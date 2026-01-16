@@ -57,7 +57,9 @@ void
 execute_kernels(const size_t      tid,
                 const hipStream_t stream,
                 const size_t      stream_id,
-                const size_t      device_id)
+                const size_t      device_id,
+                const bool        infinite_loop,
+                const size_t      num_iterations)
 {
     // Set device
     HIP_ASSERT(hipSetDevice(device_id));
@@ -77,15 +79,25 @@ execute_kernels(const size_t      tid,
         h_data[i] = static_cast<float>(i);
     }
 
-    // Run kernels in a loop for a while
-    std::cout << "Starting kernel execution loop for thread " << tid << " with stream " << stream_id
-              << " on device " << device_id << "...\n";
-    const int num_iterations = 30;
-
-    for(int iter = 0; iter < num_iterations; ++iter)
+    // Run kernels - infinite loop if infinite_loop is true, otherwise run for specified iterations
+    if(infinite_loop)
     {
+        std::cout << "Starting infinite kernel execution loop for thread " << tid << " with stream "
+                  << stream_id << " on device " << device_id << "...\n";
+    }
+    else
+    {
+        std::cout << "Starting kernel execution loop for " << num_iterations
+                  << " iterations for thread " << tid << " with stream " << stream_id
+                  << " on device " << device_id << "...\n";
+    }
+
+    size_t iter = 0;
+    while(infinite_loop || iter < num_iterations)
+    {
+        ++iter;
         // Add ROCTX markers for better profiling
-        std::string range_name = "Iteration_" + std::to_string(iter + 1);
+        std::string range_name = "Iteration_" + std::to_string(iter);
         roctxRangePush(range_name.c_str());  // Removed - ROCTx not linked
 
         // Copy data to device
@@ -135,6 +147,7 @@ execute_kernels(const size_t      tid,
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
     }
 
+    // Note: This will never be reached if infinite_loop is true (app will be killed externally)
     std::cout << "Kernel execution loop completed for thread " << tid << " with stream "
               << stream_id << " on device " << device_id << "...\n";
 
@@ -149,6 +162,8 @@ main(int argc, char** argv)
     size_t nthreads{32};
     size_t nstreams{8};
     int    ndevices{0};
+    bool   infinite_loop{true};  // Default to infinite loop
+    size_t num_iterations{30};   // Default iterations when not in infinite mode
     for(int i = 1; i < argc; ++i)
     {
         auto _arg = std::string{argv[i]};
@@ -156,16 +171,19 @@ main(int argc, char** argv)
         {
             fprintf(stderr,
                     "usage: attachment-test [NUM_THREADS (%zu)] [NUM_STREAMS (%zu)] "
-                    "[NUM_DEVICES (%d)]\n",
+                    "[NUM_DEVICES (%d)] [INFINITE_LOOP (1=true)] [NUM_ITERATIONS (%zu)]\n",
                     nthreads,
                     nstreams,
-                    ndevices);
+                    ndevices,
+                    num_iterations);
             exit(EXIT_SUCCESS);
         }
     }
     if(argc > 1) nthreads = std::atoll(argv[1]);
     if(argc > 2) nstreams = std::atoll(argv[2]);
     if(argc > 3) ndevices = std::stoi(argv[3]);
+    if(argc > 4) infinite_loop = std::stoi(argv[4]) != 0;
+    if(argc > 5) num_iterations = std::atoll(argv[5]);
 
     std::cout << "Attachment test app started with PID: " << getpid() << std::endl;
 
@@ -195,8 +213,13 @@ main(int argc, char** argv)
     for(auto& itr : _streams)
         HIP_ASSERT(hipStreamCreate(&itr));
     for(size_t i = 0; i < nthreads; ++i)
-        _threads.emplace_back(
-            execute_kernels, i, _streams.at(i % nstreams), i % nstreams, i % ndevices);
+        _threads.emplace_back(execute_kernels,
+                              i,
+                              _streams.at(i % nstreams),
+                              i % nstreams,
+                              i % ndevices,
+                              infinite_loop,
+                              num_iterations);
     for(auto& itr : _threads)
         itr.join();
 

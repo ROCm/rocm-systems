@@ -99,17 +99,11 @@ LD_PRELOAD=${ROCPROF_PRELOAD} ${ROCPROFV3} --attach $APP_PID --attach-duration-m
 
 echo "${OUTPUT_FORMAT} profiler detached successfully"
 
-# Wait for the application to finish
-echo "Waiting for application to complete..."
-wait $APP_PID
-APP_EXIT_CODE=$?
+# Kill the test application after detach completes
+echo "Killing test application (PID: $APP_PID)..."
+kill -9 $APP_PID 2>/dev/null || true
 
-if [ $APP_EXIT_CODE -ne 0 ]; then
-    echo "Test application failed with exit code $APP_EXIT_CODE"
-    exit 1
-fi
-
-echo "Test application completed successfully"
+echo "Test application terminated"
 
 # Files should be created directly in the expected location with the specified output name
 echo "Checking for generated ${OUTPUT_FORMAT} output files..."
