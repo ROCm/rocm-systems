@@ -208,7 +208,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
    ...
   ```
 
-- **`amd-smi set --power-cap` now requires sepcification of the power cap type**.  
+- **`amd-smi set --power-cap` now accepts sepcification of the power cap type**.  
   - Command now takes the form: `amd-smi set --power-cap <power-cap-type> <new-cap>`
   - Default power cap type will be ppt0
   - Acceptable power cap types are "ppt0" and "ppt1"
