@@ -223,9 +223,6 @@ class RocProfCompute:
             print(self.__mspec)
             sys.exit(0)
 
-        if self.__mode == "profile":
-            self.replace_parameters_in_output_directory()
-
         arch = self.__mspec.gpu_arch
         soc_module = importlib.import_module(f"rocprof_compute_soc.soc_{arch}")
         soc_class = getattr(soc_module, f"{arch}_soc")
@@ -460,6 +457,8 @@ class RocProfCompute:
 
         if self.__args.name is not None and "/" in self.__args.name:
             console_error('"/" is not permitted in profile name')
+
+        self.replace_parameters_in_output_directory()
 
         # instantiate desired profiler
         profiler = self.create_profiler()
