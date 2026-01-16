@@ -60,13 +60,29 @@ jobs:
           if [[ "$file" == projects/clr/* || "$file" == projects/hip/* || "$file" == projects/hip-tests/* ]]; then
             WINDOWS_SKIP=false
           fi
-          if [[ "$file" == projects/hip/docs/* || \
-                "$file" == projects/rdc/docs/* || \
-                "$file" == projects/rocm-smi-lib/docs/* || \
-                "$file" == projects/rocminfo/docs/* || \
-                "$file" == projects/rocprofiler-compute/docs/* || \
-                "$file" == projects/rocprofiler-systems/docs/* || \
-                "$file" == projects/rocr-runtime/runtime/docs/* ]]; then
+
+          # Exclude paths:
+          #     docs/**
+          #     *.md
+          #     *.rtf
+          #     *.rst
+          #
+          #     projects/*/docs/**
+          #     **/.markdownlint-ci2.yaml
+          #     **/.readthedocs.yaml
+          #     **/.spellcheck.local.yaml
+          #     **/.wordlist.txt
+          if [[ "${file}" == docs/* || \
+                "${file}" == *.md || \
+                "${file}" == *.rtf || \
+                "${file}" == *.rst
+             ]] || \
+             grep --quiet --extended-regexp '^projects/[^/.]+/docs/.*$' <<< "${file}" || \
+             grep --quiet --extended-regexp '^([^/.]+/)*.markdownlint-ci2.yaml$' <<< "${file}" || \
+             grep --quiet --extended-regexp '^([^/.]+/)*.readthedocs.yaml$' <<< "${file}" || \
+             grep --quiet --extended-regexp '^([^/.]+/)*.spellcheck.local.yaml$' <<< "${file}" || \
+             grep --quiet --extended-regexp '^([^/.]+/)*.wordlist.txt$' <<< "${file}" \
+            ; then
             WINDOWS_SKIP=true
             MATCH_FOUND=false
           fi

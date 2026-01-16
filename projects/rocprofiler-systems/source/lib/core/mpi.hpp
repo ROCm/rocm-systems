@@ -27,11 +27,12 @@
 
 #pragma once
 
-#include "debug.hpp"
 #include <timemory/timemory.hpp>
 
 #include <timemory/environment/declaration.hpp>
 #include <timemory/utility/types.hpp>
+
+#include "logger/debug.hpp"
 
 #include <cstdint>
 #include <map>
@@ -259,8 +260,9 @@ check_error(const char* _func, int err_code, comm_t _comm = mpi::comm_world_v)
         PMPI_Error_string(err_code, msg, &len);
         msg[std::min<int>(len, 1023)] = '\0';
         int _rank                     = rank();
-        fprintf(stderr, "[rank=%i][pid=%i][tid=%i][%s]> Error code (%i): %s\n", _rank,
-                (int) process::get_id(), (int) threading::get_id(), _func, err_code, msg);
+        LOG_ERROR("[rank={}][pid={}][tid={}][{}]> Error code ({}): {}", _rank,
+                  (int) process::get_id(), (int) threading::get_id(), _func, err_code,
+                  msg);
     }
     if(!_success && fail_on_error()) PMPI_Abort(_comm, err_code);
     return (err_code == MPI_SUCCESS);
@@ -342,8 +344,7 @@ initialize(int& argc, char**& argv)
                 auto ret     = MPI_Init_thread(&argc, &argv, itr, &_actual);
                 if(_actual != itr)
                 {
-                    fprintf(stderr, "Warning! MPI_Init_thread does not support: %s\n",
-                            _type.c_str());
+                    LOG_WARNING("MPI_Init_thread does not support: {}", _type);
                 }
                 return ROCPROFSYS_MPI_ERROR_CHECK(ret);
             };

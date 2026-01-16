@@ -22,7 +22,8 @@
 
 #include "kill_gotcha.hpp"
 #include "core/config.hpp"
-#include "core/debug.hpp"
+
+#include "logger/debug.hpp"
 
 #include <cstdlib>
 #include <unistd.h>
@@ -57,9 +58,9 @@ kill_gotcha::operator()(const gotcha_data& _data, kill_func_t _func, pid_t _pid,
 
         if(_sig == SIGKILL && _pid != _self_pid && _pid > 0)
         {
-            ROCPROFSYS_DEBUG("[kill_gotcha] Intercepted '%s(%d, SIGKILL)' triggered from "
-                             "process with id: %d. Sleeping for %d seconds...\n",
-                             _data.tool_id.c_str(), _pid, _self_pid, kill_delay);
+            LOG_DEBUG("[kill_gotcha] Intercepted '{}({}, SIGKILL)' triggered from "
+                      "process with id: {}. Sleeping for {} seconds...",
+                      _data.tool_id, _pid, _self_pid, kill_delay);
 
             ::sleep(kill_delay);
         }
