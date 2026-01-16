@@ -35,12 +35,11 @@
 #include "utils/debug.hpp"
 #include "os/os.hpp"
 
-#include <simde/x86/avx.h>
-#include <simde/x86/sse2.h>
-#if defined(SIMDE_VERSION_MAJOR) &&                                                                \
-    ((SIMDE_VERSION_MAJOR > 0) || (SIMDE_VERSION_MAJOR == 0 && SIMDE_VERSION_MINOR >= 7))
-
-#include <simde/x86/avx512.h>
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
+#include <emmintrin.h>  // SSE2
+#if defined(__AVX__)
+#include <immintrin.h>  // AVX, AVX512
+#endif
 #endif
 
 
@@ -3551,39 +3550,39 @@ bool VirtualGPU::createVirtualQueue(uint deviceQueueSize) {
 }
 
 // ================================================================================================
-#if IS_LINUX
+#if IS_LINUX && (defined(__x86_64__) || defined(_M_X64))
 __attribute__((optimize("unroll-all-loops"), always_inline)) static inline void nontemporalMemcpy(
     void* __restrict dst, const void* __restrict src, size_t size) {
-#if defined(__AVX512F__) && false  // Disable until SIMDe adds support.
-  for (auto i = 0u; i != size / sizeof(simde__m512i); ++i) {
-    simde_mm512_stream_si512(reinterpret_cast<simde__m512i* __restrict&>(dst)++,
-                             *reinterpret_cast<const simde__m512i* __restrict&>(src)++);
+#if defined(__AVX512F__) && false  // Disabled - can enable once tested
+  for (auto i = 0u; i != size / sizeof(__m512i); ++i) {
+    _mm512_stream_si512(reinterpret_cast<__m512i* __restrict&>(dst)++,
+                        *reinterpret_cast<const __m512i* __restrict&>(src)++);
   }
-  size = size % sizeof(simde__m512i);
+  size = size % sizeof(__m512i);
 #endif
 
 #if defined(__AVX__)
-  for (auto i = 0u; i != size / sizeof(simde__m256i); ++i) {
-    simde_mm256_stream_si256(reinterpret_cast<simde__m256i* __restrict&>(dst)++,
-                             *reinterpret_cast<const simde__m256i* __restrict&>(src)++);
+  for (auto i = 0u; i != size / sizeof(__m256i); ++i) {
+    _mm256_stream_si256(reinterpret_cast<__m256i* __restrict&>(dst)++,
+                        *reinterpret_cast<const __m256i* __restrict&>(src)++);
   }
-  size = size % sizeof(simde__m256i);
+  size = size % sizeof(__m256i);
 #endif
-  for (auto i = 0u; i != size / sizeof(simde__m128i); ++i) {
-    simde_mm_stream_si128(reinterpret_cast<simde__m128i* __restrict&>(dst)++,
-                          *(reinterpret_cast<const simde__m128i* __restrict&>(src)++));
+  for (auto i = 0u; i != size / sizeof(__m128i); ++i) {
+    _mm_stream_si128(reinterpret_cast<__m128i* __restrict&>(dst)++,
+                     *(reinterpret_cast<const __m128i* __restrict&>(src)++));
   }
-  size = size % sizeof(simde__m128i);
+  size = size % sizeof(__m128i);
 
-  for (auto i = 0u; i != size / sizeof(int64_t); ++i) {
-    simde_mm_stream_si64(reinterpret_cast<int64_t* __restrict&>(dst)++,
-                         *reinterpret_cast<const int64_t* __restrict&>(src)++);
+  for (auto i = 0u; i != size / sizeof(long long int); ++i) {
+    _mm_stream_si64(reinterpret_cast<long long int* __restrict&>(dst)++,
+                    *reinterpret_cast<const long long int* __restrict&>(src)++);
   }
-  size = size % sizeof(int64_t);
+  size = size % sizeof(long long int);
 
   for (auto i = 0u; i != size / sizeof(int32_t); ++i) {
-    simde_mm_stream_si32(reinterpret_cast<int32_t* __restrict&>(dst)++,
-                         *reinterpret_cast<const int32_t* __restrict&>(src)++);
+    _mm_stream_si32(reinterpret_cast<int32_t* __restrict&>(dst)++,
+                    *reinterpret_cast<const int32_t* __restrict&>(src)++);
   }
 
   size = size % sizeof(int32_t);
@@ -3591,7 +3590,7 @@ __attribute__((optimize("unroll-all-loops"), always_inline)) static inline void 
   std::memcpy(dst, src, size);
 
   // Add memory fence
-  simde_mm_sfence();
+  _mm_sfence();
 }
 #else
 static inline void nontemporalMemcpy(void* __restrict dst, const void* __restrict src,
@@ -3848,9 +3847,21 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
         *dev().info().hdpMemFlushCntl = 1u;
         auto kSentinel = *reinterpret_cast<volatile int*>(dev().info().hdpMemFlushCntl);
       } else if (kernArgImpl == KernelArgImpl::DeviceKernelArgsReadback && argSize != 0) {
-        simde_mm_sfence();
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
+        _mm_sfence();
+#elif defined(__aarch64__) || defined(_M_ARM64)
+        __asm__ __volatile__("dmb st" ::: "memory");
+#else
+        std::atomic_thread_fence(std::memory_order_release);
+#endif
         *(argBuffer + argSize - 1) = *(parameters + argSize - 1);
-        simde_mm_mfence();
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
+        _mm_mfence();
+#elif defined(__aarch64__) || defined(_M_ARM64)
+        __asm__ __volatile__("dmb sy" ::: "memory");
+#else
+        std::atomic_thread_fence(std::memory_order_seq_cst);
+#endif
         auto kSentinel = *reinterpret_cast<volatile unsigned char*>(argBuffer + argSize - 1);
       }
     }

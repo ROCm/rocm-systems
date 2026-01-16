@@ -19,8 +19,12 @@
  THE SOFTWARE. */
 
 #include "hip_graph_internal.hpp"
+#include <atomic>
 #include <cmath>
-#include <simde/x86/sse2.h>
+
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
+#include <emmintrin.h>  // SSE2 for _mm_sfence, _mm_mfence
+#endif
 
 
 #define CASE_STRING(X, C)                                                                          \
@@ -2100,9 +2104,21 @@ void GraphKernelArgManager::ReadBackOrFlush() {
 
       // Read-modify-write sequence with memory barriers
       volatile unsigned char kSentinel = *sentinel_ptr;
-      simde_mm_sfence();
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
+      _mm_sfence();
+#elif defined(__aarch64__) || defined(_M_ARM64)
+      __asm__ __volatile__("dmb st" ::: "memory");
+#else
+      std::atomic_thread_fence(std::memory_order_release);
+#endif
       *sentinel_ptr = kSentinel;
-      simde_mm_mfence();
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
+      _mm_mfence();
+#elif defined(__aarch64__) || defined(_M_ARM64)
+      __asm__ __volatile__("dmb sy" ::: "memory");
+#else
+      std::atomic_thread_fence(std::memory_order_seq_cst);
+#endif
       kSentinel = *sentinel_ptr;
       (void)kSentinel; // Suppress unused variable warning
     }

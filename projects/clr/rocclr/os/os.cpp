@@ -31,7 +31,10 @@
 #include <unistd.h>
 #endif  // !_WIN32
 #include <cmath>
-#include <simde/x86/sse2.h>
+
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
+#include <emmintrin.h>  // SSE2 for _mm_pause
+#endif
 
 namespace amd {
 
@@ -118,7 +121,15 @@ size_t Os::pageSize_ = 0;
 
 int Os::processorCount_ = 0;
 
-void Os::spinPause() { simde_mm_pause(); }
+void Os::spinPause() {
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
+  _mm_pause();
+#elif defined(__aarch64__) || defined(_M_ARM64)
+  __asm__ __volatile__("yield" ::: "memory");
+#else
+  // No-op on other platforms
+#endif
+}
 
 void Os::sleep(long n) {
 // FIXME_lmoriche: Should be nano-seconds not seconds.
