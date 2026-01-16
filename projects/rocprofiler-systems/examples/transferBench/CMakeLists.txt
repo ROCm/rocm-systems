@@ -121,7 +121,7 @@ endif()
 # Specify GPU architectures to compile for
 foreach(arch IN LISTS ROCPROFSYS_GFX_TARGETS)
     rocprofiler_systems_lookup_gfx(${arch} GPU_CATEGORIES)
-    if("apu" IN_LIST GPU_CATEGORIES)
+    if("apu" IN_LIST GPU_CATEGORIES AND NOT "instinct" IN_LIST GPU_CATEGORIES)
         continue()
     endif()
     target_compile_options(transferBench PRIVATE --offload-arch=${arch})

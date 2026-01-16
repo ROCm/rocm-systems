@@ -581,11 +581,83 @@ function(ROCPROFILER_SYSTEMS_PRINT_FEATURES)
     rocprofiler_systems_print_disabled_features()
 endfunction()
 
+# ----------------------------------------------------------------------------
+# function check_rocminfo()
+# Searches for a given regex in the output of rocminfo, returns true if found, false otherwise.
+# By default, returns a boolean, but if GET_OUTPUT is present, returns the output of rocminfo with the regex applied
+#
+# ARGS:
+#   _REGEX: The regex to search for
+#   _RESULT_VARIABLE: The variable to store the result
+#   GET_OUTPUT: If present, return the output of rocminfo
+#
+# Returns:
+#   Default: true if the regex is found, false otherwise
+#   GET_OUTPUT: output of rocminfo is returned in _RESULT_VARIABLE (empty string if error)
+#       Note: If regex empty, it is ignored
+#
+function(CHECK_ROCMINFO _REGEX _RESULT_VARIABLE)
+    cmake_parse_arguments(ARG "GET_OUTPUT" "" "" ${ARGN})
+    find_program(
+        rocminfo_EXECUTABLE
+        NAMES rocminfo
+        HINTS ${ROCM_PATH} ${ROCmVersion_DIR} /opt/rocm
+        PATHS ${ROCM_PATH} ${ROCmVersion_DIR} /opt/rocm
+        PATH_SUFFIXES bin
+    )
+
+    if(NOT DEFINED ARG_GET_OUTPUT AND _REGEX STREQUAL "")
+        message(FATAL_ERROR "Regex is empty, but GET_OUTPUT is not defined")
+    endif()
+
+    set(_result FALSE)
+    set(_failure FALSE)
+
+    if(rocminfo_EXECUTABLE)
+        execute_process(
+            COMMAND ${rocminfo_EXECUTABLE}
+            RESULT_VARIABLE rocminfo_RET
+            OUTPUT_VARIABLE rocminfo_OUTPUT
+            ERROR_VARIABLE rocminfo_ERROR
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_STRIP_TRAILING_WHITESPACE
+        )
+
+        if(rocminfo_RET EQUAL 0)
+            if(NOT _REGEX STREQUAL "")
+                string(REGEX MATCHALL "${_REGEX}" rocminfo_OUTPUT "${rocminfo_OUTPUT}")
+                if(rocminfo_OUTPUT)
+                    set(_result TRUE)
+                endif()
+            endif()
+        else()
+            message(
+                AUTHOR_WARNING
+                "${rocminfo_EXECUTABLE} failed with error code ${rocminfo_RET}\nstderr:\n${rocminfo_ERROR}\nstdout:\n${rocminfo_OUTPUT}"
+            )
+            set(_failure TRUE)
+        endif()
+    else()
+        message(AUTHOR_WARNING "rocminfo not found")
+        set(_failure TRUE)
+    endif()
+
+    if(DEFINED ARG_GET_OUTPUT)
+        if(NOT _failure)
+            set(${_RESULT_VARIABLE} "${rocminfo_OUTPUT}" PARENT_SCOPE)
+        else()
+            set(${_RESULT_VARIABLE} "" PARENT_SCOPE)
+        endif()
+        return()
+    endif()
+
+    set(${_RESULT_VARIABLE} ${_result} PARENT_SCOPE)
+endfunction()
+
 # ----------------------------------------------------------------------------------------#
 # function rocprofiler_systems_get_gfx_archs()
 # If a regex is provided, it will be used to filter the architectures.
 # Otherwise, all architectures will be returned.
-# Uses rocm_agent_enumerator to detect GPU architectures.
 #
 # Arguments:
 #   _VAR      - Output variable to store detected architectures
@@ -605,57 +677,41 @@ function(ROCPROFILER_SYSTEMS_GET_GFX_ARCHS _VAR)
         set(ARG_PREFIX "[${PROJECT_NAME}] ")
     endif()
 
-    find_program(
-        rocm_agent_enumerator_EXECUTABLE
-        NAMES rocm_agent_enumerator
-        HINTS ${ROCM_PATH} ${ROCmVersion_DIR} /opt/rocm
-        PATHS ${ROCM_PATH} ${ROCmVersion_DIR} /opt/rocm
-        PATH_SUFFIXES bin
-    )
+    # Below regex avoids matching "gfxX-X-generic" which may appear
+    check_rocminfo("gfx[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]+" _GFXINFO GET_OUTPUT)
+    if(NOT _GFXINFO)
+        message(AUTHOR_WARNING "Could not get system architectures")
+        return()
+    endif()
 
-    if(rocm_agent_enumerator_EXECUTABLE)
-        execute_process(
-            COMMAND ${rocm_agent_enumerator_EXECUTABLE}
-            RESULT_VARIABLE enumerator_RET
-            OUTPUT_VARIABLE enumerator_OUTPUT
-            ERROR_VARIABLE enumerator_ERROR
-            OUTPUT_STRIP_TRAILING_WHITESPACE
-            ERROR_STRIP_TRAILING_WHITESPACE
-        )
+    list(REMOVE_ITEM _GFXINFO "gfx000")
+    list(REMOVE_DUPLICATES _GFXINFO)
 
-        if(enumerator_RET EQUAL 0)
-            string(REPLACE "\n" ";" enumerator_GFXINFO "${enumerator_OUTPUT}")
-            # gfx000 is the cpu, remove it
-            list(REMOVE_ITEM enumerator_GFXINFO "gfx000")
-            list(REMOVE_DUPLICATES enumerator_GFXINFO)
-            set(${_VAR} "${enumerator_GFXINFO}" PARENT_SCOPE)
-
-            if(ARG_ECHO)
-                string(REPLACE ";" "${ARG_DELIM}" _GFXINFO_ECHO "${enumerator_GFXINFO}")
-                message(STATUS "${ARG_PREFIX}System architectures: ${_GFXINFO_ECHO}")
+    # Filter architectures if GFX_MATCH regex is provided
+    if(DEFINED ARG_GFX_MATCH)
+        set(_FILTERED_GFXINFO "")
+        foreach(_arch IN LISTS _GFXINFO)
+            if(_arch MATCHES "${ARG_GFX_MATCH}")
+                list(APPEND _FILTERED_GFXINFO "${_arch}")
             endif()
+        endforeach()
+        set(_GFXINFO "${_FILTERED_GFXINFO}")
+    endif()
 
-            # Filter the architectures if a regex is provided
-            if(ARG_GFX_MATCH)
-                string(REGEX MATCH "${ARG_GFX_MATCH}" _GFX_MATCH "${enumerator_GFXINFO}")
-                list(REMOVE_DUPLICATES _GFX_MATCH)
-                set(${_VAR} "${_GFX_MATCH}" PARENT_SCOPE)
-
-                if(ARG_ECHO)
-                    string(REPLACE ";" "${ARG_DELIM}" _GFXINFO_ECHO "${_GFX_MATCH}")
-                    message(
-                        STATUS
-                        "${ARG_PREFIX}System architectures (filtered: ${ARG_GFX_MATCH}): ${_GFXINFO_ECHO}"
-                    )
-                endif()
-            endif()
-        else()
+    # Echo detected architectures if requested
+    if(ARG_ECHO)
+        string(REPLACE ";" "${ARG_DELIM}" _GFXINFO_ECHO "${_GFXINFO}")
+        if(DEFINED ARG_GFX_MATCH)
             message(
-                AUTHOR_WARNING
-                "${rocm_agent_enumerator_EXECUTABLE} failed with error code ${enumerator_RET}\nstderr:\n${enumerator_ERROR}\nstdout:\n${enumerator_OUTPUT}"
+                STATUS
+                "${ARG_PREFIX}System architectures (filtered: ${ARG_GFX_MATCH}): ${_GFXINFO_ECHO}"
             )
+        else()
+            message(STATUS "${ARG_PREFIX}System architectures: ${_GFXINFO_ECHO}")
         endif()
     endif()
+
+    set(${_VAR} "${_GFXINFO}" PARENT_SCOPE)
 endfunction()
 
 # ----------------------------------------------------------------------------------------#
@@ -1131,6 +1187,11 @@ function(ROCPROFILER_SYSTEMS_LOOKUP_GFX _TARGET _OUTPUT_LIST)
 
     if(_TARGET IN_LIST INSTINCT_LIST)
         list(APPEND _CATEGORIES "instinct")
+        # Some instinct GPUs may also be an APU (ex: MI300A)
+        check_rocminfo("APU" _is_apu)
+        if(_is_apu)
+            list(APPEND _CATEGORIES "apu")
+        endif()
     endif()
     if(_TARGET IN_LIST RADEON_LIST)
         list(APPEND _CATEGORIES "radeon")
