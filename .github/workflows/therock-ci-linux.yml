@@ -7,6 +7,12 @@ on:
         type: string
       project_to_test:
         type: string
+      build_variant_label:
+        type: string
+        default: ""
+      build_variant_cmake_preset:
+        type: string
+        default: ""
 
 
 permissions:
@@ -15,7 +21,7 @@ permissions:
 jobs:
   therock-build-linux:
     name: Build Linux Packages
-    runs-on: azure-linux-scale-rocm
+    runs-on: ${{ inputs.build_variant_label == 'asan' && 'azure-linux-u2404-hx176-cpu-rocm' || 'azure-linux-scale-rocm' }}
     permissions:
       id-token: write
     container:
@@ -75,6 +81,7 @@ jobs:
       - name: Configure Projects
         env:
           amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
+          cmake_preset: ${{ inputs.build_variant_cmake_preset }}
           package_version: ADHOCBUILD
           extra_cmake_options: "-DTHEROCK_ROCM_SYSTEMS_SOURCE_DIR=../ ${{ inputs.cmake_options }}"
           BUILD_DIR: build
@@ -122,6 +129,8 @@ jobs:
   therock-test-linux:
     name: "Test"
     needs: [therock-build-linux]
+    # If build_variant_label is empty, we are in the default build, so run tests
+    if: ${{ build_variant_label == "" }}
     uses: ./.github/workflows/therock-test-packages.yml
     with:
       project_to_test: ${{ inputs.project_to_test }}
