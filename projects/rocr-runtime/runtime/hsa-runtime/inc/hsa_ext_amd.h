@@ -715,6 +715,10 @@ typedef enum hsa_amd_agent_info_s {
    * valid on Windows. The type of this attribute is LUID.
    */
   HSA_AMD_AGENT_INFO_LUID = 0xA11A,
+  /**
+   * The agent supports expert scheduling mode. The type of this attribute is bool.
+   */
+  HSA_AMD_AGENT_INFO_HAS_EXPERT_SCHED_MODE = 0xA11B,
 } hsa_amd_agent_info_t;
 
 /**
@@ -2307,7 +2311,8 @@ hsa_status_t HSA_API
  *
  * @param[in] agents List of accessing agents.
  *
- * @param[in] interop_handle Handle of interop buffer (dmabuf handle in Linux)
+ * @param[in] interop_handle interop buffer handle (FD on Linux and HANDLE on
+ * Windows)
  *
  * @param [in] flags Reserved, must be 0
  *
@@ -2328,14 +2333,10 @@ hsa_status_t HSA_API
  *
  * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT all other errors
  */
-hsa_status_t HSA_API hsa_amd_interop_map_buffer(uint32_t num_agents,
-                                        hsa_agent_t* agents,
-                                        hsa_handle_t interop_handle,
-                                        uint32_t flags,
-                                        size_t* size,
-                                        void** ptr,
-                                        size_t* metadata_size,
-                                        const void** metadata);
+hsa_status_t HSA_API hsa_amd_interop_map_buffer(uint32_t num_agents, hsa_agent_t* agents,
+                                                hsa_handle_t interop_handle, uint32_t flags,
+                                                size_t* size, void** ptr, size_t* metadata_size,
+                                                const void** metadata);
 
 /**
  * @brief Removes a previously mapped interop object from HSA's flat address space.

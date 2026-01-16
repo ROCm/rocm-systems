@@ -1036,13 +1036,19 @@ class AMDSMILogger():
                 amdgpu_version = str(driver_version['driver_version'])[:80]
         fw_pldm_version = str(output['version_info']['fw pldm version'])
         vbios_version = str(output['version_info']['vbios version'])
+        kernel_version = str(output['version_info']['kernel version'])
 
         # print GPU info
         print(default_line_1)
         # Split the version line into 3 lines, each wrapping to the same width
         print("| AMD-SMI          {0:40s} {1:19s}|".format(amd_smi_version.ljust(40), ""))
-        if amdgpu_version != "N/A":
+
+        # Print amdgpu or kernel version based on availability, if neither then don't print
+        if amdgpu_version.strip() != "N/A":
             print("| amdgpu Version:  {0:40s} {1:19s}|".format(amdgpu_version, ""))
+        elif kernel_version.strip() != "N/A":
+            print("| OS kernel Version:  {0:40s} {1:19s}|".format(kernel_version, ""))
+
         if rocm_version != "N/A":
             print("| ROCm Version:    {0:40s} {1:19s}|".format(rocm_version, ""))
 

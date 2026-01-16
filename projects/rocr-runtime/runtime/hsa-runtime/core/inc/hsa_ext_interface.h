@@ -55,6 +55,11 @@ namespace rocr {
 namespace core {
 struct ImageExtTableInternal : public ImageExtTable {
   decltype(::hsa_amd_image_get_info_max_dim)* hsa_amd_image_get_info_max_dim_fn;
+  // V2 unified APIs for images and mipmaps
+  decltype(::hsa_ext_image_data_get_info_v2)* hsa_ext_image_data_get_info_v2_fn;
+  decltype(::hsa_ext_image_create_v2)* hsa_ext_image_create_v2_fn;
+  decltype(::hsa_ext_image_destroy_v2)* hsa_ext_image_destroy_v2_fn;
+  decltype(::hsa_ext_image_mipmap_array_get_level)* hsa_ext_image_mipmap_array_get_level_fn;
 };
 
 struct PcSamplingExtTableInternal : public PcSamplingExtTable {};

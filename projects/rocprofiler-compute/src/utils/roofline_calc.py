@@ -471,7 +471,7 @@ def calc_ai_profile(
     """Given counter data, calculate arithmetic intensity for each kernel
     in the application. Leverage hard-coded equations to calculate AI values.
 
-    Used during profiling stage to generate roofline PDF, since Roofline yamls
+    Used during profiling stage to generate roofline HTML, since Roofline yamls
     are not available in the profiling stage."""
 
     console_debug(

@@ -39,6 +39,8 @@
 #include <rocprofiler-sdk/external_correlation.h>
 #include <rocprofiler-sdk/fwd.h>
 
+#include <fmt/format.h>
+#include <fmt/ranges.h>
 #include <hsa/hsa.h>
 #include <hsa/hsa_ext_amd.h>
 

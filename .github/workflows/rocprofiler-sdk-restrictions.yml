@@ -16,11 +16,16 @@ on:
   pull_request:
     paths:
       - 'projects/rocprofiler-sdk/**'
+      - '!**/*.md'
+      - '!**/*.rtf'
+      - '!**/*.rst'
+      - '!**/.markdownlint-ci2.yaml'
+      - '!**/.readthedocs.yaml'
+      - '!**/.spellcheck.local.yaml'
+      - '!**/.wordlist.txt'
       - '!projects/rocprofiler-sdk/.github/workflows/pull_*.yml'
       - '!projects/rocprofiler-sdk/.github/workflows/linting.yml'
       - '!projects/rocprofiler-sdk/.github/workflows/markdown_lint.yml'
-      - '!projects/rocprofiler-sdk/*.md'
-      - '!projects/rocprofiler-sdk/**/README.md'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

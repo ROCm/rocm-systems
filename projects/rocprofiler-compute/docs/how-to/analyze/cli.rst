@@ -346,11 +346,6 @@ Show System Speed-of-Light and CS_Busy blocks only
    this case, ``1`` is the ID for System Speed-of-Light and ``5.1.0`` the ID for
    GPU Busy Cycles metric.
 
-.. note::
-   
-   Dispatch filtering via ``-d`` or ``--dispatch`` is not supported for profiling
-   data collected with ``--iteration-multiplexing`` option.
-
 Filter kernels
   First, list the top kernels in your application using `--list-stats`.
 

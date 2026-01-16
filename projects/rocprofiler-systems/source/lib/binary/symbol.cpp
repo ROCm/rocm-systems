@@ -21,7 +21,6 @@
 // SOFTWARE.
 
 #include "core/config.hpp"
-#include "core/debug.hpp"
 
 #if !defined(TIMEMORY_USE_BFD)
 #    error "BFD support not enabled"
