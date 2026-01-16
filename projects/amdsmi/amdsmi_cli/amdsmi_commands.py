@@ -5497,6 +5497,43 @@ class AMDSMICommands():
             self.helpers.check_required_groups(check_render=True, check_video=False)
             self.group_check_printed = True
 
+        # Mode-1 gpureset is hive-wide.
+        # Group GPUs by hive and reset each hive only once.
+        gpus_to_reset = []
+
+        if args.gpureset and isinstance(args.gpu, list) and len(args.gpu) > 1:
+            # Group GPUs by their XGMI hive ID.
+            # If GPU not in a hive or no hive info, reset individually.
+            hive_to_gpus = {}
+            gpus_without_hive = []
+
+            for gpu in args.gpu:
+                try:
+                    xgmi_info = amdsmi_interface.amdsmi_get_xgmi_info(gpu)
+                    if isinstance(xgmi_info, dict):
+                        hive_id = xgmi_info.get('xgmi_hive_id', None)
+                        if hive_id is not None and hive_id != 0:
+                            if hive_id not in hive_to_gpus:
+                                hive_to_gpus[hive_id] = []
+                            hive_to_gpus[hive_id].append(gpu)
+                        else:
+                            gpus_without_hive.append(gpu)
+                    else:
+                        gpus_without_hive.append(gpu)
+                except:
+                    gpus_without_hive.append(gpu)
+
+            # For each hive, reset using the first GPU (resets entire hive)
+            for hive_id, gpu_list in hive_to_gpus.items():
+                gpus_to_reset.append(gpu_list[0])
+
+            # Add all non-hive GPUs to reset individually
+            gpus_to_reset.extend(gpus_without_hive)
+
+            # Update args.gpu to only the GPUs to reset
+            if gpus_to_reset:
+                args.gpu = gpus_to_reset
+
         # Handle multiple GPUs
         handled_multiple_gpus, device_handle = self.helpers.handle_gpus(args, self.logger, self.reset)
         if handled_multiple_gpus:
