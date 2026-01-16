@@ -23,9 +23,10 @@
 #include "core/amd_smi.hpp"
 #include "core/common.hpp"
 #include "core/config.hpp"
-#include "core/debug.hpp"
 #include "core/gpu.hpp"
 #include "timemory.hpp"
+
+#include "logger/debug.hpp"
 
 #if defined(ROCPROFSYS_USE_ROCM) && ROCPROFSYS_USE_ROCM > 0
 namespace rocprofsys
@@ -54,8 +55,8 @@ get_setting_name(std::string _v)
                                        __VA_ARGS__ });                                   \
             if(!_ret.second)                                                             \
             {                                                                            \
-                ROCPROFSYS_PRINT("Warning! Duplicate setting: %s / %s\n",                \
-                                 get_setting_name(ENV_NAME).c_str(), ENV_NAME);          \
+                LOG_WARNING("Duplicate setting: {} / {}", get_setting_name(ENV_NAME),    \
+                            ENV_NAME);                                                   \
             }                                                                            \
             return _config->find(ENV_NAME)->second;                                      \
         }()
@@ -68,10 +69,10 @@ config_settings(const std::shared_ptr<settings>& _config)
 
     std::string default_metrics = "busy, temp, power, mem_usage";
     // No distinction between busy and activity shown in description
-    std::string jpeg_activity_support = "";
-    std::string vcn_activity_support  = "";
-    std::string xgmi_support          = "";
-    std::string pcie_support          = "";
+    std::string jpeg_activity_support{};
+    std::string vcn_activity_support{};
+    std::string xgmi_support{};
+    std::string pcie_support{};
 
     size_t device_count = gpu::get_processor_count();
     for(size_t i = 0; i < device_count; i++)

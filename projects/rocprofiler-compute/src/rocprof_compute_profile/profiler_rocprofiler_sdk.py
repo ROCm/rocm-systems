@@ -80,19 +80,20 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
             })
 
         if args.attach_pid:
-            # In attach mode, tools are provided using ROCP_TOOL_LIBRARIES
+            # In attach mode, tools are provided using ROCPROF_ATTACH_TOOL_LIBRARY
             # instead of LD_PRELOAD.
             options.update({
-                "ROCP_TOOL_LIBRARIES": ":".join(ld_preload),
+                "ROCPROF_ATTACH_TOOL_LIBRARY": ":".join(ld_preload),
             })
             options.pop("LD_PRELOAD", None)
 
-            rocprofiler_attach_tool_path = str(
+            rocprofiler_attach_library_path = str(
                 Path(args.rocprofiler_sdk_tool_path).parent.parent
                 / "librocprofiler-sdk-rocattach.so"
             )
             options.update({
-                "ROCPROF_ATTACH_TOOL_LIBRARY": rocprofiler_attach_tool_path,
+                "ROCPROF_ATTACH_TOOL_LIBRARY": rocprofiler_sdk_tool_path,
+                "ROCPROF_ATTACH_LIBRARY": rocprofiler_attach_library_path,
                 "ROCPROF_ATTACH_PID": args.attach_pid,
             })
 

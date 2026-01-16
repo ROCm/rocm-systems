@@ -30,6 +30,8 @@
 #include <memory>
 #include <timemory/utility/types.hpp>
 
+#include "logger/debug.hpp"
+
 namespace rocprofsys
 {
 namespace rocprofiler_sdk
@@ -184,9 +186,8 @@ counter_storage::write(counter_storage_type* storage, const std::string& metric_
 {
     if(!trait::runtime_enabled<counter_data_tracker>::get())
     {
-        ROCPROFSYS_WARNING_F(
-            1, "%s counter_data_tracker is disabled. Can't write storage.\n",
-            metric_name.c_str());
+        LOG_WARNING("{} counter_data_tracker is disabled. Can't write storage.",
+                    metric_name);
         return;
     }
 
