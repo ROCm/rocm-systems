@@ -799,7 +799,8 @@ class AMDSMICommands():
                 static_dict['limit'] = limit_info
         if args.driver:
             driver_info_dict = {"name" : "N/A",
-                                "version" : "N/A"}
+                                "version" : "N/A",
+                                "os_kernel_version" : "N/A"}
 
             try:
                 driver_info = amdsmi_interface.amdsmi_get_gpu_driver_info(args.gpu)
@@ -807,6 +808,11 @@ class AMDSMICommands():
                 driver_info_dict["version"] = driver_info["driver_version"]
             except amdsmi_exception.AmdSmiLibraryException as e:
                 logging.debug("Failed to get driver info for gpu %s | %s", gpu_id, e.get_error_info())
+
+            try:
+                driver_info_dict["os_kernel_version"] = os.uname().release
+            except (AttributeError, OSError) as e:
+                logging.debug("Failed to get os kernel version for gpu %s | %s", gpu_id, e)
 
             static_dict['driver'] = driver_info_dict
         if args.board:
@@ -7517,10 +7523,12 @@ class AMDSMICommands():
         processors = amdsmi_interface.amdsmi_get_processor_handles()
         version_info = {"amd-smi": "N/A",
                         "amdgpu version": "N/A",
+                        "kernel version": "N/A",
                         "fw pldm version": "N/A",
                         "vbios version": "N/A",
                         "rocm version": (False, "N/A")}
         version_info['rocm version'] = amdsmi_interface.amdsmi_get_rocm_version()
+        version_info['kernel version'] = os.uname().release
         try:
             version_info["amdgpu version"] = amdsmi_interface.amdsmi_get_gpu_driver_info(processors[0])
         except amdsmi_exception.AmdSmiLibraryException as e:

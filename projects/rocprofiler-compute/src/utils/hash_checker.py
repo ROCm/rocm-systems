@@ -43,27 +43,16 @@ from pathlib import Path
 
 import yaml
 
-try:
-    from . import hash_manager  # type: ignore
-except Exception:
-    import importlib.util
+PROJECT_ROOT = Path(__file__).resolve().parents[2]  # rocprofiler-compute/
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
-    _HERE = Path(__file__).resolve().parent
-    _SPEC = importlib.util.spec_from_file_location(
-        "hash_manager", str(_HERE / "hash_manager.py")
-    )
-    hash_manager = importlib.util.module_from_spec(_SPEC)  # type: ignore[assignment]
-    assert _SPEC and _SPEC.loader is not None
-    _SPEC.loader.exec_module(hash_manager)  # type: ignore[attr-defined]
-# ---------------------------------------------------------------------------
+from tools.config_management import hash_manager  # noqa: E402
 
-# Subproject root: .../projects/rocprofiler-compute
-SUBROOT = Path(__file__).resolve().parents[2]
-
-CONFIGS_ROOT: Path = SUBROOT / "src" / "rocprof_compute_soc" / "analysis_configs"
-HASH_FILE: Path = SUBROOT / "tools" / "config_management" / ".config_hashes.json"
+CONFIGS_ROOT: Path = PROJECT_ROOT / "src" / "rocprof_compute_soc" / "analysis_configs"
+HASH_FILE: Path = PROJECT_ROOT / "src" / "utils" / ".config_hashes.json"
 TEMPLATE_FILE: Path = (
-    SUBROOT / "tools" / "config_management" / "analysis_config_template.yaml"
+    PROJECT_ROOT / "tools" / "config_management" / "gfx9_config_template.yaml"
 )
 
 
@@ -73,7 +62,7 @@ TEMPLATE_FILE: Path = (
 def _latest_arch(template_file: Path) -> str:
     if not template_file.is_file():
         return ""
-    with open(template_file, "r", encoding="utf-8") as f:
+    with open(template_file, encoding="utf-8") as f:
         data = yaml.safe_load(f) or {}
     return str(data.get("latest_arch") or "")
 

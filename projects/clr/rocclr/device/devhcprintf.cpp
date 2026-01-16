@@ -67,11 +67,11 @@ static const uint64_t* consumeFloatingPoint(FILE* stream, int* outCount, const s
 template <typename... Args>
 static const uint64_t* consumeCstring(FILE* stream, int* outCount, const std::string& spec,
                                       const uint64_t* ptr, Args... args) {
-  auto str = reinterpret_cast<const char*>(ptr);
-  auto old = *outCount;
+  const char* str = reinterpret_cast<const char*>(ptr);
   checkPrintf(stream, outCount, spec.c_str(), args..., str);
-  auto stringMemSize = *outCount - old + 1;
-  return ptr + (stringMemSize + 7) / 8;
+  size_t payloadBytes = std::strlen(str) + 1;
+  size_t qwords = (payloadBytes + 7) / 8;
+  return ptr + qwords;
 }
 
 template <typename... Args>

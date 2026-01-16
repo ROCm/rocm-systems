@@ -457,6 +457,9 @@ hipError_t hipDeviceGetAttribute(int* pi, hipDeviceAttribute_t attr, int device)
     case hipDeviceAttributeHostNumaId:
       *pi = static_cast<int>(g_devices[device]->devices()[0]->getPreferredNumaNode());
       break;
+    case hipDeviceAttributeExpertSchedMode:
+      *pi = static_cast<int>(g_devices[device]->devices()[0]->info().hasExpertSchedMode_);
+      break;
     default:
       HIP_RETURN(hipErrorInvalidValue);
   }
