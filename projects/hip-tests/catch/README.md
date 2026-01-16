@@ -5,21 +5,22 @@ Collection of HIP runtime tests.
 ## How to build
 
 `hip-tests` now rely on `amdclang` to build, which is shipped with ROCm installation.
+Although individual tests will compile with `hipcc`, ideally you should use `amdclang++`.
 
 ### Linux
 
 - `cd hip-tests`
 - `mkdir build && cd build`
-- `cmake ../catch -DHIP_PLATFORM=amd -DCMAKE_CXX_COMPILER=amdclang++ -DCMAKE_C_COMPILER=amdclang -DCMAKE_HIP_COMPILER=amdclang++ -DCMAKE_PREFIX_PATH=<HIP-Install-Path>`
+- `cmake ../catch -DHIP_PLATFORM=amd -DCMAKE_BUILD_TYPE=Release -DCMAKE_HIP_COMPILER=amdclang++ -DCMAKE_PREFIX_PATH=<HIP-Install-Path>`
 - `make -j32 build_tests`
 - `make test`
 
 ## How to write tests
 Tests in Catch2 are declared via ```TEST_CASE```.
 
-[Please read the Catch2 documentation on how to write test cases](https://github.com/catchorg/Catch2/blob/v2.13.6/docs/tutorial.md#top)
+[Please read the Catch2 documentation on how to write test cases](https://github.com/catchorg/Catch2/blob/v3.8.1/docs/tutorial.md#top)
 
-[Catch2 Detailed Reference](https://github.com/catchorg/Catch2/blob/v2.13.6/docs/Readme.md#top)
+[Catch2 Detailed Reference](https://github.com/catchorg/Catch2/blob/v3.8.1/docs/Readme.md#top)
 
 ## Taking care of existing features
 - Don’t build on platform: EXCLUDE_HIP_PLATFORM, can be done via CMAKE. Adding source in if(HIP_PLATFORM == amd/nvidia).
@@ -182,10 +183,13 @@ The process must be a standalone exe inside the same folder as other tests.
 
 ## Building a single test
 
-The  test suite has moved to Catch2v3 (v3.8.1 to be exact). Moving from v2 to v3 came with some fundamental changes in how Catch2 interacts with hip-tests.
+`standalone_main.cc` is now removed, and we use the main shipped with Catch2 to build standalone tests.
+The  test suite has moved to Catch2v3 (v3.8.1 to be exact).
+Moving from v2 to v3 came with some fundamental changes in how Catch2 interacts with hip-tests.
 Starting with, it is no longer a single header, it is now a library, which needs to be linked to the test exe.
 
-If you are on your personal machine, I highly recommend you to install Catch2v3 (v3.8.1) locally on your system. This helps skip the download/build part in hip-tests and results in faster builds overall.
+If you are on your personal machine, I highly recommend you to install Catch2v3 (v3.8.1) locally on your system.
+This helps skip the download/build part in hip-tests and results in faster builds overall.
 
 ### Steps to install Catch2v3 locally
 
@@ -242,7 +246,23 @@ make -j$(nproc) Catch2
 export DEPS_PATH=$PWD/_deps
 ```
 
-We now use the Catch2 we just build to link to the tests
+We now use the Catch2 we just build to link to the tests.
+
+For standalone tests:
+
+```bash
+amdclang++                                                                           \
+  -I $ROCM_SYSTEMS_DIR/projects/hip-tests/catch/include                              \
+  -I $DEPS_PATH/catch2-src/src                                                       \
+  -I $DEPS_PATH/catch2-build/generated-includes                                      \
+  --offload-arch=native                                                              \
+  -L $DEPS_PATH/catch2-build/src                                                     \
+  $DEPS_PATH/catch2-src/src/catch2/internal/catch_main.cpp                           \
+  -lCatch2                                                                           \
+  -x hip <test_file.cc>
+```
+
+To use our main:
 
 ```bash
 amdclang++                                                                           \
@@ -255,7 +275,7 @@ amdclang++                                                                      
   --offload-arch=native                                                              \
   -L $DEPS_PATH/catch2-build/src                                                     \
   -lCatch2                                                                           \
-  -x hip <path_to_test>
+  -x hip <test_file.cc>
 ```
 
 You might need to set `LD_LIBRARY_PATH` to be Catch2 location.
