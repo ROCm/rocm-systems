@@ -90,16 +90,10 @@ namespace AMD {
 
 #if defined(__linux__)
 static_assert(
-<<<<<<< HEAD
-    (sizeof(core::ShareableHandle::handle) >= sizeof(amdgpu_bo_handle)) &&
-        (alignof(core::ShareableHandle::handle) >= alignof(amdgpu_bo_handle)),
-    "ShareableHandle cannot store a amdgpu_bo_handle");
-#endif
-=======
     (sizeof(core::ShareableHandle::handle) >= sizeof(HsaMemoryObjectHandle)) &&
         (alignof(core::ShareableHandle::handle) >= alignof(HsaMemoryObjectHandle)),
     "ShareableHandle cannot store a HsaMemoryObjectHandle");
->>>>>>> 90286a82c740 (Use thunk device handle instead of drm inside agent)
+#endif
 
 namespace {
 

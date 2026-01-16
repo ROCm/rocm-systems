@@ -1411,22 +1411,23 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
       srand(static_cast<uint32_t>(std::chrono::high_resolution_clock::now().time_since_epoch().count()));
       handle->handle[7] = rand();
 
-    HsaExternalHandleDesc desc;
-    desc.device_handle = agent_->libThunkDev();
-    desc.fd = reinterpret_cast<HSAint32>(dmabuf_fd);
-    desc.type = HSA_EXTERNAL_HANDLE_DMA_BUF;
-    HsaHandleImportFlags hflags;
-    hflags.ui32.IPCHandle = 1;
-    hflags.ui32.SysMem = handle->handle[3];
-    hflags.ui32.UpdateMetadata = 1;
-    HsaHandleImportResult res;
-    HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtHandleImport(&desc, &res, &hflags));
-    if (status == HSAKMT_STATUS_ERROR) {
-      close(dmabuf_fd);
-      return HSA_STATUS_ERROR;
-    }
-    handle->handle[7] = res.metadata;
-    allocation_map_[ptr].thunk_bo = res.buf_handle;
+      HsaExternalHandleDesc desc;
+      desc.device_handle = agent_->libThunkDev();
+      desc.fd = reinterpret_cast<HSAint32>(dmabuf_fd);
+      desc.type = HSA_EXTERNAL_HANDLE_DMA_BUF;
+      HsaHandleImportFlags hflags;
+      hflags.ui32.IPCHandle = 1;
+      hflags.ui32.SysMem = handle->handle[3];
+      hflags.ui32.UpdateMetadata = 1;
+      HsaHandleImportResult res;
+      HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtHandleImport(&desc, &res, &hflags));
+      if (status == HSAKMT_STATUS_ERROR) {
+        close(dmabuf_fd);
+        return HSA_STATUS_ERROR;
+      }
+      handle->handle[7] = res.metadata;
+      allocation_map_[ptr].thunk_bo = res.buf_handle;
+   }
 #else
     assert(!"Unimplemented!");
 #endif
@@ -1560,7 +1561,7 @@ int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle,
 
       // Store the buffer object handle in allocation map for later use
       if (status == HSAKMT_STATUS_SUCCESS) {
-        ScopedAcquire<KernelSharedMutex> lock(&memory_lock_);
+        std::lock_guard<std::shared_mutex> lock(memory_lock_);
         allocation_map_[*importAddress] =
             AllocationRegion(nullptr, *importSize, *importSize, core::MemoryRegion::AllocateNoFlags);
         allocation_map_[*importAddress].thunk_bo = res.buf_handle;
@@ -1609,7 +1610,6 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
       if (ret) {
         return HSA_STATUS_ERROR_INVALID_ARGUMENT;
       }
-      
       return HSA_STATUS_SUCCESS;
     };
 
@@ -1716,7 +1716,7 @@ hsa_status_t Runtime::IPCDetach(void* ptr) {
       if (it->second.region != nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 #if defined(__linux__)
       if (it->second.thunk_bo) {
-        HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemoryVaUnmap(it->second.thunk_bo, 0, 
+        HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemoryVaUnmap(it->second.thunk_bo, 0,
                                                                reinterpret_cast<HSAuint64>(it->second.size),
                                                                reinterpret_cast<HSAuint64>(ptr)));
         if (status != HSAKMT_STATUS_SUCCESS) {
