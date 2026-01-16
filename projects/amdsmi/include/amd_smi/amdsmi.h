@@ -294,6 +294,36 @@ typedef struct {
     uint32_t minor;  //!< Minor version number
 } amdsmi_hsmp_driver_version_t;
 
+/** HSMP Enabled Commands Structure */
+typedef struct {
+    bool read_mask;    //!< Read mask indicator
+    uint32_t arg0;     //!< Bit mask 0
+    uint32_t arg1;     //!< Bit mask 1
+    uint32_t arg2;     //!< Bit mask 2
+} amdsmi_hsmp_enabled_commands_t;
+
+/**
+ * @brief SVI3 VR controller temperature information.
+ *
+ * @cond @tag{cpu_bm} @endcond
+ */
+typedef struct {
+    uint32_t rail_selection;    //!< SVI3 rail selection (0 or 1)
+    uint32_t rail_index;        //!< SVI3 rail index (0-7)
+    uint32_t temperature;       //!< Temperature value in millidegree Celsius
+} amdsmi_svi3_vr_controller_temp_t;
+
+/**
+ * @brief SPD DIMM register validation limits
+ *
+ * @cond @tag{cpu_bm} @endcond
+ */
+#define AMDSMI_MAX_SPD_DIMM_ADDRESS       0xFF   //!< Maximum SPD DIMM address [7:0]
+#define AMDSMI_MAX_SPD_LID                0xF    //!< Maximum SPD logical ID [11:8]
+#define AMDSMI_MAX_SPD_REG_OFFSET         0x7FF  //!< Maximum SPD register offset [22:12]
+#define AMDSMI_MAX_SPD_REG_SPACE          0x1    //!< Maximum SPD register space [23]
+#define AMDSMI_MAX_SPD_WRITE_DATA         0xFF    //!< Maximum SPD write data [31:24]
+
 #endif
 
 /**
@@ -3639,14 +3669,20 @@ amdsmi_status_t amdsmi_set_cpu_socket_power_cap(amdsmi_processor_handle processo
  *
  *  @platform{cpu_bm}
  *
- *  @param[in] processor_handle Cpu socket which to query
+ *  @param[in]  processor_handle Cpu socket which to configure
  *
- *  @param[in] mode - mode to be set
+ *  @param[in]  mode - power efficiency mode to be set
+ *
+ *  @param[inout]  util - pointer to utility value for power efficiency calculation
+ *
+ *  @param[inout]  ppt_limit - pointer to PPT (Package Power Tracking) limit value
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_set_cpu_pwr_efficiency_mode(amdsmi_processor_handle processor_handle,
-                                                   uint8_t mode);
+                                                   uint8_t mode,
+                                                   uint32_t *util,
+                                                   uint32_t *ppt_limit);
 
 /** @} End tagPowerControl */
 
@@ -7545,14 +7581,14 @@ amdsmi_status_t amdsmi_set_cpu_pcie_link_rate(amdsmi_processor_handle processor_
  *
  *  @param[in]  processor_handle Cpu socket which to query
  *
- *  @param[in]  max_pstate - maximum pstate value to be set
- *
  *  @param[in]  min_pstate - minimum pstate value to be set
+ *
+ *  @param[in]  max_pstate - maximum pstate value to be set
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_set_cpu_df_pstate_range(amdsmi_processor_handle processor_handle,
-                                               uint8_t max_pstate, uint8_t min_pstate);
+                                               uint8_t min_pstate, uint8_t max_pstate);
 
 /** @} End tagPstateSelect */
 
@@ -7760,6 +7796,64 @@ amdsmi_status_t amdsmi_get_cpu_socket_count(uint32_t *sock_count);
 /** @} End tagCPUAuxillary */
 
 /**
+ *  @brief Set the Max and Min XGMI PState Range
+ *
+ *  This API configures the XGMI P-State frequency range for the specified processor socket.
+ *  - XGMI P-States control the frequency of the external Global Memory Interconnect (xGMI) links.
+ *  - Lower P-State values correspond to higher frequencies.
+ *  - The maximum P-State value must be less than or equal to the minimum P-State value.
+ *  - XGMI P-States can be set through APML or HSMP; the last value is enforced.
+ *
+ *  P-State range constraints:
+ *  - min_pstate: Minimum allowed XGMI P-State (highest frequency)
+ *  - max_pstate: Maximum allowed XGMI P-State (lowest frequency)
+ *  - Constraint: max_pstate <= min_pstate
+ *
+ *  @ingroup tagXgmiPstateControl
+ *
+ *  @platform{cpu_bm}
+ *
+ *  @param[in] processor_handle Cpu socket which to configure
+ *
+ *  @param[in] min_pstate Minimum XGMI P-State value (highest frequency setting)
+ *
+ *  @param[in] max_pstate Maximum XGMI P-State value (lowest frequency setting)
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_set_cpu_xgmi_pstate_range(amdsmi_processor_handle processor_handle,
+                                                uint8_t min_pstate, uint8_t max_pstate);
+
+/**
+ *  @brief Get the Max and Min XGMI PState Range
+ *
+ *  This API retrieves the current XGMI P-State frequency range configuration for the specified processor socket.
+ *  - XGMI P-States control the frequency of the external Global Memory Interconnect (xGMI) links.
+ *  - Lower P-State values correspond to higher frequencies.
+ *  - The returned values represent the currently configured P-State range limits.
+ *
+ *  P-State range values returned:
+ *  - min_pstate: Current minimum XGMI P-State setting (highest frequency)
+ *  - max_pstate: Current maximum XGMI P-State setting (lowest frequency)
+ *  - Relationship: max_pstate <= min_pstate
+ *
+ *  @ingroup tagXgmiPstateControl
+ *
+ *  @platform{cpu_bm}
+ *
+ *  @param[in] processor_handle Cpu socket which to query
+ *
+ *  @param[out] min_pstate Pointer to store current minimum XGMI P-State value
+ *  @param[out] max_pstate Pointer to store current maximum XGMI P-State value
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_cpu_xgmi_pstate_range(amdsmi_processor_handle processor_handle,
+                                                uint8_t *min_pstate, uint8_t *max_pstate);
+
+/** @} End tagXgmiPstateControl */
+
+/**
  *  @brief Set the CPU Rail Isofrequency Policy
  *
  *  This API configures the frequency policy for CPU power rails.
@@ -7867,6 +7961,424 @@ amdsmi_status_t amdsmi_get_dfc_ctrl(amdsmi_processor_handle processor_handle, ui
 
 /** @} End tagDFCEnableControl */
 
+/**
+ *  @brief Get the PC6 Enable State
+ *
+ *  This API retrieves the current PC6 (Package C6) enable state for the specified processor socket.
+ *
+ *  PC6 enable state values returned:
+ *  - 0: PC6 disabled
+ *  - 1: PC6 enabled
+ *
+ *  @ingroup tagPC6Control
+ *
+ *  @platform{cpu_bm}
+ *
+ *  @param[in] processor_handle Cpu socket which to query
+ *
+ *  @param[out] enabled Pointer to store the current PC6 enable state
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_pc6_enable(amdsmi_processor_handle processor_handle,
+                                       uint8_t *enabled);
+
+/**
+ *  @brief Set the PC6 Enable State
+ *
+ *  This API configures the PC6 (Package C6) enable state for the specified processor socket.
+ *
+ *  PC6 enable state values:
+ *  - 0: PC6 disabled
+ *  - 1: PC6 enabled
+ *
+ *  @ingroup tagPC6Control
+ *
+ *  @platform{cpu_bm}
+ *
+ *  @param[in] processor_handle Cpu socket which to configure
+ *
+ *  @param[in] enable PC6 enable state (0=disable, 1=enable)
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_set_pc6_enable(amdsmi_processor_handle processor_handle,
+                                       uint8_t enable);
+
+/** @} End tagPC6Control */
+
+/**
+ *  @brief Get the Core C6 Enable State.
+ *
+ *  This API retrieves the current Core C6 (CC6) low-power state configuration.
+ *
+ *  CC6 enable state values returned:
+ *  - 0: CC6 state disabled
+ *  - 1: CC6 state enabled
+ *
+ *  @ingroup tagCC6Control
+ *
+ *  @platform{cpu_bm}
+ *
+ *  @param[in]      processor_handle Cpu socket which to query
+ *
+ *  @param[in,out]  enabled Pointer to store the current CC6 enable state
+ *
+ *  @return ::amdsmi_status_t
+ *          ::AMDSMI_STATUS_SUCCESS on success, non-zero on failure
+ */
+amdsmi_status_t amdsmi_get_cc6_enable(amdsmi_processor_handle processor_handle,
+                                       uint8_t *enabled);
+
+/**
+ *  @brief Set the Core C6 Enable State.
+ *
+ *  This API configures the Core C6 (CC6) low-power state for CPU cores.
+ *
+ *  CC6 enable state values:
+ *  - 0: Disable CC6 state
+ *  - 1: Enable CC6 state
+ *
+ *  @ingroup tagCC6Control
+ *
+ *  @platform{cpu_bm}
+ *
+ *  @param[in] processor_handle Cpu socket which to configure
+ *
+ *  @param[in] enable CC6 enable state value:
+ *                     - 0: Disable CC6 low-power state
+ *                     - 1: Enable CC6 low-power state
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_set_cc6_enable(amdsmi_processor_handle processor_handle,
+                                       uint8_t enable);
+
+/** @} End tagCC6Control */
+
+/**
+ *  @brief Read DIMM sideband register data
+ *
+ *  This API executes a four-byte read transaction at a specified register offset
+ *  in a designated device on the target DIMM using the JEDEC Sideband Bus protocol.
+ *  - The target DIMM is identified by DIMM_ADDRESS .
+ *  - The Local Identifier (LID) specifies the device on the DIMM as per JEDEC SidebandBus spec (JESD403).
+ *  - Only specific LID codes are supported: LID code 1001 (PMIC0) and LID code 1010 (SPD Hub).
+ *  - Register access can target either volatile or non-volatile memory spaces.
+ *  - NVM register space is available only in select devices on the SPD sideband bus.
+ *
+ *  @ingroup tagDIMMRegister
+ *
+ *  @param[in] processor_handle Processor handle for the target socket
+ *
+ *  @param[in] dimm_addr DIMM address
+ *
+ *  @param[in] lid Link/Lane identifier for the device on DIMM
+ *
+ *  @param[in] reg_offset Register offset within the specified register space
+ *
+ *  @param[in] reg_space Register space selector:
+ *                        - 0: Volatile register space
+ *                        - 1: Non-volatile memory (NVM) register space
+ *
+ *  @param[out] data Pointer to store the 4-byte read data from the register
+ *
+ *  @return ::amdsmi_status_t
+ *          ::AMDSMI_STATUS_SUCCESS on successful register read, non-zero on failure
+ */
+amdsmi_status_t amdsmi_dimm_sb_reg_read(amdsmi_processor_handle processor_handle,
+                                        uint64_t dimm_addr,
+                                        uint64_t lid,
+                                        uint64_t reg_offset,
+                                        uint64_t reg_space,
+                                        uint32_t *data);
+/**
+ *  @brief Write Data to DIMM Sideband Register
+ *
+ *  This API executes a four-byte write transaction at a specified register offset
+ *  in a designated device on the target DIMM using the JEDEC Sideband Bus protocol.
+ *  - The target DIMM is identified by DIMM_ADDRESS.
+ *  - The Local Identifier (LID) specifies the device on the DIMM as per JEDEC SidebandBus spec (JESD403).
+ *  - Only specific LID codes are supported: LID code 1001 (PMIC0) and LID code 1010 (SPD Hub).
+ *  - Register access can target either volatile or non-volatile memory spaces.
+ *  - NVM register space is available only in select devices on the SPD sideband bus.
+ *  - Write operations modify the configuration or control state of the target device.
+ *
+ *  @ingroup tagDIMMRegister
+ *
+ *  @platform{cpu_bm}
+ *
+ *  @param[in] processor_handle Processor handle for the target socket
+ *
+ *  @param[in] dimm_addr DIMM address
+ *
+ *  @param[in] id Link/Lane identifier for the device on DIMM
+ *
+ *  @param[in] reg_offset Register offset within the specified register space
+ *
+ *  @param[in] reg_space Register space selector:
+ *                        - 0: Volatile register space
+ *                        - 1: Non-volatile memory (NVM) register space
+ *
+ *  @param[in] write_data 4-byte data value to write to the target register
+ *
+ *  @return ::amdsmi_status_t
+ *          ::AMDSMI_STATUS_SUCCESS on successful register write, non-zero on failure
+ */
+amdsmi_status_t amdsmi_dimm_sb_reg_write(amdsmi_processor_handle processor_handle,
+                                          uint64_t dimm_addr,
+                                          uint64_t lid,
+                                          uint64_t reg_offset,
+                                          uint64_t reg_space,
+                                          uint64_t write_data);
+
+/** @} End tagDIMMRegister */
+
+/**
+ *  @brief Read CCD (Core Complex Die) power consumption
+ *
+ *  @details This function reads the power consumption of a specific CCD within a CPU socket.
+ *
+ *  @ingroup tagCPUPowerQuery
+ *
+ *  @platform{cpu_bm}
+ *
+ *  @param[in]      processor_handle   CPU socket handle to query
+ *  @param[in]      ccd_id             CCD identifier (typically 0-7)
+ *  @param[out]     power              Pointer to store power consumption in milliwatts
+ *
+ *   @return ::amdsmi_status_t
+ *          ::AMDSMI_STATUS_SUCCESS on successful register read, non-zero on failure
+ */
+amdsmi_status_t amdsmi_get_ccd_power(amdsmi_processor_handle processor_handle,
+                                     uint32_t ccd_id,
+                                     uint32_t *power);
+
+/** @} End tagCPUPowerQuery */
+
+/**
+ *  @brief Read Thermal Delta (TDELTA) Behavior
+ *
+ *  This API retrieves the thermal solution behavior value from the CPU socket
+ *
+ *  Thermal Behavior values returned:
+ *  - 0: Thermal solution behavior is normal (operating within expected thermal range)
+ *  - 1 or any other value: Thermal solution is out of expected range (thermal stress detected)
+ *
+ *  @ingroup tagCPUThermalQuery
+ *
+ *  @platform{cpu_bm}
+ *
+ *  @param[in]      processor_handle CPU socket handle to query
+ *  @param[out]     tdelta Pointer to store the thermal delta behavior value:
+ *                         - 0: Normal thermal solution behavior
+ *                         - Non-zero: Thermal solution out of expected range
+ *
+ *   @return ::amdsmi_status_t
+ *          ::AMDSMI_STATUS_SUCCESS on successful register read, non-zero on failure
+ */
+amdsmi_status_t amdsmi_read_tdelta(amdsmi_processor_handle processor_handle,
+                                   uint8_t *tdelta);
+
+/** @} End tagCPUThermalQuery */
+
+
+/**
+ *  @brief Get Temperature of SVI3 VR Controller Rails
+ *
+ *  This API retrieves the temperature of SVI3 voltage regulator
+ *
+ *  @ingroup tagSVI3TempQuery
+ *
+ *  @platform{cpu_bm}
+ *
+ *  @param[in]      processor_handle CPU socket handle to query
+ *
+ *  @param[in,out]  vr_temp_info Pointer to SVI3 VR controller temperature structure:
+ *                               Input: rail_selection and rail_index must be configured
+ *                                     - rail_selection[0]: 0=hottest rail, 1=specific rail
+ *                                     - rail_index[3:1]: SVI3 rail index (when rail_selection[0]=1)
+ *                               Output: temperature field populated with rail temperature in C
+ *                                      - temperature[27:0]: Temperature in degrees Celsius
+ *                                      - rail_index[30:28]: Actual rail index of returned data
+ *
+ *  @return ::amdsmi_status_t
+ *          ::AMDSMI_STATUS_SUCCESS on successful temperature read, non-zero on failure
+ */
+amdsmi_status_t amdsmi_get_svi3_vr_controller_temp(amdsmi_processor_handle processor_handle,
+                                                   amdsmi_svi3_vr_controller_temp_t *vr_temp_info);
+
+/** @} End tagSVI3TempQuery */
+
+/**
+ *  @brief Get HSMP Enabled Commands information for a given CPU socket.
+ *
+ *  @details This function retrieves enabled commands bit masks for both read and write commands
+ *  from the HSMP interface. The information includes ReadEnabledCommandsBitMask0-2 and
+ *  WriteEnabledCommandsBitMask0-2.
+ *
+ *  @ingroup tagHSMPEnCmdStats
+ *
+ *  @platform{cpu_bm}
+ *
+ *  @param[in]      processor_handle CPU socket handle to query
+ *  @param[out]     enabled_cmds Output buffer for enabled commands information
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_enabled_commands(amdsmi_processor_handle processor_handle,
+                                           amdsmi_hsmp_enabled_commands_t *enabled_cmds);
+
+/** @} End  tagHSMPEnCmdStats*/
+/**
+ *  @brief Get the CPU core floor limit frequency.
+ *
+ *  @details This function retrieve the floor frequency limit for the specified CPU core.
+ *
+ *  @ingroup tagCPUFreqFloorControl
+ *
+ *  @platform{cpu_bm}
+ *
+ *  @param[in]      processor_handle CPU core which to query
+ *
+ *  @param[in,out]  pfloorlimit - Input buffer to fill the floor limit frequency in MHz
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_cpu_core_floorlimit(amdsmi_processor_handle processor_handle,
+                                               uint32_t *pfloorlimit);
+
+/**
+ *  @brief Get the CPU core effective floor limit frequency.
+ *
+ *  @details This function returns the effective floor frequency limit for the specified CPU core.
+ *
+ *  @ingroup tagCPUFreqFloorControl
+ *
+ *  @platform{cpu_bm}
+ *
+ *  @param[in]      processor_handle CPU core which to query
+ *
+ *  @param[in,out]  pefffloorlimit - Input buffer to fill the effective floor limit frequency in MHz
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_cpu_core_efffloorlimit(amdsmi_processor_handle processor_handle,
+                                                  uint32_t *pefffloorlimit);
+
+/**
+ *  @brief Set the CPU core floor limit frequency.
+ *
+ *  @details This function sets the floor frequency limit for the specified CPU core.
+ *
+ *  @ingroup tagCPUFreqFloorControl
+ *
+ *  @platform{cpu_bm}
+ *
+ *  @param[in] processor_handle CPU core which to set
+ *
+ *  @param[in] floorlimit - floor limit frequency value to be set in MHz
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_set_cpu_core_floorlimit(amdsmi_processor_handle processor_handle,
+						uint32_t floorlimit);
+
+/**
+ *  @brief Set the CPU socket floor limit frequency.
+ *
+ *  @details This function sets the floor frequency limit for the specified CPU socket.
+ *
+ *  @ingroup tagCPUFreqFloorControl
+ *
+ *  @platform{cpu_bm}
+ *
+ *  @param[in] processor_handle CPU socket which to set
+ *
+ *  @param[in] floorlimit - floor limit frequency value to be set in MHz
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_set_cpu_floorlimit(amdsmi_processor_handle processor_handle,
+                                          uint32_t floorlimit);
+
+/**
+ *  @brief Set CPU MSR floor limit frequency.
+ *
+ *  @details This function sets the MSR floor frequency limit for the specified CPU socket.
+ *
+ *  @ingroup tagCPUFreqFloorControl
+ *
+ *  @platform{cpu_bm}
+ *
+ *  @param[in] processor_handle CPU socket which to set
+ *
+ *  @param[in] msrfloorlimit - MSR floor limit frequency value to be set in MHz
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_cpu_msr_floorlimit(amdsmi_processor_handle processor_handle,
+                                          uint32_t msrfloorlimit);
+
+/**
+ *  @brief Set CPU core MSR floor limit frequency.
+ *
+ *  @details This function sets the MSR floor frequency limit for the specified CPU core.
+ *           This is a core-level MSR operation that directly sets the floor frequency
+ *           at the hardware register level for individual CPU cores.
+ *
+ *  @ingroup tagCPUFreqFloorControl
+ *
+ *  @platform{cpu_bm}
+ *
+ *  @param[in] processor_handle CPU core which to set
+ *
+ *  @param[in] msrfloorlimit - MSR floor limit frequency value to be set in MHz
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_cpu_core_msr_floorlimit(amdsmi_processor_handle processor_handle,
+                                               uint32_t msrfloorlimit);
+
+/** @} End  tagCPUFreqFloorControl*/
+
+/**
+ *  @brief Set the SDPS limit for a given processor socket.
+ *
+ *  @details This function will set the SDPS (Software Defined Power Scaling) limit control.
+ *  The limit is specified in milliwatts.
+ *
+ *  @platform{cpu_bm}
+ *
+ *  @param[in] processor_handle Processor handle for which to set the limit
+ *  @param[in] sdps_limit SDPS limit value in milliwatts
+ *
+ *  @retval ::AMDSMI_STATUS_SUCCESS           Call was successful
+ *  @retval ::AMDSMI_STATUS_INVAL            Invalid processor_handle
+ *  @retval ::AMDSMI_STATUS_NOT_SUPPORTED    ESMI library not enabled or SDPS not available
+ *  @retval ::AMDSMI_STATUS_API_FAILED       ESMI API call failed
+ */
+amdsmi_status_t amdsmi_set_cpu_socket_sdps_limit(amdsmi_processor_handle processor_handle,
+                                                  uint32_t sdps_limit);
+
+/**
+ *  @brief Get the current SDPS limit for a given processor socket.
+ *
+ *  @details This function will retrieve the current SDPS (Software Defined Power Scaling) limit control.
+ *  The limit is returned in milliwatts.
+ *
+ *  @platform{cpu_bm}
+ *
+ *  @param[in] processor_handle Processor handle for which to query the limit
+ *  @param[out] sdps_limit Pointer to receive the current SDPS limit value in milliwatts
+ *
+ *  @retval ::AMDSMI_STATUS_SUCCESS           Call was successful
+ *  @retval ::AMDSMI_STATUS_INVAL            Invalid processor_handle or sdps_limit pointer
+ *  @retval ::AMDSMI_STATUS_NOT_SUPPORTED    ESMI library not enabled or SDPS not available
+ *  @retval ::AMDSMI_STATUS_API_FAILED       ESMI API call failed
+ */
+amdsmi_status_t amdsmi_get_cpu_socket_sdps_limit(amdsmi_processor_handle processor_handle,
+                                                  uint32_t *sdps_limit);
 #endif
 
 #ifdef __cplusplus

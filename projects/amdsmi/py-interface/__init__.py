@@ -81,10 +81,30 @@ try:
     from .amdsmi_interface import amdsmi_get_cpu_model
     from .amdsmi_interface import amdsmi_get_cpu_model_name
     from .amdsmi_interface import amdsmi_get_cpu_handles
-    from .amdsmi_interface import amdsmi_get_dfc_ctrl
-    from .amdsmi_interface import amdsmi_set_dfc_ctrl
-    from .amdsmi_interface import amdsmi_get_cpu_rail_isofreq_policy
+    from .amdsmi_interface import amdsmi_set_cpu_xgmi_pstate_range
+    from .amdsmi_interface import amdsmi_get_cpu_xgmi_pstate_range
     from .amdsmi_interface import amdsmi_set_cpu_rail_isofreq_policy
+    from .amdsmi_interface import amdsmi_get_cpu_rail_isofreq_policy
+    from .amdsmi_interface import amdsmi_set_dfc_ctrl
+    from .amdsmi_interface import amdsmi_get_dfc_ctrl
+    from .amdsmi_interface import amdsmi_set_cc6_enable
+    from .amdsmi_interface import amdsmi_get_cc6_enable
+    from .amdsmi_interface import amdsmi_set_pc6_enable
+    from .amdsmi_interface import amdsmi_get_pc6_enable
+    from .amdsmi_interface import amdsmi_dimm_sb_reg_read
+    from .amdsmi_interface import amdsmi_dimm_sb_reg_write
+    from .amdsmi_interface import amdsmi_get_ccd_power
+    from .amdsmi_interface import amdsmi_read_tdelta
+    from .amdsmi_interface import amdsmi_get_svi3_vr_controller_temp
+    from .amdsmi_interface import amdsmi_get_enabled_commands
+    from .amdsmi_interface import amdsmi_get_cpu_core_floorlimit
+    from .amdsmi_interface import amdsmi_get_cpu_core_efffloorlimit
+    from .amdsmi_interface import amdsmi_set_cpu_floorlimit
+    from .amdsmi_interface import amdsmi_cpu_msr_floorlimit
+    from .amdsmi_interface import amdsmi_set_cpu_core_floorlimit
+    from .amdsmi_interface import amdsmi_cpu_core_msr_floorlimit
+    from .amdsmi_interface import amdsmi_set_cpu_socket_sdps_limit
+    from .amdsmi_interface import amdsmi_get_cpu_socket_sdps_limit
 except AttributeError:
     pass
 
