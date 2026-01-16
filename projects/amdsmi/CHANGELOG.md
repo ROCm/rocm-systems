@@ -225,7 +225,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
     Ex.
 
     ```console
-    $ sudo amd-smi reset --power-cap ppt1 1150
+    $ sudo amd-smi reset --power-cap
     GPU: 0
       POWERCAP:
           PPT0: Successfully reset power cap to 203W
