@@ -54,7 +54,15 @@ if(hip_FOUND AND rccl_FOUND)
         COMMAND grep "Currently, supports" ${rccl-tests_SOURCE_DIR}/src/Makefile
         OUTPUT_VARIABLE _supported_line
         OUTPUT_STRIP_TRAILING_WHITESPACE
+        RESULT_VARIABLE _rccl_grep_ret
     )
+    if(_rccl_grep_ret NOT EQUAL 0)
+        message(
+            FATAL_ERROR
+            "This grep should never fail unless rccl-tests/src/Makefile was modified in an incompatible way"
+        )
+    endif()
+
     # Extract just the gfx architectures
     string(REGEX MATCHALL "gfx[0-9a-z]+" RCCL_SUPPORTED_TARGETS "${_supported_line}")
     set(RCCL_GPU_TARGETS "")

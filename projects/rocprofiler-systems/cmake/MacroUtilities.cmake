@@ -678,7 +678,7 @@ function(ROCPROFILER_SYSTEMS_GET_GFX_ARCHS _VAR)
     endif()
 
     # Below regex avoids matching "gfxX-X-generic" which may appear
-    check_rocminfo("gfx[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]+" _GFXINFO GET_OUTPUT)
+    check_rocminfo("gfx[0-9A-Fa-f][0-9A-Fa-f]+" _GFXINFO GET_OUTPUT)
     if(NOT _GFXINFO)
         message(AUTHOR_WARNING "Could not get system architectures")
         return()
