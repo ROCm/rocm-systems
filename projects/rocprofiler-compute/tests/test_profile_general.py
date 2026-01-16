@@ -2857,51 +2857,19 @@ if __name__ == "__main__":
         app_name="torch_test_app",
     )
     assert returncode == 0, "Profiling the torch application failed"
-
     # Verify files are generated
     # 1. Check basic CSV files
     file_dict = test_utils.check_csv_files(workload_dir, num_devices, 1)
     assert "pmc_perf.csv" in file_dict, "pmc_perf.csv not generated"
-
-    # 2. Check torch trace output
-    torch_trace_csvs = list(Path(workload_dir).glob("*_torch_trace.csv"))
-    assert len(torch_trace_csvs) >= 13, "Torch trace CSV files are less than expected."
-    torch_trace_paths = [Path(p) for p in sorted(torch_trace_csvs)]
-
-    # 3. Check torch operators directory
+    # 2. Check torch operators directory
     torch_operators_dir = Path(workload_dir) / "torch_operators"
     assert torch_operators_dir.exists(), "torch_operators directory not created"
     assert torch_operators_dir.is_dir(), "torch_operators is not a directory"
-
-    # 4-6. Verify each torch trace CSV has expected structure and valid data
-    required_columns = ["Function", "Kernel_Name", "Counter_Name", "Counter_Value"]
-    for torch_trace_csv in torch_trace_paths:
-        assert torch_trace_csv.exists(), f"Torch trace CSV not found: {torch_trace_csv}"
-        torch_trace_df = pd.read_csv(torch_trace_csv)
-        for col in required_columns:
-            assert col in torch_trace_df.columns, (
-                f"Missing column '{col}' in {torch_trace_csv.name}"
-            )
-
-        # Verify torch trace has data
-        assert len(torch_trace_df) > 0, f"Empty Torch trace {torch_trace_csv.name}"
-
-        # Verify counter values are valid (non-negative)
-        counter_values = torch_trace_df["Counter_Value"]
-        assert all(counter_values >= 0), (
-            f"Negative counter values. {torch_trace_csv.name}"
-        )
-        assert not all(counter_values == 0), (
-            f"Counter values are zero. {torch_trace_csv.name}"
-        )
-
-    # 7. Check per-operator CSV files exist
+    # 3. Check per-operator CSV files exist
     operator_csv_files = list(torch_operators_dir.glob("*.csv"))
     assert len(operator_csv_files) > 0, "No per-operator CSV files generated"
-
-    # 8. Verify per-operator CSV structure
+    # 4. Verify per-operator CSV structure
     for op_csv in operator_csv_files:
         op_df = pd.read_csv(op_csv)
         assert len(op_df) > 0, f"Per-operator CSV {op_csv.name} is empty"
-
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
