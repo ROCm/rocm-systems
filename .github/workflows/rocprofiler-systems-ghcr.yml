@@ -10,10 +10,28 @@ on:
     paths:
       - '.github/workflows/rocprofiler-systems-ghcr.yml'
       - 'projects/rocprofiler-systems/docker/**'
+      - '!**/*.md'
+      - '!**/*.rtf'
+      - '!**/*.rst'
+      - '!**/.markdownlint-ci2.yaml'
+      - '!**/.readthedocs.yaml'
+      - '!**/.spellcheck.local.yaml'
+      - '!**/.wordlist.txt'
+      - '!docs/**'
+      - '!projects/*/docs/**'
   pull_request:
     paths:
       - '.github/workflows/rocprofiler-systems-ghcr.yml'
       - 'projects/rocprofiler-systems/docker/**'
+      - '!**/*.md'
+      - '!**/*.rtf'
+      - '!**/*.rst'
+      - '!**/.markdownlint-ci2.yaml'
+      - '!**/.readthedocs.yaml'
+      - '!**/.spellcheck.local.yaml'
+      - '!**/.wordlist.txt'
+      - '!docs/**'
+      - '!projects/*/docs/**'
 
 jobs:
   prepare_matrix_ci:

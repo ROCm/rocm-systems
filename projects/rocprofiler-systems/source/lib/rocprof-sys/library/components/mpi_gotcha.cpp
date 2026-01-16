@@ -24,7 +24,6 @@
 #include "api.hpp"
 #include "core/components/fwd.hpp"
 #include "core/config.hpp"
-#include "core/debug.hpp"
 #include "core/mpi.hpp"
 #include "core/mproc.hpp"
 #include "library/components/category_region.hpp"
@@ -35,6 +34,8 @@
 #include <timemory/mpl/types.hpp>
 #include <timemory/signals/signal_mask.hpp>
 #include <timemory/utility/locking.hpp>
+
+#include "logger/debug.hpp"
 
 #include <cstdint>
 #include <limits>
@@ -75,8 +76,10 @@ struct comm_rank_data
 
     friend bool operator>(const comm_rank_data& _lhs, const comm_rank_data& _rhs)
     {
-        ROCPROFSYS_CI_THROW(!_lhs.updated() && !_rhs.updated(),
-                            "Error! comparing rank data that is not updated");
+        if(get_is_continuous_integration() && !_lhs.updated() && !_rhs.updated())
+        {
+            throw std::runtime_error("Error! Comparing rank data that is not updated");
+        }
 
         if(_lhs.updated() && !_rhs.updated()) return true;
         if(!_lhs.updated() && _rhs.updated()) return false;
@@ -112,7 +115,7 @@ rocprofsys_mpi_copy(MPI_Comm, int, void*, void*, void*, int*)
 int
 rocprofsys_mpi_fini(MPI_Comm, int, void*, void*)
 {
-    ROCPROFSYS_DEBUG("MPI Comm attribute finalize\n");
+    LOG_DEBUG("MPI Comm attribute finalize");
     auto _blocked = get_sampling_signals();
     if(!_blocked.empty())
         tim::signals::block_signals(_blocked, tim::signals::sigmask_scope::process);
@@ -222,9 +225,8 @@ mpi_gotcha::update()
         rocprofsys::mpi::set_size(_size);
         rocprofsys::settings::default_process_suffix() = _rank;
 
-        ROCPROFSYS_BASIC_VERBOSE(0, "[pid=%i] MPI rank: %i (%i), MPI size: %i (%i)\n",
-                                 process::get_id(), rocprofsys::mpi::rank(), _rank,
-                                 rocprofsys::mpi::size(), _size);
+        LOG_DEBUG("[pid={}] MPI rank: {} ({}), MPI size: {} ({})", process::get_id(),
+                  rocprofsys::mpi::rank(), _rank, rocprofsys::mpi::size(), _size);
         last_comm_record      = _rank_data;
         config::get_use_pid() = true;
         return true;
@@ -244,7 +246,7 @@ mpi_gotcha::disable_comm_intercept()
 void
 mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming, int*, char***)
 {
-    ROCPROFSYS_BASIC_DEBUG_F("%s(int*, char***)\n", _data.tool_id.c_str());
+    LOG_DEBUG("{}(int*, char***)", _data.tool_id);
 
     rocprofsys_push_trace_hidden(_data.tool_id.c_str());
 #if !defined(ROCPROFSYS_USE_MPI) && defined(ROCPROFSYS_USE_MPI_HEADERS)
@@ -256,7 +258,7 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming, int*, char***)
 void
 mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming, int*, char***, int, int*)
 {
-    ROCPROFSYS_BASIC_DEBUG_F("%s(int*, char***, int, int*)\n", _data.tool_id.c_str());
+    LOG_DEBUG("{}(int*, char***, int, int*)", _data.tool_id);
 
     rocprofsys_push_trace_hidden(_data.tool_id.c_str());
 #if !defined(ROCPROFSYS_USE_MPI) && defined(ROCPROFSYS_USE_MPI_HEADERS)
@@ -266,9 +268,9 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming, int*, char***, in
 }
 
 void
-mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming)
+mpi_gotcha::audit([[maybe_unused]] const gotcha_data_t& _data, audit::incoming)
 {
-    ROCPROFSYS_BASIC_DEBUG_F("%s()\n", _data.tool_id.c_str());
+    LOG_DEBUG("{}()", _data.tool_id);
 
     auto _blocked = get_sampling_signals();
     if(!_blocked.empty())
@@ -289,7 +291,7 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming)
 void
 mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming, comm_t _comm, int* _val)
 {
-    ROCPROFSYS_BASIC_DEBUG_F("%s(comm_t _comm, int* _val)\n", _data.tool_id.c_str());
+    LOG_DEBUG("{}(comm_t _comm, int* _val)", _data.tool_id);
 
     rocprofsys_push_trace_hidden(_data.tool_id.c_str());
     if(_data.tool_id.find("MPI_Comm_rank") == 0 ||
@@ -306,15 +308,15 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming, comm_t _comm, int
     }
     else
     {
-        ROCPROFSYS_BASIC_PRINT_F("%s(<comm>, %p) :: unexpected function wrapper\n",
-                                 _data.tool_id.c_str(), static_cast<void*>(_val));
+        LOG_WARNING("{}(<comm>, {}) :: unexpected function wrapper", _data.tool_id,
+                    static_cast<void*>(_val));
     }
 }
 
 void
 mpi_gotcha::audit(const gotcha_data_t& _data, audit::outgoing, int _retval)
 {
-    ROCPROFSYS_BASIC_DEBUG_F("%s() returned %i\n", _data.tool_id.c_str(), (int) _retval);
+    LOG_DEBUG("{}() returned {}", _data.tool_id, (int) _retval);
 
     if(!settings::use_output_suffix()) settings::use_output_suffix() = true;
 
@@ -329,7 +331,7 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::outgoing, int _retval)
         // were excluded via a regex expression)
         if(get_use_mpip())
         {
-            ROCPROFSYS_BASIC_VERBOSE_F(2, "Activating MPI wrappers...\n");
+            LOG_DEBUG("Activating MPI wrappers...");
 
             // use env vars ROCPROFSYS_MPIP_PERMIT_LIST and ROCPROFSYS_MPIP_REJECT_LIST
             // to control the gotcha bindings at runtime
@@ -380,9 +382,8 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::outgoing, int _retval)
             }
             else
             {
-                ROCPROFSYS_BASIC_VERBOSE(
-                    0, "%s() returned %i :: unexpected function wrapper\n",
-                    _data.tool_id.c_str(), (int) _retval);
+                LOG_WARNING("{}() returned {} :: unexpected function wrapper",
+                            _data.tool_id, (int) _retval);
             }
 
             if(_comm_entry.updated())

@@ -446,12 +446,27 @@ class GraphNode : public hipGraphNodeDOTAttribute {
     out << "=\"";
     out << GetLabel(flag);
     if (DEBUG_HIP_GRAPH_DOT_PRINT) {
-      out << "\nStreamId:" << stream_id_;
-      out << "\nSegmentId:" << segment_id_;
-      out << "\nSignalIsRequired: " << ((signal_is_required_) ? "true" : "false");
+      if (DEBUG_HIP_GRAPH_DOT_PRINT >= 2) {
+        out << "\nStreamId:" << stream_id_;
+        out << "\nHW Queue:" << hw_queue_id_;
+      }
+      if (segment_id_ == -1) {
+        out << "\nStreamId:" << stream_id_;
+        out << "\nSignalIsRequired: " << ((signal_is_required_) ? "true" : "false");
+      }
       out << "\nDeviceId:" << dev_id_;
     }
     out << "\"";
+    if (DEBUG_HIP_GRAPH_DOT_PRINT) {
+      // Add color coding based on segment ID for better visualization
+      if (segment_id_ != -1) {
+        // Color nodes based on segment ID for better visual grouping
+        const char* colors[] = {"lightcoral", "lightblue", "lightgreen", "lightyellow",
+                                "lightpink",  "lightgray", "lightcyan",  "lightsalmon"};
+        int color_index = segment_id_ % (sizeof(colors) / sizeof(colors[0]));
+        out << ",fillcolor=\"" << colors[color_index] << "\",style=\"filled\"";
+      }
+    }
     out << "];";
   }
   void SetDeviceId(int id) { dev_id_ = id; }
@@ -473,6 +488,7 @@ class GraphNode : public hipGraphNodeDOTAttribute {
   size_t inDegree_;         //!< count of in coming edges (@todo: remove, it's dependencies_.size())
   size_t outDegree_;        //!< count of outgoing edges (@todo: remove, it's edges_.size())
   int32_t stream_id_ = -1;  //! Stream ID on which this node will be executed
+  int hw_queue_id_ = -1; //! Hardware queue ID on which this node will be executed
   int32_t segment_id_ = -1;  //! Segment ID on which this node will be executed
   int32_t launch_id_ = -1;  //! Launch ID of this node in the entire graph execution sequence
   static int nextID;
@@ -489,7 +505,7 @@ class GraphNode : public hipGraphNodeDOTAttribute {
   size_t kernargSegmentAlignment_ = 256;  //!< Kernel arg segment alignment
   int dev_id_;  //!< Device Id when node is created(dev id from capture stream/current device
                 //!< when explicitly added)
-  bool wait_ = false;                
+  bool wait_ = false;
 };
 
 class GraphEventWaitNode : public GraphNode {
@@ -733,16 +749,56 @@ class Graph {
   void GenerateDOT(std::ostream& fout, hipGraphDebugDotFlags flag) {
     fout << "subgraph cluster_" << GetID() << " {" << std::endl;
     fout << "label=\"graph_" << GetID() << "\"graph[style=\"dashed\"];\n";
-    for (auto node : vertices_) {
-      node->GenerateDOTNode(GetID(), fout, flag);
+
+    // Check if we should group nodes by segments
+    bool useSegmentClustering = !segments_.empty();
+
+    if (useSegmentClustering) {
+      GenerateDOTWithSegments(fout, flag);
+    } else {
+      // Original node-by-node generation
+      for (auto node : vertices_) {
+        node->GenerateDOTNode(GetID(), fout, flag);
+      }
+      fout << "\n";
+      for (auto& node : vertices_) {
+        node->GenerateDOTNodeEdges(GetID(), fout, flag);
+      }
     }
-    fout << "\n";
-    for (auto& node : vertices_) {
-      node->GenerateDOTNodeEdges(GetID(), fout, flag);
-    }
+
     fout << "}" << std::endl;
     for (auto node : vertices_) {
       node->GenerateDOT(fout, flag);
+    }
+  }
+
+  // generate DOT with segment clustering
+  void GenerateDOTWithSegments(std::ostream& fout, hipGraphDebugDotFlags flag) {
+    // Generate segment clusters
+    for (const auto& segment : segments_) {
+      // if (segment_nodes.find(segment.id) != segment_nodes.end()) {
+      fout << "subgraph cluster_segment_" << segment.id << " {" << std::endl;
+      fout << "label=\"Segment " << segment.id;
+      if (segment.stream_id != -1) {
+        fout << "\\nStream: " << segment.stream_id;
+      }
+      if (segment.dependency_level != -1) {
+        fout << "\\nLevel: " << segment.dependency_level;
+      }
+      fout << "\";" << std::endl;
+      fout << "style=\"rounded,filled\";" << std::endl;
+      fout << "fillcolor=\"lightblue\";" << std::endl;
+      fout << "color=\"blue\";" << std::endl;
+      for (auto node : segment.nodes) {
+        node->GenerateDOTNode(GetID(), fout, flag);
+      }
+      fout << "}" << std::endl;
+    }
+
+    fout << "\n";
+    // Generate all edges after all nodes are defined
+    for (auto& node : vertices_) {
+      node->GenerateDOTNodeEdges(GetID(), fout, flag);
     }
   }
 
@@ -1164,7 +1220,6 @@ class GraphKernelNode : public GraphNode {
     for (auto& command : commands_) {
       hipFunction_t func = getFunc(kernelParams_, dev_id_);
       hip::DeviceFunc* function = hip::DeviceFunc::asFunction(func);
-      amd::Kernel* kernel = function->kernel();
       amd::ScopedLock lock(function->dflock_);
       command->enqueue();
       command->release();
@@ -1188,9 +1243,14 @@ class GraphKernelNode : public GraphNode {
     out << "=\"";
     out << GetLabel(flag);
     if (DEBUG_HIP_GRAPH_DOT_PRINT) {
-      out << "StreamId:" << stream_id_;
-      out << "\nSegmentId:" << segment_id_;
-      out << "\nSignalIsRequired: " << ((signal_is_required_) ? "true" : "false");
+      if (DEBUG_HIP_GRAPH_DOT_PRINT >= 2) {
+        out << "\nStreamId:" << stream_id_;
+        out << "\nHW Queue:" << hw_queue_id_;
+      }
+      if (segment_id_ == -1) {
+        out << "\nStreamId:" << stream_id_;
+        out << "\nSignalIsRequired: " << ((signal_is_required_) ? "true" : "false");
+      }
       out << "\nDeviceId:" << dev_id_;
     }
     out << "\"";
@@ -1419,7 +1479,6 @@ class GraphKernelNode : public GraphNode {
       return hipErrorInvalidDeviceFunction;
     }
     hip::DeviceFunc* function = hip::DeviceFunc::asFunction(func);
-    amd::Kernel* kernel = function->kernel();
     amd::ScopedLock lock(function->dflock_);
     status = validateKernelParams(&kernelParams_, func, dev_id_);
     if (hipSuccess != status) {
@@ -1797,16 +1856,7 @@ class GraphMemcpyNode1D : public GraphMemcpyNode {
     amd::Memory* srcMemory = getMemoryObject(src_, sOffset);
     size_t dOffset = 0;
     amd::Memory* dstMemory = getMemoryObject(dst_, dOffset);
-    
-    hip::MemcpyType memType = hipHostToHost;
-    if (srcMemory != nullptr && dstMemory == nullptr) {
-        memType = ihipGetMemcpyType(srcMemory, dst_);
-    } else if (srcMemory == nullptr && dstMemory != nullptr) {
-        memType = ihipGetMemcpyType(src_, dstMemory);
-    } else if (srcMemory != nullptr && dstMemory != nullptr) {
-        memType = ihipGetMemcpyType(srcMemory, dstMemory, kind_);
-    }
-
+    hip::MemcpyType memType = ihipGetMemcpyType(src_, dst_, kind_);
     switch (memType) {
       case hipCopyBuffer:
         // D2H/H2D source/dst is pinned memory
@@ -1864,24 +1914,8 @@ class GraphMemcpyNode1D : public GraphMemcpyNode {
     if (!AMD_DIRECT_DISPATCH) {
       WorkerThreadLock_.lock();
     }
-
-    hip::MemcpyType type;
-    size_t dOffset, sOffset;
-    amd::Memory* dstMemory = getMemoryObject(dst_, dOffset);
-    amd::Memory* srcMemory = getMemoryObject(src_, sOffset);
-
-    if (dstMemory != nullptr && srcMemory != nullptr) {
-      status = ihipMemcpyCommand(command, dstMemory, srcMemory, count_, kind_, *stream, dOffset,
-                                 sOffset);
-      type = ihipGetMemcpyType(srcMemory, dstMemory, kind_);
-    } else if (dstMemory == nullptr && srcMemory != nullptr) {
-      status = ihipMemcpyCommand(command, dst_, srcMemory, count_, kind_, *stream, sOffset);
-      type = ihipGetMemcpyType(srcMemory, dst_);
-    } else if (dstMemory != nullptr && srcMemory == nullptr) {
-      status = ihipMemcpyCommand(command, dstMemory, src_, count_, kind_, *stream, dOffset);
-      type = ihipGetMemcpyType(src_, dstMemory);
-    }
-
+    status = ihipMemcpyCommand(command, dst_, src_, count_, kind_, *stream);
+    hip::MemcpyType type = ihipGetMemcpyType(src_, dst_, kind_);
     if (type == hipCopyBuffer) {
       amd::CopyMemoryCommand* cpycmd = reinterpret_cast<amd::CopyMemoryCommand*>(command);
       amd::CopyMetadata copyMetadata = cpycmd->copyMetadata();
@@ -2030,18 +2064,7 @@ class GraphMemcpyNode1D : public GraphMemcpyNode {
   }
   virtual bool GraphCaptureEnabled() override {
     if (parentGraph_ != nullptr && parentGraph_->IsSegmentSchedulingEnabled()) {
-      hip::MemcpyType type;
-
-      size_t dOffset, sOffset;
-      amd::Memory* dstMemory = getMemoryObject(dst_, dOffset);
-      amd::Memory* srcMemory = getMemoryObject(src_, sOffset);
-
-      // The case below is only interested in hipCopyBuffer,
-      // which is only valid for device to device copies.
-      if (dstMemory != nullptr && srcMemory != nullptr) {
-        type = ihipGetMemcpyType(srcMemory, dstMemory, kind_);
-      }
-
+      hip::MemcpyType type = ihipGetMemcpyType(src_, dst_, kind_);
       switch (type) {
         case hipCopyBuffer:
           return true;
@@ -2088,21 +2111,7 @@ class GraphMemcpyNodeFromSymbol : public GraphMemcpyNode1D {
     if (status != hipSuccess) {
       return status;
     }
-
-    size_t devOffset, dOffset;
-    amd::Memory* devMemory = getMemoryObject(device_ptr, devOffset);
-    amd::Memory* dstMemory = getMemoryObject(dst_, dOffset);
-
-    if (devMemory == nullptr) {
-        return hipErrorInvalidValue;
-    }
-
-    if (dstMemory != nullptr) {
-      status = ihipMemcpyCommand(command, dstMemory, devMemory, count_, kind_, *stream, dOffset, devOffset);
-    } else {
-      status = ihipMemcpyCommand(command, dst_, devMemory, count_, kind_, *stream, devOffset);
-    }
-
+    status = ihipMemcpyCommand(command, dst_, device_ptr, count_, kind_, *stream);
     if (status != hipSuccess) {
       return status;
     }
@@ -2197,21 +2206,7 @@ class GraphMemcpyNodeToSymbol : public GraphMemcpyNode1D {
     if (status != hipSuccess) {
       return status;
     }
-
-    size_t devOffset, sOffset;
-    amd::Memory* devMemory = getMemoryObject(device_ptr, devOffset);
-    amd::Memory* srcMemory = getMemoryObject(src_, sOffset);
-
-    if (devMemory == nullptr) {
-        return hipErrorInvalidValue;
-    }
-
-    if (srcMemory != nullptr) {
-      status = ihipMemcpyCommand(command, devMemory, srcMemory, count_, kind_, *stream, devOffset, sOffset);
-    } else {
-      status = ihipMemcpyCommand(command, devMemory, src_, count_, kind_, *stream, devOffset);
-    }
-
+    status = ihipMemcpyCommand(command, device_ptr, src_, count_, kind_, *stream);
     if (status != hipSuccess) {
       return status;
     }

@@ -22,7 +22,6 @@
 
 #include "library/ptl.hpp"
 #include "core/config.hpp"
-#include "core/debug.hpp"
 #include "core/defines.hpp"
 #include "core/state.hpp"
 #include "library/runtime.hpp"
@@ -32,6 +31,8 @@
 
 #include <PTL/ThreadPool.hh>
 #include <PTL/UserTaskQueue.hh>
+
+#include "logger/debug.hpp"
 
 #include <timemory/backends/threading.hpp>
 #include <timemory/utility/declaration.hpp>
@@ -129,7 +130,7 @@ join()
 {
     if(general::get_thread_pool_state() == State::Active)
     {
-        ROCPROFSYS_DEBUG_F("waiting for all general tasks to complete...\n");
+        LOG_DEBUG("waiting for all general tasks to complete...");
         for(size_t i = 0; i < thread_info::get_peak_num_threads(); ++i)
             general::get_task_group(i).join();
     }
@@ -140,7 +141,7 @@ shutdown()
 {
     if(general::get_thread_pool_state() == State::Active)
     {
-        ROCPROFSYS_DEBUG_F("Waiting on completion of general tasks...\n");
+        LOG_DEBUG("Waiting on completion of general tasks...");
         for(size_t i = 0; i < thread_info::get_peak_num_threads(); ++i)
         {
             general::get_task_group(i).join();
@@ -152,13 +153,13 @@ shutdown()
 
     if(get_thread_pool_state() == State::Active)
     {
-        ROCPROFSYS_DEBUG_F("Destroying the rocprof-sys thread pool...\n");
+        LOG_DEBUG("Destroying the rocprof-sys thread pool...");
         get_thread_pool().destroy_threadpool();
         get_thread_pool_state() = State::Finalized;
     }
     else
     {
-        ROCPROFSYS_DEBUG_F("thread-pool is not active...\n");
+        LOG_DEBUG("thread-pool is not active...");
     }
 }
 

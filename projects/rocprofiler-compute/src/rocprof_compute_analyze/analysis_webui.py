@@ -355,7 +355,9 @@ class webui_analysis(OmniAnalyze_Base):
             )
 
         if self._profiling_config.get("iteration_multiplexing") is not None:
-            self._runs[self.dest_dir].raw_pmc = self.iteration_multiplex_merge_counters(
+            self._runs[
+                self.dest_dir
+            ].raw_pmc = self.iteration_multiplex_impute_counters(
                 self._runs[self.dest_dir].raw_pmc,
                 policy=self._profiling_config["iteration_multiplexing"],
             )
