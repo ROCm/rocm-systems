@@ -3194,19 +3194,28 @@ if __name__ == "__main__":
 
 
 @pytest.mark.multi_rank
-def test_multi_rank_profiling(binary_handler_profile_rocprof_compute):
+def test_multi_rank_profiling():
     workload_dir = test_utils.get_output_dir()
 
     num_ranks = 2
 
-    _ = binary_handler_profile_rocprof_compute(
-        config, workload_dir, check_success=True, roof=False, num_ranks=num_ranks
-    )
+    cmd = [
+        "mpirun",
+        "-n",
+        str(num_ranks),
+        "src/rocprof-compute",
+        "profile",
+        "--output-directory",
+        workload_dir,
+        "--",
+    ] + config["app_laplace_eqn"]
+    proc = subprocess.Popen(cmd)
+    proc.wait()
 
     for rank in range(num_ranks):
-        rank_dir = Path(workload_dir) / f"rank_{rank}"
+        rank_dir = Path(workload_dir) / str(rank)
         assert rank_dir.exists(), f"Rank directory {rank_dir} does not exist"
-        file_dict = test_utils.check_csv_files(rank_dir, num_devices, num_kernels)
+        file_dict = test_utils.check_csv_files(str(rank_dir), num_devices, num_kernels)
 
         if soc == "MI100":
             assert sorted(list(file_dict.keys())) == CSVS
