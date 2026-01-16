@@ -143,16 +143,6 @@ class RocProfCompute_Base:
                         "--torch-operators flag has no significance if not profiling a PyTorch application."
                     )              
                     args.torch_operators = False
-
-
-            # if args.format_rocprof_output == "rocpd" and getattr(args, 'torch_operators', False):
-            #     args.format_rocprof_output = "csv"
-            #     args.retain_rocpd_output = True
-            #     console_warning(
-            #         "Changed rocprof output format to 'csv' for torch operator profiling.\n"
-            #         "Enabled retention of 'rocpd' output in accordance with user input."
-            #     )
-
             args.remaining = " ".join(args.remaining)
         elif not args.attach_pid:
             console_error(

@@ -134,7 +134,12 @@ def process_rocpd_csv(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def update_rocpd_pmc_events(counter_info: pd.DataFrame, rocpd_db_path: str) -> None:
-    """Update pmc_event table in the given rocpd database path"""
+    """Update pmc_event table in the given rocpd database path    
+       Maps dispatch_id from native counter collection to event_id in rocpd schema.
+       Native counter collection uses dispatch_id, but rocpd schema requires event_id
+       which must be obtained from rocpd_kernel_dispatch table to handle cases where
+       marker API events (e.g., PyTorch operators) offset the event_id sequence.
+    """
     try:
         with closing(sqlite3.connect(rocpd_db_path)) as conn:
             # Get pmc_event table name
@@ -154,13 +159,56 @@ def update_rocpd_pmc_events(counter_info: pd.DataFrame, rocpd_db_path: str) -> N
             guid = table_name[len(ROCPD_PMC_EVENT_TABLE_NAME_PREFIX) :].replace(
                 "_", "-"
             )
+            
+            # Map dispatch_id to event_id from rocpd_kernel_dispatch
+            # Native counter collection CSV has dispatch_id, but rocpd schema needs event_id
+            # event_id may differ from dispatch_id when marker API tracing is enabled
+            dispatch_to_event_query = """
+                SELECT DISTINCT dispatch_id, event_id, guid
+                FROM rocpd_kernel_dispatch
+                WHERE guid = ?
+            """
+            dispatch_to_event_df = pd.read_sql_query(
+                dispatch_to_event_query, conn, params=(guid,)
+            )
+            
+            if dispatch_to_event_df.empty:
+                console_error(
+                    f"No kernel dispatch data found in rocpd database for guid {guid}"
+                )
+                return
+            
+            # Create mapping dict for fast lookup
+            dispatch_to_event = dict(
+                zip(
+                    dispatch_to_event_df["dispatch_id"],
+                    dispatch_to_event_df["event_id"],
+                )
+            )
+            
+            # Map dispatch_id to event_id for counter data
+            counter_info = counter_info.copy()
+            counter_info["event_id"] = counter_info["dispatch_id"].map(dispatch_to_event)
+            
+            # Check for unmapped dispatch IDs
+            unmapped = counter_info["event_id"].isna()
+            if unmapped.any():
+                console_error(
+                    f"Warning: {unmapped.sum()} counter rows have dispatch_ids "
+                    f"not found in rocpd_kernel_dispatch table"
+                )
+                # Drop unmapped rows
+                counter_info = counter_info[~unmapped]
+            if counter_info.empty:
+                console_error("No valid counter data to insert after dispatch_id mapping")
+                return
             columns = ("guid", "event_id", "pmc_id", "value")
             values = list(
                 zip(
                     # guid
                     [guid] * len(counter_info),
                     # event_id
-                    counter_info["dispatch_id"],
+                    counter_info["event_id"],
                     # pmc_id
                     counter_info["counter_id"],
                     # value
