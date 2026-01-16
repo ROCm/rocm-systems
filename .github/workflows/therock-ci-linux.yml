@@ -130,7 +130,7 @@ jobs:
     name: "Test"
     needs: [therock-build-linux]
     # If build_variant_label is empty, we are in the default build, so run tests
-    if: ${{ build_variant_label == '' }}
+    if: ${{ inputs.build_variant_label == '' }}
     uses: ./.github/workflows/therock-test-packages.yml
     with:
       project_to_test: ${{ inputs.project_to_test }}
