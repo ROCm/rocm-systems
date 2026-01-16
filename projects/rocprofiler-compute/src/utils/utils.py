@@ -1490,6 +1490,13 @@ def consolidate_torch_trace_output(workload_dir: str) -> None:
         group.to_csv(output_file, index=False)
         console_log(f"Saved consolidated trace for {f} to {output_file}")
 
+    for trace_file in torch_trace_files:
+        try:
+            Path.unlink(trace_file)
+            console_debug(f"Removed temporary torch trace file: {trace_file}")
+        except OSError as e:
+            console_warning(f"Error removing temporary file {trace_file}: {e}")
+
 
 @demarcate
 def process_kokkos_trace_output(workload_dir: str, fbase: str) -> None:
