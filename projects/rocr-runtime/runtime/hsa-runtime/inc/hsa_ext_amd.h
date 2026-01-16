@@ -3838,6 +3838,8 @@ hsa_status_t HSA_API hsa_amd_counted_queue_acquire(hsa_agent_t agent, hsa_queue_
  * @retval ::HSA_STATUS_SUCCESS The function has been executed successfully.
  * @retval ::HSA_STATUS_ERROR Invalid queue or queue was already released.
  * @retval ::HSA_STATUS_ERROR_NOT_INITIALIZED The HSA runtime has not been initialized.
+ * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT The @p queue is NULL or previously released.
+ * @retval ::HSA_STATUS_ERROR_INVALID_AGENT The queue's agent is invalid or not a GPU agent.
  */
 hsa_status_t HSA_API hsa_amd_counted_queue_release(hsa_queue_t* queue);
 
