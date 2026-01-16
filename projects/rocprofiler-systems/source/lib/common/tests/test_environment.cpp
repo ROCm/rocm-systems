@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier:  MIT
 
 #include "common/environment.hpp"
 
@@ -79,4 +60,87 @@ TEST_F(DuplicatedEnvironmentEntriesTest, DuplicateEnvironmentEntries)
 
     for(auto* entry : env_vars)
         free(entry);
+}
+
+TEST_F(DuplicatedEnvironmentEntriesTest, HandlesEmptyVector)
+{
+    std::vector<char*> env_vars;
+    consolidate_env_entries(env_vars);
+    EXPECT_TRUE(env_vars.empty());
+}
+
+TEST_F(DuplicatedEnvironmentEntriesTest, HandlesNullEntries)
+{
+    std::vector<char*> env_vars = {
+        strdup("PATH=/usr/bin"),
+        nullptr,
+        strdup("PATH=/bin"),
+    };
+    consolidate_env_entries(env_vars);
+    ASSERT_EQ(env_vars.size(), 1);
+    EXPECT_STREQ(env_vars[0], "PATH=/usr/bin:/bin");
+    for(auto* entry : env_vars)
+        std::free(entry);
+}
+
+TEST_F(DuplicatedEnvironmentEntriesTest, HandlesEmptyValues)
+{
+    std::vector<char*> env_vars = {
+        strdup("EMPTY_VAR="),
+        strdup("PATH=/usr/bin"),
+    };
+    consolidate_env_entries(env_vars);
+    ASSERT_EQ(env_vars.size(), 2);
+
+    for(auto* entry : env_vars)
+        std::free(entry);
+}
+
+class AddTorchLibraryPathTest : public ::testing::Test
+{
+protected:
+    std::unordered_set<std::string> updated_envs;
+};
+
+TEST_F(AddTorchLibraryPathTest, SkipsNonPythonExecutables)
+{
+    std::vector<char*> envp = {
+        strdup("LD_LIBRARY_PATH=/usr/lib"),
+    };
+    std::vector<char*> argv = {
+        strdup("/usr/bin/bash"),
+    };
+    add_torch_library_path(envp, argv, false, updated_envs);
+    // Should not modify environment
+    ASSERT_EQ(envp.size(), 1);
+    EXPECT_STREQ(envp[0], "LD_LIBRARY_PATH=/usr/lib");
+    for(auto* entry : envp)
+        std::free(entry);
+    for(auto* entry : argv)
+        std::free(entry);
+}
+
+TEST_F(AddTorchLibraryPathTest, HandlesEmptyArgv)
+{
+    std::vector<char*> envp = {
+        strdup("LD_LIBRARY_PATH=/usr/lib"),
+    };
+    std::vector<char*> argv;
+    add_torch_library_path(envp, argv, false, updated_envs);
+    ASSERT_EQ(envp.size(), 1);
+    EXPECT_STREQ(envp[0], "LD_LIBRARY_PATH=/usr/lib");
+    for(auto* entry : envp)
+        std::free(entry);
+}
+
+TEST_F(AddTorchLibraryPathTest, HandlesNullArgvFront)
+{
+    std::vector<char*> envp = {
+        strdup("LD_LIBRARY_PATH=/usr/lib"),
+    };
+    std::vector<char*> argv = { nullptr };
+    add_torch_library_path(envp, argv, false, updated_envs);
+    ASSERT_EQ(envp.size(), 1);
+    for(auto* entry : envp)
+        std::free(entry);
 }
