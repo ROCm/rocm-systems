@@ -280,3 +280,19 @@ set(ROCPROFSYS_OMPVV_OFFLOAD_TESTS
 rocprofiler_systems_message(STATUS
                             "Successfully configured OMPVV"
 )
+
+if(ROCPROFSYS_INSTALL_EXAMPLES)
+    foreach(
+        test_target
+        IN
+        LISTS ROCPROFSYS_OMPVV_HOST_TESTS ROCPROFSYS_OMPVV_OFFLOAD_TESTS
+    )
+        if(TARGET "${test_target}-build")
+            install(
+                PROGRAMS "${OMPVV_BIN_DEST}/${test_target}"
+                DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples
+                COMPONENT rocprofiler-systems-examples
+            )
+        endif()
+    endforeach()
+endif()

@@ -25,7 +25,6 @@
 #include "core/agent_manager.hpp"
 #include "core/common.hpp"
 #include "core/config.hpp"
-#include "core/debug.hpp"
 #include "core/node_info.hpp"
 #include "core/perfetto.hpp"
 #include "core/timemory.hpp"
@@ -40,6 +39,8 @@
 #include <timemory/units.hpp>
 #include <timemory/utility/procfs/cpuinfo.hpp>
 #include <timemory/utility/type_list.hpp>
+
+#include "logger/debug.hpp"
 
 #include <cstddef>
 #include <cstdlib>
@@ -332,9 +333,8 @@ write_perfetto_counter_track(index&& _idx, Args... _args)
 void
 post_process()
 {
-    ROCPROFSYS_VERBOSE(1,
-                       "Post-processing %zu cpu frequency and memory usage entries...\n",
-                       data.size());
+    LOG_DEBUG("Post-processing {} cpu frequency and memory usage entries...",
+              data.size());
 
     auto& enabled_cpus = component::cpu_freq::get_enabled_cpus();
 
@@ -342,7 +342,10 @@ post_process()
         using freq_track = perfetto_counter_track<category::cpu_freq>;
 
         const auto& _thread_info = thread_info::get(0, InternalTID);
-        ROCPROFSYS_CI_THROW(!_thread_info, "Missing thread info for thread 0");
+        if(get_is_continuous_integration() && !_thread_info)
+        {
+            throw std::runtime_error("Missing thread info for thread 0");
+        }
         if(!_thread_info) return;
 
         if(!freq_track::exists(_idx))
@@ -379,7 +382,10 @@ post_process()
         }
 
         const auto& _thread_info = thread_info::get(0, InternalTID);
-        ROCPROFSYS_CI_THROW(!_thread_info, "Missing thread info for thread 0");
+        if(get_is_continuous_integration() && !_thread_info)
+        {
+            throw std::runtime_error("Missing thread info for thread 0");
+        }
         if(!_thread_info) return;
 
         for(auto& itr : data)
