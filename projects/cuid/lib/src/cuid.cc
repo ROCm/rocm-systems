@@ -111,6 +111,11 @@ amdcuid_status_t amdcuid_get_num_handles(uint32_t* count) {
     if (!count)
         return AMDCUID_STATUS_INVALID_ARGUMENT;
 
+    // get all the devices on the system first
+    if (mgr.devices().empty()) {
+        mgr.discover_devices();
+    }
+
     *count = static_cast<uint32_t>(mgr.get_handle_count());
     if (*count == 0) {
         return AMDCUID_STATUS_UNSUPPORTED;
@@ -119,9 +124,6 @@ amdcuid_status_t amdcuid_get_num_handles(uint32_t* count) {
 }
 
 amdcuid_status_t amdcuid_get_all_handles(amdcuid_id_t *handles, uint32_t count) {
-    if (mgr.devices().empty()) {
-        mgr.discover_devices();
-    }
     auto handle_list = mgr.get_all_handles();
     auto handle_count = static_cast<uint32_t>(handle_list.size());
     if (handle_count == 0) {
