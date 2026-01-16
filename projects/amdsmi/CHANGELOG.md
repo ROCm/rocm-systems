@@ -573,9 +573,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Added restarting (reloading) AMD GPU driver to both CLI and API calls**  
   - Refer to [the “Removed `amd-smi reset -r and --reload-driver` option” note](#removed-driver-reload-option) below for current behavior.
 
-<a name="removed-driver-reload-option"></a>
-- **Removed `amd-smi reset -r and --reload-driver` option.**
-
 - **Added the Default command**.  
   - A default view has been added. The default view provides a snapshot of commonly requested information such as bdf, current partition mode, version information, and more. Users can access that information by simply typing `amd-smi` with no additional commands or arguments. Users may also obtain this information through laternate output formats such as json or csv by using the default command with the respective output format: `amd-smi default --json` or `amd-smi default --csv`.
 
