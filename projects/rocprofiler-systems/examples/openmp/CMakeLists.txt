@@ -89,13 +89,17 @@ endif()
 target_link_libraries(openmp-cg PRIVATE openmp-common)
 target_link_libraries(openmp-lu PRIVATE openmp-common)
 
-if(ROCPROFSYS_INSTALL_EXAMPLES)
-    install(
-        TARGETS openmp-cg openmp-lu
-        DESTINATION bin
-        COMPONENT rocprofiler-systems-examples
-    )
-endif()
+set(OPENMP_EXAMPLES openmp-cg openmp-lu)
+
+foreach(OPENMP_EXAMPLE IN LISTS OPENMP_EXAMPLES)
+    if(ROCPROFSYS_INSTALL_EXAMPLES AND TARGET ${OPENMP_EXAMPLE})
+        install(
+            TARGETS ${OPENMP_EXAMPLE}
+            DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples
+            COMPONENT rocprofiler-systems-examples
+        )
+    endif()
+endforeach()
 
 set(DEFAULT_GPU_TARGETS
     "gfx900"

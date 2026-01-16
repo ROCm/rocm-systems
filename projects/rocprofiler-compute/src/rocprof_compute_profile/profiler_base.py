@@ -531,12 +531,15 @@ class RocProfCompute_Base:
             and not args.attach_pid
         ):
             # Use native counter collection tool
+            # Use lib* glob pattern to handle CMAKE_INSTALL_LIBDIR variations
+            # (lib, lib64, lib32, etc. depending on distribution)
+            native_tool_base_path = Path(sys.argv[0]).resolve().parents[2]
+            native_tool_glob_pattern = (
+                "lib*/rocprofiler-compute/librocprofiler-compute-tool.so"
+            )
             try:
                 native_tool_path = str(
-                    Path(sys.argv[0]).resolve().parents[2]
-                    / "lib"
-                    / "rocprofiler-compute"
-                    / "librocprofiler-compute-tool.so"
+                    next(native_tool_base_path.glob(native_tool_glob_pattern))
                 )
             except Exception as e:
                 console_debug(
@@ -552,6 +555,7 @@ class RocProfCompute_Base:
                     )
                     / "librocprofiler-compute-tool.so"
                 )
+                native_tool_cpp_path = Path(__file__).resolve().parents[1] / "lib"
                 link_libraries = ("rocprofiler-sdk",)
                 build_command = (
                     # Create shared object
@@ -564,10 +568,10 @@ class RocProfCompute_Base:
                     # rocprofiler sdk library path
                     f"-L {str(Path(args.rocprofiler_sdk_tool_path).parent.parent)} "
                     # native tool source files (tool.cpp and helper.cpp)
-                    f"{str(Path(__file__).parent.parent)}/"
-                    "lib/rocprofiler_compute_tool.cpp "
-                    f"{str(Path(__file__).parent.parent)}/"
-                    "lib/helper.cpp "
+                    f"{native_tool_cpp_path}/"
+                    "rocprofiler_compute_tool.cpp "
+                    f"{native_tool_cpp_path}/"
+                    "helper.cpp "
                     # temporary shared object for native tool
                     f"-o {native_tool_path}"
                 )
@@ -575,7 +579,15 @@ class RocProfCompute_Base:
                 success, output = capture_subprocess_output(shlex.split(build_command))
                 console_debug(f"Build output: {output}")
                 if not success:
-                    console_error("Failed to build native counter collection tool.")
+                    console_error(
+                        "Failed to use native counter collection tool.\n"
+                        "Could not find pre-built .so file at: "
+                        f"{native_tool_base_path / native_tool_glob_pattern}\n"
+                        "Could not find source .cpp files in folder: "
+                        f"{native_tool_cpp_path}\n"
+                        "Please ensure the native tool library is installed "
+                        "or source files are present."
+                    )
 
         if self.__profiler == "rocprofiler-sdk":
             options = self.get_profiler_options(native_tool_path=native_tool_path)
