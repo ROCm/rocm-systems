@@ -114,7 +114,7 @@ class RocProfCompute_Base:
                     f"Your command {args.remaining[0]} doesn't point to a executable. "
                     "Please verify."
                 )
-            
+
             # Appending a wrapper for injecting roctx-markers
             if hasattr(args, 'torch_operators') and args.torch_operators:
                 # Find the inject_roctx.py script in src/utils
@@ -124,7 +124,7 @@ class RocProfCompute_Base:
                         f"Cannot find inject_roctx.py at {inject_script}. "
                         "Please verify your installation."
                     )
-                
+
                 # Case 1: Explicit python command (python, python3, etc.)
                 if args.remaining[0].startswith('python'):
                     # Insert inject_roctx.py after the python interpreter
@@ -141,7 +141,7 @@ class RocProfCompute_Base:
                 else:
                     console_warning(
                         "--torch-operators flag has no significance if not profiling a PyTorch application."
-                    )              
+                    )
                     args.torch_operators = False
             args.remaining = " ".join(args.remaining)
         elif not args.attach_pid:

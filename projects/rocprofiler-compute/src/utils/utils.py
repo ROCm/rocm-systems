@@ -968,11 +968,11 @@ def run_prof(
         combined_df.to_csv(workload_dir + f"/results_{fbase}.csv", index=False)
         if torch_operators_enabled:
             # Extract marker_api_trace and counter_collection CSVs from db files
-            # If using native tool for counter collection, extract counter_collection.csv from native_counter_collection.csv                                
+            # If using native tool for counter collection, extract counter_collection.csv from native_counter_collection.csv
             # Add torch operator trace processing
             import sqlite3
             from contextlib import closing
-            
+
             # SQL queries for extraction
             MARKER_API_TRACE_QUERY = """
             SELECT
@@ -989,7 +989,7 @@ def run_prof(
                 INNER JOIN rocpd_info_process P ON P.id = T.pid AND P.guid = R.guid
                 INNER JOIN rocpd_string C ON C.id = E.category_id AND C.guid = R.guid
             ORDER BY R.start
-            """            
+            """
             COUNTERS_COLLECTION_QUERY = """
             SELECT
                 agent_id as GPU_ID,
@@ -1063,7 +1063,7 @@ def run_prof(
                         #     FROM kernels
                         #     ORDER BY start
                         #     """
-                        #     # Extract kernel trace  
+                        #     # Extract kernel trace
                         #     kernel_df = pd.read_sql_query(KERNEL_TRACE_QUERY, conn)
                         #     kernel_csv = f"{hostname_output_path}/{pid}_kernel_trace.csv"
                         #     if not kernel_df.empty:
@@ -1080,7 +1080,7 @@ def run_prof(
                         #         console_error(f"Failed to convert native counter collection CSV: {e}")
                         # else:
                         #     console_warning(f"No counter collection data found in {db_path}.")
-                
+
                 except sqlite3.Error as e:
                     console_error(f"Failed to extract data from {db_path}: {e}")
                 except Exception as e:
@@ -1403,8 +1403,8 @@ def process_torch_trace_output(workload_dir: str, fbase: str) -> None:
         f"{workload_dir}/out/pmc_1/*/*_marker_api_trace.csv"
     )
     existing_marker_files_csv = [
-        markers_file for markers_file in marker_api_trace_csvs 
-        if Path(markers_file).is_file() and 
+        markers_file for markers_file in marker_api_trace_csvs
+        if Path(markers_file).is_file() and
         Path(markers_file.replace("_marker_api_trace.csv", "_counter_collection.csv")).is_file()
     ]
     if not existing_marker_files_csv:
@@ -1414,7 +1414,7 @@ def process_torch_trace_output(workload_dir: str, fbase: str) -> None:
         return
     # Collect corresponding counter files
     counter_files = [
-        f.replace("_marker_api_trace.csv", "_counter_collection.csv") 
+        f.replace("_marker_api_trace.csv", "_counter_collection.csv")
         for f in existing_marker_files_csv
     ]
     # Join marker and counter data
@@ -1489,10 +1489,10 @@ def consolidate_torch_trace_output(workload_dir: str) -> None:
     if not all_traces:
         console_warning("No valid torch trace data to consolidate.")
         return
-    
+
     consolidated_df = pd.concat(all_traces, ignore_index=True)
     consolidated_df = consolidated_df.sort_values(by=["Function", "Counter_Name"])
-    
+
     split_columns = consolidated_df["Function"].str.split(":#", expand=True)
     consolidated_df["Operator_Name"] = split_columns[0] if len(split_columns.columns) > 0 else None
     consolidated_df["Context_Id"] = split_columns[1] if len(split_columns.columns) > 1 else None

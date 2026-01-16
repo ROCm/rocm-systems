@@ -159,7 +159,7 @@ def update_rocpd_pmc_events(counter_info: pd.DataFrame, rocpd_db_path: str) -> N
             guid = table_name[len(ROCPD_PMC_EVENT_TABLE_NAME_PREFIX) :].replace(
                 "_", "-"
             )
-            
+
             # Map dispatch_id to event_id from rocpd_kernel_dispatch
             # Native counter collection CSV has dispatch_id, but rocpd schema needs event_id
             # event_id may differ from dispatch_id when marker API tracing is enabled
@@ -171,13 +171,13 @@ def update_rocpd_pmc_events(counter_info: pd.DataFrame, rocpd_db_path: str) -> N
             dispatch_to_event_df = pd.read_sql_query(
                 dispatch_to_event_query, conn, params=(guid,)
             )
-            
+
             if dispatch_to_event_df.empty:
                 console_error(
                     f"No kernel dispatch data found in rocpd database for guid {guid}"
                 )
                 return
-            
+
             # Create mapping dict for fast lookup
             dispatch_to_event = dict(
                 zip(
@@ -185,11 +185,11 @@ def update_rocpd_pmc_events(counter_info: pd.DataFrame, rocpd_db_path: str) -> N
                     dispatch_to_event_df["event_id"],
                 )
             )
-            
+
             # Map dispatch_id to event_id for counter data
             counter_info = counter_info.copy()
             counter_info["event_id"] = counter_info["dispatch_id"].map(dispatch_to_event)
-            
+
             # Check for unmapped dispatch IDs
             unmapped = counter_info["event_id"].isna()
             if unmapped.any():

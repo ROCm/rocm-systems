@@ -37,8 +37,6 @@ import pandas as pd
 import pytest
 import test_utils
 from scipy.stats import zscore
-from glob import glob
-import random
 
 # Runtime config options
 config = {}
@@ -2790,7 +2788,7 @@ def test_torch_operators_profile(binary_handler_profile_rocprof_compute):
     """
     pytest.importorskip("torch", reason="Skipping torch test since PyTorch is not installed")
     workload_dir = test_utils.get_output_dir(param_id="torch_ops")
-    
+
     REPO_ROOT = Path(__file__).resolve().parents[2]
     BUILD_DIR = Path(os.environ.get("ROCPROFILER_COMPUTE_BUILD_DIR", REPO_ROOT / "build"))
     BUILD_DIR.mkdir(parents=True, exist_ok=True)
@@ -2798,7 +2796,7 @@ def test_torch_operators_profile(binary_handler_profile_rocprof_compute):
     helper_dir = BUILD_DIR / "tmp" / "torch_ops"
     helper_dir.mkdir(parents=True, exist_ok=True)
     torch_app_path = helper_dir / "test_torch_app.py"
-    
+
     torch_app_code = """
 import torch
 import torch.nn as nn
@@ -2832,7 +2830,7 @@ if __name__ == "__main__":
     
     print("Training completed")
 """
-    
+
     with open(torch_app_path, "w") as f:
         f.write(torch_app_code)
 
@@ -2862,17 +2860,17 @@ if __name__ == "__main__":
     # 1. Check basic CSV files
     file_dict = test_utils.check_csv_files(workload_dir, num_devices, 1)
     assert "pmc_perf.csv" in file_dict, "pmc_perf.csv not generated"
-    
+
     # 2. Check torch trace output
     torch_trace_csvs = list(Path(workload_dir).glob("*_torch_trace.csv"))
     assert len(torch_trace_csvs) in [13,20], "Torch trace CSV files are less than expected."
     torch_trace_paths = [Path(p) for p in sorted(torch_trace_csvs)]
-    
+
     # 3. Check torch operators directory
     torch_operators_dir = Path(workload_dir) / "torch_operators"
     assert torch_operators_dir.exists(), "torch_operators directory not created"
     assert torch_operators_dir.is_dir(), "torch_operators is not a directory"
-    
+
     # 4-6. Verify each torch trace CSV has expected structure and valid data
     required_columns = ["Function", "Kernel_Name", "Counter_Name", "Counter_Value"]
     for torch_trace_csv in torch_trace_paths:
@@ -2880,26 +2878,26 @@ if __name__ == "__main__":
         torch_trace_df = pd.read_csv(torch_trace_csv)
         for col in required_columns:
             assert col in torch_trace_df.columns, f"Required column '{col}' missing from torch trace {torch_trace_csv.name}"
-        
+
         # Verify torch trace has data
         assert len(torch_trace_df) > 0, f"Torch trace CSV {torch_trace_csv.name} is empty"
-        
+
         # Verify counter values are valid (non-negative)
         counter_values = torch_trace_df["Counter_Value"]
         assert all(counter_values >= 0), f"Found negative counter values in {torch_trace_csv.name}"
         assert not all(counter_values == 0), f"All counter values are zero in {torch_trace_csv.name}"
-    
+
     # 7. Check per-operator CSV files exist
     operator_csv_files = list(torch_operators_dir.glob("*.csv"))
     assert len(operator_csv_files) > 0, "No per-operator CSV files generated"
-    
+
     # 8. Verify per-operator CSV structure
     for op_csv in operator_csv_files:
         op_df = pd.read_csv(op_csv)
         assert "Operator_Name" in op_df.columns, f"Operator_Name missing in {op_csv.name}"
         assert "Context_Id" in op_df.columns, f"Context_Id missing in {op_csv.name}"
         assert len(op_df) > 0, f"Per-operator CSV {op_csv.name} is empty"
-    
+
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
-    
+
