@@ -74,6 +74,8 @@ config["COUNTER_LOGGING"] = False
 config["METRIC_COMPARE"] = False
 config["METRIC_LOGGING"] = False
 
+arch_config = {}
+
 num_kernels = 3
 num_devices = 1
 
@@ -1325,6 +1327,7 @@ def test_roofline_missing_file_handling(binary_handler_profile_rocprof_compute):
 
     try:
         from roofline import Roofline
+        from utils.schema import Workload
         from utils.specs import generate_machine_specs
 
         class MockArgs:
@@ -1336,6 +1339,7 @@ def test_roofline_missing_file_handling(binary_handler_profile_rocprof_compute):
 
         args = MockArgs()
         mspec = generate_machine_specs(None, None)
+        workload = Workload()
 
         workload_dir = test_utils.get_output_dir()
 
@@ -1350,7 +1354,9 @@ def test_roofline_missing_file_handling(binary_handler_profile_rocprof_compute):
 
         roofline_instance = Roofline(args, mspec, run_parameters)
 
-        result = roofline_instance.cli_generate_plot("FP32")
+        result = roofline_instance.cli_generate_plot(
+            "FP32", workload, config, arch_config
+        )
 
         assert result is None
 
@@ -1377,6 +1383,7 @@ def test_roofline_invalid_datatype_cli(binary_handler_profile_rocprof_compute):
 
     try:
         from roofline import Roofline
+        from utils.schema import Workload
         from utils.specs import generate_machine_specs
 
         class MockArgs:
@@ -1388,6 +1395,7 @@ def test_roofline_invalid_datatype_cli(binary_handler_profile_rocprof_compute):
 
         args = MockArgs()
         mspec = generate_machine_specs(None, None)
+        workload = Workload()
 
         run_parameters = {
             "workload_dir": test_utils.get_output_dir(),
@@ -1400,7 +1408,9 @@ def test_roofline_invalid_datatype_cli(binary_handler_profile_rocprof_compute):
 
         roofline_instance = Roofline(args, mspec, run_parameters)
 
-        result = roofline_instance.cli_generate_plot("INVALID_DATATYPE")
+        result = roofline_instance.cli_generate_plot(
+            "INVALID_DATATYPE", workload, config, arch_config
+        )
 
         assert result is None
 
