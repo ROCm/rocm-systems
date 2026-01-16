@@ -570,6 +570,12 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Added restarting (reloading) AMD GPU driver to both CLI and API calls**  
   - Refer to [<i><b>Separated driver reload from `amdsmi_set_gpu_memory_partition()` / `amdsmi_set_gpu_memory_partition_mode()` and CLI (`sudo amd-smi set -M <NPS mode>`)</b></i>](#separate-driver-reload-anchor) section for more details.
 
+- **Added restarting (reloading) AMD GPU driver to both CLI and API calls**  
+  - Refer to [the “Removed `amd-smi reset -r and --reload-driver` option” note](#removed-driver-reload-option) below for current behavior.
+
+<a name="removed-driver-reload-option"></a>
+- **Removed `amd-smi reset -r and --reload-driver` option.**
+
 - **Added the Default command**.  
   - A default view has been added. The default view provides a snapshot of commonly requested information such as bdf, current partition mode, version information, and more. Users can access that information by simply typing `amd-smi` with no additional commands or arguments. Users may also obtain this information through laternate output formats such as json or csv by using the default command with the respective output format: `amd-smi default --json` or `amd-smi default --csv`.
 
@@ -659,6 +665,12 @@ $ amd-smi
     1) Memory partition change request (`amdsmi_set_gpu_memory_partition()` / `amdsmi_set_gpu_memory_partition_mode()`) or CLI (`sudo amd-smi set -M <NPS mode>`)
     2) Driver reload (`amdsmi_gpu_driver_reload()` / `sudo amd-smi reset -r` or `sudo amd-smi reset --reload-driver`) \[\*\]
   ***Driver reload requires all GPU activity on all devices to be stopped.***
+
+  ### Removed
+  
+  <a name="removed-driver-reload-option"></a>
+  - **Removed `amd-smi reset -r and --reload-driver` option.**
+    - Invoking `--reload-driver or -r` now only prints “Driver Reload capability is removed from amd-smi use modprobe to reload driver” and exits.
 
 - **Modified `amd-smi` CLI `monitor` and `metric` for violations**.  
   - Disabled `amd-smi monitor --violation` on guests.  

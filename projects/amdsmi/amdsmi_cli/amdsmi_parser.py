@@ -1695,6 +1695,10 @@ class AMDSMIParser(argparse.ArgumentParser):
 
 
     def error(self, message):
+        if any(flag in message for flag in ('-r', '--reload-driver')):
+            print("Driver Reload capability is removed from amd-smi use modprobe to reload driver")
+            self.exit(0)
+
         outputformat = self.helpers.get_output_format()
 
         if "argument : invalid choice: " in message:
