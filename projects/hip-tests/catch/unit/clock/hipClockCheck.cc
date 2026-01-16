@@ -42,6 +42,9 @@ __global__ void reduce_c64(long long* start, long long* end, float* in /* 32 siz
     *start = clock64();
   }
 
+  // do not reorder
+  __threadfence();
+
   // trivial reduce
   auto val = in[threadIdx.x];
   val += __shfl_down(val, 16);
@@ -49,6 +52,8 @@ __global__ void reduce_c64(long long* start, long long* end, float* in /* 32 siz
   val += __shfl_down(val, 4);
   val += __shfl_down(val, 2);
   val += __shfl_down(val, 1);
+
+  __threadfence();
 
   if (threadIdx.x == 0) {
     *out = val;
@@ -62,6 +67,9 @@ __global__ void reduce_c(long long* start, long long* end, float* in /* 32 sized
     *start = clock();
   }
 
+  // do not reorder
+  __threadfence();
+
   // trivial reduce
   auto val = in[threadIdx.x];
   val += __shfl_down(val, 16);
@@ -69,6 +77,8 @@ __global__ void reduce_c(long long* start, long long* end, float* in /* 32 sized
   val += __shfl_down(val, 4);
   val += __shfl_down(val, 2);
   val += __shfl_down(val, 1);
+
+  __threadfence();
 
   if (threadIdx.x == 0) {
     *out = val;
@@ -82,6 +92,9 @@ __global__ void reduce_wc64(long long* start, long long* end, float* in /* 32 si
     *start = wall_clock64();
   }
 
+  // do not reorder
+  __threadfence();
+
   // trivial reduce
   auto val = in[threadIdx.x];
   val += __shfl_down(val, 16);
@@ -89,6 +102,8 @@ __global__ void reduce_wc64(long long* start, long long* end, float* in /* 32 si
   val += __shfl_down(val, 4);
   val += __shfl_down(val, 2);
   val += __shfl_down(val, 1);
+
+  __threadfence();
 
   if (threadIdx.x == 0) {
     *out = val;
