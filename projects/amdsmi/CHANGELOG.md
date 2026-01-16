@@ -43,39 +43,39 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   ```console
   $amd-smi set --cpu-railisofreq-policy 0
   CPU: 0
-    CPURAILISO:
-        STATE: Set CPU ISO frequency policy operation successful
+      RAILISOFREQ_POLICY:
+          RESPONSE: Set to, 1, successful
 
   CPU: 1
-    CPURAILISO:
-        STATE: Set CPU ISO frequency policy operation successful
+      RAILISOFREQ_POLICY:
+          RESPONSE: Set to, 1, successful
 
   $amd-smi metric --cpu-railisofreq-policy
   CPU: 0
-    CPURAILISO:
-        CPURAILISOFREQ_POLICY: 0
+      RAILISOFREQ_POLICY:
+          VALUE: 1
 
   CPU: 1
-    CPURAILISO:
-        CPURAILISOFREQ_POLICY: 0
+      RAILISOFREQ_POLICY:
+          VALUE: 1
 
   $amd-smi set --cpu-dfcstate-ctrl 0
   CPU: 0
-    DFCSTATECTRL:
-        STATE: DFCState control operation successful
+      DFCSTATE_CTRL:
+          RESPONSE: Set to, 1, successful
 
   CPU: 1
-    DFCSTATECTRL:
-        STATE: DFCState control operation successful
+      DFCSTATE_CTRL:
+          RESPONSE: Set to, 1, successful
 
   $amd-smi metric --cpu-dfcstate-ctrl
   CPU: 0
-    DFCSTATE:
-        DFCSTATECTRL_STATUS: 0
+      DFCSTATE_CTRL:
+          VALUE: 1
 
   CPU: 1
-    DFCSTATE:
-        DFCSTATECTRL_STATUS: 0
+      DFCSTATE_CTRL:
+          VALUE: 1
  ```
  
 - **Added GPU and base board temperature `amd-smi monitor` CLI support**.  
