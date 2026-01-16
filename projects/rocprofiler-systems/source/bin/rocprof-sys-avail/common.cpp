@@ -449,41 +449,16 @@ file_exists(const std::string& _fname)
 void
 filter_operations(const std::string& env_var_name, std::vector<std::string>& choices)
 {
-    // Define operations to exclude for each environment variable that supports operations
-    // The exclusions apply to _OPERATIONS, _OPERATIONS_EXCLUDE, and
-    // _OPERATIONS_ANNOTATE_BACKTRACE
-    static const std::unordered_map<std::string, std::unordered_set<std::string>>
-        exclusions = {
-            { "ROCPROFSYS_ROCM_OMPT_OPERATIONS",
-              { "omp_callback_functions", "omp_thread_end" } },
-        };
-
-    std::string      base_name     = env_var_name;
-    constexpr size_t exclude_len   = sizeof("_EXCLUDE") - 1;
-    constexpr size_t backtrace_len = sizeof("_ANNOTATE_BACKTRACE") - 1;
-
-    const size_t len = env_var_name.size();
-
-    if(len > exclude_len &&
-       env_var_name.compare(len - exclude_len, exclude_len, "_EXCLUDE") == 0)
+    // Filter out internal/unsupported callbacks
+    if(env_var_name.find("ROCPROFSYS_ROCM_OMPT_OPERATIONS") == 0)
     {
-        base_name = env_var_name.substr(0, len - exclude_len);
-    }
-    else if(len > backtrace_len &&
-            env_var_name.compare(len - backtrace_len, backtrace_len,
-                                 "_ANNOTATE_BACKTRACE") == 0)
-    {
-        base_name = env_var_name.substr(0, len - backtrace_len);
-    }
-
-    auto it = exclusions.find(base_name);
-    if(it != exclusions.end())
-    {
-        choices.erase(std::remove_if(choices.begin(), choices.end(),
-                                     [&it](const std::string& op) {
-                                         return it->second.count(op) > 0;
-                                     }),
-                      choices.end());
+        choices.erase(
+            std::remove_if(choices.begin(), choices.end(),
+                           [](const std::string& op) {
+                               return op == "omp_callback_functions" ||  // internal
+                                      op == "omp_thread_end";            // unsupported
+                           }),
+            choices.end());
     }
 }
 
