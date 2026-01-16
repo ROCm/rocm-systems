@@ -118,7 +118,7 @@ class Roofline:
             self.__run_parameters["kernel_filter"] = True
         if (
             hasattr(self.__args, "iteration_multiplexing")
-            and self.__args.iteration_multiplexing != None
+            and self.__args.iteration_multiplexing is not None
         ):
             self.__run_parameters["iteration_multiplexing"] = (
                 self.__args.iteration_multiplexing
