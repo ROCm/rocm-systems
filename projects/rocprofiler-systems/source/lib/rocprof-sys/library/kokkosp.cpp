@@ -190,6 +190,7 @@ cache_kokkos_event(const char* name, const char* event_type, const char* target,
     const char*  call_stack      = "{}";
     const char*  line_info       = "{}";
 
+    // change to region with 0 duration
     rocprofsys::trace_cache::get_buffer_storage().store(
         rocprofsys::trace_cache::in_time_sample{
             rocprofsys::trait::name<category::kokkos>::value, timestamp_ns,

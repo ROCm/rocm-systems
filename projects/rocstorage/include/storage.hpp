@@ -28,24 +28,26 @@
 #include <memory>
 #include <string>
 
-namespace rocm {
+namespace rocm
+{
 
-class storage {
+class storage
+{
 public:
-  explicit storage(std::string database_path, std::string uuid);
-  virtual ~storage();
+    explicit storage(std::string database_path, std::string uuid);
+    virtual ~storage();
 
-  storage(const storage &) = delete;
-  storage(storage &&) = delete;
-  storage &operator=(const storage &) = delete;
-  storage &operator=(storage &&) = delete;
+    storage(const storage&)            = delete;
+    storage(storage&&)                 = delete;
+    storage& operator=(const storage&) = delete;
+    storage& operator=(storage&&)      = delete;
 
-  std::shared_ptr<rocstorage::writer> get_writer() const;
-  std::shared_ptr<rocstorage::reader> get_reader() const;
+    std::shared_ptr<rocstorage::writer> get_writer() const;
+    std::shared_ptr<rocstorage::reader> get_reader() const;
 
 private:
-  struct impl;
-  std::unique_ptr<impl> m_impl;
+    struct impl;
+    std::unique_ptr<impl> m_impl;
 };
 
-} // namespace rocm
+}  // namespace rocm
