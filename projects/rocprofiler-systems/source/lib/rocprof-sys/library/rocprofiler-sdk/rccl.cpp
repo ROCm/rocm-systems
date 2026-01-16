@@ -81,10 +81,10 @@ void
 cache_rccl_comm_data_events(const uint32_t device_id, size_t bytes, uint64_t timestamp_ns)
 {
     static std::mutex _mutex{};
-    static uint64_t   value = 0;
+    static uint64_t   cumulative_bytes = 0;
     {
         std::unique_lock<std::mutex> _lk{ _mutex };
-        bytes = (value += bytes);
+        bytes = (cumulative_bytes += bytes);
     }
     const std::string track_name      = Track::label;
     const std::string event_metadata  = "{}";
@@ -99,7 +99,7 @@ cache_rccl_comm_data_events(const uint32_t device_id, size_t bytes, uint64_t tim
         track_name.c_str(), timestamp_ns, event_metadata.c_str(), stack_id,
         parent_stack_id, correlation_id, call_stack.c_str(), line_info.c_str(), device_id,
         static_cast<uint8_t>(agent_type::CPU), track_name.c_str(),
-        static_cast<double>(value) });
+        static_cast<double>(cumulative_bytes) });
 }
 
 static auto
