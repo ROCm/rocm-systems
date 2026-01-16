@@ -1,5 +1,6 @@
 /*
 Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
+
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
 in the Software without restriction, including without limitation the rights
@@ -22,42 +23,97 @@ THE SOFTWARE.
 #pragma once
 
 #include <atomic>
+#include <condition_variable>
+#include <functional>
+#include <mutex>
+#include <queue>
 #include <thread>
+#include <vector>
 
-#include <boost/asio/post.hpp>
-#include <boost/asio/thread_pool.hpp>
-
-// This is a simple wrapper around boost::asio::thread_pool that keeps track of the number of
-// currently active tasks using an atomic counter.
+// Custom thread pool implementation using C++11 std::thread
+// Replaces boost::asio::thread_pool with same API surface
 class ThreadPool {
  public:
   ThreadPool(size_t thread_count = std::thread::hardware_concurrency())
-      : thread_count_(thread_count) {}
+      : thread_count_(thread_count), stop_(false), active_tasks_(0) {
+    workers_.reserve(thread_count_);
+    for (size_t i = 0; i < thread_count_; ++i) {
+      workers_.emplace_back([this] { this->worker_thread(); });
+    }
+  }
 
-  ~ThreadPool() { thread_pool_.join(); }
+  ~ThreadPool() {
+    {
+      std::lock_guard<std::mutex> lock(queue_mutex_);
+      stop_ = true;
+    }
+    condition_.notify_all();
+    for (std::thread& worker : workers_) {
+      if (worker.joinable()) {
+        worker.join();
+      }
+    }
+  }
 
-  // Submits a task to the thread pool and increments the number of active tasks. The task is
-  // wrapped in a lambda that decrements the number of active tasks upon completion.
-  template <typename T> void Post(T&& task) {
-    ++active_tasks_;
-    auto&& task_wrapper = [task, this] {
-      task();
-      --active_tasks_;
-    };
-    boost::asio::post(thread_pool_, task_wrapper);
+  // Submits a task to the thread pool and increments the number of active tasks.
+  // The task is wrapped in a lambda that decrements the number of active tasks upon completion.
+  template <typename T>
+  void Post(T&& task) {
+    {
+      std::lock_guard<std::mutex> lock(queue_mutex_);
+      if (stop_) {
+        return;  // Don't accept new tasks after shutdown
+      }
+      ++active_tasks_;
+      tasks_.emplace([this, task]() {
+        task();
+        --active_tasks_;
+      });
+    }
+    condition_.notify_one();
   }
 
   // Busy waits for the number of active tasks to reach zero.
   void Wait() const {
-    while (active_tasks_.load(std::memory_order_relaxed))
-      ;
+    while (active_tasks_.load(std::memory_order_relaxed)) {
+      // Busy wait - matches original behavior
+    }
   }
 
   size_t thread_count() const { return thread_count_; }
 
  private:
+  void worker_thread() {
+    while (true) {
+      std::function<void()> task;
+      {
+        std::unique_lock<std::mutex> lock(queue_mutex_);
+        condition_.wait(lock, [this] { return stop_ || !tasks_.empty(); });
+
+        if (stop_ && tasks_.empty()) {
+          return;
+        }
+
+        if (!tasks_.empty()) {
+          task = std::move(tasks_.front());
+          tasks_.pop();
+        }
+      }
+
+      if (task) {
+        task();
+      }
+    }
+  }
+
   const size_t thread_count_;
-  boost::asio::thread_pool thread_pool_{thread_count_};
+  std::vector<std::thread> workers_;
+  std::queue<std::function<void()>> tasks_;
+
+  std::mutex queue_mutex_;
+  std::condition_variable condition_;
+  bool stop_;
+
   std::atomic<size_t> active_tasks_;
 };
 
