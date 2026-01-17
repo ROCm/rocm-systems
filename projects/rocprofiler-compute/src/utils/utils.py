@@ -1492,7 +1492,7 @@ def consolidate_torch_trace_output(workload_dir: str) -> None:
 
     for trace_file in torch_trace_files:
         try:
-            Path.unlink(trace_file)
+            Path(trace_file).unlink()
             console_debug(f"Removed temporary torch trace file: {trace_file}")
         except OSError as e:
             console_warning(f"Error removing temporary file {trace_file}: {e}")
