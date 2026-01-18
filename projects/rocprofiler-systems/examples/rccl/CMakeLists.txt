@@ -56,7 +56,7 @@ if(hip_FOUND AND rccl_FOUND)
         OUTPUT_STRIP_TRAILING_WHITESPACE
         RESULT_VARIABLE _rccl_grep_ret
     )
-    if(_rccl_grep_ret NOT EQUAL 0)
+    if(NOT _rccl_grep_ret EQUAL 0)
         message(
             FATAL_ERROR
             "This grep should never fail unless rccl-tests/src/Makefile was modified in an incompatible way"
