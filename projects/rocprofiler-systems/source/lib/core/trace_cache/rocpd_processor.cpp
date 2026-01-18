@@ -22,8 +22,9 @@
 
 #include "core/trace_cache/rocpd_processor.hpp"
 #include "core/agent_manager.hpp"
+#include "core/common_types.hpp"
 #include "core/config.hpp"
-#include "core/debug.hpp"
+#include "core/demangler.hpp"
 #include "core/gpu_metrics.hpp"
 #include "core/node_info.hpp"
 #include "core/rocpd/data_processor.hpp"
@@ -31,6 +32,7 @@
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/sample_type.hpp"
 #include "library/thread_info.hpp"
+#include "logger/debug.hpp"
 
 #include <cstdint>
 #include <limits>
@@ -38,7 +40,6 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
-#include <timemory/utility/demangle.hpp>
 
 #if ROCPROFSYS_USE_ROCM > 0
 #    include "library/rocprofiler-sdk/fwd.hpp"
@@ -90,7 +91,7 @@ rocpd_processor_t::handle([[maybe_unused]] const kernel_dispatch_sample& _kds)
     }
 
     auto region_name_primary_key = m_data_processor->insert_string(
-        tim::demangle(kernel_symbol->kernel_name).c_str());
+        rocprofsys::utility::demangle(kernel_symbol->kernel_name).c_str());
 
     auto stack_id        = _kds.correlation_id_internal;
     auto parent_stack_id = _kds.correlation_id_ancestor;
@@ -234,48 +235,6 @@ void
 rocpd_processor_t::handle([[maybe_unused]] const region_sample& _rs)
 {
 #if ROCPROFSYS_USE_ROCM > 0
-    static auto parse_args = []([[maybe_unused]] const std::string& arg_str) {
-        rocprofiler_sdk::function_args_t args;
-        const std::string                delimiter = ";;";
-
-        auto split = [](const std::string& str, const std::string& _delimiter) {
-            std::vector<std::string> tokens;
-            size_t                   start = 0;
-            size_t                   end   = str.find(_delimiter);
-
-            while(end != std::string::npos)
-            {
-                tokens.push_back(str.substr(start, end - start));
-                start = end + _delimiter.length();
-                end   = str.find(_delimiter, start);
-            }
-
-            return tokens;
-        };
-
-        if(arg_str.empty())
-        {
-            return args;
-        }
-
-        auto tokens = split(arg_str, delimiter);
-
-        // Ensure the number of tokens is a multiple of 4
-        if(tokens.size() % 4 != 0)
-        {
-            throw std::invalid_argument("Malformed argument string.");
-        }
-
-        for(auto it = tokens.begin(); it != tokens.end(); it += 4)
-        {
-            rocprofiler_sdk::argument_info arg = { static_cast<uint32_t>(std::stoi(*it)),
-                                                   *(it + 1), *(it + 2), *(it + 3) };
-            args.push_back(arg);
-        }
-
-        return args;
-    };
-
     auto& n_info  = node_info::get_instance();
     auto  process = m_metadata->get_process_info();
     auto  thread_primary_key =
@@ -292,7 +251,7 @@ rocpd_processor_t::handle([[maybe_unused]] const region_sample& _rs)
         m_data_processor->insert_event(category_primary_key, stack_id, parent_stack_id,
                                        correlation_id, _rs.call_stack.c_str());
 
-    auto args = parse_args(_rs.args_str);
+    auto args = process_arguments_string(_rs.args_str);
     for(const auto& arg : args)
     {
         m_data_processor->insert_args(event_primary_key, arg.arg_number,
@@ -648,13 +607,17 @@ rocpd_processor_t::rocpd_processor_t(const std::shared_ptr<metadata_registry>& m
 void
 rocpd_processor_t::prepare_for_processing()
 {
+    LOG_DEBUG("Preparing rocpd processor for processing");
     post_process_metadata();
+    LOG_TRACE("Rocpd processor prepared for processing");
 }
 
 void
 rocpd_processor_t::finalize_processing()
 {
+    LOG_DEBUG("Finalizing rocpd processor");
     m_data_processor->flush();
+    LOG_INFO("Rocpd processor finalized successfully");
 }
 
 void
@@ -663,9 +626,10 @@ rocpd_processor_t::post_process_metadata()
 #if ROCPROFSYS_USE_ROCM > 0
     if(!get_use_rocpd())
     {
+        LOG_TRACE("Rocpd not enabled, skipping metadata post-processing");
         return;
     }
-    ROCPROFSYS_DEBUG("Post processing metadata..\n");
+    LOG_DEBUG("Post-processing metadata for rocpd");
     auto n_info = node_info::get_instance();
 
     m_data_processor->insert_node_info(
@@ -688,7 +652,8 @@ rocpd_processor_t::post_process_metadata()
             rocpd_agent->logical_node_id, rocpd_agent->logical_node_type_id,
             rocpd_agent->device_id, rocpd_agent->name.c_str(),
             rocpd_agent->model_name.c_str(), rocpd_agent->vendor_name.c_str(),
-            rocpd_agent->product_name.c_str(), "");
+            rocpd_agent->product_name.c_str(), rocpd_agent->product_name.c_str(),
+            rocpd_agent->agent_info.c_str());
         rocpd_agent->base_id = _base_id;
     }
     auto _string_list = m_metadata->get_string_list();
@@ -738,7 +703,7 @@ rocpd_processor_t::post_process_metadata()
     auto _kernel_symbols_list = m_metadata->get_kernel_symbol_list();
     for(const auto& kernel_symbol : _kernel_symbols_list)
     {
-        auto kernel_name = tim::demangle(kernel_symbol.kernel_name);
+        auto kernel_name = rocprofsys::utility::demangle(kernel_symbol.kernel_name);
         m_data_processor->insert_kernel_symbol(
             kernel_symbol.kernel_id, n_info.id, process_info.pid,
             kernel_symbol.code_object_id, kernel_symbol.kernel_name, kernel_name.c_str(),

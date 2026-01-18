@@ -76,7 +76,6 @@ target_sources(rocclr PRIVATE
   ${ROCCLR_SRC_DIR}/device/rocm/rocblitcl.cpp
   ${ROCCLR_SRC_DIR}/device/rocm/roccounters.cpp
   ${ROCCLR_SRC_DIR}/device/rocm/rocdevice.cpp
-  ${ROCCLR_SRC_DIR}/device/rocm/rocglinterop.cpp
   ${ROCCLR_SRC_DIR}/device/rocm/rockernel.cpp
   ${ROCCLR_SRC_DIR}/device/rocm/rocmemory.cpp
   ${ROCCLR_SRC_DIR}/device/rocm/rocprintf.cpp
@@ -85,5 +84,13 @@ target_sources(rocclr PRIVATE
   ${ROCCLR_SRC_DIR}/device/rocm/rocsignal.cpp
   ${ROCCLR_SRC_DIR}/device/rocm/rocvirtual.cpp
   ${ROCCLR_SRC_DIR}/device/rocm/rocurilocator.cpp)
+
+if(UNIX)
+  target_sources(rocclr PRIVATE
+    ${ROCCLR_SRC_DIR}/device/rocm/rocglinterop.cpp)
+else()
+  target_sources(rocclr PRIVATE
+    ${ROCCLR_SRC_DIR}/device/rocm/rocglinterop_windows.cpp)
+endif()
 
 target_compile_definitions(rocclr PUBLIC WITH_HSA_DEVICE)

@@ -17,7 +17,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
-#include "hip/hip_runtime.h"
+#include <hip/hip_runtime.h>
 
 extern "C" __global__ void kernelMultipleArgsSaxpy(int a1, int a2, int* x1, int b1, int b2, int* x2,
                                                    int c1, int c2, int* x3, int d1, int d2, int* x4,

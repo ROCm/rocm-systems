@@ -10,17 +10,13 @@ This section provides an overview of ROCm Compute Profiler's CLI analysis featur
 
 * :ref:`Derived metrics <cli-list-metrics>`: All of ROCm Compute Profiler's built-in metrics.
 
-* :ref:`Baseline comparison <analysis-baseline-comparison>`: Compare multiple
-  runs in a side-by-side manner.
+* :ref:`Baseline comparison <analysis-baseline-comparison>`: Compare multiple runs in a side-by-side manner.
 
-* :ref:`Metric customization <cli-analysis-options>`: Isolate a subset of
-  built-in metrics or build your own profiling configuration.
+* :ref:`Metric customization <cli-analysis-options>`: Isolate a subset of built-in metrics or build your own profiling configuration.
 
-* :ref:`Filtering <cli-analysis-options>`: Hone in on a particular kernel,
-  GPU ID, or dispatch ID via post-process filtering.
-
-* :ref:`Per-kernel roofline analysis <per-kernel-roofline>`: Detailed arithmetic
-   intensity and performance analysis for individual kernels.
+* :ref:`Filtering <cli-analysis-options>`: Hone in on a particular kernel, GPU ID, or dispatch ID via post-process filtering.
+  
+* :ref:`Per-kernel roofline analysis <per-kernel-roofline>`: Detailed arithmetic intensity and performance analysis for individual kernels.
 
 Run ``rocprof-compute analyze -h`` for more details.
 
@@ -350,11 +346,6 @@ Show System Speed-of-Light and CS_Busy blocks only
    this case, ``1`` is the ID for System Speed-of-Light and ``5.1.0`` the ID for
    GPU Busy Cycles metric.
 
-.. note::
-   
-   Dispatch filtering via ``-d`` or ``--dispatch`` is not supported for profiling
-   data collected with ``--iteration-multiplexing`` option.
-
 Filter kernels
   First, list the top kernels in your application using `--list-stats`.
 
@@ -566,12 +557,8 @@ Analysis database example
    DEBUG Applied analysis mode filters
    DEBUG Calculated dispatch data
    DEBUG Collected metrics data
-   WARNING Failed to evaluate expression for 3.1.25 - Value: to_round(to_avg(
-   (pmc_df.get("TCP_TCP_LATENCY_sum") / pmc_df.get("TCP_TA_TCP_STATE_READ_sum")).where((pmc_df.get("TCP_TA_TCP_STATE_READ_sum") != 0), None)), 0) - unsupported operand type(s) for /: 'NoneType' and 'float'
    WARNING Failed to evaluate expression for 3.1.39 - Value: to_round((to_avg(
    (pmc_df.get("pmc_perf_ACCUM") / pmc_df.get("SQC_ICACHE_REQ")).where((pmc_df.get("SQC_ICACHE_REQ") != 0), None)) * 100), 0) - unsupported operand type(s) for /: 'NoneType' and 'float'
-   WARNING Failed to evaluate expression for 3.1.25 - Value: to_round(to_avg(
-   (pmc_df.get("TCP_TCP_LATENCY_sum") / pmc_df.get("TCP_TA_TCP_STATE_READ_sum")).where((pmc_df.get("TCP_TA_TCP_STATE_READ_sum") != 0), None)), 0) - unsupported operand type(s) for /: 'NoneType' and 'float'
    WARNING Failed to evaluate expression for 3.1.39 - Value: to_round((to_avg(
    (pmc_df.get("pmc_perf_ACCUM") / pmc_df.get("SQC_ICACHE_REQ")).where((pmc_df.get("SQC_ICACHE_REQ") != 0), None)) * 100), 0) - unsupported operand type(s) for /: 'NoneType' and 'float'
    DEBUG Calculated metric values

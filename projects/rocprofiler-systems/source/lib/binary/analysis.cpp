@@ -36,7 +36,6 @@
 #include "core/binary/fwd.hpp"
 #include "core/common.hpp"
 #include "core/config.hpp"
-#include "core/debug.hpp"
 #include "core/locking.hpp"
 #include "core/state.hpp"
 #include "core/utility.hpp"
@@ -52,6 +51,8 @@
 #include <timemory/utility/filepath.hpp>
 #include <timemory/utility/join.hpp>
 #include <timemory/utility/procfs/maps.hpp>
+
+#include "logger/debug.hpp"
 
 #include <cstdint>
 #include <cstdlib>
@@ -75,8 +76,7 @@ parse_line_info(const std::string& _name, bool _process_dwarf, bool _process_bfd
     auto& _bfd = _info.bfd;
     _bfd       = std::make_shared<bfd_file>(_name);
 
-    ROCPROFSYS_BASIC_VERBOSE(0, "[binary] Reading line info for '%s'...\n",
-                             _name.c_str());
+    LOG_INFO("[binary] Reading line info for '{}'...", _name);
 
     if(_bfd && _bfd->is_good())
     {
@@ -125,8 +125,8 @@ parse_line_info(const std::string& _name, bool _process_dwarf, bool _process_bfd
         _info.sort();
     }
 
-    ROCPROFSYS_BASIC_VERBOSE(1, "[binary] Reading line info for '%s'... %zu entries\n",
-                             _bfd->name.c_str(), _info.symbols.size());
+    LOG_DEBUG("[binary] Reading line info for '{}'... {} entries", _bfd->name,
+              _info.symbols.size());
 
     return _info;
 }
@@ -222,7 +222,7 @@ lookup_ipaddr_entry(uintptr_t _addr, unw_context_t* _context_p,
     {
         static auto _exclude_range = []() {
             auto _maps                 = ::tim::procfs::maps::iterate_program_headers();
-            auto _exclude_range_v      = std::set<address_range_t>{};
+            auto _exclude_range_v      = std::set<address_range>{};
             auto _insert_exclude_range = [&_maps,
                                           &_exclude_range_v](const std::string& _v) {
                 auto _base_v = std::string_view{ filepath::basename(_v) };
@@ -233,7 +233,7 @@ lookup_ipaddr_entry(uintptr_t _addr, unw_context_t* _context_p,
                        _real_v == _v)
                     {
                         _exclude_range_v.emplace(
-                            address_range_t{ mitr.load_address, mitr.last_address });
+                            address_range{ mitr.load_address, mitr.last_address });
                     }
                 }
             };

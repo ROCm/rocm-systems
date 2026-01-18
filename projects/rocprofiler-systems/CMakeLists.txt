@@ -236,8 +236,17 @@ rocprofiler_systems_add_option(ROCPROFSYS_BUILD_CODECOV "Build for code coverage
 rocprofiler_systems_add_option(ROCPROFSYS_INSTALL_PERFETTO_TOOLS
                                "Install perfetto tools (i.e. traced, perfetto, etc.)" OFF
 )
-rocprofiler_systems_add_option(ROCPROFILER_BUILD_SQLITE3
-                               "Enable building sqlite3 library internally" OFF
+
+rocprofiler_systems_add_option(ROCPROFSYS_BUILD_SPDLOG
+                               "Enable building spdlog library internally" ON
+)
+
+rocprofiler_systems_add_option(ROCPROFSYS_BUILD_SQLITE3
+                               "Enable building sqlite3 library internally" ON
+)
+
+rocprofiler_systems_add_option(ROCPROFSYS_BUILD_GTEST
+                               "Enable building googletest library internally" ON
 )
 
 if(ROCPROFSYS_USE_PAPI)
@@ -271,9 +280,13 @@ else()
     math(EXPR ROCPROFSYS_THREAD_COUNT "16 * ${ROCPROFSYS_PROCESSOR_COUNT}")
     compute_pow2_ceil(ROCPROFSYS_THREAD_COUNT "16 * ${ROCPROFSYS_PROCESSOR_COUNT}")
 
-    # set the default to 2048 if it could not be calculated
+    # Fatal error if pow2 calculation failed (e.g., Python3 not found)
     if(ROCPROFSYS_THREAD_COUNT LESS 2)
-        set(ROCPROFSYS_THREAD_COUNT 2048)
+        rocprofiler_systems_message(
+            FATAL_ERROR
+            "Failed to compute power of 2 ceiling for ROCPROFSYS_THREAD_COUNT. "
+            "Ensure dependency is available. Processor count: ${ROCPROFSYS_PROCESSOR_COUNT}"
+        )
     endif()
 endif()
 

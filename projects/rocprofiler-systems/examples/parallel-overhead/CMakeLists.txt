@@ -1,3 +1,6 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
+
 cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
 
 project(rocprofiler-systems-parallel-overhead-example LANGUAGES CXX)
@@ -32,10 +35,13 @@ target_link_libraries(
 )
 target_compile_definitions(parallel-overhead-locks PRIVATE USE_LOCKS=1)
 
-if(ROCPROFSYS_INSTALL_EXAMPLES)
-    install(
-        TARGETS parallel-overhead parallel-overhead-locks
-        DESTINATION bin
-        COMPONENT rocprofiler-systems-examples
-    )
-endif()
+set(PARALLEL_OVERHEAD_EXAMPLES parallel-overhead parallel-overhead-locks)
+foreach(PARALLEL_OVERHEAD_EXAMPLE IN LISTS PARALLEL_OVERHEAD_EXAMPLES)
+    if(ROCPROFSYS_INSTALL_EXAMPLES AND TARGET ${PARALLEL_OVERHEAD_EXAMPLE})
+        install(
+            TARGETS ${PARALLEL_OVERHEAD_EXAMPLE}
+            DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples
+            COMPONENT rocprofiler-systems-examples
+        )
+    endif()
+endforeach()

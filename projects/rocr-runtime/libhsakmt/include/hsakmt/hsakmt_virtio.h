@@ -29,6 +29,10 @@
 #if defined(__linux__)
 #include "hsakmt/linux/kfd_ioctl.h"
 #endif
+
+// Forward declaration for HsaKFDContext to avoid dependency issues
+typedef struct _HsaKFDContext HsaKFDContext;
+
 #include "hsakmt/hsakmt.h"
 #include <libdrm/amdgpu.h>
 
@@ -40,6 +44,9 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtOpenKFD(void);
 HSAKMT_STATUS HSAKMTAPI vhsaKmtCloseKFD(void);
 HSAKMT_STATUS HSAKMTAPI vhsaKmtAllocMemory(HSAuint32 PreferredNode, HSAuint64 SizeInBytes,
                                            HsaMemFlags MemFlags, void** MemoryAddress);
+HSAKMT_STATUS HSAKMTAPI vhsaKmtAllocMemoryAlign(HSAuint32 PreferredNode, HSAuint64 SizeInBytes,
+                                                HSAuint64 Alignment, HsaMemFlags MemFlags,
+                                                void** MemoryAddress);
 HSAKMT_STATUS HSAKMTAPI vhsaKmtFreeMemory(void* MemoryAddress, HSAuint64 SizeInBytes);
 HSAKMT_STATUS HSAKMTAPI vhsaKmtMapMemoryToGPUNodes(void* MemoryAddress, HSAuint64 MemorySizeInBytes,
                                                    HSAuint64* AlternateVAGPU,
@@ -52,6 +59,10 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtMapMemoryToGPU(void* MemoryAddress, HSAuint64 Mem
 HSAKMT_STATUS HSAKMTAPI vhsaKmtRegisterMemoryWithFlags(void* MemoryAddress,
                                                        HSAuint64 MemorySizeInBytes,
                                                        HsaMemFlags MemFlags);
+HSAKMT_STATUS HSAKMTAPI vhsaKmtRegisterMemory(void* MemoryAddress, HSAuint64 MemorySizeInBytes);
+HSAKMT_STATUS HSAKMTAPI vhsaKmtRegisterMemoryToNodes(void* MemoryAddress,
+                                                     HSAuint64 MemorySizeInBytes,
+                                                     HSAuint32 NumberOfNodes, HSAuint32* NodeArray);
 HSAKMT_STATUS HSAKMTAPI vhsaKmtDeregisterMemory(void* MemoryAddress);
 HSAKMT_STATUS HSAKMTAPI vhsaKmtGetVersion(HsaVersionInfo* v);
 HSAKMT_STATUS HSAKMTAPI vhsaKmtAcquireSystemProperties(HsaSystemProperties* SystemProperties);
@@ -101,12 +112,87 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtCreateQueue(HSAuint32 NodeId, HSA_QUEUE_TYPE Type
                                            void* QueueAddress, HSAuint64 QueueSizeInBytes,
                                            HsaEvent* Event, HsaQueueResource* QueueResource);
 HSAKMT_STATUS HSAKMTAPI vhsaKmtDestroyQueue(HSA_QUEUEID QueueId);
+HSAKMT_STATUS HSAKMTAPI vhsaKmtUpdateQueue(HSA_QUEUEID QueueId, HSAuint32 QueuePercentage,
+                                           HSA_QUEUE_PRIORITY Priority, void* QueueAddress,
+                                           HSAuint64 QueueSize, HsaEvent* Event);
+HSAKMT_STATUS HSAKMTAPI vhsaKmtGetQueueInfo(HSA_QUEUEID QueueId, HsaQueueInfo* QueueInfo);
+HSAKMT_STATUS HSAKMTAPI vhsaKmtSetQueueCUMask(HSA_QUEUEID QueueId, HSAuint32 CUMaskCount,
+                                              HSAuint32* QueueCUMask);
+HSAKMT_STATUS HSAKMTAPI vhsaKmtAllocQueueGWS(HSA_QUEUEID QueueId, HSAuint32 nGWS,
+                                             HSAuint32* firstGWS);
+HSAKMT_STATUS HSAKMTAPI vhsaKmtRegisterGraphicsHandleToNodesExt(
+    HSAuint64 GraphicsResourceHandle, HsaGraphicsResourceInfo* GraphicsResourceInfo,
+    HSAuint64 NumberOfNodes, HSAuint32* NodeArray, HSA_REGISTER_MEM_FLAGS RegisterFlags);
 HSAKMT_STATUS HSAKMTAPI vhsaKmtRegisterGraphicsHandleToNodes(
     HSAuint64 GraphicsResourceHandle, HsaGraphicsResourceInfo* GraphicsResourceInfo,
     HSAuint64 NumberOfNodes, HSAuint32* NodeArray);
+HSAKMT_STATUS HSAKMTAPI vhsaKmtMapGraphicHandle(HSAuint32 NodeId, HSAuint64 GraphicDeviceHandle,
+                                                HSAuint64 GraphicResourceHandle,
+                                                HSAuint64 GraphicResourceOffset,
+                                                HSAuint64 GraphicResourceSize,
+                                                HSAuint64* FlatMemoryAddress);
+HSAKMT_STATUS HSAKMTAPI vhsaKmtUnmapGraphicHandle(HSAuint32 NodeId, HSAuint64 FlatMemoryAddress,
+                                                  HSAuint64 SizeInBytes);
+HSAKMT_STATUS HSAKMTAPI vhsaKmtExportDMABufHandle(void* MemoryAddress, HSAuint64 MemorySizeInBytes,
+                                                  int* DMABufFd, HSAuint64* Offset);
 HSAKMT_STATUS HSAKMTAPI vhsaKmtGetRuntimeCapabilities(HSAuint32* caps_mask);
+HSAKMT_STATUS HSAKMTAPI vhsaKmtModelEnabled(bool* enable);
+HSAKMT_STATUS HSAKMTAPI vhsaKmtOpenSMI(HSAuint32 NodeId, int* fd);
+HSAKMT_STATUS HSAKMTAPI vhsaKmtSetXNACKMode(HSAint32 enable);
+HSAKMT_STATUS HSAKMTAPI vhsaKmtShareMemory(void* MemoryAddress, HSAuint64 SizeInBytes,
+                                           HsaSharedMemoryHandle* SharedMemoryHandle);
+HSAKMT_STATUS HSAKMTAPI vhsaKmtRegisterSharedHandleToNodes(
+    const HsaSharedMemoryHandle* SharedMemoryHandle, void** MemoryAddress, HSAuint64* SizeInBytes,
+    HSAuint64 NumberOfNodes, HSAuint32* NodeArray);
+HSAKMT_STATUS HSAKMTAPI vhsaKmtRegisterSharedHandle(const HsaSharedMemoryHandle* SharedMemoryHandle,
+                                                    void** MemoryAddress, HSAuint64* SizeInBytes);
+HSAKMT_STATUS HSAKMTAPI vhsaKmtSetMemoryUserData(const void* Pointer, void* UserData);
+HSAKMT_STATUS HSAKMTAPI vhsaKmtSetMemoryPolicy(HSAuint32 Node, HSAuint32 DefaultPolicy,
+                                               HSAuint32 AlternatePolicy,
+                                               void* MemoryAddressAlternate,
+                                               HSAuint64 MemorySizeInBytes);
+HSAKMT_STATUS HSAKMTAPI vhsaKmtSVMGetAttr(void* start_addr, HSAuint64 size, unsigned int nattr,
+                                          HSA_SVM_ATTRIBUTE* attrs);
+HSAKMT_STATUS HSAKMTAPI vhsaKmtSVMSetAttr(void* start_addr, HSAuint64 size, unsigned int nattr,
+                                          HSA_SVM_ATTRIBUTE* attrs);
+HSAKMT_STATUS HSAKMTAPI vhsaKmtReplaceAsanHeaderPage(void* addr);
+HSAKMT_STATUS HSAKMTAPI vhsaKmtReturnAsanHeaderPage(void* addr);
+HSAKMT_STATUS HSAKMTAPI vhsaKmtSPMAcquire(HSAuint32 PreferredNode);
+HSAKMT_STATUS HSAKMTAPI vhsaKmtSPMRelease(HSAuint32 PreferredNode);
+HSAKMT_STATUS HSAKMTAPI vhsaKmtSPMSetDestBuffer(HSAuint32 PreferredNode, HSAuint32 SizeInBytes,
+                                                HSAuint32* timeout, HSAuint32* SizeCopied,
+                                                void* DestMemoryAddress, bool* isSPMDataLoss);
+HSAKMT_STATUS HSAKMTAPI vhsaKmtAisReadWriteFile(void* MemoryAddress, HSAuint64 MemorySizeInBytes,
+                                                HSAint32 fd, HSAint64 file_offset,
+                                                HsaAisFlags AisFlags, HSAuint64* SizeCopiedInBytes,
+                                                HSAint32* status);
+HSAKMT_STATUS HSAKMTAPI vhsaKmtProcessVMRead(HSAuint32 Pid, HsaMemoryRange* LocalMemoryArray,
+                                             HSAuint64 LocalMemoryArrayCount,
+                                             HsaMemoryRange* RemoteMemoryArray,
+                                             HSAuint64 RemoteMemoryArrayCount,
+                                             HSAuint64* SizeCopied);
+HSAKMT_STATUS HSAKMTAPI vhsaKmtProcessVMWrite(HSAuint32 Pid, HsaMemoryRange* LocalMemoryArray,
+                                              HSAuint64 LocalMemoryArrayCount,
+                                              HsaMemoryRange* RemoteMemoryArray,
+                                              HSAuint64 RemoteMemoryArrayCount,
+                                              HSAuint64* SizeCopied);
 
 int vamdgpu_query_gpu_info(amdgpu_device_handle dev, void* out);
+int vamdgpu_device_initialize(int fd, uint32_t* major_version, uint32_t* minor_version,
+                             amdgpu_device_handle* device_handle);
+int vamdgpu_device_deinitialize(amdgpu_device_handle device_handle);
+int vamdgpu_device_get_fd(amdgpu_device_handle device_handle);
+int vdrmCommandWriteRead(int fd, unsigned long drmCommandIndex, void* data, unsigned long size);
+int vamdgpu_bo_cpu_map(amdgpu_bo_handle buf_handle, void** cpu);
+int vamdgpu_bo_free(amdgpu_bo_handle buf_handle);
+int vamdgpu_bo_export(amdgpu_bo_handle buf_handle, enum amdgpu_bo_handle_type type,
+                     uint32_t* shared_handle);
+int vamdgpu_bo_import(amdgpu_device_handle dev, enum amdgpu_bo_handle_type type,
+                     uint32_t shared_handle, struct amdgpu_bo_import_result* output);
+int vamdgpu_bo_va_op(amdgpu_bo_handle bo, uint64_t offset, uint64_t size, uint64_t addr,
+                    uint64_t flags, uint32_t ops);
+int vamdgpu_bo_query_info(amdgpu_bo_handle bo, struct amdgpu_bo_info* info);
+int vamdgpu_bo_set_metadata(amdgpu_bo_handle bo, struct amdgpu_bo_metadata* info);
 
 #ifdef __cplusplus
 }

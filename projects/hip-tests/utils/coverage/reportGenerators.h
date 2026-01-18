@@ -36,9 +36,9 @@ class BasicAPIStats {
   float getMediumCoverageLimit() const;
 };
 
-void generateXMLReportFiles(std::vector<HipAPI>& hip_apis,
-                            std::vector<HipAPIGroup>& hip_api_groups);
+void generateXMLReportFiles(std::vector<HipAPI>& hip_apis, std::vector<HipAPIGroup>& hip_api_groups,
+                            const std::string& work_directory);
 void generateHTMLReportFiles(std::vector<HipAPI>& hip_apis,
                              std::vector<HipAPIGroup>& hip_api_groups,
                              std::string tests_root_directory, std::string hipApiHeaderFile,
-                             std::string hip_rtc_header_file);
+                             std::string hip_rtc_header_file, const std::string& work_directory);

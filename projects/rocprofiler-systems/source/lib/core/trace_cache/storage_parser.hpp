@@ -23,17 +23,18 @@
 #pragma once
 
 #include "common/defines.h"
-#include "core/debug.hpp"
+
 #include "core/trace_cache/cacheable.hpp"
 #include "core/trace_cache/type_registry.hpp"
+
+#include "logger/debug.hpp"
 
 #include <cassert>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
-#include <functional>
+#include <fstream>
 #include <memory>
-#include <sstream>
 #include <string>
 
 namespace rocprofsys
@@ -67,15 +68,13 @@ public:
             throw std::runtime_error("TypeProcessing is nullptr");
         }
 
-        ROCPROFSYS_DEBUG("Consuming buffered storage with filename: %s\n",
-                         m_filename.c_str());
+        LOG_DEBUG("Loading storage from file: {}", m_filename);
 
         std::ifstream ifs(m_filename, std::ios::binary);
         if(!ifs.good())
         {
-            std::stringstream ss;
-            ss << "Error opening file for reading: " << m_filename << "\n";
-            throw std::runtime_error(ss.str());
+            throw std::runtime_error(
+                fmt::format("Error opening file for reading: {}", m_filename));
         }
 
         struct __attribute__((packed)) sample_header
@@ -94,10 +93,8 @@ public:
         {
             if(!ifs.good())
             {
-                ROCPROFSYS_WARNING(0,
-                                   "Stream not in good state, stopping parse. File: %s\n",
-                                   m_filename.c_str());
-                break;
+                throw std::runtime_error(fmt::format(
+                    "Stream not in good state, stopping parse. File: {}", m_filename));
             }
 
             ifs.read(reinterpret_cast<char*>(&header), sizeof(header));
@@ -118,15 +115,15 @@ public:
 
             if(ifs.fail())
             {
-                ROCPROFSYS_WARNING(1,
-                                   "Bad read while consuming buffered storage. Filename: "
-                                   "%s Bytes read: %d\n",
-                                   m_filename.c_str(), static_cast<int>(ifs.tellg()));
-                continue;
+                throw std::runtime_error(
+                    fmt::format("Bad read while consuming buffered storage. Filename: {} "
+                                "Bytes read: {}",
+                                m_filename, static_cast<int>(ifs.tellg())));
             }
 
             if(header.type == TypeIdentifierEnum::fragmented_space)
             {
+                LOG_TRACE("Skipping fragmented space in storage");
                 continue;
             }
 
@@ -144,15 +141,13 @@ public:
             }
             else
             {
-                ROCPROFSYS_DEBUG("Unsupported type detected. Skipping current sample.\n");
+                LOG_TRACE("Unknown sample type encountered, skipping");
                 continue;
             }
         }
 
         ifs.close();
-        ROCPROFSYS_DEBUG("File parsing finished. Removing %s from file system.\n",
-                         m_filename.c_str());
-        std::remove(m_filename.c_str());
+        LOG_DEBUG("Storage parsing complete from {}", m_filename);
     }
 
 private:

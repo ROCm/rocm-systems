@@ -156,3 +156,17 @@ TEST_CASE("Unit_hipLaunchKernel_Negative_Parameters") {
   }
 #endif
 }
+
+TEST_CASE("Unit_hipLaunchKernel_Verify_Capture") {
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  GENERATE_CAPTURE();
+  BEGIN_CAPTURE(stream);
+  HIP_CHECK(hipLaunchKernel(reinterpret_cast<void*>(kernel), dim3{1, 1, 1}, dim3{1, 1, 1}, nullptr,
+                            0, stream));
+  END_CAPTURE(stream);
+
+  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipStreamDestroy(stream));
+}

@@ -24,7 +24,7 @@ THE SOFTWARE.
 #pragma clang diagnostic ignored "-Wsign-compare"
 #include "hip_test_context.hh"
 
-#include <catch.hpp>
+#include <catch2/catch_all.hpp>
 #include <atomic>
 #include <chrono>
 #include <cstring>

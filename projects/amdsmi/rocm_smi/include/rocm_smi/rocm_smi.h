@@ -109,7 +109,7 @@ typedef enum {
                                          //!< being used
   RSMI_STATUS_REFCOUNT_OVERFLOW,         //!< An internal reference counter
                                          //!< exceeded INT32_MAX
-  RSMI_STATUS_DIRECTORY_NOT_FOUND,       //!< Error when a directory is not 
+  RSMI_STATUS_DIRECTORY_NOT_FOUND,       //!< Error when a directory is not
                                          //!< found, maps to ENOTDIR
   RSMI_STATUS_SETTING_UNAVAILABLE,       //!< Requested setting is unavailable
                                          //!< for the current device
@@ -1475,6 +1475,22 @@ typedef enum {
 } rsmi_reg_type_t;
 
 /**
+ * @brief PTL (Peak Tops Limiter) data format types
+ * These correspond to the hardware data types used in matrix operations.
+ * Only F8 and XF32 are always supported at full performance. From the remaining
+ * five types, only two can be supported at peak performance simultaneously.
+ *
+ */
+typedef enum {
+    RSMI_PTL_DATA_FORMAT_I8 = 0x0,        //!< Integer 8-bit format
+    RSMI_PTL_DATA_FORMAT_F16 = 0x1,       //!< Float 16-bit format
+    RSMI_PTL_DATA_FORMAT_BF16 = 0x2,      //!< Brain Float 16-bit format
+    RSMI_PTL_DATA_FORMAT_F32 = 0x3,       //!< Float 32-bit format
+    RSMI_PTL_DATA_FORMAT_F64 = 0x4,       //!< Float 64-bit format
+    RSMI_PTL_DATA_FORMAT_INVALID = 0xFFFFFFFF  //!< Invalid format
+} rsmi_ptl_data_format_t;
+
+/**
  * @brief This structure holds error counts.
  */
 typedef struct {
@@ -2666,7 +2682,7 @@ rsmi_dev_power_profile_set(uint32_t dv_ind, uint32_t reserved,
  *
  *  @return ::rsmi_status_t | ::RSMI_STATUS_SUCCESS on success, non-zero on fail.
  */
-rsmi_status_t 
+rsmi_status_t
 rsmi_dev_supported_power_cap_get(uint32_t dv_ind, uint32_t *sensor_count,
                                  uint32_t *sensor_inds, rsmi_power_cap_type_t *sensor_types);
 /** @} */  // end of PowerCont
@@ -5097,7 +5113,7 @@ rsmi_dev_compute_partition_xcp_config_set(uint32_t dv_ind,
  *  @param[in] dv_ind a device index
  *
  *  @param[in] type a pointer to a requested resource using enum ::rsmi_accelerator_partition_resource_type_t
- * 
+ *
  *  @param[inout] profile a pointer to the requested rsmi_accelerator_partition_resource_profile_t details
  *
  *  @retval ::RSMI_STATUS_SUCCESS call was successful
@@ -5601,6 +5617,96 @@ rsmi_status_t
 rsmi_dev_metrics_xcd_counter_get(uint32_t dv_ind, uint16_t* xcd_counter_value);
 
 /**
+ *  @brief Check if ptl enabled for device
+ *
+ *  @details Given a device index @p dv_ind and a pointer to a bool in which
+ *  the status will stored
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[inout] enabled a pointer to bool to which the status will be stored
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ *          ::RSMI_STATUS_NOT_SUPPORTED is returned in case the sysfs fails
+ *
+ */
+rsmi_status_t
+rsmi_get_gpu_ptl_state(uint32_t dv_ind, bool* enabled);
+
+/**
+ *  @brief Set PTL enable/disable state
+ *
+ *  @ingroup tagPTL
+ *
+ *  @platform{gpu_bm_linux} @platform{host}
+ *
+ *  @details This function enables or disables PTL (Peak Tops Limiter) operation.
+ *  Use rsmi_set_gpu_ptl_enable_with_formats()
+ *  for more control over the preferred data formats when enabling.
+ *
+ *  @param[in] processor_handle Device to configure
+ *
+ *  @param[in] enable Boolean flag: true to enable PTL with default formats,
+ *  false to disable PTL
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+rsmi_status_t
+rsmi_set_gpu_ptl_state(uint32_t dv_ind, bool enabled);
+
+/**
+ *  @brief Get ptl data formats
+ *
+ *  @details Given a device index @p dv_ind and string pointers to store ptl data
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[inout] format a pointer to data format to which the raw format string will be stored
+ *
+ *  @param[in] len the length of the caller provided buffer @p name.
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ *          ::RSMI_STATUS_NOT_SUPPORTED is returned in case the sysfs fails
+ *
+ */
+rsmi_status_t
+rsmi_get_gpu_ptl_formats(uint32_t dv_ind, char* format, size_t len);
+
+/**
+ *  @brief Set ptl data formats
+ *
+ *  @details Given a device index @p dv_ind and raw string poitner in which to set ptl format
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[inout] format string pointer format to set ptl level to
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ *          ::RSMI_STATUS_NOT_SUPPORTED is returned in case the sysfs fails
+ *
+ */
+rsmi_status_t
+rsmi_set_gpu_ptl_formats(uint32_t dv_ind, const char* format);
+
+/**
+ *  @brief Get supported ptl formats
+ *
+ *  @details Given a device index @p dv_ind and string pointer return supported ptl formats
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[inout] supported string pointer to return supported ptl formats
+ *
+ *  @param[in] len the length of the caller provided buffer @p name.
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ *          ::RSMI_STATUS_NOT_SUPPORTED is returned in case the sysfs fails
+ *
+ */
+rsmi_status_t
+rsmi_read_supported_ptl_formats(uint32_t dv_ind, char* supported, size_t length);
+
+/**
  *  @brief Get the log from the GPU metrics associated with the device
  *
  *  @details Given a device index @p dv_ind it will log all the gpu metric info
@@ -5631,23 +5737,23 @@ rsmi_dev_metrics_log_get(uint32_t dv_ind);
  *  https://docs.kernel.org/admin-guide/sysctl/kernel.html#modprobe
  *  with no extra parameters as specified in
  *  https://docs.kernel.org/gpu/amdgpu/module-parameters.html.
- * 
+ *
  *  Use this function with caution, as it will unload and reload the AMD GPU
- *  driver: `modprobe -r amdgpu && modprobe amdgpu`. 
- *  
+ *  driver: `modprobe -r amdgpu && modprobe amdgpu`.
+ *
  *  Any process or workload using the AMD GPU driver is REQUIRED to be
  *  stopped before calling this function. Otherwise, function will return
  *  ::RSMI_STATUS_AMDGPU_RESTART_ERR could not successfully restart
  *  the amdgpu driver.
- * 
+ *
  *  User is REQUIRED to have root/admin privileges to call this function.
  *  Otherwise, this function will return ::RSMI_STATUS_PERMISSION.
- * 
+ *
  *  This API will take time to complete, as we are checking the driver's
  *  loading status to confirm it reloaded properly. If
  *  ::RSMI_STATUS_AMDGPU_RESTART_ERR is returned, it means the driver
  *  did not reload properly and the user should check dmesg logs.
- * 
+ *
  *  This function has been created in order to conviently reload the
  *  AMD GPU driver once `rsmi_dev_memory_partition_set()`
  *  successfully has been changed on Baremetal systems.

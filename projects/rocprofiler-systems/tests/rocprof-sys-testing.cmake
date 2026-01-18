@@ -139,7 +139,7 @@ set(_lock_environment
     "ROCPROFSYS_COUT_OUTPUT=ON"
     "ROCPROFSYS_TIME_OUTPUT=OFF"
     "ROCPROFSYS_TIMELINE_PROFILE=OFF"
-    "ROCPROFSYS_VERBOSE=2"
+    "ROCPROFSYS_LOG_LEVEL=trace"
     "${_test_library_path}"
 )
 
@@ -223,7 +223,9 @@ set(_window_environment
     "ROCPROFSYS_USE_PROCESS_SAMPLING=OFF"
     "ROCPROFSYS_TIME_OUTPUT=OFF"
     "ROCPROFSYS_FILE_OUTPUT=ON"
+    # TODO: Deprecate ROCPROFSYS_VERBOSE
     "ROCPROFSYS_VERBOSE=2"
+    "ROCPROFSYS_LOG_LEVEL=trace"
     "${_test_openmp_env}"
     "${_test_library_path}"
 )
@@ -402,6 +404,7 @@ function(ROCPROFILER_SYSTEMS_WRITE_TEST_CONFIG _FILE _ENV)
 # default values
 ROCPROFSYS_CI                     = ON
 ROCPROFSYS_VERBOSE                = 1
+ROCPROFSYS_LOG_LEVEL              = info
 ROCPROFSYS_DL_VERBOSE             = 1
 ROCPROFSYS_SAMPLING_FREQ          = 300
 ROCPROFSYS_SAMPLING_DELAY         = 0.05
@@ -705,6 +708,15 @@ function(ROCPROFILER_SYSTEMS_ADD_TEST)
                     $<TARGET_FILE_DIR:${TEST_TARGET}>/${TEST_NAME}.inst ${TEST_RUN_ARGS}
                 WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
             )
+
+            add_test(
+                NAME ${TEST_NAME}-binary-rewrite-cleanup
+                COMMAND
+                    ${CMAKE_COMMAND} -E rm -rf
+                    $<TARGET_FILE_DIR:${TEST_TARGET}>/${TEST_NAME}.inst
+                    ${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/${TEST_NAME}-binary-rewrite
+                WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+            )
         endif()
 
         if(NOT TEST_SKIP_RUNTIME AND NOT ROCPROFSYS_USE_SANITIZER)
@@ -713,6 +725,14 @@ function(ROCPROFILER_SYSTEMS_ADD_TEST)
                 COMMAND
                     $<TARGET_FILE:rocprofiler-systems-instrument> ${TEST_RUNTIME_ARGS} --
                     $<TARGET_FILE:${TEST_TARGET}> ${TEST_RUN_ARGS}
+                WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+            )
+
+            add_test(
+                NAME ${TEST_NAME}-runtime-instrument-cleanup
+                COMMAND
+                    ${CMAKE_COMMAND} -E rm -rf
+                    ${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/${TEST_NAME}-runtime-instrument
                 WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
             )
         endif()
@@ -740,7 +760,9 @@ function(ROCPROFILER_SYSTEMS_ADD_TEST)
             sampling
             binary-rewrite
             binary-rewrite-run
+            binary-rewrite-cleanup
             runtime-instrument
+            runtime-instrument-cleanup
             sys-run
         )
             string(
@@ -783,7 +805,9 @@ function(ROCPROFILER_SYSTEMS_ADD_TEST)
                 endif()
             endif()
 
-            if("${_TEST}" MATCHES "binary-rewrite-run")
+            if("${_TEST}" MATCHES "-cleanup$")
+                set(_REGEX_VAR)
+            elseif("${_TEST}" MATCHES "binary-rewrite-run")
                 set(_REGEX_VAR REWRITE_RUN)
             elseif("${_TEST}" MATCHES "runtime-instrument")
                 set(_REGEX_VAR RUNTIME)
@@ -838,6 +862,36 @@ function(ROCPROFILER_SYSTEMS_ADD_TEST)
                         FIXTURES_REQUIRED rocprofsys-global-tmp-files
                         ${_props}
                 )
+
+                if("${_TEST}" STREQUAL "binary-rewrite")
+                    set_tests_properties(
+                        ${TEST_NAME}-${_TEST}
+                        PROPERTIES FIXTURES_SETUP ${TEST_NAME}-binary-rewrite-fixture
+                    )
+                elseif("${_TEST}" STREQUAL "binary-rewrite-run")
+                    set_tests_properties(
+                        ${TEST_NAME}-${_TEST}
+                        PROPERTIES
+                            FIXTURES_REQUIRED
+                                "rocprofsys-global-tmp-files;${TEST_NAME}-binary-rewrite-fixture"
+                    )
+                elseif("${_TEST}" STREQUAL "binary-rewrite-cleanup")
+                    set_tests_properties(
+                        ${TEST_NAME}-${_TEST}
+                        PROPERTIES FIXTURES_CLEANUP ${TEST_NAME}-binary-rewrite-fixture
+                    )
+                elseif("${_TEST}" STREQUAL "runtime-instrument")
+                    set_tests_properties(
+                        ${TEST_NAME}-${_TEST}
+                        PROPERTIES FIXTURES_SETUP ${TEST_NAME}-runtime-instrument-fixture
+                    )
+                elseif("${_TEST}" STREQUAL "runtime-instrument-cleanup")
+                    set_tests_properties(
+                        ${TEST_NAME}-${_TEST}
+                        PROPERTIES
+                            FIXTURES_CLEANUP ${TEST_NAME}-runtime-instrument-fixture
+                    )
+                endif()
             endif()
         endforeach()
     endif()
@@ -969,6 +1023,7 @@ function(ROCPROFILER_SYSTEMS_ADD_CAUSAL_TEST)
                 "ROCPROFSYS_USE_PID=OFF"
                 "ROCPROFSYS_THREAD_POOL_SIZE=0"
                 "ROCPROFSYS_VERBOSE=1"
+                "ROCPROFSYS_LOG_LEVEL=info"
                 "ROCPROFSYS_DL_VERBOSE=0"
                 "ROCPROFSYS_DEBUG_SETTINGS=0"
                 "${TEST_ENVIRONMENT}"
@@ -1032,7 +1087,7 @@ function(ROCPROFILER_SYSTEMS_ADD_PYTHON_TEST)
         TEST
         "STANDALONE" # options
         "NAME;FILE;TIMEOUT;PYTHON_EXECUTABLE;PYTHON_VERSION" # single value args
-        "PROFILE_ARGS;RUN_ARGS;ENVIRONMENT;LABELS;PROPERTIES;PASS_REGEX;FAIL_REGEX;SKIP_REGEX;DEPENDS;COMMAND" # multiple
+        "PROFILE_ARGS;RUN_ARGS;ENVIRONMENT;LABELS;PROPERTIES;PASS_REGEX;FAIL_REGEX;SKIP_REGEX;DEPENDS;COMMAND;FIXTURES_REQUIRED" # multiple
         # value args
         ${ARGN}
     )
@@ -1131,6 +1186,12 @@ function(ROCPROFILER_SYSTEMS_ADD_PYTHON_TEST)
         rocprofiler_systems_check_pass_fail_regex("${_TEST}" "${_PASS_REGEX}"
             "${_FAIL_REGEX}"
         )
+
+        set(_PYTHON_FIXTURES "rocprofsys-global-tmp-files")
+        if(TEST_FIXTURES_REQUIRED)
+            list(APPEND _PYTHON_FIXTURES "${TEST_FIXTURES_REQUIRED}")
+        endif()
+
         set_tests_properties(
             ${_TEST}
             PROPERTIES
@@ -1142,7 +1203,7 @@ function(ROCPROFILER_SYSTEMS_ADD_PYTHON_TEST)
                 FAIL_REGULAR_EXPRESSION "${${_FAIL_REGEX}}"
                 SKIP_REGULAR_EXPRESSION "${TEST_SKIP_REGEX}"
                 REQUIRED_FILES "${TEST_FILE}"
-                FIXTURES_REQUIRED rocprofsys-global-tmp-files
+                FIXTURES_REQUIRED "${_PYTHON_FIXTURES}"
                 ${_TEST_PROPERTIES}
         )
     endforeach()
@@ -1272,6 +1333,7 @@ function(ROCPROFILER_SYSTEMS_ADD_VALIDATION_TEST)
         )
     endif()
 
+    set(_EXIST_FILES_TESTS "")
     foreach(_FILE ${TEST_EXIST_FILES})
         add_test(
             NAME validate-${TEST_NAME}-${_FILE}-exists
@@ -1280,6 +1342,7 @@ function(ROCPROFILER_SYSTEMS_ADD_VALIDATION_TEST)
                 ${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/${TEST_NAME}/${_FILE}
             WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
         )
+        list(APPEND _EXIST_FILES_TESTS "validate-${TEST_NAME}-${_FILE}-exists")
     endforeach()
 
     if(TEST_TIMEMORY_FILE)
@@ -1321,6 +1384,16 @@ function(ROCPROFILER_SYSTEMS_ADD_VALIDATION_TEST)
 
     list(APPEND TEST_ENVIRONMENT "ROCPROFSYS_CI_TIMEOUT=${TEST_TIMEOUT}")
 
+    # Determine the cleanup fixture this validation test should require
+    set(_VALIDATION_FIXTURES "rocprofsys-global-tmp-files")
+    if("${TEST_NAME}" MATCHES "-binary-rewrite(-run)?$")
+        string(REGEX REPLACE "-binary-rewrite(-run)?$" "" _BASE_TEST_NAME "${TEST_NAME}")
+        list(APPEND _VALIDATION_FIXTURES "${_BASE_TEST_NAME}-binary-rewrite-fixture")
+    elseif("${TEST_NAME}" MATCHES "-runtime-instrument$")
+        string(REGEX REPLACE "-runtime-instrument$" "" _BASE_TEST_NAME "${TEST_NAME}")
+        list(APPEND _VALIDATION_FIXTURES "${_BASE_TEST_NAME}-runtime-instrument-fixture")
+    endif()
+
     foreach(
         _TEST
         validate-${TEST_NAME}-timemory
@@ -1361,8 +1434,20 @@ function(ROCPROFILER_SYSTEMS_ADD_VALIDATION_TEST)
                 FAIL_REGULAR_EXPRESSION "${TEST_FAIL_REGEX}"
                 SKIP_REGULAR_EXPRESSION "${TEST_SKIP_REGEX}"
                 REQUIRED_FILES "${TEST_FILE}"
-                FIXTURES_REQUIRED rocprofsys-global-tmp-files
+                FIXTURES_REQUIRED "${_VALIDATION_FIXTURES}"
                 ${TEST_PROPERTIES}
+        )
+    endforeach()
+
+    # Set properties for file existence validation tests
+    foreach(_TEST ${_EXIST_FILES_TESTS})
+        set_tests_properties(
+            ${_TEST}
+            PROPERTIES
+                TIMEOUT ${TEST_TIMEOUT}
+                LABELS "${TEST_LABELS}"
+                DEPENDS "${TEST_DEPENDS};${TEST_NAME}"
+                FIXTURES_REQUIRED "${_VALIDATION_FIXTURES}"
         )
     endforeach()
 endfunction()

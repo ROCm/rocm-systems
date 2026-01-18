@@ -36,6 +36,8 @@
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/registration.h>
 
+#include "logger/debug.hpp"
+
 #include <memory>
 #include <vector>
 
@@ -100,16 +102,6 @@ struct timing_interval
     rocprofiler_timestamp_t start = 0;
     rocprofiler_timestamp_t end   = 0;
 };
-
-struct argument_info
-{
-    uint32_t    arg_number = 0;
-    std::string arg_type   = {};
-    std::string arg_name   = {};
-    std::string arg_value  = {};
-};
-
-using function_args_t = std::vector<argument_info>;
 
 using agent_counter_info_map_t =
     std::unordered_map<rocprofiler_agent_id_t,
@@ -281,7 +273,7 @@ as_client_data(void* _ptr)
                     << "] failed with error code "                                       \
                     << ROCPROFSYS_VARIABLE(_rocp_status_, __LINE__)                      \
                     << " :: " << status_msg;                                             \
-                ROCPROFSYS_WARNING(0, "%s\n", msg.str().c_str());                        \
+                LOG_WARNING("{}", msg.str());                                            \
             }                                                                            \
         }
 #endif

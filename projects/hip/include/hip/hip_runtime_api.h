@@ -598,6 +598,8 @@ typedef enum hipDeviceAttribute_t {
                                                  ///< indirectly addressable) VGPRs per thread in
                                                  ///< DWORDs.
   hipDeviceAttributePciChipId,                   ///< GPU Manufacturer device id
+  hipDeviceAttributeExpertSchedMode,             ///< '1' if Device supports expert scheduling mode,
+                                                 ///< '0' otherwise.
 
   hipDeviceAttributeAmdSpecificEnd = 19999,
   hipDeviceAttributeVendorSpecificBegin = 20000,
@@ -4652,6 +4654,8 @@ hipError_t hipMemcpy(void* dst, const void* src, size_t sizeBytes, hipMemcpyKind
 /**
  *  @brief Memory copy on the stream.
  *  It allows single or multiple devices to do memory copy on single or multiple streams.
+ *  The operation is akin to hipMemcpyAsync + hipStreamSynchronize.
+ *  Since it is a sync API, it is not allowed during graph capture.
  *
  *  @param[out]  dst Data being copy to
  *  @param[in]  src Data being copy from

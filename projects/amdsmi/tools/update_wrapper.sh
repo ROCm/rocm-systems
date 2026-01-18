@@ -25,7 +25,7 @@
 set -eu
 
 # get current dir
-DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )/.." &> /dev/null && pwd )
+DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )/.." &> /dev/null && pwd -P )
 
 # override by calling this script with:
 # DOCKER_NAME=yourdockername ./update_wrapper.sh
@@ -40,7 +40,7 @@ DOCKER_BUILDKIT=$(docker buildx version >/dev/null 2>&1 && echo 1 || echo 0)
 export DOCKER_BUILDKIT
 
 build_docker_image () {
-    DOCKER_DIR="$DIR/py-interface"
+    DOCKER_DIR=$(cd "$DIR/py-interface" && pwd -P)
     DOCKERFILE="$DOCKER_DIR/Dockerfile"
 
     DOCKERFILE_TIME=$(git log -1 --format=%at -- "$DOCKERFILE")

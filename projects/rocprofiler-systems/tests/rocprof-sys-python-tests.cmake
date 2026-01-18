@@ -90,6 +90,9 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
         DEPENDS code-coverage-basic-blocks-binary-rewrite
                 code-coverage-basic-blocks-binary-rewrite-run
                 code-coverage-basic-blocks-hybrid-runtime-instrument
+        FIXTURES_REQUIRED
+            code-coverage-basic-blocks-binary-rewrite-fixture
+            code-coverage-basic-blocks-hybrid-runtime-instrument-fixture
         LABELS "code-coverage"
         ENVIRONMENT "${_python_environment}"
     )
@@ -161,15 +164,28 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
             TEST
             ""
             "NAME;TIMEMORY_METRIC;TIMEMORY_FILE;PERFETTO_FILE"
-            "ARGS;PERFETTO_METRIC;ROCPD_FILE;ROCPD_RULES"
+            "ARGS;TIMEMORY_ARGS;PERFETTO_ARGS;PERFETTO_METRIC;ROCPD_FILE;ROCPD_RULES"
             ${ARGN}
         )
+
+        # Use specific args if provided, otherwise fall back to common ARGS
+        if(TEST_TIMEMORY_ARGS)
+            set(_TIMEMORY_VALIDATION_ARGS ${TEST_TIMEMORY_ARGS})
+        else()
+            set(_TIMEMORY_VALIDATION_ARGS ${TEST_ARGS})
+        endif()
+
+        if(TEST_PERFETTO_ARGS)
+            set(_PERFETTO_VALIDATION_ARGS ${TEST_PERFETTO_ARGS})
+        else()
+            set(_PERFETTO_VALIDATION_ARGS ${TEST_ARGS})
+        endif()
 
         rocprofiler_systems_add_python_test(
             NAME ${TEST_NAME}-validate-timemory
             COMMAND
                 ${_PYTHON_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/validate-timemory-json.py
-                -m ${TEST_TIMEMORY_METRIC} ${TEST_ARGS} -i
+                -m ${TEST_TIMEMORY_METRIC} ${_TIMEMORY_VALIDATION_ARGS} -i
             PYTHON_VERSION ${_VERSION}
             FILE rocprof-sys-tests-output/${TEST_NAME}/${_VERSION}/${TEST_TIMEMORY_FILE}
             DEPENDS ${TEST_NAME}-${_VERSION}
@@ -182,7 +198,7 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
             NAME ${TEST_NAME}-validate-perfetto
             COMMAND
                 ${_PYTHON_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/validate-perfetto-proto.py
-                -m ${TEST_PERFETTO_METRIC} ${TEST_ARGS} -p -t
+                -m ${TEST_PERFETTO_METRIC} ${_PERFETTO_VALIDATION_ARGS} -p -t
                 /opt/trace_processor/bin/trace_processor_shell -i
             PYTHON_VERSION ${_VERSION}
             FILE rocprof-sys-tests-output/${TEST_NAME}/${_VERSION}/${TEST_PERFETTO_FILE}
@@ -214,7 +230,8 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
         endif()
     endfunction()
 
-    set(python_source_labels
+    # Timemory validation uses hierarchical output with multiple entries at different depths
+    set(python_source_timemory_labels
         main_loop
         run
         fib
@@ -225,7 +242,7 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
         inefficient
         _sum
     )
-    set(python_source_count
+    set(python_source_timemory_count
         5
         3
         3
@@ -236,7 +253,7 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
         3
         3
     )
-    set(python_source_depth
+    set(python_source_timemory_depth
         0
         1
         2
@@ -244,6 +261,29 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
         4
         5
         6
+        2
+        3
+    )
+
+    # Perfetto (cached mode) aggregates entries by name
+    set(python_source_perfetto_labels
+        main_loop
+        run
+        fib
+        inefficient
+        _sum
+    )
+    set(python_source_perfetto_count
+        5
+        3
+        24
+        3
+        3
+    )
+    set(python_source_perfetto_depth
+        0
+        1
+        2
         2
         3
     )
@@ -256,14 +296,17 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
         TIMEMORY_FILE "trip_count.json"
         PERFETTO_FILE "perfetto-trace.proto"
         PERFETTO_METRIC ${python_source_categories}
-        ARGS -l ${python_source_labels} -c ${python_source_count} -d
-             ${python_source_depth}
+        TIMEMORY_ARGS -l ${python_source_timemory_labels} -c ${python_source_timemory_count} -d
+                      ${python_source_timemory_depth}
+        PERFETTO_ARGS -l ${python_source_perfetto_labels} -c ${python_source_perfetto_count} -d
+                      ${python_source_perfetto_depth}
         ROCPD_FILE "rocpd.db"
         ROCPD_RULES
             "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/python/python-source-rules.json"
     )
 
-    set(python_builtin_labels
+    # Timemory validation uses hierarchical output with multiple entries at different depths
+    set(python_builtin_timemory_labels
         [run][builtin.py:31]
         [fib][builtin.py:13]
         [fib][builtin.py:13]
@@ -277,7 +320,7 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
         [fib][builtin.py:13]
         [inefficient][builtin.py:17]
     )
-    set(python_builtin_count
+    set(python_builtin_timemory_count
         5
         5
         10
@@ -291,7 +334,7 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
         10
         5
     )
-    set(python_builtin_depth
+    set(python_builtin_timemory_depth
         0
         1
         2
@@ -306,14 +349,26 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
         1
     )
 
+    # Perfetto validation with trace caching aggregates all calls to the same function,
+    # so we only expect one entry per unique label rather than hierarchical entries.
+    set(python_builtin_perfetto_labels
+        [run][builtin.py:31]
+        [fib][builtin.py:13]
+        [inefficient][builtin.py:17]
+    )
+    set(python_builtin_perfetto_count 5 445 5)
+    set(python_builtin_perfetto_depth 0 1 1)
+
     rocprofiler_systems_add_python_validation_test(
         NAME python-builtin
         TIMEMORY_METRIC "trip_count"
         TIMEMORY_FILE "trip_count.json"
         PERFETTO_METRIC "python"
         PERFETTO_FILE "perfetto-trace.proto"
-        ARGS -l ${python_builtin_labels} -c ${python_builtin_count} -d
-             ${python_builtin_depth}
+        TIMEMORY_ARGS -l ${python_builtin_timemory_labels} -c ${python_builtin_timemory_count} -d
+             ${python_builtin_timemory_depth}
+        PERFETTO_ARGS -l ${python_builtin_perfetto_labels} -c ${python_builtin_perfetto_count} -d
+             ${python_builtin_perfetto_depth}
         ROCPD_FILE "rocpd.db"
         ROCPD_RULES
             "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/python/python-builtin-rules.json"

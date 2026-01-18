@@ -10,16 +10,26 @@ on:
     paths:
       - '.github/workflows/rocprofiler-compute-rhel-8.yml'
       - 'projects/rocprofiler-compute/**'
-      - '!projects/rocprofiler-compute/*.md'
-      - '!projects/rocprofiler-compute/.github/**/*.md'
+      - '!**/*.md'
+      - '!**/*.rtf'
+      - '!**/*.rst'
+      - '!**/.markdownlint-ci2.yaml'
+      - '!**/.readthedocs.yaml'
+      - '!**/.spellcheck.local.yaml'
+      - '!**/.wordlist.txt'
       - '!projects/rocprofiler-compute/docs/**'
       - '!projects/rocprofiler-compute/docker/**'
   pull_request:
     paths:
       - '.github/workflows/rocprofiler-compute-rhel-8.yml'
       - 'projects/rocprofiler-compute/**'
-      - '!projects/rocprofiler-compute/*.md'
-      - '!projects/rocprofiler-compute/.github/**/*.md'
+      - '!**/*.md'
+      - '!**/*.rtf'
+      - '!**/*.rst'
+      - '!**/.markdownlint-ci2.yaml'
+      - '!**/.readthedocs.yaml'
+      - '!**/.spellcheck.local.yaml'
+      - '!**/.wordlist.txt'
       - '!projects/rocprofiler-compute/docs/**'
       - '!projects/rocprofiler-compute/docker/**'
 
@@ -54,6 +64,8 @@ jobs:
           if [ ${{ matrix.os-release }} == "8.10" ]; then
             yum -y install python39
             yum -y install python39-devel
+            alternatives --set python3 /usr/bin/python3.9
+            rm /usr/bin/python3.11
           else
             yum -y install python3-devel
           fi
@@ -69,9 +81,9 @@ jobs:
           max_attempts: 3
           command: |
             if [ ${{ matrix.os-release }} == "8.10" ]; then
-              yum install -y https://repo.radeon.com/amdgpu-install/latest/rhel/8.10/amdgpu-install-7.1.70100-1.el8.noarch.rpm
+              yum install -y https://repo.radeon.com/amdgpu-install/latest/rhel/8.10/amdgpu-install-7.1.1.70101-1.el8.noarch.rpm
             else
-              yum install -y https://repo.radeon.com/amdgpu-install/latest/rhel/9.4/amdgpu-install-7.1.70100-1.el9.noarch.rpm
+              yum install -y https://repo.radeon.com/amdgpu-install/latest/rhel/9.4/amdgpu-install-7.1.1.70101-1.el9.noarch.rpm
             fi
             yum install -y rocm-dev
       - name: Checkout
@@ -81,8 +93,9 @@ jobs:
       - name: Install Python prereqs
         working-directory: projects/rocprofiler-compute
         run: |
-          python3.9 -m pip install -r requirements.txt
-          python3.9 -m pip install -r requirements-test.txt
+          python3 -m pip install -r requirements.txt
+          python3 -m pip install -r requirements-test.txt
+          python3 -m pip install cmake
       - name: Configure and install
         working-directory: projects/rocprofiler-compute
         run: |

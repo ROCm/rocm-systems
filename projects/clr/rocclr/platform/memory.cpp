@@ -243,7 +243,7 @@ bool Memory::allocHostMemory(void* initFrom, bool allocHostMem, bool forceCopy) 
   // @note: SVM host memory allocation should be done in the device backend
   else if (allocHostMem && !isInterop() && !(getMemFlags() & CL_MEM_SVM_FINE_GRAIN_BUFFER)) {
     if (!hostMemRef_.allocateMemory(size_, context_())) {
-      DevLogError("Cannot allocate Host Memory Buffer \n");
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM, "Cannot allocate Host Memory Buffer \n");
       return false;
     }
 
@@ -291,7 +291,7 @@ bool Memory::create(void* initFrom, bool sysMemAlloc, bool skipAlloc, bool force
   }
   // Allocate host memory if requested
   else if (!allocHostMemory(initFrom, forceAllocHostMem)) {
-    DevLogError("Cannot allocate Host Memory \n");
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM, "Cannot allocate Host Memory \n");
     return false;
   }
 
@@ -654,7 +654,8 @@ bool Image::validateDimensions(const std::vector<amd::Device*>& devices, cl_mem_
   switch (type) {
     case CL_MEM_OBJECT_IMAGE3D:
       if ((width == 0) || (height == 0) || (depth < 1)) {
-        DevLogPrintfError("Invalid Dimenstions, width: %u height: %u depth: %u \n", width, height,
+        ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE,
+                 "Invalid Dimenstions, width: %u height: %u depth: %u \n", width, height,
                           depth);
         return false;
       }
@@ -667,7 +668,7 @@ bool Image::validateDimensions(const std::vector<amd::Device*>& devices, cl_mem_
       break;
     case CL_MEM_OBJECT_IMAGE2D_ARRAY:
       if (arraySize == 0) {
-        DevLogError("Array is empty \n");
+        ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE, "Array is empty \n");
         return false;
       }
       for (const auto& dev : devices) {
@@ -677,7 +678,7 @@ bool Image::validateDimensions(const std::vector<amd::Device*>& devices, cl_mem_
         }
       }
       if (!sizePass) {
-        DevLogPrintfError("Cannot allocate image of size: %u \n", arraySize);
+        ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE, "Cannot allocate image of size: %u \n", arraySize);
         return false;
       }
     // Fall through...
@@ -690,7 +691,7 @@ bool Image::validateDimensions(const std::vector<amd::Device*>& devices, cl_mem_
       break;
     case CL_MEM_OBJECT_IMAGE1D_ARRAY:
       if (arraySize == 0) {
-        DevLogError("Array size cannot be empty \n");
+        ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE, "Array size cannot be empty \n");
         return false;
       }
 
@@ -701,13 +702,13 @@ bool Image::validateDimensions(const std::vector<amd::Device*>& devices, cl_mem_
         }
       }
       if (!sizePass) {
-        DevLogPrintfError("Cannot allocate image of size: %u \n", arraySize);
+        ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE, "Cannot allocate image of size: %u \n", arraySize);
         return false;
       }
     // Fall through...
     case CL_MEM_OBJECT_IMAGE1D:
       if (width == 0) {
-        DevLogError("Invalid dimension \n");
+        ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE, "Invalid dimension \n");
         return false;
       }
       for (const auto& dev : devices) {
@@ -727,7 +728,7 @@ bool Image::validateDimensions(const std::vector<amd::Device*>& devices, cl_mem_
       break;
   }
 
-  DevLogError("Dimension Validation failed \n");
+  ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE, "Dimension Validation failed \n");
   return false;
 }
 
@@ -830,7 +831,7 @@ bool Image::Format::isValid() const {
       break;
 
     default: {
-      DevLogPrintfError("Invalid Image format: %u \n", image_channel_data_type);
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE, "Invalid Image format: %u \n", image_channel_data_type);
       return false;
     }
   }
@@ -855,7 +856,7 @@ bool Image::Format::isValid() const {
           break;
 
         default: {
-          DevLogPrintfError("Invalid Luminance: %u \n", image_channel_data_type);
+          ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE, "Invalid Luminance: %u \n", image_channel_data_type);
           return false;
         }
       }
@@ -869,7 +870,7 @@ bool Image::Format::isValid() const {
           break;
 
         default: {
-          DevLogPrintfError("Invalid RGB: %u \n", image_channel_data_type);
+          ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE, "Invalid RGB: %u \n", image_channel_data_type);
           return false;
         }
       }
@@ -885,7 +886,7 @@ bool Image::Format::isValid() const {
           break;
 
         default: {
-          DevLogPrintfError("Invalid BGRA/ARGB: %u \n", image_channel_data_type);
+          ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE, "Invalid BGRA/ARGB: %u \n", image_channel_data_type);
           return false;
         }
       }
@@ -899,7 +900,7 @@ bool Image::Format::isValid() const {
         case CL_UNORM_INT8:
           break;
         default: {
-          DevLogPrintfError("Invalid sBGRA: %u \n", image_channel_data_type);
+          ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE, "Invalid sBGRA: %u \n", image_channel_data_type);
           return false;
         }
       }
@@ -911,14 +912,14 @@ bool Image::Format::isValid() const {
         case CL_FLOAT:
           break;
         default: {
-          DevLogPrintfError("Invalid CL Depth: %u \n", image_channel_data_type);
+          ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE, "Invalid CL Depth: %u \n", image_channel_data_type);
           return false;
         }
       }
       break;
 
     default: {
-      DevLogPrintfError("Invalid image_channel_order: %u \n", image_channel_order);
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE, "Invalid image_channel_order: %u \n", image_channel_order);
       return false;
     }
   }

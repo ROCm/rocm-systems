@@ -41,7 +41,7 @@ static const std::map<uint32_t, std::string> kTempSensorNameMap = {
     {AMDSMI_TEMPERATURE_TYPE_HBM_2, "HBM_2"},
     {AMDSMI_TEMPERATURE_TYPE_HBM_3, "HBM_3"},
     {AMDSMI_TEMPERATURE_TYPE_PLX, "PLX"},
-    
+
     // GPU Board Node Temperature Types (100-149)
     {AMDSMI_TEMPERATURE_TYPE_GPUBOARD_NODE_RETIMER_X, "GPU Board Node Retimer X"},
     {AMDSMI_TEMPERATURE_TYPE_GPUBOARD_NODE_OAM_X_IBC, "GPU Board Node OAM X IBC"},
@@ -49,7 +49,7 @@ static const std::map<uint32_t, std::string> kTempSensorNameMap = {
     {AMDSMI_TEMPERATURE_TYPE_GPUBOARD_NODE_OAM_X_VDD18_VR, "GPU Board Node OAM X VDD18 VR"},
     {AMDSMI_TEMPERATURE_TYPE_GPUBOARD_NODE_OAM_X_04_HBM_B_VR, "GPU Board Node OAM X 04 HBM B VR"},
     {AMDSMI_TEMPERATURE_TYPE_GPUBOARD_NODE_OAM_X_04_HBM_D_VR, "GPU Board Node OAM X 04 HBM D VR"},
-    
+
     // GPU Board VR Temperature Types (150-199)
     {AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDCR_VDD0, "GPU Board VDDCR VDD0"},
     {AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDCR_VDD1, "GPU Board VDDCR VDD1"},
@@ -64,7 +64,7 @@ static const std::map<uint32_t, std::string> kTempSensorNameMap = {
     {AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDCR_11_HBM_D, "GPU Board VDDCR 11 HBM D"},
     {AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDD_USR, "GPU Board VDD USR"},
     {AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDIO_11_E32, "GPU Board VDDIO 11 E32"},
-    
+
     // Baseboard System Temperature Types (200+)
     {AMDSMI_TEMPERATURE_TYPE_BASEBOARD_UBB_FPGA, "Baseboard UBB FPGA"},
     {AMDSMI_TEMPERATURE_TYPE_BASEBOARD_UBB_FRONT, "Baseboard UBB Front"},

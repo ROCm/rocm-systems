@@ -88,8 +88,7 @@ function(configure_ompvv_tests TEST_TYPE TEST_LIST_VAR)
                 NUM_THREADS_DEVICE=${OMPVV_NUM_THREADS_DEVICE}
                 NUM_TEAMS_DEVICE=${OMPVV_NUM_TEAMS_DEVICE}
                 "FOFFLOADING=${FOFFLOADING_FLAGS}" "FFLAGS=${CUSTOM_FFLAGS}"
-                "FLINKFLAGS=${CUSTOM_FLINKFLAGS}" "SOURCES=${TEST}" compile >
-                ${CMAKE_CURRENT_BINARY_DIR}/ompvv-compile-${TARGET_NAME}.log 2>&1
+                "FLINKFLAGS=${CUSTOM_FLINKFLAGS}" "SOURCES=${TEST}" compile
             COMMAND
                 ${CMAKE_COMMAND} -E copy_if_different
                 "${ROCPROFSYS_OMPVV_SOURCE_DIR}/bin/${TEST_NAME}.F90.o"
@@ -223,7 +222,7 @@ endif()
 
 set(OMPVV_OPENMP_VERSION 5.0)
 set(OMPVV_TDIR "tests/${OMPVV_OPENMP_VERSION}")
-set(OMPVV_NUM_THREADS_HOST 128) # Smallest possible value of ROCPROFSYS_THREAD_COUNT. Avoids very long test times
+set(OMPVV_NUM_THREADS_HOST 8) # The default value from ompvv.F90
 set(OMPVV_NUM_TEAMS_DEVICE 8) # default used by ompvv
 set(OMPVV_NUM_THREADS_DEVICE 8) # default used by ompvv
 
@@ -281,3 +280,19 @@ set(ROCPROFSYS_OMPVV_OFFLOAD_TESTS
 rocprofiler_systems_message(STATUS
                             "Successfully configured OMPVV"
 )
+
+if(ROCPROFSYS_INSTALL_EXAMPLES)
+    foreach(
+        test_target
+        IN
+        LISTS ROCPROFSYS_OMPVV_HOST_TESTS ROCPROFSYS_OMPVV_OFFLOAD_TESTS
+    )
+        if(TARGET "${test_target}-build")
+            install(
+                PROGRAMS "${OMPVV_BIN_DEST}/${test_target}"
+                DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples
+                COMPONENT rocprofiler-systems-examples
+            )
+        endif()
+    endforeach()
+endif()

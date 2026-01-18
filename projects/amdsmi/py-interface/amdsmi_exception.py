@@ -79,6 +79,7 @@ class AmdSmiLibraryException(AmdSmiException):
             amdsmi_wrapper.AMDSMI_STATUS_NOT_INIT : "AMDSMI_STATUS_NOT_INIT - Device not initialized",
             amdsmi_wrapper.AMDSMI_STATUS_NO_SLOT : "AMDSMI_STATUS_NO_SLOT - No more free slot",
             amdsmi_wrapper.AMDSMI_STATUS_DRIVER_NOT_LOADED : "AMDSMI_STATUS_DRIVER_NOT_LOADED - Driver not loaded",
+            amdsmi_wrapper.AMDSMI_STATUS_MORE_DATA : "AMDSMI_STATUS_MORE_DATA - There is more data than the buffer size the user passed",
             amdsmi_wrapper.AMDSMI_STATUS_NO_DATA : "AMDSMI_STATUS_NO_DATA - No data was found for given input",
             amdsmi_wrapper.AMDSMI_STATUS_INSUFFICIENT_SIZE : "AMDSMI_STATUS_INSUFFICIENT_SIZE - Insufficient size for operation",
             amdsmi_wrapper.AMDSMI_STATUS_UNEXPECTED_SIZE : "AMDSMI_STATUS_UNEXPECTED_SIZE - unexpected size of data was read",
@@ -93,10 +94,10 @@ class AmdSmiLibraryException(AmdSmiException):
             amdsmi_wrapper.AMDSMI_STATUS_NO_DRV : "AMDSMI_STATUS_NO_DRV - No Energy and HSMP driver present",
             amdsmi_wrapper.AMDSMI_STATUS_FILE_NOT_FOUND : "AMDSMI_STATUS_FILE_NOT_FOUND - File or directory not found",
             amdsmi_wrapper.AMDSMI_STATUS_ARG_PTR_NULL : "AMDSMI_STATUS_ARG_PTR_NULL - Parsed argument is invalid",
-            amdsmi_wrapper.AMDSMI_STATUS_MAP_ERROR : "AMDSMI_STATUS_MAP_ERROR - The internal library error did not map to a status code",
             amdsmi_wrapper.AMDSMI_STATUS_AMDGPU_RESTART_ERR:  "AMDSMI_STATUS_AMDGPU_RESTART_ERR - AMDGPU restart failed, please check dmsg for errors",
             amdsmi_wrapper.AMDSMI_STATUS_SETTING_UNAVAILABLE:  "AMDSMI_STATUS_SETTING_UNAVAILABLE - Setting is not available",
             amdsmi_wrapper.AMDSMI_STATUS_CORRUPTED_EEPROM:  "AMDSMI_STATUS_CORRUPTED_EEPROM - Setting is not available",
+            amdsmi_wrapper.AMDSMI_STATUS_MAP_ERROR : "AMDSMI_STATUS_MAP_ERROR - The internal library error did not map to a status code",
             amdsmi_wrapper.AMDSMI_STATUS_UNKNOWN_ERROR : "AMDSMI_STATUS_UNKNOWN_ERROR - An unknown error occurred"
         }
 
@@ -145,7 +146,6 @@ class AmdSmiKeyException(AmdSmiException):
 
     def __str__(self):
         return self.err_msg
-
 
 class AmdSmiBdfFormatException(AmdSmiException):
     def __init__(self, bdf):

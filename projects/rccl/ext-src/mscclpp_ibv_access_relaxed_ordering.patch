@@ -1,0 +1,51 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index a95a8e5..62b4f22 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -96,6 +96,24 @@ include(${PROJECT_SOURCE_DIR}/cmake/AddFormatTargets.cmake)
+ 
+ # Find ibverbs and libnuma
+ find_package(IBVerbs)
++
++# Check if IBV_ACCESS_RELAXED_ORDERING exists in infiniband/verbs.h
++# Disable use of this symbol in mscclpp/src/ib.cc if it does not exist
++if(IBVERBS_FOUND)
++  try_compile(HAS_IBV_ACCESS_RELAXED_ORDERING
++    ${CMAKE_BINARY_DIR}
++    "${CMAKE_CURRENT_SOURCE_DIR}/../check_ibv_access_relaxed_ordering.cc"
++    CMAKE_FLAGS "-DINCLUDE_DIRECTORIES=${IBVERBS_INCLUDE_DIRS}"
++    OUTPUT_VARIABLE try_compile_output
++  )
++  message(STATUS "try_compile_output: ${try_compile_output}")
++  if(NOT HAS_IBV_ACCESS_RELAXED_ORDERING)
++    message(WARNING "IBV_ACCESS_RELAXED_ORDERING does not exist in ${IBVERBS_INCLUDE_DIRS}/infiniband/verbs.h. Disabling this symbol in mscclpp/src/ib.cc.")
++  else()
++    message(STATUS "IBV_ACCESS_RELAXED_ORDERING exists in ${IBVERBS_INCLUDE_DIRS}/infiniband/verbs.h.")
++  endif()
++endif()
++
+ find_package(NUMA REQUIRED)
+ find_package(Threads REQUIRED)
+ 
+diff --git a/src/ib.cc b/src/ib.cc
+index d9d72d1..bddd4a8 100644
+--- a/src/ib.cc
++++ b/src/ib.cc
+@@ -48,9 +48,17 @@ IbMr::IbMr(ibv_pd* pd, void* buff, std::size_t size) : buff(buff) {
+   }
+   uintptr_t addr = reinterpret_cast<uintptr_t>(buff) & -pageSize;
+   std::size_t pages = (size + (reinterpret_cast<uintptr_t>(buff) - addr) + pageSize - 1) / pageSize;
++
++#if defined(HAS_IBV_ACCESS_RELAXED_ORDERING)
+   this->mr = IBVerbs::ibv_reg_mr2(pd, reinterpret_cast<void*>(addr), pages * pageSize,
+                                   IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ |
+                                       IBV_ACCESS_RELAXED_ORDERING | IBV_ACCESS_REMOTE_ATOMIC);
++#else
++  this->mr = IBVerbs::ibv_reg_mr2(pd, reinterpret_cast<void*>(addr), pages * pageSize,
++                                  IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ |
++                                      IBV_ACCESS_REMOTE_ATOMIC);
++#endif
++
+   if (this->mr == nullptr) {
+     std::stringstream err;
+     err << "ibv_reg_mr failed (errno " << errno << ")";

@@ -255,7 +255,7 @@ template <bool useGCR> class BlitSdma : public BlitSdmaBase {
 
   // Internal signals for blocking APIs
   core::unique_signal_ptr signals_[2];
-  KernelMutex lock_;
+  std::mutex lock_;
   bool parity_;
 
   /// Queue resource descriptor for doorbell, read
