@@ -174,14 +174,14 @@ def generate_machine_specs(
     ##########################################
     machine_info = extract_machine_info()
 
-    # FIXME: use device
-    # Load amd-smi data
-    gpu_info = extract_gpu_info()
-
     ##########################################
     ## B. SoC Specs
     ##########################################
     soc_info = extract_soc_info()
+
+    # FIXME: use device
+    # Load amd-smi data
+    gpu_info = extract_gpu_info(gpu_arch=soc_info["gpu_arch"])
 
     # Combine all specifications
     with amdsmi_ctx():
@@ -269,7 +269,16 @@ def extract_machine_info() -> dict[str, Any]:
 
 
 @demarcate
-def extract_gpu_info() -> dict[str, Any]:
+def extract_gpu_info(gpu_arch: Optional[str]) -> dict[str, Any]:
+    # Partition is only supported on >= MI 300 series
+    # (gpu_arch should be gfx940 or higher for MI300+)
+    is_partition_supported = False
+    if gpu_arch and gpu_arch.startswith("gfx") and len(gpu_arch) >= 6:
+        try:
+            is_partition_supported = int(gpu_arch[3:6], 16) >= 0x940
+        except ValueError:
+            pass  # Invalid hex string, keep is_partition_supported as False
+
     result: dict[str, Optional[str]] = {
         "vbios": None,
         "compute_partition": None,
@@ -278,17 +287,22 @@ def extract_gpu_info() -> dict[str, Any]:
 
     with amdsmi_ctx():
         result["vbios"] = get_gpu_vbios_part_number()
-        result["compute_partition"] = get_gpu_compute_partition()
-        result["memory_partition"] = get_gpu_memory_partition()
+        if is_partition_supported:
+            result["compute_partition"] = get_gpu_compute_partition()
+            result["memory_partition"] = get_gpu_memory_partition()
+        else:
+            result["compute_partition"] = "N/A"
+            result["memory_partition"] = "N/A"
 
     # Apply defaults and warnings
-    if result["compute_partition"] == "N/A" or not result["compute_partition"]:
-        console_warning("Cannot detect accelerator partition from amd-smi.")
-        console_warning("Applying default accelerator partition: SPX")
-        result["compute_partition"] = "SPX"
+    if is_partition_supported:
+        if result["compute_partition"] == "N/A" or not result["compute_partition"]:
+            console_warning("Cannot detect accelerator partition from amd-smi.")
+            console_warning("Applying default accelerator partition: SPX")
+            result["compute_partition"] = "SPX"
 
-    if result["memory_partition"] == "N/A" or not result["memory_partition"]:
-        console_warning("Cannot detect memory partition from amd-smi.")
+        if result["memory_partition"] == "N/A" or not result["memory_partition"]:
+            console_warning("Cannot detect memory partition from amd-smi.")
 
     console_debug(
         f"vbios is {result['vbios']}, compute partition is "
