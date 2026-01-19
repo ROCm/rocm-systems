@@ -158,11 +158,11 @@ ExecTest() {
 
   # Construct Test Command
   TEST_LOG_NAME="$TEST_NAME"_n"$NUM_RANKS"_w"$NUM_WG"_z"$NUM_THREADS"
-  CMD="$LAUNCHER $OPTIONS $APP -u 1 -a $TEST_NUM -w $NUM_WG -z $NUM_THREADS -noverif"
+  CMD="$LAUNCHER $OPTIONS $APP -a $TEST_NUM -w $NUM_WG -z $NUM_THREADS -noverif"
 
   if [[ "" != "$MAX_MSG_SIZE" ]]
   then
-    CMD+=" -s $MAX_MSG_SIZE"
+    CMD+=" -v $MAX_MSG_SIZE"
     TEST_LOG_NAME+=_"$MAX_MSG_SIZE"B
   fi
 

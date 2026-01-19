@@ -98,7 +98,7 @@ Tester::Tester(TesterArguments args) : args(args) {
   *verification_error = false;
 
   max_msg_size = args.max_msg_size;
-  if (args.unified_msg_size) {
+  if (args.max_volume_size) {
     switch (_type) {
       case GetTestType:
       case GetNBITestType:
@@ -112,8 +112,7 @@ Tester::Tester(TesterArguments args) : args(args) {
       case DefaultCTXPutNBITestType:
       case DefaultCTXPTestType:
       case DefaultCTXGTestType:
-        //TODO pingpong and pingping?
-        max_msg_size = args.max_msg_size / args.num_wgs / args.wg_size;
+        max_msg_size = args.max_volume_size / args.num_wgs / args.wg_size;
         break;
       case WAVEGetTestType:
       case WAVEGetNBITestType:
@@ -121,7 +120,7 @@ Tester::Tester(TesterArguments args) : args(args) {
       case WAVEPutNBITestType:
       case WAVEPutSignalTestType:
       case WAVEPutSignalNBITestType:
-        max_msg_size = args.max_msg_size / args.num_wgs / num_warps;
+        max_msg_size = args.max_volume_size / args.num_wgs / num_warps;
         break;
       case WGGetTestType:
       case WGGetNBITestType:
@@ -129,7 +128,9 @@ Tester::Tester(TesterArguments args) : args(args) {
       case WGPutNBITestType:
       case WGPutSignalTestType:
       case WGPutSignalNBITestType:
-        max_msg_size = args.max_msg_size / args.num_wgs;
+      case PingPongTestType:
+      case PingAllTestType:
+        max_msg_size = args.max_volume_size / args.num_wgs;
         break;
       case TeamBroadcastTestType:
       case TeamReductionTestType:
@@ -138,14 +139,14 @@ Tester::Tester(TesterArguments args) : args(args) {
       case TeamAllToAllTestType:
       case AllToAllsTestType:
       case TeamAlltoallmemOnStreamTestType:
-        max_msg_size = args.max_msg_size / args.num_wgs / args.numprocs;
+        max_msg_size = args.max_volume_size / args.num_wgs / args.numprocs;
         break;
       default:
         break;
     }
     if (max_msg_size == 0) {
       if (args.myid == 0) {
-        std::cerr << "Requested communication volume is smaller than what is required to send at least 1 byte per operation, adjust -w, -z, and -s to match, or  remove -u.";
+        std::cerr << "Requested communication volume is smaller than what is required to send at least 1 byte per operation, adjust -w, -z, and -v to match, or  remove -v.";
       }
       exit(-1);
     }

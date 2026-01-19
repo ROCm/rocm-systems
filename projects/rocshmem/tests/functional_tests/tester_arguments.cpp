@@ -47,9 +47,9 @@ TesterArguments::TesterArguments(int argc, char *argv[]) {
     } else if (arg == "-a") {
       i++;
       algorithm = atoi(argv[i]);
-    } else if (arg == "-u") {
+    } else if (arg == "-v") {
       i++;
-      unified_msg_size = atoi(argv[i]);
+      max_volume_size = atoi(argv[i]);
     } else if (arg == "-z") {
       i++;
       wg_size = atoi(argv[i]);
@@ -174,6 +174,7 @@ void TesterArguments::show_usage(std::string executable_name) {
   std::cout << "\t-t <number of rocshmem service threads>\n";
   std::cout << "\t-w <number of workgroups>\n";
   std::cout << "\t-s <maximum message size (in bytes)>\n";
+  std::cout << "\t-v <maximum per origin volume (in bytes)>\n";
   std::cout << "\t-a <algorithm number to test>\n";
   std::cout << "\t-z <WorkGroup Size>\n";
   std::cout << "\t-c <Coalescing Coefficient>\n";
