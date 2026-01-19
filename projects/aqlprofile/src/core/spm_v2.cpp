@@ -404,7 +404,6 @@ PUBLIC_API hsa_status_t aqlprofile_spm_drain_counters(aqlprofile_handle_t handle
 
     { // reset flags
         std::lock_guard<std::mutex> lock(s->drain_mutex);
-        s->draining_producer_done = false;
         s->draining_consumer_done = false;
     }
 
@@ -516,7 +515,14 @@ static void producer(std::shared_ptr<spm_state_t> s)
                     s->draining_failed = s->size_copied != 0; // Set failure if data still remaining
                 }
                 s->drain_cond.notify_all();
-                draining = false; // Reset draining state
+
+                // Wait for consumer acknowledgment, then reset our own flag
+                {
+                  std::unique_lock<std::mutex> lock(s->drain_mutex);
+                  s->drain_cond.wait(lock, [&s]() { return s->draining_consumer_done.load(); });
+                  s->draining_producer_done = false;  // Reset our own flag
+                  draining = false; // Reset draining state
+                }
             }
             else // exiting case
             break;
