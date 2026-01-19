@@ -45,7 +45,7 @@ TEST_CASE("Unit_hipManagedKeyword_SingleGpu") {
   }
 
   int blockSize = 256;
-  int numBlocks = ((N) / blockSize) + 1;
+  int numBlocks = N / blockSize;
 
   managed_add<<<numBlocks, blockSize>>>(N);
   HIP_CHECK(hipGetLastError());
