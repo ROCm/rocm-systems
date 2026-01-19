@@ -25,8 +25,6 @@
 
 import argparse
 import importlib
-import os
-import re
 import socket
 import sys
 import time
@@ -173,7 +171,7 @@ class RocProfCompute:
             self.__args.format_rocprof_output = "csv"
 
     def replace_parameters_in_output_directory(self) -> None:
-        add_Rank = False
+        add_rank = False
         # Add --name to workload path if --path is not given
         if self.__args.path == str(Path.cwd() / "workloads"):
             self.__args.path = str(Path(self.__args.path) / self.__args.name)
@@ -197,7 +195,7 @@ class RocProfCompute:
             )
         else:
             if "%rank%" not in self.__args.path and get_rank() is not None:
-                add_Rank = True
+                add_rank = True
 
         # Replace parameters with actual values in workload path
         self.__args.path = self.__args.path.replace(
@@ -210,7 +208,7 @@ class RocProfCompute:
         # Replace %rank% with actual rank value in workload path
         self.__args.path = replace_rank(self.__args.path)
 
-        if add_Rank:
+        if add_rank:
             self.__args.path = str(
                 Path(self.__args.path) / f"{get_rank()}"
             )
