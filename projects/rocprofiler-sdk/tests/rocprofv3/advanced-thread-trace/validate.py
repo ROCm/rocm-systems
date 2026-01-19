@@ -28,6 +28,7 @@ import re
 import os
 import glob
 import json
+from pathlib import Path
 
 
 def test_json_data(json_data):
@@ -103,6 +104,86 @@ def test_realtime_clock(output_path):
                 if "metadata" not in key and len(value) >= 2:
                     verify_sorted(value)
                     verify_gfxclock(value, frequency)
+
+
+def test_sttracedata_data(att_sttracedata_out_dir_path):
+    expected_value = 3735928559  # m0 value from kernel_lds.cpp (0xDEADBEEF)
+
+    def find_ui_output_dirs(att_out_dir_path):
+        matches = [
+            p for p in Path(att_out_dir_path).glob("ui_output_agent_*") if p.is_dir()
+        ]
+        return matches
+
+    def find_sttracedata_files(sttracedata_files_path):
+        root = Path(sttracedata_files_path)
+        if not root.is_dir():
+            return []
+        matches = [p for p in root.glob("s_ttracedata_*") if p.is_file()]
+        return matches
+
+    att_ui_dispatch_dirs = find_ui_output_dirs(att_sttracedata_out_dir_path)
+    assert len(att_ui_dispatch_dirs) > 0, "ui_output_agent_* dirs not found."
+
+    found_sttracedata = False
+    for ui_dispatch_dir in att_ui_dispatch_dirs:
+        with open(ui_dispatch_dir / "filenames.json", "r") as inp:
+            filenames_json = json.load(inp)
+
+        listed_file_names = filenames_json.get("s_ttracedata_filenames", {})
+        if not listed_file_names:
+            continue
+
+        found_sttracedata = True
+        sttracedata_files_found = find_sttracedata_files(ui_dispatch_dir)
+        listed_count = sum(len(files) for files in listed_file_names.values())
+
+        assert (
+            len(sttracedata_files_found) == listed_count
+        ), "s_ttracedata files mismatch between filenames.json and files present in dir."
+
+        for files in listed_file_names.values():
+            for file in files:
+                with open(ui_dispatch_dir / file[0], "r") as inp:
+                    sttracedata_file_data = json.load(inp)
+
+                assert (
+                    file[1] == sttracedata_file_data["begin_time"]
+                ), "begin time mismatch filenames.json and s_ttracedata_*.json"
+
+                assert (
+                    file[2] == sttracedata_file_data["end_time"]
+                ), "end time mismatch filenames.json and s_ttracedata_*.json"
+
+                assert (
+                    sttracedata_file_data["records_count"] > 0
+                ), "s_ttracedata records are empty."
+
+                sttracedata_records = sttracedata_file_data["records"]
+
+                assert len(sttracedata_records) == sttracedata_file_data["records_count"]
+
+                # Validate ordering and sentinel value in records.
+                last_known_time = sttracedata_records[0][0]
+                assert last_known_time == sttracedata_file_data["begin_time"]
+
+                for record in sttracedata_records:
+                    assert (
+                        record[1] == expected_value
+                    ), "s_ttracedata record value mismatch."
+
+                for record in sttracedata_records[1:]:
+                    assert (
+                        record[0] >= last_known_time
+                    ), "data from s_ttracedata file is not in increasing time."
+                    last_known_time = record[0]
+
+                assert (
+                    last_known_time == sttracedata_file_data["end_time"]
+                ), "end time mismatch between records and s_ttracedata_*.json"
+
+    # Require at least one ui_output_agent_* directory with s_ttracedata data.
+    assert found_sttracedata, "No ui_output_agent_* directory contains s_ttracedata data."
 
 
 if __name__ == "__main__":

@@ -270,3 +270,30 @@ rocprofiler_add_integration_execute_test(
     WILL_FAIL
     DISABLED ${IS_DISABLED}
     FAIL_REGULAR_EXPRESSION "Invalid GPU Device Index")
+
+set(S_TTRACEDATA_OUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/att-rocprofv3-sttracedata")
+
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-sttracedata
+    COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -d ${S_TTRACEDATA_OUT_DIR} --att --
+            $<TARGET_FILE:thread-trace-api-multi-test>
+    DEPENDS vector-ops
+    TIMEOUT 45
+    LABELS "integration-tests"
+    DISABLED ${IS_DISABLED}
+    ENVIRONMENT "ROCPROF_ATT_LIBRARY_PATH=${attdecoder_LIB_DIR}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+    FIXTURES_SETUP rocprofv3-test-sttracedata)
+
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-sttracedata
+    TEST_PATHS validate.py
+    COPY conftest.py
+    CONFIG pytest.ini
+    TIMEOUT 45
+    LABELS "integration-tests"
+    DISABLED ${IS_DISABLED}
+    FIXTURES_REQUIRED rocprofv3-test-sttracedata
+    DISCOVERY_ARGS -k test_sttracedata_data
+    ARGS --att-sttracedata-out-dir ${S_TTRACEDATA_OUT_DIR}
+    FAIL_REGULAR_EXPRESSION "AssertionError")

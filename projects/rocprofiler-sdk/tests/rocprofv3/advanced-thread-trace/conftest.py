@@ -50,6 +50,11 @@ def pytest_addoption(parser):
         action="store",
         help="Output Path.",
     )
+    parser.addoption(
+        "--att-sttracedata-out-dir",
+        action="store",
+        help="Path to Output directory.",
+    )
 
 
 @pytest.fixture
@@ -78,3 +83,9 @@ def code_object_file_path(request):
                 code_object_memory.append(filename)
     code_object_files["hsa_memory_load"] = code_object_memory
     return code_object_files
+
+
+@pytest.fixture
+def att_sttracedata_out_dir_path(request):
+    output_dir_path = request.config.getoption("--att-sttracedata-out-dir")
+    return output_dir_path
