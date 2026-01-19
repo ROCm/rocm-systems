@@ -48,12 +48,12 @@ TEST_CASE("Unit_hipManagedKeyword_SingleGpu") {
   int numBlocks = N / blockSize;
 
   managed_add<<<numBlocks, blockSize>>>(N);
-  HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError());
 
   float maxError = 0.0f;
   for (size_t i = 0; i < N; i++) {
-    INFO("Reading output from managed varaible: Index: " << i << " output: " << m_B[i]);
+    INFO("Reading output from managed variable: Index: " << i << " output: " << m_B[i]);
     REQUIRE(3.0f == m_B[i]);
   }
 }
