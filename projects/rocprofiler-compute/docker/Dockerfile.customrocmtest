@@ -11,7 +11,7 @@ ARG TARBALL_NAME=<tarball_name>
 
 # Install ROCm from TheRock Nightly build
 RUN mkdir -p /rocm && \
-    curl -LO https://therock-nightly-tarball.s3.amazonaws.com/${TARBALL_NAME} && \
+    curl -fLO https://therock-nightly-tarball.s3.amazonaws.com/${TARBALL_NAME} && \
     tar -xf ${TARBALL_NAME} -C /rocm && \
     rm ${TARBALL_NAME}
 
