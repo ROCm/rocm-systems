@@ -567,6 +567,18 @@ get_mem_alloc_address(
 }
 #endif
 
+uint64_t
+get_scratch_mem_alloc_size(
+    [[maybe_unused]] const rocprofiler_buffer_tracing_scratch_memory_record_t& record)
+{
+// Scratch memory samples from SDK versions prior to 7.0.2 do not include allocation_size
+#if(ROCPROFSYS_USE_ROCM > 0 && ROCPROFSYS_ROCM_VERSION >= 70002)
+    return record.allocation_size;
+#else
+    return 0;
+#endif
+}
+
 void
 cache_region(const rocprofiler_callback_tracing_record_t* record,
              const rocprofiler_timestamp_t                start_timestamp,
@@ -616,12 +628,25 @@ cache_kernel_dispatch(rocprofiler_buffer_tracing_kernel_dispatch_record_t* recor
 }
 
 void
+cache_scratch_memory(rocprofiler_buffer_tracing_scratch_memory_record_t* record,
+                     uint64_t                                            stream_handle)
+{
+    trace_cache::get_metadata_registry().add_stream(stream_handle);
+    trace_cache::get_buffer_storage().store(trace_cache::scratch_memory_sample{
+        record->start_timestamp, record->end_timestamp, record->thread_id,
+        record->agent_id.handle, record->queue_id.handle,
+        static_cast<int32_t>(record->kind), static_cast<int32_t>(record->operation),
+        static_cast<int32_t>(record->flags), get_scratch_mem_alloc_size(*record),
+        record->correlation_id.internal, get_parent_stack_id(record->correlation_id),
+        stream_handle });
+}
+
+void
 cache_memory_copy(rocprofiler_buffer_tracing_memory_copy_record_t* record,
                   uint64_t                                         stream_handle)
 {
     trace_cache::get_metadata_registry().add_stream(stream_handle);
     trace_cache::get_buffer_storage().store(trace_cache::memory_copy_sample{
-
         record->start_timestamp, record->end_timestamp, record->thread_id,
         record->dst_agent_id.handle, record->src_agent_id.handle,
         static_cast<int32_t>(record->kind), static_cast<int32_t>(record->operation),
@@ -1759,6 +1784,120 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                     }
                 }
             }
+            else if(header->kind == ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY)
+            {
+                auto* record =
+                    static_cast<rocprofiler_buffer_tracing_scratch_memory_record_t*>(
+                        header->payload);
+
+                bool _group_by_queue = _default_group_by_queue;
+
+                const auto* agent     = tool_data->get_gpu_tool_agent(record->agent_id);
+                auto        device_id = static_cast<uint32_t>(agent->device_id);
+
+                const auto& t_info = thread_info::get(record->thread_id, SystemTID);
+                auto        thread_id_sequent = t_info->index_data->sequent_value;
+
+                auto _corr_id = record->correlation_id.internal;
+                auto _beg_ns  = record->start_timestamp;
+                auto _end_ns  = record->end_timestamp;
+                auto _name =
+                    tool_data->buffered_tracing_info.at(record->kind, record->operation);
+
+                auto _stream_id = get_stream_id(record).handle;
+                if(_stream_id == 0)
+                {
+                    // Scratch memory event is not associated with a HIP stream
+                    _group_by_queue = true;
+                }
+
+                {
+                    auto track_name = JOIN("", "GPU Scratch Memory [", device_id,
+                                           "] Thread ", record->thread_id);
+                    cache_category<category::rocm_scratch_memory>();
+                    cache_add_thread_info(record->thread_id);
+                    cache_add_track(track_name.c_str(), record->thread_id);
+                    cache_scratch_memory(record, _stream_id);
+                }
+
+                if(get_use_timemory())
+                {
+                    auto _bundle = kernel_dispatch_bundle_t{ _name };
+
+                    _bundle.push(thread_id_sequent).start().stop();
+                    _bundle.get([_beg_ns, _end_ns](tim::component::wall_clock* _wc) {
+                        _wc->set_value(_end_ns - _beg_ns);
+                        _wc->set_accum(_end_ns - _beg_ns);
+                    });
+                    _bundle.pop();
+                }
+
+                if(get_use_perfetto())
+                {
+// Scratch memory samples from SDK versions prior to 7.0.2 do not include
+// allocation_size field, so counter tracks are not needed
+#if(ROCPROFSYS_USE_ROCM > 0 && ROCPROFSYS_ROCM_VERSION >= 70002)
+                    using counter_track = perfetto_counter_track<
+                        rocprofiler_buffer_tracing_scratch_memory_record_t>;
+
+                    if(!counter_track::exists(device_id))
+                    {
+                        auto track_name_alloc_size =
+                            JOIN("", "GPU Scratch Memory [", device_id, "] (S) Thread ",
+                                 thread_id_sequent);
+                        counter_track::emplace(device_id, track_name_alloc_size, "bytes");
+                    }
+
+                    if(record->operation == ROCPROFILER_SCRATCH_MEMORY_ALLOC)
+                    {
+                        TRACE_COUNTER("rocm_scratch_memory",
+                                      counter_track::at(device_id, 0), _beg_ns,
+                                      record->allocation_size);
+                    }
+#endif
+                    auto add_perfetto_annotations = [&](::perfetto::EventContext ctx) {
+                        if(config::get_perfetto_annotations())
+                        {
+                            tracing::add_perfetto_annotation(ctx, "begin_ns", _beg_ns);
+                            tracing::add_perfetto_annotation(ctx, "end_ns", _end_ns);
+                            tracing::add_perfetto_annotation(ctx, "corr_id", _corr_id);
+                            tracing::add_perfetto_annotation(ctx, "stream_id",
+                                                             _stream_id);
+                        }
+                    };
+
+                    if(_group_by_queue)
+                    {
+                        auto track_name_events = [&]() {
+                            return JOIN("", "GPU Scratch Memory (S) Events Thread ",
+                                        thread_id_sequent);
+                        };
+                        const auto _track = tracing::get_perfetto_track(
+                            category::rocm_scratch_memory{}, track_name_events);
+
+                        tracing::push_perfetto(category::rocm_scratch_memory{},
+                                               _name.data(), _track, _beg_ns,
+                                               ::perfetto::Flow::ProcessScoped(_corr_id),
+                                               add_perfetto_annotations);
+
+                        tracing::pop_perfetto(category::rocm_scratch_memory{}, "", _track,
+                                              _end_ns);
+                    }
+                    else
+                    {
+                        const auto _track = tracing::get_perfetto_track(
+                            category::rocm_hip_stream{}, _track_desc_stream, _stream_id);
+
+                        tracing::push_perfetto(category::rocm_hip_stream{}, _name.data(),
+                                               _track, _beg_ns,
+                                               ::perfetto::Flow::ProcessScoped(_corr_id),
+                                               add_perfetto_annotations);
+
+                        tracing::pop_perfetto(category::rocm_hip_stream{}, "", _track,
+                                              _end_ns);
+                    }
+                }
+            }
             else if(header->kind == ROCPROFILER_BUFFER_TRACING_MEMORY_COPY)
             {
                 auto* record =
@@ -2248,6 +2387,17 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
             _data->primary_ctx, ROCPROFILER_BUFFER_TRACING_MEMORY_COPY, nullptr, 0,
             _data->memory_copy_buffer));
+    }
+    if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY) > 0)
+    {
+        ROCPROFILER_CALL(rocprofiler_create_buffer(
+            _data->primary_ctx, buffer_size, watermark,
+            ROCPROFILER_BUFFER_POLICY_LOSSLESS, tool_tracing_buffered, tool_data,
+            &_data->scratch_memory_buffer));
+
+        ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
+            _data->primary_ctx, ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY, nullptr, 0,
+            _data->scratch_memory_buffer));
     }
 
 #if(ROCPROFILER_VERSION >= 600)
