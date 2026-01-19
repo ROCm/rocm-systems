@@ -23,8 +23,6 @@
 #pragma once
 
 #include "writer_data.hpp"
-#include <cstddef>
-#include <cstdint>
 #include <memory>
 #include <optional>
 
@@ -62,15 +60,15 @@ public:
      * @brief Insert node info into rocpd
      * @param node_info Node info which will be inserted into rocpd
      */
-    void insert_node_info(const writer_api::node_info_t& node_info);
+    void register_node_info(const writer_api::node_info_t& node_info);
 
     /***
      * @brief Insert process info into rocpd
      * @param process_info Process info which will be inserted into rocpd
      * @param node_id_value Node Id Value - which will uniquely identify the node
      */
-    void insert_process_info(const writer_api::process_info_t& process_info,
-                             const writer_api::node_id_t       node_id_value);
+    void register_process_info(const writer_api::process_info_t& process_info,
+                               const writer_api::node_id_t       node_id_value);
 
     /***
      * @brief Insert agent info into rocpd
@@ -78,9 +76,9 @@ public:
      * @param node_id_value Node Id Value - which will uniquely identify the node
      * @param process_id_value Process Id Value - which will uniquely identify the process
      */
-    void insert_agent_info(const writer_api::agent_info_t& agent,
-                           const writer_api::node_id_t     node_id_value,
-                           const writer_api::process_id_t  process_id_value);
+    void register_agent_info(const writer_api::agent_info_t& agent,
+                             const writer_api::node_id_t     node_id_value,
+                             const writer_api::process_id_t  process_id_value);
 
     /***
      * @brief Insert pmc info into rocpd
@@ -90,10 +88,10 @@ public:
      * @param agent_id_value Agent Id Value (agent type and logical index) - which will
      * uniquely identify the agent
      */
-    void insert_pmc_info(const writer_api::pmc_info_t&        pmc_info,
-                         const writer_api::node_id_t          node_id_value,
-                         const writer_api::process_id_t       process_id_value,
-                         const writer_api::agent_unique_id_t& agent_id_value);
+    void register_pmc_info(const writer_api::pmc_info_t&        pmc_info,
+                           const writer_api::node_id_t          node_id_value,
+                           const writer_api::process_id_t       process_id_value,
+                           const writer_api::agent_unique_id_t& agent_id_value);
 
     /***
      * @brief Insert thread info into rocpd
@@ -101,9 +99,9 @@ public:
      * @param node_id_value Node Id Value - which will uniquely identify the node
      * @param process_id_value Process Id Value - which will uniquely identify the process
      */
-    void insert_thread_info(const writer_api::thread_info_t& thread_info,
-                            const writer_api::node_id_t      node_id_value,
-                            const writer_api::process_id_t   process_id_value);
+    void register_thread_info(const writer_api::thread_info_t& thread_info,
+                              const writer_api::node_id_t      node_id_value,
+                              const writer_api::process_id_t   process_id_value);
 
     /***
      * @brief Insert stream info into rocpd
@@ -111,9 +109,9 @@ public:
      * @param node_id_value Node Id Value - which will uniquely identify the node
      * @param process_id_value Process Id Value - which will uniquely identify the process
      */
-    void insert_stream_info(const writer_api::stream_info_t& stream_info,
-                            const writer_api::node_id_t      node_id_value,
-                            const writer_api::process_id_t   process_id_value);
+    void register_stream_info(const writer_api::stream_info_t& stream_info,
+                              const writer_api::node_id_t      node_id_value,
+                              const writer_api::process_id_t   process_id_value);
 
     /***
      * @brief Insert queue info into rocpd
@@ -121,9 +119,9 @@ public:
      * @param node_id_value Node Id Value - which will uniquely identify the node
      * @param process_id_value Process Id Value - which will uniquely identify the process
      */
-    void insert_queue_info(const writer_api::queue_info_t& queue_info,
-                           const writer_api::node_id_t     node_id_value,
-                           const writer_api::process_id_t  process_id_value);
+    void register_queue_info(const writer_api::queue_info_t& queue_info,
+                             const writer_api::node_id_t     node_id_value,
+                             const writer_api::process_id_t  process_id_value);
 
     /***
      * @brief Insert code object info into rocpd
@@ -133,10 +131,10 @@ public:
      * @param agent_id_value Agent Id Value (agent type and logical index) - which will
      * uniquely identify the agent
      */
-    void insert_code_object_info(const writer_api::code_object_info_t& code_object,
-                                 const writer_api::node_id_t           node_id_value,
-                                 const writer_api::process_id_t        process_id_value,
-                                 const writer_api::agent_unique_id_t&  agent_id_value);
+    void register_code_object_info(const writer_api::code_object_info_t& code_object,
+                                   const writer_api::node_id_t           node_id_value,
+                                   const writer_api::process_id_t        process_id_value,
+                                   const writer_api::agent_unique_id_t&  agent_id_value);
 
     /***
      * @brief Insert kernel symbol info into rocpd
@@ -146,10 +144,11 @@ public:
      * @param code_obj_id_value Code Object Id Value - which will uniquely identify the
      * code object
      */
-    void insert_kernel_symbol_info(const writer_api::kernel_symbol_info_t& kernel_symbol,
-                                   const writer_api::node_id_t             node_id_value,
-                                   const writer_api::process_id_t  process_id_value,
-                                   const writer_api::code_obj_id_t code_obj_id_value);
+    void register_kernel_symbol_info(
+        const writer_api::kernel_symbol_info_t& kernel_symbol,
+        const writer_api::node_id_t             node_id_value,
+        const writer_api::process_id_t          process_id_value,
+        const writer_api::code_obj_id_t         code_obj_id_value);
 
     /***
      * @brief Insert track info into rocpd
@@ -158,16 +157,16 @@ public:
      * @param process_id_value Process Id Value - which will uniquely identify the process
      * @param thread_id_value Thread Id Value - which will uniquely identify the thread
      */
-    void insert_track_info(const writer_api::track_info_t&              track,
-                           const writer_api::node_id_t                  node_id_value,
-                           const writer_api::process_id_t               process_id_value,
-                           const std::optional<writer_api::thread_id_t> thread_id_value);
+    void register_track_info(
+        const writer_api::track_info_t& track, const writer_api::node_id_t node_id_value,
+        const writer_api::process_id_t               process_id_value,
+        const std::optional<writer_api::thread_id_t> thread_id_value);
 
     /***
      * @brief Insert string into rocpd
      * @param str String which will be inserted into rocpd
      */
-    void insert_string(const std::string& str);
+    void register_string(const std::string& str);
 
     // --------------------- Data Tables ---------------------
 
@@ -223,7 +222,9 @@ public:
         const writer_api::agent_unique_id_t&      agent_id_value,
         const writer_api::kernel_symbol_id_t      kernel_symbol_id_value,
         const writer_api::stream_id_t             stream_id_value,
-        const writer_api::queue_id_t              queue_id_value);
+        const writer_api::queue_id_t              queue_id_value,
+        // new
+        const writer_api::track_name_t& track_name_value);
 
     /***
      * @brief Insert memory copy data into rocpd
@@ -261,7 +262,9 @@ public:
         const writer_api::thread_id_t                       thread_id_value,
         const writer_api::queue_id_t                        queue_id_value,
         const writer_api::stream_id_t                       stream_id_value,
-        const std::optional<writer_api::agent_unique_id_t>& agent_id_value);
+        const std::optional<writer_api::agent_unique_id_t>& agent_id_value,
+        // new
+        const writer_api::track_name_t& track_name_value);
 
     /***
      * @brief Flush the writer

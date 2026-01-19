@@ -1,6 +1,8 @@
 #pragma once
 
 #include <cstddef>
+#include <deque>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -19,6 +21,19 @@ using pmc_description_name_t = std::string;
 using stream_id_t            = size_t;
 using queue_id_t             = size_t;
 using track_name_t           = std::string;
+
+struct execution_context_t
+{
+    node_id_t                   node_id;
+    std::optional<process_id_t> process_id;
+    std::optional<thread_id_t>  thread_id;
+
+    std::optional<agent_id_t>  agent_id;
+    std::optional<stream_id_t> stream_id;
+    std::optional<queue_id_t>  queue_id;
+
+    std::optional<track_name_t> track_name;
+};
 
 // --------------------- Info Tables ---------------------
 
@@ -145,6 +160,52 @@ struct track_info_t
     std::string  extdata;
 };
 
+// --------------------- Call Stack & Line Info Abstract Data Types ------------------
+
+struct address_range_info_t
+{
+    size_t      address_base;
+    size_t      address_low;
+    size_t      address_high;
+    std::string extdata;
+};
+
+struct program_counter_info_t
+{
+    std::string function;
+    std::string filename;
+    size_t      line_number;
+    std::string extdata;
+};
+
+struct stack_frame_t
+{
+    std::optional<program_counter_info_t> program_counter;
+    std::optional<address_range_info_t>   address_range;
+    std::string                           extdata;
+};
+
+// implicit depth, zero for the top frame etc.
+using call_stack_t = std::deque<stack_frame_t>;
+
+struct source_code_info_t
+{
+    std::optional<std::string> filename;
+    std::optional<size_t>      starting_line_number;
+    std::vector<std::string>   source_code_lines;
+    std::vector<std::string>   assembly_instruction_lines;
+    std::string                extdata;
+};
+
+struct line_info_entry_t
+{
+    std::optional<source_code_info_t>     source_code;
+    std::optional<program_counter_info_t> program_counter;
+    std::optional<address_range_info_t>   address_range;  // connect to program_counter
+};
+
+using source_context_list_t = std::vector<line_info_entry_t>;
+
 // --------------------- Data Tables ---------------------
 
 struct arg_data_t
@@ -158,21 +219,28 @@ struct arg_data_t
 
 struct event_data_t
 {
-    size_t      stack_id;
-    size_t      parent_stack_id;
-    size_t      correlation_id;
-    std::string call_stack;
-    std::string line_info;
-    std::string extdata;
+    size_t stack_id;
+    size_t parent_stack_id;
+    size_t correlation_id;
+
+    // v3: Serialize to JSON
+    // v4: Put inside tables
+    call_stack_t                   call_stack;
+    std::vector<line_info_entry_t> line_info_list;
+
+    // v3: table rocpd_string
+    // v4: table rocpd_category
     std::string event_category;
+
+    std::string extdata;
 };
 
 struct region_data_t
 {
     event_data_t event;
 
-    size_t      start;
-    size_t      end;
+    size_t      start_timestamp;
+    size_t      end_timestamp;
     std::string name;
     std::string extdata;
 
@@ -181,7 +249,8 @@ struct region_data_t
 
 struct sample_data_t
 {
-    size_t      timestamp;
+    size_t timestamp;
+
     std::string extdata;
 };
 
@@ -198,8 +267,8 @@ struct kernel_dispatch_data_t
 {
     event_data_t event;
     size_t       dispatch_id;
-    size_t       start;
-    size_t       end;
+    size_t       start_timestamp;
+    size_t       end_timestamp;
     size_t       private_segment_size;
     size_t       group_segment_size;
     size_t       workgroup_size_x;
@@ -215,8 +284,8 @@ struct kernel_dispatch_data_t
 struct memory_copy_data_t
 {
     event_data_t event;
-    size_t       start;
-    size_t       end;
+    size_t       start_timestamp;
+    size_t       end_timestamp;
     size_t       dst_address;
     size_t       src_address;
     size_t       size;
@@ -229,8 +298,8 @@ struct memory_alloc_data_t
     event_data_t event;
     std::string  type;
     std::string  level;
-    size_t       start;
-    size_t       end;
+    size_t       start_timestamp;
+    size_t       end_timestamp;
     size_t       address;
     size_t       size;
     std::string  extdata;
