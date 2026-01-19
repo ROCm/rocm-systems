@@ -67,12 +67,17 @@ public:
     ~FilenameMgr();
 
     void addwave(const Fspath& file, Coord coord, size_t start, size_t end);
+    void add_shaderdata_data(
+        int                                                               se,
+        const std::vector<rocprofiler_thread_trace_decoder_shaderdata_t>& records);
 
     Fspath                    dir{};
     Fspath                    filename{};
     std::map<Coord, WaveName> streams{};
     std::vector<std::string>  perfcounters{};
     int                       gfxip = 9;
+    using ShaderDataName            = WaveName;
+    std::map<int, std::vector<ShaderDataName>> shaderdata_files{};
 };
 
 }  // namespace att_wrapper

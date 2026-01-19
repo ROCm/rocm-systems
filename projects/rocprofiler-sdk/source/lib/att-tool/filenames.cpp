@@ -22,6 +22,7 @@
 
 #include "filenames.hpp"
 #include "outputfile.hpp"
+#include "shaderdata.hpp"
 
 #include <fstream>
 #include <iostream>
@@ -38,6 +39,26 @@ FilenameMgr::addwave(const Fspath& name, Coord coord, size_t begint, size_t endt
     streams.emplace(coord, WaveName{name.filename(), begint, endt});
 }
 
+void
+FilenameMgr::add_shaderdata_data(
+    int                                                               se,
+    const std::vector<rocprofiler_thread_trace_decoder_shaderdata_t>& records)
+{
+    if(records.empty() || !GlobalDefs::get().has_format("json")) return;
+
+    int64_t begin = records.front().time;
+    int64_t end   = records.back().time;
+
+    auto&        vec = shaderdata_files[se];
+    const size_t idx = vec.size();
+    Fspath       file =
+        dir / ("s_ttracedata_" + std::to_string(se) + "_" + std::to_string(idx) + ".json");
+    vec.emplace_back(
+        ShaderDataName{file.filename(), static_cast<size_t>(begin), static_cast<size_t>(end)});
+
+    write_shaderdata_json(records, file, begin, end);
+}
+
 FilenameMgr::~FilenameMgr()
 {
     if(!GlobalDefs::get().has_format("json")) return;
@@ -50,12 +71,23 @@ FilenameMgr::~FilenameMgr()
                 [to_string(coord.id)] = {data.name, data.begin, data.end};
     }
 
+    nlohmann::json s_ttracedata;
+    for(auto& [se, vec] : shaderdata_files)
+    {
+        nlohmann::json::array_t arr;
+        arr.reserve(vec.size());
+        for(const auto& entry : vec)
+            arr.push_back({entry.name, entry.begin, entry.end});
+        s_ttracedata[to_string(se)] = std::move(arr);
+    }
+
     const nlohmann::json metadata = {{"global_begin_time", 0},
                                      {"gfxv", (gfxip > 9) ? "navi" : "vega"},
                                      {"gfxip", gfxip},
                                      {"version", TOOL_VERSION},
                                      {"counter_names", perfcounters},
-                                     {"wave_filenames", namelist}};
+                                     {"wave_filenames", namelist},
+                                     {"s_ttracedata_filenames", s_ttracedata}};
 
     OutputFile(filename) << metadata;
 }

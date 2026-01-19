@@ -14,6 +14,7 @@ set(ATT_TOOL_HEADER_FILES
     outputfile.hpp
     perfcounter.hpp
     profile_interface.hpp
+    shaderdata.hpp
     util.hpp
     wave.hpp
     wstates.hpp)
