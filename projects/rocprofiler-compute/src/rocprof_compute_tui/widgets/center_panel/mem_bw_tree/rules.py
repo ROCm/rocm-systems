@@ -26,15 +26,11 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Optional
 
-from .predicates import (
-    AlwaysTrue,
-    AnyOf,
-    Compare,
-    Predicate,
-)
+from .predicates import AlwaysTrue, AnyOf, Compare, HotspotRange, Predicate
 
-# Node IDs (stable)
+# Node IDs
 ROOT = "workload_bw_measurement"
 NODE_HIGH_EA_L2_BP = "high_ea_l2_backpressure"
 NODE_HIGH_TCR_TCP_BP = "high_tcr_tcp_backpressure"
@@ -65,7 +61,7 @@ METRICS_NON_TEMPORAL_SET = ()
 
 METRICS_HIGH_TC_TA_BP = ("16.3.21",)
 
-METRICS_HIGH_TA_VMEM_BP = ()
+METRICS_HIGH_TA_VMEM_BP = ("15.1.6",)
 
 METRICS_HIGH_VL1D_SET_FULL_STALL = ("16.3.22",)
 
@@ -80,7 +76,7 @@ METRICS_UTCL1_STALL = ()
 
 METRICS_UTCL1_LATENCY = ()
 
-METRICS_L2_CHANNEL_HOTSPOTTING = ()
+METRICS_L2_CHANNEL_HOTSPOTTING = "18.4"
 
 METRICS_L2_HIT_LOW = ()
 
@@ -92,6 +88,7 @@ class Rule:
     node_id: str
     metric_ids: Sequence[str]
     predicate: Predicate
+    value_column: Optional[str] = None
 
 
 RULES: list[Rule] = [
@@ -100,14 +97,20 @@ RULES: list[Rule] = [
         #
         node_id=NODE_HIGH_EA_L2_BP,
         metric_ids=METRICS_HIGH_EA_L2_BP,
-        predicate=Compare("17.2.0 + 17.2.4", "4.1.10 * 0.75", ">="),
+        predicate=Compare(lhs="17.2.0 + 17.2.4", rhs="4.1.10 * 0.75", op=">="),
+    ),
+    Rule(
+        #
+        node_id=NODE_VL1D_HIT_LOW,
+        metric_ids=METRICS_VL1D_HIT_LOW,
+        predicate=Compare(lhs="16.3.5", rhs="50", op="<="),
     ),
     Rule(
         # "A high GL2-GL1 stall rate, e.g., over 10%,
         # could clearly indicate that GL2 is a potential bottleneck."
         node_id=NODE_HIGH_TCR_TCP_BP,
         metric_ids=METRICS_HIGH_TCR_TCP_BP,
-        predicate=Compare("16.3.20", 10, "<"),
+        predicate=Compare(lhs="16.3.20", rhs=10, op="<"),
     ),
     Rule(
         node_id=NODE_NON_TEMPORAL_SET,
@@ -115,17 +118,23 @@ RULES: list[Rule] = [
         predicate=AlwaysTrue("Assuming workload is Non-Temporal."),
     ),
     Rule(
+        #
+        node_id=NODE_HIGH_TA_VMEM_BP,
+        metric_ids=METRICS_HIGH_TA_VMEM_BP,
+        predicate=Compare(lhs="15.1.6", rhs=10, op=">"),
+    ),
+    Rule(
         # "On the TA-TCP interface, the key metric TCP_TA_ADDR_STALL_RATE
         # allows identifying whether TCP is a bottleneck"
         node_id=NODE_HIGH_TC_TA_BP,
         metric_ids=METRICS_HIGH_TC_TA_BP,
-        predicate=Compare("16.3.21", 10, ">"),
+        predicate=Compare(lhs="16.3.21", rhs=10, op=">"),
     ),
     Rule(
         # "The TCP capacity stall is measurable via TCP_SET_FULL_STALL_RATE."
         node_id=NODE_HIGH_VL1D_SET_FULL_STALL,
         metric_ids=METRICS_HIGH_VL1D_SET_FULL_STALL,
-        predicate=Compare("16.3.22", 10, ">"),
+        predicate=Compare(lhs="16.3.22", rhs=10, op=">"),
     ),
     Rule(
         # "The unbalanced TCP miss traffic can point to tagram hotspotting,
@@ -133,19 +142,42 @@ RULES: list[Rule] = [
         # more than five times."
         node_id=NODE_TAGRAM_HOTSPOTTING,
         metric_ids=METRICS_TAGRAM_HOTSPOTTING,
+        predicate=HotspotRange(
+            metric_range="16.3.10:16.3.13",
+            column="Avg",
+            ratio_threshold=5.0,
+            min_active_metrics=4,
+        ),
+    ),
+    Rule(
+        #
+        node_id=NODE_L2_CHANNEL_HOTSPOTTING,
+        metric_ids=("18.4.0:18.4.127",),
         predicate=AnyOf([
-            Compare("16.3.10", "16.3.11 * 5", ">="),
-            Compare("16.3.10", "16.3.12 * 5", ">="),
-            Compare("16.3.10", "16.3.13 * 5", ">="),
-            Compare("16.3.11", "16.3.10 * 5", ">="),
-            Compare("16.3.11", "16.3.12 * 5", ">="),
-            Compare("16.3.11", "16.3.13 * 5", ">="),
-            Compare("16.3.12", "16.3.10 * 5", ">="),
-            Compare("16.3.12", "16.3.11 * 5", ">="),
-            Compare("16.3.12", "16.3.13 * 5", ">="),
-            Compare("16.3.13", "16.3.10 * 5", ">="),
-            Compare("16.3.13", "16.3.11 * 5", ">="),
-            Compare("16.3.13", "16.3.12 * 5", ">="),
+            HotspotRange(
+                metric_range="18.4.0:18.4.127",
+                column="L2 Read",
+                ratio_threshold=5.0,
+                min_active_metrics=4,
+            ),
+            HotspotRange(
+                metric_range="18.4.0:18.4.127",
+                column="L2 Write",
+                ratio_threshold=5.0,
+                min_active_metrics=4,
+            ),
+            HotspotRange(
+                metric_range="18.4.0:18.4.127",
+                column="L2 Atomic",
+                ratio_threshold=5.0,
+                min_active_metrics=4,
+            ),
         ]),
+    ),
+    Rule(
+        #
+        node_id=NODE_L2_HIT_LOW,
+        metric_ids=METRICS_L2_HIT_LOW,
+        predicate=Compare(lhs="18.1.0", rhs="50", op="<"),
     ),
 ]

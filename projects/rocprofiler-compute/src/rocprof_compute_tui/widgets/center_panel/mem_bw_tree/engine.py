@@ -74,8 +74,7 @@ class DecisionEngine:
         Semantics:
           - Root is always evaluated as NO_RULE (for now).
           - Any reached node is highlighted.
-          - Predicate TRUE / FALSE / ERROR are all terminal states
-            for the node itself.
+          - Predicate TRUE / FALSE / ERROR
           - Children are evaluated if the parent is reached.
           - ERROR does not block children unless configured.
         """

@@ -107,9 +107,6 @@ class MemBwTreePanel(Static):
         self._last_snapshot = None
         self._details: Optional[Static] = None
 
-    # ------------------------------------------------------------------
-    # UI composition
-    # ------------------------------------------------------------------
     def compose(self) -> ComposeResult:
         self._root = TreeNode.from_dict(TREE_DICT)
 
@@ -120,9 +117,6 @@ class MemBwTreePanel(Static):
             self._details = Static("", id="mem-bw-details")
             yield self._details
 
-    # ------------------------------------------------------------------
-    # Kernel-selection API
-    # ------------------------------------------------------------------
     def set_kernel(
         self,
         kernel_name: str,
@@ -154,9 +148,6 @@ class MemBwTreePanel(Static):
     def get_current_kernel(self) -> Optional[str]:
         return self._current_kernel
 
-    # ------------------------------------------------------------------
-    # Decision → UI mapping
-    # ------------------------------------------------------------------
     def _apply_decision_to_tree(
         self,
         root: TreeNode,
@@ -187,9 +178,6 @@ class MemBwTreePanel(Static):
             elif ev.status == EvalStatus.NO_RULE:
                 node.tags.add("eval_no_rule")
 
-    # ------------------------------------------------------------------
-    # Node selection → details panel
-    # ------------------------------------------------------------------
     @on(NodeSelected)
     def _on_node_selected(self, event: NodeSelected) -> None:
         self._update_details(event.node_id)
@@ -204,8 +192,8 @@ class MemBwTreePanel(Static):
             return
 
         title = (
-            f"[b]Mem BW Tree[/b]  |  Kernel: {self._current_kernel or 'N/A'}\n"
-            f"[b]Selected Node:[/b] {node_id}\n\n"
+            f"Mem BW Tree  |  Kernel: {self._current_kernel or 'N/A'}\n"
+            f"Selected Node: {node_id}\n\n"
         )
 
         if self._last_decision is None or self._last_snapshot is None:
@@ -222,9 +210,7 @@ class MemBwTreePanel(Static):
             self._details.update(title + "Node was not reached during BFS evaluation.")
             return
 
-        # --------------------------------------------------------------
         # Status header
-        # --------------------------------------------------------------
         if ev.status == EvalStatus.TRUE:
             status = "[details-pass]PASS[/details-pass]"
         elif ev.status == EvalStatus.FALSE:
@@ -232,24 +218,20 @@ class MemBwTreePanel(Static):
         elif ev.status == EvalStatus.ERROR:
             status = "[details-warn]ERROR[/details-warn]"
         else:  # NO_RULE
-            status = "[b]REACHED (no rule)[/b]"
+            status = "REACHED (no rule)"
 
         lines = [title, f"{status}\n\n"]
 
-        # --------------------------------------------------------------
         # Error details
-        # --------------------------------------------------------------
         if ev.status == EvalStatus.ERROR and ev.error:
             lines.append(f"[details-warn]{ev.error}[/details-warn]\n")
 
-        # --------------------------------------------------------------
         # Predicate details
-        # --------------------------------------------------------------
         for pr in ev.predicate_results:
-            lines.append(f"[b]Expression[/b]: {pr.expression}\n")
+            lines.append(f"Expression: {pr.expression}\n")
             lines.append(f"{pr.details}\n\n")
 
-            lines.append("[b]Inputs[/b]:\n")
+            lines.append("Inputs:\n")
             for mid, val in pr.inputs.items():
                 mm = snap.meta.get(mid)
                 if mm:
@@ -263,9 +245,7 @@ class MemBwTreePanel(Static):
                     lines.append(f"  - {mid}: {val:.6g}\n")
             lines.append("\n")
 
-        # --------------------------------------------------------------
         # Missing metrics
-        # --------------------------------------------------------------
         if snap.missing:
             lines.append(
                 "[details-warn]Missing metrics "

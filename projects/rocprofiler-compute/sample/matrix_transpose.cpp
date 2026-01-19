@@ -47,9 +47,6 @@
         }                                                                    \
     } while (0)
 
-// ============================================================
-// Helpers
-// ============================================================
 static inline bool is_pow2_u64(uint64_t x) {
     return x && ((x & (x - 1)) == 0);
 }
@@ -111,7 +108,7 @@ __global__ void tagramStride(
 }
 
 // ============================================================
-// Tagram stress: diagonal / affine permutation (structured, not random)
+// Tagram stress: diagonal
 //
 // Key idea:
 //   idx = base + ((tid * A + block_id * B) XOR (tid >> s)) * stride
@@ -145,7 +142,7 @@ __global__ void tagramDiagonal(
         // Affine permutation on 2^n domain if A is odd
         uint64_t p = tid * A_odd + block_id * B_odd;
 
-        // Deterministic "diagonal-ish" mixing (still structured)
+        // Deterministic "diagonal-ish"
         p ^= (tid >> xor_shift);
 
         uint64_t idx = (base_offset_floats + p * stride_floats) & index_mask;

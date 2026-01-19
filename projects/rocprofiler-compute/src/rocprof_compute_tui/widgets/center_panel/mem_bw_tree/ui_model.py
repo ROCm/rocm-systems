@@ -28,10 +28,6 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
 
-# ============================================================================
-# Metric snapshot
-# ============================================================================
-
 
 @dataclass(frozen=True)
 class MetricMeta:
@@ -47,14 +43,9 @@ class MetricSnapshot:
     A point-in-time view of metrics for a single kernel dispatch.
     """
 
-    values: dict[str, float]  # Metric_ID -> value
+    values: dict[str, dict[str, float]]  # Metric_ID -> { column_name -> value }
     meta: dict[str, MetricMeta]  # Metric_ID -> metadata
     missing: list[str]  # Metric_IDs not found in kernel data
-
-
-# ============================================================================
-# Predicate evaluation result
-# ============================================================================
 
 
 @dataclass(frozen=True)
@@ -64,14 +55,9 @@ class PredicateResult:
     """
 
     passed: bool
-    expression: str  # Short, human-readable expression
-    details: str  # Verbose explanation
+    expression: str
+    details: str
     inputs: dict[str, float]  # Metric_ID -> value used
-
-
-# ============================================================================
-# Node-level evaluation
-# ============================================================================
 
 
 class EvalStatus(str, Enum):
@@ -95,11 +81,6 @@ class NodeEvaluation:
     status: EvalStatus
     predicate_results: list[PredicateResult]
     error: Optional[str] = None
-
-
-# ============================================================================
-# Decision result (engine output)
-# ============================================================================
 
 
 @dataclass

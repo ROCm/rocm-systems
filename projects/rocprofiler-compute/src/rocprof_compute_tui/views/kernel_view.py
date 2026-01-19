@@ -84,6 +84,7 @@ class KernelView(Container):
         padding: 0 1;
         offset: 5 0;
         margin-top: 1;
+        width: auto;
     }
 
     .kernel-row {

@@ -24,12 +24,38 @@
 
 from __future__ import annotations
 
+import math
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Optional, Protocol, Union
 
 from .ui_model import MetricSnapshot, PredicateResult
+
+DEFAULT_VALUE_COLS = ("Value", "Avg", "Mean", "Pct", "Pct of Peak")
+
+
+def resolve_metric_value(
+    snap: MetricSnapshot,
+    metric_id: str,
+    *,
+    column: Optional[str] = None,
+) -> Optional[float]:
+    if metric_id not in snap.values:
+        return None
+
+    colmap = snap.values[metric_id]
+
+    # Explicit column
+    if column is not None:
+        return colmap.get(column)
+
+    # Default pick order (preserves old semantics)
+    for col in DEFAULT_VALUE_COLS:
+        if col in colmap:
+            return colmap[col]
+
+    return None
 
 
 class Predicate(Protocol):
@@ -69,9 +95,10 @@ class ConstExpr:
 @dataclass(frozen=True)
 class MetricExpr:
     metric_id: MetricId
+    column: Optional[str] = None
 
     def evaluate(self, snap: MetricSnapshot) -> EvalResult:
-        v = snap.values.get(self.metric_id)
+        v = resolve_metric_value(snap, self.metric_id, column=self.column)
         return EvalResult(
             value=v,
             inputs={self.metric_id: v if v is not None else float("nan")},
@@ -98,7 +125,7 @@ class BinaryExpr:
     right: ValueExpr
 
     def evaluate(self, snap: MetricSnapshot) -> EvalResult:
-        l = self.left.evaluate(snap)  # noqa: E741
+        l = self.left.evaluate(snap)  # noqa E741
         r = self.right.evaluate(snap)
 
         inputs = {**l.inputs, **r.inputs}
@@ -224,6 +251,12 @@ def parse_value_expr(expr: Union[str, int, float]) -> ValueExpr:
     return _Parser(tokens).parse()
 
 
+def _coerce_expr(v: Union[str, int, float, ValueExpr]) -> ValueExpr:
+    if isinstance(v, (ConstExpr, MetricExpr, BinaryExpr)):
+        return v
+    return parse_value_expr(v)
+
+
 @dataclass(frozen=True)
 class Compare:
     lhs: Union[str, int, float, ValueExpr]
@@ -235,7 +268,7 @@ class Compare:
         object.__setattr__(self, "rhs", _coerce_expr(self.rhs))
 
     def evaluate(self, snap: MetricSnapshot) -> PredicateResult:
-        l = self.lhs.evaluate(snap)  # noqa: E741
+        l = self.lhs.evaluate(snap)  # noqa E741
         r = self.rhs.evaluate(snap)
 
         expr = f"{self.lhs.display(snap)} {self.op} {self.rhs.display(snap)}"
@@ -260,25 +293,106 @@ class Compare:
         return PredicateResult(ok, expr, details, inputs)
 
 
-def _coerce_expr(v: Union[str, int, float, ValueExpr]) -> ValueExpr:
-    if isinstance(v, (ConstExpr, MetricExpr, BinaryExpr)):
-        return v
-    return parse_value_expr(v)
+@dataclass(frozen=True)
+class HotspotRange:
+    metric_range: str
+    column: Optional[str] = None
+    ratio_threshold: float = 5.0
+    min_active_metrics: int = 2
+
+    def evaluate(self, snap: MetricSnapshot) -> PredicateResult:
+        mids = self._expand_range(self.metric_range)
+
+        values: list[tuple[str, float]] = []
+        missing: list[str] = []
+
+        for mid in mids:
+            v = resolve_metric_value(snap, mid, column=self.column)
+            if v is None:
+                missing.append(mid if self.column is None else f"{mid}[{self.column}]")
+            else:
+                values.append((mid, float(v)))
+
+        expr = (
+            f"HotspotRange({self.metric_range}, column={self.column})"
+            if self.column
+            else f"HotspotRange({self.metric_range})"
+        )
+
+        if missing:
+            return PredicateResult(
+                False,
+                expr,
+                "Missing metrics or columns:\n" + "\n".join(missing),
+                {m: float("nan") for m in missing},
+            )
+
+        if len(values) < self.min_active_metrics:
+            return PredicateResult(
+                False,
+                expr,
+                f"Only {len(values)} metrics; requires {self.min_active_metrics}.",
+                dict(values),
+            )
+
+        nums = sorted(v for _, v in values)
+
+        if all(v == 0.0 for v in nums):
+            return PredicateResult(
+                False,
+                expr,
+                "All metrics are zero; no hotspot.",
+                dict(values),
+            )
+
+        p10_idx = max(0, math.ceil(0.1 * len(nums)) - 1)
+        cold = nums[p10_idx]
+
+        hot_mid, hot = max(values, key=lambda x: x[1])
+        ratio = float("inf") if cold == 0 else hot / cold
+        passed = ratio >= self.ratio_threshold
+
+        details = (
+            f"Column: {self.column or 'default'}\n"
+            f"Metrics evaluated: {len(values)}\n"
+            f"Hot: {hot_mid} = {hot:.6g}\n"
+            f"Cold (p10): {cold:.6g}\n"
+            f"Ratio: {'∞' if math.isinf(ratio) else f'{ratio:.4g}'}\n"
+            f"Threshold: {self.ratio_threshold} → "
+            f"{'PASS (hotspot)' if passed else 'FAIL (no hotspot)'}"
+        )
+
+        return PredicateResult(passed, expr, details, dict(values))
+
+    @staticmethod
+    def _expand_range(rng: str) -> list[str]:
+        a, b = rng.split(":")
+        pa = a.split(".")
+        pb = b.split(".")
+        if pa[:2] != pb[:2]:
+            raise ValueError(f"Invalid metric range: {rng}")
+
+        lo, hi = sorted([int(pa[2]), int(pb[2])])
+        prefix = ".".join(pa[:2])
+        return [f"{prefix}.{i}" for i in range(lo, hi + 1)]
 
 
 @dataclass(frozen=True)
 class AnyOf:
-    preds: Sequence[Predicate]
+    preds: Sequence
 
     def evaluate(self, snap: MetricSnapshot) -> PredicateResult:
         results = [p.evaluate(snap) for p in self.preds]
-        ok = any(r.passed for r in results)
+        passed = any(r.passed for r in results)
+
         expr = "ANY(" + " OR ".join(r.expression for r in results) + ")"
         details = "\n".join(r.details for r in results)
+
         inputs: dict[str, float] = {}
         for r in results:
             inputs.update(r.inputs)
-        return PredicateResult(ok, expr, details, inputs)
+
+        return PredicateResult(passed, expr, details, inputs)
 
 
 @dataclass(frozen=True)

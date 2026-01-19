@@ -57,6 +57,11 @@ Panel Config:
           min: MIN((SQ_VMEM_WR_TA_DATA_FIFO_FULL / $denom))
           max: MAX((SQ_VMEM_WR_TA_DATA_FIFO_FULL / $denom))
           unit: (Cycles + $normUnit)
+        SQ_VMEM_CMD_STALL_RATE:
+          avg: AVG((SQ_VMEM_TA_CMD_FIFO_FULL / SQ_BUSY_CYCLES))
+          min: MIN((SQ_VMEM_TA_CMD_FIFO_FULL / SQ_BUSY_CYCLES))
+          max: MAX((SQ_VMEM_TA_CMD_FIFO_FULL / SQ_BUSY_CYCLES))
+          unit: pct
   - metric_table:
       id: 1502
       title: Instruction counts

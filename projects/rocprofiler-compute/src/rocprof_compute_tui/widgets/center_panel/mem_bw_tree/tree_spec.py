@@ -63,13 +63,12 @@ def build_paths(tree: dict, prefix: Optional[list[str]] = None) -> dict[str, lis
 
 TREE_DICT: dict[str, Any] = {
     "node_id": ROOT,
-    "label": "Workload BW Measurement",
+    "label": "Memory Bandwidth Measurement",
     "children": [
         {
             "node_id": NODE_HIGH_EA_L2_BP,
             "label": "High EA -> L2 Backpressure",
             "children": [
-                {"node_id": "soc_tuning", "label": "SoC Tunning"},
                 {
                     "node_id": NODE_HIGH_TCR_TCP_BP,
                     "label": "High TCR -> TCP Backpressure",

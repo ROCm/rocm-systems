@@ -370,3 +370,11 @@ Terminal {
 #tab-mem-tree {
     min-width: 0;
 }
+
+#kernel-header-row Label {
+    width: 1fr;
+}
+
+#kernel-header-row InstantButton {
+    width: 1fr;
+}
