@@ -32,7 +32,6 @@ else
 fi
 
 # This names/values should match the TestType enum in rocSHMEM/tests/functional_tests/tester.hpp
-# and in heatmap_driver.sh
 declare -A TEST_NUMBERS=(
   ["get"]="0"
   ["getnbi"]="1"
@@ -131,7 +130,10 @@ ExecTest() {
   NUM_WG=$3
   NUM_THREADS=$4
   MAX_MSG_SIZE=$5
-  TIMEOUT=$((5 * 60)) # Timeout in seconds
+  if [[ "" == "$NOTIMEOUT" ]]; then
+    TIMEOUT=$((5 * 60)) # Timeout in seconds
+  fi
+  HEAP_SIZE=$((6*1024*1024*1024))
 
   if command -v amd-smi >/dev/null && amd-smi version 2>&1 >/dev/null
   then
@@ -159,10 +161,11 @@ ExecTest() {
 
   # MPI Parameters
   LAUNCHER=mpirun
-  OPTIONS=" -n $NUM_RANKS -mca pml ucx -mca osc ucx"
+  OPTIONS=" -n $NUM_RANKS"
+  OPTIONS+=" -mca pml ucx -mca osc ucx"
   OPTIONS+=" -x ROCSHMEM_MAX_NUM_CONTEXTS=$ROCSHMEM_MAX_NUM_CONTEXTS"
-  OPTIONS+=" -x UCX_ROCM_IPC_SIGPOOL_MAX_ELEMS=16384"
-  OPTIONS+=" --map-by numa --timeout $TIMEOUT"
+  OPTIONS+=" -x UCX_ROCM_IPC_SIGPOOL_MAX_ELEMS=16384 -x ROCSHMEM_HEAP_SIZE=$HEAP_SIZE"
+  OPTIONS+=" --map-by numa ${TIMEOUT:+--timeout $TIMEOUT}"
 
   if [[ "" != "$ROCSHMEM_TEST_USE_DEFAULT_STREAM" ]]
   then
@@ -176,11 +179,16 @@ ExecTest() {
 
   # Construct Test Command
   TEST_LOG_NAME="$TEST_NAME"_n"$NUM_RANKS"_w"$NUM_WG"_z"$NUM_THREADS"
-  CMD="$LAUNCHER $OPTIONS $APP -a $TEST_NUM -w $NUM_WG -z $NUM_THREADS"
+  CMD="$LAUNCHER $OPTIONS $APP -a $TEST_NUM -w $NUM_WG -z $NUM_THREADS ${NOVERIF:+-noverif}"
 
   if [[ "" != "$MAX_MSG_SIZE" ]]
   then
-    CMD+=" -s $MAX_MSG_SIZE"
+    # Check if in volume mode
+    if [[ $MAX_MSG_SIZE == v* ]]; then
+      CMD+=" -v ${MAX_MSG_SIZE#v}"
+    else
+      CMD+=" -s $MAX_MSG_SIZE"
+    fi
     TEST_LOG_NAME+=_"$MAX_MSG_SIZE"B
   fi
 
@@ -690,6 +698,42 @@ TestGDA() {
   ExecTest  "teamctxoddeveninfra" 4       1            1
   ExecTest  "teamctxoddeveninfra" 5       1            1
   unset ROCSHMEM_MAX_NUM_CONTEXTS
+}
+
+TestHeatMapRMA() {
+  NOTIMEOUT=1
+  NOVERIF=1
+  ##############################################################################
+  #       | Name             | Ranks | Workgroups | Threads | Max Message Size #
+  ##############################################################################
+  ExecTest  "get"              2       1            1         v1048576
+  ExecTest  "get"              2       32           1024      v1073741824
+  ExecTest  "waveget"          2       1            64        v1073741824
+  ExecTest  "waveget"          2       2            64        v1073741824
+  ExecTest  "waveget"          2       16           1024      v1073741824
+  ExecTest  "wgget"            2       1            1024      v1073741824
+  ExecTest  "wgget"            2       16           1024      v1073741824
+  #ExecTest  "wgget"            2       32           1024      v1073741824
+
+  ExecTest  "put"              2       1            1         v1048576
+  ExecTest  "put"              2       32           1024      v1073741824
+  ExecTest  "waveput"          2       1            64        v1073741824
+  ExecTest  "waveput"          2       2            64        v1073741824
+  ExecTest  "waveput"          2       16           1024      v1073741824
+  ExecTest  "wgput"            2       1            1024      v1073741824
+  ExecTest  "wgput"            2       16           1024      v1073741824
+  #ExecTest  "wgput"            2       32           1024      v1073741824
+}
+
+TestHeatMapColl() {
+  NOTIMEOUT=1
+  NOVERIF=1
+  ExecTest  "alltoall"         2       1            256        v1073741824
+  ExecTest  "alltoall"         4       1            256        v1073741824
+  ExecTest  "alltoall"         8       1            256        v1073741824
+  ExecTest  "alltoall"         16      1            256        v1073741824
+  ExecTest  "alltoall"         32      1            256        v1073741824
+  ExecTest  "alltoall"         64      1            256        v1073741824
 }
 
 ValidateInput() {
