@@ -897,6 +897,7 @@ def test_output_directory(binary_handler_profile_rocprof_compute, monkeypatch):
             binary_handler_profile_rocprof_compute(
                 config, default_workload_dir=workload_base_dir
             )
+            os.chdir("..")
             workload_dir = os.path.join(
                 workload_base_dir,
                 "workloads",
@@ -911,6 +912,7 @@ def test_output_directory(binary_handler_profile_rocprof_compute, monkeypatch):
             binary_handler_profile_rocprof_compute(
                 config, default_workload_dir=workload_base_dir
             )
+            os.chdir("..")
             workload_dir = os.path.join(
                 workload_base_dir,
                 "workloads",
