@@ -263,12 +263,48 @@ Examples:
 .. code-block:: shell-session
 
    $ rocprof-compute profile --name vcopy -- ./vcopy -n 1048576 -b 256
-   # -> ./workloads/vcopy/MI200 (single rank)
+
+   $ tree workloads/vcopy
+
+   └── MI200
+    ├── empirRoof_gpu-0_FP32.html
+    ├── log.txt
+    ├── perfmon
+    │   ├── pmc_perf_0.txt
+    │   ├── pmc_perf_0.yaml
+    │   ├── pmc_perf_1.txt
+    │   ├── pmc_perf_1.yaml
+    │   ├── pmc_perf_2.txt
+    │   ├── pmc_perf_2.yaml
+    │   ├── pmc_perf_3.txt
+    │   ├── pmc_perf_3.yaml
+    │   ├── pmc_perf_4.txt
+    │   ├── pmc_perf_4.yaml
+    │   ├── pmc_perf_5.txt
+    │   ├── SQC_DCACHE_INFLIGHT_LEVEL.txt
+    │   ├── SQC_DCACHE_INFLIGHT_LEVEL.yaml
+    │   ├── SQC_ICACHE_INFLIGHT_LEVEL.txt
+    │   ├── SQC_ICACHE_INFLIGHT_LEVEL.yaml
+    │   ├── SQ_IFETCH_LEVEL.txt
+    │   ├── SQ_IFETCH_LEVEL.yaml
+    │   ├── SQ_INST_LEVEL_LDS.txt
+    │   ├── SQ_INST_LEVEL_LDS.yaml
+    │   ├── SQ_INST_LEVEL_SMEM.txt
+    │   ├── SQ_INST_LEVEL_SMEM.yaml
+    │   ├── SQ_INST_LEVEL_VMEM.txt
+    │   ├── SQ_INST_LEVEL_VMEM.yaml
+    │   ├── SQ_LEVEL_WAVES.txt
+    │   └── SQ_LEVEL_WAVES.yaml
+    ├── pmc_perf.csv
+    ├── profiling_config.yaml
+    ├── roofline.csv
+    └── sysinfo.csv
 
 .. code-block:: shell-session
 
    $ rocprof-compute profile --output-directory /tmp/profiles/%hostname%/%rank% -- ./vcopy -n 1048576 -b 256
-   # -> /tmp/profiles/<host>/<rank>
+   
+   $ tree /tmp/profiles
 
 .. _profiling-output-format:
 
