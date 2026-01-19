@@ -803,7 +803,7 @@ def run_prof(
                     os.environ.update(original_env)
 
             with temporary_env(new_env):
-                libname = options["ROCPROF_ATTACH_TOOL_LIBRARY"]
+                libname = options["ROCPROF_ATTACH_LIBRARY"]
                 c_lib = ctypes.CDLL(libname)
                 if c_lib is None:
                     console_error(f"Error opening {libname}")
@@ -829,7 +829,7 @@ def run_prof(
                         f"detach will happen in {duration} milliseconds...\033[0m"
                     )
                     time.sleep(int(duration) / 1000)
-                c_lib.detach()
+                c_lib.detach(int(pid))
 
         else:
             if app_cmd is None:

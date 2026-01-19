@@ -23,7 +23,9 @@
 #include "data_processor.hpp"
 #include "core/rocpd/data_storage/database.hpp"
 #include "core/rocpd/data_storage/table_insert_query.hpp"
-#include "debug.hpp"
+
+#include "logger/debug.hpp"
+
 #include <memory>
 #include <stdexcept>
 
@@ -141,7 +143,7 @@ data_processor::insert_track(const char* track_name, size_t node_id, size_t proc
 {
     if(_tracks.find(track_name) != _tracks.end())
     {
-        ROCPROFSYS_WARNING(2, "Fail to add track %s, already exist!\n", track_name);
+        LOG_WARNING("Fail to add track {}, already exist!", track_name);
         return;
     }
 
@@ -169,10 +171,10 @@ data_processor::insert_pmc_description(
     auto it = _pmc_descriptor_map.find({ agent_id, name });
     if(it != _pmc_descriptor_map.end())
     {
-        ROCPROFSYS_WARNING(0,
-                           "Insert PMC description failed! Error: PMC descriptor "
-                           "(name:%s) (ID:%lu) already exist!\n",
-                           name, agent_id);
+        LOG_WARNING("Insert PMC description failed! Error: PMC descriptor "
+                    "Insert PMC description failed! Error: PMC descriptor "
+                    "(name: {}) (ID: {}) already exist!",
+                    name, agent_id);
         return;
     }
     data_storage::queries::table_insert_query query_builder;
@@ -199,17 +201,15 @@ void
 data_processor::insert_pmc_event(size_t event_id, size_t agent_id, const char* pmc_name,
                                  double value, const char* extdata)
 {
-    ROCPROFSYS_VERBOSE(2,
-                       "Insert PMC event: id %ld, agent id: %ld, pmc name: %s, value: "
-                       "%lf, extdata: %s\n",
-                       event_id, agent_id, pmc_name, value, extdata);
+    LOG_TRACE(
+        "Insert PMC event: id {}, agent id: {}, pmc name: {}, value: {}, extdata: {}",
+        event_id, agent_id, pmc_name, value, extdata);
     auto it = _pmc_descriptor_map.find({ agent_id, pmc_name });
     if(it == _pmc_descriptor_map.end())
     {
-        ROCPROFSYS_WARNING(0,
-                           "Insert PMC event failed! Error: non-existing PMC description "
-                           "agent id: %ld, pmc name: %s !\n",
-                           agent_id, pmc_name);
+        LOG_WARNING("Insert PMC event failed! Error: non-existing PMC description "
+                    "agent id: {}, pmc name: {} !",
+                    agent_id, pmc_name);
         return;
     }
 
@@ -222,14 +222,12 @@ void
 data_processor::insert_sample(const char* track, uint64_t timestamp, size_t event_id,
                               const char* extdata)
 {
-    ROCPROFSYS_VERBOSE(
-        3, "Insert sample: track: %s, timestamp: %lu, event id: %ld, extdata: %s\n",
-        track, timestamp, event_id, extdata);
+    LOG_TRACE("Insert sample: track: {}, timestamp: {}, event id: {}, extdata: {}", track,
+              timestamp, event_id, extdata);
     auto it = _tracks.find(track);
     if(it == _tracks.end())
     {
-        ROCPROFSYS_WARNING(0, "Insert sample failed! Error: Unexisting track %s!\n",
-                           track);
+        LOG_WARNING("Insert sample failed! Error: Unexisting track {}!", track);
         return;
     }
     auto track_info = it->second;
@@ -460,7 +458,7 @@ data_processor::insert_code_object(size_t id, size_t node_id, size_t process_id,
                                    uint64_t ld_size, uint64_t ld_delta,
                                    const char* storage_type, const char* extdata)
 {
-    ROCPROFSYS_VERBOSE(2, "Insert code object with ID: %ld\n", id);
+    LOG_TRACE("Insert code object with ID: {}", id);
     _insert_code_object_statement(id, _upid.c_str(), node_id, process_id, agent_id, uri,
                                   ld_base, ld_size, ld_delta, storage_type, extdata);
 }
@@ -473,7 +471,7 @@ data_processor::insert_kernel_symbol(
     uint32_t private_segment_size, uint32_t sgrp_count, uint32_t arch_vgrp_count,
     uint32_t accum_vgrp_count, const char* extdata)
 {
-    ROCPROFSYS_VERBOSE(2, "Insert kernel symbol: %s with ID: %ld\n", name, id);
+    LOG_TRACE("Insert kernel symbol: {} with ID: {}", name, id);
     _insert_kernel_symbol_statement(
         id, _upid.c_str(), node_id, process_id, code_obj_id, name, display_name,
         kernel_obj, kernarg_segmnt_size, kernarg_segment_alignment, group_segment_size,
@@ -485,7 +483,7 @@ data_processor::insert_region(size_t node_id, size_t process_id, size_t thread_i
                               uint64_t start, uint64_t end, size_t name_id,
                               size_t event_id, const char* extdata)
 {
-    ROCPROFSYS_VERBOSE(2, "Insert region for event id: %ld\n", event_id);
+    LOG_TRACE("Insert region for event id: {}", event_id);
 
     _insert_region_statement(_upid.c_str(), node_id, process_id, thread_id, start, end,
                              name_id, event_id, extdata);
@@ -500,7 +498,7 @@ data_processor::insert_kernel_dispatch(
     size_t grid_size_x, size_t grid_size_y, size_t grid_size_z, size_t region_name_id,
     size_t event_id, const char* extdata)
 {
-    ROCPROFSYS_VERBOSE(2, "Insert kernel dispatch for event id: %ld\n", event_id);
+    LOG_TRACE("Insert kernel dispatch for event id: {}", event_id);
 
     _insert_kernel_dispatch_statement(
         _upid.c_str(), node_id, process_id, thread_id, agent_id, kernel_id, dispatch_id,

@@ -13,35 +13,51 @@ Overview
 
 This document provides the technical details needed to implement a process attachment tool similar to ``rocprofv3 --attach``. Process attachment allows profiling tools to dynamically attach to running GPU applications without requiring application restart. The implementation can use either the provided python or exported C functions.
 
+Direct Python Execution
+===================================
+
+The python file ``rocprof-attach`` can be called directly to attach to a specific PID and use custom tools within the attachment target.
+
+.. code-block:: bash
+
+   $ rocprof-attach -p 12345 -t path/to/your-tool-library.so -d 5000
+
+In this example, the process with PID 12345 will be attached to and the library path/to/your-tool-library.so will be loaded by rocprofiler-sdk from within that process. After 5000 milliseconds have passed, detach will be called and ``rocprof-attach`` will exit when detachment is complete.
+
+More information can be found by invoking ``rocprof-attach -h``
+
+
 Python Functions
 ===================================
 
-The python file ``rocprof-attach`` defines a main function that can be used for attachment:
+The python file ``rocprof-attach`` defines an attach function that can be used for attachment:
 
 .. code-block:: python
 
-   def main(
-       pid=os.environ.get("ROCPROF_ATTACH_PID", None),
-       attach_library=os.environ.get(
-           "ROCPROF_ATTACH_TOOL_LIBRARY", ROCPROF_ATTACH_TOOL_LIBRARY
-       ),
-       duration=os.environ.get("ROCPROF_ATTACH_DURATION", None),
-   )
+   def attach(
+     pid,
+     attach_tool_library,
+     attach_duration_msec,
+     attach_library=ROCPROF_ATTACH_LIBRARY,
+   ):
 
 **Function Details**
 
-The main function performs the entire attachment process, including attaching and detaching, and provides the ability to use custom tools. It also has simple control flow intended for direct calling from python. For more complex control, it is recommended to instead use the explicit attach and detach functions provided by the ``librocprofiler-sdk-rocattach.so`` binary.
+The attach function performs the entire attachment process, including attaching and detaching, and provides the ability to use custom tools via the tool_libraries parameter. It also has simple control flow intended for direct calling from python. For more complex control, it is recommended to instead use the explicit attach and detach functions provided by the ``librocprofiler-sdk-rocattach.so`` binary.
 
 **Parameters**
 
 - **pid**: Required - PID of process to attach to
    - Defaults to environment variable ROCPROF_ATTACH_PID
-- **attach_library**: Optional - Colon delimited list of tool libraries to use
+- **attach_tool_library**: Colon delimited list of tool libraries to use
    - Defaults to environment variable ROCPROF_ATTACH_TOOL_LIBRARY
-   - If unspecified, defaults to the absolute path of librocprofiler-sdk-rocattach.so
-- **duration**: Optional - Length of time in milliseconds to profile for
+- **attach_duration_msec**: Optional - Length of time in milliseconds to profile for
    - Defaults to environment variable ROCPROF_ATTACH_DURATION
    - If unspecified, attachment will run until Enter is pressed or SIGINT (Ctrl+C) is received
+- **attach_tool_library**: Optional - Tool library to use for attachment and detachment
+   - Default will work for nearly all applications
+   - Defaults to environment variable ROCPROF_ATTACH_LIBRARY
+   - If unspecified, defaults to the absolute path of librocprofiler-sdk-rocattach.so
 
 C Functions
 ===================================
@@ -55,7 +71,7 @@ The C library ``librocprofiler-sdk-rocattach.so`` defines an attach and detach f
        void attach(uint32_t pid) ROCPROFILER_EXPORT;
 
        // Detach from target process and cleanup
-       void detach() ROCPROFILER_EXPORT;
+       void detach(uint32_t pid) ROCPROFILER_EXPORT;
    }
 
 **Function Details:**
@@ -65,8 +81,10 @@ The C library ``librocprofiler-sdk-rocattach.so`` defines an attach and detach f
    - Initiates ptrace-based attachment sequence
    - Custom tool libraries can be specified in a colon delimited list with the environment variable ROCPROF_ATTACH_TOOL_LIBRARY
 
-- **detach()**: Entry point for detaching from the target process
+- **detach(uint32_t pid)**: Entry point for detaching from the target process
+   - Takes the target process ID as a parameter
    - Cleans up attachment resources and terminates profiling
+   - A PID of 0 can be specified to detach from all processes
 
 Function Call Sequence
 ======================

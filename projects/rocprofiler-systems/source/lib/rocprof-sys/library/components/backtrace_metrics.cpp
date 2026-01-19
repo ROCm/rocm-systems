@@ -24,7 +24,6 @@
 #include "core/common.hpp"
 #include "core/components/fwd.hpp"
 #include "core/config.hpp"
-#include "core/debug.hpp"
 #include "core/perfetto.hpp"
 #include "core/trace_cache/cache_manager.hpp"
 #include "core/trace_cache/cacheable.hpp"
@@ -60,6 +59,8 @@
 #include <timemory/utility/demangle.hpp>
 #include <timemory/utility/types.hpp>
 #include <timemory/variadic.hpp>
+
+#include "logger/debug.hpp"
 
 #include <array>
 #include <cstring>
@@ -194,7 +195,11 @@ apply_for_all_thread_names(int64_t _tid, std::function<void(const std::string&)>
         {
             std::string _desc = tim::papi::get_event_info(itr).short_descr;
             if(_desc.empty()) _desc = itr;
-            ROCPROFSYS_CI_THROW(_desc.empty(), "Empty description for %s\n", itr.c_str());
+            if(get_is_continuous_integration() && _desc.empty())
+            {
+                throw std::runtime_error(
+                    fmt::format("Empty description for {}", itr.c_str()));
+            }
 
             std::stringstream track_name_ss;
             track_name_ss << "Thread " << _desc << " [" << _tid << "] (S)";
@@ -344,7 +349,7 @@ backtrace_metrics::configure(bool _setup, int64_t _tid)
         if constexpr(tim::trait::is_available<hw_counters>::value)
         {
             perfetto_counter_track<hw_counters>::init();
-            ROCPROFSYS_DEBUG("HW COUNTER: starting...\n");
+            LOG_DEBUG("HW COUNTER: starting...");
             if(get_papi_vector(_tid))
             {
                 get_papi_vector(_tid)->start();
@@ -354,7 +359,7 @@ backtrace_metrics::configure(bool _setup, int64_t _tid)
     }
     else if(!_setup && _is_running)
     {
-        ROCPROFSYS_DEBUG("Destroying sampler for thread %lu...\n", _tid);
+        LOG_DEBUG("Destroying sampler for thread {}...", _tid);
         *_running = false;
 
         if constexpr(tim::trait::is_available<hw_counters>::value)
@@ -362,10 +367,10 @@ backtrace_metrics::configure(bool _setup, int64_t _tid)
             if(_tid == threading::get_id())
             {
                 if(get_papi_vector(_tid)) get_papi_vector(_tid)->stop();
-                ROCPROFSYS_DEBUG("HW COUNTER: stopped...\n");
+                LOG_DEBUG("HW COUNTER: stopped...");
             }
         }
-        ROCPROFSYS_DEBUG("Sampler destroyed for thread %lu\n", _tid);
+        LOG_DEBUG("Sampler destroyed for thread {}...", _tid);
     }
 }
 
@@ -399,7 +404,11 @@ backtrace_metrics::init_perfetto(int64_t _tid, valid_array_t _valid)
         {
             std::string _desc = tim::papi::get_event_info(itr).short_descr;
             if(_desc.empty()) _desc = itr;
-            ROCPROFSYS_CI_THROW(_desc.empty(), "Empty description for %s\n", itr.c_str());
+            if(get_is_continuous_integration() && _desc.empty())
+            {
+                throw std::runtime_error(
+                    fmt::format("Empty description for {}", itr.c_str()));
+            }
             perfetto_counter_track<hw_counters>::emplace(
                 _tid, JOIN(' ', "Thread", _desc, _tid_name, "(S)"));
         }
@@ -412,7 +421,11 @@ backtrace_metrics::fini_perfetto(int64_t _tid, valid_array_t _valid)
     auto        _hw_cnt_labels = *get_papi_labels(_tid);
     const auto& _thread_info   = thread_info::get(_tid, SequentTID);
 
-    ROCPROFSYS_CI_THROW(!_thread_info, "Error! missing thread info for tid=%li\n", _tid);
+    if(get_is_continuous_integration() && !_thread_info)
+    {
+        throw std::runtime_error(
+            fmt::format("Error! missing thread info for tid={}", _tid));
+    }
     if(!_thread_info) return;
 
     uint64_t _ts         = _thread_info->get_stop();

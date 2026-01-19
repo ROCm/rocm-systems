@@ -1716,6 +1716,15 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
       static_cast<hsa_luid_t*>(value)->low = properties_.LuidLowPart;
       static_cast<hsa_luid_t*>(value)->high = properties_.LuidHighPart;
       break;
+    case HSA_AMD_AGENT_INFO_HAS_EXPERT_SCHED_MODE: {
+      // Requires KFD version >= 1.20 AND GFX major version >= 12
+      auto kfd_version = core::Runtime::runtime_singleton_->KfdVersion().version;
+      *((bool*)value) = (kfd_version.KernelInterfaceMajorVersion > 1 ||
+                         (kfd_version.KernelInterfaceMajorVersion == 1 &&
+                          kfd_version.KernelInterfaceMinorVersion >= 20)) &&
+                        properties_.EngineId.ui32.Major >= 12;
+      break;
+    }
     default:
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
       break;

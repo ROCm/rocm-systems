@@ -21,7 +21,9 @@
 // SOFTWARE.
 
 #include "agent_manager.hpp"
-#include "debug.hpp"
+
+#include "logger/debug.hpp"
+
 #include <algorithm>
 #include <iterator>
 
@@ -42,11 +44,10 @@ agent_manager::agent_manager(std::vector<std::shared_ptr<agent>> agents)
 void
 agent_manager::insert_agent(agent& _agent)
 {
-    ROCPROFSYS_VERBOSE(
-        3, "Inserting agent with device handle: %lu, and agent id: %ld, device type: %s",
-        _agent.device_id,
-        (_agent.type == agent_type::GPU ? _gpu_agents_cnt : _cpu_agents_cnt),
-        (_agent.type == agent_type::GPU ? "GPU" : "CPU"));
+    LOG_TRACE("Inserting agent with device handle: {}, and agent id: {}, device type: {}",
+              _agent.device_id,
+              (_agent.type == agent_type::GPU ? _gpu_agents_cnt : _cpu_agents_cnt),
+              (_agent.type == agent_type::GPU ? "GPU" : "CPU"));
 
     _agent.device_type_index =
         (_agent.type == agent_type::GPU ? _gpu_agents_cnt++ : _cpu_agents_cnt++);
@@ -56,18 +57,17 @@ agent_manager::insert_agent(agent& _agent)
 const agent&
 agent_manager::get_agent_by_type_index(size_t type_index, agent_type type) const
 {
-    ROCPROFSYS_VERBOSE(3, "Getting agent for type: %s, with type index: %ld\n",
-                       (type == agent_type::GPU) ? "GPU" : "CPU", type_index);
+    LOG_TRACE("Getting agent for type: {}, with type index: {}",
+              (type == agent_type::GPU ? "GPU" : "CPU"), type_index);
     auto _agent =
         std::find_if(_agents.begin(), _agents.end(), [&](const auto& agent_ptr) {
             return agent_ptr->type == type && agent_ptr->device_type_index == type_index;
         });
     if(_agent == _agents.end())
     {
-        std::ostringstream oss;
-        oss << "Agent not found for type index: " << type_index
-            << ", type: " << (type == agent_type::GPU ? "GPU" : "CPU");
-        throw std::out_of_range(oss.str());
+        throw std::out_of_range(
+            fmt::format("Agent not found for type index: {}, type: {}", type_index,
+                        (type == agent_type::GPU ? "GPU" : "CPU")));
     }
     return **_agent;
 }
@@ -75,18 +75,17 @@ agent_manager::get_agent_by_type_index(size_t type_index, agent_type type) const
 const agent&
 agent_manager::get_agent_by_id(size_t device_id, agent_type type) const
 {
-    ROCPROFSYS_VERBOSE(3, "Getting agent for device id: %ld, type %s\n", device_id,
-                       (type == agent_type::GPU) ? "GPU" : "CPU");
+    LOG_TRACE("Getting agent for device id: {}, type {}", device_id,
+              (type == agent_type::GPU ? "GPU" : "CPU"));
     auto _agent =
         std::find_if(_agents.begin(), _agents.end(), [&](const auto& agent_ptr) {
             return agent_ptr->type == type && agent_ptr->device_id == device_id;
         });
     if(_agent == _agents.end())
     {
-        std::ostringstream oss;
-        oss << "Agent not found for device id: " << device_id
-            << ", type: " << (type == agent_type::GPU ? "GPU" : "CPU");
-        throw std::out_of_range(oss.str());
+        throw std::out_of_range(fmt::format("Agent not found for device id: {}, type: {}",
+                                            device_id,
+                                            (type == agent_type::GPU ? "GPU" : "CPU")));
     }
     return **_agent;
 }
@@ -94,18 +93,17 @@ agent_manager::get_agent_by_id(size_t device_id, agent_type type) const
 const agent&
 agent_manager::get_agent_by_handle(uint64_t device_handle, agent_type type) const
 {
-    ROCPROFSYS_VERBOSE(3, "Getting agent for device handle: %ld, type %s\n",
-                       device_handle, (type == agent_type::GPU ? "GPU" : "CPU"));
+    LOG_TRACE("Getting agent for device handle: {}, type {}", device_handle,
+              (type == agent_type::GPU ? "GPU" : "CPU"));
     auto _agent =
         std::find_if(_agents.begin(), _agents.end(), [&](const auto& agent_ptr) {
             return agent_ptr->type == type && agent_ptr->handle == device_handle;
         });
     if(_agent == _agents.end())
     {
-        std::ostringstream oss;
-        oss << "Agent not found for device handle: " << device_handle
-            << ", type: " << (type == agent_type::GPU ? "GPU" : "CPU");
-        throw std::out_of_range(oss.str());
+        throw std::out_of_range(
+            fmt::format("Agent not found for device handle: {}, type: {}", device_handle,
+                        (type == agent_type::GPU ? "GPU" : "CPU")));
     }
     return **_agent;
 }
@@ -113,16 +111,15 @@ agent_manager::get_agent_by_handle(uint64_t device_handle, agent_type type) cons
 const agent&
 agent_manager::get_agent_by_handle(size_t device_handle) const
 {
-    ROCPROFSYS_VERBOSE(3, "Getting agent for device handle: %ld\n", device_handle);
+    LOG_TRACE("Getting agent for device handle: {}", device_handle);
     auto _agent =
         std::find_if(_agents.begin(), _agents.end(), [&](const auto& agent_ptr) {
             return agent_ptr->handle == device_handle;
         });
     if(_agent == _agents.end())
     {
-        std::ostringstream oss;
-        oss << "Agent not found for device handle: " << device_handle;
-        throw std::out_of_range(oss.str());
+        throw std::out_of_range(
+            fmt::format("Agent not found for device handle: {}", device_handle));
     }
     return **_agent;
 }
@@ -130,8 +127,8 @@ agent_manager::get_agent_by_handle(size_t device_handle) const
 std::vector<std::shared_ptr<agent>>
 agent_manager::get_agents_by_type(agent_type type) const
 {
-    ROCPROFSYS_VERBOSE(3, "Getting agent for device type: %s\n",
-                       type == agent_type::GPU ? "GPU" : "CPU");
+    LOG_TRACE("Getting agent for device type: {}",
+              (type == agent_type::GPU ? "GPU" : "CPU"));
 
     std::vector<std::shared_ptr<agent>> agents;
     std::copy_if(std::begin(_agents), std::end(_agents), std::back_inserter(agents),
