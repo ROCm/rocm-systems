@@ -2859,6 +2859,7 @@ if __name__ == "__main__":
     assert returncode == 0, "Profiling the torch application failed"
     # Verify files are generated
     # 1. Check basic CSV files
+    num_devices = config.get("num_devices", 1)
     file_dict = test_utils.check_csv_files(workload_dir, num_devices, 1)
     assert "pmc_perf.csv" in file_dict, "pmc_perf.csv not generated"
     # 2. Check torch operators directory
