@@ -3195,41 +3195,43 @@ def test_multi_rank_profiling():
         pytest.skip("mpirun is not available")
 
     root_dir = Path(__file__).resolve().parents[1]
-    rocprof_cmd = [sys.executable, str(root_dir / "src/rocprof-compute")]
-    laplace_path = root_dir / "tests" / "laplace_eqn"
-    if not laplace_path.exists():
-        pytest.skip("laplace_eqn test binary not available")
+    rocprof_cmd = [str(root_dir / "src/rocprof-compute")]
 
-    workload_dir = test_utils.get_output_dir()
+    workload_base_dir = test_utils.get_output_dir()
 
     num_ranks = 2
 
-    cmd = [
+    baseline_cmd = [
         "mpirun",
         "-n",
         str(num_ranks),
         *rocprof_cmd,
         "profile",
-        "--output-directory",
-        workload_dir,
-        "--",
-    ] + config["app_laplace_eqn"]
+    ]
+
+    # Test without MPI communication
+    occupancy_path = root_dir / "tests" / "occupancy"
+    if not occupancy_path.exists():
+        pytest.skip("occupancy test binary not available")
+
+    workload_dir = str(Path(workload_base_dir) / "occupancy")
+
+    cmd = (
+        baseline_cmd
+        + [
+            "--output-directory",
+            workload_dir,
+            "--",
+        ]
+        + config["occupancy"]
+    )
     proc = subprocess.run(cmd, text=True, capture_output=True)
-    if proc.returncode != 0:
-        pytest.skip(
-            "MPI profiling failed; skipping multi-rank validation.\n"
-            f"stdout:\n{proc.stdout}\n"
-            f"stderr:\n{proc.stderr}"
-        )
+    assert proc.returncode == 0
 
     for rank in range(num_ranks):
         rank_dir = Path(workload_dir) / str(rank)
         assert rank_dir.exists(), f"Rank directory {rank_dir} does not exist"
         file_dict = test_utils.check_csv_files(str(rank_dir), num_devices, num_kernels)
-        if "pmc_perf.csv" not in file_dict:
-            pytest.skip(
-                "MPI profiling did not produce counter data; skipping validation."
-            )
 
         if soc == "MI100":
             assert sorted(list(file_dict.keys())) == CSVS
@@ -3250,3 +3252,49 @@ def test_multi_rank_profiling():
         )
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+    # Test with MPI communication
+    laplace_path = root_dir / "tests" / "laplace_eqn"
+    if not laplace_path.exists():
+        pytest.skip("laplace_eqn test binary not available")
+
+    workload_dir = str(Path(workload_base_dir) / "laplace_eqn")
+
+    cmd = (
+        baseline_cmd
+        + [
+            "--output-directory",
+            workload_dir,
+            "--",
+        ]
+        + config["app_laplace_eqn"]
+    )
+    proc = subprocess.run(cmd, text=True, capture_output=True)
+    assert proc.returncode == 0
+
+    for rank in range(num_ranks):
+        rank_dir = Path(workload_dir) / str(rank)
+        assert rank_dir.exists(), f"Rank directory {rank_dir} does not exist"
+        file_dict = test_utils.check_csv_files(str(rank_dir), num_devices, num_kernels)
+
+        if soc == "MI100":
+            assert sorted(list(file_dict.keys())) == CSVS
+        elif soc == "MI200":
+            assert sorted(list(file_dict.keys())) == CSVS
+        elif "MI300" in soc:
+            assert sorted(list(file_dict.keys())) == CSVS
+        elif "MI350" in soc:
+            assert sorted(list(file_dict.keys())) == CSVS
+        else:
+            print(f"Testing isn't supported yet for {soc}")
+            assert 0
+
+        validate(
+            inspect.stack()[0][3],
+            str(rank_dir),
+            file_dict,
+        )
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+    test_utils.clean_output_dir(config["cleanup"], workload_base_dir)
