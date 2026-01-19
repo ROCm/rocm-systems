@@ -151,26 +151,49 @@ if(CI_BUILD)
     rocprofiler_systems_add_option(ROCPROFSYS_STRIP_LIBRARIES "Strip the libraries" OFF
                                    ADVANCED
     )
-else()
-    rocprofiler_systems_add_option(ROCPROFSYS_BUILD_CI "Enable internal asserts, etc."
-                                   OFF ADVANCED NO_FEATURE
+elseif(ROCPROFSYS_BUILD_CI)
+    rocprofiler_systems_add_option(ROCPROFSYS_STRIP_LIBRARIES "Strip the libraries" OFF
+    ADVANCED
     )
-    rocprofiler_systems_add_option(ROCPROFSYS_BUILD_EXAMPLES
-                                   "Enable building the examples" OFF ADVANCED
-    )
-    rocprofiler_systems_add_option(ROCPROFSYS_BUILD_TESTING
-                                   "Enable building the testing suite" OFF ADVANCED
+    rocprofiler_systems_add_option(
+        ROCPROFSYS_BUILD_HIDDEN_VISIBILITY
+        "Build with hidden visibility (disable for Debug builds)" OFF ADVANCED
     )
     rocprofiler_systems_add_option(
         ROCPROFSYS_BUILD_DEBUG "Enable building with extensive debug symbols" OFF
         ADVANCED
     )
+    rocprofiler_systems_add_option(ROCPROFSYS_BUILD_EXAMPLES
+    "Enable building the examples" ON ADVANCED
+    )
+    rocprofiler_systems_add_option(ROCPROFSYS_INSTALL_EXAMPLES
+    "Install rocprofiler-systems examples" ON
+    )
+    rocprofiler_systems_add_option(ROCPROFSYS_BUILD_TESTING
+        "Enable building the testing suite" ON ADVANCED
+    )
+    set(ROCPROFSYS_USE_PYTESTS ON CACHE BOOL "Enable pytest suite" FORCE)
+    rocprofiler_systems_add_option(ROCPROFSYS_INSTALL_TESTING "Install testing scripts and pytest package" ON)
+else()
+    rocprofiler_systems_add_option(ROCPROFSYS_BUILD_CI "Enable internal asserts, etc."
+    OFF ADVANCED NO_FEATURE
+    )
+    rocprofiler_systems_add_option(ROCPROFSYS_BUILD_EXAMPLES
+    "Enable building the examples" OFF ADVANCED
+    )
+    rocprofiler_systems_add_option(ROCPROFSYS_BUILD_TESTING
+    "Enable building the testing suite" OFF ADVANCED
+    )
     rocprofiler_systems_add_option(
-        ROCPROFSYS_BUILD_HIDDEN_VISIBILITY
-        "Build with hidden visibility (disable for Debug builds)" ON ADVANCED
+    ROCPROFSYS_BUILD_DEBUG "Enable building with extensive debug symbols" OFF
+    ADVANCED
+    )
+    rocprofiler_systems_add_option(
+    ROCPROFSYS_BUILD_HIDDEN_VISIBILITY
+    "Build with hidden visibility (disable for Debug builds)" ON ADVANCED
     )
     rocprofiler_systems_add_option(ROCPROFSYS_STRIP_LIBRARIES "Strip the libraries"
-                                   ${_STRIP_LIBRARIES_DEFAULT} ADVANCED
+    ${_STRIP_LIBRARIES_DEFAULT} ADVANCED
     )
 endif()
 

@@ -677,12 +677,22 @@ function(ROCPROFILER_SYSTEMS_GET_GFX_ARCHS _VAR)
         set(ARG_PREFIX "[${PROJECT_NAME}] ")
     endif()
 
-    # Below regex avoids matching "gfxX-X-generic" which may appear
-    check_rocminfo("gfx[0-9A-Fa-f][0-9A-Fa-f]+" _GFXINFO GET_OUTPUT)
-    if(NOT _GFXINFO)
+    # Match only "Name:" lines to avoid matching gfx in marketing names/descriptions.
+    # Regex avoids matching "gfxX-X-generic" which may appear.
+    check_rocminfo("Name:[ \t]+gfx[0-9A-Fa-f][0-9A-Fa-f]+" _RAW_GFXINFO GET_OUTPUT)
+    if(NOT _RAW_GFXINFO)
         message(AUTHOR_WARNING "Could not get system architectures")
         return()
     endif()
+
+    # Extract just the gfx architecture from each "Name: gfxXXXX" match
+    set(_GFXINFO "")
+    foreach(_match IN LISTS _RAW_GFXINFO)
+        string(REGEX MATCH "gfx[0-9A-Fa-f]+" _arch "${_match}")
+        if(_arch)
+            list(APPEND _GFXINFO "${_arch}")
+        endif()
+    endforeach()
 
     list(REMOVE_ITEM _GFXINFO "gfx000")
     list(REMOVE_DUPLICATES _GFXINFO)
