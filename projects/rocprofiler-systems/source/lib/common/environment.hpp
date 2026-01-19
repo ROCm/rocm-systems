@@ -523,7 +523,7 @@ consolidate_env_entries(std::vector<char*>& envp)
         std::string result;
 
         const auto total_parts_length = std::accumulate(
-            parts.begin(), parts.end(), 0,
+            parts.begin(), parts.end(), std::size_t{ 0 },
             [](std::size_t acc, const std::string& part) { return acc + part.size(); });
 
         const auto delim_count       = parts.size() - 1;
