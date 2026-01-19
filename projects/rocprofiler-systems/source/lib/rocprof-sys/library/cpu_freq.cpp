@@ -301,7 +301,7 @@ config_perfetto_counter_tracks(type_list<Types...>, std::array<const char*, N> _
         if(!track::exists(0))
         {
             auto addendum = [&](const char* _v) {
-                return fmt::format("CPU [{}] {} (S)", 0, _v);
+                return fmt::format("CPU [{}] (S)", _v);
             };
             track::emplace(0, addendum(_labels.at(_idx)), _units.at(_idx));
         }
@@ -353,7 +353,7 @@ post_process()
         if(!freq_track::exists(_idx))
         {
             auto addendum = [&](const char* _v) {
-                return fmt::format("CPU [{}] {} (S)", _idx, _v);
+                return fmt::format("CPU {} [{}] (S)", _v, _idx);
             };
             freq_track::emplace(_idx, addendum("Frequency"), "MHz");
         }

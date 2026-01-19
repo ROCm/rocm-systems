@@ -66,6 +66,7 @@
 #include <timemory/utility/types.hpp>
 
 #include <nlohmann/json.hpp>
+#include <spdlog/fmt/ranges.h>
 
 #include "logger/debug.hpp"
 
@@ -290,10 +291,8 @@ create_agent_profile(rocprofiler_agent_id_t          agent_id,
 
     if(counters_v.size() != expected_v)
     {
-        auto requested_counters =
-            timemory::join::join(timemory::join::array_config{ ", ", "", "" }, counters);
-        auto found_counters =
-            timemory::join::join(timemory::join::array_config{ ", ", "", "" }, found_v);
+        auto requested_counters = fmt::format("{}", fmt::join(counters, ", "));
+        auto found_counters     = fmt::format("{}", fmt::join(found_v, ", "));
 
         // Determine which counters were not found
         auto missing_counters = std::vector<std::string>{};
@@ -302,8 +301,7 @@ create_agent_profile(rocprofiler_agent_id_t          agent_id,
             if(std::find(found_v.begin(), found_v.end(), counter) == found_v.end())
                 missing_counters.emplace_back(counter);
         }
-        auto missing_counters_str = timemory::join::join(
-            timemory::join::array_config{ ", ", "", "" }, missing_counters);
+        auto missing_counters_str = fmt::format("{}", fmt::join(missing_counters, ", "));
 
         // In production, warn and continue with available counters
         LOG_WARNING("Unable to find all counters for agent {} (gpu-{}, {}). "
@@ -424,13 +422,13 @@ get_backtrace(std::optional<std::vector<tim::unwind::processed_entry>>& _bt_data
             const auto* _loc   = (_linfo && !_linfo.location.empty())
                                      ? &_linfo.location
                                      : ((itr.location.empty()) ? &_unk : &itr.location);
-            auto        _line =
-                (_linfo && _linfo.line > 0)
-                           ? join("", _linfo.line)
-                           : ((itr.lineno == 0) ? std::string{ "?" } : join("", itr.lineno));
-            auto _entry = join("", rocprofsys::utility::demangle(*_func), " @ ",
-                               join(':', ::basename(_loc->c_str()), _line));
-            backtrace[join("", "frame#", _bt_cnt++)] = _entry;
+            auto        _line  = (_linfo && _linfo.line > 0)
+                                     ? fmt::format("{}", _linfo.line)
+                                     : ((itr.lineno == 0) ? std::string{ "?" }
+                                                          : fmt::format("{}", itr.lineno));
+            auto _entry = fmt::format("{} @ {}:{}", rocprofsys::utility::demangle(*_func),
+                                      ::basename(_loc->c_str()), _line);
+            backtrace[fmt::format("frame#{}", _bt_cnt++)] = _entry;
         }
     }
     return backtrace;
@@ -821,25 +819,26 @@ tool_tracing_callback_stop(
                                 (_linfo && !_linfo.location.empty())
                                     ? &_linfo.location
                                     : ((itr.location.empty()) ? &_unk : &itr.location);
-                            auto _line = (_linfo && _linfo.line > 0)
-                                             ? join("", _linfo.line)
-                                             : ((itr.lineno == 0) ? std::string{ "?" }
-                                                                  : join("", itr.lineno));
-                            auto _entry =
-                                join("", rocprofsys::utility::demangle(*_func), " @ ",
-                                     join(':', ::basename(_loc->c_str()), _line));
+                            auto _line =
+                                (_linfo && _linfo.line > 0)
+                                    ? fmt::format("{}", _linfo.line)
+                                    : ((itr.lineno == 0) ? std::string{ "?" }
+                                                         : fmt::format("{}", itr.lineno));
+                            auto _entry = fmt::format(
+                                "{} @ {}:{}", rocprofsys::utility::demangle(*_func),
+                                ::basename(_loc->c_str()), _line);
                             if(_bt_cnt < 10)
                             {
                                 // Prepend zero for better ordering in UI. Only one
                                 // zero is ever necessary since stack depth is limited
                                 // to 16.
                                 tracing::add_perfetto_annotation(
-                                    ctx, join("", "frame#0", _bt_cnt++), _entry);
+                                    ctx, fmt::format("frame#0{}", _bt_cnt++), _entry);
                             }
                             else
                             {
                                 tracing::add_perfetto_annotation(
-                                    ctx, join("", "frame#", _bt_cnt++), _entry);
+                                    ctx, fmt::format("frame#{}", _bt_cnt++), _entry);
                             }
                         }
                     }
@@ -1194,24 +1193,25 @@ ompt_tracing_callback_stop(
                             (_linfo && !_linfo.location.empty())
                                 ? &_linfo.location
                                 : ((itr.location.empty()) ? &_unk : &itr.location);
-                        auto _line = (_linfo && _linfo.line > 0)
-                                         ? join("", _linfo.line)
-                                         : ((itr.lineno == 0) ? std::string{ "?" }
-                                                              : join("", itr.lineno));
-                        auto _entry =
-                            join("", rocprofsys::utility::demangle(*_func), " @ ",
-                                 join(':', ::basename(_loc->c_str()), _line));
+                        auto _line =
+                            (_linfo && _linfo.line > 0)
+                                ? fmt::format("{}", _linfo.line)
+                                : ((itr.lineno == 0) ? std::string{ "?" }
+                                                     : fmt::format("{}", itr.lineno));
+                        auto _entry = fmt::format("{} @ {}:{}",
+                                                  rocprofsys::utility::demangle(*_func),
+                                                  ::basename(_loc->c_str()), _line);
                         if(_bt_cnt < 10)
                         {
                             // Prepend zero for better ordering in UI. Only one zero
                             // is ever necessary since stack depth is limited to 16.
                             tracing::add_perfetto_annotation(
-                                ctx, join("", "frame#0", _bt_cnt++), _entry);
+                                ctx, fmt::format("frame#0{}", _bt_cnt++), _entry);
                         }
                         else
                         {
                             tracing::add_perfetto_annotation(
-                                ctx, join("", "frame#", _bt_cnt++), _entry);
+                                ctx, fmt::format("frame#{}", _bt_cnt++), _entry);
                         }
                     }
                 }

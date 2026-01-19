@@ -80,7 +80,6 @@
 #include <timemory/signals/types.hpp>
 #include <timemory/units.hpp>
 #include <timemory/utility/backtrace.hpp>
-#include <timemory/utility/join.hpp>
 #include <timemory/utility/procfs/maps.hpp>
 
 #if ROCPROFSYS_USE_ROCM > 0
@@ -267,7 +266,8 @@ struct fini_bundle
     {
         std::stringstream _ss;
         if(_print_prefix && m_label.length() > 0) _ss << m_label << " : ";
-        _ss << timemory::join::join(", ", std::get<Tp>(m_data)...);
+        size_t _idx = 0;
+        ((_ss << (_idx++ > 0 ? ", " : "") << std::get<Tp>(m_data)), ...);
         return _ss.str();
     }
 
@@ -775,7 +775,7 @@ rocprofsys_reset_preload_hidden(void)
         for(const auto& itr : delimit(_preload_libs, ":"))
         {
             if(itr.find("librocprof-sys") != std::string::npos) continue;
-            _modified_preload += common::join("", ":", itr);
+            _modified_preload += fmt::format(":{}", itr);
         }
         if(!_modified_preload.empty() && _modified_preload.find(':') == 0)
             _modified_preload = _modified_preload.substr(1);

@@ -22,7 +22,6 @@
 
 #pragma once
 
-#include "common/join.hpp"
 #include "core/categories.hpp"
 #include "core/concepts.hpp"
 #include "core/defines.hpp"

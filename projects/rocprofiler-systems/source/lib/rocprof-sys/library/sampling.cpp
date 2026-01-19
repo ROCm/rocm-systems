@@ -1411,13 +1411,14 @@ post_process_perfetto(int64_t _tid, const std::vector<timer_sampling_data>& _tim
                 _overflow_event.substr(_overflow_pos + _overflow_prefix.length());
 
         const auto* _main_name =
-            static_strings.emplace(join(" ", _overflow_event, "samples [rocprof-sys]"))
+            static_strings
+                .emplace(fmt::format("{} samples [rocprof-sys]", _overflow_event))
                 .first->c_str();
 
         auto _track = tracing::get_perfetto_track(
             category::overflow_sampling{},
             [](auto _seq_id, auto _sys_id) {
-                return TIMEMORY_JOIN(" ", "Thread", _seq_id, "Overflow", "(S)", _sys_id);
+                return fmt::format("Thread {} Overflow (S) {}", _seq_id, _sys_id);
             },
             _thread_info->index_data->sequent_value,
             _thread_info->index_data->system_value);
@@ -1495,7 +1496,7 @@ post_process_perfetto(int64_t _tid, const std::vector<timer_sampling_data>& _tim
         auto _track = tracing::get_perfetto_track(
             category::timer_sampling{},
             [](auto _seq_id, auto _sys_id) {
-                return TIMEMORY_JOIN(" ", "Thread", _seq_id, "(S)", _sys_id);
+                return fmt::format("Thread {} (S) {}", _seq_id, _sys_id);
             },
             _thread_info->index_data->sequent_value,
             _thread_info->index_data->system_value);
@@ -1607,7 +1608,7 @@ post_process_perfetto(int64_t _tid, const std::vector<timer_sampling_data>& _tim
                                         tracing::add_perfetto_annotation(
                                             ctx, _label.c_str(),
                                             fmt::format(
-                                                "@{}@{}:{}",
+                                                "{}@{}:{}",
                                                 rocprofsys::utility::demangle(line.name),
                                                 line.location, line.line));
                                     }

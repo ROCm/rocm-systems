@@ -864,7 +864,7 @@ data::post_process(uint32_t _dev_id)
             if(counter_track::exists(_dev_id)) return;
 
             auto addendum = [&](const char* _v) {
-                return fmt::format("GPU [{}] {} (S)", _dev_id, _v);
+                return fmt::format("GPU {} [{}] (S)", _v, _dev_id);
             };
 
             auto addendum_blk = [&](std::size_t _i, const char* _metric,

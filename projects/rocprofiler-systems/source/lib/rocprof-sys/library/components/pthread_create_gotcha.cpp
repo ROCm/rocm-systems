@@ -243,14 +243,13 @@ pthread_create_gotcha::wrapper::operator()() const
         LOG_DEBUG("[PID={}][rank={}] Thread {} (parent: {}) created", process::get_id(),
                   dmp::rank(), _info->index_data->as_string(),
                   _parent_info->index_data->as_string());
-        threading::set_thread_name(TIMEMORY_JOIN(" ", "Thread", _tid).c_str());
+        threading::set_thread_name(fmt::format("Thread {}", _tid).c_str());
         auto _manager = tim::manager::instance();
         if(_manager) _manager->initialize();
         if(!thread_bundle_data_t::get()->at(_tid))
         {
             thread_data<thread_bundle_t>::construct(
-                TIMEMORY_JOIN('/', "rocprofsys/process", process::get_id(), "thread",
-                              _tid),
+                fmt::format("rocprofsys/process/{}/thread/{}", process::get_id(), _tid),
                 quirk::config<quirk::auto_start>{});
             thread_bundle_data_t::get()->at(_tid)->start();
         }

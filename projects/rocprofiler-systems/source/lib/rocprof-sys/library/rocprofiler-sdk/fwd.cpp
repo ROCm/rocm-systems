@@ -23,8 +23,6 @@
 #include "library/rocprofiler-sdk/fwd.hpp"
 #include "core/state.hpp"
 
-#include <timemory/utility/join.hpp>
-
 #include "logger/debug.hpp"
 
 #include <exception>
