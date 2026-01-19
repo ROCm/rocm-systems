@@ -226,6 +226,12 @@ class AMDSMICommands():
         # Set args.* to passed in arguments
         if gpu:
             args.gpu = gpu
+        
+        cpu_attributes = ["cpu"]
+        for attr in cpu_attributes:
+            if hasattr(args, 'cpu') and getattr(args, 'cpu'):
+                print("N/A")
+                return
 
         # Handle No GPU passed
         if args.gpu == None:
