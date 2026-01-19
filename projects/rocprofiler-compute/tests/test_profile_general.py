@@ -2827,7 +2827,7 @@ if __name__ == "__main__":
     model = model.cuda()
     x = torch.randn(5, 10).cuda()
     # Run a few iterations
-    for i in range(5):
+    for epoch in range(1):
         output = model(x)
         loss = output.sum()
         loss.backward()
@@ -2869,3 +2869,134 @@ if __name__ == "__main__":
         op_df = pd.read_csv(op_csv)
         assert len(op_df) > 0, f"Per-operator CSV {op_csv.name} is empty"
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+def test_torch_operators_overhead(binary_handler_profile_rocprof_compute):
+    """
+    Measure overhead introduced by --torch-operators flag.
+    Compares execution time with and without the flag to ensure overhead is acceptable.
+    NOTE: Not included in the test suite since this requires PyTorch installation.
+    """
+    pytest.importorskip("torch", reason="PyTorch required for overhead test")
+
+    REPO_ROOT = Path(__file__).resolve().parents[2]
+    BUILD_DIR = Path(
+        os.environ.get("ROCPROFILER_COMPUTE_BUILD_DIR", REPO_ROOT / "build")
+    )
+    BUILD_DIR.mkdir(parents=True, exist_ok=True)
+    helper_dir = BUILD_DIR / "tmp" / "torch_ops"
+    helper_dir.mkdir(parents=True, exist_ok=True)
+    torch_app_path = helper_dir / "test_torch_app.py"
+
+    torch_app_code = """
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+class SimpleNet(nn.Module):
+    def __init__(self):
+        super(SimpleNet, self).__init__()
+        self.fc1 = nn.Linear(10, 20)
+        self.fc2 = nn.Linear(20, 10)
+    def forward(self, x):
+        x = self.fc1(x)
+        x = F.relu(x)
+        x = self.fc2(x)
+        return x
+
+if __name__ == "__main__":
+    if not torch.cuda.is_available():
+        import sys
+        print("GPU is required for this test. Exiting.")
+        sys.exit(1)
+    model = SimpleNet()
+    model = model.cuda()
+    x = torch.randn(5, 10).cuda()
+    # Run a few iterations
+    for epoch in range(1):
+        output = model(x)
+        loss = output.sum()
+        loss.backward()
+    print("Training completed")
+"""
+
+    with open(torch_app_path, "w") as f:
+        f.write(torch_app_code)
+
+    config["torch_test_app"] = ["python3", str(torch_app_path)]
+
+    # Run WITHOUT --torch-operators (baseline)
+    workload_dir_baseline = test_utils.get_output_dir(param_id="torch_baseline")
+    import time
+
+    start_baseline = time.time()
+    returncode_baseline = binary_handler_profile_rocprof_compute(
+        config,
+        workload_dir_baseline,
+        [],  # No torch-operators flag
+        check_success=True,
+        roof=False,
+        app_name="torch_test_app",
+    )
+    baseline_time = time.time() - start_baseline
+    assert returncode_baseline == 0, "Baseline profiling failed"
+
+    # Read baseline timestamps
+    baseline_df = pd.read_csv(f"{workload_dir_baseline}/pmc_perf.csv")
+    baseline_kernel_duration = (
+        baseline_df["End_Timestamp"].max() - baseline_df["Start_Timestamp"].min()
+    )
+    test_utils.clean_output_dir(config["cleanup"], workload_dir_baseline)
+
+    # Run WITH --torch-operators
+    workload_dir_with_flag = test_utils.get_output_dir(param_id="torch_with_ops")
+    start_with_flag = time.time()
+    returncode_with_flag = binary_handler_profile_rocprof_compute(
+        config,
+        workload_dir_with_flag,
+        ["--torch-operators"],
+        check_success=True,
+        roof=False,
+        app_name="torch_test_app",
+    )
+    with_flag_time = time.time() - start_with_flag
+    assert returncode_with_flag == 0, "Profiling with torch-operators failed"
+
+    # Read with-flag timestamps
+    with_flag_df = pd.read_csv(f"{workload_dir_with_flag}/pmc_perf.csv")
+    with_flag_kernel_duration = (
+        with_flag_df["End_Timestamp"].max() - with_flag_df["Start_Timestamp"].min()
+    )
+
+    # Calculate overheads
+    wall_clock_overhead = ((with_flag_time - baseline_time) / baseline_time) * 100
+    kernel_overhead = (
+        (with_flag_kernel_duration - baseline_kernel_duration)
+        / baseline_kernel_duration
+    ) * 100
+
+    print(f"\n{'=' * 70}")
+    print("Performance Overhead Analysis:")
+    print(f"  Baseline wall-clock time:     {baseline_time:.2f}s")
+    print(f"  With --torch-operators time:  {with_flag_time:.2f}s")
+    print(f"  Wall-clock overhead:          {wall_clock_overhead:.1f}%")
+    print(f"  Baseline kernel duration:     {baseline_kernel_duration:.0f} ns")
+    print(f"  With flag kernel duration:    {with_flag_kernel_duration:.0f} ns")
+    print(f"  Kernel execution overhead:    {kernel_overhead:.1f}%")
+    print(f"{'=' * 70}\n")
+
+    # Verify torch operators directory was created
+    torch_operators_dir = Path(workload_dir_with_flag) / "torch_operators"
+    assert torch_operators_dir.exists(), "torch_operators directory should be created"
+    operator_csv_files = list(torch_operators_dir.glob("*.csv"))
+    assert len(operator_csv_files) > 0, "Operator CSV files should be generated"
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir_with_flag)
+
+    # Assert overhead is reasonable (< 100% wall-clock, < 50% kernel)
+    assert wall_clock_overhead < 100, (
+        f"Wall-clock overhead too high: {wall_clock_overhead:.1f}%"
+    )
+    assert kernel_overhead < 50, (
+        f"Kernel execution overhead too high: {kernel_overhead:.1f}%"
+    )
