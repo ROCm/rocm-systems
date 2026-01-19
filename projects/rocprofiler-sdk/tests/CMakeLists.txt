@@ -92,6 +92,9 @@ add_subdirectory(code-object-multi-threaded)
 # rocpd validation tests
 add_subdirectory(rocpd)
 
+# rocattach validation tests
+add_subdirectory(rocattach)
+
 # rocprofv3 validation tests
 add_subdirectory(rocprofv3)
 

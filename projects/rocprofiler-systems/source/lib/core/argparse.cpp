@@ -32,6 +32,8 @@
 #include <timemory/utility/filepath.hpp>
 #include <timemory/utility/join.hpp>
 
+#include "logger/debug.hpp"
+
 namespace rocprofsys
 {
 namespace argparse
@@ -216,6 +218,20 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
 
     _parser.start_group("DEBUG OPTIONS", "");
 
+    if(_data.environ_filter("log_level", _data))
+    {
+        _parser.add_argument({ "--log-level" }, "Log level")
+            .max_count(1)
+            .dtype("string")
+            .choices({ "trace", "debug", "info", "warn", "error", "critical", "off" })
+            .action([&](parser_t& p) {
+                update_env(_data, "ROCPROFSYS_LOG_LEVEL",
+                           p.get<std::string>("log-level"));
+            });
+
+        _data.processed_environs.emplace("log_level");
+    }
+
     if(_data.environ_filter("monochrome", _data))
     {
         _parser.add_argument({ "--monochrome" }, "Disable colorized output")
@@ -234,24 +250,35 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
 
     if(_data.environ_filter("debug", _data))
     {
-        _parser.add_argument({ "--debug" }, "Debug output")
+        _parser
+            .add_argument({ "--debug" },
+                          "[DEPRECATED Use --log-level=debug] Debug output")
             .max_count(1)
-            .action([&](parser_t& p) {
-                update_env(_data, "ROCPROFSYS_DEBUG", p.get<bool>("debug"));
-            });
+            .action(
+                [&](parser_t&) { update_env(_data, "ROCPROFSYS_LOG_LEVEL", "debug"); });
 
         _data.processed_environs.emplace("debug");
     }
 
     if(_data.environ_filter("verbose", _data))
     {
-        _parser.add_argument({ "-v", "--verbose" }, "Verbose output")
+        _parser
+            .add_argument({ "-v", "--verbose" },
+                          "[DEPRECATED Use --log-level=trace] Verbose output")
             .count(1)
             .dtype("integral")
             .action([&](parser_t& p) {
                 auto _v       = p.get<int>("verbose");
                 _data.verbose = _v;
                 update_env(_data, "ROCPROFSYS_VERBOSE", _v);
+
+                constexpr std::array<const char*, 5> log_levels = { "off", "info",
+                                                                    "debug", "debug",
+                                                                    "trace" };
+
+                auto index =
+                    std::clamp(_v + 1, 0, static_cast<int>(log_levels.size() - 1));
+                update_env(_data, "ROCPROFSYS_LOG_LEVEL", log_levels[index]);
             });
 
         _data.processed_environs.emplace("verbose");
@@ -1172,8 +1199,7 @@ add_group_arguments(parser_t& _parser, const std::string& _group_name, parser_da
         }
         else
         {
-            TIMEMORY_PRINTF_WARNING(stderr, "Warning! Option %s (%s) is not enabled\n",
-                                    _name.c_str(), itr->get_env_name().c_str());
+            LOG_WARNING("Option {} ({}) is not enabled", _name, itr->get_env_name());
             _parser.add_argument({ _opt_name }, itr->get_description())
                 .action([&](parser_t& p) {
                     using namespace timemory::join;
