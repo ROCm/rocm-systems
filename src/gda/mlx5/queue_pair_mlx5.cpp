@@ -31,7 +31,7 @@
 namespace rocshmem {
 
 __device__ void QueuePair::mlx5_ring_doorbell(uint64_t db_val, uint64_t my_sq_counter) {
-  *dbrec = byteswap<uint32_t>(my_sq_counter);
+  *const_cast<uint32_t*>(dbrec) = byteswap<uint32_t>(my_sq_counter);
   __atomic_signal_fence(__ATOMIC_SEQ_CST);
 
   __hip_atomic_store(db.ptr, db_val, __ATOMIC_SEQ_CST, __HIP_MEMORY_SCOPE_SYSTEM);
@@ -111,7 +111,7 @@ __device__ void QueuePair::mlx5_quiet() {
         completed = __hip_atomic_load(&quiet_completed, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
       } while (completed != wave_cq_consumer);
 
-      *cq_dbrec = byteswap<uint32_t>(wave_cq_consumer + quiet_amount);
+      *const_cast<uint32_t*>(cq_dbrec) = byteswap<uint32_t>(wave_cq_consumer + quiet_amount);
       __atomic_signal_fence(__ATOMIC_SEQ_CST);
 
       uint64_t sunk_wqe_id = wqe_broadcast[wavefront_id];
