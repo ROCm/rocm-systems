@@ -214,7 +214,6 @@ def inject_roctx_into_optimizer():
 
 def inject_roctx_into_model():
     """Wrap nn.Module forward() method with call counter."""
-    import inspect
 
     from torch import nn
     from typing import Any
