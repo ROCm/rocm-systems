@@ -229,6 +229,47 @@ an Instinct MI210 vs an Instinct MI250.
    -rw-r--r-- 1 auser agroup   650 Mar  1 15:15 sysinfo.csv
    -rw-r--r-- 1 auser agroup   399 Mar  1 15:15 timestamps.csv
 
+Output directory configuration
+------------------------------
+
+Profile mode writes results into a workload directory. By default, the output
+directory is derived from ``--name`` and the target system information:
+
+* Without MPI rank detection, the default is ``./workloads/<name>/<gpu_model>``.
+* With MPI rank detection, the default is ``./workloads/<name>/<rank>``.
+
+You can override the output directory with ``--output-directory`` (``-p``). The
+``--path`` alias is deprecated for profile mode. When ``--output-directory`` is
+explicitly provided, ``--name`` is ignored.
+
+.. note::
+
+   ``--path`` and ``--subpath`` are deprecated for profile mode and will be
+   removed in a future release. Use ``--output-directory`` with parameterized
+   placeholders instead.
+
+The output directory can be parameterized with the following keywords:
+
+* ``%hostname%``: Host name
+* ``%gpumodel%``: GPU model
+* ``%rank%``: MPI process rank (defaults to ``0`` if no rank is detected)
+* ``%env{NAME}%``: Environment variable ``NAME`` (empty string if unset)
+
+If MPI rank is detected and the output directory does not include ``%rank%``,
+ROCm Compute Profiler appends ``/<rank>`` to avoid collisions across ranks.
+
+Examples:
+
+.. code-block:: shell-session
+
+   $ rocprof-compute profile --name vcopy -- ./vcopy -n 1048576 -b 256
+   # -> ./workloads/vcopy/MI200 (single rank)
+
+.. code-block:: shell-session
+
+   $ rocprof-compute profile --output-directory /tmp/profiles/%hostname%/%rank% -- ./vcopy -n 1048576 -b 256
+   # -> /tmp/profiles/<host>/<rank>
+
 .. _profiling-output-format:
 
 Profiling output format
@@ -961,3 +1002,28 @@ Iteration multiplexing feature comes with some caveats to be considered when pro
 * **Non-deterministic workloads**
 
   Workloads which dispatch kernels with non-deterministic names and launch parameters may trigger warnings for insufficient dispatch counts because iteration multiplexing identifies unique kernels by their names and optionally by their launch parameters; this is especially true of large AI workloads that dispatch kernels non-deterministically based on the model layers being used for the current input, and in such cases kernel filtering of common kernels is recommended.
+
+Multi-rank profiling
+========================
+
+When profiling MPI workloads, ROCm Compute Profiler can isolate outputs by rank.
+If a rank is detected and no rank placeholder is provided, each rank writes to a
+subdirectory named by its rank to avoid output collisions.
+
+.. code-block:: shell-session
+
+   $ mpirun -n 4 rocprof-compute profile --output-directory /tmp/mpi_profile -- ./laplace_eqn -n 1048576 -b 256
+
+The example above produces:
+
+.. code-block:: shell-session
+
+   $ ls /tmp/mpi_profile
+   0  1  2  3
+
+To control output placement explicitly, add ``%rank%`` (and other placeholders)
+to your output directory:
+
+.. code-block:: shell-session
+
+   $ mpirun -n 4 rocprof-compute profile --output-directory /tmp/mpi_profile/%hostname%/%rank% -- ./laplace_eqn -n 1048576 -b 256
