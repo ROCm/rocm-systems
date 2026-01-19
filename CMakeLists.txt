@@ -150,6 +150,12 @@ target_link_libraries(${ROCDXG_TARGET} PRIVATE thunk_proxy)
 
 set_property(TARGET ${ROCDXG_TARGET} PROPERTY LINK_FLAGS ${ROCDXG_LINK_FLAGS})
 
+## Ensure runtime can locate ROCm libs from /opt/rocm/lib via RPATH
+set_target_properties(${ROCDXG_TARGET} PROPERTIES
+  BUILD_RPATH "/opt/rocm/lib"
+  INSTALL_RPATH "/opt/rocm/lib"
+  INSTALL_RPATH_USE_LINK_PATH TRUE)
+
 ## Set the VERSION and SOVERSION values
 set_property ( TARGET ${ROCDXG_TARGET} PROPERTY VERSION "${LIB_VERSION_STRING}" )
 set_property ( TARGET ${ROCDXG_TARGET} PROPERTY SOVERSION "${LIB_VERSION_MAJOR}" )
