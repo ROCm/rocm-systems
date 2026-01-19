@@ -31,6 +31,8 @@
     }                                                                                    \
     }  // namespace ::tim::cereal
 
+#include "common/defines.h"
+
 #if !defined(ROCPROFSYS_USE_ROCM)
 #    define ROCPROFSYS_USE_ROCM 0
 #endif
@@ -40,7 +42,6 @@
 
 #include <timemory/manager.hpp>
 
-#include <dlfcn.h>
 #include <string>
 
 #include "core/agent_manager.hpp"
@@ -92,17 +93,6 @@ _amdsmi_is_initialized()
     return initialized;
 }
 
-void
-prevent_amdsmi_library_unload()
-{
-    static bool _initialized = false;
-    if(_initialized) return;
-    _initialized = true;
-
-    dlopen("libamd_smi.so", RTLD_NOW | RTLD_NOLOAD | RTLD_NODELETE);
-    dlopen("librocm_smi64.so", RTLD_NOW | RTLD_NOLOAD | RTLD_NODELETE);
-}
-
 bool
 amdsmi_init()
 {
@@ -113,8 +103,6 @@ amdsmi_init()
             ROCPROFSYS_AMD_SMI_CALL(::amdsmi_init(AMDSMI_INIT_AMD_GPUS));
             get_processor_handles();
             _amdsmi_is_initialized() = true;  // Mark as initialized
-
-            prevent_amdsmi_library_unload();
         } catch(std::exception& _e)
         {
             LOG_ERROR("Exception thrown initializing amd-smi: {}", _e.what());
