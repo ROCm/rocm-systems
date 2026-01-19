@@ -358,6 +358,12 @@ int GetProcessInfo(rsmi_process_info_t *procs, uint32_t num_allocated,
         }
       }
     }
+    else {
+      // Skip unexpected entries that don't match known formats
+      // (e.g., non-numeric, non-pid: format files/directories)
+      dentry = readdir(proc_dir);
+      continue;
+    }
 
     dentry = readdir(proc_dir);
   }
@@ -405,26 +411,10 @@ int GetKfdGpuIdsForPid(long pid, std::unordered_set<uint64_t>* out){
     perror(("Unable to open KFD process directory for process " + std::to_string(pid)).c_str());
     return errno ? errno : ESRCH;
   }
-
-  struct dirent* e;
-
-  while ((e = readdir(d))) {
-
-    if (e->d_name[0] == '.') continue; // skip "."/".." and hidden entries
-
-    // Grab KFD GPU id from one of these fields
-    if (!strncmp(e->d_name, "stats_", 6)) {
-      out->insert(strtoull(e->d_name + 6, nullptr, 10));
-    } else if (!strncmp(e->d_name, "vram_", 5)) {
-      out->insert(strtoull(e->d_name + 5, nullptr, 10));
-    } else if (!strncmp(e->d_name, "counters_", 9)) {
-      out->insert(strtoull(e->d_name + 9, nullptr, 10));
-    } else if (!strncmp(e->d_name, "sdma_", 5)) {
-      out->insert(strtoull(e->d_name + 5, nullptr, 10));
-    }
-  }
-
   closedir(d);
+
+  // Use the lambda for the primary process directory (instead of duplicating code)
+  extract_gpu_ids_from_dir(pdir);
 
   // Also check secondary contexts (context_xxxx directories)
   // These are created by the KFD multiple contexts feature
