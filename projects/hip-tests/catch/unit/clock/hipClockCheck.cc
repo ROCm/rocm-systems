@@ -36,6 +36,17 @@ THE SOFTWARE.
 // What clock functions should exhibit is forward progress of the clock ticks.
 // What we measure here is the start tick should be smaller than the end tick.
 // We do some primitive math in the middle.
+
+__device__ float reduce_32_elements(float* in) {
+  auto val = in[threadIdx.x];
+  val += __shfl_down(val, 16);
+  val += __shfl_down(val, 8);
+  val += __shfl_down(val, 4);
+  val += __shfl_down(val, 2);
+  val += __shfl_down(val, 1);
+  return val;
+}
+
 __global__ void reduce_c64(long long* start, long long* end, float* in /* 32 sized input */,
                            float* out /* single sized output*/) {
   if (threadIdx.x == 0) {
@@ -44,15 +55,7 @@ __global__ void reduce_c64(long long* start, long long* end, float* in /* 32 siz
 
   // do not reorder
   __threadfence();
-
-  // trivial reduce
-  auto val = in[threadIdx.x];
-  val += __shfl_down(val, 16);
-  val += __shfl_down(val, 8);
-  val += __shfl_down(val, 4);
-  val += __shfl_down(val, 2);
-  val += __shfl_down(val, 1);
-
+  auto val = reduce_32_elements(in);
   __threadfence();
 
   if (threadIdx.x == 0) {
@@ -69,15 +72,7 @@ __global__ void reduce_c(long long* start, long long* end, float* in /* 32 sized
 
   // do not reorder
   __threadfence();
-
-  // trivial reduce
-  auto val = in[threadIdx.x];
-  val += __shfl_down(val, 16);
-  val += __shfl_down(val, 8);
-  val += __shfl_down(val, 4);
-  val += __shfl_down(val, 2);
-  val += __shfl_down(val, 1);
-
+  auto val = reduce_32_elements(in);
   __threadfence();
 
   if (threadIdx.x == 0) {
@@ -94,15 +89,7 @@ __global__ void reduce_wc64(long long* start, long long* end, float* in /* 32 si
 
   // do not reorder
   __threadfence();
-
-  // trivial reduce
-  auto val = in[threadIdx.x];
-  val += __shfl_down(val, 16);
-  val += __shfl_down(val, 8);
-  val += __shfl_down(val, 4);
-  val += __shfl_down(val, 2);
-  val += __shfl_down(val, 1);
-
+  auto val = reduce_32_elements(in);
   __threadfence();
 
   if (threadIdx.x == 0) {
@@ -144,12 +131,17 @@ void execute_clock_kernels(void (*kernel)(long long*, long long*, float*, float*
   HIP_CHECK(hipFree(d_clock_start));
   HIP_CHECK(hipFree(d_clock_end));
 
+  // Make sure the math happenned correctly
+  INFO("sum(1.0f, 2.0f, ..., 32.0f) gpu result: " << out << " cpu: " << cpu_result);
+  REQUIRE(out == cpu_result);
+
   // Measure the clock progress
+  // There can be two scenarios:
+  // 1) clock_start < clock_end : which we expect
+  // 2) clock_start > clock_end : which means clock warped around, but chances of that happening is
+  // really low
   INFO("Clock start: " << clock_start << " end: " << clock_end);
   REQUIRE(clock_start < clock_end);
-
-  INFO("sum(1.0f,...,32.0f) gpu result: " << out << " cpu: " << cpu_result);
-  REQUIRE(out == cpu_result);
 }
 
 TEST_CASE("Unit_hipClock64_Positive_Basic") {
