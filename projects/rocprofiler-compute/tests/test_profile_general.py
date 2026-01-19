@@ -2819,12 +2819,13 @@ class SimpleNet(nn.Module):
         return x
 
 if __name__ == "__main__":
+    if not torch.cuda.is_available():
+        import sys
+        print("GPU is required for this test. Exiting.")
+        sys.exit(1)
     model = SimpleNet()
-    if torch.cuda.is_available():
-        model = model.cuda()
-        x = torch.randn(5, 10).cuda()
-    else:
-        x = torch.randn(5, 10)
+    model = model.cuda()
+    x = torch.randn(5, 10).cuda()
     # Run a few iterations
     for i in range(5):
         output = model(x)
@@ -2841,11 +2842,6 @@ if __name__ == "__main__":
     # Profile with --torch-operators option
     options = [
         "--torch-operators",
-        "--format-rocprof-output",
-        "csv",
-        "--no-native-tool",
-        "--device",
-        "-1",
     ]
 
     returncode = binary_handler_profile_rocprof_compute(
@@ -2853,7 +2849,6 @@ if __name__ == "__main__":
         workload_dir,
         options,
         check_success=True,
-        roof=True,
         app_name="torch_test_app",
     )
     assert returncode == 0, "Profiling the torch application failed"
