@@ -19,6 +19,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Interactive prompt when file exists and no flag is specified:
     - User can choose: Overwrite (o) / Append (a) / Cancel (N)
 
+- **Updated process reporting for MI300A systems.**
+  - Since MI300A hardware exposes no dedicated VRAM, `amd-smi defualt output` now reports `VRAM_MEM: N/A` for running processes on those platforms.
+
 ### Removed
 
 - N/A
