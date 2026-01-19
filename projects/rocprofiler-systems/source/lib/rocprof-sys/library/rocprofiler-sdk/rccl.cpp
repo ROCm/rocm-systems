@@ -23,10 +23,11 @@
 #include "library/rocprofiler-sdk/rccl.hpp"
 
 #include "core/config.hpp"
-#include "core/debug.hpp"
 #include "core/perfetto.hpp"
 
 #include "library/tracing.hpp"
+
+#include "logger/debug.hpp"
 
 namespace rocprofsys
 {
@@ -84,8 +85,11 @@ rccl_type_size(ncclDataType_t datatype)
         case ncclUint64:
         case ncclFloat64: return 8;
         default:
-            ROCPROFSYS_CI_ABORT(true, "Unsupported RCCL datatype: %i", datatype);
-            return 0;
+        {
+            LOG_CRITICAL("Unsupported RCCL datatype: {}", static_cast<int>(datatype));
+            ::rocprofsys::set_state(::rocprofsys ::State ::Finalized);
+            std::abort();
+        }
     };
 }
 

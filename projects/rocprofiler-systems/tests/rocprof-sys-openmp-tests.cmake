@@ -26,6 +26,7 @@ set(_ompt_environment
     "ROCPROFSYS_PROFILE=ON"
     "ROCPROFSYS_TIME_OUTPUT=OFF"
     "ROCPROFSYS_USE_OMPT=ON"
+    "ROCPROFSYS_LOG_LEVEL=trace"
     "ROCPROFSYS_TIMEMORY_COMPONENTS=wall_clock,trip_count,peak_rss"
     "${_test_openmp_env}"
     "${_test_library_path}"
@@ -126,6 +127,7 @@ if(ROCPROFSYS_OMPVV_HOST_TESTS)
               -e -v 1 --label return args
             SAMPLING_TIMEOUT 300
             REWRITE_TIMEOUT 300
+            RUNTIME_TIMEOUT 600
             ENVIRONMENT
               "${_ompt_environment};ROCPROFSYS_COUT_OUTPUT=ON;ROCPROFSYS_CI_SKIP_PUSH_POP_CHECK=ON"
             REWRITE_RUN_PASS_REGEX "${_OMPT_PASS_REGEX}"

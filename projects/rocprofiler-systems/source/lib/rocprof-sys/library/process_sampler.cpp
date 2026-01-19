@@ -22,10 +22,11 @@
 
 #include "library/process_sampler.hpp"
 #include "core/config.hpp"
-#include "core/debug.hpp"
 #include "library/amd_smi.hpp"
 #include "library/cpu_freq.hpp"
 #include "library/runtime.hpp"
+
+#include "logger/debug.hpp"
 
 #include <memory>
 #include <vector>
@@ -83,8 +84,8 @@ sampler::poll(std::atomic<State>* _state, nsec_t _interval, promise_t* _ready)
     for(auto& itr : instances)
         itr->config();
 
-    ROCPROFSYS_VERBOSE(
-        1, "Background process sampling polling at an interval of %f seconds...\n",
+    LOG_DEBUG(
+        "Background process sampling polling at an interval of {:.2f} seconds...",
         std::chrono::duration_cast<std::chrono::duration<double>>(_interval).count());
 
     auto _duration = config::get_process_sampling_duration();
@@ -113,15 +114,12 @@ sampler::poll(std::atomic<State>* _state, nsec_t _interval, promise_t* _ready)
 
     if(_has_duration && _now >= _end && get_state() < State::Finalized)
     {
-        ROCPROFSYS_VERBOSE(
-            1,
-            "Background process sampling duration of %f seconds has elapsed. "
-            "Shutting down process sampling...\n",
-            _duration);
+        LOG_DEBUG("Background process sampling duration of {:.2f} seconds has elapsed. "
+                  "Shutting down process sampling...",
+                  _duration);
     }
 
-    ROCPROFSYS_CONDITIONAL_BASIC_PRINT(get_debug(),
-                                       "Thread sampler polling completed...\n");
+    LOG_DEBUG("Thread sampler polling completed...");
 
     if(polling_finished) polling_finished->set_value();
 }
@@ -131,11 +129,11 @@ sampler::setup()
 {
     if(!get_use_process_sampling())
     {
-        ROCPROFSYS_DEBUG("Background sampler is disabled...\n");
+        LOG_DEBUG("Background sampler is disabled...");
         return;
     }
 
-    ROCPROFSYS_VERBOSE(1, "Setting up background sampler...\n");
+    LOG_DEBUG("Setting up background sampler...");
 
     // shutdown if already running
     shutdown();
@@ -204,7 +202,10 @@ sampler::shutdown()
         }
 
         // during CI, throw an error if polling_finished is not valid
-        ROCPROFSYS_CI_THROW(!polling_finished, "polling_finished is not valid\n");
+        if(!polling_finished && get_is_continuous_integration())
+        {
+            throw std::runtime_error("polling_finished is not valid");
+        }
         if(polling_finished)
         {
             // wait for the thread to finish

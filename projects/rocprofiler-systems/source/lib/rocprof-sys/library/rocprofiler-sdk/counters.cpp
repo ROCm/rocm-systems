@@ -22,12 +22,15 @@
 
 #include "library/rocprofiler-sdk/counters.hpp"
 #include "core/agent_manager.hpp"
+#include "core/demangler.hpp"
 #include "core/trace_cache/cache_manager.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "library/rocprofiler-sdk/fwd.hpp"
 
 #include <memory>
 #include <timemory/utility/types.hpp>
+
+#include "logger/debug.hpp"
 
 namespace rocprofsys
 {
@@ -94,7 +97,9 @@ counter_event::operator()(const client_data* tool_data, ::perfetto::CounterTrack
     const auto* _kern_sym_data =
         tool_data->get_kernel_symbol_info(_dispatch_info.kernel_id);
 
-    auto _bundle = counter_bundle_t{ tim::demangle(_kern_sym_data->kernel_name), _scope };
+    auto _bundle =
+        counter_bundle_t{ rocprofsys::utility::demangle(_kern_sym_data->kernel_name),
+                          _scope };
 
     _bundle.push(_dispatch_info.queue_id.handle)
         .start()
@@ -181,9 +186,8 @@ counter_storage::write(counter_storage_type* storage, const std::string& metric_
 {
     if(!trait::runtime_enabled<counter_data_tracker>::get())
     {
-        ROCPROFSYS_WARNING_F(
-            1, "%s counter_data_tracker is disabled. Can't write storage.\n",
-            metric_name.c_str());
+        LOG_WARNING("{} counter_data_tracker is disabled. Can't write storage.",
+                    metric_name);
         return;
     }
 
