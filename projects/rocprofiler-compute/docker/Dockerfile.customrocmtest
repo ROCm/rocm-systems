@@ -18,7 +18,8 @@ RUN mkdir -p /rocm && \
 # Set environment variables for ROCm
 ENV PATH="/rocm/bin:${PATH}" \
     ROCM_PATH="/rocm" \
-    LD_LIBRARY_PATH="/rocm/lib:/rocm/lib/rocm_sysdeps/lib:${LD_LIBRARY_PATH}"
+    LD_LIBRARY_PATH="/rocm/lib:/rocm/lib/rocm_sysdeps/lib:${LD_LIBRARY_PATH}" \
+    HIP_DEVICE_LIB_PATH="/rocm/llvm/amdgcn/bitcode"
 
 # Update package list and install prerequisites
 RUN apt-get update && apt-get install -y \
