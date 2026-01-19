@@ -31,7 +31,6 @@
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
-#include <spdlog/fmt/fmt.h>
 #include <spdlog/fmt/ranges.h>
 
 #include <algorithm>

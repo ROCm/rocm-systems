@@ -27,7 +27,6 @@
 
 #include "logger/debug.hpp"
 
-#include <spdlog/fmt/fmt.h>
 #include <spdlog/fmt/ranges.h>
 
 #if defined(ROCPROFSYS_USE_ROCM) && ROCPROFSYS_USE_ROCM > 0

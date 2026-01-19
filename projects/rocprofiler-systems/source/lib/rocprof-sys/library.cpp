@@ -979,9 +979,7 @@ rocprofsys_finalize_hidden(void)
     // report the high-level metrics for the process
     if(get_main_bundle())
     {
-        std::ostringstream _oss;
-        _oss << *get_main_bundle();
-        std::string _msg = _oss.str();
+        std::string _msg = get_main_bundle()->as_string();
         auto        _pos = _msg.find(">>>  ");
         if(_pos != std::string::npos) _msg = _msg.substr(_pos + 5);
         LOG_INFO("{}", _msg);
@@ -1001,9 +999,7 @@ rocprofsys_finalize_hidden(void)
             if(itr && itr->get<comp::wall_clock>() &&
                !itr->get<comp::wall_clock>()->get_is_running())
             {
-                std::ostringstream _oss;
-                _oss << *itr;
-                std::string _msg = _oss.str();
+                std::string _msg = itr->as_string();
                 auto        _pos = _msg.find(">>>  ");
                 if(_pos != std::string::npos) _msg = _msg.substr(_pos + 5);
                 if(_thr_verbose >= 0)
