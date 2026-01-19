@@ -48,11 +48,11 @@ When ROCm Compute Profiler detects values exceeding their theoretical peaks, it 
 What does "Counter variance corrected" mean?
 =============================================
 
-When profiling, you may see a warning like:
+When profiling, you may see the following warning:
 
 .. code-block:: text
 
-   WARNING: Counter variance corrected: 5 value(s) adjusted (max 2.3% deviation from multi-pass collection).
+   WARNING: Counter variance corrected: X value(s) adjusted (max Y% deviation from multi-pass collection).
 
 This indicates that ROCm Compute Profiler detected and corrected negative values in derived metrics. This is expected behavior, not an error.
 

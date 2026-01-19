@@ -7945,3 +7945,29 @@ def test_noise_clamp_threshold_boundary():
     # Exactly 1% error: -10000 / 1000000 = 0.01
     to_noise_clamp(pd.Series([-10000.0]), pd.Series([1000000.0]))
     assert get_noise_clamp_warnings()["count"] == 1
+
+
+@pytest.mark.noise_clamp
+def test_noise_clamper_instance_isolation():
+    """Separate NoiseClamper instances should have independent state."""
+    import numpy as np
+
+    from utils.parser import NoiseClamper
+
+    clamper1 = NoiseClamper()
+    clamper2 = NoiseClamper()
+
+    clamper1.clamp(pd.Series([-20000.0]), pd.Series([1000000.0]))
+
+    assert clamper1.get_stats()["count"] == 1
+    assert clamper2.get_stats()["count"] == 0
+
+    clamper1.clear()
+    assert clamper1.get_stats()["count"] == 0
+    assert clamper2.get_stats()["count"] == 0
+
+    clamper1.clamp(np.array([-50000.0]), np.array([1000000.0]))
+    clamper2.clamp(np.array([-30000.0, -40000.0]), np.array([1000000.0, 1000000.0]))
+
+    assert clamper1.get_stats()["count"] == 1
+    assert clamper2.get_stats()["count"] == 2
