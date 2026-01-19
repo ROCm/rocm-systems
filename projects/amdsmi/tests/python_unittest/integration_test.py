@@ -336,7 +336,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
                 if not results[i][event_group_name]['supported'] or not results[i][event_group_name]['counters']:
                     msg_add = ''
                     if not results[i][event_group_name]['supported']:
-                        msg_add = '\n\tAPI RETURNED AMDSMI_STATUS_NOT_SUPPORTED'
+                        msg_add = '\n\tAMDSMI API Returned AMDSMI_STATUS_NOT_SUPPORTED'
                     # Record that these would have been tested if supported
                     self.common.print(f'\t### amdsmi_gpu_create_counter(){msg_add}')
                     self.common.print(f'\t### amdsmi_gpu_control_counter(){msg_add}')
@@ -362,7 +362,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
                         if self.common.check_ret(msg, e, event_type_cond):
                             self.raise_exception = e
                         # Record that these would have been tested if supported
-                        msg_add = '\n\tAPI RETURNED AMDSMI_STATUS_NOT_SUPPORTED'
+                        msg_add = '\n\tAMDSMI API Returned AMDSMI_STATUS_NOT_SUPPORTED'
                         self.common.print(f'\t### amdsmi_gpu_control_counter(){msg_add}')
                         self.common.print(f'\t### amdsmi_gpu_read_counter(){msg_add}')
                         self.common.print(f'\t### amdsmi_gpu_control_counter(){msg_add}')

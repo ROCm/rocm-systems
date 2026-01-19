@@ -168,6 +168,7 @@ def ReadTestingInput(file_contents):
                 if status:
                     if func_name in api_support_map and api_support_map[func_name]:
                         # Once API is supported, it cannot be unsupported
+                        api_support_map[func_name] += 1
                         pass
                     else:
                         # API is not supported

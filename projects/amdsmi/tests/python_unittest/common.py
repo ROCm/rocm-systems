@@ -511,7 +511,7 @@ class Common(unittest.TestCase):
         status_msg = ''
         status_ret = False
         if any(error_code in value for value in self.not_supported_error_codes):
-            status_msg = f'\tAPI RETURNED {error_code_name}'
+            status_msg = f'\tAMDSMI API Returned {error_code_name}'
         elif error_code_name == expected_code_name:
             status_msg = f'\tTest PASSED with expected result {expected_code_name}'
         elif error_code_name != self.PASS and expected_code_name == self.ANY_FAIL:
