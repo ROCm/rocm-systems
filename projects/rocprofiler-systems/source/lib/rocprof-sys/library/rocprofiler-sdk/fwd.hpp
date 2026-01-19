@@ -122,7 +122,7 @@ using backtrace_operation_map_t =
 
 struct client_data
 {
-    static constexpr size_t num_buffers  = 4;
+    static constexpr size_t num_buffers  = 5;
     static constexpr size_t num_contexts = 2;
 
     using buffer_name_info_t   = rocprofiler::sdk::buffer_name_info_t<std::string_view>;
@@ -138,6 +138,7 @@ struct client_data
     rocprofiler_context_id_t                  primary_ctx               = { 0 };
     rocprofiler_context_id_t                  counter_ctx               = { 0 };
     rocprofiler_buffer_id_t                   kernel_dispatch_buffer    = { 0 };
+    rocprofiler_buffer_id_t                   scratch_memory_buffer     = { 0 };
     rocprofiler_buffer_id_t                   memory_copy_buffer        = { 0 };
     rocprofiler_buffer_id_t                   memory_alloc_buffer       = { 0 };
     rocprofiler_buffer_id_t                   counter_collection_buffer = { 0 };
@@ -179,12 +180,9 @@ client_data::get_contexts() const
 inline client_data::buffer_id_vec_t
 client_data::get_buffers() const
 {
-    return buffer_id_vec_t{
-        kernel_dispatch_buffer,
-        memory_copy_buffer,
-        memory_alloc_buffer,
-        counter_collection_buffer,
-    };
+    return buffer_id_vec_t{ kernel_dispatch_buffer, scratch_memory_buffer,
+                            memory_copy_buffer, memory_alloc_buffer,
+                            counter_collection_buffer };
 }
 
 inline const rocprofsys_agent_t*
