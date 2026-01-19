@@ -414,6 +414,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                 auto _d = p.get<bool>("device");
                 update_env(_data, "ROCPROFSYS_USE_PROCESS_SAMPLING", _h || _d);
                 update_env(_data, "ROCPROFSYS_CPU_FREQ_ENABLED", _h);
+                update_env(_data, "ROCPROFSYS_AINIC_STAT_ENABLED", _h);
                 if(_h) update_env(_data, "ROCPROFSYS_USE_AMD_SMI", _d);
             });
 
@@ -435,6 +436,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                 update_env(_data, "ROCPROFSYS_USE_PROCESS_SAMPLING", _h || _d);
                 update_env(_data, "ROCPROFSYS_USE_AMD_SMI", _d);
                 if(_d) update_env(_data, "ROCPROFSYS_CPU_FREQ_ENABLED", _h);
+                if(_d) update_env(_data, "ROCPROFSYS_AINIC_STAT_ENABLED", _h);
             });
 
         _data.processed_environs.emplace("device");
@@ -900,6 +902,22 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
 
         _data.processed_environs.emplace("gpus");
         _data.processed_environs.emplace("sampling_gpus");
+    }
+
+    if(_data.environ_filter("ainics", _data))
+    {
+        _parser
+            .add_argument({ "--ainics" },
+                          "AI NIC IDs for SMI queries. Supports comma-separated list")
+            .dtype("list of strings")
+            .required({ "device" })
+            .action([&](parser_t& p) {
+                update_env(_data, "ROCPROFSYS_SAMPLING_AINICS",
+                           join(array_config_t{ "," }, p.get<strvec_t>("gpus")));
+            });
+
+        _data.processed_environs.emplace("ainics");
+        _data.processed_environs.emplace("sampling_ainics");
     }
 
     _parser.start_group("GENERAL SAMPLING OPTIONS",

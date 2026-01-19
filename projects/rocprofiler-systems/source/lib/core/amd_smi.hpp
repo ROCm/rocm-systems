@@ -26,6 +26,10 @@
 #    include <amd_smi/amdsmi.h>
 #endif
 
+#if ROCPROFSYS_USE_AINIC > 0
+#    define USE_AINIC
+#endif
+
 namespace rocprofsys
 {
 namespace amd_smi

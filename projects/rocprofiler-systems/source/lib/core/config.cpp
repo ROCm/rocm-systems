@@ -495,6 +495,10 @@ configure_settings(bool _init)
                               "user time, and kernel time",
                               false, "process_sampling");
 
+    ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_AINIC_STAT_ENABLED",
+                              "Enable tracking for AI NIC metrics",
+                              false, "process_sampling");
+
     ROCPROFSYS_CONFIG_SETTING(
         double, "ROCPROFSYS_PROCESS_SAMPLING_FREQ",
         "Number of measurements per second when ROCPROFSYS_USE_PROCESS_SAMPLING=ON. If "
@@ -518,6 +522,12 @@ configure_settings(bool _init)
         "Devices to query when ROCPROFSYS_USE_AMD_SMI=ON. Values should be separated by "
         "commas and can be explicit or ranges, e.g. 0,1,5-8. An empty value implies "
         "'all' and 'none' suppresses all GPU sampling",
+        std::string{ "all" }, "amd_smi", "rocm", "process_sampling");
+
+    ROCPROFSYS_CONFIG_SETTING(
+        std::string, "ROCPROFSYS_SAMPLING_AINICS",
+        "AI NICs to query when ROCPROFSYS_USE_AMD_SMI=ON. NIC names should be separated by "
+        "commas, e.g. eno8303, enp7s0.",
         std::string{ "all" }, "amd_smi", "rocm", "process_sampling");
 
     ROCPROFSYS_CONFIG_SETTING(
@@ -1222,6 +1232,7 @@ configure_mode_settings(const std::shared_ptr<settings>& _config)
         _set("ROCPROFSYS_USE_PROCESS_SAMPLING", false);
         _set("ROCPROFSYS_USE_CODE_COVERAGE", false);
         _set("ROCPROFSYS_CPU_FREQ_ENABLED", false);
+        _set("ROCPROFSYS_AINIC_STAT_ENABLED", false);
         set_setting_value("ROCPROFSYS_TIMEMORY_COMPONENTS", std::string{});
         set_setting_value("ROCPROFSYS_PAPI_EVENTS", std::string{});
     }
@@ -1918,10 +1929,25 @@ get_use_process_sampling()
 }
 
 bool&
+get_use_ainic_stat_enabled()
+{
+    static auto _v = get_config()->find("ROCPROFSYS_AINIC_STAT_ENABLED");
+    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
+}
+
+bool&
 get_cpu_freq_enabled()
 {
     static auto _v = get_config()->find("ROCPROFSYS_CPU_FREQ_ENABLED");
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
+}
+
+std::string
+get_sampling_ainics()
+{
+    static auto _v = get_config()->find("ROCPROFSYS_SAMPLING_AINICS");
+    return static_cast<tim::tsettings<std::string>&>(*_v->second).get();
+
 }
 
 bool&

@@ -50,6 +50,8 @@
 #include <tuple>
 #include <type_traits>
 
+#include "ainic_stats.hpp"
+
 namespace rocprofsys
 {
 namespace amd_smi
@@ -58,10 +60,16 @@ void
 setup();
 
 void
+setup_ainic();
+
+void
 config();
 
 void
 sample();
+
+void
+nic_sample();
 
 void
 shutdown();
@@ -150,6 +158,37 @@ private:
     static std::unique_ptr<std::thread>& get_thread();
     static bool                          setup();
     static bool                          shutdown();
+};
+
+struct nic_data
+{
+    using timestamp_t = int64_t;
+
+    explicit nic_data(uint32_t nic_index, const std::string& nic);
+
+    static std::vector<nic_data>& get_initial();
+    static std::vector<std::string> nic_vec;
+    const std::string& get_nic() const;
+    static bool setup();
+
+    void sample();
+
+    static void post_process(size_t nic_index);
+
+    static AINICStatsCollector    nic_stats_collector;
+
+    timestamp_t                   m_ts = 0;
+
+private:
+    std::string _nic;
+    uint32_t    _nic_index;
+    uint32_t    _rx_rdma_cnp_pkts;
+    uint32_t    _tx_rdma_cnp_pkts;
+    uint32_t    _rx_ucast_bytes;
+    uint32_t    _tx_ucast_bytes;
+    uint32_t    _rx_ucast_pkts;
+    uint32_t    _tx_ucast_pkts;
+
 };
 
 #if !defined(ROCPROFSYS_USE_ROCM) || ROCPROFSYS_USE_ROCM == 0

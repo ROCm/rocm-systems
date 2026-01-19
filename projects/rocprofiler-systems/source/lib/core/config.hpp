@@ -217,6 +217,9 @@ bool&
 get_use_process_sampling() ROCPROFSYS_HOT;
 
 bool&
+get_use_ainic_stat_enabled() ROCPROFSYS_HOT;
+
+bool&
 get_cpu_freq_enabled();
 
 bool&
@@ -339,6 +342,9 @@ get_process_sampling_duration();
 
 std::string
 get_sampling_gpus();
+
+std::string
+get_sampling_ainics();
 
 bool
 get_trace_thread_locks();
