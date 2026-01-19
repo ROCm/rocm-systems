@@ -541,6 +541,72 @@ perfetto_processor_t::handle([[maybe_unused]] const kernel_dispatch_sample& _kds
 }
 
 void
+perfetto_processor_t::handle([[maybe_unused]] const scratch_memory_sample& _sms)
+{
+#if ROCPROFSYS_USE_ROCM > 0
+    auto        _corr_id           = _sms.correlation_id_internal;
+    auto        _stream_id         = _sms.stream_handle;
+    auto        _queue_id_handle   = _sms.queue_id_handle;
+    const auto& _t_info            = thread_info::get(_sms.thread_id, SystemTID);
+    const auto  _thread_id_sequent = _t_info->index_data->sequent_value;
+    auto        _beg_ts            = _sms.start_timestamp;
+    auto        _end_ts            = _sms.end_timestamp;
+
+    auto _agent_device_id =
+        m_agent_manager.get_agent_by_handle(_sms.agent_id_handle).device_type_index;
+    auto _name = std::string{ m_metadata.get_buffer_name_info().at(
+        static_cast<rocprofiler_buffer_tracing_kind_t>(_sms.kind),
+        static_cast<rocprofiler_tracing_operation_t>(_sms.operation)) };
+
+// Scratch memory samples from SDK versions prior to 7.0.2 do not include
+// allocation_size field, so counter tracks are not needed
+#    if ROCPROFSYS_ROCM_VERSION >= 70002
+    using counter_track =
+        perfetto_counter_track<rocprofiler_buffer_tracing_scratch_memory_record_t>;
+
+    if(!counter_track::exists(_agent_device_id))
+    {
+        auto _track_desc_alloc_size = JOIN("", "GPU Scratch Memory [", _agent_device_id,
+                                           "] Thread ", _thread_id_sequent);
+        counter_track::emplace(_agent_device_id, _track_desc_alloc_size, "bytes");
+    }
+
+    if(_sms.operation == ROCPROFILER_SCRATCH_MEMORY_ALLOC)
+    {
+        TRACE_COUNTER("rocm_scratch_memory", counter_track::at(_agent_device_id, 0),
+                      _beg_ts, _sms.allocation_size);
+    }
+#    endif
+
+    auto _track_desc_events = [&]() {
+        return JOIN("", "GPU Scratch Memory Events Thread ", _thread_id_sequent);
+    };
+
+    const auto _track =
+        tracing::get_perfetto_track(category::rocm_scratch_memory{}, _track_desc_events);
+
+    auto add_perfetto_annotations = [&](::perfetto::EventContext ctx) {
+        if(!m_use_annotations) return;
+
+        annotate_perfetto(ctx, { { "begin_ns", _beg_ts },
+                                 { "end_ns", _end_ts },
+                                 { "corr_id", _corr_id },
+                                 { "stream_id", _stream_id },
+                                 { "queue", _queue_id_handle },
+                                 { "allocation_size", _sms.allocation_size },
+                                 { "agent_id", _agent_device_id },
+                                 { "operation", _name },
+                                 { "flags", _sms.flags } });
+    };
+
+    tracing::push_perfetto(category::rocm_scratch_memory{}, _name.c_str(), _track,
+                           _beg_ts, ::perfetto::Flow::ProcessScoped(_corr_id),
+                           add_perfetto_annotations);
+    tracing::pop_perfetto(category::rocm_scratch_memory{}, "", _track, _end_ts);
+#endif
+}
+
+void
 perfetto_processor_t::handle([[maybe_unused]] const memory_copy_sample& _mcs)
 {
 #if ROCPROFSYS_USE_ROCM > 0

@@ -66,6 +66,37 @@ get_handle_from_code_object(
 #    endif
 }
 #endif
+
+#if ROCPROFSYS_USE_ROCM > 0
+using memory_operation = std::string;
+using memory_type      = std::string;
+std::pair<memory_operation, memory_type>
+parse_memory_operation_name(std::string_view memory_operation_name)
+{
+    static const std::unordered_map<std::string_view,
+                                    std::pair<memory_operation, memory_type>>
+        parsing_map{
+            { "MEMORY_ALLOCATION_NONE", { "NONE", "REAL" } },
+            { "MEMORY_ALLOCATION_ALLOCATE", { "ALLOC", "REAL" } },
+            { "MEMORY_ALLOCATION_VMEM_ALLOCATE", { "ALLOC", "VIRTUAL" } },
+            { "MEMORY_ALLOCATION_FREE", { "FREE", "REAL" } },
+            { "MEMORY_ALLOCATION_VMEM_FREE", { "FREE", "VIRTUAL" } },
+            { "SCRATCH_MEMORY_NONE", { "NONE", "SCRATCH" } },
+            { "SCRATCH_MEMORY_ALLOC", { "ALLOC", "SCRATCH" } },
+            { "SCRATCH_MEMORY_FREE", { "FREE", "SCRATCH" } },
+            { "SCRATCH_MEMORY_ASYNC_RECLAIM", { "ASYNC_RECLAIM", "SCRATCH" } },
+        };
+
+    auto item = parsing_map.find(memory_operation_name);
+    if(item == parsing_map.end())
+    {
+        LOG_WARNING("Unknown memory operation name: {}", memory_operation_name);
+        return { "UNKNOWN", "UNKNOWN" };
+    }
+
+    return item->second;
+}
+#endif
 }  // namespace
 
 void
@@ -107,6 +138,46 @@ rocpd_processor_t::handle([[maybe_unused]] const kernel_dispatch_sample& _kds)
         _kds.workgroup_size_x, _kds.workgroup_size_y, _kds.workgroup_size_z,
         _kds.grid_size_x, _kds.grid_size_y, _kds.grid_size_z, region_name_primary_key,
         event_id);
+#endif
+}
+
+void
+rocpd_processor_t::handle([[maybe_unused]] const scratch_memory_sample& _sms)
+{
+#if ROCPROFSYS_USE_ROCM > 0
+    auto& n_info  = node_info::get_instance();
+    auto  process = m_metadata->get_process_info();
+
+    const auto* _name = m_metadata->get_buffer_name_info().at(
+        static_cast<rocprofiler_buffer_tracing_kind_t>(_sms.kind),
+        static_cast<rocprofiler_tracing_operation_t>(_sms.operation));
+
+    auto agent_primary_key =
+        m_agent_manager->get_agent_by_handle(_sms.agent_id_handle).base_id;
+
+    auto thread_primary_key =
+        m_data_processor->map_thread_id_to_primary_key(_sms.thread_id);
+
+    auto category_primary_key = m_data_processor->insert_string(
+        trait::name<category::rocm_scratch_memory>::value);
+
+    auto stack_id        = _sms.correlation_id_internal;
+    auto parent_stack_id = _sms.correlation_id_ancestor;
+    auto correlation_id  = 0;
+    auto address_value   = 0;
+
+    auto event_primary_key = m_data_processor->insert_event(
+        category_primary_key, stack_id, parent_stack_id, correlation_id);
+
+    auto [memory_operation, memory_type] = parse_memory_operation_name(_name);
+
+    auto extdata_json_str = JOIN("", "{\"flags\": ", _sms.flags, "}");
+
+    m_data_processor->insert_memory_alloc(
+        n_info.id, process.pid, thread_primary_key, agent_primary_key,
+        memory_operation.c_str(), memory_type.c_str(), _sms.start_timestamp,
+        _sms.end_timestamp, address_value, _sms.allocation_size, _sms.queue_id_handle,
+        _sms.stream_handle, event_primary_key, extdata_json_str.c_str());
 #endif
 }
 
@@ -153,46 +224,6 @@ void
 rocpd_processor_t::handle([[maybe_unused]] const memory_allocate_sample& _mas)
 {
 #if ROCPROFSYS_USE_ROCM > 0 && (ROCPROFILER_VERSION >= 600)
-    static auto memtype_to_db =
-        [](std::string_view memory_type) -> std::pair<std::string, std::string> {
-        constexpr auto MEMORY_PREFIX  = std::string_view{ "MEMORY_ALLOCATION_" };
-        constexpr auto SCRATCH_PREFIX = std::string_view{ "SCRATCH_MEMORY_" };
-        constexpr auto VMEM_PREFIX    = std::string_view{ "VMEM_" };
-        constexpr auto ASYNC_PREFIX   = std::string_view{ "ASYNC_" };
-
-        std::string _type;
-        std::string _level;
-        if(memory_type.find(MEMORY_PREFIX) == 0)
-        {
-            _type = memory_type.substr(MEMORY_PREFIX.length());
-            if(_type.find(VMEM_PREFIX) == 0)
-            {
-                _type  = _type.substr(VMEM_PREFIX.length());
-                _level = "VIRTUAL";
-            }
-            else
-            {
-                _level = "REAL";
-            }
-        }
-        else if(memory_type.find(SCRATCH_PREFIX) == 0)
-        {
-            _type  = memory_type.substr(SCRATCH_PREFIX.length());
-            _level = "SCRATCH";
-            if(memory_type.find(ASYNC_PREFIX) == 0)
-            {
-                _type = memory_type.substr(ASYNC_PREFIX.length());  // RECLAIM
-            }
-        }
-
-        if(_type == "ALLOCATE")
-        {
-            _type = "ALLOC";
-        }
-
-        return std::make_pair(_type, _level);
-    };
-
     auto& n_info  = node_info::get_instance();
     auto  process = m_metadata->get_process_info();
     auto  thread_primary_key =
@@ -210,7 +241,7 @@ rocpd_processor_t::handle([[maybe_unused]] const memory_allocate_sample& _mas)
             static_cast<rocprofiler_buffer_tracing_kind_t>(_mas.kind),
             static_cast<rocprofiler_tracing_operation_t>(_mas.operation));
 
-        auto [type, level] = memtype_to_db(_name);
+        auto [memory_operation, memory_type] = parse_memory_operation_name(_name);
 
         auto stack_id        = _mas.correlation_id_internal;
         auto parent_stack_id = _mas.correlation_id_ancestor;
@@ -224,9 +255,10 @@ rocpd_processor_t::handle([[maybe_unused]] const memory_allocate_sample& _mas)
             category_primary_key, stack_id, parent_stack_id, correlation_id);
 
         m_data_processor->insert_memory_alloc(
-            n_info.id, process.pid, thread_primary_key, agent_primary_key, type.c_str(),
-            level.c_str(), _mas.start_timestamp, _mas.end_timestamp, _mas.address_value,
-            _mas.allocation_size, queue_id, _mas.stream_handle, event_primary_key);
+            n_info.id, process.pid, thread_primary_key, agent_primary_key,
+            memory_operation.c_str(), memory_type.c_str(), _mas.start_timestamp,
+            _mas.end_timestamp, _mas.address_value, _mas.allocation_size, queue_id,
+            _mas.stream_handle, event_primary_key);
     }
 #endif
 }
