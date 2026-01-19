@@ -1,3 +1,6 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
+
 cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
 
 project(rocprofiler-systems-python)
@@ -36,7 +39,7 @@ if(Python3_FOUND)
         if(ROCPROFSYS_INSTALL_EXAMPLES)
             install(
                 PROGRAMS ${PROJECT_BINARY_DIR}/${_FILE}
-                DESTINATION bin
+                DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples
                 COMPONENT rocprofiler-systems-examples
             )
         endif()

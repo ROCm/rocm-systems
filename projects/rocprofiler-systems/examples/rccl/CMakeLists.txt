@@ -138,6 +138,14 @@ if(hip_FOUND AND rccl_FOUND)
         add_dependencies(rccl-tests::${_EXE_NAME} copy-${_EXE_NAME})
 
         list(APPEND _RCCL_TEST_TARGETS "rccl-tests::${_EXE_NAME}")
+
+        if(ROCPROFSYS_INSTALL_EXAMPLES)
+            install(
+                PROGRAMS ${_EXE_DEST_PATH}
+                DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples
+                COMPONENT rocprofiler-systems-examples
+            )
+        endif()
     endforeach()
 
     set(RCCL_TEST_TARGETS "${_RCCL_TEST_TARGETS}" CACHE INTERNAL "rccl-test targets")
