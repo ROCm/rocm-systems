@@ -303,7 +303,7 @@ Examples:
 .. code-block:: shell-session
 
    $ rocprof-compute profile --output-directory /tmp/profiles/%hostname%/%rank% -- ./vcopy -n 1048576 -b 256
-   
+
    $ tree /tmp/profiles/<hostname>/0
 
    └── MI200
