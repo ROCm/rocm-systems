@@ -763,7 +763,7 @@ class GpuAgent : public GpuAgentInt {
   /// @brief Coarse-grain deallocator on this GPU.
   std::function<void(void*)> coarsegrain_deallocator_;
 
-  std::unique_ptr<void, std::function<void(void*)>> trap_handler_tma_region_;
+  void* trap_handler_tma_region_;
 
   /* PC Sampling fields - begin */
   /* 2nd level Trap handler code is based on the offsets within this structure */

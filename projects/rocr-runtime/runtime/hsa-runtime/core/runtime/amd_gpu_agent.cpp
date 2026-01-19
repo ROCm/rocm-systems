@@ -112,9 +112,7 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
       scratch_limit_async_threshold_(0),
       scratch_cache_(
           [this](void* base, size_t size, bool large) { ReleaseScratch(base, size, large); }),
-      trap_handler_tma_region_(nullptr, [this](void* ptr){
-        if (ptr && this->finegrain_allocator_) this->finegrain_deallocator()(ptr);
-      }),
+      trap_handler_tma_region_(NULL),
       rec_sdma_eng_override_(false),
       pcs_hosttrap_data_(),
       pcs_stochastic_data_(),
@@ -2269,27 +2267,26 @@ hsa_status_t GpuAgent::UpdateTrapHandlerWithPCS(pcs_sampling_data_t* pcs_hosttra
     ((uint64_t*)tma_region_host)[1] = (uint64_t)pcs_stochastic_buffers;
 
     if (!trap_handler_tma_region_) {
-      void* mem = (uint64_t*)finegrain_allocator()(2 * sizeof(uint64_t), 0);
-      if (!mem) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
-
-      trap_handler_tma_region_.reset(mem);
+      trap_handler_tma_region_ = (uint64_t*)finegrain_allocator()(2 * sizeof(uint64_t), 0);
+      if (trap_handler_tma_region_ == nullptr) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 
       // NearestCpuAgent owns pool returned system_allocator()
       auto cpuAgent = GetNearestCpuAgent()->public_handle();
 
       hsa_status_t ret =
-          AMD::hsa_amd_agents_allow_access(1, &cpuAgent, NULL, trap_handler_tma_region_.get());
+          AMD::hsa_amd_agents_allow_access(1, &cpuAgent, NULL, trap_handler_tma_region_);
       assert(ret == HSA_STATUS_SUCCESS);
     }
 
     /* On non-large BAR systems, we may not be able to access device memory, so do a DmaCopy */
-    if (DmaCopy(trap_handler_tma_region_.get(), tma_region_host, 2 * sizeof(uint64_t)) != HSA_STATUS_SUCCESS)
+    if (DmaCopy(trap_handler_tma_region_, tma_region_host, 2 * sizeof(uint64_t)) != HSA_STATUS_SUCCESS)
       return HSA_STATUS_ERROR;
 
     tma_size = 2 * sizeof(uint64_t);
-    tma_addr = trap_handler_tma_region_.get();
+    tma_addr = trap_handler_tma_region_;
   } else if (trap_handler_tma_region_) {
-    trap_handler_tma_region_.reset(nullptr);
+    finegrain_deallocator()(trap_handler_tma_region_);
+    trap_handler_tma_region_ = NULL;
   }
 
   // Bind the trap handler to this node.
