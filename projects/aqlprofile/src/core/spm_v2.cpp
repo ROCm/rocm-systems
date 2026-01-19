@@ -45,7 +45,8 @@ struct spm_state_t : public spm_set_dest_buffer_args {
     std::atomic<bool> data_ready{};
 
     std::atomic<bool> draining_requested{false};
-    std::atomic<bool> draining_done{false};
+    std::atomic<bool> draining_producer_done{false};
+    std::atomic<bool> draining_consumer_done{false};
     std::atomic<bool> draining_failed{false};
     std::mutex drain_mutex{};
     std::condition_variable drain_cond{};
@@ -387,17 +388,24 @@ PUBLIC_API hsa_status_t aqlprofile_spm_drain_counters(aqlprofile_handle_t handle
     {
         std::lock_guard<std::mutex> lock(s->drain_mutex);
         s->draining_requested = true;
-        s->draining_done = false;
+        s->draining_producer_done = false;
+        s->draining_consumer_done = false;
         s->draining_failed = false;
     }
 
     // Wait for draining to complete
     std::unique_lock<std::mutex> lock(s->drain_mutex);
-    s->drain_cond.wait(lock, [&s]() { return s->draining_done.load(); });
+    s->drain_cond.wait(lock, [&s]() { return s->draining_consumer_done.load(); });
 
     // Check if draining failed
     if (s->draining_failed) {
         return HSA_STATUS_ERROR;  // Producer couldn't drain after re-tries
+    }
+
+    { // reset flags
+        std::lock_guard<std::mutex> lock(s->drain_mutex);
+        s->draining_producer_done = false;
+        s->draining_consumer_done = false;
     }
 
     return HSA_STATUS_SUCCESS;
@@ -503,7 +511,7 @@ static void producer(std::shared_ptr<spm_state_t> s)
                 // Signal that draining is complete
                 {
                     std::lock_guard<std::mutex> lock(s->drain_mutex);
-                    s->draining_done = true;
+                    s->draining_producer_done = true;
                     s->draining_requested = false; // Reset for next drain request
                     s->draining_failed = s->size_copied != 0; // Set failure if data still remaining
                 }
@@ -536,6 +544,13 @@ static void consumer(std::shared_ptr<spm_state_t> s, aqlprofile_spm_data_callbac
                 callback(i, (void*)(buf_info + 1), buf_info->bytes_copied, flags, userdata);
 
             base += s->buf_size_xcc;
+        }
+
+        // Check if producer draining is done and signal consumer completion
+        if (s->draining_producer_done.load()) {
+            std::lock_guard<std::mutex> drain_lock(s->drain_mutex);
+            s->draining_consumer_done = true;
+            s->drain_cond.notify_all();
         }
     }
 }
