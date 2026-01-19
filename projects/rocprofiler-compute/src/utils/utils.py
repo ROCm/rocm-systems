@@ -1483,12 +1483,14 @@ def consolidate_torch_trace_output(workload_dir: str) -> None:
     ]
     grouped = consolidated_df.groupby("Operator_Name")
     for operator_name, group in grouped:
-        f = operator_name.replace("torch.", "").replace(".", "_")
+        sanitized_operator_name = operator_name.replace("torch.", "").replace(".", "_")
         # Ensure output directory exists
         Path(f"{workload_dir}/torch_operators").mkdir(parents=True, exist_ok=True)
-        output_file = f"{workload_dir}/torch_operators/{f}.csv"
+        output_file = f"{workload_dir}/torch_operators/{sanitized_operator_name}.csv"
         group.to_csv(output_file, index=False)
-        console_log(f"Saved consolidated trace for {f} to {output_file}")
+        console_log(
+            f"Saved consolidated trace for {sanitized_operator_name} to {output_file}"
+        )
 
     for trace_file in torch_trace_files:
         try:
