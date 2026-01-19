@@ -29,6 +29,7 @@ import re
 import sqlite3
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import numpy as np
@@ -989,19 +990,19 @@ def test_analyze_rocpd(
         Dispatch,
         Kernel,
         Metadata,
-        Metric,
+        MetricDefinition,
+        MetricValue,
         RooflineData,
-        Value,
         Workload,
     )
 
     table_name_map = {
         "compute_workload": Workload,
-        "compute_metric": Metric,
+        "compute_metric_definition": MetricDefinition,
         "compute_roofline_data": RooflineData,
         "compute_dispatch": Dispatch,
         "compute_kernel": Kernel,
-        "compute_value": Value,
+        "compute_metric_value": MetricValue,
         "compute_metadata": Metadata,
     }
 
@@ -2268,6 +2269,7 @@ def test_live_attach_detach_block(binary_handler_profile_rocprof_compute):
     try:
         # Start workload
         process_workload = subprocess.Popen(config["app_hip_dynamic_shared"], env=env)
+        time.sleep(5)  # Give workload time to start
 
         attach_detach = {
             "attach_pid": process_workload.pid,
@@ -2316,8 +2318,9 @@ def test_live_attach_detach_block_thread_sleep(binary_handler_profile_rocprof_co
     try:
         # Start workload with sleep mode enabled
         process_workload = subprocess.Popen(
-            [config["app_hip_dynamic_shared"], "--enable-sleep"], env=env
+            [*config["app_hip_dynamic_shared"], "--enable-sleep"], env=env
         )
+        time.sleep(5)  # Give workload time to start
 
         attach_detach = {
             "attach_pid": process_workload.pid,
@@ -2358,7 +2361,7 @@ def test_live_attach_detach_block_thread_sleep(binary_handler_profile_rocprof_co
 
 
 @pytest.mark.live_attach_detach
-def test_live_attach_detach_singlepath_launch_stats(
+def test_live_attach_detach_singlepass_launch_stats(
     binary_handler_profile_rocprof_compute,
 ):
     options = ["--set", "launch_stats"]
@@ -2374,6 +2377,7 @@ def test_live_attach_detach_singlepath_launch_stats(
     try:
         # Start workload
         process_workload = subprocess.Popen(config["app_hip_dynamic_shared"], env=env)
+        time.sleep(5)  # Give workload time to start
 
         attach_detach = {
             "attach_pid": process_workload.pid,

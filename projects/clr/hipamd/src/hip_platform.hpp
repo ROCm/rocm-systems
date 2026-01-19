@@ -50,9 +50,12 @@ class PlatformState {
   // Unique FD Store Lock
   amd::Monitor ufd_lock_{true};
 
+  // Lock for logging operations
+  amd::Monitor lg_lock_{true};
+
   // Singleton object
   static PlatformState* platform_;
-  PlatformState() {}
+  PlatformState() : log_level_(0), log_size_(0), log_mask_(0) {}
   ~PlatformState() {}
 
  public:
@@ -113,6 +116,14 @@ class PlatformState {
 
   size_t UfdMapSize() const { return ufd_map_.size(); }
 
+  // Logging lock accessor
+  amd::Monitor& getLogLock() { return lg_lock_; }
+
+  // Friend functions for logging access
+  friend hipError_t hipExtEnableLogging();
+  friend hipError_t hipExtDisableLogging();
+  friend hipError_t hipExtSetLoggingParams(size_t log_level, size_t log_size, size_t log_mask);
+
   inline bool RegisterLibraryFunction(const hipKernel_t f, const hipLibrary_t l) {
     amd::ScopedLock lock(lock_);
     if (library_functions_.find(f) == library_functions_.end()) {
@@ -150,5 +161,10 @@ class PlatformState {
 
   void* dynamicLibraryHandle_{nullptr};
   std::unordered_map<hipKernel_t, hipLibrary_t> library_functions_;
+
+  // Logging state (moved from LoggingInfo singleton)
+  size_t log_level_;
+  size_t log_size_;
+  size_t log_mask_;
 };
 }  // namespace hip
