@@ -858,14 +858,6 @@ void GraphExec::FindStreamsReqPerDev() {
       }
     }
   }
-
-  // Account for the launch stream that's available only on the instantiation device
-  // We only need to create (count - 1) extra streams for the instantiation device
-  for (auto& [dev_id, count] : max_streams_dev_) {
-    if (dev_id == instantiateDeviceId_ && count > 0) {
-      count = count - 1;
-    }
-  }
 }
 
 // ================================================================================================
@@ -896,14 +888,6 @@ void GraphExec::FindStreamsReqPerDevForSegments() {
     // Update max streams per device based on this level's requirements
     for (const auto& [dev_id, count] : streams_per_dev_at_level) {
       max_streams_dev_[dev_id] = std::max(max_streams_dev_[dev_id], count);
-    }
-  }
-
-  // Account for the launch stream that's available only on the instantiation device
-  // We only need to create (count - 1) extra streams for the instantiation device
-  for (auto& [dev_id, count] : max_streams_dev_) {
-    if (dev_id == instantiateDeviceId_ && count > 0) {
-      count = count - 1;
     }
   }
 }
