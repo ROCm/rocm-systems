@@ -1,3 +1,6 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
+
 cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
 
 project(rocprofiler-systems-fork LANGUAGES CXX)
@@ -18,7 +21,13 @@ target_link_libraries(
 target_compile_options(fork-example PRIVATE ${_FLAGS})
 
 if(ROCPROFSYS_INSTALL_EXAMPLES)
-    install(TARGETS fork-example DESTINATION bin COMPONENT rocprofiler-systems-examples)
+    if(TARGET fork-example)
+        install(
+            TARGETS fork-example
+            DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples
+            COMPONENT rocprofiler-systems-examples
+        )
+    endif()
 endif()
 
 # HIP fork example (multi-process concurrency test)
@@ -81,10 +90,10 @@ if(HIPCC_EXECUTABLE)
             rocprofiler_systems_custom_compilation(COMPILER ${HIPCC_EXECUTABLE} TARGET hipMallocConcurrencyMproc)
         endif()
 
-        if(ROCPROFSYS_INSTALL_EXAMPLES)
+        if(ROCPROFSYS_INSTALL_EXAMPLES AND TARGET hipMallocConcurrencyMproc)
             install(
                 TARGETS hipMallocConcurrencyMproc
-                DESTINATION bin
+                DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples
                 COMPONENT rocprofiler-systems-examples
             )
         endif()

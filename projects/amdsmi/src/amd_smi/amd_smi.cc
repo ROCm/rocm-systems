@@ -6843,4 +6843,107 @@ amdsmi_status_t amdsmi_get_esmi_err_msg(amdsmi_status_t status, const char **sta
     return AMDSMI_STATUS_SUCCESS;
 }
 
+amdsmi_status_t amdsmi_set_cpu_rail_isofreq_policy(amdsmi_processor_handle processor_handle,
+                                                   uint8_t input)
+{
+    amdsmi_status_t status;
+    uint8_t sock_ind;
+    bool val;
+
+    AMDSMI_CHECK_INIT();
+
+    if (processor_handle == nullptr )
+        return AMDSMI_STATUS_INVAL;
+
+    amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
+    if (r != AMDSMI_STATUS_SUCCESS)
+        return r;
+
+    sock_ind = (uint8_t)std::stoi(proc_id, NULL, 0);
+
+    val = (bool)input;
+    status = static_cast<amdsmi_status_t>(esmi_cpurail_isofreq_policy_set(sock_ind, &val));
+    if (status != AMDSMI_STATUS_SUCCESS)
+        return amdsmi_errno_to_esmi_status(status);
+
+    return AMDSMI_STATUS_SUCCESS;
+}
+
+amdsmi_status_t amdsmi_get_cpu_rail_isofreq_policy(amdsmi_processor_handle processor_handle,
+                                                   uint8_t *cpurailiso)
+{
+    amdsmi_status_t status;
+    uint8_t sock_ind;
+    bool cpurailisofreq;
+
+    AMDSMI_CHECK_INIT();
+
+    if (processor_handle == nullptr || cpurailiso == nullptr)
+        return AMDSMI_STATUS_INVAL;
+
+    amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
+    if (r != AMDSMI_STATUS_SUCCESS)
+        return r;
+
+    sock_ind = (uint8_t)std::stoi(proc_id, NULL, 0);
+
+    status = static_cast<amdsmi_status_t>(esmi_cpurail_isofreq_policy_get(sock_ind, &cpurailisofreq));
+    if (status != AMDSMI_STATUS_SUCCESS)
+        return amdsmi_errno_to_esmi_status(status);
+
+    *cpurailiso = (uint8_t) cpurailisofreq;
+    return AMDSMI_STATUS_SUCCESS;
+}
+
+amdsmi_status_t amdsmi_set_dfc_ctrl(amdsmi_processor_handle processor_handle,
+                                    bool dfc_ctrl)
+{
+    amdsmi_status_t status;
+    uint8_t sock_ind;
+
+    AMDSMI_CHECK_INIT();
+
+    if (processor_handle == nullptr)
+        return AMDSMI_STATUS_INVAL;
+
+    amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
+    if (r != AMDSMI_STATUS_SUCCESS)
+        return r;
+
+    sock_ind = (uint8_t)std::stoi(proc_id, NULL, 0);
+
+    status = static_cast<amdsmi_status_t>(esmi_dfc_enable_set(sock_ind, &dfc_ctrl));
+    if (status != AMDSMI_STATUS_SUCCESS)
+        return amdsmi_errno_to_esmi_status(status);
+
+    return AMDSMI_STATUS_SUCCESS;
+}
+
+amdsmi_status_t amdsmi_get_dfc_ctrl(amdsmi_processor_handle processor_handle,
+                                    uint8_t *dfc_ctrl)
+{
+    amdsmi_status_t status;
+    uint8_t sock_ind;
+    bool dfcctrl;
+
+    AMDSMI_CHECK_INIT();
+
+    if (processor_handle == nullptr || dfc_ctrl == nullptr)
+        return AMDSMI_STATUS_INVAL;
+
+    amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
+    if (r != AMDSMI_STATUS_SUCCESS)
+        return r;
+
+    sock_ind = (uint8_t)std::stoi(proc_id, NULL, 0);
+
+    status = static_cast<amdsmi_status_t>(esmi_dfc_ctrl_setting_get(sock_ind, &dfcctrl));
+    if (status != AMDSMI_STATUS_SUCCESS)
+        return amdsmi_errno_to_esmi_status(status);
+
+    *dfc_ctrl = (uint8_t)dfcctrl;
+
+    return AMDSMI_STATUS_SUCCESS;
+}
+
 #endif

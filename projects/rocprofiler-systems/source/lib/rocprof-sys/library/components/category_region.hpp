@@ -43,6 +43,8 @@
 #include <timemory/mpl/types.hpp>
 #include <timemory/utility/types.hpp>
 
+#include "logger/debug.hpp"
+
 #include <string_view>
 #include <utility>
 
@@ -119,6 +121,31 @@ cache_stop(const char* name)
         cache_region(thread_id, name, timestamp, end_ts,
                      rocprofsys::trait::name<CategoryT>::value);
     }
+}
+
+/// Flush all pending cached entries for this thread.
+/// Called during finalization to ensure entries that were started but not stopped
+/// (e.g., main entry point) are written to the trace cache.
+inline void
+flush_pending_cached_entries()
+{
+    const auto end_ts = static_cast<timestamp_t>(rocprofsys::comp::wall_clock::record());
+    uint64_t   thread_id = 0;
+
+    const auto& extended_info = rocprofsys::thread_info::get(std::this_thread::get_id());
+    if(extended_info.has_value() && extended_info->index_data.has_value())
+    {
+        constexpr size_t UNKNOWN_TIME = 0;
+        thread_id                     = extended_info->index_data->system_value;
+        rocprofsys::trace_cache::get_metadata_registry().add_thread_info(
+            { getppid(), getpid(), thread_id, UNKNOWN_TIME, UNKNOWN_TIME, "{}" });
+    }
+
+    for(const auto& [key, start_ts] : map_name_to_args)
+    {
+        cache_region(thread_id, key.name, start_ts, end_ts, key.category);
+    }
+    map_name_to_args.clear();
 }
 }  // namespace
 
@@ -242,11 +269,12 @@ category_region<CategoryT>::start(std::string_view name, Args&&... args)
     constexpr bool _ct_use_causal =
         (sizeof...(OptsT) == 0 || is_one_of<quirk::causal, type_list<OptsT...>>::value);
 
-    ROCPROFSYS_CONDITIONAL_PRINT(
-        tracing::debug_push,
-        "[%s][PID=%i][state=%s][thread_state=%s] rocprofsys_push_region(%s)\n",
-        category_name, process::get_id(), std::to_string(get_state()).c_str(),
-        std::to_string(get_thread_state()).c_str(), name.data());
+    if(tracing::debug_push)
+    {
+        LOG_DEBUG("[{}][PID={}][state={}][thread_state={}] rocprofsys_push_region({})",
+                  category_name, process::get_id(), std::to_string(get_state()),
+                  std::to_string(get_thread_state()), name.data());
+    }
 
     if constexpr(is_one_of<CategoryT, tracing_count_categories_t>::value)
     {
@@ -304,11 +332,12 @@ category_region<CategoryT>::stop(std::string_view name, Args&&... args)
     constexpr bool _ct_use_causal =
         (sizeof...(OptsT) == 0 || is_one_of<quirk::causal, type_list<OptsT...>>::value);
 
-    ROCPROFSYS_CONDITIONAL_PRINT(
-        tracing::debug_pop,
-        "[%s][PID=%i][state=%s][thread_state=%s] rocprofsys_pop_region(%s)\n",
-        category_name, process::get_id(), std::to_string(get_state()).c_str(),
-        std::to_string(get_thread_state()).c_str(), name.data());
+    if(tracing::debug_pop)
+    {
+        LOG_DEBUG("[{}][PID={}][state={}][thread_state={}] rocprofsys_pop_region({})",
+                  category_name, process::get_id(), std::to_string(get_state()),
+                  std::to_string(get_thread_state()), name.data());
+    }
 
     // only execute when active
     if(get_state() == State::Active)
@@ -351,10 +380,8 @@ category_region<CategoryT>::stop(std::string_view name, Args&&... args)
     }
     else
     {
-        static auto _debug = get_debug_env();
-        ROCPROFSYS_CONDITIONAL_BASIC_PRINT(
-            _debug, "[%s] rocprofsys_pop_region(%s) ignored :: state = %s\n",
-            category_name, name.data(), std::to_string(get_state()).c_str());
+        LOG_DEBUG("[{}] rocprofsys_pop_region({}) ignored :: state = {}", category_name,
+                  name.data(), std::to_string(get_state()));
     }
 }
 
@@ -383,11 +410,12 @@ category_region<CategoryT>::mark(std::string_view name, Args&&...)
 
     if(get_use_causal())
     {
-        ROCPROFSYS_CONDITIONAL_PRINT(
-            tracing::debug_mark,
-            "[%s][PID=%i][state=%s][thread_state=%s] rocprofsys_progress(%s)\n",
-            category_name, process::get_id(), std::to_string(get_state()).c_str(),
-            std::to_string(get_thread_state()).c_str(), name.data());
+        if(tracing::debug_mark)
+        {
+            LOG_DEBUG("[{}][PID={}][state={}][thread_state={}] rocprofsys_progress({})",
+                      category_name, process::get_id(), std::to_string(get_state()),
+                      std::to_string(get_thread_state()), name.data());
+        }
 
         causal::mark_progress_point(name);
     }

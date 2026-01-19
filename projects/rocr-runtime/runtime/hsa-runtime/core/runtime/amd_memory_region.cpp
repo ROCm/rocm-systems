@@ -48,6 +48,8 @@
 #include "core/inc/amd_memory_region.h"
 
 #include <algorithm>
+#include <mutex>
+#include <shared_mutex>
 
 #include "core/inc/runtime.h"
 #include "core/inc/amd_cpu_agent.h"
@@ -132,7 +134,7 @@ MemoryRegion::MemoryRegion(bool fine_grain, bool kernarg, bool full_profile,
 MemoryRegion::~MemoryRegion() {}
 
 hsa_status_t MemoryRegion::Allocate(size_t& size, AllocateFlags alloc_flags, void** address, int agent_node_id) const {
-  ScopedAcquire<KernelMutex> lock(&owner()->agent_memory_lock_);
+  std::lock_guard<std::mutex> lock(owner()->agent_memory_lock_);
   return AllocateImpl(size, alloc_flags, address, agent_node_id);
 }
 
@@ -160,7 +162,7 @@ hsa_status_t MemoryRegion::AllocateImpl(size_t& size, AllocateFlags alloc_flags,
 }
 
 hsa_status_t MemoryRegion::Free(void* address, size_t size) const {
-  ScopedAcquire<KernelMutex> lock(&owner()->agent_memory_lock_);
+  std::lock_guard<std::mutex> lock(owner()->agent_memory_lock_);
   return FreeImpl(address, size);
 }
 
@@ -172,7 +174,7 @@ hsa_status_t MemoryRegion::FreeImpl(void* address, size_t size) const {
 
 // TODO:  Look into a better name and/or making this process transparent to exporting.
 hsa_status_t MemoryRegion::IPCFragmentExport(void* address) const {
-  ScopedAcquire<KernelMutex> lock(&owner()->agent_memory_lock_);
+  std::lock_guard<std::mutex> lock(owner()->agent_memory_lock_);
   if (!fragment_allocator_.discardBlock(address)) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
   return HSA_STATUS_SUCCESS;
 }
@@ -448,7 +450,7 @@ hsa_status_t MemoryRegion::AllowAccess(uint32_t num_agents,
   std::vector<uint64_t> union_agents;
   info.size = sizeof(info);
 
-  ScopedAcquire<KernelMutex> lock(&access_lock_);
+  std::lock_guard<std::mutex> lock(access_lock_);
 
   if (core::Runtime::runtime_singleton_->PtrInfo(const_cast<void*>(ptr), &info, malloc,
                                                  &agent_count, &accessible,
@@ -512,8 +514,7 @@ hsa_status_t MemoryRegion::AllowAccess(uint32_t num_agents,
 
   {  // Sequence with pointer info since queries to other fragments of the block may be adjusted by
      // this call.
-    ScopedAcquire<KernelSharedMutex::Shared> lock(
-        core::Runtime::runtime_singleton_->memory_lock_.shared());
+    std::shared_lock<std::shared_mutex> lock(core::Runtime::runtime_singleton_->memory_lock_);
     uint64_t alternate_va = 0;
     if (owner()->driver().MakeMemoryResident(ptr, size, &alternate_va, &map_flag,
                                              whitelist_nodes.size(),

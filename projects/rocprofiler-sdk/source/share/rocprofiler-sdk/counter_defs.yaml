@@ -10495,6 +10495,7 @@ rocprofiler-sdk:
       - gfx940
       - gfx941
       - gfx942
+      - gfx950
       expression: 100*reduce(SQ_ACTIVE_INST_VALU,sum)/(reduce(GRBM_GUI_ACTIVE,max)*CU_NUM)
     - architectures:
       - gfx12

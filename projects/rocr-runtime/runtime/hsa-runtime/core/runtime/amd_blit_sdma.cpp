@@ -293,7 +293,7 @@ static bool DepSignalCompleteHandler(hsa_signal_value_t signal_value, void *arg 
 template <bool useGCR>
 hsa_status_t BlitSdma<useGCR>::SubmitBlockingCommand(const void* cmd, size_t cmd_size,
                                                      uint64_t size) {
-  ScopedAcquire<KernelMutex> lock(&lock_);
+  std::unique_lock<std::mutex> lock(lock_);
 
   // Alternate between completion signals
   // Using two allows overlapping command writing and copies
@@ -310,7 +310,7 @@ hsa_status_t BlitSdma<useGCR>::SubmitBlockingCommand(const void* cmd, size_t cmd
   // Mark signal as in use, guard against exception leaving the signal in an unusable state.
   completionSignal->StoreRelaxed(2);
   MAKE_SCOPE_GUARD([&]() { completionSignal->StoreRelaxed(0); });
-  lock.Release();
+  lock.unlock();
 
   std::vector<core::Signal*> gang_signals(0);
 

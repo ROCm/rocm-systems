@@ -71,7 +71,7 @@ endif()
 # Use the directory that actually contains the library we found
 get_filename_component(_rocm_llvm_lib "${LIBOMPTARGET_SO}" DIRECTORY)
 set(_rocm_clang_lib "${ROCM_ROOT_DIR}/lib")
-set(_COMMON_RPATH "${_rocm_llvm_lib};${_rocm_clang_lib};$ORIGIN")
+set(_COMMON_RPATH "${_rocm_llvm_lib};${_rocm_clang_lib};$ORIGIN;$ORIGIN/lib")
 if(ROCmVersion_DIR)
     list(APPEND _COMMON_RPATH "${ROCmVersion_DIR}/llvm/lib")
 endif()
@@ -126,3 +126,15 @@ rocprofiler_systems_custom_compilation(
 rocprofiler_systems_custom_compilation(TARGET openmp-target
                                        COMPILER ${OMP_TARGET_COMPILER}
 )
+
+if(ROCPROFSYS_INSTALL_EXAMPLES)
+    if(TARGET openmp-target AND TARGET openmp-target-lib)
+        install(
+            TARGETS openmp-target openmp-target-lib
+            RUNTIME DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples
+            LIBRARY
+                DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples/lib
+                COMPONENT rocprofiler-systems-examples
+        )
+    endif()
+endif()
