@@ -2658,7 +2658,7 @@ GPU: 0
 ### Removed
 
 - **Removed `amd-smi reset --compute-partition` and `... --memory-partition` and associated APIs**.  
-  - This change is part of the partition redesign. Reset functionality will be reintroduced in a later update.
+  - This change is part of the partition redesign.
   - associated APIs include `amdsmi_reset_gpu_compute_partition()` and `amdsmi_reset_gpu_memory_partition()`
 
 - **Removed usage of _validate_positive in Parser and replaced with _positive_int and _not_negative_int as appropriate**.  
