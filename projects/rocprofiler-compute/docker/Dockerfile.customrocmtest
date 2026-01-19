@@ -7,7 +7,7 @@ RUN apt-get update && apt-get install -y curl
 # Define the tarball name as a variable
 # Check https://therock-nightly-tarball.s3.amazonaws.com/index.html for latest builds
 # Use therock-dist-linux-gfx<arch>-dcgpu-<rocm-version>.tar.gz naming convention
-ARG TARBALL_NAME=<tarball_name>
+ARG TARBALL_NAME=therock-dist-linux-gfx94X-dcgpu-7.11.0a20260116.tar.gz
 
 # Install ROCm from TheRock Nightly build
 RUN mkdir -p /rocm && \
@@ -19,7 +19,8 @@ RUN mkdir -p /rocm && \
 ENV PATH="/rocm/bin:${PATH}" \
     ROCM_PATH="/rocm" \
     LD_LIBRARY_PATH="/rocm/lib:/rocm/lib/rocm_sysdeps/lib:${LD_LIBRARY_PATH}" \
-    HIP_DEVICE_LIB_PATH="/rocm/llvm/amdgcn/bitcode"
+    HIP_DEVICE_LIB_PATH="/rocm/llvm/amdgcn/bitcode" \
+    HIP_PLATFORM=amd
 
 # Update package list and install prerequisites
 RUN apt-get update && apt-get install -y \
