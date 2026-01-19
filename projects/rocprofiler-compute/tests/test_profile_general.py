@@ -3209,7 +3209,7 @@ def test_multi_rank_profiling():
         "profile",
     ]
 
-    # Test without MPI communication
+    # Test without MPI-aware workload
     occupancy_path = root_dir / "tests" / "occupancy"
     if not occupancy_path.exists():
         pytest.skip("occupancy test binary not available")
@@ -3253,7 +3253,7 @@ def test_multi_rank_profiling():
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
-    # Test with MPI communication
+    # Test with MPI-aware workload
     laplace_path = root_dir / "tests" / "laplace_eqn"
     if not laplace_path.exists():
         pytest.skip("laplace_eqn test binary not available")
