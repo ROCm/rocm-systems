@@ -123,6 +123,9 @@ ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_pcie_link_width, ROCPROFSYS_CATEGOR
 ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_pcie_link_speed, ROCPROFSYS_CATEGORY_AMD_SMI_PCIE_LINK_SPEED, "device_pcie_link_speed", "PCIe Link Speed")
 ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_pcie_bandwidth_acc, ROCPROFSYS_CATEGORY_AMD_SMI_PCIE_BANDWIDTH_ACC, "device_pcie_bandwidth_acc", "PCIe Bandwidth Accumulated")
 ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_pcie_bandwidth_inst, ROCPROFSYS_CATEGORY_AMD_SMI_PCIE_BANDWIDTH_INST, "device_pcie_bandwidth_inst", "PCIe Bandwidth Instantaneous")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_process_vram_usage, ROCPROFSYS_CATEGORY_AMD_SMI_PROCESS_VRAM_USAGE, "process_vram_usage", "Process VRAM usage in MB")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_process_sdma_usage, ROCPROFSYS_CATEGORY_AMD_SMI_PROCESS_SDMA_USAGE, "process_sdma_usage", "Process SDMA usage in microseconds")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_process_cu_occupancy, ROCPROFSYS_CATEGORY_AMD_SMI_PROCESS_CU_OCCUPANCY, "process_cu_occupancy", "Process Compute Unit occupancy in percent")
 ROCPROFSYS_DEFINE_CATEGORY(category, rocm_rccl, ROCPROFSYS_CATEGORY_ROCM_RCCL, "rccl", "ROCm Communication Collectives Library (RCCL) regions")
 ROCPROFSYS_DEFINE_CATEGORY(category, pthread, ROCPROFSYS_CATEGORY_PTHREAD, "pthread", "POSIX threading functions")
 ROCPROFSYS_DEFINE_CATEGORY(category, kokkos, ROCPROFSYS_CATEGORY_KOKKOS, "kokkos", "KokkosTools regions")
@@ -203,6 +206,9 @@ using name = perfetto_category<Tp...>;
         ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_pcie_link_speed),                 \
         ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_pcie_bandwidth_acc),              \
         ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_pcie_bandwidth_inst),             \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_process_vram_usage),              \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_process_sdma_usage),              \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_process_cu_occupancy),            \
         ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_rccl),                               \
         ROCPROFSYS_PERFETTO_CATEGORY(category::pthread),                                 \
         ROCPROFSYS_PERFETTO_CATEGORY(category::kokkos),                                  \

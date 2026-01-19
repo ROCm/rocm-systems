@@ -21,6 +21,7 @@ set(library_headers
     ${CMAKE_CURRENT_LIST_DIR}/ptl.hpp
     ${CMAKE_CURRENT_LIST_DIR}/rocm.hpp
     ${CMAKE_CURRENT_LIST_DIR}/amd_smi.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/gpu_process_stats.hpp
     ${CMAKE_CURRENT_LIST_DIR}/rocprofiler-sdk.hpp
     ${CMAKE_CURRENT_LIST_DIR}/runtime.hpp
     ${CMAKE_CURRENT_LIST_DIR}/sampling.hpp
@@ -42,6 +43,7 @@ if(ROCPROFSYS_USE_ROCM)
             ${CMAKE_CURRENT_LIST_DIR}/rocm.cpp
             ${CMAKE_CURRENT_LIST_DIR}/rocprofiler-sdk.cpp
             ${CMAKE_CURRENT_LIST_DIR}/amd_smi.cpp
+            ${CMAKE_CURRENT_LIST_DIR}/gpu_process_stats.cpp
     )
     add_subdirectory(rocprofiler-sdk)
 endif()
@@ -56,6 +58,7 @@ set(ndebug_sources
     ${CMAKE_CURRENT_LIST_DIR}/components/backtrace_metrics.cpp
     ${CMAKE_CURRENT_LIST_DIR}/kokkosp.cpp
     ${CMAKE_CURRENT_LIST_DIR}/amd_smi.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/gpu_process_stats.cpp
 )
 
 set_source_files_properties(
