@@ -2049,13 +2049,13 @@ def replace_rank(name: str) -> str:
     pattern = re.compile(r"%rank%")
 
     return pattern.sub(rank, name)
-    
+
 
 def replace_env(name: str) -> str:
     def env(match: re.Match[str]) -> str:
         var_name = match.group(1)
         return os.environ.get(var_name, "")  # Default to empty string if not found
-    
+
     # Replace %env{VAR}% with environment variable values
     pattern = re.compile(r"%env{([^}]+)}%")
 

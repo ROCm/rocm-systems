@@ -210,11 +210,11 @@ Examples:
         required=False,
         help=(
             "\t\t\tSpecify output directory to save workload.\n"
-            """\t\t\tOutput directory can also be parameterized with the following keywords:\n"""  # noqa: E501
-            """\t\t\t   %%hostname%%: Host name\n"""
-            """\t\t\t   %%gpumodel%%: GPU model\n"""
-            """\t\t\t   %%rank%%: MPI process rank\n"""
-            """\t\t\t   %%env{NAME}%%: Environment variable 'NAME'\n"""
+            "\t\t\tOutput directory can also be parameterized with the following keywords:\n"  # noqa: E501
+            "\t\t\t   %%hostname%%: Host name\n"
+            "\t\t\t   %%gpumodel%%: GPU model\n"
+            "\t\t\t   %%rank%%: MPI process rank\n"
+            "\t\t\t   %%env{NAME}%%: Environment variable 'NAME'\n"
             "\t\t\t(DEFAULT: {Path.cwd()}/workloads/<name>/%%gpumodel%%) without MPI,\n"  # noqa: E501
             "\t\t\t {Path.cwd()}/workloads/<name>/%%rank%%) with MPI.)\n"
             "\t\t\t(DEPRECATED) --path is deprecated. Use --output-directory or -p instead."  # noqa: E501
