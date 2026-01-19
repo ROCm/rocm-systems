@@ -673,8 +673,7 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
                 update_mode::REPLACE, ":", updated_envs, original_envs);
         });
     parser
-        .add_argument({ "--ainics" },
-                      "AI NIC IDs for SMI queries. Comma-separated list.")
+        .add_argument({ "--ainics" }, "AI NIC IDs for SMI queries. Comma-separated list.")
         .dtype("string")
         .required({ "device" })
         .action([&](parser_t& p) {

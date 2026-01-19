@@ -75,11 +75,11 @@ namespace amd_smi
 using bundle_t          = std::deque<data>;
 using sampler_instances = thread_data<bundle_t, category::amd_smi>;
 
-using nic_bundle_t      = std::deque<nic_data>;
+using nic_bundle_t          = std::deque<nic_data>;
 using nic_sampler_instances = thread_data<nic_bundle_t, category::amd_smi_nic>;
-std::vector<nic_bundle_t> nic_sampler_vec = {};
-std::vector<std::string> nic_data::nic_vec = {};
-AINICStatsCollector nic_data::nic_stats_collector;
+std::vector<nic_bundle_t> nic_sampler_vec   = {};
+std::vector<std::string>  nic_data::nic_vec = {};
+AINICStatsCollector       nic_data::nic_stats_collector;
 
 namespace
 {
@@ -208,29 +208,35 @@ metadata_initialize_smi_tracks(size_t gpu_id)
 void
 metadata_initialize_ainic_smi_tracks(uint32_t nic_index)
 {
-    const auto thread_id = std::nullopt;
-    std::string& nic = nic_data::nic_vec[nic_index];
-    char buf[256];
-    snprintf(buf, sizeof(buf), "%s (%d)", nic.c_str(), (int)nic_index);
-    std::string track_name { buf };
+    const auto   thread_id = std::nullopt;
+    std::string& nic       = nic_data::nic_vec[nic_index];
+    char         buf[256];
+    snprintf(buf, sizeof(buf), "%s (%d)", nic.c_str(), (int) nic_index);
+    std::string track_name{ buf };
 
     trace_cache::get_metadata_registry().add_track(
-        { trace_cache::info::annotate_with_nic<category::amd_smi_nic_rx_cnp>(track_name),
+        { trace_cache::info::annotate_with_nic<category::amd_smi_nic_rx_cnp>(
+            track_name),
           thread_id, "{}" });
     trace_cache::get_metadata_registry().add_track(
-        { trace_cache::info::annotate_with_nic<category::amd_smi_nic_tx_cnp>(track_name),
+        { trace_cache::info::annotate_with_nic<category::amd_smi_nic_tx_cnp>(
+            track_name),
           thread_id, "{}" });
     trace_cache::get_metadata_registry().add_track(
-        { trace_cache::info::annotate_with_nic<category::amd_smi_nic_rx_ucast_bytes>(track_name),
+        { trace_cache::info::annotate_with_nic<category::amd_smi_nic_rx_ucast_bytes>(
+            track_name),
           thread_id, "{}" });
     trace_cache::get_metadata_registry().add_track(
-        { trace_cache::info::annotate_with_nic<category::amd_smi_nic_tx_ucast_bytes>(track_name),
+        { trace_cache::info::annotate_with_nic<category::amd_smi_nic_tx_ucast_bytes>(
+            track_name),
           thread_id, "{}" });
     trace_cache::get_metadata_registry().add_track(
-        { trace_cache::info::annotate_with_nic<category::amd_smi_nic_rx_ucast_pkts>(track_name),
+        { trace_cache::info::annotate_with_nic<category::amd_smi_nic_rx_ucast_pkts>(
+            track_name),
           thread_id, "{}" });
     trace_cache::get_metadata_registry().add_track(
-        { trace_cache::info::annotate_with_nic<category::amd_smi_nic_tx_ucast_pkts>(track_name),
+        { trace_cache::info::annotate_with_nic<category::amd_smi_nic_tx_ucast_pkts>(
+            track_name),
           thread_id, "{}" });
 }
 
@@ -452,16 +458,18 @@ metadata_initialize_ainic_smi_pmc(uint32_t nic_index)
           EXPRESSION, 0, 0, "{}" });
     trace_cache::get_metadata_registry().add_pmc_info(
         { agent_type::NIC, nic_index, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-          trait::name<category::amd_smi_nic_rx_ucast_bytes>::value, "AI NIC RX UCAST BYTES",
-          trait::name<category::amd_smi_nic_rx_ucast_bytes>::description, LONG_DESCRIPTION,
-          COMPONENT, trace_cache::ABSOLUTE, rocprofsys::trace_cache::ABSOLUTE, BLOCK,
-          EXPRESSION, 0, 0, "{}" });
+          trait::name<category::amd_smi_nic_rx_ucast_bytes>::value,
+          "AI NIC RX UCAST BYTES",
+          trait::name<category::amd_smi_nic_rx_ucast_bytes>::description,
+          LONG_DESCRIPTION, COMPONENT, trace_cache::ABSOLUTE,
+          rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0, "{}" });
     trace_cache::get_metadata_registry().add_pmc_info(
         { agent_type::NIC, nic_index, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-          trait::name<category::amd_smi_nic_tx_ucast_bytes>::value, "AI NIC TX UCAST BYTES",
-          trait::name<category::amd_smi_nic_tx_ucast_bytes>::description, LONG_DESCRIPTION,
-          COMPONENT, trace_cache::ABSOLUTE, rocprofsys::trace_cache::ABSOLUTE, BLOCK,
-          EXPRESSION, 0, 0, "{}" });
+          trait::name<category::amd_smi_nic_tx_ucast_bytes>::value,
+          "AI NIC TX UCAST BYTES",
+          trait::name<category::amd_smi_nic_tx_ucast_bytes>::description,
+          LONG_DESCRIPTION, COMPONENT, trace_cache::ABSOLUTE,
+          rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0, "{}" });
     trace_cache::get_metadata_registry().add_pmc_info(
         { agent_type::NIC, nic_index, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
           trait::name<category::amd_smi_nic_rx_ucast_pkts>::value, "AI NIC RX UCAST PKTS",
@@ -600,8 +608,8 @@ std::unique_ptr<data::promise_t> data::polling_finished = {};
 data::data(uint32_t _dev_id) { sample(_dev_id); }
 
 nic_data::nic_data(uint32_t nic_index, const std::string& nic)
-    : _nic(nic),
-      _nic_index(nic_index)
+: _nic(nic)
+, _nic_index(nic_index)
 {
     sample();
 }
@@ -803,21 +811,21 @@ data::sample(uint32_t _device_id)
 #undef ROCPROFSYS_AMDSMI_GET
 }
 
-void nic_data::sample()
+void
+nic_data::sample()
 {
     NICData stats;
     nic_data::nic_stats_collector.get_data(_nic, stats);
     _rx_rdma_cnp_pkts = stats._rx_rdma_cnp_pkts;
     _tx_rdma_cnp_pkts = stats._tx_rdma_cnp_pkts;
-    _rx_ucast_bytes = stats._rx_rdma_ucast_bytes;
-    _tx_ucast_bytes = stats._tx_rdma_ucast_bytes;
-    _rx_ucast_pkts = stats._rx_rdma_ucast_pkts;
-    _tx_ucast_pkts = stats._tx_rdma_ucast_pkts;
+    _rx_ucast_bytes   = stats._rx_rdma_ucast_bytes;
+    _tx_ucast_bytes   = stats._tx_rdma_ucast_bytes;
+    _rx_ucast_pkts    = stats._rx_rdma_ucast_pkts;
+    _tx_ucast_pkts    = stats._tx_rdma_ucast_pkts;
 
-    trace_cache::get_buffer_storage().store(trace_cache::ainic_sample{
-        _rx_rdma_cnp_pkts, _tx_rdma_cnp_pkts,
-        _rx_ucast_bytes, _tx_ucast_bytes,
-        _rx_ucast_pkts, _tx_ucast_pkts });
+    trace_cache::get_buffer_storage().store(
+        trace_cache::ainic_sample{ _rx_rdma_cnp_pkts, _tx_rdma_cnp_pkts, _rx_ucast_bytes,
+                                   _tx_ucast_bytes, _rx_ucast_pkts, _tx_ucast_pkts });
 }
 
 void
@@ -840,7 +848,7 @@ namespace
 std::vector<unique_ptr_t<bundle_t>*> _bundle_data{};
 
 std::vector<unique_ptr_t<nic_bundle_t>*> _nic_bundle_data{};
-}
+}  // namespace
 
 void
 config()
@@ -872,12 +880,11 @@ config()
 
     for(uint32_t nic_index = 0; nic_index < nic_data::nic_vec.size(); ++nic_index)
     {
-        auto nic_bundle = std::deque<nic_data> {};
+        auto nic_bundle = std::deque<nic_data>{};
         nic_sampler_vec.push_back(nic_bundle);
         metadata_initialize_ainic_smi_tracks(nic_index);
         metadata_initialize_ainic_smi_pmc(nic_index);
     }
-
 }
 
 void
@@ -910,8 +917,8 @@ nic_sample()
 
     for(uint32_t nic_index = 0; nic_index < nic_data::nic_vec.size(); ++nic_index)
     {
-        std::string& nic = nic_data::nic_vec[nic_index];
-        auto data = nic_data { nic_index, nic };
+        std::string& nic  = nic_data::nic_vec[nic_index];
+        auto         data = nic_data { nic_index, nic };
         nic_sampler_vec[nic_index].push_back(data);
     }
 }
@@ -1283,7 +1290,7 @@ void
 nic_data::post_process(size_t nic_index)
 {
     using counter_track = perfetto_counter_track<nic_data>;
-    std::string& nic = nic_data::nic_vec[nic_index];
+    std::string& nic    = nic_data::nic_vec[nic_index];
 
     auto addendum = [&](const char* _v) {
         return JOIN(" ", nic, _v, JOIN("", '[', nic_index, ']'), "(S)");
@@ -1308,18 +1315,18 @@ nic_data::post_process(size_t nic_index)
 
         size_t track_index = 0;
 
-        TRACE_COUNTER("nic_rx_cnp_pkts",
-            counter_track::at(nic_index, track_index++), _ts, _rx_rdma_cnp_pkts);
-        TRACE_COUNTER("nic_tx_cnp_pkts",
-            counter_track::at(nic_index, track_index++), _ts, _tx_rdma_cnp_pkts);
-        TRACE_COUNTER("nic_rx_ucast_bytes",
-            counter_track::at(nic_index, track_index++), _ts, _rx_ucast_bytes);
-        TRACE_COUNTER("nic_tx_ucast_bytes",
-            counter_track::at(nic_index, track_index++), _ts, _tx_ucast_bytes);
-        TRACE_COUNTER("nic_rx_ucast_pkts",
-            counter_track::at(nic_index, track_index++), _ts, _rx_ucast_pkts);
-        TRACE_COUNTER("nic_tx_ucast_pkts",
-            counter_track::at(nic_index, track_index++), _ts, _tx_ucast_pkts);
+        TRACE_COUNTER("nic_rx_cnp_pkts", counter_track::at(nic_index, track_index++), _ts,
+            _rx_rdma_cnp_pkts);
+        TRACE_COUNTER("nic_tx_cnp_pkts", counter_track::at(nic_index, track_index++), _ts,
+            _tx_rdma_cnp_pkts);
+        TRACE_COUNTER("nic_rx_ucast_bytes", counter_track::at(nic_index, track_index++),
+            _ts, _rx_ucast_bytes);
+        TRACE_COUNTER("nic_tx_ucast_bytes", counter_track::at(nic_index, track_index++),
+            _ts, _tx_ucast_bytes);
+        TRACE_COUNTER("nic_rx_ucast_pkts", counter_track::at(nic_index, track_index++),
+            _ts, _rx_ucast_pkts);
+        TRACE_COUNTER("nic_tx_ucast_pkts", counter_track::at(nic_index, track_index++),
+            _ts, _tx_ucast_pkts);
     }
 }
 
@@ -1459,12 +1466,16 @@ setup()
 }
 
 // Parse a comma-separated list of strings.
-static std::vector<std::string> parse_list(const std::string& nic_str) {
-    std::vector<std::string> nic_vec {};
-    std::string current {""};
-    for (auto& ch : nic_str) {
-        if (ch == ',') {
-            if (current.size() > 0) {
+static std::vector<std::string> parse_list(const std::string& nic_str)
+{
+    std::vector<std::string> nic_vec{};
+    std::string              current{ "" };
+    for (auto& ch : nic_str)
+    {
+        if(ch == ',')
+        {
+            if(current.size() > 0)
+            {
                 nic_vec.push_back(current);
                 current = "";
             }
@@ -1482,7 +1493,7 @@ void
 setup_ainic()
 {
     auto _ainic_devices_v = get_sampling_ainics();
-    nic_data::nic_vec = parse_list(_ainic_devices_v);
+    nic_data::nic_vec     = parse_list(_ainic_devices_v);
 
     // Run update_stats() the first time, to get the names of all existing NICs.
     nic_data::nic_stats_collector.update_stats();
@@ -1524,7 +1535,6 @@ post_process()
         LOG_DEBUG("Post-processing ainic data for NIC: {}", nic);
         nic_data::post_process(i);
     }
-
 }
 
 uint32_t

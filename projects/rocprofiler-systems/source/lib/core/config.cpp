@@ -496,8 +496,8 @@ configure_settings(bool _init)
                               false, "process_sampling");
 
     ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_AINIC_STAT_ENABLED",
-                              "Enable tracking for AI NIC metrics",
-                              false, "process_sampling");
+                              "Enable tracking for AI NIC metrics", false,
+                              "process_sampling");
 
     ROCPROFSYS_CONFIG_SETTING(
         double, "ROCPROFSYS_PROCESS_SAMPLING_FREQ",
@@ -524,14 +524,13 @@ configure_settings(bool _init)
         "'all' and 'none' suppresses all GPU sampling",
         std::string{ "all" }, "amd_smi", "rocm", "process_sampling");
 
-    ROCPROFSYS_CONFIG_SETTING(
-        std::string, "ROCPROFSYS_SAMPLING_AINICS",
-        "AI NICs to query when ROCPROFSYS_USE_AMD_SMI=ON. NIC names should be separated by "
-        "commas, e.g. eno8303, enp7s0.",
-        std::string{ "all" }, "amd_smi", "rocm", "process_sampling");
+    ROCPROFSYS_CONFIG_SETTING(std::string, "ROCPROFSYS_SAMPLING_AINICS",
+                              "AI NICs to query when ROCPROFSYS_USE_AMD_SMI=ON. NIC names should be separated by "
+                              "commas, e.g. eno8303, enp7s0.",
+                              std::string{ "all" }, "amd_smi", "rocm",
+                              "process_sampling");
 
-    ROCPROFSYS_CONFIG_SETTING(
-        std::string, "ROCPROFSYS_SAMPLING_TIDS",
+    ROCPROFSYS_CONFIG_SETTING(std::string, "ROCPROFSYS_SAMPLING_TIDS",
         "Limit call-stack sampling to specific thread IDs, starting at zero for the main "
         "thread. Be aware that some libraries, such as ROCm may create additional "
         "threads which increment the TID count. However, no threads started by "
@@ -1947,7 +1946,6 @@ get_sampling_ainics()
 {
     static auto _v = get_config()->find("ROCPROFSYS_SAMPLING_AINICS");
     return static_cast<tim::tsettings<std::string>&>(*_v->second).get();
-
 }
 
 bool&

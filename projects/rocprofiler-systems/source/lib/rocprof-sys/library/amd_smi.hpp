@@ -166,18 +166,18 @@ struct nic_data
 
     explicit nic_data(uint32_t nic_index, const std::string& nic);
 
-    static std::vector<nic_data>& get_initial();
+    static std::vector<nic_data>&   get_initial();
     static std::vector<std::string> nic_vec;
-    const std::string& get_nic() const;
-    static bool setup();
+    const std::string&              get_nic() const;
+    static bool                     setup();
 
     void sample();
 
     static void post_process(size_t nic_index);
 
-    static AINICStatsCollector    nic_stats_collector;
+    static AINICStatsCollector nic_stats_collector;
 
-    timestamp_t                   m_ts = 0;
+    timestamp_t m_ts = 0;
 
 private:
     std::string _nic;
@@ -188,7 +188,6 @@ private:
     uint32_t    _tx_ucast_bytes;
     uint32_t    _rx_ucast_pkts;
     uint32_t    _tx_ucast_pkts;
-
 };
 
 #if !defined(ROCPROFSYS_USE_ROCM) || ROCPROFSYS_USE_ROCM == 0
