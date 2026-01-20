@@ -279,6 +279,8 @@ class NoiseClamper:
         reference: Union[pd.Series, float, np.ndarray],
     ) -> Union[pd.Series, float, np.ndarray]:
         """Clamp negative values to 0 and track significant deviations."""
+        if difference is None or (np.isscalar(difference) and pd.isna(difference)):
+            return np.nan
         if np.isscalar(difference):
             return self._clamp_scalar(difference, reference)
         return self._clamp_array(difference, reference)
@@ -406,7 +408,7 @@ def clear_noise_clamp_warnings() -> None:
 
 
 def get_noise_clamp_warnings() -> dict:
-    """Return collected stats (for testing)."""
+    """Return collected stats."""
     return _noise_clamper.get_stats()
 
 
@@ -1208,7 +1210,17 @@ def eval_metric(
                             row[expr] = ""
 
     for df_id, row_id, col, expr in exprs_to_eval:
+        noise_clamp_count_prev = get_noise_clamp_warnings()["count"]
         eval_result = metric_evaluator.eval_expression(expr)
+        noise_clamp_count_new = get_noise_clamp_warnings()["count"]
+        if (
+            noise_clamp_count_new > noise_clamp_count_prev
+            and "Metric" in dfs[df_id].columns
+        ):
+            metric_name = dfs[df_id].loc[row_id, "Metric"]
+            console_warning(
+                f"Variance corrected for metric: {row_id} {metric_name} {col}"
+            )
         dfs[df_id].loc[row_id, col] = eval_result
 
     # Print aggregated summary of any noise clamping warnings
