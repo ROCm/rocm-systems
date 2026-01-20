@@ -678,7 +678,6 @@ function(ROCPROFILER_SYSTEMS_GET_GFX_ARCHS _VAR)
     endif()
 
     # Match only "Name:" lines to avoid matching gfx in marketing names/descriptions.
-    # Regex avoids matching "gfxX-X-generic" which may appear.
     check_rocminfo("Name:[ \t]+gfx[0-9A-Fa-f][0-9A-Fa-f]+" _RAW_GFXINFO GET_OUTPUT)
     if(NOT _RAW_GFXINFO)
         message(AUTHOR_WARNING "Could not get system architectures")

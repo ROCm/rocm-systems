@@ -650,6 +650,11 @@ HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNT
 HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipKernelGetParamInfo, hipKernelGetParamInfo, hipKernelGetParamInfo_fn, kernel, paramIndex, paramOffset, paramSize);
 #endif
 
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 21
+HIP_API_INFO_DEFINITION_0(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipExtDisableLogging, hipExtDisableLogging, hipExtDisableLogging_fn);
+HIP_API_INFO_DEFINITION_0(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipExtEnableLogging, hipExtEnableLogging, hipExtEnableLogging_fn);
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipExtSetLoggingParams, hipExtSetLoggingParams, hipExtSetLoggingParams_fn, log_level, log_size, log_mask);
+#endif
 // clang-format on
 
 #else

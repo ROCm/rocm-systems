@@ -316,7 +316,9 @@ configure_settings(bool _init)
                               "backend", "perfetto");
 
     ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_TRACE_LEGACY",
-                              "Use legacy direct mode for perfetto tracing instead of "
+                              "[DEPRECATED] The new default option is to use data from "
+                              "cached buffer. When set to true system will use "
+                              "legacy direct mode for perfetto tracing instead of "
                               "deferred trace generation. When false (default), uses "
                               "cached mode with minimal runtime overhead.",
                               false, "backend", "perfetto");
@@ -1088,6 +1090,9 @@ configure_settings(bool _init)
     handle_deprecated_setting("ROCPROFSYS_OUTPUT_FILE", "ROCPROFSYS_PERFETTO_FILE");
     handle_deprecated_setting("ROCPROFSYS_USE_PERFETTO", "ROCPROFSYS_TRACE");
     handle_deprecated_setting("ROCPROFSYS_USE_TIMEMORY", "ROCPROFSYS_PROFILE");
+    handle_deprecated_setting("ROCPROFSYS_DEBUG", "ROCPROFSYS_LOG_LEVEL");
+    handle_deprecated_setting("ROCPROFSYS_VERBOSE", "ROCPROFSYS_LOG_LEVEL");
+    handle_deprecated_setting("ROCPROFSYS_TRACE_LEGACY", "ROCPROFSYS_TRACE");
 
     scope::get_fields()[scope::flat::value]     = _config->get_flat_profile();
     scope::get_fields()[scope::timeline::value] = _config->get_timeline_profile();
