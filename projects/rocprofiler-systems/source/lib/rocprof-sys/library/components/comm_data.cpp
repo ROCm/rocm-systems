@@ -374,7 +374,7 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, int sen
 
     {
         cache_comm_data_events<mpi_send>(0, sendcount * _send_size);
-        cache_comm_data_events<mpi_recv>(0, recvcount * _send_size);
+        cache_comm_data_events<mpi_recv>(0, recvcount * _recv_size);
     }
 
     if(rocprofsys::get_use_timemory())
@@ -424,7 +424,7 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, int sen
 
     {
         cache_comm_data_events<mpi_send>(0, sendcount * _send_size);
-        cache_comm_data_events<mpi_recv>(0, recvcount * _send_size);
+        cache_comm_data_events<mpi_recv>(0, recvcount * _recv_size);
     }
 
     if(rocprofsys::get_use_timemory())
@@ -524,9 +524,6 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, size_t 
     {
         ROCPROFSYS_CI_THROW(true, "RCCL function not handled: %s", _data.tool_id.c_str());
     }
-
-    if(get_use_perfetto()) write_perfetto_counter_track<rccl_recv>(count * _size);
-    if(get_use_rocpd()) rocpd_process_cpu_usage_events<rccl_recv>(0, count * _size);
 
     if(rocprofsys::get_use_timemory())
     {
