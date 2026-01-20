@@ -58,8 +58,26 @@ def check_amdgpu_driver():
     if amd_gpu_status_file.exists():
         if amd_gpu_status_file.read_text(encoding="ascii").strip() == "live":
             return True
+            
+    # If not found as module, check if amdgpu is built-in by looking for AMD GPU devices
+    # AMD vendor ID is 0x1002
+    drm_path = Path("/sys/class/drm")
+    if drm_path.exists():
+        for card in drm_path.iterdir():
+            vendor_file = card / "device" / "vendor"
+            if vendor_file.exists():
+                try:
+                    vendor_id = vendor_file.read_text(encoding="ascii").strip()
+                    if vendor_id == "0x1002":  # AMD vendor ID
+                        # Additionally verify the driver is amdgpu
+                        driver_link = card / "device" / "driver"
+                        if driver_link.exists():
+                            driver_name = driver_link.resolve().name
+                            if driver_name == "amdgpu":
+                                return True
+                except (IOError, OSError):
+                    continue
     return False
-
 
 def check_amd_hsmp_driver():
     """ Returns true if amd_hsmp or hsmp_acpi is found in the list of initialized modules """
