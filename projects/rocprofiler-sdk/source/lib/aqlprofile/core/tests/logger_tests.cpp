@@ -1,8 +1,11 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include "lib/aqlprofile/core/logger.h"
+
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
+
 #include <unistd.h>
 #include <chrono>
 #include <cstdlib>
@@ -10,15 +13,6 @@
 #include <fstream>
 #include <sstream>
 #include <thread>
-
-#include "../logger.h"
-
-// Define static members for Logger class
-namespace aql_profile
-{
-Logger::mutex_t Logger::mutex_;
-Logger*         Logger::instance_ = nullptr;
-}  // namespace aql_profile
 
 namespace aql_profile
 {

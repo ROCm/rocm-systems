@@ -1,25 +1,16 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include "lib/aqlprofile/aql_profile_v2.h"
+#include "lib/aqlprofile/core/logger.h"
+#include "lib/aqlprofile/core/pm4_factory.h"
+
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
+
 #include <cstring>
 #include <memory>
 #include <vector>
-
-#include "../logger.h"
-#include "../pm4_factory.h"
-#include "lib/aqlprofile/aql_profile_v2.h"
-// Define static members
-bool aql_profile::Pm4Factory::concurrent_create_mode_ = false;
-bool aql_profile::Pm4Factory::spm_kfd_mode_           = false;
-// Pm4Factory::mutex_t Pm4Factory::mutex_;
-aql_profile::Pm4Factory::instances_t* aql_profile::Pm4Factory::instances_ = nullptr;
-namespace aql_profile
-{
-Logger::mutex_t Logger::mutex_;
-Logger*         Logger::instance_ = nullptr;
-}  // namespace aql_profile
 
 namespace aql_profile_v2_tests
 {

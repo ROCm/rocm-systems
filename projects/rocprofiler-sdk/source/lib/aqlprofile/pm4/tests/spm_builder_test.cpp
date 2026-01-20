@@ -1,17 +1,18 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include <gmock/gmock.h>
-#include <gtest/gtest.h>
-#include <cstring>
-#include <memory>
-#include <vector>
-
+#include "lib/aqlprofile/pm4/spm_builder.h"
 #include "lib/aqlprofile/def/gpu_block_info.h"
 #include "lib/aqlprofile/pm4/cmd_builder.h"
 #include "lib/aqlprofile/pm4/cmd_config.h"
-#include "lib/aqlprofile/pm4/spm_builder.h"
 #include "lib/aqlprofile/pm4/trace_config.h"
+
+#include <gmock/gmock.h>
+#include <gtest/gtest.h>
+
+#include <cstring>
+#include <memory>
+#include <vector>
 
 using namespace pm4_builder;
 // using namespace aql_profile;
@@ -37,7 +38,7 @@ protected:
     void SetUp() override
     {
         // Initialize test data structures
-        memset(&test_config_, 0, sizeof(test_config_));
+        test_config_ = SpmConfig{};
 
         // Set up default SPM config
         test_config_.sampleRate       = 1000;
@@ -45,7 +46,7 @@ protected:
         test_config_.data_buffer_size = test_buffer_.size() * sizeof(uint32_t);
 
         // Initialize agent info for creating concrete SpmBuilder
-        memset(&agent_info_, 0, sizeof(agent_info_));
+        agent_info_ = AgentInfo{};
         strncpy(agent_info_.name, "gfx90a", sizeof(agent_info_.name) - 1);
         strncpy(agent_info_.gfxip, "gfx90a", sizeof(agent_info_.gfxip) - 1);
         agent_info_.cu_num               = 104;
