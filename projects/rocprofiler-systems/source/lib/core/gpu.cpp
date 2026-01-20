@@ -113,7 +113,7 @@ amdsmi_init()
             // supported
             uint64_t init_flags = AMDSMI_INIT_AMD_GPUS;
 
-#    if USE_AINIC
+#    ifdef USE_AINIC
             init_flags |= AMDSMI_INIT_AMD_NICS;
 #    endif
 
