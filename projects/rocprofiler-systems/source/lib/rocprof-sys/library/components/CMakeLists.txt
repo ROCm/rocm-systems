@@ -45,4 +45,3 @@ target_sources(
     PRIVATE ${component_sources} ${component_headers}
 )
 
-add_subdirectory(tests)

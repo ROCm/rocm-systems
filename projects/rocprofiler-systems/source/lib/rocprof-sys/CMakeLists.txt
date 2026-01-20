@@ -27,7 +27,6 @@ target_link_libraries(
     rocprofiler-systems-object-library
     PRIVATE
         rocprofiler-systems::rocprofiler-systems-interface-library
-        rocprofiler-systems::rocprofiler-systems-binary
 )
 
 # ------------------------------------------------------------------------------#
