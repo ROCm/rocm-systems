@@ -112,6 +112,7 @@ target_sources(amdhip64 PRIVATE
   hip_intercept.cpp
   hip_log.cpp
   hip_memory.cpp
+  hip_internal_timer.cpp
   hip_mempool.cpp
   hip_mempool_impl.cpp
   hip_module.cpp
@@ -129,6 +130,7 @@ target_sources(amdhip64 PRIVATE
   hip_table_interface.cpp
   hip_table_interface_c.cpp
   hip_comgr_helper.cpp
+  hip_internal_timer.cpp
   hip_library.cpp)
 
 if(WIN32)

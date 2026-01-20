@@ -280,6 +280,8 @@ global:
     hipDestroySurfaceObject*;
     hipHccModuleLaunchKernel*;
     hipExtModuleLaunchKernel*;
+    *getHipInternalTimer*;
+    *g_hipInternalTimer*;
 
     };
 local:
