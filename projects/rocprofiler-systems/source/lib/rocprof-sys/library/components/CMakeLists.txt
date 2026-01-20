@@ -44,4 +44,3 @@ target_sources(
     rocprofiler-systems-object-library
     PRIVATE ${component_sources} ${component_headers}
 )
-
