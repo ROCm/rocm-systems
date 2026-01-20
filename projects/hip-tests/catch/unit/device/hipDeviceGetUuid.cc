@@ -359,7 +359,7 @@ TEST_CASE("Unit_Uuid_FntlTstsFor_SetEnv_HIP_VISIBLE_DEVICES") {
 #endif
     SECTION("Get Dev Count from Child") {
       if (uuid_map.size() >= 2) {
-        std::string uuid =getNthElem(0).data();
+        std::string uuid = getNthElem(0).data();
         std::string uuidEnv = uuid.substr(0, 20);
         std::string uuid1 =  getNthElem(1).data();
         std::string uuidEnv1 = uuid1.substr(0, 20);
@@ -375,7 +375,7 @@ TEST_CASE("Unit_Uuid_FntlTstsFor_SetEnv_HIP_VISIBLE_DEVICES") {
     }
 #ifdef __linux__
     SECTION("Get UUID from Child proc rocminfo") {
-      std::string setUuid =getNthElem(0).data();
+      std::string setUuid = getNthElem(0).data();
       std::string uuidEnv = setUuid.substr(0, 20);
       unsetenv("HIP_VISIBLE_DEVICES");
       setenv("HIP_VISIBLE_DEVICES", uuidEnv.c_str(), 1);
@@ -456,7 +456,7 @@ TEST_CASE("Unit_Uuid_FntlTstsFor_SetEnv_HIP_VISIBLE_DEVICES") {
       }
     }
     SECTION("Set Env Variable in child process") {
-      std::string uuid =getNthElem(0).data();
+      std::string uuid = getNthElem(0).data();
       std::string uuidEnv = uuid.substr(0, 20);
       hip::SpawnProc proc("setEnvInChildProc", true);
       REQUIRE(proc.run(uuidEnv) == 1);
@@ -468,7 +468,7 @@ TEST_CASE("Unit_Uuid_FntlTstsFor_SetEnv_HIP_VISIBLE_DEVICES") {
     SECTION("Chk RocmInfo Uuid list before and after set Env") {
       std::map<int, std::vector<char>> uuid_map;
       uuid_map = getUUIDlistFromRocmInfo();
-      std::string uuid =getNthElem(0).data();
+      std::string uuid = getNthElem(0).data();
       unsetenv("HIP_VISIBLE_DEVICES");
       setenv("HIP_VISIBLE_DEVICES", uuid.c_str(), 1);
       std::map<int, std::vector<char>> uuid_map1;
@@ -506,7 +506,7 @@ void ChkUUID() {
   uuid_map = getUUIDlistWithoutRocmInfo();
 #endif
   if (!uuid_map.empty()) {
-    std::string uuid =getNthElem(0).data();
+    std::string uuid = getNthElem(0).data();
     std::string t_uuid = uuid.substr(4, 19);
     if (memcmp(d_uuid.bytes, t_uuid.c_str(), 16) == 0) {
       tState = 1;
