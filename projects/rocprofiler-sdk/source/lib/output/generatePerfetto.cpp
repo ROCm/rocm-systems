@@ -39,6 +39,7 @@
 #include <future>
 #include <iostream>
 #include <map>
+#include <memory>
 #include <thread>
 #include <unordered_map>
 #include <utility>
@@ -1207,31 +1208,49 @@ write_perfetto(
     auto filename = std::string{"results"};
     auto ofs      = get_output_stream(ocfg, filename, ".pftrace");
 
-    auto amount_read = std::atomic<size_t>{0};
-    auto is_done     = std::promise<void>{};
-    auto _mtx        = std::mutex{};
-    auto _reader     = [&ofs, &_mtx, &is_done, &amount_read](
-                       ::perfetto::TracingSession::ReadTraceCallbackArgs _args) {
-        auto _lk = std::unique_lock<std::mutex>{_mtx};
-        if(_args.data && _args.size > 0)
-        {
-            ROCP_TRACE << "Writing " << _args.size << " B to trace...";
-            // Write the trace data into file
-            ofs.stream->write(_args.data, _args.size);
-            amount_read += _args.size;
-        }
-        ROCP_INFO_IF(!_args.has_more && amount_read > 0)
-            << "Wrote " << amount_read << " B to perfetto trace file";
-        if(!_args.has_more) is_done.set_value();
-    };
-
+    // Use shared_ptr for callback state to avoid a use-after-free race condition.
+    //
+    // The Perfetto ReadTrace callback runs on an internal Perfetto thread. When the callback
+    // calls set_value() on the promise, the waiting thread (this one) wakes up immediately.
+    // However, the callback hasn't finished executing yet - it still needs to return from
+    // set_value() and unlock any held mutexes. If we destroy the promise/mutex when wait()
+    // returns, the callback thread may still be accessing them, causing undefined behavior.
+    //
+    // By using shared_ptr, the callback captures a copy of the shared_ptr, keeping the state
+    // alive until the callback truly completes. When the callback returns, its shared_ptr copy
+    // is destroyed, and the ref count decrements. The state is only destroyed when both this
+    // thread and the callback thread are done with it.
     for(size_t i = 0; i < 2; ++i)
     {
         ROCP_TRACE << "Reading trace...";
-        amount_read = 0;
-        is_done     = std::promise<void>{};
+
+        struct read_trace_state
+        {
+            std::mutex          mtx{};
+            std::promise<void>  is_done{};
+            std::atomic<size_t> amount_read{0};
+            std::ostream*       stream = nullptr;
+        };
+
+        auto state    = std::make_shared<read_trace_state>();
+        state->stream = ofs.stream;
+
+        // Capture shared_ptr BY VALUE so the callback owns a reference
+        auto _reader = [state](::perfetto::TracingSession::ReadTraceCallbackArgs _args) {
+            auto _lk = std::unique_lock<std::mutex>{state->mtx};
+            if(_args.data && _args.size > 0)
+            {
+                ROCP_TRACE << "Writing " << _args.size << " B to trace...";
+                // Write the trace data into file
+                state->stream->write(_args.data, _args.size);
+                state->amount_read += _args.size;
+            }
+            ROCP_INFO_IF(!_args.has_more && state->amount_read > 0)
+                << "Wrote " << state->amount_read << " B to perfetto trace file";
+            if(!_args.has_more) state->is_done.set_value();
+        };
         tracing_session->ReadTrace(_reader);
-        is_done.get_future().wait();
+        state->is_done.get_future().wait();
     }
 
     ROCP_TRACE << "Destroying tracing session...";

@@ -54,11 +54,19 @@ TEST(rocprofiler_lib, buffer)
     ASSERT_NE(buffer_v, nullptr) << "get_buffer returned a nullptr. id=" << buffer_id->handle;
     EXPECT_EQ(buffer_v->buffer_id, buffer_id->handle);
 
-    buffer_v->watermark = common::units::get_page_size();
+    // Initialize the buffer pool (normally done by rocprofiler_create_buffer)
+    buffer_v->buffer_size = common::units::get_page_size();
+    buffer_v->pool_size   = 2;
+    buffer_v->watermark   = common::units::get_page_size();
+    buffer_v->policy      = ROCPROFILER_BUFFER_POLICY_LOSSLESS;
+    for(size_t i = 0; i < buffer_v->pool_size; ++i)
+    {
+        buffer_v->buffers.emplace_back();
+        buffer_v->buffers.back().allocate(buffer_v->buffer_size);
+    }
+
+    EXPECT_EQ(buffer_v->buffers.size(), 2);
     EXPECT_EQ(buffer_v->get_internal_buffer().get_num_record_headers(), 0);
-
-    EXPECT_TRUE(buffer_v->get_internal_buffer().allocate(sizeof(rocprofiler_buffer_id_t)));
-
     EXPECT_EQ(buffer_v->get_internal_buffer().capacity(), common::units::get_page_size());
 
     auto data = *buffer_id;

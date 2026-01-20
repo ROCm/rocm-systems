@@ -1807,6 +1807,10 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
   };
 
   while (!async_events_control_.exit) {
+    // Update hsa_signals pointer at start of each iteration since PushBack
+    // at the end of the previous iteration may have reallocated the vector.
+    hsa_signals = reinterpret_cast<hsa_signal_handle*>(&async_events_.signal_[0]);
+
     // Wait for a signal
     std::vector<hsa_signal_value_t> value(1);
     value[0] = 0;
@@ -1825,8 +1829,6 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
       // Skip wake-up signal logic
       index = 1;
       wait_any = false;
-      // The new events can reallocate the signals, hence update the pointer
-      hsa_signals = reinterpret_cast<hsa_signal_handle*>(&async_events_.signal_[0]);
      }
     }
 
@@ -2318,7 +2320,8 @@ void Runtime::PrintMemoryMapNear(void* ptr) {
 
 Runtime::AsyncEventsInfo::AsyncEventsInfo(bool exceptions_)
   : monitor_exceptions(exceptions_), events(), new_events(), control(this) {
-
+  // Add wake signal to events BEFORE starting thread so the thread has
+  // a valid signal to wait on when it begins execution
   events.PushBack(control.wake, HSA_SIGNAL_CONDITION_NE, 0, NULL, NULL);
   control.Start();
 }
@@ -2477,12 +2480,14 @@ void Runtime::Unload() {
   
   hw_exception_event_.reset();
 
-  SharedSignalPool.clear();
-
-  EventPool.clear();
 
   mapped_handle_map_.clear();
   memory_handle_map_.clear();
+
+  // Clear signal and event pools before destroying agents, since the pools
+  // contain allocations from memory regions owned by agents.
+  SharedSignalPool.clear();
+  EventPool.clear();
 
   DestroyAgents();
 

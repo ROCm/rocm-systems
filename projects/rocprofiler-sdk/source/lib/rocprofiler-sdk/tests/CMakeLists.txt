@@ -14,6 +14,8 @@ include(GoogleTest)
 set(rocprofiler_lib_sources
     agent.cpp
     buffer.cpp
+    buffer_correlation_ordering.cpp
+    buffer_ordering_stress.cpp
     contexts.cpp
     enum_string.cpp
     hsa.cpp

@@ -18,6 +18,7 @@ set(ROCPROFILER_LIB_SOURCES
     device_counting_service.cpp
     dispatch_counting_service.cpp
     external_correlation.cpp
+    hsa_tool_hooks.cpp
     intercept_table.cpp
     internal_threading.cpp
     ompt.cpp

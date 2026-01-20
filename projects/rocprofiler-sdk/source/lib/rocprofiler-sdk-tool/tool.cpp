@@ -1870,6 +1870,9 @@ tool_attach(rocprofiler_client_detach_t /*detach_func*/,
             uint64_t                  context_ids_length,
             void* /*tool_data*/)
 {
+    // Reset static state to prevent SIGSEGV on attach-twice scenarios
+    common::clear_string_entries();
+
     // save the existing config for comparison
     auto original_config = tool::get_config();
 
@@ -2842,6 +2845,9 @@ tool_detach(void* /*tool_data*/)
         rocprofiler_get_timestamp(&(tool_metadata->process_end_ns));
 
     generate_output(cleanup_mode::reset);
+
+    // Reset static state after cleanup to prepare for potential re-attach
+    common::clear_string_entries();
 }
 
 void
@@ -2864,6 +2870,9 @@ tool_fini(void* /*tool_data*/)
     flush();
 
     generate_output(cleanup_mode::destroy);
+
+    // Clean up static string entries to prevent memory leaks detected by LSAN
+    common::clear_string_entries();
 
     if(destructors)
     {

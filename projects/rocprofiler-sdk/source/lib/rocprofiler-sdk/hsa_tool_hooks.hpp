@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc.
+// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -9,38 +9,43 @@
 // copies of the Software, and to permit persons to whom the Software is
 // furnished to do so, subject to the following conditions:
 //
-// The above copyright notice and this permission notice shall be included in
-// all copies or substantial portions of the Software.
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
 //
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 // FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
 // AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-// THE SOFTWARE.
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
 
 #pragma once
 
-#include <cstdint>
-#include <string>
-#include <string_view>
-
 namespace rocprofiler
 {
-namespace common
+namespace hsa_tool_hooks
 {
-const std::string*
-get_string_entry(std::string_view name);
+/**
+ * @brief Get the OnUnload status.
+ * @return 0 if not called, -1 if in progress, 1 if completed
+ */
+int
+get_on_unload_status();
 
-const std::string*
-get_string_entry(size_t hash);
-
-size_t
-add_string_entry(std::string_view name);
-
-// Clear string entry cache (for attach/detach)
+/**
+ * @brief Set the OnUnload status.
+ * @param status New status value
+ */
 void
-clear_string_entries();
-}  // namespace common
+set_on_unload_status(int status);
+
+/**
+ * @brief Synchronize all pending async operations.
+ * @return true if synchronization completed successfully
+ */
+bool
+sync_all_async_operations();
+
+}  // namespace hsa_tool_hooks
 }  // namespace rocprofiler

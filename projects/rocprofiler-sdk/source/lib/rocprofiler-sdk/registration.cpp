@@ -41,6 +41,7 @@
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/hsa/scratch_memory.hpp"
+#include "lib/rocprofiler-sdk/hsa_tool_hooks.hpp"
 #include "lib/rocprofiler-sdk/intercept_table.hpp"
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
 #include "lib/rocprofiler-sdk/kfd/kfd.hpp"
@@ -891,6 +892,14 @@ finalize()
     std::call_once(_once, []() {
         auto num_clients = get_num_clients();
         set_fini_status(-1);
+
+        // Check if OnUnload already synchronized async operations
+        // If so, the sync operations in _fini functions will be no-ops
+        if(hsa_tool_hooks::get_on_unload_status() > 0)
+        {
+            ROCP_INFO << "OnUnload already synchronized async operations";
+        }
+
         hsa::async_copy_fini();
         counters::device_counting_service_finalize();
         hsa::queue_controller_fini();
@@ -904,12 +913,14 @@ finalize()
         pc_sampling::service_fini();
 #endif
         code_object::finalize();
-        context::correlation_id_finalize();
         if(get_init_status() > 0)
         {
             invoke_client_finalizers();
         }
         if(num_clients > 0) internal_threading::finalize();
+        // NOTE: correlation_id_finalize must run before set_fini_status(1) to ensure
+        // all correlation ID operations complete before we signal finalization is done
+        context::correlation_id_finalize();
         set_fini_status(1);
     });
 
