@@ -78,9 +78,7 @@ macro(ROCPROFILER_ACTIVATE_CLANG_TIDY)
                                 "path to clang-tidy executable")
 
         set(CMAKE_CXX_CLANG_TIDY
-            ${ROCPROFILER_CLANG_TIDY_EXE}
-            -header-filter=${PROJECT_SOURCE_DIR}/source/.*
-            --exclude-header-filter=${PROJECT_SOURCE_DIR}/source/include/rocprofiler-sdk/rccl/details/.*
+            ${ROCPROFILER_CLANG_TIDY_EXE} -header-filter=${PROJECT_SOURCE_DIR}/source/.*
             --warnings-as-errors=*,-misc-header-include-cycle)
 
         # Create a preprocessor definition that depends on .clang-tidy content so the
