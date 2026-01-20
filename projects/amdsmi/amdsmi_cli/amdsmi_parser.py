@@ -948,7 +948,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                 static_parser.add_argument('-l', '--limit', action='store_true', required=False, help=limit_help)
                 static_parser.add_argument('-P', '--soc-pstate', action='store_true', required=False, help=soc_pstate_help)
                 static_parser.add_argument('-x', '--xgmi-plpd', action='store_true', required=False, help=xgmi_plpd_help)
-                static_parser.add_argument('-o', --profile', action='store_true', required=False, help=profile_help)
+                static_parser.add_argument('-o', '--profile', action='store_true', required=False, help=profile_help)
 
             if self.helpers.is_linux() and not self.helpers.is_virtual_os():
                 static_parser.add_argument('-u', '--numa', action='store_true', required=False, help=numa_help)
