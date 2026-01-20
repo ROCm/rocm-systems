@@ -55,6 +55,7 @@
 #include "library/components/mpi_gotcha.hpp"
 #include "library/components/numa_gotcha.hpp"
 #include "library/components/pthread_gotcha.hpp"
+#include "library/components/ucx_gotcha.hpp"
 #include "library/components/vaapi_gotcha.hpp"
 #include "library/coverage.hpp"
 #include "library/process_sampler.hpp"
@@ -609,6 +610,12 @@ rocprofsys_init_tooling_hidden(void)
     // start these gotchas once settings have been initialized
     if(get_init_bundle()) get_init_bundle()->start();
 
+    if(get_use_ucx())
+    {
+        LOG_DEBUG("Setting up UCX traces...\n");
+        component::ucx_gotcha::start();
+    }
+
     if(get_use_vaapi_tracing())
     {
         LOG_DEBUG("Setting up VA-API traces...");
@@ -899,6 +906,12 @@ rocprofsys_finalize_hidden(void)
 
     fini_bundle_t _finalization{};
     _finalization.start();
+
+    if(get_use_ucx())
+    {
+        LOG_DEBUG("Shutting down UCX tracing...\n");
+        component::ucx_gotcha::shutdown();
+    }
 
     if(get_use_vaapi_tracing())
     {

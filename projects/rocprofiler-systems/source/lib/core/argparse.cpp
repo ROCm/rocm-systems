@@ -169,6 +169,14 @@ add_ld_library_path(parser_data& _data)
 }
 
 parser_data&
+add_torch_library_path(parser_data& _data, bool verbose)
+{
+    rocprofsys::common::add_torch_library_path(_data.current, _data.command, verbose,
+                                               _data.updated);
+    return _data;
+}
+
+parser_data&
 add_core_arguments(parser_t& _parser, parser_data& _data)
 {
     const auto* _cputime_desc =
