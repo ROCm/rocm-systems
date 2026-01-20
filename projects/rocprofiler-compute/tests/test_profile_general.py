@@ -3200,6 +3200,8 @@ def test_multi_rank_profiling():
     workload_base_dir = test_utils.get_output_dir()
 
     num_ranks = 2
+    num_devices = 1
+    num_kernels = 4
 
     baseline_cmd = [
         "mpirun",
@@ -3207,6 +3209,7 @@ def test_multi_rank_profiling():
         str(num_ranks),
         *rocprof_cmd,
         "profile",
+        "--no-roof",
     ]
 
     # Test without MPI-aware workload
@@ -3223,7 +3226,7 @@ def test_multi_rank_profiling():
             workload_dir,
             "--",
         ]
-        + config["occupancy"]
+        + config["app_occupancy"]
     )
     proc = subprocess.run(cmd, text=True, capture_output=True)
     assert proc.returncode == 0
