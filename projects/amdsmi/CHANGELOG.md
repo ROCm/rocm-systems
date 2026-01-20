@@ -8,11 +8,32 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Added
 
-- N/A
+- **Added `os_kernel_version` to `amd-smi static --driver` and `amd-smi` output**.  
+  - Displays the Linux kernel version from `os.uname().release`.
+
+- **Added flexible argument ordering for `amd-smi set --power-cap`**.  
+  - The `--power-cap` option now accepts arguments in any order, improving usability.
+    - Both syntaxes are now supported:
+      - `amd-smi set --power-cap <power-cap-type> <new-cap>`
+      - `amd-smi set --power-cap <new-cap> <power-cap-type>`
+
+  Example:
+
+  ```console
+  $ sudo amd-smi set --power-cap ppt1 1150
+  GPU: 0
+    POWERCAP: Successfully set ppt1 power cap to 1150W
+    ...
+
+  $ sudo amd-smi set --power-cap 1100 ppt1
+  GPU: 0
+    POWERCAP: Successfully set ppt1 power cap to 1100W
+    ...
+  ```
 
 ### Changed
 
-- **Modified output file handling options for `--file` argument**.  
+- **Modified output file handling options for `--file` argument**.
   - Previously tool always appended to existing files without confirmation
   - Now added `--overwrite` / `--append` flag: Overwrites / Appends file content
   - Interactive prompt when file exists and no flag is specified:
@@ -28,7 +49,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Resolved Issues
 
-- **Fixed `amd-smi set` commands showing an AttributeError when partition attributes are not present**.  
+- **Fixed `amd-smi set` commands showing an AttributeError when partition attributes are not present**.
   - Resolved `AttributeError: 'Namespace' object has no attribute 'compute_partition'` error
   - Now using safe `getattr()` access pattern for optional arguments in set_gpu function
 
@@ -36,10 +57,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Added
 
-- **Added support for get and set option for CPUISOFreqPolicy control API and DFCState Control API**. 
+- **Added support for get and set option for CPUISOFreqPolicy control API and DFCState Control API**.  
   - Users can now able to set the  CPU ISO frequency policy  using `amd-smi set --cpu-railisofreq-policy (0-1)`.
   - Users can now able to read the CPU ISO frequency policy  using `amd-smi metric --cpu-railisofreq-policy`.
-  - Users can now able to set the  Data Fabric C-state control status using `amd-smi set --cpu-dfcstate-ctrl  (0-1)`.
+  - Users can now able to set the  Data Fabric C-state control status using `amd-smi set --cpu-dfcstate-ctrl (0-1)`.
   - Users can now able to read the Data Fabric C-state control status  using `amd-smi metric --cpu-dfcstate-ctrl`.
 
   ```console
@@ -78,8 +99,8 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   CPU: 1
     DFCSTATE:
         DFCSTATECTRL_STATUS: 0
- ```
- 
+  ```
+
 - **Added GPU and base board temperature `amd-smi monitor` CLI support**.  
   - Added `--gpu-board-temps` option to `amd-smi monitor` command for GPU board temperature sensors
   - Added `--base-board-temps` option to `amd-smi monitor` command for base board temperature sensors
@@ -149,7 +170,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - New C++ API added:
     - amdsmi_get_supported_power_cap(): Returns which power cap types are supported on the device (PPT0, PPT1). This will allow users to know which power cap types they can get/set.
     - Original APIs remain the same but now can get/set both PPT0 and PPT1 limits (on supported hardware):
-      - amdsmi_get_power_cap_info() 
+      - amdsmi_get_power_cap_info()
       - amdsmi_set_power_cap()
   - New C++ type added:
     - `amdsmi_power_cap_type_t`: The power cap type, either PPT0 or PPT1
@@ -189,8 +210,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
    ...
   ```
 
-- **`amd-smi set --power-cap` now requires sepcification of the power cap type**.  
+- **`amd-smi set --power-cap` now accepts sepcification of the power cap type**.  
   - Command now takes the form: `amd-smi set --power-cap <power-cap-type> <new-cap>`
+  - Default power cap type will be ppt0
   - Acceptable power cap types are "ppt0" and "ppt1"
 
   ```console
@@ -203,8 +225,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **`amd-smi reset --power-cap` will attempt to reset both power caps**.  
   - When using the reset command, both PPT0 and PPT1 power caps will be reset to their default values. If a device only has PPT0, then only PPT0 will be reset.  
     Ex.
+
     ```console
-    $ sudo amd-smi reset --power-cap ppt1 1150
+    $ sudo amd-smi reset --power-cap
     GPU: 0
       POWERCAP:
           PPT0: Successfully reset power cap to 203W
@@ -214,6 +237,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **`amd-smi static --limit` now has a PPT1 section when PPT1 is available**.  
   - The static --limit command has been updated to include PPT1 power limit information when available on the device.
+
     ```console
     $ amd-smi static --limit
     GPU: 0
@@ -229,8 +253,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
           SLOWDOWN_EDGE_TEMPERATURE: N/A
           ...
     ```
+
     - JSON and CSV formats are updated to reflect this change as well.  
       Ex.
+
       ```console
       $ amd-smi static --limit --json
       {
@@ -262,7 +288,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
             },
             ...
       ```
-    
+
       ```console
       $ amd-smi static --limit --csv
       gpu,ppt0_max_power_limit,ppt0_min_power_limit,ppt0_socket_power_limit,ppt1_max_power_limit,ppt1_min_power_limit,ppt1_socket_power_limit,slowdown_edge_temperature,slowdown_hotspot_temperature,slowdown_vram_temperature,shutdown_edge_temperature,shutdown_hotspot_temperature,shutdown_vram_temperature
