@@ -867,6 +867,17 @@ def create_empirical_peaks_dict(empirical_peaks_df: pd.DataFrame) -> dict[str, f
         peak_data_row = empirical_peaks_df.iloc[0]
         for col in empirical_peaks_df.columns:
             empirical_peaks[f"ammolite__{col}_empirical_peak"] = peak_data_row[col]
+
+        # Combine F4 and F6 peaks into a single F6F4 peak using MAX.
+        # The hardware counter SQ_INSTS_VALU_MFMA_MOPS_F6F4 cannot distinguish
+        # between F4 and F6 operations (they use the same V_MFMA_F32_*_F8F6F4
+        # instruction with identical cycle timing), so we use the maximum of
+        # the two empirical peaks as a conservative combined peak value.
+        f4_peak = peak_data_row.get("MFMAF4Flops", 0)
+        f6_peak = peak_data_row.get("MFMAF6Flops", 0)
+        empirical_peaks["ammolite__MFMA_FLOPs_F6F4_empirical_peak"] = max(
+            f4_peak, f6_peak
+        )
     else:
         peak_names = [
             "FP16Flops",
