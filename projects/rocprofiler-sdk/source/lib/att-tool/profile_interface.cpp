@@ -86,7 +86,7 @@ get_trace_data(rocprofiler_thread_trace_decoder_record_type_t trace_id,
         if(trace_size > 0)
         {
             const int se = tool.config.shader_engine;
-            tool.config.filemgr->add_shaderdata_data(se, ptr, static_cast<size_t>(trace_size));
+            tool.config.filemgr->add_shaderdata_data(se, ptr, trace_size);
         }
     }
 
