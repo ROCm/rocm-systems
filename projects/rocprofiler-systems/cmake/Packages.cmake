@@ -237,6 +237,10 @@ if(ROCPROFSYS_USE_ROCM)
         REQUIRED
     )
 
+    rocprofiler_systems_target_compile_definitions(rocprofiler-systems-rocm
+        INTERFACE ENABLE_ESMI_LIB
+    )
+
     # amd_smi in ROCm 6.4 requires both drm and drm_amdgpu libraries to be explicitly linked.
     # This is no longer the case in ROCm 7.0.
     if(ROCPROFSYS_ROCM_VERSION_MAJOR EQUAL 6 AND ROCPROFSYS_ROCM_VERSION_MINOR EQUAL 4)
@@ -1191,7 +1195,7 @@ target_compile_definitions(
 if(ROCPROFSYS_USE_AINIC)
     target_compile_definitions(
         rocprofiler-systems-compile-definitions
-        INTERFACE ROCPROFSYS_USE_AINIC
+        INTERFACE ROCPROFSYS_USE_AINIC ENABLE_ESMI_LIB
     )
 endif()
 
