@@ -404,29 +404,26 @@ def write_region_csv(importData, config) -> None:
 def write_pc_sampling_csv(importData, config) -> None:
     """Write PC sampling data to a CSV file using the normalized pc_sample view."""
 
-    # Unified PC sampling query using normalized schema
+    # Pivot the normalized pc_sample view into wide format with selected fields
+    # Handles both host_trap and stochastic sampling methods
     pc_sample_query = """
         SELECT
-            sample_id AS Sample_Id,
-            guid AS GUID,
+            guid AS Guid,
             timestamp AS Sample_Timestamp,
-            nid AS Node_Id,
-            pid AS Process_Id,
-            tid AS Thread_Id,
-            agent_name AS Agent_Name,
-            agent_type AS Agent_Type,
-            track_id AS Track_Id,
-            event_id AS Event_Id,
-            stack_id AS Stack_Id,
-            parent_stack_id AS Parent_Stack_Id,
-            corr_id AS Correlation_Id,
-            field_name AS Field_Name,
-            field_description AS Field_Description,
-            value_type AS Value_Type,
-            field_value AS Field_Value
+            MAX(CASE WHEN field_name = 'exec_mask' THEN field_value END) AS Exec_Mask,
+            corr_id AS Dispatch_Id,
+            MAX(CASE WHEN field_name = 'instruction' THEN field_value END) AS Instruction,
+            MAX(CASE WHEN field_name = 'instruction_comment' THEN field_value END) AS Instruction_Comment,
+            stack_id AS Correlation_Id,
+            MAX(CASE WHEN field_name = 'wave_issued_instruction' THEN field_value END) AS Wave_Issued_Instruction,
+            MAX(CASE WHEN field_name = 'instruction_type' THEN field_value END) AS Instruction_Type,
+            MAX(CASE WHEN field_name = 'stall_reason' THEN field_value END) AS Stall_Reason,
+            MAX(CASE WHEN field_name = 'wave_count' THEN field_value END) AS Wave_Count
         FROM "pc_sample"
+        GROUP BY
+            sample_id, guid, timestamp, corr_id, stack_id
         ORDER BY
-            sample_id ASC, field_name ASC
+            timestamp ASC
     """
     write_sql_query_to_csv(importData, config, pc_sample_query, "pc_sampling")
 

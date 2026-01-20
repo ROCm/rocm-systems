@@ -62,6 +62,13 @@ FROM
     `rocpd_info_pmc{{uuid}}`;
 
 CREATE VIEW IF NOT EXISTS
+    `rocpd_info_pc_sample` AS
+SELECT
+    *
+FROM
+    `rocpd_info_pc_sample{{uuid}}`;
+
+CREATE VIEW IF NOT EXISTS
     `rocpd_info_code_object` AS
 SELECT
     *
@@ -102,6 +109,13 @@ SELECT
     *
 FROM
     `rocpd_pmc_event{{uuid}}`;
+
+CREATE VIEW IF NOT EXISTS
+    `rocpd_pc_sample_event` AS
+SELECT
+    *
+FROM
+    `rocpd_pc_sample_event{{uuid}}`;
 
 CREATE VIEW IF NOT EXISTS
     `rocpd_region` AS
