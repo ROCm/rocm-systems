@@ -89,9 +89,9 @@ public:
                   aqlprofile_memory_dealloc_callback_t dealloc,
                   void*                                data)
     : agent(agent)
+    , userdata(data)
     , alloc_cb(alloc)
     , dealloc_cb(dealloc)
-    , userdata(data)
     , handle(HANDLE_COUNTER.fetch_add(1))
     {}
 
@@ -100,9 +100,9 @@ public:
                   aqlprofile_memory_dealloc_callback_t dealloc,
                   void*                                data)
     : agent_handle(agent)
+    , userdata(data)
     , alloc_cb(alloc)
     , dealloc_cb(dealloc)
-    , userdata(data)
     , handle(HANDLE_COUNTER.fetch_add(1))
     {}
 

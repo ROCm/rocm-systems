@@ -26,6 +26,6 @@ target_sources(
             threadtrace.cpp
             vega20_reg_init.cpp)
 
-if(ROCPROFILER_BUILD_TESTS AND FALSE)
+if(ROCPROFILER_BUILD_TESTS)
     add_subdirectory(tests)
 endif()
