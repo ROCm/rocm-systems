@@ -148,11 +148,21 @@ class TestInstrumentBinary:
         run_test,
         assert_regex,
     ):
-        """Test instrument with library basename (run from lib directory)."""
+        """Test instrument with library basename.
+
+        This MUST be run from a tmp directory, NOT from the actual lib directory.
+        Running from the lib directory causes Dyninst to modify the library in-place,
+        contaminating it with instrumentation markers. This breaks all subsequent
+        binary rewrite tests with "unable to reinstrument previously instrumented
+        binary" errors.
+        """
         lib_basename = "librocprof-sys-user.so"
         user_lib = rocprof_config.rocprofsys_lib_dir / lib_basename
         if not user_lib.exists():
             pytest.skip(f"{lib_basename} not built")
+
+        tmp_dir = test_output_dir / "tmp"
+        tmp_dir.mkdir(parents=True, exist_ok=True)
 
         output_lib = test_output_dir / lib_basename
 
@@ -170,8 +180,7 @@ class TestInstrumentBinary:
                 lib_basename,
             ],
             timeout=120,
-            # Run from lib directory so basename can be found
-            working_directory=rocprof_config.rocprofsys_lib_dir,
+            working_directory=tmp_dir,
             fail_on_not_found=True,
         )
 

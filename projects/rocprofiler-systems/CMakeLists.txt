@@ -151,6 +151,7 @@ if(CI_BUILD)
     rocprofiler_systems_add_option(ROCPROFSYS_STRIP_LIBRARIES "Strip the libraries" OFF
                                    ADVANCED
     )
+    # This is the default used by TheRock
 elseif(ROCPROFSYS_BUILD_CI)
     rocprofiler_systems_add_option(ROCPROFSYS_BUILD_DEVELOPER "Enable developer build flags" OFF ADVANCED)
     rocprofiler_systems_add_option(ROCPROFSYS_STRIP_LIBRARIES "Strip the libraries" OFF
