@@ -44,8 +44,8 @@ from rocprofsys import (
     SysRunRunner,
 )
 
-# Key for storing test results on pytest items
-_results_key: StashKey[list] = StashKey()
+# Key for storing the single test result on pytest items
+_result_key: StashKey = StashKey()
 # Key for tracking subtest failures (for pytest-subtests plugin compatibility when pytest < 9.0.0)
 _subtest_failures_key: StashKey[list] = StashKey()
 # Key to prevent duplicate output printing
@@ -441,49 +441,51 @@ def pytest_collection_modifyitems(config, items) -> None:
 
 @pytest.hookimpl(hookwrapper=True)  # Allows yield
 def pytest_runtest_makereport(item, call):
-    """Track test results (cleanup decisions) and inject runner if needed."""
+    """Build runner output and attach to report."""
     outcome = yield
     rep = outcome.get_result()
-    setattr(item, f"rep_{rep.when}", rep)
-
-    show_output_flag = getattr(pytest, "_show_output_flag", False)
-    show_on_fail_flag = getattr(pytest, "_show_output_on_subtest_fail_flag", False)
-    has_subtest_failures = len(item.stash.get(_subtest_failures_key, [])) > 0
-
-    should_show = show_output_flag or (
-        show_on_fail_flag and (rep.failed or has_subtest_failures)
-    )
-
-    # Only act on call phase
-    if not (should_show) or rep.when != "call":
-        return
-
-    # Prevent duplicate output (only print once per test function)
-    if item.stash.get(_output_printed_key, False):
-        return
-
-    results = item.stash.get(_results_key, [])
-    if not results:
-        return
-
     config = getattr(pytest, "_config_ref", None)
+
+    # Relevant flags
+    show_output_flag = getattr(pytest, "_show_output_flag", False)
+    show_on_subfail_flag = getattr(pytest, "_show_output_on_subtest_fail_flag", False)
     print_env_flag = bool(config and config.getoption("--print-env", default=False))
 
+    has_subtest_failures = len(item.stash.get(_subtest_failures_key, [])) > 0
+    show_runner_output = (show_output_flag and not rep.failed) or (
+        show_on_subfail_flag and has_subtest_failures
+    )
+
+    if (
+        rep.when != "call"
+        or item.stash.get(_output_printed_key, False)
+        or not (show_runner_output or print_env_flag)
+    ):
+        return
+
+    # A test should only call run_test once
+    result = item.stash.get(_result_key, None)
+    if not result:
+        return
+
+    item.stash[_output_printed_key] = True
     output_parts = []
-    for result in results:
+
+    # Build the output
+    if show_runner_output:
         cmd = " ".join(str(c) for c in getattr(result, "command", []))
         if cmd:
             output_parts.append(f"{'='*70}")
             output_parts.append(f"Command: {cmd}")
+    if print_env_flag:
+        result_env = getattr(result, "environment", None)
+        if isinstance(result_env, dict) and result_env:
+            env_lines = [f"  {k}={v}" for k, v in sorted(result_env.items())]
+            output_parts.append(
+                "Environment (via --print-env):\n\n" + "\n".join(env_lines) + "\n"
+            )
             output_parts.append(f"{'='*70}")
-        if print_env_flag:
-            result_env = getattr(result, "environment", None)
-            if isinstance(result_env, dict) and result_env:
-                env_lines = [f"  {k}={v}" for k, v in sorted(result_env.items())]
-                output_parts.append(
-                    "Environment (via --print-env):\n\n" + "\n".join(env_lines) + "\n"
-                )
-                output_parts.append(f"{'='*70}")
+    if show_runner_output:
         output_parts.append("Test Output:\n")
         test_out = getattr(result, "test_output", "")
         if test_out:
@@ -491,7 +493,6 @@ def pytest_runtest_makereport(item, call):
 
     if not output_parts:
         return
-    item.stash[_output_printed_key] = True
 
     output_text = "\n".join(output_parts) + "\n\n"
     rep.sections.append(("Runner Output", output_text))
@@ -896,7 +897,7 @@ def collect_result(request) -> Callable:
     """
 
     def _collect(result):
-        request.node.stash.setdefault(_results_key, []).append(result)
+        request.node.stash[_result_key] = result
 
     return _collect
 
