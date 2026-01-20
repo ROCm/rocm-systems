@@ -1792,7 +1792,9 @@ hsa_status_t GpuAgent::QueueCreate(size_t size, hsa_queue_type32_t queue_type, u
   scratch.main_queue_base = nullptr;
   scratch.main_queue_process_offset = 0;
 
-  MAKE_NAMED_SCOPE_GUARD(scratchGuard, [&]() { ReleaseQueueMainScratch(scratch); });
+  MAKE_NAMED_SCOPE_GUARD(scratchGuard, [&]() {
+    if (scratch.main_queue_base != nullptr) ReleaseQueueMainScratch(scratch);
+  });
 
   if (scratch.main_size != 0) {
     AcquireQueueMainScratch(scratch);
