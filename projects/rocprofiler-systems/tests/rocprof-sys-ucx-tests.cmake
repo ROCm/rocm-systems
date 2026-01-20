@@ -31,6 +31,23 @@ if(NOT ROCPROFSYS_USE_MPI AND NOT ROCPROFSYS_USE_MPI_HEADERS)
     return()
 endif()
 
+# Detect MPI implementation by checking include paths
+set(_DETECTED_MPI_IMPL "unknown")
+if("${MPI_C_COMPILER_INCLUDE_DIRS};${MPI_C_HEADER_DIR}" MATCHES "openmpi")
+    set(_DETECTED_MPI_IMPL "openmpi")
+elseif("${MPI_C_COMPILER_INCLUDE_DIRS};${MPI_C_HEADER_DIR}" MATCHES "mpich")
+    set(_DETECTED_MPI_IMPL "mpich")
+endif()
+
+# Only proceed if OpenMPI is detected
+if(NOT "${_DETECTED_MPI_IMPL}" STREQUAL "openmpi")
+    message(
+        STATUS
+        "Skipping UCX tests - requires OpenMPI (detected: ${_DETECTED_MPI_IMPL}). UCX tests use OpenMPI-specific environment variables (OMPI_MCA_*)."
+    )
+    return()
+endif()
+
 # Force OpenMPI to use UCX transport via environment variables
 set(_ucxp_mpi_environment
     "OMPI_MCA_pml=ucx" # Use UCX point-to-point messaging layer
