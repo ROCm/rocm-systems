@@ -4,7 +4,7 @@
 
 Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/](https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/).
 
-## ROCm Systems Profiler 1.4.0 for ROCm x.y.z (unreleased)
+## ROCm Systems Profiler 1.4.0 for ROCm 7.11.0
 
 ### Added
 
@@ -23,6 +23,7 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 - `--trace-legacy` / `-L` CLI flag enables legacy direct mode for tracing.
 - Changed thread storage allocation from a hard-coded 4096-element array to a compile-time computed size derived from the ROCPROFSYS_MAX_THREADS configuration flag.
 - Changed logging module to use `spdlog` library.
+- Simplify categorizing like pmc_info events by removing the _<idx> from the "symbol" field. ie., "JpegAct_0" -> "JpegAct".
 
 ### Resolved issues
 
