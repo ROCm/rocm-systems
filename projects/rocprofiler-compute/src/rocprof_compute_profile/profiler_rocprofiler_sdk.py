@@ -92,7 +92,6 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
                 / "librocprofiler-sdk-rocattach.so"
             )
             options.update({
-                "ROCPROF_ATTACH_TOOL_LIBRARY": rocprofiler_sdk_tool_path,
                 "ROCPROF_ATTACH_LIBRARY": rocprofiler_attach_library_path,
                 "ROCPROF_ATTACH_PID": args.attach_pid,
             })
