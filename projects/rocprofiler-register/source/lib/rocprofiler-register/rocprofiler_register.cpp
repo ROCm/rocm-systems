@@ -366,12 +366,6 @@ rocp_reg_scan_for_tools()
             << rocprofiler_lib_register_entrypoint << " not found. Tried to dlopen "
             << _rocp_reg_lib;
     }
-    else if(_found_tool && rocprofiler_set_api_table)
-    {
-        rocprofiler_lib_config_fn = &rocprofiler_set_api_table;
-        rocprofiler_lib_attach_fn = &rocprofiler_attach;
-        rocprofiler_lib_detach_fn = &rocprofiler_detach;
-    }
 
     return rocp_scan_data{ rocprofiler_lib_handle,
                            rocprofiler_lib_config_fn,
