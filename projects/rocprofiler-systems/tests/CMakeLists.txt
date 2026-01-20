@@ -65,9 +65,12 @@ else()
     #
     # -------------------------------------------------------------------------------------- #
 
+    #delete temp files created by rocprofiler-sys tests in /tmp owned by the current user. Always return success.
     add_test(
         NAME rocprofsys-cleanup-tmp-files
-        COMMAND sh -c "rm -f /tmp/buffered_storage*.bin /tmp/metadata*.json"
+        COMMAND
+            sh -c
+            "find /tmp -maxdepth 1 -user $(whoami) \\( -name 'buffered_storage*.bin' -o -name 'metadata*.json' \\) -delete 2>/dev/null || true"
         WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
     )
 
