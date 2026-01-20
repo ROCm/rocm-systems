@@ -21,8 +21,8 @@
 // SOFTWARE.
 
 #include "api.hpp"
-#include "core/debug.hpp"
 
+#include "logger/debug.hpp"
 #include <exception>
 #include <stdexcept>
 
@@ -46,7 +46,7 @@ rocprofsys_push_region(const char* _name)
         rocprofsys_push_region_hidden(_name);
     } catch(std::exception& _e)
     {
-        ROCPROFSYS_WARNING_F(1, "Exception caught: %s\n", _e.what());
+        LOG_WARNING("Exception caught: {}", _e.what());
         return -1;
     }
     return 0;
@@ -60,7 +60,7 @@ rocprofsys_pop_region(const char* _name)
         rocprofsys_pop_region_hidden(_name);
     } catch(std::exception& _e)
     {
-        ROCPROFSYS_WARNING_F(1, "Exception caught: %s\n", _e.what());
+        LOG_WARNING("Exception caught: {}", _e.what());
         return -1;
     }
     return 0;
@@ -77,7 +77,7 @@ rocprofsys_push_category_region(rocprofsys_category_t _category, const char* _na
                                                _annotation_count);
     } catch(std::exception& _e)
     {
-        ROCPROFSYS_WARNING_F(1, "Exception caught: %s\n", _e.what());
+        LOG_WARNING("Exception caught: {}", _e.what());
         return -1;
     }
     return 0;
@@ -94,7 +94,7 @@ rocprofsys_pop_category_region(rocprofsys_category_t _category, const char* _nam
                                               _annotation_count);
     } catch(std::exception& _e)
     {
-        ROCPROFSYS_WARNING_F(1, "Exception caught: %s\n", _e.what());
+        LOG_WARNING("Exception caught: {}", _e.what());
         return -1;
     }
     return 0;

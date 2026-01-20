@@ -21,7 +21,8 @@
 // SOFTWARE.
 
 #include "utility.hpp"
-#include "debug.hpp"
+
+#include "logger/debug.hpp"
 
 namespace rocprofsys
 {
@@ -71,12 +72,11 @@ parse_numeric_range(std::string _input_string, const std::string& _label, Up _in
     {
         if(_v.find_first_not_of("0123456789-:") != std::string::npos)
         {
-            ROCPROFSYS_BASIC_VERBOSE_F(
-                0,
-                "Invalid %s specification. Only numerical values (e.g., 0), ranges "
+            LOG_WARNING(
+                "Invalid {} specification. Only numerical values (e.g., 0), ranges "
                 "(e.g., 0-7), and ranges with increments (e.g. 20-40:10) are permitted. "
-                "Ignoring %s...",
-                _label.c_str(), _v.c_str());
+                "Ignoring {}...",
+                _label, _v);
             continue;
         }
 
@@ -92,10 +92,13 @@ parse_numeric_range(std::string _input_string, const std::string& _label, Up _in
         if(_v.find('-') != std::string::npos)
         {
             auto _vv = tim::delimit(_v, "-");
-            ROCPROFSYS_CONDITIONAL_THROW(
-                _vv.size() != 2,
-                "Invalid %s range specification: %s. Required format N-M, e.g. 0-4",
-                _label.c_str(), _v.c_str());
+            if(_vv.size() != 2)
+            {
+                throw std::runtime_error(fmt::format(
+                    "Invalid {} range specification: {}. Required format N-M, e.g. 0-4",
+                    _label, _v));
+            }
+
             Tp _vn = _get_value(_vv.at(0));
             Tp _vN = _get_value(_vv.at(1));
             do

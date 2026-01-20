@@ -31,8 +31,8 @@
 #include <hip/hip_deprecated.h>
 #include <hip/hip_version.h>
 
-#include "fmt/core.h"
-#include "fmt/ranges.h"
+#include <fmt/core.h>
+#include <fmt/ranges.h>
 
 #define ROCP_SDK_HIP_FORMATTER(TYPE, ...)                                                          \
     template <>                                                                                    \
