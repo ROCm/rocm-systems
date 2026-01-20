@@ -187,6 +187,12 @@ rocprofiler_systems_add_feature(CMAKE_CXX_STANDARD "CXX language standard")
 rocprofiler_systems_add_option(CMAKE_CXX_STANDARD_REQUIRED
                                "Require C++ language standard" ON
 )
+rocprofiler_systems_add_option(ROCPROFSYS_USE_AMD_SMI
+                               "Use amd-smi" ON
+)
+rocprofiler_systems_add_option(ROCPROFSYS_USE_AINIC
+                               "Use amd-smi AI NIC API" OFF
+)
 rocprofiler_systems_add_option(CMAKE_CXX_EXTENSIONS
                                "Compiler specific language extensions" OFF
 )

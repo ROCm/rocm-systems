@@ -37,6 +37,7 @@
 
 #if ROCPROFSYS_USE_ROCM > 0
 #    include <amd_smi/amdsmi.h>
+#    include "core/amd_smi.hpp"
 #endif
 
 #include <chrono>

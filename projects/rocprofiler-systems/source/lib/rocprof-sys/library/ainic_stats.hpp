@@ -5,6 +5,7 @@
 #include <string>
 
 #include "core/amd_smi.hpp"
+#include <amd_smi/amd_smi_system.h>
 
 struct NICData
 {

@@ -114,7 +114,7 @@ amdsmi_init()
             uint64_t init_flags = AMDSMI_INIT_AMD_GPUS;
 
 #    if USE_AINIC
-            init_flags |= AMDSMI_INIT_AMD_AINIC;
+            init_flags |= AMDSMI_INIT_AMD_NICS;
 #    endif
 
             ROCPROFSYS_AMD_SMI_CALL(::amdsmi_init(init_flags));
@@ -318,7 +318,7 @@ get_processor_handles()
         {
             processor_type_t processor_type = {};
             ret = amdsmi_get_processor_type(processor, &processor_type);
-            if(processor_type == AMDSMI_PROCESSOR_TYPE_AMD_AINIC)
+            if(processor_type == AMDSMI_PROCESSOR_TYPE_AMD_NIC)
             {
                 processors::ainic_list.push_back(processor);
                 continue;
