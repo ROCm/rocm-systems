@@ -15,7 +15,7 @@ This section provides an overview of ROCm Compute Profiler's CLI analysis featur
 * :ref:`Metric customization <cli-analysis-options>`: Isolate a subset of built-in metrics or build your own profiling configuration.
 
 * :ref:`Filtering <cli-analysis-options>`: Hone in on a particular kernel, GPU ID, or dispatch ID via post-process filtering.
-  
+
 * :ref:`Per-kernel roofline analysis <per-kernel-roofline>`: Detailed arithmetic intensity and performance analysis for individual kernels.
 
 Run ``rocprof-compute analyze -h`` for more details.
@@ -534,36 +534,46 @@ Analysis database example
 
 .. code-block:: shell-session
 
-   $ rocprof-compute analyze --verbose --db test -p workloads/vmem/MI300X_A1 -p workloads/vmem1/MI300X_A1
+   $ rocprof-compute analyze --verbose --output-name test --output-format db -p workloads/nbody/MI300X_A1 -p workloads/nbody1/MI300X_A1
    DEBUG Execution mode = analyze
 
-                                    __                                       _
-   _ __ ___   ___ _ __  _ __ ___  / _|       ___ ___  _ __ ___  _ __  _   _| |_ ___
-   | '__/ _ \ / __| '_ \| '__/ _ \| |_ _____ / __/ _ \| '_ ` _ \| '_ \| | | | __/ _ \
-   | | | (_) | (__| |_) | | | (_) |  _|_____| (_| (_) | | | | | | |_) | |_| | ||  __/
-   |_|  \___/ \___| .__/|_|  \___/|_|        \___\___/|_| |_| |_| .__/ \__,_|\__\___|
-                  |_|                                           |_|
+                                 __                                       _
+ _ __ ___   ___ _ __  _ __ ___  / _|       ___ ___  _ __ ___  _ __  _   _| |_ ___
+| '__/ _ \ / __| '_ \| '__/ _ \| |_ _____ / __/ _ \| '_ ` _ \| '_ \| | | | __/ _ \
+| | | (_) | (__| |_) | | | (_) |  _|_____| (_| (_) | | | | | | |_) | |_| | ||  __/
+|_|  \___/ \___| .__/|_|  \___/|_|        \___\___/|_| |_| |_| .__/ \__,_|\__\___|
+               |_|                                           |_|
 
-      INFO Analysis mode = db
-   DEBUG [omnisoc init]
-   DEBUG [omnisoc init]
-   DEBUG [analysis] prepping to do some analysis
-      INFO [analysis] deriving rocprofiler-compute metrics...
-   WARNING Roofline ceilings not found for /app/projects/rocprofiler-compute/workloads/vmem/MI300X_A1.
-   WARNING Roofline ceilings not found for /app/projects/rocprofiler-compute/workloads/vmem1/MI300X_A1.
-   WARNING PC sampling data not found for /app/projects/rocprofiler-compute/workloads/vmem/MI300X_A1.
-   WARNING PC sampling data not found for /app/projects/rocprofiler-compute/workloads/vmem1/MI300X_A1.
-   DEBUG Collected dispatch data
-   DEBUG Applied analysis mode filters
-   DEBUG Calculated dispatch data
-   DEBUG Collected metrics data
-   WARNING Failed to evaluate expression for 3.1.39 - Value: to_round((to_avg(
+   INFO Analysis mode = db
+   INFO ed45b0b189
+  DEBUG [omnisoc init]
+   INFO ed45b0b189
+  DEBUG [omnisoc init]
+  DEBUG [analysis] prepping to do some analysis
+   INFO [analysis] deriving rocprofiler-compute metrics...
+  DEBUG Collected roofline ceilings
+WARNING PC sampling data not found for /app/projects/rocprofiler-compute/workloads/nbody/MI300X_A1.
+WARNING PC sampling data not found for /app/projects/rocprofiler-compute/workloads/nbody1/MI300X_A1.
+  DEBUG Collected dispatch data
+  DEBUG Applied analysis mode filters
+  DEBUG Calculated dispatch data
+  DEBUG Collected metrics data
+WARNING Failed to evaluate expression for 3.1.39 - Value: to_round((to_avg(
    (pmc_df.get("pmc_perf_ACCUM") / pmc_df.get("SQC_ICACHE_REQ")).where((pmc_df.get("SQC_ICACHE_REQ") != 0), None)) * 100), 0) - unsupported operand type(s) for /: 'NoneType' and 'float'
-   WARNING Failed to evaluate expression for 3.1.39 - Value: to_round((to_avg(
+WARNING Failed to evaluate expression for 3.1.39 - Value: to_round((to_avg(
    (pmc_df.get("pmc_perf_ACCUM") / pmc_df.get("SQC_ICACHE_REQ")).where((pmc_df.get("SQC_ICACHE_REQ") != 0), None)) * 100), 0) - unsupported operand type(s) for /: 'NoneType' and 'float'
-   DEBUG Calculated metric values
-   DEBUG Calculated roofline data points
-   DEBUG [analysis] generating analysis
-   DEBUG SQLite database initialized with name: test.db
-   DEBUG Initialized database: test.db
-   DEBUG Completed writing database
+  DEBUG Calculating expressions for kernel: _ZN12rocrand_impl6system6detail17trampoline_kernelINS_4host33static_block_size_config_providerILj256EEEjLb0ELNS3_11target_archE942EZNS3_25xorwow_generator_templateINS0_13device_systemENS3_23default_config_providerIL16rocrand_rng_type401EEEE4initEvEUlT_DpT0_E_JPN14rocrand_device13xorwow_engineEjjyyEEEvT3_DpT4_
+  DEBUG Calculating expressions for kernel: _ZN12rocrand_impl6system6detail17trampoline_kernelINS_4host23default_config_providerIL16rocrand_rng_type401EEEfLb0ELNS3_11target_archE942EZZNS3_25xorwow_generator_templateINS0_13device_systemES6_E8generateIfNS3_20uniform_distributionIfjEEEE14rocrand_statusPT_mT0_ENKUlSF_E_clISt17integral_constantIbLb0EEEEDaSF_EUlSF_DpT0_E_JPN14rocrand_device13xorwow_engineEjPfmSD_EEEvT3_DpT4_
+  DEBUG Calculating expressions for kernel: void bodyForce_block<256>(HIP_vector_type<float, 4u> const*, HIP_vector_type<float, 4u>*, float, int)
+  DEBUG Calculating expressions for kernel: _ZN12rocrand_impl6system6detail17trampoline_kernelINS_4host33static_block_size_config_providerILj256EEEjLb0ELNS3_11target_archE942EZNS3_25xorwow_generator_templateINS0_13device_systemENS3_23default_config_providerIL16rocrand_rng_type401EEEE4initEvEUlT_DpT0_E_JPN14rocrand_device13xorwow_engineEjjyyEEEvT3_DpT4_
+  DEBUG Calculating expressions for kernel: _ZN12rocrand_impl6system6detail17trampoline_kernelINS_4host23default_config_providerIL16rocrand_rng_type401EEEfLb0ELNS3_11target_archE942EZZNS3_25xorwow_generator_templateINS0_13device_systemES6_E8generateIfNS3_20uniform_distributionIfjEEEE14rocrand_statusPT_mT0_ENKUlSF_E_clISt17integral_constantIbLb0EEEEDaSF_EUlSF_DpT0_E_JPN14rocrand_device13xorwow_engineEjPfmSD_EEEvT3_DpT4_
+  DEBUG Calculating expressions for kernel: void bodyForce_block<256>(HIP_vector_type<float, 4u> const*, HIP_vector_type<float, 4u>*, float, int)
+  DEBUG Calculated metric values
+  DEBUG Calculated roofline data points
+  DEBUG [analysis] generating analysis
+  DEBUG SQLite database initialized with name: test.db
+  DEBUG Initialized database: test.db
+   INFO ed45b0b189
+   INFO ed45b0b189
+  DEBUG Completed writing database
+WARNING Created file: test.db
