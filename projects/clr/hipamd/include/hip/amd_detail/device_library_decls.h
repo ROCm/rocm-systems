@@ -97,6 +97,8 @@ extern "C" __device__ __attribute__((const)) uint __ockl_multi_grid_size(void);
 extern "C" __device__ __attribute__((const)) uint __ockl_multi_grid_thread_rank(void);
 extern "C" __device__ __attribute__((const)) int __ockl_multi_grid_is_valid(void);
 extern "C" __device__ __attribute__((convergent)) void __ockl_multi_grid_sync(void);
+extern "C" __device__ __attribute__((const)) uint __ockl_grid_bar_arrive(void);
+extern "C" __device__ __attribute__((convergent)) void __ockl_grid_bar_wait(uint);
 
 extern "C" __device__ void __ockl_atomic_add_noret_f32(float*, float);
 

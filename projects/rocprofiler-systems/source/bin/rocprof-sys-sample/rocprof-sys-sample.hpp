@@ -35,3 +35,6 @@ get_initial_environment();
 
 std::vector<char*>
 parse_args(int argc, char** argv, std::vector<char*>& envp);
+
+void
+add_torch_library_path(std::vector<char*>& envp, const std::vector<char*>& argv);
