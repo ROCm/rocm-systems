@@ -27,7 +27,10 @@
 #include <mutex>
 #include <stdexcept>
 #include <shared_mutex>
+
 #include "lib/aqlprofile/core/ip_discovery.h"
+
+#define __maybe_unused __attribute__((__unused__))
 
 #include "lib/aqlprofile/linux/registers/sienna_cichlid_ip_offset.h"
 #include "lib/aqlprofile/util/reg_offsets.h"

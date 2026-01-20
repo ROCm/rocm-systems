@@ -1,8 +1,11 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include "lib/aqlprofile/core/logger.h"
+
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
+
 #include <fstream>
 #include <filesystem>
 #include <thread>
@@ -10,13 +13,12 @@
 #include <sstream>
 #include <cctype>
 #include <cstdlib>
+
 #ifdef _WIN32
 #    include <stdlib.h>  // _putenv_s, _unsetenv via _putenv_s
 #else
 #    include <unistd.h>
 #endif
-
-#include "lib/aqlprofile/core/logger.h"
 
 #ifdef _WIN32
 static inline int
@@ -31,13 +33,6 @@ unsetenv(const char* name)
     return static_cast<int>(_putenv_s(name, ""));
 }
 #endif
-
-// Define static members for Logger class
-namespace aql_profile
-{
-Logger::mutex_t Logger::mutex_;
-Logger*         Logger::instance_ = nullptr;
-}  // namespace aql_profile
 
 namespace aql_profile
 {
