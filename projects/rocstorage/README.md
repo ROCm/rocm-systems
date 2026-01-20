@@ -14,7 +14,6 @@ This library is part of the [rocm-systems](https://github.com/ROCm/rocm-systems)
 - C++17 compatible compiler
 - SQLite3 (bundled via CMake module)
 - spdlog (for logging)
-- fmt (for string formatting)
 - Optional: `rocprofiler-sdk-rocpd` for schema compatibility
 
 ### System Package Dependencies
@@ -67,6 +66,12 @@ For projects using an installed rocstorage:
 find_package(rocstorage REQUIRED)
 target_link_libraries(your_target PRIVATE rocstorage::rocstorage)
 ```
+
+<!-- ## Benchmark -->
+
+<!-- // TODO -->
+<!-- | Benchmark           | Description                   | Time (ns) | -->
+<!-- |---------------------|-------------------------------|-----------| -->
 
 ## License
 

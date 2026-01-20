@@ -171,20 +171,8 @@ public:
     // --------------------- Data Tables ---------------------
 
     /***
-     * @brief Insert region data into rocpd
-     * @param region_data Region data which will be inserted into rocpd
-     * @param node_id_value Node Id Value - which will uniquely identify the node
-     * @param process_id_value Process Id Value - which will uniquely identify the process
-     * @param thread_id_value Thread Id Value - which will uniquely identify the thread
-     */
-    void insert_region_data(const writer_api::region_data_t& region_data,
-                            const writer_api::node_id_t      node_id_value,
-                            const writer_api::process_id_t   process_id_value,
-                            const writer_api::thread_id_t    thread_id_value);
-
-    /***
-     * @brief Insert region data into rocpd and CREATE SAMPLE WHICH WILL REFERENCE THE
-     * TRACK
+     * @brief Insert region data into rocpd and create sample which will reference the
+     * track
      * @param region_data Region data which will be inserted into rocpd
      * @param node_id_value Node Id Value - which will uniquely identify the node
      * @param process_id_value Process Id Value - which will uniquely identify the process
@@ -195,7 +183,8 @@ public:
                             const writer_api::node_id_t      node_id_value,
                             const writer_api::process_id_t   process_id_value,
                             const writer_api::thread_id_t    thread_id_value,
-                            const writer_api::track_name_t   track_name_value);
+                            // new
+                            const writer_api::track_name_t& track_name_value);
 
     /***
      * @brief Insert pmc event data into rocpd
@@ -242,7 +231,9 @@ public:
                                  const writer_api::agent_unique_id_t&  src_agent_id_value,
                                  const writer_api::agent_unique_id_t&  dst_agent_id_value,
                                  const writer_api::stream_id_t         stream_id_value,
-                                 const writer_api::queue_id_t          queue_id_value);
+                                 const writer_api::queue_id_t          queue_id_value,
+                                 // new
+                                 const writer_api::track_name_t& track_name_value);
 
     /***
      * @brief Insert memory alloc data into rocpd
@@ -267,9 +258,10 @@ public:
         const writer_api::track_name_t& track_name_value);
 
     /***
-     * @brief Flush the writer
+     * @brief Flush in-memory data to disk
+     * @note This function is only used with in-memory database option
      */
-    void flush();
+    void flush_in_memory_data_to_disk();
 
 private:
     struct impl;

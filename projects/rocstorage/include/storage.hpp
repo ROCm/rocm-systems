@@ -45,6 +45,7 @@ public:
     std::shared_ptr<rocstorage::writer> get_writer() const;
     std::shared_ptr<rocstorage::reader> get_reader() const;
 
+    // TODO: Add get_version()
 private:
     struct impl;
     std::unique_ptr<impl> m_impl;

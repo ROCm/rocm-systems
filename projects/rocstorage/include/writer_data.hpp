@@ -11,6 +11,7 @@ namespace rocstorage
 namespace writer_api
 {
 
+// Unique values which determine the uniqueness of the data
 using node_id_t              = size_t;
 using process_id_t           = size_t;
 using thread_id_t            = size_t;
@@ -22,15 +23,21 @@ using stream_id_t            = size_t;
 using queue_id_t             = size_t;
 using track_name_t           = std::string;
 
-struct execution_context_t
+struct trace_environment_t
 {
-    node_id_t                   node_id;
-    std::optional<process_id_t> process_id;
-    std::optional<thread_id_t>  thread_id;
+    struct system_environment_t
+    {
+        std::optional<node_id_t>    node_id;
+        std::optional<process_id_t> process_id;
+        std::optional<thread_id_t>  thread_id;
+    } system_environment;
 
-    std::optional<agent_id_t>  agent_id;
-    std::optional<stream_id_t> stream_id;
-    std::optional<queue_id_t>  queue_id;
+    struct gpu_environment_t
+    {
+        std::optional<agent_id_t>  agent_id;
+        std::optional<stream_id_t> stream_id;
+        std::optional<queue_id_t>  queue_id;
+    } gpu_environment;
 
     std::optional<track_name_t> track_name;
 };
@@ -66,7 +73,7 @@ struct process_info_t
 struct agent_unique_id_t
 {
     size_t      logical_index;
-    std::string agent_type;
+    std::string agent_type;  // todo
 };
 
 struct agent_info_t
