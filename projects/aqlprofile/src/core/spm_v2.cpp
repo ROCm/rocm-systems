@@ -380,6 +380,20 @@ PUBLIC_API hsa_status_t aqlprofile_spm_drain_counters(aqlprofile_handle_t handle
     auto s = aqlprofile::spm::spm_state_map->query(handle);
     if (!s) return HSA_STATUS_ERROR_NOT_INITIALIZED;
 
+    // Check that no draining is already in progress
+    {
+        std::lock_guard<std::mutex> lock(s->drain_mutex);
+        
+        // Check if any draining operation is already active
+        if (s->draining_requested.load() || 
+            s->draining_producer_done.load() || 
+            s->draining_consumer_done.load()) {
+            
+            // Another drain operation is in progress or incomplete
+            return HSA_STATUS_ERROR;
+        }
+    }
+
     // Drain the counters. Send a signal to producer thread to start draining. 
     // We don't want to stop the threads, we simply signal the thread to start 
     // draining. And we wait for the drain to complete.
@@ -393,18 +407,18 @@ PUBLIC_API hsa_status_t aqlprofile_spm_drain_counters(aqlprofile_handle_t handle
         s->draining_failed = false;
     }
 
-    // Wait for draining to complete
-    std::unique_lock<std::mutex> lock(s->drain_mutex);
-    s->drain_cond.wait(lock, [&s]() { return s->draining_consumer_done.load(); });
+    {
+      // Wait for draining to complete
+      std::unique_lock<std::mutex> lock(s->drain_mutex);
+      s->drain_cond.wait(lock, [&s]() { return s->draining_consumer_done.load(); });
 
-    // Check if draining failed
-    if (s->draining_failed) {
-        return HSA_STATUS_ERROR;  // Producer couldn't drain after re-tries
-    }
+      s->draining_consumer_done = false;
 
-    { // reset flags
-        std::lock_guard<std::mutex> lock(s->drain_mutex);
-        s->draining_consumer_done = false;
+      // Check if draining failed; Producer couldn't drain after re-tries
+      if (s->draining_failed) {
+        s->draining_failed = false;  // Reset for next call
+        return HSA_STATUS_ERROR;
+      }
     }
 
     return HSA_STATUS_SUCCESS;
@@ -515,14 +529,7 @@ static void producer(std::shared_ptr<spm_state_t> s)
                     s->draining_failed = s->size_copied != 0; // Set failure if data still remaining
                 }
                 s->drain_cond.notify_all();
-
-                // Wait for consumer acknowledgment, then reset our own flag
-                {
-                  std::unique_lock<std::mutex> lock(s->drain_mutex);
-                  s->drain_cond.wait(lock, [&s]() { return s->draining_consumer_done.load(); });
-                  s->draining_producer_done = false;  // Reset our own flag
-                  draining = false; // Reset draining state
-                }
+                draining = false; // Reset draining state
             }
             else // exiting case
             break;
