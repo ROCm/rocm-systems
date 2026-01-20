@@ -282,6 +282,26 @@ const char *ScratchCopyDwordIsa =
         .if (.amdgcn.gfx_generation_number >= 12)
             s_setreg_b32 hwreg(HW_REG_SCRATCH_BASE_LO), s4
             s_setreg_b32 hwreg(HW_REG_SCRATCH_BASE_HI), s5
+
+            // cast a pointer from private address space to flat address space for gfx1250+
+            // reference: gfx1250 Shader Programming Guide 4.9.2.1. Global Shared Scratch Addressing
+            .if (.amdgcn.gfx_generation_number > 12) || (.amdgcn.gfx_generation_minor >= 5)
+                v_mbcnt_lo_u32_b32 v6, -1, 0 // Calculate TID per lane
+                v_lshlrev_b32 v6, 20, v6 // shift TID into address-bits[56:52]
+                v_mov_b32 v7, 0x10000000 // gfx1250+ private base high
+                v_cmp_eq_u32 vcc_lo, v1, v7
+                s_cbranch_vccz DST_SCRATCH
+                v_add_co_u32 v0, vcc_lo, src_flat_scratch_base_lo, v0 // Add flat-scratch-base to TID (per-lane)
+                v_add_co_ci_u32 v1, vcc_lo, src_flat_scratch_base_hi, v6, vcc_lo // Calculate the full flat-address of wave's scratch space
+                v_and_b32 v0, v0, 0xfffff800 // clear per SE/CU offset
+                s_branch OUT
+
+                DST_SCRATCH:
+                v_add_co_u32 v2, vcc_lo, src_flat_scratch_base_lo, v2
+                v_add_co_ci_u32 v3, vcc_lo, src_flat_scratch_base_hi, v6, vcc_lo
+                v_and_b32 v2, v2, 0xfffff800
+                OUT:
+            .endif
         .elseif (.amdgcn.gfx_generation_number >= 10)
             s_setreg_b32 hwreg(HW_REG_FLAT_SCR_LO), s4
             s_setreg_b32 hwreg(HW_REG_FLAT_SCR_HI), s5
