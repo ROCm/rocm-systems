@@ -263,8 +263,9 @@ auto getUUIDlistFromRocmInfo() {
       continue;
     } else if (auto loc = rocminfo_line.find("GPU-"); loc != std::string::npos) {
       if (std::string::npos == rocminfo_line.find("GPU-XX")) {
-        std::vector<char> t_uuid(20, 0);
+        std::vector<char> t_uuid(21, 0);
         std::memcpy(t_uuid.data(), &rocminfo_line[loc], 20);
+        t_uuid.back() = '\0';
         uuid_map[j] = t_uuid;
       }
     }
