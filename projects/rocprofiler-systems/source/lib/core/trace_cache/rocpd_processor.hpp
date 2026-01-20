@@ -45,6 +45,7 @@ public:
     void finalize_processing();
 
     void handle(const kernel_dispatch_sample& sample);
+    void handle(const scratch_memory_sample& sample);
     void handle(const memory_copy_sample& sample);
     void handle(const memory_allocate_sample& sample);
     void handle(const region_sample& sample);

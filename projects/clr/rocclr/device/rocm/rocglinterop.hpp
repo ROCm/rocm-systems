@@ -136,5 +136,7 @@ bool Export(mesa_glinterop_export_in& in, mesa_glinterop_export_out& out, MESA_I
 
 bool glAssociate(Device* device, uint flags, void* GLplatformContext, void* GLdeviceContext);
 bool glDissociate(Device* device, void* GLplatformContext, void* GLdeviceContext);
+bool Export(amd::Memory* mem, GLenum targetType, int miplevel, hsa_handle_t* handle, int* offset);
+
 } // namespace GlInterop
 }  // namespace amd::roc

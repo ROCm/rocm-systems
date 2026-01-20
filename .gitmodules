@@ -98,3 +98,7 @@
 [submodule "projects/rocprofiler-systems/external/filesystem"]
 	path = projects/rocprofiler-systems/external/filesystem
 	url = https://github.com/gulrak/filesystem.git
+[submodule "projects/rocprofiler-systems/external/spdlog"]
+	path = projects/rocprofiler-systems/external/spdlog
+	url = https://github.com/gabime/spdlog.git
+	tag = v1.16.0

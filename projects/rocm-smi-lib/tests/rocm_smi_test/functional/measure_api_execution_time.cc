@@ -101,6 +101,7 @@ void TestMeasureApiExecutionTime::Run(void) {
    * 3) Setup backwards compatiblity (~100 microseconds)
    * 4) Put data into structures (~100 microseconds)
    * 5) Pass to public structure (~100 microseconds)
+   * 6) Additional gpu_metric read time for Navi (~1000 microseconds)
    * ---------------------------
    * ~2100 worst case
    *
@@ -114,7 +115,7 @@ void TestMeasureApiExecutionTime::Run(void) {
    * procedures
    * c) Expirement with other file reading options
    **/
-  constexpr float kMETRICS_ELAPSED_MICROSEC_BASE = (2100);
+  constexpr float kMETRICS_ELAPSED_MICROSEC_BASE = (3100);
   bool skip = false;
 
   TestBase::Run();

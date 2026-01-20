@@ -23,7 +23,6 @@
 #include "library/runtime.hpp"
 #include "api.hpp"
 #include "core/config.hpp"
-#include "core/debug.hpp"
 #include "core/defines.hpp"
 #include "core/utility.hpp"
 #include "library/thread_data.hpp"
@@ -42,6 +41,8 @@
 #include <timemory/utility/argparse.hpp>
 #include <timemory/utility/declaration.hpp>
 #include <timemory/utility/signals.hpp>
+
+#include "logger/debug.hpp"
 
 #include <array>
 #include <csignal>
@@ -192,8 +193,7 @@ setup_gotchas()
     if(_initialized) return;
     _initialized = true;
 
-    ROCPROFSYS_BASIC_DEBUG(
-        "Configuring gotcha wrapper around fork, MPI_Init, and MPI_Init_thread\n");
+    LOG_DEBUG("Configuring gotcha wrapper around fork, MPI_Init, and MPI_Init_thread");
 
     component::mpi_gotcha::configure();
     component::exit_gotcha::configure();

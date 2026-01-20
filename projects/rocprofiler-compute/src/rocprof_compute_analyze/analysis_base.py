@@ -386,26 +386,24 @@ class OmniAnalyze_Base:
             sys.exit(0)
 
         # Ensure analysis output does not overwrite existing files
-        if not args.output_name:
-            return
+        if args.output_name:
+            if not re.match(r"^[A-Za-z0-9_-]+$", args.output_name):
+                console_error(
+                    "analysis",
+                    "Analysis output file/folder name must "
+                    "contain only alphanumeric characters "
+                    "or underscores (_), hyphens (-).",
+                )
 
-        if not re.match(r"^[A-Za-z0-9_-]+$", args.output_name):
-            console_error(
-                "analysis",
-                "Analysis output file/folder name must "
-                "contain only alphanumeric characters "
-                "or underscores (_), hyphens (-).",
-            )
+            path_to_check = args.output_name
+            if args.output_format in ("txt", "db"):
+                path_to_check += f".{args.output_format}"
 
-        path_to_check = args.output_name
-        if args.output_format in ("txt", "db"):
-            path_to_check += f".{args.output_format}"
-
-        if Path(path_to_check).exists():
-            console_error(
-                f"Analysis output file/folder {path_to_check} already exists. "
-                "Please choose a different name."
-            )
+            if Path(path_to_check).exists():
+                console_error(
+                    f"Analysis output file/folder {path_to_check} already exists. "
+                    "Please choose a different name."
+                )
 
         # Check if any kernel's counters are missing due to iteration multiplexing
         if (

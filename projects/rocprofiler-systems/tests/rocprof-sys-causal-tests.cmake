@@ -135,7 +135,7 @@ causal_e2e_args_and_validation(_causal_line_113 line-113 "-S" "causal.cpp:113" 0
 if(ROCPROFSYS_BUILD_NUMBER GREATER 1)
     set(_causal_e2e_environment)
 else()
-    set(_causal_e2e_environment "ROCPROFSYS_VERBOSE=0")
+    set(_causal_e2e_environment "ROCPROFSYS_VERBOSE=0;ROCPROFSYS_LOG_LEVEL=trace")
 endif()
 
 rocprofiler_systems_add_causal_test(

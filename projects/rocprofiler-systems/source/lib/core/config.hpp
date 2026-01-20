@@ -225,6 +225,9 @@ get_use_pid();
 bool&
 get_use_mpip();
 
+bool&
+get_use_ucx();
+
 bool
 get_use_kokkosp();
 

@@ -9,11 +9,29 @@ on:
       - 'projects/rocprofiler-systems/**'
       - 'projects/rocprofiler-systems/source/python/gui/*.py'
       - 'projects/rocprofiler-systems/source/python/gui/**/*.py'
+      - '!**/*.md'
+      - '!**/*.rtf'
+      - '!**/*.rst'
+      - '!**/.markdownlint-ci2.yaml'
+      - '!**/.readthedocs.yaml'
+      - '!**/.spellcheck.local.yaml'
+      - '!**/.wordlist.txt'
+      - '!docs/**'
+      - '!projects/*/docs/**'
   pull_request:
     paths:
       - 'projects/rocprofiler-systems/**'
       - 'projects/rocprofiler-systems/source/python/gui/*.py'
       - 'projects/rocprofiler-systems/source/python/gui/**/*.py'
+      - '!**/*.md'
+      - '!**/*.rtf'
+      - '!**/*.rst'
+      - '!**/.markdownlint-ci2.yaml'
+      - '!**/.readthedocs.yaml'
+      - '!**/.spellcheck.local.yaml'
+      - '!**/.wordlist.txt'
+      - '!docs/**'
+      - '!projects/*/docs/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

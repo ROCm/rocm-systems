@@ -56,6 +56,7 @@
 #include <rocprofiler-sdk-rocpd/types.h>
 
 #include <fmt/format.h>
+#include <fmt/ranges.h>
 #include <sqlite3.h>
 #include <unistd.h>
 
