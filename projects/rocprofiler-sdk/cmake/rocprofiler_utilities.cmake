@@ -1049,16 +1049,9 @@ function(rocprofiler_add_unit_test)
     # parse args
     set(_FLAG_OPTS)
     set(_SINGLE_OPTS
-        "TARGET"
-        "TEST_LIST"
-        "TEST_PREFIX"
-        "TIMEOUT"
-        "LABELS"
-        "DISABLED"
-        "PASS_REGULAR_EXPRESSION"
-        "FAIL_REGULAR_EXPRESSION"
-        "SKIP_REGULAR_EXPRESSION")
-    set(_MULTI_OPTS "SOURCES" "ENVIRONMENT" "DISABLE_TESTS")
+        "TARGET" "TEST_LIST" "TEST_PREFIX" "TIMEOUT" "DISABLED" "PASS_REGULAR_EXPRESSION"
+        "FAIL_REGULAR_EXPRESSION" "SKIP_REGULAR_EXPRESSION")
+    set(_MULTI_OPTS "SOURCES" "LABELS" "ENVIRONMENT" "DISABLE_TESTS")
 
     cmake_parse_arguments(RAUT "${_FLAG_OPTS}" "${_SINGLE_OPTS}" "${_MULTI_OPTS}" ${ARGN})
 
@@ -1084,6 +1077,15 @@ function(rocprofiler_add_unit_test)
     set_arg_if_empty(RAUT_FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
     set_arg_if_empty(RAUT_DISABLED "OFF")
     set_arg_if_empty(RAUT_TEST_PREFIX "unit.")
+
+    # Ensure test prefix starts with 'unit.' and ends with '.'
+    if(NOT RAUT_TEST_PREFIX MATCHES "^unit\\.")
+        set(RAUT_TEST_PREFIX "unit.${RAUT_TEST_PREFIX}")
+    endif()
+
+    if(NOT RAUT_TEST_PREFIX MATCHES "\\.$")
+        set(RAUT_TEST_PREFIX "${RAUT_TEST_PREFIX}.")
+    endif()
 
     set(_DISABLE_TESTS_SOURCE "")
     if(RAUT_DISABLE_TESTS)
@@ -1116,9 +1118,11 @@ function(rocprofiler_add_unit_test)
                    SKIP_REGULAR_EXPRESSION
                    "${RAUT_SKIP_REGULAR_EXPRESSION}"
                    ENVIRONMENT
-                   "${RAUT_ENVIRONMENT}"
-                   DISABLED
-                   ${RAUT_DISABLED})
+                   "${RAUT_ENVIRONMENT}")
+
+    if(${RAUT_DISABLED})
+        set_tests_properties(${${RAUT_TEST_LIST}} PROPERTIES DISABLED ${RAUT_DISABLED})
+    endif()
 
     if(_DISABLE_TESTS_SOURCE)
         set_tests_properties(${_DISABLE_TESTS_SOURCE} PROPERTIES DISABLED ON)
@@ -1173,6 +1177,11 @@ function(rocprofiler_add_unit_test)
             ${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/${PACKAGE_NAME}/tests/unit-tests/${RAUT_TARGET}.cmake
         DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PACKAGE_NAME}/tests/unit-tests
         COMPONENT tests)
+
+    # propagate to parent scope
+    set(${RAUT_TEST_LIST}
+        "${${RAUT_TEST_LIST}}"
+        PARENT_SCOPE)
 
     cmake_policy(POP)
 endfunction()
