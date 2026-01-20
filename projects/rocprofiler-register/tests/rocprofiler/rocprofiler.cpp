@@ -20,7 +20,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-
 #include <rocprofiler-register/rocprofiler-register.h>
 #include <amdhip/amdhip.hpp>
 #include <hsa-runtime/hsa-runtime.hpp>
