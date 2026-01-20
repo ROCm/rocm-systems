@@ -12,6 +12,7 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 - Added dependency to `spdlog` library.
 - Added environment variable `ROCPROFSYS_LOG_LEVEL` which control level of logging.
   - Available log levels: `critical`, `error`, `warning`, `info`(default), `debug`, `trace` and `off`.
+- Support for UCX (Unified Communication X) API tracing.
 
 ### Changed
 
