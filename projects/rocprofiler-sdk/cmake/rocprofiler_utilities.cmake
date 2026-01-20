@@ -1079,6 +1079,15 @@ function(rocprofiler_add_unit_test)
     set_arg_if_empty(RAUT_DISABLED "OFF")
     set_arg_if_empty(RAUT_TEST_PREFIX "unit.")
 
+    # Ensure test prefix starts with 'unit.' and ends with '.'
+    if(NOT RAUT_TEST_PREFIX MATCHES "^unit\\.")
+        set(RAUT_TEST_PREFIX "unit.${RAUT_TEST_PREFIX}")
+    endif()
+
+    if(NOT RAUT_TEST_PREFIX MATCHES "\\.$")
+        set(RAUT_TEST_PREFIX "${RAUT_TEST_PREFIX}.")
+    endif()
+
     set(_DISABLE_TESTS_SOURCE "")
     if(RAUT_DISABLE_TESTS)
         foreach(_TEST ${RAUT_DISABLE_TESTS})
@@ -1110,9 +1119,11 @@ function(rocprofiler_add_unit_test)
                    SKIP_REGULAR_EXPRESSION
                    "${RAUT_SKIP_REGULAR_EXPRESSION}"
                    ENVIRONMENT
-                   "${RAUT_ENVIRONMENT}"
-                   DISABLED
-                   ${RAUT_DISABLED})
+                   "${RAUT_ENVIRONMENT}")
+
+    if(${RAUT_DISABLED})
+        set_tests_properties(${${RAUT_TEST_LIST}} PROPERTIES DISABLED ${RAUT_DISABLED})
+    endif()
 
     if(_DISABLE_TESTS_SOURCE)
         set_tests_properties(${_DISABLE_TESTS_SOURCE} PROPERTIES DISABLED ON)
