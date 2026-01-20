@@ -32,24 +32,27 @@ namespace rocprofiler
 {
 namespace att_wrapper
 {
+/// Write shaderdata records to a JSON file.
 inline void
-write_shaderdata_json(const std::vector<rocprofiler_thread_trace_decoder_shaderdata_t>& records,
-                      const Fspath&                                                     filepath,
-                      int64_t                                                           begin_time,
-                      int64_t                                                           end_time)
+write_shaderdata_json(const rocprofiler_thread_trace_decoder_shaderdata_t* records,
+                      size_t                                               count,
+                      const Fspath&                                        filepath,
+                      int64_t                                              begin_time,
+                      int64_t                                              end_time)
 {
-    if(records.empty()) return;
+    if(records == nullptr || count == 0) return;
 
     nlohmann::ordered_json out;
-    out["type"]           = "S_TTRACEDATA";
+    out["type"]           = "shaderdata";
     out["begin_time"]     = begin_time;
     out["end_time"]       = end_time;
     out["records_schema"] = {"time", "value", "cu", "simd", "wave_id", "flags"};
 
     nlohmann::json::array_t events;
-    events.reserve(records.size());
-    for(const auto& entry : records)
+    events.reserve(count);
+    for(size_t i = 0; i < count; i++)
     {
+        const auto& entry = records[i];
         events.push_back({entry.time,
                           entry.value,
                           static_cast<int>(entry.cu),

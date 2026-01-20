@@ -51,7 +51,7 @@ def pytest_addoption(parser):
         help="Output Path.",
     )
     parser.addoption(
-        "--att-sttracedata-out-dir",
+        "--att-shaderdata-out-dir",
         action="store",
         help="Path to Output directory.",
     )
@@ -86,6 +86,6 @@ def code_object_file_path(request):
 
 
 @pytest.fixture
-def att_sttracedata_out_dir_path(request):
-    output_dir_path = request.config.getoption("--att-sttracedata-out-dir")
+def att_shaderdata_out_dir_path(request):
+    output_dir_path = request.config.getoption("--att-shaderdata-out-dir")
     return output_dir_path

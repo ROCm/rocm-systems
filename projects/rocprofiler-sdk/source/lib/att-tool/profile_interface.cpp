@@ -83,11 +83,10 @@ get_trace_data(rocprofiler_thread_trace_decoder_record_type_t trace_id,
     {
         using shaderdata_t = rocprofiler_thread_trace_decoder_shaderdata_t;
         const auto* ptr    = static_cast<const shaderdata_t*>(trace_events);
-        if(trace_size > 0 && ptr != nullptr)
+        if(trace_size > 0)
         {
-            std::vector<shaderdata_t> recs(ptr, ptr + trace_size);
-            const int                 se = tool.config.shader_engine;
-            tool.config.filemgr->add_shaderdata_data(se, recs);
+            const int se = tool.config.shader_engine;
+            tool.config.filemgr->add_shaderdata_data(se, ptr, static_cast<size_t>(trace_size));
         }
     }
 

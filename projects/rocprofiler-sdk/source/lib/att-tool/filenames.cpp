@@ -40,23 +40,23 @@ FilenameMgr::addwave(const Fspath& name, Coord coord, size_t begint, size_t endt
 }
 
 void
-FilenameMgr::add_shaderdata_data(
-    int                                                               se,
-    const std::vector<rocprofiler_thread_trace_decoder_shaderdata_t>& records)
+FilenameMgr::add_shaderdata_data(int                                                  se,
+                                 const rocprofiler_thread_trace_decoder_shaderdata_t* records,
+                                 size_t                                               count)
 {
-    if(records.empty() || !GlobalDefs::get().has_format("json")) return;
+    if(records == nullptr || count == 0) return;
+    if(!GlobalDefs::get().has_format("json")) return;
 
-    int64_t begin = records.front().time;
-    int64_t end   = records.back().time;
+    int64_t begin = records[0].time;
+    int64_t end   = records[count - 1].time;
 
     auto&        vec = shaderdata_files[se];
     const size_t idx = vec.size();
-    Fspath       file =
-        dir / ("s_ttracedata_" + std::to_string(se) + "_" + std::to_string(idx) + ".json");
+    Fspath file = dir / ("shaderdata_" + std::to_string(se) + "_" + std::to_string(idx) + ".json");
     vec.emplace_back(
         ShaderDataName{file.filename(), static_cast<size_t>(begin), static_cast<size_t>(end)});
 
-    write_shaderdata_json(records, file, begin, end);
+    write_shaderdata_json(records, count, file, begin, end);
 }
 
 FilenameMgr::~FilenameMgr()
@@ -71,14 +71,14 @@ FilenameMgr::~FilenameMgr()
                 [to_string(coord.id)] = {data.name, data.begin, data.end};
     }
 
-    nlohmann::json s_ttracedata;
+    nlohmann::json shaderdata;
     for(auto& [se, vec] : shaderdata_files)
     {
         nlohmann::json::array_t arr;
         arr.reserve(vec.size());
         for(const auto& entry : vec)
             arr.push_back({entry.name, entry.begin, entry.end});
-        s_ttracedata[to_string(se)] = std::move(arr);
+        shaderdata[to_string(se)] = std::move(arr);
     }
 
     const nlohmann::json metadata = {{"global_begin_time", 0},
@@ -87,7 +87,7 @@ FilenameMgr::~FilenameMgr()
                                      {"version", TOOL_VERSION},
                                      {"counter_names", perfcounters},
                                      {"wave_filenames", namelist},
-                                     {"s_ttracedata_filenames", s_ttracedata}};
+                                     {"shaderdata_filenames", shaderdata}};
 
     OutputFile(filename) << metadata;
 }
