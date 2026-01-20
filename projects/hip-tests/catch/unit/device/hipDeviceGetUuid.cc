@@ -361,7 +361,7 @@ TEST_CASE("Unit_Uuid_FntlTstsFor_SetEnv_HIP_VISIBLE_DEVICES") {
       if (uuid_map.size() >= 2) {
         std::string uuid = getNthElem(0).data();
         std::string uuidEnv = uuid.substr(0, 20);
-        std::string uuid1 =  getNthElem(1).data();
+        std::string uuid1 = getNthElem(1).data();
         std::string uuidEnv1 = uuid1.substr(0, 20);
         std::string totalString = uuidEnv + "," + uuidEnv1;
         unsetenv("HIP_VISIBLE_DEVICES");
