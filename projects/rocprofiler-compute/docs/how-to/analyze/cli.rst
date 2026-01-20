@@ -346,6 +346,7 @@ Show System Speed-of-Light and CS_Busy blocks only
    this case, ``1`` is the ID for System Speed-of-Light and ``5.1.0`` the ID for
    GPU Busy Cycles metric.
 
+
 Filter kernels
   First, list the top kernels in your application using `--list-stats`.
 
@@ -562,12 +563,6 @@ WARNING Failed to evaluate expression for 3.1.39 - Value: to_round((to_avg(
    (pmc_df.get("pmc_perf_ACCUM") / pmc_df.get("SQC_ICACHE_REQ")).where((pmc_df.get("SQC_ICACHE_REQ") != 0), None)) * 100), 0) - unsupported operand type(s) for /: 'NoneType' and 'float'
 WARNING Failed to evaluate expression for 3.1.39 - Value: to_round((to_avg(
    (pmc_df.get("pmc_perf_ACCUM") / pmc_df.get("SQC_ICACHE_REQ")).where((pmc_df.get("SQC_ICACHE_REQ") != 0), None)) * 100), 0) - unsupported operand type(s) for /: 'NoneType' and 'float'
-  DEBUG Calculating expressions for kernel: _ZN12rocrand_impl6system6detail17trampoline_kernelINS_4host33static_block_size_config_providerILj256EEEjLb0ELNS3_11target_archE942EZNS3_25xorwow_generator_templateINS0_13device_systemENS3_23default_config_providerIL16rocrand_rng_type401EEEE4initEvEUlT_DpT0_E_JPN14rocrand_device13xorwow_engineEjjyyEEEvT3_DpT4_
-  DEBUG Calculating expressions for kernel: _ZN12rocrand_impl6system6detail17trampoline_kernelINS_4host23default_config_providerIL16rocrand_rng_type401EEEfLb0ELNS3_11target_archE942EZZNS3_25xorwow_generator_templateINS0_13device_systemES6_E8generateIfNS3_20uniform_distributionIfjEEEE14rocrand_statusPT_mT0_ENKUlSF_E_clISt17integral_constantIbLb0EEEEDaSF_EUlSF_DpT0_E_JPN14rocrand_device13xorwow_engineEjPfmSD_EEEvT3_DpT4_
-  DEBUG Calculating expressions for kernel: void bodyForce_block<256>(HIP_vector_type<float, 4u> const*, HIP_vector_type<float, 4u>*, float, int)
-  DEBUG Calculating expressions for kernel: _ZN12rocrand_impl6system6detail17trampoline_kernelINS_4host33static_block_size_config_providerILj256EEEjLb0ELNS3_11target_archE942EZNS3_25xorwow_generator_templateINS0_13device_systemENS3_23default_config_providerIL16rocrand_rng_type401EEEE4initEvEUlT_DpT0_E_JPN14rocrand_device13xorwow_engineEjjyyEEEvT3_DpT4_
-  DEBUG Calculating expressions for kernel: _ZN12rocrand_impl6system6detail17trampoline_kernelINS_4host23default_config_providerIL16rocrand_rng_type401EEEfLb0ELNS3_11target_archE942EZZNS3_25xorwow_generator_templateINS0_13device_systemES6_E8generateIfNS3_20uniform_distributionIfjEEEE14rocrand_statusPT_mT0_ENKUlSF_E_clISt17integral_constantIbLb0EEEEDaSF_EUlSF_DpT0_E_JPN14rocrand_device13xorwow_engineEjPfmSD_EEEvT3_DpT4_
-  DEBUG Calculating expressions for kernel: void bodyForce_block<256>(HIP_vector_type<float, 4u> const*, HIP_vector_type<float, 4u>*, float, int)
   DEBUG Calculated metric values
   DEBUG Calculated roofline data points
   DEBUG [analysis] generating analysis
