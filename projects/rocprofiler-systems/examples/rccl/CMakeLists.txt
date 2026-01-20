@@ -1,24 +1,5 @@
-# MIT License
-#
-# Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
 cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
 list(APPEND CMAKE_MESSAGE_CONTEXT "rccl-tests")
@@ -68,6 +49,33 @@ if(hip_FOUND AND rccl_FOUND)
         return()
     endif()
 
+    # Parse comment describing supported gfx targets from rccl src/Makefile
+    execute_process(
+        COMMAND grep "Currently, supports" ${rccl-tests_SOURCE_DIR}/src/Makefile
+        OUTPUT_VARIABLE _supported_line
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        RESULT_VARIABLE _rccl_grep_ret
+    )
+    if(NOT _rccl_grep_ret EQUAL 0)
+        message(
+            FATAL_ERROR
+            "This grep should never fail unless rccl-tests/src/Makefile was modified in an incompatible way"
+        )
+    endif()
+
+    # Extract just the gfx architectures
+    string(REGEX MATCHALL "gfx[0-9a-z]+" RCCL_SUPPORTED_TARGETS "${_supported_line}")
+    set(RCCL_GPU_TARGETS "")
+    foreach(arch IN LISTS ROCPROFSYS_GFX_TARGETS)
+        if(arch IN_LIST RCCL_SUPPORTED_TARGETS)
+            list(APPEND RCCL_GPU_TARGETS ${arch})
+        endif()
+    endforeach()
+    if(RCCL_GPU_TARGETS STREQUAL "")
+        message(AUTHOR_WARNING "rccl-tests skipped. No supported GPU targets found.")
+        return()
+    endif()
+
     # Copy source to build directory
     file(COPY ${rccl-tests_SOURCE_DIR}/ DESTINATION ${rccl-tests_BUILD_DIR})
 
@@ -78,7 +86,9 @@ if(hip_FOUND AND rccl_FOUND)
     add_custom_target(
         build-rccl-tests
         ALL
-        COMMAND make HIP_HOME=${ROCM_PATH} RCCL_HOME=${rccl_ROOT_DIR} -j
+        COMMAND
+            make HIP_HOME=${ROCM_PATH} RCCL_HOME=${rccl_ROOT_DIR}
+            GPU_TARGETS=${RCCL_GPU_TARGETS} -j
         WORKING_DIRECTORY ${rccl-tests_BUILD_DIR}
         COMMENT
             "Building rccl-tests with HIP_HOME=${ROCM_PATH} RCCL_HOME=${rccl_ROOT_DIR} ..."

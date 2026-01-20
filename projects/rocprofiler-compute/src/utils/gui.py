@@ -61,7 +61,7 @@ def multi_bar_chart(
 
 def create_instruction_mix_bar_chart(display_df: pd.DataFrame, df_unit: str) -> px.bar:
     display_df = display_df.copy()
-    display_df["Avg"] = display_df["Avg"].apply(lambda x: int(x) if x != "" else 0)
+    display_df["Avg"] = display_df["Avg"].apply(lambda x: int(x) if x != "N/A" else 0)
 
     return px.bar(
         display_df,
@@ -78,7 +78,7 @@ def create_multi_bar_charts(
     display_df: pd.DataFrame, table_id: int, df_unit: str
 ) -> list[px.bar]:
     display_df = display_df.copy()
-    display_df["Avg"] = display_df["Avg"].apply(lambda x: int(x) if x != "" else 0)
+    display_df["Avg"] = display_df["Avg"].apply(lambda x: int(x) if x != "N/A" else 0)
 
     nested_bar = multi_bar_chart(table_id, display_df)
     charts = []
@@ -103,7 +103,9 @@ def create_multi_bar_charts(
 
 def create_sol_charts(display_df: pd.DataFrame, table_id: int) -> list[px.bar]:
     display_df = display_df.copy()
-    display_df["Avg"] = display_df["Avg"].apply(lambda x: float(x) if x != "" else 0.0)
+    display_df["Avg"] = display_df["Avg"].apply(
+        lambda x: float(x) if x != "N/A" else 0.0
+    )
 
     charts = []
 
@@ -144,7 +146,7 @@ def create_sol_charts(display_df: pd.DataFrame, table_id: int) -> list[px.bar]:
     elif table_id == 1101:
         # Special formatting reference 'Pct of Peak' value
         display_df["Pct of Peak"] = display_df["Pct of Peak"].apply(
-            lambda x: float(x) if x != "" else 0.0
+            lambda x: float(x) if x != "N/A" else 0.0
         )
         charts.append(
             px.bar(
