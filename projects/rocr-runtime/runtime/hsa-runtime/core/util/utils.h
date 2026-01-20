@@ -409,7 +409,14 @@ inline void FlushCpuCache(const void* base, size_t offset, size_t len) {
   cur += offset;
   uintptr_t lastline = (uintptr_t)(cur + len - 1) | (cacheline_size - 1);
   do {
+#if defined(__x86_64__) || defined(__i386__)
     _mm_clflush((const void*)cur);
+#elif defined(__aarch64__)
+    asm volatile("dc civac, %0" :: "r"(cur) : "memory");
+#else
+    // No cache flush available for this architecture
+    (void)cur;
+#endif
     cur += cacheline_size;
   } while (cur <= (const char*)lastline);
 }
