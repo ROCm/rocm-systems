@@ -1,128 +1,42 @@
-cmake_minimum_required(VERSION 3.16.0)
+#
+#
+#
+rocprofiler_deactivate_clang_tidy()
 
 include(GoogleTest)
-find_package(GTest REQUIRED)
-include_directories(${GTEST_INCLUDE_DIRS})
 
-# Add a test for gfx9 command builder
-add_executable(command-builder-test)
-set(AQLPROFILE_COMMAND_BUILDER_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/cmd_builder_tests.cpp)
-target_sources(command-builder-test PRIVATE ${AQLPROFILE_COMMAND_BUILDER_SOURCES})
-target_include_directories(command-builder-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
-                                                        ${LIB_DIR})
+add_library(aqlprofile-pm4-tests-flags INTERFACE)
+target_compile_options(aqlprofile-pm4-tests-flags
+                       INTERFACE -Wno-shadow -Wno-unused-parameter -Wno-unused-variable)
+target_link_options(aqlprofile-pm4-tests-flags INTERFACE -Wl,-no-as-needed)
+
+set(AQLPROFILE_PM4_TEST_SOURCES
+    cmd_builder_tests.cpp gfx9_cmd_builder_tests.cpp pmc_builder_tests.cpp
+    spm_builder_test.cpp sqtt_builder_tests.cpp trace_config_test.cpp)
+
+add_executable(aqlprofile-pm4-tests)
+
+target_sources(aqlprofile-pm4-tests PRIVATE ${AQLPROFILE_PM4_TEST_SOURCES})
+
 target_link_libraries(
-    command-builder-test
-    PRIVATE hsa-runtime64::hsa-runtime64 GTest::gtest GTest::gtest_main GTest::gmock
-            GTest::gmock_main ${CMAKE_DL_LIBS})
-gtest_add_tests(
-    TARGET command-builder-test
-    SOURCES ${AQLPROFILE_COMMAND_BUILDER_SOURCES}
-    TEST_LIST command-builder-test_TESTS
-    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
-set_tests_properties(
-    ${command-builder-test_TESTS}
-    PROPERTIES TIMEOUT 45 LABELS "unittests" FAIL_REGULAR_EXPRESSION
-               "${AQLPROFILE_DEFAULT_FAIL_REGEX}")
+    aqlprofile-pm4-tests
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk-aqlprofile
+            rocprofiler-sdk::rocprofiler-sdk-static-library
+            rocprofiler-sdk::rocprofiler-sdk-common-library
+            rocprofiler-sdk::rocprofiler-sdk-hsa-runtime
+            rocprofiler-sdk::rocprofiler-sdk-drm
+            aqlprofile-pm4-tests-flags
+            GTest::gtest
+            GTest::gmock
+            GTest::gtest_main)
 
-# Add a test for pmc_builder
-add_executable(pmc-builder-test)
-set(AQLPROFILE_PMC_BUILDER_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/pmc_builder_tests.cpp)
-target_sources(pmc-builder-test PRIVATE ${AQLPROFILE_PMC_BUILDER_SOURCES})
-target_include_directories(pmc-builder-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
-                                                    ${LIB_DIR} ${LIB_DIR}/core/include)
-target_link_libraries(
-    pmc-builder-test PRIVATE hsa-runtime64::hsa-runtime64 GTest::gtest GTest::gtest_main
-                             GTest::gmock GTest::gmock_main ${CMAKE_DL_LIBS})
+rocprofiler_add_unit_test(
+    TARGET aqlprofile-pm4-tests
+    SOURCES ${AQLPROFILE_PM4_TEST_SOURCES}
+    TEST_PREFIX "aqlprofile.pm4."
+    TEST_LIST aqlprofile_pm4_TESTS DISABLE_TESTS "SqttBuilderTest.BufferStepCalculation"
+    TIMEOUT 30
+    LABELS "unittests;aqlprofile"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
-gtest_add_tests(
-    TARGET pmc-builder-test
-    SOURCES ${AQLPROFILE_PMC_BUILDER_SOURCES}
-    TEST_LIST pmc-builder-test_TESTS
-    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
-set_tests_properties(
-    ${pmc-builder-test_TESTS}
-    PROPERTIES TIMEOUT 45 LABELS "unittests" FAIL_REGULAR_EXPRESSION
-               "${AQLPROFILE_DEFAULT_FAIL_REGEX}")
-
-# Add a test for gfx9_comand_builder
-add_executable(gfx9-command-builder-test)
-set(AQLPROFILE_GFX9_COMMAND_BUILDER_SOURCES
-    ${CMAKE_CURRENT_SOURCE_DIR}/gfx9_cmd_builder_tests.cpp)
-target_sources(gfx9-command-builder-test
-               PRIVATE ${AQLPROFILE_GFX9_COMMAND_BUILDER_SOURCES})
-target_include_directories(gfx9-command-builder-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
-                                                             ${LIB_DIR})
-target_link_libraries(
-    gfx9-command-builder-test
-    PRIVATE hsa-runtime64::hsa-runtime64 GTest::gtest GTest::gtest_main GTest::gmock
-            GTest::gmock_main ${CMAKE_DL_LIBS})
-gtest_add_tests(
-    TARGET gfx9-command-builder-test
-    SOURCES ${AQLPROFILE_GFX9_COMMAND_BUILDER_SOURCES}
-    TEST_LIST gfx9-command-builder-test_TESTS
-    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
-set_tests_properties(
-    ${gfx9-command-builder-test_TESTS}
-    PROPERTIES TIMEOUT 45 LABELS "unittests" FAIL_REGULAR_EXPRESSION
-               "${AQLPROFILE_DEFAULT_FAIL_REGEX}")
-
-# Add a SPM builder test
-add_executable(spm-builder-test)
-set(AQLPROFILE_SPM_BUILDER_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/spm_builder_test.cpp)
-target_sources(spm-builder-test PRIVATE ${AQLPROFILE_SPM_BUILDER_SOURCES})
-target_include_directories(spm-builder-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
-                                                    ${LIB_DIR} ${LIB_DIR}/core/include)
-target_link_libraries(
-    spm-builder-test
-    PUBLIC aqlprofile::headers
-    PRIVATE hsa-runtime64::hsa-runtime64 GTest::gtest GTest::gtest_main GTest::gmock
-            GTest::gmock_main ${CMAKE_DL_LIBS})
-
-gtest_add_tests(
-    TARGET spm-builder-test
-    SOURCES ${AQLPROFILE_SPM_BUILDER_SOURCES}
-    TEST_LIST spm-builder-test_TESTS
-    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
-set_tests_properties(
-    ${spm-builder-test_TESTS}
-    PROPERTIES TIMEOUT 45 LABELS "unittests" FAIL_REGULAR_EXPRESSION
-               "${AQLPROFILE_DEFAULT_FAIL_REGEX}")
-
-# Add a test for trace config
-add_executable(trace-config-test)
-set(AQLPROFILE_TRACE_CONFIG_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/trace_config_test.cpp)
-target_sources(trace-config-test PRIVATE ${AQLPROFILE_TRACE_CONFIG_SOURCES})
-target_include_directories(trace-config-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
-                                                     ${LIB_DIR} ${LIB_DIR}/core/include)
-target_link_libraries(
-    trace-config-test PRIVATE hsa-runtime64::hsa-runtime64 GTest::gtest GTest::gtest_main
-                              GTest::gmock GTest::gmock_main ${CMAKE_DL_LIBS})
-
-gtest_add_tests(
-    TARGET trace-config-test
-    SOURCES ${AQLPROFILE_TRACE_CONFIG_SOURCES}
-    TEST_LIST trace-config-test_TESTS
-    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
-set_tests_properties(
-    ${trace-config-test_TESTS}
-    PROPERTIES TIMEOUT 45 LABELS "unittests" FAIL_REGULAR_EXPRESSION
-               "${AQLPROFILE_DEFAULT_FAIL_REGEX}")
-
-# Add a test for sqtt builder
-add_executable(sqtt-builder-test)
-set(AQLPROFILE_SQTT_BUILDER_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/sqtt_builder_tests.cpp)
-target_sources(sqtt-builder-test PRIVATE ${AQLPROFILE_SQTT_BUILDER_SOURCES})
-target_include_directories(sqtt-builder-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
-                                                     ${LIB_DIR} ${LIB_DIR}/core/include)
-target_link_libraries(
-    sqtt-builder-test PRIVATE hsa-runtime64::hsa-runtime64 GTest::gtest GTest::gtest_main
-                              GTest::gmock GTest::gmock_main ${CMAKE_DL_LIBS})
-gtest_add_tests(
-    TARGET sqtt-builder-test
-    SOURCES ${AQLPROFILE_SQTT_BUILDER_SOURCES}
-    TEST_LIST sqtt-builder-test_TESTS
-    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
-set_tests_properties(
-    ${sqtt-builder-test_TESTS}
-    PROPERTIES TIMEOUT 45 LABELS "unittests" FAIL_REGULAR_EXPRESSION
-               "${AQLPROFILE_DEFAULT_FAIL_REGEX}")
+# message(FATAL_ERROR "aqlprofile_pm4_TESTS: ${aqlprofile_pm4_TESTS}")
