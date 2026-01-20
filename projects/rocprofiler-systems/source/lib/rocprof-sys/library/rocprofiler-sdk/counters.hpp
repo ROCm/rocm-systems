@@ -122,13 +122,15 @@ namespace tim
 {
 namespace operation
 {
-using type = ::rocprofsys::rocprofiler_sdk::counter_data_tracker;
 
 template <>
-struct set_storage<type>
-: protected dynamic_storage_base<storage<type>*, ROCPROFSYS_MAX_THREADS>
+struct set_storage<::rocprofsys::rocprofiler_sdk::counter_data_tracker>
+: public dynamic_storage_base<
+      storage<::rocprofsys::rocprofiler_sdk::counter_data_tracker>*,
+      ROCPROFSYS_MAX_THREADS>
 {
     static constexpr size_t max_threads = ROCPROFSYS_MAX_THREADS;
+    using type            = ::rocprofsys::rocprofiler_sdk::counter_data_tracker;
     using base_type       = dynamic_storage_base<storage<type>*, max_threads>;
     using storage_array_t = typename base_type::storage_array_t;
 
@@ -145,9 +147,6 @@ struct set_storage<type>
         std::fill(get().begin(), get().end(), _v);
     }
 
-    // Expose get_capacity for get_storage access
-    using base_type::get_capacity;
-
     static storage_array_t& get()
     {
         static storage_array_t _v(max_threads, nullptr);
@@ -156,8 +155,10 @@ struct set_storage<type>
 };
 
 template <>
-struct get_storage<type>
+struct get_storage<::rocprofsys::rocprofiler_sdk::counter_data_tracker>
 {
+    using type = ::rocprofsys::rocprofiler_sdk::counter_data_tracker;
+
     ROCPROFSYS_DEFAULT_OBJECT(get_storage)
 
     auto operator()(const type&) const
@@ -174,9 +175,8 @@ struct get_storage<type>
     auto operator()(size_t _idx) const
     {
         // Thread-safe read using atomic capacity
-        if(_idx >=
-           operation::set_storage<type>::get_capacity().load(std::memory_order_acquire))
-            return static_cast<storage<type>*>(nullptr);
+        const size_t current_capacity = operation::set_storage<type>::get_capacity();
+        if(_idx >= current_capacity) return static_cast<storage<type>*>(nullptr);
         return operation::set_storage<type>::get().at(_idx);
     }
 
