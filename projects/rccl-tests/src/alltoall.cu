@@ -52,13 +52,33 @@ testResult_t AlltoAllRunColl(void* sendbuff, void* recvbuff, size_t count, ncclD
   return testSuccess;
 }
 
+testResult_t AlltoAllGetAlgoProtoChannels(ncclComm_t comm, size_t count, ncclDataType_t type, int* algo, int* proto, int* nchannels) {
+  // AllToAll only supports RING algorithm with SIMPLE protocol
+  // ncclFuncAllToAllPivot is an internal function that may not be available
+  // in all configurations, so we return fixed values for algo/proto.
+  *algo = 1;   // NCCL_ALGO_RING
+  *proto = 2;  // NCCL_PROTO_SIMPLE
+  // Get nchannels by querying with a standard collective (AllGather).
+  // nChannels is based on the communicator config, so this gives us the right value.
+  if(rcclTestsGetAlgoInfo == NULL) {
+    *nchannels = -1;  // Unknown
+    return testSuccess;
+  }
+  int dummyAlgo, dummyProto;
+  ncclResult_t res = rcclTestsGetAlgoInfo(comm, ncclFuncAllGather, count, type, 0, 0, 1, &dummyAlgo, &dummyProto, nchannels);
+  if (res != ncclSuccess) {
+    *nchannels = -1;  // Unknown
+  }
+  return testSuccess;
+}
+
 struct testColl alltoAllTest = {
   "AlltoAll",
   AlltoAllGetCollByteCount,
   AlltoAllInitData,
   AlltoAllGetBw,
   AlltoAllRunColl,
-  NULL
+  AlltoAllGetAlgoProtoChannels
 };
 
 void AlltoAllGetBuffSize(size_t *sendcount, size_t *recvcount, size_t count, int nranks) {
