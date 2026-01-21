@@ -217,6 +217,7 @@ set ( SRCS core/driver/driver.cpp
            core/runtime/cache.cpp
            core/runtime/svm_profiler.cpp
            core/runtime/thunk_loader.cpp
+           core/runtime/counted_queue_manager.cpp
            core/common/hsa_table_interface.cpp
            loader/executable.cpp
            libamdhsacode/amd_elf_image.cpp

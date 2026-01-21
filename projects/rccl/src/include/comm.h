@@ -20,9 +20,16 @@
 #include "nvmlwrap.h"
 #include "profiler.h"
 #include "allocator.h"
+#include "dev_runtime.h"
+#include "sym_kernels.h"
+#include "ce_coll.h"
 #include "latency_profiler/CollTrace.h"
 #include "rccl_common.h"
 #include "recorder.h"
+
+#ifdef ENABLE_ROCSHMEM
+#include <rocshmem/rocshmem.hpp>
+#endif
 
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
 #define HIPRT_CB
@@ -205,16 +212,23 @@ struct ncclTaskColl {
   int chunkSteps, sliceSteps;
   // Computed later:
   size_t trafficBytes;
+#ifdef ENABLE_WARP_SPEED
+  int32_t nMaxChannels:16;
+  bool useWarpSpeed;
+#else
   int32_t nMaxChannels:8;
+#endif
   int32_t nWarps:8;
   int32_t algorithm:8, protocol:8, pipeline:8;
-  uint32_t isCollnet:1, isNvls:1;
-  uint32_t devFuncId:30;
+  uint32_t isCollnet:1, isNvls:1, isSymLast:1;
+  uint32_t devFuncId:29;
   int regBufType;
   uint64_t opCount;
   // number of elements in planner->ipcMemQueue associated with this collective
   int nCleanupQueueElts;
 
+  struct ncclDevrWindow* sendWin;
+  struct ncclDevrWindow* recvWin;
   void* sendMhandle;
   void* recvMhandle;
   void** sendNetHandles;
@@ -228,12 +242,16 @@ struct ncclTaskColl {
 
   // Profiler plugin
   int eActivationMask;
+  void* groupApiEventHandle;
+  void* collApiEventHandle;
   void* eventHandle;
   uint8_t nChannels;
 };
+
 struct ncclTaskP2p {
   struct ncclTaskP2p* next;
   ncclFunc_t func;
+  ncclFunc_t collAPI;
   void* buff;
   size_t count;
   ncclDataType_t datatype;
@@ -243,6 +261,8 @@ struct ncclTaskP2p {
 
   // Profiler plugin
   int eActivationMask;
+  void* groupApiEventHandle;
+  void* p2pApiEventHandle;
   void* eventHandle;
   uint8_t nChannels;
 };
@@ -258,12 +278,14 @@ struct ncclKernelPlan {
   bool persistent; // aka captured in a graph
   bool isHostCbEnq;
   bool isSymColl;
+  bool isCeColl;
   enum ncclDevWorkStorageType workStorageType;
   bool kernelSpecialized;
   void* kernelFn;
   union {
     struct ncclDevKernelArgs* kernelArgs;
-    struct ncclSymDevArgs* kernelSymArgs;
+    void* kernelSymArgs;
+    struct ncclCeCollArgs* ceCollArgs;
   };
   size_t kernelArgsSize;
   struct channelMasks channelMask;
@@ -282,6 +304,8 @@ struct ncclKernelPlan {
   struct ncclIntruQueue<struct ncclProxyOp, &ncclProxyOp::enqNext> proxyOpQueue;
 
   // Profiler plugin
+  void* groupApiEventHandle;
+  void* kernelLaunchEventHandle;
   void* groupEventHandle;
 };
 
@@ -372,9 +396,8 @@ struct ncclKernelPlanner {
   struct ncclTaskCollSorter collSorter;
   struct Peer* peers/*[nRanks]*/;
   int nTasksColl, nTasksP2p;
+  int nTasksP2pSend, nTasksP2pRecv;
   bool persistent;
-  bool isSymColl;
-
   // The list of user streams aggregated over all tasks present.
   struct ncclCudaStreamList* streams;
   // Keep track of the number of user streams
@@ -392,6 +415,8 @@ struct ncclKernelPlanner {
   //////////////////////////////////////////////////////////////////////////////
 
   struct ncclIntruQueue<struct ncclTaskColl, &ncclTaskColl::next> collTaskQueue;
+  struct ncclIntruQueue<struct ncclTaskColl, &ncclTaskColl::next> collCeTaskQueue;
+  struct ncclIntruQueue<struct ncclTaskColl, &ncclTaskColl::next> collSymTaskQueue;
   struct ncclIntruQueue<struct ncclWorkList, &ncclWorkList::next> collWorkQueue;
   struct ncclIntruQueue<struct ncclWorkList, &ncclWorkList::next> tmpCollWorkQueue;
   struct ncclIntruQueue<struct ncclCommCallback, &ncclCommCallback::next> collCleanupQueue;
@@ -450,6 +475,8 @@ typedef enum ncclGroupTaskType {
   ncclGroupTaskTypeNum = 2,
 } ncclGroupTaskType_t;
 
+struct ncclCommSymTeams;
+
 struct ncclComm {
   uint64_t startMagic;
   struct ncclMemoryStack memPermanent, memScoped;
@@ -469,10 +496,12 @@ struct ncclComm {
   bool peerInfoValid;
 
   ncclNet_t* ncclNet;
+  void* netContext;
   int netPluginIndex;
   int ncclNetVer;
   ncclNetDeviceType netDeviceType;
   ncclCollNet_t* ncclCollNet;
+  void* collNetContext;
   void* bootstrap;
   // Bitmasks for ncclTransportP2pSetup
   struct channelMasks* connectSend;
@@ -508,6 +537,7 @@ struct ncclComm {
   int localRank;
   int localRanks;
   int maxLocalRanks;
+  int minLocalRanks;
   int* rankToNode;
   int* rankToLocalRank;
   int* localRankToRank;
@@ -517,6 +547,9 @@ struct ncclComm {
   int MNNVL; // true when MNNVL is available
   struct cliqueInfo clique; // Our MNNVL clique information
   int cliqueRank; // Our rank within the MNNVL clique
+
+  // NVL Domain info
+  ncclNvlDomainInfo_v5_t nvlDomainInfo;
 
   bool checkPointers;
   bool dmaBufSupport;
@@ -544,13 +577,14 @@ struct ncclComm {
   int p2pChunkSize;
   int nvlsChunkSize;
 
-  // Algorithm/Protocols thresholds
+  // Tuner values
+  ncclTunerConstants_t tunerConstants;
   ssize_t threadThresholds[NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS];
   float latencies[NCCL_NUM_FUNCTIONS][NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS];
   float bandwidths[NCCL_NUM_FUNCTIONS][NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS];
   int maxThreads[NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS];
   uint64_t minMaxLLRange[RCCL_TUNABLE_COLLS][NCCL_NUM_PROTOCOLS - 1][RCCL_PROTOCOL_ENTRY_SIZE];
-  uint64_t minMaxChannelThresholds[RCCL_TUNABLE_COLLS][RCCL_CHANNELS_TUNABLE_ENTRIES][3]; //for each collective, set for 5 channel-counts: 32,40,48,56,64, the two values for min/max size-threshold 
+  uint64_t minMaxChannelThresholds[RCCL_TUNABLE_COLLS][RCCL_CHANNELS_TUNABLE_ENTRIES][3]; //for each collective, set for 5 channel-counts: 32,40,48,56,64, the two values for min/max size-threshold
 
   /* This attribute can indicate the states of communicators and return code of
   * asynchronous NCCL operations. */
@@ -570,8 +604,7 @@ struct ncclComm {
   bool hasFineGrain;
 
   // Device side of the communicator (for cudaFree's)
-  struct ncclDevComm* devComm; // actually = &ncclDevCommAndChannels::comm
-  struct ncclSymDevComm symDevComm;
+  struct ncclKernelComm* devComm; // actually = &ncclKernelCommAndChannels::comm
 
   uint32_t workArgsBytes; // max size of kernel args
   uint32_t workFifoBytes; // size of workFifoBuf, power of 2
@@ -694,6 +727,10 @@ struct ncclComm {
   uint64_t seqNumber[NCCL_NUM_FUNCTIONS];
   struct ncclProfilerProxy profiler;
 
+  // CE Collective
+  struct ncclCeColl ceColl;
+  struct ncclIntruQueue<struct ncclCeInitTask, &ncclCeInitTask::next> ceInitTaskQueue;
+  
   // buffer registration cache
   struct ncclRegCache regCache;
   int isAllNvlink;
@@ -703,13 +740,8 @@ struct ncclComm {
   bool useGdr;
   int splitCount;
 
-  // symmetric buffer
-  uint8_t* baseUCSymPtr;
-  uint8_t* baseMCSymPtr;
-  size_t baseStride;
-  size_t symAllocHead;
-  CUmemGenericAllocationHandle symMCHandle;
-  struct ncclIntruQueue<struct ncclSymRegTask, &ncclSymRegTask::next> symRegTaskQueue;
+  struct ncclDevrState devrState; // The symmetric runtime state
+  struct ncclSymkState symkState; // The symmetric kernels state (built on previous)
 
   // unroll factor for comm [RCCL]
   int unroll;
@@ -719,7 +751,18 @@ struct ncclComm {
   char* archName;
   // multiProcessorCount from hipDeviceProp_t [RCCL]
   int cuCount;
-  
+
+#ifdef ENABLE_ROCSHMEM
+  // circular ring buffer in rocshmem symmetric heap
+  void** sourceRshmem;
+  void** destRshmem;
+  rocshmem::rocshmem_team_t team_reduce_world_dup;
+  int enableRocshmem;
+  int rocshmemThreshold;
+  int numSymBuf;
+  int symId;
+#endif
+
   uint64_t endMagic;
 };
 

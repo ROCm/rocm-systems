@@ -1,0 +1,458 @@
+{
+  "system_configurations": {
+    "name": "RCCL-Performance-Benchmarks",
+    "description": "RCCL Performance Test Suite - All Collective Operations"
+  },
+  "paths": {
+    "workdir": "${WORKDIR:-/path/to/rccl}",
+    "rocm_path": "${ROCM_PATH:-/opt/rocm}",
+    "mpi_path": "${MPI_PATH:-/opt/ompi}",
+    "test_binary_dir": "${RCCL_TEST_BIN_DIR}"
+  },
+  "env_variables": {
+    "HSA_NO_SCRATCH_RECLAIM": "1",
+    "NCCL_DEBUG": "WARN"
+  },
+  "build_configuration": {
+    "cmake_options": {
+      "CMAKE_BUILD_TYPE": "Release",
+      "ENABLE_CODE_COVERAGE": "OFF",
+      "BUILD_TESTS": "ON",
+      "BUILD_LOCAL_GPU_TARGET_ONLY": "ON",
+      "TRACE": "OFF",
+      "COLLTRACE": "OFF"
+    },
+    "env_variables": {
+      "HIPCC_COMPILE_FLAGS_APPEND": "-O3"
+    },
+    "parallel_jobs": 64,
+    "generator": "Unix Makefiles"
+  },
+  "test_configurations": {
+    "perf_base": {
+      "is_gtest": false,
+      "num_ranks": 8,
+      "num_nodes": 1,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_LAUNCH_MODE": "GROUP"
+      }
+    },
+    "allreduce_perf": {
+      "extends": "perf_base",
+      "binary": "all_reduce_perf",
+      "tests": [
+        {
+          "name": "AllReduce_Perf_SmallMessages",
+          "description": "AllReduce bandwidth test for small messages (8B - 8KB)",
+          "command_args": "-b 8 -e 8K -f 2 -g 1"
+        },
+        {
+          "name": "AllReduce_Perf_MediumMessages",
+          "description": "AllReduce bandwidth test for medium messages (16KB - 1MB)",
+          "command_args": "-b 16K -e 1M -f 2 -g 1"
+        },
+        {
+          "name": "AllReduce_Perf_LargeMessages",
+          "description": "AllReduce bandwidth test for large messages (2MB - 128MB)",
+          "command_args": "-b 2M -e 128M -f 2 -g 1",
+          "timeout": 600
+        },
+        {
+          "name": "AllReduce_Perf_InPlace",
+          "description": "AllReduce in-place bandwidth test",
+          "command_args": "-b 8 -e 128M -f 2 -g 1 -c 1"
+        },
+        {
+          "name": "AllReduce_Perf_MultiGPU",
+          "description": "AllReduce test with all 8 GPUs",
+          "command_args": "-b 1M -e 128M -f 2 -g 8"
+        }
+      ]
+    },
+    "allgather_perf": {
+      "extends": "perf_base",
+      "binary": "all_gather_perf",
+      "tests": [
+        {
+          "name": "AllGather_Perf_SmallMessages",
+          "description": "AllGather bandwidth test for small messages",
+          "command_args": "-b 8 -e 8K -f 2 -g 1"
+        },
+        {
+          "name": "AllGather_Perf_MediumMessages",
+          "description": "AllGather bandwidth test for medium messages",
+          "command_args": "-b 16K -e 1M -f 2 -g 1"
+        },
+        {
+          "name": "AllGather_Perf_LargeMessages",
+          "description": "AllGather bandwidth test for large messages",
+          "command_args": "-b 2M -e 128M -f 2 -g 1",
+          "timeout": 600
+        }
+      ]
+    },
+    "broadcast_perf": {
+      "extends": "perf_base",
+      "binary": "broadcast_perf",
+      "tests": [
+        {
+          "name": "Broadcast_Perf_SmallMessages",
+          "description": "Broadcast bandwidth test for small messages",
+          "command_args": "-b 8 -e 8K -f 2 -g 1"
+        },
+        {
+          "name": "Broadcast_Perf_MediumMessages",
+          "description": "Broadcast bandwidth test for medium messages",
+          "command_args": "-b 16K -e 1M -f 2 -g 1"
+        },
+        {
+          "name": "Broadcast_Perf_LargeMessages",
+          "description": "Broadcast bandwidth test for large messages",
+          "command_args": "-b 2M -e 128M -f 2 -g 1",
+          "timeout": 600
+        }
+      ]
+    },
+    "reduce_perf": {
+      "extends": "perf_base",
+      "binary": "reduce_perf",
+      "tests": [
+        {
+          "name": "Reduce_Perf_SmallMessages",
+          "description": "Reduce bandwidth test for small messages",
+          "command_args": "-b 8 -e 8K -f 2 -g 1"
+        },
+        {
+          "name": "Reduce_Perf_MediumMessages",
+          "description": "Reduce bandwidth test for medium messages",
+          "command_args": "-b 16K -e 1M -f 2 -g 1"
+        },
+        {
+          "name": "Reduce_Perf_LargeMessages",
+          "description": "Reduce bandwidth test for large messages",
+          "command_args": "-b 2M -e 128M -f 2 -g 1",
+          "timeout": 600
+        }
+      ]
+    },
+    "reducescatter_perf": {
+      "extends": "perf_base",
+      "binary": "reduce_scatter_perf",
+      "tests": [
+        {
+          "name": "ReduceScatter_Perf_SmallMessages",
+          "description": "ReduceScatter bandwidth test for small messages",
+          "command_args": "-b 8 -e 8K -f 2 -g 1"
+        },
+        {
+          "name": "ReduceScatter_Perf_MediumMessages",
+          "description": "ReduceScatter bandwidth test for medium messages",
+          "command_args": "-b 16K -e 1M -f 2 -g 1"
+        },
+        {
+          "name": "ReduceScatter_Perf_LargeMessages",
+          "description": "ReduceScatter bandwidth test for large messages",
+          "command_args": "-b 2M -e 128M -f 2 -g 1",
+          "timeout": 600
+        }
+      ]
+    },
+    "alltoall_perf": {
+      "extends": "perf_base",
+      "binary": "alltoall_perf",
+      "tests": [
+        {
+          "name": "AllToAll_Perf_SmallMessages",
+          "description": "AllToAll bandwidth test for small messages",
+          "command_args": "-b 8 -e 8K -f 2 -g 1"
+        },
+        {
+          "name": "AllToAll_Perf_MediumMessages",
+          "description": "AllToAll bandwidth test for medium messages",
+          "command_args": "-b 16K -e 1M -f 2 -g 1"
+        },
+        {
+          "name": "AllToAll_Perf_LargeMessages",
+          "description": "AllToAll bandwidth test for large messages",
+          "command_args": "-b 2M -e 64M -f 2 -g 1",
+          "timeout": 600
+        }
+      ]
+    },
+    "sendrecv_perf": {
+      "extends": "perf_base",
+      "binary": "sendrecv_perf",
+      "num_ranks": 2,
+      "tests": [
+        {
+          "name": "SendRecv_Perf_SmallMessages",
+          "description": "SendRecv bandwidth test for small messages",
+          "command_args": "-b 8 -e 8K -f 2 -g 1"
+        },
+        {
+          "name": "SendRecv_Perf_MediumMessages",
+          "description": "SendRecv bandwidth test for medium messages",
+          "command_args": "-b 16K -e 1M -f 2 -g 1"
+        },
+        {
+          "name": "SendRecv_Perf_LargeMessages",
+          "description": "SendRecv bandwidth test for large messages",
+          "command_args": "-b 2M -e 128M -f 2 -g 1",
+          "timeout": 600
+        },
+        {
+          "name": "SendRecv_Perf_Latency",
+          "description": "SendRecv latency test",
+          "command_args": "-b 8 -e 8 -f 1 -g 1 -n 1000"
+        }
+      ]
+    },
+    "allreduce_multinode": {
+      "extends": "perf_base",
+      "binary": "all_reduce_perf",
+      "num_ranks": 16,
+      "num_nodes": 2,
+      "timeout": 600,
+      "env_variables": {
+        "NCCL_IB_DISABLE": "0",
+        "NCCL_NET_GDR_LEVEL": "5",
+        "NCCL_SOCKET_IFNAME": "eth0,eth1"
+      },
+      "tests": [
+        {
+          "name": "AllReduce_MultiNode_SmallMessages",
+          "description": "Multi-node AllReduce test for small messages",
+          "command_args": "-b 8 -e 8K -f 2 -g 1"
+        },
+        {
+          "name": "AllReduce_MultiNode_MediumMessages",
+          "description": "Multi-node AllReduce test for medium messages",
+          "command_args": "-b 16K -e 1M -f 2 -g 1"
+        },
+        {
+          "name": "AllReduce_MultiNode_LargeMessages",
+          "description": "Multi-node AllReduce test for large messages",
+          "command_args": "-b 2M -e 128M -f 2 -g 1",
+          "timeout": 900
+        },
+        {
+          "name": "AllReduce_MultiNode_MaxBandwidth",
+          "description": "Multi-node AllReduce maximum bandwidth test",
+          "command_args": "-b 128M -e 2G -f 2 -g 8",
+          "timeout": 1200
+        }
+      ]
+    },
+    "scatter_gather_perf": {
+      "extends": "perf_base",
+      "binary": "scatter_perf",
+      "tests": [
+        {
+          "name": "Scatter_Perf_SmallMessages",
+          "description": "Scatter bandwidth test for small messages",
+          "command_args": "-b 8 -e 8K -f 2 -g 1"
+        },
+        {
+          "name": "Scatter_Perf_MediumMessages",
+          "description": "Scatter bandwidth test for medium messages",
+          "command_args": "-b 16K -e 1M -f 2 -g 1"
+        },
+        {
+          "name": "Scatter_Perf_LargeMessages",
+          "description": "Scatter bandwidth test for large messages",
+          "command_args": "-b 2M -e 64M -f 2 -g 1"
+        }
+      ]
+    },
+    "gather_perf": {
+      "extends": "perf_base",
+      "binary": "gather_perf",
+      "tests": [
+        {
+          "name": "Gather_Perf_SmallMessages",
+          "description": "Gather bandwidth test for small messages",
+          "command_args": "-b 8 -e 8K -f 2 -g 1"
+        },
+        {
+          "name": "Gather_Perf_MediumMessages",
+          "description": "Gather bandwidth test for medium messages",
+          "command_args": "-b 16K -e 1M -f 2 -g 1"
+        },
+        {
+          "name": "Gather_Perf_LargeMessages",
+          "description": "Gather bandwidth test for large messages",
+          "command_args": "-b 2M -e 64M -f 2 -g 1"
+        }
+      ]
+    },
+    "allreduce_algos": {
+      "extends": "perf_base",
+      "binary": "all_reduce_perf",
+      "num_ranks": 8,
+      "tests": [
+        {
+          "name": "AllReduce_Ring_Algorithm",
+          "description": "AllReduce using Ring algorithm",
+          "command_args": "-b 1M -e 128M -f 2 -g 1",
+          "env_variables": {
+            "NCCL_ALGO": "Ring"
+          }
+        },
+        {
+          "name": "AllReduce_Tree_Algorithm",
+          "description": "AllReduce using Tree algorithm",
+          "command_args": "-b 1M -e 128M -f 2 -g 1",
+          "env_variables": {
+            "NCCL_ALGO": "Tree"
+          }
+        },
+        {
+          "name": "AllReduce_CollNetDirect",
+          "description": "AllReduce using CollNet Direct",
+          "command_args": "-b 1M -e 128M -f 2 -g 1",
+          "env_variables": {
+            "NCCL_ALGO": "CollNetDirect"
+          }
+        }
+      ]
+    },
+    "allreduce_protocols": {
+      "extends": "perf_base",
+      "binary": "all_reduce_perf",
+      "num_ranks": 8,
+      "tests": [
+        {
+          "name": "AllReduce_SimpleProtocol",
+          "description": "AllReduce using Simple protocol",
+          "command_args": "-b 1M -e 128M -f 2 -g 1",
+          "env_variables": {
+            "NCCL_PROTO": "Simple"
+          }
+        },
+        {
+          "name": "AllReduce_LL_Protocol",
+          "description": "AllReduce using LL (Low Latency) protocol",
+          "command_args": "-b 1M -e 128M -f 2 -g 1",
+          "env_variables": {
+            "NCCL_PROTO": "LL"
+          }
+        },
+        {
+          "name": "AllReduce_LL128_Protocol",
+          "description": "AllReduce using LL128 protocol",
+          "command_args": "-b 1M -e 128M -f 2 -g 1",
+          "env_variables": {
+            "NCCL_PROTO": "LL128"
+          }
+        }
+      ]
+    },
+    "stress_tests": {
+      "extends": "perf_base",
+      "binary": "all_reduce_perf",
+      "num_ranks": 8,
+      "timeout": 1800,
+      "tests": [
+        {
+          "name": "AllReduce_Stress_LongDuration",
+          "description": "Long duration AllReduce stress test",
+          "command_args": "-b 1M -e 128M -f 2 -g 8 -n 10000"
+        },
+        {
+          "name": "AllReduce_Stress_MaxSize",
+          "description": "Maximum message size stress test",
+          "command_args": "-b 1G -e 2G -f 2 -g 8",
+          "timeout": 2400
+        },
+        {
+          "name": "AllReduce_Stress_AllSizes",
+          "description": "All message sizes comprehensive test",
+          "command_args": "-b 8 -e 2G -f 2 -g 8 -n 100",
+          "timeout": 3600
+        }
+      ]
+    }
+  },
+  "test_suites": [
+    {
+      "name": "AllReduce Performance Tests",
+      "description": "AllReduce collective bandwidth and latency benchmarks",
+      "config": "allreduce_perf",
+      "enabled": true
+    },
+    {
+      "name": "AllGather Performance Tests",
+      "description": "AllGather collective bandwidth benchmarks",
+      "config": "allgather_perf",
+      "enabled": true
+    },
+    {
+      "name": "Broadcast Performance Tests",
+      "description": "Broadcast collective bandwidth benchmarks",
+      "config": "broadcast_perf",
+      "enabled": true
+    },
+    {
+      "name": "Reduce Performance Tests",
+      "description": "Reduce collective bandwidth benchmarks",
+      "config": "reduce_perf",
+      "enabled": true
+    },
+    {
+      "name": "ReduceScatter Performance Tests",
+      "description": "ReduceScatter collective bandwidth benchmarks",
+      "config": "reducescatter_perf",
+      "enabled": true
+    },
+    {
+      "name": "AllToAll Performance Tests",
+      "description": "AllToAll collective bandwidth benchmarks",
+      "config": "alltoall_perf",
+      "enabled": true
+    },
+    {
+      "name": "SendRecv Performance Tests",
+      "description": "Point-to-point SendRecv bandwidth and latency benchmarks",
+      "config": "sendrecv_perf",
+      "enabled": true
+    },
+    {
+      "name": "Scatter Performance Tests",
+      "description": "Scatter collective bandwidth benchmarks",
+      "config": "scatter_gather_perf",
+      "enabled": false
+    },
+    {
+      "name": "Gather Performance Tests",
+      "description": "Gather collective bandwidth benchmarks",
+      "config": "gather_perf",
+      "enabled": false
+    },
+    {
+      "name": "AllReduce Multi-Node Tests",
+      "description": "Multi-node AllReduce performance tests (requires 2+ nodes)",
+      "config": "allreduce_multinode",
+      "enabled": false
+    },
+    {
+      "name": "AllReduce Algorithm Comparison",
+      "description": "Compare different AllReduce algorithms (Ring, Tree, CollNet)",
+      "config": "allreduce_algos",
+      "enabled": false
+    },
+    {
+      "name": "AllReduce Protocol Comparison",
+      "description": "Compare different protocols (Simple, LL, LL128)",
+      "config": "allreduce_protocols",
+      "enabled": false
+    },
+    {
+      "name": "Stress Tests",
+      "description": "Long duration and maximum size stress tests",
+      "config": "stress_tests",
+      "enabled": false
+    }
+  ]
+}
+

@@ -81,7 +81,7 @@ namespace AMD {
 AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_size_pkts,
                    HSAuint32 node_id, ScratchInfo& scratch, core::HsaEventCallback callback,
                    void* err_data, uint64_t flags)
-    : Queue(shared_queue, flags, !agent->is_xgmi_cpu_gpu()),
+    : Queue(shared_queue, flags, !agent->is_xgmi_cpu_gpu(), agent),
       LocalSignal(0, false),
       DoorbellSignal(signal()),
       ring_buf_(nullptr),
@@ -97,7 +97,7 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
       dynamicScratchState(0),
       exceptionState(0),
       suspended_(false),
-      priority_(HSA_QUEUE_PRIORITY_NORMAL),
+      priority_(HSA::HSA_AMD_QUEUE_PRIORITY_NORMAL),
       exception_signal_(nullptr) {
 
   // Queue size is a function of several restrictions.
@@ -495,6 +495,21 @@ hsa_status_t AqlQueue::GetInfo(hsa_queue_info_attribute_t attribute, void* value
       *(reinterpret_cast<uint64_t*>(value)) =
           reinterpret_cast<uint64_t>(signal_.hardware_doorbell_ptr);
       break;
+    case HSA_QUEUE_INFO_USE_COUNT:
+      if (!is_counted_queue) {
+        *static_cast<uint32_t*>(value) = static_cast<uint32_t>(-1);
+      } else {
+        if (use_count == 0) {
+          // Queue was released
+          return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+        }
+        *static_cast<uint32_t*>(value) = use_count;
+      }
+      break;
+    case HSA_QUEUE_INFO_HW_ID:
+      // Return the hardware queue ID for both counted and non-counted queues
+      *static_cast<uint32_t*>(value) = public_handle()->id; 
+      break;
     default:
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
@@ -631,7 +646,7 @@ hsa_status_t AqlQueue::Inactivate() {
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t AqlQueue::SetPriority(HSA_QUEUE_PRIORITY priority) {
+hsa_status_t AqlQueue::SetPriority(HSA::hsa_amd_queue_priority_internal_t priority) {
   if (suspended_) {
     return HSA_STATUS_ERROR_INVALID_QUEUE;
   }
