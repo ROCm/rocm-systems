@@ -8,10 +8,10 @@
 // Minimal test environment
 struct AgentInfo
 {
-    uint32_t se_num;
-    uint32_t xcc_num;
-    uint32_t shader_arrays_per_se;
-    uint32_t cu_num;
+    uint32_t se_num               = 0;
+    uint32_t xcc_num              = 1;
+    uint32_t shader_arrays_per_se = 0;
+    uint32_t cu_num               = 0;
 };
 
 class CmdBuffer
