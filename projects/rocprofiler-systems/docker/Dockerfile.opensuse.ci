@@ -30,7 +30,7 @@ RUN zypper --non-interactive update -y && \
     zypper --non-interactive install -y chrpath cmake curl dpkg-devel \
         gcc-c++ gcc-fortran git gmock gtest iproute2 ninja nlohmann_json-devel \
         openmpi3-devel papi-devel python3-devel python3-pip rpm-build \
-        sqlite3-devel vim wget && \
+        sqlite3-devel vim wget libucp-devel libuct-devel && \
     zypper --non-interactive clean --all && \
     python3 -m pip install 'cmake==3.21' perfetto
 

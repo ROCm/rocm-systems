@@ -127,8 +127,9 @@ ROCPROFSYS_DEFINE_CATEGORY(category, rocm_rccl, ROCPROFSYS_CATEGORY_ROCM_RCCL, "
 ROCPROFSYS_DEFINE_CATEGORY(category, pthread, ROCPROFSYS_CATEGORY_PTHREAD, "pthread", "POSIX threading functions")
 ROCPROFSYS_DEFINE_CATEGORY(category, kokkos, ROCPROFSYS_CATEGORY_KOKKOS, "kokkos", "KokkosTools regions")
 ROCPROFSYS_DEFINE_CATEGORY(category, mpi, ROCPROFSYS_CATEGORY_MPI, "mpi", "MPI regions")
+ROCPROFSYS_DEFINE_CATEGORY(category, ucx, ROCPROFSYS_CATEGORY_UCX, "ucx", "UCX regions")
 ROCPROFSYS_DEFINE_CATEGORY(category, process_sampling, ROCPROFSYS_CATEGORY_PROCESS_SAMPLING, "process_sampling", "Process-level data")
-ROCPROFSYS_DEFINE_CATEGORY(category, comm_data, ROCPROFSYS_CATEGORY_COMM_DATA, "comm_data", "MPI/RCCL counters for tracking amount of data sent or received")
+ROCPROFSYS_DEFINE_CATEGORY(category, comm_data, ROCPROFSYS_CATEGORY_COMM_DATA, "comm_data", "MPI/RCCL/UCX counters for tracking amount of data sent or received")
 ROCPROFSYS_DEFINE_CATEGORY(category, causal, ROCPROFSYS_CATEGORY_CAUSAL, "causal", "Causal profiling data")
 ROCPROFSYS_DEFINE_CATEGORY(category, cpu_freq, ROCPROFSYS_CATEGORY_CPU_FREQ, "cpu_frequency", "CPU frequency (collected in background thread)")
 ROCPROFSYS_DEFINE_CATEGORY(category, process_page, ROCPROFSYS_CATEGORY_PROCESS_PAGE, "process_physical_memory", "Physical memory usage (RSS) in process in MB (collected in background thread)")
@@ -207,6 +208,7 @@ using name = perfetto_category<Tp...>;
         ROCPROFSYS_PERFETTO_CATEGORY(category::pthread),                                 \
         ROCPROFSYS_PERFETTO_CATEGORY(category::kokkos),                                  \
         ROCPROFSYS_PERFETTO_CATEGORY(category::mpi),                                     \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::ucx),                                     \
         ROCPROFSYS_PERFETTO_CATEGORY(category::sampling),                                \
         ROCPROFSYS_PERFETTO_CATEGORY(category::process_sampling),                        \
         ROCPROFSYS_PERFETTO_CATEGORY(category::comm_data),                               \
