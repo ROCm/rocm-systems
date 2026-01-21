@@ -123,7 +123,7 @@ ncclResult_t ncclRegisterCollBuffers(
   info->regBufType = NCCL_REGULAR_BUFFER;
   *regNeedConnect = true;
   if (!(ncclParamLocalRegister() || (comm->planner.persistent && ncclParamGraphRegister()))) goto exit;
-#if CUDART_VERSION >= 11030
+#if CUDART_VERSION >= 11030 || defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
   if (info->algorithm == NCCL_ALGO_NVLS || info->algorithm == NCCL_ALGO_NVLS_TREE) {
     /* this part of nvls reg code is temporarily not used and obsolete. */
     if (!comm->nvlsRegSupport || info->opDev.op == ncclDevPreMulSum) goto exit;
