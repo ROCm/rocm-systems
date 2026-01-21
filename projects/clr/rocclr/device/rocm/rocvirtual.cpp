@@ -1737,7 +1737,11 @@ VirtualGPU::VirtualGPU(Device& device, bool profiling, bool cooperative,
       copy_command_type_(0),
       fence_state_(Device::CacheState::kCacheStateInvalid),
       fence_dirty_(false),
-      dedicated_queue_(dedicated_queue) {
+      dedicated_queue_(dedicated_queue)
+#if defined(_WIN32)
+     ,deviceQueueMonitor_(nullptr)
+#endif
+     {
   index_ = device.numOfVgpus_++;
   gpu_device_ = device.getBackendDevice();
   printfdbg_ = nullptr;
@@ -1822,7 +1826,15 @@ VirtualGPU::~VirtualGPU() {
   delete printfdbg_;
 
   if (nullptr != schedulerQueue_) {
+#if defined(_WIN32)
+    // Stop the monitor thread before destroying the queue
+    if (deviceQueueMonitor_ != nullptr) {
+      deviceQueueMonitor_->Terminate();
+      delete deviceQueueMonitor_;
+      deviceQueueMonitor_ = nullptr;
+    }
     Hsa::queue_destroy(schedulerQueue_);
+#endif  // _WIN32
   }
 
   if (nullptr != virtualQueue_) {
@@ -3448,6 +3460,18 @@ bool VirtualGPU::createSchedulerParam() {
       break;
     }
 
+#if defined(_WIN32)
+    // Create and start the device queue monitor thread
+    deviceQueueMonitor_ = new DeviceQueueMonitor();
+    if (!deviceQueueMonitor_->Start(schedulerQueue_)) {
+      LogError("Failed to start monitor thread");
+      Hsa::queue_destroy(schedulerQueue_);
+      schedulerQueue_ = nullptr;
+      delete deviceQueueMonitor_;
+      deviceQueueMonitor_ = nullptr;
+      return false;
+    }
+#endif  // _WIN32
     return true;
   }
 

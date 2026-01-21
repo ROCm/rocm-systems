@@ -462,6 +462,15 @@ class VirtualGPU : public device::VirtualDevice {
   void HiddenHeapInit();
   uint64_t getQueueID();
 
+#if defined(_WIN32)
+  //! Wake up the device queue monitor thread when scheduler enqueues a kernel
+  void WakeupDeviceQueueMonitor() {
+    if (deviceQueueMonitor_ != nullptr) {
+      deviceQueueMonitor_->WakeUp();
+    }
+  }
+#endif  // _WIN32
+
   //! Analyzes a crashed AQL queue to find a broken AQL packet
   void AnalyzeAqlQueue() const;
   bool ForceIrq() const { return force_irq_; }
@@ -617,6 +626,100 @@ class VirtualGPU : public device::VirtualDevice {
   uint schedulerThreads_;      //!< The number of scheduler threads
 
   hsa_queue_t* schedulerQueue_;
+
+#if defined(_WIN32)
+  //! Thread to monitor the scheduler queue when a kernel is enqueued
+  class DeviceQueueMonitor : public amd::Thread {
+   public:
+    DeviceQueueMonitor()
+        : amd::Thread("DeviceQueue Monitor", CQ_THREAD_STACK_SIZE),
+          running_(false),
+          queue_(nullptr) {}
+          //wakeup_signal_(),
+          //monitor_lock_() {}
+
+    ~DeviceQueueMonitor() {
+      Terminate();
+    }
+
+    //! Initialize and start the monitor thread
+    bool Start(hsa_queue_t* queue) {
+      if (queue == nullptr) {
+        return false;
+      }
+      queue_ = queue;
+      running_ = true;
+      return amd::Thread::start(this);
+    }
+
+    //! Wakes up the monitor thread to check the scheduler queue
+    void WakeUp() {
+      amd::ScopedLock lock(monitor_lock_);
+      monitor_lock_.notify();
+    }
+
+    //! Stop the monitor thread
+    void Terminate() {
+      if (running_) {
+        running_ = false;
+        WakeUp();
+        if (Os::isThreadAlive(*this)) {
+          // Wait for the thread to finish
+          while (state() < Thread::FINISHED) {
+            Os::yield();
+          }
+        }
+      }
+    }
+
+    //! The monitor thread entry point
+    void run(void* data) override {
+      VirtualGPU* vgpu = static_cast<VirtualGPU*>(data);
+      MonitorQueue(vgpu);
+    }
+
+   private:
+    //! Loop to monitor the scheduler queue
+    void MonitorQueue(VirtualGPU* vgpu) {
+      ClPrint(amd::LOG_DEBUG, amd::LOG_QUEUE,
+              "Thread started to monitor scheduler queue: %p", queue_);
+
+      while (running_) {
+        // Wait for the monitor thread to wake up
+        {
+          amd::ScopedLock lock(monitor_lock_);
+          monitor_lock_.wait();
+        }
+        if (!running_) {
+          break;
+        }
+
+        if (queue_ != nullptr) {
+          uint64_t read_index = Hsa::queue_load_read_index_scacquire(queue_);
+          uint64_t write_index = Hsa::queue_load_write_index_relaxed(queue_);
+
+          // Process if there are pending packets in the scheduler queue
+          if (read_index != write_index) {
+            ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL,
+                    "Pending packets detected in scheduler queue, "
+                    "ring the doorbell - read=%lu, write=%lu", read_index, write_index);
+            // Ring the doorbell
+            Hsa::signal_store_screlease(queue_->doorbell_signal, write_index - 1);
+          }
+        }
+      }
+
+      ClPrint(amd::LOG_DEBUG, amd::LOG_QUEUE,
+              "Monitor thread terminated for queue: %p", queue_);
+    }
+
+    std::atomic<bool> running_;   //!< Flag to control thread execution
+    hsa_queue_t* queue_;          //!< The scheduler queue to monitor
+    amd::Monitor monitor_lock_;   //!< Lock to synchronize monitor thread
+  };
+
+  DeviceQueueMonitor* deviceQueueMonitor_;  //!< Windows-specific device queue monitor
+#endif  // _WIN32
 
   HwQueueTracker barriers_;  //!< Tracks active barriers in ROCr
 

@@ -2767,6 +2767,12 @@ bool KernelBlitManager::runScheduler(uint64_t vqVM, hsa_queue_t* schedulerQueue,
     return false;
   }
   releaseArguments(parameters);
+
+#if defined(_WIN32)
+  // Scheduler has enqueued a kernel, wake up the device queue monitor thread
+  gpu().WakeupDeviceQueueMonitor();
+#endif  // _WIN32
+
   // Wait for the scheduler to finish all operations
   gpu().WaitCompleteSignal(sp->complete_signal);
 
