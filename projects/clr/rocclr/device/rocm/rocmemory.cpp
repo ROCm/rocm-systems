@@ -201,32 +201,6 @@ void Memory::cpuUnmap(device::VirtualDevice& vDev) {
   decIndMapCount();
 }
 
-// ================================================================================================
-hsa_status_t Memory::interopMapBuffer(hsa_handle_t fdn, hsa_interop_map_flag_t flags) {
-  hsa_agent_t agent = dev().getBackendDevice();
-  size_t size;
-  size_t metadata_size = 0;
-  void* metadata;
-  auto fd = fdn;
-  hsa_status_t status = Hsa::interop_map_buffer(1, &agent, fd, flags, &size, &interop_deviceMemory_,
-                                                &metadata_size, (const void**)&metadata);
-  ClPrint(amd::LOG_DEBUG, amd::LOG_MEM, "Map Interop memory %p, size 0x%zx", interop_deviceMemory_,
-          size);
-  deviceMemory_ = static_cast<char*>(interop_deviceMemory_);  // + out.buf_offset;
-  if (status != HSA_STATUS_SUCCESS) return status;
-  // if map_buffer wrote a legitimate SRD, copy it to amdImageDesc_
-  // Note: Check if amdImageDesc_ is valid, because VA library maps linear planes of YUV image
-  // as buffers for processing in HIP later
-  if ((amdImageDesc_ != nullptr) && (metadata_size != 0) &&
-      (reinterpret_cast<hsa_amd_image_descriptor_t*>(metadata)->deviceID ==
-       amdImageDesc_->deviceID)) {
-    memcpy(amdImageDesc_, metadata, metadata_size);
-  }
-  kind_ = MEMORY_KIND_INTEROP;
-  assert(deviceMemory_ != nullptr && "Interop map failed to produce a pointer!");
-  return status;
-}
-
 // Setup an interop buffer (dmabuf handle) as an OpenCL buffer
 // ================================================================================================
 bool Memory::createInteropBuffer(GLenum targetType, int miplevel) {
@@ -295,8 +269,6 @@ bool Memory::createInteropBuffer(GLenum targetType, int miplevel) {
                              glenv->getOrigCtx()))
       return false;
   }
-
-  if (interopMapBuffer(out.dmabuf_fd) != HSA_STATUS_SUCCESS) return false;
 
   close(out.dmabuf_fd);
   deviceMemory_ = static_cast<char*>(interop_deviceMemory_) + out.buf_offset;
@@ -912,11 +884,7 @@ bool Buffer::create(bool alloc_local) {
     amd::InteropObject* interop = owner()->getInteropObj();
     auto ext_memory = interop->asExternalMemory();
     amd::GLObject* glObject = interop->asGLObject();
-    if (ext_memory != nullptr) {
-      return interopMapBuffer(ext_memory->Handle()) == HSA_STATUS_SUCCESS;
-    } else if (glObject != nullptr) {
       return createInteropBuffer(GL_ARRAY_BUFFER, 0);
-    }
   }
   if (nullptr != owner()->parent()) {
     amd::Memory& parent = *owner()->parent();

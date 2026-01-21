@@ -1014,14 +1014,6 @@ bool Device::populateOCLDeviceConstants() {
     }
   }
 
-  hsa_luid_t localUID = {0};
-  if (HSA_STATUS_SUCCESS ==
-      Hsa::agent_get_info(bkendDevice_, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_LUID),
-                          &localUID)) {
-    info_.luidLowPart_ = localUID.low;
-    info_.luidHighPart_ = localUID.high;
-  }
-
   if (HSA_STATUS_SUCCESS !=
       Hsa::agent_get_info(bkendDevice_,
                           (amd::IS_HIP)
@@ -1655,12 +1647,6 @@ bool Device::populateOCLDeviceConstants() {
   }
 
   info_.hasExpertSchedMode_ = false;
-  if (HSA_STATUS_SUCCESS !=
-      Hsa::agent_get_info(bkendDevice_,
-                          static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_HAS_EXPERT_SCHED_MODE),
-                          &info_.hasExpertSchedMode_)) {
-    LogWarning("HSA_AMD_AGENT_INFO_HAS_EXPERT_SCHED_MODE query failed.");
-  }
 
   ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Gfx Major/Minor/Stepping: %d/%d/%d", isa().versionMajor(),
           isa().versionMinor(), isa().versionStepping());
