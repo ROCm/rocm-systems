@@ -1,3 +1,6 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
+
 cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
 
 if(
@@ -183,8 +186,14 @@ else()
     rocprofiler_systems_add_option(ROCPROFSYS_BUILD_EXAMPLES
     "Enable building the examples" OFF ADVANCED
     )
+    rocprofiler_systems_add_option(ROCPROFSYS_INSTALL_EXAMPLES
+    "Install the examples" OFF
+    )
     rocprofiler_systems_add_option(ROCPROFSYS_BUILD_TESTING
     "Enable building the testing suite" OFF ADVANCED
+    )
+    rocprofiler_systems_add_option(ROCPROFSYS_INSTALL_TESTING
+    "Install the test suite" OFF
     )
     rocprofiler_systems_add_option(
     ROCPROFSYS_BUILD_DEBUG "Enable building with extensive debug symbols" OFF
@@ -290,6 +299,15 @@ elseif("$ENV{ROCPROFSYS_CI}")
             "Ignoring values of ROCPROFSYS_PYTHON_ENVS and/or ROCPROFSYS_PYTHON_PREFIX"
         )
     endif()
+endif()
+
+if(ROCPROFSYS_INSTALL_TESTING)
+    set(ROCPROFSYS_INSTALL_EXAMPLES ON CACHE BOOL "Enable installing examples" FORCE)
+    set(ROCPROFSYS_BUILD_TESTING ON CACHE BOOL "Enable building the testing suite" FORCE)
+endif()
+
+if(ROCPROFSYS_INSTALL_EXAMPLES)
+    set(ROCPROFSYS_BUILD_EXAMPLES ON CACHE BOOL "Enable building the examples" FORCE)
 endif()
 
 if(ROCPROFSYS_BUILD_TESTING)
