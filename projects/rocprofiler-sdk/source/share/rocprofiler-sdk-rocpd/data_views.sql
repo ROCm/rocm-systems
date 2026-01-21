@@ -754,5 +754,7 @@ FROM
     INNER JOIN `rocpd_event{{uuid}}` E ON E.id = R.event_id AND E.guid = R.guid
     INNER JOIN `rocpd_pc_sample_event{{uuid}}` PSE ON PSE.event_id = R.event_id AND PSE.guid = R.guid
     INNER JOIN `rocpd_info_pc_sample{{uuid}}` PSF ON PSF.id = PSE.field_id AND PSF.guid = PSE.guid
-    LEFT JOIN `rocpd_info_agent{{uuid}}` A ON A.id = PSF.agent_id AND A.guid = PSF.guid
+    LEFT JOIN `rocpd_event{{uuid}}` PE ON PE.id = E.parent_id AND PE.guid = E.guid
+    LEFT JOIN `rocpd_kernel_dispatch{{uuid}}` KD ON KD.event_id = PE.id AND KD.guid = PE.guid
+    LEFT JOIN `rocpd_info_agent{{uuid}}` A ON A.id = KD.agent_id AND A.guid = KD.guid
 ;
