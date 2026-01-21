@@ -367,7 +367,9 @@ PTraceSession::write_internal(size_t addr, const std::vector<uint8_t>& data, siz
         const size_t offset = (word_iter * word_size);
         uint64_t     word;
         std::memcpy(&word, data.data() + offset, word_size);
-        PTRACE_CALL(PTRACE_POKEDATA, addr + offset, word);
+        PTRACE_CALL(PTRACE_POKEDATA,  // NOLINT(performance-no-int-to-ptr)
+                    reinterpret_cast<void*>(static_cast<uintptr_t>(addr + offset)),
+                    word);
     }
 
     // If not evenly divisible, read the last word to do a masked partial write.
@@ -378,7 +380,9 @@ PTraceSession::write_internal(size_t addr, const std::vector<uint8_t>& data, siz
         uint64_t     last_word = 0;
         PTRACE_CALL(PTRACE_PEEKDATA, addr + offset, &last_word);
         std::memcpy(&last_word, data.data() + offset, remainder);
-        PTRACE_CALL(PTRACE_POKEDATA, addr + offset, last_word);
+        PTRACE_CALL(PTRACE_POKEDATA,  // NOLINT(performance-no-int-to-ptr)
+                    reinterpret_cast<void*>(static_cast<uintptr_t>(addr + offset)),
+                    last_word);
     }
     ROCP_TRACE << "[rocprofiler-sdk-rocattach] ptrace wrote " << size << " bytes at " << addr;
     return ROCATTACH_STATUS_SUCCESS;
