@@ -571,7 +571,16 @@ target_compile_definitions(${ROCRTST} PRIVATE HAVE_NUMA=$<BOOL:${HAVE_NUMA}>)
 set(HAVE_HWLOC FALSE)
 set(HWLOC_TARGET "")
 
-if(PKG_CONFIG_FOUND)
+# First priority: Try to find hwloc via CMake package (from TheRock sysdeps)
+find_package(hwloc QUIET CONFIG)
+if(hwloc_FOUND AND TARGET hwloc::hwloc)
+  set(HWLOC_TARGET hwloc::hwloc)
+  set(HAVE_HWLOC TRUE)
+  message(STATUS "Found hwloc via CMake package (TheRock sysdeps)")
+endif()
+
+# Second priority: Try pkg-config
+if(NOT HAVE_HWLOC AND PKG_CONFIG_FOUND)
   pkg_check_modules(HWLOC_PC hwloc)
   if(HWLOC_PC_FOUND)
     # Try to find the actual library file for SHARED IMPORTED target
