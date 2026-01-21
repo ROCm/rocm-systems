@@ -2795,7 +2795,8 @@ def test_torch_trace_profile(binary_handler_profile_rocprof_compute):
     NOTE: Not included in the test suite since this requires PyTorch installation.
     """
     workload_dir = test_utils.get_output_dir(param_id="torch_ops")
-    torch_app_path = workload_dir / "test_torch_app.py"
+    Path(workload_dir).mkdir(parents=True, exist_ok=True)
+    torch_app_path = Path(workload_dir) / "test_torch_app.py"
 
     torch_app_code = """
 import torch
@@ -2873,7 +2874,8 @@ def test_torch_trace_overhead(binary_handler_profile_rocprof_compute):
     Compares execution time with and without the flag to ensure overhead is acceptable.
     NOTE: Not included in the test suite since this requires PyTorch installation.
     """
-    helper_dir = test_utils.get_output_dir(param_id="torch_helper_script")
+    helper_dir = Path(test_utils.get_output_dir(param_id="torch_helper_script"))
+    helper_dir.mkdir(parents=True, exist_ok=True)
     torch_app_path = helper_dir / "test_torch_app.py"
 
     torch_app_code = """
