@@ -52,7 +52,7 @@ namespace hsa
 {
 class AQLPacket;
 };
-namespace SPM
+namespace spm
 {
 /**
  * @brief  SPM counter config contains SPM parameters and counters
@@ -131,15 +131,9 @@ public:
 private:
     // Cache to contain the map of config id handle to spm counter config
     common::Synchronized<std::unordered_map<uint64_t, std::shared_ptr<spm_counter_config>>>
-        _configs;
+                                                           _configs;
+    common::Synchronized<std::set<rocprofiler_agent_id_t>> spm_kfd_agents;
 };
-
-rocprofiler_status_t
-configure_dispatch(rocprofiler_context_id_t                       context_id,
-                   rocprofiler_spm_dispatch_counting_service_cb_t callback,
-                   void*                                          callback_args,
-                   rocprofiler_spm_dispatch_counting_record_cb_t  record_callback,
-                   void*                                          record_callback_args);
 
 SpmCounterController&
 spm_get_controller();
@@ -153,15 +147,12 @@ destroy_spm_counter_profile(uint64_t id);
 std::shared_ptr<spm_counter_config>
 get_spm_counter_config(rocprofiler_spm_counter_config_id_t id);
 
-/**
-A wrapper that invokes the configure disaptch of SpmCounterController
-*/
 rocprofiler_status_t
-configure_spm_dispatch(rocprofiler_context_id_t                       context_id,
-                       rocprofiler_spm_dispatch_counting_service_cb_t callback,
-                       void*                                          callback_data_args,
-                       rocprofiler_spm_dispatch_counting_record_cb_t  record_callback,
-                       void*                                          record_callback_args);
+configure_callback_spm_dispatch(rocprofiler_context_id_t                       context_id,
+                                rocprofiler_spm_dispatch_counting_service_cb_t callback,
+                                void*                                          callback_data_args,
+                                rocprofiler_spm_dispatch_counting_record_cb_t  record_callback,
+                                void* record_callback_args);
 
 bool
 is_spm_explicitly_enabled();
@@ -178,5 +169,5 @@ start_context(const context::context*);
 void
 stop_context(const context::context*);
 
-}  // namespace SPM
+}  // namespace spm
 }  // namespace rocprofiler

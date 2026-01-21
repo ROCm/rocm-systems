@@ -37,15 +37,15 @@ namespace rocprofiler
 namespace aql
 {
 hsa_ven_amd_aqlprofile_id_query_t
-get_query_info(rocprofiler_agent_id_t agent, const counters::Metric& metric)
+get_query_info(rocprofiler_agent_id_t agent, const std::string& block, const std::string& pmc_name)
 {
     auto                     aql_agent = *CHECK_NOTNULL(rocprofiler::agent::get_aql_agent(agent));
     aqlprofile_pmc_profile_t profile   = {.agent = aql_agent, .events = nullptr, .event_count = 0};
-    hsa_ven_amd_aqlprofile_id_query_t query = {metric.block().c_str(), 0, 0};
+    hsa_ven_amd_aqlprofile_id_query_t query = {block.c_str(), 0, 0};
     if(aqlprofile_get_pmc_info(&profile, AQLPROFILE_INFO_BLOCK_ID, &query) != HSA_STATUS_SUCCESS)
     {
-        ROCP_DFATAL << fmt::format("AQL failed to query info for counter {}", metric);
-        throw std::runtime_error(fmt::format("AQL failed to query info for counter {}", metric));
+        ROCP_DFATAL << fmt::format("AQL failed to query info for counter {}", pmc_name);
+        throw std::runtime_error(fmt::format("AQL failed to query info for counter {}", pmc_name));
     }
     return query;
 }

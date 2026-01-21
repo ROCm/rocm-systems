@@ -26,7 +26,7 @@
 
 namespace rocprofiler
 {
-namespace SPM
+namespace spm
 {
 /** @brief Wrapper to aqlprofile functions for SPM
  */
@@ -61,5 +61,5 @@ public:
     void*      handle            = nullptr;
 };
 
-}  // namespace SPM
+}  // namespace spm
 }  // namespace rocprofiler

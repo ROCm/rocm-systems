@@ -20,7 +20,10 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "lib/rocprofiler-sdk/spm/spm_dlsym.hpp"
+#include "lib/rocprofiler-sdk/spm/dlsym.hpp"
+#include "lib/common/logging.hpp"
+
+#include <fmt/format.h>
 
 #include <dlfcn.h>
 #include <atomic>
@@ -31,15 +34,18 @@
 
 namespace rocprofiler
 {
-namespace SPM
+namespace spm
 {
 Dlsym::Dlsym()
 {
-    handle = dlopen("libhsa-amd-aqlprofile64.so", RTLD_NOW | RTLD_LOCAL | RTLD_NOLOAD);
-    if(!handle)
-        handle = dlopen("libhsa-amd-aqlprofile64.so.1", RTLD_NOW | RTLD_LOCAL | RTLD_NOLOAD);
+    handle = dlopen("libhsa-amd-aqlprofile64.so", RTLD_NOLOAD | RTLD_LAZY);
+    if(!handle) handle = dlopen("libhsa-amd-aqlprofile64.so.1", RTLD_NOLOAD | RTLD_LAZY);
 
-    if(!handle) return;
+    if(!handle)
+    {
+        ROCP_CI_LOG(WARNING) << fmt::format("aqlprofile cannot be opened");
+        return;
+    }
 
     create_packets_fn = (CreateFn*) dlsym(handle, "aqlprofile_spm_create_packets");
     delete_packets_fn = (DeleteFn*) dlsym(handle, "aqlprofile_spm_delete_packets");
@@ -54,5 +60,5 @@ Dlsym::~Dlsym()
 {
     if(handle) dlclose(handle);
 }
-}  // namespace SPM
+}  // namespace spm
 }  // namespace rocprofiler

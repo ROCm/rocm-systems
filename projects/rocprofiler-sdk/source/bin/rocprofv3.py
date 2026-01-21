@@ -437,7 +437,7 @@ For attachment profiling of running processes:
         nargs="*",
     )
 
-    spm_options = parser.add_argument_group("Streaming Perfmon options")
+    spm_options = parser.add_argument_group("Streaming Performance Monitor(SPM) options")
 
     add_parser_bool_argument(
         spm_options,
@@ -471,9 +471,9 @@ For attachment profiling of running processes:
 
     spm_options.add_argument(
         "--spm-frequency",
-        help="Frequency in Mhz. This is estimated to shader clock count. Default is set to 500000 in tool.",
+        help="Frequency in Ghz. This is estimated to shader clock count. Default is set to 0.5GHz in tool.",
         default=None,
-        type=int,
+        type=float,
     )
     pc_sampling_options = parser.add_argument_group("PC sampling options")
 
@@ -1679,7 +1679,6 @@ def run(app_args, args, **kwargs):
             not args.spm_beta_enabled
             and os.environ.get("ROCPROFILER_SPM_BETA_ENABLED", None) is None
         ):
-
             fatal_error(
                 "SPM unavailable. The feature is implicitly disabled. To enable it, use --spm-beta-enabled option"
             )
@@ -1697,7 +1696,6 @@ def run(app_args, args, **kwargs):
             )
 
         if args.spm is None:
-
             fatal_error("Please input list of counters to be sampled")
 
         update_env(

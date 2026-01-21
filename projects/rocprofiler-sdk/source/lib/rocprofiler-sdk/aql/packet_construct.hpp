@@ -26,7 +26,7 @@
 #include "lib/rocprofiler-sdk/aql/helpers.hpp"
 #include "lib/rocprofiler-sdk/counters/metrics.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
-#include "lib/rocprofiler-sdk/spm/spm_decode.hpp"
+#include "lib/rocprofiler-sdk/spm/decode.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/core.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
@@ -149,7 +149,7 @@ protected:
 
 private:
     rocprofiler_agent_id_t                   _agent_id{};
-    std::vector<SPM::spm_counter_instance_t> id_map{};
+    std::vector<spm::spm_counter_instance_t> id_map{};
     std::vector<AQLProfileMetric>            _metrics;
     std::vector<aqlprofile_pmc_event_t>      events{};
     std::vector<aqlprofile_spm_parameter_t>  params{};

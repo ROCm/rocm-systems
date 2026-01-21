@@ -39,7 +39,7 @@ namespace rocprofiler
 namespace tool
 {
 constexpr auto type     = domain_type::COUNTER_VALUES;
-constexpr auto spm_type = domain_type::SPM_COUNTER_VALUES;
+constexpr auto spm_type = domain_type::STREAMING_PERFORMANCE_MONITOR_VALUES;
 
 tool_counter_record_t::container_type
 tool_counter_record_t::read() const

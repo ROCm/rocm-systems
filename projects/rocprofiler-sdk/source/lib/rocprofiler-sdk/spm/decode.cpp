@@ -30,8 +30,8 @@
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/counters/id_decode.hpp"
 #include "lib/rocprofiler-sdk/hsa/aql_packet.hpp"
-#include "lib/rocprofiler-sdk/spm/spm_decode.hpp"
-#include "lib/rocprofiler-sdk/spm/spm_dlsym.hpp"
+#include "lib/rocprofiler-sdk/spm/decode.hpp"
+#include "lib/rocprofiler-sdk/spm/dlsym.hpp"
 
 #include <atomic>
 #include <cstdint>
@@ -51,7 +51,7 @@
 
 namespace rocprofiler
 {
-namespace SPM
+namespace spm
 {
 /** @brief Calback for every sample in SPM data buffer
  * [In] timestamp - timestamp of the sample
@@ -85,14 +85,14 @@ decode_cb(uint64_t timestamp, uint64_t value, uint64_t index, int shader_engine,
 void
 aql_data_callback(size_t buffer_id, void* data, size_t data_size, int flags, void* userdata)
 {
-    SPM::counter_vec counters{};
+    spm::counter_vec counters{};
     auto*            spm_packet = static_cast<hsa::SPMPacket*>(userdata);
     if(data_size == 0)
     {
         return;
     }
 
-    auto& desc_v0 = *static_cast<rocprofiler::SPM::spm_desc_v0_t*>(spm_packet->spm_desc.data);
+    auto& desc_v0 = *static_cast<rocprofiler::spm::spm_desc_v0_t*>(spm_packet->spm_desc.data);
     if(!desc_v0.valid()) return;
 
     {
@@ -113,7 +113,7 @@ aql_data_callback(size_t buffer_id, void* data, size_t data_size, int flags, voi
     auto status =
         spm_packet->sym.spm_decode_fn(spm_packet->aql_desc, decode_cb, data, data_size, &counters);
     if(status != HSA_STATUS_SUCCESS) return;
-    auto records = std::vector<rocprofiler_spm_counter_record_t>{};
+    auto records = std::vector<const rocprofiler_spm_counter_record_t*>{};
 
     for(size_t i = 0; i < counters.size(); i++)
     {
@@ -144,7 +144,7 @@ aql_data_callback(size_t buffer_id, void* data, size_t data_size, int flags, voi
             for(size_t it = 0; it < size; it++)
             {
                 // Construct SPM record and add it to the buffer
-                records.emplace_back(rocprofiler_spm_counter_record_t{
+                records.emplace_back(new rocprofiler_spm_counter_record_t{
                     .size = sizeof(rocprofiler_spm_counter_record_t),
                     .id   = instance_id,
                     .agent_id =
@@ -155,13 +155,16 @@ aql_data_callback(size_t buffer_id, void* data, size_t data_size, int flags, voi
         }
     }
     // Return the buffer of SPM records to the tool
-    spm_packet->record_cb(spm_packet->dispatch_data,
+    spm_packet->record_cb(&(spm_packet->dispatch_data),
                           records.data(),
                           records.size(),
                           1 << ROCPROFILER_SPM_RECORD_FLAG_DATA | flags,
                           spm_packet->user_data,
                           spm_packet->record_callback_args);
+    for(auto record : records)
+        delete(record);
+    records.clear();
 }
 
-}  // namespace SPM
+}  // namespace spm
 }  // namespace rocprofiler

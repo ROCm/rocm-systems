@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "lib/rocprofiler-sdk/spm/spm_core.hpp"
+#include "lib/rocprofiler-sdk/spm/core.hpp"
 #include "lib/common/container/stable_vector.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
@@ -29,7 +29,7 @@
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
-#include "lib/rocprofiler-sdk/spm/spm_dispatch_handlers.hpp"
+#include "lib/rocprofiler-sdk/spm/dispatch_handlers.hpp"
 
 #include <hsa/hsa_api_trace.h>
 #include <rocprofiler-sdk/fwd.h>
@@ -55,7 +55,7 @@
 
 namespace rocprofiler
 {
-namespace SPM
+namespace spm
 {
 /**
  * @brief The functions checks if the `ROCPROFILER_SPM_BETA_ENABLED` is set.
@@ -227,28 +227,17 @@ get_spm_counter_config(rocprofiler_spm_counter_config_id_t id)
     }
 }
 
-rocprofiler_status_t
-configure_spm_dispatch(rocprofiler_context_id_t                       context_id,
-                       rocprofiler_spm_dispatch_counting_service_cb_t callback,
-                       void*                                          callback_data_args,
-                       rocprofiler_spm_dispatch_counting_record_cb_t  record_callback,
-                       void*                                          record_callback_args)
-{
-    return configure_dispatch(
-        context_id, callback, callback_data_args, record_callback, record_callback_args);
-}
-
 /** @brief  Configures SPM dispatch for the context
  * Checks for conflicting services
  * Instantiates spm_dispatch_counter_collection_service
  */
 
 rocprofiler_status_t
-configure_dispatch(rocprofiler_context_id_t                       context_id,
-                   rocprofiler_spm_dispatch_counting_service_cb_t callback,
-                   void*                                          callback_args,
-                   rocprofiler_spm_dispatch_counting_record_cb_t  record_callback,
-                   void*                                          record_callback_args)
+configure_callback_spm_dispatch(rocprofiler_context_id_t                       context_id,
+                                rocprofiler_spm_dispatch_counting_service_cb_t callback,
+                                void*                                          callback_args,
+                                rocprofiler_spm_dispatch_counting_record_cb_t  record_callback,
+                                void*                                          record_callback_args)
 {
     auto* ctx_p = rocprofiler::context::get_mutable_registered_context(context_id);
     if(!ctx_p) return ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID;
@@ -263,7 +252,7 @@ configure_dispatch(rocprofiler_context_id_t                       context_id,
     {
         ctx.dispatch_spm =
             std::make_unique<rocprofiler::context::spm_dispatch_counter_collection_service>();
-        ctx.dispatch_spm->callback = std::make_shared<SPM::spm_counter_callback_info>();
+        ctx.dispatch_spm->callback = std::make_shared<spm::spm_counter_callback_info>();
     }
 
     auto& cb                 = ctx.dispatch_spm->callback;
@@ -283,6 +272,7 @@ configure_dispatch(rocprofiler_context_id_t                       context_id,
  * Adds a pre kernel and a post kernel callback
  * Enabled flag is used to check if context has already been enabled
  */
+
 void
 start_context(const context::context* ctx)
 {
@@ -334,10 +324,12 @@ start_context(const context::context* ctx)
             });
     }
 }
+
 /** @brief stop SPM dispatch context
  * Disables serialization
  * Sets Enabled flag to false
  */
+
 void
 stop_context(const context::context* ctx)
 {
@@ -356,6 +348,6 @@ stop_context(const context::context* ctx)
     if(controller) controller->disable_serialization();
 }
 
-}  // namespace SPM
+}  // namespace spm
 
 }  // namespace rocprofiler

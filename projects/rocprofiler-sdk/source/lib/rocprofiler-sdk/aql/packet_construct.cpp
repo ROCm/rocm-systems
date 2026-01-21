@@ -50,7 +50,7 @@ CounterPacketConstruct::CounterPacketConstruct(rocprofiler_agent_id_t           
     // for the counter.
     for(const auto& x : metrics)
     {
-        auto query_info                = get_query_info(_agent, x);
+        auto query_info                = get_query_info(_agent, x.block(), x.name());
         _metrics.emplace_back().metric = x;
         uint64_t event_id              = 0;
         if(!x.event().empty()) event_id = std::stoul(x.event(), nullptr);
@@ -290,18 +290,18 @@ SPMPacketConstruct::SPMPacketConstruct(const rocprofiler_agent_id_t         agen
 : _agent_id(agent_id)
 {
     const auto*  agent       = CHECK_NOTNULL(rocprofiler::agent::get_agent(_agent_id));
-    const double sclk_freq   = agent->max_engine_clk_fcompute * 1E6;  // MHz
+    const double sclk_freq   = agent->max_engine_clk_fcompute * 1E9;  // GHz
     const size_t sclk_period = static_cast<size_t>(std::round(sclk_freq / sample_freq));
 
     params.clear();
-    params.push_back({AQLPROFILE_SPM_PARAMETER_TYPE_BUFFER_SIZE, buffer_size});
+    params.push_back({AQLPROFILE_SPM_PARAMETER_TYPE_BUFFER_SIZE, buffer_size * 1024});
     params.push_back({AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL, sclk_period});
     params.push_back({AQLPROFILE_SPM_PARAMETER_TYPE_TIMEOUT, timeout});
 
     events.clear();
     for(const auto& metric : metrics)
     {
-        auto query_info                = get_query_info(_agent_id, metric);
+        auto query_info                = get_query_info(_agent_id, metric.block(), metric.name());
         _metrics.emplace_back().metric = metric;
 
         auto event       = aqlprofile_pmc_event_t{};
@@ -363,14 +363,14 @@ SPMPacketConstruct::construct_packet(const CoreApiTable& coreapi, const AmdExtTa
     pkt->pool               = std::move(pool);
 
     pkt->spm_desc.size =
-        sizeof(SPM::spm_desc_v0_t) + id_map.size() * sizeof(id_map[0]) + pkt->aql_desc.size;
+        sizeof(spm::spm_desc_v0_t) + id_map.size() * sizeof(id_map[0]) + pkt->aql_desc.size;
 
     pkt->container_desc_data = std::make_shared<std::vector<char>>(pkt->spm_desc.size);
     pkt->spm_desc.data       = pkt->container_desc_data->data();
 
-    auto* desc = static_cast<SPM::spm_desc_v0_t*>(pkt->spm_desc.data);
+    auto* desc = static_cast<spm::spm_desc_v0_t*>(pkt->spm_desc.data);
 
-    *desc               = SPM::spm_desc_v0_t{};
+    *desc               = spm::spm_desc_v0_t{};
     desc->aql_desc_size = pkt->aql_desc.size;
     desc->num_events    = id_map.size();
 

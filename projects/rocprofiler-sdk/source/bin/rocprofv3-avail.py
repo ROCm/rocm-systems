@@ -279,15 +279,12 @@ def info_pc_sampling(args):
         print("\n")
 
 
-def listing(args, spm=False):
+def listing_spm(args):
     from rocprofv3 import avail
 
-    def print_agent_counter(counters, spm_):
+    def print_agent_counter(counters):
         if len(counters) == 0:
-            msg = "No {counter_type} counters supported".format(
-                counter_type="SPM" if spm_ else "PMC"
-            )
-            print("{:30}\n".format(msg))
+            print("{:30}\n".format("No SPM counters supported"))
             return
         names_len = [len(counter.name) for counter in counters]
         names = [
@@ -295,15 +292,11 @@ def listing(args, spm=False):
             for counter in counters
         ]
         columns = get_number_columns(max(names_len))
-        msg = "SPM" if spm_ else "PMC"
-        print("{:30}:\n".format(msg))
+        print("{:30}:\n".format("SPM"))
         for idx in range(0, len(names), columns):
             print("{:30}".format(" ".join(names[idx : (idx + columns)])))
 
-    if spm:
-        agent_counters = avail.get_spm_counters()
-    else:
-        agent_counters = avail.get_counters()
+    agent_spm_counters = avail.get_spm_counters()
     agent_info_map = avail.get_agent_info_map()
 
     for agent, info in dict(sorted(agent_info_map.items())).items():
@@ -317,7 +310,7 @@ def listing(args, spm=False):
                     "GPU", info["logical_node_type_id"], "Name", info["name"]
                 )
             )
-            print_agent_counter(agent_counters[agent], spm)
+            print_agent_counter(agent_spm_counters[agent])
             print("\n")
             break
         elif info["type"] == 2 and args.device is None:
@@ -326,34 +319,113 @@ def listing(args, spm=False):
                     "GPU", info["logical_node_type_id"], "Name", info["name"]
                 )
             )
-            print_agent_counter(agent_counters[agent], spm)
+            print_agent_counter(agent_spm_counters[agent])
             print("\n")
 
 
-def info_pmc(args, spm=False):
+def listing_pmc(args):
     from rocprofv3 import avail
 
-    _args = None
-    if spm:
-        agent_counters = avail.get_spm_counters()
-        _args = args.spm
-    else:
-        agent_counters = avail.get_counters()
-        _args = args.pmc
+    def print_agent_counter(counters):
+        if len(counters) == 0:
+            print("{:30}\n".format("No PMC counters supported"))
+            return
+        names_len = [len(counter.name) for counter in counters]
+        names = [
+            "{name:{width}}".format(name=counter.name, width=max(names_len))
+            for counter in counters
+        ]
+        columns = get_number_columns(max(names_len))
+        print("{:30}:\n".format("PMC"))
+        for idx in range(0, len(names), columns):
+            print("{:30}".format(" ".join(names[idx : (idx + columns)])))
+
+    agent_counters = avail.get_counters()
     agent_info_map = avail.get_agent_info_map()
 
-    def print_pmc_info(_args, pmc_counters):
+    for agent, info in dict(sorted(agent_info_map.items())).items():
+        if (
+            info["type"] == 2
+            and args.device is not None
+            and info["logical_node_type_id"] == args.device
+        ):
+            print(
+                "{:30}:\t{}\n{:30}:\t{}".format(
+                    "GPU", info["logical_node_type_id"], "Name", info["name"]
+                )
+            )
+            print_agent_counter(agent_counters[agent])
+            print("\n")
+            break
+        elif info["type"] == 2 and args.device is None:
+            print(
+                "{:30}:\t{}\n{:30}:\t{}".format(
+                    "GPU", info["logical_node_type_id"], "Name", info["name"]
+                )
+            )
+            print_agent_counter(agent_counters[agent])
+            print("\n")
 
-        if _args is None:
+
+def info_spm(args):
+    from rocprofv3 import avail
+
+    agent_info_map = avail.get_agent_info_map()
+
+    def print_spm_info(_args, agent):
+
+        if not _args.spm:
+            spm_counters = avail.get_spm_counters()[agent]
+            for counter in spm_counters:
+                print(counter)
+                print("\n")
+        else:
+            spm_counters = avail.get_spm_counters()[agent]
+            for spm in _args.spm:
+                for counter in spm_counters:
+                    if spm == counter.get_as_dict()["Counter_Name"]:
+                        print(counter)
+
+    for agent, info in dict(sorted(agent_info_map.items())).items():
+        if (
+            info["type"] == 2
+            and args.device is not None
+            and info["logical_node_type_id"] == args.device
+        ):
+            print(
+                "{}:{}\n{}:{}".format(
+                    "GPU", info["logical_node_type_id"], "Name", info["name"]
+                )
+            )
+            print_spm_info(args, agent)
+            break
+        elif info["type"] == 2 and args.device is None:
+            print(
+                "{}:{}\n{}:{}".format(
+                    "GPU", info["logical_node_type_id"], "Name", info["name"]
+                )
+            )
+            print_spm_info(args, agent)
+
+
+def info_pmc(args):
+    from rocprofv3 import avail
+
+    agent_info_map = avail.get_agent_info_map()
+
+    def print_pmc_info(_args, agent):
+
+        if not _args.pmc:
+            pmc_counters = avail.get_counters()[agent]
             for counter in pmc_counters:
                 print(counter)
                 print("\n")
         else:
-            for pmc in _args:
+            pmc_counters = avail.get_counters()[agent]
+            for pmc in _args.pmc:
                 for counter in pmc_counters:
                     if pmc == counter.get_as_dict()["Counter_Name"]:
                         print(counter)
-                        print("\n")
 
     for agent, info in dict(sorted(agent_info_map.items())).items():
         if (
@@ -366,7 +438,7 @@ def info_pmc(args, spm=False):
                     "GPU", info["logical_node_type_id"], "Name", info["name"]
                 )
             )
-            print_pmc_info(_args, agent_counters[agent])
+            print_pmc_info(args, agent)
             break
         elif info["type"] == 2 and args.device is None:
             print(
@@ -374,16 +446,17 @@ def info_pmc(args, spm=False):
                     "GPU", info["logical_node_type_id"], "Name", info["name"]
                 )
             )
-            print_pmc_info(_args, agent_counters[agent])
+            print_pmc_info(args, agent)
 
 
 def process_info(args):
+
     if args.pmc is None and args.pc_sampling is None and args.spm is None:
-        list_basic_agent(args, True)
+        list_basic_agent(args)
     if args.pmc is not None:
         info_pmc(args)
     if args.spm is not None:
-        info_pmc(args, True)
+        info_spm(args)
     if args.pc_sampling is not None:
         os.environ["ROCPROFILER_PC_SAMPLING_BETA_ENABLED"] = "on"
         info_pc_sampling(args)
@@ -400,9 +473,9 @@ def process_list(args):
     if args.agent:
         list_basic_agent(args, False)
     if args.pmc:
-        listing(args)
+        listing_pmc(args)
     if args.spm:
-        listing(args, True)
+        listing_spm(args)
     if args.pc_sampling:
         os.environ["ROCPROFILER_PC_SAMPLING_BETA_ENABLED"] = "on"
         list_pc_sampling(args)

@@ -66,7 +66,7 @@ findDeviceMetrics(const rocprofiler_agent_t& agent, const std::unordered_set<std
 }
 
 hsa_ven_amd_aqlprofile_id_query_t
-v1_get_query_info(hsa_agent_t agent, const counters::Metric& metric)
+v1_get_query_info(hsa_agent_t agent, const std::string& block, const std::string& pmc_name)
 {
     hsa_ven_amd_aqlprofile_profile_t  profile = {.agent  = agent,
                                                 .type   = HSA_VEN_AMD_AQLPROFILE_EVENT_TYPE_PMC,
@@ -76,12 +76,12 @@ v1_get_query_info(hsa_agent_t agent, const counters::Metric& metric)
                                                 .parameter_count = 0,
                                                 .output_buffer   = {nullptr, 0},
                                                 .command_buffer  = {nullptr, 0}};
-    hsa_ven_amd_aqlprofile_id_query_t query   = {metric.block().c_str(), 0, 0};
+    hsa_ven_amd_aqlprofile_id_query_t query   = {block.c_str(), 0, 0};
     if(hsa_ven_amd_aqlprofile_get_info(&profile, HSA_VEN_AMD_AQLPROFILE_INFO_BLOCK_ID, &query) !=
        HSA_STATUS_SUCCESS)
     {
-        DLOG(FATAL) << fmt::format("AQL failed to query info for counter {}", metric);
-        throw std::runtime_error(fmt::format("AQL failed to query info for counter {}", metric));
+        DLOG(FATAL) << fmt::format("AQL failed to query info for counter {}", pmc_name);
+        throw std::runtime_error(fmt::format("AQL failed to query info for counter {}", pmc_name));
     }
     return query;
 }
@@ -134,7 +134,7 @@ TEST(aql_helpers, get_query_info)
 
         for(auto& metric : metrics)
         {
-            auto query = aql::get_query_info(agent->id, metric);
+            auto query = aql::get_query_info(agent->id, metric.block(), metric.name());
             ROCP_INFO << fmt::format("{},{},{}", query.id, query.name, query.instance_count);
             EXPECT_TRUE(query.name != nullptr);
             EXPECT_TRUE(query.instance_count != 0);
@@ -159,9 +159,9 @@ TEST(aql_helpers, get_query_info_compare_v1)
 
         for(auto& metric : metrics)
         {
-            auto query = aql::get_query_info(agent->id, metric);
-            auto query_v1 =
-                v1_get_query_info(agent::get_agent_cache(agent)->get_hsa_agent(), metric);
+            auto query    = aql::get_query_info(agent->id, metric.block(), metric.name());
+            auto query_v1 = v1_get_query_info(
+                agent::get_agent_cache(agent)->get_hsa_agent(), metric.block(), metric.name());
             // v1 query with hsa_agent
 
             EXPECT_EQ(query.id, query_v1.id);
@@ -184,7 +184,7 @@ TEST(aql_helpers, get_block_counters)
 
         for(auto& metric : metrics)
         {
-            auto query = aql::get_query_info(agent->id, metric);
+            auto query = aql::get_query_info(agent->id, metric.block(), metric.name());
             for(unsigned block_index = 0; block_index < query.instance_count; ++block_index)
             {
                 aqlprofile_pmc_event_t event = {
@@ -215,7 +215,7 @@ TEST(aql_helpers, get_block_counters_compare_v1)
 
         for(auto& metric : metrics)
         {
-            auto query = aql::get_query_info(agent->id, metric);
+            auto query = aql::get_query_info(agent->id, metric.block(), metric.name());
             for(unsigned block_index = 0; block_index < query.instance_count; ++block_index)
             {
                 aqlprofile_pmc_event_t event = {
@@ -250,7 +250,7 @@ TEST(aql_helpers, get_dim_info)
 
         for(auto& metric : metrics)
         {
-            auto query = aql::get_query_info(agent->id, metric);
+            auto query = aql::get_query_info(agent->id, metric.block(), metric.name());
             for(unsigned block_index = 0; block_index < query.instance_count; ++block_index)
             {
                 aqlprofile_pmc_event_t event = {
