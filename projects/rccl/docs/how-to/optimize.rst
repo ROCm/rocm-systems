@@ -4,10 +4,9 @@
 
 .. _rccl-usage-tips:
 
-
-*****************************************
-RCCL usage tips
-*****************************************
+*************************
+Optimize RCCL performance
+*************************
 
 This topic describes some of the more common RCCL extensions, such as NPKit and MSCCL, and provides tips on how to
 configure and customize the application.
@@ -212,11 +211,11 @@ the same OAM) on the MI300X.
 Here are the benchmark results for in-place (where the output buffer is used as
 the input buffer) and out-of-place allreduce bus bandwidth.
 
-.. figure:: ../data/how-to/rccl-usage-tips/in-place_allreduce.png
+.. figure:: ../images/in-place_allreduce.png
     :alt: In-place allreduce benchmark results
     :align: center
 
-.. figure:: ../data/how-to/rccl-usage-tips/out-of-place_allreduce.png
+.. figure:: ../images/out-of-place_allreduce.png
     :alt: Out-of-place allreduce benchmark results
     :align: center
 

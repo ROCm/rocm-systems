@@ -99,7 +99,6 @@ between different library functions.
 .. doxygenstruct:: ncclUniqueId
 
 
-
 Enumerations
 ------------
 

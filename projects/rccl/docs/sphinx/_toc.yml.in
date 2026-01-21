@@ -8,28 +8,33 @@ subtrees:
 - caption: Install
   entries:
   - file: install/installation
-    title: Installation guide
-  - file: install/docker-install
-    title: Running RCCL using Docker
-  - file: install/building-installing
-    title: Building and installing from source
+    title: RCCL installation
 
 - caption: How to
   entries:
+  - file: how-to/integrate-rccl
+    title: Integrate RCCL into your GPU applications
+  - file: how-to/perform-testing
+    title: Perform unit testing
+  - file: how-to/optimize
+    title: Optimize performance
   - file: how-to/using-rccl-tuner-plugin-api
-    title: Using the RCCL Tuner plugin
-  - file: how-to/using-nccl
-    title: Using the NCCL Net plugin
+    title: Use the RCCL Tuner plugin
+  - file: how-to/replayer
+    title: Use the RCCL Replayer
   - file: how-to/troubleshooting-rccl
-    title: Troubleshoot RCCL
-  - file: how-to/rccl-usage-tips
+    title: Troubleshoot
 
-- caption: Examples
+- caption: Concepts
   entries:
-  - url: https://github.com/ROCm/rccl/tree/develop/ext-tuner/example
-    title: RCCL Tuner plugin examples
-  - url: https://github.com/ROCm/rccl/tree/develop/ext-net/example
-    title: NCCL Net plugin examples
+  - file: concepts/architecture
+    title: High-level architecture
+  - file: concepts/operations
+    title: Collective operations
+  - file: concepts/xgmi
+    title: xGMI integration
+  - file: concepts/primitive-tests
+    title: Primitive tests
 
 - caption: API reference
   entries:
