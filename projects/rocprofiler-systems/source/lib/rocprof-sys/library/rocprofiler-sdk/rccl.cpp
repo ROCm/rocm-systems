@@ -78,7 +78,7 @@ write_perfetto_counter_track(uint64_t _val, uint64_t _begin_ts, uint64_t _end_ts
 
 template <typename Track>
 void
-cache_rccl_comm_data_events(const uint32_t device_id, size_t bytes, uint64_t timestamp_ns)
+cache_rccl_comm_data_events(size_t bytes, uint64_t timestamp_ns)
 {
     static std::mutex _mutex{};
     static uint64_t   cumulative_bytes = 0;
@@ -93,6 +93,7 @@ cache_rccl_comm_data_events(const uint32_t device_id, size_t bytes, uint64_t tim
     const size_t      correlation_id  = 0;
     const std::string call_stack      = "{}";
     const std::string line_info       = "{}";
+    const uint32_t    device_id       = 0;
 
     trace_cache::get_buffer_storage().store(trace_cache::pmc_event_with_sample{
         static_cast<size_t>(category_enum_id<category::comm_data>::value),
@@ -207,9 +208,9 @@ tool_tracing_callback_rccl(rocprofiler_callback_tracing_record_t record,
         if(size > 0)
         {
             if(is_send)
-                cache_rccl_comm_data_events<rccl_send>(0, size, end_ts);
+                cache_rccl_comm_data_events<rccl_send>(size, end_ts);
             else
-                cache_rccl_comm_data_events<rccl_recv>(0, size, end_ts);
+                cache_rccl_comm_data_events<rccl_recv>(size, end_ts);
 
             if(config::get_use_perfetto())
             {
