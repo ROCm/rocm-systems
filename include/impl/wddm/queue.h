@@ -252,10 +252,8 @@ private:
   static void AqlToPm4Thread(ComputeQueue *queue);
 
   uint64_t max_scratch_waves_;
-  uint64_t dispatch_waves_;
   uint64_t scratch_size_per_wave_;
   uint64_t scratch_size_;
-  uint64_t total_scratch_size_;
   void *scratch_base_;
   uint32_t scratch_mem_alignment_size_;
   GpuMemoryHandle scratch_mem_;
