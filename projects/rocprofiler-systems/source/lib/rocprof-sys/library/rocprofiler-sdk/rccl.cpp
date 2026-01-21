@@ -208,16 +208,14 @@ tool_tracing_callback_rccl(rocprofiler_callback_tracing_record_t record,
         if(size > 0)
         {
             if(is_send)
-                cache_rccl_comm_data_events<rccl_send>(size, end_ts);
-            else
-                cache_rccl_comm_data_events<rccl_recv>(size, end_ts);
-
-            if(config::get_use_perfetto())
             {
-                if(is_send)
-                    write_perfetto_counter_track<rccl_send>(size, begin_ts, end_ts);
-                else
-                    write_perfetto_counter_track<rccl_recv>(size, begin_ts, end_ts);
+                cache_rccl_comm_data_events<rccl_send>(size, end_ts);
+                write_perfetto_counter_track<rccl_send>(size, begin_ts, end_ts);
+            }
+            else
+            {
+                cache_rccl_comm_data_events<rccl_recv>(size, end_ts);
+                write_perfetto_counter_track<rccl_recv>(size, begin_ts, end_ts);
             }
         }
     }
