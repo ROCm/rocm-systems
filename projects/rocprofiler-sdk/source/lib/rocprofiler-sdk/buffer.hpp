@@ -32,11 +32,9 @@
 #include <fmt/format.h>
 
 #include <sys/types.h>
+#include <array>
 #include <atomic>
-#include <condition_variable>
 #include <cstdint>
-#include <deque>
-#include <mutex>
 #include <optional>
 
 namespace rocprofiler
@@ -45,33 +43,27 @@ namespace buffer
 {
 struct instance
 {
-    using buffer_t = common::container::record_header_buffer;
+    using buffer_t                       = common::container::record_header_buffer;
+    static constexpr auto size           = 2;  // double buffering
+    static constexpr auto sync_wait_usec = std::chrono::microseconds{10};
 
-    // Buffer pool design:
-    // - buffers: pool of empty buffers ready for writing, front() is active
-    // - flushing: FIFO queue of buffers awaiting/undergoing flush
-    // When active buffer fills, it moves to flushing and flush task is launched.
-    // Flush task processes buffers in order and returns them to the pool.
-    mutable std::deque<buffer_t>    buffers       = {};       // empty buffers, front() is active
-    mutable std::deque<buffer_t>    flushing      = {};       // buffers being flushed (FIFO)
-    mutable std::mutex              mutex         = {};       // protects both deques
-    mutable std::condition_variable buffer_avail  = {};       // signaled when buffer returned
-    mutable std::atomic<bool>       flush_running = {false};  // flush task active
-    mutable std::atomic<uint64_t>   drop_count    = {};
-    size_t                          buffer_size   = 0;  // size of each buffer
-    size_t                          pool_size     = 2;  // number of buffers in pool
-    uint64_t                        watermark     = 0;
-    uint64_t                        context_id    = 0;  // rocprofiler_context_id_t value
-    uint64_t                        buffer_id     = 0;  // rocprofiler_buffer_id_t value
-    uint64_t                        task_group_id = 0;  // thread-pool assignment
-    rocprofiler_buffer_tracing_cb_t callback      = nullptr;
-    void*                           callback_data = nullptr;
-    rocprofiler_buffer_policy_t     policy        = ROCPROFILER_BUFFER_POLICY_NONE;
+    mutable std::array<buffer_t, size>         buffers       = {};
+    mutable std::array<std::atomic_flag, size> syncer        = {false, false};  // r/w lock
+    mutable std::atomic<uint32_t>              buffer_idx    = {};              // array index
+    mutable std::atomic<uint64_t>              drop_count    = {};
+    uint64_t                                   watermark     = 0;
+    uint64_t                                   context_id    = 0;  // rocprofiler_context_id_t value
+    uint64_t                                   buffer_id     = 0;  // rocprofiler_buffer_id_t value
+    uint64_t                                   task_group_id = 0;  // thread-pool assignment
+    rocprofiler_buffer_tracing_cb_t            callback      = nullptr;
+    void*                                      callback_data = nullptr;
+    rocprofiler_buffer_policy_t                policy        = ROCPROFILER_BUFFER_POLICY_NONE;
 
     template <typename Tp>
     bool emplace(uint32_t, uint32_t, Tp&);
 
     buffer_t& get_internal_buffer();
+    buffer_t& get_internal_buffer(size_t);
 };
 
 using unique_buffer_vec_t = common::container::stable_vector<std::unique_ptr<instance>, 4>;
@@ -96,19 +88,20 @@ flush(rocprofiler_buffer_id_t buffer_id, bool wait);
 
 rocprofiler_status_t
 flush(uint64_t buffer_idx, bool wait);
-
-// Internal: launch flush task if not already running
-void
-launch_flush_task(rocprofiler_buffer_id_t buffer_id);
 }  // namespace buffer
 }  // namespace rocprofiler
 
 inline rocprofiler::buffer::instance::buffer_t&
 rocprofiler::buffer::instance::get_internal_buffer()
 {
-    // Return the active buffer (front of the pool)
-    // Caller must hold mutex
-    return buffers.front();
+    auto idx = buffer_idx.load() % buffers.size();
+    return buffers.at(idx);
+}
+
+inline rocprofiler::buffer::instance::buffer_t&
+rocprofiler::buffer::instance::get_internal_buffer(size_t idx)
+{
+    return buffers.at(idx % buffers.size());
 }
 
 inline rocprofiler::buffer::instance*
@@ -127,86 +120,75 @@ template <typename Tp>
 inline bool
 rocprofiler::buffer::instance::emplace(uint32_t category, uint32_t kind, Tp& value)
 {
-    auto lock = std::unique_lock<std::mutex>{mutex};
+    struct local_sync
+    {
+        local_sync(uint64_t buffer_id, uint64_t idx, std::atomic_flag& flag)
+        : m_flag{flag}
+        {
+            if(m_flag.test_and_set())
+            {
+                ROCP_INFO << fmt::format(
+                    "waiting for buffer flush to complete [id={}, index={}]...", buffer_id, idx);
+                while(m_flag.test_and_set())
+                {
+                    ROCP_TRACE << fmt::format(
+                        "waiting for buffer flush to complete [id={}, index={}]...",
+                        buffer_id,
+                        idx);
+                    std::this_thread::yield();
+                    std::this_thread::sleep_for(sync_wait_usec);
+                }
+            }
+        }
 
-    // Helper to launch flush task with unlock/relock pattern
-    auto trigger_flush = [this, &lock](bool relock) {
-        lock.unlock();
-        buffer::launch_flush_task(rocprofiler_buffer_id_t{buffer_id});
-        if(relock) lock.lock();
+        ~local_sync() { m_flag.clear(); }
+
+        std::atomic_flag& m_flag;
     };
 
-    // Wait for a buffer to be available if pool is empty
-    while(buffers.empty())
+    // get the index of the current buffer
+    auto get_idx = [this]() { return buffer_idx.load(std::memory_order_acquire) % buffers.size(); };
+    auto idx     = get_idx();
+    auto success = false;
     {
-        if(policy != ROCPROFILER_BUFFER_POLICY_LOSSLESS)
+        auto _syncer = local_sync{buffer_id, idx, syncer.at(idx)};  // ensure buffer not flushing
+        success      = buffers.at(idx).emplace(category, kind, value);
+    }
+
+    if(!success)
+    {
+        if(buffers.at(idx).capacity() < sizeof(value))
         {
-            // LOSSY policy: drop the record
-            ++drop_count;
+            ROCP_CI_LOG(ERROR) << fmt::format(
+                "buffer {} too small (size={}) to hold an object of type {} with size {}",
+                buffer_id,
+                buffers.at(idx).capacity(),
+                common::cxx_demangle(typeid(value).name()),
+                sizeof(value));
             return false;
         }
-        // LOSSLESS policy: wait for a buffer to be returned from flush
-        buffer_avail.wait(lock);
-    }
 
-    // Try to write to the active buffer (front of pool)
-    bool success = buffers.front().emplace(category, kind, value);
-
-    if(success)
-    {
-        // Check watermark - if reached, move buffer to flush queue
-        if(buffers.front().count() >= watermark)
+        if(policy == ROCPROFILER_BUFFER_POLICY_LOSSLESS)
         {
-            flushing.push_back(std::move(buffers.front()));
-            buffers.pop_front();
-            trigger_flush(false);
+            // blocks until buffer is flushed
+            do
+            {
+                buffer::flush(buffer_id, true);
+                idx          = get_idx();
+                auto _syncer = local_sync{buffer_id, idx, syncer.at(idx)};  // wait for flush
+                success      = buffers.at(idx).emplace(category, kind, value);
+            } while(!success);
         }
-        return true;
-    }
-
-    // Emplace failed - check why
-    if(buffer_size < sizeof(value))
-    {
-        // Buffer too small for this record type
-        ROCP_CI_LOG(ERROR) << fmt::format(
-            "buffer {} too small (size={}) to hold an object of type {} with size {}",
-            buffer_id,
-            buffer_size,
-            common::cxx_demangle(typeid(value).name()),
-            sizeof(value));
-        return false;
-    }
-
-    // Buffer is full - move to flush queue and try next buffer
-    flushing.push_back(std::move(buffers.front()));
-    buffers.pop_front();
-
-    // Retry with next available buffer (may need to wait for flush to complete)
-    while(buffers.empty())
-    {
-        if(policy != ROCPROFILER_BUFFER_POLICY_LOSSLESS)
+        else
         {
-            // LOSSY policy: launch flush and drop the record
-            trigger_flush(false);
             ++drop_count;
-            return false;
-        }
-        // LOSSLESS policy: launch flush, then wait for buffer to be returned
-        trigger_flush(true);
-        if(buffers.empty())
-        {
-            buffer_avail.wait(lock);
         }
     }
 
-    // Retry emplace with the new active buffer
-    success = buffers.front().emplace(category, kind, value);
-
-    if(success && buffers.front().count() >= watermark)
+    if(buffers.at(idx).count() >= watermark)
     {
-        flushing.push_back(std::move(buffers.front()));
-        buffers.pop_front();
-        trigger_flush(false);
+        // flush without syncing
+        buffer::flush(buffer_id, false);
     }
 
     return success;

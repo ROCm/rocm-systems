@@ -132,143 +132,6 @@ allocate_buffer()
     return rocprofiler_buffer_id_t{_idx};
 }
 
-void
-launch_flush_task(rocprofiler_buffer_id_t buffer_id)
-{
-    if(registration::get_fini_status() > 0)
-    {
-        ROCP_ERROR << "ignoring rocprofiler buffer flush task launch (handle=" << buffer_id.handle
-                   << ") after finalization";
-        return;
-    }
-
-    auto offset = get_buffer_offset();
-
-    if(!is_valid_buffer_id(buffer_id)) return;
-
-    auto* buff = get_buffer(buffer_id);
-    if(!buff) return;
-
-    // Check if we should launch a flush task (under lock)
-    {
-        auto lock = std::unique_lock<std::mutex>{buff->mutex};
-
-        // Already running - no need to launch another
-        if(buff->flush_running.load(std::memory_order_relaxed)) return;
-
-        // Nothing to flush
-        if(buff->flushing.empty()) return;
-
-        // Mark as running before releasing lock
-        buff->flush_running.store(true, std::memory_order_relaxed);
-    }
-
-    auto* task_group =
-        internal_threading::get_task_group(rocprofiler_callback_thread_t{buff->task_group_id});
-
-    ROCP_FATAL_IF(!task_group)
-        << "buffer (" << buffer_id.handle
-        << ") flush request received after the task group for handling request was destroyed";
-
-    ROCP_INFO << fmt::format("launching buffer flush task [id={}]...", buffer_id.handle);
-
-    auto _task = [buffer_id, offset]() {
-        ROCP_ERROR_IF(registration::get_fini_status() > 0)
-            << "executing buffer (" << buffer_id.handle << ") flush task during finalization!";
-
-        auto& buff_v = CHECK_NOTNULL(get_buffers())->at(buffer_id.handle - offset);
-
-        // Process all buffers in the flushing queue
-        while(true)
-        {
-            instance::buffer_t buf_to_flush;
-
-            // Pop a buffer from the flushing queue
-            {
-                auto lock = std::unique_lock<std::mutex>{buff_v->mutex};
-
-                if(buff_v->flushing.empty())
-                {
-                    // No more buffers to flush - mark task as not running
-                    buff_v->flush_running.store(false, std::memory_order_relaxed);
-                    ROCP_INFO << fmt::format("flush task complete [id={}]", buffer_id.handle);
-                    return;
-                }
-
-                buf_to_flush = std::move(buff_v->flushing.front());
-                buff_v->flushing.pop_front();
-            }
-
-            // Process buffer without holding lock
-            if(!buf_to_flush.is_empty())
-            {
-                constexpr auto clear_buffer_v = std::true_type{};
-
-                auto num_processed = buf_to_flush.process_record_headers(
-                    clear_buffer_v, [&buffer_id, &offset, &buff_v](auto&& _headers) {
-                        try
-                        {
-                            if(buff_v->callback)
-                            {
-                                ROCP_INFO << fmt::format(
-                                    "invoking buffer callback for {} records [buffer_id={}, "
-                                    "offset={}]",
-                                    _headers.size(),
-                                    buffer_id.handle,
-                                    offset);
-                                buff_v->callback(rocprofiler_context_id_t{buff_v->context_id},
-                                                 rocprofiler_buffer_id_t{buff_v->buffer_id},
-                                                 _headers.data(),
-                                                 _headers.size(),
-                                                 buff_v->callback_data,
-                                                 buff_v->drop_count);
-                            }
-                            else
-                            {
-                                ROCP_TRACE << fmt::format(
-                                    "no buffer callback for {} records [buffer_id={}, offset={}]",
-                                    _headers.size(),
-                                    buffer_id.handle,
-                                    offset);
-                            }
-                        } catch(std::exception& e)
-                        {
-                            ROCP_CI_LOG(ERROR) << fmt::format(
-                                "buffer callback threw an exception: {} [buffer_id={}, "
-                                "offset={}, context_id={}, callback={}, callback_data={}, "
-                                "records={}, first_record_ptr={}, drop_count={}]",
-                                e.what(),
-                                buffer_id.handle,
-                                offset,
-                                buff_v->context_id,
-                                reinterpret_cast<const void*>(buff_v->callback),
-                                buff_v->callback_data,
-                                _headers.size(),
-                                (!_headers.empty() ? static_cast<const void*>(&_headers[0])
-                                                   : nullptr),
-                                buff_v->drop_count.load());
-                        }
-                    });
-
-                ROCP_INFO << fmt::format(
-                    "completed buffer callback for {} records [buffer_id={}, offset={}]",
-                    num_processed,
-                    buffer_id.handle,
-                    offset);
-            }
-
-            // Return buffer to pool and notify waiting writers
-            {
-                auto lock = std::unique_lock<std::mutex>{buff_v->mutex};
-                buff_v->buffers.push_back(std::move(buf_to_flush));
-            }
-            buff_v->buffer_avail.notify_all();
-        }
-    };
-
-    task_group->exec(std::move(_task));
-}
-
 rocprofiler_status_t
 flush(rocprofiler_buffer_id_t buffer_id, bool wait)
 {
@@ -279,12 +142,14 @@ flush(rocprofiler_buffer_id_t buffer_id, bool wait)
         return ROCPROFILER_STATUS_ERROR_FINALIZED;
     }
 
-    // During finalization, always wait
     if(registration::get_fini_status() < 0 && !wait) wait = true;
+
+    auto offset = get_buffer_offset();
 
     if(!is_valid_buffer_id(buffer_id)) return ROCPROFILER_STATUS_ERROR_BUFFER_NOT_FOUND;
 
     auto* buff = get_buffer(buffer_id);
+
     if(!buff) return ROCPROFILER_STATUS_ERROR_BUFFER_NOT_FOUND;
 
     auto* task_group =
@@ -294,25 +159,111 @@ flush(rocprofiler_buffer_id_t buffer_id, bool wait)
         << "buffer (" << buffer_id.handle
         << ") flush request received after the task group for handling request was destroyed";
 
-    ROCP_INFO << fmt::format("executing buffer flush [id={}, wait={}]...", buffer_id.handle, wait);
+    if(wait) task_group->wait();
 
-    // Move current active buffer to flushing queue (if it has data)
+    auto idx = buff->buffer_idx++;
+    idx %= buff->buffers.size();
+
+    ROCP_INFO << fmt::format("executing buffer flush [id={}, index={}]...", buffer_id.handle, idx);
+
+    // buffer is currently being flushed or destroyed
+    if(buff->syncer.at(idx).test_and_set())
     {
-        auto lock = std::unique_lock<std::mutex>{buff->mutex};
-
-        if(!buff->buffers.empty() && !buff->buffers.front().is_empty())
+        ROCP_INFO << fmt::format(
+            "waiting for buffer flush to complete [id={}, index={}]...", buffer_id.handle, idx);
+        if(!wait) return ROCPROFILER_STATUS_ERROR_BUFFER_BUSY;
+        while(buff->syncer.at(idx).test_and_set())
         {
-            buff->flushing.push_back(std::move(buff->buffers.front()));
-            buff->buffers.pop_front();
+            ROCP_TRACE << fmt::format(
+                "waiting for buffer flush to complete [id={}, index={}]...", buffer_id.handle, idx);
+            std::this_thread::yield();
+            std::this_thread::sleep_for(buff->sync_wait_usec);
         }
     }
 
-    // Launch flush task (will check if already running internally)
-    launch_flush_task(buffer_id);
+    auto _task = [buffer_id, idx, offset]() {
+        ROCP_ERROR_IF(registration::get_fini_status() > 0)
+            << "executing buffer (" << buffer_id.handle << ") flush task finalization!";
 
+        auto& buff_v          = CHECK_NOTNULL(get_buffers())->at(buffer_id.handle - offset);
+        auto& buff_internal_v = buff_v->get_internal_buffer(idx);
+
+        if(!buff_internal_v.is_empty())
+        {
+            // designates that buffer should be cleared after functor is invoked
+            constexpr auto clear_buffer_v = std::true_type{};
+
+            // invoke the callback within the scoped lock of process_record_headers.
+            auto num_processed = buff_internal_v.process_record_headers(
+                clear_buffer_v, [&buffer_id, &idx, &offset, &buff_v](auto&& _headers) {
+                    // invoke buffer callback
+                    try
+                    {
+                        if(buff_v->callback)
+                        {
+                            ROCP_INFO << fmt::format("invoking buffer callback for {} records "
+                                                     "[buffer_id={}, idx={}, offset={}]",
+                                                     _headers.size(),
+                                                     buffer_id.handle,
+                                                     idx,
+                                                     offset);
+                            buff_v->callback(rocprofiler_context_id_t{buff_v->context_id},
+                                             rocprofiler_buffer_id_t{buff_v->buffer_id},
+                                             _headers.data(),
+                                             _headers.size(),
+                                             buff_v->callback_data,
+                                             buff_v->drop_count);
+                        }
+                        else
+                        {
+                            ROCP_TRACE << fmt::format("no buffer callback for {} records "
+                                                      "[buffer_id={}, idx={}, offset={}]",
+                                                      _headers.size(),
+                                                      buffer_id.handle,
+                                                      idx,
+                                                      offset);
+                        }
+
+                    } catch(std::exception& e)
+                    {
+                        ROCP_CI_LOG(ERROR) << fmt::format(
+                            "buffer callback threw an exception: {} [buffer_id={}, idx={}, "
+                            "offset={}, context_id={}, callback={}, callback_data={}, records={}, "
+                            "first_record_ptr={}, drop_count={}]",
+                            e.what(),
+                            buffer_id.handle,
+                            idx,
+                            offset,
+                            buff_v->context_id,
+                            reinterpret_cast<const void*>(buff_v->callback),
+                            buff_v->callback_data,
+                            _headers.size(),
+                            (!_headers.empty() ? static_cast<const void*>(&_headers[0]) : nullptr),
+                            buff_v->drop_count.load());
+                    }
+                });
+
+            ROCP_INFO << fmt::format(
+                "completed buffer callback for {} records [buffer_id={}, idx={}, offset={}]",
+                num_processed,
+                buffer_id.handle,
+                idx,
+                offset);
+        }
+        else
+        {
+            ROCP_INFO << "buffer at " << buffer_id.handle << " is empty...";
+        }
+
+        ROCP_INFO << fmt::format(
+            "completed buffer flush [id={}, index={}]...", buffer_id.handle, idx);
+        buff_v->syncer.at(idx).clear();
+    };
+
+    task_group->exec(std::move(_task));
     if(wait)
     {
-        task_group->wait();
+        task_group->join();
     }
 
     return ROCPROFILER_STATUS_SUCCESS;
@@ -348,14 +299,10 @@ rocprofiler_create_buffer(rocprofiler_context_id_t        context,
     auto& buff = CHECK_NOTNULL(rocprofiler::buffer::get_buffers())
                      ->at(opt_buff_id->handle - rocprofiler::buffer::get_buffer_offset());
 
-    // Initialize the buffer pool (default 2 buffers)
-    buff->buffer_size = size;
-    buff->pool_size   = 2;
-    for(size_t i = 0; i < buff->pool_size; ++i)
-    {
-        buff->buffers.emplace_back();
-        buff->buffers.back().allocate(size);
-    }
+    // allocate the buffers. if it is lossless, we allocate a second buffer to store data while
+    // other buffer is being flushed
+    buff->buffers.front().allocate(size);
+    if(action == ROCPROFILER_BUFFER_POLICY_LOSSLESS) buff->buffers.back().allocate(size);
 
     buff->watermark     = watermark;
     buff->policy        = action;
@@ -363,6 +310,7 @@ rocprofiler_create_buffer(rocprofiler_context_id_t        context,
     buff->callback_data = callback_data;
     buff->context_id    = context.handle;
     buff->buffer_id     = buffer_id->handle;
+    buff->buffer_idx    = 0;
 
     return ROCPROFILER_STATUS_SUCCESS;
 }
@@ -385,34 +333,23 @@ rocprofiler_destroy_buffer(rocprofiler_buffer_id_t buffer_id)
     if(!rocprofiler::buffer::is_valid_buffer_id(buffer_id))
         return ROCPROFILER_STATUS_ERROR_BUFFER_NOT_FOUND;
 
-    auto  offset       = rocprofiler::buffer::get_buffer_offset();
-    auto* buffers_list = CHECK_NOTNULL(rocprofiler::buffer::get_buffers());
-    auto& buff         = buffers_list->at(buffer_id.handle - offset);
+    auto  offset  = rocprofiler::buffer::get_buffer_offset();
+    auto* buffers = CHECK_NOTNULL(rocprofiler::buffer::get_buffers());
+    auto& buff    = buffers->at(buffer_id.handle - offset);
 
     if(!buff) return ROCPROFILER_STATUS_ERROR_BUFFER_NOT_FOUND;
 
-    // Try to acquire the mutex (non-blocking)
-    auto lock = std::unique_lock<std::mutex>{buff->mutex, std::try_to_lock};
-    if(!lock.owns_lock())
+    // buffer is currently being flushed or destroyed
+    for(auto& itr : buff->syncer)
     {
-        return ROCPROFILER_STATUS_ERROR_BUFFER_BUSY;
+        if(itr.test_and_set()) return ROCPROFILER_STATUS_ERROR_BUFFER_BUSY;
     }
 
-    // Check if flush is in progress
-    if(buff->flush_running.load(std::memory_order_relaxed) || !buff->flushing.empty())
-    {
-        return ROCPROFILER_STATUS_ERROR_BUFFER_BUSY;
-    }
+    for(auto& itr : buff->buffers)
+        itr.reset();
 
-    // Reset all buffers in the pool
-    for(auto& buf : buff->buffers)
-    {
-        buf.reset();
-    }
-    buff->buffers.clear();
-    buff->flushing.clear();
-
-    lock.unlock();
+    for(auto& itr : buff->syncer)
+        itr.clear();
 
     buff.reset();
 
