@@ -127,15 +127,15 @@ Mi200Factory::Mi200Factory(const AgentInfo* agent_info)
             case SqCounterBlockId: block_info->event_id_max = 303; break;
             case TcpCounterBlockId:
                 block_info->event_id_max = 87;
-                ROCP_FATAL_IF(agent_info->se_num * block_info->instance_count !=
+                ROCP_FATAL_IF(agent_info->se_per_xcc() * block_info->instance_count !=
                               cu_block_delay_table_size)
                     << fmt::format("Mismatch in CU block delay table size. Expected {}, got {}. "
-                                   "agent-{}: {}. agent SEs: {}, block instances: {}",
-                                   agent_info->se_num * block_info->instance_count,
+                                   "agent-{}: {}. agent SE/XCC: {}, block instances: {}",
+                                   agent_info->se_per_xcc() * block_info->instance_count,
                                    cu_block_delay_table_size,
                                    agent_info->dev_index,
                                    agent_info->name,
-                                   agent_info->se_num,
+                                   agent_info->se_per_xcc(),
                                    block_info->instance_count);
                 break;
             case TccCounterBlockId:
