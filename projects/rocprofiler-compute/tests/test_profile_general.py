@@ -23,6 +23,7 @@
 
 ##############################################################################
 
+import importlib.util
 import inspect
 import os
 import re
@@ -2781,26 +2782,20 @@ def test_iteration_multiplexing_all_counter_accuracy(
     )
 
 
+skip_if_no_torch = pytest.mark.skipif(
+    importlib.util.find_spec("torch") is None, reason="torch is required for this test"
+)
+
+
+@skip_if_no_torch
 def test_torch_operators_profile(binary_handler_profile_rocprof_compute):
     """
     Test profiling a PyTorch application with --torch-operators option.
     Verifies that all required files are generated and counter values are valid.
     NOTE: Not included in the test suite since this requires PyTorch installation.
     """
-    pytest.importorskip(
-        "torch", reason="Skipping torch test since PyTorch is not installed"
-    )
     workload_dir = test_utils.get_output_dir(param_id="torch_ops")
-
-    REPO_ROOT = Path(__file__).resolve().parents[2]
-    BUILD_DIR = Path(
-        os.environ.get("ROCPROFILER_COMPUTE_BUILD_DIR", REPO_ROOT / "build")
-    )
-    BUILD_DIR.mkdir(parents=True, exist_ok=True)
-    # Create a simple torch app for testing
-    helper_dir = BUILD_DIR / "tmp" / "torch_ops"
-    helper_dir.mkdir(parents=True, exist_ok=True)
-    torch_app_path = helper_dir / "test_torch_app.py"
+    torch_app_path = workload_dir / "test_torch_app.py"
 
     torch_app_code = """
 import torch
@@ -2871,21 +2866,14 @@ if __name__ == "__main__":
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
+@skip_if_no_torch
 def test_torch_operators_overhead(binary_handler_profile_rocprof_compute):
     """
     Measure overhead introduced by --torch-operators flag.
     Compares execution time with and without the flag to ensure overhead is acceptable.
     NOTE: Not included in the test suite since this requires PyTorch installation.
     """
-    pytest.importorskip("torch", reason="PyTorch required for overhead test")
-
-    REPO_ROOT = Path(__file__).resolve().parents[2]
-    BUILD_DIR = Path(
-        os.environ.get("ROCPROFILER_COMPUTE_BUILD_DIR", REPO_ROOT / "build")
-    )
-    BUILD_DIR.mkdir(parents=True, exist_ok=True)
-    helper_dir = BUILD_DIR / "tmp" / "torch_ops"
-    helper_dir.mkdir(parents=True, exist_ok=True)
+    helper_dir = test_utils.get_output_dir(param_id="torch_helper_script")
     torch_app_path = helper_dir / "test_torch_app.py"
 
     torch_app_code = """
@@ -2927,7 +2915,6 @@ if __name__ == "__main__":
 
     # Run WITHOUT --torch-operators (baseline)
     workload_dir_baseline = test_utils.get_output_dir(param_id="torch_baseline")
-    import time
 
     start_baseline = time.time()
     returncode_baseline = binary_handler_profile_rocprof_compute(
