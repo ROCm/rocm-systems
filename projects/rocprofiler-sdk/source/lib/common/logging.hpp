@@ -26,8 +26,13 @@
 
 #include <glog/logging.h>
 
+// logging statements should use fmt format strings
+#include <fmt/format.h>
+#include <fmt/ranges.h>
+
 #include <cstdint>
 #include <optional>
+#include <string>
 #include <string_view>
 
 #define ROCP_LOG_LEVEL_TRACE   4
