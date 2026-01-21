@@ -181,11 +181,7 @@ class Fn:
   def __iter__(self):
     return iter((self.coll, self.algo, self.proto, self.redop, self.ty, self.acc, self.pipeline, self.unroll))
 
-def calc_unroll_and_pipeline_for_local_arch():
-
-  if not is_local_arch_only:
-    return (all_unrolls, all_pipelines)
-
+def get_gfx_targets():
   rocminfo_path = os.environ.get('ROCM_PATH') + "/bin/rocminfo"
 
   res = subprocess.run([rocminfo_path], stdout=subprocess.PIPE, universal_newlines=True)
@@ -205,10 +201,22 @@ def calc_unroll_and_pipeline_for_local_arch():
       cu_count = int(line.split(':')[-1].strip())
       gfx_targets[(curr_name, cu_count)] = None
       curr_name = None
+  return list(gfx_targets.keys())
+
+def compiling_for_arch(arch):
+  gfx_targets = get_gfx_targets()
+  for gfx_name, cu_count in gfx_targets:
+    if gfx_name == arch:
+      return True
+  return False
+
+def calc_unroll_and_pipeline_for_local_arch():
+  if not is_local_arch_only:
+    return (all_unrolls, all_pipelines)
 
   # We want to remove duplicates but cannot use a dictionary since same gfx name can have different cu counts
   # Use (gfx_name, cu_count) as key for dictionary and convert it to list here
-  gfx_targets = list(gfx_targets.keys())
+  gfx_targets = get_gfx_targets()
   
   # Homogeneous system is required to build for only 1 variant of unroll factor (except for gfx950)
   if len(gfx_targets) == 1:
@@ -381,8 +389,7 @@ with open(os.path.join(gensrc, "device_table.h"), "w") as f:
   print("-- Generating %s" % os.path.join(gensrc, "device_table.h"))
   out = f.write
 
-  if is_ifc: func_declaration = "__device__ void"
-  else: func_declaration = "__device__ __attribute__((noinline)) void"
+  func_declaration = "__device__ void"
 
   for fn in primary_funcs:
     sym = paste("_", "ncclDevFunc", *fn)
@@ -410,7 +417,7 @@ with open(os.path.join(gensrc, "device_table.h"), "w") as f:
     out("nullptr};\n")
     out("\n")
 
-  if not is_ifc:
+  if not is_ifc or compiling_for_arch("gfx950"):
     for unroll in all_unrolls:
       out(f"template<unsigned short f, unsigned short l>\n"
           f"struct Caller{unroll} {{\n"
