@@ -186,7 +186,7 @@ class Event {
 
 class EventDD : public Event {
  public:
-  explicit EventDD(unsigned int flags) : Event(flags) {}
+  explicit EventDD(uint32_t flags) : Event(flags) {}
   ~EventDD() override = default;
 
   bool awaitEventCompletion() override;

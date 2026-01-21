@@ -35,12 +35,7 @@ static std::unordered_set<hipEvent_t> eventSet;
 // ================================================================================================
 bool Event::ready() {
   // Check HW status of the ROCcrl event. Note: not all ROCclr modes support HW status
-  if (CheckHwEvent()) {
-    return true;
-  }
-
-  const int status = event_->status();
-  if (status == CL_COMPLETE) {
+  if (CheckHwEvent() || event_->status() == CL_COMPLETE) {
     return true;
   }
 
@@ -79,7 +74,7 @@ hipError_t Event::synchronize() {
   }
 
   // Check HW status of the ROCcrl event. Note: not all ROCclr modes support HW status
-  static constexpr bool kWaitCompletion = true;
+  constexpr bool kWaitCompletion = true;
   const amd::SyncPolicy policy =
       (flags_ == hipEventBlockingSync) ? amd::SyncPolicy::Blocking : amd::SyncPolicy::Auto;
 
@@ -95,7 +90,7 @@ bool Event::awaitEventCompletion() { return event_->awaitCompletion(); }
 
 // ================================================================================================
 bool EventDD::awaitEventCompletion() {
-  static constexpr bool kWaitCompletion = true;
+  constexpr bool kWaitCompletion = true;
   const amd::SyncPolicy policy =
       (flags_ == hipEventBlockingSync) ? amd::SyncPolicy::Blocking : amd::SyncPolicy::Auto;
   return g_devices[deviceId()]->devices()[0]->IsHwEventReady(*event_, kWaitCompletion, policy);
@@ -215,14 +210,14 @@ hipError_t Event::recordCommand(amd::Command*& command, amd::HostQueue* stream, 
     return hipSuccess;
   }
 
-  const uint32_t flags = (ext_flags == 0) ? flags_ : ext_flags;
+  const auto flags = (ext_flags == 0) ? flags_ : ext_flags;
   
-  int32_t releaseFlags;
-  if (flags & hipEventDisableSystemFence) {
-    releaseFlags = amd::Device::kCacheStateIgnore;
-  } else {
-    releaseFlags = amd::Device::kCacheStateInvalid;
-  }
+  const auto releaseFlags = [&]() {
+    if (flags & hipEventDisableSystemFence) {
+      return amd::Device::kCacheStateIgnore;
+    }
+    return amd::Device::kCacheStateInvalid;
+  }();
 
   constexpr bool kMarkerTs = true;
   constexpr bool kFlushCache = true;
@@ -396,8 +391,11 @@ hipError_t hipEventRecord_common(hipEvent_t event, hipStream_t stream, uint32_t 
   }
 
   getStreamPerThread(stream);
-  auto* e = reinterpret_cast<hip::Event*>(event);
-  auto* hip_stream = hip::getStream(stream);
+  auto* const e = reinterpret_cast<hip::Event*>(event);
+  auto* const hip_stream = hip::getStream(stream);
+  if (hip_stream == nullptr) {
+    return hipErrorInvalidValue;
+  }
 
   // Clean up previous capture stream association
   hipStream_t lastCaptureStream = e->GetCaptureStream();
@@ -417,11 +415,10 @@ hipError_t hipEventRecord_common(hipEvent_t event, hipStream_t stream, uint32_t 
     e->SetNodesPrevToRecorded(lastCapturedNodes);
 
     if (flags == hipEventRecordExternal) {
-      auto* node = new hip::GraphEventRecordNode(event);
-      const auto status = hip::ihipGraphAddNode(
-          node, reinterpret_cast<hip::Graph*>(hip_stream->GetCaptureGraph()),
-          reinterpret_cast<hip::GraphNode* const*>(lastCapturedNodes.data()),
-          lastCapturedNodes.size(), false);
+      auto* const node = new hip::GraphEventRecordNode(event);
+      const auto status = hip::ihipGraphAddNode(node, hip_stream->GetCaptureGraph(),
+                                                lastCapturedNodes.data(),
+                                                lastCapturedNodes.size(), false);
       if (status != hipSuccess) {
         ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "hipEventRecord add external event node failed");
         return status;
