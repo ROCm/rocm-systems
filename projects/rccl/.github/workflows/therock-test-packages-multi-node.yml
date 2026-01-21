@@ -66,7 +66,9 @@ jobs:
       - name: Test gfx950
         if: ${{ inputs.amdgpu_families == 'gfx950-dcgpu' }}
         run: |
-          SETUP_NODES=1 sbatch --wait -N4 /apps/cvs_tests/cvs-sbatch/sbatch/default.sbatch
+          chmod +x /apps/cvs_tests/ci-entrypoint.sh
+          /apps/cvs_tests/ci-entrypoint.sh
+
 
       - name: Configure AWS Credentials for non-forked repos
         if: ${{ always() && !github.event.pull_request.head.repo.fork }}
