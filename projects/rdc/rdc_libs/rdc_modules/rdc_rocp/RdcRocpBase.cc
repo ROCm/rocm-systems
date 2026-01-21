@@ -513,7 +513,7 @@ rdc_status_t RdcRocpBase::apply_field_transformation(
 
   switch (field) {
     case RDC_FI_PROF_GPU_UTIL_PERCENT:
-      output->dbl = raw_value / 100.0F;
+      output->dbl = raw_value / 100.0;
       break;
 
     case RDC_FI_PROF_OCC_ELAPSED: {
@@ -544,21 +544,24 @@ rdc_status_t RdcRocpBase::apply_field_transformation(
       }
       const std::string target_version = agents[agent_index].name;
       const bool isMI200 = (target_version.find("gfx90a") != std::string::npos);
+      const auto simd_count = agents[agent_index].simd_per_cu > 0 ? agents[agent_index].simd_per_cu : 1;
       if (isMI200) {
-        output->dbl = divided_dbl / (1024.0F / static_cast<double>(agents[agent_index].simd_per_cu));
+        output->dbl = divided_dbl / (1024.0 / simd_count);
       } else {  // Assume mi300
-        output->dbl = divided_dbl / (2048.0F / static_cast<double>(agents[agent_index].simd_per_cu));
+        output->dbl = divided_dbl / (2048.0 / simd_count);
       }
     } break;
 
     case RDC_FI_PROF_EVAL_FLOPS_32_PERCENT:
-    case RDC_FI_PROF_EVAL_FLOPS_64_PERCENT:
+    case RDC_FI_PROF_EVAL_FLOPS_64_PERCENT: {
       if (!is_eval_field) {
         RDC_LOG(RDC_ERROR, "Field expected to be in the eval_fields list but it isn't!");
         return RDC_ST_BAD_PARAMETER;
       }
-      output->dbl = divided_dbl / (256.0F / static_cast<double>(agents[agent_index].simd_per_cu));
+      const auto simd_count = agents[agent_index].simd_per_cu > 0 ? agents[agent_index].simd_per_cu : 1;
+      output->dbl = divided_dbl / (256.0 / simd_count);
       break;
+    }
 
     default:
       if (is_eval_field) {

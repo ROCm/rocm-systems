@@ -462,6 +462,9 @@ rdc_status_t RdcCacheManagerImpl::rdc_job_get_stats(const char jobId[64],
 }
 
 void RdcCacheManagerImpl::set_average_summary(rdc_stats_summary_t& summary, uint32_t num_gpus) {
+  if (num_gpus == 0) {
+    return;
+  }
   summary.average = summary.average / num_gpus;
   summary.standard_deviation = summary.standard_deviation / num_gpus;
 }

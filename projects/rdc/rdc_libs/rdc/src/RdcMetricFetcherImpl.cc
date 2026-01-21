@@ -1062,7 +1062,7 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_partition_field_(uint32_t gpu_index
         return RDC_ST_OK;
       }
 
-      uint32_t chunk_size = vc / pCount;
+      uint32_t chunk_size = vc / (pCount > 0 ? pCount : 1);
       uint32_t start_idx = partIdx * chunk_size;
       uint32_t end_idx = start_idx + chunk_size;
 
