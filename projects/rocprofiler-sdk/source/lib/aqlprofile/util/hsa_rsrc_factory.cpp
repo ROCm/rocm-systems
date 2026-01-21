@@ -729,8 +729,7 @@ HsaRsrcFactory::LoadAndFinalize(const AgentInfo*         agent_info,
     hsa_file_t file_handle = open(filename.c_str(), O_RDONLY);
     if(file_handle == -1)
     {
-        std::cerr << "Error: failed to load '" << filename << "'" << std::endl;
-        assert(false);
+        ROCP_CI_LOG(FATAL) << "Error: failed to load '" << filename << "'";
         return false;
     }
 
@@ -740,7 +739,7 @@ HsaRsrcFactory::LoadAndFinalize(const AgentInfo*         agent_info,
         file_handle, &code_obj_rdr);
     if(status != HSA_STATUS_SUCCESS)
     {
-        std::cerr << "Failed to create code object reader '" << filename << "'" << std::endl;
+        ROCP_CI_LOG(FATAL) << "Failed to create code object reader '" << filename << "'";
         return false;
     }
 
