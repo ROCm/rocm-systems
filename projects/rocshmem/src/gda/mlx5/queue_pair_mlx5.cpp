@@ -41,82 +41,45 @@ __device__ void QueuePair::mlx5_ring_doorbell(uint64_t db_val, uint64_t my_sq_co
 }
 
 __device__ void QueuePair::mlx5_quiet() {
-  constexpr size_t BROADCAST_SIZE = 1024 / WF_SIZE;
-  __shared__ uint64_t wqe_broadcast[BROADCAST_SIZE];
-  uint8_t wavefront_id = get_flat_block_id() / WF_SIZE;
-  wqe_broadcast[wavefront_id] = 0;
-
   uint64_t activemask = get_active_lane_mask();
   uint8_t num_active_lanes = get_active_lane_count(activemask);
   uint8_t my_logical_lane_id = get_active_lane_num(activemask);
   bool is_leader{my_logical_lane_id == 0};
-  const uint64_t leader_phys_lane_id = get_first_active_lane_id(activemask);
+
+  if (!is_leader) {
+    return;
+  }
 
   while (true) {
-    bool done{false};
-    uint64_t quiet_amount{0};
-    uint64_t wave_cq_consumer{0};
-    while (!done) {
-      uint64_t active = __hip_atomic_load(&quiet_active, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
-      uint64_t posted = __hip_atomic_load(&quiet_posted, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
-      uint64_t completed = __hip_atomic_load(&quiet_completed, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
-      if (!(posted - completed)) {
-        return;
-      }
-      int64_t quiet_val = posted - active;
-      if (quiet_val <= 0) {
-        continue;
-      }
-      quiet_amount = min(num_active_lanes, quiet_val);
-      if (is_leader) {
-        done = __hip_atomic_compare_exchange_strong(&quiet_active, &active, active + quiet_amount, __ATOMIC_RELAXED, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
-        if (done) {
-          wave_cq_consumer = __hip_atomic_fetch_add(&cq_consumer, quiet_amount, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
-        }
-      }
-      done = __shfl(done, leader_phys_lane_id);
+    volatile mlx5_cqe64 *cqe_entry = cq_buf;
+    uint8_t op_own = *((volatile uint8_t*)&cqe_entry->op_own);
+    bool opcode_valid = (op_own >> 4) != MLX5_CQE_INVALID;
+    if (!opcode_valid) {
+//      continue;
+      return;
     }
-    wave_cq_consumer = __shfl(wave_cq_consumer, leader_phys_lane_id);
-    uint64_t my_cq_consumer = wave_cq_consumer + my_logical_lane_id;
-    uint64_t my_cq_index = my_cq_consumer % cq_cnt;
 
-    if (my_logical_lane_id < quiet_amount) {
-      volatile mlx5_cqe64 *cqe_entry = &cq_buf[my_cq_index];
-      uint16_t be_wqe_counter{0};
-      uint8_t op_own{0};
-      uint8_t owner_bit = (my_cq_consumer >> cq_log_cnt) & 1;
-      bool vote_failed{true};
+    uint16_t be_wqe_counter = *((volatile uint16_t*)&cqe_entry->wqe_counter);
+    uint16_t wqe_counter = byteswap<uint16_t>(be_wqe_counter);
 
-      while (vote_failed) {
-        op_own = *((volatile uint8_t*)&cqe_entry->op_own);
-        bool my_ownership_vote = (op_own & 1) == owner_bit;
-        bool my_opcode_vote = (op_own >> 4) != MLX5_CQE_INVALID;
-        uint64_t votes = __ballot(my_ownership_vote && my_opcode_vote);
-        vote_failed = __popcll(votes) < quiet_amount;
-        if (!vote_failed) {
-          be_wqe_counter = *((volatile uint16_t*)&cqe_entry->wqe_counter);
-        }
-      }
+    __atomic_signal_fence(__ATOMIC_SEQ_CST);
 
-      uint16_t wqe_counter = byteswap<uint16_t>(be_wqe_counter);
-      uint64_t wqe_id =  outstanding_wqes[wqe_counter];
-      __hip_atomic_fetch_max(&wqe_broadcast[wavefront_id], wqe_id, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_WORKGROUP);
-      uint8_t mlx5_invld_bits = MLX5_CQE_INVALID << 4 | owner_bit;
-      *((volatile uint8_t*)&cqe_entry->op_own) = mlx5_invld_bits;
-      __atomic_signal_fence(__ATOMIC_SEQ_CST);
+    uint64_t sunk_u64 = __hip_atomic_load(&sq_sunk, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+    uint16_t sunk_u16 = (uint16_t)sunk_u64;
+    uint16_t delta = (uint16_t)(wqe_counter - sunk_u16);
+
+    if (delta == 0) {
+      return;
     }
-    if (is_leader) {
-      uint64_t completed {0};
-      do {
-        completed = __hip_atomic_load(&quiet_completed, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
-      } while (completed != wave_cq_consumer);
+    if (delta > 32768) {
+      continue;
+    }
 
-      *cq_dbrec = byteswap<uint32_t>(wave_cq_consumer + quiet_amount);
-      __atomic_signal_fence(__ATOMIC_SEQ_CST);
+    __atomic_signal_fence(__ATOMIC_SEQ_CST);
 
-      uint64_t sunk_wqe_id = wqe_broadcast[wavefront_id];
-      __hip_atomic_fetch_max(&sq_sunk, sunk_wqe_id, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
-      __hip_atomic_fetch_add(&quiet_completed, quiet_amount, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+    bool done = __hip_atomic_compare_exchange_strong(&sq_sunk, &sunk_u64, sunk_u64 + delta, __ATOMIC_RELAXED, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+    if (done) {
+      return;
     }
   }
 }
@@ -139,7 +102,7 @@ __device__ __forceinline__ void QueuePair::mlx5_wait_for_free_sq_slots(
     }
 
     uint64_t num_free_entries =
-        min(sq_wqe_cnt, cq_cnt) -
+        sq_wqe_cnt -
         static_cast<uint64_t>(num_active_sq_entries);
 
     uint64_t num_entries_until_wave_last_entry =
@@ -156,8 +119,6 @@ __device__ __forceinline__ void QueuePair::mlx5_wait_for_free_sq_slots(
 __device__ __forceinline__ void QueuePair::mlx5_build_rma_wqe(
     uint64_t my_sq_counter, uint64_t my_sq_index, uintptr_t laddr,
     uintptr_t raddr, int32_t size, uint8_t opcode) {
-  outstanding_wqes[my_sq_counter % OUTSTANDING_TABLE_SIZE] = my_sq_counter;
-
   SegmentBuilder seg_build(my_sq_index, sq_buf);
 
   seg_build.update_ctrl_seg(my_sq_counter, opcode, 0, qp_num,
@@ -190,9 +151,6 @@ __device__ __forceinline__ void QueuePair::mlx5_ring_doorbell(
         ((wave_sq_counter + num_wqes - 1) % sq_wqe_cnt)]);
 
   mlx5_ring_doorbell(*ctrl_wqe_8B_for_db, wave_sq_counter + num_wqes);
-
-  __hip_atomic_fetch_add(&quiet_posted, num_wqes,
-    __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
 
   __hip_atomic_store(&sq_db_touched, wave_sq_counter + num_wqes,
     __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
@@ -257,8 +215,6 @@ __device__ __forceinline__ void QueuePair::mlx5_build_amo_wqe(
     uint64_t my_sq_counter, uint64_t my_sq_index, uintptr_t raddr,
     uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp, bool fetching,
     uint64_t *wave_fetch_atomic) {
-  outstanding_wqes[my_sq_counter % OUTSTANDING_TABLE_SIZE] = my_sq_counter;
-
   SegmentBuilder seg_build(my_sq_index, sq_buf);
   seg_build.update_ctrl_seg(my_sq_counter, opcode, 0, qp_num,
                             MLX5_WQE_CTRL_CQ_UPDATE, 4, 0, 0);
