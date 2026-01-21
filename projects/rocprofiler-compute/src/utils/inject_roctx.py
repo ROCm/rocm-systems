@@ -76,8 +76,13 @@ def roctx_wrapper(func, name=None):
     @wraps(func)
     def wrapper(*args, **kwargs):
         call_counter["count"] += 1
-        frame = inspect.currentframe().f_back
-        location = f"{Path(frame.f_code.co_filename).name}:{frame.f_lineno}"
+        current_frame = inspect.currentframe()
+        caller_frame = current_frame.f_back if current_frame is not None else None
+        if caller_frame is not None:
+            filename = caller_frame.f_code.co_filename
+            location = f"{Path(filename).name}:{caller_frame.f_lineno}"
+        else:
+            location = "unknown:0"
 
         # Unique marker: function + call_number + source_location
         rangePush(f"{func_name}:#{call_counter['count']}@{location}")
@@ -90,7 +95,7 @@ def roctx_wrapper(func, name=None):
     return wrapper
 
 
-def auto_discover_torch_functions(module, prefix, exclude_patterns=None):
+def auto_discover_torch_callables(module, prefix, exclude_patterns=None):
     """Automatically discover all callable functions in a module."""
     if exclude_patterns is None:
         exclude_patterns = ["__", "_", "is_", "set_", "get_"]
@@ -123,15 +128,15 @@ def inject_roctx_into_torch():
     all_operations = {}
 
     # torch.* functions (matmul, mm, cat, etc.)
-    all_operations.update(auto_discover_torch_functions(torch, "torch"))
+    all_operations.update(auto_discover_torch_callables(torch, "torch"))
 
     # torch.nn.functional.* functions (linear, relu, softmax, etc.)
-    all_operations.update(auto_discover_torch_functions(F, "torch.nn.functional"))
+    all_operations.update(auto_discover_torch_callables(F, "torch.nn.functional"))
 
     # torch.linalg.* functions (matrix operations)
     try:
         all_operations.update(
-            auto_discover_torch_functions(torch.linalg, "torch.linalg")
+            auto_discover_torch_callables(torch.linalg, "torch.linalg")
         )
     except Exception as e:
         console_warning(type(e))
@@ -139,7 +144,7 @@ def inject_roctx_into_torch():
 
     # torch.fft.* functions (FFT operations)
     try:
-        all_operations.update(auto_discover_torch_functions(torch.fft, "torch.fft"))
+        all_operations.update(auto_discover_torch_callables(torch.fft, "torch.fft"))
     except Exception as e:
         console_warning(type(e))
         console_warning(f"Could not access torch.fft: {e}")
@@ -175,8 +180,14 @@ def inject_roctx_into_torch():
 
     def backward_with_roctx(self, *args, **kwargs):
         backward_counter["count"] += 1
-        frame = inspect.currentframe().f_back
-        location = f"{frame.f_code.co_filename.split('/')[-1]}:{frame.f_lineno}"
+        current_frame = inspect.currentframe()
+        caller_frame = current_frame.f_back if current_frame is not None else None
+        if caller_frame is not None:
+            filename = caller_frame.f_code.co_filename
+            location = f"{Path(filename).name}:{caller_frame.f_lineno}"
+        else:
+            location = "unknown:0"
+
         rangePush(f"torch.Tensor.backward:#{backward_counter['count']}@{location}")
         try:
             return original_backward(self, *args, **kwargs)
@@ -230,8 +241,13 @@ def inject_roctx_into_model():
         self._roctx_call_count += 1
 
         # Get caller location
-        frame = inspect.currentframe().f_back
-        location = f"{frame.f_code.co_filename.split('/')[-1]}:{frame.f_lineno}"
+        current_frame = inspect.currentframe()
+        caller_frame = current_frame.f_back if current_frame is not None else None
+        if caller_frame is not None:
+            filename = caller_frame.f_code.co_filename
+            location = f"{Path(filename).name}:{caller_frame.f_lineno}"
+        else:
+            location = "unknown:0"
 
         # Create detailed marker
         rangePush(
