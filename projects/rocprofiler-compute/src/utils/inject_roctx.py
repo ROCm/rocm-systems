@@ -77,7 +77,7 @@ def roctx_wrapper(func, name=None):
     def wrapper(*args, **kwargs):
         call_counter["count"] += 1
         frame = inspect.currentframe().f_back
-        location = f"{frame.f_code.co_filename.split('/')[-1]}:{frame.f_lineno}"
+        location = f"{Path(frame.f_code.co_filename).name}:{frame.f_lineno}"
 
         # Unique marker: function + call_number + source_location
         rangePush(f"{func_name}:#{call_counter['count']}@{location}")
