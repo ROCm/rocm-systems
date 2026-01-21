@@ -1290,6 +1290,8 @@ def apply_dispatch_filter(df: pd.DataFrame, workload: schema.Workload) -> pd.Dat
     # NB: support ignoring the 1st n dispatched execution by '> n'
     #     The better way may be parsing python slice string
     for dispatch_id in workload.filter_dispatch_ids:
+        if isinstance(dispatch_id, str) and ">" in dispatch_id:
+            dispatch_id = re.match(r"\>\s*(\d+)", dispatch_id).group(1)
         if int(dispatch_id) >= len(df):  # subtract 2 bc of the two header rows
             console_error("analysis", f"{dispatch_id} is an invalid dispatch id.")
 
@@ -1297,7 +1299,7 @@ def apply_dispatch_filter(df: pd.DataFrame, workload: schema.Workload) -> pd.Dat
         isinstance(workload.filter_dispatch_ids[0], str)
         and ">" in workload.filter_dispatch_ids[0]
     ):
-        dispatch_match = re.match(r"\> (\d+)", workload.filter_dispatch_ids[0])
+        dispatch_match = re.match(r"\>\s*(\d+)", workload.filter_dispatch_ids[0])
         df = df[
             df[schema.PMC_PERF_FILE_PREFIX]["Dispatch_ID"]
             > int(dispatch_match.group(1))

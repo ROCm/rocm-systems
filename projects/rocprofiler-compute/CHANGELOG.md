@@ -49,6 +49,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Fix issue where counter collection data was empty when profiling workload which spawn multiple child processes
 
+* Fix issue where dispatch filtering in a range (e.g. >2) was not working
+
 * Fix redundant warnings for compute/memory partition not found for < MI 300 series GPUs by skipping partition checks
 
 ### Removed
