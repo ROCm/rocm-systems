@@ -59,11 +59,10 @@ public:
                                   cu_block_delay_table_size)
                         << fmt::format(
                                "Mismatch in CU block delay table size. Expected {}, got {}. "
-                               "agent-{}: {}. agent SE/XCC: {}, block instances: {}",
+                               "agent devid: {}. agent SE/XCC: {}, block instances: {}",
                                agent_info->se_per_xcc() * block_info->instance_count,
                                cu_block_delay_table_size,
                                agent_info->dev_index,
-                               agent_info->name,
                                agent_info->se_per_xcc(),
                                block_info->instance_count);
                     break;
