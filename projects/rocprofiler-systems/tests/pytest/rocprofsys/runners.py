@@ -41,6 +41,13 @@ def _safe_remove_directory(dirpath: Path) -> None:
         pass
 
 
+def _decode_bytes(data: bytes | None, encoding: str = "utf-8") -> str:
+    """Decode bytes to string, returning empty string if None."""
+    if data is None:
+        return ""
+    return data.decode(encoding, errors="replace")
+
+
 @dataclass
 class TestResult:
     """Result of a test execution
@@ -255,9 +262,8 @@ class BaseRunner(ABC):
 
         except subprocess.TimeoutExpired as e:
             duration = time.time() - start_time
-            # Decode bytes to string
-            stdout = e.stdout.decode("utf-8", errors="replace") if e.stdout else ""
-            stderr = e.stderr.decode("utf-8", errors="replace") if e.stderr else ""
+            stdout = _decode_bytes(e.stdout)
+            stderr = _decode_bytes(e.stderr)
 
             test_result = TestResult(
                 returncode=-1,
@@ -427,9 +433,8 @@ class BinaryRewriteRunner(BaseRunner):
 
         except subprocess.TimeoutExpired as e:
             duration = time.time() - start_time
-            # Decode bytes to string
-            stdout = e.stdout.decode("utf-8", errors="replace") if e.stdout else ""
-            stderr = e.stderr.decode("utf-8", errors="replace") if e.stderr else ""
+            stdout = _decode_bytes(e.stdout)
+            stderr = _decode_bytes(e.stderr)
 
             test_result = TestResult(
                 returncode=-1,

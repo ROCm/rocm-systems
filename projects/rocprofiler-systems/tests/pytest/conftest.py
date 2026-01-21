@@ -90,6 +90,7 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=None,
         help="Set the test output directory (default: <build_dir>/rocprof-sys-pytest-output in build mode, /tmp/<user>/rocprof-sys-pytest-output in install mode)",
     )
+    # @output_dir@ is replaced with the value of --output-dir (or default) in the log file path
     group.addoption(
         "--output-log",
         action="store",
@@ -225,8 +226,11 @@ def pytest_sessionstart(session):
     """Set up terminal output redirection after plugins are loaded."""
     config = session.config
 
-    # Log file path config - use function, not fixture (fixtures don't work in hooks)
-    rocprof_config = get_rocprof_config()
+    try:
+        rocprof_config = get_rocprof_config()
+    except Exception as e:
+        pytest.exit(f"{e}")
+
     log_file = config.getoption("--output-log", default="@output_dir@/pytest-output.txt")
 
     if log_file.lower() == "none":
@@ -245,8 +249,6 @@ def pytest_sessionstart(session):
             tw = terminal._tw
             file_handle = config._log_file_handle
 
-            # Wrap write method to redirect to file
-            # (line and sep internally call write, so we only need to wrap write)
             original_write = tw.write
 
             def redirect_to_file(s, **kwargs):
@@ -263,7 +265,7 @@ def pytest_report_header(config) -> list[str]:
     try:
         rocprof_config = get_rocprof_config()
     except Exception as e:
-        return [f"rocprofiler-systems: Configuration error - {e}"]
+        return [f"{e}"]
 
     try:
         gpuInfo = detect_gpu(rocprof_config.rocm_path)
@@ -356,7 +358,10 @@ def pytest_report_header(config) -> list[str]:
 
 def pytest_collection_modifyitems(config, items) -> None:
     """Skip tests based on markers and available resources."""
-    rocprof_config = get_rocprof_config()
+    try:
+        rocprof_config = get_rocprof_config()
+    except Exception as e:
+        pytest.exit(f"{e}")
     gpu_info = detect_gpu(rocprof_config.rocm_path)
 
     skip_gpu = pytest.mark.skip(reason="No valid GPU available")
@@ -588,7 +593,10 @@ def check_use_rocpd() -> bool:
     """
     if os.environ.get("ROCPROFSYS_USE_ROCPD", "").upper() == "OFF":
         return False
-    rocprof_config = get_rocprof_config()
+    try:
+        rocprof_config = get_rocprof_config()
+    except Exception as e:
+        pytest.exit(f"{e}")
     gpu_info = detect_gpu(rocprof_config.rocm_path)
     if not gpu_info.available:
         return False

@@ -106,6 +106,12 @@ fi
 CCACHE_PREFIX=""
 ACTUAL_COMPILER="${1}"
 if [ "$(basename ${1})" = "ccache" ]; then
+    if [ -z "${2:-}" ]; then
+        echo -e "\nError: ${BASH_SOURCE[0]} detected 'ccache' as a compiler wrapper," >&2
+        echo "but no underlying compiler was specified as the next argument." >&2
+        echo "Usage: ccache <actual-compiler> [args...]" >&2
+        exit 1
+    fi
     CCACHE_PREFIX="${1}"
     ACTUAL_COMPILER="${2}"
 fi

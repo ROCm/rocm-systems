@@ -316,7 +316,7 @@ build_pyinstaller_docker() {
 
     # Create a temporary build context
     BUILD_CONTEXT=$(mktemp -d)
-    trap "rm -rf $BUILD_CONTEXT" EXIT
+    trap "rm -rf \"$BUILD_CONTEXT\"" EXIT
 
     # Copy test files to build context
     cp -r "${SCRIPT_DIR}" "${BUILD_CONTEXT}/pytest"
