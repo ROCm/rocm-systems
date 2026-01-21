@@ -104,7 +104,7 @@ get_buffer(rocprofiler_buffer_id_t buffer_id)
 std::optional<rocprofiler_buffer_id_t>
 allocate_buffer()
 {
-    if(registration::get_fini_status() > 0) return std::nullopt;
+    if(registration::get_fini_status() != 0) return std::nullopt;
 
     // ensure buffer has thread to handle flushing it
     static auto _init_threads_once = std::once_flag{};
@@ -135,7 +135,7 @@ allocate_buffer()
 rocprofiler_status_t
 flush(rocprofiler_buffer_id_t buffer_id, bool wait)
 {
-    if(registration::get_fini_status() > 0)
+    if(registration::get_fini_status() != 0)
     {
         ROCP_ERROR << "ignoring rocprofiler buffer flush (handle=" << buffer_id.handle
                    << ") request after finalization";
@@ -182,7 +182,7 @@ flush(rocprofiler_buffer_id_t buffer_id, bool wait)
     }
 
     auto _task = [buffer_id, idx, offset]() {
-        ROCP_ERROR_IF(registration::get_fini_status() > 0)
+        ROCP_ERROR_IF(registration::get_fini_status() != 0)
             << "executing buffer (" << buffer_id.handle << ") flush task finalization!";
 
         auto& buff_v          = CHECK_NOTNULL(get_buffers())->at(buffer_id.handle - offset);

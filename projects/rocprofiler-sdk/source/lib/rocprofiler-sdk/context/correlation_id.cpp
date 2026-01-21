@@ -73,62 +73,53 @@ correlation_id::add_ref_count()
 uint32_t
 correlation_id::sub_ref_count()
 {
-    // Use CAS loop to atomically check and decrement to avoid TOCTOU race condition.
-    // Previously, the check (m_ref_count == 0) and decrement (fetch_sub(1)) were separate,
-    // allowing another thread to modify ref_count between check and decrement.
-    uint32_t _current = m_ref_count.load(std::memory_order_acquire);
-    while(_current > 0)
+    if(m_ref_count == 0)
     {
-        if(m_ref_count.compare_exchange_weak(
-               _current, _current - 1, std::memory_order_release, std::memory_order_relaxed))
-        {
-            // Successfully decremented from '_current' to '_current - 1'
-            if(registration::get_fini_status() > 0) return 0;
-
-            if(_current == 1)
-            {
-                auto ctxs = get_active_contexts([](const context* ctx) {
-                    return (ctx->buffered_tracer &&
-                            (ctx->buffered_tracer->domains(
-                                ROCPROFILER_BUFFER_TRACING_CORRELATION_ID_RETIREMENT)));
-                });
-
-                auto record = rocprofiler_buffer_tracing_correlation_id_retirement_record_t{
-                    .size = sizeof(rocprofiler_buffer_tracing_correlation_id_retirement_record_t),
-                    .kind = ROCPROFILER_BUFFER_TRACING_CORRELATION_ID_RETIREMENT,
-                    .timestamp               = common::timestamp_ns(),
-                    .internal_correlation_id = internal};
-
-                if(!ctxs.empty())
-                {
-                    for(const auto* itr : ctxs)
-                    {
-                        auto* _buffer = buffer::get_buffer(itr->buffered_tracer->buffer_data.at(
-                            ROCPROFILER_BUFFER_TRACING_CORRELATION_ID_RETIREMENT));
-
-                        auto success = CHECK_NOTNULL(_buffer)->emplace(
-                            ROCPROFILER_BUFFER_CATEGORY_TRACING,
-                            ROCPROFILER_BUFFER_TRACING_CORRELATION_ID_RETIREMENT,
-                            record);
-
-                        ROCP_CI_LOG_IF(WARNING, !success) << fmt::format(
-                            "failed to emplace correlation id retirement for {}", internal);
-                    }
-                }
-            }
-            return _current;  // Return previous value before decrement
-        }
-        // CAS failed - 'current' updated with actual value, retry loop
-        _current = m_ref_count.load(std::memory_order_acquire);
+        ROCP_CI_LOG(WARNING) << fmt::format(
+            "attempt to decrement correlation id {} reference count but reference count is zero",
+            internal);
+        return 0;
     }
 
-    // Ref count was already 0
-    ROCP_CI_LOG_IF(WARNING, registration::get_fini_status() <= 0) << fmt::format(
-        "attempt to decrement correlation id {} reference count but reference count is zero "
-        "(fini_status={})",
-        internal,
-        registration::get_fini_status());
-    return 0;
+    auto _ret = m_ref_count.fetch_sub(1);
+
+    if(registration::get_fini_status() > 0) return 0;
+
+    ROCP_CI_LOG_IF(WARNING, _ret == 0) << fmt::format("correlation id underflow on {}", internal);
+
+    if(_ret == 1)
+    {
+        auto ctxs = get_active_contexts([](const context* ctx) {
+            return (ctx->buffered_tracer &&
+                    (ctx->buffered_tracer->domains(
+                        ROCPROFILER_BUFFER_TRACING_CORRELATION_ID_RETIREMENT)));
+        });
+
+        auto record = rocprofiler_buffer_tracing_correlation_id_retirement_record_t{
+            .size      = sizeof(rocprofiler_buffer_tracing_correlation_id_retirement_record_t),
+            .kind      = ROCPROFILER_BUFFER_TRACING_CORRELATION_ID_RETIREMENT,
+            .timestamp = common::timestamp_ns(),
+            .internal_correlation_id = internal};
+
+        if(!ctxs.empty())
+        {
+            for(const auto* itr : ctxs)
+            {
+                auto* _buffer = buffer::get_buffer(itr->buffered_tracer->buffer_data.at(
+                    ROCPROFILER_BUFFER_TRACING_CORRELATION_ID_RETIREMENT));
+
+                auto success = CHECK_NOTNULL(_buffer)->emplace(
+                    ROCPROFILER_BUFFER_CATEGORY_TRACING,
+                    ROCPROFILER_BUFFER_TRACING_CORRELATION_ID_RETIREMENT,
+                    record);
+
+                ROCP_CI_LOG_IF(WARNING, !success)
+                    << fmt::format("failed to emplace correlation id retirement for {}", internal);
+            }
+        }
+    }
+
+    return _ret;
 }
 
 uint32_t
@@ -146,6 +137,14 @@ correlation_id::sub_kern_count()
 correlation_id*
 correlation_tracing_service::construct(uint32_t _init_ref_count)
 {
+    if(registration::get_fini_status() != 0)
+    {
+        ROCP_CI_LOG(WARNING) << "correlation_tracing_service::construct called during "
+                             << (registration::get_fini_status() < 0 ? "pre-init" : "finalization")
+                             << " (fini_status=" << registration::get_fini_status() << ")";
+        return nullptr;
+    }
+
     ROCP_FATAL_IF(_init_ref_count == 0) << "must have reference count > 0";
 
     auto  _internal_id = get_unique_internal_id();

@@ -102,7 +102,7 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
     if(!data) return true;
 
     // if we have fully finalized, delete the data and return
-    if(registration::get_fini_status() > 0)
+    if(registration::get_fini_status() != 0)
     {
         auto* _session = static_cast<Queue::queue_info_session_t**>(data);
         delete _session;
@@ -207,7 +207,7 @@ WriteInterceptor(const void* packets,
                  void*                                 data,
                  hsa_amd_queue_intercept_packet_writer writer)
 {
-    if(registration::get_fini_status() > 0)
+    if(registration::get_fini_status() != 0)
     {
         writer(packets, pkt_count);
         return;
@@ -278,6 +278,13 @@ WriteInterceptor(const void* packets,
             constexpr auto ref_count = 1;
             corr_id                  = context::correlation_tracing_service::construct(ref_count);
             _corr_id_pop             = corr_id;
+        }
+
+        if(!corr_id)
+        {
+            // During finalization - just write packet through without tracing
+            transformed_packets.emplace_back(packets_arr[i]);
+            continue;
         }
 
         // increase the reference count to denote that this correlation id is being used in a kernel

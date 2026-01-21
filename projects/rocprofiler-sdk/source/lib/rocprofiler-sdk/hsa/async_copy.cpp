@@ -341,7 +341,7 @@ bool
 async_copy_handler(hsa_signal_value_t signal_value, void* arg)
 {
     // if we have fully finalized, delete the data and return
-    if(registration::get_fini_status() > 0)
+    if(registration::get_fini_status() != 0)
     {
         auto* _data = static_cast<async_copy_data*>(arg);
         delete _data;
@@ -691,6 +691,16 @@ async_copy_impl(Args... args)
         constexpr auto ref_count = 1;
         _data->correlation_id    = context::correlation_tracing_service::construct(ref_count);
         _corr_id_pop             = _data->correlation_id;
+    }
+
+    if(!_data->correlation_id)
+    {
+        // During finalization - cleanup and execute without tracing
+        ROCP_HSA_TABLE_CALL(ERROR, get_core_table()->hsa_signal_destroy_fn(_data->rocp_signal));
+        delete _data;
+        return invoke(get_next_dispatch<TableIdx, OpIdx>(),
+                      std::move(_tied_args),
+                      std::make_index_sequence<N>{});
     }
 
     // increase the reference count to denote that this correlation id is being used in a kernel
