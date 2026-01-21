@@ -176,7 +176,7 @@ ncclResult_t rocm_smi_getLinkInfo(int srcIndex, int dstIndex, RSMI_IO_LINK_TYPE*
         rsmi_weight == 41 || rsmi_weight == 13)) {
 	uint64_t min_bw = 0, max_bw = 0;
 	*hops = 1;
-#if defined USE_ROCM_SMI64CONFIG && rocm_smi_VERSION_MAJOR >= 5
+#if defined HAVE_ROCM_SMI64CONFIG && rocm_smi_VERSION_MAJOR >= 5
 	rsmi_version_t version;
 	ROCMSMICHECK(rsmi_version_get(&version));
 	if (version.major >= 5)
