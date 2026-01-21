@@ -23,13 +23,6 @@
 #include "lib/aqlprofile/core/aql_profile.hpp"
 #include "lib/aqlprofile/aql_profile_v2.h"
 
-#include <cstdint>
-#include <future>
-#include <map>
-#include <string>
-#include <vector>
-#include <mutex>
-
 #include "lib/aqlprofile/core/counter_dimensions.hpp"
 
 #include "lib/aqlprofile/core/logger.h"
@@ -40,6 +33,16 @@
 #include "lib/aqlprofile/pm4/sqtt_builder.h"
 
 #include "lib/aqlprofile/core/commandbuffermgr.hpp"
+
+#include "lib/common/logging.hpp"
+
+#include <cstdint>
+#include <future>
+#include <map>
+#include <string>
+#include <vector>
+#include <mutex>
+
 
 #ifdef _WIN32
 #    define CONSTRUCTOR_API
@@ -950,7 +953,9 @@ hsa_ven_amd_aqlprofile_att_marker(hsa_ven_amd_aqlprofile_profile_t*           pr
                                   uint32_t                                    data,
                                   hsa_ven_amd_aqlprofile_att_marker_channel_t channel)
 {
-    assert(profile->type == HSA_VEN_AMD_AQLPROFILE_EVENT_TYPE_TRACE);
+    ROCP_FATAL_IF(profile->type != HSA_VEN_AMD_AQLPROFILE_EVENT_TYPE_TRACE)
+        << "ATT Marker can be used only with HSA_VEN_AMD_AQLPROFILE_EVENT_TYPE_TRACE profiling "
+           "type";
 
     aql_profile::Pm4Factory*  pm4_factory  = aql_profile::Pm4Factory::Create(profile);
     pm4_builder::SqttBuilder* sqtt_builder = pm4_factory->GetSqttBuilder();

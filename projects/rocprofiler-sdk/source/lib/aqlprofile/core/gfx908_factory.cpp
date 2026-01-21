@@ -25,6 +25,7 @@
 #include "lib/aqlprofile/pm4/gfx9_cmd_builder.h"
 #include "lib/aqlprofile/pm4/pmc_builder.h"
 #include "lib/aqlprofile/pm4/sqtt_builder.h"
+#include "lib/common/logging.hpp"
 
 namespace aql_profile
 {
@@ -104,8 +105,16 @@ Mi100Factory::Mi100Factory(const AgentInfo* agent_info)
             case SqCounterBlockId: block_info->event_id_max = 303; break;
             case TcpCounterBlockId:
                 block_info->event_id_max = 87;
-                assert(agent_info->se_num * block_info->instance_count ==
-                       cu_block_delay_table_size);
+                ROCP_FATAL_IF(agent_info->se_num * block_info->instance_count !=
+                              cu_block_delay_table_size)
+                    << fmt::format("Mismatch in CU block delay table size. Expected {}, got {}. "
+                                   "agent-{}: {}. agent SEs: {}, block instances: {}",
+                                   agent_info->se_num * block_info->instance_count,
+                                   cu_block_delay_table_size,
+                                   agent_info->dev_index,
+                                   agent_info->name,
+                                   agent_info->se_num,
+                                   block_info->instance_count);
                 break;
             case TccCounterBlockId:
                 block_info->instance_count = 32;
