@@ -54,6 +54,15 @@
 #include <thread>
 #include <vector>
 
+#define HSA_AMD_INTERFACE_VERSION                                                                  \
+    ROCPROFILER_COMPUTE_VERSION(HSA_AMD_INTERFACE_VERSION_MAJOR, HSA_AMD_INTERFACE_VERSION_MINOR, 0)
+
+#if HSA_AMD_INTERFACE_VERSION >= ROCPROFILER_COMPUTE_VERSION(1, 7, 0)
+constexpr auto hsa_amd_memory_pool_executable_flag = HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG;
+#else
+constexpr auto hsa_amd_memory_pool_executable_flag = (1 << 2);
+#endif
+
 namespace rocprofiler
 {
 namespace aqlprofile
@@ -560,7 +569,7 @@ HsaRsrcFactory::AllocateLocalMemory(const AgentInfo* agent_info, size_t size)
     status = rocprofiler::aqlprofile::get_amd_ext_table()->hsa_amd_memory_pool_allocate_fn(
         agent_info->gpu_pool,
         size,
-        HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG,
+        hsa_amd_memory_pool_executable_flag,
         reinterpret_cast<void**>(&buffer));
     uint8_t* ptr = (status == HSA_STATUS_SUCCESS) ? buffer : nullptr;
     return ptr;
@@ -582,7 +591,7 @@ HsaRsrcFactory::AllocateKernArgMemory(const AgentInfo* agent_info, size_t size)
         status = rocprofiler::aqlprofile::get_amd_ext_table()->hsa_amd_memory_pool_allocate_fn(
             *kern_arg_pool_,
             size,
-            HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG,
+            hsa_amd_memory_pool_executable_flag,
             reinterpret_cast<void**>(&buffer));
         // Both the CPU and GPU can access the kernel arguments
         if(status == HSA_STATUS_SUCCESS)
@@ -611,7 +620,7 @@ HsaRsrcFactory::AllocateSysMemory(const AgentInfo* agent_info, size_t size)
         status = rocprofiler::aqlprofile::get_amd_ext_table()->hsa_amd_memory_pool_allocate_fn(
             *cpu_pool_,
             size,
-            HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG,
+            hsa_amd_memory_pool_executable_flag,
             reinterpret_cast<void**>(&buffer));
         // Both the CPU and GPU can access the memory
         if(status == HSA_STATUS_SUCCESS)
