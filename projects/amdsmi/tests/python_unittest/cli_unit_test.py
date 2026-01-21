@@ -540,9 +540,10 @@ class TestAmdSmiCli(unittest.TestCase):
                 cmd, cond = cmd_cond
                 items = cmd.split()
 
+                # Find the first sub_arg
                 if not found_sub_arg and len(items) >= 3:
                     sub_arg = items[2]
-                    for mod in file_mods + ['--gpu']:
+                    for mod in file_mods + ['--gpu', '--loglevel']:
                         if mod == sub_arg:
                             sub_arg = ''
                             break
@@ -559,8 +560,16 @@ class TestAmdSmiCli(unittest.TestCase):
                         # will get default gpu_index=0
                         pass
 
+                # Remove all --gpu for all sub_args except for the first sub_arg
+                if cmd and found_sub_arg:
+                    sub_arg = items[2]
+                    if sub_arg != found_sub_arg:
+                        if '--gpu' in cmd:
+                            cmd = ''
+
+
                 # Remove all file and watch modifiers except for gpu 0
-                if gpu_index != '0':
+                if cmd and gpu_index != '0':
                     for mod in file_mods + watch_mods:
                         if mod in cmd:
                             cmd = ''
