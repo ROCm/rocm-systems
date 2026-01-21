@@ -503,9 +503,10 @@ hsa_status_t hsa_ext_image_destroy_v2(hsa_agent_t agent, hsa_ext_image_t image) 
 hsa_status_t hsa_ext_image_mipmap_array_get_level(hsa_agent_t agent,
                                                   const hsa_ext_image_t* mipmap_array,
                                                   uint32_t mip_level,
+                                                  const hsa_ext_image_descriptor_v2_t* image_descriptor,
                                                   hsa_ext_image_t* level_view) {
   return rocr::core::Runtime::runtime_singleton_->extensions_.image_api
-      .hsa_ext_image_mipmap_array_get_level_fn(agent, mipmap_array, mip_level,
+      .hsa_ext_image_mipmap_array_get_level_fn(agent, mipmap_array, mip_level, image_descriptor,
                                                level_view);
 }
 

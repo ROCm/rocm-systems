@@ -77,6 +77,18 @@ struct comm_data : base<comm_data, void>
         static constexpr auto label = "MPI Comm Send";
     };
 
+    struct ucx_recv
+    {
+        static constexpr auto value = "comm_data";
+        static constexpr auto label = "UCX Comm Recv";
+    };
+
+    struct ucx_send
+    {
+        static constexpr auto value = "comm_data";
+        static constexpr auto label = "UCX Comm Send";
+    };
+
     ROCPROFSYS_DEFAULT_OBJECT(comm_data)
 
     static void preinit();
@@ -134,6 +146,61 @@ struct comm_data : base<comm_data, void>
                       int sendcount, MPI_Datatype sendtype, void*, int recvcount,
                       MPI_Datatype recvtype, MPI_Comm);
 #endif
+
+    // UCX communication tracking
+    // ucp_tag_send_nbx - send with tag matching (5 params: ep, buffer, count, tag, param)
+    static void audit(const gotcha_data& _data, audit::incoming, void*, const void*,
+                      size_t count, uint64_t tag, const void*);
+
+    // ucp_tag_recv_nbx - receive with tag matching (6 params: worker, buffer, count, tag,
+    // tag_mask, param)
+    static void audit(const gotcha_data& _data, audit::incoming, void*, void*,
+                      size_t count, uint64_t tag, uint64_t tag_mask, const void*);
+
+    // ucp_put_nbx - RMA put operation (6 params: ep, buffer, count, remote_addr, rkey,
+    // param)
+    static void audit(const gotcha_data& _data, audit::incoming, void*, const void*,
+                      size_t count, uint64_t remote_addr, void* rkey, const void*);
+
+    // ucp_get_nbx - RMA get operation (6 params: ep, buffer, count, remote_addr, rkey,
+    // param)
+    static void audit(const gotcha_data& _data, audit::incoming, void*, void*,
+                      size_t count, uint64_t remote_addr, void* rkey, const void*);
+
+    // ucp_am_send_nbx - active message send (7 params: ep, id, header, header_length,
+    // buffer, count, param)
+    static void audit(const gotcha_data& _data, audit::incoming, void*, unsigned id,
+                      const void* header, size_t header_length, const void* buffer,
+                      size_t count, const void*);
+
+    // ucp_stream_send_nbx - stream send (4 params: ep, buffer, count, param)
+    static void audit(const gotcha_data& _data, audit::incoming, void*, const void*,
+                      size_t             count, const void*);
+
+    // ucp_stream_recv_nbx - stream receive (5 params: ep, buffer, count, length, param)
+    static void audit(const gotcha_data& _data, audit::incoming, void*, void*,
+                      size_t count, size_t* length, const void*);
+
+    // Legacy UCX functions (kept for compatibility)
+    // ucp_tag_send_nb/nbx - send with tag matching
+    static void audit(const gotcha_data& _data, audit::incoming, void*, size_t count,
+                      void*, void*, void*);
+
+    // ucp_tag_recv_nb/nbx - receive with tag matching
+    static void audit(const gotcha_data& _data, audit::incoming, void*, size_t count,
+                      void*, void*, void*, void*, void*);
+
+    // ucp_put/get operations - RMA (legacy)
+    static void audit(const gotcha_data& _data, audit::incoming, void*, size_t length,
+                      uint64_t, void*, void*);
+
+    // ucp_am_send_nb/nbx - active message send (legacy)
+    static void audit(const gotcha_data& _data, audit::incoming, void*, unsigned, void*,
+                      size_t, void*, size_t, unsigned, void*);
+
+    // ucp_stream_send/recv operations (legacy)
+    static void audit(const gotcha_data& _data, audit::incoming, void*, void*,
+                      size_t             count, void*, unsigned, void*);
 
 private:
     static auto& add(tracker_t& _t, data_type value)

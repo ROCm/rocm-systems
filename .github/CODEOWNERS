@@ -10,6 +10,7 @@
 **/library/include/                                                   @ROCm/rocm-documentation
 
 # Project-specific ownership
+/projects/amdsmi/                                                     @ROCm/smi-reviewers
 /projects/clr/                                                        @ROCm/clr-reviewers
 /projects/hip/                                                        @ROCm/hip-reviewers
 /projects/hipother/                                                   @ROCm/hipother-reviewers
