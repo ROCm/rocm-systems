@@ -1372,8 +1372,11 @@ def process_torch_trace_output(
         marker_trace_csv_file_path = f"{workload_dir}/out/pmc_1/*"
     if not counter_csv_file_path:
         counter_csv_file_path = f"{workload_dir}/out/pmc_1/*"
-    marker_api_trace_csvs = glob.glob(
-        marker_trace_csv_file_path / "*_marker_api_trace.csv"
+    marker_trace_csv_file_path = Path(marker_trace_csv_file_path)
+    counter_csv_file_path = Path(counter_csv_file_path)
+    # Find all marker_api_trace CSV files
+    marker_api_trace_csvs = list(
+        marker_trace_csv_file_path.glob("*_marker_api_trace.csv")
     )
     existing_marker_files_csv = [
         markers_file
