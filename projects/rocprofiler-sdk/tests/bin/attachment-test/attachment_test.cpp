@@ -24,11 +24,19 @@
 #include <rocprofiler-sdk-roctx/roctx.h>
 #include <unistd.h>
 #include <chrono>
+#include <csignal>
 #include <cstdlib>
 #include <iostream>
 #include <string>
 #include <thread>
 #include <vector>
+
+// Signal handler - handles signal without affecting execution
+void
+signal_handler(int signum)
+{
+    std::cout << "Attachment test process " << getpid() << " received signal " << signum << "\n";
+}
 
 /* Macro for checking GPU API return values */
 #define HIP_ASSERT(call)                                                                           \
@@ -147,6 +155,9 @@ execute_kernels(const size_t tid, const size_t device_id)
 int
 main(int argc, char** argv)
 {
+    // Install signal handler for SIGINT
+    std::signal(SIGINT, signal_handler);
+
     size_t nthreads{8};
     int    ndevices{0};
     for(int i = 1; i < argc; ++i)

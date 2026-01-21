@@ -139,7 +139,7 @@ private:
 
     static void ptrace_signal_handler_func(
         int                                                 pid,
-        std::shared_ptr<PTraceRunner>                       runner,
+        const std::shared_ptr<PTraceRunner>&                runner,
         std::atomic<ptrace_session_signal_handler_state_t>& state,
         std::atomic<rocattach_status_t>&                    error);
 
