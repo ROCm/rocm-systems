@@ -47,18 +47,25 @@ void BroadcastGetBw(size_t count, int typesize, double sec, double* algBw, doubl
   *busBw = baseBw * factor;
 }
 
-testResult_t BroadcastRunColl(void* sendbuff, void* recvbuff, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream, void* bias = nullptr) {
-  int rank;
-  NCCLCHECK(ncclCommUserRank(comm, &rank));
+testResult_t BroadcastRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, size_t recvoffset, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream, int deviceImpl, void* bias = nullptr) {
+  if (deviceImpl == 0) {
+    int rank;
+    NCCLCHECK(ncclCommUserRank(comm, &rank));
+
+    char* sptr = (char*)sendbuff + sendoffset;
+    char* rptr = (char*)recvbuff + recvoffset;
 #if NCCL_MAJOR >= 2 && NCCL_MINOR >= 2
-  NCCLCHECK(ncclBroadcast(sendbuff, recvbuff, count, type, root, comm, stream));
+    NCCLCHECK(ncclBroadcast(sptr, rptr, count, type, root, comm, stream));
 #else
-  if (rank == root) {
-      NCCLCHECK(ncclBcast(sendbuff, count, type, root, comm, stream));
-  } else {
-      NCCLCHECK(ncclBcast(recvbuff, count, type, root, comm, stream));
-  }
+    if (rank == root) {
+      NCCLCHECK(ncclBcast(sptr, count, type, root, comm, stream));
+    } else {
+      NCCLCHECK(ncclBcast(rptr, count, type, root, comm, stream));
+    }
 #endif
+  } else {
+    return testNotImplemented;
+  }
   return testSuccess;
 }
 
@@ -112,3 +119,7 @@ struct testEngine ncclTestEngine = {
   BroadcastGetBuffSize,
   BroadcastRunTest
 };
+// struct testEngine broadcastEngine = {
+//   .getBuffSize = BroadcastGetBuffSize,
+//   .runTest = BroadcastRunTest
+// };

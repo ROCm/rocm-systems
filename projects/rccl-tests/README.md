@@ -130,7 +130,7 @@ All tests support the same set of arguments :
   * `-u,--cumask <d0,d1,d2,d3>` Default: None
 * Performance
   * `-n,--iters <iteration count>` number of iterations. Default : 20.
-  * `-w,--warmup_iters <warmup iteration count>` number of warmup iterations (not timed). Default : 5.
+  * `-w,--warmup_iters <warmup iteration count>` number of warmup iterations (not timed). Default : 1.
   * `-m,--agg_iters <aggregation count>` number of operations to aggregate together in each iteration. Default : 1.
   * `-N,--run_cycles <cycle count>` run & print each cycle. Default : 1; 0=infinite.
   * `-a,--average <0/1/2/3>` Report performance as an average across all ranks (MPI=1 only). <0=Rank0,1=Avg,2=Min,3=Max>. Default : 1.
@@ -141,6 +141,7 @@ All tests support the same set of arguments :
   * `-G,--hipgraph <num graph launches>` Capture iterations as a HIP graph and then replay specified number of times. Default : 0.
   * `-C,--report_cputime <0/1>]` Report CPU time instead of latency. Default : 0.
   * `-R,--local_register <0/1/2>` enable local (1) or symmetric (2) buffer registration on send/recv buffers. Default : 0.
+  * `-S,--report_timestamps <0/1>` Add timestamp ("%Y-%m-%d %H:%M:%S") to each performance report line. Default : 0.
   * `-T,--timeout <time in seconds>` timeout each test after specified number of seconds. Default : disabled.
   * `-F,--cache_flush <cache flush after every -F iteration>` Enable cache flush after every -F iteration. Default : 0 (No cache flush).
   * `-O,--out_of_place <0=in-place only, 1=out-of-place only>`. Default: both.

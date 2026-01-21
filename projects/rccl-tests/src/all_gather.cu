@@ -52,8 +52,14 @@ void AllGatherGetBw(size_t count, int typesize, double sec, double* algBw, doubl
   *busBw = baseBw * factor;
 }
 
-testResult_t AllGatherRunColl(void* sendbuff, void* recvbuff, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream, void* bias = nullptr) {
-  NCCLCHECK(ncclAllGather(sendbuff, recvbuff, count, type, comm, stream));
+testResult_t AllGatherRunColl(void* sendbuff,  size_t sendoffset,void* recvbuff, size_t recvoffset, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream, int deviceImpl, void* bias = nullptr) {
+  if (deviceImpl == 0) {
+    char* sptr = (char*)sendbuff + sendoffset;
+    char* rptr = (char*)recvbuff + recvoffset;
+    NCCLCHECK(ncclAllGather(sptr, rptr, count, type, comm, stream));
+  } else {
+    return testNotImplemented;
+  }
   return testSuccess;
 }
 
@@ -97,3 +103,7 @@ struct testEngine ncclTestEngine = {
   AllGatherGetBuffSize,
   AllGatherRunTest
 };
+// struct testEngine allGatherEngine = {
+//   .getBuffSize = AllGatherGetBuffSize,
+//   .runTest = AllGatherRunTest
+// };
