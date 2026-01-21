@@ -266,7 +266,6 @@ class QueuePair {
 
   db_reg_t db{};
 
-  uint64_t cq_consumer{0};
   uint64_t quiet_posted{0};
   uint64_t quiet_active{0};
   uint64_t quiet_completed{0};
@@ -319,9 +318,6 @@ class QueuePair {
   uint64_t sq_posted{0};
   uint64_t sq_db_touched{0};
   uint64_t sq_sunk{0};
-
-  static constexpr size_t OUTSTANDING_TABLE_SIZE = 65536;
-  uint64_t outstanding_wqes[OUTSTANDING_TABLE_SIZE]{0};
 
   /* GDAProvider::MLX5 END */
 

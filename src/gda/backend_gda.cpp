@@ -1274,12 +1274,12 @@ void GDABackend::create_cqs(int cqe) {
   assert(gda_provider != GDAProvider::IONIC);
 
   memset(&cq_attr, 0, sizeof(struct ibv_cq_init_attr_ex));
-  cq_attr.cqe           = cqe;
+  cq_attr.cqe         = 1;
   cq_attr.cq_context    = nullptr;
   cq_attr.channel       = nullptr;
   cq_attr.comp_vector   = 0;
-  cq_attr.flags         = 0;
-  cq_attr.comp_mask     = IBV_CQ_INIT_ATTR_MASK_PD;
+  cq_attr.flags         |= IBV_CREATE_CQ_ATTR_IGNORE_OVERRUN;
+  cq_attr.comp_mask     = IBV_CQ_INIT_ATTR_MASK_PD | IBV_CQ_INIT_ATTR_MASK_FLAGS;
   cq_attr.parent_domain = pd_parent;
 
   for (int i = 0; i < qps.size(); i++) {
