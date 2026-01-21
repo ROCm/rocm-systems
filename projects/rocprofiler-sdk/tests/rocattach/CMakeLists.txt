@@ -61,7 +61,7 @@ set_tests_properties(
                ENVIRONMENT
                "${rocattach-test-env}"
                PASS_REGULAR_EXPRESSION
-               "Test C tool \\(priority=0\\) is using rocprofiler-sdk v"
+               "Attachment test process [0-9]+ received signal 2"
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
                DISABLED

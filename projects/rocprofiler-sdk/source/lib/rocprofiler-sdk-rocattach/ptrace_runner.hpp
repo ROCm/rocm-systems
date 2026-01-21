@@ -56,7 +56,7 @@ public:
                                   int*             ptrace_errno,
                                   size_t           timeout_ms = DEFAULT_TIMEOUT_MS);
 
-    pid_t get_pid() { return m_pid; };
+    pid_t get_pid() const { return m_pid; };
 
 private:
     // Data for a single ptrace operation.
