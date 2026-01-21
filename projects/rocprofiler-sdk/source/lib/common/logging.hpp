@@ -26,7 +26,8 @@
 
 #include <glog/logging.h>
 
-#include <fmt/format.h>  // usually used in conjunction with logging
+// logging statements should use fmt format strings
+#include <fmt/format.h>
 #include <fmt/ranges.h>
 
 #include <cstdint>
