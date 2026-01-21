@@ -46,6 +46,7 @@
 #include "core/state.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "library/amd_smi.hpp"
+#include "library/gpu_process_stats.hpp"
 #include "library/runtime.hpp"
 #include "library/thread_info.hpp"
 
@@ -753,6 +754,12 @@ config()
         metadata_initialize_smi_tracks(_dev_id);
         metadata_initialize_smi_pmc(_dev_id);
     }
+    
+    // Initialize GPU process stats
+    auto _target_pid = get_root_process_id();
+    gpu_process_stats::initialize(_target_pid);
+    gpu_process_stats::initialize_perfetto_tracks(_target_pid);
+    gpu_process_stats::initialize_pmc();
 }
 
 void
@@ -771,6 +778,9 @@ sample()
         if(!_data) continue;
         _data->emplace_back(data{ itr });
     }
+
+    // Sample GPU process stats after device sampling
+    gpu_process_stats::sample(get_root_process_id());
 }
 
 void
@@ -1255,6 +1265,12 @@ setup()
         is_initialized() = true;
         data::setup();
 
+        // Configure GPU process stats if metrics are specified
+        if(_metrics && !_metrics->empty())
+        {
+            gpu_process_stats::configure(*_metrics);
+        }
+
     } catch(std::runtime_error& _e)
     {
         LOG_WARNING("Exception thrown when initializing amd-smi: {}", _e.what());
@@ -1292,6 +1308,8 @@ post_process()
         LOG_DEBUG("Post-processing amd-smi data for device: {}", itr);
         data::post_process(itr);
     }
+    // Post-process GPU process stats
+    gpu_process_stats::post_process();
 }
 
 uint32_t

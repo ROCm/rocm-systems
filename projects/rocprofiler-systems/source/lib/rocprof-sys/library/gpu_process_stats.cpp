@@ -22,29 +22,18 @@
 
 #include "library/gpu_process_stats.hpp"
 #include "core/categories.hpp"
-#include "core/common.hpp"
-#include "core/config.hpp"
-#include "core/perfetto.hpp"
 #include "core/state.hpp"
-#include "core/timemory.hpp"
 #include "core/trace_cache/cache_manager.hpp"
 #include "core/trace_cache/cacheable.hpp"
-#include "library/amd_smi.hpp"
-#include "library/process_sampler.hpp"
 #include "library/runtime.hpp"
-#include "library/thread_data.hpp"
-#include "library/thread_info.hpp"
 
 #include <timemory/utility/types.hpp>
 
 #include <cassert>
-#include <limits>
-#include <mutex>
-#include <sstream>
+#include <bitset>
 #include <stdexcept>
 #include <string_view>
 #include <unordered_map>
-#include <vector>
 
 #if ROCPROFSYS_USE_ROCM > 0
 #    include <amd_smi/amdsmi.h>
@@ -56,11 +45,6 @@ namespace gpu_process_stats
 {
 namespace
 {
-// Process-level data storage
-std::vector<process_info_t> process_samples       = {};
-std::mutex                  process_samples_mutex = {};
-pid_t                       target_process_id     = 0;  // Cached target PID
-
 // Singleton accessor for process settings
 process_settings&
 get_process_settings_impl()
@@ -79,7 +63,6 @@ get_process_settings()
 void
 initialize(pid_t target_pid)
 {
-    target_process_id = target_pid;
     LOG_DEBUG("GPU process stats initialized for target PID: {}", target_pid);
 }
 
@@ -99,7 +82,7 @@ sample(pid_t _pid)
 
     if(!_process_metrics_enabled) return;
 
-    [[maybe_unused]] auto _timestamp = tim::get_clock_real_now<size_t, std::nano>();
+    auto _timestamp = tim::get_clock_real_now<size_t, std::nano>();
     assert(_timestamp < std::numeric_limits<int64_t>::max());
 
 #if ROCPROFSYS_USE_ROCM > 0
@@ -112,22 +95,31 @@ sample(pid_t _pid)
 
         if(_status == AMDSMI_STATUS_SUCCESS)
         {
-            // Store process info
-            process_info_t _info;
-            _info.process_id   = _proc_info.process_id;
-            _info.vram_usage   = _proc_info.vram_usage;
-            _info.sdma_usage   = _proc_info.sdma_usage;
-            _info.cu_occupancy = _proc_info.cu_occupancy;
+            // Serialize settings
+            std::bitset<8> settings_bits;
+            settings_bits.reset();
+            settings_bits.set(
+                static_cast<int>(
+                    trace_cache::gpu_process_stats_sample::settings_positions::vram_usage),
+                _proc_settings.vram_usage);
+            settings_bits.set(
+                static_cast<int>(
+                    trace_cache::gpu_process_stats_sample::settings_positions::sdma_usage),
+                _proc_settings.sdma_usage);
+            settings_bits.set(
+                static_cast<int>(
+                    trace_cache::gpu_process_stats_sample::settings_positions::cu_occupancy),
+                _proc_settings.cu_occupancy);
 
-            // Lock and store the sample
-            {
-                std::lock_guard<std::mutex> _lk(process_samples_mutex);
-                process_samples.push_back(_info);
-            }
+            // Store to trace_cache
+            trace_cache::get_buffer_storage().store(trace_cache::gpu_process_stats_sample{
+                settings_bits.to_ulong(), _proc_info.process_id, _timestamp,
+                _proc_info.vram_usage, _proc_info.sdma_usage, _proc_info.cu_occupancy });
 
             LOG_DEBUG("Collected process GPU metrics for PID {}: VRAM={} MB, "
                       "SDMA={} us, CU={}",
-                      _pid, _info.vram_usage, _info.sdma_usage, _info.cu_occupancy);
+                      _pid, _proc_info.vram_usage, _proc_info.sdma_usage,
+                      _proc_info.cu_occupancy);
         }
         else if(_status == AMDSMI_STATUS_NOT_SUPPORTED)
         {
@@ -160,111 +152,29 @@ sample(pid_t _pid)
 void
 post_process()
 {
-    std::lock_guard<std::mutex> _lk(process_samples_mutex);
-
-    if(process_samples.empty())
-    {
-        LOG_DEBUG("No process GPU metrics collected.");
-        return;
-    }
-
-    LOG_DEBUG("Post-processing {} process GPU metric samples", process_samples.size());
-
-    // Get process settings (global, not device-specific)
-    auto _proc_settings = get_process_settings();
-
-    // Check if any process metrics are enabled
-    bool _any_enabled = _proc_settings.vram_usage || _proc_settings.sdma_usage ||
-                        _proc_settings.cu_occupancy;
-
-    if(!_any_enabled) return;
-
-    const auto& _thread_info = thread_info::get(0, InternalTID);
-    if(!_thread_info) return;
-
-    auto use_perfetto = get_use_perfetto();
-
-    using counter_track = perfetto_counter_track<amd_smi::data>;
-
-    // Setup perfetto counter tracks for process metrics
-    auto setup_process_perfetto_tracks = [&]() {
-        // Use a special "device id" for process metrics (e.g., max value)
-        uint32_t _process_track_id = std::numeric_limits<uint32_t>::max();
-
-        if(counter_track::exists(_process_track_id)) return;
-
-        auto make_track_name = [](const char* metric) {
-            return JOIN(" ", "Process GPU", metric, "(S)");
-        };
-
-        if(_proc_settings.vram_usage)
-        {
-            counter_track::emplace(_process_track_id, make_track_name("VRAM Usage"),
-                                   "MB");
-        }
-        if(_proc_settings.sdma_usage)
-        {
-            counter_track::emplace(_process_track_id, make_track_name("SDMA Usage"),
-                                   "us");
-        }
-        if(_proc_settings.cu_occupancy)
-        {
-            counter_track::emplace(_process_track_id, make_track_name("CU Occupancy"),
-                                   "%");
-        }
-    };
-
-    if(use_perfetto)
-    {
-        setup_process_perfetto_tracks();
-
-        uint32_t _process_track_id = std::numeric_limits<uint32_t>::max();
-        size_t   track_index       = 0;
-
-        // Write perfetto metrics for each sample
-        // For now, just report the final values
-        if(!process_samples.empty())
-        {
-            const auto& last_sample = process_samples.back();
-            auto        _ts         = tim::get_clock_real_now<size_t, std::nano>();
-
-            if(_proc_settings.vram_usage)
-            {
-                TRACE_COUNTER("amd_smi",
-                              counter_track::at(_process_track_id, track_index++), _ts,
-                              last_sample.vram_usage);
-            }
-            if(_proc_settings.sdma_usage)
-            {
-                TRACE_COUNTER("amd_smi",
-                              counter_track::at(_process_track_id, track_index++), _ts,
-                              last_sample.sdma_usage);
-            }
-            if(_proc_settings.cu_occupancy)
-            {
-                TRACE_COUNTER("amd_smi",
-                              counter_track::at(_process_track_id, track_index++), _ts,
-                              last_sample.cu_occupancy);
-            }
-        }
-    }
-
-    // Clear processed samples
-    process_samples.clear();
+    // Post-processing is now handled by the trace cache processors
+    // (perfetto_processor_t and rocpd_processor_t)
+    LOG_DEBUG("GPU process stats post-processing delegated to trace cache processors");
 }
 
 void
-initialize_perfetto_tracks()
+initialize_perfetto_tracks(pid_t target_pid)
 {
     const auto thread_id = std::nullopt;
 
-    // Add tracks for process-specific metrics (not tied to a specific device)
+    // Add tracks for process-specific metrics, annotated with target process ID
     trace_cache::get_metadata_registry().add_track(
-        { trait::name<category::amd_smi_process_vram_usage>::value, thread_id, "{}" });
+        { trace_cache::info::annotate_with_process_id<category::amd_smi_process_vram_usage>(
+              target_pid),
+          thread_id, "{}" });
     trace_cache::get_metadata_registry().add_track(
-        { trait::name<category::amd_smi_process_sdma_usage>::value, thread_id, "{}" });
+        { trace_cache::info::annotate_with_process_id<category::amd_smi_process_sdma_usage>(
+              target_pid),
+          thread_id, "{}" });
     trace_cache::get_metadata_registry().add_track(
-        { trait::name<category::amd_smi_process_cu_occupancy>::value, thread_id, "{}" });
+        { trace_cache::info::annotate_with_process_id<category::amd_smi_process_cu_occupancy>(
+              target_pid),
+          thread_id, "{}" });
 }
 
 void
@@ -313,7 +223,7 @@ configure(const std::string& env_value)
     };
 
     // Initialize all process metrics to false
-    for(auto& it : supported)
+    for(const auto& it : supported)
         it.second = false;
 
     auto _keys = tim::delimit(env_value, ", ;:");

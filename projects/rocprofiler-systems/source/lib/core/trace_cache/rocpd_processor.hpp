@@ -52,6 +52,7 @@ public:
     void handle(const in_time_sample& sample);
     void handle(const pmc_event_with_sample& sample);
     void handle(const amd_smi_sample& sample);
+    void handle(const gpu_process_stats_sample& sample);
     void handle(const cpu_freq_sample& sample);
     void handle(const backtrace_region_sample& sample);
 

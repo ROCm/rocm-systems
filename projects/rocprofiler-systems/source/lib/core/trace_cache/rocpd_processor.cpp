@@ -559,6 +559,54 @@ rocpd_processor_t::handle([[maybe_unused]] const amd_smi_sample& _amd_smi)
 }
 
 void
+rocpd_processor_t::handle([[maybe_unused]] const gpu_process_stats_sample& _proc_stats)
+{
+#if ROCPROFSYS_USE_ROCM > 0
+    const auto* _name            = "gpu_process_stats";
+    auto        name_primary_key = m_data_processor->insert_string(_name);
+    auto        event_id = m_data_processor->insert_event(name_primary_key, 0, 0, 0);
+
+    // Use process ID as the agent identifier (not a GPU agent)
+    auto base_id = _proc_stats.process_id;
+
+    auto insert_event_and_sample = [&](bool enabled, const char* pmc_name,
+                                       const char* track_name, double value) {
+        if(!enabled) return;
+        m_data_processor->insert_pmc_event(event_id, base_id, pmc_name, value);
+        m_data_processor->insert_sample(track_name, _proc_stats.timestamp, event_id);
+    };
+
+    using pos = trace_cache::gpu_process_stats_sample::settings_positions;
+    std::bitset<8> settings_bits(_proc_stats.settings);
+    bool is_vram_enabled = settings_bits.test(static_cast<int>(pos::vram_usage));
+    bool is_sdma_enabled = settings_bits.test(static_cast<int>(pos::sdma_usage));
+    bool is_cu_enabled   = settings_bits.test(static_cast<int>(pos::cu_occupancy));
+
+    // Use annotated track names with process ID for consistency with Perfetto
+    insert_event_and_sample(
+        is_vram_enabled, trait::name<category::amd_smi_process_vram_usage>::value,
+        info::annotate_with_process_id<category::amd_smi_process_vram_usage>(
+            _proc_stats.process_id)
+            .c_str(),
+        static_cast<double>(_proc_stats.vram_usage));
+
+    insert_event_and_sample(
+        is_sdma_enabled, trait::name<category::amd_smi_process_sdma_usage>::value,
+        info::annotate_with_process_id<category::amd_smi_process_sdma_usage>(
+            _proc_stats.process_id)
+            .c_str(),
+        static_cast<double>(_proc_stats.sdma_usage));
+
+    insert_event_and_sample(
+        is_cu_enabled, trait::name<category::amd_smi_process_cu_occupancy>::value,
+        info::annotate_with_process_id<category::amd_smi_process_cu_occupancy>(
+            _proc_stats.process_id)
+            .c_str(),
+        static_cast<double>(_proc_stats.cu_occupancy));
+#endif
+}
+
+void
 rocpd_processor_t::handle([[maybe_unused]] const cpu_freq_sample& _cpu_freq_sample)
 {
 #if ROCPROFSYS_USE_ROCM > 0

@@ -47,6 +47,7 @@ enum class type_identifier_t : uint32_t
     cpu_freq_sample         = 0x0007,
     backtrace_region_sample = 0x0008,
     scratch_memory          = 0x0009,
+    gpu_process_stats_sample   = 0x000A,
     fragmented_space        = 0xFFFF
 };
 
@@ -751,6 +752,68 @@ get_size(const cpu_freq_sample& item)
                              item.virt_mem_usage, item.peak_rss,
                              item.context_switch_count, item.page_faults,
                              item.user_mode_time, item.kernel_mode_time, item.freqs);
+}
+
+struct gpu_process_stats_sample : cacheable_t
+{
+    static constexpr type_identifier_t type_identifier =
+        type_identifier_t::gpu_process_stats_sample;
+
+    gpu_process_stats_sample() = default;
+    gpu_process_stats_sample(uint64_t _settings, uint32_t _process_id, size_t _timestamp,
+                             uint64_t _vram_usage, uint64_t _sdma_usage,
+                             uint32_t _cu_occupancy)
+    : settings(_settings)
+    , process_id(_process_id)
+    , timestamp(_timestamp)
+    , vram_usage(_vram_usage)
+    , sdma_usage(_sdma_usage)
+    , cu_occupancy(_cu_occupancy)
+    {}
+
+    enum class settings_positions : uint8_t
+    {
+        vram_usage = 0,
+        sdma_usage,
+        cu_occupancy
+    };
+
+    uint64_t settings;  // bitfield
+    uint32_t process_id;
+    size_t   timestamp;
+    uint64_t vram_usage;
+    uint64_t sdma_usage;
+    uint32_t cu_occupancy;
+};
+
+template <>
+inline void
+serialize(uint8_t* buffer, const gpu_process_stats_sample& item)
+{
+    utility::store_value(buffer, item.settings, item.process_id,
+                         static_cast<uint64_t>(item.timestamp), item.vram_usage,
+                         item.sdma_usage, item.cu_occupancy);
+}
+
+template <>
+inline gpu_process_stats_sample
+deserialize(uint8_t*& buffer)
+{
+    gpu_process_stats_sample item;
+    uint64_t                 timestamp;
+    utility::parse_value(buffer, item.settings, item.process_id, timestamp,
+                         item.vram_usage, item.sdma_usage, item.cu_occupancy);
+    item.timestamp = timestamp;
+    return item;
+}
+
+template <>
+inline size_t
+get_size(const gpu_process_stats_sample& item)
+{
+    return utility::get_size(item.settings, item.process_id,
+                             static_cast<uint64_t>(item.timestamp), item.vram_usage,
+                             item.sdma_usage, item.cu_occupancy);
 }
 
 struct backtrace_region_sample : cacheable_t

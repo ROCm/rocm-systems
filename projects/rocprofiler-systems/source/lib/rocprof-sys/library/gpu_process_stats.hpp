@@ -33,6 +33,7 @@ namespace gpu_process_stats
 /// Process-specific GPU metrics data structure
 struct process_info_t
 {
+    uint64_t timestamp;
     uint32_t process_id;
     uint64_t vram_usage;
     uint64_t sdma_usage;
@@ -61,7 +62,7 @@ post_process();
 
 /// Initialize Perfetto tracks for process metrics
 void
-initialize_perfetto_tracks();
+initialize_perfetto_tracks(pid_t target_pid);
 
 /// Initialize PMC (Performance Monitoring Counters) info for process metrics
 void

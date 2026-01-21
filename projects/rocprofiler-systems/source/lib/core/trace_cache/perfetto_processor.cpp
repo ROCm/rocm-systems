@@ -1287,6 +1287,76 @@ perfetto_processor_t::handle([[maybe_unused]] const amd_smi_sample& _amd_smi)
 }
 
 void
+perfetto_processor_t::handle(
+    [[maybe_unused]] const gpu_process_stats_sample& _proc_stats)
+{
+#if ROCPROFSYS_USE_ROCM > 0
+    using pos = trace_cache::gpu_process_stats_sample::settings_positions;
+    std::bitset<8> settings_bits(_proc_stats.settings);
+    bool is_vram_enabled = settings_bits.test(static_cast<int>(pos::vram_usage));
+    bool is_sdma_enabled = settings_bits.test(static_cast<int>(pos::sdma_usage));
+    bool is_cu_enabled   = settings_bits.test(static_cast<int>(pos::cu_occupancy));
+
+    auto _ts = _proc_stats.timestamp;
+    auto _pid = _proc_stats.process_id;
+
+    // Use process_id as the track ID for process-level metrics
+    uint32_t _process_track_id = static_cast<uint32_t>(_pid);
+
+    // Setup perfetto counter tracks for process metrics with PID annotation
+    using process_counter_track = perfetto_counter_track<category::amd_smi_process_vram_usage>;
+
+    if(!process_counter_track::exists(_process_track_id))
+    {
+        if(is_vram_enabled)
+        {
+            process_counter_track::emplace(
+                _process_track_id,
+                trace_cache::info::annotate_with_process_id<
+                    category::amd_smi_process_vram_usage>(_pid),
+                "MB");
+        }
+        if(is_sdma_enabled)
+        {
+            process_counter_track::emplace(
+                _process_track_id,
+                trace_cache::info::annotate_with_process_id<
+                    category::amd_smi_process_sdma_usage>(_pid),
+                "us");
+        }
+        if(is_cu_enabled)
+        {
+            process_counter_track::emplace(
+                _process_track_id,
+                trace_cache::info::annotate_with_process_id<
+                    category::amd_smi_process_cu_occupancy>(_pid),
+                "%");
+        }
+    }
+
+    size_t track_index = 0;
+    if(is_vram_enabled)
+    {
+        TRACE_COUNTER("process_vram_usage",
+                      process_counter_track::at(_process_track_id, track_index++), _ts,
+                      static_cast<double>(_proc_stats.vram_usage));
+    }
+    if(is_sdma_enabled)
+    {
+        TRACE_COUNTER("process_sdma_usage",
+                      process_counter_track::at(_process_track_id, track_index++), _ts,
+                      static_cast<double>(_proc_stats.sdma_usage));
+    }
+    if(is_cu_enabled)
+    {
+        TRACE_COUNTER("process_cu_occupancy",
+                      process_counter_track::at(_process_track_id, track_index++), _ts,
+                      static_cast<double>(_proc_stats.cu_occupancy));
+    }
+#endif
+}
+
+void
 perfetto_processor_t::handle([[maybe_unused]] const in_time_sample& _sample)
 {
     // Dispatch based on category_enum_id using the category type mapping

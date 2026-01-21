@@ -143,6 +143,16 @@ annotate_with_device_id(uint32_t           device_id,
     return ss.str();
 }
 
+template <typename Category>
+inline std::string
+annotate_with_process_id(pid_t process_id)
+{
+    std::stringstream ss;
+    ss << std::string(tim::trait::name<Category>::value) + " [PID:" +
+              std::to_string(process_id) + "]";
+    return ss.str();
+}
+
 struct track
 {
     std::string           track_name;  // < Unique

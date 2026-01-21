@@ -444,7 +444,7 @@ bool Device::init() {
     }
     // Note: for now disable HSA path by default except for gfx942
     if (IS_WINDOWS && (GPU_ENABLE_PAL == 2) &&
-        (std::strcmp(roc_device->info().name_, "gfx942") != 0)) {
+        (std::string(roc_device->info().name_).find("gfx942") == std::string::npos)) {
       return false;
     }
     roc_device.release()->registerDevice();
