@@ -54,7 +54,7 @@ class Gfx9Factory : public Pm4Factory {
 // Mi100 factory class
 class Mi100Factory : public Gfx9Factory {
  public:
-  explicit Mi100Factory(const AgentInfo* agent_info);
+  explicit Mi100Factory(const AgentInfo* agent_info, bool is_base = false);
 
  virtual int GetAccumLowID() const override { return 1; }
 

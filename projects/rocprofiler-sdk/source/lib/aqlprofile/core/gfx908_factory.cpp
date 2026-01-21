@@ -80,7 +80,7 @@ void Mi100Factory::InitSpmBlockDelayTable() {
   *p++ = NULL;                // VGT = 10
 }
 
-Mi100Factory::Mi100Factory(const AgentInfo* agent_info)
+Mi100Factory::Mi100Factory(const AgentInfo* agent_info, bool is_base)
     : Gfx9Factory(block_table_, sizeof(block_table_), agent_info) {
   InitSpmBlockDelayTable();
   for (unsigned i = 0; i < AQLPROFILE_BLOCKS_NUMBER; ++i) {
@@ -101,7 +101,7 @@ Mi100Factory::Mi100Factory(const AgentInfo* agent_info)
         break;
       case TcpCounterBlockId:
         block_info->event_id_max = 87;
-        assert(agent_info->se_num * block_info->instance_count == cu_block_delay_table_size);
+        assert(is_base || (agent_info->se_per_xcc() * block_info->instance_count == cu_block_delay_table_size));
         break;
       case TccCounterBlockId:
         block_info->instance_count = 32;

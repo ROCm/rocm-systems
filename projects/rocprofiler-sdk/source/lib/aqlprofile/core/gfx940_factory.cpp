@@ -31,7 +31,7 @@ namespace aql_profile {
 class Mi300Factory : public Mi100Factory {
  public:
   explicit Mi300Factory(const AgentInfo* agent_info, gpu_id_t gpu_id = MI300_GPU_ID)
-      : Mi100Factory(agent_info) {
+      : Mi100Factory(agent_info, true) {
     InitSpmBlockDelayTable(gpu_id);
     for (unsigned blockname_id = 0; blockname_id < AQLPROFILE_BLOCKS_NUMBER;
          ++blockname_id) {
@@ -53,7 +53,7 @@ class Mi300Factory : public Mi100Factory {
           break;
         case TcpCounterBlockId:
           block_info->event_id_max = 84;
-          assert(agent_info->se_num * block_info->instance_count == cu_block_delay_table_size);
+          assert(agent_info->se_per_xcc() * block_info->instance_count == cu_block_delay_table_size);
           break;
         case TccCounterBlockId:
           block_info->instance_count = 16;
