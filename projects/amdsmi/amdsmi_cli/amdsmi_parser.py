@@ -1352,7 +1352,8 @@ class AMDSMIParser(argparse.ArgumentParser):
         # Help text for Arguments only on BM platforms
         if self.helpers.is_amdgpu_initialized():
             if self.helpers.is_baremetal():
-                set_fan_help = "Set GPU fan speed (0-255 or 0-100%%)"
+                fan_support = self.helpers.get_fan_support()
+                set_fan_help = f"Set GPU fan speed ({fan_support})"
                 perf_level_help_choices_str = ", ".join(self.helpers.get_perf_levels()[0][0:-1])
                 set_perf_level_help = f"Set one of the following performance levels:\n\t{perf_level_help_choices_str}"
                 power_profile_choices_str = ", ".join(self.helpers.get_power_profiles()[0:-1])

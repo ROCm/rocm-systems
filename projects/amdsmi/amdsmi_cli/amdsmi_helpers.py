@@ -945,6 +945,35 @@ class AMDSMIHelpers():
         return value
 
 
+    def get_fan_support(self):
+        """Check if fan control is supported on the first device.
+
+        Returns:
+            str: "0-255 or 0-100%%" if fan control is supported, "N/A" otherwise
+        """
+        device_handles = amdsmi_interface.amdsmi_get_processor_handles()
+        for dev in device_handles:
+            try:
+                # Try to get both fan speed and max fan speed
+                # If both succeed, fan control is supported
+                _ = amdsmi_interface.amdsmi_get_gpu_fan_speed(dev, 0)
+                _ = amdsmi_interface.amdsmi_get_gpu_fan_speed_max(dev, 0)
+                # Fan control is supported on this device
+                return "0-255 or 0-100%%"
+            except amdsmi_interface.AmdSmiLibraryException as e:
+                logging.debug(f"AMDSMIHelpers.get_fan_support - Unable to get fan info for device {dev}: {str(e)}")
+                if e.err_code == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED:
+                    logging.debug(f"AMDSMIHelpers.get_fan_support - Device {dev} does not support fan control")
+                    return "N/A"
+                return "N/A"
+            except Exception as e:
+                logging.debug(f"AMDSMIHelpers.get_fan_support - Unexpected error occurred --> Unable to get fan info for device {dev}: {str(e)}")
+                return "N/A"
+            # Only check the first device (socket device, never partition)
+            break
+        return "N/A"
+
+
     def get_soc_pstates(self):
         device_handles = amdsmi_interface.amdsmi_get_processor_handles()
         soc_pstate_profile_list = []
