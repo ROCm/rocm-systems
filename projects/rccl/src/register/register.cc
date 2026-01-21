@@ -18,7 +18,11 @@
 
 using namespace rccl;
 
-NCCL_PARAM(LocalRegister, "LOCAL_REGISTER", 0); // LWPCOMMLIBS-632: off by default for RCCL as unsupported feature.
+#if ROCM_VERSION >= 71100
+NCCL_PARAM(LocalRegister, "LOCAL_REGISTER", 1);
+#else
+NCCL_PARAM(LocalRegister, "LOCAL_REGISTER", 0);
+#endif
 
 ncclResult_t ncclRegLocalIsValid(struct ncclReg *reg, bool *isValid) {
   if (reg && isValid) {

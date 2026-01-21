@@ -232,7 +232,15 @@ private:
 
     if (flags & (Recv*RolePostRecv | Send*RolePostSend)) {
       step += StepPerSlice;
-      STORE(connStepPtr, step);
+      if (!skip_fence && !((flags & RolePostSend) && dataStored)) {
+        __atomic_signal_fence(__ATOMIC_ACQ_REL);
+        asm volatile("s_waitcnt lgkmcnt(0) vmcnt(0)" ::: "memory");
+      }
+      if (Direct) {
+        __atomic_store_n(connStepPtr, step, __ATOMIC_RELEASE);
+      } else {
+        STORE(connStepPtr, step);
+      }
     }
   }
 
@@ -601,9 +609,14 @@ public:
       }
       if (flags & (Recv*RolePostRecv | Send*RolePostSend)) {
         if (Send && (!Recv || (flags & RolePostSend)) && (dstSize!=0 || (flags&ConnFifoEnabled))) {
-          fence_acq_rel_sys();
+          __atomic_signal_fence(__ATOMIC_ACQ_REL);
+          asm volatile("s_waitcnt lgkmcnt(0) vmcnt(0)" ::: "memory");
         }
-        st_relaxed_sys_global(connStepPtr, step);
+        if (Direct && fn.work->regUsed) {
+          __atomic_store_n(connStepPtr, step, __ATOMIC_RELEASE);
+        } else {
+          STORE(connStepPtr, step);
+        }
       }
     }
   }
