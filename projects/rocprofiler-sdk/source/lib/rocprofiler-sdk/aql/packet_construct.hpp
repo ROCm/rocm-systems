@@ -22,7 +22,7 @@
 
 #pragma once
 
-#include "lib/rocprofiler-sdk/aql/aql_profile_v2.h"
+#include "lib/aqlprofile/aql_profile_v2.h"
 #include "lib/rocprofiler-sdk/aql/helpers.hpp"
 #include "lib/rocprofiler-sdk/counters/metrics.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
