@@ -8,13 +8,17 @@
 #include "collectives.h"
 #include "primitives.h"
 
-namespace {
-  template<typename T, typename RedOp, typename Proto>
-#if defined(USE_INDIRECT_FUNCTION_CALL) && !defined(__gfx942__) && !defined(__gfx950__)
-  __device__ void runRing(int tid, int nthreads, struct ncclDevWorkColl* work) {
+// Use named namespace in self-contained mode to avoid conflicts with other headers
+// Use anonymous namespace in RDC mode for internal linkage (faster linking)
+#ifdef NCCL_DEFINE_SHMEM
+namespace broadcast_impl {
+#define BROADCAST_IMPL broadcast_impl::
 #else
-  __device__ __attribute__((noinline)) void runRing(int tid, int nthreads, struct ncclDevWorkColl* work) {
+namespace {
+#define BROADCAST_IMPL
 #endif
+  template<typename T, typename RedOp, typename Proto>
+  __device__ void runRing(int tid, int nthreads, struct ncclDevWorkColl* work) {
 #if defined(ENABLE_NPKIT)
     const int bid = ncclShmem.channelId - work->channelLo;
     int npKitCtxIdx = bid; // unused variable - compiler warning
@@ -119,20 +123,20 @@ template<typename T, typename RedOp>
 struct RunWorkColl<ncclFuncBroadcast, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE> {
   __device__ __forceinline__ void run(int tid, int nthreads, struct ncclDevWorkColl* work) {
     using Proto = ProtoSimple<BROADCAST_CHUNKSTEPS/BROADCAST_SLICESTEPS, BROADCAST_SLICESTEPS>;
-    runRing<T, RedOp, Proto>(tid, nthreads, work);
+    BROADCAST_IMPL runRing<T, RedOp, Proto>(tid, nthreads, work);
   }
 };
 
 template<typename T, typename RedOp>
 struct RunWorkColl<ncclFuncBroadcast, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_LL> {
   __device__ __forceinline__ void run(int tid, int nthreads, struct ncclDevWorkColl* work) {
-    runRing<T, RedOp, ProtoLL>(tid, nthreads, work);
+    BROADCAST_IMPL runRing<T, RedOp, ProtoLL>(tid, nthreads, work);
   }
 };
 
 template<typename T, typename RedOp>
 struct RunWorkColl<ncclFuncBroadcast, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_LL128> {
   __device__ __forceinline__ void run(int tid, int nthreads, struct ncclDevWorkColl* work) {
-    runRing<T, RedOp, ProtoLL128>(tid, nthreads, work);
+    BROADCAST_IMPL runRing<T, RedOp, ProtoLL128>(tid, nthreads, work);
   }
 };

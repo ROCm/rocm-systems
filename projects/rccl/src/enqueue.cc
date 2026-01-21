@@ -44,23 +44,140 @@ struct ncclKernelMatch {
   bool specialized;
 };
 
+// Map from ncclDataType_t to type string suffix for kernel selection
+static const char* ncclDataTypeToKernelSuffix(ncclDataType_t type)
+{
+    switch(type)
+    {
+        case ncclInt8:
+        case ncclUint8: return "i8"; // i8 used for both since many ops treat them same
+        case ncclInt32: return "i32";
+        case ncclUint32: return "u32";
+        case ncclInt64: return "i64";
+        case ncclUint64: return "u64";
+        case ncclFloat16: return "f16";
+        case ncclFloat32: return "f32";
+        case ncclFloat64: return "f64";
+        case ncclBfloat16: return "bf16";
+        case ncclFloat8e4m3: return "f8e4m3";
+        case ncclFloat8e5m2: return "f8e5m2";
+        default: return nullptr;
+    }
+}
 
+// Type-specific kernel tables - one per data type
+static ncclKernelMatch const ncclKerns_i8[3] = {
+    {(void*)ncclDevKernel_i8_1, true},
+    {(void*)ncclDevKernel_i8_2, true},
+    {(void*)ncclDevKernel_i8_4, true}
+};
+static ncclKernelMatch const ncclKerns_u8[3] = {
+    {(void*)ncclDevKernel_u8_1, true},
+    {(void*)ncclDevKernel_u8_2, true},
+    {(void*)ncclDevKernel_u8_4, true}
+};
+static ncclKernelMatch const ncclKerns_i32[3] = {
+    {(void*)ncclDevKernel_i32_1, true},
+    {(void*)ncclDevKernel_i32_2, true},
+    {(void*)ncclDevKernel_i32_4, true}
+};
+static ncclKernelMatch const ncclKerns_u32[3] = {
+    {(void*)ncclDevKernel_u32_1, true},
+    {(void*)ncclDevKernel_u32_2, true},
+    {(void*)ncclDevKernel_u32_4, true}
+};
+static ncclKernelMatch const ncclKerns_i64[3] = {
+    {(void*)ncclDevKernel_i64_1, true},
+    {(void*)ncclDevKernel_i64_2, true},
+    {(void*)ncclDevKernel_i64_4, true}
+};
+static ncclKernelMatch const ncclKerns_u64[3] = {
+    {(void*)ncclDevKernel_u64_1, true},
+    {(void*)ncclDevKernel_u64_2, true},
+    {(void*)ncclDevKernel_u64_4, true}
+};
+static ncclKernelMatch const ncclKerns_f16[3] = {
+    {(void*)ncclDevKernel_f16_1, true},
+    {(void*)ncclDevKernel_f16_2, true},
+    {(void*)ncclDevKernel_f16_4, true}
+};
+static ncclKernelMatch const ncclKerns_f32[3] = {
+    {(void*)ncclDevKernel_f32_1, true},
+    {(void*)ncclDevKernel_f32_2, true},
+    {(void*)ncclDevKernel_f32_4, true}
+};
+static ncclKernelMatch const ncclKerns_f64[3] = {
+    {(void*)ncclDevKernel_f64_1, true},
+    {(void*)ncclDevKernel_f64_2, true},
+    {(void*)ncclDevKernel_f64_4, true}
+};
+static ncclKernelMatch const ncclKerns_bf16[3] = {
+    {(void*)ncclDevKernel_bf16_1, true},
+    {(void*)ncclDevKernel_bf16_2, true},
+    {(void*)ncclDevKernel_bf16_4, true}
+};
+static ncclKernelMatch const ncclKerns_f8e4m3[3] = {
+    {(void*)ncclDevKernel_f8e4m3_1, true},
+    {(void*)ncclDevKernel_f8e4m3_2, true},
+    {(void*)ncclDevKernel_f8e4m3_4, true}
+};
+static ncclKernelMatch const ncclKerns_f8e5m2[3] = {
+    {(void*)ncclDevKernel_f8e5m2_1, true},
+    {(void*)ncclDevKernel_f8e5m2_2, true},
+    {(void*)ncclDevKernel_f8e5m2_4, true}
+};
+
+// Get type-specific kernel table for a given data type
+static const ncclKernelMatch* ncclGetKernelTableForType(ncclDataType_t type)
+{
+    switch(type)
+    {
+        case ncclInt8:
+        case ncclUint8: return ncclKerns_i8;
+        case ncclInt32: return ncclKerns_i32;
+        case ncclUint32: return ncclKerns_u32;
+        case ncclInt64: return ncclKerns_i64;
+        case ncclUint64: return ncclKerns_u64;
+        case ncclFloat16: return ncclKerns_f16;
+        case ncclFloat32: return ncclKerns_f32;
+        case ncclFloat64: return ncclKerns_f64;
+        case ncclBfloat16: return ncclKerns_bf16;
+        case ncclFloat8e4m3: return ncclKerns_f8e4m3;
+        case ncclFloat8e5m2: return ncclKerns_f8e5m2;
+        default: return ncclKerns_i8; // fallback to generic
+    }
+}
+
+// Generic kernels now dispatch to type-specific tables at runtime
+// This provides flexibility while avoiding large generic function tables
 #ifdef ENABLE_COLLTRACE
 #define ncclGetKernelIndex(p_comm) ((p_comm)->unroll + ((p_comm)->collTraceEnabled ? 3 : 0))
 static ncclKernelMatch const ncclKerns[6] = {
-  {(void *)ncclDevKernel_Generic_1, true},
-  {(void *)ncclDevKernel_Generic_2, true},
-  {(void *)ncclDevKernel_Generic_4, true},
-  {(void *)ncclDevKernelDebug_Generic_1, true},
-  {(void *)ncclDevKernelDebug_Generic_2, true},
-  {(void *)ncclDevKernelDebug_Generic_4, true}
+#ifdef BUILD_GENERIC_KERNELS
+    {(void*)ncclDevKernel_Generic_1, true},
+    {(void*)ncclDevKernel_Generic_2, true},
+    {(void*)ncclDevKernel_Generic_4, true},
+#else
+    {nullptr, false}, // Generic kernels disabled - must use type-specific kernels
+    {nullptr, false},
+    {nullptr, false},
+#endif
+    {     (void*)ncclDevKernel_i8_1, true}, // Debug fallback to i8
+    {     (void*)ncclDevKernel_i8_2, true},
+    {     (void*)ncclDevKernel_i8_4, true}
 };
 #else
 #define ncclGetKernelIndex(p_comm) ((p_comm)->unroll)
 static ncclKernelMatch const ncclKerns[3] = {
+#ifdef BUILD_GENERIC_KERNELS
   {(void*)ncclDevKernel_Generic_1, true},
   {(void*)ncclDevKernel_Generic_2, true},
   {(void*)ncclDevKernel_Generic_4, true}
+#else
+  {nullptr, false}, // Generic kernels disabled - must use type-specific kernels
+  {nullptr, false},
+  {nullptr, false}
+#endif
 };
 #endif
 
@@ -894,8 +1011,28 @@ static ncclResult_t scheduleCollTasksToPlan(
     plan->threadPerBlock = std::max(plan->threadPerBlock, 192 /* 3*WARP_SIZE */);
 #endif
     if (!plan->kernelSpecialized) {
-      plan->kernelFn = ncclKerns[ncclGetKernelIndex(comm)].kernelFn;
-      plan->kernelSpecialized = ncclKerns[ncclGetKernelIndex(comm)].specialized;
+        // Prefer type-specific kernels for better performance
+        const ncclKernelMatch* typeKernels = ncclGetKernelTableForType(task->datatype);
+        int                    kernelIdx   = ncclGetKernelIndex(comm);
+
+        // Use type-specific kernel if available, fall back to generic
+        if(kernelIdx < 3)
+        {
+            plan->kernelFn          = typeKernels[kernelIdx].kernelFn;
+            plan->kernelSpecialized = typeKernels[kernelIdx].specialized;
+        }
+        else
+        {
+            // Debug mode or fallback
+            plan->kernelFn          = ncclKerns[kernelIdx].kernelFn;
+            plan->kernelSpecialized = ncclKerns[kernelIdx].specialized;
+#ifndef BUILD_GENERIC_KERNELS
+            if (plan->kernelFn == nullptr) {
+                WARN("Generic kernels are disabled but required for this code path. Please rebuild RCCL with -DBUILD_GENERIC_KERNELS=ON");
+                return ncclInvalidUsage;
+            }
+#endif
+        }
     }
     // Profiler
     plan->groupApiEventHandle = task->groupApiEventHandle;
@@ -1263,6 +1400,12 @@ static ncclResult_t scheduleP2pTasksToPlan(
   if (!plan->kernelSpecialized) {
     plan->kernelFn = ncclKerns[ncclGetKernelIndex(comm)].kernelFn;
     plan->kernelSpecialized = ncclKerns[ncclGetKernelIndex(comm)].specialized;
+#ifndef BUILD_GENERIC_KERNELS
+    if (plan->kernelFn == nullptr) {
+      WARN("Generic kernels are disabled but required for this code path. Please rebuild RCCL with -DBUILD_GENERIC_KERNELS=ON");
+      return ncclInvalidUsage;
+    }
+#endif
   }
 
   // Compute how much to split operations

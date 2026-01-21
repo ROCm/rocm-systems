@@ -12,8 +12,72 @@
 #include "device.h"
 #include "op128.h"
 #include "reduce_kernel.h"
+// In self-contained mode (NCCL_DEFINE_SHMEM), device_table.h is not needed
+// because all device functions and tables are defined inline in each kernel file
+#ifndef NCCL_DEFINE_SHMEM
 #include "device_table.h"
+#endif
 #include "network/unpack/unpack_defs.h"
+
+// Forward declarations for type-specific function tables
+// These are defined in the generated device_table.h
+typedef void (*ncclDevFuncPtr_t)();
+
+// Type-specific function tables (defined in generated code)
+// Skip these extern declarations in self-contained mode (NCCL_DEFINE_SHMEM)
+// because each kernel file only defines its own type's tables
+#if defined(USE_INDIRECT_FUNCTION_CALL) && !defined(__gfx950__) && !defined(NCCL_DEFINE_SHMEM)
+extern __device__ ncclDevFuncPtr_t const ncclDevFuncTable_i8_1[];
+extern __device__ ncclDevFuncPtr_t const ncclDevFuncTable_i8_2[];
+extern __device__ ncclDevFuncPtr_t const ncclDevFuncTable_i8_4[];
+extern __device__ ncclDevFuncPtr_t const ncclDevFuncTable_u8_1[];
+extern __device__ ncclDevFuncPtr_t const ncclDevFuncTable_u8_2[];
+extern __device__ ncclDevFuncPtr_t const ncclDevFuncTable_u8_4[];
+extern __device__ ncclDevFuncPtr_t const ncclDevFuncTable_i32_1[];
+extern __device__ ncclDevFuncPtr_t const ncclDevFuncTable_i32_2[];
+extern __device__ ncclDevFuncPtr_t const ncclDevFuncTable_i32_4[];
+extern __device__ ncclDevFuncPtr_t const ncclDevFuncTable_u32_1[];
+extern __device__ ncclDevFuncPtr_t const ncclDevFuncTable_u32_2[];
+extern __device__ ncclDevFuncPtr_t const ncclDevFuncTable_u32_4[];
+extern __device__ ncclDevFuncPtr_t const ncclDevFuncTable_i64_1[];
+extern __device__ ncclDevFuncPtr_t const ncclDevFuncTable_i64_2[];
+extern __device__ ncclDevFuncPtr_t const ncclDevFuncTable_i64_4[];
+extern __device__ ncclDevFuncPtr_t const ncclDevFuncTable_u64_1[];
+extern __device__ ncclDevFuncPtr_t const ncclDevFuncTable_u64_2[];
+extern __device__ ncclDevFuncPtr_t const ncclDevFuncTable_u64_4[];
+extern __device__ ncclDevFuncPtr_t const ncclDevFuncTable_f16_1[];
+extern __device__ ncclDevFuncPtr_t const ncclDevFuncTable_f16_2[];
+extern __device__ ncclDevFuncPtr_t const ncclDevFuncTable_f16_4[];
+extern __device__ ncclDevFuncPtr_t const ncclDevFuncTable_f32_1[];
+extern __device__ ncclDevFuncPtr_t const ncclDevFuncTable_f32_2[];
+extern __device__ ncclDevFuncPtr_t const ncclDevFuncTable_f32_4[];
+extern __device__ ncclDevFuncPtr_t const ncclDevFuncTable_f64_1[];
+extern __device__ ncclDevFuncPtr_t const ncclDevFuncTable_f64_2[];
+extern __device__ ncclDevFuncPtr_t const ncclDevFuncTable_f64_4[];
+extern __device__ ncclDevFuncPtr_t const ncclDevFuncTable_bf16_1[];
+extern __device__ ncclDevFuncPtr_t const ncclDevFuncTable_bf16_2[];
+extern __device__ ncclDevFuncPtr_t const ncclDevFuncTable_bf16_4[];
+extern __device__ ncclDevFuncPtr_t const ncclDevFuncTable_f8e4m3_1[];
+extern __device__ ncclDevFuncPtr_t const ncclDevFuncTable_f8e4m3_2[];
+extern __device__ ncclDevFuncPtr_t const ncclDevFuncTable_f8e4m3_4[];
+extern __device__ ncclDevFuncPtr_t const ncclDevFuncTable_f8e5m2_1[];
+extern __device__ ncclDevFuncPtr_t const ncclDevFuncTable_f8e5m2_2[];
+extern __device__ ncclDevFuncPtr_t const ncclDevFuncTable_f8e5m2_4[];
+#endif
+
+// Type-specific caller functions are defined inline in device_table.h
+
+// Generic function tables and callers (these are redirected to type-specific ones in type-specific kernels)
+// Unroll-specific dispatch functions that extract type from funcId
+// and call the appropriate NCCL_CALL_FUNCTIONS_<type>_<unroll>(funcId)
+// Each function is specialized for a specific unroll factor (no runtime branching)
+// Skip in self-contained mode (NCCL_DEFINE_SHMEM) - not needed when each kernel has its own dispatcher
+#ifndef NCCL_DEFINE_SHMEM
+extern __device__ void callTypeSpecificFunction_1(int funcId);
+extern __device__ void callTypeSpecificFunction_2(int funcId);
+extern __device__ void callTypeSpecificFunction_4(int funcId);
+#endif
+
 #define NCCL_MAX_DEV_ARITY (NCCL_MAX_TREE_ARITY-1)  // Using balanced tree instead of split tree
 
 #define __syncwarp()
@@ -186,11 +250,25 @@ struct ncclShmemData {
   uint64_t barrier_pat;
 };
 
-extern __shared__ ncclShmemData ncclShmem;
-#if __CUDA_ARCH__ >= 700
-  extern __shared__ ulong2 ncclShmemPerWarp[/*ncclShmemDynamicSize()/sizeof(ulong2)*/];
+// Shared memory declarations/definitions
+// When NCCL_DEFINE_SHMEM is defined before including this header, we provide
+// definitions (for self-contained kernels without -fgpu-rdc).
+// Otherwise, we provide extern declarations (for RDC builds where common.cu
+// provides the definitions).
+#ifdef NCCL_DEFINE_SHMEM
+  __shared__ ncclShmemData ncclShmem;
+  #if __CUDA_ARCH__ >= 700
+    __shared__ ulong2 ncclShmemPerWarp[/*ncclShmemDynamicSize()/sizeof(ulong2)*/];
+  #else
+    __shared__ ulong2 ncclShmemPerWarp[ncclShmemScratchWarpSize()*(NCCL_MAX_NTHREADS/WARP_SIZE)/sizeof(ulong2)];
+  #endif
 #else
-  extern __shared__ ulong2 ncclShmemPerWarp[ncclShmemScratchWarpSize()*(NCCL_MAX_NTHREADS/WARP_SIZE)/sizeof(ulong2)];
+  extern __shared__ ncclShmemData ncclShmem;
+  #if __CUDA_ARCH__ >= 700
+    extern __shared__ ulong2 ncclShmemPerWarp[/*ncclShmemDynamicSize()/sizeof(ulong2)*/];
+  #else
+    extern __shared__ ulong2 ncclShmemPerWarp[ncclShmemScratchWarpSize()*(NCCL_MAX_NTHREADS/WARP_SIZE)/sizeof(ulong2)];
+  #endif
 #endif
 
 #ifdef ENABLE_FAULT_INJECTION
@@ -507,7 +585,7 @@ __device__ __forceinline__ void profiler(int action) {
   }
 }
 
-template<int SpecializedFnId, typename SpecializedRunWorkBatch, bool COLLTRACE, int COLL_UNROLL>
+template<int SpecializedFnId, typename SpecializedRunWorkBatch, typename TypeDispatcher, bool COLLTRACE, int COLL_UNROLL>
 __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* args) {
   const int tid = threadIdx.x;
   int tn = blockDim.x;
@@ -674,21 +752,9 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
     if (0 <= SpecializedFnId && ncclShmem.funcId == (unsigned)SpecializedFnId) {
       SpecializedRunWorkBatch().run();
     } else {
-#ifdef USE_INDIRECT_FUNCTION_CALL
-      if (COLL_UNROLL == 1)
-        ncclDevFuncTable_1[ncclShmem.funcId]();
-      else if (COLL_UNROLL == 2)
-        ncclDevFuncTable_2[ncclShmem.funcId]();
-      else
-        ncclDevFuncTable_4[ncclShmem.funcId]();
-#else
-      if (COLL_UNROLL == 1)
-        NCCL_CALL_FUNCTIONS_1(ncclShmem.funcId);
-      else if (COLL_UNROLL == 2)
-        NCCL_CALL_FUNCTIONS_2(ncclShmem.funcId);
-      else
-        NCCL_CALL_FUNCTIONS_4(ncclShmem.funcId);
-#endif
+      // Dispatch using the type-specific dispatcher passed as template parameter
+      // This works for both direct (switch/case) and indirect (function pointer) dispatch
+      TypeDispatcher::dispatch(ncclShmem.funcId, COLL_UNROLL);
     }
 
     if (ncclShmem.nextBatchIx == -1) break;
@@ -721,6 +787,8 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
 #endif
 }
 
+#ifdef BUILD_GENERIC_KERNELS
+// Generic kernels - dispatch to type-specific functions at runtime
 __global__ void ncclDevKernel_Generic_1(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
 __global__ void ncclDevKernel_Generic_2(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
 __global__ void ncclDevKernel_Generic_4(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
@@ -728,7 +796,46 @@ __global__ void ncclDevKernel_Generic_4(ncclDevKernelArgsDefaultStorage NCCL_GRI
 __global__ void ncclDevKernelDebug_Generic_1(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
 __global__ void ncclDevKernelDebug_Generic_2(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
 __global__ void ncclDevKernelDebug_Generic_4(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
-#endif
+#endif // ENABLE_COLLTRACE
+#endif // BUILD_GENERIC_KERNELS
+
+// Type-specific kernel declarations
+__global__ void ncclDevKernel_i8_1(ncclDevKernelArgs4K NCCL_GRID_CONSTANT const args4K);
+__global__ void ncclDevKernel_i8_2(ncclDevKernelArgs4K NCCL_GRID_CONSTANT const args4K);
+__global__ void ncclDevKernel_i8_4(ncclDevKernelArgs4K NCCL_GRID_CONSTANT const args4K);
+__global__ void ncclDevKernel_u8_1(ncclDevKernelArgs4K NCCL_GRID_CONSTANT const args4K);
+__global__ void ncclDevKernel_u8_2(ncclDevKernelArgs4K NCCL_GRID_CONSTANT const args4K);
+__global__ void ncclDevKernel_u8_4(ncclDevKernelArgs4K NCCL_GRID_CONSTANT const args4K);
+__global__ void ncclDevKernel_i32_1(ncclDevKernelArgs4K NCCL_GRID_CONSTANT const args4K);
+__global__ void ncclDevKernel_i32_2(ncclDevKernelArgs4K NCCL_GRID_CONSTANT const args4K);
+__global__ void ncclDevKernel_i32_4(ncclDevKernelArgs4K NCCL_GRID_CONSTANT const args4K);
+__global__ void ncclDevKernel_u32_1(ncclDevKernelArgs4K NCCL_GRID_CONSTANT const args4K);
+__global__ void ncclDevKernel_u32_2(ncclDevKernelArgs4K NCCL_GRID_CONSTANT const args4K);
+__global__ void ncclDevKernel_u32_4(ncclDevKernelArgs4K NCCL_GRID_CONSTANT const args4K);
+__global__ void ncclDevKernel_i64_1(ncclDevKernelArgs4K NCCL_GRID_CONSTANT const args4K);
+__global__ void ncclDevKernel_i64_2(ncclDevKernelArgs4K NCCL_GRID_CONSTANT const args4K);
+__global__ void ncclDevKernel_i64_4(ncclDevKernelArgs4K NCCL_GRID_CONSTANT const args4K);
+__global__ void ncclDevKernel_u64_1(ncclDevKernelArgs4K NCCL_GRID_CONSTANT const args4K);
+__global__ void ncclDevKernel_u64_2(ncclDevKernelArgs4K NCCL_GRID_CONSTANT const args4K);
+__global__ void ncclDevKernel_u64_4(ncclDevKernelArgs4K NCCL_GRID_CONSTANT const args4K);
+__global__ void ncclDevKernel_f16_1(ncclDevKernelArgs4K NCCL_GRID_CONSTANT const args4K);
+__global__ void ncclDevKernel_f16_2(ncclDevKernelArgs4K NCCL_GRID_CONSTANT const args4K);
+__global__ void ncclDevKernel_f16_4(ncclDevKernelArgs4K NCCL_GRID_CONSTANT const args4K);
+__global__ void ncclDevKernel_f32_1(ncclDevKernelArgs4K NCCL_GRID_CONSTANT const args4K);
+__global__ void ncclDevKernel_f32_2(ncclDevKernelArgs4K NCCL_GRID_CONSTANT const args4K);
+__global__ void ncclDevKernel_f32_4(ncclDevKernelArgs4K NCCL_GRID_CONSTANT const args4K);
+__global__ void ncclDevKernel_f64_1(ncclDevKernelArgs4K NCCL_GRID_CONSTANT const args4K);
+__global__ void ncclDevKernel_f64_2(ncclDevKernelArgs4K NCCL_GRID_CONSTANT const args4K);
+__global__ void ncclDevKernel_f64_4(ncclDevKernelArgs4K NCCL_GRID_CONSTANT const args4K);
+__global__ void ncclDevKernel_bf16_1(ncclDevKernelArgs4K NCCL_GRID_CONSTANT const args4K);
+__global__ void ncclDevKernel_bf16_2(ncclDevKernelArgs4K NCCL_GRID_CONSTANT const args4K);
+__global__ void ncclDevKernel_bf16_4(ncclDevKernelArgs4K NCCL_GRID_CONSTANT const args4K);
+__global__ void ncclDevKernel_f8e4m3_1(ncclDevKernelArgs4K NCCL_GRID_CONSTANT const args4K);
+__global__ void ncclDevKernel_f8e4m3_2(ncclDevKernelArgs4K NCCL_GRID_CONSTANT const args4K);
+__global__ void ncclDevKernel_f8e4m3_4(ncclDevKernelArgs4K NCCL_GRID_CONSTANT const args4K);
+__global__ void ncclDevKernel_f8e5m2_1(ncclDevKernelArgs4K NCCL_GRID_CONSTANT const args4K);
+__global__ void ncclDevKernel_f8e5m2_2(ncclDevKernelArgs4K NCCL_GRID_CONSTANT const args4K);
+__global__ void ncclDevKernel_f8e5m2_4(ncclDevKernelArgs4K NCCL_GRID_CONSTANT const args4K);
 
 #define DEFINE_ncclDevKernel_nop(suffix, coll, redop, ty, algo, proto, specializedFnId) \
   __global__ void ncclDevKernel_##suffix(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {}
@@ -740,7 +847,7 @@ __global__ void ncclDevKernelDebug_Generic_4(ncclDevKernelArgsDefaultStorage NCC
   }
 #else
 #define DEFINE_ncclDevFunc(suffix, coll, redop, ty, algo, proto, acc, pipeline, unroll) \
-  __device__ __attribute__((noinline)) void ncclDevFunc_##suffix() { \
+  __device__ void ncclDevFunc_##suffix() { \
     RunWorkBatch<coll, ty, redop<ty>, algo, proto, acc, unroll, pipeline>().run(); \
   }
 #endif

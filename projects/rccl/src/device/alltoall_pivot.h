@@ -8,13 +8,17 @@
 #include "collectives.h"
 #include "primitives.h"
 
-namespace {
-  template<typename T, typename RedOp, typename Proto>
-#if defined(USE_INDIRECT_FUNCTION_CALL) && !defined(__gfx942__) && !defined(__gfx950__)
-  __device__ void runRing(int tid, int nthreads, struct ncclDevWorkColl* work) {
+// Use named namespace in self-contained mode to avoid conflicts with other headers
+// Use anonymous namespace in RDC mode for internal linkage (faster linking)
+#ifdef NCCL_DEFINE_SHMEM
+namespace alltoall_impl {
+#define ALLTOALL_IMPL alltoall_impl::
 #else
-  __device__ __attribute__((noinline)) void runRing(int tid, int nthreads, struct ncclDevWorkColl* work) {
+namespace {
+#define ALLTOALL_IMPL
 #endif
+  template<typename T, typename RedOp, typename Proto>
+  __device__ void runRing(int tid, int nthreads, struct ncclDevWorkColl* work) {
     const int bid = ncclShmem.channelId - work->channelLo;
     const int nranks = ncclShmem.comm.nRanks;
     size_t count, partOffset, partCount, chunkCount;
@@ -78,6 +82,6 @@ template<typename T, typename RedOp>
 struct RunWorkColl<ncclFuncAlltoAllPivot, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE> {
   __device__ __forceinline__ void run(int tid, int nThreads, struct ncclDevWorkColl* work) {
     using Proto = ProtoSimple<ALLTOALL_PIVOT_CHUNKSTEPS/ALLTOALL_PIVOT_SLICESTEPS, ALLTOALL_PIVOT_SLICESTEPS>;
-    runRing<T, RedOp, Proto>(tid, nThreads, work);
+    ALLTOALL_IMPL runRing<T, RedOp, Proto>(tid, nThreads, work);
   }
 };

@@ -13,13 +13,17 @@
 #include "npkit/npkit.h"
 #endif
 
-namespace {
-  template<typename T, typename RedOp, typename Proto, int RCCLMetadata>
-#if defined(USE_INDIRECT_FUNCTION_CALL) && !defined(__gfx942__) && !defined(__gfx950__)
-  __device__ void runRing(int tid, int nthreads, struct ncclDevWorkColl* work) {
+// Use named namespace in self-contained mode to avoid conflicts with other headers
+// Use anonymous namespace in RDC mode for internal linkage (faster linking)
+#ifdef NCCL_DEFINE_SHMEM
+namespace allreduce_impl {
+#define ALLREDUCE_IMPL allreduce_impl::
 #else
-  __device__ __attribute__((noinline)) void runRing(int tid, int nthreads, struct ncclDevWorkColl* work) {
+namespace {
+#define ALLREDUCE_IMPL
 #endif
+  template<typename T, typename RedOp, typename Proto, int RCCLMetadata>
+  __device__ void runRing(int tid, int nthreads, struct ncclDevWorkColl* work) {
 #ifdef ENABLE_WARP_SPEED
     int warp = threadIdx.x / WARP_SIZE;
     ncclRing *ring = &ncclShmem.warpChannel[warp].ring;
@@ -221,11 +225,7 @@ namespace {
   }
 
   template<typename T, typename RedOp, typename Proto>
-#if defined(USE_INDIRECT_FUNCTION_CALL) && !defined(__gfx942__) && !defined(__gfx950__)
   __device__ void runTreeUpDown(int tid, int nthreads, struct ncclDevWorkColl* work) {
-#else
-  __device__ __attribute__((noinline)) void runTreeUpDown(int tid, int nthreads, struct ncclDevWorkColl* work) {
-#endif
 #if defined(ENABLE_NPKIT)
     const int bid = ncclShmem.channelId - work->channelLo;
     int npKitCtxIdx = bid; // unused variable - compiler warning
@@ -369,11 +369,7 @@ namespace {
   }
 
   template<typename T, typename RedOp, typename Proto>
-#if defined(USE_INDIRECT_FUNCTION_CALL) && !defined(__gfx942__) && !defined(__gfx950__)
   __device__ void runTreeSplit(int tid, int nthreads, struct ncclDevWorkColl* work) {
-#else
-  __device__ __attribute__((noinline)) void runTreeSplit(int tid, int nthreads, struct ncclDevWorkColl* work) {
-#endif
 #if defined(ENABLE_NPKIT)
     const int bid = ncclShmem.channelId - work->channelLo; // unused variable - compiler warning
 #endif
@@ -574,16 +570,16 @@ namespace {
 #define rcclAllReduceRunRingSimpleProtoImpl(tid, nthreads, work) \
   if(work->rcclUseOneSlice){ \
     using Proto = ProtoSimple<ALLREDUCE_CHUNKSTEPS/ALLREDUCE_SLICESTEPS_SINGLE_NODE, ALLREDUCE_SLICESTEPS_SINGLE_NODE>; \
-    runRing<T, RedOp, Proto, RCCL_METADATA_EMPTY>(tid, nthreads, work); \
+    ALLREDUCE_IMPL runRing<T, RedOp, Proto, RCCL_METADATA_EMPTY>(tid, nthreads, work); \
   } \
   else{ \
     using Proto = ProtoSimple<ALLREDUCE_CHUNKSTEPS/ALLREDUCE_SLICESTEPS, ALLREDUCE_SLICESTEPS>; \
-    runRing<T, RedOp, Proto, RCCL_METADATA_EMPTY>(tid, nthreads, work); \
+    ALLREDUCE_IMPL runRing<T, RedOp, Proto, RCCL_METADATA_EMPTY>(tid, nthreads, work); \
   }
 #else
 #define rcclAllReduceRunRingSimpleProtoImpl(tid, nthreads, work) \
   using Proto = ProtoSimple<ALLREDUCE_CHUNKSTEPS/ALLREDUCE_SLICESTEPS, ALLREDUCE_SLICESTEPS>; \
-  runRing<T, RedOp, Proto, RCCL_METADATA_EMPTY>(tid, nthreads, work);
+  ALLREDUCE_IMPL runRing<T, RedOp, Proto, RCCL_METADATA_EMPTY>(tid, nthreads, work);
 #endif
 
 template<typename T, typename RedOp>
@@ -598,15 +594,15 @@ struct RunWorkColl<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_TREE, NCCL_PROTO_SIMPL
   __device__ __forceinline__ void run(int tid, int nthreads, struct ncclDevWorkColl* work) {
     using Proto = ProtoSimple<1, 1>;
     if (work->acc != nullptr) {
-      runTreeSplit<T, RedOp, Proto>(tid, nthreads, work);
+      ALLREDUCE_IMPL runTreeSplit<T, RedOp, Proto>(tid, nthreads, work);
     } else {
-      runTreeUpDown<T, RedOp, Proto>(tid, nthreads, work);
+      ALLREDUCE_IMPL runTreeUpDown<T, RedOp, Proto>(tid, nthreads, work);
     }
     // Check-here
     // #if CUDART_VERSION >= 11020 && CUDART_VERSION < 11040 && __CUDA_ARCH__ >= 800
-    //   runTreeUpDown<T, RedOp, ProtoSimple<1, 1>>(tid, nthreads, work);
+    //   ALLREDUCE_IMPL runTreeUpDown<T, RedOp, ProtoSimple<1, 1>>(tid, nthreads, work);
     // #else
-    //   runTreeSplit<T, RedOp, ProtoSimple<1, 1>>(tid, nthreads, work);
+    //   ALLREDUCE_IMPL runTreeSplit<T, RedOp, ProtoSimple<1, 1>>(tid, nthreads, work);
     // #endif
   }
 };
@@ -1117,27 +1113,27 @@ struct RunWorkColl<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_COLLNET_CHAIN, NCCL_PR
 template<typename T, typename RedOp>
 struct RunWorkColl<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_LL> {
   __device__ __forceinline__ void run(int tid, int nthreads, struct ncclDevWorkColl* work) {
-    runRing<T, RedOp, ProtoLL, RCCL_METADATA_EMPTY>(tid, nthreads, work);
+    ALLREDUCE_IMPL runRing<T, RedOp, ProtoLL, RCCL_METADATA_EMPTY>(tid, nthreads, work);
   }
 };
 
 template<typename T, typename RedOp>
 struct RunWorkColl<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_TREE, NCCL_PROTO_LL> {
   __device__ __forceinline__ void run(int tid, int nthreads, struct ncclDevWorkColl* work) {
-    runTreeSplit<T, RedOp, ProtoLL>(tid, nthreads, work);
+    ALLREDUCE_IMPL runTreeSplit<T, RedOp, ProtoLL>(tid, nthreads, work);
   }
 };
 
 template<typename T, typename RedOp>
 struct RunWorkColl<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_LL128> {
   __device__ __forceinline__ void run(int tid, int nthreads, struct ncclDevWorkColl* work) {
-    runRing<T, RedOp, ProtoLL128, RCCL_METADATA_EMPTY>(tid, nthreads, work);
+    ALLREDUCE_IMPL runRing<T, RedOp, ProtoLL128, RCCL_METADATA_EMPTY>(tid, nthreads, work);
   }
 };
 
 template<typename T, typename RedOp>
 struct RunWorkColl<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_TREE, NCCL_PROTO_LL128> {
   __device__ __forceinline__ void run(int tid, int nthreads, struct ncclDevWorkColl* work) {
-    runTreeSplit<T, RedOp, ProtoLL128>(tid, nthreads, work);
+    ALLREDUCE_IMPL runTreeSplit<T, RedOp, ProtoLL128>(tid, nthreads, work);
   }
 };

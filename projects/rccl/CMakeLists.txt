@@ -32,7 +32,7 @@ option(ENABLE_MSCCLPP_CLIP                     "Enable MSCCL++ CLIP"            
 option(ENABLE_MSCCLPP_EXECUTOR                 "Enable MSCCL++ Executor"                       OFF)
 option(ENABLE_MSCCLPP_FORMAT_CHECKS            "Enable formatting checks in MSCCL++"           OFF)
 option(ENABLE_NPKIT                            "Enable NPKit"                                  OFF)
-option(ENABLE_IFC                              "Enable indirect function call"                 OFF)
+option(ENABLE_IFC                              "Enable indirect function call"                 ON)
 option(GENERATE_SYM_KERNELS                    "Generate symmetric memory kernels"             OFF)
 option(INSTALL_DEPENDENCIES                    "Force install dependencies"                    OFF)
 option(REPORT_KERNEL_RESOURCE_USE              "Append -Rpass-analysis=kernel to CXX flags"    OFF)
@@ -43,6 +43,7 @@ option(TRACE                                   "Enable additional tracing"      
 option(FAULT_INJECTION                         "Enable fault injection"                        ON)
 option(QUIET_WARNINGS                          "Supress compiler warnings"                     OFF)
 option(ENABLE_ROCSHMEM                         "Enable rocSHMEM support in RCCL"               OFF)
+option(BUILD_GENERIC_KERNELS                   "Build generic kernels for all data types"      OFF)
 
 # Default GPU architectures to build
 #==================================================================================================
@@ -246,6 +247,15 @@ if(ENABLE_IFC)
   endif()
 else()
   set(IFC_ENABLED OFF)
+endif()
+
+## Option to build generic kernels (kernels that dispatch to type-specific code at runtime)
+if(BUILD_GENERIC_KERNELS)
+  set(GENERIC_KERNELS_ENABLED ON)
+  message(STATUS "Generic kernels enabled (provides runtime type dispatch fallback)")
+else()
+  set(GENERIC_KERNELS_ENABLED OFF)
+  message(WARNING "Generic kernels disabled - faster build but may fail at runtime if generic kernels are needed. Use -DBUILD_GENERIC_KERNELS=ON if you encounter errors.")
 endif()
 
 ## Check for LL128 support
@@ -890,7 +900,7 @@ endif()
 
 # Execute the python script to generate required collective functions
 execute_process(
-    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/src/device/generate.py ${GEN_DIR} ${IFC_ENABLED} ${COLLTRACE} ${ENABLE_MSCCL_KERNEL} ${BUILD_LOCAL_GPU_TARGET_ONLY} ${ONLY_FUNCS}
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/src/device/generate.py ${GEN_DIR} ${IFC_ENABLED} ${COLLTRACE} ${ENABLE_MSCCL_KERNEL} ${BUILD_LOCAL_GPU_TARGET_ONLY} ${GENERIC_KERNELS_ENABLED} ${ONLY_FUNCS}
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
     RESULT_VARIABLE gen_py_result
     ERROR_VARIABLE gen_py_error
@@ -917,10 +927,97 @@ endif()
 # Find the generated files in the output directory
 file(GLOB_RECURSE GENERATED_FILES "${GEN_DIR}/*")
 
-# Append all found generated files to the list
+# Separate type-specific kernel files for independent device linking
+set(TYPE_KERNEL_FILES)
+set(NON_KERNEL_FILES)
 foreach(file ${GENERATED_FILES})
+  get_filename_component(filename ${file} NAME)
+  if(filename MATCHES "^kernels_.*\\.cu\\.cpp$")
+    list(APPEND TYPE_KERNEL_FILES ${file})
+  else()
+    list(APPEND NON_KERNEL_FILES ${file})
+  endif()
+endforeach()
+
+# Add non-kernel files to HIP_SOURCES
+foreach(file ${NON_KERNEL_FILES})
   list(APPEND HIP_SOURCES ${file})
 endforeach()
+
+# Create separate object libraries for each type kernel file
+# Each type is self-contained: f32 functions only call f32 functions, etc.
+# This enables independent device code linking for each type in parallel
+#
+# When GENERIC_KERNELS_ENABLED is OFF:
+#   - Each type kernel is FULLY self-contained (all device functions are defined inline)
+#   - NO -fgpu-rdc is needed, enabling parallel device linking
+#   - Each kernel compiles and device-links INDEPENDENTLY
+#
+# When GENERIC_KERNELS_ENABLED is ON:
+#   - Type kernels may reference functions from separate collectives files
+#   - -fgpu-rdc is required for cross-module device function calls
+#   - Device linking happens as a single final step
+set(TYPE_LIBRARIES)
+foreach(kernel_file ${TYPE_KERNEL_FILES})
+  get_filename_component(kernel_name ${kernel_file} NAME_WE)
+
+  # Create object library for this type (compiled with hipcc via rocm-cmake)
+  add_library(rccl_${kernel_name} OBJECT ${kernel_file})
+
+  # Apply essential compile options (same as main rccl target)
+  target_compile_options(rccl_${kernel_name} PRIVATE
+    -x hip
+    -fPIC
+    -Wall
+    -Wno-format-nonliteral
+    -Wno-unused-function
+  )
+
+  # Only add -fgpu-rdc when generic kernels are enabled
+  # When disabled, type-specific kernels are self-contained and don't need RDC
+  if(GENERIC_KERNELS_ENABLED)
+    target_compile_options(rccl_${kernel_name} PRIVATE -fgpu-rdc)
+  else()
+    message(STATUS "Type kernel ${kernel_name}: self-contained (no -fgpu-rdc)")
+  endif()
+
+  # Apply essential include directories
+  target_include_directories(rccl_${kernel_name} PRIVATE
+    ${PROJECT_BINARY_DIR}/include
+    ${HIPIFY_DIR}/src
+    ${HIPIFY_DIR}/src/device
+    ${HIPIFY_DIR}/src/include
+    ${HIPIFY_DIR}/gensrc
+    ${HSA_INCLUDE_PATH}
+  )
+
+  # Apply essential compile definitions (same as main rccl target)
+  target_compile_definitions(rccl_${kernel_name} PRIVATE __HIP_PLATFORM_AMD__=1)
+  target_compile_definitions(rccl_${kernel_name} PRIVATE ROCM_VERSION=${ROCM_VERSION})
+  if(COLLTRACE)
+    target_compile_definitions(rccl_${kernel_name} PRIVATE ENABLE_COLLTRACE)
+  endif()
+  if(FAULT_INJECTION)
+    target_compile_definitions(rccl_${kernel_name} PRIVATE ENABLE_FAULT_INJECTION)
+  endif()
+  if(IFC_ENABLED)
+    target_compile_definitions(rccl_${kernel_name} PRIVATE USE_INDIRECT_FUNCTION_CALL)
+  endif()
+  # Note: ENABLE_LL128 is NOT added to type kernels to match original behavior
+  # LL128 code paths are only in the main rccl target
+
+  # Set GPU architecture targets (critical for device compilation)
+  foreach(target ${GPU_TARGETS})
+    target_compile_options(rccl_${kernel_name} PRIVATE --offload-arch=${target})
+  endforeach()
+
+  # Ensure hipify is complete before compiling type kernels
+  # This prevents race conditions where kernels compile before headers are hipified
+  add_dependencies(rccl_${kernel_name} hipify_all)
+
+  list(APPEND TYPE_LIBRARIES rccl_${kernel_name})
+endforeach()
+
 
 # Create an initial git_version.cpp file (that will be updated with latest git version)
 #==================================================================================================
@@ -940,12 +1037,34 @@ list(APPEND HIP_SOURCES ${CMAKE_CURRENT_BINARY_DIR}/git_version.cpp)
 
 # Set up RCCL library
 #==================================================================================================
-## Set RCCL source files
+## Set RCCL source files (without type-specific kernels)
 add_library(rccl ${HIP_SOURCES})
+
+## Link type-specific object libraries
+# When GENERIC_KERNELS_ENABLED is OFF:
+#   - Each type library is SELF-CONTAINED with finalized device code
+#   - Device linking happened at compile time (no -fgpu-rdc)
+#   - Objects can be linked directly without additional device linking
+#   - Build is FASTER due to parallel device linking per type
+# When GENERIC_KERNELS_ENABLED is ON:
+#   - Type libraries contain relocatable device code
+#   - Final device linking happens when rccl library is linked
+foreach(ty_lib ${TYPE_LIBRARIES})
+  target_sources(rccl PRIVATE $<TARGET_OBJECTS:${ty_lib}>)
+endforeach()
+
+if(NOT GENERIC_KERNELS_ENABLED)
+  message(STATUS "Type-specific kernels are self-contained - parallel device linking enabled")
+endif()
 
 ## Set RCCL dependencies
 ## Ensure git version is updated before building rccl
 add_dependencies(rccl update_git_version)
+
+if (BUILD_TESTS AND ROCM_VERSION VERSION_GREATER_EQUAL "60400" AND CMAKE_BUILD_TYPE MATCHES "Debug")
+  ## Set static replacement dependency for fixture unit tests
+  add_dependencies(rccl replace_static_in_hipify)
+endif()
 
 ## Set RCCL include directories
 target_include_directories(rccl PRIVATE ${PROJECT_BINARY_DIR}/include)        # for generated rccl.h header
@@ -1190,6 +1309,9 @@ if (BUILD_BFD)
 endif()
 if (IFC_ENABLED)
   target_compile_definitions(rccl PRIVATE USE_INDIRECT_FUNCTION_CALL)
+endif()
+if (GENERIC_KERNELS_ENABLED)
+  target_compile_definitions(rccl PRIVATE BUILD_GENERIC_KERNELS)
 endif()
 if(DEMANGLE_DIR)
   target_compile_definitions(rccl PRIVATE "HAVE_CPLUS_DEMANGLE=1")
