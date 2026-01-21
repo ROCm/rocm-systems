@@ -30,7 +30,7 @@
 
 namespace rocprofiler
 {
-namespace SPM
+namespace spm
 {
 typedef struct values_vec_t
 {
@@ -104,5 +104,5 @@ decode_cb(uint64_t timestamp, uint64_t value, uint64_t index, int shader_engine,
 void
 aql_data_callback(size_t len, void* data, size_t data_len, int flags, void* userdata);
 
-}  // namespace SPM
+}  // namespace spm
 }  // namespace rocprofiler

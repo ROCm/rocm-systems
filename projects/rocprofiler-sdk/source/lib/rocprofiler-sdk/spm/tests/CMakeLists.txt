@@ -14,13 +14,13 @@ find_program(
 set(_ROCPROFILER_SHARE_DIR
     "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_DATAROOTDIR}/${PACKAGE_NAME}")
 
-set(ROCPROFILER_LIB_SPM_COUNTER_TEST_SOURCES spm_core.cpp)
+set(ROCPROFILER_LIB_SPM_COUNTER_TEST_SOURCES core.cpp)
 
 add_executable(spm-counter-test)
 
 target_sources(spm-counter-test PRIVATE ${ROCPROFILER_LIB_SPM_COUNTER_TEST_SOURCES})
 
-add_dependencies(spm-counter-test agent_hasco_targets)
+add_dependencies(spm-counter-test agent_hsaco_targets)
 
 target_link_libraries(
     spm-counter-test

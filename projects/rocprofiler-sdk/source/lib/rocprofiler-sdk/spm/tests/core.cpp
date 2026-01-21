@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "lib/rocprofiler-sdk/spm/spm_core.hpp"
+#include "lib/rocprofiler-sdk/spm/core.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
@@ -29,7 +29,7 @@
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/profiling_time.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
-#include "lib/rocprofiler-sdk/spm/spm_dispatch_handlers.hpp"
+#include "lib/rocprofiler-sdk/spm/dispatch_handlers.hpp"
 
 #include <rocprofiler-sdk/dispatch_counting_service.h>
 #include <rocprofiler-sdk/experimental/spm.h>
@@ -127,7 +127,7 @@ findSPMDeviceMetrics(const hsa::AgentCache& agent, const std::unordered_set<std:
 
     for(const auto& counter : *gfx_metrics)
     {
-        if((metrics.count(counter.name()) > 0 || metrics.empty()) && counter.spm())
+        if((metrics.count(counter.name()) > 0 || metrics.empty()) && counter.spm_support())
         {
             ret.push_back(counter);
         }
@@ -164,17 +164,17 @@ set_client_ctx(rocprofiler_context_id_t& ctx)
 }
 
 void
-null_dispatch_callback(rocprofiler_spm_dispatch_counting_service_data_t,
+null_dispatch_callback(const rocprofiler_spm_dispatch_counting_service_data_t*,
                        rocprofiler_spm_counter_config_id_t*,
                        rocprofiler_user_data_t*,
                        void*)
 {}
 
 void
-null_record_callback(rocprofiler_spm_dispatch_counting_service_data_t,
-                     rocprofiler_spm_counter_record_t*,
+null_record_callback(const rocprofiler_spm_dispatch_counting_service_data_t*,
+                     const rocprofiler_spm_counter_record_t**,
                      size_t,
-                     uint8_t,
+                     int,
                      rocprofiler_user_data_t*,
                      void*)
 {}
@@ -202,17 +202,16 @@ TEST(spm_core, check_packet_generation)
             rocprofiler_counter_id_t            id     = {.handle = metric.id()};
             ROCP_ERROR << fmt::format("Generating packet for {}", metric);
 
-            auto params = std::vector<rocprofiler_spm_parameter_t>{};
-            params.push_back({ROCPROFILER_SPM_PARAMETER_TYPE_SCLK_COUNT, 640000});
-            params.push_back({ROCPROFILER_SPM_PARAMETER_TYPE_TIMEOUT_MS, 30});
-            params.push_back({ROCPROFILER_SPM_PARAMETER_TYPE_BUFFER_SIZE, 32768});
-            ROCPROFILER_CALL(
-                rocprofiler_spm_create_counter_config(
-                    agent.get_rocp_agent()->id, &id, 1, params.data(), params.size(), &cfg_id),
-                "Unable to create profile");
-            auto profile = SPM::get_spm_counter_config(cfg_id);
+            auto params        = rocprofiler_spm_configuration_t{};
+            params.frequency   = 640000;
+            params.buffer_size = 30;
+            params.timeout     = 32768;
+            ROCPROFILER_CALL(rocprofiler_spm_create_counter_config(
+                                 agent.get_rocp_agent()->id, &id, 1, &params, &cfg_id),
+                             "Unable to create profile");
+            auto profile = spm::get_spm_counter_config(cfg_id);
             ASSERT_TRUE(profile);
-            EXPECT_EQ(SPM::spm_counter_callback_info::setup_spm_counter_config(profile),
+            EXPECT_EQ(spm::spm_counter_callback_info::setup_spm_counter_config(profile),
                       ROCPROFILER_STATUS_SUCCESS)
                 << fmt::format("Could not build profile for {}", metric.name());
 
@@ -224,7 +223,7 @@ TEST(spm_core, check_packet_generation)
             /**
              * Check packet generation
              */
-            SPM::spm_counter_callback_info  cb_info;
+            spm::spm_counter_callback_info  cb_info;
             std::unique_ptr<hsa::AQLPacket> pkt;
             EXPECT_EQ(cb_info.get_spm_packet(pkt, profile), ROCPROFILER_STATUS_SUCCESS)
                 << "Unable to generate packet";
@@ -280,20 +279,20 @@ struct expected_dispatch
 };
 
 void
-user_dispatch_cb(rocprofiler_spm_dispatch_counting_service_data_t dispatch_data,
-                 rocprofiler_spm_counter_config_id_t*             config,
-                 rocprofiler_user_data_t*                         user_data,
-                 void*                                            callback_data_args)
+user_dispatch_cb(const rocprofiler_spm_dispatch_counting_service_data_t* dispatch_data,
+                 rocprofiler_spm_counter_config_id_t*                    config,
+                 rocprofiler_user_data_t*                                user_data,
+                 void*                                                   callback_data_args)
 {
     expected_dispatch& expected = *static_cast<expected_dispatch*>(callback_data_args);
 
-    auto agent_id       = dispatch_data.dispatch_info.agent_id;
-    auto queue_id       = dispatch_data.dispatch_info.queue_id;
-    auto correlation_id = dispatch_data.correlation_id;
-    auto kernel_id      = dispatch_data.dispatch_info.kernel_id;
-    auto dispatch_id    = dispatch_data.dispatch_info.dispatch_id;
+    auto agent_id       = dispatch_data->dispatch_info.agent_id;
+    auto queue_id       = dispatch_data->dispatch_info.queue_id;
+    auto correlation_id = dispatch_data->correlation_id;
+    auto kernel_id      = dispatch_data->dispatch_info.kernel_id;
+    auto dispatch_id    = dispatch_data->dispatch_info.dispatch_id;
 
-    EXPECT_EQ(sizeof(rocprofiler_spm_dispatch_counting_service_data_t), dispatch_data.size);
+    EXPECT_EQ(sizeof(rocprofiler_spm_dispatch_counting_service_data_t), dispatch_data->size);
     EXPECT_EQ(expected.kernel_id, kernel_id);
     EXPECT_EQ(expected.dispatch_id, dispatch_id);
     EXPECT_EQ(expected.agent_id, agent_id);
@@ -301,8 +300,8 @@ user_dispatch_cb(rocprofiler_spm_dispatch_counting_service_data_t dispatch_data,
     EXPECT_EQ(expected.correlation_id.internal, correlation_id.internal);
     EXPECT_EQ(expected.correlation_id.external.ptr, correlation_id.external.ptr);
     EXPECT_EQ(expected.correlation_id.external.value, correlation_id.external.value);
-    EXPECT_EQ(expected.workgroup_size, dispatch_data.dispatch_info.workgroup_size);
-    EXPECT_EQ(expected.grid_size, dispatch_data.dispatch_info.grid_size);
+    EXPECT_EQ(expected.workgroup_size, dispatch_data->dispatch_info.workgroup_size);
+    EXPECT_EQ(expected.grid_size, dispatch_data->dispatch_info.grid_size);
 
     ASSERT_NE(config, nullptr);
     config->handle = expected.id.handle;
@@ -361,19 +360,19 @@ TEST(spm_core, check_callbacks)
              */
             expected_dispatch        expected = {};
             rocprofiler_counter_id_t id       = {.handle = metric.id()};
-            auto                     params   = std::vector<rocprofiler_spm_parameter_t>{};
-            params.push_back({ROCPROFILER_SPM_PARAMETER_TYPE_SCLK_COUNT, 640000});
-            params.push_back({ROCPROFILER_SPM_PARAMETER_TYPE_TIMEOUT_MS, 30});
-            params.push_back({ROCPROFILER_SPM_PARAMETER_TYPE_BUFFER_SIZE, 32768});
-            ROCPROFILER_CALL(
-                rocprofiler_spm_create_counter_config(
-                    agent.get_rocp_agent()->id, &id, 1, params.data(), params.size(), &expected.id),
-                "Unable to create profile");
-            auto profile = SPM::get_spm_counter_config(expected.id);
+            auto                     params   = rocprofiler_spm_configuration_t{};
+            params.frequency                  = 640000;
+            params.buffer_size                = 30;
+            params.timeout                    = 32768;
+
+            ROCPROFILER_CALL(rocprofiler_spm_create_counter_config(
+                                 agent.get_rocp_agent()->id, &id, 1, &params, &expected.id),
+                             "Unable to create profile");
+            auto profile = spm::get_spm_counter_config(expected.id);
             ASSERT_TRUE(profile);
 
-            std::shared_ptr<SPM::spm_counter_callback_info> cb_info =
-                std::make_shared<SPM::spm_counter_callback_info>();
+            std::shared_ptr<spm::spm_counter_callback_info> cb_info =
+                std::make_shared<spm::spm_counter_callback_info>();
             cb_info->user_cb       = user_dispatch_cb;
             cb_info->callback_args = static_cast<void*>(&expected);
 
@@ -399,7 +398,7 @@ TEST(spm_core, check_callbacks)
             hsa::Queue::queue_info_session_t::external_corr_id_map_t extern_ids = {};
 
             auto user_data       = rocprofiler_user_data_t{.value = corr_id.internal};
-            auto ret_pkt         = SPM::pre_kernel_call(&ctx,
+            auto ret_pkt         = spm::pre_kernel_call(&ctx,
                                                 cb_info,
                                                 fq,
                                                 pkt,
@@ -414,9 +413,9 @@ TEST(spm_core, check_callbacks)
             auto sess = std::make_shared<hsa::Queue::queue_info_session_t>(std::move(_sess));
             ASSERT_TRUE(ret_pkt.pkt)
                 << fmt::format("Expected a packet to be generated for - {}", metric.name());
-            SPM::inst_pkt_t pkts;
+            spm::inst_pkt_t pkts;
             pkts.emplace_back(
-                std::make_pair(std::move(ret_pkt.pkt), static_cast<SPM::ClientID>(0)));
+                std::make_pair(std::move(ret_pkt.pkt), static_cast<spm::ClientID>(0)));
             post_kernel_call(&ctx, cb_info, sess, pkts, kernel_dispatch::profiling_time{});
         }
     }
@@ -450,20 +449,20 @@ TEST(spm_core, destroy_counter_profile)
         {
             expected_dispatch        expected = {};
             rocprofiler_counter_id_t id       = {.handle = metric.id()};
-            auto                     params   = std::vector<rocprofiler_spm_parameter_t>{};
-            params.push_back({ROCPROFILER_SPM_PARAMETER_TYPE_SCLK_COUNT, 640000});
-            params.push_back({ROCPROFILER_SPM_PARAMETER_TYPE_TIMEOUT_MS, 30});
-            params.push_back({ROCPROFILER_SPM_PARAMETER_TYPE_BUFFER_SIZE, 32768});
-            ROCPROFILER_CALL(
-                rocprofiler_spm_create_counter_config(
-                    agent.get_rocp_agent()->id, &id, 1, params.data(), params.size(), &expected.id),
-                "Unable to create profile");
+            auto                     params   = rocprofiler_spm_configuration_t{};
+            params.frequency                  = 640000;
+            params.buffer_size                = 30;
+            params.timeout                    = 32768;
+
+            ROCPROFILER_CALL(rocprofiler_spm_create_counter_config(
+                                 agent.get_rocp_agent()->id, &id, 1, &params, &expected.id),
+                             "Unable to create profile");
             ROCPROFILER_CALL(rocprofiler_spm_destroy_counter_config(expected.id),
                              "Could not delete profile id");
             /**
              * Check the profile was actually destroyed
              */
-            auto profile = SPM::get_spm_counter_config(expected.id);
+            auto profile = spm::get_spm_counter_config(expected.id);
             EXPECT_FALSE(profile);
         }
     }
@@ -487,11 +486,11 @@ TEST(spm_core, start_stop_callback_ctx)
 
     ROCPROFILER_CALL(rocprofiler_create_context(&get_client_ctx()), "context creation failed");
 
-    ROCPROFILER_CALL(rocprofiler_configure_spm_dispatch_service(get_client_ctx(),
-                                                                null_dispatch_callback,
-                                                                (void*) 0x12345,
-                                                                null_record_callback,
-                                                                (void*) 0x54321),
+    ROCPROFILER_CALL(rocprofiler_configure_callback_spm_dispatch_service(get_client_ctx(),
+                                                                         null_dispatch_callback,
+                                                                         (void*) 0x12345,
+                                                                         null_record_callback,
+                                                                         (void*) 0x54321),
                      "Could not setup counting service");
     ROCPROFILER_CALL(rocprofiler_start_context(get_client_ctx()), "start context");
 
@@ -567,14 +566,13 @@ TEST(spm_core, test_profile_incremental)
         {
             rocprofiler_spm_counter_config_id_t old_id = cfg_id;
             rocprofiler_counter_id_t            id     = {.handle = block_metrics.front().id()};
-            auto                                params = std::vector<rocprofiler_spm_parameter_t>{};
-            params.push_back({ROCPROFILER_SPM_PARAMETER_TYPE_SCLK_COUNT, 640000});
-            params.push_back({ROCPROFILER_SPM_PARAMETER_TYPE_TIMEOUT_MS, 30});
-            params.push_back({ROCPROFILER_SPM_PARAMETER_TYPE_BUFFER_SIZE, 32768});
-            ROCPROFILER_CALL(
-                rocprofiler_spm_create_counter_config(
-                    agent.get_rocp_agent()->id, &id, 1, params.data(), params.size(), &cfg_id),
-                "Unable to create profile incrementally when we should be able to");
+            auto                                params = rocprofiler_spm_configuration_t{};
+            params.frequency                           = 640000;
+            params.buffer_size                         = 30;
+            params.timeout                             = 32768;
+            ROCPROFILER_CALL(rocprofiler_spm_create_counter_config(
+                                 agent.get_rocp_agent()->id, &id, 1, &params, &cfg_id),
+                             "Unable to create profile incrementally when we should be able to");
             EXPECT_NE(old_id.handle, cfg_id.handle)
                 << "We expect that the handle changes this is due to the existing profile being "
                    "unmodifiable after creation: "
@@ -590,7 +588,7 @@ TEST(spm_core, test_profile_incremental)
              */
             rocprofiler_counter_id_t id = {.handle = metric.id()};
             if(status = rocprofiler_spm_create_counter_config(
-                   agent.get_rocp_agent()->id, &id, 1, nullptr, 0, &cfg_id);
+                   agent.get_rocp_agent()->id, &id, 1, nullptr, &cfg_id);
                status != ROCPROFILER_STATUS_SUCCESS)
             {
                 break;

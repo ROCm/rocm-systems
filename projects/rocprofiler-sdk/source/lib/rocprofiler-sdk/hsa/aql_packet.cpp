@@ -358,7 +358,7 @@ SPMPacket::kfd_start()
         return;
     }
 
-    auto status = sym.spm_start_fn(this->handle, SPM::aql_data_callback, this);
+    auto status = sym.spm_start_fn(this->handle, spm::aql_data_callback, this);
     ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS) << "Unable to acquire KFD thread";
 }
 

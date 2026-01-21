@@ -132,9 +132,9 @@ struct config : output_config
     bool   list_metrics_output_file    = get_env("ROCPROF_OUTPUT_LIST_METRICS_FILE", false);
     bool   advanced_thread_trace       = get_env("ROCPROF_ADVANCED_THREAD_TRACE", false);
     bool   spm_counter_collection      = get_env("ROCPROF_SPM_COUNTER_COLLECTION", false);
-    size_t spm_buffer_size             = get_env("ROCPROF_SPM_BUFFER_SIZE", 32768);
+    size_t spm_buffer_size_kb          = get_env("ROCPROF_SPM_BUFFER_SIZE", 32768);
     size_t spm_timeout_ms              = get_env("ROCPROF_SPM_TIMEOUT_MS", 50);
-    size_t spm_frequency_sclk          = get_env("ROCPROF_SPM_FREQUENCY", 500000);
+    float  spm_frequency_ghz           = get_env("ROCPROF_SPM_FREQUENCY", 0.5);
     bool   att_serialize_all           = get_env("ROCPROF_ATT_PARAM_SERIALIZE_ALL", false);
     bool   enable_signal_handlers      = get_env("ROCPROF_SIGNAL_HANDLERS", true);
     bool   enable_process_sync         = get_env("ROCPROF_PROCESS_SYNC", false);

@@ -54,7 +54,8 @@ public:
            std::string dsc,
            std::string expr,
            std::string constant,
-           uint64_t    id);
+           uint64_t    id,
+           bool        spm_support = false);
 
     const std::string& name() const { return name_; }
     const std::string& block() const { return block_; }
@@ -65,11 +66,11 @@ public:
     uint64_t           id() const { return id_; }
     uint32_t           flags() const { return flags_; }
     bool               empty() const { return empty_; }
-    bool               spm() const { return spm_; }
+    bool               spm_support() const { return spm_support_; }
 
     void setflags(uint32_t flags) { this->flags_ = flags; }
     void set_id(uint64_t id) { this->id_ = id; }
-    void setSpm(bool is_spm) { this->spm_ = is_spm; }
+    void setspm(bool spm_support) { this->spm_support_ = spm_support; }
 
     friend bool operator<(Metric const& lhs, Metric const& rhs);
     friend bool operator==(Metric const& lhs, Metric const& rhs);
@@ -83,7 +84,7 @@ private:
     std::string constant_    = {};
     int64_t     id_          = -1;
     bool        empty_       = false;
-    bool        spm_         = false;
+    bool        spm_support_ = false;
     uint32_t    flags_       = 0;
 };
 
@@ -134,8 +135,6 @@ checkValidMetric(const std::string& agent, const Metric& metric);
 rocprofiler_status_t
 setCustomCounterDefinition(const CustomCounterDefinition& def);
 
-bool
-isSupportSpm(const std::string& agent_name, const Metric& metric);
 }  // namespace counters
 }  // namespace rocprofiler
 

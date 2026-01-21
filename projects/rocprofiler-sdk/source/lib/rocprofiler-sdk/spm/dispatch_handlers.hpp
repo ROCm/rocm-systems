@@ -25,11 +25,11 @@
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/aql_packet.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/profiling_time.hpp"
-#include "lib/rocprofiler-sdk/spm/spm_core.hpp"
+#include "lib/rocprofiler-sdk/spm/core.hpp"
 
 namespace rocprofiler
 {
-namespace SPM
+namespace spm
 {
 using ClientID   = int64_t;
 using inst_pkt_t = common::container::
@@ -52,5 +52,5 @@ post_kernel_call(const context::context*                            ctx,
                  std::shared_ptr<hsa::Queue::queue_info_session_t>& session,
                  inst_pkt_t&                                        aql,
                  kernel_dispatch::profiling_time                    dispatch_time);
-}  // namespace SPM
+}  // namespace spm
 }  // namespace rocprofiler

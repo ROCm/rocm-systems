@@ -29,19 +29,6 @@
 ROCPROFILER_EXTERN_C_INIT
 
 /**
- * @brief (experimental) SPM parameter type used to configure SPM service.
- *
- **/
-typedef enum ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_spm_parameter_type_t
-{
-    ROCPROFILER_SPM_PARAMETER_TYPE_SCLK_COUNT = 0,  ///< No. of sc clock counts to do sampling
-    ROCPROFILER_SPM_PARAMETER_TYPE_BUFFER_SIZE,     ///< SPM Buffer size, in bytes.
-    ROCPROFILER_SPM_PARAMETER_TYPE_TIMEOUT_MS,
-    ROCPROFILER_SPM_PARAMETER_TYPE_LAST
-    ///< SPM timeout in ms. Time to wait to read the SPM buffer
-} rocprofiler_spm_parameter_type_t;
-
-/**
  * @brief SPM Profile Configurations
  * @see rocprofiler_spm_create_counter_config for how to create.
  */
@@ -54,11 +41,15 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_spm_counter_config_id_t
  * @brief (experimental) SPM parameter type and value.
  *
  **/
-typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_spm_parameter_t
+typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_spm_configuration_t
 {
-    rocprofiler_spm_parameter_type_t type;   ///< SPM Parameter type
-    uint64_t                         value;  ///< SPM Parameter value
-} rocprofiler_spm_parameter_t;
+    size_t size;      ///< Size of this struct
+    float frequency;  ///< Input frequency (in GHz) is estimated to number of scclock count. Used to
+                      ///< determine sample interval.
+    uint64_t buffer_size;  ///< Buffer size of user mode buffer in KB
+    uint64_t timeout;      ///< Timeout for the user mode buffer in ms
+
+} rocprofiler_spm_configuration_t;
 
 /**
  * @brief (experimental) Create SPM Counter Configuration. A config is bound to an agent but can
@@ -74,8 +65,7 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_spm_parameter_t
  * @param [in] agent_id Agent identifier
  * @param [in] counters_list List of GPU counters
  * @param [in] counters_count Size of counters list
- * @param [in] parameters Parameters list of rocprofiler_spm_parameter_type_t
- * @param [in] parameter_count Number of parameters
+ * @param [in] parameters SPM parameter configuration
  * @param [in,out] config_id Identifier for GPU SPM counters group. If an existing
                    config is supplied, that profiles counters and parameters will be copied
                    over to a new config (returned via this id)
@@ -96,10 +86,9 @@ rocprofiler_status_t
 rocprofiler_spm_create_counter_config(rocprofiler_agent_id_t               agent_id,
                                       rocprofiler_counter_id_t*            counters_list,
                                       size_t                               counters_count,
-                                      rocprofiler_spm_parameter_t*         parameters,
-                                      size_t                               parameter_count,
+                                      rocprofiler_spm_configuration_t*     parameters,
                                       rocprofiler_spm_counter_config_id_t* config_id)
-    ROCPROFILER_API ROCPROFILER_NONNULL(2, 6);
+    ROCPROFILER_API ROCPROFILER_NONNULL(2);
 
 /**
  * @brief (experimental) Destroy SPM Profile Configuration.
@@ -123,6 +112,7 @@ typedef enum ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_spm_record_flag_t
     ROCPROFILER_SPM_RECORD_FLAG_DATA_LOST = 0,  ///< records with data loss
     ROCPROFILER_SPM_RECORD_FLAG_DATA,           ///< records with data
     ROCPROFILER_SPM_RECORD_FLAG_END,            ///< End of agent service
+    ROCPROFILER_SPM_RECORD_FLAG_DATA_NONE,
     ROCPROFILER_SPM_RECORD_FLAG_LAST,
 } rocprofiler_spm_record_flag_t;
 
@@ -154,20 +144,22 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_spm_counter_record_t
  * @brief (experimental) Callback to receive SPM data
  *
  * @param [in] dispatch_data kernel dispatch data
- * @param [in] records pointer to the array of SPM records
+ * @param [in] records array of pointers to the rocprofiler_spm_counter_record_t.
+          Memory of records is managed by the SDK. It is valid only within this callback
  * @param [in] record_count  size of the record array
  * @param [in] flags  rocprofiler_spm_record_flag_t
  * @param [in] userdata user data supplied by dispatch callback
  * @param [in] record Callback data supplied via dispatch configure service
+
  */
 ROCPROFILER_SDK_EXPERIMENTAL
 typedef void (*rocprofiler_spm_dispatch_counting_record_cb_t)(
-    rocprofiler_spm_dispatch_counting_service_data_t dispatch_data,
-    rocprofiler_spm_counter_record_t*                records,
-    size_t                                           record_count,
-    uint8_t                                          flags,
-    rocprofiler_user_data_t*                         userdata,
-    void*                                            record_callback_args);
+    const rocprofiler_spm_dispatch_counting_service_data_t* dispatch_data,
+    const rocprofiler_spm_counter_record_t**                records,
+    size_t                                                  record_count,
+    int                                                     flags,
+    rocprofiler_user_data_t*                                userdata,
+    void*                                                   record_callback_args);
 /**
  * @brief (experimental) Callback query if dispatch should be profiled
  *
@@ -178,10 +170,10 @@ typedef void (*rocprofiler_spm_dispatch_counting_record_cb_t)(
  */
 ROCPROFILER_SDK_EXPERIMENTAL
 typedef void (*rocprofiler_spm_dispatch_counting_service_cb_t)(
-    rocprofiler_spm_dispatch_counting_service_data_t dispatch_data,
-    rocprofiler_spm_counter_config_id_t*             config,
-    rocprofiler_user_data_t*                         user_data,
-    void*                                            callback_data_args);
+    const rocprofiler_spm_dispatch_counting_service_data_t* dispatch_data,
+    rocprofiler_spm_counter_config_id_t*                    config,
+    rocprofiler_user_data_t*                                user_data,
+    void*                                                   callback_data_args);
 
 /**
  * @defgroup SPM counter
@@ -243,7 +235,7 @@ rocprofiler_iterate_spm_supported_counters(rocprofiler_agent_id_t               
  * context
  */
 ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_status_t
-rocprofiler_configure_spm_dispatch_service(
+rocprofiler_configure_callback_spm_dispatch_service(
     rocprofiler_context_id_t                       context_id,
     rocprofiler_spm_dispatch_counting_service_cb_t dispatch_callback,
     void*                                          dispatch_callback_args,

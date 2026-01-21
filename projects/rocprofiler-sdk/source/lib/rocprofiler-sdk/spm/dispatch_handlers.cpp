@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "lib/rocprofiler-sdk/spm/spm_dispatch_handlers.hpp"
+#include "lib/rocprofiler-sdk/spm/dispatch_handlers.hpp"
 #include "lib/common/container/small_vector.hpp"
 #include "lib/common/synchronized.hpp"
 #include "lib/common/utility.hpp"
@@ -33,7 +33,7 @@
 
 namespace rocprofiler
 {
-namespace SPM
+namespace spm
 {
 /**
  * @brief Async Handler for barrier=packet1 completion signal
@@ -130,7 +130,7 @@ pre_kernel_call(const context::context*                                         
         dispatch_data.dispatch_info        = dispatch_info;
     }
 
-    info->user_cb(dispatch_data, &req_profile, user_data, info->callback_args);
+    info->user_cb(&dispatch_data, &req_profile, user_data, info->callback_args);
 
     if(req_profile.handle == 0) return {nullptr, true};
 
@@ -177,7 +177,7 @@ pre_kernel_call(const context::context*                                         
                           .hsa_amd_signal_async_handler_fn(signal_to_start_kfd,
                                                            HSA_SIGNAL_CONDITION_EQ,
                                                            -1,
-                                                           rocprofiler::SPM::AsyncSignalHandler,
+                                                           rocprofiler::spm::AsyncSignalHandler,
                                                            ret_pkt.get());
         ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK)
             << "Error: hsa_amd_signal_async_handler failed with error code " << status
@@ -228,5 +228,5 @@ post_kernel_call(const context::context*                           ctx,
         }
     });
 }
-}  // namespace SPM
+}  // namespace spm
 }  // namespace rocprofiler

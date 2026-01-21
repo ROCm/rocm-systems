@@ -630,8 +630,8 @@ set_external_correlation_id(rocprofiler_thread_id_t                            t
 }
 
 void
-spm_dispatch_callback(rocprofiler_spm_dispatch_counting_service_data_t dispatch_data,
-                      rocprofiler_spm_counter_config_id_t*             config,
+spm_dispatch_callback(const rocprofiler_spm_dispatch_counting_service_data_t* dispatch_data,
+                      rocprofiler_spm_counter_config_id_t*                    config,
                       rocprofiler_user_data_t* /* user_data*/,
                       void* /*callback_data_args*/)
 {
@@ -641,7 +641,7 @@ spm_dispatch_callback(rocprofiler_spm_dispatch_counting_service_data_t dispatch_
         profile_cache = {};
 
     auto search_cache = [&]() {
-        if(auto pos = profile_cache.find(dispatch_data.dispatch_info.agent_id);
+        if(auto pos = profile_cache.find(dispatch_data->dispatch_info.agent_id);
            pos != profile_cache.end())
         {
             *config = pos->second;
@@ -669,7 +669,7 @@ spm_dispatch_callback(rocprofiler_spm_dispatch_counting_service_data_t dispatch_
                                                  "SQC_ICACHE_MISSES"};
     auto                  gpu_counters        = std::vector<rocprofiler_counter_id_t>{};
     ROCPROFILER_CALL(rocprofiler_iterate_spm_supported_counters(
-                         dispatch_data.dispatch_info.agent_id,
+                         dispatch_data->dispatch_info.agent_id,
                          []([[maybe_unused]] rocprofiler_agent_id_t id,
                             rocprofiler_counter_id_t*               counters,
                             size_t                                  num_counters,
@@ -714,31 +714,30 @@ spm_dispatch_callback(rocprofiler_spm_dispatch_counting_service_data_t dispatch_
         }
     }
 
-    auto params = std::vector<rocprofiler_spm_parameter_t>{};
-    params.push_back({ROCPROFILER_SPM_PARAMETER_TYPE_TIMEOUT_MS, 30});
-    params.push_back({ROCPROFILER_SPM_PARAMETER_TYPE_BUFFER_SIZE, 32768 *1024});
-    params.push_back({ROCPROFILER_SPM_PARAMETER_TYPE_SCLK_COUNT, 50000});
+    auto params        = rocprofiler_spm_configuration_t{};
+    params.timeout     = 30;
+    params.buffer_size = 32768;
+    params.frequency   = 50000;
     // Look for the counters contained in counters_to_collect in gpu_counters
     // Create a colleciton profile for the counters
     rocprofiler_spm_counter_config_id_t profile = {.handle = 0};
-    ROCPROFILER_CALL(rocprofiler_spm_create_counter_config(dispatch_data.dispatch_info.agent_id,
+    ROCPROFILER_CALL(rocprofiler_spm_create_counter_config(dispatch_data->dispatch_info.agent_id,
                                                            collect_counters.data(),
                                                            collect_counters.size(),
-                                                           params.data(),
-                                                           params.size(),
+                                                           &params,
                                                            &profile),
                      "Could not construct profile cfg");
 
-    profile_cache.emplace(dispatch_data.dispatch_info.agent_id, profile);
+    profile_cache.emplace(dispatch_data->dispatch_info.agent_id, profile);
     // Return the profile to collect those counters for this dispatch
     *config = profile;
 }
 
 void
-spm_data_callback(rocprofiler_spm_dispatch_counting_service_data_t /*dispatch_data*/,
-                  rocprofiler_spm_counter_record_t* records,
-                  size_t                            record_count,
-                  uint8_t                           flags,
+spm_data_callback(const rocprofiler_spm_dispatch_counting_service_data_t* /*dispatch_data*/,
+                  const rocprofiler_spm_counter_record_t** records,
+                  size_t                                   record_count,
+                  int                                      flags,
                   rocprofiler_user_data_t* /* user_data*/,
                   void* /* record_callback_args*/)
 {
@@ -751,13 +750,13 @@ spm_data_callback(rocprofiler_spm_dispatch_counting_service_data_t /*dispatch_da
         for(size_t count = 0; count < record_count; count++)
         {
             auto counter_id = rocprofiler_counter_id_t{};
-            ROCPROFILER_CALL(rocprofiler_query_record_counter_id(records[count].id, &counter_id),
+            ROCPROFILER_CALL(rocprofiler_query_record_counter_id(records[count]->id, &counter_id),
                              "query record counter id");
             spm_cb_records.emplace_back(spm_counting_record_t{counter_id,
-                                                              records[count].agent_id,
-                                                              records[count].id,
-                                                              records[count].timestamp,
-                                                              records[count].value});
+                                                              records[count]->agent_id,
+                                                              records[count]->id,
+                                                              records[count]->timestamp,
+                                                              records[count]->value});
         }
     }
 }
@@ -2176,12 +2175,13 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         "buffer tracing service for ompt configure");
 
     if(getenv("ROCPROFILER_SPM_BETA_ENABLED") != nullptr)
-        ROCPROFILER_CALL(rocprofiler_configure_spm_dispatch_service(spm_dispatch_collection_ctx,
-                                                                    spm_dispatch_callback,
-                                                                    nullptr,
-                                                                    spm_data_callback,
-                                                                    nullptr),
-                         "Could not setup SPM counting service");
+        ROCPROFILER_CALL(
+            rocprofiler_configure_callback_spm_dispatch_service(spm_dispatch_collection_ctx,
+                                                                spm_dispatch_callback,
+                                                                nullptr,
+                                                                spm_data_callback,
+                                                                nullptr),
+            "Could not setup SPM counting service");
     ROCPROFILER_CALL(
         rocprofiler_configure_buffer_dispatch_counting_service(
             counter_collection_ctx, counter_collection_buffer, dispatch_callback, nullptr),

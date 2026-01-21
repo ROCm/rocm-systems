@@ -563,7 +563,8 @@ write_rocpd(
     const generator<rocprofiler_buffer_tracing_scratch_memory_record_t>&    scratch_memory_gen,
     const generator<rocprofiler_buffer_tracing_rccl_api_record_t>&          rccl_api_gen,
     const generator<rocprofiler_buffer_tracing_rocdecode_api_ext_record_t>& rocdecode_api_gen,
-    const generator<tool_counter_record_t>&                                 counter_collection_gen)
+    const generator<tool_counter_record_t>&                                 counter_collection_gen,
+    const generator<tool_spm_counter_record_t>&                             spm_collection_gen)
 {
     static auto get_simple_timer = [](std::string_view label) {
         return common::simple_timer{fmt::format("SQLite3 generation :: {:24}", label)};
@@ -970,6 +971,7 @@ write_rocpd(
                         insert_value("expression", _expression, allow_empty_string{}),
                         insert_value("is_constant", aitr.is_constant),
                         insert_value("is_derived", aitr.is_derived),
+                        insert_value("spm_support", aitr.spm_support),
                         insert_value("extdata", json_data),
                     });
 
@@ -1132,8 +1134,10 @@ write_rocpd(
         }
     };
 
-    auto insert_pmc_event_data = [&conn, &tool_metadata, &counter_collection_gen](
-                                     auto& dispatch_evt_ids) {
+    auto insert_pmc_event_data = [&conn,
+                                  &tool_metadata,
+                                  &counter_collection_gen,
+                                  &spm_collection_gen](auto& dispatch_evt_ids) {
         auto   _sqlgenperf_rocpd = get_simple_timer("rocpd_pmc_event");
         size_t idx               = tool_metadata.pmc_event_offset;
         for(auto ditr : counter_collection_gen)
@@ -1153,6 +1157,30 @@ write_rocpd(
                                                          insert_value("event_id", evt_id),
                                                          insert_value("pmc_id", count.id.handle),
                                                          insert_value("value", count.value),
+                                                     });
+
+                    execute_raw_sql_statements(conn, stmt);
+                }
+            }
+        }
+        for(auto ditr : spm_collection_gen)
+        {
+            auto _deferred = sql::deferred_transaction{conn};
+            for(const auto& record : spm_collection_gen.get(ditr))
+            {
+                const auto& info        = record.dispatch_data.dispatch_info;
+                auto        dispatch_id = info.dispatch_id;
+
+                auto evt_id = dispatch_evt_ids.at(dispatch_id);
+                for(const auto& count : record.read())
+                {
+                    auto stmt = get_insert_statement("rocpd_pmc_event{{uuid}}",
+                                                     {
+                                                         insert_value("id", idx++),
+                                                         insert_value("event_id", evt_id),
+                                                         insert_value("pmc_id", count.id.handle),
+                                                         insert_value("value", count.value),
+                                                         insert_value("timestamp", count.timestamp),
                                                      });
 
                     execute_raw_sql_statements(conn, stmt);

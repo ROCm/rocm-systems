@@ -24,8 +24,8 @@
 
 #include "lib/common/container/small_vector.hpp"
 #include "lib/rocprofiler-sdk/aql/aql_profile_v2.h"
-#include "lib/rocprofiler-sdk/spm/spm_decode.hpp"
-#include "lib/rocprofiler-sdk/spm/spm_dlsym.hpp"
+#include "lib/rocprofiler-sdk/spm/decode.hpp"
+#include "lib/rocprofiler-sdk/spm/dlsym.hpp"
 
 #include <rocprofiler-sdk/experimental/spm.h>
 #include <rocprofiler-sdk/hsa.h>
@@ -270,7 +270,7 @@ struct SPMMemoryPool
                                 void*                          data);
     static void           Free(void* ptr, void* data);
     static hsa_status_t   Copy(void* dst, const void* src, size_t size, void* data);
-    SPM::Dlsym::DeleteFn* delete_packets_fn{nullptr};
+    spm::Dlsym::DeleteFn* delete_packets_fn{nullptr};
     aqlprofile_handle_t   handle{};
 };
 
@@ -304,7 +304,7 @@ public:
     rocprofiler_user_data_t*     user_data;
     void*                        record_callback_args{};
     aqlprofile_spm_buffer_desc_t aql_desc{};
-    rocprofiler::SPM::spm_descriptor_t               spm_desc{};
+    rocprofiler::spm::spm_descriptor_t               spm_desc{};
     rocprofiler_spm_dispatch_counting_record_cb_t    record_cb{};
     rocprofiler_spm_dispatch_counting_service_data_t dispatch_data{};
     std::shared_ptr<std::vector<char>>               container_desc_data{};
@@ -313,7 +313,7 @@ public:
     void                                             populate_before() override;
     void                                             populate_after() override;
 
-    const SPM::Dlsym sym{};
+    const spm::Dlsym sym{};
 
 private:
     std::atomic<bool> running{false};
