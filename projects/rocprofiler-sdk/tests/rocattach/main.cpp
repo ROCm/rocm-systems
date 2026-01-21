@@ -24,6 +24,7 @@
 #include <rocprofiler-sdk-rocattach/rocattach.h>
 #include <rocprofiler-sdk-rocattach/types.h>
 
+#include <signal.h>
 #include <stdlib.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -90,7 +91,7 @@ main(int argc, char** argv)
     }
     else
     {
-        // Wait a small amount of time for child processes to start executing
+        // Wait for child processes to exec
         std::this_thread::sleep_for(std::chrono::milliseconds(2500));
 
         setenv("ROCPROF_ATTACH_TOOL_LIBRARY", argv[2], true);
@@ -98,7 +99,17 @@ main(int argc, char** argv)
         ROCATTACH_CALL(rocattach_attach(pid1));
         ROCATTACH_CALL(rocattach_attach(pid2));
 
-        // Wait a small amount of time for child processes to continue executing
+        // Send signal to child processes after attaching
+        if(kill(pid1, SIGINT) == -1)
+        {
+            std::cout << "error: Failed to send signal to pid1\n";
+        }
+        if(kill(pid2, SIGINT) == -1)
+        {
+            std::cout << "error: Failed to send signal to pid2\n";
+        }
+
+        // Wait for child processes to continue executing
         std::this_thread::sleep_for(std::chrono::milliseconds(5000));
 
         ROCATTACH_CALL(rocattach_detach(pid1));
