@@ -679,7 +679,7 @@ which operators contribute to specific performance counter values.
    ``linear``, ``relu``) are high-level API functions. When executed on GPU, these
    operators may dispatch one or more low-level GPU kernels (such as
    ``implicit_convolve_sgemm``) that perform the actual computation on the hardware.
-   The ``--torch-operators`` feature provides operator-level attribution by injecting
+   The ``--torch-trace`` feature provides operator-level attribution by injecting
    markers that map collected kernel performance counters to their originating PyTorch
    operators.
 
@@ -692,12 +692,12 @@ Requirements
 Usage
 -----
 
-To enable Torch operator mapping, use the ``--torch-operators`` option when profiling
+To enable Torch operator mapping, use the ``--torch-trace`` option when profiling
 a PyTorch workload:
 
 .. code-block:: shell-session
 
-   $ rocprof-compute profile --name mnist_torch --torch-operators -- python train.py
+   $ rocprof-compute profile --name mnist_torch --torch-trace -- python train.py
 
                                     __                                       _
     _ __ ___   ___ _ __  _ __ ___  / _|       ___ ___  _ __ ___  _ __  _   _| |_ ___
@@ -711,7 +711,7 @@ a PyTorch workload:
    Path: /home/auser/workloads/mnist_torch/MI300X_A1
    Target: MI300X_A1
    Command: python train.py
-   Torch Operators: Enabled
+   Torch Trace: Enabled
    Kernel Selection: None
    Dispatch Selection: None
    Hardware Blocks: All
@@ -755,7 +755,7 @@ their performance counters:
 | MARKER_CORE_RANGE_API | torch.manual_seed:#1@main.py:99 |      1214226 |     1214226 |                0 |           7072577770736616 |         7072577771920451 |        4 |             1 | 1214226 |         512 |              512 |                   0 |                      0 |          16 |            0 |     32 | __amd_rocclr_copyBuffer |         7072577923044453 |       7072577923046813 |           6 | SPI_RA_TGLIM_CU_FULL_CSN  |               0 |
 | MARKER_CORE_RANGE_API | torch.manual_seed:#1@main.py:99 |      1214226 |     1214226 |                0 |           7072577770736616 |         7072577771920451 |        4 |             1 | 1214226 |         512 |              512 |                   0 |                      0 |          16 |            0 |     32 | __amd_rocclr_copyBuffer |         7072577923044453 |       7072577923046813 |           6 | SPI_RA_TMP_STALL_CSN      |               0 |
 
-``torch_operators/`` directory
+``torch_trace/`` directory
    Contains individual CSV files for each PyTorch operator detected during profiling.
    Each file is named after the operator (e.g., ``nn_functional_conv2d.csv``,
    ``nn_functional_linear.csv``, ``relu.csv``) and contains all kernel executions and
@@ -770,7 +770,7 @@ their performance counters:
    This per-operator organization enables focused analysis of specific operators without
    processing the entire trace.
 
-.. table:: torch_operators/ones_like.csv from profiling mnist model.
+.. table:: torch_trace/ones_like.csv from profiling mnist model.
    :widths: 20 80
 
 | Operator_Name   | Context_Id        | Kernel_Name                                                                                                                                                             | Counter_Name                   |   Counter_Value |   Start_Timestamp_function |   End_Timestamp_function |   Start_Timestamp_kernel |   End_Timestamp_kernel |
@@ -801,7 +801,7 @@ Limitations
 
 .. note::
 
-   * The ``--torch-operators`` option requires the application to be a Python command
+   * The ``--torch-trace`` option requires the application to be a Python command
      or Python script.
 
    * A valid PyTorch installation must be available in the environment where profiling
@@ -818,13 +818,13 @@ Torch operator mapping can be combined with other profiling options:
 .. code-block:: shell-session
 
    # Combine with block filtering for targeted counter collection
-   $ rocprof-compute profile --name mnist --torch-operators -b 11 12 -- python train.py
+   $ rocprof-compute profile --name mnist --torch-trace -b 11 12 -- python train.py
 
    # Combine with iteration multiplexing
-   $ rocprof-compute profile --name mnist --torch-operators --iteration-multiplexing kernel -- python train.py
+   $ rocprof-compute profile --name mnist --torch-trace --iteration-multiplexing kernel -- python train.py
 
    # Combine with kernel filtering (filters by GPU kernel name)
-   $ rocprof-compute profile --name mnist --torch-operators -k elementwise -- python train.py
+   $ rocprof-compute profile --name mnist --torch-trace -k elementwise -- python train.py
 
 .. _iteration-multiplexing:
 

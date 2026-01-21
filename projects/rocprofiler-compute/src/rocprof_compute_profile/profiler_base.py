@@ -120,7 +120,7 @@ class RocProfCompute_Base:
                 )
 
             # Appending a wrapper for injecting roctx-markers
-            if hasattr(args, "torch_operators") and args.torch_operators:
+            if getattr(args, "torch_trace", False):
                 # Find the inject_roctx.py script in src/utils
                 inject_script = (
                     Path(__file__).parent.parent / "utils" / "inject_roctx.py"
@@ -148,10 +148,10 @@ class RocProfCompute_Base:
                     console_debug(f"New command: {' '.join(args.remaining)}")
                 else:
                     console_warning(
-                        "--torch-operators flag has no significance if not profiling",
+                        "--torch-trace flag has no significance if not profiling",
                         " a PyTorch application.",
                     )
-                    args.torch_operators = False
+                    args.torch_trace = False
             args.remaining = " ".join(args.remaining)
         elif not args.attach_pid:
             console_error(
@@ -513,7 +513,7 @@ class RocProfCompute_Base:
                 mspec=self._soc._mspec,
                 loglevel=args.loglevel,
                 format_rocprof_output=args.format_rocprof_output,
-                torch_operators_enabled=getattr(args, "torch_operators", False),
+                torch_trace_enabled=getattr(args, "torch_trace", False),
                 retain_rocpd_output=args.retain_rocpd_output,
             )
 

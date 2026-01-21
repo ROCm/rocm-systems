@@ -56,7 +56,7 @@ try:
 except ImportError:
     console_warning(
         "PyTorch is not installed or not properly configured.\n"
-        "The --torch-operators option requires a valid PyTorch installation.\n"
+        "The --torch-trace option requires a valid PyTorch installation.\n"
         "Please install PyTorch and try again."
     )
     sys.exit(0)

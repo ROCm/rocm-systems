@@ -240,12 +240,12 @@ Examples:
         # help="\t\t\tKokkos trace, traces Kokkos API calls.",
     )
     profile_group.add_argument(
-        "--torch-operators",
-        dest="torch_operators",
+        "--torch-trace",
+        dest="torch_trace",
         required=False,
         default=False,
         action="store_true",
-        help="\t\t\tTorch Operators, maps operators to counter values.",
+        help="\t\t\tTorch Trace, maps operators to counter values.",
     )
     profile_group.add_argument(
         "-k",

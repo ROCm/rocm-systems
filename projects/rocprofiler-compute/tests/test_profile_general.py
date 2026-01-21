@@ -2788,9 +2788,9 @@ skip_if_no_torch = pytest.mark.skipif(
 
 
 @skip_if_no_torch
-def test_torch_operators_profile(binary_handler_profile_rocprof_compute):
+def test_torch_trace_profile(binary_handler_profile_rocprof_compute):
     """
-    Test profiling a PyTorch application with --torch-operators option.
+    Test profiling a PyTorch application with --torch-trace option.
     Verifies that all required files are generated and counter values are valid.
     NOTE: Not included in the test suite since this requires PyTorch installation.
     """
@@ -2834,9 +2834,9 @@ if __name__ == "__main__":
 
     config["torch_test_app"] = ["python3", str(torch_app_path)]
 
-    # Profile with --torch-operators option
+    # Profile with --torch-trace option
     options = [
-        "--torch-operators",
+        "--torch-trace",
     ]
 
     returncode = binary_handler_profile_rocprof_compute(
@@ -2852,12 +2852,12 @@ if __name__ == "__main__":
     num_devices = config.get("num_devices", 1)
     file_dict = test_utils.check_csv_files(workload_dir, num_devices, 1)
     assert "pmc_perf.csv" in file_dict, "pmc_perf.csv not generated"
-    # 2. Check torch operators directory
-    torch_operators_dir = Path(workload_dir) / "torch_operators"
-    assert torch_operators_dir.exists(), "torch_operators directory not created"
-    assert torch_operators_dir.is_dir(), "torch_operators is not a directory"
+    # 2. Check torch trace directory
+    torch_trace_dir = Path(workload_dir) / "torch_trace"
+    assert torch_trace_dir.exists(), "torch_trace directory not created"
+    assert torch_trace_dir.is_dir(), "torch_trace is not a directory"
     # 3. Check per-operator CSV files exist
-    operator_csv_files = list(torch_operators_dir.glob("*.csv"))
+    operator_csv_files = list(torch_trace_dir.glob("*.csv"))
     assert len(operator_csv_files) > 0, "No per-operator CSV files generated"
     # 4. Verify per-operator CSV structure
     for op_csv in operator_csv_files:
@@ -2867,9 +2867,9 @@ if __name__ == "__main__":
 
 
 @skip_if_no_torch
-def test_torch_operators_overhead(binary_handler_profile_rocprof_compute):
+def test_torch_trace_overhead(binary_handler_profile_rocprof_compute):
     """
-    Measure overhead introduced by --torch-operators flag.
+    Measure overhead introduced by --torch-trace flag.
     Compares execution time with and without the flag to ensure overhead is acceptable.
     NOTE: Not included in the test suite since this requires PyTorch installation.
     """
@@ -2913,14 +2913,14 @@ if __name__ == "__main__":
 
     config["torch_test_app"] = ["python3", str(torch_app_path)]
 
-    # Run WITHOUT --torch-operators (baseline)
+    # Run WITHOUT --torch-trace (baseline)
     workload_dir_baseline = test_utils.get_output_dir(param_id="torch_baseline")
 
     start_baseline = time.time()
     returncode_baseline = binary_handler_profile_rocprof_compute(
         config,
         workload_dir_baseline,
-        [],  # No torch-operators flag
+        [],  # No torch-trace flag
         check_success=True,
         roof=False,
         app_name="torch_test_app",
@@ -2935,19 +2935,19 @@ if __name__ == "__main__":
     )
     test_utils.clean_output_dir(config["cleanup"], workload_dir_baseline)
 
-    # Run WITH --torch-operators
+    # Run WITH --torch-trace
     workload_dir_with_flag = test_utils.get_output_dir(param_id="torch_with_ops")
     start_with_flag = time.time()
     returncode_with_flag = binary_handler_profile_rocprof_compute(
         config,
         workload_dir_with_flag,
-        ["--torch-operators"],
+        ["--torch-trace"],
         check_success=True,
         roof=False,
         app_name="torch_test_app",
     )
     with_flag_time = time.time() - start_with_flag
-    assert returncode_with_flag == 0, "Profiling with torch-operators failed"
+    assert returncode_with_flag == 0, "Profiling with torch-trace failed"
 
     # Read with-flag timestamps
     with_flag_df = pd.read_csv(f"{workload_dir_with_flag}/pmc_perf.csv")
@@ -2965,17 +2965,17 @@ if __name__ == "__main__":
     print(f"\n{'=' * 70}")
     print("Performance Overhead Analysis:")
     print(f"  Baseline wall-clock time:     {baseline_time:.2f}s")
-    print(f"  With --torch-operators time:  {with_flag_time:.2f}s")
+    print(f"  With --torch-trace time:  {with_flag_time:.2f}s")
     print(f"  Wall-clock overhead:          {wall_clock_overhead:.1f}%")
     print(f"  Baseline kernel duration:     {baseline_kernel_duration:.0f} ns")
     print(f"  With flag kernel duration:    {with_flag_kernel_duration:.0f} ns")
     print(f"  Kernel execution overhead:    {kernel_overhead:.1f}%")
     print(f"{'=' * 70}\n")
 
-    # Verify torch operators directory was created
-    torch_operators_dir = Path(workload_dir_with_flag) / "torch_operators"
-    assert torch_operators_dir.exists(), "torch_operators directory should be created"
-    operator_csv_files = list(torch_operators_dir.glob("*.csv"))
+    # Verify torch trace directory was created
+    torch_trace_dir = Path(workload_dir_with_flag) / "torch_trace"
+    assert torch_trace_dir.exists(), "torch_trace directory should be created"
+    operator_csv_files = list(torch_trace_dir.glob("*.csv"))
     assert len(operator_csv_files) > 0, "Operator CSV files should be generated"
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir_with_flag)

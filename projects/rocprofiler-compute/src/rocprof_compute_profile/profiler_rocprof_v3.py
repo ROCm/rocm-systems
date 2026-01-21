@@ -60,7 +60,7 @@ class rocprof_v3_profiler(RocProfCompute_Base):
             )
         elif args.hip_trace:
             trace_option = "--hip-trace"
-        elif args.torch_operators:
+        elif args.torch_trace:
             trace_option = "--marker-trace"
         else:
             trace_option = "--kernel-trace"
@@ -135,8 +135,8 @@ class rocprof_v3_profiler(RocProfCompute_Base):
         if self.ready_to_profile:
             # Manually join each pmc_perf*.csv output
             self.join_prof()
-            # Consolidate torch trace output if --torch-operators was used
-            if self.get_args().torch_operators:
+            # Consolidate torch trace output if --torch-trace was used
+            if self.get_args().torch_trace:
                 consolidate_torch_trace_output(self.get_args().path)
 
             # Run roofline microbenchmark

@@ -786,7 +786,7 @@ def run_prof(
     mspec: Any,  # noqa: ANN401
     loglevel: int,
     format_rocprof_output: str,
-    torch_operators_enabled: bool = False,
+    torch_trace_enabled: bool = False,
     retain_rocpd_output: bool = False,
 ) -> None:
     multiple_files = isinstance(fnames, list)
@@ -966,7 +966,7 @@ def run_prof(
         # Drop PID since its not required
         combined_df = combined_df.drop(columns=["PID"])
         combined_df.to_csv(workload_dir + f"/results_{fbase}.csv", index=False)
-        if torch_operators_enabled:
+        if torch_trace_enabled:
             # Extract marker_api_trace and counter_collection CSVs
             import sqlite3
             from contextlib import closing
@@ -1077,7 +1077,7 @@ def run_prof(
                 using_native_tool=options["ROCPROF_COUNTER_COLLECTION"] == "0",
             )
             # Add torch operator trace processing
-            if torch_operators_enabled:
+            if torch_trace_enabled:
                 process_torch_trace_output(workload_dir, fbase)
 
             # TODO: as rocprofv3 --kokkos-trace feature improves,
@@ -1096,7 +1096,7 @@ def run_prof(
                 process_kokkos_trace_output(workload_dir, fbase)
             elif "--hip-trace" in options:
                 process_hip_trace_output(workload_dir, fbase)
-            if torch_operators_enabled:
+            if torch_trace_enabled:
                 process_torch_trace_output(workload_dir, fbase)
 
         # Combine results into single CSV file
@@ -1509,8 +1509,8 @@ def consolidate_torch_trace_output(workload_dir: str) -> None:
     for operator_name, group in grouped:
         sanitized_operator_name = operator_name.replace("torch.", "").replace(".", "_")
         # Ensure output directory exists
-        Path(f"{workload_dir}/torch_operators").mkdir(parents=True, exist_ok=True)
-        output_file = f"{workload_dir}/torch_operators/{sanitized_operator_name}.csv"
+        Path(f"{workload_dir}/torch_trace").mkdir(parents=True, exist_ok=True)
+        output_file = f"{workload_dir}/torch_trace/{sanitized_operator_name}.csv"
         group.to_csv(output_file, index=False)
         console_log(
             f"Saved consolidated trace for {sanitized_operator_name} to {output_file}"
