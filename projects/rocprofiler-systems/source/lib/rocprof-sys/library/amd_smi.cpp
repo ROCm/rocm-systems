@@ -1272,7 +1272,10 @@ shutdown()
 
     try
     {
-        data::shutdown();
+        if(data::shutdown())
+        {
+            ROCPROFSYS_AMD_SMI_CALL(amdsmi_shut_down());
+        }
     } catch(std::runtime_error& _e)
     {
         LOG_WARNING("Exception thrown when shutting down amd-smi: {}", _e.what());

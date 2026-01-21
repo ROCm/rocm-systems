@@ -43,11 +43,6 @@ THE SOFTWARE.
 TEST_CASE("Unit_hipMipmappedArrayCreate_Negative_Parameters") {
   CHECK_IMAGE_SUPPORT;
 
-#ifdef __linux__
-  HipTest::HIP_SKIP_TEST("Mipmap APIs are not supported on Linux");
-  return;
-#endif  //__linux__
-
   hipmipmappedArray array;
 
   HIP_ARRAY3D_DESCRIPTOR desc = {};

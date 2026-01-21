@@ -637,7 +637,17 @@ hsa_status_t ImageManagerGfx12::PopulateSamplerSrd(Sampler& sampler) const {
   }
   word2.bits.XY_MIN_FILTER = word2.bits.XY_MAG_FILTER;
   word2.bits.Z_FILTER = SQ_TEX_Z_FILTER_NONE;
-  word2.bits.MIP_FILTER = SQ_TEX_MIP_FILTER_NONE;
+
+  switch (sampler_descriptor.mipmap_filter_mode) {
+    case HSA_EXT_SAMPLER_FILTER_MODE_NEAREST:
+      word2.bits.MIP_FILTER = static_cast<int>(SQ_TEX_MIP_FILTER_POINT);
+      break;
+    case HSA_EXT_SAMPLER_FILTER_MODE_LINEAR:
+      word2.bits.MIP_FILTER = static_cast<int>(SQ_TEX_MIP_FILTER_LINEAR);
+      break;
+    default:
+      word2.bits.MIP_FILTER = static_cast<int>(SQ_TEX_MIP_FILTER_NONE);
+  }
 
   word3.u32All = 0;
 
@@ -1051,7 +1061,7 @@ hsa_status_t ImageManagerGfx12::PopulateMipmapSrd(MipmappedArray& mipmap) const 
 
     // For 1d, 2d and 2d-msaa, fields DEPTH+PITCH_MSB encode pitch-1
     if (!mipmap_array && !mipmap_3d) {
-      uint32_t encPitch = out.pitch - 1;
+      uint32_t encPitch = 0;  // mipmap dosesn't support custom pitch, so set it as 0
       word4.f.DEPTH = encPitch & 0x3fff;           // first 14 bits
       word4.f.PITCH_MSB = (encPitch >> 14) & 0x3;  // last 2 bits
     } else {
@@ -1358,6 +1368,8 @@ hsa_status_t ImageManagerGfx12::PopulateMipLevelSrd(
     MipmappedArray& level_view,
     const MipmappedArray& mipmap_array,
     uint32_t mip_level) const {
+  // Copy entire parent structure (srd is a fixed array, so it's deep-copied automatically)
+  level_view = mipmap_array;
 
   // SRD already copied from parent, just modify BASE_LEVEL/LAST_LEVEL fields
   uint32_t* srd_words = reinterpret_cast<uint32_t*>(level_view.srd);
@@ -1370,7 +1382,9 @@ hsa_status_t ImageManagerGfx12::PopulateMipLevelSrd(
   word1->f.BASE_LEVEL = mip_level;
   word3->f.LAST_LEVEL = mip_level;
 
-  debug_print("Set SRD mip selection: BASE_LEVEL=%u, LAST_LEVEL=%u", mip_level, mip_level);
+  if (core::Runtime::runtime_singleton_->flag().image_print_srd()) {
+    debug_print("Set SRD mip selection: BASE_LEVEL=%u, LAST_LEVEL=%u", mip_level, mip_level);
+  }
 
   return HSA_STATUS_SUCCESS;
 }

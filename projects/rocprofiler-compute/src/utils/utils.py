@@ -235,6 +235,101 @@ def detect_rocprof(args: argparse.Namespace) -> str:
     return rocprof_cmd
 
 
+def perform_attach_detach(new_env: dict[str, str], options: dict[str, Any]) -> None:
+    @contextmanager
+    def temporary_env(env_vars: dict[str, str]) -> Generator[None, None, None]:
+        """
+        Temporarily change the environment variable of this application.
+        """
+        original_env = os.environ.copy()
+        os.environ.update({k: str(v) for k, v in env_vars.items()})
+        try:
+            yield
+        finally:
+            os.environ.clear()
+            os.environ.update(original_env)
+
+    with temporary_env(new_env):
+        libname = options["ROCPROF_ATTACH_LIBRARY"]
+
+        try:
+            c_lib = ctypes.CDLL(libname)
+            if c_lib is None:
+                console_error(f"Error opening {libname}")
+        except Exception as e:
+            console_error(f"Error loading {libname}: {e}")
+
+        # Set argument and return types for attach/detach functions
+        try:
+            # old attach/detach API
+            c_lib.attach.argtypes = [ctypes.c_uint]
+        except Exception as e:
+            console_debug(
+                "Error setting old attach/detach API argument "
+                f"types: {e}, trying new API"
+            )
+            try:
+                # new attach/detach API
+                c_lib.rocattach_attach.restype = ctypes.c_int
+                c_lib.rocattach_attach.argtypes = [ctypes.c_int]
+                c_lib.rocattach_detach.restype = ctypes.c_int
+                c_lib.rocattach_detach.argtypes = [ctypes.c_int]
+            except Exception as e:
+                console_error(
+                    f"Error setting attach/detach function argument types: {e}"
+                )
+
+        pid = options["ROCPROF_ATTACH_PID"]
+        if pid is None:
+            console_error("Mode of attach/detach must have setup for process ID")
+
+        try:
+            # old attach/detach API
+            c_lib.attach(int(pid))
+        except Exception as e:
+            console_debug(f"Error attaching with old API: {e}, trying new API")
+            try:
+                # new attach/detach API
+                attach_status = c_lib.rocattach_attach(int(pid))
+                if attach_status != 0:
+                    console_error(
+                        f"Error attaching to process {pid}, "
+                        f"rocattach_attach returned {attach_status}"
+                    )
+            except Exception as e:
+                console_error(f"Error attaching to process {pid}: {e}")
+
+        duration = os.environ.get("ROCPROF_ATTACH_DURATION", None)
+        if duration is None:
+            console_log(
+                f"\033[93mAttach to process with ID {pid} is successful, "
+                "Press Enter to detach...\033[0m"
+            )
+            input()
+        else:
+            console_log(
+                f"\033[93mAttach to process with ID {pid} is successful, "
+                f"detach will happen in {duration} milliseconds...\033[0m"
+            )
+            time.sleep(int(duration) / 1000)
+
+        try:
+            # old attach/detach API
+            c_lib.detach(int(pid))
+        except Exception as e:
+            console_debug(f"Error detaching with old API: {e}, trying new API")
+            try:
+                # new attach/detach API
+                detach_status = c_lib.rocattach_detach(int(pid))
+                if detach_status != 0:
+                    console_error(
+                        f"Error detaching from process {pid}, "
+                        f"rocattach_detach returned {detach_status}"
+                    )
+            except Exception as e:
+                console_error(f"Error detaching from process {pid}: {e}")
+
+
 def capture_subprocess_output(
     subprocess_args: list[str],
     new_env: Optional[dict[str, str]] = None,
@@ -788,49 +883,7 @@ def run_prof(
         console_debug(f"rocprof sdk env vars: {new_env}")
 
         if is_mode_live_attach:
-
-            @contextmanager
-            def temporary_env(env_vars: dict[str, str]) -> Generator[None, None, None]:
-                """
-                Temporarily change the environment variable of this application.
-                """
-                original_env = os.environ.copy()
-                os.environ.update({k: str(v) for k, v in env_vars.items()})
-                try:
-                    yield
-                finally:
-                    os.environ.clear()
-                    os.environ.update(original_env)
-
-            with temporary_env(new_env):
-                libname = options["ROCPROF_ATTACH_LIBRARY"]
-                c_lib = ctypes.CDLL(libname)
-                if c_lib is None:
-                    console_error(f"Error opening {libname}")
-                c_lib.attach.argtypes = [ctypes.c_uint]
-
-                pid = options["ROCPROF_ATTACH_PID"]
-                if pid is None:
-                    console_error(
-                        "Mode of attach/detach must have setup for process ID"
-                    )
-
-                c_lib.attach(int(pid))
-                duration = os.environ.get("ROCPROF_ATTACH_DURATION", None)
-                if duration is None:
-                    console_log(
-                        f"\033[93mAttach to process with ID {pid} is successful, "
-                        "Press Enter to detach...\033[0m"
-                    )
-                    input()
-                else:
-                    console_log(
-                        f"\033[93mAttach to process with ID {pid} is successful, "
-                        f"detach will happen in {duration} milliseconds...\033[0m"
-                    )
-                    time.sleep(int(duration) / 1000)
-                c_lib.detach(int(pid))
-
+            perform_attach_detach(new_env, options)
         else:
             if app_cmd is None:
                 console_error(

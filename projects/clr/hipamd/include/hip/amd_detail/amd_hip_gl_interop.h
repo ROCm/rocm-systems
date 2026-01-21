@@ -81,7 +81,7 @@ hipError_t hipGLGetDevices(unsigned int* pHipDeviceCount, int* pHipDevices,
  *
  * @param [out] resource - Returns pointer of graphics resource.
  * @param [in] buffer - Buffer to be registered.
- * @param [in] flags - Register flags.
+ * @param [in] flags - Register OpenGL flags.
  *
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorUnknown, #hipErrorInvalidResourceHandle
  *
@@ -94,7 +94,7 @@ hipError_t hipGraphicsGLRegisterBuffer(hipGraphicsResource** resource, GLuint bu
  * @param [out] resource - Returns pointer of graphics resource.
  * @param [in] image - Image to be registered.
  * @param [in] target - Valid target value Id.
- * @param [in] flags - Register flags.
+ * @param [in] flags - Register OpenGL flags.
  *
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorUnknown, #hipErrorInvalidResourceHandle
  *
