@@ -192,7 +192,7 @@ set(_rccl_environment
     "ROCPROFSYS_TIME_OUTPUT=OFF"
     "ROCPROFSYS_USE_PID=OFF"
     "ROCPROFSYS_USE_RCCLP=ON"
-    "ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch,memory_copy,rccl_api"
+    "ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch,memory_copy"
     "${_test_openmp_env}"
     "${_test_library_path}"
 )
