@@ -397,7 +397,8 @@ SELECT
     K.end,
     (K.end - K.start) AS duration,
     PMC_I.name AS counter_name,
-    PMC_E.value AS counter_value
+    PMC_E.value AS counter_value,
+    PMC_E.timestamp AS timestamp
 FROM
     `rocpd_pmc_event` PMC_E
     INNER JOIN `rocpd_info_pmc` PMC_I ON PMC_I.id = PMC_E.pmc_id
@@ -686,6 +687,7 @@ SELECT
     PMC_I.value_type,
     PMC_I.id AS counter_id,
     SUM(PMC_E.value) AS value,
+    PMC_E.timestamp AS timestamp,
     K.start,
     K.end,
     PMC_I.is_constant,
@@ -723,4 +725,5 @@ GROUP BY
     PMC_E.guid,
     K.dispatch_id,
     PMC_I.name,
-    K.agent_id;
+    K.agent_id,
+    PMC_E.timestamp;

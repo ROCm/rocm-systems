@@ -1103,6 +1103,39 @@ write_rocpd(
                     );
                 }
             }
+
+            for(auto pctr : spm_collection_gen)
+            {
+                auto _deferred = sql::deferred_transaction{conn};
+                for(const auto& record : spm_collection_gen.get(pctr))
+                {
+                    const auto& dispatch_data = record.dispatch_data;
+                    const auto& info          = dispatch_data.dispatch_info;
+
+                    // Register thread ID
+                    get_thread_id(record.thread_id);
+
+                    // Use buffer category for kernel dispatches
+                    auto kind =
+                        tool_metadata.buffer_names.at(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH);
+
+                    // Process this dispatch (SPM dispatch timestamps are not available)
+                    process_dispatch(info.dispatch_id,                // dispatch_id
+                                     info.kernel_id,                  // kernel_id
+                                     dispatch_data.correlation_id,    // corr_id
+                                     info,                            // info
+                                     kind,                            // kind
+                                     record.thread_id,                // thread_id
+                                     get_queue_id(info.queue_id),     // queue_id
+                                     get_stream_id(rocprofiler_stream_id_t{.handle = 0}),
+                                     0,                               // start_timestamp
+                                     0,                               // end_timestamp
+                                     info.grid_size,                  // grid
+                                     info.workgroup_size,             // workgroup
+                                     false                            // enable_duplicate_check
+                    );
+                }
+            }
         }
         else
         {
