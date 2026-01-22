@@ -21,6 +21,10 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 
 * An error that occurred during HIP graph stream capture in thread‑local capture mode has been fixed. The HIP runtime now updates its validation logic to ensure that captures running in other threads on different streams no longer invalidate or block the thread‑local capture in the current thread.
 
+### Optimized
+
+* HIP log level control capabilities HIP runtime adds dynamic logging functionalities, enabling applications to programmatically enable, disable, and configure logging at runtime without modifying environment variables or restarting the application. The result is more precise control over diagnostic output, making it easier to debug targeted code paths or minimize log noise during performance‑critical execution.
+
 ## HIP 7.11 for ROCm 7.11
 
 ### Added
