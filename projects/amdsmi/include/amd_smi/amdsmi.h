@@ -39,12 +39,6 @@ extern "C" {
 #include <stdbool.h>
 #include <stddef.h>
 
-#ifndef __KERNEL__
-#include <stdint.h>
-#include <stdbool.h>
-#include <stddef.h>
-#endif
-
 /**
  * @brief Initialization flags
  *
@@ -1285,11 +1279,6 @@ typedef struct {
     uint32_t vram_used;   //!< In MB
     uint32_t reserved[2];
 } amdsmi_vram_usage_t;
-
-#ifdef __cplusplus
-#include <cstdint>
-#include <stdint.h>
-#endif  // __cplusplus
 
 /**
  * @brief library versioning
@@ -3152,140 +3141,6 @@ amdsmi_status_t
 amdsmi_get_gpu_enumeration_info(amdsmi_processor_handle processor_handle, amdsmi_enumeration_info_t *info);
 
 /**
- *  @brief Get the list of cpu handles in the system.
- *
- *  @ingroup tagProcDiscovery
- *
- *  @platform{cpu_bm}
- *
- *  @details Depends on AMDSMI_INIT_AMD_CPUS flag passed to ::amdsmi_init.
- *  The processor handles can be used in other APIs to get processor detail information.
- *
- *  @param[in,out] cpu_count As input, the value passed
- *  through this parameter is the number of ::amdsmi_processor_handle that
- *  may be safely written to the memory pointed to by @p processor_handles. This is the
- *  limit on how many processor handles will be written to @p processor_handles. On return, @p
- *  socket_count will contain the number of processor handles written to @p processor_handles,
- *  or the number of processor handles that could have been written if enough memory had been
- *  provided.
- *  If @p processor_handles is NULL, as output, @p cpu_count will contain
- *  how many processors are available to read in the system.
- *
- *  @param[in,out] processor_handles A pointer to a block of memory to which the
- *  ::amdsmi_processor_handle values will be written. This value may be NULL.
- *  In this case, this function can be used to query how many processors are
- *  available to read in the system.
- *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
- */
-amdsmi_status_t amdsmi_get_cpu_handles(uint32_t *cpu_count, amdsmi_processor_handle *processor_handles);
-
-/**
- *  @brief Get the list of the cpu core handles in a system.
- *
- *  @ingroup tagProcDiscovery
- *
- *  @platform{cpu_bm}
- *
- *  @details This function retrieves the cpu core handles of a system.
- *  @param[in,out] cores_count As input, the value passed
- *  through this parameter is the number of ::amdsmi_processor_handle's that
- *  may be safely written to the memory pointed to by @p processor_handles. This is the
- *  limit on how many core handles will be written to @p processor_handles. On return, @p
- *  cores_count will contain the number of core processor handles written to @p processor_handles,
- *  or the number of core processor handles that could have been written if enough memory had been
- *  provided.
- *  If @p processor_handles is NULL, as output, @p processor_count will contain
- *  how many cpu cores are available to read in the system.
- *
- *  @param[in,out] processor_handles A pointer to a block of memory to which the
- *  ::amdsmi_processor_handle values will be written. This value may be NULL.
- *  In this case, this function can be used to query how many processors are
- *  available to read.
- *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
-*/
-amdsmi_status_t amdsmi_get_cpucore_handles(uint32_t *cores_count, amdsmi_processor_handle* processor_handles);
-
-/**
- *  @brief Get respective processor counts from the processor handles
- *
- *  @ingroup tagProcDiscovery
- *
- *  @platform{cpu_bm}
- *
- *  @details This function retrieves respective processor counts information.
- *  The @p processor_handle must be provided to retrieve the processor ID.
- *
- *  @param[in] processor_handles A pointer to a block of memory to which the
- *  ::amdsmi_processor_handle values will be written. This value may be NULL.
- *
- *  @param[in] processor_count total processor count per socket
- *
- *  @param[out] nr_cpusockets Total number of cpu sockets
- *
- *  @param[out] nr_cpucores Total number of cpu cores
- *
- *  @param[out] nr_gpus Total number of gpu devices
- *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
- */
-amdsmi_status_t amdsmi_get_processor_count_from_handles(amdsmi_processor_handle* processor_handles,
-                                                        uint32_t* processor_count, uint32_t* nr_cpusockets,
-                                                        uint32_t* nr_cpucores, uint32_t* nr_gpus);
-
-/**
- *  @brief Get information about the given processor
- *
- *  @ingroup tagProcDiscovery
- *
- *  @platform{cpu_bm}
- *
- *  @details This function retrieves processor information. The @p processor_handle must
- *  be provided to retrieve the processor ID.
- *
- *  @param[in] processor_handle a processor handle
- *
- *  @param[in] len the length of the caller provided buffer @p name.
- *
- *  @param[out] name The id of the processor.
- *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
- */
-amdsmi_status_t amdsmi_get_processor_info( amdsmi_processor_handle processor_handle, size_t len, char *name);
-
-/**
- *  @brief Get the list of cpu socket handles in the system.
- *
- *  @ingroup tagProcDiscovery
- *
- *  @platform{cpu_bm}
- *
- *  @details Depends on AMDSMI_INIT_AMD_CPUS flag passed to ::amdsmi_init.
- *  The socket handles can be used to query the processor handles in that socket, which
- *  will be used in other APIs to get processor detail information.
- *
- *  @param[in,out] socket_count As input, the value passed
- *  through this parameter is the number of ::amdsmi_cpusocket_handle that
- *  may be safely written to the memory pointed to by @p socket_handles. This is the
- *  limit on how many socket handles will be written to @p socket_handles. On return, @p
- *  socket_count will contain the number of socket handles written to @p socket_handles,
- *  or the number of socket handles that could have been written if enough memory had been
- *  provided.
- *  If @p socket_handles is NULL, as output, @p socket_count will contain
- *  how many sockets are available to read in the system.
- *
- *  @param[in,out] socket_handles A pointer to a block of memory to which the
- *  ::amdsmi_cpusocket_handle values will be written. This value may be NULL.
- *  In this case, this function can be used to query how many sockets are
- *  available to read in the system.
- *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
- */
-amdsmi_status_t amdsmi_get_cpusocket_handles(uint32_t *socket_count,
-                amdsmi_cpusocket_handle* socket_handles);
-
-/**
  *  @brief Returns BDF of the given NIC device
  *
  *  @ingroup tagProcDiscovery
@@ -4510,102 +4365,6 @@ amdsmi_status_t amdsmi_get_supported_power_cap(amdsmi_processor_handle processor
  */
 amdsmi_status_t amdsmi_set_gpu_power_profile(amdsmi_processor_handle processor_handle, uint32_t reserved,
                                              amdsmi_power_profile_preset_masks_t profile);
-
-/**
- *  @brief Get the socket power.
- *
- *  @ingroup tagPowerControl
- *
- *  @platform{cpu_bm}
- *
- *  @param[in]      processor_handle Cpu socket which to query
- *
- *  @param[in,out]    ppower - Input buffer to return socket power
- *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
- */
-amdsmi_status_t amdsmi_get_cpu_socket_power(amdsmi_processor_handle processor_handle,
-                                            uint32_t *ppower);
-
-/**
- *  @brief Get the socket power cap.
- *
- *  @ingroup tagPowerControl
- *
- *  @platform{cpu_bm}
- *
- *  @param[in]      processor_handle Cpu socket which to query
- *
- *  @param[in,out]    pcap - Input buffer to return power cap.
- *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
- */
-amdsmi_status_t amdsmi_get_cpu_socket_power_cap(amdsmi_processor_handle processor_handle,
-                                                uint32_t *pcap);
-
-/**
- *  @brief Get the maximum power cap value for a given socket.
- *
- *  @ingroup tagPowerControl
- *
- *  @platform{cpu_bm}
- *
- *  @param[in]      processor_handle Cpu socket which to query
- *
- *  @param[in,out]    pmax - Input buffer to return maximum power limit value
- *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
- */
-amdsmi_status_t amdsmi_get_cpu_socket_power_cap_max(amdsmi_processor_handle processor_handle,
-                                                    uint32_t *pmax);
-
-/**
- *  @brief Get the SVI based power telemetry for all rails.
- *
- *  @ingroup tagPowerControl
- *
- *  @platform{cpu_bm}
- *
- *  @param[in]      processor_handle Cpu socket which to query
- *
- *  @param[in,out]    power - Input buffer to return svi based power value
- *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
- */
-amdsmi_status_t amdsmi_get_cpu_pwr_svi_telemetry_all_rails(amdsmi_processor_handle processor_handle,
-                                                           uint32_t *power);
-
-/**
- *  @brief Set the power cap value for a given socket.
- *
- *  @ingroup tagPowerControl
- *
- *  @platform{cpu_bm}
- *
- *  @param[in]  processor_handle Cpu socket which to query
- *
- *  @param[in]  pcap - Input power limit value
- *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
- */
-amdsmi_status_t amdsmi_set_cpu_socket_power_cap(amdsmi_processor_handle processor_handle,
-                                                uint32_t pcap);
-
-/**
- *  @brief Set the power efficiency profile policy.
- *
- *  @ingroup tagPowerControl
- *
- *  @platform{cpu_bm}
- *
- *  @param[in]      processor_handle Cpu socket which to query
- *
- *  @param[in]        mode - mode to be set
- *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
- */
-amdsmi_status_t amdsmi_set_cpu_pwr_efficiency_mode(amdsmi_processor_handle processor_handle,
-                                                   uint8_t mode);
 
 /** @} End tagPowerControl */
 
@@ -7107,14 +6866,156 @@ amdsmi_status_t amdsmi_get_xgmi_info(amdsmi_processor_handle processor_handle, a
 #ifdef ENABLE_ESMI_LIB
 
 /*****************************************************************************/
-/** @defgroup tagEnergyInfo     Energy information (RAPL MSR)
+/** @defgroup tagEsmiProcDiscovery ESMI Discovery Queries
+ *  These functions provide discovery of the sockets.
+ *  @{
+ */
+
+/**
+ *  @brief Get the list of cpu handles in the system.
+ *
+ *  @ingroup tagEsmiProcDiscovery
+ *
+ *  @platform{cpu_bm}
+ *
+ *  @details Depends on AMDSMI_INIT_AMD_CPUS flag passed to ::amdsmi_init.
+ *  The processor handles can be used in other APIs to get processor detail information.
+ *
+ *  @param[in,out] cpu_count As input, the value passed
+ *  through this parameter is the number of ::amdsmi_processor_handle that
+ *  may be safely written to the memory pointed to by @p processor_handles. This is the
+ *  limit on how many processor handles will be written to @p processor_handles. On return, @p
+ *  socket_count will contain the number of processor handles written to @p processor_handles,
+ *  or the number of processor handles that could have been written if enough memory had been
+ *  provided.
+ *  If @p processor_handles is NULL, as output, @p cpu_count will contain
+ *  how many processors are available to read in the system.
+ *
+ *  @param[in,out] processor_handles A pointer to a block of memory to which the
+ *  ::amdsmi_processor_handle values will be written. This value may be NULL.
+ *  In this case, this function can be used to query how many processors are
+ *  available to read in the system.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_cpu_handles(uint32_t *cpu_count, amdsmi_processor_handle *processor_handles);
+
+/**
+ *  @brief Get the list of the cpu core handles in a system.
+ *
+ *  @ingroup tagEsmiProcDiscovery
+ *
+ *  @platform{cpu_bm}
+ *
+ *  @details This function retrieves the cpu core handles of a system.
+ *  @param[in,out] cores_count As input, the value passed
+ *  through this parameter is the number of ::amdsmi_processor_handle's that
+ *  may be safely written to the memory pointed to by @p processor_handles. This is the
+ *  limit on how many core handles will be written to @p processor_handles. On return, @p
+ *  cores_count will contain the number of core processor handles written to @p processor_handles,
+ *  or the number of core processor handles that could have been written if enough memory had been
+ *  provided.
+ *  If @p processor_handles is NULL, as output, @p processor_count will contain
+ *  how many cpu cores are available to read in the system.
+ *
+ *  @param[in,out] processor_handles A pointer to a block of memory to which the
+ *  ::amdsmi_processor_handle values will be written. This value may be NULL.
+ *  In this case, this function can be used to query how many processors are
+ *  available to read.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+*/
+amdsmi_status_t amdsmi_get_cpucore_handles(uint32_t *cores_count, amdsmi_processor_handle* processor_handles);
+
+/**
+ *  @brief Get respective processor counts from the processor handles
+ *
+ *  @ingroup tagEsmiProcDiscovery
+ *
+ *  @platform{cpu_bm}
+ *
+ *  @details This function retrieves respective processor counts information.
+ *  The @p processor_handle must be provided to retrieve the processor ID.
+ *
+ *  @param[in] processor_handles A pointer to a block of memory to which the
+ *  ::amdsmi_processor_handle values will be written. This value may be NULL.
+ *
+ *  @param[in] processor_count total processor count per socket
+ *
+ *  @param[out] nr_cpusockets Total number of cpu sockets
+ *
+ *  @param[out] nr_cpucores Total number of cpu cores
+ *
+ *  @param[out] nr_gpus Total number of gpu devices
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_processor_count_from_handles(amdsmi_processor_handle* processor_handles,
+                                                        uint32_t* processor_count, uint32_t* nr_cpusockets,
+                                                        uint32_t* nr_cpucores, uint32_t* nr_gpus);
+
+/**
+ *  @brief Get information about the given processor
+ *
+ *  @ingroup tagEsmiProcDiscovery
+ *
+ *  @platform{cpu_bm}
+ *
+ *  @details This function retrieves processor information. The @p processor_handle must
+ *  be provided to retrieve the processor ID.
+ *
+ *  @param[in] processor_handle a processor handle
+ *
+ *  @param[in] len the length of the caller provided buffer @p name.
+ *
+ *  @param[out] name The id of the processor.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_processor_info( amdsmi_processor_handle processor_handle, size_t len, char *name);
+
+/**
+ *  @brief Get the list of cpu socket handles in the system.
+ *
+ *  @ingroup tagEsmiProcDiscovery
+ *
+ *  @platform{cpu_bm}
+ *
+ *  @details Depends on AMDSMI_INIT_AMD_CPUS flag passed to ::amdsmi_init.
+ *  The socket handles can be used to query the processor handles in that socket, which
+ *  will be used in other APIs to get processor detail information.
+ *
+ *  @param[in,out] socket_count As input, the value passed
+ *  through this parameter is the number of ::amdsmi_cpusocket_handle that
+ *  may be safely written to the memory pointed to by @p socket_handles. This is the
+ *  limit on how many socket handles will be written to @p socket_handles. On return, @p
+ *  socket_count will contain the number of socket handles written to @p socket_handles,
+ *  or the number of socket handles that could have been written if enough memory had been
+ *  provided.
+ *  If @p socket_handles is NULL, as output, @p socket_count will contain
+ *  how many sockets are available to read in the system.
+ *
+ *  @param[in,out] socket_handles A pointer to a block of memory to which the
+ *  ::amdsmi_cpusocket_handle values will be written. This value may be NULL.
+ *  In this case, this function can be used to query how many sockets are
+ *  available to read in the system.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_cpusocket_handles(uint32_t *socket_count,
+                amdsmi_cpusocket_handle* socket_handles);
+
+/** @} End tagEsmiProcDiscovery */
+
+/*****************************************************************************/
+/** @defgroup tagEsmiEnergyInfo ESMI Energy information (RAPL MSR)
  *  @{
  */
 
 /**
  *  @brief Get the core energy for a given core.
  *
- *  @ingroup tagEnergyInfo
+ *  @ingroup tagEsmiEnergyInfo
  *
  *  @platform{cpu_bm}
  *
@@ -7130,7 +7031,7 @@ amdsmi_status_t amdsmi_get_cpu_core_energy(amdsmi_processor_handle processor_han
 /**
  *  @brief Get the socket energy for a given socket.
  *
- *  @ingroup tagEnergyInfo
+ *  @ingroup tagEsmiEnergyInfo
  *
  *  @platform{cpu_bm}
  *
@@ -7143,17 +7044,17 @@ amdsmi_status_t amdsmi_get_cpu_core_energy(amdsmi_processor_handle processor_han
 amdsmi_status_t amdsmi_get_cpu_socket_energy(amdsmi_processor_handle processor_handle,
                                              uint64_t *penergy);
 
-/** @} End tagEnergyInfo */
+/** @} End tagEsmiEnergyInfo */
 
 /*****************************************************************************/
-/** @defgroup tagHSMPSystemStats     HSMP system statistics
+/** @defgroup tagEsmiHSMPSystemStats ESMI HSMP system statistics
  *  @{
  */
 
 /**
  *  @brief Get Number of threads Per Core.
  *
- *  @ingroup tagHSMPSystemStats
+ *  @ingroup tagEsmiHSMPSystemStats
  *
  *  @platform{cpu_bm}
  *
@@ -7166,7 +7067,7 @@ amdsmi_status_t amdsmi_get_threads_per_core(uint32_t *threads_per_core);
 /**
  *  @brief Get HSMP Driver Version.
  *
- *  @ingroup tagHSMPSystemStats
+ *  @ingroup tagEsmiHSMPSystemStats
  *
  *  @platform{cpu_bm}
  *
@@ -7181,7 +7082,7 @@ amdsmi_status_t amdsmi_get_cpu_hsmp_driver_version(amdsmi_processor_handle proce
 /**
  *  @brief Get SMU Firmware Version.
  *
- *  @ingroup tagHSMPSystemStats
+ *  @ingroup tagEsmiHSMPSystemStats
  *
  *  @platform{cpu_bm}
  *
@@ -7196,7 +7097,7 @@ amdsmi_status_t amdsmi_get_cpu_smu_fw_version(amdsmi_processor_handle processor_
 /**
  *  @brief Get HSMP protocol Version.
  *
- *  @ingroup tagHSMPSystemStats
+ *  @ingroup tagEsmiHSMPSystemStats
  *
  *  @platform{cpu_bm}
  *
@@ -7211,7 +7112,7 @@ amdsmi_status_t amdsmi_get_cpu_hsmp_proto_ver(amdsmi_processor_handle processor_
 /**
  *  @brief Get normalized status of the processor's PROCHOT status.
  *
- *  @ingroup tagHSMPSystemStats
+ *  @ingroup tagEsmiHSMPSystemStats
  *
  *  @platform{cpu_bm}
  *
@@ -7227,7 +7128,7 @@ amdsmi_status_t amdsmi_get_cpu_prochot_status(amdsmi_processor_handle processor_
 /**
  *  @brief Get Data fabric clock and Memory clock in MHz.
  *
- *  @ingroup tagHSMPSystemStats
+ *  @ingroup tagEsmiHSMPSystemStats
  *
  *  @platform{cpu_bm}
  *
@@ -7245,7 +7146,7 @@ amdsmi_status_t amdsmi_get_cpu_fclk_mclk(amdsmi_processor_handle processor_handl
 /**
  *  @brief Get core clock in MHz.
  *
- *  @ingroup tagHSMPSystemStats
+ *  @ingroup tagEsmiHSMPSystemStats
  *
  *  @platform{cpu_bm}
  *
@@ -7261,7 +7162,7 @@ amdsmi_status_t amdsmi_get_cpu_cclk_limit(amdsmi_processor_handle processor_hand
 /**
  *  @brief Get current active frequency limit of the socket.
  *
- *  @ingroup tagHSMPSystemStats
+ *  @ingroup tagEsmiHSMPSystemStats
  *
  *  @platform{cpu_bm}
  *
@@ -7279,7 +7180,7 @@ amdsmi_status_t amdsmi_get_cpu_socket_current_active_freq_limit(amdsmi_processor
 /**
  *  @brief Get socket frequency range.
  *
- *  @ingroup tagHSMPSystemStats
+ *  @ingroup tagEsmiHSMPSystemStats
  *
  *  @platform{cpu_bm}
  *
@@ -7297,7 +7198,7 @@ amdsmi_status_t amdsmi_get_cpu_socket_freq_range(amdsmi_processor_handle process
 /**
  *  @brief Get socket frequency limit of the core.
  *
- *  @ingroup tagHSMPSystemStats
+ *  @ingroup tagEsmiHSMPSystemStats
  *
  *  @platform{cpu_bm}
  *
@@ -7310,17 +7211,120 @@ amdsmi_status_t amdsmi_get_cpu_socket_freq_range(amdsmi_processor_handle process
 amdsmi_status_t amdsmi_get_cpu_core_current_freq_limit(amdsmi_processor_handle processor_handle,
                                                        uint32_t *freq);
 
-/** @} End tagHSMPSystemStats */
+/** @} End tagEsmiHSMPSystemStats */
 
 /*****************************************************************************/
-/** @defgroup tagPerfBoostControl   Performance (Boost limit) Control
+/** @defgroup tagEsmiPowerControl ESMI Power Control
+ *  @{
+ */
+
+/**
+ *  @brief Get the socket power.
+ *
+ *  @ingroup tagEsmiPowerControl
+ *
+ *  @platform{cpu_bm}
+ *
+ *  @param[in]      processor_handle Cpu socket which to query
+ *
+ *  @param[in,out]    ppower - Input buffer to return socket power
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_cpu_socket_power(amdsmi_processor_handle processor_handle,
+                                            uint32_t *ppower);
+
+/**
+ *  @brief Get the socket power cap.
+ *
+ *  @ingroup tagEsmiPowerControl
+ *
+ *  @platform{cpu_bm}
+ *
+ *  @param[in]      processor_handle Cpu socket which to query
+ *
+ *  @param[in,out]    pcap - Input buffer to return power cap.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_cpu_socket_power_cap(amdsmi_processor_handle processor_handle,
+                                                uint32_t *pcap);
+
+/**
+ *  @brief Get the maximum power cap value for a given socket.
+ *
+ *  @ingroup tagEsmiPowerControl
+ *
+ *  @platform{cpu_bm}
+ *
+ *  @param[in]      processor_handle Cpu socket which to query
+ *
+ *  @param[in,out]    pmax - Input buffer to return maximum power limit value
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_cpu_socket_power_cap_max(amdsmi_processor_handle processor_handle,
+                                                    uint32_t *pmax);
+
+/**
+ *  @brief Get the SVI based power telemetry for all rails.
+ *
+ *  @ingroup tagEsmiPowerControl
+ *
+ *  @platform{cpu_bm}
+ *
+ *  @param[in]      processor_handle Cpu socket which to query
+ *
+ *  @param[in,out]    power - Input buffer to return svi based power value
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_cpu_pwr_svi_telemetry_all_rails(amdsmi_processor_handle processor_handle,
+                                                           uint32_t *power);
+
+/**
+ *  @brief Set the power cap value for a given socket.
+ *
+ *  @ingroup tagEsmiPowerControl
+ *
+ *  @platform{cpu_bm}
+ *
+ *  @param[in]  processor_handle Cpu socket which to query
+ *
+ *  @param[in]  pcap - Input power limit value
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_set_cpu_socket_power_cap(amdsmi_processor_handle processor_handle,
+                                                uint32_t pcap);
+
+/**
+ *  @brief Set the power efficiency profile policy.
+ *
+ *  @ingroup tagEsmiPowerControl
+ *
+ *  @platform{cpu_bm}
+ *
+ *  @param[in]      processor_handle Cpu socket which to query
+ *
+ *  @param[in]        mode - mode to be set
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_set_cpu_pwr_efficiency_mode(amdsmi_processor_handle processor_handle,
+                                                   uint8_t mode);
+
+/** @} End tagEsmiPowerControl */
+
+/*****************************************************************************/
+/** @defgroup tagEsmiPerfBoostControl ESMI Performance (Boost limit) Control
  *  @{
  */
 
 /**
  *  @brief Get the core boost limit.
  *
- *  @ingroup tagPerfBoostControl
+ *  @ingroup tagEsmiPerfBoostControl
  *
  *  @platform{cpu_bm}
  *
@@ -7336,7 +7340,7 @@ amdsmi_status_t amdsmi_get_cpu_core_boostlimit(amdsmi_processor_handle processor
 /**
  *  @brief Get the socket c0 residency.
  *
- *  @ingroup tagPerfBoostControl
+ *  @ingroup tagEsmiPerfBoostControl
  *
  *  @platform{cpu_bm}
  *
@@ -7352,7 +7356,7 @@ amdsmi_status_t amdsmi_get_cpu_socket_c0_residency(amdsmi_processor_handle proce
 /**
  *  @brief Set the core boostlimit value.
  *
- *  @ingroup tagPerfBoostControl
+ *  @ingroup tagEsmiPerfBoostControl
  *
  *  @platform{cpu_bm}
  *
@@ -7368,7 +7372,7 @@ amdsmi_status_t amdsmi_set_cpu_core_boostlimit(amdsmi_processor_handle processor
 /**
  *  @brief Set the socket boostlimit value.
  *
- *  @ingroup tagPerfBoostControl
+ *  @ingroup tagEsmiPerfBoostControl
  *
  *  @platform{cpu_bm}
  *
@@ -7381,17 +7385,17 @@ amdsmi_status_t amdsmi_set_cpu_core_boostlimit(amdsmi_processor_handle processor
 amdsmi_status_t amdsmi_set_cpu_socket_boostlimit(amdsmi_processor_handle processor_handle,
                                                  uint32_t boostlimit);
 
-/** @} End tagPerfBoostControl */
+/** @} End tagEsmiPerfBoostControl */
 
 /*****************************************************************************/
-/** @defgroup tagDDRBandwidthMonitor    DDR bandwidth monitor
+/** @defgroup tagEsmiDDRBandwidthMonitor ESMI DDR bandwidth monitor
  *  @{
  */
 
 /**
  *  @brief Get the DDR bandwidth data.
  *
- *  @ingroup tagDDRBandwidthMonitor
+ *  @ingroup tagEsmiDDRBandwidthMonitor
  *
  *  @platform{cpu_bm}
  *
@@ -7403,17 +7407,17 @@ amdsmi_status_t amdsmi_set_cpu_socket_boostlimit(amdsmi_processor_handle process
 amdsmi_status_t amdsmi_get_cpu_ddr_bw(amdsmi_processor_handle processor_handle,
                                       amdsmi_ddr_bw_metrics_t *ddr_bw);
 
-/** @} End tagDDRBandwidthMonitor */
+/** @} End tagEsmiDDRBandwidthMonitor */
 
 /*****************************************************************************/
-/** @defgroup  tagTempQuery   Temperature Query
+/** @defgroup tagEsmiTempQuery ESMI Temperature Query
  *  @{
  */
 
 /**
  *  @brief Get socket temperature.
  *
- *  @ingroup tagTempQuery
+ *  @ingroup tagEsmiTempQuery
  *
  *  @platform{cpu_bm}
  *
@@ -7426,17 +7430,17 @@ amdsmi_status_t amdsmi_get_cpu_ddr_bw(amdsmi_processor_handle processor_handle,
 amdsmi_status_t amdsmi_get_cpu_socket_temperature(amdsmi_processor_handle processor_handle,
                                                   uint32_t *ptmon);
 
-/** @} End tagTempQuery */
+/** @} End tagEsmiTempQuery */
 
 /*****************************************************************************/
-/** @defgroup  tagDimmStatistics   Dimm statistics
+/** @defgroup tagEsmiDimmStatistics ESMI Dimm statistics
  *  @{
  */
 
 /**
  *  @brief Get DIMM temperature range and refresh rate.
  *
- *  @ingroup tagDimmStatistics
+ *  @ingroup tagEsmiDimmStatistics
  *
  *  @platform{cpu_bm}
  *
@@ -7453,7 +7457,7 @@ amdsmi_status_t amdsmi_get_cpu_dimm_temp_range_and_refresh_rate(amdsmi_processor
 /**
  *  @brief Get DIMM power consumption.
  *
- *  @ingroup tagDimmStatistics
+ *  @ingroup tagEsmiDimmStatistics
  *
  *  @platform{cpu_bm}
  *
@@ -7470,7 +7474,7 @@ amdsmi_status_t amdsmi_get_cpu_dimm_power_consumption(amdsmi_processor_handle pr
 /**
  *  @brief Get DIMM thermal sensor value.
  *
- *  @ingroup tagDimmStatistics
+ *  @ingroup tagEsmiDimmStatistics
  *
  *  @platform{cpu_bm}
  *
@@ -7484,17 +7488,17 @@ amdsmi_status_t amdsmi_get_cpu_dimm_thermal_sensor(amdsmi_processor_handle proce
                                                    uint8_t dimm_addr,
                                                    amdsmi_dimm_thermal_t *dimm_temp);
 
-/** @} End tagDimmStatistics */
+/** @} End tagEsmiDimmStatistics */
 
 /*****************************************************************************/
-/** @defgroup tagXGMIBandwidthCont     xGMI bandwidth control
+/** @defgroup tagEsmiXGMIBandwidthCont ESMI xGMI bandwidth control
  *  @{
  */
 
 /**
  *  @brief Set xgmi width.
  *
- *  @ingroup tagXGMIBandwidthCont
+ *  @ingroup tagEsmiXGMIBandwidthCont
  *
  *  @platform{cpu_bm}
  *
@@ -7506,17 +7510,17 @@ amdsmi_status_t amdsmi_get_cpu_dimm_thermal_sensor(amdsmi_processor_handle proce
 amdsmi_status_t amdsmi_set_cpu_xgmi_width(amdsmi_processor_handle processor_handle,
                                           uint8_t min, uint8_t max);
 
-/** @} End tagXGMIBandwidthCont */
+/** @} End tagEsmiXGMIBandwidthCont */
 
 /*****************************************************************************/
-/** @defgroup tagGMI3WidthCont     GMI3 width control
+/** @defgroup tagEsmiGMI3WidthCont ESMI GMI3 width control
  *  @{
  */
 
 /**
  *  @brief Set gmi3 link width range.
  *
- *  @ingroup tagGMI3WidthCont
+ *  @ingroup tagEsmiGMI3WidthCont
  *
  *  @platform{cpu_bm}
  *
@@ -7529,17 +7533,17 @@ amdsmi_status_t amdsmi_set_cpu_xgmi_width(amdsmi_processor_handle processor_hand
 amdsmi_status_t amdsmi_set_cpu_gmi3_link_width_range(amdsmi_processor_handle processor_handle,
                                                      uint8_t min_link_width, uint8_t max_link_width);
 
-/** @} End tagGMI3WidthCont */
+/** @} End tagEsmiGMI3WidthCont */
 
 /*****************************************************************************/
-/** @defgroup tagPstateSelect     Pstate selection
+/** @defgroup tagEsmiPstateSelect ESMI Pstate selection
  *  @{
  */
 
 /**
  *  @brief Enable APB.
  *
- *  @ingroup tagPstateSelect
+ *  @ingroup tagEsmiPstateSelect
  *
  *  @platform{cpu_bm}
  *
@@ -7552,7 +7556,7 @@ amdsmi_status_t amdsmi_cpu_apb_enable(amdsmi_processor_handle processor_handle);
 /**
  *  @brief Disable APB.
  *
- *  @ingroup tagPstateSelect
+ *  @ingroup tagEsmiPstateSelect
  *
  *  @platform{cpu_bm}
  *
@@ -7568,7 +7572,7 @@ amdsmi_status_t amdsmi_cpu_apb_disable(amdsmi_processor_handle processor_handle,
 /**
  *  @brief Set NBIO lclk dpm level value.
  *
- *  @ingroup tagPstateSelect
+ *  @ingroup tagEsmiPstateSelect
  *
  *  @platform{cpu_bm}
  *
@@ -7585,7 +7589,7 @@ amdsmi_status_t amdsmi_set_cpu_socket_lclk_dpm_level(amdsmi_processor_handle pro
 /**
  *  @brief Get NBIO LCLK dpm level.
  *
- *  @ingroup tagPstateSelect
+ *  @ingroup tagEsmiPstateSelect
  *
  *  @platform{cpu_bm}
  *
@@ -7601,7 +7605,7 @@ amdsmi_status_t amdsmi_get_cpu_socket_lclk_dpm_level(amdsmi_processor_handle pro
 /**
  *  @brief Set pcie link rate.
  *
- *  @ingroup tagPstateSelect
+ *  @ingroup tagEsmiPstateSelect
  *
  *  @platform{cpu_bm}
  *
@@ -7617,7 +7621,7 @@ amdsmi_status_t amdsmi_set_cpu_pcie_link_rate(amdsmi_processor_handle processor_
 /**
  *  @brief Set df pstate range.
  *
- *  @ingroup tagPstateSelect
+ *  @ingroup tagEsmiPstateSelect
  *
  *  @platform{cpu_bm}
  *
@@ -7630,17 +7634,17 @@ amdsmi_status_t amdsmi_set_cpu_pcie_link_rate(amdsmi_processor_handle processor_
 amdsmi_status_t amdsmi_set_cpu_df_pstate_range(amdsmi_processor_handle processor_handle,
                                                uint8_t max_pstate, uint8_t min_pstate);
 
-/** @} End tagPstateSelect */
+/** @} End tagEsmiPstateSelect */
 
 /*****************************************************************************/
-/** @defgroup tagBandwidthMon     Bandwidth monitor
+/** @defgroup tagEsmiBandwidthMon ESMI Bandwidth monitor
  *  @{
  */
 
 /**
  *  @brief Get current input output bandwidth.
  *
- *  @ingroup tagBandwidthMon
+ *  @ingroup tagEsmiBandwidthMon
  *
  *  @platform{cpu_bm}
  *
@@ -7656,7 +7660,7 @@ amdsmi_status_t amdsmi_get_cpu_current_io_bandwidth(amdsmi_processor_handle proc
 /**
  *  @brief Get current input output bandwidth.
  *
- *  @ingroup tagBandwidthMon
+ *  @ingroup tagEsmiBandwidthMon
  *
  *  @platform{cpu_bm}
  *
@@ -7669,17 +7673,17 @@ amdsmi_status_t amdsmi_get_cpu_current_io_bandwidth(amdsmi_processor_handle proc
 amdsmi_status_t amdsmi_get_cpu_current_xgmi_bw(amdsmi_processor_handle processor_handle,
                                                amdsmi_link_id_bw_type_t link, uint32_t *xgmi_bw);
 
-/** @} End tagBandwidthMon */
+/** @} End tagEsmiBandwidthMon */
 
 /*****************************************************************************/
-/** @defgroup tagHSMPMetricsTable HSMP Metrics Table
+/** @defgroup tagEsmiHSMPMetricsTable ESMI HSMP Metrics Table
  *  @{
  */
 
 /**
  *  @brief Get HSMP metrics table version
  *
- *  @ingroup tagHSMPMetricsTable
+ *  @ingroup tagEsmiHSMPMetricsTable
  *
  *  @platform{cpu_bm}
  *
@@ -7694,7 +7698,7 @@ amdsmi_status_t amdsmi_get_hsmp_metrics_table_version(amdsmi_processor_handle pr
 /**
  *  @brief Get HSMP metrics table
  *
- *  @ingroup tagHSMPMetricsTable
+ *  @ingroup tagEsmiHSMPMetricsTable
  *
  *  @platform{cpu_bm}
  *
@@ -7706,17 +7710,17 @@ amdsmi_status_t amdsmi_get_hsmp_metrics_table_version(amdsmi_processor_handle pr
 amdsmi_status_t amdsmi_get_hsmp_metrics_table(amdsmi_processor_handle processor_handle,
                                          amdsmi_hsmp_metrics_table_t *metrics_table);
 
-/** @} End tagHSMPMetricsTable */
+/** @} End tagEsmiHSMPMetricsTable */
 
 /*****************************************************************************/
-/** @defgroup tagCPUAuxillary Auxillary functions
+/** @defgroup tagEsmiCPUAuxillary ESMI Auxillary functions
  *  @{
  */
 
 /**
  *  @brief Retrieve the CPU processor model name based on the processor index.
  *
- *  @ingroup tagCPUAuxillary
+ *  @ingroup tagEsmiCPUAuxillary
  *
  *  @platform{cpu_bm}
  *
@@ -7742,7 +7746,7 @@ amdsmi_status_t amdsmi_get_cpu_model_name(amdsmi_processor_handle processor_hand
 /**
  *  @brief Get CPU socket count from sys filesystem.
  *
- *  @ingroup tagCPUAuxillary
+ *  @ingroup tagEsmiCPUAuxillary
  *
  *  @platform{cpu_bm}
  *
@@ -7755,7 +7759,7 @@ amdsmi_status_t amdsmi_get_cpu_socket_count(uint32_t *sock_count);
 /**
  *  @brief Get cpu cores per socket from sys filesystem.
  *
- *  @ingroup tagCPUAuxillary
+ *  @ingroup tagEsmiCPUAuxillary
  *
  *  @platform{cpu_bm}
  *
@@ -7769,7 +7773,7 @@ amdsmi_status_t amdsmi_get_cpu_cores_per_socket(uint32_t sock_count, amdsmi_sock
 /**
  *  @brief Get a description of provided AMDSMI error status for esmi errors.
  *
- *  @ingroup tagCPUAuxillary
+ *  @ingroup tagEsmiCPUAuxillary
  *
  *  @platform{cpu_bm}
  *
@@ -7788,7 +7792,7 @@ amdsmi_status_t amdsmi_get_esmi_err_msg(amdsmi_status_t status, const char **sta
 /**
  *  @brief Get CPU model.
  *
- *  @ingroup tagCPUAuxillary
+ *  @ingroup tagEsmiCPUAuxillary
  *
  *  @platform{cpu_bm}
  *
@@ -7801,7 +7805,7 @@ amdsmi_status_t amdsmi_get_cpu_model(uint32_t *cpu_model);
 /**
  *  @brief Get CPU family.
  *
- *  @ingroup tagCPUAuxillary
+ *  @ingroup tagEsmiCPUAuxillary
  *
  *  @platform{cpu_bm}
  *
@@ -7814,7 +7818,7 @@ amdsmi_status_t amdsmi_get_cpu_family(uint32_t *cpu_family);
 /**
  *  @brief Get first online core on socket.
  *
- *  @ingroup tagCPUAuxillary
+ *  @ingroup tagEsmiCPUAuxillary
  *
  *  @platform{cpu_bm}
  *
@@ -7827,10 +7831,10 @@ amdsmi_status_t amdsmi_get_cpu_family(uint32_t *cpu_family);
 amdsmi_status_t amdsmi_first_online_core_on_cpu_socket(amdsmi_processor_handle processor_handle,
                                                        uint32_t *pcore_ind);
 
-/** @} End tagCPUAuxillary */
+/** @} End tagEsmiCPUAuxillary */
 
 /*****************************************************************************/
-/** @defgroup tagCpuISOFreqPolicy ISO Frequency Policy
+/** @defgroup tagEsmiCpuISOFreqPolicy ESMI ISO Frequency Policy
  *  @{
  */
 
@@ -7846,7 +7850,7 @@ amdsmi_status_t amdsmi_first_online_core_on_cpu_socket(amdsmi_processor_handle p
  *  - 0: Disable independent control (all cores on both rails have the same frequency limit)
  *  - 1: Enable independent control (each rail has an independent frequency limit)
  *
- *  @ingroup tagCpuISOFreqPolicy
+ *  @ingroup tagEsmiCpuISOFreqPolicy
  *
  *  @platform{cpu_bm}
  *
@@ -7872,7 +7876,7 @@ amdsmi_status_t amdsmi_set_cpu_rail_isofreq_policy(amdsmi_processor_handle proce
  *  - 0: Independent control disabled (all cores on both rails have the same frequency limit)
  *  - 1: Independent control enabled (each rail has an independent frequency limit)
  *
- *  @ingroup tagCpuISOFreqPolicy
+ *  @ingroup tagEsmiCpuISOFreqPolicy
  *
  *  @platform{cpu_bm}
  *
@@ -7886,10 +7890,10 @@ amdsmi_status_t amdsmi_set_cpu_rail_isofreq_policy(amdsmi_processor_handle proce
 amdsmi_status_t amdsmi_get_cpu_rail_isofreq_policy(amdsmi_processor_handle processor_handle,
                                                    uint8_t *cpurailiso);
 
-/** @} End tagCpuISOFreqPolicy */
+/** @} End tagEsmiCpuISOFreqPolicy */
 
 /*****************************************************************************/
-/** @defgroup tagDFCEnableControl DFC Control
+/** @defgroup tagEsmiDFCEnableControl ESMI DFC Control
  *  @{
  */
 
@@ -7906,7 +7910,7 @@ amdsmi_status_t amdsmi_get_cpu_rail_isofreq_policy(amdsmi_processor_handle proce
  *  - 0: Disable DFC control
  *  - 1: Enable DFC control
  *
- *  @ingroup tagDFCEnableControl
+ *  @ingroup tagEsmiDFCEnableControl
  *
  *  @platform{cpu_bm}
  *
@@ -7932,7 +7936,7 @@ amdsmi_status_t amdsmi_set_dfc_ctrl(amdsmi_processor_handle processor_handle, bo
  *  - 0: DFC control is disabled
  *  - 1: DFC control is enabled
  *
- *  @ingroup tagDFCEnableControl
+ *  @ingroup tagEsmiDFCEnableControl
  *
  *  @platform{cpu_bm}
  *
@@ -7945,7 +7949,7 @@ amdsmi_status_t amdsmi_set_dfc_ctrl(amdsmi_processor_handle processor_handle, bo
  */
 amdsmi_status_t amdsmi_get_dfc_ctrl(amdsmi_processor_handle processor_handle, uint8_t *dfc_ctrl);
 
-/** @} End tagDFCEnableControl */
+/** @} End tagEsmiDFCEnableControl */
 
 #endif
 
