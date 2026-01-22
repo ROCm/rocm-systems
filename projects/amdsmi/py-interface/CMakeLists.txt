@@ -12,6 +12,11 @@ set(PY_BUILD_DIR "python_package")
 # additionally defined in pyproject.toml
 set(PY_PACKAGE_DIR "${PY_BUILD_DIR}/amdsmi")
 set(PY_WRAPPER_INSTALL_DIR "${SHARE_INSTALL_PREFIX}" CACHE STRING "Wrapper installation directory")
+set(AMDSMI_PYTHON_LIB_NAME "libamd_smi.so")
+if(BUILD_PYTHON_LIB)
+    set(AMDSMI_PYTHON_LIB_NAME "libamd_smi_python.so")
+endif()
+set(AMDSMI_PYTHON_LIB_PATH "${PROJECT_BINARY_DIR}/src/${AMDSMI_PYTHON_LIB_NAME}")
 
 # try to find clang of the right version
 set(GOOD_CLANG_FOUND FALSE)
@@ -35,6 +40,8 @@ if(NOT GOOD_CLANG_FOUND)
         AUTHOR_WARNING
             "A wrapper will not be re-generated! Using old wrapper instead.\nSet -DBUILD_WRAPPER=ON to re-build the wrapper"
     )
+    # Still need Python3 for building the wheel package
+    find_package(Python3 3.6 COMPONENTS Interpreter REQUIRED)
     add_custom_command(
         OUTPUT amdsmi_wrapper.py ${PY_PACKAGE_DIR}/amdsmi_wrapper.py
         DEPENDS ${AMD_SMI} ${CMAKE_CURRENT_SOURCE_DIR}/amdsmi_wrapper.py
@@ -54,10 +61,11 @@ else()
     add_custom_command(
         OUTPUT amdsmi.h ${CMAKE_CURRENT_SOURCE_DIR}/amdsmi_wrapper.py amdsmi_wrapper.py
                ${PY_PACKAGE_DIR}/amdsmi_wrapper.py
-        DEPENDS ${AMD_SMI} python_pre_reqs generator.py ${PROJECT_SOURCE_DIR}/include/amd_smi/amdsmi.h
+        DEPENDS ${AMD_SMI} $<$<BOOL:${BUILD_PYTHON_LIB}>:${AMD_SMI}_python> python_pre_reqs generator.py ${PROJECT_SOURCE_DIR}/include/amd_smi/amdsmi.h
         COMMAND cp ${PROJECT_SOURCE_DIR}/include/amd_smi/amdsmi.h ./
-        COMMAND ${Python3_EXECUTABLE} generator.py "$<$<BOOL:${ENABLE_ESMI_LIB}>:-e -DENABLE_ESMI_LIB>" -i amdsmi.h -l
-                ${PROJECT_BINARY_DIR}/src/libamd_smi.so -o ${CMAKE_CURRENT_SOURCE_DIR}/amdsmi_wrapper.py
+        COMMAND ${CMAKE_COMMAND} -E env AMDSMI_FIND_LIB_PATH=${CMAKE_CURRENT_BINARY_DIR}/${PY_PACKAGE_DIR}/_find_lib.py
+                ${Python3_EXECUTABLE} generator.py "$<$<BOOL:${ENABLE_ESMI_LIB}>:-e -DENABLE_ESMI_LIB>" -i amdsmi.h -l
+                ${AMDSMI_PYTHON_LIB_PATH} -o ${CMAKE_CURRENT_SOURCE_DIR}/amdsmi_wrapper.py
         COMMAND mkdir -p ${PY_PACKAGE_DIR}
         COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/amdsmi_wrapper.py ${PY_PACKAGE_DIR}/)
 endif()
@@ -65,7 +73,9 @@ endif()
 # populate version string
 configure_file(pyproject.toml.in ${PY_BUILD_DIR}/pyproject.toml @ONLY)
 configure_file(_version.py.in ${PY_PACKAGE_DIR}/_version.py @ONLY)
-configure_file(setup.py.in ${PY_BUILD_DIR}/setup.py @ONLY)
+if(BUILD_PYTHON_LIB)
+    configure_file(_find_lib.py.in ${PY_PACKAGE_DIR}/_find_lib.py @ONLY)
+endif()
 
 add_custom_target(python_wrapper DEPENDS amdsmi_wrapper.py)
 
@@ -81,24 +91,37 @@ add_custom_command(
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${PROJECT_SOURCE_DIR}/LICENSE ${PY_PACKAGE_DIR}/)
 
 # copy libamd_smi.so to allow for a self-contained python package
-add_custom_command(OUTPUT ${PY_PACKAGE_DIR}/libamd_smi.so DEPENDS ${PROJECT_BINARY_DIR}/src/libamd_smi.so
-                   COMMAND cp "${PROJECT_BINARY_DIR}/src/libamd_smi.so" ${PY_PACKAGE_DIR}/)
+add_custom_command(OUTPUT ${PY_PACKAGE_DIR}/${AMDSMI_PYTHON_LIB_NAME} DEPENDS ${AMDSMI_PYTHON_LIB_PATH}
+                   COMMAND cp "${AMDSMI_PYTHON_LIB_PATH}" ${PY_PACKAGE_DIR}/)
 
 add_custom_target(
     python_package ALL
     DEPENDS ${PY_BUILD_DIR}/pyproject.toml
-            ${PY_BUILD_DIR}/setup.py
             ${PY_PACKAGE_DIR}/_version.py
             ${PY_PACKAGE_DIR}/__init__.py
             ${PY_PACKAGE_DIR}/amdsmi_exception.py
             ${PY_PACKAGE_DIR}/amdsmi_interface.py
             ${PY_PACKAGE_DIR}/README.md
             ${PY_PACKAGE_DIR}/LICENSE
-            ${PY_PACKAGE_DIR}/libamd_smi.so)
+            ${PY_PACKAGE_DIR}/${AMDSMI_PYTHON_LIB_NAME}
+            $<$<BOOL:${BUILD_PYTHON_LIB}>:${PY_PACKAGE_DIR}/_find_lib.py>)
+if(BUILD_PYTHON_LIB)
+    add_dependencies(python_package ${AMD_SMI}_python)
+endif()
+
+# Build a wheel into the binary dir (no deps, local artifacts only)
+add_custom_target(
+    python_wheel ALL
+    DEPENDS python_package
+    COMMAND ${CMAKE_COMMAND} -E env PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}/${PY_BUILD_DIR}
+            ${Python3_EXECUTABLE} -m pip wheel --no-deps -w ${CMAKE_CURRENT_BINARY_DIR}/${PY_BUILD_DIR}
+            ${CMAKE_CURRENT_BINARY_DIR}/${PY_BUILD_DIR}
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/${PY_BUILD_DIR}
+    COMMENT "Building amdsmi wheel without dependencies")
 
 install(
     FILES ${CMAKE_CURRENT_BINARY_DIR}/${PY_BUILD_DIR}/pyproject.toml
-          ${CMAKE_CURRENT_BINARY_DIR}/${PY_BUILD_DIR}/setup.py ${CMAKE_CURRENT_BINARY_DIR}/${PY_PACKAGE_DIR}/_version.py
+          ${CMAKE_CURRENT_BINARY_DIR}/${PY_PACKAGE_DIR}/_version.py
     DESTINATION ${PY_WRAPPER_INSTALL_DIR}
     COMPONENT dev)
 

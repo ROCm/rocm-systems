@@ -104,75 +104,35 @@ do_ldconfig() {
 }
 
 do_install_amdsmi_python_lib() {
-  # get python version
-  local python3_minor_version
-  python3_minor_version=$(python3 -c 'import sys;print(sys.version_info.minor)')
-  if [ $? -ne 0 ]; then
-    echo "[WARNING] Could not determine python version. "\
-      "AMD-SMI python library will not be installed."
-    return
-  fi
-
-  # check if python version is supported
-  if [ "$python3_minor_version" -lt 6 ]; then
-    echo "[WARNING] AMD-SMI python library is not "\
-      "supported on python version 3.$python3_minor_version. "\
-      "AMD-SMI python library will not be installed."
-    return
-  fi
-
-  local PREVIOUS_PIP_ROOT_USER_ACTION="$PIP_ROOT_USER_ACTION"
-  export PIP_ROOT_USER_ACTION=ignore
-  # python3.11 requires --break-system-packages
-  local PREVIOUS_PIP_BREAK_SYSTEM_PACKAGES="$PIP_BREAK_SYSTEM_PACKAGES"
-  export PIP_BREAK_SYSTEM_PACKAGES=1
 
 
-  # Remove old python library
   local amdsmi_pip_list_output
   amdsmi_pip_list_output=$(python3 -m pip list --format=columns --disable-pip-version-check)
   # check pip list output for amdsmi
   if [[ $amdsmi_pip_list_output == *"amdsmi"* ]]; then
     echo "Detected old AMD-SMI python library (amdsmi)..."
-    python3 -m pip uninstall amdsmi --yes --quiet --disable-pip-version-check
-    echo "Removed old AMD-SMI python library (amdsmi)..."
+    # TODO make this into a prompt if the user has a $VERSION mismatch and tell them to go to pypi
+    # between installed and to be installed version
+    python3 - <<'PY'
+import importlib.metadata as m
+import sys
+
+expected = "@CPACK_PACKAGE_VERSION@"
+try:
+    dist = m.distribution("amdsmi")
+    found = dist.version
+    if found != expected:
+        print(f"[INFO] amdsmi version mismatch: installed {found}, expected {expected}.")
+        print("[INFO] Consider installing a matching amdsmi wheel from PyPI to align with this ROCm package.")
+except Exception:
+    pass
+PY
   fi
 
   # static builds don't include python lib
   if [ "@BUILD_SHARED_LIBS@" != "ON" ]; then
     return
   fi
-
-  check_and_install_amdsmi() {
-  local setuptools_version
-  setuptools_version=$(python3 -c 'import setuptools; print(setuptools.__version__)')
-  if [ $? -ne 0 ]; then
-    echo "[WARNING] Could not determine setuptools version. "\
-      "AMD-SMI python library will not be installed."
-    return
-  fi
-
-  # install python library at $RPM_INSTALL_PREFIX0/@SHARE_INSTALL_PREFIX@/amdsmi
-  local python_lib_path=$RPM_INSTALL_PREFIX0/@SHARE_INSTALL_PREFIX@
-  local amdsmi_python_lib_path="$python_lib_path"
-  local amdsmi_setup_py_path="$python_lib_path/setup.py"
-
-  # Decide installation method based on setuptools version
-  if [[ "$(printf '%s\n' "$setuptools_version" "28.5" | sort -V | head -n1)" == "$setuptools_version" ]]; then
-    echo "[WARNING] Setuptools version is less than 28.5. AMD-SMI will not be installed."
-  elif [[ "$(printf '%s\n' "$setuptools_version" "41.0.1" | sort -V | head -n1)" != "41.0.1" ]]; then
-    echo "Using setup.py for installation due to setuptools version $setuptools_version"
-    cd $amdsmi_python_lib_path
-    python3 setup.py install
-    cd -
-  else
-    echo "Using pyproject.toml for installation due to setuptools version $setuptools_version"
-    python3 -m pip install "$amdsmi_python_lib_path" --quiet --disable-pip-version-check --no-build-isolation --no-index
-  fi
-}
-
-  # Call the function
-  check_and_install_amdsmi
 
   export PIP_ROOT_USER_ACTION="$PREVIOUS_PIP_ROOT_USER_ACTION"
   export PIP_BREAK_SYSTEM_PACKAGES="$PREVIOUS_PIP_BREAK_SYSTEM_PACKAGES"
