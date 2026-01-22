@@ -1,7 +1,7 @@
 {
   "archs": {
     "gfx908": {
-      "delta_hash": "c79d278b54a112f55b45b30edd7dfc0b",
+      "delta_hash": "6493af2b2f4e5fd58b9430ad4502d093",
       "files": {
         "0000_top_stats.yaml": "2819d96f5b1c3704f2ac50868a246a7f",
         "0100_system_info.yaml": "cefae2b10db8cf4b0d3a971cff5e82c8",
@@ -24,7 +24,7 @@
       }
     },
     "gfx90a": {
-      "delta_hash": "9d4cab247c1e08fed26fb0101d709a3f",
+      "delta_hash": "1b38bc00ed106fc634860990e51d6d88",
       "files": {
         "0000_top_stats.yaml": "2819d96f5b1c3704f2ac50868a246a7f",
         "0100_system_info.yaml": "cefae2b10db8cf4b0d3a971cff5e82c8",
@@ -47,7 +47,7 @@
       }
     },
     "gfx940": {
-      "delta_hash": "8fe8453c8a7c7081be8b537b91fce353",
+      "delta_hash": "cebf85ffffbe9b3fe64bfff2f5562bcd",
       "files": {
         "0000_top_stats.yaml": "2819d96f5b1c3704f2ac50868a246a7f",
         "0100_system_info.yaml": "cefae2b10db8cf4b0d3a971cff5e82c8",
@@ -70,7 +70,7 @@
       }
     },
     "gfx941": {
-      "delta_hash": "ce64827a06cf5480db3cad1fefb058b5",
+      "delta_hash": "394990c85fdd38f70e143858bc895a02",
       "files": {
         "0000_top_stats.yaml": "2819d96f5b1c3704f2ac50868a246a7f",
         "0100_system_info.yaml": "cefae2b10db8cf4b0d3a971cff5e82c8",
@@ -93,7 +93,7 @@
       }
     },
     "gfx942": {
-      "delta_hash": "1ef733f7dae6dce194d7ddf9281a39de",
+      "delta_hash": "072f6c0c62b8cf8e7d2f4430e294caf5",
       "files": {
         "0000_top_stats.yaml": "2819d96f5b1c3704f2ac50868a246a7f",
         "0100_system_info.yaml": "cefae2b10db8cf4b0d3a971cff5e82c8",
@@ -133,7 +133,7 @@
         "1400_scalar_l1_data_cache.yaml": "ea6d0cdb6c34f574248f09554e976599",
         "1500_address_processing_unit_and_data_return_path_ta_td.yaml": "355a0c6b9b113fcfb686a300b78be21a",
         "1600_vector_l1_data_cache.yaml": "689aba850739a9cbd64ce1e816e95dff",
-        "1700_l2_cache.yaml": "067f8c8a7264762fdc58a41728b4382b",
+        "1700_l2_cache.yaml": "b9f0cbaedcb7b8a0a9b38763b85fdba5",
         "1800_l2_cache_per_channel.yaml": "7e2a1809a9b7f70a088068d6689c8aa4",
         "2100_pc_sampling.yaml": "8049866f25214544f1e53a9e2f08399b"
       }
