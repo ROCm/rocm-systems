@@ -22,29 +22,38 @@
 
 set(TARGET rocprofiler-systems-attach)
 
-add_executable(${TARGET} ${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-attach.cpp)
+find_package(rocprofiler-sdk-rocattach QUIET) #QUIET to avoid error if not found
 
-# Note: This is justa workaround to get the rocattach library.
-# The proper way would be to use find_package(rocprofiler-sdk-rocattach REQUIRED)
-# and use the rocprofiler-sdk-rocattach::rocprofiler-sdk-rocattach target.
-# In that way we can resolve paths for library and headers only with linking to the rocprofiler-sdk-rocattach library.
+if(rocprofiler-sdk-rocattach_FOUND)
+    add_executable(${TARGET} ${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-attach.cpp)
 
-# find_package(rocprofiler-sdk-rocattach REQUIRED)
-# message(STATUS "rocprofiler-sdk-rocattach_FOUND: ${rocprofiler-sdk-rocattach_FOUND}, rocprofiler-sdk-rocattach_INCLUDE_DIRS: ${rocprofiler-sdk-rocattach_INCLUDE_DIRS}, rocprofiler-sdk-rocattach_LIBRARIES: ${rocprofiler-sdk-rocattach_LIBRARIES}")
+    # Note: This is justa workaround to get the rocattach library.
+    # The proper way would be to use find_package(rocprofiler-sdk-rocattach REQUIRED)
+    # and use the rocprofiler-sdk-rocattach::rocprofiler-sdk-rocattach target.
+    # In that way we can resolve paths for library and headers only with linking to the rocprofiler-sdk-rocattach library.
 
-target_include_directories(${TARGET} PRIVATE /opt/rocm/include/)
+    # find_package(rocprofiler-sdk-rocattach REQUIRED)
+    # message(STATUS "rocprofiler-sdk-rocattach_FOUND: ${rocprofiler-sdk-rocattach_FOUND}, rocprofiler-sdk-rocattach_INCLUDE_DIRS: ${rocprofiler-sdk-rocattach_INCLUDE_DIRS}, rocprofiler-sdk-rocattach_LIBRARIES: ${rocprofiler-sdk-rocattach_LIBRARIES}")
 
-target_link_directories(${TARGET} PRIVATE /opt/rocm/lib/)
-target_link_libraries(${TARGET} PRIVATE rocprofiler-sdk-rocattach)
+    target_include_directories(${TARGET} PRIVATE /opt/rocm/include/)
 
-set_target_properties(
-    ${TARGET}
-    PROPERTIES
-        BUILD_RPATH "\$ORIGIN:\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}"
-        INSTALL_RPATH "${ROCPROFSYS_EXE_INSTALL_RPATH}"
-        OUTPUT_NAME ${BINARY_NAME_PREFIX}-attach
-)
+    target_link_directories(${TARGET} PRIVATE /opt/rocm/lib/)
+    target_link_libraries(${TARGET} PRIVATE rocprofiler-sdk-rocattach)
 
-rocprofiler_systems_strip_target(${TARGET})
+    set_target_properties(
+        ${TARGET}
+        PROPERTIES
+            BUILD_RPATH "\$ORIGIN:\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}"
+            INSTALL_RPATH "${ROCPROFSYS_EXE_INSTALL_RPATH}"
+            OUTPUT_NAME ${BINARY_NAME_PREFIX}-attach
+    )
 
-install(TARGETS ${TARGET} DESTINATION ${CMAKE_INSTALL_BINDIR} OPTIONAL)
+    rocprofiler_systems_strip_target(${TARGET})
+
+    install(TARGETS ${TARGET} DESTINATION ${CMAKE_INSTALL_BINDIR} OPTIONAL)
+else()
+    message(
+        INFO
+        "rocprofiler-sdk-rocattach not found, skipping rocprof-sys-attach target"
+    )
+endif()
