@@ -24,9 +24,10 @@
 
 #include "core/defines.hpp"
 #include "core/timemory.hpp"
+#include <rocprofiler-sdk/fwd.h>
 
 #if defined(ROCPROFSYS_USE_ROCM) && ROCPROFSYS_USE_ROCM > 0
-#    include <rocprofiler-sdk/registration.h>
+#    include <rocprofiler-sdk/experimental/registration.h>
 #    include <rocprofiler-sdk/rocprofiler.h>
 #endif
 
@@ -65,6 +66,10 @@ extern "C"
                                                   rocprofiler_client_id_t* client_id);
 
     rocprofiler_tool_configure_result_t* rocprofiler_configure(
+        uint32_t version, const char* runtime_version, uint32_t priority,
+        rocprofiler_client_id_t* client_id) ROCPROFSYS_PUBLIC_API;
+
+    rocprofiler_tool_configure_attach_result_t* rocprofiler_configure_attach(
         uint32_t version, const char* runtime_version, uint32_t priority,
         rocprofiler_client_id_t* client_id) ROCPROFSYS_PUBLIC_API;
 }
