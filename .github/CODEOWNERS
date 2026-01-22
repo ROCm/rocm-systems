@@ -15,6 +15,9 @@
 /projects/hip/                                                        @ROCm/hip-reviewers
 /projects/hipother/                                                   @ROCm/hipother-reviewers
 /projects/hip-tests/                                                  @ROCm/hip-tests-reviewers
+/projects/rccl/                                                       @ROCm/rccl-reviewers
+/projects/rccl/src/include/api_trace.h                                @ROCm/rccl-reviewers @ROCm/ROCM-DevTools-Team
+/projects/rccl-tests/                                                 @ROCm/rccl-reviewers
 /projects/rdc/                                                        @ROCm/rdc-reviewers
 /projects/rocm-core/                                                  @nunnikri @frepaul @raramakr @ashutom @amd-isparry @arvindcheru
 /projects/rocm-smi-lib/                                               @ROCm/smi-reviewers
