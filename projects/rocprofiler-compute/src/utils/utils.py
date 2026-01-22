@@ -1369,43 +1369,40 @@ def process_torch_trace_output(
         - Output file is saved to workload root, not the temporary out/ directory
     """
     if not marker_trace_csv_file_path:
-        marker_trace_csv_file_path = f"{workload_dir}/out/pmc_1/*"
-    if not counter_csv_file_path:
-        counter_csv_file_path = f"{workload_dir}/out/pmc_1/*"
-    marker_trace_csv_file_path = Path(marker_trace_csv_file_path)
-    counter_csv_file_path = Path(counter_csv_file_path)
+        marker_trace_csv_file_path = f"{workload_dir}/out/pmc_1/"
+        counter_csv_file_path = None
     # Find all marker_api_trace CSV files
     marker_api_trace_csvs = list(
-        marker_trace_csv_file_path.glob("*_marker_api_trace.csv")
+        Path(marker_trace_csv_file_path).glob("*/*_marker_api_trace.csv")
     )
-    existing_marker_files_csv = [
-        markers_file
-        for markers_file in marker_api_trace_csvs
-        if Path(markers_file).is_file()
-        and (
+    if not counter_csv_file_path:
+        counter_collection_csvs = [
+            markers_file.parent
+            / markers_file.name.replace("_marker_api_trace.", "_counter_collection.")
+            for markers_file in marker_api_trace_csvs
+        ]
+    else:
+        counter_collection_csvs = [
             Path(counter_csv_file_path)
-            / Path(markers_file).name.replace(
-                "_marker_api_trace.csv", "_counter_collection.csv"
-            )
-        ).is_file()
+            / markers_file.name.replace("_marker_api_trace.", "_counter_collection.")
+            for markers_file in marker_api_trace_csvs
+        ]
+    existing_csv_files = [
+        [marker_api_trace_csvs[i], counter_collection_csvs[i]]
+        for i in range(len(marker_api_trace_csvs))
+        if counter_collection_csvs[i].is_file() and marker_api_trace_csvs[i].is_file()
     ]
-    if not existing_marker_files_csv:
+    if not existing_csv_files:
         console_warning(
             f"No marker files with corresponding counter files found for {fbase}"
         )
         return
-    # Collect corresponding counter files
-    counter_files = [
-        Path(counter_csv_file_path)
-        / Path(f).name.replace("_marker_api_trace.csv", "_counter_collection.csv")
-        for f in existing_marker_files_csv
-    ]
     # Join marker and counter data
     combined_markers = pd.concat(
-        [pd.read_csv(f) for f in existing_marker_files_csv], ignore_index=True
+        [pd.read_csv(f[0]) for f in existing_csv_files], ignore_index=True
     )
     combined_counters = pd.concat(
-        [pd.read_csv(f) for f in counter_files], ignore_index=True
+        [pd.read_csv(f[1]) for f in existing_csv_files], ignore_index=True
     )
     # Merge markers with counters on Correlation_Id
     merged_results = pd.merge(
