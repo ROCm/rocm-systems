@@ -1,6 +1,16 @@
 #
-# Build dynamic Library object
+# Build static AQLProfile library
 #
+
+if(NOT ROCPROFILER_BUILD_AQLPROFILE)
+    rocprofiler_add_interface_library(
+        rocprofiler-sdk-aqlprofile "Interface library to external AQLProfile library"
+        INTERNAL)
+    target_link_libraries(
+        rocprofiler-sdk-aqlprofile
+        INTERFACE $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-aqlprofile-external>)
+    return()
+endif()
 
 rocprofiler_deactivate_clang_tidy()
 
