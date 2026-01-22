@@ -27,6 +27,7 @@ set(ROCPROFSYS_PYTEST_FILES
 add_custom_target(
     copy-pytest-files
     ALL
+    DEPENDS ${ROCPROFSYS_PYTEST_PACKAGE_FILES} ${ROCPROFSYS_PYTEST_FILES}
     COMMAND
         ${CMAKE_COMMAND} -E make_directory
         ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests/pytest/rocprofsys
@@ -36,33 +37,49 @@ add_custom_target(
     COMMAND
         ${CMAKE_COMMAND} -E copy_if_different ${ROCPROFSYS_PYTEST_FILES}
         ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests/pytest/
+    COMMAND
+        ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/requirements.txt
+        ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests/
+    COMMAND
+        ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_LIST_DIR}/README.md
+        ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests/
     COMMENT "Copying pytest files to build directory"
 )
 
 if(ROCPROFSYS_INSTALL_TESTING)
     # Under install mode, run build_standalone.sh under default mode
-    execute_process(
+    add_custom_command(
+        OUTPUT ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests/rocprofsys-tests.pyz
         COMMAND
             ${CMAKE_CURRENT_LIST_DIR}/build_standalone.sh --output-dir
-            ${CMAKE_BINARY_DIR}/share/rocprofiler-systems
-        WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
-        RESULT_VARIABLE BUILD_STANDALONE_RESULT
-        OUTPUT_VARIABLE BUILD_STANDALONE_OUTPUT
-        ERROR_VARIABLE BUILD_STANDALONE_ERROR
+            ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests
+        DEPENDS
+            ${CMAKE_CURRENT_LIST_DIR}/build_standalone.sh
+            ${ROCPROFSYS_PYTEST_PACKAGE_FILES}
+            ${ROCPROFSYS_PYTEST_FILES}
+        COMMENT "Building standalone pytest binary"
+        VERBATIM
     )
 
-    if(NOT BUILD_STANDALONE_RESULT EQUAL 0)
-        rocprofiler_systems_message(FATAL_ERROR "Build standalone binary failed (${BUILD_STANDALONE_RESULT}):\n${BUILD_STANDALONE_OUTPUT}\n${BUILD_STANDALONE_ERROR}")
-    endif()
+    add_custom_target(
+        build-standalone-pytest
+        ALL
+        DEPENDS ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests/rocprofsys-tests.pyz
+    )
 
-    if(BUILD_STANDALONE_RESULT EQUAL 0)
-        install(
-            FILES ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/rocprofsys-tests.pyz
-            DESTINATION share/rocprofiler-systems
-        )
-        install(
-            FILES ${CMAKE_SOURCE_DIR}/requirements.txt
-            DESTINATION share/rocprofiler-systems
-        )
-    endif()
+    install(
+        FILES ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests/rocprofsys-tests.pyz
+        DESTINATION share/rocprofiler-systems/tests
+        COMPONENT rocprofiler-systems-tests
+    )
+    install(
+        FILES ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests/requirements.txt
+        DESTINATION share/rocprofiler-systems/tests
+        COMPONENT rocprofiler-systems-tests
+    )
+    install(
+        FILES ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests/README.md
+        DESTINATION share/rocprofiler-systems/tests
+        COMPONENT rocprofiler-systems-tests
+    )
 endif()

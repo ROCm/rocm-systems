@@ -19,6 +19,7 @@ else()
     include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-rocm-tests.cmake)
     include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-user-api-tests.cmake)
     include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-mpi-tests.cmake)
+    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-ucx-tests.cmake)
     include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-kokkos-tests.cmake)
     include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-openmp-tests.cmake)
     include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-code-coverage-tests.cmake)
@@ -84,7 +85,7 @@ set(ROCPROFSYS_TEST_SCRIPTS
 )
 
 add_custom_target(
-    move-test-files
+    copy-test-files
     ALL
     COMMAND
         ${CMAKE_COMMAND} -E make_directory
