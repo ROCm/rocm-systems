@@ -50,6 +50,7 @@ RCCL_PARAM(WarpSpeedEnable, "WARP_SPEED_ENABLE", 0);
 #endif
 #define RCCL_WARP_SPEED_MIN_BYTES (1ULL << 26) // 64 MB
 
+
 void rcclRestrictMaxChannels(struct ncclComm* comm, int& nc ) {
 
   if (comm->nNodes > 1 && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950")) {
@@ -59,19 +60,27 @@ void rcclRestrictMaxChannels(struct ncclComm* comm, int& nc ) {
       char* end = nullptr;
       long userMax = strtol(maxNChannelsStr, &end, 10);
 
-      if (end != maxNChannelsStr && *end == '\0' && userMax > 0) {
+      const bool valid = (end != maxNChannelsStr && *end == '\0' && userMax > 0);
+      if (valid) {
         // 64 is the max number of channels for gfx950 multi-node
         userMax = std::min<long>(userMax, 64);
         const int cap = (int)userMax;
+        INFO(NCCL_TUNING, "RCCL MaxChannels is capped to: %i", cap);
         // Cap max channels, but don't permanently shrink comm->nChannels
         // based on a small-message tuning decision (which can legitimately pick nc=1).
         nc = std::min(nc, cap);
         comm->nChannels = std::min(comm->nChannels, cap);
+      } else {
+        // Invalid / non-positive value: treat as "unset" and apply default restriction.
+        INFO(NCCL_TUNING, "RCCL MaxChannels: ignoring invalid NCCL_MAX_NCHANNELS='%s', default capping to 48", maxNChannelsStr);
+        nc = std::min(nc, 48);
+        comm->nChannels = std::min(comm->nChannels, 48);
       }
     } else {
       // Default restriction for gfx950 multi-node when user hasn't set a valid max.
       nc = std::min(nc, 48);
       comm->nChannels = std::min(comm->nChannels, 48);
+      INFO(NCCL_TUNING, "RCCL MaxChannels: default capping to 48");
     }
   }
 }
