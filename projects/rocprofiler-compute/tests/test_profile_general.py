@@ -2877,7 +2877,6 @@ def test_torch_trace_overhead(binary_handler_profile_rocprof_compute):
     helper_dir = Path(test_utils.get_output_dir(param_id="torch_helper_script"))
     helper_dir.mkdir(parents=True, exist_ok=True)
     torch_app_path = helper_dir / "test_torch_app.py"
-
     torch_app_code = """
 import torch
 import torch.nn as nn
@@ -2909,15 +2908,11 @@ if __name__ == "__main__":
         loss.backward()
     print("Training completed")
 """
-
     with open(torch_app_path, "w") as f:
         f.write(torch_app_code)
-
     config["torch_test_app"] = ["python3", str(torch_app_path)]
-
     # Run WITHOUT --torch-trace (baseline)
     workload_dir_baseline = test_utils.get_output_dir(param_id="torch_baseline")
-
     start_baseline = time.time()
     returncode_baseline = binary_handler_profile_rocprof_compute(
         config,
@@ -2932,11 +2927,10 @@ if __name__ == "__main__":
 
     # Read baseline timestamps
     baseline_df = pd.read_csv(f"{workload_dir_baseline}/pmc_perf.csv")
-    baseline_kernel_duration = (
+    baseline_kernel_duration_total = (
         baseline_df["End_Timestamp"].max() - baseline_df["Start_Timestamp"].min()
     )
     test_utils.clean_output_dir(config["cleanup"], workload_dir_baseline)
-
     # Run WITH --torch-trace
     workload_dir_with_flag = test_utils.get_output_dir(param_id="torch_with_ops")
     start_with_flag = time.time()
@@ -2950,42 +2944,59 @@ if __name__ == "__main__":
     )
     with_flag_time = time.time() - start_with_flag
     assert returncode_with_flag == 0, "Profiling with torch-trace failed"
-
     # Read with-flag timestamps
     with_flag_df = pd.read_csv(f"{workload_dir_with_flag}/pmc_perf.csv")
-    with_flag_kernel_duration = (
+    with_flag_kernel_duration_total = (
         with_flag_df["End_Timestamp"].max() - with_flag_df["Start_Timestamp"].min()
     )
-
+    baseline_df["_kernel_occurrence"] = baseline_df.groupby("Kernel_Name").cumcount()
+    with_flag_df["_kernel_occurrence"] = with_flag_df.groupby("Kernel_Name").cumcount()
+    alignment_keys = ["Kernel_Name", "_kernel_occurrence"]
+    aligned = baseline_df[alignment_keys + ["Start_Timestamp", "End_Timestamp"]].merge(
+        with_flag_df[alignment_keys + ["Start_Timestamp", "End_Timestamp"]],
+        on=alignment_keys,
+        suffixes=("_baseline", "_with_flag"),
+        how="inner",
+    )
+    baseline_kernel_durations = (
+        aligned["End_Timestamp_baseline"] - aligned["Start_Timestamp_baseline"]
+    )
+    with_flag_kernel_durations = (
+        aligned["End_Timestamp_with_flag"] - aligned["Start_Timestamp_with_flag"]
+    )
     # Calculate overheads
+    worst_kernel_increase = (
+        (with_flag_kernel_durations - baseline_kernel_durations)
+        / baseline_kernel_durations
+    ).max() * 100
     wall_clock_overhead = ((with_flag_time - baseline_time) / baseline_time) * 100
     kernel_overhead = (
-        (with_flag_kernel_duration - baseline_kernel_duration)
-        / baseline_kernel_duration
+        (with_flag_kernel_duration_total - baseline_kernel_duration_total)
+        / baseline_kernel_duration_total
     ) * 100
-
     print(f"\n{'=' * 70}")
     print("Performance Overhead Analysis:")
+    print(f"  Worst-case single kernel increase: {worst_kernel_increase:.1f}%")
     print(f"  Baseline wall-clock time:     {baseline_time:.2f}s")
     print(f"  With --torch-trace time:  {with_flag_time:.2f}s")
     print(f"  Wall-clock overhead:          {wall_clock_overhead:.1f}%")
-    print(f"  Baseline kernel duration:     {baseline_kernel_duration:.0f} ns")
-    print(f"  With flag kernel duration:    {with_flag_kernel_duration:.0f} ns")
+    print(f"  Baseline kernel duration:     {baseline_kernel_duration_total:.0f} ns")
+    print(f"  With flag kernel duration:    {with_flag_kernel_duration_total:.0f} ns")
     print(f"  Kernel execution overhead:    {kernel_overhead:.1f}%")
     print(f"{'=' * 70}\n")
-
     # Verify torch trace directory was created
     torch_trace_dir = Path(workload_dir_with_flag) / "torch_trace"
     assert torch_trace_dir.exists(), "torch_trace directory should be created"
     operator_csv_files = list(torch_trace_dir.glob("*.csv"))
     assert len(operator_csv_files) > 0, "Operator CSV files should be generated"
-
     test_utils.clean_output_dir(config["cleanup"], workload_dir_with_flag)
-
     # Assert overhead is reasonable (< 100% wall-clock, < 50% kernel)
     assert wall_clock_overhead < 100, (
         f"Wall-clock overhead too high: {wall_clock_overhead:.1f}%"
     )
     assert kernel_overhead < 50, (
         f"Kernel execution overhead too high: {kernel_overhead:.1f}%"
+    )
+    assert worst_kernel_increase < 100, (
+        f"Worst-case single kernel increase too high: {worst_kernel_increase:.1f}%"
     )
