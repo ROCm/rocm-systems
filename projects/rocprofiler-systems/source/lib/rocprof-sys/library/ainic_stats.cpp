@@ -1,5 +1,7 @@
 #include "ainic_stats.hpp"
 
+#include <memory>
+
 std::string
 NICData::to_string() const
 {
@@ -44,7 +46,7 @@ void AINICStatsCollector::update_stats()
 {
 #ifdef USE_AINIC
     uint32_t soc_count{};
-    unique_ptr<amdsmi_socket_handle[]> sockets;
+    std::unique_ptr<amdsmi_socket_handle[]> sockets;
     // Call amdsmi_get_socket_handles with second parameter (socket_handles)
     // nullptr to get the number of socket handles.
     amdsmi_status_t status = amdsmi_get_socket_handles(&soc_count, nullptr);
@@ -56,7 +58,7 @@ void AINICStatsCollector::update_stats()
         return;
 
     // Allocate a buffer for soc_count socket handles.
-    sockets = make_unique<amdsmi_socket_handle[]>(soc_count);
+    sockets = std::make_unique<amdsmi_socket_handle[]>(soc_count);
     // Get the socket handles.
     status = amdsmi_get_socket_handles(&soc_count, sockets.get());
     if (status != AMDSMI_STATUS_SUCCESS){
@@ -144,7 +146,7 @@ void AINICStatsCollector::update_data_for_one_nic(amdsmi_processor_handle proces
                 data._name = ainic_info.rdma_dev.rdma_dev_info[rdma_dev_idx].rdma_dev;
                 data._netdev = ainic_info.rdma_dev.rdma_dev_info[rdma_dev_idx].rdma_port_info[rdma_port_idx].netdev;
 
-                unique_ptr<amdsmi_nic_stat_t[]> stats;
+                std::unique_ptr<amdsmi_nic_stat_t[]> stats;
 
                 // Call *_statistics the first time to get the number of statistics.
                 uint32_t num_stats{};
@@ -156,7 +158,7 @@ void AINICStatsCollector::update_data_for_one_nic(amdsmi_processor_handle proces
                 );
 
                 // Allocate stats.
-                stats = make_unique<amdsmi_nic_stat_t[]>(num_stats);
+                stats = std::make_unique<amdsmi_nic_stat_t[]>(num_stats);
 
                 // Call *_statistics the second time to get the statistics.
                 amdsmi_get_nic_rdma_port_statistics(
