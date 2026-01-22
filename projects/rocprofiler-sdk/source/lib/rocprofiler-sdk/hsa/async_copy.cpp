@@ -341,7 +341,7 @@ bool
 async_copy_handler(hsa_signal_value_t signal_value, void* arg)
 {
     // if we have fully finalized, delete the data and return
-    if(registration::get_fini_status() != 0)
+    if(registration::get_fini_status() > 0)
     {
         auto* _data = static_cast<async_copy_data*>(arg);
         delete _data;

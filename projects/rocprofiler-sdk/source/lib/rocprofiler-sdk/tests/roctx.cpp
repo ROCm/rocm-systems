@@ -492,8 +492,12 @@ TEST(rocprofiler_lib, roctx_buffered_tracing)
 
     static fini_func_t tool_fini = [](void* client_data) -> void {
         auto* cb_data = static_cast<callback_data*>(client_data);
-        ROCPROFILER_CALL(rocprofiler_flush_buffer(cb_data->client_buffer),
-                         "rocprofiler context stop failed");
+        // Buffer flush may return ERROR_FINALIZED if rocprofiler has already finalized
+        // and flushed buffers - this is not an error
+        auto flush_status = rocprofiler_flush_buffer(cb_data->client_buffer);
+        EXPECT_TRUE(flush_status == ROCPROFILER_STATUS_SUCCESS ||
+                    flush_status == ROCPROFILER_STATUS_ERROR_FINALIZED)
+            << "rocprofiler buffer flush failed with status " << flush_status;
         int status = 0;
         ROCPROFILER_CALL(rocprofiler_context_is_active(cb_data->client_ctx, &status),
                          "rocprofiler_context_is_active failed");

@@ -508,7 +508,14 @@ tool_fini(void* tool_data)
 
     std::cout << "finalizing...\n" << std::flush;
     rocprofiler_stop_context(client_ctx);
-    ROCPROFILER_CHECK(rocprofiler_flush_buffer(client_buffer));
+    // Buffer flush may return ERROR_FINALIZED if rocprofiler has already finalized
+    // and flushed buffers - this is not an error
+    auto flush_status = rocprofiler_flush_buffer(client_buffer);
+    if(flush_status != ROCPROFILER_STATUS_SUCCESS &&
+       flush_status != ROCPROFILER_STATUS_ERROR_FINALIZED)
+    {
+        ROCPROFILER_CHECK(flush_status);
+    }
 
     auto* _call_stack = static_cast<call_stack_t*>(tool_data);
     _call_stack->emplace_back(source_location{__FUNCTION__, __FILE__, __LINE__, ""});
@@ -592,7 +599,14 @@ shutdown()
 {
     if(client_id)
     {
-        ROCPROFILER_CHECK(rocprofiler_flush_buffer(client_buffer));
+        // Buffer flush may return ERROR_FINALIZED if rocprofiler has already finalized
+        // and flushed buffers - this is not an error
+        auto flush_status = rocprofiler_flush_buffer(client_buffer);
+        if(flush_status != ROCPROFILER_STATUS_SUCCESS &&
+           flush_status != ROCPROFILER_STATUS_ERROR_FINALIZED)
+        {
+            ROCPROFILER_CHECK(flush_status);
+        }
         client_fini_func(*client_id);
     }
 }

@@ -314,7 +314,14 @@ tool_fini(void* user_data)
     {};
 
     rocprofiler_stop_context(get_client_ctx());
-    ROCPROFILER_CALL(rocprofiler_flush_buffer(get_buffer()), "buffer flush");
+    // Buffer flush may return ERROR_FINALIZED if rocprofiler has already finalized
+    // and flushed buffers - this is not an error
+    auto flush_status = rocprofiler_flush_buffer(get_buffer());
+    if(flush_status != ROCPROFILER_STATUS_SUCCESS &&
+       flush_status != ROCPROFILER_STATUS_ERROR_FINALIZED)
+    {
+        ROCPROFILER_CALL(flush_status, "buffer flush");
+    }
 
     auto* output_stream = static_cast<std::ostream*>(user_data);
     *output_stream << std::flush;

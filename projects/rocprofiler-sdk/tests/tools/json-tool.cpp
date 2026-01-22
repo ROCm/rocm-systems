@@ -2976,7 +2976,13 @@ flush()
     {
         if(itr && itr->handle > 0)
         {
-            ROCPROFILER_CALL(rocprofiler_flush_buffer(*itr), "buffer flush");
+            auto status = rocprofiler_flush_buffer(*itr);
+            // ROCPROFILER_STATUS_ERROR_FINALIZED means rocprofiler has already finalized
+            // and buffers were flushed during finalization - this is not an error
+            if(status != ROCPROFILER_STATUS_SUCCESS && status != ROCPROFILER_STATUS_ERROR_FINALIZED)
+            {
+                ROCPROFILER_CALL(status, "buffer flush");
+            }
         }
     }
 }

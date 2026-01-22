@@ -362,7 +362,19 @@ flush()
         if(itr > null_buffer_id)
         {
             ROCP_INFO << "flushing buffer " << itr.handle;
-            ROCPROFILER_CALL(rocprofiler_flush_buffer(itr), "buffer flush");
+            auto status = rocprofiler_flush_buffer(itr);
+            // ROCPROFILER_STATUS_ERROR_FINALIZED means rocprofiler has already finalized
+            // and buffers were flushed during finalization - this is not an error
+            if(status != ROCPROFILER_STATUS_SUCCESS && status != ROCPROFILER_STATUS_ERROR_FINALIZED)
+            {
+                ROCP_FATAL << "buffer flush failed with error code " << status << ": "
+                           << rocprofiler_get_status_string(status);
+            }
+            else if(status == ROCPROFILER_STATUS_ERROR_FINALIZED)
+            {
+                ROCP_INFO << "buffer " << itr.handle
+                          << " already flushed during finalization, skipping";
+            }
         }
     }
     ROCP_INFO << "Buffers flushed";
