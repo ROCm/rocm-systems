@@ -50,7 +50,9 @@ void AINICStatsCollector::update_stats()
     // Call amdsmi_get_socket_handles with second parameter (socket_handles)
     // nullptr to get the number of socket handles.
     amdsmi_status_t status = amdsmi_get_socket_handles(&soc_count, nullptr);
-    if (status != AMDSMI_STATUS_SUCCESS){
+    if (status != AMDSMI_STATUS_SUCCESS)
+    {
+        LOG_ERROR("amdsmi_get_socket_handles failed with status {}", status);
         return;
     }
 
@@ -61,7 +63,9 @@ void AINICStatsCollector::update_stats()
     sockets = std::make_unique<amdsmi_socket_handle[]>(soc_count);
     // Get the socket handles.
     status = amdsmi_get_socket_handles(&soc_count, sockets.get());
-    if (status != AMDSMI_STATUS_SUCCESS){
+    if (status != AMDSMI_STATUS_SUCCESS)
+    {
+        LOG_ERROR("amdsmi_get_socket_handles failed with status {}", status);
         return;
     }
 
@@ -75,7 +79,9 @@ void AINICStatsCollector::update_stats()
             sockets[index],
             AMDSMI_PROCESSOR_TYPE_AMD_NIC,
             nullptr, &processor_count);
-        if (status != AMDSMI_STATUS_SUCCESS){
+        if (status != AMDSMI_STATUS_SUCCESS)
+        {
+            LOG_ERROR("amdsmi_get_processor_handles_by_type failed with status {}", status);
             return;
         }
         std::vector<amdsmi_processor_handle> processor_handles(processor_count);
@@ -85,6 +91,7 @@ void AINICStatsCollector::update_stats()
             processor_handles.data(), &processor_count);
         if (status != AMDSMI_STATUS_SUCCESS)
         {
+            LOG_ERROR("amdsmi_get_processor_handles_by_type failed with status {}", status);
             return;
         }
         for(uint32_t idx = 0; idx < processor_count; ++idx)
