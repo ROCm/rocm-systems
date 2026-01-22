@@ -64,6 +64,11 @@ THE SOFTWARE.
 
 #define CHAR_BUF_SIZE 512
 
+template <typename T>
+constexpr T ceil_div(T value, T divisor) {
+  return (value + divisor - 1) / divisor;
+}
+
 #define CONSOLE_PRINT(fmt, ...)                                                                    \
   do {                                                                                             \
     std::printf(fmt "\n", ##__VA_ARGS__);                                                          \

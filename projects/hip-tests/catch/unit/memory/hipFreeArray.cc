@@ -98,7 +98,7 @@ TEMPLATE_TEST_CASE("Unit_hipFreeArray_MultiThreaded", "", char, int, float2, flo
 
   std::vector<std::thread> threads;
 
-  for (auto arr : arr_ptrs) {
+  for (auto& arr : arr_ptrs) {
     HIP_CHECK(hipMallocArray(&arr, &desc, extent.width, extent.height, hipArrayDefault));
 
     threads.emplace_back([arr] {

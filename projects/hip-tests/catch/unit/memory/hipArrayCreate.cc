@@ -155,7 +155,11 @@ void testArrayAsTexture(hipArray_t array, const size_t width, const size_t heigh
   // set hip array
   std::vector<scalar_type> hostData(width * h * vec_info::size);
   // assigned ascending values to the data array to show indexing is working
-  std::iota(std::begin(hostData), std::end(hostData), 0);
+  // Avoid signed char overflow (UB) by generating in a wider type first.
+  std::vector<int> hostDataSeed(hostData.size());
+  std::iota(std::begin(hostDataSeed), std::end(hostDataSeed), 0);
+  std::transform(hostDataSeed.begin(), hostDataSeed.end(), hostData.begin(),
+                 [](int value) { return static_cast<scalar_type>(value); });
 
   copyToArray(array, hostData, height);
 
@@ -180,9 +184,10 @@ void testArrayAsTexture(hipArray_t array, const size_t width, const size_t heigh
   // run kernel
   T* device_data{};
   HIP_CHECK(hipMalloc(&device_data, size));
-  readFromTexture<<<dim3(width / BlockSize, height ? height / BlockSize : 1, 1),
-                    dim3(BlockSize, height ? BlockSize : 1, 1)>>>(device_data, textObj, width,
-                                                                  height, false);
+  const auto grid_x = ceil_div(width, BlockSize);
+  const auto grid_y = height ? ceil_div(height, BlockSize) : 1;
+  readFromTexture<<<dim3(grid_x, grid_y, 1), dim3(BlockSize, height ? BlockSize : 1, 1)>>>(
+      device_data, textObj, width, height, false);
   HIP_CHECK(hipGetLastError());  // check for errors when running the kernel
 
   // copy data back and then test it

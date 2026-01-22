@@ -80,7 +80,9 @@ TEST_CASE("Unit_hipArrayGetInfo_Positive_Basic") {
  */
 TEST_CASE("Unit_hipArrayGetInfo_Negative_Parameters") {
   CHECK_IMAGE_SUPPORT
-  ArrayAllocGuard<float> array(make_hipExtent(1024, 4, 4));
+  hipChannelFormatDesc desc_create = hipCreateChannelDesc<float>();
+  hipArray_t array = nullptr;
+  HIP_CHECK(hipMalloc3DArray(&array, &desc_create, make_hipExtent(1024, 4, 4), 0u));
 
   hipChannelFormatDesc desc;
   hipExtent extent;
@@ -91,8 +93,13 @@ TEST_CASE("Unit_hipArrayGetInfo_Negative_Parameters") {
   }
 
   SECTION("array is freed") {
-    HIP_CHECK(hipFreeArray(array.ptr()));
-    HIP_CHECK_ERROR(hipArrayGetInfo(&desc, &extent, &flags, array.ptr()), hipErrorInvalidHandle);
+    HIP_CHECK(hipFreeArray(array));
+    HIP_CHECK_ERROR(hipArrayGetInfo(&desc, &extent, &flags, array), hipErrorInvalidHandle);
+    array = nullptr;
+  }
+
+  if (array) {
+    static_cast<void>(hipFreeArray(array));
   }
 }
 
