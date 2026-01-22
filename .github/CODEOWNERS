@@ -24,6 +24,7 @@
 /projects/rocprofiler-sdk/                                            @ROCm/rocm-devtools-team @ROCm/rocprofiler-owners # First Review: @ROCm/rocm-devtools-team, Final Review: @ROCm/rocprofiler-owners 
 /projects/rocr-runtime/                                               @kentrussell @dayatsin-amd @cfreeamd
 /projects/roctracer/                                                  @ammarwa @bgopesh
+/projects/rocshmem/                                                   @ROCm/rocshmem-reviewers
 
 # Language runtime build infra code owners
 /projects/clr/**/*.cmake                                              @ROCm/clr-reviewers @ROCm/lrt-build-infra
