@@ -51,7 +51,6 @@ class webui_analysis(OmniAnalyze_Base):
         self.app = dash.Dash(
             __name__, title=PROJECT_NAME, external_stylesheets=[dbc.themes.CYBORG]
         )
-        self.dest_dir = str(Path(args.path[0][0]).absolute().resolve())
         self.arch: Optional[str] = None
 
         self.__hidden_sections = ["Memory Chart"]
@@ -90,6 +89,7 @@ class webui_analysis(OmniAnalyze_Base):
         kernel_top_df = base_data.dfs[1]
         for kernel_id in base_data.filter_kernel_ids:
             filt_kernel_names.append(str(kernel_top_df.loc[kernel_id, "Kernel_Name"]))
+        input_filters["kernel"] = filt_kernel_names
 
         # setup app layout
         from utils.gui_components.header import get_header
@@ -338,6 +338,7 @@ class webui_analysis(OmniAnalyze_Base):
             )
 
         args = self.get_args()
+        self.dest_dir = str(Path(args.path[0][0]).absolute().resolve())
 
         # create 'mega dataframe'
         self._runs[self.dest_dir].raw_pmc = file_io.create_df_pmc(

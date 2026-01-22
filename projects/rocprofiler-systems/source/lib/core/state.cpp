@@ -23,8 +23,9 @@
 #include "state.hpp"
 #include "common/static_object.hpp"
 #include "config.hpp"
-#include "debug.hpp"
 #include "utility.hpp"
+
+#include "logger/debug.hpp"
 
 #include <atomic>
 #include <string>
@@ -79,13 +80,19 @@ get_thread_state()
 State
 set_state(State _n)
 {
-    ROCPROFSYS_CONDITIONAL_PRINT_F(get_debug_init(), "Setting state :: %s -> %s\n",
-                                   std::to_string(get_state()).c_str(),
-                                   std::to_string(_n).c_str());
+    if(get_debug_init())
+    {
+        LOG_DEBUG("Setting state :: {} -> {}", std::to_string(get_state()),
+                  std::to_string(_n));
+    }
     // state should always be increased, not decreased
-    ROCPROFSYS_CI_BASIC_THROW(
-        _n < get_state(), "State is being assigned to a lesser value :: %s -> %s",
-        std::to_string(get_state()).c_str(), std::to_string(_n).c_str());
+    if(get_is_continuous_integration() && _n < get_state())
+    {
+        throw std::runtime_error(
+            fmt::format("State is being assigned to a lesser value :: {} -> {}",
+                        std::to_string(get_state()), std::to_string(_n)));
+    }
+
     auto _v = get_state();
     get_state_value().store(_n, std::memory_order_relaxed);
     // std::swap(get_state_value(), _n);

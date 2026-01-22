@@ -30,13 +30,16 @@ jobs:
     name: 'Test single-node'
     runs-on: ${{ inputs.test_runs_on }}
     container:
-      image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:405945a40deaff9db90b9839c0f41d4cba4a383c1a7459b28627047bf6302a26
+      image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
       options: --ipc host
         --group-add video
         --device /dev/kfd
         --device /dev/dri
         --group-add 110
+        --ulimit memlock=-1:-1
+        --security-opt seccomp=unconfined
         --env-file /etc/podinfo/gha-gpu-isolation-settings
+        --user 0:0
     defaults:
       run:
         shell: bash
@@ -50,7 +53,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: "ROCm/TheRock"
-          ref: d76278526218def9fb1b016bc9e421738cb4f8f6 # 2025-12-09 commit
+          ref: ff46daa79b4c826c4f4676893d0d6586de567dfa # 2026-01-12 commit
 
       - name: Run setup test environment workflow
         uses: './.github/actions/setup_test_environment'
@@ -70,5 +73,5 @@ jobs:
         # TODO (geomin12): Rebuild rccl-tests without MPI to enable RCCL correctness tests.
         run: |
           pytest ./build_tools/github_actions/test_executable_scripts/test_rccl.py -v -s \
-            --log-cli-level=info \
-            -k "not test_rccl_correctness_tests"
+            -k "not test_rccl_correctness_tests" \
+            --log-cli-level=info

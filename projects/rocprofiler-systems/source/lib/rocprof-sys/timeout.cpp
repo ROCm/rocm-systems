@@ -22,7 +22,6 @@
 
 #include "core/categories.hpp"
 #include "core/config.hpp"
-#include "core/debug.hpp"
 #include "core/locking.hpp"
 #include "core/state.hpp"
 #include "library/components/pthread_gotcha.hpp"
@@ -32,6 +31,8 @@
 #include <timemory/log/color.hpp>
 #include <timemory/signals/types.hpp>
 #include <timemory/unwind/backtrace.hpp>
+
+#include "logger/debug.hpp"
 
 #include <chrono>
 #include <sstream>
@@ -76,7 +77,7 @@ ci_timeout_backtrace(int)
 
     static auto _mutex = locking::atomic_mutex{};
     auto        _lk    = locking::atomic_lock{ _mutex };
-    ROCPROFSYS_PRINT("%s\n", _err.str().c_str());
+    LOG_INFO("{}", _err.str());
 
     ++ci_timeout_backtrace_global_done;
 }
@@ -127,18 +128,16 @@ ensure_ci_timeout_backtrace(double             _ci_timeout_seconds,
                 const auto& _info = thread_info::get(_handle);
                 if(_info)
                 {
-                    ROCPROFSYS_WARNING_F(
-                        0, "pthread_kill(%zu, %i) failed for thread %zi (info: %s)\n",
-                        _handle, timeout_signal_v, _info->index_data->sequent_value,
-                        _info->as_string().c_str());
+                    LOG_WARNING("pthread_kill({}, {}) failed for thread {} (info: {})",
+                                        static_cast<size_t>(_handle), timeout_signal_v,
+                                        _info->index_data->sequent_value, _info->as_string());
                 }
                 else
                 {
-                    ROCPROFSYS_WARNING_F(
-                        0,
-                        "pthread_kill(%zu, %i) failed. executing generic "
-                                "kill(%i, %i)...\n",
-                        _handle, timeout_signal_v, process::get_id(), timeout_signal_v);
+                    LOG_WARNING("pthread_kill({}, {}) failed. executing generic "
+                                                "kill({}, {})...",
+                                        _handle, timeout_signal_v, process::get_id(),
+                                        timeout_signal_v);
                 }
 
                 ::kill(process::get_id(), timeout_signal_v);
@@ -151,18 +150,14 @@ ensure_ci_timeout_backtrace(double             _ci_timeout_seconds,
         };
 
         _tids.erase(main_thread_native_handle);
-        ROCPROFSYS_WARNING_F(-127,
-                             "timeout after %8.3f seconds... Generating backtraces for "
-                             "%zu threads...\n",
-                             _ci_timeout_seconds, _tids.size() + 1);
+        LOG_WARNING("Timeout after {} seconds... Generating backtraces for "
+                    "{} threads...",
+                    _ci_timeout_seconds, _tids.size() + 1);
 
         for(auto itr : _tids)
             _kill_thread(itr);
 
         _kill_thread(main_thread_native_handle);
-
-        ::rocprofsys::debug::flush();
-        ::rocprofsys::debug::lock _debug_lk{};
 
         if(++_ci_timeout_nitr >= _ci_timeout_total_count)
         {
@@ -176,7 +171,7 @@ ensure_ci_timeout_backtrace(double             _ci_timeout_seconds,
         }
     }
 
-    ROCPROFSYS_WARNING_F(0, "timeout thread exiting...\n");
+    LOG_WARNING("Timeout thread exiting...");
 }
 }  // namespace
 

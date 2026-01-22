@@ -64,6 +64,28 @@
 extern r_debug _amdgpu_r_debug;
 
 namespace rocr {
+
+/// @brief Mapping between priority type used internally within ROCR to the type used by KFD
+
+// Highest queue priority allowed for HSA user is HSA_QUEUE_PRIORITY_HIGH
+// HSA_QUEUE_PRIORITY_MAXIMUM is reserved for PC Sampling and can only be allocated internally
+// in ROCR
+__forceinline HSA_QUEUE_PRIORITY HsaInternalToKfdPriority(
+    rocr::HSA::hsa_amd_queue_priority_internal_t priority) {
+  switch (priority) {
+    case rocr::HSA::HSA_AMD_QUEUE_PRIORITY_LOW:
+      return HSA_QUEUE_PRIORITY_MINIMUM;
+    case rocr::HSA::HSA_AMD_QUEUE_PRIORITY_NORMAL:
+      return HSA_QUEUE_PRIORITY_NORMAL;
+    case rocr::HSA::HSA_AMD_QUEUE_PRIORITY_HIGH:
+      return HSA_QUEUE_PRIORITY_HIGH;
+    case rocr::HSA::HSA_AMD_QUEUE_PRIORITY_MAXIMUM:
+      return HSA_QUEUE_PRIORITY_MAXIMUM;
+    default:
+      return HSA_QUEUE_PRIORITY_NORMAL;
+  }
+}
+
 namespace AMD {
 
 #if defined(__linux__)
@@ -370,10 +392,13 @@ hsa_status_t KfdDriver::FreeMemory(void *mem, size_t size) {
 }
 
 hsa_status_t KfdDriver::CreateQueue(uint32_t node_id, HSA_QUEUE_TYPE type, uint32_t queue_pct,
-                                    HSA_QUEUE_PRIORITY priority, uint32_t sdma_engine_id,
+                                    HSA::hsa_amd_queue_priority_internal_t priority, uint32_t sdma_engine_id,
                                     void* queue_addr, uint64_t queue_size_bytes, HsaEvent* event,
                                     HsaQueueResource& queue_resource) const {
-  if (HSAKMT_CALL(hsaKmtCreateQueueExt(node_id, type, queue_pct, priority, sdma_engine_id,
+  // Convert from ROCR internal priority type to KFD type
+  HSA_QUEUE_PRIORITY kfd_priority = HsaInternalToKfdPriority(priority);
+
+  if (HSAKMT_CALL(hsaKmtCreateQueueExt(node_id, type, queue_pct, kfd_priority, sdma_engine_id,
                                        queue_addr, queue_size_bytes, event, &queue_resource)) !=
       HSAKMT_STATUS_SUCCESS) {
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
@@ -389,9 +414,12 @@ hsa_status_t KfdDriver::DestroyQueue(HSA_QUEUEID queue_id) const {
 }
 
 hsa_status_t KfdDriver::UpdateQueue(HSA_QUEUEID queue_id, uint32_t queue_pct,
-                                    HSA_QUEUE_PRIORITY priority, void* queue_addr,
+                                    HSA::hsa_amd_queue_priority_internal_t priority, void* queue_addr,
                                     uint64_t queue_size, HsaEvent* event) const {
-  if (HSAKMT_CALL(hsaKmtUpdateQueue(queue_id, queue_pct, priority, queue_addr, queue_size,
+  // Convert from ROCR internal priority type to KFD type
+  HSA_QUEUE_PRIORITY kfd_priority = HsaInternalToKfdPriority(priority);
+
+  if (HSAKMT_CALL(hsaKmtUpdateQueue(queue_id, queue_pct, kfd_priority, queue_addr, queue_size,
                                     event)) != HSAKMT_STATUS_SUCCESS) {
     return HSA_STATUS_ERROR;
   }
