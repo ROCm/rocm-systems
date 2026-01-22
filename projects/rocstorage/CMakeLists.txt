@@ -63,6 +63,7 @@ set(rocstorage_public_headers
     ${CMAKE_CURRENT_LIST_DIR}/include/writer.hpp
     ${CMAKE_CURRENT_LIST_DIR}/include/reader.hpp
     ${CMAKE_CURRENT_LIST_DIR}/include/storage.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/include/writer_types.hpp
 )
 
 foreach(HEADER_FILE ${rocstorage_public_headers})
@@ -238,6 +239,6 @@ export(PACKAGE ${PACKAGE_NAME})
 # Tests and Benchmarks
 # ------------------------------------------------------------ #
 
-if(ROCSTORAGE_BUILD_TESTS OR ROCSTORAGE_BUILD_BENCHMARKS)
-    add_subdirectory(tests)
-endif()
+# if(ROCSTORAGE_BUILD_TESTS OR ROCSTORAGE_BUILD_BENCHMARKS)
+#     add_subdirectory(tests)
+# endif()

@@ -23,42 +23,93 @@
 
 #pragma once
 #include <optional>
-#include <string>
 #include <type_traits>
 
-namespace rocstorage {
-namespace common {
-namespace traits {
+namespace rocstorage
+{
+namespace common
+{
+namespace traits
+{
 
-namespace {
-template <typename T> struct is_string_literal_impl : std::false_type {};
+namespace
+{
+template <typename T>
+struct is_string_literal_impl : std::false_type
+{};
 
-template <> struct is_string_literal_impl<std::string_view> : std::true_type {};
-
-template <> struct is_string_literal_impl<const char *> : std::true_type {};
-
-template <> struct is_string_literal_impl<char *> : std::true_type {};
-
-template <> struct is_string_literal_impl<std::string> : std::true_type {};
+template <>
+struct is_string_literal_impl<const char*> : std::true_type
+{};
 
 template <typename T>
-inline constexpr bool is_string_literal_impl_v =
-    is_string_literal_impl<T>::value;
+inline constexpr bool is_string_literal_impl_v = is_string_literal_impl<T>::value;
 
-} // namespace
+}  // namespace
 
-template <typename T> constexpr bool is_string_literal() {
-  using Tp = std::decay_t<T>;
-  return is_string_literal_impl_v<Tp>;
+template <typename T>
+constexpr bool
+is_string_literal()
+{
+    using Tp = std::decay_t<T>;
+    return is_string_literal_impl_v<Tp>;
 }
 
-template <typename T> struct is_optional : std::false_type {};
+template <typename T>
+struct is_optional : std::false_type
+{};
 
-template <typename T> struct is_optional<std::optional<T>> : std::true_type {};
+template <typename T>
+struct is_optional<std::optional<T>> : std::true_type
+{};
 
 template <typename T>
 inline constexpr bool is_optional_v = is_optional<T>::value;
 
-} // namespace traits
-} // namespace common
-} // namespace rocstorage
+template <typename T>
+struct unwrap_optional
+{
+    using type = T;
+};
+
+template <typename T>
+struct unwrap_optional<std::optional<T>>
+{
+    using type = T;
+};
+
+template <typename T>
+using unwrap_optional_t = typename unwrap_optional<std::decay_t<T>>::type;
+
+template <typename T>
+bool
+is_null_value(const T& value)
+{
+    if constexpr(is_optional_v<std::decay_t<T>>)
+    {
+        return !value.has_value();
+    }
+    else
+    {
+        return false;
+    }
+}
+
+template <typename T>
+decltype(auto)
+get_value(T&& value)
+{
+    using decayed_t = std::decay_t<T>;
+    if constexpr(is_optional_v<decayed_t>)
+    {
+        return value.value();
+    }
+    else
+    {
+        return std::forward<T>(value);
+    }
+}
+
+}  // namespace traits
+}  // namespace common
+}  // namespace rocstorage

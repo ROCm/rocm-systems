@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in
-// all copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier:  MIT
 
 #include <rocstorage/writer.hpp>
 
@@ -30,571 +11,1566 @@
 
 #include <stdexcept>
 #include <unordered_map>
+#include <unordered_set>
 
-namespace rocstorage {
+namespace rocstorage
+{
 
-namespace {
-void initialize_metadata(
-    const std::shared_ptr<data_storage::database> &database,
-    const std::string &uuid) {
-  data_storage::queries::table_insert_query query;
-  database->execute_query(query.set_table_name("rocpd_metadata_" + uuid)
-                              .set_columns("tag", "value")
-                              .set_values("upid", uuid)
-                              .get_query_string());
+namespace
+{
+void
+initialize_metadata(const std::shared_ptr<data_storage::database>& database,
+                    const std::string&                             uuid)
+{
+    data_storage::queries::table_insert_query query;
+    database->execute_query(query.set_table_name("rocpd_metadata_" + uuid)
+                                .set_columns("tag", "value")
+                                .set_values("upid", uuid)
+                                .get_query_string());
 }
 
-struct track_name_value {
-  size_t track_id;
-  size_t name_id;
+using primary_key = size_t;
+
+template <typename PrimaryKey = primary_key>
+struct autoincrementer
+{
+    explicit autoincrementer(const char* label)
+    : m_label(label)
+    {}
+
+    auto get_primary_key_value() noexcept { return m_primary_key_value.fetch_add(1); }
+
+private:
+    std::atomic<PrimaryKey> m_primary_key_value{};
+    const char*             m_label;
 };
 
-struct pmc_identifier_key {
-  size_t agent_id;
-  std::string name;
+struct track_name_value
+{
+    size_t track_id;
+    size_t name_id;
 };
 
-struct pmc_identifier_hash {
-  std::size_t operator()(const pmc_identifier_key &pmc) const noexcept {
-    std::size_t h1 = std::hash<size_t>{}(pmc.agent_id);
-    std::size_t h2 = std::hash<std::string>{}(pmc.name);
-    return h1 ^ (h2 << 1);
-  }
+struct agent_unique_id_hash
+{
+    std::size_t operator()(const writer_api::agent_unique_id_t& agent) const noexcept
+    {
+        return std::hash<std::string>{}(agent.agent_type) ^
+               std::hash<size_t>{}(agent.type_index);
+    }
 };
 
-struct pmc_identifier_equal {
-  bool operator()(const pmc_identifier_key &lhs,
-                  const pmc_identifier_key &rhs) const noexcept {
-    return lhs.agent_id == rhs.agent_id && lhs.name == rhs.name;
-  }
+struct pmc_unique_id_hash
+{
+    std::size_t operator()(const writer_api::pmc_info_unique_id_t& pmc) const noexcept
+    {
+        return agent_unique_id_hash{}(*pmc.agent_id) ^ std::hash<std::string>{}(pmc.name);
+    }
 };
+struct track_info_hash
+{
+    std::size_t operator()(const writer_api::track_info_t& track_info) const noexcept
+    {
+        std::string track_name_value =
+            track_info.name.has_value() ? track_info.name.value() : "";
+        size_t process_id_value =
+            track_info.process_id.has_value() ? track_info.process_id.value() : 0;
+        size_t thread_id_value =
+            track_info.thread_id.has_value() ? track_info.thread_id.value() : 0;
 
-} // namespace
+        return std::hash<size_t>{}(track_info.node_id) ^
+               std::hash<std::string>{}(track_name_value) ^
 
-struct writer::impl {
-  struct data_identifiers {
-    using track_name_key = std::string;
-    using thread_id = size_t;
-    using thread_primary_key = size_t;
-    using pmc_info_primary_key = size_t;
-    using string_key = std::string;
-    using string_primary_key = size_t;
+               std::hash<size_t>{}(process_id_value) ^
+               std::hash<size_t>{}(thread_id_value);
+    }
+};
+}  // namespace
 
-    ~data_identifiers() = default;
+struct writer::impl
+{
+    struct data_identifiers
+    {
+        using primary_key = size_t;
 
-    std::unordered_map<track_name_key, track_name_value> m_tracks{};
-    std::unordered_map<pmc_identifier_key, pmc_info_primary_key,
-                       pmc_identifier_hash, pmc_identifier_equal>
-        m_pmc_descriptor_map{};
-    std::unordered_map<thread_id, thread_primary_key> m_thread_id_map{};
-    std::unordered_map<string_key, string_primary_key> m_string_map{};
-  };
+        ~data_identifiers() = default;
 
-  explicit impl(std::shared_ptr<data_storage::database> database,
-                std::string uuid)
-      : m_database(std::move(database)), m_uuid(std::move(uuid)),
-        m_uuid_cstr(m_uuid.c_str()),
-        m_data_identifiers(std::make_unique<data_identifiers>()) {
-    if (!m_database) {
-      throw std::invalid_argument(
-          "Provided pointer to a non-existing database!");
+        // ---------------------------- Node Info ----------------------------
+
+        std::unordered_set<writer_api::node_id_t> m_node_info_id_set{};
+
+        // ---------------------------- Process Info ----------------------------
+
+        autoincrementer<primary_key> m_process_info_primary_key_provider{
+            "process_info"
+        };
+        std::unordered_map<writer_api::process_id_t, primary_key> m_process_info_id_map{};
+
+        // ---------------------------- Agent Info ----------------------------
+
+        autoincrementer<primary_key> m_agent_info_primary_key_provider{ "agent_info" };
+        std::unordered_map<writer_api::agent_unique_id_t,
+                           primary_key,
+                           agent_unique_id_hash>
+            m_agent_id_map{};
+
+        // ---------------------------- PMC Info ----------------------------
+
+        autoincrementer<primary_key> m_pmc_info_primary_key_provider{ "pmc_info" };
+        std::unordered_map<writer_api::pmc_info_unique_id_t,
+                           primary_key,
+                           pmc_unique_id_hash>
+            m_pmc_info_id_map{};
+
+        // ---------------------------- Thread Info ----------------------------
+
+        autoincrementer<primary_key> m_thread_info_primary_key_provider{ "thread_info" };
+        std::unordered_map<writer_api::thread_id_t, primary_key> m_thread_info_id_map{};
+
+        // ---------------------------- Stream Info ----------------------------
+
+        autoincrementer<primary_key> m_stream_info_primary_key_provider{ "stream_info" };
+        std::unordered_map<writer_api::stream_id_t, primary_key> m_stream_info_id_map{};
+
+        // ---------------------------- Queue Info ----------------------------
+
+        autoincrementer<primary_key> m_queue_info_primary_key_provider{ "queue_info" };
+        std::unordered_map<writer_api::queue_id_t, primary_key> m_queue_info_id_map{};
+
+        // ---------------------------- Code Object Info ----------------------------
+
+        std::unordered_set<writer_api::code_object_id_t> m_code_object_info_id_set{};
+
+        // ---------------------------- Kernel Symbol Info ----------------------------
+
+        std::unordered_set<writer_api::kernel_symbol_id_t> m_kernel_symbol_info_id_set{};
+
+        // ---------------------------- Track Info ----------------------------
+
+        autoincrementer<primary_key> m_track_info_primary_key_provider{ "track_info" };
+        std::unordered_map<writer_api::track_info_t, primary_key, track_info_hash>
+            m_track_info_id_map{};
+
+        // ---------------------------- String Info ----------------------------
+
+        autoincrementer<primary_key> m_string_info_primary_key_provider{ "string_info" };
+        std::unordered_map<std::string, primary_key> m_string_info_id_map{};
+
+        // ---------------------------- Event Info ----------------------------
+
+        autoincrementer<primary_key> m_event_info_primary_key_provider{ "event_data" };
+
+        // ---------------------------- Region Info ----------------------------
+
+        autoincrementer<primary_key> m_region_info_primary_key_provider{ "region_data" };
+
+        // ---------------------------- Arg ----------------------------
+
+        autoincrementer<primary_key> m_arg_primary_key_provider{ "arg" };
+
+        // ---------------------------- PMC Event Info ----------------------------
+
+        autoincrementer<primary_key> m_pmc_event_info_primary_key_provider{
+            "pmc_event_data"
+        };
+
+        // -------------------------- Kernel Dispatch Info ------------------------
+
+        autoincrementer<primary_key> m_kernel_dispatch_info_primary_key_provider{
+            "kernel_dispatch_data"
+        };
+
+        // -------------------------- Memory Copy Info ------------------------
+
+        autoincrementer<primary_key> m_memory_copy_info_primary_key_provider{
+            "memory_copy_data"
+        };
+
+        // -------------------------- Memory Alloc Info ------------------------
+
+        autoincrementer<primary_key> m_memory_alloc_info_primary_key_provider{
+            "memory_alloc_data"
+        };
+    };
+
+private:
+    inline bool is_node_registered(const writer_api::node_id_t& node_id) const noexcept
+    {
+        return m_data_identifiers->m_node_info_id_set.count(node_id) > 0;
+    }
+    inline bool is_process_registered(
+        const writer_api::process_id_t& process_id) const noexcept
+    {
+        return m_data_identifiers->m_process_info_id_map.count(process_id) > 0;
     }
 
-    if (m_uuid.empty()) {
-      throw std::invalid_argument("Empty UUID provided!");
+    inline std::optional<size_t> get_agent_primary_key(
+        const std::optional<writer_api::agent_unique_id_t>& agent_unique_id) const
+    {
+        if(agent_unique_id.has_value())
+        {
+            auto it = m_data_identifiers->m_agent_id_map.find(*agent_unique_id);
+            if(it == m_data_identifiers->m_agent_id_map.end())
+            {
+                throw std::runtime_error(
+                    fmt::format("Agent not registered: agent_type: {}, agent_index: {}",
+                                agent_unique_id->agent_type,
+                                agent_unique_id->type_index));
+            }
+            return it->second;
+        }
+        return std::nullopt;
     }
 
-    m_database->initialize_schema();
-    initialize_metadata(m_database, m_uuid);
-    m_insert_statements =
-        std::make_unique<data_storage::insert_statements>(m_database, m_uuid);
-  }
-
-  size_t insert_string(const char *str) {
-    auto it = m_data_identifiers->m_string_map.find(str);
-    if (it != m_data_identifiers->m_string_map.end())
-      return it->second;
-
-    m_insert_statements->m_insert_string_statement(m_uuid_cstr, str);
-
-    const auto string_id = m_database->get_last_insert_id();
-    m_data_identifiers->m_string_map.emplace(str, string_id);
-    return string_id;
-  }
-
-  void insert_node_info(size_t node_id, size_t hash, const char *machine_id,
-                        const char *system_name, const char *hostname,
-                        const char *release, const char *version,
-                        const char *hardware_name, const char *domain_name) {
-    data_storage::queries::table_insert_query query;
-    m_database->execute_query(
-        query.set_table_name("rocpd_info_node_" + m_uuid)
-            .set_columns("id", "guid", "hash", "machine_id", "system_name",
-                         "hostname", "release", "version", "hardware_name",
-                         "domain_name")
-            .set_values(node_id, m_uuid, hash, machine_id, system_name,
-                        hostname, release, version, hardware_name, domain_name)
-            .get_query_string());
-  }
-
-  void insert_process_info(size_t node_id, size_t ppid, size_t pid, size_t init,
-                           size_t fini, size_t start, size_t end,
-                           const char *command, const char *environment,
-                           const char *extdata) {
-    data_storage::queries::table_insert_query query;
-    m_database->execute_query(
-        query.set_table_name("rocpd_info_process_" + m_uuid)
-            .set_columns("id", "guid", "nid", "ppid", "pid", "init", "fini",
-                         "start", "end", "command", "environment", "extdata")
-            .set_values(pid, m_uuid, node_id, ppid, pid, init, fini, start, end,
-                        command, environment, extdata)
-            .get_query_string());
-  }
-
-  size_t insert_agent(size_t node_id, size_t pid, const char *agent_type,
-                      size_t absolute_index, size_t logical_index,
-                      size_t type_index, size_t uuid, const char *name,
-                      const char *model_name, const char *vendor_name,
-                      const char *product_name, const char *user_name,
-                      const char *extdata) {
-    data_storage::queries::table_insert_query query;
-    m_database->execute_query(
-        query.set_table_name("rocpd_info_agent_" + m_uuid)
-            .set_columns("guid", "nid", "pid", "type", "absolute_index",
-                         "logical_index", "type_index", "uuid", "name",
-                         "model_name", "vendor_name", "product_name",
-                         "user_name", "extdata")
-            .set_values(m_uuid, node_id, pid, agent_type, absolute_index,
-                        logical_index, type_index, uuid, name, model_name,
-                        vendor_name, product_name, user_name, extdata)
-            .get_query_string());
-
-    return m_database->get_last_insert_id();
-  }
-
-  void insert_track(const char *track_name, size_t node_id, size_t process_id,
-                    std::optional<size_t> thread_id, const char *extdata) {
-    if (m_data_identifiers->m_tracks.find(track_name) !=
-        m_data_identifiers->m_tracks.end()) {
-      LOG_ERROR("Failed to add track '{}': already exists", track_name);
-      return;
+    inline bool is_agent_registered(
+        const writer_api::agent_unique_id_t& agent_unique_id) const noexcept
+    {
+        return m_data_identifiers->m_agent_id_map.count(agent_unique_id) > 0;
     }
 
-    auto name_id = insert_string(track_name);
-
-    data_storage::queries::table_insert_query query;
-    m_database->execute_query(
-        query.set_table_name("rocpd_track_" + m_uuid)
-            .set_columns("guid", "nid", "pid", "tid", "name_id", "extdata")
-            .set_values(m_uuid, node_id, process_id, thread_id, name_id,
-                        extdata)
-            .get_query_string());
-
-    auto track_id = m_database->get_last_insert_id();
-    m_data_identifiers->m_tracks[track_name] =
-        track_name_value{track_id, name_id};
-  }
-
-  size_t insert_event(size_t string_primary_key, size_t stack_id,
-                      size_t parent_stack_id, size_t correlation_id,
-                      const char *call_stack, const char *line_info,
-                      const char *extdata) {
-    m_insert_statements->m_insert_event_statement(
-        m_uuid_cstr, string_primary_key, stack_id, parent_stack_id,
-        correlation_id, call_stack, line_info, extdata);
-    return m_database->get_last_insert_id();
-  }
-
-  void insert_pmc_event(size_t event_id, size_t agent_id,
-                        const char *pmc_descriptor, double value,
-                        const char *extdata) {
-    auto it = m_data_identifiers->m_pmc_descriptor_map.find(
-        {agent_id, pmc_descriptor});
-    if (it == m_data_identifiers->m_pmc_descriptor_map.end()) {
-      LOG_ERROR("Insert PMC event failed: non-existing PMC description "
-                "(agent_id: {}, pmc_name: {})",
-                agent_id, pmc_descriptor);
-      return;
+    inline bool is_pmc_info_registered(
+        const writer_api::pmc_info_unique_id_t& pmc_unique_id) const noexcept
+    {
+        return m_data_identifiers->m_pmc_info_id_map.count(pmc_unique_id) > 0;
     }
 
-    const auto pmc_description_id = it->second;
-    m_insert_statements->m_insert_pmc_event_statement(
-        m_uuid_cstr, event_id, pmc_description_id, value, extdata);
-  }
-
-  void insert_pmc_description(
-      size_t node_id, size_t process_id, size_t agent_id,
-      const char *target_arch, size_t event_code, size_t instance_id,
-      const char *name, const char *symbol, const char *description,
-      const char *long_description, const char *component, const char *units,
-      const char *value_type, const char *block, const char *expression,
-      uint32_t is_constant, uint32_t is_derived, const char *extdata) {
-    auto it = m_data_identifiers->m_pmc_descriptor_map.find({agent_id, name});
-    if (it != m_data_identifiers->m_pmc_descriptor_map.end()) {
-      LOG_ERROR("Insert PMC description failed: PMC descriptor already "
-                "exists (name: {}, agent_id: {})",
-                name, agent_id);
-      return;
-    }
-    data_storage::queries::table_insert_query query_builder;
-
-    auto query =
-        query_builder.set_table_name("rocpd_info_pmc_" + m_uuid)
-            .set_columns("guid", "nid", "pid", "agent_id", "target_arch",
-                         "event_code", "instance_id", "name", "symbol",
-                         "description", "long_description", "component",
-                         "units", "value_type", "block", "expression",
-                         "is_constant", "is_derived", "extdata")
-            .set_values(m_uuid, node_id, process_id, agent_id, target_arch,
-                        event_code, instance_id, name, symbol, description,
-                        long_description, component, units, value_type, block,
-                        expression, is_constant, is_derived, extdata)
-            .get_query_string();
-    m_database->execute_query(query);
-
-    auto pmc_id = m_database->get_last_insert_id();
-    m_data_identifiers->m_pmc_descriptor_map.emplace(
-        std::pair<pmc_identifier_key, size_t>{{agent_id, name}, pmc_id});
-  }
-
-  void insert_sample(const char *track, size_t timestamp, size_t event_id,
-                     const char *extdata) {
-    auto it = m_data_identifiers->m_tracks.find(track);
-    if (it == m_data_identifiers->m_tracks.end()) {
-      LOG_ERROR("Insert sample failed: track '{}' does not exist", track);
-      return;
-    }
-    auto track_info = it->second;
-    m_insert_statements->m_insert_sample_statement(
-        m_uuid_cstr, track_info.track_id, timestamp, event_id, extdata);
-  }
-
-  void insert_region(size_t node_id, size_t process_id, size_t thread_id,
-                     size_t start, size_t end, size_t name_id, size_t event_id,
-                     const char *extdata) {
-    m_insert_statements->m_insert_region_statement(
-        m_uuid_cstr, node_id, process_id, thread_id, start, end, name_id,
-        event_id, extdata);
-  }
-
-  size_t insert_thread_info(size_t node_id, size_t parent_process_id,
-                            size_t process_id, size_t thread_id,
-                            const char *name, size_t start, size_t end,
-                            const char *extdata) {
-    auto it = m_data_identifiers->m_thread_id_map.find(thread_id);
-
-    if (it != m_data_identifiers->m_thread_id_map.end()) {
-      return m_data_identifiers->m_thread_id_map.at(thread_id);
+    inline bool is_thread_info_registered(
+        const writer_api::thread_id_t& thread_id) const noexcept
+    {
+        return m_data_identifiers->m_thread_info_id_map.count(thread_id) > 0;
     }
 
-    data_storage::queries::table_insert_query query;
-    m_database->execute_query(
-        query.set_table_name("rocpd_info_thread_" + m_uuid)
-            .set_columns("guid", "nid", "ppid", "pid", "tid", "name", "start",
-                         "end", "extdata")
-            .set_values(m_uuid_cstr, node_id, parent_process_id, process_id,
-                        thread_id, name, start, end, extdata)
-            .get_query_string());
-
-    auto thread_idx = m_database->get_last_insert_id();
-    m_data_identifiers->m_thread_id_map.emplace(thread_id, thread_idx);
-    return thread_idx;
-  }
-
-  void insert_stream_info(size_t stream_id, size_t node_id, size_t process_id,
-                          const char *name, const char *extdata) {
-    data_storage::queries::table_insert_query query;
-    m_database->execute_query(
-        query.set_table_name("rocpd_info_stream_" + m_uuid)
-            .set_columns("id", "guid", "nid", "pid", "name", "extdata")
-            .set_values(stream_id, m_uuid, node_id, process_id, name, extdata)
-            .get_query_string());
-  }
-
-  void insert_queue_info(size_t queue_id, size_t node_id, size_t process_id,
-                         const char *name, const char *extdata) {
-    data_storage::queries::table_insert_query query;
-    m_database->execute_query(
-        query.set_table_name("rocpd_info_queue_" + m_uuid)
-            .set_columns("id", "guid", "nid", "pid", "name", "extdata")
-            .set_values(queue_id, m_uuid, node_id, process_id, name, extdata)
-            .get_query_string());
-  }
-
-  void insert_kernel_dispatch(
-      size_t node_id, size_t process_id, size_t thread_id, size_t agent_id,
-      size_t kernel_id, size_t dispatch_id, size_t queue_id, size_t stream_id,
-      size_t start, size_t end, size_t private_segment_size,
-      size_t group_segment_size, size_t workgroup_size_x,
-      size_t workgroup_size_y, size_t workgroup_size_z, size_t grid_size_x,
-      size_t grid_size_y, size_t grid_size_z, size_t region_name_id,
-      size_t event_id, const char *extdata) {
-    m_insert_statements->m_insert_kernel_dispatch_statement(
-        m_uuid_cstr, node_id, process_id, thread_id, agent_id, kernel_id,
-        dispatch_id, queue_id, stream_id, start, end, private_segment_size,
-        group_segment_size, workgroup_size_x, workgroup_size_y,
-        workgroup_size_z, grid_size_x, grid_size_y, grid_size_z, region_name_id,
-        event_id, extdata);
-  }
-
-  void insert_memory_copy(size_t node_id, size_t process_id, size_t thread_id,
-                          size_t start, size_t end, size_t name_id,
-                          size_t dst_agent_id, size_t dst_addr,
-                          size_t src_agent_id, size_t src_addr, size_t size,
-                          size_t queue_id, size_t stream_id,
-                          size_t region_name_id, size_t event_id,
-                          const char *extdata) {
-    m_insert_statements->m_insert_memory_copy_statement(
-        m_uuid_cstr, node_id, process_id, thread_id, start, end, name_id,
-        dst_agent_id, dst_addr, src_agent_id, src_addr, size, queue_id,
-        stream_id, region_name_id, event_id, extdata);
-  }
-
-  void insert_kernel_symbol(size_t id, size_t node_id, size_t process_id,
-                            size_t code_obj_id, const char *name,
-                            const char *display_name, uint32_t kernel_obj,
-                            uint32_t kernarg_segmnt_size,
-                            uint32_t kernarg_segment_alignment,
-                            uint32_t group_segment_size,
-                            uint32_t private_segment_size, uint32_t sgrp_count,
-                            uint32_t arch_vgrp_count, uint32_t accum_vgrp_count,
-                            const char *extdata) {
-    m_insert_statements->m_insert_kernel_symbol_statement(
-        id, m_uuid_cstr, node_id, process_id, code_obj_id, name, display_name,
-        kernel_obj, kernarg_segmnt_size, kernarg_segment_alignment,
-        group_segment_size, private_segment_size, sgrp_count, arch_vgrp_count,
-        accum_vgrp_count, extdata);
-  }
-
-  void insert_code_object(size_t id, size_t node_id, size_t process_id,
-                          size_t agent_id, const char *uri, size_t ld_base,
-                          size_t ld_size, size_t ld_delta,
-                          const char *storage_type, const char *extdata) {
-    m_insert_statements->m_insert_code_object_statement(
-        id, m_uuid_cstr, node_id, process_id, agent_id, uri, ld_base, ld_size,
-        ld_delta, storage_type, extdata);
-  }
-
-  void insert_args(size_t event_id, size_t position, const char *type,
-                   const char *name, const char *value, const char *extdata) {
-    m_insert_statements->m_insert_args_statement(
-        m_uuid_cstr, event_id, position, type, name, value, extdata);
-  }
-
-  void insert_memory_alloc(size_t node_id, size_t process_id, size_t thread_id,
-                           std::optional<size_t> agent_id, const char *type,
-                           const char *level, size_t start, size_t end,
-                           size_t address, size_t size, size_t queue_id,
-                           size_t stream_id, size_t event_id,
-                           const char *extdata) {
-    if (agent_id.has_value()) {
-      m_insert_statements->m_insert_memory_alloc_statement(
-          m_uuid_cstr, node_id, process_id, thread_id, agent_id.value(), type,
-          level, start, end, address, size, queue_id, stream_id, event_id,
-          extdata);
-    } else {
-      m_insert_statements->m_insert_memory_alloc_no_agent_statement(
-          m_uuid_cstr, node_id, process_id, thread_id, type, level, start, end,
-          address, size, queue_id, stream_id, event_id, extdata);
+    inline bool is_stream_info_registered(
+        const writer_api::stream_id_t& stream_id) const noexcept
+    {
+        return m_data_identifiers->m_stream_info_id_map.count(stream_id) > 0;
     }
-  }
 
-  size_t map_thread_id_to_primary_key(size_t thread_id) {
-    auto it = m_data_identifiers->m_thread_id_map.find(thread_id);
-
-    if (it == m_data_identifiers->m_thread_id_map.end()) {
-      throw std::invalid_argument("Given thread id don't exist");
+    inline bool is_queue_info_registered(
+        const writer_api::queue_id_t& queue_id) const noexcept
+    {
+        return m_data_identifiers->m_queue_info_id_map.count(queue_id) > 0;
     }
-    return m_data_identifiers->m_thread_id_map.at(thread_id);
-  }
 
-  void flush() { m_database->flush(); }
+    inline bool is_code_object_info_registered(
+        const writer_api::code_object_id_t& code_obj_id) const noexcept
+    {
+        return m_data_identifiers->m_code_object_info_id_set.count(code_obj_id) > 0;
+    }
 
-  std::shared_ptr<data_storage::database> m_database;
-  std::string m_uuid;
-  const char *m_uuid_cstr;
-  std::unique_ptr<data_storage::insert_statements> m_insert_statements;
-  std::unique_ptr<data_identifiers> m_data_identifiers;
+    inline bool is_kernel_symbol_info_registered(
+        const writer_api::kernel_symbol_id_t& kernel_symbol_id) const noexcept
+    {
+        return m_data_identifiers->m_kernel_symbol_info_id_set.count(kernel_symbol_id) >
+               0;
+    }
+
+    inline bool is_track_info_registered(
+        const writer_api::track_info_t& track_info) const noexcept
+    {
+        return m_data_identifiers->m_track_info_id_map.count(track_info) > 0;
+    }
+
+    inline bool is_string_registered(const std::string& str) const noexcept
+    {
+        return m_data_identifiers->m_string_info_id_map.count(str) > 0;
+    }
+
+public:
+    explicit impl(std::shared_ptr<data_storage::database> database, std::string uuid)
+    : m_database(std::move(database))
+    , m_uuid(std::move(uuid))
+    , m_data_identifiers(std::make_unique<data_identifiers>())
+    {
+        if(!m_database)
+        {
+            throw std::invalid_argument("Provided pointer to a non-existing database!");
+        }
+
+        if(m_uuid.empty())
+        {
+            throw std::invalid_argument("Empty UUID provided!");
+        }
+
+        m_database->initialize_schema();
+        initialize_metadata(m_database, m_uuid);
+        m_insert_statements =
+            std::make_unique<data_storage::schema_v3::insert_statements>(m_database,
+                                                                         m_uuid);
+    }
+
+    void register_node_info(const writer_api::node_info_t& node_info)
+    {
+        if(is_node_registered(node_info.node_id))
+        {
+            LOG_WARNING("Node already registered: node_id: {}", node_info.node_id);
+            return;
+        }
+
+        m_insert_statements->node_info_statement()(node_info.node_id,
+                                                   node_info.hash,
+                                                   node_info.machine_id,
+                                                   node_info.system_name,
+                                                   node_info.hostname,
+                                                   node_info.release,
+                                                   node_info.version,
+                                                   node_info.hardware_name,
+                                                   node_info.domain_name);
+
+        m_data_identifiers->m_node_info_id_set.insert(node_info.node_id);
+    }
+
+    void register_process_info(const writer_api::process_info_t& process_info)
+    {
+        if(is_process_registered(process_info.pid))
+        {
+            LOG_WARNING("Process already registered: pid: {}", process_info.pid);
+            return;
+        }
+
+        if(!is_node_registered(process_info.node_id))
+        {
+            throw std::runtime_error(
+                fmt::format("Node not registered for Process Info: node_id: {}",
+                            process_info.node_id));
+        }
+
+        const auto primary_key = m_data_identifiers->m_process_info_primary_key_provider
+                                     .get_primary_key_value();
+        m_insert_statements->process_info_statement()(primary_key,
+                                                      process_info.node_id,
+                                                      process_info.ppid,
+                                                      process_info.pid,
+                                                      process_info.init,
+                                                      process_info.fini,
+                                                      process_info.start,
+                                                      process_info.end,
+                                                      process_info.command,
+                                                      process_info.environment,
+                                                      process_info.extdata);
+
+        m_data_identifiers->m_process_info_id_map.emplace(process_info.pid, primary_key);
+    }
+
+    void register_agent_info(const writer_api::agent_info_t& agent_info)
+    {
+        if(is_agent_registered(agent_info.unique_id))
+        {
+            LOG_WARNING("Agent already registered: type: {}, index: {}, name: {}",
+                        agent_info.unique_id.agent_type,
+                        agent_info.unique_id.type_index,
+                        agent_info.name);
+            return;
+        }
+
+        if(!is_node_registered(agent_info.node_id))
+        {
+            throw std::runtime_error(fmt::format(
+                "Node not registered for Agent Info: node_id: {}", agent_info.node_id));
+        }
+
+        if(!is_process_registered(agent_info.process_id))
+        {
+            throw std::runtime_error(fmt::format(
+                "Process not registered for Agent Info: pid: {}", agent_info.process_id));
+        }
+
+        const auto process_primary_key =
+            m_data_identifiers->m_process_info_id_map.at(agent_info.process_id);
+
+        const std::string_view agent_type{ agent_info.unique_id.agent_type };
+
+        if(agent_type != "CPU" && agent_type != "GPU")
+        {
+            throw std::runtime_error(fmt::format(
+                "Invalid agent type: {}. Type can be NULL, CPU, or GPU.", agent_type));
+        }
+
+        const auto primary_key =
+            m_data_identifiers->m_agent_info_primary_key_provider.get_primary_key_value();
+        m_insert_statements->agent_info_statement()(primary_key,
+                                                    agent_info.node_id,
+                                                    process_primary_key,
+                                                    agent_info.unique_id.agent_type,
+                                                    agent_info.absolute_index,
+                                                    agent_info.logical_index,
+                                                    agent_info.unique_id.type_index,
+                                                    agent_info.uuid,
+                                                    agent_info.name,
+                                                    agent_info.model_name,
+                                                    agent_info.vendor_name,
+                                                    agent_info.product_name,
+                                                    agent_info.user_name,
+                                                    agent_info.extdata);
+
+        m_data_identifiers->m_agent_id_map.emplace(agent_info.unique_id, primary_key);
+    }
+
+    void register_pmc_info(const writer_api::pmc_info_t& pmc_info)
+    {
+        if(is_pmc_info_registered(pmc_info.unique_id))
+        {
+            LOG_WARNING("PMC already registered: name: {}, agent_id: {}",
+                        pmc_info.unique_id.name,
+                        pmc_info.unique_id.agent_id->agent_type);
+            return;
+        }
+
+        if(!is_node_registered(pmc_info.node_id))
+        {
+            throw std::runtime_error(fmt::format(
+                "Node not registered for PMC Info: node_id: {}", pmc_info.node_id));
+        }
+
+        if(!is_process_registered(pmc_info.process_id))
+        {
+            throw std::runtime_error(fmt::format(
+                "Process not registered for PMC Info: pid: {}", pmc_info.process_id));
+        }
+
+        const auto process_primary_key =
+            m_data_identifiers->m_process_info_id_map.at(pmc_info.process_id);
+
+        const auto agent_foreign_key = get_agent_primary_key(pmc_info.unique_id.agent_id);
+
+        const auto primary_key =
+            m_data_identifiers->m_pmc_info_primary_key_provider.get_primary_key_value();
+        m_insert_statements->pmc_info_statement()(primary_key,
+                                                  pmc_info.node_id,
+                                                  process_primary_key,
+                                                  agent_foreign_key,
+                                                  pmc_info.target_arch,
+                                                  pmc_info.event_code,
+                                                  pmc_info.instance_id,
+                                                  pmc_info.unique_id.name,
+                                                  pmc_info.symbol,
+                                                  pmc_info.description,
+                                                  pmc_info.long_description,
+                                                  pmc_info.component,
+                                                  pmc_info.units,
+                                                  pmc_info.value_type,
+                                                  pmc_info.block,
+                                                  pmc_info.expression,
+                                                  pmc_info.is_constant,
+                                                  pmc_info.is_derived,
+                                                  pmc_info.extdata);
+
+        m_data_identifiers->m_pmc_info_id_map.emplace(pmc_info.unique_id, primary_key);
+    }
+
+    // ---------------------------------------------------------------------------------------------
+
+    void register_thread_info(const writer_api::thread_info_t& thread_info)
+    {
+        if(is_thread_info_registered(thread_info.thread_id))
+        {
+            LOG_WARNING("Thread already registered: thread_id: {}",
+                        thread_info.thread_id);
+            return;
+        }
+
+        if(!is_node_registered(thread_info.node_id))
+        {
+            throw std::runtime_error(fmt::format(
+                "Node not registered for Thread Info: node_id: {}", thread_info.node_id));
+        }
+
+        if(!is_process_registered(thread_info.process_id))
+        {
+            throw std::runtime_error(
+                fmt::format("Process not registered for Thread Info: pid: {}",
+                            thread_info.process_id));
+        }
+
+        const auto process_primary_key =
+            m_data_identifiers->m_process_info_id_map.at(thread_info.process_id);
+
+        const auto primary_key = m_data_identifiers->m_thread_info_primary_key_provider
+                                     .get_primary_key_value();
+
+        m_insert_statements->thread_info_statement()(primary_key,
+                                                     thread_info.node_id,
+                                                     thread_info.parent_process_id,
+                                                     process_primary_key,
+                                                     thread_info.thread_id,
+                                                     thread_info.name,
+                                                     thread_info.start,
+                                                     thread_info.end,
+                                                     thread_info.extdata);
+
+        m_data_identifiers->m_thread_info_id_map.emplace(thread_info.thread_id,
+                                                         primary_key);
+    }
+
+    void register_stream_info(const writer_api::stream_info_t& stream_info)
+    {
+        if(is_stream_info_registered(stream_info.stream_id))
+        {
+            LOG_WARNING("Stream already registered: stream_id: {}",
+                        stream_info.stream_id);
+            return;
+        }
+
+        if(!is_node_registered(stream_info.node_id))
+        {
+            throw std::runtime_error(fmt::format(
+                "Node not registered for Stream Info: node_id: {}", stream_info.node_id));
+        }
+
+        if(!is_process_registered(stream_info.process_id))
+        {
+            throw std::runtime_error(
+                fmt::format("Process not registered for Stream Info: pid: {}",
+                            stream_info.process_id));
+        }
+
+        const auto process_primary_key =
+            m_data_identifiers->m_process_info_id_map.at(stream_info.process_id);
+
+        const auto primary_key = m_data_identifiers->m_stream_info_primary_key_provider
+                                     .get_primary_key_value();
+        m_insert_statements->stream_info_statement()(primary_key,
+                                                     stream_info.node_id,
+                                                     process_primary_key,
+                                                     stream_info.name,
+                                                     stream_info.extdata);
+
+        m_data_identifiers->m_stream_info_id_map.emplace(stream_info.stream_id,
+                                                         primary_key);
+    }
+
+    void register_queue_info(const writer_api::queue_info_t& queue_info)
+    {
+        if(is_queue_info_registered(queue_info.queue_id))
+        {
+            LOG_WARNING("Queue already registered: queue_id: {}", queue_info.queue_id);
+            return;
+        }
+
+        if(!is_node_registered(queue_info.node_id))
+        {
+            throw std::runtime_error(fmt::format(
+                "Node not registered for Queue Info: node_id: {}", queue_info.node_id));
+        }
+
+        if(!is_process_registered(queue_info.process_id))
+        {
+            throw std::runtime_error(fmt::format(
+                "Process not registered for Queue Info: pid: {}", queue_info.process_id));
+        }
+
+        const auto process_primary_key =
+            m_data_identifiers->m_process_info_id_map.at(queue_info.process_id);
+
+        const auto primary_key =
+            m_data_identifiers->m_queue_info_primary_key_provider.get_primary_key_value();
+
+        m_insert_statements->queue_info_statement()(primary_key,
+                                                    queue_info.node_id,
+                                                    process_primary_key,
+                                                    queue_info.name,
+                                                    queue_info.extdata);
+
+        m_data_identifiers->m_queue_info_id_map.emplace(queue_info.queue_id, primary_key);
+    }
+
+    void regsiter_code_object_info(const writer_api::code_object_info_t& code_object_info)
+    {
+        if(is_code_object_info_registered(code_object_info.id))
+        {
+            LOG_WARNING("Code object already registered: id: {}", code_object_info.id);
+            return;
+        }
+
+        if(!is_node_registered(code_object_info.node_id))
+        {
+            throw std::runtime_error(
+                fmt::format("Node not registered for Code Object Info: node_id: {}",
+                            code_object_info.node_id));
+        }
+
+        const auto agent_foreign_key = get_agent_primary_key(code_object_info.agent_id);
+
+        m_insert_statements->code_object_info_statement()(code_object_info.id,
+                                                          code_object_info.node_id,
+                                                          code_object_info.process_id,
+                                                          agent_foreign_key,
+                                                          code_object_info.uri,
+                                                          code_object_info.ld_base,
+                                                          code_object_info.ld_size,
+                                                          code_object_info.ld_delta,
+                                                          code_object_info.storage_type,
+                                                          code_object_info.extdata);
+
+        m_data_identifiers->m_code_object_info_id_set.insert(code_object_info.id);
+    }
+
+    void register_kernel_symbol_info(
+        const writer_api::kernel_symbol_info_t& kernel_symbol_info)
+    {
+        if(is_kernel_symbol_info_registered(kernel_symbol_info.id))
+        {
+            LOG_WARNING("Kernel symbol already registered: id: {}",
+                        kernel_symbol_info.id);
+            return;
+        }
+
+        if(!is_node_registered(kernel_symbol_info.node_id))
+        {
+            throw std::runtime_error(
+                fmt::format("Node not registered for Kernel Symbol Info: node_id: {}",
+                            kernel_symbol_info.node_id));
+        }
+
+        if(!is_process_registered(kernel_symbol_info.process_id))
+        {
+            throw std::runtime_error(
+                fmt::format("Process not registered for Kernel Symbol Info: pid: {}",
+                            kernel_symbol_info.process_id));
+        }
+
+        const auto process_primary_key =
+            m_data_identifiers->m_process_info_id_map.at(kernel_symbol_info.process_id);
+
+        if(!is_code_object_info_registered(kernel_symbol_info.code_obj_id))
+        {
+            throw std::runtime_error(fmt::format(
+                "Code object not registered for Kernel Symbol Info: code_obj_id: {}",
+                kernel_symbol_info.code_obj_id));
+        }
+
+        m_insert_statements->kernel_symbol_info_statement()(
+            kernel_symbol_info.id,
+            kernel_symbol_info.node_id,
+            process_primary_key,
+            kernel_symbol_info.code_obj_id,
+            kernel_symbol_info.name,
+            kernel_symbol_info.display_name,
+            kernel_symbol_info.kernel_obj,
+            kernel_symbol_info.kernarg_segmnt_size,
+            kernel_symbol_info.kernarg_segment_alignment,
+            kernel_symbol_info.group_segment_size,
+            kernel_symbol_info.private_segment_size,
+            kernel_symbol_info.sgrp_count,
+            kernel_symbol_info.arch_vgrp_count,
+            kernel_symbol_info.accum_vgrp_count,
+            kernel_symbol_info.extdata);
+
+        m_data_identifiers->m_kernel_symbol_info_id_set.emplace(kernel_symbol_info.id);
+    }
+
+    void register_track_info(const writer_api::track_info_t& track)
+    {
+        if(is_track_info_registered(track))
+        {
+            constexpr auto empty = "NULL";
+
+            const auto process_print_value =
+                track.process_id.has_value() ? std::to_string(track.process_id.value())
+                                             : empty;
+            const auto thread_print_value = track.thread_id.has_value()
+                                                ? std::to_string(track.thread_id.value())
+                                                : empty;
+            const auto name_print_value =
+                track.name.has_value() ? track.name.value() : empty;
+
+            LOG_WARNING("Track already registered: node_id: {}, process_id: {}, "
+                        "thread_id: {}, name: {}",
+                        track.node_id,
+                        process_id,
+                        thread_id,
+                        name);
+            return;
+        }
+
+        if(!is_node_registered(track.node_id))
+        {
+            throw std::runtime_error(fmt::format(
+                "Node not registered for Track Info: node_id: {}", track.node_id));
+        }
+
+        if(track.process_id.has_value() &&
+           !is_process_registered(track.process_id.value()))
+        {
+            throw std::runtime_error(
+                fmt::format("Process not registered for Track Info: pid: {}",
+                            track.process_id.value()));
+        }
+
+        std::optional<primary_key> process_primary_key = std::nullopt;
+        if(track.process_id.has_value())
+        {
+            process_primary_key =
+                m_data_identifiers->m_process_info_id_map.at(track.process_id.value());
+        }
+
+        if(track.thread_id.has_value() &&
+           !is_thread_info_registered(track.thread_id.value()))
+        {
+            throw std::runtime_error(
+                fmt::format("Thread not registered for Track Info: thread_id: {}",
+                            track.thread_id.value()));
+        }
+
+        std::optional<primary_key> thread_primary_key = std::nullopt;
+        if(track.thread_id.has_value())
+        {
+            thread_primary_key =
+                m_data_identifiers->m_thread_info_id_map.at(track.thread_id.value());
+        }
+
+        std::optional<primary_key> string_primary_key = std::nullopt;
+        if(track.name.has_value())
+        {
+            if(!is_string_registered(track.name.value()))
+            {
+                register_string(track.name.value());
+            }
+
+            string_primary_key =
+                m_data_identifiers->m_string_info_id_map.at(track.name.value());
+        }
+
+        const auto primary_key =
+            m_data_identifiers->m_track_info_primary_key_provider.get_primary_key_value();
+
+        m_insert_statements->track_info_statement()(primary_key,
+                                                    track.node_id,
+                                                    process_primary_key,
+                                                    thread_primary_key,
+                                                    string_primary_key,
+                                                    track.extdata);
+
+        m_data_identifiers->m_track_info_id_map.emplace(track, primary_key);
+    }
+
+    void register_string(const char* str)
+    {
+        if(str == nullptr)
+        {
+            throw std::runtime_error("Trying to register string that is null");
+        }
+
+        if(is_string_registered(str))
+        {
+            LOG_WARNING("String already registered: str: {}", str);
+            return;
+        }
+
+        const auto primary_key = m_data_identifiers->m_string_info_primary_key_provider
+                                     .get_primary_key_value();
+        m_insert_statements->string_statement()(primary_key, str);
+        m_data_identifiers->m_string_info_id_map.emplace(str, primary_key);
+    }
+
+    // --------------------- Data Tables ---------------------
+
+private:
+    primary_key insert_event(const writer_api::event_data_t& event_data)
+    {
+        auto json_call_stack_serializer = [](const writer_api::call_stack_t& call_stack) {
+            return "{}";
+        };
+
+        auto json_line_info_serializer =
+            [](const writer_api::source_context_list_t& line_info_list) { return "{}"; };
+
+        if(!is_string_registered(event_data.event_category))
+        {
+            register_string(event_data.event_category);
+        }
+
+        const auto event_category_primary_key =
+            m_data_identifiers->m_string_info_id_map.at(event_data.event_category);
+        const auto primary_key =
+            m_data_identifiers->m_event_info_primary_key_provider.get_primary_key_value();
+
+        m_insert_statements->event_statement()(
+            primary_key,
+            event_category_primary_key,
+            event_data.stack_id,
+            event_data.parent_stack_id,
+            event_data.correlation_id,
+            json_call_stack_serializer(event_data.call_stack),
+            json_line_info_serializer(event_data.line_info_list),
+            event_data.extdata);
+
+        return primary_key;
+    }
+
+    void insert_sample(const writer_api::sample_data_t& sample_data) {}
+
+    inline void insert_arg(const writer_api::arg_data_t& arg_data, primary_key event_id)
+    {
+        if(arg_data.type == nullptr || arg_data.name == nullptr)
+        {
+            throw std::runtime_error(
+                fmt::format("Type or name is null for Arg Data: type: {}, name: {}",
+                            arg_data.type,
+                            arg_data.name));
+        }
+
+        if(!is_string_registered(arg_data.type))
+        {
+            register_string(arg_data.type);
+            auto primary_key =
+                m_data_identifiers->m_arg_primary_key_provider.get_primary_key_value();
+            m_insert_statements->arg_statement()(primary_key,
+                                                 event_id,
+                                                 arg_data.position,
+                                                 arg_data.type,
+                                                 arg_data.name,
+                                                 arg_data.value,
+                                                 arg_data.extdata);
+        }
+    }
+
+public:
+    void insert_region_data(const writer_api::region_data_t&       region_data,
+                            const writer_api::trace_environment_t& trace_environment)
+
+    {
+        if(!trace_environment.node_id.has_value() ||
+           !is_node_registered(trace_environment.node_id.value()))
+        {
+            const std::string node_id_str =
+                trace_environment.node_id.has_value()
+                    ? std::to_string(trace_environment.node_id.value())
+                    : "[NULL]";
+            throw std::runtime_error(fmt::format(
+                "Node not registered for Region Data: node_id: {}", node_id_str));
+        }
+
+        if(!trace_environment.process_id.has_value() ||
+           !is_process_registered(trace_environment.process_id.value()))
+        {
+            const std::string process_id_str =
+                trace_environment.process_id.has_value()
+                    ? std::to_string(trace_environment.process_id.value())
+                    : "[NULL]";
+            throw std::runtime_error(fmt::format(
+                "Process not registered for Region Data: pid: {}", process_id_str));
+        }
+
+        const auto process_primary_key = m_data_identifiers->m_process_info_id_map.at(
+            trace_environment.process_id.value());
+
+        if(!trace_environment.thread_id.has_value() ||
+           !is_thread_info_registered(trace_environment.thread_id.value()))
+        {
+            const std::string thread_id_str =
+                trace_environment.thread_id.has_value()
+                    ? std::to_string(trace_environment.thread_id.value())
+                    : "[NULL]";
+            throw std::runtime_error(fmt::format(
+                "Thread not registered for Region Data: thread_id: {}", thread_id_str));
+        }
+
+        const auto thread_primary_key = m_data_identifiers->m_thread_info_id_map.at(
+            trace_environment.thread_id.value());
+
+        if(region_data.event.has_value() && !region_data.args.empty())
+        {
+            throw std::runtime_error(fmt::format(
+                "Writing args require providing event data for correlation: name: {}",
+                region_data.name));
+        }
+
+        // ----------------------------------------------------------------
+
+        if(!is_string_registered(region_data.name))
+        {
+            register_string(region_data.name);
+        }
+
+        const auto region_name_primary_key =
+            m_data_identifiers->m_string_info_id_map.at(region_data.name);
+
+        std::optional<primary_key> event_primary_key = std::nullopt;
+        if(region_data.event.has_value())
+        {
+            event_primary_key = insert_event(region_data.event.value());
+        }
+
+        const auto primary_key = m_data_identifiers->m_region_info_primary_key_provider
+                                     .get_primary_key_value();
+        m_insert_statements->region_statement()(primary_key,
+                                                trace_environment.node_id.value(),
+                                                process_primary_key,
+                                                thread_primary_key,
+                                                region_data.start_timestamp,
+                                                region_data.end_timestamp,
+                                                region_name_primary_key,
+                                                event_primary_key,
+                                                region_data.extdata);
+
+        // Event should not be empty when writing args
+        for(const auto& arg : region_data.args)
+        {
+            insert_arg(arg, event_primary_key.value());
+        }
+
+        if(trace_environment.track_name.has_value())
+        {
+            const writer_api::track_info_t track_info = {
+                trace_environment.track_name.value(),
+                nullptr,
+                trace_environment.node_id.value(),
+                trace_environment.process_id.value(),
+                trace_environment.thread_id.value()
+            };
+
+            if(is_track_info_registered(track_info))
+            {
+                const writer_api::sample_data_t sample_data = {
+                    region_data.start_timestamp, track_info, nullptr
+                };
+                insert_sample(sample_data);
+            }
+        }
+    }
+
+    void insert_pmc_event_data(const writer_api::pmc_event_data_t&     pmc_event_data,
+                               const writer_api::pmc_info_unique_id_t& pmc_unique_id)
+    {
+        if(!is_pmc_info_registered(pmc_unique_id))
+        {
+            throw std::runtime_error(
+                fmt::format("PMC Info not registered for PMC Event Data: pmc_name: {}",
+                            pmc_unique_id.name));
+        }
+
+        const auto pmc_info_primary_key =
+            m_data_identifiers->m_pmc_info_id_map.at(pmc_unique_id);
+
+        std::optional<primary_key> event_primary_key = std::nullopt;
+        if(pmc_event_data.event.has_value())
+        {
+            event_primary_key = insert_event(pmc_event_data.event.value());
+        }
+
+        const auto primary_key = m_data_identifiers->m_pmc_event_info_primary_key_provider
+                                     .get_primary_key_value();
+        m_insert_statements->pmc_event_statement()(primary_key,
+                                                   event_primary_key,
+                                                   pmc_info_primary_key,
+                                                   pmc_event_data.value,
+                                                   pmc_event_data.extdata);
+    }
+
+    void insert_kernel_dispatch_data(
+        const writer_api::kernel_dispatch_data_t& kernel_dispatch_data,
+        const writer_api::trace_environment_t&    trace_environment)
+    {
+        if(!trace_environment.node_id.has_value() ||
+           !is_node_registered(trace_environment.node_id.value()))
+        {
+            const std::string node_id_str =
+                trace_environment.node_id.has_value()
+                    ? std::to_string(trace_environment.node_id.value())
+                    : "[NULL]";
+            throw std::runtime_error(
+                fmt::format("Node not registered for Kernel Dispatch Data: node_id: {}",
+                            node_id_str));
+        }
+
+        if(!trace_environment.process_id.has_value() ||
+           !is_process_registered(trace_environment.process_id.value()))
+        {
+            const std::string process_id_str =
+                trace_environment.process_id.has_value()
+                    ? std::to_string(trace_environment.process_id.value())
+                    : "[NULL]";
+            throw std::runtime_error(
+                fmt::format("Process not registered for Kernel Dispatch Data: pid: {}",
+                            process_id_str));
+        }
+
+        const auto process_primary_key = m_data_identifiers->m_process_info_id_map.at(
+            trace_environment.process_id.value());
+
+        if(!trace_environment.thread_id.has_value() ||
+           !is_thread_info_registered(trace_environment.thread_id.value()))
+        {
+            const std::string thread_id_str =
+                trace_environment.thread_id.has_value()
+                    ? std::to_string(trace_environment.thread_id.value())
+                    : "[NULL]";
+            throw std::runtime_error(fmt::format(
+                "Thread not registered for Kernel Dispatch Data: thread_id: {}",
+                thread_id_str));
+        }
+
+        std::optional<primary_key> thread_primary_key{ std::nullopt };
+        if(trace_environment.thread_id.has_value())
+        {
+            thread_primary_key = m_data_identifiers->m_thread_info_id_map.at(
+                trace_environment.thread_id.value());
+        }
+
+        if(!trace_environment.agent_id.has_value() ||
+           !is_agent_registered(trace_environment.agent_id.value()))
+        {
+            const std::string agent_id_str =
+                trace_environment.agent_id.has_value()
+                    ? fmt::format("[agent_type={}, type_index={}]",
+                                  trace_environment.agent_id->agent_type,
+                                  trace_environment.agent_id->type_index)
+                    : "[NULL]";
+
+            throw std::runtime_error(
+                fmt::format("Agent not registered for Kernel Dispatch Data: agent_id: {}",
+                            agent_id_str));
+        }
+
+        const auto agent_primary_key =
+            m_data_identifiers->m_agent_id_map.at(trace_environment.agent_id.value());
+
+        if(!trace_environment.queue_id.has_value() ||
+           !is_queue_info_registered(trace_environment.queue_id.value()))
+        {
+            const std::string queue_id_str =
+                trace_environment.queue_id.has_value()
+                    ? std::to_string(trace_environment.queue_id.value())
+                    : "[NULL]";
+            throw std::runtime_error(
+                fmt::format("Queue not registered for Kernel Dispatch Data: queue_id: {}",
+                            queue_id_str));
+        }
+
+        const auto queue_primary_key = m_data_identifiers->m_queue_info_id_map.at(
+            trace_environment.queue_id.value());
+
+        if(!trace_environment.stream_id.has_value() ||
+           !is_stream_info_registered(trace_environment.stream_id.value()))
+        {
+            const std::string stream_id_str =
+                trace_environment.stream_id.has_value()
+                    ? std::to_string(trace_environment.stream_id.value())
+                    : "[NULL]";
+            throw std::runtime_error(fmt::format(
+                "Stream not registered for Kernel Dispatch Data: stream_id: {}",
+                stream_id_str));
+        }
+
+        const auto stream_primary_key = m_data_identifiers->m_stream_info_id_map.at(
+            trace_environment.stream_id.value());
+
+        if(!is_kernel_symbol_info_registered(kernel_dispatch_data.kernel_symbol_id))
+        {
+            throw std::runtime_error(
+                fmt::format("Kernel symbol not registered for Kernel Dispatch Data: "
+                            "kernel_id: {}",
+                            kernel_dispatch_data.kernel_symbol_id));
+        }
+
+        // ----------------------------------------------------------------
+
+        if(!is_string_registered(kernel_dispatch_data.name))
+        {
+            register_string(kernel_dispatch_data.name);
+        }
+
+        const auto kernel_name_primary_key =
+            m_data_identifiers->m_string_info_id_map.at(kernel_dispatch_data.name);
+
+        std::optional<primary_key> event_primary_key = std::nullopt;
+        if(kernel_dispatch_data.event.has_value())
+        {
+            event_primary_key = insert_event(kernel_dispatch_data.event.value());
+        }
+
+        const auto primary_key =
+            m_data_identifiers->m_kernel_dispatch_info_primary_key_provider
+                .get_primary_key_value();
+
+        m_insert_statements->kernel_dispatch_statement()(
+            primary_key,
+            trace_environment.node_id.value(),
+            process_primary_key,
+            thread_primary_key,
+            agent_primary_key,
+            kernel_dispatch_data.kernel_symbol_id,
+            kernel_dispatch_data.dispatch_id,
+            queue_primary_key,
+            stream_primary_key,
+            kernel_dispatch_data.start_timestamp,
+            kernel_dispatch_data.end_timestamp,
+            kernel_dispatch_data.private_segment_size,
+            kernel_dispatch_data.group_segment_size,
+            kernel_dispatch_data.workgroup_size_x,
+            kernel_dispatch_data.workgroup_size_y,
+            kernel_dispatch_data.workgroup_size_z,
+            kernel_dispatch_data.grid_size_x,
+            kernel_dispatch_data.grid_size_y,
+            kernel_dispatch_data.grid_size_z,
+            kernel_name_primary_key,
+            event_primary_key,
+            kernel_dispatch_data.extdata);
+    }
+
+    void insert_memory_copy_data(const writer_api::memory_copy_data_t&  memory_copy_data,
+                                 const writer_api::trace_environment_t& trace_environment)
+    {
+        // TODO: Clean up if/else statements for all inserts
+
+        // Node
+        if(!trace_environment.node_id.has_value() ||
+           !is_node_registered(trace_environment.node_id.value()))
+        {
+            const std::string node_id_str =
+                trace_environment.node_id.has_value()
+                    ? std::to_string(trace_environment.node_id.value())
+                    : "[NULL]";
+            throw std::runtime_error(fmt::format(
+                "Node not provided or not registered for Memory Copy Data: node_id: {}",
+                node_id_str));
+        }
+
+        // process
+        if(!trace_environment.process_id.has_value() ||
+           !is_process_registered(trace_environment.process_id.value()))
+        {
+            const std::string process_id_str =
+                trace_environment.process_id.has_value()
+                    ? std::to_string(trace_environment.process_id.value())
+                    : "[NULL]";
+            throw std::runtime_error(fmt::format(
+                "Process not provided or not registered for Memory Copy Data: pid: {}",
+                process_id_str));
+        }
+
+        const auto process_primary_key = m_data_identifiers->m_process_info_id_map.at(
+            trace_environment.process_id.value());
+
+        // thread
+        if(trace_environment.thread_id.has_value() &&
+           !is_thread_info_registered(trace_environment.thread_id.value()))
+        {
+            throw std::runtime_error(
+                fmt::format("Thread not registered for Memory Copy Data: thread_id: {}",
+                            std::to_string(trace_environment.thread_id.value())));
+        }
+
+        std::optional<primary_key> thread_primary_key = std::nullopt;
+        if(trace_environment.thread_id.has_value())
+        {
+            thread_primary_key = m_data_identifiers->m_thread_info_id_map.at(
+                trace_environment.thread_id.value());
+        }
+
+        // src agent
+        if(memory_copy_data.src_agent_id.has_value() &&
+           !is_agent_registered(memory_copy_data.src_agent_id.value()))
+        {
+            throw std::runtime_error(
+                fmt::format("Source agent not registered for Memory Copy Data: agent_id "
+                            "[agent_type={}, type_index={}]",
+                            memory_copy_data.src_agent_id->agent_type,
+                            memory_copy_data.src_agent_id->type_index));
+        }
+
+        std::optional<primary_key> src_agent_primary_key = std::nullopt;
+        if(memory_copy_data.src_agent_id.has_value())
+        {
+            src_agent_primary_key = m_data_identifiers->m_agent_id_map.at(
+                memory_copy_data.src_agent_id.value());
+        }
+
+        // dst agent
+        if(memory_copy_data.dst_agent_id.has_value() &&
+           !is_agent_registered(memory_copy_data.dst_agent_id.value()))
+        {
+            throw std::runtime_error(
+                fmt::format("Destination agent not registered for Memory Copy Data: "
+                            "agent_id [agent_type={}, type_index={}]",
+                            memory_copy_data.dst_agent_id->agent_type,
+                            memory_copy_data.dst_agent_id->type_index));
+        }
+
+        std::optional<primary_key> dst_agent_primary_key = std::nullopt;
+        if(memory_copy_data.dst_agent_id.has_value())
+        {
+            dst_agent_primary_key = m_data_identifiers->m_agent_id_map.at(
+                memory_copy_data.dst_agent_id.value());
+        }
+
+        // queue
+        if(trace_environment.queue_id.has_value() &&
+           !is_queue_info_registered(trace_environment.queue_id.value()))
+        {
+            throw std::runtime_error(
+                fmt::format("Queue not registered for Memory Copy Data: queue_id: {}",
+                            trace_environment.queue_id.value()));
+        }
+
+        std::optional<primary_key> queue_primary_key = std::nullopt;
+        if(trace_environment.queue_id.has_value())
+        {
+            queue_primary_key = m_data_identifiers->m_queue_info_id_map.at(
+                trace_environment.queue_id.value());
+        }
+
+        // stream
+        if(trace_environment.stream_id.has_value() &&
+           !is_stream_info_registered(trace_environment.stream_id.value()))
+        {
+            throw std::runtime_error(
+                fmt::format("Stream not registered for Memory Copy Data: stream_id: {}",
+                            trace_environment.stream_id.value()));
+        }
+
+        std::optional<primary_key> stream_primary_key = std::nullopt;
+        if(trace_environment.stream_id.has_value())
+        {
+            stream_primary_key = m_data_identifiers->m_stream_info_id_map.at(
+                trace_environment.stream_id.value());
+        }
+
+        // ----------------------------------------------------------------
+
+        if(!is_string_registered(memory_copy_data.name))
+        {
+            register_string(memory_copy_data.name);
+        }
+
+        const auto name_primary_key =
+            m_data_identifiers->m_string_info_id_map.at(memory_copy_data.name);
+
+        // event
+        std::optional<primary_key> event_primary_key = std::nullopt;
+        if(memory_copy_data.event.has_value())
+        {
+            event_primary_key = insert_event(memory_copy_data.event.value());
+        }
+
+        std::optional<primary_key> region_name_primary_key = std::nullopt;
+        if(memory_copy_data.region_name != nullptr)
+        {
+            if(!is_string_registered(memory_copy_data.region_name))
+            {
+                register_string(memory_copy_data.region_name);
+            }
+            region_name_primary_key =
+                m_data_identifiers->m_string_info_id_map.at(memory_copy_data.region_name);
+        }
+
+        const auto primary_key =
+            m_data_identifiers->m_memory_copy_info_primary_key_provider
+                .get_primary_key_value();
+
+        m_insert_statements->memory_copy_statement()(primary_key,
+                                                     trace_environment.node_id.value(),
+                                                     process_primary_key,
+                                                     thread_primary_key,
+                                                     memory_copy_data.start_timestamp,
+                                                     memory_copy_data.end_timestamp,
+                                                     name_primary_key,
+                                                     dst_agent_primary_key,
+                                                     memory_copy_data.dst_address,
+                                                     src_agent_primary_key,
+                                                     memory_copy_data.src_address,
+                                                     memory_copy_data.size,
+                                                     queue_primary_key,
+                                                     stream_primary_key,
+                                                     region_name_primary_key,
+                                                     event_primary_key,
+                                                     memory_copy_data.extdata);
+    }
+
+    void insert_memory_alloc_data(
+        const writer_api::memory_alloc_data_t& memory_alloc_data,
+        const writer_api::trace_environment_t& trace_environment)
+    {
+        // Node
+        if(!trace_environment.node_id.has_value() ||
+           !is_node_registered(trace_environment.node_id.value()))
+        {
+            const std::string node_id_str =
+                trace_environment.node_id.has_value()
+                    ? std::to_string(trace_environment.node_id.value())
+                    : "[NULL]";
+            throw std::runtime_error(fmt::format(
+                "Node not provided or not registered for Memory Alloc Data: node_id: {}",
+                node_id_str));
+        }
+
+        // process
+        if(!trace_environment.process_id.has_value() ||
+           !is_process_registered(trace_environment.process_id.value()))
+        {
+            const std::string process_id_str =
+                trace_environment.process_id.has_value()
+                    ? std::to_string(trace_environment.process_id.value())
+                    : "[NULL]";
+            throw std::runtime_error(fmt::format(
+                "Process not provided or not registered for Memory Alloc Data: pid: {}",
+                process_id_str));
+        }
+
+        const auto process_primary_key = m_data_identifiers->m_process_info_id_map.at(
+            trace_environment.process_id.value());
+
+        // thread
+        if(trace_environment.thread_id.has_value() &&
+           !is_thread_info_registered(trace_environment.thread_id.value()))
+        {
+            throw std::runtime_error(
+                fmt::format("Thread not registered for Memory Alloc Data: thread_id: {}",
+                            std::to_string(trace_environment.thread_id.value())));
+        }
+
+        std::optional<primary_key> thread_primary_key = std::nullopt;
+        if(trace_environment.thread_id.has_value())
+        {
+            thread_primary_key = m_data_identifiers->m_thread_info_id_map.at(
+                trace_environment.thread_id.value());
+        }
+
+        // agent
+        if(trace_environment.agent_id.has_value() &&
+           !is_agent_registered(trace_environment.agent_id.value()))
+        {
+            throw std::runtime_error(
+                fmt::format("Agent not registered for Memory Alloc Data: agent_id "
+                            "[agent_type={}, type_index={}]",
+                            trace_environment.agent_id->agent_type,
+                            trace_environment.agent_id->type_index));
+        }
+
+        std::optional<primary_key> agent_primary_key = std::nullopt;
+        if(trace_environment.agent_id.has_value())
+        {
+            agent_primary_key =
+                m_data_identifiers->m_agent_id_map.at(trace_environment.agent_id.value());
+        }
+
+        // queue
+        if(trace_environment.queue_id.has_value() &&
+           !is_queue_info_registered(trace_environment.queue_id.value()))
+        {
+            throw std::runtime_error(
+                fmt::format("Queue not registered for Memory Alloc Data: queue_id: {}",
+                            trace_environment.queue_id.value()));
+        }
+
+        std::optional<primary_key> queue_primary_key = std::nullopt;
+        if(trace_environment.queue_id.has_value())
+        {
+            queue_primary_key = m_data_identifiers->m_queue_info_id_map.at(
+                trace_environment.queue_id.value());
+        }
+
+        // stream
+        if(trace_environment.stream_id.has_value() &&
+           !is_stream_info_registered(trace_environment.stream_id.value()))
+        {
+            throw std::runtime_error(
+                fmt::format("Stream not registered for Memory Alloc Data: stream_id: {}",
+                            trace_environment.stream_id.value()));
+        }
+
+        std::optional<primary_key> stream_primary_key = std::nullopt;
+        if(trace_environment.stream_id.has_value())
+        {
+            stream_primary_key = m_data_identifiers->m_stream_info_id_map.at(
+                trace_environment.stream_id.value());
+        }
+
+        // -----------------------------------------------------------------------
+
+        std::optional<primary_key> event_primary_key = std::nullopt;
+        if(memory_alloc_data.event.has_value())
+        {
+            event_primary_key = insert_event(memory_alloc_data.event.value());
+        }
+
+        if(memory_alloc_data.type != nullptr)
+        {
+            const std::string_view                    type_value = memory_alloc_data.type;
+            constexpr std::array<std::string_view, 4> allowed_type_values = {
+                "ALLOC", "FREE", "REALLOC", "RECLAIM"
+            };
+
+            const auto is_value_allowed =
+                std::find(allowed_type_values.begin(),
+                          allowed_type_values.end(),
+                          type_value) != allowed_type_values.end();
+
+            if(!is_value_allowed)
+            {
+                throw std::runtime_error(
+                    fmt::format("Invalid type value for Memory Alloc Data: type: {}. "
+                                "Allowed values: {}",
+                                type_value,
+                                allowed_type_values));
+            }
+        }
+
+        if(memory_alloc_data.level != nullptr)
+        {
+            const std::string_view level_value = memory_alloc_data.level;
+            constexpr std::array<std::string_view, 3> allowed_level_values = {
+                "REAL", "VIRTUAL", "SCRATCH"
+            };
+            const auto is_value_allowed =
+                std::find(allowed_level_values.begin(),
+                          allowed_level_values.end(),
+                          level_value) != allowed_level_values.end();
+
+            if(!is_value_allowed)
+            {
+                throw std::runtime_error(
+                    fmt::format("Invalid level value for Memory Alloc Data: level: {}. "
+                                "Allowed values: {}",
+                                level_value,
+                                allowed_level_values));
+            }
+        }
+
+        const auto primary_key =
+            m_data_identifiers->m_memory_alloc_info_primary_key_provider
+                .get_primary_key_value();
+
+        m_insert_statements->memory_alloc_statement()(primary_key,
+                                                      trace_environment.node_id.value(),
+                                                      process_primary_key,
+                                                      thread_primary_key,
+                                                      agent_primary_key,
+                                                      memory_alloc_data.type,
+                                                      memory_alloc_data.level,
+                                                      memory_alloc_data.start_timestamp,
+                                                      memory_alloc_data.end_timestamp,
+                                                      memory_alloc_data.address,
+                                                      memory_alloc_data.size,
+                                                      queue_primary_key,
+                                                      stream_primary_key,
+                                                      event_primary_key,
+                                                      memory_alloc_data.extdata);
+    }
+
+    void flush_in_memory_data_to_disk() { m_database->flush(); }
+
+    std::shared_ptr<data_storage::database>                     m_database;
+    std::string                                                 m_uuid;
+    std::unique_ptr<data_storage::schema_v3::insert_statements> m_insert_statements;
+    std::unique_ptr<data_identifiers>                           m_data_identifiers;
 };
 
 // ----------------------- PUBLIC API -------------------------
 
-writer::writer(std::shared_ptr<data_storage::database> database,
-               std::string uuid)
-    : m_impl(std::make_unique<impl>(std::move(database), std::move(uuid))) {}
+writer::writer(std::shared_ptr<data_storage::database> database, std::string uuid)
+: m_impl(std::make_unique<impl>(std::move(database), std::move(uuid)))
+{}
 
 writer::~writer() = default;
 
-size_t writer::insert_string(const char *str) {
-  return m_impl->insert_string(str);
+void
+writer::register_node_info(const writer_api::node_info_t& node_info)
+{
+    m_impl->register_node_info(node_info);
 }
 
-void writer::insert_node_info(size_t node_id, size_t hash,
-                              const char *machine_id, const char *system_name,
-                              const char *hostname, const char *release,
-                              const char *version, const char *hardware_name,
-                              const char *domain_name) {
-  m_impl->insert_node_info(node_id, hash, machine_id, system_name, hostname,
-                           release, version, hardware_name, domain_name);
+void
+writer::register_process_info(const writer_api::process_info_t& process_info)
+{
+    m_impl->register_process_info(process_info);
 }
 
-void writer::insert_process_info(size_t node_id, size_t ppid, size_t pid,
-                                 size_t init, size_t fini, size_t start,
-                                 size_t end, const char *command,
-                                 const char *environment, const char *extdata) {
-  m_impl->insert_process_info(node_id, ppid, pid, init, fini, start, end,
-                              command, environment, extdata);
+void
+writer::register_agent_info(const writer_api::agent_info_t& agent)
+{
+    m_impl->register_agent_info(agent);
 }
 
-size_t writer::insert_agent(size_t node_id, size_t pid, const char *agent_type,
-                            size_t absolute_index, size_t logical_index,
-                            size_t type_index, uint64_t uuid, const char *name,
-                            const char *model_name, const char *vendor_name,
-                            const char *product_name, const char *user_name,
-                            const char *extdata) {
-  return m_impl->insert_agent(node_id, pid, agent_type, absolute_index,
-                              logical_index, type_index, uuid, name, model_name,
-                              vendor_name, product_name, user_name, extdata);
+void
+writer::register_pmc_info(const writer_api::pmc_info_t& pmc_info)
+{
+    m_impl->register_pmc_info(pmc_info);
 }
 
-void writer::insert_track(const char *track_name, size_t node_id,
-                          size_t process_id, std::optional<size_t> thread_id,
-                          const char *extdata) {
-  m_impl->insert_track(track_name, node_id, process_id, thread_id, extdata);
+void
+writer::register_thread_info(const writer_api::thread_info_t& thread_info)
+{
+    m_impl->register_thread_info(thread_info);
 }
 
-void writer::insert_pmc_description(
-    size_t node_id, size_t process_id, size_t agent_id, const char *target_arch,
-    size_t event_code, size_t instance_id, const char *name, const char *symbol,
-    const char *description, const char *long_description,
-    const char *component, const char *units, const char *value_type,
-    const char *block, const char *expression, uint32_t is_constant,
-    uint32_t is_derived, const char *extdata) {
-  m_impl->insert_pmc_description(
-      node_id, process_id, agent_id, target_arch, event_code, instance_id, name,
-      symbol, description, long_description, component, units, value_type,
-      block, expression, is_constant, is_derived, extdata);
+void
+writer::register_stream_info(const writer_api::stream_info_t& stream_info)
+{
+    m_impl->register_stream_info(stream_info);
 }
 
-void writer::insert_pmc_event(size_t event_id, size_t agent_id,
-                              const char *pmc_name, double value,
-                              const char *extdata) {
-  m_impl->insert_pmc_event(event_id, agent_id, pmc_name, value, extdata);
+void
+writer::register_queue_info(const writer_api::queue_info_t& queue_info)
+{
+    m_impl->register_queue_info(queue_info);
 }
 
-void writer::insert_sample(const char *track, uint64_t timestamp,
-                           size_t event_id, const char *extdata) {
-  m_impl->insert_sample(track, timestamp, event_id, extdata);
+void
+writer::register_code_object_info(const writer_api::code_object_info_t& code_object)
+{
+    m_impl->regsiter_code_object_info(code_object);
 }
 
-size_t writer::insert_event(size_t string_primary_key, size_t stack_id,
-                            size_t parent_stack_id, size_t correlation_id,
-                            const char *call_stack, const char *line_info,
-                            const char *extdata) {
-  return m_impl->insert_event(string_primary_key, stack_id, parent_stack_id,
-                              correlation_id, call_stack, line_info, extdata);
+void
+writer::register_kernel_symbol_info(const writer_api::kernel_symbol_info_t& kernel_symbol)
+{
+    m_impl->register_kernel_symbol_info(kernel_symbol);
 }
 
-void writer::insert_args(size_t event_id, size_t position, const char *type,
-                         const char *name, const char *value,
-                         const char *extdata) {
-  m_impl->insert_args(event_id, position, type, name, value, extdata);
+void
+writer::register_track_info(const writer_api::track_info_t& track)
+{
+    m_impl->register_track_info(track);
 }
 
-void writer::insert_stream_info(size_t stream_id, size_t node_id,
-                                size_t process_id, const char *name,
-                                const char *extdata) {
-  m_impl->insert_stream_info(stream_id, node_id, process_id, name, extdata);
+void
+writer::register_string(const char* str)
+{
+    m_impl->register_string(str);
 }
 
-void writer::insert_queue_info(size_t queue_id, size_t node_id,
-                               size_t process_id, const char *name,
-                               const char *extdata) {
-  m_impl->insert_queue_info(queue_id, node_id, process_id, name, extdata);
+void
+writer::insert_region_data(const writer_api::region_data_t&       region_data,
+                           const writer_api::trace_environment_t& trace_environment)
+{
+    m_impl->insert_region_data(region_data, trace_environment);
 }
 
-void writer::insert_code_object(size_t id, size_t node_id, size_t process_id,
-                                size_t agent_id, const char *uri,
-                                uint64_t ld_base, uint64_t ld_size,
-                                uint64_t ld_delta, const char *storage_type,
-                                const char *extdata) {
-  m_impl->insert_code_object(id, node_id, process_id, agent_id, uri, ld_base,
-                             ld_size, ld_delta, storage_type, extdata);
+void
+writer::insert_pmc_event_data(const writer_api::pmc_event_data_t&     pmc_event_data,
+                              const writer_api::pmc_info_unique_id_t& pmc_unique_id)
+{
+    m_impl->insert_pmc_event_data(pmc_event_data, pmc_unique_id);
 }
 
-void writer::insert_kernel_symbol(
-    size_t id, size_t node_id, size_t process_id, uint64_t code_obj_id,
-    const char *name, const char *display_name, uint32_t kernel_obj,
-    uint32_t kernarg_segmnt_size, uint32_t kernarg_segment_alignment,
-    uint32_t group_segment_size, uint32_t private_segment_size,
-    uint32_t sgrp_count, uint32_t arch_vgrp_count, uint32_t accum_vgrp_count,
-    const char *extdata) {
-  m_impl->insert_kernel_symbol(id, node_id, process_id, code_obj_id, name,
-                               display_name, kernel_obj, kernarg_segmnt_size,
-                               kernarg_segment_alignment, group_segment_size,
-                               private_segment_size, sgrp_count,
-                               arch_vgrp_count, accum_vgrp_count, extdata);
+void
+writer::insert_kernel_dispatch_data(
+    const writer_api::kernel_dispatch_data_t& kernel_dispatch_data,
+    const writer_api::trace_environment_t&    trace_environment)
+{
+    m_impl->insert_kernel_dispatch_data(kernel_dispatch_data, trace_environment);
 }
 
-void writer::insert_region(size_t node_id, size_t process_id, size_t thread_id,
-                           uint64_t start, uint64_t end, size_t name_id,
-                           size_t event_id, const char *extdata) {
-  m_impl->insert_region(node_id, process_id, thread_id, start, end, name_id,
-                        event_id, extdata);
+void
+writer::insert_memory_copy_data(const writer_api::memory_copy_data_t&  memory_copy_data,
+                                const writer_api::trace_environment_t& trace_environment)
+{
+    m_impl->insert_memory_copy_data(memory_copy_data, trace_environment);
 }
 
-void writer::insert_kernel_dispatch(
-    size_t node_id, size_t process_id, size_t thread_id, size_t agent_id,
-    size_t kernel_id, size_t dispatch_id, size_t queue_id, size_t stream_id,
-    uint64_t start, uint64_t end, size_t private_segment_size,
-    size_t group_segment_size, size_t workgroup_size_x, size_t workgroup_size_y,
-    size_t workgroup_size_z, size_t grid_size_x, size_t grid_size_y,
-    size_t grid_size_z, size_t region_name_id, size_t event_id,
-    const char *extdata) {
-  m_impl->insert_kernel_dispatch(
-      node_id, process_id, thread_id, agent_id, kernel_id, dispatch_id,
-      queue_id, stream_id, start, end, private_segment_size, group_segment_size,
-      workgroup_size_x, workgroup_size_y, workgroup_size_z, grid_size_x,
-      grid_size_y, grid_size_z, region_name_id, event_id, extdata);
+void
+writer::insert_memory_alloc_data(const writer_api::memory_alloc_data_t& memory_alloc_data,
+                                 const writer_api::trace_environment_t& trace_environment)
+{
+    m_impl->insert_memory_alloc_data(memory_alloc_data, trace_environment);
 }
 
-void writer::insert_memory_copy(size_t node_id, size_t process_id,
-                                size_t thread_id, uint64_t start, uint64_t end,
-                                size_t name_id, size_t dst_agent_id,
-                                size_t dst_addr, size_t src_agent_id,
-                                size_t src_addr, size_t size, size_t queue_id,
-                                size_t stream_id, size_t region_name_id,
-                                size_t event_id, const char *extdata) {
-  m_impl->insert_memory_copy(node_id, process_id, thread_id, start, end,
-                             name_id, dst_agent_id, dst_addr, src_agent_id,
-                             src_addr, size, queue_id, stream_id,
-                             region_name_id, event_id, extdata);
+void
+writer::flush_in_memory_data_to_disk()
+{
+    m_impl->flush_in_memory_data_to_disk();
 }
 
-void writer::insert_memory_alloc(size_t node_id, size_t process_id,
-                                 size_t thread_id,
-                                 std::optional<size_t> agent_id,
-                                 const char *type, const char *level,
-                                 uint64_t start, uint64_t end, size_t address,
-                                 size_t size, size_t queue_id, size_t stream_id,
-                                 size_t event_id, const char *extdata) {
-  m_impl->insert_memory_alloc(node_id, process_id, thread_id, agent_id, type,
-                              level, start, end, address, size, queue_id,
-                              stream_id, event_id, extdata);
-}
-
-size_t writer::insert_thread_info(size_t node_id, size_t parent_process_id,
-                                  size_t process_id, size_t thread_id,
-                                  const char *name, uint64_t start,
-                                  uint64_t end, const char *extdata) {
-  return m_impl->insert_thread_info(node_id, parent_process_id, process_id,
-                                    thread_id, name, start, end, extdata);
-}
-
-size_t writer::map_thread_id_to_primary_key(size_t thread_id) {
-  return m_impl->map_thread_id_to_primary_key(thread_id);
-}
-
-void writer::flush() { m_impl->flush(); }
-
-} // namespace rocstorage
+}  // namespace rocstorage
