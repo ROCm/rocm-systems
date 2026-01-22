@@ -841,6 +841,13 @@ For attachment profiling of running processes:
     )
 
     att_options.add_argument(
+        "--att-perfcounter-target-only",
+        help="(gfx9) Enable performance counters only for the target CU. This heavily reduces bandwidth use.",
+        default=None,
+        type=bool,
+    )
+
+    att_options.add_argument(
         "--att-activity",
         help="(gfx9) Collect HW activity counters. Integer in [1,16] range specifying collection period. Recommended: 8",
         default=None,
@@ -1758,6 +1765,12 @@ def run(app_args, args, **kwargs):
                     args.att_perfcounter_ctrl,
                     overwrite=True,
                 )
+        if args.att_perfcounter_target_only:
+            update_env(
+                "ROCPROF_ATT_PARAM_TARGET_ONLY",
+                1 if args.att_perfcounter_target_only else 0,
+                overwrite=True,
+            )
         if args.att_activity:
             if args.pmc:
                 fatal_error("ATT activity cannot be enabled with PMC")
