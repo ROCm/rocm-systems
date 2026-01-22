@@ -24,11 +24,6 @@
 #include <algorithm>
 #include "lib/common/static_object.hpp"
 
-namespace
-{
-using memory_manager_map_t = std::unordered_map<size_t, std::shared_ptr<MemoryManager>>;
-}
-
 std::atomic<size_t>&
 MemoryManager::get_handle_counter()
 {
@@ -36,18 +31,11 @@ MemoryManager::get_handle_counter()
     return _v;
 }
 
-std::mutex&
-MemoryManager::get_managers_map_mutex()
-{
-    static auto*& _v = rocprofiler::common::static_object<std::mutex>::construct();
-    return *CHECK_NOTNULL(_v);
-}
-
-memory_manager_map_t&
+MemoryManager::memory_manager_synced_map_t*
 MemoryManager::get_managers()
 {
-    static auto*& _v = rocprofiler::common::static_object<memory_manager_map_t>::construct();
-    return *CHECK_NOTNULL(_v);
+    static auto*& _v = rocprofiler::common::static_object<memory_manager_synced_map_t>::construct();
+    return _v;
 }
 
 void
