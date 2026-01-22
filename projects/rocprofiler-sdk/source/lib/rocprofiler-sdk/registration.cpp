@@ -23,6 +23,7 @@
 #define _GNU_SOURCE 1
 
 #include "lib/rocprofiler-sdk/registration.hpp"
+#include "lib/aqlprofile/aqlprofile.hpp"
 #include "lib/aqlprofile/util/hsa_rsrc_factory.h"
 #include "lib/common/dl.hpp"
 #include "lib/common/elf_utils.hpp"

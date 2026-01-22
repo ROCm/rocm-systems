@@ -220,6 +220,25 @@ target_link_libraries(rocprofiler-sdk-dw INTERFACE libdw::libdw)
 
 # ----------------------------------------------------------------------------------------#
 #
+# amd aql
+#
+# ----------------------------------------------------------------------------------------#
+
+if(NOT ROCPROFILER_BUILD_AQLPROFILE)
+    find_library(
+        hsa-amd-aqlprofile64_library
+        NAMES hsa-amd-aqlprofile64 hsa-amd-aqlprofile REQUIRED
+        HINTS ${rocm_version_DIR} ${ROCM_PATH}
+        PATHS ${rocm_version_DIR} ${ROCM_PATH})
+
+    target_compile_definitions(rocprofiler-sdk-aqlprofile-external
+                               INTERFACE ROCPROFILER_EXTERNAL_AQLPROFILE=1)
+    target_link_libraries(rocprofiler-sdk-aqlprofile-external
+                          INTERFACE ${hsa-amd-aqlprofile64_library})
+endif()
+
+# ----------------------------------------------------------------------------------------#
+#
 # HSAKMT
 #
 # ----------------------------------------------------------------------------------------#

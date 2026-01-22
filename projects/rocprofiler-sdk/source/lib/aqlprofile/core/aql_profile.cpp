@@ -43,7 +43,6 @@
 #include <vector>
 #include <mutex>
 
-
 #ifdef _WIN32
 #    define CONSTRUCTOR_API
 #    define DESTRUCTOR_API
