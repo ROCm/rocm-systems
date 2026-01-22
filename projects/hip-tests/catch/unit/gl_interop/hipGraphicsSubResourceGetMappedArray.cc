@@ -106,7 +106,7 @@ TEST_CASE("Unit_hipGraphicsSubResourceGetMappedArray_Negative_Parameters") {
     HIP_CHECK(hipGraphicsUnregisterResource(unregistered_resource));
     HIP_CHECK_ERROR(
         hipGraphicsSubResourceGetMappedArray(&image_devptr, unregistered_resource, 0, 0),
-        hipErrorInvalidHandle);
+        hipErrorInvalidResourceHandle);
   }
 
   SECTION("not mapped resource") {
