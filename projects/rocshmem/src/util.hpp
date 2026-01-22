@@ -172,7 +172,7 @@ static int get_wf_size(int device_id) {
   return device_properties[device_id].warpSize;
 }
 
-static char* get_arch_name(int device_id) {
+static const char* get_arch_name(int device_id) {
   assert(device_properties.size() > device_id);
   return device_properties[device_id].gcnArchName;
 }
