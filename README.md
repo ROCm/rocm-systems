@@ -26,8 +26,8 @@ Enter the following commands to install the installer script for Ubuntu® versio
 
 ```bash
 sudo apt update
-wget https://repo.radeon.com/amdgpu-install/7.1.0/ubuntu/noble/amdgpu-install_7.1.0.xxxxx-1_all.deb
-sudo apt install ./amdgpu-install_7.1.0.xxxxx-1_all.deb
+wget https://repo.radeon.com/amdgpu-install/7.2.0/ubuntu/noble/amdgpu-install_7.2.0.xxxxx-1_all.deb
+sudo apt install ./amdgpu-install_7.2.0.xxxxx-1_all.deb
 ```
 
 #### Install AMD ROCm package
@@ -71,7 +71,7 @@ Expected result:
 /opt/
 ├── [...]
 ├── rocm -> /etc/alternatives/rocm
-├── rocm-7.1.0
+├── rocm-7.2.0
 └── [...]
 ```
 
@@ -135,8 +135,7 @@ See [Installing the all open use case](https://amdgpu-install.readthedocs.io/en/
 
 | AMD Rocdxg Lib Version | AMD ROCm Version | AMD Windows Driver Version | Supported AMD GPU Products |
 | ---------------------- | ---------------- | -------------------------- | -------------------------- |
-| 1.0.0                  | 7.1              | AMD Windows x86 drivers can be directly downloaded from [AMD Driver](https://www.amd.com/en/support/download/drivers.html) | ***Radeon***<br><br>AMD Radeon RX 9070<br>AMD Radeon RX 9070 XT<br>AMD Radeon RX 9070 GRE<br>AMD Radeon AI PRO R9700<br>AMD Radeon RX 9060<br>AMD Radeon RX 9060 XT<br>AMD Radeon RX 7900 XTX<br>AMD Radeon RX 7900 XT<br>AMD Radeon RX 7900 GRE<br>AMD Radeon PRO W7900<br>AMD Radeon PRO W7900 Dual Slot<br>AMD Radeon PRO W7800<br>AMD Radeon PRO W7800 48GB<br>AMD Radeon RX 7800 XT<br>AMD Radeon PRO W7700 |
-| 1.1.0                  | 7.1              | AMD Windows x86 drivers can be directly downloaded from [AMD Driver](https://www.amd.com/en/support/download/drivers.html) | ***Ryzen***<br><br>AMD Ryzen AI Max+ 395<br>AMD Ryzen AI Max 390<br>AMD Ryzen AI Max 385<br>AMD Ryzen AI 9 HX 375<br>AMD Ryzen AI 9 HX 370<br>AMD Ryzen AI 9 365 |
+| 1.1.0                  | 7.2              | AMD Windows x86 drivers can be directly downloaded from [AMD Driver](https://www.amd.com/en/support/download/drivers.html) | ***Radeon***<br><br>AMD Radeon RX 9070<br>AMD Radeon RX 9070 XT<br>AMD Radeon RX 9070 GRE<br>AMD Radeon AI PRO R9700<br>AMD Radeon RX 9060<br>AMD Radeon RX 9060 XT<br>AMD Radeon RX 7900 XTX<br>AMD Radeon RX 7900 XT<br>AMD Radeon RX 7900 GRE<br>AMD Radeon PRO W7900<br>AMD Radeon PRO W7900 Dual Slot<br>AMD Radeon PRO W7800<br>AMD Radeon PRO W7800 48GB<br>AMD Radeon RX 7800 XT<br>AMD Radeon PRO W7700<br><br>***Ryzen***<br><br>AMD Ryzen AI Max+ 395<br>AMD Ryzen AI Max 390<br>AMD Ryzen AI Max 385<br>AMD Ryzen AI 9 HX 375<br>AMD Ryzen AI 9 HX 370<br>AMD Ryzen AI 9 365 |
 
 ## Documentation
 For detailed documentation including installation guides, configuration options, and metric descriptions, please refer to [Use ROCm on Radeon and Ryzen](https://rocm.docs.amd.com/projects/radeon-ryzen/en/latest/index.html#)
