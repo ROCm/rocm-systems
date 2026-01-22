@@ -10,7 +10,43 @@
 #include "primitives.h"
 
 namespace {
-  template<typename T, typename RedOp, typename Proto, bool isNetOffload = false>
+    //------Temporary work around to fix incompatible primitive constructors------
+    //------Delete when upstream fix in NCCL becomes available -----------------------
+    template<typename T, typename RedOp, typename Proto, bool isNetOffload>
+    struct PrimsCaller {
+      __host__ __device__ static Primitives<T, RedOp, FanSymmetric<1>, 0, Proto, 0, isNetOffload>
+      call(int tid, int nthreads, int const *recvPeers, int const *sendPeers,
+      void const *inputBuf, void *outputBuf, uint64_t redOpArg, uint8_t group=0,
+      uint8_t connIndexRecv = 0, uint8_t connIndexSend = 0, struct ncclDevWorkColl* collWork = nullptr) {
+          return Primitives<T, RedOp, FanSymmetric<1>, 0, Proto, 0, isNetOffload>(
+            tid, nthreads, recvPeers, sendPeers, inputBuf, outputBuf, redOpArg, group, connIndexRecv, connIndexSend, collWork, nullptr, isNetOffload ? NCCL_MAX_NET_SIZE : 0);
+      }
+    };
+    // Specialization for ProtoLL
+    template<typename T, typename RedOp, int COLL_UNROLL, bool isNetOffload>
+    struct PrimsCaller<T, RedOp, ProtoLL, COLL_UNROLL, isNetOffload> {
+        __host__ __device__ static Primitives<T, RedOp, FanSymmetric<1>, 0, ProtoLL, 0, isNetOffload>
+        call(int tid, int nthreads, int const *recvPeers, int const *sendPeers,
+      void const *inputBuf, void *outputBuf, uint64_t redOpArg, uint8_t group=0,
+      uint8_t connIndexRecv = 0, uint8_t connIndexSend = 0, struct ncclDevWorkColl* collWork = nullptr) {
+            return Primitives<T, RedOp, FanSymmetric<1>, 0, ProtoLL, 0, isNetOffload>(
+                tid, nthreads, recvPeers, sendPeers, inputBuf, outputBuf, redOpArg, group, connIndexRecv, connIndexSend, collWork, false, false, isNetOffload ? NCCL_MAX_NET_SIZE : 0);
+        }
+    };
+
+    // Specialization for ProtoLL128
+    template<typename T, typename RedOp, int COLL_UNROLL, bool isNetOffload>
+    struct PrimsCaller<T, RedOp, ProtoLL128, COLL_UNROLL, isNetOffload> {
+        __host__ __device__ static Primitives<T, RedOp, FanSymmetric<1>, 0, ProtoLL128, 0, isNetOffload>
+        call(int tid, int nthreads, int const *recvPeers, int const *sendPeers,
+      void const *inputBuf, void *outputBuf, uint64_t redOpArg, uint8_t group=0,
+      uint8_t connIndexRecv = 0, uint8_t connIndexSend = 0, struct ncclDevWorkColl* collWork = nullptr) {
+            return Primitives<T, RedOp, FanSymmetric<1>, 0, ProtoLL128, 0, isNetOffload>(
+                tid, nthreads, recvPeers, sendPeers, inputBuf, outputBuf, redOpArg, group, connIndexRecv, connIndexSend, collWork, false, false, isNetOffload ? NCCL_MAX_NET_SIZE : 0);
+        }
+    };
+    // ----------------------------------------------------------------------------
+    template<typename T, typename RedOp, typename Proto, bool isNetOffload = false>
 #if defined(USE_INDIRECT_FUNCTION_CALL) && !defined(__gfx942__) && !defined(__gfx950__)
   __device__ void runRing(int tid, int nthreads, struct ncclDevWorkColl* work) {
 #else
@@ -75,12 +111,19 @@ namespace {
     }
 
     if (tid < workNthreads) {
-      // Coverity reports that the callee treats &ring->next as an array.  However, due to the use of
-      // FanSymmetric<1>, only the first element is ever accessed, so it's fine.
-      // coverity[callee_ptr_arith:FALSE]
-      Primitives<T, RedOp, FanSymmetric<1>, 0, Proto, 0, isNetOffload> prims
-        (tid, workNthreads, &ring->prev, &ring->next, inputBuf, outputBuf, work->redOpArg, 0, work->connIndex, work->connIndex, work, NULL, isNetOffload ? NCCL_MAX_NET_SIZE : 0);
+      //--- Work around for incompatible primitive constructor ---
 
+      // // Coverity reports that the callee treats &ring->next as an array.  However, due to the use of
+      // // FanSymmetric<1>, only the first element is ever accessed, so it's fine.
+      // // coverity[callee_ptr_arith:FALSE]
+      // Primitives<T, RedOp, FanSymmetric<1>, 0, Proto, 0, isNetOffload> prims
+      //   (tid, workNthreads, &ring->prev, &ring->next, inputBuf, outputBuf, work->redOpArg, 0, work->connIndex, work->connIndex, work, NULL, isNetOffload ? NCCL_MAX_NET_SIZE : 0);
+
+      auto prims = PrimsCaller<T, RedOp, Proto, COLL_UNROLL, isNetOffload>::call(
+          tid, workNthreads, &ring->prev, &ring->next, inputBuf, outputBuf,
+          work->redOpArg, 0, work->connIndex, work->connIndex, work
+      );
+    //---------------------------------------------------------
 #if defined(ENABLE_NPKIT)
       if (tid == 0) {
         prims.npKitCtxIdx = npKitCtxIdx;
