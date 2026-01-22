@@ -60,13 +60,6 @@ if (NOT DEFINED BUILD_ROCR)
   set(BUILD_ROCR ON)
 endif()
 
-find_package(NUMA)
-if(NUMA_FOUND)
-  set(NUMA "${NUMA_LIBRARIES}")
-else()
-  find_library(NUMA NAMES numa REQUIRED)
-endif()
-
 function(add_rocm_subdir subdir subdir_assigns)
     message("add_rocm_subdir() -- " ${subdir})
     # message("  subdir_assigns before:" ${subdir_assigns} "EOM")
@@ -245,7 +238,7 @@ set(CPACK_DEBIAN_DEV_PACKAGE_DEPENDS "libdrm-amdgpu-dev | libdrm-dev, rocm-core,
 
 set(CPACK_DEBIAN_DEV_PACKAGE_RECOMMENDS "libdrm-amdgpu-dev")
 
-set(CPACK_DEBIAN_BINARY_PACKAGE_DEPENDS "libdrm-amdgpu-amdgpu1 | libdrm-amdgpu1, libnuma1, numactl, libelf1")
+set(CPACK_DEBIAN_BINARY_PACKAGE_DEPENDS "libdrm-amdgpu-amdgpu1 | libdrm-amdgpu1, libnuma1, libelf1")
 set(CPACK_DEBIAN_ASAN_PACKAGE_DEPENDS "libdrm-amdgpu-dev | libdrm-dev, rocm-core-asan, libdrm-amdgpu-amdgpu1 | libdrm-amdgpu1, libnuma1, libelf1")
 set(CPACK_DEBIAN_ASAN_PACKAGE_RECOMMENDS "libdrm-amdgpu-dev")
 

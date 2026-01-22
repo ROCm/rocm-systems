@@ -4,11 +4,13 @@
 
 Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/](https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/).
 
-## ROCm Systems Profiler 1.4.0 for ROCm x.y.z (unreleased)
+## ROCm Systems Profiler 1.4.0 for ROCm 7.11.0
 
 ### Added
 
 - Support for UCX (Unified Communication X) API tracing.
+- Profiling and metric collection capabilities for XGMI and PCIe data.
+- How-to document for XGMI and PCIe sampling and monitoring.
 - Documentation for `--trace-legacy` / `-L` CLI flag for direct tracing mode.
 - Added dependency to `spdlog` library.
 - Added environment variable `ROCPROFSYS_LOG_LEVEL` which control level of logging.
@@ -42,8 +44,6 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 ### Added
 
-- Profiling and metric collection capabilities for XGMI and PCIe data.
-- How-to document for XGMI and PCIe sampling and monitoring.
 - Added a `ROCPROFSYS_PERFETTO_FLUSH_PERIOD_MS` configuration setting to set the flush period for Perfetto traces. The default value is 10000 ms (10 seconds).
 - Added fetching of the `rocpd` schema from rocprofiler-sdk-rocpd
 
