@@ -940,9 +940,10 @@ def run_prof(
         # Write results_fbase.csv
         rocpd_data.convert_dbs_to_csv(
             glob.glob(workload_dir + "/out/pmc_1/*/*.db"),
-            workload_dir + f"/results_{fbase}.csv",
+            workload_dir + f"/{fbase}_counter_collection.csv",
+            workload_dir + f"/{fbase}_marker_api_trace.csv",
         )
-        combined_df = pd.read_csv(workload_dir + f"/results_{fbase}.csv")
+        combined_df = pd.read_csv(workload_dir + f"/{fbase}_counter_collection.csv")
         # Reset Dispatch_ID based on PID, Kernel_Name, Grid_Size,
         # Workgroup_Size, LDS_Per_Workgroup, Start_Timestamp, End_Timestamp
         combined_df["Dispatch_ID"] = combined_df.groupby(
@@ -965,7 +966,9 @@ def run_prof(
         ).ngroup()
         # Drop PID since its not required
         combined_df = combined_df.drop(columns=["PID"])
-        combined_df.to_csv(workload_dir + f"/results_{fbase}.csv", index=False)
+        combined_df.to_csv(
+            workload_dir + f"/{fbase}_counter_collection.csv", index=False
+        )
         if torch_trace_enabled:
             # Extract marker_api_trace and counter_collection CSVs
             import sqlite3
@@ -1053,7 +1056,7 @@ def run_prof(
                     console_error(f"Failed to extract data from {db_path}: {e}")
                 except Exception as e:
                     console_error(f"Unexpected error extracting from {db_path}: {e}")
-            process_torch_trace_output(workload_dir, fbase)
+            process_torch_trace_output(workload_dir, fbase, workload_dir)
         if retain_rocpd_output:
             for db_path in glob.glob(workload_dir + "/out/pmc_1/*/*.db"):
                 pid = Path(db_path).stem.split("_")[0]
@@ -1076,10 +1079,6 @@ def run_prof(
                 # counter data collected using native tool
                 using_native_tool=options["ROCPROF_COUNTER_COLLECTION"] == "0",
             )
-            # Add torch operator trace processing
-            if torch_trace_enabled:
-                process_torch_trace_output(workload_dir, fbase)
-
             # TODO: as rocprofv3 --kokkos-trace feature improves,
             # rocprof-compute should make updates accordingly
             if "ROCPROF_HIP_RUNTIME_API_TRACE" in options:
@@ -1096,9 +1095,9 @@ def run_prof(
                 process_kokkos_trace_output(workload_dir, fbase)
             elif "--hip-trace" in options:
                 process_hip_trace_output(workload_dir, fbase)
-            if torch_trace_enabled:
-                process_torch_trace_output(workload_dir, fbase)
-
+        # Add torch operator trace processing
+        if torch_trace_enabled:
+            process_torch_trace_output(workload_dir, fbase)
         # Combine results into single CSV file
         if results_files:
             combined_results = pd.concat(
@@ -1369,11 +1368,11 @@ def process_torch_trace_output(
         - Output file is saved to workload root, not the temporary out/ directory
     """
     if not marker_trace_csv_file_path:
-        marker_trace_csv_file_path = f"{workload_dir}/out/pmc_1/"
+        marker_trace_csv_file_path = f"{workload_dir}/out/pmc_1/*"
         counter_csv_file_path = None
     # Find all marker_api_trace CSV files
     marker_api_trace_csvs = list(
-        Path(marker_trace_csv_file_path).glob("*/*_marker_api_trace.csv")
+        Path(marker_trace_csv_file_path).glob("/*_marker_api_trace.csv")
     )
     if not counter_csv_file_path:
         counter_collection_csvs = [
