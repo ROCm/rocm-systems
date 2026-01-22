@@ -99,7 +99,7 @@ public:
     , userdata(data)
     , alloc_cb(alloc)
     , dealloc_cb(dealloc)
-    , handle(HANDLE_COUNTER.fetch_add(1))
+    , handle(get_handle_counter().fetch_add(1))
     {}
 
     MemoryManager(aqlprofile_agent_handle_t            agent,
@@ -110,12 +110,12 @@ public:
     , userdata(data)
     , alloc_cb(alloc)
     , dealloc_cb(dealloc)
-    , handle(HANDLE_COUNTER.fetch_add(1))
+    , handle(get_handle_counter().fetch_add(1))
     {}
 
-    virtual ~MemoryManager() {}
+    virtual ~MemoryManager() = default;
 
-    void CheckStatus(hsa_status_t status) const
+    static void CheckStatus(hsa_status_t status)
     {
         if(status != HSA_STATUS_SUCCESS) throw status;
     }
@@ -142,22 +142,22 @@ public:
 
     static void RegisterManager(const std::shared_ptr<MemoryManager>& shared)
     {
-        std::lock_guard<std::mutex> lk(managers_map_mutex);
-        managers[shared->handle] = shared;
+        std::lock_guard<std::mutex> lk(get_managers_map_mutex());
+        get_managers()[shared->handle] = shared;
     }
 
     static void DeleteManager(size_t handle)
     {
-        std::lock_guard<std::mutex> lk(managers_map_mutex);
-        managers.erase(handle);
+        std::lock_guard<std::mutex> lk(get_managers_map_mutex());
+        get_managers().erase(handle);
     }
 
     static std::shared_ptr<MemoryManager> GetManager(size_t handle)
     {
-        std::lock_guard<std::mutex> lk(managers_map_mutex);
+        std::lock_guard<std::mutex> lk(get_managers_map_mutex());
         try
         {
-            return managers.at(handle);
+            return get_managers().at(handle);
         } catch(std::exception& e)
         {
             return nullptr;
@@ -184,9 +184,9 @@ protected:
     aqlprofile_memory_dealloc_callback_t const dealloc_cb;
     size_t                                     handle;
 
-    static std::atomic<size_t>                                        HANDLE_COUNTER;
-    static std::unordered_map<size_t, std::shared_ptr<MemoryManager>> managers;
-    static std::mutex                                                 managers_map_mutex;
+    static std::atomic<size_t>&                                        get_handle_counter();
+    static std::unordered_map<size_t, std::shared_ptr<MemoryManager>>& get_managers();
+    static std::mutex&                                                 get_managers_map_mutex();
 };
 
 class CounterMemoryManager : public MemoryManager
