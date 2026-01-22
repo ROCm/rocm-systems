@@ -187,7 +187,7 @@ index a14dfbc..66596f3 100644
  template <typename T>
  __global__ void __launch_bounds__(512, 1)
      allreduce8(T* buff, T* scratch, T* resultBuff, mscclpp::DeviceHandle<mscclpp::SmChannel>* smChannels,
-@@ -808,25 +979,9 @@ cudaError_t allreduce(T* buff, T* scratch, T* resultBuff, mscclpp::DeviceHandle<
+@@ -808,25 +971,9 @@ cudaError_t allreduce(T* buff, T* scratch, T* resultBuff, mscclpp::DeviceHandle<
                        size_t channelOutOffset, size_t channelScratchOffset, int rank, int nRanksPerNode, int worldSize,
                        size_t nelems, cudaStream_t stream) {
    static uint32_t flag = 1;
@@ -213,7 +213,7 @@ index a14dfbc..66596f3 100644
    if (sizeof(T) * nelems < worldSize * sizeof(int)) {
      int nBlocks = nRanksPerNode - 1;
      int nThreadsPerBlock = 32;
-@@ -852,16 +1007,21 @@ cudaError_t allreduce(T* buff, T* scratch, T* resultBuff, mscclpp::DeviceHandle<
+@@ -844,16 +999,21 @@ cudaError_t allreduce(T* buff, T* scratch, T* resultBuff, mscclpp::DeviceHandle<
    } else {
      int nBlocks = 8 * (nRanksPerNode - 1);
      int nThreadsPerBlock = 512;

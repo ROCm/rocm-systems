@@ -85,7 +85,7 @@ index 9f46ff9..fac105a 100644
  }
  
  template <typename T>
-@@ -977,7 +1004,7 @@ cudaError_t allreduce(T* buff, T* scratch, T* resultBuff, mscclpp::DeviceHandle<
+@@ -969,7 +996,7 @@ cudaError_t allreduce(T* buff, T* scratch, T* resultBuff, mscclpp::DeviceHandle<
                        mscclpp::DeviceHandle<mscclpp::SmChannel>* smScrChannels,
  		      mscclpp::DeviceHandle<mscclpp::SmChannel>* smOutChannels, size_t channelInOffset,
                        size_t channelOutOffset, size_t channelScratchOffset, int rank, int nRanksPerNode, int worldSize,
@@ -94,7 +94,7 @@ index 9f46ff9..fac105a 100644
    static uint32_t flag = 1;
  
    nRanksPerNode = (worldSize < nRanksPerNode) ? worldSize : nRanksPerNode;
-@@ -986,8 +1013,8 @@ cudaError_t allreduce(T* buff, T* scratch, T* resultBuff, mscclpp::DeviceHandle<
+@@ -978,8 +1005,8 @@ cudaError_t allreduce(T* buff, T* scratch, T* resultBuff, mscclpp::DeviceHandle<
      int nBlocks = nRanksPerNode - 1;
      int nThreadsPerBlock = 32;
      allreduceAllToAll<<<nBlocks, nThreadsPerBlock, 0, stream>>>(buff, scratch, resultBuff, smChannels,
@@ -105,7 +105,7 @@ index 9f46ff9..fac105a 100644
      int nBlocks = 4*(nRanksPerNode - 1);
      int nThreadsPerBlock = 1024;
      if (nelems >= 8192) {
-@@ -998,11 +1025,11 @@ cudaError_t allreduce(T* buff, T* scratch, T* resultBuff, mscclpp::DeviceHandle<
+@@ -990,11 +1017,11 @@ cudaError_t allreduce(T* buff, T* scratch, T* resultBuff, mscclpp::DeviceHandle<
      size_t NpkitSharedMemSize = NPKIT_SHM_NUM_EVENTS * sizeof(NpKitEvent);
      allreduce7<<<nBlocks, nThreadsPerBlock, NpkitSharedMemSize, stream>>>(
          buff, scratch, resultBuff, smChannels, channelInOffset, channelScratchOffset, rank, nRanksPerNode, worldSize,

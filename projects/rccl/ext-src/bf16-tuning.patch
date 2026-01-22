@@ -2,7 +2,7 @@ diff --git a/apps/nccl/src/allreduce.hpp b/apps/nccl/src/allreduce.hpp
 index 7a2cd4a..a14dfbc 100644
 --- a/apps/nccl/src/allreduce.hpp
 +++ b/apps/nccl/src/allreduce.hpp
-@@ -850,7 +850,7 @@ cudaError_t allreduce(T* buff, T* scratch, T* resultBuff, mscclpp::DeviceHandle<
+@@ -845,7 +845,7 @@ cudaError_t allreduce(T* buff, T* scratch, T* resultBuff, mscclpp::DeviceHandle<
                                                           flag++);
  #endif
    } else {

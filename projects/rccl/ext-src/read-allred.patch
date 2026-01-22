@@ -1,8 +1,8 @@
 diff --git a/apps/nccl/src/allreduce.hpp b/apps/nccl/src/allreduce.hpp
-index 4134241..76674ba 100644
+index 4134241..3fed055 100644
 --- a/apps/nccl/src/allreduce.hpp
 +++ b/apps/nccl/src/allreduce.hpp
-@@ -495,24 +495,345 @@ __global__ void __launch_bounds__(512, 1)
+@@ -495,24 +495,337 @@ __global__ void __launch_bounds__(512, 1)
    }
  }
  
@@ -48,14 +48,15 @@ index 4134241..76674ba 100644
 +  }
 +  __syncwarp();
 +
++  // Wait for other GPUs before reading input from channels
++  if (threadIdx.x < static_cast<uint32_t>(nPeer)) {
++    channels[threadIdx.x].signal();
++    channels[threadIdx.x].wait();
++  }
++  __syncthreads();
++
 +  // we can use double buffering to hide synchronization overhead
 +  for (size_t itr = 0; itr < nItrs; itr++) {
-+    if (threadIdx.x < static_cast<uint32_t>(nPeer)) {
-+      channels[threadIdx.x].signal();
-+      channels[threadIdx.x].wait();
-+    }
-+    __syncthreads();
-+
 +    for (size_t idx = threadIdx.x; idx < nInt4PerChunk; idx += blockDim.x) {
 +      int4 data = buff4[nInt4PerRank * rank + idx + offsetOfThisBlock];
 +      for (int peerIdx = 0; peerIdx < nPeer; peerIdx++) {
@@ -69,19 +70,10 @@ index 4134241..76674ba 100644
 +                                   data);
 +      }
 +    }
-+    __syncthreads();
-+
 +    offsetOfThisBlock += nInt4PerChunk;
 +  }
 +
 +  if (restNInt4 > 0) {
-+    if (threadIdx.x < static_cast<uint32_t>(nPeer)) {
-+      channels[threadIdx.x].signal();
-+      channels[threadIdx.x].wait();
-+
-+    }
-+    __syncthreads();
-+
 +    for (size_t idx = threadIdx.x; idx < restNInt4; idx += blockDim.x) {
 +      int4 data = buff4[nInt4PerRank * rank + idx + offsetOfThisBlock];
 +      for (int peerIdx = 0; peerIdx < nPeer; peerIdx++) {
@@ -94,15 +86,15 @@ index 4134241..76674ba 100644
 +                                   data);
 +      }
 +    }
-+    __syncthreads();
 +  }
 +
++  // Synchronize threads before signaling that all results have been written to outChannels
++  __syncthreads();
 +  if (threadIdx.x < static_cast<uint32_t>(nPeer)) {
-+      outChannels[threadIdx.x].signal();
-+      outChannels[threadIdx.x].wait();
++    outChannels[threadIdx.x].signal();
++    outChannels[threadIdx.x].wait();
 +  }
 +  __syncthreads();
-+
 +}
 +
 +template <typename T>
@@ -320,9 +312,9 @@ index 4134241..76674ba 100644
 +  int readAllred = 0, hieAllred = 0;
 +  char* envValue = nullptr;
 +  char* envValue1 = nullptr;
- 
-+  nRanksPerNode = (worldSize < nRanksPerNode) ? worldSize : nRanksPerNode;
 +
++  nRanksPerNode = (worldSize < nRanksPerNode) ? worldSize : nRanksPerNode;
+ 
 +  envValue = std::getenv("MSCCLPP_READ_ALLRED");
 +  envValue1 = std::getenv("MSCCLPP_HIERARCHICAL_ALLRED");
 +
@@ -355,7 +347,7 @@ index 4134241..76674ba 100644
        nThreadsPerBlock = (nelems <= 76800) ? 512 : 1024;
      }
  #if defined(ENABLE_NPKIT)
-@@ -526,11 +847,23 @@ cudaError_t allreduce(T* buff, T* scratch, T* resultBuff, mscclpp::DeviceHandle<
+@@ -526,11 +839,23 @@ cudaError_t allreduce(T* buff, T* scratch, T* resultBuff, mscclpp::DeviceHandle<
                                                           flag++);
  #endif
    } else {
