@@ -112,7 +112,7 @@ IPCBackend::IPCBackend(TcpBootstrap *bootstrap):  Backend(bootstrap) {
 void IPCBackend::init() {
   ROCSHMEM_HOST_CTX_DEFAULT.ctx_opaque = default_host_ctx.get();
 
-  char *arch_name = get_arch_name(hip_dev_id);
+  const char *arch_name = get_arch_name(hip_dev_id);
   if (strncmp(arch_name, "gfx1201", strlen("gfx1201")) == 0) {
     fine_grained_allocator_ = new HIPAllocatorFinegrained();
   } else {
@@ -149,7 +149,7 @@ IPCBackend::~IPCBackend() {
 
   CHECK_HIP(hipFree(ctx_array));
   if (fine_grained_allocator_) {
-    char *arch_name = get_arch_name(hip_dev_id);
+    const char *arch_name = get_arch_name(hip_dev_id);
     if (strncmp(arch_name, "gfx1201", strlen("gfx1201")) == 0) {
       delete static_cast<HIPAllocatorFinegrained *>(fine_grained_allocator_);
     } else {
