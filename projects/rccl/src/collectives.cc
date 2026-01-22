@@ -409,10 +409,6 @@ ncclResult_t ncclReduceScatter_impl(const void* sendbuff, void* recvbuff, size_t
     INFO(NCCL_INIT, "RCCL DIRECT REDUCE-SCATTER recvcount=%zu msgSize=%zu rank=%d nRanks=%d nNodes=%d comm=%p stream=%p sendbuff=%p recvbuff=%p",
       recvcount, msgSize, comm->rank, nRanks, comm->nNodes, comm, stream, sendbuff, recvbuff);
 
-    struct ncclInfo info = { ncclFuncReduceScatterDirect, "ReduceScatterDirect",
-      sendbuff, recvbuff, recvcount, datatype, op, 0, comm, stream, /* Args */
-      REDUCESCATTER_CHUNKSTEPS, comm -> rcclUseOneSlice ? REDUCESCATTER_SLICESTEPS_SINGLE_NODE : REDUCESCATTER_SLICESTEPS, nullptr };
-  
     // Temporary Buffer to store data from each rank
     void* tempbuff = comm->tempBuff;
 
@@ -437,7 +433,6 @@ ncclResult_t ncclReduceScatter_impl(const void* sendbuff, void* recvbuff, size_t
       NCCLCHECK(ncclRecv((void*)((char*)tempbuff + peer * offset), recvcount, datatype, peer, comm, stream));
     }
     NCCLCHECK(ncclGroupEnd());
-    return ncclEnqueueCheck(&info);
   }
   
   return ncclEnqueueCheck(&info);

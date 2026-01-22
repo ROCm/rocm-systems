@@ -157,7 +157,6 @@ static inline int ncclFuncTrafficPerByte(ncclFunc_t func, int nRanks) {
   case ncclFuncAllReduce: return 2;
   case ncclFuncAllGather: return nRanks;
   case ncclFuncReduceScatter: return nRanks;
-  case ncclFuncReduceScatterDirect: return nRanks;
   default: return 1;
   }
 }
@@ -416,7 +415,7 @@ ncclResult_t ncclTasksRegAndEnqueue(struct ncclComm* comm) {
     }
 #endif
     // Direct Reduce Scatter
-    if (task->func == ncclFuncReduceScatterDirect && comm->enableDirectReduceScatter) {
+    if (task->func == ncclFuncReduceScatter && comm->enableDirectReduceScatter) {
       devWork.enableDirectReduceScatter = comm->enableDirectReduceScatter;
       int64_t directReduceScatterLimit = rcclParamDirectReduceScatterThreshold();
       if (directReduceScatterLimit >= 0) {
@@ -744,7 +743,8 @@ static ncclResult_t scheduleCollTasksToPlan(
         addWorkBatchToPlan(comm, plan, c, workNode->workType, task->devFuncId, plan->workBytes);
         // Set pattern to profiler to add a proxy profiler for kernel events
         // for Direct Reduce Scatter (DRS), we don't need to add proxy op
-        if (task->func != ncclFuncReduceScatterDirect && task->func != ncclFuncAllToAllGda) {
+        bool isDRS = task->func == ncclFuncReduceScatter && comm->enableDirectReduceScatter;
+        if (!isDRS && task->func != ncclFuncAllToAllGda) {
             NCCLCHECK(addProxyOpIfNeeded(comm, plan, &proxyOp));
             NCCLCHECK(addProfilerProxyOpIfNeeded(comm, plan, &proxyOp));
         }
@@ -895,7 +895,8 @@ static ncclResult_t scheduleCollTasksToPlan(
         // determine if that's actually true but it's also not clear if that would be an issue.
         // coverity[uninit_use_in_call:FALSE]
         // for Direct Reduce Scatter (DRS), we don't need to add proxy op
-        if (task->func != ncclFuncReduceScatterDirect && task->func != ncclFuncAllToAllGda) {
+        bool isDRS = task->func == ncclFuncReduceScatter && comm->enableDirectReduceScatter;
+        if (!isDRS && task->func != ncclFuncAllToAllGda) {
             NCCLCHECK(addProxyOpIfNeeded(comm, plan, proxyOp));
             NCCLCHECK(addProfilerProxyOpIfNeeded(comm, plan, proxyOp));
         }
@@ -2343,7 +2344,7 @@ rccl_static ncclResult_t getAlgoInfo(
       NCCLCHECK(ncclRegLocalIsValid(regSendBuf, &isSendValid));
       NCCLCHECK(ncclRegLocalIsValid(regRecvBuf, &isRecvValid));
       regBuff = (regSendBuf && regRecvBuf && isSendValid && isRecvValid) || (ncclCudaGraphValid(comm->planner.capturingGraph) && ncclParamGraphRegister());
-      if (regBuff && (info->func == ncclFuncAllGather || info->func == ncclFuncReduceScatter || info->func == ncclFuncReduceScatterDirect)) {
+      if (regBuff && (info->func == ncclFuncAllGather || info->func == ncclFuncReduceScatter)) {
         if ((comm->nNodes > 1 && collNetSupport && nvlsSupport) || (comm->nNodes == 1 && nvlsSupport)) {
           int recChannels;
           NCCLCHECK(ncclNvlsRegResourcesQuery(comm, info, &recChannels));
@@ -2380,13 +2381,6 @@ static ncclResult_t calcCollChunking(
     break;
   case ncclFuncReduceScatter:
     pattern =
-      info->algorithm == NCCL_ALGO_PAT ? ncclPatternPatUp :
-      info->algorithm == NCCL_ALGO_NVLS ? ncclPatternNvls :
-      info->algorithm == NCCL_ALGO_COLLNET_DIRECT ? ncclPatternCollnetDirect :
-      ncclPatternRing;
-    break;
-  case ncclFuncReduceScatterDirect:
-      pattern =
       info->algorithm == NCCL_ALGO_PAT ? ncclPatternPatUp :
       info->algorithm == NCCL_ALGO_NVLS ? ncclPatternNvls :
       info->algorithm == NCCL_ALGO_COLLNET_DIRECT ? ncclPatternCollnetDirect :
@@ -2455,7 +2449,7 @@ static ncclResult_t calcCollChunking(
     while (nBytes / (nChannels * chunkSize) < comm->channels[0].collnetChain.depth * 8 && chunkSize > 65536) chunkSize /= 2;
     while (nBytes / (nChannels * chunkSize) < comm->channels[0].collnetChain.depth && chunkSize > 32768) chunkSize /= 2;
   } else if (info->algorithm == NCCL_ALGO_NVLS) {
-    if ((info->regBufType & NCCL_NVLS_REG_BUFFER) && (info->func == ncclFuncAllGather || info->func == ncclFuncReduceScatter || info->func == ncclFuncReduceScatterDirect)) {
+    if ((info->regBufType & NCCL_NVLS_REG_BUFFER) && (info->func == ncclFuncAllGather || info->func == ncclFuncReduceScatter)) {
       chunkSize = comm->buffSizes[NCCL_PROTO_SIMPLE] / NCCL_STEPS;
     } else {
       int maxChunkSize = comm->nvlsChunkSize;
@@ -2578,7 +2572,7 @@ static ncclResult_t calcCollChunking(
         proxyOp->sendbuff = (uint8_t*)info->sendbuff;
         proxyOp->sendMhandle = info->sendMhandle;
       } else {
-        if (info->func == ncclFuncAllGather || info->func == ncclFuncReduceScatter || info->func == ncclFuncReduceScatterDirect) {
+        if (info->func == ncclFuncAllGather || info->func == ncclFuncReduceScatter) {
           proxyOp->nbytes = nBytes / nchunksPerLoop;
           proxyOp->loopSize = proxyOp->loopSize / nchunksPerLoop;
           proxyOp->loopOffset = 0;
@@ -2616,7 +2610,7 @@ static ncclResult_t calcCollChunking(
   if (pattern == ncclPatternCollnetDirect || pattern == ncclPatternNvls) {
     proxyOp->specifics.collnetDirect.nNodes = comm->nNodes;
     proxyOp->specifics.collnetDirect.node = comm->node;
-    if (info->func == ncclFuncAllGather || info->func == ncclFuncReduceScatter || info->func == ncclFuncReduceScatterDirect) {
+    if (info->func == ncclFuncAllGather || info->func == ncclFuncReduceScatter) {
       proxyOp->specifics.collnetDirect.sizePerRank = info->count*ncclTypeSize(info->datatype);
     }
   }
