@@ -47,7 +47,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   sudo modprobe -r amdgpu
   sudo modprobe amdgpu
   ```
-  - For historical details only; this option has been removed however [<i><b>Separated driver reload from `amdsmi_set_gpu_memory_partition()` / `amdsmi_set_gpu_memory_partition_mode()` and CLI (`sudo amd-smi set -M <NPS mode>`)</b></i>](#separate-driver-reload-anchor)
+  - For historical reference; this option has been removed [<i><b>Separated driver reload from `amdsmi_set_gpu_memory_partition()` / `amdsmi_set_gpu_memory_partition_mode()` and CLI (`sudo amd-smi set -M <NPS mode>`)</b></i>](#separate-driver-reload-anchor)
 
 ### Optimized
 
