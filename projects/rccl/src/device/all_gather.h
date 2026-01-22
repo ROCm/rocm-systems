@@ -20,11 +20,20 @@ namespace {
     const int bid = ncclShmem.channelId - work->channelLo;
     int npKitCtxIdx = bid; // unused variable - compiler warning
 #endif
+#ifdef ENABLE_WARP_SPEED
+    int warp = threadIdx.x / WARP_SIZE;
+    ncclRing *ring = &ncclShmem.warpChannel[warp].ring;
+#else
     ncclRing *ring = &ncclShmem.channel.ring;
+#endif
     const int *ringRanks = ring->userRanks;
     const int nranks = ncclShmem.comm.nRanks;
     ssize_t count, partOffset, partCount, chunkCount;
+#ifdef ENABLE_WARP_SPEED
+    ncclCollCbdPart(work, ncclShmem.warpChannelId[warp], Proto::Id, sizeof(T), &count, &partOffset, &partCount, &chunkCount);
+#else
     ncclCollCbdPart(work, ncclShmem.channelId, Proto::Id, sizeof(T), &count, &partOffset, &partCount, &chunkCount);
+#endif
     ssize_t offset;
     ssize_t dataOffset;
     int nelem;
@@ -142,7 +151,7 @@ namespace {
 #endif
         // Final wait/copy.
         prims.directRecv(offset, nelem);
-  
+
 #if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_ALL_GATHER_RING_DIRECT_RECV_EXIT)
         if (tid == 0) {
           NpKit::CollectGpuEvent(NPKIT_EVENT_ALL_GATHER_RING_DIRECT_RECV_EXIT, nelem*sizeof(T), prims.npKitDataProcessTotalTime, NPKIT_GET_GPU_TIMESTAMP(),

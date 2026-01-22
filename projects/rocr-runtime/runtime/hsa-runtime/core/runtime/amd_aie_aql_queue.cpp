@@ -67,7 +67,7 @@ namespace AMD {
 
 AieAqlQueue::AieAqlQueue(core::SharedQueue* shared_queue, AieAgent* agent, size_t req_size_pkts,
                          uint32_t node_id, uint64_t flags)
-    : Queue(shared_queue, flags),
+    : Queue(shared_queue, flags, agent),
       LocalSignal(0, false),
       DoorbellSignal(signal()),
       agent_(*agent),
@@ -104,7 +104,7 @@ AieAqlQueue::AieAqlQueue(core::SharedQueue* shared_queue, AieAgent* agent, size_
 
   HsaQueueResource queue_resource = {};
   hsa_status_t status =
-      agent_.driver().CreateQueue(node_id, HSA_QUEUE_COMPUTE_AQL, 0, HSA_QUEUE_PRIORITY_NORMAL, 0,
+      agent_.driver().CreateQueue(node_id, HSA_QUEUE_COMPUTE_AQL, 0, rocr::HSA::HSA_AMD_QUEUE_PRIORITY_NORMAL, 0,
                                   nullptr, queue_size_bytes_, nullptr, queue_resource);
   if (status != HSA_STATUS_SUCCESS) {
     throw AMD::hsa_exception(status, "Failed to create a hardware context for an AIE queue.");
@@ -135,7 +135,7 @@ hsa_status_t AieAqlQueue::Inactivate() {
   return status;
 }
 
-hsa_status_t AieAqlQueue::SetPriority(HSA_QUEUE_PRIORITY priority) {
+hsa_status_t AieAqlQueue::SetPriority(HSA::hsa_amd_queue_priority_internal_t priority) {
   return HSA_STATUS_SUCCESS;
 }
 
@@ -276,6 +276,13 @@ hsa_status_t AieAqlQueue::GetInfo(hsa_queue_info_attribute_t attribute,
     case HSA_AMD_QUEUE_INFO_DOORBELL_ID:
       // Hardware doorbell supports AQL semantics.
       *static_cast<uint64_t*>(value) = reinterpret_cast<uint64_t>(signal_.hardware_doorbell_ptr);
+      break;
+    case HSA_QUEUE_INFO_USE_COUNT:
+      // AIE queues do not support counted queue features
+      *static_cast<uint32_t*>(value) = static_cast<uint32_t>(-1);
+      break;
+    case HSA_QUEUE_INFO_HW_ID:
+      *static_cast<uint32_t*>(value) = public_handle()->id;
       break;
     default:
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;

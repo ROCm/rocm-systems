@@ -444,7 +444,7 @@ bool Device::init() {
     }
     // Note: for now disable HSA path by default except for gfx942
     if (IS_WINDOWS && (GPU_ENABLE_PAL == 2) &&
-        (std::strcmp(roc_device->info().name_, "gfx942") != 0)) {
+        (std::string(roc_device->info().name_).find("gfx942") == std::string::npos)) {
       return false;
     }
     roc_device.release()->registerDevice();
@@ -915,6 +915,16 @@ void Sampler::fillSampleDescriptor(hsa_ext_sampler_descriptor_v2_t& samplerDescr
   samplerDescriptor.filter_mode = sampler.filterMode() == CL_FILTER_NEAREST
                                       ? HSA_EXT_SAMPLER_FILTER_MODE_NEAREST
                                       : HSA_EXT_SAMPLER_FILTER_MODE_LINEAR;
+  switch (sampler.mipFilter()) {
+    case CL_FILTER_NEAREST:
+      samplerDescriptor.mipmap_filter_mode = HSA_EXT_SAMPLER_FILTER_MODE_NEAREST;
+      break;
+    case CL_FILTER_LINEAR:
+      samplerDescriptor.mipmap_filter_mode = HSA_EXT_SAMPLER_FILTER_MODE_LINEAR;
+      break;
+    default:
+      samplerDescriptor.mipmap_filter_mode = HSA_EXT_SAMPLER_FILTER_MODE_NONE;
+  }
   samplerDescriptor.coordinate_mode = sampler.normalizedCoords()
                                           ? HSA_EXT_SAMPLER_COORDINATE_MODE_NORMALIZED
                                           : HSA_EXT_SAMPLER_COORDINATE_MODE_UNNORMALIZED;
@@ -1636,6 +1646,14 @@ bool Device::populateOCLDeviceConstants() {
                           static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_PM4_EMULATION),
                           &pm4_emulation_)) {
     LogError("HSA_AMD_AGENT_INFO_PM4_EMULATION query failed.");
+  }
+
+  info_.hasExpertSchedMode_ = false;
+  if (HSA_STATUS_SUCCESS !=
+      Hsa::agent_get_info(bkendDevice_,
+                          static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_HAS_EXPERT_SCHED_MODE),
+                          &info_.hasExpertSchedMode_)) {
+    LogWarning("HSA_AMD_AGENT_INFO_HAS_EXPERT_SCHED_MODE query failed.");
   }
 
   ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Gfx Major/Minor/Stepping: %d/%d/%d", isa().versionMajor(),

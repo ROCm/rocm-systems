@@ -418,7 +418,7 @@ Addition:
                 min: MIN(TCC_ATOMIC_SECTORS_sum * 32/ (End_Timestamp - Start_Timestamp))
                 max: MAX(TCC_ATOMIC_SECTORS_sum * 32/ (End_Timestamp - Start_Timestamp))
                 unit: Gbps
-            - Bypasss Req:
+            - Bypass Req:
                 avg: AVG((TCC_BYPASS_REQ_sum / $denom))
                 min: MIN((TCC_BYPASS_REQ_sum / $denom))
                 max: MAX((TCC_BYPASS_REQ_sum / $denom))

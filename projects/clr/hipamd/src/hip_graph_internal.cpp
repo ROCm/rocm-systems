@@ -202,10 +202,12 @@ void Graph::ScheduleOneNode(Node node, int stream_id) {
       reinterpret_cast<hip::ChildGraphNode*>(node)->GraphExec::TopologicalOrder();
     }
     for (auto edge : node->GetEdges()) {
-      ScheduleOneNode(edge, stream_id);
-      // 1. Each extra edge will get a new stream from the pool
-      // 2. Streams will be reused if the number of edges > streams
-      stream_id = (stream_id + 1) % DEBUG_HIP_FORCE_GRAPH_QUEUES;
+      if (edge->stream_id_ == -1) {
+        ScheduleOneNode(edge, stream_id);
+        // 1. Each extra edge will get a new stream from the pool
+        // 2. Streams will be reused if the number of edges > streams
+        stream_id = (stream_id + 1) % DEBUG_HIP_FORCE_GRAPH_QUEUES;
+      }
     }
   }
 }
