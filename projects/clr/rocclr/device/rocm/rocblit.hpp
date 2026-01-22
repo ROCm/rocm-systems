@@ -186,6 +186,20 @@ class DmaBlitManager : public device::HostBlitManager {
     return false;
   }
 
+  //! Stream memory increment operation - Increment memory by a 'value'.
+  virtual bool streamOpsIncrement(device::Memory& memory,  //!< Memory to write the 'value'
+                                  uint64_t value, size_t offset, size_t sizeBytes) const {
+    assert(!"Unimplemented");
+    return false;
+  }
+
+  //! Stream memory decrement operation - Decrement memory by a 'value'.
+  virtual bool streamOpsDecrement(device::Memory& memory,  //!< Memory to write the 'value'
+                                  uint64_t value, size_t offset, size_t sizeBytes) const {
+    assert(!"Unimplemented");
+    return false;
+  }
+
   //! Stream memory ops- Waits for a 'value' at 'memory' and wait is released based on compare op.
   virtual bool streamOpsWait(device::Memory& memory,  //!< Memory to compare the 'value' against
                              uint64_t value, size_t offset, size_t sizeBytes, uint64_t flags,
@@ -290,6 +304,8 @@ class KernelBlitManager : public DmaBlitManager {
     BlitCopyImage1DA,
     BlitCopyImageToBuffer,
     BlitCopyBufferToImage,
+    StreamOpsIncrement,
+    StreamOpsDecrement,
     BlitTotal
   };
 
@@ -492,6 +508,14 @@ class KernelBlitManager : public DmaBlitManager {
   virtual bool streamOpsWrite(device::Memory& memory,  //!< Memory to write the 'value'
                               uint64_t value, size_t offset, size_t sizeBytes) const;
 
+  //! Stream memory increment operation - Increment memory by a 'value'.
+  virtual bool streamOpsIncrement(device::Memory& memory,  //!< Memory to write the 'value'
+                                  uint64_t value, size_t offset, size_t sizeBytes) const;
+
+  //! Stream memory decrement operation - Decrement memory by a 'value'.
+  virtual bool streamOpsDecrement(device::Memory& memory,  //!< Memory to write the 'value'
+                                  uint64_t value, size_t offset, size_t sizeBytes) const;
+
   //! Stream memory ops- Waits for a 'value' at 'memory' and wait is released based on compare op.
   virtual bool streamOpsWait(
       device::Memory& memory,  //!< Memory contents to compare the 'value' against
@@ -587,7 +611,9 @@ static const char* BlitName[KernelBlitManager::BlitTotal] = {
     "__amd_rocclr_initHeap",          "__amd_rocclr_batchMemOp",
     "__amd_rocclr_fillImage",         "__amd_rocclr_copyImage",
     "__amd_rocclr_copyImage1DA",      "__amd_rocclr_copyImageToBuffer",
-    "__amd_rocclr_copyBufferToImage"};
+    "__amd_rocclr_copyBufferToImage", "__amd_rocclr_streamOpsIncrement",
+    "__amd_rocclr_streamOpsDecrement"
+};
 
 inline void KernelBlitManager::setArgument(amd::Kernel* kernel, size_t index, size_t size,
                                            const void* value, size_t offset,

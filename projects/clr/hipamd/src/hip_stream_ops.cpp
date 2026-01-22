@@ -100,7 +100,19 @@ hipError_t ihipStreamOperation(hipStream_t stream, cl_command_type cmdType, void
         return hipErrorInvalidValue;
         break;
     }
-  } else if (cmdType != ROCCLR_COMMAND_STREAM_WRITE_VALUE) {
+  } else if (cmdType == ROCCLR_COMMAND_STREAM_WRITE_VALUE) {
+    switch (flags) {
+      case hipExtStreamWriteValueIncrement:
+        outFlags = ROCCLR_STREAM_WRITE_VALUE_INCREMENT;
+        break;
+      case hipExtStreamWriteValueDecrement:
+        outFlags = ROCCLR_STREAM_WRITE_VALUE_DECREMENT;
+        break;
+      default:
+        assert(flags == 0x0);
+        break;
+    }
+  } else {
     return hipErrorInvalidValue;
   }
 
@@ -139,8 +151,8 @@ hipError_t hipStreamWriteValue32(hipStream_t stream, void* ptr, uint32_t value,
                                  unsigned int flags) {
   HIP_INIT_API(hipStreamWriteValue32, stream, ptr, value, flags);
   HIP_RETURN_DURATION(ihipStreamOperation(stream, ROCCLR_COMMAND_STREAM_WRITE_VALUE, ptr, value,
-                                          0,  // mask un-used set it to 0
-                                          0,  // flags un-used for now set it to 0
+                                          0,      // mask un-used set it to 0
+                                          flags,
                                           sizeof(uint32_t)));
 }
 
@@ -148,8 +160,8 @@ hipError_t hipStreamWriteValue64(hipStream_t stream, void* ptr, uint64_t value,
                                  unsigned int flags) {
   HIP_INIT_API(hipStreamWriteValue64, stream, ptr, value, flags);
   HIP_RETURN_DURATION(ihipStreamOperation(stream, ROCCLR_COMMAND_STREAM_WRITE_VALUE, ptr, value,
-                                          0,  // mask un-used set it to 0
-                                          0,  // flags un-used for now set it to 0
+                                          0,      // mask un-used set it to 0
+                                          flags,
                                           sizeof(uint64_t)));
 }
 
