@@ -679,7 +679,9 @@ ncclResult_t ncclGroupEndInternal(ncclSimInfo_t* simInfo) {
   ncclSimInfo_t* internalSimInfoPtr = NULL;
   size_t realSize = 0;
   bool hasCommHead = false;
-  ncclGroupJob* groupJob = NULL;
+  static __thread ncclGroupJob groupJobObject = {0};
+  ncclGroupJob* groupJob = &groupJobObject;
+  bool asyncJobsTransfered = false;
 
   internalSimInfo.magic = 0;
 
@@ -723,7 +725,6 @@ ncclResult_t ncclGroupEndInternal(ncclSimInfo_t* simInfo) {
     }
   }
 
-  NCCLCHECKGOTO(ncclCalloc(&groupJob, 1), ret, fail);
   ncclIntruQueueConstruct(&groupJob->asyncJobs);
   groupJob->groupRefCount = 0;
   groupJob->nonBlockingInit = false;
@@ -733,6 +734,7 @@ ncclResult_t ncclGroupEndInternal(ncclSimInfo_t* simInfo) {
   groupJob->abortFlag = false;
   groupJob->joined = false;
   ncclIntruQueueTransfer(&groupJob->asyncJobs, &ncclAsyncJobs);
+  asyncJobsTransfered = true;
 
   if (hasCommHead || !ncclIntruQueueEmpty(&groupJob->asyncJobs) || ncclGroupCommPreconnectHead != nullptr) {
     /* make sure ncclGroupBlocking has been set. */
@@ -777,7 +779,6 @@ ncclResult_t ncclGroupEndInternal(ncclSimInfo_t* simInfo) {
       NCCLCHECKGOTO(groupLaunch(&groupJob->base, internalSimInfoPtr), ret, fail);
       CUDACHECKGOTO(cudaSetDevice(savedDev), ret, fail);
       if (simInfo) memcpy((void*)simInfo, (void*)internalSimInfoPtr, realSize);
-      free(groupJob);
     }
   }
   /* Reset the job state for the next group call. */
@@ -788,9 +789,8 @@ exit:
   NCCLCHECK(ncclProfilerStopGroupApiEvent());
   return ret;
 fail:
-  if (groupJob) {
+  if (asyncJobsTransfered) {
     groupCleanup(groupJob->groupCommHead, &groupJob->asyncJobs, ret);
-    free(groupJob);
   } else {
     groupCleanup(ncclGroupCommHead, &ncclAsyncJobs, ret);
   }
@@ -803,9 +803,6 @@ ncclResult_t ncclGroupJobComplete(struct ncclGroupJob* groupJob) {
   if (groupJob && groupJob->nonBlockingInit) {
     if (!__atomic_exchange_n(&groupJob->joined, true, __ATOMIC_ACQ_REL)) {
       ret = ncclAsyncJobComplete(&groupJob->base);
-    }
-    if (ncclAtomicRefCountDecrement(&groupJob->groupRefCount) == 0) {
-      free(groupJob);
     }
   }
   return ret;
