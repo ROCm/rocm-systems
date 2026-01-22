@@ -66,50 +66,6 @@ struct is_optional<std::optional<T>> : std::true_type
 template <typename T>
 inline constexpr bool is_optional_v = is_optional<T>::value;
 
-template <typename T>
-struct unwrap_optional
-{
-    using type = T;
-};
-
-template <typename T>
-struct unwrap_optional<std::optional<T>>
-{
-    using type = T;
-};
-
-template <typename T>
-using unwrap_optional_t = typename unwrap_optional<std::decay_t<T>>::type;
-
-template <typename T>
-bool
-is_null_value(const T& value)
-{
-    if constexpr(is_optional_v<std::decay_t<T>>)
-    {
-        return !value.has_value();
-    }
-    else
-    {
-        return false;
-    }
-}
-
-template <typename T>
-decltype(auto)
-get_value(T&& value)
-{
-    using decayed_t = std::decay_t<T>;
-    if constexpr(is_optional_v<decayed_t>)
-    {
-        return value.value();
-    }
-    else
-    {
-        return std::forward<T>(value);
-    }
-}
-
 }  // namespace traits
 }  // namespace common
 }  // namespace rocstorage

@@ -32,6 +32,6 @@ endif()
 # Performance Benchmarks (Google Benchmark)
 # ------------------------------------------------------------ #
 
-if(ROCSTORAGE_BUILD_BENCHMARKS)
-    add_subdirectory(benchmarks)
-endif()
+# if(ROCSTORAGE_BUILD_BENCHMARKS)
+# add_subdirectory(benchmarks)
+# endif()

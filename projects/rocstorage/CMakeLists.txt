@@ -239,6 +239,6 @@ export(PACKAGE ${PACKAGE_NAME})
 # Tests and Benchmarks
 # ------------------------------------------------------------ #
 
-# if(ROCSTORAGE_BUILD_TESTS OR ROCSTORAGE_BUILD_BENCHMARKS)
-#     add_subdirectory(tests)
-# endif()
+if(ROCSTORAGE_BUILD_TESTS OR ROCSTORAGE_BUILD_BENCHMARKS)
+    add_subdirectory(tests)
+endif()

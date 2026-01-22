@@ -297,9 +297,9 @@ struct code_object_info_t
     const char*      storage_type;
     const char*      extdata;
 
-    node_id_t         node_id;
-    process_id_t      process_id;
-    agent_unique_id_t agent_id;
+    node_id_t                        node_id;
+    process_id_t                     process_id;
+    std::optional<agent_unique_id_t> agent_id;
 };
 
 /***

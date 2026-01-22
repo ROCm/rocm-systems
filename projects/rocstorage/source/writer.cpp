@@ -589,11 +589,36 @@ public:
                             code_object_info.node_id));
         }
 
-        const auto agent_foreign_key = get_agent_primary_key(code_object_info.agent_id);
+        if(!is_process_registered(code_object_info.process_id))
+        {
+            throw std::runtime_error(
+                fmt::format("Process not registered for Code Object Info: pid: {}",
+                            code_object_info.process_id));
+        }
+
+        const auto process_primary_key =
+            m_data_identifiers->m_process_info_id_map.at(code_object_info.process_id);
+
+        if(code_object_info.agent_id.has_value() &&
+           !is_agent_registered(code_object_info.agent_id.value()))
+        {
+            throw std::runtime_error(
+                fmt::format("Agent not registered for Code Object Info: agent_id "
+                            "[agent_type={}, type_index={}]",
+                            code_object_info.agent_id->agent_type,
+                            code_object_info.agent_id->type_index));
+        }
+
+        std::optional<primary_key> agent_foreign_key = std::nullopt;
+        if(code_object_info.agent_id.has_value())
+        {
+            agent_foreign_key =
+                m_data_identifiers->m_agent_id_map.at(code_object_info.agent_id.value());
+        }
 
         m_insert_statements->code_object_info_statement()(code_object_info.id,
                                                           code_object_info.node_id,
-                                                          code_object_info.process_id,
+                                                          process_primary_key,
                                                           agent_foreign_key,
                                                           code_object_info.uri,
                                                           code_object_info.ld_base,
@@ -677,9 +702,9 @@ public:
             LOG_WARNING("Track already registered: node_id: {}, process_id: {}, "
                         "thread_id: {}, name: {}",
                         track.node_id,
-                        process_id,
-                        thread_id,
-                        name);
+                        process_print_value,
+                        thread_print_value,
+                        name_print_value);
             return;
         }
 
