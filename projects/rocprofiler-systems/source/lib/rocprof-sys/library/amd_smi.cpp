@@ -875,15 +875,18 @@ config()
         metadata_initialize_smi_pmc(_dev_id);
     }
 
-    // Get AI NIC data for all NICs at once.
-    nic_data::nic_stats_collector.update_stats();
-
-    for(uint32_t nic_index = 0; nic_index < nic_data::nic_vec.size(); ++nic_index)
+    if(get_use_ainic_stat_enabled())
     {
-        auto nic_bundle = std::deque<nic_data>{};
-        nic_sampler_vec.push_back(nic_bundle);
-        metadata_initialize_ainic_smi_tracks(nic_index);
-        metadata_initialize_ainic_smi_pmc(nic_index);
+        // Get AI NIC data for all NICs at once.
+        nic_data::nic_stats_collector.update_stats();
+
+        for(uint32_t nic_index = 0; nic_index < nic_data::nic_vec.size(); ++nic_index)
+        {
+            auto nic_bundle = std::deque<nic_data>{};
+            nic_sampler_vec.push_back(nic_bundle);
+            metadata_initialize_ainic_smi_tracks(nic_index);
+            metadata_initialize_ainic_smi_pmc(nic_index);
+        }
     }
 }
 
@@ -904,7 +907,10 @@ sample()
         _data->emplace_back(data{ itr });
     }
 
-    nic_sample();
+    if(get_use_ainic_stat_enabled())
+    {
+        nic_sample();
+    }
 }
 
 void
@@ -1453,7 +1459,10 @@ setup()
             }
         }
 
-        setup_ainic();
+        if(get_use_ainic_stat_enabled())
+        {
+            setup_ainic();
+        }
 
         is_initialized() = true;
         data::setup();
@@ -1529,11 +1538,14 @@ post_process()
         data::post_process(itr);
     }
 
-    for(size_t i = 0; i < nic_data::nic_vec.size(); ++i)
+    if(get_use_ainic_stat_enabled())
     {
-        auto& nic = nic_data::nic_vec.at(i);
-        LOG_DEBUG("Post-processing ainic data for NIC: {}", nic);
-        nic_data::post_process(i);
+        for(size_t i = 0; i < nic_data::nic_vec.size(); ++i)
+        {
+            auto& nic = nic_data::nic_vec.at(i);
+            LOG_DEBUG("Post-processing ainic data for NIC: {}", nic);
+            nic_data::post_process(i);
+        }
     }
 }
 
