@@ -2,15 +2,28 @@
 
 Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs.amd.com/projects/HIP/en/latest/index.html)
 
-## HIP 8.0 for ROCm 8.0
+## HIP 7.11 for ROCm 7.11
 
 ### Added
 
-* New HIP APIs
-    - `hipKernelGetParamInfo`   returns the offset and size of a kernel parameter
+* New HIP API
+    - `hipKernelGetParamInfo` returns the offset and size of a kernel parameter.
+* New HIP flag
+    - `HIP_POINTER_ATTRIBUTE_IS_LEGACY_HIP_IPC_CAPABLE` is now supported in the `hipPointerGetAttribute` API, providing parity with the equivalent CUDA attribute.
 
-* New HIP supports
-    - `grid_group::block_rank()` returns the rank of the block in the calling thread
+### Resolved issues
+
+* A bug in inter‑GPU copy operations has been fixed by ensuring that the SDMA engine allocator is always queried for inter‑GPU transfers instead of reusing a previously cached engine. Because the allocator applies specialized logic to choose high‑bandwidth engines for each source–destination agent pair, reusing an engine selected for a different copy type could lead to reduced performance or incorrect behavior.
+* An error in `hipMemRangeGetAttribute` that occurred when memory was allocated with `hipMallocAsync` has been resolved. The HIP runtime now correctly handles coherency‑range mode for memory‑pool pointers in the ROCm device implementation.
+* A race condition in the packet batch‑write logic has been fixed, where the Command Processor (CP) fetcher could read malformed packets. The update now invalidates all packet headers before writing packet bodies and then validates the headers in a defined order to prevent the fetcher from accessing incomplete packets.
+* A deadlock that occurred when `hipMallocAsync` was used after launching a persistent or long‑running kernel in another stream has been resolved. The HIP runtime now removes the default‑stream wait during mapping operations, preventing the stall.
+* An incorrect granularity value returned for device memory when requesting the recommended granularity through the `hipMemGetAllocationGranularity` API has been fixed.
+
+### Optimized
+
+* HIP runtime implemented a global SDMA engine allocator with per‑stream affinity to improve memory copy performance.
+* Packet batch‑dispatch optimization: A new graph‑segment scheduling mechanism has been added to the HIP runtime to reduce CPU overhead during HIP graph launches. It uses hierarchical path discovery to construct execution segments that can be dispatched efficiently in parallel, replacing the traditional topological‑ordering approach.
+* Improved `hipGraphLaunch` parallelism for complex data‑parallel graphs. The HIP runtime now eliminates recursion, applies topological ordering, and removes an extra loop in `hipGraphLaunch` to streamline execution.
 
 ## HIP 7.2 for ROCm 7.2
 
