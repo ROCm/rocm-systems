@@ -52,7 +52,7 @@
 int
 main(int argc, char** argv)
 {
-    if(argc != 3)
+    if(argc < 3)
     {
         std::cout << "error: wrong number of arguments\n";
         return 1;
@@ -100,13 +100,20 @@ main(int argc, char** argv)
         ROCATTACH_CALL(rocattach_attach(pid2));
 
         // Send signal to child processes after attaching
-        if(kill(pid1, SIGINT) == -1)
+        if(argc >= 4)
         {
-            std::cout << "error: Failed to send signal to pid1\n";
-        }
-        if(kill(pid2, SIGINT) == -1)
-        {
-            std::cout << "error: Failed to send signal to pid2\n";
+            std::string signal_arg{argv[3]};
+            if(signal_arg == "--send-signal")
+            {
+                if(kill(pid1, SIGWINCH) == -1)
+                {
+                    std::cout << "error: Failed to send signal to pid1\n";
+                }
+                if(kill(pid2, SIGWINCH) == -1)
+                {
+                    std::cout << "error: Failed to send signal to pid2\n";
+                }
+            }
         }
 
         // Wait for child processes to continue executing
