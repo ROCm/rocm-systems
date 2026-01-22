@@ -62,9 +62,6 @@
     return HSA_STATUS_ERROR;   \
   }
 
-std::vector<std::string> EventDimension::dimension_list;
-std::unordered_map<std::string, size_t> EventDimension::dimension_table;
-
 namespace aql_profile_v2 {
 // Command buffer partitioning manager
 // Supports Pre/Post commands partitioning
@@ -316,9 +313,8 @@ PUBLIC_API hsa_status_t aqlprofile_pmc_iterate_data(aqlprofile_handle_t handle,
 PUBLIC_API hsa_status_t aqlprofile_iterate_event_ids(aqlprofile_eventname_callback_t callback,
                                                      void* user_data) {
   try {
-    EventDimension::init();
-    for (auto& [name, id] : EventDimension::dimension_table) {
-      if (auto ret = callback(id, name.c_str(), user_data); ret != HSA_STATUS_SUCCESS) {
+    for(const auto& [name, id] : EventDimension::get_dimension_table()) {
+      if(auto ret = callback(id, name.data(), user_data); ret != HSA_STATUS_SUCCESS) {
         return ret;
       }
     }
@@ -437,8 +433,8 @@ PUBLIC_API hsa_status_t aqlprofile_get_pmc_info(const aqlprofile_pmc_profile_t* 
         if (!info) return HSA_STATUS_ERROR;
 
         const auto& attrib =
-            EventAttribDimension::get(profile->agent, (hsa_ven_amd_aqlprofile_block_name_t)block);
-        if (!attrib.get_num()) return HSA_STATUS_ERROR;
+            EventAttribDimension::get(profile->agent, static_cast<hsa_ven_amd_aqlprofile_block_name_t>(block));
+        if(attrib.get_num() == 0u) return HSA_STATUS_ERROR;
 
         query->id = block;
         query->instance_count = attrib.get_num_instances();

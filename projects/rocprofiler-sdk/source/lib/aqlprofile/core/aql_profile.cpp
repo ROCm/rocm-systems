@@ -558,8 +558,7 @@ hsa_ven_amd_aqlprofile_get_info(const hsa_ven_amd_aqlprofile_profile_t* profile,
 PUBLIC_API hsa_status_t
 hsa_ven_amd_aqlprofile_iterate_event_ids(hsa_ven_amd_aqlprofile_eventname_callback_t callback) {
   try {
-    EventDimension::init();
-    for (auto& [name, id] : EventDimension::dimension_table) callback(id, name.c_str());
+    for (const auto& [name, id] : EventDimension::get_dimension_table()) callback(id, name.data());
   } catch (...) {
     return HSA_STATUS_ERROR;
   }
