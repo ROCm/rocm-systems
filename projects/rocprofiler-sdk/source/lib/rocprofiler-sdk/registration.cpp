@@ -41,7 +41,6 @@
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/hsa/scratch_memory.hpp"
-#include "lib/rocprofiler-sdk/hsa_tool_hooks.hpp"
 #include "lib/rocprofiler-sdk/intercept_table.hpp"
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
 #include "lib/rocprofiler-sdk/kfd/kfd.hpp"
@@ -892,13 +891,6 @@ finalize()
     std::call_once(_once, []() {
         auto num_clients = get_num_clients();
         set_fini_status(-1);
-
-        // Check if OnUnload already synchronized async operations
-        // If so, the sync operations in _fini functions will be no-ops
-        if(hsa_tool_hooks::get_on_unload_status() > 0)
-        {
-            ROCP_INFO << "OnUnload already synchronized async operations";
-        }
 
         hsa::async_copy_fini();
         counters::device_counting_service_finalize();

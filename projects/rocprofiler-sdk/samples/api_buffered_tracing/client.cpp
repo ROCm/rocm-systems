@@ -512,14 +512,7 @@ shutdown()
 {
     if(client_id)
     {
-        // Buffer flush may return ERROR_FINALIZED if rocprofiler has already finalized
-        // and flushed buffers - this is not an error
-        auto flush_status = rocprofiler_flush_buffer(client_buffer);
-        if(flush_status != ROCPROFILER_STATUS_SUCCESS &&
-           flush_status != ROCPROFILER_STATUS_ERROR_FINALIZED)
-        {
-            ROCPROFILER_CALL(flush_status, "buffer flush");
-        }
+        ROCPROFILER_CALL(rocprofiler_flush_buffer(client_buffer), "buffer flush");
         client_fini_func(*client_id);
     }
 }

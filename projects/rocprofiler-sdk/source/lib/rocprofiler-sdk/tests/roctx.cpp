@@ -263,21 +263,20 @@ tool_tracing_buffered(rocprofiler_context_id_t      context,
              << "(" << record->operation << "), drop_count=" << drop_count
              << ", start=" << record->start_timestamp << ", stop=" << record->end_timestamp;
 
-        auto corr_id = static_cast<int64_t>(record->correlation_id.internal);
+        static int64_t last_corr_id = -1;
+        auto           corr_id      = static_cast<int64_t>(record->correlation_id.internal);
 
         std::cout << info.str() << "\n" << std::flush;
         EXPECT_GE(context.handle, 0) << info.str();
         EXPECT_GT(record->thread_id, 0) << info.str();
         EXPECT_GT(record->kind, 0) << info.str();
-        // Note: correlation IDs are not guaranteed to be monotonically increasing
-        // when records are sorted by timestamp. Temporal ordering should be validated
-        // using timestamp fields, not correlation ID values.
-        EXPECT_GT(corr_id, 0) << info.str();
+        EXPECT_GT(corr_id, last_corr_id) << info.str();
         EXPECT_GT(record->start_timestamp, 0) << info.str();
         EXPECT_GT(record->end_timestamp, 0) << info.str();
         EXPECT_LE(record->start_timestamp, record->end_timestamp) << info.str();
 
         cb_data->client_callback_count++;
+        last_corr_id = corr_id;
     }
 }
 
@@ -492,12 +491,8 @@ TEST(rocprofiler_lib, roctx_buffered_tracing)
 
     static fini_func_t tool_fini = [](void* client_data) -> void {
         auto* cb_data = static_cast<callback_data*>(client_data);
-        // Buffer flush may return ERROR_FINALIZED if rocprofiler has already finalized
-        // and flushed buffers - this is not an error
-        auto flush_status = rocprofiler_flush_buffer(cb_data->client_buffer);
-        EXPECT_TRUE(flush_status == ROCPROFILER_STATUS_SUCCESS ||
-                    flush_status == ROCPROFILER_STATUS_ERROR_FINALIZED)
-            << "rocprofiler buffer flush failed with status " << flush_status;
+        ROCPROFILER_CALL(rocprofiler_flush_buffer(cb_data->client_buffer),
+                         "rocprofiler context stop failed");
         int status = 0;
         ROCPROFILER_CALL(rocprofiler_context_is_active(cb_data->client_ctx, &status),
                          "rocprofiler_context_is_active failed");

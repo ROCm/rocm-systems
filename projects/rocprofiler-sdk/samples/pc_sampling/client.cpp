@@ -145,14 +145,7 @@ tool_fini(void* /*tool_data*/)
         for(auto buff_id : *pcs::get_pc_sampling_buffer_ids())
         {
             // Flush the buffer explicitly
-            // Buffer flush may return ERROR_FINALIZED if rocprofiler has already finalized
-            // and flushed buffers - this is not an error
-            auto flush_status = rocprofiler_flush_buffer(buff_id);
-            if(flush_status != ROCPROFILER_STATUS_SUCCESS &&
-               flush_status != ROCPROFILER_STATUS_ERROR_FINALIZED)
-            {
-                ROCPROFILER_CHECK(flush_status);
-            }
+            ROCPROFILER_CHECK(rocprofiler_flush_buffer(buff_id));
             // Destroying the buffer
             rocprofiler_status_t status = rocprofiler_destroy_buffer(buff_id);
             if(status == ROCPROFILER_STATUS_ERROR_BUFFER_BUSY)

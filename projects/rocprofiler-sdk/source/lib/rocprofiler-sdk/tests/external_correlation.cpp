@@ -204,9 +204,6 @@ tool_tracing_buffered(rocprofiler_context_id_t      context,
         EXPECT_GE(context.handle, 0) << info.str();
         EXPECT_GT(record->thread_id, 0) << info.str();
         EXPECT_GT(record->kind, 0) << info.str();
-        // Note: correlation IDs are not guaranteed to be monotonically increasing
-        // when records are sorted by timestamp. Temporal ordering should be validated
-        // using timestamp fields, not correlation ID values.
         EXPECT_GT(corr_id, 0) << info.str();
         EXPECT_GT(record->start_timestamp, 0) << info.str();
         EXPECT_GT(record->end_timestamp, 0) << info.str();
