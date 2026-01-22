@@ -5,7 +5,10 @@
 #include <string>
 
 #include "core/amd_smi.hpp"
-#include <amd_smi/amd_smi_system.h>
+
+#ifdef USE_AINIC
+#    include <amd_smi/amd_smi_system.h>
+#endif
 
 struct NICData
 {
@@ -34,7 +37,10 @@ struct NICData
 
 class AINICStatsCollector
 {
+public:
     using nic_params_t = std::map<std::string, NICData>;
+
+private:
 
 #ifdef USE_AINIC
     amd::smi::AMDSmiSystem&
@@ -64,12 +70,12 @@ public:
     // Update the statistics for all NICs.
     void update_stats();
 
-    const nic_params_t& params();
-
     // Find nic and fill in the data.
     // If the nic is not found, return false.
     bool find_nic(const std::string& nic, NICData& data);
 
 private:
-    void update_data_for_one_nic(NICData&);
+    size_t get_nic_count();
+
+    void update_data_for_one_nic(amdsmi_processor_handle processor_handle);
 };
