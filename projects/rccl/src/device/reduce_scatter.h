@@ -23,7 +23,7 @@ namespace {
     ncclRing *ring = &ncclShmem.channel.ring;
 #endif
     int const *ringRanks = ring->userRanks;
-    const int nranks = ncclShmem.comm.nRanks;
+    const int nranks = ncclShmem.comm.nRanks; 
     size_t count;
     size_t gridOffset;
     size_t channelCount;

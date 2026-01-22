@@ -524,6 +524,7 @@ set(SRC_FILES
   src/device/reduce.h
   src/device/reduce_kernel.h
   src/device/reduce_scatter.h
+  src/device/reduce_scatter_direct.h
   src/device/rccl_metadata.h
   src/device/rccl_ptr.h
   src/device/sendrecv.h
