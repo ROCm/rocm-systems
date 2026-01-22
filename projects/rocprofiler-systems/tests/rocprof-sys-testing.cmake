@@ -1,24 +1,5 @@
-# MIT License
-#
-# Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
 #
 # configuration and functions for testing
@@ -420,72 +401,6 @@ ${_FILE_CONTENTS}
         list(APPEND _ENV_CONTENTS "ROCPROFSYS_DEBUG_SETTINGS=1")
     endif()
     set(${_ENV} "${_ENV_CONTENTS}" PARENT_SCOPE)
-endfunction()
-
-# -------------------------------------------------------------------------------------- #
-# Check GPU architectures on the system. If a regex is provided, it will be used to filter
-# the architectures. Otherwise, all architectures will be returned. Uses rocminfo to get
-# the architectures.
-function(ROCPROFILER_SYSTEMS_GET_GFX_ARCHS _VAR)
-    cmake_parse_arguments(ARG "ECHO" "PREFIX;DELIM;GFX_MATCH" "" ${ARGN})
-
-    if(NOT DEFINED ARG_DELIM)
-        set(ARG_DELIM ", ")
-    endif()
-
-    if(NOT DEFINED ARG_PREFIX)
-        set(ARG_PREFIX "[${PROJECT_NAME}] ")
-    endif()
-
-    find_program(
-        rocminfo_EXECUTABLE
-        NAMES rocminfo
-        HINTS ${ROCmVersion_DIR} ${ROCM_PATH} /opt/rocm
-        PATHS ${ROCmVersion_DIR} ${ROCM_PATH} /opt/rocm
-        PATH_SUFFIXES bin
-    )
-
-    if(rocminfo_EXECUTABLE)
-        execute_process(
-            COMMAND ${rocminfo_EXECUTABLE}
-            RESULT_VARIABLE rocminfo_RET
-            OUTPUT_VARIABLE rocminfo_OUT
-            ERROR_VARIABLE rocminfo_ERR
-            OUTPUT_STRIP_TRAILING_WHITESPACE
-            ERROR_STRIP_TRAILING_WHITESPACE
-        )
-
-        if(rocminfo_RET EQUAL 0)
-            string(REGEX MATCHALL "gfx([0-9A-Fa-f]+)" rocminfo_GFXINFO "${rocminfo_OUT}")
-            list(REMOVE_DUPLICATES rocminfo_GFXINFO)
-            set(${_VAR} "${rocminfo_GFXINFO}" PARENT_SCOPE)
-
-            if(ARG_ECHO)
-                string(REPLACE ";" "${ARG_DELIM}" _GFXINFO_ECHO "${rocminfo_GFXINFO}")
-                message(STATUS "${ARG_PREFIX}System architectures: ${_GFXINFO_ECHO}")
-            endif()
-
-            # Filter the architectures if a regex is provided
-            if(ARG_GFX_MATCH)
-                string(REGEX MATCH "${ARG_GFX_MATCH}" _GFX_MATCH "${rocminfo_GFXINFO}")
-                list(REMOVE_DUPLICATES _GFX_MATCH)
-                set(${_VAR} "${_GFX_MATCH}" PARENT_SCOPE)
-
-                if(ARG_ECHO)
-                    string(REPLACE ";" "${ARG_DELIM}" _GFXINFO_ECHO "${_GFX_MATCH}")
-                    message(
-                        STATUS
-                        "${ARG_PREFIX}System architectures (filtered: ${ARG_GFX_MATCH}): ${_GFXINFO_ECHO}"
-                    )
-                endif()
-            endif()
-        else()
-            message(
-                AUTHOR_WARNING
-                "${rocminfo_EXECUTABLE} failed with error code ${rocminfo_RET}\nstderr:\n${rocminfo_ERR}\nstdout:\n${rocminfo_OUT}"
-            )
-        endif()
-    endif()
 endfunction()
 
 # -------------------------------------------------------------------------------------- #

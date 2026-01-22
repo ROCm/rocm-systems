@@ -752,6 +752,8 @@
     #endif
         "=== Following tests disabled as it should be a local perf test",
         "Performance_hipExtLaunchKernelGGL_QueryGPUFrequency",
+        "Unit_hipDynamicLogging_Positive_Basic",
+        "Unit_hipDynamicLogging_Positive_MultipleEnableDisable",
         "End of json"
     ]
 }

@@ -192,8 +192,8 @@ namespace RcclUnitTesting
     case ncclCollAllReduce:     ss << "ncclAllReduce";     break;
     case ncclCollGather:        ss << "ncclGather";        break;
     case ncclCollScatter:       ss << "ncclScatter";       break;
-    case ncclCollAllToAll:      ss << "ncclAllToAll";      break;
-    case ncclCollAllToAllv:     ss << "ncclAllToAllv";     break;
+    case ncclCollAlltoAll:      ss << "ncclAlltoAll";      break;
+    case ncclCollAlltoAllv:     ss << "ncclAlltoAllv";     break;
     case ncclCollSend:          ss << "ncclSend";          break;
     case ncclCollRecv:          ss << "ncclRecv";          break;
     default:                    ss << "[Unknown]";         break;
@@ -276,7 +276,7 @@ namespace RcclUnitTesting
       *numInputElements  = totalRanks * N;
       *numOutputElements = N;
       break;
-    case ncclCollAllToAll:
+    case ncclCollAlltoAll:
       *numInputElements = totalRanks * N;
       *numOutputElements = totalRanks * N;
       break;
