@@ -204,8 +204,9 @@ jobs:
 
       - name: Check Test Results
         if: always()
+        shell: bash
         run: |
-          if [ "${{ steps.test.outcome }}" == "failure" ]; then
+          if [[ "${{ steps.test.outcome }}" == "failure" ]]; then
             echo "::error::Tests failed - see CDash for details: https://my.cdash.org/index.php?project=rocprofiler-compute"
             exit 1
           fi
