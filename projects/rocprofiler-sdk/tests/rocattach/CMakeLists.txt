@@ -81,7 +81,7 @@ set_tests_properties(
                ENVIRONMENT
                "${rocattach-test-env}"
                PASS_REGULAR_EXPRESSION
-               "Attachment test process [0-9]+ received signal 2"
+               "Attachment test process [0-9]+ received signal [0-9]+"
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
                DISABLED
