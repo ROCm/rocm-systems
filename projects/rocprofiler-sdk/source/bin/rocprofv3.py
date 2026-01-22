@@ -123,6 +123,89 @@ def strtobool(val):
         raise ValueError(f"invalid truth value {val} (type={val_type})")
 
 
+def get_mpi_rank():
+    """Detect MPI rank from various MPI implementation environment variables.
+    Returns the rank as an integer, or None if not running under MPI.
+    """
+    # OpenMPI
+    if "OMPI_COMM_WORLD_RANK" in os.environ:
+        return int(os.environ["OMPI_COMM_WORLD_RANK"])
+    # MVAPICH2
+    elif "MV2_COMM_WORLD_RANK" in os.environ:
+        return int(os.environ["MV2_COMM_WORLD_RANK"])
+    # SLURM
+    elif "SLURM_PROCID" in os.environ:
+        return int(os.environ["SLURM_PROCID"])
+    # PMI (used by some MPI implementations)
+    elif "PMI_RANK" in os.environ:
+        return int(os.environ["PMI_RANK"])
+    # Flux
+    elif "FLUX_TASK_RANK" in os.environ:
+        return int(os.environ["FLUX_TASK_RANK"])
+    # MPICH
+    elif "PMI_ID" in os.environ:
+        return int(os.environ["PMI_ID"])
+    return None
+
+
+def parse_rank_specification(rank_spec):
+    """Parse a rank specification string and return a set of ranks.
+    Supports comma-separated ranges and individual ranks.
+    Examples: "0-3,8,10-15" -> {0,1,2,3,8,10,11,12,13,14,15}
+              "0,1,2" -> {0,1,2}
+    """
+    ranks = set()
+    if not rank_spec:
+        return ranks
+
+    for part in rank_spec.split(','):
+        part = part.strip()
+        if '-' in part:
+            # Handle range
+            try:
+                start, end = part.split('-')
+                start = int(start.strip())
+                end = int(end.strip())
+                if start > end:
+                    raise ValueError(f"Invalid range: {part} (start > end)")
+                ranks.update(range(start, end + 1))
+            except ValueError as e:
+                fatal_error(f"Invalid rank range specification '{part}': {e}")
+        else:
+            # Handle single rank
+            try:
+                ranks.add(int(part))
+            except ValueError:
+                fatal_error(f"Invalid rank specification '{part}': not a valid integer")
+
+    return ranks
+
+
+def should_rank_provide_output(mpi_ranks_spec=None):
+    """Check if the current MPI rank should provide profile/trace output.
+    Args:
+        mpi_ranks_spec: String specification of ranks (e.g., "0-3,8,10-15")
+                       If None, all ranks provide output (default behavior).
+    Returns:
+        True if this rank should provide output, False otherwise.
+    """
+    # If no specification provided, all ranks provide output (default)
+    if not mpi_ranks_spec:
+        return True
+
+    current_rank = get_mpi_rank()
+
+    # If we can't detect the rank, assume we should provide output
+    if current_rank is None:
+        return True
+
+    # Parse the rank specification
+    selected_ranks = parse_rank_specification(mpi_ranks_spec)
+
+    # Check if current rank is in the selected set
+    return current_rank in selected_ranks
+
+
 def resolve_library_path(val, args, is_sdk_lib=True):
     from pathlib import Path
 
@@ -229,6 +312,11 @@ def parse_arguments(args=None):
 For MPI applications (or other job launchers such as SLURM), place rocprofv3 inside the job launcher:
 
     $ mpirun -n 4 rocprofv3 --hip-trace -- ./mympiapp
+
+For MPI applications, select specific ranks to provide profile/trace output:
+
+    $ mpirun -n 16 rocprofv3 --hip-trace --mpi-ranks 0-3,8 -- ./mympiapp
+    $ srun -n 32 rocprofv3 --hip-trace --mpi-ranks 0 -- ./myapp
 
 For attachment profiling of running processes:
 
@@ -568,6 +656,13 @@ For attachment profiling of running processes:
 
     filter_options = parser.add_argument_group("Filtering options")
 
+    filter_options.add_argument(
+        "--mpi-ranks",
+        help="Specify which MPI ranks should provide profile/trace output using comma-separated ranges and individual ranks (e.g., '0-3,8,10-15'). If not specified, all ranks provide output. The tool runs on all ranks but only selected ranks generate output files.",
+        default=os.environ.get("ROCPROF_MPI_RANKS", None),
+        type=str,
+        metavar="RANK_SPECIFICATION",
+    )
     filter_options.add_argument(
         "--kernel-include-regex",
         help="Include the kernels matching this filter from counter-collection and thread-trace data (non-matching kernels will be excluded)",
@@ -1148,6 +1243,27 @@ def run(app_args, args, **kwargs):
     app_env = dict(os.environ)
     use_execv = kwargs.get("use_execv", True)
     app_pass = kwargs.get("pass_id", None)
+
+    # Check if this MPI rank should provide profile/trace output
+    # If not, run the application without profiling instrumentation
+    if hasattr(args, 'mpi_ranks') and args.mpi_ranks is not None:
+        if not should_rank_provide_output(args.mpi_ranks):
+            current_rank = get_mpi_rank()
+            if current_rank is not None and args.log_level in ("info", "trace"):
+                sys.stderr.write(
+                    f"[rocprofv3] MPI rank {current_rank} not in selected ranks "
+                    f"({args.mpi_ranks}), running application without profiling\n"
+                )
+                sys.stderr.flush()
+            # Execute application without profiling
+            if use_execv:
+                os.execvpe(app_args[0], app_args, env=app_env)
+            else:
+                try:
+                    exit_code = subprocess.check_call(app_args, env=app_env)
+                    return exit_code
+                except Exception as e:
+                    fatal_error(f"{e}\n")
 
     def setattrifnone(obj, attr, value):
         if getattr(obj, f"{attr}") is None:

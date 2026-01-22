@@ -168,3 +168,71 @@ Assuming the hostname as `ubuntu-latest`, the process IDs as 3000020 and 3000019
     ubuntu-latest.3000019.0/ubuntu-latest/3000019_agent_info.csv
     ubuntu-latest.3000020.1/ubuntu-latest/3000020_hip_api_trace.csv
     ubuntu-latest.3000019.0/ubuntu-latest/3000019_hip_api_trace.csv
+
+Selective rank profiling
+==========================
+
+When running large-scale MPI jobs, collecting profiling data from all ranks can generate excessive output and may not be necessary. The ``--mpi-ranks`` option allows you to specify which MPI ranks should provide profile and trace output, while the tool still runs on all ranks to maintain program correctness.
+
+Specifying ranks to profile
+-----------------------------
+
+Use the ``--mpi-ranks`` option with a comma-separated list of ranks and ranges:
+
+.. code-block:: bash
+
+    # Profile only rank 0
+    mpirun -n 16 rocprofv3 --hip-trace --mpi-ranks 0 -- <application_path>
+
+    # Profile ranks 0-3 and rank 8
+    mpirun -n 16 rocprofv3 --hip-trace --mpi-ranks 0-3,8 -- <application_path>
+
+    # Profile ranks 0, 4, 8, and 12
+    mpirun -n 16 rocprofv3 --hip-trace --mpi-ranks 0,4,8,12 -- <application_path>
+
+    # Profile a range of ranks (10 through 15)
+    srun -n 32 rocprofv3 --kernel-trace --mpi-ranks 10-15 -- <application_path>
+
+The rank specification syntax supports:
+
+- **Individual ranks**: Comma-separated integers (e.g., ``0,1,2,8``)
+- **Ranges**: Hyphen-separated start and end values (e.g., ``0-7`` for ranks 0 through 7)
+- **Combined**: Mix of individual ranks and ranges (e.g., ``0-3,8,10-15``)
+
+Environment variable
+---------------------
+
+You can also set the rank specification using the ``ROCPROF_MPI_RANKS`` environment variable:
+
+.. code-block:: bash
+
+    export ROCPROF_MPI_RANKS="0-3,8"
+    mpirun -n 16 rocprofv3 --hip-trace -- <application_path>
+
+The command-line option ``--mpi-ranks`` takes precedence over the environment variable.
+
+Behavior
+---------
+
+When using ``--mpi-ranks``:
+
+- The ``rocprofv3`` tool runs on **all** MPI ranks to avoid disrupting the application's execution
+- Only the specified ranks collect and output profiling/trace data
+- Non-selected ranks execute the application without profiling overhead or output generation
+- This reduces output file count and storage requirements for large-scale runs
+
+Default behavior
+-----------------
+
+If ``--mpi-ranks`` is not specified, all ranks provide output (default behavior), which is equivalent to running without rank filtering.
+
+Supported MPI implementations
+-------------------------------
+
+The rank detection supports the following MPI implementations and job launchers:
+
+- OpenMPI (``OMPI_COMM_WORLD_RANK``)
+- MVAPICH2 (``MV2_COMM_WORLD_RANK``)
+- MPICH (``PMI_ID``, ``PMI_RANK``)
+- SLURM (``SLURM_PROCID``)
+- Flux (``FLUX_TASK_RANK``)
