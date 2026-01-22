@@ -915,6 +915,16 @@ void Sampler::fillSampleDescriptor(hsa_ext_sampler_descriptor_v2_t& samplerDescr
   samplerDescriptor.filter_mode = sampler.filterMode() == CL_FILTER_NEAREST
                                       ? HSA_EXT_SAMPLER_FILTER_MODE_NEAREST
                                       : HSA_EXT_SAMPLER_FILTER_MODE_LINEAR;
+  switch (sampler.mipFilter()) {
+    case CL_FILTER_NEAREST:
+      samplerDescriptor.mipmap_filter_mode = HSA_EXT_SAMPLER_FILTER_MODE_NEAREST;
+      break;
+    case CL_FILTER_LINEAR:
+      samplerDescriptor.mipmap_filter_mode = HSA_EXT_SAMPLER_FILTER_MODE_LINEAR;
+      break;
+    default:
+      samplerDescriptor.mipmap_filter_mode = HSA_EXT_SAMPLER_FILTER_MODE_NONE;
+  }
   samplerDescriptor.coordinate_mode = sampler.normalizedCoords()
                                           ? HSA_EXT_SAMPLER_COORDINATE_MODE_NORMALIZED
                                           : HSA_EXT_SAMPLER_COORDINATE_MODE_UNNORMALIZED;

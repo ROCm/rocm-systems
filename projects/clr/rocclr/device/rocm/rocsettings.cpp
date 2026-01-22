@@ -177,6 +177,10 @@ bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, b
     gwsInitSupported_ = false;
   }
 
+  if (GPU_MIPMAP) {
+    enableExtension(ClKhrMipMapImage);
+    enableExtension(ClKhrMipMapImageWrites);
+  }
   // Override current device settings
   override();
 

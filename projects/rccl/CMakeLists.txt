@@ -26,7 +26,7 @@ option(BUILD_TESTS                             "Build unit test programs"       
 option(COLLTRACE                               "Collective Trace Option"                       ON)
 option(DUMP_ASM                                "Disassemble and dump"                          OFF)
 option(ENABLE_CODE_COVERAGE                    "Enable code coverage"                          OFF)
-option(ENABLE_MSCCL_KERNEL                     "Enable MSCCL while compiling"                  ON)
+option(ENABLE_MSCCL_KERNEL                     "Enable MSCCL while compiling"                  OFF)
 option(ENABLE_MSCCLPP                          "Enable MSCCL++"                                OFF)
 option(ENABLE_MSCCLPP_CLIP                     "Enable MSCCL++ CLIP"                           OFF)
 option(ENABLE_MSCCLPP_EXECUTOR                 "Enable MSCCL++ Executor"                       OFF)
@@ -42,6 +42,7 @@ option(TIMETRACE                               "Enable time-trace during compila
 option(TRACE                                   "Enable additional tracing"                     OFF)
 option(FAULT_INJECTION                         "Enable fault injection"                        ON)
 option(QUIET_WARNINGS                          "Supress compiler warnings"                     OFF)
+option(ENABLE_ROCSHMEM                         "Enable rocSHMEM support in RCCL"               OFF)
 
 # Default GPU architectures to build
 #==================================================================================================
@@ -65,6 +66,11 @@ include(CheckSymbolExists)
 include(cmake/Dependencies.cmake) # GTest, rocm-cmake, rocm_local_targets
 include(cmake/CheckSymbolExistsNoWarn.cmake)
 
+# Include rocSHMEM build module only if enabled
+if(ENABLE_ROCSHMEM)
+  include(cmake/ROCSHMEM.cmake)
+endif()
+
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 # Build only for local GPU architecture
@@ -79,6 +85,9 @@ endif()
 
 # Determine which GPU architectures to build for
 set(GPU_TARGETS "${DEFAULT_GPUS}" CACHE STRING "Target default GPUs if GPU_TARGETS is not defined.")
+
+# ROCM NetIB patch
+include(cmake/rocmIb.cmake)
 
 # Modify GPU architectures for Address Sanitizer builds by appending "xnack+"
 if (BUILD_ADDRESS_SANITIZER)
@@ -252,26 +261,56 @@ find_package(hsa-runtime64 REQUIRED)
 get_target_property(HSA_INCLUDE_PATH hsa-runtime64::hsa-runtime64 INTERFACE_INCLUDE_DIRECTORIES)
 message(STATUS "HSA runtime: ${HSA_INCLUDE_PATH}")
 
-## Check for ROCM-smi
-find_package(rocm_smi PATHS ${ROCM_PATH}/lib/cmake/rocm_smi)
-if (rocm_smi_FOUND)
-  message(STATUS "Found rocm_smi at ${ROCM_SMI_INCLUDE_DIR}")
-else()
-  message(STATUS "Checking old include directory structure for rocm_smi")
-  set(ROCM_SMI_INCLUDE_DIR "${ROCM_PATH}/rocm_smi/include")
-  set(ROCM_SMI_LIB_DIR     "${ROCM_PATH}/rocm_smi/lib")
-  set(ROCM_SMI_LIBRARIES   rocm_smi64)
+## Check for amd-smi if ROCm 7.11.0 or newer
+if(ROCM_VERSION VERSION_GREATER_EQUAL "71100")
+  find_package(amd_smi PATHS ${ROCM_PATH}/lib/cmake/amd_smi)
+  if(amd_smi_FOUND)
+    message(STATUS "amd_smi_INCLUDE_DIR: ${amd_smi_INCLUDE_DIR}")
+    message(STATUS "amd_smi_LIB_DIR: ${amd_smi_LIB_DIR}")
+    set(SMI_INCLUDE_DIR "${amd_smi_INCLUDE_DIR}" CACHE INTERNAL "amd-smi include directory")
+    set(SMI_LIB_DIR "${amd_smi_LIB_DIR}" CACHE INTERNAL "amd-smi library directory")
+    set(SMI_LIB_NAME "amd-smi-lib" CACHE INTERNAL "amd-smi-lib for packaging")
+    if(NOT EXISTS "${SMI_INCLUDE_DIR}" OR NOT EXISTS "${SMI_LIB_DIR}")
+      message(FATAL_ERROR "amd_smi not found in ${SMI_INCLUDE_DIR}")
+    endif()
+    message(STATUS "Found amd_smi at ${SMI_INCLUDE_DIR}")
+    set(SMI_LIBRARIES amd_smi)
+    set(USE_AMDSMI ON CACHE INTERNAL "Use amd-smi instead of rocm-smi")
+  endif()
 endif()
-check_include_file_cxx("${ROCM_SMI_INCLUDE_DIR}/rocm_smi/rocm_smi64Config.h" HAVE_ROCM_SMI64CONFIG)
-### Check for RSMI_INIT_FLAG_THRAD_ONLY_MUTEX support
-file(READ "${ROCM_SMI_INCLUDE_DIR}/rocm_smi/rocm_smi.h" rocm_smi_incl)
-string(FIND "${rocm_smi_incl}" "RSMI_INIT_FLAG_THRAD_ONLY_MUTEX" matchres)
-if(${matchres} EQUAL -1)
-  message(STATUS "RSMI_INIT_FLAG_THRAD_ONLY_MUTEX not supported")
-else()
-  message(STATUS "RSMI_INIT_FLAG_THRAD_ONLY_MUTEX supported")
-  set(HAVE_ROCM_SMI_THREAD_ONLY_MUTEX True)
-endif ()
+
+if(NOT USE_AMDSMI)
+  ## Fallback to rocm-smi if amd-smi not found or ROCm < 7.11.0
+  message(WARNING "Could not find amd_smi. Falling back to rocm_smi.")
+  find_package(rocm_smi PATHS ${ROCM_PATH}/lib/cmake/rocm_smi)
+  if(rocm_smi_FOUND)
+    set(SMI_INCLUDE_DIR "${rocm_smi_INCLUDE_DIR}" CACHE INTERNAL "rocm-smi include directory")
+    set(SMI_LIB_DIR "${rocm_smi_LIB_DIR}" CACHE INTERNAL "rocm-smi library directory")
+  else()
+    message(WARNING "CMake could not find rocm-smi. Checking old include directory structure for rocm_smi")
+    set(SMI_INCLUDE_DIR "${ROCM_PATH}/rocm_smi/include")
+    set(SMI_LIB_DIR     "${ROCM_PATH}/rocm_smi/lib")
+  endif()
+
+  if(NOT EXISTS "${SMI_INCLUDE_DIR}" OR NOT EXISTS "${SMI_LIB_DIR}")
+    message(FATAL_ERROR "rocm_smi not found in ${SMI_INCLUDE_DIR}")
+  endif()
+  message(STATUS "Found rocm_smi at ${SMI_INCLUDE_DIR}")
+  set(SMI_LIB_NAME "rocm-smi-lib" CACHE INTERNAL "rocm-smi-lib for packaging")
+  set(SMI_LIBRARIES rocm_smi64)
+
+  check_include_file_cxx("${SMI_INCLUDE_DIR}/rocm_smi/rocm_smi64Config.h" HAVE_ROCM_SMI64CONFIG)
+
+  ### Check for RSMI_INIT_FLAG_THRAD_ONLY_MUTEX support
+  file(READ "${SMI_INCLUDE_DIR}/rocm_smi/rocm_smi.h" rocm_smi_incl)
+  string(FIND "${rocm_smi_incl}" "RSMI_INIT_FLAG_THRAD_ONLY_MUTEX" matchres)
+  if(${matchres} EQUAL -1)
+    message(STATUS "RSMI_INIT_FLAG_THRAD_ONLY_MUTEX not supported")
+  else()
+    message(STATUS "RSMI_INIT_FLAG_THRAD_ONLY_MUTEX supported")
+    set(HAVE_ROCM_SMI_THREAD_ONLY_MUTEX True)
+  endif ()
+endif()
 
 ## Check for BFD library if custom backtrace is requested
 if(BUILD_BFD)
@@ -318,6 +357,8 @@ if(BUILD_BFD)
   endif()
 endif()
 
+
+
 # Check for --amdgpu-kernarg-preload-count
 check_cxx_compiler_flag("-mllvm --amdgpu-kernarg-preload-count=16" HAVE_KERNARG_PRELOAD)
 if (HAVE_KERNARG_PRELOAD)
@@ -332,6 +373,7 @@ endif()
 ## Disable building MSCCL++ if the build environment is invalid
 ## Currently MSCCL++ is supported only on gfx942 and gfx950, and only on Ubuntu and CentOS
 set(MSCCLPP_SUPPORTED_ARCHS "gfx942" "gfx942:xnack-" "gfx942:xnack+" "gfx950" "gfx950:xnack-" "gfx950:xnack+")
+
 
 # Check if any of the supported architectures are in GPU_TARGETS
 set(ARCH_MATCH_FOUND OFF)
@@ -354,6 +396,20 @@ if (ENABLE_MSCCLPP AND ROCM_VERSION VERSION_LESS "60200")
   set(ENABLE_MSCCLPP OFF)
   message(WARNING "MSCCL++ integration only supported on ROCm 6.2.0 or greater; disabling MSCCL++ build")
 endif()
+
+## Disable WARP_SPEED if the build environment is invalid
+set(WARP_SPEED_SUPPORTED_ARCHS "gfx942" "gfx942:xnack-" "gfx942:xnack+" "gfx950" "gfx950:xnack-" "gfx950:xnack+")
+set(ARCH_MATCH_FOUND OFF)
+foreach(ARCH IN LISTS GPU_TARGETS)
+  if(ARCH IN_LIST WARP_SPEED_SUPPORTED_ARCHS)
+    set(ARCH_MATCH_FOUND ON)
+  endif()
+endforeach()
+if (NOT ARCH_MATCH_FOUND)
+  set(ENABLE_WARP_SPEED OFF)
+  message(WARNING "Can only build WARP_SPEED for supported GPU_TARGETS: ${WARP_SPEED_SUPPORTED_ARCHS}; current GPU_TARGETS: ${GPU_TARGETS}; so disabling WARP_SPEED build")
+endif()
+
 
 # cmake_host_system_information(RESULT HOST_OS_ID QUERY DISTRIB_ID) ## Requires cmake 3.22
 execute_process(
@@ -437,9 +493,12 @@ configure_file(src/nccl.h.in ${PROJECT_BINARY_DIR}/include/nccl.h)      # Used b
 set(SRC_FILES
   src/allocator.cc
   src/bootstrap.cc
+  src/ce_coll.cc
   src/channel.cc
   src/collectives.cc
+  src/commDump.cc
   src/debug.cc
+  src/dev_runtime.cc
   src/enqueue.cc
   src/group.cc
   src/init.cc
@@ -448,11 +507,12 @@ set(SRC_FILES
   src/msccl.cc
   src/proxy.cc
   src/rccl_wrap.cc
-  src/symmetric.cc
+  src/sym_kernels.cc
   src/transport.cc
   src/device/all_gather.h
   src/device/all_reduce.h
   src/device/alltoall_pivot.h
+  src/device/alltoall_gda.h
   src/device/broadcast.h
   src/device/common.h
   src/device/common_kernel.h
@@ -498,6 +558,7 @@ set(SRC_FILES
   src/include/BfdBacktrace.hpp
   src/include/bitops.h
   src/include/bootstrap.h
+  src/include/ce_coll.h
   src/include/channel.h
   src/include/checks.h
   src/include/collectives.h
@@ -507,6 +568,7 @@ set(SRC_FILES
   src/include/cpuset.h
 # src/include/cudawrap.h
   src/include/debug.h
+  src/include/dev_runtime.h
   src/include/device.h
   src/include/enqueue.h
   src/include/gdrwrap.h
@@ -521,6 +583,7 @@ set(SRC_FILES
   src/include/ipcsocket.h
   src/include/mnnvl.h
   src/include/nccl_common.h
+  src/include/nccl_device.h
   src/include/net_device.h
   src/include/net.h
   src/include/nvmlwrap.h
@@ -537,16 +600,16 @@ set(SRC_FILES
   src/include/register.h
   src/include/register_inline.h
   src/include/rccl_float8.h
-  src/include/rocm_smi_wrap.h
   src/include/rocmwrap.h
   src/include/roctx.h
   src/include/recorder.h
+  src/include/scheduler.h
   src/include/shm.h
   src/include/shmutils.h
   src/include/signals.h
   src/include/socket.h
   src/include/strongstream.h
-  src/include/symmetric.h
+  src/include/sym_kernels.h
   src/include/timer.h
   src/include/transport.h
   src/include/trees.h
@@ -555,12 +618,32 @@ set(SRC_FILES
   src/include/mlx5/mlx5dvcore.h
   src/include/mlx5/mlx5dvsymbols.h
   src/include/mlx5/mlx5dvwrap.h
+  src/include/ionic/ionicdvcore.h
+  src/include/ionic/ionicdvsymbols.h
+  src/include/ionic/ionicdvwrap.h
   src/include/msccl/msccl_lifecycle.h
   src/include/msccl/msccl_parser.h
   src/include/msccl/msccl_scheduler.h
   src/include/msccl/msccl_setup.h
   src/include/msccl/msccl_status.h
   src/include/msccl/msccl_struct.h
+  src/include/nccl_device/comm.h
+  src/include/nccl_device/coop.h
+  src/include/nccl_device/core.h
+  src/include/nccl_device/ll_a2a.h
+  src/include/nccl_device/mem_barrier.h
+  src/include/nccl_device/ptr.h
+  src/include/nccl_device/utility.h
+  src/include/nccl_device/impl/comm__funcs.h
+  src/include/nccl_device/impl/comm__types.h
+  src/include/nccl_device/impl/core__funcs.h
+  src/include/nccl_device/impl/core__types.h
+  src/include/nccl_device/impl/ll_a2a__funcs.h
+  src/include/nccl_device/impl/ll_a2a__types.h
+  src/include/nccl_device/impl/mem_barrier__funcs.h
+  src/include/nccl_device/impl/mem_barrier__types.h
+  src/include/nccl_device/impl/ptr__funcs.h
+  src/include/nccl_device/impl/ptr__types.h
   src/include/npkit/npkit.h
   src/include/npkit/npkit_event.h
   src/include/npkit/npkit_struct.h
@@ -608,6 +691,7 @@ set(SRC_FILES
   src/include/plugin/net/net_v8.h
   src/include/plugin/net/net_v9.h
   src/include/plugin/net/net_v10.h
+  src/include/plugin/net/net_v11.h
   src/include/plugin/profiler/net_ib_v1.h
   src/include/plugin/profiler/net_ib.h
   src/include/plugin/profiler/net_socket_v1.h
@@ -616,9 +700,11 @@ set(SRC_FILES
   src/include/plugin/profiler/profiler_v2.h
   src/include/plugin/profiler/profiler_v3.h
   src/include/plugin/profiler/profiler_v4.h
+  src/include/plugin/profiler/profiler_v5.h
   src/include/plugin/tuner/tuner_v2.h
   src/include/plugin/tuner/tuner_v3.h
   src/include/plugin/tuner/tuner_v4.h
+  src/include/plugin/tuner/tuner_v5.h
   src/misc/alt_rsmi.cc
   src/misc/archinfo.cc
   src/misc/argcheck.cc
@@ -631,11 +717,12 @@ set(SRC_FILES
   src/misc/ipcsocket.cc
   src/misc/mlx5dvsymbols.cc
   src/misc/mlx5dvwrap.cc
+  src/misc/ionicdvsymbols.cc
+  src/misc/ionicdvwrap.cc
   src/misc/npkit.cc
 # src/misc/nvmlwrap.cc
   src/misc/nvmlwrap_stub.cc
   src/misc/param.cc
-  src/misc/rocm_smi_wrap.cc
   src/misc/rocmwrap.cc
   src/misc/roctx.cc
   src/misc/recorder.cc
@@ -649,6 +736,9 @@ set(SRC_FILES
   src/misc/msccl/msccl_setup.cc
   src/misc/msccl/msccl_status.cc
   src/misc/proxy_trace/proxy_trace.cc
+  src/nccl_device/core.cc
+  src/nccl_device/ll_a2a.cc
+  src/nccl_device/mem_barrier.cc
   src/plugin/net.cc
   src/plugin/plugin_open.cc
   src/plugin/profiler.cc
@@ -658,13 +748,16 @@ set(SRC_FILES
   src/plugin/net/net_v8.cc
   src/plugin/net/net_v9.cc
   src/plugin/net/net_v10.cc
+  src/plugin/net/net_v11.cc
   src/plugin/profiler/profiler_v1.cc
   src/plugin/profiler/profiler_v2.cc
   src/plugin/profiler/profiler_v3.cc
   src/plugin/profiler/profiler_v4.cc
+  src/plugin/profiler/profiler_v5.cc
   src/plugin/tuner/tuner_v2.cc
   src/plugin/tuner/tuner_v3.cc
   src/plugin/tuner/tuner_v4.cc
+  src/plugin/tuner/tuner_v5.cc
   src/ras/client.cc
   src/ras/client_support.cc
   src/ras/collectives.cc
@@ -675,10 +768,12 @@ set(SRC_FILES
   src/register/coll_reg.cc
   src/register/register.cc
   src/register/sendrecv_reg.cc
+  src/scheduler/symmetric_sched.cc
   src/transport/coll_net.cc
   src/transport/generic.cc
   src/transport/net.cc
   src/transport/net_ib.cc
+  src/transport/net_ib_rocm.cc
   src/transport/net_socket.cc
   src/transport/nvls.cc
   src/transport/p2p.cc
@@ -694,6 +789,19 @@ set(SRC_FILES
   src/misc/latency_profiler/CollTraceFunc.cc
   src/misc/latency_profiler/CollTraceUtils.cc
 )
+
+if(USE_AMDSMI)
+  set(SMI_SOURCES
+    src/include/amdsmi_wrap.h
+    src/misc/amdsmi_wrap.cc
+  )
+else()
+  set(SMI_SOURCES
+    src/include/rocm_smi_wrap.h
+    src/misc/rocm_smi_wrap.cc
+  )
+endif()
+list(APPEND SRC_FILES ${SMI_SOURCES})
 
 if (ENABLE_MSCCL_KERNEL)
   set(MSCCL_KERNEL_SOURCES
@@ -846,6 +954,8 @@ target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/device)
 target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/device/network/unpack)
 target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/include)
 target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/include/mlx5)
+target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/include/nccl_device)
+target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/include/ionic)
 target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/include/plugin)
 target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/gensrc)
 target_include_directories(rccl PRIVATE ${HSA_INCLUDE_PATH})
@@ -858,26 +968,59 @@ if(ROCTX_ENABLE)
   target_include_directories(rccl PRIVATE ${ROCTRACER_INCLUDE_DIR})
 endif()
 
+
 ## Set RCCL compile definitions
 if(COLLTRACE)
   target_compile_definitions(rccl PRIVATE ENABLE_COLLTRACE)
 endif()
 if(ENABLE_MSCCL_KERNEL)
+  message(WARNING "MSCCL is deprecated and will be removed in a future version of RCCL.")
   target_compile_definitions(rccl PRIVATE COMPILE_MSCCL_KERNEL)
 endif()
 if(ENABLE_MSCCLPP)
   target_compile_definitions(rccl PRIVATE ENABLE_MSCCLPP)
 endif()
-if(HAVE_ROCM_SMI64CONFIG)
-  target_compile_definitions(rccl PRIVATE USE_ROCM_SMI64CONFIG)
+
+if(USE_AMDSMI)
+  target_compile_definitions(rccl PRIVATE USE_AMDSMI)
+else()
+  if(HAVE_ROCM_SMI64CONFIG)
+    target_compile_definitions(rccl PRIVATE USE_ROCM_SMI64CONFIG)
+  endif()
+  if(HAVE_ROCM_SMI_THREAD_ONLY_MUTEX)
+    target_compile_definitions(rccl PRIVATE USE_ROCM_SMI_THREAD_ONLY_MUTEX)
+  endif()
 endif()
-if(HAVE_ROCM_SMI_THREAD_ONLY_MUTEX)
-  target_compile_definitions(rccl PRIVATE USE_ROCM_SMI_THREAD_ONLY_MUTEX)
+if(ENABLE_WARP_SPEED)
+  target_compile_definitions(rccl PRIVATE ENABLE_WARP_SPEED)
+endif()
+if(ENABLE_ROCSHMEM)
+  target_compile_definitions(rccl PRIVATE ENABLE_ROCSHMEM)
+endif()
+
+# ==== rocSHMEM integration (optional) ====
+
+if (ENABLE_ROCSHMEM)
+  add_rocshmem_targets()
+  # Ensure rocSHMEM is fully built/installed before compiling rccl
+  if (TARGET rocshmem_ext)
+    add_dependencies(rccl rocshmem_ext)
+  endif()
+
+  if (ROCSHMEM_INCLUDE_DIR)
+    target_include_directories(rccl PRIVATE ${ROCSHMEM_INCLUDE_DIR})
+  endif()
+
+  # Moved to where MSCCL target_links
+  ## target_link_libraries(rccl PRIVATE ${ROCSHMEM_LIBRARY})
+  target_link_libraries(rccl PRIVATE ${IBVERBS})
+
 endif()
 
 # NPKit flags
 ## May be better to move these to a separate file
 if(ENABLE_NPKIT)
+  message(WARNING "NPKit is deprecated and will be removed in a future version of RCCL. Please consider using alternative profiling tools.")
   target_compile_definitions(rccl PRIVATE ENABLE_NPKIT)
   target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_TIME_SYNC_GPU)
   target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_TIME_SYNC_CPU)
@@ -1099,8 +1242,7 @@ if(ENABLE_CODE_COVERAGE)
   message(STATUS "Code coverage is enabled with build type '${CMAKE_BUILD_TYPE}'.")
 
   target_compile_options(rccl PRIVATE
-    -fvisibility=default -Xarch_host -fprofile-instr-generate
-    -Xarch_host -fcoverage-mapping)
+    -fvisibility=default -Xarch_host -fprofile-instr-generate -Xarch_host -fcoverage-mapping)
 
   set(COVERAGE_SHARED_LINKER_FLAGS
     -fprofile-generate
@@ -1169,7 +1311,7 @@ if (FAULT_INJECTION)
 endif()
 
 ## Set RCCL linked library directories
-target_link_directories(rccl PRIVATE ${ROCM_SMI_LIB_DIR})
+target_link_directories(rccl PRIVATE ${SMI_LIB_DIR})
 
 if (ROCM_VERSION VERSION_GREATER_EQUAL "60100")
     option(RCCL_ROCPROFILER_REGISTER "Enable rocprofiler-register support" ON)
@@ -1201,10 +1343,14 @@ target_link_libraries(rccl PRIVATE   Threads::Threads)
 target_link_libraries(rccl INTERFACE hip::host)
 target_link_libraries(rccl PRIVATE   hip::device)
 target_link_libraries(rccl PRIVATE   dl)
-target_link_libraries(rccl PRIVATE   ${ROCM_SMI_LIBRARIES})
+target_link_libraries(rccl PRIVATE   ${SMI_LIBRARIES})
 target_link_libraries(rccl PRIVATE fmt::fmt-header-only)
 if(ENABLE_MSCCLPP)
   target_link_libraries(rccl PRIVATE mscclpp_nccl)
+endif()
+if(ENABLE_ROCSHMEM)
+  target_link_libraries(rccl PRIVATE ${ROCSHMEM_LIBRARY})
+  target_link_libraries(rccl PRIVATE ${IBVERBS})
 endif()
 
 ## Set RCCL link options
@@ -1317,7 +1463,8 @@ if(BUILD_ADDRESS_SANITIZER)
 else()
   set(DEPENDS_HIP_RUNTIME "hip-runtime-amd" )
 endif()
-rocm_package_add_dependencies(DEPENDS "${DEPENDS_HIP_RUNTIME} >= 4.5.0" "rocm-smi-lib >= 4.0.0")
+
+rocm_package_add_dependencies(DEPENDS "${DEPENDS_HIP_RUNTIME} >= 4.5.0" "${SMI_LIB_NAME}")
 set(CPACK_DEB_COMPONENT_INSTALL ON)
 set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
 set(CPACK_RPM_COMPONENT_INSTALL ON)

@@ -1175,6 +1175,7 @@ void Image::populateImageDescriptor() {
   imageDescriptor_.height = image->getHeight();
   imageDescriptor_.depth = image->getDepth();
   imageDescriptor_.array_size = 0;
+  imageDescriptor_.mipmap_levels = image->getMipLevels() == 0 ? 1 : image->getMipLevels();
 
   switch (image->getType()) {
     case CL_MEM_OBJECT_IMAGE1D:
@@ -1440,8 +1441,31 @@ bool Image::createView(const Memory& parent) {
     status = Hsa::image_create(dev().getBackendDevice(), &imageDescriptor_, amdImageDesc_,
                                deviceMemory_, permission_, &hsaImageObject_);
   } else {
-    status = Hsa::image_create(dev().getBackendDevice(), &imageDescriptor_, deviceMemory_,
-                               permission_, &hsaImageObject_);
+    if (ancestor->asImage()->getMipLevels() > 1 && imageDescriptor_.mipmap_levels == 1) {
+      // This is on leveled image of mipmap image ancestor
+      amd::Memory* parentOwner = parent.owner();
+      auto* ancestor_image = static_cast<Image*>(ancestor->getDeviceMemory(dev()));
+      if (ancestor == parentOwner) {
+        // This is leveled image
+        status = Hsa::image_get_mipmap_level(dev().getBackendDevice(),
+                                           &ancestor_image->hsaImageObject_,
+                                           owner()->asImage()->getBaseMipLevel(),
+                                           nullptr, &hsaImageObject_);
+      } else if (ancestor == parentOwner->parent()) {
+        // This is format changed view on leveled image
+        status = Hsa::image_get_mipmap_level(dev().getBackendDevice(),
+                                           &ancestor_image->hsaImageObject_,
+                                           parentOwner->asImage()->getBaseMipLevel(),
+                                           &imageDescriptor_, &hsaImageObject_);
+      } else {
+        // This is an impossible view on leveled image
+        status = HSA_STATUS_ERROR_INVALID_REGION;
+      }
+    } else {
+      // This is a view on regular image or mipmap image.
+      status = Hsa::image_create(dev().getBackendDevice(), &imageDescriptor_, deviceMemory_,
+                                 permission_, &hsaImageObject_);
+    }
   }
 
   if (status != HSA_STATUS_SUCCESS) {

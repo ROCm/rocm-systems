@@ -213,7 +213,7 @@ Panel Config:
           min: MIN((TCC_STREAMING_REQ_sum / $denom))
           max: MAX((TCC_STREAMING_REQ_sum / $denom))
           unit: (Req + $normUnit)
-        Bypasss Req:
+        Bypass Req:
           avg: AVG((TCC_BYPASS_REQ_sum / $denom))
           min: MIN((TCC_BYPASS_REQ_sum / $denom))
           max: MAX((TCC_BYPASS_REQ_sum / $denom))
