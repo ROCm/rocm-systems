@@ -1053,6 +1053,7 @@ hsa_status_t HSA_API hsa_ext_image_destroy_v2(hsa_agent_t agent, hsa_ext_image_t
 hsa_status_t HSA_API hsa_ext_image_mipmap_array_get_level(hsa_agent_t agent,
                                       const hsa_ext_image_t* mipmapped_array,
                                       uint32_t mip_level,
+                                      const hsa_ext_image_descriptor_v2_t* image_descriptor,
                                       hsa_ext_image_t* level_image_out);
 
 /**
@@ -1381,7 +1382,12 @@ typedef enum {
    * square block or 2x2x2 cube block around the specified coordinate. The
    * elements are combined using linear interpolation.
    */
-  HSA_EXT_SAMPLER_FILTER_MODE_LINEAR = 1
+  HSA_EXT_SAMPLER_FILTER_MODE_LINEAR = 1,
+
+  /**
+   * None filter. Used for mipmap filter mode of non-mipmap images.
+   */
+  HSA_EXT_SAMPLER_FILTER_MODE_NONE = 2
 
 } hsa_ext_sampler_filter_mode_t;
 
@@ -1422,9 +1428,14 @@ typedef struct hsa_ext_sampler_descriptor_v2_s {
   hsa_ext_sampler_coordinate_mode32_t coordinate_mode;
 
   /**
-   * Sampler filter type describes the type of sampling performed.
+   * Sampler filter type describes the type of sampling performed on regular image.
    */
   hsa_ext_sampler_filter_mode32_t filter_mode;
+
+  /**
+   * Sampler filter type describes the type of sampling performed on mipmap image.
+  */
+  hsa_ext_sampler_filter_mode32_t mipmap_filter_mode;
 
   /**
    * Sampler address mode describes the processing of out-of-range image
