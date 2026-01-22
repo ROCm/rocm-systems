@@ -1,0 +1,10 @@
+from pathlib import Path
+
+
+def find_smi_library() -> Path:
+    here = Path(__file__).resolve().parent
+    candidate = here / "libamd_smi_python.so"
+    if candidate.exists():
+        return candidate
+    # fall back to the default shared library name for developer builds
+    return here / "libamd_smi.so"

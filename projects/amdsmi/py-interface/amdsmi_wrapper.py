@@ -1415,6 +1415,16 @@ amdsmi_process_handle_t = ctypes.c_uint32
 class struct_amdsmi_proc_info_t(Structure):
     pass
 
+class struct_engine_usage_(Structure):
+    pass
+
+struct_engine_usage_._pack_ = 1 # source:False
+struct_engine_usage_._fields_ = [
+    ('gfx', ctypes.c_uint64),
+    ('enc', ctypes.c_uint64),
+    ('reserved', ctypes.c_uint32 * 12),
+]
+
 class struct_memory_usage_(Structure):
     pass
 
@@ -1424,16 +1434,6 @@ struct_memory_usage_._fields_ = [
     ('cpu_mem', ctypes.c_uint64),
     ('vram_mem', ctypes.c_uint64),
     ('reserved', ctypes.c_uint32 * 10),
-]
-
-class struct_engine_usage_(Structure):
-    pass
-
-struct_engine_usage_._pack_ = 1 # source:False
-struct_engine_usage_._fields_ = [
-    ('gfx', ctypes.c_uint64),
-    ('enc', ctypes.c_uint64),
-    ('reserved', ctypes.c_uint32 * 12),
 ]
 
 struct_amdsmi_proc_info_t._pack_ = 1 # source:False
