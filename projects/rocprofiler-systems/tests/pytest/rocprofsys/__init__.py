@@ -11,7 +11,6 @@ Provides reusable components for testing rocprofiler-systems:
 - GPU and system detection utilities
 """
 
-
 from .config import (
     RocprofsysConfig,
     discover_install_config,

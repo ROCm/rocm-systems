@@ -21,12 +21,10 @@ pytestmark = [pytest.mark.rocprof_config]
 def write_invalid_config_file(output_dir: Path) -> Path:
     """Write an invalid configuration file."""
     config_path = output_dir / "invalid.cfg"
-    config_path.write_text(
-        """\
+    config_path.write_text("""\
 ROCPROFSYS_CONFIG_FILE =
 FOOBAR = ON
-"""
-    )
+""")
     return config_path
 
 
