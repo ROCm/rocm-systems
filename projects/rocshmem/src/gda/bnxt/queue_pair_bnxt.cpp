@@ -201,7 +201,7 @@ __device__ void QueuePair::bnxt_quiet() {
   uint64_t active_lane_mask;
   uint8_t active_lane_id;
 
-  active_lane_mask  = get_active_lane_mask();
+  active_lane_mask  = get_same_qp_lane_mask();
   active_lane_id    = get_active_lane_num(active_lane_mask);
 
   if (0 == active_lane_id) {
@@ -283,7 +283,7 @@ __device__ void QueuePair::bnxt_post_wqe_rma(int pe, int32_t length, uintptr_t l
   uint8_t active_lane_count;
   uint8_t active_lane_id;
 
-  active_lane_mask  = get_active_lane_mask();
+  active_lane_mask  = get_same_qp_lane_mask();
   active_lane_count = get_active_lane_count(active_lane_mask);
   active_lane_id    = get_active_lane_num(active_lane_mask);
 
@@ -393,7 +393,7 @@ __device__ uint64_t QueuePair::bnxt_post_wqe_amo(uintptr_t raddr, uint8_t opcode
   uint8_t active_lane_id;
   uint32_t atomic_idx = 0;
 
-  active_lane_mask  = get_active_lane_mask();
+  active_lane_mask  = get_same_qp_lane_mask();
   active_lane_count = get_active_lane_count(active_lane_mask);
   active_lane_id    = get_active_lane_num(active_lane_mask);
 
