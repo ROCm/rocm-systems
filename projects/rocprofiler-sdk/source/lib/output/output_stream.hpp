@@ -51,10 +51,29 @@ struct output_stream
     {}
 
     ~output_stream() { close(); }
-    output_stream(const output_stream&)     = delete;
-    output_stream(output_stream&&) noexcept = default;
+    output_stream(const output_stream&) = delete;
     output_stream& operator=(const output_stream&) = delete;
-    output_stream& operator=(output_stream&&) noexcept = default;
+
+    output_stream(output_stream&& other) noexcept
+    : stream{other.stream}
+    , dtor{other.dtor}
+    {
+        other.stream = nullptr;
+        other.dtor   = nullptr;
+    }
+
+    output_stream& operator=(output_stream&& other) noexcept
+    {
+        if(this != &other)
+        {
+            close();
+            stream       = other.stream;
+            dtor         = other.dtor;
+            other.stream = nullptr;
+            other.dtor   = nullptr;
+        }
+        return *this;
+    }
 
     explicit operator bool() const { return stream != nullptr; }
 
