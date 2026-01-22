@@ -967,6 +967,9 @@ enum hipLimit_t {
 #define hipStreamWaitValueEq 0x1
 #define hipStreamWaitValueAnd 0x2
 #define hipStreamWaitValueNor 0x3
+// Flags to be used with hipStreamWriteValue32 and hipStreamWriteValue64.
+#define hipExtStreamWriteValueIncrement 0x1000
+#define hipExtStreamWriteValueDecrement 0x1001
 
 /** Operations for hipStreamBatchMemOp*/
 typedef enum hipStreamBatchMemOpType {

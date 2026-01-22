@@ -2539,6 +2539,74 @@ bool KernelBlitManager::streamOpsWrite(device::Memory& memory, uint64_t value, s
 }
 
 // ================================================================================================
+bool KernelBlitManager::streamOpsIncrement(device::Memory& memory, uint64_t value, size_t offset,
+                                           size_t sizeBytes) const {
+  // TODO Copy pasted for now
+  amd::ScopedLock k(lockXferOps_);
+  bool result = false;
+  uint blitType = StreamOpsIncrement;
+  size_t dim = 1;
+  size_t globalWorkOffset[1] = {0};
+  size_t globalWorkSize[1] = {1};
+  size_t localWorkSize[1] = {1};
+  // Program kernels arguments for the write operation
+  cl_mem mem = as_cl<amd::Memory>(memory.owner());
+  bool is32BitWrite = (sizeBytes == sizeof(uint32_t)) ? true : false;
+  // Program kernels arguments for the write operation
+  if (is32BitWrite) {
+    setArgument(kernels_[blitType], 0, sizeof(cl_mem), &mem, offset);
+    setArgument(kernels_[blitType], 1, sizeof(cl_mem), nullptr);
+    setArgument(kernels_[blitType], 2, sizeof(uint32_t), &value);
+  } else {
+    setArgument(kernels_[blitType], 0, sizeof(cl_mem), nullptr);
+    setArgument(kernels_[blitType], 1, sizeof(cl_mem), &mem, offset);
+    setArgument(kernels_[blitType], 2, sizeof(uint64_t), &value);
+  }
+  // Create ND range object for the kernel's execution
+  amd::NDRangeContainer ndrange(dim, globalWorkOffset, globalWorkSize, localWorkSize);
+  // Execute the blit
+  address parameters = captureArguments(kernels_[blitType]);
+  result = gpu().submitKernelInternal(ndrange, *kernels_[blitType], parameters, nullptr);
+  releaseArguments(parameters);
+  synchronize();
+  return result;
+}
+
+// ================================================================================================
+bool KernelBlitManager::streamOpsDecrement(device::Memory& memory, uint64_t value, size_t offset,
+                                           size_t sizeBytes) const {
+  // FIXME Copy pasted for now
+  amd::ScopedLock k(lockXferOps_);
+  bool result = false;
+  uint blitType = StreamOpsDecrement;
+  size_t dim = 1;
+  size_t globalWorkOffset[1] = {0};
+  size_t globalWorkSize[1] = {1};
+  size_t localWorkSize[1] = {1};
+  // Program kernels arguments for the write operation
+  cl_mem mem = as_cl<amd::Memory>(memory.owner());
+  bool is32BitWrite = (sizeBytes == sizeof(uint32_t)) ? true : false;
+  // Program kernels arguments for the write operation
+  if (is32BitWrite) {
+    setArgument(kernels_[blitType], 0, sizeof(cl_mem), &mem, offset);
+    setArgument(kernels_[blitType], 1, sizeof(cl_mem), nullptr);
+    setArgument(kernels_[blitType], 2, sizeof(uint32_t), &value);
+  } else {
+    setArgument(kernels_[blitType], 0, sizeof(cl_mem), nullptr);
+    setArgument(kernels_[blitType], 1, sizeof(cl_mem), &mem, offset);
+    setArgument(kernels_[blitType], 2, sizeof(uint64_t), &value);
+  }
+  // Create ND range object for the kernel's execution
+  amd::NDRangeContainer ndrange(dim, globalWorkOffset, globalWorkSize, localWorkSize);
+  // Execute the blit
+  address parameters = captureArguments(kernels_[blitType]);
+  result = gpu().submitKernelInternal(ndrange, *kernels_[blitType], parameters, nullptr);
+  releaseArguments(parameters);
+  synchronize();
+  return result;
+}
+
+// ================================================================================================
 bool KernelBlitManager::streamOpsWait(device::Memory& memory, uint64_t value, size_t offset,
                                       size_t sizeBytes, uint64_t flags, uint64_t mask) const {
   amd::ScopedLock k(lockXferOps_);

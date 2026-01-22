@@ -3275,8 +3275,25 @@ void VirtualGPU::submitStreamOperation(amd::StreamOperationCommand& cmd) {
     // Add system scope to the write kernel for memory ordering
     addSystemScope();
 
-    bool result = blitMgr().streamOpsWrite(*memory, value, offset, sizeBytes);
-    ClPrint(amd::LOG_DEBUG, amd::LOG_COPY, "Writing value: 0x%lx", value);
+    bool result;
+    switch (flags) {
+      case ROCCLR_STREAM_WRITE_VALUE_INCREMENT: {
+        result = blitMgr().streamOpsIncrement(*memory, value, offset, sizeBytes);
+        ClPrint(amd::LOG_DEBUG, amd::LOG_COPY, "Incrementing value: 0x%lx", value);
+        break;
+      }
+      case ROCCLR_STREAM_WRITE_VALUE_DECREMENT: {
+        result = blitMgr().streamOpsDecrement(*memory, value, offset, sizeBytes);
+        ClPrint(amd::LOG_DEBUG, amd::LOG_COPY, "Decrementing value: 0x%lx", value);
+        break;
+      }
+      default: {
+        result = blitMgr().streamOpsWrite(*memory, value, offset, sizeBytes);
+        ClPrint(amd::LOG_DEBUG, amd::LOG_COPY, "Writing value: 0x%lx", value);
+        break;
+      }
+    }
+
     if (!result) {
       LogError("submitStreamOperation: Write failed!");
     }
