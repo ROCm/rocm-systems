@@ -1038,6 +1038,11 @@ write_rocpd(
                     : std::string_view{};
 
             auto agent_node_id = tool_metadata.get_agent(info.agent_id)->node_id;
+            auto thread_id_opt = (thread_id == 0)
+                                     ? std::optional<uint64_t>{}
+                                     : std::optional<uint64_t>{thread_id};
+
+            if(thread_id != 0) get_thread_id(thread_id);
 
             // Insert into kernel dispatch table
             auto stmt = get_insert_statement(
@@ -1046,7 +1051,7 @@ write_rocpd(
                     insert_value("id", dispatch_id),
                     insert_value("nid", node_id),
                     insert_value("pid", this_pid),
-                    insert_value("tid", thread_id),
+                    insert_value("tid", thread_id_opt),
                     insert_value("agent_id", agent_node_id),
                     insert_value("kernel_id", kernel_id),
                     insert_value("dispatch_id", dispatch_id),
@@ -1080,7 +1085,7 @@ write_rocpd(
                     const auto& info          = dispatch_data.dispatch_info;
 
                     // Register thread ID
-                    get_thread_id(record.thread_id);
+                    if(record.thread_id != 0) get_thread_id(record.thread_id);
 
                     // Use buffer category for kernel dispatches
                     auto kind =
@@ -1113,7 +1118,7 @@ write_rocpd(
                     const auto& info          = dispatch_data.dispatch_info;
 
                     // Register thread ID
-                    get_thread_id(record.thread_id);
+                    if(record.thread_id != 0) get_thread_id(record.thread_id);
 
                     // Use buffer category for kernel dispatches
                     auto kind =
@@ -1145,7 +1150,7 @@ write_rocpd(
                 for(auto itr : kernel_dispatch_gen.get(pitr))
                 {
                     // Register thread ID
-                    get_thread_id(itr.thread_id);
+                    if(itr.thread_id != 0) get_thread_id(itr.thread_id);
 
                     // Process this dispatch
                     process_dispatch(itr.dispatch_info.dispatch_id,             // dispatch_id
