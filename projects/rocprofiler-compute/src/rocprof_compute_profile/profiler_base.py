@@ -135,23 +135,20 @@ class RocProfCompute_Base:
                 if args.remaining[0].startswith("python"):
                     # Insert inject_roctx.py after the python interpreter
                     args.remaining.insert(1, str(inject_script))
-                    console_debug(f"Injected {inject_script} into command")
-                    console_debug(f"New command: {' '.join(args.remaining)}")
                 # Case 2: Direct Python script execution (./main.py, /path/to/script.py)
-                elif args.remaining[0].endswith(".py"):
+                elif args.remaining[0].endswith((".py", ".pyw", ".pyc", ".pyo")):
                     # Use current Python interpreter
                     args.remaining.insert(0, str(inject_script))
                     args.remaining.insert(0, sys.executable)
-                    console_debug(
-                        f"Injected {inject_script} and {sys.executable} into command"
-                    )
-                    console_debug(f"New command: {' '.join(args.remaining)}")
                 else:
                     console_warning(
-                        "--torch-trace flag has no significance if not profiling",
-                        " a PyTorch application.",
+                        "Please remove the '--torch-trace' flag if not profiling",
+                        "a PyTorch application.",
+                        "Assuming the workload is user verified."
+                        "Continuing to profile ...",
                     )
-                    args.torch_trace = False
+                    args.remaining.insert(0, str(inject_script))
+                    args.remaining.insert(0, sys.executable)
             args.remaining = " ".join(args.remaining)
         elif not args.attach_pid:
             console_error(

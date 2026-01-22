@@ -940,10 +940,12 @@ def run_prof(
         # Write results_fbase.csv
         rocpd_data.convert_dbs_to_csv(
             glob.glob(workload_dir + "/out/pmc_1/*/*.db"),
-            workload_dir + f"/{fbase}_counter_collection.csv",
-            workload_dir + f"/{fbase}_marker_api_trace.csv",
+            workload_dir + f"/out/pmc_1/{fbase}_counter_collection.csv",
+            workload_dir + f"/out/pmc_1/{fbase}_marker_api_trace.csv",
         )
-        combined_df = pd.read_csv(workload_dir + f"/{fbase}_counter_collection.csv")
+        combined_df = pd.read_csv(
+            workload_dir + f"/out/pmc_1/{fbase}_counter_collection.csv"
+        )
         # Reset Dispatch_ID based on PID, Kernel_Name, Grid_Size,
         # Workgroup_Size, LDS_Per_Workgroup, Start_Timestamp, End_Timestamp
         combined_df["Dispatch_ID"] = combined_df.groupby(
@@ -967,96 +969,11 @@ def run_prof(
         # Drop PID since its not required
         combined_df = combined_df.drop(columns=["PID"])
         combined_df.to_csv(
-            workload_dir + f"/{fbase}_counter_collection.csv", index=False
+            workload_dir + f"/out/pmc_1/{fbase}_counter_collection.csv", index=False
         )
+        combined_df.to_csv(workload_dir + f"/results_{fbase}.csv", index=False)
         if torch_trace_enabled:
-            # Extract marker_api_trace and counter_collection CSVs
-            import sqlite3
-            from contextlib import closing
-
-            # SQL queries for extraction
-            MARKER_API_TRACE_QUERY = """
-            SELECT
-                C.string as Domain,
-                json_extract(E.extdata, '$.message') as Function,
-                P.pid as Process_Id,
-                T.tid as Thread_Id,
-                E.correlation_id as Correlation_Id,
-                R.start as Start_Timestamp,
-                R.end as End_Timestamp
-            FROM rocpd_region R
-                INNER JOIN rocpd_event E ON E.id = R.event_id AND E.guid = R.guid
-                INNER JOIN rocpd_info_thread T ON T.id = R.tid AND T.guid = R.guid
-                INNER JOIN rocpd_info_process P ON P.id = T.pid AND P.guid = R.guid
-                INNER JOIN rocpd_string C ON C.id = E.category_id AND C.guid = R.guid
-            ORDER BY R.start
-            """
-            COUNTERS_COLLECTION_QUERY = """
-            SELECT
-                agent_id as GPU_ID,
-                dispatch_id as Dispatch_ID,
-                pid as PID,
-                grid_size as Grid_Size,
-                workgroup_size as Workgroup_Size,
-                lds_block_size as LDS_Per_Workgroup,
-                scratch_size as Scratch_Per_Workitem,
-                vgpr_count as Arch_VGPR,
-                accum_vgpr_count as Accum_VGPR,
-                sgpr_count as SGPR,
-                kernel_name as Kernel_Name,
-                start as Start_Timestamp,
-                end as End_Timestamp,
-                correlation_id as Correlation_Id,
-                kernel_id as Kernel_ID,
-                counter_name as Counter_Name,
-                value as Counter_Value
-            FROM counters_collection
-            """
-            import socket
-
-            output_path = Path(workload_dir + "/out/pmc_1")
-            hostname = socket.gethostname()
-            hostname_output_path = output_path / hostname
-            hostname_output_path.mkdir(parents=True, exist_ok=True)
-            for db_path in glob.glob(workload_dir + "/out/pmc_1/*/*.db"):
-                pid = Path(db_path).stem.split("_")[0]
-                try:
-                    # Extract marker API trace
-                    with closing(sqlite3.connect(db_path)) as conn:
-                        marker_df = pd.read_sql_query(MARKER_API_TRACE_QUERY, conn)
-                        marker_csv = (
-                            f"{hostname_output_path}/{pid}_marker_api_trace.csv"
-                        )
-                        if not marker_df.empty:
-                            marker_df.to_csv(marker_csv, index=False)
-                            console_log(
-                                f"Extracted marker data from rocpd: {marker_csv}"
-                            )
-                        else:
-                            console_warning(
-                                f"No marker API trace data found in {db_path}."
-                            )
-
-                        # Extract counter collection
-                        counter_df = pd.read_sql_query(COUNTERS_COLLECTION_QUERY, conn)
-                        counter_csv = (
-                            f"{hostname_output_path}/{pid}_counter_collection.csv"
-                        )
-                        if not counter_df.empty:
-                            counter_df.to_csv(counter_csv, index=False)
-                            console_debug(
-                                "Extracted counter collection data from rocpd:",
-                                f"{counter_csv}",
-                            )
-                        else:
-                            console_warning(
-                                "No counter collection data found in ", f"{db_path}."
-                            )
-                except sqlite3.Error as e:
-                    console_error(f"Failed to extract data from {db_path}: {e}")
-                except Exception as e:
-                    console_error(f"Unexpected error extracting from {db_path}: {e}")
-            process_torch_trace_output(workload_dir, fbase, workload_dir)
+            process_torch_trace_output(workload_dir, fbase)
         if retain_rocpd_output:
             for db_path in glob.glob(workload_dir + "/out/pmc_1/*/*.db"):
                 pid = Path(db_path).stem.split("_")[0]
@@ -1360,7 +1277,6 @@ def process_torch_trace_output(
     workload_dir: str,
     fbase: str,
     marker_trace_csv_file_path: str = None,
-    counter_csv_file_path: str = None,
 ) -> None:
     """
     Creates PyTorch operator trace from counter_collection and marker_api_trace data.
@@ -1368,24 +1284,16 @@ def process_torch_trace_output(
         - Output file is saved to workload root, not the temporary out/ directory
     """
     if not marker_trace_csv_file_path:
-        marker_trace_csv_file_path = f"{workload_dir}/out/pmc_1/*"
-        counter_csv_file_path = None
+        marker_trace_csv_file_path = f"{workload_dir}/out/pmc_1/"
     # Find all marker_api_trace CSV files
     marker_api_trace_csvs = list(
-        Path(marker_trace_csv_file_path).glob("/*_marker_api_trace.csv")
+        Path(marker_trace_csv_file_path).glob("**/*_marker_api_trace.csv")
     )
-    if not counter_csv_file_path:
-        counter_collection_csvs = [
-            markers_file.parent
-            / markers_file.name.replace("_marker_api_trace.", "_counter_collection.")
-            for markers_file in marker_api_trace_csvs
-        ]
-    else:
-        counter_collection_csvs = [
-            Path(counter_csv_file_path)
-            / markers_file.name.replace("_marker_api_trace.", "_counter_collection.")
-            for markers_file in marker_api_trace_csvs
-        ]
+    counter_collection_csvs = [
+        markers_file.parent
+        / markers_file.name.replace("_marker_api_trace.", "_counter_collection.")
+        for markers_file in marker_api_trace_csvs
+    ]
     existing_csv_files = [
         [marker_api_trace_csvs[i], counter_collection_csvs[i]]
         for i in range(len(marker_api_trace_csvs))
