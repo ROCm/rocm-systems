@@ -259,8 +259,10 @@ struct RunWorkBatch<ncclFuncSendRecv, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPL
       } else {
 #if defined(__gfx90a__)
         runSend<ProtoSimple<1,1,0,8>>(subtid, subtn, group, work);
-#elif defined(__gfx908__) || defined(__gfx942__) || defined(__gfx950__)
+#elif defined(__gfx908__)
         runSend<ProtoSimple<1,1,0,4>>(subtid, subtn, group, work);
+#elif defined(__gfx942__) || defined(__gfx950__)
+        runSend<ProtoSimple<1,1,0,2>>(subtid, subtn, group, work);
 #else
         runSend<ProtoSimple<1,1>>(subtid, subtn, group, work);
 #endif
