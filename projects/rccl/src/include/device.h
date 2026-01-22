@@ -600,7 +600,6 @@ struct ncclKernelComm {
   int p2pChunkSize;
   int isAllNvlink;
   int p2pnChannelsPerPeer;
-  int warpLevelComm;
   int* collNetDenseToUserRank;
 
   // Flag to ask NCCL kernels to abort
@@ -660,6 +659,7 @@ struct alignas(16) ncclDevKernelArgs {
   enum ncclDevWorkStorageType workStorageType;
   uint32_t workMask;
   void* workBuf;
+  int warpLevelComm;
   // A channel's first batch is at `blockIdx.x`. Use `nextJump` to follow rest of list.
   // struct ncclDevWorkBatch batches[];
 };

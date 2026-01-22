@@ -122,7 +122,7 @@ int getFirmwareVersion();
 bool rcclIsArchSupportedForFunc(struct ncclTaskColl* info, char const* archName);
 #ifdef ENABLE_WARP_SPEED
 void rcclSetWarpSpeedCUs(struct ncclComm* comm, int algo, int threadsPerBlock, int& rcclWarpSpeedChannels);
-void rcclSetWarpSpeedSupportAndFinalCuCount(struct ncclComm* comm, struct ncclKernelPlan* plan, int nChannels, int& support, int &cuCount);
+bool rcclWarpSpeedSupported(struct ncclComm* comm, struct ncclKernelPlan* plan);
 void rcclSetWarpSpeedAuto(struct ncclComm* comm, struct ncclTaskColl* info, size_t nBytes);
 #endif
 #endif
