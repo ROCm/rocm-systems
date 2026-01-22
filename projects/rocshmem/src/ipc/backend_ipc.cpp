@@ -148,7 +148,14 @@ IPCBackend::~IPCBackend() {
   CHECK_HIP(hipFree(team_world));
 
   CHECK_HIP(hipFree(ctx_array));
-  delete fine_grained_allocator_;
+  if (fine_grained_allocator_) {
+    char *arch_name = get_arch_name(hip_dev_id);
+    if (strncmp(arch_name, "gfx1201", strlen("gfx1201")) == 0) {
+      delete static_cast<HIPAllocatorFinegrained *>(fine_grained_allocator_);
+    } else {
+      delete static_cast<HIPDefaultFinegrainedAllocator *>(fine_grained_allocator_);
+    }
+  }
 }
 
 void IPCBackend::setup_ctxs() {
