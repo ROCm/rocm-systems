@@ -114,9 +114,9 @@ void IPCBackend::init() {
 
   char *arch_name = get_arch_name(hip_dev_id);
   if (strncmp(arch_name, "gfx1201", strlen("gfx1201")) == 0) {
-    fine_grained_allocator_ = new(HIPAllocatorFinegrained);
+    fine_grained_allocator_ = new HIPAllocatorFinegrained();
   } else {
-    fine_grained_allocator_ = new(HIPDefaultFinegrainedAllocator);
+    fine_grained_allocator_ = new HIPDefaultFinegrainedAllocator();
   }
 
   setup_team_world();
