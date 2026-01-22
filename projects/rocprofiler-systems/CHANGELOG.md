@@ -4,7 +4,7 @@
 
 Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/](https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/).
 
-## ROCm Systems Profiler 1.4.0 for ROCm x.y.z (unreleased)
+## ROCm Systems Profiler 1.4.0 for ROCm 7.11
 
 ### Added
 
