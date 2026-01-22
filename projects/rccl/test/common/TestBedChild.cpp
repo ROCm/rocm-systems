@@ -647,18 +647,18 @@ namespace RcclUnitTesting
                                       this->streams[groupId][localRank][collArg.streamIdx]),
                           "ncclScatter");
           break;
-        case ncclCollAllToAll:
-          CHILD_NCCL_CALL_RANK(errCode, ncclAllToAll(
+        case ncclCollAlltoAll:
+          CHILD_NCCL_CALL_RANK(errCode, ncclAlltoAll(
                                        collArg.inputGpu.ptr,
                                        collArg.outputGpu.ptr,
                                        collArg.numInputElements / collArg.totalRanks,
                                        collArg.dataType,
                                        this->comms[localRank],
                                        this->streams[groupId][localRank][collArg.streamIdx]),
-                          "ncclAllToAll");
+                          "ncclAlltoAll");
           break;
-        case ncclCollAllToAllv:
-          CHILD_NCCL_CALL_RANK(errCode, ncclAllToAllv(
+        case ncclCollAlltoAllv:
+          CHILD_NCCL_CALL_RANK(errCode, ncclAlltoAllv(
                                         collArg.inputGpu.ptr,
                                         collArg.options.sendcounts + (this->rankOffset + localRank)*this->totalRanks,
                                         collArg.options.sdispls + (this->rankOffset + localRank)*this->totalRanks,
@@ -668,7 +668,7 @@ namespace RcclUnitTesting
                                         collArg.dataType,
                                         this->comms[localRank],
                                         this->streams[groupId][localRank][collArg.streamIdx]),
-                          "ncclAllToAllv");
+                          "ncclAlltoAllv");
           break;
         case ncclCollSend:
           CHILD_NCCL_CALL_RANK(errCode, ncclSend(
