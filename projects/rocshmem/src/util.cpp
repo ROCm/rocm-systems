@@ -57,7 +57,8 @@ static void device_properties_init(void) {
     CHECK_HIP(hipGetDeviceProperties(&hipprop, i));
     prop.warpSize = hipprop.warpSize;
     prop.maxThreadsPerBlock = hipprop.maxThreadsPerBlock;
-    strncpy (prop.gcnArchName, hipprop.gcnArchName, strlen(hipprop.gcnArchName));
+    std::snprintf(prop.gcnArchName, sizeof(prop.gcnArchName), "%s",
+                  hipprop.gcnArchName);
     device_properties.push_back(prop);
 
     CHECK_HIP(hipDeviceGetAttribute (&has_large_bar, hipDeviceAttributeIsLargeBar, i));
