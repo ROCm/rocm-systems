@@ -6,7 +6,6 @@
 #include <cstddef>
 #include <deque>
 #include <optional>
-#include <string>
 #include <vector>
 
 namespace rocstorage

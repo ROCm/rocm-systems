@@ -22,20 +22,12 @@ class database;
 struct writer
 {
     friend class rocm::storage;
-
-private:
-    explicit writer(std::shared_ptr<data_storage::database> database, std::string uuid);
-
-public:
     virtual ~writer();
-
     writer()                          = delete;
     writer(const writer&)             = delete;
     writer& operator=(const writer&)  = delete;
     writer(const writer&&)            = delete;
     writer& operator=(const writer&&) = delete;
-
-    // --------------------- Info Tables ---------------------
 
     /***
      * @brief Insert node info into rocpd
@@ -107,8 +99,6 @@ public:
      */
     void register_string(const char* str);
 
-    // --------------------- Data Tables ---------------------
-
     /***
      * @brief Insert region data into rocpd and create sample which will reference the
      * track
@@ -161,6 +151,7 @@ public:
     void flush_in_memory_data_to_disk();
 
 private:
+    explicit writer(std::shared_ptr<data_storage::database> database, std::string uuid);
     struct impl;
     std::unique_ptr<impl> m_impl;
 };
