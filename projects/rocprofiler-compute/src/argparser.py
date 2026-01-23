@@ -202,10 +202,21 @@ Examples:
     profile_group.add_argument(
         "-p",
         "--path",
-        "--output-directory",
         metavar="",
         type=str,
         dest="path",
+        default=str(Path.cwd() / "workloads"),
+        required=False,
+        help=(
+            f"\t\t\t(DEPRECATED) Specify path to save workload.\n\t\t\t(DEFAULT: {Path.cwd()}/workloads/<name>)\n"  # noqa: E501
+            "\t\t\t --path is deprecated. Use --output-directory instead."  # noqa: E501
+        ),
+    )
+    profile_group.add_argument(
+        "--output-directory",
+        metavar="",
+        type=str,
+        dest="output_directory",
         default=str(Path.cwd() / "workloads"),
         required=False,
         help=(
@@ -216,8 +227,7 @@ Examples:
             "\t\t\t   %%rank%%: MPI process rank\n"
             "\t\t\t   %%env{NAME}%%: Environment variable 'NAME'\n"
             "\t\t\t(DEFAULT: {Path.cwd()}/workloads/<name>/%%gpumodel%%) without MPI,\n"  # noqa: E501
-            "\t\t\t {Path.cwd()}/workloads/<name>/%%rank%% with MPI.)\n"
-            "\t\t\t(DEPRECATED) --path is deprecated. Use --output-directory or -p instead."  # noqa: E501
+            "\t\t\t {Path.cwd()}/workloads/<name>/%%rank%% with MPI.)"
         ),
     )
     profile_group.add_argument(
@@ -229,7 +239,7 @@ Examples:
         required=False,
         help=(
             "\t\t\t(DEPRECATED) Specify the type of subpath to save workload: node_name, gpu_model."  # noqa: E501
-            "\n\t\t\t Use --output-directory with parameterization instead."
+            "\n\t\t\t --subpath is deprecated. Use --output-directory with parameterization instead."
         ),
     )
     profile_group.add_argument(

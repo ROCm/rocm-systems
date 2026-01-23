@@ -33,7 +33,7 @@ default, results are written to a subdirectory with your accelerator's name;
 for example, ``./workloads/vcopy_data/MI200/``, where name is configurable
 via the ``-n`` argument. When an MPI rank is detected, the default output
 directory uses the rank (``./workloads/vcopy_data/<rank>/``). Use
-``--output-directory`` (``-p``) to override the output location.
+``--output-directory`` to override the output location.
 
 .. note::
 
