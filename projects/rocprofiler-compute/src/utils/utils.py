@@ -1315,7 +1315,7 @@ def process_torch_trace_output(
     merged_results = pd.merge(
         combined_markers,
         combined_counters,
-        on=["Correlation_Id","GUID"],
+        on=["Correlation_Id", "GUID"],
         how="inner",
         suffixes=("_function", "_kernel"),
     )
