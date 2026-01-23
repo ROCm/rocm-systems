@@ -2151,7 +2151,17 @@ void VirtualGPU::updateCommandsState(amd::Command* list) const {
     }
 
     next = current->getNext();
+    bool ok = false;//current->referenceCount() == 1;
+    if(ok) {
+      // XPUT("updateCommandsState %p ref count: %d -- %s", 
+      //     current, current->referenceCount(), current->Xstring().c_str());
+      if (current->type() == CL_COMMAND_MARKER) {
+        auto m = (amd::Marker *)current;
+        // XPUT("updateCommandsState %p -- %s", m, m->ss_debug.c_str());
+      }
+    }
     current->release();
+    // if(ok) XPUT("updateCommandsState %p release done", current);
     current = next;
   }
 }
@@ -3980,7 +3990,7 @@ void VirtualGPU::submitKernel(amd::NDRangeKernelCommand& vcmd) {
   } else {
     // Make sure VirtualGPU has an exclusive access to the resources
     amd::ScopedLock lock(execution());
-
+   // oops
     profilingBegin(vcmd);
 
     // Submit kernel to HW
@@ -3990,7 +4000,7 @@ void VirtualGPU::submitKernel(amd::NDRangeKernelCommand& vcmd) {
       LogError("AQL dispatch failed!");
       vcmd.setStatus(CL_INVALID_OPERATION);
     }
-
+    // oops
     profilingEnd();
   }
 }

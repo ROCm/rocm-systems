@@ -26,6 +26,8 @@
 #include "hip_event.hpp"
 #include "hip_mempool_impl.hpp"
 
+#include <stdio.h>
+
 namespace hip {
 
 std::vector<hip::Stream*> g_captureStreams;

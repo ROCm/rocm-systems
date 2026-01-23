@@ -42,7 +42,7 @@ list(APPEND CMAKE_MODULE_PATH ${HIP_COMMON_DIR}/cmake)
 #############################
 # Options
 #############################
-option(__HIP_ENABLE_PCH "Enable/Disable pre-compiled hip headers" ON)
+option(__HIP_ENABLE_PCH "Enable/Disable pre-compiled hip headers" OFF)
 option(HIP_OFFICIAL_BUILD "Enable/Disable for mainline/staging builds" OFF)
 option(BUILD_SHARED_LIBS "Build the shared library" ON)
 
@@ -362,18 +362,18 @@ if(HIP_RUNTIME STREQUAL "rocclr")
 endif()
 
 # Build doxygen documentation
-find_program(DOXYGEN_EXE doxygen)
-if(DOXYGEN_EXE)
-    if(EXISTS "${HIP_COMMON_DIR}/docs/doxygen-input/doxy.cfg")
-        add_custom_target(doc COMMAND HIP_PATH=${CMAKE_CURRENT_SOURCE_DIR} ${DOXYGEN_EXE} ${HIP_COMMON_DIR}/docs/doxygen-input/doxy.cfg
-            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/docs)
-    elseif(EXISTS "${HIP_COMMON_DIR}/docs/.doxygen/Doxyfile")
-        add_custom_target(doc COMMAND HIP_PATH=${CMAKE_CURRENT_SOURCE_DIR} ${DOXYGEN_EXE} ${HIP_COMMON_DIR}/docs/.doxygen/Doxyfile
-            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/docs)
-    else()
-        message(STATUS "Unable to find doxygen config file. Will not generate doxygen output")
-    endif()
-endif()
+# find_program(DOXYGEN_EXE doxygen)
+# if(DOXYGEN_EXE)
+#     if(EXISTS "${HIP_COMMON_DIR}/docs/doxygen-input/doxy.cfg")
+#         add_custom_target(doc COMMAND HIP_PATH=${CMAKE_CURRENT_SOURCE_DIR} ${DOXYGEN_EXE} ${HIP_COMMON_DIR}/docs/doxygen-input/doxy.cfg
+#             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/docs)
+#     elseif(EXISTS "${HIP_COMMON_DIR}/docs/.doxygen/Doxyfile")
+#         add_custom_target(doc COMMAND HIP_PATH=${CMAKE_CURRENT_SOURCE_DIR} ${DOXYGEN_EXE} ${HIP_COMMON_DIR}/docs/.doxygen/Doxyfile
+#             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/docs)
+#     else()
+#         message(STATUS "Unable to find doxygen config file. Will not generate doxygen output")
+#     endif()
+# endif()
 
 #############################
 # Install steps
