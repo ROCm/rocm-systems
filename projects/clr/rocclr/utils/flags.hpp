@@ -253,6 +253,8 @@ release(bool, HIP_VMEM_MANAGE_SUPPORT, true,                                  \
         "Virtual Memory Management Support")                                  \
 release(bool, DEBUG_HIP_GRAPH_DOT_PRINT, false,                               \
          "Enable/Disable graph debug dot print dump")                         \
+release(bool, DEBUG_HIP_GRAPH_EXEC_DOT_PRINT, false,                          \
+         "Enable/Disable graph exec debug dot print dump")                    \
 release(bool, DEBUG_HIP_FORCE_ASYNC_QUEUE, false,                             \
         "Forces grpahs into async queue mode. DEBUG_HIP_FORCE_GRAPH_QUEUES must be 1") \
 release(uint, DEBUG_HIP_FORCE_GRAPH_QUEUES, 4,                                \

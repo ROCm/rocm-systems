@@ -130,20 +130,20 @@ install(FILES ${CMAKE_BINARY_DIR}/hipamd/hip-config-nvidia.cmake DESTINATION ${C
 #End dev files install
 
 #Begin doc files install
-find_program(DOXYGEN_EXE doxygen)
-if(DOXYGEN_EXE)
-    if(EXISTS "${HIP_COMMON_DIR}/docs/doxygen-input/doxy.cfg")
-        add_custom_target(build_doxygen ALL
-            COMMAND HIP_PATH=${HIP_COMMON_DIR} doxygen ${HIP_COMMON_DIR}/docs/doxygen-input/doxy.cfg)
-    elseif(EXISTS "${HIP_COMMON_DIR}/docs/.doxygen/Doxyfile")
-        add_custom_target(build_doxygen ALL
-            COMMAND HIP_PATH=${HIP_COMMON_DIR} doxygen ${HIP_COMMON_DIR}/docs/.doxygen/Doxyfile)
-    else()
-        message(FATAL_ERROR "Unable to find doxygen config file")
-    endif()
-    install(DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/RuntimeAPI/html
-            DESTINATION ${CMAKE_INSTALL_DOCDIR}/RuntimeAPI COMPONENT doc)
-endif()
+# find_program(DOXYGEN_EXE doxygen)
+# if(DOXYGEN_EXE)
+#     if(EXISTS "${HIP_COMMON_DIR}/docs/doxygen-input/doxy.cfg")
+#         add_custom_target(build_doxygen ALL
+#             COMMAND HIP_PATH=${HIP_COMMON_DIR} doxygen ${HIP_COMMON_DIR}/docs/doxygen-input/doxy.cfg)
+#     elseif(EXISTS "${HIP_COMMON_DIR}/docs/.doxygen/Doxyfile")
+#         add_custom_target(build_doxygen ALL
+#             COMMAND HIP_PATH=${HIP_COMMON_DIR} doxygen ${HIP_COMMON_DIR}/docs/.doxygen/Doxyfile)
+#     else()
+#         message(FATAL_ERROR "Unable to find doxygen config file")
+#     endif()
+#     install(DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/RuntimeAPI/html
+#             DESTINATION ${CMAKE_INSTALL_DOCDIR}/RuntimeAPI COMPONENT doc)
+# endif()
 #End doc files install
 
 ##################################

@@ -1611,7 +1611,20 @@ hipError_t hipGraphExecDestroy(hipGraphExec_t pGraphExec) {
 hipError_t ihipGraphLaunch(hip::GraphExec* graphExec, hipStream_t stream) {
   getStreamPerThread(stream);
   hip::Stream* launch_stream = hip::getStream(stream);
-  return graphExec->Run(launch_stream);
+  auto res = graphExec->Run(launch_stream);
+  if (unlikely(DEBUG_HIP_GRAPH_EXEC_DOT_PRINT)) {
+    static int i = 1;
+    if (i < 10) {
+      std::string filename =
+        "graph_exec_" + std::to_string(amd::Os::getProcessId()) + 
+        "_dot_print_" + std::to_string(i++);
+      std::ofstream ofs(filename);
+      ofs << "digraph dot {" << std::endl;
+      graphExec->GenerateDOT(ofs, (hipGraphDebugDotFlags)0);
+      ofs << "}" << std::endl;
+    } 
+  }
+  return res;
 }
 
 hipError_t hipGraphLaunch_common(hip::GraphExec* graphExec, hipStream_t stream) {

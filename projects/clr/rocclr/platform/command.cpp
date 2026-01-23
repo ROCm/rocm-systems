@@ -109,8 +109,9 @@ bool Event::setStatus(int32_t status, uint64_t timeStamp) {
     // We can only move forward in the execution status.
     return false;
   }
-
+  // oops
   if (profilingInfo().enabled_) {
+    // PAE shall we disable it??
     timeStamp = recordProfilingInfo(status, timeStamp);
     if (epoch == 0) {
       epoch = profilingInfo().queued_;
@@ -149,16 +150,16 @@ bool Event::setStatus(int32_t status, uint64_t timeStamp) {
     if (!IS_HIP) {
       releaseResources();
     }
-
+    // oops
     if (profilingInfo().enabled_ && amd::activity_prof::IsEnabled(OP_ID_DISPATCH)) {
-      amd::activity_prof::ReportActivity(command());
+      // amd::activity_prof::ReportActivity(command());
     }
 
     // Broadcast all the waiters.
     if (referenceCount() > 1) {
       signal();
     }
-
+    // oops
     if (profilingInfo().enabled_) {
       ClPrint(LOG_DEBUG, LOG_CMD, "Command %p complete (Wall: %ld, CPU: %ld, GPU: %ld us)",
         &command(),
@@ -429,9 +430,10 @@ NDRangeKernelCommand::NDRangeKernelCommand(HostQueue& queue, const EventWaitList
   if (cooperativeGroups()) {
     setNumWorkgroups();
   }
-
+  // XPUT("New ndrange kernel waitlist sz: %d", (int)eventWaitList.size());
   // This optimization will set marker_ts_ but may not submit a batch.
   if (forceProfiling) {
+    // XPUT("%s:%d Profiling forcibly enabled!", __FILE__, __LINE__);
     profilingInfo_.enabled_ = true;
     profilingInfo_.clear();
     profilingInfo_.correlation_id_ = activity_prof::correlation_id;
@@ -441,9 +443,18 @@ NDRangeKernelCommand::NDRangeKernelCommand(HostQueue& queue, const EventWaitList
 }
 
 void NDRangeKernelCommand::releaseResources() {
+
+  if(cloned_) return;
+  // XPUT("%p releasing all resources cloned %d -- %d #events %d", 
+  //   this, cloned_, (int)kernel_.referenceCount(), (int)eventWaitList().size());
   kernel_.parameters().release(parameters_);
   DEBUG_ONLY(parameters_ = NULL);
   kernel_.release();
+  
+  const auto& events = eventWaitList();
+  // for(auto evt: events) {
+  //   XPUT("event ref cnt %d -- %s", (int)evt->referenceCount(), evt->command().Xstring().c_str());
+  // }
   Command::releaseResources();
 }
 
