@@ -112,7 +112,7 @@ hipError_t hipMemCreate(hipMemGenericAllocationHandle_t* handle, size_t size,
   amd::Context* amdContext = useHostDevice ? hip::host_context : curDevContext;
 
   if (amdContext == nullptr) {
-    return hipErrorOutOfMemory;
+    HIP_RETURN(hipErrorOutOfMemory);
   }
 
   const auto& dev_info = amdContext->devices()[0]->info();
