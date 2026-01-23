@@ -256,6 +256,7 @@ TEST_CASE("Unit_hipGraphExecMemcpyNodeSetParams_Negative_Changing_Memcpy_Directi
     dst = dev;
     break;
   default:
+    REQUIRE(false);
     assert(false);
   }
 
