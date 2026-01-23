@@ -42,7 +42,7 @@ RCCL build & installation helper script
        --debug                 Build debug library
        --enable_backtrace      Build with custom backtrace support
        --disable-colltrace     Build without collective trace
-       --disable-msccl-kernel  Build without MSCCL kernels
+       --enable-msccl-kernel   Build with MSCCL kernels
        --enable-mscclpp        Build with MSCCL++ support
        --enable-mscclpp-clip   Build MSCCL++ with clip wrapper on bfloat16 and half addition routines
        --disable-roctx         Build without ROCTX logging

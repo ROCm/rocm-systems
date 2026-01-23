@@ -379,6 +379,10 @@ configure_settings(bool _init)
                               "Enable support for MPI functions", true, "mpi", "backend",
                               "parallelism");
 
+    ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_USE_UCX",
+                              "Enable support for UCX functions", true, "ucx", "backend",
+                              "parallelism");
+
     ROCPROFSYS_CONFIG_SETTING(
         bool, "ROCPROFSYS_USE_RCCLP",
         "Enable support for ROCm Communication Collectives Library (RCCL) Performance",
@@ -1940,6 +1944,13 @@ bool&
 get_use_mpip()
 {
     static auto _v = get_config()->find("ROCPROFSYS_USE_MPIP");
+    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
+}
+
+bool&
+get_use_ucx()
+{
+    static auto _v = get_config()->find("ROCPROFSYS_USE_UCX");
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
 }
 
