@@ -112,7 +112,7 @@ std::pair<const Isa*, const Isa*> Isa::supportedIsas() {
       //
       // -- Compiler --|-- Runtime --|-- IP --|-- Target --|-- Target Properties --
       //               |  Supported  | Version|  Features  |
-      // --------------|-------------|--------|------------|-----------------------               
+      // --------------|-------------|--------|------------|-----------------------
       //   Target ID   |   ROC PAL   | Major  |  SRAMECC   | SIMD/CU
       //               |             |  Minor |   XNACK    |  SIMD Width
       //               |             |   Step |            |   Instr Width
@@ -546,7 +546,7 @@ amd::Memory* Device::CreateVirtualBuffer(amd::Context& device_context, void* vpt
     // If not parent, but sub-buffer/child, then validate the address range
     vaddr_base_obj = amd::MemObjMap::FindVirtualMemObj(vptr);
     if (vaddr_base_obj == nullptr) {
-      LogPrintfError("Cannot find entry in VirtualMemObjMap: 0x%x \n", vptr);
+      LogPrintfError("Cannot find entry in VirtualMemObjMap: %p ", vptr);
       return nullptr;
     }
     assert(vaddr_base_obj->getMemFlags() & CL_MEM_VA_RANGE_AMD);
@@ -588,7 +588,7 @@ amd::Memory* Device::CreateVirtualBuffer(amd::Context& device_context, void* vpt
 bool Device::DestroyVirtualBuffer(amd::Memory* vaddr_mem_obj) {
   // Argument nullptr check.
   if (vaddr_mem_obj == nullptr || vaddr_mem_obj->getSvmPtr() == nullptr) {
-    LogPrintfError("Mem obj passed is nullptr, vaddr_mem_obj: %p \n", vaddr_mem_obj);
+    LogPrintfError("Mem obj passed is nullptr, vaddr_mem_obj: %p ", vaddr_mem_obj);
     return false;
   }
 
@@ -596,7 +596,7 @@ bool Device::DestroyVirtualBuffer(amd::Memory* vaddr_mem_obj) {
     // If parent is not nullptr, this is the sub-buffer object.
     amd::Memory* vaddr_base_obj = amd::MemObjMap::FindVirtualMemObj(vaddr_mem_obj->getSvmPtr());
     if (vaddr_base_obj == nullptr) {
-      LogPrintfError("Cannot find mem obj for ptr: 0x%x", vaddr_mem_obj->getSvmPtr());
+      LogPrintfError("Cannot find mem obj for ptr: %p", vaddr_mem_obj->getSvmPtr());
       return false;
     }
     vaddr_base_obj->removeSubBuffer(vaddr_mem_obj);
@@ -631,7 +631,7 @@ bool Device::BlitProgram::create(amd::Device* device, const std::string& extraKe
   program_ = new Program(*context_, kernels.c_str(), Program::OpenCL_C);
   if (program_ == nullptr) {
     ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN,
-             "Program creation for Kernel: %s failed\n", kernels.c_str());
+             "Program creation for Kernel: %s failed", kernels.c_str());
     return false;
   }
 
@@ -654,12 +654,12 @@ bool Device::BlitProgram::create(amd::Device* device, const std::string& extraKe
   if ((retval = program_->build(devices, opt.c_str(), nullptr, nullptr, GPU_DUMP_BLIT_KERNELS)) !=
       CL_SUCCESS) {
     ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN,
-             "Build failed for Kernel: %s with error code %d\n", kernels.c_str(), retval);
+             "Build failed for Kernel: %s with error code %d", kernels.c_str(), retval);
     return false;
   }
   if (!program_->load()) {
     ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN,
-             "Could not load the kernels: %s \n", kernels.c_str());
+             "Could not load the kernels: %s", kernels.c_str());
     return false;
   }
 
@@ -689,7 +689,7 @@ bool Device::init() {
       // that KFD is not installed.
       // Ignore the failure and assume KFD is not installed.
       // abort();
-      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_INIT, "KFD is not installed \n");
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_INIT, "KFD is not installed");
       // Disable direct dispatch if ROC initialization wasn't successful
       if (flagIsDefault(AMD_DIRECT_DISPATCH)) {
         AMD_DIRECT_DISPATCH = false;
@@ -1357,7 +1357,7 @@ bool ClBinary::createElfBinary(bool doencrypt, Program::type_t type) {
   }
 
   if (!elfOut_->dumpImage(&image, &imageSize)) {
-    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE, "Dump Image failed \n");
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE, "Dump Image failed");
     return false;
   }
 
@@ -1438,7 +1438,7 @@ bool ClBinary::decryptElf(const char* binaryIn, size_t size, char** decryptBin, 
     int outDataSize = 0;
     if (!amd::oclDecrypt(binaryIn, (int)size, outBuf, outBufSize, &outDataSize)) {
       delete[] outBuf;
-      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE, "Cannot Decrypt Image \n");
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE, "Cannot Decrypt Image");
       return false;
     }
 
@@ -1508,7 +1508,7 @@ bool ClBinary::loadLlvmBinary(std::string& llvmBinary,
   }
 
   ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN,
-           "Cannot Load LLVM Binary: %s \n", llvmBinary.c_str());
+           "Cannot Load LLVM Binary: %s", llvmBinary.c_str());
   return false;
 }
 
