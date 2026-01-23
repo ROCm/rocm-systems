@@ -550,5 +550,3 @@ void ROCmLogging::Logger::initialize_resources() {
 void ROCmLogging::Logger::destroy_resources() {
   m_File.close();
 }
-
-}

@@ -151,6 +151,8 @@ struct CacheState {
     auto& cache = caches[static_cast<size_t>(op)];
     TimePoint now = SteadyClock::now();
 
+    // ENOENT == /dev/kfd missing == RSMI_STATUS_DRIVER_NOT_LOADED
+    // Shouldn't get to this point, but handle gracefully
     StoreBatchResult result{true, false, {ENOENT, 0}};
 
     for (uint32_t i = 0; i < payload.count; ++i) {
@@ -498,7 +500,7 @@ ForkResult ExecuteBatchFork(OpType op, const std::vector<uint32_t>& gpu_ids) {
 
   ssize_t bytes_read = read(pipe_fds[0], &result.payload, sizeof(result.payload));
   close(pipe_fds[0]);
-  bool read_ok = (bytes_read >= static_cast<ssize_t>(sizeof(result.payload.count)));
+  bool read_ok = (bytes_read == static_cast<ssize_t>(sizeof(result.payload)));
 
   int child_status = 0;
   pid_t wait_result = waitpid(child_pid, &child_status, 0);
