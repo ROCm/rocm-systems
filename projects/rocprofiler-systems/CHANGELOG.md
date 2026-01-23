@@ -8,7 +8,6 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 ### Added
 
-- Support for UCX (Unified Communication X) API tracing.
 - Profiling and metric collection capabilities for XGMI and PCIe data.
 - How-to document for XGMI and PCIe sampling and monitoring.
 - Documentation for `--trace-legacy` / `-L` CLI flag for direct tracing mode.
