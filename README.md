@@ -16,46 +16,42 @@ Download and install the Windows SDK from [windows SDK](https://developer.micros
 
 ### 2. Install AMD ROCm package
 
-#### Install AMD Unified Driver Package Repositories and Installer Script
+#### Install AMD Unified Driver Package Repositories
 
-Select the applicable Ubuntu® version to download and install the amdgpu-install script on the system.
+Select the applicable Ubuntu® version to download and install the amdgpu-install package on the system.
 
 #### Ubuntu® 24.04
 
 Enter the following commands to install the installer script for Ubuntu® version 24.04:
 
 ```bash
-sudo apt update
-wget https://repo.radeon.com/amdgpu-install/7.2.0/ubuntu/noble/amdgpu-install_7.2.0.xxxxx-1_all.deb
-sudo apt install ./amdgpu-install_7.2.0.xxxxx-1_all.deb
+wget https://repo.radeon.com/amdgpu-install/7.2/ubuntu/noble/amdgpu-install_7.2.70200-1_all.deb
+sudo apt install ./amdgpu-install_7.2.70200-1_all.deb
 ```
 
 #### Install AMD ROCm package
 
-Run the installer script with appropriate ***--usecase*** parameters to install the components once the Unified Driver Deb Package repositories are installed.
-
-#### Set up ROCm usecase
-The ***--no-dkms*** parameter must be passed, as amdgpu kernel driver is not required within WSL2.
-
 Run the following command to install ROCm:
 
 ```bash
-amdgpu-install -y --usecase=rocm --no-dkms
+sudo apt update
+sudo apt install python3-setuptools python3-wheel
+sudo usermod -a -G render,video $LOGNAME # Add the current user to the render and video groups
+sudo apt install rocm
 ```
 
 > ***Note***
-> The ***-y*** option installs non-interactively. This step may take several minutes, depending on internet connection and system speed.
+> This step may take several minutes, depending on internet connection and system speed.
 > Look out for output warning or errors that indicate an unsuccessful installation.
 
-See [Using the amdgpu-install script](https://amdgpu-install.readthedocs.io/en/latest/install-script.html) for more information.
 
 ### 3. Build librocdxg
 Run the following commands in your WSL console:
- 
+
 1. Clone librocdxg repository to your local WSL.
 
 ```bash
-git clone https://github.com/[...]/librocdxg.git
+git clone git@github.com:ROCm/librocdxg.git
 cd librocdxg
 ```
 
