@@ -2893,7 +2893,7 @@ static ncclResult_t collTaskAppend(
   t->root = info->root;
   t->datatype = info->datatype;
   size_t elementSize = ncclTypeSize(t->datatype);
-  if (t->func == ncclFuncAllGather || t->func == ncclFuncBroadcast || t->func == ncclFuncAlltoAllPivot) {
+  if (t->func == ncclFuncAllGather || t->func == ncclFuncBroadcast || t->func == ncclFuncAlltoAllPivot || t->func == ncclFuncAllToAllGda) {
     t->count *= elementSize;
     t->datatype = ncclInt8;
     elementSize = 1;
