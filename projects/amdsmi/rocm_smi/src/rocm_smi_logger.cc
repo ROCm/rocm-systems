@@ -548,7 +548,7 @@ void ROCmLogging::Logger::initialize_resources() {
 }
 
 void ROCmLogging::Logger::destroy_resources() {
-  if (m_File.is_open()) {
-    m_File.close();
-  }
+  m_File.close();
+}
+
 }
