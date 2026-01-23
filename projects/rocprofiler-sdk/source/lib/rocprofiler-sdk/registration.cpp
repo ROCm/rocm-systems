@@ -52,6 +52,7 @@
 #include "lib/rocprofiler-sdk/rocdecode/rocdecode.hpp"
 #include "lib/rocprofiler-sdk/rocjpeg/rocjpeg.hpp"
 #include "lib/rocprofiler-sdk/runtime_initialization.hpp"
+#include "lib/rocprofiler-sdk/spm/core.hpp"
 
 #include <rocprofiler-sdk/context.h>
 #include <rocprofiler-sdk/experimental/registration.h>
@@ -895,6 +896,7 @@ finalize()
         counters::device_counting_service_finalize();
         hsa::queue_controller_fini();
         thread_trace::finalize();
+        spm::state_map_fini();
         ompt::finalize_ompt();
         kfd::finalize();
 #if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0

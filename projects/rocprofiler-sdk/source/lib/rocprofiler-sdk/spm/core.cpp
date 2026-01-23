@@ -96,6 +96,24 @@ SpmCounterController::spm_add_profile(std::shared_ptr<spm_counter_config>&& conf
     });
 }
 
+void
+SpmCounterController::state_map_fini()
+{
+    spm_get_controller()._agent_state_map.wlock([&](auto& map) {
+        for(auto& [agent, state_queue] : map)
+        {
+            if(!state_queue.empty())
+            {
+                if(state_queue.size() != 1) ROCP_WARNING << "state queue greater than 1";
+                auto rel_pkt = std::move(state_queue.front()->spm_packet);
+                dynamic_cast<hsa::SPMPacket*>(rel_pkt.get())->kfd_stop();
+                // state_queue.erase(state_queue.begin());
+
+                state_queue.clear();
+            }
+        }
+    });
+}
 /**
  * @brief Removes the profile entry from the global cache
  */
@@ -158,39 +176,11 @@ spm_counter_callback_info::setup_spm_counter_config(std::shared_ptr<spm_counter_
     return ROCPROFILER_STATUS_SUCCESS;
 }
 
-/**
- * @brief looks into the config's packet cache to re-use the packet
- * If not, constructs the packet using packet generator
- * updates packet_return map
- */
-rocprofiler_status_t
-spm_counter_callback_info::get_spm_packet(std::unique_ptr<rocprofiler::hsa::AQLPacket>& ret_pkt,
-                                          std::shared_ptr<spm_counter_config>&          profile)
+void
+state_map_fini()
 {
-    rocprofiler_status_t status;
-    profile->packets.wlock([&](auto& pkt_vector) {
-        status = setup_spm_counter_config(profile);
-        if(!pkt_vector.empty() && status == ROCPROFILER_STATUS_SUCCESS)
-        {
-            ret_pkt = std::move(pkt_vector.back());
-            pkt_vector.pop_back();
-        }
-    });
-
-    if(!ret_pkt)
-    {
-        // If we do not have a packet in the cache, create one.
-        ret_pkt = profile->pkt_generator->construct_packet(
-            CHECK_NOTNULL(hsa::get_queue_controller())->get_core_table(),
-            CHECK_NOTNULL(hsa::get_queue_controller())->get_ext_table());
-    };
-
-    ret_pkt->clear();
-    packet_return_map.wlock([&](auto& data) { data.emplace(ret_pkt.get(), profile); });
-
-    return ROCPROFILER_STATUS_SUCCESS;
+    spm_get_controller().state_map_fini();
 }
-
 /** @brief  Creates spm the counter config
  * Checks if the input counters does not exceed hardware limit
  * Adds the config to configs cache

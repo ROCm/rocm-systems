@@ -21,6 +21,7 @@
 // THE SOFTWARE.
 
 #include "lib/rocprofiler-sdk/hsa/aql_packet.hpp"
+#include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 
 #include <fmt/core.h>
@@ -313,6 +314,7 @@ SPMPacket::SPMPacket(aqlprofile_agent_handle_t aql_agent, aqlprofile_spm_profile
     ROCP_FATAL_IF(!sym.valid()) << "Failed to load aqlprofile SPM library";
     auto status = sym.create_packets_fn(&handle, &aql_desc, &packets, profile, 0);
 
+    hsa_agent = profile.hsa_agent;
     if(status != HSA_STATUS_SUCCESS) return;
 
     packets.start_packet.header            = VENDOR_BIT | BARRIER_BIT;
@@ -358,7 +360,7 @@ SPMPacket::kfd_start()
         return;
     }
 
-    auto status = sym.spm_start_fn(this->handle, spm::aql_data_callback, this);
+    auto status = sym.spm_start_fn(this->handle, spm::aql_data_callback, &(this->hsa_agent));
     ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS) << "Unable to acquire KFD thread";
 }
 

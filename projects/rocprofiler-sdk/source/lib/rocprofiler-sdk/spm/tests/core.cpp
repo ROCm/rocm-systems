@@ -225,8 +225,7 @@ TEST(spm_core, check_packet_generation)
              */
             spm::spm_counter_callback_info  cb_info;
             std::unique_ptr<hsa::AQLPacket> pkt;
-            EXPECT_EQ(cb_info.get_spm_packet(pkt, profile), ROCPROFILER_STATUS_SUCCESS)
-                << "Unable to generate packet";
+
             EXPECT_TRUE(pkt) << "Expected a packet to be generated";
             cb_info.packet_return_map.wlock([&](const auto& data) {
                 EXPECT_EQ(data.size(), 1) << "Incorrect packet size";
