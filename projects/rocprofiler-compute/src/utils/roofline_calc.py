@@ -466,7 +466,10 @@ def calc_ai_analyze(
 
 
 def calc_ai_profile(
-    mspec: MachineSpecs, sort_type: str, ret_df: dict[str, pd.DataFrame]
+    mspec: MachineSpecs,
+    sort_type: str,
+    ret_df: dict[str, pd.DataFrame],
+    iteration_multiplexing: str,
 ) -> dict[str, Union[list[list[float]], list[str]]]:
     """Given counter data, calculate arithmetic intensity for each kernel
     in the application. Leverage hard-coded equations to calculate AI values.
@@ -504,6 +507,10 @@ def calc_ai_profile(
         at_end = idx + 1 == df.shape[0]
         next_kernel_name = df["Kernel_Name"][idx + 1] if not at_end else ""
         kernel_name = df["Kernel_Name"][idx]
+
+        # Skip this kernel dispatch row if any counter value is n/a
+        if df.iloc[idx].isna().any():
+            continue
 
         try:
             total_flops += (
@@ -546,7 +553,8 @@ def calc_ai_profile(
         except KeyError as e:
             console_debug(
                 "roofline",
-                f"{kernel_name[:35]}: Skipped total_flops at index {idx} due to {e}",
+                f"{kernel_name[:35]}: Skipped total_flops at index \
+                    {idx} due to {e}",
             )
             pass
         try:
@@ -615,7 +623,8 @@ def calc_ai_profile(
         except KeyError as e:
             console_debug(
                 "roofline",
-                f"{kernel_name[:35]}: Skipped L1cache_data at index {idx} due to {e}",
+                f"{kernel_name[:35]}: Skipped L1cache_data at index \
+                    {idx} due to {e}",
             )
             pass
 
@@ -629,7 +638,8 @@ def calc_ai_profile(
         except KeyError as e:
             console_debug(
                 "roofline",
-                f"{kernel_name[:35]}: Skipped L2cache_data at index {idx} due to {e}",
+                f"{kernel_name[:35]}: Skipped L2cache_data at index \
+                    {idx} due to {e}",
             )
             pass
         try:

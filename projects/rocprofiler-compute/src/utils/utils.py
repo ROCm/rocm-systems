@@ -1502,6 +1502,7 @@ def impute_counters_iteration_multiplex(
             }
             # Collect imputed sub-groups as dataframes
             subgroup_dfs = []
+            previous_fill_values = {}
             for i in range(0, len(group), subgroup_size):
                 subgroup = group.iloc[i : i + subgroup_size]
 
@@ -1517,7 +1518,22 @@ def impute_counters_iteration_multiplex(
                 if fill_values:
                     subgroup = subgroup.fillna(fill_values)
 
+                # If this is the last subgroup and it still has missing values,
+                # use previous subgroup's fill values
+                # NOTE: This wont work if the first subgroup is itself incomplete
+                is_last_subgroup = (i + subgroup_size) >= len(group)
+                # First any() returns bool pd.Series for every column,
+                # second any() returns single bool
+                if (
+                    is_last_subgroup
+                    and previous_fill_values
+                    and subgroup.isna().any().any()
+                ):
+                    # Use previous subgroup's fill values for remaining missing values
+                    subgroup = subgroup.fillna(previous_fill_values)
+
                 subgroup_dfs.append(subgroup)
+                previous_fill_values = fill_values
 
             # Concatenate all subgroups for this group
             if subgroup_dfs:
