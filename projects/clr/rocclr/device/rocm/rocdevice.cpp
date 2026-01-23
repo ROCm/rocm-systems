@@ -245,10 +245,14 @@ Device::~Device() {
         amd::disableHostcalls(qInfo.hostcallBuffer_);
         context().svmFree(qInfo.hostcallBuffer_);
       }
-      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_QUEUE, "Deleting hardware queue %p with refCount 0",
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_QUEUE, "Releasing hardware queue %p",
               queue->base_address);
+      if (qInfo.isCountedQueue) {
+        Hsa::counted_queue_release(queue);
+      } else {
+        Hsa::queue_destroy(queue);
+      }
       qIter = it.erase(qIter);
-      Hsa::queue_destroy(queue);
     }
   }
   queuePool_.clear();
@@ -2966,6 +2970,44 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
     qIndex = QueuePriority::Normal;
   }
 
+  // Determine if we can use the counted queue API
+  // Counted queues cannot be used with CU masks or cooperative queues
+  bool useCountedQueue = !coop_queue && cuMask.empty() && info_.globalCUMask_.empty();
+
+  hsa_queue_t* queue;
+
+  if (useCountedQueue) {
+    // Use counted_queue_acquire - the runtime handles queue pooling internally
+    // Profiling is enabled by default for counted queues (per ROCr API spec)
+    if (Hsa::counted_queue_acquire(bkendDevice_, HSA_QUEUE_TYPE_MULTI, queue_priority,
+                                   callbackQueue, this, 0, &queue) != HSA_STATUS_SUCCESS) {
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_QUEUE,
+               "Device::acquireQueue: hsa_amd_counted_queue_acquire failed!");
+      return nullptr;
+    }
+
+    ClPrint(amd::LOG_INFO, amd::LOG_QUEUE,
+            "Acquired counted queue SWq=%p to map on HWq=%p with priority %d",
+            queue, queue->base_address, queue_priority);
+
+    // Add to pool for hostcall buffer tracking
+    auto result = queuePool_[qIndex].emplace(std::make_pair(queue, QueueInfo()));
+    assert(result.second && "QueueInfo already exists");
+    auto& qInfo = result.first->second;
+    qInfo.refCount = 1;
+    qInfo.isCountedQueue = true;
+    qInfo.hasDedicatedQueue_ = dedicated_queue;
+
+    ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "acquireQueue refCount: %p (%d)%s",
+            result.first->first->base_address, result.first->second.refCount,
+            dedicated_queue ? " (dedicated)" : "");
+
+    if (!managed) {
+      num_queues_[qIndex]++;
+    }
+    return queue;
+  }
+
   { // Lock
     amd::ScopedLock l(active_queue_access_);
 
@@ -3009,7 +3051,6 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
   }
   auto queue_size = (queue_max_packets < queue_size_hint) ? queue_max_packets : queue_size_hint;
 
-  hsa_queue_t* queue;
   auto queue_type = HSA_QUEUE_TYPE_MULTI;
 
   // Enable cooperative queue for the device queue
@@ -3131,6 +3172,7 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
       auto& qInfo = result.first->second;
       qInfo.refCount = 1;
       qInfo.hasDedicatedQueue_ = dedicated_queue;  // Track if this is a dedicated queue
+      qInfo.isCountedQueue = false;  // CU mask queues use old API
 
       return queue;
     }
@@ -3149,9 +3191,10 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
   auto& qInfo = result.first->second;
   qInfo.refCount = 1;
   qInfo.hasDedicatedQueue_ = dedicated_queue;  // Track if this is a dedicated queue
-  ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "acquireQueue refCount: %p (%d) %s",
+  qInfo.isCountedQueue = false;  // This path uses old queue_create API (globalCUMask case)
+  ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "acquireQueue refCount: %p (%d)%s",
           result.first->first->base_address, result.first->second.refCount,
-          dedicated_queue ? "(dedicated)" : "");
+          dedicated_queue ? " (dedicated)" : "");
   if (!managed && (cuMask.size() == 0)) {
     num_queues_[qIndex]++;
   }
@@ -3189,6 +3232,7 @@ void Device::releaseQueue(hsa_queue_t* queue, const std::vector<uint32_t>& cuMas
   // Defer cleanup operations outside the lock
   void* hostcallBufferToFree = nullptr;
   bool shouldDestroyQueue = false;
+  bool isCountedQueue = false;
 
   { // Lock
     amd::ScopedLock l(active_queue_access_);
@@ -3205,13 +3249,14 @@ void Device::releaseQueue(hsa_queue_t* queue, const std::vector<uint32_t>& cuMas
         qInfo.refCount--;
         ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "releaseQueue refCount:%p (%d)",
                 qIter->first->base_address, qIter->second.refCount);
-        // hsa queues with cumask set are not being reused. Hence, if the app uses multiple
-        // such queues it can cause memory leak and those must be destroyed here once the
-        // refcount reaches 0.
-        if ((!cuMask.empty()) && (qInfo.refCount == 0)) {
+
+        // For counted queues, release immediately since each acquire returns a unique handle
+        // For CU-mask queues (non-counted), destroy when refCount hits 0
+        if (qInfo.refCount == 0 && (qInfo.isCountedQueue || !cuMask.empty())) {
           hostcallBufferToFree = qInfo.hostcallBuffer_;
           shouldDestroyQueue = true;
-          ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "Deleting hardware queue %p with refCount 0",
+          isCountedQueue = qInfo.isCountedQueue;
+          ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "Releasing hardware queue %p with refCount 0",
                   queue->base_address);
           it.erase(qIter);
         }
@@ -3229,7 +3274,12 @@ void Device::releaseQueue(hsa_queue_t* queue, const std::vector<uint32_t>& cuMas
       amd::disableHostcalls(hostcallBufferToFree);
       context().svmFree(hostcallBufferToFree);
     }
-    Hsa::queue_destroy(queue);
+    if (isCountedQueue) {
+      Hsa::counted_queue_release(queue);
+    } else {
+      Hsa::queue_destroy(queue);
+    }
+    return;
   }
 
   if (coop_queue) {  // cooperative queue

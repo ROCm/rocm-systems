@@ -112,6 +112,8 @@ struct RocrEntryPoints {
   decltype(hsa_amd_signal_create)* hsa_amd_signal_create_;
   decltype(hsa_amd_register_system_event_handler)* hsa_amd_register_system_event_handler_;
   decltype(hsa_amd_queue_set_priority)* hsa_amd_queue_set_priority_;
+  decltype(hsa_amd_counted_queue_acquire)* hsa_amd_counted_queue_acquire_;
+  decltype(hsa_amd_counted_queue_release)* hsa_amd_counted_queue_release_;
   decltype(hsa_amd_memory_async_copy_rect)* hsa_amd_memory_async_copy_rect_;
   decltype(hsa_amd_memory_lock_to_pool)* hsa_amd_memory_lock_to_pool_;
   decltype(hsa_amd_signal_value_pointer)* hsa_amd_signal_value_pointer_;
@@ -422,6 +424,17 @@ class Hsa : public amd::AllStatic {
   }
   static hsa_status_t queue_set_priority(hsa_queue_t* queue, hsa_amd_queue_priority_t priority) {
     return ROCR_DYN(hsa_amd_queue_set_priority)(queue, priority);
+  }
+  static hsa_status_t counted_queue_acquire(hsa_agent_t agent, hsa_queue_type_t type,
+                                            hsa_amd_queue_priority_t priority,
+                                            void (*callback)(hsa_status_t status,
+                                                             hsa_queue_t* source, void* data),
+                                            void* data, uint64_t flags, hsa_queue_t** queue) {
+    return ROCR_DYN(hsa_amd_counted_queue_acquire)(agent, type, priority, callback, data, flags,
+                                                   queue);
+  }
+  static hsa_status_t counted_queue_release(hsa_queue_t* queue) {
+    return ROCR_DYN(hsa_amd_counted_queue_release)(queue);
   }
   static hsa_status_t memory_async_copy_rect(
     const hsa_pitched_ptr_t* dst, const hsa_dim3_t* dst_offset, const hsa_pitched_ptr_t* src,

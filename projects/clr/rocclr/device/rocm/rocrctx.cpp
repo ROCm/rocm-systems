@@ -103,6 +103,8 @@ bool Hsa::LoadLib() {
   GET_ROCR_SYMBOL(hsa_amd_signal_create)
   GET_ROCR_SYMBOL(hsa_amd_register_system_event_handler)
   GET_ROCR_SYMBOL(hsa_amd_queue_set_priority)
+  GET_ROCR_SYMBOL(hsa_amd_counted_queue_acquire)
+  GET_ROCR_SYMBOL(hsa_amd_counted_queue_release)
   GET_ROCR_SYMBOL(hsa_amd_memory_async_copy_rect)
   GET_ROCR_SYMBOL(hsa_amd_memory_lock_to_pool)
   GET_ROCR_SYMBOL(hsa_amd_signal_value_pointer)

@@ -681,9 +681,10 @@ class Device : public NullDevice {
     int refCount;           //! Reference counter. Shows how many time the queue was shared
     void* hostcallBuffer_;  //! Host call buffer for the HSA queue
     bool hasDedicatedQueue_;  //! True if this queue is a dedicated queue (e.g., null stream)
+    bool isCountedQueue;    //! True if queue was created via hsa_amd_counted_queue_acquire
 
     // Constructor
-    QueueInfo() : refCount(0), hostcallBuffer_(nullptr), hasDedicatedQueue_(false) {}
+    QueueInfo() : refCount(0), hostcallBuffer_(nullptr), hasDedicatedQueue_(false), isCountedQueue(false) {}
 
     //! Get the current hardware queue depth (wptr - rptr)
     static uint64_t GetHwQueueDepth(hsa_queue_t* queue) {
