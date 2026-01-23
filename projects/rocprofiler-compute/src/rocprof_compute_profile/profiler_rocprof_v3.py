@@ -60,7 +60,7 @@ class rocprof_v3_profiler(RocProfCompute_Base):
             )
         elif args.hip_trace:
             trace_option = "--hip-trace"
-        elif args.torch_trace:
+        elif getattr(args, "torch_trace", False):
             trace_option = "--marker-trace"
         else:
             trace_option = "--kernel-trace"
