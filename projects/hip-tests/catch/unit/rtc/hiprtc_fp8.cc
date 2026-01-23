@@ -28,6 +28,8 @@ THE SOFTWARE.
 
 TEST_CASE("Unit_hiprtc_fp8_simple") {
   constexpr const char* source = R"(
+#include <hip/hip_fp8.h>
+
 extern "C" __global__ void float_to_fp8_to_float(float* out, float* in, bool e4m3, size_t size) {
   size_t i = threadIdx.x;
   if (i < size) {
@@ -43,10 +45,10 @@ extern "C" __global__ void float_to_fp8_to_float(float* out, float* in, bool e4m
 )";
 
   hiprtcProgram prog;
-  hiprtcCreateProgram(&prog,     // prog
-                      source,    // buffer
-                      "fp8.cu",  // name
-                      0, nullptr, nullptr);
+  HIPRTC_CHECK(hiprtcCreateProgram(&prog,     // prog
+                                   source,    // buffer
+                                   "fp8.cu",  // name
+                                   0, nullptr, nullptr));
   hipDeviceProp_t props;
   int device = 0;
   HIP_CHECK(hipGetDeviceProperties(&props, device));
@@ -55,8 +57,11 @@ extern "C" __global__ void float_to_fp8_to_float(float* out, float* in, bool e4m
 #else
   std::string sarg = std::string("--fmad=false");
 #endif
-  const char* options[] = {sarg.c_str()};
-  hiprtcResult compileResult{hiprtcCompileProgram(prog, 1, options)};
+
+  // TODO: standardize the include path
+  const char* options[] = {sarg.c_str(),
+                           "-I/home/jatin/project/hip/rocm-systems/build/install/include"};
+  hiprtcResult compileResult{hiprtcCompileProgram(prog, 2, options)};
   size_t logSize;
   HIPRTC_CHECK(hiprtcGetProgramLogSize(prog, &logSize));
   if (logSize) {
@@ -121,15 +126,15 @@ extern "C" __global__ void float_to_fp8_to_float(float* out, float* in, bool e4m
   HIP_CHECK(hipModuleLaunchKernel(kernel, 1, 1, 1, size, 1, 1, 0, nullptr, nullptr, config));
 
   HIP_CHECK(hipMemcpy(out.data(), d_out, size * sizeof(float), hipMemcpyDeviceToHost));
+
+  HIP_CHECK(hipFree(d_in));
+  HIP_CHECK(hipFree(d_out));
+  HIP_CHECK(hipModuleUnload(module));
+
   for (size_t i = 0; i < size; i++) {
     __hip_fp8_e5m2 tmp = in[i];
     float cpu_out = tmp;
     INFO("Index: " << i << " in: " << in[i] << " GPU: " << out[i] << " cpu: " << cpu_out);
     REQUIRE(cpu_out == out[i]);
   }
-
-  HIP_CHECK(hipFree(d_in));
-  HIP_CHECK(hipFree(d_out));
-
-  HIP_CHECK(hipModuleUnload(module));
 }
