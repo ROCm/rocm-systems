@@ -84,7 +84,7 @@ static inline hipError_t validateResources(hipGraphicsResource_t* resources, int
       return hipErrorInvalidValue;
     }
     if (!device->registeredGraphics().isValid(resources[i])) {
-      return hipErrorInvalidHandle;
+      return hipErrorInvalidResourceHandle;
     }
     if (!device->mappedGraphics().isValid(resources[i])) {
       return hipErrorNotMapped;
