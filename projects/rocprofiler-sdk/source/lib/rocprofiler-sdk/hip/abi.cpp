@@ -630,7 +630,7 @@ ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipExtSetLoggingParams_fn, 510);
 #endif
 
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 22
-ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipKernelGetAttribute_fn, 508);
+ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipKernelGetAttribute_fn, 511);
 #endif
 
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION == 0
