@@ -182,7 +182,7 @@ struct attach_status
 auto*
 get_attach_status()
 {
-    static auto*& _v = common::static_object<attach_status>::construct();
+    static auto*& _v = common::static_object<attach_status>::construct(false);
     return _v;
 }
 
@@ -331,9 +331,6 @@ find_clients()
 
     auto env = get_env_libs();
 
-    // set to true to disable elf utils optimizations
-    auto optimize_elf_parsing = common::get_env("ROCPROFILER_OPTIMIZE_FIND_CLIENTS", true);
-
     if(!env.empty())
     {
         for(const auto& itr : env)
@@ -342,7 +339,7 @@ find_clients()
 
             if(fs::exists(itr) && resolved_exists(itr))
             {
-                auto elfinfo = common::elf_utils::read(itr, optimize_elf_parsing);
+                auto elfinfo = common::elf_utils::read(itr);
                 if(!elfinfo.has_symbol([](std::string_view symname) {
                        return (symname == "rocprofiler_configure");
                    }))
@@ -414,16 +411,16 @@ find_clients()
     {
         for(const auto& itr : get_link_map())
         {
-            ROCP_INFO << "searching " << itr << " for 'rocprofiler_configure' symbol...";
+            ROCP_INFO << "searching " << itr << " for rocprofiler_configure";
 
             if(fs::exists(itr) && resolved_exists(itr))
             {
-                auto elfinfo = common::elf_utils::read(itr, optimize_elf_parsing);
+                auto elfinfo = common::elf_utils::read(itr);
                 if(!elfinfo.has_symbol([](std::string_view symname) {
                        return (symname == "rocprofiler_configure");
                    }))
                 {
-                    ROCP_TRACE << fmt::format(
+                    ROCP_INFO << fmt::format(
                         "Shared library '{}' did not contain the 'rocprofiler_configure' symbol "
                         "(search method: ELF parsing) required by rocprofiler-sdk for tools",
                         itr);
@@ -437,7 +434,7 @@ find_clients()
                 continue;
             }
 
-            ROCP_INFO << "dlopening " << itr << " for 'rocprofiler_configure' symbol...";
+            ROCP_INFO << "dlopening " << itr << " for rocprofiler_configure";
 
             void* handle = dlopen(itr.c_str(), RTLD_LAZY | RTLD_NOLOAD);
             ROCP_ERROR_IF(handle == nullptr) << "error dlopening " << itr;
@@ -753,12 +750,6 @@ invoke_client_finalizer(rocprofiler_client_id_t client_id)
 }
 }  // namespace
 
-bool
-supports_attachment()
-{
-    return (get_attach_status()) ? get_attach_status()->has_attach_table : false;
-}
-
 void
 init_logging()
 {
@@ -891,7 +882,6 @@ finalize()
     std::call_once(_once, []() {
         auto num_clients = get_num_clients();
         set_fini_status(-1);
-
         hsa::async_copy_fini();
         counters::device_counting_service_finalize();
         hsa::queue_controller_fini();
@@ -905,14 +895,12 @@ finalize()
         pc_sampling::service_fini();
 #endif
         code_object::finalize();
+        context::correlation_id_finalize();
         if(get_init_status() > 0)
         {
             invoke_client_finalizers();
         }
         if(num_clients > 0) internal_threading::finalize();
-        // NOTE: correlation_id_finalize must run before set_fini_status(1) to ensure
-        // all correlation ID operations complete before we signal finalization is done
-        context::correlation_id_finalize();
         set_fini_status(1);
     });
 
@@ -987,19 +975,6 @@ rocprofiler_set_api_table(const char* name,
 
     ROCP_INFO << __FUNCTION__ << "(\"" << name << "\", " << lib_version << ", " << lib_instance
               << ", ..., " << num_tables << ")";
-
-    // if finalized/finalizing, ignore
-    if(rocprofiler::registration::get_fini_status() != 0)
-    {
-        ROCP_WARNING << fmt::format(
-            R"(rocprofiler-sdk has been finalized, ignoring {}(name="{}", lib_version={}, lib_instance={}, ..., num_tables={}) ...)",
-            __FUNCTION__,
-            name,
-            lib_version,
-            lib_instance,
-            num_tables);
-        return 0;
-    }
 
     static auto _once = std::once_flag{};
     std::call_once(_once, rocprofiler::registration::initialize);
