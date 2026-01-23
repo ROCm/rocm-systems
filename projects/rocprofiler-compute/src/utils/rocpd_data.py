@@ -25,7 +25,7 @@
 
 import csv
 import sqlite3
-from contextlib import closing, ExitStack
+from contextlib import ExitStack, closing
 from typing import Any
 
 import pandas as pd
@@ -113,11 +113,13 @@ def convert_dbs_to_csv(
                             writers[file_path].writerows(cursor)
                     except OSError as e:
                         console_error(
-                            f"Database error while extracting {file_path} from {db_path}: {e}"
+                            f"Database error while extracting {file_path} "
+                            f"from {db_path}: {e}"
                         )
                     except Exception as e:
                         console_error(
-                            f"Unexpected error while extracting {file_path} from {db_path}: {e}"
+                            f"Unexpected error while extracting {file_path} "
+                            f"from {db_path}: {e}"
                         )
 
 
