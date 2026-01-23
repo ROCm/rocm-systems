@@ -16,7 +16,7 @@ cd rocm-systems
 To limit your local checkout to only the project(s) you work on and improve performance with a large codebase, you can configure sparse-checkout prior to cloning:
 
 ```bash
-git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-systems.git
+git clone --no-checkout --filter=blob:none git@github.com:ROCm/rocm-systems.git
 cd rocm-systems
 git sparse-checkout init --cone
 git sparse-checkout set projects/rocprofiler-sdk shared/rocprofiler-compute
