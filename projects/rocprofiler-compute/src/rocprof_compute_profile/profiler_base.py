@@ -111,13 +111,17 @@ class RocProfCompute_Base:
             )
         # verify correct formatting for application binary
         args.remaining = args.remaining[1:]
+        resolved_exec_path: Optional[Path] = None
+
         if args.remaining:
             # Ensure that command points to an executable
-            if not shutil.which(args.remaining[0]):
+            exec_candidate = shutil.which(args.remaining[0])
+            if not exec_candidate:
                 console_error(
                     f"Your command {args.remaining[0]} doesn't point to a executable. "
                     "Please verify."
                 )
+            resolved_exec_path = Path(exec_candidate).resolve()
 
             # Appending a wrapper for injecting roctx-markers
             if getattr(args, "torch_trace", False):
@@ -146,6 +150,18 @@ class RocProfCompute_Base:
                     )
                     console_warning(
                         "Ensure the binary already initializes PyTorch/ROCTX markers; otherwise --torch-trace will have no effect."
+                    )
+
+                if (
+                    resolved_exec_path
+                    and (resolved_exec_path.parent / "_internal").is_dir()
+                ):
+                    console_warning(
+                        "Workload appears to be a self-contained binary. "
+                        "Such bundles typically ship private ROCm/HSA libraries, which "
+                        "prevents --torch-trace from collecting data. Rebuild without "
+                        "packaging libhsa/libhip (or adjust LD_LIBRARY_PATH to /opt/rocm) "
+                        "before profiling."
                     )
             args.remaining = " ".join(args.remaining)
         elif not args.attach_pid:
