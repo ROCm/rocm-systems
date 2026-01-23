@@ -343,7 +343,7 @@ hipError_t hipMemRetainAllocationHandle(hipMemGenericAllocationHandle_t* handle,
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  hip::GenericAllocation* ga = reinterpret_cast<hip::GenericAllocation*>(
+  auto ga = reinterpret_cast<hip::GenericAllocation*>(
       mem->getUserData().phys_mem_obj->getUserData().data);
   if (ga == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);

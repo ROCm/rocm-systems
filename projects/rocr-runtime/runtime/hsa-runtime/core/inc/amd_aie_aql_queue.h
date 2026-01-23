@@ -73,7 +73,7 @@ class AieAqlQueue : public core::Queue,
   ~AieAqlQueue();
 
   hsa_status_t Inactivate() override;
-  hsa_status_t SetPriority(HSA_QUEUE_PRIORITY priority) override;
+  hsa_status_t SetPriority(HSA::hsa_amd_queue_priority_internal_t priority) override;
   void Destroy() override;
   uint64_t LoadReadIndexRelaxed() override;
   uint64_t LoadReadIndexAcquire() override;

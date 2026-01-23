@@ -153,12 +153,14 @@ bool Stream::StreamCaptureOngoing(hipStream_t hStream) {
       return false;
     }
     // If any stream in current/concurrent thread is capturing in global mode
-    amd::ScopedLock lock(g_captureStreamsLock);
-    if (!g_captureStreams.empty()) {
-      for (auto stream : hip::g_captureStreams) {
-        stream->SetCaptureStatus(hipStreamCaptureStatusInvalidated);
+    if (hip::tls.stream_capture_mode_ == hipStreamCaptureModeGlobal) {
+      amd::ScopedLock lock(g_captureStreamsLock);
+      if (!g_captureStreams.empty()) {
+        for (auto stream : hip::g_captureStreams) {
+          stream->SetCaptureStatus(hipStreamCaptureStatusInvalidated);
+        }
+        return true;
       }
-      return true;
     }
     // If any stream in current thread is capturing in ThreadLocal mode
     if (!hip::tls.capture_streams_.empty()) {

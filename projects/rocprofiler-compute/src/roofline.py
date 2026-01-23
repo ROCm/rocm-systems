@@ -25,7 +25,6 @@
 import argparse
 import textwrap
 from abc import abstractmethod
-from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Optional, Union
 
@@ -36,7 +35,7 @@ import plotly.graph_objects as go
 from dash import dcc, html
 from plotly.subplots import make_subplots
 
-from utils import file_io, rocpd_data, schema
+from utils import schema
 from utils.logger import (
     console_debug,
     console_error,
@@ -96,6 +95,7 @@ class Roofline:
                 "is_standalone": False,
                 "roofline_data_type": ["FP32"],  # default to FP32
                 "kernel_filter": False,
+                "iteration_multiplexing": None,
             }
         )
         self.__ai_data: Optional[dict[str, Any]] = None
@@ -116,6 +116,13 @@ class Roofline:
             hasattr(self.__args, "gpu_kernel") and self.__args.gpu_kernel
         ):
             self.__run_parameters["kernel_filter"] = True
+        if (
+            hasattr(self.__args, "iteration_multiplexing")
+            and self.__args.iteration_multiplexing is not None
+        ):
+            self.__run_parameters["iteration_multiplexing"] = (
+                self.__args.iteration_multiplexing
+            )
 
     def get_args(self) -> argparse.Namespace:
         return self.__args
@@ -286,11 +293,7 @@ class Roofline:
         Generate a set of empirical roofline plots given a directory containing
         required profiling and benchmarking data.
         """
-        if (
-            not isinstance(self.__run_parameters["workload_dir"], list)
-            and self.__run_parameters["workload_dir"] != None
-        ):
-            self.roof_setup()
+        self.roof_setup()
 
         console_debug("roofline", f"Path: {self.__run_parameters.get('workload_dir')}")
 
@@ -300,7 +303,10 @@ class Roofline:
         )
 
         self.__ai_data = calc_ai_profile(
-            self.__mspec, self.__run_parameters.get("sort_type"), ret_df
+            self.__mspec,
+            self.__run_parameters.get("sort_type"),
+            ret_df,
+            self.__run_parameters["iteration_multiplexing"],
         )
 
         msg = "AI at each mem level:"
@@ -1133,14 +1139,17 @@ class Roofline:
     def cli_generate_plot(
         self,
         dtype: str,
-        workload: Optional[schema.Workload] = None,
-        config: Optional[dict[str, Any]] = None,
-        arch_config: Optional[schema.ArchConfig] = None,
+        workload: schema.Workload,
+        config: dict[str, Any],
+        arch_config: schema.ArchConfig,
     ) -> Optional[str]:
         """
         Plot CLI mode roofline analysis in terminal using plotext
 
         :param dtype: The datatype to be profiled
+        :param workload: Complete dataframe
+        :param config: Profiling configuration from profiling_config.yaml
+        :param arch_config: Archetype-specific configurations
         :type method: str
         :return: Build the current figure using plot.build(),
         or None if datatype is not valid for the architecture
@@ -1200,33 +1209,13 @@ class Roofline:
             console_warning("roofline", "Skipping plot generation")
             return None
 
-        # if workload is detected, utilize Roofline yamls.
-        # If not, fallback to legacy calc_ai
-        if workload and config and arch_config:
-            self.__ai_data = calc_ai_analyze(
-                workload=workload,
-                mspec=self.__mspec,
-                sort_type=str(self.__run_parameters.get("sort_type")),
-                config=config,
-                arch_config=arch_config,
-            )
-
-        else:
-            pmc_perf_csv = base_path / "pmc_perf.csv"
-            if not pmc_perf_csv.is_file():
-                console_error("roofline", f"{pmc_perf_csv} does not exist")
-
-            t_df = OrderedDict()
-            t_df["pmc_perf"] = pd.read_csv(pmc_perf_csv)
-
-            profiling_config = file_io.load_profiling_config(self.__args.path[0][0])
-            if profiling_config.get("format_rocprof_output") == "rocpd":
-                t_df["pmc_perf"] = rocpd_data.process_rocpd_csv(t_df["pmc_perf"])
-
-            t_df = self.validate_apply_kernel_filter(df=t_df, path_str=str(base_path))
-            self.__ai_data = calc_ai_profile(
-                self.__mspec, self.__run_parameters["sort_type"], t_df
-            )
+        self.__ai_data = calc_ai_analyze(
+            workload=workload,
+            mspec=self.__mspec,
+            sort_type=str(self.__run_parameters.get("sort_type")),
+            config=config,
+            arch_config=arch_config,
+        )
 
         self.__ceiling_data = construct_roof(
             roofline_parameters=self.__run_parameters, dtype=dtype
@@ -1402,38 +1391,29 @@ class Roofline:
         return plt.build()
 
     @demarcate
-    def standalone_roofline(self) -> None:
-        if (
-            not isinstance(self.__run_parameters["workload_dir"], list)
-            and self.__run_parameters["workload_dir"] != None
-        ):
-            self.roof_setup()
+    def standalone_roofline(
+        self,
+        df: dict[str, pd.DataFrame],
+    ) -> None:
+        self.roof_setup()
 
         # Change vL1D to a interpretable str, if required
         if "vL1D" in self.__run_parameters["mem_level"]:
             self.__run_parameters["mem_level"].remove("vL1D")
             self.__run_parameters["mem_level"].append("L1")
 
-        app_path = Path(str(self.__run_parameters["workload_dir"])) / "pmc_perf.csv"
-        if not app_path.is_file():
-            console_error("roofline", f"{app_path} does not exist")
-
-        t_df = OrderedDict()
-        t_df["pmc_perf"] = pd.read_csv(app_path)
-
-        profiling_config = file_io.load_profiling_config(self.__args.path)
-        if profiling_config.get("format_rocprof_output") == "rocpd":
-            t_df["pmc_perf"] = rocpd_data.process_rocpd_csv(t_df["pmc_perf"])
-
-        self.empirical_roofline(ret_df=t_df)
+        self.empirical_roofline(ret_df=df)
 
     # NB: Currently the post_prossesing() method is the only one being used by
     # rocprofiler-compute, we include pre_processing() and profile() methods for
     # those who wish to borrow the roofline module
     @abstractmethod
-    def post_processing(self) -> None:
+    def post_processing(
+        self,
+        filtered_pmc: pd.DataFrame,
+    ) -> None:
         if self.__run_parameters["is_standalone"]:
-            self.standalone_roofline()
+            self.standalone_roofline(filtered_pmc)
 
     def get_dtype(self) -> list[str]:
         return self.__run_parameters["roofline_data_type"]
