@@ -55,6 +55,10 @@ void CountedQueuesTest::SetUp() {
     rocrtst::SetEnv("GPU_MAX_HW_QUEUES", limit.c_str());
   }
 
+  // get the size of counted queue from env var
+  const char* cq_size = rocrtst::GetEnv("HSA_COUNTED_QUEUE_SIZE");
+  cq_size == nullptr ? 16384 : atoi(cq_size);
+
   TestBase::SetUp();
 }
 
@@ -849,7 +853,7 @@ void CountedQueuesTest::CountedQueuesOverflowWrapAroundTest() {
 
   // Verify value of max seen index
   uint64_t maxId = maxIndexSeen.load();
-  EXPECT_EQ(maxId, (16384 + 5) * kThreads - 1);
+  EXPECT_EQ(maxId, (counted_queue_size + 5) * kThreads - 1);
 
   hsa_amd_memory_pool_free(shared_src_buffer);
 }
