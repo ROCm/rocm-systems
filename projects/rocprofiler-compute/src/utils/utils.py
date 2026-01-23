@@ -1295,9 +1295,16 @@ def process_torch_trace_output(
         for markers_file in marker_api_trace_csvs
     ]
     existing_csv_files = [
-        [marker_api_trace_csvs[i], counter_collection_csvs[i]]
+        [
+            marker_api_trace_csvs[i],
+            counter_collection_csvs[i],
+            marker_api_trace_csvs[i].parent
+            / marker_api_trace_csvs[i]
+            .name.replace("_marker_api_trace.", "_kernel_trace."),
+        ]
         for i in range(len(marker_api_trace_csvs))
-        if counter_collection_csvs[i].is_file() and marker_api_trace_csvs[i].is_file()
+        if counter_collection_csvs[i].is_file()
+        and marker_api_trace_csvs[i].is_file()
     ]
     if not existing_csv_files:
         console_warning(
@@ -1311,6 +1318,16 @@ def process_torch_trace_output(
     combined_counters = pd.concat(
         [pd.read_csv(f[1]) for f in existing_csv_files], ignore_index=True
     )
+    if "GUID" not in combined_counters.columns:
+        # If GUID not in counters, attempt to get from kernel trace
+        # counter_collection csvs from native-tool and sdk do not have guid.
+        combined_counters["GUID"] = None
+        #Getting GUID from Kernel CSV
+        combined_kernels = pd.concat(
+            [pd.read_csv(f[2]) for f in existing_csv_files], ignore_index=True
+        )
+        kernel_guid_map = combined_kernels.set_index("Correlation_Id")["GUID"]
+        combined_counters["GUID"] = combined_counters["Correlation_Id"].map(kernel_guid_map)
     # Merge markers with counters on Correlation_Id
     merged_results = pd.merge(
         combined_markers,
