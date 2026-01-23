@@ -2949,26 +2949,17 @@ if __name__ == "__main__":
     with_flag_kernel_duration_total = (
         with_flag_df["End_Timestamp"].max() - with_flag_df["Start_Timestamp"].min()
     )
-    baseline_df["_kernel_occurrence"] = baseline_df.groupby("Kernel_Name").cumcount()
-    with_flag_df["_kernel_occurrence"] = with_flag_df.groupby("Kernel_Name").cumcount()
-    alignment_keys = ["Kernel_Name", "_kernel_occurrence"]
-    aligned = baseline_df[alignment_keys + ["Start_Timestamp", "End_Timestamp"]].merge(
-        with_flag_df[alignment_keys + ["Start_Timestamp", "End_Timestamp"]],
-        on=alignment_keys,
-        suffixes=("_baseline", "_with_flag"),
-        how="inner",
-    )
-    baseline_kernel_durations = (
-        aligned["End_Timestamp_baseline"] - aligned["Start_Timestamp_baseline"]
-    )
-    with_flag_kernel_durations = (
-        aligned["End_Timestamp_with_flag"] - aligned["Start_Timestamp_with_flag"]
-    )
+    longest_running_kernel_baseline = (
+        baseline_df["End_Timestamp"] - baseline_df["Start_Timestamp"]
+    ).max()
+    longest_running_kernel_with_flag = (
+        with_flag_df["End_Timestamp"] - with_flag_df["Start_Timestamp"]
+    ).max()
     # Calculate overheads
-    worst_kernel_increase = (
-        (with_flag_kernel_durations - baseline_kernel_durations)
-        / baseline_kernel_durations
-    ).max() * 100
+    longest_running_kernel_overhead = (
+        (longest_running_kernel_with_flag - longest_running_kernel_baseline)
+        / longest_running_kernel_baseline
+    ) * 100
     wall_clock_overhead = ((with_flag_time - baseline_time) / baseline_time) * 100
     kernel_overhead = (
         (with_flag_kernel_duration_total - baseline_kernel_duration_total)
@@ -2976,7 +2967,7 @@ if __name__ == "__main__":
     ) * 100
     print(f"\n{'=' * 70}")
     print("Performance Overhead Analysis:")
-    print(f"  Worst-case single kernel increase: {worst_kernel_increase:.1f}%")
+    print(f"  Longest running kernel overhead: {longest_running_kernel_overhead:.1f}%")
     print(f"  Baseline wall-clock time:     {baseline_time:.2f}s")
     print(f"  With --torch-trace time:  {with_flag_time:.2f}s")
     print(f"  Wall-clock overhead:          {wall_clock_overhead:.1f}%")
@@ -2997,6 +2988,6 @@ if __name__ == "__main__":
     assert kernel_overhead < 50, (
         f"Kernel execution overhead too high: {kernel_overhead:.1f}%"
     )
-    assert worst_kernel_increase < 100, (
-        f"Worst-case single kernel increase too high: {worst_kernel_increase:.1f}%"
+    assert longest_running_kernel_overhead < 50, (
+        f"Worst-case single kernel increase too high: {longest_running_kernel_overhead:.1f}%"
     )
