@@ -25,7 +25,7 @@
 
 import csv
 import sqlite3
-from contextlib import closing
+from contextlib import closing, ExitStack
 from typing import Any
 
 import pandas as pd
@@ -37,6 +37,7 @@ from utils.logger import console_error
 COUNTERS_COLLECTION_QUERY = """
 SELECT
     agent_id as GPU_ID,
+    guid as GUID,
     correlation_id as Correlation_Id,
     dispatch_id as Dispatch_ID,
     pid as PID,
@@ -57,22 +58,19 @@ FROM counters_collection
 """
 MARKER_API_TRACE_QUERY = """
 SELECT
-    C.string as Domain,
-    json_extract(E.extdata, '$.message') as Function,
-    P.pid as Process_Id,
-    T.tid as Thread_Id,
-    E.correlation_id as Correlation_Id,
-    R.start as Start_Timestamp,
-    R.end as End_Timestamp
-FROM rocpd_region R
-    INNER JOIN rocpd_event E ON E.id = R.event_id AND E.guid = R.guid
-    INNER JOIN rocpd_info_thread T ON T.id = R.tid AND T.guid = R.guid
-    INNER JOIN rocpd_info_process P ON P.id = T.pid AND P.guid = R.guid
-    INNER JOIN rocpd_string C ON C.id = E.category_id AND C.guid = R.guid
-ORDER BY R.start
+    category AS Domain,
+    json_extract(extdata, '$.message') AS Function,
+    pid AS Process_Id,
+    tid AS Thread_Id,
+    corr_id AS Correlation_Id,
+    guid AS GUID,
+    start AS Start_Timestamp,
+    end AS End_Timestamp
+FROM regions
+ORDER BY start
 """
 KERNEL_DISPATCH_QUERY = """
-SELECT DISTINCT dispatch_id, event_id, guid
+SELECT dispatch_id, event_id, guid
 FROM rocpd_kernel_dispatch
 WHERE guid = ?
 """
@@ -89,41 +87,38 @@ def convert_dbs_to_csv(
     counter_collection_csv_path: str,
     marker_trace_csv_path: str,
 ) -> None:
-    """
-    Read rocpd databases and write to CSV file
-    """
-    # Read counters_collection view from the databases and write to CSV
-    try:
-        with open(counter_collection_csv_path, "w", newline="") as csvfile:
-            writer = csv.writer(csvfile)
-            header_written = False
-            for db_path in db_paths:
-                with closing(sqlite3.connect(db_path)) as conn:
-                    with closing(conn.execute(COUNTERS_COLLECTION_QUERY)) as cursor:
-                        if not header_written:
-                            writer.writerow([
-                                description[0] for description in cursor.description
-                            ])
-                            header_written = True
-                        for row in cursor:
-                            writer.writerow(row)
-        with open(marker_trace_csv_path, "w", newline="") as csvfile:
-            writer = csv.writer(csvfile)
-            header_written = False
-            for db_path in db_paths:
-                with closing(sqlite3.connect(db_path)) as conn:
-                    with closing(conn.execute(MARKER_API_TRACE_QUERY)) as cursor:
-                        if not header_written:
-                            writer.writerow([
-                                description[0] for description in cursor.description
-                            ])
-                            header_written = True
-                        for row in cursor:
-                            writer.writerow(row)
-    except OSError as e:
-        console_error(f"Database error while converting to CSV: {e}")
-    except Exception as e:
-        console_error(f"Unexpected error converting database to CSV: {e}")
+    queries = {
+        counter_collection_csv_path: COUNTERS_COLLECTION_QUERY,
+        marker_trace_csv_path: MARKER_API_TRACE_QUERY,
+    }
+    header_written = {path: False for path in queries}
+
+    with ExitStack() as stack:
+        writers = {
+            path: csv.writer(stack.enter_context(open(path, "w", newline="")))
+            for path in queries
+        }
+        for db_path in db_paths:
+            with closing(sqlite3.connect(db_path)) as conn:
+                for file_path, query in queries.items():
+                    try:
+                        with closing(conn.execute(query)) as cursor:
+                            if cursor.description is None:
+                                continue
+                            if not header_written[file_path]:
+                                writers[file_path].writerow(
+                                    [desc[0] for desc in cursor.description]
+                                )
+                                header_written[file_path] = True
+                            writers[file_path].writerows(cursor)
+                    except OSError as e:
+                        console_error(
+                            f"Database error while extracting {file_path} from {db_path}: {e}"
+                        )
+                    except Exception as e:
+                        console_error(
+                            f"Unexpected error while extracting {file_path} from {db_path}: {e}"
+                        )
 
 
 def process_rocpd_csv(df: pd.DataFrame) -> pd.DataFrame:
