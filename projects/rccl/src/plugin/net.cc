@@ -30,6 +30,8 @@ extern getNcclCollNet_t getNcclCollNet_v8;
 extern getNcclCollNet_t getNcclCollNet_v9;
 extern getNcclCollNet_t getNcclCollNet_v10;
 
+extern int64_t rcclParamAinicRoce();
+
 NCCL_PARAM(NetPluginRefCount, "NET_PLUGIN_REF_COUNT", 1);
 #define NCCL_NET_VERSION_COUNT 5
 int ncclNetVersion[NCCL_NET_VERSION_COUNT] = {10, 9, 8, 7, 6};
@@ -244,8 +246,18 @@ static void initPluginLibsOnceFunc() {
   }
 
   // Add 2 internal ib and socket plugins
-  netPluginLibs[pluginCounter].ncclNet = &ncclNetIb;
-  netPluginLibs[pluginCounter++].ncclNetPluginState = ncclNetPluginStateInitReady;
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  if ((rcclParamAinicRoce() == 1) && !(envNetPlugin)) {
+    // For AINIC add rocm internal ib instead of default internal ib
+    netPluginLibs[pluginCounter].ncclNet = &rocmNetIb;
+    netPluginLibs[pluginCounter++].ncclNetPluginState = ncclNetPluginStateInitReady;
+  } else {
+#endif
+    netPluginLibs[pluginCounter].ncclNet = &ncclNetIb;
+    netPluginLibs[pluginCounter++].ncclNetPluginState = ncclNetPluginStateInitReady;
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  }
+#endif
   netPluginLibs[pluginCounter].ncclNet = &ncclNetSocket;
   netPluginLibs[pluginCounter++].ncclNetPluginState = ncclNetPluginStateInitReady;
   pluginCount = pluginCounter;

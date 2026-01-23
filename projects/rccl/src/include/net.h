@@ -25,4 +25,9 @@ extern ncclNet_t ncclNetSocket;
 
 extern ncclResult_t rcclNetP2pPolicy(void* handle, int isP2p);
 
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+extern ncclNet_t rocmNetIb;
+extern ncclResult_t rcclRocmNetP2pPolicy(void* handle, int isP2p);
+#endif
+
 #endif
