@@ -2053,6 +2053,12 @@ hipError_t hipLibraryGetKernelCount(unsigned int *count, hipLibrary_t library) {
   return hip::GetHipDispatchTable()->hipLibraryGetKernelCount_fn(count,
                                                                  library);
 }
+hipError_t hipKernelGetAttribute(int* pi, hipFunction_attribute attrib, hipKernel_t kernel,
+                                 hipDevice_t dev) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipKernelGetAttribute_fn(pi, attrib, kernel, dev);
+  CATCH;
+}
 hipError_t hipLibraryEnumerateKernels(hipKernel_t* kernels, unsigned int numKernels,
                                       hipLibrary_t library) {
   return hip::GetHipDispatchTable()->hipLibraryEnumerateKernels_fn(kernels, numKernels, library);

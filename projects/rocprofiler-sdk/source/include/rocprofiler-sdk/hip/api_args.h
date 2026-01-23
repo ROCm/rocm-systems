@@ -3377,6 +3377,57 @@ typedef union rocprofiler_hip_api_args_t
         size_t*     paramSize;
     } hipKernelGetParamInfo;
 #endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 21
+    struct
+    {
+        // Empty struct has a size of 0 in C but size of 1 in C++.
+        // Add the rocprofiler_hip_api_no_args struct to fix this
+        rocprofiler_hip_api_no_args no_args;
+    } hipExtDisableLogging;
+    struct
+    {
+        // Empty struct has a size of 0 in C but size of 1 in C++.
+        // Add the rocprofiler_hip_api_no_args struct to fix this
+        rocprofiler_hip_api_no_args no_args;
+    } hipExtEnableLogging;
+    struct
+    {
+        size_t log_level;
+        size_t log_size;
+        size_t log_mask;
+    } hipExtSetLoggingParams;
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 22
+    struct
+    {
+        hipMemLocation*      location;
+        hipMemAllocationType type;
+        hipMemPool_t         pool;
+    } hipMemSetMemPool;
+    struct
+    {
+        hipMemPool_t*        pool;
+        hipMemLocation*      location;
+        hipMemAllocationType type;
+    } hipMemGetMemPool;
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 23
+    struct
+    {
+        hipArrayMemoryRequirements* memoryRequirements;
+        hipMipmappedArray_t         mipmap;
+        hipDevice_t                 device;
+    } hipMipmappedArrayGetMemoryRequirements;
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 24
+    struct
+    {
+        int*                  pi;
+        hipFunction_attribute attrib;
+        hipKernel_t           kernel;
+        hipDevice_t           dev;
+    } hipKernelGetAttribute;
+#endif
 } rocprofiler_hip_api_args_t;
 
 ROCPROFILER_EXTERN_C_FINI
