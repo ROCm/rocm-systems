@@ -1144,7 +1144,7 @@ int KFDNode::get_used_memory(uint64_t* used) {
     int orig_ret = get_used_memory_orig(used);
     ss << __PRETTY_FUNCTION__
        << " | [original] gpu_id: " << gpu_id_
-       << "; val: " << *used << "; ret: " << ret
+       << "; val: " << *used << "; ret: " << orig_ret
        << "; Time took: " << std::chrono::duration_cast<std::chrono::microseconds>(
            std::chrono::steady_clock::now() - start_time).count()
        << " microseconds";
