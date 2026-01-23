@@ -8,6 +8,7 @@ include_guard(GLOBAL)
 
 if(ROCPROFSYS_USE_PYTESTS)
     include(${CMAKE_CURRENT_LIST_DIR}/pytest/CMakeLists.txt)
+    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-pytests-tests.cmake)
 else()
     include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-testing.cmake)
 

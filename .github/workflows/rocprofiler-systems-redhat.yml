@@ -105,6 +105,11 @@ jobs:
           yum install -y rocm-dev rocdecode-devel
           if [ "${OS_VERSION_MAJOR}" -gt 8 ]; then dnf install -y libavcodec-free-devel libavformat-free-devel; fi
 
+    - name: Install Python Dependencies
+      working-directory: projects/rocprofiler-systems/
+      run: |
+        /opt/conda/envs/py3.11/bin/python -m pip install -r requirements.txt
+
     - name: Configure, Build, and Test
       timeout-minutes: 115
       shell: bash
@@ -126,6 +131,7 @@ jobs:
           -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
           -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems
           -DROCPROFSYS_BUILD_TESTING=ON
+          -DROCPROFSYS_USE_PYTESTS=ON
           -DROCPROFSYS_USE_MPI=OFF
           -DROCPROFSYS_USE_ROCM=${USE_HIP}
           -DROCPROFSYS_USE_OMPT=OFF

@@ -99,6 +99,11 @@ jobs:
         apt-get install -y rocm-dev rocdecode-dev libavformat-dev libavcodec-dev
         apt-get autoclean
 
+    - name: Install Python Dependencies
+      working-directory: projects/rocprofiler-systems/
+      run: |
+        /opt/conda/envs/py3.11/bin/python -m pip install -r requirements.txt
+
     - name: Configure, Build and Test
       timeout-minutes: 115
       shell: bash
@@ -129,6 +134,7 @@ jobs:
           -DCMAKE_BUILD_TYPE=${{ matrix.build-type }} \
           -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems \
           -DROCPROFSYS_BUILD_TESTING=ON \
+          -DROCPROFSYS_USE_PYTESTS=ON \
           -DROCPROFSYS_USE_ROCM=$USE_ROCM \
           -DROCPROFSYS_USE_PYTHON=ON \
           -DROCPROFSYS_BUILD_DYNINST=${{ matrix.build-dyninst }} \

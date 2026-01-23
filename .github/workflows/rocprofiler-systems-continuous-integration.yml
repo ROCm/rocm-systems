@@ -140,6 +140,7 @@ jobs:
           apt install -y libopenmpi-dev
           echo "✅ MPI Installed!"
 
+      # TODO: Install python requirements.txt
       # TODO: Remove this and replace with TheRock tarball when runtime error is fixed
       - name: Install ROCm
         run: |

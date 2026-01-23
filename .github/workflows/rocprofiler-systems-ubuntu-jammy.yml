@@ -102,6 +102,11 @@ jobs:
         echo "CC=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')" >> $GITHUB_ENV
         echo "CXX=${{ matrix.compiler }}" >> $GITHUB_ENV
 
+    - name: Install Python Dependencies
+      working-directory: projects/rocprofiler-systems/
+      run: |
+        /opt/conda/envs/py3.11/bin/python -m pip install -r requirements.txt
+
     - name: Configure, Build, and Test
       timeout-minutes: 115
       shell: bash
@@ -130,6 +135,7 @@ jobs:
           -DCMAKE_BUILD_TYPE=${{ matrix.build-type }} \
           -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems-dev \
           -DROCPROFSYS_BUILD_TESTING=ON \
+          -DROCPROFSYS_USE_PYTESTS=ON \
           -DROCPROFSYS_USE_ROCM=${{ matrix.rocm }} \
           -DROCPROFSYS_USE_PYTHON=${{ matrix.python }} \
           -DROCPROFSYS_USE_MPI_HEADERS=${{ matrix.mpi-headers }} \
@@ -283,6 +289,11 @@ jobs:
         echo "CC=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')" >> $GITHUB_ENV
         echo "CXX=${{ matrix.compiler }}" >> $GITHUB_ENV
 
+    - name: Install Python Dependencies
+      working-directory: projects/rocprofiler-systems/
+      run: |
+        /opt/conda/envs/py3.11/bin/python -m pip install -r requirements.txt
+
     - name: Configure, Build, and Test
       timeout-minutes: 115
       shell: bash
@@ -311,6 +322,7 @@ jobs:
           -DCMAKE_BUILD_TYPE=${{ matrix.build-type }} \
           -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems-dev \
           -DROCPROFSYS_BUILD_TESTING=ON \
+          -DROCPROFSYS_USE_PYTESTS=ON \
           -DROCPROFSYS_USE_ROCM=${{ matrix.rocm }} \
           -DROCPROFSYS_USE_PYTHON=${{ matrix.python }} \
           -DROCPROFSYS_USE_MPI_HEADERS=${{ matrix.mpi-headers }} \
