@@ -29,6 +29,7 @@ import os
 
 from pathlib import Path
 
+from typing import Optional
 current_path = os.path.dirname(os.path.abspath(__file__))
 python_lib_path = f"{current_path}/../../share/amd_smi"
 sys.path.insert(0, python_lib_path)
@@ -55,7 +56,7 @@ def _log_version_and_path_diagnostics():
     print(f"[amdsmi-cli] sys.path[0]: {sys.path[0]}")
 
 
-def _check_version_compatibility(expected_version: str | None = None) -> None:
+def _check_version_compatibility(expected_version: Optional[str] = None) -> None:
     """
     Verify that the Python package version matches the expected CLI/lib version (if provided).
     If mismatched, log guidance and abort to avoid loading an incompatible library.
