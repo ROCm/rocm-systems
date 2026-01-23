@@ -33,8 +33,12 @@
 
 #include "logger/debug.hpp"
 
+#include <spdlog/fmt/ranges.h>
+
 #include <cstddef>
 #include <cstdlib>
+#include <tuple>
+#include <unistd.h>
 
 namespace rocprofsys
 {
@@ -64,13 +68,13 @@ invoke_exit_gotcha(const exit_gotcha::gotcha_data& _data, FuncT _func, Args... _
     if(get_state() < State::Finalized && !is_child_process())
     {
         LOG_DEBUG("Finalizing {} before calling {}({})...", get_exe_name(), _data.tool_id,
-                  JOIN(", ", _args...).c_str());
+                  fmt::join(std::forward_as_tuple(_args...), ", "));
 
         rocprofsys_finalize();
     }
 
-    LOG_DEBUG("Calling {}({}) in {}...", _data.tool_id, JOIN(", ", _args...),
-              get_exe_name());
+    LOG_DEBUG("Calling {}({}) in {}...", _data.tool_id,
+              fmt::join(std::forward_as_tuple(_args...), ", "), get_exe_name().c_str());
 
     if(_exit_info.is_known && _exit_info.exit_code != 0)
     {

@@ -66,6 +66,7 @@
 #include <timemory/utility/types.hpp>
 
 #include <nlohmann/json.hpp>
+#include <spdlog/fmt/ranges.h>
 
 #include "logger/debug.hpp"
 
@@ -290,10 +291,8 @@ create_agent_profile(rocprofiler_agent_id_t          agent_id,
 
     if(counters_v.size() != expected_v)
     {
-        auto requested_counters =
-            timemory::join::join(timemory::join::array_config{ ", ", "", "" }, counters);
-        auto found_counters =
-            timemory::join::join(timemory::join::array_config{ ", ", "", "" }, found_v);
+        auto requested_counters = fmt::format("{}", fmt::join(counters, ", "));
+        auto found_counters     = fmt::format("{}", fmt::join(found_v, ", "));
 
         // Determine which counters were not found
         auto missing_counters = std::vector<std::string>{};
@@ -302,8 +301,7 @@ create_agent_profile(rocprofiler_agent_id_t          agent_id,
             if(std::find(found_v.begin(), found_v.end(), counter) == found_v.end())
                 missing_counters.emplace_back(counter);
         }
-        auto missing_counters_str = timemory::join::join(
-            timemory::join::array_config{ ", ", "", "" }, missing_counters);
+        auto missing_counters_str = fmt::format("{}", fmt::join(missing_counters, ", "));
 
         // In production, warn and continue with available counters
         LOG_WARNING("Unable to find all counters for agent {} (gpu-{}, {}). "
@@ -424,13 +422,13 @@ get_backtrace(std::optional<std::vector<tim::unwind::processed_entry>>& _bt_data
             const auto* _loc   = (_linfo && !_linfo.location.empty())
                                      ? &_linfo.location
                                      : ((itr.location.empty()) ? &_unk : &itr.location);
-            auto        _line =
-                (_linfo && _linfo.line > 0)
-                           ? join("", _linfo.line)
-                           : ((itr.lineno == 0) ? std::string{ "?" } : join("", itr.lineno));
-            auto _entry = join("", rocprofsys::utility::demangle(*_func), " @ ",
-                               join(':', ::basename(_loc->c_str()), _line));
-            backtrace[join("", "frame#", _bt_cnt++)] = _entry;
+            auto        _line  = (_linfo && _linfo.line > 0)
+                                     ? fmt::format("{}", _linfo.line)
+                                     : ((itr.lineno == 0) ? std::string{ "?" }
+                                                          : fmt::format("{}", itr.lineno));
+            auto _entry = fmt::format("{} @ {}:{}", rocprofsys::utility::demangle(*_func),
+                                      ::basename(_loc->c_str()), _line);
+            backtrace[fmt::format("frame#{}", _bt_cnt++)] = _entry;
         }
     }
     return backtrace;
@@ -846,25 +844,26 @@ tool_tracing_callback_stop(
                                 (_linfo && !_linfo.location.empty())
                                     ? &_linfo.location
                                     : ((itr.location.empty()) ? &_unk : &itr.location);
-                            auto _line = (_linfo && _linfo.line > 0)
-                                             ? join("", _linfo.line)
-                                             : ((itr.lineno == 0) ? std::string{ "?" }
-                                                                  : join("", itr.lineno));
-                            auto _entry =
-                                join("", rocprofsys::utility::demangle(*_func), " @ ",
-                                     join(':', ::basename(_loc->c_str()), _line));
+                            auto _line =
+                                (_linfo && _linfo.line > 0)
+                                    ? fmt::format("{}", _linfo.line)
+                                    : ((itr.lineno == 0) ? std::string{ "?" }
+                                                         : fmt::format("{}", itr.lineno));
+                            auto _entry = fmt::format(
+                                "{} @ {}:{}", rocprofsys::utility::demangle(*_func),
+                                ::basename(_loc->c_str()), _line);
                             if(_bt_cnt < 10)
                             {
                                 // Prepend zero for better ordering in UI. Only one
                                 // zero is ever necessary since stack depth is limited
                                 // to 16.
                                 tracing::add_perfetto_annotation(
-                                    ctx, join("", "frame#0", _bt_cnt++), _entry);
+                                    ctx, fmt::format("frame#0{}", _bt_cnt++), _entry);
                             }
                             else
                             {
                                 tracing::add_perfetto_annotation(
-                                    ctx, join("", "frame#", _bt_cnt++), _entry);
+                                    ctx, fmt::format("frame#{}", _bt_cnt++), _entry);
                             }
                         }
                     }
@@ -1219,24 +1218,25 @@ ompt_tracing_callback_stop(
                             (_linfo && !_linfo.location.empty())
                                 ? &_linfo.location
                                 : ((itr.location.empty()) ? &_unk : &itr.location);
-                        auto _line = (_linfo && _linfo.line > 0)
-                                         ? join("", _linfo.line)
-                                         : ((itr.lineno == 0) ? std::string{ "?" }
-                                                              : join("", itr.lineno));
-                        auto _entry =
-                            join("", rocprofsys::utility::demangle(*_func), " @ ",
-                                 join(':', ::basename(_loc->c_str()), _line));
+                        auto _line =
+                            (_linfo && _linfo.line > 0)
+                                ? fmt::format("{}", _linfo.line)
+                                : ((itr.lineno == 0) ? std::string{ "?" }
+                                                     : fmt::format("{}", itr.lineno));
+                        auto _entry = fmt::format("{} @ {}:{}",
+                                                  rocprofsys::utility::demangle(*_func),
+                                                  ::basename(_loc->c_str()), _line);
                         if(_bt_cnt < 10)
                         {
                             // Prepend zero for better ordering in UI. Only one zero
                             // is ever necessary since stack depth is limited to 16.
                             tracing::add_perfetto_annotation(
-                                ctx, join("", "frame#0", _bt_cnt++), _entry);
+                                ctx, fmt::format("frame#0{}", _bt_cnt++), _entry);
                         }
                         else
                         {
                             tracing::add_perfetto_annotation(
-                                ctx, join("", "frame#", _bt_cnt++), _entry);
+                                ctx, fmt::format("frame#{}", _bt_cnt++), _entry);
                         }
                     }
                 }
@@ -1644,7 +1644,7 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
     if(num_headers == 0 || headers == nullptr) return;
 
     auto _track_desc_stream = [](uint64_t _stream_id) {
-        return JOIN("", "HIP Activity Stream ", _stream_id);
+        return fmt::format("HIP Activity Stream {}", _stream_id);
     };
 
     const bool _default_group_by_queue = get_group_by_queue();
@@ -1687,8 +1687,8 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                 {
                     cache_category<category::rocm_kernel_dispatch>();
                     cache_add_thread_info(record->thread_id);
-                    cache_add_track(JOIN("", "GPU Kernel Dispatch [", _agent->device_id,
-                                         "] Queue ", _queue_id.handle)
+                    cache_add_track(fmt::format("GPU Kernel Dispatch [{}] Queue {}",
+                                                _agent->device_id, _queue_id.handle)
                                         .c_str(),
                                     record->thread_id);
                     cache_kernel_dispatch(record, _stream_id);
@@ -1735,26 +1735,24 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                                 record->dispatch_info.group_segment_size);
                             tracing::add_perfetto_annotation(
                                 ctx, "workgroup_size",
-                                JOIN("", "(",
-                                     JOIN(',', record->dispatch_info.workgroup_size.x,
-                                          record->dispatch_info.workgroup_size.y,
-                                          record->dispatch_info.workgroup_size.z),
-                                     ")"));
+                                fmt::format("({},{},{})",
+                                            record->dispatch_info.workgroup_size.x,
+                                            record->dispatch_info.workgroup_size.y,
+                                            record->dispatch_info.workgroup_size.z));
                             tracing::add_perfetto_annotation(
                                 ctx, "grid_size",
-                                JOIN("", "(",
-                                     JOIN(',', record->dispatch_info.grid_size.x,
-                                          record->dispatch_info.grid_size.y,
-                                          record->dispatch_info.grid_size.z),
-                                     ")"));
+                                fmt::format("({},{},{})",
+                                            record->dispatch_info.grid_size.x,
+                                            record->dispatch_info.grid_size.y,
+                                            record->dispatch_info.grid_size.z));
                         }
                     };
 
                     if(_group_by_queue)
                     {
                         auto _track_desc = [](int32_t _device_id_v, int64_t _queue_id_v) {
-                            return JOIN("", "GPU Kernel Dispatch [", _device_id_v,
-                                        "] Queue ", _queue_id_v);
+                            return fmt::format("GPU Kernel Dispatch [{}] Queue {}",
+                                               _device_id_v, _queue_id_v);
                         };
 
                         const auto _track = tracing::get_perfetto_track(
@@ -1812,8 +1810,8 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                 }
 
                 {
-                    auto track_name = JOIN("", "GPU Scratch Memory [", device_id,
-                                           "] Thread ", record->thread_id);
+                    auto track_name = fmt::format("GPU Scratch Memory [{}] Thread {}",
+                                                  device_id, record->thread_id);
                     cache_category<category::rocm_scratch_memory>();
                     cache_add_thread_info(record->thread_id);
                     cache_add_track(track_name.c_str(), record->thread_id);
@@ -1843,8 +1841,8 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                     if(!counter_track::exists(device_id))
                     {
                         auto track_name_alloc_size =
-                            JOIN("", "GPU Scratch Memory [", device_id, "] (S) Thread ",
-                                 thread_id_sequent);
+                            fmt::format("GPU Scratch Memory [{}] (S) Thread {}",
+                                        device_id, thread_id_sequent);
                         counter_track::emplace(device_id, track_name_alloc_size, "bytes");
                     }
 
@@ -1869,8 +1867,8 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                     if(_group_by_queue)
                     {
                         auto track_name_events = [&]() {
-                            return JOIN("", "GPU Scratch Memory (S) Events Thread ",
-                                        thread_id_sequent);
+                            return fmt::format("GPU Scratch Memory (S) Events Thread {}",
+                                               thread_id_sequent);
                         };
                         const auto _track = tracing::get_perfetto_track(
                             category::rocm_scratch_memory{}, track_name_events);
@@ -1927,9 +1925,8 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                     size_t      thread_idx = record->thread_id;
                     std::string track_name;
 
-                    track_name =
-                        JOIN("", "GPU Memory Copy to Agent [",
-                             _dst_agent->logical_node_id, "] Thread ", thread_idx);
+                    track_name = fmt::format("GPU Memory Copy to Agent [{}] Thread {}",
+                                             _dst_agent->logical_node_id, thread_idx);
 
                     cache_category<category::rocm_memory_copy>();
                     cache_add_track(track_name.c_str(), record->thread_id);
@@ -1974,8 +1971,9 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                         auto _track_desc = [](int32_t                 _device_id_v,
                                               rocprofiler_thread_id_t _tid) {
                             const auto& _tid_v = thread_info::get(_tid, SystemTID);
-                            return JOIN("", "GPU Memory Copy to Agent [", _device_id_v,
-                                        "] Thread ", _tid_v->index_data->sequent_value);
+                            return fmt::format("GPU Memory Copy to Agent [{}] Thread {}",
+                                               _device_id_v,
+                                               _tid_v->index_data->sequent_value);
                         };
 
                         const auto _track = tracing::get_perfetto_track(

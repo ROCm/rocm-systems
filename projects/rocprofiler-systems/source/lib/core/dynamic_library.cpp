@@ -66,11 +66,11 @@ find_library_path(const std::string& _name, const std::vector<std::string>& _env
 
     for(auto& itr : _paths)
     {
-        auto _v = JOIN('/', itr, _name);
+        auto _v = fmt::format("{}/{}", itr, _name);
         if(filepath::exists(_v)) return _v;
         for(const auto& litr : _path_suffixes)
         {
-            _v = JOIN('/', itr, litr, _name);
+            _v = fmt::format("{}/{}/{}", itr, litr, _name);
             if(filepath::exists(_v)) return _v;
         }
     }

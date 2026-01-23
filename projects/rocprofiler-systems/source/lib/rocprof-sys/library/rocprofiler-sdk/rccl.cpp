@@ -67,7 +67,7 @@ write_perfetto_counter_track(uint64_t _val, uint64_t _begin_ts, uint64_t _end_ts
         if(!counter_track::exists(_idx))
         {
             std::string _label =
-                (_idx > 0) ? JOIN(" ", Tp::label, JOIN("", '[', _idx, ']')) : Tp::label;
+                (_idx > 0) ? fmt::format("{} [{}]", Tp::label, _idx) : Tp::label;
             counter_track::emplace(_idx, _label, "bytes");
         }
 
@@ -103,7 +103,7 @@ cache_rccl_comm_data_events(size_t bytes, uint64_t timestamp_ns)
         static_cast<double>(cumulative_bytes) });
 }
 
-static auto
+inline auto
 rccl_type_size(ncclDataType_t datatype)
 {
     switch(datatype)

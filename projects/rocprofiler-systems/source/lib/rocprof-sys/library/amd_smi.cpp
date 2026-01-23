@@ -864,22 +864,20 @@ data::post_process(uint32_t _dev_id)
             if(counter_track::exists(_dev_id)) return;
 
             auto addendum = [&](const char* _v) {
-                return JOIN(" ", "GPU", _v, JOIN("", '[', _dev_id, ']'), "(S)");
+                return fmt::format("GPU {} [{}] (S)", _v, _dev_id);
             };
 
             auto addendum_blk = [&](std::size_t _i, const char* _metric,
                                     std::size_t xcp_idx = SIZE_MAX) {
                 if(xcp_idx != SIZE_MAX)
                 {
-                    return JOIN(
-                        " ", "GPU", JOIN("", '[', _dev_id, ']'), _metric,
-                        JOIN("", "XCP_", xcp_idx, ": [", (_i < 10 ? "0" : ""), _i, ']'),
-                        "(S)");
+                    return fmt::format("GPU [{}] {} XCP_{}: [{}] (S)", _dev_id, _metric,
+                                       xcp_idx, (_i < 10 ? "0" : ""), _i);
                 }
                 else
                 {
-                    return JOIN(" ", "GPU", JOIN("", '[', _dev_id, ']'), _metric,
-                                JOIN("", "[", (_i < 10 ? "0" : ""), _i, ']'), "(S)");
+                    return fmt::format("GPU [{}] {} [{}] (S)", _dev_id, _metric,
+                                       (_i < 10 ? "0" : ""), _i);
                 }
             };
 
