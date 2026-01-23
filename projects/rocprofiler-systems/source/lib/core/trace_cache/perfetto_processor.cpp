@@ -563,8 +563,8 @@ perfetto_processor_t::handle([[maybe_unused]] const scratch_memory_sample& _sms)
 
     if(!counter_track::exists(_agent_device_id))
     {
-        auto _track_desc_alloc_size = JOIN("", "GPU Scratch Memory [", _agent_device_id,
-                                           "] Thread ", _thread_id_sequent);
+        auto _track_desc_alloc_size = fmt::format("GPU Scratch Memory [{}] Thread {}",
+                                                  _agent_device_id, _thread_id_sequent);
         counter_track::emplace(_agent_device_id, _track_desc_alloc_size, "bytes");
     }
 
@@ -576,7 +576,7 @@ perfetto_processor_t::handle([[maybe_unused]] const scratch_memory_sample& _sms)
 #    endif
 
     auto _track_desc_events = [&]() {
-        return JOIN("", "GPU Scratch Memory Events Thread ", _thread_id_sequent);
+        return fmt::format("GPU Scratch Memory Events Thread {}", _thread_id_sequent);
     };
 
     const auto _track =

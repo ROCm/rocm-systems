@@ -1810,8 +1810,8 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                 }
 
                 {
-                    auto track_name = JOIN("", "GPU Scratch Memory [", device_id,
-                                           "] Thread ", record->thread_id);
+                    auto track_name = fmt::format("GPU Scratch Memory [{}] Thread {}",
+                                                  device_id, record->thread_id);
                     cache_category<category::rocm_scratch_memory>();
                     cache_add_thread_info(record->thread_id);
                     cache_add_track(track_name.c_str(), record->thread_id);
@@ -1841,8 +1841,8 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                     if(!counter_track::exists(device_id))
                     {
                         auto track_name_alloc_size =
-                            JOIN("", "GPU Scratch Memory [", device_id, "] (S) Thread ",
-                                 thread_id_sequent);
+                            fmt::format("GPU Scratch Memory [{}] (S) Thread {}",
+                                        device_id, thread_id_sequent);
                         counter_track::emplace(device_id, track_name_alloc_size, "bytes");
                     }
 
@@ -1867,8 +1867,8 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                     if(_group_by_queue)
                     {
                         auto track_name_events = [&]() {
-                            return JOIN("", "GPU Scratch Memory (S) Events Thread ",
-                                        thread_id_sequent);
+                            return fmt::format("GPU Scratch Memory (S) Events Thread {}",
+                                               thread_id_sequent);
                         };
                         const auto _track = tracing::get_perfetto_track(
                             category::rocm_scratch_memory{}, track_name_events);

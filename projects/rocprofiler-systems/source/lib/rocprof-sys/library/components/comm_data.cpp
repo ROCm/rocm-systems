@@ -498,7 +498,7 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, const void*,
         auto      _name = std::string_view{ _data.tool_id };
         tracker_t _t{ _name };
         add(_t, count);
-        add(JOIN('/', _name, JOIN('=', "tag", tag)), count);
+        add(fmt::format("{}/tag={}", _name, tag), count);
     }
 }
 
@@ -521,9 +521,8 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, void*, size_t
         auto      _name = std::string_view{ _data.tool_id };
         tracker_t _t{ _name };
         add(_t, count);
-        add(JOIN('/', _name, JOIN('=', "tag", tag)), count);
-        add(JOIN('/', _name, JOIN('=', "tag", tag), JOIN('=', "tag_mask", tag_mask)),
-            count);
+        add(fmt::format("{}/tag={}", _name, tag), count);
+        add(fmt::format("{}/tag={}/tag_mask={}", _name, tag, tag_mask), count);
     }
 }
 
@@ -546,7 +545,7 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, const void*,
         auto      _name = std::string_view{ _data.tool_id };
         tracker_t _t{ _name };
         add(_t, count);
-        add(JOIN('/', _name, JOIN('=', "remote_addr", remote_addr)), count);
+        add(fmt::format("{}/remote_addr={}", _name, remote_addr), count);
     }
 }
 
@@ -569,7 +568,7 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, void*, size_t
         auto      _name = std::string_view{ _data.tool_id };
         tracker_t _t{ _name };
         add(_t, count);
-        add(JOIN('/', _name, JOIN('=', "remote_addr", remote_addr)), count);
+        add(fmt::format("{}/remote_addr={}", _name, remote_addr), count);
     }
 }
 
@@ -594,7 +593,7 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, unsigned id,
         auto      _name = std::string_view{ _data.tool_id };
         tracker_t _t{ _name };
         add(_t, total_size);
-        add(JOIN('/', _name, JOIN('=', "am_id", id)), total_size);
+        add(fmt::format("{}/am_id={}", _name, id), total_size);
     }
 }
 
