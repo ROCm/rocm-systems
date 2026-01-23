@@ -22,8 +22,10 @@
 // SOFTWARE.
 
 #pragma once
+
 #include <optional>
 #include <type_traits>
+#include <unordered_map>
 
 namespace rocstorage
 {
@@ -65,6 +67,18 @@ struct is_optional<std::optional<T>> : std::true_type
 
 template <typename T>
 inline constexpr bool is_optional_v = is_optional<T>::value;
+
+template <typename T>
+struct is_std_unordered_map : std::false_type
+{};
+
+template <typename K, typename V, typename Hash, typename KeyEqual, typename Alloc>
+struct is_std_unordered_map<std::unordered_map<K, V, Hash, KeyEqual, Alloc>>
+: std::true_type
+{};
+
+template <typename T>
+inline constexpr bool is_unordered_map_v = is_std_unordered_map<T>::value;
 
 }  // namespace traits
 }  // namespace common
