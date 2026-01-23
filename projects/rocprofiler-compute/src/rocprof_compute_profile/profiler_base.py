@@ -145,7 +145,7 @@ class RocProfCompute_Base:
                         "Please remove the '--torch-trace' flag if not profiling",
                         "a PyTorch application.",
                         "Assuming the workload is user verified."
-                        "Continuing to profile ...",
+                        " Continuing to profile ...",
                     )
                     args.remaining.insert(0, str(inject_script))
                     args.remaining.insert(0, sys.executable)
