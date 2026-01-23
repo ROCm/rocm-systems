@@ -474,7 +474,8 @@ enum hip_api_id_t {
   HIP_API_ID_hipMemSetMemPool = 454,
   HIP_API_ID_hipMemGetMemPool = 455,
   HIP_API_ID_hipMipmappedArrayGetMemoryRequirements = 456,
-  HIP_API_ID_LAST = 456,
+  HIP_API_ID_hipKernelGetAttribute = 457,
+  HIP_API_ID_LAST = 457,
 
   HIP_API_ID_hipChooseDevice = HIP_API_ID_CONCAT(HIP_API_ID_,hipChooseDevice),
   HIP_API_ID_hipGetDeviceProperties = HIP_API_ID_CONCAT(HIP_API_ID_,hipGetDeviceProperties),
@@ -741,6 +742,7 @@ static inline const char* hip_api_name(const uint32_t id) {
     case HIP_API_ID_hipIpcGetMemHandle: return "hipIpcGetMemHandle";
     case HIP_API_ID_hipIpcOpenEventHandle: return "hipIpcOpenEventHandle";
     case HIP_API_ID_hipIpcOpenMemHandle: return "hipIpcOpenMemHandle";
+    case HIP_API_ID_hipKernelGetAttribute: return "hipKernelGetAttribute";
     case HIP_API_ID_hipKernelGetLibrary: return "hipKernelGetLibrary";
     case HIP_API_ID_hipKernelGetName: return "hipKernelGetName";
     case HIP_API_ID_hipKernelGetParamInfo: return "hipKernelGetParamInfo";
@@ -1191,6 +1193,7 @@ static inline uint32_t hipApiIdByName(const char* name) {
   if (strcmp("hipIpcGetMemHandle", name) == 0) return HIP_API_ID_hipIpcGetMemHandle;
   if (strcmp("hipIpcOpenEventHandle", name) == 0) return HIP_API_ID_hipIpcOpenEventHandle;
   if (strcmp("hipIpcOpenMemHandle", name) == 0) return HIP_API_ID_hipIpcOpenMemHandle;
+  if (strcmp("hipKernelGetAttribute", name) == 0) return HIP_API_ID_hipKernelGetAttribute;
   if (strcmp("hipKernelGetLibrary", name) == 0) return HIP_API_ID_hipKernelGetLibrary;
   if (strcmp("hipKernelGetName", name) == 0) return HIP_API_ID_hipKernelGetName;
   if (strcmp("hipKernelGetParamInfo", name) == 0) return HIP_API_ID_hipKernelGetParamInfo;
@@ -2710,6 +2713,13 @@ typedef struct hip_api_data_s {
       hipIpcMemHandle_t handle;
       unsigned int flags;
     } hipIpcOpenMemHandle;
+    struct {
+      int* pi;
+      int pi__val;
+      hipFunction_attribute attrib;
+      hipKernel_t kernel;
+      hipDevice_t dev;
+    } hipKernelGetAttribute;
     struct {
       hipLibrary_t* library;
       hipLibrary_t library__val;
@@ -5407,6 +5417,13 @@ typedef struct hip_api_data_s {
   cb_data.args.hipIpcOpenMemHandle.handle = (hipIpcMemHandle_t)handle; \
   cb_data.args.hipIpcOpenMemHandle.flags = (unsigned int)flags; \
 };
+// hipKernelGetAttribute[('int*', 'pi'), ('hipFunction_attribute', 'attrib'), ('hipKernel_t', 'kernel'), ('hipDevice_t', 'dev')]
+#define INIT_hipKernelGetAttribute_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipKernelGetAttribute.pi = (int*)pi; \
+  cb_data.args.hipKernelGetAttribute.attrib = (hipFunction_attribute)attrib; \
+  cb_data.args.hipKernelGetAttribute.kernel = (hipKernel_t)kernel; \
+  cb_data.args.hipKernelGetAttribute.dev = (hipDevice_t)dev; \
+};
 // hipKernelGetLibrary[('hipLibrary_t*', 'library'), ('hipKernel_t', 'kernel')]
 #define INIT_hipKernelGetLibrary_CB_ARGS_DATA(cb_data) { \
   cb_data.args.hipKernelGetLibrary.library = (hipLibrary_t*)library; \
@@ -7788,6 +7805,10 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
 // hipIpcOpenMemHandle[('void**', 'devPtr'), ('hipIpcMemHandle_t', 'handle'), ('unsigned int', 'flags')]
     case HIP_API_ID_hipIpcOpenMemHandle:
       if (data->args.hipIpcOpenMemHandle.devPtr) data->args.hipIpcOpenMemHandle.devPtr__val = *(data->args.hipIpcOpenMemHandle.devPtr);
+      break;
+// hipKernelGetAttribute[('int*', 'pi'), ('hipFunction_attribute', 'attrib'), ('hipKernel_t', 'kernel'), ('hipDevice_t', 'dev')]
+    case HIP_API_ID_hipKernelGetAttribute:
+      if (data->args.hipKernelGetAttribute.pi) data->args.hipKernelGetAttribute.pi__val = *(data->args.hipKernelGetAttribute.pi);
       break;
 // hipKernelGetLibrary[('hipLibrary_t*', 'library'), ('hipKernel_t', 'kernel')]
     case HIP_API_ID_hipKernelGetLibrary:
@@ -10405,6 +10426,15 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       else { oss << "devPtr="; roctracer::hip_support::detail::operator<<(oss, data->args.hipIpcOpenMemHandle.devPtr__val); }
       oss << ", handle="; roctracer::hip_support::detail::operator<<(oss, data->args.hipIpcOpenMemHandle.handle);
       oss << ", flags="; roctracer::hip_support::detail::operator<<(oss, data->args.hipIpcOpenMemHandle.flags);
+      oss << ")";
+    break;
+    case HIP_API_ID_hipKernelGetAttribute:
+      oss << "hipKernelGetAttribute(";
+      if (data->args.hipKernelGetAttribute.pi == NULL) oss << "pi=NULL";
+      else { oss << "pi="; roctracer::hip_support::detail::operator<<(oss, data->args.hipKernelGetAttribute.pi__val); }
+      oss << ", attrib="; roctracer::hip_support::detail::operator<<(oss, data->args.hipKernelGetAttribute.attrib);
+      oss << ", kernel="; roctracer::hip_support::detail::operator<<(oss, data->args.hipKernelGetAttribute.kernel);
+      oss << ", dev="; roctracer::hip_support::detail::operator<<(oss, data->args.hipKernelGetAttribute.dev);
       oss << ")";
     break;
     case HIP_API_ID_hipKernelGetLibrary:
