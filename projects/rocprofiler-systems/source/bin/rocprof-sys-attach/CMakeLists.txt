@@ -35,9 +35,9 @@ if(rocprofiler-sdk-rocattach_FOUND)
     # find_package(rocprofiler-sdk-rocattach REQUIRED)
     # message(STATUS "rocprofiler-sdk-rocattach_FOUND: ${rocprofiler-sdk-rocattach_FOUND}, rocprofiler-sdk-rocattach_INCLUDE_DIRS: ${rocprofiler-sdk-rocattach_INCLUDE_DIRS}, rocprofiler-sdk-rocattach_LIBRARIES: ${rocprofiler-sdk-rocattach_LIBRARIES}")
 
-    target_include_directories(${TARGET} PRIVATE /opt/rocm/include/)
+    target_include_directories(${TARGET} PRIVATE ${ROCmVersion_DIR}/include/)
 
-    target_link_directories(${TARGET} PRIVATE /opt/rocm/lib/)
+    target_link_directories(${TARGET} PRIVATE ${ROCmVersion_DIR}/lib/)
     target_link_libraries(${TARGET} PRIVATE rocprofiler-sdk-rocattach)
 
     set_target_properties(

@@ -27,7 +27,11 @@
 #include <rocprofiler-sdk/fwd.h>
 
 #if defined(ROCPROFSYS_USE_ROCM) && ROCPROFSYS_USE_ROCM > 0
-#    include <rocprofiler-sdk/experimental/registration.h>
+#    if ROCPROFSYS_ROCM_VERSION >= 71100
+#        include <rocprofiler-sdk/registration.h>
+#    else
+#        include <rocprofiler-sdk/experimental/registration.h>
+#    endif
 #    include <rocprofiler-sdk/rocprofiler.h>
 #endif
 

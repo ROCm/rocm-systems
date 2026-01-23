@@ -55,7 +55,11 @@
 #include <rocprofiler-sdk/cxx/hash.hpp>
 #include <rocprofiler-sdk/cxx/name_info.hpp>
 #include <rocprofiler-sdk/cxx/operators.hpp>
-#include <rocprofiler-sdk/experimental/registration.h>
+#if ROCPROFSYS_ROCM_VERSION >= 71100
+#    include <rocprofiler-sdk/registration.h>
+#else
+#    include <rocprofiler-sdk/experimental/registration.h>
+#endif
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/marker/api_id.h>
 #include <rocprofiler-sdk/rocprofiler.h>

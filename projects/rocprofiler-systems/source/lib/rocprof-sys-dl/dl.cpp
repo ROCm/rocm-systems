@@ -45,13 +45,11 @@
 #include <timemory/utility/filepath.hpp>
 
 #include <cassert>
-#include <chrono>
 #include <gnu/libc-version.h>
 #include <link.h>
 #include <linux/limits.h>
 #include <sys/types.h>
 #include <sys/wait.h>
-#include <thread>
 #include <unistd.h>
 
 #if !defined(ROCPROFSYS_USE_ROCM)
@@ -59,7 +57,11 @@
 #endif
 
 #if ROCPROFSYS_USE_ROCM > 0
-#    include <rocprofiler-sdk/experimental/registration.h>
+#    if ROCPROFSYS_ROCM_VERSION >= 71100
+#        include <rocprofiler-sdk/registration.h>
+#    else
+#        include <rocprofiler-sdk/experimental/registration.h>
+#    endif
 #endif
 
 //--------------------------------------------------------------------------------------//
