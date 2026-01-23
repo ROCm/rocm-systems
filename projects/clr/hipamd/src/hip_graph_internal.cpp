@@ -19,8 +19,8 @@
  THE SOFTWARE. */
 
 #include "hip_graph_internal.hpp"
+#include "../../rocclr/utils/platform_intrinsics.hpp"
 #include <cmath>
-#include <simde/x86/sse2.h>
 
 
 #define CASE_STRING(X, C)                                                                          \
@@ -2100,9 +2100,9 @@ void GraphKernelArgManager::ReadBackOrFlush() {
 
       // Read-modify-write sequence with memory barriers
       volatile unsigned char kSentinel = *sentinel_ptr;
-      simde_mm_sfence();
+      _mm_sfence();
       *sentinel_ptr = kSentinel;
-      simde_mm_mfence();
+      _mm_mfence();
       kSentinel = *sentinel_ptr;
       (void)kSentinel; // Suppress unused variable warning
     }

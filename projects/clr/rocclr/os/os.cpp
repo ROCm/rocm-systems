@@ -19,6 +19,7 @@
  THE SOFTWARE. */
 
 #include "os/os.hpp"
+#include "utils/platform_intrinsics.hpp"
 #include "thread/thread.hpp"
 
 #include <string>
@@ -31,7 +32,6 @@
 #include <unistd.h>
 #endif  // !_WIN32
 #include <cmath>
-#include <simde/x86/sse2.h>
 
 namespace amd {
 
@@ -118,7 +118,7 @@ size_t Os::pageSize_ = 0;
 
 int Os::processorCount_ = 0;
 
-void Os::spinPause() { simde_mm_pause(); }
+void Os::spinPause() { _mm_pause(); }
 
 void Os::sleep(long n) {
 // FIXME_lmoriche: Should be nano-seconds not seconds.
