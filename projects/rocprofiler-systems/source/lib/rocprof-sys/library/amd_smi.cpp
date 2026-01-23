@@ -823,8 +823,12 @@ nic_data::sample()
     _rx_ucast_pkts    = stats._rx_rdma_ucast_pkts;
     _tx_ucast_pkts    = stats._tx_rdma_ucast_pkts;
 
+    auto _timestamp = tim::get_clock_real_now<size_t, std::nano>();
+    assert(_timestamp < std::numeric_limits<int64_t>::max());
+    m_ts = _timestamp;
+
     trace_cache::get_buffer_storage().store(
-        trace_cache::ainic_sample{ _rx_rdma_cnp_pkts, _tx_rdma_cnp_pkts, _rx_ucast_bytes,
+        trace_cache::ainic_sample{ _timestamp, _rx_rdma_cnp_pkts, _tx_rdma_cnp_pkts, _rx_ucast_bytes,
                                    _tx_ucast_bytes, _rx_ucast_pkts, _tx_ucast_pkts });
 }
 
@@ -1298,13 +1302,25 @@ nic_data::post_process(size_t nic_index)
     using counter_track = perfetto_counter_track<nic_data>;
     std::string& nic    = nic_data::nic_vec[nic_index];
 
+    const auto& _thread_info = thread_info::get(0, InternalTID);
+    if(get_is_continuous_integration() && !_thread_info)
+    {
+        throw std::runtime_error("Missing thread info for thread 0");
+        return;
+    }
+
+    if(!_thread_info) return;
+
     auto addendum = [&](const char* _v) {
         return JOIN(" ", nic, _v, JOIN("", '[', nic_index, ']'), "(S)");
     };
 
     for(auto& itr : nic_sampler_vec[nic_index])
     {
+
         uint64_t _ts               = itr.m_ts;
+        if(!_thread_info->is_valid_time(_ts)) continue;
+
         uint32_t _rx_rdma_cnp_pkts = itr._rx_rdma_cnp_pkts;
         uint32_t _tx_rdma_cnp_pkts = itr._tx_rdma_cnp_pkts;
         uint32_t _rx_ucast_bytes   = itr._rx_ucast_bytes;
