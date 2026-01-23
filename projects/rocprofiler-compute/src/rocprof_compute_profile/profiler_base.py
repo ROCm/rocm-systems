@@ -142,13 +142,11 @@ class RocProfCompute_Base:
                     args.remaining.insert(0, sys.executable)
                 else:
                     console_warning(
-                        "Please remove the '--torch-trace' flag if not profiling "
-                        "a PyTorch application. "
-                        "Assuming the workload is user verified. "
-                        " Continuing to profile ...",
+                        "Command does not look like a Python entry point; skipping ROCTX auto-injection and launching workload as-is."
                     )
-                    args.remaining.insert(0, str(inject_script))
-                    args.remaining.insert(0, sys.executable)
+                    console_warning(
+                        "Ensure the binary already initializes PyTorch/ROCTX markers; otherwise --torch-trace will have no effect."
+                    )
             args.remaining = " ".join(args.remaining)
         elif not args.attach_pid:
             console_error(
