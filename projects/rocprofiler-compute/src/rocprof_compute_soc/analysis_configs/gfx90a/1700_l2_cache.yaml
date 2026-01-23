@@ -312,14 +312,14 @@ Panel Config:
           max: MAX((TCC_EA_RDREQ_DRAM_sum / $denom))
           unit: (Req + $normUnit)
         Remote Read:
-          avg: AVG((MAX((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_DRAM_sum), 0) / $denom))
-          min: MIN((MAX((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_DRAM_sum), 0) / $denom))
-          max: MAX((MAX((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_DRAM_sum), 0) / $denom))
+          avg: AVG((NOISE_CLAMP((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_DRAM_sum), TCC_EA_RDREQ_sum) / $denom))
+          min: MIN((NOISE_CLAMP((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_DRAM_sum), TCC_EA_RDREQ_sum) / $denom))
+          max: MAX((NOISE_CLAMP((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_DRAM_sum), TCC_EA_RDREQ_sum) / $denom))
           unit: (Req + $normUnit)
         Write and Atomic (32B):
-          avg: AVG(MAX(((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum) / $denom), 0))
-          min: MIN(MAX(((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum) / $denom), 0))
-          max: MAX(MAX(((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum) / $denom), 0))
+          avg: AVG(NOISE_CLAMP(((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum) / $denom), TCC_EA_WRREQ_sum))
+          min: MIN(NOISE_CLAMP(((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum) / $denom), TCC_EA_WRREQ_sum))
+          max: MAX(NOISE_CLAMP(((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum) / $denom), TCC_EA_WRREQ_sum))
           unit: (Req + $normUnit)
         Write and Atomic (Uncached):
           avg: AVG((TCC_EA_WR_UNCACHED_32B_sum / $denom))
@@ -337,9 +337,9 @@ Panel Config:
           max: MAX((TCC_EA_WRREQ_DRAM_sum / $denom))
           unit: (Req + $normUnit)
         Remote Write and Atomic:
-          avg: AVG((MAX((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_DRAM_sum), 0) / $denom))
-          min: MIN((MAX((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_DRAM_sum), 0) / $denom))
-          max: MAX((MAX((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_DRAM_sum), 0) / $denom))
+          avg: AVG((NOISE_CLAMP((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_DRAM_sum), TCC_EA_WRREQ_sum) / $denom))
+          min: MIN((NOISE_CLAMP((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_DRAM_sum), TCC_EA_WRREQ_sum) / $denom))
+          max: MAX((NOISE_CLAMP((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_DRAM_sum), TCC_EA_WRREQ_sum) / $denom))
           unit: (Req + $normUnit)
         Atomic:
           avg: AVG((TCC_EA_ATOMIC_sum / $denom))
