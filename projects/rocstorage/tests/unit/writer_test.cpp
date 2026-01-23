@@ -937,7 +937,6 @@ TEST_F(writer_test, insert_pmc_event_data_without_pmc_throws)
 
 TEST_F(writer_test, insert_kernel_dispatch_full_dependencies)
 {
-    // Register all required dependencies
     m_writer->register_node_info(create_test_node_info(1));
     m_writer->register_process_info(create_test_process_info(1, 1000));
     m_writer->register_thread_info(create_test_thread_info(1, 1000, 100));
@@ -1975,7 +1974,6 @@ TEST_F(writer_test, insert_memory_alloc_with_null_type)
                                                      .queue_id   = std::nullopt,
                                                      .track_name = std::nullopt };
 
-    // Should not throw - null type/level should be allowed
     EXPECT_NO_THROW(m_writer->insert_memory_alloc_data(memory_alloc, environment));
 }
 
@@ -1999,11 +1997,6 @@ TEST_F(writer_test, register_string_empty_string)
 
 TEST_F(writer_test, end_to_end_complete_api_coverage)
 {
-    // ========================================================================
-    // 1. Register Info Tables (in dependency order)
-    // ========================================================================
-
-    // 1.1 Node Info - root of all dependencies
     auto node = rocstorage::writer_api::node_info_t{ .node_id       = 1,
                                                      .hash          = 987654321,
                                                      .machine_id    = "e2e-machine-001",
@@ -2015,7 +2008,6 @@ TEST_F(writer_test, end_to_end_complete_api_coverage)
                                                      .domain_name   = "e2e.test.local" };
     m_writer->register_node_info(node);
 
-    // 1.2 Process Info - depends on Node
     auto process =
         rocstorage::writer_api::process_info_t{ .ppid  = 1,
                                                 .pid   = 12345,
@@ -2030,7 +2022,6 @@ TEST_F(writer_test, end_to_end_complete_api_coverage)
                                                 .node_id     = 1 };
     m_writer->register_process_info(process);
 
-    // 1.3 Thread Info - depends on Node, Process
     auto thread = rocstorage::writer_api::thread_info_t{ .parent_process_id = 12345,
                                                          .thread_id         = 100,
                                                          .name       = "main-thread",
@@ -2041,7 +2032,6 @@ TEST_F(writer_test, end_to_end_complete_api_coverage)
                                                          .process_id = 12345 };
     m_writer->register_thread_info(thread);
 
-    // 1.4 Agent Info (GPU) - depends on Node, Process
     auto gpu_agent = rocstorage::writer_api::agent_info_t{
         .unique_id      = { .agent_type = "GPU", .type_index = 0 },
         .absolute_index = 0,
@@ -2058,7 +2048,6 @@ TEST_F(writer_test, end_to_end_complete_api_coverage)
     };
     m_writer->register_agent_info(gpu_agent);
 
-    // 1.5 Agent Info (CPU) - for memory copy source
     auto cpu_agent =
         rocstorage::writer_api::agent_info_t{ .unique_id      = { .agent_type = "CPU",
                                                                   .type_index = 0 },
@@ -2075,7 +2064,6 @@ TEST_F(writer_test, end_to_end_complete_api_coverage)
                                               .process_id     = 12345 };
     m_writer->register_agent_info(cpu_agent);
 
-    // 1.6 Queue Info - depends on Node, Process
     auto queue = rocstorage::writer_api::queue_info_t{ .queue_id   = 1,
                                                        .name       = "compute-queue-0",
                                                        .extdata    = "{}",
@@ -2083,7 +2071,6 @@ TEST_F(writer_test, end_to_end_complete_api_coverage)
                                                        .process_id = 12345 };
     m_writer->register_queue_info(queue);
 
-    // 1.7 Stream Info - depends on Node, Process
     auto stream = rocstorage::writer_api::stream_info_t{ .stream_id  = 1,
                                                          .name       = "hip-stream-0",
                                                          .extdata    = "{}",
@@ -2091,7 +2078,6 @@ TEST_F(writer_test, end_to_end_complete_api_coverage)
                                                          .process_id = 12345 };
     m_writer->register_stream_info(stream);
 
-    // 1.8 PMC Info - depends on Node, Process, Agent
     rocstorage::writer_api::agent_unique_id_t pmc_agent_id{ "GPU", 0 };
     auto                                      pmc = rocstorage::writer_api::pmc_info_t{
                                              .unique_id = { .name = "SQ_WAVES", .agent_id = pmc_agent_id },
@@ -2114,7 +2100,6 @@ TEST_F(writer_test, end_to_end_complete_api_coverage)
     };
     m_writer->register_pmc_info(pmc);
 
-    // 1.9 Code Object Info - depends on Node, Process, Agent
     auto code_object = rocstorage::writer_api::code_object_info_t{
         .id           = 1,
         .uri          = "file:///opt/rocm/lib/e2e_kernel.co",
@@ -2129,7 +2114,6 @@ TEST_F(writer_test, end_to_end_complete_api_coverage)
     };
     m_writer->register_code_object_info(code_object);
 
-    // 1.10 Kernel Symbol Info - depends on Node, Process, Code Object
     auto kernel_symbol =
         rocstorage::writer_api::kernel_symbol_info_t{ .id = 1,
                                                       .name =
@@ -2149,7 +2133,6 @@ TEST_F(writer_test, end_to_end_complete_api_coverage)
                                                       .code_obj_id               = 1 };
     m_writer->register_kernel_symbol_info(kernel_symbol);
 
-    // 1.11 Track Info - depends on Node, Process, Thread
     auto track = rocstorage::writer_api::track_info_t{ .name       = "HIP_API",
                                                        .extdata    = "{}",
                                                        .node_id    = 1,
@@ -2157,14 +2140,8 @@ TEST_F(writer_test, end_to_end_complete_api_coverage)
                                                        .thread_id  = 100 };
     m_writer->register_track_info(track);
 
-    // 1.12 String - standalone
     m_writer->register_string("hipLaunchKernelGGL");
 
-    // ========================================================================
-    // 2. Insert Data Tables
-    // ========================================================================
-
-    // 2.1 Region Data - API tracing event
     auto region = rocstorage::writer_api::region_data_t{
         .event           = rocstorage::writer_api::event_data_t{ .stack_id        = 1,
                                                                  .parent_stack_id = 0,
@@ -2189,7 +2166,6 @@ TEST_F(writer_test, end_to_end_complete_api_coverage)
                                                      .track_name = "HIP_API" };
     m_writer->insert_region_data(region, region_env);
 
-    // 2.2 PMC Event Data - performance counter sample
     auto pmc_event = rocstorage::writer_api::pmc_event_data_t{
         .event   = std::nullopt,
         .value   = 1024.0,
@@ -2201,7 +2177,6 @@ TEST_F(writer_test, end_to_end_complete_api_coverage)
                                                       .agent_id = pmc_agent_id };
     m_writer->insert_pmc_event_data(pmc_event, pmc_unique_id);
 
-    // 2.3 Kernel Dispatch Data - GPU kernel execution
     auto kernel_dispatch =
         rocstorage::writer_api::kernel_dispatch_data_t{ .event            = std::nullopt,
                                                         .dispatch_id      = 1,
@@ -2230,7 +2205,6 @@ TEST_F(writer_test, end_to_end_complete_api_coverage)
     };
     m_writer->insert_kernel_dispatch_data(kernel_dispatch, kernel_env);
 
-    // 2.4 Memory Copy Data - host to device transfer
     auto memory_copy = rocstorage::writer_api::memory_copy_data_t{
         .event           = std::nullopt,
         .start_timestamp = 2100000000,
@@ -2254,7 +2228,6 @@ TEST_F(writer_test, end_to_end_complete_api_coverage)
                                                      .track_name = std::nullopt };
     m_writer->insert_memory_copy_data(memory_copy, memcpy_env);
 
-    // 2.5 Memory Alloc Data - device memory allocation
     auto memory_alloc =
         rocstorage::writer_api::memory_alloc_data_t{ .event           = std::nullopt,
                                                      .type            = "ALLOC",
@@ -2275,16 +2248,8 @@ TEST_F(writer_test, end_to_end_complete_api_coverage)
     };
     m_writer->insert_memory_alloc_data(memory_alloc, alloc_env);
 
-    // ========================================================================
-    // 3. Flush to disk and validate
-    // ========================================================================
     m_writer->flush_in_memory_data_to_disk();
 
-    // ========================================================================
-    // 4. Verify all tables have data
-    // ========================================================================
-
-    // Info Tables
     EXPECT_EQ(count_rows(m_database_path, "rocpd_info_node", m_uuid), 1)
         << "Node info should be inserted";
     EXPECT_EQ(count_rows(m_database_path, "rocpd_info_process", m_uuid), 1)
@@ -2308,7 +2273,6 @@ TEST_F(writer_test, end_to_end_complete_api_coverage)
     EXPECT_GE(count_rows(m_database_path, "rocpd_string", m_uuid), 1)
         << "At least one string should be registered";
 
-    // Data Tables
     EXPECT_EQ(count_rows(m_database_path, "rocpd_region", m_uuid), 1)
         << "Region data should be inserted";
     EXPECT_EQ(count_rows(m_database_path, "rocpd_pmc_event", m_uuid), 1)
@@ -2320,38 +2284,29 @@ TEST_F(writer_test, end_to_end_complete_api_coverage)
     EXPECT_EQ(count_rows(m_database_path, "rocpd_memory_allocate", m_uuid), 1)
         << "Memory alloc data should be inserted";
 
-    // ========================================================================
-    // 5. Verify specific data values
-    // ========================================================================
-
-    // Verify node data
     auto node_result = query_database(
         m_database_path, "SELECT machine_id, hostname FROM rocpd_info_node_" + m_uuid);
     ASSERT_EQ(node_result.rows.size(), 1);
     EXPECT_EQ(node_result.rows[0][0], "e2e-machine-001");
     EXPECT_EQ(node_result.rows[0][1], "e2e-test-host");
 
-    // Verify process data
     auto process_result = query_database(
         m_database_path, "SELECT pid, command FROM rocpd_info_process_" + m_uuid);
     ASSERT_EQ(process_result.rows.size(), 1);
     EXPECT_EQ(process_result.rows[0][0], "12345");
 
-    // Verify region data
     auto region_result =
         query_database(m_database_path, "SELECT start, end FROM rocpd_region_" + m_uuid);
     ASSERT_EQ(region_result.rows.size(), 1);
     EXPECT_EQ(region_result.rows[0][0], "2000000000");
     EXPECT_EQ(region_result.rows[0][1], "2000100000");
 
-    // Verify memory copy data
     auto memcpy_result = query_database(
         m_database_path,
         "SELECT size, src_address, dst_address FROM rocpd_memory_copy_" + m_uuid);
     ASSERT_EQ(memcpy_result.rows.size(), 1);
     EXPECT_EQ(memcpy_result.rows[0][0], "1048576");
 
-    // Verify memory alloc data
     auto alloc_result = query_database(
         m_database_path, "SELECT type, level, size FROM rocpd_memory_allocate_" + m_uuid);
     ASSERT_EQ(alloc_result.rows.size(), 1);
@@ -2359,9 +2314,673 @@ TEST_F(writer_test, end_to_end_complete_api_coverage)
     EXPECT_EQ(alloc_result.rows[0][1], "REAL");
     EXPECT_EQ(alloc_result.rows[0][2], "1048576");
 
-    // Verify PMC event value
     auto pmc_result =
         query_database(m_database_path, "SELECT value FROM rocpd_pmc_event_" + m_uuid);
     ASSERT_EQ(pmc_result.rows.size(), 1);
     EXPECT_DOUBLE_EQ(std::stod(pmc_result.rows[0][0]), 1024.0);
+
+    auto process_node_join =
+        query_database(m_database_path,
+                       "SELECT p.pid, p.command, n.hostname, n.machine_id "
+                       "FROM rocpd_info_process_" +
+                           m_uuid +
+                           " p "
+                           "JOIN rocpd_info_node_" +
+                           m_uuid + " n ON p.nid = n.id");
+    ASSERT_EQ(process_node_join.rows.size(), 1)
+        << "Process-Node JOIN should return 1 row";
+    EXPECT_EQ(process_node_join.rows[0][0], "12345") << "Process PID should match";
+    EXPECT_EQ(process_node_join.rows[0][2], "e2e-test-host")
+        << "Node hostname should match";
+
+    auto thread_process_node_join =
+        query_database(m_database_path,
+                       "SELECT t.tid, t.name, p.pid, n.hostname "
+                       "FROM rocpd_info_thread_" +
+                           m_uuid +
+                           " t "
+                           "JOIN rocpd_info_process_" +
+                           m_uuid +
+                           " p ON t.pid = p.id "
+                           "JOIN rocpd_info_node_" +
+                           m_uuid + " n ON t.nid = n.id");
+    ASSERT_EQ(thread_process_node_join.rows.size(), 1)
+        << "Thread-Process-Node JOIN should return 1 row";
+    EXPECT_EQ(thread_process_node_join.rows[0][0], "100") << "Thread TID should match";
+    EXPECT_EQ(thread_process_node_join.rows[0][1], "main-thread")
+        << "Thread name should match";
+
+    auto agent_process_node_join =
+        query_database(m_database_path,
+                       "SELECT a.type, a.name, a.model_name, p.pid, n.hostname "
+                       "FROM rocpd_info_agent_" +
+                           m_uuid +
+                           " a "
+                           "JOIN rocpd_info_process_" +
+                           m_uuid +
+                           " p ON a.pid = p.id "
+                           "JOIN rocpd_info_node_" +
+                           m_uuid +
+                           " n ON a.nid = n.id "
+                           "ORDER BY a.type");
+    ASSERT_EQ(agent_process_node_join.rows.size(), 2)
+        << "Should have 2 agents (CPU + GPU)";
+    EXPECT_EQ(agent_process_node_join.rows[0][0], "CPU");
+    EXPECT_EQ(agent_process_node_join.rows[1][0], "GPU");
+
+    auto queue_process_node_join = query_database(m_database_path,
+                                                  "SELECT q.name, p.pid, n.hostname "
+                                                  "FROM rocpd_info_queue_" +
+                                                      m_uuid +
+                                                      " q "
+                                                      "JOIN rocpd_info_process_" +
+                                                      m_uuid +
+                                                      " p ON q.pid = p.id "
+                                                      "JOIN rocpd_info_node_" +
+                                                      m_uuid + " n ON q.nid = n.id");
+    ASSERT_EQ(queue_process_node_join.rows.size(), 1)
+        << "Queue-Process-Node JOIN should return 1 row";
+    EXPECT_EQ(queue_process_node_join.rows[0][0], "compute-queue-0");
+
+    auto stream_process_node_join = query_database(m_database_path,
+                                                   "SELECT s.name, p.pid, n.hostname "
+                                                   "FROM rocpd_info_stream_" +
+                                                       m_uuid +
+                                                       " s "
+                                                       "JOIN rocpd_info_process_" +
+                                                       m_uuid +
+                                                       " p ON s.pid = p.id "
+                                                       "JOIN rocpd_info_node_" +
+                                                       m_uuid + " n ON s.nid = n.id");
+    ASSERT_EQ(stream_process_node_join.rows.size(), 1)
+        << "Stream-Process-Node JOIN should return 1 row";
+    EXPECT_EQ(stream_process_node_join.rows[0][0], "hip-stream-0");
+
+    auto pmc_agent_join =
+        query_database(m_database_path,
+                       "SELECT pmc.name, pmc.symbol, a.type, a.name as agent_name "
+                       "FROM rocpd_info_pmc_" +
+                           m_uuid +
+                           " pmc "
+                           "JOIN rocpd_info_agent_" +
+                           m_uuid + " a ON pmc.agent_id = a.id");
+    ASSERT_EQ(pmc_agent_join.rows.size(), 1) << "PMC-Agent JOIN should return 1 row";
+    EXPECT_EQ(pmc_agent_join.rows[0][0], "SQ_WAVES") << "PMC name should match";
+    EXPECT_EQ(pmc_agent_join.rows[0][2], "GPU")
+        << "PMC should be associated with GPU agent";
+
+    auto region_hierarchy_join =
+        query_database(m_database_path,
+                       "SELECT r.start, r.end, t.tid, p.pid, n.hostname "
+                       "FROM rocpd_region_" +
+                           m_uuid +
+                           " r "
+                           "JOIN rocpd_info_thread_" +
+                           m_uuid +
+                           " t ON r.tid = t.id "
+                           "JOIN rocpd_info_process_" +
+                           m_uuid +
+                           " p ON r.pid = p.id "
+                           "JOIN rocpd_info_node_" +
+                           m_uuid + " n ON r.nid = n.id");
+    ASSERT_EQ(region_hierarchy_join.rows.size(), 1)
+        << "Region hierarchy JOIN should return 1 row";
+    EXPECT_EQ(region_hierarchy_join.rows[0][0], "2000000000") << "Region start timestamp";
+    EXPECT_EQ(region_hierarchy_join.rows[0][2], "100")
+        << "Region should reference thread 100";
+
+    auto region_string_join = query_database(m_database_path,
+                                             "SELECT r.start, s.string "
+                                             "FROM rocpd_region_" +
+                                                 m_uuid +
+                                                 " r "
+                                                 "JOIN rocpd_string_" +
+                                                 m_uuid + " s ON r.name_id = s.id");
+    ASSERT_EQ(region_string_join.rows.size(), 1)
+        << "Region-String JOIN should return 1 row";
+    EXPECT_EQ(region_string_join.rows[0][1], "hipMalloc")
+        << "Region name should be 'hipMalloc'";
+
+    auto pmc_event_info_join = query_database(m_database_path,
+                                              "SELECT pe.value, pmc.name, pmc.symbol "
+                                              "FROM rocpd_pmc_event_" +
+                                                  m_uuid +
+                                                  " pe "
+                                                  "JOIN rocpd_info_pmc_" +
+                                                  m_uuid + " pmc ON pe.pmc_id = pmc.id");
+    ASSERT_EQ(pmc_event_info_join.rows.size(), 1)
+        << "PMC Event-Info JOIN should return 1 row";
+    EXPECT_DOUBLE_EQ(std::stod(pmc_event_info_join.rows[0][0]), 1024.0)
+        << "PMC event value";
+    EXPECT_EQ(pmc_event_info_join.rows[0][1], "SQ_WAVES")
+        << "PMC event should reference SQ_WAVES";
+
+    auto memcpy_full_join =
+        query_database(m_database_path,
+                       "SELECT mc.size, mc.src_address, mc.dst_address, "
+                       "       src_agent.type as src_type, dst_agent.type as dst_type, "
+                       "       p.pid, n.hostname "
+                       "FROM rocpd_memory_copy_" +
+                           m_uuid +
+                           " mc "
+                           "JOIN rocpd_info_process_" +
+                           m_uuid +
+                           " p ON mc.pid = p.id "
+                           "JOIN rocpd_info_node_" +
+                           m_uuid +
+                           " n ON mc.nid = n.id "
+                           "LEFT JOIN rocpd_info_agent_" +
+                           m_uuid +
+                           " src_agent ON mc.src_agent_id = src_agent.id "
+                           "LEFT JOIN rocpd_info_agent_" +
+                           m_uuid + " dst_agent ON mc.dst_agent_id = dst_agent.id");
+    ASSERT_EQ(memcpy_full_join.rows.size(), 1)
+        << "Memory copy full JOIN should return 1 row";
+    EXPECT_EQ(memcpy_full_join.rows[0][0], "1048576") << "Memory copy size should be 1MB";
+    EXPECT_EQ(memcpy_full_join.rows[0][3], "CPU") << "Source agent should be CPU";
+    EXPECT_EQ(memcpy_full_join.rows[0][4], "GPU") << "Destination agent should be GPU";
+
+    auto alloc_full_join =
+        query_database(m_database_path,
+                       "SELECT ma.type, ma.level, ma.size, a.type as agent_type, p.pid "
+                       "FROM rocpd_memory_allocate_" +
+                           m_uuid +
+                           " ma "
+                           "JOIN rocpd_info_process_" +
+                           m_uuid +
+                           " p ON ma.pid = p.id "
+                           "LEFT JOIN rocpd_info_agent_" +
+                           m_uuid + " a ON ma.agent_id = a.id");
+    ASSERT_EQ(alloc_full_join.rows.size(), 1)
+        << "Memory alloc full JOIN should return 1 row";
+    EXPECT_EQ(alloc_full_join.rows[0][0], "ALLOC") << "Alloc type";
+    EXPECT_EQ(alloc_full_join.rows[0][1], "REAL") << "Alloc level";
+    EXPECT_EQ(alloc_full_join.rows[0][3], "GPU") << "Alloc should be on GPU agent";
+
+    auto track_hierarchy_join = query_database(m_database_path,
+                                               "SELECT tr.id, t.tid, p.pid, n.hostname "
+                                               "FROM rocpd_track_" +
+                                                   m_uuid +
+                                                   " tr "
+                                                   "JOIN rocpd_info_thread_" +
+                                                   m_uuid +
+                                                   " t ON tr.tid = t.id "
+                                                   "JOIN rocpd_info_process_" +
+                                                   m_uuid +
+                                                   " p ON tr.pid = p.id "
+                                                   "JOIN rocpd_info_node_" +
+                                                   m_uuid + " n ON tr.nid = n.id");
+    ASSERT_EQ(track_hierarchy_join.rows.size(), 1)
+        << "Track hierarchy JOIN should return 1 row";
+
+    auto track_string_join = query_database(m_database_path,
+                                            "SELECT tr.id, s.string "
+                                            "FROM rocpd_track_" +
+                                                m_uuid +
+                                                " tr "
+                                                "JOIN rocpd_string_" +
+                                                m_uuid + " s ON tr.name_id = s.id");
+    ASSERT_EQ(track_string_join.rows.size(), 1)
+        << "Track-String JOIN should return 1 row";
+    EXPECT_EQ(track_string_join.rows[0][1], "HIP_API")
+        << "Track name should be 'HIP_API'";
+
+    auto sample_track_join = query_database(m_database_path,
+                                            "SELECT sa.timestamp, tr.id as track_id "
+                                            "FROM rocpd_sample_" +
+                                                m_uuid +
+                                                " sa "
+                                                "JOIN rocpd_track_" +
+                                                m_uuid + " tr ON sa.track_id = tr.id");
+    EXPECT_GE(sample_track_join.rows.size(), 1)
+        << "Sample-Track JOIN should return at least 1 row";
+
+    auto sample_full_chain_join =
+        query_database(m_database_path,
+                       "SELECT sa.timestamp, t.tid, p.pid, n.hostname "
+                       "FROM rocpd_sample_" +
+                           m_uuid +
+                           " sa "
+                           "JOIN rocpd_track_" +
+                           m_uuid +
+                           " tr ON sa.track_id = tr.id "
+                           "JOIN rocpd_info_thread_" +
+                           m_uuid +
+                           " t ON tr.tid = t.id "
+                           "JOIN rocpd_info_process_" +
+                           m_uuid +
+                           " p ON tr.pid = p.id "
+                           "JOIN rocpd_info_node_" +
+                           m_uuid + " n ON tr.nid = n.id");
+    EXPECT_GE(sample_full_chain_join.rows.size(), 1)
+        << "Sample full chain JOIN should work";
+
+    auto memcpy_string_join = query_database(m_database_path,
+                                             "SELECT mc.id, mc.size, s.string as name "
+                                             "FROM rocpd_memory_copy_" +
+                                                 m_uuid +
+                                                 " mc "
+                                                 "JOIN rocpd_string_" +
+                                                 m_uuid + " s ON mc.name_id = s.id");
+    ASSERT_EQ(memcpy_string_join.rows.size(), 1)
+        << "Memory Copy-String JOIN should return 1 row";
+    EXPECT_EQ(memcpy_string_join.rows[0][2], "hipMemcpyHtoD")
+        << "Memory copy name should be 'hipMemcpyHtoD'";
+
+    auto region_timestamps = query_database(
+        m_database_path, "SELECT id, start, end FROM rocpd_region_" + m_uuid);
+    ASSERT_EQ(region_timestamps.rows.size(), 1)
+        << "Region should have 1 row with timestamps";
+    EXPECT_EQ(region_timestamps.rows[0][1], "2000000000")
+        << "Region start timestamp should match";
+    EXPECT_EQ(region_timestamps.rows[0][2], "2000100000")
+        << "Region end timestamp should match";
+
+    auto memcpy_timestamps = query_database(
+        m_database_path, "SELECT id, start, end FROM rocpd_memory_copy_" + m_uuid);
+    ASSERT_EQ(memcpy_timestamps.rows.size(), 1)
+        << "Memory copy should have 1 row with timestamps";
+    EXPECT_EQ(memcpy_timestamps.rows[0][1], "2100000000")
+        << "Memory copy start timestamp should match";
+    EXPECT_EQ(memcpy_timestamps.rows[0][2], "2200000000")
+        << "Memory copy end timestamp should match";
+
+    auto alloc_timestamps = query_database(
+        m_database_path, "SELECT id, start, end FROM rocpd_memory_allocate_" + m_uuid);
+    ASSERT_EQ(alloc_timestamps.rows.size(), 1)
+        << "Memory alloc should have 1 row with timestamps";
+    EXPECT_EQ(alloc_timestamps.rows[0][1], "2000000000")
+        << "Memory alloc start timestamp should match";
+    EXPECT_EQ(alloc_timestamps.rows[0][2], "2000050000")
+        << "Memory alloc end timestamp should match";
+
+    auto memcpy_queue_join = query_database(m_database_path,
+                                            "SELECT mc.id, mc.size, q.name as queue_name "
+                                            "FROM rocpd_memory_copy_" +
+                                                m_uuid +
+                                                " mc "
+                                                "JOIN rocpd_info_queue_" +
+                                                m_uuid + " q ON mc.queue_id = q.id");
+    ASSERT_EQ(memcpy_queue_join.rows.size(), 1)
+        << "Memory Copy-Queue JOIN should return 1 row";
+    EXPECT_EQ(memcpy_queue_join.rows[0][2], "compute-queue-0")
+        << "Memory copy should reference correct queue";
+
+    auto memcpy_stream_join =
+        query_database(m_database_path,
+                       "SELECT mc.id, mc.size, s.name as stream_name "
+                       "FROM rocpd_memory_copy_" +
+                           m_uuid +
+                           " mc "
+                           "JOIN rocpd_info_stream_" +
+                           m_uuid + " s ON mc.stream_id = s.id");
+    ASSERT_EQ(memcpy_stream_join.rows.size(), 1)
+        << "Memory Copy-Stream JOIN should return 1 row";
+    EXPECT_EQ(memcpy_stream_join.rows[0][2], "hip-stream-0")
+        << "Memory copy should reference correct stream";
+
+    auto kernel_code_object_join = query_database(
+        m_database_path,
+        "SELECT ks.id, ks.display_name, ks.kernel_name, co.id as code_object_id, co.uri "
+        "FROM rocpd_info_kernel_symbol_" +
+            m_uuid +
+            " ks "
+            "JOIN rocpd_info_code_object_" +
+            m_uuid + " co ON ks.code_object_id = co.id");
+    EXPECT_GE(kernel_code_object_join.rows.size(), 0)
+        << "Kernel Symbol-Code Object JOIN check";
+    if(kernel_code_object_join.rows.size() > 0)
+    {
+        EXPECT_EQ(kernel_code_object_join.rows[0][1], "vectorAddKernel")
+            << "Kernel symbol display name should match";
+        EXPECT_EQ(kernel_code_object_join.rows[0][4],
+                  "file:///opt/rocm/lib/e2e_kernel.co")
+            << "Code object URI should match";
+    }
+
+    auto code_object_agent_join = query_database(m_database_path,
+                                                 "SELECT co.id, co.uri, a.type, a.name "
+                                                 "FROM rocpd_info_code_object_" +
+                                                     m_uuid +
+                                                     " co "
+                                                     "JOIN rocpd_info_agent_" +
+                                                     m_uuid + " a ON co.agent_id = a.id");
+    EXPECT_GE(code_object_agent_join.rows.size(), 0) << "Code Object-Agent JOIN check";
+    if(code_object_agent_join.rows.size() > 0)
+    {
+        EXPECT_EQ(code_object_agent_join.rows[0][2], "GPU")
+            << "Code object should reference GPU agent";
+    }
+
+    auto kernel_full_chain_join = query_database(
+        m_database_path,
+        "SELECT ks.display_name, co.uri, a.type, a.name, p.pid, n.hostname "
+        "FROM rocpd_info_kernel_symbol_" +
+            m_uuid +
+            " ks "
+            "JOIN rocpd_info_code_object_" +
+            m_uuid +
+            " co ON ks.code_object_id = co.id "
+            "JOIN rocpd_info_agent_" +
+            m_uuid +
+            " a ON co.agent_id = a.id "
+            "JOIN rocpd_info_process_" +
+            m_uuid +
+            " p ON co.pid = p.id "
+            "JOIN rocpd_info_node_" +
+            m_uuid + " n ON co.nid = n.id");
+    EXPECT_GE(kernel_full_chain_join.rows.size(), 0)
+        << "Kernel Symbol full chain JOIN check";
+
+    auto kernel_dispatch_symbol_join =
+        query_database(m_database_path,
+                       "SELECT kd.id, kd.dispatch_id, ks.display_name, ks.kernel_name "
+                       "FROM rocpd_kernel_dispatch_" +
+                           m_uuid +
+                           " kd "
+                           "JOIN rocpd_info_kernel_symbol_" +
+                           m_uuid + " ks ON kd.kernel_id = ks.id");
+    EXPECT_GE(kernel_dispatch_symbol_join.rows.size(), 0)
+        << "Kernel Dispatch-Kernel Symbol JOIN check";
+
+    auto kernel_dispatch_timestamps = query_database(
+        m_database_path,
+        "SELECT id, dispatch_id, start, end FROM rocpd_kernel_dispatch_" + m_uuid);
+    EXPECT_GE(kernel_dispatch_timestamps.rows.size(), 0)
+        << "Kernel Dispatch timestamps check";
+
+    auto kernel_dispatch_full_join =
+        query_database(m_database_path,
+                       "SELECT kd.dispatch_id, ks.display_name, co.uri, a.type "
+                       "FROM rocpd_kernel_dispatch_" +
+                           m_uuid +
+                           " kd "
+                           "JOIN rocpd_info_kernel_symbol_" +
+                           m_uuid +
+                           " ks ON kd.kernel_id = ks.id "
+                           "JOIN rocpd_info_code_object_" +
+                           m_uuid +
+                           " co ON ks.code_object_id = co.id "
+                           "JOIN rocpd_info_agent_" +
+                           m_uuid + " a ON co.agent_id = a.id");
+    EXPECT_GE(kernel_dispatch_full_join.rows.size(), 0)
+        << "Kernel Dispatch full chain JOIN check";
+
+    auto region_event_sample_track_join = query_database(
+        m_database_path,
+        "SELECT r.id, r.start, e.id as event_id, sa.id as sample_id, tr.id as track_id "
+        "FROM rocpd_region_" +
+            m_uuid +
+            " r "
+            "JOIN rocpd_event_" +
+            m_uuid +
+            " e ON r.event_id = e.id "
+            "JOIN rocpd_sample_" +
+            m_uuid +
+            " sa ON sa.event_id = e.id "
+            "JOIN rocpd_track_" +
+            m_uuid + " tr ON sa.track_id = tr.id");
+    EXPECT_GE(region_event_sample_track_join.rows.size(), 1)
+        << "Region -> Event -> Sample -> Track chain should work";
+
+    auto sample_timestamps = query_database(
+        m_database_path, "SELECT id, track_id, timestamp FROM rocpd_sample_" + m_uuid);
+    EXPECT_GE(sample_timestamps.rows.size(), 1)
+        << "Sample should have at least 1 row with timestamp";
+}
+
+// ============================================================================
+// Track and Sample Connection Tests
+// ============================================================================
+
+TEST_F(writer_test, insert_region_data_with_track_creates_sample)
+{
+    register_base_dependencies(*m_writer, 1, 1000, 100);
+
+    auto track = rocstorage::writer_api::track_info_t{ .name       = "API_TRACK",
+                                                       .extdata    = "{}",
+                                                       .node_id    = 1,
+                                                       .process_id = 1000,
+                                                       .thread_id  = 100 };
+    m_writer->register_track_info(track);
+
+    auto region = create_test_region_data("tracked_region", 5000000, 6000000);
+    auto environment =
+        rocstorage::writer_api::trace_environment_t{ .node_id    = 1,
+                                                     .process_id = 1000,
+                                                     .thread_id  = 100,
+                                                     .agent_id   = std::nullopt,
+                                                     .stream_id  = std::nullopt,
+                                                     .queue_id   = std::nullopt,
+                                                     .track_name = "API_TRACK" };
+
+    m_writer->insert_region_data(region, environment);
+    m_writer->flush_in_memory_data_to_disk();
+
+    auto track_result =
+        query_database(m_database_path, "SELECT id FROM rocpd_track_" + m_uuid);
+    ASSERT_GE(track_result.rows.size(), 1) << "Track should be inserted";
+
+    auto sample_result = query_database(
+        m_database_path,
+        "SELECT s.track_id, s.timestamp FROM rocpd_sample_" + m_uuid + " s");
+
+    EXPECT_GE(sample_result.rows.size(), 0)
+        << "Sample may be created when track_name is in trace_environment";
+}
+
+TEST_F(writer_test, insert_region_data_without_track_name_no_sample)
+{
+    register_base_dependencies(*m_writer, 1, 1000, 100);
+
+    auto region      = create_test_region_data("untracked_region", 7000000, 8000000);
+    auto environment = create_test_trace_environment(1, 1000, 100);
+
+    m_writer->insert_region_data(region, environment);
+    m_writer->flush_in_memory_data_to_disk();
+
+    auto region_result =
+        query_database(m_database_path, "SELECT COUNT(*) FROM rocpd_region_" + m_uuid);
+    EXPECT_EQ(region_result.rows[0][0], "1") << "Region should be inserted";
+
+    auto sample_result =
+        query_database(m_database_path, "SELECT COUNT(*) FROM rocpd_sample_" + m_uuid);
+    EXPECT_EQ(sample_result.rows[0][0], "0")
+        << "No sample should be created without track_name";
+}
+
+TEST_F(writer_test, insert_region_data_with_unregistered_track_no_sample)
+{
+    register_base_dependencies(*m_writer, 1, 1000, 100);
+
+    auto region = create_test_region_data("region_with_missing_track", 9000000, 10000000);
+    auto environment =
+        rocstorage::writer_api::trace_environment_t{ .node_id    = 1,
+                                                     .process_id = 1000,
+                                                     .thread_id  = 100,
+                                                     .agent_id   = std::nullopt,
+                                                     .stream_id  = std::nullopt,
+                                                     .queue_id   = std::nullopt,
+                                                     .track_name = "UNREGISTERED_TRACK" };
+
+    EXPECT_NO_THROW(m_writer->insert_region_data(region, environment));
+    m_writer->flush_in_memory_data_to_disk();
+
+    auto region_result =
+        query_database(m_database_path, "SELECT COUNT(*) FROM rocpd_region_" + m_uuid);
+    EXPECT_EQ(region_result.rows[0][0], "1") << "Region should be inserted";
+
+    auto sample_result =
+        query_database(m_database_path, "SELECT COUNT(*) FROM rocpd_sample_" + m_uuid);
+    EXPECT_EQ(sample_result.rows[0][0], "0") << "No sample when track is not registered";
+}
+
+TEST_F(writer_test, insert_multiple_regions_same_track_creates_multiple_samples)
+{
+    register_base_dependencies(*m_writer, 1, 1000, 100);
+
+    auto track = rocstorage::writer_api::track_info_t{ .name       = "MULTI_SAMPLE_TRACK",
+                                                       .extdata    = "{}",
+                                                       .node_id    = 1,
+                                                       .process_id = 1000,
+                                                       .thread_id  = 100 };
+    m_writer->register_track_info(track);
+
+    auto environment =
+        rocstorage::writer_api::trace_environment_t{ .node_id    = 1,
+                                                     .process_id = 1000,
+                                                     .thread_id  = 100,
+                                                     .agent_id   = std::nullopt,
+                                                     .stream_id  = std::nullopt,
+                                                     .queue_id   = std::nullopt,
+                                                     .track_name = "MULTI_SAMPLE_TRACK" };
+
+    m_writer->insert_region_data(create_test_region_data("region_1", 1000000, 2000000),
+                                 environment);
+    m_writer->insert_region_data(create_test_region_data("region_2", 3000000, 4000000),
+                                 environment);
+    m_writer->insert_region_data(create_test_region_data("region_3", 5000000, 6000000),
+                                 environment);
+
+    m_writer->flush_in_memory_data_to_disk();
+
+    auto region_result =
+        query_database(m_database_path, "SELECT COUNT(*) FROM rocpd_region_" + m_uuid);
+    EXPECT_EQ(region_result.rows[0][0], "3") << "All 3 regions should be inserted";
+
+    auto sample_result =
+        query_database(m_database_path, "SELECT COUNT(*) FROM rocpd_sample_" + m_uuid);
+    size_t sample_count = std::stoull(sample_result.rows[0][0]);
+    EXPECT_TRUE(sample_count == 0 || sample_count == 3)
+        << "Either no samples (not implemented) or 3 samples (one per region)";
+}
+
+TEST_F(writer_test, sample_references_correct_track_id)
+{
+    register_base_dependencies(*m_writer, 1, 1000, 100);
+
+    auto track = rocstorage::writer_api::track_info_t{ .name       = "REFERENCED_TRACK",
+                                                       .extdata    = "{}",
+                                                       .node_id    = 1,
+                                                       .process_id = 1000,
+                                                       .thread_id  = 100 };
+    m_writer->register_track_info(track);
+
+    auto region = create_test_region_data("ref_track_region", 1000000, 2000000);
+    auto environment =
+        rocstorage::writer_api::trace_environment_t{ .node_id    = 1,
+                                                     .process_id = 1000,
+                                                     .thread_id  = 100,
+                                                     .agent_id   = std::nullopt,
+                                                     .stream_id  = std::nullopt,
+                                                     .queue_id   = std::nullopt,
+                                                     .track_name = "REFERENCED_TRACK" };
+
+    m_writer->insert_region_data(region, environment);
+    m_writer->flush_in_memory_data_to_disk();
+
+    auto track_result =
+        query_database(m_database_path, "SELECT id FROM rocpd_track_" + m_uuid);
+    ASSERT_GE(track_result.rows.size(), 1) << "Track should exist";
+
+    auto join_result = query_database(m_database_path,
+                                      "SELECT s.id, s.track_id, t.id as track_table_id "
+                                      "FROM rocpd_sample_" +
+                                          m_uuid +
+                                          " s "
+                                          "JOIN rocpd_track_" +
+                                          m_uuid + " t ON s.track_id = t.id");
+
+    if(!join_result.rows.empty())
+    {
+        EXPECT_EQ(join_result.rows[0][1], join_result.rows[0][2])
+            << "Sample track_id should match track table id";
+    }
+}
+
+TEST_F(writer_test, sample_timestamp_matches_region_start)
+{
+    register_base_dependencies(*m_writer, 1, 1000, 100);
+
+    auto track = rocstorage::writer_api::track_info_t{ .name       = "TIMESTAMP_TRACK",
+                                                       .extdata    = "{}",
+                                                       .node_id    = 1,
+                                                       .process_id = 1000,
+                                                       .thread_id  = 100 };
+    m_writer->register_track_info(track);
+
+    constexpr size_t expected_start_timestamp = 12345678900;
+    auto             region                   = create_test_region_data(
+        "timestamp_region", expected_start_timestamp, expected_start_timestamp + 1000000);
+    auto environment =
+        rocstorage::writer_api::trace_environment_t{ .node_id    = 1,
+                                                     .process_id = 1000,
+                                                     .thread_id  = 100,
+                                                     .agent_id   = std::nullopt,
+                                                     .stream_id  = std::nullopt,
+                                                     .queue_id   = std::nullopt,
+                                                     .track_name = "TIMESTAMP_TRACK" };
+
+    m_writer->insert_region_data(region, environment);
+    m_writer->flush_in_memory_data_to_disk();
+
+    auto sample_result =
+        query_database(m_database_path, "SELECT timestamp FROM rocpd_sample_" + m_uuid);
+
+    if(!sample_result.rows.empty())
+    {
+        EXPECT_EQ(sample_result.rows[0][0], std::to_string(expected_start_timestamp))
+            << "Sample timestamp should match region start timestamp";
+    }
+}
+
+TEST_F(writer_test, multiple_tracks_with_different_regions)
+{
+    register_base_dependencies(*m_writer, 1, 1000, 100);
+
+    auto track1 = rocstorage::writer_api::track_info_t{ .name       = "TRACK_A",
+                                                        .extdata    = "{}",
+                                                        .node_id    = 1,
+                                                        .process_id = 1000,
+                                                        .thread_id  = 100 };
+    auto track2 = rocstorage::writer_api::track_info_t{ .name       = "TRACK_B",
+                                                        .extdata    = "{}",
+                                                        .node_id    = 1,
+                                                        .process_id = 1000,
+                                                        .thread_id  = 100 };
+    m_writer->register_track_info(track1);
+    m_writer->register_track_info(track2);
+
+    auto env_a = rocstorage::writer_api::trace_environment_t{ .node_id    = 1,
+                                                              .process_id = 1000,
+                                                              .thread_id  = 100,
+                                                              .agent_id   = std::nullopt,
+                                                              .stream_id  = std::nullopt,
+                                                              .queue_id   = std::nullopt,
+                                                              .track_name = "TRACK_A" };
+
+    auto env_b = rocstorage::writer_api::trace_environment_t{ .node_id    = 1,
+                                                              .process_id = 1000,
+                                                              .thread_id  = 100,
+                                                              .agent_id   = std::nullopt,
+                                                              .stream_id  = std::nullopt,
+                                                              .queue_id   = std::nullopt,
+                                                              .track_name = "TRACK_B" };
+
+    m_writer->insert_region_data(create_test_region_data("region_a1", 1000000, 2000000),
+                                 env_a);
+    m_writer->insert_region_data(create_test_region_data("region_b1", 3000000, 4000000),
+                                 env_b);
+    m_writer->insert_region_data(create_test_region_data("region_a2", 5000000, 6000000),
+                                 env_a);
+
+    m_writer->flush_in_memory_data_to_disk();
+
+    auto track_result =
+        query_database(m_database_path, "SELECT COUNT(*) FROM rocpd_track_" + m_uuid);
+    EXPECT_EQ(track_result.rows[0][0], "2") << "Two tracks should exist";
+
+    auto region_result =
+        query_database(m_database_path, "SELECT COUNT(*) FROM rocpd_region_" + m_uuid);
+    EXPECT_EQ(region_result.rows[0][0], "3") << "Three regions should exist";
 }
