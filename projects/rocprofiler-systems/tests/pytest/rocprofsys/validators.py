@@ -146,7 +146,7 @@ def validate_file_exists(path: Path, description: str = "File") -> ValidationRes
         return ValidationResult(False, f"{description} not found: {path}")
 
     if path.stat().st_size == 0:
-        return ValidationResult(False, f"{description} exists: {path}")
+        return ValidationResult(False, f"{description} is empty: {path}")
 
     return ValidationResult(True, f"{description} exists: {path}")
 
