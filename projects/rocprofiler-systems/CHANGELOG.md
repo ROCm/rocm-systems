@@ -30,6 +30,7 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 ### Resolved issues
 
 - Fixed application termination with segfault when thread creation surpasses ROCPROFSYS_MAX_THREADS configuration.
+- Fixed how `roctxRange` markers are handled in the `rocpd` output. The "push" and "pop" markers are now shown as a single event.
 
 ### Removed
 

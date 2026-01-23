@@ -884,7 +884,7 @@ tool_tracing_callback_stop(
         record, iterate_args_callback, 2, &args);
 
     auto     call_stack = get_backtrace(_bt_data);
-    uint64_t _beg_ts    = user_data->value;
+    uint64_t _beg_ts    = begin_ts;
     uint64_t _end_ts    = ts;
 
     {
