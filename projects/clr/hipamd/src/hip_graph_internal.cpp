@@ -1914,6 +1914,8 @@ bool Graph::RunNodes(int32_t base_stream, const std::vector<hip::Stream*>* paral
     last_command->release();
   }
 
+  //PathDecomposition();
+
   wait_count_ = 0;
   // Run all commands in the graph
   for (auto node : GetTopoOrder()) {

@@ -38,6 +38,8 @@ if (AMD_COMPUTE_WIN)
     message("Public Compute Windows build path: ${AMD_COMPUTE_WIN}, SC: ${AMD_SC_PATH}, LibElf: ${AMD_LIBELF_PATH}")
 endif()
 
+# add_compile_options(-g -fno-omit-frame-pointer -fno-inline-functions-called-once)
+
 option(CLR_BUILD_HIP "Build HIP" OFF)
 option(CLR_BUILD_OCL "Build OCL" OFF)
 
