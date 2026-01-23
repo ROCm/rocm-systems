@@ -106,9 +106,9 @@ def convert_dbs_to_csv(
                             if cursor.description is None:
                                 continue
                             if not header_written[file_path]:
-                                writers[file_path].writerow(
-                                    [desc[0] for desc in cursor.description]
-                                )
+                                writers[file_path].writerow([
+                                    desc[0] for desc in cursor.description
+                                ])
                                 header_written[file_path] = True
                             writers[file_path].writerows(cursor)
                     except OSError as e:
