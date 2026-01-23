@@ -188,24 +188,6 @@ def generate_custom(args, cmake_args, ctest_args):
                 print(f"\n{env_var}:")
                 print(f"  {os.environ[env_var]}")
 
-        # Print suppression file contents
-        suppression_files = [
-            (f"{SOURCE_DIR}/source/scripts/thread-sanitizer-suppr.txt", "TSAN"),
-            (f"{SOURCE_DIR}/source/scripts/address-sanitizer-suppr.txt", "ASAN"),
-            (f"{SOURCE_DIR}/source/scripts/leak-sanitizer-suppr.txt", "LSAN"),
-            (f"{SOURCE_DIR}/source/scripts/undef-behavior-sanitizer-suppr.txt", "UBSAN"),
-        ]
-
-        for suppr_file, suppr_type in suppression_files:
-            if os.path.exists(suppr_file):
-                with open(suppr_file, "r") as f:
-                    content = f.read().strip()
-                    if content:
-                        print(f"\n{'-' * 40}")
-                        print(f"{suppr_type} Suppression File: {suppr_file}")
-                        print(f"{'-' * 40}")
-                        print(content)
-
         print(f"\n{'=' * 60}\n")
 
     codecov_exclude = [
