@@ -251,7 +251,9 @@ def create_df_pmc(
                     tmp_df = rocpd_data.process_rocpd_csv(tmp_df)
 
                 # Demangle original KernelNames
-                kernel_name_shortener(tmp_df, kernel_verbose)
+                # Skip for Standalone Roofline with -1 to keep full kernel names
+                if kernel_verbose >= 0:
+                    kernel_name_shortener(tmp_df, kernel_verbose)
 
                 # NB:
                 #   Idealy, the Node column should be added out of
