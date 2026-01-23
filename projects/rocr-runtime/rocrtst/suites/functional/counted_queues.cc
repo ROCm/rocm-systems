@@ -57,7 +57,7 @@ void CountedQueuesTest::SetUp() {
 
   // get the size of counted queue from env var
   const char* cq_size = rocrtst::GetEnv("HSA_COUNTED_QUEUE_SIZE");
-  cq_size == nullptr ? 16384 : atoi(cq_size);
+  counted_queue_size = (cq_size == nullptr) ? 16384 : atoi(cq_size);
 
   TestBase::SetUp();
 }
