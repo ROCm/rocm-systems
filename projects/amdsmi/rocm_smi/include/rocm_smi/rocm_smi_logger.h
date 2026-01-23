@@ -44,15 +44,15 @@
 #ifndef _ROCM_SMI_LOGGER_H_
 #define _ROCM_SMI_LOGGER_H_
 
+// C Header File(s)
+
 // C++ Header File(s)
 #include <fstream>
 #include <iostream>
 #include <sstream>
 #include <string>
 #include <mutex>
-
-// POSIX Socket Header File(s)
-#include <errno.h>
+#include <memory>
 
 // Code Specific Header Files(s)
 
@@ -63,6 +63,7 @@ namespace ROCmLogging {
 #define LOG_ALARM(x) (ROCmLogging::Logger::getInstance()->alarm(x))
 #define LOG_ALWAYS(x) (ROCmLogging::Logger::getInstance()->always(x))
 #define LOG_INFO(x) (ROCmLogging::Logger::getInstance()->info(x))
+#define LOG_WARN(x) (ROCmLogging::Logger::getInstance()->warn(x))
 #define LOG_BUFFER(x) (ROCmLogging::Logger::getInstance()->buffer(x))
 #define LOG_TRACE(x) (ROCmLogging::Logger::getInstance()->trace(x))
 #define LOG_DEBUG(x) (ROCmLogging::Logger::getInstance()->debug(x))
@@ -71,10 +72,11 @@ namespace ROCmLogging {
 typedef enum LOG_LEVEL {
   DISABLE_LOG = 1,
   LOG_LEVEL_INFO = 2,
-  LOG_LEVEL_BUFFER = 3,
-  LOG_LEVEL_TRACE = 4,
-  LOG_LEVEL_DEBUG = 5,
-  ENABLE_LOG = 6,
+  LOG_LEVEL_WARN = 3,
+  LOG_LEVEL_BUFFER = 4,
+  LOG_LEVEL_TRACE = 5,
+  LOG_LEVEL_DEBUG = 6,
+  ENABLE_LOG = 7,
 } LogLevel;
 
 // enum for LOG_TYPE
@@ -88,6 +90,7 @@ typedef enum LOG_TYPE {
 class Logger {
  public:
   static Logger* getInstance() throw();
+  ~Logger();
 
   Logger& operator<<(std::string &s) {
     switch (this->m_LogLevel) {
@@ -95,6 +98,9 @@ class Logger {
         break;
       case LOG_LEVEL_INFO:
         info(s);
+        break;
+      case LOG_LEVEL_WARN:
+        warn(s);
         break;
       case LOG_LEVEL_BUFFER:
         buffer(s);
@@ -150,6 +156,11 @@ class Logger {
   void info(std::string& text) throw();
   void info(std::ostringstream& stream) throw();
 
+  // Interface for Warn Log
+  void warn(const char* text) throw();
+  void warn(std::string& text) throw();
+  void warn(std::ostringstream& stream) throw();
+
   // Interface for Trace log
   void trace(const char* text) throw();
   void trace(std::string& text) throw();
@@ -177,7 +188,6 @@ class Logger {
 
  protected:
   Logger();
-  ~Logger();
 
   // Wrapper function for lock/unlock
   // For Extensible feature, lock and unlock should be in protected
@@ -187,7 +197,7 @@ class Logger {
   std::string getCurrentTime();
 
  private:
-  static Logger* m_Instance;
+  static std::unique_ptr<Logger> m_Instance;
   std::ofstream m_File;
   bool m_loggingIsOn = false;
   LogLevel m_LogLevel;

@@ -53,7 +53,7 @@
 #include "rocm_smi/rocm_smi_main.h"
 
 
-ROCmLogging::Logger *ROCmLogging::Logger::m_Instance = nullptr;
+std::unique_ptr<ROCmLogging::Logger> ROCmLogging::Logger::m_Instance = nullptr;
 
 // Log file name
 // WARNING: File name should be changed here and
@@ -78,9 +78,9 @@ ROCmLogging::Logger::~Logger() {
 
 ROCmLogging::Logger* ROCmLogging::Logger::getInstance() throw() {
   if (m_Instance == nullptr) {
-    m_Instance = new ROCmLogging::Logger();
+    m_Instance = std::unique_ptr<Logger>(new Logger());
   }
-  return m_Instance;
+  return m_Instance.get();
 }
 
 void ROCmLogging::Logger::lock() {
@@ -246,7 +246,7 @@ void ROCmLogging::Logger::buffer(const char* text) throw() {
   // and timestamp in the buffer message. Just log the raw bytes.
   if ((m_LogType == FILE_LOG) && (m_LogLevel >= LOG_LEVEL_BUFFER)) {
     lock();
-    if(!m_File.is_open()) {
+    if (!m_File.is_open()) {
       initialize_resources();
       if (!m_File.is_open()) {
         std::cout << "WARNING: re-initializing resources was unsuccessful."
@@ -305,6 +305,40 @@ void ROCmLogging::Logger::info(std::string& text) throw() {
 void ROCmLogging::Logger::info(std::ostringstream& stream) throw() {
   std::string text = stream.str();
   info(text.data());
+  stream.str("");
+}
+
+// Interface for Warn Log
+void ROCmLogging::Logger::warn(const char* text) throw() {
+  // By default, logging is disabled (ie. no RSMI_LOGGING)
+  // The check below allows us to toggle logging through RSMI_LOGGING
+  // set or unset
+  if (!m_loggingIsOn) {
+    return;
+  }
+
+  std::string data;
+  data.append("[WARN]: ");
+  data.append(text);
+
+  if ((m_LogType == FILE_LOG) && (m_LogLevel >= LOG_LEVEL_WARN)) {
+    logIntoFile(data);
+  } else if ((m_LogType == CONSOLE) && (m_LogLevel >= LOG_LEVEL_WARN)) {
+    logOnConsole(data);
+  } else if ((m_LogType == BOTH_FILE_AND_CONSOLE)
+             && (m_LogLevel >= LOG_LEVEL_WARN)) {
+    logOnConsole(data);
+    logIntoFile(data);
+  }
+}
+
+void ROCmLogging::Logger::warn(std::string& text) throw() {
+  warn(text.data());
+}
+
+void ROCmLogging::Logger::warn(std::ostringstream& stream) throw() {
+  std::string text = stream.str();
+  warn(text.data());
   stream.str("");
 }
 
@@ -407,6 +441,10 @@ void ROCmLogging::Logger::enableFileLogging() {
 std::string ROCmLogging::Logger::getLogSettings() {
   std::string logSettings;
 
+  logSettings += ("Logging is "
+                  + std::string((m_loggingIsOn ? "ENABLED" : "DISABLED"))
+                  + ", ");
+
   if (m_File.is_open()) {
     logSettings += "OpenStatus = File (" + std::string(logFileName)
                    + ") is open";
@@ -440,6 +478,9 @@ std::string ROCmLogging::Logger::getLogSettings() {
       break;
     case LOG_LEVEL_INFO:
       logSettings += "LogLevel = LOG_LEVEL_INFO";
+      break;
+    case LOG_LEVEL_WARN:
+      logSettings += "LogLevel = LOG_LEVEL_WARN";
       break;
     case LOG_LEVEL_BUFFER:
       logSettings += "LogLevel = LOG_LEVEL_BUFFER";
@@ -507,5 +548,7 @@ void ROCmLogging::Logger::initialize_resources() {
 }
 
 void ROCmLogging::Logger::destroy_resources() {
-  m_File.close();
+  if (m_File.is_open()) {
+    m_File.close();
+  }
 }

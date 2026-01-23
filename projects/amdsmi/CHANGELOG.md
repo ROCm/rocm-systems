@@ -3,6 +3,76 @@
 Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/projects/amdsmi](https://rocm.docs.amd.com/projects/amdsmi/en/latest/).
 
 ***All information listed below is for reference and subject to change.***
+## amd_smi_lib for ROCm 8.0.0
+
+### Added
+
+- **Added KFD data manager for improved VRAM usage reporting**.  
+  - Introduced `rocm_smi_kfd_data_manager.h` and `rocm_smi_kfd_data_manager.cc` for efficient VRAM queries
+  - **Issue**: Previous implementation of `amdsmi_get_gpu_memory_usage()` used a persistent KFD IOCTL method that created long-lived process entries in `/sys/class/kfd/kfd/proc/<pid>`. These entries remained until the process terminated, blocking driver reloads and partition changes.
+  - **Solution**: New fork-and-exit pattern where KFD operations run in short-lived child processes that exit immediately, ensuring prompt cleanup and preventing blocking of driver operations
+  - **Performance benefits**:
+    - Single batched KFD fork can query all devices when caching is enabled
+    - Cache hit: < 1 μs (O(1) hash lookup by GPU ID)
+    - Cache miss (fork): 200-800 μs typical (includes fork overhead, IOCTL, and cleanup verification)
+    - Batch queries with caching provide significant performance improvements when monitoring multiple GPUs
+  - Environment variables for fine-tuning:
+    - `AMDSMI_KFD_USE_ORIG_VRAM`: Use original ioctl method (default: 0/disabled)
+    - `AMDSMI_KFD_CACHE_TTL_MS`: Cache time-to-live in milliseconds (default: 250, set to 0 to disable)
+    - `AMDSMI_KFD_DISABLE_INOTIFY_POLLING`: Use stat polling instead of inotify (default: 1/enabled for better performance)
+    - `AMDSMI_KFD_INOTIFY_POLL_MS`: Inotify polling timeout in milliseconds (default: 2)
+    - `AMDSMI_KFD_CLEANUP_POLL_US`: Stat polling interval in microseconds (default: 250)
+
+- **Added new error status codes for better error reporting**.  
+  - `AMDSMI_STATUS_IPC_ERROR` (21): IPC communication error occurred
+  - Updated CLI exception handling to support new error code
+
+- **Added WARN log level to logging system**.  
+  - New `LOG_WARN()` macro for warning-level logging
+  - Added `LOG_LEVEL_WARN` (3) between INFO and BUFFER levels
+  - Provides better log categorization and filtering
+
+### Changed
+
+- **Improved GPU memory usage query with KFD fallback mechanism**.  
+  - Enhanced `amdsmi_get_gpu_memory_usage()` with better error handling for KFD fallback path
+  - When sysfs memory query fails, automatically falls back to KFD ioctl method
+  - Maps KFD ioctl errors to appropriate RSMI/AMD SMI status codes via new `KFDIoctlErrnoToRsmiStatus()` function
+  - Provides more informative error messages and debug logging when memory queries fail
+  - Debug logs now include execution time measurements in microseconds for performance analysis
+
+- **Enhanced logging system**.  
+  - Logger now uses `std::unique_ptr` for better memory management and automatic cleanup
+  - Added proper file handle cleanup in destructor to prevent resource leaks
+  - Logger settings now display whether logging is enabled or disabled
+  - Better error handling for file operations with validation checks
+
+### Resolved Issues
+
+- **Fixed `amdsmi_get_gpu_memory_usage()` causing failure to change partition modes**  
+  - Improved KFD IOCTL fallback mechanism to prevent interference with driver reloads and  partition changes. See [Added KFD data manager for improved VRAM usage reporting](#added-kfd-data-manager-for-improved-vram-usage-reporting) for details.
+
+- **Fixed critical sensor ID formatting bug in monitor path generation**.  
+  - **Issue**: Previously, sensor IDs > 9 produced incorrect characters due to character arithmetic
+    - sensor_id=10 produced ':' (ASCII 58, '0' + 10)
+    - sensor_id=213 produced 0x05 (ENQ control character, causes terminal answerback response)
+  - **Impact**: Control characters in log output caused terminal issues - ENQ (0x05) triggered terminals to send their answerback string (e.g., "xterm-256color"), polluting command output
+  - **Fix**: Replaced character arithmetic `static_cast<char>('0' + sensor_id)` with proper string conversion using `std::to_string()`
+  - Prevents terminal pollution and ensures correct file paths for all sensor IDs
+
+### Optimized
+
+- **Optimized VRAM usage queries with batching and caching**.  
+  - Single batched KFD fork can query all devices when caching is enabled
+  - Reduces system call overhead and fork/exec costs when monitoring multiple GPUs
+  - Cache invalidation ensures data freshness: any GPU query failure triggers full cache refresh
+  - Typical performance: < 1 μs for cache hit vs 200-800 μs for cache miss
+
+### Removed
+
+- N/A
+
+
 
 ## amd_smi_lib for ROCm 7.12.0
 
