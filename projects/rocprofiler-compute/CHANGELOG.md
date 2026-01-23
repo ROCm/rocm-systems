@@ -31,6 +31,11 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Resolved issues
 
+* Implemented `NOISE_CLAMP` for L2 cache metrics to handle negative values from multi-pass profiling variance:
+  * Negative values are clamped to 0 (eliminates physically impossible negative counts)
+  * Warnings issued only when relative error exceeds 1% (anomaly detection)
+  * Added FAQ documentation explaining the "Counter variance corrected" warning
+
 * Fixed the meaning of --dispatch option in profile mode in argparser to convey the fact that it control which iterations of the kernel to profile and not which dispatch ids to profile.
 
 * The meaning of --dispatch option in analyze is still the same which is which dispatch ids to analyze

@@ -239,7 +239,7 @@ post_process()
                 // if(get_debug() && get_verbose() >= 2)
                 if(true)
                 {
-                    auto _addr = TIMEMORY_JOIN("", "0x", std::hex, itr.address);
+                    auto _addr = fmt::format("0x{:x}", itr.address);
                     ofs << std::setw(8) << itr.count << "  " << std::setw(8) << _addr
                         << "  " << itr.source << "\n";
                 }
