@@ -1517,11 +1517,43 @@ static std::vector<std::string> parse_list(const std::string& nic_str)
 void
 setup_ainic()
 {
-    auto _ainic_devices_v = get_sampling_ainics();
-    nic_data::nic_vec     = parse_list(_ainic_devices_v);
-
     // Run update_stats() the first time, to get the names of all existing NICs.
     nic_data::nic_stats_collector.update_stats();
+
+    auto _ainic_devices_v = get_sampling_ainics();
+
+    std::string devices_lowercase = _ainic_devices_v;
+    for(auto& itr : devices_lowercase)
+        itr = std::tolower(itr);
+
+    if(devices_lowercase == "all")
+    {
+        // Set nic_vec to all devices.
+        nic_data::nic_vec = nic_data::nic_stats_collector.get_nic_list();
+    }
+    else if(devices_lowercase == "none")
+    {
+        // Set nic_vec to an empty vector.
+        nic_data::nic_vec = {};
+    }
+    else
+    {
+        // Get list of devices from the command line and add those that are
+        // valid to nic_vec.
+        nic_data::nic_vec = {};
+        auto nic_list = parse_list(_ainic_devices_v);
+        for (auto& nic : nic_list)
+        {
+            if(nic_data::nic_stats_collector.is_nic_valid(nic))
+            {
+                nic_data::nic_vec.push_back(nic);
+            }
+            else
+            {
+                LOG_WARNING("Invalid NIC: {}", nic);
+            }
+        }
+    }
 
     nic_data::setup();
 }

@@ -65,6 +65,9 @@ public:
     // in case the caller is requesting stats for a nonexistent NIC).
     void get_data(const std::string& nic, NICData& data) const;
 
+    // get_nic_list returns the list of NICs on the system.
+    std::vector<std::string> get_nic_list() const;
+
     AINICStatsCollector();
 
     // Update the statistics for all NICs.
@@ -72,7 +75,9 @@ public:
 
     // Find nic and fill in the data.
     // If the nic is not found, return false.
-    bool find_nic(const std::string& nic, NICData& data);
+    bool find_nic(const std::string& nic, NICData& data) const;
+
+    bool is_nic_valid(const std::string& nic) const;
 
 private:
     size_t get_nic_count();

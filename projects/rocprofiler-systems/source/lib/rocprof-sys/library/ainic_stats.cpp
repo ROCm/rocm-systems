@@ -31,7 +31,7 @@ AINICStatsCollector::AINICStatsCollector()
 #endif
 {}
 
-bool AINICStatsCollector::find_nic(const std::string& nic, NICData& data)
+bool AINICStatsCollector::find_nic(const std::string& nic, NICData& data) const
 {
     auto pair = _nic_params.find(nic);
     if(pair == _nic_params.end())
@@ -40,6 +40,11 @@ bool AINICStatsCollector::find_nic(const std::string& nic, NICData& data)
     }
     data = pair->second;
     return true;
+}
+
+bool AINICStatsCollector::is_nic_valid(const std::string& nic) const
+{
+    return (_nic_params.find(nic) != _nic_params.end());
 }
 
 void AINICStatsCollector::update_stats()
@@ -271,4 +276,13 @@ AINICStatsCollector::get_data(const std::string& nic, NICData& data) const
     {
         data = it->second;
     }
+}
+
+std::vector<std::string> AINICStatsCollector::get_nic_list() const
+{
+    std::vector<std::string> nic_list = {};
+    for (auto& it : _nic_params) {
+        nic_list.push_back(it.first);
+    }
+    return nic_list;
 }
