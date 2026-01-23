@@ -58,10 +58,7 @@ hipError_t Event::query() {
     return hipSuccess;
   }
 
-  if (ready()) {
-    return hipSuccess;
-  }
-  return hipErrorNotReady;
+  return ready() ? hipSuccess : hipErrorNotReady;
 }
 
 // ================================================================================================
@@ -220,7 +217,7 @@ hipError_t Event::recordCommand(amd::Command*& command, amd::HostQueue* stream, 
   }();
 
   constexpr bool kMarkerTs = true;
-  constexpr bool kFlushCache = true;
+  constexpr bool kFlushCache = false;
   command = new hip::EventMarker(*stream, kFlushCache, kMarkerTs, releaseFlags, batch_flush);
   return hipSuccess;
 }
