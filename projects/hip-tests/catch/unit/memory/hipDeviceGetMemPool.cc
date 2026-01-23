@@ -116,10 +116,11 @@ TEST_CASE("Unit_hipDeviceGetMemPool_Basic") {
 TEST_CASE("Unit_hipDeviceGetMemPool_Functional") {
   hipMemPool_t mem_pool = nullptr;
   checkMempoolSupported(0)
-      // assign current mem pool to device
-      HIP_CHECK(hipDeviceGetMemPool(&mem_pool, 0));
+  // assign current mem pool to device
+  HIP_CHECK(hipDeviceGetMemPool(&mem_pool, 0));
   // set attribute hipMemPoolAttrReleaseThreshold as UINT64_MAX
   hipMemPoolAttr attr = hipMemPoolAttrReleaseThreshold;
+  MemPoolAttrRestore restore(mem_pool, attr);
   std::uint64_t value = UINT64_MAX;
   HIP_CHECK(hipMemPoolSetAttribute(mem_pool, attr, &value));
   // call checkMallocAsync() and validate
@@ -168,10 +169,11 @@ TEST_CASE("Unit_hipDeviceGetMemPool_Multidevice", "[multigpu]") {
 TEST_CASE("Unit_hipDeviceGetDefaultMemPool_Functional") {
   hipMemPool_t mem_pool = nullptr;
   checkMempoolSupported(0)
-      // assign current mem pool to device
-      HIP_CHECK(hipDeviceGetDefaultMemPool(&mem_pool, 0));
+  // assign current mem pool to device
+  HIP_CHECK(hipDeviceGetDefaultMemPool(&mem_pool, 0));
   // set attribute hipMemPoolAttrReleaseThreshold as UINT64_MAX
   hipMemPoolAttr attr = hipMemPoolAttrReleaseThreshold;
+  MemPoolAttrRestore restore(mem_pool, attr);
   std::uint64_t value = UINT64_MAX;
   HIP_CHECK(hipMemPoolSetAttribute(mem_pool, attr, &value));
   // call checkMallocAsync() and validate

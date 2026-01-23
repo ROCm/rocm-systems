@@ -39,6 +39,21 @@ namespace {
 constexpr auto wait_ms = 500;
 }  // anonymous namespace
 
+struct MemPoolAttrRestore {
+  hipMemPool_t pool;
+  hipMemPoolAttr attr;
+  std::uint64_t old_value;
+
+  MemPoolAttrRestore(hipMemPool_t mem_pool, hipMemPoolAttr attr_in)
+      : pool(mem_pool), attr(attr_in), old_value(0) {
+    HIP_CHECK(hipMemPoolGetAttribute(pool, attr, &old_value));
+  }
+
+  ~MemPoolAttrRestore() {
+    static_cast<void>(hipMemPoolSetAttribute(pool, attr, &old_value));
+  }
+};
+
 #define checkMempoolSupported(device) {\
   int deviceSupportsMemoryPools = 0;\
   HIP_CHECK(hipDeviceGetAttribute(&deviceSupportsMemoryPools,\
@@ -62,6 +77,9 @@ template <typename T> __global__ void kernel_500ms(T* host_res, int clk_rate) {
   __threadfence_system();
   // expecting that the data is getting flushed to host here!
   uint64_t start = clock64() / clk_rate, cur;
+  if (start == 0) {
+    start = 1;
+  }
   if (clk_rate > 1) {
     do {
       cur = clock64() / clk_rate - start;
@@ -80,6 +98,9 @@ template <typename T> __global__ void kernel_500ms_gfx11(T* host_res, int clk_ra
   __threadfence_system();
   // expecting that the data is getting flushed to host here!
   uint64_t start = clock_function() / clk_rate, cur;
+  if (start == 0) {
+    start = 1;
+  }
   if (clk_rate > 1) {
     do {
       cur = clock_function() / clk_rate - start;

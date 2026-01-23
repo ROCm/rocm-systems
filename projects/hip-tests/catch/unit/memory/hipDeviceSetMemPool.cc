@@ -182,6 +182,7 @@ TEST_CASE("Unit_hipDeviceSetMemPool_functionalAttribute") {
   HIP_CHECK(hipDeviceSetMemPool(0, mem_pool));
   // set attribute hipMemPoolAttrReleaseThreshold as UINT64_MAX
   hipMemPoolAttr attr = hipMemPoolAttrReleaseThreshold;
+  MemPoolAttrRestore restore(mem_pool, attr);
   std::uint64_t value = UINT64_MAX;
   HIP_CHECK(hipMemPoolSetAttribute(mem_pool, attr, &value));
   // call checkMallocAsync function
