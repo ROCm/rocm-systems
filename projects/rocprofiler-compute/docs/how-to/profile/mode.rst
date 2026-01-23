@@ -238,8 +238,8 @@ directory is derived from ``--name`` and the target system information:
 * Without MPI rank detection, the default is ``./workloads/<name>/<gpu_model>``.
 * With MPI rank detection, the default is ``./workloads/<name>/<rank>``.
 
-You can override the output directory with ``--output-directory`` (``-p``). The
-``--path`` alias is deprecated for profile mode. When ``--output-directory`` is
+You can override the output directory with ``--output-directory``. The
+``--path`` (``-p``) argument is deprecated for profile mode. When ``--output-directory`` is
 explicitly provided, ``--name`` is ignored.
 
 .. note::
