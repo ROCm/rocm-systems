@@ -973,7 +973,7 @@ def run_prof(
         )
         combined_df.to_csv(workload_dir + f"/results_{fbase}.csv", index=False)
         if torch_trace_enabled:
-            process_torch_trace_output(workload_dir, fbase,format_rocprof_output)
+            process_torch_trace_output(workload_dir, fbase, format_rocprof_output)
         if retain_rocpd_output:
             for db_path in glob.glob(workload_dir + "/out/pmc_1/*/*.db"):
                 pid = Path(db_path).stem.split("_")[0]
@@ -1014,7 +1014,7 @@ def run_prof(
                 process_hip_trace_output(workload_dir, fbase)
         # Add torch operator trace processing
         if torch_trace_enabled:
-            process_torch_trace_output(workload_dir, fbase,format_rocprof_output)
+            process_torch_trace_output(workload_dir, fbase, format_rocprof_output)
         # Combine results into single CSV file
         if results_files:
             combined_results = pd.concat(
@@ -1298,20 +1298,20 @@ def process_torch_trace_output(
     existing_csv_files = [
         [marker_api_trace_csvs[i], counter_collection_csvs[i]]
         for i in range(len(marker_api_trace_csvs))
-        if counter_collection_csvs[i].is_file()
-        and marker_api_trace_csvs[i].is_file()
+        if counter_collection_csvs[i].is_file() and marker_api_trace_csvs[i].is_file()
     ]
     if not existing_csv_files:
         console_warning(
             f"No marker files with corresponding counter files found for {fbase}"
         )
         return
+
     # Join marker and counter data
     def _merge_pair(
-            marker_path: Path,
-            counter_path: Path,
-            join_keys: list = ["Correlation_Id"],
-            ) -> pd.DataFrame:
+        marker_path: Path,
+        counter_path: Path,
+        join_keys: list = ["Correlation_Id"],
+    ) -> pd.DataFrame:
         marker_df = pd.read_csv(marker_path)
         counter_df = pd.read_csv(counter_path)
         return pd.merge(
@@ -1321,6 +1321,7 @@ def process_torch_trace_output(
             how="inner",
             suffixes=("_function", "_kernel"),
         )
+
     if output_format == "csv":
         merged_results = pd.concat(
             [_merge_pair(f[0], f[1]) for f in existing_csv_files],
@@ -1328,8 +1329,11 @@ def process_torch_trace_output(
         )
     elif output_format == "rocpd":
         # There will one pair of csv files extracted from rocpd db and consolidated.
-        merged_results = _merge_pair(existing_csv_files[0][0], existing_csv_files[0][1],
-                                      ["Correlation_Id", "GUID"])
+        merged_results = _merge_pair(
+            existing_csv_files[0][0],
+            existing_csv_files[0][1],
+            ["Correlation_Id", "GUID"],
+        )
     # Save merged results
     merged_results.to_csv(
         f"{workload_dir}/{fbase}_torch_trace.csv",
