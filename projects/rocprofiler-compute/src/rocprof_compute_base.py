@@ -172,45 +172,44 @@ class RocProfCompute:
 
     def replace_parameters_in_output_directory(self) -> None:
         add_rank = False
-        # Add --name to workload path if --path is not given
-        if self.__args.path == str(Path.cwd() / "workloads"):
-            self.__args.path = str(Path(self.__args.path) / self.__args.name)
+        # Add --name to output directory if --output-directory is not given
+        if self.__args.output_directory == str(Path.cwd() / "workloads"):
+            self.__args.output_directory = str(
+                Path(self.__args.output_directory) / self.__args.name
+            )
 
-            # Deprecated behavior: append subpath to workload path
-            # Append gpu model to workload path in future releases
-
-            # Add node name to workload path
-            if self.__args.subpath == "node_name":
-                self.__args.path = str(Path(self.__args.path) / socket.gethostname())
-            # OR, Add MPI rank to workload path if available
-            elif get_rank() is not None:
-                self.__args.path = str(Path(self.__args.path) / f"{get_rank()}")
+            # Add MPI rank to workload path if available
+            if get_rank() is not None:
+                self.__args.output_directory = str(
+                    Path(self.__args.output_directory) / f"{get_rank()}"
+                )
             # OR, Add gpu model name to workload path
             else:
-                self.__args.path = str(Path(self.__args.path) / self.__mspec.gpu_model)
+                self.__args.output_directory = str(
+                    Path(self.__args.output_directory) / self.__mspec.gpu_model
+                )
         elif self.__args.name is not None:
             console_warning(
-                "--name is ignored when -p or --path or --output-directory "
-                "is explicitly specified."
+                "--name is ignored when --output-directory is explicitly specified."
             )
         else:
-            if "%rank%" not in self.__args.path and get_rank() is not None:
+            if "%rank%" not in self.__args.output_directory and get_rank() is not None:
                 add_rank = True
 
         # Replace parameters with actual values in workload path
-        self.__args.path = self.__args.path.replace(
+        self.__args.output_directory = self.__args.output_directory.replace(
             "%hostname%", socket.gethostname()
         ).replace("%gpumodel%", self.__mspec.gpu_model)
 
         # Replace environment variables in workload path
-        self.__args.path = replace_env(self.__args.path)
+        self.__args.poutput_directory = replace_env(self.__args.output_directory)
 
         # Replace %rank% with actual rank value in workload path
-        self.__args.path = replace_rank(self.__args.path)
+        self.__args.output_directory = replace_rank(self.__args.output_directory)
 
         if add_rank:
-            self.__args.path = str(
-                Path(self.__args.path) / f"{get_rank()}"
+            self.__args.output_directory = str(
+                Path(self.__args.output_directory) / f"{get_rank()}"
             )
 
     @demarcate
@@ -443,10 +442,16 @@ class RocProfCompute:
             self.list_metrics()
         elif self.__args.list_sets:
             self.list_sets()
-        elif self.__args.name is None and self.__args.path == str(
+        elif self.__args.name is None and self.__args.output_directory == str(
             Path.cwd() / "workloads"
         ):
-            console_error("Either --output-directory or --name is required")
+            # Remove if statement and the else code block after 8.0 release
+            if self.__args.path == str(Path.cwd() / "workloads"):
+                console_error("Either --output-directory or --name is required")
+            else:
+                console_warning(
+                    "--path is deprecated and will be removed in future releases."
+                )
 
         if self.__args.subpath != "gpu_model":
             console_warning(
@@ -456,7 +461,11 @@ class RocProfCompute:
         if self.__args.name is not None and "/" in self.__args.name:
             console_error('"/" is not permitted in profile name')
 
-        self.replace_parameters_in_output_directory()
+        if self.__args.output_directory != str(
+            Path.cwd() / "workloads"
+        ) or self.__args.path == str(Path.cwd() / "workloads"):
+            self.replace_parameters_in_output_directory()
+            self.__args.path = self.__args.output_directory
 
         # instantiate desired profiler
         profiler = self.create_profiler()
