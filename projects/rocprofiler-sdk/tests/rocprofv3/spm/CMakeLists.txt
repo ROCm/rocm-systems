@@ -9,6 +9,7 @@ project(
     VERSION 0.0.0)
 
 find_package(rocprofiler-sdk REQUIRED)
+find_package(Python3 REQUIRED)
 
 set(COUNTER_LIST
     SQ_CYCLES
@@ -24,13 +25,16 @@ set(COUNTER_LIST
 rocprofiler_sdk_spm_disabled(IS_SPM_DISABLED)
 set(IS_DISABLED ${IS_SPM_DISABLED})
 
+set(rocprofv3-spm-rocpd-env
+    "PYTHONPATH=${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages")
+
 # SPM
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-spm-execute
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --spm-beta-enabled=on --spm
         ${COUNTER_LIST} --spm-frequency 50000 --spm-buffer-size 32768 --kernel-trace -d
-        ${CMAKE_CURRENT_BINARY_DIR}/out_spm --output-format CSV JSON -o spm --
+        ${CMAKE_CURRENT_BINARY_DIR}/out_spm --output-format json rocpd -o spm --
         $<TARGET_FILE:simple-transpose>
     DEPENDS simple-transpose
     TIMEOUT 60
@@ -44,7 +48,7 @@ rocprofiler_add_integration_execute_test(
     rocprofv3-test-spm-compare-to-pmc
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pmc ${COUNTER_LIST} -d
-        ${CMAKE_CURRENT_BINARY_DIR}/out_spm --output-format CSV -o pmc --
+        ${CMAKE_CURRENT_BINARY_DIR}/out_spm --output-format json -o pmc --
         $<TARGET_FILE:simple-transpose>
     DEPENDS simple-transpose
     TIMEOUT 45
@@ -53,19 +57,37 @@ rocprofiler_add_integration_execute_test(
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
     DISABLED ${IS_DISABLED})
 
+# rocpd csv generation from spm database
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-spm-rocpd-csv-generation
+    COMMAND
+        ${Python3_EXECUTABLE} -m rocpd convert -f csv -d
+        ${CMAKE_CURRENT_BINARY_DIR}/out_spm/rocpd_csv -i
+        ${CMAKE_CURRENT_BINARY_DIR}/out_spm/spm_results.db
+    DEPENDS rocprofiler-sdk::rocprofv3
+    TIMEOUT 60
+    LABELS "integration-tests"
+    ENVIRONMENT "${rocprofv3-spm-rocpd-env}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+    FIXTURES_SETUP rocprofv3-test-spm-rocpd-csv-generation
+    FIXTURES_REQUIRED rocprofv3-test-spm-execute
+    DISABLED ${IS_DISABLED})
+
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
 
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-spm-validate
     TEST_PATHS validate.py
-    ARGS --pmc ${CMAKE_CURRENT_BINARY_DIR}/out_spm/pmc_counter_collection.csv --spm
-         ${CMAKE_CURRENT_BINARY_DIR}/out_spm/spm_streaming_performance_monitor.csv
-         --spm-json ${CMAKE_CURRENT_BINARY_DIR}/out_spm/spm_results.json
+    ARGS --pmc-json ${CMAKE_CURRENT_BINARY_DIR}/out_spm/pmc_results.json --spm-json
+        ${CMAKE_CURRENT_BINARY_DIR}/out_spm/spm_results.json --rocpd-input
+        ${CMAKE_CURRENT_BINARY_DIR}/out_spm/spm_results.db --counter-csv
+        ${CMAKE_CURRENT_BINARY_DIR}/out_spm/rocpd_csv/out_counter_collection_trace.csv
     CONFIG pytest.ini
     COPY spm_input.json conftest.py
     LABELS "integration-tests"
-    FIXTURES_REQUIRED "rocprofv3-test-spm-execute;rocprofv3-test-spm-compare-to-pmc"
+    FIXTURES_REQUIRED
+       "rocprofv3-test-spm-execute;rocprofv3-test-spm-compare-to-pmc;rocprofv3-test-spm-rocpd-csv-generation"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
     DISABLED ${IS_DISABLED})
 
@@ -74,7 +96,7 @@ rocprofiler_add_integration_execute_test(
     rocprofv3-test-spm-multigpu
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i spm_input.json -d
-        ${CMAKE_CURRENT_BINARY_DIR}/out_multi --output-format CSV -o multi --
+        ${CMAKE_CURRENT_BINARY_DIR}/out_multi --output-format json rocpd -o multi --
         $<TARGET_FILE:vector-ops>
     DEPENDS vector-ops
     TIMEOUT 60
