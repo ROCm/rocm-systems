@@ -7,7 +7,7 @@ Thank you for contributing! This guide outlines the development workflow, contri
 ### Option A: Clone the super-repo
 
 ```bash
-git clone https://github.com/ROCm/rocm-systems.git
+git clone git@github.com:ROCm/rocm-systems.git
 cd rocm-systems
 ```
 
