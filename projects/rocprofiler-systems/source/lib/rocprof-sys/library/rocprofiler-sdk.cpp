@@ -2298,8 +2298,6 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     _data->initialize();
     if(!_counter_events.empty()) _data->initialize_event_info();
 
-    printf("tool_init. _data->primary_ctx = %p\n", _data->primary_ctx.handle);
-
     ROCPROFILER_CALL(rocprofiler_create_context(&_data->primary_ctx));
 
     ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
@@ -2623,8 +2621,6 @@ extern "C"
             if(!_first) return nullptr;
             _first = false;
         }
-
-        printf("rocprofiler_configure called\n");
 
         if(!tim::get_env("ROCPROFSYS_INIT_TOOLING", true)) return nullptr;
         if(!tim::settings::enabled()) return nullptr;

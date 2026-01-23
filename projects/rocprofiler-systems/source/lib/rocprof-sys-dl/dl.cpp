@@ -1090,7 +1090,6 @@ extern "C"
         uint32_t version, const char* runtime_version, uint32_t priority,
         rocprofiler_client_id_t* client_id)
     {
-        printf("DL rocprofiler_attach\n");
         return ROCPROFSYS_DL_INVOKE(get_indirect().rocprofiler_configure_attach_f,
                                     version, runtime_version, priority, client_id);
     }

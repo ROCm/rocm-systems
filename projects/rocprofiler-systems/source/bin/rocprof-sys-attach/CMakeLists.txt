@@ -27,7 +27,7 @@ find_package(rocprofiler-sdk-rocattach QUIET) #QUIET to avoid error if not found
 if(rocprofiler-sdk-rocattach_FOUND)
     add_executable(${TARGET} ${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-attach.cpp)
 
-    # Note: This is justa workaround to get the rocattach library.
+    # Note: Hardcoeded paths are just a workaround to get the rocattach library.
     # The proper way would be to use find_package(rocprofiler-sdk-rocattach REQUIRED)
     # and use the rocprofiler-sdk-rocattach::rocprofiler-sdk-rocattach target.
     # In that way we can resolve paths for library and headers only with linking to the rocprofiler-sdk-rocattach library.
