@@ -259,14 +259,9 @@ metadata_initialize_smi_pmc(size_t gpu_id)
             if(xcp_idx) name_ss << "_" << *xcp_idx;
             name_ss << "_" << clk;
 
-            std::stringstream symbol_ss;
-            symbol_ss << "VcnAct";
-            if(xcp_idx) symbol_ss << "_" << *xcp_idx;
-            symbol_ss << "_" << clk;
-
             trace_cache::get_metadata_registry().add_pmc_info(
                 { agent_type::GPU, gpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-                  name_ss.str(), symbol_ss.str(),
+                  name_ss.str(), "VcnAct",
                   trait::name<category::amd_smi_vcn_activity>::description,
                   LONG_DESCRIPTION, COMPONENT, trace_cache::PERCENTAGE,
                   rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0 });
@@ -281,14 +276,9 @@ metadata_initialize_smi_pmc(size_t gpu_id)
             if(xcp_idx) name_ss << "_" << *xcp_idx;
             name_ss << "_" << std::to_string(clk);
 
-            std::stringstream symbol_ss;
-            symbol_ss << "JpegAct";
-            if(xcp_idx) symbol_ss << "_" << *xcp_idx;
-            symbol_ss << "_" << std::to_string(clk);
-
             trace_cache::get_metadata_registry().add_pmc_info(
                 { agent_type::GPU, gpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-                  name_ss.str(), symbol_ss.str(),
+                  name_ss.str(), "JpegAct",
                   trait::name<category::amd_smi_jpeg_activity>::description,
                   LONG_DESCRIPTION, COMPONENT, trace_cache::PERCENTAGE,
                   rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0 });
@@ -338,11 +328,10 @@ metadata_initialize_smi_pmc(size_t gpu_id)
     {
         std::stringstream read_name_ss, read_symbol_ss;
         read_name_ss << trait::name<category::amd_smi_xgmi_read_data>::value << "_" << i;
-        read_symbol_ss << "XgmiRead_" << i;
 
         trace_cache::get_metadata_registry().add_pmc_info(
             { agent_type::GPU, gpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-              read_name_ss.str(), read_symbol_ss.str(),
+              read_name_ss.str(), "XgmiRead",
               trait::name<category::amd_smi_xgmi_read_data>::description,
               LONG_DESCRIPTION, COMPONENT, "KB", rocprofsys::trace_cache::ABSOLUTE, BLOCK,
               EXPRESSION, 0, 0 });
@@ -350,11 +339,10 @@ metadata_initialize_smi_pmc(size_t gpu_id)
         std::stringstream write_name_ss, write_symbol_ss;
         write_name_ss << trait::name<category::amd_smi_xgmi_write_data>::value << "_"
                       << i;
-        write_symbol_ss << "XgmiWrite_" << i;
 
         trace_cache::get_metadata_registry().add_pmc_info(
             { agent_type::GPU, gpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-              write_name_ss.str(), write_symbol_ss.str(),
+              write_name_ss.str(), "XgmiWrite",
               trait::name<category::amd_smi_xgmi_write_data>::description,
               LONG_DESCRIPTION, COMPONENT, "KB", rocprofsys::trace_cache::ABSOLUTE, BLOCK,
               EXPRESSION, 0, 0 });

@@ -4,6 +4,12 @@
 
 Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/](https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/).
 
+## ROCm Systems Profiler 1.5.0 for ROCm x.y.z (unreleased)
+
+### Changed
+
+- Simplify categorizing like pmc_info events by removing the _<idx> from the "symbol" field. ie., "JpegAct_0" -> "JpegAct".
+
 ## ROCm Systems Profiler 1.4.0 for ROCm 7.11.0
 
 ### Added
