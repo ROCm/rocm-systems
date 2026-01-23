@@ -142,9 +142,9 @@ class RocProfCompute_Base:
                     args.remaining.insert(0, sys.executable)
                 else:
                     console_warning(
-                        "Please remove the '--torch-trace' flag if not profiling",
-                        "a PyTorch application.",
-                        "Assuming the workload is user verified."
+                        "Please remove the '--torch-trace' flag if not profiling "
+                        "a PyTorch application. "
+                        "Assuming the workload is user verified. "
                         " Continuing to profile ...",
                     )
                     args.remaining.insert(0, str(inject_script))
