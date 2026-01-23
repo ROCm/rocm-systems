@@ -46,6 +46,7 @@
 #include <optional>
 #include <shared_mutex>
 #include <unordered_map>
+#include <array>
 
 #include "rocm_smi/rocm_smi_kfd_data_manager.h"
 #include "rocm_smi/kfd_ioctl.h"
