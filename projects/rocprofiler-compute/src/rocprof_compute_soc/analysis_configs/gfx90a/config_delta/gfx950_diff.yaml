@@ -695,50 +695,50 @@ Modification:
           title: System Speed-of-Light
           metrics:
             - L2 Cache BW:
-                peak: ((($max_sclk / 1000) * 128) * TO_INT($total_l2_chan))
                 pop: |
                   ((100 * AVG(((TCC_REQ_sum * 128) / (End_Timestamp - Start_Timestamp)))) / ((($max_sclk / 1000) * 128) * TO_INT($total_l2_chan)))
+                peak: ((($max_sclk / 1000) * 128) * TO_INT($total_l2_chan))
             - L2-Fabric Read BW:
-                pop: |
-                  ((100 * (AVG((128 * TCC_BUBBLE_sum + 64 * (TCC_EA0_RDREQ_sum - TCC_BUBBLE_sum - TCC_EA0_RDREQ_32B_sum) + 32 * TCC_EA0_RDREQ_32B_sum) / (End_Timestamp - Start_Timestamp)))) / $hbmBandwidth)
                 value: |
                   AVG((128 * TCC_BUBBLE_sum + 64 * (TCC_EA0_RDREQ_sum - TCC_BUBBLE_sum - TCC_EA0_RDREQ_32B_sum) + 32 * TCC_EA0_RDREQ_32B_sum) / (End_Timestamp - Start_Timestamp))
+                pop: |
+                  ((100 * (AVG((128 * TCC_BUBBLE_sum + 64 * (TCC_EA0_RDREQ_sum - TCC_BUBBLE_sum - TCC_EA0_RDREQ_32B_sum) + 32 * TCC_EA0_RDREQ_32B_sum) / (End_Timestamp - Start_Timestamp)))) / $hbmBandwidth)
             - L2-Fabric Read Latency:
                 value: |
                   AVG(((TCC_EA0_RDREQ_LEVEL_sum / TCC_EA0_RDREQ_sum) if (TCC_EA0_RDREQ_sum != 0) else None))
             - L2-Fabric Write BW:
-                pop: |
-                  ((100 * AVG((((TCC_EA0_WRREQ_64B_sum * 64) + ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) * 32)) / (End_Timestamp - Start_Timestamp)))) / $hbmBandwidth)
                 value: |
                   AVG((((TCC_EA0_WRREQ_64B_sum * 64) + ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) * 32)) / (End_Timestamp - Start_Timestamp)))
+                pop: |
+                  ((100 * AVG((((TCC_EA0_WRREQ_64B_sum * 64) + ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) * 32)) / (End_Timestamp - Start_Timestamp)))) / $hbmBandwidth)
             - L2-Fabric Write Latency:
                 value: |
                   AVG(((TCC_EA0_WRREQ_LEVEL_sum / TCC_EA0_WRREQ_sum) if (TCC_EA0_WRREQ_sum != 0) else None))
             - MFMA FLOPs (BF16):
-                peak: ((($max_sclk * $cu_per_gpu) * 4096) / 1000)
                 pop: |
                   ((100 * AVG(((SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512) / (End_Timestamp - Start_Timestamp)))) / ((($max_sclk * $cu_per_gpu) * 4096) / 1000))
-            - MFMA FLOPs (F16):
                 peak: ((($max_sclk * $cu_per_gpu) * 4096) / 1000)
+            - MFMA FLOPs (F16):
                 pop: |
                   ((100 * AVG(((SQ_INSTS_VALU_MFMA_MOPS_F16 * 512) / (End_Timestamp - Start_Timestamp)))) / ((($max_sclk * $cu_per_gpu) * 4096) / 1000))
+                peak: ((($max_sclk * $cu_per_gpu) * 4096) / 1000)
             - MFMA FLOPs (F64):
-                peak: ((($max_sclk * $cu_per_gpu) * 128) / 1000)
                 pop: |
                   ((100 * AVG(((SQ_INSTS_VALU_MFMA_MOPS_F64 * 512) / (End_Timestamp - Start_Timestamp)))) / ((($max_sclk * $cu_per_gpu) * 128) / 1000))
+                peak: ((($max_sclk * $cu_per_gpu) * 128) / 1000)
             - MFMA IOPs (Int8):
-                peak: ((($max_sclk * $cu_per_gpu) * 8192) / 1000)
                 pop: |
                   ((100 * AVG(((SQ_INSTS_VALU_MFMA_MOPS_I8 * 512) / (End_Timestamp - Start_Timestamp)))) / ((($max_sclk * $cu_per_gpu) * 8192) / 1000))
+                peak: ((($max_sclk * $cu_per_gpu) * 8192) / 1000)
             - VALU Active Threads:
-                peak: $wave_size
                 pop: |
                   (100 * AVG((SQ_THREAD_CYCLES_VALU / SQ_ACTIVE_INST_VALU / $wave_size) if (SQ_ACTIVE_INST_VALU != 0) else None))
+                peak: $wave_size
             - vL1D Cache BW:
-                peak: ((($max_sclk / 1000) * 128) * $cu_per_gpu)
+                value: AVG(((TCP_TOTAL_CACHE_ACCESSES_sum * 128) / (End_Timestamp - Start_Timestamp)))
                 pop: |
                   ((100 * AVG(((TCP_TOTAL_CACHE_ACCESSES_sum * 128) / (End_Timestamp - Start_Timestamp)))) / ((($max_sclk / 1000) * 128) * $cu_per_gpu))
-                value: AVG(((TCP_TOTAL_CACHE_ACCESSES_sum * 128) / (End_Timestamp - Start_Timestamp)))
+                peak: ((($max_sclk / 1000) * 128) * $cu_per_gpu)
   - Panel Config:
       id: 300
       title: Memory Chart
@@ -871,21 +871,21 @@ Modification:
           title: Compute Speed-of-Light
           metrics:
             - MFMA FLOPs (BF16):
-                peak: ((($max_sclk * $cu_per_gpu) * 4096) / 1000)
                 pop: |
                   ((100 * AVG(((SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512) / (End_Timestamp - Start_Timestamp)))) / ((($max_sclk * $cu_per_gpu) * 4096) / 1000))
-            - MFMA FLOPs (F16):
                 peak: ((($max_sclk * $cu_per_gpu) * 4096) / 1000)
+            - MFMA FLOPs (F16):
                 pop: |
                   ((100 * AVG(((SQ_INSTS_VALU_MFMA_MOPS_F16 * 512) / (End_Timestamp - Start_Timestamp)))) / ((($max_sclk * $cu_per_gpu) * 4096) / 1000))
+                peak: ((($max_sclk * $cu_per_gpu) * 4096) / 1000)
             - MFMA FLOPs (F64):
-                peak: ((($max_sclk * $cu_per_gpu) * 128) / 1000)
                 pop: |
                   ((100 * AVG(((SQ_INSTS_VALU_MFMA_MOPS_F64 * 512) / (End_Timestamp - Start_Timestamp)))) / ((($max_sclk * $cu_per_gpu) * 128) / 1000))
+                peak: ((($max_sclk * $cu_per_gpu) * 128) / 1000)
             - MFMA IOPs (INT8):
-                peak: ((($max_sclk * $cu_per_gpu) * 8192) / 1000)
                 pop: |
                   ((100 * AVG(((SQ_INSTS_VALU_MFMA_MOPS_I8 * 512) / (End_Timestamp - Start_Timestamp)))) / ((($max_sclk * $cu_per_gpu) * 8192) / 1000))
+                peak: ((($max_sclk * $cu_per_gpu) * 8192) / 1000)
       - metric_table:
           id: 1103
           title: Arithmetic Operations
@@ -927,10 +927,10 @@ Modification:
                 max: MAX(((TCP_TOTAL_CACHE_ACCESSES_sum * 128) / (End_Timestamp - Start_Timestamp)))
                 min: MIN(((TCP_TOTAL_CACHE_ACCESSES_sum * 128) / (End_Timestamp - Start_Timestamp)))
             - L1 Access Latency:
+                unit: (Cycles + $normUnit)
                 avg: AVG((TCP_TCP_LATENCY_sum / $denom))
                 max: MAX((TCP_TCP_LATENCY_sum / $denom))
                 min: MIN((TCP_TCP_LATENCY_sum / $denom))
-                unit: (Cycles + $normUnit)
             - L1-L2 BW:
                 avg: |
                   AVG(((128 * TCP_TCC_READ_REQ_sum + 64 * (TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / (End_Timestamp - Start_Timestamp)))
@@ -939,15 +939,15 @@ Modification:
                 min: |
                   MIN(((128 * TCP_TCC_READ_REQ_sum + 64 * (TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / (End_Timestamp - Start_Timestamp)))
             - L1-L2 Read Latency:
+                unit: (Cycles + $normUnit)
                 avg: AVG((TCP_TCC_READ_REQ_LATENCY_sum / $denom))
                 max: MAX((TCP_TCC_READ_REQ_LATENCY_sum / $denom))
                 min: MIN((TCP_TCC_READ_REQ_LATENCY_sum / $denom))
-                unit: (Cycles + $normUnit)
             - L1-L2 Write Latency:
+                unit: (Cycles + $normUnit)
                 avg: AVG((TCP_TCC_WRITE_REQ_LATENCY_sum / $denom))
                 max: MAX((TCP_TCC_WRITE_REQ_LATENCY_sum / $denom))
                 min: MIN((TCP_TCC_WRITE_REQ_LATENCY_sum / $denom))
-                unit: (Cycles + $normUnit)
   - Panel Config:
       id: 1700
       title: L2 Cache
@@ -1010,18 +1010,18 @@ Modification:
                   MIN(((TCC_EA0_RDREQ_LEVEL_sum / TCC_EA0_RDREQ_sum) if (TCC_EA0_RDREQ_sum != 0) else None))
             - Remote Read Traffic:
                 avg: |
-                  AVG((100 * (MAX((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum), 0) / TCC_EA0_RDREQ_sum) if (TCC_EA0_RDREQ_sum != 0) else None))
+                  AVG((100 * (NOISE_CLAMP((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum), TCC_EA0_RDREQ_sum) / TCC_EA0_RDREQ_sum) if (TCC_EA0_RDREQ_sum != 0) else None))
                 max: |
-                  MAX((100 * (MAX((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum), 0) / TCC_EA0_RDREQ_sum) if (TCC_EA0_RDREQ_sum != 0) else None))
+                  MAX((100 * (NOISE_CLAMP((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum), TCC_EA0_RDREQ_sum) / TCC_EA0_RDREQ_sum) if (TCC_EA0_RDREQ_sum != 0) else None))
                 min: |
-                  MIN((100 * (MAX((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum), 0) / TCC_EA0_RDREQ_sum) if (TCC_EA0_RDREQ_sum != 0) else None))
+                  MIN((100 * (NOISE_CLAMP((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum), TCC_EA0_RDREQ_sum) / TCC_EA0_RDREQ_sum) if (TCC_EA0_RDREQ_sum != 0) else None))
             - Remote Write and Atomic Traffic:
                 avg: |
-                  AVG((100 * (MAX((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum),0) / TCC_EA0_WRREQ_sum) if (TCC_EA0_WRREQ_sum != 0) else None))
+                  AVG((100 * (NOISE_CLAMP((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum), TCC_EA0_WRREQ_sum) / TCC_EA0_WRREQ_sum) if (TCC_EA0_WRREQ_sum != 0) else None))
                 max: |
-                  MAX((100 * (MAX((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum),0) / TCC_EA0_WRREQ_sum) if (TCC_EA0_WRREQ_sum != 0) else None))
+                  MAX((100 * (NOISE_CLAMP((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum), TCC_EA0_WRREQ_sum) / TCC_EA0_WRREQ_sum) if (TCC_EA0_WRREQ_sum != 0) else None))
                 min: |
-                  MIN((100 * (MAX((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum),0) / TCC_EA0_WRREQ_sum) if (TCC_EA0_WRREQ_sum != 0) else None))
+                  MIN((100 * (NOISE_CLAMP((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum), TCC_EA0_WRREQ_sum) / TCC_EA0_WRREQ_sum) if (TCC_EA0_WRREQ_sum != 0) else None))
             - Uncached Read Traffic:
                 avg: |
                   AVG((100 * (TCC_EA0_RD_UNCACHED_32B_sum / TCC_EA0_RDREQ_sum) if (TCC_EA0_RDREQ_sum != 0) else None))
@@ -1037,13 +1037,13 @@ Modification:
                 min: |
                   MIN((100 * (TCC_EA0_WR_UNCACHED_32B_sum / TCC_EA0_WRREQ_sum) if (TCC_EA0_WRREQ_sum != 0) else None))
             - Write and Atomic BW:
+                unit: Gbps
                 avg: |
                   AVG((((TCC_EA0_WRREQ_64B_sum * 64) + ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) * 32)) / (End_Timestamp - Start_Timestamp)))
                 max: |
                   MAX((((TCC_EA0_WRREQ_64B_sum * 64) + ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) * 32)) / (End_Timestamp - Start_Timestamp)))
                 min: |
                   MIN((((TCC_EA0_WRREQ_64B_sum * 64) + ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) * 32)) / (End_Timestamp - Start_Timestamp)))
-                unit: Gbps
             - Write and Atomic Latency:
                 avg: |
                   AVG(((TCC_EA0_WRREQ_LEVEL_sum / TCC_EA0_WRREQ_sum) if (TCC_EA0_WRREQ_sum != 0) else None))
@@ -1080,17 +1080,26 @@ Modification:
                 max: MAX((TCC_EA0_RD_UNCACHED_32B_sum / $denom))
                 min: MIN((TCC_EA0_RD_UNCACHED_32B_sum / $denom))
             - Remote Read:
-                avg: AVG((MAX((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum), 0) / $denom))
-                max: MAX((MAX((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum), 0) / $denom))
-                min: MIN((MAX((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum), 0) / $denom))
+                avg: |
+                  AVG((NOISE_CLAMP((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum), TCC_EA0_RDREQ_sum) / $denom))
+                max: |
+                  MAX((NOISE_CLAMP((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum), TCC_EA0_RDREQ_sum) / $denom))
+                min: |
+                  MIN((NOISE_CLAMP((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum), TCC_EA0_RDREQ_sum) / $denom))
             - Remote Write and Atomic:
-                avg: AVG((MAX((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum), 0) / $denom))
-                max: MAX((MAX((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum), 0) / $denom))
-                min: MIN((MAX((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum), 0) / $denom))
+                avg: |
+                  AVG((NOISE_CLAMP((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum), TCC_EA0_WRREQ_sum) / $denom))
+                max: |
+                  MAX((NOISE_CLAMP((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum), TCC_EA0_WRREQ_sum) / $denom))
+                min: |
+                  MIN((NOISE_CLAMP((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum), TCC_EA0_WRREQ_sum) / $denom))
             - Write and Atomic (32B):
-                avg: AVG(MAX(((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) / $denom), 0))
-                max: MAX(MAX(((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) / $denom), 0))
-                min: MIN(MAX(((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) / $denom), 0))
+                avg: |
+                  AVG(NOISE_CLAMP(((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) / $denom), TCC_EA0_WRREQ_sum))
+                max: |
+                  MAX(NOISE_CLAMP(((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) / $denom), TCC_EA0_WRREQ_sum))
+                min: |
+                  MIN(NOISE_CLAMP(((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) / $denom), TCC_EA0_WRREQ_sum))
             - Write and Atomic (64B):
                 avg: AVG((TCC_EA0_WRREQ_64B_sum / $denom))
                 max: MAX((TCC_EA0_WRREQ_64B_sum / $denom))
@@ -1110,10 +1119,10 @@ Modification:
             - L2 Cache Hit Rate:
                 std dev: |
                   STD(((((((((((((((((100 * TCC_HIT[0]) + (100 * TCC_HIT[1])) + (100 * TCC_HIT[2])) + (100 * TCC_HIT[3])) + (100 * TCC_HIT[4])) + (100 * TCC_HIT[5])) + (100 * TCC_HIT[6])) + (100 * TCC_HIT[7])) + (100 * TCC_HIT[8])) + (100 * TCC_HIT[9])) + (100 * TCC_HIT[10])) + (100 * TCC_HIT[11])) + (100 * TCC_HIT[12])) + (100 * TCC_HIT[13])) + (100 * TCC_HIT[14])) + (100 * TCC_HIT[15])) / (((((((((((((((((TCC_MISS[0] + TCC_HIT[0]) + (TCC_MISS[1] + TCC_HIT[1])) + (TCC_MISS[2] + TCC_HIT[2])) + (TCC_MISS[3] + TCC_HIT[3])) + (TCC_MISS[4] + TCC_HIT[4])) + (TCC_MISS[5] + TCC_HIT[5])) + (TCC_MISS[6] + TCC_HIT[6])) + (TCC_MISS[7] + TCC_HIT[7])) + (TCC_MISS[8] + TCC_HIT[8])) + (TCC_MISS[9] + TCC_HIT[9])) + (TCC_MISS[10] + TCC_HIT[10])) + (TCC_MISS[11] + TCC_HIT[11])) + (TCC_MISS[12] + TCC_HIT[12])) + (TCC_MISS[13] + TCC_HIT[13])) + (TCC_MISS[14] + TCC_HIT[14])) + (TCC_MISS[15] + TCC_HIT[15]))) if (((((((((((((((((TCC_MISS[0] + TCC_HIT[0]) + (TCC_MISS[1] + TCC_HIT[1])) + (TCC_MISS[2] + TCC_HIT[2])) + (TCC_MISS[3] + TCC_HIT[3])) + (TCC_MISS[4] + TCC_HIT[4])) + (TCC_MISS[5] + TCC_HIT[5])) + (TCC_MISS[6] + TCC_HIT[6])) + (TCC_MISS[7] + TCC_HIT[7])) + (TCC_MISS[8] + TCC_HIT[8])) + (TCC_MISS[9] + TCC_HIT[9])) + (TCC_MISS[10] + TCC_HIT[10])) + (TCC_MISS[11] + TCC_HIT[11])) + (TCC_MISS[12] + TCC_HIT[12])) + (TCC_MISS[13] + TCC_HIT[13])) + (TCC_MISS[14] + TCC_HIT[14])) + (TCC_MISS[15] + TCC_HIT[15])) != 0) else None)
-                max: |
-                  MAX(((((((((((((((((100 * TCC_HIT[0]) + (100 * TCC_HIT[1])) + (100 * TCC_HIT[2])) + (100 * TCC_HIT[3])) + (100 * TCC_HIT[4])) + (100 * TCC_HIT[5])) + (100 * TCC_HIT[6])) + (100 * TCC_HIT[7])) + (100 * TCC_HIT[8])) + (100 * TCC_HIT[9])) + (100 * TCC_HIT[10])) + (100 * TCC_HIT[11])) + (100 * TCC_HIT[12])) + (100 * TCC_HIT[13])) + (100 * TCC_HIT[14])) + (100 * TCC_HIT[15])) / (((((((((((((((((TCC_MISS[0] + TCC_HIT[0]) + (TCC_MISS[1] + TCC_HIT[1])) + (TCC_MISS[2] + TCC_HIT[2])) + (TCC_MISS[3] + TCC_HIT[3])) + (TCC_MISS[4] + TCC_HIT[4])) + (TCC_MISS[5] + TCC_HIT[5])) + (TCC_MISS[6] + TCC_HIT[6])) + (TCC_MISS[7] + TCC_HIT[7])) + (TCC_MISS[8] + TCC_HIT[8])) + (TCC_MISS[9] + TCC_HIT[9])) + (TCC_MISS[10] + TCC_HIT[10])) + (TCC_MISS[11] + TCC_HIT[11])) + (TCC_MISS[12] + TCC_HIT[12])) + (TCC_MISS[13] + TCC_HIT[13])) + (TCC_MISS[14] + TCC_HIT[14])) + (TCC_MISS[15] + TCC_HIT[15]))) if (((((((((((((((((TCC_MISS[0] + TCC_HIT[0]) + (TCC_MISS[1] + TCC_HIT[1])) + (TCC_MISS[2] + TCC_HIT[2])) + (TCC_MISS[3] + TCC_HIT[3])) + (TCC_MISS[4] + TCC_HIT[4])) + (TCC_MISS[5] + TCC_HIT[5])) + (TCC_MISS[6] + TCC_HIT[6])) + (TCC_MISS[7] + TCC_HIT[7])) + (TCC_MISS[8] + TCC_HIT[8])) + (TCC_MISS[9] + TCC_HIT[9])) + (TCC_MISS[10] + TCC_HIT[10])) + (TCC_MISS[11] + TCC_HIT[11])) + (TCC_MISS[12] + TCC_HIT[12])) + (TCC_MISS[13] + TCC_HIT[13])) + (TCC_MISS[14] + TCC_HIT[14])) + (TCC_MISS[15] + TCC_HIT[15])) != 0) else None)
                 avg: |
                   AVG(((((((((((((((((100 * TCC_HIT[0]) + (100 * TCC_HIT[1])) + (100 * TCC_HIT[2])) + (100 * TCC_HIT[3])) + (100 * TCC_HIT[4])) + (100 * TCC_HIT[5])) + (100 * TCC_HIT[6])) + (100 * TCC_HIT[7])) + (100 * TCC_HIT[8])) + (100 * TCC_HIT[9])) + (100 * TCC_HIT[10])) + (100 * TCC_HIT[11])) + (100 * TCC_HIT[12])) + (100 * TCC_HIT[13])) + (100 * TCC_HIT[14])) + (100 * TCC_HIT[15])) / (((((((((((((((((TCC_MISS[0] + TCC_HIT[0]) + (TCC_MISS[1] + TCC_HIT[1])) + (TCC_MISS[2] + TCC_HIT[2])) + (TCC_MISS[3] + TCC_HIT[3])) + (TCC_MISS[4] + TCC_HIT[4])) + (TCC_MISS[5] + TCC_HIT[5])) + (TCC_MISS[6] + TCC_HIT[6])) + (TCC_MISS[7] + TCC_HIT[7])) + (TCC_MISS[8] + TCC_HIT[8])) + (TCC_MISS[9] + TCC_HIT[9])) + (TCC_MISS[10] + TCC_HIT[10])) + (TCC_MISS[11] + TCC_HIT[11])) + (TCC_MISS[12] + TCC_HIT[12])) + (TCC_MISS[13] + TCC_HIT[13])) + (TCC_MISS[14] + TCC_HIT[14])) + (TCC_MISS[15] + TCC_HIT[15]))) if (((((((((((((((((TCC_MISS[0] + TCC_HIT[0]) + (TCC_MISS[1] + TCC_HIT[1])) + (TCC_MISS[2] + TCC_HIT[2])) + (TCC_MISS[3] + TCC_HIT[3])) + (TCC_MISS[4] + TCC_HIT[4])) + (TCC_MISS[5] + TCC_HIT[5])) + (TCC_MISS[6] + TCC_HIT[6])) + (TCC_MISS[7] + TCC_HIT[7])) + (TCC_MISS[8] + TCC_HIT[8])) + (TCC_MISS[9] + TCC_HIT[9])) + (TCC_MISS[10] + TCC_HIT[10])) + (TCC_MISS[11] + TCC_HIT[11])) + (TCC_MISS[12] + TCC_HIT[12])) + (TCC_MISS[13] + TCC_HIT[13])) + (TCC_MISS[14] + TCC_HIT[14])) + (TCC_MISS[15] + TCC_HIT[15])) != 0) else None)
+                max: |
+                  MAX(((((((((((((((((100 * TCC_HIT[0]) + (100 * TCC_HIT[1])) + (100 * TCC_HIT[2])) + (100 * TCC_HIT[3])) + (100 * TCC_HIT[4])) + (100 * TCC_HIT[5])) + (100 * TCC_HIT[6])) + (100 * TCC_HIT[7])) + (100 * TCC_HIT[8])) + (100 * TCC_HIT[9])) + (100 * TCC_HIT[10])) + (100 * TCC_HIT[11])) + (100 * TCC_HIT[12])) + (100 * TCC_HIT[13])) + (100 * TCC_HIT[14])) + (100 * TCC_HIT[15])) / (((((((((((((((((TCC_MISS[0] + TCC_HIT[0]) + (TCC_MISS[1] + TCC_HIT[1])) + (TCC_MISS[2] + TCC_HIT[2])) + (TCC_MISS[3] + TCC_HIT[3])) + (TCC_MISS[4] + TCC_HIT[4])) + (TCC_MISS[5] + TCC_HIT[5])) + (TCC_MISS[6] + TCC_HIT[6])) + (TCC_MISS[7] + TCC_HIT[7])) + (TCC_MISS[8] + TCC_HIT[8])) + (TCC_MISS[9] + TCC_HIT[9])) + (TCC_MISS[10] + TCC_HIT[10])) + (TCC_MISS[11] + TCC_HIT[11])) + (TCC_MISS[12] + TCC_HIT[12])) + (TCC_MISS[13] + TCC_HIT[13])) + (TCC_MISS[14] + TCC_HIT[14])) + (TCC_MISS[15] + TCC_HIT[15]))) if (((((((((((((((((TCC_MISS[0] + TCC_HIT[0]) + (TCC_MISS[1] + TCC_HIT[1])) + (TCC_MISS[2] + TCC_HIT[2])) + (TCC_MISS[3] + TCC_HIT[3])) + (TCC_MISS[4] + TCC_HIT[4])) + (TCC_MISS[5] + TCC_HIT[5])) + (TCC_MISS[6] + TCC_HIT[6])) + (TCC_MISS[7] + TCC_HIT[7])) + (TCC_MISS[8] + TCC_HIT[8])) + (TCC_MISS[9] + TCC_HIT[9])) + (TCC_MISS[10] + TCC_HIT[10])) + (TCC_MISS[11] + TCC_HIT[11])) + (TCC_MISS[12] + TCC_HIT[12])) + (TCC_MISS[13] + TCC_HIT[13])) + (TCC_MISS[14] + TCC_HIT[14])) + (TCC_MISS[15] + TCC_HIT[15])) != 0) else None)
                 min: |
                   MIN(((((((((((((((((100 * TCC_HIT[0]) + (100 * TCC_HIT[1])) + (100 * TCC_HIT[2])) + (100 * TCC_HIT[3])) + (100 * TCC_HIT[4])) + (100 * TCC_HIT[5])) + (100 * TCC_HIT[6])) + (100 * TCC_HIT[7])) + (100 * TCC_HIT[8])) + (100 * TCC_HIT[9])) + (100 * TCC_HIT[10])) + (100 * TCC_HIT[11])) + (100 * TCC_HIT[12])) + (100 * TCC_HIT[13])) + (100 * TCC_HIT[14])) + (100 * TCC_HIT[15])) / (((((((((((((((((TCC_MISS[0] + TCC_HIT[0]) + (TCC_MISS[1] + TCC_HIT[1])) + (TCC_MISS[2] + TCC_HIT[2])) + (TCC_MISS[3] + TCC_HIT[3])) + (TCC_MISS[4] + TCC_HIT[4])) + (TCC_MISS[5] + TCC_HIT[5])) + (TCC_MISS[6] + TCC_HIT[6])) + (TCC_MISS[7] + TCC_HIT[7])) + (TCC_MISS[8] + TCC_HIT[8])) + (TCC_MISS[9] + TCC_HIT[9])) + (TCC_MISS[10] + TCC_HIT[10])) + (TCC_MISS[11] + TCC_HIT[11])) + (TCC_MISS[12] + TCC_HIT[12])) + (TCC_MISS[13] + TCC_HIT[13])) + (TCC_MISS[14] + TCC_HIT[14])) + (TCC_MISS[15] + TCC_HIT[15]))) if (((((((((((((((((TCC_MISS[0] + TCC_HIT[0]) + (TCC_MISS[1] + TCC_HIT[1])) + (TCC_MISS[2] + TCC_HIT[2])) + (TCC_MISS[3] + TCC_HIT[3])) + (TCC_MISS[4] + TCC_HIT[4])) + (TCC_MISS[5] + TCC_HIT[5])) + (TCC_MISS[6] + TCC_HIT[6])) + (TCC_MISS[7] + TCC_HIT[7])) + (TCC_MISS[8] + TCC_HIT[8])) + (TCC_MISS[9] + TCC_HIT[9])) + (TCC_MISS[10] + TCC_HIT[10])) + (TCC_MISS[11] + TCC_HIT[11])) + (TCC_MISS[12] + TCC_HIT[12])) + (TCC_MISS[13] + TCC_HIT[13])) + (TCC_MISS[14] + TCC_HIT[14])) + (TCC_MISS[15] + TCC_HIT[15])) != 0) else None)
       - metric_table:
@@ -1150,14 +1159,14 @@ Modification:
           title: L2-Fabric Read Stall (Cycles per normUnit)
           metrics:
             - ::_1:
-                ea read stall - pcie: AVG((TO_INT(TCC_EA0_RDREQ_IO_CREDIT_STALL[::_1]) / $denom))
-                ea read stall - if: AVG((TO_INT(TCC_EA0_RDREQ_GMI_CREDIT_STALL[::_1]) / $denom))
                 ea read stall - hbm: AVG((TO_INT(TCC_EA0_RDREQ_DRAM_CREDIT_STALL[::_1]) / $denom))
+                ea read stall - if: AVG((TO_INT(TCC_EA0_RDREQ_GMI_CREDIT_STALL[::_1]) / $denom))
+                ea read stall - pcie: AVG((TO_INT(TCC_EA0_RDREQ_IO_CREDIT_STALL[::_1]) / $denom))
       - metric_table:
           id: 1810
           title: L2-Fabric Write and Atomic Stall (Cycles per normUnit)
           metrics:
             - ::_1:
-                ea write stall - hbm: AVG((TO_INT(TCC_EA0_WRREQ_DRAM_CREDIT_STALL[::_1]) / $denom))
-                ea write stall - if: AVG((TO_INT(TCC_EA0_WRREQ_GMI_CREDIT_STALL[::_1]) / $denom))
                 ea write stall - pcie: AVG((TO_INT(TCC_EA0_WRREQ_IO_CREDIT_STALL[::_1]) / $denom))
+                ea write stall - if: AVG((TO_INT(TCC_EA0_WRREQ_GMI_CREDIT_STALL[::_1]) / $denom))
+                ea write stall - hbm: AVG((TO_INT(TCC_EA0_WRREQ_DRAM_CREDIT_STALL[::_1]) / $denom))
