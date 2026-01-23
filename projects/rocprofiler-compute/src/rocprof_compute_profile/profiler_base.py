@@ -146,10 +146,12 @@ class RocProfCompute_Base:
                     args.remaining.insert(0, sys.executable)
                 else:
                     console_warning(
-                        "Command does not look like a Python entry point; skipping ROCTX auto-injection and launching workload as-is."
+                        "Command does not look like a Python entry point, "
+                        "skipping ROCTX auto-injection and launching workload as-is."
                     )
                     console_warning(
-                        "Ensure the binary already initializes PyTorch/ROCTX markers; otherwise --torch-trace will have no effect."
+                        "Ensure the binary already initializes PyTorch/ROCTX markers, "
+                        "otherwise --torch-trace will have no effect."
                     )
 
                 if (
@@ -159,9 +161,9 @@ class RocProfCompute_Base:
                     console_warning(
                         "Workload appears to be a self-contained binary. "
                         "Such bundles typically ship private ROCm/HSA libraries, which "
-                        "prevents --torch-trace from collecting data. Rebuild without "
-                        "packaging libhsa/libhip (or adjust LD_LIBRARY_PATH to /opt/rocm) "
-                        "before profiling."
+                        "prevents --torch-trace from collecting data."
+                        "Rebuild without packaging libhsa/libhip or "
+                        "adjust LD_LIBRARY_PATH to /opt/rocm) before profiling."
                     )
             args.remaining = " ".join(args.remaining)
         elif not args.attach_pid:

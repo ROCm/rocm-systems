@@ -1307,7 +1307,11 @@ def process_torch_trace_output(
         )
         return
     # Join marker and counter data
-    def _merge_pair(marker_path: Path, counter_path: Path, join_keys: list = ["Correlation_Id"]) -> pd.DataFrame:
+    def _merge_pair(
+            marker_path: Path,
+            counter_path: Path,
+            join_keys: list = ["Correlation_Id"],
+            ) -> pd.DataFrame:
         marker_df = pd.read_csv(marker_path)
         counter_df = pd.read_csv(counter_path)
         return pd.merge(
@@ -1324,7 +1328,8 @@ def process_torch_trace_output(
         )
     elif output_format == "rocpd":
         # There will one pair of csv files extracted from rocpd db and consolidated.
-        merged_results = _merge_pair(existing_csv_files[0][0], existing_csv_files[0][1], ["Correlation_Id", "GUID"])
+        merged_results = _merge_pair(existing_csv_files[0][0], existing_csv_files[0][1],
+                                      ["Correlation_Id", "GUID"])
     # Save merged results
     merged_results.to_csv(
         f"{workload_dir}/{fbase}_torch_trace.csv",
