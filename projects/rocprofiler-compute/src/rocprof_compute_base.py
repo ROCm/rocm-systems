@@ -202,7 +202,7 @@ class RocProfCompute:
         ).replace("%gpumodel%", self.__mspec.gpu_model)
 
         # Replace environment variables in workload path
-        self.__args.poutput_directory = replace_env(self.__args.output_directory)
+        self.__args.output_directory = replace_env(self.__args.output_directory)
 
         # Replace %rank% with actual rank value in workload path
         self.__args.output_directory = replace_rank(self.__args.output_directory)
