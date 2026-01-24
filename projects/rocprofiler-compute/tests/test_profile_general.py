@@ -2989,5 +2989,6 @@ if __name__ == "__main__":
         f"Kernel execution overhead too high: {kernel_overhead:.1f}%"
     )
     assert longest_running_kernel_overhead < 50, (
-        f"Worst-case single kernel increase too high: {longest_running_kernel_overhead:.1f}%"
+        f"longest running kernel increase too high: "
+        f"{longest_running_kernel_overhead:.1f}%"
     )
