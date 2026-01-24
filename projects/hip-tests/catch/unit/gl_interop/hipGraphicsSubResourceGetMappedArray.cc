@@ -81,7 +81,7 @@ TEST_CASE("Unit_hipGraphicsSubResourceGetMappedArray_Negative_Parameters") {
   hipArray_t image_devptr = nullptr;
 
   SECTION("array == nullptr") {
-    HIP_CHECK(hipGraphicsSubResourceGetMappedArray(nullptr, tex_resource, 0, 0));
+    HIP_CHECK_ERROR(hipGraphicsSubResourceGetMappedArray(nullptr, tex_resource, 0, 0), hipErrorInvalidValue);
   }
 
   SECTION("non-texture resource") {
@@ -105,7 +105,7 @@ TEST_CASE("Unit_hipGraphicsSubResourceGetMappedArray_Negative_Parameters") {
     HIP_CHECK(hipGraphicsUnregisterResource(unregistered_resource));
     HIP_CHECK_ERROR(
         hipGraphicsSubResourceGetMappedArray(&image_devptr, unregistered_resource, 0, 0),
-        hipErrorContextIsDestroyed);
+        hipErrorInvalidHandle);
   }
 
   SECTION("not mapped resource") {

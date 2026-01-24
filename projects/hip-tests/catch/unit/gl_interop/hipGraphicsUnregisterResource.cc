@@ -40,18 +40,23 @@ TEST_CASE("Unit_hipGraphicsUnregisterResource_Negative_Parameters") {
 
   GLBufferObject vbo;
 
-  SECTION("already unregistered resource") {
+  SECTION("null resource") {
+    hipGraphicsResource* null_resource = nullptr;
+    HIP_CHECK_ERROR(hipGraphicsUnregisterResource(null_resource), hipErrorInvalidValue);
+  }
+
+    SECTION("already unregistered resource") {
     hipGraphicsResource* unregistered_resource;
     HIP_CHECK(
         hipGraphicsGLRegisterBuffer(&unregistered_resource, vbo, hipGraphicsRegisterFlagsNone));
     HIP_CHECK(hipGraphicsUnregisterResource(unregistered_resource));
-    HIP_CHECK_ERROR(hipGraphicsUnregisterResource(unregistered_resource), hipErrorInvalidContext);
+    HIP_CHECK_ERROR(hipGraphicsUnregisterResource(unregistered_resource), hipErrorInvalidHandle);
   }
 
   SECTION("mapped resource") {
     hipGraphicsResource* mapped_resource;
     HIP_CHECK(hipGraphicsGLRegisterBuffer(&mapped_resource, vbo, hipGraphicsRegisterFlagsNone));
     HIP_CHECK(hipGraphicsMapResources(1, &mapped_resource, 0));
-    HIP_CHECK_ERROR(hipGraphicsUnregisterResource(mapped_resource), hipErrorAlreadyMapped);
+    HIP_CHECK_ERROR(hipGraphicsUnregisterResource(mapped_resource), hipErrorArrayIsMapped);
   }
 }
