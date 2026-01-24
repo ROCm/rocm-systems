@@ -30,7 +30,6 @@
 #include "lib/rocprofiler-sdk/hsa/queue_info_session.hpp"
 
 #include <rocprofiler-sdk/experimental/spm.h>
-#include <rocprofiler-sdk/intercept_table.h>
 #include <rocprofiler-sdk/cxx/hash.hpp>
 #include <rocprofiler-sdk/cxx/operators.hpp>
 
@@ -77,7 +76,6 @@ struct spm_counter_config
     // A packet cache of AQL packets. This allows reuse of AQL packets (preventing costly
     // allocation of new packets/destruction).
     
-
     bool valid() const
     {
         return sample_freq != 0 && buffer_size != 0 && timeout != 0 && !metrics.empty();
@@ -86,6 +84,7 @@ struct spm_counter_config
 
 struct spm_callback_data
 {
+    bool                                             is_profiling{false};
     rocprofiler_spm_dispatch_counting_record_cb_t    record_cb{};
     rocprofiler_spm_dispatch_counting_service_data_t dispatch_data{};
     rocprofiler_user_data_t*                         user_data;
@@ -113,11 +112,11 @@ struct spm_counter_callback_info
     const context::context*                       internal_context;
     rocprofiler_spm_dispatch_counting_record_cb_t record_callback;
     void*                                         record_callback_args;
+    static rocprofiler_status_t setup_spm_counter_config(std::shared_ptr<spm_counter_config>&);
 
     common::Synchronized<
         std::unordered_map<rocprofiler::hsa::AQLPacket*, std::shared_ptr<spm_counter_config>>>
                                 packet_return_map{};
-    static rocprofiler_status_t setup_spm_counter_config(std::shared_ptr<spm_counter_config>&);
     
 };
 
@@ -151,17 +150,17 @@ public:
     std::shared_ptr<spm_counter_config> get_profile_cfg(rocprofiler_spm_counter_config_id_t id);
 
     void state_map_fini();
+    
     common::Synchronized<
         std::unordered_map<uint64_t, std::deque<std::unique_ptr<enqueue_dispatch_config_state>>>>
         _agent_state_map;
-    common::Synchronized<std::unordered_map<uint64_t, std::unique_ptr<spm_callback_data>>>
-        _current_dispatch_data;
+    common::Synchronized<std::unordered_map<uint64_t, std::deque<std::unique_ptr<spm_callback_data>>>>
+      _callback_data;
 
 private:
     // Cache to contain the map of config id handle to spm counter config
     common::Synchronized<std::unordered_map<uint64_t, std::shared_ptr<spm_counter_config>>>
                                                            _configs;
-    common::Synchronized<std::set<rocprofiler_agent_id_t>> spm_kfd_agents;
 };
 
 SpmCounterController&
@@ -182,10 +181,6 @@ configure_callback_spm_dispatch(rocprofiler_context_id_t                       c
                                 void*                                          callback_data_args,
                                 rocprofiler_spm_dispatch_counting_record_cb_t  record_callback,
                                 void* record_callback_args);
-
-bool
-is_spm_explicitly_enabled();
-
 /*
  * start dispatch SPM context
  */

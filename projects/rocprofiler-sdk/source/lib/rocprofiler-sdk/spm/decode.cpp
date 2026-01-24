@@ -93,14 +93,15 @@ aql_data_callback(size_t buffer_id, void* data, size_t data_size, int flags, voi
     auto agent_id = rocprofiler::agent::get_rocprofiler_agent(
                         *CHECK_NOTNULL(static_cast<hsa_agent_t*>(userdata)))
                         ->id;
+    
     spm_get_controller()._agent_state_map.rlock([&](const auto& map) {
         auto it    = map.find(agent_id.handle);
         spm_packet = it->second.front()->spm_packet.get();
     });
 
-    spm_get_controller()._current_dispatch_data.rlock([&](const auto& map) {
-        auto it       = map.find(agent_id.handle);
-        callback_data = it->second.get();
+    spm_get_controller()._callback_data.wlock([&](auto& map) {
+        auto it = map.find(agent_id.handle);
+        callback_data = it->second.front().get();
     });
 
     if(data_size == 0) return;
