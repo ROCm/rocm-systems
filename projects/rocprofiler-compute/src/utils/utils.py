@@ -1277,15 +1277,13 @@ def process_torch_trace_output(
     workload_dir: str,
     fbase: str,
     output_format: str = "rocpd",
-    marker_trace_csv_file_path: str = None,
 ) -> None:
     """
     Creates PyTorch operator trace from counter_collection and marker_api_trace data.
         - Performs inner join on Correlation_Id, filtering out unmatched entries
         - Output file is saved to workload root, not the temporary out/ directory
     """
-    if not marker_trace_csv_file_path:
-        marker_trace_csv_file_path = f"{workload_dir}/out/pmc_1/"
+    marker_trace_csv_file_path = f"{workload_dir}/out/pmc_1/"
     # Find all marker_api_trace CSV files
     marker_api_trace_csvs = list(
         Path(marker_trace_csv_file_path).glob("**/*_marker_api_trace.csv")
@@ -1310,7 +1308,7 @@ def process_torch_trace_output(
     def _merge_pair(
         marker_path: Path,
         counter_path: Path,
-        join_keys: list = ["Correlation_Id"],
+        join_keys: list = ("Correlation_Id"),
     ) -> pd.DataFrame:
         marker_df = pd.read_csv(marker_path)
         counter_df = pd.read_csv(counter_path)
@@ -1332,7 +1330,7 @@ def process_torch_trace_output(
         merged_results = _merge_pair(
             existing_csv_files[0][0],
             existing_csv_files[0][1],
-            ["Correlation_Id", "GUID"],
+            ("Correlation_Id", "GUID"),
         )
     # Save merged results
     merged_results.to_csv(
