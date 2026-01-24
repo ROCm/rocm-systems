@@ -87,7 +87,7 @@ static_assert(static_cast<uint32_t>(device::Memory::MemAccess::kMemAccessReadWri
 
 namespace amd {
 
-amd::Monitor Device::lockP2P_("Lock P2P ON/OFF");
+amd::Monitor Device::lockP2P_{true};
 std::pair<const Isa*, const Isa*> Isa::supportedIsas() {
   constexpr amd::Isa::Feature NONE = amd::Isa::Feature::Unsupported;
   constexpr amd::Isa::Feature ANY = amd::Isa::Feature::Any;
