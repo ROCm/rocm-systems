@@ -53,6 +53,7 @@ for candidate in candidate_paths:
 
 try:
     import torch
+    console_log(f"PyTorch version: {torch.__version__}")
 except ImportError:
     console_warning(
         "PyTorch is not installed or not properly configured.\n"
