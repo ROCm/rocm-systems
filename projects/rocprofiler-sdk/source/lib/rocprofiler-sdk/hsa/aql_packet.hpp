@@ -83,7 +83,7 @@ public:
     {
         before_krn_pkt.clear();
         after_krn_pkt.clear();
-        before_krn_barrier_pkt.clear();
+       
     }
     bool isEmpty() const { return empty; }
 
@@ -96,7 +96,7 @@ public:
 
     common::container::small_vector<hsa_ext_amd_aql_pm4_packet_t, 3> before_krn_pkt         = {};
     common::container::small_vector<hsa_ext_amd_aql_pm4_packet_t, 2> after_krn_pkt          = {};
-    common::container::small_vector<hsa_barrier_and_packet_t, 2>     before_krn_barrier_pkt = {};
+   
 };
 
 class EmptyAQLPacket : public AQLPacket

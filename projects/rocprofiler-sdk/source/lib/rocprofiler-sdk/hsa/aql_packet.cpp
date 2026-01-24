@@ -334,13 +334,7 @@ SPMPacket::SPMPacket(aqlprofile_agent_handle_t aql_agent, aqlprofile_spm_profile
 void
 SPMPacket::populate_before()
 {
-    hsa_barrier_and_packet_t barrier{};
-    barrier.header = HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE;
-    barrier.header |= BARRIER_BIT;
-
-    before_krn_barrier_pkt.push_back(barrier);
-    before_krn_barrier_pkt.push_back(barrier);
-    before_krn_pkt.push_back(packets.start_packet);
+     before_krn_pkt.push_back(packets.start_packet);
 };
 
 void

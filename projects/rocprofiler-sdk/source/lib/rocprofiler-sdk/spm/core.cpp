@@ -57,29 +57,8 @@ namespace rocprofiler
 {
 namespace spm
 {
-/**
- * @brief The functions checks if the `ROCPROFILER_SPM_BETA_ENABLED` is set.
- * If so, it will enable SPM service. Otherwise, the API is reported
- * as not implemented.
- *
- * The SPM is in experimental phase .
-   By enabling the `ROCPROFILER_SPM_BETA_ENABLED`,
- * user accepts all consequences of using early implementation of SPM API.
- */
-bool
-is_spm_explicitly_enabled()
-{
-    auto spm_sampling_enabled = rocprofiler::common::get_env("ROCPROFILER_SPM_BETA_ENABLED", false);
 
-    if(!spm_sampling_enabled)
-        ROCP_INFO << " SPM unavailable. The feature is implicitly disabled. "
-                  << "To use it on a supported architecture, "
-                  << "set ROCPROFILER_SPM_BETA_ENABLED=ON in the environment";
-
-    return spm_sampling_enabled;
-}
-
-/**
+    /**
  * Adds a counter collection profile to our global cache.
  * Note: these profiles can be used across multiple contexts and are independent of the context.
  * Note: these profiles are per agent
