@@ -358,53 +358,6 @@ extern const __device__ __attribute__((weak)) __hip_builtin_gridDim_t gridDim;
 #include <hip/amd_detail/amd_math_functions.h>
 #endif
 
-#if __HIP_HCC_COMPAT_MODE__
-// Define HCC work item functions in terms of HIP builtin variables.
-#pragma push_macro("__DEFINE_HCC_FUNC")
-#define __DEFINE_HCC_FUNC(hc_fun, hip_var)                                                         \
-  inline __device__ __attribute__((always_inline)) unsigned int hc_get_##hc_fun(unsigned int i) {  \
-    if (i == 0)                                                                                    \
-      return hip_var.x;                                                                            \
-    else if (i == 1)                                                                               \
-      return hip_var.y;                                                                            \
-    else                                                                                           \
-      return hip_var.z;                                                                            \
-  }
-
-__DEFINE_HCC_FUNC(workitem_id, threadIdx)
-__DEFINE_HCC_FUNC(group_id, blockIdx)
-__DEFINE_HCC_FUNC(group_size, blockDim)
-__DEFINE_HCC_FUNC(num_groups, gridDim)
-#pragma pop_macro("__DEFINE_HCC_FUNC")
-
-inline __device__ __attribute__((always_inline)) unsigned int hc_get_workitem_absolute_id(int dim) {
-  unsigned int local_id, group_id, group_size;
-
-  switch (dim) {
-    case 0:
-      local_id = __builtin_amdgcn_workitem_id_x();
-      group_id = __builtin_amdgcn_workgroup_id_x();
-      group_size = __builtin_amdgcn_workgroup_size_x();
-      break;
-    case 1:
-      local_id = __builtin_amdgcn_workitem_id_y();
-      group_id = __builtin_amdgcn_workgroup_id_y();
-      group_size = __builtin_amdgcn_workgroup_size_y();
-      break;
-    case 2:
-      local_id = __builtin_amdgcn_workitem_id_z();
-      group_id = __builtin_amdgcn_workgroup_id_z();
-      group_size = __builtin_amdgcn_workgroup_size_z();
-      break;
-    default:
-      return 0;
-  }
-
-  return group_id * group_size + local_id;
-}
-
-#endif
-
 #if !__CLANG_HIP_RUNTIME_WRAPPER_INCLUDED__
 #if !defined(__HIPCC_RTC__)
 // Support std::complex.
