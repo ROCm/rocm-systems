@@ -55,22 +55,17 @@ struct output_stream
     output_stream& operator=(const output_stream&) = delete;
 
     output_stream(output_stream&& other) noexcept
-    : stream{other.stream}
-    , dtor{other.dtor}
     {
-        other.stream = nullptr;
-        other.dtor   = nullptr;
+        std::swap(stream, other.stream);
+        std::swap(dtor, other.dtor);
     }
 
     output_stream& operator=(output_stream&& other) noexcept
     {
         if(this != &other)
         {
-            close();
-            stream       = other.stream;
-            dtor         = other.dtor;
-            other.stream = nullptr;
-            other.dtor   = nullptr;
+            std::swap(stream, other.stream);
+            std::swap(dtor, other.dtor);
         }
         return *this;
     }
