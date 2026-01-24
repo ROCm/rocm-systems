@@ -34,6 +34,7 @@ namespace RcclUnitTesting
 
     bool isGfx94;        // Detects if architecture is gfx94
     bool isGfx95;        // Detects if architecture is gfx95
+    bool isGfx11;        // Detects if architecture is gfx11
     bool isGfx12;        // Detects if architecture is gfx12
     bool isGfx90;        // Detects if architecture is gfx90
 

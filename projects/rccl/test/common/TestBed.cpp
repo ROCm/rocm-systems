@@ -712,8 +712,9 @@ namespace RcclUnitTesting
       for (int ftIdx = 0; ftIdx < funcTypes.size()      && isCorrect; ++ftIdx)
       for (int dtIdx = 0; dtIdx < dataTypes.size()      && isCorrect; ++dtIdx)
       {
-      //Skipping AllReduce FP8 test on 9 to 16 ranks (gfx90a).
-      if(ev.isGfx90 && numRanks > 8 && funcTypes[ftIdx] == ncclCollAllReduce
+      // FP8 multi-rank collectives are not supported on gfx11* architectures
+      // Single-rank works on all architectures (no actual reduction kernel executed)
+      if (numRanks > 1 && ev.isGfx11
                     && (dataTypes[dtIdx] == ncclFloat8e4m3
                     || dataTypes[dtIdx] == ncclFloat8e5m2))
       {
