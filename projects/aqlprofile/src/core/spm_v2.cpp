@@ -44,13 +44,6 @@ struct spm_state_t : public spm_set_dest_buffer_args {
     std::condition_variable work_cond{};
     std::atomic<bool> data_ready{};
 
-    std::atomic<bool> draining_requested{false};
-    std::atomic<bool> draining_producer_done{false};
-    std::atomic<bool> draining_consumer_done{false};
-    std::atomic<bool> draining_failed{false};
-    std::mutex drain_mutex{};
-    std::condition_variable drain_cond{};
-
     std::atomic<int> signal_data_loss{};
     std::atomic<bool> stop_prod_thread{};
     std::atomic<bool> stop_cons_thread{};
@@ -376,51 +369,6 @@ PUBLIC_API hsa_status_t aqlprofile_spm_stop(aqlprofile_handle_t handle)
 }
 
 PUBLIC_API hsa_status_t aqlprofile_spm_drain_counters(aqlprofile_handle_t handle){
-
-    auto s = aqlprofile::spm::spm_state_map->query(handle);
-    if (!s) return HSA_STATUS_ERROR_NOT_INITIALIZED;
-
-    // Check that no draining is already in progress
-    {
-        std::lock_guard<std::mutex> lock(s->drain_mutex);
-        
-        // Check if any draining operation is already active
-        if (s->draining_requested.load() || 
-            s->draining_producer_done.load() || 
-            s->draining_consumer_done.load()) {
-            
-            // Another drain operation is in progress or incomplete
-            return HSA_STATUS_ERROR;
-        }
-    }
-
-    // Drain the counters. Send a signal to producer thread to start draining. 
-    // We don't want to stop the threads, we simply signal the thread to start 
-    // draining. And we wait for the drain to complete.
-
-    // Set the draining request flag
-    {
-        std::lock_guard<std::mutex> lock(s->drain_mutex);
-        s->draining_requested = true;
-        s->draining_producer_done = false;
-        s->draining_consumer_done = false;
-        s->draining_failed = false;
-    }
-
-    {
-      // Wait for draining to complete
-      std::unique_lock<std::mutex> lock(s->drain_mutex);
-      s->drain_cond.wait(lock, [&s]() { return s->draining_consumer_done.load(); });
-
-      s->draining_consumer_done = false;
-
-      // Check if draining failed; Producer couldn't drain after re-tries
-      if (s->draining_failed) {
-        s->draining_failed = false;  // Reset for next call
-        return HSA_STATUS_ERROR;
-      }
-    }
-
     return HSA_STATUS_SUCCESS;
 
 }
@@ -451,7 +399,6 @@ static void producer(std::shared_ptr<spm_state_t> s)
     hsa_status_t status = HSA_STATUS_SUCCESS;
     spm_set_dest_buffer_args args = *s;
     bool exiting = false;
-    bool draining = false;
     int count_down = 0;
 
     consumer_thread_handle_t consumer_handle(s);
@@ -467,12 +414,6 @@ static void producer(std::shared_ptr<spm_state_t> s)
         // SPM counters are drained (args.size_copied == 0) which could be at least one
         // HsaSpmSetDestBuffer() call or maybe more than one.
         if (s->stop_prod_thread) exiting = true;
-
-        // Check if draining is requested
-        if (s->draining_requested && !draining) {
-            draining = true;
-            count_down = 0;  // Reset countdown for draining
-        }
 
         if (HsaSpmSetDestBuffer(args) != HSA_STATUS_SUCCESS)
         {
@@ -506,7 +447,7 @@ static void producer(std::shared_ptr<spm_state_t> s)
             consumer_handle.notify();
         }
 
-        if (exiting || draining)
+        if (exiting)
         {
             // Forced exit: This happens when we want to stop SPM but not the app. This should be
             // improved by getting the hint from caller instead of a hardcoded number. Will consider this
@@ -520,18 +461,6 @@ static void producer(std::shared_ptr<spm_state_t> s)
             // HsaSpmSetDestBuffer() call if s->stop_prod_thread is set after the HsaSpmSetDestBuffer()
             // call from this loop!
             //
-            if (draining) { // draining case
-                // Signal that draining is complete
-                {
-                    std::lock_guard<std::mutex> lock(s->drain_mutex);
-                    s->draining_producer_done = true;
-                    s->draining_requested = false; // Reset for next drain request
-                    s->draining_failed = s->size_copied != 0; // Set failure if data still remaining
-                }
-                s->drain_cond.notify_all();
-                draining = false; // Reset draining state
-            }
-            else // exiting case
             break;
         }
         if (s->stop_cons_thread) break;
@@ -557,13 +486,6 @@ static void consumer(std::shared_ptr<spm_state_t> s, aqlprofile_spm_data_callbac
                 callback(i, (void*)(buf_info + 1), buf_info->bytes_copied, flags, userdata);
 
             base += s->buf_size_xcc;
-        }
-
-        // Check if producer draining is done and signal consumer completion
-        if (s->draining_producer_done.load()) {
-            std::lock_guard<std::mutex> drain_lock(s->drain_mutex);
-            s->draining_consumer_done = true;
-            s->drain_cond.notify_all();
         }
     }
 }
