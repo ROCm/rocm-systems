@@ -69,6 +69,7 @@
 #include "suites/stress/memory_concurrent_tests.h"
 #include "suites/stress/queue_write_index_concurrent_tests.h"
 #include "suites/test_common/test_case_template.h"
+#include "suites/functional/test_fault_example.h"
 #include "suites/test_common/main.h"
 #include "suites/test_common/test_common.h"
 #include "suites/functional/concurrent_init.h"
@@ -80,6 +81,7 @@
 #include "suites/functional/signal_kernel.h"
 #include "suites/functional/cu_masking.h"
 #include "suites/functional/filter_devices.h"
+#include "suites/functional/gpu_coredump.h"
 #include "amd_smi/amdsmi.h"
 #include "common/common.h"
 #include "suites/functional/counted_queues.h"
@@ -317,6 +319,69 @@ TEST(rocrtstFunc, Memory_Available) {
     RunCustomTestProlog(&mt);
     mt.MemAvailableTest();
     RunCustomTestEpilog(&mt);
+  );
+}
+
+TEST(rocrtstFunc, GpuCoreDump_DefaultPattern) {
+  RUN_IF_NOT_EMU_MODE(
+    GpuCoreDumpTest gcd;
+    RunCustomTestProlog(&gcd);
+    gcd.TestDefaultPattern();
+    RunCustomTestEpilog(&gcd);
+  );
+}
+
+TEST(rocrtstFunc, GpuCoreDump_CustomPattern) {
+  RUN_IF_NOT_EMU_MODE(
+    GpuCoreDumpTest gcd;
+    RunCustomTestProlog(&gcd);
+    gcd.TestCustomPattern();
+    RunCustomTestEpilog(&gcd);
+  );
+}
+
+TEST(rocrtstFunc, GpuCoreDump_DisableFlag) {
+  RUN_IF_NOT_EMU_MODE(
+    GpuCoreDumpTest gcd;
+    RunCustomTestProlog(&gcd);
+    gcd.TestDisableFlag();
+    RunCustomTestEpilog(&gcd);
+  );
+}
+
+TEST(rocrtstFunc, GpuCoreDump_PatternSubstitution) {
+  RUN_IF_NOT_EMU_MODE(
+    GpuCoreDumpTest gcd;
+    RunCustomTestProlog(&gcd);
+    gcd.TestPatternSubstitution();
+    RunCustomTestEpilog(&gcd);
+  );
+}
+
+TEST(rocrtstFunc, GpuCoreDump_InvalidPath) {
+  RUN_IF_NOT_EMU_MODE(
+    GpuCoreDumpTest gcd;
+    RunCustomTestProlog(&gcd);
+    gcd.TestInvalidPath();
+    RunCustomTestEpilog(&gcd);
+  );
+}
+
+TEST(rocrtstFunc, GpuCoreDump_ContentIntegrity) {
+  RUN_IF_NOT_EMU_MODE(
+    GpuCoreDumpTest gcd;
+    RunCustomTestProlog(&gcd);
+    gcd.TestCoreDumpContentIntegrity();
+    RunCustomTestEpilog(&gcd);
+  );
+}
+
+TEST(rocrtstFunc, GpuCoreDump_PipePattern) {
+  RUN_IF_NOT_EMU_MODE(
+    GpuCoreDumpTest gcd;
+    RunCustomTestProlog(&gcd);
+    gcd.TestPipePattern();
+    RunCustomTestEpilog(&gcd);
   );
 }
 
