@@ -1,7 +1,7 @@
 {
   "archs": {
     "gfx908": {
-      "delta_hash": "bae93343a258d4b3f5e64c2f2ce91d1a",
+      "delta_hash": "1417ef1cfc1b47b7907608f2425f9f11",
       "files": {
         "0000_top_stats.yaml": "2819d96f5b1c3704f2ac50868a246a7f",
         "0100_system_info.yaml": "cefae2b10db8cf4b0d3a971cff5e82c8",
@@ -24,7 +24,7 @@
       }
     },
     "gfx90a": {
-      "delta_hash": "d64f63cee8ace777ae46002c13756ab8",
+      "delta_hash": "c3ff3aa253d044f895d776eff72279ad",
       "files": {
         "0000_top_stats.yaml": "2819d96f5b1c3704f2ac50868a246a7f",
         "0100_system_info.yaml": "cefae2b10db8cf4b0d3a971cff5e82c8",
@@ -47,7 +47,7 @@
       }
     },
     "gfx940": {
-      "delta_hash": "7b5e4d755c2c4e1654d0d01576284df2",
+      "delta_hash": "35aa77b45341e2a215b8251ad73f472f",
       "files": {
         "0000_top_stats.yaml": "2819d96f5b1c3704f2ac50868a246a7f",
         "0100_system_info.yaml": "cefae2b10db8cf4b0d3a971cff5e82c8",
@@ -70,7 +70,7 @@
       }
     },
     "gfx941": {
-      "delta_hash": "9e62e4734bcc6a318ecdbb6d5432ce98",
+      "delta_hash": "8057ce09c13a4fa3e4863085c18a158c",
       "files": {
         "0000_top_stats.yaml": "2819d96f5b1c3704f2ac50868a246a7f",
         "0100_system_info.yaml": "cefae2b10db8cf4b0d3a971cff5e82c8",
@@ -93,7 +93,7 @@
       }
     },
     "gfx942": {
-      "delta_hash": "4738dc07f7d7f08cfde42ece633e648f",
+      "delta_hash": "76bacc3fd8b2d4da43c3b8d670a097d9",
       "files": {
         "0000_top_stats.yaml": "2819d96f5b1c3704f2ac50868a246a7f",
         "0100_system_info.yaml": "cefae2b10db8cf4b0d3a971cff5e82c8",
@@ -120,9 +120,9 @@
       "files": {
         "0000_top_stats.yaml": "2819d96f5b1c3704f2ac50868a246a7f",
         "0100_system_info.yaml": "cefae2b10db8cf4b0d3a971cff5e82c8",
-        "0200_system_speed_of_light.yaml": "bf2ca00d4b255dbbe191a7641b81dc4c",
+        "0200_system_speed_of_light.yaml": "8e2a370cba884f1e4f695ee70b3bd7b6",
         "0300_memory_chart.yaml": "2c82fa6f81a0dda679706d36b99e7913",
-        "0400_roofline.yaml": "2bd3b630b72d6d165c0d30cf481136a9",
+        "0400_roofline.yaml": "e39c92773e1499158fd47ce416e7cee5",
         "0500_command_processor_cpc_cpf.yaml": "3f7dab1663ad7a6fae3801aec2b1e8d0",
         "0600_workgroup_manager_spi.yaml": "e6546a92d283fed5a5dc6df203efb670",
         "0700_wavefront.yaml": "330468fd711057b422de9b952c5cfe69",

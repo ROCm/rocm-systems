@@ -1,5 +1,5 @@
 # Use a base image
-FROM ubuntu:22.04
+FROM <rocm_build_image>
 
 # Install curl first (needed for ROCm download)
 RUN apt-get update && apt-get install -y curl
@@ -7,7 +7,7 @@ RUN apt-get update && apt-get install -y curl
 # Define the tarball name as a variable
 # Check https://therock-nightly-tarball.s3.amazonaws.com/index.html for latest builds
 # Use therock-dist-linux-gfx<arch>-dcgpu-<rocm-version>.tar.gz naming convention
-ARG TARBALL_NAME=<tarball_name>
+ARG TARBALL_NAME=therock-dist-linux-gfx94X-dcgpu-7.11.0a20260116.tar.gz
 
 # Install ROCm from TheRock Nightly build
 RUN mkdir -p /rocm && \
@@ -24,29 +24,27 @@ ENV PATH="/rocm/bin:${PATH}" \
 
 # Update package list and install prerequisites
 RUN apt-get update && apt-get install -y \
-    software-properties-common cmake locales git \
+    software-properties-common cmake locales git curl \
     && add-apt-repository ppa:deadsnakes/ppa \
     && apt-get update
+
+# Allows running git commands in /app
+RUN git config --global --add safe.directory /app
 
 # Generate the desired locale
 RUN locale-gen en_US.UTF-8
 
 # Install Python 3.10 and pip
 RUN apt-get install -y python3.10 python3.10-venv python3.10-dev python3-pip libsqlite3-dev
-RUN python3.10 -m venv /venv
-ENV PATH="/venv/bin:$PATH"
+RUN python3.10 -m venv venv
+ENV PATH="venv/bin:$PATH"
 RUN python -m pip install --upgrade pip
 
-# Install any rocprofiler-compute dependencies specified in requirements.txt
+# Install any dependencies specified in requirements.txt
+WORKDIR /app/projects/rocprofiler-compute
 COPY projects/rocprofiler-compute/requirements.txt /app/projects/rocprofiler-compute/requirements.txt
 COPY projects/rocprofiler-compute/requirements-test.txt /app/projects/rocprofiler-compute/requirements-test.txt
-RUN python -m pip install -r /app/projects/rocprofiler-compute/requirements.txt -r /app/projects/rocprofiler-compute/requirements-test.txt
-
-# Set the working directory
-WORKDIR /app
-
-# Allows running git commands in /app
-RUN git config --global --add safe.directory /app
+RUN python -m pip install -r requirements.txt -r requirements-test.txt
 
 # Run interactive bash shell
 CMD ["/bin/bash"]
