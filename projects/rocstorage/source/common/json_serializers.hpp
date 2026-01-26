@@ -5,6 +5,8 @@
 
 #include <rocstorage/writer_types.hpp>
 
+#include "string_conversions.hpp"
+
 #include <nlohmann/json.hpp>
 #include <string>
 
@@ -25,7 +27,7 @@ to_json(const writer_api::address_range_info_t& addr_range)
     j["address_base"] = addr_range.address_base;
     j["address_low"]  = addr_range.address_low;
     j["address_high"] = addr_range.address_high;
-    if(addr_range.extdata != nullptr && addr_range.extdata[0] != '\0')
+    if(is_valid_cstring(addr_range.extdata))
     {
         j["extdata"] = addr_range.extdata;
     }
@@ -39,11 +41,11 @@ inline json
 to_json(const writer_api::program_counter_info_t& pc_info)
 {
     json j;
-    if(pc_info.function != nullptr && pc_info.function[0] != '\0')
+    if(is_valid_cstring(pc_info.function))
     {
         j["function"] = pc_info.function;
     }
-    if(pc_info.filename != nullptr && pc_info.filename[0] != '\0')
+    if(is_valid_cstring(pc_info.filename))
     {
         j["filename"] = pc_info.filename;
     }
@@ -51,7 +53,7 @@ to_json(const writer_api::program_counter_info_t& pc_info)
     {
         j["line_number"] = pc_info.line_number.value();
     }
-    if(pc_info.extdata != nullptr && pc_info.extdata[0] != '\0')
+    if(is_valid_cstring(pc_info.extdata))
     {
         j["extdata"] = pc_info.extdata;
     }
@@ -73,7 +75,7 @@ to_json(const writer_api::stack_frame_t& frame)
     {
         j["address_range"] = to_json(frame.address_range.value());
     }
-    if(frame.extdata != nullptr && frame.extdata[0] != '\0')
+    if(is_valid_cstring(frame.extdata))
     {
         j["extdata"] = frame.extdata;
     }
@@ -130,8 +132,7 @@ inline json
 to_json(const writer_api::source_code_info_t& source_code)
 {
     json j;
-    if(source_code.filename.has_value() && source_code.filename.value() != nullptr &&
-       source_code.filename.value()[0] != '\0')
+    if(source_code.filename.has_value() && is_valid_cstring(source_code.filename.value()))
     {
         j["filename"] = source_code.filename.value();
     }
@@ -169,7 +170,7 @@ to_json(const writer_api::source_code_info_t& source_code)
             j["assembly_instruction_lines"] = asm_lines;
         }
     }
-    if(source_code.extdata != nullptr && source_code.extdata[0] != '\0')
+    if(is_valid_cstring(source_code.extdata))
     {
         j["extdata"] = source_code.extdata;
     }

@@ -3,9 +3,9 @@
 
 #pragma once
 
-#include "traits.hpp"
-
 #include "debug.hpp"
+#include "traits.hpp"
+#include "transaction.hpp"
 
 #include <sqlite3.h>
 
@@ -62,6 +62,11 @@ public:
                 sqlite3_step(stmt.get()), expanded_sql, "Failed to execute step");
             sqlite3_reset(stmt.get());
         };
+    }
+
+    [[nodiscard]] transaction_block create_transaction_block() const noexcept
+    {
+        return transaction_block(m_sqlite3_inmemory);
     }
 
 private:

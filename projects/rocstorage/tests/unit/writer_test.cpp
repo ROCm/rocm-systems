@@ -550,7 +550,7 @@ TEST_F(writer_test, register_agent_info_invalid_type_throws)
     m_writer->register_process_info(create_test_process_info(1, 1000));
 
     auto agent = create_test_agent_info(1, 1000, "INVALID", 0);
-    EXPECT_THROW(m_writer->register_agent_info(agent), std::runtime_error);
+    EXPECT_THROW(m_writer->register_agent_info(agent), std::invalid_argument);
 }
 
 TEST_F(writer_test, register_agent_info_without_node_throws)
@@ -2983,4 +2983,61 @@ TEST_F(writer_test, multiple_tracks_with_different_regions)
     auto region_result =
         query_database(m_database_path, "SELECT COUNT(*) FROM rocpd_region_" + m_uuid);
     EXPECT_EQ(region_result.rows[0][0], "3") << "Three regions should exist";
+}
+
+// ============================================================================
+// Transaction Rollback Tests
+// ============================================================================
+
+TEST_F(writer_test, transaction_rollback_on_exception_reverts_inserts)
+{
+    // Setup: register base dependencies
+    register_base_dependencies(*m_writer, 1, 1000, 100);
+
+    // Step 1: Insert a successful region (no event, no args) - this commits
+    auto region1      = create_test_region_data("successful_region", 1000000, 2000000);
+    auto environment1 = create_test_trace_environment(1, 1000, 100);
+    m_writer->insert_region_data(region1, environment1);
+
+    // Step 2: Attempt to insert a region with event + invalid args
+    // The event and region will be inserted, but insert_arg will throw
+    // because arg.type is nullptr. This should trigger ROLLBACK.
+    auto region2  = create_test_region_data("failed_region", 3000000, 4000000);
+    region2.event = rocstorage::writer_api::event_data_t{ .stack_id        = 1,
+                                                          .parent_stack_id = 0,
+                                                          .correlation_id  = 456,
+                                                          .call_stack      = {},
+                                                          .line_info_list  = {},
+                                                          .event_category  = "TEST_API",
+                                                          .extdata         = "{}" };
+    // Add an arg with null type to trigger exception AFTER event/region insert
+    region2.args = { rocstorage::writer_api::arg_data_t{ .position = 0,
+                                                         .type     = nullptr,  // Invalid!
+                                                         .name     = "arg_name",
+                                                         .value    = "arg_value",
+                                                         .extdata  = "{}" } };
+
+    auto environment2 = create_test_trace_environment(1, 1000, 100);
+    EXPECT_THROW(m_writer->insert_region_data(region2, environment2), std::runtime_error);
+
+    // Step 3: Flush and verify
+    m_writer->flush_in_memory_data_to_disk();
+
+    // Verify: Only 1 region should exist (the successful one)
+    auto region_count = count_rows(m_database_path, "rocpd_region", m_uuid);
+    EXPECT_EQ(region_count, 1)
+        << "Only the successful region should exist after rollback";
+
+    // Verify: No events should exist (the failed transaction's event was rolled back)
+    auto event_count = count_rows(m_database_path, "rocpd_event", m_uuid);
+    EXPECT_EQ(event_count, 0) << "Event from failed transaction should be rolled back";
+
+    // Verify: The successful region has the correct name
+    auto region_result = query_database(m_database_path,
+                                        "SELECT s.string FROM rocpd_region_" + m_uuid +
+                                            " r "
+                                            "JOIN rocpd_string_" +
+                                            m_uuid + " s ON r.name_id = s.id");
+    ASSERT_EQ(region_result.rows.size(), 1);
+    EXPECT_EQ(region_result.rows[0][0], "successful_region");
 }

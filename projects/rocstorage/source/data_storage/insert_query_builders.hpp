@@ -22,28 +22,28 @@ namespace query_builders
 struct query_value_builder
 {
     query_value_builder(std::stringstream& ss)
-    : _ss{ ss }
+    : m_stream{ ss }
     {}
 
     template <typename... Values>
     query_value_builder& set_values(Values&&... values)
     {
         auto i = sizeof...(values);
-        _ss << "( ";
+        m_stream << "( ";
         ((process_value(values) << (i-- > 1 ? ", " : " ")), ...);
-        _ss << ")";
+        m_stream << ")";
         return *this;
     }
 
-    std::string get_query_string() { return _ss.str(); }
+    std::string get_query_string() { return m_stream.str(); }
 
 private:
     template <typename T>
     std::enable_if_t<common::traits::is_string_literal<T>(), std::stringstream&>
     process_value(T& value)
     {
-        _ss << "\"" << value << "\"";
-        return _ss;
+        m_stream << "\"" << value << "\"";
+        return m_stream;
     }
 
     template <typename T>
@@ -52,13 +52,13 @@ private:
     {
         if(value.has_value())
         {
-            _ss << value.value();
+            m_stream << value.value();
         }
         else
         {
-            _ss << "NULL";
+            m_stream << "NULL";
         }
-        return _ss;
+        return m_stream;
     }
 
     template <typename T>
@@ -67,19 +67,19 @@ private:
                      std::stringstream&>
     process_value(T& value)
     {
-        _ss << value;
-        return _ss;
+        m_stream << value;
+        return m_stream;
     }
 
 private:
-    std::stringstream& _ss;
+    std::stringstream& m_stream;
 };
 
 struct query_columns_builder
 {
     query_columns_builder(std::stringstream& ss)
-    : _ss{ ss }
-    , _query_value_builder{ _ss }
+    : m_stream{ ss }
+    , m_value_builder{ m_stream }
     {}
 
     template <typename... Columns,
@@ -88,14 +88,14 @@ struct query_columns_builder
     query_value_builder& set_columns(Columns&... columns)
     {
         auto i = sizeof...(columns);
-        _ss << "( ";
-        ((_ss << columns << (i-- > 1 ? ", " : " ")), ...) << ") VALUES ";
-        return _query_value_builder;
+        m_stream << "( ";
+        ((m_stream << columns << (i-- > 1 ? ", " : " ")), ...) << ") VALUES ";
+        return m_value_builder;
     }
 
 private:
-    std::stringstream&  _ss;
-    query_value_builder _query_value_builder;
+    std::stringstream&  m_stream;
+    query_value_builder m_value_builder;
 };
 
 }  // namespace query_builders

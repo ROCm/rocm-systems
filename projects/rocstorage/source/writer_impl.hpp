@@ -9,10 +9,12 @@
 #include "data_storage/insert_statements.hpp"
 #include "data_storage/table_insert_query.hpp"
 
-#include "data_indentifier.hpp"
+#include "entity_registry.hpp"
 #include "insert_validator.hpp"
+#include "primary_key_providers.hpp"
 
 #include "common/json_serializers.hpp"
+#include "common/string_conversions.hpp"
 #include "debug.hpp"
 
 #include <stdexcept>
@@ -35,6 +37,22 @@ initialize_metadata(const std::shared_ptr<data_storage::database>& database,
                                 .get_query_string());
 }
 
+/**
+ * @brief Check if entity is already registered and log warning if so
+ * @return true if already registered (caller should return early), false otherwise
+ */
+template <typename Utility, typename Entity>
+[[nodiscard]] bool
+is_already_registered(Utility& utility, const Entity& entity)
+{
+    if(utility.is_entry_registered(get_key(entity)))
+    {
+        LOG_WARNING("{} already registered", rocstorage::to_string(entity));
+        return true;
+    }
+    return false;
+}
+
 }  // namespace
 
 struct writer::impl
@@ -43,8 +61,9 @@ public:
     explicit impl(std::shared_ptr<data_storage::database> database, std::string uuid)
     : m_database(std::move(database))
     , m_uuid(std::move(uuid))
-    , m_entity_identifiers(std::make_shared<data_identifiers>())
-    , m_validator(std::make_shared<insert_validator>(m_entity_identifiers))
+    , m_entity_registry(std::make_shared<entity_registry>())
+    , m_key_providers(std::make_shared<primary_key_providers>())
+    , m_validator(std::make_shared<insert_validator>(m_entity_registry))
     {
         if(!m_database)
         {
@@ -66,15 +85,8 @@ public:
 
     void register_node_info(const writer_api::node_info_t& node_info)
     {
-        auto&      node_info_utility = m_entity_identifiers->node_info();
-        const bool is_node_registered =
-            node_info_utility.is_entry_registered(node_info.node_id);
-
-        if(is_node_registered)
-        {
-            LOG_WARNING("Node already registered: node_id: {}", node_info.node_id);
-            return;
-        }
+        auto& node_info_utility = m_entity_registry->node_info();
+        if(is_already_registered(node_info_utility, node_info)) return;
 
         m_insert_statements->node_info_statement()(node_info.node_id,
                                                    node_info.hash,
@@ -91,17 +103,12 @@ public:
 
     void register_process_info(const writer_api::process_info_t& process_info)
     {
-        auto& process_info_utility = m_entity_identifiers->process_info();
-        if(process_info_utility.is_entry_registered(process_info.pid))
-        {
-            LOG_WARNING("Process already registered: pid: {}", process_info.pid);
-            return;
-        }
+        auto& process_info_utility = m_entity_registry->process_info();
+        if(is_already_registered(process_info_utility, process_info)) return;
 
         m_validator->require_node(process_info.node_id);
 
-        const auto primary_key = m_entity_identifiers->process_info_primary_key_provider()
-                                     .get_primary_key_value();
+        const auto primary_key = m_key_providers->process_info().get_primary_key_value();
 
         m_insert_statements->process_info_statement()(primary_key,
                                                       process_info.node_id,
@@ -120,15 +127,8 @@ public:
 
     void register_agent_info(const writer_api::agent_info_t& agent_info)
     {
-        auto& agent_info_utility = m_entity_identifiers->agent_info();
-        if(agent_info_utility.is_entry_registered(agent_info.unique_id))
-        {
-            LOG_WARNING("Agent already registered: type: {}, index: {}, name: {}",
-                        agent_info.unique_id.agent_type,
-                        agent_info.unique_id.type_index,
-                        agent_info.name);
-            return;
-        }
+        auto& agent_info_utility = m_entity_registry->agent_info();
+        if(is_already_registered(agent_info_utility, agent_info)) return;
 
         m_validator->require_node(agent_info.node_id)
             .require_process(agent_info.process_id);
@@ -136,13 +136,12 @@ public:
         const std::string_view agent_type{ agent_info.unique_id.agent_type };
         if(agent_type != "CPU" && agent_type != "GPU")
         {
-            throw std::runtime_error(fmt::format(
+            throw std::invalid_argument(fmt::format(
                 "Invalid agent type: {}. Type can be NULL, CPU, or GPU.", agent_type));
         }
 
         const auto process_pk  = m_validator->resolve_process_key(agent_info.process_id);
-        const auto primary_key = m_entity_identifiers->agent_info_primary_key_provider()
-                                     .get_primary_key_value();
+        const auto primary_key = m_key_providers->agent_info().get_primary_key_value();
 
         m_insert_statements->agent_info_statement()(primary_key,
                                                     agent_info.node_id,
@@ -164,14 +163,8 @@ public:
 
     void register_pmc_info(const writer_api::pmc_info_t& pmc_info)
     {
-        auto& pmc_info_utility = m_entity_identifiers->pmc_info();
-        if(pmc_info_utility.is_entry_registered(pmc_info.unique_id))
-        {
-            LOG_WARNING("PMC already registered: name: {}, agent_id: {}",
-                        pmc_info.unique_id.name,
-                        pmc_info.unique_id.agent_id->agent_type);
-            return;
-        }
+        auto& pmc_info_utility = m_entity_registry->pmc_info();
+        if(is_already_registered(pmc_info_utility, pmc_info)) return;
 
         m_validator->require_node(pmc_info.node_id)
             .require_process(pmc_info.process_id)
@@ -180,8 +173,7 @@ public:
         const auto process_pk = m_validator->resolve_process_key(pmc_info.process_id);
         const auto agent_pk =
             m_validator->resolve_agent_key(*pmc_info.unique_id.agent_id);
-        const auto primary_key =
-            m_entity_identifiers->pmc_info_primary_key_provider().get_primary_key_value();
+        const auto primary_key = m_key_providers->pmc_info().get_primary_key_value();
 
         m_insert_statements->pmc_info_statement()(primary_key,
                                                   pmc_info.node_id,
@@ -208,20 +200,14 @@ public:
 
     void register_thread_info(const writer_api::thread_info_t& thread_info)
     {
-        auto& thread_info_utility = m_entity_identifiers->thread_info();
-        if(thread_info_utility.is_entry_registered(thread_info.thread_id))
-        {
-            LOG_WARNING("Thread already registered: thread_id: {}",
-                        thread_info.thread_id);
-            return;
-        }
+        auto& thread_info_utility = m_entity_registry->thread_info();
+        if(is_already_registered(thread_info_utility, thread_info)) return;
 
         m_validator->require_node(thread_info.node_id)
             .require_process(thread_info.process_id);
 
         const auto process_pk  = m_validator->resolve_process_key(thread_info.process_id);
-        const auto primary_key = m_entity_identifiers->thread_info_primary_key_provider()
-                                     .get_primary_key_value();
+        const auto primary_key = m_key_providers->thread_info().get_primary_key_value();
 
         m_insert_statements->thread_info_statement()(primary_key,
                                                      thread_info.node_id,
@@ -238,20 +224,14 @@ public:
 
     void register_stream_info(const writer_api::stream_info_t& stream_info)
     {
-        auto& stream_info_utility = m_entity_identifiers->stream_info();
-        if(stream_info_utility.is_entry_registered(stream_info.stream_id))
-        {
-            LOG_WARNING("Stream already registered: stream_id: {}",
-                        stream_info.stream_id);
-            return;
-        }
+        auto& stream_info_utility = m_entity_registry->stream_info();
+        if(is_already_registered(stream_info_utility, stream_info)) return;
 
         m_validator->require_node(stream_info.node_id)
             .require_process(stream_info.process_id);
 
         const auto process_pk  = m_validator->resolve_process_key(stream_info.process_id);
-        const auto primary_key = m_entity_identifiers->stream_info_primary_key_provider()
-                                     .get_primary_key_value();
+        const auto primary_key = m_key_providers->stream_info().get_primary_key_value();
 
         m_insert_statements->stream_info_statement()(primary_key,
                                                      stream_info.node_id,
@@ -264,19 +244,14 @@ public:
 
     void register_queue_info(const writer_api::queue_info_t& queue_info)
     {
-        auto& queue_info_utility = m_entity_identifiers->queue_info();
-        if(queue_info_utility.is_entry_registered(queue_info.queue_id))
-        {
-            LOG_WARNING("Queue already registered: queue_id: {}", queue_info.queue_id);
-            return;
-        }
+        auto& queue_info_utility = m_entity_registry->queue_info();
+        if(is_already_registered(queue_info_utility, queue_info)) return;
 
         m_validator->require_node(queue_info.node_id)
             .require_process(queue_info.process_id);
 
         const auto process_pk  = m_validator->resolve_process_key(queue_info.process_id);
-        const auto primary_key = m_entity_identifiers->queue_info_primary_key_provider()
-                                     .get_primary_key_value();
+        const auto primary_key = m_key_providers->queue_info().get_primary_key_value();
 
         m_insert_statements->queue_info_statement()(primary_key,
                                                     queue_info.node_id,
@@ -289,12 +264,8 @@ public:
 
     void register_code_object_info(const writer_api::code_object_info_t& code_object_info)
     {
-        auto& code_object_info_utility = m_entity_identifiers->code_object_info();
-        if(code_object_info_utility.is_entry_registered(code_object_info.id))
-        {
-            LOG_WARNING("Code object already registered: id: {}", code_object_info.id);
-            return;
-        }
+        auto& code_object_info_utility = m_entity_registry->code_object_info();
+        if(is_already_registered(code_object_info_utility, code_object_info)) return;
 
         m_validator->require_node(code_object_info.node_id)
             .require_process(code_object_info.process_id)
@@ -322,13 +293,8 @@ public:
     void register_kernel_symbol_info(
         const writer_api::kernel_symbol_info_t& kernel_symbol_info)
     {
-        auto& kernel_symbol_info_utility = m_entity_identifiers->kernel_symbol_info();
-        if(kernel_symbol_info_utility.is_entry_registered(kernel_symbol_info.id))
-        {
-            LOG_WARNING("Kernel symbol already registered: id: {}",
-                        kernel_symbol_info.id);
-            return;
-        }
+        auto& kernel_symbol_info_utility = m_entity_registry->kernel_symbol_info();
+        if(is_already_registered(kernel_symbol_info_utility, kernel_symbol_info)) return;
 
         m_validator->require_node(kernel_symbol_info.node_id)
             .require_process(kernel_symbol_info.process_id)
@@ -359,24 +325,15 @@ public:
 
     void register_track_info(const writer_api::track_info_t& track)
     {
-        auto& track_info_utility = m_entity_identifiers->track_info();
-        if(track_info_utility.is_entry_registered(track))
-        {
-            LOG_WARNING("Track already registered: node_id: {}, process_id: {}, "
-                        "thread_id: {}, name: {}",
-                        track.node_id,
-                        to_error_string(track.process_id),
-                        to_error_string(track.thread_id),
-                        track.name.value_or("NULL"));
-            return;
-        }
+        auto& track_info_utility = m_entity_registry->track_info();
+        if(is_already_registered(track_info_utility, track)) return;
 
         m_validator->require_node(track.node_id)
             .validate_optional_process(track.process_id)
             .validate_optional_thread(track.thread_id);
 
         if(track.name.has_value() &&
-           !m_entity_identifiers->string_info().is_entry_registered(track.name.value()))
+           !m_entity_registry->string_info().is_entry_registered(track.name.value()))
         {
             register_string(track.name.value());
         }
@@ -385,8 +342,7 @@ public:
             m_validator->resolve_optional_process_key(track.process_id);
         const auto thread_pk = m_validator->resolve_optional_thread_key(track.thread_id);
         const auto string_pk = m_validator->resolve_optional_string_key(track.name);
-        const auto primary_key = m_entity_identifiers->track_info_primary_key_provider()
-                                     .get_primary_key_value();
+        const auto primary_key = m_key_providers->track_info().get_primary_key_value();
 
         m_insert_statements->track_info_statement()(
             primary_key, track.node_id, process_pk, thread_pk, string_pk, track.extdata);
@@ -396,7 +352,7 @@ public:
 
     void register_string(const char* str)
     {
-        auto& string_info_utility = m_entity_identifiers->string_info();
+        auto& string_info_utility = m_entity_registry->string_info();
 
         if(str == nullptr)
         {
@@ -411,8 +367,7 @@ public:
             return;
         }
 
-        const auto primary_key = m_entity_identifiers->string_info_primary_key_provider()
-                                     .get_primary_key_value();
+        const auto primary_key = m_key_providers->string_info().get_primary_key_value();
 
         m_insert_statements->string_statement()(primary_key, str);
 
@@ -424,7 +379,7 @@ public:
 private:
     primary_key insert_event(const writer_api::event_data_t& event_data)
     {
-        auto& string_info_utility = m_entity_identifiers->string_info();
+        auto& string_info_utility = m_entity_registry->string_info();
 
         const auto is_string_registered =
             string_info_utility.is_entry_registered(event_data.event_category);
@@ -437,8 +392,7 @@ private:
         const auto event_category_primary_key =
             string_info_utility.get_primary_key_value_for_entity(
                 event_data.event_category);
-        const auto primary_key = m_entity_identifiers->event_data_primary_key_provider()
-                                     .get_primary_key_value();
+        const auto primary_key = m_key_providers->event_data().get_primary_key_value();
 
         m_insert_statements->event_statement()(
             primary_key,
@@ -456,7 +410,7 @@ private:
     void insert_sample(const writer_api::sample_data_t& sample_data,
                        const primary_key&               event_primary_key)
     {
-        auto& track_info_utility = m_entity_identifiers->track_info();
+        auto& track_info_utility = m_entity_registry->track_info();
 
         if(!track_info_utility.is_entry_registered(sample_data.track))
         {
@@ -472,8 +426,7 @@ private:
         const auto track_primary_key =
             track_info_utility.get_primary_key_value_for_entity(sample_data.track);
 
-        const auto primary_key = m_entity_identifiers->sample_data_primary_key_provider()
-                                     .get_primary_key_value();
+        const auto primary_key = m_key_providers->sample_data().get_primary_key_value();
         m_insert_statements->sample_statement()(primary_key,
                                                 track_primary_key,
                                                 sample_data.timestamp,
@@ -483,7 +436,7 @@ private:
 
     inline void insert_arg(const writer_api::arg_data_t& arg_data, primary_key event_id)
     {
-        auto& string_info_utility = m_entity_identifiers->string_info();
+        auto& string_info_utility = m_entity_registry->string_info();
 
         if(arg_data.type == nullptr || arg_data.name == nullptr)
         {
@@ -501,8 +454,7 @@ private:
             register_string(arg_data.type);
         }
 
-        const auto primary_key =
-            m_entity_identifiers->arg_primary_key_provider().get_primary_key_value();
+        const auto primary_key = m_key_providers->arg().get_primary_key_value();
 
         m_insert_statements->arg_statement()(primary_key,
                                              event_id,
@@ -517,6 +469,8 @@ public:
     void insert_region_data(const writer_api::region_data_t&       region_data,
                             const writer_api::trace_environment_t& trace_environment)
     {
+        auto transaction_block = m_database->create_transaction_block();
+
         m_validator->require_node(trace_environment.node_id)
             .require_process(trace_environment.process_id)
             .require_thread(trace_environment.thread_id);
@@ -528,7 +482,7 @@ public:
                 region_data.name));
         }
 
-        auto& string_info_utility = m_entity_identifiers->string_info();
+        auto& string_info_utility = m_entity_registry->string_info();
         if(!string_info_utility.is_entry_registered(region_data.name))
             register_string(region_data.name);
 
@@ -545,8 +499,7 @@ public:
             event_pk = insert_event(region_data.event.value());
         }
 
-        const auto primary_key = m_entity_identifiers->region_data_primary_key_provider()
-                                     .get_primary_key_value();
+        const auto primary_key = m_key_providers->region_data().get_primary_key_value();
 
         m_insert_statements->region_statement()(primary_key,
                                                 trace_environment.node_id.value(),
@@ -558,8 +511,11 @@ public:
                                                 event_pk,
                                                 region_data.extdata);
 
-        for(const auto& arg : region_data.args)
-            insert_arg(arg, event_pk.value());
+        if(event_pk.has_value())
+        {
+            for(const auto& arg : region_data.args)
+                insert_arg(arg, event_pk.value());
+        }
 
         if(trace_environment.track_name.has_value() && event_pk.has_value())
         {
@@ -580,6 +536,8 @@ public:
     void insert_pmc_event_data(const writer_api::pmc_event_data_t&     pmc_event_data,
                                const writer_api::pmc_info_unique_id_t& pmc_unique_id)
     {
+        auto transaction_block = m_database->create_transaction_block();
+
         m_validator->require_pmc(pmc_unique_id);
 
         const auto pmc_pk = m_validator->resolve_pmc_key(pmc_unique_id);
@@ -591,8 +549,7 @@ public:
         }
 
         const auto primary_key =
-            m_entity_identifiers->pmc_event_data_primary_key_provider()
-                .get_primary_key_value();
+            m_key_providers->pmc_event_data().get_primary_key_value();
 
         m_insert_statements->pmc_event_statement()(
             primary_key, event_pk, pmc_pk, pmc_event_data.value, pmc_event_data.extdata);
@@ -602,6 +559,8 @@ public:
         const writer_api::kernel_dispatch_data_t& kernel_dispatch_data,
         const writer_api::trace_environment_t&    trace_environment)
     {
+        auto transaction_block = m_database->create_transaction_block();
+
         m_validator->require_node(trace_environment.node_id)
             .require_process(trace_environment.process_id)
             .require_thread(trace_environment.thread_id)
@@ -610,7 +569,7 @@ public:
             .require_stream(trace_environment.stream_id)
             .require_kernel_symbol(kernel_dispatch_data.kernel_symbol_id);
 
-        auto& string_info_utility = m_entity_identifiers->string_info();
+        auto& string_info_utility = m_entity_registry->string_info();
         if(!string_info_utility.is_entry_registered(kernel_dispatch_data.name))
             register_string(kernel_dispatch_data.name);
 
@@ -632,8 +591,7 @@ public:
         }
 
         const auto primary_key =
-            m_entity_identifiers->kernel_dispatch_data_primary_key_provider()
-                .get_primary_key_value();
+            m_key_providers->kernel_dispatch_data().get_primary_key_value();
 
         m_insert_statements->kernel_dispatch_statement()(
             primary_key,
@@ -678,6 +636,8 @@ public:
     void insert_memory_copy_data(const writer_api::memory_copy_data_t&  memory_copy_data,
                                  const writer_api::trace_environment_t& trace_environment)
     {
+        auto transaction_block = m_database->create_transaction_block();
+
         m_validator->require_node(trace_environment.node_id)
             .require_process(trace_environment.process_id)
             .validate_optional_thread(trace_environment.thread_id)
@@ -686,7 +646,7 @@ public:
             .validate_optional_queue(trace_environment.queue_id)
             .validate_optional_stream(trace_environment.stream_id);
 
-        auto& string_info_utility = m_entity_identifiers->string_info();
+        auto& string_info_utility = m_entity_registry->string_info();
         if(!string_info_utility.is_entry_registered(memory_copy_data.name))
             register_string(memory_copy_data.name);
         if(memory_copy_data.region_name != nullptr &&
@@ -720,8 +680,7 @@ public:
                 memory_copy_data.region_name);
 
         const auto primary_key =
-            m_entity_identifiers->memory_copy_data_primary_key_provider()
-                .get_primary_key_value();
+            m_key_providers->memory_copy_data().get_primary_key_value();
 
         m_insert_statements->memory_copy_statement()(primary_key,
                                                      trace_environment.node_id.value(),
@@ -761,6 +720,8 @@ public:
         const writer_api::memory_alloc_data_t& memory_alloc_data,
         const writer_api::trace_environment_t& trace_environment)
     {
+        auto transaction_block = m_database->create_transaction_block();
+
         m_validator->require_node(trace_environment.node_id)
             .require_process(trace_environment.process_id)
             .validate_optional_thread(trace_environment.thread_id)
@@ -818,8 +779,7 @@ public:
         }
 
         const auto primary_key =
-            m_entity_identifiers->memory_alloc_data_primary_key_provider()
-                .get_primary_key_value();
+            m_key_providers->memory_alloc_data().get_primary_key_value();
 
         m_insert_statements->memory_alloc_statement()(primary_key,
                                                       trace_environment.node_id.value(),
@@ -858,7 +818,8 @@ public:
     std::shared_ptr<data_storage::database>                     m_database;
     std::string                                                 m_uuid;
     std::unique_ptr<data_storage::schema_v3::insert_statements> m_insert_statements;
-    std::shared_ptr<data_identifiers>                           m_entity_identifiers;
+    std::shared_ptr<entity_registry>                            m_entity_registry;
+    std::shared_ptr<primary_key_providers>                      m_key_providers;
     std::shared_ptr<insert_validator>                           m_validator;
 };
 

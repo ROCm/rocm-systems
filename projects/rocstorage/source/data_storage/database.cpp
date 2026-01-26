@@ -210,7 +210,7 @@ void
 database::execute_query(const std::string& query)
 {
     validate_sqlite3_result(sqlite3_exec(m_sqlite3_inmemory, query.c_str(), 0, 0, 0),
-                            "Failed to execute query - ",
+                            "Failed to execute query:",
                             query);
 }
 
