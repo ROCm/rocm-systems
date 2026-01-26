@@ -697,7 +697,7 @@ namespace rocshmem
   }
 
 
-  int GetClosestNicToGpu(int gpuIndex, const char** dev_name)
+  int GetClosestNicToGpu(int gpuIndex, const char* exclude_list, const char** dev_name)
   {
     static bool isInitialized = false;
     static std::vector<int> closestNicId;
@@ -712,8 +712,10 @@ namespace rocshmem
 
       // Build up list of NIC bus addresses
       std::vector<std::string> ibvAddressList;
-      for (auto const& ibvDevice : ibvDeviceList)
-        ibvAddressList.push_back(ibvDevice.hasActivePort ? ibvDevice.busId : "");
+      for (auto const& ibvDevice : ibvDeviceList) {
+        auto is_excluded = (nullptr != strstr(exclude_list, ibvDevice.name.c_str()));
+        ibvAddressList.push_back((ibvDevice.hasActivePort && !is_excluded) ? ibvDevice.busId : "");
+      }
 
       // Track how many times a device has been assigned as "closest"
       // This allows distributed work across devices using multiple ports (sharing the same busID)
@@ -810,7 +812,7 @@ namespace rocshmem
 
       std::string closestGpusStr = "";
       for (int j = 0; j < numGpus; j++) {
-        if (rocshmem::GetClosestNicToGpu(j, nullptr) == i) {
+        if (rocshmem::GetClosestNicToGpu(j, nullptr, nullptr) == i) {
           if (closestGpusStr != "") closestGpusStr += ",";
           closestGpusStr += std::to_string(j);
         }

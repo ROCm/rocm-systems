@@ -127,12 +127,12 @@ GDABackend::~GDABackend() {
 }
 
 void GDABackend::select_nic() {
-  if (!envvar::requested_dev.is_default()) {
-    requested_dev = envvar::requested_dev.get_value().c_str();
+  if (!envvar::requested_nic.is_default()) {
+    requested_nic = envvar::requested_nic.get_value().c_str();
   } else {
     int gpu_dev = 0;
     CHECK_HIP(hipGetDevice(&gpu_dev));
-    int nic_dev = rocshmem::GetClosestNicToGpu(gpu_dev, &requested_dev);
+    int nic_dev = rocshmem::GetClosestNicToGpu(gpu_dev, envvar::excluded_nics.get_value().c_str(), &requested_nic);
     assert (nic_dev != -1);
   }
 }
@@ -947,12 +947,12 @@ void GDABackend::open_ib_device() {
 
   device = device_list[0]; //TODO default to HIP selected device?
 
-  if (requested_dev) {
+  if (requested_nic) {
     for (int i = 0; i < num_devices; i++) {
       const char *select_device = ibv.get_device_name(device_list[i]);
       CHECK_NNULL(select_device, "ibv_get_device_name");
 
-      if (strstr(select_device, requested_dev)) {
+      if (strstr(select_device, requested_nic)) {
         device = device_list[i];
         break;
       }
