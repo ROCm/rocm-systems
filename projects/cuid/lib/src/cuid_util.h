@@ -72,8 +72,15 @@ namespace CuidUtilities {
     amdcuid_status_t uuid_string_to_uint8(const std::string& uuid_str, uint8_t* uuid);
     std::string device_type_to_string(amdcuid_device_type_t type);
 
-    static const std::string cuid_file = "/tmp/cuid";
-    static const std::string priv_cuid_file = "/tmp/priv_cuid";
+    // Use inline functions to avoid static initialization order fiasco
+    inline const std::string& cuid_file() {
+        static const std::string path = "/tmp/cuid";
+        return path;
+    }
+    inline const std::string& priv_cuid_file() {
+        static const std::string path = "/tmp/priv_cuid";
+        return path;
+    }
 }
 
 #endif

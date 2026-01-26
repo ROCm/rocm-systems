@@ -19,10 +19,30 @@
 # THE SOFTWARE.
 
 cmake_minimum_required(VERSION 3.10)
-project(cuid)
 
-add_subdirectory(lib)
-# add_subdirectory(cli)
-add_subdirectory(daemon)
-# add_subdirectory(example)
-add_subdirectory(tests)
+# Find required packages
+find_package(GTest REQUIRED)
+find_package(OpenSSL REQUIRED)
+
+# Enable testing
+enable_testing()
+
+# Unit tests executable
+add_executable(cuid_test
+    unit/cuid_test.cc
+)
+
+target_include_directories(cuid_test PRIVATE
+    ${CMAKE_SOURCE_DIR}/lib
+)
+
+target_link_libraries(cuid_test
+    cuid_static
+    GTest::GTest
+    GTest::Main
+    OpenSSL::SSL
+    OpenSSL::Crypto
+)
+
+# Register tests with CTest
+add_test(NAME cuid_unit_tests COMMAND cuid_test)

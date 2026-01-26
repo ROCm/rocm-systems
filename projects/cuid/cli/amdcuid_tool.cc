@@ -48,9 +48,9 @@
  */
 
 
-// Default CUID file paths
-static const char* DEFAULT_CUID_FILE = CuidUtilities::cuid_file.c_str();
-static const char* DEFAULT_PRIV_CUID_FILE = CuidUtilities::priv_cuid_file.c_str();
+// Default CUID file paths - use functions to get paths at runtime
+static const char* get_default_cuid_file() { return CuidUtilities::cuid_file().c_str(); }
+static const char* get_default_priv_cuid_file() { return CuidUtilities::priv_cuid_file().c_str(); }
 
 void print_usage(const char* program_name) {
     std::cout << "Usage: " << program_name << " [OPTIONS]\n\n";
@@ -175,8 +175,8 @@ int generate_cuid_files(const std::string& key_file) {
     status = CuidFileGenerator::generate_from_devices(
         mgr.devices(),
         key_file,
-        DEFAULT_CUID_FILE,
-        DEFAULT_PRIV_CUID_FILE
+        get_default_cuid_file(),
+        get_default_priv_cuid_file()
     );
     
     if (status != AMDCUID_STATUS_SUCCESS) {
@@ -185,16 +185,16 @@ int generate_cuid_files(const std::string& key_file) {
     }
     
     std::cout << "\nCUID files generated successfully!" << std::endl;
-    std::cout << "  Public CUID file:     " << DEFAULT_CUID_FILE << std::endl;
+    std::cout << "  Public CUID file:     " << get_default_cuid_file() << std::endl;
     if (is_root()) {
-        std::cout << "  Privileged CUID file: " << DEFAULT_PRIV_CUID_FILE << std::endl;
+        std::cout << "  Privileged CUID file: " << get_default_priv_cuid_file() << std::endl;
     }
     return 0;
 }
 
 int list_devices(bool show_primary, const std::string* filter_type) {
     // Determine which file to read based on show_primary flag
-    std::string file_path = show_primary ? DEFAULT_PRIV_CUID_FILE : DEFAULT_CUID_FILE;
+    std::string file_path = show_primary ? get_default_priv_cuid_file() : get_default_cuid_file();
     
     // Check for root privileges if requesting primary CUIDs
     if (show_primary && !is_root()) {
@@ -304,7 +304,7 @@ int list_devices(bool show_primary, const std::string* filter_type) {
 
 int query_device(const std::string& identifier, bool show_primary) {
     // Determine which file to read based on show_primary flag
-    std::string file_path = show_primary ? DEFAULT_PRIV_CUID_FILE : DEFAULT_CUID_FILE;
+    std::string file_path = show_primary ? get_default_priv_cuid_file() : get_default_cuid_file();
     
     // Check for root privileges if requesting primary CUIDs
     if (show_primary && !is_root()) {

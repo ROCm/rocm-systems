@@ -130,8 +130,8 @@ public:
     static amdcuid_status_t generate_from_devices(
         const std::vector<std::shared_ptr<class CuidDevice>>& devices,
         const std::string& key_file_path,
-        const std::string& unprivileged_file = CuidUtilities::cuid_file,
-        const std::string& privileged_file = CuidUtilities::priv_cuid_file
+        const std::string& unprivileged_file = CuidUtilities::cuid_file(),
+        const std::string& privileged_file = CuidUtilities::priv_cuid_file()
     );
 };
 

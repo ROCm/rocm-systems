@@ -132,8 +132,8 @@ private:
     std::map<amdcuid_id_t, DevicePtr, CuidComparator> cuid_index_;
 
     // Cuid Files
-    CuidFile unpriv_cuid_file_{CuidUtilities::cuid_file, true};
-    CuidFile priv_cuid_file_{CuidUtilities::priv_cuid_file, false};
+    CuidFile unpriv_cuid_file_{CuidUtilities::cuid_file(), true};
+    CuidFile priv_cuid_file_{CuidUtilities::priv_cuid_file(), false};
 };
 
 #endif // CUID_DEVICE_MANAGER_H

@@ -131,7 +131,7 @@ amdcuid_status_t cuid_hmac::set_hmac_algorithm(const EVP_MD* md)
     return AMDCUID_STATUS_SUCCESS;
 }
 
-amdcuid_status_t cuid_hmac::set_hmac_key(const uint8_t (*key_data)[key_length]) {
+amdcuid_status_t cuid_hmac::set_hmac_key(const uint8_t key_data[key_length]) {
     if (geteuid() != 0) {
         return AMDCUID_STATUS_PERMISSION_DENIED;
     }
@@ -140,7 +140,7 @@ amdcuid_status_t cuid_hmac::set_hmac_key(const uint8_t (*key_data)[key_length]) 
         delete[] key;
     }
     key = new uint8_t[key_length];
-    std::memcpy(key, *key_data, key_length);
+    std::memcpy(key, key_data, key_length);
 
     // if key_file exists, delete it first
     if (std::remove(key_file_path.c_str()) != 0 && errno != ENOENT) {
@@ -167,11 +167,11 @@ amdcuid_status_t cuid_hmac::set_hmac_key(const uint8_t (*key_data)[key_length]) 
     return AMDCUID_STATUS_SUCCESS;
 }
 
-amdcuid_status_t cuid_hmac::generate_key(uint8_t (*key)[key_length]) {
+amdcuid_status_t cuid_hmac::generate_key(uint8_t key[key_length]) {
     if (!key)
         return AMDCUID_STATUS_INVALID_ARGUMENT;
 
-    if (RAND_bytes(*key, key_length) != 1) {
+    if (RAND_bytes(key, key_length) != 1) {
         return AMDCUID_STATUS_KEY_ERROR;
     }
 

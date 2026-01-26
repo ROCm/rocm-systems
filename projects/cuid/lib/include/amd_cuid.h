@@ -225,7 +225,7 @@ typedef enum {
     AMDCUID_QUERY_SECONDARY_CUID = 2,         ///< Query the secondary CUID (uint8_t[16]). The bits will be formatted in the UUIDv8 format. This is the user visible CUID in most cases.
     AMDCUID_QUERY_HARDWARE_FINGERPRINT = 3,   ///< Query the hardware fingerprint (aka serial number/id) (uint64_t). Requires elevated permissions.
     AMDCUID_QUERY_DEVICE_PATH = 4,            ///< Query the device path (string)
-    AMDCUID_QUERY_DEVICE_TYPE = 5,            ///< Query the device type (string). One of amdcuid_device_type_t
+    AMDCUID_QUERY_DEVICE_TYPE = 5,            ///< Query the device type (). One of amdcuid_device_type_t
     AMDCUID_QUERY_VENDOR_ID = 6,              ///< Query the vendor ID (uint16_t). Supported by all device types.
     AMDCUID_QUERY_DEVICE_ID = 7,              ///< Query the device ID (uint16_t). Supported by GPU, NIC, and CPU device types.
     AMDCUID_QUERY_REVISION_ID = 8,            ///< Query the revision ID (uint16_t). Supported by GPU, NIC, and CPU device types.

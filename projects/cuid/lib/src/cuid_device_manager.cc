@@ -290,9 +290,15 @@ amdcuid_status_t CuidDeviceManager::discover_devices() {
     // search for devices in the appropriate CUID file first
     if (geteuid() == 0) {
         status = get_devices_from_file_entries(priv_cuid_file_);
+        if (status != AMDCUID_STATUS_SUCCESS) {
+            return status;
+        }
     }
     else {
         status = get_devices_from_file_entries(unpriv_cuid_file_);
+        if (status != AMDCUID_STATUS_SUCCESS) {
+            return status;
+        }
     }
 
     // if there are no devices found, return error

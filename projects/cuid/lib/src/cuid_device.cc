@@ -40,10 +40,10 @@
 
 amdcuid_status_t CuidDevice::get_secondary_cuid(amdcuid_secondary_id& id, cuid_hmac * hmac) const {
     //attempt to find the secondary CUID in file first
-    CuidFile secondary_file(CuidUtilities::cuid_file, false);
+    CuidFile secondary_file(CuidUtilities::cuid_file(), false);
     amdcuid_status_t status = secondary_file.load();
     if (status != AMDCUID_STATUS_SUCCESS) {
-        std::cerr << "Failed to load secondary CUID file: " << CuidUtilities::cuid_file << std::endl;
+        std::cerr << "Failed to load secondary CUID file: " << CuidUtilities::cuid_file() << std::endl;
         return status;
     }
 

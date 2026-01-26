@@ -387,7 +387,7 @@ amdcuid_status_t CuidCpu::get_primary_cuid(amdcuid_primary_id& id) const {
     }
 
     // Attempt to read the CUID from the file first
-    std::string cuid_file_path = CuidUtilities::priv_cuid_file;
+    std::string cuid_file_path = CuidUtilities::priv_cuid_file();
     CuidFile primary_file(cuid_file_path, false);
     primary_file.load();
     std::vector<CuidFileEntry> entries = primary_file.get_entries();

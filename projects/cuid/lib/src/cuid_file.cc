@@ -102,11 +102,11 @@ bool CuidFile::parse_section_header(const std::string& line,
     size_t colon_pos = content.find(':');
     
     if (colon_pos != std::string::npos) {
-        // Format: TYPE:INDEX
+        // Format: TYPE:INDEX (index is in hex)
         std::string type_str = content.substr(0, colon_pos);
         std::string index_str = content.substr(colon_pos + 1);
         type = string_to_device_type(type_str);
-        index = std::stoul(index_str);
+        index = std::stoul(index_str, nullptr, 16);
     } else {
         // Format: PLATFORM (no index)
         type = string_to_device_type(content);

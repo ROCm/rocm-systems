@@ -46,6 +46,100 @@
 // static hmac instance for daemon
 static cuid_hmac daemon_hmac = cuid_hmac();
 
+// Global log file stream
+static std::unique_ptr<std::ofstream> g_log_file;
+static bool g_logging_to_file = false;
+
+static std::ostream& log_out() {
+    if (g_logging_to_file && g_log_file && g_log_file->is_open()) {
+        return *g_log_file;
+    }
+    return std::cout;
+}
+
+static std::ostream& log_err() {
+    if (g_logging_to_file && g_log_file && g_log_file->is_open()) {
+        return *g_log_file;
+    }
+    return std::cerr;
+}
+
+static void init_logging(bool enabled) {
+    if (enabled) {
+        g_log_file = std::make_unique<std::ofstream>("/var/log/amdcuid.log", std::ios::app);
+        if (g_log_file->is_open()) {
+            g_logging_to_file = true;
+            // Add timestamp to log entry
+            time_t now = time(nullptr);
+            *g_log_file << "\n=== Log started at " << ctime(&now);
+        }
+    }
+}
+
+amdcuid_status_t remove_device(std::string output_file,
+                                std::string priv_output_file,
+                                const amdcuid_id_t *device) {
+
+    // Load existing CUID files
+    CuidFile unpriv_file(output_file, false);
+    CuidFile priv_file(priv_output_file, true);
+    unpriv_file.load();
+    priv_file.load();
+
+    log_out() << "Attempting removal of device with secondary CUID: " << CuidUtilities::get_cuid_as_string(device) << std::endl;
+
+    amdcuid_status_t status;
+    // Remove entry from both files
+    status = unpriv_file.remove_entry(*device);
+    if (status != AMDCUID_STATUS_SUCCESS) {
+        log_err() << "Error removing device from unprivileged file: " << amdcuid_status_to_string(status) << std::endl;
+        return status;
+    }
+    status = priv_file.remove_entry(*device);
+    if (status != AMDCUID_STATUS_SUCCESS) {
+        log_err() << "Error removing device from privileged file: " << amdcuid_status_to_string(status) << std::endl;
+        return status;
+    }
+
+    // Save updated CUID files
+    unpriv_file.save();
+    priv_file.save();
+
+    return AMDCUID_STATUS_SUCCESS;
+}
+
+amdcuid_status_t update_device(std::string output_file,
+                                std::string priv_output_file,
+                                CuidFileEntry *device) {
+    // Load existing CUID files
+    CuidFile unpriv_file(output_file, false);
+    CuidFile priv_file(priv_output_file, true);
+    unpriv_file.load();
+    priv_file.load();
+
+    log_out() << "Attempting update of device with secondary CUID: " << CuidUtilities::get_cuid_as_string(&device->secondary_cuid) << std::endl;
+
+    amdcuid_status_t status;
+    // Remove entry from both files
+    status = unpriv_file.add_entry(*device);
+    if (status != AMDCUID_STATUS_SUCCESS) {
+        log_err() << "Error updating device in unprivileged file: " << amdcuid_status_to_string(status) << std::endl;
+        return status;
+    }
+    status = priv_file.add_entry(*device);
+    if (status != AMDCUID_STATUS_SUCCESS) {
+        log_err() << "Error updating device in privileged file: " << amdcuid_status_to_string(status) << std::endl;
+        return status;
+    }
+
+
+    // Save updated CUID files
+    unpriv_file.save();
+    priv_file.save();
+
+    return AMDCUID_STATUS_SUCCESS;
+}
+
 // Daemon Server
 class CuidDaemonServer
 {
@@ -230,7 +324,7 @@ private:
                 return AMDCUID_STATUS_UNSUPPORTED;
         }
         entry.last_update = time(nullptr);
-        update_device(CuidUtilities::cuid_file, CuidUtilities::priv_cuid_file, &entry);
+        update_device(CuidUtilities::cuid_file(), CuidUtilities::priv_cuid_file(), &entry);
 
         return status;
     }
@@ -239,108 +333,12 @@ private:
         const amdcuid_id_t& handle
     ) {
         return remove_device(
-            CuidUtilities::cuid_file,
-            CuidUtilities::priv_cuid_file,
+            CuidUtilities::cuid_file(),
+            CuidUtilities::priv_cuid_file(),
             &handle
         );
     }
 };
-
-
-// Global log file stream
-static std::unique_ptr<std::ofstream> g_log_file;
-static bool g_logging_to_file = false;
-
-static std::ostream& log_out() {
-    if (g_logging_to_file && g_log_file && g_log_file->is_open()) {
-        return *g_log_file;
-    }
-    return std::cout;
-}
-
-static std::ostream& log_err() {
-    if (g_logging_to_file && g_log_file && g_log_file->is_open()) {
-        return *g_log_file;
-    }
-    return std::cerr;
-}
-
-static void init_logging(bool enabled) {
-    if (enabled) {
-        g_log_file = std::make_unique<std::ofstream>("/var/log/amdcuid.log", std::ios::app);
-        if (g_log_file->is_open()) {
-            g_logging_to_file = true;
-            // Add timestamp to log entry
-            time_t now = time(nullptr);
-            *g_log_file << "\n=== Log started at " << ctime(&now);
-        }
-    }
-}
-
-
-amdcuid_status_t remove_device(std::string output_file,
-                                std::string priv_output_file,
-                                const amdcuid_id_t *device) {
-
-    // Load existing CUID files
-    CuidFile unpriv_file(output_file, false);
-    CuidFile priv_file(priv_output_file, true);
-    unpriv_file.load();
-    priv_file.load();
-
-    log_out() << "Attempting removal of device with secondary CUID: " << CuidUtilities::get_cuid_as_string(device) << std::endl;
-
-    amdcuid_status_t status;
-    // Remove entry from both files
-    status = unpriv_file.remove_entry(*device);
-    if (status != AMDCUID_STATUS_SUCCESS) {
-        log_err() << "Error removing device from unprivileged file: " << amdcuid_status_to_string(status) << std::endl;
-        return status;
-    }
-    status = priv_file.remove_entry(*device);
-    if (status != AMDCUID_STATUS_SUCCESS) {
-        log_err() << "Error removing device from privileged file: " << amdcuid_status_to_string(status) << std::endl;
-        return status;
-    }
-
-    // Save updated CUID files
-    unpriv_file.save();
-    priv_file.save();
-
-    return AMDCUID_STATUS_SUCCESS;
-}
-
-amdcuid_status_t update_device(std::string output_file,
-                                std::string priv_output_file,
-                                CuidFileEntry *device) {
-    // Load existing CUID files
-    CuidFile unpriv_file(output_file, false);
-    CuidFile priv_file(priv_output_file, true);
-    unpriv_file.load();
-    priv_file.load();
-
-    log_out() << "Attempting update of device with secondary CUID: " << CuidUtilities::get_cuid_as_string(&device->secondary_cuid) << std::endl;
-
-    amdcuid_status_t status;
-    // Remove entry from both files
-    status = unpriv_file.add_entry(*device);
-    if (status != AMDCUID_STATUS_SUCCESS) {
-        log_err() << "Error updating device in unprivileged file: " << amdcuid_status_to_string(status) << std::endl;
-        return status;
-    }
-    status = priv_file.add_entry(*device);
-    if (status != AMDCUID_STATUS_SUCCESS) {
-        log_err() << "Error updating device in privileged file: " << amdcuid_status_to_string(status) << std::endl;
-        return status;
-    }
-
-
-    // Save updated CUID files
-    unpriv_file.save();
-    priv_file.save();
-
-    return AMDCUID_STATUS_SUCCESS;
-}
 
 amdcuid_status_t get_device_from_udev(std::string *action_output, CuidFileEntry *device_entry, cuid_hmac* hmac) {
     // udev passes device information as environment variables when triggering rules
@@ -494,14 +492,14 @@ int main() {
         return 1;
     }
 
-    if (config_lines.size() < 3) {
+    if (config_lines.size() < 2) {
         std::cerr << "Insufficient config parameters. Exiting." << std::endl;
         return 1;
     }
 
     bool logging_enabled = (config_lines[1] == "true");
-    std::string output_file = CuidUtilities::cuid_file;
-    std::string priv_output_file = CuidUtilities::priv_cuid_file;
+    std::string output_file = CuidUtilities::cuid_file();
+    std::string priv_output_file = CuidUtilities::priv_cuid_file();
 
     // Initialize file logging if enabled
     init_logging(logging_enabled);
