@@ -63,9 +63,6 @@ class CountedQueuesTest : public TestBase {
   /// @brief Test to verify ring buffer wrap around when more than queue_size number of 
   // AQL packets are enqueued
   void CountedQueuesOverflowWrapAroundTest();
-
- private:
-  size_t counted_queue_size;
 };
 
 #endif  // ROCRTST_SUITES_FUNCTIONAL_COUNTED_QUEUES_H

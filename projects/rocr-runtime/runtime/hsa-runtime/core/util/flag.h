@@ -54,6 +54,8 @@
 
 namespace rocr {
 
+constexpr size_t DEFAULT_COUNTED_QUEUE_SIZE = 16384;
+
 class Flag {
  public:
   enum SDMA_OVERRIDE { SDMA_DISABLE, SDMA_ENABLE, SDMA_DEFAULT };
@@ -311,7 +313,7 @@ class Flag {
     cp_queues_limit_ = var.empty() ? 4 : atoi(var.c_str());
 
     var = os::GetEnvVar("HSA_COUNTED_QUEUE_SIZE");
-    counted_queue_size_ = var.empty() ? 16384 : atoi(var.c_str());
+    counted_queue_size_ = var.empty() ? DEFAULT_COUNTED_QUEUE_SIZE : atoi(var.c_str());
   }
 
   void parse_masks(uint32_t maxGpu, uint32_t maxCU) {
