@@ -17,6 +17,7 @@ We also provide the following validators:
 from __future__ import annotations
 import os
 import re
+import shlex
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -34,6 +35,7 @@ class ValidationResult:
         details: Additional details (e.g., query results)
         stdout: Standard output from validation script
         stderr: Standard error from validation script
+        command: The command that was executed
     """
 
     is_valid: bool
@@ -41,6 +43,7 @@ class ValidationResult:
     details: Optional[dict[str, Any]] = None
     stdout: str = ""
     stderr: str = ""
+    command: str = ""
 
 
 ROCPROFSYS_ABORT_FAIL_REGEX = [
@@ -174,6 +177,7 @@ def _run_validation_script(
         return ValidationResult(False, f"Validation script not found: {script_path}")
 
     cmd = [sys.executable, str(script_path)] + args
+    cmd_str = " ".join(shlex.quote(arg) for arg in cmd)
 
     try:
         result = subprocess.run(
@@ -197,12 +201,15 @@ def _run_validation_script(
             message=message,
             stdout=result.stdout,
             stderr=result.stderr,
+            command=cmd_str,
         )
 
     except subprocess.TimeoutExpired:
-        return ValidationResult(False, f"Validation timed out after {timeout}s")
+        return ValidationResult(
+            False, f"Validation timed out after {timeout}s", command=cmd_str
+        )
     except Exception as e:
-        return ValidationResult(False, f"Validation error: {e}")
+        return ValidationResult(False, f"Validation error: {e}", command=cmd_str)
 
 
 # ============================================================================

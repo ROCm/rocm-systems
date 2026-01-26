@@ -98,12 +98,6 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         help="Write log output to the specified file (use 'none' to disable)",
     )
     group.addoption(
-        "--print-env",
-        action="store_true",
-        default=False,
-        help="Print the environment variables used by the test",
-    )
-    group.addoption(
         "--monochrome",
         action="store_true",
         default=False,
@@ -136,7 +130,6 @@ def pytest_configure(config: pytest.Config) -> None:
     if config.getoption("--ci-mode", default=False):
         config.option.output_log = "none"  # Already reported to dashboard
         config.option.show_config = True
-        config.option.print_env = True
         config.option.show_output_on_subtest_fail = True
         config.option.verbose = max(config.option.verbose, 1)  # -v
         config.option.tbstyle = "short"  # --tb=short
@@ -454,7 +447,6 @@ def pytest_runtest_makereport(item, call):
     # Relevant flags
     show_output_flag = getattr(pytest, "_show_output_flag", False)
     show_on_subfail_flag = getattr(pytest, "_show_output_on_subtest_fail_flag", False)
-    print_env_flag = bool(config and config.getoption("--print-env", default=False))
 
     has_subtest_failures = len(item.stash.get(_subtest_failures_key, [])) > 0
     show_runner_output = (show_output_flag and not rep.failed) or (
@@ -464,7 +456,7 @@ def pytest_runtest_makereport(item, call):
     if (
         rep.when != "call"
         or item.stash.get(_output_printed_key, False)
-        or not (show_runner_output or print_env_flag)
+        or not (show_runner_output)
     ):
         return
 
@@ -473,24 +465,20 @@ def pytest_runtest_makereport(item, call):
     if not result:
         return
 
-    item.stash[_output_printed_key] = True
     output_parts = []
 
     # Build the output
     if show_runner_output:
+        item.stash[_output_printed_key] = True
         cmd = " ".join(str(c) for c in getattr(result, "command", []))
         if cmd:
             output_parts.append(f"{'='*70}")
             output_parts.append(f"Command: {cmd}")
-    if print_env_flag:
         result_env = getattr(result, "environment", None)
         if isinstance(result_env, dict) and result_env:
             env_lines = [f"  {k}={v}" for k, v in sorted(result_env.items())]
-            output_parts.append(
-                "Environment (via --print-env):\n\n" + "\n".join(env_lines) + "\n"
-            )
+            output_parts.append("Environment:\n\n" + "\n".join(env_lines) + "\n")
             output_parts.append(f"{'='*70}")
-    if show_runner_output:
         output_parts.append("Test Output:\n")
         test_out = getattr(result, "test_output", "")
         if test_out:
@@ -1223,7 +1211,7 @@ def assert_perfetto(subtests, tests_dir, record_subtest_failure, request):
         key_names: Optional[list[str]] = None,
         key_counts: Optional[list[int]] = None,
         trace_processor_path: Optional[Path] = None,
-        print_output: bool = False,
+        print_output: bool = True,
         timeout: int = 120,
         pass_regex: Optional[list[str]] = None,
         fail_regex: Optional[list[str]] = None,
@@ -1255,8 +1243,9 @@ def assert_perfetto(subtests, tests_dir, record_subtest_failure, request):
                 print_output=print_output,
                 timeout=timeout,
             )
+            output = f"Command: {validation.command}\n\n{validation.message}"
             if not validation.is_valid:
-                msg = fail_message or f"Perfetto validation failed: {validation.message}"
+                msg = fail_message or f"Perfetto validation failed:\n{output}"
                 if skip_on_fail:
                     pytest.skip(msg)
                 else:
@@ -1266,12 +1255,12 @@ def assert_perfetto(subtests, tests_dir, record_subtest_failure, request):
                 for pattern in pass_regex:
                     if not re.search(pattern, validation.stdout):
                         record_subtest_failure(subtest_name)
-                        pytest.fail(f"Pass regex not found: {pattern}")
+                        pytest.fail(f"Pass regex not found: {pattern}\n{output}")
             if fail_regex:
                 for pattern in fail_regex:
                     if re.search(pattern, validation.stdout):
                         record_subtest_failure(subtest_name)
-                        pytest.fail(f"Fail regex found: {pattern}")
+                        pytest.fail(f"Fail regex found: {pattern}\n{output}")
 
     return _assert_perfetto
 
@@ -1330,8 +1319,9 @@ def assert_rocpd(subtests, tests_dir, record_subtest_failure, request):
                 rules_files=existing_rules,
                 timeout=timeout,
             )
+            output = f"Command: {validation.command}\n\n{validation.message}"
             if not validation.is_valid:
-                msg = fail_message or f"ROCpd validation failed: {validation.message}"
+                msg = fail_message or f"ROCpd validation failed:\n{output}"
                 if skip_on_fail:
                     pytest.skip(msg)
                 else:
@@ -1341,12 +1331,12 @@ def assert_rocpd(subtests, tests_dir, record_subtest_failure, request):
                 for pattern in pass_regex:
                     if not re.search(pattern, validation.stdout):
                         record_subtest_failure(subtest_name)
-                        pytest.fail(f"Pass regex not found: {pattern}")
+                        pytest.fail(f"Pass regex not found: {pattern}\n{output}")
             if fail_regex:
                 for pattern in fail_regex:
                     if re.search(pattern, validation.stdout):
                         record_subtest_failure(subtest_name)
-                        pytest.fail(f"Fail regex found: {pattern}")
+                        pytest.fail(f"Fail regex found: {pattern}\n{output}")
 
     return _assert_rocpd
 
@@ -1377,7 +1367,7 @@ def assert_timemory(subtests, tests_dir, record_subtest_failure, request):
         labels: Optional[list[str]] = None,
         counts: Optional[list[int]] = None,
         depths: Optional[list[int]] = None,
-        print_output: bool = False,
+        print_output: bool = True,
         timeout: int = 60,
         pass_regex: Optional[list[str]] = None,
         fail_regex: Optional[list[str]] = None,
@@ -1402,8 +1392,9 @@ def assert_timemory(subtests, tests_dir, record_subtest_failure, request):
                 print_output=print_output,
                 timeout=timeout,
             )
+            output = f"Command: {validation.command}\n\n{validation.message}"
             if not validation.is_valid:
-                msg = fail_message or f"Timemory validation failed: {validation.message}"
+                msg = fail_message or f"Timemory validation failed:\n{output}"
                 if skip_on_fail:
                     pytest.skip(msg)
                 else:
@@ -1413,12 +1404,12 @@ def assert_timemory(subtests, tests_dir, record_subtest_failure, request):
                 for pattern in pass_regex:
                     if not re.search(pattern, validation.stdout):
                         record_subtest_failure(subtest_name)
-                        pytest.fail(f"Pass regex not found: {pattern}")
+                        pytest.fail(f"Pass regex not found: {pattern}\n{output}")
             if fail_regex:
                 for pattern in fail_regex:
                     if re.search(pattern, validation.stdout):
                         record_subtest_failure(subtest_name)
-                        pytest.fail(f"Fail regex found: {pattern}")
+                        pytest.fail(f"Fail regex found: {pattern}\n{output}")
 
     return _assert_timemory
 
@@ -1512,12 +1503,12 @@ def assert_causal_json(subtests, tests_dir, record_subtest_failure, request):
                 additional_args=additional_args,
                 timeout=timeout,
             )
-
+            output = f"Command: {validation.command}\n\n{validation.message}"
             if not validation.is_valid:
                 if fail_message:
-                    msg = f"{fail_message}: {validation.message}"
+                    msg = f"{fail_message}:\n{output}"
                 else:
-                    msg = f"Causal JSON validation failed: {validation.message}"
+                    msg = f"Causal JSON validation failed:\n{output}"
                 if skip_on_fail:
                     pytest.skip(msg)
                 else:
@@ -1528,12 +1519,12 @@ def assert_causal_json(subtests, tests_dir, record_subtest_failure, request):
                 for pattern in pass_regex:
                     if not re.search(pattern, validation.stdout):
                         record_subtest_failure(subtest_name)
-                        pytest.fail(f"Pass regex not found: {pattern}")
+                        pytest.fail(f"Pass regex not found: {pattern}\n{output}")
 
             if fail_regex:
                 for pattern in fail_regex:
                     if re.search(pattern, validation.stdout):
                         record_subtest_failure(subtest_name)
-                        pytest.fail(f"Fail regex found: {pattern}")
+                        pytest.fail(f"Fail regex found: {pattern}\n{output}")
 
     return _assert_causal_json

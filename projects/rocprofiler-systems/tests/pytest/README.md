@@ -119,7 +119,6 @@ pytest <build-dir>/share/rocprofiler-systems/tests/pytest/ -n 4     # Use 4 work
 | `--show-output-on-subtest-fail` | Show runner output only when **subtests** fail |
 | `--output-dir=<path>` | Set the test output directory (default: `<build_dir>/pytest-output`) |
 | `--output-log=<path>` | Write pytest output to the specified file (default: `<output_dir>/pytest-output.txt`) |
-| `--print-env` | Prepend environment variables to runner output (tied to runner output) |
 | `--monochrome` | Disable colored output and set `ROCPROFSYS_MONOCHROME=ON` for runners |
 | `--allow-disabled` | Run tests with `@pytest.mark.disable` in CI mode (developer flag) |
 

@@ -214,16 +214,18 @@ class TestOpenMPTarget:
         )
 
         assert_regex(result)
-        assert_perfetto(result, categories=["rocm_kernel_dispatch"])
         assert_rocpd(result, rules_files=openmp_target_rules)
-
-        # Informational validation - kernels may have different names
         assert_perfetto(
             result,
             subtest_name="Perfetto Kernel Dispatch Validation",
-            label_substrings=["vmul"],
-            skip_on_fail=True,
-            fail_message="Kernel names differ from expected",
+            categories=["rocm_kernel_dispatch"],
+            label_substrings=[
+                "Z4vmulIiEvPT_S1_S1_i_l51.kd",
+                "Z4vmulIfEvPT_S1_S1_i_l51.kd",
+                "Z4vmulIdEvPT_S1_S1_i_l51.kd",
+            ],
+            depths=[0, 0, 0],
+            counts=[4, 4, 4],
         )
 
 
