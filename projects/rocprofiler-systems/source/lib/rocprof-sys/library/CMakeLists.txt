@@ -22,6 +22,7 @@ set(library_headers
     ${CMAKE_CURRENT_LIST_DIR}/ptl.hpp
     ${CMAKE_CURRENT_LIST_DIR}/rocm.hpp
     ${CMAKE_CURRENT_LIST_DIR}/amd_smi.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/amd_smi_ainic.hpp
     ${CMAKE_CURRENT_LIST_DIR}/rocprofiler-sdk.hpp
     ${CMAKE_CURRENT_LIST_DIR}/runtime.hpp
     ${CMAKE_CURRENT_LIST_DIR}/sampling.hpp
@@ -44,6 +45,7 @@ if(ROCPROFSYS_USE_ROCM)
             ${CMAKE_CURRENT_LIST_DIR}/rocm.cpp
             ${CMAKE_CURRENT_LIST_DIR}/rocprofiler-sdk.cpp
             ${CMAKE_CURRENT_LIST_DIR}/amd_smi.cpp
+            ${CMAKE_CURRENT_LIST_DIR}/amd_smi_ainic.cpp
     )
     add_subdirectory(rocprofiler-sdk)
 endif()
