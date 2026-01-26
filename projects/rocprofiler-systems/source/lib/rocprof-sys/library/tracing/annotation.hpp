@@ -89,7 +89,7 @@ add_perfetto_annotation(
         auto* _dbg = ctx.event()->add_debug_annotations();
         if(_idx >= 0)
         {
-            auto _arg_name = JOIN("", "arg", _idx, "-", std::forward<Np>(_name));
+            auto _arg_name = fmt::format("arg{}-{}", _idx, std::forward<Np>(_name));
             _dbg->set_name(_arg_name);
         }
         else
@@ -136,7 +136,7 @@ add_perfetto_annotation(
     }
     else if constexpr(concepts::can_stringify<value_type>::value)
     {
-        _get_dbg()->set_string_value(JOIN("", std::forward<Tp>(_val)));
+        _get_dbg()->set_string_value(fmt::format("{}", std::forward<Tp>(_val)));
     }
     else
     {
