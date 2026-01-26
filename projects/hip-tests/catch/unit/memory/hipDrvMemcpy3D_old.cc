@@ -31,19 +31,20 @@
 
 #include <hip_test_common.hh>
 #include <hip_test_checkers.hh>
+#include <resource_guards.hh>
 
 template <typename T> class DrvMemcpy3D {
-  int width, height, depth;
+  size_t width, height, depth;
   unsigned int size;
   hipArray_Format formatKind;
   hipArray_t arr, arr1;
   size_t pitch_D, pitch_E;
   HIP_MEMCPY3D myparms;
   hipDeviceptr_t D_m, E_m;
-  T* hData{nullptr};
+  LinearAllocGuard<T> hData;
 
  public:
-  DrvMemcpy3D(int l_width, int l_height, int l_depth, hipArray_Format l_format);
+  DrvMemcpy3D(size_t l_width, size_t l_height, size_t l_depth, hipArray_Format l_format);
   DrvMemcpy3D() = delete;
   void AllocateMemory();
   void SetDefaultData();
@@ -56,7 +57,7 @@ template <typename T> class DrvMemcpy3D {
 
 /* Intializes class variables */
 template <typename T>
-DrvMemcpy3D<T>::DrvMemcpy3D(int l_width, int l_height, int l_depth, hipArray_Format l_format) {
+DrvMemcpy3D<T>::DrvMemcpy3D(size_t l_width, size_t l_height, size_t l_depth, hipArray_Format l_format) {
   width = l_width;
   height = l_height;
   depth = l_depth;
@@ -66,13 +67,13 @@ DrvMemcpy3D<T>::DrvMemcpy3D(int l_width, int l_height, int l_depth, hipArray_For
 /* Allocating Memory */
 template <typename T> void DrvMemcpy3D<T>::AllocateMemory() {
   size = width * height * depth * sizeof(T);
-  hData = reinterpret_cast<T*>(malloc(size));
-  REQUIRE(hData != nullptr);
-  memset(hData, 0, size);
+  hData = LinearAllocGuard<T>(LinearAllocs::malloc, size);
+  REQUIRE(hData.ptr() != nullptr);
+  memset(hData.ptr(), 0, size);
   for (int i = 0; i < depth; i++) {
     for (int j = 0; j < height; j++) {
       for (int k = 0; k < width; k++) {
-        hData[i * width * height + j * width + k] = i * width * height + j * width + k;
+        hData.ptr()[i * width * height + j * width + k] = i * width * height + j * width + k;
       }
     }
   }
@@ -125,7 +126,7 @@ template <typename T> void DrvMemcpy3D<T>::NegativeTests() {
                                   deviceId));
   auto reset_params = [&]() {
     SetDefaultData();
-    myparms.srcHost = hData;
+    myparms.srcHost = hData.ptr();
     myparms.dstArray = arr;
     myparms.srcPitch = width * sizeof(T);
     myparms.srcHeight = height;
@@ -141,7 +142,7 @@ template <typename T> void DrvMemcpy3D<T>::NegativeTests() {
 
   SECTION("Passing both dst host and device") {
     reset_params();
-    myparms.dstHost = hData;
+    myparms.dstHost = hData.ptr();
     myparms.dstArray = nullptr;
     myparms.dstDevice = D_m;
     myparms.dstPitch = pitch_D;
@@ -229,7 +230,7 @@ template <typename T> void DrvMemcpy3D<T>::NegativeTests() {
     myparms.srcHost = nullptr;
     myparms.srcPitch = MaxPitch;
     myparms.srcHeight = height;
-    myparms.dstHost = hData;
+    myparms.dstHost = hData.ptr();
     myparms.dstArray = nullptr;
     myparms.dstPitch = width * sizeof(T);
     myparms.dstHeight = height;
@@ -279,7 +280,7 @@ template <typename T> void DrvMemcpy3D<T>::Extent_Validation() {
   SetDefaultData();
   myparms.srcMemoryType = hipMemoryTypeHost;
   myparms.dstMemoryType = hipMemoryTypeDevice;
-  myparms.srcHost = hData;
+  myparms.srcHost = hData.ptr();
   myparms.srcPitch = width * sizeof(T);
   myparms.srcHeight = height;
   myparms.dstDevice = D_m;
@@ -335,7 +336,7 @@ template <typename T> void DrvMemcpy3D<T>::HostDevice_DrvMemcpy3D(bool device_co
     SetDefaultData();
     myparms.srcMemoryType = hipMemoryTypeHost;
     myparms.dstMemoryType = hipMemoryTypeDevice;
-    myparms.srcHost = hData;
+    myparms.srcHost = hData.ptr();
     myparms.srcPitch = width * sizeof(T);
     myparms.srcHeight = height;
     myparms.dstDevice = hipDeviceptr_t(D_m);
@@ -370,7 +371,7 @@ template <typename T> void DrvMemcpy3D<T>::HostDevice_DrvMemcpy3D(bool device_co
     myparms.dstHeight = height;
     HIP_CHECK(hipDrvMemcpy3D(&myparms));
 
-    HipTest::checkArray(hData, hOutputData, width, height, depth);
+    HipTest::checkArray(hData.ptr(), hOutputData, width, height, depth);
     free(hOutputData);
   }
   HIP_CHECK(hipSetDevice(0));
@@ -409,7 +410,7 @@ template <typename T> void DrvMemcpy3D<T>::HostArray_DrvMemcpy3D(bool device_con
     SetDefaultData();
     myparms.srcMemoryType = hipMemoryTypeHost;
     myparms.dstMemoryType = hipMemoryTypeArray;
-    myparms.srcHost = hData;
+    myparms.srcHost = hData.ptr();
     myparms.srcPitch = width * sizeof(T);
     myparms.srcHeight = height;
     myparms.dstArray = arr;
@@ -434,7 +435,7 @@ template <typename T> void DrvMemcpy3D<T>::HostArray_DrvMemcpy3D(bool device_con
     myparms.dstHeight = height;
     HIP_CHECK(hipDrvMemcpy3D(&myparms));
 
-    HipTest::checkArray(hData, hOutputData, width, height, depth);
+    HipTest::checkArray(hData.ptr(), hOutputData, width, height, depth);
     free(hOutputData);
   }
   HIP_CHECK(hipSetDevice(0));
@@ -446,7 +447,7 @@ template <typename T> void DrvMemcpy3D<T>::DeAllocateMemory() {
   HIP_CHECK(hipArrayDestroy(arr1));
   HIP_CHECK(hipFree(reinterpret_cast<void*>(D_m)));
   HIP_CHECK(hipFree(reinterpret_cast<void*>(E_m)));
-  free(hData);
+  hData = LinearAllocGuard<T>();
 }
 
 /**
