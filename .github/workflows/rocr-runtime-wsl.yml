@@ -53,69 +53,59 @@ jobs:
           }
 
       - name: Set up WSL with Ubuntu
-        uses: Ubuntu/WSL/.github/actions/wsl-install@main
+        uses: Vampire/setup-wsl@v6
         with:
-          distro: ${{ env.DISTRO }}
+          distribution: ${{ env.DISTRO }}
+          update: true
+          additional-packages: build-essential cmake ninja-build
 
-      - name: Checkout repository into WSL
-        uses: Ubuntu/WSL/.github/actions/wsl-checkout@main
-        with:
-          distro: ${{ env.DISTRO }}
-          working-dir: "~/rocm-systems"
-
-      - name: Install build dependencies in WSL
-        uses: Ubuntu/WSL/.github/actions/wsl-bash@main
-        with:
-          distro: ${{ env.DISTRO }}
-          exec: |
-            set -eu
-            export DEBIAN_FRONTEND=noninteractive
-            sudo apt update
-            sudo apt install -y build-essential cmake ninja-build
+      - name: Copy repository into WSL
+        shell: wsl-bash {0}
+        run: |
+          set -euo pipefail
+          # Copy the checked out repository to WSL home directory
+          cp -r /mnt/c/a/rocm-systems/rocm-systems ~/rocm-systems
+          ls -la ~/rocm-systems/projects/rocr-runtime/
 
       - name: Verify WSL environment
-        uses: Ubuntu/WSL/.github/actions/wsl-bash@main
-        with:
-          distro: ${{ env.DISTRO }}
-          working-dir: "~/rocm-systems"
-          exec: |
-            set -eu
-            echo "Testing WSL environment..."
-            cmake --version
-            ninja --version
-            echo "ROCR Runtime project location:"
-            ls -la projects/rocr-runtime/
+        shell: wsl-bash {0}
+        run: |
+          set -euo pipefail
+          echo "Testing WSL environment..."
+          cmake --version
+          ninja --version
+          echo "ROCR Runtime project location:"
+          ls -la ~/rocm-systems/projects/rocr-runtime/
 
       - name: Build libhsakmt with Windows SDK
-        uses: Ubuntu/WSL/.github/actions/wsl-bash@main
+        shell: wsl-bash {0}
         env:
           WIN_SDK_VERSION: ${{ steps.detect-sdk.outputs.SDK_VERSION }}
-        with:
-          distro: ${{ env.DISTRO }}
-          working-dir: "~/rocm-systems/projects/rocr-runtime/libhsakmt"
-          exec: |
-            set -eu
-            echo "Building libhsakmt in WSL with Windows SDK..."
-            
-            # Use the detected Windows SDK version from the host
-            WIN_SDK_VERSION="${WIN_SDK_VERSION:-10.0.26100.0}"
-            export win_sdk="/mnt/c/Program Files (x86)/Windows Kits/10/Include/${WIN_SDK_VERSION}/"
-            
-            echo "Using Windows SDK version: ${WIN_SDK_VERSION}"
-            echo "Windows SDK path: ${win_sdk}"
-            
-            # Verify the Windows SDK is accessible from WSL
-            if [ ! -d "${win_sdk}" ]; then
-              echo "ERROR: Windows SDK not found at ${win_sdk}"
-              echo "Available SDK versions:"
-              ls -la "/mnt/c/Program Files (x86)/Windows Kits/10/Include/" || echo "SDK directory not accessible"
-              exit 1
-            fi
-            
-            # Build the library
-            mkdir -p build
-            cd build
-            cmake .. -G Ninja -DWIN_SDK="${win_sdk}/shared"
-            make
-            
-            echo "libhsakmt build completed successfully!"
+        run: |
+          set -euo pipefail
+          cd ~/rocm-systems/projects/rocr-runtime/libhsakmt
+          
+          echo "Building libhsakmt in WSL with Windows SDK..."
+          
+          # Use the detected Windows SDK version from the host
+          WIN_SDK_VERSION="${WIN_SDK_VERSION:-10.0.26100.0}"
+          export win_sdk="/mnt/c/Program Files (x86)/Windows Kits/10/Include/${WIN_SDK_VERSION}/"
+          
+          echo "Using Windows SDK version: ${WIN_SDK_VERSION}"
+          echo "Windows SDK path: ${win_sdk}"
+          
+          # Verify the Windows SDK is accessible from WSL
+          if [ ! -d "${win_sdk}" ]; then
+            echo "ERROR: Windows SDK not found at ${win_sdk}"
+            echo "Available SDK versions:"
+            ls -la "/mnt/c/Program Files (x86)/Windows Kits/10/Include/" || echo "SDK directory not accessible"
+            exit 1
+          fi
+          
+          # Build the library
+          mkdir -p build
+          cd build
+          cmake .. -G Ninja -DWIN_SDK="${win_sdk}/shared"
+          ninja
+          
+          echo "libhsakmt build completed successfully!"
