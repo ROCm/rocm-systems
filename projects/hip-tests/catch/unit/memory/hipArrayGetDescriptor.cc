@@ -20,14 +20,15 @@ THE SOFTWARE.
 #include <string.h>
 
 #include <cstring>
+#include <atomic>
 #include <vector>
 
 #include <hip_test_common.hh>
 #include <hip_test_defgroups.hh>
 #include <resource_guards.hh>
 
-static bool testPassed1D = false;
-static bool testPassed2D = false;
+static std::atomic<bool> testPassed1D{false};
+static std::atomic<bool> testPassed2D{false};
 static constexpr auto NUM_ELM{1024};
 /**
  * @addtogroup hipArrayGetDescriptor
@@ -52,6 +53,9 @@ hipArray_t arrayCreate1D(int format, int channel) {
     case 4:
       desc.NumChannels = channel;
       break;
+    default:
+      INFO("Unsupported number of channels: " << channel);
+      REQUIRE(false);
   }
   desc.Width = 16;
   desc.Height = 0;
@@ -165,11 +169,9 @@ void thread_funct1D(hipArray_t array) {
   HIP_ARRAY_DESCRIPTOR desc;
   HIP_CHECK(hipArrayGetDescriptor(&desc, array));
   // Verify array parameters
-  if ((desc.NumChannels == 2) && (desc.Width == 16) && (desc.Height == 0) &&
-      (desc.Format == HIP_AD_FORMAT_HALF)) {
-    testPassed1D = true;
-  } else {
-    testPassed1D = false;
+  if (!((desc.NumChannels == 2) && (desc.Width == 16) && (desc.Height == 0) &&
+        (desc.Format == HIP_AD_FORMAT_HALF))) {
+    testPassed1D.store(false, std::memory_order_relaxed);
   }
 }
 // Thread function for 2D Array
@@ -177,11 +179,9 @@ void thread_funct2D(hipArray_t array) {
   HIP_ARRAY_DESCRIPTOR desc;
   HIP_CHECK(hipArrayGetDescriptor(&desc, array));
   // Verify array parameters
-  if ((desc.NumChannels == 1) && (desc.Width == 4) && (desc.Height == 4) &&
-      (desc.Format == HIP_AD_FORMAT_FLOAT)) {
-    testPassed2D = true;
-  } else {
-    testPassed2D = false;
+  if (!((desc.NumChannels == 1) && (desc.Width == 4) && (desc.Height == 4) &&
+        (desc.Format == HIP_AD_FORMAT_FLOAT))) {
+    testPassed2D.store(false, std::memory_order_relaxed);
   }
 }
 // 1D Array of type float
@@ -211,13 +211,16 @@ float* funcToChkArray(hipArray_t array) {
   HIP_ARRAY_DESCRIPTOR desc;
   HIP_CHECK(hipArrayGetDescriptor(&desc, array));
   float* A_h = nullptr;
-  static constexpr auto NUM_ELM{1024};
-  size_t mem_size = NUM_ELM * sizeof(float);
+  const size_t elements = desc.Height ? desc.Width * desc.Height : desc.Width;
+  size_t mem_size = elements * sizeof(float);
   if (desc.Format == HIP_AD_FORMAT_FLOAT) {
     A_h = reinterpret_cast<float*>(malloc(mem_size));
-    for (int i = 0; i < NUM_ELM; i++) {
+    for (size_t i = 0; i < elements; i++) {
       A_h[i] = 2.0;
     }
+  } else {
+    INFO("Unsupported format: " << desc.Format);
+    return nullptr;
   }
   HIP_CHECK(hipMemcpyAtoH(A_h, array, 0, mem_size));
   return A_h;
@@ -336,6 +339,8 @@ TEST_CASE("Unit_hipArrayGetDescriptor_MultiThreadScenarioFor1D_2D_Array",
     hipArray_t array_t2 = arrayCreate2D_Thread();
     std::vector<std::thread> ThreadVector1D;
     std::vector<std::thread> ThreadVector2D;
+    testPassed1D.store(true, std::memory_order_relaxed);
+    testPassed2D.store(true, std::memory_order_relaxed);
     for (int j = 0; j < 10; j++) {
       ThreadVector1D.emplace_back([&]() { thread_funct1D(array_t1); });
       ThreadVector2D.emplace_back([&]() { thread_funct2D(array_t2); });
@@ -347,8 +352,8 @@ TEST_CASE("Unit_hipArrayGetDescriptor_MultiThreadScenarioFor1D_2D_Array",
       t.join();
     }
     // Validation
-    REQUIRE(testPassed1D);
-    REQUIRE(testPassed2D);
+    REQUIRE(testPassed1D.load(std::memory_order_relaxed));
+    REQUIRE(testPassed2D.load(std::memory_order_relaxed));
     HIP_CHECK(hipArrayDestroy(array_t1));
     HIP_CHECK(hipArrayDestroy(array_t2));
 #if HT_NVIDIA
@@ -403,23 +408,23 @@ TEST_CASE("Unit_hipArrayGetDescriptor_Host2Array_Array2Host", "[multigpu]") {
     HIP_CHECK(hipArrayDestroy(arraySimple1D));
     SECTION("2D Array Verification") {
       int count_2D = 0;
-      size_t mem_size1 = NUM_ELM * sizeof(float);
+      size_t mem_size1 = NUM_ELM * NUM_ELM * sizeof(float);
       float* A_h2;
       A_h2 = reinterpret_cast<float*>(malloc(mem_size1));
-      for (int i = 0; i < NUM_ELM; i++) {
+      for (int i = 0; i < NUM_ELM * NUM_ELM; i++) {
         A_h2[i] = 2.0;
       }
 
       hipArray_t arraySimple2D = arrayCreateSimple2D();
       HIP_CHECK(hipMemcpyHtoA(arraySimple2D, 0, A_h2, mem_size1));
       float* A_h3 = funcToChkArray(arraySimple2D);
-      for (int i = 0; i < NUM_ELM; i++) {
+      for (int i = 0; i < NUM_ELM * NUM_ELM; i++) {
         if (A_h2[i] == A_h3[i]) {
           count_2D += 1;
         }
       }
       // Validation
-      REQUIRE(count_2D == NUM_ELM);
+      REQUIRE(count_2D == NUM_ELM * NUM_ELM);
       free(A_h2);
       HIP_CHECK(hipArrayDestroy(arraySimple2D));
     }
@@ -538,9 +543,12 @@ TEST_CASE("Unit_hipArrayGetDescriptor_Negative_Parameters") {
   SECTION("array is freed") {
     HIP_CHECK(hipArrayDestroy(ptr));
     HIP_CHECK_ERROR(hipArrayGetDescriptor(&desc, ptr), hipErrorInvalidHandle);
+    ptr = nullptr;
   }
 
-  static_cast<void>(hipArrayDestroy(ptr));
+  if (ptr) {
+    static_cast<void>(hipArrayDestroy(ptr));
+  }
 }
 
 /**

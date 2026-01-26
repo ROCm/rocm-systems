@@ -176,6 +176,7 @@ void Memcpy3DDeviceToDeviceShell(F memcpy_func, hipStream_t kernel_stream = null
   INFO("Src device: " << src_device << ", Dst device: " << dst_device);
 
   HIP_CHECK(hipSetDevice(src_device));
+  PeerAccessGuard peer_guard;
   if (device_count > 0 && kernel_stream != nullptr && kernel_stream != hipStreamPerThread) {
     HIP_CHECK(hipStreamCreate(&kernel_stream));
   }
@@ -197,7 +198,7 @@ void Memcpy3DDeviceToDeviceShell(F memcpy_func, hipStream_t kernel_stream = null
       }
       return;
     }
-    HIP_CHECK(hipDeviceEnablePeerAccess(dst_device, 0));
+    peer_guard.Enable(src_device, dst_device);
   }
 
   LinearAllocGuard3D<int> src_alloc(extent);

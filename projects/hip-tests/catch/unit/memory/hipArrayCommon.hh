@@ -37,6 +37,9 @@ __global__ void readFromTexture(T* output, hipTextureObject_t texObj, size_t wid
   // Calculate normalized texture coordinates
   const unsigned int x = blockIdx.x * blockDim.x + threadIdx.x;
   const unsigned int y = blockIdx.y * blockDim.y + threadIdx.y;
+  if (x >= width || (height != 0 && y >= height)) {
+    return;
+  }
   const float u = x / (float)width;
 
   // Read from texture and write to global memory

@@ -79,7 +79,7 @@ bool checkArray(T* hData, T* hOutputData, size_t width, size_t height, size_t de
   for (size_t i = 0; i < depth; i++) {
     for (size_t j = 0; j < height; j++) {
       for (size_t k = 0; k < width; k++) {
-        int offset = i * width * height + j * width + k;
+        size_t offset = i * width * height + j * width + k;
         if (!isEqual(hData[offset], hOutputData[offset])) {
           INFO("Mismatch at [" << i << "," << j << "," << k << "]:" << getString(hData[offset])
                                << "----" << getString(hOutputData[offset]));
