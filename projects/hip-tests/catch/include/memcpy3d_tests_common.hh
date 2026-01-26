@@ -171,7 +171,12 @@ void Memcpy3DDeviceToDeviceShell(F memcpy_func, hipStream_t kernel_stream = null
 
   const auto device_count = HipTest::getDeviceCount();
   const auto src_device = GENERATE_COPY(range(0, device_count));
-  const auto dst_device = GENERATE_COPY(range(0, device_count));
+  auto dst_device = GENERATE_COPY(range(0, device_count));
+  if constexpr (!enable_peer_access) {
+    if (src_device != dst_device) {
+      dst_device = src_device;
+    }
+  }
 
   INFO("Src device: " << src_device << ", Dst device: " << dst_device);
 
