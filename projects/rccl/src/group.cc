@@ -162,10 +162,13 @@ struct ncclPrepareTasksAndCollPreconnectJob {
 ncclResult_t ncclP2PPreconnectFunc(struct ncclAsyncJob* job_) {
   struct ncclPreconnectJob* job = (struct ncclPreconnectJob*)job_;
   struct ncclComm* comm = job->comm;
+  cudaStreamCaptureMode mode = cudaStreamCaptureModeRelaxed;
+  CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
   CUDACHECK(cudaSetDevice(comm->cudaDev));
   if (!job_->isThreadMain && CPU_COUNT(&comm->cpuAffinity)) sched_setaffinity(0, sizeof(cpu_set_t), &comm->cpuAffinity);
   NCCLCHECK(ncclTransportP2pSetup(comm, NULL, 1));
   if (comm->p2pNet) NCCLCHECK(ncclTransportP2pSetup(comm, NULL, NCCL_CONN_IDX_P2P_NET));
+  if (mode != cudaStreamCaptureModeRelaxed) CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
   return ncclSuccess;
 }
 
@@ -223,7 +226,12 @@ ncclResult_t ncclPrepareTasksAndCollPreconnectFunc(struct ncclAsyncJob* job_) {
   CUDACHECK(cudaSetDevice(comm->cudaDev));
   if (!job_->isThreadMain && CPU_COUNT(&comm->cpuAffinity)) sched_setaffinity(0, sizeof(cpu_set_t), &comm->cpuAffinity);
   NCCLCHECK(ncclPrepareTasks(comm, algoNeedConnect, &needConnect, job->simInfo));
-  if (comm->cuMemSupport && needConnect) NCCLCHECK(ncclCollPreconnect(comm, algoNeedConnect));
+  if (comm->cuMemSupport && needConnect) {
+    cudaStreamCaptureMode mode = cudaStreamCaptureModeRelaxed;
+    CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
+    NCCLCHECK(ncclCollPreconnect(comm, algoNeedConnect));
+    if (mode != cudaStreamCaptureModeRelaxed) CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
+  }
   return ncclSuccess;
 }
 
@@ -231,16 +239,19 @@ ncclResult_t ncclCollPreconnectFunc(struct ncclAsyncJob* job_) {
   struct ncclPreconnectJob* job = (struct ncclPreconnectJob*)job_;
   struct ncclComm* comm = job->comm;
   ncclResult_t ret = ncclSuccess;
+  bool modeChanged = false;
 
   if (!job_->isThreadMain) CUDACHECK(cudaSetDevice(comm->cudaDev));
   if (!job_->isThreadMain && CPU_COUNT(&comm->cpuAffinity)) sched_setaffinity(0, sizeof(cpu_set_t), &comm->cpuAffinity);
-  NCCLCHECKGOTO(ncclCollPreconnect(comm, job->algoNeedConnect), ret, fail);
+  cudaStreamCaptureMode mode = cudaStreamCaptureModeRelaxed;
+  CUDACHECKGOTO(cudaThreadExchangeStreamCaptureMode(&mode), ret, exit);
+  modeChanged = (mode != cudaStreamCaptureModeRelaxed);
+  NCCLCHECKGOTO(ncclCollPreconnect(comm, job->algoNeedConnect), ret, exit);
 
 exit:
+  if (modeChanged) (void)cudaThreadExchangeStreamCaptureMode(&mode);
   free(job->algoNeedConnect);
   return ret;
-fail:
-  goto exit;
 }
 
 struct ncclGroupSymmetricJob {
