@@ -145,23 +145,33 @@ class TestBase {
 #define IF_NVERB(VB) if (verbosity() < (TestBase::VERBOSE_##VB))
 
 // Macros to be used within TestBase classes
-#define CHK_ERR_ASRT(RET)                                                                \
-  {                                                                                      \
-    if ((RET) != AMDSMI_STATUS_SUCCESS) {                                                \
-      std::cout << std::endl << "\t===> TEST FAILURE." << std::endl;                     \
-      const char* err_str;                                                               \
-      std::cout << "\t===> ERROR: AMDSMI call returned " << (RET) << std::endl;          \
-      amdsmi_status_code_to_string((RET), &err_str);                                     \
-      std::cout << "\t===> (" << err_str << ")" << std::endl;                            \
-      std::cout << "\t===> at " << __FILE__ << ":" << std::dec << __LINE__ << std::endl; \
-    }                                                                                    \
-    if (dont_fail() && ((RET) != AMDSMI_STATUS_SUCCESS)) {                               \
-      std::cout << "\t===> Abort is over-ridden due to dont_fail command line option."   \
-                << std::endl;                                                            \
-      return;                                                                            \
-    }                                                                                    \
-    ASSERT_EQ(AMDSMI_STATUS_SUCCESS, (RET));                                             \
-  }
+#define CHK_ERR_ASRT2(RET) { \
+    if ((RET) != AMDSMI_STATUS_SUCCESS) { \
+        std::cout << std::endl << "\t===> TEST FAILURE." << std::endl; \
+        const char *err_str; \
+        std::cout << "\t===> ERROR: AMDSMI call returned " << (RET) << std::endl; \
+        amdsmi_status_code_to_string((RET), &err_str); \
+        std::cout << "\t===> (" << err_str << ")" << std::endl; \
+        std::cout << "\t===> at " << __FILE__ << ":" << std::dec << __LINE__ << \
+                                                                  std::endl; \
+    } \
+    if (dont_fail() && ((RET) != AMDSMI_STATUS_SUCCESS)) { \
+        std::cout << \
+         "\t===> Abort is over-ridden due to dont_fail command line option." \
+                                                               << std::endl; \
+        return; \
+    } \
+    ASSERT_EQ(AMDSMI_STATUS_SUCCESS, (RET)); \
+}
+#define CHK_ERR_ASRT(RET) { \
+    if (dont_fail() && ((RET) != AMDSMI_STATUS_SUCCESS)) { \
+        std::cout << \
+         "\t===> Abort is over-ridden due to dont_fail command line option." \
+                                                               << std::endl; \
+        return; \
+    } \
+    ASSERT_EQ(AMDSMI_STATUS_SUCCESS, (RET)); \
+}
 
 void MakeHeaderStr(const char* inStr, std::string* outStr);
 extern const char kSetupLabel[];

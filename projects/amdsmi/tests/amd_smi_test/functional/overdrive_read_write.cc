@@ -28,6 +28,8 @@
 #include <iostream>
 
 #include "amd_smi/amdsmi.h"
+#include "overdrive_read_write.h"
+#include "../test_common.h"
 
 TestOverdriveReadWrite::TestOverdriveReadWrite() : TestBase() {
   set_title("AMDSMI Overdrive Read/Write Test");
@@ -70,25 +72,38 @@ void TestOverdriveReadWrite::Run(void) {
   for (uint32_t dv_ind = 0; dv_ind < num_monitor_devs(); ++dv_ind) {
     PrintDeviceHeader(processor_handles_[dv_ind]);
 
-    IF_VERB(STANDARD) { std::cout << "Set Overdrive level to 0%..." << std::endl; }
+    IF_VERB(STANDARD) {
+      std::cout << "Set Overdrive level to 0%..." << std::endl;
+    }
+    DISPLAY_AMDSMI_API("amdsmi_set_gpu_overdrive_level", "gpu="+std::to_string(dv_ind));
     ret = amdsmi_set_gpu_overdrive_level(processor_handles_[dv_ind], 0);
+    DISPLAY_AMDSMI_STATUS(ret, AMDSMI_STATUS_SUCCESS);
     if (ret == AMDSMI_STATUS_NOT_SUPPORTED) {
-      IF_VERB(STANDARD) { std::cout << "\t** Not supported on this machine" << std::endl; }
       continue;
     }
     CHK_ERR_ASRT(ret)
-    IF_VERB(STANDARD) { std::cout << "Set Overdrive level to 10%..." << std::endl; }
-    ret = amdsmi_set_gpu_overdrive_level(processor_handles_[dv_ind], 10);
+    IF_VERB(STANDARD) {
+      std::cout << "Set Overdrive level to 10%..." << std::endl;
+    }
+    DISPLAY_AMDSMI_API("amdsmi_set_gpu_overdrive_level", "gpu="+std::to_string(dv_ind));
+    ret =  amdsmi_set_gpu_overdrive_level(processor_handles_[dv_ind], 10);
+    DISPLAY_AMDSMI_STATUS(ret, AMDSMI_STATUS_SUCCESS);
     CHK_ERR_ASRT(ret)
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_overdrive_level", "gpu="+std::to_string(dv_ind));
     ret = amdsmi_get_gpu_overdrive_level(processor_handles_[dv_ind], &val);
+    DISPLAY_AMDSMI_STATUS(ret, AMDSMI_STATUS_SUCCESS);
     CHK_ERR_ASRT(ret)
     IF_VERB(STANDARD) {
       std::cout << "\t**New OverDrive Level:" << val << std::endl;
       std::cout << "Reset Overdrive level to 0%..." << std::endl;
     }
+    DISPLAY_AMDSMI_API("amdsmi_set_gpu_overdrive_level", "gpu="+std::to_string(dv_ind));
     ret = amdsmi_set_gpu_overdrive_level(processor_handles_[dv_ind], 0);
+    DISPLAY_AMDSMI_STATUS(ret, AMDSMI_STATUS_SUCCESS);
     CHK_ERR_ASRT(ret)
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_overdrive_level", "gpu="+std::to_string(dv_ind));
     ret = amdsmi_get_gpu_overdrive_level(processor_handles_[dv_ind], &val);
+    DISPLAY_AMDSMI_STATUS(ret, AMDSMI_STATUS_SUCCESS);
     CHK_ERR_ASRT(ret)
     IF_VERB(STANDARD) { std::cout << "\t**New OverDrive Level:" << val << std::endl; }
   }

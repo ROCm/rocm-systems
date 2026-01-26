@@ -33,6 +33,8 @@
 #include <vector>
 
 #include "amd_smi/amdsmi.h"
+#include "hw_topology_read.h"
+#include "../test_common.h"
 
 typedef struct {
   std::string type;
@@ -87,13 +89,12 @@ void TestHWTopologyRead::Run(void) {
 
   for (uint32_t dv_ind = 0; dv_ind < num_devices; ++dv_ind) {
     amdsmi_processor_handle dev_handle = processor_handles_[dv_ind];
+    DISPLAY_AMDSMI_API("amdsmi_topo_get_numa_node_number", "gpu="+std::to_string(dv_ind));
     err = amdsmi_topo_get_numa_node_number(dev_handle, &numa_numbers[dv_ind]);
+    DISPLAY_AMDSMI_STATUS(err, AMDSMI_STATUS_SUCCESS);
     if (err != AMDSMI_STATUS_SUCCESS) {
       if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
-        IF_VERB(STANDARD) {
-          std::cout << "\t**Numa Node Number. read: Not supported on this machine" << std::endl;
-          return;
-        }
+        return;
       } else {
         CHK_ERR_ASRT(err)
       }
@@ -111,15 +112,14 @@ void TestHWTopologyRead::Run(void) {
                                                  UINT8_MAX};
       } else {
         amdsmi_link_type_t type;
+        DISPLAY_AMDSMI_API("amdsmi_topo_get_link_type", "gpu="+std::to_string(dv_ind_src)+","+std::to_string(dv_ind_dst));
         err = amdsmi_topo_get_link_type(processor_handles_[dv_ind_src],
-                                        processor_handles_[dv_ind_dst],
-                                        &gpu_links[dv_ind_src][dv_ind_dst].hops, &type);
+                processor_handles_[dv_ind_dst],
+                &gpu_links[dv_ind_src][dv_ind_dst].hops, &type);
+        DISPLAY_AMDSMI_STATUS(err, AMDSMI_STATUS_SUCCESS);
         if (err != AMDSMI_STATUS_SUCCESS) {
           if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
-            IF_VERB(STANDARD) {
-              std::cout << "\t**Link Type. read: Not supported on this machine" << std::endl;
-              return;
-            }
+            return;
           } else {
             CHK_ERR_ASRT(err)
           }
@@ -140,15 +140,14 @@ void TestHWTopologyRead::Run(void) {
               }
           }
         }
+        DISPLAY_AMDSMI_API("amdsmi_topo_get_p2p_status", "gpu="+std::to_string(dv_ind_src)+","+std::to_string(dv_ind_dst));
         err = amdsmi_topo_get_p2p_status(processor_handles_[dv_ind_src],
-                                         processor_handles_[dv_ind_dst], &type,
-                                         &gpu_links[dv_ind_src][dv_ind_dst].cap);
+                processor_handles_[dv_ind_dst],
+                &type, &gpu_links[dv_ind_src][dv_ind_dst].cap);
+        DISPLAY_AMDSMI_STATUS(err, AMDSMI_STATUS_SUCCESS);
         if (err != AMDSMI_STATUS_SUCCESS) {
           if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
-            IF_VERB(STANDARD) {
-              std::cout << "\t**Link Type. read: Not supported on this machine" << std::endl;
-              return;
-            }
+            return;
           } else {
             CHK_ERR_ASRT(err)
           }
@@ -165,28 +164,26 @@ void TestHWTopologyRead::Run(void) {
               }
           }
         }
+        DISPLAY_AMDSMI_API("amdsmi_topo_get_link_weight", "gpu="+std::to_string(dv_ind_src)+","+std::to_string(dv_ind_dst));
         err = amdsmi_topo_get_link_weight(processor_handles_[dv_ind_src],
-                                          processor_handles_[dv_ind_dst],
-                                          &gpu_links[dv_ind_src][dv_ind_dst].weight);
+                    processor_handles_[dv_ind_dst],
+                                   &gpu_links[dv_ind_src][dv_ind_dst].weight);
+        DISPLAY_AMDSMI_STATUS(err, AMDSMI_STATUS_SUCCESS);
         if (err != AMDSMI_STATUS_SUCCESS) {
           if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
-            IF_VERB(STANDARD) {
-              std::cout << "\t**Link Weight. read: Not supported on this machine" << std::endl;
-              return;
-            }
+            return;
           } else {
             CHK_ERR_ASRT(err)
           }
         }
-        err =
-            amdsmi_is_P2P_accessible(processor_handles_[dv_ind_src], processor_handles_[dv_ind_dst],
-                                     &gpu_links[dv_ind_src][dv_ind_dst].accessible);
+        DISPLAY_AMDSMI_API("amdsmi_is_P2P_accessible", "gpu="+std::to_string(dv_ind_src)+","+std::to_string(dv_ind_dst));
+        err = amdsmi_is_P2P_accessible(processor_handles_[dv_ind_src],
+                    processor_handles_[dv_ind_dst],
+                    &gpu_links[dv_ind_src][dv_ind_dst].accessible);
+        DISPLAY_AMDSMI_STATUS(err, AMDSMI_STATUS_SUCCESS);
         if (err != AMDSMI_STATUS_SUCCESS) {
           if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
-            IF_VERB(STANDARD) {
-              std::cout << "\t**P2P Access. check: Not supported on this machine" << std::endl;
-              return;
-            }
+            return;
           } else {
             CHK_ERR_ASRT(err)
           }
@@ -429,14 +426,17 @@ void TestHWTopologyRead::Run(void) {
        *  Note:   We should get AMDSMI_STATUS_INVAL for the first call with
        * amdsmi_topology_nearest_t = nullptr
        */
-      ret = amdsmi_get_link_topology_nearest(
-          processor_handles_[dv_ind_src], static_cast<amdsmi_link_type_t>(topo_link_type), nullptr);
+      DISPLAY_AMDSMI_API("amdsmi_get_link_topology_nearest", "");
+      ret = amdsmi_get_link_topology_nearest(processor_handles_[dv_ind_src],
+                                             static_cast<amdsmi_link_type_t>(topo_link_type),
+                                             nullptr);
       ASSERT_EQ(ret, amdsmi_status_t::AMDSMI_STATUS_INVAL);
 
       /*
        *
        */
       auto topology_nearest_info = amdsmi_topology_nearest_t();
+      DISPLAY_AMDSMI_API("amdsmi_get_link_topology_nearest", "");
       ret = amdsmi_get_link_topology_nearest(processor_handles_[dv_ind_src],
                                              static_cast<amdsmi_link_type_t>(topo_link_type),
                                              &topology_nearest_info);
@@ -449,6 +449,7 @@ void TestHWTopologyRead::Run(void) {
       if (topology_nearest_info.count > 0) {
         for (uint32_t k = 0; k < topology_nearest_info.count; k++) {
           amdsmi_bdf_t bdf = {};
+          DISPLAY_AMDSMI_API("amdsmi_get_gpu_device_bdf", "");
           ret = amdsmi_get_gpu_device_bdf(topology_nearest_info.processor_list[k], &bdf);
           if (ret != AMDSMI_STATUS_SUCCESS) {
             continue;

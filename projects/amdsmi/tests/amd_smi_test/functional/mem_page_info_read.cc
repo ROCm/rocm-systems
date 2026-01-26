@@ -29,6 +29,8 @@
 #include <string>
 
 #include "amd_smi/amdsmi.h"
+#include "mem_page_info_read.h"
+#include "../test_common.h"
 
 TestMemPageInfoRead::TestMemPageInfoRead() : TestBase() {
   set_title("AMDSMI Memory Page Info Test");
@@ -72,15 +74,16 @@ void TestMemPageInfoRead::Run(void) {
   for (uint32_t i = 0; i < num_monitor_devs(); ++i) {
     PrintDeviceHeader(processor_handles_[i]);
 
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_memory_reserved_pages", "gpu="+std::to_string(i));
     err = amdsmi_get_gpu_memory_reserved_pages(processor_handles_[i], &num_pages, nullptr);
+    DISPLAY_AMDSMI_STATUS(err, AMDSMI_STATUS_INVAL);
 
     if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
-      std::cout << "\t**Memory page information is not supported for this device" << std::endl;
-
       // Verify api support checking functionality is working
+      DISPLAY_AMDSMI_API("amdsmi_get_gpu_memory_reserved_pages", "gpu="+std::to_string(i));
       err = amdsmi_get_gpu_memory_reserved_pages(processor_handles_[i], nullptr, nullptr);
+      DISPLAY_AMDSMI_STATUS(err, AMDSMI_STATUS_INVAL);
       ASSERT_EQ(err, AMDSMI_STATUS_NOT_SUPPORTED);
-
       continue;
     } else {
       CHK_ERR_ASRT(err)
@@ -88,7 +91,9 @@ void TestMemPageInfoRead::Run(void) {
         std::cout << "\tNumber of memory page records: " << num_pages << std::endl;
       }
       // Verify api support checking functionality is working
+      DISPLAY_AMDSMI_API("amdsmi_get_gpu_memory_reserved_pages", "gpu="+std::to_string(i));
       err = amdsmi_get_gpu_memory_reserved_pages(processor_handles_[i], nullptr, nullptr);
+      DISPLAY_AMDSMI_STATUS(err, AMDSMI_STATUS_INVAL);
       ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
     }
 
@@ -97,11 +102,10 @@ void TestMemPageInfoRead::Run(void) {
 
       assert(records != nullptr);
 
+      DISPLAY_AMDSMI_API("amdsmi_get_gpu_memory_reserved_pages", "gpu="+std::to_string(i));
       err = amdsmi_get_gpu_memory_reserved_pages(processor_handles_[i], &num_pages, records);
+      DISPLAY_AMDSMI_STATUS(err, AMDSMI_STATUS_SUCCESS);
       if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
-        std::cout << "\t**Getting Memory Page Retirement Status not "
-                     "supported for this device"
-                  << std::endl;
         continue;
       } else {
         CHK_ERR_ASRT(err)
