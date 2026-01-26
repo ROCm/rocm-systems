@@ -125,10 +125,13 @@ jobs:
 
           if [ '${{ matrix.system.os-release }}' = '24.04' ]; then
             CODE_NAME=noble
+            PYTHON_VERSION=3.12
           else
             CODE_NAME=jammy
+            PYTHON_VERSION=3.10
           fi
           echo "code_name=${CODE_NAME}" >> $GITHUB_OUTPUT
+          echo "python_version=${PYTHON_VERSION}" >> $GITHUB_OUTPUT
 
       - name: Install amdgpu and dependencies
         shell: bash
@@ -139,7 +142,7 @@ jobs:
           wget -N -P /tmp/ https://repo.radeon.com/amdgpu-install/${ROCM_MAJOR}.${ROCM_MINOR}/ubuntu/${{ steps.setup_env.outputs.code_name }}/amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
           apt-get install -y /tmp/amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
           apt-get update
-          apt install -y amd-smi-lib libdw-dev hip-dev
+          apt install -y amd-smi-lib libdw-dev hip-dev python${{ steps.setup_env.outputs.python_version }}-venv
           echo "✅ amdgpu and ROCm dependencies Installed!"
 
       - name: Install Latest Nightly ROCm
