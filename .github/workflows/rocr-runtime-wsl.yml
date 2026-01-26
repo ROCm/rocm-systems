@@ -52,6 +52,38 @@ jobs:
             exit 1
           }
 
+      - name: Check WSL status
+        shell: powershell
+        run: |
+          Write-Host "Checking if WSL is available..."
+          try {
+            wsl --status
+          } catch {
+            Write-Host "WSL not available or not enabled"
+          }
+
+      - name: Enable WSL feature
+        shell: powershell
+        run: |
+          Write-Host "Enabling Windows Subsystem for Linux..."
+          # Check if WSL is already enabled
+          $wslFeature = Get-WindowsOptionalFeature -Online -FeatureName Microsoft-Windows-Subsystem-Linux
+          if ($wslFeature.State -ne "Enabled") {
+            Write-Host "WSL feature not enabled, enabling now..."
+            Enable-WindowsOptionalFeature -Online -FeatureName Microsoft-Windows-Subsystem-Linux -NoRestart
+          } else {
+            Write-Host "WSL feature already enabled"
+          }
+          
+          # Check Virtual Machine Platform
+          $vmFeature = Get-WindowsOptionalFeature -Online -FeatureName VirtualMachinePlatform
+          if ($vmFeature.State -ne "Enabled") {
+            Write-Host "Virtual Machine Platform not enabled, enabling now..."
+            Enable-WindowsOptionalFeature -Online -FeatureName VirtualMachinePlatform -NoRestart
+          } else {
+            Write-Host "Virtual Machine Platform already enabled"
+          }
+
       - name: Set up WSL
         uses: Ubuntu/WSL/.github/actions/wsl-install@main
         with:
