@@ -75,7 +75,9 @@ jobs:
           if [[ "${file}" == docs/* || \
                 "${file}" == *.md || \
                 "${file}" == *.rtf || \
-                "${file}" == *.rst
+                "${file}" == *.rst || \
+                "${file}" == projects/rccl/* || \
+                "${file}" == projects/rocshmem/* \
              ]] || \
              grep --quiet --extended-regexp '^projects/[^/.]+/docs/.*$' <<< "${file}" || \
              grep --quiet --extended-regexp '^([^/.]+/)*.markdownlint-ci2.yaml$' <<< "${file}" || \
