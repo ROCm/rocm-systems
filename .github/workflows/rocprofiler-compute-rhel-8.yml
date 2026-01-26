@@ -74,7 +74,7 @@ jobs:
             yum install -y rocm-dev
             
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           sparse-checkout: projects/rocprofiler-compute
 
