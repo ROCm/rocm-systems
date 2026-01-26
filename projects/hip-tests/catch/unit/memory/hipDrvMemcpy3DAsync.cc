@@ -121,7 +121,7 @@ HIP_TEST_CASE(Unit_hipDrvMemcpy3DAsync_Negative_Parameters) {
       int attr = 0;
       HIP_CHECK(hipDeviceGetAttribute(&attr, hipDeviceAttributeMaxPitch, 0));
       hipPitchedPtr invalid_ptr = dst_ptr;
-      invalid_ptr.pitch = attr;
+      invalid_ptr.pitch = static_cast<size_t>(attr) + 1;
       HIP_CHECK_ERROR(
           DrvMemcpy3DWrapper<async>(invalid_ptr, dst_pos, src_ptr, src_pos, extent, kind),
           hipErrorInvalidValue);
@@ -131,7 +131,7 @@ HIP_TEST_CASE(Unit_hipDrvMemcpy3DAsync_Negative_Parameters) {
       int attr = 0;
       HIP_CHECK(hipDeviceGetAttribute(&attr, hipDeviceAttributeMaxPitch, 0));
       hipPitchedPtr invalid_ptr = src_ptr;
-      invalid_ptr.pitch = attr;
+      invalid_ptr.pitch = static_cast<size_t>(attr) + 1;
       HIP_CHECK_ERROR(
           DrvMemcpy3DWrapper<async>(dst_ptr, dst_pos, invalid_ptr, src_pos, extent, kind),
           hipErrorInvalidValue);

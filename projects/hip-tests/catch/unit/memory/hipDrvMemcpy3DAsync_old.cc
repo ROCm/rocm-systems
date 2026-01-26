@@ -34,13 +34,14 @@
 
 template <typename T> class DrvMemcpy3DAsync {
   int width, height, depth;
-  unsigned int size;
+  size_t size;
   hipArray_Format formatKind;
   hipArray_t arr, arr1;
   hipStream_t stream;
   size_t pitch_D, pitch_E;
   HIP_MEMCPY3D myparms;
   hipDeviceptr_t D_m, E_m;
+  hipPitchedPtr pitched_D, pitched_E;
   T* hData{nullptr};
 
  public:
@@ -56,18 +57,24 @@ template <typename T> class DrvMemcpy3DAsync {
 };
 
 /* Intializes class variables */
-template <typename T> DrvMemcpy3DAsync<T>::DrvMemcpy3DAsync(int l_width, int l_height, int l_depth,
+template <typename T> DrvMemcpy3DAsync<T>::DrvMemcpy3DAsync(size_t l_width, size_t l_height, size_t l_depth,
                                                             hipArray_Format l_format) {
   width = l_width;
   height = l_height;
   depth = l_depth;
   formatKind = l_format;
+  stream = nullptr;
+  arr = nullptr;
+  arr1 = nullptr;
+  D_m = 0;
+  E_m = 0;
 }
 
 /* Allocating Memory */
 template <typename T> void DrvMemcpy3DAsync<T>::AllocateMemory() {
   size = width * height * depth * sizeof(T);
   hData = reinterpret_cast<T*>(malloc(size));
+  REQUIRE(hData != nullptr);
   memset(hData, 0, size);
   for (int i = 0; i < depth; i++) {
     for (int j = 0; j < height; j++) {
@@ -76,19 +83,23 @@ template <typename T> void DrvMemcpy3DAsync<T>::AllocateMemory() {
       }
     }
   }
-  HIP_CHECK(hipStreamCreate(&stream));
-  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&D_m), &pitch_D, width * sizeof(T), height));
-  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&E_m), &pitch_E, width * sizeof(T), height));
-  HIP_ARRAY3D_DESCRIPTOR* desc;
-  desc = reinterpret_cast<HIP_ARRAY3D_DESCRIPTOR*>(malloc(sizeof(HIP_ARRAY3D_DESCRIPTOR)));
-  desc->Format = formatKind;
-  desc->NumChannels = 1;
-  desc->Width = width;
-  desc->Height = height;
-  desc->Depth = depth;
-  desc->Flags = hipArrayDefault;
-  HIP_CHECK(hipArray3DCreate(&arr, desc));
-  HIP_CHECK(hipArray3DCreate(&arr1, desc));
+  hipExtent extent = make_hipExtent(width * sizeof(T), height, depth);
+  HIP_CHECK(hipMalloc3D(&pitched_D, extent));
+  HIP_CHECK(hipMalloc3D(&pitched_E, extent));
+  D_m = reinterpret_cast<hipDeviceptr_t>(pitched_D.ptr);
+  E_m = reinterpret_cast<hipDeviceptr_t>(pitched_E.ptr);
+  pitch_D = pitched_D.pitch;
+  pitch_E = pitched_E.pitch;
+
+  HIP_ARRAY3D_DESCRIPTOR desc{};
+  desc.Format = formatKind;
+  desc.NumChannels = 1;
+  desc.Width = width;
+  desc.Height = height;
+  desc.Depth = depth;
+  desc.Flags = hipArrayDefault;
+  HIP_CHECK(hipArray3DCreate(&arr, &desc));
+  HIP_CHECK(hipArray3DCreate(&arr1, &desc));
 }
 
 /* Setting the default data */
@@ -114,25 +125,39 @@ hipDrvMemcpy3DAsync API
 template <typename T> void DrvMemcpy3DAsync<T>::NegativeTests() {
   HIP_CHECK(hipSetDevice(0));
   AllocateMemory();
+  HIP_CHECK(hipStreamCreate(&stream));
   SetDefaultData();
   int deviceId;
   HIP_CHECK(hipGetDevice(&deviceId));
-  unsigned int MaxPitch;
-  HIP_CHECK(hipDeviceGetAttribute(reinterpret_cast<int*>(&MaxPitch), hipDeviceAttributeMaxPitch,
-                                  deviceId));
-  myparms.srcHost = hData;
-  myparms.dstArray = arr;
-  myparms.srcPitch = width * sizeof(T);
-  myparms.srcHeight = height;
-  myparms.srcMemoryType = hipMemoryTypeHost;
-  myparms.dstMemoryType = hipMemoryTypeArray;
+  int max_pitch = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&max_pitch, hipDeviceAttributeMaxPitch, deviceId));
+  unsigned int MaxPitch = static_cast<unsigned int>(max_pitch);
+  auto reset_params = [&]() {
+    SetDefaultData();
+    myparms.srcHost = hData;
+    myparms.dstHost = nullptr;
+    myparms.srcArray = nullptr;
+    myparms.dstArray = arr;
+    myparms.srcDevice = hipDeviceptr_t(nullptr);
+    myparms.dstDevice = hipDeviceptr_t(nullptr);
+    myparms.srcPitch = width * sizeof(T);
+    myparms.srcHeight = height;
+    myparms.dstPitch = 0;
+    myparms.dstHeight = 0;
+    myparms.srcMemoryType = hipMemoryTypeHost;
+    myparms.dstMemoryType = hipMemoryTypeArray;
+  };
+
+  reset_params();
 
   SECTION("Passing nullptr to Source Host") {
+    reset_params();
     myparms.srcHost = nullptr;
     REQUIRE(hipDrvMemcpy3DAsync(&myparms, stream) != hipSuccess);
   }
 
   SECTION("Passing both dst host and device") {
+    reset_params();
     myparms.dstHost = hData;
     myparms.dstArray = nullptr;
     myparms.dstDevice = D_m;
@@ -142,6 +167,7 @@ template <typename T> void DrvMemcpy3DAsync<T>::NegativeTests() {
   }
 
   SECTION("Passing max value to WidthInBytes") {
+    reset_params();
     myparms.WidthInBytes = std::numeric_limits<int>::max();
     myparms.Height = std::numeric_limits<int>::max();
     myparms.Depth = std::numeric_limits<int>::max();
@@ -149,21 +175,25 @@ template <typename T> void DrvMemcpy3DAsync<T>::NegativeTests() {
   }
 
   SECTION("Passing width > max width size") {
+    reset_params();
     myparms.WidthInBytes = width * sizeof(T) + 1;
     REQUIRE(hipDrvMemcpy3DAsync(&myparms, stream) != hipSuccess);
   }
 
   SECTION("Passing height > max height size") {
+    reset_params();
     myparms.Height = height + 1;
     REQUIRE(hipDrvMemcpy3DAsync(&myparms, stream) != hipSuccess);
   }
 
   SECTION("Passing depth > max depth size") {
+    reset_params();
     myparms.Depth = depth + 1;
     REQUIRE(hipDrvMemcpy3DAsync(&myparms, stream) != hipSuccess);
   }
 
   SECTION("widthinbytes + srcXinBytes is out of bound") {
+    reset_params();
     myparms.srcXInBytes = 1;
     myparms.dstArray = nullptr;
     myparms.dstDevice = hipDeviceptr_t(D_m);
@@ -174,6 +204,7 @@ template <typename T> void DrvMemcpy3DAsync<T>::NegativeTests() {
   }
 
   SECTION("widthinbytes + dstXinBytes is out of bound") {
+    reset_params();
     myparms.dstXInBytes = pitch_D;
     myparms.dstArray = nullptr;
     myparms.dstDevice = hipDeviceptr_t(D_m);
@@ -184,6 +215,7 @@ template <typename T> void DrvMemcpy3DAsync<T>::NegativeTests() {
   }
 
   SECTION("srcY + height is out of bound") {
+    reset_params();
     myparms.srcY = 1;
     myparms.dstArray = nullptr;
     myparms.dstDevice = hipDeviceptr_t(D_m);
@@ -194,6 +226,7 @@ template <typename T> void DrvMemcpy3DAsync<T>::NegativeTests() {
   }
 
   SECTION("dstY + height out of bounds") {
+    reset_params();
     myparms.dstY = 1;
     myparms.dstArray = nullptr;
     myparms.dstDevice = hipDeviceptr_t(D_m);
@@ -204,6 +237,7 @@ template <typename T> void DrvMemcpy3DAsync<T>::NegativeTests() {
   }
 
   SECTION("src pitch greater than Max allowed pitch") {
+    reset_params();
     myparms.srcMemoryType = hipMemoryTypeDevice;
     myparms.dstMemoryType = hipMemoryTypeHost;
     myparms.srcDevice = D_m;
@@ -218,6 +252,7 @@ template <typename T> void DrvMemcpy3DAsync<T>::NegativeTests() {
   }
 
   SECTION("dst pitch greater than Max allowed pitch") {
+    reset_params();
     myparms.dstDevice = hipDeviceptr_t(D_m);
     myparms.dstArray = nullptr;
     myparms.dstPitch = MaxPitch + 1;
@@ -227,6 +262,7 @@ template <typename T> void DrvMemcpy3DAsync<T>::NegativeTests() {
   }
 
   SECTION("Nullptr to src/dst device") {
+    reset_params();
     myparms.dstDevice = hipDeviceptr_t(nullptr);
     myparms.dstArray = nullptr;
     myparms.dstPitch = pitch_D;
@@ -236,6 +272,7 @@ template <typename T> void DrvMemcpy3DAsync<T>::NegativeTests() {
   }
 
   SECTION("Nullptr to src/dst array") {
+    reset_params();
     myparms.dstArray = nullptr;
     REQUIRE(hipDrvMemcpy3DAsync(&myparms, stream) != hipSuccess);
   }
@@ -254,6 +291,7 @@ template <typename T> void DrvMemcpy3DAsync<T>::Extent_Validation() {
   HIP_CHECK(hipSetDevice(0));
   // Allocating the memory
   AllocateMemory();
+  HIP_CHECK(hipStreamCreate(&stream));
 
   // Setting default data
   SetDefaultData();
@@ -303,6 +341,7 @@ void DrvMemcpy3DAsync<T>::HostDevice_DrvMemcpy3DAsync(bool device_context_change
   HIP_CHECK(hipSetDevice(0));
   bool skip_test = false;
   int peerAccess = 0;
+  bool peer_enabled = false;
   AllocateMemory();
   if (device_context_change) {
     HIP_CHECK(hipDeviceCanAccessPeer(&peerAccess, 0, 1));
@@ -311,9 +350,12 @@ void DrvMemcpy3DAsync<T>::HostDevice_DrvMemcpy3DAsync(bool device_context_change
       skip_test = true;
     } else {
       HIP_CHECK(hipSetDevice(1));
+      HIP_CHECK(hipDeviceEnablePeerAccess(0, 0));
+      peer_enabled = true;
     }
   }
   if (!skip_test) {
+    HIP_CHECK(hipStreamCreate(&stream));
     SetDefaultData();
     myparms.srcMemoryType = hipMemoryTypeHost;
     myparms.dstMemoryType = hipMemoryTypeDevice;
@@ -339,6 +381,7 @@ void DrvMemcpy3DAsync<T>::HostDevice_DrvMemcpy3DAsync(bool device_context_change
     HIP_CHECK(hipDrvMemcpy3DAsync(&myparms, stream));
     HIP_CHECK(hipStreamSynchronize(stream));
     T* hOutputData = reinterpret_cast<T*>(malloc(size));
+    REQUIRE(hOutputData != nullptr);
     memset(hOutputData, 0, size);
 
     // Device to host
@@ -357,6 +400,11 @@ void DrvMemcpy3DAsync<T>::HostDevice_DrvMemcpy3DAsync(bool device_context_change
     HipTest::checkArray(hData, hOutputData, width, height, depth);
     free(hOutputData);
   }
+  if (peer_enabled) {
+    HIP_CHECK(hipDeviceDisablePeerAccess(0));
+    peer_enabled = false;
+  }
+  HIP_CHECK(hipSetDevice(0));
   DeAllocateMemory();
 }
 
@@ -377,6 +425,7 @@ void DrvMemcpy3DAsync<T>::HostArray_DrvMemcpy3DAsync(bool device_context_change)
   HIP_CHECK(hipSetDevice(0));
   bool skip_test = false;
   int peerAccess = 0;
+  bool peer_enabled = false;
   AllocateMemory();
   if (device_context_change) {
     HIP_CHECK(hipDeviceCanAccessPeer(&peerAccess, 0, 1));
@@ -385,9 +434,12 @@ void DrvMemcpy3DAsync<T>::HostArray_DrvMemcpy3DAsync(bool device_context_change)
       skip_test = true;
     } else {
       HIP_CHECK(hipSetDevice(1));
+      HIP_CHECK(hipDeviceEnablePeerAccess(0, 0));
+      peer_enabled = true;
     }
   }
   if (!skip_test) {
+    HIP_CHECK(hipStreamCreate(&stream));
     SetDefaultData();
     myparms.srcMemoryType = hipMemoryTypeHost;
     myparms.dstMemoryType = hipMemoryTypeArray;
@@ -406,6 +458,7 @@ void DrvMemcpy3DAsync<T>::HostArray_DrvMemcpy3DAsync(bool device_context_change)
     HIP_CHECK(hipDrvMemcpy3DAsync(&myparms, stream));
     HIP_CHECK(hipStreamSynchronize(stream));
     T* hOutputData = reinterpret_cast<T*>(malloc(size));
+    REQUIRE(hOutputData != nullptr);
     memset(hOutputData, 0, size);
     SetDefaultData();
     // Device to host
@@ -421,6 +474,11 @@ void DrvMemcpy3DAsync<T>::HostArray_DrvMemcpy3DAsync(bool device_context_change)
     HipTest::checkArray(hData, hOutputData, width, height, depth);
     free(hOutputData);
   }
+  if (peer_enabled) {
+    HIP_CHECK(hipDeviceDisablePeerAccess(0));
+    peer_enabled = false;
+  }
+  HIP_CHECK(hipSetDevice(0));
   DeAllocateMemory();
 }
 
@@ -428,7 +486,18 @@ void DrvMemcpy3DAsync<T>::HostArray_DrvMemcpy3DAsync(bool device_context_change)
 template <typename T> void DrvMemcpy3DAsync<T>::DeAllocateMemory() {
   HIP_CHECK(hipArrayDestroy(arr));
   HIP_CHECK(hipArrayDestroy(arr1));
-  HIP_CHECK(hipStreamDestroy(stream));
+  if (stream != nullptr) {
+    HIP_CHECK(hipStreamDestroy(stream));
+    stream = nullptr;
+  }
+  if (D_m) {
+    HIP_CHECK(hipFree(reinterpret_cast<void*>(D_m)));
+    D_m = 0;
+  }
+  if (E_m) {
+    HIP_CHECK(hipFree(reinterpret_cast<void*>(E_m)));
+    E_m = 0;
+  }
   free(hData);
 }
 

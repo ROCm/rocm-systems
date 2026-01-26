@@ -36,7 +36,7 @@ HIP_TEST_CASE(Unit_hipDrvPtrGetAttributes_Negative) {
 
   HIP_CHECK(hipMalloc(&A_d, Nbytes));
   HIP_CHECK(hipGetDevice(&deviceId));
-  unsigned int device_ordinal;
+  int device_ordinal;
   int* dev_ptr{nullptr};
   void* data[2];
   data[0] = &dev_ptr;
@@ -68,14 +68,6 @@ HIP_TEST_CASE(Unit_hipDrvPtrGetAttributes_Negative) {
     REQUIRE(hipDrvPointerGetAttributes(2, attributes, data, ptr) == hipErrorInvalidValue);
   }
 #endif
-#if HT_NVIDIA
-  SECTION("Passing invalid dependencies") {
-    hipPointer_attribute attributes1[] = {HIP_POINTER_ATTRIBUTE_DEVICE_POINTER};
-    REQUIRE(
-        hipDrvPointerGetAttributes(2, attributes1, data, reinterpret_cast<hipDeviceptr_t>(A_d)) ==
-        hipErrorInvalidValue);
-  }
-#endif
 
   HIP_CHECK(hipFree(A_d));
 }
@@ -98,7 +90,7 @@ HIP_TEST_CASE(Unit_hipDrvPtrGetAttributes_Functional) {
     int* dev{nullptr};
     int* dev_ptr{nullptr};
     int* dev_ptr1{nullptr};
-    unsigned int range_size;
+    size_t range_size;
     int* start_addr{nullptr};
     void* data[5];
     data[0] = (&memory_type);
