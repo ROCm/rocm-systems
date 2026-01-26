@@ -157,6 +157,7 @@ extern const int gpu_clock_freq_mhz;
 typedef struct device_prop {
   int warpSize;
   int maxThreadsPerBlock;
+  char gcnArchName[256];
 } device_prop_t;
 
 extern std::vector<device_prop_t> device_properties;
@@ -169,6 +170,11 @@ static int get_threads_per_block(int device_id) {
 static int get_wf_size(int device_id) {
   assert(device_properties.size() > device_id);
   return device_properties[device_id].warpSize;
+}
+
+static const char* get_arch_name(int device_id) {
+  assert(device_properties.size() > device_id);
+  return device_properties[device_id].gcnArchName;
 }
 
 /* Device-side internal functions */

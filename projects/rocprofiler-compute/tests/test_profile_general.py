@@ -38,29 +38,7 @@ import pytest
 import test_utils
 from scipy.stats import zscore
 
-# Globals
-
-# TODO: MI350 What are the gpu models in MI 350 series
-SUPPORTED_ARCHS = {
-    "gfx908": {"mi100": ["MI100"]},
-    "gfx90a": {"mi200": ["MI210", "MI250", "MI250X"]},
-    "gfx940": {"mi300": ["MI300A_A0"]},
-    "gfx941": {"mi300": ["MI300X_A0"]},
-    "gfx942": {"mi300": ["MI300A_A1", "MI300X_A1"]},
-    "gfx950": {"mi350": ["MI350"]},
-}
-
-CHIP_IDS = {
-    "29856": "MI300A_A1",
-    "29857": "MI300X_A1",
-    "29858": "MI308X",
-    "30112": "MI350",
-}
-
-# --
 # Runtime config options
-# --
-
 config = {}
 config["kernel_name_1"] = "vecCopy"
 config["app_1"] = ["./tests/vcopy", "-n", "1048576", "-b", "256", "-i", "3"]
@@ -74,6 +52,8 @@ config["cleanup"] = True
 config["COUNTER_LOGGING"] = False
 config["METRIC_COMPARE"] = False
 config["METRIC_LOGGING"] = False
+
+arch_config = {}
 
 num_kernels = 3
 num_devices = 1
@@ -246,47 +226,7 @@ def counter_compare(test_name, errors_pd, baseline_df, run_df, threshold=5):
     return errors_pd
 
 
-def gpu_soc():
-    global num_devices
-    ## 1) Parse arch details from rocminfo
-    rocminfo = str(
-        # decode with utf-8 to account for rocm-smi changes in latest rocm
-        subprocess.run(
-            ["rocminfo"], stdout=subprocess.PIPE, stderr=subprocess.PIPE
-        ).stdout.decode("utf-8")
-    )
-    rocminfo = rocminfo.split("\n")
-    soc_regex = re.compile(r"^\s*Name\s*:\s+ ([a-zA-Z0-9]+)\s*$", re.MULTILINE)
-    devices = list(filter(soc_regex.match, rocminfo))
-    gpu_arch = devices[0].split()[1]
-
-    if not gpu_arch in SUPPORTED_ARCHS.keys():
-        print("Cannot find a supported arch in rocminfo")
-        assert 0
-    else:
-        num_devices = (
-            len(devices)
-            if not "CI_VISIBLE_DEVICES" in os.environ
-            else os.environ["CI_VISIBLE_DEVICES"]
-        )
-
-    ## 2) Parse chip id from rocminfo
-    chip_id = re.compile(r"^\s*Chip ID:\s+ ([a-zA-Z0-9]+)\s*", re.MULTILINE)
-    ids = list(filter(chip_id.match, rocminfo))
-    for id in ids:
-        chip_id = re.match(r"^[^()]+", id.split()[2]).group(0)
-
-    ## 3) Deduce gpu model name from arch
-    gpu_model = list(SUPPORTED_ARCHS[gpu_arch].keys())[0].upper()
-    # For testing purposes we only care about gpu model series not the specific model
-    # if gpu_model not in ("MI50", "MI100", "MI200"):
-    #     if chip_id in CHIP_IDS:
-    #         gpu_model = CHIP_IDS[chip_id]
-
-    return gpu_model
-
-
-soc = gpu_soc()
+soc = test_utils.gpu_soc()
 
 os.environ["ROCPROF"] = "rocprofiler-sdk"
 
@@ -643,9 +583,7 @@ def test_path(binary_handler_profile_rocprof_compute):
 
 
 @pytest.mark.path
-def test_path_rocflop(
-    binary_handler_profile_rocprof_compute,
-):
+def test_path_rocflop(binary_handler_profile_rocprof_compute):
     # Test whether multiprocess workloads like rocflop are handled correctly
     workload_dir = test_utils.get_output_dir()
     options = ["--block", "2.1.1"]
@@ -1326,6 +1264,7 @@ def test_roofline_missing_file_handling(binary_handler_profile_rocprof_compute):
 
     try:
         from roofline import Roofline
+        from utils.schema import Workload
         from utils.specs import generate_machine_specs
 
         class MockArgs:
@@ -1337,6 +1276,7 @@ def test_roofline_missing_file_handling(binary_handler_profile_rocprof_compute):
 
         args = MockArgs()
         mspec = generate_machine_specs(None, None)
+        workload = Workload()
 
         workload_dir = test_utils.get_output_dir()
 
@@ -1351,7 +1291,9 @@ def test_roofline_missing_file_handling(binary_handler_profile_rocprof_compute):
 
         roofline_instance = Roofline(args, mspec, run_parameters)
 
-        result = roofline_instance.cli_generate_plot("FP32")
+        result = roofline_instance.cli_generate_plot(
+            "FP32", workload, config, arch_config
+        )
 
         assert result is None
 
@@ -1378,6 +1320,7 @@ def test_roofline_invalid_datatype_cli(binary_handler_profile_rocprof_compute):
 
     try:
         from roofline import Roofline
+        from utils.schema import Workload
         from utils.specs import generate_machine_specs
 
         class MockArgs:
@@ -1389,6 +1332,7 @@ def test_roofline_invalid_datatype_cli(binary_handler_profile_rocprof_compute):
 
         args = MockArgs()
         mspec = generate_machine_specs(None, None)
+        workload = Workload()
 
         run_parameters = {
             "workload_dir": test_utils.get_output_dir(),
@@ -1401,7 +1345,9 @@ def test_roofline_invalid_datatype_cli(binary_handler_profile_rocprof_compute):
 
         roofline_instance = Roofline(args, mspec, run_parameters)
 
-        result = roofline_instance.cli_generate_plot("INVALID_DATATYPE")
+        result = roofline_instance.cli_generate_plot(
+            "INVALID_DATATYPE", workload, config, arch_config
+        )
 
         assert result is None
 
