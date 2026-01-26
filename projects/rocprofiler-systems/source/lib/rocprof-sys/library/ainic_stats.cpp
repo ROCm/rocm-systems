@@ -2,6 +2,8 @@
 
 #include <memory>
 
+#include "logger/debug.hpp"
+
 std::string
 NICData::to_string() const
 {
@@ -57,7 +59,7 @@ void AINICStatsCollector::update_stats()
     amdsmi_status_t status = amdsmi_get_socket_handles(&soc_count, nullptr);
     if (status != AMDSMI_STATUS_SUCCESS)
     {
-        LOG_ERROR("amdsmi_get_socket_handles failed with status {}", status);
+        LOG_ERROR("amdsmi_get_socket_handles failed with status {}", (int)status);
         return;
     }
 
@@ -70,7 +72,7 @@ void AINICStatsCollector::update_stats()
     status = amdsmi_get_socket_handles(&soc_count, sockets.get());
     if (status != AMDSMI_STATUS_SUCCESS)
     {
-        LOG_ERROR("amdsmi_get_socket_handles failed with status {}", status);
+        LOG_ERROR("amdsmi_get_socket_handles failed with status {}", (int)status);
         return;
     }
 
@@ -86,7 +88,7 @@ void AINICStatsCollector::update_stats()
             nullptr, &processor_count);
         if (status != AMDSMI_STATUS_SUCCESS)
         {
-            LOG_ERROR("amdsmi_get_processor_handles_by_type failed with status {}", status);
+            LOG_ERROR("amdsmi_get_processor_handles_by_type failed with status {}", (int)status);
             return;
         }
         std::vector<amdsmi_processor_handle> processor_handles(processor_count);
@@ -96,7 +98,7 @@ void AINICStatsCollector::update_stats()
             processor_handles.data(), &processor_count);
         if (status != AMDSMI_STATUS_SUCCESS)
         {
-            LOG_ERROR("amdsmi_get_processor_handles_by_type failed with status {}", status);
+            LOG_ERROR("amdsmi_get_processor_handles_by_type failed with status {}", (int)status);
             return;
         }
         for(uint32_t idx = 0; idx < processor_count; ++idx)
@@ -117,7 +119,6 @@ size_t
 AINICStatsCollector::get_nic_count()
 {
 #ifdef USE_AINIC
-    auto &amdsmi = amd::smi::AMDSmiSystem::getInstance();
     uint32_t soc_count = 10;
     std::vector<amdsmi_socket_handle> sockets(soc_count);
     // Get the sockets of the system
@@ -151,7 +152,7 @@ void AINICStatsCollector::update_data_for_one_nic(amdsmi_processor_handle proces
     amd::smi::AMDSmiAINICDevice::AINICInfo ainic_info;
     amdsmi_get_ainic_info(processor_handle, &ainic_info);
 
-    for(int port_idx = 0; port_idx < ainic_info.port.num_ports; ++port_idx) {
+    for(size_t port_idx = 0; port_idx < ainic_info.port.num_ports; ++port_idx) {
         for(uint8_t rdma_dev_idx = 0; rdma_dev_idx < ainic_info.rdma_dev.num_rdma_dev; ++rdma_dev_idx) {
             for(uint8_t rdma_port_idx = 0; rdma_port_idx < ainic_info.rdma_dev.rdma_dev_info[rdma_dev_idx].num_rdma_ports; ++rdma_port_idx) {
                 NICData data;
