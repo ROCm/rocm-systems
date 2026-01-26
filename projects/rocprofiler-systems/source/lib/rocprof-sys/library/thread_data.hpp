@@ -26,7 +26,6 @@
 #include "core/concepts.hpp"
 #include "core/config.hpp"
 #include "core/containers/stable_vector.hpp"
-#include "core/debug.hpp"
 #include "core/defines.hpp"
 #include "core/state.hpp"
 #include "core/timemory.hpp"
@@ -71,14 +70,8 @@ struct base_thread_data
         };
         grow_functors().emplace_back(_func);
 
-        // Immediately sync this container to current peak_num_threads.
-        // This ensures containers instantiated after threads exceed
-        // max_supported_threads are properly sized.
-        auto _current_peak = get_current_peak_num_threads();
-        if(_current_peak > static_cast<int64_t>(max_supported_threads))
-        {
-            _func(_current_peak);
-        }
+        // NOTE: Do not call _func() here - causes recursive static initialization
+        // deadlock. Container resizing is handled via grow_functors() in thread_info.cpp.
     }
 };
 

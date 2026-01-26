@@ -69,6 +69,8 @@ struct address_range
     uintptr_t    size() const;
     explicit     operator bool() const { return is_valid(); }
 
+    std::string as_hex() const;
+
     template <typename ArchiveT>
     void serialize(ArchiveT& ar, const unsigned)
     {

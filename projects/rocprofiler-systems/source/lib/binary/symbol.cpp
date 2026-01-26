@@ -21,7 +21,8 @@
 // SOFTWARE.
 
 #include "core/config.hpp"
-#include "core/debug.hpp"
+
+#include <spdlog/fmt/fmt.h>
 
 #if !defined(TIMEMORY_USE_BFD)
 #    error "BFD support not enabled"
@@ -120,7 +121,8 @@ symbol::operator()(const std::vector<scope_filter>& _filters) const
     return (sf::satisfies_filter(_filters, sf::FUNCTION_FILTER,
                                  rocprofsys::utility::demangle(func)) &&
             (sf::satisfies_filter(_filters, sf::SOURCE_FILTER, file) ||
-             sf::satisfies_filter(_filters, sf::SOURCE_FILTER, join(':', file, line))));
+             sf::satisfies_filter(_filters, sf::SOURCE_FILTER,
+                                  fmt::format("{}:{}", file, line))));
 }
 
 symbol&
@@ -289,7 +291,7 @@ symbol::get_inline_symbols(const std::vector<scope_filter>& _filters) const
                                 rocprofsys::utility::demangle(itr.func)) &&
            (sf::satisfies_filter(_filters, sf::SOURCE_FILTER, itr.file) ||
             sf::satisfies_filter(_filters, sf::SOURCE_FILTER,
-                                 join(':', itr.file, itr.line))))
+                                 fmt::format("{}:{}", itr.file, itr.line))))
         {
             if constexpr(concepts::is_unqualified_same<value_type, symbol>::value)
             {
@@ -326,7 +328,7 @@ symbol::get_debug_line_info(const std::vector<scope_filter>& _filters) const
         {
             if(sf::satisfies_filter(_filters, sf::SOURCE_FILTER, itr.file) ||
                sf::satisfies_filter(_filters, sf::SOURCE_FILTER,
-                                    join(':', itr.file, itr.line)))
+                                    fmt::format("{}:{}", itr.file, itr.line)))
             {
                 if constexpr(concepts::is_unqualified_same<value_type, symbol>::value)
                 {

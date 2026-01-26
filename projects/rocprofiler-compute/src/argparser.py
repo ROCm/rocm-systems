@@ -271,7 +271,6 @@ Examples:
         required=False,
         nargs="?",
         choices=[
-            # "simple",
             "kernel",
             "kernel_launch_params",
         ],
@@ -279,7 +278,6 @@ Examples:
         help=(
             "\t\t\tChoose the iteration multiplexing policy: "
             "(DEFAULT: kernel_launch_params).\n"
-            # "\t\t\t   simple (i.e. Round robin over all kernel dispatches\n"
             "\t\t\t   kernel (i.e. Round robin counters over kernel calls with "
             "unique kernel names.)\n"
             "\t\t\t   kernel_launch_params (i.e. Round robin counters over "
@@ -503,7 +501,7 @@ Examples:
         type=str,
         default=["FP32"],
         help=(
-            "\t\t\tChoose datatypes to view roofline PDFs for: (DEFAULT: FP32)\n"
+            "\t\t\tChoose datatypes to view roofline HTMLs for: (DEFAULT: FP32)\n"
             "\t\t\t   FP4\n"
             "\t\t\t   FP6\n"
             "\t\t\t   FP8\n"
@@ -694,7 +692,7 @@ Examples:
         type=str,
         default=["FP32"],
         help=(
-            "\t\tChoose datatypes to view roofline PDFs for: (DEFAULT: FP32)\n"
+            "\t\tChoose datatypes to view roofline HTMLs for: (DEFAULT: FP32)\n"
             "\t\t\t   FP4\n"
             "\t\t\t   FP6\n"
             "\t\t\t   FP8\n"

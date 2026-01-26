@@ -70,7 +70,7 @@ class AMDSMIParser(argparse.ArgumentParser):
     """
     def __init__(self, version, list, static, firmware, bad_pages, metric,
                  process, profile, event, topology, set_value, reset, monitor,
-                 xgmi, partition, ras, node, default, sys_argv=None,
+                 xgmi, partition, ras, node, rocm_smi, default, sys_argv=None,
                  helpers=None):
 
         # Helper variables
@@ -112,6 +112,17 @@ class AMDSMIParser(argparse.ArgumentParser):
             epilog="For detailed help on specific commands: amd-smi [command] -h",
             add_help=True,
             prog=self.program_name)
+
+        # Add top-level --rocm-smi flag
+        self.add_argument('--rocm-smi', action='store_true', 
+                         help='Display GPU information in ROCm-SMI compatible format')
+
+        # Add top-level command modifiers (for --rocm-smi and other top-level flags)
+        loglevel_choices = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+        loglevel_help = f"Set the logging level from the possible choices: {', '.join(loglevel_choices)}"
+        self.add_argument('--loglevel', action='store', type=str.upper, required=False, 
+                         help=loglevel_help, default='ERROR', metavar='LEVEL',
+                         choices=loglevel_choices)
 
         # Setup subparsers
         self.subparsers = self.add_subparsers(
@@ -1019,6 +1030,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         pending_help = "Displays all pending retired pages"
         retired_help = "Displays retired pages"
         un_res_help = "Displays unreservable pages"
+        hex_help = "Displays page addresses and sizes in hexadecimal format"
 
         # Create bad_pages subparser
         bad_pages_parser = subparsers.add_parser('bad-pages', help=bad_pages_help, description=bad_pages_subcommand_help)
@@ -1030,6 +1042,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         bad_pages_parser.add_argument('-p', '--pending', action='store_true', required=False, help=pending_help)
         bad_pages_parser.add_argument('-r', '--retired', action='store_true', required=False, help=retired_help)
         bad_pages_parser.add_argument('-u', '--un-res', action='store_true', required=False, help=un_res_help)
+        bad_pages_parser.add_argument('-x', '--hex', action='store_true', required=False, help=hex_help)
 
         # Add Universal Arguments
         self._add_device_arguments(bad_pages_parser, required=False)
@@ -1097,6 +1110,8 @@ class AMDSMIParser(argparse.ArgumentParser):
         cpu_dimm_temp_range_rate_help = "Displays dimm temperature range and refresh rate"
         cpu_dimm_pow_consumption_help = "Displays dimm power consumption"
         cpu_dimm_thermal_sensor_help = "Displays dimm thermal sensor"
+        cpu_dfcstate_ctrl_help = "Displays DFCState control status"
+        cpu_railisofreq_policy_help = "Displays CPU ISO frequency policy"
 
         # Help text for core options
         core_energy_help = "Displays core energy for the selected core"
@@ -1177,6 +1192,8 @@ class AMDSMIParser(argparse.ArgumentParser):
                                     nargs=1, metavar=("DIMM_ADDR"), help=cpu_dimm_pow_consumption_help)
             cpu_group.add_argument('--cpu-dimm-thermal-sensor', action='append', required=False, type=lambda x: int(x, 0),
                                     nargs=1, metavar=("DIMM_ADDR"), help=cpu_dimm_thermal_sensor_help)
+            cpu_group.add_argument('--cpu-dfcstate-ctrl', action='store_true', required=False, help=cpu_dfcstate_ctrl_help)
+            cpu_group.add_argument('--cpu-railisofreq-policy', action='store_true', required=False, help=cpu_railisofreq_policy_help)
 
             # Optional Args for CPU cores
             core_group = metric_parser.add_argument_group("CPU Core Arguments")
@@ -1371,6 +1388,8 @@ class AMDSMIParser(argparse.ArgumentParser):
         set_cpu_enable_apb_help = "Enables the DF p-state performance boost algorithm"
         set_cpu_disable_apb_help = "Disables the DF p-state performance boost algorithm. Input parameter is DFPstate (0-3)"
         set_soc_boost_limit_help = "Sets the boost limit for the given socket. Input parameter is socket BOOST_LIMIT value"
+        set_cpu_dfcstate_ctrl_help = "Sets the DFCState control. Input parameter is value (0-1)"
+        set_cpu_railisofreq_policy_help = "Sets the CPU ISO frequency policy. Input parameter is value (0-1)"
 
         # Help text for CPU Core set options
         set_core_boost_limit_help = "Sets the boost limit for the given core. Input parameter is core BOOST_LIMIT value"
@@ -1419,7 +1438,8 @@ class AMDSMIParser(argparse.ArgumentParser):
                 cpu_group.add_argument('--cpu-enable-apb', action='store_true', required=False, help=set_cpu_enable_apb_help)
                 cpu_group.add_argument('--cpu-disable-apb', action='append', required=False, type=self._not_negative_int, nargs=1, metavar=("DF_PSTATE"), help=set_cpu_disable_apb_help)
                 cpu_group.add_argument('--soc-boost-limit', action='append', required=False, type=self._positive_int, nargs=1, metavar=("BOOST_LIMIT"), help=set_soc_boost_limit_help)
-
+                cpu_group.add_argument('--cpu-dfcstate-ctrl', action='append', required=False, type=self._not_negative_int, nargs=1, metavar=("VALUE"), help=set_cpu_dfcstate_ctrl_help)
+                cpu_group.add_argument('--cpu-railisofreq-policy', action='append', required=False, type=self._not_negative_int, nargs=1, metavar=("VALUE"), help=set_cpu_railisofreq_policy_help)
                 # Optional CPU Core Args
                 core_group = set_value_parser.add_argument_group("CPU Core Arguments")
                 core_group.add_argument('--core-boost-limit', action='append', required=False, type=self._positive_int, nargs=1, metavar=("BOOST_LIMIT"), help=set_core_boost_limit_help)

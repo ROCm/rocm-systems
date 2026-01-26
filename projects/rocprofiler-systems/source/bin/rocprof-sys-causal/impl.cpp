@@ -400,6 +400,15 @@ parse_args(int argc, char** argv, std::vector<char*>& _env,
             std::min<int>(_cols - parser.get_help_width() - 8, 120));
 
     parser.start_group("DEBUG OPTIONS", "");
+
+    parser.add_argument({ "--log-level" }, "Log level")
+        .max_count(1)
+        .dtype("string")
+        .choices({ "trace", "debug", "info", "warn", "error", "critical", "off" })
+        .action([&](parser_t& p) {
+            update_env(_env, "ROCPROFSYS_LOG_LEVEL", p.get<std::string>("log-level"));
+        });
+
     parser.add_argument({ "--monochrome" }, "Disable colorized output")
         .max_count(1)
         .dtype("bool")
@@ -410,17 +419,26 @@ parse_args(int argc, char** argv, std::vector<char*>& _env,
             update_env(_env, "ROCPROFSYS_MONOCHROME", (_monochrome) ? "1" : "0");
             update_env(_env, "MONOCHROME", (_monochrome) ? "1" : "0");
         });
-    parser.add_argument({ "--debug" }, "Debug output")
+    parser.add_argument({ "--debug" }, "[DEPRECATED Use --log-level=debug] Debug output")
         .max_count(1)
         .action([&](parser_t& p) {
             update_env(_env, "ROCPROFSYS_DEBUG", p.get<bool>("debug"));
+            update_env(_env, "ROCPROFSYS_LOG_LEVEL", "debug");
         });
-    parser.add_argument({ "-v", "--verbose" }, "Verbose output")
+    parser
+        .add_argument({ "-v", "--verbose" },
+                      "[DEPRECATED Use --log-level=trace] Verbose output")
         .count(1)
         .action([&](parser_t& p) {
             auto _v = p.get<int>("verbose");
             verbose = _v;
             update_env(_env, "ROCPROFSYS_VERBOSE", _v);
+
+            constexpr std::array<const char*, 5> log_levels = { "off", "info", "debug",
+                                                                "debug", "trace" };
+
+            auto index = std::clamp(_v + 1, 0, static_cast<int>(log_levels.size() - 1));
+            update_env(_env, "ROCPROFSYS_LOG_LEVEL", log_levels[index]);
         });
 
     std::string _config_file      = {};

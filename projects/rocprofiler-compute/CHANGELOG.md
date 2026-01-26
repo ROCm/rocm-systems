@@ -27,7 +27,14 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Option ``--rocprofiler-sdk-library-path`` has been changed to ``--rocprofiler-tool-library-path`` to better reflect the fact that we provide flexibility in choosing the path to ROCprofiler-SDK tool and not the library.
 
+* Standalone roofline (--roof-only option) in profile mode now creates HTML file output instead of PDF file output for roofline charts
+
 ### Resolved issues
+
+* Implemented `NOISE_CLAMP` for L2 cache metrics to handle negative values from multi-pass profiling variance:
+  * Negative values are clamped to 0 (eliminates physically impossible negative counts)
+  * Warnings issued only when relative error exceeds 1% (anomaly detection)
+  * Added FAQ documentation explaining the "Counter variance corrected" warning
 
 * Fixed the meaning of --dispatch option in profile mode in argparser to convey the fact that it control which iterations of the kernel to profile and not which dispatch ids to profile.
 
@@ -46,6 +53,12 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * Improve detection of empty values when metric evalulation fails due to counter data missing
 
 * Fix issue where counter collection data was empty when profiling workload which spawn multiple child processes
+
+* Fix issue where dispatch filtering in a range (e.g. >2) was not working
+
+* Fix redundant warnings for compute/memory partition not found for < MI 300 series GPUs by skipping partition checks
+
+* Fixed formula for metrics related to reads from L2 cache to HBM for MI350
 
 ### Removed
 

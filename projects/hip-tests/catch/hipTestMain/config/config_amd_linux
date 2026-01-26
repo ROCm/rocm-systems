@@ -138,15 +138,9 @@
         "=== TODO ===",
         "Unit_Device_tgammaf_Accuracy_Limited_Positive",
         "=== TODO === fail on 100% test data",
-        "Unit_Device_hexp10_Accuracy_Positive",
-        "Unit_Device_h2exp10_Accuracy_Positive",
-        "Unit_Device_hexp2_Accuracy_Positive",
-        "Unit_Device_h2exp2_Accuracy_Positive",
-        "Unit_Device_hlog_Accuracy_Positive",
-        "Unit_Device_h2log_Accuracy_Positive",
-        "Unit_Device_hlog10_Accuracy_Positive",
-        "Unit_Device_h2log10_Accuracy_Positive",
         "Unit_Device___hfma2_Accuracy_Positive",
+        "=== Test does not reflect a valid use case - SWDEV-569454",
+        "Unit_hipStreamPerThread_MultiThread",
     #endif
     #if defined gfx90a || defined gfx942 || defined gfx950
         "=== SWDEV-443630 : Below test failed in stress test on 19/01/24 ===",
