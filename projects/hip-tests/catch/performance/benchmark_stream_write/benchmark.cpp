@@ -179,9 +179,40 @@ static inline void execute_optimized_user_kernel() {
       CHECK_HIP(hipEventRecord(eventStartWrite[i], streams[i]));
     }
     for (int j = 0; j < scale; j++) {
-      for (int j = 0; j < scale; j++) {
-        sync_kernel<<<1, 1, 0, streams[i]>>>(test_ptrs, 0);  // all kernels increment 0th signal
-      }
+      sync_kernel<<<1, 1, 0, streams[i]>>>(test_ptrs, 0);  // all kernels increment 0th signal
+    }
+    if (events && finer) {
+      CHECK_HIP(hipEventRecord(eventStopWrite[i], streams[i]));
+      CHECK_HIP(hipEventRecord(eventStartWait[i], streams[i]));
+    }
+
+    CHECK_HIP(hipStreamWaitValue32(streams[i], &test_ptrs[0], num_devices * scale,
+                                   hipStreamWaitValueEq,
+                                   0xFFFFFFFF));  /// all kernels wait for value to be 8=num_devices
+
+    if (events) {
+      CHECK_HIP(hipEventRecord(eventStopWait[i], streams[i]));
+    }
+  }
+  if (synchronize) {
+    for (int i = 0; i < num_devices; i++) {
+      CHECK_HIP(hipSetDevice(i));
+      CHECK_HIP(hipEventSynchronize(eventStopWait[i]));
+    }
+  }
+};
+
+static inline void execute_optimized_new_flags() {
+  // wait for all gemms here - unique signals written by each of the streams.
+  // t3-t2 will give us API launch time -we don't konow when will they execute
+  // events will give us exec time
+  for (int i = 0; i < num_devices; i++) {
+    CHECK_HIP(hipSetDevice(i));
+    if (events) {
+      CHECK_HIP(hipEventRecord(eventStartWrite[i], streams[i]));
+    }
+    for (int j = 0; j < scale; j++) {
+      CHECK_HIP(hipStreamWriteValue32(streams[i], &test_ptrs[0], 1, hipExtStreamWriteValueIncrement));
     }
     if (events && finer) {
       CHECK_HIP(hipEventRecord(eventStopWrite[i], streams[i]));
@@ -424,7 +455,7 @@ static inline void run_optimized_new_flags() {
 
     /*************** HIP RUNTIME TESTS ****************/
     auto t2 = std::chrono::high_resolution_clock::now();
-    execute_optimized_user_kernel();
+    execute_optimized_new_flags();
     auto t3 = std::chrono::high_resolution_clock::now();
     /*************** HIP RUNTIME TESTS ****************/
     synchronize_stream();
