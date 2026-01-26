@@ -1,0 +1,121 @@
+name: ROCR Runtime WSL
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'projects/rocr-runtime/**'
+      - '.github/workflows/rocr-runtime-wsl.yml'
+  push:
+    branches:
+      - develop
+    paths:
+      - 'projects/rocr-runtime/**'
+      - '.github/workflows/rocr-runtime-wsl.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  rocr-runtime-wsl-test:
+    name: ROCR Runtime WSL Test
+    runs-on: azure-windows-scale-rocm
+    env:
+      DISTRO: Ubuntu-24.04
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          sparse-checkout: |
+            projects/rocr-runtime
+          sparse-checkout-cone-mode: true
+
+      - name: Configure MSVC and Windows SDK
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+
+      - name: Detect Windows SDK version
+        id: detect-sdk
+        shell: powershell
+        run: |
+          $sdkPath = "C:\Program Files (x86)\Windows Kits\10\Include"
+          if (Test-Path $sdkPath) {
+            $versions = Get-ChildItem $sdkPath -Directory | Sort-Object Name -Descending
+            $latestVersion = $versions[0].Name
+            echo "Found Windows SDK version: $latestVersion"
+            echo "SDK_VERSION=$latestVersion" >> $env:GITHUB_OUTPUT
+            echo "SDK_BASE_PATH=$sdkPath\$latestVersion" >> $env:GITHUB_OUTPUT
+          } else {
+            echo "Windows SDK not found at $sdkPath"
+            exit 1
+          }
+
+      - name: Set up WSL
+        uses: Ubuntu/WSL/.github/actions/wsl-install@main
+        with:
+          distro: ${{ env.DISTRO }}
+
+      - name: Checkout repository into WSL
+        uses: Ubuntu/WSL/.github/actions/wsl-checkout@main
+        with:
+          distro: ${{ env.DISTRO }}
+          working-dir: "~/rocm-systems"
+
+      - name: Install build dependencies in WSL
+        uses: Ubuntu/WSL/.github/actions/wsl-bash@main
+        with:
+          distro: ${{ env.DISTRO }}
+          exec: |
+            set -eu
+            export DEBIAN_FRONTEND=noninteractive
+            sudo apt update
+            sudo apt install -y build-essential cmake ninja-build
+
+      - name: Verify WSL environment
+        uses: Ubuntu/WSL/.github/actions/wsl-bash@main
+        with:
+          distro: ${{ env.DISTRO }}
+          working-dir: "~/rocm-systems"
+          exec: |
+            set -eu
+            echo "Testing WSL environment..."
+            cmake --version
+            ninja --version
+            echo "ROCR Runtime project location:"
+            ls -la projects/rocr-runtime/
+
+      - name: Build libhsakmt with Windows SDK
+        uses: Ubuntu/WSL/.github/actions/wsl-bash@main
+        env:
+          WIN_SDK_VERSION: ${{ steps.detect-sdk.outputs.SDK_VERSION }}
+        with:
+          distro: ${{ env.DISTRO }}
+          working-dir: "~/rocm-systems/projects/rocr-runtime/libhsakmt"
+          exec: |
+            set -eu
+            echo "Building libhsakmt in WSL with Windows SDK..."
+            
+            # Use the detected Windows SDK version from the host
+            WIN_SDK_VERSION="${WIN_SDK_VERSION:-10.0.26100.0}"
+            export win_sdk="/mnt/c/Program Files (x86)/Windows Kits/10/Include/${WIN_SDK_VERSION}/"
+            
+            echo "Using Windows SDK version: ${WIN_SDK_VERSION}"
+            echo "Windows SDK path: ${win_sdk}"
+            
+            # Verify the Windows SDK is accessible from WSL
+            if [ ! -d "${win_sdk}" ]; then
+              echo "ERROR: Windows SDK not found at ${win_sdk}"
+              echo "Available SDK versions:"
+              ls -la "/mnt/c/Program Files (x86)/Windows Kits/10/Include/" || echo "SDK directory not accessible"
+              exit 1
+            fi
+            
+            # Build the library
+            mkdir -p build
+            cd build
+            cmake .. -DWIN_SDK="${win_sdk}/shared"
+            make
+            
+            echo "libhsakmt build completed successfully!"
