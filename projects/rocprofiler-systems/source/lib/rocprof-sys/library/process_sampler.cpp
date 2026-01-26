@@ -81,9 +81,6 @@ sampler::poll(std::atomic<State>* _state, nsec_t _interval, promise_t* _ready)
     // notify thread started
     if(_ready) _ready->set_value();
 
-    for(auto& itr : instances)
-        itr->config();
-
     LOG_DEBUG(
         "Background process sampling polling at an interval of {:.2f} seconds...",
         std::chrono::duration_cast<std::chrono::duration<double>>(_interval).count());
@@ -160,6 +157,12 @@ sampler::setup()
 
     for(auto& itr : instances)
         itr->setup();
+
+    // Call config() immediately after setup() to ensure initialization is complete
+    // before the polling thread starts. This prevents race conditions where
+    // sampling might occur before config() completes.
+    for(auto& itr : instances)
+        itr->config();
 
     polling_finished = std::make_unique<promise_t>();
 

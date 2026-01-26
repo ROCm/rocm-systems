@@ -754,7 +754,7 @@ config()
         metadata_initialize_smi_tracks(_dev_id);
         metadata_initialize_smi_pmc(_dev_id);
     }
-    
+
     // Initialize GPU process stats
     auto _target_pid = get_root_process_id();
     gpu_process_stats::initialize(_target_pid);
@@ -1157,7 +1157,7 @@ setup()
     }
 
     amdsmi_version_t _version = get_version();
-    LOG_INFO("AMD SMI version: {} - str: {}.", _version.major, _version.minor,
+    LOG_INFO("AMD SMI version: {}.{}.{}.{}.", _version.major, _version.minor,
              _version.release, _version.build);
 
     data::device_count = gpu::device_count();
@@ -1219,6 +1219,24 @@ setup()
 
     auto _metrics = get_setting_value<std::string>("ROCPROFSYS_AMD_SMI_METRICS");
 
+    // Check if process metrics are enabled - if so, we need at least one device
+    // in the device list even if device-level metrics are disabled
+    auto _process_metrics = get_setting_value<std::string>("ROCPROFSYS_PROCESS_METRICS");
+    bool _process_metrics_requested =
+        _process_metrics && !_process_metrics->empty() && *_process_metrics != "none";
+
+    // If no devices selected but process metrics are requested, add all devices
+    // to the device list (but don't enable any device-level metrics)
+    if(_devices.empty() && _process_metrics_requested)
+    {
+        LOG_DEBUG(
+            "No devices selected for AMD SMI metrics, but process metrics are "
+            "enabled. Adding all devices to device list for process metrics support.");
+        for(uint32_t i = 0; i < data::device_count; ++i)
+            _devices.emplace(i);
+        data::device_list = _devices;
+    }
+
     try
     {
         for(auto itr : _devices)
@@ -1265,10 +1283,11 @@ setup()
         is_initialized() = true;
         data::setup();
 
-        // Configure GPU process stats if metrics are specified
-        if(_metrics && !_metrics->empty())
+        // Configure GPU process stats from separate environment variable
+        // (already retrieved and configured above before device list setup)
+        if(_process_metrics)
         {
-            gpu_process_stats::configure(*_metrics);
+            gpu_process_stats::configure(*_process_metrics);
         }
 
     } catch(std::runtime_error& _e)
@@ -1344,6 +1363,10 @@ postfork_parent_reinit()
 
     // Shutdown and reinitialize to get fresh device handles
     shutdown();
+
+    // Reset the AMD SMI initialization state so it can be reinitialized
+    gpu::reset_amdsmi_initialization();
+
     setup();
 }
 }  // namespace amd_smi

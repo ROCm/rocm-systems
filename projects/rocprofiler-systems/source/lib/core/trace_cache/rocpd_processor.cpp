@@ -566,13 +566,35 @@ rocpd_processor_t::handle([[maybe_unused]] const gpu_process_stats_sample& _proc
     auto        name_primary_key = m_data_processor->insert_string(_name);
     auto        event_id = m_data_processor->insert_event(name_primary_key, 0, 0, 0);
 
-    // Use process ID as the agent identifier (not a GPU agent)
-    auto base_id = _proc_stats.process_id;
+    // Process metrics are not tied to a specific GPU agent by device_id, but we still
+    // need the agent's database primary key (base_id) for the PMC lookup.
+    // Get the first GPU agent's base_id to match what was used during PMC registration.
+    size_t agent_primary_key = 0;
+    try
+    {
+        // Try to get GPU agent with type_index 0 (first GPU)
+        const auto& agent = m_agent_manager->get_agent_by_type_index(0, agent_type::GPU);
+        agent_primary_key = agent.base_id;
+    } catch(const std::out_of_range&)
+    {
+        // Fallback: get first available GPU agent
+        auto gpu_agents = m_agent_manager->get_agents_by_type(agent_type::GPU);
+        if(!gpu_agents.empty())
+        {
+            agent_primary_key = gpu_agents[0]->base_id;
+        }
+        else
+        {
+            LOG_ERROR(
+                "No GPU agents found for process metrics. Cannot insert PMC events.");
+            return;
+        }
+    }
 
     auto insert_event_and_sample = [&](bool enabled, const char* pmc_name,
                                        const char* track_name, double value) {
         if(!enabled) return;
-        m_data_processor->insert_pmc_event(event_id, base_id, pmc_name, value);
+        m_data_processor->insert_pmc_event(event_id, agent_primary_key, pmc_name, value);
         m_data_processor->insert_sample(track_name, _proc_stats.timestamp, event_id);
     };
 
@@ -832,13 +854,46 @@ rocpd_processor_t::post_process_metadata()
     }
 
     auto pmc_info_list = m_metadata->get_pmc_info_list();
+    LOG_DEBUG("Post-processing {} PMC info entries", pmc_info_list.size());
+
     for(const auto& pmc_info : pmc_info_list)
     {
-        const auto agent_primary_key =
-            m_agent_manager
-                ->get_agent_by_type_index(pmc_info.agent_type_index, pmc_info.type)
-                .base_id;
+        size_t agent_primary_key = 0;
 
+        try
+        {
+            const auto& agent = m_agent_manager->get_agent_by_type_index(
+                pmc_info.agent_type_index, pmc_info.type);
+            agent_primary_key = agent.base_id;
+            LOG_DEBUG("Found agent for PMC '{}': type_index={}, base_id={}",
+                      pmc_info.name, pmc_info.agent_type_index, agent_primary_key);
+        } catch(const std::out_of_range& e)
+        {
+            // Agent not found by type_index, try to get the first agent of this type
+            // This can happen for process-level metrics (agent_type_index=0) when agents
+            // haven't been properly initialized
+            LOG_WARNING(
+                "Agent not found by type_index={}, type={}. Attempting to use first "
+                "available agent of type {}. Error: {}",
+                pmc_info.agent_type_index,
+                (pmc_info.type == agent_type::GPU ? "GPU" : "CPU"),
+                (pmc_info.type == agent_type::GPU ? "GPU" : "CPU"), e.what());
+
+            auto agents_of_type = m_agent_manager->get_agents_by_type(pmc_info.type);
+            if(agents_of_type.empty())
+            {
+                LOG_ERROR("No agents of type {} found. Skipping PMC description for {}",
+                          (pmc_info.type == agent_type::GPU ? "GPU" : "CPU"),
+                          pmc_info.name);
+                continue;
+            }
+            agent_primary_key = agents_of_type[0]->base_id;
+            LOG_DEBUG("Using fallback agent base_id={} for PMC '{}'", agent_primary_key,
+                      pmc_info.name);
+        }
+
+        LOG_DEBUG("Inserting PMC description: name='{}', agent_primary_key={}",
+                  pmc_info.name, agent_primary_key);
         m_data_processor->insert_pmc_description(
             n_info.id, process_info.pid, agent_primary_key, pmc_info.target_arch.c_str(),
             pmc_info.event_code, pmc_info.instance_id, pmc_info.name.c_str(),

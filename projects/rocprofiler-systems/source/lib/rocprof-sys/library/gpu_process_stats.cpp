@@ -22,6 +22,7 @@
 
 #include "library/gpu_process_stats.hpp"
 #include "core/categories.hpp"
+#include "core/gpu.hpp"
 #include "core/state.hpp"
 #include "core/trace_cache/cache_manager.hpp"
 #include "core/trace_cache/cacheable.hpp"
@@ -29,8 +30,8 @@
 
 #include <timemory/utility/types.hpp>
 
-#include <cassert>
 #include <bitset>
+#include <cassert>
 #include <stdexcept>
 #include <string_view>
 #include <unordered_map>
@@ -87,6 +88,8 @@ sample(pid_t _pid)
 
 #if ROCPROFSYS_USE_ROCM > 0
     amdsmi_process_info_t _proc_info;
+    // Initialize the structure to zero
+    std::memset(&_proc_info, 0, sizeof(_proc_info));
 
     try
     {
@@ -98,18 +101,15 @@ sample(pid_t _pid)
             // Serialize settings
             std::bitset<8> settings_bits;
             settings_bits.reset();
-            settings_bits.set(
-                static_cast<int>(
-                    trace_cache::gpu_process_stats_sample::settings_positions::vram_usage),
-                _proc_settings.vram_usage);
-            settings_bits.set(
-                static_cast<int>(
-                    trace_cache::gpu_process_stats_sample::settings_positions::sdma_usage),
-                _proc_settings.sdma_usage);
-            settings_bits.set(
-                static_cast<int>(
-                    trace_cache::gpu_process_stats_sample::settings_positions::cu_occupancy),
-                _proc_settings.cu_occupancy);
+            settings_bits.set(static_cast<int>(trace_cache::gpu_process_stats_sample::
+                                                   settings_positions::vram_usage),
+                              _proc_settings.vram_usage);
+            settings_bits.set(static_cast<int>(trace_cache::gpu_process_stats_sample::
+                                                   settings_positions::sdma_usage),
+                              _proc_settings.sdma_usage);
+            settings_bits.set(static_cast<int>(trace_cache::gpu_process_stats_sample::
+                                                   settings_positions::cu_occupancy),
+                              _proc_settings.cu_occupancy);
 
             // Store to trace_cache
             trace_cache::get_buffer_storage().store(trace_cache::gpu_process_stats_sample{
@@ -129,10 +129,41 @@ sample(pid_t _pid)
             get_process_settings().sdma_usage   = false;
             get_process_settings().cu_occupancy = false;
         }
+        else if(_status == AMDSMI_STATUS_NOT_INIT)
+        {
+            LOG_WARNING(
+                "AMD SMI not initialized (AMDSMI_STATUS_NOT_INIT) when collecting "
+                "process GPU metrics for PID {}. Process metrics will be disabled.",
+                _pid);
+            // Disable all process metrics - AMD SMI not properly initialized
+            get_process_settings().vram_usage   = false;
+            get_process_settings().sdma_usage   = false;
+            get_process_settings().cu_occupancy = false;
+        }
+        else if(_status == AMDSMI_STATUS_NOT_FOUND)
+        {
+            // This is common when the process hasn't started GPU work yet or isn't using
+            // GPU
+            LOG_TRACE("Process {} not found in GPU compute processes "
+                      "(AMDSMI_STATUS_NOT_FOUND). "
+                      "This is normal if the process hasn't started GPU work yet.",
+                      _pid);
+        }
         else
         {
-            LOG_DEBUG("Failed to get process GPU info for PID {}: status={}", _pid,
-                      static_cast<int>(_status));
+            // Get human-readable error message
+            const char* _err_msg = nullptr;
+            auto        _err     = amdsmi_status_code_to_string(_status, &_err_msg);
+            if(_err == AMDSMI_STATUS_SUCCESS && _err_msg != nullptr)
+            {
+                LOG_DEBUG("Failed to get process GPU info for PID {}: status={} ({})",
+                          _pid, static_cast<int>(_status), _err_msg);
+            }
+            else
+            {
+                LOG_DEBUG("Failed to get process GPU info for PID {}: status={}", _pid,
+                          static_cast<int>(_status));
+            }
         }
     } catch(std::runtime_error& _e)
     {
@@ -164,16 +195,16 @@ initialize_perfetto_tracks(pid_t target_pid)
 
     // Add tracks for process-specific metrics, annotated with target process ID
     trace_cache::get_metadata_registry().add_track(
-        { trace_cache::info::annotate_with_process_id<category::amd_smi_process_vram_usage>(
-              target_pid),
+        { trace_cache::info::annotate_with_process_id<
+              category::amd_smi_process_vram_usage>(target_pid),
           thread_id, "{}" });
     trace_cache::get_metadata_registry().add_track(
-        { trace_cache::info::annotate_with_process_id<category::amd_smi_process_sdma_usage>(
-              target_pid),
+        { trace_cache::info::annotate_with_process_id<
+              category::amd_smi_process_sdma_usage>(target_pid),
           thread_id, "{}" });
     trace_cache::get_metadata_registry().add_track(
-        { trace_cache::info::annotate_with_process_id<category::amd_smi_process_cu_occupancy>(
-              target_pid),
+        { trace_cache::info::annotate_with_process_id<
+              category::amd_smi_process_cu_occupancy>(target_pid),
           thread_id, "{}" });
 }
 
@@ -194,22 +225,22 @@ initialize_pmc()
         { agent_type::GPU, agent_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
           trait::name<category::amd_smi_process_vram_usage>::value, "ProcVRAM",
           trait::name<category::amd_smi_process_vram_usage>::description,
-          LONG_DESCRIPTION, COMPONENT, "MB", trace_cache::ABSOLUTE, BLOCK,
-          EXPRESSION, 0, 0 });
+          LONG_DESCRIPTION, COMPONENT, "MB", trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0,
+          0 });
 
     trace_cache::get_metadata_registry().add_pmc_info(
         { agent_type::GPU, agent_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
           trait::name<category::amd_smi_process_sdma_usage>::value, "ProcSDMA",
           trait::name<category::amd_smi_process_sdma_usage>::description,
-          LONG_DESCRIPTION, COMPONENT, "us", trace_cache::ABSOLUTE, BLOCK,
-          EXPRESSION, 0, 0 });
+          LONG_DESCRIPTION, COMPONENT, "us", trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0,
+          0 });
 
     trace_cache::get_metadata_registry().add_pmc_info(
         { agent_type::GPU, agent_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
           trait::name<category::amd_smi_process_cu_occupancy>::value, "ProcCUOcc",
           trait::name<category::amd_smi_process_cu_occupancy>::description,
-          LONG_DESCRIPTION, COMPONENT, trace_cache::PERCENTAGE,
-          trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0 });
+          LONG_DESCRIPTION, COMPONENT, trace_cache::PERCENTAGE, trace_cache::ABSOLUTE,
+          BLOCK, EXPRESSION, 0, 0 });
 }
 
 void
@@ -217,21 +248,38 @@ configure(const std::string& env_value)
 {
     using key_pair_t     = std::pair<std::string_view, bool&>;
     const auto supported = std::unordered_map<std::string_view, bool&>{
-        key_pair_t{ "process_vram_usage", get_process_settings().vram_usage },
-        key_pair_t{ "process_sdma_usage", get_process_settings().sdma_usage },
-        key_pair_t{ "process_cu_occupancy", get_process_settings().cu_occupancy },
+        key_pair_t{ "vram_usage", get_process_settings().vram_usage },
+        key_pair_t{ "sdma_usage", get_process_settings().sdma_usage },
+        key_pair_t{ "cu_occupancy", get_process_settings().cu_occupancy },
     };
+
+    // Handle "none" - disable all
+    if(env_value == "none")
+    {
+        for(const auto& it : supported)
+            it.second = false;
+        return;
+    }
+
+    // Handle empty value or "all" - enable all
+    if(env_value.empty() || env_value == "all")
+    {
+        for(const auto& it : supported)
+            it.second = true;
+        return;
+    }
 
     // Initialize all process metrics to false
     for(const auto& it : supported)
         it.second = false;
 
+    // Parse and enable specific metrics
     auto _keys = tim::delimit(env_value, ", ;:");
     for(auto itr : _keys)
     {
         if(supported.find(itr) != supported.end())
         {
-            LOG_DEBUG("Enabling AMD SMI process metric: %s\n", itr.data());
+            LOG_DEBUG("Enabling AMD SMI process metric: {}", itr);
             supported.at(itr) = true;
         }
     }

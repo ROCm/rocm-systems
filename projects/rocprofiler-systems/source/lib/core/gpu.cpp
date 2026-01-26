@@ -99,8 +99,18 @@ amdsmi_init()
     auto _amdsmi_init = []() {
         try
         {
-            // Currently, only AMDSMI_INIT_AMD_GPUS is supported
-            ROCPROFSYS_AMD_SMI_CALL(::amdsmi_init(AMDSMI_INIT_AMD_GPUS));
+            // Currently, only AMDSMI_INIT_AMD_GPUS is supported according to AMD SMI
+            // docs. However, if process info API fails with AMDSMI_STATUS_NOT_INIT, we
+            // might need to try AMDSMI_INIT_ALL_PROCESSORS or AMDSMI_INIT_AMD_APUS.
+
+            // Try AMDSMI_INIT_ALL_PROCESSORS to see if process info API needs broader
+            // init
+            auto init_flags = AMDSMI_INIT_ALL_PROCESSORS;
+            LOG_DEBUG("Initializing AMD SMI with flags: 0x{:X}",
+                      static_cast<uint64_t>(init_flags));
+
+            ROCPROFSYS_AMD_SMI_CALL(::amdsmi_init(init_flags));
+
             get_processor_handles();
             _amdsmi_is_initialized() = true;  // Mark as initialized
         } catch(std::exception& _e)
@@ -187,6 +197,18 @@ initialize_amdsmi()
 #endif
 }
 
+void
+reset_amdsmi_initialization()
+{
+#if ROCPROFSYS_USE_ROCM > 0
+    LOG_DEBUG("Resetting AMD SMI initialization state for reinitialization");
+    _amdsmi_is_initialized() = false;
+    // Reset the call_once flag by replacing it with a new instance
+    amdsmi_once.~once_flag();
+    new(&amdsmi_once) std::once_flag();
+#endif
+}
+
 template <typename ArchiveT>
 void
 add_device_metadata(ArchiveT& ar)
@@ -270,10 +292,22 @@ get_processor_handles()
     auto ret = amdsmi_get_socket_handles(&socket_count, nullptr);
     if(ret != AMDSMI_STATUS_SUCCESS)
     {
+        LOG_ERROR("amdsmi_get_socket_handles failed with status: {}",
+                  static_cast<int>(ret));
         return;
     }
+
+    LOG_DEBUG("Found {} socket(s)", socket_count);
+
     std::vector<amdsmi_socket_handle> sockets(socket_count);
     ret = amdsmi_get_socket_handles(&socket_count, sockets.data());
+    if(ret != AMDSMI_STATUS_SUCCESS)
+    {
+        LOG_ERROR("amdsmi_get_socket_handles(data) failed with status: {}",
+                  static_cast<int>(ret));
+        return;
+    }
+
     for(auto& socket : sockets)
     {
         // Passing nullptr will return us the number of processors available for read for
@@ -281,13 +315,20 @@ get_processor_handles()
         ret = amdsmi_get_processor_handles(socket, &processor_count, nullptr);
         if(ret != AMDSMI_STATUS_SUCCESS)
         {
+            LOG_ERROR("amdsmi_get_processor_handles failed with status: {}",
+                      static_cast<int>(ret));
             return;
         }
+
+        LOG_DEBUG("Socket has {} processor(s)", processor_count);
+
         std::vector<amdsmi_processor_handle> all_processors(processor_count);
         ret =
             amdsmi_get_processor_handles(socket, &processor_count, all_processors.data());
         if(ret != AMDSMI_STATUS_SUCCESS)
         {
+            LOG_ERROR("amdsmi_get_processor_handles(data) failed with status: {}",
+                      static_cast<int>(ret));
             return;
         }
 
@@ -358,6 +399,8 @@ get_processor_handles()
         }
     }
     processors::total_processor_count = processors::processors_list.size();
+    LOG_INFO("AMD SMI initialized with {} GPU processor(s)",
+             processors::total_processor_count);
 }
 
 bool

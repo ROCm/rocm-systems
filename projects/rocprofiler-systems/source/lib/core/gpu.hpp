@@ -89,6 +89,9 @@ bool
 initialize_amdsmi();
 
 void
+reset_amdsmi_initialization();
+
+void
 add_device_metadata();
 }  // namespace gpu
 }  // namespace rocprofsys
