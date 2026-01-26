@@ -3603,7 +3603,7 @@ hipError_t ihipPointerGetAttributes(void* data, hipPointer_attribute attribute,
     case HIP_POINTER_ATTRIBUTE_DEVICE_POINTER: {
       if (memObj) {
         amd::Device* currentDevice = hip::getCurrentDevice()->devices()[0];
-        device::Memory* devMem = memObj->getDeviceMemory(*hip::getCurrentDevice()->devices()[0]);
+        device::Memory* devMem = memObj->getDeviceMemory(*currentDevice);
 
         // getDeviceMemory can fail, hence validate the sanity of the mem obtained
         if (nullptr == devMem) {
@@ -3617,7 +3617,6 @@ hipError_t ihipPointerGetAttributes(void* data, hipPointer_attribute attribute,
         if (memDevices.size() == 1 && memDevices[0] != currentDevice) {
           device::Memory* origDevMem = memObj->getDeviceMemory(*memDevices[0]);
           if (origDevMem != nullptr && !origDevMem->getAllowedPeerAccess()) {
-            *reinterpret_cast<hipDeviceptr_t*>(data) = nullptr;
             return hipErrorInvalidValue;
           }
         }
