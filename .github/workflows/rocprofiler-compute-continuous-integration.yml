@@ -152,12 +152,12 @@ jobs:
         working-directory: projects/rocprofiler-compute
         run: |
           for i in 1 2 3; do
-            pip install -r requirements.txt --break-system-packages --ignore-installed --timeout 60 && break
+            python3 -m pip install -U --user -r requirements.txt && break
             echo "⚠️ pip install attempt $i failed, retrying..."
             sleep 10
           done
           for i in 1 2 3; do
-            pip install -r requirements-test.txt --break-system-packages --ignore-installed --timeout 60 && break
+            python3 -m pip install -U --user -r requirements-test.txt && break
             echo "⚠️ pip install attempt $i failed, retrying..."
             sleep 10
           done
