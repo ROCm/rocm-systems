@@ -20,8 +20,6 @@ jobs:
   rocr-runtime-wsl-test:
     name: ROCR Runtime WSL Test
     runs-on: rocr-runtime-libhsakmt-wsl
-    env:
-      DISTRO: Ubuntu-24.04
     defaults:
       run:
         shell: powershell
@@ -55,7 +53,7 @@ jobs:
       - name: Set up WSL with Ubuntu
         uses: Vampire/setup-wsl@v6
         with:
-          distribution: ${{ env.DISTRO }}
+          distribution: Ubuntu-24.04
           update: true
           additional-packages: build-essential cmake ninja-build
 
