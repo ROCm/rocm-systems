@@ -343,9 +343,9 @@
 .endif
 
 .halt_wave:
-  // Halt the wavefront upon restoring STATUS below.
+  // Halt the wavefront
   s_bitset1_b32     ttmp6, TTMP6_WAVE_STOPPED_SHIFT
-  s_bitset1_b32     ttmp12, SQ_WAVE_STATE_PRIV_HALT_SHIFT  // FIXME: when we're allowed to halt a wave?
+  s_setreg_imm32_b32 hwreg(HW_REG_STATE_PRIV, SQ_WAVE_STATE_PRIV_HALT_SHIFT, 1), 1
 
   // Initialize TTMP registers
   s_bitcmp1_b32     ttmp8, TTMP8_DEBUG_FLAG_SHIFT
@@ -808,10 +808,6 @@
   // Check if we should signal the host (only trap handler instances that observes ttmp4 == tmp5 signals host)
   s_cmp_lg_u32      ttmp4, ttmp5                            // Compare buff_written_val with watermark (fails if ttmp4 == ttmp5)
 
-  // FIMXE: If we keep this piece of code, is it possible that multiple signals are sent for the same buffer???
-  // s_add_u32         ttmp4, ttmp4, 1                         // Calculate current count (previous + 1)
-  // s_cmp_lt_u32      ttmp4, ttmp5                            // if (current_sample_count < watermark), don't signal
-
   // Restore user data and execution state
   s_mov_b32         ttmp4, exec_lo                          // restore v2 to ttmp4
   s_mov_b32         ttmp5, ttmp13                           // restore v3 to ttmp5 
@@ -938,7 +934,6 @@
   s_bfe_u32         ttmp3, ttmp12, (1 | (1 << 16))
   s_setreg_b32      hwreg(HW_REG_STATE_PRIV, 9, 1), ttmp2
   s_setreg_b32      hwreg(HW_REG_STATE_PRIV, 1, 1), ttmp3
-  // TODO: what about halt bit?
 
   s_rfe_b64         [ttmp0, ttmp1]
 
