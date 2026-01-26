@@ -1930,7 +1930,7 @@ get_use_process_sampling()
 bool&
 get_use_ainic_stat_enabled()
 {
-    static auto _v = get_config()->find("ROCPROFSYS_AINIC_STAT_ENABLED");
+    static auto _v = get_config()->find("ROCPROFSYS_USE_AINIC");
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
 }
 
