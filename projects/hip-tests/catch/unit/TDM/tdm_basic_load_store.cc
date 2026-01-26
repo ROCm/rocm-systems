@@ -2,7 +2,7 @@
 #include <resource_guards.hh>
 #include <hip/amd_detail/amd_gfx1250_TDM.h>
 
-#if defined(__clang__) && defined(__HIP__) && defined(__gfx1250__)
+#if defined(__clang__) && defined(__HIP__)
 __global__ void  TDM_load_store_tester(const int* data,  int* result, int sizex, int sizey)
 {
     __shared__ int shmem[10 * 10];
@@ -59,4 +59,4 @@ TEST_CASE("TDM_Basic_load_2d")
         REQUIRE(result.ptr()[i] == input.ptr()[i]);
     }
 }
-#endif // #if defined(__clang__) && defined(__HIP__) && defined(__gfx1250__)
+#endif // #if defined(__clang__) && defined(__HIP__)
