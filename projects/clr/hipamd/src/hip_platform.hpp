@@ -87,6 +87,8 @@ class PlatformState {
 
   // Static Code Objects functions
   hip::FatBinaryInfo** addFatBinary(const void* data, bool& success);
+  hip::FatBinaryInfo** addKpackBinary(const void* hipk_metadata, const void* wrapper_addr,
+                                      bool& success);
   hipError_t removeFatBinary(hip::FatBinaryInfo** module);
   hipError_t digestFatBinary(const void* data, hip::FatBinaryInfo*& programs);
 

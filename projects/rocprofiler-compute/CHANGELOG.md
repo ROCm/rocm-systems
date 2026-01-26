@@ -58,6 +58,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Fix redundant warnings for compute/memory partition not found for < MI 300 series GPUs by skipping partition checks
 
+* Fixed formula for metrics related to reads from L2 cache to HBM for MI350
+
 ### Removed
 
 * Removed "VL1 Lat" metric for AMD Instinct MI300 series GPUs, due to MI300 series not supporting TCP_TCP_LATENCY_sum counter.

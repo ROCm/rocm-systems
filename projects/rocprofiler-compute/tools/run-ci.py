@@ -143,12 +143,12 @@ def generate_dashboard_script(args):
             ctest_submit(PARTS Coverage RETURN_VALUE _submit_ret)
         endif()
 
-        # Report test failures but don't fail the build, post results to CDash
-        if(NOT ${{_test_ret}} EQUAL 0)
-            message(WARNING "Some tests failed (see CDash for details)")
-        endif()
-
         ctest_submit(PARTS Done RETURN_VALUE _submit_ret)
+
+        # After all submissions complete, fail if tests failed
+        if(NOT ${{_test_ret}} EQUAL 0)
+            message(FATAL_ERROR "Some tests failed (see CDash for details)")
+        endif()
         """
     return _script
 
