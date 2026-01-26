@@ -38,7 +38,7 @@ Timings baseline_timings{};
 Timings optimized_user_kernel_timings{};
 Timings optimized_new_flags_timings{};
 
-constexpr int num_devices = 1;
+constexpr int num_devices = 8;
 uint32_t value = 0;
 
 std::vector<int> devices(num_devices);
@@ -179,7 +179,9 @@ static inline void execute_optimized_user_kernel() {
       CHECK_HIP(hipEventRecord(eventStartWrite[i], streams[i]));
     }
     for (int j = 0; j < scale; j++) {
-      CHECK_HIP(hipStreamWriteValue32(streams[i], &test_ptrs[0], 1, hipExtStreamWriteValueIncrement));
+      for (int j = 0; j < scale; j++) {
+        sync_kernel<<<1, 1, 0, streams[i]>>>(test_ptrs, 0);  // all kernels increment 0th signal
+      }
     }
     if (events && finer) {
       CHECK_HIP(hipEventRecord(eventStopWrite[i], streams[i]));
@@ -482,8 +484,8 @@ int main(int argc, char *argv[]) {
   warmup_iters = (argc > 5) ? atoi(argv[5]) : 5;
   measured_iters = (argc > 6) ? atoi(argv[6]) : 10;
 
-//   std::cout << "Running baseline test" << std::endl;
-//   run_baseline();
+  std::cout << "Running baseline test" << std::endl;
+  run_baseline();
 
   std::cout << "\nRunning optimized test with user kernel" << std::endl;
   run_optimized_user_kernel();
