@@ -77,7 +77,7 @@ jobs:
                 "${file}" == *.rtf || \
                 "${file}" == *.rst || \
                 "${file}" == projects/rccl/* || \
-                "${file}" == projects/rocshmem/* \
+                "${file}" == projects/rocshmem/* 
              ]] || \
              grep --quiet --extended-regexp '^projects/[^/.]+/docs/.*$' <<< "${file}" || \
              grep --quiet --extended-regexp '^([^/.]+/)*.markdownlint-ci2.yaml$' <<< "${file}" || \
