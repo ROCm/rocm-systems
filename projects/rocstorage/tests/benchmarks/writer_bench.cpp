@@ -22,6 +22,7 @@
 
 #include <rocstorage/storage.hpp>
 #include <rocstorage/writer.hpp>
+#include <rocstorage/writer_types.hpp>
 
 #include <benchmark/benchmark.h>
 
@@ -31,392 +32,825 @@
 #include <memory>
 #include <string>
 
-namespace {
+namespace
+{
 
-class writer_fixture : public benchmark::Fixture {
+using namespace rocstorage::writer_api;
+
+// ============================================================================
+// Benchmark Configuration
+// ============================================================================
+
+// Standard data insert counts for benchmarking
+// Use ->Arg() to select: 10k (quick), 100k (standard), 1000k (stress)
+constexpr size_t COUNT_10K   = 10000;
+constexpr size_t COUNT_100K  = 100000;
+constexpr size_t COUNT_1000K = 1000000;
+
+// ============================================================================
+// Test Data Generators
+// ============================================================================
+
+node_info_t
+make_node_info(size_t node_id) noexcept
+{
+    return node_info_t{ .node_id       = node_id,
+                        .hash          = 0xDEADBEEF + node_id,
+                        .machine_id    = "bench-machine",
+                        .system_name   = "Linux",
+                        .hostname      = "benchmark-host",
+                        .release       = "6.0.0",
+                        .version       = "v1",
+                        .hardware_name = "x86_64",
+                        .domain_name   = "local" };
+}
+
+process_info_t
+make_process_info(size_t node_id, size_t pid) noexcept
+{
+    return process_info_t{ .ppid        = 0,
+                           .pid         = pid,
+                           .init        = 0,
+                           .fini        = 0,
+                           .start       = 0,
+                           .end         = 0,
+                           .command     = "/bin/benchmark",
+                           .environment = "{}",
+                           .extdata     = "{}",
+                           .node_id     = node_id };
+}
+
+thread_info_t
+make_thread_info(size_t node_id, size_t pid, size_t tid) noexcept
+{
+    return thread_info_t{ .parent_process_id = pid,
+                          .thread_id         = tid,
+                          .name              = "main",
+                          .start             = 0,
+                          .end               = 0,
+                          .extdata           = "{}",
+                          .node_id           = node_id,
+                          .process_id        = pid };
+}
+
+agent_info_t
+make_gpu_agent(size_t node_id, size_t pid, size_t type_index = 0) noexcept
+{
+    return agent_info_t{ .unique_id = { .agent_type = "GPU", .type_index = type_index },
+                         .absolute_index = type_index,
+                         .logical_index  = type_index,
+                         .uuid           = 0xABCD + type_index,
+                         .name           = "gfx90a",
+                         .model_name     = "MI200",
+                         .vendor_name    = "AMD",
+                         .product_name   = "MI210",
+                         .user_name      = "",
+                         .extdata        = "{}",
+                         .node_id        = node_id,
+                         .process_id     = pid };
+}
+
+agent_info_t
+make_cpu_agent(size_t node_id, size_t pid, size_t type_index = 0) noexcept
+{
+    return agent_info_t{ .unique_id = { .agent_type = "CPU", .type_index = type_index },
+                         .absolute_index = type_index,
+                         .logical_index  = type_index,
+                         .uuid           = 0,
+                         .name           = "cpu0",
+                         .model_name     = "EPYC",
+                         .vendor_name    = "AMD",
+                         .product_name   = "EPYC7763",
+                         .user_name      = "",
+                         .extdata        = "{}",
+                         .node_id        = node_id,
+                         .process_id     = pid };
+}
+
+queue_info_t
+make_queue_info(size_t node_id, size_t pid, size_t queue_id) noexcept
+{
+    return queue_info_t{ .queue_id   = queue_id,
+                         .name       = "hsa_queue_0",
+                         .extdata    = "{}",
+                         .node_id    = node_id,
+                         .process_id = pid };
+}
+
+stream_info_t
+make_stream_info(size_t node_id, size_t pid, size_t stream_id) noexcept
+{
+    return stream_info_t{ .stream_id  = stream_id,
+                          .name       = "hip_stream_0",
+                          .extdata    = "{}",
+                          .node_id    = node_id,
+                          .process_id = pid };
+}
+
+code_object_info_t
+make_code_object(size_t            id,
+                 size_t            node_id,
+                 size_t            pid,
+                 agent_unique_id_t agent_id) noexcept
+{
+    return code_object_info_t{ .id           = id,
+                               .uri          = "file:///kernels.hsaco",
+                               .ld_base      = 0x10000,
+                               .ld_size      = 0x1000,
+                               .ld_delta     = 0,
+                               .storage_type = "FILE",
+                               .extdata      = "{}",
+                               .node_id      = node_id,
+                               .process_id   = pid,
+                               .agent_id     = agent_id };
+}
+
+kernel_symbol_info_t
+make_kernel_symbol(size_t id, size_t node_id, size_t pid, size_t code_obj_id) noexcept
+{
+    return kernel_symbol_info_t{ .id           = id,
+                                 .name         = "vectorAdd",
+                                 .display_name = "vectorAdd(float*,float*,float*,int)",
+                                 .kernel_obj   = 0x1234,
+                                 .kernarg_segmnt_size       = 256,
+                                 .kernarg_segment_alignment = 8,
+                                 .group_segment_size        = 65536,
+                                 .private_segment_size      = 0,
+                                 .sgrp_count                = 32,
+                                 .arch_vgrp_count           = 64,
+                                 .accum_vgrp_count          = 0,
+                                 .extdata                   = "{}",
+                                 .node_id                   = node_id,
+                                 .process_id                = pid,
+                                 .code_obj_id               = code_obj_id };
+}
+
+pmc_info_t
+make_pmc_info(size_t                           node_id,
+              size_t                           pid,
+              const char*                      name,
+              std::optional<agent_unique_id_t> agent_id = std::nullopt) noexcept
+{
+    return pmc_info_t{ .unique_id        = { .name = name, .agent_id = agent_id },
+                       .target_arch      = "GPU",
+                       .event_code       = 0x100,
+                       .instance_id      = 0,
+                       .symbol           = name,
+                       .description      = name,
+                       .long_description = name,
+                       .component        = "SQ",
+                       .units            = "value",
+                       .value_type       = "ABS",
+                       .block            = "SQ",
+                       .expression       = "",
+                       .is_constant      = 0,
+                       .is_derived       = 0,
+                       .extdata          = "{}",
+                       .node_id          = node_id,
+                       .process_id       = pid };
+}
+
+track_info_t
+make_track_info(const char*           name,
+                size_t                node_id,
+                std::optional<size_t> pid = std::nullopt,
+                std::optional<size_t> tid = std::nullopt) noexcept
+{
+    return track_info_t{ .name       = name,
+                         .extdata    = "{}",
+                         .node_id    = node_id,
+                         .process_id = pid,
+                         .thread_id  = tid };
+}
+
+// ============================================================================
+// Benchmark Fixture
+// ============================================================================
+
+class writer_fixture : public benchmark::Fixture
+{
 public:
-  void SetUp(const benchmark::State &_state) override {
-    m_database_path =
-        "benchmark_writer_" + std::to_string(_state.thread_index()) + ".db";
-    m_uuid = std::to_string(_state.thread_index());
-    m_storage = std::make_unique<rocm::storage>(m_database_path, m_uuid);
-    m_writer = m_storage->get_writer();
-    setup_full_schema();
-  }
+    void SetUp(const benchmark::State& state) override
+    {
+        m_database_path =
+            "benchmark_writer_" + std::to_string(state.thread_index()) + ".db";
+        m_uuid    = std::to_string(state.thread_index());
+        m_storage = std::make_unique<rocm::storage>(m_database_path, m_uuid);
+        m_writer  = m_storage->get_writer();
+        setup_schema();
+    }
 
-  void TearDown(const benchmark::State &) override {
-    m_writer.reset();
-    m_storage.reset();
-    std::remove(m_database_path.c_str());
-  }
+    void TearDown(const benchmark::State&) override
+    {
+        m_writer.reset();
+        m_storage.reset();
+        std::remove(m_database_path.c_str());
+    }
 
-  std::string get_db_size_label() const {
-    size_t size = utility::get_file_size(m_database_path);
-    return "DB: " + utility::format_file_size(size);
-  }
+    [[nodiscard]] std::string get_db_size_label() const
+    {
+        const size_t size = utility::get_file_size(m_database_path);
+        return "DB: " + utility::format_file_size(size);
+    }
 
 protected:
-  void setup_full_schema() {
-    m_writer->insert_node_info(1, 0xDEADBEEF, "bench-machine", "Linux",
-                               "benchmark-host", "6.0.0", "v1", "x86_64",
-                               "local");
-    m_writer->insert_process_info(1, 0, 1000, 0, 0, 0, 0, "/bin/benchmark");
+    void setup_schema()
+    {
+        constexpr size_t node_id = 1;
+        constexpr size_t pid     = 1000;
+        constexpr size_t tid     = 1001;
 
-    m_thread_pk =
-        m_writer->insert_thread_info(1, 1000, 1000, 1001, "main", 0, 0);
+        // Register infrastructure (not measured - this is setup cost)
+        m_writer->register_node_info(make_node_info(node_id));
+        m_writer->register_process_info(make_process_info(node_id, pid));
+        m_writer->register_thread_info(make_thread_info(node_id, pid, tid));
 
-    m_gpu_agent = m_writer->insert_agent(1, 1000, "GPU", 0, 0, 0, 0xABCD,
-                                         "gfx90a", "MI200", "AMD", "MI210", "");
-    m_cpu_agent = m_writer->insert_agent(1, 1000, "CPU", 1, 0, 0, 0, "cpu0",
-                                         "EPYC", "AMD", "EPYC7763", "");
+        m_writer->register_agent_info(make_gpu_agent(node_id, pid, 0));
+        m_writer->register_agent_info(make_cpu_agent(node_id, pid, 0));
 
-    m_writer->insert_queue_info(1, 1, 1000, "hsa_queue_0");
-    m_writer->insert_stream_info(1, 1, 1000, "hip_stream_0");
+        m_writer->register_queue_info(make_queue_info(node_id, pid, 1));
+        m_writer->register_stream_info(make_stream_info(node_id, pid, 1));
 
-    m_writer->insert_code_object(1, 1, 1000, m_gpu_agent,
-                                 "file:///kernels.hsaco", 0x10000, 0x1000, 0,
-                                 "FILE");
-    m_writer->insert_kernel_symbol(1, 1, 1000, 1, "vectorAdd",
-                                   "vectorAdd(float*,float*,float*,int)",
-                                   0x1234, 256, 8, 65536, 0, 32, 64, 0);
+        const agent_unique_id_t gpu_agent{ "GPU", 0 };
+        m_writer->register_code_object_info(make_code_object(1, node_id, pid, gpu_agent));
+        m_writer->register_kernel_symbol_info(make_kernel_symbol(1, node_id, pid, 1));
 
-    m_writer->insert_pmc_description(1, 1000, m_gpu_agent, "GPU", 0x100, 0,
-                                     "SQ_WAVES", "SQ_WAVES", "Wave count",
-                                     "Number of waves", "SQ", "waves", "ACCUM",
-                                     "SQ", "", 0, 0);
-    m_writer->insert_pmc_description(
-        1, 1000, m_gpu_agent, "GPU", 0x101, 0, "SQ_INSTS", "SQ_INSTS",
-        "Instruction count", "Number of instructions", "SQ", "insts", "ACCUM",
-        "SQ", "", 0, 0);
-    m_writer->insert_pmc_description(1, 1000, m_gpu_agent, "GPU", 0x102, 0,
-                                     "TA_BUSY", "TA_BUSY", "TA busy cycles",
-                                     "Texture addresser busy", "TA", "cycles",
-                                     "ACCUM", "TA", "", 0, 0);
+        // Register PMC descriptions
+        m_writer->register_pmc_info(make_pmc_info(node_id, pid, "SQ_WAVES", gpu_agent));
+        m_writer->register_pmc_info(make_pmc_info(node_id, pid, "SQ_INSTS", gpu_agent));
+        m_writer->register_pmc_info(make_pmc_info(node_id, pid, "TA_BUSY", gpu_agent));
 
-    const char *smi_metrics[] = {
-        "gfx_busy",     "ucm_busy",     "mm_busy",         "temp",
-        "power",        "mem_usage",    "xgmi_link_width", "xgmi_link_speed",
-        "pcie_link_w",  "pcie_link_s",  "pcie_bw_acc",     "pcie_bw_inst",
-        "xgmi_read_0",  "xgmi_read_1",  "xgmi_read_2",     "xgmi_read_3",
-        "xgmi_read_4",  "xgmi_read_5",  "xgmi_read_6",     "xgmi_read_7",
-        "xgmi_write_0", "xgmi_write_1", "xgmi_write_2",    "xgmi_write_3",
-        "xgmi_write_4", "xgmi_write_5", "xgmi_write_6",    "xgmi_write_7",
-        "jpeg_0",       "jpeg_1",       "jpeg_2",          "jpeg_3",
-        "jpeg_4",       "jpeg_5",       "jpeg_6",          "jpeg_7"};
-    for (size_t i = 0; i < 36; ++i) {
-      m_writer->insert_pmc_description(1, 1000, m_gpu_agent, "GPU", 0x200 + i,
-                                       0, smi_metrics[i], smi_metrics[i],
-                                       "SMI metric", "AMD SMI metric", "SMI",
-                                       "value", "ABS", "SMI", "", 0, 0);
+        // Register tracks
+        m_writer->register_track_info(make_track_info("gpu_kernel", node_id, pid, tid));
+        m_writer->register_track_info(make_track_info("gpu_memcpy", node_id, pid, tid));
+        m_writer->register_track_info(make_track_info("cpu_sample", node_id, pid, tid));
+        m_writer->register_track_info(
+            make_track_info("amd_smi", node_id, std::nullopt, std::nullopt));
+
+        // Store commonly used values
+        m_trace_env = trace_environment_t{ .node_id    = node_id,
+                                           .process_id = pid,
+                                           .thread_id  = tid,
+                                           .agent_id   = gpu_agent,
+                                           .stream_id  = 1,
+                                           .queue_id   = 1,
+                                           .track_name = "gpu_kernel" };
+
+        m_gpu_agent_id = gpu_agent;
     }
 
-    const char *cpu_metrics[] = {"freq", "usage",  "idle", "user",
-                                 "sys",  "iowait", "irq"};
-    for (size_t i = 0; i < 7; ++i) {
-      m_writer->insert_pmc_description(1, 1000, m_cpu_agent, "CPU", 0x300 + i,
-                                       0, cpu_metrics[i], cpu_metrics[i],
-                                       "CPU metric", "CPU frequency metric",
-                                       "CPU", "value", "ABS", "CPU", "", 0, 0);
-    }
-
-    m_writer->insert_track("gpu_kernel", 1, 1000, m_thread_pk);
-    m_writer->insert_track("gpu_memcpy", 1, 1000, m_thread_pk);
-    m_writer->insert_track("cpu_sample", 1, 1000, m_thread_pk);
-    m_writer->insert_track("amd_smi", 1, 1000, std::nullopt);
-    m_writer->insert_track("cpu_freq", 1, 1000, std::nullopt);
-  }
-
-  std::string m_database_path;
-  std::string m_uuid;
-  std::unique_ptr<rocm::storage> m_storage;
-  std::shared_ptr<rocstorage::writer> m_writer;
-
-  size_t m_thread_pk = 0;
-  size_t m_gpu_agent = 0;
-  size_t m_cpu_agent = 0;
+    std::string                         m_database_path;
+    std::string                         m_uuid;
+    std::unique_ptr<rocm::storage>      m_storage;
+    std::shared_ptr<rocstorage::writer> m_writer;
+    trace_environment_t                 m_trace_env;
+    agent_unique_id_t                   m_gpu_agent_id;
 };
 
-BENCHMARK_DEFINE_F(writer_fixture, kernel_dispatch)
-(benchmark::State &_state) {
-  const auto count = static_cast<size_t>(_state.range(0));
-  size_t category_id = m_writer->insert_string("kernel_dispatch");
+// ============================================================================
+// Registration Benchmarks (Setup Cost)
+// These benchmarks measure the cost of registering metadata
+// ============================================================================
 
-  for (auto _ : _state) {
-    for (size_t i = 0; i < count; ++i) {
-      size_t name_id = m_writer->insert_string("vectorAdd");
-      auto event_id = m_writer->insert_event(category_id, i, 0, i);
-      m_writer->insert_kernel_dispatch(
-          1, 1000, m_thread_pk, m_gpu_agent, 1, i, 1, 1, i * 1000,
-          i * 1000 + 500, 0, 65536, 256, 1, 1, 1024, 1, 1, name_id, event_id);
+class registration_fixture : public benchmark::Fixture
+{
+public:
+    void SetUp(const benchmark::State& state) override
+    {
+        m_database_path =
+            "benchmark_registration_" + std::to_string(state.thread_index()) + ".db";
+        m_uuid    = std::to_string(state.thread_index());
+        m_storage = std::make_unique<rocm::storage>(m_database_path, m_uuid);
+        m_writer  = m_storage->get_writer();
     }
-    m_writer->flush();
-  }
-  _state.SetItemsProcessed(_state.iterations() * count);
-  _state.SetLabel(get_db_size_label());
+
+    void TearDown(const benchmark::State&) override
+    {
+        m_writer.reset();
+        m_storage.reset();
+        std::remove(m_database_path.c_str());
+    }
+
+    [[nodiscard]] std::string get_db_size_label() const
+    {
+        const size_t size = utility::get_file_size(m_database_path);
+        return "DB: " + utility::format_file_size(size);
+    }
+
+protected:
+    std::string                         m_database_path;
+    std::string                         m_uuid;
+    std::unique_ptr<rocm::storage>      m_storage;
+    std::shared_ptr<rocstorage::writer> m_writer;
+};
+
+// Benchmark: Register multiple threads
+BENCHMARK_DEFINE_F(registration_fixture, register_threads)(benchmark::State& state)
+{
+    const auto count = static_cast<size_t>(state.range(0));
+
+    constexpr size_t node_id = 1;
+    constexpr size_t pid     = 1000;
+
+    // Register required dependencies first
+    m_writer->register_node_info(make_node_info(node_id));
+    m_writer->register_process_info(make_process_info(node_id, pid));
+
+    for(auto _ : state)
+    {
+        for(size_t i = 0; i < count; ++i)
+        {
+            m_writer->register_thread_info(make_thread_info(node_id, pid, 2000 + i));
+        }
+        m_writer->flush_in_memory_data_to_disk();
+    }
+    state.SetItemsProcessed(state.iterations() * count);
+    state.SetLabel(get_db_size_label());
 }
+
+BENCHMARK_REGISTER_F(registration_fixture, register_threads)
+    ->Unit(benchmark::kSecond)
+    ->Iterations(1)
+    ->Arg(COUNT_10K)
+    ->Arg(COUNT_100K);
+
+// Benchmark: Register multiple kernel symbols
+BENCHMARK_DEFINE_F(registration_fixture, register_kernel_symbols)(benchmark::State& state)
+{
+    const auto count = static_cast<size_t>(state.range(0));
+
+    constexpr size_t node_id = 1;
+    constexpr size_t pid     = 1000;
+
+    // Register required dependencies
+    m_writer->register_node_info(make_node_info(node_id));
+    m_writer->register_process_info(make_process_info(node_id, pid));
+
+    const agent_unique_id_t gpu_agent{ "GPU", 0 };
+    m_writer->register_agent_info(make_gpu_agent(node_id, pid, 0));
+    m_writer->register_code_object_info(make_code_object(1, node_id, pid, gpu_agent));
+
+    for(auto _ : state)
+    {
+        for(size_t i = 0; i < count; ++i)
+        {
+            m_writer->register_kernel_symbol_info(
+                make_kernel_symbol(i + 1, node_id, pid, 1));
+        }
+        m_writer->flush_in_memory_data_to_disk();
+    }
+    state.SetItemsProcessed(state.iterations() * count);
+    state.SetLabel(get_db_size_label());
+}
+
+BENCHMARK_REGISTER_F(registration_fixture, register_kernel_symbols)
+    ->Unit(benchmark::kSecond)
+    ->Iterations(1)
+    ->Arg(COUNT_10K)
+    ->Arg(COUNT_100K);
+
+// Benchmark: Register PMC descriptions
+BENCHMARK_DEFINE_F(registration_fixture, register_pmc_info)(benchmark::State& state)
+{
+    const auto count = static_cast<size_t>(state.range(0));
+
+    constexpr size_t node_id = 1;
+    constexpr size_t pid     = 1000;
+
+    // Register required dependencies
+    m_writer->register_node_info(make_node_info(node_id));
+    m_writer->register_process_info(make_process_info(node_id, pid));
+
+    const agent_unique_id_t gpu_agent{ "GPU", 0 };
+    m_writer->register_agent_info(make_gpu_agent(node_id, pid, 0));
+
+    // Generate unique PMC names
+    std::vector<std::string> pmc_names;
+    pmc_names.reserve(count);
+    for(size_t i = 0; i < count; ++i)
+    {
+        pmc_names.push_back("PMC_COUNTER_" + std::to_string(i));
+    }
+
+    for(auto _ : state)
+    {
+        for(size_t i = 0; i < count; ++i)
+        {
+            m_writer->register_pmc_info(
+                make_pmc_info(node_id, pid, pmc_names[i].c_str(), gpu_agent));
+        }
+        m_writer->flush_in_memory_data_to_disk();
+    }
+    state.SetItemsProcessed(state.iterations() * count);
+    state.SetLabel(get_db_size_label());
+}
+
+BENCHMARK_REGISTER_F(registration_fixture, register_pmc_info)
+    ->Unit(benchmark::kSecond)
+    ->Iterations(1)
+    ->Arg(COUNT_10K)
+    ->Arg(COUNT_100K);
+
+// Benchmark: Full schema registration (realistic setup)
+BENCHMARK_DEFINE_F(registration_fixture, register_full_schema)(benchmark::State& state)
+{
+    const auto thread_count = static_cast<size_t>(state.range(0));
+    const auto kernel_count = static_cast<size_t>(state.range(1));
+
+    for(auto _ : state)
+    {
+        constexpr size_t node_id = 1;
+        constexpr size_t pid     = 1000;
+
+        // Infrastructure
+        m_writer->register_node_info(make_node_info(node_id));
+        m_writer->register_process_info(make_process_info(node_id, pid));
+
+        // Threads
+        for(size_t i = 0; i < thread_count; ++i)
+        {
+            m_writer->register_thread_info(make_thread_info(node_id, pid, 2000 + i));
+        }
+
+        // GPU agent
+        const agent_unique_id_t gpu_agent{ "GPU", 0 };
+        m_writer->register_agent_info(make_gpu_agent(node_id, pid, 0));
+        m_writer->register_queue_info(make_queue_info(node_id, pid, 1));
+        m_writer->register_stream_info(make_stream_info(node_id, pid, 1));
+
+        // Code objects and kernels
+        m_writer->register_code_object_info(make_code_object(1, node_id, pid, gpu_agent));
+        for(size_t i = 0; i < kernel_count; ++i)
+        {
+            m_writer->register_kernel_symbol_info(
+                make_kernel_symbol(i + 1, node_id, pid, 1));
+        }
+
+        // Tracks
+        for(size_t i = 0; i < thread_count; ++i)
+        {
+            m_writer->register_track_info(
+                make_track_info("track", node_id, pid, 2000 + i));
+        }
+
+        m_writer->flush_in_memory_data_to_disk();
+    }
+
+    const size_t total_registrations =
+        1 + 1 + thread_count + 1 + 1 + 1 + 1 + kernel_count + thread_count;
+    state.SetItemsProcessed(state.iterations() * total_registrations);
+    state.SetLabel(get_db_size_label());
+    state.counters["threads"] = static_cast<double>(thread_count);
+    state.counters["kernels"] = static_cast<double>(kernel_count);
+}
+
+BENCHMARK_REGISTER_F(registration_fixture, register_full_schema)
+    ->Unit(benchmark::kSecond)
+    ->Iterations(1)
+    // Small setup (12 threads, 100 kernels)
+    ->Args({ 12, 100 })
+    // Medium setup (64 threads, 1000 kernels)
+    ->Args({ 64, 1000 })
+    // Large setup (256 threads, 10000 kernels)
+    ->Args({ 256, 10000 });
+
+// ============================================================================
+// Data Insertion Benchmarks (Hot Path - Primary Focus)
+// ============================================================================
+
+BENCHMARK_DEFINE_F(writer_fixture, kernel_dispatch)(benchmark::State& state)
+{
+    const auto count = static_cast<size_t>(state.range(0));
+
+    for(auto _ : state)
+    {
+        for(size_t i = 0; i < count; ++i)
+        {
+            const kernel_dispatch_data_t data{ .event                = std::nullopt,
+                                               .dispatch_id          = i,
+                                               .start_timestamp      = i * 1000,
+                                               .end_timestamp        = i * 1000 + 500,
+                                               .kernel_symbol_id     = 1,
+                                               .code_object_id       = 1,
+                                               .private_segment_size = 0,
+                                               .group_segment_size   = 65536,
+                                               .workgroup_size_x     = 256,
+                                               .workgroup_size_y     = 1,
+                                               .workgroup_size_z     = 1,
+                                               .grid_size_x          = 1024,
+                                               .grid_size_y          = 1,
+                                               .grid_size_z          = 1,
+                                               .name                 = "vectorAdd",
+                                               .extdata              = "{}" };
+            m_writer->insert_kernel_dispatch_data(data, m_trace_env);
+        }
+        m_writer->flush_in_memory_data_to_disk();
+    }
+    state.SetItemsProcessed(state.iterations() * count);
+    state.SetLabel(get_db_size_label());
+}
+
 BENCHMARK_REGISTER_F(writer_fixture, kernel_dispatch)
     ->Unit(benchmark::kSecond)
     ->Iterations(1)
-    ->Arg(100000)
-    ->Arg(500000);
+    ->Arg(COUNT_10K)
+    ->Arg(COUNT_100K)
+    ->Arg(COUNT_1000K);
 
-BENCHMARK_DEFINE_F(writer_fixture, memory_copy)
-(benchmark::State &_state) {
-  const auto count = static_cast<size_t>(_state.range(0));
-  size_t category_id = m_writer->insert_string("memory_copy");
-  size_t name_id = m_writer->insert_string("hipMemcpy");
+BENCHMARK_DEFINE_F(writer_fixture, memory_copy)(benchmark::State& state)
+{
+    const auto count = static_cast<size_t>(state.range(0));
 
-  for (auto _ : _state) {
-    for (size_t i = 0; i < count; ++i) {
-      auto event_id = m_writer->insert_event(category_id, i, 0, i);
-      m_writer->insert_memory_copy(
-          1, 1000, m_thread_pk, i * 1000, i * 1000 + 200, name_id, m_gpu_agent,
-          0x7FFF00000000 + i * 4096, m_cpu_agent, 0x100000 + i * 4096, 4096, 1,
-          1, name_id, event_id);
+    for(auto _ : state)
+    {
+        for(size_t i = 0; i < count; ++i)
+        {
+            const memory_copy_data_t data{ .event           = std::nullopt,
+                                           .start_timestamp = i * 1000,
+                                           .end_timestamp   = i * 1000 + 200,
+                                           .dst_agent_id    = m_gpu_agent_id,
+                                           .dst_address     = 0x7FFF00000000 + i * 4096,
+                                           .src_agent_id    = std::nullopt,
+                                           .src_address     = 0x100000 + i * 4096,
+                                           .size            = 4096,
+                                           .name            = "hipMemcpy",
+                                           .region_name     = nullptr,
+                                           .extdata         = "{}" };
+            m_writer->insert_memory_copy_data(data, m_trace_env);
+        }
+        m_writer->flush_in_memory_data_to_disk();
     }
-    m_writer->flush();
-  }
-  _state.SetItemsProcessed(_state.iterations() * count);
-  _state.SetLabel(get_db_size_label());
+    state.SetItemsProcessed(state.iterations() * count);
+    state.SetLabel(get_db_size_label());
 }
+
 BENCHMARK_REGISTER_F(writer_fixture, memory_copy)
     ->Unit(benchmark::kSecond)
     ->Iterations(1)
-    ->Arg(100000)
-    ->Arg(500000);
+    ->Arg(COUNT_10K)
+    ->Arg(COUNT_100K)
+    ->Arg(COUNT_1000K);
 
-BENCHMARK_DEFINE_F(writer_fixture, memory_alloc)
-(benchmark::State &_state) {
-  const auto count = static_cast<size_t>(_state.range(0));
-  size_t category_id = m_writer->insert_string("memory_alloc");
+BENCHMARK_DEFINE_F(writer_fixture, memory_alloc)(benchmark::State& state)
+{
+    const auto count = static_cast<size_t>(state.range(0));
 
-  for (auto _ : _state) {
-    for (size_t i = 0; i < count; ++i) {
-      auto event_id = m_writer->insert_event(category_id, i, 0, i);
-      m_writer->insert_memory_alloc(
-          1, 1000, m_thread_pk, m_gpu_agent, "ALLOC", "REAL", i * 1000,
-          i * 1000 + 100, 0x7FFF00000000 + i * 4096, 4096, 1, 1, event_id);
+    for(auto _ : state)
+    {
+        for(size_t i = 0; i < count; ++i)
+        {
+            const memory_alloc_data_t data{ .event           = std::nullopt,
+                                            .type            = "ALLOC",
+                                            .level           = "REAL",
+                                            .start_timestamp = i * 1000,
+                                            .end_timestamp   = i * 1000 + 100,
+                                            .address         = 0x7FFF00000000 + i * 4096,
+                                            .size            = 4096,
+                                            .extdata         = "{}" };
+            m_writer->insert_memory_alloc_data(data, m_trace_env);
+        }
+        m_writer->flush_in_memory_data_to_disk();
     }
-    m_writer->flush();
-  }
-  _state.SetItemsProcessed(_state.iterations() * count);
-  _state.SetLabel(get_db_size_label());
+    state.SetItemsProcessed(state.iterations() * count);
+    state.SetLabel(get_db_size_label());
 }
+
 BENCHMARK_REGISTER_F(writer_fixture, memory_alloc)
     ->Unit(benchmark::kSecond)
     ->Iterations(1)
-    ->Arg(100000)
-    ->Arg(500000);
+    ->Arg(COUNT_10K)
+    ->Arg(COUNT_100K)
+    ->Arg(COUNT_1000K);
 
-BENCHMARK_DEFINE_F(writer_fixture, region_variable_args)
-(benchmark::State &_state) {
-  const auto count = static_cast<size_t>(_state.range(0));
-  const char *arg_types[] = {"int",    "void*",  "size_t",   "float",
-                             "double", "char*",  "uint64_t", "int32_t",
-                             "bool",   "uint8_t"};
-  const char *arg_names[] = {"arg0", "arg1", "arg2", "arg3", "arg4",
-                             "arg5", "arg6", "arg7", "arg8", "arg9"};
-  const char *arg_values[] = {"42",    "0x7fff0000", "4096", "3.14", "2.718",
-                              "hello", "12345",      "-1",   "true", "255"};
+BENCHMARK_DEFINE_F(writer_fixture, region)(benchmark::State& state)
+{
+    const auto count = static_cast<size_t>(state.range(0));
 
-  for (auto _ : _state) {
-    for (size_t i = 0; i < count; ++i) {
-      size_t name_id = m_writer->insert_string("region_name");
-      size_t category_id = m_writer->insert_string("hip_api");
-      auto event_id = m_writer->insert_event(category_id, i, 0, i);
-      size_t num_args = i % 11;
-      for (size_t arg = 0; arg < num_args; ++arg) {
-        m_writer->insert_args(event_id, arg, arg_types[arg], arg_names[arg],
-                              arg_values[arg]);
-      }
-      m_writer->insert_region(1, 1000, m_thread_pk, i * 500, i * 500 + 100,
-                              name_id, event_id);
+    for(auto _ : state)
+    {
+        for(size_t i = 0; i < count; ++i)
+        {
+            const region_data_t data{ .event           = std::nullopt,
+                                      .start_timestamp = i * 500,
+                                      .end_timestamp   = i * 500 + 100,
+                                      .name            = "user_region",
+                                      .extdata         = "{}",
+                                      .args            = {} };
+            m_writer->insert_region_data(data, m_trace_env);
+        }
+        m_writer->flush_in_memory_data_to_disk();
     }
-    m_writer->flush();
-  }
-  _state.SetItemsProcessed(_state.iterations() * count);
-  _state.SetLabel(get_db_size_label());
+    state.SetItemsProcessed(state.iterations() * count);
+    state.SetLabel(get_db_size_label());
 }
-BENCHMARK_REGISTER_F(writer_fixture, region_variable_args)
+
+BENCHMARK_REGISTER_F(writer_fixture, region)
     ->Unit(benchmark::kSecond)
     ->Iterations(1)
-    ->Arg(100000)
-    ->Arg(500000);
+    ->Arg(COUNT_10K)
+    ->Arg(COUNT_100K)
+    ->Arg(COUNT_1000K);
 
-BENCHMARK_DEFINE_F(writer_fixture, backtrace_region)
-(benchmark::State &_state) {
-  const auto count = static_cast<size_t>(_state.range(0));
+BENCHMARK_DEFINE_F(writer_fixture, region_with_args)(benchmark::State& state)
+{
+    const auto count = static_cast<size_t>(state.range(0));
 
-  for (auto _ : _state) {
-    for (size_t i = 0; i < count; ++i) {
-      size_t name_id = m_writer->insert_string("backtrace_region");
-      size_t category_id = m_writer->insert_string("backtrace");
-      auto event_id = m_writer->insert_event(category_id, i, 0, i);
-      m_writer->insert_region(1, 1000, m_thread_pk, i * 500, i * 500 + 100,
-                              name_id, event_id);
-      m_writer->insert_sample("cpu_sample", i * 500, event_id);
+    // Pre-create argument data
+    const std::vector<arg_data_t> args = {
+        { .position = 0, .type = "int", .name = "level", .value = "0", .extdata = "{}" },
+        { .position = 1,
+          .type     = "char*",
+          .name     = "name",
+          .value    = "region",
+          .extdata  = "{}" },
+        { .position = 2,
+          .type     = "size_t",
+          .name     = "id",
+          .value    = "12345",
+          .extdata  = "{}" },
+        { .position = 3,
+          .type     = "void*",
+          .name     = "ptr",
+          .value    = "0x7fff000",
+          .extdata  = "{}" },
+        { .position = 4,
+          .type     = "double",
+          .name     = "value",
+          .value    = "3.14159",
+          .extdata  = "{}" }
+    };
+
+    for(auto _ : state)
+    {
+        for(size_t i = 0; i < count; ++i)
+        {
+            // Variable number of arguments (0-5) based on iteration
+            const size_t            num_args = i % 6;
+            std::vector<arg_data_t> iter_args(args.begin(), args.begin() + num_args);
+
+            // Create event data when args are present (required for correlation)
+            std::optional<event_data_t> event_opt = std::nullopt;
+            if(!iter_args.empty())
+            {
+                event_opt = event_data_t{ .stack_id        = i,
+                                          .parent_stack_id = 0,
+                                          .correlation_id  = i,
+                                          .call_stack      = {},
+                                          .line_info_list  = {},
+                                          .event_category  = "HIP_API",
+                                          .extdata         = "{}" };
+            }
+
+            const region_data_t data{ .event           = std::move(event_opt),
+                                      .start_timestamp = i * 500,
+                                      .end_timestamp   = i * 500 + 100,
+                                      .name            = "api_call",
+                                      .extdata         = "{}",
+                                      .args            = std::move(iter_args) };
+            m_writer->insert_region_data(data, m_trace_env);
+        }
+        m_writer->flush_in_memory_data_to_disk();
     }
-    m_writer->flush();
-  }
-  _state.SetItemsProcessed(_state.iterations() * count);
-  _state.SetLabel(get_db_size_label());
+    state.SetItemsProcessed(state.iterations() * count);
+    state.SetLabel(get_db_size_label());
 }
-BENCHMARK_REGISTER_F(writer_fixture, backtrace_region)
+
+BENCHMARK_REGISTER_F(writer_fixture, region_with_args)
     ->Unit(benchmark::kSecond)
     ->Iterations(1)
-    ->Arg(100000)
-    ->Arg(500000);
+    ->Arg(COUNT_10K)
+    ->Arg(COUNT_100K)
+    ->Arg(COUNT_1000K);
 
-BENCHMARK_DEFINE_F(writer_fixture, in_time_sample)
-(benchmark::State &_state) {
-  const auto count = static_cast<size_t>(_state.range(0));
+BENCHMARK_DEFINE_F(writer_fixture, pmc_event)(benchmark::State& state)
+{
+    const auto count = static_cast<size_t>(state.range(0));
 
-  for (auto _ : _state) {
-    for (size_t i = 0; i < count; ++i) {
-      size_t track_name_id = m_writer->insert_string("in_time_track");
-      auto event_id = m_writer->insert_event(track_name_id, i, 0, i);
-      m_writer->insert_sample("cpu_sample", i * 100, event_id);
+    const pmc_info_unique_id_t pmc_id{ .name = "SQ_WAVES", .agent_id = m_gpu_agent_id };
+    const track_info_t         track = make_track_info("gpu_kernel", 1, 1000, 1001);
+
+    for(auto _ : state)
+    {
+        for(size_t i = 0; i < count; ++i)
+        {
+            const pmc_event_data_t data{
+                .event   = std::nullopt,
+                .value   = static_cast<double>(i * 100),
+                .extdata = "{}",
+                .sample  = { .timestamp = i * 1000, .track = track, .extdata = "{}" }
+            };
+            m_writer->insert_pmc_event_data(data, pmc_id);
+        }
+        m_writer->flush_in_memory_data_to_disk();
     }
-    m_writer->flush();
-  }
-  _state.SetItemsProcessed(_state.iterations() * count);
-  _state.SetLabel(get_db_size_label());
+    state.SetItemsProcessed(state.iterations() * count);
+    state.SetLabel(get_db_size_label());
 }
-BENCHMARK_REGISTER_F(writer_fixture, in_time_sample)
+
+BENCHMARK_REGISTER_F(writer_fixture, pmc_event)
     ->Unit(benchmark::kSecond)
     ->Iterations(1)
-    ->Arg(100000)
-    ->Arg(500000);
+    ->Arg(COUNT_10K)
+    ->Arg(COUNT_100K)
+    ->Arg(COUNT_1000K);
 
-BENCHMARK_DEFINE_F(writer_fixture, pmc_event_with_sample)
-(benchmark::State &_state) {
-  const auto count = static_cast<size_t>(_state.range(0));
-  size_t category_id = m_writer->insert_string("pmc_event");
+// ============================================================================
+// End-to-End Benchmark (Realistic Mixed Workload)
+// ============================================================================
 
-  for (auto _ : _state) {
-    for (size_t i = 0; i < count; ++i) {
-      auto event_id = m_writer->insert_event(category_id, i, 0, i);
-      m_writer->insert_sample("gpu_kernel", i * 1000, event_id);
-      m_writer->insert_pmc_event(event_id, m_gpu_agent, "SQ_WAVES",
-                                 static_cast<double>(i * 100));
+BENCHMARK_DEFINE_F(writer_fixture, end_to_end_mixed)(benchmark::State& state)
+{
+    const auto total_events = static_cast<size_t>(state.range(0));
+
+    // Realistic distribution: 70% regions, 20% kernel dispatches, 10% memory ops
+    const size_t region_count   = total_events * 70 / 100;
+    const size_t kernel_count   = total_events * 20 / 100;
+    const size_t memcopy_count  = total_events * 5 / 100;
+    const size_t memalloc_count = total_events * 5 / 100;
+
+    for(auto _ : state)
+    {
+        // Regions (most common)
+        for(size_t i = 0; i < region_count; ++i)
+        {
+            const region_data_t data{ .event           = std::nullopt,
+                                      .start_timestamp = i * 500,
+                                      .end_timestamp   = i * 500 + 100,
+                                      .name            = "hip_api",
+                                      .extdata         = "{}",
+                                      .args            = {} };
+            m_writer->insert_region_data(data, m_trace_env);
+        }
+
+        // Kernel dispatches
+        for(size_t i = 0; i < kernel_count; ++i)
+        {
+            const kernel_dispatch_data_t data{ .event                = std::nullopt,
+                                               .dispatch_id          = i,
+                                               .start_timestamp      = i * 10000,
+                                               .end_timestamp        = i * 10000 + 5000,
+                                               .kernel_symbol_id     = 1,
+                                               .code_object_id       = 1,
+                                               .private_segment_size = 0,
+                                               .group_segment_size   = 65536,
+                                               .workgroup_size_x     = 256,
+                                               .workgroup_size_y     = 1,
+                                               .workgroup_size_z     = 1,
+                                               .grid_size_x          = 1024,
+                                               .grid_size_y          = 1,
+                                               .grid_size_z          = 1,
+                                               .name                 = "vectorAdd",
+                                               .extdata              = "{}" };
+            m_writer->insert_kernel_dispatch_data(data, m_trace_env);
+        }
+
+        // Memory copies
+        for(size_t i = 0; i < memcopy_count; ++i)
+        {
+            const memory_copy_data_t data{ .event           = std::nullopt,
+                                           .start_timestamp = i * 2000,
+                                           .end_timestamp   = i * 2000 + 500,
+                                           .dst_agent_id    = m_gpu_agent_id,
+                                           .dst_address     = 0x7FFF00000000 + i * 4096,
+                                           .src_agent_id    = std::nullopt,
+                                           .src_address     = 0x100000 + i * 4096,
+                                           .size            = 4096,
+                                           .name            = "hipMemcpy",
+                                           .region_name     = nullptr,
+                                           .extdata         = "{}" };
+            m_writer->insert_memory_copy_data(data, m_trace_env);
+        }
+
+        // Memory allocations
+        for(size_t i = 0; i < memalloc_count; ++i)
+        {
+            const memory_alloc_data_t data{ .event           = std::nullopt,
+                                            .type            = "ALLOC",
+                                            .level           = "REAL",
+                                            .start_timestamp = i * 1000,
+                                            .end_timestamp   = i * 1000 + 100,
+                                            .address         = 0x7FFF00000000 + i * 4096,
+                                            .size            = 4096,
+                                            .extdata         = "{}" };
+            m_writer->insert_memory_alloc_data(data, m_trace_env);
+        }
+
+        m_writer->flush_in_memory_data_to_disk();
     }
-    m_writer->flush();
-  }
-  _state.SetItemsProcessed(_state.iterations() * count);
-  _state.SetLabel(get_db_size_label());
+
+    state.SetItemsProcessed(state.iterations() * total_events);
+    state.SetLabel(get_db_size_label());
+    state.counters["regions"]   = static_cast<double>(region_count);
+    state.counters["kernels"]   = static_cast<double>(kernel_count);
+    state.counters["memcopies"] = static_cast<double>(memcopy_count);
+    state.counters["memallocs"] = static_cast<double>(memalloc_count);
 }
-BENCHMARK_REGISTER_F(writer_fixture, pmc_event_with_sample)
+
+BENCHMARK_REGISTER_F(writer_fixture, end_to_end_mixed)
     ->Unit(benchmark::kSecond)
     ->Iterations(1)
-    ->Arg(100000)
-    ->Arg(500000);
+    ->Arg(COUNT_10K)
+    ->Arg(COUNT_100K)
+    ->Arg(COUNT_1000K);
 
-BENCHMARK_DEFINE_F(writer_fixture, amd_smi_sample_min)
-(benchmark::State &_state) {
-  const auto count = static_cast<size_t>(_state.range(0));
-  size_t category_id = m_writer->insert_string("amd_smi");
-  const char *min_metrics[] = {"gfx_busy", "ucm_busy", "mm_busy",
-                               "temp",     "power",    "mem_usage"};
-  constexpr size_t min_metric_count = 6;
-
-  for (auto _ : _state) {
-    for (size_t i = 0; i < count; ++i) {
-      m_writer->insert_string("amd_smi_sample");
-      auto event_id = m_writer->insert_event(category_id, i, 0, i);
-      for (size_t m = 0; m < min_metric_count; ++m) {
-        m_writer->insert_pmc_event(event_id, m_gpu_agent, min_metrics[m],
-                                   static_cast<double>(i + m));
-        m_writer->insert_sample("amd_smi", i * 1000, event_id);
-      }
-    }
-    m_writer->flush();
-  }
-  _state.SetItemsProcessed(_state.iterations() * count);
-  _state.SetLabel(get_db_size_label());
-}
-BENCHMARK_REGISTER_F(writer_fixture, amd_smi_sample_min)
-    ->Unit(benchmark::kSecond)
-    ->Iterations(1)
-    ->Arg(100000)
-    ->Arg(500000);
-
-BENCHMARK_DEFINE_F(writer_fixture, amd_smi_sample_max)
-(benchmark::State &_state) {
-  const auto count = static_cast<size_t>(_state.range(0));
-  size_t category_id = m_writer->insert_string("amd_smi");
-
-  const char *base_metrics[] = {
-      "gfx_busy",     "ucm_busy",     "mm_busy",         "temp",
-      "power",        "mem_usage",    "xgmi_link_width", "xgmi_link_speed",
-      "pcie_link_w",  "pcie_link_s",  "pcie_bw_acc",     "pcie_bw_inst",
-      "xgmi_read_0",  "xgmi_read_1",  "xgmi_read_2",     "xgmi_read_3",
-      "xgmi_read_4",  "xgmi_read_5",  "xgmi_read_6",     "xgmi_read_7",
-      "xgmi_write_0", "xgmi_write_1", "xgmi_write_2",    "xgmi_write_3",
-      "xgmi_write_4", "xgmi_write_5", "xgmi_write_6",    "xgmi_write_7",
-      "jpeg_0",       "jpeg_1",       "jpeg_2",          "jpeg_3",
-      "jpeg_4",       "jpeg_5",       "jpeg_6",          "jpeg_7"};
-  constexpr size_t base_count = 36;
-  constexpr size_t max_n = 386;
-
-  for (auto _ : _state) {
-    for (size_t i = 0; i < count; ++i) {
-      m_writer->insert_string("amd_smi_sample");
-      auto event_id = m_writer->insert_event(category_id, i, 0, i);
-      for (size_t m = 0; m < max_n; ++m) {
-        const char *metric_name = base_metrics[m % base_count];
-        m_writer->insert_pmc_event(event_id, m_gpu_agent, metric_name,
-                                   static_cast<double>(i + m));
-        m_writer->insert_sample("amd_smi", i * 1000, event_id);
-      }
-    }
-    m_writer->flush();
-  }
-  _state.SetItemsProcessed(_state.iterations() * count);
-  _state.SetLabel(get_db_size_label());
-}
-BENCHMARK_REGISTER_F(writer_fixture, amd_smi_sample_max)
-    ->Unit(benchmark::kSecond)
-    ->Iterations(1)
-    ->Arg(300 * 60)       // 300 samples per second for 1 minute
-    ->Arg(1000 * 60)      // 1000 samples per second for 1 minute
-    ->Arg(300 * 60 * 5)   // 300 samples per second for 5 minute
-    ->Arg(1000 * 60 * 5); // 1000 samples per second for 5 minute
-
-BENCHMARK_DEFINE_F(writer_fixture, cpu_freq)
-(benchmark::State &_state) {
-  const auto count = static_cast<size_t>(_state.range(0));
-  const auto cpu_core_count = static_cast<size_t>(_state.range(1));
-  size_t category_id = m_writer->insert_string("cpu_freq");
-  const size_t n = 7 + cpu_core_count * 7;
-  const char *cpu_metrics[] = {"freq", "usage",  "idle", "user",
-                               "sys",  "iowait", "irq"};
-
-  for (auto _ : _state) {
-    for (size_t i = 0; i < count; ++i) {
-      auto event_id = m_writer->insert_event(category_id, i, 0, i);
-      for (size_t m = 0; m < n; ++m) {
-        m_writer->insert_pmc_event(event_id, m_cpu_agent, cpu_metrics[m % 7],
-                                   static_cast<double>(i + m));
-        m_writer->insert_sample("cpu_freq", i * 100, event_id);
-      }
-    }
-    m_writer->flush();
-  }
-  _state.SetItemsProcessed(_state.iterations() * count);
-  _state.SetLabel(get_db_size_label());
-}
-BENCHMARK_REGISTER_F(writer_fixture, cpu_freq)
-    ->Unit(benchmark::kSecond)
-    ->Iterations(1)
-    ->Args({300 * 60, 1})
-    ->Args({300 * 60, 4})
-    ->Args({300 * 60, 8})
-    ->Args({300 * 60, 16})
-    ->Args({300 * 60, 32})
-    ->Args({1000 * 60, 1})
-    ->Args({1000 * 60, 4})
-    ->Args({1000 * 60, 8})
-    ->Args({1000 * 60, 16})
-    ->Args({1000 * 60, 32});
-
-} // namespace
+}  // namespace

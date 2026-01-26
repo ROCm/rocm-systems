@@ -136,7 +136,7 @@ struct process_info_t
     size_t       end;
     const char*  command;
     const char*  environment;
-    const char*  extdata;
+    const char*  extdata = "{}";
 
     node_id_t node_id;
 };
@@ -162,7 +162,7 @@ struct agent_info_t
     const char* vendor_name;
     const char* product_name;
     const char* user_name;
-    const char* extdata;
+    const char* extdata = "{}";
 
     node_id_t    node_id;
     process_id_t process_id;
@@ -209,7 +209,7 @@ struct pmc_info_t
     const char*          expression;
     size_t               is_constant;
     size_t               is_derived;
-    const char*          extdata;
+    const char*          extdata = "{}";
 
     node_id_t    node_id;
     process_id_t process_id;
@@ -231,7 +231,7 @@ struct thread_info_t
     const char* name;
     size_t      start;
     size_t      end;
-    const char* extdata;
+    const char* extdata = "{}";
 
     node_id_t    node_id;
     process_id_t process_id;
@@ -250,7 +250,7 @@ struct stream_info_t
 {
     stream_id_t stream_id;
     const char* name;
-    const char* extdata;
+    const char* extdata = "{}";
 
     node_id_t    node_id;
     process_id_t process_id;
@@ -269,7 +269,7 @@ struct queue_info_t
 {
     queue_id_t  queue_id;
     const char* name;
-    const char* extdata;
+    const char* extdata = "{}";
 
     node_id_t    node_id;
     process_id_t process_id;
@@ -294,7 +294,7 @@ struct code_object_info_t
     size_t           ld_size;
     size_t           ld_delta;
     const char*      storage_type;
-    const char*      extdata;
+    const char*      extdata = "{}";
 
     node_id_t                        node_id;
     process_id_t                     process_id;
@@ -324,7 +324,7 @@ struct kernel_symbol_info_t
     size_t             sgrp_count;
     size_t             arch_vgrp_count;
     size_t             accum_vgrp_count;
-    const char*        extdata;
+    const char*        extdata = "{}";
 
     node_id_t        node_id;
     process_id_t     process_id;
@@ -344,7 +344,7 @@ struct kernel_symbol_info_t
 struct track_info_t
 {
     std::optional<track_name_t> name;
-    const char*                 extdata;
+    const char*                 extdata = "{}";
 
     node_id_t                   node_id;
     std::optional<process_id_t> process_id;
@@ -367,7 +367,7 @@ struct address_range_info_t
     size_t      address_base;  ///< Base load address of the code object
     size_t      address_low;   ///< Lower bound of the address range (>= address_base)
     size_t      address_high;  ///< Upper bound of the address range (>= address_low)
-    const char* extdata;
+    const char* extdata = "{}";
 };
 
 /***
@@ -378,7 +378,7 @@ struct program_counter_info_t
     const char*           function;  ///< Function or symbol name at this program counter
     const char*           filename;  ///< Source file path (if available)
     std::optional<size_t> line_number;  ///< Line number in source file (if available)
-    const char*           extdata;
+    const char*           extdata = "{}";
 };
 
 /***
@@ -389,7 +389,7 @@ struct stack_frame_t
     std::optional<program_counter_info_t>
         program_counter;                                ///< Location info for this frame
     std::optional<address_range_info_t> address_range;  ///< Code object memory range
-    const char*                         extdata;
+    const char*                         extdata = "{}";
 };
 
 /***
@@ -410,7 +410,7 @@ struct source_code_info_t
         starting_line_number;  ///< First line number in source_code_lines
     std::vector<const char*> source_code_lines;           ///< Actual source code lines
     std::vector<const char*> assembly_instruction_lines;  ///< Disassembled instructions
-    const char*              extdata;
+    const char*              extdata = "{}";
 };
 
 /***
@@ -443,7 +443,7 @@ struct arg_data_t
     const char* type;      ///< Argument type name
     const char* name;      ///< Argument parameter name
     const char* value;     ///< Serialized argument value
-    const char* extdata;
+    const char* extdata = "{}";
 };
 
 /***
@@ -465,7 +465,7 @@ struct event_data_t
     std::vector<line_info_entry_t> line_info_list;  ///< Source context information
 
     const char* event_category;  ///< Event category name (e.g., "HIP_API", "HSA_API")
-    const char* extdata;
+    const char* extdata = "{}";
 };
 
 /***
@@ -481,7 +481,7 @@ struct region_data_t
     timestamp_ns_t start_timestamp;  ///< Region start time (nanoseconds)
     timestamp_ns_t end_timestamp;    ///< Region end time (nanoseconds)
     const char*    name;             ///< Region name (e.g., function name, annotation)
-    const char*    extdata;
+    const char*    extdata = "{}";
 
     std::vector<arg_data_t> args;  ///< Optional function arguments
 };
@@ -496,7 +496,7 @@ struct sample_data_t
 {
     timestamp_ns_t timestamp;  ///< Sample time (nanoseconds)
     track_info_t   track;
-    const char*    extdata;
+    const char*    extdata = "{}";
 };
 
 /***
@@ -509,7 +509,7 @@ struct pmc_event_data_t
 {
     std::optional<event_data_t> event;  ///< Common event metadata
     double                      value;  ///< Counter value
-    const char*                 extdata;
+    const char*                 extdata = "{}";
     sample_data_t               sample;  ///< Timestamp information
 };
 
@@ -537,7 +537,7 @@ struct kernel_dispatch_data_t
     size_t      grid_size_y;           ///< Grid size in Y dimension
     size_t      grid_size_z;           ///< Grid size in Z dimension
     const char* name;                  ///< Kernel name
-    const char* extdata;
+    const char* extdata = "{}";
 };
 
 /***
@@ -559,7 +559,7 @@ struct memory_copy_data_t
     size_t                           size;             ///< Transfer size (bytes)
     const char*                      name;             ///< Operation name
     const char*                      region_name;      ///< Region name
-    const char*                      extdata;
+    const char*                      extdata = "{}";
 };
 
 /***
@@ -577,7 +577,7 @@ struct memory_alloc_data_t
     timestamp_ns_t        end_timestamp;    ///< Allocation end time (nanoseconds)
     std::optional<size_t> address;          ///< Allocated memory address
     size_t                size;             ///< Allocation size (bytes)
-    const char*           extdata;
+    const char*           extdata = "{}";
 };
 
 }  // namespace writer_api

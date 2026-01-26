@@ -20,186 +20,324 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <benchmark/benchmark.h>
 #include <rocstorage/storage.hpp>
 #include <rocstorage/writer.hpp>
+#include <rocstorage/writer_types.hpp>
+
+#include <benchmark/benchmark.h>
 
 #include "utility.hpp"
 
+#include <chrono>
 #include <cstdio>
 #include <memory>
 #include <string>
 #include <thread>
 #include <vector>
 
-namespace {
+namespace
+{
 
-struct thread_context {
-  std::string database_path;
-  std::unique_ptr<rocm::storage> storage;
-  std::shared_ptr<rocstorage::writer> writer;
+using namespace rocstorage::writer_api;
 
-  size_t context_id;
+// ============================================================================
+// Benchmark Configuration
+// ============================================================================
 
-  size_t thread_pk = 0;
-  size_t gpu_agent = 0;
-  size_t category_id = 0;
-  size_t region_name_id = 0;
-  size_t kernel_name_id = 0;
+// Configurable event counts for parallel scaling tests
+constexpr size_t COUNT_10K   = 10000;
+constexpr size_t COUNT_100K  = 100000;
+constexpr size_t COUNT_1000K = 1000000;
 
-  void setup(size_t _thread_id) {
-    context_id = _thread_id;
+// ============================================================================
+// Per-Thread Context
+// Each thread gets its own isolated database to avoid contention
+// ============================================================================
 
-    database_path =
-        "benchmark_writer_parallel_" + std::to_string(_thread_id) + ".db";
-    std::string uuid = std::to_string(_thread_id);
-    storage = std::make_unique<rocm::storage>(database_path, uuid);
-    writer = storage->get_writer();
+struct thread_context
+{
+    std::string                         database_path;
+    std::unique_ptr<rocm::storage>      storage;
+    std::shared_ptr<rocstorage::writer> writer;
+    size_t                              context_id = 0;
+    trace_environment_t                 trace_env;
+    agent_unique_id_t                   gpu_agent_id;
 
-    writer->insert_node_info(1, 0xDEADBEEF + _thread_id, "bench-machine",
-                             "Linux", "benchmark-host", "6.0.0", "v1", "x86_64",
-                             "local");
-    writer->insert_process_info(1, 0, 1000 + _thread_id, 0, 0, 0, 0,
-                                "/bin/benchmark");
+    void setup(size_t thread_id)
+    {
+        context_id    = thread_id;
+        database_path = "benchmark_writer_parallel_" + std::to_string(thread_id) + ".db";
 
-    thread_pk =
-        writer->insert_thread_info(1, 1000 + _thread_id, 1000 + _thread_id,
-                                   2000 + _thread_id, "worker", 0, 0);
+        const std::string uuid = std::to_string(thread_id);
+        storage                = std::make_unique<rocm::storage>(database_path, uuid);
+        writer                 = storage->get_writer();
 
-    gpu_agent =
-        writer->insert_agent(1, 1000 + _thread_id, "GPU", 0, 0, 0, 0xABCD,
-                             "gfx90a", "MI200", "AMD", "MI210", "");
+        constexpr size_t node_id = 1;
+        const size_t     pid     = 1000 + thread_id;
+        const size_t     tid     = 2000 + thread_id;
 
-    writer->insert_queue_info(1, 1, 1000 + _thread_id, "hsa_queue_0");
-    writer->insert_stream_info(1, 1, 1000 + _thread_id, "hip_stream_0");
+        // Register infrastructure
+        writer->register_node_info(node_info_t{ .node_id       = node_id,
+                                                .hash          = 0xDEADBEEF + thread_id,
+                                                .machine_id    = "bench-machine",
+                                                .system_name   = "Linux",
+                                                .hostname      = "benchmark-host",
+                                                .release       = "6.0.0",
+                                                .version       = "v1",
+                                                .hardware_name = "x86_64",
+                                                .domain_name   = "local" });
 
-    writer->insert_code_object(1, 1, 1000 + _thread_id, gpu_agent,
-                               "file:///kernels.hsaco", 0x10000, 0x1000, 0,
-                               "FILE");
-    writer->insert_kernel_symbol(1, 1, 1000 + _thread_id, 1, "vectorAdd",
-                                 "vectorAdd(float*,float*,float*,int)", 0x1234,
-                                 256, 8, 65536, 0, 32, 64, 0);
+        writer->register_process_info(process_info_t{ .ppid        = 0,
+                                                      .pid         = pid,
+                                                      .init        = 0,
+                                                      .fini        = 0,
+                                                      .start       = 0,
+                                                      .end         = 0,
+                                                      .command     = "/bin/benchmark",
+                                                      .environment = "{}",
+                                                      .extdata     = "{}",
+                                                      .node_id     = node_id });
 
-    category_id = writer->insert_string("hip_api");
-    region_name_id = writer->insert_string("user_region");
-    kernel_name_id = writer->insert_string("vectorAdd");
-  }
+        writer->register_thread_info(thread_info_t{ .parent_process_id = pid,
+                                                    .thread_id         = tid,
+                                                    .name              = "worker",
+                                                    .start             = 0,
+                                                    .end               = 0,
+                                                    .extdata           = "{}",
+                                                    .node_id           = node_id,
+                                                    .process_id        = pid });
 
-  void teardown() {
-    writer.reset();
-    storage.reset();
-    std::remove(database_path.c_str());
-  }
+        gpu_agent_id = agent_unique_id_t{ .agent_type = "GPU", .type_index = 0 };
 
-  size_t get_db_size() const { return utility::get_file_size(database_path); }
+        writer->register_agent_info(agent_info_t{ .unique_id      = gpu_agent_id,
+                                                  .absolute_index = 0,
+                                                  .logical_index  = 0,
+                                                  .uuid           = 0xABCD,
+                                                  .name           = "gfx90a",
+                                                  .model_name     = "MI200",
+                                                  .vendor_name    = "AMD",
+                                                  .product_name   = "MI210",
+                                                  .user_name      = "",
+                                                  .extdata        = "{}",
+                                                  .node_id        = node_id,
+                                                  .process_id     = pid });
+
+        writer->register_queue_info(queue_info_t{ .queue_id   = 1,
+                                                  .name       = "hsa_queue_0",
+                                                  .extdata    = "{}",
+                                                  .node_id    = node_id,
+                                                  .process_id = pid });
+
+        writer->register_stream_info(stream_info_t{ .stream_id  = 1,
+                                                    .name       = "hip_stream_0",
+                                                    .extdata    = "{}",
+                                                    .node_id    = node_id,
+                                                    .process_id = pid });
+
+        writer->register_code_object_info(
+            code_object_info_t{ .id           = 1,
+                                .uri          = "file:///kernels.hsaco",
+                                .ld_base      = 0x10000,
+                                .ld_size      = 0x1000,
+                                .ld_delta     = 0,
+                                .storage_type = "FILE",
+                                .extdata      = "{}",
+                                .node_id      = node_id,
+                                .process_id   = pid,
+                                .agent_id     = gpu_agent_id });
+
+        writer->register_kernel_symbol_info(
+            kernel_symbol_info_t{ .id           = 1,
+                                  .name         = "vectorAdd",
+                                  .display_name = "vectorAdd(float*,float*,float*,int)",
+                                  .kernel_obj   = 0x1234,
+                                  .kernarg_segmnt_size       = 256,
+                                  .kernarg_segment_alignment = 8,
+                                  .group_segment_size        = 65536,
+                                  .private_segment_size      = 0,
+                                  .sgrp_count                = 32,
+                                  .arch_vgrp_count           = 64,
+                                  .accum_vgrp_count          = 0,
+                                  .extdata                   = "{}",
+                                  .node_id                   = node_id,
+                                  .process_id                = pid,
+                                  .code_obj_id               = 1 });
+
+        writer->register_track_info(track_info_t{ .name       = "gpu_kernel",
+                                                  .extdata    = "{}",
+                                                  .node_id    = node_id,
+                                                  .process_id = pid,
+                                                  .thread_id  = tid });
+
+        // Store trace environment for data insertion
+        trace_env = trace_environment_t{ .node_id    = node_id,
+                                         .process_id = pid,
+                                         .thread_id  = tid,
+                                         .agent_id   = gpu_agent_id,
+                                         .stream_id  = 1,
+                                         .queue_id   = 1,
+                                         .track_name = "gpu_kernel" };
+    }
+
+    void teardown()
+    {
+        writer.reset();
+        storage.reset();
+        std::remove(database_path.c_str());
+    }
+
+    [[nodiscard]] size_t get_db_size() const
+    {
+        return utility::get_file_size(database_path);
+    }
 };
 
-void run_realistic_workload(thread_context &_ctx, size_t _total_events) {
-  const size_t region_count = _total_events * 9967 / 10000;
-  const size_t kernel_count = _total_events * 33 / 10000;
+// ============================================================================
+// Realistic Workload Generator
+// Simulates typical profiling workload with regions and kernel dispatches
+// ============================================================================
 
-  for (size_t i = 0; i < region_count; ++i) {
-    auto event_id = _ctx.writer->insert_event(_ctx.category_id, i, 0, i);
-    size_t start = i * 1000;
-    size_t end = start + 500;
-    _ctx.writer->insert_region(1, 1000 + _ctx.context_id, _ctx.thread_pk, start,
-                               end, _ctx.region_name_id, event_id);
-    _ctx.writer->insert_args(event_id, 0, "int", "level", "0");
-    _ctx.writer->insert_args(event_id, 1, "const char*", "name", "region");
-    if (i % 2 == 0) {
-      _ctx.writer->insert_args(event_id, 2, "size_t", "id", "12345");
+void
+run_realistic_workload(thread_context& ctx, size_t total_events)
+{
+    // Distribution: 99.67% regions, 0.33% kernel dispatches
+    const size_t region_count = total_events * 9967 / 10000;
+    const size_t kernel_count = total_events * 33 / 10000;
+
+    // Insert regions (majority of workload) - no args for simplicity
+    for(size_t i = 0; i < region_count; ++i)
+    {
+        const region_data_t data{ .event           = std::nullopt,
+                                  .start_timestamp = i * 1000,
+                                  .end_timestamp   = i * 1000 + 500,
+                                  .name            = "user_region",
+                                  .extdata         = "{}",
+                                  .args            = {} };
+
+        ctx.writer->insert_region_data(data, ctx.trace_env);
     }
-  }
 
-  for (size_t i = 0; i < kernel_count; ++i) {
-    auto event_id = _ctx.writer->insert_event(_ctx.category_id, i, 0, i);
-    size_t start = i * 10000;
-    size_t end = start + 5000;
-    _ctx.writer->insert_kernel_dispatch(
-        1, 1000 + _ctx.context_id, _ctx.thread_pk, _ctx.gpu_agent, 1, i, 1, 1,
-        start, end, 0, 65536, 256, 1, 1, 1024, 1, 1, _ctx.kernel_name_id,
-        event_id);
-    _ctx.writer->insert_args(event_id, 0, "void*", "ptr", "0x7fff0000");
-    _ctx.writer->insert_args(event_id, 1, "size_t", "n", "1048576");
-    _ctx.writer->insert_args(event_id, 2, "int", "stream", "0");
-  }
+    // Insert kernel dispatches
+    for(size_t i = 0; i < kernel_count; ++i)
+    {
+        const kernel_dispatch_data_t data{ .event                = std::nullopt,
+                                           .dispatch_id          = i,
+                                           .start_timestamp      = i * 10000,
+                                           .end_timestamp        = i * 10000 + 5000,
+                                           .kernel_symbol_id     = 1,
+                                           .code_object_id       = 1,
+                                           .private_segment_size = 0,
+                                           .group_segment_size   = 65536,
+                                           .workgroup_size_x     = 256,
+                                           .workgroup_size_y     = 1,
+                                           .workgroup_size_z     = 1,
+                                           .grid_size_x          = 1024,
+                                           .grid_size_y          = 1,
+                                           .grid_size_z          = 1,
+                                           .name                 = "vectorAdd",
+                                           .extdata              = "{}" };
+        ctx.writer->insert_kernel_dispatch_data(data, ctx.trace_env);
+    }
 
-  _ctx.writer->flush();
+    ctx.writer->flush_in_memory_data_to_disk();
 }
 
 // ============================================================================
-// Parallel Writer Benchmark
-// Each thread creates its own isolated database
+// Parallel Writer Benchmark Fixture
 // ============================================================================
 
-class parallel_writer_fixture : public benchmark::Fixture {
+class parallel_writer_fixture : public benchmark::Fixture
+{
 public:
-  void SetUp(const benchmark::State &) override {}
-  void TearDown(const benchmark::State &) override {}
+    void SetUp(const benchmark::State&) override {}
+    void TearDown(const benchmark::State&) override {}
 };
 
 // ============================================================================
 // Scaling Benchmark
-// All times should be similar, this will proof that there is no dependency
-// between threads
+// Measures parallel scalability with isolated databases per thread
+// All times should be similar regardless of thread count (no contention)
 // ============================================================================
 
-BENCHMARK_DEFINE_F(parallel_writer_fixture, scaling_test)
-(benchmark::State &_state) {
-  const auto num_threads = static_cast<size_t>(_state.range(0));
-  constexpr size_t total_events = 2300000;
+BENCHMARK_DEFINE_F(parallel_writer_fixture, scaling_test)(benchmark::State& state)
+{
+    const auto num_threads  = static_cast<size_t>(state.range(0));
+    const auto total_events = static_cast<size_t>(state.range(1));
 
-  for (auto _ : _state) {
-    std::vector<thread_context> contexts(num_threads);
-    std::vector<std::thread> threads;
+    for(auto _ : state)
+    {
+        std::vector<thread_context> contexts(num_threads);
+        std::vector<std::thread>    threads;
 
-    for (size_t i = 0; i < num_threads; ++i) {
-      contexts[i].setup(i);
+        // Setup phase (not measured - done sequentially)
+        for(size_t i = 0; i < num_threads; ++i)
+        {
+            contexts[i].setup(i);
+        }
+
+        // Measure parallel workload execution
+        auto start_time = std::chrono::high_resolution_clock::now();
+
+        for(size_t i = 0; i < num_threads; ++i)
+        {
+            threads.emplace_back([&contexts, i, total_events]() {
+                run_realistic_workload(contexts[i], total_events);
+            });
+        }
+
+        for(auto& t : threads)
+        {
+            t.join();
+        }
+
+        auto end_time = std::chrono::high_resolution_clock::now();
+        auto duration =
+            std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time)
+                .count();
+
+        // Collect metrics
+        size_t total_db_size = 0;
+        for(size_t i = 0; i < num_threads; ++i)
+        {
+            total_db_size += contexts[i].get_db_size();
+        }
+
+        // Cleanup
+        for(size_t i = 0; i < num_threads; ++i)
+        {
+            contexts[i].teardown();
+        }
+
+        state.SetIterationTime(static_cast<double>(duration) / 1000.0);
+        state.counters["total_db_size_mb"] =
+            static_cast<double>(total_db_size) / (1024.0 * 1024.0);
+        state.counters["total_events"] = static_cast<double>(total_events);
+        state.counters["events_per_sec"] =
+            static_cast<double>(total_events) / (static_cast<double>(duration) / 1000.0);
     }
 
-    auto start_time = std::chrono::high_resolution_clock::now();
-
-    for (size_t i = 0; i < num_threads; ++i) {
-      threads.emplace_back([&contexts, i, total_events]() {
-        run_realistic_workload(contexts[i], total_events);
-      });
-    }
-
-    for (auto &t : threads) {
-      t.join();
-    }
-
-    auto end_time = std::chrono::high_resolution_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
-                        end_time - start_time)
-                        .count();
-
-    size_t total_db_size = 0;
-    for (size_t i = 0; i < num_threads; ++i) {
-      total_db_size += contexts[i].get_db_size();
-    }
-
-    for (size_t i = 0; i < num_threads; ++i) {
-      contexts[i].teardown();
-    }
-
-    _state.SetIterationTime(static_cast<double>(duration) / 1000.0);
-    _state.counters["total_db_size_mb"] =
-        static_cast<double>(total_db_size) / (1024.0 * 1024.0);
-    _state.counters["total_events"] = static_cast<double>(total_events);
-  }
-
-  _state.SetItemsProcessed(_state.iterations() * total_events);
+    state.SetItemsProcessed(state.iterations() * total_events);
 }
 
+// Register with thread counts (1, 2, 4, 8, 16) and event counts (10k, 100k, 1000k)
 BENCHMARK_REGISTER_F(parallel_writer_fixture, scaling_test)
     ->Unit(benchmark::kSecond)
     ->UseManualTime()
     ->Iterations(1)
-    ->Arg(1)
-    ->Arg(2)
-    ->Arg(4)
-    ->Arg(8)
-    ->Arg(16);
+    // 10k events - quick validation
+    ->Args({ 1, COUNT_10K })
+    ->Args({ 2, COUNT_10K })
+    ->Args({ 4, COUNT_10K })
+    ->Args({ 8, COUNT_10K })
+    // 100k events - standard benchmark
+    ->Args({ 1, COUNT_100K })
+    ->Args({ 2, COUNT_100K })
+    ->Args({ 4, COUNT_100K })
+    ->Args({ 8, COUNT_100K })
+    // 1000k events - stress test (optional, comment out for quick runs)
+    ->Args({ 1, COUNT_1000K })
+    ->Args({ 2, COUNT_1000K })
+    ->Args({ 4, COUNT_1000K })
+    ->Args({ 8, COUNT_1000K });
 
-} // namespace
+}  // namespace

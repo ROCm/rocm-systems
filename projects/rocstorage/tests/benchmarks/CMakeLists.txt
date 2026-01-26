@@ -22,11 +22,7 @@
 
 include(benchmark)
 
-set(BENCHMARK_SOURCES
-    writer_bench.cpp
-    writer_parallel_bench.cpp
-    writer_client_bench.cpp
-)
+set(BENCHMARK_SOURCES writer_bench.cpp writer_parallel_bench.cpp)
 
 add_executable(rocstorage_benchmarks ${BENCHMARK_SOURCES})
 
