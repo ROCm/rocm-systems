@@ -53,6 +53,9 @@ env:
   ROCM_PATH: "/opt/rocm"
   ROCM_VERSION: "7.0.0"
 
+  PYTHON_VENV_PATH: "rocprofiler-compute"
+  PYTHON_VENV_ACTIVATE: "rocprofiler-compute/bin/activate"
+
 jobs:
   prepare_matrix:
     runs-on: ubuntu-latest
@@ -151,13 +154,15 @@ jobs:
       - name: Install Python Requirements
         working-directory: projects/rocprofiler-compute
         run: |
+          python3 -m venv ${{ env.PYTHON_VENV_PATH }}
+          source ${{ env.PYTHON_VENV_ACTIVATE }}
           for i in 1 2 3; do
-            python3 -m pip install -U --user -r requirements.txt && break
+            python3 -m pip install -r requirements.txt && break
             echo "⚠️ pip install attempt $i failed, retrying..."
             sleep 10
           done
           for i in 1 2 3; do
-            python3 -m pip install -U --user -r requirements-test.txt && break
+            python3 -m pip install -r requirements-test.txt && break
             echo "⚠️ pip install attempt $i failed, retrying..."
             sleep 10
           done
@@ -171,6 +176,7 @@ jobs:
           set -e
           git config --global --add safe.directory ${GITHUB_WORKSPACE}
           git config --global --add safe.directory ${PWD}
+          source ${{ env.PYTHON_VENV_ACTIVATE }}
           PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH \
           LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:${{ env.ROCM_PATH }}/lib/rocm_sysdeps/lib:$LD_LIBRARY_PATH \
           python3 ./tools/run-ci.py \
