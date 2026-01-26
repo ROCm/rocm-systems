@@ -19,7 +19,7 @@ permissions:
 jobs:
   rocr-runtime-wsl-test:
     name: ROCR Runtime WSL Test
-    runs-on: azure-windows-scale-rocm
+    runs-on: ROCR-Runtime-libhsakmt-WSL
     env:
       DISTRO: Ubuntu-22.04
     defaults:
@@ -52,28 +52,10 @@ jobs:
             exit 1
           }
 
-      - name: Set up WSL and Ubuntu
-        shell: powershell
-        run: |
-          Write-Host "Enabling WSL Optional Feature..."
-          dism.exe /online /enable-feature /featurename:Microsoft-Windows-Subsystem-Linux /all /norestart
-          
-          Write-Host "Installing WSL2..."
-          choco install wsl2 --version=2.4.13 --yes --no-progress
-          
-          Write-Host "Installing Ubuntu 22.04 for WSL..."
-          # NOTE: Chocolatey package has outdated checksum - we override with actual current checksum.
-          # Package issue: https://community.chocolatey.org/packages/wsl-ubuntu-2204#discussion
-          # Package expects: c5028547edfe72be8f7d44ef52cee5aacaf9b1ae1ed4f7e39b94dae3cf286bc2
-          # Actual checksum: 6AD6D88763451A50F98F2469CE80464D666204C08D07F8F6A89E0D5CA05B097A
-          # Source: aka.ms/wslubuntu2204 (official Microsoft CDN)
-          choco install wsl-ubuntu-2204 --version=22.4.0.20220819 --ignore-checksums --yes --no-progress --checksum=6AD6D88763451A50F98F2469CE80464D666204C08D07F8F6A89E0D5CA05B097A --checksum-type=sha256
-          
-          Write-Host "Checking WSL installation..."
-          wsl --list --verbose
-          
-          Write-Host "Setting WSL default version to 2..."
-          wsl --set-default-version 2
+      - name: Set up WSL with Ubuntu
+        uses: Ubuntu/WSL/.github/actions/wsl-install@main
+        with:
+          distro: ${{ env.DISTRO }}
 
       - name: Checkout repository into WSL
         uses: Ubuntu/WSL/.github/actions/wsl-checkout@main
