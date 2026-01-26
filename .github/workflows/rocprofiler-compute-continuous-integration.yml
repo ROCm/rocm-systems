@@ -156,6 +156,7 @@ jobs:
 
       - name: Install Python Requirements
         working-directory: projects/rocprofiler-compute
+        shell: bash
         run: |
           python3 -m venv ${{ env.PYTHON_VENV_PATH }}
           source ${{ env.PYTHON_VENV_ACTIVATE }}
@@ -175,6 +176,7 @@ jobs:
         id: test
         timeout-minutes: ${{ steps.setup_env.outputs.mode == 'Nightly' && 120 || 90 }}
         working-directory: projects/rocprofiler-compute
+        shell: bash
         run: |
           set -e
           git config --global --add safe.directory ${GITHUB_WORKSPACE}
