@@ -4,6 +4,7 @@
 #pragma once
 
 #include <rocstorage/reader.hpp>
+#include <rocstorage/storage_types.hpp>
 #include <rocstorage/writer.hpp>
 
 #include <memory>
@@ -15,7 +16,10 @@ namespace rocm
 class storage
 {
 public:
-    explicit storage(std::string database_path, std::string uuid);
+    explicit storage(std::string                 database_path,
+                     std::string                 uuid,
+                     rocstorage::database_type_t database_type =
+                         rocstorage::database_type_t::in_memory);
     virtual ~storage();
 
     storage(const storage&)            = delete;
@@ -26,7 +30,8 @@ public:
     std::shared_ptr<rocstorage::writer> get_writer() const;
     std::shared_ptr<rocstorage::reader> get_reader() const;
 
-    // TODO: Add get_version()
+    rocstorage::version_t get_storage_version() const;
+
 private:
     struct impl;
     std::unique_ptr<impl> m_impl;

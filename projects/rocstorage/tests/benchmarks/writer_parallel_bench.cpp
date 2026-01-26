@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include <rocstorage/storage.hpp>
+#include <rocstorage/storage_types.hpp>
 #include <rocstorage/writer.hpp>
 #include <rocstorage/writer_types.hpp>
 
@@ -41,6 +42,23 @@ namespace
 using namespace rocstorage::writer_api;
 
 // ============================================================================
+// Database Type Helpers
+// ============================================================================
+
+rocstorage::database_type_t
+get_db_type_from_arg(int64_t arg) noexcept
+{
+    return arg == 0 ? rocstorage::database_type_t::in_memory
+                    : rocstorage::database_type_t::on_disk;
+}
+
+const char*
+get_db_type_label(rocstorage::database_type_t db_type) noexcept
+{
+    return db_type == rocstorage::database_type_t::in_memory ? "in_memory" : "on_disk";
+}
+
+// ============================================================================
 // Benchmark Configuration
 // ============================================================================
 
@@ -56,6 +74,7 @@ constexpr size_t COUNT_1000K = 1000000;
 
 struct thread_context
 {
+    rocstorage::database_type_t         db_type;
     std::string                         database_path;
     std::unique_ptr<rocm::storage>      storage;
     std::shared_ptr<rocstorage::writer> writer;
@@ -63,14 +82,15 @@ struct thread_context
     trace_environment_t                 trace_env;
     agent_unique_id_t                   gpu_agent_id;
 
-    void setup(size_t thread_id)
+    void setup(size_t thread_id, rocstorage::database_type_t database_type)
     {
+        db_type       = database_type;
         context_id    = thread_id;
         database_path = "benchmark_writer_parallel_" + std::to_string(thread_id) + ".db";
 
         const std::string uuid = std::to_string(thread_id);
-        storage                = std::make_unique<rocm::storage>(database_path, uuid);
-        writer                 = storage->get_writer();
+        storage = std::make_unique<rocm::storage>(database_path, uuid, db_type);
+        writer  = storage->get_writer();
 
         constexpr size_t node_id = 1;
         const size_t     pid     = 1000 + thread_id;
@@ -261,8 +281,9 @@ public:
 
 BENCHMARK_DEFINE_F(parallel_writer_fixture, scaling_test)(benchmark::State& state)
 {
-    const auto num_threads  = static_cast<size_t>(state.range(0));
-    const auto total_events = static_cast<size_t>(state.range(1));
+    const auto db_type      = get_db_type_from_arg(state.range(0));
+    const auto num_threads  = static_cast<size_t>(state.range(1));
+    const auto total_events = static_cast<size_t>(state.range(2));
 
     for(auto _ : state)
     {
@@ -272,7 +293,7 @@ BENCHMARK_DEFINE_F(parallel_writer_fixture, scaling_test)(benchmark::State& stat
         // Setup phase (not measured - done sequentially)
         for(size_t i = 0; i < num_threads; ++i)
         {
-            contexts[i].setup(i);
+            contexts[i].setup(i, db_type);
         }
 
         // Measure parallel workload execution
@@ -317,27 +338,43 @@ BENCHMARK_DEFINE_F(parallel_writer_fixture, scaling_test)(benchmark::State& stat
     }
 
     state.SetItemsProcessed(state.iterations() * total_events);
+    state.SetLabel(get_db_type_label(db_type));
 }
 
-// Register with thread counts (1, 2, 4, 8, 16) and event counts (10k, 100k, 1000k)
+// Register with db_type (0=in_memory, 1=on_disk), thread counts, and event counts
 BENCHMARK_REGISTER_F(parallel_writer_fixture, scaling_test)
     ->Unit(benchmark::kSecond)
     ->UseManualTime()
     ->Iterations(1)
-    // 10k events - quick validation
-    ->Args({ 1, COUNT_10K })
-    ->Args({ 2, COUNT_10K })
-    ->Args({ 4, COUNT_10K })
-    ->Args({ 8, COUNT_10K })
-    // 100k events - standard benchmark
-    ->Args({ 1, COUNT_100K })
-    ->Args({ 2, COUNT_100K })
-    ->Args({ 4, COUNT_100K })
-    ->Args({ 8, COUNT_100K })
-    // 1000k events - stress test (optional, comment out for quick runs)
-    ->Args({ 1, COUNT_1000K })
-    ->Args({ 2, COUNT_1000K })
-    ->Args({ 4, COUNT_1000K })
-    ->Args({ 8, COUNT_1000K });
+    // in_memory: 10k events - quick validation
+    ->Args({ 0, 1, COUNT_10K })
+    ->Args({ 0, 2, COUNT_10K })
+    ->Args({ 0, 4, COUNT_10K })
+    ->Args({ 0, 8, COUNT_10K })
+    // in_memory: 100k events - standard benchmark
+    ->Args({ 0, 1, COUNT_100K })
+    ->Args({ 0, 2, COUNT_100K })
+    ->Args({ 0, 4, COUNT_100K })
+    ->Args({ 0, 8, COUNT_100K })
+    // in_memory: 1000k events - stress test
+    ->Args({ 0, 1, COUNT_1000K })
+    ->Args({ 0, 2, COUNT_1000K })
+    ->Args({ 0, 4, COUNT_1000K })
+    ->Args({ 0, 8, COUNT_1000K })
+    // on_disk: 10k events - quick validation
+    ->Args({ 1, 1, COUNT_10K })
+    ->Args({ 1, 2, COUNT_10K })
+    ->Args({ 1, 4, COUNT_10K })
+    ->Args({ 1, 8, COUNT_10K })
+    // on_disk: 100k events - standard benchmark
+    ->Args({ 1, 1, COUNT_100K })
+    ->Args({ 1, 2, COUNT_100K })
+    ->Args({ 1, 4, COUNT_100K })
+    ->Args({ 1, 8, COUNT_100K })
+    // on_disk: 1000k events - stress test
+    ->Args({ 1, 1, COUNT_1000K })
+    ->Args({ 1, 2, COUNT_1000K })
+    ->Args({ 1, 4, COUNT_1000K })
+    ->Args({ 1, 8, COUNT_1000K });
 
 }  // namespace

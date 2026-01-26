@@ -152,18 +152,29 @@ namespace rocstorage
 {
 namespace data_storage
 {
-database::database(std::string db_path, std::string uuid)
+database::database(std::string                 db_path,
+                   std::string                 uuid,
+                   rocstorage::database_type_t database_type)
 : m_db_path{ std::move(db_path) }
 , m_uuid{ std::move(uuid) }
+, m_database_type{ database_type }
 {
     create_directory_for_database_file(m_db_path);
     LOG_INFO("rocstorage database initialized (uuid: {}, path: {})", m_uuid, m_db_path);
 
-    validate_sqlite3_result(
-        sqlite3_open(":memory:", &m_sqlite3_inmemory), "", "database open failed!");
+    if(m_database_type == rocstorage::database_type_t::in_memory)
+    {
+        validate_sqlite3_result(
+            sqlite3_open(":memory:", &m_sqlite3), "", "database open failed!");
+    }
+    else if(m_database_type == rocstorage::database_type_t::on_disk)
+    {
+        validate_sqlite3_result(
+            sqlite3_open(m_db_path.c_str(), &m_sqlite3), "", "database open failed!");
+    }
 }
 
-database::~database() { sqlite3_close(m_sqlite3_inmemory); }
+database::~database() { sqlite3_close(m_sqlite3); }
 
 std::string
 database::get_uuid() const
@@ -198,7 +209,7 @@ database::initialize_schema()
             continue;
         }
 
-        validate_sqlite3_result(sqlite3_exec(m_sqlite3_inmemory, query.c_str(), 0, 0, 0),
+        validate_sqlite3_result(sqlite3_exec(m_sqlite3, query.c_str(), 0, 0, 0),
                                 query.c_str(),
                                 std::string("Invalid schema, init database failed!"));
     }
@@ -209,7 +220,7 @@ database::initialize_schema()
 void
 database::execute_query(const std::string& query)
 {
-    validate_sqlite3_result(sqlite3_exec(m_sqlite3_inmemory, query.c_str(), 0, 0, 0),
+    validate_sqlite3_result(sqlite3_exec(m_sqlite3, query.c_str(), 0, 0, 0),
                             "Failed to execute query:",
                             query);
 }
@@ -217,12 +228,19 @@ database::execute_query(const std::string& query)
 size_t
 database::get_last_insert_id() const
 {
-    return sqlite3_last_insert_rowid(m_sqlite3_inmemory);
+    return sqlite3_last_insert_rowid(m_sqlite3);
 }
 
 void
 database::flush()
 {
+    if(m_database_type != rocstorage::database_type_t::in_memory)
+    {
+        LOG_WARNING("Flushing database is not supported for database type: {}",
+                    static_cast<int>(m_database_type));
+        return;
+    }
+
     if(m_flushed)
     {
         throw std::runtime_error("Database already flushed!");
@@ -231,7 +249,7 @@ database::flush()
     sqlite3* out_db;
     validate_sqlite3_result(
         sqlite3_open(m_db_path.c_str(), &out_db), "", "database open failed!");
-    auto* backup = sqlite3_backup_init(out_db, "main", m_sqlite3_inmemory, "main");
+    auto* backup = sqlite3_backup_init(out_db, "main", m_sqlite3, "main");
     if(backup)
     {
         sqlite3_backup_step(backup, -1);

@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <rocstorage/storage_types.hpp>
+
 #include "debug.hpp"
 #include "traits.hpp"
 #include "transaction.hpp"
@@ -21,7 +23,10 @@ namespace data_storage
 class database
 {
 public:
-    explicit database(std::string abs_db_path, std::string uuid);
+    explicit database(std::string                 abs_db_path,
+                      std::string                 uuid,
+                      rocstorage::database_type_t database_type =
+                          rocstorage::database_type_t::in_memory);
     database()                      = delete;
     database(database&)             = delete;
     database& operator=(database&)  = delete;
@@ -45,7 +50,7 @@ public:
     {
         sqlite3_stmt* p_stmt;
         validate_sqlite3_result(
-            sqlite3_prepare_v2(m_sqlite3_inmemory, query.c_str(), -1, &p_stmt, nullptr),
+            sqlite3_prepare_v2(m_sqlite3, query.c_str(), -1, &p_stmt, nullptr),
             query.c_str(),
             "Failed to create statement");
         std::shared_ptr<sqlite3_stmt> stmt{ p_stmt, sqlite3_finalize };
@@ -66,7 +71,7 @@ public:
 
     [[nodiscard]] transaction_block create_transaction_block() const noexcept
     {
-        return transaction_block(m_sqlite3_inmemory);
+        return transaction_block(m_sqlite3);
     }
 
 private:
@@ -86,7 +91,7 @@ private:
                         "Query: {}\n"
                         "{}"
                         "===========================================================",
-                        sqlite3_errmsg(m_sqlite3_inmemory),
+                        sqlite3_errmsg(m_sqlite3),
                         sqlite3_error_code,
                         sqlite3_errstr(sqlite3_error_code),
                         query,
@@ -222,11 +227,12 @@ private:
     }
 
 private:
-    sqlite3*    m_sqlite3_inmemory{ nullptr };
-    std::string m_db_path{};
-    std::string m_uuid{};
-    bool        m_initialized{ false };
-    bool        m_flushed{ false };
+    sqlite3*                    m_sqlite3{ nullptr };
+    std::string                 m_db_path{};
+    std::string                 m_uuid{};
+    rocstorage::database_type_t m_database_type;
+    bool                        m_initialized{ false };
+    bool                        m_flushed{ false };
 };
 
 }  // namespace data_storage

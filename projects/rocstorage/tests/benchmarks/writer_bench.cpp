@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include <rocstorage/storage.hpp>
+#include <rocstorage/storage_types.hpp>
 #include <rocstorage/writer.hpp>
 #include <rocstorage/writer_types.hpp>
 
@@ -36,6 +37,23 @@ namespace
 {
 
 using namespace rocstorage::writer_api;
+
+// ============================================================================
+// Database Type Helpers
+// ============================================================================
+
+rocstorage::database_type_t
+get_db_type_from_arg(int64_t arg) noexcept
+{
+    return arg == 0 ? rocstorage::database_type_t::in_memory
+                    : rocstorage::database_type_t::on_disk;
+}
+
+const char*
+get_db_type_label(rocstorage::database_type_t db_type) noexcept
+{
+    return db_type == rocstorage::database_type_t::in_memory ? "in_memory" : "on_disk";
+}
 
 // ============================================================================
 // Benchmark Configuration
@@ -232,10 +250,11 @@ class writer_fixture : public benchmark::Fixture
 public:
     void SetUp(const benchmark::State& state) override
     {
+        m_db_type = get_db_type_from_arg(state.range(0));
         m_database_path =
             "benchmark_writer_" + std::to_string(state.thread_index()) + ".db";
         m_uuid    = std::to_string(state.thread_index());
-        m_storage = std::make_unique<rocm::storage>(m_database_path, m_uuid);
+        m_storage = std::make_unique<rocm::storage>(m_database_path, m_uuid, m_db_type);
         m_writer  = m_storage->get_writer();
         setup_schema();
     }
@@ -250,7 +269,8 @@ public:
     [[nodiscard]] std::string get_db_size_label() const
     {
         const size_t size = utility::get_file_size(m_database_path);
-        return "DB: " + utility::format_file_size(size);
+        return std::string(get_db_type_label(m_db_type)) +
+               " DB: " + utility::format_file_size(size);
     }
 
 protected:
@@ -299,6 +319,7 @@ protected:
         m_gpu_agent_id = gpu_agent;
     }
 
+    rocstorage::database_type_t         m_db_type;
     std::string                         m_database_path;
     std::string                         m_uuid;
     std::unique_ptr<rocm::storage>      m_storage;
@@ -317,10 +338,11 @@ class registration_fixture : public benchmark::Fixture
 public:
     void SetUp(const benchmark::State& state) override
     {
+        m_db_type = get_db_type_from_arg(state.range(0));
         m_database_path =
             "benchmark_registration_" + std::to_string(state.thread_index()) + ".db";
         m_uuid    = std::to_string(state.thread_index());
-        m_storage = std::make_unique<rocm::storage>(m_database_path, m_uuid);
+        m_storage = std::make_unique<rocm::storage>(m_database_path, m_uuid, m_db_type);
         m_writer  = m_storage->get_writer();
     }
 
@@ -334,10 +356,12 @@ public:
     [[nodiscard]] std::string get_db_size_label() const
     {
         const size_t size = utility::get_file_size(m_database_path);
-        return "DB: " + utility::format_file_size(size);
+        return std::string(get_db_type_label(m_db_type)) +
+               " DB: " + utility::format_file_size(size);
     }
 
 protected:
+    rocstorage::database_type_t         m_db_type;
     std::string                         m_database_path;
     std::string                         m_uuid;
     std::unique_ptr<rocm::storage>      m_storage;
@@ -347,7 +371,7 @@ protected:
 // Benchmark: Register multiple threads
 BENCHMARK_DEFINE_F(registration_fixture, register_threads)(benchmark::State& state)
 {
-    const auto count = static_cast<size_t>(state.range(0));
+    const auto count = static_cast<size_t>(state.range(1));
 
     constexpr size_t node_id = 1;
     constexpr size_t pid     = 1000;
@@ -371,13 +395,17 @@ BENCHMARK_DEFINE_F(registration_fixture, register_threads)(benchmark::State& sta
 BENCHMARK_REGISTER_F(registration_fixture, register_threads)
     ->Unit(benchmark::kSecond)
     ->Iterations(1)
-    ->Arg(COUNT_10K)
-    ->Arg(COUNT_100K);
+    // in_memory
+    ->Args({ 0, COUNT_10K })
+    ->Args({ 0, COUNT_100K })
+    // on_disk
+    ->Args({ 1, COUNT_10K })
+    ->Args({ 1, COUNT_100K });
 
 // Benchmark: Register multiple kernel symbols
 BENCHMARK_DEFINE_F(registration_fixture, register_kernel_symbols)(benchmark::State& state)
 {
-    const auto count = static_cast<size_t>(state.range(0));
+    const auto count = static_cast<size_t>(state.range(1));
 
     constexpr size_t node_id = 1;
     constexpr size_t pid     = 1000;
@@ -406,13 +434,17 @@ BENCHMARK_DEFINE_F(registration_fixture, register_kernel_symbols)(benchmark::Sta
 BENCHMARK_REGISTER_F(registration_fixture, register_kernel_symbols)
     ->Unit(benchmark::kSecond)
     ->Iterations(1)
-    ->Arg(COUNT_10K)
-    ->Arg(COUNT_100K);
+    // in_memory
+    ->Args({ 0, COUNT_10K })
+    ->Args({ 0, COUNT_100K })
+    // on_disk
+    ->Args({ 1, COUNT_10K })
+    ->Args({ 1, COUNT_100K });
 
 // Benchmark: Register PMC descriptions
 BENCHMARK_DEFINE_F(registration_fixture, register_pmc_info)(benchmark::State& state)
 {
-    const auto count = static_cast<size_t>(state.range(0));
+    const auto count = static_cast<size_t>(state.range(1));
 
     constexpr size_t node_id = 1;
     constexpr size_t pid     = 1000;
@@ -448,14 +480,18 @@ BENCHMARK_DEFINE_F(registration_fixture, register_pmc_info)(benchmark::State& st
 BENCHMARK_REGISTER_F(registration_fixture, register_pmc_info)
     ->Unit(benchmark::kSecond)
     ->Iterations(1)
-    ->Arg(COUNT_10K)
-    ->Arg(COUNT_100K);
+    // in_memory
+    ->Args({ 0, COUNT_10K })
+    ->Args({ 0, COUNT_100K })
+    // on_disk
+    ->Args({ 1, COUNT_10K })
+    ->Args({ 1, COUNT_100K });
 
 // Benchmark: Full schema registration (realistic setup)
 BENCHMARK_DEFINE_F(registration_fixture, register_full_schema)(benchmark::State& state)
 {
-    const auto thread_count = static_cast<size_t>(state.range(0));
-    const auto kernel_count = static_cast<size_t>(state.range(1));
+    const auto thread_count = static_cast<size_t>(state.range(1));
+    const auto kernel_count = static_cast<size_t>(state.range(2));
 
     for(auto _ : state)
     {
@@ -507,12 +543,18 @@ BENCHMARK_DEFINE_F(registration_fixture, register_full_schema)(benchmark::State&
 BENCHMARK_REGISTER_F(registration_fixture, register_full_schema)
     ->Unit(benchmark::kSecond)
     ->Iterations(1)
-    // Small setup (12 threads, 100 kernels)
-    ->Args({ 12, 100 })
-    // Medium setup (64 threads, 1000 kernels)
-    ->Args({ 64, 1000 })
-    // Large setup (256 threads, 10000 kernels)
-    ->Args({ 256, 10000 });
+    // in_memory: Small setup (12 threads, 100 kernels)
+    ->Args({ 0, 12, 100 })
+    // in_memory: Medium setup (64 threads, 1000 kernels)
+    ->Args({ 0, 64, 1000 })
+    // in_memory: Large setup (256 threads, 10000 kernels)
+    ->Args({ 0, 256, 10000 })
+    // on_disk: Small setup (12 threads, 100 kernels)
+    ->Args({ 1, 12, 100 })
+    // on_disk: Medium setup (64 threads, 1000 kernels)
+    ->Args({ 1, 64, 1000 })
+    // on_disk: Large setup (256 threads, 10000 kernels)
+    ->Args({ 1, 256, 10000 });
 
 // ============================================================================
 // Data Insertion Benchmarks (Hot Path - Primary Focus)
@@ -520,7 +562,7 @@ BENCHMARK_REGISTER_F(registration_fixture, register_full_schema)
 
 BENCHMARK_DEFINE_F(writer_fixture, kernel_dispatch)(benchmark::State& state)
 {
-    const auto count = static_cast<size_t>(state.range(0));
+    const auto count = static_cast<size_t>(state.range(1));
 
     for(auto _ : state)
     {
@@ -553,13 +595,18 @@ BENCHMARK_DEFINE_F(writer_fixture, kernel_dispatch)(benchmark::State& state)
 BENCHMARK_REGISTER_F(writer_fixture, kernel_dispatch)
     ->Unit(benchmark::kSecond)
     ->Iterations(1)
-    ->Arg(COUNT_10K)
-    ->Arg(COUNT_100K)
-    ->Arg(COUNT_1000K);
+    // in_memory
+    ->Args({ 0, COUNT_10K })
+    ->Args({ 0, COUNT_100K })
+    ->Args({ 0, COUNT_1000K })
+    // on_disk
+    ->Args({ 1, COUNT_10K })
+    ->Args({ 1, COUNT_100K })
+    ->Args({ 1, COUNT_1000K });
 
 BENCHMARK_DEFINE_F(writer_fixture, memory_copy)(benchmark::State& state)
 {
-    const auto count = static_cast<size_t>(state.range(0));
+    const auto count = static_cast<size_t>(state.range(1));
 
     for(auto _ : state)
     {
@@ -587,13 +634,18 @@ BENCHMARK_DEFINE_F(writer_fixture, memory_copy)(benchmark::State& state)
 BENCHMARK_REGISTER_F(writer_fixture, memory_copy)
     ->Unit(benchmark::kSecond)
     ->Iterations(1)
-    ->Arg(COUNT_10K)
-    ->Arg(COUNT_100K)
-    ->Arg(COUNT_1000K);
+    // in_memory
+    ->Args({ 0, COUNT_10K })
+    ->Args({ 0, COUNT_100K })
+    ->Args({ 0, COUNT_1000K })
+    // on_disk
+    ->Args({ 1, COUNT_10K })
+    ->Args({ 1, COUNT_100K })
+    ->Args({ 1, COUNT_1000K });
 
 BENCHMARK_DEFINE_F(writer_fixture, memory_alloc)(benchmark::State& state)
 {
-    const auto count = static_cast<size_t>(state.range(0));
+    const auto count = static_cast<size_t>(state.range(1));
 
     for(auto _ : state)
     {
@@ -618,13 +670,18 @@ BENCHMARK_DEFINE_F(writer_fixture, memory_alloc)(benchmark::State& state)
 BENCHMARK_REGISTER_F(writer_fixture, memory_alloc)
     ->Unit(benchmark::kSecond)
     ->Iterations(1)
-    ->Arg(COUNT_10K)
-    ->Arg(COUNT_100K)
-    ->Arg(COUNT_1000K);
+    // in_memory
+    ->Args({ 0, COUNT_10K })
+    ->Args({ 0, COUNT_100K })
+    ->Args({ 0, COUNT_1000K })
+    // on_disk
+    ->Args({ 1, COUNT_10K })
+    ->Args({ 1, COUNT_100K })
+    ->Args({ 1, COUNT_1000K });
 
 BENCHMARK_DEFINE_F(writer_fixture, region)(benchmark::State& state)
 {
-    const auto count = static_cast<size_t>(state.range(0));
+    const auto count = static_cast<size_t>(state.range(1));
 
     for(auto _ : state)
     {
@@ -647,13 +704,18 @@ BENCHMARK_DEFINE_F(writer_fixture, region)(benchmark::State& state)
 BENCHMARK_REGISTER_F(writer_fixture, region)
     ->Unit(benchmark::kSecond)
     ->Iterations(1)
-    ->Arg(COUNT_10K)
-    ->Arg(COUNT_100K)
-    ->Arg(COUNT_1000K);
+    // in_memory
+    ->Args({ 0, COUNT_10K })
+    ->Args({ 0, COUNT_100K })
+    ->Args({ 0, COUNT_1000K })
+    // on_disk
+    ->Args({ 1, COUNT_10K })
+    ->Args({ 1, COUNT_100K })
+    ->Args({ 1, COUNT_1000K });
 
 BENCHMARK_DEFINE_F(writer_fixture, region_with_args)(benchmark::State& state)
 {
-    const auto count = static_cast<size_t>(state.range(0));
+    const auto count = static_cast<size_t>(state.range(1));
 
     // Pre-create argument data
     const std::vector<arg_data_t> args = {
@@ -718,13 +780,18 @@ BENCHMARK_DEFINE_F(writer_fixture, region_with_args)(benchmark::State& state)
 BENCHMARK_REGISTER_F(writer_fixture, region_with_args)
     ->Unit(benchmark::kSecond)
     ->Iterations(1)
-    ->Arg(COUNT_10K)
-    ->Arg(COUNT_100K)
-    ->Arg(COUNT_1000K);
+    // in_memory
+    ->Args({ 0, COUNT_10K })
+    ->Args({ 0, COUNT_100K })
+    ->Args({ 0, COUNT_1000K })
+    // on_disk
+    ->Args({ 1, COUNT_10K })
+    ->Args({ 1, COUNT_100K })
+    ->Args({ 1, COUNT_1000K });
 
 BENCHMARK_DEFINE_F(writer_fixture, pmc_event)(benchmark::State& state)
 {
-    const auto count = static_cast<size_t>(state.range(0));
+    const auto count = static_cast<size_t>(state.range(1));
 
     const pmc_info_unique_id_t pmc_id{ .name = "SQ_WAVES", .agent_id = m_gpu_agent_id };
     const track_info_t         track = make_track_info("gpu_kernel", 1, 1000, 1001);
@@ -750,9 +817,14 @@ BENCHMARK_DEFINE_F(writer_fixture, pmc_event)(benchmark::State& state)
 BENCHMARK_REGISTER_F(writer_fixture, pmc_event)
     ->Unit(benchmark::kSecond)
     ->Iterations(1)
-    ->Arg(COUNT_10K)
-    ->Arg(COUNT_100K)
-    ->Arg(COUNT_1000K);
+    // in_memory
+    ->Args({ 0, COUNT_10K })
+    ->Args({ 0, COUNT_100K })
+    ->Args({ 0, COUNT_1000K })
+    // on_disk
+    ->Args({ 1, COUNT_10K })
+    ->Args({ 1, COUNT_100K })
+    ->Args({ 1, COUNT_1000K });
 
 // ============================================================================
 // End-to-End Benchmark (Realistic Mixed Workload)
@@ -760,7 +832,7 @@ BENCHMARK_REGISTER_F(writer_fixture, pmc_event)
 
 BENCHMARK_DEFINE_F(writer_fixture, end_to_end_mixed)(benchmark::State& state)
 {
-    const auto total_events = static_cast<size_t>(state.range(0));
+    const auto total_events = static_cast<size_t>(state.range(1));
 
     // Realistic distribution: 70% regions, 20% kernel dispatches, 10% memory ops
     const size_t region_count   = total_events * 70 / 100;
@@ -849,8 +921,13 @@ BENCHMARK_DEFINE_F(writer_fixture, end_to_end_mixed)(benchmark::State& state)
 BENCHMARK_REGISTER_F(writer_fixture, end_to_end_mixed)
     ->Unit(benchmark::kSecond)
     ->Iterations(1)
-    ->Arg(COUNT_10K)
-    ->Arg(COUNT_100K)
-    ->Arg(COUNT_1000K);
+    // in_memory
+    ->Args({ 0, COUNT_10K })
+    ->Args({ 0, COUNT_100K })
+    ->Args({ 0, COUNT_1000K })
+    // on_disk
+    ->Args({ 1, COUNT_10K })
+    ->Args({ 1, COUNT_100K })
+    ->Args({ 1, COUNT_1000K });
 
 }  // namespace

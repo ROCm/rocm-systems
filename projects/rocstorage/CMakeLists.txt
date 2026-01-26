@@ -53,6 +53,16 @@ set(rocstorage_VERSION
 
 add_library(rocstorage SHARED)
 
+target_compile_definitions(
+    rocstorage
+    PRIVATE
+        $<$<COMPILE_LANGUAGE:CXX>:ROCSTORAGE_VERSION_MAJOR=${rocstorage_VERSION_MAJOR}>
+    PRIVATE
+        $<$<COMPILE_LANGUAGE:CXX>:ROCSTORAGE_VERSION_MINOR=${rocstorage_VERSION_MINOR}>
+    PRIVATE
+        $<$<COMPILE_LANGUAGE:CXX>:ROCSTORAGE_VERSION_PATCH=${rocstorage_VERSION_PATCH}>
+)
+
 add_subdirectory(source)
 
 # ------------------------------------------------------------ #
@@ -63,6 +73,7 @@ set(rocstorage_public_headers
     ${CMAKE_CURRENT_LIST_DIR}/include/writer.hpp
     ${CMAKE_CURRENT_LIST_DIR}/include/reader.hpp
     ${CMAKE_CURRENT_LIST_DIR}/include/storage.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/include/storage_types.hpp
     ${CMAKE_CURRENT_LIST_DIR}/include/writer_types.hpp
 )
 
