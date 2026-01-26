@@ -19,9 +19,9 @@ permissions:
 jobs:
   rocr-runtime-wsl-test:
     name: ROCR Runtime WSL Test
-    runs-on: ROCR-Runtime-libhsakmt-WSL
+    runs-on: rocr-runtime-libhsakmt-wsl
     env:
-      DISTRO: Ubuntu-22.04
+      DISTRO: Ubuntu-24.04
     defaults:
       run:
         shell: powershell
