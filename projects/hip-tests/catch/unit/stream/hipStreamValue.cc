@@ -613,7 +613,34 @@ TEMPLATE_TEST_CASE("Unit_hipStreamWriteValue_Increment", "", uint32_t, uint64_t)
   HIP_CHECK(hipFree(mem));
 }
 
-TEMPLATE_TEST_CASE("Unit_hipStreamWriteValue_Decrement", "", uint32_t, uint64_t) {
+TEMPLATE_TEST_CASE("Unit_hipStreamWriteValue_Decrement", "", uint32_t) {
+  if (!streamWaitValueSupported()) {
+    HipTest::HIP_SKIP_TEST("hipStreamWaitValue not supported on this device.");
+    return;
+  }
+
+  hipStream_t stream{nullptr};
+  HIP_CHECK(hipStreamCreate(&stream));
+  REQUIRE(stream != nullptr);
+
+
+  uint64_t value = 0;
+  uint64_t* mem;
+  HIP_CHECK(hipHostMalloc(&mem, sizeof(uint32_t), hipMallocSignalMemory));
+  __atomic_store(mem, &value, __ATOMIC_RELEASE);
+
+  const uint32_t decrement_value = 10;
+  HIP_CHECK(writeFunc<TestType>(stream, mem, decrement_value, hipExtStreamWriteValueDecrement));
+  HIP_CHECK(hipStreamSynchronize(stream));
+
+  const uint32_t expected_value = value - decrement_value;
+  std::cout << "Mem: " << *mem << std::endl;
+  REQUIRE(*mem == expected_value);
+  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipFree(mem));
+}
+
+TEMPLATE_TEST_CASE("Unit_hipStreamWriteValue_Decrement", "", uint64_t) {
   if (!streamWaitValueSupported()) {
     HipTest::HIP_SKIP_TEST("hipStreamWaitValue not supported on this device.");
     return;
