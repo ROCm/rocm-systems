@@ -40,6 +40,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  ROCM_VERSION: "7.2.0"
+
 # A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
   build:
@@ -80,10 +83,13 @@ jobs:
           timeout_minutes: 30
           max_attempts: 3
           command: |
+            ROCM_MAJOR=$(echo ${{ env.ROCM_VERSION }} | sed 's/\./ /g' | awk '{print $1}')
+            ROCM_MINOR=$(echo ${{ env.ROCM_VERSION }} | sed 's/\./ /g' | awk '{print $2}')
+            ROCM_VERSN=$(( (${ROCM_MAJOR}*10000)+(${ROCM_MINOR}*100) ))
             if [ ${{ matrix.os-release }} == "8.10" ]; then
-              yum install -y https://repo.radeon.com/amdgpu-install/latest/rhel/8.10/amdgpu-install-7.1.1.70101-1.el8.noarch.rpm
+              yum install -y https://repo.radeon.com/amdgpu-install/${ROCM_MAJOR}.${ROCM_MINOR}/rhel/8.10/amdgpu-install-${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1.el8.noarch.rpm
             else
-              yum install -y https://repo.radeon.com/amdgpu-install/latest/rhel/9.4/amdgpu-install-7.1.1.70101-1.el9.noarch.rpm
+              yum install -y https://repo.radeon.com/amdgpu-install/${ROCM_MAJOR}.${ROCM_MINOR}/rhel/9.4/amdgpu-install-${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1.el9.noarch.rpm
             fi
             yum install -y rocm-dev
       - name: Checkout
