@@ -108,6 +108,16 @@ include(spdlog)
 target_link_libraries(rocstorage PRIVATE $<BUILD_INTERFACE:spdlog::spdlog>)
 
 # ------------------------------------------------------------ #
+# nlohmann_json
+# ------------------------------------------------------------ #
+
+include(nlohmann_json)
+target_link_libraries(
+    rocstorage
+    PRIVATE $<BUILD_INTERFACE:nlohmann_json::nlohmann_json>
+)
+
+# ------------------------------------------------------------ #
 # Schema from rocprofiler-sdk-rocpd
 # ------------------------------------------------------------ #
 

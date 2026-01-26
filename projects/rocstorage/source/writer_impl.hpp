@@ -12,6 +12,7 @@
 #include "data_indentifier.hpp"
 #include "insert_validator.hpp"
 
+#include "common/json_serializers.hpp"
 #include "debug.hpp"
 
 #include <stdexcept>
@@ -425,13 +426,6 @@ private:
     {
         auto& string_info_utility = m_entity_identifiers->string_info();
 
-        auto json_call_stack_serializer = [](const writer_api::call_stack_t& call_stack) {
-            return "{}";
-        };
-
-        auto json_line_info_serializer =
-            [](const writer_api::source_context_list_t& line_info_list) { return "{}"; };
-
         const auto is_string_registered =
             string_info_utility.is_entry_registered(event_data.event_category);
 
@@ -452,8 +446,8 @@ private:
             event_data.stack_id,
             event_data.parent_stack_id,
             event_data.correlation_id,
-            json_call_stack_serializer(event_data.call_stack),
-            json_line_info_serializer(event_data.line_info_list),
+            json_serializers::serialize_call_stack(event_data.call_stack).c_str(),
+            json_serializers::serialize_source_context(event_data.line_info_list).c_str(),
             event_data.extdata);
 
         return primary_key;
