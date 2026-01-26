@@ -55,6 +55,13 @@ namespace
 std::vector<unique_ptr_t<nic_bundle_t>*> _nic_bundle_data{};
 }  // namespace
 
+nic_data::nic_data(uint32_t nic_index, const std::string& nic)
+: _nic(nic)
+, _nic_index(nic_index)
+{
+    sample();
+}
+
 void
 nic_data::sample()
 {

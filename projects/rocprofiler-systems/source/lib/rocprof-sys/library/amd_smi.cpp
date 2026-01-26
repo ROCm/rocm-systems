@@ -514,13 +514,6 @@ std::unique_ptr<data::promise_t> data::polling_finished = {};
 
 data::data(uint32_t _dev_id) { sample(_dev_id); }
 
-nic_data::nic_data(uint32_t nic_index, const std::string& nic)
-: _nic(nic)
-, _nic_index(nic_index)
-{
-    sample();
-}
-
 void
 data::sample(uint32_t _device_id)
 {
