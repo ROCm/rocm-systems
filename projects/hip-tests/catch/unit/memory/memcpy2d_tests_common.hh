@@ -67,11 +67,13 @@ void Memcpy2DDeviceToDeviceShell(F memcpy_func, const hipStream_t kernel_stream 
   }
 
   HIP_CHECK(hipSetDevice(src_device));
+  bool peer_access_enabled = false;
   if constexpr (enable_peer_access) {
     if (src_device == dst_device) {
       return;
     }
     HIP_CHECK(hipDeviceEnablePeerAccess(dst_device, 0));
+    peer_access_enabled = true;
   }
 
   LinearAllocGuard2D<int, unaligned> src_alloc(cols * src_cols_mult, rows);
@@ -100,6 +102,13 @@ void Memcpy2DDeviceToDeviceShell(F memcpy_func, const hipStream_t kernel_stream 
   constexpr auto f = [](size_t x, size_t y, size_t z) { return z * cols * rows + y * cols + x; };
   PitchedMemoryVerify(host_alloc.ptr(), dst_alloc.width(), dst_alloc.width_logical(),
                       dst_alloc.height(), 1, f);
+
+  if constexpr (enable_peer_access) {
+    if (peer_access_enabled) {
+      HIP_CHECK(hipSetDevice(src_device));
+      HIP_CHECK(hipDeviceDisablePeerAccess(dst_device));
+    }
+  }
 }
 
 template <bool should_synchronize, bool unaligned = false, typename F>

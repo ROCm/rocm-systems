@@ -62,6 +62,43 @@
 
 #define CHAR_BUF_SIZE 512
 
+class PeerAccessGuard {
+ public:
+  PeerAccessGuard() = default;
+
+  PeerAccessGuard(int src_device, int dst_device) { Enable(src_device, dst_device); }
+
+  void Enable(int src_device, int dst_device) {
+    if (enabled_ || src_device == dst_device) {
+      return;
+    }
+    src_device_ = src_device;
+    dst_device_ = dst_device;
+    int previous_device = 0;
+    HIP_CHECK(hipGetDevice(&previous_device));
+    HIP_CHECK(hipSetDevice(src_device_));
+    HIP_CHECK(hipDeviceEnablePeerAccess(dst_device_, 0));
+    HIP_CHECK(hipSetDevice(previous_device));
+    enabled_ = true;
+  }
+
+  ~PeerAccessGuard() {
+    if (!enabled_) {
+      return;
+    }
+    int current_device = 0;
+    hipGetDevice(&current_device);
+    hipSetDevice(src_device_);
+    static_cast<void>(hipDeviceDisablePeerAccess(dst_device_));
+    static_cast<void>(hipSetDevice(current_device));
+  }
+
+ private:
+  int src_device_{-1};
+  int dst_device_{-1};
+  bool enabled_{false};
+};
+
 #define CONSOLE_PRINT(fmt, ...)                                                                    \
   do {                                                                                             \
     std::printf(fmt "\n", ##__VA_ARGS__);                                                          \
