@@ -73,6 +73,7 @@ def check_amdgpu_driver():
             return True
     return False
 
+
 def check_amd_hsmp_driver():
     """ Returns true if amd_hsmp or hsmp_acpi is found in the list of initialized modules """
     amd_cpu_status_file = Path("/dev/hsmp")
