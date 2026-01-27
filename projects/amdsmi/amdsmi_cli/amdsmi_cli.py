@@ -123,6 +123,11 @@ def configure_logging_and_execute(args, amd_smi_commands):
 
     logging.debug(args)
 
+    # Check if --rocm-smi flag is set (top-level flag, not a subcommand)
+    if hasattr(args, 'rocm_smi') and args.rocm_smi:
+        amd_smi_commands.rocm_smi(args)
+        return
+
     # Execute subcommands
     try:
         args.func(args)
@@ -160,6 +165,7 @@ if __name__ == "__main__":
                                     amd_smi_commands.partition,
                                     amd_smi_commands.ras,
                                     amd_smi_commands.node,
+                                    amd_smi_commands.rocm_smi,
                                     amd_smi_commands.default,
                                     sys_argv=sys.argv,
                                     helpers=amd_smi_helpers)
@@ -170,7 +176,7 @@ if __name__ == "__main__":
 
     # Store possible subcommands & aliases for later errors
     valid_commands = amd_smi_parser.possible_commands
-    valid_commands += ['--help', '-h']
+    valid_commands += ['--help', '-h', '--rocm-smi']
 
     # Convert arguments to lowercase, but preserve case for folder path values
     processed_argv = []

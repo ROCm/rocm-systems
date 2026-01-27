@@ -32,6 +32,7 @@ import logging
 import os
 import re
 import shutil
+import subprocess
 import tempfile
 from pathlib import Path
 from unittest import mock
@@ -40,6 +41,15 @@ import pandas as pd
 import pytest
 
 import utils.utils as utils
+
+SUPPORTED_ARCHS = {
+    "gfx908": {"mi100": ["MI100"]},
+    "gfx90a": {"mi200": ["MI210", "MI250", "MI250X"]},
+    "gfx940": {"mi300": ["MI300A_A0"]},
+    "gfx941": {"mi300": ["MI300X_A0"]},
+    "gfx942": {"mi300": ["MI300A_A1", "MI300X_A1"]},
+    "gfx950": {"mi350": ["MI350"]},
+}
 
 
 class MockMSpec:
@@ -226,6 +236,27 @@ def get_num_pmc_file(output_dir):
     return len([
         f for f in perfmon_path.iterdir() if f.is_file() and f.suffix == ".txt"
     ])
+
+
+def gpu_soc():
+    # Parse arch details from rocminfo
+    rocminfo = str(
+        # decode with utf-8 to account for rocm-smi changes in latest rocm
+        subprocess.run(
+            ["rocminfo"], stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        ).stdout.decode("utf-8")
+    )
+    rocminfo = rocminfo.split("\n")
+    soc_regex = re.compile(r"^\s*Name\s*:\s+ ([a-zA-Z0-9]+)\s*$", re.MULTILINE)
+    devices = list(filter(soc_regex.match, rocminfo))
+    gpu_arch = devices[0].split()[1]
+
+    if not gpu_arch in SUPPORTED_ARCHS.keys():
+        return None
+
+    gpu_model = list(SUPPORTED_ARCHS[gpu_arch].keys())[0].upper()
+
+    return gpu_model
 
 
 # =============================================================================

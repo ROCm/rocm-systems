@@ -15,6 +15,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Iteration multiplexing to collect counters in single application run
 
+* Added `--torch-trace` option to enable mapping of PyTorch operators to collected counter values during profiling.
+
 * Runtime compilation of Roofline benchmarking:
   * GPU kernels from [rocm-amdgpu-bench](https://github.com/ROCm/rocm-amdgpu-bench) repository are moved into the ROCm Compute Profiler and are compiled at runtime using local HIP and HIPRTC Python wrappers.
   * Roofline binaries compiled from [rocm-amdgpu-bench](https://github.com/ROCm/rocm-amdgpu-bench) repository have been removed from the project, as Roofline runtime compilation performs the same work as the Roofline binaries.
@@ -57,6 +59,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Fix issue where dispatch filtering in a range (e.g. >2) was not working
 
 * Fix redundant warnings for compute/memory partition not found for < MI 300 series GPUs by skipping partition checks
+
+* Fixed formula for metrics related to reads from L2 cache to HBM for MI350
 
 ### Removed
 
