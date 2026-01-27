@@ -25,6 +25,9 @@
 
 cmake_minimum_required ( VERSION 3.6.3 )
 
+if (WIN_SDK)
+  include(${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists_wsl.txt)
+else ()
 set(CMAKE_VERBOSE_MAKEFILE ON)
 
 set ( HSAKMT "hsakmt" )
@@ -319,3 +322,4 @@ endif()
 ###########################
 # Use component packaging
 set ( ENABLE_LDCONFIG ON CACHE BOOL "Set library links and caches using ldconfig.")
+endif()

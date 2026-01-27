@@ -49,7 +49,6 @@
 #include <timemory/unwind/dlinfo.hpp>
 #include <timemory/unwind/types.hpp>
 #include <timemory/utility/filepath.hpp>
-#include <timemory/utility/join.hpp>
 #include <timemory/utility/procfs/maps.hpp>
 
 #include "logger/debug.hpp"
