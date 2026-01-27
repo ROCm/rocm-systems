@@ -7713,14 +7713,14 @@ amdsmi_status_t amdsmi_get_hsmp_metrics_table(amdsmi_processor_handle processor_
 /** @} End tagEsmiHSMPMetricsTable */
 
 /*****************************************************************************/
-/** @defgroup tagEsmiCPUAuxillary ESMI Auxillary functions
+/** @defgroup tagEsmiCPUAuxiliary ESMI Auxiliary functions
  *  @{
  */
 
 /**
  *  @brief Retrieve the CPU processor model name based on the processor index.
  *
- *  @ingroup tagEsmiCPUAuxillary
+ *  @ingroup tagEsmiCPUAuxiliary
  *
  *  @platform{cpu_bm}
  *
@@ -7746,7 +7746,7 @@ amdsmi_status_t amdsmi_get_cpu_model_name(amdsmi_processor_handle processor_hand
 /**
  *  @brief Get CPU socket count from sys filesystem.
  *
- *  @ingroup tagEsmiCPUAuxillary
+ *  @ingroup tagEsmiCPUAuxiliary
  *
  *  @platform{cpu_bm}
  *
@@ -7759,7 +7759,7 @@ amdsmi_status_t amdsmi_get_cpu_socket_count(uint32_t *sock_count);
 /**
  *  @brief Get cpu cores per socket from sys filesystem.
  *
- *  @ingroup tagEsmiCPUAuxillary
+ *  @ingroup tagEsmiCPUAuxiliary
  *
  *  @platform{cpu_bm}
  *
@@ -7773,7 +7773,7 @@ amdsmi_status_t amdsmi_get_cpu_cores_per_socket(uint32_t sock_count, amdsmi_sock
 /**
  *  @brief Get a description of provided AMDSMI error status for esmi errors.
  *
- *  @ingroup tagEsmiCPUAuxillary
+ *  @ingroup tagEsmiCPUAuxiliary
  *
  *  @platform{cpu_bm}
  *
@@ -7792,7 +7792,7 @@ amdsmi_status_t amdsmi_get_esmi_err_msg(amdsmi_status_t status, const char **sta
 /**
  *  @brief Get CPU model.
  *
- *  @ingroup tagEsmiCPUAuxillary
+ *  @ingroup tagEsmiCPUAuxiliary
  *
  *  @platform{cpu_bm}
  *
@@ -7805,7 +7805,7 @@ amdsmi_status_t amdsmi_get_cpu_model(uint32_t *cpu_model);
 /**
  *  @brief Get CPU family.
  *
- *  @ingroup tagEsmiCPUAuxillary
+ *  @ingroup tagEsmiCPUAuxiliary
  *
  *  @platform{cpu_bm}
  *
@@ -7818,7 +7818,7 @@ amdsmi_status_t amdsmi_get_cpu_family(uint32_t *cpu_family);
 /**
  *  @brief Get first online core on socket.
  *
- *  @ingroup tagEsmiCPUAuxillary
+ *  @ingroup tagEsmiCPUAuxiliary
  *
  *  @platform{cpu_bm}
  *
@@ -7831,7 +7831,7 @@ amdsmi_status_t amdsmi_get_cpu_family(uint32_t *cpu_family);
 amdsmi_status_t amdsmi_first_online_core_on_cpu_socket(amdsmi_processor_handle processor_handle,
                                                        uint32_t *pcore_ind);
 
-/** @} End tagEsmiCPUAuxillary */
+/** @} End tagEsmiCPUAuxiliary */
 
 /*****************************************************************************/
 /** @defgroup tagEsmiCpuISOFreqPolicy ESMI ISO Frequency Policy
