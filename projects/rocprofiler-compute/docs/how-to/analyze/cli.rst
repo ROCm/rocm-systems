@@ -8,7 +8,7 @@ CLI analysis
 
 This section provides an overview of ROCm Compute Profiler's CLI analysis features.
 
-* :ref:`Derived metrics <cli-list-metrics>`: All of ROCm Compute Profiler's built-in metrics.
+* :ref:`Derived metrics <cli-list-available-metrics>`: All of ROCm Compute Profiler's built-in metrics.
 
 * :ref:`Baseline comparison <analysis-baseline-comparison>`: Compare multiple runs in a side-by-side manner.
 
@@ -310,32 +310,40 @@ There are three high-level GPU analysis views:
 More analysis options
 =====================
 
-Single run
+**Single run**
+
   .. code-block:: shell
 
      $ rocprof-compute analyze -p workloads/vcopy/MI200/
 
-List top kernels and dispatches
+**List top kernels and dispatches**
+
   .. code-block:: shell
 
      $ rocprof-compute analyze -p workloads/vcopy/MI200/  --list-stats
 
-List metrics
+
+**List metrics**
+
   .. code-block:: shell
 
      $ rocprof-compute analyze -p workloads/vcopy/MI200/  --list-metrics gfx90a
 
-List IP blocks
+**List IP blocks**
+
   .. code-block:: shell
 
      $ rocprof-compute analyze -p workloads/vcopy/MI200/  --list-blocks gfx90a
 
-Show Description column which is excluded by default in cli output
+
+**Show Description column which is excluded by default in cli output**
+
   .. code-block:: shell
 
      $ rocprof-compute analyze -p workloads/vcopy/MI200/  --list-metrics gfx90a --include-cols Description
 
-Show System Speed-of-Light and CS_Busy blocks only
+**Show System Speed-of-Light and CS_Busy blocks only**
+
   .. code-block:: shell
 
      $ rocprof-compute analyze -p workloads/vcopy/MI200/  -b 2  5.1.0
@@ -347,158 +355,162 @@ Show System Speed-of-Light and CS_Busy blocks only
    GPU Busy Cycles metric.
 
 
-Filter kernels
-  First, list the top kernels in your application using `--list-stats`.
+**Filter kernels**
 
-  .. code-block::
+First, list the top kernels in your application using `--list-stats`.
 
-     $ rocprof-compute analyze -p workloads/vcopy/MI200/ --list-stats
+.. code-block::
 
-     Analysis mode = cli
-     [analysis] deriving rocprofiler-compute metrics...
+   $ rocprof-compute analyze -p workloads/vcopy/MI200/ --list-stats
 
-     --------------------------------------------------------------------------------
-     Detected Kernels (sorted descending by duration)
-     ╒════╤══════════════════════════════════════════════╕
-     │    │ Kernel_Name                                  │
-     ╞════╪══════════════════════════════════════════════╡
-     │  0 │ vecCopy(double*, double*, double*, int, int) │
-     ╘════╧══════════════════════════════════════════════╛
+   Analysis mode = cli
+   [analysis] deriving rocprofiler-compute metrics...
 
-     --------------------------------------------------------------------------------
-     Dispatch list
-     ╒════╤═══════════════╤══════════════════════════════════════════════╤══════════╕
-     │    │   Dispatch_ID │ Kernel_Name                                  │   GPU_ID │
-     ╞════╪═══════════════╪══════════════════════════════════════════════╪══════════╡
-     │  0 │             0 │ vecCopy(double*, double*, double*, int, int) │        0 │
-     ╘════╧═══════════════╧══════════════════════════════════════════════╧══════════╛
+   --------------------------------------------------------------------------------
+   Detected Kernels (sorted descending by duration)
+   ╒════╤══════════════════════════════════════════════╕
+   │    │ Kernel_Name                                  │
+   ╞════╪══════════════════════════════════════════════╡
+   │  0 │ vecCopy(double*, double*, double*, int, int) │
+   ╘════╧══════════════════════════════════════════════╛
 
-  Second, select the index of the kernel you would like to filter; for example,
-  ``vecCopy(double*, double*, double*, int, int) [clone .kd]`` at index ``0``.
-  Then, use this index to apply the filter via ``-k`` or ``--kernels``.
+   --------------------------------------------------------------------------------
+   Dispatch list
+   ╒════╤═══════════════╤══════════════════════════════════════════════╤══════════╕
+   │    │   Dispatch_ID │ Kernel_Name                                  │   GPU_ID │
+   ╞════╪═══════════════╪══════════════════════════════════════════════╪══════════╡
+   │  0 │             0 │ vecCopy(double*, double*, double*, int, int) │        0 │
+   ╘════╧═══════════════╧══════════════════════════════════════════════╧══════════╛
 
-  .. code-block:: shell-session
+Second, select the index of the kernel you would like to filter; for example,
+``vecCopy(double*, double*, double*, int, int) [clone .kd]`` at index ``0``.
+Then, use this index to apply the filter via ``-k`` or ``--kernels``.
 
-     $ rocprof-compute analyze -p workloads/vcopy/MI200/ -k 0
+.. code-block:: shell-session
 
-     Analysis mode = cli
-     [analysis] deriving rocprofiler-compute metrics...
+   $ rocprof-compute analyze -p workloads/vcopy/MI200/ -k 0
 
-     --------------------------------------------------------------------------------
-     0. Top Stats
-     0.1 Top Kernels
-     ╒════╤══════════════════════════════════════════╤═════════╤═══════════╤════════════╤══════════════╤════════╤═════╕
-     │    │ Kernel_Name                              │   Count │   Sum(ns) │   Mean(ns) │   Median(ns) │    Pct │ S   │
-     ╞════╪══════════════════════════════════════════╪═════════╪═══════════╪════════════╪══════════════╪════════╪═════╡
-     │  0 │ vecCopy(double*, double*, double*, int,  │    1.00 │  18560.00 │   18560.00 │     18560.00 │ 100.00 │ *   │
-     │    │ int)                                     │         │           │            │              │        │     │
-     ╘════╧══════════════════════════════════════════╧═════════╧═══════════╧════════════╧══════════════╧════════╧═════╛
-     ...
+   Analysis mode = cli
+   [analysis] deriving rocprofiler-compute metrics...
 
-  You should see your filtered kernels indicated by an asterisk in the **Top
-  Stats** table.
+   --------------------------------------------------------------------------------
+   0. Top Stats
+   0.1 Top Kernels
+   ╒════╤══════════════════════════════════════════╤═════════╤═══════════╤════════════╤══════════════╤════════╤═════╕
+   │    │ Kernel_Name                              │   Count │   Sum(ns) │   Mean(ns) │   Median(ns) │    Pct │ S   │
+   ╞════╪══════════════════════════════════════════╪═════════╪═══════════╪════════════╪══════════════╪════════╪═════╡
+   │  0 │ vecCopy(double*, double*, double*, int,  │    1.00 │  18560.00 │   18560.00 │     18560.00 │ 100.00 │ *   │
+   │    │ int)                                     │         │           │            │              │        │     │
+   ╘════╧══════════════════════════════════════════╧═════════╧═══════════╧════════════╧══════════════╧════════╧═════╛
+   ...
+
+You should see your filtered kernels indicated by an asterisk in the **Top
+Stats** table.
 
 .. _per-kernel-roofline:
 
-Per-kernel roofline analysis
-  When analyzing specific kernels, the roofline analysis provides detailed metrics for each filtered kernel:
+**Per-kernel roofline analysis**
 
-  .. code-block:: shell-session
+When analyzing specific kernels, the roofline analysis provides detailed metrics for each filtered kernel:
 
-     $ rocprof-compute analyze -p workloads/vcopy/MI200/ -k 0 -b 4
-  This generates enhanced roofline output showing per-kernel performance rates and arithmetic intensity calculations:
+.. code-block:: shell-session
 
-  .. code-block:: text
+   $ rocprof-compute analyze -p workloads/vcopy/MI200/ -k 0 -b 4
 
-   ================================================================================
-   4. Roofline
-   ================================================================================
-   (4.1) Per-Kernel Roofline Metrics and (4.2) AI Plot Points
-   --------------------------------------------------------------------------------
-   Kernel 0: vecCopy(double*, double*, double*, int, int) (100.0%)
-      |
-      ├─ 4.1 Roofline Rate Metrics:
-      |   ╒═════════════╤════════════════════╤═══════════════════╤═════════╤════════════════════╕
-      |   │ Metric_ID   │ Metric             │ Value             │ Unit    │   Peak (Empirical) │
-      |   ╞═════════════╪════════════════════╪═══════════════════╪═════════╪════════════════════╡
-      |   │ 4.1.0       │ VALU FLOPs         │                   │ Gflop/s │           61286.40 │
-      |   ├─────────────┼────────────────────┼───────────────────┼─────────┼────────────────────┤
-      |   │ 4.1.1       │ MFMA FLOPs (F64)   │                   │ Gflop/s │          108544.33 │
-      |   ├─────────────┼────────────────────┼───────────────────┼─────────┼────────────────────┤
-      |   │ 4.1.2       │ MFMA FLOPs (F32)   │                   │ Gflop/s │          104531.42 │
-      |   ├─────────────┼────────────────────┼───────────────────┼─────────┼────────────────────┤
-      |   │ 4.1.3       │ MFMA FLOPs (F16)   │                   │ Gflop/s │          709169.38 │
-      |   ├─────────────┼────────────────────┼───────────────────┼─────────┼────────────────────┤
-      |   │ 4.1.4       │ MFMA FLOPs (BF16)  │ 0.0               │ Gflop/s │          388161.09 │
-      |   ├─────────────┼────────────────────┼───────────────────┼─────────┼────────────────────┤
-      |   │ 4.1.5       │ MFMA FLOPs (F8)    │ 0.0               │ Gflop/s │         1446089.60 │
-      |   ├─────────────┼────────────────────┼───────────────────┼─────────┼────────────────────┤
-      |   │ 4.1.6       │ MFMA IOPs (Int8)   │                   │ Giop/s  │          737317.94 │
-      |   ├─────────────┼────────────────────┼───────────────────┼─────────┼────────────────────┤
-      |   │ 4.1.7       │ HBM Bandwidth      │                   │ Gb/s    │            3231.95 │
-      |   ├─────────────┼────────────────────┼───────────────────┼─────────┼────────────────────┤
-      |   │ 4.1.8       │ L2 Cache Bandwidth │                   │ Gb/s    │           19096.81 │
-      |   ├─────────────┼────────────────────┼───────────────────┼─────────┼────────────────────┤
-      |   │ 4.1.9       │ L1 Cache Bandwidth │ 3880.358726762844 │ Gb/s    │           25006.24 │
-      |   ├─────────────┼────────────────────┼───────────────────┼─────────┼────────────────────┤
-      |   │ 4.1.10      │ LDS Bandwidth      │                   │ Gb/s    │           54920.88 │
-      |   ╘═════════════╧════════════════════╧═══════════════════╧═════════╧════════════════════╛
-      ├─ 4.2 Roofline AI Plot Points:
-      |   ╒═════════════╤══════════════════════╤═════════╤════════════╕
-      |   │ Metric_ID   │ Metric               │ Value   │ Unit       │
-      |   ╞═════════════╪══════════════════════╪═════════╪════════════╡
-      |   │ 4.2.0       │ AI HBM               │         │ Flops/byte │
-      |   ├─────────────┼──────────────────────┼─────────┼────────────┤
-      |   │ 4.2.1       │ AI L2                │         │ Flops/byte │
-      |   ├─────────────┼──────────────────────┼─────────┼────────────┤
-      |   │ 4.2.2       │ AI L1                │         │ Flops/byte │
-      |   ├─────────────┼──────────────────────┼─────────┼────────────┤
-      |   │ 4.2.3       │ Performance (GFLOPs) │         │ Gflop/s    │
-      |   ╘═════════════╧══════════════════════╧═════════╧════════════╛
-  The per-kernel analysis uses YAML-based metric evaluation for accurate calculations.
+This generates enhanced roofline output showing per-kernel performance rates and arithmetic intensity calculations:
 
-  Analyze multiple kernels for comparison:
+.. code-block:: text
 
-  .. code-block:: shell-session
+================================================================================
+4. Roofline
+================================================================================
+(4.1) Per-Kernel Roofline Metrics and (4.2) AI Plot Points
+--------------------------------------------------------------------------------
+Kernel 0: vecCopy(double*, double*, double*, int, int) (100.0%)
+   |
+   ├─ 4.1 Roofline Rate Metrics:
+   |   ╒═════════════╤════════════════════╤═══════════════════╤═════════╤════════════════════╕
+   |   │ Metric_ID   │ Metric             │ Value             │ Unit    │   Peak (Empirical) │
+   |   ╞═════════════╪════════════════════╪═══════════════════╪═════════╪════════════════════╡
+   |   │ 4.1.0       │ VALU FLOPs         │                   │ Gflop/s │           61286.40 │
+   |   ├─────────────┼────────────────────┼───────────────────┼─────────┼────────────────────┤
+   |   │ 4.1.1       │ MFMA FLOPs (F64)   │                   │ Gflop/s │          108544.33 │
+   |   ├─────────────┼────────────────────┼───────────────────┼─────────┼────────────────────┤
+   |   │ 4.1.2       │ MFMA FLOPs (F32)   │                   │ Gflop/s │          104531.42 │
+   |   ├─────────────┼────────────────────┼───────────────────┼─────────┼────────────────────┤
+   |   │ 4.1.3       │ MFMA FLOPs (F16)   │                   │ Gflop/s │          709169.38 │
+   |   ├─────────────┼────────────────────┼───────────────────┼─────────┼────────────────────┤
+   |   │ 4.1.4       │ MFMA FLOPs (BF16)  │ 0.0               │ Gflop/s │          388161.09 │
+   |   ├─────────────┼────────────────────┼───────────────────┼─────────┼────────────────────┤
+   |   │ 4.1.5       │ MFMA FLOPs (F8)    │ 0.0               │ Gflop/s │         1446089.60 │
+   |   ├─────────────┼────────────────────┼───────────────────┼─────────┼────────────────────┤
+   |   │ 4.1.6       │ MFMA IOPs (Int8)   │                   │ Giop/s  │          737317.94 │
+   |   ├─────────────┼────────────────────┼───────────────────┼─────────┼────────────────────┤
+   |   │ 4.1.7       │ HBM Bandwidth      │                   │ Gb/s    │            3231.95 │
+   |   ├─────────────┼────────────────────┼───────────────────┼─────────┼────────────────────┤
+   |   │ 4.1.8       │ L2 Cache Bandwidth │                   │ Gb/s    │           19096.81 │
+   |   ├─────────────┼────────────────────┼───────────────────┼─────────┼────────────────────┤
+   |   │ 4.1.9       │ L1 Cache Bandwidth │ 3880.358726762844 │ Gb/s    │           25006.24 │
+   |   ├─────────────┼────────────────────┼───────────────────┼─────────┼────────────────────┤
+   |   │ 4.1.10      │ LDS Bandwidth      │                   │ Gb/s    │           54920.88 │
+   |   ╘═════════════╧════════════════════╧═══════════════════╧═════════╧════════════════════╛
+   ├─ 4.2 Roofline AI Plot Points:
+   |   ╒═════════════╤══════════════════════╤═════════╤════════════╕
+   |   │ Metric_ID   │ Metric               │ Value   │ Unit       │
+   |   ╞═════════════╪══════════════════════╪═════════╪════════════╡
+   |   │ 4.2.0       │ AI HBM               │         │ Flops/byte │
+   |   ├─────────────┼──────────────────────┼─────────┼────────────┤
+   |   │ 4.2.1       │ AI L2                │         │ Flops/byte │
+   |   ├─────────────┼──────────────────────┼─────────┼────────────┤
+   |   │ 4.2.2       │ AI L1                │         │ Flops/byte │
+   |   ├─────────────┼──────────────────────┼─────────┼────────────┤
+   |   │ 4.2.3       │ Performance (GFLOPs) │         │ Gflop/s    │
+   |   ╘═════════════╧══════════════════════╧═════════╧════════════╛
 
-     $ rocprof-compute analyze -p workloads/vcopy/MI200/ -k 0 1 2 -b 4
+The per-kernel analysis uses YAML-based metric evaluation for accurate calculations.
+
+Analyze multiple kernels for comparison:
+
+.. code-block:: shell-session
+
+   $ rocprof-compute analyze -p workloads/vcopy/MI200/ -k 0 1 2 -b 4
 
 .. _analysis-baseline-comparison:
 
-Baseline comparison
+**Baseline comparison**
 
-   Baseline comparison allows for checking A/B effect. Currently baseline comparison is limited to the same :ref:`SoC <def-soc>`. Cross-comparison between SoCs is in development.
+Baseline comparison allows for checking A/B effect. Currently baseline comparison is limited to the same :ref:`SoC <def-soc>`. Cross-comparison between SoCs is in development.
 
-   For both the Current Workload and the Baseline Workload, you can independently setup the following filters to allow fine grained comparisons:
+For both the Current Workload and the Baseline Workload, you can independently setup the following filters to allow fine grained comparisons:
 
-   * Workload Name with ``--path``
-   * GPU ID filtering (multi-selection) with ``--gpu-id``
-   * Kernel Name filtering (multi-selection) with ``--kernel``
-   * Dispatch ID filtering (regex filtering) with ``--dispatch``
-   * ROCm Compute Profiler panels/blocks (multi-selection) with ``--block``
+* Workload Name with ``--path``
+* GPU ID filtering (multi-selection) with ``--gpu-id``
+* Kernel Name filtering (multi-selection) with ``--kernel``
+* Dispatch ID filtering (regex filtering) with ``--dispatch``
+* ROCm Compute Profiler panels/blocks (multi-selection) with ``--block``
 
-   .. code-block:: shell
+.. code-block:: shell
 
-      rocprof-compute analyze -p [path1] [path2] … [pathN]
+   rocprof-compute analyze -p [path1] [path2] … [pathN]
 
-   .. code-block:: shell
+.. code-block:: shell
 
-      rocprof-compute analyze -p [path1] [options for path1] ... -p [pathN] [options for pathN]
+   rocprof-compute analyze -p [path1] [options for path1] ... -p [pathN] [options for pathN]
 
-   Examples:
+Examples:
 
-   .. code-block:: shell
+.. code-block:: shell
 
-      rocprof-compute analyze -p workloads/workload_1/gpu_arch/ -k 0 -b 2 -p workloads/workload_2/gpu_arch/ -k 1 -b 2
+   rocprof-compute analyze -p workloads/workload_1/gpu_arch/ -k 0 -b 2 -p workloads/workload_2/gpu_arch/ -k 1 -b 2
 
-   .. code-block:: shell
+.. code-block:: shell
 
-      rocprof-compute analyze -p workloads/workload_1/gpu_arch/ workloads/workload_2/gpu_arch/ ... workloads/workload_7/gpu_arch/ -b 12
+   rocprof-compute analyze -p workloads/workload_1/gpu_arch/ workloads/workload_2/gpu_arch/ ... workloads/workload_7/gpu_arch/ -b 12
 
-   .. image:: ../../data/analyze/cli/baseline_comparison.png
-      :align: center
-      :alt: Baseline Comparison example of LDS block among 7 runs
-      :width: 800
+.. image:: ../../data/analyze/cli/baseline_comparison.png
+   :align: center
+   :alt: Baseline Comparison example of LDS block among 7 runs
+   :width: 800
 
 
 Analysis output format
@@ -565,37 +577,37 @@ Analysis database example
    $ rocprof-compute analyze --verbose --output-name test --output-format db -p workloads/nbody/MI300X_A1 -p workloads/nbody1/MI300X_A1
    DEBUG Execution mode = analyze
 
-                                 __                                       _
- _ __ ___   ___ _ __  _ __ ___  / _|       ___ ___  _ __ ___  _ __  _   _| |_ ___
-| '__/ _ \ / __| '_ \| '__/ _ \| |_ _____ / __/ _ \| '_ ` _ \| '_ \| | | | __/ _ \
-| | | (_) | (__| |_) | | | (_) |  _|_____| (_| (_) | | | | | | |_) | |_| | ||  __/
-|_|  \___/ \___| .__/|_|  \___/|_|        \___\___/|_| |_| |_| .__/ \__,_|\__\___|
-               |_|                                           |_|
+                                    __                                       _
+   _ __ ___   ___ _ __  _ __ ___  / _|       ___ ___  _ __ ___  _ __  _   _| |_ ___
+   | '__/ _ \ / __| '_ \| '__/ _ \| |_ _____ / __/ _ \| '_ ` _ \| '_ \| | | | __/ _ \
+   | | | (_) | (__| |_) | | | (_) |  _|_____| (_| (_) | | | | | | |_) | |_| | ||  __/
+   |_|  \___/ \___| .__/|_|  \___/|_|        \___\___/|_| |_| |_| .__/ \__,_|\__\___|
+                  |_|                                           |_|
 
-   INFO Analysis mode = db
-   INFO ed45b0b189
-  DEBUG [omnisoc init]
-   INFO ed45b0b189
-  DEBUG [omnisoc init]
-  DEBUG [analysis] prepping to do some analysis
-   INFO [analysis] deriving rocprofiler-compute metrics...
-  DEBUG Collected roofline ceilings
-WARNING PC sampling data not found for /app/projects/rocprofiler-compute/workloads/nbody/MI300X_A1.
-WARNING PC sampling data not found for /app/projects/rocprofiler-compute/workloads/nbody1/MI300X_A1.
-  DEBUG Collected dispatch data
-  DEBUG Applied analysis mode filters
-  DEBUG Calculated dispatch data
-  DEBUG Collected metrics data
-WARNING Failed to evaluate expression for 3.1.39 - Value: to_round((to_avg(
-   (pmc_df.get("pmc_perf_ACCUM") / pmc_df.get("SQC_ICACHE_REQ")).where((pmc_df.get("SQC_ICACHE_REQ") != 0), None)) * 100), 0) - unsupported operand type(s) for /: 'NoneType' and 'float'
-WARNING Failed to evaluate expression for 3.1.39 - Value: to_round((to_avg(
-   (pmc_df.get("pmc_perf_ACCUM") / pmc_df.get("SQC_ICACHE_REQ")).where((pmc_df.get("SQC_ICACHE_REQ") != 0), None)) * 100), 0) - unsupported operand type(s) for /: 'NoneType' and 'float'
-  DEBUG Calculated metric values
-  DEBUG Calculated roofline data points
-  DEBUG [analysis] generating analysis
-  DEBUG SQLite database initialized with name: test.db
-  DEBUG Initialized database: test.db
-   INFO ed45b0b189
-   INFO ed45b0b189
-  DEBUG Completed writing database
-WARNING Created file: test.db
+      INFO Analysis mode = db
+      INFO ed45b0b189
+   DEBUG [omnisoc init]
+      INFO ed45b0b189
+   DEBUG [omnisoc init]
+   DEBUG [analysis] prepping to do some analysis
+      INFO [analysis] deriving rocprofiler-compute metrics...
+   DEBUG Collected roofline ceilings
+   WARNING PC sampling data not found for /app/projects/rocprofiler-compute/workloads/nbody/MI300X_A1.
+   WARNING PC sampling data not found for /app/projects/rocprofiler-compute/workloads/nbody1/MI300X_A1.
+   DEBUG Collected dispatch data
+   DEBUG Applied analysis mode filters
+   DEBUG Calculated dispatch data
+   DEBUG Collected metrics data
+   WARNING Failed to evaluate expression for 3.1.39 - Value: to_round((to_avg(
+      (pmc_df.get("pmc_perf_ACCUM") / pmc_df.get("SQC_ICACHE_REQ")).where((pmc_df.get("SQC_ICACHE_REQ") != 0), None)) * 100), 0) - unsupported operand type(s) for /: 'NoneType' and 'float'
+   WARNING Failed to evaluate expression for 3.1.39 - Value: to_round((to_avg(
+      (pmc_df.get("pmc_perf_ACCUM") / pmc_df.get("SQC_ICACHE_REQ")).where((pmc_df.get("SQC_ICACHE_REQ") != 0), None)) * 100), 0) - unsupported operand type(s) for /: 'NoneType' and 'float'
+   DEBUG Calculated metric values
+   DEBUG Calculated roofline data points
+   DEBUG [analysis] generating analysis
+   DEBUG SQLite database initialized with name: test.db
+   DEBUG Initialized database: test.db
+      INFO ed45b0b189
+      INFO ed45b0b189
+   DEBUG Completed writing database
+   WARNING Created file: test.db
