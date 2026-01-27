@@ -152,12 +152,22 @@ __global__ void block_tile_shfl_up(T* const out, const unsigned int delta) {
 
 template <typename T, size_t tile_size> void BlockTileShflUpTestImpl() {
   DYNAMIC_SECTION("Tile size: " << tile_size) {
+    const auto inv_reduction_factor = 1.0 / GetTestReductionFactor();
+
     auto blocks = GenerateBlockDimensionsForShuffle();
     auto threads = GenerateThreadDimensionsForShuffle();
     INFO("Grid dimensions: x " << blocks.x << ", y " << blocks.y << ", z " << blocks.z);
     INFO("Block dimensions: x " << threads.x << ", y " << threads.y << ", z " << threads.z);
-    auto delta = GENERATE(range(static_cast<size_t>(0), tile_size));
+
+    std::vector<size_t> deltas;
+    for (double i = 0; i < tile_size - 1; i += inv_reduction_factor) {
+      deltas.emplace_back(static_cast<size_t>(std::floor(i)));
+    }
+    deltas.emplace_back(tile_size - 1);
+
+    const auto delta = GENERATE_COPY(from_range(deltas.begin(), deltas.end()));
     INFO("Delta: " << delta);
+
     CPUGrid grid(blocks, threads);
 
     const auto alloc_size = grid.thread_count_ * sizeof(T);
@@ -209,12 +219,22 @@ __global__ void block_tile_shfl_down(T* const out, const unsigned int delta) {
 
 template <typename T, size_t tile_size> void BlockTileShflDownTestImpl() {
   DYNAMIC_SECTION("Tile size: " << tile_size) {
+    const auto inv_reduction_factor = 1.0 / GetTestReductionFactor();
+
     auto blocks = GenerateBlockDimensionsForShuffle();
     auto threads = GenerateThreadDimensionsForShuffle();
     INFO("Grid dimensions: x " << blocks.x << ", y " << blocks.y << ", z " << blocks.z);
     INFO("Block dimensions: x " << threads.x << ", y " << threads.y << ", z " << threads.z);
-    auto delta = GENERATE(range(static_cast<size_t>(0), tile_size));
+
+    std::vector<size_t> deltas;
+    for (double i = 0; i < tile_size - 1; i += inv_reduction_factor) {
+      deltas.emplace_back(static_cast<size_t>(std::floor(i)));
+    }
+    deltas.emplace_back(tile_size - 1);
+
+    const auto delta = GENERATE_COPY(from_range(deltas.begin(), deltas.end()));
     INFO("Delta: " << delta);
+
     CPUGrid grid(blocks, threads);
 
     const auto alloc_size = grid.thread_count_ * sizeof(T);
@@ -277,13 +297,23 @@ __global__ void block_tile_shfl_xor(T* const out, const unsigned mask) {
 }
 
 template <typename T, size_t tile_size> void BlockTileShflXORTestImpl() {
-  DYNAMIC_SECTION("Tile size: " << tile_size) {
+  DYNAMIC_SECTION("Tile size: " << tile_size) {    
+    const auto inv_reduction_factor = 1.0 / GetTestReductionFactor();
+
     auto blocks = GenerateBlockDimensionsForShuffle();
     auto threads = GenerateThreadDimensionsForShuffle();
     INFO("Grid dimensions: x " << blocks.x << ", y " << blocks.y << ", z " << blocks.z);
     INFO("Block dimensions: x " << threads.x << ", y " << threads.y << ", z " << threads.z);
-    const auto mask = GENERATE(range(static_cast<size_t>(0), tile_size));
+
+    std::vector<size_t> masks;
+    for (double i = 0; i < tile_size - 1; i += inv_reduction_factor) {
+        masks.emplace_back(static_cast<size_t>(std::floor(i)));
+    }
+    masks.emplace_back(tile_size - 1);
+
+    const auto mask = GENERATE_COPY(from_range(masks.begin(), masks.end()));
     INFO("Mask: 0x" << std::hex << mask);
+
     CPUGrid grid(blocks, threads);
 
     const auto alloc_size = grid.thread_count_ * sizeof(T);

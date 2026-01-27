@@ -32,7 +32,7 @@ namespace hip {
 Stream::Stream(hip::Device* dev, Priority p, unsigned int f, bool null_stream,
                const std::vector<uint32_t>& cuMask, hipStreamCaptureStatus captureStatus)
     : amd::HostQueue(*dev->asContext(), *dev->devices()[0], 0, amd::CommandQueue::RealTimeDisabled,
-                     convertToQueuePriority(p), cuMask),
+                     convertToQueuePriority(p), cuMask, null_stream),
       lock_("Stream Callback lock"),
       device_(dev),
       priority_(p),
@@ -585,6 +585,12 @@ hipError_t hipStreamQuery_common(hipStream_t stream) {
   }
   hipError_t status = ready ? hipSuccess : hipErrorNotReady;
   command->release();
+
+  // Stream is complete - opportunistically release its HW queue if idle
+  if (ready) {
+    hip_stream->vdev()->ReleaseHwQueue();
+  }
+
   return status;
 }
 
