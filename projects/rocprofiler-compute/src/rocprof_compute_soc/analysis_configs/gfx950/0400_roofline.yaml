@@ -68,8 +68,8 @@ Panel Config:
           unit: GIOP/s
           peak: $MFMAI8Ops_empirical_peak
         HBM Bandwidth:
-          value: AVG((( (TCC_BUBBLE_sum * 128) + (TCC_EA0_RDREQ_32B_sum * 32) + ((TCC_EA0_RDREQ_sum
-            - TCC_BUBBLE_sum - TCC_EA0_RDREQ_32B_sum) * 64) + ((TCC_EA0_WRREQ_sum
+          value: AVG(((TCC_EA0_RDREQ_128B_sum * 128 + TCC_EA0_RDREQ_32B_sum * 32
+            + TCC_EA0_RDREQ_64B_sum * 64 + ((TCC_EA0_WRREQ_sum
             - TCC_EA0_WRREQ_64B_sum) * 32) + (TCC_EA0_WRREQ_64B_sum * 64)) / ((End_Timestamp
             - Start_Timestamp) / 1e9)) / 1e9)
           unit: GB/s
@@ -108,9 +108,9 @@ Panel Config:
             + SQ_INSTS_VALU_TRANS_F64) )) + (SQ_INSTS_VALU_MFMA_MOPS_F16 * 512) +
             (SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512) + (SQ_INSTS_VALU_MFMA_MOPS_F32 *
             512) + (SQ_INSTS_VALU_MFMA_MOPS_F64 * 512) + (SQ_INSTS_VALU_MFMA_MOPS_F8
-            * 512) + (SQ_INSTS_VALU_MFMA_MOPS_F6F4 * 512) ) / SUM( (TCC_BUBBLE_sum
-            * 128) + (TCC_EA0_RDREQ_32B_sum * 32) + ((TCC_EA0_RDREQ_sum - TCC_BUBBLE_sum
-            - TCC_EA0_RDREQ_32B_sum) * 64) + ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum)
+            * 512) + (SQ_INSTS_VALU_MFMA_MOPS_F6F4 * 512) ) / SUM( (TCC_EA0_RDREQ_128B_sum
+            * 128) + (TCC_EA0_RDREQ_32B_sum * 32) + (TCC_EA0_RDREQ_64B_sum
+            * 64) + ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum)
             * 32) + (TCC_EA0_WRREQ_64B_sum * 64) ) )
           unit: FLOPs/Byte
         AI L2:

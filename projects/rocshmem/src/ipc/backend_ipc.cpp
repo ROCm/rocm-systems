@@ -112,6 +112,13 @@ IPCBackend::IPCBackend(TcpBootstrap *bootstrap):  Backend(bootstrap) {
 void IPCBackend::init() {
   ROCSHMEM_HOST_CTX_DEFAULT.ctx_opaque = default_host_ctx.get();
 
+  const char *arch_name = get_arch_name(hip_dev_id);
+  if (strncmp(arch_name, "gfx1201", strlen("gfx1201")) == 0) {
+    fine_grained_allocator_ = new HIPAllocatorFinegrained();
+  } else {
+    fine_grained_allocator_ = new HIPDefaultFinegrainedAllocator();
+  }
+
   setup_team_world();
 
   setup_wrk_sync_buffers();
@@ -141,6 +148,14 @@ IPCBackend::~IPCBackend() {
   CHECK_HIP(hipFree(team_world));
 
   CHECK_HIP(hipFree(ctx_array));
+  if (fine_grained_allocator_) {
+    const char *arch_name = get_arch_name(hip_dev_id);
+    if (strncmp(arch_name, "gfx1201", strlen("gfx1201")) == 0) {
+      delete static_cast<HIPAllocatorFinegrained *>(fine_grained_allocator_);
+    } else {
+      delete static_cast<HIPDefaultFinegrainedAllocator *>(fine_grained_allocator_);
+    }
+  }
 }
 
 void IPCBackend::setup_ctxs() {
@@ -368,8 +383,8 @@ void IPCBackend::setup_wrk_sync_buffers() {
    * Allocate a buffer of size wrk_sync_pool_size_, using fine-grained
    * memory allocator
   */
-  fine_grained_allocator_.allocate((void**)&wrk_sync_pool_,
-                                   wrk_sync_pool_size_);
+  fine_grained_allocator_->allocate((void**)&wrk_sync_pool_,
+                                    wrk_sync_pool_size_);
   assert(wrk_sync_pool_);
   wrk_sync_pool_top_ = wrk_sync_pool_;
 
@@ -400,7 +415,7 @@ void IPCBackend::setup_wrk_sync_buffers() {
    * Allocate device-side fine grained memory to hold IPC addresses of
    * work/sync buffers
    */
-  fine_grained_allocator_.allocate(
+  fine_grained_allocator_->allocate(
     reinterpret_cast<void**>(&wrk_sync_pool_bases_),
     num_pes * sizeof(char*));
   assert(wrk_sync_pool_bases_);
@@ -427,8 +442,8 @@ void IPCBackend::cleanup_wrk_sync_buffer() {
       CHECK_HIP(hipIpcCloseMemHandle(wrk_sync_pool_bases_[i]));
     }
   }
-  fine_grained_allocator_.deallocate(wrk_sync_pool_bases_);
-  fine_grained_allocator_.deallocate(wrk_sync_pool_);
+  fine_grained_allocator_->deallocate(wrk_sync_pool_bases_);
+  fine_grained_allocator_->deallocate(wrk_sync_pool_);
 }
 
 void IPCBackend::setup_fence_buffer() {

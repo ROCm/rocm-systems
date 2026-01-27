@@ -23,14 +23,13 @@
 find_path(MSCCLPP_INCLUDE_DIRS
     NAMES mscclpp/gpu.hpp
     HINTS
-    ${MSCCLPP_ROOT}/include)
+    ${MSCCLPP_INSTALL_DIR}/include)
 
-find_library(MSCCLPP_LIBRARIES
-    NAMES mscclpp_nccl
+find_library(MSCCLPP_NCCL_STATIC_LIB
+    NAMES mscclpp_nccl_static
     HINTS
-    ${MSCCLPP_ROOT}/lib)
+    ${MSCCLPP_INSTALL_DIR}/lib)
 
 include (FindPackageHandleStandardArgs)
-find_package_handle_standard_args(mscclpp_nccl DEFAULT_MSG MSCCLPP_INCLUDE_DIRS MSCCLPP_LIBRARIES)
-mark_as_advanced(MSCCLPP_INCLUDE_DIRS MSCCLPP_LIBRARIES)
-    
+find_package_handle_standard_args(mscclpp_nccl_static DEFAULT_MSG MSCCLPP_INCLUDE_DIRS MSCCLPP_NCCL_STATIC_LIB)
+mark_as_advanced(MSCCLPP_INCLUDE_DIRS MSCCLPP_NCCL_STATIC_LIB)
