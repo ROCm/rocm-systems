@@ -55,8 +55,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 ### Added
 
 * Add support for PC sampling of multi-kernel applications.
-  * PC Sampling output instructions are displayed with the name of the kernel that individual instruction belongs to.
-  * Single kernel selection is supported so that the PC samples of selected kernel can be displayed.
+  * PC Sampling output instructions are displayed with the name of the kernel that the individual instruction belongs to.
+  * Single kernel selection is supported so that the PC samples of the selected kernel can be displayed.
 
 
 ### Changed
