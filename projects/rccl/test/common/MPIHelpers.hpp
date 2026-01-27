@@ -180,6 +180,139 @@ std::optional<RankLogConfig> setupRankLogging(int rank);
  */
 void restoreRankLogging(RankLogConfig& config);
 
+// ============================================================================
+// Stderr Capture for Debug Log Parsing
+// ============================================================================
+
+/**
+ * @class StderrCapture
+ * @brief Captures stderr output to a string for analysis
+ *
+ * Useful for capturing NCCL debug output (e.g., NCCL_DEBUG=INFO)
+ * and parsing it for specific patterns.
+ *
+ * Usage:
+ *   StderrCapture capture;
+ *   capture.start();
+ *   // ... code that writes to stderr ...
+ *   capture.stop();
+ *   std::string output = capture.getOutput();
+ *   if (output.find("some pattern") != std::string::npos) { ... }
+ */
+class StderrCapture
+{
+public:
+    StderrCapture();
+    ~StderrCapture();
+
+    // Non-copyable, non-movable
+    StderrCapture(const StderrCapture&)            = delete;
+    StderrCapture& operator=(const StderrCapture&) = delete;
+    StderrCapture(StderrCapture&&)                 = delete;
+    StderrCapture& operator=(StderrCapture&&)      = delete;
+
+    /**
+     * @brief Start capturing stderr
+     * @return true if capture started successfully
+     */
+    bool start();
+
+    /**
+     * @brief Stop capturing and read captured output
+     */
+    void stop();
+
+    /**
+     * @brief Get the captured stderr output
+     * @return Captured output as string (empty if capture not started/stopped)
+     */
+    [[nodiscard]] const std::string& getOutput() const;
+
+    /**
+     * @brief Check if a pattern exists in captured output
+     * @param pattern Substring to search for
+     * @return true if pattern found
+     */
+    [[nodiscard]] bool hasPattern(const std::string& pattern) const;
+
+    /**
+     * @brief Reset capture state for reuse
+     */
+    void reset();
+
+    /**
+     * @brief Check if currently capturing
+     */
+    [[nodiscard]] bool isCapturing() const;
+
+private:
+    int         m_savedStderr;
+    int         m_tempFd;
+    std::string m_tempPath;
+    std::string m_capturedOutput;
+    bool        m_capturing;
+};
+
+/**
+ * @class StderrCaptureScope
+ * @brief RAII wrapper for StderrCapture - automatically starts/stops capture
+ *
+ * Usage:
+ *   StderrCapture capture;
+ *   {
+ *       StderrCaptureScope scope(capture);
+ *       // ... code that writes to stderr ...
+ *   }  // capture stops here
+ *   if (capture.hasPattern("some pattern")) { ... }
+ */
+class StderrCaptureScope
+{
+public:
+    explicit StderrCaptureScope(StderrCapture& capture);
+    ~StderrCaptureScope();
+
+    // Non-copyable
+    StderrCaptureScope(const StderrCaptureScope&)            = delete;
+    StderrCaptureScope& operator=(const StderrCaptureScope&) = delete;
+
+private:
+    StderrCapture& m_capture;
+};
+
+// ============================================================================
+// NCCL Debug Environment Helpers
+// ============================================================================
+
+/**
+ * @brief Check if NCCL debug logging is enabled for a specific subsystem
+ *
+ * Checks NCCL_DEBUG and NCCL_DEBUG_SUBSYS environment variables.
+ *
+ * @param subsystem Subsystem to check (e.g., "REG", "NET", "INIT", "COLL")
+ *                  Pass empty string to check if any debug is enabled
+ * @param minLevel Minimum debug level required (default: "INFO")
+ *                 Levels: "WARN", "INFO", "TRACE"
+ * @return true if debug logging is enabled for the specified subsystem
+ *
+ * Examples:
+ *   isNCCLDebugEnabled("REG")      // true if NCCL_DEBUG=INFO and NCCL_DEBUG_SUBSYS contains "REG"
+ *   isNCCLDebugEnabled("NET")      // true if NCCL_DEBUG=INFO and NCCL_DEBUG_SUBSYS contains "NET"
+ *   isNCCLDebugEnabled("")         // true if any NCCL_DEBUG level is set
+ */
+bool isNCCLDebugEnabled(const std::string& subsystem = "", const std::string& minLevel = "INFO");
+
+/**
+ * @brief Get the current NCCL debug level
+ * @return Debug level string ("WARN", "INFO", "TRACE") or empty if not set
+ */
+std::string getNCCLDebugLevel();
+
+/**
+ * @brief Get list of enabled NCCL debug subsystems
+ * @return Comma-separated list of subsystems or "ALL" or empty
+ */
+std::string getNCCLDebugSubsystems();
+
 } // namespace MPIHelpers
 
 #endif // MPI_TESTS_ENABLED

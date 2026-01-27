@@ -4,11 +4,27 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-#pragma once
+#ifndef DEVICE_BUFFER_HELPERS_HPP
+#define DEVICE_BUFFER_HELPERS_HPP
 
 #include "nccl.h"
 #include <cmath>
 #include <hip/hip_runtime.h>
+
+// hip_bfloat16 type handling based on ROCm version
+// Note: Do NOT define _HIP_INCLUDE_HIP_AMD_DETAIL_HIP_BFLOAT16_H_ or _HIP_BFLOAT16_H_ guards here
+// as device.h checks for them and errors if they're already set.
+// Duplicate typedef to the same type is allowed in C++.
+#if ROCM_VERSION >= 60000
+  #include <hip/hip_bf16.h>
+  #ifndef DEVICE_BUFFER_HELPERS_BF16_TYPEDEF
+  #define DEVICE_BUFFER_HELPERS_BF16_TYPEDEF
+  typedef __hip_bfloat16 hip_bfloat16;
+  #endif
+#else
+  #include <hip/hip_bfloat16.h>
+#endif
+
 #include <type_traits>
 #include <vector>
 
@@ -66,6 +82,7 @@ DEFINE_NCCL_TYPE_TRAIT(int32_t,  ncclInt32);
 DEFINE_NCCL_TYPE_TRAIT(uint32_t, ncclUint32);
 DEFINE_NCCL_TYPE_TRAIT(int64_t,  ncclInt64);
 DEFINE_NCCL_TYPE_TRAIT(uint64_t, ncclUint64);
+DEFINE_NCCL_TYPE_TRAIT(hip_bfloat16, ncclBfloat16);
 
 // Undefine macro to avoid polluting namespace
 #undef DEFINE_NCCL_TYPE_TRAIT
@@ -378,4 +395,5 @@ std::pair<hipError_t, std::vector<T>> downloadBuffer(const void* device_buffer, 
 
 } // namespace RCCLTestHelpers
 
+#endif // DEVICE_BUFFER_HELPERS_HPP
 
