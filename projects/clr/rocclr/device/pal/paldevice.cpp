@@ -2490,6 +2490,10 @@ bool Device::virtualFree(void* addr) {
   return true;
 }
 
+static inline address NextSubBufferPtr(const amd::Memory* mem) {
+  return reinterpret_cast<address>(mem->getSvmPtr()) + mem->getSize();
+}
+
 // ================================================================================================
 bool Device::SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags,
                           VmmLocationType access_location) {
@@ -2505,15 +2509,12 @@ bool Device::SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags,
     LogPrintfError("Virtual address present, but not mapped yet: 0x%x \n", va_addr);
   }
 
-  // Check for valid size.
-  if (va_size > amd_mem_obj->getSize()) {
-    LogPrintfError("Given size: %u cannot be greater than mem_size: %u \n", va_size,
-                   amd_mem_obj->getSize());
-    return false;
+  address range_end_address = reinterpret_cast<address>(amd_mem_obj->getSvmPtr()) + va_size;
+  while (amd_mem_obj && NextSubBufferPtr(amd_mem_obj) <= range_end_address) {
+    device::Memory* dev_mem_obj = amd_mem_obj->getDeviceMemory(*this);
+    dev_mem_obj->SetAccess(static_cast<device::Memory::MemAccess>(access_flags));
+    amd_mem_obj = amd::MemObjMap::FindMemObj(NextSubBufferPtr(amd_mem_obj));
   }
-
-  device::Memory* dev_mem_obj = amd_mem_obj->getDeviceMemory(*this);
-  dev_mem_obj->SetAccess(static_cast<device::Memory::MemAccess>(access_flags));
 
   return true;
 }

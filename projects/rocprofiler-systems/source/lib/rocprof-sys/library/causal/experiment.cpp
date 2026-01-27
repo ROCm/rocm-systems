@@ -141,7 +141,7 @@ experiment::sample::serialize(ArchiveT& ar, const unsigned)
 std::string
 experiment::sample::get_identifier() const
 {
-    return (lineno > 0 && !location.empty()) ? join(":", location, lineno)
+    return (lineno > 0 && !location.empty()) ? fmt::format("{}:{}", location, lineno)
                                              : rocprofsys::utility::demangle(name);
 }
 
@@ -606,9 +606,10 @@ experiment::save_experiments(std::string _fname_base, const filename_config_t& _
             auto& _selection = itr.selection;
             auto& _line_info = _selection.symbol;
 
-            std::string _name = (_selection.symbol_address > 0)
-                                    ? _line_info.func
-                                    : join(":", _line_info.file, _line_info.line);
+            std::string _name =
+                (_selection.symbol_address > 0)
+                    ? _line_info.func
+                    : fmt::format("{}:{}", _line_info.file, _line_info.line);
 
             if(_name.empty())
             {
