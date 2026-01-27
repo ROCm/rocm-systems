@@ -1739,7 +1739,7 @@ VirtualGPU::VirtualGPU(Device& device, bool profiling, bool cooperative,
       fence_dirty_(false),
       dedicated_queue_(dedicated_queue)
 #if defined(_WIN32)
-     ,deviceQueueMonitor_(nullptr)
+     ,monitorThreadRunning_(false)
 #endif
      {
   index_ = device.numOfVgpus_++;
@@ -1828,10 +1828,15 @@ VirtualGPU::~VirtualGPU() {
   if (nullptr != schedulerQueue_) {
 #if defined(_WIN32)
     // Stop the monitor thread before destroying the queue
-    if (deviceQueueMonitor_ != nullptr) {
-      deviceQueueMonitor_->Terminate();
-      delete deviceQueueMonitor_;
-      deviceQueueMonitor_ = nullptr;
+    if (monitorThreadRunning_.load(std::memory_order_relaxed)) {
+      monitorThreadRunning_.store(false, std::memory_order_relaxed);
+      {
+        std::lock_guard<std::mutex> lock(monitor_mutex_);
+        monitor_cv_.notify_one();
+      }
+      if (deviceQueueMonitorThread_.joinable()) {
+        deviceQueueMonitorThread_.join();
+      }
     }
     Hsa::queue_destroy(schedulerQueue_);
 #endif  // _WIN32
@@ -3461,16 +3466,7 @@ bool VirtualGPU::createSchedulerParam() {
     }
 
 #if defined(_WIN32)
-    // Create and start the device queue monitor thread
-    deviceQueueMonitor_ = new DeviceQueueMonitor();
-    if (!deviceQueueMonitor_->Start(schedulerQueue_)) {
-      LogError("Failed to start monitor thread");
-      Hsa::queue_destroy(schedulerQueue_);
-      schedulerQueue_ = nullptr;
-      delete deviceQueueMonitor_;
-      deviceQueueMonitor_ = nullptr;
-      return false;
-    }
+    StartDeviceQueueMonitorThread(schedulerQueue_);
 #endif  // _WIN32
     return true;
   }
@@ -3482,6 +3478,53 @@ bool VirtualGPU::createSchedulerParam() {
 
   return false;
 }
+
+// ================================================================================================
+#if defined(_WIN32)
+void VirtualGPU::StartDeviceQueueMonitorThread(hsa_queue_t* queue) {
+  if (queue == nullptr) {
+    return;
+  }
+  if (monitorThreadRunning_.load(std::memory_order_relaxed)) {
+    return;
+  }
+  monitorThreadRunning_.store(true, std::memory_order_relaxed);
+
+  deviceQueueMonitorThread_ = std::thread([this]() {
+    ClPrint(amd::LOG_DEBUG, amd::LOG_QUEUE,
+            "Thread started to monitor scheduler queue: %p", schedulerQueue_);
+
+    while (monitorThreadRunning_.load(std::memory_order_relaxed)) {
+      // Wait for the monitor thread to wake up
+      {
+        std::unique_lock<std::mutex> lock(monitor_mutex_);
+        monitor_cv_.wait(lock);
+      }
+
+      if (!monitorThreadRunning_.load(std::memory_order_relaxed)) {
+        break;
+      }
+
+      if (schedulerQueue_ != nullptr) {
+        uint64_t read_index = Hsa::queue_load_read_index_scacquire(schedulerQueue_);
+        uint64_t write_index = Hsa::queue_load_write_index_relaxed(schedulerQueue_);
+
+        // Process if there are pending packets in the scheduler queue
+        if (read_index != write_index) {
+          ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL,
+                  "Pending packets detected in scheduler queue, "
+                  "ring the doorbell - read=%lu, write=%lu", read_index, write_index);
+          // Ring the doorbell
+          Hsa::signal_store_screlease(schedulerQueue_->doorbell_signal, write_index - 1);
+        }
+      }
+    }
+
+    ClPrint(amd::LOG_DEBUG, amd::LOG_QUEUE,
+            "Monitor thread terminated for queue: %p", schedulerQueue_);
+  });
+}
+#endif  // _WIN32
 
 // ================================================================================================
 uint64_t VirtualGPU::getVQVirtualAddress() {
