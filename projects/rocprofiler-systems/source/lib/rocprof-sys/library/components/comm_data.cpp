@@ -49,9 +49,8 @@ write_perfetto_counter_track(uint64_t _val)
         auto _emplace = [](const size_t _idx) {
             if(!counter_track::exists(_idx))
             {
-                std::string _label = (_idx > 0)
-                                         ? JOIN(" ", Tp::label, JOIN("", '[', _idx, ']'))
-                                         : Tp::label;
+                std::string _label =
+                    (_idx > 0) ? fmt::format(" {} [{}]", Tp::label, _idx) : Tp::label;
                 counter_track::emplace(_idx, _label, "bytes");
             }
         };
@@ -239,10 +238,9 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, int cou
         auto      _name = std::string_view{ _data.tool_id };
         tracker_t _a{ _name };
         add(_a, count * _size);
-        tracker_t _b{ JOIN('/', _name, JOIN('=', "dst", dst)) };
+        tracker_t _b{ fmt::format("{}/dst={}", _name, dst) };
         add(_b, count * _size);
-        add(JOIN('/', _name, JOIN('=', "dst", dst), JOIN('=', "tag", tag)),
-            count * _size);
+        add(fmt::format("{}/dst={}/tag={}", _name, dst, tag), count * _size);
     }
 }
 
@@ -265,10 +263,9 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, int count,
         auto      _name = std::string_view{ _data.tool_id };
         tracker_t _a{ _name };
         add(_a, count * _size);
-        tracker_t _b{ JOIN('/', _name, JOIN('=', "dst", dst)) };
+        tracker_t _b{ fmt::format("{}/dst={}", _name, dst) };
         add(_b, count * _size);
-        add(JOIN('/', _name, JOIN('=', "dst", dst), JOIN('=', "tag", tag)),
-            count * _size);
+        add(fmt::format("{}/dst={}/tag={}", _name, dst, tag), count * _size);
     }
 }
 
@@ -291,10 +288,9 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, int cou
         auto      _name = std::string_view{ _data.tool_id };
         tracker_t _a{ _name };
         add(_a, count * _size);
-        tracker_t _b{ JOIN('/', _name, JOIN('=', "dst", dst)) };
+        tracker_t _b{ fmt::format("{}/dst={}", _name, dst) };
         add(_b, count * _size);
-        add(JOIN('/', _name, JOIN('=', "dst", dst), JOIN('=', "tag", tag)),
-            count * _size);
+        add(fmt::format("{}/dst={}/tag={}", _name, dst, tag), count * _size);
     }
 }
 
@@ -317,10 +313,9 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, int count,
         auto      _name = std::string_view{ _data.tool_id };
         tracker_t _a{ _name };
         add(_a, count * _size);
-        tracker_t _b{ JOIN('/', _name, JOIN('=', "dst", dst)) };
+        tracker_t _b{ fmt::format("{}/dst={}", _name, dst) };
         add(_b, count * _size);
-        add(JOIN('/', _name, JOIN('=', "dst", dst), JOIN('=', "tag", tag)),
-            count * _size);
+        add(fmt::format("{}/dst={}/tag={}", _name, dst, tag), count * _size);
     }
 }
 
@@ -343,7 +338,7 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, int count,
         auto      _name = std::string_view{ _data.tool_id };
         tracker_t _t{ _name };
         add(_t, count * _size);
-        add(JOIN('/', _name, JOIN('=', "root", root)), count * _size);
+        add(fmt::format("{}/root={}", _name, root), count * _size);
     }
 }
 
@@ -396,23 +391,21 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, int sen
         tracker_t _t{ _name };
         add(_t, sendcount * _send_size + recvcount * _recv_size);
         {
-            tracker_t _b{ JOIN('/', _name, "send") };
+            tracker_t _b{ fmt::format("{}/send", _name) };
             add(_b, sendcount * _send_size);
-            tracker_t _c{ JOIN('/', _name, JOIN('=', "send", dst)) };
+            tracker_t _c{ fmt::format("{}/send={}", _name, dst) };
             add(_b, sendcount * _send_size);
-            add(JOIN('/', _name, "send", JOIN('=', "tag", sendtag)),
-                sendcount * _send_size);
-            add(JOIN('/', _name, JOIN('=', "send", dst), JOIN('=', "tag", sendtag)),
+            add(fmt::format("{}/send={}/tag={}", _name, sendtag), sendcount * _send_size);
+            add(fmt::format("{}/send={}/tag={}", _name, dst, sendtag),
                 sendcount * _send_size);
         }
         {
-            tracker_t _b{ JOIN('/', _name, "recv") };
+            tracker_t _b{ fmt::format("{}/recv", _name) };
             add(_b, recvcount * _recv_size);
-            tracker_t _c{ JOIN('/', _name, JOIN('=', "recv", src)) };
+            tracker_t _c{ fmt::format("{}/recv={}", _name, src) };
             add(_b, recvcount * _recv_size);
-            add(JOIN('/', _name, "recv", JOIN('=', "tag", recvtag)),
-                recvcount * _recv_size);
-            add(JOIN('/', _name, JOIN('=', "recv", src), JOIN('=', "tag", recvtag)),
+            add(fmt::format("{}/recv={}/tag={}", _name, recvtag), recvcount * _recv_size);
+            add(fmt::format("{}/recv={}/tag={}", _name, src, recvtag),
                 recvcount * _recv_size);
         }
     }
@@ -445,10 +438,10 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, int sen
         auto      _name = std::string_view{ _data.tool_id };
         tracker_t _t{ _name };
         add(_t, sendcount * _send_size + recvcount * _recv_size);
-        tracker_t _r(JOIN('/', _name, JOIN('=', "root", root)));
+        tracker_t _r(fmt::format("{}/root={}", _name, root));
         add(_r, sendcount * _send_size + recvcount * _recv_size);
-        add(JOIN('/', _name, JOIN('=', "root", root), "send"), sendcount * _send_size);
-        add(JOIN('/', _name, JOIN('=', "root", root), "recv"), recvcount * _recv_size);
+        add(fmt::format("{}/root={}/send", _name, root), sendcount * _send_size);
+        add(fmt::format("{}/root={}/recv", _name, root), recvcount * _recv_size);
     }
 }
 
@@ -478,8 +471,8 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, int sen
         auto      _name = std::string_view{ _data.tool_id };
         tracker_t _t{ _name };
         add(_t, sendcount * _send_size + recvcount * _recv_size);
-        add(JOIN('/', _name, "send"), sendcount * _send_size);
-        add(JOIN('/', _name, "recv"), recvcount * _recv_size);
+        add(fmt::format("{}/send", _name), sendcount * _send_size);
+        add(fmt::format("{}/recv", _name), recvcount * _recv_size);
     }
 }
 #endif
@@ -505,7 +498,7 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, const void*,
         auto      _name = std::string_view{ _data.tool_id };
         tracker_t _t{ _name };
         add(_t, count);
-        add(JOIN('/', _name, JOIN('=', "tag", tag)), count);
+        add(fmt::format("{}/tag={}", _name, tag), count);
     }
 }
 
@@ -528,9 +521,8 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, void*, size_t
         auto      _name = std::string_view{ _data.tool_id };
         tracker_t _t{ _name };
         add(_t, count);
-        add(JOIN('/', _name, JOIN('=', "tag", tag)), count);
-        add(JOIN('/', _name, JOIN('=', "tag", tag), JOIN('=', "tag_mask", tag_mask)),
-            count);
+        add(fmt::format("{}/tag={}", _name, tag), count);
+        add(fmt::format("{}/tag={}/tag_mask={}", _name, tag, tag_mask), count);
     }
 }
 
@@ -553,7 +545,7 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, const void*,
         auto      _name = std::string_view{ _data.tool_id };
         tracker_t _t{ _name };
         add(_t, count);
-        add(JOIN('/', _name, JOIN('=', "remote_addr", remote_addr)), count);
+        add(fmt::format("{}/remote_addr={}", _name, remote_addr), count);
     }
 }
 
@@ -576,7 +568,7 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, void*, size_t
         auto      _name = std::string_view{ _data.tool_id };
         tracker_t _t{ _name };
         add(_t, count);
-        add(JOIN('/', _name, JOIN('=', "remote_addr", remote_addr)), count);
+        add(fmt::format("{}/remote_addr={}", _name, remote_addr), count);
     }
 }
 
@@ -601,7 +593,7 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, unsigned id,
         auto      _name = std::string_view{ _data.tool_id };
         tracker_t _t{ _name };
         add(_t, total_size);
-        add(JOIN('/', _name, JOIN('=', "am_id", id)), total_size);
+        add(fmt::format("{}/am_id={}", _name, id), total_size);
     }
 }
 
@@ -797,7 +789,7 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, const v
         auto      _name = std::string_view{ _data.tool_id };
         tracker_t _t{ _name };
         add(_t, count * _size);
-        add(JOIN('/', _name, JOIN('=', "root", root)), count * _size);
+        add(fmt::format("{}/root={}", _name, root), count * _size);
     }
 }
 
@@ -838,7 +830,7 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, size_t 
 
         tracker_t _t{ _name };
         add(_t, count * _size);
-        add(JOIN('/', _name, JOIN('=', _label, peer)), count * _size);
+        add(fmt::format("{}/{}={}", _name, _label, peer), count * _size);
     }
 }
 
@@ -858,7 +850,7 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, const v
         auto      _name = std::string_view{ _data.tool_id };
         tracker_t _t{ _name };
         add(_t, count * _size);
-        add(JOIN('/', _data.tool_id, JOIN('=', "root", root)), count * _size);
+        add(fmt::format("{}/root={}", _data.tool_id, root), count * _size);
     }
 }
 

@@ -7,7 +7,7 @@
 # Variables
 NCCL_HOME := ../../build
 INC := -I$(NCCL_HOME)/include -I$(CUDA_HOME)/include -Inccl
-PLUGIN_SO := libnccl-profiler-inspector.so
+PLUGIN_SO := librccl-profiler-inspector.so
 VERSION_FILE := version.cc
 
 # Compiler and flags
