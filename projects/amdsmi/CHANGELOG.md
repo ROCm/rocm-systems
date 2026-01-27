@@ -78,7 +78,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   CPU: 1
     DFCSTATE:
         DFCSTATECTRL_STATUS: 0
-  ```
+ ```
  
 - **Added GPU and base board temperature `amd-smi monitor` CLI support**.  
   - Added `--gpu-board-temps` option to `amd-smi monitor` command for GPU board temperature sensors
@@ -262,7 +262,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
             },
             ...
       ```
-   
+    
       ```console
       $ amd-smi static --limit --csv
       gpu,ppt0_max_power_limit,ppt0_min_power_limit,ppt0_socket_power_limit,ppt1_max_power_limit,ppt1_min_power_limit,ppt1_socket_power_limit,slowdown_edge_temperature,slowdown_hotspot_temperature,slowdown_vram_temperature,shutdown_edge_temperature,shutdown_hotspot_temperature,shutdown_vram_temperature
