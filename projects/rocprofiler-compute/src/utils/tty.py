@@ -517,8 +517,7 @@ def show_all(
         # Handle roofline panel (400) with custom display logic, then skip normal
         # table processing to prevent duplicate printing.
         if panel_id == 400:
-            if is_roofline_shown(args, runs, output, panel, roof_plot, hidden_cols):
-                continue
+            _ = is_roofline_shown(args, runs, output, panel, roof_plot, hidden_cols)
 
         panel_content = ""  # store content of all data_source from one panel
 
@@ -532,7 +531,6 @@ def show_all(
                             "Not showing roofline table due to invalid roofline data",
                         )
                         roofline_warning_shown = True
-                    continue
 
                 # Block-filter logic:
                 # - If analysis used --filter-metrics, ignore profiling block filters
@@ -598,7 +596,8 @@ def show_all(
                         args, table_config, processed_df, table_type, runs, csv_dir
                     )
 
-        if panel_content:
+        # Roofline printing is handled separately above in is_roofline_shown
+        if panel_content and table_config["id"] not in [401, 402]:
             print(f"\n{'-' * 80}", file=output)
             print(f"{panel_id // 100}. {panel['title']}", file=output)
             print(panel_content, file=output)
