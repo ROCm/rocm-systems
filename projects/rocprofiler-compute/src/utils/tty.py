@@ -514,8 +514,7 @@ def show_all(
         if len(args.path) > 1 and panel_id in config.HIDDEN_SECTIONS:
             continue
 
-        # Handle roofline panel (400) with custom display logic, then skip normal
-        # table processing to prevent duplicate printing.
+        # Handle roofline panel (400) with custom display logic
         if panel_id == 400:
             _ = is_roofline_shown(args, runs, output, panel, roof_plot, hidden_cols)
 
@@ -523,7 +522,8 @@ def show_all(
 
         for data_source in panel["data source"]:
             for table_type, table_config in data_source.items():
-                # Skip roofline tables (401, 402) if roofline data is invalid
+                # Emit warnings for roofline tables (401, 402)
+                # if roofline data is invalid
                 if table_config["id"] in [401, 402] and not has_valid_roofline:
                     if not roofline_warning_shown and roofline_in_filter:
                         console_warning(
