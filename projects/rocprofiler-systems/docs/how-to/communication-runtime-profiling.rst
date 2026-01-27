@@ -105,7 +105,7 @@ For detailed information on building rocprofiler-systems with MPI support, see t
 Profiling RCCL
 ==============
 
-RCCL (ROCm Communication Collectives Library) profiling provides insights into GPU-to-GPU communication patterns and collective operation performance. 
+RCCL profiling provides insights into GPU-to-GPU communication patterns and collective operation performance.
 
 .. important::
 
