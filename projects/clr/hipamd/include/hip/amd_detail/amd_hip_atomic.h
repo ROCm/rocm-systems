@@ -40,6 +40,8 @@ template <typename T, typename F> struct Cond_t<false, T, F> {
 
 #if !defined(__HIPCC_RTC__)
 #include "amd_hip_unsafe_atomics.h"
+#include "amd_hip_fp16.h"
+#include "amd_hip_bf16.h"
 #endif
 
 // Atomic expanders
@@ -275,6 +277,22 @@ __device__ inline double atomicAdd_system(double* address, double val) {
   __HIP_ATOMIC_BACKWARD_COMPAT_MEMORY {
     return __hip_atomic_fetch_add(address, val, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
   }
+}
+
+__device__ inline __half atomicAdd(__half* address, __half val) {
+  return unsafeAtomicAdd(address, val);
+}
+
+__device__ inline __half2 atomicAdd(__half2* address, __half2 val) {
+  return unsafeAtomicAdd(address, val);
+}
+
+__device__ inline __hip_bfloat16 atomicAdd(__hip_bfloat16* address, __hip_bfloat16 val) {
+  return unsafeAtomicAdd(address, val);
+}
+
+__device__ inline __hip_bfloat162 atomicAdd(__hip_bfloat162* address, __hip_bfloat162 val) {
+  return unsafeAtomicAdd(address, val);
 }
 
 __device__ inline int atomicSub(int* address, int val) {
