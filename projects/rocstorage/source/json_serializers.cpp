@@ -1,26 +1,16 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
 
-#pragma once
+#include "json_serializers.hpp"
 
-#include <rocstorage/writer_types.hpp>
+#include "common/string_conversions.hpp"
 
 #include <nlohmann/json.hpp>
-#include <nlohmann/json_fwd.hpp>
-
-#include "string_conversions.hpp"
-
-#include <string>
 
 namespace rocstorage::json_serializers
 {
 
-using json_t = nlohmann::json;
-
-/**
- * @brief Serialize address_range_info_t to JSON
- */
-inline json_t
+json_t
 to_json(const writer_api::address_range_info_t& addr_range)
 {
     json_t j;
@@ -34,10 +24,7 @@ to_json(const writer_api::address_range_info_t& addr_range)
     return j;
 }
 
-/**
- * @brief Serialize program_counter_info_t to JSON
- */
-inline json_t
+json_t
 to_json(const writer_api::program_counter_info_t& pc_info)
 {
     json_t j;
@@ -60,10 +47,7 @@ to_json(const writer_api::program_counter_info_t& pc_info)
     return j;
 }
 
-/**
- * @brief Serialize stack_frame_t to JSON
- */
-inline json_t
+json_t
 to_json(const writer_api::stack_frame_t& frame)
 {
     json_t j;
@@ -82,30 +66,7 @@ to_json(const writer_api::stack_frame_t& frame)
     return j;
 }
 
-/**
- * @brief Serialize call_stack_t to JSON string
- * @param call_stack The call stack to serialize (deque of stack frames)
- * @return JSON string representation of the call stack
- *
- * Example output:
- * {
- *   "frames": [
- *     {
- *       "program_counter": {
- *         "function": "main",
- *         "filename": "/path/to/file.cpp",
- *         "line_number": 42
- *       },
- *       "address_range": {
- *         "address_base": 0x1000,
- *         "address_low": 0x1000,
- *         "address_high": 0x2000
- *       }
- *     }
- *   ]
- * }
- */
-inline std::string
+std::string
 serialize_call_stack(const writer_api::call_stack_t& call_stack)
 {
     if(call_stack.empty())
@@ -125,10 +86,7 @@ serialize_call_stack(const writer_api::call_stack_t& call_stack)
     return j.dump();
 }
 
-/**
- * @brief Serialize source_code_info_t to JSON
- */
-inline json_t
+json_t
 to_json(const writer_api::source_code_info_t& source_code)
 {
     json_t j;
@@ -177,10 +135,7 @@ to_json(const writer_api::source_code_info_t& source_code)
     return j;
 }
 
-/**
- * @brief Serialize line_info_entry_t to JSON
- */
-inline json_t
+json_t
 to_json(const writer_api::line_info_entry_t& line_info)
 {
     json_t j;
@@ -199,32 +154,7 @@ to_json(const writer_api::line_info_entry_t& line_info)
     return j;
 }
 
-/**
- * @brief Serialize source_context_list_t to JSON string
- * @param line_info_list The source context list to serialize (vector of
- * line_info_entry_t)
- * @return JSON string representation of the source context
- *
- * Example output:
- * {
- *   "entries": [
- *     {
- *       "source_code": {
- *         "filename": "/path/to/source.cpp",
- *         "starting_line_number": 10,
- *         "source_code_lines": ["line 10 content", "line 11 content"],
- *         "assembly_instruction_lines": ["mov rax, rbx", "add rax, 1"]
- *       },
- *       "program_counter": {
- *         "function": "foo",
- *         "filename": "/path/to/source.cpp",
- *         "line_number": 10
- *       }
- *     }
- *   ]
- * }
- */
-inline std::string
+std::string
 serialize_source_context(const writer_api::source_context_list_t& line_info_list)
 {
     if(line_info_list.empty())

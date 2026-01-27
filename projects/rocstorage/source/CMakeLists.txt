@@ -22,6 +22,9 @@
 
 set(rocstorage_sources
     ${CMAKE_CURRENT_LIST_DIR}/writer.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/writer_impl.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/insert_validator.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/json_serializers.cpp
     ${CMAKE_CURRENT_LIST_DIR}/reader.cpp
     ${CMAKE_CURRENT_LIST_DIR}/storage.cpp
 )

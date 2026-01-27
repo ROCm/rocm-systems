@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "common/json_serializers.hpp"
+#include "json_serializers.hpp"
 
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
