@@ -53,6 +53,10 @@ target_include_directories(
 
 target_compile_features(rocstorage_unit_tests PRIVATE cxx_std_17)
 
+if(ROCSTORAGE_ENABLE_COVERAGE)
+    rocstorage_add_coverage_flags(rocstorage_unit_tests)
+endif()
+
 gtest_discover_tests(
     rocstorage_unit_tests
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}

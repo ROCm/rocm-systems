@@ -35,6 +35,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 option(ROCSTORAGE_BUILD_TESTS "Build unit tests" ON)
 option(ROCSTORAGE_BUILD_BENCHMARKS "Build performance benchmarks" ON)
 option(ROCSTORAGE_ENABLE_LOGGING "Enable logging" OFF)
+option(ROCSTORAGE_ENABLE_COVERAGE "Enable code coverage" OFF)
 
 if(ROCSTORAGE_BUILD_TESTS)
     enable_testing()
@@ -128,6 +129,16 @@ target_include_directories(
 # ------------------------------------------------------------ #
 
 set(CMAKE_MODULE_PATH ${CMAKE_CURRENT_LIST_DIR}/cmake ${CMAKE_MODULE_PATH})
+
+# ------------------------------------------------------------ #
+# Code Coverage
+# ------------------------------------------------------------ #
+
+include(coverage)
+
+if(ROCSTORAGE_ENABLE_COVERAGE)
+    rocstorage_add_coverage_flags(rocstorage)
+endif()
 
 # ------------------------------------------------------------ #
 # SQLite3
