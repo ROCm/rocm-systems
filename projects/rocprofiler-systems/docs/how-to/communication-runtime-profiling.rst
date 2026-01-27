@@ -159,7 +159,7 @@ UCX profiling is **enabled by default** (``ROCPROFSYS_USE_UCX=ON``). When an app
 Configuration
 -------------
 
-Since UCX profiling is enabled by default, you typically don't need to explicitly enable it:
+Since UCX profiling is enabled by default, you typically don't need to explicitly enable it.  However, if you need to disable UCX tracing, you can do so with the following configuration settings.
 
 .. code-block:: shell
 
