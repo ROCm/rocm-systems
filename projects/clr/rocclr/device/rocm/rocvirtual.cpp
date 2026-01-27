@@ -1730,8 +1730,8 @@ VirtualGPU::VirtualGPU(Device& device, bool profiling, bool cooperative,
       schedulerThreads_(0),
       schedulerQueue_(nullptr),
       barriers_(*this),
-      managed_buffer_(*this, ManagedBuffer::kPoolNumSignals * device.settings().stagedXferSize_),
-      managed_kernarg_buffer_(*this, device.settings().kernargPoolSize_),
+      managed_buffer_(*this, kStagingPoolNumSignals * device.settings().stagedXferSize_, kStagingPoolNumSignals),
+      managed_kernarg_buffer_(*this, device.settings().kernargPoolSize_, kKernArgPoolNumSignals),
       cuMask_(cuMask),
       priority_(priority),
       copy_command_type_(0),
@@ -1895,6 +1895,19 @@ bool VirtualGPU::create() {
   }
   // Release HW queue until the first usage
   ReleaseHwQueue();
+<<<<<<< HEAD
+=======
+  auto stamp6 = std::chrono::steady_clock::now();
+
+  ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "PROFILING INFO %p :  %0.6f, %0.6f,%0.6f, %0.6f, %0.6f, %0.6f!", gpu_queue_,
+  std::chrono::duration<double, std::micro>(stamp1 - stamp0).count(),
+  std::chrono::duration<double, std::micro>(stamp2 - stamp1).count(),
+  std::chrono::duration<double, std::micro>(stamp3 - stamp2).count(),
+  std::chrono::duration<double, std::micro>(stamp4 - stamp3).count(),
+  std::chrono::duration<double, std::micro>(stamp5 - stamp4).count(),
+  std::chrono::duration<double, std::micro>(stamp6 - stamp5).count());
+
+>>>>>>> 4509f14e5fe9 (clr: Update signal count and pool size for staging buffer)
   return true;
 }
 
@@ -1912,7 +1925,7 @@ VirtualGPU::ManagedBuffer::~ManagedBuffer() {
 
 // ================================================================================================
 bool VirtualGPU::ManagedBuffer::Create(Device::MemorySegment mem_segment) {
-  pool_chunk_end_ = pool_size_ / kPoolNumSignals;
+  pool_chunk_end_ = pool_size_ / num_signals_;
   active_chunk_ = 0;
   // Allocate memory for managed buffer
   if (mem_segment == Device::MemorySegment::kKernArg &&
@@ -1965,14 +1978,14 @@ address VirtualGPU::ManagedBuffer::Acquire(uint32_t size, uint32_t alignment) {
     // Dispatch a barrier packet into the queue
     gpu_.dispatchBarrierPacket(kBarrierPacketHeader, kSkipSignal, pool_signal_[active_chunk_]);
     // Get the next chunk
-    active_chunk_ = ++active_chunk_ % kPoolNumSignals;
+    active_chunk_ = ++active_chunk_ % num_signals_;
     // Make sure the new active chunk is free
     bool test = WaitForSignal(pool_signal_[active_chunk_], gpu_.ActiveWait());
     assert(test && "Runtime can't fail a wait for chunk!");
     // Make sure the current offset matches the new chunk to avoid possible overlaps
     // between chunks and issues during recycle
     pool_cur_offset_ = (active_chunk_ == 0) ? 0 : pool_chunk_end_;
-    pool_chunk_end_ = pool_cur_offset_ + pool_size_ / kPoolNumSignals;
+    pool_chunk_end_ = pool_cur_offset_ + pool_size_ / num_signals_;
     result = amd::alignUp(pool_base_ + pool_cur_offset_, alignment);
     pool_cur_offset_ = (result + size) - pool_base_;
   }
@@ -1983,7 +1996,7 @@ address VirtualGPU::ManagedBuffer::Acquire(uint32_t size, uint32_t alignment) {
 // ================================================================================================
 void VirtualGPU::ManagedBuffer::ResetPool() {
   pool_cur_offset_ = 0;
-  pool_chunk_end_ = pool_size_ / kPoolNumSignals;
+  pool_chunk_end_ = pool_size_ / num_signals_;
   active_chunk_ = 0;
 }
 
