@@ -2,7 +2,7 @@
 
 Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs.amd.com/projects/HIP/en/latest/index.html)
 
-## HIP 8.0 for ROCm 8.0
+## HIP 7.12 for ROCm 7.12
 
 ### Added
 
