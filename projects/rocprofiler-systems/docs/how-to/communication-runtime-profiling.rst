@@ -152,7 +152,7 @@ In ROCm versions prior to 7.12, there is a known issue which causes the applicat
 Profiling UCX
 =============
 
-UCX (Unified Communication X) is a low-level communication framework that provides the foundation for efficient data movement in high-performance computing applications. UCX profiling enables detailed analysis of low-level communication primitives, RDMA operations, and transport-layer behavior.
+UCX is a low-level communication framework that provides the foundation for efficient data movement in high-performance computing applications. UCX profiling enables detailed analysis of low-level communication primitives, RDMA operations, and transport-layer behavior.
 
 UCX profiling is **enabled by default** (``ROCPROFSYS_USE_UCX=ON``). When an application uses UCX—either directly or indirectly through higher-level libraries like MPI or RCCL—rocprofiler-systems automatically intercepts and traces UCX function calls.
 
