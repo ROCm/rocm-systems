@@ -471,11 +471,11 @@ Baseline comparison
 
    For both the Current Workload and the Baseline Workload, you can independently setup the following filters to allow fine grained comparisons:
 
-   * Workload Name with ``-p``
-   * GPU ID filtering (multi-selection) with ``-d``
-   * Kernel Name filtering (multi-selection) with ``-k``
-   * Dispatch ID filtering (regex filtering) with ``-d``
-   * ROCm Compute Profiler panels/blocks (multi-selection) with ``-b``
+   * Workload Name with ``--path``
+   * GPU ID filtering (multi-selection) with ``--gpu-id``
+   * Kernel Name filtering (multi-selection) with ``--kernel``
+   * Dispatch ID filtering (regex filtering) with ``--dispatch``
+   * ROCm Compute Profiler panels/blocks (multi-selection) with ``--block``
 
    .. code-block:: shell
 
