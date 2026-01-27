@@ -354,6 +354,38 @@ hipError_t hipMemRetainAllocationHandle(hipMemGenericAllocationHandle_t* handle,
   HIP_RETURN(hipSuccess);
 }
 
+static inline address NextSubBufferPtr(const amd::Memory* mem) {
+  return reinterpret_cast<address>(mem->getSvmPtr()) + mem->getSize();
+}
+
+static hipError_t ValidateSubBufferCoverage(amd::Memory* vaddr_sub_buffer_obj, size_t range_size) {
+  // Validate that the requested range size is within the parent sub-buffer bounds.
+  if (vaddr_sub_buffer_obj == nullptr || (vaddr_sub_buffer_obj->parent() != nullptr &&
+                                          range_size > (vaddr_sub_buffer_obj->parent()->getSize() -
+                                                        vaddr_sub_buffer_obj->getOrigin()))) {
+    return hipErrorInvalidValue;
+  }
+
+  address range_end_address =
+      reinterpret_cast<address>(vaddr_sub_buffer_obj->getSvmPtr()) + range_size;
+  size_t covered_size = 0;
+  amd::Memory* current_sub_buffer_obj = vaddr_sub_buffer_obj;
+  // Validate that the size matches the sum of sub-buffer sizes
+  while (current_sub_buffer_obj && NextSubBufferPtr(current_sub_buffer_obj) <= range_end_address) {
+    if (range_size > covered_size &&
+        range_size < covered_size + current_sub_buffer_obj->getSize()) {
+      return hipErrorInvalidValue;
+    }
+    covered_size += current_sub_buffer_obj->getSize();
+    current_sub_buffer_obj = amd::MemObjMap::FindMemObj(NextSubBufferPtr(current_sub_buffer_obj));
+  }
+  if (covered_size != range_size) {
+    return hipErrorInvalidValue;
+  }
+
+  return hipSuccess;
+}
+
 hipError_t hipMemSetAccess(void* ptr, size_t size, const hipMemAccessDesc* desc, size_t count) {
   HIP_INIT_API(hipMemSetAccess, ptr, size, desc, count);
 
@@ -361,30 +393,12 @@ hipError_t hipMemSetAccess(void* ptr, size_t size, const hipMemAccessDesc* desc,
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  // Ensure that the specified size parameter matches the total size of a complete set of
-  // sub-buffers, disallowing partial sub-buffer coverage
-  auto mem_object = amd::MemObjMap::FindMemObj(ptr);
-  hipMemLocationType memLocationType = hipMemLocationTypeNone;
-
-  if (mem_object) {
-    memLocationType = static_cast<hipMemLocationType>(mem_object->getUserData().locationType);
-    if (mem_object->parent()) {
-      size_t accumulated_buffer_size = 0;
-      for (auto sub_buffer : mem_object->parent()->subBuffers()) {
-        accumulated_buffer_size += sub_buffer->getSize();
-        if (accumulated_buffer_size > size) {
-          HIP_RETURN(hipErrorInvalidValue);
-        } else if (accumulated_buffer_size == size) {
-          break;
-        }
-      }
-
-      if (accumulated_buffer_size != size) {
-        HIP_RETURN(hipErrorInvalidValue);
-      }
-    }
-  } else {
-    HIP_RETURN(hipErrorInvalidValue);
+  // Ensure that the specified size parameter matches the sum of a complete set of
+  // sub-buffers in the range, disallowing partial sub-buffer coverage.
+  amd::Memory* vaddr_sub_obj = amd::MemObjMap::FindMemObj(ptr);
+  hipError_t status = ValidateSubBufferCoverage(vaddr_sub_obj, size);
+  if (status != hipSuccess) {
+    HIP_RETURN(status);
   }
 
   for (size_t desc_idx = 0; desc_idx < count; ++desc_idx) {
@@ -421,36 +435,15 @@ hipError_t hipMemUnmap(void* ptr, size_t size) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  // Helper lambda to get the next sub-buffer pointer
-  auto next_subbuffer_ptr = [](const amd::Memory* mem) -> address {
-    return reinterpret_cast<address>(mem->getSvmPtr()) + mem->getSize();
-  };
-
   amd::Memory* vaddr_sub_obj = amd::MemObjMap::FindMemObj(ptr);
-  // Validate that the size is within range
-  if (vaddr_sub_obj == nullptr ||
-      (vaddr_sub_obj->parent() != nullptr &&
-       size > (vaddr_sub_obj->parent()->getSize() - vaddr_sub_obj->getOrigin()))) {
-    HIP_RETURN(hipErrorInvalidValue);
-  }
-
-  address end_address = reinterpret_cast<address>(vaddr_sub_obj->getSvmPtr()) + size;
-  size_t total_processed_size = 0;
-  amd::Memory* check_obj = vaddr_sub_obj;
-  // Validate that the size matches the sum of sub-buffer sizes
-  while (check_obj && next_subbuffer_ptr(check_obj) <= end_address) {
-    if (size > total_processed_size && size < total_processed_size + check_obj->getSize()) {
-      HIP_RETURN(hipErrorInvalidValue);
-    }
-    total_processed_size += check_obj->getSize();
-    check_obj = amd::MemObjMap::FindMemObj(next_subbuffer_ptr(check_obj));
-  }
-  if (total_processed_size != size) {
-    HIP_RETURN(hipErrorInvalidValue);
+  hipError_t status = ValidateSubBufferCoverage(vaddr_sub_obj, size);
+  if (status != hipSuccess) {
+    HIP_RETURN(status);
   }
 
   // Unmap all sub-buffers in the range
-  while (vaddr_sub_obj && next_subbuffer_ptr(vaddr_sub_obj) <= end_address) {
+  address end_address = reinterpret_cast<address>(vaddr_sub_obj->getSvmPtr()) + size;
+  while (vaddr_sub_obj && NextSubBufferPtr(vaddr_sub_obj) <= end_address) {
     amd::Memory* phys_mem_obj = vaddr_sub_obj->getUserData().phys_mem_obj;
     if (phys_mem_obj == nullptr) {
       HIP_RETURN(hipErrorInvalidValue);
@@ -467,7 +460,7 @@ hipError_t hipMemUnmap(void* ptr, size_t size) {
         reinterpret_cast<hip::GenericAllocation*>(phys_mem_obj->getUserData().data);
     ga->release();
 
-    address next_ptr = next_subbuffer_ptr(vaddr_sub_obj);
+    address next_ptr = NextSubBufferPtr(vaddr_sub_obj);
     vaddr_sub_obj->release();
     vaddr_sub_obj = amd::MemObjMap::FindMemObj(next_ptr);
   }
