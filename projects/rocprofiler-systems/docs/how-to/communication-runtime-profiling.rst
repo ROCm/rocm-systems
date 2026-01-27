@@ -40,7 +40,7 @@ The supported communication runtimes span multiple layers of the parallel comput
 Profiling MPI
 =============
 
-MPI support is enabled through the ``ROCPROFSYS_USE_MPIP`` configuration setting, which is **enabled by default**. ROCm Systems Profiler can have full (``ROCPROFSYS_USE_MPI=ON``) or partial (``ROCPROFSYS_USE_MPI_HEADERS=ON``) MPI support. By default, ROCm Systems Profiler uses partial MPI support with the OpenMPI headers. For detailed information on building rocprofiler-systems with MPI support, see the :doc:`installation guide <../install/install>`.
+MPI support is enabled through the ``ROCPROFSYS_USE_MPIP`` configuration setting, which is **enabled by default**. ROCm Systems Profiler can be built with full (``ROCPROFSYS_USE_MPI=ON``) or partial (``ROCPROFSYS_USE_MPI_HEADERS=ON``) MPI support using the build-time configuration options. By default, ROCm Systems Profiler uses partial MPI support with the OpenMPI headers. For detailed information on building rocprofiler-systems with MPI support, see the :doc:`installation guide <../install/install>`.
 
 When using binary instrumentation with ``rocprof-sys-instrument``, MPI functions are automatically detected in the target application. If MPI symbols (such as ``MPI_Init``, ``MPI_Init_thread``, ``MPI_Finalize``) are found, MPI support is automatically enabled.
 
@@ -83,6 +83,7 @@ MPI Profiling Output
 
 When MPI profiling is enabled, ROCm Systems Profiler generates:
 
+* **ROCm Profiling Data (rocpd)**: When ``ROCPROFSYS_USE_ROCPD=ON`` is set, profiling data is output in a SQLite3 database format for advanced analysis. See :ref:`rocprof_sys_rocpd_output` for details on this output format. You can visualize MPI operations in a timeline view showing communication patterns, operation durations, and concurrency using `ROCm Optiq <https://rocm.docs.amd.com/projects/roc-optiq/en/latest/what-is-optiq.html>`_.
 * **Perfetto traces**: Visualize MPI operations on a timeline, showing communication patterns, operation durations, and concurrency
 * **Timemory profiles**: Statistical summaries of MPI function call counts, total time, and performance metrics
 * **Communication data**: Track message sizes, communication volumes, and data movement patterns for point-to-point and collective operations
@@ -233,12 +234,15 @@ UCX profiling works transparently with applications that use UCX directly or ind
 .. note::
 
    For MPI applications, the presence of UCX libraries alone does not ensure UCX is used at runtime. When MPI is launched with the UCX PML ( ``-mca pml ucx`` ), initialization may fail due to UCX version or transport capability mismatches, causing MPI to fall back to an alternative (non-UCX) communication path.
+   Users can verify that UCX is successfully selected at runtime by enabling MPI PML verbosity, for example using ``--mca pml_base_verbose <level>``, which reports the chosen PML during MPI initialization. Additional UCX-specific logging (e.g., ``UCX_LOG_LEVEL=info``) can also be used to confirm that UCX transports are initialized and active.
+
 
 UCX Profiling Output
 ---------------------
 
 When UCX profiling is enabled, rocprofiler-systems generates:
 
+* **ROCm Profiling Data (rocpd)**: When ``ROCPROFSYS_USE_ROCPD=ON`` is set, profiling data is output in a SQLite3 database format for advanced analysis. See :ref:`rocprof_sys_rocpd_output` for details on this output format. You can visualize MPI operations in a timeline view showing communication patterns, operation durations, and concurrency using `ROCm Optiq <https://rocm.docs.amd.com/projects/roc-optiq/en/latest/what-is-optiq.html>`_.
 * **Perfetto traces**: Visualize UCX operations on a timeline, showing communication patterns, operation durations, and concurrency
 * **Timemory profiles**: Statistical summaries of UCX function call counts, total time, and performance metrics
 * **Communication data**: Track message sizes, communication volumes, and data movement patterns
@@ -308,7 +312,7 @@ When profiling communication-intensive applications, consider the following reco
 
 **Minimize Overhead**
 
-* Tracing communication operations adds overhead; use sampling mode when precise traces are not required
+* Tracing communication operations incurs runtime overhead from intercepting each communication call and recording detailed metadata, particularly for high-frequency MPI/UCX communication paths; use sampling mode when precise traces are not required as statistical sampling can provide sufficient insights without the full overhead of complete tracing..
 * For large-scale runs, consider enabling profiling on a subset of ranks
 * Use ``ROCPROFSYS_SAMPLING_FREQ`` to control sampling rate and balance detail vs. overhead
 
@@ -320,7 +324,7 @@ When profiling communication-intensive applications, consider the following reco
 
 **Leverage Visualization**
 
-* Use the Perfetto UI to visualize communication timelines and identify bottlenecks
+* Use the `Rocm Optiq <https://rocm.docs.amd.com/projects/roc-optiq/en/latest/what-is-optiq.html>`_ for rocpd database output and the Perfetto UI for perfetto traces, to visualize communication timelines and identify bottlenecks
 * Look for communication/computation overlap opportunities
 * Identify load imbalance by comparing traces across ranks
 
