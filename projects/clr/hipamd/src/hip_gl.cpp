@@ -915,19 +915,26 @@ hipError_t hipGraphicsUnmapResources(int count, hipGraphicsResource_t* resources
     command->release();
   }
 
-  const amd::Context* amdContext = hip::getCurrentDevice()->asContext();
+  hip::Device* device = hip::getCurrentDevice();
+  if (device == nullptr) {
+    HIP_RETURN(hipErrorNoDevice);
+  }
+
+  amd::Context* amdContext = device->asContext();
+  if (!amdContext || amdContext->devices().empty()) {
+    HIP_RETURN(hipErrorUnknown);
+  }
+
   const amd::Device* curDev = amdContext->devices()[0];
   for (auto& mobj : memObjects) {
     device::Memory* mem = reinterpret_cast<device::Memory*>(mobj->getDeviceMemory(*curDev));
-    amd::MemObjMap::RemoveMemObj(reinterpret_cast<void*>(mem->virtualAddress()));
+    if (mem) {
+      amd::MemObjMap::RemoveMemObj(reinterpret_cast<void*>(mem->virtualAddress()));
+    }
     mobj->release();
   }
 
   // Remove mapping from registry
-  hip::Device* device = hip::getCurrentDevice();
-  if (device == nullptr) {
-    return hipErrorNoDevice;
-  }
   for (uint8_t i = 0; i < count; i++) {
     if (!device->mappedGraphics().remove(resources[i])) {
       LogError("failed to unmap resource");
