@@ -44,8 +44,8 @@
 // register values in amd_aql_queue.cpp then this file won't be required. For
 // now we are using this file where register details are  spelled out in the
 // structs/unions below.
-#ifndef _WSL_INC_REGISTERS_H_
-#define _WSL_INC_REGISTERS_H_
+
+#pragma once
 
 typedef enum SQ_RSRC_BUF_TYPE {
 SQ_RSRC_BUF                              = 0x00000000,
@@ -360,4 +360,4 @@ SQ_SEL_W                                 = 0x00000007,
 	signed int	i32All;
 	float	f32All;
         };
-#endif  // header guard
+

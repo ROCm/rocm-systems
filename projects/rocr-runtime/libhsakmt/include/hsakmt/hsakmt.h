@@ -401,7 +401,8 @@ hsaKmtGetQueueInfo(
 HSAKMT_STATUS
 HSAKMTAPI
 hsaKmtQueueRingDoorbell(
-    HSA_QUEUEID QueueId
+    HSA_QUEUEID QueueId,
+    HSAuint64 value
 );
 
 /**
