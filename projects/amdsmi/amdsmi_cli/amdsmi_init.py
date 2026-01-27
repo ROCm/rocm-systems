@@ -56,27 +56,21 @@ def check_amdgpu_driver():
     """ Returns true if amdgpu is found in the list of initialized modules """
     amd_gpu_status_file = Path("/sys/module/amdgpu/initstate")
     if amd_gpu_status_file.exists():
-        if amd_gpu_status_file.read_text(encoding="ascii").strip() == "live":
+        try: 
+            return amd_gpu_status_file.read_text(encoding="ascii").strip() == "live"
+        except OSError:
+            pass
+
+    # If the driver is loaded either as a module OR built in, this dir will be populated
+    drv = Path("/sys/bus/pci/drivers/amdgpu")
+    if not drv.exists():
+        return False
+
+    # Check if a symlink exists that loosely matches PCI BDF format
+    # ex: 0000:03:00.0
+    for p in drv.iterdir():
+        if p.is_symlink() and ":" in p.name and "." in p.name:
             return True
-            
-    # If not found as module, check if amdgpu is built-in by looking for AMD GPU devices
-    # AMD vendor ID is 0x1002
-    drm_path = Path("/sys/class/drm")
-    if drm_path.exists():
-        for card in drm_path.iterdir():
-            vendor_file = card / "device" / "vendor"
-            if vendor_file.exists():
-                try:
-                    vendor_id = vendor_file.read_text(encoding="ascii").strip()
-                    if vendor_id == "0x1002":  # AMD vendor ID
-                        # Additionally verify the driver is amdgpu
-                        driver_link = card / "device" / "driver"
-                        if driver_link.exists():
-                            driver_name = driver_link.resolve().name
-                            if driver_name == "amdgpu":
-                                return True
-                except (IOError, OSError):
-                    continue
     return False
 
 def check_amd_hsmp_driver():
