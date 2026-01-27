@@ -22,7 +22,7 @@ THE SOFTWARE.
 #include <vulkan/vulkan.h>
 
 #ifdef _WIN64
-
+#define NOMINMAX
 #include <Windows.h>
 #include <winnt.h>
 #include <VersionHelpers.h>

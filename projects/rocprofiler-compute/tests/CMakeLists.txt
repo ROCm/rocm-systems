@@ -75,3 +75,11 @@ set_target_properties(
     rocflop
     PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/tests
 )
+
+set(MEMCOPY_SOURCES ../sample/memcopy.cpp)
+set_source_files_properties(${MEMCOPY_SOURCES} PROPERTIES LANGUAGE HIP)
+add_executable(memcopy ${MEMCOPY_SOURCES})
+set_target_properties(
+    memcopy
+    PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/tests
+)
