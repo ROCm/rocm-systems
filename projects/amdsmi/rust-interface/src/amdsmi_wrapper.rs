@@ -1715,6 +1715,7 @@ pub struct AmdsmiProcInfoT {
     pub memory_usage: AmdsmiProcInfoTMemoryUsage,
     pub container_name: [::std::os::raw::c_char; 256usize],
     pub cu_occupancy: u32,
+    pub sdma_usage: u64,
     pub reserved: [u32; 11usize],
 }
 #[repr(C)]
@@ -1778,6 +1779,8 @@ const _: () = {
         [::std::mem::offset_of!(AmdsmiProcInfoT, container_name) - 400usize];
     ["Offset of field: AmdsmiProcInfoT::cu_occupancy"]
         [::std::mem::offset_of!(AmdsmiProcInfoT, cu_occupancy) - 656usize];
+    ["Offset of field: AmdsmiProcInfoT::sdma_usage"]
+        [::std::mem::offset_of!(AmdsmiProcInfoT, sdma_usage) - 664usize];
     ["Offset of field: AmdsmiProcInfoT::reserved"]
         [::std::mem::offset_of!(AmdsmiProcInfoT, reserved) - 660usize];
 };
