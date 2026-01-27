@@ -2092,12 +2092,6 @@ static void *fmm_allocate_host_gpu(HsaKFDContext *ctx,
 	 * memory is allocated from KFD
 	 */
 	if (!mflags.ui32.NonPaged && svm.userptr_for_paged_mem) {
-		int advice = MADV_NORMAL;
-
-		/* set madvise flags to HUGEPAGE always for 2MB pages */
-		if (MemorySizeInBytes >= (2 * 1024 * 1024))
-			advice = MADV_HUGEPAGE;
-
 		/* Allocate address space */
 		pthread_mutex_lock(&aperture->fmm_mutex);
 		mem = aperture_allocate_area_aligned(aperture, address, size, alignment);
@@ -2115,7 +2109,11 @@ static void *fmm_allocate_host_gpu(HsaKFDContext *ctx,
 		if (bind_mem_to_numa(node_id, mem, MemorySizeInBytes, mflags))
 			goto out_release_area;
 
-		madvise(mem, MemorySizeInBytes, advice);
+		/* set madvise flags to HUGEPAGE always for 2MB pages */
+		if (MemorySizeInBytes >= (2 * 1024 * 1024))
+			madvise(mem, MemorySizeInBytes, MADV_HUGEPAGE);
+
+		madvise(mem, MemorySizeInBytes, MADV_DONTFORK);
 
 		/* Create userptr BO */
 		mmap_offset = (uint64_t)mem;
