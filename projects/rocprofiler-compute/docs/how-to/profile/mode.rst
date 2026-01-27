@@ -605,14 +605,14 @@ The following example demonstrates profiling roofline data only:
    [roofline] No roofline data found. Generating...
    Checking for roofline.csv in /home/auser/repos/rocprofiler-compute/sample/workloads/vcopy/MI200
    Empirical Roofline Calculation
-   Copyright © 2025  Advanced Micro Devices, Inc. All rights reserved.
-   Total detected GPU devices: 8
-   GPU Device 0 (gfx942) with 304 CUs: Profiling...
-   99% [||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| ]
-   ...
-
-
-An inspection of our workload output folder shows ``.html`` plots were generated
+   Copyright © 2022  Advanced Micro Devices, Inc. All rights reserved.
+   Total detected GPU devices: 4
+   GPU Device 0: Profiling...
+    99% [||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| ]
+    ...
+   Empirical Roofline PDFs saved!
+   
+An inspection of our workload output folder shows ``.pdf`` plots were generated
 successfully.
 
 .. code-block:: shell-session
