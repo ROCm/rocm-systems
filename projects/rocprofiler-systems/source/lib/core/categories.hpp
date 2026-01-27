@@ -22,7 +22,6 @@
 
 #pragma once
 
-#include "common/join.hpp"
 #include "defines.hpp"
 #include "rocprofiler-systems/categories.h"  // in rocprof-sys-user
 

@@ -27,6 +27,8 @@
 
 #include "logger/debug.hpp"
 
+#include <spdlog/fmt/ranges.h>
+
 #if defined(ROCPROFSYS_USE_ROCM) && ROCPROFSYS_USE_ROCM > 0
 
 #    include <timemory/defines.h>
@@ -281,11 +283,11 @@ config_settings(const std::shared_ptr<settings>& _config)
 
         if(_skip_domains.count(_v) > 0) return;
 
-        auto _op_option_name = JOIN('_', "ROCPROFSYS_ROCM", _domain_name, "OPERATIONS");
+        auto _op_option_name = fmt::format("ROCPROFSYS_ROCM_{}_OPERATIONS", _domain_name);
         auto _eop_option_name =
-            JOIN('_', "ROCPROFSYS_ROCM", _domain_name, "OPERATIONS_EXCLUDE");
+            fmt::format("ROCPROFSYS_ROCM_{}_OPERATIONS_EXCLUDE", _domain_name);
         auto _bt_option_name =
-            JOIN('_', "ROCPROFSYS_ROCM", _domain_name, "OPERATIONS_ANNOTATE_BACKTRACE");
+            fmt::format("ROCPROFSYS_ROCM_{}_OPERATIONS_ANNOTATE_BACKTRACE", _domain_name);
 
         auto _op_choices = std::vector<std::string>{};
         for(auto itr : _domain.operations)
@@ -343,10 +345,9 @@ config_settings(const std::shared_ptr<settings>& _config)
 
     std::sort(_domain_choices.begin(), _domain_choices.end());
 
-    namespace join = ::timemory::join;
     auto _domain_description =
-        JOIN("", "Specification of ROCm domains to trace/profile. Choices: ",
-             join::join(join::array_config{ ", ", "", "" }, _domain_choices));
+        fmt::format("Specification of ROCm domains to trace/profile. Choices: {}",
+                    fmt::join(_domain_choices, ", "));
     auto _domain_defaults = std::string{ "hip_runtime_api,marker_api,kernel_dispatch,"
                                          "memory_copy,scratch_memory" };
 
