@@ -55,7 +55,7 @@
 namespace rocr {
 
 constexpr size_t DEFAULT_COUNTED_QUEUE_SIZE = 16384;
-constexpr size_t DEFAULT_GPU_HW_QUEUES_MAX = 4;
+constexpr uint32_t DEFAULT_GPU_HW_QUEUES_MAX = 4;
 
 class Flag {
  public:
