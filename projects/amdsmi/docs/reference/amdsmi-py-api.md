@@ -4224,6 +4224,8 @@ Field | Description
 `cu_occupancy` | Compute Unit usage in percents
 `evicted_time` | Time that queues are evicted on a GPU in milliseconds
 
+Sum of the process memory is not expected to be the total memory usage.
+
 Exceptions that can be thrown by `amdsmi_get_gpu_compute_process_info` function:
 
 * `AmdSmiLibraryException`
