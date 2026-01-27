@@ -391,11 +391,15 @@ ncclResult_t ncclTopoCheckMNNVL(struct ncclTopoSystem* system, struct ncclPeerIn
   nvmlGpuFabricInfoV_t *fabricInfo1 = &info1->fabricInfo;
   nvmlGpuFabricInfoV_t *fabricInfo2 = &info2->fabricInfo;
   // A zero UUID means we don't have MNNVL fabric info
-  if ((((long *)&fabricInfo2->clusterUuid)[0]|((long *)fabricInfo2->clusterUuid)[1]) == 0) return ncclSuccess;
+  unsigned long uuid0 = 0;
+  unsigned long uuid1 = 0;
+  memcpy(&uuid0, fabricInfo2->clusterUuid, sizeof(uuid0));
+  memcpy(&uuid1, fabricInfo2->clusterUuid + sizeof(uuid0), sizeof(uuid1));
+  if ((uuid0 | uuid1) == 0) return ncclSuccess;
   if ((memcmp(fabricInfo1->clusterUuid, fabricInfo2->clusterUuid, NVML_GPU_FABRIC_UUID_LEN) == 0) &&
       (fabricInfo1->cliqueId == fabricInfo2->cliqueId)) {
     TRACE(NCCL_NET, "MNNVL matching peer 0x%lx UUID %lx.%lx cliqueId 0x%x",
-         info2->busId, ((long *)fabricInfo2->clusterUuid)[0], ((long *)fabricInfo2->clusterUuid)[1], fabricInfo2->cliqueId);
+         info2->busId, uuid0, uuid1, fabricInfo2->cliqueId);
     *ret = 1;
   }
   return ncclSuccess;
@@ -936,9 +940,6 @@ void ncclTopoFree(struct ncclTopoSystem* system) {
   free(system);
 }
 
-NCCL_PARAM(NChannelsPerNetPeer, "NCHANNELS_PER_NET_PEER", -1);
-NCCL_PARAM(NChannelsPerPeer, "NCHANNELS_PER_PEER", -2);
-
 static ncclResult_t ncclTopoGetNchannels(struct ncclComm* comm, int g /*local gpu index*/, int peerRank, int* nChannels) {
   int peer;
   struct ncclTopoSystem* system = comm->topo;
@@ -959,10 +960,10 @@ static ncclResult_t ncclTopoGetNchannels(struct ncclComm* comm, int g /*local gp
     }
   } else {
     // Remote rank, use network
-    int nNetChannels = ncclParamNChannelsPerNetPeer();
-    if (nNetChannels == -1) {
-      //start from 2 channels per NIC and reduce with scale
-      nNetChannels = 2;
+    int nNetChannels = comm->config.nChannelsPerNetPeer;
+    if (nNetChannels == NCCL_CONFIG_UNDEF_INT) {
+       //start from 2 channels per NIC and reduce with scale
+       nNetChannels = 2;
 
       // check if we need to use more than one NIC, hence more than one channel
       int netCountByBw = 1, nChannelsMax = nNetChannels;
@@ -1014,7 +1015,7 @@ ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm) {
     comm->p2pnChannels = std::min(pow2Up(comm->p2pnChannels), pow2Down(ncclDevMaxChannelsForArgsBytes(ncclParamWorkArgsBytes())));
   } else {
     // Round to next pow2 nChannelsPerPeer and nChannels
-    comm->p2pnChannelsPerPeer = (ncclParamNChannelsPerPeer() == -2 ? pow2Up(minChannels) : ncclParamNChannelsPerPeer());
+    comm->p2pnChannelsPerPeer = pow2Up(minChannels);
     // Doubling P2P channels per peer on single node
     if (comm->topo->nodes[GPU].count == comm->topo->nRanks && (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942") || IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950"))) comm->p2pnChannelsPerPeer *= 2;
     comm->p2pnChannels = std::min(pow2Up(comm->p2pnChannels), 4*CHANNEL_LIMIT);

@@ -430,7 +430,7 @@ hsa_status_t KfdVirtioDriver::MakeMemoryUnresident(const void* mem) const {
 }
 
 hsa_status_t KfdVirtioDriver::CreateQueue(uint32_t node_id, HSA_QUEUE_TYPE type, uint32_t queue_pct,
-                                          HSA_QUEUE_PRIORITY priority, uint32_t sdma_engine_id,
+                                          HSA::hsa_amd_queue_priority_internal_t priority, uint32_t sdma_engine_id,
                                           void* queue_addr, uint64_t queue_size_bytes,
                                           HsaEvent* event, HsaQueueResource& queue_resource) const {
   if (vhsaKmtCreateQueueExt(node_id, type, queue_pct, priority, sdma_engine_id, queue_addr,
@@ -447,7 +447,7 @@ hsa_status_t KfdVirtioDriver::DestroyQueue(HSA_QUEUEID queue_id) const {
 }
 
 hsa_status_t KfdVirtioDriver::UpdateQueue(HSA_QUEUEID queue_id, uint32_t queue_percentage,
-                                          HSA_QUEUE_PRIORITY priority, void* queue_mem,
+                                          HSA::hsa_amd_queue_priority_internal_t priority, void* queue_mem,
                                           uint64_t queue_size, HsaEvent* event) const {
   return HSA_STATUS_ERROR;
 }
