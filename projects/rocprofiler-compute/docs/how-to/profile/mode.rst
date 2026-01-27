@@ -617,11 +617,11 @@ The following example demonstrates profiling roofline data only:
    INFO Kernel Selection: None
    INFO Dispatch Selection: None
    INFO Filtered sections: ['4']
-   INFO 
+   INFO
    INFO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
    INFO Collecting Performance Counters (Roofline Only)
    INFO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-   INFO 
+   INFO
    INFO [Run 1/3][Approximate profiling time left: pending first measurement...]
    INFO [profiling] Current input file: /app/projects/rocprofiler-compute/workloads/occupancy/MI300X_A1/perfmon/pmc_perf_0.txt
    ...
@@ -659,6 +659,172 @@ plot.
    :alt: Sample ROCm Compute Profiler roofline output
    :width: 800
 
+.. _torch-operator-mapping:
+
+Torch Operator Mapping
+========================
+
+To analyze performance metrics at the PyTorch operator level, ROCm Compute Profiler
+offers Torch Operator Mapping functionality. This feature maps performance counters
+to specific PyTorch operators, enabling detailed performance analysis of
+PyTorch workloads at the operator granularity.
+
+When enabled, this feature instruments your PyTorch application to correlate GPU
+kernel executions with their originating PyTorch operators, providing insights into
+which operators contribute to specific performance counter values.
+
+.. note::
+
+   **PyTorch Operators vs GPU Kernels**: PyTorch operators (such as ``conv2d``,
+   ``linear``, ``relu``) are high-level API functions. When executed on GPU, these
+   operators may dispatch one or more low-level GPU kernels (such as
+   ``implicit_convolve_sgemm``) that perform the actual computation on the hardware.
+   The ``--torch-trace`` feature provides operator-level attribution by injecting
+   markers that map collected kernel performance counters to their originating PyTorch
+   operators.
+
+Requirements
+------------
+
+* Valid PyTorch installation in the profiling environment
+* PyTorch application must be run as a Python script or Python command
+
+Usage
+-----
+
+To enable Torch operator mapping, use the ``--torch-trace`` option when profiling
+a PyTorch workload:
+
+.. code-block:: shell-session
+
+   $ rocprof-compute profile --name mnist_torch --torch-trace -- python train.py
+
+                                    __                                       _
+    _ __ ___   ___ _ __  _ __ ___  / _|       ___ ___  _ __ ___  _ __  _   _| |_ ___
+   | '__/ _ \ / __| '_ \| '__/ _ \| |_ _____ / __/ _ \| '_ ` _ \| '_ \| | | | __/ _ \
+   | | | (_) | (__| |_) | | | (_) |  _|_____| (_| (_) | | | | | | |_) | |_| | ||  __/
+   |_|  \___/ \___| .__/|_|  \___/|_|        \___\___/|_| |_| |_| .__/ \__,_|\__\___|
+                  |_|                                           |_|
+
+   rocprofiler-compute version: 3.4.0
+   Profiler choice: rocprofiler-sdk
+   Path: /home/auser/workloads/mnist_torch/MI300X_A1
+   Target: MI300X_A1
+   Command: python train.py
+   Torch Trace: Enabled
+   Kernel Selection: None
+   Dispatch Selection: None
+   Hardware Blocks: All
+
+   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   Collecting Performance Counters
+   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   ...
+
+Output
+------
+
+When Torch operator mapping is enabled, profiling generates additional output files
+in the workload directory that correlate PyTorch operators with GPU kernels and
+their performance counters:
+
+``<workload_name>_torch_trace.csv``
+   Contains the merged operator-to-kernel mapping with performance counter data. These
+   are temporary files that are removed after consolidation into per operator CSV files.
+   Key columns include:
+
+   * ``Function`` - PyTorch operator name (e.g., ``aten::conv2d``, ``aten::linear``)
+   * ``Kernel_Name`` - GPU kernel name dispatched by the operator
+   * ``Counter_Name`` / ``Counter_Value`` - Hardware performance counter measurements
+   * ``Start_Timestamp_function`` / ``End_Timestamp_function`` - Operator execution time
+   * ``Start_Timestamp_kernel`` / ``End_Timestamp_kernel`` - Kernel execution time
+   * ``Correlation_Id`` - Links operator calls to their kernel dispatches
+
+.. table:: SQC_ICACHE_INFLIGHT_LEVEL_torch_trace.csv from profiling mnist model.
+   :widths: 20 80
+| Domain                | Function                        |   Process_Id |   Thread_Id |   Correlation_Id |   Start_Timestamp_function |   End_Timestamp_function |   GPU_ID |   Dispatch_ID |     PID |   Grid_Size |   Workgroup_Size |   LDS_Per_Workgroup |   Scratch_Per_Workitem |   Arch_VGPR |   Accum_VGPR |   SGPR | Kernel_Name             |   Start_Timestamp_kernel |   End_Timestamp_kernel |   Kernel_ID | Counter_Name              |   Counter_Value |
+|:----------------------|:--------------------------------|-------------:|------------:|-----------------:|---------------------------:|-------------------------:|---------:|--------------:|--------:|------------:|-----------------:|--------------------:|-----------------------:|------------:|-------------:|-------:|:------------------------|-------------------------:|-----------------------:|------------:|:--------------------------|----------------:|
+| MARKER_CORE_RANGE_API | torch.manual_seed:#1@main.py:99 |      1214226 |     1214226 |                0 |           7072577770736616 |         7072577771920451 |        4 |             1 | 1214226 |         512 |              512 |                   0 |                      0 |          16 |            0 |     32 | __amd_rocclr_copyBuffer |         7072577923044453 |       7072577923046813 |           6 | CPC_CPC_STAT_STALL        |           17946 |
+| MARKER_CORE_RANGE_API | torch.manual_seed:#1@main.py:99 |      1214226 |     1214226 |                0 |           7072577770736616 |         7072577771920451 |        4 |             1 | 1214226 |         512 |              512 |                   0 |                      0 |          16 |            0 |     32 | __amd_rocclr_copyBuffer |         7072577923044453 |       7072577923046813 |           6 | CPC_CPC_TCIU_BUSY         |             714 |
+| MARKER_CORE_RANGE_API | torch.manual_seed:#1@main.py:99 |      1214226 |     1214226 |                0 |           7072577770736616 |         7072577771920451 |        4 |             1 | 1214226 |         512 |              512 |                   0 |                      0 |          16 |            0 |     32 | __amd_rocclr_copyBuffer |         7072577923044453 |       7072577923046813 |           6 | CPF_CPF_STAT_IDLE         |               0 |
+| MARKER_CORE_RANGE_API | torch.manual_seed:#1@main.py:99 |      1214226 |     1214226 |                0 |           7072577770736616 |         7072577771920451 |        4 |             1 | 1214226 |         512 |              512 |                   0 |                      0 |          16 |            0 |     32 | __amd_rocclr_copyBuffer |         7072577923044453 |       7072577923046813 |           6 | CPF_CPF_STAT_STALL        |              78 |
+| MARKER_CORE_RANGE_API | torch.manual_seed:#1@main.py:99 |      1214226 |     1214226 |                0 |           7072577770736616 |         7072577771920451 |        4 |             1 | 1214226 |         512 |              512 |                   0 |                      0 |          16 |            0 |     32 | __amd_rocclr_copyBuffer |         7072577923044453 |       7072577923046813 |           6 | GRBM_SPI_BUSY             |            7277 |
+| MARKER_CORE_RANGE_API | torch.manual_seed:#1@main.py:99 |      1214226 |     1214226 |                0 |           7072577770736616 |         7072577771920451 |        4 |             1 | 1214226 |         512 |              512 |                   0 |                      0 |          16 |            0 |     32 | __amd_rocclr_copyBuffer |         7072577923044453 |       7072577923046813 |           6 | SPI_RA_REQ_NO_ALLOC_CSN   |               8 |
+| MARKER_CORE_RANGE_API | torch.manual_seed:#1@main.py:99 |      1214226 |     1214226 |                0 |           7072577770736616 |         7072577771920451 |        4 |             1 | 1214226 |         512 |              512 |                   0 |                      0 |          16 |            0 |     32 | __amd_rocclr_copyBuffer |         7072577923044453 |       7072577923046813 |           6 | SPI_RA_RES_STALL_CSN      |               0 |
+| MARKER_CORE_RANGE_API | torch.manual_seed:#1@main.py:99 |      1214226 |     1214226 |                0 |           7072577770736616 |         7072577771920451 |        4 |             1 | 1214226 |         512 |              512 |                   0 |                      0 |          16 |            0 |     32 | __amd_rocclr_copyBuffer |         7072577923044453 |       7072577923046813 |           6 | SPI_RA_SGPR_SIMD_FULL_CSN |               0 |
+| MARKER_CORE_RANGE_API | torch.manual_seed:#1@main.py:99 |      1214226 |     1214226 |                0 |           7072577770736616 |         7072577771920451 |        4 |             1 | 1214226 |         512 |              512 |                   0 |                      0 |          16 |            0 |     32 | __amd_rocclr_copyBuffer |         7072577923044453 |       7072577923046813 |           6 | SPI_RA_TGLIM_CU_FULL_CSN  |               0 |
+| MARKER_CORE_RANGE_API | torch.manual_seed:#1@main.py:99 |      1214226 |     1214226 |                0 |           7072577770736616 |         7072577771920451 |        4 |             1 | 1214226 |         512 |              512 |                   0 |                      0 |          16 |            0 |     32 | __amd_rocclr_copyBuffer |         7072577923044453 |       7072577923046813 |           6 | SPI_RA_TMP_STALL_CSN      |               0 |
+
+``torch_trace/`` directory
+   Contains individual CSV files for each PyTorch operator detected during profiling.
+   Each file is named after the operator (e.g., ``nn_functional_conv2d.csv``,
+   ``nn_functional_linear.csv``, ``relu.csv``) and contains all kernel executions and
+   performance counters for that specific operator. Columns include:
+
+   * ``Operator_Name`` - PyTorch operator name
+   * ``Context_Id`` - Source location where operator was called (e.g., ``conv2d:10@conv.py:543``)
+   * ``Counter_Name`` / ``Counter_Value`` - Hardware counter measurements
+   * ``Start_Timestamp_function`` / ``End_Timestamp_function`` - Operator timing
+   * ``Start_Timestamp_kernel`` / ``End_Timestamp_kernel`` - Kernel timing
+
+   This per-operator organization enables focused analysis of specific operators without
+   processing the entire trace.
+
+.. table:: torch_trace/ones_like.csv from profiling mnist model.
+   :widths: 20 80
+
+| Operator_Name   | Context_Id        | Kernel_Name                                                                                                                                                             | Counter_Name                   |   Counter_Value |   Start_Timestamp_function |   End_Timestamp_function |   Start_Timestamp_kernel |   End_Timestamp_kernel |
+|:----------------|:------------------|:------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:-------------------------------|----------------:|---------------------------:|-------------------------:|-------------------------:|-----------------------:|
+| torch.ones_like | 1@__init__.py:231 | void at::native::vectorized_elementwise_kernel<4, at::native::FillFunctor<float>, std::array<char*, 1ul> >(int, at::native::FillFunctor<float>, std::array<char*, 1ul>) | CPC_CPC_STAT_BUSY              |           23004 |           6789210204040073 |         6789210223815845 |         6789210223810274 |       6789210223811914 |
+| torch.ones_like | 1@__init__.py:231 | void at::native::vectorized_elementwise_kernel<4, at::native::FillFunctor<float>, std::array<char*, 1ul> >(int, at::native::FillFunctor<float>, std::array<char*, 1ul>) | CPC_CPC_STAT_IDLE              |               0 |           6789210204040073 |         6789210223815845 |         6789210223810274 |       6789210223811914 |
+| torch.ones_like | 1@__init__.py:231 | void at::native::vectorized_elementwise_kernel<4, at::native::FillFunctor<float>, std::array<char*, 1ul> >(int, at::native::FillFunctor<float>, std::array<char*, 1ul>) | CPC_CPC_STAT_STALL             |            6715 |           6789281060081123 |         6789281079930585 |         6789281079932564 |       6789281079934204 |
+| torch.ones_like | 1@__init__.py:231 | void at::native::vectorized_elementwise_kernel<4, at::native::FillFunctor<float>, std::array<char*, 1ul> >(int, at::native::FillFunctor<float>, std::array<char*, 1ul>) | CPC_CPC_TCIU_BUSY              |             534 |           6789281060081123 |         6789281079930585 |         6789281079932564 |       6789281079934204 |
+| torch.ones_like | 1@__init__.py:231 | void at::native::vectorized_elementwise_kernel<4, at::native::FillFunctor<float>, std::array<char*, 1ul> >(int, at::native::FillFunctor<float>, std::array<char*, 1ul>) | CPC_CPC_TCIU_IDLE              |           20569 |           6789352286866085 |         6789352306292985 |         6789352306292904 |       6789352306294424 |
+| torch.ones_like | 1@__init__.py:231 | void at::native::vectorized_elementwise_kernel<4, at::native::FillFunctor<float>, std::array<char*, 1ul> >(int, at::native::FillFunctor<float>, std::array<char*, 1ul>) | CPC_CPC_UTCL2IU_BUSY           |             358 |           6789352286866085 |         6789352306292985 |         6789352306292904 |       6789352306294424 |
+| torch.ones_like | 1@__init__.py:231 | void at::native::vectorized_elementwise_kernel<4, at::native::FillFunctor<float>, std::array<char*, 1ul> >(int, at::native::FillFunctor<float>, std::array<char*, 1ul>) | CPC_CPC_UTCL2IU_IDLE           |           20046 |           6789422289668823 |         6789422308914683 |         6789422308913883 |       6789422308915403 |
+| torch.ones_like | 1@__init__.py:231 | void at::native::vectorized_elementwise_kernel<4, at::native::FillFunctor<float>, std::array<char*, 1ul> >(int, at::native::FillFunctor<float>, std::array<char*, 1ul>) | CPC_ME1_BUSY_FOR_PACKET_DECODE |           16331 |           6789422289668823 |         6789422308914683 |         6789422308913883 |       6789422308915403 |
+| torch.ones_like | 1@__init__.py:231 | void at::native::vectorized_elementwise_kernel<4, at::native::FillFunctor<float>, std::array<char*, 1ul> >(int, at::native::FillFunctor<float>, std::array<char*, 1ul>) | CPC_ME1_DC0_SPI_BUSY           |             455 |           6789492192490428 |         6789492210892375 |         6789492210897243 |       6789492210898883 |
+| torch.ones_like | 1@__init__.py:231 | void at::native::vectorized_elementwise_kernel<4, at::native::FillFunctor<float>, std::array<char*, 1ul> >(int, at::native::FillFunctor<float>, std::array<char*, 1ul>) | CPC_UTCL1_STALL_ON_TRANSLATION |             374 |           6789492192490428 |         6789492210892375 |         6789492210897243 |       6789492210898883 |
+
+``pmc_perf.csv``
+   Standard performance counter data (same as non-torch profiling)
+
+This data enables analysis such as:
+
+* Identifying which PyTorch operators executed which GPU kernels
+* Aggregating performance counter values by operator
+* Correlating operator-level timing with kernel-level hardware metrics
+* Tracing the execution flow from high-level PyTorch API to low-level GPU kernels
+
+Limitations
+-----------
+
+.. note::
+
+   * The ``--torch-trace`` option requires the application to be a Python command
+     or Python script.
+
+   * A valid PyTorch installation must be available in the environment where profiling
+     is executed.
+
+   * This feature adds instrumentation overhead to track operator boundaries. For
+     performance-critical measurements, consider profiling without this option first.
+
+Combined with Other Options
+----------------------------
+
+Torch operator mapping can be combined with other profiling options:
+
+.. code-block:: shell-session
+
+   # Combine with block filtering for targeted counter collection
+   $ rocprof-compute profile --name mnist --torch-trace -b 11 12 -- python train.py
+
+   # Combine with iteration multiplexing
+   $ rocprof-compute profile --name mnist --torch-trace --iteration-multiplexing kernel -- python train.py
+
+   # Combine with kernel filtering (filters by GPU kernel name)
+   $ rocprof-compute profile --name mnist --torch-trace -k elementwise -- python train.py
 
 .. _iteration-multiplexing:
 
@@ -687,7 +853,7 @@ To enable iteration multiplexing in ROCm Compute Profiler, use the
 ``--iteration-multiplexing`` option in your profiling command. You can optionally specify
 the policy for multiplexing. The available policies are:
 
-* ``kernel`` 
+* ``kernel``
    The counters are divided based on the kernels being executed. Each kernel call
    for a particular kernel collects a different subset of counters.
 * ``kernel_launch_params``
@@ -707,10 +873,10 @@ By default, if no policy is specified, ROCm Compute Profiler uses the ``kernel_l
      Iteration multiplexing is only supported when using ROCm Compute Profiler with
      the native counter collection tool. Ensure that ``--attach-pid`` is not used in your profiling command.
 
-   * Ensure that your workload runs for enough iterations to cover all counter subsets. 
-     When using iteration multiplexing, the total number of iterations, for each kernel (for ``kernel`` policy)  
-     or for each unique kernel and launch parameters combination (for ``kernel_launch_params`` policy), 
-     specified in the workload should be sufficient to cover all subsets of counters. If the number of iterations 
+   * Ensure that your workload runs for enough iterations to cover all counter subsets.
+     When using iteration multiplexing, the total number of iterations, for each kernel (for ``kernel`` policy)
+     or for each unique kernel and launch parameters combination (for ``kernel_launch_params`` policy),
+     specified in the workload should be sufficient to cover all subsets of counters. If the number of iterations
      is too low, some counters may not be collected.
 
    * Launch paramaters for ``kernel_launch_params`` policy.
@@ -736,11 +902,11 @@ The following example demonstrates how to use iteration multiplexing with the
    [INFO] Kernel Selection: None
    [INFO] Dispatch Selection: None
    [INFO] Filtered sections: All
-   [INFO] 
+   [INFO]
    [INFO] ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
    [INFO] Collecting Performance Counters
    [INFO] ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-   [INFO] 
+   [INFO]
    [INFO] Using native counter collection tool: /tmp/rocprofiler-compute-tool-hlz4fagh/librocprofiler-compute-tool.so
    [INFO] Iteration multiplexing: kernel
    [INFO] [profiling] Current input files: /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/SQC_DCACHE_INFLIGHT_LEVEL.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/SQC_ICACHE_INFLIGHT_LEVEL.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/SQ_IFETCH_LEVEL.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/SQ_INST_LEVEL_LDS.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/SQ_INST_LEVEL_SMEM.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/SQ_INST_LEVEL_VMEM.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/SQ_LEVEL_WAVES.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/pmc_perf_0.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/pmc_perf_1.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/pmc_perf_10.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/pmc_perf_11.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/pmc_perf_12.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/pmc_perf_2.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/pmc_perf_3.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/pmc_perf_4.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/pmc_perf_5.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/pmc_perf_6.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/pmc_perf_7.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/pmc_perf_8.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/pmc_perf_9.txt

@@ -32,6 +32,7 @@ THE SOFTWARE.
 #include <elf/elf.hpp>
 #include "comgrctx.hpp"
 #include "hip_comgr_helper.hpp"
+#include "hip_platform.hpp"
 
 namespace hip {
 hipError_t ihipFree(void* ptr);
@@ -265,6 +266,39 @@ hipError_t StatCO::digestFatBinary(const void* data, FatBinaryInfo*& programs) {
     return hipSuccess;
   }
 
+  // Fat binary wrapper structure (matches hip_platform.cpp definition)
+  // Defined locally to keep kpack integration as implementation detail
+  struct __CudaFatBinaryWrapper {
+    unsigned int magic;
+    unsigned int version;
+    void* binary;
+    void* dummy1;  // reserved1: bundle index for multi-TU binaries
+  };
+
+  // Check if this is a kpack'd binary (HIPK magic)
+  const auto* wrapper = reinterpret_cast<const __CudaFatBinaryWrapper*>(data);
+  if (wrapper->magic == symbols::kHipkMagic && wrapper->version == 1) {
+    // Discover binary path from the wrapper address using existing CLR utility
+    std::string binary_path;
+    size_t file_offset = 0;
+    if (!amd::Os::FindFileNameFromAddress(data, &binary_path, &file_offset)) {
+      LogError("Failed to discover binary path for kpack loading");
+      return hipErrorNoBinaryForGpu;
+    }
+
+    // Get bundle index from wrapper->dummy1 (reserved1 field)
+    // For multi-TU binaries, this identifies which bundle this wrapper corresponds to
+    uint64_t bundle_index = reinterpret_cast<uintptr_t>(wrapper->dummy1);
+
+    // wrapper->binary points to msgpack metadata
+    // ExtractKpackBinary will error if ROCM_KPACK_ENABLED=OFF
+    FatBinaryInfo* fatBinaryInfo = new FatBinaryInfo(
+        FatBinaryInfo::KpackParams{wrapper->binary, std::move(binary_path), bundle_index});
+    hipError_t err = fatBinaryInfo->ExtractKpackBinary(g_devices);
+    programs = fatBinaryInfo;
+    return err;
+  }
+
   // Create a new fat binary object and extract the fat binary for all devices.
   FatBinaryInfo* fatBinaryInfo = new FatBinaryInfo(nullptr, data);
   hipError_t err = fatBinaryInfo->ExtractFatBinaryUsingCOMGR(g_devices);
@@ -285,6 +319,26 @@ FatBinaryInfo** StatCO::addFatBinary(const void* data, bool initialized, bool& s
 
   success = (err == hipSuccess);
   return &modules_[data];
+}
+
+FatBinaryInfo** StatCO::addKpackBinary(const void* hipk_metadata, const void* wrapper_addr,
+                                        bool initialized, bool& success) {
+  amd::ScopedLock lock(sclock_);
+
+  // Use wrapper_addr as the key (same as data pointer for normal path)
+  // This allows digestFatBinary to access the wrapper and detect HIPK magic
+  module_to_hostModule_.insert(std::make_pair(&modules_[wrapper_addr], wrapper_addr));
+
+  if (!initialized) {
+    // Deferred loading: modules_[wrapper_addr] is nullptr, digestFatBinary will handle it later
+    success = true;
+    return &modules_[wrapper_addr];
+  }
+
+  // Immediate loading: call digestFatBinary which handles kpack detection
+  hipError_t err = digestFatBinary(wrapper_addr, modules_[wrapper_addr]);
+  success = (err == hipSuccess);
+  return &modules_[wrapper_addr];
 }
 
 hipError_t StatCO::removeFatBinary(FatBinaryInfo** module) {
