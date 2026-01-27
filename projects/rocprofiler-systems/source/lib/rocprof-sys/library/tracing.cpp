@@ -173,15 +173,15 @@ thread_init()
         {
             LOG_CRITICAL("thread setup failed. thread info not initialized: {}",
                          [&_tinfo]() {
-                             if(_tinfo) return JOIN("", *_tinfo);
+                             if(_tinfo) return _tinfo->as_string();
                              return std::string{ "no thread_info" };
                          }());
             std::exit(1);
         }
 
-        if(_tidx > 0) threading::set_thread_name(JOIN(" ", "Thread", _tidx).c_str());
+        if(_tidx > 0) threading::set_thread_name(fmt::format("Thread {}", _tidx).c_str());
         thread_data<thread_bundle_t>::construct(
-            JOIN('/', "rocprofsys/process", process::get_id(), "thread", _tidx),
+            fmt::format("rocprofsys/process/{}/thread/{}", process::get_id(), _tidx),
             quirk::config<quirk::auto_start>{});
         // save the hash maps
         get_timemory_hash_ids(_tidx)     = tim::get_hash_ids();

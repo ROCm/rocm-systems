@@ -70,7 +70,7 @@ class AMDSMIParser(argparse.ArgumentParser):
     """
     def __init__(self, version, list, static, firmware, bad_pages, metric,
                  process, profile, event, topology, set_value, reset, monitor,
-                 xgmi, partition, ras, node, default, sys_argv=None,
+                 xgmi, partition, ras, node, rocm_smi, default, sys_argv=None,
                  helpers=None):
 
         # Helper variables
@@ -112,6 +112,17 @@ class AMDSMIParser(argparse.ArgumentParser):
             epilog="For detailed help on specific commands: amd-smi [command] -h",
             add_help=True,
             prog=self.program_name)
+
+        # Add top-level --rocm-smi flag
+        self.add_argument('--rocm-smi', action='store_true', 
+                         help='Display GPU information in ROCm-SMI compatible format')
+
+        # Add top-level command modifiers (for --rocm-smi and other top-level flags)
+        loglevel_choices = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+        loglevel_help = f"Set the logging level from the possible choices: {', '.join(loglevel_choices)}"
+        self.add_argument('--loglevel', action='store', type=str.upper, required=False, 
+                         help=loglevel_help, default='ERROR', metavar='LEVEL',
+                         choices=loglevel_choices)
 
         # Setup subparsers
         self.subparsers = self.add_subparsers(
