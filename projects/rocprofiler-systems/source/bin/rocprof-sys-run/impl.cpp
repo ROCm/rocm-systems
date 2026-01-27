@@ -192,6 +192,10 @@ prepare_environment_for_run(parser_data_t& _data)
         rocprofsys::argparse::add_ld_preload(_data);
         rocprofsys::argparse::add_ld_library_path(_data);
     }
+
+    rocprofsys::argparse::add_torch_library_path(_data, _data.verbose > 0);
+
+    rocprofsys::common::consolidate_env_entries(_data.current);
 }
 
 void

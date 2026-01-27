@@ -23,17 +23,21 @@
 #include "library/components/exit_gotcha.hpp"
 #include "core/common.hpp"
 #include "core/config.hpp"
-#include "core/debug.hpp"
 #include "core/state.hpp"
+#include "core/timemory.hpp"
 #include "library/runtime.hpp"
 
 #include <timemory/backends/threading.hpp>
 #include <timemory/process/threading.hpp>
 #include <timemory/utility/types.hpp>
 
+#include "logger/debug.hpp"
+
+#include <spdlog/fmt/ranges.h>
+
 #include <cstddef>
-#include <cstdio>
 #include <cstdlib>
+#include <tuple>
 #include <unistd.h>
 
 namespace rocprofsys
@@ -63,37 +67,19 @@ invoke_exit_gotcha(const exit_gotcha::gotcha_data& _data, FuncT _func, Args... _
 
     if(get_state() < State::Finalized && !is_child_process())
     {
-        if(config::settings_are_configured())
-        {
-            ROCPROFSYS_VERBOSE(0, "finalizing %s before calling %s(%s)...\n",
-                               get_exe_name().c_str(), _data.tool_id.c_str(),
-                               JOIN(", ", _args...).c_str());
-        }
-        else
-        {
-            ROCPROFSYS_BASIC_VERBOSE(0, "finalizing %s before calling %s(%s)...\n",
-                                     get_exe_name().c_str(), _data.tool_id.c_str(),
-                                     JOIN(", ", _args...).c_str());
-        }
+        LOG_DEBUG("Finalizing {} before calling {}({})...", get_exe_name(), _data.tool_id,
+                  fmt::join(std::forward_as_tuple(_args...), ", "));
 
         rocprofsys_finalize();
     }
 
-    if(config::settings_are_configured())
-    {
-        ROCPROFSYS_VERBOSE(0, "calling %s(%s) in %s...\n", _data.tool_id.c_str(),
-                           JOIN(", ", _args...).c_str(), get_exe_name().c_str());
-    }
-    else
-    {
-        ROCPROFSYS_BASIC_VERBOSE(0, "calling %s(%s) in %s...\n", _data.tool_id.c_str(),
-                                 JOIN(", ", _args...).c_str(), get_exe_name().c_str());
-    }
+    LOG_DEBUG("Calling {}({}) in {}...", _data.tool_id,
+              fmt::join(std::forward_as_tuple(_args...), ", "), get_exe_name().c_str());
 
     if(_exit_info.is_known && _exit_info.exit_code != 0)
     {
-        ROCPROFSYS_BASIC_VERBOSE(0, "%s exiting with non-zero exit code: %i...\n",
-                                 get_exe_name().c_str(), _exit_info.exit_code);
+        LOG_DEBUG("{} exiting with non-zero exit code: {}...", get_exe_name(),
+                  _exit_info.exit_code);
     }
 
     (*_func)(_args...);
@@ -106,39 +92,6 @@ void
 exit_gotcha::operator()(const gotcha_data& _data, exit_func_t _func, int _ec) const
 {
     _exit_info = { true, _data.tool_id.find("quick") != std::string::npos, _ec };
-
-    if(config::get_use_amd_smi())
-    {
-        threading::clear_callbacks();
-
-        if(get_state() < ::rocprofsys::State::Finalized && !is_child_process())
-        {
-            if(config::settings_are_configured())
-            {
-                ROCPROFSYS_VERBOSE(0, "finalizing %s before calling %s(%i)...\n",
-                                   get_exe_name().c_str(), _data.tool_id.c_str(), _ec);
-            }
-            else
-            {
-                ROCPROFSYS_BASIC_VERBOSE(0, "finalizing %s before calling %s(%i)...\n",
-                                         get_exe_name().c_str(), _data.tool_id.c_str(),
-                                         _ec);
-            }
-
-            rocprofsys_finalize();
-        }
-
-        if(config::settings_are_configured())
-        {
-            ROCPROFSYS_VERBOSE(
-                0, "calling _exit(%i) in %s to avoid AMD SMI cleanup issues...\n", _ec,
-                get_exe_name().c_str());
-        }
-
-        std::fflush(nullptr);
-        _exit(_ec);
-    }
-
     invoke_exit_gotcha(_data, _func, _ec);
 }
 

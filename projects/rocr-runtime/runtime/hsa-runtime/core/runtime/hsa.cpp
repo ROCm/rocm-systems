@@ -1804,7 +1804,7 @@ hsa_status_t hsa_code_object_serialize(
   IS_BAD_PTR(serialized_code_object);
   IS_BAD_PTR(serialized_code_object_size);
 
-  amd::hsa::code::AmdHsaCode *code = GetCodeManager()->FromHandle(code_object).get();
+  amd::hsa::code::AmdHsaCode *code = GetCodeManager()->FromHandle(code_object);
   if (!code) {
     return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
   }
@@ -1982,7 +1982,7 @@ hsa_status_t hsa_code_object_get_info(
   IS_OPEN();
   IS_BAD_PTR(value);
 
-  amd::hsa::code::AmdHsaCode *code = GetCodeManager()->FromHandle(code_object).get();
+  amd::hsa::code::AmdHsaCode *code = GetCodeManager()->FromHandle(code_object);
   if (!code) {
     return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
   }
@@ -2039,7 +2039,7 @@ hsa_status_t hsa_code_object_get_symbol(
   IS_BAD_PTR(symbol_name);
   IS_BAD_PTR(symbol);
 
-  amd::hsa::code::AmdHsaCode *code = GetCodeManager()->FromHandle(code_object).get();
+  amd::hsa::code::AmdHsaCode *code = GetCodeManager()->FromHandle(code_object);
   if (!code) {
     return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
   }
@@ -2059,7 +2059,7 @@ hsa_status_t hsa_code_object_get_symbol_from_name(
   IS_BAD_PTR(symbol_name);
   IS_BAD_PTR(symbol);
 
-  amd::hsa::code::AmdHsaCode *code = GetCodeManager()->FromHandle(code_object).get();
+  amd::hsa::code::AmdHsaCode *code = GetCodeManager()->FromHandle(code_object);
   if (!code) {
     return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
   }
@@ -2097,7 +2097,7 @@ hsa_status_t hsa_code_object_iterate_symbols(
   IS_OPEN();
   IS_BAD_PTR(callback);
 
-  amd::hsa::code::AmdHsaCode *code = GetCodeManager()->FromHandle(code_object).get();
+  amd::hsa::code::AmdHsaCode *code = GetCodeManager()->FromHandle(code_object);
   if (!code) {
     return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
   }

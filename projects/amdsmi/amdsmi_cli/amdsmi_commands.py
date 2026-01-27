@@ -226,6 +226,12 @@ class AMDSMICommands():
         # Set args.* to passed in arguments
         if gpu:
             args.gpu = gpu
+        
+        cpu_attributes = ["cpu"]
+        for attr in cpu_attributes:
+            if hasattr(args, 'cpu') and getattr(args, 'cpu'):
+                print("N/A")
+                return
 
         # Handle No GPU passed
         if args.gpu == None:
@@ -799,7 +805,8 @@ class AMDSMICommands():
                 static_dict['limit'] = limit_info
         if args.driver:
             driver_info_dict = {"name" : "N/A",
-                                "version" : "N/A"}
+                                "version" : "N/A",
+                                "os_kernel_version" : "N/A"}
 
             try:
                 driver_info = amdsmi_interface.amdsmi_get_gpu_driver_info(args.gpu)
@@ -807,6 +814,11 @@ class AMDSMICommands():
                 driver_info_dict["version"] = driver_info["driver_version"]
             except amdsmi_exception.AmdSmiLibraryException as e:
                 logging.debug("Failed to get driver info for gpu %s | %s", gpu_id, e.get_error_info())
+
+            try:
+                driver_info_dict["os_kernel_version"] = os.uname().release
+            except (AttributeError, OSError) as e:
+                logging.debug("Failed to get os kernel version for gpu %s | %s", gpu_id, e)
 
             static_dict['driver'] = driver_info_dict
         if args.board:
@@ -7517,10 +7529,12 @@ class AMDSMICommands():
         processors = amdsmi_interface.amdsmi_get_processor_handles()
         version_info = {"amd-smi": "N/A",
                         "amdgpu version": "N/A",
+                        "kernel version": "N/A",
                         "fw pldm version": "N/A",
                         "vbios version": "N/A",
                         "rocm version": (False, "N/A")}
         version_info['rocm version'] = amdsmi_interface.amdsmi_get_rocm_version()
+        version_info['kernel version'] = os.uname().release
         try:
             version_info["amdgpu version"] = amdsmi_interface.amdsmi_get_gpu_driver_info(processors[0])
         except amdsmi_exception.AmdSmiLibraryException as e:
@@ -7765,3 +7779,62 @@ class AMDSMICommands():
                 print(e)
 
         listener.stop()
+
+
+    def rocm_smi(self, args):
+        """
+        Display GPU information in ROCm-SMI compatible format (showAllConcise).
+        This provides a drop-in replacement for rocm-smi --showallconcise using amdsmi backend.
+        
+        Args:
+            args: Parsed arguments (unused for this command)
+        """
+        try:
+            # Import the ROCm-SMI compatible functions from the compatibility module
+            import sys
+            import os
+            # Add the current directory to path if needed
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            if current_dir not in sys.path:
+                sys.path.insert(0, current_dir)
+            
+            import amdsmi_rocm_smi_compat
+            showAllConcise = amdsmi_rocm_smi_compat.showAllConcise
+            listDevices = amdsmi_rocm_smi_compat.listDevices
+            initializeRsmi = amdsmi_rocm_smi_compat.initializeRsmi
+            check_runtime_status = amdsmi_rocm_smi_compat.check_runtime_status
+            
+            # Initialize AMD SMI
+            if not initializeRsmi():
+                logging.error("Failed to initialize AMD SMI")
+                return
+            
+            try:
+                # Get processor handles
+                deviceList = listDevices()
+                
+                if not deviceList:
+                    logging.error("No AMD GPU devices found")
+                    return
+                
+                # Check runtime status (low power state warning)
+                if not check_runtime_status():
+                    print("\nWARNING: AMD GPU device(s) is/are in a low-power state. Check power control/runtime_status\n")
+                
+                # Display ROCm-SMI compatible output
+                showAllConcise(deviceList)
+                
+            finally:
+                # Shutdown AMD SMI
+                try:
+                    amdsmi_interface.amdsmi_shut_down()
+                except:
+                    pass
+                    
+        except ImportError as e:
+            logging.error(f"Could not import ROCm-SMI compatibility module: {e}")
+            logging.error("Make sure amdsmi_rocm_smi_compat.py is in the amdsmi_cli directory")
+            print("ERROR: ROCm-SMI compatibility mode not available")
+        except Exception as e:
+            logging.error(f"Error in ROCm-SMI compatibility mode: {e}")
+            print(f"ERROR: {e}")

@@ -22,8 +22,8 @@ namespace RcclUnitTesting
     case ncclCollAllReduce:     return DefaultPrepData_Reduce(collArgs, true);
     case ncclCollGather:        return DefaultPrepData_Gather(collArgs, false);
     case ncclCollScatter:       return DefaultPrepData_Scatter(collArgs);
-    case ncclCollAllToAll:      return DefaultPrepData_AllToAll(collArgs);
-    case ncclCollAllToAllv:     return DefaultPrepData_AllToAllv(collArgs);
+    case ncclCollAlltoAll:      return DefaultPrepData_AllToAll(collArgs);
+    case ncclCollAlltoAllv:     return DefaultPrepData_AllToAllv(collArgs);
     case ncclCollSend:          return DefaultPrepData_Send(collArgs);
     case ncclCollRecv:          return DefaultPrepData_Recv(collArgs);
     default:
