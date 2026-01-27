@@ -574,7 +574,7 @@ Analysis database example
 
 .. code-block:: shell-session
 
-   $ rocprof-compute analyze --verbose --db test -p workloads/vmem/MI300X_A1 -p workloads/vmem1/MI300X_A1
+   $ rocprof-compute analyze --verbose --output-name test --output-format db -p workloads/nbody/MI300X_A1 -p workloads/nbody1/MI300X_A1
    DEBUG Execution mode = analyze
 
                                     __                                       _
