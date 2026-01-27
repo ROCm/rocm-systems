@@ -366,6 +366,194 @@ void restoreRankLogging(RankLogConfig& config)
     }
 }
 
+// ============================================================================
+// StderrCapture Implementation
+// ============================================================================
+
+StderrCapture::StderrCapture()
+    : m_savedStderr(-1), m_tempFd(-1), m_capturing(false)
+{
+}
+
+StderrCapture::~StderrCapture()
+{
+    stop();
+}
+
+bool StderrCapture::start()
+{
+    if(m_capturing)
+    {
+        return true; // Already capturing
+    }
+
+    // Create temp file for capturing stderr
+    char tmpPath[] = "/tmp/rccl_stderr_XXXXXX";
+    m_tempFd = ::mkstemp(tmpPath);
+    if(m_tempFd < 0)
+    {
+        return false;
+    }
+    m_tempPath = tmpPath;
+
+    // Redirect stderr to temp file
+    std::fflush(stderr);
+    m_savedStderr = ::dup(STDERR_FILENO);
+    if(m_savedStderr < 0)
+    {
+        ::close(m_tempFd);
+        ::unlink(m_tempPath.c_str());
+        m_tempFd = -1;
+        return false;
+    }
+
+    if(::dup2(m_tempFd, STDERR_FILENO) < 0)
+    {
+        ::close(m_savedStderr);
+        ::close(m_tempFd);
+        ::unlink(m_tempPath.c_str());
+        m_savedStderr = -1;
+        m_tempFd      = -1;
+        return false;
+    }
+
+    m_capturing = true;
+    return true;
+}
+
+void StderrCapture::stop()
+{
+    if(!m_capturing)
+    {
+        return;
+    }
+
+    // Restore stderr
+    std::fflush(stderr);
+    ::dup2(m_savedStderr, STDERR_FILENO);
+    ::close(m_savedStderr);
+    m_savedStderr = -1;
+
+    // Read captured output
+    ::lseek(m_tempFd, 0, SEEK_SET);
+    char    buf[4096];
+    ssize_t n;
+    while((n = ::read(m_tempFd, buf, sizeof(buf) - 1)) > 0)
+    {
+        buf[n] = '\0';
+        m_capturedOutput += buf;
+    }
+
+    // Cleanup temp file
+    ::close(m_tempFd);
+    ::unlink(m_tempPath.c_str());
+    m_tempFd    = -1;
+    m_capturing = false;
+}
+
+const std::string& StderrCapture::getOutput() const
+{
+    return m_capturedOutput;
+}
+
+bool StderrCapture::hasPattern(const std::string& pattern) const
+{
+    return m_capturedOutput.find(pattern) != std::string::npos;
+}
+
+void StderrCapture::reset()
+{
+    stop();
+    m_capturedOutput.clear();
+}
+
+bool StderrCapture::isCapturing() const
+{
+    return m_capturing;
+}
+
+// ============================================================================
+// StderrCaptureScope Implementation
+// ============================================================================
+
+StderrCaptureScope::StderrCaptureScope(StderrCapture& capture)
+    : m_capture(capture)
+{
+    m_capture.reset();
+    m_capture.start();
+}
+
+StderrCaptureScope::~StderrCaptureScope()
+{
+    m_capture.stop();
+}
+
+// ============================================================================
+// NCCL Debug Environment Helpers
+// ============================================================================
+
+std::string getNCCLDebugLevel()
+{
+    const char* level = std::getenv("NCCL_DEBUG");
+    return level ? std::string(level) : "";
+}
+
+std::string getNCCLDebugSubsystems()
+{
+    const char* subsys = std::getenv("NCCL_DEBUG_SUBSYS");
+    return subsys ? std::string(subsys) : "";
+}
+
+bool isNCCLDebugEnabled(const std::string& subsystem, const std::string& minLevel)
+{
+    const std::string level = getNCCLDebugLevel();
+    if(level.empty())
+    {
+        return false;
+    }
+
+    // Check if debug level meets minimum requirement
+    // Level hierarchy: WARN < INFO < TRACE
+    auto levelRank = [](const std::string& lvl) -> int {
+        if(lvl == "TRACE")
+            return 3;
+        if(lvl == "INFO")
+            return 2;
+        if(lvl == "WARN")
+            return 1;
+        return 0;
+    };
+
+    if(levelRank(level) < levelRank(minLevel))
+    {
+        return false;
+    }
+
+    // If no specific subsystem requested, any debug level is enough
+    if(subsystem.empty())
+    {
+        return true;
+    }
+
+    // Check if subsystem is enabled
+    const std::string subsystems = getNCCLDebugSubsystems();
+
+    // If NCCL_DEBUG_SUBSYS is not set, all subsystems are enabled
+    if(subsystems.empty())
+    {
+        return true;
+    }
+
+    // Check for "ALL" which enables all subsystems
+    if(subsystems.find("ALL") != std::string::npos)
+    {
+        return true;
+    }
+
+    // Check if specific subsystem is in the list
+    return subsystems.find(subsystem) != std::string::npos;
+}
+
 } // namespace MPIHelpers
 
 #endif // MPI_TESTS_ENABLED
