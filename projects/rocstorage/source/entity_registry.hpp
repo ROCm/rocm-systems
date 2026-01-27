@@ -15,7 +15,7 @@
 namespace rocstorage
 {
 
-using primary_key = size_t;
+using primary_key_t = size_t;
 
 struct entity_registry
 {
@@ -34,26 +34,26 @@ struct entity_registry
 private:
     entity_utility<std::unordered_set<writer_api::node_id_t>> m_node_info{};
 
-    entity_utility<std::unordered_map<writer_api::process_id_t, primary_key>>
+    entity_utility<std::unordered_map<writer_api::process_id_t, primary_key_t>>
         m_process_info{};
 
     entity_utility<std::unordered_map<writer_api::agent_unique_id_t,
-                                      primary_key,
+                                      primary_key_t,
                                       hashing::agent_unique_id_hash>>
         m_agent_info{};
 
     entity_utility<std::unordered_map<writer_api::pmc_info_unique_id_t,
-                                      primary_key,
+                                      primary_key_t,
                                       hashing::pmc_unique_id_hash>>
         m_pmc_info{};
 
-    entity_utility<std::unordered_map<writer_api::thread_id_t, primary_key>>
+    entity_utility<std::unordered_map<writer_api::thread_id_t, primary_key_t>>
         m_thread_info{};
 
-    entity_utility<std::unordered_map<writer_api::stream_id_t, primary_key>>
+    entity_utility<std::unordered_map<writer_api::stream_id_t, primary_key_t>>
         m_stream_info{};
 
-    entity_utility<std::unordered_map<writer_api::queue_id_t, primary_key>>
+    entity_utility<std::unordered_map<writer_api::queue_id_t, primary_key_t>>
         m_queue_info{};
 
     entity_utility<std::unordered_set<writer_api::code_object_id_t>> m_code_object_info{};
@@ -62,11 +62,11 @@ private:
         m_kernel_symbol_info{};
 
     entity_utility<std::unordered_map<writer_api::track_info_t,
-                                      primary_key,
+                                      primary_key_t,
                                       hashing::track_info_hash>>
         m_track_info{};
 
-    entity_utility<std::unordered_map<std::string, primary_key>> m_string_info{};
+    entity_utility<std::unordered_map<std::string, primary_key_t>> m_string_info{};
 };
 
 }  // namespace rocstorage

@@ -26,16 +26,16 @@ namespace rocstorage
 namespace
 {
 
-void
-initialize_metadata(const std::shared_ptr<data_storage::database>& database,
-                    const std::string&                             uuid)
-{
-    data_storage::queries::table_insert_query query;
-    database->execute_query(query.set_table_name("rocpd_metadata_" + uuid)
-                                .set_columns("tag", "value")
-                                .set_values("upid", uuid)
-                                .get_query_string());
-}
+// void
+// initialize_metadata(const std::shared_ptr<data_storage::database>& database,
+//                     const std::string&                             uuid)
+// {
+//     data_storage::queries::table_insert_query query;
+//     database->execute_query(query.set_table_name("rocpd_metadata_" + uuid)
+//                                 .set_columns("tag", "value")
+//                                 .set_values("upid", uuid)
+//                                 .get_query_string());
+// }
 
 /**
  * @brief Check if entity is already registered and log warning if so
@@ -377,7 +377,7 @@ public:
     // --------------------- Data Tables ---------------------
 
 private:
-    primary_key insert_event(const writer_api::event_data_t& event_data)
+    primary_key_t insert_event(const writer_api::event_data_t& event_data)
     {
         auto& string_info_utility = m_entity_registry->string_info();
 
@@ -408,7 +408,7 @@ private:
     }
 
     void insert_sample(const writer_api::sample_data_t& sample_data,
-                       const primary_key&               event_primary_key)
+                       const primary_key_t&             event_primary_key)
     {
         auto& track_info_utility = m_entity_registry->track_info();
 
@@ -434,7 +434,7 @@ private:
                                                 sample_data.extdata);
     }
 
-    inline void insert_arg(const writer_api::arg_data_t& arg_data, primary_key event_id)
+    inline void insert_arg(const writer_api::arg_data_t& arg_data, primary_key_t event_id)
     {
         auto& string_info_utility = m_entity_registry->string_info();
 
@@ -493,7 +493,7 @@ public:
         const auto name_pk =
             string_info_utility.get_primary_key_value_for_entity(region_data.name);
 
-        std::optional<primary_key> event_pk = std::nullopt;
+        std::optional<primary_key_t> event_pk = std::nullopt;
         if(region_data.event.has_value())
         {
             event_pk = insert_event(region_data.event.value());
@@ -542,7 +542,7 @@ public:
 
         const auto pmc_pk = m_validator->resolve_pmc_key(pmc_unique_id);
 
-        std::optional<primary_key> event_pk = std::nullopt;
+        std::optional<primary_key_t> event_pk = std::nullopt;
         if(pmc_event_data.event.has_value())
         {
             event_pk = insert_event(pmc_event_data.event.value());
@@ -584,7 +584,7 @@ public:
         const auto name_pk = string_info_utility.get_primary_key_value_for_entity(
             kernel_dispatch_data.name);
 
-        std::optional<primary_key> event_pk = std::nullopt;
+        std::optional<primary_key_t> event_pk = std::nullopt;
         if(kernel_dispatch_data.event.has_value())
         {
             event_pk = insert_event(kernel_dispatch_data.event.value());
@@ -668,13 +668,13 @@ public:
         const auto name_pk =
             string_info_utility.get_primary_key_value_for_entity(memory_copy_data.name);
 
-        std::optional<primary_key> event_pk = std::nullopt;
+        std::optional<primary_key_t> event_pk = std::nullopt;
         if(memory_copy_data.event.has_value())
         {
             event_pk = insert_event(memory_copy_data.event.value());
         }
 
-        std::optional<primary_key> region_name_pk = std::nullopt;
+        std::optional<primary_key_t> region_name_pk = std::nullopt;
         if(memory_copy_data.region_name != nullptr)
             region_name_pk = string_info_utility.get_primary_key_value_for_entity(
                 memory_copy_data.region_name);
@@ -772,7 +772,7 @@ public:
         const auto stream_pk =
             m_validator->resolve_optional_stream_key(trace_environment.stream_id);
 
-        std::optional<primary_key> event_pk = std::nullopt;
+        std::optional<primary_key_t> event_pk = std::nullopt;
         if(memory_alloc_data.event.has_value())
         {
             event_pk = insert_event(memory_alloc_data.event.value());

@@ -5,6 +5,8 @@
 
 #include "traits.hpp"
 
+#include <mutex>
+
 namespace rocstorage
 {
 
@@ -21,6 +23,7 @@ public:
     template <typename... Entity>
     void emplace_entity(Entity&&... entity)
     {
+        std::lock_guard<std::mutex> lock(m_mutex);
         m_entity_container.emplace(std::forward<Entity>(entity)...);
     }
 
@@ -33,12 +36,14 @@ public:
         }
         else
         {
-            static_assert(false, "EntityContainerType is not an unordered map");
+            static_assert(common::traits::is_unordered_map_v<EntityContainerType>,
+                          "EntityContainerType is not an unordered map");
         }
     }
 
 private:
     EntityContainerType m_entity_container;
+    std::mutex          m_mutex;
 };
 
 }  // namespace rocstorage

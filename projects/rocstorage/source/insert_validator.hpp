@@ -138,90 +138,90 @@ public:
         return *this;
     }
 
-    [[nodiscard]] primary_key resolve_process_key(
+    [[nodiscard]] primary_key_t resolve_process_key(
         const std::optional<writer_api::process_id_t>& process_id) const
     {
         return m_registry->process_info().get_primary_key_value_for_entity(
             process_id.value());
     }
 
-    [[nodiscard]] primary_key resolve_process_key(
+    [[nodiscard]] primary_key_t resolve_process_key(
         writer_api::process_id_t process_id) const
     {
         return m_registry->process_info().get_primary_key_value_for_entity(process_id);
     }
 
-    [[nodiscard]] primary_key resolve_thread_key(
+    [[nodiscard]] primary_key_t resolve_thread_key(
         const std::optional<writer_api::thread_id_t>& thread_id) const
     {
         return m_registry->thread_info().get_primary_key_value_for_entity(
             thread_id.value());
     }
 
-    [[nodiscard]] primary_key resolve_agent_key(
+    [[nodiscard]] primary_key_t resolve_agent_key(
         const std::optional<writer_api::agent_unique_id_t>& agent_id) const
     {
         return m_registry->agent_info().get_primary_key_value_for_entity(
             agent_id.value());
     }
 
-    [[nodiscard]] primary_key resolve_agent_key(
+    [[nodiscard]] primary_key_t resolve_agent_key(
         const writer_api::agent_unique_id_t& agent_id) const
     {
         return m_registry->agent_info().get_primary_key_value_for_entity(agent_id);
     }
 
-    [[nodiscard]] primary_key resolve_queue_key(
+    [[nodiscard]] primary_key_t resolve_queue_key(
         const std::optional<writer_api::queue_id_t>& queue_id) const
     {
         return m_registry->queue_info().get_primary_key_value_for_entity(
             queue_id.value());
     }
 
-    [[nodiscard]] primary_key resolve_stream_key(
+    [[nodiscard]] primary_key_t resolve_stream_key(
         const std::optional<writer_api::stream_id_t>& stream_id) const
     {
         return m_registry->stream_info().get_primary_key_value_for_entity(
             stream_id.value());
     }
 
-    [[nodiscard]] primary_key resolve_pmc_key(
+    [[nodiscard]] primary_key_t resolve_pmc_key(
         const writer_api::pmc_info_unique_id_t& pmc_unique_id) const
     {
         return m_registry->pmc_info().get_primary_key_value_for_entity(pmc_unique_id);
     }
 
-    [[nodiscard]] std::optional<primary_key> resolve_optional_process_key(
+    [[nodiscard]] std::optional<primary_key_t> resolve_optional_process_key(
         const std::optional<writer_api::process_id_t>& process_id) const
     {
         return resolve_optional_key(m_registry->process_info(), process_id);
     }
 
-    [[nodiscard]] std::optional<primary_key> resolve_optional_thread_key(
+    [[nodiscard]] std::optional<primary_key_t> resolve_optional_thread_key(
         const std::optional<writer_api::thread_id_t>& thread_id) const
     {
         return resolve_optional_key(m_registry->thread_info(), thread_id);
     }
 
-    [[nodiscard]] std::optional<primary_key> resolve_optional_agent_key(
+    [[nodiscard]] std::optional<primary_key_t> resolve_optional_agent_key(
         const std::optional<writer_api::agent_unique_id_t>& agent_id) const
     {
         return resolve_optional_key(m_registry->agent_info(), agent_id);
     }
 
-    [[nodiscard]] std::optional<primary_key> resolve_optional_queue_key(
+    [[nodiscard]] std::optional<primary_key_t> resolve_optional_queue_key(
         const std::optional<writer_api::queue_id_t>& queue_id) const
     {
         return resolve_optional_key(m_registry->queue_info(), queue_id);
     }
 
-    [[nodiscard]] std::optional<primary_key> resolve_optional_stream_key(
+    [[nodiscard]] std::optional<primary_key_t> resolve_optional_stream_key(
         const std::optional<writer_api::stream_id_t>& stream_id) const
     {
         return resolve_optional_key(m_registry->stream_info(), stream_id);
     }
 
-    [[nodiscard]] std::optional<primary_key> resolve_optional_string_key(
+    [[nodiscard]] std::optional<primary_key_t> resolve_optional_string_key(
         const std::optional<std::string>& str) const
     {
         if(!str.has_value()) return std::nullopt;

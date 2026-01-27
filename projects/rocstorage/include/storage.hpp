@@ -27,10 +27,10 @@ public:
     storage& operator=(const storage&) = delete;
     storage& operator=(storage&&)      = delete;
 
-    std::shared_ptr<rocstorage::writer> get_writer() const;
-    std::shared_ptr<rocstorage::reader> get_reader() const;
+    [[nodiscard]] std::shared_ptr<rocstorage::writer> get_writer() const;
+    [[nodiscard]] std::shared_ptr<rocstorage::reader> get_reader() const;
 
-    rocstorage::version_t get_storage_version() const;
+    [[nodiscard]] rocstorage::version_t get_storage_version() const;
 
 private:
     struct impl;
