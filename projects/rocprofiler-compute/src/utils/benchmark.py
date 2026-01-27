@@ -108,8 +108,19 @@ mfma_kernel_selector = {
     "I8": "mfma_i8",
 }
 
+# Some data types have different rates. Set the number of iterations
+# to keep running time under control.
+flops_kernel_iterations = {
+    "FP16": 512,
+    "FP32": 256,
+    "FP64": 128,
+    "INT8": 64,
+    "INT32": 64,
+    "INT64": 64,
+}
+
 flops_kernel_selector = {
-    "FP16": ["flops_benchmark<__half, 1024>", sizeof(c_short)],
+    "FP16": ["flops_benchmark<_Float16, 1024>", sizeof(c_short)],
     "FP32": ["flops_benchmark<float, 1024>", sizeof(c_float)],
     "FP64": ["flops_benchmark<double, 1024>", sizeof(c_double)],
     "INT8": ["flops_benchmark<char, 1024>", sizeof(c_int8)],
@@ -563,50 +574,59 @@ def lds_bw_benchmark(device: int) -> PerfMetrics:
 
 
 flops_benchmark_src = """
+template<typename T, int Rank>
+using vecT = T __attribute__((ext_vector_type(Rank)));
+
+template<typename T> using vec4 = vecT<T, 4>;
+
 template<typename T, int nFMA>
-__global__ void flops_benchmark(T *buf, int nSize)
+__global__ void flops_benchmark(T *buf, int count)
 {
-    const int gid = blockDim.x * blockIdx.x + threadIdx.x;
-    const int nThreads = gridDim.x * blockDim.x;
-    const int nEntriesPerThread = (int) nSize / nThreads;
-    const int maxOffset = nEntriesPerThread * nThreads;
+    const T k = 1.1;
 
-    T *ptr;
-    const T y = (T) 1.1;
+    const int grid_size = gridDim.x * blockDim.x;
+    const int tid = blockDim.x * blockIdx.x + threadIdx.x;
 
-    ptr = &buf[gid];
-    T x = (T) 2.0;
+    vec4<T>* ptr = (vec4<T>*)buf;
 
-    for(int offset=0; offset < maxOffset; offset += nThreads)
-    {
-        for(int j=0; j<nFMA; j++)
-        {
-            x = ptr[offset] * x + y;
+    vec4<T> value0 = ptr[0 * grid_size + tid];
+    vec4<T> value1 = ptr[1 * grid_size + tid];
+    vec4<T> value2 = ptr[2 * grid_size + tid];
+    vec4<T> value3 = ptr[3 * grid_size + tid];
+
+    for(int j = 0; j < count; j++) {
+        for(int j = 0; j < nFMA / 16; j++) {
+
+            // 16 FMA ops
+            value0 = value0 * value0 + k;
+            value1 = value1 * value1 + k;
+            value2 = value2 * value2 + k;
+            value3 = value3 * value3 + k;
         }
     }
 
-    ptr[0] = -x;
-
+    ptr[tid] = value0 + value1 + value2 + value3;
 }
 """
 
 
 def flops_bench(device: int, type: str, unit: str, rate: int) -> PerfMetrics:
+    nFMA = 1024
     num_experiments = DEFAULT_NUM_EXPERIMENTS
     workgroup_size = DEFAULT_WORKGROUP_SIZE
-    dataset_size = DEFAULT_DATASET_SIZE
     cus = hip.hipGetDeviceProperties(device).multiProcessorCount
 
-    memblock = hip.hipMalloc(dataset_size)
-    workgroups = 128 * cus
+    workgroups = 64 * cus
     threads = workgroups * workgroup_size
 
     kernel_name = flops_kernel_selector[type][0]
     type_size = flops_kernel_selector[type][1]
+    
+    dataset_size = 4 * 4 * type_size * threads
+    memblock = hip.hipMalloc(dataset_size)
 
-    n_size = dataset_size // type_size // threads * threads
-
-    total_flops = n_size * 1024 * 2
+    iterations = flops_kernel_iterations[type]
+    total_flops = threads * iterations * nFMA * 2
 
     prog = Program(flops_benchmark_src, [kernel_name])
 
@@ -614,7 +634,7 @@ def flops_bench(device: int, type: str, unit: str, rate: int) -> PerfMetrics:
 
     # Warmup
     launch_kernel(
-        func, [workgroups, 1, 1], [workgroup_size, 1, 1], 0, None, [memblock, n_size]
+        func, [workgroups, 1, 1], [workgroup_size, 1, 1], 0, None, [memblock, iterations]
     )
     hip.hipDeviceSynchronize()
 
@@ -626,7 +646,7 @@ def flops_bench(device: int, type: str, unit: str, rate: int) -> PerfMetrics:
         [workgroup_size, 1, 1],
         0,
         None,
-        [memblock, n_size],
+        [memblock, iterations],
     )
 
     stats = calc_stats(samples)
