@@ -82,23 +82,6 @@ set(NOT_FOR_gfx90a_AND_ABOVE_TEST
     tex2DLayered.cc
     tex3D.cc
     tex3DGrad.cc
-    hipBindTextureToMipmappedArray.cc
-    hipMallocMipmappedArray.cc
-    hipFreeMipmappedArray.cc
-    hipGetMipmappedArrayLevel.cc
-    hipMipmappedArrayCreate.cc
-    hipMipmappedArrayDestroy.cc
-    hipMipmappedArrayGetLevel.cc
-    tex1DLod.cc
-    tex1DLayeredLod.cc
-    tex2DLod.cc
-    tex2DLayeredLod.cc
-    tex3DLod.cc
-    hipTexRefSetGetMipmapFilterMode.cc
-    hipTexRefSetGetMipmapLevelBias.cc
-    hipTexRefSetGetMipmapLevelClamp.cc
-    hipTexRefSetGetMipmappedArray.cc
-    hipMipmappedArrayGetMemoryRequirements.cc
 )
 
 if (HIP_PLATFORM MATCHES "amd")
@@ -157,6 +140,33 @@ if(HIP_PLATFORM MATCHES "amd")
 else()
   set(TEST_SRC ${TEST_SRC} ${NOT_FOR_gfx90a_AND_ABOVE_TEST})
 endif()
+
+# Mipmap APIs are not supported on Linux
+if(0)
+set(TEST_SRC
+    ${TEST_SRC}
+    hipBindTextureToMipmappedArray.cc
+    hipMallocMipmappedArray.cc
+    hipFreeMipmappedArray.cc
+    hipGetMipmappedArrayLevel.cc
+    hipMipmappedArrayCreate.cc
+    hipMipmappedArrayDestroy.cc
+    hipMipmappedArrayGetLevel.cc
+    hipTextureMipmapObj1D.cc
+    hipTextureMipmapObj2D.cc
+    hipTextureMipmapObj3D.cc
+    tex1DLod.cc
+    tex1DLayeredLod.cc
+    tex2DLod.cc
+    tex2DLayeredLod.cc
+    tex3DLod.cc
+    hipTexRefSetGetMipmapFilterMode.cc
+    hipTexRefSetGetMipmapLevelBias.cc
+    hipTexRefSetGetMipmapLevelClamp.cc
+    hipTexRefSetGetMipmappedArray.cc
+)
+endif()
+
 
 hip_add_exe_to_target(NAME TextureTest
                       TEST_SRC ${TEST_SRC}

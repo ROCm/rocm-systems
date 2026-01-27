@@ -660,10 +660,10 @@ class Image : public Memory {
   //! Returns image's slice pitch in bytes
   size_t getSlicePitch() const { return impl_.sp_; }
 
-  //! Returns image's mipmap levels
+  //! Returns image's slice pitch in bytes
   uint getMipLevels() const { return mipLevels_; }
 
-  //! Returns image's mipmap base level
+  //! Returns image's slice pitch in bytes
   uint getBaseMipLevel() const { return baseMipLevel_; }
 
   //! Get the image covered region
