@@ -656,7 +656,21 @@ def calc_ai_profile(
                         * 32
                     )
                 )
-
+            elif mspec.gpu_series == "MI350":
+                # Use TCC_EA0_RDREQ_128B_sum TCC_EA0_RDREQ_64B_sum to calculate hbm_data
+                hbm_data += (
+                    (df["TCC_EA0_RDREQ_128B_sum"][idx] * 128)
+                    + (df["TCC_EA0_RDREQ_64B_sum"][idx] * 64)
+                    + (df["TCC_EA0_RDREQ_32B_sum"][idx] * 32)
+                    + (
+                        (
+                            df["TCC_EA0_WRREQ_sum"][idx]
+                            - df["TCC_EA0_WRREQ_64B_sum"][idx]
+                        )
+                        * 32
+                    )
+                    + (df["TCC_EA0_WRREQ_64B_sum"][idx] * 64)
+                )
             else:
                 # Use TCC_BUBBLE_sum to calculate hbm_data
                 hbm_data += (
