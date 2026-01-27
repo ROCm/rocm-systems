@@ -20,14 +20,12 @@ target_link_libraries(
 )
 target_compile_options(fork-example PRIVATE ${_FLAGS})
 
-if(ROCPROFSYS_INSTALL_EXAMPLES)
-    if(TARGET fork-example)
-        install(
-            TARGETS fork-example
-            DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples
-            COMPONENT rocprofiler-systems-examples
-        )
-    endif()
+if(ROCPROFSYS_INSTALL_EXAMPLES AND TARGET fork-example)
+    install(
+        TARGETS fork-example
+        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples
+        COMPONENT rocprofiler-systems-examples
+    )
 endif()
 
 # HIP fork example (multi-process concurrency test)
@@ -64,6 +62,18 @@ if(HIPCC_EXECUTABLE)
     )
         add_executable(hipMallocConcurrencyMproc hipMallocConcurrencyMproc.cpp)
         target_link_libraries(hipMallocConcurrencyMproc PRIVATE Threads::Threads)
+        set_target_properties(
+            hipMallocConcurrencyMproc
+            PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/fork"
+        )
+        # Specify GPU architectures to compile for
+        foreach(arch IN LISTS ROCPROFSYS_GFX_TARGETS)
+            target_compile_options(
+                hipMallocConcurrencyMproc
+                PRIVATE --offload-arch=${arch}
+            )
+            target_link_options(hipMallocConcurrencyMproc PUBLIC --offload-arch=${arch})
+        endforeach()
 
         if(
             CMAKE_CXX_COMPILER_ID MATCHES "Clang"

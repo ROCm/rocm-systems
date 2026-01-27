@@ -34,7 +34,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: "ROCm/TheRock"
-          ref: d76278526218def9fb1b016bc9e421738cb4f8f6 # 2025-12-09 commit
+          ref: ff46daa79b4c826c4f4676893d0d6586de567dfa # 2026-01-12 commit
 
       - name: Checkout rccl repository
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -143,5 +143,5 @@ jobs:
     with:
       amdgpu_families: ${{ inputs.amdgpu_families }}
       artifact_group: ${{ inputs.artifact_group }}
-      test_runs_on: linux-mi325-1gpu-ossci-rocm-frac
+      test_runs_on: linux-mi325-4gpu-ossci-rocm
       artifact_run_id: ${{ github.run_id }}

@@ -749,6 +749,8 @@
         "========mlsejenkins_Window_Failures_on_gfx1201===========================================",
         "Unit_hipMemPoolSetAttribute_EventDependencies",
         "Unit_hipStreamSynchronize_NullStreamSynchronization",
+        "=== Test does not reflect a valid use case - SWDEV-569454",
+        "Unit_hipStreamPerThread_MultiThread",
     #endif
         "=== Following tests disabled as it should be a local perf test",
         "Performance_hipExtLaunchKernelGGL_QueryGPUFrequency",

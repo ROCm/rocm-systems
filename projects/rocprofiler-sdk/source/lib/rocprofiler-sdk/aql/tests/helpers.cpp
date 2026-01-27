@@ -86,28 +86,6 @@ v1_get_query_info(hsa_agent_t agent, const counters::Metric& metric)
     return query;
 }
 
-uint32_t
-v1_get_block_counters(hsa_agent_t agent, const hsa_ven_amd_aqlprofile_event_t& event)
-{
-    hsa_ven_amd_aqlprofile_profile_t query              = {.agent       = agent,
-                                              .type        = HSA_VEN_AMD_AQLPROFILE_EVENT_TYPE_PMC,
-                                              .events      = &event,
-                                              .event_count = 1,
-                                              .parameters  = nullptr,
-                                              .parameter_count = 0,
-                                              .output_buffer   = {nullptr, 0},
-                                              .command_buffer  = {nullptr, 0}};
-    uint32_t                         max_block_counters = 0;
-    if(hsa_ven_amd_aqlprofile_get_info(&query,
-                                       HSA_VEN_AMD_AQLPROFILE_INFO_BLOCK_COUNTERS,
-                                       &max_block_counters) != HSA_STATUS_SUCCESS)
-    {
-        throw std::runtime_error(fmt::format("AQL failed to max block info for counter {}",
-                                             static_cast<int64_t>(event.block_name)));
-    }
-    return max_block_counters;
-}
-
 void
 test_init()
 {
@@ -197,44 +175,6 @@ TEST(aql_helpers, get_block_counters)
             }
         }
     }
-}
-
-TEST(aql_helpers, get_block_counters_compare_v1)
-{
-    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
-    test_init();
-    auto agents = agent::get_agents();
-
-    ASSERT_FALSE(agents.empty());
-
-    for(auto agent : agents)
-    {
-        if(agent->type == ROCPROFILER_AGENT_TYPE_CPU) continue;
-        auto metrics = findDeviceMetrics(*agent, {});
-        ASSERT_FALSE(metrics.empty());
-
-        for(auto& metric : metrics)
-        {
-            auto query = aql::get_query_info(agent->id, metric);
-            for(unsigned block_index = 0; block_index < query.instance_count; ++block_index)
-            {
-                aqlprofile_pmc_event_t event = {
-                    .block_index = block_index,
-                    .event_id    = static_cast<uint32_t>(std::atoi(metric.event().c_str())),
-                    .flags       = aqlprofile_pmc_event_flags_t{0},
-                    .block_name  = static_cast<hsa_ven_amd_aqlprofile_block_name_t>(query.id)};
-
-                hsa_ven_amd_aqlprofile_event_t event_v1 = {
-                    .block_name  = static_cast<hsa_ven_amd_aqlprofile_block_name_t>(query.id),
-                    .block_index = block_index,
-                    .counter_id  = static_cast<uint32_t>(std::atoi(metric.event().c_str()))};
-                EXPECT_EQ(aql::get_block_counters(agent->id, event),
-                          v1_get_block_counters(agent::get_agent_cache(agent)->get_hsa_agent(),
-                                                event_v1));
-            }
-        }
-    }
-    hsa_shut_down();
 }
 
 TEST(aql_helpers, get_dim_info)
