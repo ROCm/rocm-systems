@@ -161,9 +161,9 @@ template <typename CategoryT, typename... Args>
 auto
 get_perfetto_category_uuid(Args&&... _args)
 {
-    return tim::hash::get_hash_id(
-        tim::hash::get_hash_id(JOIN('_', "rocprofsys", trait::name<CategoryT>::value)),
-        std::forward<Args>(_args)...);
+    return tim::hash::get_hash_id(tim::hash::get_hash_id(fmt::format(
+                                      "rocprofsys_{}", trait::name<CategoryT>::value)),
+                                  std::forward<Args>(_args)...);
 }
 
 template <typename CategoryT, typename TrackT = ::perfetto::Track, typename FuncT,

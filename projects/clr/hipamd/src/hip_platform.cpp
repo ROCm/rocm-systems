@@ -73,6 +73,17 @@ static bool isCompatibleCodeObject(const std::string& codeobj_target_id, const c
 
 void** __hipRegisterFatBinary(const void* data) {
   const __CudaFatBinaryWrapper* fbwrapper = reinterpret_cast<const __CudaFatBinaryWrapper*>(data);
+
+  // Check for HIPK magic (kpack'd binary with external device code)
+  if (fbwrapper->magic == symbols::kHipkMagic && fbwrapper->version == 1) {
+    // For HIPK binaries, fbwrapper->binary points to msgpack metadata
+    // Route through addKpackBinary which will error if ROCM_KPACK_ENABLED=OFF
+    bool success = false;
+    auto fat_binary_info = PlatformState::instance().addKpackBinary(fbwrapper->binary, data, success);
+    return success ? reinterpret_cast<void**>(fat_binary_info) : nullptr;
+  }
+
+  // Normal HIPF path
   if (fbwrapper->magic != __hipFatMAGIC2 || fbwrapper->version != 1) {
     LogPrintfError("Cannot Register fat binary. FatMagic: %u version: %u ", fbwrapper->magic,
                    fbwrapper->version);
@@ -1001,6 +1012,11 @@ hipError_t PlatformState::digestFatBinary(const void* data, hip::FatBinaryInfo*&
 
 hip::FatBinaryInfo** PlatformState::addFatBinary(const void* data, bool& success) {
   return statCO_.addFatBinary(data, initialized_, success);
+}
+
+hip::FatBinaryInfo** PlatformState::addKpackBinary(const void* hipk_metadata,
+                                                    const void* wrapper_addr, bool& success) {
+  return statCO_.addKpackBinary(hipk_metadata, wrapper_addr, initialized_, success);
 }
 
 hipError_t PlatformState::removeFatBinary(hip::FatBinaryInfo** module) {

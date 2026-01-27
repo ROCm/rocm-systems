@@ -174,13 +174,13 @@ Panel Config:
           pop: ((100 * AVG(((TCC_REQ_sum * 128) / (End_Timestamp - Start_Timestamp))))
             / ((($max_sclk / 1000) * 128) * TO_INT($total_l2_chan)))
         L2-Fabric Read BW:
-          value: AVG((128 * TCC_BUBBLE_sum + 64 * (TCC_EA0_RDREQ_sum - TCC_BUBBLE_sum
-            - TCC_EA0_RDREQ_32B_sum) + 32 * TCC_EA0_RDREQ_32B_sum) / (End_Timestamp
+          value: AVG((128 * TCC_EA0_RDREQ_128B_sum + 64 * TCC_EA0_RDREQ_64B_sum
+            + 32 * TCC_EA0_RDREQ_32B_sum) / (End_Timestamp
             - Start_Timestamp))
           unit: GB/s
           peak: $hbmBandwidth
-          pop: ((100 * (AVG((128 * TCC_BUBBLE_sum + 64 * (TCC_EA0_RDREQ_sum - TCC_BUBBLE_sum
-            - TCC_EA0_RDREQ_32B_sum) + 32 * TCC_EA0_RDREQ_32B_sum) / (End_Timestamp
+          pop: ((100 * (AVG((128 * TCC_EA0_RDREQ_128B_sum + 64 * TCC_EA0_RDREQ_64B_sum
+            + 32 * TCC_EA0_RDREQ_32B_sum) / (End_Timestamp
             - Start_Timestamp)))) / $hbmBandwidth)
         L2-Fabric Write BW:
           value: AVG((((TCC_EA0_WRREQ_64B_sum * 64) + ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum)

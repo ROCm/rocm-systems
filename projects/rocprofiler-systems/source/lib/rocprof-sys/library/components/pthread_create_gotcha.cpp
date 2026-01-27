@@ -243,14 +243,13 @@ pthread_create_gotcha::wrapper::operator()() const
         LOG_DEBUG("[PID={}][rank={}] Thread {} (parent: {}) created", process::get_id(),
                   dmp::rank(), _info->index_data->as_string(),
                   _parent_info->index_data->as_string());
-        threading::set_thread_name(TIMEMORY_JOIN(" ", "Thread", _tid).c_str());
+        threading::set_thread_name(fmt::format("Thread {}", _tid).c_str());
         auto _manager = tim::manager::instance();
         if(_manager) _manager->initialize();
         if(!thread_bundle_data_t::get()->at(_tid))
         {
             thread_data<thread_bundle_t>::construct(
-                TIMEMORY_JOIN('/', "rocprofsys/process", process::get_id(), "thread",
-                              _tid),
+                fmt::format("rocprofsys/process/{}/thread/{}", process::get_id(), _tid),
                 quirk::config<quirk::auto_start>{});
             thread_bundle_data_t::get()->at(_tid)->start();
         }
@@ -607,7 +606,7 @@ pthread_create_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
             std::to_string(_use_causal), std::to_string(_use_sampling),
             std::to_string(_sample_child), std::to_string(_tid),
             std::to_string(_use_bundle), std::to_string(_enable_causal),
-            std::to_string(_enable_sampling), JOIN("", *_info));
+            std::to_string(_enable_sampling), _info->as_string());
 
         std::stringstream _backtrace_ss;
         timemory_print_demangled_backtrace<8>(_backtrace_ss, std::string{},
