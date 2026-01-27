@@ -104,7 +104,7 @@ class TestContext {
   std::string currentPath() const;
 
   // Multi threaded results helpers
-  void addResults(HCResult r);  // Add multi threaded results
+  bool addResults(HCResult r);  // Add multi threaded results, returns true to stop
   void finalizeResults();       // Validate on all results
   bool hasErrorOccured();       // Query if error has occured
 

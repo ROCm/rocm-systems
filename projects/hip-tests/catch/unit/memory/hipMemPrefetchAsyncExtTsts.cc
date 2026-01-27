@@ -128,11 +128,13 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsyncAccsdByTst) {
       hipStream_t strm;
       HIP_CHECK(hipStreamCreate(&strm));
       HIP_CHECK(hipMallocManaged(&Hmm, MemSz));
-      // Initializing the memory
-      for (int i = 0; i < NumElms; ++i) {
-        Hmm[i] = InitVal;
-      }
+      const auto reset_hmm = [&]() {
+        for (int i = 0; i < NumElms; ++i) {
+          Hmm[i] = InitVal;
+        }
+      };
       SECTION("Test AccessedBy with Prefetch") {
+        reset_hmm();
         HIP_CHECK(hipMemAdvise(Hmm, MemSz, hipMemAdviseSetAccessedBy, 1));
         HIP_CHECK(hipMemPrefetchAsync(Hmm, MemSz, 0, strm));
         HIP_CHECK(hipStreamSynchronize(strm));
@@ -146,10 +148,12 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsyncAccsdByTst) {
         }
       }
       SECTION("Test ReadMostly with Prefetch") {
+        reset_hmm();
         HIP_CHECK(hipMemAdvise(Hmm, MemSz, hipMemAdviseSetReadMostly, 1));
         HIP_CHECK(hipMemPrefetchAsync(Hmm, MemSz, 0, strm));
         HIP_CHECK(hipStreamSynchronize(strm));
         MemPrftchAsyncKernel1<<<(NumElms / 32), 32, 0, strm>>>(Hmm, NumElms);
+        HIP_CHECK(hipGetLastError());
         HIP_CHECK(hipStreamSynchronize(strm));
         HIP_CHECK(hipMemRangeGetAttribute(&Outpt, sizeof(int), hipMemRangeAttributeReadMostly, Hmm,
                                           MemSz));
@@ -169,10 +173,12 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsyncAccsdByTst) {
         }
       }
       SECTION("Test PreferredLocation with Prefetch") {
+        reset_hmm();
         HIP_CHECK(hipMemAdvise(Hmm, MemSz, hipMemAdviseSetPreferredLocation, 1));
         HIP_CHECK(hipMemPrefetchAsync(Hmm, MemSz, 0, strm));
         HIP_CHECK(hipStreamSynchronize(strm));
         MemPrftchAsyncKernel1<<<(NumElms / 32), 32, 0, strm>>>(Hmm, NumElms);
+        HIP_CHECK(hipGetLastError());
         HIP_CHECK(hipStreamSynchronize(strm));
         HIP_CHECK(hipMemRangeGetAttribute(&Outpt, sizeof(int),
                                           hipMemRangeAttributePreferredLocation, Hmm, MemSz));
@@ -287,6 +293,7 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsyncNegativeTst) {
           IfTestPassed = false;
         }
         HIP_CHECK(hipStreamDestroy(strm1));
+        HIP_CHECK(hipSetDevice(0));
       }
     }
     HIP_CHECK(hipFree(Hmm));
@@ -315,6 +322,7 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsync_NonPageSz) {
   HIP_CHECK(hipMemPrefetchAsync(Hmm, (NumElms * sizeof(int) + 8), 0, strm));
   HIP_CHECK(hipStreamSynchronize(strm));
   MemPrftchAsyncKernel1<<<((NumElms + 2) / 32 + 1), 32, 0, strm>>>(Hmm, (NumElms + 2));
+  HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipStreamSynchronize(strm));
   for (int i = 0; i < (NumElms + 2); ++i) {
     if (Hmm[i] != (InitVal * InitVal)) {

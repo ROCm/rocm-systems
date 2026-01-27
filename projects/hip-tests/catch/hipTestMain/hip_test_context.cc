@@ -63,13 +63,18 @@ hipFunction_t TestContext::getFunction(const std::string kernelNameExpression) {
   }
 }
 
-void TestContext::addResults(HCResult r) {
+bool TestContext::addResults(HCResult r) {
   std::unique_lock<std::mutex> lock(resultMutex);
+  if (hasErrorOccured_.load()) {
+    return true;
+  }
   results.push_back(r);
   if ((!r.conditionsResult) ||
       ((r.result != hipSuccess) && (r.result != hipErrorPeerAccessAlreadyEnabled))) {
     hasErrorOccured_.store(true);
+    return true;
   }
+  return false;
 }
 
 void TestContext::finalizeResults() {

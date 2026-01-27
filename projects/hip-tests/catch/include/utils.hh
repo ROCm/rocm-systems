@@ -153,16 +153,18 @@ __global__ void Iota(T* const out, size_t pitch, size_t w, size_t h, size_t d) {
 }
 
 inline void LaunchDelayKernel(const std::chrono::milliseconds interval, const hipStream_t stream = nullptr) {
+  int device = 0;
+  HIPCHECK(hipGetDevice(&device));
   int ticks_per_ms = 0;
   #if HT_AMD
-  HIPCHECK(hipDeviceGetAttribute(&ticks_per_ms, hipDeviceAttributeWallClockRate, 0));
+  HIPCHECK(hipDeviceGetAttribute(&ticks_per_ms, hipDeviceAttributeWallClockRate, device));
   if (ticks_per_ms == 0) {
     std::cout << "clkFrequency = 0, set it to 1000KHz\n";
     ticks_per_ms = 1000;
   }
   #endif
   #if HT_NVIDIA
-  HIPCHECK(hipDeviceGetAttribute(&ticks_per_ms, hipDeviceAttributeClockRate, 0));
+  HIPCHECK(hipDeviceGetAttribute(&ticks_per_ms, hipDeviceAttributeClockRate, device));
   #endif
   Delay<<<1, 1, 0, stream>>>(interval.count(), ticks_per_ms);
 }

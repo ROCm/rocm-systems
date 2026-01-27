@@ -42,13 +42,16 @@ static void Malloc3DArray_DiffSizes(int gpu) {
     size_t width{size}, height{size}, depth{size};
     hipChannelFormatDesc channelDesc = hipCreateChannelDesc<float>();
     std::array<hipArray_t, ARRAY_LOOP> arr;
+    arr.fill(nullptr);
 
     for (int i = 0; i < ARRAY_LOOP; i++) {
       HIP_CHECK_THREAD(hipMalloc3DArray(&arr[i], &channelDesc, make_hipExtent(width, height, depth),
                                         hipArrayDefault));
     }
     for (int i = 0; i < ARRAY_LOOP; i++) {
-      HIP_CHECK_THREAD(hipFreeArray(arr[i]));
+      if (arr[i] != nullptr) {
+        HIP_CHECK_THREAD(hipFreeArray(arr[i]));
+      }
     }
   }
 }
