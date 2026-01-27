@@ -1702,8 +1702,9 @@ class AMDSMICommands():
                 # Reload original gpus
                 args.gpu = stored_gpus
 
-                # Print multiple device output for all formats
-                self.logger.print_output(multiple_device_enabled=True, watching_output=watching_output)
+                # Print multiple device output
+                if not self.logger.is_json_format() or watching_output:
+                    self.logger.print_output(multiple_device_enabled=True, watching_output=watching_output)
 
                 # Add output to total watch output and clear multiple device output
                 if watching_output:
