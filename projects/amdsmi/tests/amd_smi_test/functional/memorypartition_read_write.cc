@@ -98,21 +98,25 @@ void ReloadDriverWithMessages(bool isVerbose,
 
 // Helper function to check if kmod is available
 bool IsKmodInstalled() {
-  // Check common paths for modprobe
-  constexpr std::array<const char *, 4> paths = {
-    "/usr/sbin/modprobe",
-    "/sbin/modprobe",
-    "/usr/bin/modprobe",
-    "/bin/modprobe"
-  };
+  // One time check for modprobe existence
+  static bool installed = [] {
+    // Check common paths for modprobe
+    constexpr std::array<const char *, 4> paths = {
+      "/usr/sbin/modprobe",
+      "/sbin/modprobe",
+      "/usr/bin/modprobe",
+      "/bin/modprobe"
+    };
 
-  struct stat st;
-  for (const auto& path : paths) {
-    if (stat(path, &st) == 0 && (st.st_mode & S_IXUSR)) {
-      return true;
+    struct stat st;
+    for (const auto& path : paths) {
+      if (stat(path, &st) == 0 && (st.st_mode & S_IXUSR)) {
+        return true;
+      }
     }
-  }
-  return false;
+    return false;
+  }();
+  return installed;
 }
 
 TestMemoryPartitionReadWrite::TestMemoryPartitionReadWrite() : TestBase() {
