@@ -10,7 +10,7 @@ The above copyright notice and this permission notice shall be included in
 all copies or substantial portions of the Software.
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
 AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
@@ -22,6 +22,9 @@ THE SOFTWARE.
 #include <stdlib.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <atomic>
+#include <chrono>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <map>
@@ -172,6 +175,74 @@ struct CaptureStream {
   }
 };
 #endif
+
+struct CaptureIR {
+ private:
+  static inline std::atomic<uint64_t> dump_counter{0};
+
+ public:
+  std::filesystem::path CreateDumpDir() {
+    std::error_code ec;
+    std::filesystem::path base = std::filesystem::current_path(ec) / "ir_dumps";
+    if (ec) {
+      return {};
+    }
+    std::filesystem::create_directories(base, ec);
+    if (ec) {
+      return {};
+    }
+    for (int attempt = 0; attempt < 50; ++attempt) {
+      uint64_t counter = dump_counter.fetch_add(1, std::memory_order_relaxed);
+      auto stamp = std::chrono::duration_cast<std::chrono::microseconds>(
+                       std::chrono::system_clock::now().time_since_epoch())
+                       .count();
+      std::filesystem::path dir =
+          base / ("dump_" + std::to_string(stamp) + "_" + std::to_string(counter));
+      if (std::filesystem::create_directory(dir, ec)) {
+        return dir;
+      }
+    }
+    return {};
+  }
+
+  void Cleanup(const std::filesystem::path& dir) {
+    if (dir.empty()) {
+      return;
+    }
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+  }
+
+  std::string ReadDumpFile(const std::filesystem::path& dir) {
+    if (dir.empty()) {
+      return "";
+    }
+    std::error_code ec;
+    std::filesystem::path dump_file;
+    for (const auto& entry : std::filesystem::directory_iterator(dir, ec)) {
+      if (ec) {
+        break;
+      }
+      if (!entry.is_regular_file(ec)) {
+        continue;
+      }
+      if (!dump_file.empty()) {
+        dump_file.clear();
+        break;
+      }
+      dump_file = entry.path();
+    }
+    std::string data;
+    if (!dump_file.empty()) {
+      std::ifstream file(dump_file, std::ios::binary);
+      if (file.is_open()) {
+        data.assign((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+      }
+    }
+    std::filesystem::remove_all(dir, ec);
+    return data;
+  }
+};
 
 #define DECLARE_DATA()                                                                             \
   const char* msg_short = "Carpe diem.";                                                           \
