@@ -147,7 +147,7 @@ In the Perfetto trace, you can observe:
 
 .. note::
 
-   There is a known issue which causes the application to exit with an error. However, the trace data can still be found in the output directory. This issue is being tracked internally.
+In ROCm versions prior to 7.12, there is a known issue which causes the application to exit with an error. However, the trace data can still be found in the output directory. This issue has been resolved in ROCm 7.12 and later versions.
 
 Profiling UCX
 =============
