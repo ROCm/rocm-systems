@@ -626,7 +626,7 @@ class AMDSMILogger():
             json_std_output = json.dumps(combined_json, indent=4)
             print(json_std_output)
         else:
-            with open(self.destination, 'w', encoding="utf-8") as output_file:
+            with self.destination.open('w', encoding="utf-8") as output_file:
                 json.dump(combined_json, output_file, indent=4)
 
 
