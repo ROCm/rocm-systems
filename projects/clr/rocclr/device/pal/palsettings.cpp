@@ -347,6 +347,9 @@ bool Settings::create(const Pal::DeviceProperties& palProp,
 #endif
   }
 
+  resourceCacheSize_ = std::min(resourceCacheSize_,
+                               (uint64_t)GPU_MAX_RESOURCE_CACHE_SIZE * Mi);
+
   // If is Rebar, override prepinned memory size.
   if ((heaps[Pal::GpuHeapInvisible].logicalSize == 0) &&
       (heaps[Pal::GpuHeapLocal].logicalSize > 256 * Mi)) {

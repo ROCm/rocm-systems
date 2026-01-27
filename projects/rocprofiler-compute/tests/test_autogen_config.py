@@ -30,8 +30,15 @@ from pathlib import Path
 import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-HASH_DB = PROJECT_ROOT / "src/utils/.config_hashes.json"
-ANALYSIS_CONFIGS = PROJECT_ROOT / "src/rocprof_compute_soc/analysis_configs"
+
+# In development, source is under src/. In installed package, it is at the root.
+if (PROJECT_ROOT / "src").exists():
+    SRC_ROOT = PROJECT_ROOT / "src"
+else:
+    SRC_ROOT = PROJECT_ROOT
+
+HASH_DB = SRC_ROOT / "utils/.config_hashes.json"
+ANALYSIS_CONFIGS = SRC_ROOT / "rocprof_compute_soc/analysis_configs"
 
 
 def md5(path: Path) -> str:
