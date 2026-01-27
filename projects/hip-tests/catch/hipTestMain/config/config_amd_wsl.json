@@ -629,6 +629,8 @@
         "Unit_hipStreamCreate_WithPriorityPerformance_Nonblocking_high",
         "Unit_hipStreamCreate_WithPriorityPerformance_Default_low",
         "=== Following tests disabled as it should be a local perf test",
-        "Performance_hipExtLaunchKernelGGL_QueryGPUFrequency"
+        "Performance_hipExtLaunchKernelGGL_QueryGPUFrequency",
+        "=== Test does not reflect a valid use case - SWDEV-569454",
+        "Unit_hipStreamPerThread_MultiThread"
     ]
 }
