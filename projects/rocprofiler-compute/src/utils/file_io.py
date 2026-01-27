@@ -34,7 +34,13 @@ import yaml
 import config
 from utils import rocpd_data, schema
 from utils.kernel_name_shortener import kernel_name_shortener
-from utils.logger import console_debug, console_error, console_log, demarcate
+from utils.logger import (
+    console_debug,
+    console_error,
+    console_log,
+    console_warning,
+    demarcate,
+)
 
 # TODO: use pandas chunksize or dask to read really large csv file
 # from dask import dataframe as dd
@@ -251,7 +257,9 @@ def create_df_pmc(
                     tmp_df = rocpd_data.process_rocpd_csv(tmp_df)
 
                 # Demangle original KernelNames
-                kernel_name_shortener(tmp_df, kernel_verbose)
+                # Skip for Standalone Roofline with -1 to keep full kernel names
+                if kernel_verbose >= 0:
+                    kernel_name_shortener(tmp_df, kernel_verbose)
 
                 # NB:
                 #   Idealy, the Node column should be added out of
@@ -374,7 +382,9 @@ def is_single_panel_config(
     elif arch_count == len(arch_names):
         return False
     else:
-        console_error("Found multiple panel config sets but incomplete for all archs.")
+        console_warning(
+            "Found multiple panel config sets but incomplete for all archs."
+        )
 
 
 def find_1st_sub_dir(directory: str) -> Optional[str]:

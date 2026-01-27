@@ -318,7 +318,7 @@ compute_eligible_lines_impl()
         {
             if(sf::satisfies_filter(_filters, sf::SOURCE_FILTER, ditr.file) ||
                sf::satisfies_filter(_filters, sf::SOURCE_FILTER,
-                                    join(':', ditr.file, ditr.line)))
+                                    fmt::format("{}:{}", ditr.file, ditr.line)))
             {
                 _scoped.debug_info.emplace_back(ditr);
             }
@@ -364,7 +364,7 @@ compute_eligible_lines_impl()
 void
 save_maps_info_impl(std::ostream& _ofs)
 {
-    auto _maps_file = join("/", "/proc", process::get_id(), "maps");
+    auto _maps_file = fmt::format("/proc/{}/maps", process::get_id());
     auto _ifs       = std::ifstream{ _maps_file };
     auto _maps      = std::stringstream{};
     if(_ifs)
@@ -729,12 +729,14 @@ save_line_info(const settings::compose_filename_config& _cfg, int _verbose)
         }
     };
 
-    _write(tim::settings::compose_output_filename(
-               join('-', config::get_causal_output_filename(), "binary"), "txt", _cfg),
-           get_cached_binary_info().first, { true, true, true });
-    _write(tim::settings::compose_output_filename(
-               join('-', config::get_causal_output_filename(), "scoped"), "txt", _cfg),
-           get_cached_binary_info().second, { true, true, false });
+    _write(
+        tim::settings::compose_output_filename(
+            fmt::format("{}-binary", config::get_causal_output_filename()), "txt", _cfg),
+        get_cached_binary_info().first, { true, true, true });
+    _write(
+        tim::settings::compose_output_filename(
+            fmt::format("{}-scoped", config::get_causal_output_filename()), "txt", _cfg),
+        get_cached_binary_info().second, { true, true, false });
 }
 
 size_t
