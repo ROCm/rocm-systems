@@ -146,6 +146,12 @@ class webui_analysis(OmniAnalyze_Base):
                     base_data[base_run].raw_pmc
                 )
 
+            if self._profiling_config["iteration_multiplexing"] is not None:
+                base_data[base_run].raw_pmc = self.iteration_multiplex_impute_counters(
+                    base_data[base_run].raw_pmc,
+                    policy=self._profiling_config["iteration_multiplexing"],
+                )
+
             # Apply filters to workload data
             console_debug("analysis", f"gui dispatch filter is {disp_filt}")
             console_debug("analysis", f"gui kernel filter is {kernel_filter}")
@@ -224,6 +230,9 @@ class webui_analysis(OmniAnalyze_Base):
                             "is_standalone": False,
                             "roofline_data_type": self.__roofline_data_type,
                             "kernel_filter": False,
+                            "iteration_multiplexing": self._profiling_config[
+                                "iteration_multiplexing"
+                            ],
                         }
                     )
                     roof_obj = soc[self.arch].roofline_obj

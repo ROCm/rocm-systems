@@ -65,6 +65,8 @@
         "Unit_hipDeviceSynchronize_Functional",
         "Unit_hipDeviceReset_Positive_Basic",
         "Unit_hipDeviceReset_Positive_Threaded",
-        "Unit_hipModuleGetTexRef_Positive_Basic"
+        "Unit_hipModuleGetTexRef_Positive_Basic",
+        "=== Test does not reflect a valid use case - SWDEV-569454",
+        "Unit_hipStreamPerThread_MultiThread"
     ]
 }

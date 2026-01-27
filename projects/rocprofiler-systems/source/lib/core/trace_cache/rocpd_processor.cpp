@@ -171,7 +171,7 @@ rocpd_processor_t::handle([[maybe_unused]] const scratch_memory_sample& _sms)
 
     auto [memory_operation, memory_type] = parse_memory_operation_name(_name);
 
-    auto extdata_json_str = JOIN("", "{\"flags\": ", _sms.flags, "}");
+    auto extdata_json_str = fmt::format("{{\"flags\": {}}}", _sms.flags);
 
     m_data_processor->insert_memory_alloc(
         n_info.id, process.pid, thread_primary_key, agent_primary_key,
