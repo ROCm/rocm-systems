@@ -222,10 +222,10 @@ UCX profiling works transparently with applications that use UCX directly or ind
 
 .. code-block:: shell
 
-   # Direct UCX application
-   rocprof-sys-run -- ./my_ucx_app
+   # Example 1: Direct UCX application
+   rocprof-sys-sample -- ./my_ucx_app
 
-   # MPI application using UCX as transport
+   # Example 2: MPI application using UCX as transport
    export ROCPROFSYS_USE_MPIP=ON
    export ROCPROFSYS_USE_UCX=ON
    mpirun -n 4 rocprof-sys-sample -- ./my_mpi_ucx_app
