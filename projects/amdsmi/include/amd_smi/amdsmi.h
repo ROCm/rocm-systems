@@ -29,8 +29,8 @@
  */
 
 #ifdef __cplusplus
-extern "C" {
 #include <cstdint>
+extern "C" {
 #else
 #include <stdint.h>
 #endif
