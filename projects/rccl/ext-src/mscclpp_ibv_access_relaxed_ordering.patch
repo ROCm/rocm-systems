@@ -12,7 +12,7 @@ index a95a8e5..62b4f22 100644
 +if(IBVERBS_FOUND)
 +  try_compile(HAS_IBV_ACCESS_RELAXED_ORDERING
 +    ${CMAKE_BINARY_DIR}
-+    "${CMAKE_CURRENT_SOURCE_DIR}/../check_ibv_access_relaxed_ordering.cc"
++    "${EXT_SOURCE}/check_ibv_access_relaxed_ordering.cc"
 +    CMAKE_FLAGS "-DINCLUDE_DIRECTORIES=${IBVERBS_INCLUDE_DIRS}"
 +    OUTPUT_VARIABLE try_compile_output
 +  )
