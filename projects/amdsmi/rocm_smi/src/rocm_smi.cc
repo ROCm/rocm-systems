@@ -3533,6 +3533,15 @@ rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_type,
   uint32_t sensor_index =
      m->getTempSensorIndex(static_cast<rsmi_temperature_type_t>(sensor_type));
 
+  // Check if sensor_index is valid (not RSMI_TEMP_TYPE_INVALID)
+  if (sensor_index == RSMI_TEMP_TYPE_INVALID) {
+    ss << __PRETTY_FUNCTION__
+       << " | Sensor type " << sensor_type
+       << " not supported (sensor_index = RSMI_TEMP_TYPE_INVALID) | "
+       << getRSMIStatusString(RSMI_STATUS_NOT_SUPPORTED) << " |";
+    LOG_ERROR(ss);
+    return RSMI_STATUS_NOT_SUPPORTED;
+  }
 
   CHK_API_SUPPORT_ONLY(temperature, metric, sensor_index)
 
@@ -3609,6 +3618,12 @@ rsmi_dev_volt_metric_get(uint32_t dv_ind, rsmi_voltage_type_t sensor_type,
   } catch (...) {
     return RSMI_STATUS_NOT_SUPPORTED;
   }
+
+  // Check if sensor_index is valid (not RSMI_VOLT_TYPE_INVALID)
+  if (sensor_index == RSMI_VOLT_TYPE_INVALID) {
+    return RSMI_STATUS_NOT_SUPPORTED;
+  }
+
   CHK_API_SUPPORT_ONLY(voltage, metric, sensor_index)
 
   ret = get_dev_mon_value(mon_type, dv_ind, sensor_index, voltage);
