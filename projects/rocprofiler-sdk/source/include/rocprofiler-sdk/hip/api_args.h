@@ -3397,6 +3397,20 @@ typedef union rocprofiler_hip_api_args_t
         size_t log_mask;
     } hipExtSetLoggingParams;
 #endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 22
+    struct
+    {
+        hipMemLocation*      location;
+        hipMemAllocationType type;
+        hipMemPool_t         pool;
+    } hipMemSetMemPool;
+    struct
+    {
+        hipMemPool_t*        pool;
+        hipMemLocation*      location;
+        hipMemAllocationType type;
+    } hipMemGetMemPool;
+#endif
 } rocprofiler_hip_api_args_t;
 
 ROCPROFILER_EXTERN_C_FINI

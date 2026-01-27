@@ -70,14 +70,6 @@ namespace hsa
 {
 namespace
 {
-constexpr int64_t NUM_SIGNALS = 16;
-std::atomic<int64_t>&
-get_balanced_signal_slots()
-{
-    static auto*& atomic = common::static_object<std::atomic<int64_t>>::construct(NUM_SIGNALS);
-    return *atomic;
-}
-
 template <typename DomainT, typename... Args>
 inline bool
 context_filter(const context::context* ctx, DomainT domain, Args... args)
@@ -116,8 +108,6 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
         delete _session;
         return false;
     }
-
-    get_balanced_signal_slots().fetch_add(1);
 
     auto& shared_ptr_info    = *static_cast<std::shared_ptr<Queue::queue_info_session_t>*>(data);
     auto& queue_info_session = *shared_ptr_info;
@@ -290,6 +280,13 @@ WriteInterceptor(const void* packets,
             _corr_id_pop             = corr_id;
         }
 
+        if(!corr_id)
+        {
+            // During finalization - just write packet through without tracing
+            transformed_packets.emplace_back(packets_arr[i]);
+            continue;
+        }
+
         // increase the reference count to denote that this correlation id is being used in a kernel
         corr_id->add_ref_count();
         corr_id->add_kern_count();
@@ -375,13 +372,6 @@ WriteInterceptor(const void* packets,
             tracing_data_v.external_correlation_ids,
             thr_id,
             ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH);
-
-        // If there is a lot of contention for HSA signals, then schedule out the thread
-        if(get_balanced_signal_slots().fetch_sub(1) <= 0)
-        {
-            sched_yield();
-            std::this_thread::sleep_for(std::chrono::nanoseconds(100));
-        }
 
         // Stores the instrumentation pkt (i.e. AQL packets for counter collection)
         // along with an ID of the client we got the packet from (this will be returned via
@@ -689,11 +679,6 @@ Queue::sync() const
         _core_api.hsa_signal_wait_relaxed_fn(
             _active_kernels, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_ACTIVE);
     }
-    // get_balanced_signal_slots() increments upon kernel dispatch completion and decrements in
-    // WriteInterceptor with a starting value of NUM_SIGNALS, so the get_balanced_signal_slots()
-    // should be equivalent to NUM_SIGNALS if all kernel dispatches are completed
-    ROCP_CI_LOG_IF(WARNING, get_balanced_signal_slots().load() != NUM_SIGNALS) << fmt::format(
-        "There are {} incomplete dispatches", NUM_SIGNALS - get_balanced_signal_slots().load());
 }
 
 void
