@@ -463,16 +463,43 @@ Per-kernel roofline analysis
 
      $ rocprof-compute analyze -p workloads/vcopy/MI200/ -k 0 1 2 -b 4
 
+.. _analysis-baseline-comparison:
+
 Baseline comparison
-  .. code-block:: shell
 
-     rocprof-compute analyze -p workload1/path/  -p workload2/path/
+   Baseline comparison allows for checking A/B effect. Currently baseline comparison is limited to the same :ref:`SoC <def-soc>`. Cross-comparison between SoCs is in development.
 
-  OR
+   For both the Current Workload and the Baseline Workload, you can independently setup the following filters to allow fine grained comparisons:
 
-  .. code-block:: shell
+   * Workload Name with ``-p``
+   * GPU ID filtering (multi-selection) with ``-d``
+   * Kernel Name filtering (multi-selection) with ``-k``
+   * Dispatch ID filtering (regex filtering) with ``-d``
+   * ROCm Compute Profiler panels/blocks (multi-selection) with ``-b``
 
-     rocprof-compute analyze -p workload1/path/ -k 0  -p workload2/path/ -k 1
+   .. code-block:: shell
+
+      rocprof-compute analyze -p [path1] [path2] … [pathN]
+
+   .. code-block:: shell
+
+      rocprof-compute analyze -p [path1] [options for path1] ... -p [pathN] [options for pathN]
+
+   Examples:
+
+   .. code-block:: shell
+
+      rocprof-compute analyze -p workloads/workload_1/gpu_arch/ -k 0 -b 2 -p workloads/workload_2/gpu_arch/ -k 1 -b 2
+
+   .. code-block:: shell
+
+      rocprof-compute analyze -p workloads/workload_1/gpu_arch/ workloads/workload_2/gpu_arch/ ... workloads/workload_7/gpu_arch/ -b 12
+
+   .. image:: ../../data/analyze/cli/baseline_comparison.png
+      :align: center
+      :alt: Baseline Comparison example of LDS block among 7 runs
+      :width: 800
+
 
 Analysis output format
 ======================
