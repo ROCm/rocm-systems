@@ -8,6 +8,7 @@
 #include "common/hash_functions.hpp"
 #include "entity_utility.hpp"
 
+#include <cstddef>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>

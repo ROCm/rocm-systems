@@ -27,11 +27,7 @@
 #include <type_traits>
 #include <unordered_map>
 
-namespace rocstorage
-{
-namespace common
-{
-namespace traits
+namespace rocstorage::common::traits
 {
 
 namespace
@@ -53,8 +49,8 @@ template <typename T>
 constexpr bool
 is_string_literal()
 {
-    using Tp = std::decay_t<T>;
-    return is_string_literal_impl_v<Tp>;
+    using tp_t = std::decay_t<T>;
+    return is_string_literal_impl_v<tp_t>;
 }
 
 template <typename T>
@@ -80,6 +76,4 @@ struct is_std_unordered_map<std::unordered_map<K, V, Hash, KeyEqual, Alloc>>
 template <typename T>
 inline constexpr bool is_unordered_map_v = is_std_unordered_map<T>::value;
 
-}  // namespace traits
-}  // namespace common
-}  // namespace rocstorage
+}  // namespace rocstorage::common::traits

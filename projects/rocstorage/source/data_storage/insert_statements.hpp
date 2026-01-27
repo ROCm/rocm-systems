@@ -5,17 +5,14 @@
 
 #include "database.hpp"
 
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 
-namespace rocstorage
-{
-namespace data_storage
-{
-
-namespace schema_v3
+namespace rocstorage::data_storage::schema_v3
 {
 using integer_primary_key_t = size_t;
 using integer_foreign_key_t = size_t;
@@ -255,82 +252,100 @@ struct insert_statements
                            const char*                          extdata)>;
 
 public:
-    const string_statement_func_t& string_statement() const { return m_string_statement; }
+    [[nodiscard]] const string_statement_func_t& string_statement() const
+    {
+        return m_string_statement;
+    }
 
-    const node_info_statement_func_t& node_info_statement() const
+    [[nodiscard]] const node_info_statement_func_t& node_info_statement() const
     {
         return m_node_info_statement;
     }
 
-    const process_info_statement_func_t& process_info_statement() const
+    [[nodiscard]] const process_info_statement_func_t& process_info_statement() const
     {
         return m_process_info_statement;
     }
 
-    const agent_info_statement_func_t& agent_info_statement() const
+    [[nodiscard]] const agent_info_statement_func_t& agent_info_statement() const
     {
         return m_agent_info_statement;
     }
 
-    const pmc_info_statement_func_t& pmc_info_statement() const
+    [[nodiscard]] const pmc_info_statement_func_t& pmc_info_statement() const
     {
         return m_pmc_info_statement;
     }
 
-    const thread_info_statement_func_t& thread_info_statement() const
+    [[nodiscard]] const thread_info_statement_func_t& thread_info_statement() const
     {
         return m_thread_info_statement;
     }
 
-    const stream_info_statement_func_t& stream_info_statement() const
+    [[nodiscard]] const stream_info_statement_func_t& stream_info_statement() const
     {
         return m_stream_info_statement;
     }
 
-    const queue_info_statement_func_t& queue_info_statement() const
+    [[nodiscard]] const queue_info_statement_func_t& queue_info_statement() const
     {
         return m_queue_info_statement;
     }
 
-    const kernel_symbol_info_statement_func_t& kernel_symbol_info_statement() const
+    [[nodiscard]] const kernel_symbol_info_statement_func_t&
+    kernel_symbol_info_statement() const
     {
         return m_kernel_symbol_info_statement;
     }
 
-    const code_object_info_statement_func_t& code_object_info_statement() const
+    [[nodiscard]] const code_object_info_statement_func_t& code_object_info_statement()
+        const
     {
         return m_code_object_info_statement;
     }
 
-    const track_info_statement_func_t& track_info_statement() const
+    [[nodiscard]] const track_info_statement_func_t& track_info_statement() const
     {
         return m_track_info_statement;
     }
 
-    const event_statement_func_t& event_statement() const { return m_event_statement; }
+    [[nodiscard]] const event_statement_func_t& event_statement() const
+    {
+        return m_event_statement;
+    }
 
-    const arg_statement_func_t& arg_statement() const { return m_arg_statement; }
+    [[nodiscard]] const arg_statement_func_t& arg_statement() const
+    {
+        return m_arg_statement;
+    }
 
-    const pmc_event_statement_func_t& pmc_event_statement() const
+    [[nodiscard]] const pmc_event_statement_func_t& pmc_event_statement() const
     {
         return m_pmc_event_statement;
     }
 
-    const region_statement_func_t& region_statement() const { return m_region_statement; }
+    [[nodiscard]] const region_statement_func_t& region_statement() const
+    {
+        return m_region_statement;
+    }
 
-    const sample_statement_func_t& sample_statement() const { return m_sample_statement; }
+    [[nodiscard]] const sample_statement_func_t& sample_statement() const
+    {
+        return m_sample_statement;
+    }
 
-    const kernel_dispatch_statement_func_t& kernel_dispatch_statement() const
+    [[nodiscard]] const kernel_dispatch_statement_func_t& kernel_dispatch_statement()
+        const
     {
         return m_kernel_dispatch_statement;
     }
 
-    const memory_copy_statement_func_t& memory_copy_statement() const
+    [[nodiscard]] const memory_copy_statement_func_t& memory_copy_statement() const
     {
         return m_memory_copy_statement;
     }
 
-    const memory_alloc_statement_func_t& memory_alloc_statement() const
+    [[nodiscard]] const memory_alloc_statement_func_t& memory_alloc_statement() const
     {
         return m_memory_alloc_statement;
     }
@@ -356,7 +371,6 @@ private:
     void initialize_memory_copy_statement();
     void initialize_memory_alloc_statement();
 
-private:
     std::shared_ptr<database> m_database;
     std::string               m_uuid;
 
@@ -381,6 +395,4 @@ private:
     memory_alloc_statement_func_t       m_memory_alloc_statement;
 };
 
-}  // namespace schema_v3
-}  // namespace data_storage
-}  // namespace rocstorage
+}  // namespace rocstorage::data_storage::schema_v3

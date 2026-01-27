@@ -5,6 +5,7 @@
 
 #include "traits.hpp"
 
+#include <cstddef>
 #include <mutex>
 
 namespace rocstorage
@@ -23,7 +24,7 @@ public:
     template <typename... Entity>
     void emplace_entity(Entity&&... entity)
     {
-        std::lock_guard<std::mutex> lock(m_mutex);
+        std::lock_guard<std::mutex> const lock(m_mutex);
         m_entity_container.emplace(std::forward<Entity>(entity)...);
     }
 

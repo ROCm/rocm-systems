@@ -16,8 +16,8 @@ namespace rocm
 class storage
 {
 public:
-    explicit storage(std::string                 database_path,
-                     std::string                 uuid,
+    explicit storage(const std::string&          database_path,
+                     const std::string&          uuid,
                      rocstorage::database_type_t database_type =
                          rocstorage::database_type_t::in_memory);
     virtual ~storage();

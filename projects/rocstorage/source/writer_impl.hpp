@@ -4,21 +4,26 @@
 #pragma once
 
 #include <rocstorage/writer.hpp>
+#include <rocstorage/writer_types.hpp>
 
+#include "common/json_serializers.hpp"
+#include "common/string_conversions.hpp"
 #include "data_storage/database.hpp"
 #include "data_storage/insert_statements.hpp"
-#include "data_storage/table_insert_query.hpp"
-
+#include "debug.hpp"
 #include "entity_registry.hpp"
 #include "insert_validator.hpp"
 #include "primary_key_providers.hpp"
 
-#include "common/json_serializers.hpp"
-#include "common/string_conversions.hpp"
-#include "debug.hpp"
-
+#include <algorithm>
+#include <array>
+#include <memory>
+#include <optional>
 #include <stdexcept>
+#include <string>
+#include <string_view>
 #include <type_traits>
+#include <utility>
 
 namespace rocstorage
 {
@@ -414,9 +419,9 @@ private:
 
         if(!track_info_utility.is_entry_registered(sample_data.track))
         {
-            const auto track_name_print_value = sample_data.track.name.has_value()
-                                                    ? sample_data.track.name.value()
-                                                    : "[NULL]";
+            const auto* const track_name_print_value =
+                sample_data.track.name.has_value() ? sample_data.track.name.value()
+                                                   : "[NULL]";
 
             throw std::runtime_error(
                 fmt::format("Track not registered for Sample Data: track_name: {}",
@@ -434,7 +439,7 @@ private:
                                                 sample_data.extdata);
     }
 
-    inline void insert_arg(const writer_api::arg_data_t& arg_data, primary_key_t event_id)
+    void insert_arg(const writer_api::arg_data_t& arg_data, primary_key_t event_id)
     {
         auto& string_info_utility = m_entity_registry->string_info();
 
@@ -484,7 +489,9 @@ public:
 
         auto& string_info_utility = m_entity_registry->string_info();
         if(!string_info_utility.is_entry_registered(region_data.name))
+        {
             register_string(region_data.name);
+        }
 
         const auto process_pk =
             m_validator->resolve_process_key(trace_environment.process_id);
@@ -514,7 +521,9 @@ public:
         if(event_pk.has_value())
         {
             for(const auto& arg : region_data.args)
+            {
                 insert_arg(arg, event_pk.value());
+            }
         }
 
         if(trace_environment.track_name.has_value() && event_pk.has_value())
@@ -571,7 +580,9 @@ public:
 
         auto& string_info_utility = m_entity_registry->string_info();
         if(!string_info_utility.is_entry_registered(kernel_dispatch_data.name))
+        {
             register_string(kernel_dispatch_data.name);
+        }
 
         const auto process_pk =
             m_validator->resolve_process_key(trace_environment.process_id);
@@ -648,10 +659,14 @@ public:
 
         auto& string_info_utility = m_entity_registry->string_info();
         if(!string_info_utility.is_entry_registered(memory_copy_data.name))
+        {
             register_string(memory_copy_data.name);
+        }
         if(memory_copy_data.region_name != nullptr &&
            !string_info_utility.is_entry_registered(memory_copy_data.region_name))
+        {
             register_string(memory_copy_data.region_name);
+        }
 
         const auto process_pk =
             m_validator->resolve_process_key(trace_environment.process_id);
@@ -676,8 +691,10 @@ public:
 
         std::optional<primary_key_t> region_name_pk = std::nullopt;
         if(memory_copy_data.region_name != nullptr)
+        {
             region_name_pk = string_info_utility.get_primary_key_value_for_entity(
                 memory_copy_data.region_name);
+        }
 
         const auto primary_key =
             m_key_providers->memory_copy_data().get_primary_key_value();

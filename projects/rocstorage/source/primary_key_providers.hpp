@@ -5,6 +5,8 @@
 
 #include "autoincrementer.hpp"
 
+#include <cstddef>
+
 namespace rocstorage
 {
 

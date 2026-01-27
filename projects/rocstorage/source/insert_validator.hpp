@@ -8,8 +8,12 @@
 #include "entity_registry.hpp"
 #include "string_conversions.hpp"
 
+#include <cstddef>
 #include <memory>
+#include <optional>
 #include <stdexcept>
+#include <string>
+#include <utility>
 
 namespace rocstorage
 {
@@ -18,7 +22,7 @@ class insert_validator
 {
 public:
     explicit insert_validator(const std::shared_ptr<entity_registry>& registry)
-    : m_registry(std::move(registry))
+    : m_registry(registry)
     {}
 
     insert_validator& require_node(const std::optional<writer_api::node_id_t>& node_id)

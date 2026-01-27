@@ -7,9 +7,7 @@
 #include <sqlite3.h>
 #include <stdexcept>
 
-namespace rocstorage
-{
-namespace data_storage
+namespace rocstorage::data_storage
 {
 
 class transaction_block
@@ -48,5 +46,4 @@ private:
     int      m_uncaught_on_entry;
 };
 
-}  // namespace data_storage
-}  // namespace rocstorage
+}  // namespace rocstorage::data_storage

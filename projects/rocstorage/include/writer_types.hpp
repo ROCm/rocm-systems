@@ -8,9 +8,7 @@
 #include <optional>
 #include <vector>
 
-namespace rocstorage
-{
-namespace writer_api
+namespace rocstorage::writer_api
 {
 
 /***
@@ -128,17 +126,17 @@ struct node_info_t
  */
 struct process_info_t
 {
-    size_t       ppid;
-    process_id_t pid;
-    size_t       init;
-    size_t       fini;
-    size_t       start;
-    size_t       end;
-    const char*  command;
-    const char*  environment;
+    size_t       ppid{};
+    process_id_t pid{};
+    size_t       init{};
+    size_t       fini{};
+    size_t       start{};
+    size_t       end{};
+    const char*  command{};
+    const char*  environment{};
     const char*  extdata = "{}";
 
-    node_id_t node_id;
+    node_id_t node_id{};
 };
 
 /***
@@ -152,25 +150,25 @@ struct process_info_t
  */
 struct agent_info_t
 {
-    agent_unique_id_t unique_id;
+    agent_unique_id_t unique_id{};
 
-    size_t      absolute_index;
-    size_t      logical_index;
-    size_t      uuid;
-    const char* name;
-    const char* model_name;
-    const char* vendor_name;
-    const char* product_name;
-    const char* user_name;
+    size_t      absolute_index{};
+    size_t      logical_index{};
+    size_t      uuid{};
+    const char* name{};
+    const char* model_name{};
+    const char* vendor_name{};
+    const char* product_name{};
+    const char* user_name{};
     const char* extdata = "{}";
 
-    node_id_t    node_id;
-    process_id_t process_id;
+    node_id_t    node_id{};
+    process_id_t process_id{};
 };
 
 struct pmc_info_unique_id_t
 {
-    pmc_description_name_t           name;
+    pmc_description_name_t           name{};
     std::optional<agent_unique_id_t> agent_id;
 
     bool operator==(const pmc_info_unique_id_t& other) const noexcept
@@ -196,23 +194,23 @@ struct pmc_info_unique_id_t
 struct pmc_info_t
 {
     pmc_info_unique_id_t unique_id;
-    const char*          target_arch;
-    size_t               event_code;
-    size_t               instance_id;
-    const char*          symbol;
-    const char*          description;
-    const char*          long_description;
-    const char*          component;
-    const char*          units;
-    const char*          value_type;
-    const char*          block;
-    const char*          expression;
-    size_t               is_constant;
-    size_t               is_derived;
+    const char*          target_arch{};
+    size_t               event_code{};
+    size_t               instance_id{};
+    const char*          symbol{};
+    const char*          description{};
+    const char*          long_description{};
+    const char*          component{};
+    const char*          units{};
+    const char*          value_type{};
+    const char*          block{};
+    const char*          expression{};
+    size_t               is_constant{};
+    size_t               is_derived{};
     const char*          extdata = "{}";
 
-    node_id_t    node_id;
-    process_id_t process_id;
+    node_id_t    node_id{};
+    process_id_t process_id{};
 };
 
 /***
@@ -226,15 +224,15 @@ struct pmc_info_t
  */
 struct thread_info_t
 {
-    size_t      parent_process_id;
-    thread_id_t thread_id;
-    const char* name;
-    size_t      start;
-    size_t      end;
+    size_t      parent_process_id{};
+    thread_id_t thread_id{};
+    const char* name{};
+    size_t      start{};
+    size_t      end{};
     const char* extdata = "{}";
 
-    node_id_t    node_id;
-    process_id_t process_id;
+    node_id_t    node_id{};
+    process_id_t process_id{};
 };
 
 /***
@@ -248,12 +246,12 @@ struct thread_info_t
  */
 struct stream_info_t
 {
-    stream_id_t stream_id;
-    const char* name;
+    stream_id_t stream_id{};
+    const char* name{};
     const char* extdata = "{}";
 
-    node_id_t    node_id;
-    process_id_t process_id;
+    node_id_t    node_id{};
+    process_id_t process_id{};
 };
 
 /***
@@ -267,12 +265,12 @@ struct stream_info_t
  */
 struct queue_info_t
 {
-    queue_id_t  queue_id;
-    const char* name;
+    queue_id_t  queue_id{};
+    const char* name{};
     const char* extdata = "{}";
 
-    node_id_t    node_id;
-    process_id_t process_id;
+    node_id_t    node_id{};
+    process_id_t process_id{};
 };
 
 /***
@@ -288,16 +286,16 @@ struct queue_info_t
  */
 struct code_object_info_t
 {
-    code_object_id_t id;
-    const char*      uri;
-    size_t           ld_base;
-    size_t           ld_size;
-    size_t           ld_delta;
-    const char*      storage_type;
+    code_object_id_t id{};
+    const char*      uri{};
+    size_t           ld_base{};
+    size_t           ld_size{};
+    size_t           ld_delta{};
+    const char*      storage_type{};
     const char*      extdata = "{}";
 
-    node_id_t                        node_id;
-    process_id_t                     process_id;
+    node_id_t                        node_id{};
+    process_id_t                     process_id{};
     std::optional<agent_unique_id_t> agent_id;
 };
 
@@ -313,22 +311,22 @@ struct code_object_info_t
  */
 struct kernel_symbol_info_t
 {
-    kernel_symbol_id_t id;
-    const char*        name;
-    const char*        display_name;
-    size_t             kernel_obj;
-    size_t             kernarg_segmnt_size;
-    size_t             kernarg_segment_alignment;
-    size_t             group_segment_size;
-    size_t             private_segment_size;
-    size_t             sgrp_count;
-    size_t             arch_vgrp_count;
-    size_t             accum_vgrp_count;
+    kernel_symbol_id_t id{};
+    const char*        name{};
+    const char*        display_name{};
+    size_t             kernel_obj{};
+    size_t             kernarg_segmnt_size{};
+    size_t             kernarg_segment_alignment{};
+    size_t             group_segment_size{};
+    size_t             private_segment_size{};
+    size_t             sgrp_count{};
+    size_t             arch_vgrp_count{};
+    size_t             accum_vgrp_count{};
     const char*        extdata = "{}";
 
-    node_id_t        node_id;
-    process_id_t     process_id;
-    code_object_id_t code_obj_id;
+    node_id_t        node_id{};
+    process_id_t     process_id{};
+    code_object_id_t code_obj_id{};
 };
 
 /***
@@ -346,7 +344,7 @@ struct track_info_t
     std::optional<track_name_t> name;
     const char*                 extdata = "{}";
 
-    node_id_t                   node_id;
+    node_id_t                   node_id{};
     std::optional<process_id_t> process_id;
     std::optional<thread_id_t>  thread_id;
 
@@ -439,10 +437,10 @@ using source_context_list_t = std::vector<line_info_entry_t>;
  */
 struct arg_data_t
 {
-    size_t      position;  ///< Argument position (0-indexed)
-    const char* type;      ///< Argument type name
-    const char* name;      ///< Argument parameter name
-    const char* value;     ///< Serialized argument value
+    size_t      position{};  ///< Argument position (0-indexed)
+    const char* type{};      ///< Argument type name
+    const char* name{};      ///< Argument parameter name
+    const char* value{};     ///< Serialized argument value
     const char* extdata = "{}";
 };
 
@@ -494,7 +492,7 @@ struct region_data_t
  */
 struct sample_data_t
 {
-    timestamp_ns_t timestamp;  ///< Sample time (nanoseconds)
+    timestamp_ns_t timestamp{};  ///< Sample time (nanoseconds)
     track_info_t   track;
     const char*    extdata = "{}";
 };
@@ -507,8 +505,8 @@ struct sample_data_t
  */
 struct pmc_event_data_t
 {
-    std::optional<event_data_t> event;  ///< Common event metadata
-    double                      value;  ///< Counter value
+    std::optional<event_data_t> event;    ///< Common event metadata
+    double                      value{};  ///< Counter value
     const char*                 extdata = "{}";
     sample_data_t               sample;  ///< Timestamp information
 };
@@ -522,21 +520,21 @@ struct pmc_event_data_t
  */
 struct kernel_dispatch_data_t
 {
-    std::optional<event_data_t> event;             ///< Common event metadata
-    size_t                      dispatch_id;       ///< Unique dispatch identifier
-    timestamp_ns_t              start_timestamp;   ///< Kernel start time (nanoseconds)
-    timestamp_ns_t              end_timestamp;     ///< Kernel end time (nanoseconds)
-    kernel_symbol_id_t          kernel_symbol_id;  ///< Kernel symbol id
-    code_object_id_t            code_object_id;    ///< Code object id
-    size_t      private_segment_size;  ///< Private memory per work-item (bytes)
-    size_t      group_segment_size;    ///< LDS memory per workgroup (bytes)
-    size_t      workgroup_size_x;      ///< Workgroup size in X dimension
-    size_t      workgroup_size_y;      ///< Workgroup size in Y dimension
-    size_t      workgroup_size_z;      ///< Workgroup size in Z dimension
-    size_t      grid_size_x;           ///< Grid size in X dimension
-    size_t      grid_size_y;           ///< Grid size in Y dimension
-    size_t      grid_size_z;           ///< Grid size in Z dimension
-    const char* name;                  ///< Kernel name
+    std::optional<event_data_t> event;               ///< Common event metadata
+    size_t                      dispatch_id{};       ///< Unique dispatch identifier
+    timestamp_ns_t              start_timestamp{};   ///< Kernel start time (nanoseconds)
+    timestamp_ns_t              end_timestamp{};     ///< Kernel end time (nanoseconds)
+    kernel_symbol_id_t          kernel_symbol_id{};  ///< Kernel symbol id
+    code_object_id_t            code_object_id{};    ///< Code object id
+    size_t      private_segment_size{};  ///< Private memory per work-item (bytes)
+    size_t      group_segment_size{};    ///< LDS memory per workgroup (bytes)
+    size_t      workgroup_size_x{};      ///< Workgroup size in X dimension
+    size_t      workgroup_size_y{};      ///< Workgroup size in Y dimension
+    size_t      workgroup_size_z{};      ///< Workgroup size in Z dimension
+    size_t      grid_size_x{};           ///< Grid size in X dimension
+    size_t      grid_size_y{};           ///< Grid size in Y dimension
+    size_t      grid_size_z{};           ///< Grid size in Z dimension
+    const char* name{};                  ///< Kernel name
     const char* extdata = "{}";
 };
 
@@ -549,16 +547,16 @@ struct kernel_dispatch_data_t
  */
 struct memory_copy_data_t
 {
-    std::optional<event_data_t>      event;            ///< Common event metadata
-    timestamp_ns_t                   start_timestamp;  ///< Copy start time (nanoseconds)
-    timestamp_ns_t                   end_timestamp;    ///< Copy end time (nanoseconds)
-    std::optional<agent_unique_id_t> dst_agent_id;     ///< Destination agent id
-    std::optional<size_t>            dst_address;      ///< Destination memory address
-    std::optional<agent_unique_id_t> src_agent_id;     ///< Source agent id
-    std::optional<size_t>            src_address;      ///< Source memory address
-    size_t                           size;             ///< Transfer size (bytes)
-    const char*                      name;             ///< Operation name
-    const char*                      region_name;      ///< Region name
+    std::optional<event_data_t> event;               ///< Common event metadata
+    timestamp_ns_t              start_timestamp{};   ///< Copy start time (nanoseconds)
+    timestamp_ns_t              end_timestamp{};     ///< Copy end time (nanoseconds)
+    std::optional<agent_unique_id_t> dst_agent_id;   ///< Destination agent id
+    std::optional<size_t>            dst_address;    ///< Destination memory address
+    std::optional<agent_unique_id_t> src_agent_id;   ///< Source agent id
+    std::optional<size_t>            src_address;    ///< Source memory address
+    size_t                           size{};         ///< Transfer size (bytes)
+    const char*                      name{};         ///< Operation name
+    const char*                      region_name{};  ///< Region name
     const char*                      extdata = "{}";
 };
 
@@ -571,14 +569,13 @@ struct memory_copy_data_t
 struct memory_alloc_data_t
 {
     std::optional<event_data_t> event;  ///< Common event metadata
-    const char*           type;  ///< Allocation type (e.g., "hipMalloc", "hipHostMalloc")
-    const char*           level;  ///< Memory level (e.g., "device", "host", "managed")
-    timestamp_ns_t        start_timestamp;  ///< Allocation start time (nanoseconds)
-    timestamp_ns_t        end_timestamp;    ///< Allocation end time (nanoseconds)
-    std::optional<size_t> address;          ///< Allocated memory address
-    size_t                size;             ///< Allocation size (bytes)
+    const char*    type{};   ///< Allocation type (e.g., "hipMalloc", "hipHostMalloc")
+    const char*    level{};  ///< Memory level (e.g., "device", "host", "managed")
+    timestamp_ns_t start_timestamp{};  ///< Allocation start time (nanoseconds)
+    timestamp_ns_t end_timestamp{};    ///< Allocation end time (nanoseconds)
+    std::optional<size_t> address;     ///< Allocated memory address
+    size_t                size{};      ///< Allocation size (bytes)
     const char*           extdata = "{}";
 };
 
-}  // namespace writer_api
-}  // namespace rocstorage
+}  // namespace rocstorage::writer_api

@@ -3,19 +3,24 @@
 
 #pragma once
 
+#include <spdlog/common.h>
+#include <spdlog/fmt/bundled/core.h>
+#include <spdlog/fmt/ranges.h>
+#include <spdlog/logger.h>
 #include <spdlog/sinks/basic_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
 
-#include <spdlog/fmt/ranges.h>
-
+#include <algorithm>
+#include <array>
 #include <atomic>
+#include <cctype>
 #include <cstdlib>
+#include <memory>
 #include <mutex>
 #include <pthread.h>
 #include <string>
 #include <string_view>
-#include <sys/cdefs.h>
 #include <unistd.h>
 #include <vector>
 
@@ -30,7 +35,7 @@ to_lower(std::string_view s)
 {
     std::string result;
     result.reserve(s.size());
-    for(char c : s)
+    for(char const c : s)
     {
         result += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
     }
@@ -49,10 +54,10 @@ include_process_id_in_filename(std::string_view filename)
     auto filename_start = (last_sep == std::string_view::npos) ? 0 : last_sep + 1;
     auto dot_pos        = filename.find_last_of('.');
 
-    bool has_extension =
+    bool const has_extension =
         (dot_pos != std::string_view::npos) && (dot_pos > filename_start);
 
-    std::string pid_suffix = "_" + std::to_string(getpid());
+    std::string const pid_suffix = "_" + std::to_string(getpid());
 
     if(!has_extension)
     {
@@ -66,7 +71,7 @@ include_process_id_in_filename(std::string_view filename)
 inline bool
 parse_boolean_env(const char* env)
 {
-    if(!env)
+    if(env == nullptr)
     {
         return false;
     }
@@ -88,7 +93,7 @@ struct logger_settings_t
     {
         const char* rocstorage_monochrome_env = std::getenv("ROCSTORAGE_MONOCHROME");
         const char* monochrome_env            = std::getenv("MONOCHROME");
-        if(rocstorage_monochrome_env || monochrome_env)
+        if((rocstorage_monochrome_env != nullptr) || (monochrome_env != nullptr))
         {
             m_monochrome = parse_boolean_env(rocstorage_monochrome_env) ||
                            parse_boolean_env(monochrome_env);
@@ -97,7 +102,7 @@ struct logger_settings_t
 
     spdlog::level::level_enum log_level_from_env(const char* env)
     {
-        if(!env)
+        if(env == nullptr)
         {
             return m_default_level;
         }
@@ -120,9 +125,9 @@ struct logger_settings_t
         return m_default_level;
     }
 
-    spdlog::level::level_enum get_log_level() const { return m_log_level; }
+    [[nodiscard]] spdlog::level::level_enum get_log_level() const { return m_log_level; }
 
-    std::string get_log_file() const
+    [[nodiscard]] std::string get_log_file() const
     {
         if(m_log_file == nullptr)
         {
@@ -132,7 +137,7 @@ struct logger_settings_t
         return { m_log_file };
     }
 
-    const char* get_log_pattern() const
+    [[nodiscard]] const char* get_log_pattern() const
     {
         return m_monochrome ? m_log_pattern_monochrome : m_log_pattern;
     }
@@ -155,31 +160,31 @@ class logger_t
 public:
     static spdlog::logger& instance()
     {
-        static std::shared_ptr<spdlog::logger> _instance;
-        static std::atomic<bool>               _initialized{ false };
-        static std::mutex                      _init_mutex;
+        static std::shared_ptr<spdlog::logger> instance;
+        static std::atomic<bool>               initialized{ false };
+        static std::mutex                      init_mutex;
 
-        static std::once_flag _atfork_flag;
-        std::call_once(_atfork_flag, [] {
+        static std::once_flag atfork_flag;
+        std::call_once(atfork_flag, [] {
             pthread_atfork(nullptr, nullptr, [] {
                 spdlog::drop(s_logger_name);
-                _instance.reset();
-                _initialized.store(false, std::memory_order_release);
+                instance.reset();
+                initialized.store(false, std::memory_order_release);
             });
         });
 
-        if(!_initialized.load(std::memory_order_acquire))
+        if(!initialized.load(std::memory_order_acquire))
         {
-            std::lock_guard<std::mutex> lock(_init_mutex);
+            std::lock_guard<std::mutex> const lock(init_mutex);
 
-            if(!_initialized.load(std::memory_order_relaxed))
+            if(!initialized.load(std::memory_order_relaxed))
             {
-                _instance = create_logger();
-                _initialized.store(true, std::memory_order_release);
+                instance = create_logger();
+                initialized.store(true, std::memory_order_release);
             }
         }
 
-        return *_instance;
+        return *instance;
     }
 
     logger_t() = delete;
@@ -187,7 +192,7 @@ public:
 private:
     static std::shared_ptr<spdlog::logger> create_logger()
     {
-        logger_settings_t logger_settings;
+        logger_settings_t const logger_settings;
 
         std::vector<spdlog::sink_ptr> sinks;
 

@@ -9,14 +9,7 @@
 #include <string>
 #include <type_traits>
 
-namespace rocstorage
-{
-namespace data_storage
-{
-namespace queries
-{
-
-namespace query_builders
+namespace rocstorage::data_storage::queries::query_builders
 {
 
 struct query_value_builder
@@ -71,7 +64,6 @@ private:
         return m_stream;
     }
 
-private:
     std::stringstream& m_stream;
 };
 
@@ -98,7 +90,4 @@ private:
     query_value_builder m_value_builder;
 };
 
-}  // namespace query_builders
-}  // namespace queries
-}  // namespace data_storage
-}  // namespace rocstorage
+}  // namespace rocstorage::data_storage::queries::query_builders

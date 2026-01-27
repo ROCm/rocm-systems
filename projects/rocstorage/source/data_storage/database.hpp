@@ -11,13 +11,15 @@
 
 #include <sqlite3.h>
 
+#include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <stdexcept>
+#include <string>
 #include <string_view>
+#include <type_traits>
 
-namespace rocstorage
-{
-namespace data_storage
+namespace rocstorage::data_storage
 {
 
 class database
@@ -34,11 +36,11 @@ public:
     database& operator=(database&&) = delete;
     ~database();
 
-    void        flush();
-    void        initialize_schema();
-    void        execute_query(const std::string& query);
-    size_t      get_last_insert_id() const;
-    std::string get_uuid() const;
+    void                      flush();
+    void                      initialize_schema();
+    void                      execute_query(const std::string& query);
+    [[nodiscard]] size_t      get_last_insert_id() const;
+    [[nodiscard]] std::string get_uuid() const;
 
     /**
      * This function prepares an SQLite statement based on the provided SQL query
@@ -48,19 +50,19 @@ public:
     template <typename... Values>
     auto create_statement_executor(const std::string& query)
     {
-        sqlite3_stmt* p_stmt;
+        sqlite3_stmt* p_stmt = nullptr;
         validate_sqlite3_result(
             sqlite3_prepare_v2(m_sqlite3, query.c_str(), -1, &p_stmt, nullptr),
             query.c_str(),
             "Failed to create statement");
-        std::shared_ptr<sqlite3_stmt> stmt{ p_stmt, sqlite3_finalize };
+        std::shared_ptr<sqlite3_stmt> const stmt{ p_stmt, sqlite3_finalize };
 
         return [stmt, query, this](Values... value) {
             int position = 1;
 
             ((bind_value(stmt.get(), position++, value, query)), ...);
 
-            const auto expanded_sql = sqlite3_expanded_sql(stmt.get());
+            auto* const expanded_sql = sqlite3_expanded_sql(stmt.get());
             LOG_TRACE("Executing statement: {}", expanded_sql);
 
             validate_sqlite3_result(
@@ -140,7 +142,7 @@ private:
             query.c_str(),
             fmt::format("Failed to bind text at position {}, value: {}",
                         position,
-                        val ? val : "(null)"));
+                        (val != nullptr) ? val : "(null)"));
     }
 
     void bind_double(sqlite3_stmt*      stmt,
@@ -226,14 +228,12 @@ private:
         }
     }
 
-private:
     sqlite3*                    m_sqlite3{ nullptr };
-    std::string                 m_db_path{};
-    std::string                 m_uuid{};
+    std::string                 m_db_path;
+    std::string                 m_uuid;
     rocstorage::database_type_t m_database_type;
     bool                        m_initialized{ false };
     bool                        m_flushed{ false };
 };
 
-}  // namespace data_storage
-}  // namespace rocstorage
+}  // namespace rocstorage::data_storage

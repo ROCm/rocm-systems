@@ -5,12 +5,11 @@
 
 #include <rocstorage/writer_types.hpp>
 
+#include <cstddef>
 #include <functional>
 #include <string>
 
-namespace rocstorage
-{
-namespace hashing
+namespace rocstorage::hashing
 {
 
 struct agent_unique_id_hash
@@ -39,11 +38,11 @@ struct track_info_hash
 {
     std::size_t operator()(const writer_api::track_info_t& track_info) const noexcept
     {
-        std::string track_name_value =
+        std::string const track_name_value =
             track_info.name.has_value() ? track_info.name.value() : "";
-        size_t process_id_value =
+        size_t const process_id_value =
             track_info.process_id.has_value() ? track_info.process_id.value() : 0;
-        size_t thread_id_value =
+        size_t const thread_id_value =
             track_info.thread_id.has_value() ? track_info.thread_id.value() : 0;
 
         return std::hash<size_t>{}(track_info.node_id) ^
@@ -53,5 +52,4 @@ struct track_info_hash
     }
 };
 
-}  // namespace hashing
-}  // namespace rocstorage
+}  // namespace rocstorage::hashing

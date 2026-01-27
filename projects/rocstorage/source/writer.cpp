@@ -2,8 +2,13 @@
 // SPDX-License-Identifier:  MIT
 
 #include <rocstorage/writer.hpp>
+#include <rocstorage/writer_types.hpp>
 
 #include "writer_impl.hpp"
+
+#include <memory>
+#include <string>
+#include <utility>
 
 namespace rocstorage
 {

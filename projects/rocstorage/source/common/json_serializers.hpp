@@ -5,25 +5,25 @@
 
 #include <rocstorage/writer_types.hpp>
 
+#include <nlohmann/json.hpp>
+#include <nlohmann/json_fwd.hpp>
+
 #include "string_conversions.hpp"
 
-#include <nlohmann/json.hpp>
 #include <string>
 
-namespace rocstorage
-{
-namespace json_serializers
+namespace rocstorage::json_serializers
 {
 
-using json = nlohmann::json;
+using json_t = nlohmann::json;
 
 /**
  * @brief Serialize address_range_info_t to JSON
  */
-inline json
+inline json_t
 to_json(const writer_api::address_range_info_t& addr_range)
 {
-    json j;
+    json_t j;
     j["address_base"] = addr_range.address_base;
     j["address_low"]  = addr_range.address_low;
     j["address_high"] = addr_range.address_high;
@@ -37,10 +37,10 @@ to_json(const writer_api::address_range_info_t& addr_range)
 /**
  * @brief Serialize program_counter_info_t to JSON
  */
-inline json
+inline json_t
 to_json(const writer_api::program_counter_info_t& pc_info)
 {
-    json j;
+    json_t j;
     if(is_valid_cstring(pc_info.function))
     {
         j["function"] = pc_info.function;
@@ -63,10 +63,10 @@ to_json(const writer_api::program_counter_info_t& pc_info)
 /**
  * @brief Serialize stack_frame_t to JSON
  */
-inline json
+inline json_t
 to_json(const writer_api::stack_frame_t& frame)
 {
-    json j;
+    json_t j;
     if(frame.program_counter.has_value())
     {
         j["program_counter"] = to_json(frame.program_counter.value());
@@ -113,8 +113,8 @@ serialize_call_stack(const writer_api::call_stack_t& call_stack)
         return "{}";
     }
 
-    json j;
-    json frames = json::array();
+    json_t j;
+    json_t frames = json_t::array();
 
     for(const auto& frame : call_stack)
     {
@@ -128,10 +128,10 @@ serialize_call_stack(const writer_api::call_stack_t& call_stack)
 /**
  * @brief Serialize source_code_info_t to JSON
  */
-inline json
+inline json_t
 to_json(const writer_api::source_code_info_t& source_code)
 {
-    json j;
+    json_t j;
     if(source_code.filename.has_value() && is_valid_cstring(source_code.filename.value()))
     {
         j["filename"] = source_code.filename.value();
@@ -142,7 +142,7 @@ to_json(const writer_api::source_code_info_t& source_code)
     }
     if(!source_code.source_code_lines.empty())
     {
-        json lines = json::array();
+        json_t lines = json_t::array();
         for(const auto* line : source_code.source_code_lines)
         {
             if(line != nullptr)
@@ -157,7 +157,7 @@ to_json(const writer_api::source_code_info_t& source_code)
     }
     if(!source_code.assembly_instruction_lines.empty())
     {
-        json asm_lines = json::array();
+        json_t asm_lines = json_t::array();
         for(const auto* line : source_code.assembly_instruction_lines)
         {
             if(line != nullptr)
@@ -180,10 +180,10 @@ to_json(const writer_api::source_code_info_t& source_code)
 /**
  * @brief Serialize line_info_entry_t to JSON
  */
-inline json
+inline json_t
 to_json(const writer_api::line_info_entry_t& line_info)
 {
-    json j;
+    json_t j;
     if(line_info.source_code.has_value())
     {
         j["source_code"] = to_json(line_info.source_code.value());
@@ -232,8 +232,8 @@ serialize_source_context(const writer_api::source_context_list_t& line_info_list
         return "{}";
     }
 
-    json j;
-    json entries = json::array();
+    json_t j;
+    json_t entries = json_t::array();
 
     for(const auto& entry : line_info_list)
     {
@@ -244,5 +244,4 @@ serialize_source_context(const writer_api::source_context_list_t& line_info_list
     return j.dump();
 }
 
-}  // namespace json_serializers
-}  // namespace rocstorage
+}  // namespace rocstorage::json_serializers

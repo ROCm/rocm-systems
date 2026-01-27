@@ -3,16 +3,22 @@
 
 #include <rocstorage/reader.hpp>
 #include <rocstorage/storage.hpp>
+#include <rocstorage/storage_types.hpp>
 #include <rocstorage/writer.hpp>
 
 #include "data_storage/database.hpp"
+
+#include <memory>
+#include <stdexcept>
+#include <string>
+#include <utility>
 
 namespace rocm
 {
 
 struct storage::impl
 {
-    explicit impl(std::string                 database_path,
+    explicit impl(const std::string&          database_path,
                   const std::string&          uuid,
                   rocstorage::database_type_t database_type)
     : m_database(std::make_shared<rocstorage::data_storage::database>(database_path,
@@ -37,10 +43,10 @@ struct storage::impl
                                            ROCSTORAGE_VERSION_PATCH };
 };
 
-storage::storage(std::string                 database_path,
-                 std::string                 uuid,
+storage::storage(const std::string&          database_path,
+                 const std::string&          uuid,
                  rocstorage::database_type_t database_type)
-: m_impl(std::make_unique<impl>(std::move(database_path), std::move(uuid), database_type))
+: m_impl(std::make_unique<impl>(database_path, uuid, database_type))
 {}
 
 storage::~storage() { m_impl.reset(); }

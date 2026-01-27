@@ -5,32 +5,27 @@
 
 #include "insert_query_builders.hpp"
 
-namespace rocstorage
-{
-namespace data_storage
-{
-namespace queries
+#include <string>
+
+namespace rocstorage::data_storage::queries
 {
 
 struct table_insert_query
 {
     table_insert_query()
-    : _query_columns_builder{ _ss }
+    : m_query_columns_builder{ m_ss }
     {}
 
-    inline query_builders::query_columns_builder& set_table_name(
-        const std::string& tableName)
+    query_builders::query_columns_builder& set_table_name(const std::string& table_name)
     {
-        _ss.str("");
-        _ss << "INSERT INTO " << tableName << " ";
-        return _query_columns_builder;
+        m_ss.str("");
+        m_ss << "INSERT INTO " << table_name << " ";
+        return m_query_columns_builder;
     }
 
 private:
-    std::stringstream                     _ss;
-    query_builders::query_columns_builder _query_columns_builder;
+    std::stringstream                     m_ss;
+    query_builders::query_columns_builder m_query_columns_builder;
 };
 
-}  // namespace queries
-}  // namespace data_storage
-}  // namespace rocstorage
+}  // namespace rocstorage::data_storage::queries

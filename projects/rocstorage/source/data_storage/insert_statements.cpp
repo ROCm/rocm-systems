@@ -2,16 +2,18 @@
 // SPDX-License-Identifier:  MIT
 
 #include "insert_statements.hpp"
+#include "database.hpp"
+#include "debug.hpp"
 #include "table_insert_query.hpp"
 
-#include "debug.hpp"
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <optional>
+#include <string>
+#include <utility>
 
-namespace rocstorage
-{
-namespace data_storage
-{
-
-namespace schema_v3
+namespace rocstorage::data_storage::schema_v3
 {
 
 insert_statements::insert_statements(std::shared_ptr<database> database, std::string uuid)
@@ -643,6 +645,4 @@ insert_statements::initialize_memory_alloc_statement()
                                               const char*>(query);
 }
 
-}  // namespace schema_v3
-}  // namespace data_storage
-}  // namespace rocstorage
+}  // namespace rocstorage::data_storage::schema_v3

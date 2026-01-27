@@ -6,6 +6,7 @@
 #include <rocstorage/writer_types.hpp>
 
 #include <memory>
+#include <string>
 
 namespace rocm
 {

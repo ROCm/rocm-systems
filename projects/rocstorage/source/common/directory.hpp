@@ -23,14 +23,12 @@
 #pragma once
 
 #include <cerrno>
+#include <cstddef>
 #include <libgen.h>
 #include <string>
 #include <sys/stat.h>
-#include <unistd.h>
 
-namespace rocstorage
-{
-namespace common
+namespace rocstorage::common
 {
 
 inline std::string
@@ -43,7 +41,8 @@ dirname(const std::string& path)
 inline bool
 direxists(const std::string& path)
 {
-    struct stat info;
+    struct stat info
+    {};
     if(stat(path.c_str(), &info) != 0) return false;
     return (info.st_mode & S_IFDIR) != 0;
 }
@@ -78,5 +77,4 @@ makedir(const std::string& path)
     return status;
 }
 
-}  // namespace common
-}  // namespace rocstorage
+}  // namespace rocstorage::common

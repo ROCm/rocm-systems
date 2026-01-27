@@ -5,7 +5,10 @@
 
 #include "data_storage/database.hpp"
 
+#include <memory>
 #include <stdexcept>
+#include <string>
+#include <utility>
 
 namespace rocstorage
 {
