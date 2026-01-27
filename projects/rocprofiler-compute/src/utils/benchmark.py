@@ -582,7 +582,7 @@ template<typename T> using vec4 = vecT<T, 4>;
 template<typename T, int nFMA>
 __global__ void flops_benchmark(T *buf, int count)
 {
-    const T k = 1.1;
+    const T k = (T)1.1;
 
     const int grid_size = gridDim.x * blockDim.x;
     const int tid = blockDim.x * blockIdx.x + threadIdx.x;
@@ -594,7 +594,7 @@ __global__ void flops_benchmark(T *buf, int count)
     vec4<T> value2 = ptr[2 * grid_size + tid];
     vec4<T> value3 = ptr[3 * grid_size + tid];
 
-    for(int j = 0; j < count; j++) {
+    for(int i = 0; i < count; i++) {
         for(int j = 0; j < nFMA / 16; j++) {
 
             // 16 FMA ops
