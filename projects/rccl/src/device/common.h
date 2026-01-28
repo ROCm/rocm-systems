@@ -12,7 +12,9 @@
 #include "device.h"
 #include "op128.h"
 #include "reduce_kernel.h"
+#ifndef NCCL_SPECIALIZED_KERNEL
 #include "device_table.h"
+#endif
 #include "network/unpack/unpack_defs.h"
 #define NCCL_MAX_DEV_ARITY (NCCL_MAX_TREE_ARITY-1)  // Using balanced tree instead of split tree
 
@@ -186,11 +188,21 @@ struct ncclShmemData {
   uint64_t barrier_pat;
 };
 
-extern __shared__ ncclShmemData ncclShmem;
+// For RDC builds: use extern __shared__ for cross-TU sharing
+// For non-RDC builds (SPECIALIZED_KERNELS_ONLY): use __shared__ (not extern)
+#ifndef NCCL_SHMEM_DECL
+  #ifdef SPECIALIZED_KERNELS_ONLY
+    #define NCCL_SHMEM_DECL __shared__
+  #else
+    #define NCCL_SHMEM_DECL extern __shared__
+  #endif
+#endif
+
+NCCL_SHMEM_DECL ncclShmemData ncclShmem;
 #if __CUDA_ARCH__ >= 700
-  extern __shared__ ulong2 ncclShmemPerWarp[/*ncclShmemDynamicSize()/sizeof(ulong2)*/];
+  NCCL_SHMEM_DECL ulong2 ncclShmemPerWarp[/*ncclShmemDynamicSize()/sizeof(ulong2)*/];
 #else
-  extern __shared__ ulong2 ncclShmemPerWarp[ncclShmemScratchWarpSize()*(NCCL_MAX_NTHREADS/WARP_SIZE)/sizeof(ulong2)];
+  NCCL_SHMEM_DECL ulong2 ncclShmemPerWarp[ncclShmemScratchWarpSize()*(NCCL_MAX_NTHREADS/WARP_SIZE)/sizeof(ulong2)];
 #endif
 
 #ifdef ENABLE_FAULT_INJECTION
@@ -671,6 +683,11 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
   while (ncclShmem.aborted == 0) {
     if (tid == 0) __insert_timestamp(__LINE__);
     profiler(START);
+#ifdef NCCL_SPECIALIZED_KERNEL
+    // When NCCL_SPECIALIZED_KERNEL is defined, always run the specialized work batch
+    // since we're calling the right kernel directly via getSpecializedKernel()
+    SpecializedRunWorkBatch().run();
+#else
     if (0 <= SpecializedFnId && ncclShmem.funcId == (unsigned)SpecializedFnId) {
       SpecializedRunWorkBatch().run();
     } else {
@@ -690,6 +707,7 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
         NCCL_CALL_FUNCTIONS_4(ncclShmem.funcId);
 #endif
     }
+#endif
 
     if (ncclShmem.nextBatchIx == -1) break;
     int batchIx = ncclShmem.nextBatchIx;
@@ -740,7 +758,7 @@ __global__ void ncclDevKernelDebug_Generic_4(ncclDevKernelArgsDefaultStorage NCC
   }
 #else
 #define DEFINE_ncclDevFunc(suffix, coll, redop, ty, algo, proto, acc, pipeline, unroll) \
-  __device__ __attribute__((noinline)) void ncclDevFunc_##suffix() { \
+  __device__ __attribute__((noinline, used)) void ncclDevFunc_##suffix() { \
     RunWorkBatch<coll, ty, redop<ty>, algo, proto, acc, unroll, pipeline>().run(); \
   }
 #endif

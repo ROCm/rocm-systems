@@ -39,6 +39,7 @@ run_tests_all=false
 time_trace=false
 force_reduce_pipeline=false
 generate_sym_kernels=false
+specialized_kernels_only=false
 warp_speed_enabled=true # note that this flag will be overridden to false for non MI350/MI300 platforms
 quiet_warnings=false
 build_rocshmem_support=false
@@ -82,6 +83,7 @@ function display_help()
     echo "       --verbose               Show compile commands"
     echo "       --force-reduce-pipeline Force reduce_copy sw pipeline to be used for every reduce-based collectives and datatypes"
     echo "       --generate-sym-kernels  Generate symmetric memory kernels"
+    echo "       --specialized-kernels   Build with specialized kernels only (no RDC, faster build)"
     echo "    -q|--quiet-warnings        Suppress majority of compiler warnings (not recommended)"
     echo "       --rocshmem              Build with rocSHMEM support"
 }
@@ -93,7 +95,7 @@ function display_help()
 # check if we have a modern version of getopt that can handle whitespace and long parameters
 getopt -T
 if [[ "$?" -eq 4 ]]; then
-    GETOPT_PARSE=$(getopt --name "${0}" --options cdfhij:lprtq --longoptions address-sanitizer,dependencies,debug,dump-asm,enable-code-coverage,enable_backtrace,disable-colltrace,disable-msccl-kernel,enable-mscclpp,fast,help,install,jobs:,kernel-resource-use,local_gpu_only,amdgpu_targets:,no_clean,npkit-enable,log-trace,openmp-test-enable,roctx-enable,package_build,prefix:,rm-legacy-include-dir,run_tests_all,run_tests_quick,static,tests_build,time-trace,force-reduce-pipeline,generate-sym-kernels,quiet-warnings,disable-warp-speed,verbose,rocshmem -- "$@")
+    GETOPT_PARSE=$(getopt --name "${0}" --options cdfhij:lprtq --longoptions address-sanitizer,dependencies,debug,dump-asm,enable-code-coverage,enable_backtrace,disable-colltrace,disable-msccl-kernel,enable-mscclpp,fast,help,install,jobs:,kernel-resource-use,local_gpu_only,amdgpu_targets:,no_clean,npkit-enable,log-trace,openmp-test-enable,roctx-enable,package_build,prefix:,rm-legacy-include-dir,run_tests_all,run_tests_quick,static,tests_build,time-trace,force-reduce-pipeline,generate-sym-kernels,specialized-kernels,quiet-warnings,disable-warp-speed,verbose,rocshmem -- "$@")
 else
     echo "Need a new version of getopt"
     exit 1
@@ -140,6 +142,7 @@ while true; do
          --verbose)                  build_verbose=true;                                                                               shift ;;
          --force-reduce-pipeline)    force_reduce_pipeline=true;                                                                       shift ;;
          --generate-sym-kernels)     generate_sym_kernels=true;                                                                        shift ;;
+         --specialized-kernels)      specialized_kernels_only=true;                                                                    shift ;;
          --disable-warp-speed)       warp_speed_enabled=false;                                                                         shift ;;
     -q | --quiet-warnings)           quiet_warnings=true;                                                                              shift ;;
          --rocshmem)                 build_rocshmem_support=true;                                                                      shift ;;
@@ -314,6 +317,11 @@ fi
 # Generate symmetric memory kernels
 if [[ "${generate_sym_kernels}" == true ]]; then
     cmake_common_options="${cmake_common_options} -DGENERATE_SYM_KERNELS=ON"
+fi
+
+# Build with specialized kernels only (no RDC)
+if [[ "${specialized_kernels_only}" == true ]]; then
+    cmake_common_options="${cmake_common_options} -DSPECIALIZED_KERNELS_ONLY=ON"
 fi
 
 # Enable NPKit
