@@ -25,7 +25,9 @@
 #include "ce_coll.h"
 #include "nvtx.h"
 #include "scheduler.h"
+#if !defined(SPECIALIZED_KERNELS_ONLY) || defined(DEVICE_LINKER_ENABLED)
 #include "common.h"
+#endif
 #include "api_trace.h"
 #include "rccl_common.h"
 
@@ -38,6 +40,11 @@
 #include <rocshmem/rocshmem.hpp>
 #endif
 
+#ifdef SPECIALIZED_KERNELS_ONLY
+#include "specialized_kernel_selector.h"
+#include "specialized_kernel_list.h"
+#endif
+
 using namespace rccl;
 
 struct ncclKernelMatch {
@@ -45,7 +52,21 @@ struct ncclKernelMatch {
   bool specialized;
 };
 
+#if defined(DEVICE_LINKER_ENABLED)
+// Device linker mode: use merged generic kernel with fast-compiled specialized functions
+// The merged kernel dispatches via funcId like production, but functions were compiled in parallel
+__global__ void ncclDevKernel_Merged_1(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
+__global__ void ncclDevKernel_Merged_2(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
+__global__ void ncclDevKernel_Merged_4(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
 
+#define ncclGetKernelIndex(p_comm) ((p_comm)->unroll)
+static ncclKernelMatch const ncclKerns[3] = {
+  {(void*)ncclDevKernel_Merged_1, false},  // false = dispatch via funcId (not specialized)
+  {(void*)ncclDevKernel_Merged_2, false},
+  {(void*)ncclDevKernel_Merged_4, false}
+};
+#elif !defined(SPECIALIZED_KERNELS_ONLY)
+// Generic kernels (not used when SPECIALIZED_KERNELS_ONLY is defined)
 #ifdef ENABLE_COLLTRACE
 #define ncclGetKernelIndex(p_comm) ((p_comm)->unroll + ((p_comm)->collTraceEnabled ? 3 : 0))
 static ncclKernelMatch const ncclKerns[6] = {
@@ -64,6 +85,7 @@ static ncclKernelMatch const ncclKerns[3] = {
   {(void*)ncclDevKernel_Generic_4, true}
 };
 #endif
+#endif // !SPECIALIZED_KERNELS_ONLY
 
 static int rcclProtoGrainSize(int proto, ncclComm *comm){
   switch (proto) {
@@ -95,7 +117,6 @@ NCCL_PARAM(L1SharedMemoryCarveout, "L1_SHARED_MEMORY_CARVEOUT", 0);
 
 // Returns maximum kernel stack size of all CUDA kernels
 ncclResult_t ncclInitKernelsForDevice(int cudaArch, int maxSharedMem, size_t* maxStackSize) {
-  constexpr int KernelCount = sizeof(ncclKerns)/sizeof(ncclKerns[0]);
   ncclResult_t result = ncclSuccess;
 
   if (maxStackSize) *maxStackSize = 0;
@@ -107,6 +128,14 @@ ncclResult_t ncclInitKernelsForDevice(int cudaArch, int maxSharedMem, size_t* ma
   CUDACHECK(hipDeviceGetAttribute(&WarpSize, hipDeviceAttributeWarpSize, cudaDev));
   int ncclMaxSharedMem = rcclShmemDynamicSize(cudaArch, WarpSize);
 
+#ifdef SPECIALIZED_KERNELS_ONLY
+  // Use specialized kernels only
+  void** kernelList = getSpecializedKernelList();
+  int KernelCount = getSpecializedKernelCount();
+  for (int k = 0; k < KernelCount; k++) {
+    void* fn = kernelList[k];
+#else
+  constexpr int KernelCount = sizeof(ncclKerns)/sizeof(ncclKerns[0]);
 #ifdef GENERATE_SYM_KERNELS
   for (int sym=0; sym <= 1; sym++) {
     int kcount = sym==0 ? KernelCount : ncclSymkKernelCount;
@@ -116,6 +145,7 @@ ncclResult_t ncclInitKernelsForDevice(int cudaArch, int maxSharedMem, size_t* ma
   for (int k = 0; k < KernelCount; k++) {
     void* fn = ncclKerns[k].kernelFn;
 #endif
+#endif // SPECIALIZED_KERNELS_ONLY
       cudaFuncAttributes attr = {0};
       if (fn == nullptr) continue;
 
@@ -143,8 +173,10 @@ ncclResult_t ncclInitKernelsForDevice(int cudaArch, int maxSharedMem, size_t* ma
       }
     next_kernel:;
     }
+#ifndef SPECIALIZED_KERNELS_ONLY
 #ifdef GENERATE_SYM_KERNELS
   }
+#endif
 #endif
   return result;
 }
@@ -917,8 +949,22 @@ static ncclResult_t scheduleCollTasksToPlan(
     plan->threadPerBlock = std::max(plan->threadPerBlock, 192 /* 3*WARP_SIZE */);
 #endif
     if (!plan->kernelSpecialized) {
+#ifdef SPECIALIZED_KERNELS_ONLY
+      // Use specialized kernel selector
+      void* specializedKernel = getSpecializedKernel(
+          task->func, task->algorithm, task->protocol,
+          task->opDev.op, task->datatype, 0, task->pipeline, comm->unroll);
+      if (specializedKernel == nullptr) {
+        WARN("SPECIALIZED_KERNELS_ONLY: No specialized kernel found for func=%d algo=%d proto=%d redop=%d dtype=%d",
+             task->func, task->algorithm, task->protocol, task->opDev.op, task->datatype);
+        return ncclInternalError;
+      }
+      plan->kernelFn = specializedKernel;
+      plan->kernelSpecialized = true;
+#else
       plan->kernelFn = ncclKerns[ncclGetKernelIndex(comm)].kernelFn;
       plan->kernelSpecialized = ncclKerns[ncclGetKernelIndex(comm)].specialized;
+#endif
     }
     // Profiler
     plan->groupApiEventHandle = task->groupApiEventHandle;
@@ -1288,8 +1334,21 @@ static ncclResult_t scheduleP2pTasksToPlan(
   plan->threadPerBlock = std::max(plan->threadPerBlock, NCCL_MAX_NTHREADS);
 #endif
   if (!plan->kernelSpecialized) {
+#ifdef SPECIALIZED_KERNELS_ONLY
+    // P2P uses SendRecv kernel with RING algo, SIMPLE proto
+    void* specializedKernel = getSpecializedKernel(
+        ncclFuncSendRecv, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE,
+        ncclDevSum, ncclInt8, 0, 0, comm->unroll);
+    if (specializedKernel == nullptr) {
+      WARN("SPECIALIZED_KERNELS_ONLY: No specialized kernel found for P2P (SendRecv)");
+      return ncclInternalError;
+    }
+    plan->kernelFn = specializedKernel;
+    plan->kernelSpecialized = true;
+#else
     plan->kernelFn = ncclKerns[ncclGetKernelIndex(comm)].kernelFn;
     plan->kernelSpecialized = ncclKerns[ncclGetKernelIndex(comm)].specialized;
+#endif
   }
 
   // Compute how much to split operations

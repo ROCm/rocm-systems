@@ -750,7 +750,7 @@ struct ncclComm {
   int unroll;
   // custom collective [RCCL]
   bool enableCustColl;
-  // gfx name from hipDeviceProp_t [RCCL] , Memory resource owned by comm allocated in ncclCommInitRankFunc
+  // gfx name from hipDeviceProp_t [RCCL]
   char* archName;
   // multiProcessorCount from hipDeviceProp_t [RCCL]
   int cuCount;

@@ -72,10 +72,17 @@ option(ENABLE_MSCCLPP                          "Enable MSCCL++"                 
 option(ENABLE_MSCCLPP_CLIP                     "Enable MSCCL++ CLIP"                           OFF)
 option(ENABLE_MSCCLPP_EXECUTOR                 "Enable MSCCL++ Executor"                       OFF)
 option(ENABLE_MSCCLPP_FORMAT_CHECKS            "Enable formatting checks in MSCCL++"           OFF)
-option(MSCCLPP_APPLY_PATCHES                   "Apply source code patches to MSCCL++"          ON)
 option(ENABLE_NPKIT                            "Enable NPKit"                                  OFF)
 option(ENABLE_IFC                              "Enable indirect function call"                 OFF)
+option(SPECIALIZED_KERNELS_ONLY                "Build only specialized kernels (no generic)"   OFF)
+option(DEVICE_LINKER_ENABLED                   "Use device linker for merged kernel dispatch"  OFF)
 option(GENERATE_SYM_KERNELS                    "Generate symmetric memory kernels"             OFF)
+
+# DEVICE_LINKER_ENABLED requires SPECIALIZED_KERNELS_ONLY
+if (DEVICE_LINKER_ENABLED AND NOT SPECIALIZED_KERNELS_ONLY)
+  message(STATUS "DEVICE_LINKER_ENABLED implies SPECIALIZED_KERNELS_ONLY - enabling it")
+  set(SPECIALIZED_KERNELS_ONLY ON CACHE BOOL "Forced by DEVICE_LINKER_ENABLED" FORCE)
+endif()
 option(INSTALL_DEPENDENCIES                    "Force install dependencies"                    OFF)
 option(REPORT_KERNEL_RESOURCE_USE              "Append -Rpass-analysis=kernel to CXX flags"    OFF)
 option(ROCTX                                   "Enable ROCTX"                                  ON)
@@ -109,7 +116,6 @@ include(CheckIncludeFiles)
 include(CheckSymbolExists)
 include(cmake/Dependencies.cmake) # GTest, rocm-cmake, rocm_local_targets
 include(cmake/CheckSymbolExistsNoWarn.cmake)
-include(cmake/MSCCLPP.cmake)
 
 # Include rocSHMEM build module only if enabled
 if(ENABLE_ROCSHMEM)
@@ -973,6 +979,7 @@ if(ONLY_FUNCS)
 endif()
 
 # Execute the python script to generate required collective functions
+# (Always needed for host_table.cpp and device_table.h)
 execute_process(
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/src/device/generate.py ${GEN_DIR} ${IFC_ENABLED} ${COLLTRACE} ${ENABLE_MSCCL_KERNEL} ${BUILD_LOCAL_GPU_TARGET_ONLY} ${ONLY_FUNCS}
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
@@ -982,6 +989,30 @@ execute_process(
 if (gen_py_result)
   message(SEND_ERROR "Error: ${gen_py_error}")
   message(FATAL_ERROR "${CMAKE_SOURCE_DIR}/src/device/generate.py failed")
+endif()
+
+if (SPECIALIZED_KERNELS_ONLY)
+  message(STATUS "SPECIALIZED_KERNELS_ONLY mode: building only specialized kernels (no generic)")
+  # Convert GPU_TARGETS list to semicolon-separated string for Python
+  string(REPLACE ";" ";" GPU_TARGETS_STR "${GPU_TARGETS}")
+  execute_process(
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/src/device/generate_specialized.py ${GEN_DIR}/specialized ${BUILD_LOCAL_GPU_TARGET_ONLY} "${ONLY_FUNCS}" "${GPU_TARGETS_STR}"
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    RESULT_VARIABLE gen_specialized_result
+    ERROR_VARIABLE gen_specialized_error
+  )
+  if (gen_specialized_result)
+    message(WARNING "Specialized kernel generation failed: ${gen_specialized_error}")
+  else()
+    file(GLOB SPECIALIZED_KERNEL_FILES "${GEN_DIR}/specialized/*.cpp")
+    foreach(file ${SPECIALIZED_KERNEL_FILES})
+      list(APPEND HIP_SOURCES ${file})
+    endforeach()
+    if (SPECIALIZED_KERNEL_FILES)
+      set_source_files_properties(${SPECIALIZED_KERNEL_FILES} PROPERTIES COMPILE_OPTIONS "-fno-gpu-rdc")
+    endif()
+    message(STATUS "Specialized kernels: ${SPECIALIZED_KERNEL_FILES}")
+  endif()
 endif()
 
 if (GENERATE_SYM_KERNELS)
@@ -998,13 +1029,42 @@ if (GENERATE_SYM_KERNELS)
   endif()
 endif()
 
-# Find the generated files in the output directory
-file(GLOB_RECURSE GENERATED_FILES "${GEN_DIR}/*")
+# Find and add generated files
+if (SPECIALIZED_KERNELS_ONLY)
+  # Only add host_table.cpp and device_table.cpp (not device function .cpp files)
+  # Device functions are replaced by specialized kernels
+  list(APPEND HIP_SOURCES "${GEN_DIR}/host_table.cpp")
+  list(APPEND HIP_SOURCES "${GEN_DIR}/device_table.cpp")  # Contains funcNames[] needed by init.cc
+  message(STATUS "SPECIALIZED_KERNELS_ONLY: using host_table.cpp and device_table.cpp from generate.py")
+  
+  # If GENERATE_SYM_KERNELS is OFF, create stub for ncclSymkGetKernelPtr
+  if (NOT GENERATE_SYM_KERNELS)
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/sym_kernels_stub.cpp"
+"// Stub for symmetric kernel functions when GENERATE_SYM_KERNELS is OFF
+#include \"sym_kernels.h\"
+#include \"nccl.h\"
 
-# Append all found generated files to the list
-foreach(file ${GENERATED_FILES})
-  list(APPEND HIP_SOURCES ${file})
-endforeach()
+void* ncclSymkGetKernelPtr(ncclSymkKernelId /*kernelId*/, int /*red*/, ncclDataType_t /*ty*/) {
+  return nullptr;  // Symmetric kernels not enabled
+}
+
+int const ncclSymkKernelCount = 0;
+void* const ncclSymkKernelList[] = { nullptr };
+")
+    list(APPEND HIP_SOURCES "${CMAKE_CURRENT_BINARY_DIR}/sym_kernels_stub.cpp")
+    message(STATUS "SPECIALIZED_KERNELS_ONLY: added sym_kernels_stub.cpp (GENERATE_SYM_KERNELS=OFF)")
+  endif()
+  
+  # Remove common.cu from HIP_SOURCES (it contains generic kernels)
+  list(FILTER HIP_SOURCES EXCLUDE REGEX ".*common\\.cu\\.cpp$")
+  message(STATUS "SPECIALIZED_KERNELS_ONLY: excluded common.cu (generic kernels)")
+else()
+  # Normal mode: add all generated files
+  file(GLOB_RECURSE GENERATED_FILES "${GEN_DIR}/*")
+  foreach(file ${GENERATED_FILES})
+    list(APPEND HIP_SOURCES ${file})
+  endforeach()
+endif()
 
 # Create an initial git_version.cpp file (that will be updated with latest git version)
 #==================================================================================================
@@ -1080,6 +1140,11 @@ if(ENABLE_WARP_SPEED)
 endif()
 if(ENABLE_ROCSHMEM)
   target_compile_definitions(rccl PRIVATE ENABLE_ROCSHMEM)
+endif()
+if(SPECIALIZED_KERNELS_ONLY)
+  target_compile_definitions(rccl PRIVATE SPECIALIZED_KERNELS_ONLY)
+  target_include_directories(rccl PRIVATE ${GEN_DIR}/specialized)
+  message(STATUS "SPECIALIZED_KERNELS_ONLY mode enabled - using specialized kernel selector")
 endif()
 
 # ==== rocSHMEM integration (optional) ====
@@ -1275,6 +1340,63 @@ endif()
 if (IFC_ENABLED)
   target_compile_definitions(rccl PRIVATE USE_INDIRECT_FUNCTION_CALL)
 endif()
+
+# Device linker mode - use merged kernels instead of specialized
+if (DEVICE_LINKER_ENABLED)
+  target_compile_definitions(rccl PRIVATE DEVICE_LINKER_ENABLED)
+  
+  set(DEVICE_LINKER_DIR ${CMAKE_CURRENT_SOURCE_DIR}/tools/device_linker)
+  set(MERGED_HOST_OBJ ${CMAKE_CURRENT_BINARY_DIR}/merged_final_host.o)
+  set(HIPCC_COMPILER /opt/rocm/bin/hipcc)
+  
+  # The device linker pipeline must run AFTER specialized .o files are compiled
+  # but BEFORE the final link. We use PRE_LINK to achieve this timing.
+  # The merged_final_host.o is created during PRE_LINK, then we link it using
+  # LINK_FLAGS instead of target_link_libraries to avoid dependency issues.
+  
+  add_custom_command(
+    TARGET rccl
+    PRE_LINK
+    # Step 0: Compile the dispatcher kernel (merged_minimal.hip) with --offload-compress
+    COMMAND ${HIPCC_COMPILER} -c -fPIC -fno-gpu-rdc --offload-arch=gfx942 --offload-compress
+            -I${CMAKE_CURRENT_BINARY_DIR}/hipify/src/include
+            -I${CMAKE_CURRENT_BINARY_DIR}/hipify/src/include/nccl_device
+            -I${CMAKE_CURRENT_BINARY_DIR}/hipify/src/device
+            ${DEVICE_LINKER_DIR}/merged_minimal.hip 
+            -o ${DEVICE_LINKER_DIR}/merged_minimal.o
+    # Step 0b: Extract HOST object (contains __hip_module_ctor registration code)
+    # Use --allow-missing-bundles since compressed .hip_fatbin format can't be unbundled directly
+    COMMAND /opt/rocm/llvm/bin/clang-offload-bundler --type=o 
+            --targets=host-x86_64-unknown-linux-gnu,hipv4-amdgcn-amd-amdhsa--gfx942
+            --input=${DEVICE_LINKER_DIR}/merged_minimal.o
+            --output=${DEVICE_LINKER_DIR}/host_only.o --output=/dev/null 
+            --unbundle --allow-missing-bundles
+    # Step 0c: Extract DEVICE object from compressed fatbin (needed by device_linker)
+    COMMAND ${Python3_EXECUTABLE} ${DEVICE_LINKER_DIR}/extract_device_from_fatbin.py
+            ${DEVICE_LINKER_DIR}/merged_minimal.o ${DEVICE_LINKER_DIR}/minimal_device.o gfx942
+    # Step 1: Run C++ device linker (replaces Python pipeline steps 1-6)
+    COMMAND ${DEVICE_LINKER_DIR}/device_linker
+            -o ${DEVICE_LINKER_DIR}/merged_device_final.o
+            --dispatcher ${DEVICE_LINKER_DIR}/minimal_device.o
+            --host-table ${CMAKE_CURRENT_BINARY_DIR}/hipify/gensrc/host_table.cpp
+            --input-dir ${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/rccl.dir/hipify/gensrc/specialized/
+    # Step 7: Bundle host code with our merged device code
+    # This creates __CLANG_OFFLOAD_BUNDLE__* sections that the linker can process
+    COMMAND /opt/rocm/llvm/bin/clang-offload-bundler --type=o 
+            --targets=host-x86_64-unknown-linux-gnu,hipv4-amdgcn-amd-amdhsa--gfx942
+            --input=${DEVICE_LINKER_DIR}/host_only.o 
+            --input=${DEVICE_LINKER_DIR}/merged_device_final.o
+            --output=${MERGED_HOST_OBJ}
+    WORKING_DIRECTORY ${DEVICE_LINKER_DIR}
+    COMMENT "Running device linker pipeline to create merged kernel object"
+    VERBATIM
+  )
+  
+  # Add the merged object to link flags (instead of target_link_libraries to avoid dependency issues)
+  target_link_options(rccl PRIVATE ${MERGED_HOST_OBJ})
+  
+  message(STATUS "Device linker mode enabled - pipeline will run after specialized kernel compilation")
+endif()
 if(DEMANGLE_DIR)
   target_compile_definitions(rccl PRIVATE "HAVE_CPLUS_DEMANGLE=1")
   target_compile_definitions(rccl PRIVATE "HAVE_DECL_BASENAME=1")
@@ -1309,7 +1431,9 @@ target_compile_options(rccl PRIVATE -Wall)
 target_compile_options(rccl PRIVATE -Werror=deprecated-copy-with-user-provided-copy)
 target_compile_options(rccl PRIVATE -Wno-format-nonliteral)
 target_compile_options(rccl PRIVATE -Wno-unused-function)
-target_compile_options(rccl PRIVATE -fgpu-rdc)
+if(NOT SPECIALIZED_KERNELS_ONLY)
+  target_compile_options(rccl PRIVATE -fgpu-rdc)
+endif()
 
 if(QUIET_WARNINGS)
   target_compile_options(rccl PRIVATE -Wno-invalid-offsetof)
@@ -1429,7 +1553,9 @@ endif()
 if (ROCTX_ENABLE)
   target_link_libraries(rccl PRIVATE ${ROCTX_LIB})
 endif()
-target_link_libraries(rccl PRIVATE   -fgpu-rdc)             # Required when linking relocatable device code
+if(NOT SPECIALIZED_KERNELS_ONLY)
+  target_link_libraries(rccl PRIVATE -fgpu-rdc)             # Required when linking relocatable device code
+endif()
 target_link_libraries(rccl PRIVATE   Threads::Threads)
 target_link_libraries(rccl INTERFACE hip::host)
 target_link_libraries(rccl PRIVATE   hip::device)
@@ -1520,7 +1646,7 @@ if (HAVE_KERNARG_PRELOAD)
 endif()
 
 if(ENABLE_MSCCLPP)
-  add_mscclpp_targets()
+  include(cmake/MSCCLPP.cmake)
 endif()
 
 ## Track linking time
