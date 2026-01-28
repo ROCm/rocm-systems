@@ -30,7 +30,7 @@ Follow this systematic approach to optimize GPU performance:
       rocprofv3 --stats --<tracing_option> -- <application_path>
 
    Collect metrics on kernel execution time, memory bandwidth, occupancy, and
-   CU utilization. For more details on using ``rocprofv3`` for application tracing and profiling, see `rocprofv3 documentation <https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html>`_.
+   CU utilization. For more details on using ``rocprofv3`` for application tracing and profiling, see :doc:`rocprofv3 documentation <rocprofiler-sdk:how-to/using-rocprofv3>`.
 
 2. **Analyze metrics to identify bottlenecks**
 
