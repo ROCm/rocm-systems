@@ -6348,6 +6348,8 @@ gfx12_architecture_t::gfx12_architecture_t (elf_amdgpu_machine_t e_machine,
                                   amdgpu_regnum_t::excp_flag_priv);
   system_registers.add_registers (amdgpu_regnum_t::excp_flag_user,
                                   amdgpu_regnum_t::excp_flag_user);
+  system_registers.add_registers (amdgpu_regnum_t::sched_mode,
+				  amdgpu_regnum_t::sched_mode);
 }
 
 std::optional<uint64_t>
@@ -6661,6 +6663,9 @@ gfx12_architecture_t::register_name (amdgpu_regnum_t regnum) const
     case amdgpu_regnum_t::scratch_base_hi:
       return "scratch_base_hi";
 
+    case amdgpu_regnum_t::sched_mode:
+      return "sched_mode";
+
     case amdgpu_regnum_t::trapsts:
       dbgapi_assert (false && "trapsts does not exist for gfx12");
       break;
@@ -6792,6 +6797,14 @@ gfx12_architecture_t::register_type (amdgpu_regnum_t regnum) const
     case amdgpu_regnum_t::scratch_base_hi:
       return "uint32_t";
 
+    case amdgpu_regnum_t::sched_mode:
+      return "flags32_t sched_mode {"
+             "  enum fp_round {"
+             "    NORMAL = 0,"
+             "    EXPERT = 2"
+             "  } DEP_MDOE @0-1;"
+             "}";
+
     case amdgpu_regnum_t::trapsts:
       dbgapi_assert (false && "trapsts does not exist in gfx12");
 
@@ -6812,6 +6825,7 @@ gfx12_architecture_t::register_size (amdgpu_regnum_t regnum) const
     case amdgpu_regnum_t::excp_flag_user:
     case amdgpu_regnum_t::scratch_base_lo:
     case amdgpu_regnum_t::scratch_base_hi:
+    case amdgpu_regnum_t::sched_mode:
       return sizeof (uint32_t);
 
     case amdgpu_regnum_t::scratch_base:
@@ -6871,6 +6885,11 @@ gfx12_architecture_t::register_read_only_mask (amdgpu_regnum_t regnum) const
       {
         static uint32_t excp_flag_user_ro_bits = utils::bit_mask (7, 29);
         return &excp_flag_user_ro_bits;
+      }
+    case amdgpu_regnum_t::sched_mode:
+      {
+        static uint32_t pseudo_sched_mode_ro_bits = utils::bit_mask (2,31);
+        return &pseudo_sched_mode_ro_bits;
       }
 
     case amdgpu_regnum_t::trapsts:
@@ -7087,6 +7106,15 @@ gfx12_architecture_t::cwsr_record_t::register_address (
 
     case amdgpu_regnum_t::status:
       regnum = amdgpu_regnum_t::first_hwreg + 13;
+      break;
+
+    case amdgpu_regnum_t::sched_mode:
+        {
+          if (!queue ().process ().os_driver ().save_sched_mode ())
+            return std::nullopt;
+
+          regnum = amdgpu_regnum_t::first_hwreg + 16;
+        }
       break;
 
     case amdgpu_regnum_t::trapsts:
