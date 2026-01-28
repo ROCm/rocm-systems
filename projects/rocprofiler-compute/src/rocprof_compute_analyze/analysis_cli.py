@@ -27,7 +27,8 @@ from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from utils import file_io, parser, tty
 from utils.kernel_name_shortener import kernel_name_shortener
 from utils.logger import console_error, demarcate
-
+from pathlib import Path
+from utils.utils import consolidate_torch_trace_output, process_torch_trace_output
 
 class cli_analysis(OmniAnalyze_Base):
     # -----------------------
@@ -99,6 +100,11 @@ class cli_analysis(OmniAnalyze_Base):
         workload = self._runs[workload_path]
         gpu_arch = workload.sys_info.iloc[0]["gpu_arch"]
         arch_config = self._arch_configs[gpu_arch]
+
+        if getattr(args, "list_torch_operators", False):
+            if workload_path.exists() is False:
+                console_error(f"Workload path does not exist: {workload_path}")
+            process_torch_trace_output(workload)
 
         if args.list_stats:
             tty.show_kernel_stats(
