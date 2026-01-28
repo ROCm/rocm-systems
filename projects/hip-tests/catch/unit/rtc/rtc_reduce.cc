@@ -49,9 +49,7 @@ void runRtcReduceOp(hiprtcProgram& prog, T* output, const T* input, const MaskTy
   LinearAllocGuard<int> d_numReduces(LinearAllocs::hipMalloc, sizeof(int));
 
   HIP_CHECK(hipMemcpy(d_numReduces.ptr(), &numReduces, sizeof(int), hipMemcpyHostToDevice));
-  std::vector<const void*> args = {
-      reinterpret_cast<const void*>(output), reinterpret_cast<const void*>(input),
-      reinterpret_cast<const void*>(masks), reinterpret_cast<void*>(d_numReduces.ptr())};
+  std::vector<const void*> args = {output, input, masks, d_numReduces.ptr()};
   std::size_t sizeBytes = args.size() * sizeof(void*);
   void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, args.data(), HIP_LAUNCH_PARAM_BUFFER_SIZE,
                     &sizeBytes, HIP_LAUNCH_PARAM_END};
