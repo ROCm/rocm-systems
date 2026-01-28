@@ -548,6 +548,8 @@ jobs:
           python3 -m venv ${{ env.PYTHON_VENV_PATH }}
           source ${{ env.PYTHON_VENV_ACTIVATE }}
           export PATH=/opt/rh/gcc-toolset-11/root/usr/bin:$PATH
+          export LD_LIBRARY_PATH=/opt/amdgpu/lib64:${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
+          export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$HOME/.local/bin:$PATH
           python3 -m pip install --upgrade pip
           python3 -m pip install --upgrade cmake
           echo "Install ROCR-Runtime..."
