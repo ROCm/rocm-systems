@@ -637,8 +637,6 @@ jobs:
         run: |
           source ${{ env.PYTHON_VENV_ACTIVATE }}
           export PATH=~/.local/bin:/opt/rh/gcc-toolset-11/root/usr/bin:$PATH
-          export LD_LIBRARY_PATH=/opt/amdgpu/lib64:${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
-          export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$HOME/.local/bin:$PATH
           python3 ./source/scripts/run-ci.py -B build \
             --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core \
             --mode ${CI_MODE} \
