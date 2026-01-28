@@ -3169,3 +3169,15 @@ hipError_t hipExtSetLoggingParams(size_t log_level, size_t log_size, size_t log_
   return hip::GetHipDispatchTable()->hipExtSetLoggingParams_fn(log_level, log_size, log_mask);
   CATCH;
 }
+hipError_t hipMemSetMemPool(hipMemLocation* location, hipMemAllocationType type,
+                            hipMemPool_t pool) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipMemSetMemPool_fn(location, type, pool);
+  CATCH;
+}
+hipError_t hipMemGetMemPool(hipMemPool_t* pool, hipMemLocation* location,
+                            hipMemAllocationType type) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipMemGetMemPool_fn(pool, location, type);
+  CATCH;
+}
