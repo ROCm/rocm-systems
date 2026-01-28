@@ -1300,6 +1300,7 @@ def save_torch_trace_inputs(
         # Multiple pairs possible (one per PID/process)
         counter_files = glob.glob(str(src_dir / "*/*_counter_collection.csv"))
         marker_files = glob.glob(str(src_dir / "*/*_marker_api_trace.csv"))
+        Path(workload_dir / f"{fbase}").mkdir(parents=True, exist_ok=True)
         for src_counter in counter_files:
             dst_counter = str(Path(workload_dir) / f"{fbase}" / Path(src_counter).name)
             shutil.copyfile(src_counter, dst_counter)
