@@ -38,7 +38,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: df5e21e3b8449ade0af12bcf94c0113510e97f6d # 2025-12-30 commit
+          ref: 744992347a32fefa0ab849adc2bac8b363a65328 # 2026-01-28 commit
 
       - name: Install python deps
         run: |
@@ -126,5 +126,5 @@ jobs:
     with:
       project_to_test: ${{ inputs.project_to_test }}
       amdgpu_families: "gfx94X-dcgpu"
-      test_runs_on: "linux-mi325-1gpu-ossci-rocm-frac"
+      test_runs_on: "linux-mi325-1gpu-ossci-rocm"
       platform: "linux"
