@@ -256,6 +256,7 @@ ucx_gotcha::start()
     if(!get_ucx_gotcha().get<ucx_gotcha_t>()->get_is_running())
     {
         configure();
+        comm_data::start();
         get_ucx_gotcha().start();
     }
 }

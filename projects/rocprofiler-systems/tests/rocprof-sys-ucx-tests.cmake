@@ -70,35 +70,6 @@ set(_ucx_base_environment
     "${_ucxp_mpi_environment}"
 )
 
-# First test: UCX availability check using mpi-example (basic test)
-# This test checks if UCX is available. If not, subsequent UCX tests will be marked as skipped.
-rocprofiler_systems_add_test(
-    SKIP_BASELINE SKIP_RUNTIME SKIP_REWRITE SKIP_SYS_RUN
-    NAME "ucx-availability-check"
-    TARGET mpi-example
-    MPI ON
-    NUM_PROCS 2
-    LABELS "ucx;availability"
-    REWRITE_ARGS
-        -e
-        -v
-        2
-        --label
-        file
-        line
-        return
-        args
-        --min-instructions
-        0
-    ENVIRONMENT "${_ucx_base_environment};ROCPROFSYS_VERBOSE=1"
-    REWRITE_RUN_PASS_REGEX
-        "UCX.*configured|ucp_|uct_|UCX transport|pml.*ucx"
-    REWRITE_RUN_FAIL_REGEX
-        "PML ucx cannot be selected|UCX is not available|No UCX support found|Failed to select|ROCPROFSYS_ABORT_FAIL_REGEX"
-    REWRITE_RUN_SKIP_REGEX
-        "PML ucx cannot be selected|UCX is not available|No UCX support found|Failed to select"
-)
-
 # Enhanced UCX environment with more detailed logging
 set(_ucx_environment
     "${_base_environment}"
@@ -113,12 +84,45 @@ set(_ucx_environment
     "${_ucxp_mpi_environment}"
 )
 
-# Debug environment - extra verbose for troubleshooting CI issues
-set(_ucx_debug_environment
-    "${_ucx_environment}"
-    "UCX_LOG_LEVEL=debug" # Maximum UCX logging
-    "OMPI_MCA_mpi_show_mca_params=all" # Show all MCA parameters
-)
+# Enable ROCPD for UCX tests if valid ROCm is installed and a valid GPU is detected
+if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU})
+    list(APPEND _ucx_environment "ROCPROFSYS_USE_ROCPD=ON")
+endif()
+
+# Check if UCX is functional by running mpi-example without rocprof-sys
+set(skip_validation FALSE)
+
+if(EXISTS "${PROJECT_BINARY_DIR}/mpi-example")
+    # Set up UCX environment for the baseline test
+    set(_ucx_test_env_list)
+    foreach(_env_var ${_ucxp_mpi_environment})
+        list(APPEND _ucx_test_env_list "${_env_var}")
+    endforeach()
+
+    execute_process(
+        COMMAND
+            ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 2
+            ${PROJECT_BINARY_DIR}/mpi-example
+        OUTPUT_VARIABLE _ucx_output
+        ERROR_VARIABLE _ucx_output
+        RESULT_VARIABLE _ucx_result
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_STRIP_TRAILING_WHITESPACE
+        ENVIRONMENT
+        ${_ucx_test_env_list}
+    )
+
+    # Check for error patterns indicating UCX is not available
+    if(
+        _ucx_output
+            MATCHES
+            "PML ucx cannot be selected|UCX is not available|No UCX support found|Failed to select"
+    )
+        set(skip_validation TRUE)
+    endif()
+else()
+    set(skip_validation TRUE)
+endif()
 
 # UCX perfetto trace test
 rocprofiler_systems_add_test(
@@ -146,14 +150,21 @@ rocprofiler_systems_add_test(
         "ucp_tag_send|ucp_tag_recv|UCX.*configured|Using UCX|pml.*ucx"
 )
 
-# Validation test for UCX perfetto trace to ensure communication tracks are present
-rocprofiler_systems_add_validation_test(
-    NAME ucx-perfetto-sys-run
-    PERFETTO_METRIC "ucx"
-    PERFETTO_FILE "merged.proto"
-    LABELS "ucx;perfetto"
-    ARGS --counter-names "UCX Comm Recv" "UCX Comm Send" -p
-)
+if(NOT skip_validation)
+    # Validation test for UCX perfetto trace to ensure communication tracks are present
+    rocprofiler_systems_add_validation_test(
+        NAME ucx-perfetto-sys-run
+        PERFETTO_METRIC "ucx"
+        PERFETTO_FILE "merged.proto"
+        LABELS "ucx;perfetto"
+        ARGS --counter-names "UCX Comm Recv" "UCX Comm Send" -p
+    )
+else()
+    message(
+        STATUS
+        "UCX: UCX is not available or cannot be selected, skipping validation tests"
+    )
+endif()
 
 # Test all MPI example binaries with UCX transport
 foreach(
@@ -180,14 +191,16 @@ foreach(
         "ucp_tag_send|ucp_tag_recv|write_perfetto_counter_track.*ucx"
     )
 
-    # Add validation test to check for UCX communication tracks and bytes
-    rocprofiler_systems_add_validation_test(
-        NAME ucx-${_UCX_EXAMPLE}-sys-run
-        PERFETTO_METRIC "ucx"
-        PERFETTO_FILE "merged.proto"
-        LABELS "ucx"
-        ARGS --counter-names "UCX Comm Recv" "UCX Comm Send" -p
-    )
+    if(NOT skip_validation)
+        # Add validation test to check for UCX communication tracks and bytes
+        rocprofiler_systems_add_validation_test(
+            NAME ucx-${_UCX_EXAMPLE}-sys-run
+            PERFETTO_METRIC "ucx"
+            PERFETTO_FILE "merged.proto"
+            LABELS "ucx"
+            ARGS --counter-names "UCX Comm Recv" "UCX Comm Send" -p
+        )
+    endif()
 endforeach()
 
 # UCX with MPIP integration test
@@ -262,3 +275,22 @@ rocprofiler_systems_add_test(
     REWRITE_RUN_PASS_REGEX
         "ucp_am_send|ucp_am_recv|uct_ep_am|Active.*Message"
 )
+
+# -------------------------------------------------------------------------------------- #
+#
+# ROCpd tests for UCX
+#
+# -------------------------------------------------------------------------------------- #
+
+if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU} AND TEST ucx-perfetto-sys-run)
+    set_property(TEST ucx-perfetto-sys-run APPEND PROPERTY LABELS rocpd)
+
+    rocprofiler_systems_add_validation_test(
+        NAME ucx-perfetto-sys-run
+        ROCPD_FILE "rocpd.db"
+        ARGS --validation-rules
+        "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/ucx/validation-rules.json"
+        "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/default-rules.json"
+        LABELS "rocpd"
+    )
+endif()
