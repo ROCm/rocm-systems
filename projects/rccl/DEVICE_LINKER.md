@@ -105,9 +105,20 @@ Generates specialized kernel source files with:
 - `ncclDevFunc_*` definitions that the device linker extracts
 - Kernel selector headers for non-device-linker builds
 
-## CMake Configuration
+## Configuration
 
-Enable the device linker with:
+### Using install.sh
+
+```bash
+./install.sh --device-linker
+```
+
+Or with specific GPU target:
+```bash
+./install.sh --device-linker --amdgpu_targets=gfx942
+```
+
+### Using CMake directly
 
 ```cmake
 cmake .. \
