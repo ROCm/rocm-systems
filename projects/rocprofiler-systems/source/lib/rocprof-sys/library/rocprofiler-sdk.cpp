@@ -2682,7 +2682,7 @@ extern "C"
         // return pointer to configure data
         return &cfg;
     }
-
+#if ROCPROFSYS_ROCM_VERSION >= 71200
     int tool_attach_init([[maybe_unused]] rocprofiler_client_detach_t detach_func,
                          [[maybe_unused]] rocprofiler_context_id_t*   context_ids,
                          [[maybe_unused]] uint64_t                    context_ids_length,
@@ -2750,4 +2750,5 @@ extern "C"
         };
         return &cfg;
     }
+#endif
 }
