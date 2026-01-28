@@ -43,7 +43,7 @@ get_concurrent_processes(int _ppid)
     std::set<int> _children = {};
     if(_ppid > 0)
     {
-        auto          _inp = JOIN('/', "/proc", _ppid, "task", _ppid, "children");
+        auto          _inp = fmt::format("/proc/{}/task/{}/children", _ppid, _ppid);
         std::ifstream _ifs{ _inp };
         if(!_ifs)
         {

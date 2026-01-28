@@ -83,7 +83,9 @@ release(size_t, GPU_PINNED_XFER_SIZE, 32,                                     \
 release(size_t, GPU_PINNED_MIN_XFER_SIZE, 128,                                \
         "The minimal buffer size for pinned read/write transfers in MiB")     \
 release(size_t, GPU_RESOURCE_CACHE_SIZE, 64,                                  \
-        "The resource cache size in MB")                                      \
+        "The resource cache size in MiB")                                      \
+release(size_t, GPU_MAX_RESOURCE_CACHE_SIZE, 16777216,                        \
+        "The max resource cache size in MiB")                                  \
 release(size_t, GPU_MAX_SUBALLOC_SIZE, 4096,                                  \
         "The maximum size accepted for suballocations in KB")                 \
 release(size_t, GPU_NUM_MEM_DEPENDENCY, 256,                                  \
@@ -265,8 +267,11 @@ release(bool, DEBUG_HIP_KERNARG_COPY_OPT, true,                               \
         "Enable/Disable multiple kern arg copies")                            \
 release(bool, DEBUG_CLR_KERNARG_HDP_FLUSH_WA, false,                          \
         "Toggle kernel arg copy workaround")                                  \
-release(bool, DEBUG_HIP_DYNAMIC_QUEUES, false,                                \
-        "Forces dynamic queue management")                                    \
+release(uint, DEBUG_HIP_DYNAMIC_QUEUES, 2,                                    \
+        "Dynamic queue management: 0=off, 1=Queue depth heuristic,"           \
+        "2= Queue Depth + Pipe distribution")                                 \
+release(bool, DEBUG_HIP_IGNORE_STREAM_PRIORITY, false,                        \
+        "Ignore priority streams")                                            \
 release(uint, HIP_SKIP_ABORT_ON_GPU_ERROR, true,                              \
         "Set this to true, to avoid host side abort for GPU errors")          \
 release(bool, HIP_FORCE_SPIRV_CODEOBJECT, false,                              \

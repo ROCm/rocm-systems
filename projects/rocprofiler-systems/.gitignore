@@ -37,6 +37,10 @@
 # Python cache files
 *.pyc
 
+# Python virtual environments
+venv*
+.venv*
+
 # Documentation artifacts
 /_build
 _toc.yml
