@@ -55,7 +55,8 @@ static_assert(std::max({static_cast<size_t>(ROCPROFILER_HIP_RUNTIME_API_ID_LAST)
                         static_cast<size_t>(ROCPROFILER_MARKER_NAME_API_ID_LAST),
                         static_cast<size_t>(ROCPROFILER_RCCL_API_ID_LAST),
                         static_cast<size_t>(ROCPROFILER_ROCDECODE_API_ID_LAST),
-                        static_cast<size_t>(ROCPROFILER_ROCJPEG_API_ID_LAST)}) <= domain_ops_padding,
+                        static_cast<size_t>(ROCPROFILER_ROCJPEG_API_ID_LAST)}) <=
+                  domain_ops_padding,
               "domain_ops_padding is too small for API operation IDs - increase it in domain.hpp");
 
 template <typename DomainT>
