@@ -48,24 +48,22 @@ if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU})
     list(APPEND _gpu_connect_environment "ROCPROFSYS_USE_ROCPD=ON")
 endif()
 
-set(skip_validation FALSE)
+# Add a runtime validation test that checks if transferBench can run successfully
+# This test runs before all other GPU connect tests and acts as a fixture
+add_test(
+    NAME transferbench-validation-check
+    COMMAND $<TARGET_FILE:transferBench>
+    WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+)
 
-if(EXISTS "${PROJECT_BINARY_DIR}/transferBench")
-    execute_process(
-        COMMAND ${PROJECT_BINARY_DIR}/transferBench
-        OUTPUT_VARIABLE _transfer_output
-        ERROR_VARIABLE _transfer_output
-        RESULT_VARIABLE _transfer_result
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-        ERROR_STRIP_TRAILING_WHITESPACE
-    )
-
-    if(_transfer_output MATCHES "Error: No valid transfers created")
-        set(skip_validation TRUE)
-    endif()
-else()
-    set(skip_validation TRUE)
-endif()
+# Set this test as a fixture that must pass for GPU connect tests to run
+set_tests_properties(
+    transferbench-validation-check
+    PROPERTIES
+        LABELS "transferbench;validation"
+        FIXTURES_SETUP transferbench_available
+        SKIP_REGULAR_EXPRESSION "Error: No valid transfers created"
+)
 
 rocprofiler_systems_add_test(
     SKIP_BASELINE SKIP_REWRITE SKIP_SAMPLING SKIP_RUNTIME
@@ -77,25 +75,31 @@ rocprofiler_systems_add_test(
     SYS_RUN_SKIP_REGEX "Error: No valid transfers created"
 )
 
-if(NOT skip_validation)
+# Make this test depend on the transferBench validation fixture
+if(TEST transferbench-sys-run)
+    set_tests_properties(
+        transferbench-sys-run
+        PROPERTIES FIXTURES_REQUIRED transferbench_available
+    )
+endif()
+
+# Add validation test to check for XGMI data transfers
+rocprofiler_systems_add_validation_test(
+    NAME transferbench-sys-run
+    PERFETTO_FILE "perfetto-trace.proto"
+    LABELS "transferbench;perfetto"
+    ARGS --counter-names "XGMI Read Data" "XGMI Write Data" -p
+)
+
+# Add ROCPD validation if enabled
+if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU})
+    set_property(TEST transferbench-sys-run APPEND PROPERTY LABELS rocpd)
+
     rocprofiler_systems_add_validation_test(
         NAME transferbench-sys-run
-        PERFETTO_FILE "perfetto-trace.proto"
-        LABELS "transferbench;perfetto"
-        ARGS --counter-names "XGMI Read Data" "XGMI Write Data" -p
+        ROCPD_FILE "rocpd.db"
+        LABELS "transferbench;rocpd"
+        ARGS --validation-rules
+            ${_gpu_connect_rocpd_validation_rules}
     )
-
-    if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU})
-        set_property(TEST transferbench-sys-run APPEND PROPERTY LABELS rocpd)
-
-        rocprofiler_systems_add_validation_test(
-            NAME transferbench-sys-run
-            ROCPD_FILE "rocpd.db"
-            LABELS "transferbench;rocpd"
-            ARGS --validation-rules
-                ${_gpu_connect_rocpd_validation_rules}
-        )
-    endif()
-else()
-    message(STATUS "TransferBench: No valid transfers created, skipping tests")
 endif()

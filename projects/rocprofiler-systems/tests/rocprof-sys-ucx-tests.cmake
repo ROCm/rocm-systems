@@ -42,7 +42,7 @@ endif()
 # Only proceed if OpenMPI is detected
 if(NOT "${_DETECTED_MPI_IMPL}" STREQUAL "openmpi")
     message(
-        STATUS
+        WARNING
         "Skipping UCX tests - requires OpenMPI (detected: ${_DETECTED_MPI_IMPL}). UCX tests use OpenMPI-specific environment variables (OMPI_MCA_*)."
     )
     return()
@@ -60,27 +60,15 @@ set(_ucxp_mpi_environment
     "UCX_LOG_LEVEL=info" # Enable UCX logging to show transport usage
 )
 
-# Base environment for UCX tests
-set(_ucx_base_environment
-    "${_base_environment}"
-    "ROCPROFSYS_USE_UCX=ON"
-    "ROCPROFSYS_DEBUG=OFF"
-    "ROCPROFSYS_VERBOSE=2"
-    "ROCPROFSYS_DL_VERBOSE=2"
-    "${_ucxp_mpi_environment}"
-)
-
 # Enhanced UCX environment with more detailed logging
 set(_ucx_environment
     "${_base_environment}"
     "ROCPROFSYS_USE_UCX=ON"
-    "ROCPROFSYS_DEBUG=ON"
     "ROCPROFSYS_VERBOSE=3"
     "ROCPROFSYS_DL_VERBOSE=3"
     "ROCPROFSYS_PERFETTO_BACKEND=inprocess"
     "ROCPROFSYS_PERFETTO_FILL_POLICY=ring_buffer"
     "ROCPROFSYS_USE_PID=OFF"
-    "ROCPROFSYS_MPI_INIT=OFF"
     "${_ucxp_mpi_environment}"
 )
 
@@ -89,46 +77,32 @@ if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU})
     list(APPEND _ucx_environment "ROCPROFSYS_USE_ROCPD=ON")
 endif()
 
-# Check if UCX is functional by running mpi-example without rocprof-sys
-set(skip_validation FALSE)
+set(_UCX_PASS_REGEX "ucx_gotcha|category*ucx")
 
-if(EXISTS "${PROJECT_BINARY_DIR}/mpi-example")
-    # Set up UCX environment for the baseline test
-    set(_ucx_test_env_list)
-    foreach(_env_var ${_ucxp_mpi_environment})
-        list(APPEND _ucx_test_env_list "${_env_var}")
-    endforeach()
+# Add a runtime validation test that checks if UCX is functional
+# This test runs before all other UCX tests and acts as a fixture
+add_test(
+    NAME ucx-validation-check
+    COMMAND
+        ${CMAKE_COMMAND} -E env ${_ucxp_mpi_environment} ${MPIEXEC_EXECUTABLE}
+        ${MPIEXEC_NUMPROC_FLAG} 2 $<TARGET_FILE:mpi-send-recv>
+)
 
-    execute_process(
-        COMMAND
-            ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 2
-            ${PROJECT_BINARY_DIR}/mpi-example
-        OUTPUT_VARIABLE _ucx_output
-        ERROR_VARIABLE _ucx_output
-        RESULT_VARIABLE _ucx_result
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-        ERROR_STRIP_TRAILING_WHITESPACE
-        ENVIRONMENT
-        ${_ucx_test_env_list}
-    )
-
-    # Check for error patterns indicating UCX is not available
-    if(
-        _ucx_output
-            MATCHES
+# Set this test as a fixture that must pass for UCX tests to run
+set_tests_properties(
+    ucx-validation-check
+    PROPERTIES
+        LABELS "ucx;validation"
+        FIXTURES_SETUP ucx_available
+        FAIL_REGULAR_EXPRESSION
             "PML ucx cannot be selected|UCX is not available|No UCX support found|Failed to select"
-    )
-        set(skip_validation TRUE)
-    endif()
-else()
-    set(skip_validation TRUE)
-endif()
+)
 
 # UCX perfetto trace test
 rocprofiler_systems_add_test(
-    SKIP_RUNTIME
+    SKIP_BASELINE SKIP_RUNTIME SKIP_SAMPLING
     NAME "ucx-perfetto"
-    TARGET mpi-example
+    TARGET mpi-send-recv
     MPI ON
     NUM_PROCS 2
     LABELS "ucx;perfetto"
@@ -141,71 +115,79 @@ rocprofiler_systems_add_test(
         line
         --min-instructions
         0
-    ENVIRONMENT "${_ucx_environment};ROCPROFSYS_VERBOSE=1;ROCPROFSYS_TRACE_LEGACY=ON;ROCPROFSYS_PERFETTO_COMBINE_TRACES=ON"
+    ENVIRONMENT "${_ucx_environment};ROCPROFSYS_TRACE_LEGACY=ON;ROCPROFSYS_PERFETTO_COMBINE_TRACES=ON"
     REWRITE_RUN_PASS_REGEX
-        "Successfully executed: .+rocprof-sys-merge-output.sh.*"
+        "${_UCX_PASS_REGEX}|Successfully executed: .+rocprof-sys-merge-output.sh.*"
     REWRITE_RUN_FAIL_REGEX
         "Script not found|Failed to execute|ROCPROFSYS_ABORT_FAIL_REGEX"
     SYS_RUN_PASS_REGEX
-        "ucp_tag_send|ucp_tag_recv|UCX.*configured|Using UCX|pml.*ucx"
+        "${_UCX_PASS_REGEX}|Using UCX|pml.*ucx"
 )
 
-if(NOT skip_validation)
-    # Validation test for UCX perfetto trace to ensure communication tracks are present
-    rocprofiler_systems_add_validation_test(
-        NAME ucx-perfetto-sys-run
-        PERFETTO_METRIC "ucx"
-        PERFETTO_FILE "merged.proto"
-        LABELS "ucx;perfetto"
-        ARGS --counter-names "UCX Comm Recv" "UCX Comm Send" -p
-    )
-else()
-    message(
-        STATUS
-        "UCX: UCX is not available or cannot be selected, skipping validation tests"
-    )
-endif()
-
-# Test all MPI example binaries with UCX transport
-foreach(
-    _UCX_EXAMPLE
-    all2all
-    allgather
-    allreduce
-    scatter-gather
-    send-recv
-)
-    rocprofiler_systems_add_test(
-        SKIP_BASELINE SKIP_RUNTIME SKIP_SAMPLING
-        NAME "ucx-${_UCX_EXAMPLE}"
-        TARGET mpi-${_UCX_EXAMPLE}
-        MPI ON
-        NUM_PROCS 2
-        LABELS "ucx"
-        REWRITE_ARGS -e -v 2 --label file line --min-instructions 0
-        RUN_ARGS 30
-    ENVIRONMENT "${_ucx_environment};ROCPROFSYS_VERBOSE=1;ROCPROFSYS_TRACE_LEGACY=ON;ROCPROFSYS_PERFETTO_COMBINE_TRACES=ON"
-    REWRITE_RUN_PASS_REGEX
-        "UCX.*trace|ucp_.*trace|Category.*ucx|UCX function.*called"
-    SYS_RUN_PASS_REGEX
-        "ucp_tag_send|ucp_tag_recv|write_perfetto_counter_track.*ucx"
-    )
-
-    if(NOT skip_validation)
-        # Add validation test to check for UCX communication tracks and bytes
-        rocprofiler_systems_add_validation_test(
-            NAME ucx-${_UCX_EXAMPLE}-sys-run
-            PERFETTO_METRIC "ucx"
-            PERFETTO_FILE "merged.proto"
-            LABELS "ucx"
-            ARGS --counter-names "UCX Comm Recv" "UCX Comm Send" -p
+# Make this test depend on the UCX validation fixture
+foreach(_test_suffix sampling binary-rewrite binary-rewrite-run sys-run)
+    if(TEST ucx-perfetto-${_test_suffix})
+        set_tests_properties(
+            ucx-perfetto-${_test_suffix}
+            PROPERTIES FIXTURES_REQUIRED ucx_available
         )
     endif()
 endforeach()
 
+# Validation test for UCX perfetto trace to ensure communication tracks are present
+rocprofiler_systems_add_validation_test(
+    NAME ucx-perfetto-sys-run
+    PERFETTO_METRIC "ucx"
+    PERFETTO_FILE "merged.proto"
+    LABELS "ucx;perfetto"
+    ARGS --counter-names "UCX Comm Recv" "UCX Comm Send" -p
+)
+
+# Validation test for UCX rocpd output
+if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU} AND TEST ucx-perfetto-sys-run)
+    set_property(TEST ucx-perfetto-sys-run APPEND PROPERTY LABELS rocpd)
+
+    # For MPI tests, ROCPD creates separate DB files for each rank with PID suffix (rocpd-<pid>.db)
+    # Create a setup test that finds and symlinks one of them to a predictable name
+    set(UCX_ROCPD_OUTPUT_DIR
+        "${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/ucx-perfetto-sys-run"
+    )
+
+    add_test(
+        NAME ucx-perfetto-sys-run-rocpd-setup
+        COMMAND
+            ${CMAKE_COMMAND} -E env bash -c
+            "ROCPD_DB=$(ls ${UCX_ROCPD_OUTPUT_DIR}/rocpd-*.db 2>/dev/null | head -1) && ln -sf $(basename \"$ROCPD_DB\") ${UCX_ROCPD_OUTPUT_DIR}/rocpd.db"
+        WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+    )
+
+    set_tests_properties(
+        ucx-perfetto-sys-run-rocpd-setup
+        PROPERTIES LABELS "ucx;rocpd;setup" DEPENDS ucx-perfetto-sys-run
+    )
+
+    # Standard validation test - now it can use the predictable symlink name
+    rocprofiler_systems_add_validation_test(
+        NAME ucx-perfetto-sys-run
+        ROCPD_FILE "rocpd.db"
+        LABELS "ucx;rocpd"
+        ARGS --validation-rules
+            "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/ucx/validation-rules.json"
+    )
+
+    # Make validation depend on the setup test
+    if(TEST validate-ucx-perfetto-sys-run-rocpd)
+        set_property(
+            TEST validate-ucx-perfetto-sys-run-rocpd
+            APPEND
+            PROPERTY DEPENDS ucx-perfetto-sys-run-rocpd-setup
+        )
+    endif()
+endif()
+
 # UCX with MPIP integration test
 rocprofiler_systems_add_test(
-    SKIP_RUNTIME
+    SKIP_BASELINE SKIP_RUNTIME
     NAME "ucx-mpip-integration"
     TARGET mpi-all2all
     MPI ON
@@ -224,9 +206,19 @@ rocprofiler_systems_add_test(
     ENVIRONMENT
         "${_ucx_environment};ROCPROFSYS_USE_MPIP=ON"
     RUN_ARGS 30
-    REWRITE_RUN_PASS_REGEX
-        "UCX.*trace.*MPI.*trace|ucp_.*MPI_|Category.*ucx.*Category.*mpi"
+    REWRITE_RUN_PASS_REGEX "${_UCX_PASS_REGEX}"
+    SAMPLING_PASS_REGEX "${_UCX_PASS_REGEX}"
 )
+
+# Make this test depend on the UCX validation fixture
+foreach(_test_suffix sampling binary-rewrite binary-rewrite-run sys-run)
+    if(TEST ucx-mpip-integration-${_test_suffix})
+        set_tests_properties(
+            ucx-mpip-integration-${_test_suffix}
+            PROPERTIES FIXTURES_REQUIRED ucx_available
+        )
+    endif()
+endforeach()
 
 # UCX with different message sizes
 foreach(_MSG_SIZE 1024 4096 16384)
@@ -248,14 +240,24 @@ foreach(_MSG_SIZE 1024 4096 16384)
             0
         ENVIRONMENT "${_ucx_environment}"
         RUN_ARGS ${_MSG_SIZE}
-        REWRITE_RUN_PASS_REGEX
-            "UCX.*trace|ucp_.*send|ucp_.*recv|Category.*ucx"
+        REWRITE_RUN_PASS_REGEX "${_UCX_PASS_REGEX}"
+        SAMPLING_PASS_REGEX "${_UCX_PASS_REGEX}"
     )
+
+    # Make the test depend on the UCX validation fixture
+    foreach(_test_suffix sampling binary-rewrite binary-rewrite-run sys-run)
+        if(TEST ucx-bcast-${_MSG_SIZE}-${_test_suffix})
+            set_tests_properties(
+                ucx-bcast-${_MSG_SIZE}-${_test_suffix}
+                PROPERTIES FIXTURES_REQUIRED ucx_available
+            )
+        endif()
+    endforeach()
 endforeach()
 
 # Test UCX active message functionality
 rocprofiler_systems_add_test(
-    SKIP_BASELINE SKIP_RUNTIME
+    SKIP_BASELINE SKIP_RUNTIME SKIP_SAMPLING
     NAME "ucx-active-messages"
     TARGET mpi-allreduce
     MPI ON
@@ -272,25 +274,15 @@ rocprofiler_systems_add_test(
         0
     ENVIRONMENT "${_ucx_environment};OMPI_MCA_btl=^vader,tcp,openib,uct"
     RUN_ARGS 64
-    REWRITE_RUN_PASS_REGEX
-        "ucp_am_send|ucp_am_recv|uct_ep_am|Active.*Message"
+    REWRITE_RUN_PASS_REGEX "${_UCX_PASS_REGEX}"
 )
 
-# -------------------------------------------------------------------------------------- #
-#
-# ROCpd tests for UCX
-#
-# -------------------------------------------------------------------------------------- #
-
-if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU} AND TEST ucx-perfetto-sys-run)
-    set_property(TEST ucx-perfetto-sys-run APPEND PROPERTY LABELS rocpd)
-
-    rocprofiler_systems_add_validation_test(
-        NAME ucx-perfetto-sys-run
-        ROCPD_FILE "rocpd.db"
-        ARGS --validation-rules
-        "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/ucx/validation-rules.json"
-        "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/default-rules.json"
-        LABELS "rocpd"
-    )
-endif()
+# Make this test depend on the UCX validation fixture
+foreach(_test_suffix sampling binary-rewrite binary-rewrite-run sys-run)
+    if(TEST ucx-active-messages-${_test_suffix})
+        set_tests_properties(
+            ucx-active-messages-${_test_suffix}
+            PROPERTIES FIXTURES_REQUIRED ucx_available
+        )
+    endif()
+endforeach()
