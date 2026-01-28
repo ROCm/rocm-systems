@@ -161,7 +161,7 @@ void dispatch_kernel(void *packed_recv_x, int *packed_recv_src_info,
       // Synchronize to ensure all threads have completed copying
       __syncthreads();
       // Only warps assigned to valid experts proceed
-      if (dst_expert_idx >=0) {
+      if (dst_expert_idx >= 0) {
         // Calculate the destination offset for RDMA write
         int slot_idx = lane_id == 0 ?
                        atomicAdd(atomic_counter_per_expert + dst_expert_idx, 1)

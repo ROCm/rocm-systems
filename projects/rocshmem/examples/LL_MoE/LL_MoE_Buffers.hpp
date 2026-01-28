@@ -158,7 +158,7 @@ struct LLMoEBufferLayout {
  * - Used for allocating rocSHMEM symmetric memory buffer
  */
 template <typename T>
-size_t get_rmda_size_hint(int num_max_dispatch_tokens_per_rank, int hidden,
+size_t get_rdma_size_hint(int num_max_dispatch_tokens_per_rank, int hidden,
     int num_ranks, int num_experts) {
   LLMoEBufferLayout<T> ll_buffer_layout(nullptr, num_max_dispatch_tokens_per_rank,
                         hidden, num_ranks, num_experts);
