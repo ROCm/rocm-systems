@@ -357,10 +357,10 @@ create_test_memory_alloc_data(const char* type = "ALLOC", const char* level = "R
 
 // Helper to register base dependencies (node -> process -> thread)
 void
-register_base_dependencies(rocstorage::writer& writer,
-                           size_t              node_id    = 1,
-                           size_t              process_id = 1000,
-                           size_t              thread_id  = 100)
+register_base_dependencies(rocstorage::writer_t& writer,
+                           size_t                node_id    = 1,
+                           size_t                process_id = 1000,
+                           size_t                thread_id  = 100)
 {
     writer.register_node_info(create_test_node_info(node_id));
     writer.register_process_info(create_test_process_info(node_id, process_id));
@@ -384,8 +384,8 @@ protected:
 
         m_database_path = "test_writer_" + test_name + ".db";
         m_uuid          = "12345";
-        m_storage       = std::make_unique<rocm::storage>(m_database_path, m_uuid);
-        m_writer        = m_storage->get_writer();
+        m_storage = std::make_unique<rocstorage::storage_t>(m_database_path, m_uuid);
+        m_writer  = std::make_shared<rocstorage::writer_t>(std::move(m_storage));
     }
 
     void TearDown() override
@@ -395,10 +395,10 @@ protected:
         std::remove(m_database_path.c_str());
     }
 
-    std::string                         m_database_path;
-    std::string                         m_uuid;
-    std::unique_ptr<rocm::storage>      m_storage;
-    std::shared_ptr<rocstorage::writer> m_writer;
+    std::string                            m_database_path;
+    std::string                            m_uuid;
+    std::unique_ptr<rocstorage::storage_t> m_storage;
+    std::shared_ptr<rocstorage::writer_t>  m_writer;
 };
 
 // ============================================================================

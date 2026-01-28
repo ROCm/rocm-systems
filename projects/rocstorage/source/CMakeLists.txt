@@ -26,7 +26,9 @@ set(rocstorage_sources
     ${CMAKE_CURRENT_LIST_DIR}/insert_validator.cpp
     ${CMAKE_CURRENT_LIST_DIR}/json_serializers.cpp
     ${CMAKE_CURRENT_LIST_DIR}/reader.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/reader_impl.cpp
     ${CMAKE_CURRENT_LIST_DIR}/storage.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/storage_impl.cpp
 )
 target_sources(rocstorage PRIVATE ${rocstorage_sources})
 

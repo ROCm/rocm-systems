@@ -160,9 +160,9 @@ get_schema_query(rocpd_sql_schema_kind_t schema_kind, const std::string& uuid)
 
 namespace rocstorage::data_storage
 {
-database::database(std::string                 db_path,
-                   std::string                 uuid,
-                   rocstorage::database_type_t database_type)
+database::database(std::string                db_path,
+                   std::string                uuid,
+                   rocstorage::storage_type_t database_type)
 : m_db_path{ std::move(db_path) }
 , m_uuid{ std::move(uuid) }
 , m_database_type{ database_type }
@@ -170,12 +170,15 @@ database::database(std::string                 db_path,
     create_directory_for_database_file(m_db_path);
     LOG_INFO("rocstorage database initialized (uuid: {}, path: {})", m_uuid, m_db_path);
 
-    if(m_database_type == rocstorage::database_type_t::in_memory)
+    if(m_database_type == rocstorage::storage_type_t::in_memory ||
+       m_database_type == rocstorage::storage_type_t::auto_detect)
     {
+        // auto_detect defaults to in_memory
+        m_database_type = rocstorage::storage_type_t::in_memory;
         validate_sqlite3_result(
             sqlite3_open(":memory:", &m_sqlite3), "", "database open failed!");
     }
-    else if(m_database_type == rocstorage::database_type_t::on_disk)
+    else if(m_database_type == rocstorage::storage_type_t::on_disk)
     {
         validate_sqlite3_result(
             sqlite3_open(m_db_path.c_str(), &m_sqlite3), "", "database open failed!");
@@ -244,7 +247,7 @@ database::get_last_insert_id() const
 void
 database::flush()
 {
-    if(m_database_type != rocstorage::database_type_t::in_memory)
+    if(m_database_type != rocstorage::storage_type_t::in_memory)
     {
         LOG_WARNING("Flushing database is not supported for database type: {}",
                     static_cast<int>(m_database_type));

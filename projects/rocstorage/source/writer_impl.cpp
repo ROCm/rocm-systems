@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include "writer_impl.hpp"
+#include "storage_impl.hpp"
 
 #include "common/string_conversions.hpp"
 #include "debug.hpp"
@@ -38,9 +39,10 @@ is_already_registered(Utility& utility, const Entity& entity)
 
 }  // namespace
 
-writer::impl::impl(std::shared_ptr<data_storage::database> database, std::string uuid)
-: m_database(std::move(database))
-, m_uuid(std::move(uuid))
+writer_t::impl::impl(std::unique_ptr<rocstorage::storage_t> storage)
+: m_storage(std::move(storage))
+, m_database(m_storage->m_impl->get_database())
+, m_uuid(m_storage->m_impl->get_uuid())
 , m_entity_registry(std::make_shared<entity_registry>())
 , m_key_providers(std::make_shared<primary_key_providers>())
 , m_validator(std::make_shared<insert_validator>(m_entity_registry))
@@ -61,7 +63,7 @@ writer::impl::impl(std::shared_ptr<data_storage::database> database, std::string
 }
 
 void
-writer::impl::register_node_info(const writer_api::node_info_t& node_info)
+writer_t::impl::register_node_info(const writer_api::node_info_t& node_info)
 {
     auto& node_info_utility = m_entity_registry->node_info();
     if(is_already_registered(node_info_utility, node_info)) return;
@@ -80,7 +82,7 @@ writer::impl::register_node_info(const writer_api::node_info_t& node_info)
 }
 
 void
-writer::impl::register_process_info(const writer_api::process_info_t& process_info)
+writer_t::impl::register_process_info(const writer_api::process_info_t& process_info)
 {
     auto& process_info_utility = m_entity_registry->process_info();
     if(is_already_registered(process_info_utility, process_info)) return;
@@ -105,7 +107,7 @@ writer::impl::register_process_info(const writer_api::process_info_t& process_in
 }
 
 void
-writer::impl::register_agent_info(const writer_api::agent_info_t& agent_info)
+writer_t::impl::register_agent_info(const writer_api::agent_info_t& agent_info)
 {
     auto& agent_info_utility = m_entity_registry->agent_info();
     if(is_already_registered(agent_info_utility, agent_info)) return;
@@ -141,7 +143,7 @@ writer::impl::register_agent_info(const writer_api::agent_info_t& agent_info)
 }
 
 void
-writer::impl::register_pmc_info(const writer_api::pmc_info_t& pmc_info)
+writer_t::impl::register_pmc_info(const writer_api::pmc_info_t& pmc_info)
 {
     auto& pmc_info_utility = m_entity_registry->pmc_info();
     if(is_already_registered(pmc_info_utility, pmc_info)) return;
@@ -178,7 +180,7 @@ writer::impl::register_pmc_info(const writer_api::pmc_info_t& pmc_info)
 }
 
 void
-writer::impl::register_thread_info(const writer_api::thread_info_t& thread_info)
+writer_t::impl::register_thread_info(const writer_api::thread_info_t& thread_info)
 {
     auto& thread_info_utility = m_entity_registry->thread_info();
     if(is_already_registered(thread_info_utility, thread_info)) return;
@@ -203,7 +205,7 @@ writer::impl::register_thread_info(const writer_api::thread_info_t& thread_info)
 }
 
 void
-writer::impl::register_stream_info(const writer_api::stream_info_t& stream_info)
+writer_t::impl::register_stream_info(const writer_api::stream_info_t& stream_info)
 {
     auto& stream_info_utility = m_entity_registry->stream_info();
     if(is_already_registered(stream_info_utility, stream_info)) return;
@@ -224,7 +226,7 @@ writer::impl::register_stream_info(const writer_api::stream_info_t& stream_info)
 }
 
 void
-writer::impl::register_queue_info(const writer_api::queue_info_t& queue_info)
+writer_t::impl::register_queue_info(const writer_api::queue_info_t& queue_info)
 {
     auto& queue_info_utility = m_entity_registry->queue_info();
     if(is_already_registered(queue_info_utility, queue_info)) return;
@@ -241,7 +243,7 @@ writer::impl::register_queue_info(const writer_api::queue_info_t& queue_info)
 }
 
 void
-writer::impl::register_code_object_info(
+writer_t::impl::register_code_object_info(
     const writer_api::code_object_info_t& code_object_info)
 {
     auto& code_object_info_utility = m_entity_registry->code_object_info();
@@ -270,7 +272,7 @@ writer::impl::register_code_object_info(
 }
 
 void
-writer::impl::register_kernel_symbol_info(
+writer_t::impl::register_kernel_symbol_info(
     const writer_api::kernel_symbol_info_t& kernel_symbol_info)
 {
     auto& kernel_symbol_info_utility = m_entity_registry->kernel_symbol_info();
@@ -304,7 +306,7 @@ writer::impl::register_kernel_symbol_info(
 }
 
 void
-writer::impl::register_track_info(const writer_api::track_info_t& track)
+writer_t::impl::register_track_info(const writer_api::track_info_t& track)
 {
     auto& track_info_utility = m_entity_registry->track_info();
     if(is_already_registered(track_info_utility, track)) return;
@@ -331,7 +333,7 @@ writer::impl::register_track_info(const writer_api::track_info_t& track)
 }
 
 void
-writer::impl::register_string(const char* str)
+writer_t::impl::register_string(const char* str)
 {
     auto& string_info_utility = m_entity_registry->string_info();
 
@@ -358,7 +360,7 @@ writer::impl::register_string(const char* str)
 // --------------------- Data Tables ---------------------
 
 primary_key_t
-writer::impl::insert_event(const writer_api::event_data_t& event_data)
+writer_t::impl::insert_event(const writer_api::event_data_t& event_data)
 {
     auto& string_info_utility = m_entity_registry->string_info();
 
@@ -388,8 +390,8 @@ writer::impl::insert_event(const writer_api::event_data_t& event_data)
 }
 
 void
-writer::impl::insert_sample(const writer_api::sample_data_t& sample_data,
-                            const primary_key_t&             event_primary_key)
+writer_t::impl::insert_sample(const writer_api::sample_data_t& sample_data,
+                              const primary_key_t&             event_primary_key)
 {
     auto& track_info_utility = m_entity_registry->track_info();
 
@@ -416,7 +418,7 @@ writer::impl::insert_sample(const writer_api::sample_data_t& sample_data,
 }
 
 void
-writer::impl::insert_arg(const writer_api::arg_data_t& arg_data, primary_key_t event_id)
+writer_t::impl::insert_arg(const writer_api::arg_data_t& arg_data, primary_key_t event_id)
 {
     auto& string_info_utility = m_entity_registry->string_info();
 
@@ -448,8 +450,9 @@ writer::impl::insert_arg(const writer_api::arg_data_t& arg_data, primary_key_t e
 }
 
 void
-writer::impl::insert_region_data(const writer_api::region_data_t&       region_data,
-                                 const writer_api::trace_environment_t& trace_environment)
+writer_t::impl::insert_region_data(
+    const writer_api::region_data_t&       region_data,
+    const writer_api::trace_environment_t& trace_environment)
 {
     auto transaction_block = m_database->create_transaction_block();
 
@@ -519,8 +522,9 @@ writer::impl::insert_region_data(const writer_api::region_data_t&       region_d
 }
 
 void
-writer::impl::insert_pmc_event_data(const writer_api::pmc_event_data_t& pmc_event_data,
-                                    const writer_api::pmc_info_unique_id_t& pmc_unique_id)
+writer_t::impl::insert_pmc_event_data(
+    const writer_api::pmc_event_data_t&     pmc_event_data,
+    const writer_api::pmc_info_unique_id_t& pmc_unique_id)
 {
     auto transaction_block = m_database->create_transaction_block();
 
@@ -541,7 +545,7 @@ writer::impl::insert_pmc_event_data(const writer_api::pmc_event_data_t& pmc_even
 }
 
 void
-writer::impl::insert_kernel_dispatch_data(
+writer_t::impl::insert_kernel_dispatch_data(
     const writer_api::kernel_dispatch_data_t& kernel_dispatch_data,
     const writer_api::trace_environment_t&    trace_environment)
 {
@@ -621,7 +625,7 @@ writer::impl::insert_kernel_dispatch_data(
 }
 
 void
-writer::impl::insert_memory_copy_data(
+writer_t::impl::insert_memory_copy_data(
     const writer_api::memory_copy_data_t&  memory_copy_data,
     const writer_api::trace_environment_t& trace_environment)
 {
@@ -711,7 +715,7 @@ writer::impl::insert_memory_copy_data(
 }
 
 void
-writer::impl::insert_memory_alloc_data(
+writer_t::impl::insert_memory_alloc_data(
     const writer_api::memory_alloc_data_t& memory_alloc_data,
     const writer_api::trace_environment_t& trace_environment)
 {
@@ -808,7 +812,7 @@ writer::impl::insert_memory_alloc_data(
 }
 
 void
-writer::impl::flush_in_memory_data_to_disk()
+writer_t::impl::flush_in_memory_data_to_disk()
 {
     m_database->flush();
 }

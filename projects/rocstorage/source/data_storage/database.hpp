@@ -25,10 +25,10 @@ namespace rocstorage::data_storage
 class database
 {
 public:
-    explicit database(std::string                 abs_db_path,
-                      std::string                 uuid,
-                      rocstorage::database_type_t database_type =
-                          rocstorage::database_type_t::in_memory);
+    explicit database(
+        std::string                abs_db_path,
+        std::string                uuid,
+        rocstorage::storage_type_t database_type = rocstorage::storage_type_t::in_memory);
     database()                      = delete;
     database(database&)             = delete;
     database& operator=(database&)  = delete;
@@ -228,12 +228,12 @@ private:
         }
     }
 
-    sqlite3*                    m_sqlite3{ nullptr };
-    std::string                 m_db_path;
-    std::string                 m_uuid;
-    rocstorage::database_type_t m_database_type;
-    bool                        m_initialized{ false };
-    bool                        m_flushed{ false };
+    sqlite3*                   m_sqlite3{ nullptr };
+    std::string                m_db_path;
+    std::string                m_uuid;
+    rocstorage::storage_type_t m_database_type;
+    bool                       m_initialized{ false };
+    bool                       m_flushed{ false };
 };
 
 }  // namespace rocstorage::data_storage

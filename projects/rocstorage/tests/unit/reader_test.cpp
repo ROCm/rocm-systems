@@ -29,42 +29,37 @@
 #include <memory>
 #include <string>
 
-namespace {
+namespace
+{
 
-class reader_test : public ::testing::Test {
+class reader_test : public ::testing::Test
+{
 protected:
-  void SetUp() override {
-    m_database_path =
-        "test_reader_" +
-        std::to_string(
-            ::testing::UnitTest::GetInstance()->current_test_info()->line()) +
-        ".db";
-    m_uuid = "12345";
-    m_storage = std::make_unique<rocm::storage>(m_database_path, m_uuid);
-    m_reader = m_storage->get_reader();
-  }
+    void SetUp() override
+    {
+        m_database_path =
+            "test_reader_" +
+            std::to_string(
+                ::testing::UnitTest::GetInstance()->current_test_info()->line()) +
+            ".db";
+        m_uuid    = "12345";
+        m_storage = std::make_unique<rocstorage::storage_t>(m_database_path, m_uuid);
+        m_reader  = std::make_shared<rocstorage::reader_t>(std::move(m_storage));
+    }
 
-  void TearDown() override {
-    m_reader.reset();
-    m_storage.reset();
-    std::remove(m_database_path.c_str());
-  }
+    void TearDown() override
+    {
+        m_reader.reset();
+        m_storage.reset();
+        std::remove(m_database_path.c_str());
+    }
 
-  std::string m_database_path;
-  std::string m_uuid;
-  std::unique_ptr<rocm::storage> m_storage;
-  std::shared_ptr<rocstorage::reader> m_reader;
+    std::string                            m_database_path;
+    std::string                            m_uuid;
+    std::unique_ptr<rocstorage::storage_t> m_storage;
+    std::shared_ptr<rocstorage::reader_t>  m_reader;
 };
 
-TEST_F(reader_test, reader_instance_is_valid) { ASSERT_NE(m_reader, nullptr); }
+TEST_F(reader_test, create_reader_instance) { ASSERT_NE(m_reader, nullptr); }
 
-TEST_F(reader_test, reader_can_be_retrieved_multiple_times) {
-  auto reader1 = m_storage->get_reader();
-  auto reader2 = m_storage->get_reader();
-
-  ASSERT_NE(reader1, nullptr);
-  ASSERT_NE(reader2, nullptr);
-  EXPECT_EQ(reader1.get(), reader2.get());
-}
-
-} // namespace
+}  // namespace

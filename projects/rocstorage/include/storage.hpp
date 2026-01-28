@@ -3,38 +3,38 @@
 
 #pragma once
 
-#include <rocstorage/reader.hpp>
 #include <rocstorage/storage_types.hpp>
-#include <rocstorage/writer.hpp>
 
 #include <memory>
 #include <string>
 
-namespace rocm
+namespace rocstorage
 {
+struct writer_t;
+struct reader_t;
 
-class storage
+class storage_t
 {
 public:
-    explicit storage(const std::string&          database_path,
-                     const std::string&          uuid,
-                     rocstorage::database_type_t database_type =
-                         rocstorage::database_type_t::in_memory);
-    virtual ~storage();
+    explicit storage_t(const std::string&         database_path,
+                       const std::string&         uuid,
+                       rocstorage::storage_type_t desired_storage_type =
+                           rocstorage::storage_type_t::auto_detect);
+    virtual ~storage_t();
 
-    storage(const storage&)            = delete;
-    storage(storage&&)                 = delete;
-    storage& operator=(const storage&) = delete;
-    storage& operator=(storage&&)      = delete;
-
-    [[nodiscard]] std::shared_ptr<rocstorage::writer> get_writer() const;
-    [[nodiscard]] std::shared_ptr<rocstorage::reader> get_reader() const;
+    storage_t(const storage_t&)            = delete;
+    storage_t(storage_t&&)                 = delete;
+    storage_t& operator=(const storage_t&) = delete;
+    storage_t& operator=(storage_t&&)      = delete;
 
     [[nodiscard]] rocstorage::version_t get_storage_version() const;
 
 private:
+    friend struct writer_t;
+    friend struct reader_t;
+
     struct impl;
     std::unique_ptr<impl> m_impl;
 };
 
-}  // namespace rocm
+}  // namespace rocstorage

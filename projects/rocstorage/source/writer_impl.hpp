@@ -18,10 +18,10 @@
 namespace rocstorage
 {
 
-struct writer::impl
+struct writer_t::impl
 {
 public:
-    explicit impl(std::shared_ptr<data_storage::database> database, std::string uuid);
+    explicit impl(std::unique_ptr<rocstorage::storage_t> storage);
 
     void register_node_info(const writer_api::node_info_t& node_info);
     void register_process_info(const writer_api::process_info_t& process_info);
@@ -58,6 +58,8 @@ private:
     void          insert_sample(const writer_api::sample_data_t& sample_data,
                                 const primary_key_t&             event_primary_key);
     void insert_arg(const writer_api::arg_data_t& arg_data, primary_key_t event_id);
+
+    std::unique_ptr<rocstorage::storage_t> m_storage;
 
     std::shared_ptr<data_storage::database>                     m_database;
     std::string                                                 m_uuid;

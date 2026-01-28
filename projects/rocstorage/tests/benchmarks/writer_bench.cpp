@@ -42,17 +42,17 @@ using namespace rocstorage::writer_api;
 // Database Type Helpers
 // ============================================================================
 
-rocstorage::database_type_t
+rocstorage::storage_type_t
 get_db_type_from_arg(int64_t arg) noexcept
 {
-    return arg == 0 ? rocstorage::database_type_t::in_memory
-                    : rocstorage::database_type_t::on_disk;
+    return arg == 0 ? rocstorage::storage_type_t::in_memory
+                    : rocstorage::storage_type_t::on_disk;
 }
 
 const char*
-get_db_type_label(rocstorage::database_type_t db_type) noexcept
+get_db_type_label(rocstorage::storage_type_t db_type) noexcept
 {
-    return db_type == rocstorage::database_type_t::in_memory ? "in_memory" : "on_disk";
+    return db_type == rocstorage::storage_type_t::in_memory ? "in_memory" : "on_disk";
 }
 
 // ============================================================================
@@ -253,9 +253,10 @@ public:
         m_db_type = get_db_type_from_arg(state.range(0));
         m_database_path =
             "benchmark_writer_" + std::to_string(state.thread_index()) + ".db";
-        m_uuid    = std::to_string(state.thread_index());
-        m_storage = std::make_unique<rocm::storage>(m_database_path, m_uuid, m_db_type);
-        m_writer  = m_storage->get_writer();
+        m_uuid = std::to_string(state.thread_index());
+        m_storage =
+            std::make_unique<rocstorage::storage_t>(m_database_path, m_uuid, m_db_type);
+        m_writer = std::make_shared<rocstorage::writer_t>(std::move(m_storage));
         setup_schema();
     }
 
@@ -319,13 +320,13 @@ protected:
         m_gpu_agent_id = gpu_agent;
     }
 
-    rocstorage::database_type_t         m_db_type;
-    std::string                         m_database_path;
-    std::string                         m_uuid;
-    std::unique_ptr<rocm::storage>      m_storage;
-    std::shared_ptr<rocstorage::writer> m_writer;
-    trace_environment_t                 m_trace_env;
-    agent_unique_id_t                   m_gpu_agent_id;
+    rocstorage::storage_type_t             m_db_type;
+    std::string                            m_database_path;
+    std::string                            m_uuid;
+    std::unique_ptr<rocstorage::storage_t> m_storage;
+    std::shared_ptr<rocstorage::writer_t>  m_writer;
+    trace_environment_t                    m_trace_env;
+    agent_unique_id_t                      m_gpu_agent_id;
 };
 
 // ============================================================================
@@ -341,9 +342,10 @@ public:
         m_db_type = get_db_type_from_arg(state.range(0));
         m_database_path =
             "benchmark_registration_" + std::to_string(state.thread_index()) + ".db";
-        m_uuid    = std::to_string(state.thread_index());
-        m_storage = std::make_unique<rocm::storage>(m_database_path, m_uuid, m_db_type);
-        m_writer  = m_storage->get_writer();
+        m_uuid = std::to_string(state.thread_index());
+        m_storage =
+            std::make_unique<rocstorage::storage_t>(m_database_path, m_uuid, m_db_type);
+        m_writer = std::make_shared<rocstorage::writer_t>(std::move(m_storage));
     }
 
     void TearDown(const benchmark::State&) override
@@ -361,11 +363,11 @@ public:
     }
 
 protected:
-    rocstorage::database_type_t         m_db_type;
-    std::string                         m_database_path;
-    std::string                         m_uuid;
-    std::unique_ptr<rocm::storage>      m_storage;
-    std::shared_ptr<rocstorage::writer> m_writer;
+    rocstorage::storage_type_t             m_db_type;
+    std::string                            m_database_path;
+    std::string                            m_uuid;
+    std::unique_ptr<rocstorage::storage_t> m_storage;
+    std::shared_ptr<rocstorage::writer_t>  m_writer;
 };
 
 // Benchmark: Register multiple threads

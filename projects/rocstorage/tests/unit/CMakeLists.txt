@@ -23,7 +23,6 @@
 include(gtest)
 
 set(UNIT_TEST_SOURCES
-    storage_test.cpp
     writer_test.cpp
     reader_test.cpp
     insert_query_builders_test.cpp

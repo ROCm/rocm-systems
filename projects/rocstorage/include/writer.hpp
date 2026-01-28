@@ -3,32 +3,23 @@
 
 #pragma once
 
+#include <rocstorage/storage.hpp>
 #include <rocstorage/writer_types.hpp>
 
 #include <memory>
-#include <string>
-
-namespace rocm
-{
-class storage;
-}
 
 namespace rocstorage
 {
-namespace data_storage
-{
-class database;
-}
 
-struct writer
+struct writer_t
 {
-    friend class rocm::storage;
-    virtual ~writer();
-    writer()                          = delete;
-    writer(const writer&)             = delete;
-    writer& operator=(const writer&)  = delete;
-    writer(const writer&&)            = delete;
-    writer& operator=(const writer&&) = delete;
+    explicit writer_t(std::unique_ptr<rocstorage::storage_t> storage);
+    virtual ~writer_t();
+    writer_t()                            = delete;
+    writer_t(const writer_t&)             = delete;
+    writer_t& operator=(const writer_t&)  = delete;
+    writer_t(const writer_t&&)            = delete;
+    writer_t& operator=(const writer_t&&) = delete;
 
     /***
      * @brief Insert node info into rocpd
@@ -152,7 +143,6 @@ struct writer
     void flush_in_memory_data_to_disk();
 
 private:
-    explicit writer(std::shared_ptr<data_storage::database> database, std::string uuid);
     struct impl;
     std::unique_ptr<impl> m_impl;
 };

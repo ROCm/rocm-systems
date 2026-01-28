@@ -3,36 +3,24 @@
 
 #pragma once
 
-#include <memory>
-#include <string>
+#include <rocstorage/storage.hpp>
 
-namespace rocm
-{
-class storage;
-}
+#include <memory>
 
 namespace rocstorage
 {
-namespace data_storage
+
+struct reader_t
 {
-class database;
-}
+    explicit reader_t(std::unique_ptr<rocstorage::storage_t> storage);
 
-struct reader
-{
-    friend class rocm::storage;
+    virtual ~reader_t();
 
-private:
-    explicit reader(std::shared_ptr<data_storage::database> database, std::string uuid);
-
-public:
-    virtual ~reader();
-
-    reader()                          = delete;
-    reader(const reader&)             = delete;
-    reader& operator=(const reader&)  = delete;
-    reader(const reader&&)            = delete;
-    reader& operator=(const reader&&) = delete;
+    reader_t()                            = delete;
+    reader_t(const reader_t&)             = delete;
+    reader_t& operator=(const reader_t&)  = delete;
+    reader_t(const reader_t&&)            = delete;
+    reader_t& operator=(const reader_t&&) = delete;
 
 private:
     struct impl;

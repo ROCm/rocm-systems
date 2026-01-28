@@ -7,11 +7,12 @@
 
 namespace rocstorage
 {
-enum class database_type_t
+enum class storage_type_t
 {
-    in_memory = 0,
-    on_disk   = 1,
-    mmap      = 2,
+    auto_detect = 0,
+    in_memory   = 1,
+    on_disk     = 2,
+    mmap        = 3,
 };
 
 struct version_t

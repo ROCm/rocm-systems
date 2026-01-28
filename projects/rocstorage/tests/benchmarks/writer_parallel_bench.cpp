@@ -45,17 +45,17 @@ using namespace rocstorage::writer_api;
 // Database Type Helpers
 // ============================================================================
 
-rocstorage::database_type_t
+rocstorage::storage_type_t
 get_db_type_from_arg(int64_t arg) noexcept
 {
-    return arg == 0 ? rocstorage::database_type_t::in_memory
-                    : rocstorage::database_type_t::on_disk;
+    return arg == 0 ? rocstorage::storage_type_t::in_memory
+                    : rocstorage::storage_type_t::on_disk;
 }
 
 const char*
-get_db_type_label(rocstorage::database_type_t db_type) noexcept
+get_db_type_label(rocstorage::storage_type_t db_type) noexcept
 {
-    return db_type == rocstorage::database_type_t::in_memory ? "in_memory" : "on_disk";
+    return db_type == rocstorage::storage_type_t::in_memory ? "in_memory" : "on_disk";
 }
 
 // ============================================================================
@@ -74,23 +74,23 @@ constexpr size_t COUNT_1000K = 1000000;
 
 struct thread_context
 {
-    rocstorage::database_type_t         db_type;
-    std::string                         database_path;
-    std::unique_ptr<rocm::storage>      storage;
-    std::shared_ptr<rocstorage::writer> writer;
-    size_t                              context_id = 0;
-    trace_environment_t                 trace_env;
-    agent_unique_id_t                   gpu_agent_id;
+    rocstorage::storage_type_t             db_type;
+    std::string                            database_path;
+    std::unique_ptr<rocstorage::storage_t> storage;
+    std::shared_ptr<rocstorage::writer_t>  writer;
+    size_t                                 context_id = 0;
+    trace_environment_t                    trace_env;
+    agent_unique_id_t                      gpu_agent_id;
 
-    void setup(size_t thread_id, rocstorage::database_type_t database_type)
+    void setup(size_t thread_id, rocstorage::storage_type_t database_type)
     {
         db_type       = database_type;
         context_id    = thread_id;
         database_path = "benchmark_writer_parallel_" + std::to_string(thread_id) + ".db";
 
         const std::string uuid = std::to_string(thread_id);
-        storage = std::make_unique<rocm::storage>(database_path, uuid, db_type);
-        writer  = storage->get_writer();
+        storage = std::make_unique<rocstorage::storage_t>(database_path, uuid, db_type);
+        writer  = std::make_shared<rocstorage::writer_t>(std::move(storage));
 
         constexpr size_t node_id = 1;
         const size_t     pid     = 1000 + thread_id;
