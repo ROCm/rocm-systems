@@ -188,6 +188,11 @@ jobs:
             ${{ env.ROCM_PATH }}*/lib/python*/site-packages/roctx \
             ${{ env.ROCM_PATH }}*/lib/python*/site-packages/rocpd
 
+      - name: Setup environment variables
+        shell: bash
+        run: |
+          echo "PKG_CONFIG_PATH=/opt/amdgpu/lib64/pkgconfig:/opt/amdgpu/lib/pkgconfig:/opt/amdgpu/lib/$(uname -p)-linux-gnu/pkgconfig:${PKG_CONFIG_PATH}" >> $GITHUB_ENV
+
       - name: Setup ccache
         uses: hendrikmuhs/ccache-action@63069e3931dedbf3b63792097479563182fe70d1 # v1.2.18
         with:
@@ -510,6 +515,12 @@ jobs:
             ${{ env.ROCM_PATH }}/share/*rocprofiler-sdk* \
             ${{ env.ROCM_PATH }}/libexec/*rocprofiler-sdk*
 
+        # on RHEL 8.8, this fixes an issue with finding libdrm_amdgpu in /usr instead of /opt/amdgpu
+      - name: Setup environment variables
+        shell: bash
+        run: |
+          echo "PKG_CONFIG_PATH=/opt/amdgpu/lib64/pkgconfig:/opt/amdgpu/lib/pkgconfig:/opt/amdgpu/lib/$(uname -p)-linux-gnu/pkgconfig:${PKG_CONFIG_PATH}" >> $GITHUB_ENV
+
       - name: Install Curl for RHEL 8.8
         if: ${{ matrix.system.os == 'rhel-8.8' }}
         run: |
@@ -747,6 +758,11 @@ jobs:
         update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-${{ env.GCC_COMPILER_VERSION }} 100 --slave /usr/bin/g++ g++ /usr/bin/g++-${{ env.GCC_COMPILER_VERSION }} --slave /usr/bin/gcov gcov /usr/bin/gcov-${{ env.GCC_COMPILER_VERSION }}
         python3 -m pip install -U --user -r requirements.txt
         rm -rf ${{ env.ROCM_PATH }}/lib/*rocprofiler-sdk* ${{ env.ROCM_PATH }}/lib/cmake/*rocprofiler-sdk* ${{ env.ROCM_PATH }}/share/*rocprofiler-sdk* ${{ env.ROCM_PATH }}/libexec/*rocprofiler-sdk* ${{ env.ROCM_PATH }}*/lib/python*/site-packages/roctx ${{ env.ROCM_PATH }}*/lib/python*/site-packages/rocpd
+
+    - name: Setup environment variables
+      shell: bash
+      run: |
+        echo "PKG_CONFIG_PATH=/opt/amdgpu/lib64/pkgconfig:/opt/amdgpu/lib/pkgconfig:/opt/amdgpu/lib/$(uname -p)-linux-gnu/pkgconfig:${PKG_CONFIG_PATH}" >> $GITHUB_ENV
 
     - name: List Files
       shell: bash
