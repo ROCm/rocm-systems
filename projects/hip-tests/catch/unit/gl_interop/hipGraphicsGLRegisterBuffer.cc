@@ -93,7 +93,7 @@ TEST_CASE("Unit_hipGraphicsGLRegisterBuffer_Negative_Parameters") {
   SECTION("invalid buffer") {
     HIP_CHECK_ERROR(
         hipGraphicsGLRegisterBuffer(&vbo_resource, GLuint{}, hipGraphicsRegisterFlagsNone),
-        hipErrorInvalidResourceHandle);
+        hipErrorInvalidValue);
   }
 
   SECTION("invalid flags") {
