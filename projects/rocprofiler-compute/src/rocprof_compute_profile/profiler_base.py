@@ -109,16 +109,62 @@ class RocProfCompute_Base:
                 "--attach-pid cannot be used with --iteration-multiplexing. "
                 "Please remove one of these options."
             )
-
         # verify correct formatting for application binary
         args.remaining = args.remaining[1:]
+        resolved_exec_path: Optional[Path] = None
+
         if args.remaining:
             # Ensure that command points to an executable
-            if not shutil.which(args.remaining[0]):
+            exec_candidate = shutil.which(args.remaining[0])
+            if not exec_candidate:
                 console_error(
                     f"Your command {args.remaining[0]} doesn't point to a executable. "
                     "Please verify."
                 )
+            resolved_exec_path = Path(exec_candidate).resolve()
+
+            # Appending a wrapper for injecting roctx-markers
+            if getattr(args, "torch_trace", False):
+                # Find the inject_roctx.py script in src/utils
+                inject_script = (
+                    Path(__file__).parent.parent / "utils" / "inject_roctx.py"
+                )
+                if not inject_script.exists():
+                    console_error(
+                        f"Cannot find inject_roctx.py at {inject_script}. "
+                        "Please verify your installation."
+                    )
+
+                # Case 1: Explicit python command (python, python3, etc.)
+                if args.remaining[0].startswith("python"):
+                    # Insert inject_roctx.py after the python interpreter
+                    args.remaining.insert(1, str(inject_script))
+                # Case 2: Direct Python script execution (./main.py, /path/to/script.py)
+                elif args.remaining[0].endswith((".py", ".pyw", ".pyc", ".pyo")):
+                    # Use current Python interpreter
+                    args.remaining.insert(0, str(inject_script))
+                    args.remaining.insert(0, sys.executable)
+                else:
+                    console_warning(
+                        "Command does not look like a Python entry point, "
+                        "skipping ROCTX auto-injection and launching workload as-is."
+                    )
+                    console_warning(
+                        "Ensure the binary already initializes PyTorch/ROCTX markers, "
+                        "otherwise --torch-trace will have no effect."
+                    )
+
+                if (
+                    resolved_exec_path
+                    and (resolved_exec_path.parent / "_internal").is_dir()
+                ):
+                    console_warning(
+                        "Workload appears to be a self-contained binary. "
+                        "Such bundles typically ship private ROCm/HSA libraries, which "
+                        "prevents --torch-trace from collecting data."
+                        "Rebuild without packaging libhsa/libhip or "
+                        "adjust LD_LIBRARY_PATH to /opt/rocm) before profiling."
+                    )
             args.remaining = " ".join(args.remaining)
         elif not args.attach_pid:
             console_error(
@@ -471,6 +517,8 @@ class RocProfCompute_Base:
                         f'passes. Please use "--block" or "--set" '
                         f"to adjust or reduce the requested performance metrics!"
                     )
+            console_debug(f"Sending profiler options to run_prof: {options}")
+
             run_prof(
                 fnames=str_fnames,
                 profiler_options=options,
@@ -478,6 +526,7 @@ class RocProfCompute_Base:
                 mspec=self._soc._mspec,
                 loglevel=args.loglevel,
                 format_rocprof_output=args.format_rocprof_output,
+                torch_trace_enabled=getattr(args, "torch_trace", False),
                 retain_rocpd_output=args.retain_rocpd_output,
             )
 
