@@ -501,21 +501,20 @@ hip::Graph::GraphExecutionPaths Graph::FindExecutionPathsHierarchical() {
   for (const auto& root : root_nodes) {
     // For each root, find all possible paths starting from it
     std::vector<Node> current_path;
-    FindPathsRecursiveHierarchical(root, current_path, visited, graph_paths);
+    FindPathsDFS(root, current_path, visited, graph_paths);
   }
   return graph_paths;
 }
 
 // ================================================================================================
-void Graph::FindPathsRecursiveHierarchical(Node start,
-                                           std::vector<Node>& current_path,
-                                           std::unordered_set<unsigned int>& visited,
-                                           hip::Graph::GraphExecutionPaths& graph_paths) {
+void Graph::FindPathsDFS(Node start, std::vector<Node>& current_path,
+                         std::unordered_set<unsigned int>& visited,
+                         hip::Graph::GraphExecutionPaths& graph_paths) {
   // Lambda to save current path as a HierarchicalPath
-  auto savePath = [&graph_paths](const std::vector<Node>& path, int device_id,
+  auto savePath = [&graph_paths](const std::vector<Node> path, int device_id,
                                   Node child_node = nullptr, int child_index = -1) {
     hip::Graph::HierarchicalPath h_path;
-    h_path.nodes = path;
+    h_path.nodes = std::move(path);
     h_path.device_id = device_id;
     h_path.child_graph_node = child_node;
     h_path.child_graph_paths_index = child_index;
@@ -538,7 +537,8 @@ void Graph::FindPathsRecursiveHierarchical(Node start,
     if (visited.find(node->GetID()) != visited.end()) {
       // Save any remaining path (treat visited as a branch end)
       if (!current_path.empty()) {
-        savePath(current_path, current_path.back()->GetDeviceId());
+        int dev = current_path.back()->GetDeviceId();
+        savePath(std::move(current_path), dev);
         current_path.clear();
       }
       continue;
@@ -555,7 +555,7 @@ void Graph::FindPathsRecursiveHierarchical(Node start,
       if (prev_device_id != current_device_id) {
         device_changed = true;
         // Save current path before device change
-        savePath(current_path, prev_device_id);
+        savePath(std::move(current_path), prev_device_id);
         current_path.clear();
       }
     }
@@ -564,7 +564,8 @@ void Graph::FindPathsRecursiveHierarchical(Node start,
     if (node->GetType() == hipGraphNodeTypeGraph) {
       // Save path before child graph node (if any)
       if (!current_path.empty()) {
-        savePath(current_path, current_path.back()->GetDeviceId());
+        int dev = current_path.back()->GetDeviceId();
+        savePath(std::move(current_path), dev);
         current_path.clear();
       }
 
@@ -583,8 +584,8 @@ void Graph::FindPathsRecursiveHierarchical(Node start,
 
         for (const auto& child_root : child_root_nodes) {
           std::vector<Node> child_current_path;
-          childGraph->FindPathsRecursiveHierarchical(child_root, child_current_path,
-                                                     child_visited, child_graph_exec_paths);
+          childGraph->FindPathsDFS(child_root, child_current_path, child_visited,
+                                   child_graph_exec_paths);
         }
 
         // Store the child graph paths
@@ -621,25 +622,25 @@ void Graph::FindPathsRecursiveHierarchical(Node start,
     if (is_fork || is_join) {
       // Save current path as a separate segment
       if (!current_path.empty()) {
-        std::vector<Node> path_to_save = current_path;
         Node saved_join_node = nullptr;
 
         // For join nodes, save path without the join node itself
         // For fork nodes, save the complete path
         if (is_join) {
-          saved_join_node = path_to_save.back();
-          path_to_save.pop_back();
+          saved_join_node = current_path.back();
+          current_path.pop_back();
         }
 
-        if (!path_to_save.empty()) {
-          savePath(path_to_save, path_to_save.back()->GetDeviceId());
+        if (!current_path.empty()) {
+          int dev = current_path.back()->GetDeviceId();
+          savePath(current_path, dev);
         }
         current_path.clear();
 
         // For nodes that are both fork and join, save them as their own segment
         if (saved_join_node != nullptr && is_fork) {
           std::vector<Node> fork_join_segment = {saved_join_node};
-          savePath(fork_join_segment, saved_join_node->GetDeviceId());
+          savePath(std::move(fork_join_segment), saved_join_node->GetDeviceId());
         }
 
         // Put the join node back in current_path for further traversal
@@ -660,7 +661,8 @@ void Graph::FindPathsRecursiveHierarchical(Node start,
 
     // Save any remaining path (handles leaf nodes and leaf join nodes)
     if (!current_path.empty() && edges.size() == 0) {
-      savePath(current_path, current_path.back()->GetDeviceId());
+      int dev = current_path.back()->GetDeviceId();
+      savePath(std::move(current_path), dev);
       current_path.clear();
     }
   }
