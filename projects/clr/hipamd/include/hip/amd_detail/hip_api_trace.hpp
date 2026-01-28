@@ -63,7 +63,7 @@
 #define HIP_API_TABLE_STEP_VERSION 0
 #define HIP_COMPILER_API_TABLE_STEP_VERSION 0
 #define HIP_TOOLS_API_TABLE_STEP_VERSION 0
-#define HIP_RUNTIME_API_TABLE_STEP_VERSION 21
+#define HIP_RUNTIME_API_TABLE_STEP_VERSION 22
 
 // HIP API interface
 // HIP compiler dispatch functions
@@ -1119,6 +1119,10 @@ typedef hipError_t (*t_hipExtSetLoggingParams)(size_t log_level, size_t log_size
 
 typedef hipError_t (*t_hipKernelGetParamInfo)(hipKernel_t kernel, size_t paramIndex,
                                               size_t* paramOffset, size_t* paramSize);
+typedef hipError_t (*t_hipMemSetMemPool)(hipMemLocation* location, hipMemAllocationType type,
+                                         hipMemPool_t pool);
+typedef hipError_t (*t_hipMemGetMemPool)(hipMemPool_t* pool, hipMemLocation* location,
+                                         hipMemAllocationType type);
 // HIP Compiler dispatch table
 struct HipCompilerDispatchTable {
   // HIP_COMPILER_API_TABLE_STEP_VERSION == 0
@@ -1700,7 +1704,7 @@ struct HipDispatchTable {
   t_hipLibraryEnumerateKernels hipLibraryEnumerateKernels_fn;
   t_hipKernelGetLibrary hipKernelGetLibrary_fn;
   t_hipKernelGetName hipKernelGetName_fn;
-  
+
   // HIP_RUNTIME_API_TABLE_STEP_VERSION == 18
   t_hipOccupancyAvailableDynamicSMemPerBlock hipOccupancyAvailableDynamicSMemPerBlock_fn;
 
@@ -1715,8 +1719,12 @@ struct HipDispatchTable {
   t_hipExtEnableLogging hipExtEnableLogging_fn;
   t_hipExtSetLoggingParams hipExtSetLoggingParams_fn;
 
-  // DO NOT EDIT ABOVE!
   // HIP_RUNTIME_API_TABLE_STEP_VERSION == 22
+  t_hipMemSetMemPool hipMemSetMemPool_fn;
+  t_hipMemGetMemPool hipMemGetMemPool_fn;
+
+  // DO NOT EDIT ABOVE!
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 23
 
   // ******************************************************************************************* //
   //
