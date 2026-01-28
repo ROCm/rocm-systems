@@ -57,10 +57,10 @@
 #endif
 
 #if ROCPROFSYS_USE_ROCM > 0
-#    if ROCPROFSYS_ROCM_VERSION >= 71100
-#        include <rocprofiler-sdk/registration.h>
-#    else
+#    if ROCPROFSYS_ROCM_VERSION >= 71200
 #        include <rocprofiler-sdk/experimental/registration.h>
+#    else
+#        include <rocprofiler-sdk/registration.h>
 #    endif
 #endif
 
