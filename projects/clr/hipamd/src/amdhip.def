@@ -526,5 +526,3 @@ hipKernelGetParamInfo
 hipExtDisableLogging
 hipExtEnableLogging
 hipExtSetLoggingParams
-hipMemSetMemPool
-hipMemGetMemPool

@@ -223,9 +223,7 @@ set(TEST_SRC
     hipMemGetAddressRange.cc
     hipMallocMipmappedArray.cc
     hipFreeMipmappedArray.cc
-    hipHostAlloc.cc
-    hipMemSetMemPool.cc
-    hipMemGetMemPool.cc)
+    hipHostAlloc.cc)
 
 if(HIP_PLATFORM MATCHES "amd")
   set(TEST_SRC
