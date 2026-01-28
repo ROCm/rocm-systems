@@ -648,6 +648,8 @@ global:
     hipExtDisableLogging;
     hipExtEnableLogging;
     hipExtSetLoggingParams;
+    hipMemSetMemPool;
+    hipMemGetMemPool;
 local:
     *;
 } hip_7.1;

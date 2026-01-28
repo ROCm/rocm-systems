@@ -633,6 +633,8 @@ hipError_t ihipMemcpyCommand(amd::Command*& command, void* dst, const void* src,
                                            *srcMemory->asBuffer(), *dstMemory->asBuffer(), sOffset,
                                            dOffset, sizeBytes, copyMetadata);
       break;
+    case hipHostToHost:
+      break;
   }
   if (command == nullptr) {
     return hipErrorOutOfMemory;
@@ -3602,7 +3604,8 @@ hipError_t ihipPointerGetAttributes(void* data, hipPointer_attribute attribute,
     }
     case HIP_POINTER_ATTRIBUTE_DEVICE_POINTER: {
       if (memObj) {
-        device::Memory* devMem = memObj->getDeviceMemory(*hip::getCurrentDevice()->devices()[0]);
+        amd::Device* currentDevice = hip::getCurrentDevice()->devices()[0];
+        device::Memory* devMem = memObj->getDeviceMemory(*currentDevice);
 
         // getDeviceMemory can fail, hence validate the sanity of the mem obtained
         if (nullptr == devMem) {
@@ -3610,6 +3613,16 @@ hipError_t ihipPointerGetAttributes(void* data, hipPointer_attribute attribute,
                "getDeviceMemory for ptr failed : %p", ptr);
           return hipErrorMemoryAllocation;
         }
+
+        // Check if this is a cross-device access without peer access enabled
+        const std::vector<amd::Device*>& memDevices = memObj->getContext().devices();
+        if (memDevices.size() == 1 && memDevices[0] != currentDevice) {
+          device::Memory* origDevMem = memObj->getDeviceMemory(*memDevices[0]);
+          if (origDevMem != nullptr && !origDevMem->getAllowedPeerAccess()) {
+            return hipErrorInvalidValue;
+          }
+        }
+
         *reinterpret_cast<hipDeviceptr_t*>(data) =
             reinterpret_cast<hipDeviceptr_t*>(devMem->virtualAddress() + offset);
       } else {
