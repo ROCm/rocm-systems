@@ -1464,55 +1464,86 @@ write_rocpd(
 
     auto dispatch_to_evt_id = common::container::stable_vector<uint64_t, 512>{};
 
-    auto insert_pc_sampling_data = [&](const auto&        pc_sampling_gen,
-                                       const std::string& sampling_method) {
+    auto insert_pc_sampling_data = [conn,
+                                    node_id,
+                                    this_pid,
+                                    &string_entries,
+                                    &dispatch_to_evt_id,
+                                    &get_instruction_info](const auto&        pc_sampling_gen,
+                                                           const std::string& sampling_method) {
         // Cache for PC sampling field IDs to avoid redundant lookups and inserts
-        static std::unordered_map<std::string, uint64_t> pc_sampling_field_ids;
+        struct agent_id_hash
+        {
+            size_t operator()(const rocprofiler_agent_id_t& v) const noexcept
+            {
+                return std::hash<uint64_t>{}(v.handle);
+            }
+        };
+
+        struct agent_id_equal
+        {
+            bool operator()(const rocprofiler_agent_id_t& lhs,
+                            const rocprofiler_agent_id_t& rhs) const noexcept
+            {
+                return lhs.handle == rhs.handle;
+            }
+        };
+
+        std::unordered_map<rocprofiler_agent_id_t,
+                           std::unordered_map<std::string_view, uint64_t>,
+                           agent_id_hash,
+                           agent_id_equal>
+            pc_sampling_field_ids;
 
         // Function to register a PC sampling field in rocpd_info_pc_sample
         auto register_pc_sample_field = [&](const std::string& field_name,
                                             const std::string& description,
                                             const std::string& value_type = "TEXT",
                                             uint64_t           agent_id   = 0) -> uint64_t {
-            auto cache_key = field_name + "_" + std::to_string(agent_id);
-            auto it        = pc_sampling_field_ids.find(cache_key);
-            if(it != pc_sampling_field_ids.end())
-            {
-                return it->second;
-            }
+            auto  agent_key = rocprofiler_agent_id_t{agent_id};
+            auto& agent_map = pc_sampling_field_ids[agent_key];
+            auto  itr       = agent_map.find(field_name);
+            if(itr != agent_map.end()) return itr->second;
 
             // Field not registered yet, insert into rocpd_info_pc_sample
             auto stmt = agent_id > 0
-                ? get_insert_statement("rocpd_info_pc_sample{{uuid}}",
-                                      {insert_value("nid", node_id),
-                                       insert_value("pid", this_pid),
-                                       insert_value("name", field_name),
-                                       insert_value("description", description),
-                                       insert_value("value_type", value_type),
-                                       insert_value("agent_id", agent_id)})
-                : get_insert_statement("rocpd_info_pc_sample{{uuid}}",
-                                      {insert_value("nid", node_id),
-                                       insert_value("pid", this_pid),
-                                       insert_value("name", field_name),
-                                       insert_value("description", description),
-                                       insert_value("value_type", value_type)});
+                            ? get_insert_statement(
+                                  "rocpd_info_pc_sample{{uuid}}",
+                                  {insert_value("nid", node_id),
+                                   insert_value("pid", this_pid),
+                                   insert_value("name", field_name),
+                                   insert_value("description", description, allow_empty_string{}),
+                                   insert_value("value_type", value_type),
+                                   insert_value("agent_id", agent_id)})
+                            : get_insert_statement(
+                                  "rocpd_info_pc_sample{{uuid}}",
+                                  {insert_value("nid", node_id),
+                                   insert_value("pid", this_pid),
+                                   insert_value("name", field_name),
+                                   insert_value("description", description, allow_empty_string{}),
+                                   insert_value("value_type", value_type)});
 
             execute_raw_sql_statements(conn, stmt);
-            auto field_id                    = sqlite3_last_insert_rowid(conn);
-            pc_sampling_field_ids[cache_key] = field_id;
+            auto field_id         = sqlite3_last_insert_rowid(conn);
+            agent_map[field_name] = field_id;
             return field_id;
         };
 
         // Function to add a field value as a PC sample event
         auto add_pc_sample_value = [&](uint64_t           event_id,
                                        const std::string& field_name,
-                                       const std::string& value,
+                                       auto&&             value,
                                        const std::string& description  = "",
                                        const std::string& value_type   = "TEXT",
                                        uint64_t           agent_id     = 0,
                                        bool               force_insert = false) {
-            // Skip empty values, but allow "0" and "false"
-            if(!force_insert && value.empty()) return;
+            using value_t = std::decay_t<decltype(value)>;
+
+            // Skip empty values for string-like inputs, but allow "0" and "false"
+            if constexpr(common::mpl::is_string_type<value_t>::value)
+            {
+                if(!force_insert && std::string_view{value}.empty()) return;
+            }
 
             auto field_id = register_pc_sample_field(field_name, description, value_type, agent_id);
 
@@ -1525,7 +1556,7 @@ write_rocpd(
         };
 
         // Register all field types once
-        static bool fields_registered = false;
+        bool fields_registered = false;
         if(!fields_registered)
         {
             register_pc_sample_field(
@@ -1622,18 +1653,22 @@ write_rocpd(
                 }
 
                 // Create event for PC sample with parent_id linking to dispatch
-                auto evt_id = parent_evt_id > 0
-                    ? create_event(conn,
-                                  {insert_value("category_id", string_entries.at("pc_sample")),
-                                   insert_value("stack_id", record.correlation_id.internal),
-                                   insert_value("parent_stack_id", record.correlation_id.internal),
-                                   insert_value("correlation_id", record.correlation_id.external.value),
-                                   insert_value("parent_id", parent_evt_id)})
-                    : create_event(conn,
-                                  {insert_value("category_id", string_entries.at("pc_sample")),
-                                   insert_value("stack_id", record.correlation_id.internal),
-                                   insert_value("parent_stack_id", record.correlation_id.internal),
-                                   insert_value("correlation_id", record.correlation_id.external.value)});
+                auto evt_id =
+                    parent_evt_id > 0
+                        ? create_event(
+                              conn,
+                              {insert_value("category_id", string_entries.at("pc_sample")),
+                               insert_value("stack_id", record.correlation_id.internal),
+                               insert_value("parent_stack_id", record.correlation_id.internal),
+                               insert_value("correlation_id", record.correlation_id.external.value),
+                               insert_value("parent_id", parent_evt_id)})
+                        : create_event(
+                              conn,
+                              {insert_value("category_id", string_entries.at("pc_sample")),
+                               insert_value("stack_id", record.correlation_id.internal),
+                               insert_value("parent_stack_id", record.correlation_id.internal),
+                               insert_value("correlation_id",
+                                            record.correlation_id.external.value)});
 
                 // Create track_id
                 auto pc_track_id = get_track_id(conn,
@@ -1665,93 +1700,75 @@ write_rocpd(
                         evt_id, "instruction_comment", sanitize_sql_string(instruction_comment));
                 }
 
+                add_pc_sample_value(evt_id, "code_object_id", record.pc.code_object_id, "", "INT");
                 add_pc_sample_value(
-                    evt_id, "code_object_id", std::to_string(record.pc.code_object_id), "", "INT");
-                add_pc_sample_value(evt_id,
-                                    "code_object_offset",
-                                    std::to_string(record.pc.code_object_offset),
-                                    "",
-                                    "INT");
-                add_pc_sample_value(evt_id,
-                                    "exec_mask",
-                                    std::to_string(static_cast<uint64_t>(record.exec_mask)),
-                                    "",
-                                    "INT");
+                    evt_id, "code_object_offset", record.pc.code_object_offset, "", "INT");
+                add_pc_sample_value(
+                    evt_id, "exec_mask", static_cast<uint64_t>(record.exec_mask), "", "INT");
                 add_pc_sample_value(evt_id,
                                     "wave_in_group",
-                                    std::to_string(static_cast<uint32_t>(record.wave_in_group)),
+                                    static_cast<uint32_t>(record.wave_in_group),
                                     "",
                                     "INT");
 
                 // Add workgroup dimensions
-                add_pc_sample_value(
-                    evt_id, "workgroup_id_x", std::to_string(record.workgroup_id.x), "", "INT");
-                add_pc_sample_value(
-                    evt_id, "workgroup_id_y", std::to_string(record.workgroup_id.y), "", "INT");
-                add_pc_sample_value(
-                    evt_id, "workgroup_id_z", std::to_string(record.workgroup_id.z), "", "INT");
+                add_pc_sample_value(evt_id, "workgroup_id_x", record.workgroup_id.x, "", "INT");
+                add_pc_sample_value(evt_id, "workgroup_id_y", record.workgroup_id.y, "", "INT");
+                add_pc_sample_value(evt_id, "workgroup_id_z", record.workgroup_id.z, "", "INT");
 
                 // Add hardware ID fields
                 add_pc_sample_value(evt_id,
                                     "hw_id_chiplet",
-                                    std::to_string(static_cast<uint64_t>(record.hw_id.chiplet)),
+                                    static_cast<uint64_t>(record.hw_id.chiplet),
                                     "",
                                     "INT");
                 add_pc_sample_value(evt_id,
                                     "hw_id_wave_id",
-                                    std::to_string(static_cast<uint64_t>(record.hw_id.wave_id)),
+                                    static_cast<uint64_t>(record.hw_id.wave_id),
                                     "",
                                     "INT");
                 add_pc_sample_value(evt_id,
                                     "hw_id_simd_id",
-                                    std::to_string(static_cast<uint64_t>(record.hw_id.simd_id)),
+                                    static_cast<uint64_t>(record.hw_id.simd_id),
                                     "",
                                     "INT");
                 add_pc_sample_value(evt_id,
                                     "hw_id_pipe_id",
-                                    std::to_string(static_cast<uint64_t>(record.hw_id.pipe_id)),
+                                    static_cast<uint64_t>(record.hw_id.pipe_id),
                                     "",
                                     "INT");
-                add_pc_sample_value(
-                    evt_id,
-                    "hw_id_cu_or_wgp_id",
-                    std::to_string(static_cast<uint64_t>(record.hw_id.cu_or_wgp_id)),
-                    "",
-                    "INT");
-                add_pc_sample_value(
-                    evt_id,
-                    "hw_id_shader_array_id",
-                    std::to_string(static_cast<uint64_t>(record.hw_id.shader_array_id)),
-                    "",
-                    "INT");
-                add_pc_sample_value(
-                    evt_id,
-                    "hw_id_shader_engine_id",
-                    std::to_string(static_cast<uint64_t>(record.hw_id.shader_engine_id)),
-                    "",
-                    "INT");
-                add_pc_sample_value(
-                    evt_id,
-                    "hw_id_workgroup_id",
-                    std::to_string(static_cast<uint64_t>(record.hw_id.workgroup_id)),
-                    "",
-                    "INT");
                 add_pc_sample_value(evt_id,
-                                    "hw_id_vm_id",
-                                    std::to_string(static_cast<uint64_t>(record.hw_id.vm_id)),
+                                    "hw_id_cu_or_wgp_id",
+                                    static_cast<uint64_t>(record.hw_id.cu_or_wgp_id),
                                     "",
                                     "INT");
+                add_pc_sample_value(evt_id,
+                                    "hw_id_shader_array_id",
+                                    static_cast<uint64_t>(record.hw_id.shader_array_id),
+                                    "",
+                                    "INT");
+                add_pc_sample_value(evt_id,
+                                    "hw_id_shader_engine_id",
+                                    static_cast<uint64_t>(record.hw_id.shader_engine_id),
+                                    "",
+                                    "INT");
+                add_pc_sample_value(evt_id,
+                                    "hw_id_workgroup_id",
+                                    static_cast<uint64_t>(record.hw_id.workgroup_id),
+                                    "",
+                                    "INT");
+                add_pc_sample_value(
+                    evt_id, "hw_id_vm_id", static_cast<uint64_t>(record.hw_id.vm_id), "", "INT");
                 add_pc_sample_value(evt_id,
                                     "hw_id_queue_id",
-                                    std::to_string(static_cast<uint64_t>(record.hw_id.queue_id)),
+                                    static_cast<uint64_t>(record.hw_id.queue_id),
                                     "",
                                     "INT");
-                add_pc_sample_value(
-                    evt_id,
-                    "hw_id_microengine_id",
-                    std::to_string(static_cast<uint64_t>(record.hw_id.microengine_id)),
-                    "",
-                    "INT");
+                add_pc_sample_value(evt_id,
+                                    "hw_id_microengine_id",
+                                    static_cast<uint64_t>(record.hw_id.microengine_id),
+                                    "",
+                                    "INT");
 
                 // Add stochastic-specific data
                 if(sampling_method == "stochastic")
@@ -1808,12 +1825,11 @@ write_rocpd(
                         }
 
                         // Add stochastic fields
-                        add_pc_sample_value(
-                            evt_id,
-                            "wave_issued",
-                            std::to_string(static_cast<int>(stochastic_record.wave_issued)),
-                            "",
-                            "INT");
+                        add_pc_sample_value(evt_id,
+                                            "wave_issued",
+                                            static_cast<int>(stochastic_record.wave_issued),
+                                            "",
+                                            "INT");
 
                         if(!inst_type_str.empty())
                         {
@@ -1821,11 +1837,8 @@ write_rocpd(
                                 evt_id, "inst_type", sanitize_sql_string(inst_type_str));
                         }
 
-                        add_pc_sample_value(evt_id,
-                                            "wave_count",
-                                            std::to_string(stochastic_record.wave_count),
-                                            "",
-                                            "INT");
+                        add_pc_sample_value(
+                            evt_id, "wave_count", stochastic_record.wave_count, "", "INT");
 
                         if(!reason_str.empty())
                         {
@@ -1836,9 +1849,7 @@ write_rocpd(
                         // Add snapshot fields
 #define ADD_ARB_STATE_FIELD_IF_TRUE(field)                                                         \
     if(static_cast<bool>(stochastic_record.snapshot.field))                                        \
-    {                                                                                              \
-        add_pc_sample_value(evt_id, #field, "1", "", "INT");                                       \
-    }
+        add_pc_sample_value(evt_id, #field, 1, "", "INT");
 
                         ADD_ARB_STATE_FIELD_IF_TRUE(dual_issue_valu);
                         ADD_ARB_STATE_FIELD_IF_TRUE(arb_state_issue_valu);
