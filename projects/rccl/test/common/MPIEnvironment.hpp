@@ -44,6 +44,29 @@ class MPIEnvironment : public ::testing::Environment
 {
 public:
     /**
+     * @brief Destructor - ensures MPI is finalized even if TearDown fails
+     *
+     * Acts as a safety net to call MPI_Finalize if it wasn't already called.
+     * This prevents "exited without calling finalize" errors when tests fail
+     * or when the test filter matches no tests.
+     */
+    ~MPIEnvironment() override
+    {
+        if (mpi_initialized)
+        {
+            // Use MPI_Finalized to check if MPI_Finalize was already called
+            int finalized = 0;
+            MPI_Finalized(&finalized);
+            if (!finalized)
+            {
+                // Force finalize without synchronization (ranks may be out of sync)
+                MPI_Finalize();
+            }
+            mpi_initialized = false;
+        }
+    }
+
+    /**
      * @brief Current MPI rank in MPI_COMM_WORLD
      *
      * Valid after MPI initialization. Each rank corresponds to one GPU.
