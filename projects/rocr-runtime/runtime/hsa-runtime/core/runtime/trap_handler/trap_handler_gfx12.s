@@ -409,7 +409,7 @@
   // ttmp4:  Available - Can be freely used
   // ttmp5:  Available - Can be freely used
   // ttmp6:  Initially contains flags  - trap ID and halt status - reused after saving
-  // ttmp7:  Contains WGID_Y in high 16 bits, WGID_Z in low 16 bits
+  // ttmp7:  Contains WGID_Y in low 16 bits, WGID_Z in high 16 bits
   // ttmp8:  Contains dispatch ID in bits [24:0] and debug flag
   // ttmp9:  Contains WGID_X
   // ttmp10: Available - Used next to save exec_lo
