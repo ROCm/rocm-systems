@@ -919,7 +919,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .required({ "device" })
             .action([&](parser_t& p) {
                 update_env(_data, "ROCPROFSYS_SAMPLING_AINICS",
-                           join(array_config_t{ "," }, p.get<strvec_t>("gpus")));
+                           fmt::format("{}", fmt::join(p.get<strvec_t>("ainics"), ",")));
             });
 
         _data.processed_environs.emplace("ainics");

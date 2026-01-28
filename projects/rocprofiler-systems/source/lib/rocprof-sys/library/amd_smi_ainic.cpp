@@ -223,7 +223,7 @@ nic_data::post_process(size_t nic_index)
     if(!_thread_info) return;
 
     auto addendum = [&](const char* _v) {
-        return JOIN(" ", nic, _v, JOIN("", '[', nic_index, ']'), "(S)");
+        return fmt::format("{} {} [ {} ] (S)", nic, _v, nic_index);
     };
 
     for(auto& itr : nic_sampler_vec[nic_index])
