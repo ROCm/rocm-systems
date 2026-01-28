@@ -1,180 +1,987 @@
-# Source files
-set(LIBSRCFILES
-    bootstrap.cc
-    channel.cc
-    ce_coll.cc
-    collectives.cc
-    debug.cc
-    enqueue.cc
-    group.cc
-    init.cc
-    init_nvtx.cc
-    proxy.cc
-    transport.cc
-    mnnvl.cc
-    allocator.cc
-    sym_kernels.cc
-    dev_runtime.cc
+# Copyright (c) 2019-2023 Advanced Micro Devices, Inc. All rights reserved.
+# Modifications Copyright (c) Microsoft Corporation. Licensed under the MIT License.
+#
+# RCCL Source Directory CMakeLists.txt
+# This file handles source collection, hipification, and library creation
+#==================================================================================================
+
+# When RCCL is included as a subproject (e.g. rocm-systems), CMAKE_SOURCE_DIR points to the
+# super-repo root. Use PROJECT_SOURCE_DIR for RCCL-relative paths.
+set(RCCL_SOURCE_DIR "${PROJECT_SOURCE_DIR}")
+
+# Collect list of all source files
+#==================================================================================================
+# E.g: find src -type f \( -name "*.cc" -o -name "*.h" -o -name "*.hpp" \) | sort
+set(SRC_FILES
+  allocator.cc
+  bootstrap.cc
+  ce_coll.cc
+  channel.cc
+  collectives.cc
+  commDump.cc
+  debug.cc
+  dev_runtime.cc
+  enqueue.cc
+  group.cc
+  init.cc
+  init_nvtx.cc
+  mnnvl.cc
+  msccl.cc
+  proxy.cc
+  rccl_wrap.cc
+  sym_kernels.cc
+  transport.cc
+  device/all_gather.h
+  device/all_reduce.h
+  device/alltoall_pivot.h
+  device/alltoall_gda.h
+  device/broadcast.h
+  device/common.h
+  device/common_kernel.h
+  device/op128.h
+  device/primitives.h
+  device/prims_ll128.h
+  device/prims_ll.h
+  device/prims_simple.h
+  device/reduce.h
+  device/reduce_kernel.h
+  device/reduce_scatter.h
+  device/rccl_metadata.h
+  device/rccl_ptr.h
+  device/sendrecv.h
+  device/common.cu
+  device/onerank.cu
+  device/network/unpack/unpack_defs.h
+  device/network/unpack/unpack.h
+  device/symmetric/all_gather.cuh
+  device/symmetric/all_reduce.cuh
+  device/symmetric/kernel.cuh
+  device/symmetric/primitives.cuh
+  device/symmetric/reduce_scatter.cuh
+  graph/connect.cc
+  graph/paths.cc
+  graph/rings.cc
+  graph/rings.h
+  graph/rome_models.cc
+  graph/rome_models.h
+  graph/search.cc
+  graph/topo.cc
+  graph/topo.h
+  graph/trees.cc
+  graph/tuning.cc
+  graph/xml.cc
+  graph/xml.h
+  include/alloc.h
+  include/allocator.h
+  include/alt_rsmi.h
+  include/archinfo.h
+  include/api_trace.h
+  include/argcheck.h
+  include/BfdBacktrace.hpp
+  include/bitops.h
+  include/bootstrap.h
+  include/ce_coll.h
+  include/channel.h
+  include/checks.h
+  include/collectives.h
+  include/coll_net.h
+  include/comm.h
+  include/core.h
+  include/cpuset.h
+# include/cudawrap.h
+  include/debug.h
+  include/dev_runtime.h
+  include/device.h
+  include/enqueue.h
+  include/gdrwrap.h
+  include/git_version.h
+  include/graph.h
+  include/group.h
+  include/hip_rocm_version_info.h
+  include/ibvcore.h
+  include/ibvsymbols.h
+  include/ibvwrap.h
+  include/info.h
+  include/ipcsocket.h
+  include/mnnvl.h
+  include/nccl_common.h
+  include/nccl_device.h
+  include/net_device.h
+  include/net.h
+  include/nvmlwrap.h
+  include/nvtx.h
+  include/nvtx_payload_schemas.h
+  include/nvtx_stub.h
+  include/p2p.h
+  include/param.h
+  include/profiler.h
+  include/proxy.h
+  include/ras.h
+  include/rccl_common.h
+  include/rccl_vars.h
+  include/register.h
+  include/register_inline.h
+  include/rccl_float8.h
+  include/rocmwrap.h
+  include/roctx.h
+  include/recorder.h
+  include/scheduler.h
+  include/shm.h
+  include/shmutils.h
+  include/signals.h
+  include/socket.h
+  include/strongstream.h
+  include/sym_kernels.h
+  include/timer.h
+  include/transport.h
+  include/trees.h
+  include/tuner.h
+  include/utils.h
+  include/mlx5/mlx5dvcore.h
+  include/mlx5/mlx5dvsymbols.h
+  include/mlx5/mlx5dvwrap.h
+  include/ionic/ionicdvcore.h
+  include/ionic/ionicdvsymbols.h
+  include/ionic/ionicdvwrap.h
+  include/msccl/msccl_lifecycle.h
+  include/msccl/msccl_parser.h
+  include/msccl/msccl_scheduler.h
+  include/msccl/msccl_setup.h
+  include/msccl/msccl_status.h
+  include/msccl/msccl_struct.h
+  include/nccl_device/comm.h
+  include/nccl_device/coop.h
+  include/nccl_device/core.h
+  include/nccl_device/ll_a2a.h
+  include/nccl_device/mem_barrier.h
+  include/nccl_device/ptr.h
+  include/nccl_device/utility.h
+  include/nccl_device/impl/comm__funcs.h
+  include/nccl_device/impl/comm__types.h
+  include/nccl_device/impl/core__funcs.h
+  include/nccl_device/impl/core__types.h
+  include/nccl_device/impl/ll_a2a__funcs.h
+  include/nccl_device/impl/ll_a2a__types.h
+  include/nccl_device/impl/mem_barrier__funcs.h
+  include/nccl_device/impl/mem_barrier__types.h
+  include/nccl_device/impl/ptr__funcs.h
+  include/nccl_device/impl/ptr__types.h
+  include/npkit/npkit.h
+  include/npkit/npkit_event.h
+  include/npkit/npkit_struct.h
+  include/nvtx3/nvToolsExt.h
+  include/nvtx3/nvToolsExtCounters.h
+  include/nvtx3/nvToolsExtCuda.h
+  include/nvtx3/nvToolsExtCudaRt.h
+  include/nvtx3/nvToolsExtMem.h
+  include/nvtx3/nvToolsExtMemCudaRt.h
+  include/nvtx3/nvToolsExtOpenCL.h
+  include/nvtx3/nvToolsExtPayload.h
+  include/nvtx3/nvToolsExtPayloadHelper.h
+  include/nvtx3/nvToolsExtSemanticsCounters.h
+  include/nvtx3/nvToolsExtSemanticsScope.h
+  include/nvtx3/nvToolsExtSync.h
+  include/nvtx3/nvtx3.hpp
+  include/nvtx3/nvtxDetail/nvtxExtHelperMacros.h
+  include/nvtx3/nvtxDetail/nvtxExtImpl.h
+  include/nvtx3/nvtxDetail/nvtxExtImplCounters_v1.h
+  include/nvtx3/nvtxDetail/nvtxExtImplMem_v1.h
+  include/nvtx3/nvtxDetail/nvtxExtImplMemCudaRt_v1.h
+  include/nvtx3/nvtxDetail/nvtxExtImplPayload_v1.h
+  include/nvtx3/nvtxDetail/nvtxExtInit.h
+  include/nvtx3/nvtxDetail/nvtxExtPayloadHelperInternal.h
+  include/nvtx3/nvtxDetail/nvtxExtPayloadTypeInfo.h
+  include/nvtx3/nvtxDetail/nvtxExtTypes.h
+  include/nvtx3/nvtxDetail/nvtxImpl.h
+  include/nvtx3/nvtxDetail/nvtxImplCore.h
+  include/nvtx3/nvtxDetail/nvtxImplCuda_v3.h
+  include/nvtx3/nvtxDetail/nvtxImplCudaRt_v3.h
+  include/nvtx3/nvtxDetail/nvtxImplOpenCL_v3.h
+  include/nvtx3/nvtxDetail/nvtxImplSync_v3.h
+  include/nvtx3/nvtxDetail/nvtxInit.h
+  include/nvtx3/nvtxDetail/nvtxInitDecls.h
+  include/nvtx3/nvtxDetail/nvtxInitDefs.h
+  include/nvtx3/nvtxDetail/nvtxLinkOnce.h
+  include/nvtx3/nvtxDetail/nvtxTypes.h
+  include/proxy_trace/proxy_trace.h
+  include/plugin/nccl_net.h
+  include/plugin/nccl_profiler.h
+  include/plugin/nccl_tuner.h
+  include/plugin/plugin.h
+  include/plugin/net/net_v6.h
+  include/plugin/net/net_v7.h
+  include/plugin/net/net_v8.h
+  include/plugin/net/net_v9.h
+  include/plugin/net/net_v10.h
+  include/plugin/net/net_v11.h
+  include/plugin/profiler/net_ib_v1.h
+  include/plugin/profiler/net_ib.h
+  include/plugin/profiler/net_socket_v1.h
+  include/plugin/profiler/net_socket.h
+  include/plugin/profiler/profiler_v1.h
+  include/plugin/profiler/profiler_v2.h
+  include/plugin/profiler/profiler_v3.h
+  include/plugin/profiler/profiler_v4.h
+  include/plugin/profiler/profiler_v5.h
+  include/plugin/tuner/tuner_v2.h
+  include/plugin/tuner/tuner_v3.h
+  include/plugin/tuner/tuner_v4.h
+  include/plugin/tuner/tuner_v5.h
+  misc/alt_rsmi.cc
+  misc/archinfo.cc
+  misc/argcheck.cc
+  misc/api_trace.c
+  misc/api_trace.cc
+# misc/cudawrap.cc
+# misc/gdrwrap.cc
+  misc/ibvsymbols.cc
+  misc/ibvwrap.cc
+  misc/ipcsocket.cc
+  misc/mlx5dvsymbols.cc
+  misc/mlx5dvwrap.cc
+  misc/ionicdvsymbols.cc
+  misc/ionicdvwrap.cc
+  misc/npkit.cc
+# misc/nvmlwrap.cc
+  misc/nvmlwrap_stub.cc
+  misc/param.cc
+  misc/rocmwrap.cc
+  misc/roctx.cc
+  misc/recorder.cc
+  misc/shmutils.cc
+  misc/signals.cc
+  misc/socket.cc
+  misc/strongstream.cc
+  misc/utils.cc
+  misc/msccl/msccl_lifecycle.cc
+  misc/msccl/msccl_parser.cc
+  misc/msccl/msccl_setup.cc
+  misc/msccl/msccl_status.cc
+  misc/proxy_trace/proxy_trace.cc
+  nccl_device/core.cc
+  nccl_device/ll_a2a.cc
+  nccl_device/mem_barrier.cc
+  plugin/net.cc
+  plugin/plugin_open.cc
+  plugin/profiler.cc
+  plugin/tuner.cc
+  plugin/net/net_v6.cc
+  plugin/net/net_v7.cc
+  plugin/net/net_v8.cc
+  plugin/net/net_v9.cc
+  plugin/net/net_v10.cc
+  plugin/net/net_v11.cc
+  plugin/profiler/profiler_v1.cc
+  plugin/profiler/profiler_v2.cc
+  plugin/profiler/profiler_v3.cc
+  plugin/profiler/profiler_v4.cc
+  plugin/profiler/profiler_v5.cc
+  plugin/tuner/tuner_v2.cc
+  plugin/tuner/tuner_v3.cc
+  plugin/tuner/tuner_v4.cc
+  plugin/tuner/tuner_v5.cc
+  ras/client.cc
+  ras/client_support.cc
+  ras/collectives.cc
+  ras/peers.cc
+  ras/ras.cc
+  ras/ras_internal.h
+  ras/rasnet.cc
+  register/coll_reg.cc
+  register/register.cc
+  register/sendrecv_reg.cc
+  scheduler/symmetric_sched.cc
+  transport/coll_net.cc
+  transport/generic.cc
+  transport/net.cc
+  transport/net_ib.cc
+  transport/net_ib_rocm.cc
+  transport/net_socket.cc
+  transport/nvls.cc
+  transport/p2p.cc
+  transport/profiler.cc
+  transport/shm.cc
+  include/latency_profiler/CollTrace.h
+  include/latency_profiler/CollTraceEvent.h
+  include/latency_profiler/CollTraceFunc.h
+  include/latency_profiler/CollTraceUtils.h
+  include/latency_profiler/EventQueue.h
+  misc/latency_profiler/CollTrace.cc
+  misc/latency_profiler/CollTraceEvent.cc
+  misc/latency_profiler/CollTraceFunc.cc
+  misc/latency_profiler/CollTraceUtils.cc
 )
 
-# Add compatibility shim if using static cudart
-if(CUDARTLIB STREQUAL "cudart_static")
-    list(APPEND LIBSRCFILES enhcompat.cc)
+# Prepend src/ to all source files for proper paths from root
+list(TRANSFORM SRC_FILES PREPEND "src/")
+
+# Conditional source files based on build options
+#==================================================================================================
+if(USE_AMDSMI)
+  set(SMI_SOURCES
+    src/include/amdsmi_wrap.h
+    src/misc/amdsmi_wrap.cc
+  )
+else()
+  set(SMI_SOURCES
+    src/include/rocm_smi_wrap.h
+    src/misc/rocm_smi_wrap.cc
+  )
+endif()
+list(APPEND SRC_FILES ${SMI_SOURCES})
+
+if (ENABLE_MSCCL_KERNEL)
+  set(MSCCL_KERNEL_SOURCES
+    src/device/msccl_kernel_impl.h
+    src/include/msccl/msccl_kernel.h
+  )
+  list(APPEND SRC_FILES ${MSCCL_KERNEL_SOURCES})
 endif()
 
-# Configure pkg-config file
-configure_file(
-    ${CMAKE_CURRENT_SOURCE_DIR}/nccl.pc.in
-    ${CMAKE_BINARY_DIR}/lib/pkgconfig/nccl.pc
-    @ONLY
+if (ENABLE_MSCCLPP)
+  set(MSCCLPP_SOURCES
+    src/include/mscclpp/mscclpp_nccl.h
+    src/misc/mscclpp/mscclpp_nccl.cc
+  )
+  list(APPEND SRC_FILES ${MSCCLPP_SOURCES})
+endif()
+
+# Hipify source files (copy of source generated into hipify directory)
+#==================================================================================================
+find_program(hipify-perl_executable hipify-perl)
+if(NOT hipify-perl_executable)
+  message(FATAL_ERROR "hipify-perl not found")
+endif()
+# Use PROJECT_BINARY_DIR to keep hipify at project root level
+set(HIPIFY_DIR "${PROJECT_BINARY_DIR}/hipify")
+
+## Loop over each source file to hipify
+foreach(SRC_FILE ${SRC_FILES})
+  # Check that file exists
+  if (NOT EXISTS ${RCCL_SOURCE_DIR}/${SRC_FILE})
+    message(FATAL_ERROR "Unable to find file listed in CMakeLists.txt: ${RCCL_SOURCE_DIR}/${SRC_FILE}")
+  endif()
+
+  # Establish hipified copy of the source file
+  set(HIP_FILE "${HIPIFY_DIR}/${SRC_FILE}")
+  get_filename_component(HIP_FILE_DIR ${HIP_FILE} DIRECTORY)
+
+  # Make sure the file name is unique and there is no duplicate
+  add_file_unique(HIP_SOURCES ${HIP_FILE})
+
+  # Convert .cu files to .cpp so that they get processed properly
+  string(REPLACE "\.cuh" "\.h" HIP_FILE ${HIP_FILE})
+  string(REPLACE "\.cu" "\.cu.cpp" HIP_FILE ${HIP_FILE})
+  list(APPEND HIP_SOURCES ${HIP_FILE})
+
+  # Create a custom command to create hipified source code
+  if (FAULT_INJECTION)
+    add_custom_command(
+      OUTPUT ${HIP_FILE}
+      COMMAND mkdir -p ${HIP_FILE_DIR}
+              && ${hipify-perl_executable} -quiet-warnings ${RCCL_SOURCE_DIR}/${SRC_FILE} -o ${HIP_FILE}
+              && ${CMAKE_COMMAND} -E env bash ${RCCL_SOURCE_DIR}/cmake/scripts/add_unroll.sh ${HIP_FILE}
+              && ${CMAKE_COMMAND} -E env bash ${RCCL_SOURCE_DIR}/cmake/scripts/add_faults.sh ${HIP_FILE}
+      MAIN_DEPENDENCY ${RCCL_SOURCE_DIR}/${SRC_FILE}
+      COMMENT "Hipifying ${SRC_FILE} -> ${HIP_FILE}"
+    )
+  else()
+    add_custom_command(
+      OUTPUT ${HIP_FILE}
+      COMMAND mkdir -p ${HIP_FILE_DIR}
+              && ${hipify-perl_executable} -quiet-warnings ${RCCL_SOURCE_DIR}/${SRC_FILE} -o ${HIP_FILE}
+              && ${CMAKE_COMMAND} -E env bash ${RCCL_SOURCE_DIR}/cmake/scripts/add_unroll.sh ${HIP_FILE}
+      MAIN_DEPENDENCY ${RCCL_SOURCE_DIR}/${SRC_FILE}
+      COMMENT "Hipifying ${SRC_FILE} -> ${HIP_FILE}"
+    )
+  endif()
+endforeach()
+
+# Adding custom target to hipify all the source files
+# This is required to make sure that all the hipified source files are
+# available before compiling the unit tests executable(s)
+add_custom_target(hipify_all DEPENDS ${HIP_SOURCES})
+
+# Generate device/host tables and all the collective functions that are going to be in librccl.so
+#==================================================================================================
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
+if (NOT Python3_FOUND)
+  message(FATAL_ERROR "RCCL requires Python3 for generating host/device tables")
+endif()
+
+set(GEN_DIR "${HIPIFY_DIR}/gensrc")
+set(GEN_SYM_DIR "${GEN_DIR}/symmetric")
+
+if(ONLY_FUNCS)
+  message(WARNING "Using ONLY_FUNCS = ${ONLY_FUNCS}. Not meant for release builds.")
+endif()
+
+# Execute the python script to generate required collective functions
+execute_process(
+    COMMAND ${Python3_EXECUTABLE} ${RCCL_SOURCE_DIR}/src/device/generate.py ${GEN_DIR} ${IFC_ENABLED} ${COLLTRACE} ${ENABLE_MSCCL_KERNEL} ${BUILD_LOCAL_GPU_TARGET_ONLY} ${ONLY_FUNCS}
+    WORKING_DIRECTORY ${RCCL_SOURCE_DIR}
+    RESULT_VARIABLE gen_py_result
+    ERROR_VARIABLE gen_py_error
+)
+if (gen_py_result)
+  message(SEND_ERROR "Error: ${gen_py_error}")
+  message(FATAL_ERROR "${RCCL_SOURCE_DIR}/src/device/generate.py failed")
+endif()
+
+if (GENERATE_SYM_KERNELS)
+  # Execute the python script to generate required symmetric memory kernels
+  execute_process(
+    COMMAND ${Python3_EXECUTABLE} ${RCCL_SOURCE_DIR}/src/device/symmetric/generate.py ${GEN_SYM_DIR}
+    WORKING_DIRECTORY ${RCCL_SOURCE_DIR}
+    RESULT_VARIABLE gen_sym_py_result
+    ERROR_VARIABLE gen_sym_py_error
+  )
+  if (gen_sym_py_result)
+    message(SEND_ERROR "Error: ${gen_sym_py_error}")
+    message(FATAL_ERROR "${RCCL_SOURCE_DIR}/src/device/symmetric/generate.py failed")
+  endif()
+endif()
+
+# Find the generated files in the output directory
+file(GLOB_RECURSE GENERATED_FILES "${GEN_DIR}/*")
+
+# Append all found generated files to the list
+foreach(file ${GENERATED_FILES})
+  list(APPEND HIP_SOURCES ${file})
+endforeach()
+
+# Create an initial git_version.cpp file (that will be updated with latest git version)
+#==================================================================================================
+# Create initial empty file at configure time
+file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/git_version.cpp "")
+
+# Add a custom target that always runs at build time to update git version
+add_custom_target(update_git_version
+  ALL
+  COMMAND ${CMAKE_COMMAND} -DRCCL_SOURCE_DIR=${RCCL_SOURCE_DIR} -DRCCL_BINARY_DIR=${CMAKE_CURRENT_BINARY_DIR} -P ${RCCL_SOURCE_DIR}/cmake/scripts/git_version.cmake
+  BYPRODUCTS ${CMAKE_CURRENT_BINARY_DIR}/git_version.cpp
+  COMMENT "Updating git version information"
+  VERBATIM
 )
 
-# Add files from subdirectories
-add_subdirectory(transport)
-add_subdirectory(misc)
-add_subdirectory(register)
-add_subdirectory(graph)
-add_subdirectory(plugin)
-add_subdirectory(device)
-add_subdirectory(nccl_device)
-add_subdirectory(ras)
-add_subdirectory(scheduler)
+list(APPEND HIP_SOURCES ${CMAKE_CURRENT_BINARY_DIR}/git_version.cpp)
 
-add_compile_options(-fmacro-prefix-map=${CMAKE_CURRENT_SOURCE_DIR}/=)
+# Set up RCCL library
+#==================================================================================================
+## Set RCCL source files
+add_library(rccl ${HIP_SOURCES})
 
-# Add all source files
-list(APPEND LIBSRCFILES
-    ${TRANSPORT_SOURCES}
-    ${MISC_SOURCES}
-    ${REGISTER_SOURCES}
-    ${GRAPH_SOURCES}
-    ${PLUGIN_SOURCES}
-    ${RAS_SOURCES}
-    ${SYM_SOURCES}
-    ${SCHEDULER_SOURCES}
-)
+## Set RCCL dependencies
+## Ensure git version is updated before building rccl
+add_dependencies(rccl update_git_version)
 
-###################### Create a shared NCCL library ############################
-add_library(nccl SHARED)
+## Set RCCL include directories
+target_include_directories(rccl PRIVATE ${PROJECT_BINARY_DIR}/include)        # for generated rccl.h header
+target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src)                    # for hipified headers
+target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/device)
+target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/device/network/unpack)
+target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/include)
+target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/include/mlx5)
+target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/include/nccl_device)
+target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/include/ionic)
+target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/include/plugin)
+target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/gensrc)
+target_include_directories(rccl PRIVATE ${HSA_INCLUDE_PATH})
+target_include_directories(rccl PRIVATE ${SMI_INCLUDE_DIR})
+target_include_directories(rccl PRIVATE ${ROCMCORE_PATH}/include)
+if(DEMANGLE_DIR)
+  target_include_directories(rccl PRIVATE ${DEMANGLE_DIR})
+endif()
+if(ROCTX_ENABLE)
+  target_include_directories(rccl PRIVATE ${ROCTRACER_INCLUDE_DIR})
+endif()
 
-target_sources(nccl PRIVATE ${LIBSRCFILES})
+## Set RCCL compile definitions
+if(COLLTRACE)
+  target_compile_definitions(rccl PRIVATE ENABLE_COLLTRACE)
+endif()
+if(ENABLE_MSCCL_KERNEL)
+  message(WARNING "MSCCL is deprecated and will be removed in a future version of RCCL.")
+  target_compile_definitions(rccl PRIVATE COMPILE_MSCCL_KERNEL)
+endif()
+if(ENABLE_MSCCLPP)
+  target_compile_definitions(rccl PRIVATE ENABLE_MSCCLPP)
+endif()
 
-# Include directories
-target_include_directories(nccl PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/device
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/plugin
-    ${CUDAToolkit_INCLUDE_DIRS}
-    ${CUDAToolkit_INCLUDE_DIRS}/cccl
-)
+if(USE_AMDSMI)
+  target_compile_definitions(rccl PRIVATE USE_AMDSMI)
+else()
+  if(HAVE_ROCM_SMI64CONFIG)
+    target_compile_definitions(rccl PRIVATE USE_ROCM_SMI64CONFIG)
+  endif()
+  if(HAVE_ROCM_SMI_THREAD_ONLY_MUTEX)
+    target_compile_definitions(rccl PRIVATE USE_ROCM_SMI_THREAD_ONLY_MUTEX)
+  endif()
+endif()
+if(ENABLE_WARP_SPEED)
+  target_compile_definitions(rccl PRIVATE ENABLE_WARP_SPEED)
+endif()
+if(ENABLE_ROCSHMEM)
+  target_compile_definitions(rccl PRIVATE ENABLE_ROCSHMEM)
+endif()
 
-add_custom_command(
-    OUTPUT ${CMAKE_BINARY_DIR}/include/nccl.h
-    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/include
-    COMMAND sed -e "s/\\\$$\\{nccl:Major\\}/${NCCL_MAJOR}/g"
-                -e "s/\\\$$\\{nccl:Minor\\}/${NCCL_MINOR}/g"
-                -e "s/\\\$$\\{nccl:Patch\\}/${NCCL_PATCH}/g"
-                -e "s/\\\$$\\{nccl:Suffix\\}/${NCCL_SUFFIX}/g"
-                -e "s/\\\$$\\{nccl:Version\\}/${NCCL_VERSION_CODE}/g"
-                ${CMAKE_CURRENT_SOURCE_DIR}/nccl.h.in > ${CMAKE_BINARY_DIR}/include/nccl.h
-    BYPRODUCTS ${CMAKE_BINARY_DIR}/include/nccl.h
-)
+# ==== rocSHMEM integration (optional) ====
+if (ENABLE_ROCSHMEM)
+  add_rocshmem_targets()
+  # Ensure rocSHMEM is fully built/installed before compiling rccl
+  if (TARGET rocshmem_ext)
+    add_dependencies(rccl rocshmem_ext)
+  endif()
 
-add_custom_target(nccl_header DEPENDS ${CMAKE_BINARY_DIR}/include/nccl.h)
+  if (ROCSHMEM_INCLUDE_DIR)
+    target_include_directories(rccl PRIVATE ${ROCSHMEM_INCLUDE_DIR})
+  endif()
 
-add_dependencies(nccl nccl_header)
+  # Moved to where MSCCL target_links
+  ## target_link_libraries(rccl PRIVATE ${ROCSHMEM_LIBRARY})
+  target_link_libraries(rccl PRIVATE ${IBVERBS})
+endif()
 
-# Set version and output name
-set_target_properties(nccl PROPERTIES
-    VERSION ${NCCL_MAJOR}.${NCCL_MINOR}.${NCCL_PATCH}
-    SOVERSION ${NCCL_MAJOR}
-    OUTPUT_NAME "nccl"
-    PREFIX "lib"
-)
+# NPKit flags
+## May be better to move these to a separate file
+if(ENABLE_NPKIT)
+  message(WARNING "NPKit is deprecated and will be removed in a future version of RCCL. Please consider using alternative profiling tools.")
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_TIME_SYNC_GPU)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_TIME_SYNC_CPU)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_ALL_REDUCE_RING_ENTRY)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_ALL_REDUCE_RING_EXIT)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_ALL_REDUCE_TREE_UPDOWN_ENTRY)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_ALL_REDUCE_TREE_UPDOWN_EXIT)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_ALL_REDUCE_TREE_SPLIT_ENTRY)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_ALL_REDUCE_TREE_SPLIT_EXIT)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_COPY_SEND_ENTRY)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_COPY_SEND_EXIT)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_DIRECT_COPY_SEND_ENTRY)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_DIRECT_COPY_SEND_EXIT)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_DIRECT_RECV_ENTRY)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_DIRECT_RECV_EXIT)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_DIRECT_RECV_COPY_SEND_ENTRY)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_DIRECT_RECV_COPY_SEND_EXIT)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_DIRECT_RECV_REDUCE_COPY_SEND_ENTRY)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_DIRECT_RECV_REDUCE_COPY_SEND_EXIT)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_DIRECT_SEND_ENTRY)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_DIRECT_SEND_EXIT)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_DIRECT_SEND_FROM_OUTPUT_ENTRY)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_DIRECT_SEND_FROM_OUTPUT_EXIT)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_RECV_ENTRY)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_RECV_EXIT)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_RECV_COPY_SEND_ENTRY)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_RECV_COPY_SEND_EXIT)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_RECV_REDUCE_COPY_ENTRY)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_RECV_REDUCE_COPY_EXIT)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_RECV_REDUCE_COPY_SEND_ENTRY)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_RECV_REDUCE_COPY_SEND_EXIT)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_RECV_REDUCE_SEND_ENTRY)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_RECV_REDUCE_SEND_EXIT)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_SEND_ENTRY)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_SEND_EXIT)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_SEND_FROM_OUTPUT_ENTRY)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_SEND_FROM_OUTPUT_EXIT)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_PRIM_SIMPLE_WAIT_PEER_ENTRY)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_PRIM_SIMPLE_WAIT_PEER_EXIT)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_PRIM_SIMPLE_REDUCE_OR_COPY_MULTI_ENTRY)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_PRIM_SIMPLE_REDUCE_OR_COPY_MULTI_EXIT)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_PRIM_LL_WAIT_SEND_ENTRY)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_PRIM_LL_WAIT_SEND_EXIT)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_PRIM_LL_DATA_PROCESS_ENTRY)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_PRIM_LL_DATA_PROCESS_EXIT)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_PRIM_LL128_WAIT_SEND_ENTRY)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_PRIM_LL128_WAIT_SEND_EXIT)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_PRIM_LL128_DATA_PROCESS_ENTRY)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_PRIM_LL128_DATA_PROCESS_EXIT)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_NET_SEND_ENTRY)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_NET_SEND_EXIT)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_NET_TEST_ENTRY)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_NET_TEST_EXIT)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_NET_RECV_ENTRY)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_NET_RECV_EXIT)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_ALL_REDUCE_RING_SEND_ENTRY)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_ALL_REDUCE_RING_SEND_EXIT)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_ALL_REDUCE_RING_RECV_REDUCE_SEND_ENTRY)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_ALL_REDUCE_RING_RECV_REDUCE_SEND_EXIT)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_ALL_REDUCE_RING_DIRECT_RECV_REDUCE_COPY_SEND_ENTRY)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_ALL_REDUCE_RING_DIRECT_RECV_REDUCE_COPY_SEND_EXIT)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_ALL_REDUCE_RING_DIRECT_RECV_COPY_SEND_ENTRY)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_ALL_REDUCE_RING_DIRECT_RECV_COPY_SEND_EXIT)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_ALL_REDUCE_RING_DIRECT_RECV_ENTRY)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_ALL_REDUCE_RING_DIRECT_RECV_EXIT)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_ALL_REDUCE_TREE_UPDOWN_REDUCE_ENTRY)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_ALL_REDUCE_TREE_UPDOWN_REDUCE_EXIT)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_ALL_REDUCE_TREE_UPDOWN_BROADCAST_ENTRY)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_ALL_REDUCE_TREE_UPDOWN_BROADCAST_EXIT)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_ALL_REDUCE_TREE_SPLIT_REDUCE_BROADCAST_ENTRY)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_ALL_REDUCE_TREE_SPLIT_REDUCE_BROADCAST_EXIT)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_ALL_REDUCE_TREE_SPLIT_REDUCE_ENTRY)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_ALL_REDUCE_TREE_SPLIT_REDUCE_EXIT)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_ALL_REDUCE_TREE_SPLIT_BROADCAST_ENTRY)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_ALL_REDUCE_TREE_SPLIT_BROADCAST_EXIT)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_SEND_RECV_LOCAL_COPY_ENTRY)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_SEND_RECV_LOCAL_COPY_EXIT)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_SEND_RECV_SEND_ENTRY)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_SEND_RECV_SEND_EXIT)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_SEND_RECV_RECV_ENTRY)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_SEND_RECV_RECV_EXIT)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_ALL_GATHER_RING_ENTRY)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_ALL_GATHER_RING_EXIT)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_ALL_GATHER_RING_SEND_ENTRY)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_ALL_GATHER_RING_SEND_EXIT)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_ALL_GATHER_RING_RECV_COPY_SEND_ENTRY)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_ALL_GATHER_RING_RECV_COPY_SEND_EXIT)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_ALL_GATHER_RING_DIRECT_RECV_ENTRY)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_ALL_GATHER_RING_DIRECT_RECV_EXIT)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_MSCCL_GENERIC_OP_ENTRY)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_MSCCL_GENERIC_OP_EXIT)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_MSCCL_REDUCE_ENTRY)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_MSCCL_REDUCE_EXIT)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_MSCCL_SEND_ENTRY)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_MSCCL_SEND_EXIT)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_MSCCL_RECV_ENTRY)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_MSCCL_RECV_EXIT)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_MSCCL_RUN_ENTRY)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_MSCCL_RUN_EXIT)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_MSCCL_RECV_REDUCE_COPY_ENTRY)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_MSCCL_RECV_REDUCE_COPY_EXIT)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_MSCCL_INIT_ENTRY)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_MSCCL_INIT_EXIT)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_BROADCAST_RING_ENTRY)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_BROADCAST_RING_EXIT)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_REDUCE_SCATTER_RING_ENTRY)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_REDUCE_SCATTER_RING_EXIT)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_REDUCE_SCATTER_RING_SEND_ENTRY)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_REDUCE_SCATTER_RING_SEND_EXIT)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_REDUCE_SCATTER_RING_RECV_REDUCE_SEND_ENTRY)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_REDUCE_SCATTER_RING_RECV_REDUCE_SEND_EXIT)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_REDUCE_SCATTER_RING_RECV_REDUCE_COPY_ENTRY)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_REDUCE_SCATTER_RING_RECV_REDUCE_COPY_EXIT)
+  target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_PRIM_COLLECT_DATA_PROCESS_TIME)
+endif()
 
-# Set CUDA specific flags
-set_target_properties(nccl PROPERTIES
-    CUDA_SEPARABLE_COMPILATION ON
-    CUDA_RESOLVE_DEVICE_SYMBOLS ON
-    CUDA_ARCHITECTURES "${CMAKE_CUDA_ARCHITECTURES}"
-    POSITION_INDEPENDENT_CODE ON
-)
+if(PROFILE)
+  target_compile_definitions(rccl PRIVATE ENABLE_PROFILING)
+endif()
+if(ROCTX_ENABLE)
+  target_compile_definitions(rccl PRIVATE ROCTX_ENABLE)
+else()
+  target_compile_definitions(rccl PRIVATE NVTX_NO_IMPL)
+  target_compile_definitions(rccl PRIVATE NVTX_DISABLE)
+endif()
+if(TRACE)
+  target_compile_definitions(rccl PRIVATE ENABLE_TRACE)
+endif()
+if(${HIP_CONTIGUOUS_MEMORY})
+  target_compile_definitions(rccl PRIVATE HIP_CONTIGUOUS_MEMORY)
+  message(STATUS "HIP_CONTIGUOUS_MEMORY enabled")
+else()
+  message(STATUS "HIP_CONTIGUOUS_MEMORY disabled")
+endif()
+if("${hip_version_string}" VERSION_GREATER_EQUAL "5.7.31920")
+  target_compile_definitions(rccl PRIVATE HIP_UNCACHED_MEMORY)
+  message(STATUS "HIP_UNCACHED_MEMORY enabled")
+else()
+  message(STATUS "HIP_UNCACHED_MEMORY disabled - requires HIP version >= 5.7.31920")
+  # keep --hipcc-func-supp on older HIP and compiler
+  if(NOT IFC_ENABLED)
+    target_compile_options(rccl PRIVATE --hipcc-func-supp)
+    message(STATUS "--hipcc-func-supp enabled")
+  else()
+    message(STATUS "--hipcc-func-supp disabled")
+  endif()
+endif()
+if (HIP_HOST_UNCACHED_MEMORY)
+  target_compile_definitions(rccl PRIVATE HIP_HOST_UNCACHED_MEMORY)
+  message(STATUS "HIP_HOST_UNCACHED_MEMORY enabled")
+else()
+  message(STATUS "HIP_HOST_UNCACHED_MEMORY disabled")
+endif()
+if (BUILD_BFD)
+  if (HAVE_BFD)
+    target_compile_definitions(rccl PRIVATE HAVE_BFD)
+  endif()
+  if (HAVE_DECL_BFD_GET_SECTION_FLAGS)
+    target_compile_definitions(rccl PRIVATE HAVE_DECL_BFD_GET_SECTION_FLAGS)
+  endif()
+  if (HAVE_DECL_BFD_GET_SECTION_VMA)
+    target_compile_definitions(rccl PRIVATE HAVE_DECL_BFD_GET_SECTION_VMA)
+  endif()
+  if (HAVE_TWO_ARG_BFD_SECTION_SIZE)
+    target_compile_definitions(rccl PRIVATE HAVE_TWO_ARG_BFD_SECTION_SIZE)
+  endif()
+endif()
+if (IFC_ENABLED)
+  target_compile_definitions(rccl PRIVATE USE_INDIRECT_FUNCTION_CALL)
+endif()
+if(DEMANGLE_DIR)
+  target_compile_definitions(rccl PRIVATE "HAVE_CPLUS_DEMANGLE=1")
+  target_compile_definitions(rccl PRIVATE "HAVE_DECL_BASENAME=1")
+endif()
+if(LL128_ENABLED)
+  target_compile_definitions(rccl PRIVATE ENABLE_LL128)
+endif()
 
-# Link libraries
-target_link_libraries(nccl
-    PRIVATE
-    nccl_device
-    pthread
-    rt
-    dl
-    ${CUDAToolkit_LIBRARIES}
-    ${EXTRA_LIBS}
-)
+## Set RCCL compile options
+if (HAVE_PARALLEL_JOBS)
+  target_compile_options(rccl PRIVATE -parallel-jobs=12)
+endif()
 
-# Set output directories for nccl shared library
-set_target_properties(nccl PROPERTIES
-    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
-)
+if (ROCM_VERSION VERSION_GREATER_EQUAL "60200")
+  target_compile_options(rccl PRIVATE --offload-compress)    # Compress GPU code at compile time.
+  target_link_libraries(rccl PRIVATE --offload-compress)     # Compress GPU code at link time.
+  message(STATUS "--offload-compress enabled - ROCm version >= 6.2.0")
+else()
+  message(STATUS "--offload-compress disabled - ROCm version < 6.2.0")
+endif()
 
-###################### Create a ras binary executable ############################
-set(RAS_BINSRCFILES ras/client.cc)
+target_compile_options(rccl PRIVATE -Werror=uninitialized)
+target_compile_options(rccl PRIVATE -Werror=sometimes-uninitialized)
+target_compile_options(rccl PRIVATE -Wall)
+target_compile_options(rccl PRIVATE -Werror=deprecated-copy-with-user-provided-copy)
+target_compile_options(rccl PRIVATE -Wno-format-nonliteral)
+target_compile_options(rccl PRIVATE -Wno-unused-function)
+target_compile_options(rccl PRIVATE -fgpu-rdc)
 
-add_executable(ncclras ${RAS_BINSRCFILES})
+if(QUIET_WARNINGS)
+  target_compile_options(rccl PRIVATE -Wno-invalid-offsetof)
+  target_compile_options(rccl PRIVATE -Wno-unused-result)
+  target_compile_options(rccl PRIVATE -Wno-macro-redefined)
+  target_compile_options(rccl PRIVATE -Wno-unused-label)
+  target_compile_options(rccl PRIVATE -Wno-unused-variable)
+  target_compile_options(rccl PRIVATE -Wno-unused-private-field)
+  target_compile_options(rccl PRIVATE -Wno-null-conversion)
+  target_compile_options(rccl PRIVATE -Wno-missing-braces)
+endif()
 
-target_include_directories(ncclras PUBLIC
-    ${CMAKE_BINARY_DIR}/include
-    ${CUDAToolkit_INCLUDE_DIRS}
-)
+## Set RCCL compile and linker options for unit tests and code coverage
+if(ENABLE_CODE_COVERAGE)
+  if(NOT CMAKE_BUILD_TYPE MATCHES "Debug")
+    message(FATAL_ERROR "Code coverage is enabled, but the build type is '${CMAKE_BUILD_TYPE}'. "
+                        "Code coverage requires 'Debug' build types to expose internal symbols. "
+                        "Please set CMAKE_BUILD_TYPE to 'Debug' and reconfigure.")
+  endif()
 
-add_dependencies(ncclras nccl_header)
+  message(STATUS "Code coverage is enabled with build type '${CMAKE_BUILD_TYPE}'.")
 
-target_link_libraries(ncclras
-    PRIVATE
-    pthread
-    rt
-    dl
-)
+  target_compile_options(rccl PRIVATE
+    -fvisibility=default -Xarch_host -fprofile-instr-generate -Xarch_host -fcoverage-mapping)
 
-# Set output directory for ncclras executable
-set_target_properties(ncclras PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
-)
+  set(COVERAGE_SHARED_LINKER_FLAGS
+    -fprofile-generate
+    -Wl,--enable-new-dtags,--build-id=sha1,--rpath,$ORIGIN
+  )
 
-###################### Create a static NCCL library ############################
-add_library(nccl_static STATIC ${LIBSRCFILES})
+  set(COVERAGE_EXE_LINKER_FLAGS
+    -fprofile-generate
+    -Wl,--enable-new-dtags,--build-id=sha1,--rpath,$ORIGIN/../lib
+  )
 
-# Include directories
-target_include_directories(nccl_static PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/device
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/plugin
-    ${CUDAToolkit_INCLUDE_DIRS}
-    ${CUDAToolkit_INCLUDE_DIRS}/cccl
-)
+  target_link_options(rccl PRIVATE ${COVERAGE_SHARED_LINKER_FLAGS})
+  target_link_options(rccl PRIVATE ${COVERAGE_EXE_LINKER_FLAGS})
+elseif(BUILD_TESTS) # Enable default/hidden visibility based on build type and ROCM_VERSION
+  if (ROCM_VERSION VERSION_GREATER_EQUAL "60400" AND CMAKE_BUILD_TYPE MATCHES "Debug")
+    target_compile_options(rccl PRIVATE -fvisibility=default)
+  else()
+    target_compile_options(rccl PRIVATE -fvisibility=hidden)
+  endif()
+else()  # Enable hidden visibility for library without tests/code coverage enabled
+  target_compile_options(rccl PRIVATE -fvisibility=hidden)
+endif()
 
-# Add dependency on nccl_header
-add_dependencies(nccl_static nccl_header)
+if (HAVE_KERNARG_PRELOAD)
+  target_compile_options(rccl PRIVATE -mllvm --amdgpu-kernarg-preload-count=16)
+endif()
 
-# Link libraries
-target_link_libraries(nccl_static
-    PRIVATE
-    nccl_device
-    pthread
-    rt
-    dl
-    ${CUDAToolkit_LIBRARIES}
-    ${EXTRA_LIBS}
-)
+if (REPORT_KERNEL_RESOURCE_USE)
+  target_link_options(rccl PRIVATE -Rpass-analysis=kernel-resource-usage)
+endif()
 
-# Set CUDA specific flags
-set_target_properties(nccl_static PROPERTIES
-    CUDA_SEPARABLE_COMPILATION ON
-    CUDA_RESOLVE_DEVICE_SYMBOLS ON
-    CUDA_ARCHITECTURES "${CMAKE_CUDA_ARCHITECTURES}"
-    POSITION_INDEPENDENT_CODE ON
-)
+if (DUMP_ASM) # Save temporary files from kernel compilation
+  message(STATUS "Disassembling librccl.so to asm")
+  # Maintain symbols but without changing code.  Keep additional data in dwarf section of binary.
+  target_compile_options(rccl PRIVATE -gline-tables-only)
+  set(OBJ_DUMP ${ROCM_PATH}/llvm/bin/llvm-objdump)
 
-# Set output directory for nccl_static library
-set_target_properties(nccl_static PROPERTIES
-    ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
-)
+  add_custom_command(TARGET rccl POST_BUILD
+    COMMENT "Disassembling RCCL library"
+    COMMAND /bin/bash -c "${OBJ_DUMP} --offload-fatbin librccl.so"
+    VERBATIM
+  )
+  foreach(GPUARCH ${GPU_TARGETS})
+    add_custom_command(TARGET rccl POST_BUILD
+        COMMENT "Disassembling RCCL library to dump assembly for ${GPUARCH}"
+        COMMAND /bin/bash -c "${OBJ_DUMP} -d -l --source --symbolize-operands librccl.so.0.hipv4-amdgcn-amd-amdhsa--${GPUARCH} > librccl.${GPUARCH}.s"
+        VERBATIM
+    )
+  endforeach()
+endif()
+
+## NOTE: This is currently being handled by rocm-cmake, however may need to be re-enabled in the future
+#foreach(target ${GPU_TARGETS})
+#  target_compile_options(rccl PRIVATE --offload-arch=${target})
+#endforeach()
+
+if(BUILD_ADDRESS_SANITIZER)
+  target_compile_options(rccl PRIVATE -fsanitize=address -shared-libasan)
+endif()
+if(TIMETRACE)
+  target_compile_options(rccl PRIVATE -ftime-trace)
+endif()
+if (FAULT_INJECTION)
+  target_compile_definitions(rccl PRIVATE ENABLE_FAULT_INJECTION)
+  message(STATUS "Fault injection enabled")
+endif()
+
+## Set RCCL linked library directories
+target_link_directories(rccl PRIVATE ${SMI_LIB_DIR})
+
+if (ROCM_VERSION VERSION_GREATER_EQUAL "60100")
+    option(RCCL_ROCPROFILER_REGISTER "Enable rocprofiler-register support" ON)
+else()
+    if(RCCL_ROCPROFILER_REGISTER)
+        message(AUTHOR_WARNING "RCCL_ROCPROFILER_REGISTER is not valid option for ROCm < 6.2. Current ROCm version: ${ROCM_VERSION}")
+    endif()
+    set(RCCL_ROCPROFILER_REGISTER OFF CACHE BOOL "" FORCE)
+endif()
+if(RCCL_ROCPROFILER_REGISTER)
+  find_package(rocprofiler-register REQUIRED)
+  target_compile_definitions(rccl PRIVATE RCCL_ROCPROFILER_REGISTER=1)
+  target_link_libraries(
+      rccl PRIVATE rocprofiler-register::rocprofiler-register)
+endif()
+
+## Set RCCL linked libraries
+if (HAVE_BFD)
+  target_link_libraries(rccl PRIVATE bfd)
+  if(HAVE_IBERTY)
+    target_link_libraries(rccl PRIVATE iberty z)
+  endif()
+endif()
+if (ROCTX_ENABLE)
+  target_link_libraries(rccl PRIVATE ${ROCTX_LIB})
+endif()
+target_link_libraries(rccl PRIVATE   -fgpu-rdc)             # Required when linking relocatable device code
+target_link_libraries(rccl PRIVATE   Threads::Threads)
+target_link_libraries(rccl INTERFACE hip::host)
+target_link_libraries(rccl PRIVATE   hip::device)
+target_link_libraries(rccl PRIVATE   dl)
+target_link_libraries(rccl PRIVATE   ${SMI_LIBRARIES})
+target_link_libraries(rccl PRIVATE fmt::fmt-header-only)
+if(ENABLE_MSCCLPP)
+  target_link_libraries(rccl PRIVATE mscclpp_nccl)
+endif()
+if(ENABLE_ROCSHMEM)
+  target_link_libraries(rccl PRIVATE ${ROCSHMEM_LIBRARY})
+  target_link_libraries(rccl PRIVATE ${IBVERBS})
+endif()
+
+## Set RCCL link options
+## Find out available memory
+execute_process(
+  COMMAND bash "-c" "test -r /sys/fs/cgroup/memory.max && cat /sys/fs/cgroup/memory.max || echo"
+  OUTPUT_VARIABLE memory_max_string)
+if (${memory_max_string} MATCHES "^[0-9]+")
+  math(EXPR memory_in_gb "${memory_max_string} / (1024 * 1024 * 1024)")
+else()
+  execute_process(
+    COMMAND bash "-c" "free | grep -o '[[:digit:]]*' | head -1"
+    OUTPUT_VARIABLE memory_max_string)
+  ## memory_max_string holds the free memory in KB
+  if (${memory_max_string} MATCHES "^[0-9]+")
+    math(EXPR memory_in_gb "${memory_max_string} / (1024 * 1024)") ## KB to GB conversion
+  else()
+    cmake_host_system_information(RESULT memory_max_string QUERY AVAILABLE_PHYSICAL_MEMORY )
+    math(EXPR memory_in_gb "${memory_max_string} / 1024")
+  endif()
+endif()
+## Reserve 16GB for each linker job. Limit max number of linker jobs to 16
+if (HAVE_PARALLEL_JOBS)
+  math(EXPR num_linker_jobs "(${memory_in_gb} + 15) / 16")
+  if (${num_linker_jobs} GREATER_EQUAL "16")
+    set(num_linker_jobs "16")
+  endif()
+  message(STATUS "Use ${num_linker_jobs} jobs for linking")
+  target_link_options(rccl PRIVATE -parallel-jobs=${num_linker_jobs})       # Use multiple threads to link
+endif()
+if(BUILD_ADDRESS_SANITIZER)
+  target_link_options(rccl PRIVATE -fuse-ld=lld)
+endif()
+if(TIMETRACE)
+  target_link_options(rccl PRIVATE -ftime-trace)
+endif()
+
+if(NOT BUILD_SHARED_LIBS)
+  message(STATUS "Building static RCCL library")
+else()
+  message(STATUS "Building shared RCCL library")
+endif()
+if (HAVE_KERNARG_PRELOAD)
+  target_link_options(rccl PRIVATE "SHELL:-Xoffload-linker -mllvm=-amdgpu-kernarg-preload-count=16")
+endif()
+
+if(ENABLE_MSCCLPP)
+  include(${RCCL_SOURCE_DIR}/cmake/MSCCLPP.cmake)
+endif()
+
+## Track linking time
+set_property(TARGET rccl PROPERTY RULE_LAUNCH_LINK "${CMAKE_COMMAND} -E time")
+
+## Setup librccl.so version
+rocm_set_soversion(rccl "1.0")
+
+if(NOT BUILD_SHARED_LIBS)
+  # To create a static lib with `-fgpu-rdc`, you need `--emit-static-lib` and `--hip-link`.
+  # You also need to invoke amdclang++ again to trigger GPU code generation.
+  set(static_link_flags
+    ${CXXFLAGS}
+    --hip-link
+    -fgpu-rdc
+    --emit-static-lib
+  )
+
+  # Find all the libraries we need to link at link time to include them in the clang link
+  # command line.
+  get_target_property(rccl_libs rccl LINK_LIBRARIES)
+  foreach(target ${rccl_libs})
+    if(TARGET ${target})
+      get_target_property(location ${target} LOCATION)
+      if(location)
+        LIST(APPEND static_link_flags -l${location})
+      endif()
+    endif()
+  endforeach()
+
+  foreach(target ${GPU_TARGETS})
+    list(APPEND static_link_flags --offload-arch=${target})
+  endforeach()
+  list(JOIN static_link_flags " " flags_str)
+
+  # Invoking amdclang++ this way will produce a static archive, so just override ARCHIVE_CREATE.
+  set(CMAKE_CXX_ARCHIVE_CREATE "<CMAKE_CXX_COMPILER> ${flags_str} -o <TARGET> <OBJECTS>")
+endif()
+
+# Build RCCL RAS client executable
+#==================================================================================================
+message("Building rccl RAS client executable")
+
+add_executable(rcclras "${HIPIFY_DIR}/src/ras/client.cc")
+
+target_include_directories(rcclras PRIVATE ${PROJECT_BINARY_DIR}/include)
+target_include_directories(rcclras PRIVATE ${HIPIFY_DIR}/src)
+target_include_directories(rcclras PRIVATE ${HIPIFY_DIR}/src/include)
+
+target_link_libraries(rcclras PRIVATE hip::host)
+target_link_libraries(rcclras PRIVATE dl)
+
+if(BUILD_SHARED_LIBS)
+  target_link_libraries(rcclras PRIVATE rccl hip::device)
+else()
+  add_dependencies(rcclras rccl)
+  target_link_libraries(rcclras PRIVATE dl rt -lrccl -L${CMAKE_CURRENT_BINARY_DIR} -lamdhip64 -L${ROCM_PATH}/lib)
+endif()
+
+# Export HIPIFY_DIR to parent scope for use in install rules
+set(HIPIFY_DIR ${HIPIFY_DIR} PARENT_SCOPE)
