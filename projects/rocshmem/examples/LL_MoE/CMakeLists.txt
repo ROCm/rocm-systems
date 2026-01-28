@@ -21,47 +21,14 @@
 # FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 # IN THE SOFTWARE.
 ###############################################################################
-cmake_minimum_required(VERSION 3.16.3 FATAL_ERROR)
 
-###############################################################################
-# PROJECT
-###############################################################################
-include(${CMAKE_SOURCE_DIR}/cmake/setup_project.cmake)
-project(rocshmem_examples VERSION 1.0.0 LANGUAGES CXX)
-
-find_package(MPI)
-find_package(hip REQUIRED PATHS /opt/rocm)
-if (NOT TARGET roc::rocshmem)
-  find_package(rocshmem REQUIRED PATHS /opt/rocm)
-endif()
-
-###############################################################################
-# SOURCES
-###############################################################################
-set(EXAMPLE_SOURCES
-  rocshmem_allreduce_test.cc
-  rocshmem_alltoall_test.cc
-  rocshmem_broadcast_test.cc
-  rocshmem_getmem_test.cc
-  rocshmem_put_signal_test.cc
+ add_executable(ll_moe
+  MoE_example.cpp
 )
 
-if (MPI_CXX_FOUND)
-  list(APPEND EXAMPLE_SOURCES
-    rocshmem_init_attr_test.cc)
-endif()
-
-foreach(SOURCE_FILE IN LISTS EXAMPLE_SOURCES)
-  get_filename_component(EXECUTABLE_NAME ${SOURCE_FILE} NAME_WE)
-
-  add_executable(${EXECUTABLE_NAME} ${SOURCE_FILE})
-
-  target_link_libraries(
-    ${EXECUTABLE_NAME}
-    PRIVATE
-      roc::rocshmem
-      $<TARGET_NAME_IF_EXISTS:MPI::MPI_CXX>
-  )
-endforeach()
-
-add_subdirectory(LL_MoE)
+target_link_libraries(
+  ll_moe
+  PRIVATE
+    roc::rocshmem
+    $<TARGET_NAME_IF_EXISTS:MPI::MPI_CXX>
+)
