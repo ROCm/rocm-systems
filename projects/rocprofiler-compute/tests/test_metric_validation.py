@@ -64,7 +64,11 @@ VALIDATE_METRICS = {
                 # uses improved HBM3E instead of HBM3 used in
                 # MI300X GPU. Hence, multiple expected values
                 # to cover both cases.
-                "expected_values": [3910.62, 4287.31],
+                # MI 308 has lower bandwidth.
+                # MI 300X: 3910.62 GB/s
+                # MI 325X: 4287.31 GB/s
+                # MI 308: 2003.45 GB/s
+                "expected_values": [2003.45, 3910.62, 4287.31],
             },
         ],
         "MI350": [
