@@ -24,7 +24,6 @@
 
 #include "core/defines.hpp"
 #include "core/timemory.hpp"
-#include <rocprofiler-sdk/fwd.h>
 
 #if defined(ROCPROFSYS_USE_ROCM) && ROCPROFSYS_USE_ROCM > 0
 #    if ROCPROFSYS_ROCM_VERSION >= 71200
