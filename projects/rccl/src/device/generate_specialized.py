@@ -119,48 +119,17 @@ class Fn:
   def __iter__(self):
     return iter((self.coll, self.algo, self.proto, self.redop, self.ty, self.acc, self.pipeline, self.unroll))
 
-def get_unroll_for_gpu(gfx_name, cu_count=None):
-  """Determine unroll factor for a specific GPU target.
-  
-  For gfx942 with unknown CU count, we assume MI300X (>80 CUs) -> unroll=2
-  This matches production behavior for MI300X.
-  """
-  if "gfx950" == gfx_name:
-    return (["1", "2"], ["0"])
-  elif "gfx908" == gfx_name:
-    return (["2"], all_pipelines)
-  elif "gfx942" == gfx_name:
-    # MI300X has 304 CUs, MI300A has 228 CUs - both > 80, so unroll=2
-    # If cu_count is known and <= 80, use unroll=4 (unlikely for gfx942)
-    if cu_count is not None and cu_count <= 80:
-      return (["4"], all_pipelines)
-    return (["2"], all_pipelines)
-  else:
-    return (["4"], all_pipelines)
-
-def calc_unroll_and_pipeline_for_local_arch(is_local_arch_only, gpu_targets=None):
+def calc_unroll_and_pipeline_for_local_arch(is_local_arch_only):
   """Calculate unroll and pipeline settings.
   
-  Args:
-    is_local_arch_only: If True, detect local GPU via rocminfo
-    gpu_targets: Optional list of GPU targets (e.g., ["gfx942"]). If provided
-                 and contains a single target, use that to determine unroll.
+  This must match the production generator (generate.py) exactly:
+  - When is_local_arch_only=True: detect local GPU via rocminfo and use optimal unroll
+  - When is_local_arch_only=False: generate all unrolls (1, 2, 4)
   """
-  # If explicit GPU_TARGETS provided with single target, use that
-  if gpu_targets and len(gpu_targets) == 1:
-    gfx_name = gpu_targets[0]
-    print(f"Using GPU_TARGETS={gfx_name} to determine unroll factor")
-    return get_unroll_for_gpu(gfx_name)
-  
-  # If multiple GPU targets, need all unrolls
-  if gpu_targets and len(gpu_targets) > 1:
-    print(f"Multiple GPU_TARGETS={gpu_targets}, using all unrolls")
-    return (all_unrolls, all_pipelines)
-  
   if not is_local_arch_only:
     return (all_unrolls, all_pipelines)
 
-  # Detect local GPU via rocminfo
+  # Detect local GPU via rocminfo (matches production generator)
   rocm_path = os.environ.get('ROCM_PATH', '/opt/rocm')
   rocminfo_path = os.path.join(rocm_path, "bin", "rocminfo")
   res = subprocess.run([rocminfo_path], stdout=subprocess.PIPE, universal_newlines=True)
@@ -182,7 +151,12 @@ def calc_unroll_and_pipeline_for_local_arch(is_local_arch_only, gpu_targets=None
   gfx_targets = list(gfx_targets.keys())
   if len(gfx_targets) == 1:
     gfx_name, cu_count = gfx_targets[0]
-    return get_unroll_for_gpu(gfx_name, cu_count)
+    if "gfx950" == gfx_name:
+      return (["1", "2"], ["0"])
+    elif "gfx908" == gfx_name or ("gfx942" == gfx_name and cu_count > 80):
+      return (["2"], all_pipelines)
+    else:
+      return (["4"], all_pipelines)
   return (all_unrolls, all_pipelines)
 
 def func_validate(coll, algo, proto, redop, ty, acc, pipeline, unroll, local_unroll, local_pipeline):
@@ -262,11 +236,11 @@ def custom_sort_key(fn: Fn, local_unroll, local_pipeline):
 
 def get_arch_guard(fn):
   """Get the preprocessor guard for a kernel.
-  
+
   Note: __gfx942__ etc. are only defined during device code compilation,
   not host code compilation. Since getPtr is host code and needs to
   reference the kernel, we can't use architecture macros.
-  
+
   Instead, we only use feature guards (ENABLE_LL128) and rely on cmake's
   --offload-arch to restrict to the correct architecture.
   """
@@ -326,9 +300,10 @@ def generate_specialized_kernel_file(op_tuple, output_dir):
   redop_class = redop_map.get(redop, "FuncSum")
   func_const = func_map.get(coll, "ncclFuncAllReduce")
 
-  # Include acc in kernel name for acc != 0 to avoid duplicates
+  # Include acc and unroll in kernel name to avoid duplicates
   acc_suffix = f"_acc{acc}" if acc != "0" else ""
-  kernel_name = f"ncclDevKernel_{coll}_{algo}_{proto}_{redop}_{ty}{acc_suffix}_Specialized"
+  unroll_suffix = f"_unroll{unroll}"
+  kernel_name = f"ncclDevKernel_{coll}_{algo}_{proto}_{redop}_{ty}{acc_suffix}{unroll_suffix}_Specialized"
   guard = get_arch_guard(Fn(*op_tuple))
 
   # Build ncclDevFunc name (matches production naming: Coll_ALGO_PROTO_Redop_ty_acc_pipeline_unroll)
@@ -429,7 +404,8 @@ def generate_kernel_selector(all_ops, output_dir):
   for op in all_ops:
     coll, algo, proto, redop, ty, acc, pipeline, unroll = op
     acc_suffix = f"_acc{acc}" if acc != "0" else ""
-    kernel_name = f"ncclDevKernel_{coll}_{algo}_{proto}_{redop}_{ty}{acc_suffix}_Specialized"
+    unroll_suffix = f"_unroll{unroll}"
+    kernel_name = f"ncclDevKernel_{coll}_{algo}_{proto}_{redop}_{ty}{acc_suffix}{unroll_suffix}_Specialized"
     guard = get_arch_guard(Fn(*op))
     if guard:
       content += f"#if {guard}\n"
@@ -483,9 +459,10 @@ inline void* getSpecializedKernel(
     redop_const = redop_map.get(redop, "ncclDevSum")
     algo_const = f"NCCL_ALGO_{algo}"
     proto_const = f"NCCL_PROTO_{proto}"
-    # Include acc in kernel name for acc != 0 to avoid duplicates
+    # Include acc and unroll in kernel name to avoid duplicates
     acc_suffix = f"_acc{acc_str}" if acc_str != "0" else ""
-    kernel_name = f"ncclDevKernel_{coll}_{algo}_{proto}_{redop}_{ty}{acc_suffix}_Specialized"
+    unroll_suffix = f"_unroll{unroll_str}"
+    kernel_name = f"ncclDevKernel_{coll}_{algo}_{proto}_{redop}_{ty}{acc_suffix}{unroll_suffix}_Specialized"
     guard = get_arch_guard(Fn(*op))
 
     if guard:
@@ -495,7 +472,7 @@ inline void* getSpecializedKernel(
       first = False
     else:
       content += f"  else if (func == {func_const} && algo == {algo_const} && proto == {proto_const} && \n"
-    content += f"      redop == {redop_const} && datatype == {type_const} && acc == {acc_str}) {{\n"
+    content += f"      redop == {redop_const} && datatype == {type_const} && acc == {acc_str} && unroll == {unroll_str}) {{\n"
     content += f"    return {kernel_name}_getPtr();\n"
     content += "  }\n"
     if guard:
@@ -532,7 +509,8 @@ def generate_kernel_list(all_ops, output_dir):
   for op in all_ops:
     coll, algo, proto, redop, ty, acc, pipeline, unroll = op
     acc_suffix = f"_acc{acc}" if acc != "0" else ""
-    kernel_name = f"ncclDevKernel_{coll}_{algo}_{proto}_{redop}_{ty}{acc_suffix}_Specialized"
+    unroll_suffix = f"_unroll{unroll}"
+    kernel_name = f"ncclDevKernel_{coll}_{algo}_{proto}_{redop}_{ty}{acc_suffix}{unroll_suffix}_Specialized"
     guard = get_arch_guard(Fn(*op))
     if guard:
       content += f"#if {guard}\n"
@@ -549,7 +527,8 @@ inline void** getSpecializedKernelList() {{
   for i, op in enumerate(all_ops):
     coll, algo, proto, redop, ty, acc, pipeline, unroll = op
     acc_suffix = f"_acc{acc}" if acc != "0" else ""
-    kernel_name = f"ncclDevKernel_{coll}_{algo}_{proto}_{redop}_{ty}{acc_suffix}_Specialized"
+    unroll_suffix = f"_unroll{unroll}"
+    kernel_name = f"ncclDevKernel_{coll}_{algo}_{proto}_{redop}_{ty}{acc_suffix}{unroll_suffix}_Specialized"
     guard = get_arch_guard(Fn(*op))
     if guard:
       content += f"#if {guard}\n"
@@ -576,7 +555,7 @@ inline int getSpecializedKernelCount() {{
 
 def main():
   if len(sys.argv) < 2:
-    print("Usage: generate_specialized.py <output_dir> [BUILD_LOCAL_GPU_TARGET_ONLY] [ONLY_FUNCS] [GPU_TARGETS]")
+    print("Usage: generate_specialized.py <output_dir> [BUILD_LOCAL_GPU_TARGET_ONLY] [ONLY_FUNCS]")
     sys.exit(1)
 
   output_dir = sys.argv[1]
@@ -586,12 +565,6 @@ def main():
     func_pattern = sys.argv[3]
   else:
     func_pattern = "AllGather|AllReduce|AlltoAllPivot|AllToAllGda|Broadcast|Reduce|ReduceScatter|SendRecv"
-
-  # Parse GPU_TARGETS (semicolon-separated list from CMake)
-  gpu_targets = None
-  if len(sys.argv) > 4 and sys.argv[4]:
-    gpu_targets = [t.strip() for t in sys.argv[4].split(';') if t.strip()]
-    print(f"GPU_TARGETS: {gpu_targets}")
 
   if os.path.exists(output_dir):
     for name in os.listdir(output_dir):
@@ -603,7 +576,7 @@ def main():
   else:
     os.makedirs(output_dir)
 
-  local_unroll, local_pipeline = calc_unroll_and_pipeline_for_local_arch(is_local_arch_only, gpu_targets)
+  local_unroll, local_pipeline = calc_unroll_and_pipeline_for_local_arch(is_local_arch_only)
   primary_funcs = sorted(
       {Fn(*equivalent_primary(*fn)) for fn in parse_input(func_pattern, local_unroll, local_pipeline)},
       key=lambda fn: custom_sort_key(fn, local_unroll, local_pipeline)
