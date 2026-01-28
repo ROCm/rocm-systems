@@ -380,35 +380,29 @@ PUBLIC_API hsa_status_t aqlprofile_spm_drain_counters(aqlprofile_handle_t handle
     auto s = aqlprofile::spm::spm_state_map->query(handle);
     if (!s) return HSA_STATUS_ERROR_NOT_INITIALIZED;
 
-    // Check that no draining is already in progress
     {
-        std::lock_guard<std::mutex> lock(s->drain_mutex);
-        
-        // Check if any draining operation is already active
-        if (s->draining_requested.load() || 
-            s->draining_producer_done.load() || 
-            s->draining_consumer_done.load()) {
-            
-            // Another drain operation is in progress or incomplete
-            return HSA_STATUS_ERROR;
-        }
-    }
+      std::lock_guard<std::mutex> lock(s->drain_mutex);
+      // Check if any draining operation is already active
+      if (s->draining_requested.load() || s->draining_producer_done.load() ||
+          s->draining_consumer_done.load()) {
+        // Another drain operation is in progress or incomplete
+        return HSA_STATUS_ERROR;
+      }
 
-    // Drain the counters. Send a signal to producer thread to start draining. 
-    // We don't want to stop the threads, we simply signal the thread to start 
-    // draining. And we wait for the drain to complete.
+      // Drain the counters. Send a signal to producer thread to start draining.
+      // We don't want to stop the threads, we simply-
+      // 1) signal the thread to start draining
+      // 2) And we wait for the drain to complete
 
-    // Set the draining request flag
-    {
-        std::lock_guard<std::mutex> lock(s->drain_mutex);
-        s->draining_requested = true;
-        s->draining_producer_done = false;
-        s->draining_consumer_done = false;
-        s->draining_failed = false;
+      // 1)Set the draining request flag
+      s->draining_requested = true;
+      s->draining_producer_done = false;
+      s->draining_consumer_done = false;
+      s->draining_failed = false;
     }
 
     {
-      // Wait for draining to complete
+      // 2) Wait for draining to complete
       std::unique_lock<std::mutex> lock(s->drain_mutex);
       s->drain_cond.wait(lock, [&s]() { return s->draining_consumer_done.load(); });
 
@@ -562,6 +556,7 @@ static void consumer(std::shared_ptr<spm_state_t> s, aqlprofile_spm_data_callbac
         // Check if producer draining is done and signal consumer completion
         if (s->draining_producer_done.load()) {
             std::lock_guard<std::mutex> drain_lock(s->drain_mutex);
+            s->draining_producer_done = false;
             s->draining_consumer_done = true;
             s->drain_cond.notify_all();
         }
