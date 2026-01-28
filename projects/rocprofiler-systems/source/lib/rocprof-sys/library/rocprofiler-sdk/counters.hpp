@@ -22,15 +22,12 @@
 
 #pragma once
 
-#include "common/defines.h"
-
 #include "common/synchronized.hpp"
-#include "core/debug.hpp"
+#include "core/containers/stable_vector.hpp"
 #include "core/perfetto.hpp"
 #include "core/timemory.hpp"
 #include "library/rocprofiler-sdk/fwd.hpp"
 
-#include <timemory/operations/types.hpp>
 #include <timemory/utility/types.hpp>
 
 #include <rocprofiler-sdk/agent.h>
@@ -122,35 +119,45 @@ namespace tim
 {
 namespace operation
 {
-
 template <>
 struct set_storage<::rocprofsys::rocprofiler_sdk::counter_data_tracker>
-: public dynamic_storage_base<
-      storage<::rocprofsys::rocprofiler_sdk::counter_data_tracker>*,
-      ROCPROFSYS_MAX_THREADS>
 {
-    static constexpr size_t max_threads = ROCPROFSYS_MAX_THREADS;
-    using type            = ::rocprofsys::rocprofiler_sdk::counter_data_tracker;
-    using base_type       = dynamic_storage_base<storage<type>*, max_threads>;
-    using storage_array_t = typename base_type::storage_array_t;
+    static constexpr size_t initial_capacity = ROCPROFSYS_MAX_THREADS;
+    using type = ::rocprofsys::rocprofiler_sdk::counter_data_tracker;
+    using storage_array_t =
+        ::rocprofsys::container::stable_vector<storage<type>*, initial_capacity>;
+    friend struct get_storage<rocprofsys::rocprofiler_sdk::counter_data_tracker>;
 
     ROCPROFSYS_DEFAULT_OBJECT(set_storage)
 
     auto operator()(storage<type>* _v, size_t _idx) const
     {
-        base_type::ensure_capacity(get(), _idx);
+        ensure_capacity(_idx);
         get().at(_idx) = _v;
     }
+
     auto operator()(type&, size_t) const {}
+
     auto operator()(storage<type>* _v) const
     {
-        std::fill(get().begin(), get().end(), _v);
+        // Fill all existing elements with the same storage pointer
+        auto& vec = get();
+        for(size_t i = 0; i < vec.size(); ++i)
+            vec[i] = _v;
     }
 
+private:
     static storage_array_t& get()
     {
-        static storage_array_t _v(max_threads, nullptr);
+        static storage_array_t _v(initial_capacity, nullptr);
         return _v;
+    }
+
+    static void ensure_capacity(size_t _idx)
+    {
+        auto& vec = get();
+        while(vec.size() <= _idx)
+            vec.emplace_back(nullptr);
     }
 };
 
@@ -174,9 +181,7 @@ struct get_storage<::rocprofsys::rocprofiler_sdk::counter_data_tracker>
 
     auto operator()(size_t _idx) const
     {
-        // Thread-safe read using atomic capacity
-        const size_t current_capacity = operation::set_storage<type>::get_capacity();
-        if(_idx >= current_capacity) return static_cast<storage<type>*>(nullptr);
+        operation::set_storage<type>::ensure_capacity(_idx);
         return operation::set_storage<type>::get().at(_idx);
     }
 

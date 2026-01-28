@@ -2758,24 +2758,7 @@ get_tmp_file(std::string _basename, std::string _ext)
     _cfg.use_suffix    = true;
     _cfg.suffix        = "%pid%";
     _cfg.explicit_path = get_tmpdir();
-
-    auto _output_path = settings::output_path();
-    if(!_output_path.empty() && _output_path.front() == '/')
-    {
-        // Extract the last directory component to use as subdirectory
-        auto _last_slash = _output_path.find_last_of('/');
-        if(_last_slash != std::string::npos && _last_slash < _output_path.size() - 1)
-            _output_path = _output_path.substr(_last_slash + 1);
-        else if(_last_slash == _output_path.size() - 1 && _last_slash > 0)
-        {
-            // Path ends with slash, find the second-to-last slash
-            auto _prev_slash = _output_path.find_last_of('/', _last_slash - 1);
-            if(_prev_slash != std::string::npos)
-                _output_path =
-                    _output_path.substr(_prev_slash + 1, _last_slash - _prev_slash - 1);
-        }
-    }
-    _cfg.subdirectory = JOIN('/', _output_path, "%ppid%", "");
+    _cfg.subdirectory  = JOIN('/', settings::output_path(), "%ppid%", "");
     auto _fname =
         settings::compose_output_filename(std::move(_basename), std::move(_ext), _cfg);
 
