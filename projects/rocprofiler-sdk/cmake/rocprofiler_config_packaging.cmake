@@ -86,7 +86,7 @@ set(COMPONENT_DEP_core
     "rocprofiler-sdk-roctx (>= ${PROJECT_VERSION})"
     "rocprofiler-sdk-rocpd (>= ${PROJECT_VERSION})"
     "rocprofiler-sdk-rocattach (>= ${PROJECT_VERSION})"
-    "hsa-amd-aqlprofile (>= ${PROJECT_VERSION})")
+    "hsa-amd-aqlprofile (>= 1.0.0)")
 set(COMPONENT_DEP_docs "")
 set(COMPONENT_DEP_tests
     "rocprofiler-sdk (>= ${PROJECT_VERSION})"
