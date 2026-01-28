@@ -1173,7 +1173,7 @@ def dump_csv(metrics: dict[dict[PerfMetrics]], file_path: str) -> None:
         "I64": "I64Ops",
         "MFMA-F4": "MFMAF4Flops",
         "MFMA-F6": "MFMAF6Flops",
-        "MFMA-F6F4": "MFMA_FLOPs_F6F4",
+        "MFMA-F6F4": "MFMAF6F4Flops",
         "MFMA-F8": "MFMAF8Flops",
         "MFMA-F16": "MFMAF16Flops",
         "MFMA-BF16": "MFMABF16Flops",
