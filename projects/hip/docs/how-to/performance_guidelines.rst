@@ -27,7 +27,7 @@ Follow this systematic approach to optimize GPU performance:
 
    .. code-block:: bash
 
-      rocprofv3 --stats -- <tracing_option> -- <application_path>
+      rocprofv3 --stats --<tracing_option> -- <application_path>
 
    Collect metrics on kernel execution time, memory bandwidth, occupancy, and
    CU utilization. For more details on using ``rocprofv3`` for application tracing and profiling, see `rocprofv3 documentation <https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html>`_.
