@@ -51,7 +51,7 @@ jobs:
           }
 
       - name: Set up WSL with Ubuntu
-        uses: Vampire/setup-wsl@v6
+        uses: Vampire/setup-wsl@4f1b3a9edf0c4a6a5b8454c5b15b99d9c1dfb2f1 # v6.1.0
         with:
           distribution: Ubuntu-24.04
           update: true
