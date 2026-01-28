@@ -35,7 +35,8 @@ namespace rocprofiler
 namespace context
 {
 // number of bits to reserve all op codes
-constexpr size_t domain_ops_padding = 512;
+// NOTE: HIP runtime API has 515+ operations as of ROCm 7.x, must be larger than max op count
+constexpr size_t domain_ops_padding = 1024;
 
 template <typename Tp>
 struct domain_info;

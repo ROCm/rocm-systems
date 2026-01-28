@@ -24,12 +24,40 @@
 
 #include <rocprofiler-sdk/fwd.h>
 
+#include <rocprofiler-sdk/hip/compiler_api_id.h>
+#include <rocprofiler-sdk/hip/runtime_api_id.h>
+#include <rocprofiler-sdk/hsa/amd_ext_api_id.h>
+#include <rocprofiler-sdk/hsa/core_api_id.h>
+#include <rocprofiler-sdk/hsa/finalize_ext_api_id.h>
+#include <rocprofiler-sdk/hsa/image_ext_api_id.h>
+#include <rocprofiler-sdk/marker/api_id.h>
+#include <rocprofiler-sdk/rccl/api_id.h>
+#include <rocprofiler-sdk/rocdecode/api_id.h>
+#include <rocprofiler-sdk/rocjpeg/api_id.h>
+
+#include <algorithm>
 #include <limits>
 
 namespace rocprofiler
 {
 namespace context
 {
+// Validate that domain_ops_padding is large enough for all API operation IDs.
+// If this static_assert fails, increase domain_ops_padding in domain.hpp.
+static_assert(std::max({static_cast<size_t>(ROCPROFILER_HIP_RUNTIME_API_ID_LAST),
+                        static_cast<size_t>(ROCPROFILER_HIP_COMPILER_API_ID_LAST),
+                        static_cast<size_t>(ROCPROFILER_HSA_CORE_API_ID_LAST),
+                        static_cast<size_t>(ROCPROFILER_HSA_AMD_EXT_API_ID_LAST),
+                        static_cast<size_t>(ROCPROFILER_HSA_IMAGE_EXT_API_ID_LAST),
+                        static_cast<size_t>(ROCPROFILER_HSA_FINALIZE_EXT_API_ID_LAST),
+                        static_cast<size_t>(ROCPROFILER_MARKER_CORE_API_ID_LAST),
+                        static_cast<size_t>(ROCPROFILER_MARKER_CONTROL_API_ID_LAST),
+                        static_cast<size_t>(ROCPROFILER_MARKER_NAME_API_ID_LAST),
+                        static_cast<size_t>(ROCPROFILER_RCCL_API_ID_LAST),
+                        static_cast<size_t>(ROCPROFILER_ROCDECODE_API_ID_LAST),
+                        static_cast<size_t>(ROCPROFILER_ROCJPEG_API_ID_LAST)}) < domain_ops_padding,
+              "domain_ops_padding is too small for API operation IDs - increase it in domain.hpp");
+
 template <typename DomainT>
 bool
 domain_context<DomainT>::operator()(DomainT _domain) const
