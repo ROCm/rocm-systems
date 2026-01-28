@@ -8255,8 +8255,9 @@ class AMDSMICommands():
                         statuses = []
                         for link_idx in link_indexes:
                             if link_idx < len(src_link_status_map[src_gpu_bdf]):
-                                if str(src_link_status_map[src_gpu_bdf][link_idx]) != "N/A":
-                                    statuses.append(str(src_link_status_map[src_gpu_bdf][link_idx]))
+                                status_str = str(src_link_status_map[src_gpu_bdf][link_idx])
+                                if status_str != "N/A":
+                                    statuses.append(status_str)
 
                         # Join multiple statuses with "/"
                         if statuses:

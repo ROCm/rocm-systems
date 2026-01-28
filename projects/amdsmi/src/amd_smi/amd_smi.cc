@@ -2664,7 +2664,10 @@ amdsmi_get_gpu_xgmi_link_status(amdsmi_processor_handle processor_handle,
     }
 
     uint32_t socket_count = 0;
-    amdsmi_get_socket_handles(&socket_count, nullptr);
+    status = amdsmi_get_socket_handles(&socket_count, nullptr);
+    if (status != AMDSMI_STATUS_SUCCESS) {
+        return status;
+    }
     // Total number of XGMI links cannot exceed AMDSMI_MAX_NUM_XGMI_LINKS
     link_status->total_links = socket_count <= AMDSMI_MAX_NUM_XGMI_LINKS ?
                                 socket_count : AMDSMI_MAX_NUM_XGMI_LINKS;
