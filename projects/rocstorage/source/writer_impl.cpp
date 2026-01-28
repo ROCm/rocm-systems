@@ -41,7 +41,7 @@ is_already_registered(Utility& utility, const Entity& entity)
 
 writer_t::impl::impl(std::unique_ptr<rocstorage::storage_t> storage)
 : m_storage(std::move(storage))
-, m_database(m_storage->m_impl->get_database())
+, m_database(m_storage->m_impl->create_database(storage_t::impl::storage_type_t::write))
 , m_uuid(m_storage->m_impl->get_uuid())
 , m_entity_registry(std::make_shared<entity_registry>())
 , m_key_providers(std::make_shared<primary_key_providers>())

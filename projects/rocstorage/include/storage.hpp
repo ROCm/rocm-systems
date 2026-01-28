@@ -16,10 +16,7 @@ struct reader_t;
 class storage_t
 {
 public:
-    explicit storage_t(const std::string&         database_path,
-                       const std::string&         uuid,
-                       rocstorage::storage_type_t desired_storage_type =
-                           rocstorage::storage_type_t::auto_detect);
+    explicit storage_t(const std::string& database_path, const std::string& uuid);
     virtual ~storage_t();
 
     storage_t(const storage_t&)            = delete;
