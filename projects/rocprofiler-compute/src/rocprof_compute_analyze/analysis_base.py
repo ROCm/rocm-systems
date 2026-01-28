@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Any, Optional, TextIO
 
 import pandas as pd
+from utils.utils import consolidate_torch_trace_output, process_torch_trace_output
 
 import config
 from rocprof_compute_soc.soc_base import OmniSoC_Base
