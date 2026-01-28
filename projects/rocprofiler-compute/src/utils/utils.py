@@ -973,7 +973,9 @@ def run_prof(
         )
         combined_df.to_csv(workload_dir + f"/results_{fbase}.csv", index=False)
         if torch_trace_enabled:
-            process_torch_trace_output(workload_dir, fbase, format_rocprof_output)
+            # process_torch_trace_output(workload_dir, fbase, format_rocprof_output)
+            # move counter collection and marker trace to workload dir
+            save_torch_trace_inputs(workload_dir, fbase, format_rocprof_output)
         if retain_rocpd_output:
             for db_path in glob.glob(workload_dir + "/out/pmc_1/*/*.db"):
                 pid = Path(db_path).stem.split("_")[0]
@@ -1014,7 +1016,9 @@ def run_prof(
                 process_hip_trace_output(workload_dir, fbase)
         # Add torch operator trace processing
         if torch_trace_enabled:
-            process_torch_trace_output(workload_dir, fbase, format_rocprof_output)
+            # process_torch_trace_output(workload_dir, fbase, format_rocprof_output)
+            # move counter collection and marker trace to workload dir
+            save_torch_trace_inputs(workload_dir, fbase, format_rocprof_output)
         # Combine results into single CSV file
         if results_files:
             combined_results = pd.concat(
@@ -1271,22 +1275,56 @@ def process_rocprofv3_output(workload_dir: str, using_native_tool: bool) -> list
 
     return results_files_csv
 
-
 @demarcate
-def process_torch_trace_output(
+def save_torch_trace_inputs(
     workload_dir: str,
     fbase: str,
     output_format: str = "rocpd",
+) -> None:
+    """
+    Move counter_collection and marker_api_trace data to workload_dir for creation of PyTorch operator trace in Analyze mode.
+    """
+    src_dir = Path(workload_dir) / "out" / "pmc_1"
+    if output_format == "rocpd":
+        # Only one pair expected
+        src_counter = src_dir / f"{fbase}_counter_collection.csv"
+        src_marker = src_dir / f"{fbase}_marker_api_trace.csv"
+        dst_counter = Path(workload_dir) / f"{fbase}_counter_collection.csv"
+        dst_marker = Path(workload_dir) / f"{fbase}_marker_api_trace.csv"
+        shutil.copyfile(src_counter, dst_counter)
+        shutil.copyfile(src_marker, dst_marker)
+        console_log("Moved counter collection and marker trace files to workload dir for PyTorch trace creation.")
+        console_log("Counter Collection: ", str(dst_counter))
+        console_log("Marker API Trace: ", str(dst_marker))
+    elif output_format == "csv":
+        # Multiple pairs possible (one per PID/process)
+        counter_files = glob.glob(str(src_dir / "*/*_counter_collection.csv"))
+        marker_files = glob.glob(str(src_dir / "*/*_marker_api_trace.csv"))
+        for src_counter in counter_files:
+            dst_counter = str(Path(workload_dir) / f"{fbase}" / Path(src_counter).name)
+            shutil.copyfile(src_counter, dst_counter)
+            console_log("Copied Counter Collection: ", dst_counter)
+        for src_marker in marker_files:
+            dst_marker = str(Path(workload_dir) / f"{fbase}" / Path(src_marker).name)
+            shutil.copyfile(src_marker, dst_marker)
+            console_log("Copied Marker API Trace: ", dst_marker)
+    else:
+        console_warning(f"Unknown output_format: {output_format} in move_torch_trace_inputs")
+    
+@demarcate
+def process_torch_trace_output(
+    workload_dir: str,
 ) -> None:
     """
     Creates PyTorch operator trace from counter_collection and marker_api_trace data.
         - Performs inner join on Correlation_Id, filtering out unmatched entries
         - Output file is saved to workload root, not the temporary out/ directory
     """
-    marker_trace_csv_file_path = f"{workload_dir}/out/pmc_1/"
+    # marker_trace_csv_file_path = f"{workload_dir}/out/pmc_1/"
     # Find all marker_api_trace CSV files
+    
     marker_api_trace_csvs = list(
-        Path(marker_trace_csv_file_path).glob("**/*_marker_api_trace.csv")
+        Path(workload_dir).glob("**/*_marker_api_trace.csv")
     )
     counter_collection_csvs = [
         markers_file.parent
@@ -1300,10 +1338,9 @@ def process_torch_trace_output(
     ]
     if not existing_csv_files:
         console_warning(
-            f"No marker files with corresponding counter files found for {fbase}"
+            f"No marker files with corresponding counter files found."
         )
         return
-
     # Join marker and counter data
     def _merge_pair(
         marker_path: Path,
@@ -1319,38 +1356,17 @@ def process_torch_trace_output(
             how="inner",
             suffixes=("_function", "_kernel"),
         )
-
-    if output_format == "csv":
-        merged_results = pd.concat(
-            [_merge_pair(f[0], f[1]) for f in existing_csv_files],
-            ignore_index=True,
+    # If rocpd format, pairs are present in workload_dir, one pair per fbase
+    # If csv format, pairs are present in workload/{fbase}/ one pair per process
+    # Extracting the output_format used in profiling from the path of the first marker file
+    if existing_csv_files[0][0].parent.name == workload_dir:
+        join_keys = ("Correlation_Id", "GUID") #output_format "rocpd"
+    else:
+        join_keys = ("Correlation_Id",) # output_format "csv"        
+    consolidated_df = pd.concat(
+        [_merge_pair(f[0], f[1],join_keys) for f in existing_csv_files],
+        ignore_index=True,
         )
-    elif output_format == "rocpd":
-        # There will one pair of csv files extracted from rocpd db and consolidated.
-        merged_results = _merge_pair(
-            existing_csv_files[0][0],
-            existing_csv_files[0][1],
-            ("Correlation_Id", "GUID"),
-        )
-    # Save merged results
-    merged_results.to_csv(
-        f"{workload_dir}/{fbase}_torch_trace.csv",
-        index=False,
-    )
-    console_log("Created ", f"{workload_dir}/{fbase}_torch_trace.csv")
-
-
-@demarcate
-def consolidate_torch_trace_output(workload_dir: str) -> None:
-    # Consolidate torch operator trace CSV files from multiple processes
-    console_log("Consolidating torch operator trace output...")
-    # Find all torch trace CSV files in workload directory
-    torch_trace_files = glob.glob(f"{workload_dir}/*_torch_trace.csv")
-    if not torch_trace_files:
-        console_warning("No torch trace files found.")
-        return
-    # Read and concatenate all torch trace files
-    all_traces = []
     required_columns = [
         "Function",
         "Kernel_Name",
@@ -1361,41 +1377,16 @@ def consolidate_torch_trace_output(workload_dir: str) -> None:
         "Start_Timestamp_kernel",
         "End_Timestamp_kernel",
     ]
-    for trace_file in torch_trace_files:
-        try:
-            df = pd.read_csv(trace_file)
-        except pd.errors.ParserError as e:
-            console_warning(f"Parser error while reading {trace_file}: {e}")
-            continue
-        except OSError as e:
-            console_warning(f"I/O error while reading {trace_file}: {e}")
-            continue
-        except Exception as e:
-            # Unexpected error; log full details for debugging
-            console_warning(
-                f"Unexpected error while reading {trace_file}: {e}\n"
-                f"{traceback.format_exc()}"
-            )
-            continue
-
-        missing_columns = [col for col in required_columns if col not in df.columns]
-        if missing_columns:
-            console_warning(
-                f"Skipping {trace_file}: missing required columns {missing_columns}"
-            )
-            continue
-
-        all_traces.append(df[required_columns])
-    if not all_traces:
-        console_warning("No valid torch trace data to consolidate.")
-        return
-
-    consolidated_df = pd.concat(all_traces, ignore_index=True)
+    missing_columns = [col for col in required_columns if col not in consolidated_df.columns]
+    if missing_columns:
+        console_error(
+            f"Consolidated torch trace is missing required columns {missing_columns}"
+        )
+    consolidated_df = consolidated_df[required_columns]
     if consolidated_df.isnull().values.any():
         console_warning("Consolidated torch trace contains missing values")
         return
     consolidated_df = consolidated_df.sort_values(by=["Function", "Counter_Name"])
-
     split_columns = consolidated_df["Function"].str.split(":#", expand=True)
     consolidated_df["Operator_Name"] = (
         split_columns[0] if len(split_columns.columns) > 0 else None
@@ -1417,14 +1408,12 @@ def consolidate_torch_trace_output(workload_dir: str) -> None:
             "End_Timestamp_kernel",
         ]
     ]
-
     if consolidated_df.isnull().values.any():
         console_error(
             "Missing values in consolidated torch trace after splitting ",
             "the Function name.",
         )
         return
-
     grouped = consolidated_df.groupby("Operator_Name")
     for operator_name, group in grouped:
         sanitized_operator_name = operator_name.replace("torch.", "").replace(".", "_")
@@ -1435,14 +1424,12 @@ def consolidate_torch_trace_output(workload_dir: str) -> None:
         console_log(
             f"Saved consolidated trace for {sanitized_operator_name} to {output_file}"
         )
-
-    for trace_file in torch_trace_files:
+    for trace_file in marker_api_trace_csvs + counter_collection_csvs:
         try:
             Path(trace_file).unlink()
             console_debug(f"Removed temporary torch trace file: {trace_file}")
         except OSError as e:
             console_warning(f"Error removing temporary file {trace_file}: {e}")
-
 
 @demarcate
 def process_kokkos_trace_output(workload_dir: str, fbase: str) -> None:
