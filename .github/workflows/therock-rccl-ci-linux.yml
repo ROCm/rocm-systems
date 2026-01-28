@@ -122,7 +122,7 @@ jobs:
       contents: read
       id-token: write
     needs: [therock-build-linux]
-    uses: ./.github/workflows/therock-test-packages-multi-node.yml
+    uses: ./.github/workflows/therock-rccl-test-packages-multi-node.yml
     with:
       amdgpu_families: ${{ inputs.amdgpu_families }}
       artifact_group: ${{ inputs.artifact_group }}
@@ -133,7 +133,7 @@ jobs:
     name: "Test single-node"
     if: ${{ inputs.amdgpu_families == 'gfx94X-dcgpu' }}
     needs: [therock-build-linux]
-    uses: ./.github/workflows/therock-test-packages-single-node.yml
+    uses: ./.github/workflows/therock-rccl-test-packages-single-node.yml
     with:
       amdgpu_families: ${{ inputs.amdgpu_families }}
       artifact_group: ${{ inputs.artifact_group }}
