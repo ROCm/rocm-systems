@@ -266,15 +266,20 @@ bool verifyBufferData(const void* device_buffer,
 
         bool matches = false;
 
-        // Use appropriate comparison based on type
         if constexpr(std::is_floating_point_v<T>)
         {
-            // Floating-point: use tolerance-based comparison
             matches = (std::abs(actual - expected) <= tolerance);
+        }
+        else if constexpr(!std::is_integral_v<T> && std::is_convertible_v<T, float>)
+        {
+            // Custom floating-point types (e.g., hip_bfloat16, __half):
+            // cast to float for tolerance-based comparison
+            float actual_f   = static_cast<float>(actual);
+            float expected_f = static_cast<float>(expected);
+            matches = (std::abs(actual_f - expected_f) <= static_cast<float>(tolerance));
         }
         else
         {
-            // Integer: exact comparison
             matches = (actual == expected);
         }
 

@@ -170,6 +170,16 @@ void setupGPU(int world_rank)
 // Per-Rank Logging
 // ============================================================================
 
+std::string getRankLogFilePath(int rank, pid_t pid)
+{
+    return "rccl_test_rank_" + std::to_string(rank) + "_" + std::to_string(pid) + ".log";
+}
+
+std::string getRankLogFilePath(int rank)
+{
+    return getRankLogFilePath(rank, ::getpid());
+}
+
 std::optional<RankLogConfig> setupRankLogging(int rank)
 {
     const auto* env_value                = std::getenv("RCCL_MPI_LOG_ALL_RANKS");
@@ -195,14 +205,14 @@ std::optional<RankLogConfig> setupRankLogging(int rank)
         if(per_rank_logging_enabled)
         {
             // Per-rank logging enabled: Redirect to log file
-            const auto log_filename
-                = std::string{"rccl_test_rank_"} + std::to_string(rank) + ".log";
+            // Include PID for uniqueness across test runs
+            config.log_file_path = getRankLogFilePath(rank);
 
-            const auto log_fd = ::open(log_filename.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+            const auto log_fd = ::open(config.log_file_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
 
             if(log_fd < 0)
             {
-                TEST_WARN("Rank %d: Failed to create log file: %s", rank, log_filename.c_str());
+                TEST_WARN("Rank %d: Failed to create log file: %s", rank, config.log_file_path.c_str());
                 return std::nullopt;
             }
 
@@ -216,7 +226,7 @@ std::optional<RankLogConfig> setupRankLogging(int rank)
             }
 
             // Debug: Write initial marker to log file (AFTER redirection)
-            TEST_INFO("===== LOG FILE FOR RANK %d =====", rank);
+            TEST_INFO("===== LOG FILE FOR RANK %d (PID %d) =====", rank, ::getpid());
         }
         else
         {
@@ -252,31 +262,31 @@ std::optional<RankLogConfig> setupRankLogging(int rank)
         return std::nullopt; // Rank 0 outputs to console normally
     }
 
-    // Create log file for rank 0
-    const auto log_filename = std::string{"rccl_test_rank_"} + std::to_string(rank) + ".log";
+    // Create log file for rank 0 (include PID for uniqueness)
+    config.log_file_path = getRankLogFilePath(rank);
 
     // Debug: Print to stderr BEFORE creating log file
-    TEST_TRACE("Rank %d (rank 0 tee mode) opening log file: %s", rank, log_filename.c_str());
+    TEST_TRACE("Rank %d (rank 0 tee mode) opening log file: %s", rank, config.log_file_path.c_str());
 
-    const auto log_fd = ::open(log_filename.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    const auto log_fd = ::open(config.log_file_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
 
     if(log_fd < 0)
     {
-        TEST_WARN("Rank %d: Failed to create log file: %s", rank, log_filename.c_str());
+        TEST_WARN("Rank %d: Failed to create log file: %s", rank, config.log_file_path.c_str());
         return std::nullopt;
     }
 
     config.log_fd = FileDescriptor{log_fd};
 
     // Debug: Write initial marker directly to log file (BEFORE redirection)
-    const char*           marker  = "===== LOG FILE FOR RANK 0 (TEE MODE) =====\n";
-    [[maybe_unused]] auto written = ::write(log_fd, marker, std::strlen(marker));
+    std::string marker = "===== LOG FILE FOR RANK 0 (TEE MODE, PID " + std::to_string(::getpid()) + ") =====\n";
+    [[maybe_unused]] auto written = ::write(log_fd, marker.c_str(), marker.size());
 
     // Rank 0 with per-rank logging: Output to BOTH console AND log file (tee behavior)
     // Print banner before redirection
     TEST_INFO("Per-Rank Logging ENABLED (RCCL_MPI_LOG_ALL_RANKS=1)");
-    TEST_INFO("Rank 0     : Output to BOTH console AND %s", log_filename.c_str());
-    TEST_INFO("Ranks 1-N  : Output redirected to rccl_test_rank_<N>.log");
+    TEST_INFO("Rank 0     : Output to BOTH console AND %s", config.log_file_path.c_str());
+    TEST_INFO("Ranks 1-N  : Output redirected to rccl_test_rank_<N>_<PID>.log");
     TEST_INFO("Location   : Log files created in current working directory");
 
     // Save original stdout/stderr for tee thread

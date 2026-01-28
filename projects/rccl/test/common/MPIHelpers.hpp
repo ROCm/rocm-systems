@@ -144,6 +144,7 @@ struct RankLogConfig
     std::optional<FileDescriptor> pipe_read_fd; ///< Pipe read end (rank 0 only)
     std::optional<FileDescriptor> pipe_write_fd; ///< Pipe write end (rank 0 only)
     std::unique_ptr<TeeThread>    tee_thread; ///< Tee thread (rank 0 only)
+    std::string                   log_file_path; ///< Path to the log file
     bool                          logging_enabled{false}; ///< Is per-rank logging enabled?
     bool                          is_rank_zero{false}; ///< Is this rank 0?
 };
@@ -179,6 +180,30 @@ std::optional<RankLogConfig> setupRankLogging(int rank);
  * @note Flushes pending output before restoration
  */
 void restoreRankLogging(RankLogConfig& config);
+
+/**
+ * @brief Get the log file path for a given rank
+ *
+ * Returns the path to the per-rank log file. The filename includes
+ * the process ID to ensure uniqueness across test runs.
+ *
+ * Format: rccl_test_rank_<rank>_<pid>.log
+ *
+ * @param rank MPI rank
+ * @param pid Process ID (use getpid() for current process)
+ * @return Log file path string
+ */
+std::string getRankLogFilePath(int rank, pid_t pid);
+
+/**
+ * @brief Get the log file path for the current rank
+ *
+ * Convenience function that uses current process ID.
+ *
+ * @param rank MPI rank
+ * @return Log file path string
+ */
+std::string getRankLogFilePath(int rank);
 
 // ============================================================================
 // Stderr Capture for Debug Log Parsing
