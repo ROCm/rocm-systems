@@ -676,6 +676,11 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtQueryPointerInfoCtx(HsaKFDContext *ctx,
 	return hsakmt_fmm_get_mem_info(ctx, Pointer, PointerInfo);
 }
 
+#ifdef SANITIZER_AMDGPU
+#error "DAVID-DEBUG: SANITIZER_AMDGPU is defined"
+#else
+#error "DAVID-DEBUG: SANITIZER_AMDGPU is NOT  defined"
+#endif
 HSAKMT_STATUS HSAKMTAPI hsaKmtSetMemoryUserDataCtx(HsaKFDContext *ctx,
 						const void *Pointer,
 						void *UserData)
