@@ -336,21 +336,21 @@ class OmniAnalyze_Base:
                 "Access denied. Cannot access parent directories in path (i.e. ../)"
             )
 
-        # ensure absolute path
+        # ensure absolute path and validate all paths
         seen_paths: set[str] = set()
         for dir_info in args.path:
-            full_path = Path(dir_info[0]).absolute().resolve()
-            dir_info[0] = str(full_path)
+            for i, path in enumerate(dir_info):
+                full_path = Path(path).absolute().resolve()
+                dir_info[i] = str(full_path)
 
-            if not full_path.is_dir():
-                console_error(
-                    "analysis", f"Invalid directory {full_path}\nPlease try again."
-                )
-            # validate profiling data
+                if not full_path.is_dir():
+                    console_error(
+                        "analysis", f"Invalid directory {full_path}\nPlease try again."
+                    )
 
-            if dir_info[0] in seen_paths:
-                console_error("analysis", "You cannot provide the same path twice.")
-            seen_paths.add(dir_info[0])
+                if dir_info[i] in seen_paths:
+                    console_error("analysis", "You cannot provide the same path twice.")
+                seen_paths.add(dir_info[i])
 
         self._profiling_config: dict[str, Any] = file_io.load_profiling_config(
             args.path[0][0]
@@ -364,7 +364,8 @@ class OmniAnalyze_Base:
                 args.spatial_multiplexing,
                 profiling_config.get("iteration_multiplexing"),
             ]):
-                is_workload_empty(dir_info[0])
+                for path in dir_info:
+                    is_workload_empty(path)
 
         # FIXME:
         #   The proper location of this func should be in pre_processing().
