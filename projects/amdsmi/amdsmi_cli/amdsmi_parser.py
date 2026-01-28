@@ -70,7 +70,7 @@ class AMDSMIParser(argparse.ArgumentParser):
     """
     def __init__(self, version, list, static, firmware, bad_pages, metric,
                  process, profile, event, topology, set_value, reset, monitor,
-                 xgmi, partition, ras, node, default, sys_argv=None,
+                 xgmi, partition, ras, node, rocm_smi, default, sys_argv=None,
                  helpers=None):
 
         # Helper variables
@@ -112,6 +112,17 @@ class AMDSMIParser(argparse.ArgumentParser):
             epilog="For detailed help on specific commands: amd-smi [command] -h",
             add_help=True,
             prog=self.program_name)
+
+        # Add top-level --rocm-smi flag
+        self.add_argument('--rocm-smi', action='store_true', 
+                         help='Display GPU information in ROCm-SMI compatible format')
+
+        # Add top-level command modifiers (for --rocm-smi and other top-level flags)
+        loglevel_choices = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+        loglevel_help = f"Set the logging level from the possible choices: {', '.join(loglevel_choices)}"
+        self.add_argument('--loglevel', action='store', type=str.upper, required=False, 
+                         help=loglevel_help, default='ERROR', metavar='LEVEL',
+                         choices=loglevel_choices)
 
         # Setup subparsers
         self.subparsers = self.add_subparsers(
@@ -1464,7 +1475,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         reset_perf_det_help = "Disable performance determinism"
         reset_power_cap_help = "Reset the PPT0 and PPT1 power capacity limit to max capable"
         reset_gpu_clean_local_data_help = "Clean up local data in LDS/GPRs on a per partition basis"
-        reset_gpu_driver_help = "Triggers a chain that resets all GPU's"
+        
 
         # Create reset subparser
         reset_parser = subparsers.add_parser('reset', help=reset_help, description=reset_subcommand_help)
@@ -1487,7 +1498,7 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         # Add Baremetal and Virtual OS reset arguments
         reset_exclusive_group.add_argument('-l', '--clean-local-data', action='store_true', required=False, help=reset_gpu_clean_local_data_help)
-        reset_exclusive_group.add_argument('-r', '--reload-driver', action='store_true', required=False, help=reset_gpu_driver_help)
+        
 
         # Reset accepts default devices of all
         self._add_device_arguments(reset_parser, required=False)

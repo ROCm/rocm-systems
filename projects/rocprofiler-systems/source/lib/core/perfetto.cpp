@@ -285,7 +285,7 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error)
 
         if(!_script_dir.empty())
         {
-            _script_path = rocprofsys::common::join("/", _script_dir, _script_path);
+            _script_path = fmt::format("{}/{}", _script_dir, _script_path);
         }
 
         // Test that the script exists

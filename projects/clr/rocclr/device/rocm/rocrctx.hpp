@@ -138,14 +138,15 @@ struct RocrEntryPoints {
   decltype(hsa_amd_ais_file_read)* hsa_amd_ais_file_read_;
   decltype(hsa_amd_ais_file_write)* hsa_amd_ais_file_write_;
   // Image extensions
-  decltype(hsa_ext_image_data_get_info)* hsa_ext_image_data_get_info_;
-  decltype(hsa_ext_image_create)* hsa_ext_image_create_;
+  decltype(hsa_ext_image_data_get_info_v2)* hsa_ext_image_data_get_info_v2_;
+  decltype(hsa_ext_image_create_v2)* hsa_ext_image_create_v2_;
   decltype(hsa_ext_image_import)* hsa_ext_image_import_;
   decltype(hsa_ext_image_export)* hsa_ext_image_export_;
-  decltype(hsa_ext_image_destroy)* hsa_ext_image_destroy_;
+  decltype(hsa_ext_image_destroy_v2)* hsa_ext_image_destroy_v2_;
   decltype(hsa_ext_sampler_create_v2)* hsa_ext_sampler_create_v2_;
   decltype(hsa_ext_sampler_destroy)* hsa_ext_sampler_destroy_;
   decltype(hsa_ext_image_create_with_layout)* hsa_ext_image_create_with_layout_;
+  decltype(hsa_ext_image_mipmap_array_get_level)* hsa_ext_image_mipmap_array_get_level_;
 };
 
 #ifdef ROCR_DYN_DLL
@@ -523,25 +524,27 @@ class Hsa : public amd::AllStatic {
 
   // Image extensions
   static hsa_status_t image_create(hsa_agent_t agent,
-    const hsa_ext_image_descriptor_t* image_descriptor,
+    const hsa_ext_image_descriptor_v2_t* image_descriptor,
     const hsa_amd_image_descriptor_t* image_layout,
     const void* image_data, hsa_access_permission_t access_permission,
     hsa_ext_image_t* image) {
-    return ROCR_DYN(hsa_amd_image_create)(agent, image_descriptor, image_layout, image_data,
-                                          access_permission, image);
+    assert(image_descriptor->mipmap_levels == 1);
+    return ROCR_DYN(hsa_amd_image_create)(agent,
+                   reinterpret_cast<const hsa_ext_image_descriptor_t*>(image_descriptor),
+                   image_layout, image_data, access_permission, image);
   }
   static hsa_status_t image_data_get_info(
-    hsa_agent_t agent, const hsa_ext_image_descriptor_t* image_descriptor,
+    hsa_agent_t agent, const hsa_ext_image_descriptor_v2_t* image_descriptor,
     hsa_access_permission_t access_permission, hsa_ext_image_data_info_t* image_data_info) {
-    return ROCR_DYN(hsa_ext_image_data_get_info)(agent, image_descriptor, access_permission,
+    return ROCR_DYN(hsa_ext_image_data_get_info_v2)(agent, image_descriptor, access_permission,
                                                  image_data_info);
   }
   static hsa_status_t image_create(hsa_agent_t agent,
-    const hsa_ext_image_descriptor_t* image_descriptor,
+    const hsa_ext_image_descriptor_v2_t* image_descriptor,
     const void* image_data,
     hsa_access_permission_t access_permission,
     hsa_ext_image_t* image) {
-    return ROCR_DYN(hsa_ext_image_create)(agent, image_descriptor, image_data,
+    return ROCR_DYN(hsa_ext_image_create_v2)(agent, image_descriptor, image_data,
                                                  access_permission, image);
   }
   static hsa_status_t image_import(hsa_agent_t agent, const void* src_memory,
@@ -559,7 +562,7 @@ class Hsa : public amd::AllStatic {
                                           dst_slice_pitch, image_region);
   }
   static hsa_status_t image_destroy(hsa_agent_t agent, hsa_ext_image_t image) {
-    return ROCR_DYN(hsa_ext_image_destroy)(agent, image);
+    return ROCR_DYN(hsa_ext_image_destroy_v2)(agent, image);
   }
   static hsa_status_t sampler_create(hsa_agent_t agent,
     const hsa_ext_sampler_descriptor_v2_t* sampler_descriptor, hsa_ext_sampler_t* sampler) {
@@ -569,14 +572,20 @@ class Hsa : public amd::AllStatic {
     return ROCR_DYN(hsa_ext_sampler_destroy)(agent, sampler);
   }
   static hsa_status_t image_create_with_layout(
-    hsa_agent_t agent, const hsa_ext_image_descriptor_t* image_descriptor, const void* image_data,
+    hsa_agent_t agent, const hsa_ext_image_descriptor_v2_t* image_descriptor, const void* image_data,
     hsa_access_permission_t access_permission, hsa_ext_image_data_layout_t image_data_layout,
     size_t image_data_row_pitch, size_t image_data_slice_pitch, hsa_ext_image_t* image) {
     return ROCR_DYN(hsa_ext_image_create_with_layout)(
-        agent, image_descriptor, image_data, access_permission, image_data_layout,
+        agent, reinterpret_cast<const hsa_ext_image_descriptor_t*>(image_descriptor),
+        image_data, access_permission, image_data_layout,
         image_data_row_pitch, image_data_slice_pitch, image);
   }
-
+  static hsa_status_t image_get_mipmap_level(
+    hsa_agent_t agent, const hsa_ext_image_t* mipmapped_array, uint32_t mip_level,
+    const hsa_ext_image_descriptor_v2_t* image_descriptor, hsa_ext_image_t* level_image_out) {
+    return ROCR_DYN(hsa_ext_image_mipmap_array_get_level)(
+        agent, mipmapped_array, mip_level, image_descriptor, level_image_out);
+  }
  private:
   static RocrEntryPoints cep_;
   static bool is_ready_;

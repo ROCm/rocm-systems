@@ -89,6 +89,12 @@ if("${CMAKE_BUILD_TYPE}" MATCHES "Release")
     target_compile_options(roctx PRIVATE -g1)
 endif()
 
+# Specify GPU architectures to compile for
+foreach(arch IN LISTS ROCPROFSYS_GFX_TARGETS)
+    target_compile_options(roctx PRIVATE --offload-arch=${arch})
+    target_link_options(roctx PUBLIC --offload-arch=${arch})
+endforeach()
+
 if(NOT CMAKE_CXX_COMPILER_IS_HIPCC AND HIPCC_EXECUTABLE)
     # defined in MacroUtilities.cmake
     rocprofiler_systems_custom_compilation(COMPILER ${HIPCC_EXECUTABLE} TARGET roctx)

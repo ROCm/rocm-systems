@@ -30,9 +30,10 @@
 
 #include <timemory/settings/types.hpp>
 #include <timemory/utility/filepath.hpp>
-#include <timemory/utility/join.hpp>
 
 #include "logger/debug.hpp"
+
+#include <spdlog/fmt/ranges.h>
 
 namespace rocprofsys
 {
@@ -40,11 +41,9 @@ namespace argparse
 {
 namespace
 {
-namespace filepath   = ::tim::filepath;
-namespace path       = rocprofsys::common::path;
-using array_config_t = ::timemory::join::array_config;
+namespace filepath = ::tim::filepath;
+namespace path     = rocprofsys::common::path;
 using rocprofsys::common::remove_env;
-using ::timemory::join::join;
 
 auto
 get_clock_id_choices()
@@ -165,6 +164,14 @@ add_ld_library_path(parser_data& _data)
     auto _libdir = filepath::dirname(_data.dl_libpath);
     if(filepath::exists(_libdir))
         update_env(_data, "LD_LIBRARY_PATH", _libdir, update_mode::APPEND);
+    return _data;
+}
+
+parser_data&
+add_torch_library_path(parser_data& _data, bool verbose)
+{
+    rocprofsys::common::add_torch_library_path(_data.current, _data.command, verbose,
+                                               _data.updated);
     return _data;
 }
 
@@ -297,7 +304,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .dtype("filepath")
             .action([&](parser_t& p) {
                 update_env(_data, "ROCPROFSYS_CONFIG_FILE",
-                           join(array_config_t{ ":" }, p.get<strvec_t>("config")));
+                           fmt::format("{}", fmt::join(p.get<strvec_t>("config"), ":")));
             });
 
         _data.processed_environs.emplace("config");
@@ -495,10 +502,9 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .min_count(1)
             .dtype("period-spec(s)")
             .action([&](parser_t& p) {
-                update_env(
-                    _data, "ROCPROFSYS_TRACE_PERIODS",
-                    join(array_config_t{ " ", "", "" }, p.get<strvec_t>("periods")),
-                    update_mode::WEAK);
+                update_env(_data, "ROCPROFSYS_TRACE_PERIODS",
+                           fmt::format("{}", fmt::join(p.get<strvec_t>("periods"), " ")),
+                           update_mode::WEAK);
             });
 
         _data.processed_environs.emplace("periods");
@@ -726,9 +732,9 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .min_count(1)
             .dtype("period-spec(s)")
             .action([&](parser_t& p) {
-                update_env(_data, "ROCPROFSYS_TRACE_PERIODS",
-                           join(array_config_t{ ",", "", "" },
-                                p.get<strvec_t>("trace-periods")));
+                update_env(
+                    _data, "ROCPROFSYS_TRACE_PERIODS",
+                    fmt::format("{}", fmt::join(p.get<strvec_t>("trace-periods"), ",")));
             });
 
         _data.processed_environs.emplace("trace_periods");
@@ -881,7 +887,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .required({ "host" })
             .action([&](parser_t& p) {
                 update_env(_data, "ROCPROFSYS_SAMPLING_CPUS",
-                           join(array_config_t{ "," }, p.get<strvec_t>("cpus")));
+                           fmt::format("{}", fmt::join(p.get<strvec_t>("cpus"), ",")));
             });
 
         _data.processed_environs.emplace("cpus");
@@ -897,7 +903,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .required({ "device" })
             .action([&](parser_t& p) {
                 update_env(_data, "ROCPROFSYS_SAMPLING_GPUS",
-                           join(array_config_t{ "," }, p.get<strvec_t>("gpus")));
+                           fmt::format("{}", fmt::join(p.get<strvec_t>("gpus"), ",")));
             });
 
         _data.processed_environs.emplace("gpus");
@@ -952,7 +958,8 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .action([&](parser_t& p) {
                 update_env(
                     _data, "ROCPROFSYS_SAMPLING_TIDS",
-                    join(array_config_t{ ", " }, p.get<std::vector<int64_t>>("tids")));
+                    fmt::format("{}",
+                                fmt::join(p.get<std::vector<int64_t>>("tids"), ", ")));
             });
 
         _data.processed_environs.emplace("tids");
@@ -1023,7 +1030,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                 if(!_v.empty())
                 {
                     update_env(_data, "ROCPROFSYS_SAMPLING_CPUTIME_TIDS",
-                               join(array_config_t{ "," }, _v));
+                               fmt::format("{}", fmt::join(_v, ",")));
                 }
             });
 
@@ -1051,7 +1058,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                 if(!_v.empty())
                 {
                     update_env(_data, "ROCPROFSYS_SAMPLING_REALTIME_TIDS",
-                               join(array_config_t{ "," }, _v));
+                               fmt::format("{}", fmt::join(_v, ",")));
                 }
             });
 
@@ -1071,10 +1078,10 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                 {
                     if(p.exists("sampling-overflow-event") &&
                        _v.front() != p.get<std::string>("sampling-overflow-event"))
-                        throw exception<std::runtime_error>(join(
-                            "", "'--sample-overflow ", _v.front(),
-                            " ...' conflicts with '--sampling-overflow-event ",
-                            p.get<std::string>("sampling-overflow-event"), "' option"));
+                        throw exception<std::runtime_error>(fmt::format(
+                            "'--sample-overflow {} ...' conflicts with "
+                            "'--sampling-overflow-event {}' option",
+                            _v.front(), p.get<std::string>("sampling-overflow-event")));
                     update_env(_data, "ROCPROFSYS_SAMPLING_OVERFLOW_EVENT", _v.front());
                     _v.pop_front();
                 }
@@ -1086,7 +1093,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                 if(!_v.empty())
                 {
                     update_env(_data, "ROCPROFSYS_SAMPLING_OVERFLOW_TIDS",
-                               join(array_config_t{ "," }, _v));
+                               fmt::format("{}", fmt::join(_v, ",")));
                 }
             });
 
@@ -1110,7 +1117,8 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .min_count(1)
             .dtype("[EVENT ...]")
             .action([&](parser_t& p) {
-                auto _events = join(array_config_t{ "," }, p.get<strvec_t>("cpu-events"));
+                auto _events =
+                    fmt::format("{}", fmt::join(p.get<strvec_t>("cpu-events"), ","));
                 update_env(_data, "ROCPROFSYS_PAPI_EVENTS", _events);
             });
 
@@ -1127,7 +1135,8 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .min_count(1)
             .dtype("[EVENT ...]")
             .action([&](parser_t& p) {
-                auto _events = join(array_config_t{ "," }, p.get<strvec_t>("gpu-events"));
+                auto _events =
+                    fmt::format("{}", fmt::join(p.get<strvec_t>("gpu-events"), ","));
                 update_env(_data, "ROCPROFSYS_ROCM_EVENTS", _events);
             });
 
@@ -1206,10 +1215,9 @@ add_group_arguments(parser_t& _parser, const std::string& _group_name, parser_da
         if(_arg)
         {
             _arg->action([&_data, itr, _name](parser_t& p) {
-                using namespace timemory::join;
-                auto _value = join(array_config{ " ", "", "" }, p.get<strvec_t>(_name));
+                auto _value = fmt::format("{}", fmt::join(p.get<strvec_t>(_name), " "));
                 if(_value.empty()) _value = p.get<std::string>(_name);
-                if(_value.empty()) _value = join("", std::boolalpha, p.get<bool>(_name));
+                if(_value.empty()) _value = fmt::format("{}", p.get<bool>(_name));
                 if(_value.empty())
                     throw exception<std::runtime_error>("Error! no value for " + _name);
                 update_env(_data, itr->get_env_name(), _value);
@@ -1220,9 +1228,8 @@ add_group_arguments(parser_t& _parser, const std::string& _group_name, parser_da
             LOG_WARNING("Option {} ({}) is not enabled", _name, itr->get_env_name());
             _parser.add_argument({ _opt_name }, itr->get_description())
                 .action([&](parser_t& p) {
-                    using namespace timemory::join;
                     auto _value =
-                        join(array_config{ " ", "", "" }, p.get<strvec_t>(_name));
+                        fmt::format("{}", fmt::join(p.get<strvec_t>(_name), " "));
                     if(_value.empty())
                         throw exception<std::runtime_error>("Error! no value for " +
                                                             _name);
