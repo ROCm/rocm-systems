@@ -1,4 +1,4 @@
-name: TheRock CI Linux
+name: TheRock CI Linux for rccl
 
 on:
   workflow_call:

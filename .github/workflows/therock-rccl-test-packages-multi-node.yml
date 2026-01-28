@@ -1,4 +1,4 @@
-name: TheRock Test Packages multi-node
+name: TheRock Test Packages multi-node for rccl
 
 on:
   workflow_call:
