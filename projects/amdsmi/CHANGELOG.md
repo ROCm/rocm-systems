@@ -41,7 +41,13 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Removed
 
-- N/A
+- **Removed `amd-smi reset --reload-driver` option from CLI only.**
+  - Use modprobe to reload driver, e.g.,
+  ```bash
+  sudo modprobe -r amdgpu
+  sudo modprobe amdgpu
+  ```
+  - For historical reference; this option has been removed [<i><b>Separated driver reload from `amdsmi_set_gpu_memory_partition()` / `amdsmi_set_gpu_memory_partition_mode()` and CLI (`sudo amd-smi set -M <NPS mode>`)</b></i>](#separate-driver-reload-anchor)
 
 ### Optimized
 
