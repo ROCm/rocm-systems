@@ -42,7 +42,7 @@ VALIDATE_METRICS = {
                 "metric_id": "4.1.8",
                 "csv_file": "4.1_Roofline_Performance_Rates.csv",
                 "column": "Value",
-                "expected_value": 1044.48,
+                "expected_values": [1044.48],
             },
         ],
         "MI200": [
@@ -51,7 +51,7 @@ VALIDATE_METRICS = {
                 "metric_id": "4.1.8",
                 "csv_file": "4.1_Roofline_Performance_Rates.csv",
                 "column": "Value",
-                "expected_value": 1389.17,
+                "expected_values": [1389.17],
             },
         ],
         "MI300": [
@@ -60,7 +60,11 @@ VALIDATE_METRICS = {
                 "metric_id": "4.1.9",
                 "csv_file": "4.1_Roofline_Performance_Rates.csv",
                 "column": "Value",
-                "expected_value": 3910.62,
+                # MI 300 series contains MI325X GPU which
+                # uses improved HBM3E instead of HBM3 used in
+                # MI300X GPU. Hence, multiple expected values
+                # to cover both cases.
+                "expected_values": [3910.62, 4287.31],
             },
         ],
         "MI350": [
@@ -69,7 +73,7 @@ VALIDATE_METRICS = {
                 "metric_id": "4.1.10",
                 "csv_file": "4.1_Roofline_Performance_Rates.csv",
                 "column": "Value",
-                "expected_value": 5690.42,
+                "expected_values": [5690.42],
             },
         ],
         # Ignore warmup dispatch
@@ -131,13 +135,17 @@ def test_validate_metrics(
                 actual = pd.read_csv(f"{analysis_workload_dir}/{metric['csv_file']}")[
                     metric["column"]
                 ].values[0]
-                expected = metric["expected_value"]
-                # 5% tolerance in checking
-                assert abs(actual - expected) / expected <= 0.05, (
+                expected_values = metric["expected_values"]
+                # 5% tolerance in checking - assert if actual matches any expected value
+                matches = [
+                    abs(actual - expected) / expected <= 0.05
+                    for expected in expected_values
+                ]
+                diffs = [(abs(actual - exp) / exp * 100) for exp in expected_values]
+                assert any(matches), (
                     f"{metric['name']} ({metric['metric_id']}): "
-                    f"actual={actual}, expected={expected}, "
-                    f"diff={(abs(actual - expected) / expected * 100):.2f}% "
-                    f"(tolerance: 5%)"
+                    f"actual={actual}, expected_values={expected_values}, "
+                    f"diffs={diffs} (tolerance: 5%)"
                 )
         finally:
             test_utils.clean_output_dir(config["cleanup"], analysis_workload_dir)
