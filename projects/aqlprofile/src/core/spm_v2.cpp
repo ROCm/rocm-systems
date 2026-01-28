@@ -6,6 +6,8 @@
 
 #include <thread>
 #include <condition_variable>
+#include <iostream>
+#include <iomanip>
 
 #include "core/logger.h"
 #include "core/pm4_factory.h"
@@ -16,6 +18,16 @@
 
 #define PUBLIC_API __attribute__((visibility("default")))
 
+#define ENABLE_API_LOGGING 0 
+
+// Add logging macro for API entry
+#define LOG_API_ENTRY(func_name, aql_agent_handle) \
+do { \
+    if constexpr (ENABLE_API_LOGGING) { \
+        std::cerr << "[API_ENTRY] " << func_name << " - aql_agent: " << std::hex << aql_agent_handle \
+                  << " - thread_id: " << std::this_thread::get_id() << std::dec << std::endl; \
+    } \
+} while(0)
 
 static void producer(std::shared_ptr<class spm_state_t> s);
 static void consumer(std::shared_ptr<class spm_state_t> s, aqlprofile_spm_data_callback_t callback, void* userdata);
@@ -95,12 +107,17 @@ public:
         if (HsaSpmSetDestBuffer(args) != HSA_STATUS_SUCCESS)
             throw std::runtime_error("hsa_amd_spm_set_dest_buffer() init error");
 
+        uint64_t aql_agent_handle = s ? s->aql_agent.handle : 0;
+        LOG_API_ENTRY("ManagerThread", aql_agent_handle);
+
         producer_thread = std::thread(producer, s);
         consumer_thread = std::thread(consumer, s, cb, userdata);
     }
 
     ~ManagerThread()
     {
+        uint64_t aql_agent_handle = s ? s->aql_agent.handle : 0;
+        LOG_API_ENTRY("~ManagerThread", aql_agent_handle);
         s->stop_prod_thread.store(true);
 
         if (producer_thread.joinable()) producer_thread.join();
@@ -316,6 +333,8 @@ PUBLIC_API hsa_status_t aqlprofile_spm_create_packets(
     aqlprofile_spm_profile_t             profile,
     size_t                               flags
 ) {
+    LOG_API_ENTRY("aqlprofile_spm_create_packets", profile.aql_agent.handle);
+    
     try
     {
         return aqlprofile::spm::_internal_aqlprofile_spm_create_packets(handle, out_desc, packets, profile, flags);
@@ -330,6 +349,9 @@ PUBLIC_API hsa_status_t aqlprofile_spm_start(
     void*                          userdata
 ) {
     auto s = aqlprofile::spm::spm_state_map->query(handle);
+    uint64_t aql_agent_handle = s ? s->aql_agent.handle : 0;
+    LOG_API_ENTRY("aqlprofile_spm_start", aql_agent_handle);
+    
     if (!s) return HSA_STATUS_ERROR_NOT_INITIALIZED;
 
     // The first page of output_buffer is reserved for SpmBufferDesc
@@ -366,11 +388,16 @@ PUBLIC_API hsa_status_t aqlprofile_spm_start(
         aqlprofile::spm::spm_state_map->setthread(handle, std::move(manager));
     }
     catch(...) { return HSA_STATUS_ERROR; }
+    LOG_API_ENTRY("aqlprofile_spm_start success", aql_agent_handle);
     return HSA_STATUS_SUCCESS;
 }
 
 PUBLIC_API hsa_status_t aqlprofile_spm_stop(aqlprofile_handle_t handle)
 {
+    auto s = aqlprofile::spm::spm_state_map->query(handle);
+    uint64_t aql_agent_handle = s ? s->aql_agent.handle : 0;
+    LOG_API_ENTRY("aqlprofile_spm_stop", aql_agent_handle);
+    
     bool b = aqlprofile::spm::spm_state_map->setthread(handle, nullptr);
     return b ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_NOT_INITIALIZED;
 }
@@ -378,13 +405,17 @@ PUBLIC_API hsa_status_t aqlprofile_spm_stop(aqlprofile_handle_t handle)
 PUBLIC_API hsa_status_t aqlprofile_spm_drain_counters(aqlprofile_handle_t handle){
 
     auto s = aqlprofile::spm::spm_state_map->query(handle);
+    uint64_t aql_agent_handle = s ? s->aql_agent.handle : 0;
+    LOG_API_ENTRY("aqlprofile_spm_drain_counters pos_1(Entered drain call)", aql_agent_handle);
     if (!s) return HSA_STATUS_ERROR_NOT_INITIALIZED;
+    LOG_API_ENTRY("aqlprofile_spm_drain_counters pos_2(spm_start was valid)", aql_agent_handle);
 
     {
       std::lock_guard<std::mutex> lock(s->drain_mutex);
       // Check if any draining operation is already active
       if (s->draining_requested.load() || s->draining_producer_done.load() ||
           s->draining_consumer_done.load()) {
+        LOG_API_ENTRY("aqlprofile_spm_drain_counters pos_3(Previous drain in-progress. Exiting.)", aql_agent_handle);
         // Another drain operation is in progress or incomplete
         return HSA_STATUS_ERROR;
       }
@@ -402,25 +433,33 @@ PUBLIC_API hsa_status_t aqlprofile_spm_drain_counters(aqlprofile_handle_t handle
     }
 
     {
+      LOG_API_ENTRY("aqlprofile_spm_drain_counters pos_4(Before drain wait)", aql_agent_handle);
       // 2) Wait for draining to complete
       std::unique_lock<std::mutex> lock(s->drain_mutex);
       s->drain_cond.wait(lock, [&s]() { return s->draining_consumer_done.load(); });
+
+      LOG_API_ENTRY("aqlprofile_spm_drain_counters pos_5(After drain wait)", aql_agent_handle);
 
       s->draining_consumer_done = false;
 
       // Check if draining failed; Producer couldn't drain after re-tries
       if (s->draining_failed) {
         s->draining_failed = false;  // Reset for next call
+        LOG_API_ENTRY("aqlprofile_spm_drain_counters pos_6(Drain failed after re-tries)", aql_agent_handle);
         return HSA_STATUS_ERROR;
       }
     }
 
+    LOG_API_ENTRY("aqlprofile_spm_drain_counters pos_7(Drain completed)", aql_agent_handle);
     return HSA_STATUS_SUCCESS;
 
 }
 
 PUBLIC_API void aqlprofile_spm_delete_packets(aqlprofile_handle_t handle)
 {
+    auto s = aqlprofile::spm::spm_state_map->query(handle);
+    uint64_t aql_agent_handle = s ? s->aql_agent.handle : 0;
+    LOG_API_ENTRY("aqlprofile_spm_delete_packets", aql_agent_handle);
     aqlprofile::spm::spm_state_map->remove(handle);
 }
 
