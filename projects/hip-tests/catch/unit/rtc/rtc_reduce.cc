@@ -46,15 +46,16 @@ void runRtcReduceOp(hiprtcProgram& prog, T* output, const T* input, const MaskTy
   const char* loweredName;
   hipFunction_t kernel;
   hipModule_t module;
-  struct {
-    const T* d_output;
-    const T* d_input;
-    const MaskType* d_masks;
-    int numReduces;
-  } args{output, input, masks, numReduces};
-  int size = 4;
-  void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args, HIP_LAUNCH_PARAM_BUFFER_SIZE, &size,
-                    HIP_LAUNCH_PARAM_END};
+  int* d_numReduces;
+
+  HIP_CHECK(hipMalloc(&d_numReduces, sizeof(int)));
+  HIP_CHECK(hipMemcpy(d_numReduces, &numReduces, sizeof(int), hipMemcpyHostToDevice));
+  std::vector<const void*> args = {
+      reinterpret_cast<const void*>(output), reinterpret_cast<const void*>(input),
+      reinterpret_cast<const void*>(masks), reinterpret_cast<void*>(d_numReduces)};
+  std::size_t sizeBytes = args.size() * sizeof(void*);
+  void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, args.data(), HIP_LAUNCH_PARAM_BUFFER_SIZE,
+                    &sizeBytes, HIP_LAUNCH_PARAM_END};
   std::vector<char> code;
   size_t codeSize;
   std::string expression =
@@ -153,11 +154,11 @@ void runAndCompileTest(const std::tuple<Types...> types) {
   opToString<int, Op>(scalarName, intrinsicName);
   kernelStr = R"(
     template <class T, class MaskType>
-    __global__ void reduceRtcKernel(T* output, const T* input, const MaskType* masks, int numReduces)
+    __global__ void reduceRtcKernel(T* output, const T* input, const MaskType* masks, int* numReduces)
     {
       int tid = threadIdx.x;
 
-      for (int i = 0; i < numReduces; i++) {
+      for (int i = 0; i < *numReduces; i++) {
         if (masks[i] & (1ul << tid)) {
           // call the operator only if the lane is mentioned in the mask
           T& result = output[warpSize * i + tid];
