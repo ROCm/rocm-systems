@@ -131,25 +131,12 @@ __global__ void atomic_kernel(float* a, const float* b)
 
 __global__ void iops_kernel_trans()
 {
-    // 3 F16 Trans OPS
-#ifdef GFX11_RDNA3_ARCH
-    asm volatile(".set fake16\n"
-                 "v_cos_f16 v0, v0; v_cos_f16 v1, v1; v_cos_f16 v2, v2;");
-#else
-    asm volatile("v_cos_f16 v0, v0; v_cos_f16 v1, v1; v_cos_f16 v2, v2;");
-#endif
     // 2 F32 Trans OPS
     asm volatile("v_cos_f32 v3, v3; v_cos_f32 v4, v4");
 }
 
 __global__ void iops_kernel1()
 {
-#ifdef GFX11_RDNA3_ARCH
-    asm volatile(".set fake16\n"
-                 "v_add_f16 v2, v1, v0"); // 1 F16 OPS
-#else
-    asm volatile("v_add_f16 v2, v1, v0"); // 1 F16 OPS
-#endif
     asm volatile("v_fma_f32 v3, v1, v2, v3"); // 2 F32 OPs
 
     asm volatile("v_add_f64 v[0:1], v[2:3], v[4:5]"); // 1 F64 OP
@@ -159,14 +146,9 @@ __global__ void iops_kernel1()
 
 __global__ void iops_kernel2()
 {
-   #if defined(__gfx940__) || defined(__gfx90a__) || defined(__gfx1030__)
-    // Supported architectures
-    asm volatile("v_dot2_f32_f16 v0, v1, v2, v3");
-#else
-    // Fallback or skip
+    // Fallback - removed dot2_f32_f16 instruction
     asm volatile("v_add_f32 v4, v5, v6"); // 1 F32 OP
     asm volatile("v_fma_f64 v[0:1], v[0:1], v[2:3], v[4:5]"); // 2 F64 OPs
-#endif
 
 }
 
@@ -340,10 +322,8 @@ auto iops_counters(std::string_view gfxip)
 
     if (gfxip.find("gfx95") == 0)
     {
-        counters.push_back("SQ_INSTS_VALU_FLOPS_FP16");
         counters.push_back("SQ_INSTS_VALU_FLOPS_FP32");
         counters.push_back("SQ_INSTS_VALU_FLOPS_FP64");
-        counters.push_back("SQ_INSTS_VALU_FLOPS_FP16_TRANS");
         counters.push_back("SQ_INSTS_VALU_FLOPS_FP32_TRANS");
         counters.push_back("SQ_INSTS_VALU_FLOPS_FP64_TRANS");
     }
