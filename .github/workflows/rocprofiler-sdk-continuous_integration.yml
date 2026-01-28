@@ -1,4 +1,4 @@
-name: rocprofiler-sdk Continuous Integration
+#name: rocprofiler-sdk Continuous Integration
 
 on:
   workflow_dispatch:
@@ -541,7 +541,7 @@ jobs:
           echo "✅ ROCProfiler-Register Installation complete!"
 
       - name: Build and Install ROCR-Runtime
-        if: ${{ env.ENABLE_ROCR_BUILD == 'true' }}
+        if: ${{ env.ENABLE_ROCR_BUILD == 'false' }}
         shell: bash
         working-directory: projects/rocr-runtime
         run: |
