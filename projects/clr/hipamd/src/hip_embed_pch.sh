@@ -6,7 +6,7 @@
 
 printUsage() {
   echo
-  echo "Usage: $(basename "$0") HIP_BUILD_INC_DIR HIP_INC_DIR HIP_AMD_INC_DIR LLVM_DIR [option] [RTC_LIB_OUTPUT]"
+  echo "Usage: $(basename "$0") HIP_BUILD_INC_DIR HIP_INC_DIR HIP_AMD_INC_DIR CLANG_BIN_DIR [option] [RTC_LIB_OUTPUT]"
   echo
   echo "Options:"
   echo "  -p,  --generate_pch  Generate pre-compiled header (default)"
@@ -25,7 +25,7 @@ fi
 HIP_BUILD_INC_DIR="$1"
 HIP_INC_DIR="$2"
 HIP_AMD_INC_DIR="$3"
-LLVM_DIR="$4"
+CLANG_BIN_DIR="$4"
 # By default, generate pch
 TARGET="generatepch"
 
@@ -130,19 +130,19 @@ EOF
   host_triple="$(uname -m)"
   set -x
 
-  $LLVM_DIR/bin/clang -O3 --hip-path=$HIP_INC_DIR/.. -std=c++17 -nogpulib -isystem $HIP_INC_DIR -isystem $HIP_BUILD_INC_DIR -isystem $HIP_AMD_INC_DIR --cuda-device-only --cuda-gpu-arch=gfx1030 -x hip $tmp/hip_pch.h -E >$tmp/pch_wave32.cui &&
+  $CLANG_BIN_DIR/clang -O3 --hip-path=$HIP_INC_DIR/.. -std=c++17 -nogpulib -isystem $HIP_INC_DIR -isystem $HIP_BUILD_INC_DIR -isystem $HIP_AMD_INC_DIR --cuda-device-only --cuda-gpu-arch=gfx1030 -x hip $tmp/hip_pch.h -E >$tmp/pch_wave32.cui &&
 
   cat $tmp/hip_macros.h >> $tmp/pch_wave32.cui &&
 
-  $LLVM_DIR/bin/clang -cc1 -O3 -emit-pch -triple amdgcn-amd-amdhsa -aux-triple "$host_triple" -fcuda-is-device -std=c++17 -fgnuc-version=4.2.1 -o $tmp/hip_wave32.pch -x hip-cpp-output - <$tmp/pch_wave32.cui &&
+  $CLANG_BIN_DIR/clang -cc1 -O3 -emit-pch -triple amdgcn-amd-amdhsa -aux-triple "$host_triple" -fcuda-is-device -std=c++17 -fgnuc-version=4.2.1 -o $tmp/hip_wave32.pch -x hip-cpp-output - <$tmp/pch_wave32.cui &&
 
-  $LLVM_DIR/bin/clang -O3 --hip-path=$HIP_INC_DIR/.. -std=c++17 -nogpulib -isystem $HIP_INC_DIR -isystem $HIP_BUILD_INC_DIR -isystem $HIP_AMD_INC_DIR --cuda-device-only -x hip $tmp/hip_pch.h -E >$tmp/pch_wave64.cui &&
+  $CLANG_BIN_DIR/clang -O3 --hip-path=$HIP_INC_DIR/.. -std=c++17 -nogpulib -isystem $HIP_INC_DIR -isystem $HIP_BUILD_INC_DIR -isystem $HIP_AMD_INC_DIR --cuda-device-only -x hip $tmp/hip_pch.h -E >$tmp/pch_wave64.cui &&
 
   cat $tmp/hip_macros.h >> $tmp/pch_wave64.cui &&
 
-  $LLVM_DIR/bin/clang -cc1 -O3 -emit-pch -triple amdgcn-amd-amdhsa -aux-triple "$host_triple" -fcuda-is-device -std=c++17 -fgnuc-version=4.2.1 -o $tmp/hip_wave64.pch -x hip-cpp-output - <$tmp/pch_wave64.cui &&
+  $CLANG_BIN_DIR/clang -cc1 -O3 -emit-pch -triple amdgcn-amd-amdhsa -aux-triple "$host_triple" -fcuda-is-device -std=c++17 -fgnuc-version=4.2.1 -o $tmp/hip_wave64.pch -x hip-cpp-output - <$tmp/pch_wave64.cui &&
 
-  $LLVM_DIR/bin/llvm-mc -o hip_pch.o $tmp/hip_pch.mcin --filetype=obj &&
+  $CLANG_BIN_DIR/llvm-mc -o hip_pch.o $tmp/hip_pch.mcin --filetype=obj &&
 
   rm -rf $tmp
 }
@@ -187,11 +187,11 @@ __hipRTC_header_size:
 EOF
 
   set -x
-  $LLVM_DIR/bin/clang -O3 --hip-path=$HIP_INC_DIR/.. -std=c++14 -nogpulib --hip-version=4.4 -isystem $HIP_INC_DIR -isystem $HIP_BUILD_INC_DIR -isystem $HIP_AMD_INC_DIR --cuda-device-only -D__HIPCC_RTC__ -x hip $tmp/hipRTC_header.h -E -P -o $tmp/hiprtc &&
+  $CLANG_BIN_DIR/clang -O3 --hip-path=$HIP_INC_DIR/.. -std=c++14 -nogpulib --hip-version=4.4 -isystem $HIP_INC_DIR -isystem $HIP_BUILD_INC_DIR -isystem $HIP_AMD_INC_DIR --cuda-device-only -D__HIPCC_RTC__ -x hip $tmp/hipRTC_header.h -E -P -o $tmp/hiprtc &&
   cat $macroFile >> $tmp/hiprtc &&
-  $LLVM_DIR/bin/llvm-mc -o $tmp/hiprtc_header.o $tmp/hipRTC_header.mcin --filetype=obj &&
-  $LLVM_DIR/bin/clang $tmp/hiprtc_header.o -o $rtc_shared_lib_out -shared &&
-  $LLVM_DIR/bin/clang -O3 --hip-path=$HIP_INC_DIR/.. -std=c++14 -nogpulib -nogpuinc -emit-llvm -c -o $tmp/tmp.bc --cuda-device-only -D__HIPCC_RTC__ --offload-arch=gfx906 -x hip-cpp-output $tmp/hiprtc &&
+  $CLANG_BIN_DIR/llvm-mc -o $tmp/hiprtc_header.o $tmp/hipRTC_header.mcin --filetype=obj &&
+  $CLANG_BIN_DIR/clang $tmp/hiprtc_header.o -o $rtc_shared_lib_out -shared &&
+  $CLANG_BIN_DIR/clang -O3 --hip-path=$HIP_INC_DIR/.. -std=c++14 -nogpulib -nogpuinc -emit-llvm -c -o $tmp/tmp.bc --cuda-device-only -D__HIPCC_RTC__ --offload-arch=gfx906 -x hip-cpp-output $tmp/hiprtc &&
   rm -rf $tmp
 }
 

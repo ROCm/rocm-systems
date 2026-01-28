@@ -188,12 +188,19 @@ endif()
 # Short-Term solution for pre-compiled headers for online compilation
 # Enable pre compiled header
 if(__HIP_ENABLE_PCH)
-  find_package(LLVM REQUIRED CONFIG
-    HINTS
-      ${ROCM_PATH}/llvm)
-  # find_package(LLVM) returns the lib/cmake/llvm location. We require the root.
+  set(CXX_COMPILER_DIR)
+  if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    cmake_path(GET CMAKE_CXX_COMPILER PARENT_PATH CXX_COMPILER_DIR)
+  endif()
   if(NOT DEFINED HIP_LLVM_ROOT)
-    set(HIP_LLVM_ROOT "${LLVM_DIR}/../../..")
+    find_program(CLANG_EXEC
+      NAMES clang amdclang
+      PATHS ${ROCM_PATH}/lib/llvm/bin ${CXX_COMPILER_DIR} ${ROCM_PATH}/bin
+      NO_DEFAULT_PATH
+      REQUIRED)
+    get_filename_component(CLANG_BIN_DIR ${CLANG_EXEC} DIRECTORY)
+    message(STATUS "Using ${CLANG_EXEC} from ${CLANG_BIN_DIR}}")
+    set(HIP_LLVM_ROOT "${CLANG_BIN_DIR}")
   endif()
 
   execute_process(COMMAND sh -c "${CMAKE_CURRENT_SOURCE_DIR}/hip_embed_pch.sh ${HIP_COMMON_INCLUDE_DIR} ${PROJECT_BINARY_DIR}/include ${PROJECT_SOURCE_DIR}/include ${HIP_LLVM_ROOT}" COMMAND_ECHO STDERR RESULT_VARIABLE EMBED_PCH_RC WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
