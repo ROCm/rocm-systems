@@ -4,14 +4,20 @@ on:
   workflow_dispatch:
   pull_request:
     paths:
-      - 'projects/rocr-runtime/**'
-      - '.github/workflows/rocr-runtime-wsl.yml'
+      - "projects/rocr-runtime/**"
+      - "projects/clr/**"
+      - "projects/hip/**"
+      - "projects/hip-tests/**"
+      - ".github/workflows/rocr-runtime-wsl.yml"
   push:
     branches:
       - develop
     paths:
-      - 'projects/rocr-runtime/**'
-      - '.github/workflows/rocr-runtime-wsl.yml'
+      - "projects/rocr-runtime/**"
+      - "projects/clr/**"
+      - "projects/hip/**"
+      - "projects/hip-tests/**"
+      - ".github/workflows/rocr-runtime-wsl.yml"
 
 permissions:
   contents: read
