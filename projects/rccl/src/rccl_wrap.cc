@@ -342,7 +342,7 @@ ncclResult_t rcclGetAlgoInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_t co
   if (coll == ncclFuncAllGather && rcclUseAllGatherDirect(comm, msgSize)) {
     *algo = rcclAddonAlgos_t::RCCL_DIRECT_ALLGATHER;
     *protocol = NCCL_PROTO_SIMPLE; // TODO: consider LL for small messages
-    *maxChannels = comm->nChannels;
+    *maxChannels = comm->p2pnChannels;
     return ncclSuccess;
   }
   struct ncclTaskColl task;
@@ -354,7 +354,7 @@ ncclResult_t rcclGetAlgoInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_t co
 #ifdef ENABLE_WARP_SPEED
   *maxChannels = task.useWarpSpeed? task.nMaxChannels / task.nWarps : task.nMaxChannels;
   *algo = task.useWarpSpeed? rcclAddonAlgos_t::RCCL_WARP_SPEED : task.algorithm;
-  #else
+#else
   *maxChannels = task.nMaxChannels;
   *algo = task.algorithm;
 #endif
