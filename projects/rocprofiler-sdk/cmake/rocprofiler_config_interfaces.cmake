@@ -262,6 +262,12 @@ rocprofiler_config_nolink_target(rocprofiler-sdk-hsakmt-nolink hsakmt::hsakmt)
 find_package(PkgConfig)
 
 if(PkgConfig_FOUND)
+    # Prepend ROCm pkg-config paths to ensure ROCm-provided libdrm is found first This
+    # fixes linking issues on older systems (e.g., RHEL 8.8) where system libdrm may be
+    # missing newer symbols like amdgpu_device_get_fd
+    set(ENV{PKG_CONFIG_PATH}
+        "${ROCPROFILER_DEFAULT_ROCM_PATH}/lib/pkgconfig:${ROCPROFILER_DEFAULT_ROCM_PATH}/lib64/pkgconfig:$ENV{PKG_CONFIG_PATH}"
+        )
     pkg_check_modules(DRM REQUIRED IMPORTED_TARGET libdrm)
     pkg_check_modules(DRM_AMDGPU REQUIRED IMPORTED_TARGET libdrm_amdgpu)
 
