@@ -68,12 +68,16 @@ class LLMoE {
   // HIP stream to launch kernels
   hipStream_t stream;
 
+  // init mode
+  InitMode init_mode {InitMode::Deterministic};
+
 
  public:
-  LLMoE(int num_tokens_, int hidden_, int num_topk_, int num_experts_)
-      : num_tokens(num_tokens_), hidden(hidden_),
-        num_topk(num_topk_), num_experts(num_experts_),
-        ll_moe_data(num_tokens_, hidden_, num_topk_, num_experts_) {
+  LLMoE(int num_tokens_, int hidden_, int num_topk_, int num_experts_,
+    InitMode init_mode_ = InitMode::Deterministic)
+      : num_tokens(num_tokens_), hidden(hidden_), num_topk(num_topk_),
+        num_experts(num_experts_), init_mode(init_mode_),
+        ll_moe_data(num_tokens_, hidden_, num_topk_, num_experts_,init_mode_) {
 
     // Initialize rocSHMEM
     comm_init();
@@ -92,7 +96,7 @@ class LLMoE {
     CHECK_HIP(hipMemsetAsync(workspace, 0, NUM_WORKSPACE_BYTES));
 
     // Allocate rocSHMEM buffer
-    num_rdma_bytes = get_rmda_size_hint<T>(
+    num_rdma_bytes = get_rdma_size_hint<T>(
         num_tokens, hidden, num_ranks, num_experts);
     rdma_buffer_ptr = rocshmem_malloc(num_rdma_bytes);
     if (rdma_buffer_ptr == nullptr) {
@@ -217,6 +221,10 @@ class LLMoE {
     // Verify combined_x data based on the experts it is routed to
     // verify_combined_x(combined_x);
 
+    // Verify if init mode is Deterministic
+    if (init_mode == InitMode::Deterministic) {
+      verify_combined_x(combined_x);
+    }
   }
 
  private:
@@ -327,9 +335,7 @@ class LLMoE {
         }
       }
     }
-    if (all_correct) {
-      std::cout << "Verification successful: combined_x is correct." << std::endl;
-    } else {
+    if (! all_correct) {
       std::cout << "Verification failed: combined_x has mismatches." << std::endl;
     }
   }

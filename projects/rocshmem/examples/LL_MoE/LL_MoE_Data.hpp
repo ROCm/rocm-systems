@@ -26,6 +26,11 @@
 #include <random>
 #include <vector>
 
+enum class InitMode {
+  Deterministic,
+  Random
+};
+
 template <typename T>
 class LLMoEData {
  public:
@@ -44,11 +49,6 @@ class LLMoEData {
 
   // Number of tokens assigned to each expert
   std::vector<int> expert_token_count;
-
-  enum class InitMode {
-    Deterministic,
-    Random
-  };
 
  private:
   InitMode init_mode {InitMode::Deterministic};
