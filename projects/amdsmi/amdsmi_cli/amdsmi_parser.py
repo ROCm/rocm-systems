@@ -1475,7 +1475,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         reset_perf_det_help = "Disable performance determinism"
         reset_power_cap_help = "Reset the PPT0 and PPT1 power capacity limit to max capable"
         reset_gpu_clean_local_data_help = "Clean up local data in LDS/GPRs on a per partition basis"
-        reset_gpu_driver_help = "Triggers a chain that resets all GPU's"
+        
 
         # Create reset subparser
         reset_parser = subparsers.add_parser('reset', help=reset_help, description=reset_subcommand_help)
@@ -1498,7 +1498,7 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         # Add Baremetal and Virtual OS reset arguments
         reset_exclusive_group.add_argument('-l', '--clean-local-data', action='store_true', required=False, help=reset_gpu_clean_local_data_help)
-        reset_exclusive_group.add_argument('-r', '--reload-driver', action='store_true', required=False, help=reset_gpu_driver_help)
+        
 
         # Reset accepts default devices of all
         self._add_device_arguments(reset_parser, required=False)

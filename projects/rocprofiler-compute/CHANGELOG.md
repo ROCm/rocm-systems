@@ -132,15 +132,9 @@ A proposed long-term solution uses threshold-based clamping, distinguishing betw
 
 ### Added
 
-* Improved standalone Roofline plots in profile mode (PDF output) and analyze mode (CLI and GUI visual plots):
-  * Fixed the peak MFMA/VALU lines being cut off.
-  * Cleaned up the overlapping roofline numeric values by moving them into the side legend.
-  * Added AI points chart with respective values, cache level, and compute/memory bound status.
-  * Added full kernel names to symbol chart.
-
-* Add support for multi-kernel applications' pc sampling.
-  * PC Sampling's outputs' instructions are displayed with the name of the kernel that individual instruction belongs to.
-  * Single kernel selection is supported so that the pc samples of selected kernel can be displayed.
+* Add support for PC sampling of multi-kernel applications.
+  * PC Sampling output instructions are displayed with the name of the kernel that individual instruction belongs to.
+  * Single kernel selection is supported so that the PC samples of selected kernel can be displayed.
 
 
 ### Changed
@@ -149,15 +143,23 @@ A proposed long-term solution uses threshold-based clamping, distinguishing betw
 
 ### Optimized
 
-* Improved Roofline Benchmarking by updating the `flops_benchmark` calculation.
+* Improved roofline benchmarking by updating the `flops_benchmark` calculation.
+
+* Improved standalone roofline plots in profile mode (PDF output) and analyze mode (CLI and GUI visual plots):
+  * Fixed the peak MFMA/VALU lines being cut off.
+  * Cleaned up the overlapping roofline numeric values by moving them into the side legend.
+  * Added AI points chart with respective values, cache level, and compute/memory bound status.
+  * Added full kernel names to symbol chart.
 
 ### Resolved issues
-* Bugfixes for stability
+
+* Resolved existing issues to improve stability.
 
 ## ROCm Compute Profiler 3.3.0 for ROCm 7.1.0
 
 ### Added
-* Live attach/detach feature that allows coupling with a workload process, without controlling its start or end.
+
+* Dynamic process attachment feature that allows coupling with a workload process, without controlling its start or end.
   * Use '--attach-pid' to specify the target process ID.
   * Use '--attach-duration-msec' to specify time duration.
 

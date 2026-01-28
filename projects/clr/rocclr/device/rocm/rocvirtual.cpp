@@ -1616,7 +1616,7 @@ void VirtualGPU::dispatchBarrierValuePacket(uint16_t packetHeader, bool resolveD
   barrier_value_packet_.cond = cond;
 
   // Dependent signal and external signal cant be true at the same time
-  assert(resolveDepSignal & (signal.handle != 0) == 0);
+  assert((resolveDepSignal && (signal.handle != 0)) == false);
   if (resolveDepSignal) {
     auto wait_signals = Barriers().WaitingSignal();
     if (wait_signals.size() > 0) {
