@@ -4,9 +4,23 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ***All information listed below is for reference and subject to change.***
 
-## amd_smi_lib for ROCm 7.3.0
+## amd_smi_lib for ROCm 7.11.0
 
 ### Added
+
+- **Added `--hex` flag to `amd-smi bad-pages` command**.  
+  - Added `--hex` option to display page addresses and sizes in hexadecimal format with `0x` prefix
+
+  ```console
+  $ amd-smi bad-pages --hex
+  GPU: 0
+      RETIRED:
+          PAGE_ADDRESS: 0x7f8000
+          PAGE_SIZE: 0x1000
+          STATUS: RESERVED
+      PENDING: N/A
+      UN_RES: N/A
+  ```
 
 - **Added flexible argument ordering for `amd-smi set --power-cap`**.  
   - The `--power-cap` option now accepts arguments in any order, improving usability.
@@ -28,35 +42,13 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
     ...
   ```
 
-### Changed
-
-- **Modified output file handling options for `--file` argument**.
-  - Previously tool always appended to existing files without confirmation
-  - Now added `--overwrite` / `--append` flag: Overwrites / Appends file content
-  - Interactive prompt when file exists and no flag is specified:
-    - User can choose: Overwrite (o) / Append (a) / Cancel (N)
-
-### Removed
-
-- N/A
-
-### Optimized
-
-- N/A
-
-### Resolved Issues
-
-- N/A
-
-## amd_smi_lib for ROCm 7.2.0
-
-### Added
-
-- **Added support for get and set option for CPUISOFreqPolicy control API and DFCState Control API**.  
-  - Users can now able to set the  CPU ISO frequency policy  using `amd-smi set --cpu-railisofreq-policy (0-1)`.
-  - Users can now able to read the CPU ISO frequency policy  using `amd-smi metric --cpu-railisofreq-policy`.
-  - Users can now able to set the  Data Fabric C-state control status using `amd-smi set --cpu-dfcstate-ctrl (0-1)`.
-  - Users can now able to read the Data Fabric C-state control status  using `amd-smi metric --cpu-dfcstate-ctrl`.
+- **Added support for CPUISOFreqPolicy and DFCState Control APIs**.  
+  - Set/get CPU ISO frequency policy:
+    - `amd-smi set --cpu-railisofreq-policy (0-1)`
+    - `amd-smi metric --cpu-railisofreq-policy`
+  - Set/get Data Fabric C-state control:
+    - `amd-smi set --cpu-dfcstate-ctrl (0-1)`
+    - `amd-smi metric --cpu-dfcstate-ctrl`
 
   ```console
   $amd-smi set --cpu-railisofreq-policy 0
@@ -95,6 +87,31 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
     DFCSTATE:
         DFCSTATECTRL_STATUS: 0
   ```
+
+### Changed
+
+- **Modified output file handling options for `--file` argument**.
+  - Previously tool always appended to existing files without confirmation
+  - Now added `--overwrite` / `--append` flag: Overwrites / Appends file content
+  - Interactive prompt when file exists and no flag is specified:
+    - User can choose: Overwrite (o) / Append (a) / Cancel (N)
+
+### Removed
+
+- N/A
+
+### Optimized
+
+- N/A
+
+### Resolved Issues
+
+- **Fixed structure mismatch bug in `amdsmi_get_soc_pstate()` and `amdsmi_get_xgmi_plpd()`**.  
+  - This issue caused all policy IDs to display as 0.
+
+## amd_smi_lib for ROCm 7.2.0
+
+### Added
 
 - **Added GPU and base board temperature `amd-smi monitor` CLI support**.  
   - Added `--gpu-board-temps` option to `amd-smi monitor` command for GPU board temperature sensors
