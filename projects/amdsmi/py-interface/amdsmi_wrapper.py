@@ -2612,6 +2612,9 @@ amdsmi_get_processor_handles.argtypes = [amdsmi_socket_handle, ctypes.POINTER(ct
 amdsmi_get_node_handle = _libraries['libamd_smi.so'].amdsmi_get_node_handle
 amdsmi_get_node_handle.restype = amdsmi_status_t
 amdsmi_get_node_handle.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.POINTER(None))]
+amdsmi_get_device_handle_from_node = _libraries['libamd_smi.so'].amdsmi_get_device_handle_from_node
+amdsmi_get_device_handle_from_node.restype = amdsmi_status_t
+amdsmi_get_device_handle_from_node.argtypes = [amdsmi_node_handle, ctypes.POINTER(ctypes.POINTER(None))]
 amdsmi_get_cpucore_handles = _libraries['libamd_smi.so'].amdsmi_get_cpucore_handles
 amdsmi_get_cpucore_handles.restype = amdsmi_status_t
 amdsmi_get_cpucore_handles.argtypes = [ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.POINTER(None))]
@@ -3253,13 +3256,13 @@ amdsmi_set_cpu_rail_isofreq_policy.restype = amdsmi_status_t
 amdsmi_set_cpu_rail_isofreq_policy.argtypes = [amdsmi_processor_handle, uint8_t]
 amdsmi_get_cpu_rail_isofreq_policy = _libraries['libamd_smi.so'].amdsmi_get_cpu_rail_isofreq_policy
 amdsmi_get_cpu_rail_isofreq_policy.restype = amdsmi_status_t
-amdsmi_get_cpu_rail_isofreq_policy.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_uint8)]
+amdsmi_get_cpu_rail_isofreq_policy.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_ubyte)]
 amdsmi_set_dfc_ctrl = _libraries['libamd_smi.so'].amdsmi_set_dfc_ctrl
 amdsmi_set_dfc_ctrl.restype = amdsmi_status_t
 amdsmi_set_dfc_ctrl.argtypes = [amdsmi_processor_handle, ctypes.c_bool]
 amdsmi_get_dfc_ctrl = _libraries['libamd_smi.so'].amdsmi_get_dfc_ctrl
 amdsmi_get_dfc_ctrl.restype = amdsmi_status_t
-amdsmi_get_dfc_ctrl.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_uint8)]
+amdsmi_get_dfc_ctrl.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_ubyte)]
 __all__ = \
     ['AGG_BW0', 'AMDSMI_ACCELERATOR_DECODER',
     'AMDSMI_ACCELERATOR_DMA', 'AMDSMI_ACCELERATOR_ENCODER',
@@ -3587,6 +3590,7 @@ __all__ = \
     'amdsmi_get_cpu_hsmp_proto_ver', 'amdsmi_get_cpu_model',
     'amdsmi_get_cpu_model_name', 'amdsmi_get_cpu_prochot_status',
     'amdsmi_get_cpu_pwr_svi_telemetry_all_rails',
+    'amdsmi_get_cpu_rail_isofreq_policy',
     'amdsmi_get_cpu_smu_fw_version',
     'amdsmi_get_cpu_socket_c0_residency',
     'amdsmi_get_cpu_socket_count',
@@ -3597,9 +3601,10 @@ __all__ = \
     'amdsmi_get_cpu_socket_power', 'amdsmi_get_cpu_socket_power_cap',
     'amdsmi_get_cpu_socket_power_cap_max',
     'amdsmi_get_cpu_socket_temperature', 'amdsmi_get_cpucore_handles',
+    'amdsmi_get_cpusocket_handles',
+    'amdsmi_get_device_handle_from_node', 'amdsmi_get_dfc_ctrl',
     'amdsmi_get_energy_count', 'amdsmi_get_esmi_err_msg',
-    'amdsmi_get_fw_info', 'amdsmi_get_dfc_ctrl', 'amdsmi_set_dfc_ctrl',
-    'amdsmi_get_cpu_rail_isofreq_policy', 'amdsmi_set_cpu_rail_isofreq_policy',
+    'amdsmi_get_fw_info',
     'amdsmi_get_gpu_accelerator_partition_profile',
     'amdsmi_get_gpu_accelerator_partition_profile_config',
     'amdsmi_get_gpu_activity', 'amdsmi_get_gpu_asic_info',
@@ -3705,9 +3710,11 @@ __all__ = \
     'amdsmi_set_cpu_gmi3_link_width_range',
     'amdsmi_set_cpu_pcie_link_rate',
     'amdsmi_set_cpu_pwr_efficiency_mode',
+    'amdsmi_set_cpu_rail_isofreq_policy',
     'amdsmi_set_cpu_socket_boostlimit',
     'amdsmi_set_cpu_socket_lclk_dpm_level',
     'amdsmi_set_cpu_socket_power_cap', 'amdsmi_set_cpu_xgmi_width',
+    'amdsmi_set_dfc_ctrl',
     'amdsmi_set_gpu_accelerator_partition_profile',
     'amdsmi_set_gpu_clk_limit', 'amdsmi_set_gpu_clk_range',
     'amdsmi_set_gpu_compute_partition',

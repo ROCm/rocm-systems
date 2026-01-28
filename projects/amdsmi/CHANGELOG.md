@@ -4,6 +4,21 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ***All information listed below is for reference and subject to change.***
 
+## amd_smi_lib for ROCm 7.12.0
+
+### Added
+
+- **Added `amdsmi_get_device_handle_from_node` API**.
+  - Added C API function to retrieve a device handle from a node handle.
+  - Provides inverse functionality to `amdsmi_get_node_handle`.
+  - Added python binding for the API and exported in `py-interface/__init__.py` for public API access.
+  - Returns `AMDSMI_STATUS_SUCCESS` on success, `AMDSMI_STATUS_NOT_FOUND` if no matching device found.
+
+- **Enhanced `amd-smi node` command to display baseboard temperatures**.
+  - Added `--base-board-temps` / `-b` option to display baseboard temperature sensors.
+  - Selective display: Use `-p` for NPM only, `-b` for Baseboard only.
+  - Default behavior (no flags): Shows both power management and baseboard temperatures.
+
 ## amd_smi_lib for ROCm 7.11.0
 
 ### Added
