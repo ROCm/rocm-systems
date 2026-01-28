@@ -240,6 +240,17 @@ Examples:
         # help="\t\t\tKokkos trace, traces Kokkos API calls.",
     )
     profile_group.add_argument(
+        "--torch-trace",
+        dest="torch_trace",
+        required=False,
+        default=False,
+        action="store_true",
+        help=(
+            "\t\t\tTorch Trace, maps PyTorch operators to performance counters.\n"
+            "\t\t\tShould be used only when profiling PyTorch applications."
+        ),
+    )
+    profile_group.add_argument(
         "-k",
         "--kernel",
         type=str,
