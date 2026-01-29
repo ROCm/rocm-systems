@@ -1360,7 +1360,7 @@ def process_torch_trace_output(
     # If csv format, pairs are present in workload/{fbase}/ one pair per process
     # Extracting the output_format used in profiling from the path of the first marker file
     if existing_csv_files[0][0].parent.name == workload_dir:
-        join_keys = ("Correlation_Id", "GUID") #output_format "rocpd"
+        join_keys = ("Correlation_Id", "GUID") # output_format "rocpd"
     else:
         join_keys = ("Correlation_Id",) # output_format "csv"        
     consolidated_df = pd.concat(
