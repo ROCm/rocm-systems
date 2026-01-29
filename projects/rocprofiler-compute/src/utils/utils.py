@@ -1282,7 +1282,8 @@ def save_torch_trace_inputs(
     output_format: str = "rocpd",
 ) -> None:
     """
-    Move counter_collection and marker_api_trace data to workload_dir for creation of PyTorch operator trace in Analyze mode.
+    Move counter_collection and marker_api_trace data to workload_dir,
+    for creation of PyTorch operator trace in Analyze mode.
     """
     src_dir = Path(workload_dir) / "out" / "pmc_1"
     if output_format == "rocpd":
@@ -1293,7 +1294,8 @@ def save_torch_trace_inputs(
         dst_marker = Path(workload_dir) / f"{fbase}_marker_api_trace.csv"
         shutil.copyfile(src_counter, dst_counter)
         shutil.copyfile(src_marker, dst_marker)
-        console_log("Moved counter collection and marker trace files to workload dir for PyTorch trace creation.")
+        console_log("Moved counter collection and marker trace files",
+                    "to workload dir for PyTorch trace creation.")
         console_log("Counter Collection: ", str(dst_counter))
         console_log("Marker API Trace: ", str(dst_marker))
     elif output_format == "csv":
@@ -1310,7 +1312,8 @@ def save_torch_trace_inputs(
             shutil.copyfile(src_marker, dst_marker)
             console_log("Copied Marker API Trace: ", dst_marker)
     else:
-        console_warning(f"Unknown output_format: {output_format} in save_torch_trace_inputs")
+        console_warning(f"Unknown output_format: {output_format}",
+                        "in save_torch_trace_inputs")
 @demarcate
 def process_torch_trace_output(
     workload_dir: str,
@@ -1322,7 +1325,7 @@ def process_torch_trace_output(
     """
     # marker_trace_csv_file_path = f"{workload_dir}/out/pmc_1/"
     # Find all marker_api_trace CSV files
-    
+
     marker_api_trace_csvs = list(
         Path(workload_dir).glob("**/*_marker_api_trace.csv")
     )
@@ -1338,7 +1341,7 @@ def process_torch_trace_output(
     ]
     if not existing_csv_files:
         console_warning(
-            f"No marker files with corresponding counter files found."
+            "No marker files with corresponding counter files found."
         )
         return
     # Join marker and counter data
@@ -1358,11 +1361,11 @@ def process_torch_trace_output(
         )
     # If rocpd format, pairs are present in workload_dir, one pair per fbase
     # If csv format, pairs are present in workload/{fbase}/ one pair per process
-    # Extracting the output_format used in profiling from the path of the first marker file
+    # Extracting the output_format used in profiling from the path of a marker file
     if existing_csv_files[0][0].parent.name == workload_dir:
         join_keys = ("Correlation_Id", "GUID") # output_format "rocpd"
     else:
-        join_keys = ("Correlation_Id",) # output_format "csv"        
+        join_keys = ("Correlation_Id",) # output_format "csv"
     consolidated_df = pd.concat(
         [_merge_pair(f[0], f[1], join_keys) for f in existing_csv_files],
         ignore_index=True,
@@ -1377,7 +1380,10 @@ def process_torch_trace_output(
         "Start_Timestamp_kernel",
         "End_Timestamp_kernel",
     ]
-    missing_columns = [col for col in required_columns if col not in consolidated_df.columns]
+    missing_columns = [
+            col for col in required_columns
+            if col not in consolidated_df.columns
+    ]
     if missing_columns:
         console_error(
             f"Consolidated torch trace is missing required columns {missing_columns}"
