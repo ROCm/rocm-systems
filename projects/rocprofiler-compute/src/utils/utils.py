@@ -1382,6 +1382,7 @@ def process_torch_trace_output(
         console_error(
             f"Consolidated torch trace is missing required columns {missing_columns}"
         )
+        return
     consolidated_df = consolidated_df[required_columns]
     if consolidated_df.isnull().values.any():
         console_warning("Consolidated torch trace contains missing values")
