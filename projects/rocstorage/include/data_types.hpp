@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <deque>
+#include <memory>
 #include <optional>
 #include <vector>
 
@@ -116,6 +117,9 @@ struct node_info_t
     const char* domain_name;
 };
 
+using node_info_ptr_t  = std::shared_ptr<node_info_t>;
+using node_info_list_t = std::vector<node_info_ptr_t>;
+
 /***
  * @brief Process info
  * @note This is a struct which will be used to identify the process.
@@ -139,12 +143,15 @@ struct process_info_t
     node_id_t node_id{};
 };
 
+using process_info_ptr_t  = std::shared_ptr<process_info_t>;
+using process_info_list_t = std::vector<process_info_ptr_t>;
+
 /***
  * @brief Agent info
  * @note This is a struct which will be used to identify the agent.
  * @param unique_id Unique id which will uniquely identify the agent.
- * @param node_id Node id which will uniquely identify the node. Use this value to refer
- * to node_info.
+ * @param node_id Node id which will uniquely identify the node. Use this value to
+ * refer to node_info.
  * @param process_id Process id which will uniquely identify the process. Use this
  * value to refer to process_info.
  */
@@ -165,6 +172,9 @@ struct agent_info_t
     node_id_t    node_id{};
     process_id_t process_id{};
 };
+
+using agent_info_ptr_t  = std::shared_ptr<agent_info_t>;
+using agent_info_list_t = std::vector<agent_info_ptr_t>;
 
 struct pmc_info_unique_id_t
 {
@@ -213,6 +223,9 @@ struct pmc_info_t
     process_id_t process_id{};
 };
 
+using pmc_info_ptr_t  = std::shared_ptr<pmc_info_t>;
+using pmc_info_list_t = std::vector<pmc_info_ptr_t>;
+
 /***
  * @brief Thread info
  * @note This is a struct which will be used to identify the thread.
@@ -235,6 +248,9 @@ struct thread_info_t
     process_id_t process_id{};
 };
 
+using thread_info_ptr_t  = std::shared_ptr<thread_info_t>;
+using thread_info_list_t = std::vector<thread_info_ptr_t>;
+
 /***
  * @brief Stream info
  * @note This is a struct which will be used to identify the stream.
@@ -254,6 +270,9 @@ struct stream_info_t
     process_id_t process_id{};
 };
 
+using stream_info_ptr_t  = std::shared_ptr<stream_info_t>;
+using stream_info_list_t = std::vector<stream_info_ptr_t>;
+
 /***
  * @brief Queue info
  * @note This is a struct which will be used to identify the queue.
@@ -272,6 +291,9 @@ struct queue_info_t
     node_id_t    node_id{};
     process_id_t process_id{};
 };
+
+using queue_info_ptr_t  = std::shared_ptr<queue_info_t>;
+using queue_info_list_t = std::vector<queue_info_ptr_t>;
 
 /***
  * @brief Code object info
@@ -298,6 +320,9 @@ struct code_object_info_t
     process_id_t                     process_id{};
     std::optional<agent_unique_id_t> agent_id;
 };
+
+using code_object_info_ptr_t  = std::shared_ptr<code_object_info_t>;
+using code_object_info_list_t = std::vector<code_object_info_ptr_t>;
 
 /***
  * @brief Kernel symbol info
@@ -329,6 +354,9 @@ struct kernel_symbol_info_t
     code_object_id_t code_obj_id{};
 };
 
+using kernel_symbol_info_ptr_t  = std::shared_ptr<kernel_symbol_info_t>;
+using kernel_symbol_info_list_t = std::vector<kernel_symbol_info_ptr_t>;
+
 /***
  * @brief Track info
  * @note This is a struct which will be used to identify the track.
@@ -355,6 +383,9 @@ struct track_info_t
     }
 };
 
+using track_info_ptr_t  = std::shared_ptr<track_info_t>;
+using track_info_list_t = std::vector<track_info_ptr_t>;
+
 // --------------------- Call Stack & Line Info Abstract Data Types ------------------
 
 /***
@@ -368,6 +399,9 @@ struct address_range_info_t
     const char* extdata = "{}";
 };
 
+using address_range_info_ptr_t  = std::shared_ptr<address_range_info_t>;
+using address_range_info_list_t = std::vector<address_range_info_ptr_t>;
+
 /***
  * @brief Program counter information representing a location in executable code.
  */
@@ -379,6 +413,9 @@ struct program_counter_info_t
     const char*           extdata = "{}";
 };
 
+using program_counter_info_ptr_t  = std::shared_ptr<program_counter_info_t>;
+using program_counter_info_list_t = std::vector<program_counter_info_ptr_t>;
+
 /***
  * @brief A single frame in a call stack.
  */
@@ -389,6 +426,9 @@ struct stack_frame_t
     std::optional<address_range_info_t> address_range;  ///< Code object memory range
     const char*                         extdata = "{}";
 };
+
+using stack_frame_ptr_t  = std::shared_ptr<stack_frame_t>;
+using stack_frame_list_t = std::vector<stack_frame_ptr_t>;
 
 /***
  * @brief Complete call stack as an ordered collection of stack frames.
@@ -411,6 +451,9 @@ struct source_code_info_t
     const char*              extdata = "{}";
 };
 
+using source_code_info_ptr_t  = std::shared_ptr<source_code_info_t>;
+using source_code_info_list_t = std::vector<source_code_info_ptr_t>;
+
 /***
  * @brief Line info entry linking source code context with program counter location.
  */
@@ -421,6 +464,9 @@ struct line_info_entry_t
     std::optional<address_range_info_t>
         address_range;  ///< Code object for program_counter
 };
+
+using line_info_entry_ptr_t  = std::shared_ptr<line_info_entry_t>;
+using line_info_entry_list_t = std::vector<line_info_entry_ptr_t>;
 
 /***
  * @brief Collection of line info entries for an event.
@@ -444,6 +490,9 @@ struct arg_data_t
     const char* extdata = "{}";
 };
 
+using arg_data_ptr_t  = std::shared_ptr<arg_data_t>;
+using arg_data_list_t = std::vector<arg_data_ptr_t>;
+
 /***
  * @brief Common event metadata shared by all profiling events.
  * @note Maps to rocpd_event table. This is the base event data embedded in all
@@ -466,6 +515,9 @@ struct event_data_t
     const char* extdata = "{}";
 };
 
+using event_data_ptr_t  = std::shared_ptr<event_data_t>;
+using event_data_list_t = std::vector<event_data_ptr_t>;
+
 /***
  * @brief A named time region representing a span of execution.
  * @note Maps to rocpd_region table. Represents user-annotated regions, API calls,
@@ -484,6 +536,9 @@ struct region_data_t
     std::vector<arg_data_t> args;  ///< Optional function arguments
 };
 
+using region_data_ptr_t  = std::shared_ptr<region_data_t>;
+using region_data_list_t = std::vector<region_data_ptr_t>;
+
 /***
  * @brief A point-in-time sample (instantaneous event).
  * @note Maps to rocpd_sample table. Used for counter samples, markers, or any
@@ -496,6 +551,9 @@ struct sample_data_t
     track_info_t   track;
     const char*    extdata = "{}";
 };
+
+using sample_data_ptr_t  = std::shared_ptr<sample_data_t>;
+using sample_data_list_t = std::vector<sample_data_ptr_t>;
 
 /***
  * @brief Performance counter (PMC) event data.
@@ -510,6 +568,9 @@ struct pmc_event_data_t
     const char*                 extdata = "{}";
     sample_data_t               sample;  ///< Timestamp information
 };
+
+using pmc_event_data_ptr_t  = std::shared_ptr<pmc_event_data_t>;
+using pmc_event_data_list_t = std::vector<pmc_event_data_ptr_t>;
 
 /***
  * @brief GPU kernel dispatch event data.
@@ -538,6 +599,9 @@ struct kernel_dispatch_data_t
     const char* extdata = "{}";
 };
 
+using kernel_dispatch_data_ptr_t  = std::shared_ptr<kernel_dispatch_data_t>;
+using kernel_dispatch_data_list_t = std::vector<kernel_dispatch_data_ptr_t>;
+
 /***
  * @brief Memory copy operation event data.
  * @note Maps to rocpd_memory_copy table. Records a memory transfer operation
@@ -560,6 +624,9 @@ struct memory_copy_data_t
     const char*                      extdata = "{}";
 };
 
+using memory_copy_data_ptr_t  = std::shared_ptr<memory_copy_data_t>;
+using memory_copy_data_list_t = std::vector<memory_copy_data_ptr_t>;
+
 /***
  * @brief Memory allocation event data.
  * @note Maps to rocpd_memory_allocate table. Records memory allocation and
@@ -577,5 +644,8 @@ struct memory_alloc_data_t
     size_t                size{};      ///< Allocation size (bytes)
     const char*           extdata = "{}";
 };
+
+using memory_alloc_data_ptr_t  = std::shared_ptr<memory_alloc_data_t>;
+using memory_alloc_data_list_t = std::vector<memory_alloc_data_ptr_t>;
 
 }  // namespace rocstorage::data_types
