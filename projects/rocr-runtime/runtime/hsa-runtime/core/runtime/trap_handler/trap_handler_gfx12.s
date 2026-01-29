@@ -565,7 +565,7 @@
   // ttmp9 = WGID_X (from first-level handler).
   // ttmp7 contains WGID_Y in low 16 bits.
   v_writelane_b32   v2, ttmp9, 0                            // wg_id_x
-  s_bfe_u32         ttmp6, ttmp7, (0 | 16<<16)              // extract bits 15:0, wg_id_y
+  s_bfe_u32         ttmp6, ttmp7, (0 | (16 << 16))          // extract bits 15:0, wg_id_y
   v_writelane_b32   v3, ttmp6, 0
   global_store_b64  v[0:1], v[2:3], off, offset:SAMPLE_OFF_WGID_XY, scope:SCOPE_SYS  // store wg_id_x and wg_id_y
 
