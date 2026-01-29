@@ -225,9 +225,9 @@ Examples:
             "\t\t\t   %%hostname%%: Host name\n"
             "\t\t\t   %%gpumodel%%: GPU model\n"
             "\t\t\t   %%rank%%: MPI process rank\n"
-            "\t\t\t   %%env{NAME}%%: Environment variable 'NAME'\n"
-            "\t\t\t(DEFAULT: {Path.cwd()}/workloads/<name>/%%gpumodel%%) without MPI,\n"  # noqa: E501
-            "\t\t\t {Path.cwd()}/workloads/<name>/%%rank%% with MPI.)"
+            '\t\t\t   %%env{NAME}%%: Environment variable "NAME"\n'
+            "\t\t\t(DEFAULT: <current-working-directory>/workloads/<name>/%%gpumodel%%) without MPI,\n"  # noqa: E501
+            "\t\t\t <current-working-directory>/workloads/<name>/%%rank%% with MPI.)"
         ),
     )
     profile_group.add_argument(
@@ -239,7 +239,7 @@ Examples:
         required=False,
         help=(
             "\t\t\t(DEPRECATED) Specify the type of subpath to save workload: node_name, gpu_model."  # noqa: E501
-            "\n\t\t\t --subpath is deprecated. Use --output-directory with parameterization instead."
+            "\n\t\t\t --subpath is deprecated. Use --output-directory with parameterization instead."  # noqa: E501
         ),
     )
     profile_group.add_argument(
