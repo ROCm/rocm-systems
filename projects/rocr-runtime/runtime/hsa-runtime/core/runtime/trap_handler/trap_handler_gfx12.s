@@ -685,17 +685,21 @@
   // Store snapshot DATA1 and DATA2 at offset SAMPLE_OFF_SNAPSHOT_DATA + 4
   global_store_b64  v[0:1], v[2:3], off, offset:SAMPLE_OFF_SNAPSHOT_DATA + 4, scope:SCOPE_SYS
 
-  // Store main snapshot data at offset 0x24 (SAMPLE_OFF_SNAPSHOT_DATA)
-  s_getreg_b32      ttmp6, HW_REG_SQ_PERF_SNAPSHOT_DATA
-  v_writelane_b32   v2, ttmp6, 0
-  global_store_b32  v[0:1], v2, off, offset:SAMPLE_OFF_SNAPSHOT_DATA, scope:SCOPE_SYS  // store perf snapshot DATA
-
   // For stochastic sampling, use PC from snapshot registers (actual sampled instruction)
   // Trap PC points to trap handler entry, not the interrupted instruction
   s_getreg_b32      ttmp6, HW_REG_SQ_PERF_SNAPSHOT_PC_LO    // Read performance snapshot PC_LO register
   v_writelane_b32   v2, ttmp6, 0x0                          // stash PC_LO in v2
   s_getreg_b32      ttmp6, HW_REG_SQ_PERF_SNAPSHOT_PC_HI    // Read performance snapshot PC_HI register
   v_writelane_b32   v3, ttmp6, 0x0                          // stash PC_HI in v3
+
+.if .amdgcn.gfx_generation_minor == 0
+  // Store SQ_PERF_SNAPSHOT_DATA at offset 0x24
+  // We access SQ_PERF_SNAPSHOT_DATA last on gfx12.0 as it contains valid bit indicating if the
+  // sample is valid and being read by the sampled wave.
+  s_getreg_b32      ttmp6, HW_REG_SQ_PERF_SNAPSHOT_DATA
+  v_writelane_b32   v2, ttmp6, 0
+  global_store_b32  v[0:1], v2, off, offset:SAMPLE_OFF_SNAPSHOT_DATA, scope:SCOPE_SYS  // store perf snapshot DATA
+.endif
 
   // Store at offset 0x00 (SAMPLE_OFF_PC_HOST)
   global_store_b64  v[0:1], v[2:3], off, offset:SAMPLE_OFF_PC_HOST, scope:SCOPE_SYS
