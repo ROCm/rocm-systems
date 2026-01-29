@@ -1176,6 +1176,7 @@ function(rocprofiler_add_unit_test)
 
     cmake_policy(POP)
 endfunction()
+
 # gets the user local python bin directory from `python3 -m pip install --user ...`
 #
 function(_rocprofiler_get_python_user_bin _OUT)

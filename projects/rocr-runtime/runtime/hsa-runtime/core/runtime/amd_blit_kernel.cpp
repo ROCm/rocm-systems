@@ -43,6 +43,7 @@
 #include "core/inc/amd_blit_kernel.h"
 
 #include <algorithm>
+#include <cstring>
 #include <sstream>
 #include <string>
 
@@ -53,8 +54,7 @@
 namespace rocr {
 namespace AMD {
 
-static std::string& kBlitKernelSource() {
-  static std::string kBlitKernelSource_(R"(
+static constexpr const char kBlitKernelSource_[] = R"(
   // Compatibility function for GFXIP 7.
 
   function s_load_dword_offset(byte_offset)
@@ -491,25 +491,20 @@ static std::string& kBlitKernelSource() {
   L_FILL_PHASE_2_DONE:
     s_endpgm
   end
-)");
-  return kBlitKernelSource_;
-}
+)";
 
 // Search kernel source for variable definition and return value.
 int GetKernelSourceParam(const char* paramName) {
-  std::stringstream paramDef;
-  paramDef << "var " << paramName << " = ";
+  std::string paramDef = std::string("var ") + paramName + " = ";
 
-  std::string::size_type paramDefLoc =
-                              kBlitKernelSource().find(paramDef.str());
-  assert(paramDefLoc != std::string::npos);
-  std::string::size_type paramValLoc = paramDefLoc + paramDef.str().size();
-  std::string::size_type paramEndLoc =
-      kBlitKernelSource().find('\n', paramDefLoc);
-  assert(paramEndLoc != std::string::npos);
+  const char* paramDefPtr = strstr(kBlitKernelSource_, paramDef.c_str());
+  assert(paramDefPtr != nullptr);
 
-  std::string paramVal(&kBlitKernelSource()[paramValLoc],
-                       &kBlitKernelSource()[paramEndLoc]);
+  const char* paramValPtr = paramDefPtr + paramDef.size();
+  const char* paramEndPtr = strchr(paramValPtr, '\n');
+  assert(paramEndPtr != nullptr);
+
+  std::string paramVal(paramValPtr, paramEndPtr);
   return std::stoi(paramVal);
 }
 
