@@ -24,18 +24,6 @@
 
 #include <rocprofiler-sdk/fwd.h>
 
-#include <rocprofiler-sdk/hip/compiler_api_id.h>
-#include <rocprofiler-sdk/hip/runtime_api_id.h>
-#include <rocprofiler-sdk/hsa/amd_ext_api_id.h>
-#include <rocprofiler-sdk/hsa/core_api_id.h>
-#include <rocprofiler-sdk/hsa/finalize_ext_api_id.h>
-#include <rocprofiler-sdk/hsa/image_ext_api_id.h>
-#include <rocprofiler-sdk/marker/api_id.h>
-#include <rocprofiler-sdk/rccl/api_id.h>
-#include <rocprofiler-sdk/rocdecode/api_id.h>
-#include <rocprofiler-sdk/rocjpeg/api_id.h>
-
-#include <algorithm>
 #include <limits>
 
 namespace rocprofiler
