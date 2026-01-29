@@ -50,11 +50,15 @@ endif()
 
 # Add a runtime validation test that checks if transferBench can run successfully
 # This test runs before all other GPU connect tests and acts as a fixture
-add_test(
-    NAME transferbench-validation-check
-    COMMAND $<TARGET_FILE:transferBench>
-    WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
-)
+if(TARGET transferBench)
+    add_test(
+        NAME transferbench-validation-check
+        COMMAND $<TARGET_FILE:transferBench>
+        WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+    )
+else()
+    message(WARNING " transferBench not available; " "GPU connect tests will be skipped")
+endif()
 
 # Set this test as a fixture that must pass for GPU connect tests to run
 set_tests_properties(
