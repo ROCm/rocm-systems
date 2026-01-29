@@ -37,14 +37,9 @@ class reader_test : public ::testing::Test
 protected:
     void SetUp() override
     {
-        m_database_path =
-            "test_reader_" +
-            std::to_string(
-                ::testing::UnitTest::GetInstance()->current_test_info()->line()) +
-            ".db";
-        m_uuid    = "12345";
-        m_storage = std::make_unique<rocstorage::storage_t>(m_database_path, m_uuid);
-        m_reader  = std::make_shared<rocstorage::reader_t>(std::move(m_storage));
+        m_database_path = "rocpd.db";
+        m_storage       = std::make_unique<rocstorage::storage_t>(m_database_path, "");
+        m_reader        = std::make_shared<rocstorage::reader_t>(std::move(m_storage));
     }
 
     void TearDown() override
@@ -55,7 +50,6 @@ protected:
     }
 
     std::string                            m_database_path;
-    std::string                            m_uuid;
     std::unique_ptr<rocstorage::storage_t> m_storage;
     std::shared_ptr<rocstorage::reader_t>  m_reader;
 };

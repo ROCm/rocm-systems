@@ -8,6 +8,7 @@
 #include "transaction.hpp"
 
 #include <cstddef>
+#include <filesystem>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -163,7 +164,16 @@ database::database(std::string db_path, std::string uuid, database_type_t databa
 , m_uuid{ std::move(uuid) }
 , m_database_type{ database_type }
 {
-    create_directory_for_database_file(m_db_path);
+    if(std::filesystem::exists(m_db_path))
+    {
+        m_database_type = database_type_t::on_disk;
+        m_initialized   = true;
+    }
+    else
+    {
+        create_directory_for_database_file(m_db_path);
+    }
+
     LOG_INFO("rocstorage database initialized (uuid: {}, path: {})", m_uuid, m_db_path);
 
     if(m_database_type == database_type_t::in_memory)

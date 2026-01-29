@@ -6,6 +6,8 @@
 #include "rocstorage/reader.hpp"
 #include "rocstorage/storage.hpp"
 
+#include "data_storage/database.hpp"
+
 #include <memory>
 
 namespace rocstorage
@@ -16,7 +18,8 @@ struct reader_t::impl
     explicit impl(std::unique_ptr<rocstorage::storage_t> storage);
 
 private:
-    std::unique_ptr<rocstorage::storage_t> m_storage;
+    std::unique_ptr<rocstorage::storage_t>  m_storage;
+    std::shared_ptr<data_storage::database> m_database;
 };
 
 }  // namespace rocstorage

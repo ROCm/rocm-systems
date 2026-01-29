@@ -45,6 +45,12 @@ target_link_libraries(
         nlohmann_json::nlohmann_json
 )
 
+configure_file(
+    ${CMAKE_CURRENT_LIST_DIR}/rocpd.db
+    ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/rocpd.db
+    COPYONLY
+)
+
 target_include_directories(
     rocstorage_unit_tests
     PRIVATE ${CMAKE_SOURCE_DIR}/source ${CMAKE_SOURCE_DIR}/source/common
