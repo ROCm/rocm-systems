@@ -108,8 +108,9 @@ jobs:
       - name: Determine ROCm version
         shell: bash
         run: |
-          ROCM_VERSION=$(ls /opt | grep -Eo '*([0-9]\.[0-9]\.[0-9])*')
+          ROCM_VERSION=$(ls /opt | grep -Eo '*([0-9]+\.[0-9]+\.[0-9]+)*')
           echo "ROCM_VERSION=$ROCM_VERSION" >> $GITHUB_ENV
+          echo "Determined ROCm Version: $ROCM_VERSION"
 
       - name: Install Latest Nightly ROCm
         shell: bash
@@ -493,8 +494,9 @@ jobs:
       - name: Determine ROCm version
         shell: bash
         run: |
-          ROCM_VERSION=$(ls /opt | grep -Eo '*([0-9]\.[0-9]\.[0-9])*')
+          ROCM_VERSION=$(ls /opt | grep -Eo '*([0-9]+\.[0-9]+\.[0-9]+)*')
           echo "ROCM_VERSION=$ROCM_VERSION" >> $GITHUB_ENV
+          echo "Determined ROCm Version: $ROCM_VERSION"
 
       - name: Install Latest Nightly ROCm using TheRock Tarballs
         shell: bash
@@ -698,9 +700,10 @@ jobs:
     - name: Determine ROCm version
       shell: bash
       run: |
-        ROCM_VERSION=$(ls /opt | grep -Eo '*([0-9]\.[0-9]\.[0-9])*')
+        ROCM_VERSION=$(ls /opt | grep -Eo '*([0-9]+\.[0-9]+\.[0-9]+)*')
         echo "ROCM_VERSION=$ROCM_VERSION" >> $GITHUB_ENV
-
+        echo "Determined ROCm Version: $ROCM_VERSION"
+      
     - name: Install Latest Nightly ROCm
       shell: bash
       working-directory: /tmp
