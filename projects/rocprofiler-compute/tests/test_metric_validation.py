@@ -60,9 +60,9 @@ VALIDATE_METRICS = {
                 "metric_id": "4.1.9",
                 "csv_file": "4.1_Roofline_Performance_Rates.csv",
                 "column": "Value",
-                # MI 300 series contains MI325X GPU which
+                # MI 300 series contains MI 325X GPU which
                 # uses improved HBM3E instead of HBM3 used in
-                # MI300X GPU. Hence, multiple expected values
+                # MI 300X GPU. Hence, multiple expected values
                 # to cover both cases.
                 # MI 308 has lower bandwidth.
                 # MI 300X: 3910.62 GB/s
