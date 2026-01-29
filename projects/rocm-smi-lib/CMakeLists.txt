@@ -145,7 +145,7 @@ if (${ADDRESS_SANITIZER})
 else ()
     ## Security breach mitigation flags
     set(CMAKE_CXX_FLAGS
-      "${CMAKE_CXX_FLAGS} -DFORTIFY_SOURCE=2 -fstack-protector-all -Wcast-align")
+      "${CMAKE_CXX_FLAGS} -D_FORTIFY_SOURCE=2 -fstack-protector-all -Wcast-align")
     ## More security breach mitigation flags
     set(HARDENING_LDFLAGS
       "${HARDENING_LDFLAGS} -Wl,-z,noexecstack -Wl,-z,relro -Wl,-z,now")
