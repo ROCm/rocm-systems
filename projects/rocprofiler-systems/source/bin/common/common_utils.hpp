@@ -100,20 +100,65 @@ get_preset_description(std::string_view preset_mode)
                          "  ├─ PAPI Events:     PAPI_TOT_INS, PAPI_TOT_CYC, PAPI_L3_TCM\n"
                          "  ├─ ROCm Domains:    HIP API, kernels, memory, scratch\n"
                          "  └─ GPU Metrics:     busy, temp, power, mem_usage" },
-        { "--trace-ai", "Optimized for AI/ML workloads (PyTorch, TensorFlow, JAX)\n"
-                        "  ├─ Tracing:         ON (Perfetto timeline)\n"
-                        "  ├─ Profiling:       ON (call-stack based)\n"
-                        "  ├─ CPU Sampling:    OFF (reduced overhead)\n"
-                        "  ├─ Process Metrics: ON\n"
-                        "  ├─ ROCtracer:       ON\n"
-                        "  ├─ HIP API Trace:   ON\n"
-                        "  ├─ HIP Activity:    ON (kernel timing)\n"
-                        "  ├─ RCCL:            ON (collective comms)\n"
-                        "  ├─ rocPD:           ON (PyTorch dispatcher)\n"
-                        "  ├─ MPI (MPIP):      ON\n"
-                        "  ├─ ROCm Domains:    HIP API, kernels, memory, scratch\n"
-                        "  ├─ GPU Metrics:     busy, temp, power, mem_usage\n"
-                        "  └─ Buffer Size:     2 GB (for long traces)" }
+        { "--workload-trace",
+          "Optimized for general compute workloads (AI/ML, HPC, etc.)\n"
+          "  ├─ Tracing:         ON (Perfetto timeline)\n"
+          "  ├─ Profiling:       ON (call-stack based)\n"
+          "  ├─ CPU Sampling:    OFF (reduced overhead)\n"
+          "  ├─ Process Metrics: ON\n"
+          "  ├─ ROCtracer:       ON\n"
+          "  ├─ HIP API Trace:   ON\n"
+          "  ├─ HIP Activity:    ON (kernel timing)\n"
+          "  ├─ RCCL:            ON (collective comms)\n"
+          "  ├─ rocPD:           ON (SQLite Database Output Format)\n"
+          "  ├─ MPI (MPIP):      ON\n"
+          "  ├─ ROCm Domains:    HIP API, kernels, memory, scratch\n"
+          "  ├─ GPU Metrics:     busy, temp, power, mem_usage\n"
+          "  └─ Buffer Size:     2 GB (for long traces)" },
+        { "--sys-trace", "Comprehensive system API tracing\n"
+                         "  ├─ Tracing:         ON (Perfetto timeline)\n"
+                         "  ├─ Profiling:       ON (call-stack based)\n"
+                         "  ├─ ROCm APIs:       HIP API, HSA API\n"
+                         "  ├─ Marker API:      ROCTx\n"
+                         "  ├─ RCCL:            ON (collective communications)\n"
+                         "  ├─ Decode/JPEG:     rocDecode, rocJPEG\n"
+                         "  ├─ Memory Ops:      copies, scratch, allocations\n"
+                         "  └─ Kernel Dispatch: ON" },
+        { "--runtime-trace", "Runtime API tracing (excludes compiler and low-level HSA)\n"
+                             "  ├─ Tracing:         ON (Perfetto timeline)\n"
+                             "  ├─ Profiling:       ON (call-stack based)\n"
+                             "  ├─ HIP Runtime:     ON (excludes compiler API)\n"
+                             "  ├─ Marker API:      ROCTx\n"
+                             "  ├─ RCCL:            ON (collective communications)\n"
+                             "  ├─ Decode/JPEG:     rocDecode, rocJPEG\n"
+                             "  ├─ Memory Ops:      copies, scratch, allocations\n"
+                             "  └─ Kernel Dispatch: ON" },
+        { "--trace-gpu",
+          "GPU workload analysis with host functions, MPI, and device activity\n"
+          "  ├─ Tracing:         ON (Perfetto timeline)\n"
+          "  ├─ Profiling:       OFF (reduced overhead)\n"
+          "  ├─ ROCm:            ON\n"
+          "  ├─ AMD SMI:         ON (GPU metrics)\n"
+          "  ├─ CPU Sampling:    Disabled (none)\n"
+          "  └─ ROCm Domains:    HIP runtime, ROCTx, kernels, memory, scratch" },
+        { "--trace-openmp",
+          "OpenMP offload workloads with HSA domains\n"
+          "  ├─ Tracing:         ON (Perfetto timeline)\n"
+          "  ├─ Profiling:       OFF (reduced overhead)\n"
+          "  ├─ ROCm:            ON\n"
+          "  ├─ OMPT:            ON (OpenMP tools interface)\n"
+          "  └─ ROCm Domains:    HIP runtime, ROCTx, kernels, memory, HSA API" },
+        { "--profile-mpi", "MPI communication latency profiling\n"
+                           "  ├─ Tracing:         OFF\n"
+                           "  ├─ Profiling:       ON (flat profile)\n"
+                           "  ├─ AMD SMI:         OFF\n"
+                           "  ├─ ROCm:            OFF\n"
+                           "  └─ Focus:           Wall-clock files per rank" },
+        { "--trace-hw-counters", "Hardware counter collection during execution\n"
+                                 "  ├─ Profiling:       ON\n"
+                                 "  ├─ CPU Sampling:    Disabled (none)\n"
+                                 "  ├─ ROCm Events:     VALUUtilization, Occupancy\n"
+                                 "  └─ Focus:           GPU performance counters" }
     };
 
     auto it = descriptions.find(preset_mode);
@@ -193,20 +238,30 @@ validate_preset_modes(const std::vector<std::string>& active_presets)
     if(active_presets.size() > 1)
     {
         std::cerr << "\nERROR: Multiple preset modes specified: ";
-        for(size_t i = 0; i < active_presets.size(); ++i)
+        for(const auto& active_perset : active_presets)
         {
-            std::cerr << active_presets[i];
-            if(i < active_presets.size() - 1) std::cerr << ", ";
+            std::cerr << active_perset;
+            if(active_perset != active_presets.back()) std::cerr << ", ";
         }
         std::cerr << "\n\n";
 
         std::cerr << "Only ONE preset mode can be used at a time.\n\n";
-        std::cerr << "Available presets:\n"
-                  << "  --quick         Fast profiling with sensible defaults\n"
-                  << "  --simple        Flat profile, minimal overhead\n"
-                  << "  --detailed      Full trace + hardware counters\n"
-                  << "  --trace-hpc     MPI/OpenMP/HPC applications\n"
-                  << "  --trace-ai      PyTorch/TensorFlow/JAX\n\n";
+        std::cerr
+            << "Available presets:\n"
+            << "  General Purpose:\n"
+            << "    --quick              Fast profiling with sensible defaults\n"
+            << "    --simple             Flat profile, minimal overhead\n"
+            << "    --detailed           Full trace + hardware counters\n"
+            << "  Workload-Specific:\n"
+            << "    --trace-hpc          MPI/OpenMP/HPC applications\n"
+            << "    --workload-trace     General compute workloads (AI/ML, HPC, etc.)\n"
+            << "    --trace-gpu          GPU workload analysis\n"
+            << "    --trace-openmp       OpenMP offload workloads\n"
+            << "    --profile-mpi        MPI communication latency profiling\n"
+            << "    --trace-hw-counters  Hardware counter collection\n"
+            << "  API Tracing:\n"
+            << "    --sys-trace          Comprehensive system API tracing\n"
+            << "    --runtime-trace      Runtime API tracing (no compiler/HSA)\n\n";
 
         std::cerr
             << "Choose one preset or use manual options for custom configuration.\n";
@@ -243,7 +298,10 @@ warn_if_gpu_preset_without_rocm(const std::vector<std::string>& active_presets)
 {
     for(const auto& preset : active_presets)
     {
-        if(preset == "--trace-ai" || preset == "--trace-hpc")
+        if(preset == "--workload-trace" || preset == "--trace-hpc" ||
+           preset == "--sys-trace" || preset == "--runtime-trace" ||
+           preset == "--trace-gpu" || preset == "--trace-openmp" ||
+           preset == "--trace-hw-counters")
         {
             warn_if_rocm_unavailable();
             return;

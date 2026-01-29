@@ -67,12 +67,66 @@ rocprofiler_systems_add_bin_test(
 )
 
 rocprofiler_systems_add_bin_test(
-    NAME preset-sample-trace-ai
+    NAME preset-sample-workload-trace
     TARGET rocprofiler-systems-sample
-    ARGS --trace-ai -v 2 -- ls
+    ARGS --workload-trace -v 2 -- ls
     LABELS preset sample
     TIMEOUT 60
-    PASS_REGEX "Preset:        --trace-ai"
+    PASS_REGEX "Preset:        --workload-trace"
+)
+
+rocprofiler_systems_add_bin_test(
+    NAME preset-sample-sys-trace
+    TARGET rocprofiler-systems-sample
+    ARGS --sys-trace -v 2 -- ls
+    LABELS preset sample
+    TIMEOUT 60
+    PASS_REGEX "Preset:        --sys-trace"
+)
+
+rocprofiler_systems_add_bin_test(
+    NAME preset-sample-runtime-trace
+    TARGET rocprofiler-systems-sample
+    ARGS --runtime-trace -v 2 -- ls
+    LABELS preset sample
+    TIMEOUT 60
+    PASS_REGEX "Preset:        --runtime-trace"
+)
+
+rocprofiler_systems_add_bin_test(
+    NAME preset-sample-trace-gpu
+    TARGET rocprofiler-systems-sample
+    ARGS --trace-gpu -v 2 -- ls
+    LABELS preset sample
+    TIMEOUT 60
+    PASS_REGEX "Preset:        --trace-gpu"
+)
+
+rocprofiler_systems_add_bin_test(
+    NAME preset-sample-trace-openmp
+    TARGET rocprofiler-systems-sample
+    ARGS --trace-openmp -v 2 -- ls
+    LABELS preset sample
+    TIMEOUT 60
+    PASS_REGEX "Preset:        --trace-openmp"
+)
+
+rocprofiler_systems_add_bin_test(
+    NAME preset-sample-profile-mpi
+    TARGET rocprofiler-systems-sample
+    ARGS --profile-mpi -v 2 -- ls
+    LABELS preset sample
+    TIMEOUT 60
+    PASS_REGEX "Preset:        --profile-mpi"
+)
+
+rocprofiler_systems_add_bin_test(
+    NAME preset-sample-trace-hw-counters
+    TARGET rocprofiler-systems-sample
+    ARGS --trace-hw-counters -v 2 -- ls
+    LABELS preset sample
+    TIMEOUT 60
+    PASS_REGEX "Preset:        --trace-hw-counters"
 )
 
 rocprofiler_systems_add_bin_test(
@@ -126,18 +180,72 @@ rocprofiler_systems_add_bin_test(
 )
 
 rocprofiler_systems_add_bin_test(
-    NAME preset-run-trace-ai
+    NAME preset-run-workload-trace
     TARGET rocprofiler-systems-run
-    ARGS --trace-ai -v 2 -- ls
+    ARGS --workload-trace -v 2 -- ls
     LABELS preset run
     TIMEOUT 60
-    PASS_REGEX "Preset:        --trace-ai"
+    PASS_REGEX "Preset:        --workload-trace"
+)
+
+rocprofiler_systems_add_bin_test(
+    NAME preset-run-sys-trace
+    TARGET rocprofiler-systems-run
+    ARGS --sys-trace -v 2 -- ls
+    LABELS preset run
+    TIMEOUT 60
+    PASS_REGEX "Preset:        --sys-trace"
+)
+
+rocprofiler_systems_add_bin_test(
+    NAME preset-run-runtime-trace
+    TARGET rocprofiler-systems-run
+    ARGS --runtime-trace -v 2 -- ls
+    LABELS preset run
+    TIMEOUT 60
+    PASS_REGEX "Preset:        --runtime-trace"
+)
+
+rocprofiler_systems_add_bin_test(
+    NAME preset-run-trace-gpu
+    TARGET rocprofiler-systems-run
+    ARGS --trace-gpu -v 2 -- ls
+    LABELS preset run
+    TIMEOUT 60
+    PASS_REGEX "Preset:        --trace-gpu"
+)
+
+rocprofiler_systems_add_bin_test(
+    NAME preset-run-trace-openmp
+    TARGET rocprofiler-systems-run
+    ARGS --trace-openmp -v 2 -- ls
+    LABELS preset run
+    TIMEOUT 60
+    PASS_REGEX "Preset:        --trace-openmp"
+)
+
+rocprofiler_systems_add_bin_test(
+    NAME preset-run-profile-mpi
+    TARGET rocprofiler-systems-run
+    ARGS --profile-mpi -v 2 -- ls
+    LABELS preset run
+    TIMEOUT 60
+    PASS_REGEX "Preset:        --profile-mpi"
+)
+
+rocprofiler_systems_add_bin_test(
+    NAME preset-run-trace-hw-counters
+    TARGET rocprofiler-systems-run
+    ARGS --trace-hw-counters -v 2 -- ls
+    LABELS preset run
+    TIMEOUT 60
+    PASS_REGEX "Preset:        --trace-hw-counters"
 )
 
 rocprofiler_systems_add_bin_test(
     NAME preset-run-mutual-exclusion
     TARGET rocprofiler-systems-run
-    ARGS --trace-hpc --trace-ai -- ls
+    ARGS --trace-hpc --workload-trace -- ls
     LABELS preset run
     TIMEOUT 30
     FAIL_REGEX "Multiple preset modes specified|Only ONE preset"
