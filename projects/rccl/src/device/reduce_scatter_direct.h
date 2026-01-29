@@ -5,48 +5,99 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-#include "device.h"
-#include "collectives.h"
-#include "primitives.h"
-
-template<typename T, typename RedOp>
-struct RunWorkColl<ncclFuncReduceScatterDirect, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE> {
-  __device__ __forceinline__ void run(int tid, int nThreads, struct ncclDevWorkColl* work) {
-
-    size_t msgSize = work->count * sizeof(T) * ncclShmem.comm.nRanks;
-    if (work->enableDirectReduceScatter && msgSize <= (size_t)work->directReduceScatterLimitBytes) {
-      const int nRanks = ncclShmem.comm.nRanks; 
-      const ssize_t numElements = work->count;
-
-      // Calculate Offset to utilize multiple channels
-      ssize_t elementsPerBlock = numElements / gridDim.x;
-      ssize_t remainderElements = numElements % gridDim.x;
-      // Calculate the number of elements per block for each block
-      // The first n blocks get 1 extra element to account for the remainder (n = remainderElements)
-      ssize_t numElementsPerBlock = elementsPerBlock + (blockIdx.x < remainderElements ? 1 : 0);
-      ssize_t channelOffset = blockIdx.x * elementsPerBlock + min((ssize_t)blockIdx.x, remainderElements);
-
-      // Array of src pointers pointing to rank offsets in tempBuff
-      void** srcPtrs = (void**)ncclScratchForWarp(0); 
-      if (tid == 0) {
-        for (int i = 0; i < nRanks; i++) {
-          // Define offset into tempbuff for each rank's data
-          const ssize_t srcOffset = i * numElements + channelOffset;
-          srcPtrs[i] = (void*)((T*)work->tempBuff + srcOffset);
-        }
-      }
-      // Sync threads to ensure all srcPtrs are set before reduction
-      __syncthreads();
-
-      T* recvbuff = (T*)work->recvbuff;
-      // Array for destination pointer to recvbuff
-      void* dstPtrs[1];
-      dstPtrs[0] = (void*)(recvbuff + channelOffset);
-      if (tid < nThreads) {
-        // Call reduction across all rank offsets in tempbuff and store in recvbuff
-        reduceCopy<COLL_UNROLL, USE_ACC, RedOp, T, 0, 1, 64, 0, 1, 1, 0>
-          (tid, nThreads, ncclShmem.redOpArgs[0], ncclShmem.redOpArgs, false, nRanks, srcPtrs, 1, dstPtrs, numElementsPerBlock);
-      }
-    }
-  }
-};
+ #include "device.h"
+ #include "collectives.h"
+ #include "primitives.h"
+ 
+ namespace {
+   template<typename T, typename RedOp, typename Proto>
+ #if defined(USE_INDIRECT_FUNCTION_CALL) && !defined(__gfx942__) && !defined(__gfx950__)
+   __device__ void runDirect(int tid, int nthreads, struct ncclDevWorkColl* work) {
+ #else
+   __device__ __attribute__((noinline)) void runDirect(int tid, int nthreads, struct ncclDevWorkColl* work) {
+ #endif
+ 
+     size_t msgSize = work->count * sizeof(T) * ncclShmem.comm.nRanks;
+     // NOTE: Device-side printf has limited buffering. Print once per kernel launch to avoid drops.
+ 
+     if (work->enableDirectReduceScatter && msgSize <= (size_t)work->directReduceScatterLimitBytes) {
+       const int nRanks = ncclShmem.comm.nRanks; 
+       const ssize_t numElements = work->count;
+ 
+       // Calculate Offset to utilize multiple channels
+       ssize_t elementsPerBlock = numElements / gridDim.x;
+       ssize_t remainderElements = numElements % gridDim.x;
+       // Calculate the number of elements per block for each block
+       // The first n blocks get 1 extra element to account for the remainder (n = remainderElements)
+       ssize_t numElementsPerBlock = elementsPerBlock + (blockIdx.x < remainderElements ? 1 : 0);
+       ssize_t channelOffset = blockIdx.x * elementsPerBlock + min((ssize_t)blockIdx.x, remainderElements);
+ 
+       // Array of src pointers pointing to rank offsets in tempBuff
+       void** srcPtrs = (void**)ncclScratchForWarp(0); 
+       if (tid == 0) {
+         for (int i = 0; i < nRanks; i++) {
+           // Define offset into tempbuff for each rank's data
+           const ssize_t srcOffset = i * numElements + channelOffset;
+           srcPtrs[i] = (void*)((T*)work->tempBuff + srcOffset);
+         }
+       }
+       // Sync threads to ensure all srcPtrs are set before reduction
+       __syncthreads();
+ 
+       T* recvbuff = (T*)work->recvbuff;
+       // Array for destination pointer to recvbuff
+       void* dstPtrs[1];
+       dstPtrs[0] = (void*)(recvbuff + channelOffset);
+       if (tid < nthreads) {
+         // Call reduction across all rank offsets in tempbuff and store in recvbuff
+         reduceCopy<COLL_UNROLL, USE_ACC, RedOp, T, 0, 1, 64, 0, 1, 1, 0>
+           (tid, nthreads, ncclShmem.redOpArgs[0], ncclShmem.redOpArgs, false, nRanks, srcPtrs, 1, dstPtrs, numElementsPerBlock);
+       }
+     }
+   }
+ }
+ 
+ template<typename T, typename RedOp>
+ struct RunWorkColl<ncclFuncReduceScatterDirect, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE> {
+   __device__ __forceinline__ void run(int tid, int nthreads, struct ncclDevWorkColl* work) {
+     using Proto = ProtoSimple<REDUCESCATTER_CHUNKSTEPS/REDUCESCATTER_SLICESTEPS, REDUCESCATTER_SLICESTEPS>;
+     runDirect<T, RedOp, Proto>(tid, nthreads, work);
+   }
+ };
+ 
+ template<typename T, typename RedOp>
+ struct RunWorkColl<ncclFuncReduceScatterDirect, T, RedOp, NCCL_ALGO_PAT, NCCL_PROTO_SIMPLE> {
+   __device__ __forceinline__ void run(int tid, int nthreads, struct ncclDevWorkColl* work) {
+     using Proto = ProtoSimple<REDUCESCATTER_CHUNKSTEPS/REDUCESCATTER_SLICESTEPS, REDUCESCATTER_SLICESTEPS>;
+     runDirect<T, RedOp, Proto>(tid, nthreads, work);
+   }
+ };
+ 
+ template<typename T, typename RedOp>
+ struct RunWorkColl<ncclFuncReduceScatterDirect, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_LL128> {
+   __device__ __forceinline__ void run(int tid, int nthreads, struct ncclDevWorkColl* work) {
+     runDirect<T, RedOp, ProtoLL128>(tid, nthreads, work);
+   }
+ };
+ 
+ template<typename T, typename RedOp>
+ struct RunWorkColl<ncclFuncReduceScatterDirect, T, RedOp, NCCL_ALGO_PAT, NCCL_PROTO_LL128> {
+   __device__ __forceinline__ void run(int tid, int nthreads, struct ncclDevWorkColl* work) {
+     runDirect<T, RedOp, ProtoLL128>(tid, nthreads, work);
+   }
+ };
+ 
+ template<typename T, typename RedOp>
+ struct RunWorkColl<ncclFuncReduceScatterDirect, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_LL> {
+   __device__ __forceinline__ void run(int tid, int nthreads, struct ncclDevWorkColl* work) {
+     runDirect<T, RedOp, ProtoLL>(tid, nthreads, work);
+   }
+ };
+ 
+ template<typename T, typename RedOp>
+ struct RunWorkColl<ncclFuncReduceScatterDirect, T, RedOp, NCCL_ALGO_PAT, NCCL_PROTO_LL> {
+   __device__ __forceinline__ void run(int tid, int nthreads, struct ncclDevWorkColl* work) {
+     runDirect<T, RedOp, ProtoLL>(tid, nthreads, work);
+   }
+ };
+ 
