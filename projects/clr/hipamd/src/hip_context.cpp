@@ -74,7 +74,7 @@ void init(bool* status) {
     amd::Device* const amd_device = devices[i];
     amd_device->SetActiveWait(true);
     // Use the eternal contexts that already exist in amd::Device for the new hip::Device
-    auto* device = new (std::nothrow) Device(&amd_device->context(), static_cast<unsigned int>(i));
+    auto* device = new Device(&amd_device->context(), static_cast<unsigned int>(i));
     if (!device || !device->Create()) {
       *status = false;
       if (device) {
@@ -103,7 +103,7 @@ void init(bool* status) {
   }
 
   // Create and initialize host context
-  host_context = new (std::nothrow) amd::Context(devices, amd::Context::Info());
+  host_context = new amd::Context(devices, amd::Context::Info());
   if (!host_context || CL_SUCCESS != host_context->create(nullptr)) {
     if (host_context) {
       host_context->release();

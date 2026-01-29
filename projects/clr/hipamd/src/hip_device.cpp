@@ -59,13 +59,13 @@ hip::Stream* Device::NullStream(bool wait) {
 // ================================================================================================
 bool Device::Create() {
   // Create default memory pool
-  default_mem_pool_ = new (std::nothrow) MemoryPool(this);
+  default_mem_pool_ = new MemoryPool(this);
   if (default_mem_pool_ == nullptr) {
     return false;
   }
 
   // Create graph memory pool
-  graph_mem_pool_ = new (std::nothrow) MemoryPool(this, nullptr, true);
+  graph_mem_pool_ = new MemoryPool(this, nullptr, true);
   if (graph_mem_pool_ == nullptr) {
     return false;
   }
@@ -87,7 +87,7 @@ bool Device::Create() {
                            .win32SecurityAttributes = nullptr,
                            .maxSize = 0,
                            .reserved = {}};
-  default_managed_mem_pool_ = new (std::nothrow) MemoryPool(this, &props);
+  default_managed_mem_pool_ = new MemoryPool(this, &props);
   if (default_managed_mem_pool_ == nullptr) {
     return false;
   }
