@@ -1611,6 +1611,11 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   allGather3Data[rank].cpuVendor = comm->cpuVendor;
 
   comm->nChannels = std::min(treeGraph->nChannels, ringGraph->nChannels);
+
+  //For a 1‑rank job there’s no topology constraint, so ncclTopoCompute drives the ring to its allowed maximum, which results 4 x MAXCHANNELS channels for single rank comms and causes issues.
+  if (comm->nRanks == 1) {
+    comm->nChannels = treeGraph->nChannels = ringGraph->nChannels = 8;
+  }
   NCCLCHECKGOTO(ncclTopoPreset(comm, graphs, &allGather3Data[rank].topoRanks), ret, fail);
 
   NCCLCHECKGOTO(bootstrapAllGather(comm->bootstrap, allGather3Data, sizeof(*allGather3Data)), ret, fail);
