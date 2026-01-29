@@ -107,7 +107,7 @@ class cli_analysis(OmniAnalyze_Base):
             path = Path(workload_path)
             if not path.exists():
                 console_error(f"Workload path does not exist: {workload_path}")
-            process_torch_trace_output(workload_path)
+            process_torch_trace_output(str(workload_path))
 
         if getattr(args, "torch_operator", False):
             # Check whether any torch operator data was actually loaded
