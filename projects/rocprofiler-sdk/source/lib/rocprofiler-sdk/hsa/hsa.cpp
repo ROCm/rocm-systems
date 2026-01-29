@@ -26,6 +26,7 @@
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
+#include "lib/rocprofiler-sdk/context/domain.hpp"
 #include "lib/rocprofiler-sdk/hsa/details/ostream.hpp"
 #include "lib/rocprofiler-sdk/hsa/pc_sampling.hpp"
 #include "lib/rocprofiler-sdk/hsa/scratch_memory.hpp"
@@ -632,6 +633,9 @@ update_table(const context::context_array_t& _contexts,
 {
     using table_type = typename hsa_table_lookup<TableIdx>::type;
 
+    static_assert(OpIdx < context::domain_ops_padding,
+                  "operation index exceeds context domain ops padding");
+
     if constexpr(std::is_same<table_type, Tp>::value)
     {
         auto _info = hsa_api_info<TableIdx, OpIdx>{};
@@ -654,7 +658,7 @@ update_table(const context::context_array_t& _contexts,
         // 3. update function pointer with wrapper
         auto& _table = _info.get_table(_orig);
         auto& _func  = _info.get_table_func(_table);
-        _func        = _info.get_functor(_func);
+        if(_func) _func = _info.get_functor(_func);
     }
 }
 
