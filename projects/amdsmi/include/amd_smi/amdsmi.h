@@ -2256,7 +2256,98 @@ typedef struct {
 } amdsmi_gpu_metrics_t;
 
 /**
- * @brief Structure holds kfd information
+ * @brief XGMI Link Status Type
+ *
+ * @cond @tag{gpu_bm_linux} @endcond
+ */
+typedef enum {
+    AMDSMI_XGMI_LINK_DOWN,     //!< XGMI link status is down
+    AMDSMI_XGMI_LINK_UP,       //!< XGMI link status is up
+    AMDSMI_XGMI_LINK_DISABLE   //!< XGMI link status is disabled
+} amdsmi_xgmi_link_status_type_t;
+
+/**
+ * @brief XGMI Link Status
+ *
+ * @cond @tag{gpu_bm_linux} @endcond
+ */
+typedef struct {
+    uint32_t total_links;   //!< The total links in the status array
+    amdsmi_xgmi_link_status_type_t status[AMDSMI_MAX_NUM_XGMI_LINKS];
+    uint64_t reserved[7];
+} amdsmi_xgmi_link_status_t;
+
+/**
+ * @brief This structure holds the name value pairs
+ *
+ * @cond @tag{gpu_bm_linux} @endcond
+ */
+typedef struct {
+    char name[AMDSMI_MAX_STRING_LENGTH];  //!< Name
+    uint64_t value;                     //!< Use uint64_t to make it universal
+} amdsmi_name_value_t;
+
+/**
+ * @brief This register type for register table
+ *
+ * @cond @tag{gpu_bm_linux} @endcond
+ */
+typedef enum {
+    AMDSMI_REG_XGMI,  //!< XGMI registers
+    AMDSMI_REG_WAFL,  //!< WAFL registers
+    AMDSMI_REG_PCIE,  //!< PCIe registers
+    AMDSMI_REG_USR,   //!< Usr registers
+    AMDSMI_REG_USR1   //!< Usr1 registers
+} amdsmi_reg_type_t;
+
+/**
+ * @brief This structure holds ras feature information.
+ *
+ * @cond @tag{gpu_bm_linux} @platform{guest_windows} @tag{host} @endcond
+ */
+typedef struct {
+    uint32_t ras_eeprom_version;          /**< PARITY error(bit 0), Single Bit correctable (bit1),
+                                               Double bit error detection (bit2), Poison (bit 3). */
+    uint32_t ecc_correction_schema_flag;  /**< ecc_correction_schema mask.
+                                               PARITY error(bit 0), Single Bit correctable (bit1),
+                                               Double bit error detection (bit2), Poison (bit 3) */
+    struct ras_info_ {
+        uint32_t dram_ecc  : 1;
+        uint32_t sram_ecc  : 1;
+        uint32_t poisoning : 1;
+        uint32_t rsvd     : 29;
+    } ras_info;
+    bool needs_reboot;
+} amdsmi_ras_feature_t;
+
+/**
+ * @brief This structure holds error counts.
+ *
+ * @cond @tag{gpu_bm_linux} @tag{guest_windows} @tag{host} @endcond
+ */
+typedef struct {
+    uint64_t correctable_count;    //!< Accumulated correctable errors
+    uint64_t uncorrectable_count;  //!< Accumulated uncorrectable errors
+    uint64_t deferred_count;       //!< Accumulated deferred errors
+    uint64_t reserved[5];
+} amdsmi_error_count_t;
+
+/**
+ * @brief This structure contains information specific to a process.
+ * Sum of the process memory is not expected to be the total memory usage.
+ *
+ * @cond @tag{gpu_bm_linux} @endcond
+ */
+typedef struct {
+    uint32_t process_id;    //!< Process ID
+    uint64_t vram_usage;    //!< VRAM usage in MB
+    uint64_t sdma_usage;    //!< SDMA usage in microseconds
+    uint32_t cu_occupancy;  //!< Compute Unit usage in percent
+    uint32_t evicted_time;    //!< Time that queues are evicted on a GPU in milliseconds
+} amdsmi_process_info_t;
+
+/**
+ * @brief Topology Nearest
  *
  * @cond @tag{gpu_bm_linux} @endcond
  */
@@ -6782,7 +6873,9 @@ amdsmi_status_t amdsmi_stop_gpu_event_notification(amdsmi_processor_handle proce
  */
 
 /**
- *  @brief Get the XGMI link status
+ *  @brief Returns the list of process information running on a given GPU.
+ *  If pdh.dll is not present on the system, this API returns
+ *  AMDSMI_STATUS_NOT_SUPPORTED. Sum of the process memory is not expected to be the total memory usage.
  *
  *  @ingroup tagXGMI
  *

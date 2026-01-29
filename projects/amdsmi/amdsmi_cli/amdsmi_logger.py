@@ -678,11 +678,13 @@ class AMDSMILogger():
                         writer.writerows(self.watch_output)
             else:
                 with self.destination.open('a', newline = '', encoding="utf-8") as output_file:
-                    # Get the header as a list of the first element to maintain order
-                    csv_header = stored_csv_output[0].keys()
-                    writer = csv.DictWriter(output_file, csv_header)
-                    writer.writeheader()
-                    writer.writerows(stored_csv_output)
+                    # Only write to file if there is data
+                    if stored_csv_output:
+                        # Get the header as a list of the first element to maintain order
+                        csv_header = stored_csv_output[0].keys()
+                        writer = csv.DictWriter(output_file, csv_header)
+                        writer.writeheader()
+                        writer.writerows(stored_csv_output)
 
 
     def _print_dual_csv_output(self, multiple_device_enabled=False, watching_output=False):

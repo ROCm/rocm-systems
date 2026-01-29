@@ -47,6 +47,14 @@ add_executable(square2 ${EXCLUDE_OPTION} square.hip)
 
 target_include_directories(square2 PRIVATE ../../common)
 
+# Set RPATH so executable can find HIP libraries at runtime
+if(UNIX)
+  set_target_properties(square2 PROPERTIES
+    BUILD_RPATH "${ROCM_PATH}/lib"
+    INSTALL_RPATH "${ROCM_PATH}/lib"
+  )
+endif()
+
 if(TARGET build_cookbook)
 add_dependencies(build_cookbook square2)
 endif()
