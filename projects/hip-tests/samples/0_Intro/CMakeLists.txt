@@ -21,8 +21,8 @@
 
 cmake_minimum_required(VERSION 3.21.3)
 add_custom_target(build_intro)
-add_subdirectory(bit_extract)
+# add_subdirectory(bit_extract)
 add_subdirectory(module_api)
 add_subdirectory(module_api_global)
-add_subdirectory(square)
-add_subdirectory(generic_target)
+# add_subdirectory(square)
+# add_subdirectory(generic_target)

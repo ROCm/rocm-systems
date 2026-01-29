@@ -66,6 +66,10 @@ Ensure you have the following installed:
     ```
     cmake -DCMAKE_INSTALL_PREFIX=/opt/rocm ..
     ```
+
+    ```sh
+    cmake -DCMAKE_INSTALL_PREFIX=~/Projects/rocm-systems/rocm ..
+    ```
 4. **Compile the project**
     ```sh
     make

@@ -31,6 +31,10 @@ If you need to build static clr library, `rocm-llvm-dev` package should be insta
 
         - `HIPCC_BIN_DIR` points to hipcc directory, if you have ROCm installed you can point it to `$ROCM_PATH/bin`
 
+    - Example
+
+        - `cmake -DHIP_COMMON_DIR=$HIP_DIR -DCMAKE_PREFIX_PATH="/opt/rocm/" -DCMAKE_INSTALL_PREFIX=~/Projects/rocm-systems/rocm -DCLR_BUILD_HIP=ON -DCLR_BUILD_OCL=OFF -DHIP_PLATFORM=amd -DCMAKE_BUILD_TYPE=Debug .. 2>&1 | tee cmake.log`
+
 - For OpenCL™:
 
     - `cmake .. -DCLR_BUILD_OCL=ON`
