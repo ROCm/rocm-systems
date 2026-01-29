@@ -9,12 +9,12 @@
 #include <string>
 #include <type_traits>
 
-namespace rocstorage::data_storage::queries::query_builders
+namespace rocstorage::queries::insert
 {
 
 struct query_value_builder
 {
-    query_value_builder(std::stringstream& ss)
+    explicit query_value_builder(std::stringstream& ss)
     : m_stream{ ss }
     {}
 
@@ -28,7 +28,7 @@ struct query_value_builder
         return *this;
     }
 
-    std::string get_query_string() { return m_stream.str(); }
+    [[nodiscard]] std::string get_query_string() const { return m_stream.str(); }
 
 private:
     template <typename T>
@@ -69,7 +69,7 @@ private:
 
 struct query_columns_builder
 {
-    query_columns_builder(std::stringstream& ss)
+    explicit query_columns_builder(std::stringstream& ss)
     : m_stream{ ss }
     , m_value_builder{ m_stream }
     {}
@@ -90,4 +90,4 @@ private:
     query_value_builder m_value_builder;
 };
 
-}  // namespace rocstorage::data_storage::queries::query_builders
+}  // namespace rocstorage::queries::insert

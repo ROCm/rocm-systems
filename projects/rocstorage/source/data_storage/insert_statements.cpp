@@ -3,8 +3,8 @@
 
 #include "insert_statements.hpp"
 #include "database.hpp"
+#include "queries/insert/table_insert_query.hpp"
 #include "spdlog/fmt/bundled/core.h"
-#include "table_insert_query.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -44,7 +44,7 @@ insert_statements::insert_statements(std::shared_ptr<database> database, std::st
 void
 insert_statements::initialize_string_statement()
 {
-    data_storage::queries::table_insert_query query_builder;
+    rocstorage::queries::insert::table_insert_query query_builder;
     auto query = query_builder.set_table_name(fmt::format("rocpd_string_{}", m_uuid))
                      .set_columns("id", "string")
                      .set_values('?', '?')
@@ -57,7 +57,7 @@ insert_statements::initialize_string_statement()
 void
 insert_statements::initialize_node_info_statement()
 {
-    data_storage::queries::table_insert_query query_builder;
+    rocstorage::queries::insert::table_insert_query query_builder;
     auto query = query_builder.set_table_name(fmt::format("rocpd_info_node_{}", m_uuid))
                      .set_columns("id",
                                   "hash",
@@ -85,8 +85,8 @@ insert_statements::initialize_node_info_statement()
 void
 insert_statements::initialize_process_info_statement()
 {
-    data_storage::queries::table_insert_query query_builder;
-    auto                                      query =
+    rocstorage::queries::insert::table_insert_query query_builder;
+    auto                                            query =
         query_builder.set_table_name(fmt::format("rocpd_info_process_{}", m_uuid))
             .set_columns("id",
                          "nid",
@@ -119,8 +119,8 @@ insert_statements::initialize_process_info_statement()
 void
 insert_statements::initialize_thread_info_statement()
 {
-    data_storage::queries::table_insert_query query_builder;
-    auto                                      query =
+    rocstorage::queries::insert::table_insert_query query_builder;
+    auto                                            query =
         query_builder.set_table_name(fmt::format("rocpd_info_thread_{}", m_uuid))
             .set_columns(
                 "id", "nid", "ppid", "pid", "tid", "name", "start", "end", "extdata")
@@ -140,8 +140,8 @@ insert_statements::initialize_thread_info_statement()
 void
 insert_statements::initialize_agent_info_statement()
 {
-    data_storage::queries::table_insert_query query_builder;
-    auto                                      query =
+    rocstorage::queries::insert::table_insert_query query_builder;
+    auto                                            query =
         query_builder.set_table_name(fmt::format("rocpd_info_agent_{}", m_uuid))
             .set_columns("id",
                          "nid",
@@ -180,7 +180,7 @@ insert_statements::initialize_agent_info_statement()
 void
 insert_statements::initialize_pmc_info_statement()
 {
-    data_storage::queries::table_insert_query query_builder;
+    rocstorage::queries::insert::table_insert_query query_builder;
     auto query = query_builder.set_table_name(fmt::format("rocpd_info_pmc_{}", m_uuid))
                      .set_columns("id",
                                   "nid",
@@ -246,7 +246,7 @@ insert_statements::initialize_pmc_info_statement()
 void
 insert_statements::initialize_stream_info_statement()
 {
-    data_storage::queries::table_insert_query query_builder;
+    rocstorage::queries::insert::table_insert_query query_builder;
     auto query = query_builder.set_table_name(fmt::format("rocpd_info_stream_{}", m_uuid))
                      .set_columns("id", "nid", "pid", "name", "extdata")
                      .set_values('?', '?', '?', '?', '?')
@@ -261,7 +261,7 @@ insert_statements::initialize_stream_info_statement()
 void
 insert_statements::initialize_queue_info_statement()
 {
-    data_storage::queries::table_insert_query query_builder;
+    rocstorage::queries::insert::table_insert_query query_builder;
     auto query = query_builder.set_table_name(fmt::format("rocpd_info_queue_{}", m_uuid))
                      .set_columns("id", "nid", "pid", "name", "extdata")
                      .set_values('?', '?', '?', '?', '?')
@@ -276,8 +276,8 @@ insert_statements::initialize_queue_info_statement()
 void
 insert_statements::initialize_kernel_symbol_info_statement()
 {
-    data_storage::queries::table_insert_query query_builder;
-    auto                                      query =
+    rocstorage::queries::insert::table_insert_query query_builder;
+    auto                                            query =
         query_builder.set_table_name(fmt::format("rocpd_info_kernel_symbol_{}", m_uuid))
             .set_columns("id",
                          "nid",
@@ -318,8 +318,8 @@ insert_statements::initialize_kernel_symbol_info_statement()
 void
 insert_statements::initialize_code_object_info_statement()
 {
-    data_storage::queries::table_insert_query query_builder;
-    auto                                      query =
+    rocstorage::queries::insert::table_insert_query query_builder;
+    auto                                            query =
         query_builder.set_table_name(fmt::format("rocpd_info_code_object_{}", m_uuid))
             .set_columns("id",
                          "nid",
@@ -349,7 +349,7 @@ insert_statements::initialize_code_object_info_statement()
 void
 insert_statements::initialize_track_info_statement()
 {
-    data_storage::queries::table_insert_query query_builder;
+    rocstorage::queries::insert::table_insert_query query_builder;
     auto query = query_builder.set_table_name(fmt::format("rocpd_track_{}", m_uuid))
                      .set_columns("id", "nid", "pid", "tid", "name_id", "extdata")
                      .set_values('?', '?', '?', '?', '?', '?')
@@ -366,7 +366,7 @@ insert_statements::initialize_track_info_statement()
 void
 insert_statements::initialize_event_statement()
 {
-    data_storage::queries::table_insert_query query_builder;
+    rocstorage::queries::insert::table_insert_query query_builder;
     auto query = query_builder.set_table_name(fmt::format("rocpd_event_{}", m_uuid))
                      .set_columns("id",
                                   "category_id",
@@ -392,8 +392,8 @@ insert_statements::initialize_event_statement()
 void
 insert_statements::initialize_arg_statement()
 {
-    data_storage::queries::table_insert_query query_builder;
-    auto                                      query =
+    rocstorage::queries::insert::table_insert_query query_builder;
+    auto                                            query =
         query_builder.set_table_name(fmt::format("rocpd_arg_{}", m_uuid))
             .set_columns("id", "event_id", "position", "type", "name", "value", "extdata")
             .set_values('?', '?', '?', '?', '?', '?', '?')
@@ -410,7 +410,7 @@ insert_statements::initialize_arg_statement()
 void
 insert_statements::initialize_pmc_event_statement()
 {
-    data_storage::queries::table_insert_query query_builder;
+    rocstorage::queries::insert::table_insert_query query_builder;
     auto query = query_builder.set_table_name(fmt::format("rocpd_pmc_event_{}", m_uuid))
                      .set_columns("id", "event_id", "pmc_id", "value", "extdata")
                      .set_values('?', '?', '?', '?', '?')
@@ -426,7 +426,7 @@ insert_statements::initialize_pmc_event_statement()
 void
 insert_statements::initialize_region_statement()
 {
-    data_storage::queries::table_insert_query query_builder;
+    rocstorage::queries::insert::table_insert_query query_builder;
     auto query = query_builder.set_table_name(fmt::format("rocpd_region_{}", m_uuid))
                      .set_columns("id",
                                   "nid",
@@ -454,7 +454,7 @@ insert_statements::initialize_region_statement()
 void
 insert_statements::initialize_sample_statement()
 {
-    data_storage::queries::table_insert_query query_builder;
+    rocstorage::queries::insert::table_insert_query query_builder;
     auto query = query_builder.set_table_name(fmt::format("rocpd_sample_{}", m_uuid))
                      .set_columns("id", "track_id", "timestamp", "event_id", "extdata")
                      .set_values('?', '?', '?', '?', '?')
@@ -470,8 +470,8 @@ insert_statements::initialize_sample_statement()
 void
 insert_statements::initialize_kernel_dispatch_statement()
 {
-    data_storage::queries::table_insert_query query_builder;
-    auto                                      query =
+    rocstorage::queries::insert::table_insert_query query_builder;
+    auto                                            query =
         query_builder.set_table_name(fmt::format("rocpd_kernel_dispatch_{}", m_uuid))
             .set_columns("id",
                          "nid",
@@ -546,7 +546,7 @@ insert_statements::initialize_kernel_dispatch_statement()
 void
 insert_statements::initialize_memory_copy_statement()
 {
-    data_storage::queries::table_insert_query query_builder;
+    rocstorage::queries::insert::table_insert_query query_builder;
     auto query = query_builder.set_table_name(fmt::format("rocpd_memory_copy_{}", m_uuid))
                      .set_columns("id",
                                   "nid",
@@ -606,8 +606,8 @@ insert_statements::initialize_memory_copy_statement()
 void
 insert_statements::initialize_memory_alloc_statement()
 {
-    data_storage::queries::table_insert_query query_builder;
-    auto                                      query =
+    rocstorage::queries::insert::table_insert_query query_builder;
+    auto                                            query =
         query_builder.set_table_name(fmt::format("rocpd_memory_allocate_{}", m_uuid))
             .set_columns("id",
                          "nid",

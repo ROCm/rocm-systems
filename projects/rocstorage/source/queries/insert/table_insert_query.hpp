@@ -5,9 +5,10 @@
 
 #include "insert_query_builders.hpp"
 
+#include <sstream>
 #include <string>
 
-namespace rocstorage::data_storage::queries
+namespace rocstorage::queries::insert
 {
 
 struct table_insert_query
@@ -16,7 +17,7 @@ struct table_insert_query
     : m_query_columns_builder{ m_ss }
     {}
 
-    query_builders::query_columns_builder& set_table_name(const std::string& table_name)
+    query_columns_builder& set_table_name(const std::string& table_name)
     {
         m_ss.str("");
         m_ss << "INSERT INTO " << table_name << " ";
@@ -24,8 +25,8 @@ struct table_insert_query
     }
 
 private:
-    std::stringstream                     m_ss;
-    query_builders::query_columns_builder m_query_columns_builder;
+    std::stringstream     m_ss;
+    query_columns_builder m_query_columns_builder;
 };
 
-}  // namespace rocstorage::data_storage::queries
+}  // namespace rocstorage::queries::insert

@@ -27,6 +27,7 @@ set(UNIT_TEST_SOURCES
     reader_test.cpp
     insert_query_builders_test.cpp
     table_insert_query_test.cpp
+    table_select_query_test.cpp
     database_test.cpp
     json_serializer_test.cpp
 )
@@ -37,6 +38,7 @@ target_link_libraries(
     rocstorage_unit_tests
     PRIVATE
         rocstorage
+        rocstorage_queries
         GTest::gtest
         GTest::gtest_main
         GTest::gmock
@@ -45,15 +47,18 @@ target_link_libraries(
         nlohmann_json::nlohmann_json
 )
 
-configure_file(
-    ${CMAKE_CURRENT_LIST_DIR}/rocpd.db
-    ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/rocpd.db
-    COPYONLY
-)
+# configure_file(
+#     ${CMAKE_CURRENT_LIST_DIR}/rocpd.db
+#     ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/rocpd.db
+#     COPYONLY
+# )
 
 target_include_directories(
     rocstorage_unit_tests
-    PRIVATE ${CMAKE_SOURCE_DIR}/source ${CMAKE_SOURCE_DIR}/source/common
+    PRIVATE
+        ${CMAKE_SOURCE_DIR}/source
+        ${CMAKE_SOURCE_DIR}/source/common
+        ${CMAKE_SOURCE_DIR}/source/queries
 )
 
 target_compile_features(rocstorage_unit_tests PRIVATE cxx_std_17)

@@ -20,25 +20,54 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-set(rocstorage_sources
-    ${CMAKE_CURRENT_LIST_DIR}/writer.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/writer_impl.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/insert_validator.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/json_serializers.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/reader.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/reader_impl.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/storage.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/storage_impl.cpp
+# ------------------------------------------------------------ #
+# rocstorage_queries static library
+# ------------------------------------------------------------ #
+
+add_library(rocstorage_queries STATIC)
+
+set(queries_sources
+    ${CMAKE_CURRENT_LIST_DIR}/query_builder_base.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/select/select_query_builders.cpp
 )
-target_sources(rocstorage PRIVATE ${rocstorage_sources})
 
-# ------------------------------------------------------------ #
-# Common headers
-# ------------------------------------------------------------ #
-target_include_directories(rocstorage PRIVATE ${CMAKE_CURRENT_LIST_DIR}/common)
+target_sources(rocstorage_queries PRIVATE ${queries_sources})
 
-add_subdirectory(queries)
-add_subdirectory(data_storage)
+target_include_directories(
+    rocstorage_queries
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/..>
+)
 
-# Link queries library to rocstorage
-target_link_libraries(rocstorage PRIVATE rocstorage_queries)
+# Include common headers for traits
+target_include_directories(
+    rocstorage_queries
+    PRIVATE ${CMAKE_CURRENT_LIST_DIR}/../common
+)
+
+target_compile_options(
+    rocstorage_queries
+    PRIVATE
+        $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:
+        -Wall
+        -Wextra
+        -Wshadow
+        -Wvla
+        -Wpedantic
+        -Wconversion
+        -Wsign-conversion
+        -Wnon-virtual-dtor
+        -Woverloaded-virtual
+        -Wnull-dereference
+        >
+)
+
+set_target_properties(
+    rocstorage_queries
+    PROPERTIES
+        CXX_STANDARD 17
+        CXX_STANDARD_REQUIRED ON
+        CXX_EXTENSIONS OFF
+        POSITION_INDEPENDENT_CODE ON
+)
