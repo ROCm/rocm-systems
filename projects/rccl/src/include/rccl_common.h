@@ -53,7 +53,6 @@ typedef enum RcclTunableColls {
 #define RCCL_MI3XX_MAX_MULTI_NODE_CHANNELS 64
 #define RCCL_MI3XX_MAX_SINGLE_NODE_CHANNELS 56
 
-
 typedef enum {
   RCCL_VALUE_UNSET = -2,
   RCCL_VALUE_INVALID = -1
