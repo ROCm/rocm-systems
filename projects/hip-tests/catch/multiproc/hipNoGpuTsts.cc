@@ -712,9 +712,9 @@ static bool NoGpuTst_hipExtGetLinkTypeAndHopCount() {
 static bool NoGpuTst_hipExtStreamGetCUMask() {
   bool passed = false;
   hipError_t err;
-  uint32_t cuMaskSize = 1024;
-  uint32_t cuMask;
-  err = hipExtStreamGetCUMask(0, cuMaskSize, &cuMask);
+  uint32_t cuMaskSize = 16;  // Enough for 512 CUs
+  uint32_t cuMask[16];
+  err = hipExtStreamGetCUMask(0, cuMaskSize, cuMask);
   if (err == hipErrorNoDevice) {
     passed = true;
   } else {
