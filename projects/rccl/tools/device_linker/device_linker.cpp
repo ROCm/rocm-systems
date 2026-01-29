@@ -166,9 +166,13 @@ private:
 // Device code extraction from host .o files
 // ============================================================================
 
+// Global target arch for device extraction (set from command line)
+std::string g_target_arch = "gfx942";
+
 // Extract device code from a host object file using clang-offload-bundler
 // Returns empty vector on failure
-std::vector<uint8_t> extractDeviceFromHostObject(const std::string& path, const std::string& target_arch = "gfx942") {
+std::vector<uint8_t> extractDeviceFromHostObject(const std::string& path) {
+    const std::string& target_arch = g_target_arch;
     // First check if this is already a device ELF
     {
         MappedFile file(path);
@@ -513,6 +517,16 @@ class ElfBuilder {
 public:
     void setFlags(uint32_t flags) { flags_ = flags; }
     
+    void setDynamicInfo(uint64_t symtab_addr, uint64_t strtab_addr, uint64_t strtab_size,
+                        uint64_t gnuhash_addr, uint64_t hash_addr) {
+        has_dynamic_info_ = true;
+        dyn_symtab_ = symtab_addr;
+        dyn_strtab_ = strtab_addr;
+        dyn_strsz_ = strtab_size;
+        dyn_gnuhash_ = gnuhash_addr;
+        dyn_hash_ = hash_addr;
+    }
+    
     void addSection(const std::string& name, uint32_t type, uint64_t flags,
                     uint64_t addr, const std::vector<uint8_t>& data, 
                     uint64_t align = 1, uint64_t entsize = 0) {
@@ -527,7 +541,23 @@ public:
         sections_.push_back(std::move(sec));
     }
     
+    void updateSection(const std::string& name, const std::vector<uint8_t>& data) {
+        for (auto& sec : sections_) {
+            if (sec.name == name) {
+                sec.data = data;
+                return;
+            }
+        }
+    }
+    
     std::vector<uint8_t> build() {
+        // For DYN output, we need:
+        // - ELF header with program headers
+        // - Program headers (LOAD segments)
+        // - Sections
+        // - .dynamic section
+        // - Section headers
+        
         // Build section name string table
         std::vector<uint8_t> shstrtab;
         shstrtab.push_back(0);  // Empty string at index 0
@@ -539,29 +569,74 @@ public:
             shstrtab.insert(shstrtab.end(), sec.name.begin(), sec.name.end());
             shstrtab.push_back(0);
         }
+        // Add .dynamic name
+        uint32_t dynamic_name_off = shstrtab.size();
+        const char* dynamic_name = ".dynamic";
+        shstrtab.insert(shstrtab.end(), dynamic_name, dynamic_name + strlen(dynamic_name) + 1);
+        
         // Add .shstrtab name
         uint32_t shstrtab_name_off = shstrtab.size();
         const char* shstrtab_name = ".shstrtab";
         shstrtab.insert(shstrtab.end(), shstrtab_name, shstrtab_name + strlen(shstrtab_name) + 1);
         
-        // Calculate layout
-        size_t offset = 64;  // ELF header
+        // Calculate layout with program headers
+        // Layout: ELF header (64) + Program headers + Padding + Section data + .dynamic + .shstrtab + Section headers
+        // CRITICAL: For LOAD segment with p_offset=0, p_vaddr=0, file offsets MUST equal virtual addresses
+        const size_t num_phdrs = 3;  // PHDR, LOAD, DYNAMIC
+        const size_t phdr_size = 56;
+        size_t header_end = 64 + num_phdrs * phdr_size;  // After ELF header and program headers
+        
         std::vector<size_t> section_offsets;
+        size_t offset = header_end;
         
         for (const auto& sec : sections_) {
-            offset = (offset + sec.align - 1) & ~(sec.align - 1);
-            section_offsets.push_back(offset);
-            offset += sec.data.size();
+            // Each section's file offset must equal its virtual address
+            // This ensures the LOAD segment (p_offset=0, p_vaddr=0) maps correctly
+            size_t target_offset = sec.addr;
+            if (target_offset < offset) {
+                // Virtual address is before current offset - need to adjust
+                // This shouldn't happen if sections are sorted by address
+                fprintf(stderr, "Warning: Section %s vaddr 0x%lx < current offset 0x%lx\n",
+                        sec.name.c_str(), sec.addr, offset);
+                target_offset = (offset + sec.align - 1) & ~(sec.align - 1);
+            }
+            section_offsets.push_back(target_offset);
+            offset = target_offset + sec.data.size();
         }
         
-        // shstrtab section (no alignment needed, align=1)
+        // .dynamic section - populate with symbol table pointers
+        offset = (offset + 8 - 1) & ~(8 - 1);
+        size_t dynamic_offset = offset;
+        std::vector<uint8_t> dynamic_data;
+        
+        auto addDynEntry = [&](uint64_t tag, uint64_t val) {
+            size_t pos = dynamic_data.size();
+            dynamic_data.resize(pos + 16);
+            memcpy(dynamic_data.data() + pos, &tag, 8);
+            memcpy(dynamic_data.data() + pos + 8, &val, 8);
+        };
+        
+        if (has_dynamic_info_) {
+            // SYMTAB, SYMENT, STRTAB, STRSZ, GNU_HASH, HASH, NULL
+            addDynEntry(6, dyn_symtab_);   // DT_SYMTAB
+            addDynEntry(11, 24);            // DT_SYMENT (24 bytes per symbol)
+            addDynEntry(5, dyn_strtab_);    // DT_STRTAB
+            addDynEntry(10, dyn_strsz_);    // DT_STRSZ
+            addDynEntry(0x6ffffef5, dyn_gnuhash_); // DT_GNU_HASH
+            addDynEntry(4, dyn_hash_);      // DT_HASH
+        }
+        addDynEntry(0, 0);  // DT_NULL
+        
+        offset += dynamic_data.size();
+        
+        // shstrtab section
         size_t shstrtab_offset = offset;
         offset += shstrtab.size();
         
-        // Section headers
+        // Section headers (8-byte aligned)
         offset = (offset + 8 - 1) & ~(8 - 1);
         size_t shdr_offset = offset;
-        size_t num_sections = sections_.size() + 2;  // NULL + sections + shstrtab
+        size_t num_sections = sections_.size() + 3;  // NULL + sections + .dynamic + .shstrtab
         
         // Build output
         std::vector<uint8_t> out(shdr_offset + num_sections * 64);
@@ -573,22 +648,70 @@ public:
         ehdr.e_ident[EI_DATA] = ELFDATA2LSB;
         ehdr.e_ident[EI_VERSION] = EV_CURRENT;
         ehdr.e_ident[EI_OSABI] = 64;  // ELFOSABI_AMDGPU_HSA
-        ehdr.e_type = ET_REL;
+        ehdr.e_ident[EI_ABIVERSION] = 4;  // AMDGPU ABI version 4
+        ehdr.e_type = ET_DYN;  // Shared object (DYN)
         ehdr.e_machine = 224;  // EM_AMDGPU
         ehdr.e_version = EV_CURRENT;
+        ehdr.e_phoff = 64;  // Program headers start right after ELF header
         ehdr.e_shoff = shdr_offset;
         ehdr.e_flags = flags_;
         ehdr.e_ehsize = 64;
+        ehdr.e_phentsize = phdr_size;
+        ehdr.e_phnum = num_phdrs;
         ehdr.e_shentsize = 64;
         ehdr.e_shnum = num_sections;
         ehdr.e_shstrndx = num_sections - 1;
         memcpy(out.data(), &ehdr, sizeof(ehdr));
+        
+        // Program headers
+        size_t phdr_off = 64;
+        
+        // PHDR segment (points to program header table itself)
+        Elf64_Phdr phdr_phdr = {};
+        phdr_phdr.p_type = PT_PHDR;
+        phdr_phdr.p_flags = PF_R;
+        phdr_phdr.p_offset = 64;
+        phdr_phdr.p_vaddr = 64;
+        phdr_phdr.p_paddr = 64;
+        phdr_phdr.p_filesz = num_phdrs * phdr_size;
+        phdr_phdr.p_memsz = num_phdrs * phdr_size;
+        phdr_phdr.p_align = 8;
+        memcpy(out.data() + phdr_off, &phdr_phdr, sizeof(phdr_phdr));
+        phdr_off += phdr_size;
+        
+        // LOAD segment for all sections (simplified: one LOAD covering everything)
+        Elf64_Phdr phdr_load = {};
+        phdr_load.p_type = PT_LOAD;
+        phdr_load.p_flags = PF_R | PF_W | PF_X;
+        phdr_load.p_offset = 0;
+        phdr_load.p_vaddr = 0;
+        phdr_load.p_paddr = 0;
+        phdr_load.p_filesz = shdr_offset;  // Everything up to section headers
+        phdr_load.p_memsz = shdr_offset;
+        phdr_load.p_align = 0x1000;
+        memcpy(out.data() + phdr_off, &phdr_load, sizeof(phdr_load));
+        phdr_off += phdr_size;
+        
+        // DYNAMIC segment
+        Elf64_Phdr phdr_dyn = {};
+        phdr_dyn.p_type = PT_DYNAMIC;
+        phdr_dyn.p_flags = PF_R | PF_W;
+        phdr_dyn.p_offset = dynamic_offset;
+        phdr_dyn.p_vaddr = dynamic_offset;
+        phdr_dyn.p_paddr = dynamic_offset;
+        phdr_dyn.p_filesz = dynamic_data.size();
+        phdr_dyn.p_memsz = dynamic_data.size();
+        phdr_dyn.p_align = 8;
+        memcpy(out.data() + phdr_off, &phdr_dyn, sizeof(phdr_dyn));
         
         // Section data
         for (size_t i = 0; i < sections_.size(); i++) {
             memcpy(out.data() + section_offsets[i], 
                    sections_[i].data.data(), sections_[i].data.size());
         }
+        // .dynamic data
+        memcpy(out.data() + dynamic_offset, dynamic_data.data(), dynamic_data.size());
+        // .shstrtab data
         memcpy(out.data() + shstrtab_offset, shstrtab.data(), shstrtab.size());
         
         // Section headers
@@ -612,13 +735,37 @@ public:
         // NULL section
         writeShdr(0, 0, SHT_NULL, 0, 0, 0, 0, 0, 0, 0, 0);
         
+        // Find section indices for linking
+        int dynstr_idx = -1, dynsym_idx = -1;
+        for (size_t i = 0; i < sections_.size(); i++) {
+            if (sections_[i].name == ".dynstr") dynstr_idx = i + 1;
+            if (sections_[i].name == ".dynsym") dynsym_idx = i + 1;
+        }
+        
         // User sections
         for (size_t i = 0; i < sections_.size(); i++) {
             const auto& sec = sections_[i];
+            uint32_t link = 0;
+            uint32_t info = 0;
+            
+            // Set sh_link based on section type
+            if (sec.name == ".dynsym" && dynstr_idx >= 0) {
+                link = dynstr_idx;  // .dynsym links to .dynstr
+                info = 1;           // First non-local symbol
+            } else if ((sec.name == ".gnu.hash" || sec.name == ".hash") && dynsym_idx >= 0) {
+                link = dynsym_idx;  // Hash tables link to .dynsym
+            }
+            
             writeShdr(i + 1, name_offsets[i + 1], sec.type, sec.flags,
                       sec.addr, section_offsets[i], sec.data.size(),
-                      0, 0, sec.align, sec.entsize);
+                      link, info, sec.align, sec.entsize);
         }
+        
+        // .dynamic section (links to .dynstr)
+        size_t dynamic_idx = sections_.size() + 1;
+        writeShdr(dynamic_idx, dynamic_name_off, SHT_DYNAMIC, SHF_ALLOC | SHF_WRITE,
+                  dynamic_offset, dynamic_offset, dynamic_data.size(), 
+                  dynstr_idx >= 0 ? dynstr_idx : 0, 0, 8, 16);
         
         // .shstrtab
         writeShdr(num_sections - 1, shstrtab_name_off, SHT_STRTAB, 0,
@@ -640,6 +787,14 @@ private:
     
     uint32_t flags_ = 0;
     std::vector<SectionDef> sections_;
+    
+    // Dynamic section info
+    bool has_dynamic_info_ = false;
+    uint64_t dyn_symtab_ = 0;
+    uint64_t dyn_strtab_ = 0;
+    uint64_t dyn_strsz_ = 0;
+    uint64_t dyn_gnuhash_ = 0;
+    uint64_t dyn_hash_ = 0;
 };
 
 // ============================================================================
@@ -647,7 +802,8 @@ private:
 // ============================================================================
 
 void printUsage(const char* prog) {
-    fprintf(stderr, "Usage: %s -o output.o --dispatcher disp.o --host-table host_table.cpp [--input-dir dir | files...]\n", prog);
+    fprintf(stderr, "Usage: %s -o output.o --dispatcher disp.o --host-table host_table.cpp [--target arch] [--input-dir dir | files...]\n", prog);
+    fprintf(stderr, "  --target arch  GPU target (e.g., gfx942:sramecc+:xnack+)\n");
 }
 
 int main(int argc, char** argv) {
@@ -668,10 +824,14 @@ int main(int argc, char** argv) {
             host_table_path = argv[++i];
         } else if (arg == "--input-dir" && i + 1 < argc) {
             input_dir = argv[++i];
+        } else if (arg == "--target" && i + 1 < argc) {
+            g_target_arch = argv[++i];
         } else if (arg[0] != '-') {
             input_files.push_back(arg);
         }
     }
+    
+    printf("Device Linker: target=%s\n", g_target_arch.c_str());
     
     if (output_path.empty() || dispatcher_path.empty()) {
         printUsage(argv[0]);
@@ -901,7 +1061,41 @@ int main(int argc, char** argv) {
         memcpy(data_section.data() + table_size * 2 + i * 8, &func_table_4[i], 8);
     }
     
-    // Build output ELF
+    // Get additional dispatcher sections for symbol tables
+    const Section* disp_dynsym = dispatcher.findSection(".dynsym");
+    const Section* disp_dynstr = dispatcher.findSection(".dynstr");
+    const Section* disp_gnuhash = dispatcher.findSection(".gnu.hash");
+    const Section* disp_hash = dispatcher.findSection(".hash");
+    
+    // Calculate relocated .data address (must be after .text ends)
+    // disp_text_data already contains the merged code
+    uint64_t text_end = disp_text->addr + disp_text_data.size();
+    uint64_t new_data_addr = (text_end + 0xFFF) & ~0xFFFULL;  // Page-align
+    uint64_t data_offset = new_data_addr - disp_bss->addr;  // Delta for symbol fixup
+    
+    printf("Relocating .data: 0x%lx -> 0x%lx (delta=0x%lx)\n", 
+           disp_bss->addr, new_data_addr, data_offset);
+    
+    // Fix .dynsym entries that point to .data section before adding to builder
+    std::vector<uint8_t> dynsym_data;
+    if (disp_dynsym) {
+        dynsym_data = dispatcher.getSectionBytes(*disp_dynsym);
+        // Fix symbol values pointing to old .data/.bss range
+        for (size_t i = 0; i < dynsym_data.size(); i += 24) {
+            if (i + 24 > dynsym_data.size()) break;
+            
+            uint64_t st_value;
+            memcpy(&st_value, dynsym_data.data() + i + 8, 8);
+            
+            // If symbol value is in the old .data/.bss range, relocate it
+            if (st_value >= disp_bss->addr && st_value < disp_bss->addr + 0x10000) {
+                st_value += data_offset;
+                memcpy(dynsym_data.data() + i + 8, &st_value, 8);
+            }
+        }
+    }
+    
+    // Build output ELF using our ElfBuilder
     ElfBuilder builder;
     builder.setFlags(dispatcher.ehdr()->e_flags);
     
@@ -909,6 +1103,29 @@ int main(int argc, char** argv) {
     if (disp_note) {
         auto note_data = dispatcher.getSectionBytes(*disp_note);
         builder.addSection(".note", SHT_NOTE, SHF_ALLOC, disp_note->addr, note_data, 4);
+    }
+    
+    // .dynsym (with fixed symbol values)
+    if (disp_dynsym) {
+        builder.addSection(".dynsym", SHT_DYNSYM, SHF_ALLOC, disp_dynsym->addr, dynsym_data, 8, 24);
+    }
+    
+    // .gnu.hash (copy from dispatcher)
+    if (disp_gnuhash) {
+        auto gnuhash_data = dispatcher.getSectionBytes(*disp_gnuhash);
+        builder.addSection(".gnu.hash", SHT_GNU_HASH, SHF_ALLOC, disp_gnuhash->addr, gnuhash_data, 8);
+    }
+    
+    // .hash (copy from dispatcher)
+    if (disp_hash) {
+        auto hash_data = dispatcher.getSectionBytes(*disp_hash);
+        builder.addSection(".hash", SHT_HASH, SHF_ALLOC, disp_hash->addr, hash_data, 4, 4);
+    }
+    
+    // .dynstr (copy from dispatcher)
+    if (disp_dynstr) {
+        auto dynstr_data = dispatcher.getSectionBytes(*disp_dynstr);
+        builder.addSection(".dynstr", SHT_STRTAB, SHF_ALLOC, disp_dynstr->addr, dynstr_data, 1);
     }
     
     // .rodata
@@ -948,9 +1165,15 @@ int main(int argc, char** argv) {
     builder.addSection(".text", SHT_PROGBITS, SHF_ALLOC | SHF_EXECINSTR, 
                        disp_text->addr, disp_text_data, 256);
     
-    // .data (function tables)
+    // .data (function tables) at relocated address
     builder.addSection(".data", SHT_PROGBITS, SHF_ALLOC | SHF_WRITE,
-                       disp_bss->addr, data_section, 16);
+                       new_data_addr, data_section, 16);
+    
+    // Set dynamic section info for proper .dynamic entries
+    if (disp_dynsym && disp_dynstr && disp_gnuhash && disp_hash) {
+        builder.setDynamicInfo(disp_dynsym->addr, disp_dynstr->addr, disp_dynstr->size,
+                               disp_gnuhash->addr, disp_hash->addr);
+    }
     
     // Write output
     auto output = builder.build();
