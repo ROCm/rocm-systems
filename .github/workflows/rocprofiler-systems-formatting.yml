@@ -8,10 +8,28 @@ on:
       - develop
     paths:
       - 'projects/rocprofiler-systems/**'
+      - '!**/*.md'
+      - '!**/*.rtf'
+      - '!**/*.rst'
+      - '!**/.markdownlint-ci2.yaml'
+      - '!**/.readthedocs.yaml'
+      - '!**/.spellcheck.local.yaml'
+      - '!**/.wordlist.txt'
+      - '!docs/**'
+      - '!projects/*/docs/**'
   pull_request:
     paths:
       - '.github/workflows/rocprofiler-systems-formatting.yml'
       - 'projects/rocprofiler-systems/**'
+      - '!**/*.md'
+      - '!**/*.rtf'
+      - '!**/*.rst'
+      - '!**/.markdownlint-ci2.yaml'
+      - '!**/.readthedocs.yaml'
+      - '!**/.spellcheck.local.yaml'
+      - '!**/.wordlist.txt'
+      - '!docs/**'
+      - '!projects/*/docs/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

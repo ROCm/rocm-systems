@@ -90,7 +90,7 @@ Profile Options:
                                                            SPI
                                                            CPC
                                                            CPF
-  -d  [ ...], --dispatch  [ ...]                        Dispatch ID filtering.
+  -d  [ ...], --dispatch  [ ...]                        Dispatch iteration filtering.
   --no-roof                                             Profile without collecting roofline data.
   -- [ ...]                                             Provide command for profiling after double dash.
 

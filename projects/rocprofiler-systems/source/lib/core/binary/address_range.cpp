@@ -21,7 +21,8 @@
 // SOFTWARE.
 
 #include "binary/address_range.hpp"
-#include "debug.hpp"
+
+#include "logger/debug.hpp"
 
 namespace rocprofsys
 {
@@ -36,9 +37,11 @@ address_range::address_range(uintptr_t _low, uintptr_t _high)
 : low{ _low }
 , high{ _high }
 {
-    TIMEMORY_REQUIRE(high >= low)
-        << "Error! address_range high must be >= low. low=" << as_hex(low)
-        << ", high=" << as_hex(high) << "\n";
+    if(high < low)
+    {
+        throw std::invalid_argument(fmt::format(
+            "address_range high must be >= low. low={:X}, high={:X}", low, high));
+    }
 }
 
 bool
@@ -56,6 +59,19 @@ address_range::as_string(int _depth) const
     _ss.fill('0');
     _ss << "0x" << std::setw(16) << low << "-" << "0x" << std::setw(16) << high;
     return _ss.str();
+}
+
+std::string
+address_range::as_hex() const
+{
+    const auto c_width      = 16;
+    const auto _as_hex_util = [](auto _v, size_t _width) {
+        return fmt::format("0x{:0{}x}", _v, _width);
+    };
+
+    return (is_range()) ? fmt::format("{}-{}", _as_hex_util(low, c_width),
+                                      _as_hex_util(high, c_width))
+                        : _as_hex_util(low, c_width);
 }
 
 uintptr_t
@@ -171,8 +187,10 @@ address_range&
 address_range::operator+=(address_range _v)
 {
     if(!contiguous_with(_v))
-        throw exception<std::runtime_error>(
-            "attempting to add two address ranges that are not contiguous");
+    {
+        throw std::invalid_argument(
+            "Error! attempting to add two address ranges that are not contiguous");
+    }
 
     low  = std::min(low, _v.low);
     high = std::max(high, _v.high);

@@ -34,7 +34,6 @@ namespace rocpd
 {
 namespace data_storage
 {
-static std::mutex _mutex;
 class database
 {
 public:
@@ -182,8 +181,7 @@ public:
         std::shared_ptr<sqlite3_stmt> stmt{ p_stmt, sqlite3_finalize };
 
         return [stmt, query, this](Values... value) {
-            std::lock_guard lock{ _mutex };
-            int             position = 1;
+            int position = 1;
 
             ((bind_value(stmt.get(), position++, value, query)), ...);
 

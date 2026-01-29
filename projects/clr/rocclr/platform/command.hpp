@@ -90,7 +90,7 @@ class Event : public RuntimeObject {
   std::atomic_flag notified_;              //!< Command queue was notified
 
   void* hw_event_;        //!< HW event ID associated with SW event
-  Event* notify_event_;   //!< Notify event, which should contain HW signal
+  std::atomic<Event*> notify_event_;   //!< Notify event, which should contain HW signal
   const Device* device_;  //!< Device, this event associated with
 
   std::atomic<int32_t> event_entry_scope_;  //!< Command entry scope
@@ -219,7 +219,7 @@ class Event : public RuntimeObject {
   void* HwEvent() const { return hw_event_; }
 
   //! Returns notify even associated with the current command
-  Event* NotifyEvent() const {ScopedLock l(notify_lock_); return notify_event_; }
+  Event* NotifyEvent() const { return notify_event_; }
 
   //! Get entry scope of the event
   int32_t getCommandEntryScope() const {
@@ -502,7 +502,7 @@ class OneMemoryArgCommand : public Command {
     memory_->retain();
   }
 
-  virtual void releaseResources() {
+  virtual void releaseResources() override {
     memory_->release();
     DEBUG_ONLY(memory_ = NULL);
     Command::releaseResources();
@@ -510,14 +510,14 @@ class OneMemoryArgCommand : public Command {
   }
 
   //! Release all pinned memory for this command
-  virtual void ReleasePinnedMemory() {
+  virtual void ReleasePinnedMemory() override {
     for (auto it : pinned_memory_) {
       it->release();
     }
     pinned_memory_.clear();
   }
   //! Release all pinned memory for this command
-  virtual bool IsMemoryPinned() const { return !pinned_memory_.empty(); }
+  virtual bool IsMemoryPinned() const override { return !pinned_memory_.empty(); }
 
   //! Adds pinned memory, used in this command for later release
   virtual void AddPinnedMemory(Memory* pinned) override { pinned_memory_.push_back(pinned); }
@@ -1383,6 +1383,7 @@ class AccumulateCommand : public Command {
  private:
   //! Kernel names and timestamps list for activity profiling
   std::vector<std::string> kernelNames_;
+  const std::vector<std::string>* kernelNamesRef_ = nullptr;
   std::vector<std::pair<uint64_t, uint64_t>> tsList_;
 
  public:
@@ -1399,13 +1400,20 @@ class AccumulateCommand : public Command {
     kernelNames_.insert(kernelNames_.end(), kernelNames.begin(), kernelNames.end());
   }
 
+  //! Set kernel names by reference
+  void setKernelNamesRef(const std::vector<std::string>* kernelNames) {
+    kernelNamesRef_ = kernelNames;
+  }
+
   //! Add kernel timestamp to the list if available
   void addTimestamps(uint64_t startTs, uint64_t endTs) {
     tsList_.push_back(std::make_pair(startTs, endTs));
   }
 
   //! Return the kernel names
-  const std::vector<std::string>& getKernelNames() const { return kernelNames_; }
+  const std::vector<std::string>& getKernelNames() const {
+    return kernelNamesRef_ != nullptr ? *kernelNamesRef_ : kernelNames_;
+  }
 
   //! Return the kernel timestamps
   const std::vector<std::pair<uint64_t, uint64_t>>& getTimestamps() const { return tsList_; }

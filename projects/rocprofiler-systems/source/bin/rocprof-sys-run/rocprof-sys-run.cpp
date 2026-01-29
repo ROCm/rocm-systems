@@ -26,13 +26,9 @@
 #include <timemory/log/color.hpp>
 #include <timemory/log/macros.hpp>
 
-#include <algorithm>
 #include <cmath>
 #include <cstdlib>
-#include <iomanip>
 #include <iostream>
-#include <map>
-#include <sstream>
 #include <string_view>
 #include <unistd.h>
 

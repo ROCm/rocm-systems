@@ -659,6 +659,8 @@ message RegisterPolicyResponse {
   PolicyCondition condition =3;
   uint32 group_id =4;
   uint64 value=5;
+  uint32 gpu_index=6;
+  bool   reset_triggered = 7;
 }
 
 message UnRegisterPolicyResult {

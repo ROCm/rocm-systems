@@ -100,6 +100,7 @@ Required third-party packages
 
 * `libunwind <https://www.nongnu.org/libunwind/>`_ for call-stack sampling
 * `SQLite <https://github.com/sqlite/sqlite>`_ for database output
+* `spdlog <https://github.com/gabime/spdlog>`_ for logging
 
 Any of the third-party packages required by Dyninst, along with Dyninst itself, can be built and installed
 during the ROCm Systems Profiler build. The following list indicates the package, the version,
@@ -111,6 +112,8 @@ while Dyninst requires TBB), and the CMake option to build the package alongside
 
    "Dyninst", "13.0", "ROCm Systems Profiler", "``ROCPROFSYS_BUILD_DYNINST`` (default: OFF)"
    "Libunwind", "", "ROCm Systems Profiler", "``ROCPROFSYS_BUILD_LIBUNWIND`` (default: ON)"
+   "Nlohmann/JSON", "", "ROCm Systems Profiler", "``ROCPROFSYS_BUILD_NLOHMANN_JSON`` (default: ON)"
+   "spdlog", "", "ROCm Systems Profiler", "``ROCPROFSYS_BUILD_SPDLOG`` (default: ON)"
    "SQLite", "", "ROCm Systems Profiler", "``ROCPROFSYS_BUILD_SQLITE`` (default: OFF)"
    "TBB", "2018.6", "Dyninst", "``ROCPROFSYS_BUILD_TBB`` (default: OFF)"
    "ElfUtils", "0.178", "Dyninst", "``ROCPROFSYS_BUILD_ELFUTILS`` (default: OFF)"
@@ -126,6 +129,10 @@ Optional third-party packages
   * AMD SMI Lib for GPU monitoring
   * ROCprofiler SDK for GPU hardware counters and ROCm tracing
 
+* Python
+
+  * ``ROCPROFSYS_USE_PYTHON`` enables Python support.
+
 * `PAPI <https://icl.utk.edu/papi/>`_
 * MPI
 
@@ -133,6 +140,11 @@ Optional third-party packages
   * ``ROCPROFSYS_USE_MPI_HEADERS`` enables wrapping of the dynamically-linked MPI C function calls.
     (By default, if ROCm Systems Profiler cannot find an OpenMPI MPI distribution, it uses a local copy
     of the OpenMPI ``mpi.h``.)
+
+* UCX
+
+  * ``ROCPROFSYS_USE_UCX`` enables UCX (Unified Communication X) support for tracing UCX communication functions
+    used as a transport layer for MPI and other communication libraries
 
 .. csv-table::
    :header: "Third-Party Library", "CMake Enable Option"
@@ -142,6 +154,7 @@ Optional third-party packages
    "PAPI", "``ROCPROFSYS_USE_PAPI`` (default: ON)"
    "MPI", "``ROCPROFSYS_USE_MPI`` (default: OFF)"
    "MPI (header-only)", "``ROCPROFSYS_USE_MPI_HEADERS`` (default: ON)"
+   "UCX", "``ROCPROFSYS_USE_UCX`` (default: ON)"
 
 Installing Dyninst
 -----------------------------------
@@ -282,6 +295,37 @@ and the MPICH headers and then using
 ROCm Systems Profiler on an application built against OpenMPI causes a segmentation fault.
 This happens because the value of the ``MPI_COMM_WORLD`` is truncated
 during the function wrapping before being passed along to the underlying MPI function.
+
+UCX support within ROCm Systems Profiler
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+ROCm Systems Profiler supports tracing UCX (Unified Communication X) communication functions
+when ``ROCPROFSYS_USE_UCX`` is enabled (default: ON). UCX is a high-performance communication
+framework that serves as a transport layer for MPI and other communication libraries, providing
+optimized point-to-point and collective communication operations.
+
+When UCX support is enabled, ROCm Systems Profiler can automatically intercept and trace UCX
+communication functions such as ``ucp_tag_send``, ``ucp_tag_recv``, and other UCP (Unified
+Communication Protocol) and UCT (Unified Communication Transport) layer operations. This allows
+for detailed analysis of communication patterns and performance in applications using UCX as
+their underlying transport mechanism.
+
+Python support within ROCm Systems Profiler
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+ROCm Systems Profiler supports profiling Python code via the ``ROCPROFSYS_USE_PYTHON`` CMake option.
+Python support is enabled via the ``ROCPROFSYS_USE_PYTHON`` and the
+``ROCPROFSYS_PYTHON_VERSIONS="<MAJOR>.<MINOR>`` CMake options.
+Alternatively, to build multiple Python versions, use
+``ROCPROFSYS_PYTHON_VERSIONS="<MAJOR>.<MINOR>;[<MAJOR>.<MINOR>]"``,
+and ``ROCPROFSYS_PYTHON_ROOT_DIRS="/path/to/version;[/path/to/version]"`` instead of just ``ROCPROFSYS_PYTHON_VERSIONS``.
+When building multiple Python versions, the length of the ``ROCPROFSYS_PYTHON_VERSIONS``
+and ``ROCPROFSYS_PYTHON_ROOT_DIRS`` lists must
+be the same size.
+
+.. code-block:: shell
+   cmake --preset release -D ROCPROFSYS_PYTHON_ROOT_DIRS="/usr/bin;/usr/bin" -D ROCPROFSYS_PYTHON_VERSIONS="3.10;3.12"
+
 
 ROCm Systems Profiler without ROCm
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

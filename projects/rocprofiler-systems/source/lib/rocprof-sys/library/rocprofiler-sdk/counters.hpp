@@ -23,7 +23,6 @@
 #pragma once
 
 #include "common/synchronized.hpp"
-#include "core/debug.hpp"
 #include "core/perfetto.hpp"
 #include "core/timemory.hpp"
 #include "library/rocprofiler-sdk/fwd.hpp"
@@ -109,8 +108,8 @@ struct counter_storage
     void operator()(const counter_event& _event, timing_interval _timing,
                     scope::config _scope = scope::get_default()) const;
 
-    static void write(counter_storage_type* storage, std::string metric_name,
-                      std::string metric_description);
+    static void write(counter_storage_type* storage, const std::string& metric_name,
+                      const std::string& metric_description);
 };
 }  // namespace rocprofiler_sdk
 }  // namespace rocprofsys

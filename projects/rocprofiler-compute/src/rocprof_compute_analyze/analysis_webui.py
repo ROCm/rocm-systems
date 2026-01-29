@@ -51,7 +51,6 @@ class webui_analysis(OmniAnalyze_Base):
         self.app = dash.Dash(
             __name__, title=PROJECT_NAME, external_stylesheets=[dbc.themes.CYBORG]
         )
-        self.dest_dir = str(Path(args.path[0][0]).absolute().resolve())
         self.arch: Optional[str] = None
 
         self.__hidden_sections = ["Memory Chart"]
@@ -90,6 +89,7 @@ class webui_analysis(OmniAnalyze_Base):
         kernel_top_df = base_data.dfs[1]
         for kernel_id in base_data.filter_kernel_ids:
             filt_kernel_names.append(str(kernel_top_df.loc[kernel_id, "Kernel_Name"]))
+        input_filters["kernel"] = filt_kernel_names
 
         # setup app layout
         from utils.gui_components.header import get_header
@@ -144,6 +144,12 @@ class webui_analysis(OmniAnalyze_Base):
             if args.spatial_multiplexing:
                 base_data[base_run].raw_pmc = self.spatial_multiplex_merge_counters(
                     base_data[base_run].raw_pmc
+                )
+
+            if self._profiling_config["iteration_multiplexing"] is not None:
+                base_data[base_run].raw_pmc = self.iteration_multiplex_impute_counters(
+                    base_data[base_run].raw_pmc,
+                    policy=self._profiling_config["iteration_multiplexing"],
                 )
 
             # Apply filters to workload data
@@ -224,6 +230,9 @@ class webui_analysis(OmniAnalyze_Base):
                             "is_standalone": False,
                             "roofline_data_type": self.__roofline_data_type,
                             "kernel_filter": False,
+                            "iteration_multiplexing": self._profiling_config[
+                                "iteration_multiplexing"
+                            ],
                         }
                     )
                     roof_obj = soc[self.arch].roofline_obj
@@ -338,6 +347,7 @@ class webui_analysis(OmniAnalyze_Base):
             )
 
         args = self.get_args()
+        self.dest_dir = str(Path(args.path[0][0]).absolute().resolve())
 
         # create 'mega dataframe'
         self._runs[self.dest_dir].raw_pmc = file_io.create_df_pmc(
@@ -352,6 +362,14 @@ class webui_analysis(OmniAnalyze_Base):
         if args.spatial_multiplexing:
             self._runs[self.dest_dir].raw_pmc = self.spatial_multiplex_merge_counters(
                 self._runs[self.dest_dir].raw_pmc
+            )
+
+        if self._profiling_config.get("iteration_multiplexing") is not None:
+            self._runs[
+                self.dest_dir
+            ].raw_pmc = self.iteration_multiplex_impute_counters(
+                self._runs[self.dest_dir].raw_pmc,
+                policy=self._profiling_config["iteration_multiplexing"],
             )
 
         file_io.create_df_kernel_top_stats(

@@ -32,6 +32,7 @@ project(
 
 set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME "core")
 set(PACKAGE_NAME ${PROJECT_NAME})
+string(REPLACE "-" "_" PACKAGE_NAME_UNDERSCORED ${PACKAGE_NAME})
 
 if(NOT PROJECT_IS_TOP_LEVEL)
     set(CMAKE_MESSAGE_INDENT "[${PROJECT_NAME}] ")
@@ -120,6 +121,8 @@ add_subdirectory(source)
 include(rocprofiler_config_install)
 include(rocprofiler_config_install_roctx)
 include(rocprofiler_config_install_rocpd)
+include(rocprofiler_config_install_rocattach)
+include(rocprofiler_config_install_tests)
 
 if(ROCPROFILER_BUILD_TESTS)
     add_subdirectory(tests)

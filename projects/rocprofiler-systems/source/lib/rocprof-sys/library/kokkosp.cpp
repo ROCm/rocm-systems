@@ -27,7 +27,6 @@
 #include "core/agent_manager.hpp"
 #include "core/components/fwd.hpp"
 #include "core/config.hpp"
-#include "core/debug.hpp"
 #include "core/defines.hpp"
 #include "core/node_info.hpp"
 #include "core/perfetto.hpp"
@@ -46,6 +45,8 @@
 #include <timemory/utility/types.hpp>
 
 #include <nlohmann/json.hpp>
+
+#include "logger/debug.hpp"
 
 #include <cstdlib>
 #include <sstream>
@@ -191,10 +192,11 @@ cache_kokkos_event(const char* name, const char* event_type, const char* target,
     const char*  line_info       = "{}";
 
     rocprofsys::trace_cache::get_buffer_storage().store(
-        rocprofsys::trace_cache::entry_type::in_time_sample,
-        rocprofsys::trait::name<category::kokkos>::value, timestamp_ns,
-        event_metadata.dump().c_str(), stack_id, parent_stack_id, correlation_id,
-        call_stack, line_info);
+        rocprofsys::trace_cache::in_time_sample{
+            static_cast<size_t>(rocprofsys::category_enum_id<category::kokkos>::value),
+            rocprofsys::trait::name<category::kokkos>::value, timestamp_ns,
+            event_metadata.dump().c_str(), stack_id, parent_stack_id, correlation_id,
+            call_stack, line_info });
 }
 
 }  // namespace
@@ -225,7 +227,7 @@ extern "C"
         {
             _standalone_initialized = true;
 
-            ROCPROFSYS_BASIC_VERBOSE_F(0, "Parsing arguments...\n");
+            LOG_DEBUG("Parsing arguments...");
             std::string _command_line = {};
             for(int i = 0; i < argc; ++i)
             {
@@ -249,16 +251,16 @@ extern "C"
         if(_version > 0) _settings->requires_global_fencing = false;
     }
 
-    void kokkosp_init_library(const int loadSeq, const uint64_t interfaceVer,
+    void kokkosp_init_library([[maybe_unused]] const int      loadSeq,
+                              [[maybe_unused]] const uint64_t interfaceVer,
                               const uint32_t devInfoCount, void* deviceInfo)
     {
         ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
         tim::consume_parameters(devInfoCount, deviceInfo);
 
-        ROCPROFSYS_BASIC_VERBOSE_F(
-            0,
-            "Initializing rocprof-sys kokkos connector (sequence %d, version: %llu)... ",
-            loadSeq, (unsigned long long) interfaceVer);
+        LOG_DEBUG(
+            "Initializing rocprof-sys kokkos connector (sequence {}, version: {})...",
+            loadSeq, interfaceVer);
 
         if(_standalone_initialized ||
            (!rocprofsys::config::settings_are_configured() &&
@@ -282,20 +284,22 @@ extern "C"
                     {
                         std::stringstream _libs_str{};
                         for(const auto& litr : _libs)
-                            _libs_str << "    " << litr << "\n";
-                        ROCPROFSYS_ABORT(
-                            "%s was invoked with librocprof-sys.so as the "
-                            "KOKKOS_TOOLS_LIBS.\n"
+                            _libs_str << "- " << litr << "\n";
+                        LOG_CRITICAL(
+                            "{} was invoked with librocprof-sys.so as the "
+                            "KOKKOS_TOOLS_LIBS."
                             "However, librocprof-sys-dl.so has already been loaded by "
-                            "the process.\nTo avoid duplicate collections culminating "
-                            "is an error, please set KOKKOS_TOOLS_LIBS=%s.\nLoaded "
-                            "libraries:\n%s",
-                            __FUNCTION__, itr.c_str(), _libs_str.str().c_str());
+                            "the process. To avoid duplicate collections culminating "
+                            "is an error, please set KOKKOS_TOOLS_LIBS={}.Loaded "
+                            "libraries: {}",
+                            __FUNCTION__, itr, _libs_str.str());
+                        ::rocprofsys::set_state(::rocprofsys::State::Finalized);
+                        std::abort();
                     }
                 }
             }
 
-            ROCPROFSYS_BASIC_VERBOSE_F(0, "Initializing rocprof-sys (standalone)... ");
+            LOG_DEBUG("Initializing rocprof-sys (standalone)... ");
             auto _mode = tim::get_env<std::string>("ROCPROFSYS_MODE", "trace");
             auto _arg0 = (_initialize_arguments.empty()) ? std::string{ "unknown" }
                                                          : _initialize_arguments.at(0);
@@ -314,11 +318,7 @@ extern "C"
         tim::trait::runtime_enabled<kokkosp::memory_tracker>::set(
             rocprofsys::config::get_use_timemory());
 
-        if(rocprofsys::get_verbose() >= 0)
-        {
-            fprintf(stderr, "%sDone\n%s", tim::log::color::info(),
-                    tim::log::color::end());
-        }
+        LOG_DEBUG("Done");
 
         _name_len_limit = rocprofsys::config::get_setting_value<int64_t>(
                               "ROCPROFSYS_KOKKOSP_NAME_LENGTH_MAX")
@@ -338,15 +338,13 @@ extern "C"
         if(_standalone_initialized)
         {
             rocprofsys_pop_trace_hidden("kokkos_main");
-            ROCPROFSYS_VERBOSE_F(
-                0, "Finalizing kokkos rocprof-sys connector (standalone)...\n");
+            LOG_DEBUG("Finalizing kokkos rocprof-sys connector (standalone)...");
             rocprofsys_finalize_hidden();
         }
         else
         {
-            ROCPROFSYS_VERBOSE_F(0, "Finalizing kokkos rocprof-sys connector... ");
+            LOG_DEBUG("Finalizing kokkos rocprof-sys connector... ");
             kokkosp::cleanup();
-            if(rocprofsys::get_verbose() >= 0) fprintf(stderr, "Done\n");
         }
     }
 
@@ -358,8 +356,8 @@ extern "C"
 
         ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
         auto pname = (devid > std::numeric_limits<uint16_t>::max())  // junk device number
-                         ? JOIN(" ", _kp_prefix, name, "[for]")
-                         : JOIN(" ", _kp_prefix, name, JOIN("", "[for][dev", devid, ']'));
+                         ? fmt::format("{} {} [for]", _kp_prefix, name)
+                         : fmt::format("{} {} [for][dev{}]", _kp_prefix, name, devid);
         *kernid    = kokkosp::get_unique_id();
         kokkosp::logger_t{}.mark(1, __FUNCTION__, name, *kernid);
         kokkosp::create_profiler<kokkosp_region>(pname, *kernid);
@@ -383,11 +381,10 @@ extern "C"
         if(violates_name_rules(name)) return set_invalid_id(kernid);
 
         ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
-        auto pname =
-            (devid > std::numeric_limits<uint16_t>::max())  // junk device number
-                ? JOIN(" ", _kp_prefix, name, "[reduce]")
-                : JOIN(" ", _kp_prefix, name, JOIN("", "[reduce][dev", devid, ']'));
-        *kernid = kokkosp::get_unique_id();
+        auto pname = (devid > std::numeric_limits<uint16_t>::max())  // junk device number
+                         ? fmt::format("{} {} [reduce]", _kp_prefix, name)
+                         : fmt::format("{} {} [reduce][dev{}]", _kp_prefix, name, devid);
+        *kernid    = kokkosp::get_unique_id();
         kokkosp::logger_t{}.mark(1, __FUNCTION__, name, *kernid);
         kokkosp::create_profiler<kokkosp_region>(pname, *kernid);
         kokkosp::start_profiler<kokkosp_region>(*kernid);
@@ -410,11 +407,10 @@ extern "C"
         if(violates_name_rules(name)) return set_invalid_id(kernid);
 
         ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
-        auto pname =
-            (devid > std::numeric_limits<uint16_t>::max())  // junk device number
-                ? JOIN(" ", _kp_prefix, name, "[scan]")
-                : JOIN(" ", _kp_prefix, name, JOIN("", "[scan][dev", devid, ']'));
-        *kernid = kokkosp::get_unique_id();
+        auto pname = (devid > std::numeric_limits<uint16_t>::max())  // junk device number
+                         ? fmt::format("{} {} [scan]", _kp_prefix, name)
+                         : fmt::format("{} {} [scan][dev{}]", _kp_prefix, name, devid);
+        *kernid    = kokkosp::get_unique_id();
         kokkosp::logger_t{}.mark(1, __FUNCTION__, name, *kernid);
         kokkosp::create_profiler<kokkosp_region>(pname, *kernid);
         kokkosp::start_profiler<kokkosp_region>(*kernid);
@@ -437,11 +433,10 @@ extern "C"
         if(violates_name_rules(name)) return set_invalid_id(kernid);
 
         ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
-        auto pname =
-            (devid > std::numeric_limits<uint16_t>::max())  // junk device number
-                ? JOIN(" ", _kp_prefix, name, "[fence]")
-                : JOIN(" ", _kp_prefix, name, JOIN("", "[fence][dev", devid, ']'));
-        *kernid = kokkosp::get_unique_id();
+        auto pname = (devid > std::numeric_limits<uint16_t>::max())  // junk device number
+                         ? fmt::format("{} {} [fence]", _kp_prefix, name)
+                         : fmt::format("{} {} [fence][dev{}]", _kp_prefix, name, devid);
+        *kernid    = kokkosp::get_unique_id();
         kokkosp::logger_t{}.mark(1, __FUNCTION__, name, *kernid);
         kokkosp::create_profiler<kokkosp_region>(pname, *kernid);
         kokkosp::start_profiler<kokkosp_region>(*kernid);
@@ -519,9 +514,8 @@ extern "C"
 
         ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
         kokkosp::logger_t{}.mark(0, __FUNCTION__, space.name, label,
-                                 JOIN("", '[', ptr, ']'), size);
-        auto pname =
-            JOIN(" ", _kp_prefix, label, JOIN("", '[', space.name, "][allocate]"));
+                                 fmt::format("[{}]", ptr), size);
+        auto pname = fmt::format("{} {} [allocate][{}]", _kp_prefix, label, space.name);
         kokkosp::profiler_alloc_t<>{ pname }.store(std::plus<int64_t>{}, size);
         kokkosp::profiler_t<kokkosp_region>{ pname }.mark();
     }
@@ -534,9 +528,8 @@ extern "C"
 
         ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
         kokkosp::logger_t{}.mark(0, __FUNCTION__, space.name, label,
-                                 JOIN("", '[', ptr, ']'), size);
-        auto pname =
-            JOIN(" ", _kp_prefix, label, JOIN("", '[', space.name, "][deallocate]"));
+                                 fmt::format("[{}]", ptr), size);
+        auto pname = fmt::format("{} {} [deallocate][{}]", _kp_prefix, label, space.name);
         kokkosp::profiler_alloc_t<>{ pname }.store(std::plus<int64_t>{}, size);
         kokkosp::profiler_t<kokkosp_region>{ pname }.mark();
     }
@@ -552,11 +545,11 @@ extern "C"
 
         ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
         kokkosp::logger_t{}.mark(1, __FUNCTION__, dst_handle.name, dst_name,
-                                 JOIN("", '[', dst_ptr, ']'), src_handle.name, src_name,
-                                 JOIN("", '[', src_ptr, ']'), size);
+                                 fmt::format("[{}]", dst_ptr), src_handle.name, src_name,
+                                 fmt::format("[{}]", src_ptr), size);
 
-        auto name = JOIN(" ", _kp_prefix, JOIN('=', dst_handle.name, dst_name), "<-",
-                         JOIN('=', src_handle.name, src_name), "[deep_copy]");
+        auto name = fmt::format("{} {} <- {} [deep_copy]", _kp_prefix, dst_handle.name,
+                                dst_name, src_handle.name, src_name);
 
         auto& _data = kokkosp::get_profiler_stack<kokkosp_region>();
         _data.emplace_back(name);
@@ -601,20 +594,22 @@ extern "C"
         ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
         if(rocprofsys::config::get_use_perfetto())
         {
-            auto _name = tim::get_hash_identifier_fast(
-                tim::add_hash_id(JOIN(" ", _kp_prefix, label, "[dual_view_sync]")));
+            auto _name = tim::get_hash_identifier_fast(tim::add_hash_id(
+                fmt::format("{} {} [dual_view_sync]", _kp_prefix, label)));
             TRACE_EVENT_INSTANT("user", ::perfetto::StaticString{ _name.data() },
                                 "target", (is_device) ? "device" : "host");
         }
         else if(rocprofsys::config::get_use_causal())
         {
-            auto _name = tim::get_hash_identifier_fast(tim::add_hash_id(JOIN(
-                "", label, " [dual_view_sync][", (is_device) ? "device" : "host", "]")));
+            auto _name = tim::get_hash_identifier_fast(
+                tim::add_hash_id(fmt::format("{} {} [dual_view_sync][{}]", _kp_prefix,
+                                             label, (is_device) ? "device" : "host")));
             kokkosp::profiler_t<kokkosp_region>{ _name }.mark();
         }
 
-        cache_kokkos_event(JOIN(" ", _kp_prefix, label).c_str(), "[dual_view_sync]",
-                           (is_device) ? "device" : "host", timestamp);
+        cache_kokkos_event(fmt::format("{} {}", _kp_prefix, label).c_str(),
+                           "[dual_view_sync]", (is_device) ? "device" : "host",
+                           timestamp);
     }
 
     void kokkosp_dual_view_modify(const char* label, const void* const, bool is_device)
@@ -625,21 +620,22 @@ extern "C"
         ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
         if(rocprofsys::config::get_use_perfetto())
         {
-            auto _name = tim::get_hash_identifier_fast(
-                tim::add_hash_id(JOIN(" ", _kp_prefix, label, "[dual_view_modify]")));
+            auto _name = tim::get_hash_identifier_fast(tim::add_hash_id(
+                fmt::format("{} {} [dual_view_modify]", _kp_prefix, label)));
             TRACE_EVENT_INSTANT("user", ::perfetto::StaticString{ _name.data() },
                                 "target", (is_device) ? "device" : "host");
         }
         else if(rocprofsys::config::get_use_causal())
         {
             auto _name = tim::get_hash_identifier_fast(
-                tim::add_hash_id(JOIN(" ", _kp_prefix, label, "[dual_view_modify][",
-                                      (is_device) ? "device" : "host", "]")));
+                tim::add_hash_id(fmt::format("{} {} [dual_view_modify][{}]", _kp_prefix,
+                                             label, (is_device) ? "device" : "host")));
             kokkosp::profiler_t<kokkosp_region>{ _name }.mark();
         }
 
-        cache_kokkos_event(JOIN(" ", _kp_prefix, label).c_str(), "[dual_view_modify]",
-                           (is_device) ? "device" : "host", timestamp);
+        cache_kokkos_event(fmt::format("{} {}", _kp_prefix, label).c_str(),
+                           "[dual_view_modify]", (is_device) ? "device" : "host",
+                           timestamp);
     }
 
     //----------------------------------------------------------------------------------//

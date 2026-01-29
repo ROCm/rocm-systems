@@ -248,4 +248,37 @@ set(CPACK_PACKAGE_VERSION
     "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}.${ROCM_VERSION_FOR_PACKAGE}"
     )
 
+# Make CPack use LLVM binutils so ELF64-AMDGPU (.hsaco) is supported
+find_program(
+    ROCM_LLVM_OBJCOPY
+    NAMES llvm-objcopy
+    HINTS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
+    PATH_SUFFIXES llvm/bin bin)
+find_program(
+    ROCM_LLVM_OBJDUMP
+    NAMES llvm-objdump
+    HINTS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
+    PATH_SUFFIXES llvm/bin bin)
+find_program(
+    ROCM_LLVM_READELF
+    NAMES llvm-readelf
+    HINTS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
+    PATH_SUFFIXES llvm/bin bin)
+
+if(ROCM_LLVM_OBJCOPY)
+    set(CPACK_OBJCOPY_EXECUTABLE
+        "${ROCM_LLVM_OBJCOPY}"
+        CACHE FILEPATH "" FORCE)
+endif()
+if(ROCM_LLVM_OBJDUMP)
+    set(CPACK_OBJDUMP_EXECUTABLE
+        "${ROCM_LLVM_OBJDUMP}"
+        CACHE FILEPATH "" FORCE)
+endif()
+if(ROCM_LLVM_READELF)
+    set(CPACK_READELF_EXECUTABLE
+        "${ROCM_LLVM_READELF}"
+        CACHE FILEPATH "" FORCE)
+endif()
+
 include(CPack)

@@ -8,23 +8,33 @@ on:
     paths:
       - '.github/workflows/rocprofiler-systems-redhat.yml'
       - 'projects/rocprofiler-systems/**'
-      - '!projects/rocprofiler-systems/*.md'
+      - '!**/*.md'
+      - '!**/*.rtf'
+      - '!**/*.rst'
+      - '!**/.markdownlint-ci2.yaml'
+      - '!**/.readthedocs.yaml'
+      - '!**/.spellcheck.local.yaml'
+      - '!**/.wordlist.txt'
       - '!projects/rocprofiler-systems/docs/**'
       - '!projects/rocprofiler-systems/source/docs/**'
       - '!projects/rocprofiler-systems/source/python/gui/**'
       - '!projects/rocprofiler-systems/docker/**'
-      - '!projects/rocprofiler-systems/.wordlist.txt'
       - '!projects/rocprofiler-systems/CMakePresets.json'
   pull_request:
     paths:
       - '.github/workflows/rocprofiler-systems-redhat.yml'
       - 'projects/rocprofiler-systems/**'
-      - '!projects/rocprofiler-systems/*.md'
+      - '!**/*.md'
+      - '!**/*.rtf'
+      - '!**/*.rst'
+      - '!**/.markdownlint-ci2.yaml'
+      - '!**/.readthedocs.yaml'
+      - '!**/.spellcheck.local.yaml'
+      - '!**/.wordlist.txt'
       - '!projects/rocprofiler-systems/docs/**'
       - '!projects/rocprofiler-systems/source/docs/**'
       - '!projects/rocprofiler-systems/source/python/gui/**'
       - '!projects/rocprofiler-systems/docker/**'
-      - '!projects/rocprofiler-systems/.wordlist.txt'
       - '!projects/rocprofiler-systems/CMakePresets.json'
 
 concurrency:
@@ -45,7 +55,7 @@ jobs:
       matrix:
         compiler: ['g++']
         os-release: [ '8.10', '9.4' ]
-        rocm-version: [ '0.0', '6.3', '6.4', '7.0' ]
+        rocm-version: [ '0.0', '6.3', '6.4', '7.0', '7.1' ]
         build-type: ['Release']
 
     steps:

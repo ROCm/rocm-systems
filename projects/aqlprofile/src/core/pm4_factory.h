@@ -191,16 +191,15 @@ class Pm4Factory {
 
   virtual size_t GetNumEvents(uint32_t block_name) const {
     size_t se_number = GetShaderEnginesNumber() / GetXccNumber();
+    size_t sa_number = GetShaderArraysNumber();
     size_t block_samples_count = 1;
     auto* block_info = GetBlockInfo(block_name);
 
     if (block_info->attr & CounterBlockSeAttr)
       block_samples_count *= se_number;
     if (block_info->attr & CounterBlockSaAttr)
-      block_samples_count *= 2;
+      block_samples_count *= sa_number;
     if (block_info->attr & CounterBlockWgpAttr)
-      block_samples_count *= GetNumWGPs();
-    if ((block_info->attr & CounterBlockSqAttr) && IsGFX11()) // TODO: Move to CounterBlockWgpAttr
       block_samples_count *= GetNumWGPs();
     return block_samples_count;
   }
@@ -412,11 +411,13 @@ inline bool Pm4Factory::CheckConcurrent(const profile_t* profile) {
 
 // Return GPU id for a given agent
 inline gpu_id_t Pm4Factory::GetGpuId(std::string_view gfx_ip) {
+  // More specific GPU IDs must come before less specific IDs.
   std::vector<std::pair<std::string, gpu_id_t>> gfxip_map = {
       {"gfx908", MI100_GPU_ID}, {"gfx90a", MI200_GPU_ID}, {"gfx900", GFX9_GPU_ID},
       {"gfx902", GFX9_GPU_ID},  {"gfx906", GFX9_GPU_ID},  {"gfx94", MI300_GPU_ID},
-      {"gfx95", MI350_GPU_ID},  {"gfx10", GFX10_GPU_ID},  {"gfx11", GFX11_GPU_ID},
-      {"gfx115", GFX115X_GPU_ID}, {"gfx12", GFX12_GPU_ID},
+      {"gfx95", MI350_GPU_ID},  {"gfx10", GFX10_GPU_ID},
+      {"gfx115", GFX115X_GPU_ID}, {"gfx11", GFX11_GPU_ID},
+      {"gfx12", GFX12_GPU_ID},
   };
 
   for (const auto& [name, id] : gfxip_map) {

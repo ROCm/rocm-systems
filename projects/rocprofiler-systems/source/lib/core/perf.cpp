@@ -21,44 +21,16 @@
 // SOFTWARE.
 
 #include "perf.hpp"
-#include "debug.hpp"
 
 #include <timemory/units.hpp>
+
+#include "logger/debug.hpp"
 
 namespace rocprofsys
 {
 namespace perf
 {
 namespace units = ::tim::units;
-
-std::vector<std::string>
-get_config_choices()
-{
-    namespace regex_const = ::std::regex_constants;
-
-    auto       _data        = std::vector<std::string>{};
-    auto       _papi_events = tim::papi::available_events_info();
-    const auto _prefix      = std::string_view{ "perf::" };
-    auto       _regex =
-        std::regex{ "^(perf::|)PERF_COUNT_(HW|SW|HW_CACHE)_([A-Z_]+)(|:[A-Z]+)$",
-                    regex_const::optimize };
-
-    for(const auto& itr : _papi_events)
-    {
-        if(std::regex_match(itr.symbol(), _regex))
-        {
-            auto _symbol = itr.symbol();
-            auto _pos    = _symbol.find(_prefix);
-            if(_pos == 0) _symbol = _symbol.substr(_prefix.length());
-            _data.emplace_back(_symbol);
-        }
-    }
-
-    std::sort(_data.begin(), _data.end());
-    _data.erase(std::unique(_data.begin(), _data.end()), _data.end());
-
-    return _data;
-}
 
 event_type
 get_event_type(std::string_view _v)
@@ -101,7 +73,8 @@ get_hw_config(std::string_view _v)
         return hw_config::reference_cpu_cycles;
     else
     {
-        ROCPROFSYS_THROW("Unknown perf hardware config: %s", _v.data());
+        throw std::runtime_error(
+            fmt::format("Unknown perf hardware config: {}", _v.data()));
     }
 
 #undef HW_CONFIG_REGEX
@@ -134,7 +107,8 @@ get_sw_config(std::string_view _v)
         return sw_config::emulation_faults;
     else
     {
-        ROCPROFSYS_THROW("Unknown perf hw cache config: %s", _v.data());
+        throw std::runtime_error(
+            fmt::format("Unknown perf hw cache config: {}", _v.data()));
     }
 
 #undef SW_CONFIG_REGEX
@@ -165,7 +139,8 @@ get_hw_cache_config(std::string_view _v)
     else if(HW_CACHE_CONFIG_REGEX("NODE"))
         _value |= static_cast<int>(hw_cache_config::node);
     else
-        ROCPROFSYS_THROW("Unknown perf software config: %s", _v.data());
+        throw std::runtime_error(
+            fmt::format("Unknown perf software config: {}", _v.data()));
 
 #undef HW_CACHE_CONFIG_REGEX
 #define HW_CACHE_OP_REGEX(KEY)                                                           \
@@ -226,7 +201,7 @@ config_overflow_sampling(struct perf_event_attr& _pe, std::string_view _event,
         case PERF_TYPE_MAX:
         default:
         {
-            ROCPROFSYS_THROW("unsupported perf type");
+            throw std::runtime_error("Unsupported perf type");
         }
     };
 

@@ -171,6 +171,7 @@ enum full_gfx_versions {
 	GFX_VERSION_YELLOW_CARP	 	= 0x0A0305,
 	GFX_VERSION_PLUM_BONITO		= 0x0B0000,
 	GFX_VERSION_WHEAT_NAS		= 0x0B0001,
+	GFX_VERSION_GFX1151		= 0x0B0501,
 	GFX_VERSION_GFX1200		= 0x0C0000,
 	GFX_VERSION_GFX1201		= 0x0C0001,
 };
@@ -208,6 +209,7 @@ void hsakmt_topology_setup_is_dgpu_param(HsaNodeProperties *props);
 bool hsakmt_topology_is_svm_needed(HSA_ENGINE_ID EngineId);
 
 HSAuint32 hsakmt_PageSizeFromFlags(unsigned int pageSizeFlags);
+HSAuint64 MapDrmPerm(HsaMemoryMapFlags flags);
 
 void* hsakmt_allocate_exec_aligned_memory_gpu(HsaKFDContext *ctx,
 					   uint32_t size, uint32_t align,

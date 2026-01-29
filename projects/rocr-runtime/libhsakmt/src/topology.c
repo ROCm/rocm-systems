@@ -1068,6 +1068,7 @@ static int topology_get_node_props_from_drm(HsaNodeProperties *props)
 
 	props->FamilyID = gpu_info.family_id;
 	props->Integrated = !!(gpu_info.ids_flags & AMDGPU_IDS_FLAGS_FUSION);
+	props->WallClockKHz = gpu_info.gpu_counter_freq;
 
 err_query_gpu_info:
 	amdgpu_device_deinitialize(device_handle);
@@ -1212,6 +1213,10 @@ static HSAKMT_STATUS topology_sysfs_get_node_props(uint32_t node_id,
 			props->NumSdmaQueuesPerEngine = prop_val;
 		else if (strcmp(prop_name, "num_cp_queues") == 0)
 			props->NumCpQueues = prop_val;
+		else if (strcmp(prop_name, "cwsr_size") == 0)
+			props->CwsrSize = prop_val;
+		else if (strcmp(prop_name, "ctl_stack_size") == 0)
+			props->CtlStackSize = prop_val;
 		else if (strcmp(prop_name, "num_xcc") == 0)
 			props->NumXcc = prop_val;
 		else if (strcmp(prop_name, "family_id") == 0)
@@ -2220,6 +2225,13 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtAcquireSystemPropertiesCtx(HsaKFDContext *ctx,
 		goto init_doorbells_failed;
 
 	*SystemProperties = *g_system;
+
+	for (int node = 0; node < g_system->NumNodes; node++) {
+		if (hsakmt_get_gfxv_by_node_id(node) == GFX_VERSION_GFX1151 &&
+		    hsakmt_kfd_version_info.KernelInterfaceMajorVersion == 1 &&
+		    hsakmt_kfd_version_info.KernelInterfaceMinorVersion < 20)
+			pr_err_once("WARNING: KFD ABI 1.20+ is recommended for gfx1151. Current KFD ABI is %i.%i. This may result in faults, crashes and other application instability\n", hsakmt_kfd_version_info.KernelInterfaceMajorVersion, hsakmt_kfd_version_info.KernelInterfaceMinorVersion);
+	}
 
 	goto out;
 

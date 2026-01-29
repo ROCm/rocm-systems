@@ -79,8 +79,11 @@
 #include "suites/functional/aql_barrier_bit.h"
 #include "suites/functional/signal_kernel.h"
 #include "suites/functional/cu_masking.h"
+#include "suites/functional/filter_devices.h"
 #include "amd_smi/amdsmi.h"
 #include "common/common.h"
+#include "suites/functional/counted_queues.h"
+#include "common/os.h"
 
 static RocrTstGlobals *sRocrtstGlvalues = nullptr;
 
@@ -130,6 +133,12 @@ static void RunGenericTest(TestBase *test) {
 TEST(rocrtst, Test_Example) {
   TestExample tst;
 
+  RunGenericTest(&tst);
+}
+
+TEST(rocrtst, Test_Example_InterruptDisabled) {
+  TestExample tst;
+  rocrtst::SetEnv("HSA_ENABLE_INTERRUPT", "0");
   RunGenericTest(&tst);
 }
 
@@ -472,12 +481,94 @@ TEST(rocrtstFunc, VirtMemory_Access_Test) {
   );
 }
 
+TEST(rocrtstFunc, VirtMemory_Accounting_Test) {
+  RUN_IF_NOT_EMU_MODE(
+    VirtMemoryTestBasic vmt;
+
+    RunCustomTestProlog(&vmt);
+    vmt.MemoryAccountingTest();
+    RunCustomTestEpilog(&vmt);
+  );
+}
+
 TEST(rocrtstFunc, VirtMemory_Interprocess_Test) {
   RUN_IF_NOT_EMU_MODE(
     VirtMemoryTestInterProcess vmt;
     RunCustomTestProlog(&vmt);
     RunCustomTestEpilog(&vmt);
   );
+}
+
+TEST(rocrtstFunc, Filter_Devices_Test) {
+  RUN_IF_NOT_EMU_MODE(
+    FilterDevicesTest fd;
+    RunCustomTestProlog(&fd);
+    fd.TestRocrVisibleDevicesFiltering();
+    RunCustomTestEpilog(&fd);
+  );
+}
+
+TEST(rocrtstFunc, Counted_Queue_Basic_Test) {
+  CountedQueuesTest cq;
+  RunCustomTestProlog(&cq);
+  cq.CountedQueueBasicApiTest();
+  RunCustomTestEpilog(&cq);
+}
+
+TEST(rocrtstFunc, Counted_Queue_Same_Priority_Max_Limit_Test) {
+  CountedQueuesTest cq;
+  RunCustomTestProlog(&cq);
+  cq.CountedQueues_SamePriority_MaxLimitTest();
+  RunCustomTestEpilog(&cq);
+}
+
+TEST(rocrtstFunc, Counted_Queue_Invalid_Args_Test) {
+  CountedQueuesTest cq;
+  RunCustomTestProlog(&cq);
+  cq.InvalidArgsTest();
+  RunCustomTestEpilog(&cq);
+}
+
+TEST(rocrtstFunc, Counted_Queue_Multiple_Priorities_Limit_Test) {
+  CountedQueuesTest cq;
+  RunCustomTestProlog(&cq);
+  cq.CountedQueuesAllPrioritiesLimitTest();
+  RunCustomTestEpilog(&cq);
+}
+
+TEST(rocrtstFunc, Counted_Queue_Set_Priority_Nack_Test) {
+  CountedQueuesTest cq;
+  RunCustomTestProlog(&cq);
+  cq.CountedQueuesSetPriorityNackTest();
+  RunCustomTestEpilog(&cq);
+}
+
+TEST(rocrtstFunc, Counted_Queue_Set_CUMask_Nack_Test) {
+  CountedQueuesTest cq;
+  RunCustomTestProlog(&cq);
+  cq.CountedQueuesSetCUMaskNackTest();
+  RunCustomTestEpilog(&cq);
+}
+
+TEST(rocrtstFunc, Counted_Queue_Dispatch_Test) {
+  CountedQueuesTest cq;
+  RunCustomTestProlog(&cq);
+  cq.CountedQueuesDispatchTest();
+  RunCustomTestEpilog(&cq);
+}
+
+TEST(rocrtstFunc, Counted_Queue_Multithreaded_Dispatch_Test) {
+  CountedQueuesTest cq;
+  RunCustomTestProlog(&cq);
+  cq.CountedQueuesMultithreadedDispatchTest();
+  RunCustomTestEpilog(&cq);
+}
+
+TEST(rocrtstFunc, Counted_Queue_Overflow_And_Wraparound_Test) {
+  CountedQueuesTest cq;
+  RunCustomTestProlog(&cq);
+  cq.CountedQueuesOverflowWrapAroundTest();
+  RunCustomTestEpilog(&cq);
 }
 
 TEST(rocrtstNeg, Memory_Negative_Tests) {

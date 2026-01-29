@@ -45,6 +45,9 @@ cmake_minimum_required(VERSION 3.7)
 
 # Set the project name
 project("rocr")
+set( CORE_TARGET "hsa-rocr" )
+set( BUILD_ENABLE_LINTIAN_OVERRIDES ON CACHE BOOL "Enable/Disable Lintian Overrides" )
+set( BUILD_DEBIAN_PKGING_FLAG ON CACHE BOOL "Internal Status Flag to indicate Debian Packaging Build" )
 
 set(CMAKE_VERBOSE_MAKEFILE ON)
 ## Expose static library option
@@ -82,6 +85,7 @@ function(add_rocm_subdir subdir subdir_assigns)
 endfunction()
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules")
+include ( GNUInstallDirs )
 include(utils)
 
 
@@ -179,14 +183,19 @@ endif()
 if (ENABLE_ASAN_PACKAGING)
   # ASAN Package requires only asan component with libraries and license file
   set(CPACK_COMPONENTS_ALL asan)
+  set( COMP_TYPE "asan" )
 else()
   set(CPACK_COMPONENTS_ALL binary dev)
+  set( COMP_TYPE "binary" )
 endif()
+
+set(PKG_MAINTAINER_NM "AMD HSA Support")
+set(PKG_MAINTAINER_EMAIL "dl.HSA-Runtime-Support@amd.com")
 set(CPACK_DEB_COMPONENT_INSTALL ON)
 set(CPACK_RPM_COMPONENT_INSTALL ON)
 set(CPACK_PACKAGE_VENDOR "Advanced Micro Devices, Inc.")
 set(CPACK_PACKAGE_VERSION ${PACKAGE_VERSION_STRING})
-set(CPACK_PACKAGE_CONTACT "AMD HSA Support <dl.HSA-Runtime-Support@amd.com>")
+set(CPACK_PACKAGE_CONTACT "${PKG_MAINTAINER_NM} <${PKG_MAINTAINER_EMAIL}>")
 set(CPACK_COMPONENT_DESCRIPTION "Includes HSAKMT, the ROCk driver, headers, pkgonfig and cmake files for ROCT.")
 set(CPACK_COMPONENT_BINARY_DESCRIPTION "AMD Heterogeneous System Architecture HSA - Linux HSA Runtime for Boltzmann (ROCm) platforms")
 set(CPACK_COMPONENT_DEV_DESCRIPTION "AMD Heterogeneous System Architecture HSA development package.\n This package contains the headers and cmake files for the rocr-runtime package.")
@@ -334,6 +343,7 @@ include(CPack)
 # Group binary and dev component to single package
 if(NOT BUILD_SHARED_LIBS)
     cpack_add_component_group("static")
+    set( COMP_TYPE "static" )
     cpack_add_component(binary  GROUP static)
     cpack_add_component(dev GROUP static)
 endif()
@@ -341,3 +351,6 @@ endif()
 cpack_add_component(asan
   DISPLAY_NAME "ASAN"
   DESCRIPTION "ASAN libraries for rocr-runtime")
+
+# Debian specific packaging configuration install lintian files
+configure_pkg( ${CORE_TARGET} ${COMP_TYPE} ${CPACK_PACKAGE_VERSION} ${PKG_MAINTAINER_NM} ${PKG_MAINTAINER_EMAIL} )

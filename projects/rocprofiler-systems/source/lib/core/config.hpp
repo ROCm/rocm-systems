@@ -225,6 +225,9 @@ get_use_pid();
 bool&
 get_use_mpip();
 
+bool&
+get_use_ucx();
+
 bool
 get_use_kokkosp();
 
@@ -358,14 +361,26 @@ get_trace_thread_join();
 bool
 get_use_tmp_files();
 
+int
+get_kill_delay();
+
 std::string
 get_tmpdir();
 
 std::string
 get_database_absolute_path(std::string_view database_name, std::string_view tag);
 
+std::string
+get_perfetto_output_filename_with_suffix(std::string_view suffix = "");
+
 bool&
 get_use_rocpd() ROCPROFSYS_HOT;
+
+bool&
+get_caching_perfetto() ROCPROFSYS_HOT;
+
+bool
+get_merge_perfetto_files();
 
 struct tmp_file
 {

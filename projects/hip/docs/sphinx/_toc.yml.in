@@ -16,16 +16,11 @@ subtrees:
     title: Installing HIP
   - file: install/build
     title: Building HIP from source
-  - url: https://rocm.docs.amd.com/projects/install-on-linux/en/${branch}/reference/system-requirements.html
-    title: Linux supported AMD GPUs
-  - url: https://rocm.docs.amd.com/projects/install-on-windows/en/${branch}/reference/system-requirements.html
-    title: Windows supported AMD GPUs
-  - url: https://developer.nvidia.com/cuda-gpus
-    title: NVIDIA supported GPUs
 
 - caption: Programming guide
   entries:
   - file: understand/programming_model
+  - file: understand/performance_optimization
   - file: understand/hardware_implementation
   - file: understand/compilers
   - file: how-to/performance_guidelines
@@ -102,8 +97,8 @@ subtrees:
       - file: reference/hip_runtime_api/global_defines_enums_structs_files
         subtrees:
         - entries:
-          - file: reference/hip_runtime_api/global_defines_enums_structs_files/global_enum_and_defines
-          - file: reference/hip_runtime_api/global_defines_enums_structs_files/driver_types
+          - file: doxygen/html/group___global_defs
+          - file: doxygen/html/group___driver_types
           - file: doxygen/html/annotated
           - file: doxygen/html/files
   - file: reference/math_api
@@ -124,6 +119,14 @@ subtrees:
   - url: https://github.com/ROCm/rocm-examples
     title: HIP examples
   - file: tutorial/saxpy
+  - file: tutorial/programming-patterns
+    subtrees:
+    - entries:
+      - file: tutorial/programming-patterns/matrix_multiplication
+      - file: tutorial/programming-patterns/atomic_operations_histogram
+      - file: tutorial/programming-patterns/cpu_gpu_kmeans
+      - file: tutorial/programming-patterns/stencil_operations
+      - file: tutorial/programming-patterns/multikernel_bfs
   - file: tutorial/reduction
   - file: tutorial/cooperative_groups_tutorial
   - file: tutorial/graph_api

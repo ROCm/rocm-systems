@@ -73,6 +73,17 @@ static bool isCompatibleCodeObject(const std::string& codeobj_target_id, const c
 
 void** __hipRegisterFatBinary(const void* data) {
   const __CudaFatBinaryWrapper* fbwrapper = reinterpret_cast<const __CudaFatBinaryWrapper*>(data);
+
+  // Check for HIPK magic (kpack'd binary with external device code)
+  if (fbwrapper->magic == symbols::kHipkMagic && fbwrapper->version == 1) {
+    // For HIPK binaries, fbwrapper->binary points to msgpack metadata
+    // Route through addKpackBinary which will error if ROCM_KPACK_ENABLED=OFF
+    bool success = false;
+    auto fat_binary_info = PlatformState::instance().addKpackBinary(fbwrapper->binary, data, success);
+    return success ? reinterpret_cast<void**>(fat_binary_info) : nullptr;
+  }
+
+  // Normal HIPF path
   if (fbwrapper->magic != __hipFatMAGIC2 || fbwrapper->version != 1) {
     LogPrintfError("Cannot Register fat binary. FatMagic: %u version: %u ", fbwrapper->magic,
                    fbwrapper->version);
@@ -365,9 +376,9 @@ hipError_t ihipOccupancyMaxActiveBlocksPerMultiprocessor(
     int* maxBlocksPerCU, int* numBlocksPerGrid, int* bestBlockSize, const amd::Device& device,
     hipFunction_t func, int inputBlockSize, size_t dynamicSMemSize, bool bCalcPotentialBlkSz) {
   hip::DeviceFunc* function = hip::DeviceFunc::asFunction(func);
-  const amd::Kernel& kernel = *function->kernel();
+  const amd::Kernel* kernel = function->kernel();
 
-  const device::Kernel::WorkGroupInfo* wrkGrpInfo = kernel.getDeviceKernel(device)->workGroupInfo();
+  const device::Kernel::WorkGroupInfo* wrkGrpInfo = kernel->getDeviceKernel(device)->workGroupInfo();
   if (bCalcPotentialBlkSz == false) {
     if (inputBlockSize <= 0) {
       return hipErrorInvalidValue;
@@ -701,10 +712,22 @@ hipError_t ihipLaunchKernel(const void* hostFunction, dim3 gridDim, dim3 blockDi
 
   hipError_t hip_error =
       PlatformState::instance().getStatFunc(&func, hostFunction, deviceId);
-  if ((hip_error != hipSuccess) || (func == nullptr)) {
-    // assume its hip function type if we did not get a valid output from static
-    // func lookup
-    func = reinterpret_cast<hipFunction_t>(const_cast<void *>(hostFunction));
+
+  switch (hip_error) {
+  // invalid code object errors are propagated
+  case hipErrorInvalidKernelFile:
+  case hipErrorInvalidDeviceFunction:
+  case hipErrorInvalidImage:
+    return hip_error;
+  case hipSuccess:
+    if (func) {
+      break;
+    }
+    // assume it is a hip function type if we did not get a valid output from static
+    // func lookup (i.e. if !func or hip_error != hipSuccess)
+    [[fallthrough]];
+  default:
+      func = reinterpret_cast<hipFunction_t>(const_cast<void *>(hostFunction));
   }
 
   constexpr auto gridDimYZmax = static_cast<uint64_t>(std::numeric_limits<uint16_t>::max()) + 1;
@@ -813,6 +836,9 @@ void PlatformState::init() {
   for (auto& it : statCO_.functions_) {
     it.second->resize_dFunc(g_devices.size());
   }
+  amd::RuntimeTearDown::RegisterTearDownCallback("PlatformState static fatbin cleanup", [this]() {
+    statCO_.RemoveAllFatBinaries();
+  });
 }
 
 hipError_t PlatformState::loadModule(hipModule_t* module, const char* fname, const void* image) {
@@ -988,6 +1014,11 @@ hip::FatBinaryInfo** PlatformState::addFatBinary(const void* data, bool& success
   return statCO_.addFatBinary(data, initialized_, success);
 }
 
+hip::FatBinaryInfo** PlatformState::addKpackBinary(const void* hipk_metadata,
+                                                    const void* wrapper_addr, bool& success) {
+  return statCO_.addKpackBinary(hipk_metadata, wrapper_addr, initialized_, success);
+}
+
 hipError_t PlatformState::removeFatBinary(hip::FatBinaryInfo** module) {
   return statCO_.removeFatBinary(module);
 }
@@ -1093,7 +1124,8 @@ void* PlatformState::getDynamicLibraryHandle() {
 #ifdef _WIN32
   const char* libName = "amdhip64.dll";
 #else
-  const char* libName = "libamdhip64.so";
+  std::string so_name = std::string("libamdhip64.so." + std::to_string(HIP_VERSION_MAJOR));
+  const char* libName = so_name.c_str();
 #endif
 
   dynamicLibraryHandle_ = amd::Os::loadLibrary(libName);

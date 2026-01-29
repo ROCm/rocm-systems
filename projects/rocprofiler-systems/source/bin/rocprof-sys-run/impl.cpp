@@ -23,13 +23,9 @@
 #include "rocprof-sys-run.hpp"
 
 #include "common/defines.h"
-#include "common/delimit.hpp"
 #include "common/environment.hpp"
-#include "common/join.hpp"
-#include "common/setup.hpp"
+#include "common/path.hpp"
 #include "core/argparse.hpp"
-#include "core/config.hpp"
-#include "core/state.hpp"
 #include "core/timemory.hpp"
 
 #include <timemory/environment.hpp>
@@ -43,11 +39,8 @@
 #include <timemory/utility/filepath.hpp>
 #include <timemory/utility/join.hpp>
 
-#include <array>
 #include <cctype>
-#include <chrono>
 #include <cmath>
-#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -57,7 +50,6 @@
 #include <string>
 #include <string_view>
 #include <sys/wait.h>
-#include <thread>
 #include <unistd.h>
 #include <vector>
 
@@ -66,6 +58,7 @@ namespace filepath = ::tim::filepath;  // NOLINT
 namespace console  = ::tim::utility::console;
 namespace argparse = ::tim::argparse;
 namespace signals  = ::tim::signals;
+namespace path     = rocprofsys::common::path;
 using settings     = ::rocprofsys::settings;
 using namespace ::timemory::join;
 using ::tim::get_env;
@@ -82,113 +75,9 @@ to_string(bool _v)
 
 namespace
 {
-auto original_envs = std::set<std::string>{};
-enum update_mode : int
-{
-    UPD_REPLACE = 0,       // no PREPEND/APPEND bits set
-    UPD_PREPEND = 1 << 0,  // 0x01
-    UPD_APPEND  = 1 << 1,  // 0x02
-    UPD_WEAK    = 1 << 2,  // 0x04
-};
+using rocprofsys::common::update_mode;
 
-std::string
-get_rocprofsys_root(void)
-{
-    char*       _tmp = realpath("/proc/self/exe", nullptr);
-    std::string _exe = (_tmp) ? std::string{ _tmp } : std::string{};
-
-    if(_tmp) free(_tmp);
-
-    auto _pos = _exe.find_last_of('/');
-    auto _dir = std::string{ "./" };
-
-    if(_pos != std::string::npos) _dir = _exe.substr(0, _pos);
-
-    return rocprofsys::common::join("/", _dir, "..");
-}
-
-std::string
-get_internal_libpath(const std::string& _lib)
-{
-    auto _root = get_rocprofsys_root();
-    return rocprofsys::common::join("/", _root, "lib", _lib);
-}
-
-std::string
-get_internal_script_path(void)
-{
-    auto _root = get_rocprofsys_root();
-    return rocprofsys::common::join("/", _root, "libexec", "rocprofiler-systems");
-}
-
-std::string
-get_realpath(const std::string& _v)
-{
-    if(auto* _tmp = realpath(_v.c_str(), nullptr))
-    {
-        std::string _ret{ _tmp };
-        free(_tmp);
-        return _ret;
-    }
-    return {};
-}
-
-template <typename Tp>
-void
-update_env(std::vector<char*>& _environ, std::string_view _env_var, Tp&& _env_val,
-           update_mode&& _mode, std::string_view _join_delim = ":")
-{
-    auto _prepend  = (_mode & UPD_PREPEND) != 0;
-    auto _append   = (_mode & UPD_APPEND) != 0;
-    auto _weak_upd = (_mode & UPD_WEAK) != 0;
-
-    // if both flags are set, prefer append
-    if(_prepend && _append)
-    {
-        _prepend = false;
-    }
-
-    auto _key = join("", _env_var, "=");
-    for(auto& itr : _environ)
-    {
-        if(!itr) continue;
-        if(std::string_view{ itr }.find(_key) == 0)
-        {
-            if(_weak_upd)
-            {
-                // if the value has changed, do not update but allow overridding the value
-                // inherited from the initial env
-                if(original_envs.find(std::string{ itr }) == original_envs.end()) return;
-            }
-
-            if(_prepend || _append)
-            {
-                if(std::string_view{ itr }.find(join("", _env_val)) ==
-                   std::string_view::npos)
-                {
-                    auto _val = std::string{ itr }.substr(_key.length());
-                    free(itr);
-                    if(_prepend)
-                        itr =
-                            strdup(join('=', _env_var, join(_join_delim, _env_val, _val))
-                                       .c_str());
-                    else
-                        itr =
-                            strdup(join('=', _env_var, join(_join_delim, _val, _env_val))
-                                       .c_str());
-                }
-            }
-            else
-            {
-                free(itr);
-                itr = strdup(rocprofsys::common::join('=', _env_var, _env_val).c_str());
-            }
-            return;
-        }
-    }
-    _environ.emplace_back(
-        strdup(rocprofsys::common::join('=', _env_var, _env_val).c_str()));
-}
+auto original_envs = std::unordered_set<std::string>{};
 
 int
 get_verbose(parser_data_t& _data)
@@ -217,19 +106,21 @@ get_initial_environment(parser_data_t& _data)
         }
     }
 
-    auto _libexecpath = get_realpath(get_internal_script_path());
+    auto _libexecpath = path::realpath(path::get_internal_script_path());
     if(!_libexecpath.empty())
     {
-        update_env(_data.current, "ROCPROFSYS_SCRIPT_PATH", _libexecpath, UPD_REPLACE);
-        _data.updated.emplace("ROCPROFSYS_SCRIPT_PATH");
+        rocprofsys::common::update_env(_data.current, "ROCPROFSYS_SCRIPT_PATH",
+                                       _libexecpath, update_mode::REPLACE, ":",
+                                       _data.updated, original_envs);
     }
 
     const bool verbose = (get_verbose(_data) > 0);
     if(auto llvm_dir = rocprofsys::common::discover_llvm_libdir_for_ompt(verbose);
        !llvm_dir.empty())
     {
-        update_env(_data.current, "LD_LIBRARY_PATH", llvm_dir, UPD_APPEND);
-        _data.updated.emplace("LD_LIBRARY_PATH");
+        rocprofsys::common::update_env(_data.current, "LD_LIBRARY_PATH", llvm_dir,
+                                       update_mode::APPEND, ":", _data.updated,
+                                       original_envs);
         auto        current_ld = getenv("LD_LIBRARY_PATH");
         std::string new_ld     = current_ld ? (llvm_dir + ":" + current_ld) : llvm_dir;
         setenv("LD_LIBRARY_PATH", new_ld.c_str(), 1);
@@ -301,6 +192,10 @@ prepare_environment_for_run(parser_data_t& _data)
         rocprofsys::argparse::add_ld_preload(_data);
         rocprofsys::argparse::add_ld_library_path(_data);
     }
+
+    rocprofsys::argparse::add_torch_library_path(_data, _data.verbose > 0);
+
+    rocprofsys::common::consolidate_env_entries(_data.current);
 }
 
 void
@@ -362,7 +257,7 @@ parse_args(int argc, char** argv, parser_data_t& _parser_data, bool& _fork_exec)
     using parser_err_t = typename parser_t::result_type;
 
     auto help_check = [](parser_t& p, int _argc, char** _argv) {
-        std::set<std::string> help_args = { "-h", "--help", "-?" };
+        std::unordered_set<std::string> help_args = { "-h", "--help", "-?" };
         return (p.exists("help") || _argc == 1 ||
                 (_argc > 1 && help_args.find(_argv[1]) != help_args.end()));
     };

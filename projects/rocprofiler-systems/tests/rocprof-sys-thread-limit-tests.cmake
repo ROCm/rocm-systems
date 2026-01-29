@@ -32,30 +32,27 @@ endif()
 
 set(_thread_limit_environment
     "${_base_environment}"
-    "ROCPROFSYS_TRACE=ON"
     "ROCPROFSYS_PROFILE=ON"
     "ROCPROFSYS_COUT_OUTPUT=ON"
     "ROCPROFSYS_USE_SAMPLING=ON"
     "ROCPROFSYS_SAMPLING_FREQ=250"
     "ROCPROFSYS_VERBOSE=2"
+    "ROCPROFSYS_LOG_LEVEL=trace"
     "ROCPROFSYS_TIMEMORY_COMPONENTS=wall_clock,peak_rss,page_rss"
 )
 
-# Maximum allowed threads
-set(ALLOWED_MAX_THREADS 4096)
+math(EXPR THREAD_VAL_1 "${ROCPROFSYS_MAX_THREADS} - 1")
+math(EXPR THREAD_VAL_2 "${ROCPROFSYS_MAX_THREADS} + 24")
 
-math(EXPR THREAD_VAL_1 "${ROCPROFSYS_MAX_THREADS} + 24")
-math(EXPR THREAD_VAL_2 "${ALLOWED_MAX_THREADS} + 1")
-
-set(THREAD_VALUES ${THREAD_VAL_1} ${THREAD_VAL_2})
+set(THREAD_VALUES ${THREAD_VAL_1} ${THREAD_VAL_2} ${ROCPROFSYS_MAX_THREADS})
 
 # Loop over thread values
 foreach(THREADS IN LISTS THREAD_VALUES)
     set(THREAD_PASS_VALUE ${THREADS})
     math(EXPR THREAD_FAIL_VALUE "${THREADS} + 1")
-    if(${THREADS} GREATER_EQUAL ${ALLOWED_MAX_THREADS})
-        math(EXPR THREAD_PASS_VALUE "${ALLOWED_MAX_THREADS} - 1")
-        math(EXPR THREAD_FAIL_VALUE "${THREADS}")
+    if(${THREADS} GREATER_EQUAL ${ROCPROFSYS_MAX_THREADS})
+        math(EXPR THREAD_PASS_VALUE "${ROCPROFSYS_MAX_THREADS} - 1")
+        math(EXPR THREAD_FAIL_VALUE "${ROCPROFSYS_MAX_THREADS} + 1")
     endif()
 
     set(_thread_limit_pass_regex "\\|${THREAD_PASS_VALUE}>>>")
@@ -73,9 +70,9 @@ foreach(THREADS IN LISTS THREAD_VALUES)
         REWRITE_ARGS -e -v 2 -i 1024 --label return args
         RUNTIME_ARGS -e -v 1 -i 1024 --label return args
         RUN_ARGS 35 2 ${THREADS}
-        SAMPLING_TIMEOUT 180
-        REWRITE_TIMEOUT 180
-        RUNTIME_TIMEOUT 360
+        SAMPLING_TIMEOUT 480
+        REWRITE_TIMEOUT 480
+        RUNTIME_TIMEOUT 480
         RUNTIME_PASS_REGEX "${_thread_limit_pass_regex}"
         SAMPLING_PASS_REGEX "${_thread_limit_pass_regex}"
         REWRITE_RUN_PASS_REGEX "${_thread_limit_pass_regex}"

@@ -43,9 +43,11 @@ import pandas as pd
 import config
 from utils.amdsmi_interface import (
     amdsmi_ctx,
+    get_amdgpu_driver_version,
     get_gpu_compute_partition,
     get_gpu_memory_partition,
     get_gpu_vbios_part_number,
+    get_gpu_vram_size,
 )
 from utils.logger import (
     console_debug,
@@ -73,14 +75,30 @@ VERSION_LOC: list[str] = [
 
 
 def detect_arch(rocminfo_lines: list[str]) -> Optional[tuple[str, int]]:
+    supported_gpu_arch = mi_gpu_specs.get_gpu_series_dict()
+    unsupported_gpu_arch: set[str] = set()
+
     for idx1, line_text in enumerate(rocminfo_lines):
         gpu_arch = search(
             r"^\s*Name\s*:\s* ([Gg][Ff][Xx][a-zA-Z0-9]+).*\s*$", line_text
         )
-        if gpu_arch and gpu_arch in mi_gpu_specs.get_gpu_series_dict():
+        if not gpu_arch:
+            continue
+
+        if gpu_arch in supported_gpu_arch:
             return (gpu_arch, idx1)
 
-    console_error("Cannot find a supported arch in rocminfo")
+        if gpu_arch not in unsupported_gpu_arch:
+            unsupported_gpu_arch.add(gpu_arch)
+            console_warning(
+                "Detected GPU architecture: "
+                f"{gpu_arch} is currently NOT supported by the profile mode."
+            )
+
+    if unsupported_gpu_arch:
+        console_log(f"Supported architectures: {list(supported_gpu_arch.keys())}")
+
+    console_error("Cannot find a supported arch in rocminfo.")
 
 
 def detect_gpu_chip_id(rocminfo_lines: list[str]) -> Optional[str]:
@@ -156,35 +174,36 @@ def generate_machine_specs(
     ##########################################
     machine_info = extract_machine_info()
 
-    # FIXME: use device
-    # Load amd-smi data
-    gpu_info = extract_gpu_info()
-
     ##########################################
     ## B. SoC Specs
     ##########################################
     soc_info = extract_soc_info()
 
+    # FIXME: use device
+    # Load amd-smi data
+    gpu_info = extract_gpu_info(gpu_arch=soc_info["gpu_arch"])
+
     # Combine all specifications
-    specs = MachineSpecs(
-        version=specs_version,
-        timestamp=timestamp,
-        rocminfo_lines=soc_info["rocminfo_lines"],
-        hostname=socket.gethostname(),
-        cpu_model=machine_info["cpu_model"],
-        sbios=machine_info["sbios"],
-        linux_kernel_version=machine_info["linux_kernel_version"],
-        amd_gpu_kernel_version="",
-        cpu_memory=machine_info["cpu_memory"],
-        gpu_memory="",
-        linux_distro=machine_info["linux_distro"],
-        rocm_version=get_rocm_ver().strip(),
-        vbios=gpu_info["vbios"],
-        compute_partition=gpu_info["compute_partition"],
-        memory_partition=gpu_info["memory_partition"],
-        gpu_arch=soc_info["gpu_arch"],
-        gpu_chip_id=soc_info["gpu_chip_id"],
-    )
+    with amdsmi_ctx():
+        specs = MachineSpecs(
+            version=specs_version,
+            timestamp=timestamp,
+            rocminfo_lines=soc_info["rocminfo_lines"],
+            hostname=socket.gethostname(),
+            cpu_model=machine_info["cpu_model"],
+            sbios=machine_info["sbios"],
+            linux_kernel_version=machine_info["linux_kernel_version"],
+            amd_gpu_kernel_version=get_amdgpu_driver_version(),
+            cpu_memory=machine_info["cpu_memory"],
+            gpu_memory=get_gpu_vram_size(),
+            linux_distro=machine_info["linux_distro"],
+            rocm_version=get_rocm_ver().strip(),
+            vbios=gpu_info["vbios"],
+            compute_partition=gpu_info["compute_partition"],
+            memory_partition=gpu_info["memory_partition"],
+            gpu_arch=soc_info["gpu_arch"],
+            gpu_chip_id=soc_info["gpu_chip_id"],
+        )
 
     # Load above SoC specs via module import
     try:
@@ -250,7 +269,16 @@ def extract_machine_info() -> dict[str, Any]:
 
 
 @demarcate
-def extract_gpu_info() -> dict[str, Any]:
+def extract_gpu_info(gpu_arch: Optional[str]) -> dict[str, Any]:
+    # Partition is only supported on >= MI 300 series
+    # (gpu_arch should be gfx940 or higher for MI300+)
+    is_partition_supported = False
+    if gpu_arch and gpu_arch.startswith("gfx") and len(gpu_arch) >= 6:
+        try:
+            is_partition_supported = int(gpu_arch[3:6], 16) >= 0x940
+        except ValueError:
+            pass  # Invalid hex string, keep is_partition_supported as False
+
     result: dict[str, Optional[str]] = {
         "vbios": None,
         "compute_partition": None,
@@ -259,17 +287,22 @@ def extract_gpu_info() -> dict[str, Any]:
 
     with amdsmi_ctx():
         result["vbios"] = get_gpu_vbios_part_number()
-        result["compute_partition"] = get_gpu_compute_partition()
-        result["memory_partition"] = get_gpu_memory_partition()
+        if is_partition_supported:
+            result["compute_partition"] = get_gpu_compute_partition()
+            result["memory_partition"] = get_gpu_memory_partition()
+        else:
+            result["compute_partition"] = "N/A"
+            result["memory_partition"] = "N/A"
 
     # Apply defaults and warnings
-    if result["compute_partition"] == "N/A" or not result["compute_partition"]:
-        console_warning("Cannot detect accelerator partition from amd-smi.")
-        console_warning("Applying default accelerator partition: SPX")
-        result["compute_partition"] = "SPX"
+    if is_partition_supported:
+        if result["compute_partition"] == "N/A" or not result["compute_partition"]:
+            console_warning("Cannot detect accelerator partition from amd-smi.")
+            console_warning("Applying default accelerator partition: SPX")
+            result["compute_partition"] = "SPX"
 
-    if result["memory_partition"] == "N/A" or not result["memory_partition"]:
-        console_warning("Cannot detect memory partition from amd-smi.")
+        if result["memory_partition"] == "N/A" or not result["memory_partition"]:
+            console_warning("Cannot detect memory partition from amd-smi.")
 
     console_debug(
         f"vbios is {result['vbios']}, compute partition is "
@@ -420,10 +453,7 @@ class MachineSpecs:
     amd_gpu_kernel_version: Optional[str] = field(
         default=None,
         metadata={
-            "doc": (
-                "[RESERVED] The version of the AMDGPU driver installed on the machine. "
-                "Unimplemented."
-            ),
+            "doc": ("The version of the AMDGPU driver installed on the machine."),
             "name": "AMD GPU Kernel Version",
             "show_in_table": True,
         },
@@ -441,8 +471,8 @@ class MachineSpecs:
         default=None,
         metadata={
             "doc": (
-                "[RESERVED] The total amount of memory available to accelerators/GPUs "
-                "in the system. Unimplemented."
+                "The total amount of memory available to accelerators/GPUs "
+                "in the system."
             ),
             "unit": "KB",
             "name": "GPU Memory",

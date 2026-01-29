@@ -22,73 +22,137 @@
 
 #pragma once
 
-#include "buffer_storage.hpp"
-#include "sample_type.hpp"
+#include "common/defines.h"
+
+#include "core/trace_cache/cacheable.hpp"
+#include "core/trace_cache/type_registry.hpp"
+
+#include "logger/debug.hpp"
+
 #include <cassert>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
-#include <functional>
-#include <iterator>
-#include <map>
-#include <rocprofiler-systems/categories.h>
-#include <stdint.h>
+#include <fstream>
+#include <memory>
 #include <string>
-#include <type_traits>
-#include <vector>
 
 namespace rocprofsys
 {
 namespace trace_cache
 {
-using postprocessing_callback = std::function<void(const storage_parsed_type_base&)>;
-class cache_manager;
+template <typename TypeIdentifierEnum, typename... SupportedTypes>
 class storage_parser
 {
-public:
-    void register_type_callback(const entry_type&              type,
-                                const postprocessing_callback& callback);
+    static_assert(type_traits::is_enum_class_v<TypeIdentifierEnum>,
+                  "TypeIdentifierEnum must be an enum class");
 
-    void consume_storage();
-    void register_on_finished_callback(std::unique_ptr<std::function<void()>> callback);
+    static_assert(sizeof...(SupportedTypes) != 0, "SupportedTypes must be non-empty");
+
+public:
+    storage_parser(std::string _filename)
+    : m_filename(std::move(_filename))
+    {}
+
+    template <typename TypeProcessing>
+    void load(std::shared_ptr<TypeProcessing> _type_processing)
+    {
+        static_assert(
+            type_traits::has_execute_processing<TypeProcessing, TypeIdentifierEnum,
+                                                cacheable_t>::value,
+            "TypeProcessing must have member function "
+            "execute_sample_processing(TypeIdentifierEnum, const cacheable_t&)");
+
+        if(_type_processing == nullptr)
+        {
+            throw std::runtime_error("TypeProcessing is nullptr");
+        }
+
+        LOG_DEBUG("Loading storage from file: {}", m_filename);
+
+        std::ifstream ifs(m_filename, std::ios::binary);
+        if(!ifs.good())
+        {
+            throw std::runtime_error(
+                fmt::format("Error opening file for reading: {}", m_filename));
+        }
+
+        struct __attribute__((packed)) sample_header
+        {
+            TypeIdentifierEnum type;
+            size_t             sample_size;
+        };
+
+        sample_header header;
+
+        std::vector<uint8_t> sample;
+        sample.reserve(4096);
+        size_t last_capacity = sample.capacity();
+
+        while(!ifs.eof())
+        {
+            if(!ifs.good())
+            {
+                throw std::runtime_error(fmt::format(
+                    "Stream not in good state, stopping parse. File: {}", m_filename));
+            }
+
+            ifs.read(reinterpret_cast<char*>(&header), sizeof(header));
+
+            if(header.sample_size == 0 || ifs.eof())
+            {
+                continue;
+            }
+
+            if(ROCPROFSYS_UNLIKELY(header.sample_size > last_capacity))
+            {
+                sample.reserve(header.sample_size);
+                last_capacity = sample.capacity();
+            }
+
+            sample.resize(header.sample_size);
+            ifs.read(reinterpret_cast<char*>(sample.data()), header.sample_size);
+
+            if(ifs.fail())
+            {
+                throw std::runtime_error(
+                    fmt::format("Bad read while consuming buffered storage. Filename: {} "
+                                "Bytes read: {}",
+                                m_filename, static_cast<int>(ifs.tellg())));
+            }
+
+            if(header.type == TypeIdentifierEnum::fragmented_space)
+            {
+                LOG_TRACE("Skipping fragmented space in storage");
+                continue;
+            }
+
+            auto* data = sample.data();
+
+            auto sample_value = m_registry.get_type(header.type, data);
+            if(sample_value.has_value())
+            {
+                _type_processing->execute_sample_processing(
+                    header.type, std::visit(
+                                     [](auto& arg) -> cacheable_t& {
+                                         return static_cast<cacheable_t&>(arg);
+                                     },
+                                     sample_value.value()));
+            }
+            else
+            {
+                LOG_TRACE("Unknown sample type encountered, skipping");
+                continue;
+            }
+        }
+
+        ifs.close();
+        LOG_DEBUG("Storage parsing complete from {}", m_filename);
+    }
 
 private:
-    friend class cache_manager;
-    storage_parser(std::string _filename);
-
-    template <typename T>
-    static void process_arg(const uint8_t*& data_pos, T& arg)
-    {
-        if constexpr(std::is_same_v<T, std::string>)
-        {
-            arg = std::string((const char*) data_pos);
-            data_pos += arg.size() + 1;
-        }
-        else if constexpr(std::is_same_v<T, std::vector<uint8_t>>)
-        {
-            size_t vector_size = *reinterpret_cast<const size_t*>(data_pos);
-            data_pos += sizeof(size_t);
-            arg.reserve(vector_size);
-            std::copy_n(data_pos, vector_size, std::back_inserter(arg));
-            data_pos += vector_size;
-        }
-        else
-        {
-            arg = *reinterpret_cast<const T*>(data_pos);
-            data_pos += sizeof(T);
-        }
-    }
-
-    template <typename... Args>
-    static void parse_data(const uint8_t* data_pos, Args&... args)
-    {
-        (process_arg(data_pos, args), ...);
-    }
-
-    void invoke_callbacks(entry_type type, const storage_parsed_type_base& parsed);
-
-    std::string                                                m_filename;
-    std::map<entry_type, std::vector<postprocessing_callback>> m_callbacks;
-    std::unique_ptr<std::function<void()>> m_on_finished_callback{ nullptr };
+    std::string                                          m_filename;
+    type_registry<TypeIdentifierEnum, SupportedTypes...> m_registry;
 };
 
 }  // namespace trace_cache

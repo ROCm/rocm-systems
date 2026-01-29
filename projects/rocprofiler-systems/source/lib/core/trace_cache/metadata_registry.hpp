@@ -32,6 +32,7 @@
 #include <cstring>
 #include <memory>
 #include <optional>
+#include <vector>
 #if ROCPROFSYS_USE_ROCM > 0
 #    include <rocprofiler-sdk/callback_tracing.h>
 #    include <rocprofiler-sdk/cxx/name_info.hpp>
@@ -178,16 +179,21 @@ struct kernel_symbol_less
 
 }  // namespace info
 
-class cache_manager;
 struct metadata_registry
 {
+    metadata_registry();
+    metadata_registry(const metadata_registry&)            = delete;
+    metadata_registry& operator=(const metadata_registry&) = delete;
+    metadata_registry(metadata_registry&&)                 = delete;
+    metadata_registry& operator=(metadata_registry&&)      = delete;
+
     void set_process(const info::process& process);
     void add_pmc_info(const info::pmc& pmc_info);
     void add_thread_info(const info::thread& thread_info);
     void add_track(const info::track& track_info);
     void add_queue(const uint64_t& queue_handle);
     void add_stream(const uint64_t& stream_handle);
-    void add_string(const std::string_view& string_value);
+    void add_string(const std::string_view string_value);
 
     info::process               get_process_info() const;
     std::optional<info::pmc>    get_pmc_info(const std::string_view& unique_name) const;
@@ -224,26 +230,24 @@ struct metadata_registry
 #endif
 
 private:
-    friend class cache_manager;
-    metadata_registry();
-    common::synchronized<info::process> m_process;
+    common::synchronized<info::process> m_process{};
     common::synchronized<
         std::unordered_set<info::pmc, info::pmc_info_hash, info::pmc_info_equal>>
-                                                 m_pmc_infos;
-    common::synchronized<std::set<info::thread>> m_threads;
-    common::synchronized<std::set<info::track>>  m_tracks;
+                                                 m_pmc_infos{};
+    common::synchronized<std::set<info::thread>> m_threads{};
+    common::synchronized<std::set<info::track>>  m_tracks{};
 
-    common::synchronized<std::set<uint64_t>>                   m_streams;
-    common::synchronized<std::set<uint64_t>>                   m_queues;
-    common::synchronized<std::unordered_set<std::string_view>> m_strings;
+    common::synchronized<std::set<uint64_t>>              m_streams{};
+    common::synchronized<std::set<uint64_t>>              m_queues{};
+    common::synchronized<std::unordered_set<std::string>> m_strings{};
 #if ROCPROFSYS_USE_ROCM > 0
     common::synchronized<std::set<rocprofiler_callback_tracing_code_object_load_data_t,
                                   info::code_object_less>>
-        m_code_objects;
+        m_code_objects{};
     common::synchronized<
         std::set<rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t,
                  info::kernel_symbol_less>>
-                                                      m_kernel_symbols;
+                                                      m_kernel_symbols{};
     rocprofiler::sdk::buffer_name_info_t<const char*> m_buffered_tracing_info{
         rocprofiler::sdk::get_buffer_tracing_names<const char*>()
     };

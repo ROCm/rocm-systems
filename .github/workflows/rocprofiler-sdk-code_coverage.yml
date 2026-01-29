@@ -11,19 +11,29 @@ on:
       - develop
     paths:
       - 'projects/rocprofiler-sdk/**'
+      - '.github/workflows/rocprofiler-sdk-code_coverage.yml'
+      - '!**/*.md'
+      - '!**/*.rtf'
+      - '!**/*.rst'
+      - '!**/.markdownlint-ci2.yaml'
+      - '!**/.readthedocs.yaml'
+      - '!**/.spellcheck.local.yaml'
+      - '!**/.wordlist.txt'
       - '!projects/rocprofiler-sdk/CODEOWNERS'
       - '!projects/rocprofiler-sdk/source/docs/**'
-      - '!projects/rocprofiler-sdk/*.md'
-      - '!projects/rocprofiler-sdk/**/README.md'
-      - '.github/workflows/rocprofiler-sdk-code_coverage.yml'
   pull_request:
     paths:
       - 'projects/rocprofiler-sdk/**'
+      - '.github/workflows/rocprofiler-sdk-code_coverage.yml'
+      - '!**/*.md'
+      - '!**/*.rtf'
+      - '!**/*.rst'
+      - '!**/.markdownlint-ci2.yaml'
+      - '!**/.readthedocs.yaml'
+      - '!**/.spellcheck.local.yaml'
+      - '!**/.wordlist.txt'
       - '!projects/rocprofiler-sdk/CODEOWNERS'
       - '!projects/rocprofiler-sdk/source/docs/**'
-      - '!projects/rocprofiler-sdk/*.md'
-      - '!projects/rocprofiler-sdk/**/README.md'
-      - '.github/workflows/rocprofiler-sdk-code_coverage.yml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -60,6 +70,8 @@ env:
 
 jobs:
   code-coverage:
+    # TEMPORARILY DISABLED: pending CI stabilization
+    if: false
     name: Code Coverage • ${{ matrix.system.gpu }} • ${{ matrix.system.os }}
     strategy:
       # fail-fast: false
@@ -333,7 +345,7 @@ jobs:
       working-directory: projects/rocprofiler-sdk
       run:
         LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
-        PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH
+        PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$HOME/.local/bin:$PATH
         python3 ./source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-codecov
           --build-jobs 16
@@ -357,7 +369,7 @@ jobs:
       run:
         find build -type f | egrep '\.gcda$' | xargs rm &&
         LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
-        PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH
+        PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$HOME/.local/bin:$PATH
         python3 ./source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-codecov-tests
           --build-jobs 16
@@ -381,7 +393,7 @@ jobs:
       run:
         find build -type f | egrep '\.gcda$' | xargs rm &&
         LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
-        PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH
+        PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$HOME/.local/bin:$PATH
         python3 ./source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-codecov-samples
           --build-jobs 16

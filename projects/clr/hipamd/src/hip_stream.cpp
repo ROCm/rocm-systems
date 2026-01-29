@@ -32,7 +32,7 @@ namespace hip {
 Stream::Stream(hip::Device* dev, Priority p, unsigned int f, bool null_stream,
                const std::vector<uint32_t>& cuMask, hipStreamCaptureStatus captureStatus)
     : amd::HostQueue(*dev->asContext(), *dev->devices()[0], 0, amd::CommandQueue::RealTimeDisabled,
-                     convertToQueuePriority(p), cuMask),
+                     convertToQueuePriority(p), cuMask, null_stream),
       lock_("Stream Callback lock"),
       device_(dev),
       priority_(p),
@@ -74,10 +74,9 @@ bool Stream::Create() { return create(); }
 // ================================================================================================
 void Stream::Destroy(hip::Stream* stream, bool forceDestroy) {
   stream->device().removeFromActiveQueues(stream);
-  stream->device_->RemoveStream(stream);
+  stream->GetDevice()->RemoveStream(stream);
   stream->SetForceDestroy(forceDestroy);
   stream->release();
-  stream = nullptr;
 }
 
 // ================================================================================================
@@ -154,12 +153,14 @@ bool Stream::StreamCaptureOngoing(hipStream_t hStream) {
       return false;
     }
     // If any stream in current/concurrent thread is capturing in global mode
-    amd::ScopedLock lock(g_captureStreamsLock);
-    if (!g_captureStreams.empty()) {
-      for (auto stream : hip::g_captureStreams) {
-        stream->SetCaptureStatus(hipStreamCaptureStatusInvalidated);
+    if (hip::tls.stream_capture_mode_ == hipStreamCaptureModeGlobal) {
+      amd::ScopedLock lock(g_captureStreamsLock);
+      if (!g_captureStreams.empty()) {
+        for (auto stream : hip::g_captureStreams) {
+          stream->SetCaptureStatus(hipStreamCaptureStatusInvalidated);
+        }
+        return true;
       }
-      return true;
     }
     // If any stream in current thread is capturing in ThreadLocal mode
     if (!hip::tls.capture_streams_.empty()) {
@@ -207,7 +208,6 @@ static hipError_t ihipStreamCreate(hipStream_t* stream, unsigned int flags,
 }
 
 // ================================================================================================
-
 stream_per_thread::stream_per_thread() {
   m_streams.resize(g_devices.size());
   for (auto& stream : m_streams) {
@@ -215,15 +215,21 @@ stream_per_thread::stream_per_thread() {
   }
 }
 
+// ================================================================================================
 stream_per_thread::~stream_per_thread() {
   for (auto& stream : m_streams) {
     if (stream != nullptr && hip::isValid(stream)) {
-      hip::Stream::Destroy(reinterpret_cast<hip::Stream*>(stream));
+      // @note: Global variables in hip runtime will be destroyed after ROCR's global variables.
+      // Any calls to rocr may cause invalid object access. Hence, avoid the stream destruction.
+      if (IS_LINUX || (GPU_ENABLE_PAL != 0)) {
+        hip::Stream::Destroy(reinterpret_cast<hip::Stream*>(stream));
+      }
       stream = nullptr;
     }
   }
 }
 
+// ================================================================================================
 hipStream_t stream_per_thread::get() {
   hip::Device* device = hip::getCurrentDevice();
   int currDev = device->deviceId();
@@ -240,18 +246,18 @@ hipStream_t stream_per_thread::get() {
     hipError_t status =
         ihipStreamCreate(&m_streams[currDev], hipStreamDefault, hip::Stream::Priority::Normal);
     if (status != hipSuccess) {
-      DevLogError("Stream creation failed");
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_QUEUE, "Stream creation failed");
     }
   }
   return m_streams[currDev];
 }
 
+// ================================================================================================
 void stream_per_thread::clear_spt() {
   if (!m_streams.empty()) {
     m_streams[getCurrentDevice()->deviceId()] = nullptr;
   }
 }
-
 
 // ================================================================================================
 void getStreamPerThread(hipStream_t& stream) {
@@ -579,6 +585,12 @@ hipError_t hipStreamQuery_common(hipStream_t stream) {
   }
   hipError_t status = ready ? hipSuccess : hipErrorNotReady;
   command->release();
+
+  // Stream is complete - opportunistically release its HW queue if idle
+  if (ready) {
+    hip_stream->vdev()->ReleaseHwQueue();
+  }
+
   return status;
 }
 

@@ -81,7 +81,7 @@ namespace AMD {
 AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_size_pkts,
                    HSAuint32 node_id, ScratchInfo& scratch, core::HsaEventCallback callback,
                    void* err_data, uint64_t flags)
-    : Queue(shared_queue, flags, !agent->is_xgmi_cpu_gpu()),
+    : Queue(shared_queue, flags, !agent->is_xgmi_cpu_gpu(), agent),
       LocalSignal(0, false),
       DoorbellSignal(signal()),
       ring_buf_(nullptr),
@@ -97,7 +97,7 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
       dynamicScratchState(0),
       exceptionState(0),
       suspended_(false),
-      priority_(HSA_QUEUE_PRIORITY_NORMAL),
+      priority_(HSA::HSA_AMD_QUEUE_PRIORITY_NORMAL),
       exception_signal_(nullptr) {
 
   // Queue size is a function of several restrictions.
@@ -165,8 +165,8 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
   // Set group and private memory apertures in amd_queue_.
   auto& regions = agent->regions();
 
-  for (auto region : regions) {
-    const MemoryRegion* amdregion = static_cast<const AMD::MemoryRegion*>(region);
+  for (const auto& region : regions) {
+    const MemoryRegion* amdregion = static_cast<const AMD::MemoryRegion*>(region.get());
     uint64_t base = amdregion->GetBaseAddress();
 
     if (amdregion->IsLDS()) {
@@ -217,7 +217,7 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
   }
 
   MAKE_NAMED_SCOPE_GUARD(EventGuard, [&]() {
-    ScopedAcquire<KernelMutex> _lock(&queue_lock());
+    std::lock_guard<std::mutex> _lock(queue_lock());
     queue_count()--;
     if (queue_count() == 0) {
       core::InterruptSignal::DestroyEvent(queue_event());
@@ -232,7 +232,7 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
   });
 
   if (core::g_use_interrupt_wait) {
-    ScopedAcquire<KernelMutex> _lock(&queue_lock());
+    std::lock_guard<std::mutex> _lock(queue_lock());
     queue_count()++;
     if (queue_event() == nullptr) {
       assert(queue_count() == 1 && "Inconsistency in queue event reference counting found.\n");
@@ -383,11 +383,11 @@ AqlQueue::~AqlQueue() {
 
   exception_signal_->WaitingDec();
   exception_signal_->DestroySignal();
-  HSA::hsa_signal_destroy(amd_queue_.queue_inactive_signal);
+  core::Signal::Convert(amd_queue_.queue_inactive_signal)->DestroySignal();
   FreeQueueMemory();
 
   if (core::g_use_interrupt_wait) {
-    ScopedAcquire<KernelMutex> lock(&queue_lock());
+    std::lock_guard<std::mutex> lock(queue_lock());
     queue_count()--;
     if (queue_count() == 0) {
       core::InterruptSignal::DestroyEvent(queue_event());
@@ -471,7 +471,7 @@ uint64_t AqlQueue::AddWriteIndexRelease(uint64_t value) {
 void AqlQueue::StoreRelaxed(hsa_signal_value_t value) {
   if (core::Runtime::runtime_singleton_->thunkLoader()->IsDTIF() ||
         core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) {
-    HSAKMT_CALL(hsaKmtQueueRingDoorbell(queue_id_));
+    HSAKMT_CALL(hsaKmtQueueRingDoorbell(queue_id_, value));
   } else {
     // Hardware doorbell supports AQL semantics.
     _mm_sfence();
@@ -494,6 +494,21 @@ hsa_status_t AqlQueue::GetInfo(hsa_queue_info_attribute_t attribute, void* value
     case HSA_AMD_QUEUE_INFO_DOORBELL_ID:
       *(reinterpret_cast<uint64_t*>(value)) =
           reinterpret_cast<uint64_t>(signal_.hardware_doorbell_ptr);
+      break;
+    case HSA_QUEUE_INFO_USE_COUNT:
+      if (!is_counted_queue) {
+        *static_cast<uint32_t*>(value) = static_cast<uint32_t>(-1);
+      } else {
+        if (use_count == 0) {
+          // Queue was released
+          return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+        }
+        *static_cast<uint32_t*>(value) = use_count;
+      }
+      break;
+    case HSA_QUEUE_INFO_HW_ID:
+      // Return the hardware queue ID for both counted and non-counted queues
+      *static_cast<uint32_t*>(value) = public_handle()->id; 
       break;
     default:
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
@@ -631,7 +646,7 @@ hsa_status_t AqlQueue::Inactivate() {
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t AqlQueue::SetPriority(HSA_QUEUE_PRIORITY priority) {
+hsa_status_t AqlQueue::SetPriority(HSA::hsa_amd_queue_priority_internal_t priority) {
   if (suspended_) {
     return HSA_STATUS_ERROR_INVALID_QUEUE;
   }
@@ -777,7 +792,7 @@ void AqlQueue::AsyncReclaimMainScratch() {
   tool::notify_event_scratch_async_reclaim_start(public_handle(),
                                                  HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_NONE);
 
-  ScopedAcquire<KernelMutex> lock(&scratch_lock_);
+  std::lock_guard<std::mutex> lock(scratch_lock_);
 
   // Unmap the queue. CP will check amd_queue_ fields on re-map
   Suspend();
@@ -849,7 +864,7 @@ void AqlQueue::AsyncReclaimAltScratch() {
   tool::notify_event_scratch_async_reclaim_start(public_handle(),
                                                  HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_ALT);
 
-  ScopedAcquire<KernelMutex> lock(&scratch_lock_);
+  std::lock_guard<std::mutex> lock(scratch_lock_);
 
   // Unmap the queue. CP will check amd_queue_ fields on re-map
   Suspend();
@@ -1014,7 +1029,7 @@ void AqlQueue::HandleInsufficientScratch(hsa_signal_value_t& error_code,
   const uint64_t device_size = size_per_thread * lanes_per_wave * device_slots;
   const uint64_t dispatch_size = size_per_thread * lanes_per_wave * dispatch_slots;
 
-  ScopedAcquire<KernelMutex> lock(&scratch_lock_);
+  std::lock_guard<std::mutex> lock(scratch_lock_);
 
   // scratch.use_alt_limit will be 0 if alt scratch is not supported or disabled
   if (dispatch_size < scratch.use_alt_limit && dispatch_slots < device_slots) {
@@ -1323,10 +1338,11 @@ bool AqlQueue::ExceptionHandler(hsa_signal_value_t error_code, void* arg) {
     return exceptionHandlerDone();
   }
 
-  // Fallback if KFD does not support GPU core dump. In this case, there core dump is
-  // generated by hsa-runtime.
+  // Fallback if KFD does not support GPU core dump. In this case, the core
+  // dump is generated by hsa-runtime.
   if (!core::Runtime::runtime_singleton_->KfdVersion().supports_core_dump &&
-                queue->agent_->supported_isas()[0]->GetMajorVersion() != 11) {
+                !(queue->agent_->supported_isas()[0]->GetMajorVersion() == 11
+                  && queue->agent_->supported_isas()[0]->GetMinorVersion() < 5)) {
 
     if (pcs::PcsRuntime::instance()->SessionsActive())
       fprintf(stderr, "GPU core dump skipped because PC Sampling active\n");
@@ -1392,7 +1408,7 @@ hsa_status_t AqlQueue::SetCUMasking(uint32_t num_cu_mask_count, const uint32_t* 
   if ((mask.size() == mask_dwords) && (tail_mask != 0)) mask[mask_dwords - 1] &= tail_mask;
 
   // Apply mask if non-default or not queue initialization.
-  ScopedAcquire<KernelMutex> lock(&mask_lock_);
+  std::lock_guard<std::mutex> lock(mask_lock_);
   if ((!cu_mask_.empty()) || (num_cu_mask_count != 0) || (!global_mask.empty())) {
 
     // Devices with WGPs must conform to even-indexed contiguous pairwise CU enablement.
@@ -1413,7 +1429,7 @@ hsa_status_t AqlQueue::SetCUMasking(uint32_t num_cu_mask_count, const uint32_t* 
 }
 
 hsa_status_t AqlQueue::GetCUMasking(uint32_t num_cu_mask_count, uint32_t* cu_mask) {
-  ScopedAcquire<KernelMutex> lock(&mask_lock_);
+  std::lock_guard<std::mutex> lock(mask_lock_);
   assert(!cu_mask_.empty() && "No current cu_mask!");
 
   uint32_t user_dword_count = num_cu_mask_count / 32;
@@ -1439,7 +1455,7 @@ void AqlQueue::SetProfiling(bool enabled) {
 void AqlQueue::ExecutePM4(uint32_t* cmd_data, size_t cmd_size_b, hsa_fence_scope_t acquireFence,
                           hsa_fence_scope_t releaseFence, hsa_signal_t* in_signal) {
   // pm4_ib_buf_ is a shared resource, so mutually exclude here.
-  ScopedAcquire<KernelMutex> lock(&pm4_ib_mutex_);
+  std::lock_guard<std::mutex> lock(pm4_ib_mutex_);
 
   // Obtain reference to any container queue.
   core::Queue* queue = core::Queue::Convert(public_handle());
