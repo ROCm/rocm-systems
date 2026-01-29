@@ -56,7 +56,10 @@
 #include <rocprofiler-sdk/cxx/name_info.hpp>
 #include <rocprofiler-sdk/cxx/operators.hpp>
 
-#if ROCPROFSYS_ROCM_VERSION >= 71200
+// This is a workaround to include the correct registration.h because ROCPROFILER_VERSION
+// is not updated and we are not sure which version of the rocprofiler-sdk library is
+// being used.
+#if __has_include(<rocprofiler-sdk/experimental/registration.h>)
 #    include <rocprofiler-sdk/experimental/registration.h>
 #else
 #    include <rocprofiler-sdk/registration.h>

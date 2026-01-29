@@ -24,6 +24,8 @@
 #include <cstring>
 #include <iostream>
 #include <limits>
+#include <stdexcept>
+#include <string>
 
 #include <rocprofiler-sdk-rocattach/rocattach.h>
 
@@ -70,7 +72,26 @@ main(int argc, char* argv[])
     std::cout << "[rocprof-sys-attach] Trying to attach to process " << _attach_pid
               << std::endl;
 
-    auto pid    = atoi(_attach_pid);
+    int pid = 0;
+    try
+    {
+        pid = std::stoi(_attach_pid);
+        if(pid <= 0)
+        {
+            std::cerr << "Error: Invalid PID '" << _attach_pid
+                      << "'. PID must be a positive integer.\n";
+            return EXIT_FAILURE;
+        }
+    } catch(const std::invalid_argument&)
+    {
+        std::cerr << "Error: Invalid PID '" << _attach_pid << "'. Not a valid number.\n";
+        return EXIT_FAILURE;
+    } catch(const std::out_of_range&)
+    {
+        std::cerr << "Error: PID '" << _attach_pid << "' is out of range.\n";
+        return EXIT_FAILURE;
+    }
+
     auto result = rocattach_attach(pid);
     if(result != ROCATTACH_STATUS_SUCCESS)
     {
