@@ -228,6 +228,9 @@ class Program:
 
         return hip.hipModuleGetFunction(self.module, kernel_name)
 
+    def save(self, filename: str) -> None:
+        with open(filename, "wb") as f:
+            f.write(self.code)
 
 # Helper method for launching kernel
 def launch_kernel(
@@ -590,22 +593,18 @@ __global__ void flops_benchmark(T *buf, int count)
     vec4<T>* ptr = (vec4<T>*)buf;
 
     vec4<T> value0 = ptr[0 * grid_size + tid];
-    vec4<T> value1 = ptr[1 * grid_size + tid];
-    vec4<T> value2 = ptr[2 * grid_size + tid];
-    vec4<T> value3 = ptr[3 * grid_size + tid];
+
+    vec4<T> x0 = {(T)1,(T)2,(T)3,(T)4};
 
     for(int i = 0; i < count; i++) {
-        for(int j = 0; j < nFMA / 16; j++) {
+        for(int j = 0; j < nFMA / 4; j++) {
 
-            // 16 FMA ops
-            value0 = value0 * value0 + k;
-            value1 = value1 * value1 + k;
-            value2 = value2 * value2 + k;
-            value3 = value3 * value3 + k;
+            // 4 FMA ops
+            x0 = x0 * value0 + k;
         }
     }
 
-    ptr[tid] = value0 + value1 + value2 + value3;
+    ptr[tid] = x0;
 }
 """
 
@@ -621,14 +620,16 @@ def flops_bench(device: int, type: str, unit: str, rate: int) -> PerfMetrics:
 
     kernel_name = flops_kernel_selector[type][0]
     type_size = flops_kernel_selector[type][1]
-    
-    dataset_size = 4 * 4 * type_size * threads
+
+    # Each thread reads a vec4 
+    dataset_size = 4 * type_size * threads
     memblock = hip.hipMalloc(dataset_size)
 
     iterations = flops_kernel_iterations[type]
     total_flops = threads * iterations * nFMA * 2
 
     prog = Program(flops_benchmark_src, [kernel_name])
+    prog.save(f"flops_{type}_{unit}_gpu{device}.hsabin")
 
     func = prog.get_kernel(kernel_name)
 
