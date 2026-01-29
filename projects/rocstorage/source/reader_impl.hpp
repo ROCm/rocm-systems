@@ -3,7 +3,10 @@
 
 #pragma once
 
-#include <rocstorage/reader.hpp>
+#include "rocstorage/reader.hpp"
+#include "rocstorage/storage.hpp"
+
+#include <memory>
 
 namespace rocstorage
 {

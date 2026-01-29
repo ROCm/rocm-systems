@@ -2,8 +2,12 @@
 // SPDX-License-Identifier:  MIT
 
 #include "reader_impl.hpp"
+#include "rocstorage/reader.hpp"
+#include "rocstorage/storage.hpp"
 
+#include <memory>
 #include <stdexcept>
+#include <utility>
 
 namespace rocstorage
 {

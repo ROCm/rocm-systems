@@ -21,7 +21,8 @@ Checks: >
   -cppcoreguidelines-avoid-c-arrays,
   -modernize-avoid-c-arrays,
   -readability-identifier-length,
-  -bugprone-easily-swappable-parameters
+  -bugprone-easily-swappable-parameters,
+  -misc-include-cleaner
 
 WarningsAsErrors: ''
 

@@ -3,8 +3,6 @@
 
 #include "database.hpp"
 
-#include <rocstorage/storage_types.hpp>
-
 #include "debug.hpp"
 #include "directory.hpp"
 #include "transaction.hpp"

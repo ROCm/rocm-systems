@@ -1,9 +1,13 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
 
-#include <rocstorage/storage.hpp>
+#include "rocstorage/storage.hpp"
 
+#include "rocstorage/storage_types.hpp"
 #include "storage_impl.hpp"
+
+#include <memory>
+#include <string>
 
 namespace rocstorage
 {

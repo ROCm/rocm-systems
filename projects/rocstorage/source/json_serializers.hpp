@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include <rocstorage/writer_types.hpp>
+#include "rocstorage/writer_types.hpp"
 
 #include <nlohmann/json_fwd.hpp>
 

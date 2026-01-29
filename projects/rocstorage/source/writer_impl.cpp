@@ -2,6 +2,14 @@
 // SPDX-License-Identifier:  MIT
 
 #include "writer_impl.hpp"
+#include "data_storage/insert_statements.hpp"
+#include "entity_registry.hpp"
+#include "insert_validator.hpp"
+#include "primary_key_providers.hpp"
+#include "rocstorage/storage.hpp"
+#include "rocstorage/writer.hpp"
+#include "rocstorage/writer_types.hpp"
+#include "spdlog/fmt/bundled/core.h"
 #include "storage_impl.hpp"
 
 #include "common/string_conversions.hpp"
@@ -10,6 +18,7 @@
 
 #include <algorithm>
 #include <array>
+#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string_view>
@@ -79,6 +88,8 @@ writer_t::impl::register_node_info(const writer_api::node_info_t& node_info)
                                                node_info.domain_name);
 
     node_info_utility.emplace_entity(node_info.node_id);
+
+    LOG_TRACE("Registered node info: {}", rocstorage::to_string(node_info));
 }
 
 void
@@ -104,6 +115,8 @@ writer_t::impl::register_process_info(const writer_api::process_info_t& process_
                                                   process_info.extdata);
 
     process_info_utility.emplace_entity(process_info.pid, primary_key);
+
+    LOG_TRACE("Registered process info: {}", rocstorage::to_string(process_info));
 }
 
 void
@@ -140,6 +153,8 @@ writer_t::impl::register_agent_info(const writer_api::agent_info_t& agent_info)
                                                 agent_info.extdata);
 
     agent_info_utility.emplace_entity(agent_info.unique_id, primary_key);
+
+    LOG_TRACE("Registered agent info: {}", rocstorage::to_string(agent_info));
 }
 
 void
@@ -177,6 +192,8 @@ writer_t::impl::register_pmc_info(const writer_api::pmc_info_t& pmc_info)
                                               pmc_info.extdata);
 
     pmc_info_utility.emplace_entity(pmc_info.unique_id, primary_key);
+
+    LOG_TRACE("Registered pmc info: {}", rocstorage::to_string(pmc_info));
 }
 
 void
@@ -202,6 +219,8 @@ writer_t::impl::register_thread_info(const writer_api::thread_info_t& thread_inf
                                                  thread_info.extdata);
 
     thread_info_utility.emplace_entity(thread_info.thread_id, primary_key);
+
+    LOG_TRACE("Registered thread info: {}", rocstorage::to_string(thread_info));
 }
 
 void
@@ -223,6 +242,8 @@ writer_t::impl::register_stream_info(const writer_api::stream_info_t& stream_inf
                                                  stream_info.extdata);
 
     stream_info_utility.emplace_entity(stream_info.stream_id, primary_key);
+
+    LOG_TRACE("Registered stream info: {}", rocstorage::to_string(stream_info));
 }
 
 void
@@ -240,6 +261,8 @@ writer_t::impl::register_queue_info(const writer_api::queue_info_t& queue_info)
         primary_key, queue_info.node_id, process_pk, queue_info.name, queue_info.extdata);
 
     queue_info_utility.emplace_entity(queue_info.queue_id, primary_key);
+
+    LOG_TRACE("Registered queue info: {}", rocstorage::to_string(queue_info));
 }
 
 void
@@ -269,6 +292,8 @@ writer_t::impl::register_code_object_info(
                                                       code_object_info.extdata);
 
     code_object_info_utility.emplace_entity(code_object_info.id);
+
+    LOG_TRACE("Registered code object info: {}", rocstorage::to_string(code_object_info));
 }
 
 void
@@ -303,6 +328,9 @@ writer_t::impl::register_kernel_symbol_info(
         kernel_symbol_info.extdata);
 
     kernel_symbol_info_utility.emplace_entity(kernel_symbol_info.id);
+
+    LOG_TRACE("Registered kernel symbol info: {}",
+              rocstorage::to_string(kernel_symbol_info));
 }
 
 void
@@ -330,6 +358,8 @@ writer_t::impl::register_track_info(const writer_api::track_info_t& track)
         primary_key, track.node_id, process_pk, thread_pk, string_pk, track.extdata);
 
     track_info_utility.emplace_entity(track, primary_key);
+
+    LOG_TRACE("Registered track info: {}", rocstorage::to_string(track));
 }
 
 void
@@ -355,6 +385,8 @@ writer_t::impl::register_string(const char* str)
     m_insert_statements->string_statement()(primary_key, str);
 
     string_info_utility.emplace_entity(str, primary_key);
+
+    LOG_TRACE("Registered string: {}", str);
 }
 
 // --------------------- Data Tables ---------------------

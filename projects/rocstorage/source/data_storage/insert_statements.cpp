@@ -3,7 +3,7 @@
 
 #include "insert_statements.hpp"
 #include "database.hpp"
-#include "debug.hpp"
+#include "spdlog/fmt/bundled/core.h"
 #include "table_insert_query.hpp"
 
 #include <cstddef>

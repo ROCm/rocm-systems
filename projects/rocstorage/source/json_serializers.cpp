@@ -3,9 +3,12 @@
 
 #include "json_serializers.hpp"
 
+#include "rocstorage/writer_types.hpp"
+
 #include "common/string_conversions.hpp"
 
 #include <nlohmann/json.hpp>
+#include <string>
 
 namespace rocstorage::json_serializers
 {

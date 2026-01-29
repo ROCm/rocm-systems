@@ -2,9 +2,9 @@
 // SPDX-License-Identifier:  MIT
 #pragma once
 
-#include <rocstorage/writer_types.hpp>
+#include "rocstorage/writer_types.hpp"
 
-#include "debug.hpp"
+#include "spdlog/fmt/bundled/core.h"
 
 #include <optional>
 #include <string>

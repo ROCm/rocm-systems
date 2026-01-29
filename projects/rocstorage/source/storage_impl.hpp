@@ -3,7 +3,9 @@
 
 #pragma once
 
-#include <rocstorage/storage.hpp>
+#include "rocstorage/storage.hpp"
+
+#include "rocstorage/storage_types.hpp"
 
 #include "data_storage/database.hpp"
 
@@ -22,7 +24,7 @@ struct storage_t::impl
         write = 2
     };
 
-    explicit impl(const std::string& database_path, const std::string& uuid);
+    explicit impl(std::string database_path, std::string uuid);
 
     [[nodiscard]] std::string get_database_path() const;
     [[nodiscard]] std::string get_uuid() const;

@@ -3,9 +3,17 @@
 
 #include "insert_validator.hpp"
 
-#include "common/string_conversions.hpp"
+#include "rocstorage/writer_types.hpp"
 
+#include "common/string_conversions.hpp"
+#include "entity_registry.hpp"
+
+#include <cstddef>
+#include <memory>
+#include <optional>
 #include <stdexcept>
+#include <string>
+#include <string_view>
 
 namespace rocstorage
 {

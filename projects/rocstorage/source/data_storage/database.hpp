@@ -3,9 +3,8 @@
 
 #pragma once
 
-#include <rocstorage/storage_types.hpp>
-
 #include "debug.hpp"
+#include "spdlog/fmt/bundled/core.h"
 #include "traits.hpp"
 #include "transaction.hpp"
 

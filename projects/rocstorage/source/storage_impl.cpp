@@ -2,9 +2,15 @@
 // SPDX-License-Identifier:  MIT
 
 #include "storage_impl.hpp"
+#include "rocstorage/storage.hpp"
+#include "rocstorage/storage_types.hpp"
 
+#include "data_storage/database.hpp"
+
+#include <memory>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 namespace rocstorage
 {
@@ -36,9 +42,9 @@ struct storage_t::impl::database_factory_t
     }
 };
 
-storage_t::impl::impl(const std::string& database_path, const std::string& uuid)
-: m_database_path(database_path)
-, m_uuid(uuid)
+storage_t::impl::impl(std::string database_path, std::string uuid)
+: m_database_path(std::move(database_path))
+, m_uuid(std::move(uuid))
 {}
 
 std::string
