@@ -6,9 +6,9 @@
 #include "entity_registry.hpp"
 #include "insert_validator.hpp"
 #include "primary_key_providers.hpp"
+#include "rocstorage/data_types.hpp"
 #include "rocstorage/storage.hpp"
 #include "rocstorage/writer.hpp"
-#include "rocstorage/writer_types.hpp"
 #include "spdlog/fmt/bundled/core.h"
 #include "storage_impl.hpp"
 
@@ -72,7 +72,7 @@ writer_t::impl::impl(std::unique_ptr<rocstorage::storage_t> storage)
 }
 
 void
-writer_t::impl::register_node_info(const writer_api::node_info_t& node_info)
+writer_t::impl::register_node_info(const data_types::node_info_t& node_info)
 {
     auto& node_info_utility = m_entity_registry->node_info();
     if(is_already_registered(node_info_utility, node_info)) return;
@@ -93,7 +93,7 @@ writer_t::impl::register_node_info(const writer_api::node_info_t& node_info)
 }
 
 void
-writer_t::impl::register_process_info(const writer_api::process_info_t& process_info)
+writer_t::impl::register_process_info(const data_types::process_info_t& process_info)
 {
     auto& process_info_utility = m_entity_registry->process_info();
     if(is_already_registered(process_info_utility, process_info)) return;
@@ -120,7 +120,7 @@ writer_t::impl::register_process_info(const writer_api::process_info_t& process_
 }
 
 void
-writer_t::impl::register_agent_info(const writer_api::agent_info_t& agent_info)
+writer_t::impl::register_agent_info(const data_types::agent_info_t& agent_info)
 {
     auto& agent_info_utility = m_entity_registry->agent_info();
     if(is_already_registered(agent_info_utility, agent_info)) return;
@@ -158,7 +158,7 @@ writer_t::impl::register_agent_info(const writer_api::agent_info_t& agent_info)
 }
 
 void
-writer_t::impl::register_pmc_info(const writer_api::pmc_info_t& pmc_info)
+writer_t::impl::register_pmc_info(const data_types::pmc_info_t& pmc_info)
 {
     auto& pmc_info_utility = m_entity_registry->pmc_info();
     if(is_already_registered(pmc_info_utility, pmc_info)) return;
@@ -197,7 +197,7 @@ writer_t::impl::register_pmc_info(const writer_api::pmc_info_t& pmc_info)
 }
 
 void
-writer_t::impl::register_thread_info(const writer_api::thread_info_t& thread_info)
+writer_t::impl::register_thread_info(const data_types::thread_info_t& thread_info)
 {
     auto& thread_info_utility = m_entity_registry->thread_info();
     if(is_already_registered(thread_info_utility, thread_info)) return;
@@ -224,7 +224,7 @@ writer_t::impl::register_thread_info(const writer_api::thread_info_t& thread_inf
 }
 
 void
-writer_t::impl::register_stream_info(const writer_api::stream_info_t& stream_info)
+writer_t::impl::register_stream_info(const data_types::stream_info_t& stream_info)
 {
     auto& stream_info_utility = m_entity_registry->stream_info();
     if(is_already_registered(stream_info_utility, stream_info)) return;
@@ -247,7 +247,7 @@ writer_t::impl::register_stream_info(const writer_api::stream_info_t& stream_inf
 }
 
 void
-writer_t::impl::register_queue_info(const writer_api::queue_info_t& queue_info)
+writer_t::impl::register_queue_info(const data_types::queue_info_t& queue_info)
 {
     auto& queue_info_utility = m_entity_registry->queue_info();
     if(is_already_registered(queue_info_utility, queue_info)) return;
@@ -267,7 +267,7 @@ writer_t::impl::register_queue_info(const writer_api::queue_info_t& queue_info)
 
 void
 writer_t::impl::register_code_object_info(
-    const writer_api::code_object_info_t& code_object_info)
+    const data_types::code_object_info_t& code_object_info)
 {
     auto& code_object_info_utility = m_entity_registry->code_object_info();
     if(is_already_registered(code_object_info_utility, code_object_info)) return;
@@ -298,7 +298,7 @@ writer_t::impl::register_code_object_info(
 
 void
 writer_t::impl::register_kernel_symbol_info(
-    const writer_api::kernel_symbol_info_t& kernel_symbol_info)
+    const data_types::kernel_symbol_info_t& kernel_symbol_info)
 {
     auto& kernel_symbol_info_utility = m_entity_registry->kernel_symbol_info();
     if(is_already_registered(kernel_symbol_info_utility, kernel_symbol_info)) return;
@@ -334,7 +334,7 @@ writer_t::impl::register_kernel_symbol_info(
 }
 
 void
-writer_t::impl::register_track_info(const writer_api::track_info_t& track)
+writer_t::impl::register_track_info(const data_types::track_info_t& track)
 {
     auto& track_info_utility = m_entity_registry->track_info();
     if(is_already_registered(track_info_utility, track)) return;
@@ -392,7 +392,7 @@ writer_t::impl::register_string(const char* str)
 // --------------------- Data Tables ---------------------
 
 primary_key_t
-writer_t::impl::insert_event(const writer_api::event_data_t& event_data)
+writer_t::impl::insert_event(const data_types::event_data_t& event_data)
 {
     auto& string_info_utility = m_entity_registry->string_info();
 
@@ -422,7 +422,7 @@ writer_t::impl::insert_event(const writer_api::event_data_t& event_data)
 }
 
 void
-writer_t::impl::insert_sample(const writer_api::sample_data_t& sample_data,
+writer_t::impl::insert_sample(const data_types::sample_data_t& sample_data,
                               const primary_key_t&             event_primary_key)
 {
     auto& track_info_utility = m_entity_registry->track_info();
@@ -450,7 +450,7 @@ writer_t::impl::insert_sample(const writer_api::sample_data_t& sample_data,
 }
 
 void
-writer_t::impl::insert_arg(const writer_api::arg_data_t& arg_data, primary_key_t event_id)
+writer_t::impl::insert_arg(const data_types::arg_data_t& arg_data, primary_key_t event_id)
 {
     auto& string_info_utility = m_entity_registry->string_info();
 
@@ -483,8 +483,8 @@ writer_t::impl::insert_arg(const writer_api::arg_data_t& arg_data, primary_key_t
 
 void
 writer_t::impl::insert_region_data(
-    const writer_api::region_data_t&       region_data,
-    const writer_api::trace_environment_t& trace_environment)
+    const data_types::region_data_t&       region_data,
+    const data_types::trace_environment_t& trace_environment)
 {
     auto transaction_block = m_database->create_transaction_block();
 
@@ -539,14 +539,14 @@ writer_t::impl::insert_region_data(
 
     if(trace_environment.track_name.has_value() && event_pk.has_value())
     {
-        const writer_api::track_info_t track_info = {
+        const data_types::track_info_t track_info = {
             trace_environment.track_name.value(),
             nullptr,
             trace_environment.node_id.value(),
             trace_environment.process_id.value(),
             trace_environment.thread_id.value()
         };
-        const writer_api::sample_data_t sample_data = { region_data.start_timestamp,
+        const data_types::sample_data_t sample_data = { region_data.start_timestamp,
                                                         track_info,
                                                         "{}" };
         insert_sample(sample_data, event_pk.value());
@@ -555,8 +555,8 @@ writer_t::impl::insert_region_data(
 
 void
 writer_t::impl::insert_pmc_event_data(
-    const writer_api::pmc_event_data_t&     pmc_event_data,
-    const writer_api::pmc_info_unique_id_t& pmc_unique_id)
+    const data_types::pmc_event_data_t&     pmc_event_data,
+    const data_types::pmc_info_unique_id_t& pmc_unique_id)
 {
     auto transaction_block = m_database->create_transaction_block();
 
@@ -578,8 +578,8 @@ writer_t::impl::insert_pmc_event_data(
 
 void
 writer_t::impl::insert_kernel_dispatch_data(
-    const writer_api::kernel_dispatch_data_t& kernel_dispatch_data,
-    const writer_api::trace_environment_t&    trace_environment)
+    const data_types::kernel_dispatch_data_t& kernel_dispatch_data,
+    const data_types::trace_environment_t&    trace_environment)
 {
     auto transaction_block = m_database->create_transaction_block();
 
@@ -642,14 +642,14 @@ writer_t::impl::insert_kernel_dispatch_data(
 
     if(trace_environment.track_name.has_value() && event_pk.has_value())
     {
-        const writer_api::track_info_t track_info = {
+        const data_types::track_info_t track_info = {
             trace_environment.track_name.value(),
             nullptr,
             trace_environment.node_id.value(),
             trace_environment.process_id.value(),
             trace_environment.thread_id.value()
         };
-        const writer_api::sample_data_t sample_data = {
+        const data_types::sample_data_t sample_data = {
             kernel_dispatch_data.start_timestamp, track_info, "{}"
         };
         insert_sample(sample_data, event_pk.value());
@@ -658,8 +658,8 @@ writer_t::impl::insert_kernel_dispatch_data(
 
 void
 writer_t::impl::insert_memory_copy_data(
-    const writer_api::memory_copy_data_t&  memory_copy_data,
-    const writer_api::trace_environment_t& trace_environment)
+    const data_types::memory_copy_data_t&  memory_copy_data,
+    const data_types::trace_environment_t& trace_environment)
 {
     auto transaction_block = m_database->create_transaction_block();
 
@@ -732,14 +732,14 @@ writer_t::impl::insert_memory_copy_data(
 
     if(trace_environment.track_name.has_value() && event_pk.has_value())
     {
-        const writer_api::track_info_t track_info = {
+        const data_types::track_info_t track_info = {
             trace_environment.track_name.value(),
             nullptr,
             trace_environment.node_id.value(),
             trace_environment.process_id.value(),
             trace_environment.thread_id.value()
         };
-        const writer_api::sample_data_t sample_data = { memory_copy_data.start_timestamp,
+        const data_types::sample_data_t sample_data = { memory_copy_data.start_timestamp,
                                                         track_info,
                                                         "{}" };
         insert_sample(sample_data, event_pk.value());
@@ -748,8 +748,8 @@ writer_t::impl::insert_memory_copy_data(
 
 void
 writer_t::impl::insert_memory_alloc_data(
-    const writer_api::memory_alloc_data_t& memory_alloc_data,
-    const writer_api::trace_environment_t& trace_environment)
+    const data_types::memory_alloc_data_t& memory_alloc_data,
+    const data_types::trace_environment_t& trace_environment)
 {
     auto transaction_block = m_database->create_transaction_block();
 
@@ -829,14 +829,14 @@ writer_t::impl::insert_memory_alloc_data(
 
     if(trace_environment.track_name.has_value() && event_pk.has_value())
     {
-        const writer_api::track_info_t track_info = {
+        const data_types::track_info_t track_info = {
             trace_environment.track_name.value(),
             nullptr,
             trace_environment.node_id.value(),
             trace_environment.process_id.value(),
             trace_environment.thread_id.value()
         };
-        const writer_api::sample_data_t sample_data = { memory_alloc_data.start_timestamp,
+        const data_types::sample_data_t sample_data = { memory_alloc_data.start_timestamp,
                                                         track_info,
                                                         "{}" };
         insert_sample(sample_data, event_pk.value());

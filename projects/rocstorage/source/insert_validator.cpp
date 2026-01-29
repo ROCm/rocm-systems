@@ -3,7 +3,7 @@
 
 #include "insert_validator.hpp"
 
-#include "rocstorage/writer_types.hpp"
+#include "rocstorage/data_types.hpp"
 
 #include "common/string_conversions.hpp"
 #include "entity_registry.hpp"
@@ -80,14 +80,14 @@ insert_validator::insert_validator(const std::shared_ptr<entity_registry>& regis
 {}
 
 insert_validator&
-insert_validator::require_node(const std::optional<writer_api::node_id_t>& node_id)
+insert_validator::require_node(const std::optional<data_types::node_id_t>& node_id)
 {
     validate_required(m_registry->node_info(), node_id, "Node", "node_id");
     return *this;
 }
 
 insert_validator&
-insert_validator::require_node(writer_api::node_id_t node_id)
+insert_validator::require_node(data_types::node_id_t node_id)
 {
     validate_direct(m_registry->node_info(), node_id, "Node", "node_id");
     return *this;
@@ -95,21 +95,21 @@ insert_validator::require_node(writer_api::node_id_t node_id)
 
 insert_validator&
 insert_validator::require_process(
-    const std::optional<writer_api::process_id_t>& process_id)
+    const std::optional<data_types::process_id_t>& process_id)
 {
     validate_required(m_registry->process_info(), process_id, "Process", "pid");
     return *this;
 }
 
 insert_validator&
-insert_validator::require_process(writer_api::process_id_t process_id)
+insert_validator::require_process(data_types::process_id_t process_id)
 {
     validate_direct(m_registry->process_info(), process_id, "Process", "pid");
     return *this;
 }
 
 insert_validator&
-insert_validator::require_thread(const std::optional<writer_api::thread_id_t>& thread_id)
+insert_validator::require_thread(const std::optional<data_types::thread_id_t>& thread_id)
 {
     validate_required(m_registry->thread_info(), thread_id, "Thread", "thread_id");
     return *this;
@@ -117,35 +117,35 @@ insert_validator::require_thread(const std::optional<writer_api::thread_id_t>& t
 
 insert_validator&
 insert_validator::require_agent(
-    const std::optional<writer_api::agent_unique_id_t>& agent_id)
+    const std::optional<data_types::agent_unique_id_t>& agent_id)
 {
     validate_required(m_registry->agent_info(), agent_id, "Agent", "agent_id");
     return *this;
 }
 
 insert_validator&
-insert_validator::require_agent(const writer_api::agent_unique_id_t& agent_id)
+insert_validator::require_agent(const data_types::agent_unique_id_t& agent_id)
 {
     validate_direct(m_registry->agent_info(), agent_id, "Agent", "agent_id");
     return *this;
 }
 
 insert_validator&
-insert_validator::require_queue(const std::optional<writer_api::queue_id_t>& queue_id)
+insert_validator::require_queue(const std::optional<data_types::queue_id_t>& queue_id)
 {
     validate_required(m_registry->queue_info(), queue_id, "Queue", "queue_id");
     return *this;
 }
 
 insert_validator&
-insert_validator::require_stream(const std::optional<writer_api::stream_id_t>& stream_id)
+insert_validator::require_stream(const std::optional<data_types::stream_id_t>& stream_id)
 {
     validate_required(m_registry->stream_info(), stream_id, "Stream", "stream_id");
     return *this;
 }
 
 insert_validator&
-insert_validator::require_kernel_symbol(writer_api::kernel_symbol_id_t kernel_symbol_id)
+insert_validator::require_kernel_symbol(data_types::kernel_symbol_id_t kernel_symbol_id)
 {
     validate_direct(
         m_registry->kernel_symbol_info(), kernel_symbol_id, "Kernel symbol", "kernel_id");
@@ -153,7 +153,7 @@ insert_validator::require_kernel_symbol(writer_api::kernel_symbol_id_t kernel_sy
 }
 
 insert_validator&
-insert_validator::require_code_object(writer_api::code_object_id_t code_object_id)
+insert_validator::require_code_object(data_types::code_object_id_t code_object_id)
 {
     validate_direct(
         m_registry->code_object_info(), code_object_id, "Code object", "code_obj_id");
@@ -161,7 +161,7 @@ insert_validator::require_code_object(writer_api::code_object_id_t code_object_i
 }
 
 insert_validator&
-insert_validator::require_pmc(const writer_api::pmc_info_unique_id_t& pmc_unique_id)
+insert_validator::require_pmc(const data_types::pmc_info_unique_id_t& pmc_unique_id)
 {
     validate_direct(m_registry->pmc_info(), pmc_unique_id, "PMC Info", "pmc_id");
     return *this;
@@ -169,7 +169,7 @@ insert_validator::require_pmc(const writer_api::pmc_info_unique_id_t& pmc_unique
 
 insert_validator&
 insert_validator::validate_optional_thread(
-    const std::optional<writer_api::thread_id_t>& thread_id)
+    const std::optional<data_types::thread_id_t>& thread_id)
 {
     validate_optional(m_registry->thread_info(), thread_id, "Thread", "thread_id");
     return *this;
@@ -177,7 +177,7 @@ insert_validator::validate_optional_thread(
 
 insert_validator&
 insert_validator::validate_optional_process(
-    const std::optional<writer_api::process_id_t>& process_id)
+    const std::optional<data_types::process_id_t>& process_id)
 {
     validate_optional(m_registry->process_info(), process_id, "Process", "pid");
     return *this;
@@ -185,7 +185,7 @@ insert_validator::validate_optional_process(
 
 insert_validator&
 insert_validator::validate_optional_agent(
-    const std::optional<writer_api::agent_unique_id_t>& agent_id,
+    const std::optional<data_types::agent_unique_id_t>& agent_id,
     std::string_view                                    agent_role)
 {
     validate_optional(m_registry->agent_info(), agent_id, agent_role, "agent_id");
@@ -194,7 +194,7 @@ insert_validator::validate_optional_agent(
 
 insert_validator&
 insert_validator::validate_optional_queue(
-    const std::optional<writer_api::queue_id_t>& queue_id)
+    const std::optional<data_types::queue_id_t>& queue_id)
 {
     validate_optional(m_registry->queue_info(), queue_id, "Queue", "queue_id");
     return *this;
@@ -202,7 +202,7 @@ insert_validator::validate_optional_queue(
 
 insert_validator&
 insert_validator::validate_optional_stream(
-    const std::optional<writer_api::stream_id_t>& stream_id)
+    const std::optional<data_types::stream_id_t>& stream_id)
 {
     validate_optional(m_registry->stream_info(), stream_id, "Stream", "stream_id");
     return *this;
@@ -210,90 +210,90 @@ insert_validator::validate_optional_stream(
 
 primary_key_t
 insert_validator::resolve_process_key(
-    const std::optional<writer_api::process_id_t>& process_id) const
+    const std::optional<data_types::process_id_t>& process_id) const
 {
     return m_registry->process_info().get_primary_key_value_for_entity(
         process_id.value());
 }
 
 primary_key_t
-insert_validator::resolve_process_key(writer_api::process_id_t process_id) const
+insert_validator::resolve_process_key(data_types::process_id_t process_id) const
 {
     return m_registry->process_info().get_primary_key_value_for_entity(process_id);
 }
 
 primary_key_t
 insert_validator::resolve_thread_key(
-    const std::optional<writer_api::thread_id_t>& thread_id) const
+    const std::optional<data_types::thread_id_t>& thread_id) const
 {
     return m_registry->thread_info().get_primary_key_value_for_entity(thread_id.value());
 }
 
 primary_key_t
 insert_validator::resolve_agent_key(
-    const std::optional<writer_api::agent_unique_id_t>& agent_id) const
+    const std::optional<data_types::agent_unique_id_t>& agent_id) const
 {
     return m_registry->agent_info().get_primary_key_value_for_entity(agent_id.value());
 }
 
 primary_key_t
-insert_validator::resolve_agent_key(const writer_api::agent_unique_id_t& agent_id) const
+insert_validator::resolve_agent_key(const data_types::agent_unique_id_t& agent_id) const
 {
     return m_registry->agent_info().get_primary_key_value_for_entity(agent_id);
 }
 
 primary_key_t
 insert_validator::resolve_queue_key(
-    const std::optional<writer_api::queue_id_t>& queue_id) const
+    const std::optional<data_types::queue_id_t>& queue_id) const
 {
     return m_registry->queue_info().get_primary_key_value_for_entity(queue_id.value());
 }
 
 primary_key_t
 insert_validator::resolve_stream_key(
-    const std::optional<writer_api::stream_id_t>& stream_id) const
+    const std::optional<data_types::stream_id_t>& stream_id) const
 {
     return m_registry->stream_info().get_primary_key_value_for_entity(stream_id.value());
 }
 
 primary_key_t
 insert_validator::resolve_pmc_key(
-    const writer_api::pmc_info_unique_id_t& pmc_unique_id) const
+    const data_types::pmc_info_unique_id_t& pmc_unique_id) const
 {
     return m_registry->pmc_info().get_primary_key_value_for_entity(pmc_unique_id);
 }
 
 std::optional<primary_key_t>
 insert_validator::resolve_optional_process_key(
-    const std::optional<writer_api::process_id_t>& process_id) const
+    const std::optional<data_types::process_id_t>& process_id) const
 {
     return resolve_optional_key(m_registry->process_info(), process_id);
 }
 
 std::optional<primary_key_t>
 insert_validator::resolve_optional_thread_key(
-    const std::optional<writer_api::thread_id_t>& thread_id) const
+    const std::optional<data_types::thread_id_t>& thread_id) const
 {
     return resolve_optional_key(m_registry->thread_info(), thread_id);
 }
 
 std::optional<primary_key_t>
 insert_validator::resolve_optional_agent_key(
-    const std::optional<writer_api::agent_unique_id_t>& agent_id) const
+    const std::optional<data_types::agent_unique_id_t>& agent_id) const
 {
     return resolve_optional_key(m_registry->agent_info(), agent_id);
 }
 
 std::optional<primary_key_t>
 insert_validator::resolve_optional_queue_key(
-    const std::optional<writer_api::queue_id_t>& queue_id) const
+    const std::optional<data_types::queue_id_t>& queue_id) const
 {
     return resolve_optional_key(m_registry->queue_info(), queue_id);
 }
 
 std::optional<primary_key_t>
 insert_validator::resolve_optional_stream_key(
-    const std::optional<writer_api::stream_id_t>& stream_id) const
+    const std::optional<data_types::stream_id_t>& stream_id) const
 {
     return resolve_optional_key(m_registry->stream_info(), stream_id);
 }

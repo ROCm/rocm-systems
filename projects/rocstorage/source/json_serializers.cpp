@@ -3,7 +3,7 @@
 
 #include "json_serializers.hpp"
 
-#include "rocstorage/writer_types.hpp"
+#include "rocstorage/data_types.hpp"
 
 #include "common/string_conversions.hpp"
 
@@ -14,7 +14,7 @@ namespace rocstorage::json_serializers
 {
 
 json_t
-to_json(const writer_api::address_range_info_t& addr_range)
+to_json(const data_types::address_range_info_t& addr_range)
 {
     json_t j;
     j["address_base"] = addr_range.address_base;
@@ -28,7 +28,7 @@ to_json(const writer_api::address_range_info_t& addr_range)
 }
 
 json_t
-to_json(const writer_api::program_counter_info_t& pc_info)
+to_json(const data_types::program_counter_info_t& pc_info)
 {
     json_t j;
     if(is_valid_cstring(pc_info.function))
@@ -51,7 +51,7 @@ to_json(const writer_api::program_counter_info_t& pc_info)
 }
 
 json_t
-to_json(const writer_api::stack_frame_t& frame)
+to_json(const data_types::stack_frame_t& frame)
 {
     json_t j;
     if(frame.program_counter.has_value())
@@ -70,7 +70,7 @@ to_json(const writer_api::stack_frame_t& frame)
 }
 
 std::string
-serialize_call_stack(const writer_api::call_stack_t& call_stack)
+serialize_call_stack(const data_types::call_stack_t& call_stack)
 {
     if(call_stack.empty())
     {
@@ -90,7 +90,7 @@ serialize_call_stack(const writer_api::call_stack_t& call_stack)
 }
 
 json_t
-to_json(const writer_api::source_code_info_t& source_code)
+to_json(const data_types::source_code_info_t& source_code)
 {
     json_t j;
     if(source_code.filename.has_value() && is_valid_cstring(source_code.filename.value()))
@@ -139,7 +139,7 @@ to_json(const writer_api::source_code_info_t& source_code)
 }
 
 json_t
-to_json(const writer_api::line_info_entry_t& line_info)
+to_json(const data_types::line_info_entry_t& line_info)
 {
     json_t j;
     if(line_info.source_code.has_value())
@@ -158,7 +158,7 @@ to_json(const writer_api::line_info_entry_t& line_info)
 }
 
 std::string
-serialize_source_context(const writer_api::source_context_list_t& line_info_list)
+serialize_source_context(const data_types::source_context_list_t& line_info_list)
 {
     if(line_info_list.empty())
     {

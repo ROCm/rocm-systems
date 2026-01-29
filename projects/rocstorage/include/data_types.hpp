@@ -8,7 +8,7 @@
 #include <optional>
 #include <vector>
 
-namespace rocstorage::writer_api
+namespace rocstorage::data_types
 {
 
 /***
@@ -578,4 +578,4 @@ struct memory_alloc_data_t
     const char*           extdata = "{}";
 };
 
-}  // namespace rocstorage::writer_api
+}  // namespace rocstorage::data_types

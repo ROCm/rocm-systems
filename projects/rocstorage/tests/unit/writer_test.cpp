@@ -1,9 +1,9 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
 
+#include "rocstorage/data_types.hpp"
 #include "rocstorage/storage.hpp"
 #include "rocstorage/writer.hpp"
-#include "rocstorage/writer_types.hpp"
 
 #include <sqlite3.h>
 
@@ -85,7 +85,7 @@ count_rows(const std::string& db_path,
 // Test Data Factory Functions
 // ============================================================================
 
-rocstorage::writer_api::node_info_t
+rocstorage::data_types::node_info_t
 create_test_node_info(size_t node_id = 1)
 {
     static std::unordered_map<size_t, std::string> machine_ids;
@@ -95,7 +95,7 @@ create_test_node_info(size_t node_id = 1)
         machine_id = "test-machine-id-" + std::to_string(node_id);
     }
 
-    return rocstorage::writer_api::node_info_t{ .node_id       = node_id,
+    return rocstorage::data_types::node_info_t{ .node_id       = node_id,
                                                 .hash          = 123456789 + node_id,
                                                 .machine_id    = machine_id.c_str(),
                                                 .system_name   = "Linux",
@@ -106,10 +106,10 @@ create_test_node_info(size_t node_id = 1)
                                                 .domain_name   = "test-domain" };
 }
 
-rocstorage::writer_api::process_info_t
+rocstorage::data_types::process_info_t
 create_test_process_info(size_t node_id = 1, size_t pid = 1000)
 {
-    return rocstorage::writer_api::process_info_t{ .ppid        = 1,
+    return rocstorage::data_types::process_info_t{ .ppid        = 1,
                                                    .pid         = pid,
                                                    .init        = 1000000,
                                                    .fini        = 2000000,
@@ -121,12 +121,12 @@ create_test_process_info(size_t node_id = 1, size_t pid = 1000)
                                                    .node_id     = node_id };
 }
 
-rocstorage::writer_api::thread_info_t
+rocstorage::data_types::thread_info_t
 create_test_thread_info(size_t node_id    = 1,
                         size_t process_id = 1000,
                         size_t thread_id  = 100)
 {
-    return rocstorage::writer_api::thread_info_t{ .parent_process_id = process_id,
+    return rocstorage::data_types::thread_info_t{ .parent_process_id = process_id,
                                                   .thread_id         = thread_id,
                                                   .name              = "test-thread",
                                                   .start             = 1000000,
@@ -136,13 +136,13 @@ create_test_thread_info(size_t node_id    = 1,
                                                   .process_id        = process_id };
 }
 
-rocstorage::writer_api::agent_info_t
+rocstorage::data_types::agent_info_t
 create_test_agent_info(size_t      node_id    = 1,
                        size_t      process_id = 1000,
                        const char* agent_type = "GPU",
                        size_t      type_index = 0)
 {
-    return rocstorage::writer_api::agent_info_t{
+    return rocstorage::data_types::agent_info_t{
         .unique_id      = { .agent_type = agent_type, .type_index = type_index },
         .absolute_index = 0,
         .logical_index  = 0,
@@ -158,36 +158,36 @@ create_test_agent_info(size_t      node_id    = 1,
     };
 }
 
-rocstorage::writer_api::stream_info_t
+rocstorage::data_types::stream_info_t
 create_test_stream_info(size_t node_id    = 1,
                         size_t process_id = 1000,
                         size_t stream_id  = 1)
 {
-    return rocstorage::writer_api::stream_info_t{ .stream_id  = stream_id,
+    return rocstorage::data_types::stream_info_t{ .stream_id  = stream_id,
                                                   .name       = "test-stream",
                                                   .extdata    = "{}",
                                                   .node_id    = node_id,
                                                   .process_id = process_id };
 }
 
-rocstorage::writer_api::queue_info_t
+rocstorage::data_types::queue_info_t
 create_test_queue_info(size_t node_id = 1, size_t process_id = 1000, size_t queue_id = 1)
 {
-    return rocstorage::writer_api::queue_info_t{ .queue_id   = queue_id,
+    return rocstorage::data_types::queue_info_t{ .queue_id   = queue_id,
                                                  .name       = "test-queue",
                                                  .extdata    = "{}",
                                                  .node_id    = node_id,
                                                  .process_id = process_id };
 }
 
-rocstorage::writer_api::pmc_info_t
+rocstorage::data_types::pmc_info_t
 create_test_pmc_info(
     size_t                                                   node_id    = 1,
     size_t                                                   process_id = 1000,
     const char*                                              name       = "test_counter",
-    std::optional<rocstorage::writer_api::agent_unique_id_t> agent_id   = std::nullopt)
+    std::optional<rocstorage::data_types::agent_unique_id_t> agent_id   = std::nullopt)
 {
-    return rocstorage::writer_api::pmc_info_t{ .unique_id   = { .name     = name,
+    return rocstorage::data_types::pmc_info_t{ .unique_id   = { .name     = name,
                                                                 .agent_id = agent_id },
                                                .target_arch = "GPU",
                                                .event_code  = 100,
@@ -207,14 +207,14 @@ create_test_pmc_info(
                                                .process_id       = process_id };
 }
 
-rocstorage::writer_api::code_object_info_t
+rocstorage::data_types::code_object_info_t
 create_test_code_object_info(size_t                                    code_object_id = 1,
                              size_t                                    node_id        = 1,
                              size_t                                    process_id = 1000,
-                             rocstorage::writer_api::agent_unique_id_t agent_id = { "GPU",
+                             rocstorage::data_types::agent_unique_id_t agent_id = { "GPU",
                                                                                     0 })
 {
-    return rocstorage::writer_api::code_object_info_t{ .id  = code_object_id,
+    return rocstorage::data_types::code_object_info_t{ .id  = code_object_id,
                                                        .uri = "file:///test/kernel.co",
                                                        .ld_base      = 0x1000,
                                                        .ld_size      = 0x2000,
@@ -226,13 +226,13 @@ create_test_code_object_info(size_t                                    code_obje
                                                        .agent_id     = agent_id };
 }
 
-rocstorage::writer_api::kernel_symbol_info_t
+rocstorage::data_types::kernel_symbol_info_t
 create_test_kernel_symbol_info(size_t kernel_symbol_id = 1,
                                size_t node_id          = 1,
                                size_t process_id       = 1000,
                                size_t code_object_id   = 1)
 {
-    return rocstorage::writer_api::kernel_symbol_info_t{ .id           = kernel_symbol_id,
+    return rocstorage::data_types::kernel_symbol_info_t{ .id           = kernel_symbol_id,
                                                          .name         = "test_kernel",
                                                          .display_name = "Test Kernel",
                                                          .kernel_obj   = 0x1000,
@@ -249,26 +249,26 @@ create_test_kernel_symbol_info(size_t kernel_symbol_id = 1,
                                                          .code_obj_id = code_object_id };
 }
 
-rocstorage::writer_api::track_info_t
+rocstorage::data_types::track_info_t
 create_test_track_info(
     size_t                                              node_id    = 1,
     std::optional<size_t>                               process_id = 1000,
     std::optional<size_t>                               thread_id  = 100,
-    std::optional<rocstorage::writer_api::track_name_t> name       = "test-track")
+    std::optional<rocstorage::data_types::track_name_t> name       = "test-track")
 {
-    return rocstorage::writer_api::track_info_t{ .name       = name,
+    return rocstorage::data_types::track_info_t{ .name       = name,
                                                  .extdata    = "{}",
                                                  .node_id    = node_id,
                                                  .process_id = process_id,
                                                  .thread_id  = thread_id };
 }
 
-rocstorage::writer_api::region_data_t
+rocstorage::data_types::region_data_t
 create_test_region_data(const char* name            = "test_region",
                         size_t      start_timestamp = 1000000,
                         size_t      end_timestamp   = 2000000)
 {
-    return rocstorage::writer_api::region_data_t{ .event           = std::nullopt,
+    return rocstorage::data_types::region_data_t{ .event           = std::nullopt,
                                                   .start_timestamp = start_timestamp,
                                                   .end_timestamp   = end_timestamp,
                                                   .name            = name,
@@ -276,12 +276,12 @@ create_test_region_data(const char* name            = "test_region",
                                                   .args            = {} };
 }
 
-rocstorage::writer_api::trace_environment_t
+rocstorage::data_types::trace_environment_t
 create_test_trace_environment(size_t node_id    = 1,
                               size_t process_id = 1000,
                               size_t thread_id  = 100)
 {
-    return rocstorage::writer_api::trace_environment_t{ .node_id    = node_id,
+    return rocstorage::data_types::trace_environment_t{ .node_id    = node_id,
                                                         .process_id = process_id,
                                                         .thread_id  = thread_id,
                                                         .agent_id   = std::nullopt,
@@ -290,10 +290,10 @@ create_test_trace_environment(size_t node_id    = 1,
                                                         .track_name = std::nullopt };
 }
 
-rocstorage::writer_api::pmc_event_data_t
+rocstorage::data_types::pmc_event_data_t
 create_test_pmc_event_data(double value = 42.5)
 {
-    return rocstorage::writer_api::pmc_event_data_t{
+    return rocstorage::data_types::pmc_event_data_t{
         .event   = std::nullopt,
         .value   = value,
         .extdata = "{}",
@@ -303,10 +303,10 @@ create_test_pmc_event_data(double value = 42.5)
     };
 }
 
-rocstorage::writer_api::kernel_dispatch_data_t
+rocstorage::data_types::kernel_dispatch_data_t
 create_test_kernel_dispatch_data(size_t kernel_symbol_id = 1, size_t code_object_id = 1)
 {
-    return rocstorage::writer_api::kernel_dispatch_data_t{ .event       = std::nullopt,
+    return rocstorage::data_types::kernel_dispatch_data_t{ .event       = std::nullopt,
                                                            .dispatch_id = 1,
                                                            .start_timestamp = 1000000,
                                                            .end_timestamp   = 2000000,
@@ -326,10 +326,10 @@ create_test_kernel_dispatch_data(size_t kernel_symbol_id = 1, size_t code_object
                                                            .extdata = "{}" };
 }
 
-rocstorage::writer_api::memory_copy_data_t
+rocstorage::data_types::memory_copy_data_t
 create_test_memory_copy_data()
 {
-    return rocstorage::writer_api::memory_copy_data_t{ .event           = std::nullopt,
+    return rocstorage::data_types::memory_copy_data_t{ .event           = std::nullopt,
                                                        .start_timestamp = 1000000,
                                                        .end_timestamp   = 2000000,
                                                        .dst_agent_id    = std::nullopt,
@@ -342,10 +342,10 @@ create_test_memory_copy_data()
                                                        .extdata         = "{}" };
 }
 
-rocstorage::writer_api::memory_alloc_data_t
+rocstorage::data_types::memory_alloc_data_t
 create_test_memory_alloc_data(const char* type = "ALLOC", const char* level = "REAL")
 {
-    return rocstorage::writer_api::memory_alloc_data_t{ .event           = std::nullopt,
+    return rocstorage::data_types::memory_alloc_data_t{ .event           = std::nullopt,
                                                         .type            = type,
                                                         .level           = level,
                                                         .start_timestamp = 1000000,
@@ -632,7 +632,7 @@ TEST_F(writer_test, register_pmc_info_with_valid_dependencies)
     m_writer->register_process_info(create_test_process_info(1, 1000));
     m_writer->register_agent_info(create_test_agent_info(1, 1000, "GPU", 0));
 
-    rocstorage::writer_api::agent_unique_id_t agent_id{ "GPU", 0 };
+    rocstorage::data_types::agent_unique_id_t agent_id{ "GPU", 0 };
     auto pmc = create_test_pmc_info(1, 1000, "test_counter", agent_id);
     m_writer->register_pmc_info(pmc);
     m_writer->flush_in_memory_data_to_disk();
@@ -651,7 +651,7 @@ TEST_F(writer_test, register_pmc_info_with_valid_dependencies)
 
 TEST_F(writer_test, register_pmc_info_without_node_throws)
 {
-    rocstorage::writer_api::agent_unique_id_t agent_id{ "GPU", 0 };
+    rocstorage::data_types::agent_unique_id_t agent_id{ "GPU", 0 };
     auto pmc = create_test_pmc_info(999, 1000, "test", agent_id);
     EXPECT_THROW(m_writer->register_pmc_info(pmc), std::runtime_error);
 }
@@ -659,7 +659,7 @@ TEST_F(writer_test, register_pmc_info_without_node_throws)
 TEST_F(writer_test, register_pmc_info_without_process_throws)
 {
     m_writer->register_node_info(create_test_node_info(1));
-    rocstorage::writer_api::agent_unique_id_t agent_id{ "GPU", 0 };
+    rocstorage::data_types::agent_unique_id_t agent_id{ "GPU", 0 };
     auto pmc = create_test_pmc_info(1, 999, "test", agent_id);
     EXPECT_THROW(m_writer->register_pmc_info(pmc), std::runtime_error);
 }
@@ -874,7 +874,7 @@ TEST_F(writer_test, insert_region_data_with_event)
     register_base_dependencies(*m_writer, 1, 1000, 100);
 
     auto region  = create_test_region_data("event_region", 1000000, 2000000);
-    region.event = rocstorage::writer_api::event_data_t{ .stack_id        = 1,
+    region.event = rocstorage::data_types::event_data_t{ .stack_id        = 1,
                                                          .parent_stack_id = 0,
                                                          .correlation_id  = 123,
                                                          .call_stack      = {},
@@ -902,13 +902,13 @@ TEST_F(writer_test, insert_pmc_event_data_with_valid_pmc)
     m_writer->register_process_info(create_test_process_info(1, 1000));
     m_writer->register_agent_info(create_test_agent_info(1, 1000, "GPU", 0));
 
-    rocstorage::writer_api::agent_unique_id_t agent_id{ "GPU", 0 };
+    rocstorage::data_types::agent_unique_id_t agent_id{ "GPU", 0 };
     auto pmc = create_test_pmc_info(1, 1000, "my_counter", agent_id);
     m_writer->register_pmc_info(pmc);
 
     auto pmc_event = create_test_pmc_event_data(99.5);
     auto pmc_unique_id =
-        rocstorage::writer_api::pmc_info_unique_id_t{ .name     = "my_counter",
+        rocstorage::data_types::pmc_info_unique_id_t{ .name     = "my_counter",
                                                       .agent_id = agent_id };
 
     m_writer->insert_pmc_event_data(pmc_event, pmc_unique_id);
@@ -924,9 +924,9 @@ TEST_F(writer_test, insert_pmc_event_data_with_valid_pmc)
 TEST_F(writer_test, insert_pmc_event_data_without_pmc_throws)
 {
     auto pmc_event     = create_test_pmc_event_data(42.0);
-    auto pmc_unique_id = rocstorage::writer_api::pmc_info_unique_id_t{
+    auto pmc_unique_id = rocstorage::data_types::pmc_info_unique_id_t{
         .name     = "nonexistent_counter",
-        .agent_id = rocstorage::writer_api::agent_unique_id_t{ "GPU", 0 }
+        .agent_id = rocstorage::data_types::agent_unique_id_t{ "GPU", 0 }
     };
 
     EXPECT_THROW(m_writer->insert_pmc_event_data(pmc_event, pmc_unique_id),
@@ -948,11 +948,11 @@ TEST_F(writer_test, insert_kernel_dispatch_full_dependencies)
     m_writer->register_kernel_symbol_info(create_test_kernel_symbol_info(1, 1, 1000, 1));
 
     auto kernel_dispatch = create_test_kernel_dispatch_data(1, 1);
-    auto environment     = rocstorage::writer_api::trace_environment_t{
+    auto environment     = rocstorage::data_types::trace_environment_t{
             .node_id    = 1,
             .process_id = 1000,
             .thread_id  = 100,
-            .agent_id   = rocstorage::writer_api::agent_unique_id_t{ "GPU", 0 },
+            .agent_id   = rocstorage::data_types::agent_unique_id_t{ "GPU", 0 },
             .stream_id  = 1,
             .queue_id   = 1,
             .track_name = std::nullopt
@@ -981,11 +981,11 @@ TEST_F(writer_test, insert_kernel_dispatch_missing_agent_throws)
     m_writer->register_thread_info(create_test_thread_info(1, 1000, 100));
 
     auto kernel_dispatch = create_test_kernel_dispatch_data(1, 1);
-    auto environment     = rocstorage::writer_api::trace_environment_t{
+    auto environment     = rocstorage::data_types::trace_environment_t{
             .node_id    = 1,
             .process_id = 1000,
             .thread_id  = 100,
-            .agent_id   = rocstorage::writer_api::agent_unique_id_t{ "GPU", 0 },
+            .agent_id   = rocstorage::data_types::agent_unique_id_t{ "GPU", 0 },
             .stream_id  = 1,
             .queue_id   = 1,
             .track_name = std::nullopt
@@ -1003,11 +1003,11 @@ TEST_F(writer_test, insert_kernel_dispatch_missing_queue_throws)
     m_writer->register_agent_info(create_test_agent_info(1, 1000, "GPU", 0));
 
     auto kernel_dispatch = create_test_kernel_dispatch_data(1, 1);
-    auto environment     = rocstorage::writer_api::trace_environment_t{
+    auto environment     = rocstorage::data_types::trace_environment_t{
             .node_id    = 1,
             .process_id = 1000,
             .thread_id  = 100,
-            .agent_id   = rocstorage::writer_api::agent_unique_id_t{ "GPU", 0 },
+            .agent_id   = rocstorage::data_types::agent_unique_id_t{ "GPU", 0 },
             .stream_id  = 1,
             .queue_id   = 1,
             .track_name = std::nullopt
@@ -1026,11 +1026,11 @@ TEST_F(writer_test, insert_kernel_dispatch_missing_stream_throws)
     m_writer->register_queue_info(create_test_queue_info(1, 1000, 1));
 
     auto kernel_dispatch = create_test_kernel_dispatch_data(1, 1);
-    auto environment     = rocstorage::writer_api::trace_environment_t{
+    auto environment     = rocstorage::data_types::trace_environment_t{
             .node_id    = 1,
             .process_id = 1000,
             .thread_id  = 100,
-            .agent_id   = rocstorage::writer_api::agent_unique_id_t{ "GPU", 0 },
+            .agent_id   = rocstorage::data_types::agent_unique_id_t{ "GPU", 0 },
             .stream_id  = 1,
             .queue_id   = 1,
             .track_name = std::nullopt
@@ -1051,11 +1051,11 @@ TEST_F(writer_test, insert_kernel_dispatch_missing_kernel_symbol_throws)
 
     auto kernel_dispatch =
         create_test_kernel_dispatch_data(999, 1);  // Kernel symbol 999 doesn't exist
-    auto environment = rocstorage::writer_api::trace_environment_t{
+    auto environment = rocstorage::data_types::trace_environment_t{
         .node_id    = 1,
         .process_id = 1000,
         .thread_id  = 100,
-        .agent_id   = rocstorage::writer_api::agent_unique_id_t{ "GPU", 0 },
+        .agent_id   = rocstorage::data_types::agent_unique_id_t{ "GPU", 0 },
         .stream_id  = 1,
         .queue_id   = 1,
         .track_name = std::nullopt
@@ -1078,11 +1078,11 @@ TEST_F(writer_test, insert_memory_copy_with_all_dependencies)
     m_writer->register_stream_info(create_test_stream_info(1, 1000, 1));
 
     auto memory_copy         = create_test_memory_copy_data();
-    memory_copy.src_agent_id = rocstorage::writer_api::agent_unique_id_t{ "CPU", 0 };
-    memory_copy.dst_agent_id = rocstorage::writer_api::agent_unique_id_t{ "GPU", 0 };
+    memory_copy.src_agent_id = rocstorage::data_types::agent_unique_id_t{ "CPU", 0 };
+    memory_copy.dst_agent_id = rocstorage::data_types::agent_unique_id_t{ "GPU", 0 };
 
     auto environment =
-        rocstorage::writer_api::trace_environment_t{ .node_id    = 1,
+        rocstorage::data_types::trace_environment_t{ .node_id    = 1,
                                                      .process_id = 1000,
                                                      .thread_id  = 100,
                                                      .agent_id   = std::nullopt,
@@ -1111,7 +1111,7 @@ TEST_F(writer_test, insert_memory_copy_minimal_dependencies)
 
     auto memory_copy = create_test_memory_copy_data();
     auto environment =
-        rocstorage::writer_api::trace_environment_t{ .node_id    = 1,
+        rocstorage::data_types::trace_environment_t{ .node_id    = 1,
                                                      .process_id = 1000,
                                                      .thread_id  = std::nullopt,
                                                      .agent_id   = std::nullopt,
@@ -1130,7 +1130,7 @@ TEST_F(writer_test, insert_memory_copy_without_node_throws)
 {
     auto memory_copy = create_test_memory_copy_data();
     auto environment =
-        rocstorage::writer_api::trace_environment_t{ .node_id    = 999,
+        rocstorage::data_types::trace_environment_t{ .node_id    = 999,
                                                      .process_id = 1000,
                                                      .thread_id  = std::nullopt,
                                                      .agent_id   = std::nullopt,
@@ -1148,7 +1148,7 @@ TEST_F(writer_test, insert_memory_copy_without_process_throws)
 
     auto memory_copy = create_test_memory_copy_data();
     auto environment =
-        rocstorage::writer_api::trace_environment_t{ .node_id    = 1,
+        rocstorage::data_types::trace_environment_t{ .node_id    = 1,
                                                      .process_id = 999,
                                                      .thread_id  = std::nullopt,
                                                      .agent_id   = std::nullopt,
@@ -1166,10 +1166,10 @@ TEST_F(writer_test, insert_memory_copy_with_unregistered_src_agent_throws)
     m_writer->register_process_info(create_test_process_info(1, 1000));
 
     auto memory_copy         = create_test_memory_copy_data();
-    memory_copy.src_agent_id = rocstorage::writer_api::agent_unique_id_t{ "GPU", 999 };
+    memory_copy.src_agent_id = rocstorage::data_types::agent_unique_id_t{ "GPU", 999 };
 
     auto environment =
-        rocstorage::writer_api::trace_environment_t{ .node_id    = 1,
+        rocstorage::data_types::trace_environment_t{ .node_id    = 1,
                                                      .process_id = 1000,
                                                      .thread_id  = std::nullopt,
                                                      .agent_id   = std::nullopt,
@@ -1190,7 +1190,7 @@ TEST_F(writer_test, insert_memory_alloc_with_valid_type_alloc)
 
     auto memory_alloc = create_test_memory_alloc_data("ALLOC", "REAL");
     auto environment =
-        rocstorage::writer_api::trace_environment_t{ .node_id    = 1,
+        rocstorage::data_types::trace_environment_t{ .node_id    = 1,
                                                      .process_id = 1000,
                                                      .thread_id  = std::nullopt,
                                                      .agent_id   = std::nullopt,
@@ -1218,7 +1218,7 @@ TEST_F(writer_test, insert_memory_alloc_with_valid_type_free)
 
     auto memory_alloc = create_test_memory_alloc_data("FREE", "REAL");
     auto environment =
-        rocstorage::writer_api::trace_environment_t{ .node_id    = 1,
+        rocstorage::data_types::trace_environment_t{ .node_id    = 1,
                                                      .process_id = 1000,
                                                      .thread_id  = std::nullopt,
                                                      .agent_id   = std::nullopt,
@@ -1243,7 +1243,7 @@ TEST_F(writer_test, insert_memory_alloc_with_valid_type_realloc)
 
     auto memory_alloc = create_test_memory_alloc_data("REALLOC", "REAL");
     auto environment =
-        rocstorage::writer_api::trace_environment_t{ .node_id    = 1,
+        rocstorage::data_types::trace_environment_t{ .node_id    = 1,
                                                      .process_id = 1000,
                                                      .thread_id  = std::nullopt,
                                                      .agent_id   = std::nullopt,
@@ -1268,7 +1268,7 @@ TEST_F(writer_test, insert_memory_alloc_with_valid_type_reclaim)
 
     auto memory_alloc = create_test_memory_alloc_data("RECLAIM", "REAL");
     auto environment =
-        rocstorage::writer_api::trace_environment_t{ .node_id    = 1,
+        rocstorage::data_types::trace_environment_t{ .node_id    = 1,
                                                      .process_id = 1000,
                                                      .thread_id  = std::nullopt,
                                                      .agent_id   = std::nullopt,
@@ -1293,7 +1293,7 @@ TEST_F(writer_test, insert_memory_alloc_invalid_type_throws)
 
     auto memory_alloc = create_test_memory_alloc_data("INVALID_TYPE", "REAL");
     auto environment =
-        rocstorage::writer_api::trace_environment_t{ .node_id    = 1,
+        rocstorage::data_types::trace_environment_t{ .node_id    = 1,
                                                      .process_id = 1000,
                                                      .thread_id  = std::nullopt,
                                                      .agent_id   = std::nullopt,
@@ -1312,7 +1312,7 @@ TEST_F(writer_test, insert_memory_alloc_valid_level_virtual)
 
     auto memory_alloc = create_test_memory_alloc_data("ALLOC", "VIRTUAL");
     auto environment =
-        rocstorage::writer_api::trace_environment_t{ .node_id    = 1,
+        rocstorage::data_types::trace_environment_t{ .node_id    = 1,
                                                      .process_id = 1000,
                                                      .thread_id  = std::nullopt,
                                                      .agent_id   = std::nullopt,
@@ -1337,7 +1337,7 @@ TEST_F(writer_test, insert_memory_alloc_valid_level_scratch)
 
     auto memory_alloc = create_test_memory_alloc_data("ALLOC", "SCRATCH");
     auto environment =
-        rocstorage::writer_api::trace_environment_t{ .node_id    = 1,
+        rocstorage::data_types::trace_environment_t{ .node_id    = 1,
                                                      .process_id = 1000,
                                                      .thread_id  = std::nullopt,
                                                      .agent_id   = std::nullopt,
@@ -1362,7 +1362,7 @@ TEST_F(writer_test, insert_memory_alloc_invalid_level_throws)
 
     auto memory_alloc = create_test_memory_alloc_data("ALLOC", "INVALID_LEVEL");
     auto environment =
-        rocstorage::writer_api::trace_environment_t{ .node_id    = 1,
+        rocstorage::data_types::trace_environment_t{ .node_id    = 1,
                                                      .process_id = 1000,
                                                      .thread_id  = std::nullopt,
                                                      .agent_id   = std::nullopt,
@@ -1378,7 +1378,7 @@ TEST_F(writer_test, insert_memory_alloc_without_node_throws)
 {
     auto memory_alloc = create_test_memory_alloc_data("ALLOC", "REAL");
     auto environment =
-        rocstorage::writer_api::trace_environment_t{ .node_id    = 999,
+        rocstorage::data_types::trace_environment_t{ .node_id    = 999,
                                                      .process_id = 1000,
                                                      .thread_id  = std::nullopt,
                                                      .agent_id   = std::nullopt,
@@ -1396,7 +1396,7 @@ TEST_F(writer_test, insert_memory_alloc_without_process_throws)
 
     auto memory_alloc = create_test_memory_alloc_data("ALLOC", "REAL");
     auto environment =
-        rocstorage::writer_api::trace_environment_t{ .node_id    = 1,
+        rocstorage::data_types::trace_environment_t{ .node_id    = 1,
                                                      .process_id = 999,
                                                      .thread_id  = std::nullopt,
                                                      .agent_id   = std::nullopt,
@@ -1548,7 +1548,7 @@ TEST_F(writer_test, insert_memory_alloc_with_thread)
 
     auto memory_alloc = create_test_memory_alloc_data("ALLOC", "REAL");
     auto environment =
-        rocstorage::writer_api::trace_environment_t{ .node_id    = 1,
+        rocstorage::data_types::trace_environment_t{ .node_id    = 1,
                                                      .process_id = 1000,
                                                      .thread_id  = 100,
                                                      .agent_id   = std::nullopt,
@@ -1573,11 +1573,11 @@ TEST_F(writer_test, insert_memory_alloc_with_agent)
     m_writer->register_agent_info(create_test_agent_info(1, 1000, "GPU", 0));
 
     auto memory_alloc = create_test_memory_alloc_data("ALLOC", "REAL");
-    auto environment  = rocstorage::writer_api::trace_environment_t{
+    auto environment  = rocstorage::data_types::trace_environment_t{
          .node_id    = 1,
          .process_id = 1000,
          .thread_id  = std::nullopt,
-         .agent_id   = rocstorage::writer_api::agent_unique_id_t{ "GPU", 0 },
+         .agent_id   = rocstorage::data_types::agent_unique_id_t{ "GPU", 0 },
          .stream_id  = std::nullopt,
          .queue_id   = std::nullopt,
          .track_name = std::nullopt
@@ -1599,11 +1599,11 @@ TEST_F(writer_test, insert_memory_alloc_with_unregistered_agent_throws)
     m_writer->register_process_info(create_test_process_info(1, 1000));
 
     auto memory_alloc = create_test_memory_alloc_data("ALLOC", "REAL");
-    auto environment  = rocstorage::writer_api::trace_environment_t{
+    auto environment  = rocstorage::data_types::trace_environment_t{
          .node_id    = 1,
          .process_id = 1000,
          .thread_id  = std::nullopt,
-         .agent_id   = rocstorage::writer_api::agent_unique_id_t{ "GPU", 999 },
+         .agent_id   = rocstorage::data_types::agent_unique_id_t{ "GPU", 999 },
          .stream_id  = std::nullopt,
          .queue_id   = std::nullopt,
          .track_name = std::nullopt
@@ -1622,7 +1622,7 @@ TEST_F(writer_test, insert_memory_alloc_with_queue_and_stream)
 
     auto memory_alloc = create_test_memory_alloc_data("ALLOC", "REAL");
     auto environment =
-        rocstorage::writer_api::trace_environment_t{ .node_id    = 1,
+        rocstorage::data_types::trace_environment_t{ .node_id    = 1,
                                                      .process_id = 1000,
                                                      .thread_id  = std::nullopt,
                                                      .agent_id   = std::nullopt,
@@ -1653,7 +1653,7 @@ TEST_F(writer_test, insert_memory_copy_with_region_name)
     memory_copy.region_name = "my_region";
 
     auto environment =
-        rocstorage::writer_api::trace_environment_t{ .node_id    = 1,
+        rocstorage::data_types::trace_environment_t{ .node_id    = 1,
                                                      .process_id = 1000,
                                                      .thread_id  = std::nullopt,
                                                      .agent_id   = std::nullopt,
@@ -1678,7 +1678,7 @@ TEST_F(writer_test, insert_memory_copy_with_unregistered_thread_throws)
 
     auto memory_copy = create_test_memory_copy_data();
     auto environment =
-        rocstorage::writer_api::trace_environment_t{ .node_id    = 1,
+        rocstorage::data_types::trace_environment_t{ .node_id    = 1,
                                                      .process_id = 1000,
                                                      .thread_id =
                                                          999,  // Thread not registered
@@ -1697,10 +1697,10 @@ TEST_F(writer_test, insert_memory_copy_with_unregistered_dst_agent_throws)
     m_writer->register_process_info(create_test_process_info(1, 1000));
 
     auto memory_copy         = create_test_memory_copy_data();
-    memory_copy.dst_agent_id = rocstorage::writer_api::agent_unique_id_t{ "GPU", 999 };
+    memory_copy.dst_agent_id = rocstorage::data_types::agent_unique_id_t{ "GPU", 999 };
 
     auto environment =
-        rocstorage::writer_api::trace_environment_t{ .node_id    = 1,
+        rocstorage::data_types::trace_environment_t{ .node_id    = 1,
                                                      .process_id = 1000,
                                                      .thread_id  = std::nullopt,
                                                      .agent_id   = std::nullopt,
@@ -1719,7 +1719,7 @@ TEST_F(writer_test, insert_memory_copy_with_unregistered_queue_throws)
 
     auto memory_copy = create_test_memory_copy_data();
     auto environment =
-        rocstorage::writer_api::trace_environment_t{ .node_id    = 1,
+        rocstorage::data_types::trace_environment_t{ .node_id    = 1,
                                                      .process_id = 1000,
                                                      .thread_id  = std::nullopt,
                                                      .agent_id   = std::nullopt,
@@ -1739,7 +1739,7 @@ TEST_F(writer_test, insert_memory_copy_with_unregistered_stream_throws)
 
     auto memory_copy = create_test_memory_copy_data();
     auto environment =
-        rocstorage::writer_api::trace_environment_t{ .node_id    = 1,
+        rocstorage::data_types::trace_environment_t{ .node_id    = 1,
                                                      .process_id = 1000,
                                                      .thread_id  = std::nullopt,
                                                      .agent_id   = std::nullopt,
@@ -1760,12 +1760,12 @@ TEST_F(writer_test, insert_pmc_event_data_with_event)
     m_writer->register_process_info(create_test_process_info(1, 1000));
     m_writer->register_agent_info(create_test_agent_info(1, 1000, "GPU", 0));
 
-    rocstorage::writer_api::agent_unique_id_t agent_id{ "GPU", 0 };
+    rocstorage::data_types::agent_unique_id_t agent_id{ "GPU", 0 };
     auto pmc = create_test_pmc_info(1, 1000, "counter_with_event", agent_id);
     m_writer->register_pmc_info(pmc);
 
     auto pmc_event  = create_test_pmc_event_data(123.456);
-    pmc_event.event = rocstorage::writer_api::event_data_t{ .stack_id        = 10,
+    pmc_event.event = rocstorage::data_types::event_data_t{ .stack_id        = 10,
                                                             .parent_stack_id = 0,
                                                             .correlation_id  = 456,
                                                             .call_stack      = {},
@@ -1774,7 +1774,7 @@ TEST_F(writer_test, insert_pmc_event_data_with_event)
                                                             .extdata         = "{}" };
 
     auto pmc_unique_id =
-        rocstorage::writer_api::pmc_info_unique_id_t{ .name     = "counter_with_event",
+        rocstorage::data_types::pmc_info_unique_id_t{ .name     = "counter_with_event",
                                                       .agent_id = agent_id };
 
     m_writer->insert_pmc_event_data(pmc_event, pmc_unique_id);
@@ -1849,7 +1849,7 @@ TEST_F(writer_test, register_pmc_info_duplicate_is_ignored)
     m_writer->register_process_info(create_test_process_info(1, 1000));
     m_writer->register_agent_info(create_test_agent_info(1, 1000, "GPU", 0));
 
-    rocstorage::writer_api::agent_unique_id_t agent_id{ "GPU", 0 };
+    rocstorage::data_types::agent_unique_id_t agent_id{ "GPU", 0 };
     auto pmc = create_test_pmc_info(1, 1000, "dup_counter", agent_id);
     m_writer->register_pmc_info(pmc);
     m_writer->register_pmc_info(pmc);  // Duplicate
@@ -1901,7 +1901,7 @@ TEST_F(writer_test, insert_memory_alloc_with_unregistered_queue_throws)
 
     auto memory_alloc = create_test_memory_alloc_data("ALLOC", "REAL");
     auto environment =
-        rocstorage::writer_api::trace_environment_t{ .node_id    = 1,
+        rocstorage::data_types::trace_environment_t{ .node_id    = 1,
                                                      .process_id = 1000,
                                                      .thread_id  = std::nullopt,
                                                      .agent_id   = std::nullopt,
@@ -1921,7 +1921,7 @@ TEST_F(writer_test, insert_memory_alloc_with_unregistered_stream_throws)
 
     auto memory_alloc = create_test_memory_alloc_data("ALLOC", "REAL");
     auto environment =
-        rocstorage::writer_api::trace_environment_t{ .node_id    = 1,
+        rocstorage::data_types::trace_environment_t{ .node_id    = 1,
                                                      .process_id = 1000,
                                                      .thread_id  = std::nullopt,
                                                      .agent_id   = std::nullopt,
@@ -1941,7 +1941,7 @@ TEST_F(writer_test, insert_memory_alloc_with_unregistered_thread_throws)
 
     auto memory_alloc = create_test_memory_alloc_data("ALLOC", "REAL");
     auto environment =
-        rocstorage::writer_api::trace_environment_t{ .node_id    = 1,
+        rocstorage::data_types::trace_environment_t{ .node_id    = 1,
                                                      .process_id = 1000,
                                                      .thread_id =
                                                          999,  // Thread not registered
@@ -1966,7 +1966,7 @@ TEST_F(writer_test, insert_memory_alloc_with_null_type)
     memory_alloc.level = nullptr;
 
     auto environment =
-        rocstorage::writer_api::trace_environment_t{ .node_id    = 1,
+        rocstorage::data_types::trace_environment_t{ .node_id    = 1,
                                                      .process_id = 1000,
                                                      .thread_id  = std::nullopt,
                                                      .agent_id   = std::nullopt,
@@ -1997,7 +1997,7 @@ TEST_F(writer_test, register_string_empty_string)
 
 TEST_F(writer_test, end_to_end_complete_api_coverage)
 {
-    auto node = rocstorage::writer_api::node_info_t{ .node_id       = 1,
+    auto node = rocstorage::data_types::node_info_t{ .node_id       = 1,
                                                      .hash          = 987654321,
                                                      .machine_id    = "e2e-machine-001",
                                                      .system_name   = "Linux",
@@ -2009,7 +2009,7 @@ TEST_F(writer_test, end_to_end_complete_api_coverage)
     m_writer->register_node_info(node);
 
     auto process =
-        rocstorage::writer_api::process_info_t{ .ppid  = 1,
+        rocstorage::data_types::process_info_t{ .ppid  = 1,
                                                 .pid   = 12345,
                                                 .init  = 1000000000,
                                                 .fini  = 9000000000,
@@ -2022,7 +2022,7 @@ TEST_F(writer_test, end_to_end_complete_api_coverage)
                                                 .node_id     = 1 };
     m_writer->register_process_info(process);
 
-    auto thread = rocstorage::writer_api::thread_info_t{ .parent_process_id = 12345,
+    auto thread = rocstorage::data_types::thread_info_t{ .parent_process_id = 12345,
                                                          .thread_id         = 100,
                                                          .name       = "main-thread",
                                                          .start      = 1000000000,
@@ -2032,7 +2032,7 @@ TEST_F(writer_test, end_to_end_complete_api_coverage)
                                                          .process_id = 12345 };
     m_writer->register_thread_info(thread);
 
-    auto gpu_agent = rocstorage::writer_api::agent_info_t{
+    auto gpu_agent = rocstorage::data_types::agent_info_t{
         .unique_id      = { .agent_type = "GPU", .type_index = 0 },
         .absolute_index = 0,
         .logical_index  = 0,
@@ -2049,7 +2049,7 @@ TEST_F(writer_test, end_to_end_complete_api_coverage)
     m_writer->register_agent_info(gpu_agent);
 
     auto cpu_agent =
-        rocstorage::writer_api::agent_info_t{ .unique_id      = { .agent_type = "CPU",
+        rocstorage::data_types::agent_info_t{ .unique_id      = { .agent_type = "CPU",
                                                                   .type_index = 0 },
                                               .absolute_index = 0,
                                               .logical_index  = 0,
@@ -2064,22 +2064,22 @@ TEST_F(writer_test, end_to_end_complete_api_coverage)
                                               .process_id     = 12345 };
     m_writer->register_agent_info(cpu_agent);
 
-    auto queue = rocstorage::writer_api::queue_info_t{ .queue_id   = 1,
+    auto queue = rocstorage::data_types::queue_info_t{ .queue_id   = 1,
                                                        .name       = "compute-queue-0",
                                                        .extdata    = "{}",
                                                        .node_id    = 1,
                                                        .process_id = 12345 };
     m_writer->register_queue_info(queue);
 
-    auto stream = rocstorage::writer_api::stream_info_t{ .stream_id  = 1,
+    auto stream = rocstorage::data_types::stream_info_t{ .stream_id  = 1,
                                                          .name       = "hip-stream-0",
                                                          .extdata    = "{}",
                                                          .node_id    = 1,
                                                          .process_id = 12345 };
     m_writer->register_stream_info(stream);
 
-    rocstorage::writer_api::agent_unique_id_t pmc_agent_id{ "GPU", 0 };
-    auto                                      pmc = rocstorage::writer_api::pmc_info_t{
+    rocstorage::data_types::agent_unique_id_t pmc_agent_id{ "GPU", 0 };
+    auto                                      pmc = rocstorage::data_types::pmc_info_t{
                                              .unique_id = { .name = "SQ_WAVES", .agent_id = pmc_agent_id },
                                              .target_arch = "GPU",
                                              .event_code  = 4,
@@ -2100,7 +2100,7 @@ TEST_F(writer_test, end_to_end_complete_api_coverage)
     };
     m_writer->register_pmc_info(pmc);
 
-    auto code_object = rocstorage::writer_api::code_object_info_t{
+    auto code_object = rocstorage::data_types::code_object_info_t{
         .id           = 1,
         .uri          = "file:///opt/rocm/lib/e2e_kernel.co",
         .ld_base      = 0x7F0000000000,
@@ -2110,12 +2110,12 @@ TEST_F(writer_test, end_to_end_complete_api_coverage)
         .extdata      = "{}",
         .node_id      = 1,
         .process_id   = 12345,
-        .agent_id     = rocstorage::writer_api::agent_unique_id_t{ "GPU", 0 }
+        .agent_id     = rocstorage::data_types::agent_unique_id_t{ "GPU", 0 }
     };
     m_writer->register_code_object_info(code_object);
 
     auto kernel_symbol =
-        rocstorage::writer_api::kernel_symbol_info_t{ .id = 1,
+        rocstorage::data_types::kernel_symbol_info_t{ .id = 1,
                                                       .name =
                                                           "_Z12vectorAddKernelPfS_S_i",
                                                       .display_name = "vectorAddKernel",
@@ -2133,7 +2133,7 @@ TEST_F(writer_test, end_to_end_complete_api_coverage)
                                                       .code_obj_id               = 1 };
     m_writer->register_kernel_symbol_info(kernel_symbol);
 
-    auto track = rocstorage::writer_api::track_info_t{ .name       = "HIP_API",
+    auto track = rocstorage::data_types::track_info_t{ .name       = "HIP_API",
                                                        .extdata    = "{}",
                                                        .node_id    = 1,
                                                        .process_id = 12345,
@@ -2142,8 +2142,8 @@ TEST_F(writer_test, end_to_end_complete_api_coverage)
 
     m_writer->register_string("hipLaunchKernelGGL");
 
-    auto region = rocstorage::writer_api::region_data_t{
-        .event           = rocstorage::writer_api::event_data_t{ .stack_id        = 1,
+    auto region = rocstorage::data_types::region_data_t{
+        .event           = rocstorage::data_types::event_data_t{ .stack_id        = 1,
                                                                  .parent_stack_id = 0,
                                                                  .correlation_id  = 1001,
                                                                  .call_stack      = {},
@@ -2157,7 +2157,7 @@ TEST_F(writer_test, end_to_end_complete_api_coverage)
         .args            = {}
     };
     auto region_env =
-        rocstorage::writer_api::trace_environment_t{ .node_id    = 1,
+        rocstorage::data_types::trace_environment_t{ .node_id    = 1,
                                                      .process_id = 12345,
                                                      .thread_id  = 100,
                                                      .agent_id   = std::nullopt,
@@ -2166,19 +2166,19 @@ TEST_F(writer_test, end_to_end_complete_api_coverage)
                                                      .track_name = "HIP_API" };
     m_writer->insert_region_data(region, region_env);
 
-    auto pmc_event = rocstorage::writer_api::pmc_event_data_t{
+    auto pmc_event = rocstorage::data_types::pmc_event_data_t{
         .event   = std::nullopt,
         .value   = 1024.0,
         .extdata = "{}",
         .sample  = { .timestamp = 2500000000, .track = track, .extdata = "{}" }
     };
     auto pmc_unique_id =
-        rocstorage::writer_api::pmc_info_unique_id_t{ .name     = "SQ_WAVES",
+        rocstorage::data_types::pmc_info_unique_id_t{ .name     = "SQ_WAVES",
                                                       .agent_id = pmc_agent_id };
     m_writer->insert_pmc_event_data(pmc_event, pmc_unique_id);
 
     auto kernel_dispatch =
-        rocstorage::writer_api::kernel_dispatch_data_t{ .event            = std::nullopt,
+        rocstorage::data_types::kernel_dispatch_data_t{ .event            = std::nullopt,
                                                         .dispatch_id      = 1,
                                                         .start_timestamp  = 3000000000,
                                                         .end_timestamp    = 3000500000,
@@ -2194,24 +2194,24 @@ TEST_F(writer_test, end_to_end_complete_api_coverage)
                                                         .grid_size_z          = 1,
                                                         .name    = "vectorAddKernel",
                                                         .extdata = "{}" };
-    auto kernel_env = rocstorage::writer_api::trace_environment_t{
+    auto kernel_env = rocstorage::data_types::trace_environment_t{
         .node_id    = 1,
         .process_id = 12345,
         .thread_id  = 100,
-        .agent_id   = rocstorage::writer_api::agent_unique_id_t{ "GPU", 0 },
+        .agent_id   = rocstorage::data_types::agent_unique_id_t{ "GPU", 0 },
         .stream_id  = 1,
         .queue_id   = 1,
         .track_name = std::nullopt
     };
     m_writer->insert_kernel_dispatch_data(kernel_dispatch, kernel_env);
 
-    auto memory_copy = rocstorage::writer_api::memory_copy_data_t{
+    auto memory_copy = rocstorage::data_types::memory_copy_data_t{
         .event           = std::nullopt,
         .start_timestamp = 2100000000,
         .end_timestamp   = 2200000000,
-        .dst_agent_id    = rocstorage::writer_api::agent_unique_id_t{ "GPU", 0 },
+        .dst_agent_id    = rocstorage::data_types::agent_unique_id_t{ "GPU", 0 },
         .dst_address     = 0x7F1000000000,
-        .src_agent_id    = rocstorage::writer_api::agent_unique_id_t{ "CPU", 0 },
+        .src_agent_id    = rocstorage::data_types::agent_unique_id_t{ "CPU", 0 },
         .src_address     = 0x7FFE00000000,
         .size            = 1048576,
         .name            = "hipMemcpyHtoD",
@@ -2219,7 +2219,7 @@ TEST_F(writer_test, end_to_end_complete_api_coverage)
         .extdata         = "{}"
     };
     auto memcpy_env =
-        rocstorage::writer_api::trace_environment_t{ .node_id    = 1,
+        rocstorage::data_types::trace_environment_t{ .node_id    = 1,
                                                      .process_id = 12345,
                                                      .thread_id  = 100,
                                                      .agent_id   = std::nullopt,
@@ -2229,7 +2229,7 @@ TEST_F(writer_test, end_to_end_complete_api_coverage)
     m_writer->insert_memory_copy_data(memory_copy, memcpy_env);
 
     auto memory_alloc =
-        rocstorage::writer_api::memory_alloc_data_t{ .event           = std::nullopt,
+        rocstorage::data_types::memory_alloc_data_t{ .event           = std::nullopt,
                                                      .type            = "ALLOC",
                                                      .level           = "REAL",
                                                      .start_timestamp = 2000000000,
@@ -2237,11 +2237,11 @@ TEST_F(writer_test, end_to_end_complete_api_coverage)
                                                      .address         = 0x7F1000000000,
                                                      .size            = 1048576,
                                                      .extdata         = "{}" };
-    auto alloc_env = rocstorage::writer_api::trace_environment_t{
+    auto alloc_env = rocstorage::data_types::trace_environment_t{
         .node_id    = 1,
         .process_id = 12345,
         .thread_id  = 100,
-        .agent_id   = rocstorage::writer_api::agent_unique_id_t{ "GPU", 0 },
+        .agent_id   = rocstorage::data_types::agent_unique_id_t{ "GPU", 0 },
         .stream_id  = std::nullopt,
         .queue_id   = std::nullopt,
         .track_name = std::nullopt
@@ -2737,7 +2737,7 @@ TEST_F(writer_test, insert_region_data_with_track_creates_sample)
 {
     register_base_dependencies(*m_writer, 1, 1000, 100);
 
-    auto track = rocstorage::writer_api::track_info_t{ .name       = "API_TRACK",
+    auto track = rocstorage::data_types::track_info_t{ .name       = "API_TRACK",
                                                        .extdata    = "{}",
                                                        .node_id    = 1,
                                                        .process_id = 1000,
@@ -2746,7 +2746,7 @@ TEST_F(writer_test, insert_region_data_with_track_creates_sample)
 
     auto region = create_test_region_data("tracked_region", 5000000, 6000000);
     auto environment =
-        rocstorage::writer_api::trace_environment_t{ .node_id    = 1,
+        rocstorage::data_types::trace_environment_t{ .node_id    = 1,
                                                      .process_id = 1000,
                                                      .thread_id  = 100,
                                                      .agent_id   = std::nullopt,
@@ -2795,7 +2795,7 @@ TEST_F(writer_test, insert_region_data_with_unregistered_track_no_sample)
 
     auto region = create_test_region_data("region_with_missing_track", 9000000, 10000000);
     auto environment =
-        rocstorage::writer_api::trace_environment_t{ .node_id    = 1,
+        rocstorage::data_types::trace_environment_t{ .node_id    = 1,
                                                      .process_id = 1000,
                                                      .thread_id  = 100,
                                                      .agent_id   = std::nullopt,
@@ -2819,7 +2819,7 @@ TEST_F(writer_test, insert_multiple_regions_same_track_creates_multiple_samples)
 {
     register_base_dependencies(*m_writer, 1, 1000, 100);
 
-    auto track = rocstorage::writer_api::track_info_t{ .name       = "MULTI_SAMPLE_TRACK",
+    auto track = rocstorage::data_types::track_info_t{ .name       = "MULTI_SAMPLE_TRACK",
                                                        .extdata    = "{}",
                                                        .node_id    = 1,
                                                        .process_id = 1000,
@@ -2827,7 +2827,7 @@ TEST_F(writer_test, insert_multiple_regions_same_track_creates_multiple_samples)
     m_writer->register_track_info(track);
 
     auto environment =
-        rocstorage::writer_api::trace_environment_t{ .node_id    = 1,
+        rocstorage::data_types::trace_environment_t{ .node_id    = 1,
                                                      .process_id = 1000,
                                                      .thread_id  = 100,
                                                      .agent_id   = std::nullopt,
@@ -2859,7 +2859,7 @@ TEST_F(writer_test, sample_references_correct_track_id)
 {
     register_base_dependencies(*m_writer, 1, 1000, 100);
 
-    auto track = rocstorage::writer_api::track_info_t{ .name       = "REFERENCED_TRACK",
+    auto track = rocstorage::data_types::track_info_t{ .name       = "REFERENCED_TRACK",
                                                        .extdata    = "{}",
                                                        .node_id    = 1,
                                                        .process_id = 1000,
@@ -2868,7 +2868,7 @@ TEST_F(writer_test, sample_references_correct_track_id)
 
     auto region = create_test_region_data("ref_track_region", 1000000, 2000000);
     auto environment =
-        rocstorage::writer_api::trace_environment_t{ .node_id    = 1,
+        rocstorage::data_types::trace_environment_t{ .node_id    = 1,
                                                      .process_id = 1000,
                                                      .thread_id  = 100,
                                                      .agent_id   = std::nullopt,
@@ -2902,7 +2902,7 @@ TEST_F(writer_test, sample_timestamp_matches_region_start)
 {
     register_base_dependencies(*m_writer, 1, 1000, 100);
 
-    auto track = rocstorage::writer_api::track_info_t{ .name       = "TIMESTAMP_TRACK",
+    auto track = rocstorage::data_types::track_info_t{ .name       = "TIMESTAMP_TRACK",
                                                        .extdata    = "{}",
                                                        .node_id    = 1,
                                                        .process_id = 1000,
@@ -2913,7 +2913,7 @@ TEST_F(writer_test, sample_timestamp_matches_region_start)
     auto             region                   = create_test_region_data(
         "timestamp_region", expected_start_timestamp, expected_start_timestamp + 1000000);
     auto environment =
-        rocstorage::writer_api::trace_environment_t{ .node_id    = 1,
+        rocstorage::data_types::trace_environment_t{ .node_id    = 1,
                                                      .process_id = 1000,
                                                      .thread_id  = 100,
                                                      .agent_id   = std::nullopt,
@@ -2938,12 +2938,12 @@ TEST_F(writer_test, multiple_tracks_with_different_regions)
 {
     register_base_dependencies(*m_writer, 1, 1000, 100);
 
-    auto track1 = rocstorage::writer_api::track_info_t{ .name       = "TRACK_A",
+    auto track1 = rocstorage::data_types::track_info_t{ .name       = "TRACK_A",
                                                         .extdata    = "{}",
                                                         .node_id    = 1,
                                                         .process_id = 1000,
                                                         .thread_id  = 100 };
-    auto track2 = rocstorage::writer_api::track_info_t{ .name       = "TRACK_B",
+    auto track2 = rocstorage::data_types::track_info_t{ .name       = "TRACK_B",
                                                         .extdata    = "{}",
                                                         .node_id    = 1,
                                                         .process_id = 1000,
@@ -2951,7 +2951,7 @@ TEST_F(writer_test, multiple_tracks_with_different_regions)
     m_writer->register_track_info(track1);
     m_writer->register_track_info(track2);
 
-    auto env_a = rocstorage::writer_api::trace_environment_t{ .node_id    = 1,
+    auto env_a = rocstorage::data_types::trace_environment_t{ .node_id    = 1,
                                                               .process_id = 1000,
                                                               .thread_id  = 100,
                                                               .agent_id   = std::nullopt,
@@ -2959,7 +2959,7 @@ TEST_F(writer_test, multiple_tracks_with_different_regions)
                                                               .queue_id   = std::nullopt,
                                                               .track_name = "TRACK_A" };
 
-    auto env_b = rocstorage::writer_api::trace_environment_t{ .node_id    = 1,
+    auto env_b = rocstorage::data_types::trace_environment_t{ .node_id    = 1,
                                                               .process_id = 1000,
                                                               .thread_id  = 100,
                                                               .agent_id   = std::nullopt,
@@ -3003,7 +3003,7 @@ TEST_F(writer_test, transaction_rollback_on_exception_reverts_inserts)
     // The event and region will be inserted, but insert_arg will throw
     // because arg.type is nullptr. This should trigger ROLLBACK.
     auto region2  = create_test_region_data("failed_region", 3000000, 4000000);
-    region2.event = rocstorage::writer_api::event_data_t{ .stack_id        = 1,
+    region2.event = rocstorage::data_types::event_data_t{ .stack_id        = 1,
                                                           .parent_stack_id = 0,
                                                           .correlation_id  = 456,
                                                           .call_stack      = {},
@@ -3011,7 +3011,7 @@ TEST_F(writer_test, transaction_rollback_on_exception_reverts_inserts)
                                                           .event_category  = "TEST_API",
                                                           .extdata         = "{}" };
     // Add an arg with null type to trigger exception AFTER event/region insert
-    region2.args = { rocstorage::writer_api::arg_data_t{ .position = 0,
+    region2.args = { rocstorage::data_types::arg_data_t{ .position = 0,
                                                          .type     = nullptr,  // Invalid!
                                                          .name     = "arg_name",
                                                          .value    = "arg_value",
