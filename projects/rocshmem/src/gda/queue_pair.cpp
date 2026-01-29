@@ -138,7 +138,10 @@ __device__ void QueuePair::post_wqe_rma(int pe, int32_t size, uintptr_t laddr, u
 #endif
 #if defined(GDA_BNXT)
   case GDAProvider::BNXT:
-    bnxt_post_wqe_rma(pe, size, laddr, raddr, opcode);
+    if ((cy == THREAD) ||
+        (cy == WAVE && is_thread_zero_in_wave())) {
+      bnxt_post_wqe_rma(pe, size, laddr, raddr, opcode);
+    }
     return;
 #endif
   default:
