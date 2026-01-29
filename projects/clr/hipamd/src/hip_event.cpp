@@ -72,7 +72,7 @@ hipError_t Event::synchronize() {
 
   // Check HW status of the ROCcrl event. Note: not all ROCclr modes support HW status
   constexpr bool kWaitCompletion = true;
-  const amd::SyncPolicy policy =
+  const auto policy =
       (flags_ == hipEventBlockingSync) ? amd::SyncPolicy::Blocking : amd::SyncPolicy::Auto;
 
   const amd::Device* device = g_devices[deviceId()]->devices()[0];
@@ -88,7 +88,7 @@ bool Event::awaitEventCompletion() { return event_->awaitCompletion(); }
 // ================================================================================================
 bool EventDD::awaitEventCompletion() {
   constexpr bool kWaitCompletion = true;
-  const amd::SyncPolicy policy =
+  const auto policy =
       (flags_ == hipEventBlockingSync) ? amd::SyncPolicy::Blocking : amd::SyncPolicy::Auto;
   return g_devices[deviceId()]->devices()[0]->IsHwEventReady(*event_, kWaitCompletion, policy);
 }
@@ -169,9 +169,6 @@ hipError_t Event::streamWaitCommand(amd::Command*& command, hip::Stream* stream)
       (event_ != nullptr) ? amd::Command::EventWaitList{event_} : amd::Command::EventWaitList{};
 
   command = new amd::Marker(*stream, kMarkerDisableFlush, eventWaitList);
-  if (command == nullptr) {
-    return hipErrorOutOfMemory;
-  }
   // Since we only need to have a dependency on an existing event,
   // we may not need to flush any caches.
   command->setCommandEntryScope(amd::Device::kCacheStateIgnore);
@@ -295,10 +292,6 @@ hipError_t ihipEventCreateWithFlags(hipEvent_t* event, uint32_t flags) {
     e = new hip::EventDD(flags);
   } else {
     e = new hip::Event(flags);
-  }
-
-  if (e == nullptr) {
-    return hipErrorOutOfMemory;
   }
   *event = reinterpret_cast<hipEvent_t>(e);
 

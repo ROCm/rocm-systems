@@ -59,13 +59,13 @@ hip::Stream* Device::NullStream(bool wait) {
 // ================================================================================================
 bool Device::Create() {
   // Create default memory pool
-  default_mem_pool_ = new MemoryPool(this);
+  default_mem_pool_ = new (std::nothrow) MemoryPool(this);
   if (default_mem_pool_ == nullptr) {
     return false;
   }
 
   // Create graph memory pool
-  graph_mem_pool_ = new MemoryPool(this, nullptr, true);
+  graph_mem_pool_ = new (std::nothrow) MemoryPool(this, nullptr, true);
   if (graph_mem_pool_ == nullptr) {
     return false;
   }
@@ -87,7 +87,7 @@ bool Device::Create() {
                            .win32SecurityAttributes = nullptr,
                            .maxSize = 0,
                            .reserved = {}};
-  default_managed_mem_pool_ = new MemoryPool(this, &props);
+  default_managed_mem_pool_ = new (std::nothrow) MemoryPool(this, &props);
   if (default_managed_mem_pool_ == nullptr) {
     return false;
   }
@@ -225,10 +225,8 @@ void Device::WaitActiveStreams(hip::Stream* blocking_stream, bool wait_null_stre
   // Check if we have to wait anything
   if (eventWaitList.size() > 0 || submitMarker) {
     amd::Command* command = new amd::Marker(*blocking_stream, kMarkerDisableFlush, eventWaitList);
-    if (command != nullptr) {
-      command->enqueue();
-      command->release();
-    }
+    command->enqueue();
+    command->release();
   }
 
   // Release all active commands. It's safe after the marker was enqueued

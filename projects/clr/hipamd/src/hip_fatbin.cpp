@@ -751,7 +751,7 @@ hipError_t FatBinaryInfo::AddDevProgram(hip::Device* device, const void* binary_
                                         size_t binary_size, size_t binary_offset) {
   int devID = device->deviceId();
   amd::Context* ctx = device->asContext();
-  amd::Program* program = new amd::Program(*ctx);
+  amd::Program* program = new (std::nothrow) amd::Program(*ctx);
   dev_programs_[devID] = program;
   if (program == nullptr) {
     return hipErrorOutOfMemory;
