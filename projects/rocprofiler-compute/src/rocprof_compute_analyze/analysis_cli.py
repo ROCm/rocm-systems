@@ -23,12 +23,13 @@
 
 ##############################################################################
 
+
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from utils import file_io, parser, tty
 from utils.kernel_name_shortener import kernel_name_shortener
 from utils.logger import console_error, demarcate
-from pathlib import Path
 from utils.utils import process_torch_trace_output
+
 
 class cli_analysis(OmniAnalyze_Base):
     # -----------------------
