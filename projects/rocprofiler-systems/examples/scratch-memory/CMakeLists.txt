@@ -36,8 +36,8 @@ set_source_files_properties(scratch-memory.cpp PROPERTIES LANGUAGE HIP)
 add_executable(scratch-memory)
 target_sources(scratch-memory PRIVATE scratch-memory.cpp)
 target_compile_options(scratch-memory PRIVATE -W -Wall -Wextra -Wpedantic -Wshadow
-                                              -Werror)
+    -Werror)
 
 find_package(Threads REQUIRED)
 target_link_libraries(scratch-memory PRIVATE Threads::Threads hsa-runtime64
-                                            )
+)
