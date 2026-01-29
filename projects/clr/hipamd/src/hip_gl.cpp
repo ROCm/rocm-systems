@@ -920,12 +920,7 @@ hipError_t hipGraphicsUnmapResources(int count, hipGraphicsResource_t* resources
     HIP_RETURN(hipErrorNoDevice);
   }
 
-  amd::Context* amdContext = device->asContext();
-  if (!amdContext || amdContext->devices().empty()) {
-    HIP_RETURN(hipErrorUnknown);
-  }
-
-  const amd::Device* curDev = amdContext->devices()[0];
+  const amd::Device* curDev = device->devices()[0];
   for (auto& mobj : memObjects) {
     device::Memory* mem = reinterpret_cast<device::Memory*>(mobj->getDeviceMemory(*curDev));
     if (mem) {
@@ -938,7 +933,7 @@ hipError_t hipGraphicsUnmapResources(int count, hipGraphicsResource_t* resources
   for (uint8_t i = 0; i < count; i++) {
     if (!device->mappedGraphics().remove(resources[i])) {
       LogError("failed to unmap resource");
-      return hipErrorUnknown;
+      HIP_RETURN(hipErrorUnknown);
     }
   }
   HIP_RETURN(hipSuccess);
