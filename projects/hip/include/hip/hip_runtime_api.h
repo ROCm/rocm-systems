@@ -1226,6 +1226,7 @@ typedef enum hipMemAllocationType {
    * location while the application is actively using it
    */
   hipMemAllocationTypePinned = 0x1,
+  hipMemAllocationTypeManaged = 0x2,
   hipMemAllocationTypeUncached = 0x40000000,
   hipMemAllocationTypeMax = 0x7FFFFFFF
 } hipMemAllocationType;
@@ -1446,12 +1447,12 @@ void __hipGetPCH(const char** pch, unsigned int* size);
  */
 typedef enum hipGraphicsRegisterFlags {
   hipGraphicsRegisterFlagsNone = 0,
-  hipGraphicsRegisterFlagsReadOnly = 1,  ///< HIP will not write to this registered resource
+  hipGraphicsRegisterFlagsReadOnly = 1,  ///< HIP will not write to this registered resource, read only
   hipGraphicsRegisterFlagsWriteDiscard =
-      2,  ///< HIP will only write and will not read from this registered resource
-  hipGraphicsRegisterFlagsSurfaceLoadStore = 4,  ///< HIP will bind this resource to a surface
+      2,  ///< HIP will only write and will not read from this registered resource, write only
+  hipGraphicsRegisterFlagsSurfaceLoadStore = 4,  ///< HIP will bind this resource to a surface, read and write
   hipGraphicsRegisterFlagsTextureGather =
-      8  ///< HIP will perform texture gather operations on this registered resource
+      8  ///< HIP will perform texture gather operations on this registered resource, read and write or read only
 } hipGraphicsRegisterFlags;
 
 typedef struct _hipGraphicsResource hipGraphicsResource;
@@ -4441,6 +4442,19 @@ hipError_t hipMemPoolExportPointer(hipMemPoolPtrExportData* export_data, void* d
  */
 hipError_t hipMemPoolImportPointer(void** dev_ptr, hipMemPool_t mem_pool,
                                    hipMemPoolPtrExportData* export_data);
+/**
+ * @brief Sets memory pool for memory location and allocation type.
+ *
+ *
+ */
+hipError_t hipMemSetMemPool(hipMemLocation* location, hipMemAllocationType type, hipMemPool_t pool);
+/**
+ * @brief Retrieves memory pool for memory location and allocation type.
+ *
+ *
+ */
+hipError_t hipMemGetMemPool(hipMemPool_t* pool, hipMemLocation* location,
+                            hipMemAllocationType type);
 // Doxygen end of ordered memory allocator
 /**
  * @}

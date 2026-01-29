@@ -87,7 +87,7 @@ __device__ bool deactivate_thread(uint64_t* active_masks, unsigned int warp_size
   const auto warps_per_block = (block.size() + warp_size - 1) / warp_size;
   const auto block_rank = (blockIdx.z * gridDim.y + blockIdx.y) * gridDim.x + blockIdx.x;
   const auto idx = block_rank * warps_per_block + block.thread_rank() / warp_size;
-  return !(active_masks[idx] & (1u << warp.thread_rank()));
+  return !(active_masks[idx] & (1ull << warp.thread_rank()));
 }
 
 __global__ void coalesced_group_tiled_partition_size_getter(uint64_t* active_masks,
@@ -243,6 +243,8 @@ __global__ void coalesced_group_tiled_partition_shfl_up(uint64_t* active_masks, 
 
 
 template <typename T> static void CoalescedGroupTiledPartitonShflUpTestImpl() {
+  const auto inv_reduction_factor = 1.0 / GetTestReductionFactor();
+
   const auto tile_size = GenerateTileSizes();
   INFO("Tile size: " << tile_size);
   auto blocks = GenerateBlockDimensionsForShuffle();
@@ -250,8 +252,16 @@ template <typename T> static void CoalescedGroupTiledPartitonShflUpTestImpl() {
   auto warp_size = getWarpSize();
   INFO("Grid dimensions: x " << blocks.x << ", y " << blocks.y << ", z " << blocks.z);
   INFO("Block dimensions: x " << threads.x << ", y " << threads.y << ", z " << threads.z);
-  const auto delta = GENERATE_COPY(range(0u, tile_size));
+
+  std::vector<unsigned int> deltas;
+  for (double i = 0; i < tile_size - 1; i += inv_reduction_factor) {
+    deltas.emplace_back(static_cast<unsigned int>(std::floor(i)));
+  }
+  deltas.emplace_back(tile_size - 1);
+
+  const auto delta = GENERATE_COPY(from_range(deltas.begin(), deltas.end()));
   INFO("Delta: " << delta);
+
   CPUGrid grid(blocks, threads);
 
   const auto alloc_size = grid.thread_count_ * sizeof(T);
@@ -344,6 +354,8 @@ __global__ void coalesced_group_tiled_partition_shfl_down(uint64_t* active_masks
 
 
 template <typename T> static void CoalescedGroupTiledPartitonShflDownTestImpl() {
+  const auto inv_reduction_factor = 1.0 / GetTestReductionFactor();
+
   const auto tile_size = GenerateTileSizes();
   INFO("Tile size: " << tile_size);
   auto blocks = GenerateBlockDimensionsForShuffle();
@@ -351,8 +363,16 @@ template <typename T> static void CoalescedGroupTiledPartitonShflDownTestImpl() 
   auto warp_size = getWarpSize();
   INFO("Grid dimensions: x " << blocks.x << ", y " << blocks.y << ", z " << blocks.z);
   INFO("Block dimensions: x " << threads.x << ", y " << threads.y << ", z " << threads.z);
-  const auto delta = GENERATE_COPY(range(0u, tile_size));
+
+  std::vector<unsigned int> deltas;
+  for (double i = 0; i < tile_size - 1; i += inv_reduction_factor) {
+    deltas.emplace_back(static_cast<unsigned int>(std::floor(i)));
+  }
+  deltas.emplace_back(tile_size - 1);
+
+  const auto delta = GENERATE_COPY(from_range(deltas.begin(), deltas.end()));
   INFO("Delta: " << delta);
+
   CPUGrid grid(blocks, threads);
 
   const auto alloc_size = grid.thread_count_ * sizeof(T);

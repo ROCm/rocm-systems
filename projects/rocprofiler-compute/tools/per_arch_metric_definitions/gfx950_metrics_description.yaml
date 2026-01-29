@@ -2022,7 +2022,7 @@ L2 Cache Accesses:
       The L2 cache attempts to evict *streaming* requests before normal requests when
       the L2 is at capacity.
     unit: Requests per normalization unit
-  Bypasss Req:
+  Bypass Req:
     rst: ''
     unit: Unknown
   Probe Req:

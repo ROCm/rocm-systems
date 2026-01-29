@@ -402,6 +402,9 @@ bool ProcessIsolatedTestRunner::executeAllTests(const ExecutionOptions& options)
             continue;
         }
 
+        // Flush all output before fork to prevent child from inheriting unflushed buffers
+        fflush(NULL);
+
         pid_t pid = fork();
 
         if(pid == 0)
@@ -435,12 +438,19 @@ bool ProcessIsolatedTestRunner::executeAllTests(const ExecutionOptions& options)
             {
                 INFO("Running isolated test '%s' (PID: %d)\n", testConfig.name.c_str(), pid);
             }
+            // Flush parent's output before reading from child pipes to ensure proper ordering
+            fflush(stdout);
+            fflush(stderr);
+
             int            status;
             CapturedOutput output = captureProcessOutput(stdout_fd, stderr_fd, pid, &status);
 
             auto endTime = std::chrono::steady_clock::now();
             auto duration
                 = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime);
+
+            // Display captured output BEFORE status messages for proper sequencing
+            displayCapturedOutput(output, testConfig.name);
 
             TestResult testResult;
             testResult.testName  = testConfig.name;
@@ -529,8 +539,6 @@ bool ProcessIsolatedTestRunner::executeAllTests(const ExecutionOptions& options)
                 testResult.exitCode     = RCCL_TEST_INVALID;
                 testResult.errorMessage = "Failed to wait for process";
             }
-
-            displayCapturedOutput(output, testConfig.name);
 
             recordTestResult(testResult);
 

@@ -42,11 +42,6 @@ THE SOFTWARE.
 TEST_CASE("Unit_hipFreeMipmappedArray_Negative_Parameters") {
   CHECK_IMAGE_SUPPORT;
 
-#ifdef __linux__
-  HipTest::HIP_SKIP_TEST("Mipmap APIs are not supported on Linux");
-  return;
-#endif  //__linux__
-
   SECTION("array is nullptr") {
     HIP_CHECK_ERROR(hipFreeMipmappedArray(nullptr), hipErrorInvalidValue);
   }

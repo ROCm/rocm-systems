@@ -393,7 +393,7 @@ class AMDSMICommands():
     def static_gpu(self, args, multiple_devices=False, gpu=None, asic=None, bus=None, vbios=None,
                         limit=None, driver=None, ras=None, board=None, numa=None, vram=None,
                         cache=None, partition=None, dfc_ucode=None, fb_info=None, num_vf=None,
-                        soc_pstate=None, xgmi_plpd=None, process_isolation=None, clock=None):
+                        soc_pstate=None, xgmi_plpd=None, process_isolation=None, clock=None, profile=None):
         """Get Static information for target gpu
 
         Args:
@@ -485,8 +485,10 @@ class AMDSMICommands():
                 args.soc_pstate = soc_pstate
             if xgmi_plpd:
                 args.xgmi_plpd = xgmi_plpd
-            current_platform_args += ["ras", "limit", "soc_pstate", "xgmi_plpd"]
-            current_platform_values += [args.ras, args.limit, args.soc_pstate, args.xgmi_plpd]
+            if profile:
+                args.profile = profile
+            current_platform_args += ["ras", "limit", "soc_pstate", "xgmi_plpd", "profile"]
+            current_platform_values += [args.ras, args.limit, args.soc_pstate, args.xgmi_plpd, args.profile]
 
         if self.helpers.is_linux() and not self.helpers.is_virtual_os():
             if numa:
@@ -956,6 +958,30 @@ class AMDSMICommands():
                     static_dict['policies'] = policies_str
                 else:
                     static_dict['xgmi_plpd'] = policy_info
+        if 'profile' in current_platform_args:
+            if args.profile:
+                try:
+                    profile_status = amdsmi_interface.amdsmi_get_gpu_power_profile_presets(args.gpu, 0)
+                    
+                    # Parse available profiles from bitfield
+                    available_profiles = self.helpers.parse_available_profiles(
+                        profile_status['available_profiles']
+                    )
+                    
+                    # Get current profile name
+                    current_profile = self.helpers.get_profile_name_from_mask(
+                        profile_status['current']
+                    )
+                    
+                    # Store output
+                    static_dict['profile'] = {
+                        'available_profiles': available_profiles,
+                        'current': current_profile,
+                        'num_profiles': profile_status['num_profiles']
+                    }
+                except amdsmi_exception.AmdSmiLibraryException as e:
+                    static_dict['profile'] = e.get_error_info()
+                    logging.debug("Failed to get power profile info for gpu %s | %s", gpu_id, e.get_error_info())
         if 'process_isolation' in current_platform_args:
             if args.process_isolation:
                 try:
@@ -1265,7 +1291,7 @@ class AMDSMICommands():
                 board=None, numa=None, vram=None, cache=None, partition=None,
                 dfc_ucode=None, fb_info=None, num_vf=None, cpu=None,
                 interface_ver=None, soc_pstate=None, xgmi_plpd = None, process_isolation=None,
-                clock=None):
+                clock=None, profile=None):
         """Get Static information for target gpu and cpu
 
         Args:
@@ -1317,7 +1343,7 @@ class AMDSMICommands():
         gpu_attributes = ["asic", "bus", "vbios", "limit", "driver", "ras",
                           "board", "numa", "vram", "cache", "partition",
                           "dfc_ucode", "fb_info", "num_vf", "soc_pstate", "xgmi_plpd",
-                          "process_isolation", "clock"]
+                          "process_isolation", "clock", "profile"]
         for attr in gpu_attributes:
             if hasattr(args, attr):
                 if getattr(args, attr):
@@ -1347,8 +1373,8 @@ class AMDSMICommands():
                 self.static_gpu(args, multiple_devices, gpu, asic,
                                     bus, vbios, limit, driver, ras,
                                     board, numa, vram, cache, partition,
-                                    dfc_ucode, fb_info, num_vf, soc_pstate,
-                                    process_isolation, clock)
+                                    dfc_ucode, fb_info, num_vf, soc_pstate, xgmi_plpd,
+                                    process_isolation, clock, profile)
         elif self.helpers.is_amd_hsmp_initialized(): # Only CPU is initialized
             if args.cpu == None:
                 args.cpu = self.cpu_handles
@@ -1363,7 +1389,7 @@ class AMDSMICommands():
                                 bus, vbios, limit, driver, ras,
                                 board, numa, vram, cache, partition,
                                 dfc_ucode, fb_info, num_vf, soc_pstate, xgmi_plpd,
-                                process_isolation, clock)
+                                process_isolation, clock, profile)
         if self.logger.is_json_format():
             self.logger.combine_arrays_to_json()
 
@@ -4701,26 +4727,26 @@ class AMDSMICommands():
 
         # Error if no subcommand args are passed
         if self.helpers.is_baremetal():
-            if not any([args.fan is not None,
-                        args.perf_level,
-                        args.profile,
-                        args.compute_partition,
-                        args.memory_partition,
-                        args.perf_determinism is not None,
-                        args.power_cap is not None,
-                        args.soc_pstate is not None,
-                        args.xgmi_plpd is not None,
-                        args.clk_level is not None,
-                        args.clk_limit is not None,
-                        args.ptl_status is not None,
-                        args.ptl_format is not None,
-                        args.process_isolation is not None]):
+            if not any([getattr(args, 'fan', None) is not None,
+                        getattr(args, 'perf_level', None) is not None,
+                        getattr(args, 'profile', None) is not None,
+                        getattr(args, 'compute_partition', None) is not None,
+                        getattr(args, 'memory_partition', None) is not None,
+                        getattr(args, 'perf_determinism', None) is not None,
+                        getattr(args, 'power_cap', None) is not None,
+                        getattr(args, 'soc_pstate', None) is not None,
+                        getattr(args, 'xgmi_plpd', None) is not None,
+                        getattr(args, 'clk_level', None) is not None,
+                        getattr(args, 'clk_limit', None) is not None,
+                        getattr(args, 'ptl_status', None) is not None,
+                        getattr(args, 'ptl_format', None) is not None,
+                        getattr(args, 'process_isolation', None) is not None]):
                 command = " ".join(sys.argv[1:])
                 raise AmdSmiRequiredCommandException(command, self.logger.format)
         else:
-            if not any([args.power_cap is not None,
-                        args.clk_limit is not None,
-                        args.process_isolation is not None]):
+            if not any([getattr(args, 'power_cap', None) is not None,
+                        getattr(args, 'clk_limit', None) is not None,
+                        getattr(args, 'process_isolation', None) is not None]):
                 command = " ".join(sys.argv[1:])
                 raise AmdSmiRequiredCommandException(command, self.logger.format)
 
@@ -4778,7 +4804,54 @@ class AMDSMICommands():
                 self.logger.clear_multiple_devices_output()
                 return
             if args.profile:
-                self.logger.store_output(args.gpu, 'profile', "Not Yet Implemented")
+                try:
+                    # Parse profile input (name or number)
+                    profile_input = args.profile.upper()
+                    name_mapping = self.helpers.get_power_profile_name_mapping()
+                    
+                    if profile_input in name_mapping:
+                        profile_mask = name_mapping[profile_input]
+                    else:
+                        # Invalid profile - show available ones
+                        try:
+                            profile_status = amdsmi_interface.amdsmi_get_gpu_power_profile_presets(args.gpu, 0)
+                            available = self.helpers.parse_available_profiles(profile_status['available_profiles'])
+                            available_str = ", ".join(available)
+                        except amdsmi_exception.AmdSmiLibraryException as e:
+                            available_str = "Unable to fetch available profiles"
+                            logging.debug(f"Failed to fetch available profiles: {e.get_error_info()}")
+                        
+                        self.logger.store_output(args.gpu, 'profile', 
+                                                f"Invalid profile: {args.profile}\n\nAvailable profiles: {available_str}")
+                        self.logger.print_output()
+                        self.logger.clear_multiple_devices_output()
+                        return
+                    
+                    # Set the profile
+                    amdsmi_interface.amdsmi_set_gpu_power_profile(args.gpu, 0, profile_mask)
+                    
+                    self.logger.store_output(args.gpu, 'profile', 
+                                            f"Successfully set power profile to {profile_input}")
+                except amdsmi_exception.AmdSmiLibraryException as e:
+                    if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
+                        raise PermissionError('Command requires elevation') from e
+                    
+                    # Get available profiles for error message
+                    try:
+                        profile_status = amdsmi_interface.amdsmi_get_gpu_power_profile_presets(args.gpu, 0)
+                        available = self.helpers.parse_available_profiles(profile_status['available_profiles'])
+                        available_str = ", ".join(available)
+                    except amdsmi_exception.AmdSmiLibraryException as get_error:
+                        available_str = "Unable to fetch available profiles"
+                        logging.debug(f"Failed to fetch available profiles: {get_error.get_error_info()}")
+                    
+                    error_msg = f"[{e.get_error_info(detailed=False)}] Unable to set power profile to {args.profile}"
+                    self.logger.store_output(args.gpu, 'profile', error_msg)
+                    print(f"\nAvailable Power Profiles:\n\t{available_str}\n")
+                    self.logger.print_output()
+                    self.logger.clear_multiple_devices_output()
+                    return
+                
                 self.logger.print_output()
                 self.logger.clear_multiple_devices_output()
                 return
@@ -5056,13 +5129,9 @@ class AMDSMICommands():
             if isinstance(args.ptl_status, int):
                 status_string = "Enabled" if args.ptl_status else "Disabled"
                 result = f"Requested PTL status to {status_string}" # This should not print out
-                try:
-                    current_state = amdsmi_interface.amdsmi_get_gpu_ptl_state(args.gpu)
-                    if current_state == args.ptl_status:
-                        result = f"PTL state is already {status_string}"
-                    else:
-                        amdsmi_interface.amdsmi_set_gpu_ptl_state(args.gpu, args.ptl_status)
-                        result = f"Successfully set PTL state to {status_string}"
+                try: # Due to driver requirements, do NOT check current state. Set state regardless of current state.
+                    amdsmi_interface.amdsmi_set_gpu_ptl_state(args.gpu, args.ptl_status)
+                    result = f"Successfully set PTL state to {status_string}"
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                         raise PermissionError('Command requires elevation') from e
@@ -5496,6 +5565,43 @@ class AMDSMICommands():
         if not self.group_check_printed:
             self.helpers.check_required_groups(check_render=True, check_video=False)
             self.group_check_printed = True
+
+        # Mode-1 gpureset is hive-wide.
+        # Group GPUs by hive and reset each hive only once.
+        gpus_to_reset = []
+
+        if args.gpureset and isinstance(args.gpu, list) and len(args.gpu) > 1:
+            # Group GPUs by their XGMI hive ID.
+            # If GPU not in a hive or no hive info, reset individually.
+            hive_to_gpus = {}
+            gpus_without_hive = []
+
+            for gpu in args.gpu:
+                try:
+                    xgmi_info = amdsmi_interface.amdsmi_get_xgmi_info(gpu)
+                    if isinstance(xgmi_info, dict):
+                        hive_id = xgmi_info.get('xgmi_hive_id', None)
+                        if hive_id is not None and hive_id != 0:
+                            if hive_id not in hive_to_gpus:
+                                hive_to_gpus[hive_id] = []
+                            hive_to_gpus[hive_id].append(gpu)
+                        else:
+                            gpus_without_hive.append(gpu)
+                    else:
+                        gpus_without_hive.append(gpu)
+                except:
+                    gpus_without_hive.append(gpu)
+
+            # For each hive, reset using the first GPU (resets entire hive)
+            for hive_id, gpu_list in hive_to_gpus.items():
+                gpus_to_reset.append(gpu_list[0])
+
+            # Add all non-hive GPUs to reset individually
+            gpus_to_reset.extend(gpus_without_hive)
+
+            # Update args.gpu to only the GPUs to reset
+            if gpus_to_reset:
+                args.gpu = gpus_to_reset
 
         # Handle multiple GPUs
         handled_multiple_gpus, device_handle = self.helpers.handle_gpus(args, self.logger, self.reset)
@@ -7779,3 +7885,62 @@ class AMDSMICommands():
                 print(e)
 
         listener.stop()
+
+
+    def rocm_smi(self, args):
+        """
+        Display GPU information in ROCm-SMI compatible format (showAllConcise).
+        This provides a drop-in replacement for rocm-smi --showallconcise using amdsmi backend.
+        
+        Args:
+            args: Parsed arguments (unused for this command)
+        """
+        try:
+            # Import the ROCm-SMI compatible functions from the compatibility module
+            import sys
+            import os
+            # Add the current directory to path if needed
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            if current_dir not in sys.path:
+                sys.path.insert(0, current_dir)
+            
+            import amdsmi_rocm_smi_compat
+            showAllConcise = amdsmi_rocm_smi_compat.showAllConcise
+            listDevices = amdsmi_rocm_smi_compat.listDevices
+            initializeRsmi = amdsmi_rocm_smi_compat.initializeRsmi
+            check_runtime_status = amdsmi_rocm_smi_compat.check_runtime_status
+            
+            # Initialize AMD SMI
+            if not initializeRsmi():
+                logging.error("Failed to initialize AMD SMI")
+                return
+            
+            try:
+                # Get processor handles
+                deviceList = listDevices()
+                
+                if not deviceList:
+                    logging.error("No AMD GPU devices found")
+                    return
+                
+                # Check runtime status (low power state warning)
+                if not check_runtime_status():
+                    print("\nWARNING: AMD GPU device(s) is/are in a low-power state. Check power control/runtime_status\n")
+                
+                # Display ROCm-SMI compatible output
+                showAllConcise(deviceList)
+                
+            finally:
+                # Shutdown AMD SMI
+                try:
+                    amdsmi_interface.amdsmi_shut_down()
+                except:
+                    pass
+                    
+        except ImportError as e:
+            logging.error(f"Could not import ROCm-SMI compatibility module: {e}")
+            logging.error("Make sure amdsmi_rocm_smi_compat.py is in the amdsmi_cli directory")
+            print("ERROR: ROCm-SMI compatibility mode not available")
+        except Exception as e:
+            logging.error(f"Error in ROCm-SMI compatibility mode: {e}")
+            print(f"ERROR: {e}")

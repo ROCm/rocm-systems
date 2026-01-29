@@ -43,6 +43,7 @@ Parallelism API support
 * MPI
 * Kokkos-Tools (KokkosP)
 * OpenMP-Tools (OMPT)
+* UCX (Unified Communication X)
 
 GPU metrics
 ========================================

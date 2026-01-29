@@ -27,9 +27,10 @@ The following are required to install and use the AMD SMI library through its la
 
 ### Supported platforms
 
-The AMD SMI library supports Linux bare metal and Linux virtual machine guest
-for AMD GPUs and AMD EPYC™ CPUs via
-[esmi_ib_lirary](https://github.com/amd/esmi_ib_library). To use AMD SMI for virtualization, refer to
+The AMD SMI library supports Linux bare metal and Linux virtual machine guests
+for AMD GPUs, and supports AMD EPYC™ CPUs via the
+[esmi_ib_library](https://github.com/amd/esmi_ib_library).
+To use AMD SMI for virtualization on Linux SR-IOV hosts, refer to
 the [AMD SMI for Virtualization documentation](https://instinct.docs.amd.com/projects/amd-smi-virt/en/latest/index.html).
 
 AMD SMI library can run on AMD ROCm supported platforms. Refer to

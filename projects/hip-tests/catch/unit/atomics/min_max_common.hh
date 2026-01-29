@@ -286,6 +286,7 @@ void TestCore(const TestParams& p) {
   TestType test_value =
       std::is_floating_point_v<TestType> ? kFloatingPointTestValue : kIntegerTestValue;
   for (auto i = 0u; i < p.num_devices; ++i) {
+    HIP_CHECK(hipSetDevice(i));
     TestType* const mem_ptr =
       p.alloc_type == LinearAllocs::hipMalloc ? mem_devs[i].ptr() : mem_devs[i].host_ptr();
     HIP_CHECK(hipMemset(mem_ptr, 0, mem_alloc_size));
@@ -310,6 +311,7 @@ void TestCore(const TestParams& p) {
   }
   // Copy Results back to Host
   for (auto i = 0u; i < p.num_devices; ++i) {
+    HIP_CHECK(hipSetDevice(i));
     const auto device_offset = i * p.kernel_count * p.ThreadCount();
     HIP_CHECK(hipMemcpy(old_vals.data() + device_offset, old_vals_devs[i].ptr(),
                         old_vals_alloc_size, hipMemcpyDeviceToHost));

@@ -12,15 +12,21 @@
 #include "nccl.h"
 #include "rccl_float8.h"
 #if ROCM_VERSION >= 60000
-   // hip_bf16.h should be used from ROCm 6.0
-  #include <hip/hip_bf16.h>
-  typedef __hip_bfloat16 hip_bfloat16;
+  // This is a workaround for the fact that the old hip_bfloat16.h header file may still be used by some rocm files.
+  // The _HIP_INCLUDE_HIP_AMD_DETAIL_HIP_BFLOAT16_H_ and _HIP_BFLOAT16_H_ macros are defined in the old hip_bfloat16.h header
+  #if !defined(_HIP_INCLUDE_HIP_AMD_DETAIL_HIP_BFLOAT16_H_) && !defined(_HIP_BFLOAT16_H_)
+    #define _HIP_INCLUDE_HIP_AMD_DETAIL_HIP_BFLOAT16_H_
+    #define _HIP_BFLOAT16_H_
+    #include <hip/hip_bf16.h>
+    typedef __hip_bfloat16 hip_bfloat16;
+  #else
+    #error "RCCL is not using the correct hip_bf16.h file. Please make sure that the correct header is included!"
+  #endif
 #else
   #include <hip/hip_bfloat16.h>
 #endif
-#include "nccl_common.h"
+#include "nccl_tuner.h"
 #include "bitops.h"
-#include "symmetric.h"
 #if defined(ENABLE_NPKIT)
 #include "npkit/npkit_struct.h"
 #endif
@@ -31,7 +37,11 @@
 #include <string>
 #include "debug.h"
 
-extern const char* ncclFuncStr[NCCL_NUM_FUNCTIONS+2];
+#ifdef ENABLE_ROCSHMEM
+#include <rocshmem/rocshmem.hpp>
+#endif
+
+extern const char* ncclFuncStr[NCCL_NUM_FUNCTIONS+3];
 
 extern const char* ncclAlgoStr[NCCL_NUM_ALGORITHMS];
 
@@ -126,8 +136,12 @@ union ncclLLFifoLine {
   #define NCCL_MAX_GROUPS (NCCL_MAX_NTHREADS/WARP_SIZE)
 #endif
 
+#ifdef ENABLE_WARP_SPEED
+#define MAXCHANNELS 512
+#else
 #define MAXCHANNELS 128
-#define CHANNEL_LIMIT 16
+#endif
+#define CHANNEL_LIMIT 16 // this is used to limit channels for pre MI3xx GPUs
 #define NCCL_MAX_LOCAL_RANKS 72
 #define NCCL_MIN_NTHREADS (4*WARP_SIZE)
 #define NCCL_SIMPLE_MAX_NTHREADS NCCL_MAX_NTHREADS
@@ -215,6 +229,7 @@ struct ncclProxyConnector {
 struct ncclConnector {
   int connected;
   int hasSeen;
+  int p2pOnly;
   struct ncclProxyConnector proxyConn;
   struct ncclTransportComm* transportComm;
   void* transportResources;
@@ -285,7 +300,7 @@ struct ncclChannelPeer {
   int refCount;
 };
 
-struct ncclDevComm;
+struct ncclKernelComm;
 
 #pragma pack(push)  /* push current alignment to stack */
 #pragma pack(8)     /* set alignment to 8 bytes boundary */
@@ -354,7 +369,11 @@ inline __device__ int ncclP2pChannelToPart(int nP2pChannels, int base, int chann
 struct alignas(16) ncclDevWorkColl {
   // Running on channels [channelLo..channelHi], hi is inclusive.
   //   nChannels == (channelHi - channelLo) + 1
+#ifdef ENABLE_WARP_SPEED
+  uint32_t channelLo:16, channelHi:16;
+#else
   uint32_t channelLo:8, channelHi:8;
+#endif
   uint32_t nWarps:8;
   uint32_t redOpArgIsPtr:1, regUsed:1, netRegUsed:1, oneNode:1, direct:2, isOneRPN:1, rcclUseOneSlice:1, gfx9CheapFenceOff:1;
   uint32_t root:30, connIndex:2;
@@ -382,6 +401,14 @@ struct alignas(16) ncclDevWorkColl {
   };
   uint64_t redOpArg;
   uint64_t opCount;
+
+#ifdef ENABLE_ROCSHMEM
+  rocshmem::rocshmem_team_t team;
+  int enableRocshmem;
+  void* tempbuff;
+  void* sndbuff;
+  int size;
+#endif
 };
 
 
@@ -499,10 +526,10 @@ typedef enum {
 } ncclCollTraceDataType_t;
 
 struct ncclCollTrace {
-  uint8_t type;
-  uint8_t bid;
   int16_t funcIndex;
-  uint16_t data_0;
+  uint8_t xccId:4;
+  uint16_t data_0:12;
+  uint8_t type;
   uint8_t batchIx;
   uint8_t tid;
   uint8_t channelId;
@@ -564,7 +591,7 @@ struct ncclDevProfiler {
   } data[MAX_PROFILER_EVENTS_PER_CHANNEL];
 };
 
-struct ncclDevComm {
+struct ncclKernelComm {
   int rank;
   int nRanks;
   int node;
@@ -573,7 +600,7 @@ struct ncclDevComm {
   int p2pChunkSize;
   int isAllNvlink;
   int p2pnChannelsPerPeer;
-
+  int warpLevelComm;
   int* collNetDenseToUserRank;
 
   // Flag to ask NCCL kernels to abort
@@ -612,8 +639,8 @@ struct ncclDevComm {
 #define RANDOM_DELAY_ON_WARP_START 0x1L
 #endif
 
-struct alignas(16) ncclDevCommAndChannels {
-  struct ncclDevComm comm;
+struct alignas(16) ncclKernelCommAndChannels {
+  struct ncclKernelComm comm;
   struct ncclDevChannel channels[MAXCHANNELS];
 };
 
@@ -628,7 +655,7 @@ struct channelMasks {
 };
 
 struct alignas(16) ncclDevKernelArgs {
-  struct ncclDevComm* comm;
+  struct ncclKernelComm* comm;
   struct channelMasks channelMask;
   enum ncclDevWorkStorageType workStorageType;
   uint32_t workMask;
@@ -636,11 +663,6 @@ struct alignas(16) ncclDevKernelArgs {
   // A channel's first batch is at `blockIdx.x`. Use `nextJump` to follow rest of list.
   // struct ncclDevWorkBatch batches[];
 };
-
-__host__ __device__ constexpr int ncclMaxKernelArgsSize(/*int cudaDriver, */int cudaArch=NCCL_CUDA_ARCH) {
-  //return (cudaArch < 700 || cudaDriver < 12010) ? 4<<10 : (32<<10)-4;
-  return 4<<10;
-}
 
 template<size_t capacity>
 struct alignas(16) ncclDevKernelArgsStorage {
@@ -650,8 +672,23 @@ struct alignas(16) ncclDevKernelArgsStorage {
   };
 };
 
+
+typedef ncclDevKernelArgsStorage<(5<<10)> ncclDevKernelArgs5K;
 typedef ncclDevKernelArgsStorage<(4<<10)> ncclDevKernelArgs4K;
 //typedef ncclDevKernelArgsStorage<(32<<10)-4> ncclDevKernelArgs31K;
+
+#ifdef ENABLE_WARP_SPEED
+// needed extra storage for accomodating more channels than 128 for WarpSpeed support
+// 256 channels (i.e. 256 warps) would hang without this extra storage
+// 5KB should be sufficient for now
+typedef ncclDevKernelArgs5K ncclDevKernelArgsDefaultStorage;
+#else
+typedef ncclDevKernelArgs4K ncclDevKernelArgsDefaultStorage;
+#endif
+__host__ __device__ constexpr int ncclMaxKernelArgsSize(/*int cudaDriver, */int cudaArch=NCCL_CUDA_ARCH) {
+  //return (cudaArch < 700 || cudaDriver < 12010) ? 4<<10 : (32<<10)-4;
+  return sizeof(ncclDevKernelArgsDefaultStorage);
+}
 
 template<typename T>
 __host__ __device__ constexpr T min_constexpr(T a) { return a; }
@@ -759,7 +796,7 @@ inline int ncclDevFuncId(int coll, int devRedOp, int type, int algo, int proto, 
   if (coll == ncclFuncBroadcast) {
     key = ((uint64_t)(coll     & RCCL_FUNC_ID_MASK) << RCCL_COLL_SHIFT ) |
           ((uint64_t)(proto    & RCCL_FUNC_ID_MASK) << RCCL_PROTO_SHIFT);
-  } else if (coll == ncclFuncSendRecv || coll == ncclFuncAllToAllPivot) {
+  } else if (coll == ncclFuncSendRecv || coll == ncclFuncAlltoAllPivot || coll == ncclFuncAllToAllGda) {
     key = ((uint64_t)(coll     & RCCL_FUNC_ID_MASK) << RCCL_COLL_SHIFT );
   } else {
     key = ((uint64_t)(coll     & RCCL_FUNC_ID_MASK) << RCCL_COLL_SHIFT ) |

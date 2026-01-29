@@ -51,11 +51,12 @@
 #include <timemory/utility/declaration.hpp>
 #include <timemory/utility/delimit.hpp>
 #include <timemory/utility/filepath.hpp>
-#include <timemory/utility/join.hpp>
 #include <timemory/utility/signals.hpp>
 #include <timemory/utility/types.hpp>
 
 #include "logger/debug.hpp"
+
+#include <spdlog/fmt/ranges.h>
 
 #include <algorithm>
 #include <array>
@@ -316,7 +317,9 @@ configure_settings(bool _init)
                               "backend", "perfetto");
 
     ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_TRACE_LEGACY",
-                              "Use legacy direct mode for perfetto tracing instead of "
+                              "[DEPRECATED] The new default option is to use data from "
+                              "cached buffer. When set to true system will use "
+                              "legacy direct mode for perfetto tracing instead of "
                               "deferred trace generation. When false (default), uses "
                               "cached mode with minimal runtime overhead.",
                               false, "backend", "perfetto");
@@ -377,6 +380,10 @@ configure_settings(bool _init)
                               "Enable support for MPI functions", true, "mpi", "backend",
                               "parallelism");
 
+    ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_USE_UCX",
+                              "Enable support for UCX functions", true, "ucx", "backend",
+                              "parallelism");
+
     ROCPROFSYS_CONFIG_SETTING(
         bool, "ROCPROFSYS_USE_RCCLP",
         "Enable support for ROCm Communication Collectives Library (RCCL) Performance",
@@ -426,7 +433,7 @@ configure_settings(bool _init)
     for(const auto& itr : constraint::get_valid_clock_ids())
     {
         _clock_choices.emplace_back(
-            join("", "(", join('|', itr.name, itr.value, itr.raw_name), ")"));
+            fmt::format("({}|{}|{})", itr.name, itr.value, itr.raw_name));
     }
 
     ROCPROFSYS_CONFIG_SETTING(std::string, "ROCPROFSYS_TRACE_PERIODS",
@@ -1088,6 +1095,9 @@ configure_settings(bool _init)
     handle_deprecated_setting("ROCPROFSYS_OUTPUT_FILE", "ROCPROFSYS_PERFETTO_FILE");
     handle_deprecated_setting("ROCPROFSYS_USE_PERFETTO", "ROCPROFSYS_TRACE");
     handle_deprecated_setting("ROCPROFSYS_USE_TIMEMORY", "ROCPROFSYS_PROFILE");
+    handle_deprecated_setting("ROCPROFSYS_DEBUG", "ROCPROFSYS_LOG_LEVEL");
+    handle_deprecated_setting("ROCPROFSYS_VERBOSE", "ROCPROFSYS_LOG_LEVEL");
+    handle_deprecated_setting("ROCPROFSYS_TRACE_LEGACY", "ROCPROFSYS_TRACE");
 
     scope::get_fields()[scope::flat::value]     = _config->get_flat_profile();
     scope::get_fields()[scope::timeline::value] = _config->get_timeline_profile();
@@ -1549,8 +1559,6 @@ print_banner(std::ostream& _os)
     std::stringstream _version_info{};
     _version_info << "rocprof-sys v" << ROCPROFSYS_VERSION_STRING;
 
-    namespace join = ::timemory::join;
-
     // assemble the list of properties
     auto _generate_properties =
         [](std::initializer_list<std::pair<std::string, std::string>>&& _data) {
@@ -1561,7 +1569,7 @@ print_banner(std::ostream& _os)
                 if(!itr.second.empty())
                     _property_info.emplace_back(
                         itr.first.empty() ? itr.second
-                                          : join::join(": ", itr.first, itr.second));
+                                          : fmt::format("{}: {}", itr.first, itr.second));
             }
             return _property_info;
         };
@@ -1575,7 +1583,7 @@ print_banner(std::ostream& _os)
 
     // <NAME> <VERSION> (<PROPERTIES>)
     if(!_properties.empty())
-        _version_info << join::join(join::array_config{ ", ", " (", ")" }, _properties);
+        _version_info << fmt::format(" ({})", fmt::join(_properties, ", "));
 
     _os << _banner << "\n";
     _os << _version_info.str() << "\n";
@@ -1938,6 +1946,13 @@ get_use_mpip()
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
 }
 
+bool&
+get_use_ucx()
+{
+    static auto _v = get_config()->find("ROCPROFSYS_USE_UCX");
+    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
+}
+
 bool
 get_use_kokkosp()
 {
@@ -2200,8 +2215,8 @@ get_perfetto_output_filename()
 
     if(!_val.empty() && _val.at(0) != '/')
     {
-        auto _result =
-            settings::format(JOIN('/', "%env{PWD}%", _val), get_config()->get_tag());
+        auto _result = settings::format(fmt::format("{}/{}", getenv("PWD"), _val),
+                                        get_config()->get_tag());
         LOG_DEBUG("Path is relative, prepending PWD: '{}'", _result);
         return _result;
     }
@@ -2456,7 +2471,8 @@ get_database_absolute_path(std::string_view database_name, std::string_view suff
     setenv("ROCPROFSYS_DATABASE_DIR", _dir.c_str(), 1);
 
     if(!_val.empty() && _val.at(0) != '/')
-        return settings::format(JOIN('/', "%env{PWD}%", _val), get_config()->get_tag());
+        return settings::format(fmt::format("{}/{}", getenv("PWD"), _val),
+                                get_config()->get_tag());
     return _val;
 }
 
@@ -2514,8 +2530,8 @@ get_perfetto_output_filename_with_suffix(std::string_view suffix)
 
     if(!_val.empty() && _val.at(0) != '/')
     {
-        auto _result =
-            settings::format(JOIN('/', "%env{PWD}%", _val), get_config()->get_tag());
+        auto _result = settings::format(fmt::format("{}/{}", getenv("PWD"), _val),
+                                        get_config()->get_tag());
         LOG_DEBUG("Path is relative, prepending PWD: '{}'", _result);
         return _result;
     }
@@ -2731,7 +2747,7 @@ get_tmp_file(std::string _basename, std::string _ext)
     _cfg.use_suffix    = true;
     _cfg.suffix        = "%pid%";
     _cfg.explicit_path = get_tmpdir();
-    _cfg.subdirectory  = JOIN('/', settings::output_path(), "%ppid%", "");
+    _cfg.subdirectory  = fmt::format("{}/{}", settings::output_path(), "%ppid%");
     auto _fname =
         settings::compose_output_filename(std::move(_basename), std::move(_ext), _cfg);
 
@@ -2766,10 +2782,9 @@ get_causal_backend()
     } catch(std::runtime_error& _e)
     {
         auto _mode = static_cast<tim::tsettings<std::string>&>(*_v->second).get();
-        throw std::runtime_error(fmt::format(
-            "[{}] invalid causal backend {}. Choices: {}", __FUNCTION__, _mode,
-            timemory::join::join(timemory::join::array_config{ ", ", "", "" },
-                                 _v->second->get_choices())));
+        throw std::runtime_error(
+            fmt::format("[{}] invalid causal backend {}. Choices: {}", __FUNCTION__,
+                        _mode, fmt::join(_v->second->get_choices(), ", ")));
     }
     return CausalBackend::Auto;
 }
@@ -2797,10 +2812,9 @@ get_causal_mode()
         } catch(std::runtime_error& _e)
         {
             auto _mode = static_cast<tim::tsettings<std::string>&>(*_v->second).get();
-            throw std::runtime_error(fmt::format(
-                "[{}] invalid causal mode {}. Choices: {}", __FUNCTION__, _mode,
-                timemory::join::join(timemory::join::array_config{ ", ", "", "" },
-                                     _v->second->get_choices())));
+            throw std::runtime_error(
+                fmt::format("[{}] invalid causal mode {}. Choices: {}", __FUNCTION__,
+                            _mode, fmt::join(_v->second->get_choices(), ", ")));
         }
         return CausalMode::Function;
     }();
@@ -2855,7 +2869,7 @@ format_causal_scopes(std::vector<std::string> _value, const std::string& _tag)
         {
             itr = std::regex_replace(
                 itr, _main_re,
-                join("", "$1", "(", get_exe_name(), "|", get_exe_realpath(), ")", "$3"));
+                fmt::format("$1({}|{})$3", get_exe_name(), get_exe_realpath()));
         }
         // trim leading and trailing spaces since we didn't delimit spaces
         if(std::regex_search(itr, _space_re))
