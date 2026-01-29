@@ -1364,7 +1364,7 @@ def process_torch_trace_output(
     else:
         join_keys = ("Correlation_Id",) # output_format "csv"        
     consolidated_df = pd.concat(
-        [_merge_pair(f[0], f[1],join_keys) for f in existing_csv_files],
+        [_merge_pair(f[0], f[1], join_keys) for f in existing_csv_files],
         ignore_index=True,
         )
     required_columns = [
