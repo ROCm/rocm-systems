@@ -1310,7 +1310,7 @@ def save_torch_trace_inputs(
             shutil.copyfile(src_marker, dst_marker)
             console_log("Copied Marker API Trace: ", dst_marker)
     else:
-        console_warning(f"Unknown output_format: {output_format} in move_torch_trace_inputs")
+        console_warning(f"Unknown output_format: {output_format} in save_torch_trace_inputs")
     
 @demarcate
 def process_torch_trace_output(
