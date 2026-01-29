@@ -1,0 +1,14 @@
+---
+description: Ground rules for AI agent behavior in this project
+alwaysApply: true
+---
+
+# Ground Rules
+
+1. **Missing commands**: If you try to use a command and it isn't there, stop and ask the user.
+
+2. **No sudo**: Never use sudo without asking the user first.
+
+3. **Reversible changes only**: Never make a change that can't be easily undone without asking the user.
+
+4. **Code edits**: Do not make any substantial edits to code (more than a few lines) without asking the user.
