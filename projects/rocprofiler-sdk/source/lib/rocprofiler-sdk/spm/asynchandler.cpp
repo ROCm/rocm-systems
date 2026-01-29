@@ -20,24 +20,22 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-
-#include "lib/rocprofiler-sdk/spm/core.hpp"
 #include "lib/rocprofiler-sdk/spm/asynchandler.hpp"
+#include "lib/rocprofiler-sdk/spm/core.hpp"
 
 namespace rocprofiler
 {
 namespace spm
 {
-
-    /**
- * @brief The functions checks if the `ROCPROFILER_SPM_BETA_ENABLED` is set.
- * If so, it will enable SPM service. Otherwise, the API is reported
- * as not implemented.
- *
- * The SPM is in experimental phase .
-   By enabling the `ROCPROFILER_SPM_BETA_ENABLED`,
- * user accepts all consequences of using early implementation of SPM API.
- */
+/**
+* @brief The functions checks if the `ROCPROFILER_SPM_BETA_ENABLED` is set.
+* If so, it will enable SPM service. Otherwise, the API is reported
+* as not implemented.
+*
+* The SPM is in experimental phase .
+By enabling the `ROCPROFILER_SPM_BETA_ENABLED`,
+* user accepts all consequences of using early implementation of SPM API.
+*/
 bool
 is_spm_explicitly_enabled()
 {
@@ -51,17 +49,18 @@ is_spm_explicitly_enabled()
     return spm_sampling_enabled;
 }
 
-bool asynchandler(rocprofiler_agent_id_t agent_id)
+bool
+asynchandler(rocprofiler_agent_id_t agent_id)
 {
-    spm_callback_data  *callback_data = nullptr;
+    spm_callback_data* callback_data = nullptr;
 
-    spm_get_controller()._callback_data.wlock([&](auto& map)
-    {
+    spm_get_controller()._callback_data.wlock([&](auto& map) {
         auto it = map.find(agent_id.handle);
+        if(it == map.end()) return;
         callback_data = it->second.front().get();
     });
 
-    if(!callback_data->is_profiling) return false; 
+    if(!callback_data || !callback_data->is_profiling) return false;
 
     if(callback_data->config_switch == true)
     {
@@ -71,21 +70,29 @@ bool asynchandler(rocprofiler_agent_id_t agent_id)
                 << "agent state map does not have an entnry for agent in async handler";
             auto& state_queue = it->second;
             if(state_queue.size() == 1)
-                state_queue.front()->spm_packet->kfd_start();
-            else
             {
+                ROCP_FATAL_IF(!state_queue.front()->spm_packet)
+                    << "SPM packet in the state queue is null";
+                state_queue.front()->spm_packet->kfd_start();
+            }
+            else if(state_queue.size() > 1)
+            {
+                ROCP_FATAL_IF(!state_queue.front()->spm_packet)
+                    << "SPM packet in the state queue is null";
                 auto rel_pkt = std::move(state_queue.front()->spm_packet);
                 rel_pkt->kfd_stop();
                 state_queue.erase(state_queue.begin());
-                ROCP_FATAL_IF(state_queue.empty())
-                    << "agent state map has no entry for context switch async handler";
+                ROCP_FATAL_IF(!state_queue.front()->spm_packet)
+                    << "SPM packet in the state queue is null";
                 state_queue.front()->spm_packet->kfd_start();
             }
+            else
+                ROCP_FATAL << "state queue empty in async handler";
         });
     }
-    
+
     return false;
 }
 
-}
-}
+}  // namespace spm
+}  // namespace rocprofiler

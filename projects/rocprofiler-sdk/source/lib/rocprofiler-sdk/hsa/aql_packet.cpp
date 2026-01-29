@@ -334,7 +334,7 @@ SPMPacket::SPMPacket(aqlprofile_agent_handle_t aql_agent, aqlprofile_spm_profile
 void
 SPMPacket::populate_before()
 {
-     before_krn_pkt.push_back(packets.start_packet);
+    before_krn_pkt.push_back(packets.start_packet);
 };
 
 void
@@ -350,7 +350,7 @@ SPMPacket::kfd_start()
 
     if(running.exchange(true))
     {
-        ROCP_ERROR << "Double call to KFD start!";
+        ROCP_WARNING << "Double call to KFD start!";
         return;
     }
 

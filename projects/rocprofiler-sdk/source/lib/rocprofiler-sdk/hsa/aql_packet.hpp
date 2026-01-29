@@ -83,7 +83,6 @@ public:
     {
         before_krn_pkt.clear();
         after_krn_pkt.clear();
-       
     }
     bool isEmpty() const { return empty; }
 
@@ -94,9 +93,8 @@ public:
     aqlprofile_handle_t handle = {.handle = 0};
     bool                empty  = {true};
 
-    common::container::small_vector<hsa_ext_amd_aql_pm4_packet_t, 3> before_krn_pkt         = {};
-    common::container::small_vector<hsa_ext_amd_aql_pm4_packet_t, 2> after_krn_pkt          = {};
-   
+    common::container::small_vector<hsa_ext_amd_aql_pm4_packet_t, 3> before_krn_pkt = {};
+    common::container::small_vector<hsa_ext_amd_aql_pm4_packet_t, 2> after_krn_pkt  = {};
 };
 
 class EmptyAQLPacket : public AQLPacket

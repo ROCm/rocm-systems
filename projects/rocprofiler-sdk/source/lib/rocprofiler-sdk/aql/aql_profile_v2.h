@@ -194,9 +194,9 @@ typedef enum
 
 /**
  * @brief Forces draining of remaining SPM counters and waits for completion
- * 
+ *
  * This function signals the producer thread to drain all remaining SPM data from the GPU
- * hardware buffers and blocks until the draining operation is complete. Unlike 
+ * hardware buffers and blocks until the draining operation is complete. Unlike
  * aqlprofile_spm_stop(), this function does not terminate the SPM session - it only
  * ensures that all pending counter data has been processed and delivered to the data
  * callback function that was passed in during aqlprofile_spm_start().

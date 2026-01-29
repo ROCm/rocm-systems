@@ -28,8 +28,8 @@
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/hsa/aql_packet.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
-#include "lib/rocprofiler-sdk/spm/dlsym.hpp"
 #include "lib/rocprofiler-sdk/spm/asynchandler.hpp"
+#include "lib/rocprofiler-sdk/spm/dlsym.hpp"
 
 #include <rocprofiler-sdk/dispatch_counting_service.h>
 #include <rocprofiler-sdk/experimental/spm.h>
@@ -103,11 +103,14 @@ rocprofiler_spm_create_counter_config(rocprofiler_agent_id_t               agent
         }
         config->metrics.push_back(*metric_ptr);
     }
-
-    config->timeout     = parameters->timeout;
-    config->buffer_size = parameters->buffer_size;
-    config->sample_freq = parameters->frequency;
-
+    
+    if(parameters)
+    {
+       config->timeout     = parameters->timeout;
+       config->buffer_size = parameters->buffer_size;
+       config->sample_freq = parameters->frequency;
+    }
+    
     if(config_id->handle != 0)
     {
         // Copy existing counters from previous config

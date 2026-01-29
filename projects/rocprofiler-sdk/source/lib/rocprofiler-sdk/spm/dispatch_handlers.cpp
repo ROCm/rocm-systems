@@ -25,10 +25,10 @@
 #include "lib/common/synchronized.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
-#include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
-#include "lib/rocprofiler-sdk/kernel_dispatch/profiling_time.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_info_session.hpp"
+#include "lib/rocprofiler-sdk/kernel_dispatch/profiling_time.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/rocprofiler.h>
@@ -37,7 +37,6 @@ namespace rocprofiler
 {
 namespace spm
 {
-
 /**
  * @brief Callback we get from HSA interceptor when a kernel packet is being enqueued.
  * We return an AQLPacket containing the start/stop .
@@ -60,13 +59,13 @@ pre_kernel_call(const context::context*                                         
                 const context::correlation_id*                                  correlation_id)
 {
     CHECK(info && ctx);
-    auto callback_data                               = std::make_unique<spm_callback_data>();
+    auto callback_data      = std::make_unique<spm_callback_data>();
     auto no_instrumentation = [&]() {
         auto ret_pkt = std::make_unique<rocprofiler::hsa::EmptyAQLPacket>();
-        info->packet_return_map.wlock([&](auto& data) { data.emplace(ret_pkt.get(), nullptr); });
         callback_data->is_profiling = false;
         spm_get_controller()._callback_data.wlock([&](auto& map) {
-            map[CHECK_NOTNULL(queue.get_agent().get_rocp_agent())->id.handle].push_back(std::move(callback_data));
+            map[CHECK_NOTNULL(queue.get_agent().get_rocp_agent())->id.handle].push_back(
+                std::move(callback_data));
         });
         // If we have a SPM counter collection context but it is not enabled, we still might need
         // to add barrier packets to transition from serialized -> unserialized execution. This
@@ -80,7 +79,7 @@ pre_kernel_call(const context::context*                                         
     ctx->dispatch_spm->enabled.rlock([&](const auto& collect_ctx) { is_enabled = collect_ctx; });
 
     if(!is_enabled || !info->user_cb) return {no_instrumentation(), true};
-    
+
     auto _corr_id_v =
         rocprofiler_async_correlation_id_t{.internal = 0, .external = context::null_user_data};
     if(const auto* _corr_id = correlation_id)
@@ -114,62 +113,31 @@ pre_kernel_call(const context::context*                                         
                                    pkt.kernel_dispatch.grid_size_z};
         dispatch_data.dispatch_info        = dispatch_info;
     }
-   
+
     info->user_cb(&dispatch_data, &req_profile, user_data, info->callback_args);
 
     if(req_profile.handle == 0) return {no_instrumentation(), true};
-    
+
     auto prof_config = spm_get_controller().get_profile_cfg(req_profile);
     CHECK(prof_config);
 
-    std::unique_ptr<rocprofiler::hsa::AQLPacket> ret_pkt         = nullptr;
-     
+    std::unique_ptr<rocprofiler::hsa::AQLPacket> ret_pkt          = nullptr;
+    bool                                         is_config_switch = false;
+    auto ret_status = info->get_spm_packet(ret_pkt, prof_config, &is_config_switch);
+
+    CHECK_EQ(ret_status, ROCPROFILER_STATUS_SUCCESS) << rocprofiler_get_status_string(ret_status);
+
     callback_data->dispatch_data        = dispatch_data;
     callback_data->user_data            = user_data;
     callback_data->record_cb            = info->record_callback;
     callback_data->record_callback_args = info->record_callback_args;
-    callback_data->is_profiling            = true;
+    callback_data->is_profiling         = true;
+    callback_data->config_switch        = is_config_switch;
 
-    spm_get_controller()._agent_state_map.wlock([&](auto& map) {
-        auto it = map.find(dispatch_data.dispatch_info.agent_id.handle);
-        if(it == map.end())
-        {
-            std::unique_ptr<rocprofiler::hsa::SPMPacket> _pkt = nullptr;
-            callback_data->config_switch     = true;
-            _pkt = prof_config->pkt_generator->construct_packet(
-                CHECK_NOTNULL(hsa::get_queue_controller())->get_core_table(),
-                CHECK_NOTNULL(hsa::get_queue_controller())->get_ext_table());
-            ret_pkt = std::make_unique<rocprofiler::hsa::SPMPacket>(*(_pkt.get()));
-            map[dispatch_data.dispatch_info.agent_id.handle].push_back(
-                std::make_unique<enqueue_dispatch_config_state>(prof_config->id, std::move(_pkt)));
-        }
-        else
-        {
-            auto& state_queue = it->second;
-            if(state_queue.back()->config_id.handle == prof_config->id.handle)
-            {
-                ret_pkt = std::make_unique<rocprofiler::hsa::SPMPacket>(
-                    *(state_queue.back()->spm_packet.get()));
-            }
-            else
-            {
-                std::unique_ptr<rocprofiler::hsa::SPMPacket> _pkt = nullptr;
-                callback_data->config_switch     = true;
-                _pkt = prof_config->pkt_generator->construct_packet(
-                    CHECK_NOTNULL(hsa::get_queue_controller())->get_core_table(),
-                    CHECK_NOTNULL(hsa::get_queue_controller())->get_ext_table());
-                ret_pkt = std::make_unique<rocprofiler::hsa::SPMPacket>(*(_pkt.get()));
-                state_queue.push_back(std::make_unique<enqueue_dispatch_config_state>(
-                    prof_config->id, std::move(_pkt)));
-            }
-        }
-    });
-
-    info->packet_return_map.wlock([&](auto& data) { data.emplace(ret_pkt.get(), prof_config); });
     if(!ret_pkt->empty)
     {
         auto* spm_pkt = dynamic_cast<hsa::SPMPacket*>(ret_pkt.get());
-        
+
         // ROCP_FATAL_IF(pkt == nullptr)  << "NULL Packet returned from get spm packet: ";
         spm_pkt->clear();
         spm_pkt->populate_before();
@@ -177,7 +145,8 @@ pre_kernel_call(const context::context*                                         
     }
 
     spm_get_controller()._callback_data.wlock([&](auto& map) {
-            map[CHECK_NOTNULL(queue.get_agent().get_rocp_agent())->id.handle].push_back(std::move(callback_data));
+        map[CHECK_NOTNULL(queue.get_agent().get_rocp_agent())->id.handle].push_back(
+            std::move(callback_data));
     });
     return {std::move(ret_pkt), true};
 }
@@ -190,47 +159,38 @@ pre_kernel_call(const context::context*                                         
  * Puts the aql packet into config's packets cache for re-use
  */
 void
-post_kernel_call(const context::context*                           ctx,
-                 const std::shared_ptr<spm_counter_callback_info>& info,
-                 std::shared_ptr<hsa::Queue::queue_info_session_t>& /*ptr_session*/,
-                 inst_pkt_t& pkts,
+post_kernel_call(const context::context*                            ctx,
+                 const std::shared_ptr<spm_counter_callback_info>&  info,
+                 std::shared_ptr<hsa::Queue::queue_info_session_t>& ptr_session,
+                 inst_pkt_t&                                        pkts,
                  kernel_dispatch::profiling_time /*dispatch_time*/)
 {
     CHECK(info && ctx);
-    std::shared_ptr<spm_counter_config> prof_config;
+
     // Get the Profile Config
     std::unique_ptr<rocprofiler::hsa::AQLPacket> ret_pkt = nullptr;
-    info->packet_return_map.wlock([&](auto& data) {
-        for(auto& [aql_pkt, _] : pkts)
+    std::unique_ptr<spm_callback_data> current_dispatch = nullptr;
+
+   
+    for(auto& [aql_pkt, _] : pkts)
+    {   
+        ret_pkt = std::move(aql_pkt); 
+        if(ret_pkt && !ret_pkt->empty)
         {
-            const auto* profile = rocprofiler::common::get_val(data, aql_pkt.get());
-           
-            if(profile)
-            {
-                prof_config = *profile;
-                auto* spm_pkt = dynamic_cast<hsa::SPMPacket*>(aql_pkt.get());
-                spm_pkt->sym.spm_drain_counters_fn(spm_pkt->handle);
-                data.erase(aql_pkt.get());
-                ret_pkt = std::move(aql_pkt);
-                return;
-            }
+            auto* spm_pkt = dynamic_cast<hsa::SPMPacket*>(ret_pkt.get());
+            spm_pkt->sym.spm_drain_counters_fn(spm_pkt->handle);
         }
-      
-    });
-
-    if(ret_pkt)
-    {
-      spm_get_controller()._callback_data.wlock([&](auto& map)
-      {    
-        auto* spm_pkt = dynamic_cast<hsa::SPMPacket*>(ret_pkt.get());
-        auto agent_id = rocprofiler::agent::get_rocprofiler_agent(spm_pkt->hsa_agent)->id;
-        auto it = map.find(agent_id.handle);
-        auto current_dispatch = std::move(it->second.front());
-        it->second.pop_front();
-      });
     }
-}
 
+     spm_get_controller()._callback_data.wlock([&](auto& map) {
+        auto it =
+            map.find(CHECK_NOTNULL(ptr_session->queue.get_agent().get_rocp_agent())->id.handle);
+        ROCP_FATAL_IF(it == map.end()) << "callback data not available in post kernel call";
+        current_dispatch = std::move( it->second.front());
+        it->second.pop_front();
+    });
+    
+}
 
 }  // namespace spm
 }  // namespace rocprofiler

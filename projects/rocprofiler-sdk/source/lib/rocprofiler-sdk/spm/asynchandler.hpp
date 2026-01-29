@@ -29,9 +29,11 @@ namespace rocprofiler
 {
 namespace spm
 {
-    bool is_spm_explicitly_enabled();
+bool
+is_spm_explicitly_enabled();
 
-    bool asynchandler(rocprofiler_agent_id_t agent_id);
+bool
+asynchandler(rocprofiler_agent_id_t agent_id);
 
-} // rocprofiler
-}// spm
+}  // namespace spm
+}  // namespace rocprofiler

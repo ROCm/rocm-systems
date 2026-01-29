@@ -57,8 +57,7 @@ namespace rocprofiler
 {
 namespace spm
 {
-
-    /**
+/**
  * Adds a counter collection profile to our global cache.
  * Note: these profiles can be used across multiple contexts and are independent of the context.
  * Note: these profiles are per agent
@@ -124,6 +123,53 @@ spm_get_controller()
 {
     static auto* controller = rocprofiler::common::static_object<SpmCounterController>::construct();
     return *CHECK_NOTNULL(controller);
+}
+
+rocprofiler_status_t
+spm_counter_callback_info::get_spm_packet(std::unique_ptr<rocprofiler::hsa::AQLPacket>& ret_pkt,
+                                          std::shared_ptr<spm_counter_config>&          profile,
+                                          bool* is_config_switch)
+{
+    spm_get_controller()._agent_state_map.wlock([&](auto& map) {
+        auto it = map.find(profile->agent->id.handle);
+        if(it == map.end())
+        {
+            std::unique_ptr<rocprofiler::hsa::SPMPacket> _pkt = nullptr;
+            *is_config_switch                                 = true;
+            _pkt = profile->pkt_generator->construct_packet(
+                CHECK_NOTNULL(hsa::get_queue_controller())->get_core_table(),
+                CHECK_NOTNULL(hsa::get_queue_controller())->get_ext_table());
+            ret_pkt = std::make_unique<rocprofiler::hsa::SPMPacket>(*(_pkt.get()));
+            map[profile->agent->id.handle].push_back(
+                std::make_unique<enqueue_dispatch_config_state>(profile->id, std::move(_pkt)));
+        }
+        else
+        {
+            auto& state_queue = it->second;
+            ROCP_FATAL_IF(!state_queue.back() || !state_queue.back()->spm_packet) << "Empty spm packet";
+            if(state_queue.back()->config_id.handle == profile->id.handle)
+            {
+                ret_pkt = std::make_unique<rocprofiler::hsa::SPMPacket>(
+                    *(state_queue.back()->spm_packet.get()));
+            }
+            else
+            {
+                std::unique_ptr<rocprofiler::hsa::SPMPacket> _pkt = nullptr;
+                *is_config_switch                                 = true;
+                _pkt = profile->pkt_generator->construct_packet(
+                    CHECK_NOTNULL(hsa::get_queue_controller())->get_core_table(),
+                    CHECK_NOTNULL(hsa::get_queue_controller())->get_ext_table());
+                ret_pkt = std::make_unique<rocprofiler::hsa::SPMPacket>(*(_pkt.get()));
+                state_queue.push_back(
+                    std::make_unique<enqueue_dispatch_config_state>(profile->id, std::move(_pkt)));
+            }
+        }
+    });
+
+    ROCP_FATAL_IF(!ret_pkt) << "SPM packet null in get spm packet";
+
+    ret_pkt->clear();
+    return ROCPROFILER_STATUS_SUCCESS;
 }
 
 /**

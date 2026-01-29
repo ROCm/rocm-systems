@@ -66,16 +66,16 @@ struct spm_counter_config
     const rocprofiler_agent_t*    agent = nullptr;
     std::vector<counters::Metric> metrics{};
 
-    uint64_t sample_freq = 0;
-    uint64_t buffer_size = 0;
-    uint64_t timeout     = 0;
+    uint64_t sample_freq = 0.5;
+    uint64_t buffer_size = 32768;
+    uint64_t timeout     = 50;
 
     rocprofiler_spm_counter_config_id_t id{.handle = 0};
     // Packet generator to create AQL packets for insertion
     std::unique_ptr<rocprofiler::aql::SPMPacketConstruct> pkt_generator{nullptr};
     // A packet cache of AQL packets. This allows reuse of AQL packets (preventing costly
     // allocation of new packets/destruction).
-    
+
     bool valid() const
     {
         return sample_freq != 0 && buffer_size != 0 && timeout != 0 && !metrics.empty();
@@ -113,11 +113,10 @@ struct spm_counter_callback_info
     rocprofiler_spm_dispatch_counting_record_cb_t record_callback;
     void*                                         record_callback_args;
     static rocprofiler_status_t setup_spm_counter_config(std::shared_ptr<spm_counter_config>&);
-
-    common::Synchronized<
-        std::unordered_map<rocprofiler::hsa::AQLPacket*, std::shared_ptr<spm_counter_config>>>
-                                packet_return_map{};
     
+    rocprofiler_status_t get_spm_packet(std::unique_ptr<rocprofiler::hsa::AQLPacket>&,
+                                        std::shared_ptr<spm_counter_config>&,
+                                        bool* is_config_switch);
 };
 
 struct enqueue_dispatch_config_state
@@ -150,17 +149,18 @@ public:
     std::shared_ptr<spm_counter_config> get_profile_cfg(rocprofiler_spm_counter_config_id_t id);
 
     void state_map_fini();
-    
+
     common::Synchronized<
         std::unordered_map<uint64_t, std::deque<std::unique_ptr<enqueue_dispatch_config_state>>>>
         _agent_state_map;
-    common::Synchronized<std::unordered_map<uint64_t, std::deque<std::unique_ptr<spm_callback_data>>>>
-      _callback_data;
+    common::Synchronized<
+        std::unordered_map<uint64_t, std::deque<std::unique_ptr<spm_callback_data>>>>
+        _callback_data;
 
 private:
     // Cache to contain the map of config id handle to spm counter config
     common::Synchronized<std::unordered_map<uint64_t, std::shared_ptr<spm_counter_config>>>
-                                                           _configs;
+        _configs;
 };
 
 SpmCounterController&

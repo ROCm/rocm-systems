@@ -86,6 +86,7 @@ decode_cb(uint64_t timestamp, uint64_t value, uint64_t index, int shader_engine,
 void
 aql_data_callback(size_t buffer_id, void* data, size_t data_size, int flags, void* userdata)
 {
+    
     spm::counter_vec   counters{};
     hsa::SPMPacket*    spm_packet    = nullptr;
     spm_callback_data* callback_data = nullptr;
@@ -93,14 +94,14 @@ aql_data_callback(size_t buffer_id, void* data, size_t data_size, int flags, voi
     auto agent_id = rocprofiler::agent::get_rocprofiler_agent(
                         *CHECK_NOTNULL(static_cast<hsa_agent_t*>(userdata)))
                         ->id;
-    
+
     spm_get_controller()._agent_state_map.rlock([&](const auto& map) {
         auto it    = map.find(agent_id.handle);
         spm_packet = it->second.front()->spm_packet.get();
     });
 
     spm_get_controller()._callback_data.wlock([&](auto& map) {
-        auto it = map.find(agent_id.handle);
+        auto it       = map.find(agent_id.handle);
         callback_data = it->second.front().get();
     });
 
@@ -170,6 +171,7 @@ aql_data_callback(size_t buffer_id, void* data, size_t data_size, int flags, voi
 
                              callback_data->user_data,
                              callback_data->record_callback_args);
+    
 }
 
 }  // namespace spm
