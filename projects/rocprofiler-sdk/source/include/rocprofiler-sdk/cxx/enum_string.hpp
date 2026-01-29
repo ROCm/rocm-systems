@@ -30,6 +30,7 @@
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/hsa.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <string_view>
 #include <type_traits>
@@ -64,7 +65,7 @@
                 return Idx;                                                                        \
         }                                                                                          \
         static_assert(!IS_OPERATION ||                                                             \
-                          (END_VALUE <= ::rocprofiler::sdk::details::context_domain_ops_padding),  \
+                          (end <= ::rocprofiler::sdk::details::context_domain_ops_padding),        \
                       "operation enum range exceeds domain last value");                           \
     };
 
@@ -77,9 +78,9 @@ namespace details
 // Number of bits to reserve all op codes. This is set here so we can apply static_asserts to ensure
 // that any operation enumeration does not exceed this value. This value is used in
 // "lib/rocprofiler-sdk/context/domain.hpp" to create a bitset for the enabled operations.
-constexpr auto context_domain_ops_padding = 1024;
-constexpr auto is_operation               = true;
-constexpr auto not_operation              = false;
+constexpr size_t context_domain_ops_padding = 1024;
+constexpr auto   is_operation               = true;
+constexpr auto   not_operation              = false;
 
 template <typename EnumT, size_t Value>
 struct rocprofiler_enum_label

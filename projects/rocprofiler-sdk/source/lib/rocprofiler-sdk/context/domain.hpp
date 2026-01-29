@@ -39,7 +39,7 @@ namespace context
 // NOTE: HIP runtime API has 515+ operations as of ROCm 7.x, must be larger than max op count.
 // NOTE: This is set in <rocprofiler-sdk/cxx/enum_string.hpp> so we can apply static_asserts to
 // ensure that any operation enumeration does not exceed this value.
-constexpr size_t domain_ops_padding = ::rocprofiler::sdk::details::context_domain_ops_padding;
+constexpr auto domain_ops_padding = ::rocprofiler::sdk::details::context_domain_ops_padding;
 
 template <typename Tp>
 struct domain_info;
