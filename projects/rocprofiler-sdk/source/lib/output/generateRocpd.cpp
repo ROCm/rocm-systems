@@ -1500,54 +1500,33 @@ write_rocpd(
 
         std::unordered_map<int64_t, std::pair<std::string, std::string>> instruction_cache;
 
-        auto prepare_stmt = [&](std::string_view sql) {
-            sqlite3_stmt* stmt = nullptr;
-            SQLITE3_CHECK(sqlite3_prepare_v2(conn, std::string{sql}.c_str(), -1, &stmt, nullptr));
-            return stmt;
+        constexpr size_t k_sample_batch_size   = 1024;
+        constexpr size_t k_pc_field_batch_size = 4096;
+        auto             sample_value_rows     = std::vector<std::string>{};
+        auto             pc_field_value_rows   = std::vector<std::string>{};
+
+        sample_value_rows.reserve(k_sample_batch_size);
+        pc_field_value_rows.reserve(k_pc_field_batch_size);
+
+        auto flush_sample_batch = [&]() {
+            if(sample_value_rows.empty()) return;
+            auto stmt =
+                fmt::format("INSERT INTO {} (track_id, timestamp, event_id) VALUES {};",
+                            replace_uuid("rocpd_sample{{uuid}}"),
+                            fmt::join(sample_value_rows.begin(), sample_value_rows.end(), ", "));
+            execute_raw_sql_statements(conn, stmt);
+            sample_value_rows.clear();
         };
 
-        auto bind_value = [&](sqlite3_stmt* stmt, int idx, auto&& value) {
-            using value_t = std::decay_t<decltype(value)>;
-            if constexpr(common::mpl::is_string_type<value_t>::value)
-            {
-                auto sv = std::string_view{value};
-                SQLITE3_CHECK(sqlite3_bind_text(
-                    stmt, idx, sv.data(), static_cast<int>(sv.size()), SQLITE_TRANSIENT));
-            }
-            else if constexpr(std::is_same_v<value_t, bool>)
-            {
-                SQLITE3_CHECK(sqlite3_bind_int64(stmt, idx, value ? 1 : 0));
-            }
-            else if constexpr(std::is_integral_v<value_t>)
-            {
-                SQLITE3_CHECK(sqlite3_bind_int64(stmt, idx, static_cast<int64_t>(value)));
-            }
-            else if constexpr(std::is_floating_point_v<value_t>)
-            {
-                SQLITE3_CHECK(sqlite3_bind_double(stmt, idx, static_cast<double>(value)));
-            }
-            else
-            {
-                auto tmp = fmt::format("{}", value);
-                SQLITE3_CHECK(sqlite3_bind_text(
-                    stmt, idx, tmp.c_str(), static_cast<int>(tmp.size()), SQLITE_TRANSIENT));
-            }
+        auto flush_pc_field_batch = [&]() {
+            if(pc_field_value_rows.empty()) return;
+            auto stmt = fmt::format(
+                "INSERT INTO {} (event_id, field_id, value) VALUES {};",
+                replace_uuid("rocpd_pc_sample_event{{uuid}}"),
+                fmt::join(pc_field_value_rows.begin(), pc_field_value_rows.end(), ", "));
+            execute_raw_sql_statements(conn, stmt);
+            pc_field_value_rows.clear();
         };
-
-        auto step_reset = [&](sqlite3_stmt* stmt) {
-            auto rc = sqlite3_step(stmt);
-            ROCP_FATAL_IF(rc != SQLITE_DONE) << sqlite3_errmsg(conn);
-            SQLITE3_CHECK(sqlite3_reset(stmt));
-            SQLITE3_CHECK(sqlite3_clear_bindings(stmt));
-        };
-
-        auto sample_stmt = prepare_stmt(
-            fmt::format("INSERT INTO {} (track_id, timestamp, event_id) VALUES (?1, ?2, ?3);",
-                        replace_uuid("rocpd_sample{{uuid}}")));
-
-        auto pc_field_stmt = prepare_stmt(
-            fmt::format("INSERT INTO {} (event_id, field_id, value) VALUES (?1, ?2, ?3);",
-                        replace_uuid("rocpd_pc_sample_event{{uuid}}")));
 
         // Function to register a PC sampling field in rocpd_info_pc_sample
         auto register_pc_sample_field = [&](const std::string& field_name,
@@ -1689,11 +1668,10 @@ write_rocpd(
                 {
                     if(!force_insert && std::string_view{value}.empty()) return;
                 }
-
-                bind_value(pc_field_stmt, 1, event_id);
-                bind_value(pc_field_stmt, 2, field_id);
-                bind_value(pc_field_stmt, 3, value);
-                step_reset(pc_field_stmt);
+                auto value_literal = insert_value("value", value, allow_empty_string{}).value;
+                pc_field_value_rows.emplace_back(
+                    fmt::format("({}, {}, {})", event_id, field_id, value_literal));
+                if(pc_field_value_rows.size() >= k_pc_field_batch_size) flush_pc_field_batch();
             };
 
         // Process PC sampling records
@@ -1764,10 +1742,9 @@ write_rocpd(
                                                 R"({})");
 
                 // Create sample record
-                bind_value(sample_stmt, 1, pc_track_id);
-                bind_value(sample_stmt, 2, record.timestamp);
-                bind_value(sample_stmt, 3, evt_id);
-                step_reset(sample_stmt);
+                sample_value_rows.emplace_back(
+                    fmt::format("({}, {}, {})", pc_track_id, record.timestamp, evt_id));
+                if(sample_value_rows.size() >= k_sample_batch_size) flush_sample_batch();
 
                 // Add common fields as PC sample events - only skip empty strings
                 add_pc_sample_value_id(evt_id, field_sampling_method, sampling_method);
@@ -1946,8 +1923,8 @@ write_rocpd(
             }
         }
 
-        sqlite3_finalize(sample_stmt);
-        sqlite3_finalize(pc_field_stmt);
+        flush_sample_batch();
+        flush_pc_field_batch();
     };
 
     insert_node_data();
