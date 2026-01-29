@@ -59,6 +59,8 @@ class rdc_status_t(Enum):
      RDC_ST_NO_DATA = 13
      RDC_ST_PERM_ERROR = 14
      RDC_ST_CORRUPTED_EEPROM = 15
+     RDC_ST_GROUP_NOT_FOUND = 16
+     RDC_ST_FLDGROUP_NOT_FOUND = 17
      RDC_ST_UNKNOWN_ERROR = 4294967295
 
 class rdc_operation_mode_t(c_int):
