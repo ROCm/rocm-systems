@@ -943,7 +943,7 @@ typedef struct {
     uint64_t device_id;                //!< The device ID of a GPU
     uint32_t rev_id;                   //!< The revision ID of a GPU
     char asic_serial[AMDSMI_MAX_STRING_LENGTH];
-    uint32_t oam_id;                   //!< 0xFFFFFFFF if not supported
+    uint32_t oam_id;                   //!< Corresponds to socket number, 0xFFFFFFFF if not supported
     uint32_t num_of_compute_units;     //!< 0xFFFFFFFF if not supported
     uint64_t target_graphics_version;  //!< 0xFFFFFFFFFFFFFFFF if not supported
     uint32_t subsystem_id;             //!> The subsystem ID
@@ -2165,6 +2165,7 @@ typedef struct {
 
 /**
  * @brief This structure contains information specific to a process.
+ * Sum of the process memory is not expected to be the total memory usage.
  *
  * @cond @tag{gpu_bm_linux} @endcond
  */
@@ -6437,6 +6438,9 @@ amdsmi_get_gpu_driver_info(amdsmi_processor_handle processor_handle, amdsmi_driv
  *           the vendor ID, the subvendor ID, the device ID,
  *           the revision ID and the serial number.
  *
+ *  @note The processor_handle that contains amdsmi_asic_info_t member oam_id = 0
+ *        corresponds to the socket that contains baseboard information.
+ *
  *  @param[in] processor_handle Device which to query
  *
  *  @param[out] info Reference to static asic information structure.
@@ -6788,7 +6792,7 @@ amdsmi_get_violation_status(amdsmi_processor_handle processor_handle,
 /**
  *  @brief Returns the list of process information running on a given GPU.
  *  If pdh.dll is not present on the system, this API returns
- *  AMDSMI_STATUS_NOT_SUPPORTED.
+ *  AMDSMI_STATUS_NOT_SUPPORTED. Sum of the process memory is not expected to be the total memory usage.
  *
  *  @ingroup tagProcessInfo
  *

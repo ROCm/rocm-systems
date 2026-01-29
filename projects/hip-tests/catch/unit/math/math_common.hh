@@ -187,7 +187,9 @@ template <typename T, typename... Ts> class MathTest {
     std::stringstream ss;
     ss << "Input value(s): " << std::scientific
        << std::setprecision(std::numeric_limits<T>::max_digits10 - 1);
-    ((ss << " " << args), ...) << "\n" << actual_val << " ";
+    ((ss << " " << args), ...) << "\n"
+                               << "Output value: " << actual_val << "\n"
+                               << "Condition failed: ";
 
     return ss.str();
   }

@@ -14,14 +14,15 @@ RUN yum install -y python39 python39-devel && \
     python3 get-pip.py
 
 # Should be absolute path to where the standalone binary will extract its contents
-ENV ROCPROF_COMPUTE_BINARY_EXTRACT_DIR=/tmp
+ARG STANDALONEBINARY_EXTRACT_DIR=/tmp
+ENV STANDALONEBINARY_EXTRACT_DIR=${STANDALONEBINARY_EXTRACT_DIR}
 
 CMD ["/bin/bash", "-c", "\
     python3 -m pip install -r requirements.txt \
-    && python3 -m pip install nuitka patchelf \
+    && python3 -m pip install nuitka==2.6 patchelf \
     && git rev-parse HEAD > VERSION.sha \
     && python3 -m nuitka --mode=onefile --no-deployment-flag=self-execution \
-        --product-name=${ROCPROF_COMPUTE_BINARY_EXTRACT_DIR} \
+        --product-name=${STANDALONEBINARY_EXTRACT_DIR} \
         --onefile-tempdir-spec=/{PRODUCT}/rocprof_compute_standalonebinary_{PID} \
         --enable-plugin=no-qt \
         --include-data-files=VERSION*=./ \

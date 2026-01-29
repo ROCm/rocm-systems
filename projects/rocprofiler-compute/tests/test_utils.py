@@ -32,6 +32,7 @@ import logging
 import os
 import re
 import shutil
+import subprocess
 import tempfile
 from pathlib import Path
 from unittest import mock
@@ -40,6 +41,15 @@ import pandas as pd
 import pytest
 
 import utils.utils as utils
+
+SUPPORTED_ARCHS = {
+    "gfx908": {"mi100": ["MI100"]},
+    "gfx90a": {"mi200": ["MI210", "MI250", "MI250X"]},
+    "gfx940": {"mi300": ["MI300A_A0"]},
+    "gfx941": {"mi300": ["MI300X_A0"]},
+    "gfx942": {"mi300": ["MI300A_A1", "MI300X_A1"]},
+    "gfx950": {"mi350": ["MI350"]},
+}
 
 
 class MockMSpec:
@@ -209,8 +219,8 @@ def check_csv_files(output_dir, num_devices, num_kernels):
                 assert len(file_dict[file].index) >= num_devices
             elif "sysinfo" not in file and "ps_file" not in file:
                 assert len(file_dict[file].index) >= num_kernels
-        elif file.endswith(".pdf"):
-            file_dict[file] = "pdf"
+        elif file.endswith(".html"):
+            file_dict[file] = "html"
         elif file.endswith(".json"):
             file_dict[file] = "json"
     return file_dict
@@ -226,6 +236,27 @@ def get_num_pmc_file(output_dir):
     return len([
         f for f in perfmon_path.iterdir() if f.is_file() and f.suffix == ".txt"
     ])
+
+
+def gpu_soc():
+    # Parse arch details from rocminfo
+    rocminfo = str(
+        # decode with utf-8 to account for rocm-smi changes in latest rocm
+        subprocess.run(
+            ["rocminfo"], stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        ).stdout.decode("utf-8")
+    )
+    rocminfo = rocminfo.split("\n")
+    soc_regex = re.compile(r"^\s*Name\s*:\s+ ([a-zA-Z0-9]+)\s*$", re.MULTILINE)
+    devices = list(filter(soc_regex.match, rocminfo))
+    gpu_arch = devices[0].split()[1]
+
+    if not gpu_arch in SUPPORTED_ARCHS.keys():
+        return None
+
+    gpu_model = list(SUPPORTED_ARCHS[gpu_arch].keys())[0].upper()
+
+    return gpu_model
 
 
 # =============================================================================
@@ -7677,8 +7708,8 @@ def test_amdsmi_get_gpu_memory_partition():
 # =============================================================================
 
 
-def test_merge_counters_iteration_multiplex():
-    """Test merge_counters_iteration_multiplex with sample DataFrame."""
+def test_impute_counters_iteration_multiplex():
+    """Test impute_counters_iteration_multiplex with sample DataFrame."""
     import pandas as pd
 
     data = {
@@ -7695,24 +7726,33 @@ def test_merge_counters_iteration_multiplex():
         ("file1", "Start_Timestamp"): [1000, 1200, 1400],
         ("file1", "End_Timestamp"): [1500, 1700, 1900],
         ("file1", "Kernel_ID"): [1, 1, 1],
-        ("file1", "Counter1"): [100, 200, 300],
-        ("file1", "Counter2"): [400, 500, 600],
+        ("file1", "Counter1"): [100, None, None],
+        ("file1", "Counter2"): [None, 500, 300],
     }
 
     df = pd.DataFrame(data)
     df.columns = pd.MultiIndex.from_tuples(df.columns)
 
     # For "kernel" policy
-    result = utils.merge_counters_iteration_multiplex(df, "kernel")
-
+    result = utils.impute_counters_iteration_multiplex(df, "kernel")
+    # Sort by Dispatch_ID to ensure consistent order
+    result = result.sort_values(by=("file1", "Dispatch_ID"))
     assert isinstance(result, pd.DataFrame)
-    assert len(result) == 1  # Only one unique kernel_name 'kernel_a'
+    assert len(result) == 3  # Ensure same number of rows
+    # Assert Counter1 and Counter2 imputed for first two dispatches
+    assert result[("file1", "Counter2")].iloc[0] == 500
+    assert result[("file1", "Counter1")].iloc[1] == 100
 
     # For "kernel_launch_params" policy
-    result = utils.merge_counters_iteration_multiplex(df, "kernel_launch_params")
+    result = utils.impute_counters_iteration_multiplex(df, "kernel_launch_params")
+    # Sort by Dispatch_ID to ensure consistent order
+    result = result.sort_values(by=("file1", "Dispatch_ID"))
+    # Assert Counter1 and Counter2 imputed for first and last dispatches
+    assert result[("file1", "Counter2")].iloc[0] == 300
+    assert result[("file1", "Counter1")].iloc[2] == 100
 
     assert isinstance(result, pd.DataFrame)
-    assert len(result) == 2
+    assert len(result) == 3  # Ensure same number of rows
 
     data = {
         ("file1", "Dispatch_ID"): [1, 2, 3],
@@ -7728,17 +7768,23 @@ def test_merge_counters_iteration_multiplex():
         ("file1", "Start_Timestamp"): [1000, 1200, 1400],
         ("file1", "End_Timestamp"): [1500, 1700, 1900],
         ("file1", "Kernel_ID"): [1, 1, 1],
-        ("file1", "Counter1"): [100, 200, 300],
-        ("file1", "Counter2"): [400, 500, 600],
+        ("file1", "Counter1"): [100, None, 300],
+        ("file1", "Counter2"): [None, 500, None],
     }
 
     df = pd.DataFrame(data)
     df.columns = pd.MultiIndex.from_tuples(df.columns)
 
-    result = utils.merge_counters_iteration_multiplex(df, "kernel_launch_params")
+    result = utils.impute_counters_iteration_multiplex(df, "kernel_launch_params")
+    # Sort by Dispatch_ID to ensure consistent order
+    result = result.sort_values(by=("file1", "Dispatch_ID"))
 
     assert isinstance(result, pd.DataFrame)
-    assert len(result) == 3
+    assert len(result) == 3  # Ensure same number of rows
+    # No imputation possible
+    assert pd.isna(result[("file1", "Counter2")].iloc[0])
+    assert pd.isna(result[("file1", "Counter1")].iloc[1])
+    assert pd.isna(result[("file1", "Counter2")].iloc[2])
 
     # Test multi_kernel
     data = {
@@ -7755,24 +7801,35 @@ def test_merge_counters_iteration_multiplex():
         ("file1", "Start_Timestamp"): [1000, 1200, 1400],
         ("file1", "End_Timestamp"): [1500, 1700, 1900],
         ("file1", "Kernel_ID"): [1, 1, 1],
-        ("file1", "Counter1"): [100, 200, 300],
-        ("file1", "Counter2"): [400, 500, 600],
+        ("file1", "Counter1"): [100, None, None],
+        ("file1", "Counter2"): [None, 500, 300],
     }
 
     df = pd.DataFrame(data)
     df.columns = pd.MultiIndex.from_tuples(df.columns)
 
     # For "kernel" policy
-    result = utils.merge_counters_iteration_multiplex(df, "kernel")
+    result = utils.impute_counters_iteration_multiplex(df, "kernel")
+    # Sort by Dispatch_ID to ensure consistent order
+    result = result.sort_values(by=("file1", "Dispatch_ID"))
+    # Assert Counter1 and Counter2 imputed for first and last dispatches
+    assert result[("file1", "Counter2")].iloc[0] == 300
+    assert result[("file1", "Counter1")].iloc[2] == 100
 
     assert isinstance(result, pd.DataFrame)
-    assert len(result) == 2
+    assert len(result) == 3  # Ensure same number of rows
 
     # For "kernel_launch_params" policy
-    result = utils.merge_counters_iteration_multiplex(df, "kernel_launch_params")
+    result = utils.impute_counters_iteration_multiplex(df, "kernel_launch_params")
+    # Sort by Dispatch_ID to ensure consistent order
+    result = result.sort_values(by=("file1", "Dispatch_ID"))
 
     assert isinstance(result, pd.DataFrame)
-    assert len(result) == 3
+    assert len(result) == 3  # Ensure same number of rows
+    # No imputation possible
+    assert pd.isna(result[("file1", "Counter2")].iloc[0])
+    assert pd.isna(result[("file1", "Counter1")].iloc[1])
+    assert pd.isna(result[("file1", "Counter1")].iloc[2])
 
 
 # =============================================================================
@@ -7818,3 +7875,130 @@ def test_validate_roofline_csv_invalid_inconsistent_columns():
         assert is_valid is False
         assert "Inconsistent row length" in error_msg
         assert "row 2" in error_msg
+
+
+# =============================================================================
+# TESTS FOR NOISE_CLAMP: Multi-Pass Profiling Variance Handling
+# =============================================================================
+
+
+@pytest.mark.noise_clamp
+def test_noise_clamp_clamping_behavior():
+    """Core behavior: positives unchanged, negatives clamped to 0."""
+    import numpy as np
+
+    from utils.parser import to_noise_clamp
+
+    # Scalar: positive unchanged
+    assert to_noise_clamp(1000.0, 100000.0) == 1000.0
+    # Scalar: negative clamped
+    assert to_noise_clamp(-100.0, 1000000.0) == 0.0
+
+    # Series: mixed values
+    diff = pd.Series([100.0, -50.0, 200.0, -100.0])
+    ref = pd.Series([1e6, 1e6, 1e6, 1e6])
+    result = to_noise_clamp(diff, ref)
+    pd.testing.assert_series_equal(result, pd.Series([100.0, 0.0, 200.0, 0.0]))
+
+    # NumPy array
+    diff_np = np.array([100.0, -50.0])
+    ref_np = np.array([1e6, 1e6])
+    result_np = to_noise_clamp(diff_np, ref_np)
+    np.testing.assert_array_equal(result_np, np.array([100.0, 0.0]))
+
+
+@pytest.mark.noise_clamp
+def test_noise_clamp_zero_reference():
+    """Edge case: zero reference should not cause division by zero."""
+    from utils.parser import to_noise_clamp
+
+    assert to_noise_clamp(-100.0, 0.0) == 0.0
+    result = to_noise_clamp(pd.Series([-100.0]), pd.Series([0.0]))
+    assert result.iloc[0] == 0.0
+
+
+@pytest.mark.noise_clamp
+def test_noise_clamp_warning_above_threshold():
+    """Warning recorded when relative error >= 1%."""
+    from utils.parser import (
+        clear_noise_clamp_warnings,
+        get_noise_clamp_warnings,
+        to_noise_clamp,
+    )
+
+    clear_noise_clamp_warnings()
+
+    # 2% error (above 1% threshold) - should record
+    to_noise_clamp(pd.Series([-20000.0]), pd.Series([1000000.0]))
+
+    stats = get_noise_clamp_warnings()
+    assert stats["count"] == 1
+    assert stats["max_rel"] >= 0.01
+
+
+@pytest.mark.noise_clamp
+def test_noise_clamp_no_warning_below_threshold():
+    """No warning when relative error < 1%."""
+    from utils.parser import (
+        clear_noise_clamp_warnings,
+        get_noise_clamp_warnings,
+        to_noise_clamp,
+    )
+
+    clear_noise_clamp_warnings()
+
+    # 0.5% error (below 1% threshold) - still clamped, no warning
+    result = to_noise_clamp(pd.Series([-5000.0]), pd.Series([1000000.0]))
+    assert result.iloc[0] == 0.0
+    assert get_noise_clamp_warnings()["count"] == 0
+
+
+@pytest.mark.noise_clamp
+def test_noise_clamp_empty_input():
+    """Empty inputs should return empty without error."""
+    from utils.parser import to_noise_clamp
+
+    result = to_noise_clamp(pd.Series([], dtype=float), pd.Series([], dtype=float))
+    assert len(result) == 0
+
+
+@pytest.mark.noise_clamp
+def test_noise_clamp_threshold_boundary():
+    """Exactly 1% error should trigger warning (>= not >)."""
+    from utils.parser import (
+        clear_noise_clamp_warnings,
+        get_noise_clamp_warnings,
+        to_noise_clamp,
+    )
+
+    clear_noise_clamp_warnings()
+
+    # Exactly 1% error: -10000 / 1000000 = 0.01
+    to_noise_clamp(pd.Series([-10000.0]), pd.Series([1000000.0]))
+    assert get_noise_clamp_warnings()["count"] == 1
+
+
+@pytest.mark.noise_clamp
+def test_noise_clamper_instance_isolation():
+    """Separate NoiseClamper instances should have independent state."""
+    import numpy as np
+
+    from utils.parser import NoiseClamper
+
+    clamper1 = NoiseClamper()
+    clamper2 = NoiseClamper()
+
+    clamper1.clamp(pd.Series([-20000.0]), pd.Series([1000000.0]))
+
+    assert clamper1.get_stats()["count"] == 1
+    assert clamper2.get_stats()["count"] == 0
+
+    clamper1.clear()
+    assert clamper1.get_stats()["count"] == 0
+    assert clamper2.get_stats()["count"] == 0
+
+    clamper1.clamp(np.array([-50000.0]), np.array([1000000.0]))
+    clamper2.clamp(np.array([-30000.0, -40000.0]), np.array([1000000.0, 1000000.0]))
+
+    assert clamper1.get_stats()["count"] == 1
+    assert clamper2.get_stats()["count"] == 2

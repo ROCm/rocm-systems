@@ -1,24 +1,5 @@
-# MIT License
-#
-# Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
 cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
 
@@ -108,11 +89,21 @@ if("${CMAKE_BUILD_TYPE}" MATCHES "Release")
     target_compile_options(roctx PRIVATE -g1)
 endif()
 
+# Specify GPU architectures to compile for
+foreach(arch IN LISTS ROCPROFSYS_GFX_TARGETS)
+    target_compile_options(roctx PRIVATE --offload-arch=${arch})
+    target_link_options(roctx PUBLIC --offload-arch=${arch})
+endforeach()
+
 if(NOT CMAKE_CXX_COMPILER_IS_HIPCC AND HIPCC_EXECUTABLE)
     # defined in MacroUtilities.cmake
     rocprofiler_systems_custom_compilation(COMPILER ${HIPCC_EXECUTABLE} TARGET roctx)
 endif()
 
-if(ROCPROFSYS_INSTALL_EXAMPLES)
-    install(TARGETS roctx DESTINATION bin COMPONENT rocprofiler-systems-examples)
+if(ROCPROFSYS_INSTALL_EXAMPLES AND TARGET roctx)
+    install(
+        TARGETS roctx
+        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples
+        COMPONENT rocprofiler-systems-examples
+    )
 endif()

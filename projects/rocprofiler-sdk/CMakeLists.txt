@@ -121,6 +121,7 @@ add_subdirectory(source)
 include(rocprofiler_config_install)
 include(rocprofiler_config_install_roctx)
 include(rocprofiler_config_install_rocpd)
+include(rocprofiler_config_install_rocattach)
 include(rocprofiler_config_install_tests)
 
 if(ROCPROFILER_BUILD_TESTS)

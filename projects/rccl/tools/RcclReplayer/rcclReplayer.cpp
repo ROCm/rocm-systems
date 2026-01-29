@@ -430,7 +430,7 @@ void Replayer::replay()
     // no op or root
     case rrAllToAll:
     {
-      NCCL_CALL(ncclAllToAll(sbuffer, rbuffer, call.count, call.datatype, commMap[call.comm], streams[call.stream].first));
+      NCCL_CALL(ncclAlltoAll(sbuffer, rbuffer, call.count, call.datatype, commMap[call.comm], streams[call.stream].first));
       break;
     }
     case rrAllGather:
@@ -506,7 +506,7 @@ void Replayer::replay()
       log.read((char*)recvcounts.data(), size * sizeof(size_t));
       log.read((char*)rdispls.data(), size * sizeof(size_t));
       
-      NCCL_CALL(ncclAllToAllv(sbuffer, sendcounts.data(), sdispls.data(), rbuffer, recvcounts.data(), rdispls.data(),
+      NCCL_CALL(ncclAlltoAllv(sbuffer, sendcounts.data(), sdispls.data(), rbuffer, recvcounts.data(), rdispls.data(),
                               call.datatype, commMap[call.comm], streams[call.stream].first));
       HIP_CALL(hipStreamSynchronize(streams[call.stream].first)); // TODO: remove
       break;

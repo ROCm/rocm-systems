@@ -398,6 +398,12 @@ hsaKmtGetQueueInfo(
     HsaQueueInfo *QueueInfo	//IN
 );
 
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtQueueRingDoorbell(
+    HSA_QUEUEID QueueId
+);
+
 /**
   Allows an HSA process to set/change the default and alternate memory coherency, before starting to dispatch. 
 */
@@ -1248,10 +1254,10 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtAisReadWriteFile(
 
 /**
  * Check if the HSA KMT Model is enabled
- * 
+ *
  *  Arguments:
  *   @enable (OUT) - true if the HSA KMT Model is enabled, false otherwise
- * 
+ *
  *  Return:
  *   HSAKMT_STATUS_ERROR             - failed
  *   HSAKMT_STATUS_SUCCESS           - successfully complete
@@ -1261,6 +1267,59 @@ HSAKMT_STATUS
 HSAKMTAPI
 hsaKmtModelEnabled(
     bool* enable // OUT
+);
+
+
+/**
+ *  Experimental APIs to abstract DRM calls to thunk
+*/
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtHandleImport(
+    const HsaExternalHandleDesc* ImportDesc,
+    HsaHandleImportResult* ImportResult,
+    HsaHandleImportFlags* Flags
+);
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtMemoryVaMap(
+    HsaMemoryObjectHandle Handle,
+    HSAuint64 offset,
+    HSAuint64 size,
+    HSAuint64 addr,
+    HsaMemoryMapFlags flags
+);
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtMemoryVaUnmap(
+    HsaMemoryObjectHandle Handle,
+    HSAuint64 offset,
+    HSAuint64 size,
+    HSAuint64 addr
+);
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtMemoryCpuMap(
+    HsaMemoryObjectHandle Handle,
+    void** out_cpu_ptr
+);
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtMemHandleFree(
+    HsaMemoryObjectHandle Handle
+);
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtMemoryGetCpuAddr(
+  HsaAMDGPUDeviceHandle DeviceHandle,
+  HsaMemoryObjectHandle MemoryHandle,
+  HSAint32* fd, // OUT
+  HSAuint64* cpu_addr // OUT
 );
 
 #ifdef __cplusplus
