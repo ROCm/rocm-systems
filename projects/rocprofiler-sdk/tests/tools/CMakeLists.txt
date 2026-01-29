@@ -31,6 +31,10 @@ add_library(rocprofiler-sdk-c-tool SHARED)
 target_sources(rocprofiler-sdk-c-tool PRIVATE c-tool.c)
 target_link_libraries(rocprofiler-sdk-c-tool PRIVATE rocprofiler-sdk::rocprofiler-sdk
                                                      rocprofiler-sdk::tests-build-flags)
+# Suppress -Wcpp warning from rccl/rccl.h which emits a #warning when compiled with C
+# compiler This warning is treated as an error with -Werror but is harmless for this C
+# compatibility test
+target_compile_options(rocprofiler-sdk-c-tool PRIVATE -Wno-cpp)
 set_target_properties(
     rocprofiler-sdk-c-tool
     PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib/rocprofiler-sdk"
