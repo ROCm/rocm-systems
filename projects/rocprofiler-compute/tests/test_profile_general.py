@@ -906,7 +906,7 @@ def test_output_directory(binary_handler_profile_rocprof_compute):
                 "app_1",
                 rank,
             )
-            #assert os.path.exists(workload_dir)
+            # assert os.path.exists(workload_dir)
             test_utils.clean_output_dir(config["cleanup"], workload_dir)
             rank_env_vars["PMI_RANK"] = None
             os.chdir("..")
@@ -921,7 +921,7 @@ def test_output_directory(binary_handler_profile_rocprof_compute):
                 "app_1",
                 gpumodel,
             )
-            #assert os.path.exists(workload_dir)
+            # assert os.path.exists(workload_dir)
             test_utils.clean_output_dir(config["cleanup"], workload_dir)
             os.chdir("..")
 
