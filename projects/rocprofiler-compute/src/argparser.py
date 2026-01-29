@@ -748,7 +748,7 @@ Examples:
     analyze_group.add_argument(
         "--torch-operator",
         metavar="",
-        type=int,
+        type=str,
         dest="torch_operator",
         nargs="+",
         action="append",
