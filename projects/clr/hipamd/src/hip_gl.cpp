@@ -41,47 +41,27 @@ static void* associatedGLContext = nullptr;
 
 namespace hip {
 
-// Minimal helper to get current GL context without requiring GLFunctions instance.
-// Uses static local for one-time lazy initialization of function pointer.
-// This is needed to detect GL context switches before glenv is fully initialized.
-static void* getCurrentGLContextDirect() {
+// Helper to get current GL context using existing glenv, returns nullptr if glenv doesn't exist.
+static void* getCurrentGLContext(amd::GLFunctions* glenv) {
+  if (glenv == nullptr) {
+    return nullptr;
+  }
 #ifdef _WIN32
-  static auto wglGetCurrentContextPtr = []() {
-    HMODULE hGL = GetModuleHandleA("opengl32.dll");
-    if (!hGL) hGL = LoadLibraryA("opengl32.dll");
-    return hGL ? reinterpret_cast<void* (WINAPI*)()>(
-                     GetProcAddress(hGL, "wglGetCurrentContext")) : nullptr;
-  }();
-  return wglGetCurrentContextPtr ? wglGetCurrentContextPtr() : nullptr;
+  return glenv->wglGetCurrentContext_();
 #else
-  static auto glXGetCurrentContextPtr = []() {
-    void* libGL = dlopen("libGL.so.1", RTLD_NOW | RTLD_NOLOAD);
-    if (!libGL) libGL = dlopen("libGL.so.1", RTLD_NOW);
-    return libGL ? reinterpret_cast<void* (*)()>(
-                       dlsym(libGL, "glXGetCurrentContext")) : nullptr;
-  }();
-  return glXGetCurrentContextPtr ? glXGetCurrentContextPtr() : nullptr;
+  return glenv->glXGetCurrentContext_();
 #endif
 }
 
-// Minimal helper to get current GL display/DC
-static void* getCurrentGLDisplayDirect() {
+// Helper to get current GL display/DC using existing glenv, returns nullptr if glenv doesn't exist.
+static void* getCurrentGLDisplay(amd::GLFunctions* glenv) {
+  if (glenv == nullptr) {
+    return nullptr;
+  }
 #ifdef _WIN32
-  static auto wglGetCurrentDCPtr = []() {
-    HMODULE hGL = GetModuleHandleA("opengl32.dll");
-    if (!hGL) hGL = LoadLibraryA("opengl32.dll");
-    return hGL ? reinterpret_cast<void* (WINAPI*)()>(
-                     GetProcAddress(hGL, "wglGetCurrentDC")) : nullptr;
-  }();
-  return wglGetCurrentDCPtr ? wglGetCurrentDCPtr() : nullptr;
+  return glenv->wglGetCurrentDC_();
 #else
-  static auto glXGetCurrentDisplayPtr = []() {
-    void* libGL = dlopen("libGL.so.1", RTLD_NOW | RTLD_NOLOAD);
-    if (!libGL) libGL = dlopen("libGL.so.1", RTLD_NOW);
-    return libGL ? reinterpret_cast<void* (*)()>(
-                       dlsym(libGL, "glXGetCurrentDisplay")) : nullptr;
-  }();
-  return glXGetCurrentDisplayPtr ? glXGetCurrentDisplayPtr() : nullptr;
+  return glenv->glXGetCurrentDisplay_();
 #endif
 }
 
@@ -91,19 +71,14 @@ static void* getCurrentGLDisplayDirect() {
 // NOTE: Refer to Context setup code in OCLTestImp.cpp
 static bool setupGLInterop() {
   amd::Context* amdContext = hip::getCurrentDevice()->asContext();
+  amd::GLFunctions* glenv = amdContext->glenv();
 
-  // Get the current GL context and display BEFORE setting up properties.
-  void* currentGLContext = getCurrentGLContextDirect();
-  if (currentGLContext == nullptr) {
-    LogError("GL interop setup failed: no current GL context");
-    return false;
-  }
+  // Get the current GL context and display using existing glenv if available.
+  // For first-time setup (glenv == nullptr), pass nullptr and let lower level read from current thread.
+  // For context switch (glenv exists), explicitly pass the new context values.
+  void* currentGLContext = getCurrentGLContext(glenv);
+  void* currentGLDisplay = getCurrentGLDisplay(glenv);
 
-  // Get current display using the helper
-  void* currentGLDisplay = getCurrentGLDisplayDirect();
-
-  // Pass the actual GL context and display in the properties.
-  // This ensures proper setup even when glenv is already initialized from a previous setup.
   cl_context_properties properties[] = {CL_CONTEXT_PLATFORM,
                                         (cl_context_properties)AMD_PLATFORM,
                                         ROCCLR_HIP_GL_CONTEXT_KHR,
@@ -130,6 +105,93 @@ static bool setupGLInterop() {
   }
   return true;
 }
+
+// RAII guard ensuring GL interop validity for the duration of an operation.
+// Uses read-write lock pattern: shared lock for fast path (parallel access when
+// context is stable), exclusive lock for slow path (context setup/switch).
+// Thread-safety: protects concurrent HIP GL interop operations. Application must
+// not call wglMakeCurrent/glXMakeCurrent during HIP GL interop operations.
+class GLInteropGuard {
+ public:
+  GLInteropGuard() : valid_(false) {
+    amd::Context* amdContext = hip::getCurrentDevice()->asContext();
+    amd::GLFunctions* glenv = amdContext->glenv();
+
+    // Fast path: shared lock for parallel access when context is stable
+    std::shared_lock<std::shared_mutex> readLock(amd::glInteropRWMutex);
+
+    // If glenv doesn't exist, we need first-time setup
+    if (glenv == nullptr) {
+      readLock.unlock();
+      std::unique_lock<std::shared_mutex> writeLock(amd::glInteropRWMutex);
+
+      // Double-check after acquiring write lock
+      glenv = amdContext->glenv();
+      if (glenv == nullptr) {
+        if (!setupGLInterop()) {
+          return;
+        }
+        glenv = amdContext->glenv();
+        if (glenv == nullptr) {
+          return;
+        }
+        amd::associatedGLContext = getCurrentGLContext(glenv);
+      }
+
+      exclusiveLock_ = std::move(writeLock);
+      valid_ = true;
+      return;
+    }
+
+    // glenv exists, check if context has changed
+    void* currentGLContext = getCurrentGLContext(glenv);
+    if (currentGLContext == nullptr) {
+      return;
+    }
+
+    if (amd::associatedGLContext == currentGLContext) {
+      sharedLock_ = std::move(readLock);
+      valid_ = true;
+      return;
+    }
+
+    // Slow path: context switch detected, need exclusive lock for re-association
+    readLock.unlock();
+    std::unique_lock<std::shared_mutex> writeLock(amd::glInteropRWMutex);
+
+    // Re-read context under exclusive lock (another thread may have completed setup)
+    glenv = amdContext->glenv();
+    void* verifiedContext = getCurrentGLContext(glenv);
+    if (verifiedContext == nullptr) {
+      return;
+    }
+
+    // Double-check pattern: context may have been set up during lock gap
+    if (amd::associatedGLContext != verifiedContext) {
+      if (!setupGLInterop()) {
+        return;
+      }
+      amd::associatedGLContext = verifiedContext;
+    }
+
+    exclusiveLock_ = std::move(writeLock);
+    valid_ = true;
+  }
+
+  ~GLInteropGuard() = default;
+
+  GLInteropGuard(const GLInteropGuard&) = delete;
+  GLInteropGuard& operator=(const GLInteropGuard&) = delete;
+  GLInteropGuard(GLInteropGuard&&) = delete;
+  GLInteropGuard& operator=(GLInteropGuard&&) = delete;
+
+  bool isValid() const { return valid_; }
+
+ private:
+  std::shared_lock<std::shared_mutex> sharedLock_;
+  std::unique_lock<std::shared_mutex> exclusiveLock_;
+  bool valid_;
+};
 
 static inline hipError_t validateResources(hipGraphicsResource_t* resources, int count = 1) {
   hip::Device* device = hip::getCurrentDevice();
@@ -371,6 +433,13 @@ hipError_t hipGraphicsGLRegisterImage(hipGraphicsResource** resource, GLuint ima
                                       unsigned int flags) {
   HIP_INIT_API(hipGraphicsGLRegisterImage, resource, image, target, flags);
 
+  // Guard holds the lock for entire function scope, detecting context switches
+  GLInteropGuard glGuard;
+  if (!glGuard.isValid()) {
+    LogError("No GL context is current");
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
   cl_mem_flags cl_flags = 0;
   hipError_t status = HipToClMemoryFlags(flags, &cl_flags);
   if (status != hipSuccess) {
@@ -385,11 +454,6 @@ hipError_t hipGraphicsGLRegisterImage(hipGraphicsResource** resource, GLuint ima
 
   GLint miplevel = 0;
   amd::Context& amdContext = *(hip::getCurrentDevice()->asContext());
-
-  if (amdContext.glenv() == nullptr) {
-    LogError("invalid context, gl interop not initialized");
-    HIP_RETURN(hipErrorInvalidValue);
-  }
 
   amd::GLFunctions::SetIntEnv ie(amdContext.glenv());
   if (!ie.isValid()) {
@@ -597,7 +661,6 @@ hipError_t hipGraphicsGLRegisterImage(hipGraphicsResource** resource, GLuint ima
     }
 
     int iBytesPerPixel = 0;
-    cl_mem_flags clFlags = convertHipGraphicsFlagsToCL(flags);
     if (!amd::getCLFormatFromGL(amdContext, glInternalFormat, &clImageFormat, &iBytesPerPixel,
                                 cl_flags)) {
       LogWarning("\"texture\" format does not map to an appropriate CL image format");
@@ -624,7 +687,6 @@ hipError_t hipGraphicsGLRegisterImage(hipGraphicsResource** resource, GLuint ima
   }
   target = (glTarget == GL_TEXTURE_CUBE_MAP) ? target : 0;
 
-  cl_mem_flags clFlags = convertHipGraphicsFlagsToCL(flags);
   pImageGL = new (amdContext)
       amd::ImageGL(amdContext, clType, cl_flags, clImageFormat, static_cast<size_t>(gliTexWidth),
                    static_cast<size_t>(gliTexHeight), static_cast<size_t>(gliTexDepth), glTarget,
@@ -677,6 +739,20 @@ hipError_t hipGraphicsGLRegisterBuffer(hipGraphicsResource** resource, GLuint bu
                                        unsigned int flags) {
   HIP_INIT_API(hipGraphicsGLRegisterBuffer, resource, buffer, flags);
 
+  // Guard holds the lock for entire function scope, detecting context switches
+  GLInteropGuard glGuard;
+  if (!glGuard.isValid()) {
+    LogError("No GL context is current");
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  // Validate flags: SurfaceLoadStore and TextureGather are image-specific, not valid for buffers
+  if (flags == hipGraphicsRegisterFlagsSurfaceLoadStore ||
+      flags == hipGraphicsRegisterFlagsTextureGather) {
+    LogError("invalid flags for buffer registration: SurfaceLoadStore and TextureGather are image-specific");
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
   cl_mem_flags cl_flags = 0;
   hipError_t status = HipToClMemoryFlags(flags, &cl_flags);
   if (status != hipSuccess) {
@@ -695,11 +771,6 @@ hipError_t hipGraphicsGLRegisterBuffer(hipGraphicsResource** resource, GLuint bu
   GLint gliSize = 0;
 
   amd::Context& amdContext = *(hip::getCurrentDevice()->asContext());
-
-  if (amdContext.glenv() == nullptr) {
-    LogError("invalid context, gl interop not initialized");
-    HIP_RETURN(hipErrorInvalidValue);
-  }
 
   // Add this scope to bound the scoped lock
   {
