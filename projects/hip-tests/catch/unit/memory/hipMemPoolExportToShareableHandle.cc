@@ -18,7 +18,7 @@
 #include "mempool_common.hh"
 #include <hip_test_process.hh>
 
-constexpr int DATA_SIZE = 1024 * 1024;
+constexpr int DATA_SIZE = 64 * 1024;
 constexpr size_t byte_size = DATA_SIZE * sizeof(int);
 
 /**
@@ -26,8 +26,14 @@ constexpr size_t byte_size = DATA_SIZE * sizeof(int);
  */
 static __global__ void square_kernel(int* Buff) {
   int i = threadIdx.x + blockDim.x * blockIdx.x;
-  int temp = Buff[i] * Buff[i];
-  Buff[i] = temp;
+  if (i < DATA_SIZE) {
+    int temp = Buff[i] * Buff[i];
+    Buff[i] = temp;
+  }
+}
+
+static constexpr size_t ceil_div(size_t value, size_t divisor) {
+  return (value + divisor - 1) / divisor;
 }
 
 /**
@@ -91,8 +97,9 @@ HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_SameProc) {
   // Import and use pointer
   void* ptrImp;
   HIP_CHECK(hipMemPoolImportPointer(&ptrImp, mempoolImp, &ptrExp));
-  square_kernel<<<dim3(DATA_SIZE / THREADS_PER_BLOCK), dim3(THREADS_PER_BLOCK), 0, stream>>>(
+  square_kernel<<<dim3(ceil_div(DATA_SIZE, THREADS_PER_BLOCK)), dim3(THREADS_PER_BLOCK), 0, stream>>>(
       (int*)ptrImp);
+  HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipMemcpyAsync(B_h.data(), ptrImp, byte_size, hipMemcpyDeviceToHost, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
   REQUIRE(true == std::equal(B_h.begin(), B_h.end(), C_h.data()));
@@ -133,6 +140,7 @@ HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_ChldUseHdl) {
   if (pid == 0) {  // child
     REQUIRE(close(fd[1]) == 0);
     REQUIRE(close(fdSig[0]) == 0);
+    HIP_CHECK(hipSetDevice(0));
     // Wait for parent process to create the socket.
     hipMemPoolPtrExportData ptrExp;
     REQUIRE(read(fd[0], &ptrExp, sizeof(hipMemPoolPtrExportData)) >= 0);
@@ -151,9 +159,12 @@ HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_ChldUseHdl) {
     // Import and use pointer
     void* ptrImp;
     HIP_CHECK(hipMemPoolImportPointer(&ptrImp, mempoolImp, &ptrExp));
-    square_kernel<<<dim3(DATA_SIZE / THREADS_PER_BLOCK), dim3(THREADS_PER_BLOCK), 0, 0>>>(
+    square_kernel<<<dim3(ceil_div(DATA_SIZE, THREADS_PER_BLOCK)), dim3(THREADS_PER_BLOCK), 0, 0>>>(
         (int*)ptrImp);
+    HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipStreamSynchronize(0));
+    HIP_CHECK(hipFree(ptrImp));
+    HIP_CHECK(hipMemPoolDestroy(mempoolImp));
     // Import and use pointer
     REQUIRE(close(fd[0]) == 0);
     REQUIRE(close(fdSig[1]) == 0);
@@ -163,6 +174,7 @@ HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_ChldUseHdl) {
     REQUIRE(close(fd[0]) == 0);
     REQUIRE(close(fdSig[1]) == 0);
 
+    HIP_CHECK(hipSetDevice(0));
     hipMemPoolProps pool_props{};
     checkMempoolSupported(0)
         // Set property
@@ -238,6 +250,7 @@ HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_ChldCheckAccess) {
   if (pid == 0) {  // child
     REQUIRE(close(fd[1]) == 0);
     REQUIRE(close(fdSig[0]) == 0);
+    HIP_CHECK(hipSetDevice(0));
     // Wait for parent process to create the socket.
     int sig = 0;
     REQUIRE(read(fd[0], &sig, sizeof(int)) >= 0);
@@ -263,6 +276,7 @@ HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_ChldCheckAccess) {
       HIP_CHECK(hipMemPoolGetAccess(&flags, mempoolImp, &location));
       REQUIRE(flags == hipMemAccessFlagsProtReadWrite);
     }
+    HIP_CHECK(hipMemPoolDestroy(mempoolImp));
     // Import and use pointer
     REQUIRE(close(fd[0]) == 0);
     REQUIRE(close(fdSig[1]) == 0);
@@ -345,6 +359,7 @@ HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_GrndChldUseHdl) {
     if (pid2 == 0) {  // grandchild
       REQUIRE(close(fd[1]) == 0);
       REQUIRE(close(fdSig[0]) == 0);
+      HIP_CHECK(hipSetDevice(0));
       // Wait for parent process to create the socket.
       hipMemPoolPtrExportData ptrExp;
       REQUIRE(read(fd[0], &ptrExp, sizeof(hipMemPoolPtrExportData)) >= 0);
@@ -363,9 +378,12 @@ HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_GrndChldUseHdl) {
       // Import and use pointer
       void* ptrImp;
       HIP_CHECK(hipMemPoolImportPointer(&ptrImp, mempoolImp, &ptrExp));
-      square_kernel<<<dim3(DATA_SIZE / THREADS_PER_BLOCK), dim3(THREADS_PER_BLOCK), 0, 0>>>(
+      square_kernel<<<dim3(ceil_div(DATA_SIZE, THREADS_PER_BLOCK)), dim3(THREADS_PER_BLOCK), 0, 0>>>(
           (int*)ptrImp);
+      HIP_CHECK(hipGetLastError());
       HIP_CHECK(hipStreamSynchronize(0));
+      HIP_CHECK(hipFree(ptrImp));
+      HIP_CHECK(hipMemPoolDestroy(mempoolImp));
       REQUIRE(close(fd[0]) == 0);
       REQUIRE(close(fdSig[1]) == 0);
       checkSysCallErrors(sockObj.closeThisSock());

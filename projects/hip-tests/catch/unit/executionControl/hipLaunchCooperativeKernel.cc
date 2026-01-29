@@ -167,6 +167,7 @@ HIP_TEST_CASE(Unit_hipLaunchCooperativeKernel_Verify_Capture) {
     HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
     return;
   }
+  HIP_CHECK(hipSetDevice(0));
 
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
@@ -176,7 +177,5 @@ HIP_TEST_CASE(Unit_hipLaunchCooperativeKernel_Verify_Capture) {
   HIP_CHECK(hipLaunchCooperativeKernel(reinterpret_cast<void*>(coop_kernel), dim3{2, 2, 1},
                                        dim3{1, 1, 1}, nullptr, 0, stream));
   END_CAPTURE(stream);
-
-  HIP_CHECK(hipDeviceSynchronize());
   HIP_CHECK(hipStreamDestroy(stream));
 }
