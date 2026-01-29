@@ -124,16 +124,14 @@ Or with specific GPU target:
 cmake .. \
   -DGPU_TARGETS=gfx942 \
   -DBUILD_LOCAL_GPU_TARGET_ONLY=OFF \
-  -DDEVICE_LINKER_ENABLED=ON \
-  -DSPECIALIZED_KERNELS_ONLY=ON
+  -DDEVICE_LINKER=ON
 ```
 
 ### Options
 
 | Option | Description |
 |--------|-------------|
-| `DEVICE_LINKER_ENABLED` | Enable the device linker pipeline |
-| `SPECIALIZED_KERNELS_ONLY` | Build specialized kernels (auto-enabled by `DEVICE_LINKER_ENABLED`) |
+| `DEVICE_LINKER` | Enable the device linker pipeline for fast parallel kernel builds |
 | `BUILD_LOCAL_GPU_TARGET_ONLY` | When `ON`, only build for local GPU's optimal unroll factor |
 | `GPU_TARGETS` | Target GPU architectures (e.g., `gfx942`) |
 
@@ -176,7 +174,7 @@ This matches production behavior exactly - the same funcId dispatch mechanism is
 
 - `CMakeLists.txt`: Added device linker pipeline integration
 - `src/device/generate_specialized.py`: Added unroll factor to kernel names, fixed multi-unroll generation
-- `src/enqueue.cc`: Added `DEVICE_LINKER_ENABLED` path using merged kernels
+- `src/enqueue.cc`: Added `DEVICE_LINKER` path using merged kernels
 
 ## Files Added
 

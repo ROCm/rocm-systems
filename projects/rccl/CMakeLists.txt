@@ -33,15 +33,8 @@ option(ENABLE_MSCCLPP_EXECUTOR                 "Enable MSCCL++ Executor"        
 option(ENABLE_MSCCLPP_FORMAT_CHECKS            "Enable formatting checks in MSCCL++"           OFF)
 option(ENABLE_NPKIT                            "Enable NPKit"                                  OFF)
 option(ENABLE_IFC                              "Enable indirect function call"                 OFF)
-option(SPECIALIZED_KERNELS_ONLY                "Build only specialized kernels (no generic)"   OFF)
-option(DEVICE_LINKER_ENABLED                   "Use device linker for merged kernel dispatch"  OFF)
+option(DEVICE_LINKER                           "Use device linker for fast parallel kernel builds" OFF)
 option(GENERATE_SYM_KERNELS                    "Generate symmetric memory kernels"             OFF)
-
-# DEVICE_LINKER_ENABLED requires SPECIALIZED_KERNELS_ONLY
-if (DEVICE_LINKER_ENABLED AND NOT SPECIALIZED_KERNELS_ONLY)
-  message(STATUS "DEVICE_LINKER_ENABLED implies SPECIALIZED_KERNELS_ONLY - enabling it")
-  set(SPECIALIZED_KERNELS_ONLY ON CACHE BOOL "Forced by DEVICE_LINKER_ENABLED" FORCE)
-endif()
 option(INSTALL_DEPENDENCIES                    "Force install dependencies"                    OFF)
 option(REPORT_KERNEL_RESOURCE_USE              "Append -Rpass-analysis=kernel to CXX flags"    OFF)
 option(ROCTX                                   "Enable ROCTX"                                  ON)
@@ -115,7 +108,7 @@ endif()
 
 # Modify GPU architectures for Device Linker builds by appending ":xnack+:sramecc+"
 # This ensures the device ELF has correct flags matching production builds
-if (DEVICE_LINKER_ENABLED)
+if (DEVICE_LINKER)
   SET(amdgpu_targets "")
   foreach(amdgpu_target IN LISTS GPU_TARGETS)
     if(NOT amdgpu_target STREQUAL "")
@@ -924,8 +917,8 @@ if (gen_py_result)
   message(FATAL_ERROR "${CMAKE_SOURCE_DIR}/src/device/generate.py failed")
 endif()
 
-if (SPECIALIZED_KERNELS_ONLY)
-  message(STATUS "SPECIALIZED_KERNELS_ONLY mode: building only specialized kernels (no generic)")
+if (DEVICE_LINKER)
+  message(STATUS "DEVICE_LINKER mode: building specialized kernels with merged dispatcher")
   # Convert GPU_TARGETS list to semicolon-separated string for Python
   string(REPLACE ";" ";" GPU_TARGETS_STR "${GPU_TARGETS}")
   execute_process(
@@ -963,12 +956,12 @@ if (GENERATE_SYM_KERNELS)
 endif()
 
 # Find and add generated files
-if (SPECIALIZED_KERNELS_ONLY)
+if (DEVICE_LINKER)
   # Only add host_table.cpp and device_table.cpp (not device function .cpp files)
   # Device functions are replaced by specialized kernels
   list(APPEND HIP_SOURCES "${GEN_DIR}/host_table.cpp")
   list(APPEND HIP_SOURCES "${GEN_DIR}/device_table.cpp")  # Contains funcNames[] needed by init.cc
-  message(STATUS "SPECIALIZED_KERNELS_ONLY: using host_table.cpp and device_table.cpp from generate.py")
+  message(STATUS "DEVICE_LINKER: using host_table.cpp and device_table.cpp from generate.py")
   
   # If GENERATE_SYM_KERNELS is OFF, create stub for ncclSymkGetKernelPtr
   if (NOT GENERATE_SYM_KERNELS)
@@ -985,12 +978,12 @@ int const ncclSymkKernelCount = 0;
 void* const ncclSymkKernelList[] = { nullptr };
 ")
     list(APPEND HIP_SOURCES "${CMAKE_CURRENT_BINARY_DIR}/sym_kernels_stub.cpp")
-    message(STATUS "SPECIALIZED_KERNELS_ONLY: added sym_kernels_stub.cpp (GENERATE_SYM_KERNELS=OFF)")
+    message(STATUS "DEVICE_LINKER: added sym_kernels_stub.cpp (GENERATE_SYM_KERNELS=OFF)")
   endif()
   
   # Remove common.cu from HIP_SOURCES (it contains generic kernels)
   list(FILTER HIP_SOURCES EXCLUDE REGEX ".*common\\.cu\\.cpp$")
-  message(STATUS "SPECIALIZED_KERNELS_ONLY: excluded common.cu (generic kernels)")
+  message(STATUS "DEVICE_LINKER: excluded common.cu (generic kernels)")
 else()
   # Normal mode: add all generated files
   file(GLOB_RECURSE GENERATED_FILES "${GEN_DIR}/*")
@@ -1074,10 +1067,10 @@ endif()
 if(ENABLE_ROCSHMEM)
   target_compile_definitions(rccl PRIVATE ENABLE_ROCSHMEM)
 endif()
-if(SPECIALIZED_KERNELS_ONLY)
-  target_compile_definitions(rccl PRIVATE SPECIALIZED_KERNELS_ONLY)
+if(DEVICE_LINKER)
+  target_compile_definitions(rccl PRIVATE DEVICE_LINKER)
   target_include_directories(rccl PRIVATE ${GEN_DIR}/specialized)
-  message(STATUS "SPECIALIZED_KERNELS_ONLY mode enabled - using specialized kernel selector")
+  message(STATUS "DEVICE_LINKER mode enabled")
 endif()
 
 # ==== rocSHMEM integration (optional) ====
@@ -1274,9 +1267,8 @@ if (IFC_ENABLED)
   target_compile_definitions(rccl PRIVATE USE_INDIRECT_FUNCTION_CALL)
 endif()
 
-# Device linker mode - use merged kernels instead of specialized
-if (DEVICE_LINKER_ENABLED)
-  target_compile_definitions(rccl PRIVATE DEVICE_LINKER_ENABLED)
+# Device linker pipeline - merge specialized device code into single image
+if (DEVICE_LINKER)
   
   set(DEVICE_LINKER_DIR ${CMAKE_CURRENT_SOURCE_DIR}/tools/device_linker)
   set(MERGED_HOST_OBJ ${CMAKE_CURRENT_BINARY_DIR}/merged_final_host.o)
@@ -1299,23 +1291,23 @@ if (DEVICE_LINKER_ENABLED)
   add_custom_command(
     TARGET rccl
     PRE_LINK
-    # Step 0: Compile the dispatcher kernel (merged_minimal.hip) with --offload-compress
-    COMMAND ${HIPCC_COMPILER} -c -fPIC -fno-gpu-rdc --offload-arch=${DEVICE_LINKER_GPU_TARGET} --offload-compress
+    # Step 0: Compile the dispatcher kernel (merged_minimal.hip)
+    COMMAND ${HIPCC_COMPILER} -c -fPIC -fno-gpu-rdc --offload-arch=${DEVICE_LINKER_GPU_TARGET}
             -I${CMAKE_CURRENT_BINARY_DIR}/hipify/src/include
             -I${CMAKE_CURRENT_BINARY_DIR}/hipify/src/include/nccl_device
             -I${CMAKE_CURRENT_BINARY_DIR}/hipify/src/device
             ${DEVICE_LINKER_DIR}/merged_minimal.hip 
             -o ${DEVICE_LINKER_DIR}/merged_minimal.o
-    # Step 0b: Extract HOST object (contains __hip_module_ctor registration code)
-    # Use --allow-missing-bundles since compressed .hip_fatbin format can't be unbundled directly
-    COMMAND /opt/rocm/llvm/bin/clang-offload-bundler --type=o 
-            --targets=host-x86_64-unknown-linux-gnu,${DEVICE_LINKER_BUNDLE_TARGET}
-            --input=${DEVICE_LINKER_DIR}/merged_minimal.o
-            --output=${DEVICE_LINKER_DIR}/host_only.o --output=/dev/null 
-            --unbundle --allow-missing-bundles
-    # Step 0c: Extract DEVICE object from compressed fatbin (needed by device_linker)
-    COMMAND ${Python3_EXECUTABLE} ${DEVICE_LINKER_DIR}/extract_device_from_fatbin.py
-            ${DEVICE_LINKER_DIR}/merged_minimal.o ${DEVICE_LINKER_DIR}/minimal_device.o ${DEVICE_LINKER_GPU_TARGET}
+    # Step 0b: Extract .hip_fatbin section to temp file
+    COMMAND /opt/rocm/llvm/bin/llvm-objcopy
+            --dump-section=.hip_fatbin=${DEVICE_LINKER_DIR}/fatbin.bin
+            ${DEVICE_LINKER_DIR}/merged_minimal.o
+    # Step 0c: Unbundle to get device ELF (host bundle is empty)
+    COMMAND /opt/rocm/llvm/bin/clang-offload-bundler --type=bc
+            --targets=host-x86_64-unknown-linux-gnu-,${DEVICE_LINKER_BUNDLE_TARGET}
+            --input=${DEVICE_LINKER_DIR}/fatbin.bin
+            --output=/dev/null --output=${DEVICE_LINKER_DIR}/minimal_device.o
+            --unbundle
     # Step 1: Run C++ device linker to merge device code (uses lld internally to create DYN)
     COMMAND ${DEVICE_LINKER_DIR}/device_linker
             -o ${DEVICE_LINKER_DIR}/merged_device_final.o
@@ -1327,7 +1319,7 @@ if (DEVICE_LINKER_ENABLED)
     # This creates __CLANG_OFFLOAD_BUNDLE__* sections that the linker can process
     COMMAND /opt/rocm/llvm/bin/clang-offload-bundler --type=o 
             --targets=host-x86_64-unknown-linux-gnu,${DEVICE_LINKER_BUNDLE_TARGET}
-            --input=${DEVICE_LINKER_DIR}/host_only.o 
+            --input=${DEVICE_LINKER_DIR}/merged_minimal.o 
             --input=${DEVICE_LINKER_DIR}/merged_device_final.o
             --output=${MERGED_HOST_OBJ}
     WORKING_DIRECTORY ${DEVICE_LINKER_DIR}
@@ -1356,10 +1348,12 @@ if (HAVE_PARALLEL_JOBS)
   target_compile_options(rccl PRIVATE -parallel-jobs=12)
 endif()
 
-if (ROCM_VERSION VERSION_GREATER_EQUAL "60200")
+if (ROCM_VERSION VERSION_GREATER_EQUAL "60200" AND NOT DEVICE_LINKER)
   target_compile_options(rccl PRIVATE --offload-compress)    # Compress GPU code at compile time.
   target_link_libraries(rccl PRIVATE --offload-compress)     # Compress GPU code at link time.
   message(STATUS "--offload-compress enabled - ROCm version >= 6.2.0")
+elseif(DEVICE_LINKER)
+  message(STATUS "--offload-compress disabled - device linker enabled")
 else()
   message(STATUS "--offload-compress disabled - ROCm version < 6.2.0")
 endif()
@@ -1370,7 +1364,7 @@ target_compile_options(rccl PRIVATE -Wall)
 target_compile_options(rccl PRIVATE -Werror=deprecated-copy-with-user-provided-copy)
 target_compile_options(rccl PRIVATE -Wno-format-nonliteral)
 target_compile_options(rccl PRIVATE -Wno-unused-function)
-if(NOT SPECIALIZED_KERNELS_ONLY)
+if(NOT DEVICE_LINKER)
   target_compile_options(rccl PRIVATE -fgpu-rdc)
 endif()
 
@@ -1492,7 +1486,7 @@ endif()
 if (ROCTX_ENABLE)
   target_link_libraries(rccl PRIVATE ${ROCTX_LIB})
 endif()
-if(NOT SPECIALIZED_KERNELS_ONLY)
+if(NOT DEVICE_LINKER)
   target_link_libraries(rccl PRIVATE -fgpu-rdc)             # Required when linking relocatable device code
 endif()
 target_link_libraries(rccl PRIVATE   Threads::Threads)

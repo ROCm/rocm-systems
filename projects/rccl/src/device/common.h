@@ -189,9 +189,9 @@ struct ncclShmemData {
 };
 
 // For RDC builds: use extern __shared__ for cross-TU sharing
-// For non-RDC builds (SPECIALIZED_KERNELS_ONLY): use __shared__ (not extern)
+// For non-RDC builds (DEVICE_LINKER): use __shared__ (not extern)
 #ifndef NCCL_SHMEM_DECL
-  #ifdef SPECIALIZED_KERNELS_ONLY
+  #ifdef DEVICE_LINKER
     #define NCCL_SHMEM_DECL __shared__
   #else
     #define NCCL_SHMEM_DECL extern __shared__

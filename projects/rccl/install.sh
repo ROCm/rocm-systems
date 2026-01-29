@@ -39,8 +39,7 @@ run_tests_all=false
 time_trace=false
 force_reduce_pipeline=false
 generate_sym_kernels=false
-specialized_kernels_only=false
-device_linker_enabled=false
+device_linker=false
 warp_speed_enabled=true # note that this flag will be overridden to false for non MI350/MI300 platforms
 quiet_warnings=false
 build_rocshmem_support=false
@@ -144,8 +143,7 @@ while true; do
          --verbose)                  build_verbose=true;                                                                               shift ;;
          --force-reduce-pipeline)    force_reduce_pipeline=true;                                                                       shift ;;
          --generate-sym-kernels)     generate_sym_kernels=true;                                                                        shift ;;
-         --specialized-kernels)      specialized_kernels_only=true;                                                                    shift ;;
-         --device-linker)            device_linker_enabled=true;                                                                       shift ;;
+         --device-linker)            device_linker=true;                                                                               shift ;;
          --disable-warp-speed)       warp_speed_enabled=false;                                                                         shift ;;
     -q | --quiet-warnings)           quiet_warnings=true;                                                                              shift ;;
          --rocshmem)                 build_rocshmem_support=true;                                                                      shift ;;
@@ -322,14 +320,9 @@ if [[ "${generate_sym_kernels}" == true ]]; then
     cmake_common_options="${cmake_common_options} -DGENERATE_SYM_KERNELS=ON"
 fi
 
-# Build with specialized kernels only (no RDC)
-if [[ "${specialized_kernels_only}" == true ]]; then
-    cmake_common_options="${cmake_common_options} -DSPECIALIZED_KERNELS_ONLY=ON"
-fi
-
-# Build with device linker (implies specialized kernels)
-if [[ "${device_linker_enabled}" == true ]]; then
-    cmake_common_options="${cmake_common_options} -DDEVICE_LINKER_ENABLED=ON"
+# Build with device linker (fast parallel kernel builds)
+if [[ "${device_linker}" == true ]]; then
+    cmake_common_options="${cmake_common_options} -DDEVICE_LINKER=ON"
 fi
 
 # Enable NPKit
