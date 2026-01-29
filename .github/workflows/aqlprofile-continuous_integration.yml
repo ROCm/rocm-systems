@@ -118,7 +118,7 @@ jobs:
       run:
         PATH=~/.local/bin:${{ env.ROCM_PATH }}/bin:${PATH}
         LD_LIBRARY_PATH=$(pwd)/build:${{ env.ROCM_PATH }}/lib:$LD_LIBRARY_PATH
-        ctest --output-on-failure -DCTEST_SOURCE_DIRECTORY="$(pwd)"
+        ctest --output-on-failure --verbose -DCTEST_SOURCE_DIRECTORY="$(pwd)"
           -DCTEST_BINARY_DIRECTORY="$(pwd)/build" -DAQLPROFILE_BUILD_NUM_JOBS="16" -DCTEST_SITE="${{ matrix.system.runner }}"
           -DCTEST_BUILD_NAME=PR_${{ github.ref_name }}_${{ github.repository }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core
           -DCMAKE_CTEST_ARGUMENTS=""
@@ -197,7 +197,7 @@ jobs:
       run:
         PATH=~/.local/bin:${{ env.ROCM_PATH }}/bin:${PATH}
         LD_LIBRARY_PATH=$(pwd)/build:${{ env.ROCM_PATH }}/lib:$LD_LIBRARY_PATH
-        ctest --output-on-failure -DCTEST_SOURCE_DIRECTORY="$(pwd)"
+        ctest --output-on-failure --verbose -DCTEST_SOURCE_DIRECTORY="$(pwd)"
           -DCTEST_BINARY_DIRECTORY="$(pwd)/build" -DAQLPROFILE_BUILD_NUM_JOBS="16"
           -DCTEST_SITE=${{ matrix.system.runner }}
           -DCTEST_BUILD_NAME=PR_${{ github.ref_name }}_${{ github.repository }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core
