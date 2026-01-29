@@ -27,6 +27,7 @@
 #include "logger/debug.hpp"
 
 #include <memory>
+#include <sstream>
 #include <stdexcept>
 
 namespace rocprofsys
@@ -207,10 +208,10 @@ data_processor::insert_pmc_event(size_t event_id, size_t agent_id, const char* p
     auto it = _pmc_descriptor_map.find({ agent_id, pmc_name });
     if(it == _pmc_descriptor_map.end())
     {
-        LOG_WARNING("Insert PMC event failed! Error: non-existing PMC description "
-                    "agent id: {}, pmc name: {} !",
-                    agent_id, pmc_name);
-        return;
+        std::ostringstream oss;
+        oss << "Insert PMC event failed! Error: non-existing PMC description "
+            << "agent id: " << agent_id << ", pmc name: " << pmc_name;
+        throw std::runtime_error(oss.str());
     }
 
     const auto pmc_description_id = it->second;

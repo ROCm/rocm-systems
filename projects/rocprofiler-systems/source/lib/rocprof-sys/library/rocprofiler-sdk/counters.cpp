@@ -130,8 +130,9 @@ counter_event::operator()(const client_data* tool_data, ::perfetto::CounterTrack
                 category_enum_id<category::rocm_counter_collection>::value),
             track_name.c_str(), _timing.start, event_metadata.c_str(), stack_id,
             parent_stack_id, correlation_id, call_stack.c_str(), line_info.c_str(),
-            static_cast<uint32_t>(agent.device_id), static_cast<uint8_t>(agent.type),
-            track_name.c_str(), static_cast<double>(value) });
+            static_cast<uint32_t>(agent.device_type_index),
+            static_cast<uint8_t>(agent.type), track_name.c_str(),
+            static_cast<double>(value) });
     }
 }
 

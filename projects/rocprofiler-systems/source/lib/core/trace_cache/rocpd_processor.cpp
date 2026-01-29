@@ -342,7 +342,8 @@ rocpd_processor_t::handle([[maybe_unused]] const pmc_event_with_sample& _pmc)
 
     auto agent_primary_key =
         m_agent_manager
-            ->get_agent_by_id(_pmc.device_id, static_cast<agent_type>(_pmc.device_type))
+            ->get_agent_by_type_index(_pmc.device_id,
+                                      static_cast<agent_type>(_pmc.device_type))
             .base_id;
 
     auto event_id = m_data_processor->insert_event(
@@ -352,7 +353,8 @@ rocpd_processor_t::handle([[maybe_unused]] const pmc_event_with_sample& _pmc)
                                     "{}");
 
     m_data_processor->insert_pmc_event(event_id, agent_primary_key,
-                                       _pmc.pmc_info_name.c_str(), _pmc.value);
+                                       _pmc.pmc_info_name.c_str(), _pmc.value,
+                                       _pmc.event_metadata.c_str());
 #endif
 }
 

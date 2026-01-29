@@ -23,17 +23,21 @@
 #include "library/rocprofiler-sdk/rccl.hpp"
 
 #include "core/categories.hpp"
-#include "core/components/fwd.hpp"
 #include "core/config.hpp"
 #include "core/perfetto.hpp"
 #include "core/trace_cache/cache_manager.hpp"
+#include "core/trace_cache/cacheable.hpp"
+#include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/sample_type.hpp"
-
-#include "library/tracing.hpp"
 
 #include "logger/debug.hpp"
 
+#include <rocprofiler-sdk/rccl/api_args.h>
+
+#include <dlfcn.h>
 #include <mutex>
+#include <set>
+#include <unordered_map>
 
 namespace rocprofsys
 {
@@ -52,6 +56,68 @@ struct rccl_send
     static constexpr auto value = "comm_data";
     static constexpr auto label = "RCCL Comm Send";
 };
+
+void
+rccl_metadata_initialize_categories()
+{
+    static bool _is_initialized = false;
+    if(_is_initialized) return;
+
+    trace_cache::get_metadata_registry().add_string(
+        trait::name<category::comm_data>::value);
+
+    _is_initialized = true;
+}
+
+std::mutex         g_registered_gpus_mutex{};
+std::set<uint32_t> g_registered_gpus{};
+
+void
+rccl_metadata_initialize_pmc_for_gpu(uint32_t rccl_device_idx)
+{
+    {
+        std::unique_lock<std::mutex> _lk{ g_registered_gpus_mutex };
+        if(g_registered_gpus.count(rccl_device_idx) > 0) return;
+        g_registered_gpus.insert(rccl_device_idx);
+    }
+
+    [[maybe_unused]] const size_t EVENT_CODE  = 0;
+    [[maybe_unused]] const size_t INSTANCE_ID = 0;
+    [[maybe_unused]] const auto*  LONG_DESCRIPTION =
+        "Per-GPU RCCL communication data with transfer_bytes in extdata JSON";
+    [[maybe_unused]] const auto* COMPONENT   = "";
+    [[maybe_unused]] const auto* BLOCK       = "";
+    [[maybe_unused]] const auto* EXPRESSION  = "";
+    [[maybe_unused]] const auto* MSG         = "bytes";
+    [[maybe_unused]] const auto* TARGET_ARCH = "GPU";
+
+    std::string send_label = fmt::format("{} GPU {}", rccl_send::label, rccl_device_idx);
+    std::string recv_label = fmt::format("{} GPU {}", rccl_recv::label, rccl_device_idx);
+
+    trace_cache::get_metadata_registry().add_pmc_info(
+        { agent_type::GPU, rccl_device_idx, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+          send_label.c_str(), "Tracks RCCL communication data sizes (send)",
+          trait::name<category::comm_data>::description, LONG_DESCRIPTION, COMPONENT, MSG,
+          trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0 });
+
+    trace_cache::get_metadata_registry().add_pmc_info(
+        { agent_type::GPU, rccl_device_idx, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+          recv_label.c_str(), "Tracks RCCL communication data sizes (recv)",
+          trait::name<category::comm_data>::description, LONG_DESCRIPTION, COMPONENT, MSG,
+          trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0 });
+}
+
+template <typename Track>
+void
+rccl_metadata_initialize_track()
+{
+    auto _init_track = [](const char* label) {
+        trace_cache::get_metadata_registry().add_track({ label, std::nullopt, "{}" });
+    };
+
+    static std::once_flag _once{};
+    std::call_once(_once, _init_track, Track::label);
+}
 
 template <typename Tp, typename... Args>
 void
@@ -78,32 +144,40 @@ write_perfetto_counter_track(uint64_t _val, uint64_t _begin_ts, uint64_t _end_ts
 
 template <typename Track>
 void
-cache_rccl_comm_data_events(size_t bytes, uint64_t timestamp_ns)
+cache_rccl_comm_data_events(uint32_t rccl_device_idx, size_t bytes, uint64_t timestamp_ns)
 {
-    static std::mutex _mutex{};
-    static uint64_t   cumulative_bytes = 0;
+    rccl_metadata_initialize_pmc_for_gpu(rccl_device_idx);
+
+    static std::mutex                             _mutex{};
+    static std::unordered_map<uint32_t, uint64_t> cumulative_bytes_per_device{};
+    uint64_t                                      cumulative     = 0;
+    size_t                                        transfer_bytes = bytes;
     {
         std::unique_lock<std::mutex> _lk{ _mutex };
-        bytes = (cumulative_bytes += bytes);
+        auto& device_bytes = cumulative_bytes_per_device[rccl_device_idx];
+        device_bytes += bytes;
+        cumulative = device_bytes;
     }
-    const std::string track_name      = Track::label;
-    const std::string event_metadata  = "{}";
-    const size_t      stack_id        = 0;
-    const size_t      parent_stack_id = 0;
-    const size_t      correlation_id  = 0;
-    const std::string call_stack      = "{}";
-    const std::string line_info       = "{}";
-    const uint32_t    device_id       = 0;
+
+    std::string event_metadata =
+        fmt::format(R"({{"transfer_bytes":{}}})", transfer_bytes);
+
+    std::string pmc_label = fmt::format("{} GPU {}", Track::label, rccl_device_idx);
+
+    const size_t stack_id        = 0;
+    const size_t parent_stack_id = 0;
+    const size_t correlation_id  = 0;
+    const auto*  call_stack      = "{}";
+    const auto*  line_info       = "{}";
 
     trace_cache::get_buffer_storage().store(trace_cache::pmc_event_with_sample{
-        static_cast<size_t>(category_enum_id<category::comm_data>::value),
-        track_name.c_str(), timestamp_ns, event_metadata.c_str(), stack_id,
-        parent_stack_id, correlation_id, call_stack.c_str(), line_info.c_str(), device_id,
-        static_cast<uint8_t>(agent_type::CPU), track_name.c_str(),
-        static_cast<double>(cumulative_bytes) });
+        static_cast<size_t>(category_enum_id<category::comm_data>::value), Track::label,
+        timestamp_ns, event_metadata.c_str(), stack_id, parent_stack_id, correlation_id,
+        call_stack, line_info, rccl_device_idx, static_cast<uint8_t>(agent_type::GPU),
+        pmc_label.c_str(), static_cast<double>(cumulative) });
 }
 
-inline auto
+size_t
 rccl_type_size(ncclDataType_t datatype)
 {
     switch(datatype)
@@ -126,95 +200,150 @@ rccl_type_size(ncclDataType_t datatype)
     };
 }
 
+/**
+ * @brief Get device ID from RCCL communicator
+ *
+ * Dynamically loads ncclCommCuDevice() to query the device associated with
+ * the communicator. Falls back to device 0 if the function is unavailable
+ * or the query fails.
+ *
+ * @param comm The RCCL communicator
+ * @return The device ID associated with the communicator
+ */
+uint32_t
+rccl_get_device_id(ncclComm_t comm)
+{
+    if(comm == nullptr) return 0;
+
+    using ncclCommCuDevice_fn                       = ncclResult_t (*)(ncclComm_t, int*);
+    static ncclCommCuDevice_fn ncclCommCuDevice_ptr = nullptr;
+    static bool                lookup_attempted     = false;
+
+    if(!lookup_attempted)
+    {
+        lookup_attempted     = true;
+        ncclCommCuDevice_ptr = reinterpret_cast<ncclCommCuDevice_fn>(
+            dlsym(RTLD_DEFAULT, "ncclCommCuDevice"));
+        if(ncclCommCuDevice_ptr == nullptr)
+        {
+            LOG_DEBUG("ncclCommCuDevice not found via dlsym, device_id will be 0");
+        }
+    }
+
+    if(ncclCommCuDevice_ptr == nullptr) return 0;
+
+    int          device_id = 0;
+    ncclResult_t result    = ncclCommCuDevice_ptr(comm, &device_id);
+    if(result != ncclSuccess)
+    {
+        LOG_DEBUG("ncclCommCuDevice failed with error {}, using device_id 0",
+                  static_cast<int>(result));
+        return 0;
+    }
+    return static_cast<uint32_t>(device_id);
+}
+
 }  // namespace
 
-/*
- * @brief RCCL callback tracing handler
- *
- * This function processes RCCL API calls and writes the data transfer size to
- * the Perfetto counter track.
- *
- * @param record   The tracing record containing the RCCL API call information.
- * @param begin_ts The timestamp when the operation started.
- * @param end_ts   The timestamp when the operation ended.
- */
+void
+rccl_comm_data_initialize()
+{
+    static std::once_flag _once{};
+    std::call_once(_once, []() {
+        rccl_metadata_initialize_categories();
+        rccl_metadata_initialize_track<rccl_send>();
+        rccl_metadata_initialize_track<rccl_recv>();
+    });
+}
+
 void
 tool_tracing_callback_rccl(rocprofiler_callback_tracing_record_t record,
                            uint64_t begin_ts, uint64_t end_ts)
 {
     if(record.kind == ROCPROFILER_CALLBACK_TRACING_RCCL_API)
     {
+        rccl_comm_data_initialize();
+
         auto* payload =
             static_cast<rocprofiler_callback_tracing_rccl_api_data_t*>(record.payload);
 
-        size_t size    = 0;
-        bool   is_send = false;
+        size_t     size    = 0;
+        bool       is_send = false;
+        ncclComm_t comm    = nullptr;
 
-        auto set_recv = [&](size_t count, ncclDataType_t _dt) {
+        auto set_recv = [&](size_t count, ncclDataType_t _dt, ncclComm_t _comm) {
             is_send = false;
             size    = count * rccl_type_size(_dt);
+            comm    = _comm;
         };
 
-        auto set_send = [&](size_t count, ncclDataType_t _dt) {
+        auto set_send = [&](size_t count, ncclDataType_t _dt, ncclComm_t _comm) {
             is_send = true;
             size    = count * rccl_type_size(_dt);
+            comm    = _comm;
         };
 
         switch(record.operation)
         {
-            // RCCL Data Receive
             case ROCPROFILER_RCCL_API_ID_ncclAllGather:
                 set_recv(payload->args.ncclAllGather.sendcount,
-                         payload->args.ncclAllGather.datatype);
+                         payload->args.ncclAllGather.datatype,
+                         payload->args.ncclAllGather.comm);
                 break;
             case ROCPROFILER_RCCL_API_ID_ncclAllToAll:
                 set_recv(payload->args.ncclAllToAll.count,
-                         payload->args.ncclAllToAll.datatype);
+                         payload->args.ncclAllToAll.datatype,
+                         payload->args.ncclAllToAll.comm);
                 break;
             case ROCPROFILER_RCCL_API_ID_ncclAllReduce:
                 set_recv(payload->args.ncclAllReduce.count,
-                         payload->args.ncclAllReduce.datatype);
+                         payload->args.ncclAllReduce.datatype,
+                         payload->args.ncclAllReduce.comm);
                 break;
             case ROCPROFILER_RCCL_API_ID_ncclGather:
                 set_recv(payload->args.ncclGather.sendcount,
-                         payload->args.ncclGather.datatype);
+                         payload->args.ncclGather.datatype,
+                         payload->args.ncclGather.comm);
                 break;
             case ROCPROFILER_RCCL_API_ID_ncclRecv:
-                set_recv(payload->args.ncclRecv.count, payload->args.ncclRecv.datatype);
+                set_recv(payload->args.ncclRecv.count, payload->args.ncclRecv.datatype,
+                         payload->args.ncclRecv.comm);
                 break;
             case ROCPROFILER_RCCL_API_ID_ncclReduce:
                 set_recv(payload->args.ncclReduce.count,
-                         payload->args.ncclReduce.datatype);
+                         payload->args.ncclReduce.datatype,
+                         payload->args.ncclReduce.comm);
                 break;
-
-            // RCCL Data Send
             case ROCPROFILER_RCCL_API_ID_ncclBroadcast:
                 set_send(payload->args.ncclBroadcast.count,
-                         payload->args.ncclBroadcast.datatype);
+                         payload->args.ncclBroadcast.datatype,
+                         payload->args.ncclBroadcast.comm);
                 break;
             case ROCPROFILER_RCCL_API_ID_ncclReduceScatter:
                 set_send(payload->args.ncclReduceScatter.recvcount,
-                         payload->args.ncclReduceScatter.datatype);
+                         payload->args.ncclReduceScatter.datatype,
+                         payload->args.ncclReduceScatter.comm);
                 break;
             case ROCPROFILER_RCCL_API_ID_ncclSend:
-                set_send(payload->args.ncclSend.count, payload->args.ncclSend.datatype);
+                set_send(payload->args.ncclSend.count, payload->args.ncclSend.datatype,
+                         payload->args.ncclSend.comm);
                 break;
 
-            default:
-                // Skip other RCCL operations
-                break;
+            default: break;
         }
 
         if(size > 0)
         {
+            uint32_t device_id = rccl_get_device_id(comm);
+
             if(is_send)
             {
-                cache_rccl_comm_data_events<rccl_send>(size, end_ts);
+                cache_rccl_comm_data_events<rccl_send>(device_id, size, end_ts);
                 write_perfetto_counter_track<rccl_send>(size, begin_ts, end_ts);
             }
             else
             {
-                cache_rccl_comm_data_events<rccl_recv>(size, end_ts);
+                cache_rccl_comm_data_events<rccl_recv>(device_id, size, end_ts);
                 write_perfetto_counter_track<rccl_recv>(size, begin_ts, end_ts);
             }
         }

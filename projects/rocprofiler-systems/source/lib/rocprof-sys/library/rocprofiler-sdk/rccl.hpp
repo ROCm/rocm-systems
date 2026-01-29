@@ -24,9 +24,6 @@
 
 #include <rocprofiler-sdk/buffer_tracing.h>
 #include <rocprofiler-sdk/callback_tracing.h>
-// #include <rocprofiler-sdk/cxx/hash.hpp>
-// #include <rocprofiler-sdk/cxx/name_info.hpp>
-// #include <rocprofiler-sdk/cxx/operators.hpp>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/registration.h>
 
@@ -34,6 +31,9 @@ namespace rocprofsys
 {
 namespace rocprofiler_sdk
 {
+void
+rccl_comm_data_initialize();
+
 void
 tool_tracing_callback_rccl(rocprofiler_callback_tracing_record_t record,
                            uint64_t begin_ts, uint64_t end_ts);
