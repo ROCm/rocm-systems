@@ -50,7 +50,6 @@ jobs:
           sudo apt-get install -y python3-pip python3-venv
           python3 -m venv /tmp/awscli-venv
           /tmp/awscli-venv/bin/python -m pip install -U pip awscli
-          export PATH=~/.local/bin:$PATH
           KEY=$(/tmp/awscli-venv/bin/aws s3api list-objects-v2 \
                 --bucket therock-nightly-tarball \
                 --no-sign-request \
