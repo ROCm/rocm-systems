@@ -203,9 +203,9 @@ class VirtualGPU : public device::VirtualDevice {
   class ManagedBuffer : public amd::EmbeddedObject {
    public:
     //! The number of chunks the arg pool will be divided
-    static constexpr uint32_t kPoolNumSignals = 16;
-    ManagedBuffer(VirtualGPU& gpu, uint32_t pool_size)
-        : gpu_(gpu), pool_size_(pool_size), pool_signal_(kPoolNumSignals) {}
+    ManagedBuffer(VirtualGPU& gpu, uint32_t pool_size, uint32_t num_signals)
+        : gpu_(gpu), pool_size_(pool_size), pool_signal_(num_signals),
+          num_chunk_signals_(num_signals) {}
     ~ManagedBuffer();
 
     //! Allocates all necessary resources to manage memory
@@ -228,6 +228,7 @@ class VirtualGPU : public device::VirtualDevice {
     uint32_t active_chunk_ = 0;              //!< The index of the current active chunk
     uint32_t pool_cur_offset_ = 0;           //!< Current active offset for update
     std::vector<hsa_signal_t> pool_signal_;  //!< Pool of HSA signals to manage multiple chunks
+    uint32_t num_chunk_signals_;                   //!< Number of signals used per chunk
   };
   class MemoryDependency : public amd::EmbeddedObject {
    public:
@@ -621,6 +622,9 @@ class VirtualGPU : public device::VirtualDevice {
 
   ManagedBuffer managed_buffer_;          //!< Memory manager for staging copies
   ManagedBuffer managed_kernarg_buffer_;  //!< Managed memory for kernel args
+
+  static constexpr uint32_t kStagingPoolNumSignals = 4; //!< Hsa Signal count for Staging Buffer
+  static constexpr uint32_t kKernArgPoolNumSignals = 16; //!< Hsa Signal count for KernArg Buffer
 
   friend class Timestamp;
 

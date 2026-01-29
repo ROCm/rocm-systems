@@ -41,6 +41,12 @@ list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH})
 
 set(CMAKE_MODULE_PATH "${HIP_PATH}/lib/cmake/hip/" ${CMAKE_MODULE_PATH})
 set(CMAKE_HIP_ARCHITECTURES OFF)
+
+# Set RPATH for all executables built with hip_add_executable
+if(UNIX)
+  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,-rpath,${ROCM_PATH}/lib")
+endif()
+
 project(12_cmake)
 
 set(HIP_CLANG_NUM_PARALLEL_JOBS 2)

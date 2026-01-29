@@ -509,7 +509,7 @@ hipError_t ihipModuleLaunchKernel(hipFunction_t f, amd::LaunchParams& launch_par
 
   if (stopEvent != nullptr) {
     hip::Event* eStop = reinterpret_cast<hip::Event*>(stopEvent);
-    if (eStop->flags_ & hipEventDisableSystemFence) {
+    if (eStop->flags() & hipEventDisableSystemFence) {
       command->setCommandEntryScope(amd::Device::kCacheStateIgnore);
     } else {
       command->setCommandEntryScope(amd::Device::kCacheStateSystem);

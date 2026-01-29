@@ -50,6 +50,8 @@ typedef enum RcclTunableColls {
 #define RCCL_DEFAULT_MAX_NTHREADS 256 // for Simple and LL64/LL128 other archs
 #define RCCL_LL_MAX_NTHREADS 256
 #define RCCL_P2P_MAX_NTHREADS 256
+#define RCCL_MI3XX_MAX_MULTI_NODE_CHANNELS 64
+#define RCCL_MI3XX_MAX_SINGLE_NODE_CHANNELS 56
 
 typedef enum {
   RCCL_VALUE_UNSET = -2,
