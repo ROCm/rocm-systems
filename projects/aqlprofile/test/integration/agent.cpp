@@ -90,10 +90,8 @@ hsa_status_t AgentInfo::get_agent_handle_cb(hsa_agent_t agent, void* userdata)
     }
     else if (info->gfxip.find("gfx95") == 0)
     {
-        info->add_event(sq, "SQ_INSTS_VALU_FLOPS_FP16", 10, 81);
         info->add_event(sq, "SQ_INSTS_VALU_FLOPS_FP32", 10, 82);
         info->add_event(sq, "SQ_INSTS_VALU_FLOPS_FP64", 10, 83);
-        info->add_event(sq, "SQ_INSTS_VALU_FLOPS_FP16_TRANS", 10, 84);
         info->add_event(sq, "SQ_INSTS_VALU_FLOPS_FP32_TRANS", 10, 85);
         info->add_event(sq, "SQ_INSTS_VALU_FLOPS_FP64_TRANS", 10, 86);
 
