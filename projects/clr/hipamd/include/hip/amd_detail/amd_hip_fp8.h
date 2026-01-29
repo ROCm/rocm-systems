@@ -937,8 +937,8 @@ namespace hip_detail {
 
 constexpr __hip_fp8_storage_t e8m0_NaN = 0xFFU;
 constexpr __hip_internal::uint16_t bf16_NaN = 0x7FFFU;
-constexpr __hip_internal::uint32_t float_NaN = 0x7FFFFFFFU;
-constexpr __hip_internal::uint64_t double_NaN = 0x7FFFFFFFFFFFFFFFU;
+constexpr __hip_internal::uint32_t default_float_NaN = 0x7FFF0000U;
+constexpr __hip_internal::uint64_t default_double_NaN = 0x7FFF000000000000U;
 
 constexpr __hip_internal::uint16_t bf16_sig_mask = 0x007FU;
 constexpr __hip_internal::uint32_t float_sig_mask = 0x007FFFFFU;
@@ -968,7 +968,7 @@ __FP8_HOST_DEVICE_STATIC__ float __internal_cvt_e8m0_to_float(const __hip_fp8_st
       break;
     }
     case hip_detail::e8m0_NaN:
-      ret.as_int = float_NaN;
+      ret.as_int = default_float_NaN;
       break;
     default:
       ret.as_int = static_cast<__hip_internal::uint32_t>(x) << 23;
@@ -987,7 +987,7 @@ __FP8_HOST_DEVICE_STATIC__ double __internal_cvt_e8m0_to_double(const __hip_fp8_
       ret.as_int = double_half_sig_bit;
       break;
     case hip_detail::e8m0_NaN:
-      ret.as_int = double_NaN;
+      ret.as_int = default_double_NaN;
       break;
     default:
       // shift due to bias difference between double and single precision exponents
