@@ -113,6 +113,21 @@ if (BUILD_ADDRESS_SANITIZER)
   SET(GPU_TARGETS "${amdgpu_targets}")
 endif()
 
+# Modify GPU architectures for Device Linker builds by appending ":xnack+:sramecc+"
+# This ensures the device ELF has correct flags matching production builds
+if (DEVICE_LINKER_ENABLED)
+  SET(amdgpu_targets "")
+  foreach(amdgpu_target IN LISTS GPU_TARGETS)
+    if(NOT amdgpu_target STREQUAL "")
+      # Strip any existing suffixes and add the full spec
+      string(REGEX REPLACE ":.*" "" base_arch "${amdgpu_target}")
+      list(APPEND amdgpu_targets "${base_arch}:xnack+:sramecc+")
+    endif()
+  endforeach()
+  SET(GPU_TARGETS "${amdgpu_targets}")
+  message(STATUS "Device linker: modified GPU_TARGETS to ${GPU_TARGETS}")
+endif()
+
 # Check if clang compiler can offload to GPU_TARGETS
 if (COMMAND rocm_check_target_ids)
   message(STATUS "Checking for ROCm support for GPU targets: " "${GPU_TARGETS}")
@@ -1267,6 +1282,15 @@ if (DEVICE_LINKER_ENABLED)
   set(MERGED_HOST_OBJ ${CMAKE_CURRENT_BINARY_DIR}/merged_final_host.o)
   set(HIPCC_COMPILER /opt/rocm/bin/hipcc)
   
+  # Get the first GPU target for device linker (typically gfx942:xnack+:sramecc+)
+  list(GET GPU_TARGETS 0 DEVICE_LINKER_GPU_TARGET)
+  # Extract base arch (e.g., gfx942) for mcpu option
+  string(REGEX REPLACE ":.*" "" DEVICE_LINKER_GPU_BASE "${DEVICE_LINKER_GPU_TARGET}")
+  # Bundle target: hipcc reorders features alphabetically (sramecc+ before xnack+)
+  # So gfx942:xnack+:sramecc+ becomes hipv4-amdgcn-amd-amdhsa--gfx942:sramecc+:xnack+
+  set(DEVICE_LINKER_BUNDLE_TARGET "hipv4-amdgcn-amd-amdhsa--${DEVICE_LINKER_GPU_BASE}:sramecc+:xnack+")
+  message(STATUS "Device linker target: ${DEVICE_LINKER_GPU_TARGET} (bundle: ${DEVICE_LINKER_BUNDLE_TARGET})")
+  
   # The device linker pipeline must run AFTER specialized .o files are compiled
   # but BEFORE the final link. We use PRE_LINK to achieve this timing.
   # The merged_final_host.o is created during PRE_LINK, then we link it using
@@ -1276,7 +1300,7 @@ if (DEVICE_LINKER_ENABLED)
     TARGET rccl
     PRE_LINK
     # Step 0: Compile the dispatcher kernel (merged_minimal.hip) with --offload-compress
-    COMMAND ${HIPCC_COMPILER} -c -fPIC -fno-gpu-rdc --offload-arch=gfx942 --offload-compress
+    COMMAND ${HIPCC_COMPILER} -c -fPIC -fno-gpu-rdc --offload-arch=${DEVICE_LINKER_GPU_TARGET} --offload-compress
             -I${CMAKE_CURRENT_BINARY_DIR}/hipify/src/include
             -I${CMAKE_CURRENT_BINARY_DIR}/hipify/src/include/nccl_device
             -I${CMAKE_CURRENT_BINARY_DIR}/hipify/src/device
@@ -1285,23 +1309,24 @@ if (DEVICE_LINKER_ENABLED)
     # Step 0b: Extract HOST object (contains __hip_module_ctor registration code)
     # Use --allow-missing-bundles since compressed .hip_fatbin format can't be unbundled directly
     COMMAND /opt/rocm/llvm/bin/clang-offload-bundler --type=o 
-            --targets=host-x86_64-unknown-linux-gnu,hipv4-amdgcn-amd-amdhsa--gfx942
+            --targets=host-x86_64-unknown-linux-gnu,${DEVICE_LINKER_BUNDLE_TARGET}
             --input=${DEVICE_LINKER_DIR}/merged_minimal.o
             --output=${DEVICE_LINKER_DIR}/host_only.o --output=/dev/null 
             --unbundle --allow-missing-bundles
     # Step 0c: Extract DEVICE object from compressed fatbin (needed by device_linker)
     COMMAND ${Python3_EXECUTABLE} ${DEVICE_LINKER_DIR}/extract_device_from_fatbin.py
-            ${DEVICE_LINKER_DIR}/merged_minimal.o ${DEVICE_LINKER_DIR}/minimal_device.o gfx942
-    # Step 1: Run C++ device linker (replaces Python pipeline steps 1-6)
+            ${DEVICE_LINKER_DIR}/merged_minimal.o ${DEVICE_LINKER_DIR}/minimal_device.o ${DEVICE_LINKER_GPU_TARGET}
+    # Step 1: Run C++ device linker to merge device code (uses lld internally to create DYN)
     COMMAND ${DEVICE_LINKER_DIR}/device_linker
             -o ${DEVICE_LINKER_DIR}/merged_device_final.o
             --dispatcher ${DEVICE_LINKER_DIR}/minimal_device.o
             --host-table ${CMAKE_CURRENT_BINARY_DIR}/hipify/gensrc/host_table.cpp
+            --target ${DEVICE_LINKER_GPU_BASE}:sramecc+:xnack+
             --input-dir ${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/rccl.dir/hipify/gensrc/specialized/
-    # Step 7: Bundle host code with our merged device code
+    # Step 3: Bundle host code with our merged device code
     # This creates __CLANG_OFFLOAD_BUNDLE__* sections that the linker can process
     COMMAND /opt/rocm/llvm/bin/clang-offload-bundler --type=o 
-            --targets=host-x86_64-unknown-linux-gnu,hipv4-amdgcn-amd-amdhsa--gfx942
+            --targets=host-x86_64-unknown-linux-gnu,${DEVICE_LINKER_BUNDLE_TARGET}
             --input=${DEVICE_LINKER_DIR}/host_only.o 
             --input=${DEVICE_LINKER_DIR}/merged_device_final.o
             --output=${MERGED_HOST_OBJ}

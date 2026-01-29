@@ -116,6 +116,35 @@ def extract_from_ccob(data: bytes, target_arch: str) -> bytes:
     return extract_from_uncompressed(decompressed, target_arch)
 
 
+def normalize_arch(arch: str) -> tuple:
+    """Normalize arch string to (base_arch, set of features)."""
+    # Strip any prefix like hipv4-amdgcn-amd-amdhsa--
+    if '--' in arch:
+        arch = arch.split('--')[-1]
+    
+    parts = arch.split(':')
+    base = parts[0]
+    features = set(parts[1:]) if len(parts) > 1 else set()
+    return base, features
+
+
+def arch_matches(target_arch: str, bundle_target: str) -> bool:
+    """Check if target_arch matches bundle_target, ignoring feature order."""
+    base1, feat1 = normalize_arch(target_arch)
+    base2, feat2 = normalize_arch(bundle_target)
+    
+    # Base arch must match
+    if base1 != base2:
+        return False
+    
+    # If no features specified in target_arch, match any bundle with same base
+    if not feat1:
+        return True
+    
+    # Otherwise features must match (order independent)
+    return feat1 == feat2
+
+
 def extract_from_uncompressed(data: bytes, target_arch: str) -> bytes:
     """Extract device code from uncompressed __CLANG_OFFLOAD_BUNDLE__ format."""
     magic = data[0:24]
@@ -136,7 +165,7 @@ def extract_from_uncompressed(data: bytes, target_arch: str) -> bytes:
         
         print(f"  Bundle {i}: '{target}' offset={bundle_offset} size={bundle_size}")
         
-        if target_arch in target and bundle_size > 0:
+        if arch_matches(target_arch, target) and bundle_size > 0:
             return data[bundle_offset:bundle_offset + bundle_size]
     
     return None
