@@ -123,7 +123,11 @@ class EventAttribDimension {
     if (num_aid > 1) dimensions.push_back({"AID", num_aid});
 
     if (workgroup_processor)
+    {
       dimensions.push_back({"WGP", wgp_num});
+      if(bIsGFX11)
+        dimensions.push_back({"INSTANCE", block_instance_count});
+    }
     else
       dimensions.push_back({"INSTANCE", block_instance_count});
 

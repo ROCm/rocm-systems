@@ -24,6 +24,7 @@
 #include "core/common.hpp"
 #include "core/config.hpp"
 #include "core/state.hpp"
+#include "core/timemory.hpp"
 #include "library/runtime.hpp"
 
 #include <timemory/backends/threading.hpp>
@@ -32,9 +33,11 @@
 
 #include "logger/debug.hpp"
 
+#include <spdlog/fmt/ranges.h>
+
 #include <cstddef>
-#include <cstdio>
 #include <cstdlib>
+#include <tuple>
 #include <unistd.h>
 
 namespace rocprofsys
@@ -65,13 +68,13 @@ invoke_exit_gotcha(const exit_gotcha::gotcha_data& _data, FuncT _func, Args... _
     if(get_state() < State::Finalized && !is_child_process())
     {
         LOG_DEBUG("Finalizing {} before calling {}({})...", get_exe_name(), _data.tool_id,
-                  JOIN(", ", _args...).c_str());
+                  fmt::join(std::forward_as_tuple(_args...), ", "));
 
         rocprofsys_finalize();
     }
 
-    LOG_DEBUG("Calling {}({}) in {}...", _data.tool_id, JOIN(", ", _args...),
-              get_exe_name());
+    LOG_DEBUG("Calling {}({}) in {}...", _data.tool_id,
+              fmt::join(std::forward_as_tuple(_args...), ", "), get_exe_name().c_str());
 
     if(_exit_info.is_known && _exit_info.exit_code != 0)
     {
@@ -89,26 +92,6 @@ void
 exit_gotcha::operator()(const gotcha_data& _data, exit_func_t _func, int _ec) const
 {
     _exit_info = { true, _data.tool_id.find("quick") != std::string::npos, _ec };
-
-    if(config::get_use_amd_smi())
-    {
-        threading::clear_callbacks();
-
-        if(get_state() < ::rocprofsys::State::Finalized && !is_child_process())
-        {
-            LOG_DEBUG("Finalizing {} before calling {}({})...", get_exe_name(),
-                      _data.tool_id, _ec);
-
-            rocprofsys_finalize();
-        }
-
-        LOG_DEBUG("Calling _exit({}) in {} to avoid AMD SMI cleanup issues...", _ec,
-                  get_exe_name().c_str());
-
-        std::fflush(nullptr);
-        _exit(_ec);
-    }
-
     invoke_exit_gotcha(_data, _func, _ec);
 }
 

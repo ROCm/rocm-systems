@@ -110,6 +110,7 @@ target_sources(amdhip64 PRIVATE
   hip_graph.cpp
   hip_hmm.cpp
   hip_intercept.cpp
+  hip_log.cpp
   hip_memory.cpp
   hip_mempool.cpp
   hip_mempool_impl.cpp
@@ -177,6 +178,19 @@ endif()
 
 if(DISABLE_DIRECT_DISPATCH)
   target_compile_definitions(amdhip64 PRIVATE DISABLE_DIRECT_DISPATCH)
+endif()
+
+# Optional rocm-kpack support for kpack split artifacts
+# This option will be enabled permanently at a future point and gates the use
+# of the rocm-kpack library for detecting ROCm multi-arch archives in
+# distributions of ROCm so that the CLR can load them just as it would normal
+# fat binaries. See the WIP repo: https://github.com/ROCm/rocm-kpack (which
+# will be migrated to rocm-systems when ready).
+option(ROCM_KPACK_ENABLED "Enable kpack runtime loading for split device code" OFF)
+if(ROCM_KPACK_ENABLED)
+  find_package(rocm-kpack REQUIRED)
+  target_compile_definitions(amdhip64 PRIVATE ROCM_KPACK_ENABLED=1)
+  target_link_libraries(amdhip64 PRIVATE rocm::rocm_kpack)
 endif()
 
 # Short-Term solution for pre-compiled headers for online compilation
