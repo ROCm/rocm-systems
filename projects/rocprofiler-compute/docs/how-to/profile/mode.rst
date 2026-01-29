@@ -300,11 +300,13 @@ Examples:
     ├── roofline.csv
     └── sysinfo.csv
 
+Profiling without MPI at host ``amd-ryzen``:
+
 .. code-block:: shell-session
 
    $ rocprof-compute profile --output-directory /tmp/profiles/%hostname%/%rank% -- ./vcopy -n 1048576 -b 256
 
-   $ tree /tmp/profiles/<hostname>/0
+   $ tree /tmp/profiles/amd-ryzen/0
 
    └── MI200
     ├── empirRoof_gpu-0_FP32.html
@@ -1128,7 +1130,7 @@ The example above produces:
     └── sysinfo.csv
 
 To control output placement explicitly, add ``%rank%`` (and other placeholders)
-to your output directory:
+to your output directory. The following example is run on the host `amd-ryzen`:
 
 .. code-block:: shell-session
 
@@ -1137,7 +1139,7 @@ to your output directory:
    $ ls /tmp/mpi_profile
    0  1  2  3
 
-   $ tree /tmp/mpi_profile/hostname/0
+   $ tree /tmp/mpi_profile/amd-ryzen/0
 
    └── MI200
     ├── empirRoof_gpu-0_FP32.html
@@ -1172,3 +1174,17 @@ to your output directory:
     ├── profiling_config.yaml
     ├── roofline.csv
     └── sysinfo.csv
+
+.. note::
+   For profiling multi-rank workloads with MPI communication, use ``--iteration-multiplexing`` and do not turn on PC sampling with `-b 21`.
+
+ROCm Compute Profiler supports the following libraries, APIs and job schedulers:
+
+* OpenMPI
+* MPICH
+* MVAPICH2 
+* Slurm
+* Flux Core
+* PMI
+* PMIx
+* PALS
