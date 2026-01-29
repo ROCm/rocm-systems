@@ -1336,6 +1336,7 @@ def process_rocprofv3_output(workload_dir: str, using_native_tool: bool) -> list
 
     return results_files_csv
 
+
 @demarcate
 def save_torch_trace_inputs(
     workload_dir: str,
@@ -1447,7 +1448,6 @@ def process_torch_trace_output(
             f"Removed previous torch_trace directory: {workload_dir}/torch_trace"
         )
 
-
     # Join marker and counter data
     def _merge_pair(
         marker_path: Path,
@@ -1557,6 +1557,7 @@ def process_torch_trace_output(
             console_debug(f"Removed temporary torch trace file: {trace_file}")
         except OSError as e:
             console_warning(f"Error removing temporary file {trace_file}: {e}")
+
 
 @demarcate
 def process_kokkos_trace_output(workload_dir: str, fbase: str) -> None:
