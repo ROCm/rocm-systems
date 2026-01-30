@@ -54,7 +54,7 @@ from utils.utils import (
     merge_counters_spatial_multiplex,
     process_torch_trace_output,
 )
-from utils.utils import process_torch_trace_output
+
 # the build-in config to list kernel names purpose only
 TOP_STATS_BUILD_IN_CONFIG: OrderedDict[int, dict[str, Any]] = OrderedDict([
     (
@@ -191,6 +191,8 @@ class OmniAnalyze_Base:
     @demarcate
     def list_torch_operators(self) -> None:
         """List PyTorch operators or show operator-to-kernel mapping and exit."""
+        if not self.__args.path or not self.__args.path[0]:
+            console_error("'--path' to be specified")
         workload_path = (
             self.__args.path[0][0]
             if isinstance(self.__args.path[0], list)
