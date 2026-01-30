@@ -22,13 +22,12 @@ THE SOFTWARE.
 #include <stdlib.h>
 #include <fcntl.h>
 #include <errno.h>
-#include <atomic>
-#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <map>
 #include <string>
+#include <vector>
 
 #if defined(_WIN32)
 #include <io.h>
@@ -177,32 +176,21 @@ struct CaptureStream {
 #endif
 
 struct CaptureIR {
- private:
-  static inline std::atomic<uint64_t> dump_counter{0};
-
  public:
   std::filesystem::path CreateDumpDir() {
     std::error_code ec;
-    std::filesystem::path base = std::filesystem::current_path(ec) / "ir_dumps";
+    std::filesystem::path base = std::filesystem::current_path(ec);
     if (ec) {
       return {};
     }
-    std::filesystem::create_directories(base, ec);
-    if (ec) {
+    std::string template_path = (base / "ir_dumps_XXXXXX").string();
+    std::vector<char> buffer(template_path.begin(), template_path.end());
+    buffer.push_back('\0');
+    char* result = mkdtemp(buffer.data());
+    if (result == nullptr) {
       return {};
     }
-    for (int attempt = 0; attempt < 50; ++attempt) {
-      uint64_t counter = dump_counter.fetch_add(1, std::memory_order_relaxed);
-      auto stamp = std::chrono::duration_cast<std::chrono::microseconds>(
-                       std::chrono::system_clock::now().time_since_epoch())
-                       .count();
-      std::filesystem::path dir =
-          base / ("dump_" + std::to_string(stamp) + "_" + std::to_string(counter));
-      if (std::filesystem::create_directory(dir, ec)) {
-        return dir;
-      }
-    }
-    return {};
+    return std::filesystem::path(result);
   }
 
   void Cleanup(const std::filesystem::path& dir) {
@@ -239,7 +227,7 @@ struct CaptureIR {
         data.assign((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
       }
     }
-    std::filesystem::remove_all(dir, ec);
+    Cleanup(dir);
     return data;
   }
 };

@@ -1086,12 +1086,12 @@ bool check_slp_vectorize_disabled(const char** Combination_CO, int Combination_C
   if (data.find("contract <2 x half>", 0) != -1) {
     times++;
   }
-  //int start = data.find("contract <2 x half>", 0) + 1;
-  //while (data.find("contract <2 x half>", start) != -1) {
-  //  times++;
-  //  start = data.find("contract <2 x half>", start) + 1;
- // }
-  if (times == 1) {
+  int start = data.find("contract <2 x half>", 0) + 1;
+  while (data.find("contract <2 x half>", start) != -1) {
+    times++;
+    start = data.find("contract <2 x half>", start) + 1;
+  }
+  if (times == 2) {
     return 1;
   } else if (times < 1) {
     WARN("Compiler option : " << retrieved_CO);
