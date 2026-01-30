@@ -70,20 +70,16 @@ def pytest_addoption(parser):
 def binary_handler_profile_rocprof_compute(request):
     def _handler(
         config,
-        workload_dir=None,
+        workload_dir,
         options=[],
         check_success=True,
         roof=False,
         app_name="app_1",
         attach_detach_para=None,
         skip_app_name=False,
-        default_workload_dir=None,
+        workload_dir_type="output_directory", # ["default", "output_directory"],
+        num_mpi_ranks=None,
     ):
-        if workload_dir is None and default_workload_dir is None:
-            if check_success:
-                return False
-            return 1
-
         if request.config.getoption("--rocprofiler-sdk-tool-path"):
             options.extend(
                 [
@@ -104,7 +100,7 @@ def binary_handler_profile_rocprof_compute(request):
 
             command_rocprof_compute = baseline_opts + options
 
-            if workload_dir is not None:
+            if workload_dir_type == "output_directory":
                 command_rocprof_compute = command_rocprof_compute + [
                     "--output-directory",
                     workload_dir,
@@ -125,15 +121,12 @@ def binary_handler_profile_rocprof_compute(request):
                         str(attach_detach_para["attach-duration-msec"]),
                     ]
 
-            if workload_dir is None and default_workload_dir is not None:
-                # Create workload directory if it does not exist
-                p = Path(default_workload_dir)
-                if not p.exists():
-                    try:
-                        p.mkdir(parents=True, exist_ok=False)
-                    except FileExistsError:
-                        sys.exit(1)
-                os.chdir(default_workload_dir)
+            if num_mpi_ranks is not None:
+                command_rocprof_compute = [
+                    "mpirun",
+                    "-np",
+                    str(num_mpi_ranks),
+                ] + command_rocprof_compute
 
             process = subprocess.run(
                 command_rocprof_compute,
@@ -156,7 +149,7 @@ def binary_handler_profile_rocprof_compute(request):
 
             command_rocprof_compute = baseline_opts + options
 
-            if workload_dir is not None:
+            if workload_dir_type == "output_directory":
                 command_rocprof_compute = command_rocprof_compute + [
                     "--output-directory",
                     workload_dir,
@@ -177,15 +170,12 @@ def binary_handler_profile_rocprof_compute(request):
                         str(attach_detach_para["attach-duration-msec"]),
                     ]
 
-            if workload_dir is None and default_workload_dir is not None:
-                # Create workload directory if it does not exist
-                p = Path(default_workload_dir)
-                if not p.exists():
-                    try:
-                        p.mkdir(parents=True, exist_ok=False)
-                    except FileExistsError:
-                        sys.exit(1)
-                os.chdir(default_workload_dir)
+            if num_mpi_ranks is not None:
+                command_rocprof_compute = [
+                    "mpirun",
+                    "-np",
+                    str(num_mpi_ranks),
+                ] + command_rocprof_compute
 
             with pytest.raises(SystemExit) as e:
                 with patch(

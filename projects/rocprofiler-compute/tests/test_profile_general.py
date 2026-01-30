@@ -236,23 +236,6 @@ os.environ["ROCPROF"] = "rocprofiler-sdk"
 Baseline_dir = str(Path("tests/workloads/vcopy/" + soc).resolve())
 
 
-class MockProfiler:
-    def __init__(self, *args, **kwargs):
-        pass
-
-    def run_profiling(self, *args, **kwargs):
-        pass
-
-    def sanitize(self, *args, **kwargs):
-        pass
-
-    def pre_processing(self, *args, **kwargs):
-        pass
-
-    def post_processing(self, *args, **kwargs):
-        pass
-
-
 def log_counter(file_dict, test_name):
     for file in file_dict.keys():
         if file == "pmc_perf.csv" or "SQ" in file:
@@ -772,9 +755,32 @@ def test_path_csv(
 @pytest.mark.path
 def test_output_directory(binary_handler_profile_rocprof_compute, monkeypatch):
     """Test output directory creation"""
+    class MockProfiler:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def run_profiling(self, *args, **kwargs):
+            pass
+
+        def sanitize(self, *args, **kwargs):
+            pass
+
+        def pre_processing(self, *args, **kwargs):
+            pass
+
+        def post_processing(self, *args, **kwargs):
+            pass
+
     from rocprof_compute_base import RocProfCompute
 
-    workload_base_dir = test_utils.get_output_dir()
+    def switch_workload_directory(workload_dir):
+        """Change the workload directory"""
+        p = Path(workload_dir)
+        if not p.exists():
+            p.mkdir(parents=True, exist_ok=True)
+        os.chdir(workload_dir)
+
+    original_cwd = os.getcwd()
 
     with patch(
         "rocprof_compute_base.RocProfCompute.create_profiler",
@@ -783,11 +789,13 @@ def test_output_directory(binary_handler_profile_rocprof_compute, monkeypatch):
         # Check with hostname
         hostname = "test_node"
         with patch("socket.gethostname", return_value=hostname):
-            workload_dir = os.path.join(workload_base_dir, "%hostname%_output")
+            workload_base_dir = test_utils.get_output_dir(param_id="hostname")
+            workload_dir = os.path.join(workload_base_dir, "%hostname%")
+            print("workload_dir:", workload_dir)
             binary_handler_profile_rocprof_compute(config, workload_dir)
             workload_dir = workload_dir.replace("%hostname%", hostname)
             assert os.path.exists(workload_dir)
-            test_utils.clean_output_dir(config["cleanup"], workload_dir)
+            test_utils.clean_output_dir(config["cleanup"], workload_base_dir)
 
         # Check with gpumodel
         gpumodel = "MIXXX"
@@ -807,11 +815,12 @@ def test_output_directory(binary_handler_profile_rocprof_compute, monkeypatch):
             self._RocProfCompute__soc[gpuarch] = MockSoc()
 
         with patch.object(RocProfCompute, "load_soc_specs", new=mock_load_soc_specs):
+            workload_base_dir = test_utils.get_output_dir(param_id="gpumodel")
             workload_dir = os.path.join(workload_base_dir, "%gpumodel%_output")
             binary_handler_profile_rocprof_compute(config, workload_dir)
             workload_dir = workload_dir.replace("%gpumodel%", gpumodel)
             assert os.path.exists(workload_dir)
-            test_utils.clean_output_dir(config["cleanup"], workload_dir)
+            test_utils.clean_output_dir(config["cleanup"], workload_base_dir)
 
         # Check for MPI rank
         rank_env_vars = [
@@ -832,38 +841,42 @@ def test_output_directory(binary_handler_profile_rocprof_compute, monkeypatch):
             monkeypatch.delenv(key, raising=False)
 
         # Check with no rank set
+        workload_base_dir = test_utils.get_output_dir(param_id="no_rank")
         workload_dir = os.path.join(workload_base_dir, "%rank%_output")
         binary_handler_profile_rocprof_compute(config, workload_dir)
         workload_dir = workload_dir.replace("%rank%", "0")
         assert os.path.exists(workload_dir)
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        test_utils.clean_output_dir(config["cleanup"], workload_base_dir)
 
         # Check with rank set
         for key in rank_env_vars:
             monkeypatch.setenv(key, rank)
+            workload_base_dir = test_utils.get_output_dir(param_id=f"rank_env_{key}")
             workload_dir = os.path.join(workload_base_dir, "%rank%_output")
             binary_handler_profile_rocprof_compute(config, workload_dir)
             workload_dir = workload_dir.replace("%rank%", rank)
             assert os.path.exists(workload_dir)
-            test_utils.clean_output_dir(config["cleanup"], workload_dir)
+            test_utils.clean_output_dir(config["cleanup"], workload_base_dir)
             monkeypatch.delenv(key, raising=False)
 
         # Check with environment variable
         monkeypatch.setenv("ENV_1", "custom_env")
+        workload_base_dir = test_utils.get_output_dir(param_id="env")
         workload_dir = os.path.join(workload_base_dir, "%env{ENV_1}%")
         binary_handler_profile_rocprof_compute(config, workload_dir)
         workload_dir = workload_dir.replace("%env{ENV_1}%", "custom_env")
         assert os.path.exists(workload_dir)
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        test_utils.clean_output_dir(config["cleanup"], workload_base_dir)
         monkeypatch.delenv("ENV_1", raising=False)
 
         # Check when environment variable is not set
         monkeypatch.delenv("ENV_2", raising=False)
+        workload_base_dir = test_utils.get_output_dir(param_id="no_env")
         workload_dir = os.path.join(workload_base_dir, "%env{ENV_2}%")
         binary_handler_profile_rocprof_compute(config, workload_dir)
         workload_dir = workload_dir.replace("%env{ENV_2}%", "")
         assert os.path.exists(workload_dir)
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        test_utils.clean_output_dir(config["cleanup"], workload_base_dir)
 
         # Check with all patterns combined
         with (
@@ -872,6 +885,7 @@ def test_output_directory(binary_handler_profile_rocprof_compute, monkeypatch):
         ):
             monkeypatch.setenv("ENV_1", "custom_env")
             monkeypatch.setenv("OMPI_COMM_WORLD_RANK", rank)
+            workload_base_dir = test_utils.get_output_dir(param_id="host_gpu_env_rank")
             workload_dir = os.path.join(
                 workload_base_dir,
                 "%hostname%_%gpumodel%_%env{ENV_1}%_%rank%_output",
@@ -885,7 +899,7 @@ def test_output_directory(binary_handler_profile_rocprof_compute, monkeypatch):
                 .replace("%rank%", rank)
             )
             assert os.path.exists(workload_dir)
-            test_utils.clean_output_dir(config["cleanup"], workload_dir)
+            test_utils.clean_output_dir(config["cleanup"], workload_base_dir)
             monkeypatch.delenv("OMPI_COMM_WORLD_RANK", raising=False)
             monkeypatch.delenv("ENV_1", raising=False)
 
@@ -894,27 +908,31 @@ def test_output_directory(binary_handler_profile_rocprof_compute, monkeypatch):
         ):
             # With rank set and default output directory
             monkeypatch.setenv("PMI_RANK", rank)
+            workload_dir = test_utils.get_output_dir(param_id="rank_def_dir")
+            switch_workload_directory(workload_dir)
             binary_handler_profile_rocprof_compute(
-                config, default_workload_dir=workload_base_dir
+                config, workload_dir=workload_dir, workload_dir_type="default"
             )
-            os.chdir("..")
             workload_dir = os.path.join(
-                workload_base_dir,
+                workload_dir,
                 "workloads",
                 "app_1",
                 rank,
             )
+            os.chdir(original_cwd)
             assert os.path.exists(workload_dir)
             test_utils.clean_output_dir(config["cleanup"], workload_dir)
             monkeypatch.delenv("PMI_RANK", raising=False)
 
             # With no rank set and default output directory
+            workload_dir = test_utils.get_output_dir(param_id="no_rank_def_dir")
+            switch_workload_directory(workload_dir)
             binary_handler_profile_rocprof_compute(
-                config, default_workload_dir=workload_base_dir
+                config, workload_dir=workload_dir, workload_dir_type="default"
             )
-            os.chdir("..")
+            os.chdir(original_cwd)
             workload_dir = os.path.join(
-                workload_base_dir,
+                workload_dir,
                 "workloads",
                 "app_1",
                 gpumodel,
@@ -923,8 +941,9 @@ def test_output_directory(binary_handler_profile_rocprof_compute, monkeypatch):
             test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
             # With no name but with output directory
+            workload_dir = test_utils.get_output_dir(param_id="dir_no_name")
             workload_dir = os.path.join(
-                workload_base_dir,
+                workload_dir,
                 "app_1",
             )
             binary_handler_profile_rocprof_compute(
@@ -934,15 +953,15 @@ def test_output_directory(binary_handler_profile_rocprof_compute, monkeypatch):
             test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
             # With no name and output directory
+            workload_dir = test_utils.get_output_dir(param_id="no_name_no_dir")
             error_code = binary_handler_profile_rocprof_compute(
                 config,
                 skip_app_name=True,
-                default_workload_dir=workload_base_dir,
+                workload_dir=workload_dir,
                 check_success=False,
+                workload_dir_type="default"
             )
             assert error_code == 1
-
-    test_utils.clean_output_dir(config["cleanup"], workload_base_dir)
 
 
 @pytest.mark.roofline_1
@@ -3189,51 +3208,24 @@ if __name__ == "__main__":
     )
 
 
+skip_if_no_mpi = pytest.mark.skipif(
+    shutil.which("mpirun") is None, reason="mpirun is not available"
+)
+
+
+@skip_if_no_mpi
 @pytest.mark.multi_rank
-def test_multi_rank_profiling():
-    if shutil.which("mpirun") is None:
-        pytest.skip("mpirun is not available")
-
-    root_dir = Path(__file__).resolve().parents[1]
-    rocprof_cmd = [str(root_dir / "src/rocprof-compute")]
-
-    workload_base_dir = test_utils.get_output_dir()
+def test_multi_rank_profiling_no_mpi_comm(binary_handler_profile_rocprof_compute):
+    workload_dir = test_utils.get_output_dir()
 
     num_ranks = 2
-    num_devices = 1
-    num_kernels = 4
 
-    baseline_cmd = [
-        "mpirun",
-        "-n",
-        str(num_ranks),
-        *rocprof_cmd,
-        "profile",
-        "--no-roof",
-    ]
-
-    # Test without MPI-aware workload
-    occupancy_path = root_dir / "tests" / "occupancy"
-    if not occupancy_path.exists():
-        pytest.skip("occupancy test binary not available")
-
-    workload_dir = str(Path(workload_base_dir) / "occupancy")
-
-    cmd = (
-        baseline_cmd
-        + [
-            "--output-directory",
-            workload_dir,
-            "--",
-        ]
-        + config["app_occupancy"]
-    )
-    proc = subprocess.run(cmd, text=True, capture_output=True)
-    assert proc.returncode == 0
+    binary_handler_profile_rocprof_compute(config, workload_dir, num_mpi_ranks=num_ranks)
 
     for rank in range(num_ranks):
         rank_dir = Path(workload_dir) / str(rank)
         assert rank_dir.exists(), f"Rank directory {rank_dir} does not exist"
+
         file_dict = test_utils.check_csv_files(str(rank_dir), num_devices, num_kernels)
 
         if soc == "MI100":
@@ -3255,50 +3247,3 @@ def test_multi_rank_profiling():
         )
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
-
-    # Test with MPI-aware workload
-    laplace_path = root_dir / "tests" / "laplace_eqn"
-    if not laplace_path.exists():
-        pytest.skip("laplace_eqn test binary not available")
-
-    workload_dir = str(Path(workload_base_dir) / "laplace_eqn")
-
-    cmd = (
-        baseline_cmd
-        + [
-            "--output-directory",
-            workload_dir,
-            "--iteration-multiplexing",
-            "--",
-        ]
-        + config["app_laplace_eqn"]
-    )
-    proc = subprocess.run(cmd, text=True, capture_output=True)
-    assert proc.returncode == 0
-
-    for rank in range(num_ranks):
-        rank_dir = Path(workload_dir) / str(rank)
-        assert rank_dir.exists(), f"Rank directory {rank_dir} does not exist"
-        file_dict = test_utils.check_csv_files(str(rank_dir), num_devices, num_kernels)
-
-        if soc == "MI100":
-            assert sorted(list(file_dict.keys())) == CSVS
-        elif soc == "MI200":
-            assert sorted(list(file_dict.keys())) == CSVS
-        elif "MI300" in soc:
-            assert sorted(list(file_dict.keys())) == CSVS
-        elif "MI350" in soc:
-            assert sorted(list(file_dict.keys())) == CSVS
-        else:
-            print(f"Testing isn't supported yet for {soc}")
-            assert 0
-
-        validate(
-            inspect.stack()[0][3],
-            str(rank_dir),
-            file_dict,
-        )
-
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
-
-    test_utils.clean_output_dir(config["cleanup"], workload_base_dir)
