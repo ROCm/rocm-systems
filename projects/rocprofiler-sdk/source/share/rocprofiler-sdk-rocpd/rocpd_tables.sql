@@ -401,6 +401,6 @@ CREATE TABLE IF NOT EXISTS
 INSERT INTO
     `rocpd_metadata{{uuid}}` ("tag", "value")
 VALUES
-    ("schema_version", "3"),
+    ("schema_version", "4"),
     ("uuid", "{{uuid}}"),
     ("guid", "{{guid}}");
