@@ -229,17 +229,22 @@ Instead of manually configuring numerous options, use preset modes optimized for
 - **`--detailed`** - Full trace with hardware counters
 - **`--trace-hpc`** - Optimized for HPC/MPI/OpenMP applications
   - Automatically enables OMPT, MPIP, and relevant hardware counters
-- **`--trace-ai`** - Optimized for AI/ML/GPU workloads (PyTorch, TensorFlow, JAX)
+- **`--workload-trace`** - Optimized for AI/ML/GPU workloads which are supported by ROCm stack
   - Automatically enables GPU tracing, RCCL, and increases buffer sizes
+- **`--trace-gpu`** - GPU workload analysis with host functions, MPI, and device activity
+- **`--trace-openmp`** - OpenMP offload workloads with HSA domains
+- **`--profile-mpi`** - MPI communication latency profiling
+- **`--trace-hw-counters`** - Hardware counter collection during execution
+  - Automatically enables tracing VALU utilization
+- **`--sys-trace`** - Comprehensive system API tracing
+- **`--runtime-trace`** - Runtime API tracing
+  - Excludes compiler and low-level HSA
 
 **Example:**
 
 ```bash
 # HPC application with MPI
 mpirun -n 4 rocprof-sys-sample --trace-hpc -- ./mpi_app
-
-# AI/ML application
-rocprof-sys-sample --trace-ai -- python train.py
 
 # Quick profiling any application
 rocprof-sys-sample --quick -- ./myapp

@@ -238,10 +238,10 @@ validate_preset_modes(const std::vector<std::string>& active_presets)
     if(active_presets.size() > 1)
     {
         std::cerr << "\nERROR: Multiple preset modes specified: ";
-        for(const auto& active_perset : active_presets)
+        for(const auto& active_preset : active_presets)
         {
-            std::cerr << active_perset;
-            if(active_perset != active_presets.back()) std::cerr << ", ";
+            std::cerr << active_preset;
+            if(active_preset != active_presets.back()) std::cerr << ", ";
         }
         std::cerr << "\n\n";
 
