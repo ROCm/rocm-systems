@@ -34,6 +34,7 @@ from utils.logger import console_error, console_log, demarcate
 from utils.utils import resolve_rocm_library_path
 
 
+
 class rocprofiler_sdk_profiler(RocProfCompute_Base):
     def __init__(
         self,
