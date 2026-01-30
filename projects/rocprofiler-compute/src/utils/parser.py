@@ -2027,6 +2027,21 @@ def load_non_mertrics_table(
 
     workload.dfs.update(tmp)
 
+@demarcate
+def load_torch_trace_data(workload, dir_path):
+    """
+    Loads all torch operator CSVs from torch_trace directory into workload.torch_operators.
+    """
+    torch_trace_dir = Path(dir_path) / "torch_trace"
+    workload.torch_operators = {}
+    if torch_trace_dir.exists() and torch_trace_dir.is_dir():
+        for csv_file in torch_trace_dir.glob("*.csv"):
+            operator_name = csv_file.stem  # filename without .csv
+            try:
+                df = pd.read_csv(csv_file)
+                workload.torch_operators[operator_name] = df
+            except Exception as e:
+                console_warning(f"Could not load {csv_file}: {e}")
 
 @demarcate
 def load_torch_trace_data(workload: schema.Workload, dir_path: str) -> None:
