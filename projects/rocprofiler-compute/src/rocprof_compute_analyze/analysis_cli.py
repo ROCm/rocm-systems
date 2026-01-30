@@ -105,7 +105,6 @@ class cli_analysis(OmniAnalyze_Base):
                 console_error(
                     "No torch operators found in the profiling data. "
                     "Please ensure that profile mode is run with '--torch-trace' and"
-                    "analyze mode is run with '--list-torch-operators' flag"
                     " analyze mode is run with '--list-torch-operators' flag"
                     " before using '--torch-operator'."
                 )
