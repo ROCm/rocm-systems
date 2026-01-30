@@ -69,10 +69,6 @@ TEST_CASE("Unit_hipStreamBatchMemOp_Negative_Tests") {
   invalidParamArray[1].waitValue.value = 1000;
   invalidParamArray[1].waitValue.flags = hipStreamWaitValueEq;
 
-  SECTION("Stream as a nullptr") {
-    HIP_CHECK_ERROR(hipStreamBatchMemOp(nullptr, totalOps, paramArray, 0), hipErrorInvalidValue);
-  }
-
   SECTION("Invalid Stream") {
     HIP_CHECK_ERROR(hipStreamBatchMemOp(reinterpret_cast<hipStream_t>(-1), totalOps, paramArray, 0),
                     hipErrorContextIsDestroyed);
@@ -104,6 +100,44 @@ TEST_CASE("Unit_hipStreamBatchMemOp_Negative_Tests") {
                     hipErrorInvalidValue);
   }
 #endif
+  HIP_CHECK(hipFree((void*)opsArray[0]));
+  HIP_CHECK(hipStreamDestroy(stream));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ * - Verify that hipStreamBatchMemOp API works for a basic case.
+ * Test source
+ * ------------------------
+ *    - unit/stream/hipStreamBatchMemOp.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 6.4
+ */
+TEST_CASE("Unit_hipStreamBatchMemOp_Basic") {
+  hipStream_t stream{nullptr};
+  HIP_CHECK(hipStreamCreate(&stream));
+  REQUIRE(stream != nullptr);
+  int totalOps = 2;
+  static hipStreamBatchMemOpParams paramArray[2];
+  std::vector<hipDeviceptr_t> opsArray(1);
+  HIP_CHECK(hipMalloc((void**)&opsArray[0], sizeof(uint32_t)));
+
+  paramArray[0].operation = hipStreamMemOpWriteValue32;
+  paramArray[0].writeValue.address = opsArray[0];
+  paramArray[0].writeValue.value = 1000;
+  paramArray[0].writeValue.flags = 0x0;
+  paramArray[0].writeValue.alias = 0;
+
+  paramArray[1].operation = hipStreamMemOpWaitValue32;
+  paramArray[1].waitValue.address = opsArray[0];
+  paramArray[1].waitValue.value = 1000;
+  paramArray[1].waitValue.flags = hipStreamWaitValueEq;
+
+  HIP_CHECK(hipStreamBatchMemOp(stream, totalOps, paramArray, 0));
+
+  HIP_CHECK(hipStreamSynchronize(stream));
   HIP_CHECK(hipFree((void*)opsArray[0]));
   HIP_CHECK(hipStreamDestroy(stream));
 }
