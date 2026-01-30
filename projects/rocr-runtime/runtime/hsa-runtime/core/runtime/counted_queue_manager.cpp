@@ -11,11 +11,10 @@
 namespace rocr {
 namespace core {
 
-constexpr size_t DEFAULT_QUEUE_SIZE = 16384;
-
 CountedQueuePoolManager::CountedQueuePoolManager(core::Agent* agent) : agent_(agent) {
-  // Read in GPU_MAX_HW_QUEUES flag value
+  // Read in GPU_MAX_HW_QUEUES and HSA_COUNTED_QUEUE_SIZE flags
   max_hw_queues_ = core::Runtime::runtime_singleton_->flag().cp_queues_limit();
+  counted_queue_size_ = core::Runtime::runtime_singleton_->flag().counted_queue_size();
 }
 
 hsa_status_t CountedQueuePoolManager::AcquireQueue(
@@ -78,7 +77,7 @@ core::Queue* CountedQueuePoolManager::FindOrCreateHardwareQueue(
   // Create a new hardware queue
   core::Queue* cmd_queue = nullptr;
   hsa_status_t status =
-      agent_->QueueCreate(DEFAULT_QUEUE_SIZE, type, 0, callback, data, 0, 0, &cmd_queue);
+      agent_->QueueCreate(counted_queue_size_, type, 0, callback, data, 0, 0, &cmd_queue);
   if (status != HSA_STATUS_SUCCESS) return nullptr;
 
   status = cmd_queue->SetPriority(priority);
