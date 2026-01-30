@@ -108,6 +108,10 @@ mfma_kernel_selector = {
     "I8": "mfma_i8",
 }
 
+# Number of FMA operations per thread iteration in VALU benchmark.
+# This controls the compute intensity - higher values stress compute throughput.
+VALU_NFMA = 1024
+
 # Some data types have different rates. Set the number of iterations
 # to keep running time under control.
 flops_kernel_iterations = {
@@ -120,12 +124,12 @@ flops_kernel_iterations = {
 }
 
 flops_kernel_selector = {
-    "FP16": ["flops_benchmark<_Float16, 1024>", sizeof(c_short)],
-    "FP32": ["flops_benchmark<float, 1024>", sizeof(c_float)],
-    "FP64": ["flops_benchmark<double, 1024>", sizeof(c_double)],
-    "INT8": ["flops_benchmark<char, 1024>", sizeof(c_int8)],
-    "INT32": ["flops_benchmark<int, 1024>", sizeof(c_int32)],
-    "INT64": ["flops_benchmark<long, 1024>", sizeof(c_int64)],
+    "FP16": [f"flops_benchmark<_Float16, {VALU_NFMA}>", sizeof(c_short)],
+    "FP32": [f"flops_benchmark<float, {VALU_NFMA}>", sizeof(c_float)],
+    "FP64": [f"flops_benchmark<double, {VALU_NFMA}>", sizeof(c_double)],
+    "INT8": [f"flops_benchmark<char, {VALU_NFMA}>", sizeof(c_int8)],
+    "INT32": [f"flops_benchmark<int, {VALU_NFMA}>", sizeof(c_int32)],
+    "INT64": [f"flops_benchmark<long, {VALU_NFMA}>", sizeof(c_int64)],
 }
 
 mfma_ops = {
@@ -581,6 +585,8 @@ template<typename T> using vec4 = vecT<T, 4>;
 template<typename T, int nFMA>
 __global__ void flops_benchmark(T *buf, int count)
 {
+    static_assert(nFMA % 4 == 0, "nFMA must be divisible by 4 for vec4 operations");
+    
     const T k = (T)1.1;
 
     const int grid_size = gridDim.x * blockDim.x;
@@ -606,7 +612,7 @@ __global__ void flops_benchmark(T *buf, int count)
 
 
 def flops_bench(device: int, type: str, unit: str, rate: int) -> PerfMetrics:
-    nFMA = 1024
+    nFMA = VALU_NFMA
     num_experiments = DEFAULT_NUM_EXPERIMENTS
     workgroup_size = DEFAULT_WORKGROUP_SIZE
     cus = hip.hipGetDeviceProperties(device).multiProcessorCount
