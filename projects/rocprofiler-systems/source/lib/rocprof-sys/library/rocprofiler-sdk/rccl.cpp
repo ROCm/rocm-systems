@@ -91,20 +91,17 @@ rccl_metadata_initialize_pmc_for_gpu(uint32_t rccl_device_idx)
     [[maybe_unused]] const auto* MSG         = "bytes";
     [[maybe_unused]] const auto* TARGET_ARCH = "GPU";
 
-    std::string send_label = fmt::format("{} GPU {}", rccl_send::label, rccl_device_idx);
-    std::string recv_label = fmt::format("{} GPU {}", rccl_recv::label, rccl_device_idx);
+    auto register_rccl_info = [&](const char* direction_label, const char* description) {
+        std::string label = fmt::format("{} GPU {}", direction_label, rccl_device_idx);
+        trace_cache::get_metadata_registry().add_pmc_info(
+            { agent_type::GPU, rccl_device_idx, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+              label.c_str(), description, trait::name<category::comm_data>::description,
+              LONG_DESCRIPTION, COMPONENT, MSG, trace_cache::ABSOLUTE, BLOCK, EXPRESSION,
+              0, 0 });
+    };
 
-    trace_cache::get_metadata_registry().add_pmc_info(
-        { agent_type::GPU, rccl_device_idx, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-          send_label.c_str(), "Tracks RCCL communication data sizes (send)",
-          trait::name<category::comm_data>::description, LONG_DESCRIPTION, COMPONENT, MSG,
-          trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0 });
-
-    trace_cache::get_metadata_registry().add_pmc_info(
-        { agent_type::GPU, rccl_device_idx, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-          recv_label.c_str(), "Tracks RCCL communication data sizes (recv)",
-          trait::name<category::comm_data>::description, LONG_DESCRIPTION, COMPONENT, MSG,
-          trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0 });
+    register_rccl_info(rccl_send::label, "Tracks RCCL communication data sizes (send)");
+    register_rccl_info(rccl_recv::label, "Tracks RCCL communication data sizes (recv)");
 }
 
 template <typename Track>
@@ -213,32 +210,36 @@ rccl_type_size(ncclDataType_t datatype)
 uint32_t
 rccl_get_device_id(ncclComm_t comm)
 {
-    if(comm == nullptr) return 0;
+    constexpr uint32_t DEFAULT_DEVICE_ID = 0;
 
-    using ncclCommCuDevice_fn                       = ncclResult_t (*)(ncclComm_t, int*);
+    if(comm == nullptr) return DEFAULT_DEVICE_ID;
+
+    using ncclCommCuDevice_fn = ncclResult_t (*)(ncclComm_t, int*);
+
     static ncclCommCuDevice_fn ncclCommCuDevice_ptr = nullptr;
-    static bool                lookup_attempted     = false;
+    static std::once_flag      lookup_flag;
 
-    if(!lookup_attempted)
-    {
-        lookup_attempted     = true;
+    std::call_once(lookup_flag, []() {
         ncclCommCuDevice_ptr = reinterpret_cast<ncclCommCuDevice_fn>(
             dlsym(RTLD_DEFAULT, "ncclCommCuDevice"));
         if(ncclCommCuDevice_ptr == nullptr)
         {
-            LOG_DEBUG("ncclCommCuDevice not found via dlsym, device_id will be 0");
+            const char* error = dlerror();
+            LOG_DEBUG(
+                "ncclCommCuDevice not found via dlsym ({}), using default device_id",
+                error ? error : "unknown error");
         }
-    }
+    });
 
-    if(ncclCommCuDevice_ptr == nullptr) return 0;
+    if(ncclCommCuDevice_ptr == nullptr) return DEFAULT_DEVICE_ID;
 
     int          device_id = 0;
     ncclResult_t result    = ncclCommCuDevice_ptr(comm, &device_id);
     if(result != ncclSuccess)
     {
-        LOG_DEBUG("ncclCommCuDevice failed with error {}, using device_id 0",
+        LOG_DEBUG("ncclCommCuDevice failed with error {}, using default device_id",
                   static_cast<int>(result));
-        return 0;
+        return DEFAULT_DEVICE_ID;
     }
     return static_cast<uint32_t>(device_id);
 }
@@ -332,7 +333,7 @@ tool_tracing_callback_rccl(rocprofiler_callback_tracing_record_t record,
             default: break;
         }
 
-        if(size > 0)
+        if(size > 0 && comm != nullptr)
         {
             uint32_t device_id = rccl_get_device_id(comm);
 
