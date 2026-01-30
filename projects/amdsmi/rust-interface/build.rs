@@ -116,20 +116,18 @@ fn get_amdsmi_lib_dir() -> Result<String> {
 
     Err(std::io::Error::new(
         std::io::ErrorKind::NotFound,
-        format!(
-            "Could not find libamd_smi.so. Please ensure AMD-SMI is installed.\n\
-             \n\
-             Search locations tried:\n\
-             1. AMDSMI_LIB_DIR environment variable (not set or invalid)\n\
-             2. ./lib/ subdirectory (not found)\n\
-             3. pkg-config amd_smi (not found or not configured)\n\
-             4. /opt/rocm*/lib/ (not found)\n\
-             \n\
-             To fix this, either:\n\
-             - Install ROCm: https://rocm.docs.amd.com/projects/install-on-linux/en/latest/\n\
-             - Set AMDSMI_LIB_DIR to point to the directory containing libamd_smi.so\n\
-             - Build AMD-SMI from source and install it"
-        ),
+        "Could not find libamd_smi.so. Please ensure AMD-SMI is installed.\n\
+         \n\
+         Search locations tried:\n\
+         1. AMDSMI_LIB_DIR environment variable (not set or invalid)\n\
+         2. ./lib/ subdirectory (not found)\n\
+         3. pkg-config amd_smi (not found or not configured)\n\
+         4. /opt/rocm*/lib/ (not found)\n\
+         \n\
+         To fix this, either:\n\
+         - Install ROCm: https://rocm.docs.amd.com/projects/install-on-linux/en/latest/\n\
+         - Set AMDSMI_LIB_DIR to point to the directory containing libamd_smi.so\n\
+         - Build AMD-SMI from source and install it",
     ))
 }
 

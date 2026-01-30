@@ -24,6 +24,14 @@
 // is a false positive for this common FFI pattern where the pointers are never
 // dereferenced in Rust code - they're opaque handles managed by the C library.
 #![allow(clippy::not_unsafe_ptr_arg_deref)]
+
+// Suppress warnings from auto-generated bindgen code in amdsmi_wrapper.rs.
+// These are inherent to bindgen's output for bitfield structs and enum naming.
+#![allow(clippy::useless_transmute)]
+#![allow(clippy::unnecessary_cast)]
+#![allow(clippy::enum_variant_names)]
+#![allow(clippy::empty_docs)]
+
 mod amdsmi_wrapper;
 
 #[macro_use]
