@@ -1451,7 +1451,8 @@ struct_amdsmi_proc_info_t._fields_ = [
     ('container_name', ctypes.c_char * 256),
     ('cu_occupancy', ctypes.c_uint32),
     ('evicted_time', ctypes.c_uint32),
-    ('reserved', ctypes.c_uint32 * 10),
+    ('sdma_usage', ctypes.c_uint64),
+    ('reserved', ctypes.c_uint32 * 9),
 ]
 
 amdsmi_proc_info_t = struct_amdsmi_proc_info_t
