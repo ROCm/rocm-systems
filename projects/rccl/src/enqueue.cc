@@ -1013,7 +1013,9 @@ static ncclResult_t addP2pToPlan(
   bool proxySameProcess[2] = {true, true};
   void** handles[2] = {NULL, NULL};
   auto batchP2PEnableEnv = rcclParamP2pBatchEnable();
-  bool batchP2P =  batchP2PEnableEnv && recvBytes <= rcclParamP2pBatchThreshold() && sendBytes <= rcclParamP2pBatchThreshold();
+  auto p2pBatchThreshold = rcclParamP2pBatchThreshold();
+  bool belowThreshold = (recvBytes <= p2pBatchThreshold) && (sendBytes <= p2pBatchThreshold);
+  bool batchP2P =  batchP2PEnableEnv && (sendBytes == recvBytes) && belowThreshold;
   //ncclP2pChannelBaseForRound now computes channel-base based on batching enablement (env. variable RCCL_P2P_BATCH_ENABLE=1)
   //but batching is only applicable if msg size is below threshold which is not checked below
   //this causes perf. dips in some cases but also boosts in other cases even when no batching happens because msg size is above threshold
