@@ -2470,14 +2470,12 @@ void Runtime::Unload() {
   asyncExceptions_.reset();
 
   if (vm_fault_signal_ != nullptr) {
-    vm_fault_signal_->DestroySignal();
     vm_fault_signal_.reset();
   }
   
   vm_fault_event_.reset();
 
   if (hw_exception_signal_ != nullptr) {
-    hw_exception_signal_->DestroySignal();
     hw_exception_signal_.reset();
   }
   
