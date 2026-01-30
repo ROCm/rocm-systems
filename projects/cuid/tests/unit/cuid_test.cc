@@ -22,6 +22,12 @@
 
 #include <gtest/gtest.h>
 #include "include/amd_cuid.h"
+#include "src/cuid_file.h"
+#include <thread>
+#include <atomic>
+#include <chrono>
+#include <sys/wait.h>
+#include <unistd.h>
 
 // unit test public ABI functions here
 
@@ -186,4 +192,214 @@ TEST(CUIDHMACTest, SetHashKey) {
 
 TEST(CUIDHMACTest, GenerateHashKey) {
     test_generate_hash_key();
+}
+
+// ============================================================================
+// CuidFileLock Tests
+// ============================================================================
+
+// Test basic lock acquisition and release
+void test_file_lock_basic() {
+    const std::string test_file = "/tmp/cuid_test_lock_basic";
+    
+    // Test exclusive lock
+    {
+        CuidFileLock lock(test_file, CuidLockType::EXCLUSIVE);
+        EXPECT_FALSE(lock.is_locked());
+        EXPECT_TRUE(lock.acquire());
+        EXPECT_TRUE(lock.is_locked());
+        lock.release();
+        EXPECT_FALSE(lock.is_locked());
+    }
+    
+    // Test shared lock
+    {
+        CuidFileLock lock(test_file, CuidLockType::SHARED);
+        EXPECT_FALSE(lock.is_locked());
+        EXPECT_TRUE(lock.acquire());
+        EXPECT_TRUE(lock.is_locked());
+        // Lock should be released by destructor
+    }
+    
+    // Clean up
+    unlink((test_file + ".lock").c_str());
+}
+
+// Test RAII - lock released on scope exit
+void test_file_lock_raii() {
+    const std::string test_file = "/tmp/cuid_test_lock_raii";
+    
+    {
+        CuidFileLock lock(test_file, CuidLockType::EXCLUSIVE);
+        EXPECT_TRUE(lock.acquire());
+        EXPECT_TRUE(lock.is_locked());
+        // Scope ends here - destructor should release lock
+    }
+    
+    // Now we should be able to acquire again immediately
+    {
+        CuidFileLock lock(test_file, CuidLockType::EXCLUSIVE);
+        EXPECT_TRUE(lock.try_acquire());  // Should succeed immediately
+        EXPECT_TRUE(lock.is_locked());
+    }
+    
+    // Clean up
+    unlink((test_file + ".lock").c_str());
+}
+
+// Test that multiple shared locks can be acquired simultaneously
+void test_file_lock_multiple_shared() {
+    const std::string test_file = "/tmp/cuid_test_lock_shared";
+    
+    CuidFileLock lock1(test_file, CuidLockType::SHARED);
+    CuidFileLock lock2(test_file, CuidLockType::SHARED);
+    
+    EXPECT_TRUE(lock1.acquire());
+    EXPECT_TRUE(lock2.try_acquire());  // Should succeed - shared locks are compatible
+    
+    EXPECT_TRUE(lock1.is_locked());
+    EXPECT_TRUE(lock2.is_locked());
+    
+    // Clean up
+    unlink((test_file + ".lock").c_str());
+}
+
+// Test that exclusive lock blocks other locks (using fork for true multi-process test)
+void test_file_lock_exclusive_blocks() {
+    const std::string test_file = "/tmp/cuid_test_lock_exclusive";
+    
+    // Clean up from any previous run
+    unlink((test_file + ".lock").c_str());
+    
+    pid_t pid = fork();
+    
+    if (pid == 0) {
+        // Child process: acquire exclusive lock and hold it
+        CuidFileLock lock(test_file, CuidLockType::EXCLUSIVE);
+        if (!lock.acquire()) {
+            _exit(1);  // Failed to acquire lock
+        }
+        
+        // Hold lock for 500ms
+        usleep(500000);
+        _exit(0);
+    } else if (pid > 0) {
+        // Parent process: wait a bit, then try to acquire
+        usleep(100000);  // 100ms - let child acquire first
+        
+        CuidFileLock lock(test_file, CuidLockType::EXCLUSIVE);
+        
+        // try_acquire should fail because child holds exclusive lock
+        EXPECT_FALSE(lock.try_acquire());
+        
+        // Wait for child to finish
+        int status;
+        waitpid(pid, &status, 0);
+        EXPECT_TRUE(WIFEXITED(status));
+        EXPECT_EQ(WEXITSTATUS(status), 0);
+        
+        // Now lock should be available
+        EXPECT_TRUE(lock.try_acquire());
+    } else {
+        FAIL() << "fork() failed";
+    }
+    
+    // Clean up
+    unlink((test_file + ".lock").c_str());
+}
+
+// Test timeout functionality
+void test_file_lock_timeout() {
+    const std::string test_file = "/tmp/cuid_test_lock_timeout";
+    
+    // Clean up from any previous run
+    unlink((test_file + ".lock").c_str());
+    
+    pid_t pid = fork();
+    
+    if (pid == 0) {
+        // Child process: acquire exclusive lock and hold it for 2 seconds
+        CuidFileLock lock(test_file, CuidLockType::EXCLUSIVE);
+        if (!lock.acquire()) {
+            _exit(1);
+        }
+        sleep(2);
+        _exit(0);
+    } else if (pid > 0) {
+        // Parent process: wait a bit, then try to acquire with timeout
+        usleep(100000);  // 100ms - let child acquire first
+        
+        CuidFileLock lock(test_file, CuidLockType::EXCLUSIVE);
+        
+        // 1 second timeout should fail (child holds for 2 seconds)
+        auto start = std::chrono::steady_clock::now();
+        bool acquired = lock.acquire_with_timeout(1);
+        auto elapsed = std::chrono::steady_clock::now() - start;
+        
+        EXPECT_FALSE(acquired);
+        // Should have waited approximately 1 second
+        EXPECT_GE(std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count(), 900);
+        EXPECT_LE(std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count(), 1500);
+        
+        // Wait for child to finish
+        int status;
+        waitpid(pid, &status, 0);
+        
+        // Now should be able to acquire
+        EXPECT_TRUE(lock.acquire_with_timeout(1));
+    } else {
+        FAIL() << "fork() failed";
+    }
+    
+    // Clean up
+    unlink((test_file + ".lock").c_str());
+}
+
+// Test timeout with 0 (non-blocking) and -1 (infinite)
+void test_file_lock_timeout_special_cases() {
+    const std::string test_file = "/tmp/cuid_test_lock_timeout_special";
+    
+    // Clean up
+    unlink((test_file + ".lock").c_str());
+    
+    // Test timeout=0 (should behave like try_acquire)
+    {
+        CuidFileLock lock(test_file, CuidLockType::EXCLUSIVE);
+        EXPECT_TRUE(lock.acquire_with_timeout(0));  // Should succeed immediately
+        EXPECT_TRUE(lock.is_locked());
+    }
+    
+    // Test timeout=-1 (should behave like acquire - infinite wait)
+    {
+        CuidFileLock lock(test_file, CuidLockType::EXCLUSIVE);
+        EXPECT_TRUE(lock.acquire_with_timeout(-1));  // Should succeed
+        EXPECT_TRUE(lock.is_locked());
+    }
+    
+    // Clean up
+    unlink((test_file + ".lock").c_str());
+}
+
+TEST(CUIDFileLockTest, BasicLockAcquireRelease) {
+    test_file_lock_basic();
+}
+
+TEST(CUIDFileLockTest, RAIIAutoRelease) {
+    test_file_lock_raii();
+}
+
+TEST(CUIDFileLockTest, MultipleSharedLocks) {
+    test_file_lock_multiple_shared();
+}
+
+TEST(CUIDFileLockTest, ExclusiveLockBlocks) {
+    test_file_lock_exclusive_blocks();
+}
+
+TEST(CUIDFileLockTest, AcquireWithTimeout) {
+    test_file_lock_timeout();
+}
+
+TEST(CUIDFileLockTest, TimeoutSpecialCases) {
+    test_file_lock_timeout_special_cases();
 }
