@@ -1327,9 +1327,11 @@ def process_torch_trace_output(
     workload_dir: str,
 ) -> None:
     """
-    Creates PyTorch operator trace from counter_collection and marker_api_trace data.
+    Joins counter_collection and marker_api_trace data.
         - Performs inner join on Correlation_Id, filtering out unmatched entries
-        - Output file is saved to workload root, not the temporary out/ directory
+        - Consolidates data across passes
+        - Groups by Operator_Name, saving one CSV per operator
+        - Output file is saved to workload/torch_trace/ directory
     """
     # marker_trace_csv_file_path = f"{workload_dir}/out/pmc_1/"
     # Find all marker_api_trace CSV files
