@@ -642,7 +642,7 @@ function(CHECK_ROCMINFO _REGEX _RESULT_VARIABLE)
         set(_failure TRUE)
     endif()
 
-    if(DEFINED ARG_GET_OUTPUT)
+    if(ARG_GET_OUTPUT)
         if(NOT _failure)
             set(${_RESULT_VARIABLE} "${rocminfo_OUTPUT}" PARENT_SCOPE)
         else()
