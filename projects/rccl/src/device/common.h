@@ -12,9 +12,20 @@
 #include "device.h"
 #include "op128.h"
 #include "reduce_kernel.h"
-#ifndef NCCL_SPECIALIZED_KERNEL
+#if !defined(NCCL_SPECIALIZED_KERNEL) && !defined(DEVICE_LINKER)
 #include "device_table.h"
 #endif
+
+#if defined(DEVICE_LINKER_DISPATCH) || (defined(DEVICE_LINKER) && defined(USE_INDIRECT_FUNCTION_CALL))
+// Function table declarations for device linker dispatch
+// Tables are defined in common.cu, device linker populates them
+#define FUNC_COUNT 859
+typedef void(*ncclDevFuncPtr_t)();
+extern __device__ ncclDevFuncPtr_t ncclDevFuncTable_1[FUNC_COUNT];
+extern __device__ ncclDevFuncPtr_t ncclDevFuncTable_2[FUNC_COUNT];
+extern __device__ ncclDevFuncPtr_t ncclDevFuncTable_4[FUNC_COUNT];
+#endif
+
 #include "network/unpack/unpack_defs.h"
 #define NCCL_MAX_DEV_ARITY (NCCL_MAX_TREE_ARITY-1)  // Using balanced tree instead of split tree
 
@@ -691,7 +702,7 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
     if (0 <= SpecializedFnId && ncclShmem.funcId == (unsigned)SpecializedFnId) {
       SpecializedRunWorkBatch().run();
     } else {
-#ifdef USE_INDIRECT_FUNCTION_CALL
+#if defined(USE_INDIRECT_FUNCTION_CALL) || defined(DEVICE_LINKER_DISPATCH)
       if (COLL_UNROLL == 1)
         ncclDevFuncTable_1[ncclShmem.funcId]();
       else if (COLL_UNROLL == 2)

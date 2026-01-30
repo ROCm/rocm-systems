@@ -106,15 +106,16 @@ if (BUILD_ADDRESS_SANITIZER)
   SET(GPU_TARGETS "${amdgpu_targets}")
 endif()
 
-# Modify GPU architectures for Device Linker builds by appending ":xnack+:sramecc+"
-# This ensures the device ELF has correct flags matching production builds
+# Modify GPU architectures for Device Linker builds by appending ":xnack-:sramecc+"
+# This ensures the device ELF has correct flags matching the target GPUs
+# Note: Most production MI300X systems use xnack- (disabled)
 if (DEVICE_LINKER)
   SET(amdgpu_targets "")
   foreach(amdgpu_target IN LISTS GPU_TARGETS)
     if(NOT amdgpu_target STREQUAL "")
       # Strip any existing suffixes and add the full spec
       string(REGEX REPLACE ":.*" "" base_arch "${amdgpu_target}")
-      list(APPEND amdgpu_targets "${base_arch}:xnack+:sramecc+")
+      list(APPEND amdgpu_targets "${base_arch}:xnack-:sramecc+")
     endif()
   endforeach()
   SET(GPU_TARGETS "${amdgpu_targets}")
@@ -918,7 +919,7 @@ if (gen_py_result)
 endif()
 
 if (DEVICE_LINKER)
-  message(STATUS "DEVICE_LINKER mode: building specialized kernels with merged dispatcher")
+  message(STATUS "DEVICE_LINKER mode: building skeleton library with merged dispatcher")
   # Convert GPU_TARGETS list to semicolon-separated string for Python
   string(REPLACE ";" ";" GPU_TARGETS_STR "${GPU_TARGETS}")
   execute_process(
@@ -930,14 +931,10 @@ if (DEVICE_LINKER)
   if (gen_specialized_result)
     message(WARNING "Specialized kernel generation failed: ${gen_specialized_error}")
   else()
+    # Store specialized kernel files for separate compilation (NOT added to HIP_SOURCES)
+    # This creates skeleton librccl.so without specialized kernel device code
     file(GLOB SPECIALIZED_KERNEL_FILES "${GEN_DIR}/specialized/*.cpp")
-    foreach(file ${SPECIALIZED_KERNEL_FILES})
-      list(APPEND HIP_SOURCES ${file})
-    endforeach()
-    if (SPECIALIZED_KERNEL_FILES)
-      set_source_files_properties(${SPECIALIZED_KERNEL_FILES} PROPERTIES COMPILE_OPTIONS "-fno-gpu-rdc")
-    endif()
-    message(STATUS "Specialized kernels: ${SPECIALIZED_KERNEL_FILES}")
+    message(STATUS "Specialized kernels (separate compilation): ${SPECIALIZED_KERNEL_FILES}")
   endif()
 endif()
 
@@ -981,9 +978,16 @@ void* const ncclSymkKernelList[] = { nullptr };
     message(STATUS "DEVICE_LINKER: added sym_kernels_stub.cpp (GENERATE_SYM_KERNELS=OFF)")
   endif()
   
-  # Remove common.cu from HIP_SOURCES (it contains generic kernels)
-  list(FILTER HIP_SOURCES EXCLUDE REGEX ".*common\\.cu\\.cpp$")
-  message(STATUS "DEVICE_LINKER: excluded common.cu (generic kernels)")
+  # Exclude common.cu - it will be compiled separately using the device linker pipeline
+  # The device linker compiles common.cu with the 5-step pipeline (Option B)
+  list(FILTER HIP_SOURCES EXCLUDE REGEX "common\\.cu\\.cpp$")
+  message(STATUS "DEVICE_LINKER: excluding common.cu (will be built with device linker pipeline)")
+  
+  # Exclude onerank.cu to have single fatbin (multiple fatbins cause multi-GPU crashes)
+  list(FILTER HIP_SOURCES EXCLUDE REGEX "onerank\\.cu\\.cpp$")
+  # Add stub for ncclLaunchOneRank function
+  list(APPEND HIP_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/device/onerank_stub.cpp")
+  message(STATUS "DEVICE_LINKER: excluding onerank.cu, using stub (single-fatbin mode)")
 else()
   # Normal mode: add all generated files
   file(GLOB_RECURSE GENERATED_FILES "${GEN_DIR}/*")
@@ -1068,9 +1072,9 @@ if(ENABLE_ROCSHMEM)
   target_compile_definitions(rccl PRIVATE ENABLE_ROCSHMEM)
 endif()
 if(DEVICE_LINKER)
-  target_compile_definitions(rccl PRIVATE DEVICE_LINKER)
+  target_compile_definitions(rccl PRIVATE DEVICE_LINKER USE_INDIRECT_FUNCTION_CALL)
   target_include_directories(rccl PRIVATE ${GEN_DIR}/specialized)
-  message(STATUS "DEVICE_LINKER mode enabled")
+  message(STATUS "DEVICE_LINKER mode enabled (using indirect function call dispatch)")
 endif()
 
 # ==== rocSHMEM integration (optional) ====
@@ -1267,70 +1271,85 @@ if (IFC_ENABLED)
   target_compile_definitions(rccl PRIVATE USE_INDIRECT_FUNCTION_CALL)
 endif()
 
-# Device linker pipeline - merge specialized device code into single image
+# Device linker pipeline - compile specialized kernels separately, bundle into single object
 if (DEVICE_LINKER)
   
   set(DEVICE_LINKER_DIR ${CMAKE_CURRENT_SOURCE_DIR}/tools/device_linker)
-  set(MERGED_HOST_OBJ ${CMAKE_CURRENT_BINARY_DIR}/merged_final_host.o)
+  set(SPECIALIZED_OBJ_DIR ${CMAKE_CURRENT_BINARY_DIR}/specialized_objs)
+  set(FINAL_DISPATCH_OBJ ${CMAKE_CURRENT_BINARY_DIR}/final_dispatch.o)
   set(HIPCC_COMPILER /opt/rocm/bin/hipcc)
   
-  # Get the first GPU target for device linker (typically gfx942:xnack+:sramecc+)
+  # Get the first GPU target for device linker
   list(GET GPU_TARGETS 0 DEVICE_LINKER_GPU_TARGET)
-  # Extract base arch (e.g., gfx942) for mcpu option
   string(REGEX REPLACE ":.*" "" DEVICE_LINKER_GPU_BASE "${DEVICE_LINKER_GPU_TARGET}")
-  # Bundle target: hipcc reorders features alphabetically (sramecc+ before xnack+)
-  # So gfx942:xnack+:sramecc+ becomes hipv4-amdgcn-amd-amdhsa--gfx942:sramecc+:xnack+
-  set(DEVICE_LINKER_BUNDLE_TARGET "hipv4-amdgcn-amd-amdhsa--${DEVICE_LINKER_GPU_BASE}:sramecc+:xnack+")
+  set(DEVICE_LINKER_BUNDLE_TARGET "hipv4-amdgcn-amd-amdhsa--${DEVICE_LINKER_GPU_BASE}:sramecc+:xnack-")
   message(STATUS "Device linker target: ${DEVICE_LINKER_GPU_TARGET} (bundle: ${DEVICE_LINKER_BUNDLE_TARGET})")
   
-  # The device linker pipeline must run AFTER specialized .o files are compiled
-  # but BEFORE the final link. We use PRE_LINK to achieve this timing.
-  # The merged_final_host.o is created during PRE_LINK, then we link it using
-  # LINK_FLAGS instead of target_link_libraries to avoid dependency issues.
+  # Create directory for specialized kernel objects
+  file(MAKE_DIRECTORY ${SPECIALIZED_OBJ_DIR})
+  
+  # Step 1: Compile specialized kernels separately (NOT linked into rccl)
+  # These .o files are only used by the device linker
+  set(SPECIALIZED_OBJECTS "")
+  foreach(src ${SPECIALIZED_KERNEL_FILES})
+    get_filename_component(name ${src} NAME_WE)
+    set(obj ${SPECIALIZED_OBJ_DIR}/${name}.o)
+    list(APPEND SPECIALIZED_OBJECTS ${obj})
+    # Build compile definitions for specialized kernels
+    set(SPEC_KERNEL_DEFS -DDEVICE_LINKER -DENABLE_FAULT_INJECTION)
+    if(LL128_ENABLED)
+      list(APPEND SPEC_KERNEL_DEFS -DENABLE_LL128)
+    endif()
+    add_custom_command(
+      OUTPUT ${obj}
+      COMMAND ${HIPCC_COMPILER} -c -fPIC -fno-gpu-rdc --offload-arch=${DEVICE_LINKER_GPU_TARGET}
+              ${SPEC_KERNEL_DEFS}
+              -I${CMAKE_CURRENT_BINARY_DIR}/hipify/src
+              -I${CMAKE_CURRENT_BINARY_DIR}/hipify/src/include
+              -I${CMAKE_CURRENT_BINARY_DIR}/hipify/src/include/nccl_device
+              -I${CMAKE_CURRENT_BINARY_DIR}/hipify/src/include/plugin
+              -I${CMAKE_CURRENT_BINARY_DIR}/hipify/src/device
+              -I${CMAKE_CURRENT_BINARY_DIR}/hipify/gensrc
+              -I${PROJECT_BINARY_DIR}/include
+              ${src} -o ${obj}
+      DEPENDS ${src} hipify_all
+      COMMENT "Compiling specialized kernel: ${name}"
+    )
+  endforeach()
+  add_custom_target(specialized_kernels DEPENDS ${SPECIALIZED_OBJECTS})
+  
+  # Option B: Build dispatcher using 5-step device linker pipeline
+  # This compiles common.cu separately and merges with specialized kernels
+  set(DEVICE_LINKER_OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/device_linker_output)
+  set(DISPATCHER_FINAL_OBJ ${DEVICE_LINKER_OUTPUT_DIR}/dispatcher_final.o)
   
   add_custom_command(
-    TARGET rccl
-    PRE_LINK
-    # Step 0: Compile the dispatcher kernel (merged_minimal.hip)
-    COMMAND ${HIPCC_COMPILER} -c -fPIC -fno-gpu-rdc --offload-arch=${DEVICE_LINKER_GPU_TARGET}
-            -I${CMAKE_CURRENT_BINARY_DIR}/hipify/src/include
-            -I${CMAKE_CURRENT_BINARY_DIR}/hipify/src/include/nccl_device
-            -I${CMAKE_CURRENT_BINARY_DIR}/hipify/src/device
-            ${DEVICE_LINKER_DIR}/merged_minimal.hip 
-            -o ${DEVICE_LINKER_DIR}/merged_minimal.o
-    # Step 0b: Extract .hip_fatbin section to temp file
-    COMMAND /opt/rocm/llvm/bin/llvm-objcopy
-            --dump-section=.hip_fatbin=${DEVICE_LINKER_DIR}/fatbin.bin
-            ${DEVICE_LINKER_DIR}/merged_minimal.o
-    # Step 0c: Unbundle to get device ELF (host bundle is empty)
-    COMMAND /opt/rocm/llvm/bin/clang-offload-bundler --type=bc
-            --targets=host-x86_64-unknown-linux-gnu-,${DEVICE_LINKER_BUNDLE_TARGET}
-            --input=${DEVICE_LINKER_DIR}/fatbin.bin
-            --output=/dev/null --output=${DEVICE_LINKER_DIR}/minimal_device.o
-            --unbundle
-    # Step 1: Run C++ device linker to merge device code (uses lld internally to create DYN)
-    COMMAND ${DEVICE_LINKER_DIR}/device_linker
-            -o ${DEVICE_LINKER_DIR}/merged_device_final.o
-            --dispatcher ${DEVICE_LINKER_DIR}/minimal_device.o
-            --host-table ${CMAKE_CURRENT_BINARY_DIR}/hipify/gensrc/host_table.cpp
-            --target ${DEVICE_LINKER_GPU_BASE}:sramecc+:xnack+
-            --input-dir ${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/rccl.dir/hipify/gensrc/specialized/
-    # Step 3: Bundle host code with our merged device code
-    # This creates __CLANG_OFFLOAD_BUNDLE__* sections that the linker can process
-    COMMAND /opt/rocm/llvm/bin/clang-offload-bundler --type=o 
-            --targets=host-x86_64-unknown-linux-gnu,${DEVICE_LINKER_BUNDLE_TARGET}
-            --input=${DEVICE_LINKER_DIR}/merged_minimal.o 
-            --input=${DEVICE_LINKER_DIR}/merged_device_final.o
-            --output=${MERGED_HOST_OBJ}
+    OUTPUT ${DISPATCHER_FINAL_OBJ}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${DEVICE_LINKER_OUTPUT_DIR}
+    COMMAND ${DEVICE_LINKER_DIR}/build_with_device_linker.sh
+            ${CMAKE_CURRENT_BINARY_DIR}
+            ${DEVICE_LINKER_GPU_TARGET}
+    DEPENDS 
+      specialized_kernels
+      ${DEVICE_LINKER_DIR}/device_linker
+      ${DEVICE_LINKER_DIR}/build_with_device_linker.sh
+      ${CMAKE_CURRENT_BINARY_DIR}/hipify/src/device/common.cu.cpp
+      hipify_all
     WORKING_DIRECTORY ${DEVICE_LINKER_DIR}
-    COMMENT "Running device linker pipeline to create merged kernel object"
+    COMMENT "Building dispatcher with device linker (Option B: 5-step pipeline)"
     VERBATIM
   )
   
-  # Add the merged object to link flags (instead of target_link_libraries to avoid dependency issues)
-  target_link_options(rccl PRIVATE ${MERGED_HOST_OBJ})
+  add_custom_target(device_linker_dispatcher DEPENDS ${DISPATCHER_FINAL_OBJ})
   
-  message(STATUS "Device linker mode enabled - pipeline will run after specialized kernel compilation")
+  # DEVICE_LINKER mode: Exclude onerank.cu to have single fatbin
+  # Onerank is an optimization for single-rank operations - not needed for multi-GPU
+  # Use stub instead to provide ncclLaunchOneRank function
+  # Link the dispatcher object into rccl
+  target_link_libraries(rccl PRIVATE ${DISPATCHER_FINAL_OBJ})
+  add_dependencies(rccl device_linker_dispatcher)
+  
+  message(STATUS "Device linker mode: Option B (5-step pipeline with -fcuda-include-gpubinary)")
 endif()
 if(DEMANGLE_DIR)
   target_compile_definitions(rccl PRIVATE "HAVE_CPLUS_DEMANGLE=1")
@@ -1491,7 +1510,14 @@ if(NOT DEVICE_LINKER)
 endif()
 target_link_libraries(rccl PRIVATE   Threads::Threads)
 target_link_libraries(rccl INTERFACE hip::host)
-target_link_libraries(rccl PRIVATE   hip::device)
+if(NOT DEVICE_LINKER)
+  target_link_libraries(rccl PRIVATE   hip::device)
+else()
+  # In DEVICE_LINKER mode, we have pre-linked device code.
+  # Don't use hip::device as it adds --hip-link which re-links device code.
+  # We still need the HIP runtime library.
+  target_link_libraries(rccl PRIVATE ${HIP_LIBRARY})
+endif()
 target_link_libraries(rccl PRIVATE   dl)
 target_link_libraries(rccl PRIVATE   ${SMI_LIBRARIES})
 target_link_libraries(rccl PRIVATE fmt::fmt-header-only)

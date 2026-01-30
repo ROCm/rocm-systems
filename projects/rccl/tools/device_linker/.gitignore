@@ -4,13 +4,24 @@ build/
 # Compiled binary
 device_linker
 
-# Object files (build artifacts)
+# Object files and build artifacts
 *.o
+*.elf
+*.bin
+*.hipfb
+
+# Temporary/debug files
+B
+Log
+hipcc_steps.txt
+hipcc_pipeline.md
+
+# Test files (not smoke_test/)
+test_rccl_*
+test_tables*
+simple_test.cpp
+test_compile.sh
 
 # Python cache
 __pycache__/
 *.pyc
-
-# Test files
-test_rccl_*
-test_tables*
