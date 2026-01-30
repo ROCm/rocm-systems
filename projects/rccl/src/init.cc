@@ -885,6 +885,7 @@ static ncclResult_t devCommSetup(ncclComm_t comm) {
     tmpCommAndChans.comm.buffSizes[p] = comm->buffSizes[p];
   }
   tmpCommAndChans.comm.p2pChunkSize = comm->p2pChunkSize;
+  tmpCommAndChans.comm.p2pChannelShiftSize = comm->p2pChannelShiftSize;
   tmpCommAndChans.comm.channels = &devCommAndChans->channels[0];
 
   comm->workArgsBytes = std::min<size_t>(ncclParamWorkArgsBytes(), ncclMaxKernelArgsSize(comm->cudaArch));
@@ -1940,11 +1941,11 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
         uint8_t recvBase = ncclP2pChannelBaseForRound(comm, recvRound);
         for (int c=0; c<comm->p2pnChannelsPerPeer; c++) {
           int channelId;
-          channelId = ncclP2pChannelForPart(comm->p2pnChannels, sendBase, c, comm->p2pnChannelsPerPeer, comm->nNodes);
+          channelId = ncclP2pChannelForPart(comm->p2pnChannels, sendBase, c, comm->p2pnChannelsPerPeer, comm->nNodes, comm->p2pChannelShiftSize);
           if (comm->channels[channelId].peers[peer]->send[1].connected == 0) {
             comm->connectSend[peer].masks[channelId/64] |= (1UL<<(channelId%64));
           }
-          channelId = ncclP2pChannelForPart(comm->p2pnChannels, recvBase, c, comm->p2pnChannelsPerPeer, comm->nNodes);
+          channelId = ncclP2pChannelForPart(comm->p2pnChannels, recvBase, c, comm->p2pnChannelsPerPeer, comm->nNodes, comm->p2pChannelShiftSize);
           if (comm->channels[channelId].peers[peer]->recv[1].connected == 0) {
             comm->connectRecv[peer].masks[channelId/64] |= (1UL<<(channelId%64));
           }
@@ -1965,7 +1966,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   }
   NCCLCHECKGOTO(ncclTopoTuneModel(comm, comm->minCompCap, comm->maxCompCap, graphs), ret, fail);
 
-  INFO(NCCL_INIT, "comm:%p, nRanks:%d, nNodes:%d, coll channels:%d collnet channels:%d, nvls channels:%d, p2p channels:%d, p2p channels per peer:%d", comm, comm->nRanks, comm->nNodes, comm->nChannels, comm->nChannels, comm->nvlsChannels, comm->p2pnChannels, comm->p2pnChannelsPerPeer);
+  INFO(NCCL_INIT, "comm:%p, nRanks:%d, nNodes:%d, coll channels:%d collnet channels:%d, nvls channels:%d, p2p channels:%d, p2p channels per peer:%d, shiftSize:%d", comm, comm->nRanks, comm->nNodes, comm->nChannels, comm->nChannels, comm->nvlsChannels, comm->p2pnChannels, comm->p2pnChannelsPerPeer, comm->p2pChannelShiftSize);
 
   if (comm->intraRank == 0) { // Load ncclParamLaunchMode
     const char* str = ncclGetEnv("NCCL_LAUNCH_MODE");
@@ -2241,7 +2242,8 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
 
   // RCCL: determine and set unroll factor for comm
   NCCLCHECK(commSetUnrollFactor(comm));
-
+  // RCCL: Determine and set P2P channel shift size for comm
+  NCCLCHECK(rcclCommSetP2pShiftSize(comm));
 #ifdef ENABLE_ROCSHMEM
   if (rcclParamRocshmemEnabled()) { // @TODO - This doesn't seem to disable when I set ROCSHMEM_ENABLE=0 on command line
     INFO(NCCL_INIT,"Initializing rocSHMEM inside of RCCL");

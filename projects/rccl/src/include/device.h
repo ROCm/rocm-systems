@@ -345,22 +345,18 @@ inline __host__ uint8_t ncclP2pChannelBaseForRound(struct ncclComm* comm, int p2
 
 // ncclP2pChannelToPart and ncclP2pChannelForPart are inverses. The device code
 // uses ncclP2pChannelToPart to determine which part "this" channel is responsible for.
-inline __host__ int ncclP2pChannelForPart(int nP2pChannels, int base, int part, int nParts, int nNodes) {
+inline __host__ int ncclP2pChannelForPart(int nP2pChannels, int base, int part, int nParts, int nNodes, int shiftSize) {
   if (nNodes > 2) {
     // Only works because nP2pChannels is pow2
-    int nChannelsLog2 = countOneBits(nP2pChannels-1);
-    int delta = reverseBits(part, nChannelsLog2);
-    return (base + delta) & (nP2pChannels-1);
+    return (base + ((part + (base>>shiftSize))<<shiftSize)) & (nP2pChannels-1);
   } else {
     return (base * nParts + part) & (nP2pChannels-1);
   }
 }
-inline __device__ int ncclP2pChannelToPart(int nP2pChannels, int base, int channel, int nParts, int nNodes) {
+inline __device__ int ncclP2pChannelToPart(int nP2pChannels, int base, int channel, int nParts, int nNodes, int shiftSize) {
   if (nNodes > 2) {
     // Only works because nP2pChannels is pow2
-    int nChannelsLog2 = countOneBits(nP2pChannels-1);
-    int delta = (channel-base) & (nP2pChannels-1);
-    return reverseBits(delta, nChannelsLog2);
+    return (((channel - base) - ((base>>shiftSize)<<shiftSize))>>shiftSize) & (nParts-1);
   } else {
     return (channel - base * nParts) & (nP2pChannels-1);
   }
@@ -609,6 +605,7 @@ struct ncclKernelComm {
   int p2pChunkSize;
   int isAllNvlink;
   int p2pnChannelsPerPeer;
+  int p2pChannelShiftSize; // [RCCL] Modifies how parts are mapped to p2p channels
   int warpLevelComm;
   int* collNetDenseToUserRank;
 
