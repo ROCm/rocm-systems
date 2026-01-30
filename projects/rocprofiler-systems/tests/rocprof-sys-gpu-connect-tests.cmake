@@ -48,6 +48,15 @@ if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU})
     list(APPEND _gpu_connect_environment "ROCPROFSYS_USE_ROCPD=ON")
 endif()
 
+# Skip all tests if no valid GPU is detected
+if(NOT _VALID_GPU)
+    message(
+        STATUS
+        "transferBench requires a GPU and no valid GPUs were found; skipping GPU connect tests"
+    )
+    return()
+endif()
+
 # Add a runtime validation test that checks if transferBench can run successfully
 # This test runs before all other GPU connect tests and acts as a fixture
 if(TARGET transferBench)

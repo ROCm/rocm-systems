@@ -1,7 +1,7 @@
 {
     "required_tables": [
         {
-            "name": "rocpd_string",
+            "name_prefix": "rocpd_info_pmc_",
             "required_columns": [
                 "id",
                 "string"
@@ -12,13 +12,12 @@
                     "description": "Verify that 'UCX Comm' string is present in the table",
                     "error_message": "'UCX Comm' string not found in the table rocpd_string",
                     "expected_result": 2,
-                    "query": "SELECT COUNT(*) FROM rocpd_string WHERE string LIKE '%UCX Comm%';"
+                    "query": "SELECT COUNT(*) FROM {table_name} WHERE string LIKE '%UCX Comm%';"
                 }
             ]
         },
         {
-            "min_rows": 100,
-            "name": "regions",
+            "name_prefix": "regions",
             "required_columns": [
                 "tid",
                 "start",
@@ -32,14 +31,14 @@
                     "description": "Verify entries have non-zero start times",
                     "error_message": "Found entries with zero start times in table",
                     "expected_result": 0,
-                    "query": "SELECT COUNT(*) as count FROM regions WHERE start = 0"
+                    "query": "SELECT COUNT(*) as count FROM {table_name} WHERE start = 0"
                 },
                 {
                     "comparison": "greater_than",
                     "description": "Verify that 'ucx' appears in category at least 100 times in table regions",
                     "error_message": "'ucx' category entries are fewer than expected in regions",
                     "expected_result": 100,
-                    "query": "SELECT COUNT(*) FROM regions WHERE category = 'ucx';"
+                    "query": "SELECT COUNT(*) FROM {table_name} WHERE category = 'ucx';"
                 }
             ]
         }

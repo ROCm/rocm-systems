@@ -58,6 +58,8 @@ set(_ucxp_mpi_environment
     "UCX_TLS=tcp,self" # Tell UCX to use TCP for inter-process, self for intra-process
     "OMPI_MCA_pml_base_verbose=100" # Show which PML is selected
     "UCX_LOG_LEVEL=info" # Enable UCX logging to show transport usage
+    "OMPI_ALLOW_RUN_AS_ROOT=1" # Allow running as root in CI environments
+    "OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1" # Confirm the choice to run as root
 )
 
 # Enhanced UCX environment with more detailed logging
@@ -85,7 +87,7 @@ add_test(
     NAME ucx-validation-check
     COMMAND
         ${CMAKE_COMMAND} -E env ${_ucxp_mpi_environment} ${MPIEXEC_EXECUTABLE}
-        ${MPIEXEC_NUMPROC_FLAG} 2 $<TARGET_FILE:mpi-send-recv>
+        ${MPIEXEC_EXECUTABLE_ARGS} ${MPIEXEC_NUMPROC_FLAG} 2 $<TARGET_FILE:mpi-send-recv>
 )
 
 # Set this test as a fixture that must pass for UCX tests to run
