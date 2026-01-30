@@ -115,9 +115,9 @@ class cli_analysis(OmniAnalyze_Base):
             if not workload.filter_torch_operators:
                 console_error(
                     "No torch operators found in the profiling data. "
-                    'Please ensure that workload is profiled with "--torch-trace"'
-                    'option and analyze mode is run with "--list-torch-operators"'
-                    'option before using "--torch-operator" in analyze mode.'
+                    "Please ensure that profile mode is run with '--torch-trace' and "
+                    "analyze mode is run with '--list-torch-operators' flag "
+                    "before using '--torch-operator'."
                 )
 
             operator_args = getattr(args, "torch_operator", [])
