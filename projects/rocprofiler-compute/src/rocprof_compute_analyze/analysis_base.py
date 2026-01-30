@@ -197,31 +197,31 @@ class OmniAnalyze_Base:
             self.__args.path[0][0]
             if isinstance(self.__args.path[0], list)
             else self.__args.path[0]
-            )
+        )
         process_torch_trace_output(workload_path)
         torch_trace_dir = Path(workload_path) / "torch_trace"
         all_operators = sorted([f.stem for f in torch_trace_dir.glob("*.csv")])
         if not all_operators:
-            console_warning("No PyTorch operator data found",
-                            "please ensure profiling was done ",
-                            "with --torch-trace option.")
+            console_warning(
+                "No PyTorch operator data found",
+                "please ensure profiling was done ",
+                "with --torch-trace option.",
+            )
             return
 
         # Check if specific operators were requested
         operator_filter = None
-        if hasattr(self.__args, 'torch_operator') and self.__args.torch_operator:
+        if hasattr(self.__args, "torch_operator") and self.__args.torch_operator:
             # Flatten nested list
             operator_filter = [
-                item
-                for sublist in self.__args.torch_operator
-                for item in sublist
-                ]
+                item for sublist in self.__args.torch_operator for item in sublist
+            ]
 
         if operator_filter:
             # Show operator→kernel mapping for selected operators
-            print(f"\n{'='*80}")
+            print(f"\n{'=' * 80}")
             print("PyTorch Operator → Kernel Mapping")
-            print(f"{'='*80}\n")
+            print(f"{'=' * 80}\n")
 
             for op_name in operator_filter:
                 op_file = torch_trace_dir / f"{op_name}.csv"
@@ -256,20 +256,20 @@ class OmniAnalyze_Base:
                 except Exception as e:
                     console_warning(f"Error reading {op_name}: {e}")
 
-            print(f"\n{'='*80}\n")
+            print(f"\n{'=' * 80}\n")
         else:
             # List all operators
-            print(f"\n{'='*80}")
+            print(f"\n{'=' * 80}")
             print(f"PyTorch Operators in: {workload_path}")
-            print(f"{'='*80}\n")
+            print(f"{'=' * 80}\n")
             print(f"Found {len(all_operators)} operators:\n")
 
             for i, op in enumerate(all_operators, 1):
                 print(f"  {i:3d}. {op}")
 
-            print(f"\n{'='*80}")
+            print(f"\n{'=' * 80}")
             print(f"Total: {len(all_operators)} operators")
-            print(f"{'='*80}\n")
+            print(f"{'=' * 80}\n")
 
         sys.exit(0)
 
