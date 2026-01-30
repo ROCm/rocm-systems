@@ -131,7 +131,7 @@ CREATE TABLE IF NOT EXISTS
         "expression" TEXT,
         "is_constant" INTEGER,
         "is_derived" INTEGER,
-        "spm_support" INTEGER
+        "spm_support" INTEGER,
         "extdata" JSONB DEFAULT "{}" NOT NULL,
         FOREIGN KEY (nid) REFERENCES `rocpd_info_node{{uuid}}` (id) ON UPDATE CASCADE,
         FOREIGN KEY (pid) REFERENCES `rocpd_info_process{{uuid}}` (id) ON UPDATE CASCADE,

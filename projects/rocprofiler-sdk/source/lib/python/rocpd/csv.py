@@ -340,6 +340,7 @@ def write_counters_csv(importData, config) -> None:
         "sgpr_count",
         "counter_name",
         "value AS Counter_Value",
+        "timestamp AS Timestamp",
         "start AS Start_Timestamp",
         "end AS End_Timestamp",
     ]

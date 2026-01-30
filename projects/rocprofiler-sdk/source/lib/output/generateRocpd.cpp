@@ -1038,6 +1038,11 @@ write_rocpd(
                     : std::string_view{};
 
             auto agent_node_id = tool_metadata.get_agent(info.agent_id)->node_id;
+            auto thread_id_opt = (thread_id == 0)
+                                     ? std::optional<uint64_t>{}
+                                     : std::optional<uint64_t>{thread_id};
+
+            if(thread_id != 0) get_thread_id(thread_id);
 
             // Insert into kernel dispatch table
             auto stmt = get_insert_statement(
@@ -1046,7 +1051,7 @@ write_rocpd(
                     insert_value("id", dispatch_id),
                     insert_value("nid", node_id),
                     insert_value("pid", this_pid),
-                    insert_value("tid", thread_id),
+                    insert_value("tid", thread_id_opt),
                     insert_value("agent_id", agent_node_id),
                     insert_value("kernel_id", kernel_id),
                     insert_value("dispatch_id", dispatch_id),
@@ -1080,7 +1085,7 @@ write_rocpd(
                     const auto& info          = dispatch_data.dispatch_info;
 
                     // Register thread ID
-                    get_thread_id(record.thread_id);
+                    if(record.thread_id != 0) get_thread_id(record.thread_id);
 
                     // Use buffer category for kernel dispatches
                     auto kind =
@@ -1103,6 +1108,39 @@ write_rocpd(
                     );
                 }
             }
+
+            for(auto pctr : spm_collection_gen)
+            {
+                auto _deferred = sql::deferred_transaction{conn};
+                for(const auto& record : spm_collection_gen.get(pctr))
+                {
+                    const auto& dispatch_data = record.dispatch_data;
+                    const auto& info          = dispatch_data.dispatch_info;
+
+                    // Register thread ID
+                    if(record.thread_id != 0) get_thread_id(record.thread_id);
+
+                    // Use buffer category for kernel dispatches
+                    auto kind =
+                        tool_metadata.buffer_names.at(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH);
+
+                    // Process this dispatch (SPM dispatch timestamps are not available)
+                    process_dispatch(info.dispatch_id,                // dispatch_id
+                                     info.kernel_id,                  // kernel_id
+                                     dispatch_data.correlation_id,    // corr_id
+                                     info,                            // info
+                                     kind,                            // kind
+                                     record.thread_id,                // thread_id
+                                     get_queue_id(info.queue_id),     // queue_id
+                                     get_stream_id(rocprofiler_stream_id_t{.handle = 0}),
+                                     0,                               // start_timestamp
+                                     0,                               // end_timestamp
+                                     info.grid_size,                  // grid
+                                     info.workgroup_size,             // workgroup
+                                     false                            // enable_duplicate_check
+                    );
+                }
+            }
         }
         else
         {
@@ -1112,7 +1150,7 @@ write_rocpd(
                 for(auto itr : kernel_dispatch_gen.get(pitr))
                 {
                     // Register thread ID
-                    get_thread_id(itr.thread_id);
+                    if(itr.thread_id != 0) get_thread_id(itr.thread_id);
 
                     // Process this dispatch
                     process_dispatch(itr.dispatch_info.dispatch_id,             // dispatch_id
