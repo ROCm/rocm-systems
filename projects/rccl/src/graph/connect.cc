@@ -722,6 +722,11 @@ ncclResult_t ncclTopoPostset(struct ncclComm* comm, int* firstRanks, int* treePa
   int maxChannels;
   int minNchannels, maxNchannels;
   int duplicateCount = 1;
+#ifdef ENABLE_WARP_SPEED
+  const int wsEnabled = comm->topo->warpSpeedEnabled;
+  const bool singleNode = comm->nNodes == 1;
+#endif
+
   NCCLCHECK(ncclCalloc(&ringRecv, nNodes*MAXCHANNELS));
   NCCLCHECKGOTO(ncclCalloc(&ringSend, nNodes*MAXCHANNELS), ret, fail);
   NCCLCHECKGOTO(ncclCalloc(&ringPrev, nranks*MAXCHANNELS), ret, fail);
@@ -805,17 +810,16 @@ ncclResult_t ncclTopoPostset(struct ncclComm* comm, int* firstRanks, int* treePa
     }
   }
 
-#ifdef ENABLE_WARP_SPEED
   // Only use full MAXCHANNELS for gfx942 (MI300X) and gfx950
   maxChannels = (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942") ||
                  IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950"))
                  ? MAXCHANNELS : 2*CHANNEL_LIMIT;
-
+#ifdef ENABLE_WARP_SPEED
+  if(!wsEnabled){
+    maxChannels = std::min((singleNode? RCCL_MI3XX_MAX_SINGLE_NODE_CHANNELS : RCCL_MI3XX_MAX_MULTI_NODE_CHANNELS), maxChannels);
+  }
+    
 #else
-  // Only use full MAXCHANNELS for gfx942 (MI300X) and gfx950
-  maxChannels = (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942") ||
-                 IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950"))
-                 ? std::min(comm->topo->nodes[GPU].nodes[0].gpu.cu, MAXCHANNELS) : 2*CHANNEL_LIMIT;
   if (graphs[NCCL_ALGO_RING]->nIntraChannels > 0 || comm->nNodes > 1) {
     maxChannels = std::min(64, maxChannels);
   }
@@ -849,7 +853,6 @@ ncclResult_t ncclTopoPostset(struct ncclComm* comm, int* firstRanks, int* treePa
 
   // Duplication should be complete now
   nChannels = comm->nChannels = std::min(maxChannels, (nChannels <= maxChannels/2) ? nChannels*2 : nChannels);
-
   // Setup CollNet
   if (comm->config.collnetEnable) {
     struct ncclTopoGraph* collNetChainGraph = graphs[NCCL_ALGO_COLLNET_CHAIN];

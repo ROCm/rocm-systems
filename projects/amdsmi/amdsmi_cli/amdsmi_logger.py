@@ -622,12 +622,11 @@ class AMDSMILogger():
             combined_json["partition_profiles"] = self.store_partition_profiles_json_output
         if self.store_partition_resources_json_output:
             combined_json["partition_resources"] = self.store_partition_resources_json_output
-
         if self.destination == 'stdout':
             json_std_output = json.dumps(combined_json, indent=4)
             print(json_std_output)
         else:
-            with open(self.destination, 'w', encoding="utf-8") as output_file:
+            with self.destination.open('w', encoding="utf-8") as output_file:
                 json.dump(combined_json, output_file, indent=4)
 
 
@@ -679,11 +678,13 @@ class AMDSMILogger():
                         writer.writerows(self.watch_output)
             else:
                 with self.destination.open('a', newline = '', encoding="utf-8") as output_file:
-                    # Get the header as a list of the first element to maintain order
-                    csv_header = stored_csv_output[0].keys()
-                    writer = csv.DictWriter(output_file, csv_header)
-                    writer.writeheader()
-                    writer.writerows(stored_csv_output)
+                    # Only write to file if there is data
+                    if stored_csv_output:
+                        # Get the header as a list of the first element to maintain order
+                        csv_header = stored_csv_output[0].keys()
+                        writer = csv.DictWriter(output_file, csv_header)
+                        writer.writeheader()
+                        writer.writerows(stored_csv_output)
 
 
     def _print_dual_csv_output(self, multiple_device_enabled=False, watching_output=False):
