@@ -25,10 +25,60 @@ use std::mem::MaybeUninit;
 use std::os::raw::c_void;
 use std::ptr::null_mut;
 
+/// RAII guard that initializes the AMD-SMI library on creation and shuts it
+/// down when dropped.
+///
+/// This is the recommended way to manage the library lifecycle. It ensures
+/// [`amdsmi_shut_down`] is always called, even if the calling code returns
+/// early or panics.
+///
+/// # Example
+///
+/// ```no_run
+/// use amdsmi::*;
+///
+/// fn main() -> Result<(), Box<dyn std::error::Error>> {
+///     let _smi = AmdSmiGuard::new(AmdsmiInitFlagsT::AmdsmiInitAmdGpus)?;
+///
+///     for socket in amdsmi_get_socket_handles()? {
+///         for gpu in amdsmi_get_processor_handles(socket)? {
+///             println!("GPU busy: {}%", amdsmi_get_gpu_busy_percent(gpu)?);
+///         }
+///     }
+///
+///     Ok(()) // amdsmi_shut_down() called automatically here
+/// }
+/// ```
+pub struct AmdSmiGuard {
+    _private: (),
+}
+
+impl AmdSmiGuard {
+    /// Initializes the AMD-SMI library and returns a guard that will shut it
+    /// down when dropped.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the underlying `amdsmi_init` call fails.
+    pub fn new(init_flags: AmdsmiInitFlagsT) -> AmdsmiResult<Self> {
+        amdsmi_init(init_flags)?;
+        Ok(Self { _private: () })
+    }
+}
+
+impl Drop for AmdSmiGuard {
+    fn drop(&mut self) {
+        let _ = amdsmi_shut_down();
+    }
+}
+
 /// Initializes the AMD SMI library.
 ///
 /// This function must be called before any other AMD SMI functions are used.
 /// It initializes the library with the specified flags.
+///
+/// Consider using [`AmdSmiGuard`] instead, which calls [`amdsmi_shut_down`]
+/// automatically when dropped.
 ///
 /// # Arguments
 ///

@@ -18,6 +18,81 @@
 // CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 //
 
+//! Rust bindings for the AMD System Management Interface (AMD-SMI) library.
+//!
+//! This crate provides safe wrappers around the AMD-SMI C library, enabling
+//! GPU and CPU monitoring and management on AMD hardware. It covers device
+//! discovery, power/thermal monitoring, clock and performance control, memory
+//! and PCIe info, ECC/RAS error tracking, process accounting, and more.
+//!
+//! # Prerequisites
+//!
+//! - **Linux only** — AMD-SMI requires the `amdgpu` kernel driver.
+//! - The `libamd_smi.so` shared library must be installed. It is included with
+//!   [ROCm](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/)
+//!   or can be [built from source](https://github.com/ROCm/amdsmi).
+//! - At runtime, ensure the library is on the linker search path
+//!   (e.g. `LD_LIBRARY_PATH=/opt/rocm/lib`).
+//!
+//! # Quick start
+//!
+//! ```no_run
+//! use amdsmi::*;
+//!
+//! fn main() -> Result<(), Box<dyn std::error::Error>> {
+//!     // Initialize the library
+//!     amdsmi_init(AmdsmiInitFlagsT::AmdsmiInitAmdGpus)?;
+//!
+//!     // Enumerate every GPU across all sockets
+//!     for socket in amdsmi_get_socket_handles()? {
+//!         for gpu in amdsmi_get_processor_handles(socket)? {
+//!             let bdf = amdsmi_get_gpu_device_bdf(gpu)?;
+//!             let busy = amdsmi_get_gpu_busy_percent(gpu)?;
+//!             println!("{bdf}: {busy}% utilization");
+//!         }
+//!     }
+//!
+//!     amdsmi_shut_down()?;
+//!     Ok(())
+//! }
+//! ```
+//!
+//! # Thread safety
+//!
+//! The underlying C library serializes access with a global mutex and is safe
+//! to call from multiple threads. However, the handle types
+//! ([`AmdsmiProcessorHandle`], [`AmdsmiSocketHandle`]) are raw pointer
+//! aliases (`*mut c_void`) and therefore do **not** implement [`Send`] or
+//! [`Sync`]. To use handles across threads, wrap them in a newtype that
+//! asserts the safety invariant:
+//!
+//! ```rust
+//! use amdsmi::AmdsmiProcessorHandle;
+//!
+//! /// Wrapper that is safe to send across threads because the
+//! /// underlying AMD-SMI library is internally synchronized.
+//! #[derive(Clone, Copy)]
+//! struct GpuHandle(AmdsmiProcessorHandle);
+//! unsafe impl Send for GpuHandle {}
+//! unsafe impl Sync for GpuHandle {}
+//! ```
+//!
+//! # RAII initialization
+//!
+//! [`AmdSmiGuard`] calls [`amdsmi_shut_down`] automatically when dropped,
+//! so you cannot forget to clean up:
+//!
+//! ```no_run
+//! use amdsmi::*;
+//!
+//! fn main() -> Result<(), Box<dyn std::error::Error>> {
+//!     let _smi = AmdSmiGuard::new(AmdsmiInitFlagsT::AmdsmiInitAmdGpus)?;
+//!     // use the library ...
+//!     // amdsmi_shut_down() is called when `_smi` goes out of scope
+//!     Ok(())
+//! }
+//! ```
+
 #![allow(dead_code)]
 // FFI bindings use opaque pointer handles (AmdsmiProcessorHandle, AmdsmiSocketHandle)
 // which are passed through to C functions. Clippy's not_unsafe_ptr_arg_deref warning
