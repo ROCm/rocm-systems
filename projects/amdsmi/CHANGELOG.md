@@ -19,6 +19,54 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Selective display: Use `-p` for NPM only, `-b` for Baseboard only.
   - Default behavior (no flags): Shows both power management and baseboard temperatures.
 
+### Changed
+
+- **Standardized SYSFS path construction using DRM render minors (`renderD<N>`)**.  
+  - Switched internal device identification from libDRM’s device path to the DRM render minor.
+  - Updated SYSFS path construction to consistently use `renderD<N>` across ASIC info, PCIe info, and other SYSFS-backed utilities (board info, RAS/ECC, power, clocks, etc.).
+  - Improves consistency and reliability of SYSFS access.
+
+### Removed
+
+- N/A
+
+### Optimized
+
+- **Optimized `rsmi_dev_device_identifiers_get()` in the ROCm-SMI device layer**.  
+  - Removed unnecessary iteration by directly indexing the device list.
+  - Added bounds checking for `device_id`, with clearer error handling/logging.
+  - Improves performance for device identifier queries.
+
+### Resolved issues
+
+- **Fixed BDF retrieval when libDRM is unavailable**.  
+  - Updated `AMDSmiGPUDevice::get_bdf()` to fall back to ROCm-SMI/KFD when libDRM can’t be used.
+  - Added validation to prevent invalid device index access.
+  - Affects `amdsmi_get_gpu_device_bdf()` and `amdsmi_get_processor_handle_from_bdf()`.
+
+- **Fixed ASIC info retrieval when libDRM is unavailable**.  
+  - Updated `amdsmi_get_gpu_asic_info()` to return the available ASIC fields and report `AMDSMI_STATUS_SUCCESS`
+    instead of `AMDSMI_STATUS_NOT_SUPPORTED` when libDRM isn’t installed.
+  - Fixes `amd-smi static --asic` output.
+
+- **Fixed ASIC info retrieval when libDRM is unavailable**.  
+  - `amdsmi_get_gpu_asic_info()` now returns the available ASIC fields and reports `AMDSMI_STATUS_SUCCESS`
+    instead of failing with `AMDSMI_STATUS_NOT_SUPPORTED` when libDRM isn’t installed.
+  - Fixes `amd-smi static --asic` output.
+  
+- **Fixed `amd-smi` default command alignment when libDRM is unavailable**.  
+  - When `amdgpu Version` can’t be queried (libDRM missing), the default view falls back to `OS Kernel Version`;
+    the fallback line now uses consistent padding so the table stays aligned.
+  - Fixes `amd-smi` default output formatting.
+
+### Upcoming changes
+
+- N/A
+
+### Known issues
+
+- N/A
+
 ## amd_smi_lib for ROCm 7.11.0
 
 ### Added

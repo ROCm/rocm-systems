@@ -19,18 +19,20 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-
-#include <memory>
-#include <unordered_set>
 #include <dirent.h>
 #include <sys/types.h>
+
 #include <atomic>
+#include <memory>
+#include <unordered_set>
 
 #include "amd_smi/impl/amd_smi_gpu_device.h"
+#include "amd_smi/impl/amd_smi_drm.h"
 #include "amd_smi/impl/fdinfo.h"
 #include "rocm_smi/rocm_smi_kfd.h"
 #include "rocm_smi/rocm_smi_utils.h"
 #include "rocm_smi/rocm_smi_logger.h"
+#include "rocm_smi/rocm_smi_main.h"
 
 namespace amd::smi {
 
@@ -83,11 +85,37 @@ uint64_t AMDSmiGPUDevice::get_kfd_gpu_id() {
     return this->kfd_gpu_id_;
 }
 
+// This is the libDRM path, if its empty then we have issues loading libDRM
 std::string& AMDSmiGPUDevice::get_gpu_path() {
     return path_;
 }
 
 amdsmi_bdf_t AMDSmiGPUDevice::get_bdf() {
+    // If libDRM is not initialized, we have to get from ROCm-SMI APIs
+    // For some reason we only initialize the BDFs if libdrm is successful
+    // This was incorrect, we can still get through KFD/ROCm SMI (we don't even
+    // get through libdrm anyways...)
+    if (!amd::smi::AMDSmiGPUDevice::check_if_drm_is_supported()) {
+        // Use rocm-smi device interface directly to get BDF info
+        this->bdf_ = amdsmi_bdf_t{};
+        amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
+        // Validate gpu_id_ before using it, we cannot get BDF info if its
+        // larger than number of available devices
+        size_t device_size = smi.devices().size();
+        if (gpu_id_ >= static_cast<uint32_t>(device_size)) {
+            std::ostringstream ss;
+            ss << __PRETTY_FUNCTION__ << " | Specified GPU ID " << gpu_id_
+               << " is out of range. Total available devices: " << device_size;
+            LOG_ERROR(ss);
+            return this->bdf_;
+        }
+
+        uint64_t rocm_bdf = smi.devices()[gpu_id_]->bdfid();
+        this->bdf_.domain_number = static_cast<uint64_t>(((rocm_bdf >> 32) & 0xFFFFFFFF));
+        this->bdf_.bus_number = static_cast<uint64_t>(((rocm_bdf >> 8) & 0xFF));
+        this->bdf_.device_number = static_cast<uint64_t>(((rocm_bdf >> 3) & 0x1F));
+        this->bdf_.function_number = static_cast<uint64_t>((rocm_bdf & 0x7));
+    }
     return this->bdf_;
 }
 

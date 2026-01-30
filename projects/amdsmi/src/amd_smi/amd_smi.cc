@@ -1545,6 +1545,12 @@ amdsmi_get_gpu_board_info(amdsmi_processor_handle processor_handle, amdsmi_board
         LOG_INFO(ss);
     }
 
+    if (std::string(board_info->manufacturer_name) == "0x1002") {
+        std::string amd_name = "Advanced Micro Devices Inc. [AMD/ATI]";
+        smi_clear_char_and_reinitialize(board_info->manufacturer_name,
+                                    AMDSMI_MAX_STRING_LENGTH, amd_name);
+    }
+
     ss << __PRETTY_FUNCTION__ << " | [After rocm smi correction] "
        << "Returning status = AMDSMI_STATUS_SUCCESS"
        << "\n; info->model_number: |" << board_info->model_number << "|"
@@ -2405,8 +2411,40 @@ amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handle, amdsmi_asic_i
     }
     SMIGPUDEVICE_MUTEX(gpu_device->get_mutex())
 
+    auto log_asic_info = [&ss](const amdsmi_asic_info_t* info, amdsmi_status_t status) {
+        ss << __PRETTY_FUNCTION__
+           << " | info->market_name: " << info->market_name << "\n"
+           << " | info->vendor_id (dec): " << std::dec << info->vendor_id << "\n"
+           << " | info->vendor_id (hex): 0x"
+           << std::hex << std::setw(4) << std::setfill('0') << info->vendor_id << "\n"
+           << " | info->vendor_name: " << info->vendor_name << "\n"
+           << " | info->subvendor_id (dec): " << std::dec << info->subvendor_id << "\n"
+           << " | info->subvendor_id (hex): 0x"
+           << std::hex << std::setw(4) << std::setfill('0') << info->subvendor_id << "\n"
+           << " | info->device_id (dec): " << std::dec << info->device_id << "\n"
+           << " | info->device_id (hex): 0x"
+           << std::hex << std::setw(4) << std::setfill('0') << info->device_id << "\n"
+           << " | info->rev_id (dec): " << std::dec << info->rev_id << "\n"
+           << " | info->rev_id (hex): 0x"
+           << std::hex << std::setw(4) << std::setfill('0') << info->rev_id << "\n"
+           << " | info->asic_serial: 0x" << info->asic_serial << "\n"
+           << " | info->oam_id (dec): " << std::dec << info->oam_id << "\n"
+           << " | info->oam_id (hex): 0x"
+           << std::hex << std::setw(4) << std::setfill('0') << info->oam_id << "\n"
+           << " | info->num_of_compute_units (dec): " << std::dec
+           << info->num_of_compute_units << "\n"
+           << " | info->target_graphics_version: gfx"
+           << std::hex << info->target_graphics_version << "\n"
+           << " | info->subsystem_id (dec): " << std::dec << info->subsystem_id << "\n"
+           << " | info->subsystem_id (hex): 0x" << std::hex
+           << std::setw(4) << std::setfill('0') << info->subsystem_id << "\n"
+           << " | info->flags: 0x" << std::hex << info->flags << "\n"
+           << " | Returning: " << smi_amdgpu_get_status_string(status, true);
+        LOG_INFO(ss);
+    };
+
     // ---- ASIC info cache ----
-    const std::string key = gpu_device->get_gpu_path();
+    const std::string key = "renderD" + std::to_string(gpu_device->get_drm_render_minor());
 
     AsicInfoCache* cache_ptr = nullptr;
     {
@@ -2431,6 +2469,20 @@ amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handle, amdsmi_asic_i
             return AMDSMI_STATUS_SUCCESS;
         }
     }
+
+    auto store_cache = [&key, &cache_ptr, &info, &ss](amdsmi_status_t my_status) {
+        if (my_status == AMDSMI_STATUS_SUCCESS
+            && kAsicInfoCacheDuration > std::chrono::milliseconds::zero()) {
+            auto now = std::chrono::steady_clock::now();
+            std::lock_guard<std::mutex> lk(cache_ptr->mtx);
+            cache_ptr->info = *info;
+            cache_ptr->last_read = now;
+            cache_ptr->valid = true;
+
+            ss << "Successfully Cached ASIC info for key=" << key;
+            LOG_INFO(ss);
+        }
+    };
 
     /**
      * For other sysfs related information, get from rocm-smi
@@ -2541,7 +2593,14 @@ amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handle, amdsmi_asic_i
 
     std::string render_name = gpu_device->get_gpu_path();
     if (render_name.empty()) {
-        return AMDSMI_STATUS_NOT_SUPPORTED;
+        ss << __PRETTY_FUNCTION__
+           << " | render_name is empty, cannot get remaining vram info from libdrm. "
+           << "Libdrm is likely not installed.";
+        LOG_INFO(ss);
+        status = AMDSMI_STATUS_SUCCESS;
+        log_asic_info(info, status);
+        store_cache(status);
+        return status;  // Return what we have so far, even if libDRM parts fail
     }
     std::string path = "/dev/dri/" + render_name;
     ScopedFD drm_fd(path.c_str(), O_RDWR | O_CLOEXEC);
@@ -2604,45 +2663,8 @@ amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handle, amdsmi_asic_i
     info->flags = static_cast<uint64_t>(dev_info.ids_flags);
     libdrm.unload();
 
-    ss << __PRETTY_FUNCTION__
-       << " | info->market_name: " << info->market_name << "\n"
-       << " | info->vendor_id (dec): " << std::dec << info->vendor_id << "\n"
-       << " | info->vendor_id (hex): 0x"
-       << std::hex << std::setw(4) << std::setfill('0') << info->vendor_id << "\n"
-       << " | info->vendor_name: " << info->vendor_name << "\n"
-       << " | info->subvendor_id (dec): " << std::dec << info->subvendor_id << "\n"
-       << " | info->subvendor_id (hex): 0x"
-       << std::hex << std::setw(4) << std::setfill('0') << info->subvendor_id << "\n"
-       << " | info->device_id (dec): " << std::dec << info->device_id << "\n"
-       << " | info->device_id (hex): 0x"
-       << std::hex << std::setw(4) << std::setfill('0') << info->device_id << "\n"
-       << " | info->rev_id (dec): " << std::dec << info->rev_id << "\n"
-       << " | info->rev_id (hex): 0x"
-       << std::hex << std::setw(4) << std::setfill('0') << info->rev_id << "\n"
-       << " | info->asic_serial: 0x" << info->asic_serial << "\n"
-       << " | info->oam_id (dec): " << std::dec << info->oam_id << "\n"
-       << " | info->oam_id (hex): 0x"
-       << std::hex << std::setw(4) << std::setfill('0') << info->oam_id << "\n"
-       << " | info->num_of_compute_units (dec): " << std::dec
-       << info->num_of_compute_units << "\n"
-       << " | info->target_graphics_version: gfx"
-       << std::hex << info->target_graphics_version << "\n"
-       << " | Returning: " << smi_amdgpu_get_status_string(AMDSMI_STATUS_SUCCESS, true);
-    LOG_INFO(ss);
-
-    // ---- Store cache success ----
-    if (status == AMDSMI_STATUS_SUCCESS &&
-        kAsicInfoCacheDuration > std::chrono::milliseconds::zero()) {
-
-        auto now = std::chrono::steady_clock::now();
-        std::lock_guard<std::mutex> lk(cache_ptr->mtx);
-        cache_ptr->info  = *info;
-        cache_ptr->last_read = now;
-        cache_ptr->valid = true;
-
-        ss << "Successfully Cached ASIC info for key=" << key;
-        LOG_INFO(ss);
-    }
+    log_asic_info(info, status);
+    store_cache(status);
     return AMDSMI_STATUS_SUCCESS;
 }
 
@@ -2776,10 +2798,53 @@ amdsmi_status_t amdsmi_get_gpu_vram_info(
     info->vram_max_bandwidth = std::numeric_limits<decltype(info->vram_max_bandwidth)>::max();
 
     SMIGPUDEVICE_MUTEX(gpu_device->get_mutex());
+
+    auto log_vram_info = [](std::ostringstream& ss, const amdsmi_vram_info_t* info) {
+        ss << __PRETTY_FUNCTION__
+           << " | info->vram_type: " << std::dec << info->vram_type << "\n"
+           << "; info->vram_size (MB): " << std::dec << info->vram_size << "\n"
+           << "; info->vram_vendor: " << std::dec << info->vram_vendor << "\n"
+           << "; info->vram_bit_width: " << std::dec
+           << (info->vram_bit_width == std::numeric_limits<uint64_t>::max() ?
+                   "N/A" : std::to_string(info->vram_bit_width)) << "\n"
+           << "; info->vram_max_bandwidth (GB/s): " << std::dec
+           << info->vram_max_bandwidth << "\n"
+           << "; Returning: " << smi_amdgpu_get_status_string(AMDSMI_STATUS_SUCCESS, false);
+        LOG_INFO(ss);
+    };
+
+    // set info->vram_max_bandwidth to gpu_metrics vram_max_bandwidth if it is not set
+    amdsmi_gpu_metrics_t metric_info = {};
+    r = amdsmi_get_gpu_metrics_info(processor_handle, &metric_info);
+    if (r == AMDSMI_STATUS_SUCCESS) {
+        info->vram_max_bandwidth = metric_info.vram_max_bandwidth;
+    }
+
+    // map the vendor name to enum
+    char brand[256] = {'\0'};
+    r = rsmi_wrapper(rsmi_dev_vram_vendor_get, processor_handle, 0, brand, 255);
+    if (r == AMDSMI_STATUS_SUCCESS) {
+        for (auto &x : brand)
+            x = static_cast<char>(toupper(x));
+        snprintf(info->vram_vendor, AMDSMI_MAX_STRING_LENGTH, "%s", brand);
+    }
+    uint64_t total = 0;
+    r = rsmi_wrapper(rsmi_dev_memory_total_get, processor_handle, 0,
+                    RSMI_MEM_TYPE_VRAM, &total);
+    if (r == AMDSMI_STATUS_SUCCESS) {
+        info->vram_size = total / (1024 * 1024);
+    }
+
+    // Get rest of data from libdrm
     std::string render_name = gpu_device->get_gpu_path();
     std::string path = "/dev/dri/" + render_name;
     if (render_name.empty()) {
-        return AMDSMI_STATUS_NOT_SUPPORTED;
+        ss << __PRETTY_FUNCTION__
+           << " | render_name is empty, cannot get remaining vram info from libdrm. "
+           << "Libdrm is likely not installed. ";
+        LOG_INFO(ss);
+        log_vram_info(ss, info);
+        return AMDSMI_STATUS_SUCCESS;  // Return what we have so far, even if libDRM parts fail
     }
 
     ScopedFD drm_fd(path.c_str(), O_RDWR | O_CLOEXEC);
@@ -2850,40 +2915,7 @@ amdsmi_status_t amdsmi_get_gpu_vram_info(
     libdrm.unload();
     // if vram type is greater than the max enum set it to unknown
     if (info->vram_type > AMDSMI_VRAM_TYPE__MAX) info->vram_type = AMDSMI_VRAM_TYPE_UNKNOWN;
-
-    // set info->vram_max_bandwidth to gpu_metrics vram_max_bandwidth if it is not set
-    amdsmi_gpu_metrics_t metric_info = {};
-    r = amdsmi_get_gpu_metrics_info(processor_handle, &metric_info);
-    if (r == AMDSMI_STATUS_SUCCESS) {
-        info->vram_max_bandwidth = metric_info.vram_max_bandwidth;
-    }
-
-    // map the vendor name to enum
-    char brand[256] = {'\0'};
-    r = rsmi_wrapper(rsmi_dev_vram_vendor_get, processor_handle, 0, brand, 255);
-    if (r == AMDSMI_STATUS_SUCCESS) {
-        for (auto &x : brand)
-            x = static_cast<char>(toupper(x));
-        snprintf(info->vram_vendor, AMDSMI_MAX_STRING_LENGTH, "%s", brand);
-    }
-    uint64_t total = 0;
-    r = rsmi_wrapper(rsmi_dev_memory_total_get, processor_handle, 0,
-                    RSMI_MEM_TYPE_VRAM, &total);
-    if (r == AMDSMI_STATUS_SUCCESS) {
-        info->vram_size = total / (1024 * 1024);
-    }
-
-    ss << __PRETTY_FUNCTION__
-       << " | info->vram_type: " << std::dec << info->vram_type << "\n"
-       << "; info->vram_size (MB): " << std::dec << info->vram_size << "\n"
-       << "; info->vram_vendor: " << std::dec << info->vram_vendor << "\n"
-       << "; info->vram_bit_width: " << std::dec
-       << (info->vram_bit_width == std::numeric_limits<uint64_t>::max() ?
-            "N/A" : std::to_string(info->vram_bit_width)) << "\n"
-       << "; info->vram_max_bandwidth (GB/s): " << std::dec
-       << info->vram_max_bandwidth << "\n"
-       << "; Returning: " << smi_amdgpu_get_status_string(AMDSMI_STATUS_SUCCESS, false);
-    LOG_INFO(ss);
+    log_vram_info(ss, info);
     return AMDSMI_STATUS_SUCCESS;
 }
 
@@ -4998,10 +5030,47 @@ amdsmi_get_gpu_vbios_info(amdsmi_processor_handle processor_handle, amdsmi_vbios
     }
 
     SMIGPUDEVICE_MUTEX(gpu_device->get_mutex());
+
+    auto get_vbios_from_sysfs = [&](amdsmi_processor_handle processor_handle,
+                                    amdsmi_vbios_info_t* info) {
+        amdsmi_status_t status = AMDSMI_STATUS_NOT_SUPPORTED;
+        char vbios_version[AMDSMI_MAX_STRING_LENGTH];
+        status = rsmi_wrapper(rsmi_dev_vbios_version_get, processor_handle, 0,
+                            vbios_version, AMDSMI_MAX_STRING_LENGTH);
+
+        if (status == AMDSMI_STATUS_SUCCESS) {
+            snprintf(info->part_number, AMDSMI_MAX_STRING_LENGTH, "%s", vbios_version);
+        }
+        return status;
+    };
+
+    auto get_ifwi_version = [&](amdsmi_processor_handle processor_handle,
+                                amdsmi_vbios_info_t* info) {
+        amdsmi_status_t build_status;
+        char vbios_build_number[AMDSMI_MAX_STRING_LENGTH];
+
+        build_status = rsmi_wrapper(rsmi_dev_vbios_build_number_get, processor_handle, 0,
+                                    vbios_build_number, AMDSMI_MAX_STRING_LENGTH);
+
+        // Continue if sysfs doesn't exist
+        if (build_status == AMDSMI_STATUS_SUCCESS) {
+            // This device has an ifwi version so swap the version and boot_firmware
+            snprintf(info->boot_firmware, AMDSMI_MAX_STRING_LENGTH, "%s", info->version);
+            snprintf(info->version, AMDSMI_MAX_STRING_LENGTH, "%s", vbios_build_number);
+        }
+        return build_status;
+    };
+
     std::string render_name = gpu_device->get_gpu_path();
     std::string path = "/dev/dri/" + render_name;
     if (render_name.empty()) {
-        return AMDSMI_STATUS_NOT_SUPPORTED;
+        ss << __PRETTY_FUNCTION__
+           << " | render_name is empty, cannot get remaining vram info from libdrm. "
+           << "Libdrm is likely not installed. ";
+        LOG_INFO(ss);
+        status = get_vbios_from_sysfs(processor_handle, info);
+        get_ifwi_version(processor_handle, info);  // ignore errors
+        return status;  // Return what we have so far, even if libDRM parts fail
     }
 
     ScopedFD drm_fd(path.c_str(), O_RDWR | O_CLOEXEC);
@@ -5061,36 +5130,22 @@ amdsmi_get_gpu_vbios_info(amdsmi_processor_handle processor_handle, amdsmi_vbios
 
     if (drm_write == 0) {
         snprintf(info->name, AMDSMI_MAX_STRING_LENGTH, "%s", reinterpret_cast<char *>(vbios.name));
-        snprintf(info->build_date, AMDSMI_MAX_STRING_LENGTH - 1, "%s", reinterpret_cast<char *>(vbios.date) );
+        snprintf(info->build_date, AMDSMI_MAX_STRING_LENGTH - 1, "%s",
+                 reinterpret_cast<char *>(vbios.date));
         info->build_date[AMDSMI_MAX_STRING_LENGTH - 1] = '\0';
-        snprintf(info->part_number, AMDSMI_MAX_STRING_LENGTH, "%s", reinterpret_cast<char *>(vbios.vbios_pn));
+        snprintf(info->part_number, AMDSMI_MAX_STRING_LENGTH, "%s",
+                 reinterpret_cast<char *>(vbios.vbios_pn));
         // Navi devices still interpret vbios version from drm vbios_ver_str
-        snprintf(info->version, AMDSMI_MAX_STRING_LENGTH, "%s", reinterpret_cast<char *>(vbios.vbios_ver_str));
+        snprintf(info->version, AMDSMI_MAX_STRING_LENGTH, "%s",
+                 reinterpret_cast<char *>(vbios.vbios_ver_str));
     } else {
         // get sysfs vbios_version string which is known as the part number
-        char vbios_version[AMDSMI_MAX_STRING_LENGTH];
-        status = rsmi_wrapper(rsmi_dev_vbios_version_get, processor_handle, 0,
-                              vbios_version, AMDSMI_MAX_STRING_LENGTH);
-
-        // fail if cannot get vbios version from sysfs
-        if (status == AMDSMI_STATUS_SUCCESS) {
-            snprintf(info->part_number, AMDSMI_MAX_STRING_LENGTH, "%s", vbios_version);
-        }
+        status = get_vbios_from_sysfs(processor_handle, info);
     }
     libdrm.unload();
 
     // get vbios build string from rocm_smi which translates to ifwi version
-    char vbios_build_number[AMDSMI_MAX_STRING_LENGTH];
-    amdsmi_status_t build_status;
-    build_status = rsmi_wrapper(rsmi_dev_vbios_build_number_get, processor_handle, 0,
-                                vbios_build_number, AMDSMI_MAX_STRING_LENGTH);
-
-    // Continue if sysfs doesn't exist
-    if (build_status == AMDSMI_STATUS_SUCCESS) {
-        // This device has an ifwi version so swap the version and boot_firmware
-        snprintf(info->boot_firmware, AMDSMI_MAX_STRING_LENGTH, "%s", info->version);
-        snprintf(info->version, AMDSMI_MAX_STRING_LENGTH, "%s", vbios_build_number);
-    }
+    amdsmi_status_t ifwi_status = get_ifwi_version(processor_handle, info);  // ignore errors
 
     ss << __PRETTY_FUNCTION__
        << " | drmCommandWrite returned: " << strerror(errno) << "\n"
@@ -5753,8 +5808,8 @@ amdsmi_status_t amdsmi_get_pcie_info(amdsmi_processor_handle processor_handle, a
 
     memset((void *)info, 0, sizeof(*info));
 
-    std::string path_max_link_width = "/sys/class/drm/" +
-        gpu_device->get_gpu_path() + "/device/max_link_width";
+    std::string path_max_link_width = "/sys/class/drm/renderD" +
+        std::to_string(gpu_device->get_drm_render_minor()) + "/device/max_link_width";
     fp = fopen(path_max_link_width.c_str(), "r");
     if (fp) {
         fscanf(fp, "%d", &pcie_width);
@@ -5768,8 +5823,8 @@ amdsmi_status_t amdsmi_get_pcie_info(amdsmi_processor_handle processor_handle, a
     }
     info->pcie_static.max_pcie_width = (uint16_t)pcie_width;
 
-    std::string path_max_link_speed = "/sys/class/drm/" +
-        gpu_device->get_gpu_path() + "/device/max_link_speed";
+    std::string path_max_link_speed = "/sys/class/drm/renderD" +
+        std::to_string(gpu_device->get_drm_render_minor()) + "/device/max_link_speed";
     fp = fopen(path_max_link_speed.c_str(), "r");
     if (fp) {
         fscanf(fp, "%lf %s", &pcie_speed, buff);
