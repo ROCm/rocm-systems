@@ -108,6 +108,7 @@ class cli_analysis(OmniAnalyze_Base):
                     "analyze mode is run with '--list-torch-operators' flag"
                     " analyze mode is run with '--list-torch-operators' flag"
                     " before using '--torch-operator'."
+                )
             for op in workload.filter_torch_operators:
                 df = workload.torch_operators.get(op)
                 if df is not None:
