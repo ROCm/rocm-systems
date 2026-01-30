@@ -49,10 +49,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
     instead of `AMDSMI_STATUS_NOT_SUPPORTED` when libDRM isn’t installed.
   - Fixes `amd-smi static --asic` output.
 
-- **Fixed ASIC info retrieval when libDRM is unavailable**.  
-  - `amdsmi_get_gpu_asic_info()` now returns the available ASIC fields and reports `AMDSMI_STATUS_SUCCESS`
-    instead of failing with `AMDSMI_STATUS_NOT_SUPPORTED` when libDRM isn’t installed.
-  - Fixes `amd-smi static --asic` output.
+- **Fixed manufacturer name display for AMD GPUs**.  
+  - Updated `amdsmi_get_gpu_board_info()` to correctly detect vendor ID `0x1002` and display
+    "Advanced Micro Devices Inc. [AMD/ATI]" instead of the raw ID.
+  - Fixes `amd-smi static --board` output.
   
 - **Fixed `amd-smi` default command alignment when libDRM is unavailable**.  
   - When `amdgpu Version` can’t be queried (libDRM missing), the default view falls back to `OS Kernel Version`;

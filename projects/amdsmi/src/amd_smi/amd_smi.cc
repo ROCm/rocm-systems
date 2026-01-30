@@ -5145,7 +5145,7 @@ amdsmi_get_gpu_vbios_info(amdsmi_processor_handle processor_handle, amdsmi_vbios
     libdrm.unload();
 
     // get vbios build string from rocm_smi which translates to ifwi version
-    amdsmi_status_t ifwi_status = get_ifwi_version(processor_handle, info);  // ignore errors
+    auto _ = get_ifwi_version(processor_handle, info);  // ignore errors
 
     ss << __PRETTY_FUNCTION__
        << " | drmCommandWrite returned: " << strerror(errno) << "\n"
