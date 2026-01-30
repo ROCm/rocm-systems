@@ -22,11 +22,9 @@ THE SOFTWARE.
 
 #include "hip_test_params.hh"
 #include "hip_test_parameters.hh"  // Generated header with compile-time constants
-#include <iostream>
+#include "hip_test_context.hh"     // For LogPrintf
 
 void TestParameterStore::initialize() {
-    std::cout << "\n[TestParameterStore] Initializing from compile-time constants..." << std::endl;
-    
     // Load all level parameters from generated compile-time constants
     auto allParams = TestParameters::initializeLevelParameters();
     
@@ -37,10 +35,9 @@ void TestParameterStore::initialize() {
         levelWarmups[levelName] = params.warmups;
         levelMaxMemory[levelName] = params.max_memory;
         
-        std::cout << "[TestParameterStore]   " << levelName << ": "
-                  << params.memory_sizes.size() << " memory sizes, "
-                  << params.block_sizes.size() << " block sizes, "
-                  << params.iterations << " iterations" << std::endl;
+        LogPrintf("[TestParameterStore] %s: %zu memory sizes, %zu block sizes, %d iterations\n",
+                  levelName.c_str(), params.memory_sizes.size(), 
+                  params.block_sizes.size(), params.iterations);
     }
     
     // Set defaults (use level_0 as fallback if available, otherwise hardcoded)
@@ -53,28 +50,20 @@ void TestParameterStore::initialize() {
         // Hardcoded fallback if no levels defined
         defaultMemorySizes = {1024, 1048576, 10485760};  // 1K, 1M, 10M
         defaultBlockSizes = {64, 256};
-        std::cout << "[TestParameterStore] Warning: No level_0 defined, using hardcoded defaults" << std::endl;
+        LogPrintf("[TestParameterStore] Warning: No level_0 defined, using hardcoded defaults\n%s", "");
     }
     
-    std::cout << "[TestParameterStore] Initialization complete - "
-              << allParams.size() << " levels loaded\n" << std::endl;
+    LogPrintf("[TestParameterStore] Initialization complete - %zu levels loaded\n", allParams.size());
 }
 
 void TestParameterStore::loadLevelConfig(const std::string& level) {
     currentTestLevel = level;
     
     if (levelMemorySizes.count(level)) {
-        std::cout << "[TestParameterStore] Activating level: " << level << std::endl;
-        std::cout << "  Memory sizes: " << levelMemorySizes[level].size() 
-                  << " (" << levelMemorySizes[level][0] << " bytes to "
-                  << levelMemorySizes[level][levelMemorySizes[level].size()-1] << " bytes)" << std::endl;
-        std::cout << "  Block sizes: " << levelBlockSizes[level].size() 
-                  << " (" << levelBlockSizes[level][0] << " to "
-                  << levelBlockSizes[level][levelBlockSizes[level].size()-1] << ")" << std::endl;
-        std::cout << "  Iterations: " << levelIterations[level] << std::endl;
+        LogPrintf("[TestParameterStore] Activating level: %s (%zu memory sizes, %zu block sizes)\n",
+                  level.c_str(), levelMemorySizes[level].size(), levelBlockSizes[level].size());
     } else {
-        std::cout << "[TestParameterStore] Warning: Level '" << level 
-                  << "' not found, using defaults" << std::endl;
+        LogPrintf("[TestParameterStore] Warning: Level '%s' not found, using defaults\n", level.c_str());
     }
 }
 
@@ -120,5 +109,4 @@ void TestParameterStore::clear() {
     levelIterations.clear();
     levelWarmups.clear();
     levelMaxMemory.clear();
-    std::cout << "[TestParameterStore] Cleared all parameters" << std::endl;
 }

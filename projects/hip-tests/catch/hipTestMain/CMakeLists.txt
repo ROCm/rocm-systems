@@ -38,5 +38,6 @@ add_dependencies(Main_Object hip_tests_config_generation)
 
 # Add include directory for generated headers
 target_include_directories(Main_Object PRIVATE 
+    ${CMAKE_BINARY_DIR}/catch_tests
     ${CMAKE_CURRENT_BINARY_DIR}/../${CATCH_INCLUDE_DIR}
 )

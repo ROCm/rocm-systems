@@ -24,7 +24,7 @@ THE SOFTWARE.
 #include <catch2/reporters/catch_reporter_registrars.hpp>
 #include <catch2/catch_test_case_info.hpp>
 #include <hip_test_params.hh>
-#include <iostream>
+#include <hip_test_context.hh>
 #include <regex>
 #include <cstdlib>
 
@@ -53,7 +53,7 @@ private:
         // Check environment variable first
         if (const char* envLevel = std::getenv("HIP_TEST_LEVEL")) {
             std::string level = envLevel;
-            std::cout << "[Level Filter] Detected from HIP_TEST_LEVEL: " << level << std::endl;
+            LogPrintf("[Level Filter] Detected from HIP_TEST_LEVEL: %s\n", level.c_str());
             return level;
         }
         
@@ -72,10 +72,6 @@ public:
      * Initializes TestParameterStore and detects level filter
      */
     void testRunStarting(Catch::TestRunInfo const& testRunInfo) override {
-        std::cout << "\n================================================" << std::endl;
-        std::cout << "HIP Test Parameter Initialization" << std::endl;
-        std::cout << "================================================" << std::endl;
-        
         // Detect level filter from environment or command-line
         filterLevel = detectLevelFromCommandLine();
         
@@ -83,18 +79,9 @@ public:
         
         // If level was specified, load it immediately
         if (!filterLevel.empty()) {
-            std::cout << "\n[Level Filter] Applying global level: " << filterLevel << std::endl;
+            LogPrintf("[Level Filter] Applying global level: %s\n", filterLevel.c_str());
             TestParameterStore::instance().loadLevelConfig(filterLevel);
         }
-        
-        int currentDevice = 0;
-        if (hipGetDevice(&currentDevice) == hipSuccess) {
-            DeviceCapabilities::get().initialize(currentDevice);
-            std::cout << "\n";
-            DeviceCapabilities::get().print();
-        }
-        
-        std::cout << "================================================\n" << std::endl;
     }
 
     /**
@@ -108,8 +95,8 @@ public:
         if (!filterLevel.empty()) {
             // Filter level takes precedence - all tests use same parameters
             if (params.currentTestLevel != filterLevel) {
-                std::cout << "\n[Level Filter] Test: " << testInfo.name 
-                          << " -> Using filter level: " << filterLevel << std::endl;
+                LogPrintf("[Level Filter] Test: %s -> Using filter level: %s\n", 
+                          testInfo.name.c_str(), filterLevel.c_str());
                 params.loadLevelConfig(filterLevel);
             }
             return;
@@ -136,16 +123,15 @@ public:
         // If this is the first test with a level tag, set it as filter level
         if (!detectedLevel.empty() && filterLevel.empty()) {
             filterLevel = detectedLevel;
-            std::cout << "\n[Level Auto-Detection] Inferred filter level: " << filterLevel 
-                      << " from test: " << testInfo.name << std::endl;
-            std::cout << "  All subsequent tests will use " << filterLevel << " parameters" << std::endl;
+            LogPrintf("[Level Auto-Detection] Inferred filter level: %s from test: %s\n", 
+                      filterLevel.c_str(), testInfo.name.c_str());
         }
         
         // Load level-specific config if detected
         if (!detectedLevel.empty()) {
             if (params.currentTestLevel != detectedLevel) {
-                std::cout << "\n[Level Detection] Test: " << testInfo.name 
-                          << " -> Level: " << detectedLevel << std::endl;
+                LogPrintf("[Level Detection] Test: %s -> Level: %s\n", 
+                          testInfo.name.c_str(), detectedLevel.c_str());
                 params.loadLevelConfig(detectedLevel);
             }
         } else {
@@ -161,7 +147,6 @@ public:
      * Cleanup resources
      */
     void testRunEnded(Catch::TestRunStats const& testRunStats) override {
-        std::cout << "\n[TestParameterStore] Cleaning up..." << std::endl;
         TestParameterStore::instance().clear();
     }
 };

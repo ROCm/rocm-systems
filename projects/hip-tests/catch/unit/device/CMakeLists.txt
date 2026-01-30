@@ -2,6 +2,7 @@
 set(TEST_SRC
     hipChooseDevice.cc
     hipDeviceComputeCapability.cc
+    hipDeviceMemAlloc_WithLevels.cc
     hipDeviceGetByPCIBusId.cc
     hipDeviceGetLimit_old.cc
     hipDeviceGetName.cc

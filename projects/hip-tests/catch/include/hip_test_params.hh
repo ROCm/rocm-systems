@@ -107,20 +107,21 @@ public:
      */
     std::string currentTestLevel;
 
-private:
-    TestParameterStore() = default;
-    ~TestParameterStore() = default;
-    TestParameterStore(const TestParameterStore&) = delete;
-    TestParameterStore& operator=(const TestParameterStore&) = delete;
-
     /**
      * @brief Level-specific parameters (loaded from compile-time constants)
+     * Public for verification tests
      */
     std::map<std::string, std::vector<size_t>> levelMemorySizes;
     std::map<std::string, std::vector<int>> levelBlockSizes;
     std::map<std::string, int> levelIterations;
     std::map<std::string, int> levelWarmups;
     std::map<std::string, size_t> levelMaxMemory;
+
+private:
+    TestParameterStore() = default;
+    ~TestParameterStore() = default;
+    TestParameterStore(const TestParameterStore&) = delete;
+    TestParameterStore& operator=(const TestParameterStore&) = delete;
     
     /**
      * @brief Fallback parameters (if no level specified)
