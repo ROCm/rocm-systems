@@ -202,6 +202,7 @@ static void addWorkBatchToPlan(
     // batch further down.
     newBatch |= NCCL_MAX_DEV_WORK_BATCH_BYTES < chan->wipBatch.workBytes + workSize;
     if (workType == ncclDevWorkTypeP2p) {
+      newBatch |= !chan->wipBatch.batchP2P;
       newBatch |= (comm->nNodes > 2 && batchP2P)? (chan->wipBatch.nP2ps == NCCL_MAX_DEV_WORK_P2P_PER_BATCH) : (chan->wipBatch.nP2ps == 1);
       for (int i=0; i < chan->wipBatch.nP2ps; i++) {
         newBatch |= p2pRound == chan->wipBatch.p2pRounds[i];
@@ -242,6 +243,11 @@ static void addWorkBatchToPlan(
   batch->offsetBitset |= 1ull<<(offset/workSize);
   chan->wipBatch.workBytes += workSize;
   if (workType == ncclDevWorkTypeP2p) {
+    //if batching is enabled (RCCL_P2P_BATCH_ENABLE=1), 
+    //but this op is not eligible for batching with other ops (i.e. alltoallv where sendBytes != recvBytes), 
+    // mark eligiblity/ineligibility so that future ops that may be eligible, are not batched with ineligible ones
+    if(chan->wipBatch.nP2ps == 0)
+      chan->wipBatch.batchP2P = batchP2P;
     // We need to ensure that a single batch doesn't have multiple p2p's
     // of the same round since they would use the same connections.
     chan->wipBatch.p2pRounds[chan->wipBatch.nP2ps++] = p2pRound;
