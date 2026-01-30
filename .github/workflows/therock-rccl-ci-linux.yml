@@ -41,6 +41,7 @@ jobs:
         with:
           repository: "ROCm/rocm-systems"
           path: rocm-systems
+          ref: 996202f56033598b66cdc7d7c4473c6c283e6cb4 #Pinning test-branch
 
       - name: Install python deps
         run: |
