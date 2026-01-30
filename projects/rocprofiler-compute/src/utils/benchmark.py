@@ -228,10 +228,6 @@ class Program:
 
         return hip.hipModuleGetFunction(self.module, kernel_name)
 
-    def save(self, filename: str) -> None:
-        with open(filename, "wb") as f:
-            f.write(self.code)
-
 # Helper method for launching kernel
 def launch_kernel(
     func: POINTER,
@@ -629,7 +625,6 @@ def flops_bench(device: int, type: str, unit: str, rate: int) -> PerfMetrics:
     total_flops = threads * iterations * nFMA * 2
 
     prog = Program(flops_benchmark_src, [kernel_name])
-    prog.save(f"flops_{type}_{unit}_gpu{device}.hsabin")
 
     func = prog.get_kernel(kernel_name)
 
