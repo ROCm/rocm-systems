@@ -473,7 +473,7 @@ of the application (note zero-based indexing).
 .. _profiling-metric-sets:
 
 Metric sets filtering
-^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^
 
 A metrics set contains a subset of metrics that can be collected in a single pass. This filtering option minimizes profiling overhead by only collecting counters of interest.
 The `--set` filter option provides a convenient way to group related metrics for common profiling scenarios, eliminating the need to manually specify individual metrics for typical analysis workflows.
@@ -553,8 +553,11 @@ Roofline analysis occurs on any profile mode run, provided ``--no-roof`` option 
 You don't need to include any additional roofline-specific options for roofline analysis.
 If you want to focus only on roofline-specific performance data and reduce the time it takes to profile, you can use the ``--roof-only`` option.
 This option checks if there is existing profiling data in the workload directory (``pmc_perf.csv`` and ``roofline.csv``):
-	a) If found, uses the data files with the provided arguments to create another roofline PDF output; otherwise,
-	b) Profile mode runs but is limited to collecting only roofline performance counters.
+
+   a) If found, uses the data files with the provided arguments to create another roofline HTML output; otherwise,
+	
+   b) Profile mode runs but is limited to collecting only roofline performance counters.
+
 Note that ``--roof-only`` cannot be used with ``--block`` or ``--set`` options.
 
 Roofline options
@@ -608,7 +611,7 @@ The following example demonstrates profiling roofline data only:
     99% [||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| ]
     ...
    Empirical Roofline PDFs saved!
-
+   
 An inspection of our workload output folder shows ``.pdf`` plots were generated
 successfully.
 
