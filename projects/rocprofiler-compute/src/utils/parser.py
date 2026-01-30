@@ -2027,6 +2027,7 @@ def load_non_mertrics_table(
 
     workload.dfs.update(tmp)
 
+
 @demarcate
 def load_torch_trace_data(workload: schema.Workload, dir_path: str) -> None:
     """
@@ -2043,6 +2044,7 @@ def load_torch_trace_data(workload: schema.Workload, dir_path: str) -> None:
                 workload.torch_operators[operator_name] = df
             except Exception as e:
                 console_warning(f"Could not load {csv_file}: {e}")
+
 
 @demarcate
 def load_torch_trace_data(workload: schema.Workload, dir_path: str) -> None:

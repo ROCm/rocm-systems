@@ -256,12 +256,13 @@ def is_roofline_shown(
         show_roof_plot(roof_plot)
     return True
 
-def show_torch_operator_hierarchy(operator_name: str , df: pd.DataFrame) -> None:
+
+def show_torch_operator_hierarchy(operator_name: str, df: pd.DataFrame) -> None:
     """
     Display the hierarchy for each unique operator name in the DataFrame.
     """
     print("\n" + "-" * 80)
-    print("Torch Operator Hierarchy for",operator_name)
+    print("Torch Operator Hierarchy for", operator_name)
     if df is not None and not df.empty and "Operator_Name" in df.columns:
         unique_ops = df["Operator_Name"].unique()
         for op in unique_ops:
@@ -272,6 +273,38 @@ def show_torch_operator_hierarchy(operator_name: str , df: pd.DataFrame) -> None
             print()
     else:
         print("No operator names found in data.")
+
+def extract_kernel_name(full_kernel_name: str) -> str:
+    """
+    Extract the short kernel function name from a mangled C++ kernel name.
+
+    Examples:
+    - "void at::native::vectorized_elementwise_kernel<...>"
+       -> "vectorized_elementwise_kernel"
+    - "Cijk_Ailk_Bljk_SB_MT128x128x16..." -> "Cijk_Ailk_Bljk_SB_MT128x128x16..."
+    """
+    # Remove return type prefix (void, etc.)
+    kernel_name = full_kernel_name.strip()
+    if kernel_name.startswith("void "):
+        kernel_name = kernel_name[5:]
+
+    # First, extract the main function name before any template parameters
+    # Split on '<' to get the part before template parameters
+    if "<" in kernel_name:
+        main_part = kernel_name.split("<")[0]
+    elif "(" in kernel_name:
+        main_part = kernel_name.split("(")[0]
+    else:
+        main_part = kernel_name
+
+    # Now extract the function name from namespaces
+    if "::" in main_part:
+        # Get the last part after the last :: in the main part (before templates)
+        function_name = main_part.split("::")[-1].strip()
+        return function_name if function_name else kernel_name.strip()
+
+    return main_part.strip()
+
 
 def show_torch_operator_table(operator_name: str, df: pd.DataFrame) -> None:
     """Display torch operator data in a properly formatted table."""
