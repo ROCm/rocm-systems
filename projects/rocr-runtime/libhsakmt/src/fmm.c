@@ -2125,7 +2125,7 @@ static void *fmm_allocate_host_gpu(HsaKFDContext *ctx,
 
 		/* Map anonymous pages */
 		if (mmap(mem, MemorySizeInBytes, PROT_READ | PROT_WRITE,
-			 MAP_ANONYMOUS | MAP_SHARED | MAP_FIXED, -1, 0)
+			 MAP_ANONYMOUS | MAP_PRIVATE | MAP_FIXED, -1, 0)
 		    == MAP_FAILED)
 			goto out_release_area;
 
