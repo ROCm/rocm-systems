@@ -85,6 +85,9 @@ class LLMoE {
     // print rank and gpu id
     std::cout << "Rank " << rank << " using GPU " << device_id << std::endl;
 
+    // Create HIP stream
+    CHECK_HIP(hipStreamCreate(&stream));
+
     /**
      * Generate input data after COMM init, because it sets different device
      * IDs for different ranks.
@@ -93,7 +96,8 @@ class LLMoE {
 
     CHECK_HIP(hipExtMallocWithFlags(&workspace, NUM_WORKSPACE_BYTES,
               hipDeviceMallocUncached));
-    CHECK_HIP(hipMemsetAsync(workspace, 0, NUM_WORKSPACE_BYTES));
+    // Mmemset workspace to zero
+    CHECK_HIP(hipMemsetAsync(workspace, 0, NUM_WORKSPACE_BYTES, stream));
 
     // Allocate rocSHMEM buffer
     num_rdma_bytes = get_rdma_size_hint<T>(
@@ -106,13 +110,15 @@ class LLMoE {
       // Clean up other resources and exit
       exit(EXIT_FAILURE);
     }
-    CHECK_HIP(hipMemsetAsync(rdma_buffer_ptr, 0, num_rdma_bytes));
+
+    // Mmemset rdma_buffer_ptr to zero
+    CHECK_HIP(hipMemsetAsync(rdma_buffer_ptr, 0, num_rdma_bytes, stream));
 
     // Allocate dispatch buffers
     allocate_dispatch_buffers();
 
     // Synchronize to ensure all allocations are done
-    CHECK_HIP(hipDeviceSynchronize());
+    CHECK_HIP(hipStreamSynchronize(stream));
   }
 
   ~LLMoE() {
@@ -126,6 +132,9 @@ class LLMoE {
 
     // Free combine buffers
     CHECK_HIP(hipFree(combined_x));
+
+    // Destroy HIP stream
+    CHECK_HIP(hipStreamDestroy(stream));
 
     // Free rocSHMEM buffer
     rocshmem_free(rdma_buffer_ptr);

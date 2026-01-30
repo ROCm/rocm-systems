@@ -43,6 +43,7 @@ void print_usage(const char* prog_name)
   std::cerr
         << "Usage: " << prog_name << " [options]\n"
         << "Options:\n"
+        << "  -u                 Print this usage message and exit\n"
         << "  -n <num_tokens>    Number of tokens (default: 128)\n"
         << "  -h <hidden>        Hidden size (default: 7168)\n"
         << "  -k <num_topk>      Top-k value (default: 8)\n"
@@ -69,7 +70,7 @@ int main (int argc, char **argv)
 
   // parse command line arguments
   int opt;
-  while ((opt = getopt(argc, argv, "n:h:k:e:i:m:")) != -1) {
+  while ((opt = getopt(argc, argv, "n:h:k:e:i:m:u")) != -1) {
     switch (opt) {
       case 'n':
         num_tokens = atoi(optarg);
@@ -86,6 +87,9 @@ int main (int argc, char **argv)
       case 'i':
         num_iterations = atoi(optarg);
         break;
+      case 'u':
+        print_usage(argv[0]);
+        return EXIT_SUCCESS;
       case 'm':
         if (optarg[0] == 'r' && optarg[1] == '\0') {
           init_mode = InitMode::Random;
