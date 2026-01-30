@@ -130,6 +130,8 @@ macro_rules! impl_cstr_getters {
     };
 }
 
+impl std::error::Error for AmdsmiStatusT {}
+
 impl fmt::Display for AmdsmiStatusT {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let status_str = crate::amdsmi_status_code_to_string(*self)
