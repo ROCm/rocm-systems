@@ -23,6 +23,7 @@
 #include "lib/rocprofiler-sdk/hsa/profile_serializer.hpp"
 
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
+#include "lib/rocprofiler-sdk/spm/asynchandler.hpp"
 
 namespace rocprofiler
 {
@@ -113,6 +114,9 @@ profiler_serializer::kernel_completion_signal(const Queue& completed)
     {
         const auto* queue = _dispatch_ready.front();
         _dispatch_ready.erase(_dispatch_ready.begin());
+
+        if(rocprofiler::spm::is_spm_explicitly_enabled())
+            rocprofiler::spm::asynchandler((queue->get_agent().get_rocp_agent())->id);
         CHECK_NOTNULL(get_queue_controller())
             ->get_core_table()
             .hsa_signal_store_screlease_fn(queue->block_signal, 0);
@@ -149,6 +153,8 @@ profiler_serializer::queue_ready(hsa_queue_t* hsa_queue, const Queue& queue)
 
     if(_dispatch_queue == nullptr)
     {
+        if(rocprofiler::spm::is_spm_explicitly_enabled())
+            rocprofiler::spm::asynchandler((queue.get_agent().get_rocp_agent())->id);
         CHECK_NOTNULL(get_queue_controller())
             ->get_core_table()
             .hsa_signal_store_screlease_fn(queue.block_signal, 0);

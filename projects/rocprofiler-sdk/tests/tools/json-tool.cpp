@@ -637,14 +637,23 @@ spm_dispatch_callback(const rocprofiler_spm_dispatch_counting_service_data_t* di
 {
     // Iterate through the agents and get the counters available on that agent
     static std::shared_mutex m_mutex = {};
-    static std::unordered_map<rocprofiler_agent_id_t, rocprofiler_spm_counter_config_id_t>
+    static std::unordered_map<rocprofiler_agent_id_t, std::vector<rocprofiler_spm_counter_config_id_t>>
         profile_cache = {};
-
+    auto current_profile = [&](){
+        static int current = -1;
+        if(current == -1 || current == 1)
+           current = 0; 
+        else 
+           current = 1; 
+        return current;       
+    };
     auto search_cache = [&]() {
+        
         if(auto pos = profile_cache.find(dispatch_data->dispatch_info.agent_id);
            pos != profile_cache.end())
         {
-            *config = pos->second;
+            
+            *config = pos->second.at(current_profile());
             return true;
         }
         return false;
@@ -717,7 +726,7 @@ spm_dispatch_callback(const rocprofiler_spm_dispatch_counting_service_data_t* di
     auto params        = rocprofiler_spm_configuration_t{};
     params.timeout     = 30;
     params.buffer_size = 32768;
-    params.frequency   = 50000;
+    params.frequency   = 0.5;
     // Look for the counters contained in counters_to_collect in gpu_counters
     // Create a colleciton profile for the counters
     rocprofiler_spm_counter_config_id_t profile = {.handle = 0};
@@ -727,8 +736,18 @@ spm_dispatch_callback(const rocprofiler_spm_dispatch_counting_service_data_t* di
                                                            &params,
                                                            &profile),
                      "Could not construct profile cfg");
-
-    profile_cache.emplace(dispatch_data->dispatch_info.agent_id, profile);
+    auto params2        = rocprofiler_spm_configuration_t{};
+    params2.timeout     = 50;
+    params2.buffer_size = 32768;
+    params2.frequency   = 0.5; 
+    rocprofiler_spm_counter_config_id_t profile2 = {.handle = 0};
+    ROCPROFILER_CALL(rocprofiler_spm_create_counter_config(dispatch_data->dispatch_info.agent_id,
+                                                           collect_counters.data(),
+                                                           collect_counters.size(),
+                                                           &params2,
+                                                           &profile2),
+                     "Could not construct profile cfg");
+    profile_cache.emplace(dispatch_data->dispatch_info.agent_id, std::vector<rocprofiler_spm_counter_config_id_t>{profile, profile2});
     // Return the profile to collect those counters for this dispatch
     *config = profile;
 }

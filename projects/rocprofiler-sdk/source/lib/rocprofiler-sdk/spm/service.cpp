@@ -28,6 +28,7 @@
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/hsa/aql_packet.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
+#include "lib/rocprofiler-sdk/spm/asynchandler.hpp"
 #include "lib/rocprofiler-sdk/spm/dlsym.hpp"
 
 #include <rocprofiler-sdk/dispatch_counting_service.h>
@@ -48,7 +49,7 @@ is_dlsym_valid()
     static bool valid = Dlsym().valid();
     return valid;
 }
-}  // namespace SPM
+}  // namespace spm
 }  // namespace rocprofiler
 extern "C" {
 
@@ -67,7 +68,7 @@ rocprofiler_status_t
 rocprofiler_spm_create_counter_config(rocprofiler_agent_id_t               agent_id,
                                       rocprofiler_counter_id_t*            counters_list,
                                       size_t                               counters_count,
-                                      rocprofiler_spm_configuration_t*    parameters,
+                                      rocprofiler_spm_configuration_t*     parameters,
                                       rocprofiler_spm_counter_config_id_t* config_id)
 {
     if(!rocprofiler::spm::is_dlsym_valid()) return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_ABI;
@@ -102,11 +103,14 @@ rocprofiler_spm_create_counter_config(rocprofiler_agent_id_t               agent
         }
         config->metrics.push_back(*metric_ptr);
     }
-
-    config->timeout     =  parameters->timeout;
-    config->buffer_size =  parameters->buffer_size;
-    config->sample_freq =  parameters->frequency;
-
+    
+    if(parameters)
+    {
+       config->timeout     = parameters->timeout;
+       config->buffer_size = parameters->buffer_size;
+       config->sample_freq = parameters->frequency;
+    }
+    
     if(config_id->handle != 0)
     {
         // Copy existing counters from previous config

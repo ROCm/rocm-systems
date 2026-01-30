@@ -30,13 +30,13 @@
 #include "lib/rocprofiler-sdk/hsa/queue_info_session.hpp"
 
 #include <rocprofiler-sdk/experimental/spm.h>
-#include <rocprofiler-sdk/intercept_table.h>
 #include <rocprofiler-sdk/cxx/hash.hpp>
 #include <rocprofiler-sdk/cxx/operators.hpp>
 
 #include <atomic>
 #include <condition_variable>
 #include <cstdint>
+#include <deque>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -66,21 +66,30 @@ struct spm_counter_config
     const rocprofiler_agent_t*    agent = nullptr;
     std::vector<counters::Metric> metrics{};
 
-    uint64_t sample_freq = 0;
-    uint64_t buffer_size = 0;
-    uint64_t timeout     = 0;
+    uint64_t sample_freq = 0.5;
+    uint64_t buffer_size = 32768;
+    uint64_t timeout     = 50;
 
     rocprofiler_spm_counter_config_id_t id{.handle = 0};
     // Packet generator to create AQL packets for insertion
     std::unique_ptr<rocprofiler::aql::SPMPacketConstruct> pkt_generator{nullptr};
     // A packet cache of AQL packets. This allows reuse of AQL packets (preventing costly
     // allocation of new packets/destruction).
-    common::Synchronized<std::vector<std::unique_ptr<rocprofiler::hsa::AQLPacket>>> packets;
 
     bool valid() const
     {
         return sample_freq != 0 && buffer_size != 0 && timeout != 0 && !metrics.empty();
     }
+};
+
+struct spm_callback_data
+{
+    bool                                             is_profiling{false};
+    rocprofiler_spm_dispatch_counting_record_cb_t    record_cb{};
+    rocprofiler_spm_dispatch_counting_service_data_t dispatch_data{};
+    rocprofiler_user_data_t*                         user_data;
+    void*                                            record_callback_args{};
+    bool                                             config_switch{false};
 };
 
 /**
@@ -103,12 +112,23 @@ struct spm_counter_callback_info
     const context::context*                       internal_context;
     rocprofiler_spm_dispatch_counting_record_cb_t record_callback;
     void*                                         record_callback_args;
-    common::Synchronized<
-        std::unordered_map<rocprofiler::hsa::AQLPacket*, std::shared_ptr<spm_counter_config>>>
-                                packet_return_map{};
     static rocprofiler_status_t setup_spm_counter_config(std::shared_ptr<spm_counter_config>&);
-    rocprofiler_status_t        get_spm_packet(std::unique_ptr<rocprofiler::hsa::AQLPacket>&,
-                                               std::shared_ptr<spm_counter_config>&);
+    
+    rocprofiler_status_t get_spm_packet(std::unique_ptr<rocprofiler::hsa::AQLPacket>&,
+                                        std::shared_ptr<spm_counter_config>&,
+                                        bool* is_config_switch);
+};
+
+struct enqueue_dispatch_config_state
+{
+    rocprofiler_spm_counter_config_id_t          config_id;
+    std::unique_ptr<rocprofiler::hsa::SPMPacket> spm_packet;
+
+    enqueue_dispatch_config_state(rocprofiler_spm_counter_config_id_t          id,
+                                  std::unique_ptr<rocprofiler::hsa::SPMPacket> packet)
+    : config_id(id)
+    , spm_packet(std::move(packet))
+    {}
 };
 
 /**
@@ -128,11 +148,19 @@ public:
 
     std::shared_ptr<spm_counter_config> get_profile_cfg(rocprofiler_spm_counter_config_id_t id);
 
+    void state_map_fini();
+
+    common::Synchronized<
+        std::unordered_map<uint64_t, std::deque<std::unique_ptr<enqueue_dispatch_config_state>>>>
+        _agent_state_map;
+    common::Synchronized<
+        std::unordered_map<uint64_t, std::deque<std::unique_ptr<spm_callback_data>>>>
+        _callback_data;
+
 private:
     // Cache to contain the map of config id handle to spm counter config
     common::Synchronized<std::unordered_map<uint64_t, std::shared_ptr<spm_counter_config>>>
-                                                           _configs;
-    common::Synchronized<std::set<rocprofiler_agent_id_t>> spm_kfd_agents;
+        _configs;
 };
 
 SpmCounterController&
@@ -153,10 +181,6 @@ configure_callback_spm_dispatch(rocprofiler_context_id_t                       c
                                 void*                                          callback_data_args,
                                 rocprofiler_spm_dispatch_counting_record_cb_t  record_callback,
                                 void* record_callback_args);
-
-bool
-is_spm_explicitly_enabled();
-
 /*
  * start dispatch SPM context
  */
@@ -168,6 +192,9 @@ start_context(const context::context*);
  */
 void
 stop_context(const context::context*);
+
+void
+state_map_fini();
 
 }  // namespace spm
 }  // namespace rocprofiler

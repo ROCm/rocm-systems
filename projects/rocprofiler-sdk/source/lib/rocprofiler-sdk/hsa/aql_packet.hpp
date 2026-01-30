@@ -83,7 +83,6 @@ public:
     {
         before_krn_pkt.clear();
         after_krn_pkt.clear();
-        before_krn_barrier_pkt.clear();
     }
     bool isEmpty() const { return empty; }
 
@@ -94,9 +93,8 @@ public:
     aqlprofile_handle_t handle = {.handle = 0};
     bool                empty  = {true};
 
-    common::container::small_vector<hsa_ext_amd_aql_pm4_packet_t, 3> before_krn_pkt         = {};
-    common::container::small_vector<hsa_ext_amd_aql_pm4_packet_t, 2> after_krn_pkt          = {};
-    common::container::small_vector<hsa_barrier_and_packet_t, 2>     before_krn_barrier_pkt = {};
+    common::container::small_vector<hsa_ext_amd_aql_pm4_packet_t, 3> before_krn_pkt = {};
+    common::container::small_vector<hsa_ext_amd_aql_pm4_packet_t, 2> after_krn_pkt  = {};
 };
 
 class EmptyAQLPacket : public AQLPacket
@@ -294,24 +292,23 @@ public:
         aql_desc            = other.aql_desc;
         spm_desc            = other.spm_desc;
         container_desc_data = other.container_desc_data;
+        hsa_agent           = other.hsa_agent;
+        empty               = false;
     }
 
-    void                         kfd_start();
-    void                         kfd_stop();
-    bool                         Valid() const { return is_valid; }
-    hsa_agent_t                  GetAgent() const { return pool ? pool->gpu_agent : hsa_agent_t{}; }
-    aqlprofile_agent_handle_t    agent;
-    rocprofiler_user_data_t*     user_data;
-    void*                        record_callback_args{};
-    aqlprofile_spm_buffer_desc_t aql_desc{};
-    rocprofiler::spm::spm_descriptor_t               spm_desc{};
-    rocprofiler_spm_dispatch_counting_record_cb_t    record_cb{};
-    rocprofiler_spm_dispatch_counting_service_data_t dispatch_data{};
-    std::shared_ptr<std::vector<char>>               container_desc_data{};
-    aqlprofile_spm_aql_packets_t                     packets{};
-    std::shared_ptr<SPMMemoryPool>                   pool{};
-    void                                             populate_before() override;
-    void                                             populate_after() override;
+    void                      kfd_start();
+    void                      kfd_stop();
+    bool                      Valid() const { return is_valid; }
+    hsa_agent_t               hsa_agent;
+    aqlprofile_agent_handle_t agent;
+
+    aqlprofile_spm_buffer_desc_t       aql_desc{};
+    rocprofiler::spm::spm_descriptor_t spm_desc{};
+    std::shared_ptr<std::vector<char>> container_desc_data{};
+    aqlprofile_spm_aql_packets_t       packets{};
+    std::shared_ptr<SPMMemoryPool>     pool{};
+    void                               populate_before() override;
+    void                               populate_after() override;
 
     const spm::Dlsym sym{};
 
