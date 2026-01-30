@@ -111,11 +111,11 @@ mfma_kernel_selector = {
 # Some data types have different rates. Set the number of iterations
 # to keep running time under control.
 flops_kernel_iterations = {
-    "FP16": 512,
+    "FP16": 256,
     "FP32": 256,
     "FP64": 128,
-    "INT8": 64,
-    "INT32": 64,
+    "INT8": 128,
+    "INT32": 128,
     "INT64": 64,
 }
 
@@ -611,7 +611,7 @@ def flops_bench(device: int, type: str, unit: str, rate: int) -> PerfMetrics:
     workgroup_size = DEFAULT_WORKGROUP_SIZE
     cus = hip.hipGetDeviceProperties(device).multiProcessorCount
 
-    workgroups = 64 * cus
+    workgroups = 128 * cus
     threads = workgroups * workgroup_size
 
     kernel_name = flops_kernel_selector[type][0]
