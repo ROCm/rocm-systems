@@ -65,12 +65,47 @@ public:
     void get_grouped_devices(std::map<amdcuid_device_type_t, std::vector<DevicePtr>>& grouped);
     const amdcuid_device_type_set_t& device_types() const { return device_types_; }
 
-    amdcuid_status_t add_device(const char* dev_path, amdcuid_device_type_t device_type, amdcuid_id_t* handle);
-    amdcuid_status_t remove_device(const amdcuid_id_t& handle);
+    amdcuid_status_t add_device(DevicePtr device);
+    amdcuid_status_t remove_device(amdcuid_id_t& handle);
 
     /**
-     * @brief Look up a device by its handle (secondary CUID).
-     * @param handle The handle containing the secondary CUID.
+     * @brief Create devices from CUID file entries.
+     * @param[in] cuid_file The CUID file containing device entries.
+     * 
+     * @return AMDCUID_STATUS_SUCCESS on success, error code otherwise
+     */
+    amdcuid_status_t get_devices_from_file_entries(CuidFile& cuid_file);
+
+    /**
+     * @brief Get device from CUID file by derived CUID and add to device list.
+     * @param[in] derived_cuid The derived CUID to look for.
+     * @param[out] device The device pointer to populate.
+     * 
+     * @return AMDCUID_STATUS_SUCCESS on success, error code otherwise
+     */
+    amdcuid_status_t get_device_from_file_by_id(amdcuid_id_t& derived_cuid, DevicePtr& device);
+
+    /**
+     * @brief Get device from CUID file by device path and add to device list.
+     * @param[in] device_path The device path to look for.
+     * @param[out] device The device pointer to populate.
+     * 
+     * @return AMDCUID_STATUS_SUCCESS on success, error code otherwise
+     */
+    amdcuid_status_t get_device_from_file_by_dev_path(const std::string& device_path, DevicePtr& device);
+
+    /**
+     * @brief Get device from CUID file by BDF and add to device list.
+     * @param[in] bdf The BDF to look for.
+     * @param[out] device The device pointer to populate.
+     * 
+     * @return AMDCUID_STATUS_SUCCESS on success, error code otherwise
+     */
+    amdcuid_status_t get_device_from_file_by_bdf(const std::string& bdf, DevicePtr& device);
+
+    /**
+     * @brief Look up a device by its handle (derived CUID).
+     * @param handle The handle containing the derived CUID.
      * @return Pointer to the device, or nullptr if not found.
      */
     DevicePtr lookup_by_handle(const amdcuid_id_t& handle) const;
@@ -78,7 +113,7 @@ public:
     int get_handle_count() const { return static_cast<int>(cuid_index_.size()); }
 
     /**
-     * @brief Get all device handles (secondary CUIDs).
+     * @brief Get all device handles (derived CUIDs).
      * @return Vector of all valid handles.
      */
     std::vector<amdcuid_id_t> get_all_handles() const;
@@ -109,26 +144,10 @@ private:
      */
     void build_cuid_index();
 
-    /**
-     * @brief Create devices from CUID file entries.
-     * @param[in] cuid_file The CUID file containing device entries.
-     * 
-     * @return AMDCUID_STATUS_SUCCESS on success, error code otherwise
-     */
-    amdcuid_status_t get_devices_from_file_entries(CuidFile& cuid_file);
-
-    /**
-     * @brief Get device from CUID file by secondary CUID and add to device list.
-     * @param[in] secondary_cuid The secondary CUID to look for.
-     * 
-     * @return AMDCUID_STATUS_SUCCESS on success, error code otherwise
-     */
-    amdcuid_status_t get_device_from_file_by_id(amdcuid_id_t& secondary_cuid);
-
     std::vector<DevicePtr> devices_;
     amdcuid_device_type_set_t device_types_;
 
-    /// Index lookup by secondary CUID
+    /// Index lookup by derived CUID
     std::map<amdcuid_id_t, DevicePtr, CuidComparator> cuid_index_;
 
     // Cuid Files

@@ -37,7 +37,7 @@ struct CuidFileEntry {
     uint32_t device_index;  // e.g., 0 for GPU:0, 1 for GPU:1
 
     amdcuid_id_t primary_cuid;     // Only available in privileged file
-    amdcuid_id_t secondary_cuid;
+    amdcuid_id_t derived_cuid;
 
     uint64_t hardware_fingerprint;  // Only available in privileged file
     uint16_t vendor_id = 0;
@@ -62,7 +62,7 @@ struct CuidFileEntry {
         , last_update(0)
     {
         memset(primary_cuid.bytes, 0, sizeof(primary_cuid.bytes));
-        memset(secondary_cuid.bytes, 0, sizeof(secondary_cuid.bytes));
+        memset(derived_cuid.bytes, 0, sizeof(derived_cuid.bytes));
     }
 };
 
@@ -86,9 +86,10 @@ public:
     const std::vector<CuidFileEntry>& get_entries() const { return entries_; }
 
     amdcuid_status_t find_by_device_node(const std::string& device_node, CuidFileEntry& entry) const;
+    amdcuid_status_t find_by_bdf(const std::string& bdf, CuidFileEntry& entry) const;
     amdcuid_status_t find_by_package_core_id(const std::string& package_core_id, CuidFileEntry& entry) const;
     amdcuid_status_t find_by_device_type(amdcuid_device_type_t device_type, CuidFileEntry& entry) const;
-    amdcuid_status_t find_by_secondary_cuid(const amdcuid_id_t& secondary_cuid, CuidFileEntry& entry) const;
+    amdcuid_status_t find_by_derived_cuid(const amdcuid_id_t& derived_cuid, CuidFileEntry& entry) const;
     
     void clear() { entries_.clear(); }
     bool exists() const;
@@ -122,7 +123,7 @@ public:
     /**
      * @brief Generate CUID files from device manager
      * @param devices Vector of discovered devices
-     * @param key_file_path Path to the HMAC key file for secondary CUID generation
+     * @param key_file_path Path to the HMAC key file for derived CUID generation
      * @param unprivileged_file Path to write unprivileged CUID file (default: /tmp/cuid)
      * @param privileged_file Path to write privileged CUID file (default: /tmp/priv_cuid)
      * @return AMDCUID_STATUS_SUCCESS on success, error code otherwise

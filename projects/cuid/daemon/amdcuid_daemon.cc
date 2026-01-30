@@ -86,7 +86,7 @@ amdcuid_status_t remove_device(std::string output_file,
     unpriv_file.load();
     priv_file.load();
 
-    log_out() << "Attempting removal of device with secondary CUID: " << CuidUtilities::get_cuid_as_string(device) << std::endl;
+    log_out() << "Attempting removal of device with derived CUID: " << CuidUtilities::get_cuid_as_string(device) << std::endl;
 
     amdcuid_status_t status;
     // Remove entry from both files
@@ -117,7 +117,7 @@ amdcuid_status_t update_device(std::string output_file,
     unpriv_file.load();
     priv_file.load();
 
-    log_out() << "Attempting update of device with secondary CUID: " << CuidUtilities::get_cuid_as_string(&device->secondary_cuid) << std::endl;
+    log_out() << "Attempting update of device with derived CUID: " << CuidUtilities::get_cuid_as_string(&device->derived_cuid) << std::endl;
 
     amdcuid_status_t status;
     // Remove entry from both files
@@ -254,7 +254,7 @@ private:
 
         amdcuid_status_t status = AMDCUID_STATUS_SUCCESS;
         amdcuid_primary_id primary_id;
-        amdcuid_secondary_id secondary_id;
+        amdcuid_derived_id derived_id;
 
         switch (request.device_type) {
             case AMDCUID_DEVICE_TYPE_GPU: {
@@ -268,8 +268,8 @@ private:
                 // convert gpu_device to CuidFileEntry and add to files using update_device
                 status = gpu_device->get_primary_cuid(primary_id);
                 entry.primary_cuid = primary_id.UUIDv8_representation;
-                status = gpu_device->get_secondary_cuid(secondary_id, &daemon_hmac);
-                entry.secondary_cuid = secondary_id.UUIDv8_representation;
+                status = gpu_device->get_derived_cuid(derived_id, &daemon_hmac);
+                entry.derived_cuid = derived_id.UUIDv8_representation;
                 entry.vendor_id = gpu_info.header.fields.gpu.vendor_id;
                 entry.device_id = gpu_info.header.fields.gpu.device_id;
                 entry.pci_class = gpu_info.header.fields.gpu.pci_class;
@@ -290,8 +290,8 @@ private:
                 // convert nic_device to CuidFileEntry and add to files using update_device
                 status = nic_device->get_primary_cuid(primary_id);
                 entry.primary_cuid = primary_id.UUIDv8_representation;
-                status = nic_device->get_secondary_cuid(secondary_id, &daemon_hmac);
-                entry.secondary_cuid = secondary_id.UUIDv8_representation;
+                status = nic_device->get_derived_cuid(derived_id, &daemon_hmac);
+                entry.derived_cuid = derived_id.UUIDv8_representation;
                 entry.vendor_id = nic_info.header.fields.nic.vendor_id;
                 entry.device_id = nic_info.header.fields.nic.device_id;
                 entry.pci_class = nic_info.header.fields.nic.pci_class;
@@ -310,9 +310,9 @@ private:
                 *out_device = cpu_device;
                 // convert cpu_device to CuidFileEntry and add to files using update_device
                 status = cpu_device->get_primary_cuid(primary_id);
-                status = cpu_device->get_secondary_cuid(secondary_id, &daemon_hmac);
+                status = cpu_device->get_derived_cuid(derived_id, &daemon_hmac);
                 entry.primary_cuid = primary_id.UUIDv8_representation;
-                entry.secondary_cuid = secondary_id.UUIDv8_representation;
+                entry.derived_cuid = derived_id.UUIDv8_representation;
                 entry.vendor_id = cpu_info.header.fields.cpu.vendor_id;
                 entry.family = cpu_info.header.fields.cpu.family;
                 entry.model = cpu_info.header.fields.cpu.model;
@@ -401,14 +401,14 @@ amdcuid_status_t get_device_from_udev(std::string *action_output, CuidFileEntry 
             return status;
         }
         entry.primary_cuid = primary_id.UUIDv8_representation;
-        amdcuid_secondary_id secondary_id;
-        status = gpu_device->get_secondary_cuid(secondary_id, hmac);
+        amdcuid_derived_id derived_id;
+        status = gpu_device->get_derived_cuid(derived_id, hmac);
         if (status != AMDCUID_STATUS_SUCCESS) {
-            log_err() << "Error: Failed to generate secondary CUID for GPU device" << std::endl;
+            log_err() << "Error: Failed to generate derived CUID for GPU device" << std::endl;
             return status;
         }
-        log_out() << "Generated secondary CUID for GPU device: " << CuidUtilities::get_cuid_as_string(&secondary_id.UUIDv8_representation) << std::endl;
-        entry.secondary_cuid = secondary_id.UUIDv8_representation;
+        log_out() << "Generated derived CUID for GPU device: " << CuidUtilities::get_cuid_as_string(&derived_id.UUIDv8_representation) << std::endl;
+        entry.derived_cuid = derived_id.UUIDv8_representation;
         entry.device_node = info.render_node;
         entry.bdf = info.bdf;
         entry.device_index = 0; // could be set based on existing entries
@@ -427,13 +427,13 @@ amdcuid_status_t get_device_from_udev(std::string *action_output, CuidFileEntry 
             return status;
         }
         entry.primary_cuid = primary_id.UUIDv8_representation;
-        amdcuid_secondary_id secondary_id;
-        status = nic_device->get_secondary_cuid(secondary_id, hmac);
+        amdcuid_derived_id derived_id;
+        status = nic_device->get_derived_cuid(derived_id, hmac);
         if (status != AMDCUID_STATUS_SUCCESS) {
-            log_err() << "Error: Failed to generate secondary CUID for NIC device" << std::endl;
+            log_err() << "Error: Failed to generate derived CUID for NIC device" << std::endl;
             return status;
         }
-        entry.secondary_cuid = secondary_id.UUIDv8_representation;
+        entry.derived_cuid = derived_id.UUIDv8_representation;
         entry.device_node = info.network_interface;
         entry.bdf = info.bdf;
         entry.device_index = 0; // could be set based on existing entries
@@ -538,7 +538,7 @@ int main() {
         // }
         // // actions we have to worry about: add, remove, change, move
         // if (action == "remove") {
-        //     status = remove_device(output_file, priv_output_file, &device_info.secondary_cuid);
+        //     status = remove_device(output_file, priv_output_file, &device_info.derived_cuid);
         //     if (status != AMDCUID_STATUS_SUCCESS) {
         //         log_err() << "Error: Failed to remove device CUID. status: " << amdcuid_status_to_string(status) << std::endl;
         //         return 1;

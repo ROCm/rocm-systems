@@ -25,50 +25,50 @@ This value is then used to fill out a UUIDv8 style format as follows:
 | 64:65 | 10b (fixed) | for RFC 9562 compliance |
 | 66:127 | ID value (part 3) | MSB of ID value |
 
-A **secondary CUID** is derived by hashing the primary CUID using HMAC-SHA2-256 (keyed hash) with a 256-bit key. This obscures hardware details from lower-privilege software and prevents precomputed table attacks. To protect the serial number with sensitive information, users of the tool must provide the 256-bit key to use for the keyed hashing function, as described in FIPS 198-1, The Keyed-Hash Message Authentication Code (HMAC). This key must be unique, random, and protected from unauthorized use. This scheme will result in additional management overhead to securely store the key. The key should only be accessible to the privileged service which would then use the key along with the primary ID in the HMAC-SHA2-256 function to generate the secondary ID.
+A **derived CUID** is derived by hashing the primary CUID using HMAC-SHA2-256 (keyed hash) with a 256-bit key. This obscures hardware details from lower-privilege software and prevents precomputed table attacks. To protect the serial number with sensitive information, users of the tool must provide the 256-bit key to use for the keyed hashing function, as described in FIPS 198-1, The Keyed-Hash Message Authentication Code (HMAC). This key must be unique, random, and protected from unauthorized use. This scheme will result in additional management overhead to securely store the key. The key should only be accessible to the privileged service which would then use the key along with the primary ID in the HMAC-SHA2-256 function to generate the derived ID.
 
 ### CUID File
 
-Privileged applications generate and share secondary CUIDs with non-privileged users via a file (the **CUID file**) or IPC. The file should be stored in `/tmp` or a `tmpfs` directory and readable by non-privileged users. It is updated by a daemon, boot script, or cron job.
+Privileged applications generate and share derived CUIDs with non-privileged users via a file (the **CUID file**) or IPC. The file should be stored in `/tmp` or a `tmpfs` directory and readable by non-privileged users. It is updated by a daemon, boot script, or cron job.
 
 #### Example CUID File Format
 
 ```ini
 [GPU:0]
-secondary_cuid=a430166f-0027-8ef5-8d5d-01981daf3276
+derived_cuid=a430166f-0027-8ef5-8d5d-01981daf3276
 device_node=/sys/class/drm/renderD128
 last_update=1753987166
 
 [CPU:0]
-secondary_cuid=6866ba59-7bc5-47bb-98a1-789914976841
+derived_cuid=6866ba59-7bc5-47bb-98a1-789914976841
 package_core_id=0:0
 last_update=1753987166
 
 [NIC:0]
-secondary_cuid=4ef20f08-5a90-8000-8000-33158680c000
+derived_cuid=4ef20f08-5a90-8000-8000-33158680c000
 device_node=/sys/class/net/enp131s0
 last_update=1753987166
 
 [PLATFORM]
-secondary_cuid=f2b69d02-4e41-418d-bc15-e0994eebdfd9
+derived_cuid=f2b69d02-4e41-418d-bc15-e0994eebdfd9
 last_update=1753987166
 ```
 
 - **GPU:** `device_node` links the CUID to hardware.
 - **CPU:** `package_core_id` identifies cores (`package_id:core_id`).
 - **NIC:** `device_node` links to the network device.
-- **PLATFORM:** Only the secondary CUID is listed.
+- **PLATFORM:** Only the derived CUID is listed.
 
 `last_update` is a Unix timestamp for the last modification.
 
 #### Including Primary CUID (Privileged Users)
 
-Privileged users can map `primary_cuid` to `secondary_cuid`:
+Privileged users can map `primary_cuid` to `derived_cuid`:
 
 ```ini
 [GPU:0]
 primary_cuid=8faa1b22-c964-4d08-9eab-f0c19743dc5b
-secondary_cuid=a430166f-0027-8ef5-8d5d-01981daf3276
+derived_cuid=a430166f-0027-8ef5-8d5d-01981daf3276
 device_node=/sys/class/drm/renderD128
 last_update=1753987166
 ```
@@ -82,13 +82,13 @@ The CUID tool supports both privileged and non-privileged users:
 #### CUID Library
 
 - Discovers hardware and constructs primary CUIDs.
-- Generates secondary CUIDs via hashing.
+- Generates derived CUIDs via hashing.
 - Provides APIs for device info and identifiers.
 
 #### Command Line Interface (CLI)
 
 - Uses the library to detect devices and generate CUIDs.
-- Allows creation of primary/secondary CUIDs.
+- Allows creation of primary/derived CUIDs.
 - Simplifies device management and integration.
 
 ### Build Instructions

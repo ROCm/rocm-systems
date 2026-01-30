@@ -166,8 +166,8 @@ amdcuid_status_t CuidFile::load() {
                 
                 if (key == "primary_cuid") {
                     current_entry.primary_cuid = string_to_cuid(value);
-                } else if (key == "secondary_cuid") {
-                    current_entry.secondary_cuid = string_to_cuid(value);
+                } else if (key == "derived_cuid") {
+                    current_entry.derived_cuid = string_to_cuid(value);
                 } else if (key == "device_node") {
                     current_entry.device_node = value;
                 } else if (key == "package_core_id") {
@@ -226,7 +226,7 @@ amdcuid_status_t CuidFile::save() {
         file << "# Type: Privileged (contains primary CUIDs)\n";
         file << "# Permissions: Root access only\n";
     } else {
-        file << "# Type: Unprivileged (secondary CUIDs only)\n";
+        file << "# Type: Unprivileged (derived CUIDs only)\n";
         file << "# Permissions: Readable by all users\n";
     }
     file << "\n";
@@ -260,8 +260,8 @@ amdcuid_status_t CuidFile::save() {
                 file << "primary_cuid=" << CuidUtilities::get_cuid_as_string(&entry.primary_cuid) << "\n";
             }
             
-            // Write secondary CUID
-            file << "secondary_cuid=" << CuidUtilities::get_cuid_as_string(&entry.secondary_cuid) << "\n";
+            // Write derived CUID
+            file << "derived_cuid=" << CuidUtilities::get_cuid_as_string(&entry.derived_cuid) << "\n";
 
             // Write hardware fingerprint (privileged file only)
             if (is_privileged_)
@@ -331,9 +331,9 @@ amdcuid_status_t CuidFile::save() {
 }
 
 amdcuid_status_t CuidFile::add_entry(const CuidFileEntry& entry) {
-    // Check if entry with same secondary CUID exists
+    // Check if entry with same derived CUID exists
     for (auto& existing : entries_) {
-        if (memcmp(existing.secondary_cuid.bytes, entry.secondary_cuid.bytes, sizeof(amdcuid_id_t::bytes)) == 0) {
+        if (memcmp(existing.derived_cuid.bytes, entry.derived_cuid.bytes, sizeof(amdcuid_id_t::bytes)) == 0) {
             // Update existing entry
             existing = entry;
             return AMDCUID_STATUS_SUCCESS;
@@ -346,10 +346,10 @@ amdcuid_status_t CuidFile::add_entry(const CuidFileEntry& entry) {
 }
 
 amdcuid_status_t CuidFile::remove_entry(const amdcuid_id_t& handle) {
-    // search for entry by secondary CUID and move that entry to the back, then erase it
+    // search for entry by derived CUID and move that entry to the back, then erase it
     auto it = std::remove_if(entries_.begin(), entries_.end(),
                              [&handle](const CuidFileEntry& e) {
-                                 return (memcmp(e.secondary_cuid.bytes, handle.bytes, sizeof(amdcuid_id_t::bytes)) == 0);
+                                 return (memcmp(e.derived_cuid.bytes, handle.bytes, sizeof(amdcuid_id_t::bytes)) == 0);
                              });
     if (it != entries_.end()) {
         entries_.erase(it, entries_.end());
@@ -362,6 +362,17 @@ amdcuid_status_t CuidFile::find_by_device_node(const std::string& device_node,
                                                  CuidFileEntry& entry) const {
     for (const auto& e : entries_) {
         if (e.device_node == device_node) {
+            entry = e;
+            return AMDCUID_STATUS_SUCCESS;
+        }
+    }
+    return AMDCUID_STATUS_DEVICE_NOT_FOUND;
+}
+
+amdcuid_status_t CuidFile::find_by_bdf(const std::string& bdf, 
+                                         CuidFileEntry& entry) const {
+    for (const auto& e : entries_) {
+        if (e.bdf == bdf) {
             entry = e;
             return AMDCUID_STATUS_SUCCESS;
         }
@@ -391,10 +402,10 @@ amdcuid_status_t CuidFile::find_by_device_type(amdcuid_device_type_t device_type
     return AMDCUID_STATUS_DEVICE_NOT_FOUND;
 }
 
-amdcuid_status_t CuidFile::find_by_secondary_cuid(const amdcuid_id_t& secondary_cuid, 
+amdcuid_status_t CuidFile::find_by_derived_cuid(const amdcuid_id_t& derived_cuid, 
                                                     CuidFileEntry& entry) const {
     for (const auto& e : entries_) {
-        if (memcmp(e.secondary_cuid.bytes, secondary_cuid.bytes, sizeof(amdcuid_id_t::bytes)) == 0) {
+        if (memcmp(e.derived_cuid.bytes, derived_cuid.bytes, sizeof(amdcuid_id_t::bytes)) == 0) {
             entry = e;
             return AMDCUID_STATUS_SUCCESS;
         }
@@ -426,7 +437,7 @@ amdcuid_status_t CuidFileGenerator::generate_from_devices(
         return AMDCUID_STATUS_PERMISSION_DENIED;
     }
     
-    // Initialize HMAC for secondary CUID generation
+    // Initialize HMAC for derived CUID generation
     cuid_hmac hmac = cuid_hmac();
     if (!hmac.is_valid()) {
         std::cerr << "Error: Failed to initialize HMAC with key file" << std::endl;
@@ -466,15 +477,15 @@ amdcuid_status_t CuidFileGenerator::generate_from_devices(
         }
         entry.primary_cuid = primary_id.UUIDv8_representation;
         
-        // Generate secondary CUID using HMAC
-        amdcuid_secondary_id secondary_id = {};
-        status = CuidUtilities::generate_secondary_cuid(&primary_id, &secondary_id, &hmac);
+        // Generate derived CUID using HMAC
+        amdcuid_derived_id derived_id = {};
+        status = CuidUtilities::generate_derived_cuid(&primary_id, &derived_id, &hmac);
         if (status != AMDCUID_STATUS_SUCCESS) {
-            std::cerr << "Warning: Failed to generate secondary CUID for device type " 
+            std::cerr << "Warning: Failed to generate derived CUID for device type " 
                       << entry.device_type << " status: " << status << std::endl;
             continue;
         }
-        entry.secondary_cuid = secondary_id.UUIDv8_representation;
+        entry.derived_cuid = derived_id.UUIDv8_representation;
         
         // Fill in device-specific information
         switch (entry.device_type) {

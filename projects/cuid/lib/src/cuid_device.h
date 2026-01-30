@@ -36,7 +36,7 @@ public:
     virtual amdcuid_device_type_t type() const = 0;
     virtual amdcuid_status_t get_primary_cuid(amdcuid_primary_id& id) const = 0;
     virtual amdcuid_status_t get_hardware_fingerprint(uint64_t& fingerprint) const = 0;
-    amdcuid_status_t get_secondary_cuid(amdcuid_secondary_id& id, cuid_hmac * hmac = nullptr) const;
+    amdcuid_status_t get_derived_cuid(amdcuid_derived_id& id, cuid_hmac * hmac = nullptr) const;
 
     // Virtual accessors for common device properties with default wrong device type implementations
     virtual amdcuid_status_t get_vendor_id(uint16_t& vendor_id) const {

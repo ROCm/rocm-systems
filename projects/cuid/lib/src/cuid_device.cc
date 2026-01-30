@@ -38,12 +38,12 @@
 #include <iostream>
 #include <openssl/sha.h>
 
-amdcuid_status_t CuidDevice::get_secondary_cuid(amdcuid_secondary_id& id, cuid_hmac * hmac) const {
-    //attempt to find the secondary CUID in file first
-    CuidFile secondary_file(CuidUtilities::cuid_file(), false);
-    amdcuid_status_t status = secondary_file.load();
+amdcuid_status_t CuidDevice::get_derived_cuid(amdcuid_derived_id& id, cuid_hmac * hmac) const {
+    //attempt to find the derived CUID in file first
+    CuidFile derived_file(CuidUtilities::cuid_file(), false);
+    amdcuid_status_t status = derived_file.load();
     if (status != AMDCUID_STATUS_SUCCESS) {
-        std::cerr << "Failed to load secondary CUID file: " << CuidUtilities::cuid_file() << std::endl;
+        std::cerr << "Failed to load derived CUID file: " << CuidUtilities::cuid_file() << std::endl;
         return status;
     }
 
@@ -54,9 +54,9 @@ amdcuid_status_t CuidDevice::get_secondary_cuid(amdcuid_secondary_id& id, cuid_h
         {
             // for platform, just return the first entry found
             CuidFileEntry entry;
-            status = secondary_file.find_by_device_type(AMDCUID_DEVICE_TYPE_PLATFORM, entry);
+            status = derived_file.find_by_device_type(AMDCUID_DEVICE_TYPE_PLATFORM, entry);
             if (status == AMDCUID_STATUS_SUCCESS) {
-                id.UUIDv8_representation = entry.secondary_cuid;
+                id.UUIDv8_representation = entry.derived_cuid;
                 CuidUtilities::remove_UUIDv8_bits(&id.UUIDv8_representation, id.raw_bits);
                 // TODO: figure out how to fill out hash later
                 return AMDCUID_STATUS_SUCCESS;
@@ -69,9 +69,9 @@ amdcuid_status_t CuidDevice::get_secondary_cuid(amdcuid_secondary_id& id, cuid_h
             if (gpu) {
                 auto info = gpu->get_info();
                 CuidFileEntry entry;
-                status = secondary_file.find_by_device_node(info.render_node, entry);
+                status = derived_file.find_by_device_node(info.render_node, entry);
                 if (status == AMDCUID_STATUS_SUCCESS) {
-                    id.UUIDv8_representation = entry.secondary_cuid;
+                    id.UUIDv8_representation = entry.derived_cuid;
                     CuidUtilities::remove_UUIDv8_bits(&id.UUIDv8_representation, id.raw_bits);
                     // TODO: figure out how to fill out hash later
                     return AMDCUID_STATUS_SUCCESS;
@@ -94,9 +94,9 @@ amdcuid_status_t CuidDevice::get_secondary_cuid(amdcuid_secondary_id& id, cuid_h
                     std::string core_id = std::to_string(info.header.fields.cpu.physical_id) + 
                                     ":" + std::to_string(info.header.fields.cpu.core);
                     CuidFileEntry entry;
-                    status = secondary_file.find_by_package_core_id(core_id, entry);
+                    status = derived_file.find_by_package_core_id(core_id, entry);
                     if (status == AMDCUID_STATUS_SUCCESS) {
-                        id.UUIDv8_representation = entry.secondary_cuid;
+                        id.UUIDv8_representation = entry.derived_cuid;
                         CuidUtilities::remove_UUIDv8_bits(&id.UUIDv8_representation, id.raw_bits);
                         // TODO: figure out how to fill out hash later
                         return AMDCUID_STATUS_SUCCESS;
@@ -111,9 +111,9 @@ amdcuid_status_t CuidDevice::get_secondary_cuid(amdcuid_secondary_id& id, cuid_h
                 if (nic) {
                     const auto& info = nic->get_info();
                     CuidFileEntry entry;
-                    amdcuid_status_t status = secondary_file.find_by_device_node(info.network_interface, entry);
+                    amdcuid_status_t status = derived_file.find_by_device_node(info.network_interface, entry);
                     if (status == AMDCUID_STATUS_SUCCESS) {
-                        id.UUIDv8_representation = entry.secondary_cuid;
+                        id.UUIDv8_representation = entry.derived_cuid;
                         CuidUtilities::remove_UUIDv8_bits(&id.UUIDv8_representation, id.raw_bits);
                         // TODO: figure out how to fill out hash later
                         return AMDCUID_STATUS_SUCCESS;
@@ -126,14 +126,14 @@ amdcuid_status_t CuidDevice::get_secondary_cuid(amdcuid_secondary_id& id, cuid_h
                 // Will expand with different devices as we implement them
     }
 
-    // if not found, generate secondary CUID
-    if (!hmac) {
-        // if we must generate the secondary CUID, then require HMAC
-        return AMDCUID_STATUS_INVALID_ARGUMENT;
-    }
+    // if not found, generate derived CUID
     if (geteuid() != 0)
     {
         return AMDCUID_STATUS_PERMISSION_DENIED;
+    }
+    if (!hmac) {
+        // if we must generate the derived CUID, then require HMAC
+        return AMDCUID_STATUS_INVALID_ARGUMENT;
     }
     amdcuid_primary_id primary;
     status = get_primary_cuid(primary);
@@ -141,6 +141,6 @@ amdcuid_status_t CuidDevice::get_secondary_cuid(amdcuid_secondary_id& id, cuid_h
         return status;
     }
 
-    status = CuidUtilities::generate_secondary_cuid(&primary, &id, hmac);
+    status = CuidUtilities::generate_derived_cuid(&primary, &id, hmac);
     return status;
 }

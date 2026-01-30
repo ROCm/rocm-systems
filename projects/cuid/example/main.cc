@@ -69,10 +69,10 @@ int main() {
             device_node[0] = '\0';
         }
 
-        amdcuid_id_t secondary_id = {};
-        err = amdcuid_get_secondary_cuid(gpu_handles[i], &secondary_id);
+        amdcuid_id_t derived_id = {};
+        err = amdcuid_get_derived_cuid(gpu_handles[i], &derived_id);
         if (err != AMDCUID_STATUS_SUCCESS) {
-            std::cerr << "Failed to get secondary CUID for GPU #" << i << ". Error code: " << err
+            std::cerr << "Failed to get derived CUID for GPU #" << i << ". Error code: " << err
                       << " (" << amdcuid_status_to_string(err) << ")" << std::endl;
         }
 
@@ -82,7 +82,7 @@ int main() {
                   << " DeviceNode: " << device_node
                   << "  CUID: ";
         for (int j = 0; j < 16; ++j) {
-            printf("%02x", secondary_id.bytes[j]);
+            printf("%02x", derived_id.bytes[j]);
         }
         std::cout << std::endl;
     }
@@ -127,10 +127,10 @@ int main() {
             core = 0;
         }
 
-        amdcuid_id_t secondary_id = {};
-        err = amdcuid_get_secondary_cuid(cpu_handles[i], &secondary_id);
+        amdcuid_id_t derived_id = {};
+        err = amdcuid_get_derived_cuid(cpu_handles[i], &derived_id);
         if (err != AMDCUID_STATUS_SUCCESS) {
-            std::cerr << "Failed to get secondary CUID for CPU #" << i << ". Error code: " << err
+            std::cerr << "Failed to get derived CUID for CPU #" << i << ". Error code: " << err
                       << " (" << amdcuid_status_to_string(err) << ")" << std::endl;
         }
 
@@ -140,7 +140,7 @@ int main() {
                   << " VendorID: " << vendor_id
                   << "  CUID: ";
         for (int j = 0; j < 16; ++j) {
-            printf("%02x", secondary_id.bytes[j]);
+            printf("%02x", derived_id.bytes[j]);
         }
         std::cout << std::endl;
     }

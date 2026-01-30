@@ -63,7 +63,8 @@ private:
 namespace CuidUtilities {
     std::string read_sysfs_file(const std::string &path);
     std::string readlink_bdf(const std::string &device_path);
-    amdcuid_status_t generate_secondary_cuid(const amdcuid_primary_id* primary_id, amdcuid_secondary_id* secondary_id, cuid_hmac* hmac);
+    std::string bdf_to_device_path(const std::string &bdf, amdcuid_device_type_t device_type);
+    amdcuid_status_t generate_derived_cuid(const amdcuid_primary_id* primary_id, amdcuid_derived_id* derived_id, cuid_hmac* hmac);
     amdcuid_status_t generate_primary_cuid(uint64_t serial_number, uint16_t unit_id,
                                  uint8_t revision_id, uint16_t device_id, uint16_t vendor_id,
                                  uint8_t device_type, amdcuid_primary_id* primary_id);

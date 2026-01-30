@@ -57,7 +57,7 @@ void print_usage(const char* program_name) {
     std::cout << "AMD Component Unified Identifier (CUID) Tool\n\n";
     std::cout << "Options:\n";
     std::cout << "  --generate-cuid <key_file>   Generate CUID files from discovered devices\n";
-    std::cout << "                               Requires HMAC key file for secondary CUID generation\n";
+    std::cout << "                               Requires HMAC key file for derived CUID generation\n";
     std::cout << "                               Creates /tmp/cuid and /tmp/priv_cuid (if root)\n";
     std::cout << "  --list                       List all devices and their CUIDs from CUID file\n";
     std::cout << "                               Reads from /tmp/cuid (or /tmp/priv_cuid with --show-primary)\n";
@@ -277,7 +277,7 @@ int list_devices(bool show_primary, const std::string* filter_type) {
             if (show_primary && cuid_file.is_privileged()) {
                 std::cout << "\n  Primary CUID:   " << CuidUtilities::get_cuid_as_string(&entry.primary_cuid);
             }
-            std::cout << "\n  CUID:           " << CuidUtilities::get_cuid_as_string(&entry.secondary_cuid);
+            std::cout << "\n  CUID:           " << CuidUtilities::get_cuid_as_string(&entry.derived_cuid);
             
             if (!entry.device_node.empty()) {
                 std::cout << "\n  Device Node:    " << entry.device_node;
@@ -337,7 +337,7 @@ int query_device(const std::string& identifier, bool show_primary) {
         if (show_primary && cuid_file.is_privileged()) {
             std::cout << "  Primary CUID:   " << cuid_to_string(entry.primary_cuid) << std::endl;
         }
-        std::cout << "  CUID:           " << cuid_to_string(entry.secondary_cuid) << std::endl;
+        std::cout << "  CUID:           " << cuid_to_string(entry.derived_cuid) << std::endl;
         std::cout << "  Device Node:    " << entry.device_node << std::endl;
         if (!entry.bdf.empty()) {
             std::cout << "  BDF:            " << entry.bdf << std::endl;
@@ -354,7 +354,7 @@ int query_device(const std::string& identifier, bool show_primary) {
         if (show_primary && cuid_file.is_privileged()) {
             std::cout << "  Primary CUID:   " << cuid_to_string(entry.primary_cuid) << std::endl;
         }
-        std::cout << "  CUID:           " << cuid_to_string(entry.secondary_cuid) << std::endl;
+        std::cout << "  CUID:           " << cuid_to_string(entry.derived_cuid) << std::endl;
         std::cout << "  Package:Core:   " << entry.package_core_id << std::endl;
         std::cout << "  Last Update:    " << format_timestamp(entry.last_update) << std::endl;
         return 0;

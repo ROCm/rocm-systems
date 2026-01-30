@@ -38,7 +38,7 @@ enum class IpcMessageType : uint8_t {
 struct IpcRequest
 {
     IpcMessageType type;
-    char device_path[AMDCUID_MAX_QUERY_BUFFER_SIZE]; // used for ADD_DEVICE, empty otherwise
+    char* device_path; // used for ADD_DEVICE, empty otherwise
     amdcuid_device_type_t device_type;
     amdcuid_id_t handle; // used for REMOVE_DEVICE, 0 otherwise
 };

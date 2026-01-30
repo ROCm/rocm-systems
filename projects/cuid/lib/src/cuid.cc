@@ -90,33 +90,30 @@ const char* amdcuid_id_to_string(amdcuid_id_t cuid_value) {
     return uuid_str;
 }
 
-amdcuid_status_t amdcuid_add_device(const char* dev_path, amdcuid_device_type_t device_type, amdcuid_id_t* handle) {
-    if (!dev_path || !handle)
-        return AMDCUID_STATUS_INVALID_ARGUMENT;
+// amdcuid_status_t amdcuid_add_device(const char* dev_path, amdcuid_device_type_t device_type, amdcuid_id_t* handle) {
+//     if (!dev_path || !handle)
+//         return AMDCUID_STATUS_INVALID_ARGUMENT;
 
-    if (geteuid() != 0) {
-        return AMDCUID_STATUS_PERMISSION_DENIED;
-    }
+//     if (geteuid() != 0) {
+//         return AMDCUID_STATUS_PERMISSION_DENIED;
+//     }
 
-    return mgr.add_device(dev_path, device_type, handle);
-}
+//     return mgr.add_device(dev_path, device_type, handle);
+// }
 
-amdcuid_status_t amdcuid_remove_device(amdcuid_id_t handle) {
-    if (geteuid() != 0) {
-        return AMDCUID_STATUS_PERMISSION_DENIED;
-    }
+// amdcuid_status_t amdcuid_remove_device(amdcuid_id_t handle) {
+//     if (geteuid() != 0) {
+//         return AMDCUID_STATUS_PERMISSION_DENIED;
+//     }
 
-    if (mgr.is_valid_handle(handle) != AMDCUID_STATUS_SUCCESS) {
-        return AMDCUID_STATUS_DEVICE_NOT_FOUND;
-    }
+//     if (mgr.is_valid_handle(handle) != AMDCUID_STATUS_SUCCESS) {
+//         return AMDCUID_STATUS_DEVICE_NOT_FOUND;
+//     }
 
-    return mgr.remove_device(handle);
-}
+//     return mgr.remove_device(handle);
+// }
 
-amdcuid_status_t amdcuid_get_num_handles(uint32_t* count) {
-    if (!count)
-        return AMDCUID_STATUS_INVALID_ARGUMENT;
-
+amdcuid_status_t amdcuid_get_all_handles(amdcuid_id_t *handles, uint32_t *count) {
     amdcuid_status_t status;
     // get all the devices on the system first
     if (mgr.devices().empty()) {
@@ -126,27 +123,128 @@ amdcuid_status_t amdcuid_get_num_handles(uint32_t* count) {
         }
     }
 
-    *count = static_cast<uint32_t>(mgr.get_handle_count());
-    if (*count == 0) {
-        return AMDCUID_STATUS_UNSUPPORTED;
-    }
-    return AMDCUID_STATUS_SUCCESS;
-}
-
-amdcuid_status_t amdcuid_get_all_handles(amdcuid_id_t *handles, uint32_t count) {
     auto handle_list = mgr.get_all_handles();
     auto handle_count = static_cast<uint32_t>(handle_list.size());
     if (handle_count == 0) {
         handles = nullptr;
         return AMDCUID_STATUS_UNSUPPORTED;
     }
-    if (count < handle_count) {
+    if (*count < handle_count) {
+        *count = handle_count;
         return AMDCUID_STATUS_INSUFFICIENT_SIZE;
     }
     for (uint32_t i = 0; i < handle_count; ++i) {
         std::memcpy(handles[i].bytes, handle_list[i].bytes, 16);
     }
+    *count = handle_count;
     return AMDCUID_STATUS_SUCCESS;
+}
+
+// helper function to discover device given dev_path
+DevicePtr discover_device_by_path(const char* dev_path, amdcuid_device_type_t device_type) {
+    DevicePtr device = nullptr;
+    amdcuid_status_t status;
+    switch (device_type) {
+        case AMDCUID_DEVICE_TYPE_CPU: {
+            amdcuid_cpu_info cpu_info = {};
+            status = CuidCpu::discover_single(&cpu_info, dev_path);
+            if (status != AMDCUID_STATUS_SUCCESS) {
+                return nullptr;
+            }
+            device = std::make_shared<CuidCpu>(cpu_info);
+            break;
+        }
+        case AMDCUID_DEVICE_TYPE_GPU: {
+            amdcuid_gpu_info gpu_info = {};
+            status = CuidGpu::discover_single(&gpu_info, dev_path);
+            if (status != AMDCUID_STATUS_SUCCESS) {
+                return nullptr;
+            }
+            device = std::make_shared<CuidGpu>(gpu_info);
+            break;
+        }
+        case AMDCUID_DEVICE_TYPE_NIC: {
+            amdcuid_nic_info nic_info = {};
+            status = CuidNic::discover_single(&nic_info, dev_path);
+            if (status != AMDCUID_STATUS_SUCCESS) {
+                return nullptr;
+            }
+            device = std::make_shared<CuidNic>(nic_info);
+            break;
+        }
+        default:
+            return nullptr;
+    }
+    return device;
+}
+
+amdcuid_status_t amdcuid_get_handle_by_dev_path(const char* dev_path, amdcuid_device_type_t device_type, amdcuid_id_t* handle) {
+    if (!dev_path || !handle) {
+        return AMDCUID_STATUS_INVALID_ARGUMENT;
+    }
+
+    amdcuid_status_t status;
+    // check mgr first to see if device is already known
+    for (const auto& device : mgr.devices()) {
+        std::string device_path;
+        status = device->get_device_path(device_path);
+        if (status != AMDCUID_STATUS_SUCCESS) {
+            continue;
+        }
+        if (device_path == dev_path && device->type() == device_type) {
+            amdcuid_derived_id derived;
+            status = device->get_derived_cuid(derived);
+            if (status != AMDCUID_STATUS_SUCCESS) {
+                return status;
+            }
+            std::memcpy(handle->bytes, &derived.UUIDv8_representation, 16);
+            return AMDCUID_STATUS_SUCCESS;
+        }
+    }
+
+    // next check cuid files for device
+    DevicePtr device = nullptr;
+    status = mgr.get_device_from_file_by_dev_path(dev_path, device);
+    if (status == AMDCUID_STATUS_SUCCESS) {
+        amdcuid_derived_id derived;
+        status = device->get_derived_cuid(derived);
+        if (status != AMDCUID_STATUS_SUCCESS) {
+            return status;
+        }
+        std::memcpy(handle->bytes, &derived.UUIDv8_representation, 16);
+        return AMDCUID_STATUS_SUCCESS;
+    }
+
+    // finally, attempt to discover device based on type, this would require elevated permissions since it will require reading of  protected hardware info
+    if (geteuid() != 0) {
+        return AMDCUID_STATUS_PERMISSION_DENIED;
+    }
+
+    device = discover_device_by_path(dev_path, device_type);
+    if (!device) {
+        return AMDCUID_STATUS_DEVICE_NOT_FOUND;
+    } else {
+        // add device to mgr
+        amdcuid_derived_id derived;
+        status = device->get_derived_cuid(derived, &global_hmac);
+        if (status != AMDCUID_STATUS_SUCCESS) {
+            return status;
+        }
+        std::memcpy(handle->bytes, &derived.UUIDv8_representation, 16);
+        mgr.add_device(device);
+        return AMDCUID_STATUS_SUCCESS;
+    }
+}
+
+amdcuid_status_t amdcuid_get_handle_by_bdf(const char* bdf, amdcuid_device_type_t device_type, amdcuid_id_t* handle) {
+    if (!bdf || !handle) {
+        return AMDCUID_STATUS_INVALID_ARGUMENT;
+    }
+    std::string device_path = CuidUtilities::bdf_to_device_path(bdf, device_type);
+    if (device_path.empty()) {
+        return AMDCUID_STATUS_DEVICE_NOT_FOUND;
+    }
+    return amdcuid_get_handle_by_dev_path(device_path.c_str(), device_type, handle);
 }
 
 amdcuid_status_t amdcuid_query_device_property(amdcuid_id_t handle, amdcuid_query_t query, void *data, uint32_t *length) {
@@ -167,18 +265,24 @@ amdcuid_status_t amdcuid_query_device_property(amdcuid_id_t handle, amdcuid_quer
                 }
                 amdcuid_primary_id id = {};
                 status = device->get_primary_cuid(id);
-                *(amdcuid_id_t *)data = id.UUIDv8_representation;
-                *length = sizeof(amdcuid_id_t);
+                *(amdcuid_primary_id *)data = id; // would this require exposing the struct definition in the public header?
+                *length = sizeof(amdcuid_primary_id);
             }
             break;
-        case AMDCUID_QUERY_SECONDARY_CUID: {
-                if (*length < sizeof(amdcuid_secondary_id)) {
+        case AMDCUID_QUERY_DERIVED_CUID: {
+                if (*length < sizeof(amdcuid_derived_id)) {
                     return AMDCUID_STATUS_INSUFFICIENT_SIZE;
                 }
-                amdcuid_secondary_id sec_id = {};
-                status = device->get_secondary_cuid(sec_id);
-                *(amdcuid_id_t *)data = sec_id.UUIDv8_representation;
-                *length = sizeof(amdcuid_id_t);
+                amdcuid_derived_id sec_id = {};
+                if (geteuid() == 0) {
+                    // if elevated, provide hmac in case it needs to get generated
+                    status = device->get_derived_cuid(sec_id, &global_hmac);
+                } else {
+                    // if not elevated, only get existing derived cuid
+                    status = device->get_derived_cuid(sec_id);
+                }
+                *(amdcuid_derived_id *)data = sec_id;
+                *length = sizeof(amdcuid_derived_id);
             }
             break;
         case AMDCUID_QUERY_HARDWARE_FINGERPRINT: {

@@ -84,22 +84,16 @@ void test_id_to_string() {
     EXPECT_STREQ(id_str, "01020304-0506-0708-090a-0b0c0d0e0f00");
 }
 
-void test_get_num_handles() {
-    uint32_t count = 0;
-    amdcuid_status_t status = amdcuid_get_num_handles(&count);
-    EXPECT_EQ(status, AMDCUID_STATUS_SUCCESS);
-    EXPECT_GT(count, 0);
-}
-
 void test_get_all_handles() {
-    uint32_t count = 0;
-
-    amdcuid_status_t status = amdcuid_get_num_handles(&count);
-    EXPECT_EQ(status, AMDCUID_STATUS_SUCCESS);
+    uint32_t count = 1;
 
     amdcuid_id_t* handles = new amdcuid_id_t[count];
 
-    status = amdcuid_get_all_handles(handles, count);
+    amdcuid_status_t status = amdcuid_get_all_handles(handles, &count);
+    EXPECT_EQ(status, AMDCUID_STATUS_INSUFFICIENT_SIZE);
+
+    handles = new amdcuid_id_t[count];
+    status = amdcuid_get_all_handles(handles, &count);
     EXPECT_EQ(status, AMDCUID_STATUS_SUCCESS);
 
     for (uint32_t i = 0; i < count; ++i) {
@@ -113,12 +107,9 @@ void test_get_all_handles() {
 
 void test_query_device_property() {
 
-    uint32_t count = 0;
-    amdcuid_status_t status = amdcuid_get_num_handles(&count);
-    EXPECT_EQ(status, AMDCUID_STATUS_SUCCESS);
-
+    uint32_t count = 100;
     amdcuid_id_t* handles = new amdcuid_id_t[count];
-    status = amdcuid_get_all_handles(handles, count);
+    amdcuid_status_t status = amdcuid_get_all_handles(handles, &count);
     EXPECT_EQ(status, AMDCUID_STATUS_SUCCESS);
 
     // Query device type for the first handle
@@ -179,10 +170,6 @@ TEST(CUIDStatusTest, StatusToString) {
 
 TEST(CUIDIdTest, IdToString) {
     test_id_to_string();
-}
-
-TEST(CUIDHandleTest, GetNumHandles) {
-    test_get_num_handles();
 }
 
 TEST(CUIDHandleTest, GetAllHandles) {
