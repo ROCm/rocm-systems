@@ -356,7 +356,7 @@ inline __host__ int ncclP2pChannelForPart(int nP2pChannels, int base, int part, 
 inline __device__ int ncclP2pChannelToPart(int nP2pChannels, int base, int channel, int nParts, int nNodes, int shiftSize) {
   if (nNodes > 2) {
     // Only works because nP2pChannels is pow2
-    return (((channel - base) - ((base>>shiftSize)<<shiftSize))>>shiftSize) & (nParts-1);
+    return (((channel - base) - ((base>>shiftSize)<<shiftSize))>>shiftSize) & ((nP2pChannels >> shiftSize)-1);
   } else {
     return (channel - base * nParts) & (nP2pChannels-1);
   }
