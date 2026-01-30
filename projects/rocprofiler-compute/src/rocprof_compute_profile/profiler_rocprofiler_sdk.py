@@ -165,9 +165,6 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
         if self.ready_to_profile:
             # Manually join each pmc_perf*.csv output
             self.join_prof()
-            # if self.get_args().torch_trace:
-            #     consolidate_torch_trace_output(self.get_args().path)
-
             # Run roofline microbenchmark
             super().post_processing()
         else:

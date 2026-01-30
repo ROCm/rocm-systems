@@ -1291,6 +1291,8 @@ def save_torch_trace_inputs(
         src_marker = src_dir / f"{fbase}_marker_api_trace.csv"
         dst_counter = Path(workload_dir) / f"{fbase}_counter_collection.csv"
         dst_marker = Path(workload_dir) / f"{fbase}_marker_api_trace.csv"
+        # These files are expected to exist
+        # Letting shutil.copyfile raise error if files not found
         shutil.copyfile(src_counter, dst_counter)
         shutil.copyfile(src_marker, dst_marker)
         console_log(
@@ -1304,6 +1306,8 @@ def save_torch_trace_inputs(
         counter_files = glob.glob(str(src_dir / "*/*_counter_collection.csv"))
         marker_files = glob.glob(str(src_dir / "*/*_marker_api_trace.csv"))
         (Path(workload_dir) / f"{fbase}").mkdir(parents=True, exist_ok=True)
+        # Expecting the files to be present
+        # Letting shutil.copyfile raise error if files not found
         for src_counter in counter_files:
             dst_counter = str(Path(workload_dir) / f"{fbase}" / Path(src_counter).name)
             shutil.copyfile(src_counter, dst_counter)
@@ -1374,7 +1378,7 @@ def process_torch_trace_output(
     # If rocpd format, pairs are present in workload_dir, one pair per fbase
     # If csv format, pairs are present in workload/{fbase}/ one pair per process
     # Extracting the output_format used in profiling from the path of a marker file
-    if existing_csv_files[0][0].parent.name == workload_dir:
+    if Path(workload_dir).resolve() == existing_csv_files[0][0].parent.resolve():
         join_keys = ("Correlation_Id", "GUID")  # output_format "rocpd"
     else:
         join_keys = ("Correlation_Id",)  # output_format "csv"
