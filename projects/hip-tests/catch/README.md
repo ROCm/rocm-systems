@@ -22,6 +22,7 @@ Running Subtest: ctest –R “...” (Regex to match the subtest name)
 - Json file supports regex. Ex: All tests which has the word ‘Memset’ can be skipped using ‘*Memset*’
 - Support multiple skip test list which can be set via environment variable, so you can have multiple files containing different skip test lists and can pick and choose among them depending on your platform and os.
 - Better CI integration via xunit compatible output
+- hip-tests can be built in SPIRV, where all kernels are compiled in SPIRV, enable with cmake flag `-DENABLE_SPIRV=ON`. By default its `OFF`.
 
 ## Testing Context
 HIP testing framework gives you a context for each test. This context will have useful information about the environment your test is running.
