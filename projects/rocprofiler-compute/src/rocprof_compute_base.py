@@ -59,7 +59,6 @@ from utils.utils import (
     replace_rank,
     set_locale_encoding,
 )
-from utils.utils import process_torch_trace_output
 
 class RocProfCompute:
     def __init__(self) -> None:
@@ -338,11 +337,6 @@ class RocProfCompute:
 
     def handle_analyze_args(self) -> None:
         """Handle analyze-specific argument processing"""
-        # Handle list operations first - they exit immediately
-        if getattr(self.__args, "list_torch_operators", False):
-            process_torch_trace_output(self.__args.path[0][0])
-            self.list_torch_operators()
-            return
         # Block all filters during spatial-multiplexing
         if self.__args.spatial_multiplexing:
             self.__args.gpu_id = None
