@@ -1392,6 +1392,8 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   comm->topo->treeDefined = false;
   // Compute paths between GPUs and NICs
   NCCLCHECKGOTO(ncclTopoComputePaths(comm->topo, comm), ret, fail);
+  // RCCL: Determine and set P2P channel shift size for comm
+  NCCLCHECK(rcclCommSetP2pShiftSize(comm));
   // Remove inaccessible GPUs and unused NICs
   NCCLCHECKGOTO(ncclTopoTrimSystem(comm->topo, comm), ret, fail);
   // Recompute paths after trimming
@@ -2242,8 +2244,7 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
 
   // RCCL: determine and set unroll factor for comm
   NCCLCHECK(commSetUnrollFactor(comm));
-  // RCCL: Determine and set P2P channel shift size for comm
-  NCCLCHECK(rcclCommSetP2pShiftSize(comm));
+
 #ifdef ENABLE_ROCSHMEM
   if (rcclParamRocshmemEnabled()) { // @TODO - This doesn't seem to disable when I set ROCSHMEM_ENABLE=0 on command line
     INFO(NCCL_INIT,"Initializing rocSHMEM inside of RCCL");
