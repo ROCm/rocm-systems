@@ -1395,7 +1395,6 @@ def save_torch_trace_inputs(
             f"Unknown output_format: {output_format} in save_torch_trace_inputs",
         )
 
-
 @demarcate
 def process_torch_trace_output(
     workload_dir: str,
