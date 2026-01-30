@@ -17,4 +17,10 @@ reader_t::reader_t(std::unique_ptr<rocstorage::storage_t> storage)
 
 reader_t::~reader_t() = default;
 
+data_types::node_info_list_t
+reader_t::get_node_list() const
+{
+    return m_impl->get_node_list();
+}
+
 }  // namespace rocstorage

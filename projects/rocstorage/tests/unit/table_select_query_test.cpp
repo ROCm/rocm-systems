@@ -22,155 +22,155 @@ protected:
 
 TEST_F(table_select_query_test, simple_select_all)
 {
-    auto query_string = m_query.from("users").select_all().get_query_string();
-    EXPECT_EQ(query_string, " FROM users SELECT *");
+    auto query_string = m_query.select_all().from("users").get_query_string();
+    EXPECT_EQ(query_string, "SELECT * FROM users");
 }
 
 TEST_F(table_select_query_test, select_specific_columns)
 {
     auto query_string =
-        m_query.from("users").select("id", "name", "email").get_query_string();
-    EXPECT_EQ(query_string, " FROM users SELECT id, name, email");
+        m_query.select("id", "name", "email").from("users").get_query_string();
+    EXPECT_EQ(query_string, "SELECT id, name, email FROM users");
 }
 
 TEST_F(table_select_query_test, select_with_table_alias)
 {
     auto query_string =
-        m_query.from("users", "u").select("u.id", "u.name").get_query_string();
-    EXPECT_EQ(query_string, " FROM users u SELECT u.id, u.name");
+        m_query.select("u.id", "u.name").from("users", "u").get_query_string();
+    EXPECT_EQ(query_string, "SELECT u.id, u.name FROM users u");
 }
 
 TEST_F(table_select_query_test, select_distinct)
 {
     auto query_string =
-        m_query.from("users").distinct().select("name").get_query_string();
-    EXPECT_EQ(query_string, " FROM users SELECT DISTINCT name");
+        m_query.distinct().select("name").from("users").get_query_string();
+    EXPECT_EQ(query_string, "SELECT DISTINCT name FROM users");
 }
 
 TEST_F(table_select_query_test, select_with_where)
 {
     auto query_string =
-        m_query.from("users").select("id", "name").where("active = ?").get_query_string();
-    EXPECT_EQ(query_string, " FROM users SELECT id, name WHERE active = ?");
+        m_query.select("id", "name").from("users").where("active = ?").get_query_string();
+    EXPECT_EQ(query_string, "SELECT id, name FROM users WHERE active = ?");
 }
 
 TEST_F(table_select_query_test, select_with_multiple_where_conditions)
 {
-    auto query_string = m_query.from("users")
-                            .select("id", "name")
+    auto query_string = m_query.select("id", "name")
+                            .from("users")
                             .where("active = ?")
                             .and_where("age > ?")
                             .or_where("role = ?")
                             .get_query_string();
     EXPECT_EQ(query_string,
-              " FROM users SELECT id, name WHERE active = ? AND age > ? OR role = ?");
+              "SELECT id, name FROM users WHERE active = ? AND age > ? OR role = ?");
 }
 
 TEST_F(table_select_query_test, select_with_inner_join)
 {
-    auto query_string = m_query.from("users", "u")
-                            .select("u.id", "o.total")
+    auto query_string = m_query.select("u.id", "o.total")
+                            .from("users", "u")
                             .inner_join("orders", "o", "u.id = o.user_id")
                             .get_query_string();
     EXPECT_EQ(
         query_string,
-        " FROM users u SELECT u.id, o.total INNER JOIN orders AS o ON u.id = o.user_id");
+        "SELECT u.id, o.total FROM users u INNER JOIN orders AS o ON u.id = o.user_id");
 }
 
 TEST_F(table_select_query_test, select_with_left_join)
 {
-    auto query_string = m_query.from("users")
-                            .select("users.id", "orders.total")
+    auto query_string = m_query.select("users.id", "orders.total")
+                            .from("users")
                             .left_join("orders", "users.id = orders.user_id")
                             .get_query_string();
     EXPECT_EQ(query_string,
-              " FROM users SELECT users.id, orders.total LEFT JOIN orders ON users.id = "
+              "SELECT users.id, orders.total FROM users LEFT JOIN orders ON users.id = "
               "orders.user_id");
 }
 
 TEST_F(table_select_query_test, select_with_right_join_and_alias)
 {
-    auto query_string = m_query.from("users", "u")
-                            .select("u.id", "o.total")
+    auto query_string = m_query.select("u.id", "o.total")
+                            .from("users", "u")
                             .right_join("orders", "o", "u.id = o.user_id")
                             .get_query_string();
     EXPECT_EQ(
         query_string,
-        " FROM users u SELECT u.id, o.total RIGHT JOIN orders AS o ON u.id = o.user_id");
+        "SELECT u.id, o.total FROM users u RIGHT JOIN orders AS o ON u.id = o.user_id");
 }
 
 TEST_F(table_select_query_test, select_with_order_by)
 {
-    auto query_string = m_query.from("users")
-                            .select("id", "name")
+    auto query_string = m_query.select("id", "name")
+                            .from("users")
                             .order_by("name", sort_order::asc)
                             .get_query_string();
-    EXPECT_EQ(query_string, " FROM users SELECT id, name ORDER BY name ASC");
+    EXPECT_EQ(query_string, "SELECT id, name FROM users ORDER BY name ASC");
 }
 
 TEST_F(table_select_query_test, select_with_order_by_desc)
 {
-    auto query_string = m_query.from("users")
-                            .select("id", "created_at")
+    auto query_string = m_query.select("id", "created_at")
+                            .from("users")
                             .order_by("created_at", sort_order::desc)
                             .get_query_string();
-    EXPECT_EQ(query_string, " FROM users SELECT id, created_at ORDER BY created_at DESC");
+    EXPECT_EQ(query_string, "SELECT id, created_at FROM users ORDER BY created_at DESC");
 }
 
 TEST_F(table_select_query_test, select_with_multiple_order_by)
 {
-    auto query_string = m_query.from("users")
-                            .select("id", "name", "age")
+    auto query_string = m_query.select("id", "name", "age")
+                            .from("users")
                             .order_by("name", sort_order::asc)
                             .order_by("age", sort_order::desc)
                             .get_query_string();
     EXPECT_EQ(query_string,
-              " FROM users SELECT id, name, age ORDER BY name ASC, age DESC");
+              "SELECT id, name, age FROM users ORDER BY name ASC, age DESC");
 }
 
 TEST_F(table_select_query_test, select_with_limit)
 {
     auto query_string =
-        m_query.from("users").select("id", "name").limit(10).get_query_string();
-    EXPECT_EQ(query_string, " FROM users SELECT id, name LIMIT 10");
+        m_query.select("id", "name").from("users").limit(10).get_query_string();
+    EXPECT_EQ(query_string, "SELECT id, name FROM users LIMIT 10");
 }
 
 TEST_F(table_select_query_test, select_with_limit_and_offset)
 {
-    auto query_string = m_query.from("users")
-                            .select("id", "name")
+    auto query_string = m_query.select("id", "name")
+                            .from("users")
                             .limit(10)
                             .offset(20)
                             .get_query_string();
-    EXPECT_EQ(query_string, " FROM users SELECT id, name LIMIT 10 OFFSET 20");
+    EXPECT_EQ(query_string, "SELECT id, name FROM users LIMIT 10 OFFSET 20");
 }
 
 TEST_F(table_select_query_test, select_with_group_by)
 {
-    auto query_string = m_query.from("orders")
-                            .select("customer_id", "COUNT(*)")
+    auto query_string = m_query.select("customer_id", "COUNT(*)")
+                            .from("orders")
                             .group_by("customer_id")
                             .get_query_string();
     EXPECT_EQ(query_string,
-              " FROM orders SELECT customer_id, COUNT(*) GROUP BY customer_id");
+              "SELECT customer_id, COUNT(*) FROM orders GROUP BY customer_id");
 }
 
 TEST_F(table_select_query_test, select_with_group_by_and_having)
 {
-    auto query_string = m_query.from("orders")
-                            .select("customer_id", "COUNT(*)")
+    auto query_string = m_query.select("customer_id", "COUNT(*)")
+                            .from("orders")
                             .group_by("customer_id")
                             .having("COUNT(*) > ?")
                             .get_query_string();
     EXPECT_EQ(query_string,
-              " FROM orders SELECT customer_id, COUNT(*) GROUP BY customer_id HAVING "
+              "SELECT customer_id, COUNT(*) FROM orders GROUP BY customer_id HAVING "
               "COUNT(*) > ?");
 }
 
 TEST_F(table_select_query_test, complex_query)
 {
-    auto query_string = m_query.from("users", "u")
-                            .select("u.id", "u.name", "COUNT(o.id)")
+    auto query_string = m_query.select("u.id", "u.name", "COUNT(o.id)")
+                            .from("users", "u")
                             .left_join("orders", "o", "u.id = o.user_id")
                             .where("u.active = ?")
                             .group_by("u.id", "u.name")
@@ -180,7 +180,7 @@ TEST_F(table_select_query_test, complex_query)
                             .get_query_string();
 
     EXPECT_EQ(query_string,
-              " FROM users u SELECT u.id, u.name, COUNT(o.id)"
+              "SELECT u.id, u.name, COUNT(o.id) FROM users u"
               " LEFT JOIN orders AS o ON u.id = o.user_id"
               " WHERE u.active = ?"
               " GROUP BY u.id, u.name"
@@ -191,63 +191,63 @@ TEST_F(table_select_query_test, complex_query)
 
 TEST_F(table_select_query_test, reuse_query_builder)
 {
-    auto query1 = m_query.from("users").select("id").get_query_string();
+    auto query1 = m_query.select("id").from("users").get_query_string();
 
-    auto query2 = m_query.from("orders")
-                      .select("id", "total")
+    auto query2 = m_query.select("id", "total")
+                      .from("orders")
                       .where("total > ?")
                       .get_query_string();
 
-    EXPECT_EQ(query1, " FROM users SELECT id");
-    EXPECT_EQ(query2, " FROM orders SELECT id, total WHERE total > ?");
+    EXPECT_EQ(query1, "SELECT id FROM users");
+    EXPECT_EQ(query2, "SELECT id, total FROM orders WHERE total > ?");
 }
 
 TEST_F(table_select_query_test, select_all_with_where_and_limit)
 {
-    auto query_string = m_query.from("products")
-                            .select_all()
+    auto query_string = m_query.select_all()
+                            .from("products")
                             .where("price > ?")
                             .limit(50)
                             .get_query_string();
-    EXPECT_EQ(query_string, " FROM products SELECT * WHERE price > ? LIMIT 50");
+    EXPECT_EQ(query_string, "SELECT * FROM products WHERE price > ? LIMIT 50");
 }
 
 TEST_F(table_select_query_test, select_distinct_with_order_by_and_limit)
 {
-    auto query_string = m_query.from("categories")
-                            .distinct()
+    auto query_string = m_query.distinct()
                             .select("name")
+                            .from("categories")
                             .order_by("name", sort_order::asc)
                             .limit(100)
                             .get_query_string();
     EXPECT_EQ(query_string,
-              " FROM categories SELECT DISTINCT name ORDER BY name ASC LIMIT 100");
+              "SELECT DISTINCT name FROM categories ORDER BY name ASC LIMIT 100");
 }
 
 TEST_F(table_select_query_test, multiple_joins)
 {
-    auto query_string = m_query.from("orders", "o")
-                            .select("o.id", "c.name", "p.title")
+    auto query_string = m_query.select("o.id", "c.name", "p.title")
+                            .from("orders", "o")
                             .inner_join("customers", "c", "o.customer_id = c.id")
                             .left_join("products", "p", "o.product_id = p.id")
                             .get_query_string();
     EXPECT_EQ(query_string,
-              " FROM orders o SELECT o.id, c.name, p.title"
+              "SELECT o.id, c.name, p.title FROM orders o"
               " INNER JOIN customers AS c ON o.customer_id = c.id"
               " LEFT JOIN products AS p ON o.product_id = p.id");
 }
 
 TEST_F(table_select_query_test, multiple_joins_with_where)
 {
-    auto query_string = m_query.from("orders", "o")
-                            .select("o.id", "c.name", "p.title", "o.total")
+    auto query_string = m_query.select("o.id", "c.name", "p.title", "o.total")
+                            .from("orders", "o")
                             .inner_join("customers", "c", "o.customer_id = c.id")
                             .left_join("products", "p", "o.product_id = p.id")
                             .where("o.status = ?")
                             .and_where("o.total > ?")
                             .get_query_string();
     EXPECT_EQ(query_string,
-              " FROM orders o SELECT o.id, c.name, p.title, o.total"
+              "SELECT o.id, c.name, p.title, o.total FROM orders o"
               " INNER JOIN customers AS c ON o.customer_id = c.id"
               " LEFT JOIN products AS p ON o.product_id = p.id"
               " WHERE o.status = ? AND o.total > ?");
@@ -255,8 +255,8 @@ TEST_F(table_select_query_test, multiple_joins_with_where)
 
 TEST_F(table_select_query_test, join_with_group_by_having_order_limit)
 {
-    auto query_string = m_query.from("sales", "s")
-                            .select("s.product_id", "p.name", "SUM(s.amount)")
+    auto query_string = m_query.select("s.product_id", "p.name", "SUM(s.amount)")
+                            .from("sales", "s")
                             .inner_join("products", "p", "s.product_id = p.id")
                             .group_by("s.product_id", "p.name")
                             .having("SUM(s.amount) > ?")
@@ -264,7 +264,7 @@ TEST_F(table_select_query_test, join_with_group_by_having_order_limit)
                             .limit(10)
                             .get_query_string();
     EXPECT_EQ(query_string,
-              " FROM sales s SELECT s.product_id, p.name, SUM(s.amount)"
+              "SELECT s.product_id, p.name, SUM(s.amount) FROM sales s"
               " INNER JOIN products AS p ON s.product_id = p.id"
               " GROUP BY s.product_id, p.name"
               " HAVING SUM(s.amount) > ?"
@@ -274,61 +274,61 @@ TEST_F(table_select_query_test, join_with_group_by_having_order_limit)
 
 TEST_F(table_select_query_test, distinct_with_join_and_where)
 {
-    auto query_string = m_query.from("orders", "o")
-                            .distinct()
+    auto query_string = m_query.distinct()
                             .select("c.country")
+                            .from("orders", "o")
                             .left_join("customers", "c", "o.customer_id = c.id")
                             .where("o.year = ?")
                             .get_query_string();
     EXPECT_EQ(query_string,
-              " FROM orders o SELECT DISTINCT c.country"
+              "SELECT DISTINCT c.country FROM orders o"
               " LEFT JOIN customers AS c ON o.customer_id = c.id"
               " WHERE o.year = ?");
 }
 
 TEST_F(table_select_query_test, where_with_or_conditions_and_order_by)
 {
-    auto query_string = m_query.from("users")
-                            .select("id", "name", "role")
+    auto query_string = m_query.select("id", "name", "role")
+                            .from("users")
                             .where("role = ?")
                             .or_where("role = ?")
                             .or_where("role = ?")
                             .order_by("name", sort_order::asc)
                             .get_query_string();
     EXPECT_EQ(query_string,
-              " FROM users SELECT id, name, role"
+              "SELECT id, name, role FROM users"
               " WHERE role = ? OR role = ? OR role = ?"
               " ORDER BY name ASC");
 }
 
 TEST_F(table_select_query_test, group_by_multiple_columns_with_having)
 {
-    auto query_string = m_query.from("sales")
-                            .select("region", "product", "SUM(quantity)")
+    auto query_string = m_query.select("region", "product", "SUM(quantity)")
+                            .from("sales")
                             .group_by("region", "product")
                             .having("SUM(quantity) >= ?")
                             .get_query_string();
     EXPECT_EQ(query_string,
-              " FROM sales SELECT region, product, SUM(quantity)"
+              "SELECT region, product, SUM(quantity) FROM sales"
               " GROUP BY region, product"
               " HAVING SUM(quantity) >= ?");
 }
 
 TEST_F(table_select_query_test, offset_without_order_by)
 {
-    auto query_string = m_query.from("logs")
-                            .select("id", "message", "timestamp")
+    auto query_string = m_query.select("id", "message", "timestamp")
+                            .from("logs")
                             .limit(100)
                             .offset(500)
                             .get_query_string();
     EXPECT_EQ(query_string,
-              " FROM logs SELECT id, message, timestamp LIMIT 100 OFFSET 500");
+              "SELECT id, message, timestamp FROM logs LIMIT 100 OFFSET 500");
 }
 
 TEST_F(table_select_query_test, multiple_order_by_with_limit_offset)
 {
-    auto query_string = m_query.from("employees")
-                            .select("id", "name", "department", "salary")
+    auto query_string = m_query.select("id", "name", "department", "salary")
+                            .from("employees")
                             .order_by("department", sort_order::asc)
                             .order_by("salary", sort_order::desc)
                             .order_by("name", sort_order::asc)
@@ -336,16 +336,16 @@ TEST_F(table_select_query_test, multiple_order_by_with_limit_offset)
                             .offset(50)
                             .get_query_string();
     EXPECT_EQ(query_string,
-              " FROM employees SELECT id, name, department, salary"
+              "SELECT id, name, department, salary FROM employees"
               " ORDER BY department ASC, salary DESC, name ASC"
               " LIMIT 25 OFFSET 50");
 }
 
 TEST_F(table_select_query_test, full_query_all_clauses)
 {
-    auto query_string = m_query.from("transactions", "t")
-                            .distinct()
+    auto query_string = m_query.distinct()
                             .select("t.account_id", "a.name", "SUM(t.amount)", "COUNT(*)")
+                            .from("transactions", "t")
                             .inner_join("accounts", "a", "t.account_id = a.id")
                             .left_join("account_types", "at", "a.type_id = at.id")
                             .where("t.date >= ?")
@@ -361,8 +361,8 @@ TEST_F(table_select_query_test, full_query_all_clauses)
                             .get_query_string();
 
     EXPECT_EQ(query_string,
-              " FROM transactions t SELECT DISTINCT t.account_id, a.name, SUM(t.amount), "
-              "COUNT(*)"
+              "SELECT DISTINCT t.account_id, a.name, SUM(t.amount), COUNT(*)"
+              " FROM transactions t"
               " INNER JOIN accounts AS a ON t.account_id = a.id"
               " LEFT JOIN account_types AS at ON a.type_id = at.id"
               " WHERE t.date >= ? AND t.date <= ? AND at.category = ?"
@@ -375,25 +375,25 @@ TEST_F(table_select_query_test, full_query_all_clauses)
 
 TEST_F(table_select_query_test, join_without_alias)
 {
-    auto query_string = m_query.from("users")
-                            .select("users.id", "users.name", "orders.total")
+    auto query_string = m_query.select("users.id", "users.name", "orders.total")
+                            .from("users")
                             .inner_join("orders", "users.id = orders.user_id")
                             .get_query_string();
     EXPECT_EQ(query_string,
-              " FROM users SELECT users.id, users.name, orders.total"
+              "SELECT users.id, users.name, orders.total FROM users"
               " INNER JOIN orders ON users.id = orders.user_id");
 }
 
 TEST_F(table_select_query_test, right_join_full_query)
 {
-    auto query_string = m_query.from("departments", "d")
-                            .select("d.name", "COUNT(e.id)")
+    auto query_string = m_query.select("d.name", "COUNT(e.id)")
+                            .from("departments", "d")
                             .right_join("employees", "e", "d.id = e.department_id")
                             .group_by("d.name")
                             .order_by("COUNT(e.id)", sort_order::desc)
                             .get_query_string();
     EXPECT_EQ(query_string,
-              " FROM departments d SELECT d.name, COUNT(e.id)"
+              "SELECT d.name, COUNT(e.id) FROM departments d"
               " RIGHT JOIN employees AS e ON d.id = e.department_id"
               " GROUP BY d.name"
               " ORDER BY COUNT(e.id) DESC");
@@ -401,30 +401,30 @@ TEST_F(table_select_query_test, right_join_full_query)
 
 TEST_F(table_select_query_test, skip_optional_clauses_where_directly_to_order)
 {
-    auto query_string = m_query.from("products")
-                            .select("id", "name", "price")
+    auto query_string = m_query.select("id", "name", "price")
+                            .from("products")
                             .order_by("price", sort_order::asc)
                             .limit(10)
                             .get_query_string();
     EXPECT_EQ(query_string,
-              " FROM products SELECT id, name, price ORDER BY price ASC LIMIT 10");
+              "SELECT id, name, price FROM products ORDER BY price ASC LIMIT 10");
 }
 
 TEST_F(table_select_query_test, skip_optional_clauses_where_directly_to_limit)
 {
     auto query_string =
-        m_query.from("events").select("id", "name").limit(5).get_query_string();
-    EXPECT_EQ(query_string, " FROM events SELECT id, name LIMIT 5");
+        m_query.select("id", "name").from("events").limit(5).get_query_string();
+    EXPECT_EQ(query_string, "SELECT id, name FROM events LIMIT 5");
 }
 
 TEST_F(table_select_query_test, having_without_group_by)
 {
     // Note: This is semantically invalid SQL but syntactically allowed by builder
-    auto query_string = m_query.from("stats")
-                            .select("category", "total")
+    auto query_string = m_query.select("category", "total")
+                            .from("stats")
                             .having("total > ?")
                             .get_query_string();
-    EXPECT_EQ(query_string, " FROM stats SELECT category, total HAVING total > ?");
+    EXPECT_EQ(query_string, "SELECT category, total FROM stats HAVING total > ?");
 }
 
 }  // namespace

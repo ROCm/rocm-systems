@@ -36,14 +36,14 @@ using json = nlohmann::json;
 
 // --------------------- Call Stack Tests ---------------------
 
-TEST(JsonSerializerTest, EmptyCallStack)
+TEST(json_serializer_test, empty_call_stack)
 {
     call_stack_t empty_stack;
     std::string  result = json_serializers::serialize_call_stack(empty_stack);
     EXPECT_EQ(result, "{}");
 }
 
-TEST(JsonSerializerTest, CallStackWithSingleFrame)
+TEST(json_serializer_test, call_stack_with_single_frame)
 {
     call_stack_t stack;
 
@@ -86,7 +86,7 @@ TEST(JsonSerializerTest, CallStackWithSingleFrame)
     EXPECT_EQ(frame_json["address_range"]["address_high"], 0x2000);
 }
 
-TEST(JsonSerializerTest, CallStackWithMultipleFrames)
+TEST(json_serializer_test, call_stack_with_multiple_frames)
 {
     call_stack_t stack;
 
@@ -128,7 +128,7 @@ TEST(JsonSerializerTest, CallStackWithMultipleFrames)
     EXPECT_EQ(j["frames"][1]["program_counter"]["function"], "bar");
 }
 
-TEST(JsonSerializerTest, CallStackWithOptionalFields)
+TEST(json_serializer_test, call_stack_with_optional_fields)
 {
     call_stack_t stack;
 
@@ -161,7 +161,7 @@ TEST(JsonSerializerTest, CallStackWithOptionalFields)
     EXPECT_FALSE(frame_json.contains("address_range"));
 }
 
-TEST(JsonSerializerTest, CallStackWithExtdata)
+TEST(json_serializer_test, call_stack_with_extdata)
 {
     call_stack_t stack;
 
@@ -186,14 +186,14 @@ TEST(JsonSerializerTest, CallStackWithExtdata)
 
 // --------------------- Source Context Tests ---------------------
 
-TEST(JsonSerializerTest, EmptySourceContext)
+TEST(json_serializer_test, empty_source_context)
 {
     source_context_list_t empty_list;
     std::string           result = json_serializers::serialize_source_context(empty_list);
     EXPECT_EQ(result, "{}");
 }
 
-TEST(JsonSerializerTest, SourceContextWithProgramCounter)
+TEST(json_serializer_test, source_context_with_program_counter)
 {
     source_context_list_t list;
 
@@ -223,7 +223,7 @@ TEST(JsonSerializerTest, SourceContextWithProgramCounter)
     EXPECT_EQ(entry_json["program_counter"]["line_number"], 100);
 }
 
-TEST(JsonSerializerTest, SourceContextWithSourceCode)
+TEST(json_serializer_test, source_context_with_source_code)
 {
     source_context_list_t list;
 
@@ -266,7 +266,7 @@ TEST(JsonSerializerTest, SourceContextWithSourceCode)
     EXPECT_EQ(sc_json["assembly_instruction_lines"][2], "ret");
 }
 
-TEST(JsonSerializerTest, SourceContextWithMultipleEntries)
+TEST(json_serializer_test, source_context_with_multiple_entries)
 {
     source_context_list_t list;
 
@@ -306,7 +306,7 @@ TEST(JsonSerializerTest, SourceContextWithMultipleEntries)
     EXPECT_EQ(j["entries"][1]["program_counter"]["function"], "func2");
 }
 
-TEST(JsonSerializerTest, SourceContextWithCompleteEntry)
+TEST(json_serializer_test, source_context_with_complete_entry)
 {
     source_context_list_t list;
 
@@ -348,7 +348,7 @@ TEST(JsonSerializerTest, SourceContextWithCompleteEntry)
     EXPECT_TRUE(entry_json.contains("address_range"));
 }
 
-TEST(JsonSerializerTest, SourceContextWithNullPointers)
+TEST(json_serializer_test, source_context_with_null_pointers)
 {
     source_context_list_t list;
 

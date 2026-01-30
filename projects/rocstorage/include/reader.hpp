@@ -3,9 +3,11 @@
 
 #pragma once
 
+#include <rocstorage/data_types.hpp>
 #include <rocstorage/storage.hpp>
 
 #include <memory>
+#include <vector>
 
 namespace rocstorage
 {
@@ -21,6 +23,8 @@ struct reader_t
     reader_t& operator=(const reader_t&)  = delete;
     reader_t(const reader_t&&)            = delete;
     reader_t& operator=(const reader_t&&) = delete;
+
+    [[nodiscard]] data_types::node_info_list_t get_node_list() const;
 
 private:
     struct impl;

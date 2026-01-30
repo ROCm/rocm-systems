@@ -18,29 +18,29 @@ namespace rocstorage
 reader_t::impl::impl(std::unique_ptr<rocstorage::storage_t> storage)
 : m_storage(std::move(storage))
 , m_database(m_storage->m_impl->create_database(storage_t::impl::storage_type_t::read))
+, m_read_statements(
+      std::make_shared<data_storage::schema_v3::read_statements>(m_database,
+                                                                 m_database->get_uuid()))
 {
     if(!m_storage)
     {
         throw std::invalid_argument("Provided pointer to a non-existing storage!");
     }
-
-    const auto get_uuids_query =
-        "SELECT DISTINCT replace(name, rtrim(name, replace(name, '_', '')), '') AS guid "
-        "FROM sqlite_master WHERE type='table' AND name LIKE 'rocpd_%';";
-
-    m_database->execute_query(get_uuids_query);
 }
 
 data_types::node_info_list_t
 reader_t::impl::get_node_list() const
 {
-    auto query = queries::select::table_select_query{}
-                     .from("rocpd_info_node")
-                     .select_all()
-                     .get_query_string();
-    m_database->execute_query(query);
-
-    return {};
+    auto                         statement = m_read_statements->node_info_statement();
+    auto                         node_info_list = statement().to_vector();
+    data_types::node_info_list_t node_info_list_ptr;
+    node_info_list_ptr.reserve(node_info_list.size());
+    for(const auto& node_info : node_info_list)
+    {
+        node_info_list_ptr.push_back(
+            std::make_shared<data_types::node_info_t>(node_info));
+    }
+    return node_info_list_ptr;
 }
 
 data_types::process_info_list_t
@@ -88,5 +88,7 @@ reader_t::impl::get_pmc_info_list() const
 {
     return {};
 }
+
+// TODO: Write reader functions for tracks and other data events when defined
 
 }  // namespace rocstorage

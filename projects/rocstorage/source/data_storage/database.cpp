@@ -174,8 +174,7 @@ database::database(std::string db_path, std::string uuid, database_type_t databa
         create_directory_for_database_file(m_db_path);
     }
 
-    LOG_INFO("rocstorage database initialized (uuid: {}, path: {})", m_uuid, m_db_path);
-
+    // Open database before any queries
     if(m_database_type == database_type_t::in_memory)
     {
         validate_sqlite3_result(
@@ -186,9 +185,45 @@ database::database(std::string db_path, std::string uuid, database_type_t databa
         validate_sqlite3_result(
             sqlite3_open(m_db_path.c_str(), &m_sqlite3), "", "database open failed!");
     }
+
+    // Discover UUIDs from existing database
+    if(m_initialized)
+    {
+        auto uuids = discover_uuids();
+        if(uuids.size() == 1)
+        {
+            m_uuid = uuids[0];
+        }
+    }
+
+    LOG_INFO("rocstorage database initialized (uuid: {}, path: {})", m_uuid, m_db_path);
 }
 
 database::~database() { sqlite3_close(m_sqlite3); }
+
+std::vector<std::string>
+database::discover_uuids()
+{
+    struct uuid_result
+    {
+        const char* uuid;
+    };
+    auto uuid_query_executor = create_read_statement_executor<uuid_result>(
+        "SELECT DISTINCT replace(name, rtrim(name, replace(name, '_', '')), '') "
+        "AS guid "
+        "FROM sqlite_master WHERE type='table' AND name LIKE 'rocpd_%';",
+        &uuid_result::uuid);
+
+    auto result = uuid_query_executor().to_vector();
+
+    std::vector<std::string> uuids;
+    uuids.reserve(result.size());
+    for(const auto& row : result)
+    {
+        uuids.push_back(row.uuid);
+    }
+    return uuids;
+}
 
 std::string
 database::get_uuid() const

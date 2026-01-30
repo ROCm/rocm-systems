@@ -37,23 +37,37 @@ class reader_test : public ::testing::Test
 protected:
     void SetUp() override
     {
-        m_database_path = "rocpd.db";
-        m_storage       = std::make_unique<rocstorage::storage_t>(m_database_path, "");
-        m_reader        = std::make_shared<rocstorage::reader_t>(std::move(m_storage));
+        m_storage = std::make_unique<rocstorage::storage_t>(m_database_path, "");
+        m_reader  = std::make_shared<rocstorage::reader_t>(std::move(m_storage));
     }
 
     void TearDown() override
     {
         m_reader.reset();
         m_storage.reset();
-        std::remove(m_database_path.c_str());
     }
 
-    std::string                            m_database_path;
+    std::string                            m_database_path{ ROCPD_DB_PATH };
     std::unique_ptr<rocstorage::storage_t> m_storage;
     std::shared_ptr<rocstorage::reader_t>  m_reader;
 };
 
 TEST_F(reader_test, create_reader_instance) { ASSERT_NE(m_reader, nullptr); }
+
+TEST_F(reader_test, get_node_list_returns_correct_value)
+{
+    auto node_list = m_reader->get_node_list();
+    ASSERT_EQ(node_list.size(), 1);
+
+    ASSERT_EQ(node_list[0]->node_id, 9162464413581981795);
+    ASSERT_EQ(node_list[0]->hash, 9162464413581981795);
+    ASSERT_STREQ(node_list[0]->machine_id, "7cd7e017ddf442f5b7ce8428af366498");
+    ASSERT_STREQ(node_list[0]->system_name, "Linux");
+    ASSERT_STREQ(node_list[0]->hostname, "smci350-zts-gtu-c14-05");
+    ASSERT_STREQ(node_list[0]->release, "5.15.0-70-generic");
+    ASSERT_STREQ(node_list[0]->version, "#77-Ubuntu SMP Tue Mar 21 14:02:37 UTC 2023");
+    ASSERT_STREQ(node_list[0]->hardware_name, "x86_64");
+    ASSERT_STREQ(node_list[0]->domain_name, "(none)");
+}
 
 }  // namespace

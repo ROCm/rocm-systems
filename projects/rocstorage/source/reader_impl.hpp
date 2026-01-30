@@ -8,6 +8,7 @@
 #include "rocstorage/storage.hpp"
 
 #include "data_storage/database.hpp"
+#include "data_storage/read_statements.hpp"
 
 #include <memory>
 
@@ -30,10 +31,11 @@ struct reader_t::impl
     [[nodiscard]] data_types::pmc_info_list_t           get_pmc_info_list() const;
 
 private:
-    void all_get_uuids() const;
+    // void all_get_uuids() const;
 
-    std::unique_ptr<rocstorage::storage_t>  m_storage;
-    std::shared_ptr<data_storage::database> m_database;
+    std::unique_ptr<rocstorage::storage_t>                    m_storage;
+    std::shared_ptr<data_storage::database>                   m_database;
+    std::shared_ptr<data_storage::schema_v3::read_statements> m_read_statements;
 };
 
 }  // namespace rocstorage

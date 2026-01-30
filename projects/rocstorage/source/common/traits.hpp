@@ -23,7 +23,9 @@
 
 #pragma once
 
+#include <cstdint>
 #include <optional>
+#include <string>
 #include <type_traits>
 #include <unordered_map>
 
@@ -75,5 +77,28 @@ struct is_std_unordered_map<std::unordered_map<K, V, Hash, KeyEqual, Alloc>>
 
 template <typename T>
 inline constexpr bool is_unordered_map_v = is_std_unordered_map<T>::value;
+
+template <typename T>
+static constexpr bool is_int64_bindable_v =
+    std::is_same_v<T, int64_t> || std::is_same_v<T, uint64_t> ||
+    std::is_same_v<T, size_t>;
+
+template <typename T>
+static constexpr bool is_int32_bindable_v =
+    std::is_same_v<T, int32_t> || std::is_same_v<T, uint32_t>;
+
+template <typename T>
+static constexpr bool is_text_bindable_v = std::is_same_v<T, const char*>;
+
+template <typename T>
+static constexpr bool is_stirng_bindable_v = std::is_same_v<T, std::string>;
+
+template <typename T>
+static constexpr bool is_double_bindable_v = std::is_floating_point_v<T>;
+
+template <typename T>
+static constexpr bool is_supported_bind_type_v =
+    is_int64_bindable_v<T> || is_int32_bindable_v<T> || is_text_bindable_v<T> ||
+    is_double_bindable_v<T>;
 
 }  // namespace rocstorage::common::traits

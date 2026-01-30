@@ -51,7 +51,7 @@ insert_statements::initialize_string_statement()
                      .get_query_string();
 
     m_string_statement =
-        m_database->create_statement_executor<size_t, const char*>(query);
+        m_database->create_write_statement_executor<size_t, const char*>(query);
 }
 
 void
@@ -71,15 +71,16 @@ insert_statements::initialize_node_info_statement()
                      .set_values('?', '?', '?', '?', '?', '?', '?', '?', '?')
                      .get_query_string();
 
-    m_node_info_statement = m_database->create_statement_executor<integer_primary_key_t,
-                                                                  size_t,
-                                                                  const char*,
-                                                                  const char*,
-                                                                  const char*,
-                                                                  const char*,
-                                                                  const char*,
-                                                                  const char*,
-                                                                  const char*>(query);
+    m_node_info_statement =
+        m_database->create_write_statement_executor<integer_primary_key_t,
+                                                    size_t,
+                                                    const char*,
+                                                    const char*,
+                                                    const char*,
+                                                    const char*,
+                                                    const char*,
+                                                    const char*,
+                                                    const char*>(query);
 }
 
 void
@@ -103,17 +104,17 @@ insert_statements::initialize_process_info_statement()
             .get_query_string();
 
     m_process_info_statement =
-        m_database->create_statement_executor<integer_primary_key_t,
-                                              integer_foreign_key_t,
-                                              std::optional<size_t>,
-                                              size_t,
-                                              std::optional<size_t>,
-                                              std::optional<size_t>,
-                                              std::optional<size_t>,
-                                              std::optional<size_t>,
-                                              const char*,
-                                              const char*,
-                                              const char*>(query);
+        m_database->create_write_statement_executor<integer_primary_key_t,
+                                                    integer_foreign_key_t,
+                                                    std::optional<size_t>,
+                                                    size_t,
+                                                    std::optional<size_t>,
+                                                    std::optional<size_t>,
+                                                    std::optional<size_t>,
+                                                    std::optional<size_t>,
+                                                    const char*,
+                                                    const char*,
+                                                    const char*>(query);
 }
 
 void
@@ -126,15 +127,16 @@ insert_statements::initialize_thread_info_statement()
                 "id", "nid", "ppid", "pid", "tid", "name", "start", "end", "extdata")
             .set_values('?', '?', '?', '?', '?', '?', '?', '?', '?')
             .get_query_string();
-    m_thread_info_statement = m_database->create_statement_executor<integer_primary_key_t,
-                                                                    integer_foreign_key_t,
-                                                                    std::optional<size_t>,
-                                                                    integer_foreign_key_t,
-                                                                    size_t,
-                                                                    const char*,
-                                                                    std::optional<size_t>,
-                                                                    std::optional<size_t>,
-                                                                    const char*>(query);
+    m_thread_info_statement =
+        m_database->create_write_statement_executor<integer_primary_key_t,
+                                                    integer_foreign_key_t,
+                                                    std::optional<size_t>,
+                                                    integer_foreign_key_t,
+                                                    size_t,
+                                                    const char*,
+                                                    std::optional<size_t>,
+                                                    std::optional<size_t>,
+                                                    const char*>(query);
 }
 
 void
@@ -161,20 +163,21 @@ insert_statements::initialize_agent_info_statement()
                 '?', '?', '?', '?', '?', '?', '?', '?', '?', '?', '?', '?', '?', '?')
             .get_query_string();
 
-    m_agent_info_statement = m_database->create_statement_executor<integer_primary_key_t,
-                                                                   integer_foreign_key_t,
-                                                                   integer_foreign_key_t,
-                                                                   const char*,
-                                                                   std::optional<size_t>,
-                                                                   std::optional<size_t>,
-                                                                   size_t,
-                                                                   std::optional<size_t>,
-                                                                   const char*,
-                                                                   const char*,
-                                                                   const char*,
-                                                                   const char*,
-                                                                   const char*,
-                                                                   const char*>(query);
+    m_agent_info_statement =
+        m_database->create_write_statement_executor<integer_primary_key_t,
+                                                    integer_foreign_key_t,
+                                                    integer_foreign_key_t,
+                                                    const char*,
+                                                    std::optional<size_t>,
+                                                    std::optional<size_t>,
+                                                    size_t,
+                                                    std::optional<size_t>,
+                                                    const char*,
+                                                    const char*,
+                                                    const char*,
+                                                    const char*,
+                                                    const char*,
+                                                    const char*>(query);
 }
 
 void
@@ -222,25 +225,25 @@ insert_statements::initialize_pmc_info_statement()
                                  '?')
                      .get_query_string();
     m_pmc_info_statement =
-        m_database->create_statement_executor<integer_primary_key_t,
-                                              integer_foreign_key_t,
-                                              integer_foreign_key_t,
-                                              std::optional<integer_foreign_key_t>,
-                                              const char*,
-                                              std::optional<size_t>,
-                                              std::optional<size_t>,
-                                              const char*,
-                                              const char*,
-                                              const char*,
-                                              const char*,
-                                              const char*,
-                                              const char*,
-                                              const char*,
-                                              const char*,
-                                              const char*,
-                                              std::optional<size_t>,
-                                              std::optional<size_t>,
-                                              const char*>(query);
+        m_database->create_write_statement_executor<integer_primary_key_t,
+                                                    integer_foreign_key_t,
+                                                    integer_foreign_key_t,
+                                                    std::optional<integer_foreign_key_t>,
+                                                    const char*,
+                                                    std::optional<size_t>,
+                                                    std::optional<size_t>,
+                                                    const char*,
+                                                    const char*,
+                                                    const char*,
+                                                    const char*,
+                                                    const char*,
+                                                    const char*,
+                                                    const char*,
+                                                    const char*,
+                                                    const char*,
+                                                    std::optional<size_t>,
+                                                    std::optional<size_t>,
+                                                    const char*>(query);
 }
 
 void
@@ -251,11 +254,12 @@ insert_statements::initialize_stream_info_statement()
                      .set_columns("id", "nid", "pid", "name", "extdata")
                      .set_values('?', '?', '?', '?', '?')
                      .get_query_string();
-    m_stream_info_statement = m_database->create_statement_executor<integer_primary_key_t,
-                                                                    integer_foreign_key_t,
-                                                                    integer_foreign_key_t,
-                                                                    const char*,
-                                                                    const char*>(query);
+    m_stream_info_statement =
+        m_database->create_write_statement_executor<integer_primary_key_t,
+                                                    integer_foreign_key_t,
+                                                    integer_foreign_key_t,
+                                                    const char*,
+                                                    const char*>(query);
 }
 
 void
@@ -266,11 +270,12 @@ insert_statements::initialize_queue_info_statement()
                      .set_columns("id", "nid", "pid", "name", "extdata")
                      .set_values('?', '?', '?', '?', '?')
                      .get_query_string();
-    m_queue_info_statement = m_database->create_statement_executor<integer_primary_key_t,
-                                                                   integer_foreign_key_t,
-                                                                   integer_foreign_key_t,
-                                                                   const char*,
-                                                                   const char*>(query);
+    m_queue_info_statement =
+        m_database->create_write_statement_executor<integer_primary_key_t,
+                                                    integer_foreign_key_t,
+                                                    integer_foreign_key_t,
+                                                    const char*,
+                                                    const char*>(query);
 }
 
 void
@@ -298,21 +303,21 @@ insert_statements::initialize_kernel_symbol_info_statement()
                 '?', '?', '?', '?', '?', '?', '?', '?', '?', '?', '?', '?', '?', '?', '?')
             .get_query_string();
     m_kernel_symbol_info_statement =
-        m_database->create_statement_executor<integer_primary_key_t,
-                                              integer_foreign_key_t,
-                                              integer_foreign_key_t,
-                                              integer_foreign_key_t,
-                                              const char*,
-                                              const char*,
-                                              std::optional<size_t>,
-                                              std::optional<size_t>,
-                                              std::optional<size_t>,
-                                              std::optional<size_t>,
-                                              std::optional<size_t>,
-                                              std::optional<size_t>,
-                                              std::optional<size_t>,
-                                              std::optional<size_t>,
-                                              const char*>(query);
+        m_database->create_write_statement_executor<integer_primary_key_t,
+                                                    integer_foreign_key_t,
+                                                    integer_foreign_key_t,
+                                                    integer_foreign_key_t,
+                                                    const char*,
+                                                    const char*,
+                                                    std::optional<size_t>,
+                                                    std::optional<size_t>,
+                                                    std::optional<size_t>,
+                                                    std::optional<size_t>,
+                                                    std::optional<size_t>,
+                                                    std::optional<size_t>,
+                                                    std::optional<size_t>,
+                                                    std::optional<size_t>,
+                                                    const char*>(query);
 }
 
 void
@@ -334,16 +339,16 @@ insert_statements::initialize_code_object_info_statement()
             .set_values('?', '?', '?', '?', '?', '?', '?', '?', '?', '?')
             .get_query_string();
     m_code_object_info_statement =
-        m_database->create_statement_executor<integer_primary_key_t,
-                                              integer_foreign_key_t,
-                                              integer_foreign_key_t,
-                                              std::optional<integer_foreign_key_t>,
-                                              const char*,
-                                              std::optional<size_t>,
-                                              std::optional<size_t>,
-                                              std::optional<size_t>,
-                                              const char*,
-                                              const char*>(query);
+        m_database->create_write_statement_executor<integer_primary_key_t,
+                                                    integer_foreign_key_t,
+                                                    integer_foreign_key_t,
+                                                    std::optional<integer_foreign_key_t>,
+                                                    const char*,
+                                                    std::optional<size_t>,
+                                                    std::optional<size_t>,
+                                                    std::optional<size_t>,
+                                                    const char*,
+                                                    const char*>(query);
 }
 
 void
@@ -355,12 +360,12 @@ insert_statements::initialize_track_info_statement()
                      .set_values('?', '?', '?', '?', '?', '?')
                      .get_query_string();
     m_track_info_statement =
-        m_database->create_statement_executor<integer_primary_key_t,
-                                              integer_foreign_key_t,
-                                              std::optional<integer_foreign_key_t>,
-                                              std::optional<integer_foreign_key_t>,
-                                              std::optional<integer_foreign_key_t>,
-                                              const char*>(query);
+        m_database->create_write_statement_executor<integer_primary_key_t,
+                                                    integer_foreign_key_t,
+                                                    std::optional<integer_foreign_key_t>,
+                                                    std::optional<integer_foreign_key_t>,
+                                                    std::optional<integer_foreign_key_t>,
+                                                    const char*>(query);
 }
 
 void
@@ -379,14 +384,14 @@ insert_statements::initialize_event_statement()
                      .set_values('?', '?', '?', '?', '?', '?', '?', '?')
                      .get_query_string();
     m_event_statement =
-        m_database->create_statement_executor<integer_primary_key_t,
-                                              std::optional<integer_foreign_key_t>,
-                                              std::optional<size_t>,
-                                              std::optional<size_t>,
-                                              std::optional<size_t>,
-                                              const char*,
-                                              const char*,
-                                              const char*>(query);
+        m_database->create_write_statement_executor<integer_primary_key_t,
+                                                    std::optional<integer_foreign_key_t>,
+                                                    std::optional<size_t>,
+                                                    std::optional<size_t>,
+                                                    std::optional<size_t>,
+                                                    const char*,
+                                                    const char*,
+                                                    const char*>(query);
 }
 
 void
@@ -398,13 +403,13 @@ insert_statements::initialize_arg_statement()
             .set_columns("id", "event_id", "position", "type", "name", "value", "extdata")
             .set_values('?', '?', '?', '?', '?', '?', '?')
             .get_query_string();
-    m_arg_statement = m_database->create_statement_executor<integer_primary_key_t,
-                                                            integer_foreign_key_t,
-                                                            size_t,
-                                                            const char*,
-                                                            const char*,
-                                                            const char*,
-                                                            const char*>(query);
+    m_arg_statement = m_database->create_write_statement_executor<integer_primary_key_t,
+                                                                  integer_foreign_key_t,
+                                                                  size_t,
+                                                                  const char*,
+                                                                  const char*,
+                                                                  const char*,
+                                                                  const char*>(query);
 }
 
 void
@@ -416,11 +421,11 @@ insert_statements::initialize_pmc_event_statement()
                      .set_values('?', '?', '?', '?', '?')
                      .get_query_string();
     m_pmc_event_statement =
-        m_database->create_statement_executor<integer_primary_key_t,
-                                              std::optional<integer_foreign_key_t>,
-                                              integer_foreign_key_t,
-                                              double,
-                                              const char*>(query);
+        m_database->create_write_statement_executor<integer_primary_key_t,
+                                                    std::optional<integer_foreign_key_t>,
+                                                    integer_foreign_key_t,
+                                                    double,
+                                                    const char*>(query);
 }
 
 void
@@ -440,15 +445,15 @@ insert_statements::initialize_region_statement()
                      .set_values('?', '?', '?', '?', '?', '?', '?', '?', '?')
                      .get_query_string();
     m_region_statement =
-        m_database->create_statement_executor<integer_primary_key_t,
-                                              integer_foreign_key_t,
-                                              integer_foreign_key_t,
-                                              integer_foreign_key_t,
-                                              uint64_t,
-                                              uint64_t,
-                                              integer_foreign_key_t,
-                                              std::optional<integer_foreign_key_t>,
-                                              const char*>(query);
+        m_database->create_write_statement_executor<integer_primary_key_t,
+                                                    integer_foreign_key_t,
+                                                    integer_foreign_key_t,
+                                                    integer_foreign_key_t,
+                                                    uint64_t,
+                                                    uint64_t,
+                                                    integer_foreign_key_t,
+                                                    std::optional<integer_foreign_key_t>,
+                                                    const char*>(query);
 }
 
 void
@@ -460,11 +465,11 @@ insert_statements::initialize_sample_statement()
                      .set_values('?', '?', '?', '?', '?')
                      .get_query_string();
     m_sample_statement =
-        m_database->create_statement_executor<integer_primary_key_t,
-                                              integer_foreign_key_t,
-                                              uint64_t,
-                                              std::optional<integer_foreign_key_t>,
-                                              const char*>(query);
+        m_database->create_write_statement_executor<integer_primary_key_t,
+                                                    integer_foreign_key_t,
+                                                    uint64_t,
+                                                    std::optional<integer_foreign_key_t>,
+                                                    const char*>(query);
 }
 
 void
@@ -519,28 +524,28 @@ insert_statements::initialize_kernel_dispatch_statement()
                         '?')
             .get_query_string();
     m_kernel_dispatch_statement =
-        m_database->create_statement_executor<integer_primary_key_t,
-                                              integer_foreign_key_t,
-                                              integer_foreign_key_t,
-                                              std::optional<integer_foreign_key_t>,
-                                              integer_foreign_key_t,
-                                              integer_foreign_key_t,
-                                              size_t,
-                                              integer_foreign_key_t,
-                                              integer_foreign_key_t,
-                                              uint64_t,
-                                              uint64_t,
-                                              std::optional<size_t>,
-                                              std::optional<size_t>,
-                                              size_t,
-                                              size_t,
-                                              size_t,
-                                              size_t,
-                                              size_t,
-                                              size_t,
-                                              std::optional<integer_foreign_key_t>,
-                                              std::optional<integer_foreign_key_t>,
-                                              const char*>(query);
+        m_database->create_write_statement_executor<integer_primary_key_t,
+                                                    integer_foreign_key_t,
+                                                    integer_foreign_key_t,
+                                                    std::optional<integer_foreign_key_t>,
+                                                    integer_foreign_key_t,
+                                                    integer_foreign_key_t,
+                                                    size_t,
+                                                    integer_foreign_key_t,
+                                                    integer_foreign_key_t,
+                                                    uint64_t,
+                                                    uint64_t,
+                                                    std::optional<size_t>,
+                                                    std::optional<size_t>,
+                                                    size_t,
+                                                    size_t,
+                                                    size_t,
+                                                    size_t,
+                                                    size_t,
+                                                    size_t,
+                                                    std::optional<integer_foreign_key_t>,
+                                                    std::optional<integer_foreign_key_t>,
+                                                    const char*>(query);
 }
 
 void
@@ -584,23 +589,23 @@ insert_statements::initialize_memory_copy_statement()
                                  '?')
                      .get_query_string();
     m_memory_copy_statement =
-        m_database->create_statement_executor<integer_primary_key_t,
-                                              integer_foreign_key_t,
-                                              integer_foreign_key_t,
-                                              std::optional<integer_foreign_key_t>,
-                                              uint64_t,
-                                              uint64_t,
-                                              integer_foreign_key_t,
-                                              std::optional<integer_foreign_key_t>,
-                                              std::optional<size_t>,
-                                              std::optional<integer_foreign_key_t>,
-                                              std::optional<size_t>,
-                                              size_t,
-                                              std::optional<integer_foreign_key_t>,
-                                              std::optional<integer_foreign_key_t>,
-                                              std::optional<integer_foreign_key_t>,
-                                              std::optional<integer_foreign_key_t>,
-                                              const char*>(query);
+        m_database->create_write_statement_executor<integer_primary_key_t,
+                                                    integer_foreign_key_t,
+                                                    integer_foreign_key_t,
+                                                    std::optional<integer_foreign_key_t>,
+                                                    uint64_t,
+                                                    uint64_t,
+                                                    integer_foreign_key_t,
+                                                    std::optional<integer_foreign_key_t>,
+                                                    std::optional<size_t>,
+                                                    std::optional<integer_foreign_key_t>,
+                                                    std::optional<size_t>,
+                                                    size_t,
+                                                    std::optional<integer_foreign_key_t>,
+                                                    std::optional<integer_foreign_key_t>,
+                                                    std::optional<integer_foreign_key_t>,
+                                                    std::optional<integer_foreign_key_t>,
+                                                    const char*>(query);
 }
 
 void
@@ -628,21 +633,21 @@ insert_statements::initialize_memory_alloc_statement()
                 '?', '?', '?', '?', '?', '?', '?', '?', '?', '?', '?', '?', '?', '?', '?')
             .get_query_string();
     m_memory_alloc_statement =
-        m_database->create_statement_executor<integer_primary_key_t,
-                                              integer_foreign_key_t,
-                                              integer_foreign_key_t,
-                                              std::optional<integer_foreign_key_t>,
-                                              std::optional<integer_foreign_key_t>,
-                                              const char*,
-                                              const char*,
-                                              uint64_t,
-                                              uint64_t,
-                                              std::optional<size_t>,
-                                              size_t,
-                                              std::optional<integer_foreign_key_t>,
-                                              std::optional<integer_foreign_key_t>,
-                                              std::optional<integer_foreign_key_t>,
-                                              const char*>(query);
+        m_database->create_write_statement_executor<integer_primary_key_t,
+                                                    integer_foreign_key_t,
+                                                    integer_foreign_key_t,
+                                                    std::optional<integer_foreign_key_t>,
+                                                    std::optional<integer_foreign_key_t>,
+                                                    const char*,
+                                                    const char*,
+                                                    uint64_t,
+                                                    uint64_t,
+                                                    std::optional<size_t>,
+                                                    size_t,
+                                                    std::optional<integer_foreign_key_t>,
+                                                    std::optional<integer_foreign_key_t>,
+                                                    std::optional<integer_foreign_key_t>,
+                                                    const char*>(query);
 }
 
 }  // namespace rocstorage::data_storage::schema_v3

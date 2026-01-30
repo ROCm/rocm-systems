@@ -15,15 +15,15 @@
 namespace rocstorage::queries::select
 {
 
-// Forward declarations
+// Forward declarations - ordered by builder chain position
 class limit_clause_builder;
 class order_by_clause_builder;
 class having_clause_builder;
 class group_by_clause_builder;
 class where_clause_builder;
 class join_clause_builder;
-class select_columns_builder;
 class from_clause_builder;
+class select_columns_builder;
 
 class limit_clause_builder : public query_builder_base
 {
@@ -155,6 +155,18 @@ private:
     where_clause_builder m_where_builder;
 };
 
+class from_clause_builder : public query_builder_base
+{
+public:
+    explicit from_clause_builder(std::stringstream& ss);
+
+    join_clause_builder& from(std::string_view table);
+    join_clause_builder& from(std::string_view table, std::string_view alias);
+
+private:
+    join_clause_builder m_join_builder;
+};
+
 class select_columns_builder : public query_builder_base
 {
 public:
@@ -163,36 +175,24 @@ public:
     template <typename... Columns,
               typename =
                   std::enable_if_t<(common::traits::is_string_literal<Columns>() && ...)>>
-    join_clause_builder& select(Columns&&... columns)
+    from_clause_builder& select(Columns&&... columns)
     {
-        m_stream << " SELECT ";
+        m_stream << "SELECT ";
         if(m_distinct)
         {
             m_stream << "DISTINCT ";
         }
         append_columns(std::forward<Columns>(columns)...);
-        return m_join_builder;
+        return m_from_builder;
     }
 
-    join_clause_builder& select_all();
+    from_clause_builder& select_all();
 
     select_columns_builder& distinct();
 
 private:
     bool                m_distinct{ false };
-    join_clause_builder m_join_builder;
-};
-
-class from_clause_builder : public query_builder_base
-{
-public:
-    explicit from_clause_builder(std::stringstream& ss);
-
-    select_columns_builder& from(std::string_view table);
-    select_columns_builder& from(std::string_view table, std::string_view alias);
-
-private:
-    select_columns_builder m_select_builder;
+    from_clause_builder m_from_builder;
 };
 
 }  // namespace rocstorage::queries::select

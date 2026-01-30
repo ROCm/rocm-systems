@@ -246,19 +246,19 @@ join_clause_builder::limit(size_t count)
 
 select_columns_builder::select_columns_builder(std::stringstream& ss)
 : query_builder_base{ ss }
-, m_join_builder{ ss }
+, m_from_builder{ ss }
 {}
 
-join_clause_builder&
+from_clause_builder&
 select_columns_builder::select_all()
 {
-    m_stream << " SELECT ";
+    m_stream << "SELECT ";
     if(m_distinct)
     {
         m_stream << "DISTINCT ";
     }
     m_stream << "*";
-    return m_join_builder;
+    return m_from_builder;
 }
 
 select_columns_builder&
@@ -270,21 +270,21 @@ select_columns_builder::distinct()
 
 from_clause_builder::from_clause_builder(std::stringstream& ss)
 : query_builder_base{ ss }
-, m_select_builder{ ss }
+, m_join_builder{ ss }
 {}
 
-select_columns_builder&
+join_clause_builder&
 from_clause_builder::from(std::string_view table)
 {
     m_stream << " FROM " << table;
-    return m_select_builder;
+    return m_join_builder;
 }
 
-select_columns_builder&
+join_clause_builder&
 from_clause_builder::from(std::string_view table, std::string_view alias)
 {
     m_stream << " FROM " << table << " " << alias;
-    return m_select_builder;
+    return m_join_builder;
 }
 
 }  // namespace rocstorage::queries::select

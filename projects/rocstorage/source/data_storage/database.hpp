@@ -5,6 +5,7 @@
 
 #include "debug.hpp"
 #include "spdlog/fmt/bundled/core.h"
+#include "statement_result.hpp"
 #include "traits.hpp"
 #include "transaction.hpp"
 
@@ -20,6 +21,10 @@
 
 namespace rocstorage::data_storage
 {
+
+template <typename... Ts>
+struct bind_types
+{};
 
 class database
 {
@@ -54,7 +59,7 @@ public:
      * provided values to the respective placeholders in the query.
      */
     template <typename... Values>
-    auto create_statement_executor(const std::string& query)
+    auto create_write_statement_executor(const std::string& query)
     {
         sqlite3_stmt* p_stmt = nullptr;
         validate_sqlite3_result(
@@ -68,13 +73,52 @@ public:
 
             ((bind_value(stmt.get(), position++, value, query)), ...);
 
-            auto* const expanded_sql = sqlite3_expanded_sql(stmt.get());
+            // TODO: Add as optional
+            auto expanded_sql = std::unique_ptr<char, decltype(&sqlite3_free)>(
+                sqlite3_expanded_sql(stmt.get()), sqlite3_free);
             LOG_TRACE("Executing statement: {}", expanded_sql);
 
             validate_sqlite3_result(
-                sqlite3_step(stmt.get()), expanded_sql, "Failed to execute step");
+                sqlite3_step(stmt.get()), expanded_sql.get(), "Failed to execute step");
             sqlite3_reset(stmt.get());
         };
+    }
+
+    template <typename T, typename... BindTypes, typename... Members>
+    auto create_read_statement_executor_impl(bind_types<BindTypes...> /*tag*/,
+                                             const std::string& query,
+                                             Members            T::*... members)
+    {
+        sqlite3_stmt* p_stmt = nullptr;
+        validate_sqlite3_result(
+            sqlite3_prepare_v2(m_sqlite3, query.c_str(), -1, &p_stmt, nullptr),
+            query.c_str(),
+            "Failed to create query reader statement");
+
+        std::shared_ptr<sqlite3_stmt> stmt{ p_stmt, sqlite3_finalize };
+
+        return [stmt, members..., query, this](
+                   BindTypes... bind_values) -> statement_result<T> {
+            sqlite3_reset(stmt.get());
+            sqlite3_clear_bindings(stmt.get());
+
+            int position = 1;
+            ((this->bind_value(stmt.get(), position++, bind_values, query)), ...);
+
+            return statement_result<T>(stmt, members...);
+        };
+    }
+
+    /// Create a reusable query reader that maps results to struct T.
+    /// For queries with bind parameters, specify them wrapped in bind_types<>:
+    ///   create_read_statement_executor<MyStruct, bind_types<int, bool>>(query,
+    ///   &MyStruct::field)
+    /// For queries without bind parameters:
+    ///   create_read_statement_executor<MyStruct>(query, &MyStruct::field)
+    template <typename T, typename BindTypesPack = bind_types<>, typename... Members>
+    auto create_read_statement_executor(const std::string& query, Members T::*... members)
+    {
+        return create_read_statement_executor_impl<T>(BindTypesPack{}, query, members...);
     }
 
     [[nodiscard]] transaction_block create_transaction_block() const noexcept
@@ -83,6 +127,8 @@ public:
     }
 
 private:
+    [[nodiscard]] std::vector<std::string> discover_uuids();
+
     void validate_sqlite3_result(int              sqlite3_error_code,
                                  const char*      query,
                                  std::string_view context = {})
@@ -107,26 +153,6 @@ private:
 
         throw std::runtime_error(message);
     }
-
-    template <typename T>
-    static constexpr bool is_int64_bindable_v =
-        std::is_same_v<T, int64_t> || std::is_same_v<T, uint64_t> ||
-        std::is_same_v<T, size_t>;
-
-    template <typename T>
-    static constexpr bool is_int32_bindable_v =
-        std::is_same_v<T, int32_t> || std::is_same_v<T, uint32_t>;
-
-    template <typename T>
-    static constexpr bool is_text_bindable_v = std::is_same_v<T, const char*>;
-
-    template <typename T>
-    static constexpr bool is_double_bindable_v = std::is_floating_point_v<T>;
-
-    template <typename T>
-    static constexpr bool is_supported_bind_type_v =
-        is_int64_bindable_v<T> || is_int32_bindable_v<T> || is_text_bindable_v<T> ||
-        is_double_bindable_v<T>;
 
     void bind_null(sqlite3_stmt* stmt, int position, const std::string& query)
     {
@@ -204,7 +230,7 @@ private:
                 bind_value(stmt, position, *std::forward<T>(value), query);
             }
         }
-        else if constexpr(is_text_bindable_v<decayed_t>)
+        else if constexpr(common::traits::is_text_bindable_v<decayed_t>)
         {
             if(value == nullptr)
             {
@@ -215,15 +241,15 @@ private:
                 bind_text(stmt, position, value, query);
             }
         }
-        else if constexpr(is_double_bindable_v<decayed_t>)
+        else if constexpr(common::traits::is_double_bindable_v<decayed_t>)
         {
             bind_double(stmt, position, static_cast<double>(value), query);
         }
-        else if constexpr(is_int64_bindable_v<decayed_t>)
+        else if constexpr(common::traits::is_int64_bindable_v<decayed_t>)
         {
             bind_int64(stmt, position, static_cast<int64_t>(value), query);
         }
-        else if constexpr(is_int32_bindable_v<decayed_t>)
+        else if constexpr(common::traits::is_int32_bindable_v<decayed_t>)
         {
             bind_int32(stmt, position, static_cast<int32_t>(value), query);
         }
