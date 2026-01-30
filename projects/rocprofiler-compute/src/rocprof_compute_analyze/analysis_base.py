@@ -211,7 +211,6 @@ class OmniAnalyze_Base:
         print(f"\n{'=' * 80}")
         print(f"PyTorch Operators in: {workload_path}")
         print(f"{'=' * 80}\n")
-        print(f"Found {len(all_operators)} operators:\n")
 
         for i, op in enumerate(all_operators, 1):
             print(f"  {i:3d}. {op}")
