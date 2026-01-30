@@ -1335,7 +1335,7 @@ def process_torch_trace_output(
     """
     # marker_trace_csv_file_path = f"{workload_dir}/out/pmc_1/"
     # Find all marker_api_trace CSV files
-    console_log("Looking for marker and counter csv files in ", workload_dir)
+    console_log(f"Looking for marker and counter csv files in {workload_dir}")
     marker_api_trace_csvs = list(Path(workload_dir).glob("**/*_marker_api_trace.csv"))
     counter_collection_csvs = [
         markers_file.parent
