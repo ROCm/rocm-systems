@@ -203,9 +203,7 @@ class OmniAnalyze_Base:
         all_operators = sorted([f.stem for f in torch_trace_dir.glob("*.csv")])
         if not all_operators:
             console_warning(
-                "No PyTorch operator data found",
-                "please ensure profiling was done ",
-                "with --torch-trace option.",
+                "No PyTorch operator data found; please ensure profiling was done with --torch-trace option."
             )
             return
         print(f"\n{'=' * 80}")
