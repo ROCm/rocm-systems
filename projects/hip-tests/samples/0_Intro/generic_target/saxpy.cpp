@@ -26,6 +26,7 @@ THE SOFTWARE.
 
 #include <cassert>
 #include <cstddef>
+#include <cstring>
 #include <memory>
 #include <iostream>
 #include <iterator>
