@@ -90,6 +90,8 @@
 #define NCCL_GROUP_CUDA_STREAM 1 // CGMD: CUDA 9.0,9.1 Need to use an internal CUDA stream
 #endif
 
+#define TEMP_BUFF_SIZE (4 * 1024 * 1024) // Define Size for Temporary Buffer for Direct RS
+
 using namespace rccl;
 
 const char* ncclFuncStr[NCCL_NUM_FUNCTIONS+3] = { "AllGather", "AllReduce", "AlltoAllPivot", "AllToAllGda", "Broadcast", "Reduce", "ReduceScatter", "SendRecv"};
@@ -483,6 +485,13 @@ static ncclResult_t commFree(ncclComm_t comm) {
     return ncclSuccess;
 
   NCCLCHECK(ncclCeFinalize(comm));
+
+  // tempBuff is allocated per-communicator for direct ReduceScatter on gfx950.
+  // It is owned by the communicator; free it during communicator teardown.
+  if (comm->tempBuff) {
+    NCCLCHECK(ncclCudaFree(comm->tempBuff));
+    comm->tempBuff = nullptr;
+  }
 
   if (comm->symmetricSupport) {
     NCCLCHECK(ncclSymkFinalize(comm));
@@ -2285,6 +2294,10 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
   }
 #endif
 
+  // Allocate Temp Buffer for Direct Reduce Scatter
+  if (IsArchMatch(archName,"gfx950")) {
+    NCCLCHECK(ncclCudaMalloc(&(comm->tempBuff), TEMP_BUFF_SIZE));
+  }
 
 #ifdef ENABLE_MSCCLPP
   if (job->parent) {
