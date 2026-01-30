@@ -66,8 +66,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-        - language: cpp
-          build-mode: manual
+        # cpp analysis disabled - takes too long and frequently times out
+        # - language: cpp
+        #   build-mode: manual
         - language: python
           build-mode: none
         - language : actions

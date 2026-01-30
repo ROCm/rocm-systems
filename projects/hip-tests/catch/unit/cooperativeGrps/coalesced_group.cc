@@ -137,12 +137,7 @@ static uint64_t get_active_mask(unsigned int test_case, size_t warp_size) {
  *  - HIP_VERSION >= 5.2
  */
 TEST_CASE("Unit_Coalesced_Group_Getters_Positive_Basic") {
-  int device;
-  hipDeviceProp_t device_properties;
-  HIP_CHECK(hipGetDevice(&device));
-  HIP_CHECK(hipGetDeviceProperties(&device_properties, device));
-
-  size_t warp_size = static_cast<size_t>(device_properties.warpSize);
+  const int warp_size = getWarpSize();
 
   const auto blocks = GenerateBlockDimensionsForShuffle();
   const auto threads = GenerateThreadDimensionsForShuffle();
@@ -225,13 +220,7 @@ TEST_CASE("Unit_Coalesced_Group_Getters_Positive_Basic") {
  *    - HIP_VERSION >= 5.2
  */
 TEST_CASE("Unit_Coalesced_Group_Getters_Via_Base_Type_Positive_Basic") {
-  int device;
-  hipDeviceProp_t device_properties;
-  HIP_CHECK(hipGetDevice(&device));
-  HIP_CHECK(hipGetDeviceProperties(&device_properties, device));
-
-
-  size_t warp_size = static_cast<size_t>(device_properties.warpSize);
+  const int warp_size = getWarpSize();
 
   const auto blocks = GenerateBlockDimensionsForShuffle();
   const auto threads = GenerateThreadDimensionsForShuffle();
@@ -315,12 +304,7 @@ TEST_CASE("Unit_Coalesced_Group_Getters_Via_Base_Type_Positive_Basic") {
  *  - HIP_VERSION >= 5.2
  */
 TEST_CASE("Unit_Coalesced_Group_Getters_Via_Non_Member_Functions_Positive_Basic") {
-  int device;
-  hipDeviceProp_t device_properties;
-  HIP_CHECK(hipGetDevice(&device));
-  HIP_CHECK(hipGetDeviceProperties(&device_properties, device));
-
-  size_t warp_size = static_cast<size_t>(device_properties.warpSize);
+  const int warp_size = getWarpSize();
 
   const auto blocks = GenerateBlockDimensionsForShuffle();
   const auto threads = GenerateThreadDimensionsForShuffle();
@@ -407,12 +391,9 @@ template <typename T> __global__ void coalesced_group_shfl_up(T* const out,
 }
 
 template <typename T> void CoalescedGroupShflUpTestImpl() {
-  int device;
-  hipDeviceProp_t device_properties;
-  HIP_CHECK(hipGetDevice(&device));
-  HIP_CHECK(hipGetDeviceProperties(&device_properties, device));
+  const auto inv_reduction_factor = 1.0 / GetTestReductionFactor();
 
-  size_t warp_size = static_cast<size_t>(device_properties.warpSize);
+  const int warp_size = getWarpSize();
 
   const auto blocks = GenerateBlockDimensionsForShuffle();
   const auto threads = GenerateThreadDimensionsForShuffle();
@@ -423,11 +404,16 @@ template <typename T> void CoalescedGroupShflUpTestImpl() {
   INFO("Coalesced group mask: " << active_mask);
   unsigned int active_thread_count = get_active_thread_count(active_mask, warp_size);
 
-  // Tests edge cases (0, 1, max-1) and middle values
-  auto delta = GENERATE(values<size_t>({0, 1, static_cast<size_t>(getWarpSize()/2),
-                                         static_cast<size_t>(getWarpSize()-1)}));
+  std::vector<int> deltas;
+  for (double i = 0; i < warp_size - 1; i += inv_reduction_factor) {
+    deltas.emplace_back(static_cast<int>(std::floor(i)));
+  }
+  deltas.emplace_back(warp_size - 1);
+
+  auto delta = GENERATE_COPY(from_range(deltas.begin(), deltas.end()));
   delta = delta % active_thread_count;
   INFO("Delta: " << delta);
+
   CPUGrid grid(blocks, threads);
 
   const auto alloc_size = grid.thread_count_ * sizeof(T);
@@ -489,12 +475,9 @@ template <typename T> __global__ void coalesced_group_shfl_down(T* const out,
 }
 
 template <typename T> void CoalescedGroupShflDownTest() {
-  int device;
-  hipDeviceProp_t device_properties;
-  HIP_CHECK(hipGetDevice(&device));
-  HIP_CHECK(hipGetDeviceProperties(&device_properties, device));
+  const auto inv_reduction_factor = 1.0 / GetTestReductionFactor();
 
-  size_t warp_size = static_cast<size_t>(device_properties.warpSize);
+  const int warp_size = getWarpSize();
 
   const auto blocks = GenerateBlockDimensionsForShuffle();
   const auto threads = GenerateThreadDimensionsForShuffle();
@@ -505,11 +488,16 @@ template <typename T> void CoalescedGroupShflDownTest() {
   INFO("Coalesced group mask: " << active_mask);
   unsigned int active_thread_count = get_active_thread_count(active_mask, warp_size);
 
-  // Tests edge cases (0, 1, max-1) and middle values
-  auto delta = GENERATE(values<size_t>({0, 1, static_cast<size_t>(getWarpSize()/2),
-                                         static_cast<size_t>(getWarpSize()-1)}));
+  std::vector<int> deltas;
+  for (double i = 0; i < warp_size - 1; i += inv_reduction_factor) {
+    deltas.emplace_back(static_cast<int>(std::floor(i)));
+  }
+  deltas.emplace_back(warp_size - 1);
+
+  auto delta = GENERATE_COPY(from_range(deltas.begin(), deltas.end()));
   delta = delta % active_thread_count;
   INFO("Delta: " << delta);
+
   CPUGrid grid(blocks, threads);
 
   const auto alloc_size = grid.thread_count_ * sizeof(T);
@@ -581,12 +569,7 @@ template <typename T> __global__ void coalesced_group_shfl(T* const out, uint8_t
 }
 
 template <typename T> void CoalescedGroupShflTest() {
-  int device;
-  hipDeviceProp_t device_properties;
-  HIP_CHECK(hipGetDevice(&device));
-  HIP_CHECK(hipGetDeviceProperties(&device_properties, device));
-
-  size_t warp_size = static_cast<size_t>(device_properties.warpSize);
+  const int warp_size = getWarpSize();
 
   const auto blocks = GenerateBlockDimensionsForShuffle();
   const auto threads = GenerateThreadDimensionsForShuffle();
@@ -730,13 +713,7 @@ __global__ void coalesced_group_sync_check(T* global_data, unsigned int* wait_mo
 }
 
 template <bool global_memory, typename T> void CoalescedGroupSyncTest() {
-  int device;
-  hipDeviceProp_t device_properties;
-
-  HIP_CHECK(hipGetDevice(&device));
-  HIP_CHECK(hipGetDeviceProperties(&device_properties, device));
-
-  size_t warp_size = static_cast<size_t>(device_properties.warpSize);
+  const int warp_size = getWarpSize();
 
   const auto randomized_run_count = GENERATE(range(0, cmd_options.cg_iterations));
   const auto blocks = GenerateBlockDimensionsForShuffle();

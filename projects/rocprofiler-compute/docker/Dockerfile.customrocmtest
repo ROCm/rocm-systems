@@ -43,7 +43,7 @@ COPY projects/rocprofiler-compute/requirements-test.txt /app/projects/rocprofile
 RUN python -m pip install -r /app/projects/rocprofiler-compute/requirements.txt -r /app/projects/rocprofiler-compute/requirements-test.txt
 
 # Set the working directory
-WORKDIR /app
+WORKDIR /app/projects/rocprofiler-compute
 
 # Allows running git commands in /app
 RUN git config --global --add safe.directory /app

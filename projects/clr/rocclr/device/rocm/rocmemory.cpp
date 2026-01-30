@@ -1,4 +1,4 @@
-/* Copyright (c) 2008 - 2025 Advanced Micro Devices, Inc.
+/* Copyright (c) 2008 - 2026 Advanced Micro Devices, Inc.
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -230,6 +230,30 @@ hsa_status_t Memory::interopMapBuffer(hsa_handle_t fdn, hsa_interop_map_flag_t f
 // Setup an interop buffer (dmabuf handle) as an OpenCL buffer
 // ================================================================================================
 bool Memory::createInteropBuffer(GLenum targetType, int miplevel) {
+  assert(owner()->isInterop() && "Object is not an interop object.");
+
+  static constexpr size_t MaxMetadataSizeDwords = 64;
+  static constexpr size_t HeaderSizeDwords =
+      sizeof(hsa_amd_image_descriptor_t) / sizeof(uint32_t) - 1;
+
+  static_assert(alignof(hsa_amd_image_descriptor_t) == alignof(uint32_t),
+                "Unexpected alignment for hsa_amd_image_descriptor_t");
+  amdImageDesc_ = reinterpret_cast<hsa_amd_image_descriptor_t*>(
+      new uint32_t[MaxMetadataSizeDwords + HeaderSizeDwords]());
+
+  if (amdImageDesc_ == nullptr) {
+    return false;
+  }
+
+  hsa_agent_t agent = dev().getBackendDevice();
+  uint32_t id;
+  Hsa::agent_get_info(agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_CHIP_ID), &id);
+
+  static constexpr uint32_t DeviceIdVendorShift = 16u;
+
+  amdImageDesc_->version = 1;
+  amdImageDesc_->deviceID = (AmdVendor << DeviceIdVendorShift) | id;
+
 #if IS_WINDOWS
   hsa_handle_t handle;
   int offset;
@@ -240,8 +264,6 @@ bool Memory::createInteropBuffer(GLenum targetType, int miplevel) {
   deviceMemory_ = static_cast<char*>(interop_deviceMemory_) + offset;
   return true;
 #else
-  assert(owner()->isInterop() && "Object is not an interop object.");
-
   mesa_glinterop_export_in in = {0};
   mesa_glinterop_export_out out = {0};
 
@@ -255,18 +277,7 @@ bool Memory::createInteropBuffer(GLenum targetType, int miplevel) {
   else
     in.access = MESA_GLINTEROP_ACCESS_READ_WRITE;
 
-  hsa_agent_t agent = dev().getBackendDevice();
-  uint32_t id;
-  Hsa::agent_get_info(agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_CHIP_ID), &id);
-
-  static constexpr int MaxMetadataSizeDwords = 64;
   static constexpr int MaxMetadataSizeBytes = MaxMetadataSizeDwords * sizeof(int);
-  amdImageDesc_ = reinterpret_cast<hsa_amd_image_descriptor_t*>(new int[MaxMetadataSizeDwords + 2]);
-  if (amdImageDesc_ == nullptr) {
-    return false;
-  }
-  amdImageDesc_->version = 1;
-  amdImageDesc_->deviceID = AmdVendor << 16 | id;
 
   in.target = targetType;
   in.obj = owner()->getInteropObj()->asGLObject()->getGLName();
@@ -1570,7 +1581,7 @@ void Image::destroy() {
     return;
   }
 
-  delete[] amdImageDesc_;
+  delete[] reinterpret_cast<uint32_t*>(amdImageDesc_);
   amdImageDesc_ = nullptr;
 
   if (kind_ == MEMORY_KIND_INTEROP) {
