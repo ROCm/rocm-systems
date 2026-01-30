@@ -650,6 +650,14 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
         value->value.l_int = static_cast<int64_t>(partition_count);
       }
     } break;
+    case RDC_FI_KFD_ID: {
+      amdsmi_kfd_info_t kfd_info;
+      value->status = amdsmi_get_gpu_kfd_info(processor_handle, &kfd_info);
+      value->type = INTEGER;
+      if (value->status == AMDSMI_STATUS_SUCCESS) {
+        value->value.l_int = static_cast<int64_t>(kfd_info.kfd_id);
+      }
+    } break;
     case RDC_FI_POWER_USAGE: {
       amdsmi_power_info_t power_info = {};
       value->status = amdsmi_get_power_info(processor_handle, &power_info);
