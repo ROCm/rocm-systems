@@ -103,6 +103,13 @@ class cli_analysis(OmniAnalyze_Base):
         arch_config = self._arch_configs[gpu_arch]
 
         if getattr(args, "torch_operator", False) and workload.filter_torch_operators:
+            if not workload.filter_torch_operators:
+                console_error(
+                    "No torch operators found in the profiling data. "
+                    "Please ensure that profile mode is run with '--torch-trace' and"
+                    "analyze mode is run with '--list-torch-operators' flag"
+                    "before using '--torch-operator'."
+                )
             for op in workload.filter_torch_operators:
                 df = workload.torch_operators.get(op)
                 if df is not None:
