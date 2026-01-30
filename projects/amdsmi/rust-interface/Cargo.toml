@@ -45,8 +45,7 @@ name = "amdsmi_exporter"
 crate-type = ["bin"]
 
 [dev-dependencies]
-prometheus-client = "0.22.3"
-axum = "0.5"
-hyper = "0.14"
-clap = "3.0"
+prometheus-client = "0.23"
+axum = "0.8"
+clap = "4"
 tokio = { version = "1", features = ["full"] }
