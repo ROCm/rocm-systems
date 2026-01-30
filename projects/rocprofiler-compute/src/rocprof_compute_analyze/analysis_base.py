@@ -208,69 +208,17 @@ class OmniAnalyze_Base:
                 "with --torch-trace option.",
             )
             return
+        print(f"\n{'=' * 80}")
+        print(f"PyTorch Operators in: {workload_path}")
+        print(f"{'=' * 80}\n")
+        print(f"Found {len(all_operators)} operators:\n")
 
-        # Check if specific operators were requested
-        operator_filter = None
-        if hasattr(self.__args, "torch_operator") and self.__args.torch_operator:
-            # Flatten nested list
-            operator_filter = [
-                item for sublist in self.__args.torch_operator for item in sublist
-            ]
+        for i, op in enumerate(all_operators, 1):
+            print(f"  {i:3d}. {op}")
 
-        if operator_filter:
-            # Show operator→kernel mapping for selected operators
-            print(f"\n{'=' * 80}")
-            print("PyTorch Operator → Kernel Mapping")
-            print(f"{'=' * 80}\n")
-
-            for op_name in operator_filter:
-                op_file = torch_trace_dir / f"{op_name}.csv"
-                if not op_file.exists():
-                    console_warning(f"Operator not found: {op_name}")
-                    continue
-
-                try:
-                    df = pd.read_csv(op_file)
-                    if df.empty:
-                        print(f"\nOperator: {op_name}")
-                        print("  No data available")
-                        continue
-
-                    print(f"\nOperator: {op_name}")
-                    print(f"  Calls: {len(df)}")
-
-                    if "Kernel_Name" in df.columns:
-                        kernels = df["Kernel_Name"].unique()
-                        print(f"  Unique Kernels: {len(kernels)}")
-                        for i, kernel in enumerate(kernels[:10], 1):  # Show first 10
-                            print(f"    {i}. {kernel[:80]}")
-                        if len(kernels) > 10:
-                            print(f"    ... and {len(kernels) - 10} more")
-
-                    if "Duration" in df.columns:
-                        total_time = df["Duration"].sum()
-                        avg_time = df["Duration"].mean()
-                        print(f"  Total Time: {total_time:.2f} ns")
-                        print(f"  Avg Time: {avg_time:.2f} ns")
-
-                except Exception as e:
-                    console_warning(f"Error reading {op_name}: {e}")
-
-            print(f"\n{'=' * 80}\n")
-        else:
-            # List all operators
-            print(f"\n{'=' * 80}")
-            print(f"PyTorch Operators in: {workload_path}")
-            print(f"{'=' * 80}\n")
-            print(f"Found {len(all_operators)} operators:\n")
-
-            for i, op in enumerate(all_operators, 1):
-                print(f"  {i:3d}. {op}")
-
-            print(f"\n{'=' * 80}")
-            print(f"Total: {len(all_operators)} operators")
-            print(f"{'=' * 80}\n")
-
+        print(f"\n{'=' * 80}")
+        print(f"Total: {len(all_operators)} operators")
+        print(f"{'=' * 80}\n")
         sys.exit(0)
 
     @demarcate
