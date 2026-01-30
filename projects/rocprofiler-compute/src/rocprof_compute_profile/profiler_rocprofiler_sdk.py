@@ -32,6 +32,7 @@ from rocprof_compute_profile.profiler_base import RocProfCompute_Base
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils.logger import console_error, console_log, demarcate
 
+
 class rocprofiler_sdk_profiler(RocProfCompute_Base):
     def __init__(
         self,
