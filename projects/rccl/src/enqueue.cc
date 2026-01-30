@@ -2837,7 +2837,7 @@ static ncclResult_t p2pTaskAppend(
                                     : comm->p2pSchedule[round].recvRank)) {
         round += 1;
       }
-      uint8_t base = ncclP2pChannelBaseForRound(comm, round);
+      uint8_t base = ncclP2pChannelBaseForRound(comm, round, rcclParamP2pBatchEnable());
       for (int c=0; c < comm->p2pnChannelsPerPeer; c++) {
         int channelId = ncclP2pChannelForPart(comm->p2pnChannels, base, c, comm->p2pnChannelsPerPeer, comm->nNodes);
         if (isSendNotRecv) {
