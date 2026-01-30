@@ -48,6 +48,7 @@ hipError_t hipMemAddressFree(void* devPtr, size_t size) {
   if (!(g_devices[0]->devices()[0]->virtualFree(devPtr))) {
     status = hipErrorUnknown;
   }
+  amd::MemObjMap::RemoveVirtualMemObj(devPtr);
   memObj->release();
   HIP_RETURN(status);
 }
