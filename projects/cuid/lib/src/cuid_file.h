@@ -31,6 +31,102 @@
 #include <ctime>
 #include <cstring>
 #include <memory>
+#include <fcntl.h>
+#include <unistd.h>
+#include <cerrno>
+
+/**
+ * @brief Lock types for file operations
+ */
+enum class CuidLockType {
+    SHARED,     ///< Shared lock for reading (multiple readers allowed)
+    EXCLUSIVE   ///< Exclusive lock for writing (single writer, no readers)
+};
+
+/**
+ * @brief RAII-style file lock using fcntl() advisory locking
+ * 
+ * This class provides process-safe file locking for CUID files using POSIX
+ * fcntl() advisory locks. It creates a separate lock file (e.g., /tmp/cuid.lock)
+ * to synchronize access to the actual CUID data files.
+ * 
+ * Features:
+ * - POSIX compliant (works on NFS)
+ * - Supports shared (read) and exclusive (write) locks
+ * - Automatic lock release on destruction (RAII)
+ * - Blocking acquisition with timeout support
+ * 
+ * Usage:
+ *   // For reading
+ *   CuidFileLock lock("/tmp/cuid", CuidLockType::SHARED);
+ *   if (lock.acquire()) { ... read operations ... }
+ * 
+ *   // For writing
+ *   CuidFileLock lock("/tmp/cuid", CuidLockType::EXCLUSIVE);
+ *   if (lock.acquire()) { ... write operations ... }
+ */
+class CuidFileLock {
+public:
+    /**
+     * @brief Construct a file lock for the given CUID file path
+     * @param file_path Path to the CUID file (lock file will be file_path + ".lock")
+     * @param lock_type Type of lock to acquire (SHARED for read, EXCLUSIVE for write)
+     */
+    CuidFileLock(const std::string& file_path, CuidLockType lock_type);
+    
+    /**
+     * @brief Destructor - automatically releases the lock
+     */
+    ~CuidFileLock();
+    
+    // Non-copyable, non-movable (RAII resource)
+    CuidFileLock(const CuidFileLock&) = delete;
+    CuidFileLock& operator=(const CuidFileLock&) = delete;
+    CuidFileLock(CuidFileLock&&) = delete;
+    CuidFileLock& operator=(CuidFileLock&&) = delete;
+    
+    /**
+     * @brief Acquire the lock (blocking)
+     * @return true if lock was acquired successfully, false on error
+     */
+    bool acquire();
+    
+    /**
+     * @brief Acquire the lock with a timeout
+     * @param timeout_seconds Maximum time to wait for lock (0 = non-blocking, -1 = infinite)
+     * @return true if lock was acquired, false if timeout or error
+     */
+    bool acquire_with_timeout(int timeout_seconds);
+    
+    /**
+     * @brief Try to acquire the lock (non-blocking)
+     * @return true if lock was acquired, false if lock is held by another process
+     */
+    bool try_acquire();
+    
+    /**
+     * @brief Release the lock explicitly (also called by destructor)
+     */
+    void release();
+    
+    /**
+     * @brief Check if lock is currently held
+     * @return true if lock is held
+     */
+    bool is_locked() const { return is_locked_; }
+    
+    /**
+     * @brief Get the lock file path
+     * @return Path to the lock file
+     */
+    const std::string& get_lock_file_path() const { return lock_file_path_; }
+
+private:
+    std::string lock_file_path_;
+    CuidLockType lock_type_;
+    int lock_fd_;
+    bool is_locked_;
+};
 
 struct CuidFileEntry {
     amdcuid_device_type_t device_type;

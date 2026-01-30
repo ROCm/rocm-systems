@@ -36,6 +36,195 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <cstring>
+#include <fcntl.h>
+#include <cerrno>
+
+// ============================================================================
+// CuidFileLock Implementation
+// ============================================================================
+
+CuidFileLock::CuidFileLock(const std::string& file_path, CuidLockType lock_type)
+    : lock_file_path_(file_path + ".lock")
+    , lock_type_(lock_type)
+    , lock_fd_(-1)
+    , is_locked_(false)
+{
+}
+
+CuidFileLock::~CuidFileLock() {
+    release();
+}
+
+bool CuidFileLock::acquire() {
+    if (is_locked_) {
+        return true;  // Already locked
+    }
+
+    // Open or create the lock file
+    // Use O_CREAT to create if doesn't exist, O_RDWR for both read and write locks
+    lock_fd_ = open(lock_file_path_.c_str(), O_RDWR | O_CREAT, 0666);
+    if (lock_fd_ < 0) {
+        LOG(ERROR, "CuidFileLock: Failed to open lock file " << lock_file_path_ 
+            << ": " << strerror(errno));
+        return false;
+    }
+
+    // Set up the lock structure
+    struct flock fl;
+    memset(&fl, 0, sizeof(fl));
+    fl.l_whence = SEEK_SET;
+    fl.l_start = 0;
+    fl.l_len = 0;  // Lock entire file
+    fl.l_type = (lock_type_ == CuidLockType::EXCLUSIVE) ? F_WRLCK : F_RDLCK;
+
+    // F_SETLKW: blocking call - wait until lock is available
+    if (fcntl(lock_fd_, F_SETLKW, &fl) < 0) {
+        LOG(ERROR, "CuidFileLock: Failed to acquire lock on " << lock_file_path_ 
+            << ": " << strerror(errno));
+        close(lock_fd_);
+        lock_fd_ = -1;
+        return false;
+    }
+
+    is_locked_ = true;
+    LOG(DEBUG, "CuidFileLock: Acquired " 
+        << (lock_type_ == CuidLockType::EXCLUSIVE ? "exclusive" : "shared")
+        << " lock on " << lock_file_path_);
+    return true;
+}
+
+bool CuidFileLock::acquire_with_timeout(int timeout_seconds) {
+    // Special cases
+    if (timeout_seconds == 0) {
+        return try_acquire();  // Non-blocking
+    }
+    if (timeout_seconds < 0) {
+        return acquire();  // Infinite wait
+    }
+
+    if (is_locked_) {
+        return true;  // Already locked
+    }
+
+    // Open or create the lock file
+    lock_fd_ = open(lock_file_path_.c_str(), O_RDWR | O_CREAT, 0666);
+    if (lock_fd_ < 0) {
+        LOG(ERROR, "CuidFileLock: Failed to open lock file " << lock_file_path_ 
+            << ": " << strerror(errno));
+        return false;
+    }
+
+    // Set up the lock structure
+    struct flock fl;
+    memset(&fl, 0, sizeof(fl));
+    fl.l_whence = SEEK_SET;
+    fl.l_start = 0;
+    fl.l_len = 0;  // Lock entire file
+    fl.l_type = (lock_type_ == CuidLockType::EXCLUSIVE) ? F_WRLCK : F_RDLCK;
+
+    // Retry loop with timeout
+    const int retry_interval_ms = 50;  // 50ms between retries
+    const int max_retries = (timeout_seconds * 1000) / retry_interval_ms;
+    
+    for (int retry = 0; retry <= max_retries; ++retry) {
+        // Try non-blocking acquire
+        if (fcntl(lock_fd_, F_SETLK, &fl) == 0) {
+            is_locked_ = true;
+            LOG(DEBUG, "CuidFileLock: Acquired " 
+                << (lock_type_ == CuidLockType::EXCLUSIVE ? "exclusive" : "shared")
+                << " lock on " << lock_file_path_ << " after " << retry << " retries");
+            return true;
+        }
+
+        // Check if it's a "lock held" error vs real error
+        if (errno != EACCES && errno != EAGAIN) {
+            LOG(ERROR, "CuidFileLock: Failed to acquire lock on " << lock_file_path_ 
+                << ": " << strerror(errno));
+            close(lock_fd_);
+            lock_fd_ = -1;
+            return false;
+        }
+
+        // Wait before retry (unless this is the last iteration)
+        if (retry < max_retries) {
+            usleep(retry_interval_ms * 1000);  // Convert ms to microseconds
+        }
+    }
+
+    // Timeout reached
+    LOG(WARN, "CuidFileLock: Timeout after " << timeout_seconds 
+        << " seconds waiting for lock on " << lock_file_path_);
+    close(lock_fd_);
+    lock_fd_ = -1;
+    return false;
+}
+
+bool CuidFileLock::try_acquire() {
+    if (is_locked_) {
+        return true;  // Already locked
+    }
+
+    // Open or create the lock file
+    lock_fd_ = open(lock_file_path_.c_str(), O_RDWR | O_CREAT, 0666);
+    if (lock_fd_ < 0) {
+        LOG(ERROR, "CuidFileLock: Failed to open lock file " << lock_file_path_ 
+            << ": " << strerror(errno));
+        return false;
+    }
+
+    // Set up the lock structure
+    struct flock fl;
+    memset(&fl, 0, sizeof(fl));
+    fl.l_whence = SEEK_SET;
+    fl.l_start = 0;
+    fl.l_len = 0;  // Lock entire file
+    fl.l_type = (lock_type_ == CuidLockType::EXCLUSIVE) ? F_WRLCK : F_RDLCK;
+
+    // F_SETLK: non-blocking - return immediately if can't acquire
+    if (fcntl(lock_fd_, F_SETLK, &fl) < 0) {
+        if (errno == EACCES || errno == EAGAIN) {
+            // Lock is held by another process
+            LOG(DEBUG, "CuidFileLock: Lock on " << lock_file_path_ 
+                << " held by another process");
+        } else {
+            LOG(ERROR, "CuidFileLock: Failed to try_acquire lock on " << lock_file_path_ 
+                << ": " << strerror(errno));
+        }
+        close(lock_fd_);
+        lock_fd_ = -1;
+        return false;
+    }
+
+    is_locked_ = true;
+    LOG(DEBUG, "CuidFileLock: Acquired " 
+        << (lock_type_ == CuidLockType::EXCLUSIVE ? "exclusive" : "shared")
+        << " lock on " << lock_file_path_);
+    return true;
+}
+
+void CuidFileLock::release() {
+    if (!is_locked_ || lock_fd_ < 0) {
+        return;
+    }
+
+    // Unlock the file
+    struct flock fl;
+    memset(&fl, 0, sizeof(fl));
+    fl.l_whence = SEEK_SET;
+    fl.l_start = 0;
+    fl.l_len = 0;  // Unlock entire file
+    fl.l_type = F_UNLCK;
+
+    if (fcntl(lock_fd_, F_SETLK, &fl) < 0) {
+        LOG(ERROR, "CuidFileLock: Failed to release lock on " << lock_file_path_ 
+            << ": " << strerror(errno));
+    }
+
+    close(lock_fd_);
+    lock_fd_ = -1;
+    is_locked_ = false;
+    LOG(DEBUG, "CuidFileLock: Released lock on " << lock_file_path_);
+}
 
 // ============================================================================
 // CuidFile Implementation
@@ -118,6 +307,13 @@ bool CuidFile::parse_section_header(const std::string& line,
 
 amdcuid_status_t CuidFile::load() {
     entries_.clear();
+
+    // Acquire shared lock for reading
+    CuidFileLock lock(file_path_, CuidLockType::SHARED);
+    if (!lock.acquire()) {
+        LOG(ERROR, "CuidFile::load: Failed to acquire shared lock for " << file_path_);
+        return AMDCUID_STATUS_FILE_ERROR;
+    }
 
     std::ifstream file(file_path_);
     if (!file.is_open()) {
@@ -209,6 +405,13 @@ amdcuid_status_t CuidFile::load() {
 }
 
 amdcuid_status_t CuidFile::save() {
+    // Acquire exclusive lock for writing
+    CuidFileLock lock(file_path_, CuidLockType::EXCLUSIVE);
+    if (!lock.acquire()) {
+        LOG(ERROR, "CuidFile::save: Failed to acquire exclusive lock for " << file_path_);
+        return AMDCUID_STATUS_FILE_ERROR;
+    }
+
     // Create temporary file first for atomic write
     std::string temp_path = file_path_ + ".tmp";
     std::ofstream file(temp_path);
