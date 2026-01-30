@@ -25,13 +25,9 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Synced latest metric descriptions to public facing documentation
     * Updated metric units to be more human readable in public facing documentation
 
-* ``--output-directory`` option in profile mode to provide output directory for the profiling data. The directory can be parameterized with:
-  * ``%hostname%`` : The host name
-  * ``%gpumodel%`` : The GPU model
-  * ``%rank%``     : Rank of the MPI process
-  * ``%env{NAME}%``: The value of the environment variable `NAME`
+* ``--output-directory`` option in profile mode to provide parameterized output directory for the profiling data.
 
-* Detection of profiling with MPI and segmenting output directories based on MPI rank.
+* Detection of MPI ranks while profiling and creation of output directories based on MPI rank.
 
 ### Changed
 
