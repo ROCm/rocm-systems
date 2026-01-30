@@ -25,9 +25,7 @@
 #include "ce_coll.h"
 #include "nvtx.h"
 #include "scheduler.h"
-#ifndef DEVICE_LINKER
 #include "common.h"
-#endif
 #include "api_trace.h"
 #include "rccl_common.h"
 
@@ -48,16 +46,13 @@ struct ncclKernelMatch {
 };
 
 #if defined(DEVICE_LINKER)
-// Use experimental device linker
-__global__ void ncclDevKernel_Merged_1(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
-__global__ void ncclDevKernel_Merged_2(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
-__global__ void ncclDevKernel_Merged_4(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
-
+// Device linker mode: use standard generic kernels with indirect function call dispatch
+// The device linker populates ncclDevFuncTable_1/2/4 with specialized function pointers
 #define ncclGetKernelIndex(p_comm) ((p_comm)->unroll)
 static ncclKernelMatch const ncclKerns[3] = {
-  {(void*)ncclDevKernel_Merged_1, false},  // false = dispatch via funcId
-  {(void*)ncclDevKernel_Merged_2, false},
-  {(void*)ncclDevKernel_Merged_4, false}
+  {(void*)ncclDevKernel_Generic_1, true},
+  {(void*)ncclDevKernel_Generic_2, true},
+  {(void*)ncclDevKernel_Generic_4, true}
 };
 #else
 // Generic kernels (production build)
