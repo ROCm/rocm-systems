@@ -2027,9 +2027,10 @@ def load_non_mertrics_table(
     workload.dfs.update(tmp)
 
 @demarcate
-def load_torch_trace_data(workload, dir_path):
+def load_torch_trace_data(workload: schema.Workload, dir_path: str) -> None:
     """
-    Loads all torch operator CSVs from torch_trace directory into workload.torch_operators.
+    Loads all torch operator CSVs from torch_trace directory
+    into workload.torch_operators.
     """
     torch_trace_dir = Path(dir_path) / "torch_trace"
     workload.torch_operators = {}
@@ -2061,7 +2062,7 @@ def load_table_data(
 
     # Load torch operator trace data if present
     load_torch_trace_data(workload, dir_path)
-    
+
     eval_metric(
         workload.dfs,
         workload.dfs_type,
