@@ -973,7 +973,6 @@ def run_prof(
         )
         combined_df.to_csv(workload_dir + f"/results_{fbase}.csv", index=False)
         if torch_trace_enabled:
-            # process_torch_trace_output(workload_dir, fbase, format_rocprof_output)
             # move counter collection and marker trace to workload dir
             save_torch_trace_inputs(workload_dir, fbase, format_rocprof_output)
         if retain_rocpd_output:
@@ -1016,7 +1015,6 @@ def run_prof(
                 process_hip_trace_output(workload_dir, fbase)
         # Add torch operator trace processing
         if torch_trace_enabled:
-            # process_torch_trace_output(workload_dir, fbase, format_rocprof_output)
             # move counter collection and marker trace to workload dir
             save_torch_trace_inputs(workload_dir, fbase, format_rocprof_output)
         # Combine results into single CSV file
@@ -1319,7 +1317,6 @@ def save_torch_trace_inputs(
             f"Unknown output_format: {output_format}", "in save_torch_trace_inputs"
         )
 
-
 @demarcate
 def process_torch_trace_output(
     workload_dir: str,
@@ -1331,7 +1328,7 @@ def process_torch_trace_output(
     """
     # marker_trace_csv_file_path = f"{workload_dir}/out/pmc_1/"
     # Find all marker_api_trace CSV files
-
+    console_log("Looking for marker and counter csv files in ", workload_dir)
     marker_api_trace_csvs = list(Path(workload_dir).glob("**/*_marker_api_trace.csv"))
     counter_collection_csvs = [
         markers_file.parent
@@ -1343,10 +1340,20 @@ def process_torch_trace_output(
         for i in range(len(marker_api_trace_csvs))
         if counter_collection_csvs[i].is_file() and marker_api_trace_csvs[i].is_file()
     ]
-    if not existing_csv_files:
-        console_warning("No marker files with corresponding counter files found.")
+    if Path(f"{workload_dir}/torch_trace").exists() and not existing_csv_files:
+        console_log(f"Torch data has already been processed and saved to {workload_dir}/torch_trace")
         return
-
+    if not existing_csv_files:
+        console_warning(
+            "No marker files with corresponding counter files found for torch tracing."
+        )
+        return
+    #Delete existing torch_trace directory if present
+    if Path(f"{workload_dir}/torch_trace").exists():
+        shutil.rmtree(Path(f"{workload_dir}/torch_trace"))
+        console_log(
+            f"Removed previous torch_trace directory : {workload_dir}/torch_trace"
+        )
     # Join marker and counter data
     def _merge_pair(
         marker_path: Path,
