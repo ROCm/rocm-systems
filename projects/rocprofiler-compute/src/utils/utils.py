@@ -1347,8 +1347,9 @@ def process_torch_trace_output(
         for i in range(len(marker_api_trace_csvs))
         if counter_collection_csvs[i].is_file() and marker_api_trace_csvs[i].is_file()
     ]
-    if Path(f"{workload_dir}/torch_trace").exists() and not existing_csv_files:
         console_log(
+            f"Torch data has already been processed and saved to {workload_dir}/torch_trace"
+        )
             "Torch data has already been processed ",
             f"and saved to {workload_dir}/torch_trace",
         )
