@@ -97,7 +97,7 @@ in the following table.
 
     * - | ``NCCL_DEBUG_FILE``
         | Write logs to a file rather than ``stdout``.
-      - | The filename can be formatted using ``%h`` for hostname, ``%p`` for pid, and ``%%`` to escape the ``%`` character.    
+      - | The filename can be formatted using ``%h`` for hostname, ``%p`` for pid, and ``%%`` to escape the ``%`` character. It is recommended to use ``%p`` to output to individual files per pid to avoid mixing or potentially overwriting the output. Example usage: ``NCCL_DEBUG_FILE=debugfile.%h.%p``
 
 Algorithm and protocol control
 ==============================
