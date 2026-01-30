@@ -36,7 +36,7 @@ if(ROCPROFILER_BUILD_GHC_FS)
         INTERFACE $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/external/filesystem/include>)
 endif()
 
-if(ROCPROFILER_BUILD_TESTS)
+if(ROCPROFILER_BUILD_TESTS OR ROCPROFILER_THEROCK_PACKAGING)
     if(ROCPROFILER_BUILD_GTEST)
         # checkout submodule if not already checked out or clone repo if no .gitmodules
         # file

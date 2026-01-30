@@ -47,6 +47,6 @@ target_link_libraries(rocprofiler-sdk-expr-parser
 target_sources(rocprofiler-sdk-object-library
                PUBLIC $<TARGET_OBJECTS:rocprofiler-sdk-expr-parser>)
 
-if(ROCPROFILER_BUILD_TESTS)
+if(ROCPROFILER_BUILD_TESTS OR ROCPROFILER_THEROCK_PACKAGING)
     add_subdirectory(tests)
 endif()

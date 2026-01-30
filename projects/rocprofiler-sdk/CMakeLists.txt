@@ -124,7 +124,7 @@ include(rocprofiler_config_install_rocpd)
 include(rocprofiler_config_install_rocattach)
 include(rocprofiler_config_install_tests)
 
-if(ROCPROFILER_BUILD_TESTS)
+if(ROCPROFILER_BUILD_TESTS OR ROCPROFILER_THEROCK_PACKAGING)
     add_subdirectory(tests)
 endif()
 

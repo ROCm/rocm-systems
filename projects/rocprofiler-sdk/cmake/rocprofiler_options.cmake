@@ -36,6 +36,10 @@ rocprofiler_add_option(
 
 rocprofiler_add_option(ROCPROFILER_BUILD_TESTS "Enable building the tests"
                        ${ROCPROFILER_BUILD_CI})
+rocprofiler_add_option(
+    ROCPROFILER_THEROCK_PACKAGING
+    "TheRock packaging mode: build unit tests, install all tests, skip integration binaries"
+    OFF)
 rocprofiler_add_option(ROCPROFILER_BUILD_SAMPLES "Enable building the code samples"
                        ${ROCPROFILER_BUILD_CI})
 rocprofiler_add_option(ROCPROFILER_BUILD_BENCHMARK "Enable building the benchmarks" OFF)
@@ -65,7 +69,7 @@ rocprofiler_add_option(ROCPROFILER_BUILD_PYBIND11
                        "Enable building pybind11 library internally" ON)
 rocprofiler_add_option(ROCPROFILER_BUILD_GOTCHA
                        "Enable building gotcha library internally" ON)
-if(ROCPROFILER_BUILD_TESTS)
+if(ROCPROFILER_BUILD_TESTS OR ROCPROFILER_THEROCK_PACKAGING)
     rocprofiler_add_option(
         ROCPROFILER_BUILD_GTEST
         "Enable building gtest (Google testing) library internally" ON ADVANCED)

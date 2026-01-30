@@ -16,11 +16,54 @@ set(_DISABLED "@RAUT_DISABLED@")
 set(_ENVIRONMENT "@RAUT_ENVIRONMENT@")
 set(_PREFIX "@RAUT_TEST_PREFIX@")
 
+# Helper to merge/append environment overrides.
+set(_ENV_LIST ${_ENVIRONMENT})
+set(_NEW_ENV_LIST "")
+set(_LDLP_FOUND OFF)
+set(_METRICS_FOUND OFF)
+
+if(DEFINED ENV{ROCPROFILER_SDK_TEST_METRICS_PATH})
+    set(_METRICS_OVERRIDE "$ENV{ROCPROFILER_SDK_TEST_METRICS_PATH}")
+    if(NOT _METRICS_OVERRIDE MATCHES "^/")
+        set(_METRICS_OVERRIDE "/${_METRICS_OVERRIDE}")
+    endif()
+endif()
+
+foreach(_KV IN LISTS _ENV_LIST)
+    if(DEFINED ENV{ROCPROFILER_SDK_TEST_LD_LIBRARY_PATH} AND _KV MATCHES "^LD_LIBRARY_PATH=(.*)")
+        set(_LDLP_FOUND ON)
+        set(_KV "LD_LIBRARY_PATH=${CMAKE_MATCH_1}:$ENV{ROCPROFILER_SDK_TEST_LD_LIBRARY_PATH}")
+    endif()
+    if(DEFINED _METRICS_OVERRIDE AND _KV MATCHES "^ROCPROFILER_METRICS_PATH=(.*)")
+        set(_METRICS_FOUND ON)
+        set(_KV "ROCPROFILER_METRICS_PATH=${_METRICS_OVERRIDE}")
+    endif()
+    list(APPEND _NEW_ENV_LIST "${_KV}")
+endforeach()
+
+if(DEFINED ENV{ROCPROFILER_SDK_TEST_LD_LIBRARY_PATH} AND NOT _LDLP_FOUND)
+    list(APPEND _NEW_ENV_LIST "LD_LIBRARY_PATH=$ENV{ROCPROFILER_SDK_TEST_LD_LIBRARY_PATH}")
+endif()
+
+if(DEFINED ENV{ROCPROFILER_SDK_TEST_METRICS_PATH} AND NOT _METRICS_FOUND)
+    list(APPEND _NEW_ENV_LIST "ROCPROFILER_METRICS_PATH=${_METRICS_OVERRIDE}")
+endif()
+
+set(_ENVIRONMENT "${_NEW_ENV_LIST}")
+
 # test sources are in a subfolder
 set(_TEST_SOURCES)
 foreach(_FILE ${_SOURCES})
     list(APPEND _TEST_SOURCES "${CMAKE_CURRENT_LIST_DIR}/${_NAME}/${_FILE}")
 endforeach()
+
+# If the test target is not already defined (installed tree), create an IMPORTED
+# executable pointing at the installed binary.
+if(NOT TARGET ${_NAME})
+    add_executable(${_NAME} IMPORTED GLOBAL)
+    set_target_properties(${_NAME}
+                          PROPERTIES IMPORTED_LOCATION "${CMAKE_CURRENT_LIST_DIR}/bin/${_NAME}")
+endif()
 
 gtest_add_tests(
     TARGET @RAUT_TARGET@

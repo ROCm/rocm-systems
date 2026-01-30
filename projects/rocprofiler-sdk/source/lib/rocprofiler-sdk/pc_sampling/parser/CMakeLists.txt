@@ -14,6 +14,6 @@ target_sources(
     rocprofiler-sdk-object-library PRIVATE ${ROCPROFILER_LIB_PC_SAMPLING_PARSER_SOURCES}
                                            ${ROCPROFILER_LIB_PC_SAMPLING_PARSER_HEADERS})
 
-if(ROCPROFILER_BUILD_TESTS)
+if(ROCPROFILER_BUILD_TESTS OR ROCPROFILER_THEROCK_PACKAGING)
     add_subdirectory(tests)
 endif()

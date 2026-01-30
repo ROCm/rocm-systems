@@ -4,6 +4,6 @@ set(ROCPROFILER_LIB_AQL_HEADERS helpers.hpp packet_construct.hpp aql_profile_v2.
 target_sources(rocprofiler-sdk-object-library PRIVATE ${ROCPROFILER_LIB_AQL_SOURCES}
                                                       ${ROCPROFILER_LIB_AQL_HEADERS})
 
-if(ROCPROFILER_BUILD_TESTS)
+if(ROCPROFILER_BUILD_TESTS OR ROCPROFILER_THEROCK_PACKAGING)
     add_subdirectory(tests)
 endif()

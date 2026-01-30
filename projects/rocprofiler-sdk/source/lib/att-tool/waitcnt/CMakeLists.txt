@@ -8,6 +8,6 @@ set(ATT_TOOL_WAITCNT_HEADER_FILES analysis.hpp)
 target_sources(rocprofiler-sdk-att-parser PRIVATE ${ATT_TOOL_WAITCNT_SOURCE_FILES}
                                                   ${ATT_TOOL_WAITCNT_HEADER_FILES})
 
-if(ROCPROFILER_BUILD_TESTS)
+if(ROCPROFILER_BUILD_TESTS OR ROCPROFILER_THEROCK_PACKAGING)
     add_subdirectory(tests)
 endif()

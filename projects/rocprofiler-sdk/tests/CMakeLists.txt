@@ -37,6 +37,16 @@ include(GNUInstallDirs)
 # always use lib instead of lib64
 set(CMAKE_INSTALL_LIBDIR "lib")
 
+# In TheRock test packaging mode, skip integration binaries (unit tests are built from
+# source/lib).
+if(ROCPROFILER_THEROCK_PACKAGING)
+    message(
+        STATUS
+            "[rocprofiler-sdk-tests] ROCPROFILER_THEROCK_PACKAGING=ON; skipping integration test tree"
+        )
+    return()
+endif()
+
 # define the library output directory
 if(PROJECT_IS_TOP_LEVEL)
     set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}")
