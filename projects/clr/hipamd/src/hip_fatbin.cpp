@@ -477,12 +477,28 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
   guarantee(image_ != nullptr, "Image cannot be nullptr, file:%s did not map for some reason",
             fname_.c_str());
 
-  bool is_compressed = IsCodeObjectCompressed(image_),
-       is_uncompressed = IsCodeObjectUncompressed(image_);
+  // Check for empty or too-small image to avoid buffer overread in magic string comparisons.
+  constexpr size_t kCompressedMagicSize = sizeof(symbols::kOffloadBundleCompressedMagicStr) - 1;
+  constexpr size_t kUncompressedMagicSize = sizeof(symbols::kOffloadBundleUncompressedMagicStr) - 1;
+  constexpr size_t kElfHeaderSize = sizeof(amd::Elf64_Ehdr);
 
-  // It better be elf if its neither compressed nor uncompressed
+  size_t image_len = strlen(reinterpret_cast<const char*>(image_));
+  if (image_len < kCompressedMagicSize) {
+    LogPrintfError("Image too small (size %zu < %zu bytes) - invalid image", image_len, kCompressedMagicSize);
+    return hipErrorInvalidImage;
+  }
+
+  bool is_compressed = IsCodeObjectCompressed(image_);
+
+  // Only check uncompressed if not compressed AND size is sufficient
+  bool is_uncompressed = false;
+  if (!is_compressed && image_len >= kUncompressedMagicSize) {
+    is_uncompressed = IsCodeObjectUncompressed(image_);
+  }
+
   if (!is_compressed && !is_uncompressed) {
-    if (IsCodeObjectElf(image_)) {
+    // Only check ELF if size is sufficient
+    if (image_len >= kElfHeaderSize && IsCodeObjectElf(image_)) {
       // Load the binary directly
       auto elf_size = amd::Elf::getElfSize(image_);
       for (size_t i = 0; i < devices.size(); i++) {
