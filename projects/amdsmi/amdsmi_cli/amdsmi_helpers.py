@@ -1380,7 +1380,7 @@ class AMDSMIHelpers():
 
         # Use os.access to check read permission (including ACLs), so that
         # permissions granted via mechanisms like udev/uaccess are respected.
-        if os.access(path, os.R_OK):
+        if os.access(path, os.R_OK, effective_ids=True):
             return True, None, None
 
         mode = st.st_mode
