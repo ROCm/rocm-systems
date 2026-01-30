@@ -57,6 +57,7 @@ from utils.utils import (
     set_locale_encoding,
 )
 
+
 class RocProfCompute:
     def __init__(self) -> None:
         self.__args: Optional[argparse.Namespace] = None

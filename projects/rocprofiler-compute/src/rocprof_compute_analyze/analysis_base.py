@@ -52,8 +52,9 @@ from utils.utils import (
     impute_counters_iteration_multiplex,
     is_workload_empty,
     merge_counters_spatial_multiplex,
+    process_torch_trace_output,
 )
-from utils.utils import process_torch_trace_output
+
 # the build-in config to list kernel names purpose only
 TOP_STATS_BUILD_IN_CONFIG: OrderedDict[int, dict[str, Any]] = OrderedDict([
     (
@@ -191,45 +192,53 @@ class OmniAnalyze_Base:
     def list_torch_operators(self) -> None:
         """List PyTorch operators or show operator-to-kernel mapping and exit."""
         if not self.__args.path or not self.__args.path[0]:
-            console_error("--list-torch-operators or --torch-operator requires --path to be specified")
-        
-        workload_path = self.__args.path[0][0] if isinstance(self.__args.path[0], list) else self.__args.path[0]
+            console_error("'--path' to be specified")
+        workload_path = (
+            self.__args.path[0][0]
+            if isinstance(self.__args.path[0], list)
+            else self.__args.path[0]
+            )
         process_torch_trace_output(workload_path)
         torch_trace_dir = Path(workload_path) / "torch_trace"
         all_operators = sorted([f.stem for f in torch_trace_dir.glob("*.csv")])
         if not all_operators:
             console_warning("No PyTorch operator data found",
-                            "please ensure profiling was done with --torch-trace option.")
+                            "please ensure profiling was done ",
+                            "with --torch-trace option.")
             return
-        
+
         # Check if specific operators were requested
         operator_filter = None
         if hasattr(self.__args, 'torch_operator') and self.__args.torch_operator:
             # Flatten nested list
-            operator_filter = [item for sublist in self.__args.torch_operator for item in sublist]
-        
+            operator_filter = [
+                item
+                for sublist in self.__args.torch_operator
+                for item in sublist
+                ]
+
         if operator_filter:
             # Show operator→kernel mapping for selected operators
             print(f"\n{'='*80}")
-            print(f"PyTorch Operator → Kernel Mapping")
+            print("PyTorch Operator → Kernel Mapping")
             print(f"{'='*80}\n")
-            
+
             for op_name in operator_filter:
                 op_file = torch_trace_dir / f"{op_name}.csv"
                 if not op_file.exists():
                     console_warning(f"Operator not found: {op_name}")
                     continue
-                
+
                 try:
                     df = pd.read_csv(op_file)
                     if df.empty:
                         print(f"\nOperator: {op_name}")
                         print("  No data available")
                         continue
-                    
+
                     print(f"\nOperator: {op_name}")
                     print(f"  Calls: {len(df)}")
-                    
+
                     if "Kernel_Name" in df.columns:
                         kernels = df["Kernel_Name"].unique()
                         print(f"  Unique Kernels: {len(kernels)}")
@@ -237,16 +246,16 @@ class OmniAnalyze_Base:
                             print(f"    {i}. {kernel[:80]}")
                         if len(kernels) > 10:
                             print(f"    ... and {len(kernels) - 10} more")
-                    
+
                     if "Duration" in df.columns:
                         total_time = df["Duration"].sum()
                         avg_time = df["Duration"].mean()
                         print(f"  Total Time: {total_time:.2f} ns")
                         print(f"  Avg Time: {avg_time:.2f} ns")
-                
+
                 except Exception as e:
                     console_warning(f"Error reading {op_name}: {e}")
-            
+
             print(f"\n{'='*80}\n")
         else:
             # List all operators
@@ -254,14 +263,14 @@ class OmniAnalyze_Base:
             print(f"PyTorch Operators in: {workload_path}")
             print(f"{'='*80}\n")
             print(f"Found {len(all_operators)} operators:\n")
-            
+
             for i, op in enumerate(all_operators, 1):
                 print(f"  {i:3d}. {op}")
-            
+
             print(f"\n{'='*80}")
             print(f"Total: {len(all_operators)} operators")
             print(f"{'='*80}\n")
-        
+
         sys.exit(0)
 
     @demarcate
