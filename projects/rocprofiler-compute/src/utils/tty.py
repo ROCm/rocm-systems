@@ -242,12 +242,13 @@ def is_roofline_shown(
         show_roof_plot(roof_plot)
     return True
 
-def show_torch_operator_hierarchy(operator_name: str , df: pd.DataFrame) -> None:
+
+def show_torch_operator_hierarchy(operator_name: str, df: pd.DataFrame) -> None:
     """
     Display the hierarchy for each unique operator name in the DataFrame.
     """
     print("\n" + "-" * 80)
-    print("Torch Operator Hierarchy for",operator_name)
+    print("Torch Operator Hierarchy for", operator_name)
     if df is not None and not df.empty and "Operator_Name" in df.columns:
         unique_ops = df["Operator_Name"].unique()
         for op in unique_ops:
@@ -258,6 +259,7 @@ def show_torch_operator_hierarchy(operator_name: str , df: pd.DataFrame) -> None
             print()
     else:
         print("No operator names found in data.")
+
 
 def process_table_data(
     args: argparse.Namespace,

@@ -1321,6 +1321,7 @@ def save_torch_trace_inputs(
             f"Unknown output_format: {output_format}", "in save_torch_trace_inputs"
         )
 
+
 @demarcate
 def process_torch_trace_output(
     workload_dir: str,
@@ -1345,20 +1346,23 @@ def process_torch_trace_output(
         if counter_collection_csvs[i].is_file() and marker_api_trace_csvs[i].is_file()
     ]
     if Path(f"{workload_dir}/torch_trace").exists() and not existing_csv_files:
-        console_log("Torch data has already been processed ",
-                    f"and saved to {workload_dir}/torch_trace")
+        console_log(
+            "Torch data has already been processed ",
+            f"and saved to {workload_dir}/torch_trace",
+        )
         return
     if not existing_csv_files:
         console_warning(
             "No marker files with corresponding counter files found for torch tracing."
         )
         return
-    #Delete existing torch_trace directory if present
+    # Delete existing torch_trace directory if present
     if Path(f"{workload_dir}/torch_trace").exists():
         shutil.rmtree(Path(f"{workload_dir}/torch_trace"))
         console_log(
             f"Removed previous torch_trace directory : {workload_dir}/torch_trace"
         )
+
     # Join marker and counter data
     def _merge_pair(
         marker_path: Path,
