@@ -1311,7 +1311,7 @@ def save_torch_trace_inputs(
         for src_counter in counter_files:
             dst_counter = str(Path(workload_dir) / f"{fbase}" / Path(src_counter).name)
             shutil.copyfile(src_counter, dst_counter)
-            console_log("Copied Counter Collection: ", dst_counter)
+            console_log(f"Copied Counter Collection: {dst_counter}")
         for src_marker in marker_files:
             dst_marker = str(Path(workload_dir) / f"{fbase}" / Path(src_marker).name)
             shutil.copyfile(src_marker, dst_marker)
