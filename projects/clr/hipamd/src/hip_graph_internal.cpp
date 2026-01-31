@@ -230,9 +230,9 @@ void Graph::ScheduleOneNode(Node start, int stream_id) {
       end_of_branch = false;
     }
 
-     if (end_of_branch) {
-        // Finished one depth traversal (one branch). Rotate for the next sibling/branch.
-        sid = (sid + 1) % DEBUG_HIP_FORCE_GRAPH_QUEUES;
+    if (end_of_branch) {
+      // Finished one depth traversal (one branch). Rotate for the next sibling/branch.
+      sid = (sid + 1) % DEBUG_HIP_FORCE_GRAPH_QUEUES;
     }
   }
 }
