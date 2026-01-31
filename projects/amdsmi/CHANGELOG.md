@@ -121,7 +121,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - New C++ API added:
     - amdsmi_get_supported_power_cap(): Returns which power cap types are supported on the device (PPT0, PPT1). This will allow users to know which power cap types they can get/set.
     - Original APIs remain the same but now can get/set both PPT0 and PPT1 limits (on supported hardware):
-      - amdsmi_get_power_cap_info() 
+      - amdsmi_get_power_cap_info()
       - amdsmi_set_power_cap()
   - New C++ type added:
     - `amdsmi_power_cap_type_t`: The power cap type, either PPT0 or PPT1
@@ -161,8 +161,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
    ...
   ```
 
-- **`amd-smi set --power-cap` now requires sepcification of the power cap type**.  
+- **`amd-smi set --power-cap` now accepts sepcification of the power cap type**.  
   - Command now takes the form: `amd-smi set --power-cap <power-cap-type> <new-cap>`
+  - Default power cap type will be ppt0
   - Acceptable power cap types are "ppt0" and "ppt1"
 
   ```console
@@ -175,8 +176,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **`amd-smi reset --power-cap` will attempt to reset both power caps**.  
   - When using the reset command, both PPT0 and PPT1 power caps will be reset to their default values. If a device only has PPT0, then only PPT0 will be reset.  
     Ex.
+
     ```console
-    $ sudo amd-smi reset --power-cap ppt1 1150
+    $ sudo amd-smi reset --power-cap
     GPU: 0
       POWERCAP:
           PPT0: Successfully reset power cap to 203W
