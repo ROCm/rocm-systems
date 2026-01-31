@@ -189,7 +189,6 @@ void Graph::ScheduleOneNode(Node start, int stream_id) {
 
   // stack of pending nodes for DFS
   std::vector<Node> pending;
-  pending.reserve(64);
   pending.push_back(start);
 
   int sid = stream_id;
@@ -199,49 +198,42 @@ void Graph::ScheduleOneNode(Node start, int stream_id) {
     pending.pop_back();
 
     // Skip if already scheduled
-    if (cur->stream_id_ != -1) continue;
+    if (cur->stream_id_ != -1) {
+      continue;
+    }
+   
+    // Schedule current node on this branch's stream
+    cur->stream_id_ = sid;
 
-    // Walk one depth path with a FIXED sid
-    while (cur && cur->stream_id_ == -1) {
-      // Schedule current node on this branch's stream
-      cur->stream_id_ = sid;
-      max_streams_ = std::max(max_streams_, sid + 1);
-      streams_dev_ids_[sid].insert(cur->dev_id_);
+    max_streams_ = std::max(max_streams_, sid + 1);
+    streams_dev_ids_[sid].insert(cur->dev_id_);
 
-      // Process child graph separately, since, there is no connection
-      if (cur->GetType() == hipGraphNodeTypeGraph) {
-        auto cgn   = reinterpret_cast<hip::ChildGraphNode*>(cur);
-        auto child = cgn->GetChildGraph();
-        hipError_t status = child->ScheduleNodes();
-        (void)status;
-        max_streams_ = std::max(max_streams_, child->max_streams_);
-        cgn->GraphExec::TopologicalOrder();
-      }
-
-      const auto& edges = cur->GetEdges();
-
-      // Choose a "primary" next edge to continue the depth walk.
-      // Push other edges as sibling branches to do later (with rotated stream ids).
-      Node next = nullptr;
-
-      // To preserve left-to-right behavior, push siblings in reverse so the earlier
-      // edges get processed first.
-      for (int i = static_cast<int>(edges.size()) - 1; i >= 0; --i) {
-        Node e = edges[static_cast<size_t>(i)];
-        if (e->stream_id_ != -1) continue;
-
-        if (!next) {
-          next = e; // last unscheduled seen becomes primary (because reverse loop)
-        } else {
-          pending.push_back(e); // sibling branch start
-        }
-      }
-
-      cur = next; // continue down the primary chain
+    // Process child graph separately, since, there is no connection
+    if (cur->GetType() == hipGraphNodeTypeGraph) {
+      auto cgn   = reinterpret_cast<hip::ChildGraphNode*>(cur);
+      auto child = cgn->GetChildGraph();
+      hipError_t status = child->ScheduleNodes();
+      (void)status;
+      max_streams_ = std::max(max_streams_, child->max_streams_);
+      cgn->GraphExec::TopologicalOrder();
     }
 
-    // Finished one depth traversal (one branch). Rotate for the next sibling/branch.
-    sid = (sid + 1) % DEBUG_HIP_FORCE_GRAPH_QUEUES;
+    const auto& edges = cur->GetEdges();
+    bool end_of_branch = true;
+
+    // To preserve left-to-right behavior, push siblings in reverse so the earlier
+    // edges get processed first.
+    for (int i = static_cast<int>(edges.size()) - 1; i >= 0; --i) {
+      Node e = edges[static_cast<size_t>(i)];
+      if (e->stream_id_ != -1) continue;
+      pending.push_back(e);
+      end_of_branch = false;
+    }
+
+     if (end_of_branch) {
+        // Finished one depth traversal (one branch). Rotate for the next sibling/branch.
+        sid = (sid + 1) % DEBUG_HIP_FORCE_GRAPH_QUEUES;
+    }
   }
 }
 
@@ -525,7 +517,6 @@ void Graph::FindPathsDFS(Node start, std::vector<Node>& current_path,
 
   // Stack of nodes to process.
   std::vector<Node> st;
-  st.reserve(64);
   st.push_back(start);
 
   while (!st.empty()) {
