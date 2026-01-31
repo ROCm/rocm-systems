@@ -4929,9 +4929,13 @@ class AMDSMICommands():
             if isinstance(args.ptl_status, int):
                 status_string = "Enabled" if args.ptl_status else "Disabled"
                 result = f"Requested PTL status to {status_string}" # This should not print out
-                try: # Due to driver requirements, do NOT check current state. Set state regardless of current state.
-                    amdsmi_interface.amdsmi_set_gpu_ptl_state(args.gpu, args.ptl_status)
-                    result = f"Successfully set PTL state to {status_string}"
+                try:
+                    current_state = amdsmi_interface.amdsmi_get_gpu_ptl_state(args.gpu)
+                    if current_state == args.ptl_status:
+                        result = f"PTL state is already {status_string}"
+                    else:
+                        amdsmi_interface.amdsmi_set_gpu_ptl_state(args.gpu, args.ptl_status)
+                        result = f"Successfully set PTL state to {status_string}"
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                         raise PermissionError('Command requires elevation') from e
