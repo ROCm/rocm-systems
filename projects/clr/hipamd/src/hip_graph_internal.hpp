@@ -717,7 +717,8 @@ class Graph {
   //! Find execution paths hierarchically, keeping child graphs separate
   GraphExecutionPaths FindExecutionPathsHierarchical();
 
-  //! Recursively find all paths from a node with hierarchical child graph handling
+  //! Find all paths from a node using an explicit DFS over a node stack, with
+  //! hierarchical handling of child graphs (only child graphs recurse)
   void FindPathsDFS(Node node, std::vector<Node>& current_path,
                     std::unordered_set<unsigned int>& visited, GraphExecutionPaths& graph_paths);
 
