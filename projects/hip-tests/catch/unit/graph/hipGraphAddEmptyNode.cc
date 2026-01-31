@@ -24,6 +24,7 @@ Testcase Scenarios :
  * Functional Test to add empty node with dependencies
  */
 HIP_TEST_CASE(Unit_hipGraphAddEmptyNode_Functional) {
+  HIP_CHECK(hipSetDevice(0));
   char* pOutBuff_d{};
   constexpr size_t size = 1024;
   hipGraph_t graph{};
@@ -54,6 +55,7 @@ HIP_TEST_CASE(Unit_hipGraphAddEmptyNode_Functional) {
  * Negative Scenarios hipGraphAddEmptyNode
  */
 HIP_TEST_CASE(Unit_hipGraphAddEmptyNode_NegTest) {
+  HIP_CHECK(hipSetDevice(0));
   char* pOutBuff_d{};
   constexpr size_t size = 1024;
   hipGraph_t graph;
@@ -112,10 +114,15 @@ static void validateOutData(int* A1_h, int* A2_h, size_t N) {
  * Functional Test to use empty node as barrier to wait for multiple nodes.
  */
 HIP_TEST_CASE(Unit_hipGraphAddEmptyNode_BarrierFunc) {
+  HIP_CHECK(hipSetDevice(0));
   size_t size = 1024;
   constexpr auto blocksPerCU = 6;
   constexpr auto threadsPerBlock = 256;
   unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, size);
+  const unsigned int max_grid_dim_x = GetDeviceAttribute(hipDeviceAttributeMaxGridDimX, 0);
+  if (blocks > max_grid_dim_x) {
+    blocks = max_grid_dim_x;
+  }
   hipGraph_t graph;
   std::vector<hipGraphNode_t> nodeDependencies;
   HIP_CHECK(hipGraphCreate(&graph, 0));
@@ -211,6 +218,7 @@ HIP_TEST_CASE(Unit_hipGraphAddEmptyNode_BarrierFunc) {
   for (int iter = 0; iter < TEST_LOOP_SIZE; iter++) {
     fillRandInpData(inputVec_h1, inputVec_h2, inputVec_h3, size);
     HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph));
+    HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipStreamSynchronize(streamForGraph));
     validateOutData(inputVec_h1, outputVec_h1, size);
     validateOutData(inputVec_h2, outputVec_h2, size);

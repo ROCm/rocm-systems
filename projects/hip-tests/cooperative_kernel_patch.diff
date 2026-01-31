@@ -1,0 +1,24 @@
+diff --git a/projects/hip-tests/catch/unit/executionControl/hipLaunchCooperativeKernel.cc b/projects/hip-tests/catch/unit/executionControl/hipLaunchCooperativeKernel.cc
+index a940c9fe8e..e525b84a63 100644
+--- a/projects/hip-tests/catch/unit/executionControl/hipLaunchCooperativeKernel.cc
++++ b/projects/hip-tests/catch/unit/executionControl/hipLaunchCooperativeKernel.cc
+@@ -183,16 +183,17 @@ TEST_CASE("Unit_hipLaunchCooperativeKernel_Verify_Capture") {
+     HipTest::HIP_SKIP_TEST("CooperativeLaunch not supported");
+     return;
+   }
++  HIP_CHECK(hipSetDevice(0));
+ 
+   hipStream_t stream;
+   HIP_CHECK(hipStreamCreate(&stream));
+ 
+   GENERATE_CAPTURE();
++  std::cout << "Capturing stream" << std::endl;
+   BEGIN_CAPTURE(stream);
++  std::cout << "Launching cooperative kernel" << std::endl;
+   HIP_CHECK(hipLaunchCooperativeKernel(reinterpret_cast<void*>(coop_kernel), dim3{2, 2, 1},
+                                        dim3{1, 1, 1}, nullptr, 0, stream));
+   END_CAPTURE(stream);
+-
+-  HIP_CHECK(hipDeviceSynchronize());
+   HIP_CHECK(hipStreamDestroy(stream));
+ }
