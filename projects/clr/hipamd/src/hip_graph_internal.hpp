@@ -688,7 +688,7 @@ class Graph {
   void RemoveUserObjGraph(UserObject* pUserObj) { graphUserObj_.erase(pUserObj); }
 
   //! Schedules one node on a vitual stream.
-  //! It will also process the nodes in edges, using recursion
+  //! It will also process the nodes in edges, using DFS
   void ScheduleOneNode(Node node,     //!< Node for scheduling on a virtual stream
                        int stream_id  //!< Current active virtual stream to use for scheduling
   );
