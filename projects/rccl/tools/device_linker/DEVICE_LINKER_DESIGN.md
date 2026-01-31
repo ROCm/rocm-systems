@@ -1,4 +1,7 @@
-# Device Linker Design Notes
+# Device Linker Design
+
+## TODO
+- [ ] Default GPU target should be auto-detected from system (e.g., `rocminfo`) rather than hardcoded to gfx942 Notes
 
 ## Goal
 Reduce kernel launch latency by using a "pure specialized kernel approach" with a custom device linker to achieve fast build times.
