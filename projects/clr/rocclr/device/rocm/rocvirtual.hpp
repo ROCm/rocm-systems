@@ -469,8 +469,21 @@ class VirtualGPU : public device::VirtualDevice {
 #if defined(_WIN32)
   //! Wake up the device queue monitor thread when scheduler enqueues a kernel
   void WakeupDeviceQueueMonitor() {
-    if (monitorThreadRunning_) {
-      monitor_cv_.notify_one();
+    if (monitorThreadRunning_.load(std::memory_order_relaxed)) {
+      ClPrint(amd::LOG_DEBUG, amd::LOG_QUEUE,
+              "Waking up device queue monitor thread for queue: %p", schedulerQueue_);
+      // Ensure all scheduler kernel operations are visible before wakeup
+      std::atomic_thread_fence(std::memory_order_seq_cst);
+
+      {
+        std::lock_guard<std::mutex> lock(monitor_mutex_);
+        monitor_cv_.notify_one();
+      }
+      ClPrint(amd::LOG_DEBUG, amd::LOG_QUEUE,
+        "Notification sent to wake up monitor thread for queue: %p", schedulerQueue_);
+    } else {
+      ClPrint(amd::LOG_DEBUG, amd::LOG_QUEUE,
+              "Monitor thread not running, cannot wake up for queue: %p", schedulerQueue_);
     }
   }
 

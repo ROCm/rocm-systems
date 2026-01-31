@@ -3483,11 +3483,14 @@ bool VirtualGPU::createSchedulerParam() {
 #if defined(_WIN32)
 void VirtualGPU::StartDeviceQueueMonitorThread(hsa_queue_t* queue) {
   if (queue == nullptr) {
+    LogError("StartDeviceQueueMonitorThread: queue is null");
     return;
   }
   if (monitorThreadRunning_.load(std::memory_order_relaxed)) {
+    LogError("StartDeviceQueueMonitorThread: monitor thread already running");
     return;
   }
+
   monitorThreadRunning_.store(true, std::memory_order_relaxed);
 
   deviceQueueMonitorThread_ = std::thread([this]() {
@@ -3500,22 +3503,43 @@ void VirtualGPU::StartDeviceQueueMonitorThread(hsa_queue_t* queue) {
         std::unique_lock<std::mutex> lock(monitor_mutex_);
         monitor_cv_.wait(lock);
       }
+      ClPrint(amd::LOG_DEBUG, amd::LOG_QUEUE, "Monitor thread woke up");
 
       if (!monitorThreadRunning_.load(std::memory_order_relaxed)) {
+        ClPrint(amd::LOG_DEBUG, amd::LOG_QUEUE, "Monitor thread terminated");
         break;
       }
 
       if (schedulerQueue_ != nullptr) {
-        uint64_t read_index = Hsa::queue_load_read_index_scacquire(schedulerQueue_);
-        uint64_t write_index = Hsa::queue_load_write_index_relaxed(schedulerQueue_);
+        std::atomic_thread_fence(std::memory_order_seq_cst);
 
-        // Process if there are pending packets in the scheduler queue
-        if (read_index != write_index) {
-          ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL,
-                  "Pending packets detected in scheduler queue, "
-                  "ring the doorbell - read=%lu, write=%lu", read_index, write_index);
-          // Ring the doorbell
-          Hsa::signal_store_screlease(schedulerQueue_->doorbell_signal, write_index - 1);
+        // After wakeup, poll for some time to check for new packets.
+        constexpr int kTotalIterations = 100;
+        int poll_iterations = 0;
+        uint64_t last_processed_write = 0;
+
+        while (monitorThreadRunning_.load(std::memory_order_relaxed)) {
+          // Read queue indices with proper memory ordering
+          uint64_t read_index = Hsa::queue_load_read_index_scacquire(schedulerQueue_);
+          uint64_t write_index = Hsa::queue_load_write_index_scacquire(schedulerQueue_);
+          ClPrint(amd::LOG_DEBUG, amd::LOG_QUEUE, "Monitor thread read=%llu, write=%llu, last_processed=%llu",
+                  read_index, write_index, last_processed_write);
+
+          if (write_index > 0 && write_index > read_index && write_index > last_processed_write) {
+            ClPrint(amd::LOG_DEBUG, amd::LOG_QUEUE, "Processing new packets - write_index=%llu", write_index);
+
+            // Ring doorbell if there is new work
+            Hsa::signal_store_screlease(schedulerQueue_->doorbell_signal, write_index);
+            last_processed_write = write_index;
+            poll_iterations = 0;
+          } else {
+            // No new packets to process, wait for wakeup
+            if (++poll_iterations >= kTotalIterations) {
+              ClPrint(amd::LOG_DEBUG, amd::LOG_QUEUE, "No packets after %d polls, waiting for wakeup", poll_iterations);
+              break;
+            }
+            amd::Os::sleep(1);
+          }
         }
       }
     }
