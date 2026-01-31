@@ -503,7 +503,7 @@ void Graph::FindPathsDFS(Node start, std::vector<Node>& current_path,
                          std::unordered_set<unsigned int>& visited,
                          hip::Graph::GraphExecutionPaths& graph_paths) {
   // Lambda to save current path as a HierarchicalPath
-  auto savePath = [&graph_paths](const std::vector<Node> path, int device_id,
+  auto savePath = [&graph_paths](std::vector<Node> path, int device_id,
                                   Node child_node = nullptr, int child_index = -1) {
     hip::Graph::HierarchicalPath h_path;
     h_path.nodes = std::move(path);
