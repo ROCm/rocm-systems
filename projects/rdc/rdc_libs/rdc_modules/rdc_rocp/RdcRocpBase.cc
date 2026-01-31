@@ -108,6 +108,7 @@ static const std::map<rdc_field_t, const char*> temp_field_map_k = {
     {RDC_FI_PROF_CPF_CPF_TCIU_IDLE, "CPF_CPF_TCIU_IDLE"},
     {RDC_FI_PROF_CPF_CPF_TCIU_STALL, "CPF_CPF_TCIU_STALL"},
     {RDC_FI_PROF_SIMD_UTILIZATION, "SIMD_UTILIZATION"},
+    {RDC_FI_PROF_KFD_ID, "SQ_WAVES"},  // dummy value,
 };
 
 double RdcRocpBase::run_profiler(uint32_t agent_index, rdc_field_t field) {
@@ -558,6 +559,12 @@ rdc_status_t RdcRocpBase::apply_field_transformation(
       }
       output->dbl = divided_dbl / (256.0F / static_cast<double>(agents[agent_index].simd_per_cu));
       break;
+
+    case RDC_FI_PROF_KFD_ID:
+      *type = INTEGER;
+      output->l_int = agents[agent_index].gpu_id;
+      break;
+
     default:
       if (is_eval_field) {
         output->dbl = divided_dbl;
