@@ -28,12 +28,16 @@ GPU_TARGET_FULL="${2:-${GPU_TARGET:-gfx942}}"
 # Strip feature flags for -target-cpu (e.g., gfx942:xnack+:sramecc+ -> gfx942)
 GPU_TARGET=$(echo "$GPU_TARGET_FULL" | sed 's/:.*$//')
 # Keep full target for bundler (e.g., gfx942:sramecc+:xnack+)
-GPU_TARGET_FEATURES=$(echo "$GPU_TARGET_FULL" | sed 's/^[^:]*://' | tr ':' '\n' | sort | tr '\n' ':' | sed 's/:$//')
-if [ -n "$GPU_TARGET_FEATURES" ]; then
-    BUNDLE_TARGET="hipv4-amdgcn-amd-amdhsa--${GPU_TARGET}:${GPU_TARGET_FEATURES}"
+# Extract features after the first colon (if any)
+if [[ "$GPU_TARGET_FULL" == *:* ]]; then
+    GPU_TARGET_FEATURES=$(echo "$GPU_TARGET_FULL" | sed 's/^[^:]*://' | tr ':' '\n' | sort | tr '\n' ':' | sed 's/:$//')
 else
-    BUNDLE_TARGET="hipv4-amdgcn-amd-amdhsa--${GPU_TARGET}"
+    GPU_TARGET_FEATURES=""
 fi
+if [ -z "$GPU_TARGET_FEATURES" ]; then
+    GPU_TARGET_FEATURES="sramecc+:xnack-"
+fi
+BUNDLE_TARGET="hipv4-amdgcn-amd-amdhsa--${GPU_TARGET}:${GPU_TARGET_FEATURES}"
 
 # Output directory - use build directory
 OUTPUT_DIR="$BUILD_DIR/device_linker_output"
@@ -176,7 +180,7 @@ DEVICE_LINKER_ARGS=(
     -o "$MERGED_ELF"
     --dispatcher "$DEVICE_ELF"
     --host-table "$HOST_TABLE"
-    --target "${GPU_TARGET}:${GPU_TARGET_FEATURES:-sramecc+:xnack+}"
+    --target "${GPU_TARGET}:${GPU_TARGET_FEATURES:-sramecc+:xnack-}"
 )
 
 if [ -d "$SPECIALIZED_OBJ_DIR" ] && [ "$(ls -A "$SPECIALIZED_OBJ_DIR"/*.o 2>/dev/null)" ]; then
