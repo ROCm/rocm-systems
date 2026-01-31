@@ -662,6 +662,7 @@ amdcuid_status_t CuidFileGenerator::generate_from_devices(
     std::map<amdcuid_device_type_t, uint32_t> device_counters;
     
     // Process each device
+    // TODO: also need to adjust this to fill out more information from every device type
     for (const auto& device : devices) {
         if (!device) continue;
         

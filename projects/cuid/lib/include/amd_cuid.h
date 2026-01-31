@@ -134,24 +134,6 @@ typedef enum {
     AMDCUID_DEVICE_TYPE_LAST      = 0x4
 } amdcuid_device_type_t;
 
-// /**
-//  * @brief Remove a device from the CUID device registry.
-//  * 
-//  * This function allows removing a device from the CUID device registry at runtime.
-//  * The device's handle will be invalidated. Requires elevated permissions to remove
-//  * the device.
-//  * 
-//  * @param[in] handle The handle of the device to remove.
-//  * 
-//  * @return AMDCUID_STATUS_SUCCESS on success,
-//  *         AMDCUID_STATUS_DEVICE_NOT_FOUND if the provided handle is invalid,
-//  *         AMDCUID_STATUS_PERMISSION_DENIED if insufficient permissions to remove the device
-//  *         AMDCUID_STATUS_IPC_ERROR if an error occurred during communication with the daemon
-//  */
-// amdcuid_status_t amdcuid_remove_device(
-//     amdcuid_id_t handle
-// );
-
 /**
  * @brief Retrieve a list of all CUID handles present in the system.
  *
@@ -214,6 +196,40 @@ amdcuid_status_t amdcuid_get_handle_by_bdf(
     amdcuid_id_t* handle
 );
 
+/**
+ * @brief Retrieve the CUID handle for a device based on its file descriptor and type.
+ * 
+ * This function allows users to obtain the CUID handle for a specific device
+ * by providing its file descriptor and type. This is useful for obtaining a
+ * handle for a specific device associated with an open file descriptor.
+ * 
+ * @param[in] fd The file descriptor associated with the target device.
+ * @param[in] device_type The type of the device (see amdcuid_device_type_t).
+ * @param[out] handle Pointer to an amdcuid_id_t that will be filled with the device's handle.
+ * 
+ * @return AMDCUID_STATUS_SUCCESS on success,
+ *         AMDCUID_STATUS_INVALID_ARGUMENT if the provided arguments are invalid,
+ *         AMDCUID_STATUS_DEVICE_NOT_FOUND if the device could not be found for the specified file descriptor
+ *         AMDCUID_STATUS_UNSUPPORTED if the device type is not supported
+ */
+amdcuid_status_t amdcuid_get_handle_by_fd(
+    int fd,
+    amdcuid_device_type_t device_type,
+    amdcuid_id_t* handle
+);
+
+/**
+ * @brief Refresh the CUID device registry by rediscovering devices on the system.
+ * 
+ * This function forces the CUID library to rediscover devices on the system
+ * and update its internal registry. This is useful if devices have been added
+ * or removed.
+ * 
+ * @return AMDCUID_STATUS_SUCCESS on success,
+ *         AMDCUID_STATUS_PERMISSION_DENIED if insufficient permissions to perform discovery,
+ *         AMDCUID_STATUS_DEVICE_NOT_FOUND if no devices are found during discovery
+ */
+amdcuid_status_t amdcuid_refresh();
 
 
 /**

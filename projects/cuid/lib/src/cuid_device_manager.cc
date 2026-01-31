@@ -39,7 +39,7 @@ public:
     static amdcuid_status_t request_add_device(
         const char* dev_path,
         amdcuid_device_type_t device_type,
-        DevicePtr* out_device
+        amdcuid_id_t* device_handle
     ) {
         int sock_fd = socket(AF_UNIX, SOCK_STREAM, 0);
         if (sock_fd < 0) {
@@ -60,7 +60,6 @@ public:
         request.type = IpcMessageType::ADD_DEVICE;
         strncpy(request.device_path, dev_path, sizeof(request.device_path));
         request.device_type = device_type;
-        memset(&request.handle, 0, sizeof(request.handle)); // Not used for ADD_DEVICE
 
         if (send(sock_fd, &request, sizeof(request), 0) != sizeof(request)) {
             close(sock_fd);
@@ -74,15 +73,13 @@ public:
         }
 
         close(sock_fd);
-        if (response.status == AMDCUID_STATUS_SUCCESS && out_device) {
-            *out_device = response.device;
+        if (response.status == AMDCUID_STATUS_SUCCESS && device_handle) {
+            *device_handle = response.device_handle;
         }
         return response.status;
     }
 
-    static amdcuid_status_t request_remove_device(
-        const amdcuid_id_t& handle
-    ) {
+    static amdcuid_status_t request_refresh_devices() {
         int sock_fd = socket(AF_UNIX, SOCK_STREAM, 0);
         if (sock_fd < 0) {
             return AMDCUID_STATUS_IPC_ERROR;
@@ -99,10 +96,9 @@ public:
         }
 
         IpcRequest request;
-        request.type = IpcMessageType::REMOVE_DEVICE;
-        memset(request.device_path, 0, sizeof(request.device_path)); // Not used for REMOVE_DEVICE
-        request.device_type = AMDCUID_DEVICE_TYPE_NONE; // Not used for REMOVE_DEVICE
-        memcpy(&request.handle, &handle, sizeof(handle));
+        request.type = IpcMessageType::REFRESH_DEVICES;
+        memset(request.device_path, 0, sizeof(request.device_path)); // Not used for REFRESH_DEVICES
+        request.device_type = AMDCUID_DEVICE_TYPE_NONE; // Not used for REFRESH_DEVICES
 
         if (send(sock_fd, &request, sizeof(request), 0) != sizeof(request)) {
             close(sock_fd);
@@ -118,7 +114,83 @@ public:
         close(sock_fd);
         return response.status;
     }
+
+    static bool is_daemon_running() {
+        int sock_fd = socket(AF_UNIX, SOCK_STREAM, 0);
+        if (sock_fd < 0) {
+            return false;
+        }
+
+        struct sockaddr_un server_addr;
+        memset(&server_addr, 0, sizeof(server_addr));
+        server_addr.sun_family = AF_UNIX;
+        strncpy(server_addr.sun_path, AMDCUID_SOCKET_PATH, sizeof(server_addr.sun_path));
+
+        if (connect(sock_fd, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0) {
+            close(sock_fd);
+            return false;
+        }
+
+        close(sock_fd);
+        return true;
+    }
 };
+
+amdcuid_status_t CuidDeviceManager::get_devices_on_system() {
+
+    amdcuid_status_t status;
+    std::vector<DevicePtr> discovered_devices;
+
+    // discover devices on the system
+    // Discover platform device
+    std::vector<DevicePtr> platform_devices;
+    status = CuidPlatform::discover(platform_devices);
+    if (status != AMDCUID_STATUS_SUCCESS && status != AMDCUID_STATUS_DEVICE_NOT_FOUND) {
+        return status;
+    }
+    for (const auto& platform_device : platform_devices) {
+        discovered_devices.push_back(platform_device);
+    }
+
+    // Discover CPU devices
+    std::vector<DevicePtr> cpu_devices;
+    status = CuidCpu::discover(cpu_devices);
+    if (status != AMDCUID_STATUS_SUCCESS && status != AMDCUID_STATUS_DEVICE_NOT_FOUND) {
+        return status;
+    }
+    for (const auto& cpu : cpu_devices) {
+        discovered_devices.push_back(cpu);
+    }
+
+    // Discover GPU devices
+    std::vector<DevicePtr> gpu_devices;
+    status = CuidGpu::discover(gpu_devices);
+    if (status != AMDCUID_STATUS_SUCCESS && status != AMDCUID_STATUS_DEVICE_NOT_FOUND) {
+        return status;
+    }
+    for (const auto& gpu : gpu_devices) {
+        discovered_devices.push_back(gpu);
+    }
+
+    // Discover NIC devices
+    std::vector<DevicePtr> nic_devices;
+    status = CuidNic::discover(nic_devices);
+    if (status != AMDCUID_STATUS_SUCCESS && status != AMDCUID_STATUS_DEVICE_NOT_FOUND) {
+        return status;
+    }
+    for (const auto& nic : nic_devices) {
+        discovered_devices.push_back(nic);
+    }
+
+    if (status == AMDCUID_STATUS_SUCCESS) {
+        std::lock_guard<std::mutex> lock(manager_mutex_);
+        devices_.clear();
+        devices_ = discovered_devices;
+        std::lock_guard<std::mutex> unlock(manager_mutex_);
+    }
+
+    return status;
+}
 
 // helper function to convert CuidFileEntry to appropriate CuidDevice
 void _convert_entry_to_device(CuidFileEntry& entry, DevicePtr& device){
@@ -185,10 +257,15 @@ void _convert_entry_to_device(CuidFileEntry& entry, DevicePtr& device){
 }
 
 amdcuid_status_t CuidDeviceManager::get_devices_from_file_entries(CuidFile& cuid_file) {
+    std::lock_guard<std::mutex> lock(manager_mutex_);
+
     amdcuid_status_t status = cuid_file.load();
     if (status != AMDCUID_STATUS_SUCCESS) {
+        std::lock_guard<std::mutex> unlock(manager_mutex_);
         return status;
     }
+
+    devices_.clear();
     for (const auto& entry : cuid_file.get_entries()) {
         DevicePtr device = nullptr;
         _convert_entry_to_device(const_cast<CuidFileEntry&>(entry), device);
@@ -197,59 +274,29 @@ amdcuid_status_t CuidDeviceManager::get_devices_from_file_entries(CuidFile& cuid
         }
     }
 
+    std::lock_guard<std::mutex> unlock(manager_mutex_);
+
     return AMDCUID_STATUS_SUCCESS;
 }
 
 amdcuid_status_t CuidDeviceManager::add_device(DevicePtr device) {
-    // uses device found from above
-    if (device) {
-        devices_.push_back(device);
+    std::lock_guard<std::mutex> lock(manager_mutex_);
 
+    if (device) {
         // Update the CUID index
         amdcuid_derived_id derived;
         if (device->get_derived_cuid(derived) == AMDCUID_STATUS_SUCCESS) {
             cuid_index_[derived.UUIDv8_representation] = device;
         }
+
+        devices_.push_back(device);
     }
     else {
+        std::lock_guard<std::mutex> unlock(manager_mutex_);
         return AMDCUID_STATUS_INVALID_ARGUMENT;
     }
 
-    return AMDCUID_STATUS_SUCCESS;
-}
-
-amdcuid_status_t CuidDeviceManager::remove_device(amdcuid_id_t& handle) {
-    if (geteuid() != 0) {
-        return AMDCUID_STATUS_PERMISSION_DENIED;
-    }
-
-    if (!is_valid_handle(handle)) {
-        return AMDCUID_STATUS_DEVICE_NOT_FOUND;
-    }
-
-    // Find the device to remove
-    DevicePtr device_to_remove = lookup_by_handle(handle);
-    if (!device_to_remove) {
-        return AMDCUID_STATUS_DEVICE_NOT_FOUND;
-    }
-
-    // // Request daemon to remove the device from files
-    // amdcuid_status_t status = CuidDaemonIpcClientUtils::request_remove_device(handle);
-    // if (status != AMDCUID_STATUS_SUCCESS) {
-    //     return status;
-    // }
-
-    // Remove from devices_ vector
-    auto it = std::remove_if(devices_.begin(), devices_.end(),
-                             [&device_to_remove](const DevicePtr& device) {
-                                 return device == device_to_remove;
-                             });
-    if (it != devices_.end()) {
-        devices_.erase(it, devices_.end());
-    }
-
-    // Remove from cuid_index_
-    cuid_index_.erase(handle);
+    std::lock_guard<std::mutex> unlock(manager_mutex_);
 
     return AMDCUID_STATUS_SUCCESS;
 }
@@ -329,24 +376,63 @@ amdcuid_status_t CuidDeviceManager::get_device_from_file_by_bdf(const std::strin
     return status;
 }
 
+amdcuid_status_t CuidDeviceManager::request_device(const std::string& device_path, amdcuid_device_type_t device_type, DevicePtr& device) {
+    amdcuid_status_t status;
+    if (CuidDaemonIpcClientUtils::is_daemon_running()) {
+        amdcuid_id_t device_handle;
+        status = CuidDaemonIpcClientUtils::request_add_device(device_path.c_str(), device_type, &device_handle);
+        if (status == AMDCUID_STATUS_SUCCESS && device_handle.bytes != nullptr) {
+            // Lookup device by handle and return it
+            status = get_device_from_file_by_id(device_handle, device);
+            if (status != AMDCUID_STATUS_SUCCESS) {
+                return status;
+            }
+            add_device(device);
+        }
+        return status;
+    }
+    else {
+        status = AMDCUID_STATUS_IPC_ERROR;
+    }
+
+    return status;
+}
+
+amdcuid_status_t CuidDeviceManager::request_refresh() {
+    amdcuid_status_t status;
+    if (CuidDaemonIpcClientUtils::is_daemon_running()) {
+        status = CuidDaemonIpcClientUtils::request_refresh_devices();
+        return status;
+    }
+    else {
+        status = AMDCUID_STATUS_IPC_ERROR;
+    }
+
+    return status;
+}
+
 amdcuid_status_t CuidDeviceManager::discover_devices() {
-    devices_.clear();
     amdcuid_status_t status;
     // search for devices in the appropriate CUID file first
     if (geteuid() == 0) {
         status = get_devices_from_file_entries(priv_cuid_file_);
-        if (status != AMDCUID_STATUS_SUCCESS) {
-            return status;
+        // if there are no devices found, search the system for devices
+        if (devices_.empty() || status != AMDCUID_STATUS_SUCCESS) {
+            status = get_devices_on_system();
+            if (status != AMDCUID_STATUS_SUCCESS) {
+                return status;
+            }
         }
     }
     else {
         status = get_devices_from_file_entries(unpriv_cuid_file_);
-        if (status != AMDCUID_STATUS_SUCCESS) {
+        if (status != AMDCUID_STATUS_SUCCESS || devices_.empty()) {
+            // TODO: if no devices found, send IPC request to daemon to get devices
             return status;
         }
     }
 
-    // if there are no devices found, return error
+    // if devices still empty, return error
     if (devices_.empty()) {
         return AMDCUID_STATUS_DEVICE_NOT_FOUND;
     }
@@ -358,8 +444,10 @@ amdcuid_status_t CuidDeviceManager::discover_devices() {
 }
 
 amdcuid_status_t CuidDeviceManager::shutdown() {
+    std::lock_guard<std::mutex> lock(manager_mutex_);
     devices_.clear();
     cuid_index_.clear();
+    std::lock_guard<std::mutex> unlock(manager_mutex_);
     return AMDCUID_STATUS_SUCCESS;
 }
 
@@ -376,6 +464,8 @@ void CuidDeviceManager::get_grouped_devices(std::map<amdcuid_device_type_t, std:
 }
 
 void CuidDeviceManager::build_cuid_index() {
+    std::lock_guard<std::mutex> lock(manager_mutex_);
+
     cuid_index_.clear();
     for (const auto& device : devices_) {
         amdcuid_derived_id derived;
@@ -383,6 +473,8 @@ void CuidDeviceManager::build_cuid_index() {
             cuid_index_[derived.UUIDv8_representation] = device;
         }
     }
+
+    std::lock_guard<std::mutex> unlock(manager_mutex_);
 }
 
 DevicePtr CuidDeviceManager::lookup_by_handle(const amdcuid_id_t& handle) const {
@@ -402,21 +494,30 @@ std::vector<amdcuid_id_t> CuidDeviceManager::get_all_handles() const {
     return handles;
 }
 
-std::vector<amdcuid_id_t> CuidDeviceManager::get_handles_by_type(
-    amdcuid_device_type_set_t types) const 
-{
-    std::vector<amdcuid_id_t> handles;
-    
-    for (const auto& pair : cuid_index_) {
-        uint32_t type_bit = 1U << static_cast<uint32_t>(pair.second->type());
-        if (types & type_bit) {
-            // amdcuid_id_t is handle, so just copy directly
-            handles.push_back(pair.first);
-        }
+amdcuid_status_t CuidDeviceManager::save_registry_to_files() {
+    if (geteuid() != 0) {
+        return AMDCUID_STATUS_PERMISSION_DENIED;
     }
-    return handles;
-}
 
-bool CuidDeviceManager::is_valid_handle(const amdcuid_id_t& handle) const {
-    return cuid_index_.count(handle) > 0;
+    std::lock_guard<std::mutex> lock(manager_mutex_);
+
+    // Generate new CUID files from current device list
+    amdcuid_status_t status = CuidFileGenerator::generate_from_devices(
+        devices_,
+        cuid_hmac().key_file_path,
+        CuidUtilities::cuid_file(),
+        CuidUtilities::priv_cuid_file()
+    );
+    if (status != AMDCUID_STATUS_SUCCESS) {
+        std::lock_guard<std::mutex> unlock(manager_mutex_);
+        return status;
+    }
+
+    // ensure new files generated are reloaded into the file objects
+    unpriv_cuid_file_.load();
+    priv_cuid_file_.load();
+
+    std::lock_guard<std::mutex> unlock(manager_mutex_);
+
+    return status;
 }

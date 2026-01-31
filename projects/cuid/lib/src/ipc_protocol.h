@@ -29,24 +29,23 @@
 
 #define AMDCUID_SOCKET_PATH "/var/run/amdcuid_daemon.sock"
 
-
+// TODO: this needs to be reworked with new messages for unprivileged requests to go to daemon
 enum class IpcMessageType : uint8_t {
     ADD_DEVICE = 1,
-    REMOVE_DEVICE = 2
+    REFRESH_DEVICES = 2
 };
 
 struct IpcRequest
 {
     IpcMessageType type;
     char* device_path; // used for ADD_DEVICE, empty otherwise
-    amdcuid_device_type_t device_type;
-    amdcuid_id_t handle; // used for REMOVE_DEVICE, 0 otherwise
+    amdcuid_device_type_t device_type; // used for ADD_DEVICE, AMDCUID_DEVICE_TYPE_NONE otherwise
 };
 
 struct IpcResponse
 {
     amdcuid_status_t status;
-    DevicePtr device; // used for ADD_DEVICE, 0 otherwise
+    amdcuid_id_t device_handle; // used for ADD_DEVICE, 0 otherwise
 };
 
 #endif // IPC_PROTOCOL_H

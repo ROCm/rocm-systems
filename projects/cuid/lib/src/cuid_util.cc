@@ -23,6 +23,8 @@
 #include "cuid_util.h"
 #include <dirent.h>
 #include <sys/types.h>
+#include <sys/stat.h>
+#include <sys/sysmacros.h>
 #include <unistd.h>
 #include <vector>
 #include <mutex>
@@ -124,6 +126,32 @@ std::string CuidUtilities::bdf_to_device_path(const std::string &bdf, amdcuid_de
     return "";
 }
 
+std::string CuidUtilities::real_dev_path_from_fd(int fd) {
+    struct stat st;
+    if (fstat(fd, &st) != 0) {
+        return "";
+    }
+    dev_t dev = st.st_rdev;
+    uint32_t major_num = major(dev);
+    uint32_t minor_num = minor(dev);
+
+    // Construct sysfs path from char device numbers first
+    std::string sys_path = "/sys/dev/char/" + std::to_string(major_num) + ":" + std::to_string(minor_num);
+    char buf[PATH_MAX];
+    if (realpath(sys_path.c_str(), buf) != nullptr) {
+        return std::string(buf) + "/device";
+    }
+    else {
+        // attempt to find as a block device now
+        sys_path = "/sys/dev/block/" + std::to_string(major_num) + ":" + std::to_string(minor_num);
+        if (realpath(sys_path.c_str(), buf) != nullptr) {
+            return std::string(buf) + "/device";
+        }
+    }
+    // If all fails, return empty string
+    return "";
+}
+
 amdcuid_status_t CuidUtilities::generate_derived_cuid(const amdcuid_primary_id* primary_id, amdcuid_derived_id* derived_id, cuid_hmac* hmac) {
     if (!primary_id || !hmac) {
         // Return invalid on null input
@@ -146,8 +174,8 @@ amdcuid_status_t CuidUtilities::generate_derived_cuid(const amdcuid_primary_id* 
     derived_id->hash[13] &= 0xFC; // 11111100
 
     // Get the unit id parts from the primary ID
-    uint8_t unit_id_part1 = primary_id->raw_bits[8];
-    uint8_t unit_id_part2 = primary_id->raw_bits[14] & 0xF0; // only upper 4 bits
+    uint8_t reserved_1 = 0;
+    uint8_t reserved_2 = 0;
     // Map the 256-bit hash to 122-bit CUID format
     uint8_t id_bits[16] = {0};
 
@@ -155,15 +183,15 @@ amdcuid_status_t CuidUtilities::generate_derived_cuid(const amdcuid_primary_id* 
     memcpy(id_bits, derived_id->hash, 8);
 
     // insert unit id part 1 at bits 64-71
-    id_bits[8] = unit_id_part1;
+    id_bits[8] = reserved_1;
 
     // copy next 6 bytes (46 bits) from hash and mask off last 2 bits for bits 72-117 
     memcpy(id_bits + 9, derived_id->hash + 8, 6);
     id_bits[14] &= 0xFC;
 
     // bits 118-121: UnitID part 2 (4 bits)
-    id_bits[14] |= (unit_id_part2 >> 2); // upper 2 bits of unit id part 2
-    id_bits[15] |= (unit_id_part2 & 0x03) << 6; // lower 2 bits of unit id part 2
+    id_bits[14] |= (reserved_2 >> 2); // upper 2 bits of unit id part 2
+    id_bits[15] |= (reserved_2 & 0x03) << 6; // lower 2 bits of unit id part 2
     // last 6 bits are padding (bits 122-127)
     id_bits[15] &= 0xC0;
 

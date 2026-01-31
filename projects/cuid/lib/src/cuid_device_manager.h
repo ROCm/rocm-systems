@@ -30,6 +30,7 @@
 #include <memory>
 #include <map>
 #include <cstring>
+#include <mutex>
 
 /**
  * @brief Bitmask set of device types for querying multiple device types.
@@ -57,16 +58,25 @@ struct CuidComparator {
 
 class CuidDeviceManager {
 public:
+    // Mutex for thread-safe access
+    mutable std::mutex manager_mutex_;
+
     static CuidDeviceManager& instance();
     amdcuid_status_t discover_devices(); // should rename to discover_devices() or similar
-    amdcuid_status_t shutdown(); // no need for this function as actual shutdown function, may be useful for unti testing though?
+    amdcuid_status_t shutdown(); // no need for this function as actual shutdown function, may be useful for unit testing
 
     const std::vector<DevicePtr>& devices() const { return devices_; }
     void get_grouped_devices(std::map<amdcuid_device_type_t, std::vector<DevicePtr>>& grouped);
     const amdcuid_device_type_set_t& device_types() const { return device_types_; }
 
     amdcuid_status_t add_device(DevicePtr device);
-    amdcuid_status_t remove_device(amdcuid_id_t& handle);
+
+    /**
+     * @brief Discover all devices currently present on the system.
+     * 
+     * @return AMDCUID_STATUS_SUCCESS on success, error code otherwise
+     */
+    amdcuid_status_t get_devices_on_system();
 
     /**
      * @brief Create devices from CUID file entries.
@@ -104,45 +114,52 @@ public:
     amdcuid_status_t get_device_from_file_by_bdf(const std::string& bdf, DevicePtr& device);
 
     /**
+     * @brief Request addition of a device by its path and type.
+     * @param[in] device_path The device path of the target device.
+     * @param[in] device_type The type of the device (see amdcuid_device_type_t).
+     * @param[out] device Pointer to the device pointer that will be filled with the requested device.
+     * 
+     * @return AMDCUID_STATUS_SUCCESS on success, error code otherwise
+     */
+    amdcuid_status_t request_device(const std::string& device_path, amdcuid_device_type_t device_type, DevicePtr& device);
+
+    /**
+     * @brief Request a refresh of the device list from the system.
+     * 
+     * @return AMDCUID_STATUS_SUCCESS on success, error code otherwise
+     */
+    amdcuid_status_t request_refresh();
+
+    /**
+     * @brief Build the CUID index after device discovery.
+     */
+    void build_cuid_index();
+
+    /**
      * @brief Look up a device by its handle (derived CUID).
      * @param handle The handle containing the derived CUID.
      * @return Pointer to the device, or nullptr if not found.
      */
     DevicePtr lookup_by_handle(const amdcuid_id_t& handle) const;
 
-    int get_handle_count() const { return static_cast<int>(cuid_index_.size()); }
-
     /**
      * @brief Get all device handles (derived CUIDs).
-     * @return Vector of all valid handles.
+     * @return Vector of all handles of devices present on the system.
      */
     std::vector<amdcuid_id_t> get_all_handles() const;
 
     /**
-     * @brief Get handles filtered by device type bitmask.
-     * @param types Bitmask of device types to include.
-     * @return Vector of handles matching the specified types.
+     * @brief Save the current device registry to the CUID files.
+     * 
+     * @return AMDCUID_STATUS_SUCCESS on success, error code otherwise
      */
-    std::vector<amdcuid_id_t> get_handles_by_type(amdcuid_device_type_set_t types) const;
-
-    /**
-     * @brief Check if a handle is valid (device exists in registry).
-     * @param handle The handle to validate.
-     * @return true if valid, false otherwise.
-     */
-    bool is_valid_handle(const amdcuid_id_t& handle) const;
+    amdcuid_status_t save_registry_to_files();
 
 private:
     CuidDeviceManager() = default;
     ~CuidDeviceManager() = default;
     CuidDeviceManager(const CuidDeviceManager&) = delete;
     CuidDeviceManager& operator=(const CuidDeviceManager&) = delete;
-
-    /**
-     * @brief Build the CUID index after device discovery.
-     * Called internally after init() discovers devices.
-     */
-    void build_cuid_index();
 
     std::vector<DevicePtr> devices_;
     amdcuid_device_type_set_t device_types_;

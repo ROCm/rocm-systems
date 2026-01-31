@@ -58,7 +58,7 @@ amdcuid_status_t CuidDevice::get_derived_cuid(amdcuid_derived_id& id, cuid_hmac 
             if (status == AMDCUID_STATUS_SUCCESS) {
                 id.UUIDv8_representation = entry.derived_cuid;
                 CuidUtilities::remove_UUIDv8_bits(&id.UUIDv8_representation, id.raw_bits);
-                // TODO: figure out how to fill out hash later
+                // TODO: figure out how to fill out hash later should involve just removing the reserved bits
                 return AMDCUID_STATUS_SUCCESS;
             }
         }break;
@@ -73,7 +73,7 @@ amdcuid_status_t CuidDevice::get_derived_cuid(amdcuid_derived_id& id, cuid_hmac 
                 if (status == AMDCUID_STATUS_SUCCESS) {
                     id.UUIDv8_representation = entry.derived_cuid;
                     CuidUtilities::remove_UUIDv8_bits(&id.UUIDv8_representation, id.raw_bits);
-                    // TODO: figure out how to fill out hash later
+                    // TODO: figure out how to fill out hash later should involve just removing the reserved bits
                     return AMDCUID_STATUS_SUCCESS;
                 }
                 else {
@@ -98,7 +98,7 @@ amdcuid_status_t CuidDevice::get_derived_cuid(amdcuid_derived_id& id, cuid_hmac 
                     if (status == AMDCUID_STATUS_SUCCESS) {
                         id.UUIDv8_representation = entry.derived_cuid;
                         CuidUtilities::remove_UUIDv8_bits(&id.UUIDv8_representation, id.raw_bits);
-                        // TODO: figure out how to fill out hash later
+                        // TODO: figure out how to fill out hash later should involve just removing the reserved bits
                         return AMDCUID_STATUS_SUCCESS;
                     }
                 }
@@ -115,7 +115,7 @@ amdcuid_status_t CuidDevice::get_derived_cuid(amdcuid_derived_id& id, cuid_hmac 
                     if (status == AMDCUID_STATUS_SUCCESS) {
                         id.UUIDv8_representation = entry.derived_cuid;
                         CuidUtilities::remove_UUIDv8_bits(&id.UUIDv8_representation, id.raw_bits);
-                        // TODO: figure out how to fill out hash later
+                        // TODO: figure out how to fill out hash later should involve just removing the reserved bits
                         return AMDCUID_STATUS_SUCCESS;
                     }
                 }

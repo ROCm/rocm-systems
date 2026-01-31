@@ -43,6 +43,8 @@
 #include <unistd.h>
 #include <memory>
 
+//TODO: rework this whole thing to be built off the top of the ABI
+
 // static hmac instance for daemon
 static cuid_hmac daemon_hmac = cuid_hmac();
 
@@ -74,38 +76,6 @@ static void init_logging(bool enabled) {
             *g_log_file << "\n=== Log started at " << ctime(&now);
         }
     }
-}
-
-amdcuid_status_t remove_device(std::string output_file,
-                                std::string priv_output_file,
-                                const amdcuid_id_t *device) {
-
-    // Load existing CUID files
-    CuidFile unpriv_file(output_file, false);
-    CuidFile priv_file(priv_output_file, true);
-    unpriv_file.load();
-    priv_file.load();
-
-    log_out() << "Attempting removal of device with derived CUID: " << CuidUtilities::get_cuid_as_string(device) << std::endl;
-
-    amdcuid_status_t status;
-    // Remove entry from both files
-    status = unpriv_file.remove_entry(*device);
-    if (status != AMDCUID_STATUS_SUCCESS) {
-        log_err() << "Error removing device from unprivileged file: " << amdcuid_status_to_string(status) << std::endl;
-        return status;
-    }
-    status = priv_file.remove_entry(*device);
-    if (status != AMDCUID_STATUS_SUCCESS) {
-        log_err() << "Error removing device from privileged file: " << amdcuid_status_to_string(status) << std::endl;
-        return status;
-    }
-
-    // Save updated CUID files
-    unpriv_file.save();
-    priv_file.save();
-
-    return AMDCUID_STATUS_SUCCESS;
 }
 
 amdcuid_status_t update_device(std::string output_file,
@@ -231,10 +201,10 @@ private:
         // Handle different request types
         switch (request.type) {
             case IpcMessageType::ADD_DEVICE:
-                response.status = handle_add_device(request, &response.device);
+                response.status = handle_add_device(request, response.device_handle);
                 break;
-            case IpcMessageType::REMOVE_DEVICE:
-                response.status = handle_remove_device(request.handle);
+            case IpcMessageType::REFRESH_DEVICES:
+                response.status = amdcuid_refresh();
                 break;
             default:
                 response.status = AMDCUID_STATUS_INVALID_ARGUMENT;
@@ -246,98 +216,19 @@ private:
 
     amdcuid_status_t handle_add_device(
         const IpcRequest& request,
-        DevicePtr* out_device
+        amdcuid_id_t& device_handle
     ) {
-        // Create device based on type and path
-        CuidFileEntry entry = {};
-        entry.device_type = request.device_type;
-
-        amdcuid_status_t status = AMDCUID_STATUS_SUCCESS;
-        amdcuid_primary_id primary_id;
-        amdcuid_derived_id derived_id;
-
-        switch (request.device_type) {
-            case AMDCUID_DEVICE_TYPE_GPU: {
-                amdcuid_gpu_info gpu_info = {};
-                status = CuidGpu::discover_single(&gpu_info, request.device_path);
-                if (status != AMDCUID_STATUS_SUCCESS) {
-                    return status;
-                }
-                auto gpu_device = std::make_shared<CuidGpu>(gpu_info);
-                *out_device = gpu_device;
-                // convert gpu_device to CuidFileEntry and add to files using update_device
-                status = gpu_device->get_primary_cuid(primary_id);
-                entry.primary_cuid = primary_id.UUIDv8_representation;
-                status = gpu_device->get_derived_cuid(derived_id, &daemon_hmac);
-                entry.derived_cuid = derived_id.UUIDv8_representation;
-                entry.vendor_id = gpu_info.header.fields.gpu.vendor_id;
-                entry.device_id = gpu_info.header.fields.gpu.device_id;
-                entry.pci_class = gpu_info.header.fields.gpu.pci_class;
-                entry.revision_id = gpu_info.header.fields.gpu.revision_id;
-                entry.unit_id = gpu_info.header.fields.gpu.unit_id;
-                entry.device_node = gpu_info.render_node;
-                entry.bdf = gpu_info.bdf;
-                break;
-            }
-            case AMDCUID_DEVICE_TYPE_NIC: {
-                amdcuid_nic_info nic_info = {};
-                status = CuidNic::discover_single(&nic_info, request.device_path);
-                if (status != AMDCUID_STATUS_SUCCESS) {
-                    return status;
-                }
-                auto nic_device = std::make_shared<CuidNic>(nic_info);
-                *out_device = nic_device;
-                // convert nic_device to CuidFileEntry and add to files using update_device
-                status = nic_device->get_primary_cuid(primary_id);
-                entry.primary_cuid = primary_id.UUIDv8_representation;
-                status = nic_device->get_derived_cuid(derived_id, &daemon_hmac);
-                entry.derived_cuid = derived_id.UUIDv8_representation;
-                entry.vendor_id = nic_info.header.fields.nic.vendor_id;
-                entry.device_id = nic_info.header.fields.nic.device_id;
-                entry.pci_class = nic_info.header.fields.nic.pci_class;
-                entry.revision_id = nic_info.header.fields.nic.revision_id;
-                entry.bdf = nic_info.bdf;
-                entry.device_node = nic_info.network_interface;
-                break;
-            }
-            case AMDCUID_DEVICE_TYPE_CPU: {
-                amdcuid_cpu_info cpu_info = {};
-                status = CuidCpu::discover_single(&cpu_info, request.device_path);
-                if (status != AMDCUID_STATUS_SUCCESS) {
-                    return status;
-                }
-                auto cpu_device = std::make_shared<CuidCpu>(cpu_info);
-                *out_device = cpu_device;
-                // convert cpu_device to CuidFileEntry and add to files using update_device
-                status = cpu_device->get_primary_cuid(primary_id);
-                status = cpu_device->get_derived_cuid(derived_id, &daemon_hmac);
-                entry.primary_cuid = primary_id.UUIDv8_representation;
-                entry.derived_cuid = derived_id.UUIDv8_representation;
-                entry.vendor_id = cpu_info.header.fields.cpu.vendor_id;
-                entry.family = cpu_info.header.fields.cpu.family;
-                entry.model = cpu_info.header.fields.cpu.model;
-                entry.unit_id = cpu_info.header.fields.cpu.unit_id;
-                entry.package_core_id = std::to_string(cpu_info.header.fields.cpu.physical_id) + ":" + std::to_string(cpu_info.header.fields.cpu.core);
-                break;
-            }
-            default:
-                return AMDCUID_STATUS_UNSUPPORTED;
-        }
-        entry.last_update = time(nullptr);
-        update_device(CuidUtilities::cuid_file(), CuidUtilities::priv_cuid_file(), &entry);
+        std::string dev_path(request.device_path);
+        amdcuid_device_type_t device_type = request.device_type;
+        amdcuid_status_t status = amdcuid_get_handle_by_dev_path(
+            dev_path.c_str(),
+            device_type,
+            &device_handle
+        );
 
         return status;
     }
 
-    amdcuid_status_t handle_remove_device(
-        const amdcuid_id_t& handle
-    ) {
-        return remove_device(
-            CuidUtilities::cuid_file(),
-            CuidUtilities::priv_cuid_file(),
-            &handle
-        );
-    }
 };
 
 amdcuid_status_t get_device_from_udev(std::string *action_output, CuidFileEntry *device_entry, cuid_hmac* hmac) {
@@ -469,7 +360,19 @@ int main() {
         return 1;
     }
 
-    // read config file first to set key file path, logging options, and whether to run as a daemon or only on boot
+    uint8_t key[32];
+    amdcuid_status_t key_status = amdcuid_generate_hash_key(key);
+    if (key_status != AMDCUID_STATUS_SUCCESS) {
+        log_err() << "Error generating/loading HMAC key (status: " << amdcuid_status_to_string(key_status) << ")" << std::endl;
+        return 1;
+    }
+    key_status = amdcuid_set_hash_key(key);
+    if (key_status != AMDCUID_STATUS_SUCCESS) {
+        log_err() << "Error setting HMAC key for daemon (status: " << amdcuid_status_to_string(key_status) << ")" << std::endl;
+        return 1;
+    }
+
+    // read config file first get logging options and whether to run as a daemon or only on boot
     std::ifstream config_file("/opt/cuid/amdcuid_daemon.conf");
     std::vector<std::string> config_lines;
 
@@ -498,16 +401,13 @@ int main() {
     }
 
     bool logging_enabled = (config_lines[1] == "true");
-    std::string output_file = CuidUtilities::cuid_file();
-    std::string priv_output_file = CuidUtilities::priv_cuid_file();
 
     // Initialize file logging if enabled
     init_logging(logging_enabled);
     log_out() << "AMD CUID Daemon initialized with logging " << (logging_enabled ? "enabled" : "disabled") << std::endl;
 
     if (config_lines[0] == "true") {
-        // in daemon mode, we expect to be triggered by udev on device add/remove/change
-
+        // in daemon mode, we expect to receive device events via IPC from clients and from udev
         CuidDaemonServer server;
         amdcuid_status_t status = server.start();
         if (status != AMDCUID_STATUS_SUCCESS) {
@@ -522,95 +422,26 @@ int main() {
         }
 
         // On shutdown (not reachable in current code)
+        log_out() << "Daemon server stopping, no longer listening for device events." << std::endl;
         server.stop();
-
-        // if (!daemon_hmac.is_valid()) {
-        //     log_err() << "Error: Failed to initialize HMAC" << std::endl;
-        //     return 1;
-        // }
-        // // get udev input in argv, fill out device handle, and then update CUIDs
-        // CuidFileEntry device_info;
-        // std::string action;
-        // amdcuid_status_t status = get_device_from_udev(&action, &device_info, &daemon_hmac);
-        // if (status != AMDCUID_STATUS_SUCCESS) {
-        //     log_err() << "Error: Failed to get device from udev. status: " << amdcuid_status_to_string(status) << std::endl;
-        //     return 1;
-        // }
-        // // actions we have to worry about: add, remove, change, move
-        // if (action == "remove") {
-        //     status = remove_device(output_file, priv_output_file, &device_info.derived_cuid);
-        //     if (status != AMDCUID_STATUS_SUCCESS) {
-        //         log_err() << "Error: Failed to remove device CUID. status: " << amdcuid_status_to_string(status) << std::endl;
-        //         return 1;
-        //     }
-        // }
-        // else if (action == "add" || action == "change" || action == "move") {
-        //     status = update_device(output_file, priv_output_file, &device_info);
-        //     if (status != AMDCUID_STATUS_SUCCESS) {
-        //         log_err() << "Error: Failed to update device CUID. status: " << amdcuid_status_to_string(status) << std::endl;
-        //         return 1;
-        //     }
-        // }
-        // else {
-        //     log_err() << "Error: Unsupported udev action: " << action << std::endl;
-        //     return 1;
-        // }
     }
     else {
         // non-daemon mode discovers devices on bootup and updates their CUIDs once
-        // discover devices
-        std::vector<std::shared_ptr<CuidDevice>> devices;
-
-        // Platform discovery
-        std::vector<DevicePtr> platforms;
-        amdcuid_status_t status = CuidPlatform::discover(platforms);
-        if (status == AMDCUID_STATUS_SUCCESS) {
-            devices.insert(devices.end(), platforms.begin(), platforms.end());
-        }
-
-        // GPU discovery
-        std::vector<DevicePtr> gpus;
-        status = CuidGpu::discover(gpus);
-        if (status == AMDCUID_STATUS_SUCCESS) {
-            devices.insert(devices.end(), gpus.begin(), gpus.end());
-        }
-
-         // CPU discovery
-        std::vector<DevicePtr> cpus;
-        status = CuidCpu::discover(cpus);
-        if (status == AMDCUID_STATUS_SUCCESS) {
-            devices.insert(devices.end(), cpus.begin(), cpus.end());
-        }
-
-        // NIC discovery
-        std::vector<DevicePtr> nics;
-        status = CuidNic::discover(nics);
-        if (status == AMDCUID_STATUS_SUCCESS) {
-            devices.insert(devices.end(), nics.begin(), nics.end());
-        }
-
-        if (status != AMDCUID_STATUS_SUCCESS) {
-            log_err() << "Error: Failed to initialize device manager (status: " << amdcuid_status_to_string(status) << ")" << std::endl;
-            if (status == AMDCUID_STATUS_PERMISSION_DENIED) {
-                log_err() << "Some devices may require root privileges to discover." << std::endl;
-            }
-            return 1;
-        }
-
-        log_out() << "Discovered " << devices.size() << " device(s)" << std::endl;
-
-        // Generate CUID files
-        status = CuidFileGenerator::generate_from_devices(
-            devices,
-            daemon_hmac.key_file_path,
-            output_file,
-            priv_output_file
-        );
-
+        // discover devices by refreshing
+        amdcuid_status_t status = amdcuid_refresh();
         if (status != AMDCUID_STATUS_SUCCESS) {
             log_err() << "Error: Failed to generate CUID files (status: " << amdcuid_status_to_string(status) << ")" << std::endl;
             return 1;
         }
+
+        log_out() << "CUID files generated/updated successfully." << std::endl;
+
+        // get handle count for logging
+        uint32_t count = 0;
+        amdcuid_id_t dummy[1] = {};
+        status = amdcuid_get_all_handles(dummy, &count);
+
+        log_out() << "Total devices with CUIDs: " << count << std::endl;
     }
 
     log_out() << "AMD CUID Daemon Exiting..." << std::endl;
