@@ -1391,7 +1391,7 @@ if (DEVICE_LINKER)
     endif()
     add_custom_command(
       OUTPUT ${obj}
-      COMMAND ${HIPCC_COMPILER} -c -fPIC -fno-gpu-rdc --offload-arch=${DEVICE_LINKER_GPU_TARGET}
+      COMMAND ${HIPCC_COMPILER} -c -fPIC -fno-gpu-rdc -gline-tables-only --offload-arch=${DEVICE_LINKER_GPU_TARGET}
               ${SPEC_KERNEL_DEFS}
               -I${CMAKE_CURRENT_BINARY_DIR}/hipify/src
               -I${CMAKE_CURRENT_BINARY_DIR}/hipify/src/include

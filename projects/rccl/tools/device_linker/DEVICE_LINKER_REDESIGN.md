@@ -20,7 +20,11 @@
 
 **Sequential Multi-GPU: WORKING** - Each GPU works when initialized separately.
 
-**Parallel Multi-GPU: BLOCKED** - COMGR fails during concurrent code object loading.
+**Parallel Multi-GPU: DEBUGGING** - Tests still fail, investigating root cause.
+
+**Specialized Kernel Symbols: WORKING** - 2493 `ncclDevFunc_*` symbols now appear in `.symtab` and show up in `llvm-objdump -d --symbolize-operands` output.
+
+**Debug Line Tables: IMPLEMENTED** - Support for `-gline-tables-only` debug info has been added to the device linker. Awaiting build system integration to enable compilation with debug flags.
 
 ### Summary
 
@@ -475,6 +479,27 @@ The device linker auto-detects the GPU target including feature flags:
 - Matches what `clang-offload-bundler` expects for unbundling
 
 Override with `--target <arch>` if needed.
+
+### Debug Line Tables Support
+
+The device linker supports merging `.debug_line` sections for line-level debugging:
+
+**To enable:**
+1. Add `-gline-tables-only` to specialized kernel compilation flags in CMake
+2. Rebuild specialized kernels
+3. Run device linker - it will automatically:
+   - Extract `.debug_line` from dispatcher and specialized kernels
+   - Concatenate into a merged section
+   - Patch `DW_LNE_set_address` opcodes with correct addresses
+
+**What works:**
+- Line-based breakpoints in `rocgdb`
+- Line information in stack traces
+- Source stepping through specialized kernel code
+
+**What doesn't work (limitation of -gline-tables-only):**
+- Variable inspection (no type info)
+- Full debug info (use full `-g` for that, but increases binary size)
 
 ---
 

@@ -239,6 +239,16 @@ struct KernelInfo {
     std::vector<uint8_t> code;
     std::vector<uint8_t> kd;        // 64-byte kernel descriptor from .rodata
     std::vector<uint8_t> note;      // kernel's .note section
+    std::vector<uint8_t> debug_line; // .debug_line section (if compiled with -gline-tables-only)
+    std::vector<uint8_t> debug_line_str; // .debug_line_str section (DWARF5 string table)
+    // Additional DWARF sections for llvm-objdump --source support
+    std::vector<uint8_t> debug_abbrev;
+    std::vector<uint8_t> debug_info;
+    std::vector<uint8_t> debug_str;
+    std::vector<uint8_t> debug_str_offsets;
+    std::vector<uint8_t> debug_addr;
+    std::vector<uint8_t> debug_rnglists;
+    uint64_t orig_text_addr = 0;    // Original .text address for debug_line patching
     int vgpr = 0, sgpr = 0, lds = 0, stack = 0;
 };
 
@@ -311,6 +321,45 @@ KernelInfo parseKernel(const std::vector<uint8_t>& elf_data) {
     if (rodata && rodata->size >= 64) {
         auto data = elf.getBytes(*rodata);
         info.kd.assign(data.begin(), data.begin() + 64);
+    }
+    
+    // Extract .debug_line section if present (compiled with -gline-tables-only)
+    auto* debug_line = elf.find(".debug_line");
+    if (debug_line && debug_line->size > 0) {
+        info.debug_line = elf.getBytes(*debug_line);
+        info.orig_text_addr = text->addr;  // Save original .text address for patching
+        
+        // Also extract .debug_line_str (DWARF5 string table for file names)
+        auto* debug_line_str = elf.find(".debug_line_str");
+        if (debug_line_str && debug_line_str->size > 0) {
+            info.debug_line_str = elf.getBytes(*debug_line_str);
+        }
+        
+        // Extract additional DWARF sections for llvm-objdump --source
+        auto* debug_abbrev = elf.find(".debug_abbrev");
+        if (debug_abbrev && debug_abbrev->size > 0) {
+            info.debug_abbrev = elf.getBytes(*debug_abbrev);
+        }
+        auto* debug_info = elf.find(".debug_info");
+        if (debug_info && debug_info->size > 0) {
+            info.debug_info = elf.getBytes(*debug_info);
+        }
+        auto* debug_str = elf.find(".debug_str");
+        if (debug_str && debug_str->size > 0) {
+            info.debug_str = elf.getBytes(*debug_str);
+        }
+        auto* debug_str_offsets = elf.find(".debug_str_offsets");
+        if (debug_str_offsets && debug_str_offsets->size > 0) {
+            info.debug_str_offsets = elf.getBytes(*debug_str_offsets);
+        }
+        auto* debug_addr = elf.find(".debug_addr");
+        if (debug_addr && debug_addr->size > 0) {
+            info.debug_addr = elf.getBytes(*debug_addr);
+        }
+        auto* debug_rnglists = elf.find(".debug_rnglists");
+        if (debug_rnglists && debug_rnglists->size > 0) {
+            info.debug_rnglists = elf.getBytes(*debug_rnglists);
+        }
     }
     
     unlink(tmp.c_str());
@@ -461,6 +510,18 @@ private:
     std::vector<std::pair<const KernelInfo*, uint64_t>> kernel_text_offsets_;  // kernel -> text offset
     std::vector<std::pair<size_t, uint64_t>> specialized_kd_offsets_;  // KD offset in .rodata -> text offset
     std::unordered_map<std::string, FuncIdMapping> funcid_map_;
+    
+    // Debug line info: (offset in merged .debug_line, size, orig_text_addr, new_text_offset)
+    struct DebugLineChunk {
+        size_t merged_offset;      // Offset in merged .debug_line section
+        size_t size;               // Size of this chunk
+        uint64_t orig_text_addr;   // Original .text address in kernel's ELF
+        uint64_t new_text_offset;  // New offset in merged .text section
+        size_t str_offset_base;    // Base offset for this chunk's strings in merged .debug_line_str
+        size_t orig_str_size;      // Original .debug_line_str size for this kernel
+    };
+    std::vector<DebugLineChunk> debug_line_chunks_;
+    std::vector<uint8_t> merged_debug_line_str_;  // Merged .debug_line_str data
     
     // Output sections
     std::vector<SectionInfo> sections_;
@@ -694,6 +755,148 @@ private:
             gpr_max.alignment = 1;
             // Empty section
             sections_.push_back(std::move(gpr_max));
+        }
+        
+        // Build merged .debug_line and .debug_line_str sections from dispatcher and specialized kernels
+        // (if any have debug info from -gline-tables-only compilation)
+        {
+            SectionInfo debug_line;
+            debug_line.name = ".debug_line";
+            debug_line.type = SHT_PROGBITS;
+            debug_line.flags = 0;  // Non-allocated
+            debug_line.alignment = 1;
+            
+            // First, add dispatcher's .debug_line and .debug_line_str if present
+            auto* disp_debug_line = disp_->find(".debug_line");
+            auto* disp_debug_line_str = disp_->find(".debug_line_str");
+            if (disp_debug_line && disp_debug_line->size > 0) {
+                auto disp_dl = disp_->getBytes(*disp_debug_line);
+                auto* disp_text = disp_->find(".text");
+                uint64_t disp_text_addr = disp_text ? disp_text->addr : 0;
+                
+                size_t str_base = merged_debug_line_str_.size();
+                size_t orig_str_size = 0;
+                if (disp_debug_line_str && disp_debug_line_str->size > 0) {
+                    auto disp_dls = disp_->getBytes(*disp_debug_line_str);
+                    orig_str_size = disp_dls.size();
+                    merged_debug_line_str_.insert(merged_debug_line_str_.end(), 
+                                                  disp_dls.begin(), disp_dls.end());
+                }
+                
+                debug_line_chunks_.push_back({
+                    debug_line.data.size(),  // merged_offset
+                    disp_dl.size(),          // size
+                    disp_text_addr,          // orig_text_addr
+                    0,                       // new_text_offset (dispatcher is at offset 0)
+                    str_base,                // str_offset_base
+                    orig_str_size            // orig_str_size
+                });
+                debug_line.data.insert(debug_line.data.end(), disp_dl.begin(), disp_dl.end());
+            }
+            
+            // Then add each specialized kernel's .debug_line and .debug_line_str
+            for (const auto& [kern, text_off] : kernel_text_offsets_) {
+                if (!kern->debug_line.empty()) {
+                    size_t str_base = merged_debug_line_str_.size();
+                    size_t orig_str_size = kern->debug_line_str.size();
+                    
+                    // Append this kernel's .debug_line_str to merged
+                    if (!kern->debug_line_str.empty()) {
+                        merged_debug_line_str_.insert(merged_debug_line_str_.end(),
+                                                      kern->debug_line_str.begin(),
+                                                      kern->debug_line_str.end());
+                    }
+                    
+                    debug_line_chunks_.push_back({
+                        debug_line.data.size(),    // merged_offset
+                        kern->debug_line.size(),   // size
+                        kern->orig_text_addr,      // orig_text_addr
+                        text_off,                  // new_text_offset
+                        str_base,                  // str_offset_base
+                        orig_str_size              // orig_str_size
+                    });
+                    debug_line.data.insert(debug_line.data.end(), 
+                                          kern->debug_line.begin(), 
+                                          kern->debug_line.end());
+                }
+            }
+            
+            if (!debug_line.data.empty()) {
+                printf("Built .debug_line: %zu bytes (%zu chunks)\n", 
+                       debug_line.data.size(), debug_line_chunks_.size());
+                sections_.push_back(std::move(debug_line));
+            }
+            
+            // Add merged .debug_line_str section
+            if (!merged_debug_line_str_.empty()) {
+                SectionInfo debug_line_str;
+                debug_line_str.name = ".debug_line_str";
+                debug_line_str.type = SHT_PROGBITS;
+                debug_line_str.flags = SHF_MERGE | SHF_STRINGS;
+                debug_line_str.alignment = 1;
+                debug_line_str.entsize = 1;
+                debug_line_str.data = merged_debug_line_str_;
+                printf("Built .debug_line_str: %zu bytes\n", merged_debug_line_str_.size());
+                sections_.push_back(std::move(debug_line_str));
+            }
+            
+            // Copy additional debug sections from dispatcher for source display
+            // Dispatcher covers the Generic kernel code; specialized kernels have their own debug_line
+            auto addDebugSection = [this](const char* name, const std::vector<uint8_t>& data, 
+                                         uint64_t flags = 0, uint64_t entsize = 0) {
+                if (data.empty()) return;
+                SectionInfo sec;
+                sec.name = name;
+                sec.type = SHT_PROGBITS;
+                sec.flags = flags;
+                sec.alignment = 1;
+                sec.entsize = entsize;
+                sec.data = data;
+                printf("Copied %s: %zu bytes\n", name, data.size());
+                sections_.push_back(std::move(sec));
+            };
+            
+            // Try to get debug sections from dispatcher first
+            auto copyDebugFromElf = [&](ElfParser* elf, const char* source) {
+                auto getSection = [elf](const char* name) -> std::vector<uint8_t> {
+                    auto* sec = elf->find(name);
+                    if (sec && sec->size > 0) return elf->getBytes(*sec);
+                    return {};
+                };
+                
+                auto abbrev = getSection(".debug_abbrev");
+                auto info = getSection(".debug_info");
+                auto str = getSection(".debug_str");
+                auto str_off = getSection(".debug_str_offsets");
+                auto addr = getSection(".debug_addr");
+                auto rng = getSection(".debug_rnglists");
+                
+                if (!abbrev.empty() || !info.empty()) {
+                    printf("Using debug sections from %s\n", source);
+                    addDebugSection(".debug_abbrev", abbrev);
+                    addDebugSection(".debug_info", info);
+                    addDebugSection(".debug_str", str, SHF_MERGE | SHF_STRINGS, 1);
+                    addDebugSection(".debug_str_offsets", str_off);
+                    addDebugSection(".debug_addr", addr);
+                    addDebugSection(".debug_rnglists", rng);
+                    return true;
+                }
+                return false;
+            };
+            
+            // Prefer dispatcher debug info (covers Generic kernels)
+            if (!copyDebugFromElf(disp_.get(), "dispatcher")) {
+                // Fall back to first specialized kernel
+                if (!kernel_text_offsets_.empty()) {
+                    const KernelInfo* first_kern = kernel_text_offsets_[0].first;
+                    addDebugSection(".debug_abbrev", first_kern->debug_abbrev);
+                    addDebugSection(".debug_info", first_kern->debug_info);
+                    addDebugSection(".debug_str", first_kern->debug_str, SHF_MERGE | SHF_STRINGS, 1);
+                    addDebugSection(".debug_str_offsets", first_kern->debug_str_offsets);
+                    addDebugSection(".debug_addr", first_kern->debug_addr);
+                    addDebugSection(".debug_rnglists", first_kern->debug_rnglists);
+                }
+            }
         }
         
         return true;
@@ -1098,35 +1301,52 @@ private:
                 uint32_t stack = max_stack_;
                 memcpy(kd + 4, &stack, 4);
                 
-                // RSRC1: VGPR/SGPR
+                // RSRC1 at offset 0x30: VGPR/SGPR
                 uint32_t rsrc1;
-                memcpy(&rsrc1, kd + 0x34, 4);
+                memcpy(&rsrc1, kd + 0x30, 4);
                 int vgpr_g = (max_vgpr_ + 3) / 4 - 1;
                 int sgpr_g = (max_sgpr_ + 7) / 8 - 1;
                 rsrc1 = (rsrc1 & ~0x3FF) | (vgpr_g & 0x3F) | ((sgpr_g & 0xF) << 6);
-                memcpy(kd + 0x34, &rsrc1, 4);
+                memcpy(kd + 0x30, &rsrc1, 4);
                 
-                // RSRC2: Enable scratch
+                // RSRC2 at offset 0x34: Enable scratch
                 uint32_t rsrc2;
-                memcpy(&rsrc2, kd + 0x38, 4);
+                memcpy(&rsrc2, kd + 0x34, 4);
                 if (stack > 0) {
                     rsrc2 |= 1;  // SCRATCH_EN = 1
                 }
-                memcpy(kd + 0x38, &rsrc2, 4);
+                memcpy(kd + 0x34, &rsrc2, 4);
                 
-                // For specialized KDs: patch kernel_code_entry_byte_offset
-                if (is_specialized && text_off != 0) {
-                    // KD offset 0x10: kernel_code_entry_byte_offset (int64_t, relative to KD address)
-                    // new_offset = (text_addr + text_off) - (rodata_addr + kd_off)
-                    uint64_t rodata_addr = 0;
-                    for (const auto& s : sections_) if (s.name == ".rodata") { rodata_addr = s.addr; break; }
+                // Patch kernel_code_entry_byte_offset
+                // KD offset 0x10: kernel_code_entry_byte_offset (int64_t, relative to KD address)
+                uint64_t rodata_addr = 0;
+                for (const auto& s : sections_) if (s.name == ".rodata") { rodata_addr = s.addr; break; }
+                
+                int64_t entry_offset;
+                if (is_specialized) {
+                    // For specialized: calculate from scratch
+                    entry_offset = (int64_t)(text_addr_ + text_off) - (int64_t)(rodata_addr + kd_off);
+                } else {
+                    // For dispatcher: adjust original entry_offset by the layout delta
+                    // Original layout: disp_text_addr - disp_rodata_addr
+                    // New layout: text_addr_ - rodata_addr
+                    // delta = new_layout - old_layout
+                    auto* disp_text = disp_->find(".text");
+                    auto* disp_rodata = disp_->find(".rodata");
+                    uint64_t disp_text_addr = disp_text ? disp_text->addr : 0;
+                    uint64_t disp_rodata_addr = disp_rodata ? disp_rodata->addr : 0;
                     
-                    int64_t entry_offset = (int64_t)(text_addr_ + text_off) - (int64_t)(rodata_addr + kd_off);
-                    memcpy(kd + 0x10, &entry_offset, 8);
+                    int64_t old_entry_offset;
+                    memcpy(&old_entry_offset, kd + 0x10, 8);
                     
-                    printf("  KD[%zu] (specialized): entry_offset=%ld (text=0x%lx)\n",
-                           kd_off / 64, entry_offset, text_addr_ + text_off);
+                    int64_t delta = (int64_t)(text_addr_ - rodata_addr) - 
+                                   (int64_t)(disp_text_addr - disp_rodata_addr);
+                    entry_offset = old_entry_offset + delta;
+                    
+                    printf("  KD[%zu]: old_entry=%ld, delta=%ld, new_entry=%ld\n",
+                           kd_off / 64, old_entry_offset, delta, entry_offset);
                 }
+                memcpy(kd + 0x10, &entry_offset, 8);
                 
                 uint16_t props;
                 memcpy(&props, kd + 0x3c, 2);
@@ -1477,8 +1697,121 @@ private:
             }
         }
         
+        // Patch .debug_line section addresses
+        patchDebugLine();
+        
         // Build .rela.dyn section with R_AMDGPU_RELATIVE64 relocations
         buildRelocations();
+    }
+    
+    void patchDebugLine() {
+        if (debug_line_chunks_.empty()) return;
+        
+        SectionInfo* debug_line_sec = nullptr;
+        for (auto& s : sections_) {
+            if (s.name == ".debug_line") { debug_line_sec = &s; break; }
+        }
+        if (!debug_line_sec || debug_line_sec->data.empty()) return;
+        
+        printf("Patching .debug_line addresses (%zu chunks)...\n", debug_line_chunks_.size());
+        
+        int patched = 0;
+        for (const auto& chunk : debug_line_chunks_) {
+            // Scan this chunk for DW_LNE_set_address opcodes
+            // Format: 0x00 (extended opcode), length (usually 0x09 for 8-byte addr), 
+            //         0x02 (DW_LNE_set_address), 8-byte address
+            uint8_t* data = debug_line_sec->data.data() + chunk.merged_offset;
+            size_t size = chunk.size;
+            
+            for (size_t i = 0; i + 11 <= size; i++) {
+                // Look for: 00 09 02 <8-byte-addr>
+                // The length byte (09) = 1 + 8 (opcode + address)
+                if (data[i] == 0x00 && data[i+1] == 0x09 && data[i+2] == 0x02) {
+                    uint64_t old_addr;
+                    memcpy(&old_addr, &data[i+3], 8);
+                    
+                    // Calculate new address:
+                    // old_addr is relative to original .text in the kernel's ELF
+                    // new_addr = text_addr_ + chunk.new_text_offset + (old_addr - chunk.orig_text_addr)
+                    uint64_t new_addr = text_addr_ + chunk.new_text_offset + 
+                                       (old_addr - chunk.orig_text_addr);
+                    
+                    memcpy(&data[i+3], &new_addr, 8);
+                    patched++;
+                }
+            }
+        }
+        
+        printf("  Patched %d DW_LNE_set_address opcodes\n", patched);
+        
+        // Calculate the address delta for dispatcher debug sections
+        // Dispatcher's original .text address vs merged position
+        auto* disp_text = disp_->find(".text");
+        uint64_t disp_orig_text = disp_text ? disp_text->addr : 0;
+        int64_t disp_delta = (int64_t)text_addr_ - (int64_t)disp_orig_text;
+        
+        // Patch .debug_info section - adjust DW_AT_low_pc/high_pc addresses
+        // For DWARF4, these are typically 8-byte addresses at fixed positions
+        SectionInfo* debug_info_sec = nullptr;
+        for (auto& s : sections_) {
+            if (s.name == ".debug_info") { debug_info_sec = &s; break; }
+        }
+        if (debug_info_sec && !debug_info_sec->data.empty() && disp_delta != 0) {
+            // DWARF4 compile unit header: unit_length(4) + version(2) + abbr_offset(4) + addr_size(1) = 11 bytes
+            // Then DIE entries. The DW_AT_low_pc is typically at offset 0x13 (19) for this format
+            // DW_AT_high_pc follows (could be address or offset)
+            // We'll scan for addresses in the dispatcher's original range and patch them
+            uint8_t* data = debug_info_sec->data.data();
+            size_t size = debug_info_sec->data.size();
+            int info_patched = 0;
+            
+            // Scan for 8-byte values that look like addresses in the original dispatcher range
+            auto* disp_text_sec = disp_->find(".text");
+            uint64_t disp_text_start = disp_text_sec ? disp_text_sec->addr : 0;
+            uint64_t disp_text_end = disp_text_start + (disp_text_sec ? disp_text_sec->size : 0);
+            
+            for (size_t off = 11; off + 8 <= size; off++) {
+                uint64_t val;
+                memcpy(&val, data + off, 8);
+                // Check if this looks like an address in the original dispatcher .text range
+                if (val >= disp_text_start && val < disp_text_end + 0x10000) {
+                    uint64_t new_val = val + disp_delta;
+                    memcpy(data + off, &new_val, 8);
+                    info_patched++;
+                    off += 7;  // Skip rest of this value
+                }
+            }
+            if (info_patched > 0) {
+                printf("  Patched %d addresses in .debug_info (delta=%+ld)\n", info_patched, disp_delta);
+            }
+        }
+        
+        // Also patch .debug_addr section if present
+        // The addresses are relative to the first kernel's .text, need to adjust to merged .text
+        SectionInfo* debug_addr_sec = nullptr;
+        for (auto& s : sections_) {
+            if (s.name == ".debug_addr") { debug_addr_sec = &s; break; }
+        }
+        if (debug_addr_sec && !debug_addr_sec->data.empty() && !debug_line_chunks_.empty()) {
+            // Use the first kernel's original text address as the base
+            uint64_t first_orig_text = debug_line_chunks_[0].orig_text_addr;
+            uint64_t first_new_text = text_addr_ + debug_line_chunks_[0].new_text_offset;
+            int64_t addr_delta = (int64_t)first_new_text - (int64_t)first_orig_text;
+            
+            // .debug_addr format: header (12 bytes for DWARF32) + array of 8-byte addresses
+            // Header: length (4), version (2), address_size (1), segment_selector_size (1) = 8 bytes
+            // Then addresses
+            size_t header_size = 8;  // DWARF32 header
+            int addr_patched = 0;
+            for (size_t off = header_size; off + 8 <= debug_addr_sec->data.size(); off += 8) {
+                uint64_t old_addr;
+                memcpy(&old_addr, debug_addr_sec->data.data() + off, 8);
+                uint64_t new_addr = old_addr + addr_delta;
+                memcpy(debug_addr_sec->data.data() + off, &new_addr, 8);
+                addr_patched++;
+            }
+            printf("  Patched %d addresses in .debug_addr (delta=%+ld)\n", addr_patched, addr_delta);
+        }
     }
     
     void buildRelocations() {
