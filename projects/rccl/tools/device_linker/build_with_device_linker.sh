@@ -138,6 +138,7 @@ $CLANG -cc1 \
     -aux-triple x86_64-unknown-linux-gnu \
     -O3 \
     -emit-obj \
+    -debug-info-kind=line-tables-only \
     -fcuda-is-device \
     -fno-threadsafe-statics \
     -mllvm -amdgpu-internalize-symbols \

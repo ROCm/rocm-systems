@@ -83,8 +83,7 @@ function display_help()
     echo "       --verbose               Show compile commands"
     echo "       --force-reduce-pipeline Force reduce_copy sw pipeline to be used for every reduce-based collectives and datatypes"
     echo "       --generate-sym-kernels  Generate symmetric memory kernels"
-    echo "       --specialized-kernels   Build with specialized kernels only (no RDC, faster build)"
-    echo "       --device-linker         Build with device linker (implies --specialized-kernels, ~10x faster build)"
+    echo "       --device-linker         Build with device linker (experimental)"
     echo "    -q|--quiet-warnings        Suppress majority of compiler warnings (not recommended)"
     echo "       --rocshmem              Build with rocSHMEM support"
 }

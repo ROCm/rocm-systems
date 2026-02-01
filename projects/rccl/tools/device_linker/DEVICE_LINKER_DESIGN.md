@@ -654,3 +654,85 @@ Possible causes:
    - `ncclDevKernel_Coll_Algo_Proto_Redop_Type_accN_unrollN_Specialized` (from specialized kernels)
    - Both formats now correctly parsed to extract funcId key and unroll factor
    - This was the key fix that enabled function table population (831 functions mapped)
+
+### Current Status (February 1, 2026)
+
+**Single-GPU tests: PASS**
+**Multi-GPU tests: PARTIAL** (kernel executes but data correctness issues)
+
+#### Progress Since January 30
+
+Multi-GPU crash debugging led to discovery and fixing of several KD (Kernel Descriptor) issues:
+
+1. **KD RSRC1/RSRC2 Offset Bug** (FIXED)
+   - Device linker was reading/writing RSRC1 at offset 0x34 and RSRC2 at offset 0x38
+   - Correct offsets per AMDGPU ABI: RSRC1 at 0x30, RSRC2 at 0x34
+   - This caused `kernel_code_properties` (at 0x38) to be corrupted
+   - Symptom: SGPR layout shifted, kernarg pointer in wrong registers
+
+2. **KD Entry Offset for Dispatcher KDs** (FIXED)
+   - Dispatcher KDs (`ncclDevKernel_Generic_*`) weren't getting their `kernel_code_entry_byte_offset` patched
+   - When ELF sections are merged, the relative offset between `.rodata` (KDs) and `.text` (code) changes
+   - Solution: Calculate delta and adjust original entry_offset
+   ```cpp
+   int64_t delta = (int64_t)(text_addr_ - rodata_addr) -
+                   (int64_t)(disp_text_addr - disp_rodata_addr);
+   entry_offset = old_entry_offset + delta;
+   ```
+
+3. **Specialized Kernel Pipeline Variants** (FIXED in `generate_specialized.py`)
+   - Only `pipeline=1` variants were generated for bf16 types
+   - Function table expected both `pipeline=0` and `pipeline=1`
+   - Root cause: filename didn't include pipeline, so variants overwrote each other
+   - Fix: Added `_pipe{N}` suffix to filename when pipeline != 0
+   - Result: 859 specialized kernels now generated (was 831)
+
+#### Current Test Results
+
+```
+=== Two-GPU Test ===
+Found 8 HIP device(s)
+Step 1: Creating device list
+Step 2: Creating communicators with ncclCommInitAll
+Communicators created!
+Step 3: Allocating memory
+Step 4: Initializing data
+Step 5: Creating streams
+Step 6: Running AllReduce
+AllReduce completed!
+Step 7: Verifying results
+=== TEST FAILED: 2048 errors ===
+```
+
+- Kernel no longer crashes
+- AllReduce completes (2 GPUs × 1024 elements)
+- All 2048 result elements are incorrect
+- Suggests data path issue, not kernel launch issue
+
+#### Verified Working
+
+- 859 specialized kernels compiled and linked
+- 859 relocations in merged ELF (function table fully populated)
+- KD structure verified correct:
+  - LDS: 19776 bytes
+  - Scratch: 1096 bytes
+  - Entry offset: 384 (0x180)
+  - RSRC1: 0x00af0365
+  - RSRC2: 0x00001391 (SCRATCH_EN=1)
+  - Properties: 0x081e (kernarg at s[4:5])
+
+#### Outstanding Issues
+
+1. **Data correctness**: AllReduce produces wrong results
+   - Kernel runs without crash
+   - GPU 0: sendbuff=1.0, GPU 1: sendbuff=2.0
+   - Expected recvbuff=3.0, actual=??? (all wrong)
+   - Need to debug collective data flow
+
+#### Files Modified in This Session
+
+| File | Change |
+|------|--------|
+| `tools/device_linker/device_linker.cpp` | Fixed RSRC1/RSRC2 offsets (0x30/0x34), fixed dispatcher KD entry_offset patching |
+| `src/device/generate_specialized.py` | Added pipeline to filename to generate all bf16 variants |
+| `src/device/common.h` | Added/reverted NULL check for function table dispatch |

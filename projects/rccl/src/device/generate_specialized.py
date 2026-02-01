@@ -254,10 +254,11 @@ def get_arch_guard(fn):
 def generate_specialized_kernel_file(op_tuple, output_dir):
   coll, algo, proto, redop, ty, acc, pipeline, unroll = op_tuple
   coll_lower = coll_camel_to_lower[coll]
-  # Include acc and unroll in filename to avoid overwriting
+  # Include acc, pipeline, and unroll in filename to avoid overwriting
   acc_file_suffix = f"_acc{acc}" if acc != "0" else ""
+  pipeline_file_suffix = f"_pipe{pipeline}" if pipeline != "0" else ""
   unroll_file_suffix = f"_unroll{unroll}"
-  filename = f"specialized_{coll_lower}_{algo.lower()}_{proto.lower()}_{redop.lower()}_{ty}{acc_file_suffix}{unroll_file_suffix}.cpp"
+  filename = f"specialized_{coll_lower}_{algo.lower()}_{proto.lower()}_{redop.lower()}_{ty}{acc_file_suffix}{pipeline_file_suffix}{unroll_file_suffix}.cpp"
   filepath = os.path.join(output_dir, filename)
 
   type_map = {
