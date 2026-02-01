@@ -31,6 +31,8 @@
 - `.AMDGPU.gpr_maximums` section added to match IFC
 - **Symbol section indices now correct**: `ncclDevFuncTable_*` symbols point to `.data.rel.ro`
 - **Symbol addresses remapped**: Function table symbols moved from `.bss` to `.data.rel.ro`
+- **Specialized kernel symbols preserved**: All `ncclDevFunc_*` symbols added to `.symtab` for debugging
+- **GPU auto-detection with features**: Detects full target (e.g., `gfx950:sramecc+:xnack-`) from rocminfo
 
 ### Critical Design Constraint
 
@@ -439,6 +441,40 @@ llvm-readelf -S merged.elf
 3. **Section indices matter** - symbols must have correct st_shndx
 4. **Compare with production** - byte-level verification catches bugs early
 5. **Understand ELF structure** - headers, program headers, section headers all interrelated
+6. **Non-alloc section offsets must be recalculated** - if you modify `.symtab`/`.strtab` after layout, recalculate file offsets before writing
+7. **ELF local/global symbol ordering** - local symbols must precede globals; `sh_info` marks the boundary
+
+---
+
+## Debugging Support
+
+### Specialized Kernel Symbols
+
+The device linker preserves all specialized kernel symbols (`ncclDevFunc_*`) in `.symtab` for debugging:
+
+- **Type**: `STT_FUNC` (function)
+- **Binding**: `STB_GLOBAL` (must be global because ELF requires local symbols before globals)
+- **Visibility**: `STV_HIDDEN` (won't pollute dynamic symbol table)
+- **Section**: `.text`
+
+This allows debuggers (e.g., `rocgdb`) to:
+- Show function names in stack traces
+- Set breakpoints on specialized kernels
+- Provide source-level debugging of device code
+
+Verify symbols with:
+```bash
+llvm-readelf --symbols merged_device.elf | grep ncclDevFunc_
+```
+
+### GPU Auto-Detection
+
+The device linker auto-detects the GPU target including feature flags:
+- Extracts full target from `rocminfo` (e.g., `gfx950:sramecc+:xnack-`)
+- Falls back to base arch (e.g., `gfx950`) if features not found
+- Matches what `clang-offload-bundler` expects for unbundling
+
+Override with `--target <arch>` if needed.
 
 ---
 
@@ -458,9 +494,10 @@ llvm-readelf -S merged.elf
 
 | Mistake | Correct |
 |---------|---------|
+| Forgetting to rebuild `device_linker` after code changes | **Always rebuild**: `g++ -O2 -std=c++17 -o device_linker device_linker.cpp -lpthread` |
 | `--offload-compress` in dispatcher compile | Remove it - causes CCOB extraction failures |
-| Wrong `--target-arch` (e.g., gfx942 vs gfx950) | Must match GPU_TARGETS exactly |
-| Device linker defaulting to gfx942 | Pass `--target-arch` explicitly, check cmake variable `DEVICE_LINKER_GPU_ARCH` |
+| Wrong `--target-arch` (e.g., gfx942 vs gfx950) | Auto-detected from rocminfo now; override with `--target` if needed |
+| Target missing feature flags (e.g., `gfx950` vs `gfx950:sramecc+:xnack-`) | Auto-detection now includes features; bundler requires exact match |
 
 ### Link Errors
 

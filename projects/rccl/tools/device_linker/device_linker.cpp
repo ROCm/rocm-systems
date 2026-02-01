@@ -164,10 +164,27 @@ private:
 // Kernel extraction utilities
 // ============================================================================
 
-std::string g_target_arch;  // Default: detect from local GPU
+std::string g_target_arch;  // Default: detect from local GPU (includes feature flags)
 
 std::string detectLocalGpu() {
-    FILE* fp = popen("rocminfo 2>/dev/null | grep -m1 'gfx[0-9]*' | grep -oE 'gfx[0-9a-z]+'", "r");
+    // Try to get full target with features (e.g., gfx950:sramecc+:xnack-)
+    // This matches what HIP/clang-offload-bundler expects
+    FILE* fp = popen("rocminfo 2>/dev/null | grep -oE 'gfx[0-9a-z]+:[^[:space:]]+' | head -1", "r");
+    if (fp) {
+        char buf[128] = {0};
+        if (fgets(buf, sizeof(buf), fp)) {
+            pclose(fp);
+            std::string arch(buf);
+            while (!arch.empty() && (arch.back() == '\n' || arch.back() == '\r'))
+                arch.pop_back();
+            if (!arch.empty()) return arch;
+        } else {
+            pclose(fp);
+        }
+    }
+    
+    // Fallback: just get the gfx arch without features
+    fp = popen("rocminfo 2>/dev/null | grep -m1 'gfx[0-9]*' | grep -oE 'gfx[0-9a-z]+'", "r");
     if (!fp) return "";
     char buf[64] = {0};
     if (fgets(buf, sizeof(buf), fp)) {
@@ -1351,6 +1368,39 @@ private:
             }
         }
         
+        // Add specialized kernel symbols to .symtab for debugging
+        // These are local symbols that don't affect dynamic linking but allow
+        // debuggers to show function names in stack traces
+        if (symtab_sec && strtab_sec && !kernel_text_offsets_.empty()) {
+            printf("Adding %zu specialized kernel symbols to .symtab...\n", kernel_text_offsets_.size());
+            
+            uint16_t text_shndx = new_section_indices[".text"];
+            
+            for (const auto& [kern, text_off] : kernel_text_offsets_) {
+                // Append name to .strtab
+                uint32_t name_off = strtab_sec->data.size();
+                strtab_sec->data.insert(strtab_sec->data.end(), 
+                                        kern->name.begin(), kern->name.end());
+                strtab_sec->data.push_back('\0');
+                
+                // Create Elf64_Sym entry
+                // Use STB_GLOBAL (not STB_LOCAL) because ELF requires local symbols
+                // to precede global symbols, and sh_info marks the boundary.
+                // STV_HIDDEN ensures they don't pollute the dynamic symbol table.
+                Elf64_Sym sym = {};
+                sym.st_name = name_off;
+                sym.st_value = text_addr_ + text_off;
+                sym.st_size = kern->code.size();
+                sym.st_info = ELF64_ST_INFO(STB_GLOBAL, STT_FUNC);
+                sym.st_other = STV_HIDDEN;
+                sym.st_shndx = text_shndx;
+                
+                // Append to .symtab
+                const uint8_t* p = reinterpret_cast<const uint8_t*>(&sym);
+                symtab_sec->data.insert(symtab_sec->data.end(), p, p + sizeof(sym));
+            }
+        }
+        
         // Patch has_dyn_sized_stack and has_recursion ABS symbols to 0
         // These are ABS symbols (st_shndx == SHN_ABS == 0xFFF1)
         if (symtab_sec && strtab_sec) {
@@ -1553,13 +1603,29 @@ private:
         const char* shstr_name = ".shstrtab";
         shstrtab.insert(shstrtab.end(), shstr_name, shstr_name + strlen(shstr_name) + 1);
         
-        // Section offsets (already computed in layout)
+        // Section offsets - recalculate non-alloc sections since patchSections may have
+        // modified their sizes (e.g., adding symbols to .symtab/.strtab)
         std::vector<uint64_t> section_offsets;
         uint64_t offset = 0;
+        
+        // First pass: use layout-computed offsets for alloc sections, track max offset
         for (const auto& s : sections_) {
-            section_offsets.push_back(s.offset);
-            if (s.type != SHT_NOBITS) {
-                offset = std::max(offset, s.offset + s.fileSize());
+            if (s.isAlloc()) {
+                section_offsets.push_back(s.offset);
+                if (s.type != SHT_NOBITS) {
+                    offset = std::max(offset, s.offset + s.fileSize());
+                }
+            } else {
+                section_offsets.push_back(0);  // Will be computed below
+            }
+        }
+        
+        // Second pass: assign offsets to non-alloc sections sequentially after alloc sections
+        for (size_t i = 0; i < sections_.size(); i++) {
+            if (!sections_[i].isAlloc() && sections_[i].type != SHT_NOBITS) {
+                offset = (offset + sections_[i].alignment - 1) & ~(sections_[i].alignment - 1);
+                section_offsets[i] = offset;
+                offset += sections_[i].fileSize();
             }
         }
         
