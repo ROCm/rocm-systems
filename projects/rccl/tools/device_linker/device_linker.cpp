@@ -610,11 +610,12 @@ private:
         printf("Mapped %d kernel functions, total .text size: %zu bytes\n", mapped, text.data.size());
         sections_.push_back(std::move(text));
         
-        // Build .data.rel.ro (function tables - read-only after relocation)
-        // This section is zeroed; relocations fill values at load time
+        // Build .data.rel.ro (function tables - now pre-filled, could be read-only)
+        // Note: Keeping the name .data.rel.ro for ELF compatibility but values are pre-filled
         SectionInfo data_rel_ro;
         data_rel_ro.name = ".data.rel.ro";
         data_rel_ro.type = SHT_PROGBITS;
+        // Keep SHF_WRITE for now as some runtime loaders may expect it for RELRO sections
         data_rel_ro.flags = SHF_ALLOC | SHF_WRITE;
         data_rel_ro.alignment = 16;
         // Size: 3 function tables
@@ -906,23 +907,17 @@ private:
         // Copy and patch various metadata fields
         out = orig;
         
-        // 1. Patch uses_dynamic_stack: true -> false
-        // In msgpack: ".uses_dynamic_stack" is 0xb3 + 19 chars, true is 0xc3, false is 0xc2
-        const char* target1 = ".uses_dynamic_stack";
-        size_t tlen1 = strlen(target1);
-        int patch_count1 = 0;
+        // 1. Keep uses_dynamic_stack as-is (IFC has true, we should match)
+        // Previously we patched true->false but IFC production builds keep it true
+        printf("  .note: keeping uses_dynamic_stack unchanged (matching IFC)\n");
         
-        for (size_t i = 0; i + tlen1 + 1 < out.size(); i++) {
-            if (out[i] == 0xb3 && memcmp(out.data() + i + 1, target1, tlen1) == 0 && out[i + 1 + tlen1] == 0xc3) {
-                out[i + 1 + tlen1] = 0xc2;  // Change true (0xc3) to false (0xc2)
-                patch_count1++;
-            }
-        }
-        if (patch_count1 > 0) {
-            printf("  .note: patched %d uses_dynamic_stack from true to false\n", patch_count1);
-        }
+        // 2. Keep private_segment_fixed_size as-is (IFC has 0, we should match)
+        // Previously we patched from 0 to max_stack_ but IFC keeps it at 0
+        printf("  .note: keeping private_segment_fixed_size unchanged (matching IFC)\n");
         
-        // 2. Patch .private_segment_fixed_size: 0 -> max_stack_
+        // NOTE: We still patch VGPR/SGPR counts below to match our max resource usage
+        
+        // Legacy code for .private_segment_fixed_size patching (disabled)
         // The field name is 27 chars: ".private_segment_fixed_size"
         // Encoded as: 0xbb (fixstr 27) + 27 chars + value
         // Original value 0 is encoded as single byte 0x00
@@ -996,7 +991,9 @@ private:
             return patched;
         };
         
-        // Apply all patches (modifying byte stream)
+        // Skip private_segment_fixed_size patching - keep at 0 to match IFC
+        // (The code below is disabled)
+        /*
         if (!patch_positions.empty()) {
             if (max_stack_ <= 127) {
                 for (auto pos : patch_positions) { out[pos] = (uint8_t)max_stack_; patch_count2++; }
@@ -1014,6 +1011,7 @@ private:
         if (patch_count2 > 0) {
             printf("  .note: patched %d private_segment_fixed_size to %d\n", patch_count2, max_stack_);
         }
+        */
         
         int vgpr_patched = expandIntField(".vgpr_count", max_vgpr_);
         int sgpr_patched = expandIntField(".sgpr_count", max_sgpr_);
@@ -1227,17 +1225,38 @@ private:
     
     // ========== Pass 3: Patch ==========
     void patchSections() {
-        // Function tables in .data.rel.ro stay zeroed - relocations fill at load time
+        // Function tables in .data.rel.ro - pre-fill with absolute addresses
+        // This avoids relying on R_AMDGPU_RELATIVE64 relocations which may not
+        // be properly applied across all GPUs in multi-GPU scenarios
         SectionInfo* data_rel_ro_sec = nullptr;
         for (auto& s : sections_) if (s.name == ".data.rel.ro") { data_rel_ro_sec = &s; break; }
         
         if (data_rel_ro_sec) {
-            printf("Function tables at 0x%lx (zeroed, relocations will fill)\n", data_rel_ro_addr_);
+            printf("Function tables at 0x%lx (pre-filling with absolute addresses)\n", data_rel_ro_addr_);
             int populated = 0;
+            
+            // Pre-fill table entries with absolute addresses
+            // The device ELF is typically loaded at base address 0, so absolute = addend
+            uint8_t* table_data = data_rel_ro_sec->data.data();
+            int pop1 = 0, pop2 = 0, pop4 = 0;
             for (int i = 0; i < FUNC_COUNT; i++) {
-                if (table_1_[i] || table_2_[i] || table_4_[i]) populated++;
+                if (table_1_[i]) {
+                    uint64_t addr = text_addr_ + table_1_[i];
+                    memcpy(table_data + i * 8, &addr, 8);
+                    pop1++;
+                }
+                if (table_2_[i]) {
+                    uint64_t addr = text_addr_ + table_2_[i];
+                    memcpy(table_data + table_spacing_ + i * 8, &addr, 8);
+                    pop2++;
+                }
+                if (table_4_[i]) {
+                    uint64_t addr = text_addr_ + table_4_[i];
+                    memcpy(table_data + table_spacing_ * 2 + i * 8, &addr, 8);
+                    pop4++;
+                }
             }
-            printf("  %d function entries will be relocated\n", populated);
+            printf("  Function entries pre-filled: table_1=%d, table_2=%d, table_4=%d\n", pop1, pop2, pop4);
         }
         
         // Patch .text with PC-relative table references (now pointing to .data.rel.ro)
@@ -1252,7 +1271,9 @@ private:
             uint32_t s_add = 0x8000FF00;
             
             auto* disp_bss = disp_->find(".bss");
+            auto* disp_text = disp_->find(".text");
             uint64_t old_data_addr = disp_bss ? disp_bss->addr : 0x8000;
+            uint64_t disp_text_addr = disp_text ? disp_text->addr : 0;
             
             int patches = 0;
             for (size_t off = 0; off + 12 <= text_sec->data.size(); off += 4) {
@@ -1264,8 +1285,12 @@ private:
                     uint32_t old_lit;
                     memcpy(&old_lit, text_sec->data.data() + off + 8, 4);
                     
+                    // pc is the new address in merged ELF
                     uint64_t pc = text_addr_ + off + 4;
-                    uint64_t old_target = pc + old_lit;
+                    // original_pc is the address in the original dispatcher
+                    uint64_t original_pc = disp_text_addr + off + 4;
+                    // old_target is the original target (relative to original dispatcher layout)
+                    uint64_t old_target = original_pc + old_lit;
                     
                     int idx = -1;
                     if (old_target >= old_data_addr && old_target < old_data_addr + 0x6000) {
@@ -1297,8 +1322,9 @@ private:
                 uint32_t lds = max_lds_;
                 memcpy(kd + 0, &lds, 4);
                 
-                // Stack - patch to max_stack_
-                uint32_t stack = max_stack_;
+                // Stack - use 0 like IFC does (FLAT_SCRATCH handles scratch via SGPRs)
+                // IFC production builds have scratch_size=0 in their KDs
+                uint32_t stack = 0;  // Was: max_stack_
                 memcpy(kd + 4, &stack, 4);
                 
                 // RSRC1 at offset 0x30: VGPR/SGPR
@@ -1310,6 +1336,8 @@ private:
                 memcpy(kd + 0x30, &rsrc1, 4);
                 
                 // RSRC2 at offset 0x34: Enable scratch
+                // Note: We preserve the original USER_SGPR and properties because the
+                // dispatcher code was compiled expecting a specific SGPR layout
                 uint32_t rsrc2;
                 memcpy(&rsrc2, kd + 0x34, 4);
                 if (stack > 0) {
@@ -1815,9 +1843,6 @@ private:
     }
     
     void buildRelocations() {
-        // R_AMDGPU_RELATIVE64 = 13 (0x0D)
-        constexpr uint64_t R_AMDGPU_RELATIVE64 = 13;
-        
         // Find the existing .rela.dyn section (created as placeholder)
         SectionInfo* rela_sec = nullptr;
         for (auto& s : sections_) {
@@ -1828,46 +1853,18 @@ private:
             return;
         }
         
-        // Clear existing data (was pre-sized for layout calculation)
+        // Clear existing data - we no longer need relocations since function tables
+        // are pre-filled with absolute addresses in patchSections()
+        // This avoids issues with R_AMDGPU_RELATIVE64 relocations not being
+        // properly applied across all GPUs in multi-GPU scenarios
         rela_sec->data.clear();
         
-        int reloc_count = 0;
+        printf("Built .rela.dyn with 0 relocations (function tables pre-filled)\n");
         
-        // Add relocation for each table entry: r_offset, r_info, r_addend
-        auto addReloc = [&](uint64_t offset, uint64_t addend) {
-            size_t p = rela_sec->data.size();
-            rela_sec->data.resize(p + 24);
-            uint64_t r_info = R_AMDGPU_RELATIVE64;  // sym=0, type=13
-            memcpy(rela_sec->data.data() + p, &offset, 8);
-            memcpy(rela_sec->data.data() + p + 8, &r_info, 8);
-            memcpy(rela_sec->data.data() + p + 16, &addend, 8);
-            reloc_count++;
-        };
-        
-        // For each non-zero entry in function tables (in .data.rel.ro)
-        for (int i = 0; i < FUNC_COUNT; i++) {
-            if (table_1_[i]) {
-                uint64_t offset = data_rel_ro_addr_ + i * 8;
-                uint64_t addend = text_addr_ + table_1_[i];
-                addReloc(offset, addend);
-            }
-            if (table_2_[i]) {
-                uint64_t offset = data_rel_ro_addr_ + table_spacing_ + i * 8;
-                uint64_t addend = text_addr_ + table_2_[i];
-                addReloc(offset, addend);
-            }
-            if (table_4_[i]) {
-                uint64_t offset = data_rel_ro_addr_ + table_spacing_ * 2 + i * 8;
-                uint64_t addend = text_addr_ + table_4_[i];
-                addReloc(offset, addend);
-            }
-        }
-        
-        // Record address/size (already computed during layout)
+        // Record address/size 
         rela_addr_ = rela_sec->addr;
-        rela_size_ = rela_sec->size();
+        rela_size_ = 0;  // No actual relocations
         
-        printf("Built .rela.dyn with %d R_AMDGPU_RELATIVE64 relocations\n", reloc_count);
         printf("  .rela.dyn @ 0x%06lx  size=0x%06zx\n", rela_addr_, rela_size_);
         
         // Now populate .dynamic section with final rela addresses
