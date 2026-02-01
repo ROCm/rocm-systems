@@ -89,12 +89,14 @@ struct SectionInfo {
     uint64_t alignment = 1;
     uint64_t entsize = 0;
     std::vector<uint8_t> data;
+    size_t nobits_size = 0;  // For SHT_NOBITS sections
     
     // Computed during layout
     uint64_t addr = 0;
     uint64_t offset = 0;
     
-    size_t size() const { return data.size(); }
+    size_t size() const { return type == SHT_NOBITS ? nobits_size : data.size(); }
+    size_t fileSize() const { return type == SHT_NOBITS ? 0 : data.size(); }
     bool isAlloc() const { return flags & SHF_ALLOC; }
 };
 
@@ -121,7 +123,8 @@ public:
                 shdrs[i].sh_offset,
                 shdrs[i].sh_size,
                 shdrs[i].sh_addralign,
-                shdrs[i].sh_entsize
+                shdrs[i].sh_entsize,
+                (uint16_t)i
             });
         }
     }
@@ -138,6 +141,7 @@ public:
         uint64_t size;
         uint64_t align;
         uint64_t entsize;
+        uint16_t index;
     };
     
     const ParsedSection* find(const std::string& name) const {
@@ -160,7 +164,22 @@ private:
 // Kernel extraction utilities
 // ============================================================================
 
-std::string g_target_arch = "gfx942";
+std::string g_target_arch;  // Default: detect from local GPU
+
+std::string detectLocalGpu() {
+    FILE* fp = popen("rocminfo 2>/dev/null | grep -m1 'gfx[0-9]*' | grep -oE 'gfx[0-9a-z]+'", "r");
+    if (!fp) return "";
+    char buf[64] = {0};
+    if (fgets(buf, sizeof(buf), fp)) {
+        pclose(fp);
+        std::string arch(buf);
+        while (!arch.empty() && (arch.back() == '\n' || arch.back() == '\r'))
+            arch.pop_back();
+        return arch;
+    }
+    pclose(fp);
+    return "";
+}
 
 std::vector<uint8_t> extractDeviceCode(const std::string& path) {
     MappedFile file(path);
@@ -201,6 +220,8 @@ std::vector<uint8_t> extractDeviceCode(const std::string& path) {
 struct KernelInfo {
     std::string name;
     std::vector<uint8_t> code;
+    std::vector<uint8_t> kd;        // 64-byte kernel descriptor from .rodata
+    std::vector<uint8_t> note;      // kernel's .note section
     int vgpr = 0, sgpr = 0, lds = 0, stack = 0;
 };
 
@@ -242,10 +263,12 @@ KernelInfo parseKernel(const std::vector<uint8_t>& elf_data) {
         }
     }
     
-    // Parse .note for resources
+    // Parse .note for resources and save full note
     auto* note = elf.find(".note");
     if (note) {
         auto data = elf.getBytes(*note);
+        info.note = data;  // Save full note section
+        
         std::string_view view((char*)data.data(), data.size());
         
         auto findInt = [&](const char* key) -> int {
@@ -264,6 +287,13 @@ KernelInfo parseKernel(const std::vector<uint8_t>& elf_data) {
         info.sgpr = findInt(".sgpr_count");
         info.lds = findInt(".group_segment_fixed_size");
         info.stack = findInt(".private_segment_fixed_size");
+    }
+    
+    // Extract kernel descriptor from .rodata (64 bytes)
+    auto* rodata = elf.find(".rodata");
+    if (rodata && rodata->size >= 64) {
+        auto data = elf.getBytes(*rodata);
+        info.kd.assign(data.begin(), data.begin() + 64);
     }
     
     unlink(tmp.c_str());
@@ -411,6 +441,8 @@ private:
     std::unique_ptr<MappedFile> disp_file_;
     std::unique_ptr<ElfParser> disp_;
     std::vector<KernelInfo> kernels_;
+    std::vector<std::pair<const KernelInfo*, uint64_t>> kernel_text_offsets_;  // kernel -> text offset
+    std::vector<std::pair<size_t, uint64_t>> specialized_kd_offsets_;  // KD offset in .rodata -> text offset
     std::unordered_map<std::string, FuncIdMapping> funcid_map_;
     
     // Output sections
@@ -426,6 +458,11 @@ private:
     // Addresses computed during layout
     uint64_t text_addr_ = 0;
     uint64_t data_addr_ = 0;
+    uint64_t data_rel_ro_addr_ = 0;  // Function tables
+    uint64_t dyn_addr_ = 0;          // .dynamic section
+    uint64_t relro_end_ = 0;         // End of RELRO segment
+    uint64_t rela_addr_ = 0;
+    size_t rela_size_ = 0;
     size_t table_spacing_ = 6880;
     
     // ========== Pass 1: Collect ==========
@@ -485,6 +522,9 @@ private:
                 default: continue;
             }
             
+            // Track this kernel's code offset for KD patching
+            kernel_text_offsets_.push_back({&k, rel_addr});
+            
             text.data.insert(text.data.end(), k.code.begin(), k.code.end());
             while (text.data.size() % FUNC_ALIGNMENT != 0) text.data.push_back(0);
             mapped++;
@@ -492,17 +532,48 @@ private:
         printf("Mapped %d kernel functions, total .text size: %zu bytes\n", mapped, text.data.size());
         sections_.push_back(std::move(text));
         
-        // Build .data (function tables)
+        // Build .data.rel.ro (function tables - read-only after relocation)
+        // This section is zeroed; relocations fill values at load time
+        SectionInfo data_rel_ro;
+        data_rel_ro.name = ".data.rel.ro";
+        data_rel_ro.type = SHT_PROGBITS;
+        data_rel_ro.flags = SHF_ALLOC | SHF_WRITE;
+        data_rel_ro.alignment = 16;
+        // Size: 3 function tables
+        size_t func_table_size = table_spacing_ * 2 + FUNC_COUNT * 8;
+        func_table_size = (func_table_size + 15) & ~15UL;  // 16-byte align
+        data_rel_ro.data.resize(func_table_size, 0);  // Zeroed, relocations fill
+        sections_.push_back(std::move(data_rel_ro));
+        
+        // Build .data (scratch variables only)
+        auto* disp_bss = disp_->find(".bss");
         SectionInfo data;
         data.name = ".data";
         data.type = SHT_PROGBITS;
         data.flags = SHF_ALLOC | SHF_WRITE;
         data.alignment = 16;
-        data.data.resize(table_spacing_ * 2 + FUNC_COUNT * 8, 0);
-        // Will populate with absolute addresses after layout
+        // Scratch variables: ncclDeviceScratchTrigger (4) + ncclDeviceScratchSink (4) + padding
+        size_t scratch_size = 0x60;  // Match IFC's .data size
+        data.data.resize(scratch_size, 0);
         sections_.push_back(std::move(data));
         
-        // Build .note (patched)
+        // Build .bss (uninitialized data - NOBITS)
+        // The dispatcher's .bss originally contained:
+        //   - ncclDevFuncTable_1/2/4 (6872 * 3 = 20616 bytes) - NOW MOVED to .data.rel.ro
+        //   - __hip_cuid_* (1 byte)
+        // So our .bss should ONLY contain __hip_cuid_* (1 byte + alignment)
+        SectionInfo bss;
+        bss.name = ".bss";
+        bss.type = SHT_NOBITS;
+        bss.flags = SHF_ALLOC | SHF_WRITE;
+        bss.alignment = 1;
+        // Only need space for __hip_cuid_* (1 byte) - IFC-like size
+        size_t bss_size = 0x6b;  // Match IFC size (contains just cuid markers)
+        bss.data.resize(0);  // NOBITS has no data
+        bss.nobits_size = bss_size;
+        sections_.push_back(std::move(bss));
+        
+        // Build .note (dispatcher only - specialized kernels are called as functions, not launched)
         auto* disp_note = disp_->find(".note");
         if (disp_note) {
             SectionInfo note;
@@ -512,11 +583,13 @@ private:
             note.alignment = 4;
             
             auto orig = disp_->getBytes(*disp_note);
+            // Patch uses_dynamic_stack to false for multi-GPU compatibility
             patchNote(orig, note.data);
+            printf("Built .note: %zu bytes (dispatcher only)\n", note.data.size());
             sections_.push_back(std::move(note));
         }
         
-        // Build .rodata (KDs - will patch later)
+        // Build .rodata (KDs - dispatcher only, specialized kernels are called as functions)
         auto* disp_rodata = disp_->find(".rodata");
         if (disp_rodata) {
             SectionInfo rodata;
@@ -525,6 +598,7 @@ private:
             rodata.flags = SHF_ALLOC;
             rodata.alignment = 64;
             rodata.data = disp_->getBytes(*disp_rodata);
+            printf("Built .rodata: %zu bytes (dispatcher KDs only)\n", rodata.data.size());
             sections_.push_back(std::move(rodata));
         }
         
@@ -543,6 +617,42 @@ private:
             }
         }
         
+        // Placeholder for .rela.dyn (allocated, will be populated during patchSections)
+        // Size will be updated after we know how many relocations are needed
+        {
+            SectionInfo rela;
+            rela.name = ".rela.dyn";
+            rela.type = SHT_RELA;
+            rela.flags = SHF_ALLOC;
+            rela.alignment = 8;
+            rela.entsize = 24;
+            // Actual data populated in buildRelocations()
+            sections_.push_back(std::move(rela));
+        }
+        
+        // .dynamic - will be populated during layout
+        {
+            SectionInfo dyn;
+            dyn.name = ".dynamic";
+            dyn.type = SHT_DYNAMIC;
+            dyn.flags = SHF_ALLOC | SHF_WRITE;
+            dyn.alignment = 8;
+            dyn.entsize = 16;
+            // Actual data populated in computeLayout()
+            sections_.push_back(std::move(dyn));
+        }
+        
+        // .relro_padding - NOBITS section for page alignment after RELRO segment
+        {
+            SectionInfo relro_pad;
+            relro_pad.name = ".relro_padding";
+            relro_pad.type = SHT_NOBITS;
+            relro_pad.flags = SHF_ALLOC | SHF_WRITE;
+            relro_pad.alignment = 1;
+            relro_pad.nobits_size = 0;  // Will be computed during layout
+            sections_.push_back(std::move(relro_pad));
+        }
+        
         // Non-allocated sections
         for (const char* name : {".symtab", ".strtab"}) {
             auto* s = disp_->find(name);
@@ -558,142 +668,364 @@ private:
             }
         }
         
+        // Add empty .AMDGPU.gpr_maximums section (expected by COMGR)
+        {
+            SectionInfo gpr_max;
+            gpr_max.name = ".AMDGPU.gpr_maximums";
+            gpr_max.type = SHT_PROGBITS;
+            gpr_max.flags = 0;  // Non-allocated
+            gpr_max.alignment = 1;
+            // Empty section
+            sections_.push_back(std::move(gpr_max));
+        }
+        
         return true;
     }
     
     void patchNote(const std::vector<uint8_t>& orig, std::vector<uint8_t>& out) {
-        // Patch private_segment_fixed_size: 24 -> max_stack_
-        const char* target = ".private_segment_fixed_size";
-        size_t tlen = strlen(target);
+        // Copy and patch various metadata fields
+        out = orig;
         
-        std::vector<size_t> patches;
-        for (size_t i = 0; i + 1 + tlen + 1 <= orig.size(); i++) {
-            if (orig[i] == 0xbb && memcmp(orig.data() + i + 1, target, tlen) == 0 && orig[i + 1 + tlen] == 24) {
-                patches.push_back(i + 1 + tlen);
+        // 1. Patch uses_dynamic_stack: true -> false
+        // In msgpack: ".uses_dynamic_stack" is 0xb3 + 19 chars, true is 0xc3, false is 0xc2
+        const char* target1 = ".uses_dynamic_stack";
+        size_t tlen1 = strlen(target1);
+        int patch_count1 = 0;
+        
+        for (size_t i = 0; i + tlen1 + 1 < out.size(); i++) {
+            if (out[i] == 0xb3 && memcmp(out.data() + i + 1, target1, tlen1) == 0 && out[i + 1 + tlen1] == 0xc3) {
+                out[i + 1 + tlen1] = 0xc2;  // Change true (0xc3) to false (0xc2)
+                patch_count1++;
+            }
+        }
+        if (patch_count1 > 0) {
+            printf("  .note: patched %d uses_dynamic_stack from true to false\n", patch_count1);
+        }
+        
+        // 2. Patch .private_segment_fixed_size: 0 -> max_stack_
+        // The field name is 27 chars: ".private_segment_fixed_size"
+        // Encoded as: 0xbb (fixstr 27) + 27 chars + value
+        // Original value 0 is encoded as single byte 0x00
+        // New value (e.g., 1124 = 0x464) needs uint16: 0xcd 0x04 0x64
+        // This changes the size! We need to handle this carefully.
+        // 
+        // For now, if max_stack_ fits in a single byte (0-127), we can patch in place.
+        // If max_stack_ > 127 but original is 0, we can't expand in place easily.
+        // 
+        // Alternative: patch to 0 (leave unchanged) and rely on KD patching only.
+        // The HSA runtime uses KD values, not metadata, for actual execution.
+        // But COMGR might validate consistency...
+        //
+        // Patch .private_segment_fixed_size in msgpack
+        // Original value 0 is encoded as single byte fixint (0x00)
+        // For values > 127, we need uint16 encoding (0xcd + 2 bytes big-endian)
+        const char* target2 = ".private_segment_fixed_size";
+        size_t tlen2 = strlen(target2);
+        int patch_count2 = 0;
+        
+        // Find all occurrences and patch (may need to expand encoding)
+        std::vector<size_t> patch_positions;
+        for (size_t i = 0; i + tlen2 + 1 < out.size(); i++) {
+            // fixstr(27) = 0xbb
+            if (out[i] == 0xbb && memcmp(out.data() + i + 1, target2, tlen2) == 0) {
+                size_t val_off = i + 1 + tlen2;
+                if (val_off < out.size() && out[val_off] <= 0x7f) {
+                    patch_positions.push_back(val_off);
+                }
             }
         }
         
-        out.reserve(orig.size() + patches.size() * 2 + 4);
-        size_t prev = 0;
-        for (size_t p : patches) {
-            out.insert(out.end(), orig.begin() + prev, orig.begin() + p);
-            out.push_back(0xcd);
-            out.push_back((max_stack_ >> 8) & 0xff);
-            out.push_back(max_stack_ & 0xff);
-            prev = p + 1;
-            printf("  .note: private_segment_fixed_size 24 -> %d\n", max_stack_);
-        }
-        out.insert(out.end(), orig.begin() + prev, orig.end());
+        // Helper to expand msgpack integer field (handles fixint -> uint8/uint16 expansion)
+        auto expandIntField = [&](const char* field_name, int new_val) -> int {
+            size_t flen = strlen(field_name);
+            std::vector<size_t> positions;
+            
+            for (size_t i = 0; i + flen + 2 < out.size(); i++) {
+                uint8_t prefix = out[i];
+                size_t str_len = 0, hdr = 1;
+                if (prefix >= 0xa0 && prefix <= 0xbf) str_len = prefix - 0xa0;
+                else if (prefix == 0xbb) str_len = 27;  // fixstr(27)
+                else if (prefix == 0xd9 && i + 1 < out.size()) { str_len = out[i + 1]; hdr = 2; }
+                
+                if (str_len == flen && memcmp(out.data() + i + hdr, field_name, flen) == 0) {
+                    positions.push_back(i + hdr + flen);
+                }
+            }
+            if (positions.empty()) return 0;
+            
+            std::sort(positions.rbegin(), positions.rend());
+            int patched = 0;
+            for (auto off : positions) {
+                if (off >= out.size()) continue;
+                uint8_t b = out[off];
+                
+                if (b <= 0x7f) {  // fixint
+                    if (new_val <= 127) { out[off] = new_val; }
+                    else if (new_val <= 255) { out.insert(out.begin() + off, 1, 0); out[off] = 0xcc; out[off+1] = new_val; }
+                    else { out.insert(out.begin() + off, 2, 0); out[off] = 0xcd; out[off+1] = (new_val>>8)&0xff; out[off+2] = new_val&0xff; }
+                    patched++;
+                } else if (b == 0xcc && off + 1 < out.size()) {  // uint8
+                    if (new_val <= 255) { out[off+1] = new_val; }
+                    else { out.insert(out.begin() + off + 1, 1, 0); out[off] = 0xcd; out[off+1] = (new_val>>8)&0xff; out[off+2] = new_val&0xff; }
+                    patched++;
+                } else if (b == 0xcd && off + 2 < out.size()) {  // uint16
+                    out[off+1] = (new_val>>8)&0xff; out[off+2] = new_val&0xff;
+                    patched++;
+                }
+            }
+            return patched;
+        };
         
-        // Update descsz and pad to alignment
-        if (!patches.empty() && out.size() >= 12) {
-            uint32_t namesz, old_descsz;
-            memcpy(&namesz, out.data(), 4);
-            memcpy(&old_descsz, out.data() + 4, 4);
-            
-            uint32_t new_descsz = old_descsz + patches.size() * 2;
+        // Apply all patches (modifying byte stream)
+        if (!patch_positions.empty()) {
+            if (max_stack_ <= 127) {
+                for (auto pos : patch_positions) { out[pos] = (uint8_t)max_stack_; patch_count2++; }
+            } else {
+                std::sort(patch_positions.rbegin(), patch_positions.rend());
+                for (auto pos : patch_positions) {
+                    if (max_stack_ <= 65535) {
+                        out.insert(out.begin() + pos, 2, 0);
+                        out[pos] = 0xcd; out[pos+1] = (max_stack_>>8)&0xff; out[pos+2] = max_stack_&0xff;
+                    }
+                    patch_count2++;
+                }
+            }
+        }
+        if (patch_count2 > 0) {
+            printf("  .note: patched %d private_segment_fixed_size to %d\n", patch_count2, max_stack_);
+        }
+        
+        int vgpr_patched = expandIntField(".vgpr_count", max_vgpr_);
+        int sgpr_patched = expandIntField(".sgpr_count", max_sgpr_);
+        if (vgpr_patched > 0 || sgpr_patched > 0) {
+            printf("  .note: patched %d .vgpr_count to %d, %d .sgpr_count to %d\n",
+                   vgpr_patched, max_vgpr_, sgpr_patched, max_sgpr_);
+        }
+        
+        // Update descsz ONCE after all modifications
+        // Note header: namesz(4) + descsz(4) + type(4) + name("AMDGPU\0" aligned to 4 = 8) = 20 bytes
+        uint32_t new_descsz = out.size() - 20;
+        memcpy(out.data() + 4, &new_descsz, 4);
+        
+        // Pad descriptor to 4-byte boundary if needed
+        size_t pad = (4 - (new_descsz % 4)) % 4;
+        for (size_t i = 0; i < pad; i++) out.push_back(0);
+        if (pad > 0) {
+            new_descsz = out.size() - 20;
             memcpy(out.data() + 4, &new_descsz, 4);
-            
-            // Calculate expected total size with alignment
-            uint32_t namesz_aligned = (namesz + 3) & ~3;
-            uint32_t old_descsz_aligned = (old_descsz + 3) & ~3;
-            uint32_t new_descsz_aligned = (new_descsz + 3) & ~3;
-            
-            // Pad to match aligned size
-            size_t expected_size = 12 + namesz_aligned + new_descsz_aligned;
-            while (out.size() < expected_size) out.push_back(0);
-            
-            printf("  .note: descsz %u -> %u, size %zu -> %zu\n", 
-                   old_descsz, new_descsz, orig.size(), out.size());
         }
     }
     
     // ========== Pass 2: Layout ==========
     void computeLayout() {
-        // Layout order for AMDGPU code object:
-        // [ELF header + phdrs] [.note] [.dynsym] [.gnu.hash] [.hash] [.dynstr] [.rodata] [.text] [.data]
-        // Then non-alloc: [.symtab] [.strtab] [.dynamic] [.shstrtab] [section headers]
+        // Layout to match IFC exactly:
+        // LOAD R:  [ELF header + phdrs] [.note] [.dynsym] [.gnu.hash] [.hash] [.dynstr] [.rela.dyn] [.rodata]
+        // LOAD RX: [.text] (page-aligned)
+        // LOAD RW (RELRO): [.data.rel.ro] [.dynamic] [.relro_padding] (page-aligned start)
+        // LOAD RW: [.data] [.bss] (page-aligned start)
+        // Non-alloc: [.symtab] [.strtab] [.shstrtab] [section headers]
+        
+        printf("Computing layout (IFC-compatible)...\n");
+        
+        // Pre-calculate .rela.dyn size based on function table entries
+        int rela_count = 0;
+        for (int i = 0; i < FUNC_COUNT; i++) {
+            if (table_1_[i]) rela_count++;
+            if (table_2_[i]) rela_count++;
+            if (table_4_[i]) rela_count++;
+        }
+        for (auto& s : sections_) {
+            if (s.name == ".rela.dyn") {
+                s.data.resize(rela_count * 24);
+                break;
+            }
+        }
         
         const size_t ehdr_size = 64;
         const size_t phdr_size = 56;
-        const size_t num_phdrs = 3;
+        const size_t num_phdrs = 9;  // Match IFC: PHDR, LOAD R, LOAD RX, LOAD RW(RELRO), LOAD RW, DYNAMIC, GNU_RELRO, GNU_STACK, NOTE
         uint64_t addr = ehdr_size + num_phdrs * phdr_size;
         
-        // Sort allocated sections in desired order
+        // Sort allocated sections in IFC order
         auto order = [](const std::string& n) -> int {
+            // LOAD R segment
             if (n == ".note") return 0;
             if (n == ".dynsym") return 1;
             if (n == ".gnu.hash") return 2;
             if (n == ".hash") return 3;
             if (n == ".dynstr") return 4;
-            if (n == ".rodata") return 5;
-            if (n == ".text") return 6;
-            if (n == ".data") return 7;
+            if (n == ".rela.dyn") return 5;
+            if (n == ".rodata") return 6;
+            // LOAD RX segment
+            if (n == ".text") return 7;
+            // LOAD RW (RELRO) segment - .data.rel.ro, .dynamic, .relro_padding
+            if (n == ".data.rel.ro") return 8;
+            if (n == ".dynamic") return 9;
+            if (n == ".relro_padding") return 10;
+            // LOAD RW segment - .data, .bss
+            if (n == ".data") return 11;
+            if (n == ".bss") return 12;
             return 100;
         };
         
         std::sort(sections_.begin(), sections_.end(), [&](const SectionInfo& a, const SectionInfo& b) {
             bool a_alloc = a.isAlloc(), b_alloc = b.isAlloc();
-            if (a_alloc != b_alloc) return a_alloc;  // Alloc sections first
+            if (a_alloc != b_alloc) return a_alloc;
             if (a_alloc) return order(a.name) < order(b.name);
             return false;
         });
         
-        // Assign addresses to allocated sections
+        // First pass: compute addresses for sections before RELRO segment
         for (auto& s : sections_) {
             if (!s.isAlloc()) continue;
+            if (s.name == ".data.rel.ro") break;  // Stop before RELRO segment
             
             addr = (addr + s.alignment - 1) & ~(s.alignment - 1);
             s.addr = addr;
-            s.offset = addr;  // For LOAD segment, offset == addr
+            s.offset = addr;
             addr += s.size();
             
             if (s.name == ".text") text_addr_ = s.addr;
-            if (s.name == ".data") data_addr_ = s.addr;
             
-            printf("  %-12s @ 0x%06lx  size=0x%06zx  align=%lu\n",
+            printf("  %-16s @ 0x%08lx  size=0x%06zx  align=%lu\n",
                    s.name.c_str(), s.addr, s.size(), s.alignment);
         }
         
-        // Non-allocated sections go at end
+        // Page-align for RELRO segment (LOAD RW #1)
+        uint64_t relro_start = (addr + 0xFFF) & ~0xFFFUL;
+        printf("  [page align for RELRO: 0x%lx -> 0x%lx]\n", addr, relro_start);
+        addr = relro_start;
+        
+        // Compute .data.rel.ro address
+        for (auto& s : sections_) {
+            if (s.name == ".data.rel.ro") {
+                addr = (addr + s.alignment - 1) & ~(s.alignment - 1);
+                s.addr = addr;
+                s.offset = addr;
+                data_rel_ro_addr_ = addr;
+                addr += s.size();
+                printf("  %-16s @ 0x%08lx  size=0x%06zx  align=%lu\n",
+                       s.name.c_str(), s.addr, s.size(), s.alignment);
+                break;
+            }
+        }
+        
+        // Compute .dynamic address and populate data
+        for (auto& s : sections_) {
+            if (s.name == ".dynamic") {
+                addr = (addr + s.alignment - 1) & ~(s.alignment - 1);
+                s.addr = addr;
+                s.offset = addr;
+                dyn_addr_ = addr;
+                // Data will be populated after all addresses are known
+                printf("  %-16s @ 0x%08lx  (data populated later)\n", s.name.c_str(), s.addr);
+                break;
+            }
+        }
+        
+        // Compute .relro_padding size to align RELRO segment end to page boundary
+        // RELRO covers .data.rel.ro + .dynamic + .relro_padding
+        uint64_t relro_end_before_pad = addr;
+        uint64_t relro_end_aligned = (relro_end_before_pad + 0xFFF) & ~0xFFFUL;
+        size_t relro_pad_size = relro_end_aligned - relro_end_before_pad;
+        
+        for (auto& s : sections_) {
+            if (s.name == ".relro_padding") {
+                s.nobits_size = relro_pad_size;
+                s.addr = addr;
+                s.offset = addr;  // NOBITS doesn't take file space
+                printf("  %-16s @ 0x%08lx  size=0x%06zx  (NOBITS)\n",
+                       s.name.c_str(), s.addr, s.size(), s.alignment);
+                addr += relro_pad_size;
+                break;
+            }
+        }
+        
+        relro_end_ = addr;  // End of RELRO segment
+        
+        // Page-align for .data/.bss segment (LOAD RW #2)
+        uint64_t data_start = (addr + 0xFFF) & ~0xFFFUL;
+        printf("  [page align for data: 0x%lx -> 0x%lx]\n", addr, data_start);
+        addr = data_start;
+        
+        // Assign addresses to .data and .bss
+        for (auto& s : sections_) {
+            if (!s.isAlloc()) continue;
+            if (s.name != ".data" && s.name != ".bss") continue;
+            
+            addr = (addr + s.alignment - 1) & ~(s.alignment - 1);
+            s.addr = addr;
+            s.offset = s.type == SHT_NOBITS ? data_start : addr;  // NOBITS shares offset with previous
+            if (s.name == ".data") data_addr_ = addr;
+            addr += s.size();
+            
+            printf("  %-16s @ 0x%08lx  size=0x%06zx  %s\n",
+                   s.name.c_str(), s.addr, s.size(), s.type == SHT_NOBITS ? "(NOBITS)" : "");
+        }
+        
+        // Reserve space for .dynamic section (11 entries * 16 bytes = 176 bytes)
+        // Actual data will be populated in populateDynamicSection() after buildRelocations()
+        size_t dyn_size = 11 * 16;  // RELA, RELASZ, RELAENT, RELACOUNT, SYMTAB, SYMENT, STRTAB, STRSZ, GNU_HASH, HASH, NULL
+        
+        // Update .relro_padding based on reserved .dynamic size
+        uint64_t addr_after_dyn = dyn_addr_ + dyn_size;
+        for (auto& s : sections_) {
+            if (s.name == ".relro_padding") {
+                uint64_t relro_end_aligned = (addr_after_dyn + 0xFFF) & ~0xFFFUL;
+                s.nobits_size = relro_end_aligned - addr_after_dyn;
+                s.addr = addr_after_dyn;
+                s.offset = addr_after_dyn;
+                relro_end_ = addr_after_dyn + s.nobits_size;
+                printf("  %-16s @ 0x%08lx  size=0x%06zx  (reserved)\n", ".dynamic", dyn_addr_, dyn_size);
+                printf("  %-16s @ 0x%08lx  size=0x%06zx  (NOBITS)\n",
+                       s.name.c_str(), s.addr, s.size());
+                break;
+            }
+        }
+        
+        // Non-allocated sections - offset only, no address
+        // Need to recalculate offset starting from end of last allocated section
+        uint64_t nonalloc_off = 0;
+        for (const auto& s : sections_) {
+            if (s.isAlloc() && s.type != SHT_NOBITS) {
+                nonalloc_off = std::max(nonalloc_off, s.offset + s.fileSize());
+            }
+        }
+        
         for (auto& s : sections_) {
             if (s.isAlloc()) continue;
-            addr = (addr + s.alignment - 1) & ~(s.alignment - 1);
+            nonalloc_off = (nonalloc_off + s.alignment - 1) & ~(s.alignment - 1);
             s.addr = 0;
-            s.offset = addr;
-            addr += s.size();
-            printf("  %-12s @ offset 0x%06lx  size=0x%06zx (non-alloc)\n",
+            s.offset = nonalloc_off;
+            nonalloc_off += s.fileSize();
+            printf("  %-16s @ offset 0x%08lx  size=0x%06zx (non-alloc)\n",
                    s.name.c_str(), s.offset, s.size());
         }
+        
+        printf("Layout complete. Total size: 0x%lx\n", nonalloc_off);
     }
     
     // ========== Pass 3: Patch ==========
     void patchSections() {
-        // Patch .data with absolute function addresses
-        SectionInfo* data_sec = nullptr;
-        for (auto& s : sections_) if (s.name == ".data") { data_sec = &s; break; }
+        // Function tables in .data.rel.ro stay zeroed - relocations fill at load time
+        SectionInfo* data_rel_ro_sec = nullptr;
+        for (auto& s : sections_) if (s.name == ".data.rel.ro") { data_rel_ro_sec = &s; break; }
         
-        if (data_sec) {
-            printf("Populating function tables at 0x%lx\n", data_addr_);
+        if (data_rel_ro_sec) {
+            printf("Function tables at 0x%lx (zeroed, relocations will fill)\n", data_rel_ro_addr_);
             int populated = 0;
             for (int i = 0; i < FUNC_COUNT; i++) {
-                uint64_t addr1 = table_1_[i] ? text_addr_ + table_1_[i] : 0;
-                uint64_t addr2 = table_2_[i] ? text_addr_ + table_2_[i] : 0;
-                uint64_t addr4 = table_4_[i] ? text_addr_ + table_4_[i] : 0;
-                if (addr1 || addr2 || addr4) populated++;
-                memcpy(data_sec->data.data() + i * 8, &addr1, 8);
-                memcpy(data_sec->data.data() + table_spacing_ + i * 8, &addr2, 8);
-                memcpy(data_sec->data.data() + table_spacing_ * 2 + i * 8, &addr4, 8);
+                if (table_1_[i] || table_2_[i] || table_4_[i]) populated++;
             }
-            printf("  Populated %d function entries\n", populated);
+            printf("  %d function entries will be relocated\n", populated);
         }
         
-        // Patch .text with PC-relative table references
+        // Patch .text with PC-relative table references (now pointing to .data.rel.ro)
         SectionInfo* text_sec = nullptr;
         for (auto& s : sections_) if (s.name == ".text") { text_sec = &s; break; }
         
         if (text_sec) {
-            uint64_t table_addrs[3] = { data_addr_, data_addr_ + table_spacing_, data_addr_ + table_spacing_ * 2 };
+            uint64_t table_addrs[3] = { data_rel_ro_addr_, data_rel_ro_addr_ + table_spacing_, data_rel_ro_addr_ + table_spacing_ * 2 };
             
             // Find s_getpc_b64 + s_add_u32 patterns
             uint32_t s_getpc = 0xBE801C00;
@@ -734,19 +1066,19 @@ private:
             printf("Patched %d PC-relative table references\n", patches);
         }
         
-        // Patch .rodata (KDs)
+        // Patch .rodata (KDs) - both dispatcher and specialized
         SectionInfo* rodata_sec = nullptr;
         for (auto& s : sections_) if (s.name == ".rodata") { rodata_sec = &s; break; }
         
         if (rodata_sec) {
-            for (size_t kd_off : {0UL, 64UL, 128UL}) {
-                if (kd_off + 64 > rodata_sec->data.size()) continue;
-                
-                uint8_t* kd = rodata_sec->data.data() + kd_off;
-                
-                // LDS and stack
-                uint32_t lds = max_lds_, stack = max_stack_;
+            // Helper to patch a single KD with max resources
+            auto patchKD = [&](uint8_t* kd, size_t kd_off, bool is_specialized, uint64_t text_off = 0) {
+                // LDS - patch to max across all kernels
+                uint32_t lds = max_lds_;
                 memcpy(kd + 0, &lds, 4);
+                
+                // Stack - patch to max_stack_
+                uint32_t stack = max_stack_;
                 memcpy(kd + 4, &stack, 4);
                 
                 // RSRC1: VGPR/SGPR
@@ -757,38 +1089,448 @@ private:
                 rsrc1 = (rsrc1 & ~0x3FF) | (vgpr_g & 0x3F) | ((sgpr_g & 0xF) << 6);
                 memcpy(kd + 0x34, &rsrc1, 4);
                 
-                // RSRC2: SCRATCH_EN, USER_SGPR
+                // RSRC2: Enable scratch
                 uint32_t rsrc2;
                 memcpy(&rsrc2, kd + 0x38, 4);
-                if (stack > 0) rsrc2 |= 1;
-                rsrc2 = (rsrc2 & ~(0x1f << 1)) | (10 << 1);
+                if (stack > 0) {
+                    rsrc2 |= 1;  // SCRATCH_EN = 1
+                }
                 memcpy(kd + 0x38, &rsrc2, 4);
                 
-                // CODE_PROPERTIES
-                uint16_t props = 0x001e;
-                memcpy(kd + 0x3c, &props, 2);
+                // For specialized KDs: patch kernel_code_entry_byte_offset
+                if (is_specialized && text_off != 0) {
+                    // KD offset 0x10: kernel_code_entry_byte_offset (int64_t, relative to KD address)
+                    // new_offset = (text_addr + text_off) - (rodata_addr + kd_off)
+                    uint64_t rodata_addr = 0;
+                    for (const auto& s : sections_) if (s.name == ".rodata") { rodata_addr = s.addr; break; }
+                    
+                    int64_t entry_offset = (int64_t)(text_addr_ + text_off) - (int64_t)(rodata_addr + kd_off);
+                    memcpy(kd + 0x10, &entry_offset, 8);
+                    
+                    printf("  KD[%zu] (specialized): entry_offset=%ld (text=0x%lx)\n",
+                           kd_off / 64, entry_offset, text_addr_ + text_off);
+                }
                 
-                printf("  KD[%zu]: LDS=%d, stack=%d, RSRC2=0x%08x, props=0x%04x\n",
-                       kd_off / 64, lds, stack, rsrc2, props);
+                uint16_t props;
+                memcpy(&props, kd + 0x3c, 2);
+                if (!is_specialized) {
+                    printf("  KD[%zu] (dispatcher): LDS=%d, stack=%d, RSRC2=0x%08x\n",
+                           kd_off / 64, lds, stack, rsrc2);
+                }
+            };
+            
+            // Patch dispatcher KDs (first 3)
+            for (size_t kd_off : {0UL, 64UL, 128UL}) {
+                if (kd_off + 64 > rodata_sec->data.size()) continue;
+                uint8_t* kd = rodata_sec->data.data() + kd_off;
+                patchKD(kd, kd_off, false);
             }
+            
+            // Patch specialized KDs
+            for (const auto& [kd_offset, text_off] : specialized_kd_offsets_) {
+                if (kd_offset + 64 > rodata_sec->data.size()) continue;
+                uint8_t* kd = rodata_sec->data.data() + kd_offset;
+                patchKD(kd, kd_offset, true, text_off);
+            }
+            printf("Patched %zu dispatcher KDs + %zu specialized KDs\n", 
+                   3UL, specialized_kd_offsets_.size());
         }
         
-        // Patch .dynsym symbol values
+        // Patch .dynsym symbol values for all relocated sections
         SectionInfo* dynsym_sec = nullptr;
         for (auto& s : sections_) if (s.name == ".dynsym") { dynsym_sec = &s; break; }
         
-        if (dynsym_sec) {
-            auto* disp_bss = disp_->find(".bss");
-            uint64_t old_data = disp_bss ? disp_bss->addr : 0x8000;
-            uint64_t delta = data_addr_ - old_data;
-            
-            for (size_t i = 0; i + 24 <= dynsym_sec->data.size(); i += 24) {
-                uint64_t val;
-                memcpy(&val, dynsym_sec->data.data() + i + 8, 8);
-                if (val >= old_data && val < old_data + 0x10000) {
-                    val += delta;
-                    memcpy(dynsym_sec->data.data() + i + 8, &val, 8);
+        // Get old section addresses from dispatcher
+        auto* disp_bss = disp_->find(".bss");
+        auto* disp_rodata = disp_->find(".rodata");
+        auto* disp_text_sec = disp_->find(".text");
+        
+        uint64_t old_data = disp_bss ? disp_bss->addr : 0;
+        uint64_t old_rodata = disp_rodata ? disp_rodata->addr : 0;
+        uint64_t old_text = disp_text_sec ? disp_text_sec->addr : 0;
+        
+        // Get new section addresses
+        uint64_t new_rodata = 0;
+        for (const auto& s : sections_) {
+            if (s.name == ".rodata") { new_rodata = s.addr; break; }
+        }
+        
+        int64_t data_delta = (int64_t)data_addr_ - (int64_t)old_data;
+        int64_t rodata_delta = (int64_t)new_rodata - (int64_t)old_rodata;
+        int64_t text_delta = (int64_t)text_addr_ - (int64_t)old_text;
+        
+        printf("Symbol deltas: .rodata=%+ld, .text=%+ld, .data=%+ld\n", 
+               rodata_delta, text_delta, data_delta);
+        
+        // Build section index map for merged ELF: section name -> index (+1 for NULL)
+        std::unordered_map<std::string, uint16_t> new_section_indices;
+        for (size_t i = 0; i < sections_.size(); i++) {
+            new_section_indices[sections_[i].name] = i + 1;  // +1 for NULL section
+        }
+        
+        // Build address range to section index map for merged ELF
+        struct SectionRange {
+            uint64_t start, end;
+            uint16_t index;
+            std::string name;
+        };
+        std::vector<SectionRange> merged_ranges;
+        for (size_t i = 0; i < sections_.size(); i++) {
+            if (sections_[i].isAlloc() && sections_[i].size() > 0) {
+                merged_ranges.push_back({
+                    sections_[i].addr,
+                    sections_[i].addr + sections_[i].size(),
+                    (uint16_t)(i + 1),  // +1 for NULL section
+                    sections_[i].name
+                });
+            }
+        }
+        
+        // Find old section indices from dispatcher
+        uint16_t old_bss_idx = 0, old_rodata_idx = 0, old_text_idx = 0;
+        {
+            auto* bss = disp_->find(".bss");
+            auto* rodata = disp_->find(".rodata");
+            auto* text = disp_->find(".text");
+            if (bss) old_bss_idx = bss->index;
+            if (rodata) old_rodata_idx = rodata->index;
+            if (text) old_text_idx = text->index;
+        }
+        printf("Old section indices: .bss=%d, .rodata=%d, .text=%d\n", old_bss_idx, old_rodata_idx, old_text_idx);
+        printf("New section indices: .data=%d, .bss=%d, .rodata=%d, .text=%d\n",
+               new_section_indices[".data"], new_section_indices[".bss"],
+               new_section_indices[".rodata"], new_section_indices[".text"]);
+        
+        // Helper to find which merged section an address falls into
+        auto findSectionForAddr = [&](uint64_t addr) -> uint16_t {
+            for (const auto& r : merged_ranges) {
+                if (addr >= r.start && addr < r.end) {
+                    return r.index;
                 }
+            }
+            return 0;  // Not found
+        };
+        
+        // Get strtab for looking up symbol names
+        SectionInfo* dynsym_strtab = nullptr;
+        for (auto& s : sections_) if (s.name == ".dynstr") { dynsym_strtab = &s; break; }
+        
+        // Helper to patch symbol entry
+        // strtab_data is the string table for looking up symbol names (can be nullptr)
+        auto patchSymbol = [&](uint8_t* sym, const uint8_t* strtab_data, size_t strtab_size) {
+            uint32_t name_idx;
+            uint64_t val;
+            uint16_t shndx;
+            memcpy(&name_idx, sym, 4);
+            memcpy(&val, sym + 8, 8);
+            memcpy(&shndx, sym + 6, 2);
+            
+            // Skip ABS symbols (st_shndx == SHN_ABS == 0xFFF1)
+            if (shndx == 0xFFF1 || shndx == 0) {
+                return;  // Don't modify ABS or undefined symbols
+            }
+            
+            // Get symbol name if available
+            const char* sym_name = nullptr;
+            if (strtab_data && name_idx < strtab_size) {
+                sym_name = (const char*)strtab_data + name_idx;
+            }
+            
+            // Special handling for ncclDevFuncTable_* symbols:
+            // These should be mapped to .data.rel.ro, not .data/.bss
+            // Their relative offset within the old .bss maps to offset within .data.rel.ro
+            if (sym_name && strstr(sym_name, "ncclDevFuncTable_")) {
+                // Extract table number (1, 2, or 4)
+                int table_num = 0;
+                if (strstr(sym_name, "ncclDevFuncTable_1")) table_num = 1;
+                else if (strstr(sym_name, "ncclDevFuncTable_2")) table_num = 2;
+                else if (strstr(sym_name, "ncclDevFuncTable_4")) table_num = 4;
+                
+                if (table_num > 0) {
+                    // Map to .data.rel.ro address
+                    uint64_t new_val;
+                    switch (table_num) {
+                        case 1: new_val = data_rel_ro_addr_; break;
+                        case 2: new_val = data_rel_ro_addr_ + table_spacing_; break;
+                        case 4: new_val = data_rel_ro_addr_ + table_spacing_ * 2; break;
+                        default: new_val = val; break;
+                    }
+                    
+                    // Update symbol value
+                    memcpy(sym + 8, &new_val, 8);
+                    
+                    // Update section index to .data.rel.ro
+                    uint16_t data_rel_ro_idx = new_section_indices[".data.rel.ro"];
+                    memcpy(sym + 6, &data_rel_ro_idx, 2);
+                    
+                    printf("  Patched %s: 0x%lx -> 0x%lx (section %d -> %d)\n",
+                           sym_name, val, new_val, shndx, data_rel_ro_idx);
+                    return;
+                }
+            }
+            
+            // Standard handling for other symbols
+            uint64_t new_val = val;
+            int64_t delta = 0;
+            if (old_data && val >= old_data && val < old_data + 0x10000) {
+                delta = data_delta;
+            } else if (old_rodata && val >= old_rodata && val < old_rodata + 0x1000) {
+                delta = rodata_delta;
+            } else if (old_text && val >= old_text && val < old_text + 0x10000) {
+                delta = text_delta;
+            }
+            
+            if (delta != 0 && val != 0) {
+                new_val = (uint64_t)((int64_t)val + delta);
+                memcpy(sym + 8, &new_val, 8);
+            }
+            
+            // Update st_shndx based on the NEW address (after patching)
+            // Find which section the symbol's new address falls into
+            uint16_t new_shndx = findSectionForAddr(new_val);
+            if (new_shndx != 0 && new_shndx != shndx) {
+                memcpy(sym + 6, &new_shndx, 2);
+            }
+        };
+        
+        if (dynsym_sec && dynsym_strtab) {
+            printf("Patching .dynsym symbols...\n");
+            for (size_t i = 0; i + 24 <= dynsym_sec->data.size(); i += 24) {
+                uint8_t* sym = dynsym_sec->data.data() + i;
+                
+                // Get symbol name
+                uint32_t name_idx;
+                memcpy(&name_idx, sym, 4);
+                const char* sym_name = "";
+                if (name_idx < dynsym_strtab->data.size()) {
+                    sym_name = (const char*)dynsym_strtab->data.data() + name_idx;
+                }
+                
+                // ncclDevFuncTable_* symbols: patch their addresses to .data.rel.ro
+                // These are function pointer tables filled by relocations
+                if (strncmp(sym_name, "ncclDevFuncTable_", 17) == 0) {
+                    uint64_t new_val = 0;
+                    if (strstr(sym_name, "ncclDevFuncTable_1")) new_val = data_rel_ro_addr_;
+                    else if (strstr(sym_name, "ncclDevFuncTable_2")) new_val = data_rel_ro_addr_ + table_spacing_;
+                    else if (strstr(sym_name, "ncclDevFuncTable_4")) new_val = data_rel_ro_addr_ + table_spacing_ * 2;
+                    
+                    if (new_val != 0) {
+                        // Update st_value
+                        memcpy(sym + 8, &new_val, 8);
+                        // Update st_shndx to .data.rel.ro
+                        uint16_t data_rel_ro_idx = 0;
+                        for (size_t j = 0; j < sections_.size(); j++) {
+                            if (sections_[j].name == ".data.rel.ro") { data_rel_ro_idx = j + 1; break; }
+                        }
+                        memcpy(sym + 6, &data_rel_ro_idx, 2);
+                        // Keep as OBJECT type with hidden visibility
+                        sym[4] = 1 | (0 << 4);  // STT_OBJECT | STB_LOCAL
+                        sym[5] = 2;  // STV_HIDDEN
+                        printf("  Patched dynsym %s: val=0x%lx, shndx=%d\n", sym_name, new_val, data_rel_ro_idx);
+                    }
+                    continue;
+                }
+                
+                patchSymbol(sym, dynsym_strtab->data.data(), dynsym_strtab->data.size());
+            }
+        }
+        
+        // Also patch .symtab
+        SectionInfo* symtab_sec = nullptr;
+        SectionInfo* strtab_sec = nullptr;
+        for (auto& s : sections_) {
+            if (s.name == ".symtab") symtab_sec = &s;
+            if (s.name == ".strtab") strtab_sec = &s;
+        }
+        
+        if (symtab_sec && strtab_sec) {
+            printf("Patching .symtab symbols...\n");
+            for (size_t i = 0; i + 24 <= symtab_sec->data.size(); i += 24) {
+                patchSymbol(symtab_sec->data.data() + i,
+                           strtab_sec->data.data(), strtab_sec->data.size());
+            }
+        }
+        
+        // Patch has_dyn_sized_stack and has_recursion ABS symbols to 0
+        // These are ABS symbols (st_shndx == SHN_ABS == 0xFFF1)
+        if (symtab_sec && strtab_sec) {
+            int patched = 0;
+            for (size_t i = 0; i + 24 <= symtab_sec->data.size(); i += 24) {
+                uint8_t* sym = symtab_sec->data.data() + i;
+                uint32_t name_idx;
+                uint16_t shndx;
+                uint64_t val;
+                memcpy(&name_idx, sym, 4);
+                memcpy(&shndx, sym + 6, 2);
+                memcpy(&val, sym + 8, 8);
+                
+                // Only patch ABS symbols with value 1
+                if (shndx == 0xFFF1 && val == 1 && name_idx < strtab_sec->data.size()) {
+                    const char* name = (const char*)strtab_sec->data.data() + name_idx;
+                    // Check if this is a Generic kernel's has_dyn_sized_stack or has_recursion
+                    if (strstr(name, "Generic_") && 
+                        (strstr(name, "has_dyn_sized_stack") || strstr(name, "has_recursion"))) {
+                        val = 0;
+                        memcpy(sym + 8, &val, 8);
+                        patched++;
+                    }
+                }
+            }
+            if (patched > 0) {
+                printf("Patched %d ABS symbols (has_dyn_sized_stack/has_recursion) to 0\n", patched);
+            }
+        }
+        
+        // Patch ABS symbols for resource maxima
+        // These symbols are in .symtab and .strtab with format:
+        // kernelname.suffix
+        // strtab_sec is already set above
+        //
+        // NOTE: We DO NOT patch .private_seg_size - it must match KD and metadata (both 0)
+        // The Generic kernels dispatch via function pointers; the called functions
+        // handle their own stack requirements.
+        
+        if (symtab_sec && strtab_sec) {
+            const char* strtab = (const char*)strtab_sec->data.data();
+            for (size_t i = 0; i + 24 <= symtab_sec->data.size(); i += 24) {
+                uint8_t* sym = symtab_sec->data.data() + i;
+                uint32_t name_idx;
+                uint16_t shndx;
+                memcpy(&name_idx, sym, 4);
+                memcpy(&shndx, sym + 6, 2);
+                
+                // Check if this is an ABS symbol (st_shndx == SHN_ABS = 0xFFF1)
+                if (shndx == 0xFFF1 && name_idx < strtab_sec->data.size()) {
+                    const char* name = strtab + name_idx;
+                    size_t len = strlen(name);
+                    
+                    // DO NOT patch .private_seg_size - must match KD (0)
+                    // const char* suffix1 = ".private_seg_size";
+                    // if (len > strlen(suffix1) && strcmp(name + len - strlen(suffix1), suffix1) == 0) {
+                    //     // Leave at original value (0) to match KD and metadata
+                    // }
+                    
+                    // Patch .num_vgpr to max_vgpr_
+                    const char* suffix2 = ".num_vgpr";
+                    if (len > strlen(suffix2) && strcmp(name + len - strlen(suffix2), suffix2) == 0) {
+                        uint64_t new_val = max_vgpr_;
+                        memcpy(sym + 8, &new_val, 8);
+                    }
+                    
+                    // Patch .numbered_sgpr to max_sgpr_
+                    const char* suffix3 = ".numbered_sgpr";
+                    if (len > strlen(suffix3) && strcmp(name + len - strlen(suffix3), suffix3) == 0) {
+                        uint64_t new_val = max_sgpr_;
+                        memcpy(sym + 8, &new_val, 8);
+                    }
+                }
+            }
+        }
+        
+        // Build .rela.dyn section with R_AMDGPU_RELATIVE64 relocations
+        buildRelocations();
+    }
+    
+    void buildRelocations() {
+        // R_AMDGPU_RELATIVE64 = 13 (0x0D)
+        constexpr uint64_t R_AMDGPU_RELATIVE64 = 13;
+        
+        // Find the existing .rela.dyn section (created as placeholder)
+        SectionInfo* rela_sec = nullptr;
+        for (auto& s : sections_) {
+            if (s.name == ".rela.dyn") { rela_sec = &s; break; }
+        }
+        if (!rela_sec) {
+            fprintf(stderr, "Error: .rela.dyn section not found\n");
+            return;
+        }
+        
+        // Clear existing data (was pre-sized for layout calculation)
+        rela_sec->data.clear();
+        
+        int reloc_count = 0;
+        
+        // Add relocation for each table entry: r_offset, r_info, r_addend
+        auto addReloc = [&](uint64_t offset, uint64_t addend) {
+            size_t p = rela_sec->data.size();
+            rela_sec->data.resize(p + 24);
+            uint64_t r_info = R_AMDGPU_RELATIVE64;  // sym=0, type=13
+            memcpy(rela_sec->data.data() + p, &offset, 8);
+            memcpy(rela_sec->data.data() + p + 8, &r_info, 8);
+            memcpy(rela_sec->data.data() + p + 16, &addend, 8);
+            reloc_count++;
+        };
+        
+        // For each non-zero entry in function tables (in .data.rel.ro)
+        for (int i = 0; i < FUNC_COUNT; i++) {
+            if (table_1_[i]) {
+                uint64_t offset = data_rel_ro_addr_ + i * 8;
+                uint64_t addend = text_addr_ + table_1_[i];
+                addReloc(offset, addend);
+            }
+            if (table_2_[i]) {
+                uint64_t offset = data_rel_ro_addr_ + table_spacing_ + i * 8;
+                uint64_t addend = text_addr_ + table_2_[i];
+                addReloc(offset, addend);
+            }
+            if (table_4_[i]) {
+                uint64_t offset = data_rel_ro_addr_ + table_spacing_ * 2 + i * 8;
+                uint64_t addend = text_addr_ + table_4_[i];
+                addReloc(offset, addend);
+            }
+        }
+        
+        // Record address/size (already computed during layout)
+        rela_addr_ = rela_sec->addr;
+        rela_size_ = rela_sec->size();
+        
+        printf("Built .rela.dyn with %d R_AMDGPU_RELATIVE64 relocations\n", reloc_count);
+        printf("  .rela.dyn @ 0x%06lx  size=0x%06zx\n", rela_addr_, rela_size_);
+        
+        // Now populate .dynamic section with final rela addresses
+        populateDynamicSection();
+    }
+    
+    void populateDynamicSection() {
+        for (auto& s : sections_) {
+            if (s.name == ".dynamic") {
+                std::vector<uint8_t>& dyn_data = s.data;
+                dyn_data.clear();
+                
+                auto addDyn = [&](uint64_t tag, uint64_t val) {
+                    size_t p = dyn_data.size();
+                    dyn_data.resize(p + 16);
+                    memcpy(dyn_data.data() + p, &tag, 8);
+                    memcpy(dyn_data.data() + p + 8, &val, 8);
+                };
+                
+                // Find section addresses for dynamic entries
+                uint64_t dynsym_addr = 0, dynstr_addr = 0, dynstr_sz = 0, gnuhash_addr = 0, hash_addr = 0;
+                for (const auto& sec : sections_) {
+                    if (sec.name == ".dynsym") dynsym_addr = sec.addr;
+                    else if (sec.name == ".dynstr") { dynstr_addr = sec.addr; dynstr_sz = sec.size(); }
+                    else if (sec.name == ".gnu.hash") gnuhash_addr = sec.addr;
+                    else if (sec.name == ".hash") hash_addr = sec.addr;
+                }
+                
+                // Add entries in same order as IFC
+                if (rela_addr_ && rela_size_) {
+                    addDyn(7, rela_addr_);                   // DT_RELA
+                    addDyn(8, rela_size_);                   // DT_RELASZ
+                    addDyn(9, 24);                           // DT_RELAENT
+                    addDyn(0x6ffffff9, rela_size_ / 24);     // DT_RELACOUNT
+                }
+                if (dynsym_addr) addDyn(6, dynsym_addr);    // DT_SYMTAB
+                addDyn(11, 24);                              // DT_SYMENT
+                if (dynstr_addr) addDyn(5, dynstr_addr);    // DT_STRTAB
+                if (dynstr_sz) addDyn(10, dynstr_sz);       // DT_STRSZ
+                if (gnuhash_addr) addDyn(0x6ffffef5, gnuhash_addr);  // DT_GNU_HASH
+                if (hash_addr) addDyn(4, hash_addr);        // DT_HASH
+                addDyn(0, 0);  // DT_NULL
+                
+                printf("Populated .dynamic section: %zu bytes (%zu entries)\n", 
+                       dyn_data.size(), dyn_data.size() / 16);
+                break;
             }
         }
     }
@@ -807,69 +1549,29 @@ private:
             shstrtab.push_back(0);
         }
         
-        uint32_t dyn_name_off = shstrtab.size();
-        const char* dyn_name = ".dynamic";
-        shstrtab.insert(shstrtab.end(), dyn_name, dyn_name + strlen(dyn_name) + 1);
-        
         uint32_t shstr_name_off = shstrtab.size();
         const char* shstr_name = ".shstrtab";
         shstrtab.insert(shstrtab.end(), shstr_name, shstr_name + strlen(shstr_name) + 1);
         
-        // Find max allocated offset for non-alloc placement
+        // Section offsets (already computed in layout)
+        std::vector<uint64_t> section_offsets;
         uint64_t offset = 0;
         for (const auto& s : sections_) {
-            if (s.isAlloc()) offset = std::max(offset, s.offset + s.size());
-        }
-        
-        // Place non-alloc sections
-        std::vector<uint64_t> section_offsets;
-        for (const auto& s : sections_) {
-            if (s.isAlloc()) {
-                section_offsets.push_back(s.offset);
-            } else {
-                offset = (offset + s.alignment - 1) & ~(s.alignment - 1);
-                section_offsets.push_back(offset);
-                offset += s.size();
+            section_offsets.push_back(s.offset);
+            if (s.type != SHT_NOBITS) {
+                offset = std::max(offset, s.offset + s.fileSize());
             }
         }
         
-        // .dynamic
-        offset = (offset + 7) & ~7UL;
-        uint64_t dyn_off = offset;
-        std::vector<uint8_t> dyn_data;
-        auto addDyn = [&](uint64_t tag, uint64_t val) {
-            size_t p = dyn_data.size();
-            dyn_data.resize(p + 16);
-            memcpy(dyn_data.data() + p, &tag, 8);
-            memcpy(dyn_data.data() + p + 8, &val, 8);
-        };
-        
-        // Find section addresses for dynamic entries
-        uint64_t dynsym_addr = 0, dynstr_addr = 0, dynstr_sz = 0, gnuhash_addr = 0, hash_addr = 0;
-        for (const auto& s : sections_) {
-            if (s.name == ".dynsym") dynsym_addr = s.addr;
-            else if (s.name == ".dynstr") { dynstr_addr = s.addr; dynstr_sz = s.size(); }
-            else if (s.name == ".gnu.hash") gnuhash_addr = s.addr;
-            else if (s.name == ".hash") hash_addr = s.addr;
-        }
-        
-        if (dynsym_addr) addDyn(6, dynsym_addr);    // DT_SYMTAB
-        addDyn(11, 24);                              // DT_SYMENT
-        if (dynstr_addr) addDyn(5, dynstr_addr);    // DT_STRTAB
-        if (dynstr_sz) addDyn(10, dynstr_sz);       // DT_STRSZ
-        if (gnuhash_addr) addDyn(0x6ffffef5, gnuhash_addr);
-        if (hash_addr) addDyn(4, hash_addr);
-        addDyn(0, 0);  // DT_NULL
-        offset += dyn_data.size();
-        
         // .shstrtab
+        offset = (offset + 7) & ~7UL;
         uint64_t shstrtab_off = offset;
         offset += shstrtab.size();
         
         // Section headers
         offset = (offset + 7) & ~7UL;
         uint64_t shdr_off = offset;
-        size_t num_shdrs = sections_.size() + 3;  // NULL + sections + .dynamic + .shstrtab
+        size_t num_shdrs = sections_.size() + 2;  // NULL + sections + .shstrtab
         
         // Build output buffer
         std::vector<uint8_t> out(shdr_off + num_shdrs * 64);
@@ -890,49 +1592,141 @@ private:
         ehdr.e_flags = elf_flags_;
         ehdr.e_ehsize = 64;
         ehdr.e_phentsize = 56;
-        ehdr.e_phnum = 3;
+        ehdr.e_phnum = 9;  // Match IFC: PHDR, LOAD R, LOAD RX, LOAD RW (RELRO), LOAD RW (data), DYNAMIC, GNU_RELRO, GNU_STACK, NOTE
         ehdr.e_shentsize = 64;
         ehdr.e_shnum = num_shdrs;
         ehdr.e_shstrndx = num_shdrs - 1;
         memcpy(out.data(), &ehdr, sizeof(ehdr));
         
-        // Program headers
+        // Find section boundaries for proper segment creation (matching IFC)
+        uint64_t note_start = 0, note_end = 0;
+        uint64_t rodata_end = 0;
+        uint64_t text_start = 0, text_end = 0;
+        uint64_t data_rel_ro_start = 0, data_rel_ro_end = 0;
+        uint64_t dyn_sec_addr = 0, dyn_sec_size = 0;
+        uint64_t data_start = 0, bss_end = 0;
+        uint64_t relro_pad_addr = 0, relro_pad_size = 0;
+        for (const auto& s : sections_) {
+            if (s.name == ".note") { note_start = s.addr; note_end = s.addr + s.size(); }
+            if (s.name == ".rodata") rodata_end = s.addr + s.size();
+            if (s.name == ".text") { text_start = s.addr; text_end = s.addr + s.size(); }
+            if (s.name == ".data.rel.ro") { data_rel_ro_start = s.addr; data_rel_ro_end = s.addr + s.size(); }
+            if (s.name == ".dynamic") { dyn_sec_addr = s.addr; dyn_sec_size = s.size(); }
+            if (s.name == ".data") data_start = s.addr;
+            if (s.name == ".bss") bss_end = s.addr + s.size();
+            if (s.name == ".relro_padding") { relro_pad_addr = s.addr; relro_pad_size = s.size(); }
+        }
+        // RELRO segment: .data.rel.ro + .dynamic + .relro_padding
+        uint64_t relro_start = data_rel_ro_start;
+        uint64_t relro_filesz = (dyn_sec_addr + dyn_sec_size) - relro_start;
+        uint64_t relro_memsz = relro_end_ - relro_start;
+        
+        // Program headers (9 segments to match IFC)
         size_t phdr_off = 64;
         
+        // 1. PHDR - program header table itself
         Elf64_Phdr phdr_phdr = {};
         phdr_phdr.p_type = PT_PHDR;
         phdr_phdr.p_flags = PF_R;
         phdr_phdr.p_offset = phdr_phdr.p_vaddr = phdr_phdr.p_paddr = 64;
-        phdr_phdr.p_filesz = phdr_phdr.p_memsz = 3 * 56;
+        phdr_phdr.p_filesz = phdr_phdr.p_memsz = 9 * 56;  // 9 program headers
         phdr_phdr.p_align = 8;
         memcpy(out.data() + phdr_off, &phdr_phdr, sizeof(phdr_phdr));
         phdr_off += 56;
         
-        // Find max alloc end for LOAD segment - must include .dynamic!
-        uint64_t load_end = dyn_off + dyn_data.size();  // Include .dynamic in LOAD
-        
-        Elf64_Phdr phdr_load = {};
-        phdr_load.p_type = PT_LOAD;
-        phdr_load.p_flags = PF_R | PF_W | PF_X;
-        phdr_load.p_offset = phdr_load.p_vaddr = phdr_load.p_paddr = 0;
-        phdr_load.p_filesz = phdr_load.p_memsz = load_end;
-        phdr_load.p_align = 0x1000;
-        memcpy(out.data() + phdr_off, &phdr_load, sizeof(phdr_load));
+        // 2. LOAD R - read-only sections (from 0 to end of .rodata)
+        Elf64_Phdr phdr_load_r = {};
+        phdr_load_r.p_type = PT_LOAD;
+        phdr_load_r.p_flags = PF_R;
+        phdr_load_r.p_offset = phdr_load_r.p_vaddr = phdr_load_r.p_paddr = 0;
+        phdr_load_r.p_filesz = phdr_load_r.p_memsz = rodata_end;
+        phdr_load_r.p_align = 0x1000;
+        memcpy(out.data() + phdr_off, &phdr_load_r, sizeof(phdr_load_r));
         phdr_off += 56;
         
+        // 3. LOAD R E - executable section (.text)
+        Elf64_Phdr phdr_load_rx = {};
+        phdr_load_rx.p_type = PT_LOAD;
+        phdr_load_rx.p_flags = PF_R | PF_X;
+        phdr_load_rx.p_offset = phdr_load_rx.p_vaddr = phdr_load_rx.p_paddr = text_start;
+        phdr_load_rx.p_filesz = phdr_load_rx.p_memsz = text_end - text_start;
+        phdr_load_rx.p_align = 0x1000;
+        memcpy(out.data() + phdr_off, &phdr_load_rx, sizeof(phdr_load_rx));
+        phdr_off += 56;
+        
+        // 4. LOAD RW (RELRO) - .data.rel.ro + .dynamic + .relro_padding
+        Elf64_Phdr phdr_load_relro = {};
+        phdr_load_relro.p_type = PT_LOAD;
+        phdr_load_relro.p_flags = PF_R | PF_W;
+        phdr_load_relro.p_offset = phdr_load_relro.p_vaddr = phdr_load_relro.p_paddr = relro_start;
+        phdr_load_relro.p_filesz = relro_filesz;
+        phdr_load_relro.p_memsz = relro_memsz;
+        phdr_load_relro.p_align = 0x1000;
+        memcpy(out.data() + phdr_off, &phdr_load_relro, sizeof(phdr_load_relro));
+        phdr_off += 56;
+        
+        // 5. LOAD RW - .data + .bss
+        Elf64_Phdr phdr_load_data = {};
+        phdr_load_data.p_type = PT_LOAD;
+        phdr_load_data.p_flags = PF_R | PF_W;
+        phdr_load_data.p_offset = phdr_load_data.p_vaddr = phdr_load_data.p_paddr = data_start;
+        // Find .data section to get file size
+        uint64_t data_filesz = 0;
+        for (const auto& s : sections_) {
+            if (s.name == ".data") data_filesz = s.fileSize();
+        }
+        phdr_load_data.p_filesz = data_filesz;
+        phdr_load_data.p_memsz = bss_end - data_start;
+        phdr_load_data.p_align = 0x1000;
+        memcpy(out.data() + phdr_off, &phdr_load_data, sizeof(phdr_load_data));
+        phdr_off += 56;
+        
+        // 6. DYNAMIC
         Elf64_Phdr phdr_dyn = {};
         phdr_dyn.p_type = PT_DYNAMIC;
         phdr_dyn.p_flags = PF_R | PF_W;
-        phdr_dyn.p_offset = phdr_dyn.p_vaddr = phdr_dyn.p_paddr = dyn_off;
-        phdr_dyn.p_filesz = phdr_dyn.p_memsz = dyn_data.size();
+        phdr_dyn.p_offset = phdr_dyn.p_vaddr = phdr_dyn.p_paddr = dyn_sec_addr;
+        phdr_dyn.p_filesz = phdr_dyn.p_memsz = dyn_sec_size;
         phdr_dyn.p_align = 8;
         memcpy(out.data() + phdr_off, &phdr_dyn, sizeof(phdr_dyn));
+        phdr_off += 56;
+        
+        // 7. GNU_RELRO - marks .data.rel.ro + .dynamic as read-only after relocs
+        Elf64_Phdr phdr_relro = {};
+        phdr_relro.p_type = PT_GNU_RELRO;  // 0x6474e552
+        phdr_relro.p_flags = PF_R;
+        phdr_relro.p_offset = phdr_relro.p_vaddr = phdr_relro.p_paddr = relro_start;
+        phdr_relro.p_filesz = relro_filesz;
+        phdr_relro.p_memsz = relro_memsz;
+        phdr_relro.p_align = 1;
+        memcpy(out.data() + phdr_off, &phdr_relro, sizeof(phdr_relro));
+        phdr_off += 56;
+        
+        // 8. GNU_STACK (marks stack as RW, no execute)
+        Elf64_Phdr phdr_stack = {};
+        phdr_stack.p_type = PT_GNU_STACK;  // 0x6474e551
+        phdr_stack.p_flags = PF_R | PF_W;
+        phdr_stack.p_offset = phdr_stack.p_vaddr = phdr_stack.p_paddr = 0;
+        phdr_stack.p_filesz = phdr_stack.p_memsz = 0;
+        phdr_stack.p_align = 0;
+        memcpy(out.data() + phdr_off, &phdr_stack, sizeof(phdr_stack));
+        phdr_off += 56;
+        
+        // 9. NOTE
+        Elf64_Phdr phdr_note = {};
+        phdr_note.p_type = PT_NOTE;
+        phdr_note.p_flags = PF_R;
+        phdr_note.p_offset = phdr_note.p_vaddr = phdr_note.p_paddr = note_start;
+        phdr_note.p_filesz = phdr_note.p_memsz = note_end - note_start;
+        phdr_note.p_align = 4;
+        memcpy(out.data() + phdr_off, &phdr_note, sizeof(phdr_note));
         
         // Section data
         for (size_t i = 0; i < sections_.size(); i++) {
-            memcpy(out.data() + section_offsets[i], sections_[i].data.data(), sections_[i].data.size());
+            if (sections_[i].type != SHT_NOBITS) {
+                memcpy(out.data() + section_offsets[i], sections_[i].data.data(), sections_[i].data.size());
+            }
         }
-        memcpy(out.data() + dyn_off, dyn_data.data(), dyn_data.size());
         memcpy(out.data() + shstrtab_off, shstrtab.data(), shstrtab.size());
         
         // Section headers
@@ -969,16 +1763,14 @@ private:
             
             if (s.name == ".dynsym" && dynstr_idx >= 0) { link = dynstr_idx; info = 1; }
             else if ((s.name == ".gnu.hash" || s.name == ".hash") && dynsym_idx >= 0) { link = dynsym_idx; }
+            else if (s.name == ".rela.dyn" && dynsym_idx >= 0) { link = dynsym_idx; }
+            else if (s.name == ".dynamic" && dynstr_idx >= 0) { link = dynstr_idx; }
             else if (s.name == ".symtab" && strtab_idx >= 0) { link = strtab_idx; info = 26; }
             
             writeShdr(i + 1, name_offs[i + 1], s.type, s.flags,
                       s.addr, section_offsets[i], s.size(),
                       link, info, s.alignment, s.entsize);
         }
-        
-        size_t dyn_idx = sections_.size() + 1;
-        writeShdr(dyn_idx, dyn_name_off, SHT_DYNAMIC, SHF_ALLOC | SHF_WRITE,
-                  dyn_off, dyn_off, dyn_data.size(), dynstr_idx > 0 ? dynstr_idx : 0, 0, 8, 16);
         
         writeShdr(num_shdrs - 1, shstr_name_off, SHT_STRTAB, 0, 0, shstrtab_off, shstrtab.size(), 0, 0, 1, 0);
         
@@ -1015,7 +1807,17 @@ int main(int argc, char** argv) {
         else if (arg[0] != '-') inputs.push_back(arg);
     }
     
-    printf("Device Linker: target=%s\n", g_target_arch.c_str());
+    // Detect local GPU if no target specified
+    if (g_target_arch.empty()) {
+        g_target_arch = detectLocalGpu();
+        if (g_target_arch.empty()) {
+            fprintf(stderr, "Error: No --target specified and could not detect local GPU\n");
+            return 1;
+        }
+        printf("Device Linker: target=%s (auto-detected)\n", g_target_arch.c_str());
+    } else {
+        printf("Device Linker: target=%s\n", g_target_arch.c_str());
+    }
     
     if (output.empty() || dispatcher.empty()) { printUsage(argv[0]); return 1; }
     

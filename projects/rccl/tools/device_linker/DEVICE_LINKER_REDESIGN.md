@@ -1,5 +1,128 @@
 # Device Linker: Proper Design
 
+## AI Assistant Rules (MUST FOLLOW)
+
+1. **Document every mistake** - When a mistake is made, immediately add it to the "Common Build Mistakes" section below.
+
+2. **Re-read this document first** - When encountering ANY problem, re-read this design document BEFORE attempting a fix. The solution may already be documented.
+
+3. **Review code changes before compiling** - After making a code change, STOP and review the change with the user before running the build. Do not chain multiple changes together without review.
+
+4. **Two-strike rule** - If a fix-compile cycle fails twice, STOP and check with the user. Do not continue attempting fixes independently.
+
+5. **Do not assume** - If something worked before but isn't working now, investigate what changed rather than guessing at solutions.
+
+---
+
+## Status
+
+**Single-GPU: WORKING** - Single GPU tests pass.
+
+**Sequential Multi-GPU: WORKING** - Each GPU works when initialized separately.
+
+**Parallel Multi-GPU: BLOCKED** - COMGR fails during concurrent code object loading.
+
+### Summary
+
+- `ONLY_FUNCS` works with device linker (24 specialized kernels generated)
+- ELF structure matches IFC exactly (9 segments, section ordering, relocations)
+- `.note` metadata patched to set `uses_dynamic_stack: false`
+- ABS symbols patched to set `has_dyn_sized_stack` and `has_recursion` to 0
+- `.AMDGPU.gpr_maximums` section added to match IFC
+- **Symbol section indices now correct**: `ncclDevFuncTable_*` symbols point to `.data.rel.ro`
+- **Symbol addresses remapped**: Function table symbols moved from `.bss` to `.data.rel.ro`
+
+### Critical Design Constraint
+
+**Symbol section indices must match the section containing the symbol's address.**
+
+When merging ELFs, symbols must be remapped:
+1. Update `st_value` to the new address in the merged ELF
+2. Update `st_shndx` to the section index containing that address
+3. Special handling for function tables: they move from `.bss` (dispatcher) to `.data.rel.ro` (merged)
+
+The device linker now correctly maps:
+- `ncclDevFuncTable_1` → `.data.rel.ro` @ 0x2fa000
+- `ncclDevFuncTable_2` → `.data.rel.ro` @ 0x2fbae0  
+- `ncclDevFuncTable_4` → `.data.rel.ro` @ 0x2fd5c0
+- `__hip_cuid_*` → `.bss`
+- Kernel descriptors → `.rodata`
+- Kernel code → `.text`
+
+### Test Results
+
+| Test | Result |
+|------|--------|
+| Single GPU (device 0) | PASS |
+| Single GPU (device 1) | PASS |
+| Sequential (dev 0 then dev 1, separate comms) | PASS |
+| Parallel (ncclCommInitAll or threads) | FAIL |
+| IFC build parallel | PASS |
+
+### Root Cause Analysis
+
+The issue is **specific to concurrent code object loading**. When COMGR loads our ELF 
+on multiple devices simultaneously, it fails with "Cannot Find Global Var Sizes". 
+
+This happens even though:
+1. Our ELF is valid (works on single GPU and sequentially)
+2. Structure matches IFC exactly
+3. Metadata has been patched to match IFC
+4. Symbol section indices are now correct
+
+Error from COMGR:
+```
+Error: COMGR failed to get the metadata.
+Error: create kernel metadata map using COMgr
+Error: Cannot Find Global Var Sizes
+Error: Cannot create kernels.
+Error: AMD HSA Code Object Reader create failed: HSA_STATUS_ERROR_INVALID_ARGUMENT
+```
+
+This appears to be a **COMGR bug** where concurrent loading of our post-processed ELF 
+triggers a code path that doesn't handle our ELF format correctly, even though sequential 
+loading works fine.
+
+### Systematic ELF Verification (Completed)
+
+| Check | Status |
+|-------|--------|
+| ELF header (e_type, e_machine, e_flags) | MATCH |
+| Program headers (9 segments) | MATCH |
+| Section ordering | MATCH |
+| Symbol section indices (st_shndx) | FIXED - now correct |
+| Function table symbols → .data.rel.ro | FIXED |
+| .hash nchain = .dynsym count | MATCH |
+| .dynamic entries | MATCH |
+| .rela.dyn relocations | CORRECT (1662 R_AMDGPU_RELATIVE64) |
+| Kernel metadata structure | VALID (different from IFC but correct) |
+| Note section msgpack | VALID |
+
+### Known Differences from IFC (Acceptable)
+
+1. **Function table symbols**: GLOBAL PROTECTED in .dynsym (IFC: LOCAL HIDDEN in .symtab only)
+2. **Function table size**: 6872 bytes (IFC: 104 bytes) - expected due to more functions
+3. **Kernel args**: 4096-byte struct by_value (IFC: global_buffer pointers)
+4. **.rodata flags**: 0x2 (IFC: 0x32 with MERGE|STRINGS) - not critical
+5. **.comment section**: Missing (IFC has it) - not critical
+
+### Next Step: Debug COMGR
+
+Build COMGR with debug symbols and investigate the "Cannot Find Global Var Sizes" error path.
+Key things to look for:
+1. Where the error string is generated in COMGR source
+2. What condition triggers it during concurrent loading but not sequential
+3. Whether there's thread-unsafe code accessing shared state
+4. Whether GLOBAL OBJECT symbols in .dynsym trigger special handling
+
+### Potential Solutions
+
+1. **Debug COMGR** - Build with debug symbols, trace the error source
+2. **File ROCm bug report** - COMGR concurrent loading issue with device-linker ELFs
+3. **Serialize code object loading** - Add locking around HIP kernel registration
+4. **Match IFC's note section exactly** - Ensure all msgpack fields are identical
+5. **Use alternative bundling** - Create separate code objects per GPU (defeats size goals)
+
 ## Goal
 
 Merge dispatcher device code + specialized kernel device code into a single ELF that the HIP runtime can load and execute.
@@ -50,28 +173,59 @@ For each specialized kernel:
 
 ## Phase 2: Plan Layout
 
-Define the merged ELF layout with **NO OVERLAP**:
+Define the merged ELF layout to **match IFC exactly**:
 
 ```
 Address   Section        Contents
 ────────────────────────────────────────────────────────
 0x000     [ELF header]   64 bytes
-0x040     [Program hdrs] 3 × 56 = 168 bytes  
-0x0E8     .note          AMDGPU metadata (variable size)
+0x040     [Program hdrs] 9 × 56 = 504 bytes  
+0x238     .note          AMDGPU metadata (variable size, 8-byte padded)
 0xXXX     .dynsym        Dynamic symbols
 0xXXX     .gnu.hash      Hash table
 0xXXX     .hash          Hash table  
 0xXXX     .dynstr        Dynamic strings
-0xXXX     .rodata        Kernel descriptors (3 × 64 = 192 bytes)
-0xXXX     .text          Dispatcher code + specialized kernels
-0xXXX     .data          Function tables + scratch variables
 0xXXX     .rela.dyn      Relocations for function pointers
+0xXXX     .rodata        Kernel descriptors (3 × 64 = 192 bytes)
+0xXXX     .text          Dispatcher code + specialized kernels (page-aligned)
+0xXXX     .data.rel.ro   Function tables (zeroed, filled by relocations)
 0xXXX     .dynamic       Dynamic section
-[non-alloc sections: .symtab, .strtab, .shstrtab]
+0xXXX     .relro_padding NOBITS section for page alignment
+0xXXX     .data          Scratch variables only
+0xXXX     .bss           Uninitialized data (NOBITS)
+[non-alloc sections: .symtab, .strtab, .shstrtab - file offset only, no vaddr]
 [section headers]
 ```
 
-**Key rule: Calculate ALL sizes first, then assign addresses. No overlaps.**
+**Key rules:**
+1. Calculate ALL sizes first, then assign addresses. No overlaps.
+2. `.note` section must be padded to 8-byte boundaries for HSA loader compatibility.
+3. `.text` section must be page-aligned (0x1000).
+4. `.data.rel.ro` starts at page boundary for RELRO segment.
+
+### Program Headers (Segments) - Match IFC
+
+Create 9 program headers to match IFC's working structure:
+
+```
+#   Type       Flags   Covers
+──────────────────────────────────────────────────────────────
+1   PHDR       R       Program header table itself (9 × 56 bytes)
+2   LOAD       R       Read-only: .note, .dynsym, .gnu.hash, .hash, .dynstr, .rela.dyn, .rodata
+3   LOAD       R E     Executable: .text
+4   LOAD       RW      Relocatable read-only: .data.rel.ro, .dynamic, .relro_padding
+5   LOAD       RW      True writable: .data, .bss
+6   DYNAMIC    RW      Points to .dynamic section
+7   GNU_RELRO  R       Marks .data.rel.ro + .dynamic as read-only after relocations
+8   GNU_STACK  RW      Stack permissions (size 0)
+9   NOTE       R       Points to .note section
+```
+
+**Critical layout rules:**
+- Segment 4 (LOAD RW for RELRO) must contain `.data.rel.ro`, `.dynamic`, and `.relro_padding`
+- Segment 5 (LOAD RW for data) must contain `.data` and `.bss` only
+- GNU_RELRO segment covers same range as segment 4
+- Non-allocated sections (.symtab, .strtab, .shstrtab) must NOT be in any LOAD segment
 
 ## Phase 3: Build Section Contents
 
@@ -86,15 +240,27 @@ Offset next:        Specialized kernel 2
 
 Record: `specialized_func_addr[funcId] = text_base + offset`
 
-### 3.2 .data section
+### 3.2 .data.rel.ro section (function tables - read-only after relocation)
 
 ```
-Offset 0:                    ncclDevFuncTable_1[FUNC_COUNT]  (FUNC_COUNT × 8 bytes)
-Offset FUNC_COUNT*8:         ncclDevFuncTable_2[FUNC_COUNT]  
-Offset FUNC_COUNT*8*2:       ncclDevFuncTable_4[FUNC_COUNT]
-Offset FUNC_COUNT*8*3:       ncclDeviceScratchTrigger (4 bytes, initialized to 0)
-Offset FUNC_COUNT*8*3+4:     ncclDeviceScratchSink (4 bytes)
+Offset 0:                    ncclDevFuncTable_1[FUNC_COUNT]  (FUNC_COUNT × 8 bytes, zeroed)
+Offset FUNC_COUNT*8:         ncclDevFuncTable_2[FUNC_COUNT]  (zeroed)
+Offset FUNC_COUNT*8*2:       ncclDevFuncTable_4[FUNC_COUNT]  (zeroed)
 ```
+
+Data is zeroed; R_AMDGPU_RELATIVE64 relocations fill values at load time.
+After relocation processing, GNU_RELRO marks this section read-only.
+
+### 3.2b .data section (true writable scratch variables)
+
+```
+Offset 0:     ncclDeviceScratchTrigger (4 bytes, initialized to 0)
+Offset 4:     ncclDeviceScratchSink (4 bytes)
+```
+
+### 3.2c .bss section (uninitialized data)
+
+NOBITS section for any additional uninitialized variables from dispatcher.
 
 ### 3.3 .rodata section
 
@@ -273,3 +439,67 @@ llvm-readelf -S merged.elf
 3. **Section indices matter** - symbols must have correct st_shndx
 4. **Compare with production** - byte-level verification catches bugs early
 5. **Understand ELF structure** - headers, program headers, section headers all interrelated
+
+---
+
+## Common Build Mistakes (DO NOT REPEAT)
+
+### CMake Configuration
+
+| Mistake | Correct |
+|---------|---------|
+| `-DDEVICE_LINKER_ENABLED=ON` | `-DDEVICE_LINKER=ON` (use DEVICE_LINKER, not DEVICE_LINKER_ENABLED) |
+| Using `SPECIALIZED_KERNELS_ONLY` | OBSOLETE - use `DEVICE_LINKER` instead |
+| Missing `USE_INDIRECT_FUNCTION_CALL` | Must be defined for function pointer dispatch |
+| `ONLY_FUNCS` cached from previous build | Delete `CMakeCache.txt` when changing config |
+| Using `ONLY_FUNCS` for "faster" testing | Don't limit kernels - full build should be fast with DEVICE_LINKER |
+
+### Device Linker Pipeline
+
+| Mistake | Correct |
+|---------|---------|
+| `--offload-compress` in dispatcher compile | Remove it - causes CCOB extraction failures |
+| Wrong `--target-arch` (e.g., gfx942 vs gfx950) | Must match GPU_TARGETS exactly |
+| Device linker defaulting to gfx942 | Pass `--target-arch` explicitly, check cmake variable `DEVICE_LINKER_GPU_ARCH` |
+
+### Link Errors
+
+| Mistake | Correct |
+|---------|---------|
+| `sym_kernels_stub.cpp` duplicate symbol | Remove `ncclSymkGetKernelPtr` from stub - it's in `sym_kernels.cc` |
+
+### Device Linker Runtime
+
+| Mistake | Symptom | Correct |
+|---------|---------|---------|
+| Wrong target arch | "Processing 1 input files", "Mapped 0 kernel functions" | Ensure `--target-arch` matches the .o files |
+| Specialized kernels not found | 0 relocations generated | Check `--input-dir` path and that .o files exist for target arch |
+
+### Current Unresolved Issue
+
+**Problem**: `merged_minimal.hip` only contains padding (`__device_linker_padding`), not the dispatcher kernels (`ncclDevKernel_Generic_*`).
+
+**Impact**: The device linker produces an ELF without the dispatcher, causing "undefined reference to ncclDevKernel_Generic_*" at link time.
+
+**Root cause**: When `SPECIALIZED_KERNELS_ONLY` is enabled (which `DEVICE_LINKER_ENABLED` implies), `common.cu` is excluded from the main build. But `merged_minimal.hip` doesn't include the dispatcher code either.
+
+**Needs discussion**: How should the dispatcher be included in the device linker pipeline?
+
+### Build Command Reference
+
+```bash
+# Correct full build command:
+cmake -DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++ \
+      -DCMAKE_C_COMPILER=/opt/rocm/bin/amdclang \
+      -DDEVICE_LINKER_ENABLED=ON \
+      -DGPU_TARGETS=gfx950 \
+      -DBUILD_LOCAL_GPU_TARGET_ONLY=ON \
+      -DCMAKE_BUILD_TYPE=Release \
+      -GNinja ..
+
+# After reconfiguring, ALWAYS delete CMakeCache.txt first:
+rm -f CMakeCache.txt
+
+# If sym_kernels_stub.cpp error, edit build/sym_kernels_stub.cpp:
+# Remove the ncclSymkGetKernelPtr function definition
+```
