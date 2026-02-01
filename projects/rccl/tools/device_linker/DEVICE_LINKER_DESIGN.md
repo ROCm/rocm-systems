@@ -723,16 +723,60 @@ Step 7: Verifying results
 
 #### Outstanding Issues
 
-1. **Data correctness**: AllReduce produces wrong results
-   - Kernel runs without crash
-   - GPU 0: sendbuff=1.0, GPU 1: sendbuff=2.0
-   - Expected recvbuff=3.0, actual=??? (all wrong)
-   - Need to debug collective data flow
+1. **Multi-GPU illegal instruction error**
+   - Single GPU on GPU 0: WORKS
+   - Single GPU on GPU 1: WORKS  
+   - Multi-GPU (2+ GPUs): FAILS with `HSA_STATUS_ERROR_ILLEGAL_INSTRUCTION`
+   - Crash occurs at PC offset 0x7da4 (within Generic_2 kernel) - valid instruction at that offset
+   - The KD properties differ from production but that's not the cause
+     - Our KD: USER_SGPR=8, properties=0x081e (dispatch_ptr, queue_ptr, kernarg_ptr, dispatch_id)
+     - Production: USER_SGPR=2, properties=0x0008 (only kernarg_ptr)
+   - Patching KD to match production causes memory access error (kernarg ptr in wrong registers)
+   
+   **Investigation summary:**
+   - Tried R_AMDGPU_RELATIVE64 relocations: Fails on multi-GPU
+   - Tried pre-filling function tables at link time: Still fails on multi-GPU
+   - Function table addresses ARE correct (verified: Table_2[622] = 0x3aa00 matches symbol)
+   - Crash occurs at specialized function entry (scratch_store_dword instruction at 0x3aa10)
+   - Scratch requirements are met (KD: 1096 bytes, specialized kernel needs only 72 bytes)
+   - Crash PC is valid function address - function pointer dispatch works correctly
+   
+   **Root cause identified: Different memory load patterns**
+   - IFC production uses `s_load_dwordx2` (scalar memory load) for function table access
+   - Our build uses `global_load_dwordx2` (vector memory load)
+   
+   IFC pattern:
+   ```
+   v_readfirstlane_b32 s2, v0     // Convert funcId to scalar FIRST
+   s_load_dwordx2 s[0:1], s[0:1], s2  // Scalar load from constant cache
+   ```
+   
+   Our pattern:
+   ```
+   global_load_dwordx2 v[0:1], v0, s[0:1]  // Vector load from global memory
+   v_readfirstlane_b32 s0, v0     // Convert result to scalar AFTER
+   ```
+   
+   - Scalar loads go through the constant cache (L0/L1), vector loads go through L2/global memory
+   - On multi-GPU, the global memory path may have coherency issues between GPUs
+   - This difference comes from how the dispatcher was compiled:
+     - IFC compiles everything together; compiler knows table is constant-like
+     - Device linker compiles dispatcher separately; compiler uses global loads
+   
+   **Potential fixes:**
+   1. Use IFC-compiled dispatcher binary with scalar loads (requires extracting from IFC build)
+   2. Patch dispatcher code at link time to use scalar loads (complex)
+   3. Move function table to true constant memory (requires ABI changes)
+
+2. **Table offset bug** (FIXED)
+   - PC-relative table references were calculated using merged PC instead of original dispatcher PC
+   - This caused all 3 Generic kernels to point to ncclDevFuncTable_4 instead of their respective tables
+   - Fixed by using `original_pc = disp_text_addr + off` for calculating `old_target`
 
 #### Files Modified in This Session
 
 | File | Change |
 |------|--------|
-| `tools/device_linker/device_linker.cpp` | Fixed RSRC1/RSRC2 offsets (0x30/0x34), fixed dispatcher KD entry_offset patching |
+| `tools/device_linker/device_linker.cpp` | Fixed RSRC1/RSRC2 offsets (0x30/0x34), fixed dispatcher KD entry_offset patching, fixed PC-relative table offset calculation |
 | `src/device/generate_specialized.py` | Added pipeline to filename to generate all bf16 variants |
 | `src/device/common.h` | Added/reverted NULL check for function table dispatch |
