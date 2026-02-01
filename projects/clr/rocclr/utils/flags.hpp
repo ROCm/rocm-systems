@@ -32,6 +32,12 @@ release(cstring, AMD_LOG_LEVEL_FILE, "",                                      \
         "Set output file for AMD_LOG_LEVEL, Default is stderr")               \
 release(size_t, AMD_LOG_LEVEL_SIZE, 2048,                                     \
         "The max size of AMD_LOG generated in MB if printed to a file")       \
+release(bool, AMD_LOG_INMEM, false,                                    \
+        "Enable in-memory async logging for improved performance")                      \
+release(size_t, AMD_LOG_BUFFER_SIZE, 524288,                                  \
+        "Per-thread buffer size for async logging in bytes")                  \
+release(size_t, AMD_LOG_FLUSH_INTERVAL_MS, 50,                                \
+        "Async log flush interval in milliseconds")                           \
 debug(uint, DEBUG_GPU_FLAGS, 0,                                               \
         "The debug options for GPU device")                                   \
 release(size_t, CQ_THREAD_STACK_SIZE, 256*Ki, /* @todo: that much! */         \

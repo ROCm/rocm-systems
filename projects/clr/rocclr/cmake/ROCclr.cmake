@@ -83,6 +83,12 @@ target_sources(rocclr PRIVATE
   ${ROCCLR_SRC_DIR}/utils/debug.cpp
   ${ROCCLR_SRC_DIR}/utils/flags.cpp)
 
+# Add async logging sources (Linux only)
+if(UNIX)
+  target_sources(rocclr PRIVATE
+    ${ROCCLR_SRC_DIR}/utils/async_logger.cpp)
+endif()
+
 find_package(Git)
 
 set(ROCCLR_VERSION_GITHASH "not_found")
