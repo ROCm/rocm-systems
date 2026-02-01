@@ -18,7 +18,7 @@
 
 #if defined(DEVICE_LINKER_DISPATCH) || (defined(DEVICE_LINKER) && defined(USE_INDIRECT_FUNCTION_CALL))
 // Function table declarations for device linker dispatch
-// Tables are defined in common.cu, device linker populates them
+// Tables are defined in common.cu with visibility("hidden") to stay out of .dynsym
 #define FUNC_COUNT 859
 typedef void(*ncclDevFuncPtr_t)();
 extern __device__ ncclDevFuncPtr_t ncclDevFuncTable_1[FUNC_COUNT];
@@ -702,7 +702,7 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
     if (0 <= SpecializedFnId && ncclShmem.funcId == (unsigned)SpecializedFnId) {
       SpecializedRunWorkBatch().run();
     } else {
-#if defined(USE_INDIRECT_FUNCTION_CALL) || defined(DEVICE_LINKER_DISPATCH)
+#if defined(DEVICE_LINKER_DISPATCH) || defined(USE_INDIRECT_FUNCTION_CALL)
       if (COLL_UNROLL == 1)
         ncclDevFuncTable_1[ncclShmem.funcId]();
       else if (COLL_UNROLL == 2)

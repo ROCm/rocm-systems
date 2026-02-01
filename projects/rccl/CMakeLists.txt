@@ -960,20 +960,27 @@ if (DEVICE_LINKER)
   list(APPEND HIP_SOURCES "${GEN_DIR}/device_table.cpp")  # Contains funcNames[] needed by init.cc
   message(STATUS "DEVICE_LINKER: using host_table.cpp and device_table.cpp from generate.py")
   
-  # If GENERATE_SYM_KERNELS is OFF, create stub for ncclSymkGetKernelPtr
+  # If GENERATE_SYM_KERNELS is OFF, create stub for all sym_kernels functions
   if (NOT GENERATE_SYM_KERNELS)
     file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/sym_kernels_stub.cpp"
 "// Stub for symmetric kernel functions when GENERATE_SYM_KERNELS is OFF
 #include \"sym_kernels.h\"
 #include \"nccl.h\"
+#include \"comm.h\"
 
-void* ncclSymkGetKernelPtr(ncclSymkKernelId /*kernelId*/, int /*red*/, ncclDataType_t /*ty*/) {
-  return nullptr;  // Symmetric kernels not enabled
-}
+ncclResult_t ncclSymkInitOnce(struct ncclComm* /*comm*/) { return ncclSuccess; }
+ncclResult_t ncclSymkFinalize(struct ncclComm* /*comm*/) { return ncclSuccess; }
+bool ncclSymkAvailable(struct ncclComm* /*comm*/, ncclFunc_t /*coll*/, int /*red*/, ncclDataType_t /*ty*/, size_t /*count*/) { return false; }
+ncclResult_t ncclSymkPickKernel(struct ncclComm* /*comm*/, ncclFunc_t /*coll*/, int /*red*/, ncclDataType_t /*ty*/, size_t /*totalBytes*/, size_t /*count*/, int /*nRanks*/, float* /*time*/, ncclSymkKernelId* /*outKernel*/, int* /*outNThreads*/, int* /*outNChannels*/) { return ncclInternalError; }
+const char* ncclSymkKernelIdToString(int /*kernelId*/) { return \"<sym_kernels_disabled>\"; }
+void* ncclSymkGetKernelPtr(ncclSymkKernelId /*kernelId*/, int /*red*/, ncclDataType_t /*ty*/) { return nullptr; }
+ncclResult_t ncclSymkMakeDevWork(struct ncclComm* /*comm*/, struct ncclTaskColl* /*task*/, struct ncclSymkDevWork* /*outDevWork*/) { return ncclInternalError; }
 
 int const ncclSymkKernelCount = 0;
 void* const ncclSymkKernelList[] = { nullptr };
 ")
+    # Exclude sym_kernels.cc since stub provides the same symbols
+    list(FILTER HIP_SOURCES EXCLUDE REGEX "sym_kernels\\.cc$")
     list(APPEND HIP_SOURCES "${CMAKE_CURRENT_BINARY_DIR}/sym_kernels_stub.cpp")
     message(STATUS "DEVICE_LINKER: added sym_kernels_stub.cpp (GENERATE_SYM_KERNELS=OFF)")
   endif()

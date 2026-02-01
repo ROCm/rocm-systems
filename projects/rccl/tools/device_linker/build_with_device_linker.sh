@@ -43,10 +43,21 @@ BUNDLE_TARGET="hipv4-amdgcn-amd-amdhsa--${GPU_TARGET}:${GPU_TARGET_FEATURES}"
 OUTPUT_DIR="$BUILD_DIR/device_linker_output"
 mkdir -p "$OUTPUT_DIR"
 
-# Tools
-CLANG=/opt/rocm/lib/llvm/bin/clang-22
-LLD=/opt/rocm/lib/llvm/bin/lld
-BUNDLER=/opt/rocm/lib/llvm/bin/clang-offload-bundler
+# Tools - derive paths from amdclang++
+ROCM_PATH=${ROCM_PATH:-/opt/rocm}
+AMDCLANG="$ROCM_PATH/bin/amdclang++"
+CLANG_RESOURCE_DIR=$($AMDCLANG -print-resource-dir)
+LLVM_PATH=$(dirname $(dirname $(dirname "$CLANG_RESOURCE_DIR")))
+CLANG="$LLVM_PATH/bin/clang"
+LLD="$LLVM_PATH/bin/lld"
+BUNDLER="$LLVM_PATH/bin/clang-offload-bundler"
+# Bitcode may be in a different clang version dir - find it
+if [ -d "$CLANG_RESOURCE_DIR/lib/amdgcn/bitcode" ]; then
+    BITCODE_DIR="$CLANG_RESOURCE_DIR/lib/amdgcn/bitcode"
+else
+    # Search for ocml.bc to find the correct bitcode directory
+    BITCODE_DIR=$(dirname $(find "$LLVM_PATH/lib/clang" -name "ocml.bc" 2>/dev/null | head -1))
+fi
 DEVICE_LINKER="$SCRIPT_DIR/device_linker"
 
 # BUNDLE_TARGET is set above based on GPU_TARGET_FULL
@@ -105,12 +116,12 @@ echo ""
 
 # System include paths (from hipcc -### output)
 SYS_INCLUDES=(
-    "-internal-isystem" "/opt/rocm/lib/llvm/lib/clang/22/include/cuda_wrappers"
-    "-idirafter" "/opt/rocm/include"
+    "-internal-isystem" "$CLANG_RESOURCE_DIR/include/cuda_wrappers"
+    "-idirafter" "$ROCM_PATH/include"
     "-internal-isystem" "/usr/lib/gcc/x86_64-linux-gnu/12/../../../../include/c++/12"
     "-internal-isystem" "/usr/lib/gcc/x86_64-linux-gnu/12/../../../../include/x86_64-linux-gnu/c++/12"
     "-internal-isystem" "/usr/lib/gcc/x86_64-linux-gnu/12/../../../../include/c++/12/backward"
-    "-internal-isystem" "/opt/rocm/lib/llvm/lib/clang/22/include"
+    "-internal-isystem" "$CLANG_RESOURCE_DIR/include"
     "-internal-isystem" "/usr/local/include"
     "-internal-isystem" "/usr/lib/gcc/x86_64-linux-gnu/12/../../../../x86_64-linux-gnu/include"
     "-internal-externc-isystem" "/usr/include/x86_64-linux-gnu"
@@ -120,6 +131,8 @@ SYS_INCLUDES=(
 
 # Step 1: Compile dispatcher device code
 echo "Step 1: Compiling device code..."
+# Derive ISA version from GPU target (e.g., gfx950 -> 950)
+ISA_VERSION=$(echo "$GPU_TARGET" | sed 's/gfx//')
 $CLANG -cc1 \
     -triple amdgcn-amd-amdhsa \
     -aux-triple x86_64-unknown-linux-gnu \
@@ -131,17 +144,17 @@ $CLANG -cc1 \
     -fvisibility=hidden \
     -fapply-global-visibility-to-externs \
     -aux-target-cpu x86-64 \
-    -mlink-builtin-bitcode /opt/rocm/lib/llvm/lib/clang/22/lib/amdgcn/bitcode/ocml.bc \
-    -mlink-builtin-bitcode /opt/rocm/lib/llvm/lib/clang/22/lib/amdgcn/bitcode/ockl.bc \
-    -mlink-builtin-bitcode /opt/rocm/lib/llvm/lib/clang/22/lib/amdgcn/bitcode/oclc_daz_opt_off.bc \
-    -mlink-builtin-bitcode /opt/rocm/lib/llvm/lib/clang/22/lib/amdgcn/bitcode/oclc_unsafe_math_off.bc \
-    -mlink-builtin-bitcode /opt/rocm/lib/llvm/lib/clang/22/lib/amdgcn/bitcode/oclc_finite_only_off.bc \
-    -mlink-builtin-bitcode /opt/rocm/lib/llvm/lib/clang/22/lib/amdgcn/bitcode/oclc_correctly_rounded_sqrt_on.bc \
-    -mlink-builtin-bitcode /opt/rocm/lib/llvm/lib/clang/22/lib/amdgcn/bitcode/oclc_wavefrontsize64_on.bc \
-    -mlink-builtin-bitcode /opt/rocm/lib/llvm/lib/clang/22/lib/amdgcn/bitcode/oclc_isa_version_942.bc \
-    -mlink-builtin-bitcode /opt/rocm/lib/llvm/lib/clang/22/lib/amdgcn/bitcode/oclc_abi_version_600.bc \
+    -mlink-builtin-bitcode "$BITCODE_DIR/ocml.bc" \
+    -mlink-builtin-bitcode "$BITCODE_DIR/ockl.bc" \
+    -mlink-builtin-bitcode "$BITCODE_DIR/oclc_daz_opt_off.bc" \
+    -mlink-builtin-bitcode "$BITCODE_DIR/oclc_unsafe_math_off.bc" \
+    -mlink-builtin-bitcode "$BITCODE_DIR/oclc_finite_only_off.bc" \
+    -mlink-builtin-bitcode "$BITCODE_DIR/oclc_correctly_rounded_sqrt_on.bc" \
+    -mlink-builtin-bitcode "$BITCODE_DIR/oclc_wavefrontsize64_on.bc" \
+    -mlink-builtin-bitcode "$BITCODE_DIR/oclc_isa_version_${ISA_VERSION}.bc" \
+    -mlink-builtin-bitcode "$BITCODE_DIR/oclc_abi_version_600.bc" \
     -target-cpu $GPU_TARGET \
-    -resource-dir /opt/rocm/lib/llvm/lib/clang/22 \
+    -resource-dir "$CLANG_RESOURCE_DIR" \
     "${SYS_INCLUDES[@]}" \
     -include __clang_hip_runtime_wrapper.h \
     -D DEVICE_LINKER -D DEVICE_LINKER_DISPATCH -D ENABLE_FAULT_INJECTION \
@@ -217,7 +230,7 @@ $CLANG -cc1 \
     -emit-obj \
     -mrelocation-model pic -pic-level 2 \
     -target-cpu x86-64 \
-    -resource-dir /opt/rocm/lib/llvm/lib/clang/22 \
+    -resource-dir "$CLANG_RESOURCE_DIR" \
     "${SYS_INCLUDES[@]}" \
     -include __clang_hip_runtime_wrapper.h \
     -D DEVICE_LINKER -D DEVICE_LINKER_DISPATCH -D ENABLE_FAULT_INJECTION \
@@ -241,4 +254,4 @@ echo "Final object: $FINAL_OBJ"
 echo ""
 echo "=== Verification ==="
 echo "Sections in final object:"
-/opt/rocm/llvm/bin/llvm-objdump -h "$FINAL_OBJ" | grep -E "^\s+[0-9]+" | head -10
+"$LLVM_PATH/bin/llvm-objdump" -h "$FINAL_OBJ" | grep -E "^\s+[0-9]+" | head -10
