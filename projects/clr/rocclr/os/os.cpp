@@ -140,33 +140,4 @@ void Os::touchStackPages(address bottom, address top) {
   }
 }
 
-bool Os::skipIDIV(address& pc) {
-  address insn = pc;
-  if (insn[0] == 0x66) {  // LCP prefix
-    insn += 1;
-  }
-  if ((insn[0] & 0xf0) == 0x40) {  // REX prefix
-    insn += 1;
-  }
-  if (insn[0] == 0xf6 || insn[0] == 0xf7) {  // IDIV
-    // This is a DivisionError: skip the insn and resume execution
-    char mod = insn[1] >> 6;
-    char rm = insn[1] & 0x7;
-    insn += 2;  // skip opcode and mod/rm
-
-    if (rm == 0x4 && mod != 0x3) {
-      insn += 1;  // sib follows mod/rm
-    }
-
-    if ((mod == 0x0 && rm == 0x5) || mod == 0x2) {
-      insn += 4;  // disp32
-    } else if (mod == 0x1) {
-      insn += 1;  // disp8
-    }
-    pc = insn;
-    return true;
-  }
-  return false;
-}
-
 }  // namespace amd

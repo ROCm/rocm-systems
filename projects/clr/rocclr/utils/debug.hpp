@@ -1,4 +1,4 @@
-/* Copyright (c) 2008 - 2021 Advanced Micro Devices, Inc.
+/* Copyright (c) 2026 Advanced Micro Devices, Inc.
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -83,10 +83,27 @@ extern void log_entry(LogLevel level, const char* file, int line, const char* me
 //! \brief Insert a timestamped log entry.
 extern void log_timestamped(LogLevel level, const char* file, int line, const char* messsage);
 
-//! \brief Insert a printf-style log entry.
+//! \brief Insert a printf-style log entry (synchronous).
 extern void log_printf(LogLevel level, const char* file, int line, const char* format, ...);
 extern void log_printf(LogLevel level, const char* file, int line, uint64_t* start,
                        const char* format, ...);
+
+//! \brief Async logging support
+//! Check if async logging is enabled
+extern bool is_async_logging_enabled();
+
+//! \brief Initialize async logging system
+extern void init_async_logging();
+
+//! \brief Shutdown async logging system
+extern void shutdown_async_logging();
+
+//! \brief Flush async logs synchronously
+extern void flush_async_logs();
+
+//! \brief Async log printf (fast path)
+extern void async_log_printf_impl(uint16_t level, uint32_t mask, const char* file, int line,
+                                  const char* format, ...);
 
 /*@}*/  // namespace amd
 }  // namespace amd
@@ -200,14 +217,17 @@ inline void warning(const char* msg) { amd::report_warning(msg); }
 #define CL_LOG
 
 #ifdef CL_LOG
+
+// Async logging path - uses lock-free ring buffers and background flushing
 #define ClPrint(level, mask, format, ...)                                                          \
   do {                                                                                             \
     if (AMD_LOG_LEVEL >= level) {                                                                  \
       if (AMD_LOG_MASK & mask || mask == amd::LOG_ALWAYS) {                                        \
-        if (AMD_LOG_MASK & amd::LOG_LOCATION) {                                                    \
-          amd::log_printf(level, __FILENAME__, __LINE__, format, ##__VA_ARGS__);                   \
+        if (amd::is_async_logging_enabled()) {                                                     \
+          amd::async_log_printf_impl(level, mask, __FILENAME__, __LINE__,                          \
+                                    format, ##__VA_ARGS__);                                        \
         } else {                                                                                   \
-          amd::log_printf(level, "", 0, format, ##__VA_ARGS__);                                    \
+          amd::log_printf(level, __FILENAME__, __LINE__, format, ##__VA_ARGS__);                   \
         }                                                                                          \
       }                                                                                            \
     }                                                                                              \
@@ -222,11 +242,7 @@ inline void warning(const char* msg) { amd::report_warning(msg); }
   do {                                                                                             \
     if (AMD_LOG_LEVEL >= level) {                                                                  \
       if (AMD_LOG_MASK & mask || mask == amd::LOG_ALWAYS) {                                        \
-        if (AMD_LOG_MASK & amd::LOG_LOCATION) {                                                    \
-          amd::log_printf(level, __FILENAME__, __LINE__, startTimeUs, format, ##__VA_ARGS__);      \
-        } else {                                                                                   \
-          amd::log_printf(level, "", 0, startTimeUs, format, ##__VA_ARGS__);                       \
-        }                                                                                          \
+        amd::log_printf(level, __FILENAME__, __LINE__, startTimeUs, format, ##__VA_ARGS__);        \
       }                                                                                            \
     }                                                                                              \
   } while (false)

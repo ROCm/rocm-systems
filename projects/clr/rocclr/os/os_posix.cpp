@@ -1,4 +1,4 @@
-/* Copyright (c) 2008 - 2023 Advanced Micro Devices, Inc.
+/* Copyright (c) 2026 Advanced Micro Devices, Inc.
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -63,66 +63,54 @@
 
 namespace amd {
 
-static struct sigaction oldSigAction;
+// Crash signal handling
+static const int kCrashSignals[] = {SIGSEGV, SIGABRT, SIGBUS, SIGILL, SIGFPE};
+static constexpr size_t kNumCrashSignals = sizeof(kCrashSignals) / sizeof(kCrashSignals[0]);
+static struct sigaction oldCrashHandlers_[kNumCrashSignals];
+static Os::CrashCallback crashCallback_ = nullptr;
+static std::atomic<bool> crashHandlersInstalled_{false};
 
-static bool callOldSignalHandler(int sig, siginfo_t* info, void* ptr) {
-  if (oldSigAction.sa_handler == SIG_DFL) {
-    // no signal handler was previously installed.
-    return false;
-  } else if (oldSigAction.sa_handler != SIG_IGN) {
-    if ((oldSigAction.sa_flags & SA_NODEFER) == 0) {
-      sigaddset(&oldSigAction.sa_mask, sig);
-    }
-
-    void (*handler)(int) = oldSigAction.sa_handler;
-    if (oldSigAction.sa_flags & SA_RESETHAND) {
-      oldSigAction.sa_handler = SIG_DFL;
-    }
-
-    sigset_t savedSigSet;
-    pthread_sigmask(SIG_SETMASK, &oldSigAction.sa_mask, &savedSigSet);
-
-    if (oldSigAction.sa_flags & SA_SIGINFO) {
-      oldSigAction.sa_sigaction(sig, info, ptr);
-    } else {
-      handler(sig);
-    }
-
-    pthread_sigmask(SIG_SETMASK, &savedSigSet, NULL);
+static void crashSignalHandler(int sig) {
+  // Invoke the registered callback (e.g., flush logs)
+  if (crashCallback_ != nullptr) {
+    crashCallback_();
   }
 
+  // Re-raise signal for core dump using async-signal-safe functions
+  // Use kill(getpid(), sig) which is async-signal-safe
+  kill(getpid(), sig);
+}
+
+bool Os::installExceptionHandlers(CrashCallback callback) {
+  if (crashHandlersInstalled_.exchange(true)) {
+    return true;  // Already installed
+  }
+
+  crashCallback_ = callback;
+
+  struct sigaction sa;
+  sigemptyset(&sa.sa_mask);
+  sa.sa_handler = crashSignalHandler;
+  sa.sa_flags = SA_RESETHAND;  // One-shot: auto-restore default after first signal
+
+  for (size_t i = 0; i < kNumCrashSignals; ++i) {
+    if (sigaction(kCrashSignals[i], &sa, &oldCrashHandlers_[i]) != 0) {
+      return false;
+    }
+  }
   return true;
 }
 
-static void divisionErrorHandler(int sig, siginfo_t* info, void* ptr) {
-  assert(info != NULL && ptr != NULL && "just checking");
-  ucontext_t* uc = (ucontext_t*)ptr;
-  address insn;
-
-#if defined(ATI_ARCH_X86)
-  insn = (address)uc->uc_mcontext.gregs[LP64_SWITCH(REG_EIP, REG_RIP)];
-#else
-  assert(!"Unimplemented");
-#endif
-
-  if (Thread::current()->isWorkerThread()) {
-    if (Os::skipIDIV(insn)) {
-#if defined(ATI_ARCH_X86)
-      uc->uc_mcontext.gregs[LP64_SWITCH(REG_EIP, REG_RIP)] = (greg_t)insn;
-#else
-      assert(!"Unimplemented");
-#endif
-      return;
-    }
-  }
-
-  // Call the chained signal handler
-  if (callOldSignalHandler(sig, info, ptr)) {
+void Os::uninstallExceptionHandlers() {
+  if (!crashHandlersInstalled_.load()) {
     return;
   }
 
-  std::cerr << "Unhandled signal in divisionErrorHandler()" << std::endl;
-  ::abort();
+  for (size_t i = 0; i < kNumCrashSignals; ++i) {
+    sigaction(kCrashSignals[i], &oldCrashHandlers_[i], nullptr);
+  }
+  crashCallback_ = nullptr;
+  crashHandlersInstalled_.store(false);
 }
 
 typedef int (*pthread_setaffinity_fn)(pthread_t, size_t, const cpu_set_t*);
@@ -131,22 +119,6 @@ static pthread_setaffinity_fn pthread_setaffinity_fptr;
 static void init() __attribute__((constructor(101)));
 static void init() { Os::init(); }
 static cpu_set_t nativeMask_;
-
-bool Os::installSigfpeHandler() {
-  // Install a SIGFPE signal handler @todo: Chain the handlers
-  struct sigaction sa;
-  sigfillset(&sa.sa_mask);
-  sa.sa_handler = SIG_DFL;
-  sa.sa_sigaction = divisionErrorHandler;
-  sa.sa_flags = SA_SIGINFO | SA_RESTART;
-
-  if (sigaction(SIGFPE, &sa, &oldSigAction) != 0) {
-    return false;
-  }
-  return true;
-}
-
-void Os::uninstallSigfpeHandler() {}
 
 bool Os::init() {
   static bool initialized_ = false;

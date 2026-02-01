@@ -1,4 +1,4 @@
-/* Copyright (c) 2009 - 2025 Advanced Micro Devices, Inc.
+/* Copyright (c) 2026 Advanced Micro Devices, Inc.
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -32,6 +32,12 @@ release(cstring, AMD_LOG_LEVEL_FILE, "",                                      \
         "Set output file for AMD_LOG_LEVEL, Default is stderr")               \
 release(size_t, AMD_LOG_LEVEL_SIZE, 2048,                                     \
         "The max size of AMD_LOG generated in MB if printed to a file")       \
+release(bool, AMD_LOG_INMEM, false,                                           \
+        "Enable in-memory asynchronous logging")                              \
+release(size_t, AMD_LOG_BUFFER_SIZE, 8,                                       \
+        "Ring buffer size for in-memory logging in MB")                       \
+release(size_t, AMD_LOG_FLUSH_INTERVAL_MS, 50,                                \
+        "Async log flush interval in milliseconds")                           \
 debug(uint, DEBUG_GPU_FLAGS, 0,                                               \
         "The debug options for GPU device")                                   \
 release(size_t, CQ_THREAD_STACK_SIZE, 256*Ki, /* @todo: that much! */         \

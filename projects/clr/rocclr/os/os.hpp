@@ -1,4 +1,4 @@
-/* Copyright (c) 2008 - 2021 Advanced Micro Devices, Inc.
+/* Copyright (c) 2026 Advanced Micro Devices, Inc.
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -254,23 +254,23 @@ class Os : AllStatic {
   //! Return the timeNanos starting point offset to Epoch.
   static uint64_t offsetToEpochNanos();
 
-  // X86 Instructions helpers:
-  //
-
-  //! Skip an IDIV (F6/F7) instruction and return a pointer to the next insn.
-  static bool skipIDIV(address& insn);
-
   // return gloabal memory size to be assigned to device info
   static size_t getPhysicalMemSize();
 
   //! get Application file name and path
   static void getAppPathAndFileName(std::string& appName, std::string& appPathAndName);
 
-  //! Install SIGFPE handler for CPU device
-  static bool installSigfpeHandler();
+  //! Callback type for crash handlers
+  typedef void (*CrashCallback)();
 
-  //! Uninstall SIGFPE handler for CPU device
-  static void uninstallSigfpeHandler();
+  //! Install crash signal/exception handlers
+  //! POSIX: SIGSEGV, SIGABRT, SIGBUS, SIGILL, SIGFPE
+  //! Windows: ACCESS_VIOLATION, STACK_OVERFLOW, ILLEGAL_INSTRUCTION, INT_DIVIDE_BY_ZERO
+  //! Callback is invoked before re-raising for default handling (core dump)
+  static bool installExceptionHandlers(CrashCallback callback = nullptr);
+
+  //! Uninstall crash handlers
+  static void uninstallExceptionHandlers();
 
   //! Return the current process id
   static int getProcessId();

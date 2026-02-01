@@ -1,4 +1,4 @@
-/* Copyright (c) 2008 - 2022 Advanced Micro Devices, Inc.
+/* Copyright (c) 2026 Advanced Micro Devices, Inc.
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -43,11 +43,8 @@ namespace amd {
 
 static size_t allocationGranularity_;
 
-static LONG WINAPI divExceptionFilter(struct _EXCEPTION_POINTERS* ep);
-
-#ifdef _WIN64
-PVOID divExceptionHandler = NULL;
-#endif  // _WIN64
+// Forward declaration for SEH on 32-bit Windows
+static LONG WINAPI crashExceptionFilter(struct _EXCEPTION_POINTERS* ep);
 
 static double PerformanceFrequency;
 static GROUP_AFFINITY nativeMask_;
@@ -240,35 +237,39 @@ static void SetThreadName(DWORD threadId, const char* name) {
 
 void Os::setCurrentThreadName(const char* name) { SetThreadName(GetCurrentThreadId(), name); }
 
-static LONG WINAPI divExceptionFilter(struct _EXCEPTION_POINTERS* ep) {
+// Crash exception handling for Windows
+static Os::CrashCallback crashCallback_ = nullptr;
+static PVOID crashExceptionHandler = NULL;
+
+static LONG WINAPI crashExceptionFilter(struct _EXCEPTION_POINTERS* ep) {
   DWORD code = ep->ExceptionRecord->ExceptionCode;
 
-  if ((code == EXCEPTION_INT_DIVIDE_BY_ZERO || code == EXCEPTION_INT_OVERFLOW) &&
-      Thread::current()->isWorkerThread()) {
-    address insn = (address)ep->ContextRecord->LP64_SWITCH(Eip, Rip);
-
-    if (Os::skipIDIV(insn)) {
-      ep->ContextRecord->LP64_SWITCH(Eip, Rip) = (uintptr_t)insn;
-      return EXCEPTION_CONTINUE_EXECUTION;
+  // Handle crash exceptions: invoke callback before continuing search
+  if (code == EXCEPTION_ACCESS_VIOLATION ||
+      code == EXCEPTION_STACK_OVERFLOW ||
+      code == EXCEPTION_ILLEGAL_INSTRUCTION ||
+      code == EXCEPTION_INT_DIVIDE_BY_ZERO ||
+      code == EXCEPTION_INT_OVERFLOW) {
+    if (crashCallback_ != nullptr) {
+      crashCallback_();
     }
   }
+
   return EXCEPTION_CONTINUE_SEARCH;
 }
 
-bool Os::installSigfpeHandler() {
-#ifdef _WIN64
-  divExceptionHandler = AddVectoredExceptionHandler(1, divExceptionFilter);
-#endif  // _WIN64
-  return true;
+bool Os::installExceptionHandlers(CrashCallback callback) {
+  crashCallback_ = callback;
+  crashExceptionHandler = AddVectoredExceptionHandler(1, crashExceptionFilter);
+  return crashExceptionHandler != NULL;
 }
 
-void Os::uninstallSigfpeHandler() {
-#ifdef _WIN64
-  if (divExceptionHandler != NULL) {
-    RemoveVectoredExceptionHandler(divExceptionHandler);
-    divExceptionHandler = NULL;
+void Os::uninstallExceptionHandlers() {
+  if (crashExceptionHandler != NULL) {
+    RemoveVectoredExceptionHandler(crashExceptionHandler);
+    crashExceptionHandler = NULL;
   }
-#endif  // _WIN64
+  crashCallback_ = nullptr;
 }
 
 void* Thread::entry(Thread* thread) {
@@ -276,7 +277,7 @@ void* Thread::entry(Thread* thread) {
 #if !defined(_WIN64)
   __try {
     ret = thread->main();
-  } __except (divExceptionFilter(GetExceptionInformation())) {
+  } __except (crashExceptionFilter(GetExceptionInformation())) {
     // nothing to do here.
   }
 #else   // _WIN64
