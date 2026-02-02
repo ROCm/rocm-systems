@@ -104,12 +104,41 @@ def get_gpu_node_count():
     return None
 
 
+def load_json_file(filepath):
+    """
+    Load JSON from a file, handling cases where multiple MPI ranks may have written
+    to the same file (resulting in concatenated JSON objects).
+
+    Returns the first valid JSON object found, or None if no valid JSON exists.
+    """
+    try:
+        with open(filepath, 'r') as f:
+            content = f.read()
+
+        # Try to load as a single JSON object first
+        try:
+            return json.loads(content)
+        except json.JSONDecodeError as e:
+            # If that fails, it might be multiple JSON objects concatenated
+            # Try to extract the first valid JSON object
+            decoder = json.JSONDecoder()
+            try:
+                obj, idx = decoder.raw_decode(content)
+                # Successfully decoded the first JSON object
+                return obj
+            except json.JSONDecodeError:
+                # Even the first object is malformed
+                return None
+    except (IOError, OSError):
+        return None
+
+
 def get_sdk_data(data):
     """
     Extract rocprofiler-sdk-tool data from JSON, handling both dict and list structures.
     Some JSON files have rocprofiler-sdk-tool as a list, others as a dict.
     """
-    if "rocprofiler-sdk-tool" not in data:
+    if data is None or "rocprofiler-sdk-tool" not in data:
         return None
 
     sdk_data = data["rocprofiler-sdk-tool"]
@@ -135,15 +164,24 @@ def test_mpi_ranks_feature(output_dir, test_mode):
     - without-mpi: Non-MPI run, should generate output regardless
     """
 
-    # Find all JSON output files in the output directory
-    json_files = glob.glob(os.path.join(output_dir, "**/out_results.json"), recursive=True)
-
     # Detect the number of GPU nodes in the system
     gpu_node_count = get_gpu_node_count()
     is_single_node = gpu_node_count is not None and gpu_node_count <= 1
 
+    # Find JSON output files
+    # For MPI tests: Look only in rank.* subdirectories (to avoid stale files)
+    # For non-MPI tests: Look everywhere in the output directory
+    if test_mode in ["with-mpi-single", "with-mpi-multiple"]:
+        # MPI test - only look in rank.* subdirectories
+        json_files = []
+        for rank_dir in glob.glob(os.path.join(output_dir, "rank.*")):
+            json_files.extend(glob.glob(os.path.join(rank_dir, "**/out_results.json"), recursive=True))
+    else:
+        # Non-MPI test - look everywhere
+        json_files = glob.glob(os.path.join(output_dir, "**/out_results.json"), recursive=True)
+
     if test_mode == "with-mpi-single":
-        # With --mpi-ranks 0 and 4 MPI ranks, only rank 0 should generate output
+        # With --mpi-ranks 0 and 4 MPI ranks, only rank 0 should generate output in rank.0/
         # So we should have exactly 1 JSON file
         assert len(json_files) == 1, (
             f"Expected 1 JSON file for rank 0 only, but found {len(json_files)}: {json_files}"
@@ -151,12 +189,12 @@ def test_mpi_ranks_feature(output_dir, test_mode):
 
         # Verify the file is from rank 0
         json_file = json_files[0]
-        with open(json_file, 'r') as f:
-            data = json.load(f)
+        data = load_json_file(json_file)
+        assert data is not None, f"Failed to load JSON from {json_file}"
 
         # Check that we have valid profiling data
         sdk_data = get_sdk_data(data)
-        assert sdk_data is not None, "Missing rocprofiler-sdk-tool data"
+        assert sdk_data is not None, f"Missing rocprofiler-sdk-tool data in {json_file}"
         buffer_records = sdk_data.get("buffer_records", {})
 
         # Should have some kernel or HIP API data
@@ -168,38 +206,23 @@ def test_mpi_ranks_feature(output_dir, test_mode):
 
     elif test_mode == "with-mpi-multiple":
         # With --mpi-ranks 0-1,3 and 4 MPI ranks, ranks 0, 1, and 3 should generate output
+        # Each rank uses a separate output directory (via %env{OMPI_COMM_WORLD_RANK}%)
+        # so we should always get exactly 3 files
         expected_files = 3
 
-        if is_single_node:
-            # On single-node systems, MPI ranks share the same output directory and may overwrite
-            # each other's files, resulting in only 1 file (the last rank to write)
-            print(f"INFO: Single GPU node detected (GPU count: {gpu_node_count})")
-            print("INFO: On single-node systems, MPI ranks may share output directory")
+        if gpu_node_count is not None:
+            print(f"INFO: Detected {gpu_node_count} GPU node(s)")
 
-            # Accept 1 file (ranks overwriting each other) on single node systems
-            assert len(json_files) >= 1, (
-                f"Expected at least 1 JSON file on single-node system, but found {len(json_files)}: {json_files}"
-            )
-
-            if len(json_files) < expected_files:
-                print(f"INFO: Found {len(json_files)} file(s) instead of {expected_files} - expected on single-node setup")
-        else:
-            # On multi-node systems, each rank should have its own output directory
-            if gpu_node_count is not None:
-                print(f"INFO: Multiple GPU nodes detected (GPU count: {gpu_node_count})")
-            else:
-                print("INFO: Could not detect GPU count, assuming multi-node system")
-
-            # Require exactly the expected number of files on multi-node systems
-            assert len(json_files) == expected_files, (
-                f"Expected {expected_files} JSON files for ranks 0, 1, and 3 on multi-node system, "
-                f"but found {len(json_files)}: {json_files}"
-            )
+        # With separate output directories per rank, we should have exactly the expected number
+        assert len(json_files) == expected_files, (
+            f"Expected {expected_files} JSON files for ranks 0, 1, and 3, "
+            f"but found {len(json_files)}: {json_files}"
+        )
 
         # Verify each file has valid profiling data
         for json_file in json_files:
-            with open(json_file, 'r') as f:
-                data = json.load(f)
+            data = load_json_file(json_file)
+            assert data is not None, f"Failed to load JSON from {json_file}"
 
             sdk_data = get_sdk_data(data)
             assert sdk_data is not None, f"Missing rocprofiler-sdk-tool data in {json_file}"
@@ -221,11 +244,11 @@ def test_mpi_ranks_feature(output_dir, test_mode):
 
         # Verify the file has valid profiling data
         json_file = json_files[0]
-        with open(json_file, 'r') as f:
-            data = json.load(f)
+        data = load_json_file(json_file)
+        assert data is not None, f"Failed to load JSON from {json_file}"
 
         sdk_data = get_sdk_data(data)
-        assert sdk_data is not None, "Missing rocprofiler-sdk-tool data"
+        assert sdk_data is not None, f"Missing rocprofiler-sdk-tool data in {json_file}"
         buffer_records = sdk_data.get("buffer_records", {})
 
         # Should have some kernel or HIP API data
@@ -244,12 +267,17 @@ def test_csv_output_consistency(output_dir, test_mode):
     Verify that CSV files are also correctly generated/not generated based on rank filtering.
     """
 
-    # Find all kernel trace CSV files
-    csv_files = glob.glob(os.path.join(output_dir, "**/out_kernel_trace.csv"), recursive=True)
-
-    # Detect the number of GPU nodes in the system
-    gpu_node_count = get_gpu_node_count()
-    is_single_node = gpu_node_count is not None and gpu_node_count <= 1
+    # Find CSV files
+    # For MPI tests: Look only in rank.* subdirectories
+    # For non-MPI tests: Look everywhere in the output directory
+    if test_mode in ["with-mpi-single", "with-mpi-multiple"]:
+        # MPI test - only look in rank.* subdirectories
+        csv_files = []
+        for rank_dir in glob.glob(os.path.join(output_dir, "rank.*")):
+            csv_files.extend(glob.glob(os.path.join(rank_dir, "**/out_kernel_trace.csv"), recursive=True))
+    else:
+        # Non-MPI test - look everywhere
+        csv_files = glob.glob(os.path.join(output_dir, "**/out_kernel_trace.csv"), recursive=True)
 
     if test_mode == "with-mpi-single":
         # Only rank 0 should have CSV output
@@ -258,19 +286,12 @@ def test_csv_output_consistency(output_dir, test_mode):
         )
 
     elif test_mode == "with-mpi-multiple":
+        # Each rank has separate output directory, so expect exactly 3 CSV files
         expected_files = 3
-
-        if is_single_node:
-            # On single-node systems, accept 1 or more files
-            assert len(csv_files) >= 1, (
-                f"Expected at least 1 CSV file on single-node system, but found {len(csv_files)}: {csv_files}"
-            )
-        else:
-            # On multi-node systems, require exactly the expected number
-            assert len(csv_files) == expected_files, (
-                f"Expected {expected_files} CSV files for ranks 0, 1, and 3 on multi-node system, "
-                f"but found {len(csv_files)}: {csv_files}"
-            )
+        assert len(csv_files) == expected_files, (
+            f"Expected {expected_files} CSV files for ranks 0, 1, and 3, "
+            f"but found {len(csv_files)}: {csv_files}"
+        )
 
     elif test_mode == "without-mpi":
         # Non-MPI run should have CSV output
@@ -282,26 +303,29 @@ def test_csv_output_consistency(output_dir, test_mode):
 def test_no_output_for_filtered_ranks(output_dir, test_mode):
     """
     Verify that ranks not in the --mpi-ranks list do not generate output.
-    This test is skipped on single-node systems where ranks may share output directories.
+    Since each rank has a separate output directory (via %env{OMPI_COMM_WORLD_RANK}%),
+    we can check that rank 2's directory doesn't exist or is empty.
     """
 
     if test_mode != "with-mpi-multiple":
         pytest.skip("This test only applies to with-mpi-multiple mode")
 
-    # Detect if we're on a single-node system
-    gpu_node_count = get_gpu_node_count()
-    is_single_node = gpu_node_count is not None and gpu_node_count <= 1
+    # Check for rank.2 directory (which should NOT have been created or should be empty)
+    rank_2_dir = os.path.join(output_dir, "rank.2")
 
-    if is_single_node:
-        pytest.skip("Skipping filtered ranks test on single-node system (ranks share output directory)")
+    if os.path.exists(rank_2_dir):
+        # Directory exists - check if it has any JSON files
+        json_files_in_rank_2 = glob.glob(os.path.join(rank_2_dir, "**/out_results.json"), recursive=True)
+        assert len(json_files_in_rank_2) == 0, (
+            f"Rank 2 should not generate output, but found {len(json_files_in_rank_2)} files: {json_files_in_rank_2}"
+        )
 
-    # In with-mpi-multiple mode with --mpi-ranks 0-1,3, rank 2 should NOT generate output
-    json_files = glob.glob(os.path.join(output_dir, "**/out_results.json"), recursive=True)
-
-    # On multi-node systems, we should have exactly 3 files (no output from rank 2)
-    assert len(json_files) == 3, (
-        f"Expected exactly 3 output files (ranks 0,1,3) on multi-node system, got {len(json_files)}"
-    )
+    # Verify that ranks 0, 1, and 3 directories exist with output
+    for rank in [0, 1, 3]:
+        rank_dir = os.path.join(output_dir, f"rank.{rank}")
+        assert os.path.exists(rank_dir), f"Expected directory for rank {rank} at {rank_dir}"
+        json_files = glob.glob(os.path.join(rank_dir, "**/out_results.json"), recursive=True)
+        assert len(json_files) >= 1, f"Expected output files for rank {rank} in {rank_dir}"
 
 
 if __name__ == "__main__":

@@ -28,13 +28,14 @@ if(MPIRUN_EXECUTABLE)
         OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1)
 
     # Test with MPI - profile only rank 0 out of 4 ranks
+    # Use %env{OMPI_COMM_WORLD_RANK}% to create separate output directories per rank
     rocprofiler_add_integration_execute_test(
         rocprofv3-test-mpi-ranks-with-mpi
         COMMAND
             ${CMAKE_COMMAND} -E env ${MPI_ENV_VARS}
             ${MPIRUN_EXECUTABLE} -n 4
             $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --hip-trace --kernel-trace
-            --output-format csv json -d ${CMAKE_CURRENT_BINARY_DIR}/mpi-ranks-trace
+            --output-format csv json -d ${CMAKE_CURRENT_BINARY_DIR}/mpi-ranks-trace/rank.%env{OMPI_COMM_WORLD_RANK}%
             -o out --mpi-ranks 0 ${PRELOAD_ARGS} -- $<TARGET_FILE:simple-transpose>
         DEPENDS simple-transpose
         TIMEOUT 120
@@ -43,13 +44,14 @@ if(MPIRUN_EXECUTABLE)
         FIXTURES_SETUP rocprofv3-test-mpi-ranks-with-mpi)
 
     # Test with MPI - profile ranks 0-1,3 out of 4 ranks
+    # Use %env{OMPI_COMM_WORLD_RANK}% to create separate output directories per rank
     rocprofiler_add_integration_execute_test(
         rocprofv3-test-mpi-ranks-with-mpi-multiple
         COMMAND
             ${CMAKE_COMMAND} -E env ${MPI_ENV_VARS}
             ${MPIRUN_EXECUTABLE} -n 4
             $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --hip-trace --kernel-trace
-            --output-format csv json -d ${CMAKE_CURRENT_BINARY_DIR}/mpi-ranks-multiple-trace
+            --output-format csv json -d ${CMAKE_CURRENT_BINARY_DIR}/mpi-ranks-multiple-trace/rank.%env{OMPI_COMM_WORLD_RANK}%
             -o out --mpi-ranks 0-1,3 ${PRELOAD_ARGS} -- $<TARGET_FILE:simple-transpose>
         DEPENDS simple-transpose
         TIMEOUT 120
