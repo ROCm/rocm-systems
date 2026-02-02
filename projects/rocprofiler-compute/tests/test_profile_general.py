@@ -791,7 +791,6 @@ def test_output_directory(binary_handler_profile_rocprof_compute, monkeypatch):
         with patch("socket.gethostname", return_value=hostname):
             workload_base_dir = test_utils.get_output_dir(param_id="hostname")
             workload_dir = os.path.join(workload_base_dir, "%hostname%")
-            print("workload_dir:", workload_dir)
             binary_handler_profile_rocprof_compute(config, workload_dir)
             workload_dir = workload_dir.replace("%hostname%", hostname)
             assert os.path.exists(workload_dir)
@@ -942,10 +941,6 @@ def test_output_directory(binary_handler_profile_rocprof_compute, monkeypatch):
 
             # With no name but with output directory
             workload_dir = test_utils.get_output_dir(param_id="dir_no_name")
-            workload_dir = os.path.join(
-                workload_dir,
-                "app_1",
-            )
             binary_handler_profile_rocprof_compute(
                 config, workload_dir=workload_dir, skip_app_name=True
             )
@@ -962,6 +957,7 @@ def test_output_directory(binary_handler_profile_rocprof_compute, monkeypatch):
                 workload_dir_type="default"
             )
             assert error_code == 1
+            test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.roofline_1
@@ -3208,21 +3204,19 @@ if __name__ == "__main__":
     )
 
 
-skip_if_no_mpi = pytest.mark.skipif(
-    shutil.which("mpirun") is None, reason="mpirun is not available"
-)
-
-
-@skip_if_no_mpi
+@pytest.mark.mpi
 @pytest.mark.multi_rank
 def test_multi_rank_profiling_no_mpi_comm(binary_handler_profile_rocprof_compute):
+    from mpi4py import MPI
+
+    comm = MPI.COMM_WORLD
+    size = comm.Get_size()
+
     workload_dir = test_utils.get_output_dir()
 
-    num_ranks = 2
+    binary_handler_profile_rocprof_compute(config, workload_dir)
 
-    binary_handler_profile_rocprof_compute(config, workload_dir, num_mpi_ranks=num_ranks)
-
-    for rank in range(num_ranks):
+    for rank in range(size):
         rank_dir = Path(workload_dir) / str(rank)
         assert rank_dir.exists(), f"Rank directory {rank_dir} does not exist"
 
