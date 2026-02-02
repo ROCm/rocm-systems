@@ -110,9 +110,10 @@ KNOWN_WRAPPERS=(
 
 CCACHE_PREFIX=""
 ACTUAL_COMPILER="${1}"
+CURRENT_BASENAME="$(basename "${1}")"
 
 for wrapper in "${KNOWN_WRAPPERS[@]}"; do
-    if [[ "$(basename ${1})" == "${wrapper}" ]]; then
+    if [[ "${CURRENT_BASENAME}" == "${wrapper}" ]]; then
         if [ -z "${2:-}" ]; then
             echo -e "\nError: ${BASH_SOURCE[0]} detected '${wrapper}' as a wrapper," >&2
             echo "but no underlying command was specified as the next argument." >&2
@@ -124,6 +125,7 @@ for wrapper in "${KNOWN_WRAPPERS[@]}"; do
         fi
         shift
         ACTUAL_COMPILER="${1}"
+        CURRENT_BASENAME="$(basename "${1}")"
     fi
 done
 
