@@ -33,7 +33,7 @@ Usage: python inject_roctx.py main.py --epochs 1 --batch-size 4
 import os
 import sys
 from pathlib import Path
-import pkgutil
+# import pkgutil
 import importlib
 
 # Add parent directory to Python path for config module
@@ -74,6 +74,7 @@ from roctx import rangePop, rangePush
 
 # Global stack for hierarchical marker names
 marker_stack = []
+context_stack = []
 
 if hasattr(torch._C, "_dispatch_call"):
     original_dispatch_call = torch._C._dispatch_call
@@ -92,7 +93,7 @@ if hasattr(torch._C, "_dispatch_call"):
     torch._C._dispatch_call = dispatch_call_with_roctx
 else:
     console_warning("torch._C._dispatch_call not found; skipping dispatcher patching.")
-    
+
 try:
     import torchvision
     original_tv_dispatch_call = torchvision._C._dispatch_call
@@ -126,21 +127,25 @@ try:
 except Exception:
     pass
 
-try:
-    import torch.jit
-    original_jit_script = torch.jit.script
-    def jit_script_with_roctx(*args, **kwargs):
-        full_marker_name = "/".join(marker_stack + ["torch.jit.script"])
-        marker_stack.append("torch.jit.script")
-        rangePush(full_marker_name)
-        try:
-            return original_jit_script(*args, **kwargs)
-        finally:
-            rangePop()
-            marker_stack.pop()
-    torch.jit.script = jit_script_with_roctx
-except Exception:
-    pass
+# try:
+#     import torch.jit
+#     original_jit_script = torch.jit.script
+#     def jit_script_with_roctx(*args, **kwargs):
+#         full_marker_name = "/".join(marker_stack + ["torch.jit.script"])
+#         marker_stack.append("torch.jit.script")
+#         rangePush(full_marker_name)
+#         try:
+#             return original_jit_script(*args, **kwargs)
+#         except Exception as e:
+#             console_warning("Exception in torch.jit.script, popping ROCTX marker")
+#             console_warning(str(e))
+#             return None
+#         finally:
+#             rangePop()
+#             marker_stack.pop()
+#     torch.jit.script = jit_script_with_roctx
+# except Exception:
+#     pass
 
 try:
     import torch.cuda
@@ -158,89 +163,119 @@ try:
 except Exception:
     pass
 
-def auto_wrap_class_methods(module, prefix, exclude_patterns=None):
-    if exclude_patterns is None:
-        exclude_patterns = ["__", "_", "is_", "set_", "get_"]
-    for name in dir(module):
-        if any(name.startswith(pat) for pat in exclude_patterns):
-            continue
-        attr = getattr(module, name)
-        if isinstance(attr, type):  # It's a class
-            class_obj = attr
-            for meth_name in dir(class_obj):
-                if any(meth_name.startswith(pat) for pat in exclude_patterns):
-                    continue
-                meth = getattr(class_obj, meth_name)
-                if callable(meth):
-                    # Avoid double-wrapping
-                    if hasattr(meth, "_is_roctx_wrapped"):
-                        continue
-                    def make_method_wrapper(orig_meth, cname, mname):
-                        def wrapper(self, *args, **kwargs):
-                            full_marker_name = "/".join(marker_stack + [f"{prefix}.{cname}.{mname}"])
-                            marker_stack.append(f"{prefix}.{cname}.{mname}")
-                            rangePush(full_marker_name)
-                            try:
-                                return orig_meth(self, *args, **kwargs)
-                            finally:
-                                rangePop()
-                                marker_stack.pop()
-                        wrapper._is_roctx_wrapped = True
-                        return wrapper
-                    try:
-                        setattr(class_obj, meth_name, make_method_wrapper(meth, name, meth_name))
-                    except Exception:
-                        pass  # Some built-in methods can't be set
+# def auto_wrap_class_methods(module, prefix, exclude_patterns=None):
+#     """
+#     Automatically wraps all instance methods of classes within a given module
+#     with ROCTX markers for hierarchical profiling.
 
-def auto_wrap_all_submodules(parent_module, prefix):
-    # Wrap the parent module itself
-    auto_wrap_class_methods(parent_module, prefix)
-    # Iterate over all submodules
-    if hasattr(parent_module, "__path__"):
-        for module_info in pkgutil.walk_packages(parent_module.__path__, prefix + "."):
-            try:
-                submod = importlib.import_module(module_info.name)
-                auto_wrap_class_methods(submod, module_info.name)
-            except Exception:
-                pass  # Some submodules may not import cleanly
+#     Skips:
+#       - Methods whose names start with any string in `exclude_patterns` (e.g., "__", "_", "is_", "set_", "get_"),
+#         to avoid wrapping private, special, or accessor methods that are not relevant for profiling.
+#       - Methods listed in the internal `skip_method_names` set (e.g., "join"), to prevent wrapping methods
+#         that are known to cause runtime errors or conflicts (such as pybind11/torch C++ bindings that do not
+#         support Python-level monkey-patching).
+#       - Static methods and class methods, as these are not instance methods and may not be safe or meaningful
+#         to wrap for profiling.
+#       - Non-callable attributes, to avoid attempting to wrap constants or properties.
+#       - Methods already wrapped with ROCTX, to prevent double-wrapping.
+#     """
+#     skip_method_names = {"join", "shutdown", "acquire", "release", "wait", "notify", "notify_all"} 
+#     if exclude_patterns is None:
+#         exclude_patterns = ["__", "_", "is_", "set_", "get_"]
+#     for name in dir(module):
+#         if any(name.startswith(pat) for pat in exclude_patterns):
+#             continue
+#         attr = getattr(module, name)
+#         if isinstance(attr, type):  # It's a class
+#             class_obj = attr
+#             for meth_name in dir(class_obj):
+#                 if meth_name in skip_method_names:
+#                     continue
+#                 if any(meth_name.startswith(pat) for pat in exclude_patterns):
+#                     continue
+#                 meth = getattr(class_obj, meth_name)
+#                 if not callable(meth):
+#                     continue
+#                 descriptor = class_obj.__dict__.get(meth_name, None)
+#                 if isinstance(descriptor, (staticmethod, classmethod)):
+#                     console_log(f"Skipping static/class method: {prefix}.{name}.{meth_name}")
+#                     continue
+#                 # Avoid double-wrapping
+#                 if hasattr(meth, "_is_roctx_wrapped"):
+#                     continue
+#                 def make_method_wrapper(orig_meth, cname, mname):
+#                     def wrapper(self, *args, **kwargs):
+#                         full_marker_name = "/".join(marker_stack + [f"{prefix}.{cname}.{mname}"])
+#                         marker_stack.append(f"{prefix}.{cname}.{mname}")
+#                         rangePush(full_marker_name)
+#                         try:
+#                             return orig_meth(self, *args, **kwargs)
+#                         finally:
+#                             rangePop()
+#                             marker_stack.pop()
+#                     wrapper._is_roctx_wrapped = True
+#                     return wrapper
+#                 try:
+#                     setattr(class_obj, meth_name, make_method_wrapper(meth, name, meth_name))
+#                 except Exception:
+#                     pass  # Some built-in methods can't be set
 
-# Auto-wrap all submodules of relevant libraries (taken from PyTorch examples)
-auto_wrap_all_submodules(torch, "torch")
-try:
-    import torchvision
-    auto_wrap_all_submodules(torchvision, "torchvision")
-except Exception:
-    pass
-try:
-    import torch.cuda
-    auto_wrap_all_submodules(torch.cuda, "torch.cuda")
-except Exception:
-    pass
-try:
-    import torch.distributed
-    auto_wrap_all_submodules(torch.distributed, "torch.distributed")
-except Exception:
-    pass
-try:
-    import timm
-    auto_wrap_all_submodules(timm, "timm")
-except Exception:
-    pass
-try:
-    import transformers
-    auto_wrap_all_submodules(transformers, "transformers")
-except Exception:
-    pass
-try:
-    import lmdb
-    auto_wrap_all_submodules(lmdb, "lmdb")
-except Exception:
-    pass
-try:
-    import spacy
-    auto_wrap_all_submodules(spacy, "spacy")
-except Exception:
-    pass
+# def auto_wrap_all_submodules(parent_module, prefix):
+#     # Wrap the parent module itself
+#     auto_wrap_class_methods(parent_module, prefix)
+#     # Iterate over all submodules
+#     if hasattr(parent_module, "__path__"):
+#         for module_info in pkgutil.walk_packages(parent_module.__path__, prefix + "."):
+#             try:
+#                 submod = importlib.import_module(module_info.name)
+#                 auto_wrap_class_methods(submod, module_info.name)
+#             except Exception:
+#                 pass  # Some submodules may not import cleanly
+
+# # Save original sys.argv before auto-wrapping to prevent torch submodules from parsing workload arguments
+# _saved_argv = sys.argv
+# sys.argv = [sys.argv[0]] if sys.argv else ["inject_roctx.py"]
+
+# # Auto-wrap all submodules of relevant libraries (taken from PyTorch examples)
+# auto_wrap_all_submodules(torch, "torch")
+# try:
+#     import torchvision
+#     auto_wrap_all_submodules(torchvision, "torchvision")
+# except Exception:
+#     pass
+# try:
+#     import torch.cuda
+#     auto_wrap_all_submodules(torch.cuda, "torch.cuda")
+# except Exception:
+#     pass
+# try:
+#     import torch.distributed
+#     auto_wrap_all_submodules(torch.distributed, "torch.distributed")
+# except Exception:
+#     pass
+# try:
+#     import timm
+#     auto_wrap_all_submodules(timm, "timm")
+# except Exception:
+#     pass
+# try:
+#     import transformers
+#     auto_wrap_all_submodules(transformers, "transformers")
+# except Exception:
+#     pass
+# try:
+#     import lmdb
+#     auto_wrap_all_submodules(lmdb, "lmdb")
+# except Exception:
+#     pass
+# try:
+#     import spacy
+#     auto_wrap_all_submodules(spacy, "spacy")
+# except Exception:
+#     pass
+
+# # Restore original sys.argv after all auto-wrapping is complete
+# sys.argv = _saved_argv
 
 def roctx_wrapper(func, name=None):
     func_name = name or func.__name__
@@ -257,21 +292,21 @@ def roctx_wrapper(func, name=None):
         else:
             location = "unknown:0"
 
-        # Build hierarchical marker name
-        full_marker_name = "/".join(
-            marker_stack + [f"{func_name}:#{call_counter['count']}@{location}"]
-        )
-        marker_stack.append(f"{func_name}:#{call_counter['count']}@{location}")
+        # Build hierarchical marker name with separate context
+        marker_stack.append(func_name)
+        context_stack.append(f"#{call_counter['count']}@{location}")
+        full_marker_name = "/".join(marker_stack) + ":" + "/".join(context_stack)
+        
         rangePush(full_marker_name)
         try:
             result = func(*args, **kwargs)
         finally:
             rangePop()
             marker_stack.pop()
+            context_stack.pop()
         return result
 
     return wrapper
-
 
 def auto_discover_torch_callables(module, prefix, exclude_patterns=None):
     """Automatically discover all callable functions in a module."""
@@ -366,31 +401,27 @@ def inject_roctx_into_torch():
         else:
             location = "unknown:0"
 
-        full_marker_name = "/".join(
-            marker_stack
-            + [f"torch.Tensor.backward:#{backward_counter['count']}@{location}"]
-        )
-        marker_stack.append(
-            f"torch.Tensor.backward:#{backward_counter['count']}@{location}"
-        )
+        marker_stack.append("torch.Tensor.backward")
+        context_stack.append(f"#{backward_counter['count']}@{location}")
+        full_marker_name = "/".join(marker_stack) + ":" + "/".join(context_stack)
+        
         rangePush(full_marker_name)
         try:
             return original_backward(self, *args, **kwargs)
         finally:
             rangePop()
             marker_stack.pop()
-
+            context_stack.pop()
+            
     torch.Tensor.backward = backward_with_roctx
-
     wrapped_count += 1
     console_log("Wrapped: torch.Tensor.backward")
-
+    
     console_log(f"Wrapped {wrapped_count} operations with ROCTX markers")
     if failed_count > 0:
         console_warning(
             f"Failed to wrap {failed_count} operations (likely not patchable)"
         )
-
 
 def inject_roctx_into_optimizer():
     """Wrap optimizer step() method."""
@@ -399,14 +430,17 @@ def inject_roctx_into_optimizer():
     original_step = Optimizer.step
 
     def step_with_roctx(self, *args, **kwargs):
-        full_marker_name = "/".join(marker_stack + [f"optimizer.{self.__class__.__name__}.step"])
         marker_stack.append(f"optimizer.{self.__class__.__name__}.step")
+        context_stack.append("")  # No context for this level
+        full_marker_name = "/".join(marker_stack) + ":" + "/".join(context_stack) if context_stack else "/".join(marker_stack)
+        
         rangePush(full_marker_name)
         try:
             return original_step(self, *args, **kwargs)
         finally:
             rangePop()
             marker_stack.pop()
+            context_stack.pop()
             
     Optimizer.step = step_with_roctx
     console_log("Wrapped optimizer.step() with ROCTX markers\n")
@@ -423,13 +457,10 @@ def inject_roctx_into_model():
     # Per-instance call counters
     def call_with_roctx(self, *args, **kwargs):
         class_name = self.__class__.__name__
-
-        # Initialize counter for this instance if not exists
         if not hasattr(self, "_roctx_call_count"):
             self._roctx_call_count = 0
         self._roctx_call_count += 1
 
-        # Get caller location
         current_frame = inspect.currentframe()
         caller_frame = current_frame.f_back if current_frame is not None else None
         if caller_frame is not None:
@@ -438,56 +469,75 @@ def inject_roctx_into_model():
         else:
             location = "unknown:0"
 
-        full_marker_name = "/".join(
-            marker_stack
-            + [f"nn.Module.{class_name}.forward:#{self._roctx_call_count}@{location}"]
-        )
-        marker_stack.append(
-            f"nn.Module.{class_name}.forward:#{self._roctx_call_count}@{location}"
-        )
+        marker_stack.append(f"nn.Module.{class_name}.forward")
+        context_stack.append(f"#{self._roctx_call_count}@{location}")
+        full_marker_name = "/".join(marker_stack) + ":" + "/".join(context_stack)
+        
         rangePush(full_marker_name)
         try:
             return original_call(self, *args, **kwargs)
         finally:
             rangePop()
             marker_stack.pop()
+            context_stack.pop()
 
     nn.Module.__call__ = call_with_roctx
     console_log("Wrapped nn.Module forward() with ROCTX markers\n")
 
 def instrument_all_torch_ops():
-    import torch
-    from roctx import rangePush, rangePop
-    global marker_stack
     op_namespaces = ["aten", "quantized", "ml", "prims", "nvfuser"]
+    wrapped_count = 0
+    failed_count = 0
+
+    console_log("Instrumenting torch.ops namespace for C++ ATen operations...")
     for ns in op_namespaces:
         ops = getattr(torch.ops, ns, None)
         if ops is None:
             continue
+        ns_count = 0
         for op_name in dir(ops):
             if op_name.startswith("__"):
                 continue
-            op = getattr(ops, op_name, None)
-            if not callable(op):
-                continue
-            if hasattr(op, "_roctx_wrapped"):
-                continue
-            def make_wrapper(op, ns, op_name):
-                def wrapper(*args, **kwargs):
-                    marker_name = f"{ns}::{op_name}"
-                    marker_stack.append(marker_name)
-                    rangePush(marker_name)
-                    try:
-                        return op(*args, **kwargs)
-                    finally:
-                        rangePop()
-                        marker_stack.pop()
-                wrapper._roctx_wrapped = True
-                return wrapper
             try:
-                setattr(ops, op_name, make_wrapper(op, ns, op_name))
+                op = getattr(ops, op_name, None)
+                if not callable(op):
+                    continue
+                if hasattr(op, "_roctx_wrapped"):
+                    continue
+                
+                def make_wrapper(original_op, namespace, operation_name):
+                    def wrapper(*args, **kwargs):
+                        marker_name = f"torch.ops.{namespace}.{operation_name}"
+                        marker_stack.append(marker_name)
+                        context_stack.append("")  # torch.ops has no additional context
+                        full_marker_name = "/".join(marker_stack) + (":" + "/".join(context_stack) if any(context_stack) else "")
+                        
+                        rangePush(full_marker_name)
+                        try:
+                            return original_op(*args, **kwargs)
+                        finally:
+                            rangePop()
+                            marker_stack.pop()
+                            context_stack.pop()
+                    wrapper._roctx_wrapped = True
+                    return wrapper
+                
+                wrapped_op = make_wrapper(op, ns, op_name)
+                setattr(ops, op_name, wrapped_op)
+                wrapped_count += 1
+                ns_count += 1
             except Exception as e:
-                print(f"[ROCTX] Failed to wrap {ns} op {op_name}: {e}")
+                failed_count += 1
+                if failed_count <= 10:
+                    console_log(f"  Failed to wrap {ns}.{op_name}: {e}")
+        
+        if ns_count > 0:
+            console_log(f"  Wrapped {ns_count} operations in torch.ops.{ns}")
+    
+    console_log(f"[ROCTX] Total: {wrapped_count} torch.ops operations wrapped")
+    if failed_count > 0:
+        console_log(f"[ROCTX] ({failed_count} operations failed to wrap)")
+    console_log("")
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
@@ -502,6 +552,7 @@ if __name__ == "__main__":
     inject_roctx_into_torch()
     inject_roctx_into_optimizer()
     inject_roctx_into_model()
+    instrument_all_torch_ops()
 
     console_log("=" * 70)
     console_log("Starting target script with ROCTX instrumentation...")
@@ -515,4 +566,4 @@ if __name__ == "__main__":
     module = importlib.util.module_from_spec(spec)
     sys.modules["__main__"] = module
     spec.loader.exec_module(module)
-    instrument_all_torch_ops()
+    
