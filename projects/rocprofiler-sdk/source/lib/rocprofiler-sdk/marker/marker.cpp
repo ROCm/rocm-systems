@@ -27,6 +27,7 @@
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/context/correlation_id.hpp"
+#include "lib/rocprofiler-sdk/context/domain.hpp"
 #include "lib/rocprofiler-sdk/marker/utils.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/tracing/tracing.hpp"
@@ -411,6 +412,9 @@ update_table(Tp* _orig, std::integral_constant<size_t, OpIdx>)
 {
     using table_type = typename roctx_table_lookup<TableIdx>::type;
 
+    static_assert(OpIdx < context::domain_ops_padding,
+                  "operation index exceeds context domain ops padding");
+
     if constexpr(std::is_same<table_type, Tp>::value)
     {
         auto _info = roctx_api_info<TableIdx, OpIdx>{};
@@ -431,7 +435,7 @@ update_table(Tp* _orig, std::integral_constant<size_t, OpIdx>)
         // 3. update function pointer with wrapper
         auto& _table = _info.get_table(_orig);
         auto& _func  = _info.get_table_func(_table);
-        _func        = _info.get_functor(_func);
+        if(_func) _func = _info.get_functor(_func);
     }
 }
 

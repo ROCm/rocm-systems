@@ -718,6 +718,7 @@ void CountedQueuesTest::CountedQueuesOverflowWrapAroundTest() {
 
   // To verify that after the queue has been used up, next index wraps around
   std::atomic<uint64_t> maxIndexSeen{0};
+  std::atomic<uint32_t> countedQueueSize{0};
 
   auto func = [&]() {
     // local dest buffer for each user application
@@ -745,6 +746,8 @@ void CountedQueuesTest::CountedQueuesOverflowWrapAroundTest() {
 
     uint32_t queue_size = queue->size;           // should be 16384
     const uint32_t queue_mask = queue_size - 1;  // used for index wraparound
+
+    countedQueueSize.store(queue_size);
 
     struct __attribute__((aligned(16))) local_args_t {
       uint32_t* dstArray;
@@ -847,9 +850,9 @@ void CountedQueuesTest::CountedQueuesOverflowWrapAroundTest() {
     th.join();
   }
 
-  // Verify value of max seen index
+  // Verify value of max seen index based on counted queue size
   uint64_t maxId = maxIndexSeen.load();
-  EXPECT_EQ(maxId, (16384 + 5) * kThreads - 1);
+  EXPECT_EQ(maxId, (countedQueueSize.load() + 5) * kThreads - 1);
 
   hsa_amd_memory_pool_free(shared_src_buffer);
 }
