@@ -499,12 +499,15 @@ class OneMemoryArgCommand : public Command {
   OneMemoryArgCommand(HostQueue& queue, cl_command_type type, const EventWaitList& eventWaitList,
                       Memory& memory)
       : Command(queue, type, eventWaitList, AMD_SERIALIZE_COPY), memory_(&memory) {
-    memory_->retain();
+    if (!(amd::IS_HIP && AMD_DIRECT_DISPATCH)) {
+      memory_->retain();
+    }
   }
 
   virtual void releaseResources() {
-    memory_->release();
-    DEBUG_ONLY(memory_ = NULL);
+    if (!(amd::IS_HIP && AMD_DIRECT_DISPATCH)) {
+      memory_->release();
+    }
     Command::releaseResources();
     ReleasePinnedMemory();
   }
@@ -538,14 +541,17 @@ class TwoMemoryArgsCommand : public Command {
       : Command(queue, type, eventWaitList, AMD_SERIALIZE_COPY),
         memory1_(&memory1),
         memory2_(&memory2) {
-    memory1_->retain();
-    memory2_->retain();
+    if (!(amd::IS_HIP && AMD_DIRECT_DISPATCH)) {
+      memory1_->retain();
+      memory2_->retain();
+    }
   }
 
   virtual void releaseResources() {
-    memory1_->release();
-    memory2_->release();
-    DEBUG_ONLY(memory1_ = memory2_ = NULL);
+    if (!(amd::IS_HIP && AMD_DIRECT_DISPATCH)) {
+      memory1_->release();
+      memory2_->release();
+    }
     Command::releaseResources();
   }
 
@@ -1182,7 +1188,9 @@ class MigrateMemObjectsCommand : public Command {
                            cl_mem_migration_flags flags)
       : Command(queue, type, eventWaitList), migrationFlags_(flags) {
     for (const auto& it : memObjects) {
-      it->retain();
+      if (!(amd::IS_HIP && AMD_DIRECT_DISPATCH)) {
+        it->retain();
+      }
       memObjects_.push_back(it);
     }
   }
@@ -1191,8 +1199,10 @@ class MigrateMemObjectsCommand : public Command {
 
   //! Release all resources associated with this command
   void releaseResources() {
-    for (const auto& it : memObjects_) {
-      it->release();
+    if (!(amd::IS_HIP && AMD_DIRECT_DISPATCH)) {
+      for (const auto& it : memObjects_) {
+        it->release();
+      }
     }
     Command::releaseResources();
   }
@@ -1431,15 +1441,19 @@ class ExtObjectsCommand : public Command {
                     const std::vector<amd::Memory*>& memoryObjects, cl_command_type type)
       : Command(queue, type, eventWaitList) {
     for (const auto& it : memoryObjects) {
-      it->retain();
+      if (!(amd::IS_HIP && AMD_DIRECT_DISPATCH)) {
+        it->retain();
+      }
       memObjects_.push_back(it);
     }
   }
 
   //! Release all resources associated with this command
   void releaseResources() {
-    for (const auto& it : memObjects_) {
-      it->release();
+    if (!(amd::IS_HIP && AMD_DIRECT_DISPATCH)) {
+      for (const auto& it : memObjects_) {
+        it->release();
+      }
     }
     Command::releaseResources();
   }
@@ -1658,7 +1672,9 @@ class MakeBuffersResidentCommand : public Command {
                              cl_bus_address_amd* busAddr)
       : Command(queue, type, eventWaitList), busAddresses_(busAddr) {
     for (const auto& it : memObjects) {
-      it->retain();
+      if (!(amd::IS_HIP && AMD_DIRECT_DISPATCH)) {
+        it->retain();
+      }
       memObjects_.push_back(it);
     }
   }
@@ -1667,7 +1683,9 @@ class MakeBuffersResidentCommand : public Command {
 
   void releaseResources() {
     for (const auto& it : memObjects_) {
-      it->release();
+      if (!(amd::IS_HIP && AMD_DIRECT_DISPATCH)) {
+        it->release();
+      }
     }
     Command::releaseResources();
   }
@@ -1902,12 +1920,15 @@ class VirtualMapCommand : public Command {
       : Command(queue, 1, eventWaitList), ptr_(ptr), size_(size), memory_(memory) {
     // Sanity checks
     assert(size > 0 && "invalid");
-    if (memory_) memory_->retain();
+    if (!(amd::IS_HIP && AMD_DIRECT_DISPATCH)) {
+      if (memory_) memory_->retain();
+    }
   }
 
   virtual void releaseResources() {
-    if (memory_) memory_->release();
-    DEBUG_ONLY(memory_ = nullptr);
+    if (!(amd::IS_HIP && AMD_DIRECT_DISPATCH)) {
+      if (memory_) memory_->release();
+    }
     Command::releaseResources();
   }
 
