@@ -24,6 +24,7 @@
 #include <unordered_set>
 #include <dirent.h>
 #include <sys/types.h>
+#include <atomic>
 
 #include "amd_smi/impl/amd_smi_gpu_device.h"
 #include "amd_smi/impl/fdinfo.h"
@@ -114,13 +115,11 @@ pthread_mutex_t* AMDSmiGPUDevice::get_mutex() {
 }
 
 // cache the compute process list for the device
-static std::chrono::steady_clock::time_point last_compute_process_list_update_time;
+static std::atomic<std::chrono::steady_clock::time_point> last_compute_process_list_update_time = {};
 static const std::chrono::milliseconds compute_process_list_cache_duration = std::chrono::milliseconds(500); // 500 ms
 static std::mutex compute_process_list_mutex;
 static uint32_t num_running_processes = 0;
-using RsmiDeviceList_t = uint32_t[];
-using RsmiProcessList_t = rsmi_process_info_t[];
-static std::unique_ptr<RsmiProcessList_t> list_all_processes_ptr = std::make_unique<RsmiProcessList_t>(0);
+static std::unique_ptr<rsmi_process_info_t[]> list_all_processes_ptr = nullptr;
 static std::unordered_map<uint32_t, amdsmi_proc_info_t> process_info_cache_map;
 
 int32_t AMDSmiGPUDevice::get_compute_process_list_impl(GPUComputeProcessList_t& compute_process_list,
@@ -138,8 +137,15 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(GPUComputeProcessList_t& 
      */
     auto status_code(rsmi_status_t::RSMI_STATUS_SUCCESS);
     // only get new data if cache duration has expired
-    std::lock_guard<std::mutex> lock(compute_process_list_mutex);
-    if (std::chrono::steady_clock::now() - last_compute_process_list_update_time > compute_process_list_cache_duration) {
+    if (std::chrono::steady_clock::now() - last_compute_process_list_update_time.load() > compute_process_list_cache_duration) {
+        // double-check locking pattern here
+        std::lock_guard<std::mutex> lock(compute_process_list_mutex);
+        if (std::chrono::steady_clock::now() - last_compute_process_list_update_time.load() <= compute_process_list_cache_duration) {
+            // another thread already updated the data while we were waiting for the lock
+            // so just return the existing data
+            return rsmi_status_t::RSMI_STATUS_SUCCESS;
+        }
+
         // Clear the process info cache when refreshing
         process_info_cache_map.clear();
 
@@ -151,10 +157,10 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(GPUComputeProcessList_t& 
         /**
          *  Make a type safe pointer, then
          *
-         * second call to rsmi_compute_process_info_get() g
+         * second call to rsmi_compute_process_info_get() to get the actual data into
          *  the allocated rsmi_process_info_t array.
          */
-        list_all_processes_ptr = std::make_unique<RsmiProcessList_t>(num_running_processes);
+        list_all_processes_ptr = std::make_unique<rsmi_process_info_t[]>(num_running_processes);
 
         status_code = rsmi_compute_process_info_get(list_all_processes_ptr.get(), &num_running_processes);
         if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS) {
@@ -232,7 +238,7 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(GPUComputeProcessList_t& 
     auto update_list_by_running_device = [&](rsmi_process_info_t rsmi_proc_info) {
         // Get all devices running this process into list_device_ptr
         auto status_result(true);
-        std::unique_ptr<RsmiDeviceList_t> list_device_ptr = std::make_unique<RsmiDeviceList_t>(num_running_devices);
+        std::unique_ptr<uint32_t[]> list_device_ptr = std::make_unique<uint32_t[]>(num_running_devices);
         list_device_allocation_size = num_running_devices;
         auto status_code = rsmi_compute_process_gpus_get(rsmi_proc_info.process_id, list_device_ptr.get(), &list_device_allocation_size);
         if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS) {
@@ -273,8 +279,8 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(GPUComputeProcessList_t& 
     for (auto process_idx = uint32_t(0); process_idx < num_running_processes; ++process_idx) {
         if (list_type == ComputeProcessListType_t::kAllProcesses ||
             list_type == ComputeProcessListType_t::kAllProcessesOnDevice) {
-            if (update_list_by_running_device(list_all_processes_ptr[process_idx])) {
-            }
+                std::lock_guard<std::mutex> lock(compute_process_list_mutex);
+                update_list_by_running_device(list_all_processes_ptr[process_idx]);
         }
     }
 
