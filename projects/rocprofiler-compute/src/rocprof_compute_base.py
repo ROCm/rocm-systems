@@ -50,14 +50,14 @@ from utils.specs import MachineSpecs, generate_machine_specs
 from utils.utils import (
     detect_rocprof,
     get_panel_alias,
+    get_rank,
     get_submodules,
     get_version,
     get_version_display,
     parse_sets_yaml,
-    set_locale_encoding,
-    get_rank,
-    replace_rank,
     replace_env,
+    replace_rank,
+    set_locale_encoding,
 )
 
 
