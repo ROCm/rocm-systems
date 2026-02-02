@@ -34,14 +34,13 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: "ROCm/TheRock"
-          ref: 62ac2f8517f15f4d300d174fceb63590fb171bdf # amdsmi runtime dep branch
+          ref: b74cc568204bd9c224f479303588b783331edb31 # 3143 branch with fix
 
       - name: Checkout rocm-systems repository
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: "ROCm/rocm-systems"
           path: rocm-systems
-          ref: 996202f56033598b66cdc7d7c4473c6c283e6cb4 #Pinning test-branch
 
       - name: Install python deps
         run: |
