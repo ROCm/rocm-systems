@@ -444,7 +444,7 @@ PROFILING WORKFLOW:
                 rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_PROCESS_SAMPLING",
                                                true, update_mode::REPLACE, ":",
                                                updated_envs, original_envs);
-                rocprofsys::common::update_env(_env, "ROCPROFSYS_SAMPLING_CPUS", "none",
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_SAMPLING_CPUS", "all",
                                                update_mode::REPLACE, ":", updated_envs,
                                                original_envs);
                 auto* hip_visible_devices = getenv("HIP_VISIBLE_DEVICES");

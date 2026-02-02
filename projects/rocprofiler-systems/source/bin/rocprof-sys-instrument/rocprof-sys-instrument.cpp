@@ -484,7 +484,7 @@ main(int argc, char** argv)
     const auto* _desc = R"(
 Binary instrumentation tool for profiling and tracing applications.
 QUICK REFERENCE:
-  Presets:  --quick (fast), --profile-only, --trace-hpc (HPC/MPI), --workload-trace (GPU/ML)
+  Presets:  --quick (fast), --trace-hpc (HPC/MPI), --workload-trace (GPU/ML)
   Modes:    Binary rewrite (-o file.inst) or runtime (no -o)
   Output:   Results saved to rocprof-sys-output/ directory
 EXAMPLES:
@@ -493,7 +493,6 @@ EXAMPLES:
   Workload-Specific Presets:
     rocprof-sys-instrument --trace-hpc -o myapp.inst -- ./myapp     # HPC/MPI/OpenMP
     rocprof-sys-instrument --workload-trace -- python train.py      # AI/ML/GPU workloads
-    rocprof-sys-instrument --profile-only -o myapp.inst -- ./myapp
   Custom Configuration:
     rocprof-sys-instrument -R '^compute_' -o myapp.inst -- ./myapp
     rocprof-sys-instrument -ME '^(libhsa|libamdhip64)' -- ./myapp
@@ -646,36 +645,6 @@ INSTRUMENTATION MODES:
                 // use_stubs  = false;
                 // Runtime instrumentation mode
                 binary_rewrite = false;
-            }
-        });
-    parser
-        .add_argument(
-            { "--profile-only" },
-            "Profile-only preset: binary rewrite optimized for profiling without "
-            "detailed trace (lower overhead)")
-        .max_count(1)
-        .dtype("bool")
-        .action([](parser_t& p) {
-            if(p.get<bool>("profile-only"))
-            {
-                instr_mode     = "trace";
-                binary_rewrite = true;
-                // use_stubs      = false;
-            }
-        });
-    parser
-        .add_argument(
-            { "--trace-only" },
-            "Trace-only preset: binary rewrite optimized for detailed tracing and "
-            "analysis")
-        .max_count(1)
-        .dtype("bool")
-        .action([](parser_t& p) {
-            if(p.get<bool>("trace-only"))
-            {
-                instr_mode     = "trace";
-                binary_rewrite = true;
-                // use_stubs      = false;
             }
         });
     parser
@@ -1271,9 +1240,8 @@ INSTRUMENTATION MODES:
     }
 
     auto active_presets = rocprofsys::common_utils::collect_active_presets(
-        parser, { "quick", "profile-only", "trace-only", "trace-hpc", "workload-trace",
-                  "sys-trace", "runtime-trace", "trace-gpu", "trace-openmp",
-                  "profile-mpi", "trace-hw-counters" });
+        parser, { "quick", "trace-hpc", "workload-trace", "sys-trace", "runtime-trace",
+                  "trace-gpu", "trace-openmp", "profile-mpi", "trace-hw-counters" });
 
     const auto are_valid_presets =
         rocprofsys::common_utils::validate_preset_modes(active_presets);

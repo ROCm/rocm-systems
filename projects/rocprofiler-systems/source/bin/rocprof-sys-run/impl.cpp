@@ -396,11 +396,18 @@ INSTRUMENTATION WORKFLOW:
                 _parser_data.updated.emplace("ROCPROFSYS_PROFILE");
                 _parser_data.updated.emplace("ROCPROFSYS_USE_SAMPLING");
                 _parser_data.updated.emplace("ROCPROFSYS_USE_PROCESS_SAMPLING");
+                _parser_data.updated.emplace("ROCPROFSYS_SAMPLING_GPUS");
                 tim::set_env("ROCPROFSYS_TRACE", "ON", 0);
                 tim::set_env("ROCPROFSYS_PROFILE", "ON", 0);
                 tim::set_env("ROCPROFSYS_USE_SAMPLING", "ON", 0);
                 tim::set_env("ROCPROFSYS_USE_PROCESS_SAMPLING", "ON", 0);
                 tim::set_env("ROCPROFSYS_SAMPLING_CPUS", "all", 0);
+                auto* hip_visible_devices = getenv("HIP_VISIBLE_DEVICES");
+                if(hip_visible_devices && strlen(hip_visible_devices) > 0)
+                {
+                    tim::set_env("ROCPROFSYS_SAMPLING_GPUS",
+                                 std::string(hip_visible_devices).c_str(), 0);
+                }
             }
         });
     parser
