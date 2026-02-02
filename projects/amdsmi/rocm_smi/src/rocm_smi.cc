@@ -4497,8 +4497,8 @@ rsmi_status_string(rsmi_status_t status, const char **status_string) {
       break;
 
     case RSMI_STATUS_NOT_FOUND:
-      *status_string = "RSMI_STATUS_NOT_FOUND: An item was searched for but "
-                       "not found";
+      *status_string = "RSMI_STATUS_NOT_FOUND: An item required to complete "
+                       "the call was not found";
       break;
 
     case RSMI_STATUS_INSUFFICIENT_SIZE:
