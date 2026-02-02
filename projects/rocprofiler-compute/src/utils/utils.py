@@ -1450,7 +1450,9 @@ def process_torch_trace_output(
         return
     grouped = consolidated_df.groupby("Operator_Name")
     for operator_name, group in grouped:
-        sanitized_operator_name = operator_name.replace("torch.", "").replace(".", "_")
+        # Extract the operator name from hierarchy
+        last_operator = operator_name.split("/")[-1]
+        sanitized_operator_name = last_operator.replace("torch.", "").replace(".", "_")
         # Ensure output directory exists
         Path(f"{workload_dir}/torch_trace").mkdir(parents=True, exist_ok=True)
         output_file = f"{workload_dir}/torch_trace/{sanitized_operator_name}.csv"
