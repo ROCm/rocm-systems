@@ -22,10 +22,16 @@ endif()
 find_program(MPIRUN_EXECUTABLE NAMES mpirun mpiexec)
 
 if(MPIRUN_EXECUTABLE)
+    # Set OpenMPI environment variables for CI/root execution
+    set(MPI_ENV_VARS
+        OMPI_ALLOW_RUN_AS_ROOT=1
+        OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1)
+
     # Test with MPI - profile only rank 0 out of 4 ranks
     rocprofiler_add_integration_execute_test(
         rocprofv3-test-mpi-ranks-with-mpi
         COMMAND
+            ${CMAKE_COMMAND} -E env ${MPI_ENV_VARS}
             ${MPIRUN_EXECUTABLE} -n 4
             $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --hip-trace --kernel-trace
             --output-format csv json -d ${CMAKE_CURRENT_BINARY_DIR}/mpi-ranks-trace
@@ -40,6 +46,7 @@ if(MPIRUN_EXECUTABLE)
     rocprofiler_add_integration_execute_test(
         rocprofv3-test-mpi-ranks-with-mpi-multiple
         COMMAND
+            ${CMAKE_COMMAND} -E env ${MPI_ENV_VARS}
             ${MPIRUN_EXECUTABLE} -n 4
             $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --hip-trace --kernel-trace
             --output-format csv json -d ${CMAKE_CURRENT_BINARY_DIR}/mpi-ranks-multiple-trace
