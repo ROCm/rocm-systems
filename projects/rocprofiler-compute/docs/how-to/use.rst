@@ -32,8 +32,8 @@ This runs the app, launches each kernel, and generates profiling results. By
 default, results are written to a subdirectory with your accelerator's name;
 for example, ``./workloads/vcopy_data/MI200/``, where name is configurable
 via the ``-n`` argument. When an MPI rank is detected, the default output
-directory appends the rank (``./workloads/vcopy_data/<rank>/``). Use
-``--output-directory`` to override the output location.
+directory appends the rank (``./workloads/vcopy_data/<rank>/``) instead of
+the gpu model. Use ``--output-directory`` to override the output location.
 
 .. note::
 
