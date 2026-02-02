@@ -41,7 +41,8 @@ hipError_t hipMemAddressFree(void* devPtr, size_t size) {
   }
   amd::Memory* memObj = amd::MemObjMap::FindVirtualMemObj(devPtr);
   if (memObj == nullptr) {
-    LogPrintfError("Cannot find the Virtual MemObj entry for this addr 0x%x", devPtr);
+    LogPrintfError("Cannot find the Virtual MemObj entry for this addr %p", devPtr);
+    HIP_RETURN(hipErrorInvalidValue);
   }
   // Single call frees address range for all devices.
   if (!(g_devices[0]->devices()[0]->virtualFree(devPtr))) {
@@ -74,10 +75,10 @@ hipError_t hipMemAddressReserve(void** ptr, size_t size, size_t alignment, void*
 
   // If requested address was not allocated, printf error message.
   if (addr != nullptr && addr == *ptr) {
-    LogPrintfError("Requested address was not allocated. Allocated address : 0x%x ", *ptr);
+    LogPrintfError("Requested address was not allocated. Allocated address : %p ", *ptr);
   }
 
-  HIP_RETURN(hipSuccess);
+  HIP_RETURN(hipSuccess, ReturnPtrValue(ptr));
 }
 
 hipError_t hipMemCreate(hipMemGenericAllocationHandle_t* handle, size_t size,
