@@ -1076,3 +1076,222 @@ NULL      0x0
 **Note:** Our Generic_4 KD has a decoding error despite being 64-byte aligned
 
 **Tested:** Patching offset 0x2c to 0x1f (matching IFC) does NOT fix multi-GPU. The value is now correct in the KD but the issue persists.
+
+---
+
+## Proposed Fix: Include onerank.cu in Device Linker Build
+
+### Problem Summary
+
+The IFC build has several elements missing from our device linker output:
+1. **12 oneRankReduce kernels** - for different data types (int8, uint8, int32, uint32, int64, uint64, half, bfloat16, float, double, fp8_e4m3, fp8_e5m2)
+2. **`__clang_gpu_used_external` symbol** - 96 bytes in `.data` with 12 relocations pointing to oneRankReduce kernel entries
+3. **Kernel metadata in `.note`** - IFC has 18 kernels, we have 3
+
+Currently, we use `onerank_stub.cpp` (host-side memcpy fallback) to avoid multiple `.hip_fatbin` sections. But this causes structural differences that may affect multi-GPU loading.
+
+### Proposed Solution
+
+**Compile onerank.cu as part of the same compilation unit as common.cu.**
+
+In non-RDC mode (`-fno-gpu-rdc`), each compilation unit is self-contained - you cannot link separate device modules. The solution is to compile both as a single unit using `#include`.
+
+```
+Current flow:
+  common.cu.cpp → device obj → device ELF (dispatcher with 3 kernels)
+
+Proposed flow:
+  dispatcher_combined.hip (includes common.cu + onerank.cu)
+    → device obj → device ELF (dispatcher with 15 kernels)
+```
+
+This way:
+- Single compilation unit = single CUID
+- Compiler naturally generates `__clang_gpu_used_external` with oneRankReduce pointers
+- The `.note` section will have all 15 kernels (3 Generic + 12 oneRankReduce)
+- No manual symbol fabrication needed
+
+### Implementation Steps
+
+#### 1. Create Combined Dispatcher Source
+
+Create `tools/device_linker/dispatcher_combined.hip`:
+
+```cpp
+/*
+ * Combined dispatcher source for device linker mode.
+ * Includes both common.cu (generic kernels) and onerank.cu (oneRankReduce helpers).
+ * This ensures they're compiled as a single unit, which is required for non-RDC mode.
+ */
+
+// Include common.cu first (has the generic dispatcher kernels)
+#include "common.cu.cpp"
+
+// Include onerank.cu (has the 12 oneRankReduce kernels)
+// May need some refactoring if there are symbol conflicts
+#include "onerank.cu.cpp"
+```
+
+**Potential refactoring needed in onerank.cu:**
+- Check for duplicate `#include` guards
+- Ensure no conflicting static/namespace symbols
+- May need to adjust include paths
+
+#### 2. Modify `build_with_device_linker.sh`
+
+Change the source file from `common.cu.cpp` to `dispatcher_combined.hip`:
+
+```bash
+# Source file - combined dispatcher with onerank
+SOURCE="$SCRIPT_DIR/dispatcher_combined.hip"
+# Or if generated: SOURCE="$BUILD_DIR/dispatcher_combined.hip"
+```
+
+The rest of the pipeline (Steps 1-5) stays the same - just compiling a different source file.
+
+#### 3. Update CMakeLists.txt
+
+```cmake
+if(DEVICE_LINKER)
+  # Exclude both common.cu and onerank.cu - built via device linker pipeline
+  list(FILTER HIP_SOURCES EXCLUDE REGEX "common\\.cu\\.cpp$")
+  list(FILTER HIP_SOURCES EXCLUDE REGEX "onerank\\.cu\\.cpp$")
+  # NO stub needed - onerank is compiled into the combined dispatcher
+  message(STATUS "DEVICE_LINKER: common.cu and onerank.cu built together via device linker pipeline")
+endif()
+```
+
+### Expected Results After Fix
+
+| Aspect | Before | After |
+|--------|--------|-------|
+| Kernels in .note | 3 (Generic only) | 15 (3 Generic + 12 oneRankReduce) |
+| `__clang_gpu_used_external` | Missing | Present (96 bytes, 12 relocs) |
+| `__hip_cuid_*` symbols | 1 | 1 (still single compilation unit) |
+| onerank functionality | Stub (memcpy) | Real kernels |
+| Multi-GPU | FAIL | (to be tested) |
+
+### Verification
+
+After implementation, verify:
+
+```bash
+# Check for __clang_gpu_used_external symbol
+llvm-readelf --symbols merged_device.elf | grep clang_gpu_used
+
+# Check kernel count in .note (should see oneRankReduce)
+llvm-objdump -s --section=.note merged_device.elf | strings | grep -c "oneRankReduce\|Generic"
+
+# Check relocation count (should increase due to __clang_gpu_used_external)
+llvm-readelf -r merged_device.elf | grep R_AMDGPU | wc -l
+
+# Verify oneRankReduce kernels are present
+llvm-readelf --symbols merged_device.elf | grep oneRankReduce
+```
+
+### Source File Analysis
+
+**common.cu includes:**
+- `device.h`, `collectives.h`, `common.h`
+- Defines `ncclShmem` under `#ifndef DEVICE_LINKER`
+- Defines function tables under `#ifdef DEVICE_LINKER`
+- 3 Generic kernels (+ 3 Debug kernels under `ENABLE_COLLTRACE`)
+
+**onerank.cu includes:**
+- `alloc.h`, `collectives.h`, `common_kernel.h`, `common.h`, `<cuda_runtime.h>`
+- Defines `COLL_UNROLL` based on architecture (gfx950→1, gfx908/942→2, other→4)
+- 12 oneRankReduce kernel instantiations in anonymous namespace
+- Host function `ncclLaunchOneRank()`
+
+### Potential Issues and Refactoring
+
+When `#include "onerank.cu.cpp"` is added, check for:
+
+1. **Duplicate includes**: Both include `collectives.h` and `common.h`. These should have include guards - verify they do.
+
+2. **`COLL_UNROLL` definition**: Only onerank.cu defines it. common.cu uses explicit template parameters (1, 2, 4). No conflict, but ensure `common_kernel.h` is included before onerank uses `reduceCopy`.
+
+3. **Symbol conflicts**: onerank.cu uses anonymous namespace for `oneRankReduce` - good, no conflict.
+
+4. **Include paths**: Combined source needs `common_kernel.h` (for `reduceCopy`). The build script includes already have `$HIPIFY_DIR/src/device`.
+
+### Device Linker Changes Required
+
+The device linker patches metadata - it doesn't just copy. When onerank is added:
+
+**What changes in the dispatcher ELF:**
+| Section | Before (3 kernels) | After (15 kernels) |
+|---------|-------------------|-------------------|
+| `.note` | ~4,592 bytes | ~26,780 bytes |
+| `.rodata` | 3 KDs (192 bytes) + tables | 15 KDs (960 bytes) + tables |
+| `.data` | scratch vars only | + `__clang_gpu_used_external` (96 bytes) |
+| Relocations | 859 (table_2 only) | 859 + 12 (for `__clang_gpu_used_external`) |
+
+**Device linker patches that work automatically:**
+1. `.note` patching - iterates ALL kernel metadata, patches `private_segment_fixed_size`, `vgpr_count`, `sgpr_count`
+2. `.rodata` KD patching - iterates ALL KDs by symbol, patches `kernel_code_entry_byte_offset`
+
+**Device linker changes needed:**
+
+1. **Preserve `__clang_gpu_used_external` in `.data`**
+
+Currently in `buildSections()` (line ~637):
+```cpp
+// Build .data (scratch variables only)
+size_t scratch_size = 0x60;  // Match IFC's .data size
+data.data.resize(scratch_size, 0);  // PROBLEM: Zeroed, not copied!
+```
+
+Fix: Copy from dispatcher's `.data` section instead of zeroing:
+```cpp
+// Build .data (copy from dispatcher - includes __clang_gpu_used_external)
+auto* disp_data = disp_->find(".data");
+if (disp_data) {
+    data.data = disp_->getBytes(*disp_data);  // Copy contents
+}
+```
+
+2. **Copy dispatcher's `.data` relocations**
+
+The dispatcher's `.rela.dyn` will have 12 relocations for `__clang_gpu_used_external`. Currently the device linker only creates relocations for function tables. Need to:
+
+```cpp
+// After building our relocations, also copy dispatcher's .data relocations
+auto* disp_rela = disp_->find(".rela.dyn");
+if (disp_rela) {
+    // Find relocations targeting .data section
+    // Adjust offsets for new .data address
+    // Append to our rela_dyn
+}
+```
+
+3. **Preserve `__clang_gpu_used_external` symbol**
+
+The symbol should be in dispatcher's `.symtab`. When rebuilding symbol tables:
+- Copy the symbol entry
+- Update `st_value` to new `.data` address
+- Keep it as LOCAL HIDDEN (like IFC)
+
+**What should work automatically:**
+- `.note` patching - iterates all kernels
+- `.rodata` KD patching - iterates all KDs by offset
+- `.dynsym`/`.symtab` handling - copies all symbols
+
+### Debug Kernels (Optional)
+
+IFC has 18 kernels total:
+- 3 Generic (`ncclDevKernel_Generic_1/2/4`)
+- 3 Debug (`ncclDevKernelDebug_Generic_1/2/4`)
+- 12 oneRankReduce
+
+If debug kernels are needed for complete parity, they may need to be enabled via compile flag.
+
+### Alternative: Manual Symbol Creation
+
+If the combined source approach has issues, we could manually add `__clang_gpu_used_external` in device_linker.cpp:
+
+1. Add 96 bytes to `.data` section
+2. Add 12 `R_AMDGPU_RELATIVE64` relocations pointing to kernel entries (e.g., Generic_1/2/4 repeated, or specialized kernel entries)
+3. Add symbol to `.symtab` as LOCAL HIDDEN
+
+But the "compile as single unit" approach is cleaner and ensures the compiler generates everything correctly.

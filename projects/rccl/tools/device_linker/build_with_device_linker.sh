@@ -63,7 +63,9 @@ DEVICE_LINKER="$SCRIPT_DIR/device_linker"
 # BUNDLE_TARGET is set above based on GPU_TARGET_FULL
 
 # Source and output files
-SOURCE="$HIPIFY_DIR/src/device/common.cu.cpp"
+# Use combined dispatcher that includes both common.cu and onerank.cu
+# This ensures __clang_gpu_used_external is generated correctly
+SOURCE="$SCRIPT_DIR/dispatcher_combined.hip"
 DEVICE_OBJ="$OUTPUT_DIR/dispatcher_device.o"
 DEVICE_ELF="$OUTPUT_DIR/dispatcher_device.elf"
 MERGED_ELF="$OUTPUT_DIR/merged_device.elf"
@@ -73,15 +75,24 @@ FINAL_OBJ="$OUTPUT_DIR/dispatcher_final.o"
 # Specialized kernel directory (from CMake build)
 SPECIALIZED_OBJ_DIR="$BUILD_DIR/specialized_objs"
 
-# Onerank device object (compiled separately)
-ONERANK_OBJ="$OUTPUT_DIR/onerank_device.o"
-
 # Host table for funcId mapping
 HOST_TABLE="$HIPIFY_DIR/gensrc/host_table.cpp"
 
 # Check prerequisites
 if [ ! -f "$SOURCE" ]; then
     echo "Error: Source not found: $SOURCE"
+    exit 1
+fi
+
+# Check that hipified sources exist (dispatcher_combined.hip includes them)
+if [ ! -f "$HIPIFY_DIR/src/device/common.cu.cpp" ]; then
+    echo "Error: Hipified common.cu not found: $HIPIFY_DIR/src/device/common.cu.cpp"
+    echo "Run CMake configure first to generate hipified sources."
+    exit 1
+fi
+
+if [ ! -f "$HIPIFY_DIR/src/device/onerank.cu.cpp" ]; then
+    echo "Error: Hipified onerank.cu not found: $HIPIFY_DIR/src/device/onerank.cu.cpp"
     echo "Run CMake configure first to generate hipified sources."
     exit 1
 fi
@@ -202,10 +213,8 @@ if [ -d "$SPECIALIZED_OBJ_DIR" ] && [ "$(ls -A "$SPECIALIZED_OBJ_DIR"/*.o 2>/dev
     echo "  Including specialized kernels from: $SPECIALIZED_OBJ_DIR"
 fi
 
-if [ -f "$ONERANK_OBJ" ]; then
-    DEVICE_LINKER_ARGS+=(--onerank "$ONERANK_OBJ")
-    echo "  Including onerank device code from: $ONERANK_OBJ"
-fi
+# Note: onerank.cu is now compiled as part of dispatcher_combined.hip
+# The oneRankReduce kernels and __clang_gpu_used_external are in the dispatcher ELF
 
 $DEVICE_LINKER "${DEVICE_LINKER_ARGS[@]}"
 echo "  Output: $MERGED_ELF ($(ls -lh "$MERGED_ELF" | awk '{print $5}'))"
