@@ -103,7 +103,12 @@ rocprofiler_systems_add_validation_test(
     LABELS "transferbench;perfetto"
     ARGS --counter-names "XGMI Read Data" "XGMI Write Data" -p
 )
-
+if(TEST validate-transferbench-sys-run-perfetto)
+    set_property(
+        TEST validate-transferbench-sys-run-perfetto
+        APPEND PROPERTY FIXTURES_REQUIRED transferbench_available
+    )
+endif()
 # Add ROCPD validation if enabled
 if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU})
     set_property(TEST transferbench-sys-run APPEND PROPERTY LABELS rocpd)
