@@ -37,7 +37,8 @@ namespace rocprofsys
 enum class agent_type : uint8_t
 {
     CPU,  ///< Agent type is a CPU
-    GPU   ///< Agent type is a GPU
+    GPU,  ///< Agent type is a GPU
+    NIC   ///< Agent type is a NIC
 };
 
 struct agent

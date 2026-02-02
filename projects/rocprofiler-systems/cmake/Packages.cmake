@@ -1194,6 +1194,13 @@ target_compile_definitions(
     INTERFACE ROCPROFSYS_MAX_THREADS=${ROCPROFSYS_MAX_THREADS}
 )
 
+if(ROCPROFSYS_AINIC_STAT_ENABLED)
+    target_compile_definitions(
+        rocprofiler-systems-compile-definitions
+        INTERFACE ROCPROFSYS_AINIC_STAT_ENABLED ENABLE_ESMI_LIB
+    )
+endif()
+
 foreach(_LIB ${ROCPROFSYS_EXTENSION_LIBRARIES})
     get_target_property(_COMPILE_DEFS ${_LIB} INTERFACE_COMPILE_DEFINITIONS)
     if(_COMPILE_DEFS)
