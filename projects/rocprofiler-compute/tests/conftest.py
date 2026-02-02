@@ -77,8 +77,7 @@ def binary_handler_profile_rocprof_compute(request):
         app_name="app_1",
         attach_detach_para=None,
         skip_app_name=False,
-        workload_dir_type="output_directory", # ["default", "output_directory"],
-        num_mpi_ranks=None,
+        workload_dir_type="output_directory",  # ["default", "output_directory"],
     ):
         if request.config.getoption("--rocprofiler-sdk-tool-path"):
             options.extend(
@@ -121,13 +120,6 @@ def binary_handler_profile_rocprof_compute(request):
                         str(attach_detach_para["attach-duration-msec"]),
                     ]
 
-            if num_mpi_ranks is not None:
-                command_rocprof_compute = [
-                    "mpirun",
-                    "-np",
-                    str(num_mpi_ranks),
-                ] + command_rocprof_compute
-
             process = subprocess.run(
                 command_rocprof_compute,
                 text=True,
@@ -169,13 +161,6 @@ def binary_handler_profile_rocprof_compute(request):
                         "--attach-duration-msec",
                         str(attach_detach_para["attach-duration-msec"]),
                     ]
-
-            if num_mpi_ranks is not None:
-                command_rocprof_compute = [
-                    "mpirun",
-                    "-np",
-                    str(num_mpi_ranks),
-                ] + command_rocprof_compute
 
             with pytest.raises(SystemExit) as e:
                 with patch(
