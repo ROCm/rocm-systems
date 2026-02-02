@@ -36,8 +36,8 @@
 
 #include <dlfcn.h>
 #include <mutex>
-#include <set>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace rocprofsys
 {
@@ -69,8 +69,8 @@ rccl_metadata_initialize_categories()
     _is_initialized = true;
 }
 
-std::mutex         g_registered_gpus_mutex{};
-std::set<uint32_t> g_registered_gpus{};
+std::mutex                   g_registered_gpus_mutex{};
+std::unordered_set<uint32_t> g_registered_gpus{};
 
 void
 rccl_metadata_initialize_pmc_for_gpu(uint32_t rccl_device_idx)
