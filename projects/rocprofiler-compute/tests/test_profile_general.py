@@ -907,37 +907,37 @@ def test_output_directory(binary_handler_profile_rocprof_compute, monkeypatch):
         ):
             # With rank set and default output directory
             monkeypatch.setenv("PMI_RANK", rank)
-            workload_dir = test_utils.get_output_dir(param_id="rank_def_dir")
-            switch_workload_directory(workload_dir)
+            workload_base_dir = test_utils.get_output_dir(param_id="rank_def_dir")
+            switch_workload_directory(workload_base_dir)
             binary_handler_profile_rocprof_compute(
-                config, workload_dir=workload_dir, workload_dir_type="default"
+                config, workload_dir=workload_base_dir, workload_dir_type="default"
             )
             workload_dir = os.path.join(
-                workload_dir,
+                workload_base_dir,
                 "workloads",
                 "app_1",
                 rank,
             )
             os.chdir(original_cwd)
             assert os.path.exists(workload_dir)
-            test_utils.clean_output_dir(config["cleanup"], workload_dir)
+            test_utils.clean_output_dir(config["cleanup"], workload_base_dir)
             monkeypatch.delenv("PMI_RANK", raising=False)
 
             # With no rank set and default output directory
-            workload_dir = test_utils.get_output_dir(param_id="no_rank_def_dir")
-            switch_workload_directory(workload_dir)
+            workload_base_dir = test_utils.get_output_dir(param_id="no_rank_def_dir")
+            switch_workload_directory(workload_base_dir)
             binary_handler_profile_rocprof_compute(
-                config, workload_dir=workload_dir, workload_dir_type="default"
+                config, workload_dir=workload_base_dir, workload_dir_type="default"
             )
             os.chdir(original_cwd)
             workload_dir = os.path.join(
-                workload_dir,
+                workload_base_dir,
                 "workloads",
                 "app_1",
                 gpumodel,
             )
             assert os.path.exists(workload_dir)
-            test_utils.clean_output_dir(config["cleanup"], workload_dir)
+            test_utils.clean_output_dir(config["cleanup"], workload_base_dir)
 
             # With no name but with output directory
             workload_dir = test_utils.get_output_dir(param_id="dir_no_name")
