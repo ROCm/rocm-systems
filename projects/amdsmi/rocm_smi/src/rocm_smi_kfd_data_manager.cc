@@ -434,8 +434,9 @@ bool IsInPidNamespace() {
     close(fd);
   }
 
-  // Note: Cannot log here - async-signal-safe constraints
-  // Logging failure will cause parent to detect short read and report EIO.
+  // Note: Cannot log here - we're in forked child, must use only
+  // async-signal-safe functions. Write failure will cause parent
+  // to detect short read and report EIO.
   static_cast<void>(write(write_fd, &result, sizeof(result)));
   close(write_fd);
   _exit(result.status ? 1 : 0);
@@ -456,8 +457,9 @@ bool IsInPidNamespace() {
       payload.results[i] = {gpu_ids[i], err, 0};
     }
     payload.count = limit;
-    // Note: Cannot log here - async-signal-safe constraints
-    // Write failure will cause parent to detect short read and report EIO.
+    // Note: Cannot log here - we're in forked child, must use only
+    // async-signal-safe functions. Write failure will cause parent
+    // to detect short read and report EIO.
     static_cast<void>(write(write_fd, &payload, sizeof(payload)));
     close(write_fd);
     _exit(1);
@@ -487,8 +489,9 @@ bool IsInPidNamespace() {
   }
 
   close(fd);
-  // Note: Cannot log here - async-signal-safe constraints
-  // Write failure will cause parent to detect short read and report EIO.
+  // Note: Cannot log here - we're in forked child, must use only
+  // async-signal-safe functions. Write failure will cause parent
+  // to detect short read and report EIO.
   static_cast<void>(write(write_fd, &payload, sizeof(payload)));
   close(write_fd);
   _exit(0);
