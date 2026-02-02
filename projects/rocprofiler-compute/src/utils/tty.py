@@ -243,22 +243,108 @@ def is_roofline_shown(
     return True
 
 
+def extract_kernel_name(full_kernel_name: str) -> str:
+    """
+    Extract the short kernel function name from a mangled C++ kernel name.
+
+    Examples:
+    - "void at::native::vectorized_elementwise_kernel<...>"
+       -> "vectorized_elementwise_kernel"
+    - "Cijk_Ailk_Bljk_SB_MT128x128x16..." -> "Cijk_Ailk_Bljk_SB_MT128x128x16..."
+    """
+    # Remove return type prefix (void, etc.)
+    kernel_name = full_kernel_name.strip()
+    if kernel_name.startswith("void "):
+        kernel_name = kernel_name[5:]
+
+    # First, extract the main function name before any template parameters
+    # Split on '<' to get the part before template parameters
+    if "<" in kernel_name:
+        main_part = kernel_name.split("<")[0]
+    elif "(" in kernel_name:
+        main_part = kernel_name.split("(")[0]
+    else:
+        main_part = kernel_name
+
+    # Now extract the function name from namespaces
+    if "::" in main_part:
+        # Get the last part after the last :: in the main part (before templates)
+        function_name = main_part.split("::")[-1].strip()
+        return function_name if function_name else kernel_name.strip()
+
+    return main_part.strip()
+
+
 def show_torch_operator_hierarchy(operator_name: str, df: pd.DataFrame) -> None:
     """
-    Display the hierarchy for each unique operator name in the DataFrame.
+    Display the hierarchy for each unique operator name in the DataFrame,
+    showing marker hierarchy on the left and kernel launches on the right.
     """
     print("\n" + "-" * 80)
-    print("Torch Operator Hierarchy for", operator_name)
+    print("Marker Hierarchy (Stack)".ljust(40) + "Kernel Launches")
+    print("-" * 80)
+
     if df is not None and not df.empty and "Operator_Name" in df.columns:
         unique_ops = df["Operator_Name"].unique()
         for op in unique_ops:
             parts = str(op).split("/")
+
+            hierarchy_lines = []
+            # Display the hierarchy tree
             for i, part in enumerate(parts):
-                prefix = "    " * i + ("└─ " if i == len(parts) - 1 else "├─ ")
-                print(f"{prefix}{part}")
+                if i == 0:
+                    # Top level - just the module name
+                    hierarchy_lines.append(f"{part}")
+                else:
+                    indent = "  " * i
+                    prefix = "└─ "
+                    hierarchy_lines.append(f"{indent}{prefix}{part}")
+
+            # Get kernels for this operator
+            kernels_info = []
+            op_data = df[df["Operator_Name"] == op]
+            if not op_data.empty and "Kernel_Name" in op_data.columns:
+                # Group by extracted kernel name and aggregate correlation IDs
+                kernel_groups = {}
+                for idx, row in op_data.iterrows():
+                    full_kernel_name = row["Kernel_Name"]
+                    kernel_name = extract_kernel_name(full_kernel_name)
+
+                    if kernel_name not in kernel_groups:
+                        kernel_groups[kernel_name] = []
+
+                    # Get correlation ID and context ID
+                    corr_id = ""
+                    if "Correlation_Id" in row:
+                        corr_id = str(row["Correlation_Id"])
+                    context_id_str = str(row["Context_Id"])
+                    kernel_groups[kernel_name].append(corr_id + "_" + context_id_str)
+
+                # Format output for each unique kernel
+                for kernel_name, corr_ids in kernel_groups.items():
+                    count = len(corr_ids)
+                    corr_list = ", ".join(corr_ids)
+                    kernel_info = (
+                        f"|--> {kernel_name} ({count} calls)\n"
+                        f"     Correlation_Ids: {corr_list}\n"
+                        f"     Context Info: ..."
+                    )
+                    kernels_info.append(kernel_info)
+
+            # Print hierarchy lines (left column)
+            for line in hierarchy_lines:
+                print(f"{line.ljust(40)}|")
+
+            # Print kernel lines aligned to the deepest level
+            deepest_indent = "  " * len(parts)
+            for kernel_line in kernels_info:
+                left_padding = deepest_indent + "    "
+                print(f"{left_padding.ljust(40)}{kernel_line}")
+
             print()
     else:
         print("No operator names found in data.")
+    print("-" * 80)
 
 
 def extract_kernel_name(full_kernel_name: str) -> str:
