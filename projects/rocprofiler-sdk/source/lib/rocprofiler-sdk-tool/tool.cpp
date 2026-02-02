@@ -1108,7 +1108,7 @@ buffered_tracing_callback(rocprofiler_context_id_t /*context*/,
                     }
                 };
 
-                tool::tool_buffer_tracing_kfd_record_t rec;
+                auto rec = tool::tool_buffer_tracing_kfd_record_t{};
                 set_kfd_record(rec);
                 tool::write_ring_buffer(rec, domain_type::KFD);
             }
