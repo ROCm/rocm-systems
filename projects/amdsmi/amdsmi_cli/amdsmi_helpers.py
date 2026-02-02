@@ -1409,14 +1409,10 @@ class AMDSMIHelpers():
 
         return False, errno.EACCES, "Permission denied (other)"
 
-    def check_required_groups(self, check_render=True, check_video=True):
+    def check_required_groups(self):
         """
         Check if the current user can access kfd and dri
         Specifically, only care for EACCES/EPERM
-
-        Args:
-            check_render (bool): Whether to check  /dev/kfd &  /dev/dri/renderD* devices. Defaults to True.
-            check_video (bool): Whether to check /dev/dri/card* devices. Defaults to True.
 
         Returns:
             bool: True if all checked devices are accessible, False if any permission errors found
@@ -1429,13 +1425,9 @@ class AMDSMIHelpers():
         paths_to_check = []
 
         # Only add paths for device types that are flagged for checking
-        if check_render and os.path.exists("/dev/kfd"):
+        if os.path.exists("/dev/kfd"):
             paths_to_check.append("/dev/kfd")
             paths_to_check += [p for p in sorted(glob.glob("/dev/dri/renderD*"))]
-
-        # Video group corresponds to /dev/dri/card*
-        if check_video:
-            paths_to_check += [p for p in sorted(glob.glob("/dev/dri/card*"))]
 
         if not paths_to_check:
             return True
@@ -1468,8 +1460,8 @@ class AMDSMIHelpers():
 
         if denied:
             # Collect unique group info from denied devices
-            required_groups = {"kfd": [], "renderD": [], "card": []}
-            device_types = {"kfd": [], "renderD": [], "card": []}
+            required_groups = {"kfd": [], "renderD": []}
+            device_types = {"kfd": [], "renderD": []}
 
             for path, err, msg, si in denied:
                 if "error" not in si:
@@ -1480,9 +1472,6 @@ class AMDSMIHelpers():
                     elif "/dev/dri/renderD" in path:
                         device_types["renderD"].append(path)
                         required_groups["renderD"].append(si)
-                    elif "/dev/dri/card" in path:
-                        device_types["card"].append(path)
-                        required_groups["card"].append(si)
 
             # Deduplicate group info by converting to tuple for hashing
             for device_type in required_groups:
@@ -1522,23 +1511,6 @@ class AMDSMIHelpers():
                 else:
                     lines.append("    - Required group:")
                 for group_info in required_groups["renderD"]:
-                    lines.append(
-                        "      - User: {user} (UID={uid}) | Group: {group} (GID={gid})".format(
-                            user=group_info["user"],
-                            uid=group_info["uid"],
-                            group=group_info["group"],
-                            gid=group_info["gid"],
-                        )
-                    )
-                    all_groups.add(group_info["group"])
-
-            if device_types["card"]:
-                lines.append(f"  • /dev/dri/card*: {len(device_types['card'])} device(s) denied")
-                if len(required_groups["card"]) > 1:
-                    lines.append("    - Required group(s):")
-                else:
-                    lines.append("    - Required group:")
-                for group_info in required_groups["card"]:
                     lines.append(
                         "      - User: {user} (UID={uid}) | Group: {group} (GID={gid})".format(
                             user=group_info["user"],
