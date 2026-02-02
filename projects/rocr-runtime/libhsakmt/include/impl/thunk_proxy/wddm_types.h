@@ -40,11 +40,9 @@
 //
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef _WSL_INC_THUNK_PROXY_WDDM_TYPES_H_
-#define _WSL_INC_THUNK_PROXY_WDDM_TYPES_H_
+#pragma once
 
 #include <stdint.h>
-
 #include <no_sal2.h>
 
 typedef uint32_t UINT, *UINT_PTR;
@@ -166,4 +164,3 @@ typedef struct _GUID {
 
 #include <guiddef.h>
 
-#endif
