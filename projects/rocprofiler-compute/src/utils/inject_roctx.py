@@ -74,21 +74,25 @@ from roctx import rangePop, rangePush
 
 # Global stack for hierarchical marker names
 marker_stack = []
-original_dispatch_call = torch._C._dispatch_call
 
-def dispatch_call_with_roctx(*args, **kwargs):
-    op_name = str(args[0]) if args else "aten_op"
-    # Use hierarchical marker if desired
-    full_marker_name = "/".join(marker_stack + [f"aten::{op_name}"])
-    marker_stack.append(f"aten::{op_name}")
-    rangePush(full_marker_name)
-    try:
-        return original_dispatch_call(*args, **kwargs)
-    finally:
-        rangePop()
-        marker_stack.pop()
+if hasattr(torch._C, "_dispatch_call"):
+    original_dispatch_call = torch._C._dispatch_call
 
-torch._C._dispatch_call = dispatch_call_with_roctx
+    def dispatch_call_with_roctx(*args, **kwargs):
+        op_name = str(args[0]) if args else "aten_op"
+        full_marker_name = "/".join(marker_stack + [f"aten::{op_name}"])
+        marker_stack.append(f"aten::{op_name}")
+        rangePush(full_marker_name)
+        try:
+            return original_dispatch_call(*args, **kwargs)
+        finally:
+            rangePop()
+            marker_stack.pop()
+
+    torch._C._dispatch_call = dispatch_call_with_roctx
+else:
+    console_warning("torch._C._dispatch_call not found; skipping dispatcher patching.")
+    
 try:
     import torchvision
     original_tv_dispatch_call = torchvision._C._dispatch_call
