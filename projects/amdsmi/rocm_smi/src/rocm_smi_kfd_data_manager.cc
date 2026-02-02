@@ -59,6 +59,13 @@ namespace {
 constexpr const char* kDevKfd = "/dev/kfd";
 constexpr const char* kKfdProcBase = "/sys/class/kfd/kfd/proc/";
 constexpr pid_t kInvalidPid = -1;
+constexpr auto kMaxGpuCount = std::uint32_t(256);
+constexpr auto kDefaultBuffSize = std::uint32_t(128);
+
+using SteadyClock = std::chrono::steady_clock;
+using TimePoint = SteadyClock::time_point;
+using Milliseconds = std::chrono::milliseconds;
+using KfdProcSnapshot = std::set<std::string>;
 
 //=============================================================================
 // PID Namespace Detection for Container Support
@@ -70,12 +77,6 @@ constexpr pid_t kInvalidPid = -1;
 // Shared namespace (baremetal/VM): Direct PID lookup
 // Isolated namespace (container):  Baseline diff to find new entry
 //=============================================================================
-
-using SteadyClock = std::chrono::steady_clock;
-using TimePoint = SteadyClock::time_point;
-using Milliseconds = std::chrono::milliseconds;
-using KfdProcSnapshot = std::set<std::string>;
-
 struct InternalConfig {
   bool initialized = false;
   bool pid_namespace_checked = false;
@@ -94,7 +95,7 @@ struct BatchIpcPayload {
     uint32_t gpu_id;
     int32_t status;
     uint64_t data;
-  } results[256];  // Max GPUs supported
+  } results[kMaxGpuCount];  // Max GPUs supported
 };
 
 // Updated StoreBatch - also returns target result to avoid second loop
@@ -152,9 +153,10 @@ struct CacheState {
     auto& cache = caches[static_cast<size_t>(op)];
     TimePoint now = SteadyClock::now();
 
-    // ENOENT == /dev/kfd missing == RSMI_STATUS_DRIVER_NOT_LOADED
-    // Shouldn't get to this point, but handle gracefully
-    StoreBatchResult result{true, false, {ENOENT, 0}};
+    // Typical case: when this could return-
+    // 1. Caller passes invalid target_gpu_id or mismatched GPU ID list
+    // 2. payload.count == 0, which means the loop just won't run
+    StoreBatchResult result{true, false, {EINVAL, 0}};
 
     for (uint32_t i = 0; i < payload.count; ++i) {
       // Always check if this is our target (even on error path)
@@ -201,55 +203,82 @@ struct CacheState {
   }
 };
 
-// Global state
-std::mutex g_mutex;
-InternalConfig g_cfg;
-KFDManagerConfig g_current_cfg;
-std::atomic<pid_t> g_helper_pid{kInvalidPid};
-CacheState g_cache;
+//=============================================================================
+// Global State - Meyers Singleton pattern for safe initialization
+//=============================================================================
+std::mutex& GetGlobalMutex() {
+  static std::mutex instance;
+  return instance;
+}
+
+InternalConfig& GetInternalConfig() {
+  static InternalConfig instance;
+  return instance;
+}
+
+KFDManagerConfig& GetKFDManagerConfig() {
+  static KFDManagerConfig instance;
+  return instance;
+}
+
+std::atomic<pid_t>& GetHelperPid() {
+  static std::atomic<pid_t> instance{kInvalidPid};
+  return instance;
+}
+
+CacheState& GetGlobalCache() {
+  static CacheState instance;
+  return instance;
+}
 
 //=============================================================================
 // Helper Functions
 //=============================================================================
 
-inline bool PathExists(const char* path) {
+inline bool PathExists(const char* path) noexcept {
   struct stat st;
   return stat(path, &st) == 0;
 }
 
-inline bool KfdProcEntryExists(const char* full_path) {
+inline bool KfdProcEntryExists(const char* full_path) noexcept {
   return access(full_path, F_OK) == 0;
 }
 
-inline bool KfdProcEntryExists(const std::string& entry_name) {
-  char path[128];
+inline bool KfdProcEntryExists(const std::string& entry_name) noexcept {
+  char path[kDefaultBuffSize];
   snprintf(path, sizeof(path), "%s%s", kKfdProcBase, entry_name.c_str());
   return access(path, F_OK) == 0;
 }
 
 void WaitForEntryRemoval(const std::string& entry_name, int poll_ms) {
-  char kfd_path[128];
-  snprintf(kfd_path, sizeof(kfd_path), "%s%s", kKfdProcBase, entry_name.c_str());
+  const std::string kfd_path = std::string(kKfdProcBase) + entry_name;
 
-  if (!KfdProcEntryExists(kfd_path)) return;
+  if (!KfdProcEntryExists(kfd_path.c_str())) return;
 
   auto start_time = SteadyClock::now();
+  auto deadline = start_time + Milliseconds(GetKFDManagerConfig().max_cleanup_wait_ms);
   bool use_inotify = false;
   int notify_fd = -1;
 
-  if (!g_current_cfg.disable_inotify_polling) {
+  if (!GetKFDManagerConfig().disable_inotify_polling) {
     notify_fd = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
     use_inotify = (notify_fd >= 0);
   }
+
+  bool timed_out = false;
 
   if (use_inotify) {
     int watch_fd = inotify_add_watch(notify_fd, kKfdProcBase, IN_DELETE);
     if (watch_fd >= 0) {
       struct pollfd pfd = {notify_fd, POLLIN, 0};
-      char buf[256];
-      while (KfdProcEntryExists(kfd_path)) {
+      char buf[kMaxGpuCount];
+      while (KfdProcEntryExists(kfd_path.c_str())) {
+        if (SteadyClock::now() >= deadline) {
+          timed_out = true;
+          break;
+        }
         if (poll(&pfd, 1, poll_ms) > 0) {
-          (void)read(notify_fd, buf, sizeof(buf));
+          static_cast<void>(read(notify_fd, buf, sizeof(buf)));
         }
       }
       inotify_rm_watch(notify_fd, watch_fd);
@@ -257,24 +286,36 @@ void WaitForEntryRemoval(const std::string& entry_name, int poll_ms) {
     close(notify_fd);
   } else {
     // Stat-based polling (default, faster for short-lived entries)
-    while (KfdProcEntryExists(kfd_path)) {
+    while (KfdProcEntryExists(kfd_path.c_str())) {
+      if (SteadyClock::now() >= deadline) {
+        timed_out = true;
+        break;
+      }
       std::this_thread::sleep_for(
-          std::chrono::microseconds(g_current_cfg.cleanup_poll_us));
+          std::chrono::microseconds(GetKFDManagerConfig().cleanup_poll_us));
     }
   }
 
   auto elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(
       SteadyClock::now() - start_time).count();
-  std::ostringstream ss;
-  ss << __PRETTY_FUNCTION__ << " | Entry " << entry_name
-     << " removed after " << elapsed_us << " us ("
-     << (use_inotify ? "inotify" : "stat-poll") << ")";
-  LOG_DEBUG(ss);
+
+  if (timed_out) {
+    std::ostringstream ss;
+    ss << __PRETTY_FUNCTION__ << " | Entry " << entry_name
+       << " NOT removed after " << elapsed_us << " us (TIMEOUT)";
+    LOG_WARN(ss);
+  } else {
+    std::ostringstream ss;
+    ss << __PRETTY_FUNCTION__ << " | Entry " << entry_name
+       << " removed after " << elapsed_us << " us ("
+       << (use_inotify ? "inotify" : "stat-poll") << ")";
+    LOG_DEBUG(ss);
+  }
 }
 
 void WaitForKfdProcRemoval(pid_t pid) {
   WaitForEntryRemoval(std::to_string(pid),
-                      static_cast<int>(g_current_cfg.inotify_poll_ms));
+                      static_cast<int>(GetKFDManagerConfig().inotify_poll_ms));
 }
 
 KfdProcSnapshot CaptureKfdProcEntries() {
@@ -288,7 +329,14 @@ KfdProcSnapshot CaptureKfdProcEntries() {
       snapshot.insert(entry->d_name);
     }
   }
-  closedir(dir);
+
+  if (closedir(dir) != 0) {
+    // Log but don't fail - data was already read successfully
+    // The resource will be cleaned up when the process exits anyway
+    std::ostringstream ss;
+    ss << __PRETTY_FUNCTION__ << " | closedir failed: " << strerror(errno);
+    LOG_WARN(ss);
+  }
   return snapshot;
 }
 
@@ -305,7 +353,14 @@ std::string DetectNewKfdProcEntry(const KfdProcSnapshot& baseline) {
       break;
     }
   }
-  closedir(dir);
+
+  if (closedir(dir) != 0) {
+    // Log but don't fail - data was already read successfully
+    // The resource will be cleaned up when the process exits anyway
+    std::ostringstream ss;
+    ss << __PRETTY_FUNCTION__ << " | closedir failed: " << strerror(errno);
+    LOG_WARN(ss);
+  }
   return new_entry;
 }
 
@@ -345,16 +400,16 @@ bool DetectPidNamespace() {
 }
 
 bool IsInPidNamespace() {
-  std::lock_guard lock(g_mutex);
-  if (!g_cfg.pid_namespace_checked) {
-    g_cfg.in_pid_namespace = DetectPidNamespace();
-    g_cfg.pid_namespace_checked = true;
+  std::lock_guard lock(GetGlobalMutex());
+  if (!GetInternalConfig().pid_namespace_checked) {
+    GetInternalConfig().in_pid_namespace = DetectPidNamespace();
+    GetInternalConfig().pid_namespace_checked = true;
     std::ostringstream ss;
     ss << __PRETTY_FUNCTION__ << " | PID namespace: "
-       << (g_cfg.in_pid_namespace ? "isolated (container)" : "shared");
+       << (GetInternalConfig().in_pid_namespace ? "isolated (container)" : "shared");
     LOG_INFO(ss);
   }
-  return g_cfg.in_pid_namespace;
+  return GetInternalConfig().in_pid_namespace;
 }
 
 [[noreturn]] void ChildExecute(OpType op, uint32_t gpu_id, int write_fd) {
@@ -379,7 +434,9 @@ bool IsInPidNamespace() {
     close(fd);
   }
 
-  (void)write(write_fd, &result, sizeof(result));
+  // Note: Cannot log here - async-signal-safe constraints
+  // Logging failure will cause parent to detect short read and report EIO.
+  static_cast<void>(write(write_fd, &result, sizeof(result)));
   close(write_fd);
   _exit(result.status ? 1 : 0);
 }
@@ -394,16 +451,19 @@ bool IsInPidNamespace() {
   int fd = open(kDevKfd, O_RDWR | O_CLOEXEC);
   if (fd < 0) {
     int err = errno;
-    for (uint32_t i = 0; i < count && i < 256; ++i) {
+    uint32_t limit = (count < kMaxGpuCount) ? count : kMaxGpuCount;
+    for (uint32_t i = 0; i < limit; ++i) {
       payload.results[i] = {gpu_ids[i], err, 0};
     }
-    payload.count = std::min(count, 256u);
-    (void)write(write_fd, &payload, sizeof(payload));
+    payload.count = limit;
+    // Note: Cannot log here - async-signal-safe constraints
+    // Write failure will cause parent to detect short read and report EIO.
+    static_cast<void>(write(write_fd, &payload, sizeof(payload)));
     close(write_fd);
     _exit(1);
   }
 
-  for (uint32_t i = 0; i < count && i < 256; ++i) {
+  for (uint32_t i = 0; i < count && i < kMaxGpuCount; ++i) {
     payload.results[i].gpu_id = gpu_ids[i];
 
     switch (op) {
@@ -427,7 +487,9 @@ bool IsInPidNamespace() {
   }
 
   close(fd);
-  (void)write(write_fd, &payload, sizeof(payload));
+  // Note: Cannot log here - async-signal-safe constraints
+  // Write failure will cause parent to detect short read and report EIO.
+  static_cast<void>(write(write_fd, &payload, sizeof(payload)));
   close(write_fd);
   _exit(0);
 }
@@ -441,9 +503,9 @@ int64_t ReadEnvInt64(const char* name, int64_t fallback) {
 }
 
 void EnsureInitialized() {
-  std::lock_guard lock(g_mutex);
-  if (!g_cfg.initialized) {
-    g_cfg.initialized = true;
+  std::lock_guard lock(GetGlobalMutex());
+  if (!GetInternalConfig().initialized) {
+    GetInternalConfig().initialized = true;
   }
 }
 
@@ -497,10 +559,12 @@ ForkResult ExecuteBatchFork(OpType op, const std::vector<uint32_t>& gpu_ids) {
 
   // Parent
   close(pipe_fds[1]);
-  g_helper_pid.store(child_pid, std::memory_order_release);
+  GetHelperPid().store(child_pid, std::memory_order_release);
 
   ssize_t bytes_read = read(pipe_fds[0], &result.payload, sizeof(result.payload));
   close(pipe_fds[0]);
+  // read() returns -1 on error, 0 on EOF, or partial/full byte count.
+  // We require exactly sizeof(payload) bytes for a valid response.
   bool read_ok = (bytes_read == static_cast<ssize_t>(sizeof(result.payload)));
 
   int child_status = 0;
@@ -514,7 +578,7 @@ ForkResult ExecuteBatchFork(OpType op, const std::vector<uint32_t>& gpu_ids) {
   }
 
   // Wait for KFD proc cleanup
-  int poll_ms = static_cast<int>(g_current_cfg.inotify_poll_ms);
+  int poll_ms = static_cast<int>(GetKFDManagerConfig().inotify_poll_ms);
   std::string direct_entry = std::to_string(child_pid);
 
   if (!in_container) {
@@ -522,6 +586,20 @@ ForkResult ExecuteBatchFork(OpType op, const std::vector<uint32_t>& gpu_ids) {
       WaitForEntryRemoval(direct_entry, poll_ms);
     }
   } else {
+    // Container PID namespace handling: We can't directly map the child's
+    // container-local PID to its host PID in /sys/class/kfd/kfd/proc/.
+    // We use a snapshot-diff approach to find the new entry.
+    //
+    // See above 'PID Namespace Detection for Container Support' for details.
+    //
+    // KNOWN RACE: Another process could create a KFD entry between our
+    // snapshot and detection, causing us to wait for the wrong entry.
+    // This is mitigated by:
+    //   1. Narrow window (snapshot taken immediately before fork)
+    //   2. Bounded wait (max_cleanup_wait_ms timeout)
+    //   3. Kernel cleanup (child's entry disappears when child exits)
+    // Worst case: we timeout waiting for wrong entry, but our child's
+    // entry will have been cleaned up by the kernel anyway.
     if (KfdProcEntryExists(direct_entry)) {
       WaitForEntryRemoval(direct_entry, poll_ms);
     } else {
@@ -536,7 +614,7 @@ ForkResult ExecuteBatchFork(OpType op, const std::vector<uint32_t>& gpu_ids) {
     }
   }
 
-  g_helper_pid.store(kInvalidPid, std::memory_order_release);
+  GetHelperPid().store(kInvalidPid, std::memory_order_release);
 
   if (!read_ok) {
     result.err_code = EIO;
@@ -560,34 +638,35 @@ KFDManagerConfig GetCurrentConfig() {
   // WARNING: Do not add debug logs in any of initialization/getconfig,
   // since logging is enabled after these functions are called.
 
-  std::lock_guard lock(g_mutex);
-  return g_current_cfg;
+  std::lock_guard lock(GetGlobalMutex());
+  return GetKFDManagerConfig();
 }
 
-void LoadConfigFromEnvironment(KFDManagerConfig* cfg) {
-  if (!cfg) return;
-  cfg->use_original_vram_fcn = static_cast<bool>(
+void LoadConfigFromEnvironment(KFDManagerConfig& cfg) {  // NOLINT(runtime/references)
+  cfg.use_original_vram_fcn = static_cast<bool>(
       ReadEnvInt64("AMDSMI_KFD_USE_ORIG_VRAM",
-                   cfg->use_original_vram_fcn ? 1 : 0));
-  cfg->disable_inotify_polling = static_cast<bool>(
+                   cfg.use_original_vram_fcn ? 1 : 0));
+  cfg.disable_inotify_polling = static_cast<bool>(
       ReadEnvInt64("AMDSMI_KFD_DISABLE_INOTIFY_POLLING",
-                   cfg->disable_inotify_polling ? 1 : 0));
-  cfg->inotify_poll_ms = ReadEnvInt64(
-      "AMDSMI_KFD_INOTIFY_POLL_MS", cfg->inotify_poll_ms);
-  cfg->cleanup_poll_us = ReadEnvInt64(
-      "AMDSMI_KFD_CLEANUP_POLL_US", cfg->cleanup_poll_us);
-  cfg->cache_ttl_ms = ReadEnvInt64(
-      "AMDSMI_KFD_CACHE_TTL_MS", cfg->cache_ttl_ms);
+                   cfg.disable_inotify_polling ? 1 : 0));
+  cfg.inotify_poll_ms = ReadEnvInt64(
+      "AMDSMI_KFD_INOTIFY_POLL_MS", cfg.inotify_poll_ms);
+  cfg.cleanup_poll_us = ReadEnvInt64(
+      "AMDSMI_KFD_CLEANUP_POLL_US", cfg.cleanup_poll_us);
+  cfg.cache_ttl_ms = ReadEnvInt64(
+      "AMDSMI_KFD_CACHE_TTL_MS", cfg.cache_ttl_ms);
+  cfg.max_cleanup_wait_ms = ReadEnvInt64(
+    "AMDSMI_KFD_MAX_CLEANUP_WAIT_MS", cfg.max_cleanup_wait_ms);
 }
 
 int InitializeManager(const KFDManagerConfig& cfg) {
   // WARNING: Do not add debug logs in any of initialization/getconfig,
   // since logging is enabled after these functions are called.
 
-  std::lock_guard lock(g_mutex);
-  if (g_cfg.initialized) return 0;
-  g_current_cfg = cfg;
-  g_cfg.initialized = true;
+  std::lock_guard lock(GetGlobalMutex());
+  if (GetInternalConfig().initialized) return 0;
+  GetKFDManagerConfig() = cfg;
+  GetInternalConfig().initialized = true;
   return 0;
 }
 
@@ -627,12 +706,14 @@ QueryResult ExecuteIsolatedQuery(OpType op, uint32_t gpu_id) {
   }
 
   close(pipe_fds[1]);
-  g_helper_pid.store(child_pid, std::memory_order_release);
+  GetHelperPid().store(child_pid, std::memory_order_release);
 
   IpcPayload payload{};
   ssize_t bytes_read = read(pipe_fds[0], &payload, sizeof(payload));
   close(pipe_fds[0]);
-  bool read_ok = (bytes_read == sizeof(payload));
+  // read() returns -1 on error, 0 on EOF, or partial/full byte count.
+  // We require exactly sizeof(payload) bytes for a valid response.
+  bool read_ok = (bytes_read == static_cast<ssize_t>(sizeof(payload)));
 
   int child_status = 0;
   pid_t wait_result = waitpid(child_pid, &child_status, 0);
@@ -643,7 +724,7 @@ QueryResult ExecuteIsolatedQuery(OpType op, uint32_t gpu_id) {
     waitpid(child_pid, nullptr, 0);
   }
 
-  int poll_ms = static_cast<int>(g_current_cfg.inotify_poll_ms);
+  int poll_ms = static_cast<int>(GetKFDManagerConfig().inotify_poll_ms);
   std::string direct_entry = std::to_string(child_pid);
 
   if (!in_container) {
@@ -651,6 +732,20 @@ QueryResult ExecuteIsolatedQuery(OpType op, uint32_t gpu_id) {
       WaitForEntryRemoval(direct_entry, poll_ms);
     }
   } else {
+    // Container PID namespace handling: We can't directly map the child's
+    // container-local PID to its host PID in /sys/class/kfd/kfd/proc/.
+    // We use a snapshot-diff approach to find the new entry.
+    //
+    // See above 'PID Namespace Detection for Container Support' for details.
+    //
+    // KNOWN RACE: Another process could create a KFD entry between our
+    // snapshot and detection, causing us to wait for the wrong entry.
+    // This is mitigated by:
+    //   1. Narrow window (snapshot taken immediately before fork)
+    //   2. Bounded wait (max_cleanup_wait_ms timeout)
+    //   3. Kernel cleanup (child's entry disappears when child exits)
+    // Worst case: we timeout waiting for wrong entry, but our child's
+    // entry will have been cleaned up by the kernel anyway.
     if (KfdProcEntryExists(direct_entry)) {
       WaitForEntryRemoval(direct_entry, poll_ms);
     } else {
@@ -664,7 +759,7 @@ QueryResult ExecuteIsolatedQuery(OpType op, uint32_t gpu_id) {
     }
   }
 
-  g_helper_pid.store(kInvalidPid, std::memory_order_release);
+  GetHelperPid().store(kInvalidPid, std::memory_order_release);
 
   if (!read_ok) {
     out.err_code = EIO;
@@ -682,13 +777,25 @@ QueryResult ExecuteBatchQueryCached(OpType op,
                                     const std::vector<uint32_t>& gpu_ids,
                                     uint32_t target_gpu_id) {
   EnsureInitialized();
-
-  int64_t ttl_ms = g_current_cfg.cache_ttl_ms;
+  int64_t ttl_ms = GetKFDManagerConfig().cache_ttl_ms;
 
   // O(1) cache lookup - returns nullopt for expired/error entries
-  if (auto cached = g_cache.TryGet(op, target_gpu_id, ttl_ms)) {
+  if (auto cached = GetGlobalCache().TryGet(op, target_gpu_id, ttl_ms)) {
     return *cached;
   }
+
+  // TODO(optimization): Consider adding a "single-flight" / "coalescing"
+  // pattern. This avoids redundant forks when multiple threads have
+  // concurrent cache misses.
+  //
+  // Current behavior: both threads fork (safe but slightly inefficient).
+  // Search: "singleflight pattern", "request coalescing", "call coalescing C++"
+  //         or "deduplicate concurrent requests" folly Singleton
+  //
+  // A few open-source C++ libraries have implementations, try:
+  // "folly Singleton" or "folly futures coalescing"
+  // or "C++ promise shared future" (to see  underlying mechanism)
+
 
   // Cache miss - execute batch fork for all GPUs
   auto fork_result = ExecuteBatchFork(op, gpu_ids);
@@ -699,12 +806,12 @@ QueryResult ExecuteBatchQueryCached(OpType op,
     ss << __PRETTY_FUNCTION__ << " | Fork failed (err=" << fork_result.err_code
        << "), purging cache for op=" << static_cast<uint32_t>(op);
     LOG_WARN(ss);
-    g_cache.Purge(op, -1);
+    GetGlobalCache().Purge(op, -1);
     return QueryResult{fork_result.err_code, 0};
   }
 
   // Store results and find target in single pass
-  auto store_result = g_cache.StoreBatch(op, fork_result.payload, target_gpu_id);
+  auto store_result = GetGlobalCache().StoreBatch(op, fork_result.payload, target_gpu_id);
 
   std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << " | Refreshed " << fork_result.payload.count
@@ -716,7 +823,7 @@ QueryResult ExecuteBatchQueryCached(OpType op,
 }
 
 void PurgeCacheEntries(OpType op, int32_t gpu_id) {
-  g_cache.Purge(op, gpu_id);
+  GetGlobalCache().Purge(op, gpu_id);
   std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << " | Purged cache for op="
      << static_cast<uint32_t>(op) << " gpu_id=" << gpu_id;
@@ -724,7 +831,7 @@ void PurgeCacheEntries(OpType op, int32_t gpu_id) {
 }
 
 void PurgeAllCacheEntries() {
-  g_cache.PurgeAll();
+  GetGlobalCache().PurgeAll();
   std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << " | Purged all cache entries";
   LOG_DEBUG(ss);
@@ -750,7 +857,7 @@ int QueryAvailableVramBatch(const std::vector<uint32_t>& gpu_ids,
 }
 
 void TerminateActiveHelpers() {
-  pid_t pid = g_helper_pid.exchange(kInvalidPid, std::memory_order_acq_rel);
+  pid_t pid = GetHelperPid().exchange(kInvalidPid, std::memory_order_acq_rel);
   if (pid > 0) {
     kill(pid, SIGKILL);
     waitpid(pid, nullptr, 0);

@@ -485,8 +485,12 @@ static inline std::unordered_set<uint32_t> GetEnvVarUIntegerSets(
 // Get and store env. variables in this method
 void RocmSMI::GetEnvVariables(void) {
   amd::smi::kfd::KFDManagerConfig kfd_cfg;
-  amd::smi::kfd::LoadConfigFromEnvironment(&kfd_cfg);
-  amd::smi::kfd::InitializeManager(kfd_cfg);
+  amd::smi::kfd::LoadConfigFromEnvironment(kfd_cfg);
+  auto ret = amd::smi::kfd::InitializeManager(kfd_cfg);
+  if (ret != 0) {  // we'll never hit this (as of today)
+    throw amd::smi::rsmi_exception(RSMI_INITIALIZATION_ERROR,
+                 "Failed to initialize KFD Manager from environment config.");
+  }
   env_vars_.logging_on = getRSMIEnvVar_LoggingEnabled("RSMI_LOGGING");
 #ifndef DEBUG
   (void)GetEnvVarUInteger(nullptr);  // This is to quiet release build warning.
@@ -567,6 +571,8 @@ std::string RocmSMI::getRSMIEnvVarInfo(void) {
      << kfd_cfg.cleanup_poll_us << " us" << std::endl;
   ss << "\tAMDSMI_KFD_CACHE_TTL_MS: "
      << kfd_cfg.cache_ttl_ms << " ms" << std::endl;
+  ss << "\tAMDSMI_KFD_MAX_CLEANUP_WAIT_MS: "
+     << kfd_cfg.max_cleanup_wait_ms << " ms" << std::endl;
   ss << "\tRSMI_DEBUG_ENUM_OVERRIDE = {";
   if (env_vars_.enum_overrides.empty()) {
     ss << "}" << std::endl;

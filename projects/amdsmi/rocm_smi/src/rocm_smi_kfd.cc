@@ -1115,12 +1115,16 @@ int KFDNode::get_used_memory_orig(uint64_t* used) {
   // used = total - available
   uint64_t total = 0;
   int ret = get_total_memory(&total);
-  if (ret == 0 && total > 0 && mem.available < total) {
-    *used = total - mem.available;
-    return 0;
+  if (ret != 0) {
+    return ret;
   }
 
-  return 1;
+  if (total > 0 && mem.available < total) {
+    *used = total - mem.available;
+    return 0;
+  } else {
+    return ENXIO;  // case ENXIO:   return RSMI_STATUS_UNEXPECTED_DATA;
+  }
 }
 
 // Order of logic:
@@ -1189,11 +1193,15 @@ int KFDNode::get_used_memory(uint64_t* used) {
   // used = total - available
   uint64_t total = 0;
   ret = get_total_memory(&total);
-  if (ret == 0 && total > 0 && available < total) {
+  if (ret != 0) {
+    return ret;
+  }
+  if (total > 0 && available < total) {
     *used = total - available;
     return 0;
+  } else {
+    return ENXIO;  // case ENXIO:   return RSMI_STATUS_UNEXPECTED_DATA;
   }
-  return 1;
 }
 
 int KFDNode::get_cache_info(rsmi_gpu_cache_info_t *info) {

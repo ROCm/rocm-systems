@@ -55,6 +55,7 @@
  *   AMDSMI_KFD_INOTIFY_POLL_MS:        poll timeout in ms (default: 2)
  *   AMDSMI_KFD_CLEANUP_POLL_US:        stat poll interval in us (default: 250)
  *   AMDSMI_KFD_CACHE_TTL_MS:           cache TTL in ms (default: 250, 0=disabled)
+ *   AMDSMI_KFD_MAX_CLEANUP_WAIT_MS:    max wait for cleanup in ms (default: 100)
  *
  * THREAD SAFETY: All public functions are thread-safe.
  * =============================================================================
@@ -75,17 +76,28 @@ struct KFDManagerConfig {
   bool use_original_vram_fcn = false;
 
   /// Use stat-based polling instead of inotify (default: true, faster)
+  /// Set AMDSMI_KFD_DISABLE_INOTIFY_POLLING=0 to re-enable
   bool disable_inotify_polling = true;
 
   /// Poll timeout for inotify in milliseconds (default: 2ms)
+  /// Set AMDSMI_KFD_INOTIFY_POLL_MS to adjust
+  /// Ignored if disable_inotify_polling=true
   int64_t inotify_poll_ms = 2;
 
   /// Stat polling interval in microseconds (default: 250us)
+  /// Set AMDSMI_KFD_CLEANUP_POLL_US to adjust
   int64_t cleanup_poll_us = 250;
 
   /// Cache time-to-live in milliseconds (default: 250ms, 0=disabled)
   /// When enabled, batch queries use O(1) cache lookup
+  /// Set AMDSMI_KFD_CACHE_TTL_MS to adjust
   int64_t cache_ttl_ms = 250;
+
+  /// Maximum wait time for child process cleanup in milliseconds (default: 100ms)
+  /// This is a safety bound - normal cleanup takes <50ms. If this timeout fires,
+  /// there's likely a kernel/driver issue that won't resolve with more waiting.
+  /// Set AMDSMI_KFD_MAX_CLEANUP_WAIT_MS to adjust
+  int64_t max_cleanup_wait_ms = 100;
 };
 
 /// Supported KFD operation types
@@ -101,21 +113,21 @@ struct QueryResult {
 };
 
 /// Load configuration from environment variables into cfg
-void LoadConfigFromEnvironment(KFDManagerConfig* cfg);
+void LoadConfigFromEnvironment(KFDManagerConfig& cfg);  // NOLINT(runtime/references)
 
 /// Get current configuration (thread-safe)
 KFDManagerConfig GetCurrentConfig();
 
 /// Initialize manager with specified config (first call wins, thread-safe)
-int InitializeManager(const KFDManagerConfig& cfg);
+[[nodiscard]] int InitializeManager(const KFDManagerConfig& cfg);
 
 /// Execute KFD operation in isolated child process (thread-safe, no caching)
-QueryResult ExecuteIsolatedQuery(OpType op, uint32_t gpu_id);
+[[nodiscard]] QueryResult ExecuteIsolatedQuery(OpType op, uint32_t gpu_id);
 
 /// Batch query with caching - O(1) cache lookup by gpu_id
 /// If target's cache is valid, returns immediately
 /// Otherwise, refreshes cache for ALL gpu_ids in one fork
-QueryResult ExecuteBatchQueryCached(OpType op,
+[[nodiscard]] QueryResult ExecuteBatchQueryCached(OpType op,
                                     const std::vector<uint32_t>& gpu_ids,
                                     uint32_t target_gpu_id);
 
@@ -126,10 +138,10 @@ void PurgeCacheEntries(OpType op, int32_t gpu_id = -1);
 void PurgeAllCacheEntries();
 
 /// Convenience wrapper to query available VRAM (no caching)
-int QueryAvailableVram(uint32_t gpu_id, uint64_t* out_available);
+[[nodiscard]] int QueryAvailableVram(uint32_t gpu_id, uint64_t* out_available);
 
 /// Convenience wrapper for batched VRAM query (with caching)
-int QueryAvailableVramBatch(const std::vector<uint32_t>& gpu_ids,
+[[nodiscard]] int QueryAvailableVramBatch(const std::vector<uint32_t>& gpu_ids,
                             uint32_t target_gpu_id,
                             uint64_t* out_available);
 
