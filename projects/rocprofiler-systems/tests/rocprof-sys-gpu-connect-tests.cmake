@@ -75,7 +75,7 @@ set_tests_properties(
     PROPERTIES
         LABELS "transferbench;validation"
         FIXTURES_SETUP transferbench_available
-        SKIP_REGULAR_EXPRESSION "Error: No valid transfers created"
+        FAIL_REGULAR_EXPRESSION "Error: No valid transfers created"
 )
 
 rocprofiler_systems_add_test(
