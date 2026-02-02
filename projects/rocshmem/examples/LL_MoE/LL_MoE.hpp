@@ -88,6 +88,9 @@ class LLMoE {
     // Create HIP stream
     CHECK_HIP(hipStreamCreate(&stream));
 
+    // num_experts must be divisible by num_ranks
+    ASSERT(num_experts % num_ranks == 0);
+
     /**
      * Generate input data after COMM init, because it sets different device
      * IDs for different ranks.
