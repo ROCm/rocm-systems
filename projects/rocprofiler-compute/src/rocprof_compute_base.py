@@ -171,6 +171,7 @@ class RocProfCompute:
             self.__args.format_rocprof_output = "csv"
 
     def replace_parameters_in_output_directory(self) -> None:
+        """Replace parameters in output directory path"""
         # Add --name to output directory if --output-directory is not given
         if self.__args.output_directory == str(Path.cwd() / "workloads"):
             self.__args.output_directory = str(
@@ -458,10 +459,17 @@ class RocProfCompute:
         if self.__args.name is not None and "/" in self.__args.name:
             console_error('"/" is not permitted in profile name')
 
+        # Replace parameters in output directory when either:
+        # 1. --output-directory is explicitly given by user
+        # 2. --path and --output-directory are set to default workload directory
+        # --output-directory is given higher priority than --path
+        # as --path is deprecated and will be removed in future releases.
         if self.__args.output_directory != str(
             Path.cwd() / "workloads"
         ) or self.__args.path == str(Path.cwd() / "workloads"):
             self.replace_parameters_in_output_directory()
+            # Set path to output_directory for roofline
+            # Remove this while removing roofline from profiling mode
             self.__args.path = self.__args.output_directory
 
         # instantiate desired profiler
