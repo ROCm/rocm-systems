@@ -22,6 +22,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
     - `AMDSMI_KFD_DISABLE_INOTIFY_POLLING`: Use stat polling instead of inotify (default: 1/enabled for better performance)
     - `AMDSMI_KFD_INOTIFY_POLL_MS`: Inotify polling timeout in milliseconds (default: 2)
     - `AMDSMI_KFD_CLEANUP_POLL_US`: Stat polling interval in microseconds (default: 250)
+    - `AMDSMI_KFD_MAX_CLEANUP_WAIT_MS`: Max wait time for KFD process cleanup in milliseconds (default: 100)
 
 - **Added new error status codes for better error reporting**.  
   - `AMDSMI_STATUS_IPC_ERROR` (21): IPC communication error occurred
