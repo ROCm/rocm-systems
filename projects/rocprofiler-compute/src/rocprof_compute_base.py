@@ -225,11 +225,13 @@ class RocProfCompute:
             console_warning(
                 "--name is ignored when --output-directory is explicitly specified."
             )
-        else:
-            if "%rank%" not in self.__args.output_directory and get_rank() is not None:
-                self.__args.output_directory = str(
-                    Path(self.__args.output_directory) / f"{get_rank()}"
-                )
+
+        # Add MPI rank to workload path if %rank% is not present in output directory
+        # and rank is available
+        if "%rank%" not in self.__args.output_directory and get_rank() is not None:
+            self.__args.output_directory = str(
+                Path(self.__args.output_directory) / f"{get_rank()}"
+            )
 
         # Replace parameters with actual values in workload path
         self.__args.output_directory = self.__args.output_directory.replace(
@@ -244,7 +246,7 @@ class RocProfCompute:
 
     @demarcate
     def generate_machine_specs(self) -> None:
-        """Generate MachineSpecs instance for RocProfCompute run"""
+        """Generate MachineSpecs for RocProfCompute"""
         self.__mspec = generate_machine_specs(self.__args)
         if self.__args and self.__args.specs:
             print(self.__mspec)
@@ -478,8 +480,8 @@ class RocProfCompute:
 
         # Replace parameters in output directory when either:
         # 1. --output-directory is explicitly given by user
-        # 2. --path and --output-directory are set to default workload directory
-        # --output-directory is given higher priority than --path
+        # 2. --path and --output-directory are set to default workload directory.
+        # NOTE: --output-directory is given higher priority than --path
         # as --path is deprecated and will be removed in future releases.
         if self.__args.output_directory != str(
             Path.cwd() / "workloads"
