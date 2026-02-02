@@ -1075,27 +1075,37 @@ buffered_tracing_callback(rocprofiler_context_id_t /*context*/,
             {
                 auto set_kfd_record = [&header](auto& kfd_record) {
                     if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU)
+                    {
                         kfd_record.record =
                             *(static_cast<
                                 rocprofiler_buffer_tracing_kfd_event_unmap_from_gpu_record_t*>(
                                 header->payload));
+                    }
                     else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS)
+                    {
                         kfd_record.record =
                             *(static_cast<
                                 rocprofiler_buffer_tracing_kfd_event_dropped_events_record_t*>(
                                 header->payload));
+                    }
                     else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE)
+                    {
                         kfd_record.record =
                             *(static_cast<rocprofiler_buffer_tracing_kfd_page_migrate_record_t*>(
                                 header->payload));
+                    }
                     else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT)
+                    {
                         kfd_record.record =
                             *(static_cast<rocprofiler_buffer_tracing_kfd_page_fault_record_t*>(
                                 header->payload));
+                    }
                     else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_QUEUE)
+                    {
                         kfd_record.record =
                             *(static_cast<rocprofiler_buffer_tracing_kfd_queue_record_t*>(
                                 header->payload));
+                    }
                 };
 
                 tool::tool_buffer_tracing_kfd_record_t rec;
