@@ -2592,7 +2592,7 @@ amdsmi_get_gpu_memory_partition_config(amdsmi_processor_handle processor_handle,
 
     // current memory partition
     constexpr uint32_t kCurrentPartitionSize = 5;
-    char current_mem_partition[kCurrentPartitionSize];
+    char current_mem_partition[kCurrentPartitionSize] = {};
     std::string current_mem_partition_str = "N/A";
     amdsmi_status_t status = amdsmi_get_gpu_memory_partition(processor_handle,
                                             current_mem_partition, kCurrentPartitionSize);
@@ -2614,7 +2614,7 @@ amdsmi_get_gpu_memory_partition_config(amdsmi_processor_handle processor_handle,
 
     // Add memory partition capabilities here
     constexpr uint32_t kLenCapsSize = 30;
-    char memory_caps[kLenCapsSize];
+    char memory_caps[kLenCapsSize] = {};
     auto status_mem_caps = rsmi_wrapper(rsmi_dev_memory_partition_capabilities_get,
                                           processor_handle, 0,
                                           memory_caps, kLenCapsSize);
