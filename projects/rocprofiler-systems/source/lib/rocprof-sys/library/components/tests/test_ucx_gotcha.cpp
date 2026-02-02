@@ -451,3 +451,46 @@ TEST_F(ucx_gotcha_test, test_start)
     EXPECT_CALL(*test_globals::g_ucx_gotcha_gmock, configure(::testing::_)).Times(89);
     initializer();
 }
+
+TEST_F(ucx_gotcha_test, test_audit_incoming_tag_send)
+{
+    MockedGotchaData data;
+    data.tool_id = "test_tool_id";
+
+    void*       call_worker;
+    void*       call_buffer;
+    size_t      call_count;
+    uint64_t    call_tag;
+    uint64_t    call_tag_mask;
+    const void* call_param;
+
+    EXPECT_CALL(*test_globals::g_category_region_gmock, start_tag_recv)
+        .Times(1)
+        .WillOnce([&](std::string_view name, void* worker, void* buffer, size_t count,
+                      uint64_t tag, uint64_t tag_mask, const void* param) {
+            EXPECT_EQ(name, "test_tool_id");
+            call_worker   = worker;
+            call_buffer   = buffer;
+            call_count    = count;
+            call_tag      = tag;
+            call_tag_mask = tag_mask;
+            call_param    = param;
+        });
+
+    void*       worker   = (void*) 0;
+    void*       buffer   = (void*) 1;
+    size_t      count    = 1;
+    uint64_t    tag      = 2;
+    uint64_t    tag_mask = 3;
+    const void* param    = (const void*) 3;
+
+    ucx_gotcha_under_test_t::audit(data, tim::audit::incoming{}, worker, buffer, count,
+                                   tag, tag_mask, param);
+
+    EXPECT_EQ(call_worker, worker);
+    EXPECT_EQ(call_buffer, buffer);
+    EXPECT_EQ(call_count, count);
+    EXPECT_EQ(call_tag, tag);
+    EXPECT_EQ(call_tag_mask, tag_mask);
+    EXPECT_EQ(call_param, param);
+}
