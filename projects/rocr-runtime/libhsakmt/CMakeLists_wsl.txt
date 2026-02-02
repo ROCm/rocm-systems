@@ -109,8 +109,10 @@ set ( ROCDXG_SRC "src/dxg/debug.cpp"
                  "src/dxg/openclose.cpp"
                  "src/dxg/perfctr.cpp"
                  "src/dxg/queues.cpp"
+                 "src/dxg/rocrstub.cpp"
                  "src/dxg/time.cpp"
                  "src/dxg/topology.cpp"
+                 "src/dxg/topology_lnx.cpp"
                  "src/dxg/spm.cpp"
                  "src/dxg/version.cpp"
                  "src/dxg/svm.cpp"
@@ -119,10 +121,14 @@ set ( ROCDXG_SRC "src/dxg/debug.cpp"
                  "src/dxg/dxcore_loader.cpp"
                  "src/dxg/ais.cpp"
                  "src/dxg/wddm/device.cpp"
+                 "src/dxg/wddm/event.cpp"
                  "src/dxg/wddm/gpu_memory.cpp"
                  "src/dxg/wddm/va_mgr.cpp"
                  "src/dxg/wddm/queue.cpp"
-                 "src/dxg/wddm/cmd_util.cpp" )
+                 "src/dxg/wddm/cmd_util.cpp"
+                 ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/hsa-runtime/core/util/timer.cpp
+                 ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/hsa-runtime/core/util/small_heap.cpp
+                 ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/hsa-runtime/core/util/lnx/os_linux.cpp )
 
 ## Declare the library target name
 add_library (${ROCDXG_TARGET} SHARED "")
@@ -138,7 +144,11 @@ target_include_directories( ${ROCDXG_TARGET}
   $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
   PRIVATE
   ${WIN_SDK}
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/dxg )
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/dxg
+  ${CMAKE_CURRENT_SOURCE_DIR}/../runtime
+  ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/hsa-runtime/core
+  ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/hsa-runtime
+  ${CMAKE_CURRENT_SOURCE_DIR}/include/hsakmt/drm)
 
 add_compile_definitions(LINUX __AMD64__ LITTLEENDIAN_CPU HSA_LARGE_MODEL)
 

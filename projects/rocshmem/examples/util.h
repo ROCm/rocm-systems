@@ -31,12 +31,29 @@
 #include <hip/hip_runtime.h>
 
 #define CHECK_HIP(condition) {                                            \
-        hipError_t error = condition;                                     \
-        if(error != hipSuccess){                                          \
-            fprintf(stderr,"HIP error: %d line: %d\n", error,  __LINE__); \
-            exit(error);                                                  \
-        }                                                                 \
-    }
+    hipError_t error = condition;                                         \
+    if(error != hipSuccess){                                              \
+        fprintf(stderr, "HIP error: %d line: %s:%d\n",                    \
+                error, __FILE__,  __LINE__);                              \
+        exit(error);                                                      \
+    }                                                                     \
+}
+
+#define ASSERT(condition) {                                               \
+  if (!(condition)) {                                                     \
+    fprintf(stderr, "Assertion failed: [%s:%d], condition:  %s\n",        \
+            __FILE__, __LINE__, #condition);                              \
+    exit(EXIT_FAILURE);                                                   \
+  }                                                                       \
+}
+
+#define DEVICE_ASSERT(condition) {                                        \
+  if (!(condition)) {                                                     \
+    printf("Assertion failed: [%s:%d], condition:  %s\n",                 \
+            __FILE__, __LINE__, #condition);                              \
+    abort();                                                              \
+  }                                                                       \
+}
 
 static int get_launcher_local_rank() {
     char *local_rank_str = nullptr;
