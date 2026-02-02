@@ -84,8 +84,7 @@ class RocProfCompute:
         setattr(self.__args, "loglevel", self.__loglevel)
         set_locale_encoding()
 
-        if self.__mode == "profile":
-            self.generate_machine_specs()
+        self.generate_machine_specs()
 
         self.sanitize()
 
