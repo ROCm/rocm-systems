@@ -448,6 +448,12 @@ For attachment profiling of running processes:
         help="For collecting KFD Trace events involving GPU queue eviction and restore operations.",
     )
 
+    add_parser_bool_argument(
+        extended_tracing_options,
+        "--kfd-dropped-events-trace",
+        help="For collecting KFD Trace events involving events dropped by KFD.",
+    )
+
     counter_collection_options = parser.add_argument_group("Counter collection options")
 
     counter_collection_options.add_argument(
@@ -1288,7 +1294,7 @@ def run(app_args, args, **kwargs):
             setattrifnone(args, f"hsa_{itr}_trace", True)
 
     if args.kfd_trace:
-        for itr in ("page_migration", "page_mapping", "queue"):
+        for itr in ("page_migration", "page_mapping", "queue", "dropped_events"):
             setattrifnone(args, f"kfd_{itr}_trace", True)
 
     trace_count = 0
@@ -1311,6 +1317,7 @@ def run(app_args, args, **kwargs):
             ["kfd_page_migration_trace", "KFD_PAGE_MIGRATION_TRACE"],
             ["kfd_page_mapping_trace", "KFD_PAGE_MAPPING_TRACE"],
             ["kfd_queue_trace", "KFD_QUEUE_TRACE"],
+            ["kfd_dropped_events_trace", "KFD_DROPPED_EVENTS_TRACE"],
             ["scratch_memory_trace", "SCRATCH_MEMORY_TRACE"],
             ["group_by_queue", "GROUP_BY_QUEUE"],
         ]

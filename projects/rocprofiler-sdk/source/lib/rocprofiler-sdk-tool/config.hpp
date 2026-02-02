@@ -124,6 +124,7 @@ struct config : output_config
     bool   kfd_page_migration_trace    = get_env("ROCPROF_KFD_PAGE_MIGRATION_TRACE", false);
     bool   kfd_page_mapping_trace      = get_env("ROCPROF_KFD_PAGE_MAPPING_TRACE", false);
     bool   kfd_queue_trace             = get_env("ROCPROF_KFD_QUEUE_TRACE", false);
+    bool   kfd_dropped_events_trace    = get_env("ROCPROF_KFD_DROPPED_EVENTS_TRACE", false);
     bool   scratch_memory_trace        = get_env("ROCPROF_SCRATCH_MEMORY_TRACE", false);
     bool   counter_collection          = get_env("ROCPROF_COUNTER_COLLECTION", false);
     bool   hip_runtime_api_trace       = get_env("ROCPROF_HIP_RUNTIME_API_TRACE", false);
@@ -184,7 +185,6 @@ struct config : output_config
     {}
 
     auto get_attach_invariants() const;
-    bool kfd_any_trace() const;
 };
 
 #define CFG_SERIALIZE_MEMBER(VAR)             ar(cereal::make_nvp(#VAR, VAR))
@@ -229,12 +229,6 @@ config::get_attach_invariants() const
 }
 
 inline bool
-config::kfd_any_trace() const
-{
-    return kfd_page_migration_trace || kfd_page_mapping_trace || kfd_queue_trace;
-}
-
-inline bool
 is_attach_invariant(const config& lhs, const config& rhs)
 {
     return lhs.get_attach_invariants() == rhs.get_attach_invariants();
@@ -274,6 +268,7 @@ config::save(ArchiveT& ar) const
     CFG_SERIALIZE_MEMBER(kfd_page_migration_trace);
     CFG_SERIALIZE_MEMBER(kfd_page_mapping_trace);
     CFG_SERIALIZE_MEMBER(kfd_queue_trace);
+    CFG_SERIALIZE_MEMBER(kfd_dropped_events_trace);
     CFG_SERIALIZE_MEMBER(scratch_memory_trace);
     CFG_SERIALIZE_MEMBER(counter_collection);
     CFG_SERIALIZE_MEMBER(hip_runtime_api_trace);
