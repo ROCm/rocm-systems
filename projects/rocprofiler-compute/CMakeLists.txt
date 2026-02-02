@@ -250,6 +250,13 @@ message(STATUS "Pytest CPU threadcount: ${PYTEST_NUMPROCS_ANALYSIS}")
 # add tests
 # ---------------------------
 
+find_package(MPI COMPONENTS CXX)
+if(MPI_CXX_COMPILER)
+    message(STATUS "MPI CXX compiler found: ${MPI_CXX_COMPILER}")
+else()
+    message(FATAL_ERROR "MPI CXX compiler not found. MPI tests will be skipped.")
+endif()
+
 option(
     TEST_FROM_INSTALL
     "Test from install directory rather than from source directory"
@@ -388,13 +395,19 @@ add_test(
         tests/test_profile_general.py ${WORKING_DIR_OPTION}
 )
 
-add_test(
-    NAME test_profile_multi_rank
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest -s -m multi_rank
-        --junitxml=tests/test_profile_multi_rank.xml ${COV_OPTION}
-        tests/test_profile_general.py ${WORKING_DIR_OPTION}
-)
+if(MPI_CXX_COMPILER)
+    add_test(
+        NAME test_profile_multi_rank
+        COMMAND
+            mpirun -n 2 ${PYTHON_TEST_COMMAND} -m pytest -s -m multi_rank
+            --junitxml=tests/test_profile_multi_rank.xml ${COV_OPTION}
+            tests/test_profile_general.py --with-mpi ${WORKING_DIR_OPTION}
+    )
+    set_tests_properties(
+        test_profile_multi_rank
+        PROPERTIES LABELS "profile" RESOURCE_GROUPS gpus:2 TIMEOUT 1800
+    )
+endif()
 
 add_test(
     NAME test_metric_validation
@@ -420,7 +433,6 @@ set_tests_properties(
     test_profile_iteration_multiplexing_1
     test_profile_iteration_multiplexing_2
     test_profile_iteration_multiplexing_stochastic
-    test_profile_multi_rank
     PROPERTIES LABELS "profile" RESOURCE_GROUPS gpus:1 TIMEOUT 1800
 )
 
