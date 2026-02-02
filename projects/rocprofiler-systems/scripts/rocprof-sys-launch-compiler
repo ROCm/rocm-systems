@@ -102,7 +102,21 @@ if [ "$(basename ${1})" = "cmake" ] && [ "${2}" = "-E" ] && [ "${3}" = "__run_co
     fi
 fi
 
-if [[ "${CXX_COMPILER}" != "${1}" ]]; then
+# Handle ccache wrapper (the actual compiler is the next argument after ccache)
+CCACHE_PREFIX=""
+ACTUAL_COMPILER="${1}"
+if [ "$(basename ${1})" = "ccache" ]; then
+    if [ -z "${2:-}" ]; then
+        echo -e "\nError: ${BASH_SOURCE[0]} detected 'ccache' as a compiler wrapper," >&2
+        echo "but no underlying compiler was specified as the next argument." >&2
+        echo "Usage: ccache <actual-compiler> [args...]" >&2
+        exit 1
+    fi
+    CCACHE_PREFIX="${1}"
+    ACTUAL_COMPILER="${2}"
+fi
+
+if [[ "${CXX_COMPILER}" != "${ACTUAL_COMPILER}" ]]; then
     debug-message $@
     # the command does not depend on rocprofiler-systems so just execute the command w/o re-directing to ${ROCPROFSYS_COMPILER}
     eval $@
@@ -111,6 +125,11 @@ else
     if [ ! -f "${ROCPROFSYS_COMPILER}" ]; then
         echo -e "\nError: the compiler redirect for rocprofiler-systems was not found at ${ROCPROFSYS_COMPILER}\n"
         exit 1
+    fi
+
+    # discard ccache if present
+    if [ -n "${CCACHE_PREFIX}" ]; then
+        shift
     fi
 
     # discard the compiler from the command
@@ -123,7 +142,12 @@ else
         export LIBRARY_PATH=${LLVM_LIB_DIR}:${LIBRARY_PATH}
     fi
 
-    debug-message ${ROCPROFSYS_COMPILER} $@
-    # execute ${ROCPROFSYS_COMPILER} (again, usually nvcc_wrapper)
-    ${ROCPROFSYS_COMPILER} $@
+    # Use ccache with the rocprofiler-systems compiler if ccache was originally requested
+    if [ -n "${CCACHE_PREFIX}" ]; then
+        debug-message ${CCACHE_PREFIX} ${ROCPROFSYS_COMPILER} $@
+        ${CCACHE_PREFIX} ${ROCPROFSYS_COMPILER} $@
+    else
+        debug-message ${ROCPROFSYS_COMPILER} $@
+        ${ROCPROFSYS_COMPILER} $@
+    fi
 fi

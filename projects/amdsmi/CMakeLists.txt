@@ -149,11 +149,16 @@ pkg_check_modules(DRM REQUIRED IMPORTED_TARGET libdrm)
 pkg_check_modules(DRM_AMDGPU REQUIRED IMPORTED_TARGET libdrm_amdgpu)
 
 # Configuration
-function(get_imported_soname target out_var)
-    get_target_property(link_libs ${target} INTERFACE_LINK_LIBRARIES)
-    set(result)
+function(get_imported_target_info target out_soname out_include_dirs)
+    # Resolve include directories.
+    get_target_property(include_dirs "${target}" INTERFACE_INCLUDE_DIRECTORIES)
+    set("${out_include_dirs}" "${include_dirs}" PARENT_SCOPE)
+
+    # Resolve the soname of the link library so that it can be opened with dlopen.
+    get_target_property(link_libs "${target}" INTERFACE_LINK_LIBRARIES)
+    set(soname)
     foreach(link_lib ${link_libs})
-        if(result)
+        if(soname)
             message(FATAL_ERROR "Target ${target} has multiple link libraries: ${link_libs}")
         endif()
         execute_process(
@@ -169,18 +174,18 @@ function(get_imported_soname target out_var)
             else()
                 message(FATAL_ERROR "Could not find SONAME in objdump output for ${link_lib}")
             endif()
-            set(result "${SONAME_OF_MY_PKG}")
+            set(soname "${SONAME_OF_MY_PKG}")
         else()
             message(FATAL_ERROR "objdump failed for ${link_lib}")
         endif()
     endforeach()
-    if(NOT result)
+    if(NOT soname)
         message(FATAL_ERROR "Could not find SONAME for target ${target} libs: ${link_libs}")
     endif()
-    set("${out_var}" "${result}" PARENT_SCOPE)
+    set("${out_soname}" "${soname}" PARENT_SCOPE)
 endfunction()
 
-get_imported_soname(PkgConfig::DRM_AMDGPU LIBDRM_AMDGPU_SONAME)
+get_imported_target_info(PkgConfig::DRM_AMDGPU LIBDRM_AMDGPU_SONAME LIBDRM_AMDGPU_INCLUDES)
 configure_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/include/config/amd_smi_config.h.in"
     "${CMAKE_CURRENT_BINARY_DIR}/include/config/amd_smi_config.h"
@@ -261,6 +266,7 @@ include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/shared_mutex
     ${CMAKE_CURRENT_SOURCE_DIR}/include/amd_smi
     ${ESMI_INC_DIR}
+    ${LIBDRM_AMDGPU_INCLUDES}
 )
 
 set(CMN_SRC_LIST

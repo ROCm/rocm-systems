@@ -73,7 +73,7 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
   hsa_status_t Inactivate() override;
 
   /// @brief Change the scheduling priority of the queue
-  hsa_status_t SetPriority(HSA_QUEUE_PRIORITY priority) override;
+  hsa_status_t SetPriority(HSA::hsa_amd_queue_priority_internal_t priority) override;
 
   /// @brief Destroy ref counted queue
   void Destroy() override;
@@ -306,7 +306,7 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
   // GPU-visible indirect buffer holding PM4 commands.
   void* pm4_ib_buf_;
   uint32_t pm4_ib_size_b_;
-  KernelMutex pm4_ib_mutex_;
+  std::mutex pm4_ib_mutex_;
 
   // Error handler control variable.
   std::atomic<uint32_t> dynamicScratchState, exceptionState;
@@ -316,17 +316,17 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
   bool suspended_;
 
   // Thunk dispatch and wavefront scheduling priority
-  HSA_QUEUE_PRIORITY priority_;
+  HSA::hsa_amd_queue_priority_internal_t priority_;
 
   // Exception notification signal
   Signal* exception_signal_;
 
   // CU mask lock
-  KernelMutex mask_lock_;
+  std::mutex mask_lock_;
 
   // Mutex to prevent AsyncReclaimScratch and HandleInsufficientScratch from
   // happening at the same time.
-  KernelMutex scratch_lock_;
+  std::mutex scratch_lock_;
 
   // Current CU mask
   std::vector<uint32_t> cu_mask_;
@@ -345,10 +345,10 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
   }
 
   // Mutex for queue_event_ manipulation
-KernelMutex& queue_lock() {
+std::mutex& queue_lock() {
   // This allocation is meant to last until the last thread has exited.
   // It is intentionally not freed.
-  static KernelMutex* queue_lock_ = new KernelMutex();
+  static std::mutex* queue_lock_ = new std::mutex();
   return *queue_lock_;
 }
 

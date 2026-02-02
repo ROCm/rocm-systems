@@ -23,7 +23,6 @@
 #include "library/runtime.hpp"
 #include "api.hpp"
 #include "core/config.hpp"
-#include "core/debug.hpp"
 #include "core/defines.hpp"
 #include "core/utility.hpp"
 #include "library/thread_data.hpp"
@@ -42,6 +41,8 @@
 #include <timemory/utility/argparse.hpp>
 #include <timemory/utility/declaration.hpp>
 #include <timemory/utility/signals.hpp>
+
+#include "logger/debug.hpp"
 
 #include <array>
 #include <csignal>
@@ -192,12 +193,12 @@ setup_gotchas()
     if(_initialized) return;
     _initialized = true;
 
-    ROCPROFSYS_BASIC_DEBUG(
-        "Configuring gotcha wrapper around fork, MPI_Init, and MPI_Init_thread\n");
+    LOG_DEBUG("Configuring gotcha wrapper around fork, MPI_Init, and MPI_Init_thread");
 
     component::mpi_gotcha::configure();
     component::exit_gotcha::configure();
     component::fork_gotcha::configure();
+    component::kill_gotcha::configure();
 }
 }  // namespace
 
@@ -208,7 +209,7 @@ get_main_bundle()
         auto _self = RUSAGE_SELF;
         std::swap(_self, tim::get_rusage_type());
         auto _tmp = std::make_unique<main_bundle_t>(
-            JOIN('/', "rocprofsys/process", process::get_id()),
+            fmt::format("rocprofsys/process/{}", process::get_id()),
             quirk::config<quirk::auto_start>{});
         std::swap(_self, tim::get_rusage_type());
         return _tmp;
@@ -220,7 +221,7 @@ std::unique_ptr<init_bundle_t>&
 get_init_bundle()
 {
     static auto _v = std::make_unique<init_bundle_t>(
-        JOIN('/', "rocprofsys/process", process::get_id()));
+        fmt::format("rocprofsys/process/{}", process::get_id()));
     return _v;
 }
 
@@ -229,7 +230,7 @@ get_preinit_bundle()
 {
     static auto _v =
         (setup_gotchas(), std::make_unique<preinit_bundle_t>(
-                              JOIN('/', "rocprofsys/process", process::get_id()),
+                              fmt::format("rocprofsys/process/{}", process::get_id()),
                               quirk::config<quirk::auto_start>{}));
     return _v;
 }

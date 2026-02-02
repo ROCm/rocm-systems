@@ -30,6 +30,12 @@
   #define ncclFloat8e5m2 ncclFp8E5M2
 #endif
 
+// Forward compatibility for AlltoAll API changes in 2.28.3
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,3)
+  #define ncclAllToAll ncclAlltoAll
+  #define ncclAllToAllv ncclAlltoAllv
+#endif
+
 // For nccl.h < 2.13 since we define a weak fallback
 extern "C" char const* ncclGetLastError(ncclComm_t comm);
 

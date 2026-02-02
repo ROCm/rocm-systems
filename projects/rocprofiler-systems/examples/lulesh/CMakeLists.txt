@@ -1,3 +1,6 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
+
 cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
 
 project(rocprofiler-systems-lulesh-example LANGUAGES C CXX)
@@ -82,16 +85,11 @@ rocprofiler_systems_causal_example_executable(
     INCLUDE_DIRECTORIES ${PROJECT_SOURCE_DIR}/includes
 )
 
-if(ROCPROFSYS_INSTALL_EXAMPLES)
-    if(LULESH_BUILD_KOKKOS)
-        install(
-            TARGETS kokkoscore kokkoscontainers
-            DESTINATION ${CMAKE_INSTALL_LIBDIR}
+if(ROCPROFSYS_INSTALL_EXAMPLES AND LULESH_BUILD_KOKKOS)
+    install(
+        TARGETS kokkoscore kokkoscontainers kokkossimd
+        LIBRARY
+            DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples/lib
             COMPONENT rocprofiler-systems-examples
-        )
-        set_target_properties(
-            lulesh
-            PROPERTIES INSTALL_RPATH "\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}"
-        )
-    endif()
+    )
 endif()

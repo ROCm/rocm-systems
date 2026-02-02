@@ -39,6 +39,10 @@ static __global__ void grid_group_thread_rank_getter(unsigned int* thread_ranks)
   thread_ranks[thread_rank_in_grid()] = cg::this_grid().thread_rank();
 }
 
+static __global__ void grid_group_block_rank_getter(unsigned int* block_ranks) {
+  block_ranks[thread_rank_in_grid()] = cg::this_grid().block_rank();
+}
+
 static __global__ void grid_group_is_valid_getter(unsigned int* is_valid_flags) {
   is_valid_flags[thread_rank_in_grid()] = cg::this_grid().is_valid();
 }
@@ -160,9 +164,18 @@ TEST_CASE("Unit_Grid_Group_Getters_Positive_Basic") {
   HIP_CHECK(hipMemcpy(uint_arr.ptr(), uint_arr_dev.ptr(),
                       grid.thread_count_ * sizeof(*uint_arr.ptr()), hipMemcpyDeviceToHost));
   HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipLaunchCooperativeKernel(grid_group_block_rank_getter, blocks, threads, params, 0, 0));
 
   // Verify grid_group.is_valid() values
   ArrayAllOf(uint_arr.ptr(), grid.thread_count_, [](uint32_t) { return 1; });
+
+  HIP_CHECK(hipMemcpy(uint_arr.ptr(), uint_arr_dev.ptr(),
+                      grid.thread_count_ * sizeof(*uint_arr.ptr()), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipDeviceSynchronize());
+
+  // Verify grid_group.block_rank() values
+  ArrayAllOf(uint_arr.ptr(), grid.thread_count_, [threads](uint32_t i) {
+    return i/(threads.x * threads.y * threads.z); });
 }
 
 /**
@@ -260,12 +273,8 @@ TEST_CASE("Unit_Grid_Group_Sync_Positive_Basic") {
   }
 
   auto loops = GENERATE(2, 4, 8, 16);
-  // Launch params for this test are hardcoded as a workaround for an issue reported
-  // SWDEV-429791. When fixed, please enable calls to GenerateBlock/ThreadDimensions()
-  const auto blocks =
-      GENERATE_COPY(dim3(5, 5, 5), dim3(330, 1, 1), dim3(1, 330, 1), dim3(1, 1, 330));
-  const auto threads =
-      GENERATE_COPY(dim3(16, 8, 8), dim3(32, 32, 1), dim3(64, 8, 2), dim3(16, 16, 3));
+  const auto blocks = GenerateBlockDimensions();
+  const auto threads = GenerateThreadDimensions();
   if (!CheckDimensions(device, sync_kernel, blocks, threads)) return;
   INFO("Grid dimensions: x " << blocks.x << ", y " << blocks.y << ", z " << blocks.z);
   INFO("Block dimensions: x " << threads.x << ", y " << threads.y << ", z " << threads.z);

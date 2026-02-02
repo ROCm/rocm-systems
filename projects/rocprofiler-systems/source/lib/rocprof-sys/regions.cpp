@@ -124,6 +124,12 @@ rocprofsys_pop_trace_hidden(const char* name)
     rocprofsys::component::category_region<rocprofsys::category::host>::stop(name);
 }
 
+extern "C" void
+rocprofsys_flush_pending_region_cache_hidden()
+{
+    flush_pending_cached_entries();
+}
+
 //======================================================================================//
 ///
 ///

@@ -39,14 +39,15 @@ jobs:
     env:
       VENV_DIR: ${{ github.workspace }}/.venv
       ARTIFACT_RUN_ID: "${{ inputs.artifact_run_id }}"
-      OUTPUT_ARTIFACTS_DIR: /home/arravikum/dist_new/dist/rocm
+      OUTPUT_ARTIFACTS_DIR: /apps/cvs_tests/dist_new/dist/rocm
       THEROCK_BIN_DIR: "./build/bin"
+      AWS_SHARED_CREDENTIALS_FILE: /apps/cvs_tests/awsconfig/credentials.ini
     steps:
       - name: Checkout Repository
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: "ROCm/TheRock"
-          ref: d76278526218def9fb1b016bc9e421738cb4f8f6 # 2025-12-09 commit
+          ref: ff46daa79b4c826c4f4676893d0d6586de567dfa # 2026-01-12 commit
 
       - name: Run setup test environment workflow
         uses: './.github/actions/setup_test_environment'
@@ -61,20 +62,11 @@ jobs:
 
       # The following step leverages slurm to run multi node rccl tests on the slurm mi350x cluster.
       # salloc will hold 4 nodes while the commands inside the block run. After the block completes, salloc automatically releases the nodes.
+      # sbatch script runs rccl_heatmap_cvs script which validates and generates a bandwidth heatmap file for different rccl collectives
       - name: Test gfx950
         if: ${{ inputs.amdgpu_families == 'gfx950-dcgpu' }}
         run: |
-          salloc -N 4 -p meta64 -t 04:00:00 --exclusive bash -c "
-          source /home/arravikum/TheRock/.venv/bin/activate &&
-          cd /home/arravikum/cvs &&
-          python input/setup.py &&
-          pytest -vvv -s ./tests/rccl/rccl_multinode_cvs.py \
-              --cluster_file ./input/cluster.json \
-              --config_file ./input/mi350_config.json \
-              --log-file=/tmp/rccl_log.log \
-              --html=/home/arravikum/cvs/test_reports/ci_test_report.html \
-              --capture=tee-sys \
-              --self-contained-html"
+          SETUP_NODES=1 sbatch --wait -N4 /apps/cvs_tests/cvs-sbatch/sbatch/default.sbatch
 
       - name: Configure AWS Credentials for non-forked repos
         if: ${{ always() && !github.event.pull_request.head.repo.fork }}
@@ -91,6 +83,6 @@ jobs:
           python3 build_tools/github_actions/upload_test_report_script.py \
             --run-id "${{ github.run_id }}" \
             --amdgpu-family "${{ inputs.amdgpu_families }}" \
-            --report-path "/home/arravikum/cvs/test_reports" \
+            --report-path "/apps/cvs_tests/test_reports" \
             --log-destination "/logs/gfx950-dcgpu" \
             --index-file-name "index_rccl_test_report.html"

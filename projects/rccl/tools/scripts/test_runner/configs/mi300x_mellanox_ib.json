@@ -1,0 +1,506 @@
+{
+  "system_configurations": {
+    "name": "RCCL-Tests-MI300X-Mellanox-IB",
+    "description": "Comprehensive RCCL Test Configuration - All Tests"
+  },
+  "paths": {
+    "workdir": "${WORKDIR:-$PWD}",
+    "rocm_path": "${ROCM_PATH:-/opt/rocm}",
+    "mpi_path": "${MPI_PATH:-/opt/ompi}"
+  },
+  "env_variables": {
+    "HSA_NO_SCRATCH_RECLAIM": "1",
+    "NCCL_SOCKET_IFNAME": "eth0,eth1",
+    "NCCL_DEBUG": "INFO"
+  },
+  "build_configuration": {
+    "cmake_options": {
+      "CMAKE_BUILD_TYPE": "Debug",
+      "ENABLE_CODE_COVERAGE": "ON",
+      "BUILD_TESTS": "ON",
+      "BUILD_LOCAL_GPU_TARGET_ONLY": "ON",
+      "TRACE": "ON",
+      "COLLTRACE": "ON"
+    },
+    "env_variables": {
+      "HIPCC_COMPILE_FLAGS_APPEND": "-g -Wno-format-nonliteral -Xarch_host -fprofile-instr-generate -Xarch_host -fcoverage-mapping -parallel-jobs=16"
+    },
+    "parallel_jobs": 64,
+    "generator": "Unix Makefiles"
+  },
+  "test_configurations": {
+    "default": {
+      "env_variables": {
+        "NCCL_LAUNCH_MODE": "GROUP"
+      }
+    },
+    "shm_comprehensive": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 1,
+      "num_gpus": 2,
+      "timeout": 120,
+      "env_variables": {
+        "NCCL_SHM_DISABLE": "0",
+        "NCCL_SHM_USE_CUDA_MEMCPY": "1"
+      },
+      "tests": [
+        {
+          "name": "SHM_ComprehensiveWorkflow",
+          "description": "Comprehensive workflow test for shared memory transport",
+          "test_filter": "ShmMPITest.ShmWorkflow"
+        },
+        {
+          "name": "SHM_CEMemcpy_SendSide",
+          "description": "Shared memory test with compute engine memcpy on send side",
+          "test_filter": "ShmMPITest.ShmWithMemcpyTest",
+          "timeout": 180,
+          "env_variables": {
+            "NCCL_SHM_MEMCPY_MODE": "1",
+            "NCCL_SHM_LOCALITY": "1"
+          }
+        },
+        {
+          "name": "SHM_CEMemcpy_RecvSide",
+          "description": "Shared memory test with compute engine memcpy on receive side",
+          "test_filter": "ShmMPITest.ShmWithMemcpyTest",
+          "env_variables": {
+            "NCCL_SHM_MEMCPY_MODE": "2",
+            "NCCL_SHM_LOCALITY": "2"
+          }
+        },
+        {
+          "name": "SHM_CEMemcpy_BothSides",
+          "description": "Shared memory test with compute engine memcpy on both send and receive sides using simple protocol",
+          "test_filter": "ShmMPITest.ShmWithMemcpyTest",
+          "env_variables": {
+            "NCCL_PROTO": "SIMPLE",
+            "NCCL_SHM_MEMCPY_MODE": "3",
+            "NCCL_SHM_LOCALITY": "1"
+          }
+        },
+        {
+          "name": "SHM_AllTests",
+          "description": "All shared memory transport tests",
+          "test_filter": "ShmMPITest.*"
+        }
+      ]
+    },
+    "p2p_comprehensive": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 1,
+      "num_gpus": 2,
+      "timeout": 120,
+      "env_variables": {
+        "NCCL_P2P_USE_CUDA_MEMCPY": "1",
+        "NCCL_LEGACY_CUDA_REGISTER": "1"
+      },
+      "tests": [
+        {
+          "name": "P2P_Workflow",
+          "description": "Peer-to-peer transport workflow test between two GPUs",
+          "test_filter": "P2pMPITest.P2pWorkflow",
+          "env_variables": {
+            "NCCL_P2P_DISABLE": "0"
+          }
+        },
+        {
+          "name": "P2P_WithMemcpy",
+          "description": "Peer-to-peer test with CUDA memcpy and legacy buffer registration",
+          "test_filter": "P2pMPITest.P2pWithMemcpyTest"
+        },
+        {
+          "name": "P2P_SendRecvRegistration",
+          "description": "Test peer-to-peer send/receive buffer registration mechanisms",
+          "test_filter": "P2pMPITest.P2pSendRecvRegistrationTest"
+        },
+        {
+          "name": "P2P_IpcReg_VerySmallBuffer",
+          "description": "Test P2P IPC buffer registration with very small buffer sizes and SHM disabled",
+          "test_filter": "P2pMPITest.P2pIpcBufferRegistration_VerySmallBuffer",
+          "env_variables": {
+            "NCCL_SHM_DISABLE": "1",
+            "NCCL_LOCAL_REGISTER": "1"
+          }
+        },
+        {
+          "name": "P2P_AllTests",
+          "description": "All peer-to-peer transport tests",
+          "test_filter": "P2pMPITest.*"
+        }
+      ]
+    },
+    "net_transport_eth_multinode": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 2,
+      "num_gpus": 1,
+      "env_variables": {
+        "NCCL_NET_SHARED_COMMS": "1",
+        "NCCL_NET_SHARED_BUFFERS": "1",
+        "NCCL_IB_DISABLE": "0"
+      },
+      "tests": [
+        {
+          "name": "NET_AllTests_2Nodes_ETH",
+          "description": "All network transport tests over Ethernet across two nodes",
+          "test_filter": "NetTransportMPITest.*",
+          "timeout": 600
+        },
+        {
+          "name": "NET_MultipleBufferSizes_2Nodes",
+          "description": "Network transport test with multiple buffer sizes across two nodes",
+          "test_filter": "NetTransportMPITest.MultipleBufferSizesTest",
+          "timeout": 180
+        },
+        {
+          "name": "NET_NetGraphRegister_2Nodes",
+          "description": "Network transport test with graph buffer registration across two nodes",
+          "test_filter": "NetTransportMPITest.NetGraphRegisterBufferTest",
+          "timeout": 120,
+          "env_variables": {
+            "NCCL_GRAPH_REGISTER": "1"
+          }
+        }
+      ]
+    },
+    "net_ib_base": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 1,
+      "num_gpus": 2,
+      "env_variables": {
+        "NCCL_DMABUF_ENABLE": "1"
+      }
+    },
+    "net_ib_initialization": {
+      "extends": "net_ib_base",
+      "timeout": 60,
+      "tests": [
+        {
+          "name": "NetIB_Init_Plugin",
+          "description": "Initialize InfiniBand network plugin and verify basic setup",
+          "test_filter": "NetIbMPITest.InitializePlugin"
+        },
+        {
+          "name": "NetIB_Init_GetDeviceCount",
+          "description": "Query and validate InfiniBand device count",
+          "test_filter": "NetIbMPITest.GetDeviceCount"
+        }
+      ]
+    },
+    "net_ib_properties": {
+      "extends": "net_ib_base",
+      "timeout": 60,
+      "tests": [
+        {
+          "name": "NetIB_Props_GetProperties",
+          "description": "Query InfiniBand device properties and capabilities",
+          "test_filter": "NetIbMPITest.GetDeviceProperties"
+        },
+        {
+          "name": "NetIB_Props_InvalidDevice",
+          "description": "Test error handling when querying properties of invalid InfiniBand device",
+          "test_filter": "NetIbMPITest.GetDevicePropertiesInvalidDevice"
+        }
+      ]
+    },
+    "net_ib_memory": {
+      "extends": "net_ib_base",
+      "timeout": 120,
+      "tests": [
+        {
+          "name": "NetIB_Mem_RegisterHost",
+          "description": "Test InfiniBand registration of host memory buffers",
+          "test_filter": "NetIbMPITest.RegisterHostMemory"
+        },
+        {
+          "name": "NetIB_Mem_RegisterGpu",
+          "description": "Test InfiniBand registration of GPU device memory buffers",
+          "test_filter": "NetIbMPITest.RegisterGpuMemory"
+        }
+      ]
+    },
+    "net_ib_transfer": {
+      "extends": "net_ib_base",
+      "env_variables": {
+        "NCCL_DEBUG": "TRACE",
+        "NCCL_DEBUG_SUBSYS": "NET,INIT"
+      },
+      "tests": [
+        {
+          "name": "NetIB_Xfer_SimpleSendRecv",
+          "description": "Basic InfiniBand send/receive data transfer test",
+          "test_filter": "NetIbMPITest.SimpleSendRecv",
+          "timeout": 180,
+          "env_variables": {
+            "RCCL_MPI_LOG_ALL_RANKS": "1"
+          }
+        },
+        {
+          "name": "NetIB_Xfer_MultipleSizes",
+          "description": "InfiniBand data transfer with multiple buffer sizes",
+          "test_filter": "NetIbMPITest.SendRecvMultipleSizes",
+          "timeout": 300
+        },
+        {
+          "name": "NetIB_Stress_LargeTransfer",
+          "description": "Stress test for large data transfers over InfiniBand",
+          "test_filter": "NetIbMPITest.LargeTransfer",
+          "timeout": 300
+        }
+      ]
+    },
+    "unit_tests_fixtures": {
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsFixtures",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 8,
+      "timeout": 0,
+      "tests": [
+        {
+          "name": "NetIb_Debug",
+          "description": "InfiniBand unit tests with debug output using test fixtures",
+          "test_filter": "NetIbTests.*",
+          "env_variables": {
+            "NCCL_SOCKET_IFNAME": "eth1"
+          }
+        },
+        {
+          "name": "Rcclwrap_All",
+          "description": "RCCL wrapper API unit tests with trace-level debugging",
+          "test_filter": "Rcclwrap.*",
+          "env_variables": {
+            "NCCL_DEBUG": "TRACE"
+	  }
+        },
+        {
+          "name": "Fixtures_All",
+          "description": "All Fixtures tests",
+          "env_variables": {
+            "NCCL_DEBUG": "TRACE"
+          }
+        }
+      ]
+    },
+    "unit_tests_standard": {
+      "is_gtest": true,
+      "binary": "rccl-UnitTests",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 8,
+      "timeout": 0,
+      "env_variables": {
+        "NCCL_DEBUG": ""
+      },
+      "tests": [
+        {"name": "AllReduce.OutOfPlace", "description": "AllReduce out-of-place", "test_filter": "AllReduce.OutOfPlace"},
+        {"name": "AllReduce.OutOfPlaceGraph", "description": "AllReduce out-of-place graph", "test_filter": "AllReduce.OutOfPlaceGraph"},
+        {"name": "AllReduce.InPlace", "description": "AllReduce in-place", "test_filter": "AllReduce.InPlace"},
+        {"name": "AllReduce.InPlaceGraph", "description": "AllReduce in-place graph", "test_filter": "AllReduce.InPlaceGraph"},
+        {"name": "AllReduce.ManagedMem", "description": "AllReduce managed memory", "test_filter": "AllReduce.ManagedMem"},
+        {"name": "AllReduce.Channels", "description": "AllReduce channels", "test_filter": "AllReduce.Channels"},
+        {"name": "AllReduce.ManagedMemGraph", "description": "AllReduce managed memory graph", "test_filter": "AllReduce.ManagedMemGraph"},
+        {"name": "AllReduce.PreMultScalar", "description": "AllReduce pre-mult scalar", "test_filter": "AllReduce.PreMultScalar"},
+        {"name": "AllReduce.UserBufferRegistration", "description": "AllReduce user buffer registration", "test_filter": "AllReduce.UserBufferRegistration"},
+        {"name": "AllReduce.ManagedMemUserBufferRegistration", "description": "AllReduce managed mem user buffer", "test_filter": "AllReduce.ManagedMemUserBufferRegistration"},
+        {"name": "AllGather.OutOfPlace", "description": "AllGather out-of-place", "test_filter": "AllGather.OutOfPlace"},
+        {"name": "AllGather.OutOfPlaceGraph", "description": "AllGather out-of-place graph", "test_filter": "AllGather.OutOfPlaceGraph"},
+        {"name": "AllGather.InPlace", "description": "AllGather in-place", "test_filter": "AllGather.InPlace"},
+        {"name": "AllGather.InPlaceGraph", "description": "AllGather in-place graph", "test_filter": "AllGather.InPlaceGraph"},
+        {"name": "AllGather.ManagedMem", "description": "AllGather managed memory", "test_filter": "AllGather.ManagedMem"},
+        {"name": "AllGather.ManagedMemGraph", "description": "AllGather managed memory graph", "test_filter": "AllGather.ManagedMemGraph"},
+        {"name": "AllGather.UserBufferRegistration", "description": "AllGather user buffer registration", "test_filter": "AllGather.UserBufferRegistration"},
+        {"name": "AllGather.ManagedMemUserBufferRegistration", "description": "AllGather managed mem user buffer", "test_filter": "AllGather.ManagedMemUserBufferRegistration"},
+        {"name": "AllToAll.OutOfPlace", "description": "AllToAll out-of-place", "test_filter": "AllToAll.OutOfPlace"},
+        {"name": "AllToAll.OutOfPlaceGraph", "description": "AllToAll out-of-place graph", "test_filter": "AllToAll.OutOfPlaceGraph"},
+        {"name": "AllToAll.ManagedMem", "description": "AllToAll managed memory", "test_filter": "AllToAll.ManagedMem"},
+        {"name": "AllToAll.ManagedMemGraph", "description": "AllToAll managed memory graph", "test_filter": "AllToAll.ManagedMemGraph"},
+        {"name": "AllToAllv.OutOfPlace", "description": "AllToAllv out-of-place", "test_filter": "AllToAllv.OutOfPlace"},
+        {"name": "AllToAllv.OutOfPlaceGraph", "description": "AllToAllv out-of-place graph", "test_filter": "AllToAllv.OutOfPlaceGraph"},
+        {"name": "Broadcast.OutOfPlace", "description": "Broadcast out-of-place", "test_filter": "Broadcast.OutOfPlace"},
+        {"name": "Broadcast.OutOfPlaceGraph", "description": "Broadcast out-of-place graph", "test_filter": "Broadcast.OutOfPlaceGraph"},
+        {"name": "Broadcast.InPlace", "description": "Broadcast in-place", "test_filter": "Broadcast.InPlace"},
+        {"name": "Broadcast.InPlaceGraph", "description": "Broadcast in-place graph", "test_filter": "Broadcast.InPlaceGraph"},
+        {"name": "Broadcast.ManagedMem", "description": "Broadcast managed memory", "test_filter": "Broadcast.ManagedMem"},
+        {"name": "Broadcast.ManagedMemGraph", "description": "Broadcast managed memory graph", "test_filter": "Broadcast.ManagedMemGraph"},
+        {"name": "Gather.OutOfPlace", "description": "Gather out-of-place", "test_filter": "Gather.OutOfPlace"},
+        {"name": "Gather.OutOfPlaceGraph", "description": "Gather out-of-place graph", "test_filter": "Gather.OutOfPlaceGraph"},
+        {"name": "Gather.InPlace", "description": "Gather in-place", "test_filter": "Gather.InPlace"},
+        {"name": "Gather.InPlaceGraph", "description": "Gather in-place graph", "test_filter": "Gather.InPlaceGraph"},
+        {"name": "Gather.ManagedMem", "description": "Gather managed memory", "test_filter": "Gather.ManagedMem"},
+        {"name": "Gather.ManagedMemGraph", "description": "Gather managed memory graph", "test_filter": "Gather.ManagedMemGraph"},
+        {"name": "Scatter.OutOfPlace", "description": "Scatter out-of-place", "test_filter": "Scatter.OutOfPlace"},
+        {"name": "Scatter.OutOfPlaceGraph", "description": "Scatter out-of-place graph", "test_filter": "Scatter.OutOfPlaceGraph"},
+        {"name": "Scatter.InPlace", "description": "Scatter in-place", "test_filter": "Scatter.InPlace"},
+        {"name": "Scatter.InPlaceGraph", "description": "Scatter in-place graph", "test_filter": "Scatter.InPlaceGraph"},
+        {"name": "Scatter.ManagedMem", "description": "Scatter managed memory", "test_filter": "Scatter.ManagedMem"},
+        {"name": "Scatter.ManagedMemGraph", "description": "Scatter managed memory graph", "test_filter": "Scatter.ManagedMemGraph"},
+        {"name": "Reduce.OutOfPlace", "description": "Reduce out-of-place", "test_filter": "Reduce.OutOfPlace"},
+        {"name": "Reduce.OutOfPlaceGraph", "description": "Reduce out-of-place graph", "test_filter": "Reduce.OutOfPlaceGraph"},
+        {"name": "Reduce.InPlace", "description": "Reduce in-place", "test_filter": "Reduce.InPlace"},
+        {"name": "Reduce.InPlaceGraph", "description": "Reduce in-place graph", "test_filter": "Reduce.InPlaceGraph"},
+        {"name": "Reduce.ManagedMem", "description": "Reduce managed memory", "test_filter": "Reduce.ManagedMem"},
+        {"name": "Reduce.ManagedMemGraph", "description": "Reduce managed memory graph", "test_filter": "Reduce.ManagedMemGraph"},
+        {"name": "ReduceScatter.OutOfPlace", "description": "ReduceScatter out-of-place", "test_filter": "ReduceScatter.OutOfPlace"},
+        {"name": "ReduceScatter.OutOfPlaceGraph", "description": "ReduceScatter out-of-place graph", "test_filter": "ReduceScatter.OutOfPlaceGraph"},
+        {"name": "ReduceScatter.InPlace", "description": "ReduceScatter in-place", "test_filter": "ReduceScatter.InPlace"},
+        {"name": "ReduceScatter.InPlaceGraph", "description": "ReduceScatter in-place graph", "test_filter": "ReduceScatter.InPlaceGraph"},
+        {"name": "ReduceScatter.ManagedMem", "description": "ReduceScatter managed memory", "test_filter": "ReduceScatter.ManagedMem"},
+        {"name": "ReduceScatter.ManagedMemGraph", "description": "ReduceScatter managed memory graph", "test_filter": "ReduceScatter.ManagedMemGraph"},
+        {"name": "SendRecv.SinglePairs", "description": "SendRecv single pairs", "test_filter": "SendRecv.SinglePairs"},
+        {"name": "SendRecv.UserBufferRegister", "description": "SendRecv user buffer register", "test_filter": "SendRecv.UserBufferRegister"},
+        {"name": "GroupCall.Identical", "description": "GroupCall identical", "test_filter": "GroupCall.Identical"},
+        {"name": "GroupCall.Different", "description": "GroupCall different", "test_filter": "GroupCall.Different"},
+        {"name": "GroupCall.Multistream", "description": "GroupCall multistream", "test_filter": "GroupCall.Multistream"},
+        {"name": "GroupCall.MixedDataType", "description": "GroupCall mixed data type", "test_filter": "GroupCall.MixedDataType"},
+        {"name": "GroupCall.MultiGroupCall", "description": "GroupCall multi group call", "test_filter": "GroupCall.MultiGroupCall"},
+        {"name": "NonBlocking.SingleCalls", "description": "NonBlocking single calls", "test_filter": "NonBlocking.SingleCalls"},
+        {"name": "CommTests.Sorter", "description": "CommTests sorter", "test_filter": "CommTests.Sorter"},
+        {"name": "Enqueue", "description": "Enqueue operation tests", "test_filter": "Enqueue.*"},
+        {"name": "Alloc", "description": "Memory allocation tests", "test_filter": "Alloc.*"},
+        {"name": "ParamTests", "description": "Parameter handling tests", "test_filter": "ParamTests.*"},
+        {"name": "ProxyTests", "description": "Proxy service tests", "test_filter": "ProxyTests.*"},
+        {"name": "Rcclwrap", "description": "RCCL wrapper tests", "test_filter": "Rcclwrap.*"},
+        {"name": "TransportTest", "description": "Transport layer tests", "test_filter": "TransportTest.*"},
+        {"name": "ArgCheck", "description": "Argument validation tests", "test_filter": "ArgCheck.*"},
+        {"name": "BitOps", "description": "Bit operation utility tests", "test_filter": "ALIGN_*:DIVUP:ROUNDUP:u32fp*:*Hash"},
+        {"name": "AltRsmi", "description": "Alternative RSMI tests", "test_filter": "AltRsmi.*"},
+        {"name": "NetSocket", "description": "Network socket tests", "test_filter": "NetSocket.*"},
+        {"name": "Ipcsocket", "description": "IPC socket tests", "test_filter": "Ipcsocket.*"},
+        {"name": "Standalone.SplitComms_RankCheck", "description": "Verify device assignment for each rank using ncclCommSplit API", "test_filter": "Standalone.SplitComms_RankCheck"},
+        {"name": "Standalone.SplitComms_OneColor", "description": "Creates communicator for each device with same color", "test_filter": "Standalone.SplitComms_OneColor"},
+        {"name": "Standalone.SplitComms_Reduce", "description": "Reduces communicators into fewer ranks", "test_filter": "Standalone.SplitComms_Reduce"},
+        {"name": "Standalone.RegressionTiming", "description": "Verify no timing regression for protocols (LL, LL128, Simple)", "test_filter": "Standalone.RegressionTiming"},
+        {"name": "Standalone.StackSize", "description": "Verify RCCL kernel stack size for each gfx architecture", "test_filter": "Standalone.StackSize"},
+        {"name": "Standalone.CommCuDevice_Check", "description": "Verify device associated with communicator in single/multi-device scenarios", "test_filter": "Standalone.CommCuDevice_Check"},
+        {"name": "Standalone.SplitComms_RankCheck_Basic_Failure", "description": "Verify ncclCommUserRank fails with invalid communicator handle", "test_filter": "Standalone.SplitComms_RankCheck_Basic_Failure"}
+      ]
+    },
+    "debug_tests": {
+      "is_gtest": true,
+      "binary": "rccl-UnitTests",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 8,
+      "timeout": 0,
+      "env_variables": {
+        "NCCL_DEBUG": "VERSION",
+        "NCCL_DEBUG_SUBSYS": "ALL"
+      },
+      "tests": [
+        {
+          "name": "Debug_ThreadName",
+          "description": "Test thread naming functionality with AllToAll operation",
+          "test_filter": "AllToAll.OutOfPlaceGraph*",
+          "env_variables": {
+            "NCCL_SET_THREAD_NAME": "1"
+          }
+        },
+        {
+          "name": "Debug_AllSubsystems",
+          "description": "Test debug logging for all RCCL subsystems with trace-level output",
+          "test_filter": "AllToAll.OutOfPlaceGraph*",
+          "env_variables": {
+            "NCCL_DEBUG": "TRACE",
+            "NCCL_DEBUG_FILE": "cdcvg.dbg",
+            "NCCL_DEBUG_SUBSYS": "INIT,COLL,P2P,SHM,NET,GRAPH,TUNING,ENV,ALLOC,CALL,PROXY,NVLS,BOOTSTRAP,REG,PROFILE,RAS,VERBS"
+          }
+        }
+      ]
+    },
+    "alt_rsmi_tests": {
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsFixtures",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 120,
+      "tests": [
+        {
+          "name": "AltRsmi_AllTests",
+          "description": "All Alternative RSMI implementation tests using public API only",
+          "test_filter": "AltRsmiTest.*"
+        }
+      ]
+    }
+  },
+  "test_suites": [
+    {
+      "name": "SHM Tests - Complete Suite",
+      "description": "All shared memory transport tests (single node)",
+      "config": "shm_comprehensive",
+      "enabled": true
+    },
+    {
+      "name": "P2P Tests - Complete Suite",
+      "description": "All peer-to-peer transport tests (single node)",
+      "config": "p2p_comprehensive",
+      "enabled": true
+    },
+    {
+      "name": "NET Transport - Ethernet (Multi-Node)",
+      "description": "Network transport tests over Ethernet",
+      "config": "net_transport_eth_multinode",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Initialization Tests",
+      "description": "InfiniBand plugin initialization and device enumeration",
+      "config": "net_ib_initialization",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Device Properties",
+      "description": "InfiniBand device property queries",
+      "config": "net_ib_properties",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Memory Registration",
+      "description": "InfiniBand memory registration tests",
+      "config": "net_ib_memory",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Data Transfer",
+      "description": "InfiniBand data transfer and stress tests",
+      "config": "net_ib_transfer",
+      "enabled": true
+    },
+    {
+      "name": "Unit Tests - Fixtures",
+      "description": "Non-MPI unit tests using fixtures",
+      "config": "unit_tests_fixtures",
+      "enabled": true
+    },
+    {
+      "name": "Unit Tests - Standard Collectives",
+      "description": "Basic collective operation tests",
+      "config": "unit_tests_standard",
+      "enabled": true
+    },
+    {
+      "name": "Debug and Logging Tests",
+      "description": "Tests for debug output and logging functionality",
+      "config": "debug_tests",
+      "enabled": true
+    },
+    {
+      "name": "AltRsmi Tests - Complete Suite",
+      "description": "All Alternative RSMI tests using public API only",
+      "config": "alt_rsmi_tests",
+      "enabled": true
+    }
+  ]
+}

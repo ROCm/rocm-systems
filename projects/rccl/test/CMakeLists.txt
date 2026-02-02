@@ -153,6 +153,7 @@ if(BUILD_TESTS)
     NonBlockingTests.cpp
     ReduceScatterTests.cpp
     ReduceTests.cpp
+    RegisterTests.cpp
     ScatterTests.cpp
     SendRecvTests.cpp
     StandaloneTests.cpp
@@ -163,6 +164,7 @@ if(BUILD_TESTS)
     common/EnvVars.cpp
     common/PrepDataFuncs.cpp
     common/PtrUnion.cpp
+    common/ProcessIsolatedTestRunner.cpp
     common/TestBed.cpp
     common/TestBedChild.cpp
     common/StandaloneUtils.cpp
@@ -236,6 +238,25 @@ if(BUILD_TESTS)
       list(APPEND RCCL_TEST_EXECUTABLES rccl-UnitTestsMPI)
 
     endif()
+
+    # rccl-UnitTestsAltRsmi: Uses TEST BUILD alt_rsmi.cc (ARSMI_TEST_BUILD)
+    # This separate executable compiles alt_rsmi.cc with ARSMI_TEST_BUILD,
+    # enabling external linkage of internal variables so that
+    # tests can access and manipulate them for testing.
+    list(APPEND RCCL_TEST_EXECUTABLES rccl-UnitTestsAltRsmi)
+
+    set(TEST_ALTRSMI_SOURCE_FILES
+      AltRsmiTests.cpp
+      ../src/misc/alt_rsmi.cc
+      common/main_fixtures.cpp
+      common/EnvVars.cpp
+      common/ProcessIsolatedTestRunner.cpp
+    )
+
+    add_executable(rccl-UnitTestsAltRsmi ${TEST_ALTRSMI_SOURCE_FILES})
+
+    # Define ARSMI_TEST_BUILD specifically for rccl-UnitTestsAltRsmi
+    target_compile_definitions(rccl-UnitTestsAltRsmi PRIVATE ARSMI_TEST_BUILD)
   endif()
 
   foreach(test_executable IN LISTS RCCL_TEST_EXECUTABLES)

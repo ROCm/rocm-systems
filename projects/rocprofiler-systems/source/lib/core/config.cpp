@@ -25,7 +25,6 @@
 #include "common/defines.h"
 #include "common/static_object.hpp"
 #include "constraint.hpp"
-#include "debug.hpp"
 #include "defines.hpp"
 #include "gpu.hpp"
 #include "mproc.hpp"
@@ -52,9 +51,12 @@
 #include <timemory/utility/declaration.hpp>
 #include <timemory/utility/delimit.hpp>
 #include <timemory/utility/filepath.hpp>
-#include <timemory/utility/join.hpp>
 #include <timemory/utility/signals.hpp>
 #include <timemory/utility/types.hpp>
+
+#include "logger/debug.hpp"
+
+#include <spdlog/fmt/ranges.h>
 
 #include <algorithm>
 #include <array>
@@ -143,8 +145,8 @@ using utility::parse_numeric_range;
                                    __VA_ARGS__ });                                       \
         if(!_ret.second)                                                                 \
         {                                                                                \
-            ROCPROFSYS_PRINT("Warning! Duplicate setting: %s / %s\n",                    \
-                             get_setting_name(ENV_NAME).c_str(), ENV_NAME);              \
+            LOG_WARNING("Duplicate setting: {} / {}", get_setting_name(ENV_NAME),        \
+                        ENV_NAME);                                                       \
         }                                                                                \
         return _config->find(ENV_NAME)->second;                                          \
     }()
@@ -157,8 +159,8 @@ using utility::parse_numeric_range;
             std::set<std::string>{ "custom", "rocprofsys", __VA_ARGS__ });               \
         if(!_ret.second)                                                                 \
         {                                                                                \
-            ROCPROFSYS_PRINT("Warning! Duplicate setting: %s / %s\n",                    \
-                             get_setting_name(ENV_NAME).c_str(), ENV_NAME);              \
+            LOG_WARNING("Duplicate setting: {} / {}", get_setting_name(ENV_NAME),        \
+                        ENV_NAME);                                                       \
         }                                                                                \
         return _config->find(ENV_NAME)->second;                                          \
     }()
@@ -174,8 +176,8 @@ using utility::parse_numeric_range;
             std::vector<std::string>{ CMD_LINE });                                       \
         if(!_ret.second)                                                                 \
         {                                                                                \
-            ROCPROFSYS_PRINT("Warning! Duplicate setting: %s / %s\n",                    \
-                             get_setting_name(ENV_NAME).c_str(), ENV_NAME);              \
+            LOG_WARNING("Duplicate setting: {} / {}", get_setting_name(ENV_NAME),        \
+                        ENV_NAME);                                                       \
         }                                                                                \
         return _config->find(ENV_NAME)->second;                                          \
     }()
@@ -191,7 +193,7 @@ auto cfg_fini_callbacks = std::vector<std::function<void()>>{};
 void
 finalize()
 {
-    ROCPROFSYS_DEBUG("[rocprofsys_finalize] Disabling signal handling...\n");
+    LOG_DEBUG("[rocprofsys_finalize] Disabling signal handling...");
     tim::signals::disable_signal_detection();
     _settings_are_configured() = false;
     for(const auto& itr : cfg_fini_callbacks)
@@ -216,9 +218,11 @@ configure_settings(bool _init)
     if(is_ci_value && get_state() < State::Init)
     {
         timemory_print_demangled_backtrace<64>();
-        ROCPROFSYS_THROW("config::configure_settings() called before "
-                         "rocprofsys_init_library. state = %s",
-                         std::to_string(get_state()).c_str());
+
+        auto message = fmt::format("config::configure_settings() called before "
+                                   "rocprofsys_init_library. state = {}",
+                                   static_cast<int>(get_state()));
+        throw std::runtime_error(message);
     }
 
     tim::manager::add_metadata("ROCPROFSYS_VERSION", ROCPROFSYS_VERSION_STRING);
@@ -255,6 +259,15 @@ configure_settings(bool _init)
 
     auto _system_backend =
         tim::get_env("ROCPROFSYS_PERFETTO_BACKEND_SYSTEM", false, false);
+
+    ROCPROFSYS_CONFIG_SETTING(std::string, "ROCPROFSYS_LOG_LEVEL",
+                              "Rocprofiler-systems log level", "info", "debugging",
+                              "advanced");
+
+    ROCPROFSYS_CONFIG_SETTING(std::string, "ROCPROFSYS_LOG_FILE",
+                              "Filename for the Rocprofiler-systems log file. Leave "
+                              "empty to not write to a file.",
+                              "rocprof-sys-log.txt", "debugging", "advanced");
 
     auto _rocprofsys_debug = _config->get<bool>("ROCPROFSYS_DEBUG");
     if(_rocprofsys_debug) tim::set_env("TIMEMORY_DEBUG_SETTINGS", "1", 0);
@@ -299,12 +312,21 @@ configure_settings(bool _init)
         get_env<size_t>("ROCPROFSYS_NUM_THREADS", 1), "threading", "performance",
         "sampling", "parallelism", "advanced");
 
-    ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_TRACE", "Enable perfetto backend",
-                              _default_perfetto_v, "backend", "perfetto");
+    ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_TRACE",
+                              "Enable perfetto backend for tracing", _default_perfetto_v,
+                              "backend", "perfetto");
+
+    ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_TRACE_LEGACY",
+                              "[DEPRECATED] The new default option is to use data from "
+                              "cached buffer. When set to true system will use "
+                              "legacy direct mode for perfetto tracing instead of "
+                              "deferred trace generation. When false (default), uses "
+                              "cached mode with minimal runtime overhead.",
+                              false, "backend", "perfetto");
 
     ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_USE_PERFETTO",
-                              "[DEPRECATED] Renamed to ROCPROFSYS_TRACE",
-                              _default_perfetto_v, "backend", "perfetto", "deprecated");
+                              "[DEPRECATED] Renamed to ROCPROFSYS_TRACE", false,
+                              "backend", "perfetto", "deprecated");
 
     ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_PROFILE", "Enable timemory backend",
                               !_config->get<bool>("ROCPROFSYS_TRACE"), "backend",
@@ -320,10 +342,6 @@ configure_settings(bool _init)
 
     ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_USE_ROCPD", "Enable rocpd backend", false,
                               "backend", "rocpd");
-
-    ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_TRACE_CACHED",
-                              "Enable perfetto with trace cache", false, "backend",
-                              "perfetto_caching");
 
     ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_USE_ROCM",
                               "Enable ROCm API and kernel tracing", true, "backend",
@@ -360,6 +378,10 @@ configure_settings(bool _init)
 
     ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_USE_MPIP",
                               "Enable support for MPI functions", true, "mpi", "backend",
+                              "parallelism");
+
+    ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_USE_UCX",
+                              "Enable support for UCX functions", true, "ucx", "backend",
                               "parallelism");
 
     ROCPROFSYS_CONFIG_SETTING(
@@ -411,7 +433,7 @@ configure_settings(bool _init)
     for(const auto& itr : constraint::get_valid_clock_ids())
     {
         _clock_choices.emplace_back(
-            join("", "(", join('|', itr.name, itr.value, itr.raw_name), ")"));
+            fmt::format("({}|{}|{})", itr.name, itr.value, itr.raw_name));
     }
 
     ROCPROFSYS_CONFIG_SETTING(std::string, "ROCPROFSYS_TRACE_PERIODS",
@@ -830,6 +852,18 @@ configure_settings(bool _init)
         "starting with '_' or containing '::_M'.",
         true, "causal", "analysis", "advanced");
 
+    ROCPROFSYS_CONFIG_SETTING(int, "ROCPROFSYS_KILL_DELAY",
+                              "Delay (in seconds) before terminating the process "
+                              "after a kill signal is received.",
+                              0, "process", "advanced");
+
+    auto kill_delay_config = _config->find("ROCPROFSYS_KILL_DELAY")->second;
+    auto kill_delay_value  = kill_delay_config->get<int>().second;
+    if(kill_delay_value < 0)
+    {
+        kill_delay_config->set(0);
+    }
+
     // set the defaults
     _config->get_flamegraph_output()     = false;
     _config->get_ctest_notes()           = false;
@@ -861,6 +895,7 @@ configure_settings(bool _init)
     _add_rocprofsys_category(_config->find("ROCPROFSYS_CONFIG_FILE"));
     _add_rocprofsys_category(_config->find("ROCPROFSYS_DEBUG"));
     _add_rocprofsys_category(_config->find("ROCPROFSYS_VERBOSE"));
+    _add_rocprofsys_category(_config->find("ROCPROFSYS_LOG_LEVEL"));
     _add_rocprofsys_category(_config->find("ROCPROFSYS_TIME_OUTPUT"));
     _add_rocprofsys_category(_config->find("ROCPROFSYS_OUTPUT_PREFIX"));
     _add_rocprofsys_category(_config->find("ROCPROFSYS_OUTPUT_PATH"));
@@ -877,7 +912,8 @@ configure_settings(bool _init)
         {
             if(_config->get<bool>("ROCPROFSYS_CI"))
             {
-                ROCPROFSYS_THROW("Error! Setting '%s' not found!", _name.c_str());
+                throw std::runtime_error(
+                    fmt::format("Error! Setting '{}' not found!", _name));
             }
         }
     };
@@ -890,6 +926,7 @@ configure_settings(bool _init)
     _add_advanced_category("ROCPROFSYS_TEXT_OUTPUT");
     _add_advanced_category("ROCPROFSYS_DIFF_OUTPUT");
     _add_advanced_category("ROCPROFSYS_DEBUG");
+    _add_advanced_category("ROCPROFSYS_LOG_LEVEL");
     _add_advanced_category("ROCPROFSYS_ENABLE_SIGNAL_HANDLER");
     _add_advanced_category("ROCPROFSYS_FLAT_PROFILE");
     _add_advanced_category("ROCPROFSYS_INPUT_EXTENSIONS");
@@ -937,14 +974,11 @@ configure_settings(bool _init)
 
     if(_paranoid > 2 && !_has_cap_sys_admin)
     {
-        ROCPROFSYS_BASIC_VERBOSE(
-            0,
-            "/proc/sys/kernel/perf_event_paranoid has a value of %i. "
-            "Disabling PAPI (requires a value <= 2)...\n",
-            _paranoid);
-        ROCPROFSYS_BASIC_VERBOSE(
-            0, "In order to enable PAPI support, run 'echo N | sudo tee "
-               "/proc/sys/kernel/perf_event_paranoid' where N is <= 2\n");
+        LOG_WARNING("/proc/sys/kernel/perf_event_paranoid has a value of {}. "
+                    "Disabling PAPI (requires a value <= 2)",
+                    _paranoid);
+        LOG_WARNING("In order to enable PAPI support, run 'echo N | sudo tee "
+                    "/proc/sys/kernel/perf_event_paranoid' where N is <= 2");
         trait::runtime_enabled<comp::papi_config>::set(false);
         trait::runtime_enabled<comp::papi_common<void>>::set(false);
         trait::runtime_enabled<comp::papi_array_t>::set(false);
@@ -1004,7 +1038,7 @@ configure_settings(bool _init)
     {
         if(_config->get_suppress_config()) continue;
 
-        ROCPROFSYS_BASIC_VERBOSE(1, "Reading config file %s\n", itr.c_str());
+        LOG_DEBUG("Reading config file {}", itr);
         if(_config->read(itr) && _main_proc &&
            ((_config->get<bool>("ROCPROFSYS_CI") && settings::verbose() >= 0) ||
             settings::verbose() >= 1 || settings::debug()))
@@ -1020,8 +1054,7 @@ configure_settings(bool _init)
             }
             if(!_iss.str().empty())
             {
-                ROCPROFSYS_BASIC_VERBOSE(1, "config file '%s':\n%s\n", fitr.c_str(),
-                                         _iss.str().c_str());
+                LOG_DEBUG("config file '{}': {}", fitr, _iss.str());
             }
         }
     }
@@ -1062,6 +1095,9 @@ configure_settings(bool _init)
     handle_deprecated_setting("ROCPROFSYS_OUTPUT_FILE", "ROCPROFSYS_PERFETTO_FILE");
     handle_deprecated_setting("ROCPROFSYS_USE_PERFETTO", "ROCPROFSYS_TRACE");
     handle_deprecated_setting("ROCPROFSYS_USE_TIMEMORY", "ROCPROFSYS_PROFILE");
+    handle_deprecated_setting("ROCPROFSYS_DEBUG", "ROCPROFSYS_LOG_LEVEL");
+    handle_deprecated_setting("ROCPROFSYS_VERBOSE", "ROCPROFSYS_LOG_LEVEL");
+    handle_deprecated_setting("ROCPROFSYS_TRACE_LEGACY", "ROCPROFSYS_TRACE");
 
     scope::get_fields()[scope::flat::value]     = _config->get_flat_profile();
     scope::get_fields()[scope::timeline::value] = _config->get_timeline_profile();
@@ -1091,7 +1127,7 @@ configure_settings(bool _init)
     configure_signal_handler(_config);
     configure_disabled_settings(_config);
 
-    ROCPROFSYS_BASIC_VERBOSE(2, "configuration complete\n");
+    LOG_DEBUG("Configuration complete");
 
     if(auto opt = get_setting_value<int>("ROCPROFSYS_VERBOSE"); opt) verbose_value = *opt;
     if(auto opt = get_setting_value<bool>("ROCPROFSYS_DEBUG"); opt) debug_value = *opt;
@@ -1106,18 +1142,17 @@ configure_mode_settings(const std::shared_ptr<settings>& _config)
     auto _set = [](const std::string& _name, bool _v) {
         if(!set_setting_value(_name, _v))
         {
-            ROCPROFSYS_BASIC_VERBOSE(
-                4, "[configure_mode_settings] No configuration setting named '%s'...\n",
-                _name.data());
+            LOG_DEBUG("[configure_mode_settings] No configuration setting named '{}'...",
+                      _name);
         }
         else
         {
             bool _changed = get_setting_value<bool>(_name).value_or(!_v) != _v;
-            ROCPROFSYS_BASIC_VERBOSE(
-                1 && _changed,
-                "[configure_mode_settings] Overriding %s to %s in %s mode...\n",
-                _name.c_str(), JOIN("", std::boolalpha, _v).c_str(),
-                std::to_string(get_mode()).c_str());
+            if(_changed)
+            {
+                LOG_WARNING("[configure_mode_settings] Overriding {} to {} in {} mode...",
+                            _name, _v, static_cast<int>(get_mode()));
+            }
         }
     };
 
@@ -1154,8 +1189,7 @@ configure_mode_settings(const std::shared_ptr<settings>& _config)
     if(gpu::device_count() == 0)
     {
 #if ROCPROFSYS_ROCM_VERSION > 0
-        ROCPROFSYS_BASIC_VERBOSE(
-            1, "No ROCm devices were found: disabling rocm and amd_smi...\n");
+        LOG_WARNING("No ROCm devices were found: disabling rocm and amd_smi...");
 #endif
         _set("ROCPROFSYS_USE_ROCM", false);
         _set("ROCPROFSYS_USE_AMD_SMI", false);
@@ -1173,10 +1207,9 @@ configure_mode_settings(const std::shared_ptr<settings>& _config)
             {
                 _force = 1;
                 _message =
-                    JOIN("", " (forced. Previous value: '", _current_kokkosp_lib, "')");
+                    fmt::format(" (forced. Previous value: '{}')", _current_kokkosp_lib);
             }
-            ROCPROFSYS_BASIC_VERBOSE_F(1, "Setting KOKKOS_TOOLS_LIBS=%s%s\n",
-                                       "librocprof-sys.so", _message.c_str());
+            LOG_WARNING("Setting KOKKOS_TOOLS_LIBS={}{}", "librocprof-sys.so", _message);
             tim::set_env("KOKKOS_TOOLS_LIBS", "librocprof-sys.so", _force);
         }
     }
@@ -1221,8 +1254,8 @@ rocprofsys_exit_action(int nsig)
 {
     tim::signals::block_signals(get_sampling_signals(),
                                 tim::signals::sigmask_scope::process);
-    ROCPROFSYS_BASIC_PRINT("Finalizing after signal %i :: %s\n", nsig,
-                           signal_settings::str(static_cast<sys_signal>(nsig)).c_str());
+    LOG_DEBUG("Finalizing after signal {} :: {}", nsig,
+              signal_settings::str(static_cast<sys_signal>(nsig)));
     auto _handler = get_signal_handler().load();
     if(_handler) (*_handler)();
     kill(process::get_id(), nsig);
@@ -1231,16 +1264,7 @@ rocprofsys_exit_action(int nsig)
 void
 rocprofsys_trampoline_handler(int _v)
 {
-    if(get_verbose_env() >= 1)
-    {
-        ::rocprofsys::debug::flush();
-        ::rocprofsys::debug::lock _debug_lk{};
-        ROCPROFSYS_FPRINTF_STDERR_COLOR(warning);
-        fprintf(::rocprofsys::debug::get_file(),
-                "signal %i ignored (ROCPROFSYS_IGNORE_DYNINST_TRAMPOLINE=ON)\n", _v);
-        ::rocprofsys::debug::flush();
-        timemory_print_demangled_backtrace<64>();
-    }
+    LOG_DEBUG("signal {} ignored (ROCPROFSYS_IGNORE_DYNINST_TRAMPOLINE=ON)", _v);
 }
 }  // namespace
 
@@ -1342,8 +1366,8 @@ get_sampling_signals(int64_t)
         if(get_use_sampling() && !get_use_sampling_cputime() &&
            !get_use_sampling_realtime() && !get_use_sampling_overflow())
         {
-            ROCPROFSYS_VERBOSE_F(1, "sampling enabled by cputime/realtime/overflow not "
-                                    "specified. defaulting to cputime...\n");
+            LOG_WARNING("Sampling enabled by cputime/realtime/overflow is not "
+                        "specified. Defaulting to cputime...");
             set_setting_value("ROCPROFSYS_SAMPLING_CPUTIME", true);
         }
 
@@ -1365,14 +1389,12 @@ configure_disabled_settings(const std::shared_ptr<settings>& _config)
             auto _disabled = _config->disable_category(_category);
             _config->enable(_opt);
             for(auto&& itr : _disabled)
-                ROCPROFSYS_BASIC_VERBOSE(3, "[%s=OFF]    disabled option :: '%s'\n",
-                                         _opt.c_str(), itr.c_str());
+                LOG_DEBUG("[{}=OFF]    disabled option :: '{}'", _opt, itr);
             return false;
         }
         auto _enabled = _config->enable_category(_category);
         for(auto&& itr : _enabled)
-            ROCPROFSYS_BASIC_VERBOSE(3, "[%s=ON]      enabled option :: '%s'\n",
-                                     _opt.c_str(), itr.c_str());
+            LOG_DEBUG("[{}=ON]      enabled option :: '{}'", _opt, itr);
         return true;
     };
 
@@ -1478,8 +1500,11 @@ handle_deprecated_setting(const std::string& _old, const std::string& _new, int 
 
     if(_old_setting == _config->end()) return;
 
-    ROCPROFSYS_CI_THROW(_new_setting == _config->end(),
-                        "New configuration setting not found: '%s'", _new.c_str());
+    if(get_is_continuous_integration() && _new_setting == _config->end())
+    {
+        throw std::runtime_error(
+            fmt::format("New configuration setting not found: '{}'", _new));
+    }
 
     if(_old_setting->second->get_environ_updated() ||
        _old_setting->second->get_config_updated())
@@ -1488,13 +1513,13 @@ handle_deprecated_setting(const std::string& _old, const std::string& _new, int 
             std::array<char, 79> _v = {};
             _v.fill('=');
             _v.back() = '\0';
-            ROCPROFSYS_BASIC_VERBOSE(_verbose, "#%s#\n", _v.data());
+            LOG_WARNING("#{}#", _v.data());
         };
         _separator();
-        ROCPROFSYS_BASIC_VERBOSE(_verbose, "#\n");
-        ROCPROFSYS_BASIC_VERBOSE(_verbose, "# DEPRECATION NOTICE:\n");
-        ROCPROFSYS_BASIC_VERBOSE(_verbose, "#   %s is deprecated!\n", _old.c_str());
-        ROCPROFSYS_BASIC_VERBOSE(_verbose, "#   Use %s instead!\n", _new.c_str());
+        LOG_WARNING("#");
+        LOG_WARNING("# DEPRECATION NOTICE:");
+        LOG_WARNING("#   {} is deprecated!", _old);
+        LOG_WARNING("#   Use {} instead!", _new);
 
         if(!_new_setting->second->get_environ_updated() &&
            !_new_setting->second->get_config_updated())
@@ -1507,15 +1532,13 @@ handle_deprecated_setting(const std::string& _old, const std::string& _new, int 
             {
                 std::string _cause =
                     (_old_setting->second->get_environ_updated()) ? "environ" : "config";
-                ROCPROFSYS_BASIC_VERBOSE(_verbose, "#\n");
-                ROCPROFSYS_BASIC_VERBOSE(_verbose, "# %s :: '%s' -> '%s'\n", _new.c_str(),
-                                         _before.c_str(), _after.c_str());
-                ROCPROFSYS_BASIC_VERBOSE(_verbose, "#   via %s (%s)\n", _old.c_str(),
-                                         _cause.c_str());
+                LOG_WARNING("#");
+                LOG_WARNING("# {} :: '{}' -> '{}'", _new, _before, _after);
+                LOG_WARNING("#   via {} ({})", _old, _cause);
             }
         }
 
-        ROCPROFSYS_BASIC_VERBOSE(_verbose, "#\n");
+        LOG_WARNING("#");
         _separator();
     }
 }
@@ -1536,8 +1559,6 @@ print_banner(std::ostream& _os)
     std::stringstream _version_info{};
     _version_info << "rocprof-sys v" << ROCPROFSYS_VERSION_STRING;
 
-    namespace join = ::timemory::join;
-
     // assemble the list of properties
     auto _generate_properties =
         [](std::initializer_list<std::pair<std::string, std::string>>&& _data) {
@@ -1548,7 +1569,7 @@ print_banner(std::ostream& _os)
                 if(!itr.second.empty())
                     _property_info.emplace_back(
                         itr.first.empty() ? itr.second
-                                          : join::join(": ", itr.first, itr.second));
+                                          : fmt::format("{}: {}", itr.first, itr.second));
             }
             return _property_info;
         };
@@ -1562,9 +1583,10 @@ print_banner(std::ostream& _os)
 
     // <NAME> <VERSION> (<PROPERTIES>)
     if(!_properties.empty())
-        _version_info << join::join(join::array_config{ ", ", " (", ")" }, _properties);
+        _version_info << fmt::format(" ({})", fmt::join(_properties, ", "));
 
-    tim::log::stream(_os, tim::log::color::info()) << _banner << _version_info.str();
+    _os << _banner << "\n";
+    _os << _version_info.str() << "\n";
     _os << std::endl;
 }
 
@@ -1573,7 +1595,7 @@ print_settings(
     std::ostream&                                                                _ros,
     std::function<bool(const std::string_view&, const std::set<std::string>&)>&& _filter)
 {
-    ROCPROFSYS_CONDITIONAL_BASIC_PRINT(true, "configuration:\n");
+    LOG_INFO("configuration:");
 
     std::stringstream _os{};
 
@@ -1685,18 +1707,19 @@ print_settings(bool _include_env)
 
     if(_include_env)
     {
-        std::cerr << tim::log::info;
-        tim::print_env(std::cerr, [_is_rocprofsys_option](const std::string& _v) {
+        std::stringstream _ss1{};
+        tim::print_env(_ss1, [_is_rocprofsys_option](const std::string& _v) {
             auto _is_omni_opt = _is_rocprofsys_option(_v, std::set<std::string>{});
             if(settings::verbose() >= 2 || settings::debug()) return _is_omni_opt;
             return (_is_omni_opt && _v.find("ROCPROFSYS_SIGNAL_") != 0);
         });
-        std::cerr << tim::log::flush;
+
+        LOG_INFO("{}", _ss1.str());
     }
 
-    print_settings(std::cerr, _is_rocprofsys_option);
-
-    fprintf(stderr, "\n");
+    std::stringstream _ss2{};
+    print_settings(_ss2, _is_rocprofsys_option);
+    LOG_INFO("{}", _ss2.str());
 }
 
 std::string&
@@ -1756,8 +1779,8 @@ get_mode()
         for(const auto& itr : _v->second->get_choices())
             _ss << ", " << itr;
         auto _msg = (_ss.str().length() > 2) ? _ss.str().substr(2) : std::string{};
-        ROCPROFSYS_THROW("[%s] invalid mode %s. Choices: %s\n", __FUNCTION__,
-                         _mode.c_str(), _msg.c_str());
+        throw std::runtime_error(
+            fmt::format("[{}] invalid mode {}. Choices: {}", __FUNCTION__, _mode, _msg));
     }
     return Mode::Trace;
 }
@@ -1836,8 +1859,12 @@ get_verbose()
 bool&
 get_use_perfetto()
 {
-    static auto _v = get_config()->at("ROCPROFSYS_TRACE");
-    return static_cast<tim::tsettings<bool>&>(*_v).get();
+    static auto _trace_setting  = get_config()->at("ROCPROFSYS_TRACE");
+    static auto _legacy_setting = get_config()->at("ROCPROFSYS_TRACE_LEGACY");
+    auto&       _trace  = static_cast<tim::tsettings<bool>&>(*_trace_setting).get();
+    auto&       _legacy = static_cast<tim::tsettings<bool>&>(*_legacy_setting).get();
+    static bool _v      = _trace && _legacy;
+    return _v;
 }
 
 bool&
@@ -1883,8 +1910,9 @@ get_use_sampling()
     static auto _v = get_config()->find("ROCPROFSYS_USE_SAMPLING");
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
 #else
-    ROCPROFSYS_THROW("Error! sampling was enabled but rocprof-sys was not built with "
-                     "libunwind support");
+    throw std::runtime_error(
+        "Error! sampling was enabled but rocprof-sys was not built with "
+        "libunwind support");
     static bool _v = false;
     return _v;
 #endif
@@ -1915,6 +1943,13 @@ bool&
 get_use_mpip()
 {
     static auto _v = get_config()->find("ROCPROFSYS_USE_MPIP");
+    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
+}
+
+bool&
+get_use_ucx()
+{
+    static auto _v = get_config()->find("ROCPROFSYS_USE_UCX");
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
 }
 
@@ -2091,15 +2126,20 @@ get_category_config()
         }
         else
         {
-            ROCPROFSYS_ABORT(
-                "Error! Conflicting options ROCPROFSYS_ENABLE_CATEGORIES and "
-                "ROCPROFSYS_DISABLE_CATEGORIES were both provided.");
+            LOG_CRITICAL("Error! Conflicting options ROCPROFSYS_ENABLE_CATEGORIES and "
+                         "ROCPROFSYS_DISABLE_CATEGORIES were both provided.");
+            ::rocprofsys::set_state(::rocprofsys::State::Finalized);
+            std::abort();
         }
 
-        ROCPROFSYS_CI_THROW(_enabled.size() + _disabled.size() != _avail.size(),
-                            "Error! Internal error for categories: %zu (enabled) + %zu "
-                            "(disabled) != %zu (total)\n",
-                            _enabled.size(), _disabled.size(), _avail.size());
+        if(get_is_continuous_integration() &&
+           _enabled.size() + _disabled.size() != _avail.size())
+        {
+            throw std::runtime_error(
+                fmt::format("Error! Internal error for categories: {} (enabled) + {} "
+                            "(disabled) != {} (total)\n",
+                            _enabled.size(), _disabled.size(), _avail.size()));
+        }
 
         return std::make_pair(_enabled, _disabled);
     }();
@@ -2144,11 +2184,12 @@ get_perfetto_backend()
 std::string
 get_perfetto_output_filename()
 {
-    static auto _v       = get_config()->find("ROCPROFSYS_PERFETTO_FILE");
-    auto        _val     = static_cast<tim::tsettings<std::string>&>(*_v->second).get();
-    auto        _pos_dir = _val.find_last_of('/');
-    auto        _dir     = std::string{};
-    auto        _ext     = std::string{ "proto" };
+    static auto _v   = get_config()->find("ROCPROFSYS_PERFETTO_FILE");
+    auto        _val = static_cast<tim::tsettings<std::string>&>(*_v->second).get();
+
+    auto _pos_dir = _val.find_last_of('/');
+    auto _dir     = std::string{};
+    auto _ext     = std::string{ "proto" };
     if(_pos_dir != std::string::npos)
     {
         _dir = _val.substr(0, _pos_dir + 1);
@@ -2161,12 +2202,26 @@ get_perfetto_output_filename()
         _val = _val.substr(0, _pos_ext);
     }
 
+    LOG_DEBUG("Parsed: dir='{}', basename='{}', ext='{}'", _dir, _val, _ext);
+    LOG_DEBUG("settings::output_path()='{}'", settings::output_path());
+    LOG_DEBUG("settings::output_prefix()='{}'", settings::output_prefix());
+
     auto _cfg = settings::compose_filename_config{ settings::use_output_suffix(),
                                                    settings::default_process_suffix(),
                                                    false, _dir };
     _val      = settings::compose_output_filename(_val, _ext, _cfg);
+
+    LOG_DEBUG("After compose_output_filename: '{}'", _val);
+
     if(!_val.empty() && _val.at(0) != '/')
-        return settings::format(JOIN('/', "%env{PWD}%", _val), get_config()->get_tag());
+    {
+        auto _result = settings::format(fmt::format("{}/{}", getenv("PWD"), _val),
+                                        get_config()->get_tag());
+        LOG_DEBUG("Path is relative, prepending PWD: '{}'", _result);
+        return _result;
+    }
+
+    LOG_DEBUG("Path is absolute, returning: '{}'", _val);
     return _val;
 }
 
@@ -2416,7 +2471,8 @@ get_database_absolute_path(std::string_view database_name, std::string_view suff
     setenv("ROCPROFSYS_DATABASE_DIR", _dir.c_str(), 1);
 
     if(!_val.empty() && _val.at(0) != '/')
-        return settings::format(JOIN('/', "%env{PWD}%", _val), get_config()->get_tag());
+        return settings::format(fmt::format("{}/{}", getenv("PWD"), _val),
+                                get_config()->get_tag());
     return _val;
 }
 
@@ -2426,8 +2482,14 @@ get_perfetto_output_filename_with_suffix(std::string_view suffix)
     static auto _v   = get_config()->find("ROCPROFSYS_PERFETTO_FILE");
     auto        _val = static_cast<tim::tsettings<std::string>&>(*_v->second).get();
 
+    LOG_DEBUG("Initial ROCPROFSYS_PERFETTO_FILE='{}', suffix='{}'", _val, suffix);
+
     // If absolute path is provided, return it as-is
-    if(!_val.empty() && _val.at(0) == '/') return _val;
+    if(!_val.empty() && _val.at(0) == '/')
+    {
+        LOG_DEBUG("Absolute path, returning: '{}'", _val);
+        return _val;
+    }
 
     auto _pos_dir = _val.find_last_of('/');
     auto _dir     = std::string{};
@@ -2451,6 +2513,10 @@ get_perfetto_output_filename_with_suffix(std::string_view suffix)
     bool _explicitly_set =
         (_v->second->get_environ_updated() || _v->second->get_config_updated());
 
+    LOG_DEBUG("Parsed: dir='{}', basename='{}', ext='{}', explicitly_set={}", _dir, _val,
+              _ext, _explicitly_set);
+    LOG_DEBUG("settings::output_path()='{}'", settings::output_path());
+
     auto _cfg = settings::compose_filename_config{
         !_explicitly_set && !suffix.empty(),  // use_suffix only if not explicitly set
         suffix,                               // suffix value
@@ -2459,9 +2525,18 @@ get_perfetto_output_filename_with_suffix(std::string_view suffix)
     };
 
     _val = settings::compose_output_filename(_val, _ext, _cfg);
-    if(!_val.empty() && _val.at(0) != '/')
-        return settings::format(JOIN('/', "%env{PWD}%", _val), get_config()->get_tag());
 
+    LOG_DEBUG("After compose_output_filename: '{}'", _val);
+
+    if(!_val.empty() && _val.at(0) != '/')
+    {
+        auto _result = settings::format(fmt::format("{}/{}", getenv("PWD"), _val),
+                                        get_config()->get_tag());
+        LOG_DEBUG("Path is relative, prepending PWD: '{}'", _result);
+        return _result;
+    }
+
+    LOG_DEBUG("Path is absolute, returning: '{}'", _val);
     return _val;
 }
 
@@ -2475,8 +2550,19 @@ get_use_rocpd()
 bool&
 get_caching_perfetto()
 {
-    static auto _v = get_config()->at("ROCPROFSYS_TRACE_CACHED");
-    return static_cast<tim::tsettings<bool>&>(*_v).get();
+    static auto _trace_setting  = get_config()->at("ROCPROFSYS_TRACE");
+    static auto _legacy_setting = get_config()->at("ROCPROFSYS_TRACE_LEGACY");
+    auto&       _trace  = static_cast<tim::tsettings<bool>&>(*_trace_setting).get();
+    auto&       _legacy = static_cast<tim::tsettings<bool>&>(*_legacy_setting).get();
+    static bool _v      = _trace && !_legacy;
+    return _v;
+}
+
+int
+get_kill_delay()
+{
+    static auto _v = get_config()->find("ROCPROFSYS_KILL_DELAY");
+    return static_cast<tim::tsettings<int>&>(*_v->second).get();
 }
 
 tmp_file::tmp_file(std::string _v)
@@ -2503,7 +2589,7 @@ tmp_file::touch() const
 bool
 tmp_file::open(int _mode, int _perms)
 {
-    ROCPROFSYS_BASIC_VERBOSE(2, "Opening temporary file '%s'...\n", filename.c_str());
+    LOG_DEBUG("Opening temporary file '{}'...", filename);
 
     touch();
     m_pid = getpid();
@@ -2515,7 +2601,7 @@ tmp_file::open(int _mode, int _perms)
 bool
 tmp_file::open(std::ios::openmode _mode)
 {
-    ROCPROFSYS_BASIC_VERBOSE(2, "Opening temporary file '%s'...\n", filename.c_str());
+    LOG_DEBUG("Opening temporary file '{}'...", filename);
 
     touch();
 
@@ -2528,7 +2614,7 @@ tmp_file::open(std::ios::openmode _mode)
 bool
 tmp_file::fopen(const char* _mode)
 {
-    ROCPROFSYS_BASIC_VERBOSE(2, "Opening temporary file '%s'...\n", filename.c_str());
+    LOG_DEBUG("Opening temporary file '{}'...", filename);
 
     touch();
 
@@ -2619,8 +2705,7 @@ tmp_file::remove()
     close();
     if(filepath::exists(filename))
     {
-        ROCPROFSYS_BASIC_VERBOSE(2, "Removing temporary file '%s'...\n",
-                                 filename.c_str());
+        LOG_DEBUG("Removing temporary file '{}'...", filename);
         auto _ret = ::remove(filename.c_str());
         return (_ret == 0);
     }
@@ -2662,15 +2747,16 @@ get_tmp_file(std::string _basename, std::string _ext)
     _cfg.use_suffix    = true;
     _cfg.suffix        = "%pid%";
     _cfg.explicit_path = get_tmpdir();
-    _cfg.subdirectory  = JOIN('/', settings::output_path(), "%ppid%", "");
+    _cfg.subdirectory  = fmt::format("{}/{}", settings::output_path(), "%ppid%");
     auto _fname =
         settings::compose_output_filename(std::move(_basename), std::move(_ext), _cfg);
 
     if(_fname.empty() || _fname.front() != '/')
     {
-        ROCPROFSYS_THROW("Error! temporary file '%s' (based on '%s.%s') is either empty "
-                         "or is not an absolute path",
-                         _fname.c_str(), _basename.c_str(), _ext.c_str());
+        throw std::runtime_error(
+            fmt::format("Error! temporary file '{}' (based on '{}.'{}) is either empty "
+                        "or is not an absolute path",
+                        _fname, _basename, _ext));
     }
     auto itr = _existing_files.find(_fname);
     if(itr != _existing_files.end()) return itr->second;
@@ -2696,11 +2782,9 @@ get_causal_backend()
     } catch(std::runtime_error& _e)
     {
         auto _mode = static_cast<tim::tsettings<std::string>&>(*_v->second).get();
-        ROCPROFSYS_THROW(
-            "[%s] invalid causal backend %s. Choices: %s\n", __FUNCTION__, _mode.c_str(),
-            timemory::join::join(timemory::join::array_config{ ", ", "", "" },
-                                 _v->second->get_choices())
-                .c_str());
+        throw std::runtime_error(
+            fmt::format("[{}] invalid causal backend {}. Choices: {}", __FUNCTION__,
+                        _mode, fmt::join(_v->second->get_choices(), ", ")));
     }
     return CausalBackend::Auto;
 }
@@ -2728,11 +2812,9 @@ get_causal_mode()
         } catch(std::runtime_error& _e)
         {
             auto _mode = static_cast<tim::tsettings<std::string>&>(*_v->second).get();
-            ROCPROFSYS_THROW(
-                "[%s] invalid causal mode %s. Choices: %s\n", __FUNCTION__, _mode.c_str(),
-                timemory::join::join(timemory::join::array_config{ ", ", "", "" },
-                                     _v->second->get_choices())
-                    .c_str());
+            throw std::runtime_error(
+                fmt::format("[{}] invalid causal mode {}. Choices: {}", __FUNCTION__,
+                            _mode, fmt::join(_v->second->get_choices(), ", ")));
         }
         return CausalMode::Function;
     }();
@@ -2787,7 +2869,7 @@ format_causal_scopes(std::vector<std::string> _value, const std::string& _tag)
         {
             itr = std::regex_replace(
                 itr, _main_re,
-                join("", "$1", "(", get_exe_name(), "|", get_exe_realpath(), ")", "$3"));
+                fmt::format("$1({}|{})$3", get_exe_name(), get_exe_realpath()));
         }
         // trim leading and trailing spaces since we didn't delimit spaces
         if(std::regex_search(itr, _space_re))

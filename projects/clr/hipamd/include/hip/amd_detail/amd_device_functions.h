@@ -52,10 +52,12 @@ __device__ static inline unsigned int __popcll(unsigned long long int input) {
   return __builtin_popcountll(input);
 }
 
-__device__ static inline int __clz(int input) { return __ockl_clz_u32((uint)input); }
+__device__ static inline int __clz(int input) {
+  return input == 0u ? 32 : __builtin_clz((uint)input);
+}
 
 __device__ static inline int __clzll(long long int input) {
-  return __ockl_clz_u64((__hip_uint64_t)input);
+  return input == 0u ? 64 : __builtin_clzl((__hip_uint64_t)input);
 }
 
 __device__ static inline int __ffs(unsigned int input) {
@@ -640,7 +642,7 @@ __device__ inline void __named_sync() { __builtin_amdgcn_s_barrier(); }
 
 // hip.amdgcn.bc - lanemask
 __device__ inline __hip_uint64_t __lanemask_gt() {
-  __hip_uint32_t lane = __ockl_lane_u32();
+  __hip_uint32_t lane = __lane_id();
   if (lane == 63) return 0;
   __hip_uint64_t ballot = __ballot64(1);
   __hip_uint64_t mask = (~((__hip_uint64_t)0)) << (lane + 1);
@@ -648,14 +650,14 @@ __device__ inline __hip_uint64_t __lanemask_gt() {
 }
 
 __device__ inline __hip_uint64_t __lanemask_lt() {
-  __hip_uint32_t lane = __ockl_lane_u32();
+  __hip_uint32_t lane = __lane_id();
   __hip_int64_t ballot = __ballot64(1);
   __hip_uint64_t mask = ((__hip_uint64_t)1 << lane) - (__hip_uint64_t)1;
   return mask & ballot;
 }
 
 __device__ inline __hip_uint64_t __lanemask_eq() {
-  __hip_uint32_t lane = __ockl_lane_u32();
+  __hip_uint32_t lane = __lane_id();
   __hip_int64_t mask = ((__hip_uint64_t)1 << lane);
   return mask;
 }

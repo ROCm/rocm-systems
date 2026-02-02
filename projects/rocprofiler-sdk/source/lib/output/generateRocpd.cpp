@@ -56,6 +56,7 @@
 #include <rocprofiler-sdk-rocpd/types.h>
 
 #include <fmt/format.h>
+#include <fmt/ranges.h>
 #include <sqlite3.h>
 #include <unistd.h>
 
@@ -1479,6 +1480,10 @@ write_rocpd(
     }
 
     SQLITE3_CHECK(sqlite3_close_v2(conn));
+
+    // Clear UUID/GUID state at end of write to prepare for potential re-attach
+    get_guid().clear();
+    get_uuid().clear();
 }
 }  // namespace tool
 }  // namespace rocprofiler

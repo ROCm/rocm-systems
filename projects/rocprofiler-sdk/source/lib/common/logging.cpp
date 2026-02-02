@@ -25,6 +25,7 @@
 #include "lib/common/filesystem.hpp"
 
 #include <fmt/format.h>
+#include <fmt/ranges.h>
 #include <glog/logging.h>
 #include <glog/vlog_is_on.h>
 
