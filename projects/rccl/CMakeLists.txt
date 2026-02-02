@@ -1157,6 +1157,8 @@ if(ENABLE_ROCSHMEM)
   target_compile_definitions(rccl PRIVATE ENABLE_ROCSHMEM)
 endif()
 if(DEVICE_LINKER)
+  # for now anyway, so much easier to debug
+  target_compile_options(rccl PRIVATE "-gline-tables-only")
   target_compile_definitions(rccl PRIVATE DEVICE_LINKER USE_INDIRECT_FUNCTION_CALL)
   target_include_directories(rccl PRIVATE ${GEN_DIR}/specialized)
   message(STATUS "DEVICE_LINKER mode enabled (using indirect function call dispatch)")

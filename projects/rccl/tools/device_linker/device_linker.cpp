@@ -252,6 +252,7 @@ struct KernelInfo {
     std::vector<uint8_t> debug_str_offsets;
     std::vector<uint8_t> debug_addr;
     std::vector<uint8_t> debug_rnglists;
+    std::vector<uint8_t> debug_ranges;  // DWARF4 ranges (different from DWARF5 rnglists)
     uint64_t orig_text_addr = 0;    // Original .text address for debug_line patching
     int vgpr = 0, sgpr = 0, lds = 0, stack = 0;
 };
@@ -363,6 +364,10 @@ KernelInfo parseKernel(const std::vector<uint8_t>& elf_data) {
         auto* debug_rnglists = elf.find(".debug_rnglists");
         if (debug_rnglists && debug_rnglists->size > 0) {
             info.debug_rnglists = elf.getBytes(*debug_rnglists);
+        }
+        auto* debug_ranges = elf.find(".debug_ranges");
+        if (debug_ranges && debug_ranges->size > 0) {
+            info.debug_ranges = elf.getBytes(*debug_ranges);
         }
     }
     
@@ -970,6 +975,7 @@ private:
                 auto str_off = getSection(".debug_str_offsets");
                 auto addr = getSection(".debug_addr");
                 auto rng = getSection(".debug_rnglists");
+                auto ranges = getSection(".debug_ranges");  // DWARF4
                 
                 if (!abbrev.empty() || !info.empty()) {
                     printf("Using debug sections from %s\n", source);
@@ -979,6 +985,7 @@ private:
                     addDebugSection(".debug_str_offsets", str_off);
                     addDebugSection(".debug_addr", addr);
                     addDebugSection(".debug_rnglists", rng);
+                    addDebugSection(".debug_ranges", ranges);  // DWARF4
                     return true;
                 }
                 return false;
@@ -995,6 +1002,7 @@ private:
                     addDebugSection(".debug_str_offsets", first_kern->debug_str_offsets);
                     addDebugSection(".debug_addr", first_kern->debug_addr);
                     addDebugSection(".debug_rnglists", first_kern->debug_rnglists);
+                    addDebugSection(".debug_ranges", first_kern->debug_ranges);  // DWARF4
                 }
             }
         }
@@ -2061,6 +2069,49 @@ private:
                 addr_patched++;
             }
             printf("  Patched %d addresses in .debug_addr (delta=%+ld)\n", addr_patched, addr_delta);
+        }
+        
+        // Patch .debug_ranges section (DWARF4 address ranges)
+        // Format: pairs of (start_addr, end_addr), terminated by (0, 0)
+        SectionInfo* debug_ranges_sec = nullptr;
+        for (auto& s : sections_) {
+            if (s.name == ".debug_ranges") { debug_ranges_sec = &s; break; }
+        }
+        if (debug_ranges_sec && !debug_ranges_sec->data.empty() && disp_delta != 0) {
+            uint8_t* data = debug_ranges_sec->data.data();
+            size_t size = debug_ranges_sec->data.size();
+            int ranges_patched = 0;
+            
+            // Get dispatcher text range for address validation
+            auto* disp_text_sec_rng = disp_->find(".text");
+            uint64_t disp_text_start_rng = disp_text_sec_rng ? disp_text_sec_rng->addr : 0;
+            uint64_t disp_text_end_rng = disp_text_start_rng + (disp_text_sec_rng ? disp_text_sec_rng->size : 0);
+            
+            // Scan address pairs - each is two 8-byte addresses
+            for (size_t off = 0; off + 16 <= size; off += 16) {
+                uint64_t start_addr, end_addr;
+                memcpy(&start_addr, data + off, 8);
+                memcpy(&end_addr, data + off + 8, 8);
+                
+                // Skip terminator (0, 0) and base address entries (0xffffffff..., addr)
+                if (start_addr == 0 && end_addr == 0) continue;
+                if (start_addr == 0xffffffffffffffffULL) continue;
+                
+                // Patch addresses in dispatcher's original range
+                if (start_addr >= disp_text_start_rng && start_addr < disp_text_end_rng + 0x10000) {
+                    start_addr += disp_delta;
+                    memcpy(data + off, &start_addr, 8);
+                    ranges_patched++;
+                }
+                if (end_addr >= disp_text_start_rng && end_addr < disp_text_end_rng + 0x10000) {
+                    end_addr += disp_delta;
+                    memcpy(data + off + 8, &end_addr, 8);
+                    ranges_patched++;
+                }
+            }
+            if (ranges_patched > 0) {
+                printf("  Patched %d addresses in .debug_ranges (delta=%+ld)\n", ranges_patched, disp_delta);
+            }
         }
     }
     

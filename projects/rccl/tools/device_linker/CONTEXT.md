@@ -281,6 +281,10 @@ PC-relative offset from getpc (at 0x1bb04) to table (at 0x15cc0):
 ### Flawed Test Warning
 The `test_one_at_time.cpp` test was misleading - it called ncclAllReduce on just one GPU from a 2-GPU communicator, which hangs because collectives require all participants. Use `test_multi_gpu_proper.cpp` instead.
 
+### Debug Info Merging: FIXED
+Added `.debug_ranges` section copying and patching (was missing, causing DWARF errors).
+- `llvm-dwarfdump --verify` now passes
+
 ### Next Steps for Debugging
 The hang (not crash) suggests something different than the original PC-relative issue. Possible causes:
 - Synchronization/barrier issue between GPUs

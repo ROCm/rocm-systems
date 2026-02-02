@@ -17,11 +17,11 @@
 #   1. Line 16: Skip device_table.h when DEVICE_LINKER defined
 #      #if !defined(NCCL_SPECIALIZED_KERNEL) && !defined(DEVICE_LINKER)
 #   2. After line 18: Add extern declarations for function tables
-#      #ifdef DEVICE_LINKER_DISPATCH
+#      #ifdef DEVICE_LINKER
 #      extern __device__ ncclDevFuncPtr_t ncclDevFuncTable_1/2/4[FUNC_COUNT];
 #      #endif
-#   3. Line 694: Add DEVICE_LINKER_DISPATCH to dispatch condition
-#      #if defined(USE_INDIRECT_FUNCTION_CALL) || defined(DEVICE_LINKER_DISPATCH)
+#   3. Line 694: Add DEVICE_LINKER to dispatch condition
+#      #if defined(USE_INDIRECT_FUNCTION_CALL) || defined(DEVICE_LINKER)
 #
 # NOTE: If hipify hasn't been run since source changes, you also need to apply
 #       these changes to build/release/hipify/src/device/common.h
@@ -61,7 +61,7 @@ HIPCC=/opt/rocm/bin/hipcc
 CFLAGS="-c -fPIC -fno-gpu-rdc --offload-arch=$GPU_TARGET"
 
 # Defines
-DEFINES="-DDEVICE_LINKER -DDEVICE_LINKER_DISPATCH -DENABLE_FAULT_INJECTION"
+DEFINES="-DDEVICE_LINKER -DENABLE_FAULT_INJECTION"
 
 # Include paths (order matters)
 INCLUDES=(
