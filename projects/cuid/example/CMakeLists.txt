@@ -28,4 +28,4 @@ find_package(OpenSSL REQUIRED)
 add_executable(cuid_example main.cc)
 
 target_include_directories(cuid_example PRIVATE ${CMAKE_SOURCE_DIR}/../lib)
-target_link_libraries(cuid_example PRIVATE cuid_static OpenSSL::Crypto pthread)
+target_link_libraries(cuid_example PRIVATE amdcuid_static OpenSSL::Crypto pthread)

@@ -58,14 +58,14 @@ set(CUID_HEADERS
     src/cuid_internal.h
 )
 
-add_library(cuid_static STATIC ${CUID_SOURCES} ${CUID_HEADERS})
-add_library(cuid_shared SHARED ${CUID_SOURCES} ${CUID_HEADERS})
+add_library(amdcuid_static STATIC ${CUID_SOURCES} ${CUID_HEADERS})
+add_library(amdcuid_shared SHARED ${CUID_SOURCES} ${CUID_HEADERS})
 
-target_include_directories(cuid_static 
+target_include_directories(amdcuid_static 
     PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
-target_include_directories(cuid_shared 
+target_include_directories(amdcuid_shared 
     PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
 )

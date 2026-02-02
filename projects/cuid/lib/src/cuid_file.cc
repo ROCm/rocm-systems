@@ -639,38 +639,37 @@ amdcuid_status_t CuidFileGenerator::generate_from_devices(
         std::cerr << "Error: Root privileges are required to generate CUID files." << std::endl;
         return AMDCUID_STATUS_PERMISSION_DENIED;
     }
-    
+
     // Initialize HMAC for derived CUID generation
     cuid_hmac hmac = cuid_hmac();
     if (!hmac.is_valid()) {
-        std::cerr << "Error: Failed to initialize HMAC with key file" << std::endl;
+        std::cerr << "Error: Failed to initialize HMAC with key" << std::endl;
         return AMDCUID_STATUS_KEY_ERROR;
     }
-    
+
     // Create file handlers
     CuidFile unpriv_cuid_file(unprivileged_file, false);
     CuidFile priv_cuid_file(privileged_file, true);
-    
+
     // Clear existing entries
     unpriv_cuid_file.clear();
     priv_cuid_file.clear();
-    
+
     // Get current timestamp
     time_t now = time(nullptr);
-    
+
     // Track device indices per type
     std::map<amdcuid_device_type_t, uint32_t> device_counters;
-    
+
     // Process each device
-    // TODO: also need to adjust this to fill out more information from every device type
     for (const auto& device : devices) {
         if (!device) continue;
-        
+
         CuidFileEntry entry;
         entry.device_type = device->type();
         entry.device_index = device_counters[entry.device_type]++;
         entry.last_update = now;
-        
+
         // Get primary CUID
         amdcuid_primary_id primary_id = {};
         amdcuid_status_t status = device->get_primary_cuid(primary_id);
@@ -680,17 +679,17 @@ amdcuid_status_t CuidFileGenerator::generate_from_devices(
             continue;
         }
         entry.primary_cuid = primary_id.UUIDv8_representation;
-        
+
         // Generate derived CUID using HMAC
         amdcuid_derived_id derived_id = {};
-        status = CuidUtilities::generate_derived_cuid(&primary_id, &derived_id, &hmac);
+        status = device->get_derived_cuid(derived_id, &hmac);
         if (status != AMDCUID_STATUS_SUCCESS) {
             std::cerr << "Warning: Failed to generate derived CUID for device type " 
                       << entry.device_type << " status: " << status << std::endl;
             continue;
         }
         entry.derived_cuid = derived_id.UUIDv8_representation;
-        
+
         // Fill in device-specific information
         switch (entry.device_type) {
             case AMDCUID_DEVICE_TYPE_GPU: {
@@ -732,7 +731,10 @@ amdcuid_status_t CuidFileGenerator::generate_from_devices(
                     entry.revision_id = info.header.fields.nic.revision_id;
                     entry.pci_class = info.header.fields.nic.pci_class;
                     entry.device_node = info.network_interface;
-                    // MAC address would need to be read from sysfs, for now skip
+                    std::string mac_address;
+                    if (nic->get_mac_address(mac_address) == AMDCUID_STATUS_SUCCESS) {
+                        entry.mac_address = mac_address;
+                    }
                     entry.bdf = info.bdf;
                 }
                 break;
@@ -749,7 +751,7 @@ amdcuid_status_t CuidFileGenerator::generate_from_devices(
             default:
                 break;
         }
-        
+
         // Add to both files
         unpriv_cuid_file.add_entry(entry);
         priv_cuid_file.add_entry(entry);

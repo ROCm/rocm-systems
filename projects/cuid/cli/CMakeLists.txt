@@ -30,7 +30,7 @@ find_package(OpenSSL REQUIRED)
 add_executable(amdcuid_tool amdcuid_tool.cc)
 
 # Link against the CUID library
-target_link_libraries(amdcuid_tool cuid_static OpenSSL::Crypto)
+target_link_libraries(amdcuid_tool amdcuid_static OpenSSL::Crypto)
 
 # Include directories
 target_include_directories(amdcuid_tool PRIVATE ${CMAKE_SOURCE_DIR}/lib)

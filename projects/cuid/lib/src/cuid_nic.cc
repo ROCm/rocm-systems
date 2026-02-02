@@ -158,9 +158,14 @@ amdcuid_status_t CuidNic::get_hardware_fingerprint(uint64_t& fingerprint) const 
             return AMDCUID_STATUS_SUCCESS;
         }
     }
+    // TODO: serial ID coudl be found in FRU_ID so should attempt to look there
     // pci config space file does not exist or read failed, so create fingerprint from MAC address
-    std::string mac_path = m_info.network_interface + "/address";
-    std::string mac_address = CuidUtilities::read_sysfs_file(mac_path);
+    std::string mac_address;
+    status = get_mac_address(mac_address);
+    if (status != AMDCUID_STATUS_SUCCESS)
+    {
+        return status;
+    }
     if (!mac_address.empty())
     {
         // convert MAC address string to bytes
@@ -255,5 +260,15 @@ amdcuid_status_t CuidNic::get_device_path(std::string& path) const {
         return AMDCUID_STATUS_UNSUPPORTED;
     }
     path = m_info.network_interface;
+    return AMDCUID_STATUS_SUCCESS;
+}
+
+amdcuid_status_t CuidNic::get_mac_address(std::string& mac_address) const {
+    std::string mac_path = m_info.network_interface + "/address";
+    mac_address = CuidUtilities::read_sysfs_file(mac_path);
+
+    if (mac_address.empty()) {
+        return AMDCUID_STATUS_UNSUPPORTED;
+    }
     return AMDCUID_STATUS_SUCCESS;
 }

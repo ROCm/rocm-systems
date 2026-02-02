@@ -43,8 +43,6 @@
 #include <unistd.h>
 #include <memory>
 
-//TODO: rework this whole thing to be built off the top of the ABI
-
 // static hmac instance for daemon
 static cuid_hmac daemon_hmac = cuid_hmac();
 
@@ -360,17 +358,23 @@ int main() {
         return 1;
     }
 
-    uint8_t key[32];
-    amdcuid_status_t key_status = amdcuid_generate_hash_key(key);
-    if (key_status != AMDCUID_STATUS_SUCCESS) {
-        log_err() << "Error generating/loading HMAC key (status: " << amdcuid_status_to_string(key_status) << ")" << std::endl;
-        return 1;
+    // if no HMAC key exists, generate and store it
+    int fd = open("/opt/cuid/hmac_key.bin", O_RDONLY);
+    if (fd < 0) {
+        close(fd);
+        uint8_t key[32];
+        amdcuid_status_t key_status = amdcuid_generate_hash_key(key);
+        if (key_status != AMDCUID_STATUS_SUCCESS) {
+            log_err() << "Error generating/loading HMAC key (status: " << amdcuid_status_to_string(key_status) << ")" << std::endl;
+            return 1;
+        }
+        key_status = amdcuid_set_hash_key(key);
+        if (key_status != AMDCUID_STATUS_SUCCESS) {
+            log_err() << "Error setting HMAC key for daemon (status: " << amdcuid_status_to_string(key_status) << ")" << std::endl;
+            return 1;
+        }
     }
-    key_status = amdcuid_set_hash_key(key);
-    if (key_status != AMDCUID_STATUS_SUCCESS) {
-        log_err() << "Error setting HMAC key for daemon (status: " << amdcuid_status_to_string(key_status) << ")" << std::endl;
-        return 1;
-    }
+    close(fd);
 
     // read config file first get logging options and whether to run as a daemon or only on boot
     std::ifstream config_file("/opt/cuid/amdcuid_daemon.conf");
@@ -426,6 +430,7 @@ int main() {
         server.stop();
     }
     else {
+        log_out() << "Running in non-daemon mode, generating/updating CUID files once..." << std::endl;
         // non-daemon mode discovers devices on bootup and updates their CUIDs once
         // discover devices by refreshing
         amdcuid_status_t status = amdcuid_refresh();

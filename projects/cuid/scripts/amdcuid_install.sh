@@ -29,10 +29,10 @@ mkdir -p /opt/cuid/include
 mkdir -p /opt/cuid/tests
 
 # copy files, these will likely change on actual inclusion in rocm-systems package
-cp ../build/daemon/amdcuid_daemon.conf /opt/cuid/amdcuid_daemon.conf
+cp ../daemon/amdcuid_daemon.conf /opt/cuid/amdcuid_daemon.conf
 cp ../build/daemon/amdcuid_daemon /opt/cuid/bin/amdcuid_daemon
-cp ../build/lib/libamdcuid.so /opt/cuid/lib/libamdcuid.so
-cp ../lib/include/amdcuid.h /opt/cuid/include/amdcuid.h
+cp ../build/lib/libamdcuid_shared.so /opt/cuid/lib/libamdcuid_shared.so
+cp ../lib/include/amd_cuid.h /opt/cuid/include/amd_cuid.h
 cp ../build/cli/amdcuid_tool /opt/cuid/bin/amdcuid_tool
 cp ../build/tests/amdcuid_test /opt/cuid/tests/amdcuid_test
 

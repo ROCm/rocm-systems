@@ -54,6 +54,9 @@ public:
     amdcuid_status_t get_bdf(std::string& bdf) const override;
     amdcuid_status_t get_device_path(std::string& path) const override;
 
+    // MAC address accessor
+    amdcuid_status_t get_mac_address(std::string& mac_address) const;
+
     const amdcuid_nic_info& get_info() const;
 private:
     amdcuid_nic_info m_info;

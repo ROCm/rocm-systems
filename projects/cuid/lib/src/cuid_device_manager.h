@@ -25,6 +25,7 @@
 
 #include "src/cuid_device.h"
 #include "src/cuid_file.h"
+#include "src/hmac.h"
 #include "include/amd_cuid.h"
 #include <vector>
 #include <memory>
@@ -170,6 +171,9 @@ private:
     // Cuid Files
     CuidFile unpriv_cuid_file_{CuidUtilities::cuid_file(), true};
     CuidFile priv_cuid_file_{CuidUtilities::priv_cuid_file(), false};
+
+    //cuid hmac for deriving cuids
+    cuid_hmac manager_hmac;
 };
 
 #endif // CUID_DEVICE_MANAGER_H

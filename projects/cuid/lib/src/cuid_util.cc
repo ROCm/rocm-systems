@@ -224,7 +224,6 @@ amdcuid_status_t CuidUtilities::generate_derived_cuid(const amdcuid_primary_id* 
     return AMDCUID_STATUS_SUCCESS;
 }
 
-
 amdcuid_status_t CuidUtilities::generate_primary_cuid(uint64_t serial_number, uint16_t unit_id,
                                  uint8_t revision_id, uint16_t device_id, uint16_t vendor_id,
                                  uint8_t device_type, amdcuid_primary_id* primary_id) {

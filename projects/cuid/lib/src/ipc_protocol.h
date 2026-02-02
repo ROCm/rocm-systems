@@ -29,7 +29,6 @@
 
 #define AMDCUID_SOCKET_PATH "/var/run/amdcuid_daemon.sock"
 
-// TODO: this needs to be reworked with new messages for unprivileged requests to go to daemon
 enum class IpcMessageType : uint8_t {
     ADD_DEVICE = 1,
     REFRESH_DEVICES = 2

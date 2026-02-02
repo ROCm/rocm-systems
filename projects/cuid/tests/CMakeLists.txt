@@ -28,16 +28,16 @@ find_package(OpenSSL REQUIRED)
 enable_testing()
 
 # Unit tests executable
-add_executable(cuid_test
+add_executable(amdcuid_test
     unit/cuid_test.cc
 )
 
-target_include_directories(cuid_test PRIVATE
+target_include_directories(amdcuid_test PRIVATE
     ${CMAKE_SOURCE_DIR}/lib
 )
 
-target_link_libraries(cuid_test
-    cuid_static
+target_link_libraries(amdcuid_test
+    amdcuid_static
     GTest::GTest
     GTest::Main
     OpenSSL::SSL
@@ -45,4 +45,4 @@ target_link_libraries(cuid_test
 )
 
 # Register tests with CTest
-add_test(NAME cuid_unit_tests COMMAND cuid_test)
+add_test(NAME cuid_unit_tests COMMAND amdcuid_test)

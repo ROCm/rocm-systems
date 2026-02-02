@@ -38,92 +38,105 @@
 #include <iostream>
 #include <openssl/sha.h>
 
+// helper function to get a hash from the raw bytes of a derived ID
+void get_hash_from_raw(uint8_t raw_bytes[16], uint8_t out_hash[14]) {
+    // just remove the reserved bits from the raw bytes to get the hash
+    memcpy(out_hash, raw_bytes, 8);
+
+    // byte 8 of raw bits is reserved which we can skip
+    memcpy(&out_hash[8], &raw_bytes[9], 5);
+    // byte 14 of raw bits has 2 reserved bits in the MSBs, so mask those off
+    out_hash[13] = raw_bytes[14] & 0x3F;
+}
+
 amdcuid_status_t CuidDevice::get_derived_cuid(amdcuid_derived_id& id, cuid_hmac * hmac) const {
-    //attempt to find the derived CUID in file first
+    // attempt to find the derived CUID in file first
     CuidFile derived_file(CuidUtilities::cuid_file(), false);
     amdcuid_status_t status = derived_file.load();
-    if (status != AMDCUID_STATUS_SUCCESS) {
-        std::cerr << "Failed to load derived CUID file: " << CuidUtilities::cuid_file() << std::endl;
-        return status;
-    }
 
-    amdcuid_device_type_t type = this->type();
-    // there's only 1 platform entry, so handle that case first
-    switch (type){
-        case AMDCUID_DEVICE_TYPE_PLATFORM:
-        {
-            // for platform, just return the first entry found
-            CuidFileEntry entry;
-            status = derived_file.find_by_device_type(AMDCUID_DEVICE_TYPE_PLATFORM, entry);
-            if (status == AMDCUID_STATUS_SUCCESS) {
-                id.UUIDv8_representation = entry.derived_cuid;
-                CuidUtilities::remove_UUIDv8_bits(&id.UUIDv8_representation, id.raw_bits);
-                // TODO: figure out how to fill out hash later should involve just removing the reserved bits
-                return AMDCUID_STATUS_SUCCESS;
-            }
-        }break;
-        case AMDCUID_DEVICE_TYPE_GPU:
-        // search by render node
-        {
-            auto gpu = reinterpret_cast<CuidGpu*>(const_cast<CuidDevice*>(this));
-            if (gpu) {
-                auto info = gpu->get_info();
+    if (status == AMDCUID_STATUS_SUCCESS) {
+        amdcuid_device_type_t type = this->type();
+        // there's only 1 platform entry, so handle that case first
+        switch (type){
+            case AMDCUID_DEVICE_TYPE_PLATFORM:
+            {
+                // for platform, just return the first entry found
                 CuidFileEntry entry;
-                status = derived_file.find_by_device_node(info.render_node, entry);
+                status = derived_file.find_by_device_type(AMDCUID_DEVICE_TYPE_PLATFORM, entry);
                 if (status == AMDCUID_STATUS_SUCCESS) {
                     id.UUIDv8_representation = entry.derived_cuid;
                     CuidUtilities::remove_UUIDv8_bits(&id.UUIDv8_representation, id.raw_bits);
                     // TODO: figure out how to fill out hash later should involve just removing the reserved bits
+                    get_hash_from_raw(id.raw_bits, id.hash);
                     return AMDCUID_STATUS_SUCCESS;
                 }
+            }break;
+            case AMDCUID_DEVICE_TYPE_GPU:
+            // search by render node
+            {
+                auto gpu = reinterpret_cast<CuidGpu*>(const_cast<CuidDevice*>(this));
+                if (gpu) {
+                    auto info = gpu->get_info();
+                    CuidFileEntry entry;
+                    status = derived_file.find_by_device_node(info.render_node, entry);
+                    if (status == AMDCUID_STATUS_SUCCESS) {
+                        id.UUIDv8_representation = entry.derived_cuid;
+                        CuidUtilities::remove_UUIDv8_bits(&id.UUIDv8_representation, id.raw_bits);
+                        // TODO: figure out how to fill out hash later should involve just removing the reserved bits
+                        get_hash_from_raw(id.raw_bits, id.hash);
+                        return AMDCUID_STATUS_SUCCESS;
+                    }
+                    else {
+                        std::cerr << "GPU device not found in file" << std::endl;
+                    }
+                }
                 else {
-                    std::cerr << "GPU device not found in file" << std::endl;
+                    std::cerr << "GPU device not found" << std::endl;
                 }
             }
-            else {
-                std::cerr << "GPU device not found" << std::endl;
-            }
+            break;
+            case AMDCUID_DEVICE_TYPE_CPU:
+                // search by package_core_id
+                {
+                    auto cpu = reinterpret_cast<CuidCpu*>(const_cast<CuidDevice*>(this));
+                    if (cpu) {
+                        const auto& info = cpu->get_info();
+                        std::string core_id = std::to_string(info.header.fields.cpu.physical_id) + 
+                                        ":" + std::to_string(info.header.fields.cpu.core);
+                        CuidFileEntry entry;
+                        status = derived_file.find_by_package_core_id(core_id, entry);
+                        if (status == AMDCUID_STATUS_SUCCESS) {
+                            id.UUIDv8_representation = entry.derived_cuid;
+                            CuidUtilities::remove_UUIDv8_bits(&id.UUIDv8_representation, id.raw_bits);
+                            // TODO: figure out how to fill out hash later should involve just removing the reserved bits
+                            get_hash_from_raw(id.raw_bits, id.hash);
+                            return AMDCUID_STATUS_SUCCESS;
+                        }
+                    }
+                }
+                break;
+            case AMDCUID_DEVICE_TYPE_NIC:
+                // search by device node
+                {
+                    auto nic = reinterpret_cast<CuidNic*>(const_cast<CuidDevice*>(this));
+                    if (nic) {
+                        const auto& info = nic->get_info();
+                        CuidFileEntry entry;
+                        amdcuid_status_t status = derived_file.find_by_device_node(info.network_interface, entry);
+                        if (status == AMDCUID_STATUS_SUCCESS) {
+                            id.UUIDv8_representation = entry.derived_cuid;
+                            CuidUtilities::remove_UUIDv8_bits(&id.UUIDv8_representation, id.raw_bits);
+                            // TODO: figure out how to fill out hash later should involve just removing the reserved bits
+                            get_hash_from_raw(id.raw_bits, id.hash);
+                            return AMDCUID_STATUS_SUCCESS;
+                        }
+                    }
+                }
+                break;
+            default:
+                break;
+                    // Will expand with different devices as we implement them
         }
-        break;
-        case AMDCUID_DEVICE_TYPE_CPU:
-            // search by package_core_id
-            {
-                auto cpu = reinterpret_cast<CuidCpu*>(const_cast<CuidDevice*>(this));
-                if (cpu) {
-                    const auto& info = cpu->get_info();
-                    std::string core_id = std::to_string(info.header.fields.cpu.physical_id) + 
-                                    ":" + std::to_string(info.header.fields.cpu.core);
-                    CuidFileEntry entry;
-                    status = derived_file.find_by_package_core_id(core_id, entry);
-                    if (status == AMDCUID_STATUS_SUCCESS) {
-                        id.UUIDv8_representation = entry.derived_cuid;
-                        CuidUtilities::remove_UUIDv8_bits(&id.UUIDv8_representation, id.raw_bits);
-                        // TODO: figure out how to fill out hash later should involve just removing the reserved bits
-                        return AMDCUID_STATUS_SUCCESS;
-                    }
-                }
-            }
-            break;
-        case AMDCUID_DEVICE_TYPE_NIC:
-            // search by device node
-            {
-                auto nic = reinterpret_cast<CuidNic*>(const_cast<CuidDevice*>(this));
-                if (nic) {
-                    const auto& info = nic->get_info();
-                    CuidFileEntry entry;
-                    amdcuid_status_t status = derived_file.find_by_device_node(info.network_interface, entry);
-                    if (status == AMDCUID_STATUS_SUCCESS) {
-                        id.UUIDv8_representation = entry.derived_cuid;
-                        CuidUtilities::remove_UUIDv8_bits(&id.UUIDv8_representation, id.raw_bits);
-                        // TODO: figure out how to fill out hash later should involve just removing the reserved bits
-                        return AMDCUID_STATUS_SUCCESS;
-                    }
-                }
-            }
-            break;
-        default:
-            break;
-                // Will expand with different devices as we implement them
     }
 
     // if not found, generate derived CUID

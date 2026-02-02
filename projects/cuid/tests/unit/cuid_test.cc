@@ -111,6 +111,67 @@ void test_get_all_handles() {
     delete[] handles;
 }
 
+void test_get_handle_by_bdf() {
+    const char* test_bdf = "0000:03:00.0";
+    amdcuid_device_type_t device_type = AMDCUID_DEVICE_TYPE_GPU;
+    amdcuid_id_t handle;
+
+    amdcuid_status_t status = amdcuid_get_handle_by_dev_path(test_bdf, device_type, &handle);
+    if (status == AMDCUID_STATUS_SUCCESS) {
+        const char* id_str = amdcuid_id_to_string(handle);
+        EXPECT_NE(id_str, nullptr);
+        EXPECT_GT(strlen(id_str), 0);
+    } else {
+        EXPECT_EQ(status, AMDCUID_STATUS_DEVICE_NOT_FOUND);
+    }
+}
+
+void test_get_handle_by_dev_path() {
+    const char* test_dev_path = "/dev/dri/renderD128";
+    amdcuid_device_type_t device_type = AMDCUID_DEVICE_TYPE_GPU;
+    amdcuid_id_t handle;
+
+    amdcuid_status_t status = amdcuid_get_handle_by_dev_path(test_dev_path, device_type, &handle);
+    if (status == AMDCUID_STATUS_SUCCESS) {
+        const char* id_str = amdcuid_id_to_string(handle);
+        EXPECT_NE(id_str, nullptr);
+        EXPECT_GT(strlen(id_str), 0);
+    } else {
+        EXPECT_EQ(status, AMDCUID_STATUS_DEVICE_NOT_FOUND);
+    }
+}
+
+void test_get_handle_by_fd() {
+    const char* test_dev_path = "/dev/dri/renderD128";
+    int fd = open(test_dev_path, O_RDONLY);
+    if (fd < 0) {
+        GTEST_SKIP() << "Skipping test_get_handle_by_fd: unable to open device file";
+    }
+
+    amdcuid_device_type_t device_type = AMDCUID_DEVICE_TYPE_GPU;
+    amdcuid_id_t handle;
+
+    amdcuid_status_t status = amdcuid_get_handle_by_fd(fd, device_type, &handle);
+    if (status == AMDCUID_STATUS_SUCCESS) {
+        const char* id_str = amdcuid_id_to_string(handle);
+        EXPECT_NE(id_str, nullptr);
+        EXPECT_GT(strlen(id_str), 0);
+    } else {
+        EXPECT_EQ(status, AMDCUID_STATUS_DEVICE_NOT_FOUND);
+    }
+
+    close(fd);
+}
+
+void test_refresh() {
+    amdcuid_status_t status = amdcuid_refresh();
+    if (status == AMDCUID_STATUS_SUCCESS) {
+        SUCCEED();
+    } else {
+        EXPECT_EQ(status, AMDCUID_STATUS_PERMISSION_DENIED);
+    }
+}
+
 void test_query_device_property() {
 
     uint32_t count = 100;
@@ -180,6 +241,22 @@ TEST(CUIDIdTest, IdToString) {
 
 TEST(CUIDHandleTest, GetAllHandles) {
     test_get_all_handles();
+}
+
+TEST(CUIDHandleTest, GetHandleByBDF) {
+    test_get_handle_by_bdf();
+}
+
+TEST(CUIDHandleTest, GetHandleByDevPath) {
+    test_get_handle_by_dev_path();
+}
+
+TEST(CUIDHandleTest, GetHandleByFD) {
+    test_get_handle_by_fd();
+}
+
+TEST(CUIDRefreshTest, RefreshDevices) {
+    test_refresh();
 }
 
 TEST(CUIDQueryTest, QueryDeviceProperty) {
