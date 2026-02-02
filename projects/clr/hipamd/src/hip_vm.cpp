@@ -47,6 +47,10 @@ hipError_t hipMemAddressFree(void* devPtr, size_t size) {
   if (!(g_devices[0]->devices()[0]->virtualFree(devPtr))) {
     status = hipErrorUnknown;
   }
+  g_devices[memObj->getUserData().deviceId]->SyncAllStreams();
+  while (memObj->referenceCount() > 1) {
+    amd::Os::yield();
+  }
   memObj->release();
   HIP_RETURN(status);
 }
