@@ -41,6 +41,7 @@ RCCL_PARAM(PipelineAllDTypes, "PIPELINE_ALL_DATA_TYPES", 0);
 // Otherwise, it is automatically set for certain archs, datatypes and reduction collectives
 RCCL_PARAM(disableReduceCopyPipelining, "DISABLE_REDUCE_COPY_PIPELINING", 0);
 RCCL_PARAM(DirectAllGatherThreshold, "DIRECT_ALLGATHER_THRESHOLD", 75497472);
+RCCL_PARAM(DirectReduceScatterThreshold, "DIRECT_REDUCE_SCATTER_THRESHOLD", 2097152);
 RCCL_PARAM(ThreadsPerBlock, "THREADS_PER_BLOCK", -1);
 RCCL_PARAM(UnrollFactor, "UNROLL_FACTOR", -1);
 #ifdef ENABLE_WARP_SPEED
@@ -50,12 +51,39 @@ RCCL_PARAM(WarpSpeedForceEnable, "WARP_SPEED_FORCE_ENABLE", 0);
 #endif
 #define RCCL_WARP_SPEED_MIN_BYTES (1ULL << 26) // 64 MB
 
-RCCL_PARAM(ReducedCuEnable, "REDUCED_CU_ENABLE", 0);
 
 void rcclRestrictMaxChannels(struct ncclComm* comm, int& nc ) {
-    if (comm->nNodes > 1 && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && rcclParamReducedCuEnable() == 1)    {
-        nc = comm->nChannels = std::min(nc, 48);
+
+  if (comm->nNodes > 1 && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950")) {
+    const char* maxNChannelsStr = getenv("NCCL_MAX_NCHANNELS");
+
+    if (maxNChannelsStr) {
+      char* end = nullptr;
+      long userMax = strtol(maxNChannelsStr, &end, 10);
+
+      const bool valid = (end != maxNChannelsStr && *end == '\0' && userMax > 0);
+      if (valid) {
+        // 64 is the max number of channels for gfx950 multi-node
+        userMax = std::min<long>(userMax, 64);
+        const int cap = (int)userMax;
+        INFO(NCCL_TUNING, "RCCL MaxChannels is capped to: %i", cap);
+        // Cap max channels, but don't permanently shrink comm->nChannels
+        // based on a small-message tuning decision (which can legitimately pick nc=1).
+        nc = std::min(nc, cap);
+        comm->nChannels = std::min(comm->nChannels, cap);
+      } else {
+        // Invalid / non-positive value: treat as "unset" and apply default restriction.
+        INFO(NCCL_TUNING, "RCCL MaxChannels: ignoring invalid NCCL_MAX_NCHANNELS='%s', default capping to 48", maxNChannelsStr);
+        nc = std::min(nc, 48);
+        comm->nChannels = std::min(comm->nChannels, 48);
+      }
+    } else {
+      // Default restriction for gfx950 multi-node when user hasn't set a valid max.
+      nc = std::min(nc, 48);
+      comm->nChannels = std::min(comm->nChannels, 48);
+      INFO(NCCL_TUNING, "RCCL MaxChannels: default capping to 48");
     }
+  }
 }
 
 static inline bool rcclCollSupportsRing(ncclFunc_t func) {
@@ -445,6 +473,41 @@ bool rcclUseAllGatherDirect(struct ncclComm* comm, size_t& msgSize) {
   return (comm->enableCustColl && (msgSize <= threshold) && (threshold != -1) && !rankMultiple)
     ;
 }
+
+bool rcclUseReduceScatterDirect(struct ncclComm* comm, size_t& msgSize) {
+  // Direct ReduceScatter is supported for MI350 (gfx950):
+  // - 2 nodes: enable for 128KiB .. 2MiB
+  // - 4 and 8 nodes: enable up to 2MiB
+  static int userDirectReduceScatterInput = -2;
+  if (userDirectReduceScatterInput == -2) {
+    const char *inputStr = getenv("RCCL_DIRECT_REDUCE_SCATTER_DISABLE");
+    userDirectReduceScatterInput = !inputStr ? 0 : 1;
+  }
+  if (userDirectReduceScatterInput == 1) {
+    INFO(NCCL_INIT, "RCCL DIRECT REDUCE-SCATTER has been disabled.");
+    return false;
+  }
+  const bool archGfx950 = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950");
+  if (!archGfx950) return false;
+
+  size_t threshold = rcclParamDirectReduceScatterThreshold();
+  if (threshold > -1) { 
+    // Set threshold to 2MiB hard limit
+    // NOTE: If the DirectReduceScatterThreshold / hard-limit is increased, ensure TEMP_BUFF_SIZE (init.cc)
+    // is increased accordingly -> TEMP_BUFF_SIZE >= 2 * (max enabled msgSize) for headroom.
+    threshold = std::min(threshold, (size_t)2097152);
+  } else {
+    threshold = 2097152;
+  }
+  INFO(NCCL_INIT, "RCCL DIRECT REDUCE-SCATTER threshold set to: %zu", threshold);
+
+  if (msgSize > threshold) return false;
+  // for 2 nodes, enable if msgSize is in 128KiB .. 2MiB range
+  if (comm->nNodes == 2) return msgSize >= (size_t)131072;
+  if (comm->nNodes == 8 || comm->nNodes == 4) return true;
+  return false;
+}
+
 
 void rcclSetPxn(struct ncclComm* comm,  int& rcclPxnDisable) {
   static int pxnDisable = RCCL_VALUE_UNSET;
