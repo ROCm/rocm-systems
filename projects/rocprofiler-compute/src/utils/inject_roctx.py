@@ -33,6 +33,8 @@ Usage: python inject_roctx.py main.py --epochs 1 --batch-size 4
 import os
 import sys
 from pathlib import Path
+import pkgutil
+import importlib
 
 # Add parent directory to Python path for config module
 script_dir = Path(__file__).resolve().parent
@@ -149,6 +151,90 @@ try:
             rangePop()
             marker_stack.pop()
     torch.cuda.set_device = set_device_with_roctx
+except Exception:
+    pass
+
+def auto_wrap_class_methods(module, prefix, exclude_patterns=None):
+    if exclude_patterns is None:
+        exclude_patterns = ["__", "_", "is_", "set_", "get_"]
+    for name in dir(module):
+        if any(name.startswith(pat) for pat in exclude_patterns):
+            continue
+        attr = getattr(module, name)
+        if isinstance(attr, type):  # It's a class
+            class_obj = attr
+            for meth_name in dir(class_obj):
+                if any(meth_name.startswith(pat) for pat in exclude_patterns):
+                    continue
+                meth = getattr(class_obj, meth_name)
+                if callable(meth):
+                    # Avoid double-wrapping
+                    if hasattr(meth, "_is_roctx_wrapped"):
+                        continue
+                    def make_method_wrapper(orig_meth, cname, mname):
+                        def wrapper(self, *args, **kwargs):
+                            full_marker_name = "/".join(marker_stack + [f"{prefix}.{cname}.{mname}"])
+                            marker_stack.append(f"{prefix}.{cname}.{mname}")
+                            rangePush(full_marker_name)
+                            try:
+                                return orig_meth(self, *args, **kwargs)
+                            finally:
+                                rangePop()
+                                marker_stack.pop()
+                        wrapper._is_roctx_wrapped = True
+                        return wrapper
+                    try:
+                        setattr(class_obj, meth_name, make_method_wrapper(meth, name, meth_name))
+                    except Exception:
+                        pass  # Some built-in methods can't be set
+
+def auto_wrap_all_submodules(parent_module, prefix):
+    # Wrap the parent module itself
+    auto_wrap_class_methods(parent_module, prefix)
+    # Iterate over all submodules
+    if hasattr(parent_module, "__path__"):
+        for module_info in pkgutil.walk_packages(parent_module.__path__, prefix + "."):
+            try:
+                submod = importlib.import_module(module_info.name)
+                auto_wrap_class_methods(submod, module_info.name)
+            except Exception:
+                pass  # Some submodules may not import cleanly
+
+# Auto-wrap all submodules of relevant libraries (taken from PyTorch examples)
+auto_wrap_all_submodules(torch, "torch")
+try:
+    import torchvision
+    auto_wrap_all_submodules(torchvision, "torchvision")
+except Exception:
+    pass
+try:
+    import torch.cuda
+    auto_wrap_all_submodules(torch.cuda, "torch.cuda")
+except Exception:
+    pass
+try:
+    import torch.distributed
+    auto_wrap_all_submodules(torch.distributed, "torch.distributed")
+except Exception:
+    pass
+try:
+    import timm
+    auto_wrap_all_submodules(timm, "timm")
+except Exception:
+    pass
+try:
+    import transformers
+    auto_wrap_all_submodules(transformers, "transformers")
+except Exception:
+    pass
+try:
+    import lmdb
+    auto_wrap_all_submodules(lmdb, "lmdb")
+except Exception:
+    pass
+try:
+    import spacy
+    auto_wrap_all_submodules(spacy, "spacy")
 except Exception:
     pass
 
@@ -309,12 +395,15 @@ def inject_roctx_into_optimizer():
     original_step = Optimizer.step
 
     def step_with_roctx(self, *args, **kwargs):
-        rangePush(f"optimizer.{self.__class__.__name__}.step")
+        full_marker_name = "/".join(marker_stack + [f"optimizer.{self.__class__.__name__}.step"])
+        marker_stack.append(f"optimizer.{self.__class__.__name__}.step")
+        rangePush(full_marker_name)
         try:
             return original_step(self, *args, **kwargs)
         finally:
             rangePop()
-
+            marker_stack.pop()
+            
     Optimizer.step = step_with_roctx
     console_log("Wrapped optimizer.step() with ROCTX markers\n")
 
