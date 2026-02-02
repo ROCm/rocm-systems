@@ -18,6 +18,7 @@ Testcase Scenarios :
 #include <hip_test_checkers.hh>
 #include <hip_test_common.hh>
 #include <hip_test_kernels.hh>
+#include <utils.hh>
 
 #define TEST_LOOP_SIZE 50
 /**
