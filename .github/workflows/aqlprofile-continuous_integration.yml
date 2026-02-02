@@ -27,7 +27,7 @@ concurrency:
 
 env:
   ROCM_PATH: "/opt/rocm"
-  ROCM_VERSION: "7.1.1"
+  ROCM_VERSION: "7.2.0"
   PYTHON_VENV_PATH: "aqlprofile"
   PYTHON_VENV_ACTIVATE: "aqlprofile/bin/activate"
   navi3_EXCLUDE_TESTS_REGEX: ""
