@@ -53,7 +53,7 @@ for candidate in candidate_paths:
 
 try:
     import torch
-
+    import torch._C
     console_log(f"PyTorch version: {torch.__version__}")
 except ImportError:
     console_warning(
@@ -72,7 +72,85 @@ from roctx import rangePop, rangePush
 
 # Global stack for hierarchical marker names
 marker_stack = []
+original_dispatch_call = torch._C._dispatch_call
 
+def dispatch_call_with_roctx(*args, **kwargs):
+    op_name = str(args[0]) if args else "aten_op"
+    # Use hierarchical marker if desired
+    full_marker_name = "/".join(marker_stack + [f"aten::{op_name}"])
+    marker_stack.append(f"aten::{op_name}")
+    rangePush(full_marker_name)
+    try:
+        return original_dispatch_call(*args, **kwargs)
+    finally:
+        rangePop()
+        marker_stack.pop()
+
+torch._C._dispatch_call = dispatch_call_with_roctx
+try:
+    import torchvision
+    original_tv_dispatch_call = torchvision._C._dispatch_call
+    def tv_dispatch_call_with_roctx(*args, **kwargs):
+        op_name = str(args[0]) if args else "vision_op"
+        full_marker_name = "/".join(marker_stack + [f"torchvision::{op_name}"])
+        marker_stack.append(f"torchvision::{op_name}")
+        rangePush(full_marker_name)
+        try:
+            return original_tv_dispatch_call(*args, **kwargs)
+        finally:
+            rangePop()
+            marker_stack.pop()
+    torchvision._C._dispatch_call = tv_dispatch_call_with_roctx
+except Exception:
+    pass  # torchvision not installed or no _C._dispatch_call
+
+try:
+    import torch.distributed as dist
+    original_all_reduce = dist.all_reduce
+    def all_reduce_with_roctx(*args, **kwargs):
+        full_marker_name = "/".join(marker_stack + ["torch.distributed.all_reduce"])
+        marker_stack.append("torch.distributed.all_reduce")
+        rangePush(full_marker_name)
+        try:
+            return original_all_reduce(*args, **kwargs)
+        finally:
+            rangePop()
+            marker_stack.pop()
+    dist.all_reduce = all_reduce_with_roctx
+except Exception:
+    pass
+
+try:
+    import torch.jit
+    original_jit_script = torch.jit.script
+    def jit_script_with_roctx(*args, **kwargs):
+        full_marker_name = "/".join(marker_stack + ["torch.jit.script"])
+        marker_stack.append("torch.jit.script")
+        rangePush(full_marker_name)
+        try:
+            return original_jit_script(*args, **kwargs)
+        finally:
+            rangePop()
+            marker_stack.pop()
+    torch.jit.script = jit_script_with_roctx
+except Exception:
+    pass
+
+try:
+    import torch.cuda
+    original_set_device = torch.cuda.set_device
+    def set_device_with_roctx(*args, **kwargs):
+        full_marker_name = "/".join(marker_stack + ["torch.cuda.set_device"])
+        marker_stack.append("torch.cuda.set_device")
+        rangePush(full_marker_name)
+        try:
+            return original_set_device(*args, **kwargs)
+        finally:
+            rangePop()
+            marker_stack.pop()
+    torch.cuda.set_device = set_device_with_roctx
+except Exception:
+    pass
 
 def roctx_wrapper(func, name=None):
     func_name = name or func.__name__
