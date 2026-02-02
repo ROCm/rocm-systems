@@ -747,10 +747,10 @@ config()
         metadata_initialize_smi_pmc(_dev_id);
     }
 
-    if(get_use_ainic_stat_enabled())
-    {
-        nic_config();
-    }
+#ifdef USE_AINIC
+    nic_config();
+#endif
+
 }
 
 void
@@ -770,10 +770,9 @@ sample()
         _data->emplace_back(data{ itr });
     }
 
-    if(get_use_ainic_stat_enabled())
-    {
-        nic_sample();
-    }
+#ifdef USE_AINIC
+    nic_sample();
+#endif
 }
 
 void
@@ -1253,10 +1252,9 @@ setup()
             }
         }
 
-        if(get_use_ainic_stat_enabled())
-        {
-            nic_setup();
-        }
+#ifdef USE_AINIC
+        nic_setup();
+#endif
 
         is_initialized() = true;
         data::setup();
@@ -1299,15 +1297,14 @@ post_process()
         data::post_process(itr);
     }
 
-    if(get_use_ainic_stat_enabled())
+#ifdef USE_AINIC
+    for(size_t i = 0; i < nic_data::nic_vec.size(); ++i)
     {
-        for(size_t i = 0; i < nic_data::nic_vec.size(); ++i)
-        {
-            auto& nic = nic_data::nic_vec.at(i);
-            LOG_DEBUG("Post-processing ainic data for NIC: {}", nic);
-            nic_data::post_process(i);
-        }
+        auto& nic = nic_data::nic_vec.at(i);
+        LOG_DEBUG("Post-processing ainic data for NIC: {}", nic);
+        nic_data::post_process(i);
     }
+#endif
 }
 
 uint32_t

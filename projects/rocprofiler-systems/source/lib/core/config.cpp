@@ -1943,13 +1943,6 @@ get_cpu_freq_enabled()
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
 }
 
-bool&
-get_use_ainic_stat_enabled()
-{
-    static auto _v = get_config()->find("ROCPROFSYS_AINIC_STAT_ENABLED");
-    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
-}
-
 std::string
 get_sampling_ainics()
 {
