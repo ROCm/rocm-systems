@@ -621,30 +621,32 @@ private:
         printf("Mapped %d kernel functions, total .text size: %zu bytes\n", mapped, text.data.size());
         sections_.push_back(std::move(text));
         
-        // Build .data.rel.ro (function tables - now pre-filled, could be read-only)
-        // Note: Keeping the name .data.rel.ro for ELF compatibility but values are pre-filled
-        SectionInfo data_rel_ro;
-        data_rel_ro.name = ".data.rel.ro";
-        data_rel_ro.type = SHT_PROGBITS;
-        // Keep SHF_WRITE for now as some runtime loaders may expect it for RELRO sections
-        data_rel_ro.flags = SHF_ALLOC | SHF_WRITE;
-        data_rel_ro.alignment = 16;
-        // Size: 3 function tables
-        size_t func_table_size = table_spacing_ * 2 + FUNC_COUNT * 8;
-        func_table_size = (func_table_size + 15) & ~15UL;  // 16-byte align
-        data_rel_ro.data.resize(func_table_size, 0);  // Zeroed, relocations fill
-        sections_.push_back(std::move(data_rel_ro));
+        // NOTE: We do NOT create a separate .data.rel.ro section for function tables.
+        // The function tables are already in .rodata at the correct PC-relative offset
+        // from the dispatcher code. We'll make .rodata writable so relocations can fill them.
+        // See rodata_table_1_off_, rodata_table_2_off_, rodata_table_4_off_ which are
+        // populated when we process .rodata below.
         
-        // Build .data (scratch variables only)
-        auto* disp_bss = disp_->find(".bss");
+        // Build .data (copy from dispatcher - contains __clang_gpu_used_external)
+        // The dispatcher's .data contains:
+        //   - __clang_gpu_used_external (96 bytes = 12 * 8-byte pointers to oneRankReduce kernels)
+        // These pointers are filled in by R_AMDGPU_RELATIVE64 relocations.
+        // We MUST copy the dispatcher's .data, not zero it out!
+        auto* disp_data = disp_->find(".data");
         SectionInfo data;
         data.name = ".data";
         data.type = SHT_PROGBITS;
         data.flags = SHF_ALLOC | SHF_WRITE;
         data.alignment = 16;
-        // Scratch variables: ncclDeviceScratchTrigger (4) + ncclDeviceScratchSink (4) + padding
-        size_t scratch_size = 0x60;  // Match IFC's .data size
-        data.data.resize(scratch_size, 0);
+        if (disp_data && disp_data->size > 0) {
+            data.data = disp_->getBytes(*disp_data);
+            printf("Copied dispatcher .data: %zu bytes\n", data.data.size());
+        } else {
+            // Fallback: create empty .data if dispatcher doesn't have one
+            size_t scratch_size = 0x60;  // Match IFC's .data size
+            data.data.resize(scratch_size, 0);
+            printf("Created empty .data: %zu bytes (dispatcher had no .data)\n", scratch_size);
+        }
         sections_.push_back(std::move(data));
         
         // Build .bss (uninitialized data - NOBITS)
@@ -679,13 +681,16 @@ private:
             sections_.push_back(std::move(note));
         }
         
-        // Build .rodata (KDs + const function tables from dispatcher)
+        // Build .rodata (KDs + function tables from dispatcher)
+        // IMPORTANT: We make this section WRITABLE (SHF_WRITE) so relocations can fill
+        // the function table entries at load time. The dispatcher code uses PC-relative
+        // addressing to find the tables at their original offsets within this section.
         auto* disp_rodata = disp_->find(".rodata");
         if (disp_rodata) {
             SectionInfo rodata;
             rodata.name = ".rodata";
             rodata.type = SHT_PROGBITS;
-            rodata.flags = SHF_ALLOC;
+            rodata.flags = SHF_ALLOC | SHF_WRITE;  // WRITE needed for relocations!
             rodata.alignment = 64;
             rodata.data = disp_->getBytes(*disp_rodata);
             
@@ -735,23 +740,39 @@ private:
             auto* disp_text_for_onerank = disp_->find(".text");
             auto* symtab_for_onerank = disp_->find(".symtab");
             auto* strtab_for_onerank = disp_->find(".strtab");
+            printf("  Collecting oneRankReduce: text=%p, symtab=%p, strtab=%p\n",
+                   (void*)disp_text_for_onerank, (void*)symtab_for_onerank, (void*)strtab_for_onerank);
             if (disp_text_for_onerank && symtab_for_onerank && strtab_for_onerank) {
                 const char* strings = disp_->fileStr(strtab_for_onerank->offset);
                 const Elf64_Sym* syms = disp_->fileAt<Elf64_Sym>(symtab_for_onerank->offset);
                 size_t nsyms = symtab_for_onerank->size / sizeof(Elf64_Sym);
                 
                 uint16_t text_idx = disp_text_for_onerank->index;
+                printf("  .text section index=%u, nsyms=%zu\n", text_idx, nsyms);
+                int onerank_candidates = 0;
                 for (size_t i = 0; i < nsyms; i++) {
                     const char* name = strings + syms[i].st_name;
                     // Look for oneRankReduce FUNC symbols in .text
-                    if (ELF64_ST_TYPE(syms[i].st_info) == STT_FUNC &&
-                        syms[i].st_shndx == text_idx &&
-                        strstr(name, "oneRankReduce") != nullptr &&
-                        strstr(name, ".kd") == nullptr) {
+                    bool is_func = ELF64_ST_TYPE(syms[i].st_info) == STT_FUNC;
+                    bool in_text = syms[i].st_shndx == text_idx;
+                    bool has_onerank = strstr(name, "oneRankReduce") != nullptr;
+                    bool not_kd = strstr(name, ".kd") == nullptr;
+                    
+                    if (has_onerank && not_kd) {
+                        onerank_candidates++;
+                        if (onerank_candidates <= 3) {
+                            printf("    Candidate: %s (func=%d, shndx=%u vs text_idx=%u, in_text=%d)\n",
+                                   name, is_func, syms[i].st_shndx, text_idx, in_text);
+                        }
+                    }
+                    
+                    if (is_func && in_text && has_onerank && not_kd) {
                         // Store offset within .text
                         onerank_text_offsets_.push_back(syms[i].st_value - disp_text_for_onerank->addr);
                     }
                 }
+                printf("  Found %d oneRankReduce candidates, %zu matched\n", 
+                       onerank_candidates, onerank_text_offsets_.size());
                 if (!onerank_text_offsets_.empty()) {
                     printf("  Found %zu oneRankReduce kernels for __clang_gpu_used_external\n",
                            onerank_text_offsets_.size());
@@ -990,7 +1011,8 @@ private:
         printf("  .note: keeping uses_dynamic_stack unchanged (matching IFC)\n");
         
         // 2. Set private_segment_fixed_size to max_stack_ for specialized functions
-        // Unlike IFC, we call separate specialized functions that need scratch
+        // Unlike IFC which compiles everything together, we call separate specialized
+        // functions that have their own scratch requirements
         printf("  .note: will patch private_segment_fixed_size to %d\n", max_stack_);
         
         // NOTE: We still patch VGPR/SGPR counts below to match our max resource usage
@@ -1111,14 +1133,17 @@ private:
     
     // ========== Pass 2: Layout ==========
     void computeLayout() {
-        // Layout to match IFC exactly:
-        // LOAD R:  [ELF header + phdrs] [.note] [.dynsym] [.gnu.hash] [.hash] [.dynstr] [.rela.dyn] [.rodata]
+        // Layout preserving PC-relative references:
+        // The dispatcher uses PC-relative addressing to find function tables.
+        // Original layout has function tables in .rodata BEFORE .text.
+        // We put .data.rel.ro (function tables) before .text to preserve this.
+        //
+        // LOAD R:  [ELF header + phdrs] [.note] [.dynsym] [.gnu.hash] [.hash] [.dynstr] [.rela.dyn] [.rodata] [.data.rel.ro]
         // LOAD RX: [.text] (page-aligned)
-        // LOAD RW (RELRO): [.data.rel.ro] [.dynamic] [.relro_padding] (page-aligned start)
-        // LOAD RW: [.data] [.bss] (page-aligned start)
+        // LOAD RW: [.dynamic] [.relro_padding] [.data] [.bss]
         // Non-alloc: [.symtab] [.strtab] [.shstrtab] [section headers]
         
-        printf("Computing layout (IFC-compatible)...\n");
+        printf("Computing layout (preserving PC-relative offsets)...\n");
         
         // Pre-calculate .rela.dyn size based on function table entries + oneRankReduce
         int rela_count = 0;
@@ -1140,25 +1165,25 @@ private:
         const size_t num_phdrs = 9;  // Match IFC: PHDR, LOAD R, LOAD RX, LOAD RW(RELRO), LOAD RW, DYNAMIC, GNU_RELRO, GNU_STACK, NOTE
         uint64_t addr = ehdr_size + num_phdrs * phdr_size;
         
-        // Sort allocated sections in IFC order
+        // Sort allocated sections - CRITICAL: .rodata (with function tables) BEFORE .text
+        // The dispatcher uses PC-relative addressing to find function tables in .rodata.
+        // We preserve this layout: .rodata before .text at the original relative offset.
         auto order = [](const std::string& n) -> int {
-            // LOAD R segment
+            // LOAD R segment (read-only, but .rodata is now writable for relocations)
             if (n == ".note") return 0;
             if (n == ".dynsym") return 1;
             if (n == ".gnu.hash") return 2;
             if (n == ".hash") return 3;
             if (n == ".dynstr") return 4;
             if (n == ".rela.dyn") return 5;
-            if (n == ".rodata") return 6;
+            if (n == ".rodata") return 6;  // Function tables are HERE at PC-relative offset
             // LOAD RX segment
             if (n == ".text") return 7;
-            // LOAD RW (RELRO) segment - .data.rel.ro, .dynamic, .relro_padding
-            if (n == ".data.rel.ro") return 8;
-            if (n == ".dynamic") return 9;
-            if (n == ".relro_padding") return 10;
-            // LOAD RW segment - .data, .bss
-            if (n == ".data") return 11;
-            if (n == ".bss") return 12;
+            // LOAD RW segment - .dynamic, .relro_padding, .data, .bss
+            if (n == ".dynamic") return 8;
+            if (n == ".relro_padding") return 9;
+            if (n == ".data") return 10;
+            if (n == ".bss") return 11;
             return 100;
         };
         
@@ -1169,41 +1194,51 @@ private:
             return false;
         });
         
-        // First pass: compute addresses for sections before RELRO segment
+        // First pass: compute addresses for sections before .text
+        // Function tables are in .rodata at their original PC-relative offsets
         for (auto& s : sections_) {
             if (!s.isAlloc()) continue;
-            if (s.name == ".data.rel.ro") break;  // Stop before RELRO segment
+            if (s.name == ".text") break;  // Stop before .text
             
             addr = (addr + s.alignment - 1) & ~(s.alignment - 1);
             s.addr = addr;
             s.offset = addr;
             addr += s.size();
             
-            if (s.name == ".text") text_addr_ = s.addr;
-            if (s.name == ".rodata") rodata_addr_ = s.addr;
+            if (s.name == ".rodata") {
+                rodata_addr_ = s.addr;
+                // Function tables are inside .rodata - set data_rel_ro_addr_ to point there
+                // This is used by relocation building code
+                data_rel_ro_addr_ = rodata_addr_ + rodata_table_1_off_;
+            }
             
             printf("  %-16s @ 0x%08lx  size=0x%06zx  align=%lu\n",
                    s.name.c_str(), s.addr, s.size(), s.alignment);
         }
         
-        // Page-align for RELRO segment (LOAD RW #1)
-        uint64_t relro_start = (addr + 0xFFF) & ~0xFFFUL;
-        printf("  [page align for RELRO: 0x%lx -> 0x%lx]\n", addr, relro_start);
-        addr = relro_start;
+        // Page-align for .text segment (LOAD RX)
+        uint64_t text_start = (addr + 0xFFF) & ~0xFFFUL;
+        printf("  [page align for .text: 0x%lx -> 0x%lx]\n", addr, text_start);
+        addr = text_start;
         
-        // Compute .data.rel.ro address
+        // Compute .text address
         for (auto& s : sections_) {
-            if (s.name == ".data.rel.ro") {
+            if (s.name == ".text") {
                 addr = (addr + s.alignment - 1) & ~(s.alignment - 1);
                 s.addr = addr;
                 s.offset = addr;
-                data_rel_ro_addr_ = addr;
+                text_addr_ = addr;
                 addr += s.size();
                 printf("  %-16s @ 0x%08lx  size=0x%06zx  align=%lu\n",
                        s.name.c_str(), s.addr, s.size(), s.alignment);
                 break;
             }
         }
+        
+        // Page-align for RW segment
+        uint64_t rw_start = (addr + 0xFFF) & ~0xFFFUL;
+        printf("  [page align for RW: 0x%lx -> 0x%lx]\n", addr, rw_start);
+        addr = rw_start;
         
         // Compute .dynamic address and populate data
         for (auto& s : sections_) {
@@ -1439,8 +1474,9 @@ private:
                 memcpy(kd + 0, &lds, 4);
                 
                 // Stack - set to max needed by specialized functions
-                // Unlike IFC which compiles everything together, we call separate functions
-                // that have their own scratch requirements
+                // The specialized functions we call need scratch space for their local variables
+                // Unlike IFC which compiles everything together and can inline/optimize,
+                // we call separate functions that have explicit scratch requirements
                 uint32_t stack = max_stack_;
                 memcpy(kd + 4, &stack, 4);
                 
@@ -1635,24 +1671,24 @@ private:
                 else if (strstr(sym_name, "ncclDevFuncTable_4")) table_num = 4;
                 
                 if (table_num > 0) {
-                    // Map to .data.rel.ro address
+                    // Map to .rodata address where function tables are
                     uint64_t new_val;
                     switch (table_num) {
-                        case 1: new_val = data_rel_ro_addr_; break;
-                        case 2: new_val = data_rel_ro_addr_ + table_spacing_; break;
-                        case 4: new_val = data_rel_ro_addr_ + table_spacing_ * 2; break;
+                        case 1: new_val = rodata_addr_ + rodata_table_1_off_; break;
+                        case 2: new_val = rodata_addr_ + rodata_table_2_off_; break;
+                        case 4: new_val = rodata_addr_ + rodata_table_4_off_; break;
                         default: new_val = val; break;
                     }
                     
                     // Update symbol value
                     memcpy(sym + 8, &new_val, 8);
                     
-                    // Update section index to .data.rel.ro
-                    uint16_t data_rel_ro_idx = new_section_indices[".data.rel.ro"];
-                    memcpy(sym + 6, &data_rel_ro_idx, 2);
+                    // Update section index to .rodata
+                    uint16_t rodata_idx = new_section_indices[".rodata"];
+                    memcpy(sym + 6, &rodata_idx, 2);
                     
                     printf("  Patched %s: 0x%lx -> 0x%lx (section %d -> %d)\n",
-                           sym_name, val, new_val, shndx, data_rel_ro_idx);
+                           sym_name, val, new_val, shndx, rodata_idx);
                     return;
                 }
             }
@@ -1694,27 +1730,27 @@ private:
                     sym_name = (const char*)dynsym_strtab->data.data() + name_idx;
                 }
                 
-                // ncclDevFuncTable_* symbols: patch their addresses to .data.rel.ro
+                // ncclDevFuncTable_* symbols: patch their addresses to .rodata
                 // These are function pointer tables filled by relocations
                 if (strncmp(sym_name, "ncclDevFuncTable_", 17) == 0) {
                     uint64_t new_val = 0;
-                    if (strstr(sym_name, "ncclDevFuncTable_1")) new_val = data_rel_ro_addr_;
-                    else if (strstr(sym_name, "ncclDevFuncTable_2")) new_val = data_rel_ro_addr_ + table_spacing_;
-                    else if (strstr(sym_name, "ncclDevFuncTable_4")) new_val = data_rel_ro_addr_ + table_spacing_ * 2;
+                    if (strstr(sym_name, "ncclDevFuncTable_1")) new_val = rodata_addr_ + rodata_table_1_off_;
+                    else if (strstr(sym_name, "ncclDevFuncTable_2")) new_val = rodata_addr_ + rodata_table_2_off_;
+                    else if (strstr(sym_name, "ncclDevFuncTable_4")) new_val = rodata_addr_ + rodata_table_4_off_;
                     
                     if (new_val != 0) {
                         // Update st_value
                         memcpy(sym + 8, &new_val, 8);
-                        // Update st_shndx to .data.rel.ro
-                        uint16_t data_rel_ro_idx = 0;
+                        // Update st_shndx to .rodata
+                        uint16_t rodata_idx = 0;
                         for (size_t j = 0; j < sections_.size(); j++) {
-                            if (sections_[j].name == ".data.rel.ro") { data_rel_ro_idx = j + 1; break; }
+                            if (sections_[j].name == ".rodata") { rodata_idx = j + 1; break; }
                         }
-                        memcpy(sym + 6, &data_rel_ro_idx, 2);
+                        memcpy(sym + 6, &rodata_idx, 2);
                         // Keep as OBJECT type with hidden visibility
                         sym[4] = 1 | (0 << 4);  // STT_OBJECT | STB_LOCAL
                         sym[5] = 2;  // STV_HIDDEN
-                        printf("  Patched dynsym %s: val=0x%lx, shndx=%d\n", sym_name, new_val, data_rel_ro_idx);
+                        printf("  Patched dynsym %s: val=0x%lx, shndx=%d\n", sym_name, new_val, rodata_idx);
                     }
                     continue;
                 }
@@ -1734,8 +1770,42 @@ private:
         if (symtab_sec && strtab_sec) {
             printf("Patching .symtab symbols...\n");
             for (size_t i = 0; i + 24 <= symtab_sec->data.size(); i += 24) {
-                patchSymbol(symtab_sec->data.data() + i,
-                           strtab_sec->data.data(), strtab_sec->data.size());
+                uint8_t* sym = symtab_sec->data.data() + i;
+                
+                // Get symbol name
+                uint32_t name_idx;
+                memcpy(&name_idx, sym, 4);
+                const char* sym_name = "";
+                if (name_idx < strtab_sec->data.size()) {
+                    sym_name = (const char*)strtab_sec->data.data() + name_idx;
+                }
+                
+                // ncclDevFuncTable_* symbols: change to LOCAL HIDDEN to match IFC
+                // IFC has these as _ZL18ncclDevFuncTable_* (LOCAL HIDDEN)
+                if (strncmp(sym_name, "ncclDevFuncTable_", 17) == 0) {
+                    uint64_t new_val = 0;
+                    if (strstr(sym_name, "ncclDevFuncTable_1")) new_val = rodata_addr_ + rodata_table_1_off_;
+                    else if (strstr(sym_name, "ncclDevFuncTable_2")) new_val = rodata_addr_ + rodata_table_2_off_;
+                    else if (strstr(sym_name, "ncclDevFuncTable_4")) new_val = rodata_addr_ + rodata_table_4_off_;
+                    
+                    if (new_val != 0) {
+                        // Update st_value
+                        memcpy(sym + 8, &new_val, 8);
+                        // Update st_shndx to .rodata
+                        uint16_t rodata_idx = 0;
+                        for (size_t j = 0; j < sections_.size(); j++) {
+                            if (sections_[j].name == ".rodata") { rodata_idx = j + 1; break; }
+                        }
+                        memcpy(sym + 6, &rodata_idx, 2);
+                        // Change to LOCAL HIDDEN to match IFC
+                        sym[4] = ELF64_ST_INFO(STB_LOCAL, STT_OBJECT);
+                        sym[5] = STV_HIDDEN;
+                        printf("  Patched symtab %s: val=0x%lx, shndx=%d -> LOCAL HIDDEN\n", sym_name, new_val, rodata_idx);
+                    }
+                    continue;
+                }
+                
+                patchSymbol(sym, strtab_sec->data.data(), strtab_sec->data.size());
             }
         }
         
@@ -2024,18 +2094,23 @@ private:
         };
         
         // Generate relocations for each function table entry
+        // Tables are in .rodata at their original PC-relative offsets
+        uint64_t table1_addr = rodata_addr_ + rodata_table_1_off_;
+        uint64_t table2_addr = rodata_addr_ + rodata_table_2_off_;
+        uint64_t table4_addr = rodata_addr_ + rodata_table_4_off_;
+        
         int reloc_count = 0;
         for (int i = 0; i < FUNC_COUNT; i++) {
             if (table_1_[i]) {
-                addReloc(data_rel_ro_addr_ + i * 8, text_addr_ + table_1_[i]);
+                addReloc(table1_addr + i * 8, text_addr_ + table_1_[i]);
                 reloc_count++;
             }
             if (table_2_[i]) {
-                addReloc(data_rel_ro_addr_ + table_spacing_ + i * 8, text_addr_ + table_2_[i]);
+                addReloc(table2_addr + i * 8, text_addr_ + table_2_[i]);
                 reloc_count++;
             }
             if (table_4_[i]) {
-                addReloc(data_rel_ro_addr_ + table_spacing_ * 2 + i * 8, text_addr_ + table_4_[i]);
+                addReloc(table4_addr + i * 8, text_addr_ + table_4_[i]);
                 reloc_count++;
             }
         }
