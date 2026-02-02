@@ -84,6 +84,9 @@ class RocProfCompute:
         setattr(self.__args, "loglevel", self.__loglevel)
         set_locale_encoding()
 
+        if self.__mode == "profile":
+            generate_machine_specs(self.__args)
+
         self.sanitize()
 
         if self.__mode == "profile":
@@ -170,6 +173,45 @@ class RocProfCompute:
             )
             self.__args.format_rocprof_output = "csv"
 
+        # Validate name and output directory arguments in profiling mode
+        # Skip validation if only listing metrics or sets
+        if self.__mode == "profile" and (
+            self.__args.list_metrics is None
+            and getattr(self.__args, "list_available_metrics", False)
+            and getattr(self.__args, "list_sets", False)
+        ):
+            if self.__args.name is None and self.__args.output_directory == str(
+                Path.cwd() / "workloads"
+            ):
+            # Remove if statement and the else code block after 8.0 release
+            if self.__args.path == str(Path.cwd() / "workloads"):
+                console_error("Either --output-directory or --name is required")
+            else:
+                console_warning(
+                    "--path is deprecated and will be removed in future releases."
+                )
+
+            if self.__args.subpath != "gpu_model":
+                console_warning(
+                    f"--subpath is deprecated and will be removed in future releases."
+                )
+
+            if self.__args.name is not None and "/" in self.__args.name:
+                console_error('"/" is not permitted in profile name')
+
+            # Replace parameters in output directory when either:
+            # 1. --output-directory is explicitly given by user
+            # 2. --path and --output-directory are set to default workload directory
+            # --output-directory is given higher priority than --path
+            # as --path is deprecated and will be removed in future releases.
+            if self.__args.output_directory != str(
+                Path.cwd() / "workloads"
+            ) or self.__args.path == str(Path.cwd() / "workloads"):
+                self.replace_parameters_in_output_directory()
+                # Set path to output_directory for roofline
+                # Remove this while removing roofline from profiling mode
+                self.__args.path = self.__args.output_directory
+
     def replace_parameters_in_output_directory(self) -> None:
         """Replace parameters in output directory path"""
         # Add --name to output directory if --output-directory is not given
@@ -211,13 +253,16 @@ class RocProfCompute:
         self.__args.output_directory = replace_rank(self.__args.output_directory)
 
     @demarcate
-    def load_soc_specs(self, sysinfo: Optional[dict] = None) -> None:
-        """Load OmniSoC instance for RocProfCompute run"""
-        self.__mspec = generate_machine_specs(self.__args, sysinfo)
+    def geneate_machine_specs(self) -> None:
+        """Generate MachineSpecs instance for RocProfCompute run"""
+        self.__mspec = generate_machine_specs(self.__args)
         if self.__args and self.__args.specs:
             print(self.__mspec)
             sys.exit(0)
 
+    @demarcate
+    def load_soc_specs(self, sysinfo: Optional[dict] = None) -> None:
+        """Load OmniSoC instance for RocProfCompute run"""
         arch = self.__mspec.gpu_arch
         soc_module = importlib.import_module(f"rocprof_compute_soc.soc_{arch}")
         soc_class = getattr(soc_module, f"{arch}_soc")
@@ -440,37 +485,6 @@ class RocProfCompute:
             self.list_metrics()
         elif self.__args.list_sets:
             self.list_sets()
-        elif self.__args.name is None and self.__args.output_directory == str(
-            Path.cwd() / "workloads"
-        ):
-            # Remove if statement and the else code block after 8.0 release
-            if self.__args.path == str(Path.cwd() / "workloads"):
-                console_error("Either --output-directory or --name is required")
-            else:
-                console_warning(
-                    "--path is deprecated and will be removed in future releases."
-                )
-
-        if self.__args.subpath != "gpu_model":
-            console_warning(
-                f"--subpath is deprecated and will be removed in future releases."
-            )
-
-        if self.__args.name is not None and "/" in self.__args.name:
-            console_error('"/" is not permitted in profile name')
-
-        # Replace parameters in output directory when either:
-        # 1. --output-directory is explicitly given by user
-        # 2. --path and --output-directory are set to default workload directory
-        # --output-directory is given higher priority than --path
-        # as --path is deprecated and will be removed in future releases.
-        if self.__args.output_directory != str(
-            Path.cwd() / "workloads"
-        ) or self.__args.path == str(Path.cwd() / "workloads"):
-            self.replace_parameters_in_output_directory()
-            # Set path to output_directory for roofline
-            # Remove this while removing roofline from profiling mode
-            self.__args.path = self.__args.output_directory
 
         # instantiate desired profiler
         profiler = self.create_profiler()
