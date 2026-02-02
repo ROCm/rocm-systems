@@ -1,10 +1,21 @@
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+#if defined(__linux__)
 #include <dlfcn.h>
-#include "impl/hsa/hsa.h"
-#include "impl/hsa/hsa_ven_amd_loader.h"
+#endif
+#include "hsa-runtime/inc/hsa.h"
+#include "hsa-runtime/inc/hsa_ven_amd_loader.h"
+
+static hsa_status_t (*fn_hsa_ven_amd_loader_query_host_address)(
+    const void *device_address, const void **host_address);
 
 static std::mutex* lock_ = new std::mutex();
 
-#if 1
+#if defined(__linux__)
 #define _HSAKMT_LOOKUP_SYMS(_sym)                                              \
 if (fn_##_sym == nullptr) {                                                    \
     std::lock_guard<std::mutex> gard(*lock_);                                  \
