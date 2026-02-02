@@ -260,6 +260,8 @@ ROCm Compute Profiler appends ``/<rank>`` to avoid collisions across ranks.
 
 Examples:
 
+* Profiling without MPI:
+
 .. code-block:: shell-session
 
    $ rocprof-compute profile --name vcopy -- ./vcopy -n 1048576 -b 256
@@ -300,7 +302,7 @@ Examples:
     ├── roofline.csv
     └── sysinfo.csv
 
-Profiling without MPI at host ``amd-ryzen``:
+* Profiling with MPI at host ``amd-ryzen``:
 
 .. code-block:: shell-session
 
@@ -1082,6 +1084,11 @@ When profiling MPI workloads, ROCm Compute Profiler can isolate outputs by rank.
 If a rank is detected and no rank placeholder is provided, each rank writes to a
 subdirectory named by its rank to avoid output collisions.
 
+Example Usage
+-----
+
+* With ``--output-directory`` option: 
+
 .. code-block:: shell-session
 
    $ mpirun -n 4 rocprof-compute profile --output-directory /tmp/mpi_profile -- ./laplace_eqn -n 1048576 -b 256
@@ -1128,6 +1135,56 @@ The example above produces:
     ├── profiling_config.yaml
     ├── roofline.csv
     └── sysinfo.csv
+
+* With ``--name`` option:
+
+.. code-block:: shell-session
+
+   $ mpirun -n 4 rocprof-compute profile --name laplace -- ./laplace_eqn -n 1048576 -b 256
+
+The example above produces:
+
+.. code-block:: shell-session
+
+   $ ls ./workloads/laplace_eqn
+   0  1  2  3
+
+   $ tree ./workloads/laplace_eqn/0
+
+   └── MI200
+    ├── empirRoof_gpu-0_FP32.html
+    ├── log.txt
+    ├── perfmon
+    │   ├── pmc_perf_0.txt
+    │   ├── pmc_perf_0.yaml
+    │   ├── pmc_perf_1.txt
+    │   ├── pmc_perf_1.yaml
+    │   ├── pmc_perf_2.txt
+    │   ├── pmc_perf_2.yaml
+    │   ├── pmc_perf_3.txt
+    │   ├── pmc_perf_3.yaml
+    │   ├── pmc_perf_4.txt
+    │   ├── pmc_perf_4.yaml
+    │   ├── pmc_perf_5.txt
+    │   ├── SQC_DCACHE_INFLIGHT_LEVEL.txt
+    │   ├── SQC_DCACHE_INFLIGHT_LEVEL.yaml
+    │   ├── SQC_ICACHE_INFLIGHT_LEVEL.txt
+    │   ├── SQC_ICACHE_INFLIGHT_LEVEL.yaml
+    │   ├── SQ_IFETCH_LEVEL.txt
+    │   ├── SQ_IFETCH_LEVEL.yaml
+    │   ├── SQ_INST_LEVEL_LDS.txt
+    │   ├── SQ_INST_LEVEL_LDS.yaml
+    │   ├── SQ_INST_LEVEL_SMEM.txt
+    │   ├── SQ_INST_LEVEL_SMEM.yaml
+    │   ├── SQ_INST_LEVEL_VMEM.txt
+    │   ├── SQ_INST_LEVEL_VMEM.yaml
+    │   ├── SQ_LEVEL_WAVES.txt
+    │   └── SQ_LEVEL_WAVES.yaml
+    ├── pmc_perf.csv
+    ├── profiling_config.yaml
+    ├── roofline.csv
+    └── sysinfo.csv
+
 
 To control output placement explicitly, add ``%rank%`` (and other placeholders)
 to your output directory. The following example is run on the host `amd-ryzen`:
@@ -1182,9 +1239,18 @@ ROCm Compute Profiler supports the following libraries, APIs and job schedulers:
 
 * OpenMPI
 * MPICH
-* MVAPICH2 
+* MVAPICH2
 * Slurm
 * Flux Core
 * PMI
 * PMIx
 * PALS
+
+For other MPI implementations or job schedulers, please use the ``%env{NAME}%``
+placeholder to include environment variables that identify the rank. For example,
+if your MPI implementation sets the ``MY_MPI_RANK`` environment variable, you can
+specify the output directory as follows:
+
+.. code-block:: shell-session
+
+   $ mpirun -n 4 rocprof-compute profile --output-directory /tmp/mpi_profile/%env{MY_MPI_RANK}% -- ./my_mpi_application
