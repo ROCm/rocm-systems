@@ -42,10 +42,12 @@ target_link_libraries(
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-perfetto>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-sqlite3>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-json>
+        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-logger>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-timemory>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-elfutils>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-bfd>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-mpi>
+        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-ucx>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-libva>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-ptl>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-rocm>
@@ -64,6 +66,7 @@ target_link_libraries(
 add_subdirectory(common)
 add_subdirectory(core)
 add_subdirectory(binary)
+add_subdirectory(logger)
 
 # ------------------------------------------------------------------------------#
 #

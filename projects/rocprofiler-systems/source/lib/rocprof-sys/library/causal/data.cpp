@@ -29,7 +29,7 @@
 #include "core/binary/fwd.hpp"
 #include "core/config.hpp"
 #include "core/containers/c_array.hpp"
-#include "core/debug.hpp"
+#include "core/demangler.hpp"
 #include "core/state.hpp"
 #include "core/utility.hpp"
 #include "library/causal/delay.hpp"
@@ -52,6 +52,8 @@
 #include <timemory/unwind/processed_entry.hpp>
 #include <timemory/utility/procfs/maps.hpp>
 #include <timemory/utility/types.hpp>
+
+#include "logger/debug.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -87,8 +89,12 @@ auto speedup_dist      = []() {
     size_t _nzero = std::ceil(_v.size() / 4.0);
     _v.resize(_v.size() + _nzero, 0);
     std::sort(_v.begin(), _v.end());
-    ROCPROFSYS_CI_THROW(_v.back() > 100, "Error! last value is too large: %i\n",
-                             (int) _v.back());
+    if(get_is_continuous_integration() && _v.back() > 100)
+    {
+        throw std::runtime_error(
+            fmt::format("Error! last value is too large: {}", _v.back()));
+    }
+
     return _v;
 }();
 
@@ -191,14 +197,11 @@ get_filters(const std::set<binary::scope_filter::filter_scope>& _scopes = {
         if(_former_include != _current_include)
         {
             if(!_binary_include.empty())
-                ROCPROFSYS_VERBOSE(0, "[causal] binary scope     : %s\n",
-                                   _binary_include.c_str());
+                LOG_DEBUG("[causal] binary scope     : {}", _binary_include);
             if(!_source_include.empty())
-                ROCPROFSYS_VERBOSE(0, "[causal] source scope     : %s\n",
-                                   _source_include.c_str());
+                LOG_DEBUG("[causal] source scope     : {}", _source_include);
             if(!_function_include.empty())
-                ROCPROFSYS_VERBOSE(0, "[causal] function scope   : %s\n",
-                                   _function_include.c_str());
+                LOG_DEBUG("[causal] function scope   : {}", _function_include);
             _former_include = _current_include;
         }
 
@@ -229,14 +232,11 @@ get_filters(const std::set<binary::scope_filter::filter_scope>& _scopes = {
         if(_former_exclude != _current_exclude)
         {
             if(!_binary_exclude.empty())
-                ROCPROFSYS_VERBOSE(0, "[causal] binary exclude   : %s\n",
-                                   _binary_exclude.c_str());
+                LOG_DEBUG("[causal] binary exclude   : {}", _binary_exclude);
             if(!_source_exclude.empty())
-                ROCPROFSYS_VERBOSE(0, "[causal] source exclude   : %s\n",
-                                   _source_exclude.c_str());
+                LOG_DEBUG("[causal] source exclude   : {}", _source_exclude);
             if(!_function_exclude.empty())
-                ROCPROFSYS_VERBOSE(0, "[causal] function exclude : %s\n",
-                                   _function_exclude.c_str());
+                LOG_DEBUG("[causal] function exclude : {}", _function_exclude);
             _former_exclude = _current_exclude;
         }
 
@@ -318,7 +318,7 @@ compute_eligible_lines_impl()
         {
             if(sf::satisfies_filter(_filters, sf::SOURCE_FILTER, ditr.file) ||
                sf::satisfies_filter(_filters, sf::SOURCE_FILTER,
-                                    join(':', ditr.file, ditr.line)))
+                                    fmt::format("{}:{}", ditr.file, ditr.line)))
             {
                 _scoped.debug_info.emplace_back(ditr);
             }
@@ -341,10 +341,9 @@ compute_eligible_lines_impl()
         }
     }
 
-    ROCPROFSYS_VERBOSE(
-        0, "[causal] eligible address ranges: %zu, coarse address range: %zu [%s]\n",
-        _eligible_ar.size(), _eligible_ar.range_size(),
-        _eligible_ar.get_coarse_range().as_string().c_str());
+    LOG_DEBUG("[causal] eligible address ranges: {}, coarse address range: {} [{}]",
+              _eligible_ar.size(), _eligible_ar.range_size(),
+              _eligible_ar.get_coarse_range().as_string());
 
     if(_eligible_ar.empty())
     {
@@ -354,16 +353,18 @@ compute_eligible_lines_impl()
         save_line_info(_cfg, config::get_verbose());
     }
 
-    ROCPROFSYS_CONDITIONAL_THROW(
-        _eligible_ar.empty(),
-        "Error! binary analysis (after filters) resulted in zero eligible instruction "
-        "pointer addresses for causal experimentation");
+    if(_eligible_ar.empty())
+    {
+        throw std::runtime_error(
+            "Error! binary analysis (after filters) resulted in "
+            "zero eligible instruction pointer addresses for causal experimentation");
+    }
 }
 
 void
 save_maps_info_impl(std::ostream& _ofs)
 {
-    auto _maps_file = join("/", "/proc", process::get_id(), "maps");
+    auto _maps_file = fmt::format("/proc/{}/maps", process::get_id());
     auto _ifs       = std::ifstream{ _maps_file };
     auto _maps      = std::stringstream{};
     if(_ifs)
@@ -387,8 +388,8 @@ save_line_info_impl(std::ostream&                           _ofs,
     auto _write_impl = [&_ofs, &_info](const binary::binary_info& _data) {
         for(const auto& itr : _data.mappings)
         {
-            _ofs << itr.pathname << " [" << as_hex(itr.load_address) << " - "
-                 << as_hex(itr.last_address) << "]\n";
+            _ofs << itr.pathname << " [" << fmt::format("0x{:X}", itr.load_address)
+                 << " - " << fmt::format("0x{:X}", itr.last_address) << "]\n";
         }
 
         auto _emitted_dwarf_addresses = std::set<uintptr_t>{};
@@ -396,10 +397,11 @@ save_line_info_impl(std::ostream&                           _ofs,
         {
             auto _addr     = itr.address;
             auto _addr_off = itr.address + itr.load_address;
-            _ofs << "    " << as_hex(_addr_off) << " [" << as_hex(_addr)
+            _ofs << "    " << _addr_off.as_hex() << " [" << _addr.as_hex()
                  << "] :: " << itr.file;
             if(itr.line > 0) _ofs << ":" << itr.line;
-            if(!itr.func.empty()) _ofs << " [" << tim::demangle(itr.func) << "]";
+            if(!itr.func.empty())
+                _ofs << " [" << rocprofsys::utility::demangle(itr.func) << "]";
             _ofs << "\n";
 
             if(std::get<0>(_info))
@@ -408,7 +410,7 @@ save_line_info_impl(std::ostream&                           _ofs,
                 {
                     _ofs << "        " << ditr.file << ":" << ditr.line;
                     if(!ditr.func.empty())
-                        _ofs << " [" << tim::demangle(ditr.func) << "]";
+                        _ofs << " [" << rocprofsys::utility::demangle(ditr.func) << "]";
                     _ofs << "\n";
                 }
             }
@@ -417,7 +419,7 @@ save_line_info_impl(std::ostream&                           _ofs,
             {
                 for(const auto& ditr : itr.dwarf_info)
                 {
-                    _ofs << "        " << as_hex(ditr.address) << " :: " << ditr.file
+                    _ofs << "        " << ditr.address.as_hex() << " :: " << ditr.file
                          << ":" << ditr.line;
                     _ofs << "\n";
                     _emitted_dwarf_addresses.emplace(ditr.address.low);
@@ -430,7 +432,7 @@ save_line_info_impl(std::ostream&                           _ofs,
             for(const auto& itr : _data.debug_info)
             {
                 if(_emitted_dwarf_addresses.count(itr.address.low) > 0) continue;
-                _ofs << "    " << as_hex(itr.address) << " :: " << itr.file << ":"
+                _ofs << "    " << itr.address.as_hex() << " :: " << itr.file << ":"
                      << itr.line;
                 _ofs << "\n";
             }
@@ -469,8 +471,10 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
 
     const auto& _thr_info = thread_info::init(true);
     set_thread_state(ThreadState::Disabled);
-    ROCPROFSYS_CONDITIONAL_THROW(!_thr_info->is_offset,
-                                 "Error! causal profiling thread should be offset");
+    if(!_thr_info->is_offset)
+    {
+        throw std::runtime_error("Error! causal profiling thread should be offset");
+    }
 
     if(!perform_experiment_impl_completed)
         perform_experiment_impl_completed = std::make_unique<std::promise<void>>();
@@ -504,8 +508,7 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
 
     if(_delay_sec > 0.0)
     {
-        ROCPROFSYS_VERBOSE(1, "[causal] delaying experimentation for %.2f seconds...\n",
-                           _delay_sec);
+        LOG_DEBUG("[causal] delaying experimentation for {} seconds...", _delay_sec);
         uint64_t _delay_nsec = _delay_sec * units::sec;
         std::this_thread::yield();
         std::this_thread::sleep_for(std::chrono::nanoseconds{ _delay_nsec });
@@ -519,12 +522,10 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
             auto _elapsed = clock_type::now() - _start_time;
             if(_elapsed >= _duration_nsec)
             {
-                ROCPROFSYS_VERBOSE(
-                    1,
-                    "[causal] stopping experimentation after %.2f seconds "
-                    "(elapsed: %.2f seconds)...\n",
-                    _duration_sec,
-                    std::chrono::duration_cast<duration_sec_t>(_elapsed).count());
+                LOG_DEBUG("[causal] stopping experimentation after {} seconds "
+                          "(elapsed: {} seconds)...",
+                          _duration_sec,
+                          std::chrono::duration_cast<duration_sec_t>(_elapsed).count());
                 causal::sampling::post_process();
                 return true;
             }
@@ -544,9 +545,8 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
             {
                 if(_impl_no > 0) return;
 
-                ROCPROFSYS_VERBOSE(
-                    0,
-                    "[causal] experiment failed to start. Number of PC candidates: %zu\n",
+                LOG_DEBUG(
+                    "[causal] experiment failed to start. Number of PC candidates: {}",
                     eligible_pc_candidates.load());
 
                 auto _memory   = std::stringstream{};
@@ -582,7 +582,7 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
                 for(const auto& itr : _eligible_pc_hist)
                 {
                     _eligible << "    " << std::setw(8) << itr.second
-                              << " :: " << as_hex(itr.first) << "\n";
+                              << " :: " << fmt::format("0x{:X}", itr.first) << "\n";
                 }
 
                 auto _samples = std::vector<std::pair<uintptr_t, size_t>>{};
@@ -606,34 +606,33 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
                         {
                             _sample << "    " << std::setw(8) << itr.second
                                     << " :: " << std::setw(5) << std::boolalpha
-                                    << _is_eligible << " :: " << as_hex(itr.first) << " "
+                                    << _is_eligible
+                                    << " :: " << fmt::format("0x{:X}", itr.first) << " "
                                     << _linfo->location << ":" << _linfo->lineno << " ["
-                                    << demangle(_linfo->name) << "]\n";
+                                    << rocprofsys::utility::demangle(_linfo->name)
+                                    << "]\n";
                             for(const auto& iitr : _linfo->lineinfo.lines)
                             {
-                                _sample << "    " << std::setw(8) << itr.second
-                                        << " :: " << std::setw(5) << std::boolalpha
-                                        << _is_eligible << " :: " << as_hex(itr.first)
-                                        << " " << iitr.location << ":" << iitr.line
-                                        << " [" << demangle(iitr.name) << "]\n";
+                                _sample
+                                    << "    " << std::setw(8) << itr.second
+                                    << " :: " << std::setw(5) << std::boolalpha
+                                    << _is_eligible
+                                    << " :: " << fmt::format("0x{:X}", itr.first) << " "
+                                    << iitr.location << ":" << iitr.line << " ["
+                                    << rocprofsys::utility::demangle(iitr.name) << "]\n";
                             }
                         }
                     }
                 }
 
-                ROCPROFSYS_PRINT_COLOR(fatal, "causal experiment never started\n");
+                LOG_CRITICAL("Causal experiment never started");
 
-                std::cerr << std::flush;
-                auto _cerr = tim::log::warning_stream(std::cerr);
-                _cerr << "\npc samples:\n\n" << _sample.str() << "\n";
-                _cerr << "\neligible pcs:\n\n" << _eligible.str() << "\n";
-                _cerr << "\nscoped pcs:\n\n" << _scoped.str() << "\n";
+                LOG_WARNING("pc samples: {} eligible pcs: {} scoped pcs: {}",
+                            _sample.str(), _eligible.str(), _scoped.str());
                 if(get_verbose() >= 1)
                 {
-                    _cerr << "\nbinary pcs:\n\n" << _binary.str() << "\n";
-                    _cerr << "\nmaps:\n\n" << _memory.str() << "\n";
+                    LOG_WARNING("binary pcs: {} maps: {}", _binary.str(), _memory.str());
                 }
-                std::cerr << std::flush;
 
                 // if launched via rocprof-sys-causal, allow end-to-end runs that do not
                 // start experiments
@@ -643,24 +642,25 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
 
                 if(!(get_causal_end_to_end() && _omni_causal_launcher))
                 {
-                    ROCPROFSYS_CONDITIONAL_THROW(_impl_no == 0,
-                                                 "causal experiment never started");
+                    if(_impl_no == 0)
+                    {
+                        throw std::runtime_error(
+                            "Error! Causal experiment never started");
+                    }
                 }
 
                 return;
             }
             else
             {
-                ROCPROFSYS_VERBOSE(
-                    1,
-                    "[causal] experiment failed to start. Number of PC candidates: %zu\n",
+                LOG_DEBUG(
+                    "[causal] experiment failed to start. Number of PC candidates: {}",
                     eligible_pc_candidates.load());
             }
         }
 
-        ROCPROFSYS_VERBOSE(3,
-                           "[causal] experiment started. Number of PC candidates: %zu\n",
-                           eligible_pc_candidates.load());
+        LOG_TRACE("[causal] experiment started. Number of PC candidates: {}",
+                  eligible_pc_candidates.load());
 
         reset_sample_selection();
 
@@ -725,16 +725,18 @@ save_line_info(const settings::compose_filename_config& _cfg, int _verbose)
         }
         else
         {
-            throw ::rocprofsys::exception<std::runtime_error>("Error opening " + ofname);
+            throw std::runtime_error(fmt::format("Error opening {}", ofname));
         }
     };
 
-    _write(tim::settings::compose_output_filename(
-               join('-', config::get_causal_output_filename(), "binary"), "txt", _cfg),
-           get_cached_binary_info().first, { true, true, true });
-    _write(tim::settings::compose_output_filename(
-               join('-', config::get_causal_output_filename(), "scoped"), "txt", _cfg),
-           get_cached_binary_info().second, { true, true, false });
+    _write(
+        tim::settings::compose_output_filename(
+            fmt::format("{}-binary", config::get_causal_output_filename()), "txt", _cfg),
+        get_cached_binary_info().first, { true, true, true });
+    _write(
+        tim::settings::compose_output_filename(
+            fmt::format("{}-scoped", config::get_causal_output_filename()), "txt", _cfg),
+        get_cached_binary_info().second, { true, true, false });
 }
 
 size_t
@@ -792,7 +794,7 @@ sample_selection(size_t _nitr, size_t _wait_ns)
         // kept because of size() - 1 in distribution range
         if(ROCPROFSYS_UNLIKELY(_address_vec.empty()))
         {
-            ROCPROFSYS_WARNING(0, "no addresses for sample selection...\n");
+            LOG_WARNING("No addresses for sample selection...");
             return selected_entry{};
         }
 
@@ -834,13 +836,14 @@ sample_selection(size_t _nitr, size_t _wait_ns)
                 {
                     if(ROCPROFSYS_UNLIKELY(config::get_debug()))
                     {
-                        ROCPROFSYS_WARNING(
-                            0, "[%s][%s][%s][%s] %s [%s:%i][%s][%zu]\n",
-                            as_hex(_lookup_addr).c_str(), as_hex(_addr).c_str(),
-                            as_hex(_sym_addr).c_str(),
-                            (_location.empty()) ? "" : _location.data(),
-                            demangle(itr.func).c_str(), itr.file.c_str(), itr.line,
-                            itr.address.as_string().c_str(), itr.address.size());
+                        LOG_WARNING("[{}][{}][{}] [{}] {} [{}:{}][{}][{}]",
+                                    fmt::format("0x{:X}", _lookup_addr),
+                                    fmt::format("0x{:X}", _addr),
+                                    fmt::format("0x{:X}", _sym_addr),
+                                    (_location.empty()) ? "" : _location,
+                                    rocprofsys::utility::demangle(itr.func), itr.file,
+                                    itr.line, itr.address.as_string(),
+                                    itr.address.size());
                     }
                 }
             }
@@ -866,7 +869,7 @@ sample_selection(size_t _nitr, size_t _wait_ns)
         {
             if(ROCPROFSYS_UNLIKELY(!aitr))
             {
-                ROCPROFSYS_WARNING(0, "invalid atomic pc...\n");
+                LOG_WARNING("Invalid atomic pc...");
                 continue;
             }
 
@@ -898,12 +901,13 @@ get_line_info(uintptr_t _addr, bool _include_discarded)
 
             // make sure the address is in the coarse grained mapped regions
             // before performing an exhaustive search
-            bool _is_mapped = std::find_if(litr.mappings.begin(), litr.mappings.end(),
-                                                  [_addr](const auto& mitr) {
-                                               return address_range_t{ mitr.load_address,
-                                                                       mitr.last_address }
-                                                   .contains(_addr);
-                                           }) != litr.mappings.end();
+            bool _is_mapped =
+                std::find_if(litr.mappings.begin(), litr.mappings.end(),
+                                    [_addr](const auto& mitr) {
+                                 return binary::address_range{ mitr.load_address,
+                                                               mitr.last_address }
+                                     .contains(_addr);
+                             }) != litr.mappings.end();
 
             if(!_is_mapped) return;
 
@@ -937,10 +941,10 @@ get_line_info(uintptr_t _addr, bool _include_discarded)
                     for(const auto& itr : ditr.get_debug_line_info(_filters))
                     {
                         if(!_ipaddr.contains(itr.ipaddr()))
-                            ROCPROFSYS_THROW(
-                                "Error! debug line info ipaddr (%s) is not contained in "
-                                       "symbol ipaddr (%s)",
-                                as_hex(itr.ipaddr()).c_str(), as_hex(_ipaddr).c_str());
+                            throw std::runtime_error(
+                                fmt::format("Error! debug line info ipaddr ({}) is not "
+                                                          "contained in symbol ipaddr ({})",
+                                                   itr.ipaddr().as_hex(), _ipaddr.as_hex()));
                         if(itr.ipaddr().contains(_addr)) _debug_data.emplace_back(itr);
                     }
                     utility::combine(_local_data, _debug_data);
@@ -1059,10 +1063,12 @@ start_experimenting()
         speedup_dist.clear();
         for(auto itr : _user_speedup_dist)
         {
-            ROCPROFSYS_CONDITIONAL_ABORT_F(itr > 100,
-                                           "Virtual speedups must be in range [0, 100]. "
-                                           "Invalid virtual speedup: %lu\n",
-                                           itr);
+            if(itr > 100)
+            {
+                LOG_DEBUG("Virtual speedups must be in range [0, 100]. "
+                          "Invalid virtual speedup: {}",
+                          itr);
+            }
             speedup_dist.emplace_back(static_cast<uint16_t>(itr));
         }
     }

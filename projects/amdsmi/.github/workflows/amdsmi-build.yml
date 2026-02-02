@@ -2,9 +2,9 @@ name: AMDSMI CI
 
 on:
   pull_request:
-    branches: [amd-staging, amd-mainline, release/rocm-rel-*]
+    branches: [develop, juwillia/ci-1.0]
   push:
-    branches: [amd-staging, amd-mainline, release/rocm-rel-*]
+    branches: [develop, juwillia/ci-1.0]
   workflow_dispatch:
 
 permissions:

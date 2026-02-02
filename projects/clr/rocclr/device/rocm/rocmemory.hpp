@@ -126,7 +126,10 @@ class Memory : public device::Memory {
 
   // Free / deregister device memory.
   virtual void destroy() = 0;
-  hsa_status_t interopMapBuffer(amd::Os::FileDesc fdn);
+
+  // Map interop buffer
+  hsa_status_t interopMapBuffer(hsa_handle_t fdn,
+                                hsa_interop_map_flag_t flags = HSA_INTEROP_MAP_FLAG_NONE);
 
   // Place interop object into HSA's flat address space
   bool createInteropBuffer(GLenum targetType, int miplevel);
@@ -224,7 +227,7 @@ class Image : public roc::Memory {
   size_t getDeviceDataAlignment() { return deviceImageInfo_.alignment; }
 
   hsa_ext_image_t getHsaImageObject() const { return hsaImageObject_; }
-  const hsa_ext_image_descriptor_t& getHsaImageDescriptor() const { return imageDescriptor_; }
+  const hsa_ext_image_descriptor_v2_t& getHsaImageDescriptor() const { return imageDescriptor_; }
 
   virtual const address cpuSrd() const {
     return reinterpret_cast<const address>(getHsaImageObject().handle);
@@ -260,7 +263,7 @@ class Image : public roc::Memory {
 
   void populateImageDescriptor();
 
-  hsa_ext_image_descriptor_t imageDescriptor_;
+  hsa_ext_image_descriptor_v2_t imageDescriptor_;
   hsa_access_permission_t permission_;
   hsa_ext_image_data_info_t deviceImageInfo_;
   hsa_ext_image_t hsaImageObject_;

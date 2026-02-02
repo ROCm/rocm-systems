@@ -31,6 +31,8 @@
 #include "library/thread_info.hpp"
 #include "library/tracing.hpp"
 
+#include "logger/debug.hpp"
+
 #include <timemory/components/macros.hpp>
 #include <timemory/mpl/concepts.hpp>
 #include <timemory/mpl/types.hpp>
@@ -72,16 +74,17 @@ compute_sleep_for_overhead()
         int64_t _end = tracing::now();
         if(i < _nwarm) continue;
         auto _diff = (_end - _beg);
-        ROCPROFSYS_CONDITIONAL_THROW(
-            _diff < _val, "Error! sleep_for(%zu) [nanoseconds] >= %zu", _val, _diff);
+        if(_diff < _val)
+        {
+            throw std::runtime_error(
+                fmt::format("Error! sleep_for({}) [nanoseconds] >= {}", _val, _diff));
+        }
         _stats += (_diff - _val);
     }
 
-    ROCPROFSYS_BASIC_VERBOSE(2,
-                             "[causal] overhead of std::this_thread::sleep_for(...) "
-                             "invocation = %6.3f usec +/- %e\n",
-                             _stats.get_mean() / units::usec,
-                             _stats.get_stddev() / units::usec);
+    LOG_TRACE("[causal] overhead of std::this_thread::sleep_for(...) "
+              "invocation = {} usec +/- {} usec",
+              _stats.get_mean() / units::usec, _stats.get_stddev() / units::usec);
 
     tim::manager::instance()->add_metadata([_stats](auto& ar) {
         ar(tim::cereal::make_nvp("causal thread sleep overhead [nsec]", _stats));

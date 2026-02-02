@@ -90,6 +90,11 @@ class HybridMutex {
       os::PostSemaphore(sem_);
   }
 
+  // To add compatibility with std::lock_guard
+  void lock() { Acquire(); }
+  void unlock() { Release(); }
+  bool try_lock() { return Try(); }
+
  private:
   std::atomic<int> lock_;
   os::Semaphore sem_;
@@ -98,27 +103,6 @@ class HybridMutex {
 
   /// @brief: Disable copiable and assignable ability.
   DISALLOW_COPY_AND_ASSIGN(HybridMutex);
-};
-
-
-/// @brief: a class represents a kernel mutex.
-/// Uses the kernel's scheduler to keep the waiting thread from being scheduled
-/// until the lock is released (Best for long waits, though anything using
-/// a kernel object is a long wait).
-class KernelMutex {
- public:
-  KernelMutex() { lock_ = os::CreateMutex(); }
-  ~KernelMutex() { os::DestroyMutex(lock_); }
-
-  bool Try() { return os::TryAcquireMutex(lock_); }
-  bool Acquire() { return os::AcquireMutex(lock_); }
-  void Release() { os::ReleaseMutex(lock_); }
-
- private:
-  os::Mutex lock_;
-
-  /// @brief: Disable copiable and assignable ability.
-  DISALLOW_COPY_AND_ASSIGN(KernelMutex);
 };
 
 /// @brief: represents a spin lock.
@@ -143,6 +127,11 @@ class SpinMutex {
   }
   void Release() { lock_ = 0; }
 
+  // To add compatibility with std::lock_guard
+  void lock() { Acquire(); }
+  void unlock() { Release(); }
+  bool try_lock() { return Try(); }
+
  private:
   std::atomic<int> lock_;
 
@@ -165,124 +154,6 @@ class KernelEvent {
 
   /// @brief: Disable copiable and assignable ability.
   DISALLOW_COPY_AND_ASSIGN(KernelEvent);
-};
-
-/// @brief: represents a yielding shared mutex.
-/// aka read/write mutex
-class KernelSharedMutex {
- public:
-  /// @brief: Interfaces ScopedAcquire to shared operations.
-  class Shared {
-   public:
-    explicit Shared(KernelSharedMutex* lock) : lock_(lock) {}
-    bool Try() { return lock_->TryShared(); }
-    bool Acquire() { return lock_->AcquireShared(); }
-    void Release() { lock_->ReleaseShared(); }
-
-   private:
-    KernelSharedMutex* lock_;
-  };
-
-  KernelSharedMutex() { lock_ = os::CreateSharedMutex(); }
-  ~KernelSharedMutex() { os::DestroySharedMutex(lock_); }
-
-  // Exclusive mode operations
-  bool Try() { return os::TryAcquireSharedMutex(lock_); }
-  bool Acquire() { return os::AcquireSharedMutex(lock_); }
-  void Release() { os::ReleaseSharedMutex(lock_); }
-
-  // Shared mode operations
-  bool TryShared() { return os::TrySharedAcquireSharedMutex(lock_); }
-  bool AcquireShared() { return os::SharedAcquireSharedMutex(lock_); }
-  void ReleaseShared() { os::SharedReleaseSharedMutex(lock_); }
-
-  // Return shared operations interface
-  Shared shared() { return Shared(this); }
-
- private:
-  os::SharedMutex lock_;
-
-  /// @brief: Disable copiable and assignable ability.
-  DISALLOW_COPY_AND_ASSIGN(KernelSharedMutex);
-};
-
-/// @brief: Type trait to identify mutex types
-template <class T> class isMutex {
- public:
-  enum { value = false };
-};
-template <> class isMutex<HybridMutex> {
- public:
-  enum { value = true };
-};
-template <> class isMutex<KernelMutex> {
- public:
-  enum { value = true };
-};
-template <> class isMutex<SpinMutex> {
- public:
-  enum { value = true };
-};
-template <> class isMutex<KernelSharedMutex> {
- public:
-  enum { value = true };
-};
-
-/// @brief: A class behaves as a lock in a scope. When trying to enter into the
-/// critical section, creat a object of this class. After the control path goes
-/// out of the scope, it will release the lock automatically.
-template <class LockType> class ScopedAcquire {
- public:
-  /// @brief: When constructing, acquire the lock.
-  /// @param: lock(Input), pointer to an existing lock.
-  explicit ScopedAcquire(LockType* lock) : lock_(lock), doRelease(true) {
-    static_assert(isMutex<LockType>::value, "ScopedAcquire requires a mutex type.");
-    lock_.Acquire();
-  }
-  explicit ScopedAcquire(LockType lock) : lock_(lock), doRelease(true) {
-    static_assert(!isMutex<LockType>::value, "Mutex types are not copyable.");
-    lock_.Acquire();
-  }
-
-  /// @brief: when destructing, release the lock.
-  ~ScopedAcquire() {
-    if (doRelease) lock_.Release();
-  }
-
-  /// @brief: Release the lock early.  Avoid using when possible.
-  void Release() {
-    lock_.Release();
-    doRelease = false;
-  }
-
- private:
-  /// @brief: Adapts between pointers to mutex types and mutex pointer types.
-  template <class T, bool B> class container {
-   public:
-    container(T* lock) : lock_(lock) {}
-    __forceinline bool Acquire() { return lock_->Acquire(); }
-    __forceinline void Release() { return lock_->Release(); }
-
-   private:
-    T* lock_;
-  };
-
-  /// @brief: Specialization for mutex pointer types.
-  template <class T> class container<T, false> {
-   public:
-    container(T lock) : lock_(lock) {}
-    __forceinline bool Acquire() { return lock_.Acquire(); }
-    __forceinline void Release() { return lock_.Release(); }
-
-   private:
-    T lock_;
-  };
-
-  container<LockType, isMutex<LockType>::value> lock_;
-  bool doRelease;
-
-  /// @brief: Disable copiable and assignable ability.
-  DISALLOW_COPY_AND_ASSIGN(ScopedAcquire);
 };
 
 }  // namespace rocr

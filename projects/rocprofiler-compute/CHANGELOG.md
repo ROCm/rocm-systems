@@ -13,11 +13,9 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
     * ``--no-native-tool`` option is provided, forcing usage of the default profiler.
     * When performing a dynamic attach to a process for profiling.
 
-* Iteration multiplexing to collect counters in single application run:
-  * Is incompatible with --no-native-tool
-  * Two options:
-    * kernel: Counters are collected in a round robin fashion for unique kernels.
-    * kernel_launch_params: Counters are collected in a round robin fashion for unique kernels having the exact same launch parameters.
+* Iteration multiplexing to collect counters in single application run
+
+* Added `--torch-trace` option to enable mapping of PyTorch operators to collected counter values during profiling.
 
 * Runtime compilation of Roofline benchmarking:
   * GPU kernels from [rocm-amdgpu-bench](https://github.com/ROCm/rocm-amdgpu-bench) repository are moved into the ROCm Compute Profiler and are compiled at runtime using local HIP and HIPRTC Python wrappers.
@@ -31,7 +29,14 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Option ``--rocprofiler-sdk-library-path`` has been changed to ``--rocprofiler-tool-library-path`` to better reflect the fact that we provide flexibility in choosing the path to ROCprofiler-SDK tool and not the library.
 
+* Standalone roofline (--roof-only option) in profile mode now creates HTML file output instead of PDF file output for roofline charts
+
 ### Resolved issues
+
+* Implemented `NOISE_CLAMP` for L2 cache metrics to handle negative values from multi-pass profiling variance:
+  * Negative values are clamped to 0 (eliminates physically impossible negative counts)
+  * Warnings issued only when relative error exceeds 1% (anomaly detection)
+  * Added FAQ documentation explaining the "Counter variance corrected" warning
 
 * Fixed the meaning of --dispatch option in profile mode in argparser to convey the fact that it control which iterations of the kernel to profile and not which dispatch ids to profile.
 
@@ -41,9 +46,29 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Corrected peak VALU Roofline profiling and analysis by removing `FP8` VALU and `BF16` VALU benchmarking.
 
+* Fixed issue where detected max memory clock from amd-smi interface was using max gfx clock
+  * Fixed issue where values detected from amd-smi were wrong when some GPU devices were hidden using ROCR or HIP environment variables
+
+* Analysis mode bugfixes
+  * Improved warnings when metrics could not be calculated due to missing counter data
+  * Fix the check to prevent showing table where a column is full of N/A
+  * Improve detection of empty values when metric evalulation fails due to counter data missing
+
+* Fix issue where counter collection data was empty when profiling workload which spawn multiple child processes
+
+* Fix issue where dispatch filtering in a range (e.g. >2) was not working
+
+* Fix redundant warnings for compute/memory partition not found for < MI 300 series GPUs by skipping partition checks
+
+* Fixed formula for metrics related to reads from L2 cache to HBM for MI350
+
 ### Removed
 
 * Removed "VL1 Lat" metric for AMD Instinct MI300 series GPUs, due to MI300 series not supporting TCP_TCP_LATENCY_sum counter.
+
+### Optimized
+
+* Improved the responsiveness of menu and dropdown buttons in TUI analyze mode for a smoother user experience.
 
 ## ROCm Compute Profiler 3.4.0 for ROCm 7.2.0
 
@@ -107,15 +132,9 @@ A proposed long-term solution uses threshold-based clamping, distinguishing betw
 
 ### Added
 
-* Improved standalone Roofline plots in profile mode (PDF output) and analyze mode (CLI and GUI visual plots):
-  * Fixed the peak MFMA/VALU lines being cut off.
-  * Cleaned up the overlapping roofline numeric values by moving them into the side legend.
-  * Added AI points chart with respective values, cache level, and compute/memory bound status.
-  * Added full kernel names to symbol chart.
-
-* Add support for multi-kernel applications' pc sampling.
-  * PC Sampling's outputs' instructions are displayed with the name of the kernel that individual instruction belongs to.
-  * Single kernel selection is supported so that the pc samples of selected kernel can be displayed.
+* Add support for PC sampling of multi-kernel applications.
+  * PC Sampling output instructions are displayed with the name of the kernel that individual instruction belongs to.
+  * Single kernel selection is supported so that the PC samples of selected kernel can be displayed.
 
 
 ### Changed
@@ -124,15 +143,23 @@ A proposed long-term solution uses threshold-based clamping, distinguishing betw
 
 ### Optimized
 
-* Improved Roofline Benchmarking by updating the `flops_benchmark` calculation.
+* Improved roofline benchmarking by updating the `flops_benchmark` calculation.
+
+* Improved standalone roofline plots in profile mode (PDF output) and analyze mode (CLI and GUI visual plots):
+  * Fixed the peak MFMA/VALU lines being cut off.
+  * Cleaned up the overlapping roofline numeric values by moving them into the side legend.
+  * Added AI points chart with respective values, cache level, and compute/memory bound status.
+  * Added full kernel names to symbol chart.
 
 ### Resolved issues
-* Bugfixes for stability
+
+* Resolved existing issues to improve stability.
 
 ## ROCm Compute Profiler 3.3.0 for ROCm 7.1.0
 
 ### Added
-* Live attach/detach feature that allows coupling with a workload process, without controlling its start or end.
+
+* Dynamic process attachment feature that allows coupling with a workload process, without controlling its start or end.
   * Use '--attach-pid' to specify the target process ID.
   * Use '--attach-duration-msec' to specify time duration.
 

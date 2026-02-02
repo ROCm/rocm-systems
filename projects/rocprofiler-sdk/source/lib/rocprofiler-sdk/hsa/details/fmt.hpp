@@ -22,6 +22,9 @@
 
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 
+#include <fmt/format.h>
+#include <fmt/ranges.h>
+
 namespace fmt
 {
 template <>

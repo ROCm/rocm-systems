@@ -1,3 +1,6 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
+
 cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
 
 project(rocprofiler-systems-transpose-example LANGUAGES CXX)
@@ -63,6 +66,12 @@ endif()
 add_executable(transpose transpose.cpp)
 target_link_libraries(transpose PRIVATE Threads::Threads)
 
+# Specify GPU architectures to compile for
+foreach(arch IN LISTS ROCPROFSYS_GFX_TARGETS)
+    target_compile_options(transpose PRIVATE --offload-arch=${arch})
+    target_link_options(transpose PUBLIC --offload-arch=${arch})
+endforeach()
+
 if(
     CMAKE_CXX_COMPILER_ID MATCHES "Clang"
     AND NOT CMAKE_CXX_COMPILER_IS_HIPCC
@@ -93,6 +102,10 @@ if(NOT CMAKE_CXX_COMPILER_IS_HIPCC AND HIPCC_EXECUTABLE)
     rocprofiler_systems_custom_compilation(COMPILER ${HIPCC_EXECUTABLE} TARGET transpose)
 endif()
 
-if(ROCPROFSYS_INSTALL_EXAMPLES)
-    install(TARGETS transpose DESTINATION bin COMPONENT rocprofiler-systems-examples)
+if(ROCPROFSYS_INSTALL_EXAMPLES AND TARGET transpose)
+    install(
+        TARGETS transpose
+        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples
+        COMPONENT rocprofiler-systems-examples
+    )
 endif()

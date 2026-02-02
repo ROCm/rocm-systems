@@ -20,8 +20,8 @@ namespace RcclUnitTesting
     ncclCollAllReduce,
     ncclCollGather,
     ncclCollScatter,
-    ncclCollAllToAll,
-    ncclCollAllToAllv,
+    ncclCollAlltoAll,
+    ncclCollAlltoAllv,
     ncclCollSend,
     ncclCollRecv,
     ncclNumFuncs
@@ -36,8 +36,8 @@ namespace RcclUnitTesting
     "AllReduce",
     "Gather",
     "Scatter",
-    "AllToAll",
-    "AllToAllv",
+    "AlltoAll",
+    "AlltoAllv",
     "Send",
     "Recv"
   };

@@ -34,7 +34,10 @@ add_library(trace-cache-tests OBJECT ${trace_cache_tests_sources})
 
 target_link_libraries(
     trace-cache-tests
-    PRIVATE rocprofiler-systems-googletest-library rocprofiler-systems-core-library
+    PRIVATE
+        rocprofiler-systems-googletest-library
+        rocprofiler-systems-core-library
+        rocprofiler-systems-logger
 )
 
 target_include_directories(

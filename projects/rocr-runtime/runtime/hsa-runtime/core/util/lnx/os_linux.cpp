@@ -897,7 +897,7 @@ void* ReserveMemory(void* start, size_t size, size_t alignment, MemProt prot) {
   if (size >= kLargePageSize) {
     int status = madvise(aligned, size, MADV_HUGEPAGE);
     if (status) {
-      LogPrint(HSA_AMD_LOG_FLAG_INFO,
+      fprintf(stderr,
               "madvise with advice MADV_HUGEPAGE"
               " starting at address %p and page size 0x%zx, returned %d, errno: %s",
               aligned, size, status, strerror(errno));
@@ -928,6 +928,10 @@ bool UncommitMemory(void* addr, size_t size) {
 
   return ::mmap(addr, size, PROT_NONE, MAP_PRIVATE | MAP_FIXED | MAP_NORESERVE | MAP_ANONYMOUS, -1,
                 0) != MAP_FAILED;
+}
+
+bool ProtectMemory(void* va, size_t size, MemProt perms) {
+  return ::mprotect(va, size, MemProtToOsProt(perms)) == 0;
 }
 
 uint64_t HostTotalPhysicalMemory() {

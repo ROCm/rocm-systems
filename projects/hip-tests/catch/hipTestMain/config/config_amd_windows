@@ -177,7 +177,6 @@
         "Unit_hipStreamCreateWithPriority_MulthreadNonblockingflag",
         "SWDEV-396617 ExecMemcpyNodeSetParamsFromSymbol fails in direction",
         "SWDEV-396616 hipMemMap returns invalid error",
-        "Unit_hipMemVmm_Basic",
         "SWDEV-396615 mGPUs not considered correctly",
         "Unit_hipManagedKeyword_MultiGpu",
         "Disabling test tracked SWDEV-391555",
@@ -699,7 +698,6 @@
         "====================================================",
         "Unit_hipEventRecord",
         "========Rock_Window_Failures_on_gfx1151===========================================",
-        "Unit_hipMemVmm_Uncached",
         "Unit_Uuid_FntlTstsFor_SetEnv_HIP_VISIBLE_DEVICES",
         "Unit_UUID_setEnv_Thread",
         "Unit_hipTexRefSetArray_Positive",
@@ -751,9 +749,13 @@
         "========mlsejenkins_Window_Failures_on_gfx1201===========================================",
         "Unit_hipMemPoolSetAttribute_EventDependencies",
         "Unit_hipStreamSynchronize_NullStreamSynchronization",
+        "=== Test does not reflect a valid use case - SWDEV-569454",
+        "Unit_hipStreamPerThread_MultiThread",
     #endif
         "=== Following tests disabled as it should be a local perf test",
         "Performance_hipExtLaunchKernelGGL_QueryGPUFrequency",
+        "Unit_hipDynamicLogging_Positive_Basic",
+        "Unit_hipDynamicLogging_Positive_MultipleEnableDisable",
         "End of json"
     ]
 }

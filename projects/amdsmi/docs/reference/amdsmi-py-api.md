@@ -579,6 +579,43 @@ except AmdSmiException as e:
     print(e)
 ```
 
+### amdsmi_get_supported_power_cap
+
+Description: Returns dictionary of Package Power Tracking (PPT) types as currently
+configured on the given GPU. It is not supported on virtual machine guest
+
+Input parameters:
+
+* `processor_handle` device which to query
+
+Output: Dictionary with fields
+
+Field | Description | Units
+---|---
+`sensor_inds` | List of integer indices of the supported ppt types. 0 indicates PPT0 and 1 indicates PPT1. Should be used as input for `amdsmi_get_power_cap_info` and `amdsmi_set_power_cap_info`.
+`sensor_types` | Enum `AmdSmiPowerCapType` that corresponds to the ppt types that are supported on the device.
+
+Exceptions that can be thrown by `amdsmi_get_supported_power_cap` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+Example:
+
+```python
+try:
+    devices = amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            power_cap_types = amdsmi_get_supported_power_cap(device)
+            print(power_cap_types['sensor_inds'])
+            print(power_cap_types['sensor_types'])
+except AmdSmiException as e:
+    print(e)
+```
+
 ### amdsmi_get_gpu_vram_info
 
 Description: Returns dictionary of vram information for the given GPU.
@@ -1389,7 +1426,7 @@ Field | Description
 ---|---
 `name` | Name of process. If user does not have permission this will be "N/A"
 `pid` | Process ID
-`mem` | Total memory usage by GPU during process in Bytes
+`mem` | Total memory usage by GPU during process in Bytes (sum of the process memory is not expected to be the total memory usage.)
 `engine_usage` | <table><thead><tr> <th> Subfield </th> <th> Description</th> </tr></thead><tbody><tr><td>`gfx`</td><td>GFX engine usage in ns</td></tr><tr><td>`enc`</td><td>Encode engine usage in ns</td></tr></tbody></table>
 `memory_usage` | <table><thead><tr> <th> Subfield </th> <th> Description</th> </tr></thead><tbody><tr><td>`gtt_mem`</td><td>GTT memory usage in Bytes</td></tr><tr><td>`cpu_mem`</td><td>CPU memory usage in Bytes</td></tr><tr><td>`vram_mem`</td><td>Process VRAM memory usage in Bytes</td></tr> </tbody></table>
 `cu_occupancy` | Number of Compute Units utilized
@@ -1485,10 +1522,10 @@ Description: Dump CPER entries for a given GPU in a file using from CPER header 
 Input parameters:
 
 * `processor_handle` device which to query
-* `severity_mask`    the severity mask of the entries to be retrieved: 
+* `severity_mask`    the severity mask of the entries to be retrieved:
                         1:'nonfatal-uncorrected',
-                        2: 'fatal', 
-                        4: 'nonfatal-corrected', 'corrected', 
+                        2: 'fatal',
+                        4: 'nonfatal-corrected', 'corrected',
                         7: 'all'
 * `buffer_size`      number of bytes that will be used to create a buffer for copying cper entries into; default is 1048576 bytes
 * `cursor`           the zero based index at which to start retrieving cper entries; default value is 0; for example, if there are 10 cper entries available, then with a cursor value of 8, it will retrieve the last two cper entries only
@@ -1515,6 +1552,18 @@ Field | Description
 `record_id`        | A unique identifier for the CPER entry. |
 `flags`            | Reserved flags related to the CPER entry. |
 `persistence_info` | Reserved information related to persistence. |
+
+Output2: Updated cursor (int type)
+* Cursor is the index of the next cper entry in the GPU ring buffer. For example, if 10 entries were fetched successfully, the value of cursor will be 11 upon return from the API. Subsequent call to the API with cursor value of 11 should fetch the next entry
+
+Output3: A list of dictionaries, each dictionary containing the CPER record and its size:
+* {"bytes": <raw bytes>, "size": <number of bytes>}
+
+Output4: status_code
+    AMDSMI_STATUS_SUCCESS: If all entries were retrieved successfully
+    AMDSMI_STATUS_MORE_DATA: If some of the entries were retrieved and:
+        * A subsequent call to the API with the updated cursor will result in the fetching the next batch of entries, or
+        * Increasing the input buffer_size will allow more entries to be fetched with the same cursor
 
 Exceptions that can be thrown by `amdsmi_get_gpu_cper_entries` function:
 
@@ -4175,6 +4224,8 @@ Field | Description
 `cu_occupancy` | Compute Unit usage in percents
 `evicted_time` | Time that queues are evicted on a GPU in milliseconds
 
+note: Sum of the process memory is not expected to be the total memory usage.
+
 Exceptions that can be thrown by `amdsmi_get_gpu_compute_process_info` function:
 
 * `AmdSmiLibraryException`
@@ -4578,7 +4629,7 @@ try:
         print("No GPUs on machine")
     else:
         for device in devices:
-            node_number = amdsmi_topo_get_numa_node_number()
+            node_number = amdsmi_topo_get_numa_node_number(device)
             print(node_number)
 except AmdSmiException as e:
     print(e)
@@ -5398,8 +5449,7 @@ try:
     else:
         for processor in processor_handles:
             version = amdsmi_get_cpu_hsmp_driver_version(processor)
-            print(version['major'])
-            print(version['minor'])
+            print(version)
 except AmdSmiException as e:
     print(e)
 ```
@@ -5432,9 +5482,7 @@ try:
     else:
         for processor in processor_handles:
             version = amdsmi_get_cpu_smu_fw_version(processor)
-            print(version['debug'])
-            print(version['minor'])
-            print(version['major'])
+            print(version)
 except AmdSmiException as e:
     print(e)
 ```
@@ -6056,14 +6104,14 @@ Example:
 
 ```python
 try:
+    dimm_addr =0
     processor_handles = amdsmi_get_cpusocket_handles()
     if len(processor_handles) == 0:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
-            dimm = amdsmi_get_cpu_dimm_temp_range_and_refresh_rate(processor)
-            print(dimm['range'])
-            print(dimm['ref_rate'])
+            dimm = amdsmi_get_cpu_dimm_temp_range_and_refresh_rate(processor, dimm_addr)
+            print(dimm)
 except AmdSmiException as e:
     print(e)
 ```
@@ -6090,12 +6138,13 @@ Example:
 
 ```python
 try:
+    dimm_addr = 0
     processor_handles = amdsmi_get_cpusocket_handles()
     if len(processor_handles) == 0:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
-            dimm = amdsmi_get_cpu_dimm_power_consumption(processor)
+            dimm = amdsmi_get_cpu_dimm_power_consumption(processor, dimm_addr)
             print(dimm['power'])
             print(dimm['update_rate'])
             print(dimm['dimm_addr'])
@@ -6125,12 +6174,13 @@ Example:
 
 ```python
 try:
+    dimm_addr = 0
     processor_handles = amdsmi_get_cpusocket_handles()
     if len(processor_handles) == 0:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
-            dimm = amdsmi_get_cpu_dimm_thermal_sensor(processor)
+            dimm = amdsmi_get_cpu_dimm_thermal_sensor(processor,dimm_addr)
             print(dimm['sensor'])
             print(dimm['update_rate'])
             print(dimm['dimm_addr'])
@@ -6643,8 +6693,13 @@ Example:
 
 ```python
 try:
-     cpu_model_name = amdsmi_get_cpu_model_name()
-     print(cpu_model_name)
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
+        print("No CPU sockets on machine")
+    else:
+        for processor in processor_handles: 
+            cpu_model_name = amdsmi_get_cpu_model_name(processor)
+            print(cpu_model_name)
 except AmdSmiException as e:
     print(e)
 ```
@@ -6698,6 +6753,180 @@ try:
     rocm_load_status, version_message = amdsmi_get_rocm_version()
     print(f"ROCm load status: {rocm_load_status}")
     print(f"ROCm version msg: {version_message}")
+except AmdSmiException as e:
+    print(e)
+```
+
+### amdsmi_set_cpu_rail_isofreq_policy
+
+Description: Set the CPU Rail Isofrequency Policy. This function configures the frequency policy for CPU power rails.
+
+Input parameters:
+- `processor_handle` (amdsmi_processor_handle): CPU socket handle to query
+- `value` (int): Input policy value indicating the isofrequency setting:
+    - 0: Independent control enabled (each rail has an independent frequency limit)
+    - 1: Independent control disabled (all cores on both rails or each rail - have the same frequency limit)
+
+Output: `None`
+
+Exceptions that can be thrown by `amdsmi_set_cpu_rail_isofreq_policy` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+from amdsmi import *
+try:
+    ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
+        print("No CPUs on machine")
+    else:
+        for processor in processor_handles:
+            # Set independent control mode (0)
+            amdsmi_set_cpu_rail_isofreq_policy(processor, 0)
+            print("CPU rail isofrequency policy: set to each rail has independent frequency limit")
+except AmdSmiException as e:
+    print(e)
+```
+
+### amdsmi_get_cpu_rail_isofreq_policy
+
+Description: Get the CPU Rail Isofrequency Policy. This function retrieves the current frequency policy configuration for CPU power rails.
+
+Input parameters:
+- `processor_handle` (amdsmi_processor_handle): CPU socket handle to query
+
+Output: Integer representing the CPU rail isofrequency policy:
+    - 0: Independent control enabled (each rail has an independent frequency limit)
+    - 1: Independent control disabled (all cores on both rails or each rail - have the same frequency limit)
+
+Exceptions that can be thrown by `amdsmi_get_cpu_rail_isofreq_policy` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+from amdsmi import *
+try:
+    ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
+        print("No CPUs on machine")
+    else:
+        for processor in processor_handles:
+            policy = amdsmi_get_cpu_rail_isofreq_policy(processor)
+            if policy == 0:
+                print("CPU rail isofrequency policy: Each rail has independent frequency limit")
+            elif policy == 1:
+                print("CPU rail isofrequency policy: Both rail have same frequency limit")
+            else:
+                print("CPU rail isofrequency policy: Unknown value {policy}")
+except AmdSmiException as e:
+    print(e)
+```
+
+### amdsmi_set_dfc_ctrl
+
+Description: Set the DFCState enabling control. DFCState is a low power state used for I/O Die (IOD).
+
+Input parameters:
+- `processor_handle` (amdsmi_processor_handle): CPU socket handle to query
+- `value` (int): DFCState control value:
+  - 0: Disable DFCState control
+  - 1: Enable DFCState control
+
+Output: `None`
+
+Exceptions that can be thrown by `amdsmi_set_dfc_ctrl` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+from amdsmi import *
+try:
+    ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
+        print("No CPUs on machine")
+    else:
+        for processor in processor_handles:
+            # Enable DFCState control
+            amdsmi_set_dfc_ctrl(processor, 1)
+            print("DFCState control enabled")
+except AmdSmiException as e:
+    print(e)
+```
+
+### amdsmi_get_dfc_ctrl
+
+Description: Get the current DFCState enabling control status. DFCState is a low power state used for I/O Die (IOD).
+
+Input parameters:
+- `processor_handle` (amdsmi_processor_handle): CPU socket handle to query
+
+Output: Integer representing the DFCState control status:
+    - 0: DFCState control is disabled
+    - 1: DFCState control is enabled
+
+Exceptions that can be thrown by `amdsmi_get_dfc_ctrl` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+from amdsmi import *
+try:
+    ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
+        print("No CPUs on machine")
+    else:
+        for processor in processor_handles:
+            dfc_status = amdsmi_get_dfc_ctrl(processor)
+            if dfc_status == 0:
+                print("DFCState control is disabled")
+            elif dfc_status == 1:
+                print("DFCState control is enabled")
+            else:
+                print(f"DFCState control: Unknown status {dfc_status}")
 except AmdSmiException as e:
     print(e)
 ```

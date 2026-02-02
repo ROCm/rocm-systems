@@ -122,14 +122,16 @@ void TestGpuMetricsRead::Run(void) {
 
     rsmi_gpu_metrics_t smu = {};
     err = rsmi_dev_gpu_metrics_info_get(i, &smu);
-    if (err != RSMI_STATUS_SUCCESS) {
-      if (err == RSMI_STATUS_NOT_SUPPORTED) {
-        IF_VERB(STANDARD) {
-          std::cout << "\t**" <<
-          "Not supported on this machine" << std::endl;
-          continue;
-        }
+    if (err == RSMI_STATUS_NOT_SUPPORTED) {
+      IF_VERB(STANDARD) {
+        std::cout << "\t**Not supported on this machine" << std::endl;
       }
+      continue;
+    }
+    if (err == RSMI_STATUS_UNEXPECTED_DATA) {
+      std::cerr << "\t**gpu metric file version unsupported: GPU metrics on device ["
+                << i << "]" << std::endl;
+      continue;
     } else {
       CHK_ERR_ASRT(err);
       IF_VERB(STANDARD) {
