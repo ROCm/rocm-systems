@@ -171,7 +171,6 @@ class RocProfCompute:
             self.__args.format_rocprof_output = "csv"
 
     def replace_parameters_in_output_directory(self) -> None:
-        add_rank = False
         # Add --name to output directory if --output-directory is not given
         if self.__args.output_directory == str(Path.cwd() / "workloads"):
             self.__args.output_directory = str(
@@ -188,13 +187,16 @@ class RocProfCompute:
                 self.__args.output_directory = str(
                     Path(self.__args.output_directory) / self.__mspec.gpu_model
                 )
+            return  # exit function after this block
         elif self.__args.name is not None:
             console_warning(
                 "--name is ignored when --output-directory is explicitly specified."
             )
         else:
             if "%rank%" not in self.__args.output_directory and get_rank() is not None:
-                add_rank = True
+                self.__args.output_directory = str(
+                    Path(self.__args.output_directory) / f"{get_rank()}"
+                )
 
         # Replace parameters with actual values in workload path
         self.__args.output_directory = self.__args.output_directory.replace(
@@ -206,11 +208,6 @@ class RocProfCompute:
 
         # Replace %rank% with actual rank value in workload path
         self.__args.output_directory = replace_rank(self.__args.output_directory)
-
-        if add_rank:
-            self.__args.output_directory = str(
-                Path(self.__args.output_directory) / f"{get_rank()}"
-            )
 
     @demarcate
     def load_soc_specs(self, sysinfo: Optional[dict] = None) -> None:
