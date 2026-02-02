@@ -3252,7 +3252,13 @@ def test_multi_rank_profiling_no_mpi_comm(binary_handler_profile_rocprof_compute
     comm = MPI.COMM_WORLD
     rank = comm.Get_rank()
 
-    workload_dir = test_utils.get_output_dir()
+    MPI.COMM_WORLD.Barrier()
+    if rank == 0:
+        workload_dir = test_utils.get_output_dir()
+    else:
+        workload_dir = None
+
+    workload_dir = MPI.COMM_WORLD.bcast(workload_dir, root=0)
 
     binary_handler_profile_rocprof_compute(config, workload_dir)
 
@@ -3279,4 +3285,6 @@ def test_multi_rank_profiling_no_mpi_comm(binary_handler_profile_rocprof_compute
         file_dict,
     )
 
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+    MPI.COMM_WORLD.Barrier()
+    if rank == 0:
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
