@@ -233,7 +233,7 @@ rccl_get_device_id(ncclComm_t comm)
 
     if(ncclCommCuDevice_ptr == nullptr) return DEFAULT_DEVICE_ID;
 
-    int          device_id = 0;
+    int          device_id = DEFAULT_DEVICE_ID;
     ncclResult_t result    = ncclCommCuDevice_ptr(comm, &device_id);
     if(result != ncclSuccess)
     {
