@@ -231,7 +231,7 @@ class AMDSMILogger():
                         # Add N/A for empty process_info
                         table_values += "N/A".rjust(17) + "N/A".rjust(9) + "N/A".rjust(10) + \
                                         "N/A".rjust(10) + "N/A".rjust(10) + "N/A".rjust(10) + \
-                                        "N/A".rjust(9) + "N/A".rjust(10) + "N/A".rjust(10) + '\n'
+                                        "N/A".rjust(9) + "N/A".rjust(8) + "N/A".rjust(8) + '\n'
                     else:
                         #Fix this herre
                         for process_key, process_value in process_dict['process_info'].items():
@@ -253,9 +253,9 @@ class AMDSMILogger():
                             elif process_key == "cu_occupancy":
                                 table_values += string_process_value.rjust(9)
                             elif process_key == "sdma_usage":
-                                table_values += string_process_value.rjust(10)
+                                table_values += string_process_value.rjust(8)
                             elif process_key == "evicted_time":
-                                table_values += string_process_value.rjust(9)
+                                table_values += string_process_value.rjust(8)
                                 # Add the stored gpu and stored timestamp to the next line
                                 table_values += '\n'
                                 if stored_timestamp:

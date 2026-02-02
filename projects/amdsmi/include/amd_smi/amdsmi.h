@@ -1216,7 +1216,7 @@ typedef struct {
     uint32_t cu_occupancy;  //!< Num CUs utilized
     uint32_t evicted_time;    //!< Time that queues are evicted on a GPU in milliseconds
     uint64_t sdma_usage;    //!< SDMA usage in microseconds
-    uint32_t reserved[9];
+    uint32_t reserved[8];
 } amdsmi_proc_info_t;
 
 /**
