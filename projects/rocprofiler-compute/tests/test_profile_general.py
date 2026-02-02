@@ -27,7 +27,6 @@ import importlib.util
 import inspect
 import os
 import re
-import shutil
 import sqlite3
 import subprocess
 import sys
@@ -755,6 +754,7 @@ def test_path_csv(
 @pytest.mark.path
 def test_output_directory(binary_handler_profile_rocprof_compute, monkeypatch):
     """Test output directory creation"""
+
     class MockProfiler:
         def __init__(self, *args, **kwargs):
             pass
