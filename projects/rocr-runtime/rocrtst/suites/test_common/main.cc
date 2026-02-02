@@ -69,6 +69,7 @@
 #include "suites/stress/memory_concurrent_tests.h"
 #include "suites/stress/queue_write_index_concurrent_tests.h"
 #include "suites/test_common/test_case_template.h"
+#include "suites/functional/test_fault_example.h"
 #include "suites/test_common/main.h"
 #include "suites/test_common/test_common.h"
 #include "suites/functional/concurrent_init.h"
@@ -80,8 +81,10 @@
 #include "suites/functional/signal_kernel.h"
 #include "suites/functional/cu_masking.h"
 #include "suites/functional/filter_devices.h"
+#include "suites/functional/gpu_coredump.h"
 #include "amd_smi/amdsmi.h"
 #include "common/common.h"
+#include "suites/functional/counted_queues.h"
 #include "common/os.h"
 
 static RocrTstGlobals *sRocrtstGlvalues = nullptr;
@@ -136,8 +139,8 @@ TEST(rocrtst, Test_Example) {
 }
 
 TEST(rocrtst, Test_Example_InterruptDisabled) {
-  rocrtst::SetEnv("HSA_ENABLE_INTERRUPT", "0");
   TestExample tst;
+  rocrtst::SetEnv("HSA_ENABLE_INTERRUPT", "0");
   RunGenericTest(&tst);
 }
 
@@ -316,6 +319,69 @@ TEST(rocrtstFunc, Memory_Available) {
     RunCustomTestProlog(&mt);
     mt.MemAvailableTest();
     RunCustomTestEpilog(&mt);
+  );
+}
+
+TEST(rocrtstFunc, GpuCoreDump_DefaultPattern) {
+  RUN_IF_NOT_EMU_MODE(
+    GpuCoreDumpTest gcd;
+    RunCustomTestProlog(&gcd);
+    gcd.TestDefaultPattern();
+    RunCustomTestEpilog(&gcd);
+  );
+}
+
+TEST(rocrtstFunc, GpuCoreDump_CustomPattern) {
+  RUN_IF_NOT_EMU_MODE(
+    GpuCoreDumpTest gcd;
+    RunCustomTestProlog(&gcd);
+    gcd.TestCustomPattern();
+    RunCustomTestEpilog(&gcd);
+  );
+}
+
+TEST(rocrtstFunc, GpuCoreDump_DisableFlag) {
+  RUN_IF_NOT_EMU_MODE(
+    GpuCoreDumpTest gcd;
+    RunCustomTestProlog(&gcd);
+    gcd.TestDisableFlag();
+    RunCustomTestEpilog(&gcd);
+  );
+}
+
+TEST(rocrtstFunc, GpuCoreDump_PatternSubstitution) {
+  RUN_IF_NOT_EMU_MODE(
+    GpuCoreDumpTest gcd;
+    RunCustomTestProlog(&gcd);
+    gcd.TestPatternSubstitution();
+    RunCustomTestEpilog(&gcd);
+  );
+}
+
+TEST(rocrtstFunc, GpuCoreDump_InvalidPath) {
+  RUN_IF_NOT_EMU_MODE(
+    GpuCoreDumpTest gcd;
+    RunCustomTestProlog(&gcd);
+    gcd.TestInvalidPath();
+    RunCustomTestEpilog(&gcd);
+  );
+}
+
+TEST(rocrtstFunc, GpuCoreDump_ContentIntegrity) {
+  RUN_IF_NOT_EMU_MODE(
+    GpuCoreDumpTest gcd;
+    RunCustomTestProlog(&gcd);
+    gcd.TestCoreDumpContentIntegrity();
+    RunCustomTestEpilog(&gcd);
+  );
+}
+
+TEST(rocrtstFunc, GpuCoreDump_PipePattern) {
+  RUN_IF_NOT_EMU_MODE(
+    GpuCoreDumpTest gcd;
+    RunCustomTestProlog(&gcd);
+    gcd.TestPipePattern();
+    RunCustomTestEpilog(&gcd);
   );
 }
 
@@ -505,6 +571,69 @@ TEST(rocrtstFunc, Filter_Devices_Test) {
     fd.TestRocrVisibleDevicesFiltering();
     RunCustomTestEpilog(&fd);
   );
+}
+
+TEST(rocrtstFunc, Counted_Queue_Basic_Test) {
+  CountedQueuesTest cq;
+  RunCustomTestProlog(&cq);
+  cq.CountedQueueBasicApiTest();
+  RunCustomTestEpilog(&cq);
+}
+
+TEST(rocrtstFunc, Counted_Queue_Same_Priority_Max_Limit_Test) {
+  CountedQueuesTest cq;
+  RunCustomTestProlog(&cq);
+  cq.CountedQueues_SamePriority_MaxLimitTest();
+  RunCustomTestEpilog(&cq);
+}
+
+TEST(rocrtstFunc, Counted_Queue_Invalid_Args_Test) {
+  CountedQueuesTest cq;
+  RunCustomTestProlog(&cq);
+  cq.InvalidArgsTest();
+  RunCustomTestEpilog(&cq);
+}
+
+TEST(rocrtstFunc, Counted_Queue_Multiple_Priorities_Limit_Test) {
+  CountedQueuesTest cq;
+  RunCustomTestProlog(&cq);
+  cq.CountedQueuesAllPrioritiesLimitTest();
+  RunCustomTestEpilog(&cq);
+}
+
+TEST(rocrtstFunc, Counted_Queue_Set_Priority_Nack_Test) {
+  CountedQueuesTest cq;
+  RunCustomTestProlog(&cq);
+  cq.CountedQueuesSetPriorityNackTest();
+  RunCustomTestEpilog(&cq);
+}
+
+TEST(rocrtstFunc, Counted_Queue_Set_CUMask_Nack_Test) {
+  CountedQueuesTest cq;
+  RunCustomTestProlog(&cq);
+  cq.CountedQueuesSetCUMaskNackTest();
+  RunCustomTestEpilog(&cq);
+}
+
+TEST(rocrtstFunc, Counted_Queue_Dispatch_Test) {
+  CountedQueuesTest cq;
+  RunCustomTestProlog(&cq);
+  cq.CountedQueuesDispatchTest();
+  RunCustomTestEpilog(&cq);
+}
+
+TEST(rocrtstFunc, Counted_Queue_Multithreaded_Dispatch_Test) {
+  CountedQueuesTest cq;
+  RunCustomTestProlog(&cq);
+  cq.CountedQueuesMultithreadedDispatchTest();
+  RunCustomTestEpilog(&cq);
+}
+
+TEST(rocrtstFunc, Counted_Queue_Overflow_And_Wraparound_Test) {
+  CountedQueuesTest cq;
+  RunCustomTestProlog(&cq);
+  cq.CountedQueuesOverflowWrapAroundTest();
+  RunCustomTestEpilog(&cq);
 }
 
 TEST(rocrtstNeg, Memory_Negative_Tests) {

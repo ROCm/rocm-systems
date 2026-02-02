@@ -10,10 +10,14 @@
 **/library/include/                                                   @ROCm/rocm-documentation
 
 # Project-specific ownership
+/projects/amdsmi/                                                     @ROCm/smi-reviewers
 /projects/clr/                                                        @ROCm/clr-reviewers
 /projects/hip/                                                        @ROCm/hip-reviewers
 /projects/hipother/                                                   @ROCm/hipother-reviewers
 /projects/hip-tests/                                                  @ROCm/hip-tests-reviewers
+/projects/rccl/                                                       @ROCm/rccl-reviewers
+/projects/rccl/src/include/api_trace.h                                @ROCm/rccl-reviewers @ROCm/ROCM-DevTools-Team
+/projects/rccl-tests/                                                 @ROCm/rccl-reviewers
 /projects/rdc/                                                        @ROCm/rdc-reviewers
 /projects/rocm-core/                                                  @nunnikri @frepaul @raramakr @ashutom @amd-isparry @arvindcheru
 /projects/rocm-smi-lib/                                               @ROCm/smi-reviewers
@@ -23,6 +27,7 @@
 /projects/rocprofiler-sdk/                                            @ROCm/rocm-devtools-team @ROCm/rocprofiler-owners # First Review: @ROCm/rocm-devtools-team, Final Review: @ROCm/rocprofiler-owners 
 /projects/rocr-runtime/                                               @kentrussell @dayatsin-amd @cfreeamd
 /projects/roctracer/                                                  @ammarwa @bgopesh
+/projects/rocshmem/                                                   @ROCm/rocshmem-reviewers
 
 # Language runtime build infra code owners
 /projects/clr/**/*.cmake                                              @ROCm/clr-reviewers @ROCm/lrt-build-infra
@@ -38,6 +43,7 @@
 /projects/rocr-runtime/libhsakmt                                      @kentrussell @dayatsin-amd @cfreeamd
 /projects/rocr-runtime/libhsakmt/tests/kfdtest                        @kentrussell @xiaogang-chen-amd
 /projects/rocr-runtime/rocrtst                                        @shwetagkhatri @cfreeamd
+/projects/rocr-runtime/runtime/hsa-runtime/core/runtime/trap_handler/*.s	@lancesix @dayatsin-amd @cfreeamd @shwetagkhatri
 /projects/rocr-runtime/runtime/hsa-runtime/core/driver/xdna           @atgutier @ypapadop-amd @dayatsin-amd @cfreeamd
 /projects/rocr-runtime/runtime/hsa-runtime/core/driver/virtio         @dayatsin-amd @cfreeamd
 /projects/rocr-runtime/runtime/hsa-runtime/loader                     @dayatsin-amd @kzhuravl @cfreeamd

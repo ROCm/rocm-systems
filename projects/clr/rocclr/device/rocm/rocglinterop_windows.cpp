@@ -166,8 +166,26 @@ bool Export(amd::Memory* mem, GLenum targetType, int miplevel, hsa_handle_t* han
   const auto GLContext = mem->getContext().info().hCtx_;
   const auto name = static_cast<uint>(obj->getGLName());
 
-  assert(targetType == GL_ARRAY_BUFFER && "Only GL_ARRAY_BUFFER is supported");
-  constexpr GLenum type = GL_RESOURCE_ATTACH_VERTEXBUFFER_AMD;
+  GLenum type;
+  switch (obj->getCLGLObjectType()) {
+    case CL_GL_OBJECT_BUFFER:
+      type = GL_RESOURCE_ATTACH_VERTEXBUFFER_AMD;
+      break;
+    case CL_GL_OBJECT_RENDERBUFFER:
+      type = GL_RESOURCE_ATTACH_RENDERBUFFER_AMD;
+      break;
+    case CL_GL_OBJECT_TEXTURE_BUFFER:
+    case CL_GL_OBJECT_TEXTURE1D:
+    case CL_GL_OBJECT_TEXTURE1D_ARRAY:
+    case CL_GL_OBJECT_TEXTURE2D:
+    case CL_GL_OBJECT_TEXTURE2D_ARRAY:
+    case CL_GL_OBJECT_TEXTURE3D:
+      type = GL_RESOURCE_ATTACH_TEXTURE_AMD;
+      break;
+    default:
+      LogError("Unknown OpenGL interop type: 0x%x", obj->getCLGLObjectType());
+      return false;
+  }
 
   const auto glRenderContext = reinterpret_cast<HGLRC>(GLContext);
   GLResource glResource = {.type = type, .name = name};

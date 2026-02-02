@@ -217,6 +217,7 @@ set ( SRCS core/driver/driver.cpp
            core/runtime/cache.cpp
            core/runtime/svm_profiler.cpp
            core/runtime/thunk_loader.cpp
+           core/runtime/counted_queue_manager.cpp
            core/common/hsa_table_interface.cpp
            loader/executable.cpp
            libamdhsacode/amd_elf_image.cpp
@@ -456,9 +457,9 @@ if( NOT ${BUILD_SHARED_LIBS} )
     install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules/FindLibElf.cmake ${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules/COPYING-CMAKE-SCRIPTS
       DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${CORE_RUNTIME_NAME}
       COMPONENT dev)
+    # Linker script (defines function aliases)
+    install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/${LNKSCR}
+      DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${CORE_RUNTIME_NAME}
+      COMPONENT dev)
   endif()
-  # Linker script (defines function aliases)
-  install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/${LNKSCR}
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${CORE_RUNTIME_NAME}
-    COMPONENT dev)
 endif()
