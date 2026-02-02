@@ -797,6 +797,9 @@ PROFILING WORKFLOW:
             rocprofsys::common::update_env(_env, "ROCPROFSYS_CPU_FREQ_ENABLED", _h,
                                            update_mode::REPLACE, ":", updated_envs,
                                            original_envs);
+            rocprofsys::common::update_env(_env, "ROCPROFSYS_AINIC_STAT_ENABLED", _h,
+                                           update_mode::REPLACE, ":", updated_envs,
+                                           original_envs);
             if(_h)
                 rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_AMD_SMI", _d,
                                                update_mode::REPLACE, ":", updated_envs,
@@ -818,6 +821,10 @@ PROFILING WORKFLOW:
                                            original_envs);
             if(_d)
                 rocprofsys::common::update_env(_env, "ROCPROFSYS_CPU_FREQ_ENABLED", _h,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+            if(_d)
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_AINIC_STAT_ENABLED", _h,
                                                update_mode::REPLACE, ":", updated_envs,
                                                original_envs);
         });
@@ -1040,6 +1047,16 @@ PROFILING WORKFLOW:
             rocprofsys::common::update_env(
                 _env, "ROCPROFSYS_SAMPLING_GPUS",
                 join(array_config{ "," }, p.get<std::vector<std::string>>("gpus")),
+                update_mode::REPLACE, ":", updated_envs, original_envs);
+        });
+    parser
+        .add_argument({ "--ainics" }, "AI NIC IDs for SMI queries. Comma-separated list.")
+        .dtype("string")
+        .required({ "device" })
+        .action([&](parser_t& p) {
+            rocprofsys::common::update_env(
+                _env, "ROCPROFSYS_SAMPLING_AINICS",
+                join(array_config{ "," }, p.get<std::vector<std::string>>("ainics")),
                 update_mode::REPLACE, ":", updated_envs, original_envs);
         });
 

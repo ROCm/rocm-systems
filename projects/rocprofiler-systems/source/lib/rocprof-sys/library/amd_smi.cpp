@@ -79,6 +79,13 @@ using sampler_instances = thread_data<bundle_t, category::amd_smi>;
 #    define AMDSMI_MAX_NUM_JPEG_ENG_V1 AMDSMI_MAX_NUM_JPEG
 #endif
 
+std::atomic<State>&
+get_state()
+{
+    static std::atomic<State> _v{ State::PreInit };
+    return _v;
+}
+
 namespace
 {
 void
@@ -86,6 +93,8 @@ metadata_initialize_category()
 {
     trace_cache::get_metadata_registry().add_string(
         trait::name<category::amd_smi>::value);
+    trace_cache::get_metadata_registry().add_string(
+        trait::name<category::amd_smi_nic>::value);
 }
 
 void
@@ -436,13 +445,6 @@ check_error(const char* _file, int _line, amdsmi_status_t _code, bool* _option =
                     _error_code_is_known ? _msg : _unknown_error_message));
 }
 
-std::atomic<State>&
-get_state()
-{
-    static std::atomic<State> _v{ State::PreInit };
-    return _v;
-}
-
 std::vector<uint8_t>
 serialize_gpu_metrics(uint32_t device_id, const data::gpu_metrics_t& metrics,
                       const gpu::gpu_metrics_capabilities_t& capabilities)
@@ -718,7 +720,7 @@ data::print(std::ostream& _os) const
 namespace
 {
 std::vector<unique_ptr_t<bundle_t>*> _bundle_data{};
-}
+}  // namespace
 
 void
 config()
@@ -744,6 +746,11 @@ config()
         metadata_initialize_smi_tracks(_dev_id);
         metadata_initialize_smi_pmc(_dev_id);
     }
+
+    if(get_use_ainic_stat_enabled())
+    {
+        nic_config();
+    }
 }
 
 void
@@ -761,6 +768,11 @@ sample()
         auto& _data = *_bundle_data.at(itr);
         if(!_data) continue;
         _data->emplace_back(data{ itr });
+    }
+
+    if(get_use_ainic_stat_enabled())
+    {
+        nic_sample();
     }
 }
 
@@ -1241,6 +1253,11 @@ setup()
             }
         }
 
+        if(get_use_ainic_stat_enabled())
+        {
+            nic_setup();
+        }
+
         is_initialized() = true;
         data::setup();
 
@@ -1280,6 +1297,16 @@ post_process()
     {
         LOG_DEBUG("Post-processing amd-smi data for device: {}", itr);
         data::post_process(itr);
+    }
+
+    if(get_use_ainic_stat_enabled())
+    {
+        for(size_t i = 0; i < nic_data::nic_vec.size(); ++i)
+        {
+            auto& nic = nic_data::nic_vec.at(i);
+            LOG_DEBUG("Post-processing ainic data for NIC: {}", nic);
+            nic_data::post_process(i);
+        }
     }
 }
 
