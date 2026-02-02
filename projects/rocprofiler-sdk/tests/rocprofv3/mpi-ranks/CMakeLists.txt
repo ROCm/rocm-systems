@@ -1,0 +1,98 @@
+#
+# rocprofv3 MPI ranks filtering test
+#
+cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
+
+project(
+    rocprofiler-sdk-tests-rocprofv3-mpi-ranks
+    LANGUAGES CXX
+    VERSION 0.0.0)
+
+find_package(rocprofiler-sdk REQUIRED)
+
+string(REPLACE "LD_PRELOAD=" "" PRELOAD_ENV "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
+
+if(PRELOAD_ENV)
+    set(PRELOAD_ARGS --suppress-marker-preload --preload ${PRELOAD_ENV})
+else()
+    set(PRELOAD_ARGS)
+endif()
+
+# Check if mpirun is available
+find_program(MPIRUN_EXECUTABLE NAMES mpirun mpiexec)
+
+if(MPIRUN_EXECUTABLE)
+    # Test with MPI - profile only rank 0 out of 4 ranks
+    rocprofiler_add_integration_execute_test(
+        rocprofv3-test-mpi-ranks-with-mpi
+        COMMAND
+            ${MPIRUN_EXECUTABLE} -n 4
+            $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --hip-trace --kernel-trace
+            --output-format csv json -d ${CMAKE_CURRENT_BINARY_DIR}/mpi-ranks-trace
+            -o out --mpi-ranks 0 ${PRELOAD_ARGS} -- $<TARGET_FILE:simple-transpose>
+        DEPENDS simple-transpose
+        TIMEOUT 120
+        LABELS "integration-tests" "mpi-tests"
+        PRELOAD "${PRELOAD_ENV}"
+        FIXTURES_SETUP rocprofv3-test-mpi-ranks-with-mpi)
+
+    # Test with MPI - profile ranks 0-1,3 out of 4 ranks
+    rocprofiler_add_integration_execute_test(
+        rocprofv3-test-mpi-ranks-with-mpi-multiple
+        COMMAND
+            ${MPIRUN_EXECUTABLE} -n 4
+            $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --hip-trace --kernel-trace
+            --output-format csv json -d ${CMAKE_CURRENT_BINARY_DIR}/mpi-ranks-multiple-trace
+            -o out --mpi-ranks 0-1,3 ${PRELOAD_ARGS} -- $<TARGET_FILE:simple-transpose>
+        DEPENDS simple-transpose
+        TIMEOUT 120
+        LABELS "integration-tests" "mpi-tests"
+        PRELOAD "${PRELOAD_ENV}"
+        FIXTURES_SETUP rocprofv3-test-mpi-ranks-with-mpi-multiple)
+
+    rocprofiler_add_integration_validate_test(
+        rocprofv3-test-mpi-ranks-with-mpi
+        TEST_PATHS validate.py
+        COPY conftest.py
+        CONFIG pytest.ini
+        ARGS --output-dir ${CMAKE_CURRENT_BINARY_DIR}/mpi-ranks-trace
+             --test-mode with-mpi-single
+        TIMEOUT 45
+        LABELS "integration-tests" "mpi-tests"
+        FIXTURES_REQUIRED rocprofv3-test-mpi-ranks-with-mpi)
+
+    rocprofiler_add_integration_validate_test(
+        rocprofv3-test-mpi-ranks-with-mpi-multiple
+        TEST_PATHS validate.py
+        COPY conftest.py
+        CONFIG pytest.ini
+        ARGS --output-dir ${CMAKE_CURRENT_BINARY_DIR}/mpi-ranks-multiple-trace
+             --test-mode with-mpi-multiple
+        TIMEOUT 45
+        LABELS "integration-tests" "mpi-tests"
+        FIXTURES_REQUIRED rocprofv3-test-mpi-ranks-with-mpi-multiple)
+endif()
+
+# Test without MPI - should work gracefully (no MPI env vars set)
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-mpi-ranks-without-mpi
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --hip-trace --kernel-trace
+        --output-format csv json -d ${CMAKE_CURRENT_BINARY_DIR}/no-mpi-trace
+        -o out --mpi-ranks 0 ${PRELOAD_ARGS} -- $<TARGET_FILE:simple-transpose>
+    DEPENDS simple-transpose
+    TIMEOUT 120
+    LABELS "integration-tests"
+    PRELOAD "${PRELOAD_ENV}"
+    FIXTURES_SETUP rocprofv3-test-mpi-ranks-without-mpi)
+
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-mpi-ranks-without-mpi
+    TEST_PATHS validate.py
+    COPY conftest.py
+    CONFIG pytest.ini
+    ARGS --output-dir ${CMAKE_CURRENT_BINARY_DIR}/no-mpi-trace
+         --test-mode without-mpi
+    TIMEOUT 45
+    LABELS "integration-tests"
+    FIXTURES_REQUIRED rocprofv3-test-mpi-ranks-without-mpi)
