@@ -1,0 +1,7 @@
+export PATH=/opt/rocm/bin:$PATH
+cmake -G Ninja -B build-ifc-only \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DGPU_TARGETS=gfx942 \
+    -DENABLE_IFC=ON 
+
+#    -DONLY_FUNCS="AllReduce * * Sum f32"

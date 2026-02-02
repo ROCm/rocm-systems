@@ -985,16 +985,12 @@ void* const ncclSymkKernelList[] = { nullptr };
     message(STATUS "DEVICE_LINKER: added sym_kernels_stub.cpp (GENERATE_SYM_KERNELS=OFF)")
   endif()
   
-  # Exclude common.cu - it will be compiled separately using the device linker pipeline
-  # The device linker compiles common.cu with the 5-step pipeline (Option B)
+  # Exclude common.cu and onerank.cu - they will be compiled together using the device linker pipeline
+  # The device linker compiles dispatcher_combined.hip which includes both files
+  # This generates __clang_gpu_used_external correctly for oneRankReduce kernels
   list(FILTER HIP_SOURCES EXCLUDE REGEX "common\\.cu\\.cpp$")
-  message(STATUS "DEVICE_LINKER: excluding common.cu (will be built with device linker pipeline)")
-  
-  # Exclude onerank.cu to have single fatbin (multiple fatbins cause multi-GPU crashes)
   list(FILTER HIP_SOURCES EXCLUDE REGEX "onerank\\.cu\\.cpp$")
-  # Add stub for ncclLaunchOneRank function
-  list(APPEND HIP_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/device/onerank_stub.cpp")
-  message(STATUS "DEVICE_LINKER: excluding onerank.cu, using stub (single-fatbin mode)")
+  message(STATUS "DEVICE_LINKER: excluding common.cu and onerank.cu (built together via device linker pipeline)")
 else()
   # Normal mode: add all generated files
   file(GLOB_RECURSE GENERATED_FILES "${GEN_DIR}/*")
@@ -1349,9 +1345,8 @@ if (DEVICE_LINKER)
   
   add_custom_target(device_linker_dispatcher DEPENDS ${DISPATCHER_FINAL_OBJ})
   
-  # DEVICE_LINKER mode: Exclude onerank.cu to have single fatbin
-  # Onerank is an optimization for single-rank operations - not needed for multi-GPU
-  # Use stub instead to provide ncclLaunchOneRank function
+  # DEVICE_LINKER mode: common.cu and onerank.cu are compiled together via dispatcher_combined.hip
+  # This generates __clang_gpu_used_external and includes all oneRankReduce kernels
   # Link the dispatcher object into rccl
   target_link_libraries(rccl PRIVATE ${DISPATCHER_FINAL_OBJ})
   add_dependencies(rccl device_linker_dispatcher)
