@@ -92,7 +92,8 @@ rocprofiler_systems_add_test(
 if(TEST transferbench-sys-run)
     set_tests_properties(
         transferbench-sys-run
-        APPEND PROPERTIES FIXTURES_REQUIRED transferbench_available
+        APPEND
+        PROPERTIES FIXTURES_REQUIRED transferbench_available
     )
 endif()
 
@@ -106,7 +107,8 @@ rocprofiler_systems_add_validation_test(
 if(TEST validate-transferbench-sys-run-perfetto)
     set_property(
         TEST validate-transferbench-sys-run-perfetto
-        APPEND PROPERTY FIXTURES_REQUIRED transferbench_available
+        APPEND
+        PROPERTY FIXTURES_REQUIRED transferbench_available
     )
 endif()
 # Add ROCPD validation if enabled
@@ -120,4 +122,12 @@ if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU})
         ARGS --validation-rules
             ${_gpu_connect_rocpd_validation_rules}
     )
+
+    # Make ROCPD validation test depend on the transferBench fixture
+    if(TEST validate-transferbench-sys-run-rocpd)
+        set_tests_properties(
+            validate-transferbench-sys-run-rocpd
+            PROPERTIES FIXTURES_REQUIRED transferbench_available
+        )
+    endif()
 endif()
