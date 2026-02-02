@@ -181,6 +181,7 @@ Currently stripped down to just padding. Previously had:
      - Need a separate guard for device linker dispatch
    
    **DECISION: Option B** - Create new `DEVICE_LINKER_DISPATCH` guard
+   - OBSOLETE just DEVICE_LINKER
    - Only affects dispatch mechanism in `ncclKernelMain`
    - Does NOT affect `noinline` attributes
    - Keeps existing `USE_INDIRECT_FUNCTION_CALL` behavior unchanged

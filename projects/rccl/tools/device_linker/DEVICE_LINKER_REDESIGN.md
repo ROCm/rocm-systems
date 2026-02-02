@@ -482,9 +482,7 @@ Override with `--target <arch>` if needed.
 
 ### Debug Line Tables Support
 
-The device linker supports merging `.debug_line` sections for line-level debugging:
-
-**To enable:**
+The device linker supports merging `.debug_line` sections for line-level debugging:**To enable:**
 1. Add `-gline-tables-only` to specialized kernel compilation flags in CMake
 2. Rebuild specialized kernels
 3. Run device linker - it will automatically:
@@ -524,9 +522,7 @@ The device linker supports merging `.debug_line` sections for line-level debuggi
 | Wrong `--target-arch` (e.g., gfx942 vs gfx950) | Auto-detected from rocminfo now; override with `--target` if needed |
 | Target missing feature flags (e.g., `gfx950` vs `gfx950:sramecc+:xnack-`) | Auto-detection now includes features; bundler requires exact match |
 
-### Link Errors
-
-| Mistake | Correct |
+### Link Errors| Mistake | Correct |
 |---------|---------|
 | `sym_kernels_stub.cpp` duplicate symbol | Remove `ncclSymkGetKernelPtr` from stub - it's in `sym_kernels.cc` |
 

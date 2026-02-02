@@ -16,7 +16,7 @@
 #include "device_table.h"
 #endif
 
-#if defined(DEVICE_LINKER_DISPATCH) || (defined(DEVICE_LINKER) && defined(USE_INDIRECT_FUNCTION_CALL))
+#if defined(DEVICE_LINKER) || defined(USE_INDIRECT_FUNCTION_CALL)
 // Function table declarations for device linker dispatch
 // Tables defined in common.cu - const gives internal linkage like IFC
 // Device linker creates relocations to fill them
@@ -703,7 +703,7 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
     if (0 <= SpecializedFnId && ncclShmem.funcId == (unsigned)SpecializedFnId) {
       SpecializedRunWorkBatch().run();
     } else {
-#if defined(DEVICE_LINKER_DISPATCH) || defined(USE_INDIRECT_FUNCTION_CALL)
+#if defined(DEVICE_LINKER) || defined(USE_INDIRECT_FUNCTION_CALL)
       if (COLL_UNROLL == 1)
         ncclDevFuncTable_1[ncclShmem.funcId]();
       else if (COLL_UNROLL == 2)

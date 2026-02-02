@@ -114,7 +114,7 @@ INCLUDES=(
 )
 
 # Defines
-DEFINES="-DDEVICE_LINKER -DDEVICE_LINKER_DISPATCH -DENABLE_FAULT_INJECTION"
+DEFINES="-DDEVICE_LINKER -DENABLE_FAULT_INJECTION"
 
 # CUID (compilation unit ID) - needs to match between device and host compilation
 CUID="devicelinker$(echo -n "$SOURCE" | md5sum | cut -c1-16)"
@@ -169,7 +169,7 @@ $CLANG -cc1 \
     -resource-dir "$CLANG_RESOURCE_DIR" \
     "${SYS_INCLUDES[@]}" \
     -include __clang_hip_runtime_wrapper.h \
-    -D DEVICE_LINKER -D DEVICE_LINKER_DISPATCH -D ENABLE_FAULT_INJECTION \
+    -D DEVICE_LINKER -D ENABLE_FAULT_INJECTION \
     "${INCLUDES[@]}" \
     -fhip-new-launch-api \
     -fgnuc-version=4.2.1 \
@@ -243,7 +243,7 @@ $CLANG -cc1 \
     -resource-dir "$CLANG_RESOURCE_DIR" \
     "${SYS_INCLUDES[@]}" \
     -include __clang_hip_runtime_wrapper.h \
-    -D DEVICE_LINKER -D DEVICE_LINKER_DISPATCH -D ENABLE_FAULT_INJECTION \
+    -D DEVICE_LINKER -D ENABLE_FAULT_INJECTION \
     "${INCLUDES[@]}" \
     -fcuda-include-gpubinary "$FATBIN" \
     -cuid=$CUID \
