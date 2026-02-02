@@ -70,6 +70,9 @@ from functools import wraps
 import torch.nn.functional as F
 from roctx import rangePop, rangePush
 
+# Global stack for hierarchical marker names
+marker_stack = []
+
 
 def roctx_wrapper(func, name=None):
     func_name = name or func.__name__
@@ -86,12 +89,17 @@ def roctx_wrapper(func, name=None):
         else:
             location = "unknown:0"
 
-        # Unique marker: function + call_number + source_location
-        rangePush(f"{func_name}:#{call_counter['count']}@{location}")
+        # Build hierarchical marker name
+        full_marker_name = "/".join(
+            marker_stack + [f"{func_name}:#{call_counter['count']}@{location}"]
+        )
+        marker_stack.append(f"{func_name}:#{call_counter['count']}@{location}")
+        rangePush(full_marker_name)
         try:
             result = func(*args, **kwargs)
         finally:
             rangePop()
+            marker_stack.pop()
         return result
 
     return wrapper
@@ -190,11 +198,19 @@ def inject_roctx_into_torch():
         else:
             location = "unknown:0"
 
-        rangePush(f"torch.Tensor.backward:#{backward_counter['count']}@{location}")
+        full_marker_name = "/".join(
+            marker_stack
+            + [f"torch.Tensor.backward:#{backward_counter['count']}@{location}"]
+        )
+        marker_stack.append(
+            f"torch.Tensor.backward:#{backward_counter['count']}@{location}"
+        )
+        rangePush(full_marker_name)
         try:
             return original_backward(self, *args, **kwargs)
         finally:
             rangePop()
+            marker_stack.pop()
 
     torch.Tensor.backward = backward_with_roctx
 
@@ -251,14 +267,19 @@ def inject_roctx_into_model():
         else:
             location = "unknown:0"
 
-        # Create detailed marker
-        rangePush(
+        full_marker_name = "/".join(
+            marker_stack
+            + [f"nn.Module.{class_name}.forward:#{self._roctx_call_count}@{location}"]
+        )
+        marker_stack.append(
             f"nn.Module.{class_name}.forward:#{self._roctx_call_count}@{location}"
         )
+        rangePush(full_marker_name)
         try:
             return original_call(self, *args, **kwargs)
         finally:
             rangePop()
+            marker_stack.pop()
 
     nn.Module.__call__ = call_with_roctx
     console_log("Wrapped nn.Module forward() with ROCTX markers\n")
