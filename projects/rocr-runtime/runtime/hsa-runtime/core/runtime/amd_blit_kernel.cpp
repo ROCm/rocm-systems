@@ -601,7 +601,8 @@ hsa_status_t BlitKernel::Destroy() {
   }
 
   if (completion_signal_.handle != 0) {
-    HSA::hsa_signal_destroy(completion_signal_);
+    core::Signal* signal = core::Signal::Convert(completion_signal_);
+    signal->DestroySignal();
   }
 
   return HSA_STATUS_SUCCESS;

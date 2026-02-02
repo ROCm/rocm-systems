@@ -22,34 +22,61 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
  * DEALINGS IN THE SOFTWARE.
  */
+
 #include <stdlib.h>
 #include <cstring>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <cstdint>
+#if defined(__linux__)
 #include <sys/mman.h>
 #include <sys/sysinfo.h>
 #include <linux/mman.h>
+#endif
 #include <fcntl.h>
-#include <unistd.h>
 #include <cstdio>
-#include <strings.h>
+#include <cstring>
 #include <cassert>
-
+#include <mutex>
+#include <algorithm>
+#include "util/os.h"
+#include "util/utils.h"
 
 hsakmtRuntime *dxg_runtime = new hsakmtRuntime();
 
 void hsakmtRuntime::HeapInit() {
-    ReserveLocalHeapSpace();
-    ReserveSystemHeapSpace();
-    InitHandleApertureSpace();
-    InitLocalHeapMgr();
-    InitSystemHeapMgr();
-    InitHandleApertureMgr();
+    if (ReserveLocalHeapSpace()) {
+        InitLocalHeapMgr();
+    } else {
+        pr_err("Local heap reservation failed, local heap manager not initialized\n");
+    }
+
+    if (ReserveSystemHeapSpace()) {
+        InitSystemHeapMgr();
+    } else {
+        pr_err("System heap reservation failed, system heap manager not initialized\n");
+    }
+
+    if (InitHandleApertureSpace()) {
+        InitHandleApertureMgr();
+    } else {
+        pr_warn("InitHandleApertureSpace failed, handle aperture operations will be unavailable\n");
+    }
 }
 
 void hsakmtRuntime::HeapFini() {
-    FreeSystemHeapSpace();
-    FreeLocalHeapSpace();
+    if (local_heap_space_start_ != 0) {
+        FreeLocalHeapSpace();
+    }
+
+    if (system_heap_space_start_ != 0) {
+        FreeSystemHeapSpace();
+    }
+    // Destroy heap managers to prevent stale pointers
+    // This is needed when topology refresh to re-initializes heaps
+    system_heap_mgr_.reset();
+    local_heap_mgr_.reset();
+    handle_aperture_mgr_.reset();
 }
 
 bool hsakmtRuntime::ReserveSvmSpace(uint64_t &base, uint64_t &size, uint64_t align) {
@@ -68,8 +95,8 @@ bool hsakmtRuntime::ReserveSvmSpace(uint64_t &base, uint64_t &size, uint64_t ali
     /* it will retry 16 times to find the avaliable range. */
     for (int i = 0; i < 16; i++) {
         local_va = 0;
-        ptr = mmap(NULL, sys_va_size , PROT_NONE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
-        if (ptr == MAP_FAILED) {
+        ptr = rocr::os::ReserveMemory(nullptr, sys_va_size, align);
+        if (ptr == nullptr) {
             pr_err("fail to reserve cpu va in %d time!\n", i);
             break;
         }
@@ -78,7 +105,7 @@ bool hsakmtRuntime::ReserveSvmSpace(uint64_t &base, uint64_t &size, uint64_t ali
 
         int match_cnt = 0;
         for (uint32_t j = 0; j < num_adapters; j++) {
-            device = get_wddmdev(j+1);
+          device = WddmDevice(j);
             uint64_t start = (base == 0) ? (uint64_t)ptr : base;
             uint64_t end = start + ((base == 0) ? sys_va_size : size) + 1;
 
@@ -89,7 +116,7 @@ bool hsakmtRuntime::ReserveSvmSpace(uint64_t &base, uint64_t &size, uint64_t ali
 
                 match_cnt++;
                 base = local_va;
-                pr_debug("success to reserve gpu va %lx and va cpu %p in %d time\n",
+                pr_debug("success to reserve gpu va %llx and va cpu %p in %d time\n",
                         local_va, ptr, i);
             } else {
                 pr_err("%s fail to reserve gpu va for cpu va %p in %d time!\n",
@@ -104,13 +131,17 @@ bool hsakmtRuntime::ReserveSvmSpace(uint64_t &base, uint64_t &size, uint64_t ali
     }
 
     if (match_index >= 0) {
+      // Windows can't release a portion of reserved space.
+      // The logic shouldn't add extra space in reservation - (size + align)
+#if defined(__linux__)
         /* release cpu unused ranges*/
         uint64_t left_size = local_va - sys_va[match_index];
         uint64_t right_size = align - left_size;
-        if ((left_size > 0) && munmap((void*)sys_va[match_index], left_size))
-            pr_err("fail to unmap left %lx with size %lx\n", sys_va[match_index], left_size);
-        if ((right_size > 0) && munmap((void*)(local_va + size), right_size))
-            pr_err("fail to unmap right %lx with size %lx\n", (local_va + size), right_size);
+        if ((left_size > 0) && !rocr::os::ReleaseMemory((void*)sys_va[match_index], left_size))
+            pr_err("fail to unmap left %lx with size %llx\n", sys_va[match_index], left_size);
+        if ((right_size > 0) && !rocr::os::ReleaseMemory((void*)(local_va + size), right_size))
+            pr_err("fail to unmap right %lx with size %llx\n", (local_va + size), right_size);
+#endif
     } else {
         pr_err("fail to reserve Local Heap Space!\n");
         base = 0;
@@ -120,8 +151,8 @@ bool hsakmtRuntime::ReserveSvmSpace(uint64_t &base, uint64_t &size, uint64_t ali
     /* free match fail address for cpu va */
     int free = match_index >= 0 ? match_index : 16;
     for (int j = 0; j < free; j++) {
-        if (sys_va[j] != 0 && munmap((void*)sys_va[j], sys_va_size)) {
-            pr_err("fail to unmap %d %lx\n", j, sys_va[j]);
+        if (sys_va[j] != 0 && !rocr::os::ReleaseMemory((void*)sys_va[j], sys_va_size)) {
+            pr_err("fail to unmap %d %llx\n", j, sys_va[j]);
         }
     }
 
@@ -136,44 +167,47 @@ bool hsakmtRuntime::ReserveSvmSpace(uint64_t &base, uint64_t &size, uint64_t ali
  * will return error.
  */
 bool hsakmtRuntime::ReserveLocalHeapSpace() {
-    wsl::thunk::WDDMDevice* device;
-    uint64_t total_local_size = 0;
-    uint64_t align = 0x40000000; /* 1G */
-    size_t num_adapters = get_num_wddmdev();
+  wsl::thunk::WDDMDevice* device;
+  uint64_t total_local_size = 0;
+  uint64_t align = 0x40000000; /* 1G */
+  size_t num_adapters = get_num_wddmdev();
 
-    for (uint32_t j = 0; j < num_adapters; j++) {
-        device = get_wddmdev(j+1);
-        if (device == nullptr)
-            return -1;
-        /*
-         * For APU, use non local memory(shared GPU memory) as GPU memory,
-         * because it has small local memory
-        */
-        if (device->IsDgpu())
-          total_local_size = wsl::Max(device->LocalHeapSize(), total_local_size);
-        else
-          total_local_size = wsl::Max(device->LocalHeapSize(), device->NonLocalHeapSize(), total_local_size);
+  for (uint32_t j = 0; j < num_adapters; j++) {
+    device = WddmDevice(j);
+    if (device == nullptr) {
+      return false;
     }
-
-    total_local_size = wsl::AlignUp(total_local_size, align) * 4;
-    local_heap_space_start_ = 0;
-    local_heap_space_size_ = total_local_size;
-
-    return ReserveSvmSpace(local_heap_space_start_, local_heap_space_size_, align);
+    // For APU, use non local memory(shared GPU memory) as GPU memory,
+    // because it has small local memory
+    if (device->IsDgpu()) {
+        total_local_size += rocr::AlignUp(device->LocalHeapSize(), align) * 2;
+    } else {
+        total_local_size += rocr::AlignUp(
+            std::max(device->LocalHeapSize(), device->NonLocalHeapSize()), align) * 2;
+    }
+  }
+  local_heap_space_start_ = 0;
+  local_heap_space_size_ = total_local_size;
+  return ReserveSvmSpace(local_heap_space_start_, local_heap_space_size_, align);
 }
 
 bool hsakmtRuntime::FreeSvmSpace(uint64_t &base, uint64_t &size) {
     wsl::thunk::WDDMDevice* device;
     size_t num_adapters = get_num_wddmdev();
+    if (size == 0) {
+        return true;
+    }
     for (uint32_t j = 0; j < num_adapters; j++) {
-        device = get_wddmdev(j+1);
-        if (device == nullptr)
-            return -1;
+      device = WddmDevice(j);
+        if (device == nullptr) {
+            pr_err("FreeSvmSpace: adapter %d is nullptr!\n", j);
+            return false;
+        }
         wsl::thunk::d3dthunk::FreeGpuVirtualAddress(device->GetAdapter(), base, size);
     }
 
     void *cpu = (void *)base;
-    auto r = (munmap(cpu, size) == 0);
+    auto r = rocr::os::ReleaseMemory(cpu, size);
     base = 0;
     size = 0;
     return r;
@@ -190,17 +224,13 @@ void hsakmtRuntime::InitLocalHeapMgr() {
 }
 
 bool hsakmtRuntime::ReserveSystemHeapSpace() {
-    struct sysinfo info;
-    int ret = sysinfo(&info);
-    uint64_t max_ram = 0x10000000000;
-    uint64_t alignment = 0x100000000;
-    assert(!ret);
-
-    int32_t protFlags = PROT_NONE;
-    // minimum of reserve size is 8G, maximum of reserve size is 1T.
-    system_heap_space_size_ = std::min(wsl::AlignUp(info.totalram, alignment) * 2, max_ram);
-
-    return ReserveSvmSpace(system_heap_space_start_, system_heap_space_size_, alignment);
+  constexpr uint64_t max_ram = 0x10000000000ULL;
+  constexpr uint64_t alignment = 0x100000000ULL;
+  uint64_t total_ram = rocr::os::HostTotalPhysicalMemory();
+  // minimum of reserve size is 8G, maximum of reserve size is 1T.
+  total_ram = rocr::AlignUp(total_ram, static_cast<size_t>(alignment) * 2);
+  system_heap_space_size_ = (total_ram > max_ram) ? max_ram : total_ram;
+  return ReserveSvmSpace(system_heap_space_start_, system_heap_space_size_, alignment);
 }
 
 bool hsakmtRuntime::FreeSystemHeapSpace(void) {
@@ -208,21 +238,16 @@ bool hsakmtRuntime::FreeSystemHeapSpace(void) {
 }
 
 bool hsakmtRuntime::CommitSystemHeapSpace(void* addr, int64_t size, bool lock) {
-    int32_t protFlags = PROT_READ | PROT_WRITE | PROT_EXEC;
-    int32_t mapFlags = MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED|
-        MAP_NORESERVE|MAP_UNINITIALIZED;
-    if (lock)
-        mapFlags |= MAP_LOCKED;
-    void* paddr = mmap(addr, size, protFlags, mapFlags, -1, 0);
-    if (paddr == MAP_FAILED) {
-        pr_err("fail to commit %s addr = %p, paddr = %p\n", (lock ? "locked" : ""), addr, paddr);
+  rocr::os::MemProt protFlags = rocr::os::MEM_PROT_RWX;
+    if (lock) assert(false);
+        //mapFlags |= MAP_LOCKED;
+    if (!rocr::os::CommitMemory(addr, size, protFlags)) {
+        pr_err("fail to commit %s addr = %p\n", (lock ? "locked" : ""), addr);
         return false;
     }
-    assert(addr == paddr);
-
     /*if (!Runtime::runtime_singleton_->PinWARequired())
       return true;*/
-
+#if defined(__linux__)
     /*
      * Do not make the pages in this range available to the child
      * after a fork(2).  This is useful to prevent copy-on-write
@@ -235,20 +260,15 @@ bool hsakmtRuntime::CommitSystemHeapSpace(void* addr, int64_t size, bool lock) {
      */
     if (madvise(addr, size, MADV_DONTFORK))
         pr_err("fail to set MADV_DONTFORK for addr = %p\n", addr);
-
+#endif
     return true;
 }
 
 bool hsakmtRuntime::DecommitSystemHeapSpace(void* addr, int64_t size) {
-    int32_t protFlags = PROT_NONE;
-    int32_t mapFlags = MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED|
-        MAP_NORESERVE|MAP_UNINITIALIZED;
-    void* paddr = mmap(addr, size, protFlags, mapFlags, -1, 0);
-    if (paddr == MAP_FAILED) {
-        pr_err("fail to decommit addr = %p, paddr = %p\n", addr, paddr);
+    if (!rocr::os::UncommitMemory(addr, size)) {
+        pr_err("fail to decommit addr = %p\n", addr);
         return false;
     }
-    assert(addr == paddr);
     return true;
 }
 
@@ -269,15 +289,24 @@ ErrorCode hsakmtRuntime::ReserveGpuVirtualAddress(const thunk_proxy::AllocDomain
         align = GPU_HUGE_PAGE_SIZE;
 
     if (domain == thunk_proxy::kSystem) {
+        if (!system_heap_mgr_) {
+            *out_gpu_virt_addr = 0;
+            return ErrorCode::OutOfMemory;
+        }
+
         gpu_addr = system_heap_mgr_->Alloc(size, align, hit_base_addr);
         if (gpu_addr == 0)
             code = ErrorCode::OutOfMemory;
-
-        if (!CommitSystemHeapSpace((void*)gpu_addr, size, lock)) {
+        else if (!CommitSystemHeapSpace((void*)gpu_addr, size, lock)) {
             system_heap_mgr_->Free(gpu_addr);
             code = ErrorCode::SyscallFail;
         }
     } else {
+        if (!local_heap_mgr_) {
+            *out_gpu_virt_addr = 0;
+            return ErrorCode::OutOfGpuMemory;
+        }
+
         gpu_addr = local_heap_mgr_->Alloc(size, align, hit_base_addr);
         if (gpu_addr == 0)
             code = ErrorCode::OutOfGpuMemory;
@@ -293,15 +322,20 @@ ErrorCode hsakmtRuntime::FreeGpuVirtualAddress(const thunk_proxy::AllocDomain do
 
     if (domain == thunk_proxy::kSystem) {
         DecommitSystemHeapSpace((void *)gpu_addr, size);
-        system_heap_mgr_->Free(gpu_addr);
+        if (system_heap_mgr_) {
+            system_heap_mgr_->Free(gpu_addr);
+        }
     } else {
-        local_heap_mgr_->Free(gpu_addr);
+        if (local_heap_mgr_) {
+            local_heap_mgr_->Free(gpu_addr);
+        }
     }
 
     return code;
 }
 
 bool hsakmtRuntime::CommitSystemHeapSpaceIPC(void* addr, int64_t size, int &memfd, bool lock) {
+#if defined(__linux__)
     int fd = -1;
 
     if (memfd == -1) {
@@ -333,17 +367,23 @@ bool hsakmtRuntime::CommitSystemHeapSpaceIPC(void* addr, int64_t size, int &memf
 
     if (madvise(addr, size, MADV_DONTFORK))
         pr_err("fail to set MADV_DONTFORK for addr = %p\n", addr);
-
+#else
+  assert(!"Unimplemented!");
+#endif
     return true;
 }
 
 bool hsakmtRuntime::DecommitSystemHeapSpaceIPC(void* addr, int64_t size, int &memfd) {
+#if defined(__linux__)
     if (munmap(addr, size) != 0) {
         pr_err("fail to unmap = %p \n", addr);
         return false;
     }
     close(memfd);
     memfd = -1;
+#else
+  assert(!"Unimplemented!");
+#endif
     return true;
 }
 
@@ -382,9 +422,9 @@ bool hsakmtRuntime::InitHandleApertureSpace() {
 
     while (handle_aperture_start_ < END_NON_CANONICAL_ADDR - 1) {
 		for (uint32_t j = 0; j < num_adapters;) {
-	        device = get_wddmdev(j+1);
+        device = WddmDevice(j);
 	        if (device == nullptr)
-	            return -1;
+	            return false;
 
             if (device->PrivateApertureBase() &&
                     IS_OVERLAPPING(device->PrivateApertureBase(),
@@ -411,7 +451,7 @@ bool hsakmtRuntime::InitHandleApertureSpace() {
     }
 
     handle_aperture_start_ = 0;
-    pr_err("fail\n");
+    pr_err("failed to create non-canonical addr aperture\n");
 
     return false;
 }
@@ -448,7 +488,7 @@ bool is_forked_child(void) {
   if (dxg_runtime->is_forked)
     return true;
 
-  pid_t cur_pid = getpid();
+  int cur_pid = getpid();
   if (dxg_runtime->parent_pid != cur_pid) {
     dxg_runtime->is_forked = true;
     dxg_runtime->parent_pid = cur_pid;
@@ -459,10 +499,9 @@ bool is_forked_child(void) {
 }
 
 /* Callbacks from pthread_atfork */
-static void prepare_fork_handler(void) { pthread_mutex_lock(&dxg_runtime->hsakmt_mutex); }
-static void parent_fork_handler(void) { pthread_mutex_unlock(&dxg_runtime->hsakmt_mutex); }
+static void prepare_fork_handler(void) { dxg_runtime->hsakmt_mutex.lock(); }
+static void parent_fork_handler(void) { dxg_runtime->hsakmt_mutex.unlock(); }
 static void child_fork_handler(void) {
-  pthread_mutex_init(&dxg_runtime->hsakmt_mutex, NULL);
   dxg_runtime->is_forked = true;
 }
 
@@ -477,7 +516,9 @@ static void clear_after_fork(void) {
   clear_allocation_map();
 
   if (dxg_runtime->dxg_fd >= 0) {
+#if defined(__linux__)
     close(dxg_runtime->dxg_fd);
+#endif
     dxg_runtime->dxg_fd = -1;
   }
   delete dxg_runtime;
@@ -486,47 +527,74 @@ static void clear_after_fork(void) {
 }
 
 static inline void init_page_size(void) {
+#if defined(__linux__)
   dxg_runtime->page_size = sysconf(_SC_PAGESIZE);
   dxg_runtime->page_shift = ffs(dxg_runtime->page_size) - 1;
+#else
+  SYSTEM_INFO si;
+  ::GetSystemInfo(&si);
+  dxg_runtime->page_size = si.dwPageSize;
+  //note ignore page_shift it's not used
+#endif
 }
 
 static HSAKMT_STATUS init_vars_from_env(void) {
-  char *envvar;
-  int debug_level;
+  const char* envvar;
 
-  /* Normally libraries don't print messages. For debugging purpose, we'll
-   * print messages if an environment variable, HSAKMT_DEBUG_LEVEL, is set.
-   */
-  envvar = getenv("HSAKMT_DEBUG_LEVEL");
-  if (envvar) {
+  // Enable debug messages via HSAKMT_DEBUG_LEVEL environment variable.
+  // Libraries normally suppress messages; this allows debugging output when needed.
+  if ((envvar = getenv("HSAKMT_DEBUG_LEVEL")) != nullptr) {
     dxg_runtime->hsakmt_debug_level = atoi(envvar);
   }
 
-  /* Check whether to support Zero frame buffer */
-  envvar = getenv("HSA_ZFB");
-  if (envvar)
+  // Enable Zero Frame Buffer (ZFB) support if HSA_ZFB is set.
+  if ((envvar = getenv("HSA_ZFB")) != nullptr) {
     dxg_runtime->zfb_support = atoi(envvar);
+  }
 
-  /* Check whether to handle vendor specific aql packet */
-  envvar = getenv("WSLKMT_VENDOR_PACKET");
-  if (envvar)
+  // Enable vendor-specific AQL packet processing if WSLKMT_VENDOR_PACKET is set.
+  if ((envvar = getenv("WSLKMT_VENDOR_PACKET")) != nullptr) {
     dxg_runtime->vendor_packet_process = atoi(envvar);
+  }
 
-  /* Decide whether to check available system memory before allocation */
-  envvar = getenv("WSL_CHECK_AVAIL_SYSRAM");
-  if (envvar)
-    dxg_runtime->check_avail_sysram = !strcmp(envvar, "1");
-
-  envvar = getenv("WSL_ENABLE_THUNK_SUB_ALLOCATOR");
-  if (envvar)
+  // Enable thunk sub-allocator via WSL_ENABLE_THUNK_SUB_ALLOCATOR.
+  if ((envvar = getenv("WSL_ENABLE_THUNK_SUB_ALLOCATOR")) != nullptr) {
     dxg_runtime->enable_thunk_sub_allocator = atoi(envvar);
+  }
 
-  envvar = getenv("ROCR_VISIBLE_DEVICES");
-  if (envvar) {
+  // Enable PM4 packet usage if ROCR_USE_PM4 is set.
+  if ((envvar = getenv("ROCR_USE_PM4")) != nullptr) {
+    dxg_runtime->use_pm4_ = atoi(envvar);
+  }
+
+  // Disable wait timeout if ROCR_DISABLE_WAIT_TIMEOUT is set.
+  if ((envvar = getenv("ROCR_DISABLE_WAIT_TIMEOUT")) != nullptr) {
+    dxg_runtime->disable_wait_timeout_ = atoi(envvar);
+  }
+
+  // Check available system memory before allocation if WSL_CHECK_AVAIL_SYSRAM is "1".
+  if ((envvar = getenv("WSL_CHECK_AVAIL_SYSRAM")) != nullptr) {
+    dxg_runtime->check_avail_sysram = (envvar[0] == '1' && envvar[1] == '\0');
+  }
+
+  // Set default GPU node based on ROCR_VISIBLE_DEVICES. Extract the first numeric value
+  // from the environment variable and add 1 to convert to 1-indexed node ID.
+  if ((envvar = getenv("ROCR_VISIBLE_DEVICES")) != nullptr) {
     std::string devices(envvar);
     size_t first_num_pos = devices.find_first_of("0123456789");
-    if (first_num_pos != std::string::npos)
-      dxg_runtime->default_node = std::stoi(devices.substr(first_num_pos)) + 1;
+    if (first_num_pos != std::string::npos) {
+      dxg_runtime->default_node = std::stoi(devices.substr(first_num_pos));
+    }
+  }
+
+  // Determine SVM (Shared Virtual Memory) API support. Enabled by default unless
+  // HSA_USE_SVM is explicitly set to "0". Currently forced to false.
+  envvar = getenv("HSA_USE_SVM");
+  dxg_runtime->is_svm_api_supported =
+      !(envvar && envvar[0] == '0' && envvar[1] == '\0') && false;
+
+  if ((envvar = getenv("HSAKMT_DEBUG_SYSMEM")) != nullptr) {
+    dxg_runtime->hsakmt_debug_sysmem = atoi(envvar);
   }
 
   return HSAKMT_STATUS_SUCCESS;
@@ -538,7 +606,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void) {
   HsaSystemProperties sys_props;
   char *error;
 
-  pthread_mutex_lock(&dxg_runtime->hsakmt_mutex);
+  std::lock_guard<std::recursive_mutex> lck(dxg_runtime->hsakmt_mutex);
 
   /* If the process has forked, the child process must re-initialize
    * it's connection to DXG. Any references tracked by dxg_open_count
@@ -555,7 +623,11 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void) {
       goto open_failed;
 
     if (dxg_runtime->dxg_fd < 0) {
+#if defined(__linux__)
       fd = open(dxg_runtime->dxg_device_name, O_RDWR | O_CLOEXEC);
+#else
+      fd = 1;
+#endif
 
       if (fd == -1) {
         result = HSAKMT_STATUS_KERNEL_IO_CHANNEL_NOT_OPENED;
@@ -570,11 +642,14 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void) {
         goto dxcore_loader_failed;
     }
 
+#if defined(__linux__)
     hsakmt_hsa_loader_init();
+#endif
     init_page_size();
 
-    char *useSvmStr = getenv("HSA_USE_SVM");
-    dxg_runtime->is_svm_api_supported = !(useSvmStr && !strcmp(useSvmStr, "0")) && false;
+
+
+
 
     dxg_runtime->dxg_open_count = 1;
 
@@ -584,8 +659,10 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void) {
        * prepare will deadlock when trying to take
        * the same lock multiple times.
        */
+#if defined(__linux__)
       pthread_atfork(prepare_fork_handler, parent_fork_handler,
                      child_fork_handler);
+#endif
       atfork_installed = true;
     }
   } else {
@@ -594,24 +671,26 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void) {
   }
 
   reset_suballocator();
-  pthread_mutex_unlock(&dxg_runtime->hsakmt_mutex);
   return result;
 dxcore_loader_failed:
+#if defined(__linux__)
   close(fd);
+#endif
 open_failed:
-  pthread_mutex_unlock(&dxg_runtime->hsakmt_mutex);
 
   return result;
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtCloseKFD(void) {
   HSAKMT_STATUS result;
-
-  pthread_mutex_lock(&dxg_runtime->hsakmt_mutex);
+  std::lock_guard<std::recursive_mutex> lck(dxg_runtime->hsakmt_mutex);
 
   if (dxg_runtime->dxg_open_count > 0) {
     if (--dxg_runtime->dxg_open_count == 0) {
+      dxg_runtime->HeapFini();
+#if defined(__linux__)
       close(dxg_runtime->dxg_fd);
+#endif
       dxg_runtime->dxg_fd = -1;
       wsl::thunk::dxcore::DxcoreLoader::Instance().Shutdown();
     }
@@ -619,8 +698,6 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCloseKFD(void) {
     result = HSAKMT_STATUS_SUCCESS;
   } else
     result = HSAKMT_STATUS_KERNEL_IO_CHANNEL_NOT_OPENED;
-
-  pthread_mutex_unlock(&dxg_runtime->hsakmt_mutex);
 
   return result;
 }
