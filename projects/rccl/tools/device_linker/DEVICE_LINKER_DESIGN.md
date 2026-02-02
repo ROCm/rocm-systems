@@ -741,32 +741,55 @@ Step 7: Verifying results
    - Scratch requirements are met (KD: 1096 bytes, specialized kernel needs only 72 bytes)
    - Crash PC is valid function address - function pointer dispatch works correctly
    
-   **Root cause identified: Different memory load patterns**
-   - IFC production uses `s_load_dwordx2` (scalar memory load) for function table access
-   - Our build uses `global_load_dwordx2` (vector memory load)
+   **Scalar load issue FIXED but multi-GPU still fails**
    
-   IFC pattern:
-   ```
-   v_readfirstlane_b32 s2, v0     // Convert funcId to scalar FIRST
-   s_load_dwordx2 s[0:1], s[0:1], s2  // Scalar load from constant cache
-   ```
+   Root cause for scalar/vector loads was the function table declaration:
+   - Missing `const` qualifier caused compiler to use vector loads
+   - Added `const` to table declarations in common.h/common.cu
+   - Now generates scalar loads matching IFC: `v_readfirstlane_b32` then `s_load_dwordx2`
+   - Tables now in `.rodata` (const) instead of `.bss` (mutable)
    
-   Our pattern:
-   ```
-   global_load_dwordx2 v[0:1], v0, s[0:1]  // Vector load from global memory
-   v_readfirstlane_b32 s0, v0     // Convert result to scalar AFTER
-   ```
+   **Current state after scalar load fix:**
+   - Single GPU on GPU 0: WORKS
+   - Single GPU on GPU 1: WORKS
+   - Multi-GPU (concurrent): FAILS
+   - Tested without `const` - still fails (pre-existing issue, not caused by const change)
    
-   - Scalar loads go through the constant cache (L0/L1), vector loads go through L2/global memory
-   - On multi-GPU, the global memory path may have coherency issues between GPUs
-   - This difference comes from how the dispatcher was compiled:
-     - IFC compiles everything together; compiler knows table is constant-like
-     - Device linker compiles dispatcher separately; compiler uses global loads
+   **Detailed crash analysis:**
+   - PC = 0x3f700 (correct specialized function address)
+   - s0:s1 = 0x3f700 (function pointer correctly loaded)
+   - s32 = 0, s33 = 0 (stack pointer is zero)
+   - Crash at `scratch_store_dword off, v42, s33 offset:24`
+   - BOTH GPUs have waves at the crash point (8 waves total - 4 per GPU)
    
-   **Potential fixes:**
-   1. Use IFC-compiled dispatcher binary with scalar loads (requires extracting from IFC build)
-   2. Patch dispatcher code at link time to use scalar loads (complex)
-   3. Move function table to true constant memory (requires ABI changes)
+   **Key observations:**
+   - Dispatcher sets `s_mov_b32 s32, 0` at kernel entry (by design)
+   - This works fine on single GPU (scratch_store_dword with s32=0 succeeds)
+   - Fails only during concurrent multi-GPU execution
+   - Production RCCL works fine on same system with multi-GPU
+   
+   **Fixed:**
+   - KD `private_segment_fixed_size` now set to max_stack_ (1096 bytes) instead of 0
+   - .note metadata also patched to match
+   - BUT multi-GPU still fails!
+   
+   **Current status (scratch fix applied):**
+   - KD scratch: 1096 bytes (was 0)
+   - .note private_segment_fixed_size: 1096 (was 0)
+   - Single GPU on GPU 0: WORKS
+   - Single GPU on GPU 1: WORKS  
+   - Multi-GPU (both running concurrently): FAILS
+   
+   **Investigation path:**
+   1. Scratch size was 0 - FIXED, but didn't help
+   2. SCRATCH_EN = 1 in RSRC2 - correct
+   3. uses_dynamic_stack = true - correct
+   4. Crash still at scratch_store_dword in specialized function
+   
+   **Remaining theories:**
+   1. Something about concurrent kernel launches breaks scratch setup
+   2. Code object structure issue for multi-GPU
+   3. HIP/HSA runtime issue with our specific ELF format
 
 2. **Table offset bug** (FIXED)
    - PC-relative table references were calculated using merged PC instead of original dispatcher PC
@@ -780,3 +803,276 @@ Step 7: Verifying results
 | `tools/device_linker/device_linker.cpp` | Fixed RSRC1/RSRC2 offsets (0x30/0x34), fixed dispatcher KD entry_offset patching, fixed PC-relative table offset calculation |
 | `src/device/generate_specialized.py` | Added pipeline to filename to generate all bf16 variants |
 | `src/device/common.h` | Added/reverted NULL check for function table dispatch |
+
+## Debugging Tools Reference
+
+### ROCm 7 LLVM Object Tools
+
+These tools are invaluable for analyzing AMDGPU device code:
+
+#### 1. KD (Kernel Descriptor) Disassembly
+```bash
+# Decode KDs with human-readable field names
+llvm-objdump -Dr --section=.rodata <device.elf>
+
+# Output shows:
+#   .amdhsa_group_segment_fixed_size 19808    # LDS size
+#   .amdhsa_private_segment_fixed_size 0      # Scratch size
+#   .amdhsa_accum_offset 128                  # AGPR offset (field at KD+0x2c)
+#   .amdhsa_next_free_vgpr 136                # VGPR count
+#   .amdhsa_enable_private_segment 1          # SCRATCH_EN
+#   .amdhsa_uses_dynamic_stack 1              # Dynamic stack flag
+```
+
+#### 2. Raw Section Contents with Relocations
+```bash
+# Show hex dump with relocation annotations
+llvm-objdump -s -r --section=.rodata <device.elf>
+
+# Useful for function tables - shows where R_AMDGPU_RELATIVE64 will be applied
+llvm-objdump -s -r --section=.data.rel.ro <device.elf>
+```
+
+#### 3. Offloading Bundle Extraction
+```bash
+# Automatically extract embedded device code from host .so
+llvm-objdump --offloading <librccl.so>
+
+# This creates extracted files like:
+#   librccl.so.0.hipv4-amdgcn-amd-amdhsa--gfx942:sramecc+:xnack-
+
+# Then analyze the extracted device ELF:
+llvm-objdump -Dr --section=.rodata librccl.so.0.hipv4-amdgcn-amd-amdhsa--gfx942*
+```
+
+#### 4. Full Contents Disassembly
+```bash
+llvm-objdump -d --full-contents <device.elf>
+```
+
+### Key KD Fields (64-byte descriptor at each .kd symbol)
+
+| Offset | Size | Field | Notes |
+|--------|------|-------|-------|
+| 0x00 | 4 | group_segment_fixed_size | LDS allocation in bytes |
+| 0x04 | 4 | private_segment_fixed_size | Scratch size (should match max callee) |
+| 0x08 | 8 | kernarg_size | Kernel argument buffer size |
+| 0x10 | 8 | kernel_code_entry_byte_offset | Signed offset from KD to entry point |
+| 0x2c | 4 | reserved (accum_offset encoding) | IFC has 0x1f, affects AGPR allocation |
+| 0x30 | 4 | compute_pgm_rsrc1 | VGPR/SGPR allocation |
+| 0x34 | 4 | compute_pgm_rsrc2 | SCRATCH_EN (bit 0), USER_SGPR (bits 1-5) |
+| 0x38 | 2 | kernel_code_properties | SGPR enables (dispatch_ptr, queue_ptr, etc.) |
+
+### Comparing IFC vs Device Linker Output
+
+```bash
+# Extract IFC device ELF
+llvm-objcopy --dump-section=.hip_fatbin=/tmp/ifc_fatbin.bin /path/to/ifc/librccl.so
+clang-offload-bundler --unbundle -type=o -targets=hipv4-amdgcn-amd-amdhsa--gfx942 \
+    -input=/tmp/ifc_fatbin.bin -output=/tmp/ifc_device.elf
+
+# Compare KDs side-by-side
+llvm-objdump -Dr --section=.rodata /tmp/ifc_device.elf | grep -A40 "Generic_2.*\.kd"
+llvm-objdump -Dr --section=.rodata /tmp/our_device.elf | grep -A40 "Generic_2.*\.kd"
+```
+
+### Current Status (Feb 2026)
+
+**Working:**
+- Single GPU execution on any GPU
+
+**Not Working:**
+- Multi-GPU concurrent execution
+
+**KD Comparison (IFC vs Ours for Generic_2):**
+
+| Field | IFC | Ours | Notes |
+|-------|-----|------|-------|
+| group_segment_fixed_size | 19808 | 19776 | 32 byte diff (OK) |
+| private_segment_fixed_size | 0 | 1096 | We add scratch for callees |
+| accum_offset | 128 | 128 | Now matching (patched 0x2c) |
+| next_free_vgpr | 136 | 304 | We use more VGPRs |
+| enable_private_segment | 1 | 1 | Both enable scratch |
+| uses_dynamic_stack | 1 | 1 | Both use dynamic stack |
+
+### Current Status Summary
+
+**Working:**
+- Single GPU on GPU 0
+- Single GPU on GPU 1
+- Sequential GPU execution (GPU 0, then GPU 1, in same process)
+
+**Not Working:**
+- Concurrent multi-GPU (ncclCommInitAll with multiple GPUs)
+
+**Tested Approaches:**
+| Approach | Single GPU | Multi-GPU | Failure Mode |
+|----------|------------|-----------|--------------|
+| Const tables + pre-fill (scalar loads) | PASS | FAIL | SIGSEGV at scratch_store_dword |
+| Non-const tables + relocations (vector loads) | PASS | FAIL | SIGILL (garbage function pointer) |
+
+**Root Cause Analysis:**
+The issue is specific to concurrent multi-GPU execution using ncclCommInitAll. Sequential execution on multiple GPUs works fine.
+
+IFC compiles everything together in one pass, while we merge separately compiled pieces. This may affect how the HIP/HSA runtime:
+1. Loads the code object across multiple GPUs
+2. Applies relocations per-GPU
+3. Initializes scratch memory for concurrent kernels
+
+Further investigation needed into HIP/HSA runtime behavior for multi-GPU code object loading.
+
+## Detailed IFC vs Device Linker Comparison
+
+### Relocation Analysis (Feb 2026)
+
+**IFC Relocations (2589 total):**
+| Category | Count | Offset Range | Notes |
+|----------|-------|--------------|-------|
+| Table 1 | 859 | 0x6df11e0 - 0x6df2cc0 | ncclDevFuncTable_1 entries |
+| Table 2 | 859 | 0x6df2cc0 - 0x6df47a0 | ncclDevFuncTable_2 entries |
+| Table 4 | 859 | 0x6df47a0 - 0x6df6280 | ncclDevFuncTable_4 entries |
+| Other | 12 | 0x6df7330 - 0x6df7388 | `__clang_gpu_used_external` (96 bytes) |
+
+**The 12 "other" relocations:**
+- Located in `.data` section (section 12)
+- Point to symbol `__clang_gpu_used_external` (LOCAL HIDDEN, 96 bytes)
+- Addends are kernel entry points in .text (0xcca00, 0xcb800, 0xc0d00, etc.)
+- These appear to be the 12 dispatcher/debug kernel entry points
+
+**Our Relocations:**
+- With reloc approach: 859 (only table_2, since we only have unroll=2 functions)
+- With const+prefill approach: 0 (tables in .rodata, pre-filled)
+- Missing: `__clang_gpu_used_external` and its 12 relocations
+
+### Section Comparison
+
+| Section | IFC Size | Ours Size | IFC Flags | Ours Flags | Notes |
+|---------|----------|-----------|-----------|------------|-------|
+| .note | 0x689c (26780) | 0x11f0 (4592) | A | A | **IFC 5.8x larger** - more kernel metadata |
+| .dynsym | 0x18f0 (6384) | 0x108 (264) | A | A | IFC 24x larger - more dynamic symbols |
+| .rela.dyn | 0xf2b8 (62136) | 0x0 (0) | A | A | **We have NO relocations** (const+prefill) |
+| .rodata | 0xa5180 | 0x5158 | **AMS** | A | IFC has Merge+Strings flags |
+| .dynamic | 0xb0 (176) | 0x70 (112) | WA | WA | Different dynamic entries |
+| .data | 0x60 (96) | 0x60 (96) | WA | WA | Same size |
+| .bss | 0xe4 (228) | 0x6b (107) | WA | WA | IFC larger |
+
+**Key Differences:**
+1. `.note` much larger in IFC - contains metadata for all kernels
+2. `.rela.dyn` empty in our const+prefill build - no runtime relocations
+3. `.rodata` flags: IFC has "AMS" (Alloc+Merge+Strings), ours has just "A"
+
+### Kernel Count in .note
+
+**IFC (18 kernels):**
+- 12 `oneRankReduce` helper kernels (for different data types: i, j, m, bf16, d, l, half, f, fp8_e5m2, fp8_e4m3, h, a)
+- 3 Generic dispatch kernels (Generic_1, Generic_2, Generic_4)
+- 3 Debug dispatch kernels (Debug_Generic_1, Debug_Generic_2, Debug_Generic_4)
+
+**Ours (3 kernels):**
+- 3 Generic dispatch kernels only
+
+**Missing from our build:**
+- Debug kernels (not compiled with DEVICE_LINKER_DISPATCH)
+- oneRankReduce helpers (these are internal NCCL functions, not in dispatcher)
+
+**The 12 "other" relocations** point to the oneRankReduce kernel entry points via `__clang_gpu_used_external` in .data section.
+
+### `__clang_gpu_used_external` Symbol
+
+**IFC has:**
+- Symbol: `__clang_gpu_used_external` at 0x6df7330, 96 bytes, LOCAL HIDDEN, section 12 (.data)
+- Contents: 12 pointers (initially zero, filled by R_AMDGPU_RELATIVE64 relocations)
+- Purpose: Tracks which device functions are used (LLVM dead code elimination marker)
+
+**We're missing:**
+- No `__clang_gpu_used_external` symbol in our build
+- Our .data has just `__hip_cuid_*` symbols (1 byte each)
+- This symbol might be required by the HSA runtime for proper initialization
+
+### .dynamic Section Comparison
+
+**IFC (11 entries):**
+```
+RELA      0xb850
+RELASZ    62136 (bytes)
+RELAENT   24 (bytes)
+RELACOUNT 2589
+SYMTAB    0x6ad8
+SYMENT    24 (bytes)
+STRTAB    0x935c
+STRSZ     9454 (bytes)
+GNU_HASH  0x83c8
+HASH      0x8b04
+NULL      0x0
+```
+
+**Ours (7 entries) - const+prefill mode:**
+```
+SYMTAB    0x1428
+SYMENT    24 (bytes)
+STRTAB    0x15e0
+STRSZ     473 (bytes)
+GNU_HASH  0x1530
+HASH      0x1580
+NULL      0x0
+```
+
+**Missing from ours:** RELA, RELASZ, RELAENT, RELACOUNT (because we have no relocations in const+prefill mode)
+
+### Dynamic Symbol Table (.dynsym) Comparison
+
+**IFC:** 266 entries
+- Many `__hip_cuid_*` symbols (compilation unit IDs from multiple TUs)
+- Kernel descriptor symbols (`.kd` suffix)
+- NO function table symbols (tables have internal linkage `_ZL`)
+
+**Ours:** 11 entries
+- Only 1 `__hip_cuid_*` (single compilation unit)
+- Kernel function symbols
+- Kernel descriptor symbols (`.kd`)
+- Function table symbols (`ncclDevFuncTable_*`) - LOCAL HIDDEN
+
+**Notable:** We export function table symbols in .dynsym, IFC does not (they use `_ZL` internal linkage)
+
+### KD Field-by-Field Comparison (Generic_2)
+
+| Field | IFC | Ours | Match? |
+|-------|-----|------|--------|
+| group_segment_fixed_size (LDS) | 19808 | 19776 | NO (-32) |
+| private_segment_fixed_size | 0 | 1096 | NO |
+| kernarg_size | 4352 | 4352 | YES |
+| accum_offset | 128 | 64 | **NO** |
+| tg_split | 0 | 0 | YES |
+| next_free_vgpr | 136 | 304 | **NO** |
+| reserve_vcc | 0 | 0 | YES |
+| reserve_xnack_mask | 0 | 0 | YES |
+| next_free_sgpr | 112 | 112 | YES |
+| float_round_mode_32 | 0 | 0 | YES |
+| float_round_mode_16_64 | 0 | 0 | YES |
+| float_denorm_mode_32 | 3 | 3 | YES |
+| float_denorm_mode_16_64 | 3 | 3 | YES |
+| dx10_clamp | 1 | 1 | YES |
+| ieee_mode | 1 | 1 | YES |
+| fp16_overflow | 0 | 0 | YES |
+| enable_private_segment | 1 | 1 | YES |
+| system_sgpr_workgroup_id_x | 1 | 1 | YES |
+| system_sgpr_workgroup_id_y | 1 | 1 | YES |
+| system_sgpr_workgroup_id_z | 1 | 1 | YES |
+| system_sgpr_workgroup_info | 0 | 0 | YES |
+| system_vgpr_workitem_id | 2 | 2 | YES |
+| user_sgpr_dispatch_ptr | 1 | 1 | YES |
+| user_sgpr_queue_ptr | 1 | 1 | YES |
+| user_sgpr_kernarg_segment_ptr | 1 | 1 | YES |
+| user_sgpr_dispatch_id | 1 | 1 | YES |
+| user_sgpr_private_segment_size | 0 | 0 | YES |
+| uses_dynamic_stack | 1 | 1 | YES |
+
+**Key KD Differences:**
+1. `accum_offset`: IFC=128, Ours=64 - AGPR allocation differs
+2. `next_free_vgpr`: IFC=136, Ours=304 - We allocate 2.2x more VGPRs
+3. `private_segment_fixed_size`: IFC=0, Ours=1096 - We set scratch for callees
+4. `group_segment_fixed_size`: 32-byte difference in LDS
+
+**Note:** Our Generic_4 KD has a decoding error despite being 64-byte aligned
+
+**Tested:** Patching offset 0x2c to 0x1f (matching IFC) does NOT fix multi-GPU. The value is now correct in the KD but the issue persists.

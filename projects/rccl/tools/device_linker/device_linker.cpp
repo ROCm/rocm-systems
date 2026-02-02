@@ -153,6 +153,10 @@ public:
         const uint8_t* p = file_.at<uint8_t>(s.offset);
         return std::vector<uint8_t>(p, p + s.size);
     }
+    
+    // Access to symbol table entries (for finding function table locations)
+    template<typename T> const T* fileAt(size_t offset) const { return file_.at<T>(offset); }
+    const char* fileStr(size_t offset) const { return file_.str(offset); }
 
 private:
     const MappedFile& file_;
@@ -530,13 +534,19 @@ private:
     // Resource maxima
     int max_vgpr_ = 0, max_sgpr_ = 0, max_lds_ = 0, max_stack_ = 0;
     
-    // Function tables
+    // Function tables (text offsets per funcId)
     std::vector<uint64_t> table_1_, table_2_, table_4_;
+    
+    // Function table offsets within .rodata (for const tables)
+    uint64_t rodata_table_1_off_ = 0;
+    uint64_t rodata_table_2_off_ = 0;
+    uint64_t rodata_table_4_off_ = 0;
     
     // Addresses computed during layout
     uint64_t text_addr_ = 0;
+    uint64_t rodata_addr_ = 0;       // .rodata section
     uint64_t data_addr_ = 0;
-    uint64_t data_rel_ro_addr_ = 0;  // Function tables
+    uint64_t data_rel_ro_addr_ = 0;  // Function tables (if not in .rodata)
     uint64_t dyn_addr_ = 0;          // .dynamic section
     uint64_t relro_end_ = 0;         // End of RELRO segment
     uint64_t rela_addr_ = 0;
@@ -668,7 +678,7 @@ private:
             sections_.push_back(std::move(note));
         }
         
-        // Build .rodata (KDs - dispatcher only, specialized kernels are called as functions)
+        // Build .rodata (KDs + const function tables from dispatcher)
         auto* disp_rodata = disp_->find(".rodata");
         if (disp_rodata) {
             SectionInfo rodata;
@@ -677,7 +687,42 @@ private:
             rodata.flags = SHF_ALLOC;
             rodata.alignment = 64;
             rodata.data = disp_->getBytes(*disp_rodata);
-            printf("Built .rodata: %zu bytes (dispatcher KDs only)\n", rodata.data.size());
+            
+            // Find function table offsets within .rodata using symbols
+            // Tables are declared const, so they're in .rodata now
+            uint64_t rodata_base = disp_rodata->addr;
+            rodata_table_1_off_ = rodata_table_2_off_ = rodata_table_4_off_ = 0;
+            
+            // Read symbol table to find function tables
+            auto* symtab = disp_->find(".symtab");
+            auto* strtab = disp_->find(".strtab");
+            if (symtab && strtab) {
+                const char* strings = disp_->fileStr(strtab->offset);
+                const Elf64_Sym* syms = disp_->fileAt<Elf64_Sym>(symtab->offset);
+                size_t nsyms = symtab->size / sizeof(Elf64_Sym);
+                
+                for (size_t i = 0; i < nsyms; i++) {
+                    const char* name = strings + syms[i].st_name;
+                    uint16_t shndx = syms[i].st_shndx;
+                    
+                    // Check if symbol is in .rodata section
+                    if (shndx == disp_rodata->index) {
+                        if (strcmp(name, "ncclDevFuncTable_1") == 0) {
+                            rodata_table_1_off_ = syms[i].st_value - rodata_base;
+                        } else if (strcmp(name, "ncclDevFuncTable_2") == 0) {
+                            rodata_table_2_off_ = syms[i].st_value - rodata_base;
+                        } else if (strcmp(name, "ncclDevFuncTable_4") == 0) {
+                            rodata_table_4_off_ = syms[i].st_value - rodata_base;
+                        }
+                    }
+                }
+            }
+            
+            printf("Built .rodata: %zu bytes (KDs + const function tables)\n", rodata.data.size());
+            if (rodata_table_1_off_ || rodata_table_2_off_ || rodata_table_4_off_) {
+                printf("  Function tables in .rodata at offsets: 0x%lx, 0x%lx, 0x%lx\n",
+                       rodata_table_1_off_, rodata_table_2_off_, rodata_table_4_off_);
+            }
             sections_.push_back(std::move(rodata));
         }
         
@@ -911,9 +956,9 @@ private:
         // Previously we patched true->false but IFC production builds keep it true
         printf("  .note: keeping uses_dynamic_stack unchanged (matching IFC)\n");
         
-        // 2. Keep private_segment_fixed_size as-is (IFC has 0, we should match)
-        // Previously we patched from 0 to max_stack_ but IFC keeps it at 0
-        printf("  .note: keeping private_segment_fixed_size unchanged (matching IFC)\n");
+        // 2. Set private_segment_fixed_size to max_stack_ for specialized functions
+        // Unlike IFC, we call separate specialized functions that need scratch
+        printf("  .note: will patch private_segment_fixed_size to %d\n", max_stack_);
         
         // NOTE: We still patch VGPR/SGPR counts below to match our max resource usage
         
@@ -991,9 +1036,7 @@ private:
             return patched;
         };
         
-        // Skip private_segment_fixed_size patching - keep at 0 to match IFC
-        // (The code below is disabled)
-        /*
+        // Patch private_segment_fixed_size to max_stack_ for specialized function scratch
         if (!patch_positions.empty()) {
             if (max_stack_ <= 127) {
                 for (auto pos : patch_positions) { out[pos] = (uint8_t)max_stack_; patch_count2++; }
@@ -1011,7 +1054,6 @@ private:
         if (patch_count2 > 0) {
             printf("  .note: patched %d private_segment_fixed_size to %d\n", patch_count2, max_stack_);
         }
-        */
         
         int vgpr_patched = expandIntField(".vgpr_count", max_vgpr_);
         int sgpr_patched = expandIntField(".sgpr_count", max_sgpr_);
@@ -1104,6 +1146,7 @@ private:
             addr += s.size();
             
             if (s.name == ".text") text_addr_ = s.addr;
+            if (s.name == ".rodata") rodata_addr_ = s.addr;
             
             printf("  %-16s @ 0x%08lx  size=0x%06zx  align=%lu\n",
                    s.name.c_str(), s.addr, s.size(), s.alignment);
@@ -1225,54 +1268,78 @@ private:
     
     // ========== Pass 3: Patch ==========
     void patchSections() {
-        // Function tables in .data.rel.ro - pre-fill with absolute addresses
-        // This avoids relying on R_AMDGPU_RELATIVE64 relocations which may not
-        // be properly applied across all GPUs in multi-GPU scenarios
+        // Function tables - check if in .rodata (const tables) or .data.rel.ro
+        SectionInfo* rodata_sec = nullptr;
         SectionInfo* data_rel_ro_sec = nullptr;
-        for (auto& s : sections_) if (s.name == ".data.rel.ro") { data_rel_ro_sec = &s; break; }
+        for (auto& s : sections_) {
+            if (s.name == ".rodata") rodata_sec = &s;
+            if (s.name == ".data.rel.ro") data_rel_ro_sec = &s;
+        }
         
-        if (data_rel_ro_sec) {
-            printf("Function tables at 0x%lx (pre-filling with absolute addresses)\n", data_rel_ro_addr_);
-            int populated = 0;
+        // Fill tables in .rodata if they're there (const tables case)
+        if (rodata_sec && rodata_table_2_off_ > 0) {
+            printf("Function tables in .rodata (const) - pre-filling at offsets 0x%lx, 0x%lx, 0x%lx\n",
+                   rodata_table_1_off_, rodata_table_2_off_, rodata_table_4_off_);
             
-            // Pre-fill table entries with absolute addresses
-            // The device ELF is typically loaded at base address 0, so absolute = addend
-            uint8_t* table_data = data_rel_ro_sec->data.data();
+            uint8_t* rodata = rodata_sec->data.data();
             int pop1 = 0, pop2 = 0, pop4 = 0;
             for (int i = 0; i < FUNC_COUNT; i++) {
-                if (table_1_[i]) {
+                if (table_1_[i] && rodata_table_1_off_) {
                     uint64_t addr = text_addr_ + table_1_[i];
-                    memcpy(table_data + i * 8, &addr, 8);
+                    memcpy(rodata + rodata_table_1_off_ + i * 8, &addr, 8);
                     pop1++;
                 }
-                if (table_2_[i]) {
+                if (table_2_[i] && rodata_table_2_off_) {
                     uint64_t addr = text_addr_ + table_2_[i];
-                    memcpy(table_data + table_spacing_ + i * 8, &addr, 8);
+                    memcpy(rodata + rodata_table_2_off_ + i * 8, &addr, 8);
                     pop2++;
                 }
-                if (table_4_[i]) {
+                if (table_4_[i] && rodata_table_4_off_) {
                     uint64_t addr = text_addr_ + table_4_[i];
-                    memcpy(table_data + table_spacing_ * 2 + i * 8, &addr, 8);
+                    memcpy(rodata + rodata_table_4_off_ + i * 8, &addr, 8);
                     pop4++;
                 }
             }
-            printf("  Function entries pre-filled: table_1=%d, table_2=%d, table_4=%d\n", pop1, pop2, pop4);
+            printf("  Function entries pre-filled in .rodata: table_1=%d, table_2=%d, table_4=%d\n", pop1, pop2, pop4);
+        }
+        // For .data.rel.ro tables, don't pre-fill - R_AMDGPU_RELATIVE64 relocations
+        // will fill them at load time (like IFC). This is important for multi-GPU.
+        else if (data_rel_ro_sec) {
+            printf("Function tables at 0x%lx (will be filled by relocations at load time)\n", data_rel_ro_addr_);
         }
         
-        // Patch .text with PC-relative table references (now pointing to .data.rel.ro)
+        // Patch .text with PC-relative table references
         SectionInfo* text_sec = nullptr;
         for (auto& s : sections_) if (s.name == ".text") { text_sec = &s; break; }
         
         if (text_sec) {
-            uint64_t table_addrs[3] = { data_rel_ro_addr_, data_rel_ro_addr_ + table_spacing_, data_rel_ro_addr_ + table_spacing_ * 2 };
+            // Determine table addresses based on where they are (rodata or data.rel.ro)
+            uint64_t table_addrs[3];
+            uint64_t old_table_base;
+            auto* disp_rodata = disp_->find(".rodata");
+            auto* disp_bss = disp_->find(".bss");
+            
+            if (rodata_table_2_off_ > 0 && disp_rodata) {
+                // Tables are in .rodata (const case)
+                table_addrs[0] = rodata_addr_ + rodata_table_1_off_;
+                table_addrs[1] = rodata_addr_ + rodata_table_2_off_;
+                table_addrs[2] = rodata_addr_ + rodata_table_4_off_;
+                old_table_base = disp_rodata->addr + rodata_table_1_off_;
+                printf("PC-relative patching: tables in .rodata at 0x%lx, 0x%lx, 0x%lx\n",
+                       table_addrs[0], table_addrs[1], table_addrs[2]);
+            } else {
+                // Tables in .data.rel.ro (old non-const case)
+                table_addrs[0] = data_rel_ro_addr_;
+                table_addrs[1] = data_rel_ro_addr_ + table_spacing_;
+                table_addrs[2] = data_rel_ro_addr_ + table_spacing_ * 2;
+                old_table_base = disp_bss ? disp_bss->addr : 0x8000;
+            }
             
             // Find s_getpc_b64 + s_add_u32 patterns
             uint32_t s_getpc = 0xBE801C00;
             uint32_t s_add = 0x8000FF00;
             
-            auto* disp_bss = disp_->find(".bss");
             auto* disp_text = disp_->find(".text");
-            uint64_t old_data_addr = disp_bss ? disp_bss->addr : 0x8000;
             uint64_t disp_text_addr = disp_text ? disp_text->addr : 0;
             
             int patches = 0;
@@ -1290,20 +1357,37 @@ private:
                     // original_pc is the address in the original dispatcher
                     uint64_t original_pc = disp_text_addr + off + 4;
                     // old_target is the original target (relative to original dispatcher layout)
-                    uint64_t old_target = original_pc + old_lit;
+                    int32_t signed_lit = (int32_t)old_lit;
+                    uint64_t old_target = (uint64_t)((int64_t)original_pc + signed_lit);
                     
                     int idx = -1;
-                    if (old_target >= old_data_addr && old_target < old_data_addr + 0x6000) {
-                        uint64_t rel = old_target - old_data_addr;
-                        if (rel < table_spacing_) idx = 0;
-                        else if (rel < table_spacing_ * 2) idx = 1;
-                        else idx = 2;
+                    // Check if target is one of the tables
+                    if (rodata_table_2_off_ > 0 && disp_rodata) {
+                        uint64_t rodata_base = disp_rodata->addr;
+                        if (old_target >= rodata_base + rodata_table_1_off_ &&
+                            old_target < rodata_base + rodata_table_1_off_ + FUNC_COUNT * 8) {
+                            idx = 0;
+                        } else if (old_target >= rodata_base + rodata_table_2_off_ &&
+                                   old_target < rodata_base + rodata_table_2_off_ + FUNC_COUNT * 8) {
+                            idx = 1;
+                        } else if (old_target >= rodata_base + rodata_table_4_off_ &&
+                                   old_target < rodata_base + rodata_table_4_off_ + FUNC_COUNT * 8) {
+                            idx = 2;
+                        }
+                    } else {
+                        if (old_target >= old_table_base && old_target < old_table_base + 0x6000) {
+                            uint64_t rel = old_target - old_table_base;
+                            if (rel < table_spacing_) idx = 0;
+                            else if (rel < table_spacing_ * 2) idx = 1;
+                            else idx = 2;
+                        }
                     }
                     
                     if (idx >= 0) {
-                        uint32_t new_lit = (uint32_t)(table_addrs[idx] - pc);
+                        int32_t new_lit = (int32_t)(table_addrs[idx] - pc);
                         memcpy(text_sec->data.data() + off + 8, &new_lit, 4);
-                        printf("  Patched table ref: PC=0x%lx, table %d -> 0x%lx\n", pc, idx, table_addrs[idx]);
+                        printf("  Patched table ref: PC=0x%lx, table %d -> 0x%lx (lit=0x%x)\n", 
+                               pc, idx, table_addrs[idx], (uint32_t)new_lit);
                         patches++;
                     }
                 }
@@ -1312,9 +1396,7 @@ private:
         }
         
         // Patch .rodata (KDs) - both dispatcher and specialized
-        SectionInfo* rodata_sec = nullptr;
-        for (auto& s : sections_) if (s.name == ".rodata") { rodata_sec = &s; break; }
-        
+        // (rodata_sec was found earlier in this function)
         if (rodata_sec) {
             // Helper to patch a single KD with max resources
             auto patchKD = [&](uint8_t* kd, size_t kd_off, bool is_specialized, uint64_t text_off = 0) {
@@ -1322,9 +1404,10 @@ private:
                 uint32_t lds = max_lds_;
                 memcpy(kd + 0, &lds, 4);
                 
-                // Stack - use 0 like IFC does (FLAT_SCRATCH handles scratch via SGPRs)
-                // IFC production builds have scratch_size=0 in their KDs
-                uint32_t stack = 0;  // Was: max_stack_
+                // Stack - set to max needed by specialized functions
+                // Unlike IFC which compiles everything together, we call separate functions
+                // that have their own scratch requirements
+                uint32_t stack = max_stack_;
                 memcpy(kd + 4, &stack, 4);
                 
                 // RSRC1 at offset 0x30: VGPR/SGPR
@@ -1344,6 +1427,12 @@ private:
                     rsrc2 |= 1;  // SCRATCH_EN = 1
                 }
                 memcpy(kd + 0x34, &rsrc2, 4);
+                
+                // Patch reserved field at offset 0x2c to match IFC (0x1f vs 0x0f)
+                // This field may affect wavefront scheduling or resource allocation
+                // IFC builds have 0x1f, our dispatcher compiles with 0x0f
+                uint32_t reserved_2c = 0x1f;
+                memcpy(kd + 0x2c, &reserved_2c, 4);
                 
                 // Patch kernel_code_entry_byte_offset
                 // KD offset 0x10: kernel_code_entry_byte_offset (int64_t, relative to KD address)
@@ -1853,17 +1942,46 @@ private:
             return;
         }
         
-        // Clear existing data - we no longer need relocations since function tables
-        // are pre-filled with absolute addresses in patchSections()
-        // This avoids issues with R_AMDGPU_RELATIVE64 relocations not being
-        // properly applied across all GPUs in multi-GPU scenarios
+        // Build R_AMDGPU_RELATIVE64 relocations for function tables (like IFC)
+        // These relocations tell the runtime to fill table entries with function addresses
+        // The runtime applies these per-GPU during code object loading
         rela_sec->data.clear();
         
-        printf("Built .rela.dyn with 0 relocations (function tables pre-filled)\n");
+        // R_AMDGPU_RELATIVE64 = 13 (0x0d)
+        // Each relocation: offset (8) + info (8) + addend (8) = 24 bytes
+        const uint64_t R_AMDGPU_RELATIVE64 = 13;
+        
+        auto addReloc = [&](uint64_t offset, uint64_t addend) {
+            size_t pos = rela_sec->data.size();
+            rela_sec->data.resize(pos + 24);
+            memcpy(rela_sec->data.data() + pos, &offset, 8);
+            uint64_t info = R_AMDGPU_RELATIVE64;
+            memcpy(rela_sec->data.data() + pos + 8, &info, 8);
+            memcpy(rela_sec->data.data() + pos + 16, &addend, 8);
+        };
+        
+        // Generate relocations for each function table entry
+        int reloc_count = 0;
+        for (int i = 0; i < FUNC_COUNT; i++) {
+            if (table_1_[i]) {
+                addReloc(data_rel_ro_addr_ + i * 8, text_addr_ + table_1_[i]);
+                reloc_count++;
+            }
+            if (table_2_[i]) {
+                addReloc(data_rel_ro_addr_ + table_spacing_ + i * 8, text_addr_ + table_2_[i]);
+                reloc_count++;
+            }
+            if (table_4_[i]) {
+                addReloc(data_rel_ro_addr_ + table_spacing_ * 2 + i * 8, text_addr_ + table_4_[i]);
+                reloc_count++;
+            }
+        }
+        
+        printf("Built .rela.dyn with %d R_AMDGPU_RELATIVE64 relocations\n", reloc_count);
         
         // Record address/size 
         rela_addr_ = rela_sec->addr;
-        rela_size_ = 0;  // No actual relocations
+        rela_size_ = rela_sec->data.size();
         
         printf("  .rela.dyn @ 0x%06lx  size=0x%06zx\n", rela_addr_, rela_size_);
         

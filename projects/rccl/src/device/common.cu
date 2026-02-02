@@ -19,12 +19,13 @@ __shared__ ncclShmemData ncclShmem;
 
 #ifdef DEVICE_LINKER
 // Device linker mode: define function tables here (device linker overwrites with actual pointers)
-// Use visibility("hidden") to keep them out of .dynsym but allow extern declarations
+// const at namespace scope gives internal linkage like IFC
+// Tables in .data.rel.ro - device linker creates relocations
 #define FUNC_COUNT 859
 typedef void(*ncclDevFuncPtr_t)();
-__attribute__((visibility("hidden"))) __device__ ncclDevFuncPtr_t ncclDevFuncTable_1[FUNC_COUNT];
-__attribute__((visibility("hidden"))) __device__ ncclDevFuncPtr_t ncclDevFuncTable_2[FUNC_COUNT];
-__attribute__((visibility("hidden"))) __device__ ncclDevFuncPtr_t ncclDevFuncTable_4[FUNC_COUNT];
+__device__ ncclDevFuncPtr_t const ncclDevFuncTable_1[FUNC_COUNT] = {};
+__device__ ncclDevFuncPtr_t const ncclDevFuncTable_2[FUNC_COUNT] = {};
+__device__ ncclDevFuncPtr_t const ncclDevFuncTable_4[FUNC_COUNT] = {};
 #endif
 
 struct RunWorkNop {

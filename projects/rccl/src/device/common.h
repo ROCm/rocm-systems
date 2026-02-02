@@ -18,12 +18,13 @@
 
 #if defined(DEVICE_LINKER_DISPATCH) || (defined(DEVICE_LINKER) && defined(USE_INDIRECT_FUNCTION_CALL))
 // Function table declarations for device linker dispatch
-// Tables are defined in common.cu with visibility("hidden") to stay out of .dynsym
+// Tables defined in common.cu - const gives internal linkage like IFC
+// Device linker creates relocations to fill them
 #define FUNC_COUNT 859
 typedef void(*ncclDevFuncPtr_t)();
-extern __device__ ncclDevFuncPtr_t ncclDevFuncTable_1[FUNC_COUNT];
-extern __device__ ncclDevFuncPtr_t ncclDevFuncTable_2[FUNC_COUNT];
-extern __device__ ncclDevFuncPtr_t ncclDevFuncTable_4[FUNC_COUNT];
+extern __device__ ncclDevFuncPtr_t const ncclDevFuncTable_1[FUNC_COUNT];
+extern __device__ ncclDevFuncPtr_t const ncclDevFuncTable_2[FUNC_COUNT];
+extern __device__ ncclDevFuncPtr_t const ncclDevFuncTable_4[FUNC_COUNT];
 #endif
 
 #include "network/unpack/unpack_defs.h"
