@@ -451,6 +451,39 @@ def inject_roctx_into_model():
     nn.Module.__call__ = call_with_roctx
     console_log("Wrapped nn.Module forward() with ROCTX markers\n")
 
+def instrument_all_torch_ops():
+    import torch
+    from roctx import rangePush, rangePop
+    global marker_stack
+    op_namespaces = ["aten", "quantized", "ml", "prims", "nvfuser"]
+    for ns in op_namespaces:
+        ops = getattr(torch.ops, ns, None)
+        if ops is None:
+            continue
+        for op_name in dir(ops):
+            if op_name.startswith("__"):
+                continue
+            op = getattr(ops, op_name, None)
+            if not callable(op):
+                continue
+            if hasattr(op, "_roctx_wrapped"):
+                continue
+            def make_wrapper(op, ns, op_name):
+                def wrapper(*args, **kwargs):
+                    marker_name = f"{ns}::{op_name}"
+                    marker_stack.append(marker_name)
+                    rangePush(marker_name)
+                    try:
+                        return op(*args, **kwargs)
+                    finally:
+                        rangePop()
+                        marker_stack.pop()
+                wrapper._roctx_wrapped = True
+                return wrapper
+            try:
+                setattr(ops, op_name, make_wrapper(op, ns, op_name))
+            except Exception as e:
+                print(f"[ROCTX] Failed to wrap {ns} op {op_name}: {e}")
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
@@ -478,3 +511,4 @@ if __name__ == "__main__":
     module = importlib.util.module_from_spec(spec)
     sys.modules["__main__"] = module
     spec.loader.exec_module(module)
+    instrument_all_torch_ops()
