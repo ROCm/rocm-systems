@@ -2024,12 +2024,12 @@ def get_rank() -> Optional[str]:
         "FLUX_TASK_RANK",
         "PMI_RANK",
         "PMIX_RANK",
-        "MPI_RANK",
-        "MPI_LOCALRANKID",
-        "MPI_RANKID",
-        "MV2_COMM_WORLD_RANK",
-        "OMPI_COMM_WORLD_RANK",
         "PALS_RANKID",
+        "OMPI_COMM_WORLD_RANK",
+        "MV2_COMM_WORLD_RANK",
+        "MPI_RANKID",
+        "MPI_LOCALRANKID",
+        "MPI_RANK",
     ]
     for env_var in rank_env_vars:
         value = os.environ.get(env_var)
