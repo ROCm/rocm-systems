@@ -40,15 +40,22 @@
 //
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef _WSL_INC_WDDM_DEVICE_H_
-#define _WSL_INC_WDDM_DEVICE_H_
+#pragma once
 
 #include <cassert>
+
+#if !defined(__linux__)
+#define WIN32_NO_STATUS
+#include <Windows.h>
+#undef WIN32_NO_STATUS
+#endif
+
 #include <ntstatus.h>
 
 #include <atomic>
 #include <memory>
 #include <vector>
+#include <bitset>
 
 #include "impl/wddm/types.h"
 #include "impl/thunk_proxy/thunk_proxy.h"
@@ -67,7 +74,7 @@ class WDDMQueue;
 // WSL2 hyperv GPADL protocol limitation
 #define MAX_USERPTR_BLOCK_SIZE 0xf0000000
 #define START_NON_CANONICAL_ADDR (1ULL << 47)
-#define END_NON_CANONICAL_ADDR (~0UL - (1UL << 47))
+#define END_NON_CANONICAL_ADDR (~0ULL - (1ULL << 47))
 #define IS_OVERLAPPING(start1, size1, start2, size2) \
   ((start1 < (start2 + size2)) && (start2 < (start1 + size1)))
 
@@ -85,7 +92,15 @@ struct SegmentInfo {
 
 class WDDMDevice {
 public:
+  enum device_init_result {
+    kDeviceSuccess = 0,
+    kDeviceSkipped = 1,
+    kDeviceFailed = 2,
+  };
+
   static constexpr size_t GpuMemoryChunkSize = 2 * (1ULL << 30);   // 2 GB
+  static constexpr uint32_t kNumberOfHsaEvents = 1024;   //!< Note: may change in the future to 8K, KMD should define it
+  static constexpr uint32_t kAqlPayloadId = 1 << 24;
 
   WDDMDevice(D3DKMT_HANDLE adapter, LUID adapter_luid, uint32_t node_id);
   ~WDDMDevice();
@@ -135,6 +150,8 @@ public:
   uint32_t Gl2CacheLineSize() { return device_info_.gl2_cacheline_size; }
   bool SupportStateShadowingByCpFw(void) const { return device_info_.state_shadowing_by_cpfw; }
   bool SupportPlatformAtomic(void) const { return device_info_.platform_atomic_support; }
+  bool IsAqlSupported() const { return device_info_.hwsInfo.hwsMask.aql_queue != 0; }
+
   uint32_t GetSdmaEngine(uint32_t idx) {
     assert(idx < NumSdmaEngine());
     return device_info_.sdma_schedid[idx];
@@ -145,6 +162,7 @@ public:
 
   void GetClockCounters(uint64_t *gpu, uint64_t *cpu);
   uint32_t GetNumCpQueues() { return device_info_.num_cp_queues; }
+  uint32_t NumXcc() const { return device_info_.num_xcc; }
 
   bool CreateSyncobj(D3DKMT_HANDLE *handle, uint64_t **addr);
   void DestroySyncobj(D3DKMT_HANDLE handle);
@@ -157,6 +175,8 @@ public:
                       uint64_t command_size, uint64_t fence_value);
   bool SubmitToHwQueue(WDDMQueue *queue, uint64_t command_addr,
                       uint64_t command_size, uint64_t fence_value);
+  bool SubmitToAqlQueue(WDDMQueue* queue, uint64_t command_addr, uint64_t command_size,
+                        uint64_t SubmitToAqlQueue);
 
   bool WaitPagingFence(WDDMQueue *queue) {
     uint64_t value = page_fence_value_;
@@ -181,9 +201,11 @@ public:
   uint32_t GetAqlFrameSize(void) const { return cmdbuf_aql_frame_size_; }
   static uint32_t GetAqlFrameNum(void) { return cmdbuf_aql_frame_num_; }
 
-  // Both legacy HWS and stage 1 HWS use KMD to alloc use queue memory,
-  // return false by default
-  bool AllocUserQueueMemFromUMD(void) const { return false; }
+  bool AllocUserQueueMemFromUMD(void) const {
+    // stage 1 HWS queue memory is allocated by KMD.
+    // GFX10 uses legacy HWS. UMD allocates user queue.
+    return (device_info_.major == 10);
+  }
 
   bool IsHwsEnabled(int engine) {
     return thunk_proxy::GetHwsEnabled(engine, &device_info_);
@@ -200,9 +222,15 @@ public:
   const thunk_proxy::DeviceInfo& DeviceInfo() const { return device_info_; }
 
   ErrorCode CreateGpuMemory(const GpuMemoryCreateInfo &create_info, GpuMemory **gpu_mem, gpusize *gpu_va = nullptr);
+  uint32_t RegisterEvent(uint32_t type, HANDLE event_handle, uint64_t* mailbox);
+  bool UnregisterEvent(uint32_t event_id, HANDLE event_handle);
+  static HSAKMT_STATUS WaitOnMultipleEvents(HsaEvent* events[], uint32_t num_elems, bool wait_all, uint32_t msec);
+  device_init_result InitStatus() const { return init_status_; }
+  uint32_t GbAddrConfig() const { return device_info_.gb_addr_config; }
 
 private:
-  bool ParseDeviceInfo(void);
+  bool Escape(void* priv_data, uint32_t priv_size, bool hw_access);
+  NTSTATUS ParseDeviceInfo(void);
   void DestroyDeviceInfo(void);
   bool CreateDevice(void);
   bool DestroyDevice(void);
@@ -236,6 +264,11 @@ private:
   thunk_proxy::DeviceInfo device_info_;
   std::vector<struct SegmentInfo> segment_infos_;
   //CmdUtil cmd_util;
+  device_init_result init_status_;
+
+  // GPU events fields
+  uint64_t base_mailbox_va_ = 0;  //!< GPU VA returned by KMD for all mailboxes
+  std::bitset<kNumberOfHsaEvents> alloced_events_;  //!< The bit map of allocated events
 };
 
 NTSTATUS WDDMCreateDevices(std::vector<WDDMDevice *> &devices);
@@ -243,4 +276,3 @@ NTSTATUS WDDMCreateDevices(std::vector<WDDMDevice *> &devices);
 } // namespace thunk
 } // namespace wsl
 
-#endif

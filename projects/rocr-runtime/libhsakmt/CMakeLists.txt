@@ -27,299 +27,365 @@ cmake_minimum_required ( VERSION 3.6.3 )
 
 if (WIN_SDK)
   include(${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists_wsl.txt)
-else ()
-set(CMAKE_VERBOSE_MAKEFILE ON)
+else()
+  set(CMAKE_VERBOSE_MAKEFILE ON)
 
-set ( HSAKMT "hsakmt" )
-set ( HSAKMT_PACKAGE "hsakmt-roct" )
-set ( HSAKMT_COMPONENT "lib${HSAKMT}" )
-set ( HSAKMT_TARGET "${HSAKMT}" )
-set(HSAKMT_STATIC_DRM_TARGET "${HSAKMT_TARGET}-staticdrm")
+  set ( HSAKMT "hsakmt" )
+  set ( HSAKMT_PACKAGE "hsakmt-roct" )
+  set ( HSAKMT_COMPONENT "lib${HSAKMT}" )
+  set ( HSAKMT_TARGET "${HSAKMT}" )
+  set(HSAKMT_STATIC_DRM_TARGET "${HSAKMT_TARGET}-staticdrm")
 
-project ( ${HSAKMT_TARGET} VERSION 1.9.0)
+  project ( ${HSAKMT_TARGET} VERSION 1.9.0)
 
-# Optionally, build HSAKMT with ccache.
-set(ROCM_CCACHE_BUILD OFF CACHE BOOL "Set to ON for a ccache enabled build")
-if (ROCM_CCACHE_BUILD)
-  find_program(CCACHE_PROGRAM ccache)
-  if (CCACHE_PROGRAM)
-    set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE ${CCACHE_PROGRAM})
-  else()
-    message(WARNING "Unable to find ccache. Falling back to real compiler")
-  endif() # if (CCACHE_PROGRAM)
-endif() # if (ROCM_CCACHE_BUILD)
+  # Optionally, build HSAKMT with ccache.
+  set(ROCM_CCACHE_BUILD OFF CACHE BOOL "Set to ON for a ccache enabled build")
+  if (ROCM_CCACHE_BUILD)
+    find_program(CCACHE_PROGRAM ccache)
+    if (CCACHE_PROGRAM)
+      set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE ${CCACHE_PROGRAM})
+    else()
+      message(WARNING "Unable to find ccache. Falling back to real compiler")
+    endif() # if (CCACHE_PROGRAM)
+  endif() # if (ROCM_CCACHE_BUILD)
 
-list( PREPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules" )
+  list( PREPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules" )
 
-## Include common cmake modules
-include ( utils )
-include ( GNUInstallDirs )
+  ## Include common cmake modules
+  include ( utils )
+  include ( GNUInstallDirs )
 
-## Setup the package version.
-get_version ( "1.0.0" )
+  ## Setup the package version.
+  get_version ( "1.0.0" )
 
-set ( BUILD_VERSION_MAJOR ${VERSION_MAJOR} )
-set ( BUILD_VERSION_MINOR ${VERSION_MINOR} )
-set ( BUILD_VERSION_PATCH ${VERSION_PATCH} )
+  set ( BUILD_VERSION_MAJOR ${VERSION_MAJOR} )
+  set ( BUILD_VERSION_MINOR ${VERSION_MINOR} )
+  set ( BUILD_VERSION_PATCH ${VERSION_PATCH} )
 
-set ( LIB_VERSION_MAJOR 1)
-set ( LIB_VERSION_MINOR 0)
-if (${ROCM_PATCH_VERSION})
+  set ( LIB_VERSION_MAJOR 1)
+  set ( LIB_VERSION_MINOR 0)
+  if (${ROCM_PATCH_VERSION})
     set ( LIB_VERSION_PATCH ${ROCM_PATCH_VERSION} )
-else ()
+  else()
     set ( LIB_VERSION_PATCH 6)
-endif ()
-set ( LIB_VERSION_STRING "${LIB_VERSION_MAJOR}.${LIB_VERSION_MINOR}.${LIB_VERSION_PATCH}" )
+  endif()
+  set ( LIB_VERSION_STRING "${LIB_VERSION_MAJOR}.${LIB_VERSION_MINOR}.${LIB_VERSION_PATCH}" )
 
-if ( DEFINED VERSION_BUILD AND NOT ${VERSION_BUILD} STREQUAL "" )
+  if ( DEFINED VERSION_BUILD AND NOT ${VERSION_BUILD} STREQUAL "" )
     message ( "VERSION BUILD DEFINED ${VERSION_BUILD}" )
     set ( BUILD_VERSION_PATCH "${BUILD_VERSION_PATCH}-${VERSION_BUILD}" )
-endif ()
-set ( BUILD_VERSION_STRING "${BUILD_VERSION_MAJOR}.${BUILD_VERSION_MINOR}.${BUILD_VERSION_PATCH}" )
+  endif()
+  set ( BUILD_VERSION_STRING "${BUILD_VERSION_MAJOR}.${BUILD_VERSION_MINOR}.${BUILD_VERSION_PATCH}" )
 
-## Compiler flags
-set (HSAKMT_C_FLAGS -fPIC -W -Wall -Wextra -Wno-unused-parameter -Wformat-security -Wswitch-default -Wundef -Wshadow -Wpointer-arith -Wbad-function-cast -Wcast-qual -Wstrict-prototypes -Wmissing-prototypes -Wmissing-declarations -Wredundant-decls -Wunreachable-code -std=gnu99 -fvisibility=hidden)
-if ( CMAKE_COMPILER_IS_GNUCC )
-    set ( HSAKMT_C_FLAGS "${HSAKMT_C_FLAGS}" -Wlogical-op)
-endif ()
-if ( ${HSAKMT_WERROR} )
-    set ( HSAKMT_C_FLAGS "${HSAKMT_C_FLAGS}" -Werror )
-endif ()
-if ( "${CMAKE_BUILD_TYPE}" STREQUAL Release )
-    set ( HSAKMT_C_FLAGS "${HSAKMT_C_FLAGS}" -O2 )
-else ()
-    set ( HSAKMT_C_FLAGS "${HSAKMT_C_FLAGS}" -g )
-endif ()
+  ## Compiler flags
+  if (UNIX)
+    set (HSAKMT_C_FLAGS -fPIC -W -Wall -Wextra -Wno-unused-parameter -Wformat-security -Wswitch-default -Wundef -Wshadow -Wpointer-arith -Wbad-function-cast -Wcast-qual -Wstrict-prototypes -Wmissing-prototypes -Wmissing-declarations -Wredundant-decls -Wunreachable-code -std=gnu99 -fvisibility=hidden)
 
-set ( HSAKMT_LINKER_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/src/libhsakmt.ver" )
+    if ( CMAKE_COMPILER_IS_GNUCC )
+      set ( HSAKMT_C_FLAGS "${HSAKMT_C_FLAGS}" -Wlogical-op)
+    endif()
+    if ( ${HSAKMT_WERROR} )
+      set ( HSAKMT_C_FLAGS "${HSAKMT_C_FLAGS}" -Werror )
+    endif()
+    if ( "${CMAKE_BUILD_TYPE}" STREQUAL Release )
+      set ( HSAKMT_C_FLAGS "${HSAKMT_C_FLAGS}" -O2 )
+    else()
+      set ( HSAKMT_C_FLAGS "${HSAKMT_C_FLAGS}" -g )
+    endif()
+  endif()
 
-## Linker Flags
-## Add --enable-new-dtags to generate DT_RUNPATH
-set (HSAKMT_LINK_FLAGS "${HSAKMT_LINK_FLAGS} -Wl,--enable-new-dtags -Wl,--version-script=${HSAKMT_LINKER_SCRIPT} -Wl,-soname=${HSAKMT_COMPONENT}.so.${LIB_VERSION_MAJOR} -Wl,-z,nodelete")
+  set ( HSAKMT_LINKER_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/src/libhsakmt.ver" )
 
-## Address Sanitize Flag
-if ( ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANITIZER STREQUAL "HOST_ASAN" )
+  ## Linker Flags
+  ## Add --enable-new-dtags to generate DT_RUNPATH
+  set (HSAKMT_LINK_FLAGS "${HSAKMT_LINK_FLAGS} -Wl,--enable-new-dtags -Wl,--version-script=${HSAKMT_LINKER_SCRIPT} -Wl,-soname=${HSAKMT_COMPONENT}.so.${LIB_VERSION_MAJOR} -Wl,-z,nodelete")
+
+  ## Address Sanitize Flag
+  if ( ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANITIZER STREQUAL "HOST_ASAN" )
     set ( HSAKMT_C_FLAGS "${HSAKMT_C_FLAGS}" -fsanitize=address )
     set ( HSAKMT_LINK_FLAGS "${HSAKMT_LINK_FLAGS} -fsanitize=address" )
     if ( BUILD_SHARED_LIBS )
-        set ( HSAKMT_LINK_FLAGS "${HSAKMT_LINK_FLAGS} -shared-libsan" )
-    else ()
-        set ( HSAKMT_LINK_FLAGS "${HSAKMT_LINK_FLAGS} -static-libsan" )
-    endif ()
-else ()
+      set ( HSAKMT_LINK_FLAGS "${HSAKMT_LINK_FLAGS} -shared-libsan" )
+    else()
+      set ( HSAKMT_LINK_FLAGS "${HSAKMT_LINK_FLAGS} -static-libsan" )
+    endif()
+  else()
     if ( CMAKE_COMPILER_IS_GNUCC )
-        set ( HSAKMT_LINK_FLAGS "${HSAKMT_LINK_FLAGS} -Wl,-no-undefined" )
-    else ()
-        set ( HSAKMT_LINK_FLAGS "${HSAKMT_LINK_FLAGS} -Wl,-undefined,error" )
-    endif ()
-endif ()
+      set ( HSAKMT_LINK_FLAGS "${HSAKMT_LINK_FLAGS} -Wl,-no-undefined" )
+    else()
+      set ( HSAKMT_LINK_FLAGS "${HSAKMT_LINK_FLAGS} -Wl,-undefined,error" )
+    endif()
+  endif()
 
-## Source files
-set ( HSAKMT_SRC "src/debug.c"
-                 "src/events.c"
-                 "src/fmm.c"
-                 "src/globals.c"
-                 "src/hsakmtmodel.c"
-                 "src/libhsakmt.c"
-                 "src/memory.c"
-                 "src/openclose.c"
-                 "src/perfctr.c"
-                 "src/pmc_table.c"
-                 "src/queues.c"
-                 "src/time.c"
-                 "src/topology.c"
-                 "src/rbtree.c"
-                 "src/spm.c"
-                 "src/version.c"
-                 "src/svm.c"
-                 "src/pc_sampling.c"
-                 "src/ais.c"
-                 "src/kfdcontext.c")
+  if (WIN32)
+    if (EXISTS "${CMAKE_CURRENT_BINARY_DIR}../inc/shared")
+      # Include UVD IP interface file. It's public as the file is in the PAL interface.
+      target_include_directories(${HSAKMT_TARGET} PUBLIC ${CMAKE_CURRENT_BINARY_DIR}../inc/shared)
+    endif()
 
-## Declare the library target name
-add_library (${HSAKMT_TARGET} STATIC "")
+    set(CMAKE_CXX_STANDARD 20)
+    set(CMAKE_CXX_STANDARD_REQUIRED ON)
+    ## Source files
+    set ( HSAKMT_SRC "src/dxg/ais.cpp"
+                     "src/dxg/debug.cpp"
+                     "src/dxg/dxcore_loader.cpp" 
+                     "src/dxg/events.cpp"
+                     "src/dxg/memory.cpp"
+                     "src/dxg/libdrm.cpp"
+                     "src/dxg/hsa.cpp"
+                     "src/dxg/openclose.cpp"
+                     "src/dxg/perfctr.cpp"
+                     "src/dxg/queues.cpp"
+                     "src/dxg/time.cpp"
+                     "src/dxg/topology.cpp"
+                     "src/dxg/topology_win.cpp"
+                     "src/dxg/spm.cpp"
+                     "src/dxg/version.cpp"
+                     "src/dxg/svm.cpp"
+                     "src/dxg/pc_sampling.cpp"
+                     "src/dxg/hsakmtmodel.cpp"
+                     "src/dxg/events.cpp"
+                     "src/dxg/thunk_proxy/thunk_proxy.cpp"
+                     "src/dxg/wddm/device.cpp"
+                     "src/dxg/wddm/event.cpp"
+                     "src/dxg/wddm/gpu_memory.cpp"
+                     "src/dxg/wddm/va_mgr.cpp"
+                     "src/dxg/wddm/queue.cpp"
+                     "src/dxg/wddm/cmd_util.cpp" )
+  else()
+    ## Source files
+    set ( HSAKMT_SRC "src/debug.c"
+                     "src/events.c"
+                     "src/fmm.c"
+                     "src/globals.c"
+                     "src/hsakmtmodel.c"
+                     "src/libhsakmt.c"
+                     "src/memory.c"
+                     "src/openclose.c"
+                     "src/perfctr.c"
+                     "src/pmc_table.c"
+                     "src/queues.c"
+                     "src/time.c"
+                     "src/topology.c"
+                     "src/rbtree.c"
+                     "src/spm.c"
+                     "src/version.c"
+                     "src/svm.c"
+                     "src/pc_sampling.c"
+                     "src/ais.c"
+                     "src/kfdcontext.c")
+  endif()
 
-## Add sources
-target_sources ( ${HSAKMT_TARGET} PRIVATE ${HSAKMT_SRC} )
+  ## Declare the library target name
+  add_library (${HSAKMT_TARGET} STATIC "")
 
-## Add headers.  The public headers need to point at their location in both build and install
-## directory layouts.  This declaration allows publishing library use data to downstream clients.
-target_include_directories( ${HSAKMT_TARGET}
-  PUBLIC
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-  $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
-  PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR}/src )
+  ## Add sources
+  target_sources ( ${HSAKMT_TARGET} PRIVATE ${HSAKMT_SRC} )
 
-set_property(TARGET ${HSAKMT_TARGET} PROPERTY LINK_FLAGS ${HSAKMT_LINK_FLAGS})
+  if (UNIX)
+    set(EXTRA_INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/src)
+  else()
+    set(EXTRA_INCLUDE_DIRS 
+      ${DK_HEADER}/ms_sdk/include/shared
+      ${DK_HEADER}/inc/shared
+      ${DK_HEADER}/inc/asic_reg
+      ${CMAKE_CURRENT_SOURCE_DIR}/../../../inc/asic_reg
+      ${CMAKE_CURRENT_SOURCE_DIR}/../../../inc/shared
+      ${CMAKE_CURRENT_SOURCE_DIR}/src/dxg
+      ${CMAKE_CURRENT_SOURCE_DIR}/../runtime
+      ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/hsa-runtime/core
+      ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/hsa-runtime)
+  endif()
 
-## Set the VERSION and SOVERSION values
-set_property ( TARGET ${HSAKMT_TARGET} PROPERTY VERSION "${LIB_VERSION_STRING}" )
-set_property ( TARGET ${HSAKMT_TARGET} PROPERTY SOVERSION "${LIB_VERSION_MAJOR}" )
-
-find_package(PkgConfig)
-# get OS-info for OS-specific build dependencies
-get_os_info()
-
-find_package(PkgConfig)
-# Check for libraries required for building
-find_library(LIBC NAMES c REQUIRED)
-find_package(NUMA)
-if(NUMA_FOUND)
-  set(NUMA "${NUMA_LIBRARIES}")
-else()
-  find_library(NUMA NAMES numa REQUIRED)
-endif()
-message(STATUS "LIBC: " ${LIBC})
-message(STATUS "NUMA: " ${NUMA})
-
-## If environment variable DRM_DIR is set, the script
-## will pick up the corresponding libraries from that path.
-if(DRM_DIR)
-  list (PREPEND CMAKE_PREFIX_PATH "${DRM_DIR}")
-endif()
-
-# The module name passed to pkg_check_modules() is determined by the
-# name of file *.pc
-pkg_check_modules(DRM REQUIRED IMPORTED_TARGET libdrm)
-pkg_check_modules(DRM_AMDGPU REQUIRED IMPORTED_TARGET libdrm_amdgpu)
-include_directories(${DRM_AMDGPU_INCLUDE_DIRS})
-include_directories(${DRM_INCLUDE_DIRS})
-
-target_link_libraries ( ${HSAKMT_TARGET}
-  PRIVATE ${DRM_LDFLAGS} ${DRM_AMDGPU_LDFLAGS} pthread rt ${LIBC} ${NUMA} ${CMAKE_DL_LIBS}
-)
-
-target_compile_options(${HSAKMT_TARGET} PRIVATE ${DRM_CFLAGS} ${HSAKMT_C_FLAGS})
-
-include(CheckFunctionExists)
-set(CMAKE_REQUIRED_DEFINITIONS -D__USE_GNU=1)
-set(CMAKE_REQUIRED_INCLUDES sys/mman.h)
-check_function_exists(memfd_create HAVE_MEMFD_CREATE)
-if(HAVE_MEMFD_CREATE)
-  target_compile_definitions(${HSAKMT_TARGET} PRIVATE -DHAVE_MEMFD_CREATE=1)
-endif()
-
-## Define default paths and packages.
-if( CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT )
-  set ( CMAKE_INSTALL_PREFIX "/opt/rocm" )
-endif()
-set ( CMAKE_INSTALL_PREFIX ${CMAKE_INSTALL_PREFIX} CACHE STRING "Default installation directory." FORCE )
-
-# Installs binaries and exports the library usage data to ${HSAKMT_TARGET}Targets
-install ( TARGETS ${HSAKMT_TARGET} EXPORT ${HSAKMT_TARGET}Targets
-    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT asan
-    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT asan )
-install ( TARGETS ${HSAKMT_TARGET}
-    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT binary
-    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT binary )
-
-# Install public headers
-install ( DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/${HSAKMT_TARGET} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-  COMPONENT dev PATTERN "linux" EXCLUDE PATTERN "*virtio*" EXCLUDE)
-
-# Record our usage data for clients find_package calls.
-install ( EXPORT ${HSAKMT_TARGET}Targets
-  FILE ${HSAKMT_TARGET}Targets.cmake
-  NAMESPACE ${HSAKMT_TARGET}::
-  DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${HSAKMT_TARGET}
-  COMPONENT dev)
-
-# Adds the target alias hsakmt::hsakmt to the local cmake cache.
-# This isn't necessary today.  It's harmless preparation for some
-# hypothetical future in which the we might be included by add_subdirectory()
-# in some other project's cmake file.  It allows uniform use of find_package
-# and target_link_library() without regard to whether a target is external or
-# a subdirectory of the current build.
-add_library( ${HSAKMT_TARGET}::${HSAKMT_TARGET} ALIAS ${HSAKMT_TARGET} )
-
-# Create cmake configuration files
-include(CMakePackageConfigHelpers)
-
-configure_package_config_file(${HSAKMT_TARGET}-config.cmake.in
-                            ${HSAKMT_TARGET}-config.cmake
-                            INSTALL_DESTINATION
-                            ${CMAKE_INSTALL_LIBDIR}/cmake/${HSAKMT_TARGET} )
-
-write_basic_package_version_file(${HSAKMT_TARGET}-config-version.cmake
-                 VERSION ${BUILD_VERSION_STRING}
-                 COMPATIBILITY
-                 AnyNewerVersion)
-
-install(FILES
-        ${CMAKE_CURRENT_BINARY_DIR}/${HSAKMT_TARGET}-config.cmake
-        ${CMAKE_CURRENT_BINARY_DIR}/${HSAKMT_TARGET}-config-version.cmake
-        DESTINATION
-        ${CMAKE_INSTALL_LIBDIR}/cmake/${HSAKMT_TARGET}
-        COMPONENT dev)
-
-# Optionally record the package's find module in the user's package cache.
-if ( NOT DEFINED EXPORT_TO_USER_PACKAGE_REGISTRY )
-  set ( EXPORT_TO_USER_PACKAGE_REGISTRY "off" )
-endif()
-set ( EXPORT_TO_USER_PACKAGE_REGISTRY ${EXPORT_TO_USER_PACKAGE_REGISTRY}
-             CACHE BOOL "Add cmake package config location to the user's cmake package registry.")
-if(${EXPORT_TO_USER_PACKAGE_REGISTRY})
-  # Enable writing to the registry
-  set(CMAKE_EXPORT_PACKAGE_REGISTRY ON)
-  # Generate a target file for the build
-  export(TARGETS ${HSAKMT_TARGET} NAMESPACE ${HSAKMT_TARGET}:: FILE ${HSAKMT_TARGET}Targets.cmake)
-  # Record the package in the user's cache.
-  export(PACKAGE ${HSAKMT_TARGET})
-endif()
-
-# CPACK_PACKAGING_INSTALL_PREFIX is needed in libhsakmt.pc.in
-# TODO: Add support for relocatable packages.
-configure_file ( libhsakmt.pc.in libhsakmt.pc @ONLY )
-
-install ( FILES ${CMAKE_CURRENT_BINARY_DIR}/libhsakmt.pc DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig COMPONENT dev)
-
-if ( NOT BUILD_SHARED_LIBS)
-  ## Create separate target file for static builds
-  ## In static builds, libdrm and libdrm_amdgpu need to be linked statically
-  add_library (${HSAKMT_STATIC_DRM_TARGET}  STATIC "")
-  target_sources (${HSAKMT_STATIC_DRM_TARGET} PRIVATE ${HSAKMT_SRC})
-
-  target_include_directories( ${HSAKMT_STATIC_DRM_TARGET}
+  ## Add headers.  The public headers need to point at their location in both build and install
+  ## directory layouts.  This declaration allows publishing library use data to downstream clients.
+  target_include_directories( ${HSAKMT_TARGET}
     PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
     PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/src )
+    ${EXTRA_INCLUDE_DIRS} )
+
+  if (WIN32)
+    add_compile_definitions(__AMD64__ LITTLEENDIAN_CPU HSA_LARGE_MODEL NOMINMAX)
+    target_compile_options(${HSAKMT_TARGET}
+      PRIVATE "$<$<CXX_COMPILER_ID:MSVC>:/FI${CMAKE_CURRENT_SOURCE_DIR}/src/dxg/librocdxg.h>")
+    add_compile_options(
+      "$<$<CXX_COMPILER_ID:MSVC>:/FI${CMAKE_CURRENT_SOURCE_DIR}/src/dxg/librocdxg.h>")
+  endif()
+
+  set_property(TARGET ${HSAKMT_TARGET} PROPERTY LINK_FLAGS ${HSAKMT_LINK_FLAGS})
 
   ## Set the VERSION and SOVERSION values
-  set_property(TARGET ${HSAKMT_STATIC_DRM_TARGET} PROPERTY LINK_FLAGS ${HSAKMT_LINK_FLAGS}
-              PROPERTY VERSION "${LIB_VERSION_STRING}"
-              PROPERTY SOVERSION "${LIB_VERSION_MAJOR}" )
+  set_property ( TARGET ${HSAKMT_TARGET} PROPERTY VERSION "${LIB_VERSION_STRING}" )
+  set_property ( TARGET ${HSAKMT_TARGET} PROPERTY SOVERSION "${LIB_VERSION_MAJOR}" )
 
-  #Additional search path for static libraries
-  if(${DISTRO_ID} MATCHES "ubuntu")
-      set(AMDGPU_STATIC_LIB_PATHS "-L/opt/amdgpu/lib/x86_64-linux-gnu")
-  else()
-      set(AMDGPU_STATIC_LIB_PATHS "-L/opt/amdgpu/lib64" "-L/opt/amdgpu/lib")
+  find_package(PkgConfig)
+  # get OS-info for OS-specific build dependencies
+  get_os_info()
+
+  find_package(PkgConfig)
+  if (UNIX)
+    # Check for libraries required for building
+    find_library(LIBC NAMES c REQUIRED)
+    find_package(NUMA)
+    if(NUMA_FOUND)
+      set(NUMA "${NUMA_LIBRARIES}")
+    else()
+      find_library(NUMA NAMES numa REQUIRED)
+    endif()
+    message(STATUS "LIBC: " ${LIBC})
+    message(STATUS "NUMA: " ${NUMA})
+
+    ## If environment variable DRM_DIR is set, the script
+    ## will pick up the corresponding libraries from that path.
+    if(DRM_DIR)
+      list (PREPEND CMAKE_PREFIX_PATH "${DRM_DIR}")
+    endif()
+
+    # The module name passed to pkg_check_modules() is determined by the
+    # name of file *.pc
+    pkg_check_modules(DRM REQUIRED IMPORTED_TARGET libdrm)
+    pkg_check_modules(DRM_AMDGPU REQUIRED IMPORTED_TARGET libdrm_amdgpu)
+    include_directories(${DRM_AMDGPU_INCLUDE_DIRS})
+    include_directories(${DRM_INCLUDE_DIRS})
+
+    target_link_libraries ( ${HSAKMT_TARGET}
+      PRIVATE ${DRM_LDFLAGS} ${DRM_AMDGPU_LDFLAGS} pthread rt ${LIBC} ${NUMA} ${CMAKE_DL_LIBS}
+    )
+
+    target_compile_options(${HSAKMT_TARGET} PRIVATE ${DRM_CFLAGS} ${HSAKMT_C_FLAGS})
+
+    include(CheckFunctionExists)
+    set(CMAKE_REQUIRED_DEFINITIONS -D__USE_GNU=1)
+    set(CMAKE_REQUIRED_INCLUDES sys/mman.h)
+    check_function_exists(memfd_create HAVE_MEMFD_CREATE)
+    if(HAVE_MEMFD_CREATE)
+      target_compile_definitions(${HSAKMT_TARGET} PRIVATE -DHAVE_MEMFD_CREATE=1)
+    endif()
   endif()
-  # Link drm_amdgpu and drm library statically
-  target_link_libraries ( ${HSAKMT_STATIC_DRM_TARGET}
-    PRIVATE pthread rt c numa ${CMAKE_DL_LIBS}
-    INTERFACE -Wl,-Bstatic ${AMDGPU_STATIC_LIB_PATHS} ${DRM_AMDGPU_LDFLAGS} ${DRM_LDFLAGS} -Wl,-Bdynamic
-  )
-  target_compile_options(${HSAKMT_STATIC_DRM_TARGET} PRIVATE ${DRM_CFLAGS} ${HSAKMT_C_FLAGS})
 
-  install ( TARGETS ${HSAKMT_STATIC_DRM_TARGET} EXPORT ${HSAKMT_STATIC_DRM_TARGET}Targets
-            ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT binary
-            LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT binary)
-  install ( EXPORT ${HSAKMT_STATIC_DRM_TARGET}Targets
-    FILE ${HSAKMT_STATIC_DRM_TARGET}Targets.cmake
-    NAMESPACE ${HSAKMT_STATIC_DRM_TARGET}::
+  ## Define default paths and packages.
+  if( CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT )
+    set ( CMAKE_INSTALL_PREFIX "/opt/rocm" )
+  endif()
+  set ( CMAKE_INSTALL_PREFIX ${CMAKE_INSTALL_PREFIX} CACHE STRING "Default installation directory." FORCE )
+
+  # Installs binaries and exports the library usage data to ${HSAKMT_TARGET}Targets
+  install ( TARGETS ${HSAKMT_TARGET} EXPORT ${HSAKMT_TARGET}Targets
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT asan
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT asan )
+  install ( TARGETS ${HSAKMT_TARGET}
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT binary
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT binary )
+
+  # Install public headers
+  install ( DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/${HSAKMT_TARGET} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+    COMPONENT dev PATTERN "linux" EXCLUDE PATTERN "*virtio*" EXCLUDE)
+
+  # Record our usage data for clients find_package calls.
+  install ( EXPORT ${HSAKMT_TARGET}Targets
+    FILE ${HSAKMT_TARGET}Targets.cmake
+    NAMESPACE ${HSAKMT_TARGET}::
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${HSAKMT_TARGET}
     COMPONENT dev)
 
-  add_library( ${HSAKMT_STATIC_DRM_TARGET}::${HSAKMT_STATIC_DRM_TARGET} ALIAS ${HSAKMT_STATIC_DRM_TARGET} )
-endif()
+  # Adds the target alias hsakmt::hsakmt to the local cmake cache.
+  # This isn't necessary today.  It's harmless preparation for some
+  # hypothetical future in which the we might be included by add_subdirectory()
+  # in some other project's cmake file.  It allows uniform use of find_package
+  # and target_link_library() without regard to whether a target is external or
+  # a subdirectory of the current build.
+  add_library( ${HSAKMT_TARGET}::${HSAKMT_TARGET} ALIAS ${HSAKMT_TARGET} )
 
-###########################
-# Packaging directives
-###########################
-# Use component packaging
-set ( ENABLE_LDCONFIG ON CACHE BOOL "Set library links and caches using ldconfig.")
+  # Create cmake configuration files
+  include(CMakePackageConfigHelpers)
+
+  configure_package_config_file(${HSAKMT_TARGET}-config.cmake.in
+                              ${HSAKMT_TARGET}-config.cmake
+                              INSTALL_DESTINATION
+                                ${CMAKE_INSTALL_LIBDIR}/cmake/${HSAKMT_TARGET} )
+
+  write_basic_package_version_file(${HSAKMT_TARGET}-config-version.cmake
+                   VERSION ${BUILD_VERSION_STRING}
+                   COMPATIBILITY
+                   AnyNewerVersion)
+
+  install(FILES
+          ${CMAKE_CURRENT_BINARY_DIR}/${HSAKMT_TARGET}-config.cmake
+          ${CMAKE_CURRENT_BINARY_DIR}/${HSAKMT_TARGET}-config-version.cmake
+          DESTINATION
+          ${CMAKE_INSTALL_LIBDIR}/cmake/${HSAKMT_TARGET}
+          COMPONENT dev)
+
+  # Optionally record the package's find module in the user's package cache.
+  if ( NOT DEFINED EXPORT_TO_USER_PACKAGE_REGISTRY )
+    set ( EXPORT_TO_USER_PACKAGE_REGISTRY "off" )
+  endif()
+  set ( EXPORT_TO_USER_PACKAGE_REGISTRY ${EXPORT_TO_USER_PACKAGE_REGISTRY}
+               CACHE BOOL "Add cmake package config location to the user's cmake package registry.")
+  if(${EXPORT_TO_USER_PACKAGE_REGISTRY})
+    # Enable writing to the registry
+    set(CMAKE_EXPORT_PACKAGE_REGISTRY ON)
+    # Generate a target file for the build
+    export(TARGETS ${HSAKMT_TARGET} NAMESPACE ${HSAKMT_TARGET}:: FILE ${HSAKMT_TARGET}Targets.cmake)
+    # Record the package in the user's cache.
+    export(PACKAGE ${HSAKMT_TARGET})
+  endif()
+
+  # CPACK_PACKAGING_INSTALL_PREFIX is needed in libhsakmt.pc.in
+  # TODO: Add support for relocatable packages.
+  configure_file ( libhsakmt.pc.in libhsakmt.pc @ONLY )
+
+  install ( FILES ${CMAKE_CURRENT_BINARY_DIR}/libhsakmt.pc DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig COMPONENT dev)
+
+  if ( NOT BUILD_SHARED_LIBS)
+    ## Create separate target file for static builds
+    ## In static builds, libdrm and libdrm_amdgpu need to be linked statically
+    add_library (${HSAKMT_STATIC_DRM_TARGET}  STATIC "")
+    target_sources (${HSAKMT_STATIC_DRM_TARGET} PRIVATE ${HSAKMT_SRC})
+
+    target_include_directories( ${HSAKMT_STATIC_DRM_TARGET}
+      PUBLIC
+      $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+      $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+      PRIVATE
+      ${EXTRA_INCLUDE_DIRS} )
+
+    ## Set the VERSION and SOVERSION values
+    set_property(TARGET ${HSAKMT_STATIC_DRM_TARGET} PROPERTY LINK_FLAGS ${HSAKMT_LINK_FLAGS}
+                PROPERTY VERSION "${LIB_VERSION_STRING}"
+                PROPERTY SOVERSION "${LIB_VERSION_MAJOR}" )
+    if (UNIX)
+      #Additional search path for static libraries
+      if(${DISTRO_ID} MATCHES "ubuntu")
+        set(AMDGPU_STATIC_LIB_PATHS "-L/opt/amdgpu/lib/x86_64-linux-gnu")
+      else()
+        set(AMDGPU_STATIC_LIB_PATHS "-L/opt/amdgpu/lib64" "-L/opt/amdgpu/lib")
+      endif()
+      # Link drm_amdgpu and drm library statically
+      target_link_libraries ( ${HSAKMT_STATIC_DRM_TARGET}
+        PRIVATE pthread rt c numa ${CMAKE_DL_LIBS}
+        INTERFACE -Wl,-Bstatic ${AMDGPU_STATIC_LIB_PATHS} ${DRM_AMDGPU_LDFLAGS} ${DRM_LDFLAGS} -Wl,-Bdynamic
+      )
+    endif()
+    target_compile_options(${HSAKMT_STATIC_DRM_TARGET} PRIVATE ${DRM_CFLAGS} ${HSAKMT_C_FLAGS})
+
+    install ( TARGETS ${HSAKMT_STATIC_DRM_TARGET} EXPORT ${HSAKMT_STATIC_DRM_TARGET}Targets
+              ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT binary
+              LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT binary)
+    install ( EXPORT ${HSAKMT_STATIC_DRM_TARGET}Targets
+      FILE ${HSAKMT_STATIC_DRM_TARGET}Targets.cmake
+      NAMESPACE ${HSAKMT_STATIC_DRM_TARGET}::
+      DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${HSAKMT_TARGET}
+      COMPONENT dev)
+
+    add_library( ${HSAKMT_STATIC_DRM_TARGET}::${HSAKMT_STATIC_DRM_TARGET} ALIAS ${HSAKMT_STATIC_DRM_TARGET} )
+  endif()
+
+  ###########################
+  # Packaging directives
+  ###########################
+  # Use component packaging
+  set ( ENABLE_LDCONFIG ON CACHE BOOL "Set library links and caches using ldconfig.")
 endif()

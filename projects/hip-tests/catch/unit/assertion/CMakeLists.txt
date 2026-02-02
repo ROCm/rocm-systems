@@ -30,6 +30,7 @@ elseif(HIP_PLATFORM MATCHES "amd")
     set(TEST_SRC
         static_assert.cc
         assert.cc
+        constexpr_assert.cc
     )
     hip_add_exe_to_target(NAME AssertionTest
                           TEST_SRC ${TEST_SRC}
