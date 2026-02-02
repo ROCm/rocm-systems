@@ -92,7 +92,7 @@ rocprofiler_systems_add_test(
 if(TEST transferbench-sys-run)
     set_tests_properties(
         transferbench-sys-run
-        PROPERTIES FIXTURES_REQUIRED transferbench_available
+        APPEND PROPERTIES FIXTURES_REQUIRED transferbench_available
     )
 endif()
 
