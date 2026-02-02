@@ -196,7 +196,7 @@ class RocProfCompute:
 
                 if self.__args.subpath != "gpu_model":
                     console_warning(
-                        f"--subpath is deprecated and will be removed in future releases."
+                        "--subpath is deprecated and will be removed in future releases."
                     )
 
             if self.__args.name is not None and "/" in self.__args.name:
