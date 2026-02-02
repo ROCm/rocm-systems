@@ -33,6 +33,7 @@ Usage: python inject_roctx.py main.py --epochs 1 --batch-size 4
 import os
 import sys
 from pathlib import Path
+
 # import pkgutil
 import importlib
 
@@ -56,6 +57,7 @@ for candidate in candidate_paths:
 try:
     import torch
     import torch._C
+
     console_log(f"PyTorch version: {torch.__version__}")
 except ImportError:
     console_warning(
@@ -96,7 +98,9 @@ else:
 
 try:
     import torchvision
+
     original_tv_dispatch_call = torchvision._C._dispatch_call
+
     def tv_dispatch_call_with_roctx(*args, **kwargs):
         op_name = str(args[0]) if args else "vision_op"
         full_marker_name = "/".join(marker_stack + [f"torchvision::{op_name}"])
@@ -107,13 +111,16 @@ try:
         finally:
             rangePop()
             marker_stack.pop()
+
     torchvision._C._dispatch_call = tv_dispatch_call_with_roctx
 except Exception:
     pass  # torchvision not installed or no _C._dispatch_call
 
 try:
     import torch.distributed as dist
+
     original_all_reduce = dist.all_reduce
+
     def all_reduce_with_roctx(*args, **kwargs):
         full_marker_name = "/".join(marker_stack + ["torch.distributed.all_reduce"])
         marker_stack.append("torch.distributed.all_reduce")
@@ -123,6 +130,7 @@ try:
         finally:
             rangePop()
             marker_stack.pop()
+
     dist.all_reduce = all_reduce_with_roctx
 except Exception:
     pass
@@ -149,7 +157,9 @@ except Exception:
 
 try:
     import torch.cuda
+
     original_set_device = torch.cuda.set_device
+
     def set_device_with_roctx(*args, **kwargs):
         full_marker_name = "/".join(marker_stack + ["torch.cuda.set_device"])
         marker_stack.append("torch.cuda.set_device")
@@ -159,6 +169,7 @@ try:
         finally:
             rangePop()
             marker_stack.pop()
+
     torch.cuda.set_device = set_device_with_roctx
 except Exception:
     pass
@@ -179,7 +190,7 @@ except Exception:
 #       - Non-callable attributes, to avoid attempting to wrap constants or properties.
 #       - Methods already wrapped with ROCTX, to prevent double-wrapping.
 #     """
-#     skip_method_names = {"join", "shutdown", "acquire", "release", "wait", "notify", "notify_all"} 
+#     skip_method_names = {"join", "shutdown", "acquire", "release", "wait", "notify", "notify_all"}
 #     if exclude_patterns is None:
 #         exclude_patterns = ["__", "_", "is_", "set_", "get_"]
 #     for name in dir(module):
@@ -277,6 +288,7 @@ except Exception:
 # # Restore original sys.argv after all auto-wrapping is complete
 # sys.argv = _saved_argv
 
+
 def roctx_wrapper(func, name=None):
     func_name = name or func.__name__
     call_counter = {"count": 0}
@@ -296,7 +308,7 @@ def roctx_wrapper(func, name=None):
         marker_stack.append(func_name)
         context_stack.append(f"#{call_counter['count']}@{location}")
         full_marker_name = "/".join(marker_stack) + ":" + "/".join(context_stack)
-        
+
         rangePush(full_marker_name)
         try:
             result = func(*args, **kwargs)
@@ -307,6 +319,7 @@ def roctx_wrapper(func, name=None):
         return result
 
     return wrapper
+
 
 def auto_discover_torch_callables(module, prefix, exclude_patterns=None):
     """Automatically discover all callable functions in a module."""
@@ -404,7 +417,7 @@ def inject_roctx_into_torch():
         marker_stack.append("torch.Tensor.backward")
         context_stack.append(f"#{backward_counter['count']}@{location}")
         full_marker_name = "/".join(marker_stack) + ":" + "/".join(context_stack)
-        
+
         rangePush(full_marker_name)
         try:
             return original_backward(self, *args, **kwargs)
@@ -412,16 +425,17 @@ def inject_roctx_into_torch():
             rangePop()
             marker_stack.pop()
             context_stack.pop()
-            
+
     torch.Tensor.backward = backward_with_roctx
     wrapped_count += 1
     console_log("Wrapped: torch.Tensor.backward")
-    
+
     console_log(f"Wrapped {wrapped_count} operations with ROCTX markers")
     if failed_count > 0:
         console_warning(
             f"Failed to wrap {failed_count} operations (likely not patchable)"
         )
+
 
 def inject_roctx_into_optimizer():
     """Wrap optimizer step() method."""
@@ -432,8 +446,12 @@ def inject_roctx_into_optimizer():
     def step_with_roctx(self, *args, **kwargs):
         marker_stack.append(f"optimizer.{self.__class__.__name__}.step")
         context_stack.append("")  # No context for this level
-        full_marker_name = "/".join(marker_stack) + ":" + "/".join(context_stack) if context_stack else "/".join(marker_stack)
-        
+        full_marker_name = (
+            "/".join(marker_stack) + ":" + "/".join(context_stack)
+            if context_stack
+            else "/".join(marker_stack)
+        )
+
         rangePush(full_marker_name)
         try:
             return original_step(self, *args, **kwargs)
@@ -441,7 +459,7 @@ def inject_roctx_into_optimizer():
             rangePop()
             marker_stack.pop()
             context_stack.pop()
-            
+
     Optimizer.step = step_with_roctx
     console_log("Wrapped optimizer.step() with ROCTX markers\n")
 
@@ -472,7 +490,7 @@ def inject_roctx_into_model():
         marker_stack.append(f"nn.Module.{class_name}.forward")
         context_stack.append(f"#{self._roctx_call_count}@{location}")
         full_marker_name = "/".join(marker_stack) + ":" + "/".join(context_stack)
-        
+
         rangePush(full_marker_name)
         try:
             return original_call(self, *args, **kwargs)
@@ -483,6 +501,7 @@ def inject_roctx_into_model():
 
     nn.Module.__call__ = call_with_roctx
     console_log("Wrapped nn.Module forward() with ROCTX markers\n")
+
 
 def instrument_all_torch_ops():
     op_namespaces = ["aten", "quantized", "ml", "prims", "nvfuser"]
@@ -504,14 +523,16 @@ def instrument_all_torch_ops():
                     continue
                 if hasattr(op, "_roctx_wrapped"):
                     continue
-                
+
                 def make_wrapper(original_op, namespace, operation_name):
                     def wrapper(*args, **kwargs):
                         marker_name = f"torch.ops.{namespace}.{operation_name}"
                         marker_stack.append(marker_name)
                         context_stack.append("")  # torch.ops has no additional context
-                        full_marker_name = "/".join(marker_stack) + (":" + "/".join(context_stack) if any(context_stack) else "")
-                        
+                        full_marker_name = "/".join(marker_stack) + (
+                            ":" + "/".join(context_stack) if any(context_stack) else ""
+                        )
+
                         rangePush(full_marker_name)
                         try:
                             return original_op(*args, **kwargs)
@@ -519,9 +540,10 @@ def instrument_all_torch_ops():
                             rangePop()
                             marker_stack.pop()
                             context_stack.pop()
+
                     wrapper._roctx_wrapped = True
                     return wrapper
-                
+
                 wrapped_op = make_wrapper(op, ns, op_name)
                 setattr(ops, op_name, wrapped_op)
                 wrapped_count += 1
@@ -530,14 +552,15 @@ def instrument_all_torch_ops():
                 failed_count += 1
                 if failed_count <= 10:
                     console_log(f"  Failed to wrap {ns}.{op_name}: {e}")
-        
+
         if ns_count > 0:
             console_log(f"  Wrapped {ns_count} operations in torch.ops.{ns}")
-    
+
     console_log(f"[ROCTX] Total: {wrapped_count} torch.ops operations wrapped")
     if failed_count > 0:
         console_log(f"[ROCTX] ({failed_count} operations failed to wrap)")
     console_log("")
+
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
@@ -566,4 +589,3 @@ if __name__ == "__main__":
     module = importlib.util.module_from_spec(spec)
     sys.modules["__main__"] = module
     spec.loader.exec_module(module)
-    
