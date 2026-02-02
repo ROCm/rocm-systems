@@ -72,12 +72,17 @@ struct mpi_gotcha : comp::base<mpi_gotcha, void>
     static uintptr_t null_comm() { return std::numeric_limits<uintptr_t>::max(); }
     static void      disable_comm_intercept();
 
+    static void set_on_init_callback(
+        const std::function<void(int rank, int size)>& _on_init_callback);
+
 private:
     int       m_rank     = 0;
     int       m_size     = 1;
     int*      m_rank_ptr = nullptr;
     int*      m_size_ptr = nullptr;
     uintptr_t m_comm_val = null_comm();
+
+    static std::function<void(int rank, int size)> s_on_init_callback;
 };
 }  // namespace component
 

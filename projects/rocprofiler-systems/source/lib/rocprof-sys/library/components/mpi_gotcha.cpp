@@ -150,6 +150,8 @@ auto permit_bindings = strset_t{};
 auto reject_bindings = strset_t{};
 }  // namespace
 
+std::function<void(int, int)> mpi_gotcha::s_on_init_callback = {};
+
 void
 mpi_gotcha::configure()
 {
@@ -189,6 +191,19 @@ mpi_gotcha::configure()
         reject_bindings.emplace("PMPI_Comm_size");
 #endif
     };
+}
+
+void
+mpi_gotcha::set_on_init_callback(
+    const std::function<void(int rank, int size)>& _on_init_callback)
+{
+    if(s_on_init_callback)
+    {
+        LOG_CRITICAL("s_on_init_callback already set");
+        return;
+    }
+
+    s_on_init_callback = _on_init_callback;
 }
 
 void
@@ -352,6 +367,8 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::outgoing, int _retval)
                 mproc_comm_record.size = m_size = _size;
                 auto _rank                      = mproc::get_process_index(_pid, _ppid);
                 if(_rank >= 0) mproc_comm_record.rank = m_rank = _rank;
+
+                if(s_on_init_callback) s_on_init_callback(m_rank, m_size);
             }
         }
     }

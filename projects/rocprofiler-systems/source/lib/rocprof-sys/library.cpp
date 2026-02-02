@@ -89,6 +89,8 @@
 #    include <rocprofiler-sdk/registration.h>
 #endif
 
+#include <nlohmann/json.hpp>
+
 #include "logger/debug.hpp"
 
 #include <atomic>
@@ -136,6 +138,26 @@ set_metadata_process_end_timestamp(int64_t _ts)
     auto process_info = trace_cache::get_metadata_registry().get_process_info();
     process_info.end  = _ts;
     trace_cache::get_metadata_registry().set_process(process_info);
+}
+
+void
+set_metadata_environement_json(const std::string& _environment_json)
+{
+    auto process_info        = trace_cache::get_metadata_registry().get_process_info();
+    process_info.environment = _environment_json;
+    trace_cache::get_metadata_registry().set_process(process_info);
+}
+
+std::string
+escape_quotes_for_sql(std::string str)
+{
+    std::string::size_type pos = 0;
+    while((pos = str.find('"', pos)) != std::string::npos)
+    {
+        str.replace(pos, 1, "\"\"");
+        pos += 2;
+    }
+    return str;
 }
 
 bool
@@ -357,15 +379,17 @@ read_command_line(pid_t _pid)
 void
 rocprofsys_preinit_cache()
 {
-    auto _cmd_line = read_command_line(getpid());
+    const auto        _cmd_line = read_command_line(getpid());
+    const std::string _command  = _cmd_line.empty()
+                                      ? "rocprofiler-systems"
+                                      : fmt::format("{}", fmt::join(_cmd_line, " "));
 
-    if(_cmd_line.empty())
-    {
-        _cmd_line.emplace_back("rocprofiler-systems");
-    }
+    std::stringstream _extdata_stream;
+    config::print_settings_json(_extdata_stream);
 
     trace_cache::get_metadata_registry().set_process(
-        { getpid(), getppid(), _cmd_line.at(0) });
+        { getpid(), getppid(), _command, "",
+          escape_quotes_for_sql(_extdata_stream.str()) });
 }
 
 void
@@ -775,6 +799,16 @@ rocprofsys_init_hidden(const char* _mode, bool _is_binary_rewrite, const char* _
     {
         rocprofsys_preinit_hidden();
     }
+
+#if defined(ROCPROFSYS_USE_MPI)
+    component::mpi_gotcha::set_on_init_callback([](int rank, int size) {
+        nlohmann::json _environment_json;
+        _environment_json["MPI_COMM_WORLD_SIZE"] = size;
+        _environment_json["MPI_COMM_WORLD_RANK"] = rank;
+
+        set_metadata_environement_json(escape_quotes_for_sql(_environment_json.dump()));
+    });
+#endif
 }
 
 //======================================================================================//
