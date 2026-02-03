@@ -24,6 +24,7 @@
 
 #include "generateStats.hpp"
 #include "generator.hpp"
+#include "kfd_info.hpp"
 #include "output_config.hpp"
 #include "statistics.hpp"
 

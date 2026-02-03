@@ -24,6 +24,7 @@
 
 #include "counter_info.hpp"
 #include "generator.hpp"
+#include "kfd_info.hpp"
 #include "pc_sample_transform.hpp"
 #include "statistics.hpp"
 #include "stream_info.hpp"

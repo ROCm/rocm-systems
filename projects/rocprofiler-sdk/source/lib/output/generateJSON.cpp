@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "generateJSON.hpp"
+#include "kfd_info.hpp"
 #include "output_stream.hpp"
 #include "statistics.hpp"
 #include "timestamps.hpp"

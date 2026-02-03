@@ -24,6 +24,7 @@
 
 #include "agent_info.hpp"
 #include "generator.hpp"
+#include "kfd_info.hpp"
 #include "metadata.hpp"
 #include "output_config.hpp"
 #include "stream_info.hpp"

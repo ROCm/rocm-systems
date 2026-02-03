@@ -30,16 +30,38 @@ namespace rocprofiler
 {
 namespace tool
 {
+
+// Wrapper type used by the tool to simplify the passing around of KFD data
+struct tool_buffer_tracing_kfd_record_t
+{
+    std::variant<rocprofiler_buffer_tracing_kfd_event_page_migrate_record_t,
+                 rocprofiler_buffer_tracing_kfd_event_page_fault_record_t,
+                 rocprofiler_buffer_tracing_kfd_event_queue_record_t,
+                 rocprofiler_buffer_tracing_kfd_event_unmap_from_gpu_record_t,
+                 rocprofiler_buffer_tracing_kfd_event_dropped_events_record_t,
+                 rocprofiler_buffer_tracing_kfd_page_migrate_record_t,
+                 rocprofiler_buffer_tracing_kfd_page_fault_record_t,
+                 rocprofiler_buffer_tracing_kfd_queue_record_t>
+        record;
+};
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, const ::rocprofiler::tool::tool_buffer_tracing_kfd_record_t& data)
+{
+    std::visit([&ar](const auto record) { cereal::save(ar, record); }, data.record);
+}
+
 static auto
 agent_node_id(const metadata& tool_metadata, const rocprofiler_agent_id_t& agent)
 {
     return agent.handle == 0 ? -1 : int32_t(tool_metadata.get_agent(agent)->node_id);
 }
 
-// The types defined below are simple wrappers of the
+// The rocpd_kfd_* types defined below are simple wrappers of the
 // rocprofiler_buffer_tracing_kfd_... types, and are defined so that cereal's
-// save() routines invoked on them will lead to proper serialization through the
-// string-based rocpd_kfd_event_data type
+// save() routines invoked on them will lead to proper serializetion of miscellaneous
+// data into extdata JSON strings in rocpd tables
 
 #define NVP_APPLY(cb, field) cb(#field, field)
 
@@ -259,9 +281,7 @@ struct rocpd_kfd_queue_record_t : rocprofiler_buffer_tracing_kfd_queue_record_t
     int64_t agent_id = -1;
 };
 
-// rocpd_kfd_event_data is for encoding arbitrary kfd event data that does not
-// map well into structured rocpd tables. The primary use of this type is to
-// serialize into rocpd_event's extdata column.
+// A variant capturing all of the rocpd_kfd_* types
 struct rocpd_kfd_event_data_t
 {
     std::variant<rocpd_kfd_event_page_migrate_record_t,

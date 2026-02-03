@@ -134,19 +134,6 @@ struct tool_buffer_tracing_hip_api_ext_record_t : rocprofiler_buffer_tracing_hip
     rocprofiler_stream_id_t stream_id = {};
 };
 
-struct tool_buffer_tracing_kfd_record_t
-{
-    std::variant<rocprofiler_buffer_tracing_kfd_event_page_migrate_record_t,
-                 rocprofiler_buffer_tracing_kfd_event_page_fault_record_t,
-                 rocprofiler_buffer_tracing_kfd_event_queue_record_t,
-                 rocprofiler_buffer_tracing_kfd_event_unmap_from_gpu_record_t,
-                 rocprofiler_buffer_tracing_kfd_event_dropped_events_record_t,
-                 rocprofiler_buffer_tracing_kfd_page_migrate_record_t,
-                 rocprofiler_buffer_tracing_kfd_page_fault_record_t,
-                 rocprofiler_buffer_tracing_kfd_queue_record_t>
-        record;
-};
-
 }  // namespace tool
 }  // namespace rocprofiler
 
@@ -187,13 +174,6 @@ save(ArchiveT& ar, const ::rocprofiler::tool::tool_buffer_tracing_hip_api_ext_re
 {
     cereal::save(ar, static_cast<const rocprofiler_buffer_tracing_hip_api_ext_record_t&>(data));
     SAVE_DATA_FIELD(stream_id);
-}
-
-template <typename ArchiveT>
-void
-save(ArchiveT& ar, const ::rocprofiler::tool::tool_buffer_tracing_kfd_record_t& data)
-{
-    std::visit([&ar](const auto record) { cereal::save(ar, record); }, data.record);
 }
 
 #undef SAVE_DATA_FIELD

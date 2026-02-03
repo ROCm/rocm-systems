@@ -23,6 +23,7 @@
 #pragma once
 
 #include "generator.hpp"
+#include "kfd_info.hpp"
 #include "metadata.hpp"
 #include "statistics.hpp"
 #include "stream_info.hpp"
