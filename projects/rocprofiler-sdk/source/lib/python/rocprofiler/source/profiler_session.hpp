@@ -50,7 +50,7 @@ namespace python
 /**
  * @brief Kernel symbol resolver for mapping kernel IDs to names
  */
-class KernelSymbolResolver
+class __attribute__((visibility("default"))) KernelSymbolResolver
 {
 public:
     void register_kernel(uint64_t kernel_id, const std::string& name);
@@ -68,7 +68,7 @@ private:
  * This class manages a hardware counter profiling session. It handles
  * context creation, counter configuration, and record collection.
  */
-class ProfilerSession
+class __attribute__((visibility("default"))) ProfilerSession
 {
 public:
     /**
@@ -151,7 +151,7 @@ private:
  * @brief Ensure rocprofiler is initialized
  * @return true if initialization succeeded
  */
-bool
+__attribute__((visibility("default"))) bool
 ensure_rocprofiler_initialized();
 
 }  // namespace python
