@@ -280,7 +280,7 @@ def show_torch_operator_hierarchy(operator_name: str, df: pd.DataFrame) -> None:
     Display the hierarchy for each unique operator name in the DataFrame,
     showing marker hierarchy on the left and kernel launches on the right.
     """
-    print("\n" + "-" * 80)
+    print(f"\n" + "-" * 80)
     print("Marker Hierarchy (Stack)".ljust(40) + "Kernel Launches")
     print("-" * 80)
 
@@ -343,7 +343,7 @@ def show_torch_operator_hierarchy(operator_name: str, df: pd.DataFrame) -> None:
 
             print()
     else:
-        print("No operator names found in data.")
+        console_log("No operator names found in data.")
     print("-" * 80)
 
 
