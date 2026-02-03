@@ -10,8 +10,8 @@ elseif (HIP_PLATFORM MATCHES "amd")
   set(GPGPU_LANGUAGE HIP)
   set(GPGPU_LINKER_LIBRARIES hip::host hip::device)
 endif()
-enable_language(${GPGPU_LANGUAGE})
 project(hiptests LANGUAGES C CXX ${GPGPU_LANGUAGE})
+enable_language(${GPGPU_LANGUAGE})
 
 if (HIP_PLATFORM MATCHES "nvidia")
   find_package(CUDAToolkit REQUIRED)
@@ -423,17 +423,11 @@ if(BUILD_STRESS_TESTS)
 endif()
 
 add_custom_target(gen_coverage
-    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/utils/coverage
-    COMMAND ${CMAKE_COMMAND} -B ${CMAKE_CURRENT_BINARY_DIR}/utils/coverage -S ${CMAKE_CURRENT_SOURCE_DIR}/../utils/coverage
-    COMMAND ${CMAKE_COMMAND} --build ${CMAKE_CURRENT_BINARY_DIR}/utils/coverage --target clean-cov-report
-    COMMAND ${CMAKE_COMMAND} --build ${CMAKE_CURRENT_BINARY_DIR}/utils/coverage
-    COMMAND ${CMAKE_CURRENT_BINARY_DIR}/utils/coverage/generateHipAPICoverage ${HIP_PATH}/include ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/utils/coverage/
-    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-    COMMENT "Generating Test Coverage Report"
-    USES_TERMINAL
-    VERBATIM
-)
-set_property(TARGET gen_coverage PROPERTY EXCLUDE_FROM_ALL TRUE)
+                  COMMAND ${CMAKE_COMMAND} -B build/
+                  COMMAND ${CMAKE_COMMAND} --build build/
+                  COMMAND ./build/generateHipAPICoverage ${HIP_PATH}/include
+                  WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/../utils/coverage
+                  COMMENT "Generating Test Coverage Report")
 
 # packaging the tests
 add_subdirectory(packaging)
