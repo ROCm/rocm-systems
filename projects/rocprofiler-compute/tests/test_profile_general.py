@@ -3244,47 +3244,42 @@ if __name__ == "__main__":
     )
 
 
-@pytest.mark.mpi
 @pytest.mark.multi_rank
 def test_multi_rank_profiling_no_mpi_comm(binary_handler_profile_rocprof_compute):
-    from mpi4py import MPI
+    """
+    Test multi-rank profiling of a non-MPI application.
 
-    comm = MPI.COMM_WORLD
-    rank = comm.Get_rank()
+    The fixture launches the profiling command with mpirun.
+    """
+    num_ranks = 2
 
-    MPI.COMM_WORLD.Barrier()
-    if rank == 0:
-        workload_dir = test_utils.get_output_dir()
-    else:
-        workload_dir = None
+    workload_dir = test_utils.get_output_dir()
 
-    workload_dir = MPI.COMM_WORLD.bcast(workload_dir, root=0)
+    binary_handler_profile_rocprof_compute(config, workload_dir, num_ranks=num_ranks)
 
-    binary_handler_profile_rocprof_compute(config, workload_dir)
+    # Check output for each rank
+    for rank in range(num_ranks):
+        rank_dir = Path(workload_dir) / str(rank)
+        assert rank_dir.exists(), f"Rank directory {rank_dir} does not exist"
 
-    rank_dir = Path(workload_dir) / str(rank)
-    assert rank_dir.exists(), f"Rank directory {rank_dir} does not exist"
+        file_dict = test_utils.check_csv_files(str(rank_dir), num_devices, num_kernels)
 
-    file_dict = test_utils.check_csv_files(str(rank_dir), num_devices, num_kernels)
+        if soc == "MI100":
+            assert sorted(list(file_dict.keys())) == CSVS
+        elif soc == "MI200":
+            assert sorted(list(file_dict.keys())) == CSVS
+        elif "MI300" in soc:
+            assert sorted(list(file_dict.keys())) == CSVS
+        elif "MI350" in soc:
+            assert sorted(list(file_dict.keys())) == CSVS
+        else:
+            print(f"Testing isn't supported yet for {soc}")
+            assert 0
 
-    if soc == "MI100":
-        assert sorted(list(file_dict.keys())) == CSVS
-    elif soc == "MI200":
-        assert sorted(list(file_dict.keys())) == CSVS
-    elif "MI300" in soc:
-        assert sorted(list(file_dict.keys())) == CSVS
-    elif "MI350" in soc:
-        assert sorted(list(file_dict.keys())) == CSVS
-    else:
-        print(f"Testing isn't supported yet for {soc}")
-        assert 0
+        validate(
+            inspect.stack()[0][3],
+            str(rank_dir),
+            file_dict,
+        )
 
-    validate(
-        inspect.stack()[0][3],
-        str(rank_dir),
-        file_dict,
-    )
-
-    MPI.COMM_WORLD.Barrier()
-    if rank == 0:
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
