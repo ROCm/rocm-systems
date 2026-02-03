@@ -30,7 +30,6 @@ namespace rocprofiler
 {
 namespace tool
 {
-
 // Wrapper type used by the tool to simplify the passing around of KFD data
 struct tool_buffer_tracing_kfd_record_t
 {
