@@ -215,7 +215,7 @@ except OSError as e:
     print("Unable to find libamd_smi_python.so library try installing amd-smi-lib from your package manager")
 
 #Add support for amdsmi_free_name_value_pairs
-amdsmi_free_name_value_pairs = _libraries['libamd_smi.so'].amdsmi_free_name_value_pairs
+amdsmi_free_name_value_pairs = _libraries['libamd_smi_python.so'].amdsmi_free_name_value_pairs
 amdsmi_free_name_value_pairs.restype = None
 amdsmi_free_name_value_pairs.argtypes = [ctypes.POINTER(None)]
 

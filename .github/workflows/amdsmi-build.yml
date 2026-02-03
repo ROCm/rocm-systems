@@ -104,9 +104,16 @@ jobs:
       - name: Build and Install Python Wheel
         run: |
           set -e
-          echo 'Building Python wheel on ${{ matrix.os }}'
           BUILD_FOLDER=${{ env.PROJECT_DIR }}/build
           
+          # Check Python version (wheel testing requires Python 3.8+)
+          PYTHON_VERSION=$(python3 -c "import sys; print(f'{sys.version_info.major}{sys.version_info.minor}')")
+          if [ "$PYTHON_VERSION" -lt "38" ]; then
+            echo "⚠ Python $PYTHON_VERSION too old for wheel testing (requires 3.8+), skipping wheel build..."
+            exit 0
+          fi
+          
+          echo 'Building Python wheel on ${{ matrix.os }}'
           # Upgrade setuptools for proper wheel metadata
           echo 'Upgrading setuptools...'
           python3 -m pip install --upgrade pip setuptools wheel
@@ -243,17 +250,22 @@ jobs:
             fi
           done
 
-          # Build and install Python wheel
-          echo 'Building Python wheel on ${{ matrix.os }}'
-          python3 -m pip install --upgrade pip setuptools wheel
-          cd $BUILD_FOLDER/py-interface/python_package
-          rm -rf *.whl *.egg-info build dist
-          python3 -m pip wheel --no-deps --no-build-isolation -w . .
-          echo 'Wheel created:'
-          ls -lh *.whl
-          python3 -m pip install --force-reinstall $BUILD_FOLDER/py-interface/python_package/amdsmi-*.whl
-          cd /tmp && python3 -c "import amdsmi; print('✓ Import successful'); amdsmi.amdsmi_init(); print('✓ Library loaded'); amdsmi.amdsmi_shut_down(); print('✓ Wheel working!')"
-          echo 'Python wheel build and install completed on ${{ matrix.os }}'
+          # Build and install Python wheel (requires Python 3.8+)
+          PYTHON_VERSION=$(python3 -c "import sys; print(f'{sys.version_info.major}{sys.version_info.minor}')")
+          if [ "$PYTHON_VERSION" -ge "38" ]; then
+            echo 'Building Python wheel on ${{ matrix.os }}'
+            python3 -m pip install --upgrade pip setuptools wheel
+            cd $BUILD_FOLDER/py-interface/python_package
+            rm -rf *.whl *.egg-info build dist
+            python3 -m pip wheel --no-deps --no-build-isolation -w . .
+            echo 'Wheel created:'
+            ls -lh *.whl
+            python3 -m pip install --force-reinstall $BUILD_FOLDER/py-interface/python_package/amdsmi-*.whl
+            cd /tmp && python3 -c "import amdsmi; print('✓ Import successful'); amdsmi.amdsmi_init(); print('✓ Library loaded'); amdsmi.amdsmi_shut_down(); print('✓ Wheel working!')"
+            echo 'Python wheel build and install completed on ${{ matrix.os }}'
+          else
+            echo "⚠ Python $PYTHON_VERSION too old for wheel testing (requires 3.8+), skipping..."
+          fi
 
           echo 'Installing for test on ${{ matrix.os }}'
           for i in $(seq 1 $RETRIES); do
@@ -546,9 +558,16 @@ jobs:
       - name: Build and Install Python Wheel
         run: |
           set -e
-          echo 'Building Python wheel on ${{ matrix.os }}'
           BUILD_FOLDER=${{ env.PROJECT_DIR }}/build
           
+          # Check Python version (wheel testing requires Python 3.8+)
+          PYTHON_VERSION=$(python3 -c "import sys; print(f'{sys.version_info.major}{sys.version_info.minor}')")
+          if [ "$PYTHON_VERSION" -lt "38" ]; then
+            echo "⚠ Python $PYTHON_VERSION too old for wheel testing (requires 3.8+), skipping wheel build..."
+            exit 0
+          fi
+          
+          echo 'Building Python wheel on ${{ matrix.os }}'
           # Upgrade setuptools for proper wheel metadata
           echo 'Upgrading setuptools...'
           python3 -m pip install --upgrade pip setuptools wheel
@@ -742,17 +761,22 @@ jobs:
             fi
           done
 
-          # Build and install Python wheel
-          echo 'Building Python wheel on ${{ matrix.os }}'
-          python3 -m pip install --upgrade pip setuptools wheel
-          cd $BUILD_FOLDER/py-interface/python_package
-          rm -rf *.whl *.egg-info build dist
-          python3 -m pip wheel --no-deps --no-build-isolation -w . .
-          echo 'Wheel created:'
-          ls -lh *.whl
-          python3 -m pip install --force-reinstall $BUILD_FOLDER/py-interface/python_package/amdsmi-*.whl
-          cd /tmp && python3 -c "import amdsmi; print('✓ Import successful'); amdsmi.amdsmi_init(); print('✓ Library loaded'); amdsmi.amdsmi_shut_down(); print('✓ Wheel working!')"
-          echo 'Python wheel build and install completed on ${{ matrix.os }}'
+          # Build and install Python wheel (requires Python 3.8+)
+          PYTHON_VERSION=$(python3 -c "import sys; print(f'{sys.version_info.major}{sys.version_info.minor}')")
+          if [ "$PYTHON_VERSION" -ge "38" ]; then
+            echo 'Building Python wheel on ${{ matrix.os }}'
+            python3 -m pip install --upgrade pip setuptools wheel
+            cd $BUILD_FOLDER/py-interface/python_package
+            rm -rf *.whl *.egg-info build dist
+            python3 -m pip wheel --no-deps --no-build-isolation -w . .
+            echo 'Wheel created:'
+            ls -lh *.whl
+            python3 -m pip install --force-reinstall $BUILD_FOLDER/py-interface/python_package/amdsmi-*.whl
+            cd /tmp && python3 -c "import amdsmi; print('✓ Import successful'); amdsmi.amdsmi_init(); print('✓ Library loaded'); amdsmi.amdsmi_shut_down(); print('✓ Wheel working!')"
+            echo 'Python wheel build and install completed on ${{ matrix.os }}'
+          else
+            echo "⚠ Python $PYTHON_VERSION too old for wheel testing (requires 3.8+), skipping..."
+          fi
 
           echo 'Installing for test on RHEL10/AlmaLinux8'
           dnf install python3-setuptools python3-wheel -y
@@ -787,17 +811,22 @@ jobs:
           make -j $(nproc)
           make package
 
-          # Build and install Python wheel
-          echo 'Building Python wheel on ${{ matrix.os }}'
-          python3 -m pip install --upgrade pip setuptools wheel
-          cd $BUILD_FOLDER/py-interface/python_package
-          rm -rf *.whl *.egg-info build dist
-          python3 -m pip wheel --no-deps --no-build-isolation -w . .
-          echo 'Wheel created:'
-          ls -lh *.whl
-          python3 -m pip install --force-reinstall $BUILD_FOLDER/py-interface/python_package/amdsmi-*.whl
-          cd /tmp && python3 -c "import amdsmi; print('✓ Import successful'); amdsmi.amdsmi_init(); print('✓ Library loaded'); amdsmi.amdsmi_shut_down(); print('✓ Wheel working!')"
-          echo 'Python wheel build and install completed on ${{ matrix.os }}'
+          # Build and install Python wheel (requires Python 3.8+)
+          PYTHON_VERSION=$(python3 -c "import sys; print(f'{sys.version_info.major}{sys.version_info.minor}')")
+          if [ "$PYTHON_VERSION" -ge "38" ]; then
+            echo 'Building Python wheel on ${{ matrix.os }}'
+            python3 -m pip install --upgrade pip setuptools wheel
+            cd $BUILD_FOLDER/py-interface/python_package
+            rm -rf *.whl *.egg-info build dist
+            python3 -m pip wheel --no-deps --no-build-isolation -w . .
+            echo 'Wheel created:'
+            ls -lh *.whl
+            python3 -m pip install --force-reinstall $BUILD_FOLDER/py-interface/python_package/amdsmi-*.whl
+            cd /tmp && python3 -c "import amdsmi; print('✓ Import successful'); amdsmi.amdsmi_init(); print('✓ Library loaded'); amdsmi.amdsmi_shut_down(); print('✓ Wheel working!')"
+            echo 'Python wheel build and install completed on ${{ matrix.os }}'
+          else
+            echo "⚠ Python $PYTHON_VERSION too old for wheel testing (requires 3.8+), skipping..."
+          fi
 
           echo 'Installing for test on ${{ matrix.os }}'
           case ${{ env.PACKAGE_MANAGER }} in
