@@ -146,20 +146,9 @@ buffered_callback(rocprofiler_context_id_t      context,
     }
 }
 
-// Code object callback for kernel name resolution
-rocprofiler_status_t
-code_object_callback(rocprofiler_code_object_id_t   code_object_id,
-                     rocprofiler_code_object_info_t info,
-                     void*                          user_data)
-{
-    (void) code_object_id;
-    (void) info;
-    (void) user_data;
-
-    // For now, we'll resolve kernel names from the dispatch info
-    // Full implementation would track code objects here
-    return ROCPROFILER_STATUS_SUCCESS;
-}
+// Note: Code object tracking for kernel name resolution would be done via
+// callback tracing service if needed. For now, kernel names are resolved
+// from the dispatch info directly.
 
 // Tool initialization callback
 int

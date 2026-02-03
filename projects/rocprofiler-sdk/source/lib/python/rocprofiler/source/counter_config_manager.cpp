@@ -142,9 +142,14 @@ CounterConfigManager::resolve_counters_for_agent(rocprofiler_agent_id_t         
 
                 if(dim_status == ROCPROFILER_STATUS_SUCCESS && info_v1.dimensions_count > 0)
                 {
-                    dimension_cache_[counter.handle] =
-                        std::vector<rocprofiler_counter_record_dimension_info_t>(
-                            info_v1.dimensions, info_v1.dimensions + info_v1.dimensions_count);
+                    // Dereference each pointer to get the actual dimension info structs
+                    std::vector<rocprofiler_counter_record_dimension_info_t> dims;
+                    dims.reserve(info_v1.dimensions_count);
+                    for(size_t j = 0; j < info_v1.dimensions_count; ++j)
+                    {
+                        dims.push_back(*info_v1.dimensions[j]);
+                    }
+                    dimension_cache_[counter.handle] = std::move(dims);
                 }
                 break;
             }
