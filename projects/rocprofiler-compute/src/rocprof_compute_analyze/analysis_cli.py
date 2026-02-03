@@ -31,7 +31,6 @@ from pathlib import Path
 from utils.utils import process_torch_trace_output
 
 
-
 class cli_analysis(OmniAnalyze_Base):
     # -----------------------
     # Required child methods
