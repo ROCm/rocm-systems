@@ -208,10 +208,16 @@ main()
                        gpuMatrix,
                        WIDTH);
 
+    // Wait for all kernels to complete before freeing memory
+    checkHipErrors(hipStreamSynchronize(stream));
+
     // free the resources on device side
     checkHipErrors(hipFree(result));
     checkHipErrors(hipFree(gpuMatrix));
     checkHipErrors(hipFree(gpuTransposeMatrix));
+
+    // destroy the stream
+    checkHipErrors(hipStreamDestroy(stream));
 
     // free the resources on host side
     free(Matrix);
