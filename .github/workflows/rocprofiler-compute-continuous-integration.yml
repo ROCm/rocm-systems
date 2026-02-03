@@ -91,14 +91,14 @@ jobs:
       packages: read
     container:
       image: ghcr.io/rocm/rocprofiler-ubuntu:${{ matrix.system.os-release }}-systems-ci-${{ matrix.system.arch }}
-      options: 
-        --privileged 
+      options:
+        --privileged
         --ipc host
         --group-add video
         --device /dev/kfd
         --device /dev/dri
         --cap-add CAP_SYS_ADMIN
-        
+
     steps:
       - uses: actions/checkout@v5
         with:
@@ -162,9 +162,10 @@ jobs:
             sleep 10
           done
           echo "✅ pip requirements installed!"
-      
+
       - name: Configure, Build, and Test
         id: test
+        continue-on-error: true
         timeout-minutes: ${{ steps.setup_env.outputs.mode == 'Nightly' && 120 || 90 }}
         working-directory: projects/rocprofiler-compute
         run: |
@@ -188,9 +189,9 @@ jobs:
             -DPYTEST_NUMPROCS=8 \
             -- \
             -E "${{ steps.setup_env.outputs.excluded_tests }}"
-      
+
       - name: Output Logs
-        if: failure()
+        if: steps.test.outcome == 'failure'
         working-directory: projects/rocprofiler-compute
         run: |
           echo "❌ Run Failed: Outputting available log files..."
@@ -201,3 +202,12 @@ jobs:
             fi
           done
 
+      - name: Check Test Results
+        if: always()
+        shell: bash
+        run: |
+          if [[ "${{ steps.test.outcome }}" == "failure" ]]; then
+            echo "::error::Tests failed - see CDash for details: https://my.cdash.org/index.php?project=rocprofiler-compute"
+            exit 1
+          fi
+          echo "✅ All tests passed!"

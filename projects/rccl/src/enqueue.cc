@@ -27,6 +27,7 @@
 #include "scheduler.h"
 #include "common.h"
 #include "api_trace.h"
+#include "rccl_common.h"
 
 #include <cstring> // std::memcpy
 #include <cinttypes> // PRIx64
@@ -161,6 +162,7 @@ static inline int ncclFuncTrafficPerByte(ncclFunc_t func, int nRanks) {
 }
 
 RCCL_PARAM_DECLARE(EnableProxyTrace);
+RCCL_PARAM_DECLARE(DirectReduceScatterThreshold);
 /*****************************************************************************/
 /*       Launch system : synchronization and CUDA kernel launch              */
 /*****************************************************************************/
@@ -412,7 +414,22 @@ ncclResult_t ncclTasksRegAndEnqueue(struct ncclComm* comm) {
         devWork.size = task->count;
     }
 #endif
-
+    // Direct Reduce Scatter
+    if (task->func == ncclFuncReduceScatter && comm->enableDirectReduceScatter) {
+      devWork.enableDirectReduceScatter = comm->enableDirectReduceScatter;
+      int64_t directReduceScatterLimit = rcclParamDirectReduceScatterThreshold();
+      if (directReduceScatterLimit >= 0) {
+        // set threshold to 2MiB hard limit
+        directReduceScatterLimit = std::min(directReduceScatterLimit, (int64_t)2097152);
+        devWork.directReduceScatterLimitBytes = (uint32_t) directReduceScatterLimit;
+      } else {
+        devWork.directReduceScatterLimitBytes = (uint32_t)0;
+      }
+      devWork.tempBuff = (void*)comm->tempBuff;
+      devWork.currentRank = comm->rank;
+      devWork.count = task->count;
+    }
+    
     devWork.isOneRPN = comm->isOneRPN;
     devWork.netRegUsed = devWork.regUsed = 0;
     devWork.gfx9CheapFenceOff = gfx9CheapFenceOff(devWork, comm->gfx9CheapFenceOff);
@@ -725,10 +742,12 @@ static ncclResult_t scheduleCollTasksToPlan(
         proxyOp.incWorkCounter = true;
         addWorkBatchToPlan(comm, plan, c, workNode->workType, task->devFuncId, plan->workBytes);
         // Set pattern to profiler to add a proxy profiler for kernel events
-        if (task->func != ncclFuncAllToAllGda) {
+        // for Direct Reduce Scatter (DRS), we don't need to add proxy op
+        bool isDRS = task->func == ncclFuncReduceScatter && comm->enableDirectReduceScatter;
+        if (!isDRS && task->func != ncclFuncAllToAllGda) {
             NCCLCHECK(addProxyOpIfNeeded(comm, plan, &proxyOp));
             NCCLCHECK(addProfilerProxyOpIfNeeded(comm, plan, &proxyOp));
-	}
+        }
       }
     } else { // not task->isCollnet
       int trafficPerByte = ncclFuncTrafficPerByte(task->func, comm->nRanks);
@@ -875,7 +894,9 @@ static ncclResult_t scheduleCollTasksToPlan(
         // Coverity reports "proxyOp->connection" as being possibly uninitialized.  It's hard to
         // determine if that's actually true but it's also not clear if that would be an issue.
         // coverity[uninit_use_in_call:FALSE]
-        if (task->func != ncclFuncAllToAllGda) {
+        // for Direct Reduce Scatter (DRS), we don't need to add proxy op
+        bool isDRS = task->func == ncclFuncReduceScatter && comm->enableDirectReduceScatter;
+        if (!isDRS && task->func != ncclFuncAllToAllGda) {
             NCCLCHECK(addProxyOpIfNeeded(comm, plan, proxyOp));
             NCCLCHECK(addProfilerProxyOpIfNeeded(comm, plan, proxyOp));
         }
@@ -1821,7 +1842,7 @@ ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan
   cudaStream_t launchStream = planner->streams->stream;
 
   NCCLCHECK(ncclProfilerStartKernelLaunchEvent(plan, launchStream));
-  
+
   void* extra[] = {plan->kernelArgs, &plan->kernelArgsSize};
 
   auto event = latency_profiler::collTraceAquireEventBaseline(plan, launchStream);
@@ -2101,6 +2122,7 @@ static ncclResult_t updateCollCostTable(
 }
 
 extern int64_t ncclParamMinNchannels();
+extern int64_t ncclParamMaxNchannels();
 
 static ncclResult_t topoGetAlgoInfo(
     struct ncclComm* comm, struct ncclTaskColl* info, size_t nBytes,
@@ -2160,10 +2182,16 @@ static ncclResult_t topoGetAlgoInfo(
   rcclSetPipelining(comm, nBytes, info);
   if (simInfo) simInfo->estimatedTime = time;
   TRACE(NCCL_COLL, "%ld Bytes -> Algo %d proto %d time %f", nBytes, info->algorithm, info->protocol, time);
-#ifdef ENABLE_WARP_SPEED
-  int nc = comm->topo->warpSpeedEnabled? comm->nChannels / 2 : comm->nChannels;
-#else
   int nc = comm->nChannels;
+#ifdef ENABLE_WARP_SPEED
+  if(comm->topo->warpSpeedEnabled) {
+    nc /= comm->warpSpeedChannelMultiplier;
+    // Temporary check as we reduce CU usage for all collectives
+    // TODO: Remove this condition after optimizing all collectives
+    if(IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && comm->nNodes == 1 && comm->nRanks == 8 && info->func != ncclFuncAllReduce && ncclParamMaxNchannels() < 0) {
+      nc *= 2;
+    }
+  }
 #endif
   int nt = comm->maxThreads[info->algorithm][info->protocol];
   int threadThreshold = comm->threadThresholds[info->algorithm][info->protocol];
@@ -2198,7 +2226,7 @@ static ncclResult_t topoGetAlgoInfo(
     INFO(NCCL_INIT, "post-adjustment based on threadThreshold:%i nBytes:%lu nc:%i", threadThreshold, nBytes, nc);
     rcclOverrideChannels(comm, info->func, nBytes, nc);
   }
-  
+
   rcclRestrictMaxChannels(comm, nc);
 
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
@@ -2869,7 +2897,7 @@ static ncclResult_t collTaskAppend(
   NCCLCHECK(ncclProfilerStartGroupApiEvent(info, isGraphCaptured));
   NCCLCHECK(ncclProfilerRecordGroupApiEventState(ncclProfilerGroupStartApiStop));
   NCCLCHECK(ncclProfilerStartCollApiEvent(info, isGraphCaptured));
-  
+
   struct ncclTaskColl* t = ncclMemoryPoolAlloc<struct ncclTaskColl>(&comm->memPool_ncclTaskColl, &comm->memPermanent);
   t->func = info->coll;
   t->sendbuff = info->sendbuff;
@@ -2908,7 +2936,7 @@ static ncclResult_t ceCollTaskAppend(
     struct ncclDevrWindow* recvWin,
     struct ncclDevRedOpFull opDev) {
   struct ncclKernelPlanner *planner = &comm->planner;
-  
+
   // Check if CE needs initialization
   if (comm->ceColl.baseUCSymReadyPtr == NULL && ncclIntruQueueEmpty(&comm->ceInitTaskQueue)) {
     struct ncclCeInitTask* ceTask;
@@ -2982,7 +3010,7 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       ncclDevrFindWindow(comm, info->sendbuff, &sendWin);
       ncclDevrFindWindow(comm, info->recvbuff, &recvWin);
       bool ceImplemented = ncclCeImplemented(info->coll, info->op, info->datatype);
-      
+
       // Append CE collective task if CE is supported and requested by user
       if (comm->symmetricSupport && comm->nNodes == 1 && sendWin && recvWin && (sendWin->winFlags & recvWin->winFlags & NCCL_WIN_COLL_SYMMETRIC) && comm->config.CTAPolicy == NCCL_CTA_POLICY_ZERO && ceImplemented) {
         NCCLCHECK(ceCollTaskAppend(comm, info, sendWin, recvWin, opDev));

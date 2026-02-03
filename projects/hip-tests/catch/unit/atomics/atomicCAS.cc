@@ -31,11 +31,49 @@ THE SOFTWARE.
  * @ingroup AtomicsTest
  */
 
-#ifdef HT_NVIDIA
-#define TYPES
-#else
-#define TYPES , float, double
-#endif
+// Helper function to run atomicCAS tests (single kernel)
+template <typename TestType> static void runAtomicCASTest() {
+  int warp_size = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+  const auto cache_line_size = 128u;
+
+  for (auto current = 0; current < cmd_options.iterations; ++current) {
+    DYNAMIC_SECTION("Same address " << current) {
+      SingleDeviceSingleKernelTest<TestType, AtomicOperation::kCASAdd>(1, sizeof(TestType));
+    }
+
+    DYNAMIC_SECTION("Adjacent addresses " << current) {
+      SingleDeviceSingleKernelTest<TestType, AtomicOperation::kCASAdd>(warp_size, sizeof(TestType));
+    }
+
+    DYNAMIC_SECTION("Scattered addresses " << current) {
+      SingleDeviceSingleKernelTest<TestType, AtomicOperation::kCASAdd>(warp_size, cache_line_size);
+    }
+  }
+}
+
+// Helper function to run atomicCAS tests (multiple kernels)
+template <typename TestType> static void runAtomicCASMultiKernelTest() {
+  int warp_size = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+  const auto cache_line_size = 128u;
+
+  for (auto current = 0; current < cmd_options.iterations; ++current) {
+    DYNAMIC_SECTION("Same address " << current) {
+      SingleDeviceMultipleKernelTest<TestType, AtomicOperation::kCASAdd>(2, 1, sizeof(TestType));
+    }
+
+    DYNAMIC_SECTION("Adjacent addresses " << current) {
+      SingleDeviceMultipleKernelTest<TestType, AtomicOperation::kCASAdd>(2, warp_size,
+                                                                         sizeof(TestType));
+    }
+
+    DYNAMIC_SECTION("Scattered addresses " << current) {
+      SingleDeviceMultipleKernelTest<TestType, AtomicOperation::kCASAdd>(2, warp_size,
+                                                                         cache_line_size);
+    }
+  }
+}
 
 /**
  * Test Description
@@ -62,25 +100,15 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_atomicCAS_Positive", "", int, unsigned int, unsigned long long,
-                   unsigned short int TYPES) {
-  int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
-  const auto cache_line_size = 128u;
-
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
-    DYNAMIC_SECTION("Same address " << current) {
-      SingleDeviceSingleKernelTest<TestType, AtomicOperation::kCASAdd>(1, sizeof(TestType));
-    }
-
-    DYNAMIC_SECTION("Adjacent addresses " << current) {
-      SingleDeviceSingleKernelTest<TestType, AtomicOperation::kCASAdd>(warp_size, sizeof(TestType));
-    }
-
-    DYNAMIC_SECTION("Scattered addresses " << current) {
-      SingleDeviceSingleKernelTest<TestType, AtomicOperation::kCASAdd>(warp_size, cache_line_size);
-    }
-  }
+TEST_CASE("Unit_atomicCAS_Positive") {
+  SECTION("int") { runAtomicCASTest<int>(); }
+  SECTION("unsigned int") { runAtomicCASTest<unsigned int>(); }
+  SECTION("unsigned long long") { runAtomicCASTest<unsigned long long>(); }
+  SECTION("unsigned short int") { runAtomicCASTest<unsigned short int>(); }
+#ifndef HT_NVIDIA
+  SECTION("float") { runAtomicCASTest<float>(); }
+  SECTION("double") { runAtomicCASTest<double>(); }
+#endif
 }
 
 /**
@@ -107,27 +135,15 @@ TEMPLATE_TEST_CASE("Unit_atomicCAS_Positive", "", int, unsigned int, unsigned lo
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_atomicCAS_Positive_Multi_Kernel", "", int, unsigned int,
-                   unsigned long long, unsigned short int TYPES) {
-  int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
-  const auto cache_line_size = 128u;
-
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
-    DYNAMIC_SECTION("Same address " << current) {
-      SingleDeviceMultipleKernelTest<TestType, AtomicOperation::kCASAdd>(2, 1, sizeof(TestType));
-    }
-
-    DYNAMIC_SECTION("Adjacent addresses " << current) {
-      SingleDeviceMultipleKernelTest<TestType, AtomicOperation::kCASAdd>(2, warp_size,
-                                                                         sizeof(TestType));
-    }
-
-    DYNAMIC_SECTION("Scattered addresses " << current) {
-      SingleDeviceMultipleKernelTest<TestType, AtomicOperation::kCASAdd>(2, warp_size,
-                                                                         cache_line_size);
-    }
-  }
+TEST_CASE("Unit_atomicCAS_Positive_Multi_Kernel") {
+  SECTION("int") { runAtomicCASMultiKernelTest<int>(); }
+  SECTION("unsigned int") { runAtomicCASMultiKernelTest<unsigned int>(); }
+  SECTION("unsigned long long") { runAtomicCASMultiKernelTest<unsigned long long>(); }
+  SECTION("unsigned short int") { runAtomicCASMultiKernelTest<unsigned short int>(); }
+#ifndef HT_NVIDIA
+  SECTION("float") { runAtomicCASMultiKernelTest<float>(); }
+  SECTION("double") { runAtomicCASMultiKernelTest<double>(); }
+#endif
 }
 
 /**

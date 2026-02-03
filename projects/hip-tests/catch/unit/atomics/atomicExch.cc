@@ -29,6 +29,62 @@ THE SOFTWARE.
  * @ingroup AtomicsTest
  */
 
+// Helper function to run atomicExch tests for same address (compile time)
+template <typename TestType> static void runAtomicExchSameAddressCompileTimeTest() {
+  for (auto current = 0; current < cmd_options.iterations; ++current) {
+    DYNAMIC_SECTION("Positive Same Address" << current) {
+      AtomicExchSameAddressTest<TestType, AtomicScopes::device>();
+    }
+  }
+}
+
+// Helper function to run atomicExch tests (single kernel)
+template <typename TestType> static void runAtomicExchTest() {
+  int warp_size = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+  const auto cache_line_size = 128u;
+
+  for (auto current = 0; current < cmd_options.iterations; ++current) {
+    DYNAMIC_SECTION("Same address " << current) {
+      AtomicExchSingleDeviceSingleKernelTest<TestType, AtomicScopes::device>(1, sizeof(TestType));
+    }
+
+    DYNAMIC_SECTION("Adjacent addresses " << current) {
+      AtomicExchSingleDeviceSingleKernelTest<TestType, AtomicScopes::device>(warp_size,
+                                                                             sizeof(TestType));
+    }
+
+    DYNAMIC_SECTION("Scattered addresses " << current) {
+      AtomicExchSingleDeviceSingleKernelTest<TestType, AtomicScopes::device>(warp_size,
+                                                                             cache_line_size);
+    }
+  }
+}
+
+// Helper function to run atomicExch tests (multi kernel)
+template <typename TestType> static void runAtomicExchMultiKernelTest() {
+  int warp_size = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+  const auto cache_line_size = 128u;
+
+  for (auto current = 0; current < cmd_options.iterations; ++current) {
+    DYNAMIC_SECTION("Same address " << current) {
+      AtomicExchSingleDeviceMultipleKernelTest<TestType, AtomicScopes::device>(2, 1,
+                                                                               sizeof(TestType));
+    }
+
+    DYNAMIC_SECTION("Adjacent addresses " << current) {
+      AtomicExchSingleDeviceMultipleKernelTest<TestType, AtomicScopes::device>(2, warp_size,
+                                                                               sizeof(TestType));
+    }
+
+    DYNAMIC_SECTION("Scattered addresses " << current) {
+      AtomicExchSingleDeviceMultipleKernelTest<TestType, AtomicScopes::device>(2, warp_size,
+                                                                               cache_line_size);
+    }
+  }
+}
+
 /**
  * Test Description
  * ------------------------
@@ -50,18 +106,17 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-#if HT_NVIDIA
-TEMPLATE_TEST_CASE("Unit_atomicExch_Positive_Same_Address_Compile_Time", "", int, unsigned int,
-                   unsigned long long, float) {
-#else
-TEMPLATE_TEST_CASE("Unit_atomicExch_Positive_Same_Address_Compile_Time", "", int, unsigned int,
-                   unsigned long, unsigned long long, float, double) {
-#endif  // HT_NVIDIA
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
-    DYNAMIC_SECTION("Positive Same Address" << current) {
-      AtomicExchSameAddressTest<TestType, AtomicScopes::device>();
-    }
-  }
+TEST_CASE("Unit_atomicExch_Positive_Same_Address_Compile_Time") {
+  SECTION("int") { runAtomicExchSameAddressCompileTimeTest<int>(); }
+  SECTION("unsigned int") { runAtomicExchSameAddressCompileTimeTest<unsigned int>(); }
+#ifndef HT_NVIDIA
+  SECTION("unsigned long") { runAtomicExchSameAddressCompileTimeTest<unsigned long>(); }
+#endif
+  SECTION("unsigned long long") { runAtomicExchSameAddressCompileTimeTest<unsigned long long>(); }
+  SECTION("float") { runAtomicExchSameAddressCompileTimeTest<float>(); }
+#ifndef HT_NVIDIA
+  SECTION("double") { runAtomicExchSameAddressCompileTimeTest<double>(); }
+#endif
 }
 
 /**
@@ -90,31 +145,17 @@ TEMPLATE_TEST_CASE("Unit_atomicExch_Positive_Same_Address_Compile_Time", "", int
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-#if HT_NVIDIA
-TEMPLATE_TEST_CASE("Unit_atomicExch_Positive", "", int, unsigned int, unsigned long long, float) {
-#else
-TEMPLATE_TEST_CASE("Unit_atomicExch_Positive", "", int, unsigned int, unsigned long,
-                   unsigned long long, float, double) {
-#endif  // HT_NVIDIA
-  int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
-  const auto cache_line_size = 128u;
-
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
-    DYNAMIC_SECTION("Same address " << current) {
-      AtomicExchSingleDeviceSingleKernelTest<TestType, AtomicScopes::device>(1, sizeof(TestType));
-    }
-
-    DYNAMIC_SECTION("Adjacent addresses " << current) {
-      AtomicExchSingleDeviceSingleKernelTest<TestType, AtomicScopes::device>(warp_size,
-                                                                             sizeof(TestType));
-    }
-
-    DYNAMIC_SECTION("Scattered addresses " << current) {
-      AtomicExchSingleDeviceSingleKernelTest<TestType, AtomicScopes::device>(warp_size,
-                                                                             cache_line_size);
-    }
-  }
+TEST_CASE("Unit_atomicExch_Positive") {
+  SECTION("int") { runAtomicExchTest<int>(); }
+  SECTION("unsigned int") { runAtomicExchTest<unsigned int>(); }
+#ifndef HT_NVIDIA
+  SECTION("unsigned long") { runAtomicExchTest<unsigned long>(); }
+#endif
+  SECTION("unsigned long long") { runAtomicExchTest<unsigned long long>(); }
+  SECTION("float") { runAtomicExchTest<float>(); }
+#ifndef HT_NVIDIA
+  SECTION("double") { runAtomicExchTest<double>(); }
+#endif
 }
 
 /**
@@ -142,33 +183,17 @@ TEMPLATE_TEST_CASE("Unit_atomicExch_Positive", "", int, unsigned int, unsigned l
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-#if HT_NVIDIA
-TEMPLATE_TEST_CASE("Unit_atomicExch_Positive_Multi_Kernel", "", int, unsigned int,
-                   unsigned long long, float) {
-#else
-TEMPLATE_TEST_CASE("Unit_atomicExch_Positive_Multi_Kernel", "", int, unsigned int, unsigned long,
-                   unsigned long long, float, double) {
-#endif  // HT_NVIDIA
-  int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
-  const auto cache_line_size = 128u;
-
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
-    DYNAMIC_SECTION("Same address " << current) {
-      AtomicExchSingleDeviceMultipleKernelTest<TestType, AtomicScopes::device>(2, 1,
-                                                                               sizeof(TestType));
-    }
-
-    DYNAMIC_SECTION("Adjacent addresses " << current) {
-      AtomicExchSingleDeviceMultipleKernelTest<TestType, AtomicScopes::device>(2, warp_size,
-                                                                               sizeof(TestType));
-    }
-
-    DYNAMIC_SECTION("Scattered addresses " << current) {
-      AtomicExchSingleDeviceMultipleKernelTest<TestType, AtomicScopes::device>(2, warp_size,
-                                                                               cache_line_size);
-    }
-  }
+TEST_CASE("Unit_atomicExch_Positive_Multi_Kernel") {
+  SECTION("int") { runAtomicExchMultiKernelTest<int>(); }
+  SECTION("unsigned int") { runAtomicExchMultiKernelTest<unsigned int>(); }
+#ifndef HT_NVIDIA
+  SECTION("unsigned long") { runAtomicExchMultiKernelTest<unsigned long>(); }
+#endif
+  SECTION("unsigned long long") { runAtomicExchMultiKernelTest<unsigned long long>(); }
+  SECTION("float") { runAtomicExchMultiKernelTest<float>(); }
+#ifndef HT_NVIDIA
+  SECTION("double") { runAtomicExchMultiKernelTest<double>(); }
+#endif
 }
 
 /**
