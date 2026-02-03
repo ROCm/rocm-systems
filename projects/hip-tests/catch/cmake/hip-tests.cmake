@@ -66,8 +66,8 @@ function(hip_gen_exe_target)
     endif()
 
     # Create shared lib of all tests
-    set_source_files_properties(${SRC_NAME} PROPERTIES LANGUAGE HIP)
-    set_source_files_properties(${COMMON_SHARED_SRC} PROPERTIES LANGUAGE HIP)
+    set_source_files_properties(${SRC_NAME} PROPERTIES LANGUAGE ${GPGPU_LANGUAGE})
+    set_source_files_properties(${COMMON_SHARED_SRC} PROPERTIES LANGUAGE ${GPGPU_LANGUAGE})
     if(NOT RTC_TESTING)
       add_executable(${_EXE_NAME} EXCLUDE_FROM_ALL ${SRC_NAME} ${COMMON_SHARED_SRC} $<TARGET_OBJECTS:Main_Object> $<TARGET_OBJECTS:KERNELS>)
     else ()
