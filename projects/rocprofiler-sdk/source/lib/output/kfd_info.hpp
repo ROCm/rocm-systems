@@ -44,13 +44,6 @@ struct tool_buffer_tracing_kfd_record_t
         record;
 };
 
-template <typename ArchiveT>
-void
-save(ArchiveT& ar, const ::rocprofiler::tool::tool_buffer_tracing_kfd_record_t& data)
-{
-    std::visit([&ar](const auto record) { cereal::save(ar, record); }, data.record);
-}
-
 static auto
 agent_node_id(const metadata& tool_metadata, const rocprofiler_agent_id_t& agent)
 {
@@ -309,6 +302,13 @@ namespace cereal
 {
 #define SAVE_DATA_FIELD(FIELD) ar(cereal::make_nvp(#FIELD, rec.FIELD))
 #define LOAD_DATA_FIELD(FIELD) ar(cereal::make_nvp(#FIELD, rec.FIELD))
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, const ::rocprofiler::tool::tool_buffer_tracing_kfd_record_t& data)
+{
+    std::visit([&ar](const auto record) { cereal::save(ar, record); }, data.record);
+}
 
 template <typename ArchiveT>
 void
