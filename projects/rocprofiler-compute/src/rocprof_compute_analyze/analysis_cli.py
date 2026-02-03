@@ -26,7 +26,7 @@
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from utils import file_io, parser, tty
 from utils.kernel_name_shortener import kernel_name_shortener
-from utils.logger import console_error, demarcate
+from utils.logger import console_error, console_log, demarcate
 
 
 class cli_analysis(OmniAnalyze_Base):
@@ -104,16 +104,16 @@ class cli_analysis(OmniAnalyze_Base):
             if not workload.filter_torch_operators:
                 console_error(
                     "No torch operators found in the profiling data. "
-                    "Please ensure that profile mode is run with '--torch-trace' and"
-                    " analyze mode is run with '--list-torch-operators' flag"
-                    " before using '--torch-operator'."
+                    'Please ensure that workload is profiled with "--torch-trace" option'
+                    ' and analyze mode is run with "--list-torch-operators" option'
+                    ' before using "--torch-operator" in analyze mode.'
                 )
             for op in workload.filter_torch_operators:
                 df = workload.torch_operators.get(op)
                 if df is not None:
                     tty.show_torch_operator_hierarchy(op, df)
                 else:
-                    print(f"No data for operator: {op}")
+                    console_log(f"No data for operator: {op}")
 
         if args.list_stats:
             tty.show_kernel_stats(
