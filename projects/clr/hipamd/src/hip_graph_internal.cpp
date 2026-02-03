@@ -811,8 +811,8 @@ hipError_t GraphExec::CreateStreams(uint32_t num_streams, int devId) {
                                   hipStreamNonBlocking);
 
     if (!stream->Create()) {
-      ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "[hipGraph] Failed to %s stream %u for device %d",
-              stream == nullptr ? "allocate" : "create", i, devId);
+      ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "[hipGraph] Failed to create stream %u for device %d",
+              i, devId);
       hip::Stream::Destroy(stream);
       // Clean up any previously created streams for this device
       for (auto& created_stream : parallel_streams_[devId]) {
