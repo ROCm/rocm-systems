@@ -132,10 +132,11 @@ public:
 
     const std::optional<py::function>& python_callback() const { return python_callback_; }
 
-private:
-    rocprofiler_context_id_t ctx_    = {};
-    rocprofiler_buffer_id_t  buffer_ = {};
+    // Static session pointer for callbacks (public for access from free functions)
+    static ProfilerSession* s_active_session_;
+    static std::mutex       s_session_mutex_;
 
+private:
     std::unique_ptr<CounterConfigManager> config_manager_;
     std::unique_ptr<RecordCollector>      record_collector_;
     KernelSymbolResolver                  kernel_resolver_;
@@ -144,23 +145,6 @@ private:
     bool                        per_kernel_ = true;
     std::optional<py::function> python_callback_;
     bool                        started_ = false;
-
-    // Static session pointer for callbacks
-    static ProfilerSession* s_active_session_;
-    static std::mutex       s_session_mutex_;
-
-    // Friend declarations for callback functions
-    friend void dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
-                                  rocprofiler_counter_config_id_t*             config,
-                                  rocprofiler_user_data_t*                     user_data,
-                                  void*                                        callback_data_args);
-
-    friend void buffered_callback(rocprofiler_context_id_t      context,
-                                  rocprofiler_buffer_id_t       buffer_id,
-                                  rocprofiler_record_header_t** headers,
-                                  size_t                        num_headers,
-                                  void*                         user_data,
-                                  uint64_t                      drop_count);
 };
 
 /**

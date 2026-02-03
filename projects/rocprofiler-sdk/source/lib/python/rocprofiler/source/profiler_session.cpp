@@ -30,6 +30,7 @@
 #include <rocprofiler-sdk/registration.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
+#include <atomic>
 #include <cstring>
 #include <iostream>
 #include <mutex>
@@ -47,6 +48,14 @@ std::mutex       ProfilerSession::s_session_mutex_;
 static rocprofiler_client_id_t* g_client_id      = nullptr;
 static bool                     g_tool_init_done = false;
 static std::once_flag           g_init_flag;
+
+// Global state for pre-created context (must be created during tool_init)
+static rocprofiler_context_id_t      g_context          = {};
+static rocprofiler_buffer_id_t       g_buffer           = {};
+static rocprofiler_callback_thread_t g_callback_thread  = {};
+static bool                          g_context_created  = false;
+static std::atomic<bool>             g_profiling_active = false;
+static std::mutex                    g_context_mutex;
 
 // Kernel symbol resolver implementation
 void
@@ -71,7 +80,21 @@ dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
                   rocprofiler_user_data_t*                     user_data,
                   void*                                        callback_data_args)
 {
-    auto* session = static_cast<ProfilerSession*>(callback_data_args);
+    (void) callback_data_args;
+
+    // Only collect counters when profiling is active
+    if(!g_profiling_active.load(std::memory_order_acquire))
+    {
+        return;
+    }
+
+    // Get the active session under lock
+    ProfilerSession* session = nullptr;
+    {
+        std::lock_guard lock(ProfilerSession::s_session_mutex_);
+        session = ProfilerSession::s_active_session_;
+    }
+
     if(!session) return;
 
     try
@@ -100,8 +123,15 @@ buffered_callback(rocprofiler_context_id_t      context,
     (void) context;
     (void) buffer_id;
     (void) drop_count;
+    (void) user_data;
 
-    auto* session = static_cast<ProfilerSession*>(user_data);
+    // Get the active session under lock
+    ProfilerSession* session = nullptr;
+    {
+        std::lock_guard lock(ProfilerSession::s_session_mutex_);
+        session = ProfilerSession::s_active_session_;
+    }
+
     if(!session) return;
 
     for(size_t i = 0; i < num_headers; ++i)
@@ -157,7 +187,73 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
     (void) fini_func;
     (void) tool_data;
 
-    g_tool_init_done = true;
+    std::lock_guard lock(g_context_mutex);
+
+    // Create context
+    auto status = rocprofiler_create_context(&g_context);
+    if(status != ROCPROFILER_STATUS_SUCCESS)
+    {
+        std::cerr << "[rocprofiler-python] Failed to create context: "
+                  << rocprofiler_get_status_string(status) << std::endl;
+        return 1;
+    }
+
+    // Create buffer
+    status = rocprofiler_create_buffer(g_context,
+                                       4096,  // buffer size
+                                       2048,  // watermark
+                                       ROCPROFILER_BUFFER_POLICY_LOSSLESS,
+                                       buffered_callback,
+                                       nullptr,  // user_data - we use global session pointer
+                                       &g_buffer);
+
+    if(status != ROCPROFILER_STATUS_SUCCESS)
+    {
+        std::cerr << "[rocprofiler-python] Failed to create buffer: "
+                  << rocprofiler_get_status_string(status) << std::endl;
+        return 1;
+    }
+
+    // Create callback thread
+    status = rocprofiler_create_callback_thread(&g_callback_thread);
+    if(status != ROCPROFILER_STATUS_SUCCESS)
+    {
+        std::cerr << "[rocprofiler-python] Failed to create callback thread: "
+                  << rocprofiler_get_status_string(status) << std::endl;
+        return 1;
+    }
+
+    // Assign callback thread to buffer
+    status = rocprofiler_assign_callback_thread(g_buffer, g_callback_thread);
+    if(status != ROCPROFILER_STATUS_SUCCESS)
+    {
+        std::cerr << "[rocprofiler-python] Failed to assign callback thread: "
+                  << rocprofiler_get_status_string(status) << std::endl;
+        return 1;
+    }
+
+    // Configure dispatch counting service
+    status = rocprofiler_configure_buffer_dispatch_counting_service(
+        g_context, g_buffer, dispatch_callback, nullptr);
+
+    if(status != ROCPROFILER_STATUS_SUCCESS)
+    {
+        std::cerr << "[rocprofiler-python] Failed to configure dispatch counting service: "
+                  << rocprofiler_get_status_string(status) << std::endl;
+        return 1;
+    }
+
+    // Start the context (it will be controlled via g_profiling_active flag)
+    status = rocprofiler_start_context(g_context);
+    if(status != ROCPROFILER_STATUS_SUCCESS)
+    {
+        std::cerr << "[rocprofiler-python] Failed to start context: "
+                  << rocprofiler_get_status_string(status) << std::endl;
+        return 1;
+    }
+
+    g_context_created = true;
+    g_tool_init_done  = true;
     return 0;
 }
 
@@ -166,6 +262,29 @@ void
 tool_fini(void* tool_data)
 {
     (void) tool_data;
+
+    std::lock_guard lock(g_context_mutex);
+
+    if(g_context_created)
+    {
+        // Flush any remaining records
+        if(g_buffer.handle != 0)
+        {
+            rocprofiler_flush_buffer(g_buffer);
+        }
+
+        // Stop context
+        rocprofiler_stop_context(g_context);
+
+        // Destroy buffer
+        if(g_buffer.handle != 0)
+        {
+            rocprofiler_destroy_buffer(g_buffer);
+            g_buffer = {};
+        }
+
+        g_context_created = false;
+    }
 }
 
 // rocprofiler_configure implementation for force_configure
@@ -263,44 +382,11 @@ ProfilerSession::start()
         throw std::runtime_error("Another profiling session is already active");
     }
 
-    // Create context
-    auto status = rocprofiler_create_context(&ctx_);
-    if(status != ROCPROFILER_STATUS_SUCCESS)
+    // Check that the global context was created during tool_init
+    if(!g_context_created)
     {
-        throw std::runtime_error("Failed to create context: " +
-                                 std::string(rocprofiler_get_status_string(status)));
-    }
-
-    // Create buffer
-    status = rocprofiler_create_buffer(ctx_,
-                                       4096,  // buffer size
-                                       2048,  // watermark
-                                       ROCPROFILER_BUFFER_POLICY_LOSSLESS,
-                                       buffered_callback,
-                                       this,
-                                       &buffer_);
-
-    if(status != ROCPROFILER_STATUS_SUCCESS)
-    {
-        throw std::runtime_error("Failed to create buffer: " +
-                                 std::string(rocprofiler_get_status_string(status)));
-    }
-
-    // Create callback thread
-    rocprofiler_callback_thread_t client_thread = {};
-    status = rocprofiler_create_callback_thread(&client_thread);
-    if(status != ROCPROFILER_STATUS_SUCCESS)
-    {
-        throw std::runtime_error("Failed to create callback thread: " +
-                                 std::string(rocprofiler_get_status_string(status)));
-    }
-
-    // Assign callback thread to buffer
-    status = rocprofiler_assign_callback_thread(buffer_, client_thread);
-    if(status != ROCPROFILER_STATUS_SUCCESS)
-    {
-        throw std::runtime_error("Failed to assign callback thread: " +
-                                 std::string(rocprofiler_get_status_string(status)));
+        throw std::runtime_error(
+            "rocprofiler context not initialized. Ensure rocprofiler was properly initialized.");
     }
 
     // Pre-build counter configs for all GPU agents
@@ -318,26 +404,13 @@ ProfilerSession::start()
         }
     }
 
-    // Configure dispatch counting service
-    status = rocprofiler_configure_buffer_dispatch_counting_service(
-        ctx_, buffer_, dispatch_callback, this);
+    // Clear any previous records
+    record_collector_->clear();
 
-    if(status != ROCPROFILER_STATUS_SUCCESS)
-    {
-        throw std::runtime_error("Failed to configure dispatch counting service: " +
-                                 std::string(rocprofiler_get_status_string(status)));
-    }
-
-    // Start the context
-    status = rocprofiler_start_context(ctx_);
-    if(status != ROCPROFILER_STATUS_SUCCESS)
-    {
-        throw std::runtime_error("Failed to start context: " +
-                                 std::string(rocprofiler_get_status_string(status)));
-    }
-
+    // Set this session as active and enable profiling
     s_active_session_ = this;
     started_          = true;
+    g_profiling_active.store(true, std::memory_order_release);
 }
 
 void
@@ -350,20 +423,16 @@ ProfilerSession::stop()
 
     std::lock_guard lock(s_session_mutex_);
 
-    // Stop the context
-    rocprofiler_stop_context(ctx_);
+    // Disable profiling first (prevents new dispatches from being collected)
+    g_profiling_active.store(false, std::memory_order_release);
 
-    // Flush the buffer to get remaining records
-    rocprofiler_flush_buffer(buffer_);
-
-    // Destroy the buffer
-    if(buffer_.handle != 0)
+    // Flush the global buffer to get remaining records
+    if(g_buffer.handle != 0)
     {
-        rocprofiler_destroy_buffer(buffer_);
-        buffer_ = {};
+        rocprofiler_flush_buffer(g_buffer);
     }
 
-    // Destroy counter configs
+    // Destroy counter configs for this session
     config_manager_->destroy_all_configs();
 
     s_active_session_ = nullptr;
