@@ -3264,6 +3264,52 @@ def test_multi_rank_profiling_no_mpi_comm(binary_handler_profile_rocprof_compute
         assert rank_dir.exists(), f"Rank directory {rank_dir} does not exist"
 
         file_dict = test_utils.check_csv_files(str(rank_dir), num_devices, num_kernels)
+        if soc == "MI100":
+            assert sorted(list(file_dict.keys())) == CSVS
+        elif soc == "MI200":
+            assert sorted(list(file_dict.keys())) == CSVS
+        elif "MI300" in soc:
+            assert sorted(list(file_dict.keys())) == CSVS
+        elif "MI350" in soc:
+            assert sorted(list(file_dict.keys())) == CSVS
+        else:
+            print(f"Testing isn't supported yet for {soc}")
+            assert 0
+
+        validate(
+            inspect.stack()[0][3],
+            str(rank_dir),
+            file_dict,
+        )
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.multi_rank
+def test_multi_rank_profiling_mpi_comm(
+    binary_handler_profile_rocprof_compute,
+):
+    """
+    Test multi-rank profiling of an MPI application.
+
+    The fixture launches the profiling command with mpirun.
+    """
+    num_ranks = 2
+
+    workload_dir = test_utils.get_output_dir()
+
+    options = ["--iteration-multiplexing"]
+
+    binary_handler_profile_rocprof_compute(
+        config, workload_dir, options, app_name="app_mpi_aware_laplace_eqn", num_ranks=2
+    )
+
+    # Check output for each rank
+    for rank in range(num_ranks):
+        rank_dir = Path(workload_dir) / str(rank)
+        assert rank_dir.exists(), f"Rank directory {rank_dir} does not exist"
+
+        file_dict = test_utils.check_csv_files(str(rank_dir), num_devices, num_kernels)
 
         if soc == "MI100":
             assert sorted(list(file_dict.keys())) == CSVS
