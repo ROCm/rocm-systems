@@ -158,12 +158,12 @@ def parse_rank_specification(rank_spec):
     if not rank_spec:
         return ranks
 
-    for part in rank_spec.split(','):
+    for part in rank_spec.split(","):
         part = part.strip()
-        if '-' in part:
+        if "-" in part:
             # Handle range
             try:
-                start, end = part.split('-')
+                start, end = part.split("-")
                 start = int(start.strip())
                 end = int(end.strip())
                 if start > end:
@@ -1246,7 +1246,7 @@ def run(app_args, args, **kwargs):
 
     # Check if this MPI rank should provide profile/trace output
     # If not, run the application without profiling instrumentation
-    if hasattr(args, 'mpi_ranks') and args.mpi_ranks is not None:
+    if hasattr(args, "mpi_ranks") and args.mpi_ranks is not None:
         if not should_rank_provide_output(args.mpi_ranks):
             current_rank = get_mpi_rank()
             if current_rank is not None and args.log_level in ("info", "trace"):

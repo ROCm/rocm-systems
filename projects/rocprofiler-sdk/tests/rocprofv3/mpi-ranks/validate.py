@@ -35,26 +35,10 @@ def get_gpu_node_count():
     Detect the number of GPU nodes/agents available in the system.
     Returns the count of GPU nodes, or None if detection fails.
     """
-    # try:
-    #     # Method 1: Try using rocm-smi to count GPUs
-    #     result = subprocess.run(
-    #         ['rocm-smi', '--showid'],
-    #         capture_output=True,
-    #         text=True,
-    #         timeout=5
-    #     )
-    #     if result.returncode == 0:
-    #         # Count lines that contain "GPU[" to get GPU count
-    #         gpu_count = result.stdout.count('GPU[')
-    #         if gpu_count > 0:
-    #             return gpu_count
-    # except (FileNotFoundError, subprocess.TimeoutExpired):
-    #     pass
-
     try:
         # Method 2: Check /sys/class/kfd/kfd/topology/nodes/ for GPU nodes
         # This follows the logic from rocprofiler-sdk/source/lib/rocprofiler-sdk/agent.cpp
-        nodes_path = '/sys/class/kfd/kfd/topology/nodes'
+        nodes_path = "/sys/class/kfd/kfd/topology/nodes"
         if os.path.exists(nodes_path):
             gpu_count = 0
             node_id = 0
@@ -65,10 +49,12 @@ def get_gpu_node_count():
                 if not os.path.exists(node_path):
                     break
 
-                properties_file = os.path.join(node_path, 'properties')
-                if os.path.exists(properties_file) and os.access(properties_file, os.R_OK):
+                properties_file = os.path.join(node_path, "properties")
+                if os.path.exists(properties_file) and os.access(
+                    properties_file, os.R_OK
+                ):
                     try:
-                        with open(properties_file, 'r') as f:
+                        with open(properties_file, "r") as f:
                             content = f.read()
 
                         # Properties file must be non-empty
@@ -80,11 +66,11 @@ def get_gpu_node_count():
                         cpu_cores_count = 0
                         simd_count = 0
 
-                        for line in content.split('\n'):
+                        for line in content.split("\n"):
                             line = line.strip()
-                            if line.startswith('cpu_cores_count'):
+                            if line.startswith("cpu_cores_count"):
                                 cpu_cores_count = int(line.split()[1])
-                            elif line.startswith('simd_count'):
+                            elif line.startswith("simd_count"):
                                 simd_count = int(line.split()[1])
 
                         # A node is a GPU if cpu_cores_count == 0 AND simd_count > 0
@@ -112,7 +98,7 @@ def load_json_file(filepath):
     Returns the first valid JSON object found, or None if no valid JSON exists.
     """
     try:
-        with open(filepath, 'r') as f:
+        with open(filepath, "r") as f:
             content = f.read()
 
         # Try to load as a single JSON object first
@@ -175,17 +161,21 @@ def test_mpi_ranks_feature(output_dir, test_mode):
         # MPI test - only look in rank.* subdirectories
         json_files = []
         for rank_dir in glob.glob(os.path.join(output_dir, "rank.*")):
-            json_files.extend(glob.glob(os.path.join(rank_dir, "**/out_results.json"), recursive=True))
+            json_files.extend(
+                glob.glob(os.path.join(rank_dir, "**/out_results.json"), recursive=True)
+            )
     else:
         # Non-MPI test - look everywhere
-        json_files = glob.glob(os.path.join(output_dir, "**/out_results.json"), recursive=True)
+        json_files = glob.glob(
+            os.path.join(output_dir, "**/out_results.json"), recursive=True
+        )
 
     if test_mode == "with-mpi-single":
         # With --mpi-ranks 0 and 4 MPI ranks, only rank 0 should generate output in rank.0/
         # So we should have exactly 1 JSON file
-        assert len(json_files) == 1, (
-            f"Expected 1 JSON file for rank 0 only, but found {len(json_files)}: {json_files}"
-        )
+        assert (
+            len(json_files) == 1
+        ), f"Expected 1 JSON file for rank 0 only, but found {len(json_files)}: {json_files}"
 
         # Verify the file is from rank 0
         json_file = json_files[0]
@@ -199,8 +189,8 @@ def test_mpi_ranks_feature(output_dir, test_mode):
 
         # Should have some kernel or HIP API data
         has_data = (
-            len(buffer_records.get("kernel_dispatch", [])) > 0 or
-            len(buffer_records.get("hip_api", [])) > 0
+            len(buffer_records.get("kernel_dispatch", [])) > 0
+            or len(buffer_records.get("hip_api", [])) > 0
         )
         assert has_data, "No profiling data found in rank 0 output"
 
@@ -225,22 +215,24 @@ def test_mpi_ranks_feature(output_dir, test_mode):
             assert data is not None, f"Failed to load JSON from {json_file}"
 
             sdk_data = get_sdk_data(data)
-            assert sdk_data is not None, f"Missing rocprofiler-sdk-tool data in {json_file}"
+            assert (
+                sdk_data is not None
+            ), f"Missing rocprofiler-sdk-tool data in {json_file}"
             buffer_records = sdk_data.get("buffer_records", {})
 
             # Should have some kernel or HIP API data
             has_data = (
-                len(buffer_records.get("kernel_dispatch", [])) > 0 or
-                len(buffer_records.get("hip_api", [])) > 0
+                len(buffer_records.get("kernel_dispatch", [])) > 0
+                or len(buffer_records.get("hip_api", [])) > 0
             )
             assert has_data, f"No profiling data found in {json_file}"
 
     elif test_mode == "without-mpi":
         # Without MPI environment, --mpi-ranks should be ignored and output generated
         # We should have at least 1 JSON file
-        assert len(json_files) >= 1, (
-            f"Expected at least 1 JSON file for non-MPI run, but found {len(json_files)}: {json_files}"
-        )
+        assert (
+            len(json_files) >= 1
+        ), f"Expected at least 1 JSON file for non-MPI run, but found {len(json_files)}: {json_files}"
 
         # Verify the file has valid profiling data
         json_file = json_files[0]
@@ -253,8 +245,8 @@ def test_mpi_ranks_feature(output_dir, test_mode):
 
         # Should have some kernel or HIP API data
         has_data = (
-            len(buffer_records.get("kernel_dispatch", [])) > 0 or
-            len(buffer_records.get("hip_api", [])) > 0
+            len(buffer_records.get("kernel_dispatch", [])) > 0
+            or len(buffer_records.get("hip_api", [])) > 0
         )
         assert has_data, "No profiling data found in output"
 
@@ -274,16 +266,22 @@ def test_csv_output_consistency(output_dir, test_mode):
         # MPI test - only look in rank.* subdirectories
         csv_files = []
         for rank_dir in glob.glob(os.path.join(output_dir, "rank.*")):
-            csv_files.extend(glob.glob(os.path.join(rank_dir, "**/out_kernel_trace.csv"), recursive=True))
+            csv_files.extend(
+                glob.glob(
+                    os.path.join(rank_dir, "**/out_kernel_trace.csv"), recursive=True
+                )
+            )
     else:
         # Non-MPI test - look everywhere
-        csv_files = glob.glob(os.path.join(output_dir, "**/out_kernel_trace.csv"), recursive=True)
+        csv_files = glob.glob(
+            os.path.join(output_dir, "**/out_kernel_trace.csv"), recursive=True
+        )
 
     if test_mode == "with-mpi-single":
         # Only rank 0 should have CSV output
-        assert len(csv_files) == 1, (
-            f"Expected 1 CSV file for rank 0 only, but found {len(csv_files)}: {csv_files}"
-        )
+        assert (
+            len(csv_files) == 1
+        ), f"Expected 1 CSV file for rank 0 only, but found {len(csv_files)}: {csv_files}"
 
     elif test_mode == "with-mpi-multiple":
         # Each rank has separate output directory, so expect exactly 3 CSV files
@@ -295,9 +293,9 @@ def test_csv_output_consistency(output_dir, test_mode):
 
     elif test_mode == "without-mpi":
         # Non-MPI run should have CSV output
-        assert len(csv_files) >= 1, (
-            f"Expected at least 1 CSV file for non-MPI run, but found {len(csv_files)}: {csv_files}"
-        )
+        assert (
+            len(csv_files) >= 1
+        ), f"Expected at least 1 CSV file for non-MPI run, but found {len(csv_files)}: {csv_files}"
 
 
 def test_no_output_for_filtered_ranks(output_dir, test_mode):
@@ -315,17 +313,25 @@ def test_no_output_for_filtered_ranks(output_dir, test_mode):
 
     if os.path.exists(rank_2_dir):
         # Directory exists - check if it has any JSON files
-        json_files_in_rank_2 = glob.glob(os.path.join(rank_2_dir, "**/out_results.json"), recursive=True)
-        assert len(json_files_in_rank_2) == 0, (
-            f"Rank 2 should not generate output, but found {len(json_files_in_rank_2)} files: {json_files_in_rank_2}"
+        json_files_in_rank_2 = glob.glob(
+            os.path.join(rank_2_dir, "**/out_results.json"), recursive=True
         )
+        assert (
+            len(json_files_in_rank_2) == 0
+        ), f"Rank 2 should not generate output, but found {len(json_files_in_rank_2)} files: {json_files_in_rank_2}"
 
     # Verify that ranks 0, 1, and 3 directories exist with output
     for rank in [0, 1, 3]:
         rank_dir = os.path.join(output_dir, f"rank.{rank}")
-        assert os.path.exists(rank_dir), f"Expected directory for rank {rank} at {rank_dir}"
-        json_files = glob.glob(os.path.join(rank_dir, "**/out_results.json"), recursive=True)
-        assert len(json_files) >= 1, f"Expected output files for rank {rank} in {rank_dir}"
+        assert os.path.exists(
+            rank_dir
+        ), f"Expected directory for rank {rank} at {rank_dir}"
+        json_files = glob.glob(
+            os.path.join(rank_dir, "**/out_results.json"), recursive=True
+        )
+        assert (
+            len(json_files) >= 1
+        ), f"Expected output files for rank {rank} in {rank_dir}"
 
 
 if __name__ == "__main__":

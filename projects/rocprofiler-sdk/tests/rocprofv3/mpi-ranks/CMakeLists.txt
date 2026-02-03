@@ -23,19 +23,17 @@ find_program(MPIRUN_EXECUTABLE NAMES mpirun mpiexec)
 
 if(MPIRUN_EXECUTABLE)
     # Set OpenMPI environment variables for CI/root execution
-    set(MPI_ENV_VARS
-        OMPI_ALLOW_RUN_AS_ROOT=1
-        OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1)
+    set(MPI_ENV_VARS OMPI_ALLOW_RUN_AS_ROOT=1 OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1)
 
-    # Test with MPI - profile only rank 0 out of 4 ranks
-    # Use %env{OMPI_COMM_WORLD_RANK}% to create separate output directories per rank
+    # Test with MPI - profile only rank 0 out of 4 ranks Use %env{OMPI_COMM_WORLD_RANK}%
+    # to create separate output directories per rank
     rocprofiler_add_integration_execute_test(
         rocprofv3-test-mpi-ranks-with-mpi
         COMMAND
-            ${CMAKE_COMMAND} -E env ${MPI_ENV_VARS}
-            ${MPIRUN_EXECUTABLE} -n 4
+            ${CMAKE_COMMAND} -E env ${MPI_ENV_VARS} ${MPIRUN_EXECUTABLE} -n 4
             $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --hip-trace --kernel-trace
-            --output-format csv json -d ${CMAKE_CURRENT_BINARY_DIR}/mpi-ranks-trace/rank.%env{OMPI_COMM_WORLD_RANK}%
+            --output-format csv json -d
+            ${CMAKE_CURRENT_BINARY_DIR}/mpi-ranks-trace/rank.%env{OMPI_COMM_WORLD_RANK}%
             -o out --mpi-ranks 0 ${PRELOAD_ARGS} -- $<TARGET_FILE:simple-transpose>
         DEPENDS simple-transpose
         TIMEOUT 120
@@ -43,15 +41,15 @@ if(MPIRUN_EXECUTABLE)
         PRELOAD "${PRELOAD_ENV}"
         FIXTURES_SETUP rocprofv3-test-mpi-ranks-with-mpi)
 
-    # Test with MPI - profile ranks 0-1,3 out of 4 ranks
-    # Use %env{OMPI_COMM_WORLD_RANK}% to create separate output directories per rank
+    # Test with MPI - profile ranks 0-1,3 out of 4 ranks Use %env{OMPI_COMM_WORLD_RANK}%
+    # to create separate output directories per rank
     rocprofiler_add_integration_execute_test(
         rocprofv3-test-mpi-ranks-with-mpi-multiple
         COMMAND
-            ${CMAKE_COMMAND} -E env ${MPI_ENV_VARS}
-            ${MPIRUN_EXECUTABLE} -n 4
+            ${CMAKE_COMMAND} -E env ${MPI_ENV_VARS} ${MPIRUN_EXECUTABLE} -n 4
             $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --hip-trace --kernel-trace
-            --output-format csv json -d ${CMAKE_CURRENT_BINARY_DIR}/mpi-ranks-multiple-trace/rank.%env{OMPI_COMM_WORLD_RANK}%
+            --output-format csv json -d
+            ${CMAKE_CURRENT_BINARY_DIR}/mpi-ranks-multiple-trace/rank.%env{OMPI_COMM_WORLD_RANK}%
             -o out --mpi-ranks 0-1,3 ${PRELOAD_ARGS} -- $<TARGET_FILE:simple-transpose>
         DEPENDS simple-transpose
         TIMEOUT 120
@@ -64,8 +62,8 @@ if(MPIRUN_EXECUTABLE)
         TEST_PATHS validate.py
         COPY conftest.py
         CONFIG pytest.ini
-        ARGS --output-dir ${CMAKE_CURRENT_BINARY_DIR}/mpi-ranks-trace
-             --test-mode with-mpi-single
+        ARGS --output-dir ${CMAKE_CURRENT_BINARY_DIR}/mpi-ranks-trace --test-mode
+             with-mpi-single
         TIMEOUT 45
         LABELS "integration-tests" "mpi-tests"
         FIXTURES_REQUIRED rocprofv3-test-mpi-ranks-with-mpi)
@@ -75,8 +73,8 @@ if(MPIRUN_EXECUTABLE)
         TEST_PATHS validate.py
         COPY conftest.py
         CONFIG pytest.ini
-        ARGS --output-dir ${CMAKE_CURRENT_BINARY_DIR}/mpi-ranks-multiple-trace
-             --test-mode with-mpi-multiple
+        ARGS --output-dir ${CMAKE_CURRENT_BINARY_DIR}/mpi-ranks-multiple-trace --test-mode
+             with-mpi-multiple
         TIMEOUT 45
         LABELS "integration-tests" "mpi-tests"
         FIXTURES_REQUIRED rocprofv3-test-mpi-ranks-with-mpi-multiple)
@@ -87,8 +85,8 @@ rocprofiler_add_integration_execute_test(
     rocprofv3-test-mpi-ranks-without-mpi
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --hip-trace --kernel-trace
-        --output-format csv json -d ${CMAKE_CURRENT_BINARY_DIR}/no-mpi-trace
-        -o out --mpi-ranks 0 ${PRELOAD_ARGS} -- $<TARGET_FILE:simple-transpose>
+        --output-format csv json -d ${CMAKE_CURRENT_BINARY_DIR}/no-mpi-trace -o out
+        --mpi-ranks 0 ${PRELOAD_ARGS} -- $<TARGET_FILE:simple-transpose>
     DEPENDS simple-transpose
     TIMEOUT 120
     LABELS "integration-tests"
@@ -100,8 +98,7 @@ rocprofiler_add_integration_validate_test(
     TEST_PATHS validate.py
     COPY conftest.py
     CONFIG pytest.ini
-    ARGS --output-dir ${CMAKE_CURRENT_BINARY_DIR}/no-mpi-trace
-         --test-mode without-mpi
+    ARGS --output-dir ${CMAKE_CURRENT_BINARY_DIR}/no-mpi-trace --test-mode without-mpi
     TIMEOUT 45
     LABELS "integration-tests"
     FIXTURES_REQUIRED rocprofv3-test-mpi-ranks-without-mpi)
