@@ -63,3 +63,5 @@ foreach(SOURCE_FILE IN LISTS EXAMPLE_SOURCES)
       $<TARGET_NAME_IF_EXISTS:MPI::MPI_CXX>
   )
 endforeach()
+
+add_subdirectory(LL_MoE)
