@@ -27,6 +27,7 @@
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdbool.h>
 #include <dirent.h>
 #include <malloc.h>
 #include <string.h>
@@ -58,10 +59,44 @@
 #define KFD_SYSFS_PATH_SYSTEM_PROPERTIES "%s/system_properties"
 #define KFD_SYSFS_PATH_NODES "%s/nodes"
 
+/* Procfs topology support for per-process GPU partitioning */
+static char procfs_topology_path[128];
+static bool procfs_topology_checked = false;
+static bool procfs_topology_available = false;
+
+static bool check_procfs_topology_available(void)
+{
+	char path[128];
+	snprintf(path, sizeof(path), "/proc/kfd/%d/topology/nodes", getpid());
+	DIR *dir = opendir(path);
+	if (dir) {
+		closedir(dir);
+		snprintf(procfs_topology_path, sizeof(procfs_topology_path),
+			 "/proc/kfd/%d/topology", getpid());
+		return true;
+	}
+	return false;
+}
+
 static const char *get_topology_dir(void)
 {
+	/* Check for hsakmt model first */
 	if (hsakmt_use_model)
 		return hsakmt_model_topology;
+
+	/* Check for HSA_FORCE_SYSFS_TOPOLOGY env var */
+	if (getenv("HSA_FORCE_SYSFS_TOPOLOGY"))
+		return KFD_SYSFS_PATH;
+
+	/* Check for per-process procfs topology (only once) */
+	if (!procfs_topology_checked) {
+		procfs_topology_checked = true;
+		procfs_topology_available = check_procfs_topology_available();
+	}
+
+	if (procfs_topology_available)
+		return procfs_topology_path;
+
 	return KFD_SYSFS_PATH;
 }
 
