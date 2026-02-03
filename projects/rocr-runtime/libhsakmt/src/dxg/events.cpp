@@ -27,53 +27,68 @@
 #include <cassert>
 #include <thread>
 #include <chrono>
+#include "impl/wddm/device.h"
+#include "impl/wddm/event.h"
+#include "hsa-runtime/inc/amd_hsa_signal.h"
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtCreateEvent(HsaEventDescriptor *EventDesc,
                                           bool ManualReset, bool IsSignaled,
                                           HsaEvent **Event) {
   CHECK_DXG_OPEN();
-  pr_warn_once("not supported\n");
-  assert(false);
+  if (EventDesc->EventType >= HSA_EVENTTYPE_MAXID) {
+    return HSAKMT_STATUS_INVALID_PARAMETER;
+  }
+  // Allocate thunk HSA event
+  std::unique_ptr<wsl::thunk::Event> event(new wsl::thunk::Event());
+  if (!event) {
+    return HSAKMT_STATUS_ERROR;
+  }
+  // Initialize the HSA event class
+  if (!event->Init(*EventDesc)) {
+    return HSAKMT_STATUS_ERROR;
+  }
+
+  *Event = event.get();
+  event.release();
   return HSAKMT_STATUS_SUCCESS;
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtDestroyEvent(HsaEvent *Event) {
   CHECK_DXG_OPEN();
-  if (!Event)
+  if (Event == nullptr) {
     return HSAKMT_STATUS_SUCCESS;
-
-  pr_warn_once("not supported\n");
-  assert(false);
+  }
+  delete static_cast<wsl::thunk::Event*>(Event);
   return HSAKMT_STATUS_SUCCESS;
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtSetEvent(HsaEvent *Event) {
   CHECK_DXG_OPEN();
-  pr_warn_once("not supported\n");
-  if (!Event)
-    return HSAKMT_STATUS_INVALID_HANDLE;
+  if (Event == nullptr) {
+    return HSAKMT_STATUS_SUCCESS;
+  }
+  static_cast<wsl::thunk::Event*>(Event)->Set();
 
-  assert(false);
   return HSAKMT_STATUS_SUCCESS;
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtResetEvent(HsaEvent *Event) {
   CHECK_DXG_OPEN();
-  pr_warn_once("not supported\n");
-  if (!Event)
-    return HSAKMT_STATUS_INVALID_HANDLE;
+  if (Event == nullptr) {
+    return HSAKMT_STATUS_SUCCESS;
+  }
+  static_cast<wsl::thunk::Event*>(Event)->Reset();
 
-  assert(false);
   return HSAKMT_STATUS_SUCCESS;
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtQueryEventState(HsaEvent *Event) {
   CHECK_DXG_OPEN();
-  pr_warn_once("not supported\n");
-  if (!Event)
-    return HSAKMT_STATUS_INVALID_HANDLE;
+  if (Event == nullptr) {
+    return HSAKMT_STATUS_SUCCESS;
+  }
 
-  assert(false);
+
   return HSAKMT_STATUS_SUCCESS;
 }
 
@@ -106,22 +121,23 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtWaitOnMultipleEvents_Ext(HsaEvent *Events[],
                                                        HSAuint32 Milliseconds,
                                                        uint64_t *event_age) {
   CHECK_DXG_OPEN();
-
-  if (!Events)
-    return HSAKMT_STATUS_INVALID_HANDLE;
+  if (Events == nullptr) {
+    return HSAKMT_STATUS_SUCCESS;
+  }
 
   if (NumEvents == 1 && Events[0] == nullptr) {
     std::this_thread::sleep_for(std::chrono::microseconds(20));
     return HSAKMT_STATUS_SUCCESS;
   }
+  HSAKMT_STATUS status =
+      wsl::thunk::WDDMDevice::WaitOnMultipleEvents(Events, NumEvents, WaitOnAll, Milliseconds);
 
-  assert(false);
   return HSAKMT_STATUS_SUCCESS;
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtOpenSMI(HSAuint32 NodeId, int *fd) {
   CHECK_DXG_OPEN();
   pr_debug("node id %d\n", NodeId);
-  assert(false);
+
   return HSAKMT_STATUS_SUCCESS;
 }

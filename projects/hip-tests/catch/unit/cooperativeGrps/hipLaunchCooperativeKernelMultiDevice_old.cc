@@ -86,45 +86,48 @@ namespace cg = cooperative_groups;
 
 static constexpr size_t kBufferLen = 1024 * 1024;
 
-__global__ void test_gws(uint* buf, uint buf_size, long* tmp_buf, long* result) {
-  extern __shared__ long tmp[];
-  uint groups = gridDim.x;
-  uint group_id = blockIdx.x;
-  uint local_id = threadIdx.x;
-  uint chunk = gridDim.x * blockDim.x;
+__global__ void test_gws(uint* buf, uint buf_size, unsigned long long* tmp_buf,
+                         unsigned long long* result) {
+  extern __shared__ unsigned long long tmp[];
 
-  uint i = group_id * blockDim.x + local_id;
-  long sum = 0;
-  while (i < buf_size) {
+  cg::thread_block tb = cg::this_thread_block();
+  cg::grid_group gg = cg::this_grid();
+  cg::multi_grid_group mgg = cg::this_multi_grid();
+
+  const auto tid = gg.thread_rank();
+  const auto stride = gg.size();
+  const auto local_tid = tb.thread_rank();
+  const auto wid = blockIdx.x;
+  const auto workgroup_size = tb.size();
+  const auto gid = mgg.grid_rank();
+  const auto grid_size = gridDim.x;
+  const auto num_grids = mgg.num_grids();
+
+  unsigned long long sum = 0;
+  for (size_t i = tid; i < buf_size; i += stride) {
     sum += buf[i];
-    i += chunk;
   }
-  tmp[local_id] = sum;
-  __syncthreads();
-  i = 0;
-  if (local_id == 0) {
-    sum = 0;
-    while (i < blockDim.x) {
-      sum += tmp[i];
-      i++;
-    }
-    tmp_buf[group_id] = sum;
-  }
-  // wait
-  cg::this_grid().sync();
+  tmp[local_tid] = sum;
+  tb.sync();
 
-  if (((blockIdx.x * blockDim.x) + threadIdx.x) == 0) {
-    for (uint i = 1; i < groups; ++i) {
-      sum += tmp_buf[i];
-    }
-    //*result = sum;
-    result[1 + cg::this_multi_grid().grid_rank()] = sum;
-  }
-  cg::this_multi_grid().sync();
-  if (cg::this_multi_grid().grid_rank() == 0) {
+  if (local_tid == 0) {
     sum = 0;
-    for (uint i = 1; i <= cg::this_multi_grid().num_grids(); ++i) {
-      sum += result[i];
+    for (size_t i = 0; i < workgroup_size; i++) {
+      sum += tmp[i];
+    }
+    tmp_buf[wid] = sum;
+  }
+  gg.sync();
+
+  if (tid < grid_size) {
+    atomicAdd(&result[gid + 1], tmp_buf[tid]);
+  }
+  mgg.sync();
+
+  if (gid == 0) {
+    sum = 0;
+    for (size_t i = 0; i < num_grids; i++) {
+      sum += result[i + 1];
     }
     *result = sum;
   }
@@ -136,20 +139,7 @@ TEST_CASE("Unit_hipLaunchCooperativeKernelMultiDevice_Basic", "[multigpu]") {
   int device_num = 0;
   HIP_CHECK(hipGetDeviceCount(&device_num));
 
-  size_t buffer_size = kBufferLen * sizeof(int);
-
-  int* A_h = reinterpret_cast<int*>(malloc(buffer_size * device_num));
-  for (uint32_t i = 0; i < kBufferLen * device_num; ++i) {
-    A_h[i] = static_cast<int>(i);
-  }
-
-  std::vector<int*> A_d(device_num);
-  std::vector<long*> B_d(device_num);
-  long* C_d;
-  std::vector<hipStream_t> stream(device_num);
-
   std::vector<hipDeviceProp_t> device_properties(device_num);
-
   for (int i = 0; i < device_num; i++) {
     HIP_CHECK(hipSetDevice(i));
 
@@ -159,28 +149,39 @@ TEST_CASE("Unit_hipLaunchCooperativeKernelMultiDevice_Basic", "[multigpu]") {
       HipTest::HIP_SKIP_TEST("Device doesn't support cooperative launch!");
       return;
     }
+  }
+
+  size_t buffer_size = kBufferLen * sizeof(int);
+
+  int* A_h = nullptr;
+  std::vector<int*> A_d(device_num);
+  std::vector<unsigned long long*> B_d(device_num);
+  unsigned long long* C_d;
+  std::vector<hipStream_t> stream(device_num);
+
+  A_h = reinterpret_cast<int*>(malloc(buffer_size * device_num));
+  for (uint32_t i = 0; i < kBufferLen * device_num; i++) {
+    A_h[i] = static_cast<int>(i);
+  }
+
+  for (int i = 0; i < device_num; i++) {
+    HIP_CHECK(hipSetDevice(i));
 
     HIP_CHECK(hipMalloc(&A_d[i], buffer_size));
     HIP_CHECK(hipMemcpy(A_d[i], &A_h[i * kBufferLen], buffer_size, hipMemcpyHostToDevice));
-    if (i == 0) {
-      HIP_CHECK(hipHostMalloc(&C_d, (device_num + 1) * sizeof(long)));
-    }
 
     HIP_CHECK(hipStreamCreate(&stream[i]));
+
     HIP_CHECK(hipDeviceSynchronize());
   }
 
-  dim3 dimBlock;
-  dim3 dimGrid;
-  dimGrid.x = 1;
-  dimGrid.y = 1;
-  dimGrid.z = 1;
-  dimBlock.x = 64;
-  dimBlock.y = 1;
-  dimBlock.z = 1;
+  HIP_CHECK(hipHostMalloc(&C_d, (device_num + 1) * sizeof(unsigned long long)));
 
+  uint workgroup = GENERATE(32, 64, 128, 256);
+
+  dim3 dimBlock = dim3(workgroup);
+  dim3 dimGrid = dim3(1);
   int num_blocks = 0;
-  uint workgroup = GENERATE(64, 128, 256);
 
   hipLaunchParams* launch_params_list = new hipLaunchParams[device_num];
   std::vector<void*> args(device_num * num_kernel_args);
@@ -188,16 +189,16 @@ TEST_CASE("Unit_hipLaunchCooperativeKernelMultiDevice_Basic", "[multigpu]") {
   for (int i = 0; i < device_num; i++) {
     HIP_CHECK(hipSetDevice(i));
 
-    dimBlock.x = workgroup;
     HIP_CHECK(hipOccupancyMaxActiveBlocksPerMultiprocessor(
-        &num_blocks, test_gws, dimBlock.x * dimBlock.y * dimBlock.z, dimBlock.x * sizeof(long)));
+        &num_blocks, test_gws, dimBlock.x * dimBlock.y * dimBlock.z,
+        dimBlock.x * sizeof(unsigned long long)));
 
     INFO("GPU" << i << " has block size = " << dimBlock.x << " and num blocks per CU " << num_blocks
                << "\n");
 
     dimGrid.x = device_properties[i].multiProcessorCount * std::min(num_blocks, 32);
 
-    HIP_CHECK(hipMalloc(&B_d[i], dimGrid.x * sizeof(long)));
+    HIP_CHECK(hipMalloc(&B_d[i], dimGrid.x * sizeof(unsigned long long)));
 
     args[i * num_kernel_args] = (void*)&A_d[i];
     args[i * num_kernel_args + 1] = (void*)&kBufferLen;
@@ -207,7 +208,7 @@ TEST_CASE("Unit_hipLaunchCooperativeKernelMultiDevice_Basic", "[multigpu]") {
     launch_params_list[i].func = reinterpret_cast<void*>(test_gws);
     launch_params_list[i].gridDim = dimGrid;
     launch_params_list[i].blockDim = dimBlock;
-    launch_params_list[i].sharedMem = dimBlock.x * sizeof(long);
+    launch_params_list[i].sharedMem = dimBlock.x * sizeof(unsigned long long);
     launch_params_list[i].stream = stream[i];
     launch_params_list[i].args = &args[i * num_kernel_args];
   }
@@ -218,7 +219,7 @@ TEST_CASE("Unit_hipLaunchCooperativeKernelMultiDevice_Basic", "[multigpu]") {
   }
 
   size_t processed_Dwords = kBufferLen * device_num;
-  REQUIRE(*C_d == (((long)(processed_Dwords) * (processed_Dwords - 1)) / 2));
+  REQUIRE(*C_d == (((unsigned long long)(processed_Dwords) * (processed_Dwords - 1)) / 2));
 
   delete[] launch_params_list;
 

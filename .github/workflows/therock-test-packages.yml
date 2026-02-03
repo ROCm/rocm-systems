@@ -3,7 +3,7 @@ name: TheRock Test Packages
 on:
   workflow_call:
     inputs:
-      project_to_test:
+      projects_to_test:
         type: string
       amdgpu_families:
         type: string
@@ -29,7 +29,7 @@ jobs:
           sparse-checkout: build_tools
           path: "prejob"
           repository: "ROCm/TheRock"
-          ref: df5e21e3b8449ade0af12bcf94c0113510e97f6d # 2025-12-30 commit
+          ref: 846614189049e22b02c85bf2b496a9025b27e75d # 2026-02-02 commit
 
       # Checkout failure is possible on Windows, as it's the first job on a GPU test runner.
       # Post-job cleanup isn't necessary since no executables are launched in this job.
@@ -42,12 +42,12 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: "ROCm/TheRock"
-          ref: df5e21e3b8449ade0af12bcf94c0113510e97f6d # 2025-12-30 commit
+          ref: 846614189049e22b02c85bf2b496a9025b27e75d # 2026-02-02 commit
 
       - name: "Configuring CI options"
         env:
           PLATFORM: ${{ inputs.platform }}
-          project_to_test: ${{ inputs.project_to_test }}
+          PROJECTS_TO_TEST: ${{ inputs.projects_to_test }}
         id: configure
         run: python ./build_tools/github_actions/fetch_test_configurations.py
 
@@ -84,7 +84,7 @@ jobs:
           sparse-checkout: build_tools
           path: "prejob"
           repository: "ROCm/TheRock"
-          ref: df5e21e3b8449ade0af12bcf94c0113510e97f6d # 2025-12-30 commit
+          ref: 846614189049e22b02c85bf2b496a9025b27e75d # 2026-02-02 commit
 
       - name: Pre-job cleanup processes on Windows
         if: ${{ runner.os == 'Windows' }}
@@ -95,7 +95,7 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: "ROCm/TheRock"
-          ref: df5e21e3b8449ade0af12bcf94c0113510e97f6d # 2025-12-30 commit
+          ref: 846614189049e22b02c85bf2b496a9025b27e75d # 2026-02-02 commit
 
       - name: Run setup test environment workflow
         uses: './.github/actions/setup_test_environment'
