@@ -510,6 +510,19 @@ def show_all(
     )
 
     for panel_id, panel in arch_configs.panel_configs.items():
+        # NOTE: Experimental Feature Toggle
+        # Hide block 30 unless explicitly requested
+        if (
+            panel_id == 3000
+            and not args.membw_analysis
+            and (panel_id // 100) not in filter_panel_ids
+            and (
+                not args.filter_metrics
+                or str(panel_id // 100) not in args.filter_metrics
+            )
+        ):
+            continue
+
         # Skip panels that don't support baseline comparison
         if len(args.path) > 1 and panel_id in config.HIDDEN_SECTIONS:
             continue

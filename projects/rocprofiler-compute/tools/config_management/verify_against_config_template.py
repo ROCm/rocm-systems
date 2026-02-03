@@ -63,7 +63,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from config_management import utils_ruamel as cm_utils  # noqa: E402
 
 REQUIRED_PANEL_KEYS = ("id", "title", "data source", "metrics_description")
-OPTIONAL_PANEL_KEYS = ("alias",)
+OPTIONAL_PANEL_KEYS = ("alias", "latest_only")
 DEFAULT_ALLOWED_PANEL_KEYS = set(REQUIRED_PANEL_KEYS) | set(OPTIONAL_PANEL_KEYS)
 
 
@@ -97,8 +97,13 @@ def _as_str(v: Any) -> str:
 
 def load_template(
     template_file: Path,
-) -> tuple[list[TemplatePanel], dict[int, TemplatePanel]]:
+) -> tuple[str, list[TemplatePanel], dict[int, TemplatePanel], dict[int, bool]]:
     data = cm_utils.load_yaml(template_file) or {}
+
+    latest_arch = data.get("latest_arch")
+    if latest_arch is not None and not isinstance(latest_arch, str):
+        raise ValueError("Template latest_arch must be a string like 'gfx###'")
+
     panels_raw = data.get("panels", [])
     if not isinstance(panels_raw, list):
         raise ValueError("Template YAML must contain a top-level 'panels' list")
@@ -124,6 +129,9 @@ def load_template(
         ds_list = p.get("data_sources", []) or []
         if not isinstance(ds_list, list):
             raise ValueError(f"Template panels[{idx}].data_sources must be list")
+
+        latest_only_by_id: dict[int, bool] = {}
+        latest_only_by_id[pid] = bool(p.get("latest_only", False))
 
         ds_out: list[TemplateDataSource] = []
         for j, ds in enumerate(ds_list):
@@ -166,7 +174,7 @@ def load_template(
         panels.append(panel)
         by_id[pid] = panel
 
-    return panels, by_id
+    return latest_arch, panels, by_id, latest_only_by_id
 
 
 def extract_panel_info(
@@ -207,17 +215,29 @@ def validate_arch(
     template_panels: list[TemplatePanel],
     template_by_id: dict[int, TemplatePanel],
     allowed_panel_keys: set[str],
+    latest_arch: Optional[str],
+    template_latest_only_by_id: Optional[dict[int, bool]],
 ) -> list[str]:
     """Validate one architecture directory. Returns list of errors."""
     errors: list[str] = []
 
     panel_files = sorted(arch_dir.glob("*.yaml"))
     actual_by_id: dict[int, Path] = {}
+    actual_latest_only: dict[int, bool] = {}
     actual_order: list[int] = []
 
     for f in panel_files:
         pid, panel_config, ds_actual = extract_panel_info(f)
         rel = f"{arch_dir.name}/{f.name}"
+
+        latest_only = bool(panel_config.get("latest_only", False))
+
+        # If someone mistakenly marks latest_only in a non-latest arch, error early
+        if latest_only and latest_arch and arch_dir.name != latest_arch:
+            errors.append(
+                f"ERROR [{rel}]: Panel id {pid} is latest_only "
+                f'but arch "{arch_dir.name}"" is not latest_arch "{latest_arch}"'
+            )
 
         if pid is None:
             errors.append(f"ERROR [{rel}]: Missing or non-integer Panel Config.id")
@@ -291,12 +311,25 @@ def validate_arch(
     expected_set = set(expected_ids)
 
     for pid in expected_ids:
+        tpl_latest_only = template_latest_only_by_id.get(pid, False)
+
+        # latest_only panels are only required in latest_arch
+        if tpl_latest_only and latest_arch and arch_dir.name != latest_arch:
+            continue
+
         if pid not in actual_ids:
             errors.append(
                 f"ERROR [{arch_dir.name}]: Missing panel id {pid} required by template"
             )
 
     for pid in sorted(actual_ids - expected_set):
+        rel = f"{arch_dir.name}/{actual_by_id[pid].name}"
+        is_latest_only = actual_latest_only.get(pid, False)
+
+        if latest_arch and arch_dir.name == latest_arch and is_latest_only:
+            # Allowed: latest-only extras in latest arch
+            continue
+
         errors.append(
             f"ERROR [{arch_dir.name}/{actual_by_id[pid].name}]: "
             f"Extra panel id {pid} not present in template"
@@ -343,7 +376,9 @@ def main() -> None:
         print(f"Error: {template_file} is not a file")
         sys.exit(1)
 
-    template_panels, template_by_id = load_template(template_file)
+    latest_arch, template_panels, template_by_id, template_latest_only_by_id = (
+        load_template(template_file)
+    )
     allowed_panel_keys = set(DEFAULT_ALLOWED_PANEL_KEYS) | set(args.allow_panel_key)
     print(f"Loading template from {template_file}")
     print(f"Template loaded: {len(template_panels)} panels\n")
@@ -361,6 +396,8 @@ def main() -> None:
             template_panels=template_panels,
             template_by_id=template_by_id,
             allowed_panel_keys=allowed_panel_keys,
+            latest_arch=latest_arch,
+            template_latest_only_by_id=template_latest_only_by_id,
         )
         if arch_errors:
             for e in arch_errors:

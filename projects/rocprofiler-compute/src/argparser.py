@@ -842,3 +842,12 @@ Examples:
             "Enable it without node names means ALL."
         ),
     )
+
+    # Experimental Feature Toggle controlling all functionalities
+    # pertaining to "Memory Bandwidth Guided Analysis"
+
+    analyze_group.add_argument(
+        "--membw-analysis",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
