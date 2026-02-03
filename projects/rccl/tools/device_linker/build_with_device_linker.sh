@@ -114,7 +114,13 @@ INCLUDES=(
 )
 
 # Defines
-DEFINES="-DDEVICE_LINKER -DENABLE_FAULT_INJECTION"
+# IMPORTANT: These must match host compilation (CMakeLists.txt) to ensure structure layout agreement
+# All of these affect struct layouts or code paths and MUST be consistent:
+#   - DEVICE_LINKER: Uses function tables instead of direct calls
+#   - ENABLE_FAULT_INJECTION: Adds faults field to ncclShmemData
+#   - ENABLE_WARP_SPEED: Affects ncclShmemData layout (warpComm, warpChannel fields) and kernel args size
+#   - ENABLE_LL128: Affects protocol selection and scratch sizes
+DEFINES="-DDEVICE_LINKER -DENABLE_FAULT_INJECTION -DENABLE_WARP_SPEED -DENABLE_LL128"
 
 # CUID (compilation unit ID) - needs to match between device and host compilation
 CUID="devicelinker$(echo -n "$SOURCE" | md5sum | cut -c1-16)"
@@ -169,7 +175,7 @@ $CLANG -cc1 \
     -resource-dir "$CLANG_RESOURCE_DIR" \
     "${SYS_INCLUDES[@]}" \
     -include __clang_hip_runtime_wrapper.h \
-    -D DEVICE_LINKER -D ENABLE_FAULT_INJECTION \
+    -D DEVICE_LINKER -D ENABLE_FAULT_INJECTION -D ENABLE_WARP_SPEED -D ENABLE_LL128 \
     "${INCLUDES[@]}" \
     -fhip-new-launch-api \
     -fgnuc-version=4.2.1 \
@@ -243,7 +249,7 @@ $CLANG -cc1 \
     -resource-dir "$CLANG_RESOURCE_DIR" \
     "${SYS_INCLUDES[@]}" \
     -include __clang_hip_runtime_wrapper.h \
-    -D DEVICE_LINKER -D ENABLE_FAULT_INJECTION \
+    -D DEVICE_LINKER -D ENABLE_FAULT_INJECTION -D ENABLE_WARP_SPEED -D ENABLE_LL128 \
     "${INCLUDES[@]}" \
     -fcuda-include-gpubinary "$FATBIN" \
     -cuid=$CUID \

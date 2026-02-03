@@ -54,6 +54,14 @@ extern const char* funcNames[];
 
 #ifdef __CUDA_ARCH__
   #define NCCL_CUDA_ARCH __CUDA_ARCH__
+#elif defined(__gfx950__)
+  // Map AMD gfx950 to a high CUDA arch for consistent LDS calculations
+  #define NCCL_CUDA_ARCH 950
+#elif defined(__gfx942__)
+  #define NCCL_CUDA_ARCH 942
+#elif defined(__GFX9__)
+  // Other GFX9 chips get a generic high value
+  #define NCCL_CUDA_ARCH 900
 #else
   #define NCCL_CUDA_ARCH 0
 #endif

@@ -170,9 +170,19 @@ add_custom_target(specialized_kernels ALL DEPENDS ${SPECIALIZED_OBJECTS})
 
 # Step 6: Compile merged_minimal.hip (the dispatcher)
 set(DISPATCHER_OBJ ${CMAKE_CURRENT_BINARY_DIR}/merged_minimal.o)
+# Build dispatcher defines - MUST match host compilation for structure layout agreement
+set(DISPATCHER_DEFS -DDEVICE_LINKER -D__HIP_PLATFORM_AMD__ -DENABLE_FAULT_INJECTION)
+if(ENABLE_WARP_SPEED)
+  list(APPEND DISPATCHER_DEFS -DENABLE_WARP_SPEED)
+endif()
+if(LL128_ENABLED)
+  list(APPEND DISPATCHER_DEFS -DENABLE_LL128)
+endif()
+
 add_custom_command(
   OUTPUT ${DISPATCHER_OBJ}
   COMMAND ${HIPCC} -c -fPIC -fno-gpu-rdc --offload-arch=${GPU_TARGET_FULL}
+          ${DISPATCHER_DEFS}
           -I${BASE_BUILD_FULL}/include
           -I${HIPIFY_DIR}/src
           -I${HIPIFY_DIR}/src/device

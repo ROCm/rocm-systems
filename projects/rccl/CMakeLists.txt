@@ -1383,9 +1383,13 @@ if (DEVICE_LINKER)
     set(obj ${SPECIALIZED_OBJ_DIR}/${name}.o)
     list(APPEND SPECIALIZED_OBJECTS ${obj})
     # Build compile definitions for specialized kernels
+    # IMPORTANT: These must match host compilation to ensure structure layout agreement
     set(SPEC_KERNEL_DEFS -DDEVICE_LINKER -DENABLE_FAULT_INJECTION)
     if(LL128_ENABLED)
       list(APPEND SPEC_KERNEL_DEFS -DENABLE_LL128)
+    endif()
+    if(ENABLE_WARP_SPEED)
+      list(APPEND SPEC_KERNEL_DEFS -DENABLE_WARP_SPEED)
     endif()
     add_custom_command(
       OUTPUT ${obj}
