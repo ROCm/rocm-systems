@@ -29,6 +29,7 @@
 #include <atomic>
 #include <mutex>
 #include <thread>
+#include <variant>
 
 namespace rocprofiler
 {
@@ -46,32 +47,35 @@ public:
     explicit PTraceRunner(pid_t pid);
     ~PTraceRunner();
 
+    using ptrace_parameter_t = std::variant<uint64_t, void*>;
+
     // Intended to mirror ptrace(), but with parameters for its return value and errno
     // A return value of ROCATTACH_STATUS_ERROR indicates a timeout while communicating with this
     // class's worker thread.
-    rocattach_status_t ptrace_run(__ptrace_request op,
-                                  void*            addr,
-                                  void*            data,
-                                  uint64_t*        ptrace_retval,
-                                  int*             ptrace_errno,
-                                  size_t           timeout_ms = DEFAULT_TIMEOUT_MS);
+    rocattach_status_t ptrace_run(__ptrace_request   op,
+                                  ptrace_parameter_t addr,
+                                  ptrace_parameter_t data,
+                                  uint64_t*          ptrace_retval,
+                                  int*               ptrace_errno,
+                                  size_t             timeout_ms = DEFAULT_TIMEOUT_MS);
 
     pid_t get_pid() const { return m_pid; };
 
 private:
+    const pid_t m_pid = {};
+
     // Data for a single ptrace operation.
     // ptrace_run fills in op, addr, and data when invoking ptrace
     // ptrace_runner worker thread fills in retval and ptrace_errno after running ptrace
     struct ptrace_data_t
     {
         __ptrace_request op;
-        void*            addr;
-        void*            data;
+        uint64_t         addr;
+        uint64_t         data;
         uint64_t         retval;
         int              ptrace_errno;
     };
 
-    const pid_t m_pid = 0;
     // Mutex controls access to m_ptrace_data, as well as ensuring ptrace_run is not run
     // concurrently.
     std::mutex m_ptrace_run_mutex;
