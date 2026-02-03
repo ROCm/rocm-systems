@@ -100,7 +100,7 @@ hipError_t DynCO::getDeviceVar(DeviceVar** dvar, std::string var_name) {
 
   auto it = vars_.find(var_name);
   if (it == vars_.end()) {
-    LogPrintfError("Cannot find the Var: %s ", var_name.c_str());
+    LogPrintfError("Cannot find the Var: {} ", var_name.c_str());
     return hipErrorNotFound;
   }
 
@@ -117,7 +117,7 @@ hipError_t DynCO::getDynFunc(hipFunction_t* hfunc, std::string func_name) {
 
   auto it = functions_.find(func_name);
   if (it == functions_.end()) {
-    LogPrintfError("Cannot find the function: %s ", func_name.c_str());
+    LogPrintfError("Cannot find the function: {} ", func_name.c_str());
     return hipErrorNotFound;
   }
 
@@ -148,7 +148,7 @@ hipError_t DynCO::initDynManagedVars(const std::string& managedVar) {
   // To get size of the managed variable
   status = getDeviceVar(&dvar, managedVar + ".managed");
   if (status != hipSuccess) {
-    ClPrint(amd::LOG_ERROR, amd::LOG_API, "Status %d, failed to get .managed device variable:%s",
+    ClPrint(amd::LOG_ERROR, amd::LOG_API, "Status {}, failed to get .managed device variable:{}",
             status, managedVar.c_str());
     return status;
   }
@@ -166,7 +166,7 @@ hipError_t DynCO::initDynManagedVars(const std::string& managedVar) {
     status = ihipMemcpy(pointer, reinterpret_cast<address>(dvar->device_ptr()), dvar->size(),
                         hipMemcpyDeviceToDevice, *stream);
     if (status != hipSuccess) {
-      ClPrint(amd::LOG_ERROR, amd::LOG_API, "Status %d, failed to copy device ptr:%s", status,
+      ClPrint(amd::LOG_ERROR, amd::LOG_API, "Status {}, failed to copy device ptr:{}", status,
               managedVar.c_str());
       return status;
     }
@@ -178,7 +178,7 @@ hipError_t DynCO::initDynManagedVars(const std::string& managedVar) {
   // Get deivce ptr to initialize with managed memory pointer
   status = getDeviceVar(&dvar, managedVar);
   if (status != hipSuccess) {
-    ClPrint(amd::LOG_ERROR, amd::LOG_API, "Status %d, failed to get managed device variable:%s",
+    ClPrint(amd::LOG_ERROR, amd::LOG_API, "Status {}, failed to get managed device variable:{}",
             status, managedVar.c_str());
     return status;
   }
@@ -186,7 +186,7 @@ hipError_t DynCO::initDynManagedVars(const std::string& managedVar) {
   status = ihipMemcpy(reinterpret_cast<address>(dvar->device_ptr()), &pointer, dvar->size(),
                       hipMemcpyHostToDevice, *stream);
   if (status != hipSuccess) {
-    ClPrint(amd::LOG_ERROR, amd::LOG_API, "Status %d, failed to copy device ptr:%s", status,
+    ClPrint(amd::LOG_ERROR, amd::LOG_API, "Status {}, failed to copy device ptr:{}", status,
             managedVar.c_str());
     return status;
   }
@@ -203,7 +203,7 @@ hipError_t DynCO::populateDynGlobalVars() {
                                      ->getDeviceProgram(*hip::getCurrentDevice()->devices()[0]);
 
   if (!dev_program->getGlobalVarFromCodeObj(&var_names)) {
-    LogPrintfError("Could not get Global vars from Code Obj for Module: 0x%x", module_);
+    LogPrintfError("Could not get Global vars from Code Obj for Module: {:#x}", static_cast<void*>(module_));
     return hipErrorSharedObjectSymbolNotFound;
   }
 
@@ -231,7 +231,7 @@ hipError_t DynCO::populateDynGlobalFuncs() {
 
   // Get all the global func names from COMGR
   if (!dev_program->getGlobalFuncFromCodeObj(&func_names)) {
-    LogPrintfError("Could not get Global Funcs from Code Obj for Module: 0x%x", module_);
+    LogPrintfError("Could not get Global Funcs from Code Obj for Module: {:#x}", static_cast<void*>(module_));
     return hipErrorSharedObjectSymbolNotFound;
   }
 
@@ -349,7 +349,7 @@ hipError_t StatCO::removeFatBinary(FatBinaryInfo** module) {
     for (auto& hostVar : hostVarsIter->second) {
       auto varIter = vars_.find(hostVar);
       if (varIter == vars_.end()) {
-        LogPrintfError("removeFatBinary: Unable to find module 0x%x hostVar 0x%x", module, hostVar);
+        LogPrintfError("removeFatBinary: Unable to find module {:#x} hostVar {:#x}", static_cast<const void*>(module), static_cast<const void*>(hostVar));
       } else {
         delete varIter->second;
         vars_.erase(varIter);
@@ -388,8 +388,8 @@ hipError_t StatCO::removeFatBinary(FatBinaryInfo** module) {
     for (auto& hostFunc : hostFuncsIter->second) {
       auto funcIter = functions_.find(hostFunc);
       if (funcIter == functions_.end()) {
-        LogPrintfError("removeFatBinary: Unable to find module 0x%x hostFunc 0x%x", module,
-                       hostFunc);
+        LogPrintfError("removeFatBinary: Unable to find module {:#x} hostFunc {:#x}", static_cast<const void*>(module),
+                       static_cast<const void*>(hostFunc));
       } else {
         delete funcIter->second;
         functions_.erase(funcIter);
@@ -406,8 +406,8 @@ hipError_t StatCO::removeFatBinary(FatBinaryInfo** module) {
       delete moduleIter->second;
       modules_.erase(moduleIter);
     } else {
-      LogPrintfError("removeFatBinary: Unable to find module 0x%x via hostModule 0x%x", module,
-                     hostModule);
+      LogPrintfError("removeFatBinary: Unable to find module {:#x} via hostModule {:#x}", static_cast<const void*>(module),
+                     static_cast<const void*>(hostModule));
     }
     module_to_hostModule_.erase(hostModuleIter);
   }
@@ -476,7 +476,7 @@ hipError_t StatCO::registerStatFunction(const void* hostFunction, Function* func
 
   if (functions_.find(hostFunction) != functions_.end()) {
     ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_API,
-             "hostFunctionPtr: 0x%x already exists", hostFunction);
+             "hostFunctionPtr: {:#x} already exists", static_cast<void*>(const_cast<void*>(hostFunction)));
     delete func;
   } else {
     functions_.insert(std::make_pair(hostFunction, func));

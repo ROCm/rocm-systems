@@ -123,7 +123,7 @@ bool Comgr::LoadLib(bool is_versioned) {
   is_ready_ = true;
   size_t major = 0, minor = 0;
   get_version(&major, &minor);
-  ClPrint(amd::LOG_INFO, amd::LOG_CODE, "Loaded COMGR library version %zu.%zu.", major, minor);
+  ClPrint(amd::LOG_INFO, amd::LOG_CODE, "Loaded COMGR library version {}.{}.", major, minor);
   return true;
 }
 

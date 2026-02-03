@@ -83,7 +83,7 @@ static void handlePayload(MessageHandler& messages, uint32_t service, uint64_t* 
     }
     case SERVICE_PRINTF:
       if (!messages.handlePayload(service, payload)) {
-        ClPrint(amd::LOG_ERROR, amd::LOG_ALWAYS, "Hostcall: invalid request for service \"%d\".",
+        ClPrint(amd::LOG_ERROR, amd::LOG_ALWAYS, "Hostcall: invalid request for service \"{}\".",
                 service);
         guarantee(false, "Hostcall: invalid service request %d \n", service);
       }
@@ -97,8 +97,8 @@ static void handlePayload(MessageHandler& messages, uint32_t service, uint64_t* 
           amd::MemObjMap::RemoveMemObj(reinterpret_cast<void*>(payload[0]));
           mem->release();
         } else {
-          ClPrint(amd::LOG_ERROR, amd::LOG_ALWAYS, "Hostcall: Unknown pointer %p in devmem service",
-                  payload[0]);
+          ClPrint(amd::LOG_ERROR, amd::LOG_ALWAYS, "Hostcall: Unknown pointer {} in devmem service",
+                  static_cast<void*>(reinterpret_cast<void*>(payload[0])));
         }
       } else {
         amd::Context& ctx = dev.context();
@@ -423,7 +423,7 @@ bool enableHostcalls(const amd::Device& dev, void* bfr, uint32_t numPackets) {
       return false;
     }
     ClPrint(amd::LOG_INFO, (amd::LOG_INIT | amd::LOG_QUEUE | amd::LOG_RESOURCE),
-            "Launched hostcall listener at %p", hostcallListener);
+            "Launched hostcall listener at {}", static_cast<void*>(hostcallListener));
   }
 // For PAL, create one signal per device (inside hostcallListener->initDevice(dev)) whose pointer is
 // stored in this hostcall buffer For ROCr, create only one signal across all devices (inside
@@ -436,8 +436,8 @@ bool enableHostcalls(const amd::Device& dev, void* bfr, uint32_t numPackets) {
   }
 #endif  // defined(WITH_PAL_DEVICE)
   hostcallListener->addBuffer(buffer);
-  ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "Registered hostcall buffer %p with listener %p", buffer,
-          hostcallListener);
+  ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "Registered hostcall buffer {} with listener {}", static_cast<void*>(buffer),
+          static_cast<void*>(hostcallListener));
   return true;
 }
 

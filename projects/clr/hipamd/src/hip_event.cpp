@@ -406,7 +406,7 @@ hipError_t hipEventRecord_common(hipEvent_t event, hipStream_t stream, uint32_t 
   if (stream != nullptr && stream != hipStreamLegacy &&
       hip_stream->GetCaptureStatus() == hipStreamCaptureStatusActive) {
     ClPrint(amd::LOG_INFO, amd::LOG_CODE,
-            "[hipGraph] Current capture node EventRecord on stream : %p, Event %p", stream, event);
+            "[hipGraph] Current capture node EventRecord on stream : {}, Event {}", static_cast<void*>(stream), static_cast<void*>(event));
     hip_stream->SetCaptureEvent(event);
     const auto& lastCapturedNodes = hip_stream->GetLastCapturedNodes();
     e->SetNodesPrevToRecorded(lastCapturedNodes);

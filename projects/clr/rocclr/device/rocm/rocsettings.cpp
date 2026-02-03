@@ -272,6 +272,6 @@ void Settings::setKernelArgImpl(const amd::Isa& isa, bool isXgmi, bool hasValidH
     kernel_arg_impl_ = kernelArgImpl & (HIP_FORCE_DEV_KERNARG ? 0xF : 0x0);
   }
 
-  ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Using dev kernel arg wa = %d", kernel_arg_impl_);
+  ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Using dev kernel arg wa = {}", kernel_arg_impl_);
 }
 }  // namespace amd::roc

@@ -30,7 +30,7 @@ amd::AppProfile* rocCreateAppProfile() {
 
   if ((appProfile == nullptr) || !appProfile->init()) {
     ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_INIT,
-             "App Profile init failed, appProfile: 0x%x \n", appProfile);
+             "App Profile init failed, appProfile: {:#x} \n", static_cast<void*>(appProfile));
     return nullptr;
   }
 

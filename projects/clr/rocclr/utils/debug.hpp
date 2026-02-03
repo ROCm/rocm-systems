@@ -71,7 +71,7 @@ enum LogMask {
   LOG_ALWAYS = -1         //!< (0xFFFFFFFF) Log always even mask flag is zero
 };
 
-//! \brief log file output
+//! \brief log file output (legacy, used when Quill is disabled)
 extern FILE* outFile;
 
 //! \brief Display a warning message.
@@ -87,6 +87,15 @@ extern void log_timestamped(LogLevel level, const char* file, int line, const ch
 extern void log_printf(LogLevel level, const char* file, int line, const char* format, ...);
 extern void log_printf(LogLevel level, const char* file, int line, uint64_t* start,
                        const char* format, ...);
+
+//! \brief Initialize the logging subsystem (Quill backend if enabled).
+extern void init_logging();
+
+//! \brief Shutdown the logging subsystem.
+extern void shutdown_logging();
+
+//! \brief Check if Quill logging is initialized.
+extern bool is_quill_initialized();
 
 /*@}*/  // namespace amd
 }  // namespace amd

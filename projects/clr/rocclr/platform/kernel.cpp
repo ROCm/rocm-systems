@@ -59,7 +59,7 @@ bool KernelParameters::check() {
   for (size_t i = 0; i < signature_.numParameters(); ++i) {
     if (!test(i)) {
       ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN,
-              "Kernel Parameter test failed for idx: %d \n", i);
+              "Kernel Parameter test failed for idx: {} \n", i);
       return false;
     }
   }
@@ -261,7 +261,7 @@ address KernelParameters::capture(device::VirtualDevice& vDev, uint64_t lclMemSi
           memArg->retain();
           device::Memory* devMem = memArg->getDeviceMemory(device);
           if (nullptr == devMem) {
-            LogPrintfError("Can't allocate memory size - 0x%08X bytes!", memArg->getSize());
+            LogPrintfError("Can't allocate memory size - {:#08X} bytes!", memArg->getSize());
             *error = CL_MEM_OBJECT_ALLOCATION_FAILURE;
             break;
           }
@@ -329,7 +329,7 @@ bool KernelParameters::boundToSvmPointer(const Device& device, const_address cap
                                          size_t index) const {
   if (!device.info().svmCapabilities_) {
     ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN, 
-            "The device: 0x%x does not have SVM Capabilities \n", &device);
+            "The device: {:#x} does not have SVM Capabilities \n", static_cast<const void*>(&device));
     return false;
   }
   //! Information about which arguments are SVM pointers is stored after

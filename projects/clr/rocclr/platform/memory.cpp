@@ -314,7 +314,7 @@ bool Memory::create(void* initFrom, bool sysMemAlloc, bool skipAlloc, bool force
     if (forceAlloc || (!skipAlloc && ((devices.size() == 1) || DISABLE_DEFERRED_ALLOC))) {
       device::Memory* mem = getDeviceMemory(*devices[i]);
       if (NULL == mem) {
-        LogPrintfError("Can't allocate memory size - 0x%08X bytes!", getSize());
+        LogPrintfError("Can't allocate memory size - {:#08X} bytes!", getSize());
         return false;
       }
     }
@@ -539,7 +539,7 @@ void Memory::commitSvmMemory() {
     if (amd::Os::commitMemory(svmHostAddress_, size_, amd::Os::MEM_PROT_RW)) {
       svmPtrCommited_ = true;
     } else {
-      LogPrintfError("Mem Map failed for the host address 0x%x", svmHostAddress_);
+      LogPrintfError("Mem Map failed for the host address {:#x}", static_cast<void*>(svmHostAddress_));
     }
   }
 }
@@ -550,7 +550,7 @@ void Memory::uncommitSvmMemory() {
     if (amd::Os::uncommitMemory(svmHostAddress_, size_)) {
       svmPtrCommited_ = false;
     } else {
-      LogPrintfError("Mem Unmap failed for the host address 0x%x", svmHostAddress_);
+      LogPrintfError("Mem Unmap failed for the host address {:#x}", static_cast<void*>(svmHostAddress_));
     }
   }
 }
@@ -655,7 +655,7 @@ bool Image::validateDimensions(const std::vector<amd::Device*>& devices, cl_mem_
     case CL_MEM_OBJECT_IMAGE3D:
       if ((width == 0) || (height == 0) || (depth < 1)) {
         ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE,
-                 "Invalid Dimenstions, width: %u height: %u depth: %u \n", width, height,
+                 "Invalid Dimenstions, width: {} height: {} depth: {} \n", width, height,
                           depth);
         return false;
       }
@@ -678,7 +678,7 @@ bool Image::validateDimensions(const std::vector<amd::Device*>& devices, cl_mem_
         }
       }
       if (!sizePass) {
-        ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE, "Cannot allocate image of size: %u \n", arraySize);
+        ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE, "Cannot allocate image of size: {} \n", arraySize);
         return false;
       }
     // Fall through...
@@ -702,7 +702,7 @@ bool Image::validateDimensions(const std::vector<amd::Device*>& devices, cl_mem_
         }
       }
       if (!sizePass) {
-        ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE, "Cannot allocate image of size: %u \n", arraySize);
+        ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE, "Cannot allocate image of size: {} \n", arraySize);
         return false;
       }
     // Fall through...
@@ -831,7 +831,7 @@ bool Image::Format::isValid() const {
       break;
 
     default: {
-      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE, "Invalid Image format: %u \n", image_channel_data_type);
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE, "Invalid Image format: {} \n", image_channel_data_type);
       return false;
     }
   }
@@ -856,7 +856,7 @@ bool Image::Format::isValid() const {
           break;
 
         default: {
-          ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE, "Invalid Luminance: %u \n", image_channel_data_type);
+          ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE, "Invalid Luminance: {} \n", image_channel_data_type);
           return false;
         }
       }
@@ -870,7 +870,7 @@ bool Image::Format::isValid() const {
           break;
 
         default: {
-          ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE, "Invalid RGB: %u \n", image_channel_data_type);
+          ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE, "Invalid RGB: {} \n", image_channel_data_type);
           return false;
         }
       }
@@ -886,7 +886,7 @@ bool Image::Format::isValid() const {
           break;
 
         default: {
-          ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE, "Invalid BGRA/ARGB: %u \n", image_channel_data_type);
+          ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE, "Invalid BGRA/ARGB: {} \n", image_channel_data_type);
           return false;
         }
       }
@@ -900,7 +900,7 @@ bool Image::Format::isValid() const {
         case CL_UNORM_INT8:
           break;
         default: {
-          ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE, "Invalid sBGRA: %u \n", image_channel_data_type);
+          ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE, "Invalid sBGRA: {} \n", image_channel_data_type);
           return false;
         }
       }
@@ -912,14 +912,14 @@ bool Image::Format::isValid() const {
         case CL_FLOAT:
           break;
         default: {
-          ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE, "Invalid CL Depth: %u \n", image_channel_data_type);
+          ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE, "Invalid CL Depth: {} \n", image_channel_data_type);
           return false;
         }
       }
       break;
 
     default: {
-      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE, "Invalid image_channel_order: %u \n", image_channel_order);
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE, "Invalid image_channel_order: {} \n", image_channel_order);
       return false;
     }
   }

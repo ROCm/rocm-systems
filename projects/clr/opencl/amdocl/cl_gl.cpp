@@ -1146,7 +1146,7 @@ cl_mem clCreateFromGLBufferAMD(Context& amdContext, cl_mem_flags flags, GLuint b
 
   device::Memory* mem = pBufferGL->getDeviceMemory(dev);
   if (NULL == mem) {
-    LogPrintfError("Can't allocate memory size - 0x%08X bytes!", pBufferGL->getSize());
+    LogPrintfError("Can't allocate memory size - {:#08X} bytes!", pBufferGL->getSize());
     *not_null(errcode_ret) = CL_INVALID_GL_OBJECT;
     return (cl_mem)0;
   }

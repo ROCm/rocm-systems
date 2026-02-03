@@ -38,7 +38,7 @@ void LibraryContainer::Register(std::string name, int device, hipKernel_t k) {
     kernels_.insert(std::make_pair(std::make_pair(name, device), k));
     auto lib = reinterpret_cast<hipLibrary_t>(this);
     if (!hip::PlatformState::instance().RegisterLibraryFunction(k, lib)) {
-      LogPrintfInfo("Already registered: %p", k);
+      LogPrintfInfo("Already registered: {}", static_cast<void*>(k));
     }
   }
 }

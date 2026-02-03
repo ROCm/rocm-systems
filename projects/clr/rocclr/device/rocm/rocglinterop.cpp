@@ -145,7 +145,7 @@ bool GetInfo(mesa_glinterop_device_info& info, MESA_INTEROP_KIND Kind, const Dis
   }
   if (ret == MESA_GLINTEROP_SUCCESS) return true;
   if (ret < static_cast<int>(sizeof(errorStrings) / sizeof(errorStrings[0])))
-    LogPrintfError("Mesa interop: GetInfo failed with \"%s\".\n", errorStrings[ret]);
+    LogPrintfError("Mesa interop: GetInfo failed with \"{}\".\n", errorStrings[ret]);
   else
     LogError("Mesa interop: GetInfo failed with invalid error code.\n");
   return false;
@@ -169,7 +169,7 @@ bool Export(mesa_glinterop_export_in& in, mesa_glinterop_export_out& out, MESA_I
   }
   if (ret == MESA_GLINTEROP_SUCCESS) return true;
   if (ret < static_cast<int>(sizeof(errorStrings) / sizeof(errorStrings[0])))
-    LogPrintfError("Mesa interop: Export failed with \"%s\".\n", errorStrings[ret]);
+    LogPrintfError("Mesa interop: Export failed with \"{}\".\n", errorStrings[ret]);
   else
     LogError("Mesa interop: Export failed with invalid error code.\n");
   return false;

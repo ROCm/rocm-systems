@@ -127,8 +127,8 @@ bool Graph::isGraphValid(Graph* pGraph) {
 // ================================================================================================
 void Graph::AddNode(const Node& node) {
   vertices_.emplace_back(node);
-  ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_CODE, "[hipGraph] Add %s(%p)",
-          GetGraphNodeTypeString(node->GetType()), node);
+  ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_CODE, "[hipGraph] Add {}({})",
+          GetGraphNodeTypeString(node->GetType()), static_cast<void*>(node));
   node->SetParentGraph(this);
 }
 
@@ -146,8 +146,8 @@ std::vector<Node> Graph::GetRootNodes() const {
   for (const auto& entry : vertices_) {
     if (entry->GetInDegree() == 0) {
       roots.push_back(entry);
-      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_CODE, "[hipGraph] Root node: %s(%p)",
-              GetGraphNodeTypeString(entry->GetType()), entry);
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_CODE, "[hipGraph] Root node: {}({})",
+              GetGraphNodeTypeString(entry->GetType()), static_cast<void*>(entry));
     }
   }
   return roots;
@@ -307,7 +307,7 @@ hipError_t Graph::ScheduleNodesIntoBatches() {
 
     if (avg_segment_length < kAvgSegmentLengthThreshold) {
       ClPrint(amd::LOG_INFO, amd::LOG_CODE,
-              "[hipGraph] Complex graph detected: %zu segments, avg length %.2f - "
+              "[hipGraph] Complex graph detected: {} segments, avg length {:.2f} - "
               "falling back to classic path for better performance",
               segments_.size(), avg_segment_length);
       // Return special status to indicate fallback to classic path
@@ -328,8 +328,8 @@ hipError_t Graph::ScheduleNodesIntoBatches() {
   }
 
   ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_CODE,
-          "[hipGraph] ScheduleNodesIntoBatches: Total nodes = %zu, total segments = %zu max "
-          "dependency level = %d, max streams = %d",
+          "[hipGraph] ScheduleNodesIntoBatches: Total nodes = {}, total segments = {} max "
+          "dependency level = {}, max streams = {}",
           GetNodeCount(), segments_.size(), max_dependency_level_, max_streams_);
 
   return hipSuccess;
@@ -354,7 +354,7 @@ void Graph::ResolveSegmentDependencies() {
           // Validate segment ID is within bounds
           if (dep_segment_id < 0 || dep_segment_id >= static_cast<int>(segments_.size())) {
             ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
-                    "[hipGraph] Invalid segment ID %d (segments size: %zu)",
+                    "[hipGraph] Invalid segment ID {} (segments size: {})",
                     dep_segment_id, segments_.size());
             continue;  // Skip invalid segment ID
           }
@@ -380,8 +380,8 @@ void Graph::ResolveSegmentDependencies() {
     if (segment.child_graph_ptr != nullptr) {
       ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_CODE,
               "[hipGraph] Recursively resolving dependencies"
-              "for child graph %p in segment [id=%d]",
-              segment.child_graph_ptr, segment.id);
+              "for child graph {} in segment [id={}]",
+              static_cast<void*>(segment.child_graph_ptr), segment.id);
 
       // Child graph resolves its own internal segment dependencies
       segment.child_graph_ptr->ResolveSegmentDependencies();
@@ -783,12 +783,12 @@ hipError_t GraphExec::CreateStreams(uint32_t num_streams, int devId) {
 
   if (num_streams == 0) {
     ClPrint(amd::LOG_WARNING, amd::LOG_CODE,
-            "[hipGraph] Attempting to create 0 streams for device %d", devId);
+            "[hipGraph] Attempting to create 0 streams for device {}", devId);
     return hipSuccess;
   }
 
   if (devId < 0 || devId >= g_devices.size() || g_devices[devId] == nullptr) {
-    ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "[hipGraph] Invalid device ID %d for stream creation",
+    ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "[hipGraph] Invalid device ID {} for stream creation",
             devId);
     return hipErrorInvalidDevice;
   }
@@ -797,13 +797,13 @@ hipError_t GraphExec::CreateStreams(uint32_t num_streams, int devId) {
   if (parallel_streams_.find(devId) != parallel_streams_.end() &&
       !parallel_streams_[devId].empty()) {
     ClPrint(amd::LOG_WARNING, amd::LOG_CODE,
-            "[hipGraph] Streams already exist for device %d, skipping creation", devId);
+            "[hipGraph] Streams already exist for device {}, skipping creation", devId);
     return hipSuccess;
   }
 
   // Cap the number of streams to DEBUG_HIP_FORCE_GRAPH_QUEUES
   uint32_t max_streams = std::min(num_streams, DEBUG_HIP_FORCE_GRAPH_QUEUES);
-  ClPrint(amd::LOG_INFO, amd::LOG_CODE, "[hipGraph] Creating %u parallel streams for device %d",
+  ClPrint(amd::LOG_INFO, amd::LOG_CODE, "[hipGraph] Creating {} parallel streams for device {}",
     max_streams, devId);
   parallel_streams_[devId].reserve(max_streams);
   for (uint32_t i = 0; i < max_streams; ++i) {
@@ -811,7 +811,7 @@ hipError_t GraphExec::CreateStreams(uint32_t num_streams, int devId) {
                                   hipStreamNonBlocking);
 
     if (stream == nullptr || !stream->Create()) {
-      ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "[hipGraph] Failed to %s stream %u for device %d",
+      ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "[hipGraph] Failed to {} stream {} for device {}",
               stream == nullptr ? "allocate" : "create", i, devId);
       if (stream != nullptr) {
         hip::Stream::Destroy(stream);
@@ -1192,7 +1192,7 @@ hipError_t GraphExec::CaptureAQLPackets() {
     const size_t totalPoolSize = kernArgSize + kKernArgChunkSize;
     if (!kernArgManager_->AllocGraphKernargPool(totalPoolSize, g_devices[deviceId]->devices()[0])) {
       ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
-              "[hipGraph] Failed to allocate kernel argument pool of size %zu for device %d",
+              "[hipGraph] Failed to allocate kernel argument pool of size {} for device {}",
               totalPoolSize, deviceId);
     return hipErrorMemoryAllocation;
     }
@@ -1255,7 +1255,7 @@ hipError_t GraphExec::UpdateAQLPacket(hip::GraphNode* node) {
 
         ClPrint(
             amd::LOG_DETAIL_DEBUG, amd::LOG_CODE,
-            "[hipGraph] Packet count change for node (type=%d): %zu -> %zu packets (delta=%ld)",
+            "[hipGraph] Packet count change for node (type={}): {} -> {} packets (delta={})",
             node->GetType(), oldPacketCount, newPacketCount, packetDelta);
 
         if (packetDelta > 0) {
@@ -1274,7 +1274,7 @@ hipError_t GraphExec::UpdateAQLPacket(hip::GraphNode* node) {
           // Validate bounds before erasing
           if (removePos + removeCount > packetBatch.dispatchPackets.size()) {
             ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
-                    "[hipGraph] Invalid packet removal bounds: pos=%zu, count=%zu, size=%zu",
+                    "[hipGraph] Invalid packet removal bounds: pos={}, count={}, size={}",
                     removePos, removeCount, packetBatch.dispatchPackets.size());
             return hipErrorInvalidValue;
           }
@@ -1625,7 +1625,7 @@ hipError_t GraphExec::EnqueueSegment(const Segment& segment, hip::Stream* stream
 
       if (child_status != hipSuccess) {
         ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
-                "[hipGraph] EnqueueSegment: Failed to enqueue child graph, status=%d",
+                "[hipGraph] EnqueueSegment: Failed to enqueue child graph, status={}",
                 child_status);
         return child_status;
       }
@@ -1710,7 +1710,7 @@ void GraphExec::UpdateStreams(hip::Stream* launch_stream) {
   // Current stream is the default in the assignment
   streams_.push_back(launch_stream);
   if (parallel_streams_.find(devId) == parallel_streams_.end()) {
-    LogPrintfError("UpdateStreams failed for device id:%d", devId);
+    LogPrintfError("UpdateStreams failed for device id:{}", devId);
     return;
   }
   auto parallel_streams = parallel_streams_[devId];
@@ -1790,7 +1790,7 @@ bool Graph::RunOneNode(Node node) {
     // Create the execution commands on the assigned stream
     auto status = node->CreateCommand(node->GetQueue());
     if (status != hipSuccess) {
-      LogPrintfError("Command creation for node id(%d) failed!", current_id_ + 1);
+      LogPrintfError("Command creation for node id({}) failed!", current_id_ + 1);
       return false;
     }
     // If a wait was requested, then process the list
@@ -1957,7 +1957,7 @@ hipError_t GraphExec::Run(hip::Stream* launch_stream) {
     repeatLaunch_ = true;
   }
 
-  ClPrint(amd::LOG_DEBUG, amd::LOG_CODE, "GraphExec::Run max_streams: %d, on device: %d",
+  ClPrint(amd::LOG_DEBUG, amd::LOG_CODE, "GraphExec::Run max_streams: {}, on device: {}",
           max_streams_, launch_stream->DeviceId());
 
   if (use_segment_scheduling_ && instantiateDeviceId_ == launch_stream->DeviceId()) {
@@ -2012,7 +2012,7 @@ hipError_t GraphExec::Run(hip::Stream* launch_stream) {
         "graph_" + std::to_string(amd::Os::getProcessId()) + "_dot_print_launch_1";
     hipError_t status = ihipGraphDebugDotPrint(this, filename.c_str(), 0);
     if (status == hipSuccess) {
-      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_CODE, "[hipGraph] graph dump:%s", filename.c_str());
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_CODE, "[hipGraph] graph dump:{}", filename.c_str());
     }
   }
   this->retain();

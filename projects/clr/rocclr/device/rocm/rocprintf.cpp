@@ -409,7 +409,7 @@ bool PrintfDbg::init(bool printfEnabled) {
     if (err != HSA_STATUS_SUCCESS) {
       LogPrintfError(
           "\n Can't copy offset and bytes available data to dgbBuffer_,"
-          "failed with status: %d \n!",
+          "failed with status: {} \n!",
           err);
       return false;
     }

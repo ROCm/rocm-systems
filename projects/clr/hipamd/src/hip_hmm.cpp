@@ -287,7 +287,7 @@ hipError_t ihipMallocManaged(void** ptr, size_t size, size_t align, bool use_hos
   // saves the current device id so that it can be accessed later
   memObj->getUserData().deviceId = hip::getCurrentDevice()->deviceId();
 
-  ClPrint(amd::LOG_INFO, amd::LOG_API, "ihipMallocManaged ptr=0x%zx", *ptr);
+  ClPrint(amd::LOG_INFO, amd::LOG_API, "ihipMallocManaged ptr={:#zx}", *ptr);
   return hipSuccess;
 }
 // ================================================================================================

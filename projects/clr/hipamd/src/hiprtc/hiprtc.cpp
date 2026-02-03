@@ -57,7 +57,7 @@ const char* hiprtcGetErrorString(hiprtcResult x) {
     case HIPRTC_ERROR_LINKING:
       return "HIPRTC_ERROR_LINKING";
     default:
-      LogPrintfError("Invalid HIPRTC error code: %d", x);
+      LogPrintfError("Invalid HIPRTC error code: {}", x);
       return nullptr;
   };
 

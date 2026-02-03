@@ -41,7 +41,7 @@ hipError_t hipMemAddressFree(void* devPtr, size_t size) {
   }
   amd::Memory* memObj = amd::MemObjMap::FindVirtualMemObj(devPtr);
   if (memObj == nullptr) {
-    LogPrintfError("Cannot find the Virtual MemObj entry for this addr %p", devPtr);
+    LogPrintfError("Cannot find the Virtual MemObj entry for this addr {}", static_cast<void*>(devPtr));
     HIP_RETURN(hipErrorInvalidValue);
   }
   // Single call frees address range for all devices.
@@ -75,7 +75,7 @@ hipError_t hipMemAddressReserve(void** ptr, size_t size, size_t alignment, void*
 
   // If requested address was not allocated, printf error message.
   if (addr != nullptr && addr == *ptr) {
-    LogPrintfError("Requested address was not allocated. Allocated address : %p ", *ptr);
+    LogPrintfError("Requested address was not allocated. Allocated address : {} ", static_cast<void*>(*ptr));
   }
 
   HIP_RETURN(hipSuccess, ReturnPtrValue(ptr));
@@ -134,8 +134,8 @@ hipError_t hipMemCreate(hipMemGenericAllocationHandle_t* handle, size_t size,
     hipError_t hip_error = hipMemGetInfo(&free, &total);
     if (hip_error == hipSuccess) {
       LogPrintfError(
-          "Allocation failed : Device memory : required :%zu | free :%zu"
-          "| total :%zu",
+          "Allocation failed : Device memory : required :{} | free :{}"
+          "| total :{}",
           size, free, total);
     }
     HIP_RETURN(hipErrorOutOfMemory);
@@ -174,14 +174,14 @@ hipError_t hipMemExportToShareableHandle(void* shareableHandle,
   }
 
   if (ga->GetProperties().requestedHandleTypes != handleType) {
-    LogPrintfError("HandleType mismatch memoryHandleType: %d, requestedHandleTypes: %d",
+    LogPrintfError("HandleType mismatch memoryHandleType: {}, requestedHandleTypes: {}",
                    ga->GetProperties().requestedHandleTypes, handleType);
     HIP_RETURN(hipErrorInvalidValue);
   }
 
   if (!ga->asAmdMemory().getContext().devices()[0]->ExportShareableVMMHandle(
           ga->asAmdMemory(), flags, shareableHandle)) {
-    LogPrintfError("Exporting Handle failed with flags: %d", flags);
+    LogPrintfError("Exporting Handle failed with flags: {}", flags);
     HIP_RETURN(hipErrorInvalidValue);
   }
 

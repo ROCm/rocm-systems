@@ -362,7 +362,7 @@ void MemObjMap::AddMemObj(const void* k, amd::Memory* v) {
   std::unique_lock lock(AllocatedLock_);
   auto rval = MemObjMap_.insert({reinterpret_cast<uintptr_t>(k), v});
   if (!rval.second) {
-    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM, "Memobj map already has an entry for ptr: 0x%x",
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM, "Memobj map already has an entry for ptr: {:#x}",
                       reinterpret_cast<uintptr_t>(k));
   }
 }
@@ -436,7 +436,7 @@ void MemObjMap::AddVirtualMemObj(const void* k, amd::Memory* v) {
   auto rval = VirtualMemObjMap_.insert({reinterpret_cast<uintptr_t>(k), v});
   if (!rval.second) {
     ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
-            "Virtual Memobj map already has an entry for ptr: 0x%x",
+            "Virtual Memobj map already has an entry for ptr: {:#x}",
             reinterpret_cast<uintptr_t>(k));
   }
 }
@@ -471,7 +471,7 @@ void MemObjMap::AddIpcHandleMemObj(const IpcMemHandle& k, amd::Memory* v) {
   auto rval = IpcHandleMemObjMap_.insert({k, v});
   if (!rval.second) {
     ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
-        "Error adding entry for Memobj 0x%x in IpcHandle map. The handle already exists.", v);
+        "Error adding entry for Memobj {:#x} in IpcHandle map. The handle already exists.", static_cast<void*>(v));
   }
 }
 
@@ -546,7 +546,7 @@ amd::Memory* Device::CreateVirtualBuffer(amd::Context& device_context, void* vpt
     // If not parent, but sub-buffer/child, then validate the address range
     vaddr_base_obj = amd::MemObjMap::FindVirtualMemObj(vptr);
     if (vaddr_base_obj == nullptr) {
-      LogPrintfError("Cannot find entry in VirtualMemObjMap: %p ", vptr);
+      LogPrintfError("Cannot find entry in VirtualMemObjMap: {} ", static_cast<void*>(vptr));
       return nullptr;
     }
     assert(vaddr_base_obj->getMemFlags() & CL_MEM_VA_RANGE_AMD);
@@ -588,7 +588,7 @@ amd::Memory* Device::CreateVirtualBuffer(amd::Context& device_context, void* vpt
 bool Device::DestroyVirtualBuffer(amd::Memory* vaddr_mem_obj) {
   // Argument nullptr check.
   if (vaddr_mem_obj == nullptr || vaddr_mem_obj->getSvmPtr() == nullptr) {
-    LogPrintfError("Mem obj passed is nullptr, vaddr_mem_obj: %p ", vaddr_mem_obj);
+    LogPrintfError("Mem obj passed is nullptr, vaddr_mem_obj: {} ", static_cast<void*>(vaddr_mem_obj));
     return false;
   }
 
@@ -596,7 +596,7 @@ bool Device::DestroyVirtualBuffer(amd::Memory* vaddr_mem_obj) {
     // If parent is not nullptr, this is the sub-buffer object.
     amd::Memory* vaddr_base_obj = amd::MemObjMap::FindVirtualMemObj(vaddr_mem_obj->getSvmPtr());
     if (vaddr_base_obj == nullptr) {
-      LogPrintfError("Cannot find mem obj for ptr: %p", vaddr_mem_obj->getSvmPtr());
+      LogPrintfError("Cannot find mem obj for ptr: {}", static_cast<void*>(vaddr_mem_obj->getSvmPtr()));
       return false;
     }
     vaddr_base_obj->removeSubBuffer(vaddr_mem_obj);
@@ -631,7 +631,7 @@ bool Device::BlitProgram::create(amd::Device* device, const std::string& extraKe
   program_ = new Program(*context_, kernels.c_str(), Program::OpenCL_C);
   if (program_ == nullptr) {
     ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN,
-             "Program creation for Kernel: %s failed", kernels.c_str());
+             "Program creation for Kernel: {} failed", kernels.c_str());
     return false;
   }
 
@@ -654,12 +654,12 @@ bool Device::BlitProgram::create(amd::Device* device, const std::string& extraKe
   if ((retval = program_->build(devices, opt.c_str(), nullptr, nullptr, GPU_DUMP_BLIT_KERNELS)) !=
       CL_SUCCESS) {
     ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN,
-             "Build failed for Kernel: %s with error code %d", kernels.c_str(), retval);
+             "Build failed for Kernel: {} with error code {}", kernels.c_str(), retval);
     return false;
   }
   if (!program_->load()) {
     ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN,
-             "Could not load the kernels: %s", kernels.c_str());
+             "Could not load the kernels: {}", kernels.c_str());
     return false;
   }
 
@@ -1047,7 +1047,7 @@ bool Device::IpcCreate(void* dev_ptr, size_t* mem_size, char* handle, size_t* me
   amd::Memory* amd_mem_obj = amd::MemObjMap::FindMemObj(dev_ptr);
   if (amd_mem_obj == nullptr) {
     ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
-             "Cannot retrieve amd_mem_obj for dev_ptr: 0x%x", dev_ptr);
+             "Cannot retrieve amd_mem_obj for dev_ptr: {:#x}", static_cast<void*>(dev_ptr));
     return false;
   }
 
@@ -1065,7 +1065,7 @@ bool Device::IpcCreate(void* dev_ptr, size_t* mem_size, char* handle, size_t* me
   if (orig_dev_ptr > dev_ptr) {
     // If this happens, then revisit FindMemObj logic
     ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
-            "Original dev_ptr: 0x%x cannot be greater than dev_ptr: 0x%x", orig_dev_ptr, dev_ptr);
+            "Original dev_ptr: {:#x} cannot be greater than dev_ptr: {:#x}", static_cast<void*>(orig_dev_ptr), static_cast<void*>(dev_ptr));
     return false;
   }
 
@@ -1158,7 +1158,7 @@ bool Device::GetHandleForAddressRange(void* dev_ptr, size_t size, void* handle) 
   amd::Memory* amd_mem_obj = amd::MemObjMap::FindMemObj(dev_ptr);
   if (amd_mem_obj == nullptr) {
     ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
-             "Cannot retrieve amd_mem_obj for dev_ptr: 0x%x", dev_ptr);
+             "Cannot retrieve amd_mem_obj for dev_ptr: {:#x}", static_cast<void*>(dev_ptr));
     return false;
   }
 
@@ -1508,7 +1508,7 @@ bool ClBinary::loadLlvmBinary(std::string& llvmBinary,
   }
 
   ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN,
-           "Cannot Load LLVM Binary: %s", llvmBinary.c_str());
+           "Cannot Load LLVM Binary: {}", llvmBinary.c_str());
   return false;
 }
 

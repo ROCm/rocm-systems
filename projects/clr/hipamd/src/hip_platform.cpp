@@ -85,7 +85,7 @@ void** __hipRegisterFatBinary(const void* data) {
 
   // Normal HIPF path
   if (fbwrapper->magic != __hipFatMAGIC2 || fbwrapper->version != 1) {
-    LogPrintfError("Cannot Register fat binary. FatMagic: %u version: %u ", fbwrapper->magic,
+    LogPrintfError("Cannot Register fat binary. FatMagic: {} version: {} ", fbwrapper->magic,
                    fbwrapper->version);
     return nullptr;
   }
@@ -301,13 +301,13 @@ hipError_t hipLaunchByPtr(const void* hostFunction) {
   hip::Stream* stream = reinterpret_cast<hip::Stream*>(exec.hStream_);
   int deviceId = (stream != nullptr) ? stream->DeviceId() : ihipGetDevice();
   if (deviceId == -1) {
-    LogPrintfError("Wrong DeviceId: %d", deviceId);
+    LogPrintfError("Wrong DeviceId: {}", deviceId);
     HIP_RETURN(hipErrorNoDevice);
   }
   hipFunction_t func = nullptr;
   hipError_t hip_error = PlatformState::instance().getStatFunc(&func, hostFunction, deviceId);
   if ((hip_error != hipSuccess) || (func == nullptr)) {
-    LogPrintfError("Could not retrieve hostFunction: 0x%x", hostFunction);
+    LogPrintfError("Could not retrieve hostFunction: {:#x}", static_cast<void*>(const_cast<void*>(hostFunction)));
     HIP_RETURN(hipErrorInvalidDeviceFunction);
   }
 
@@ -358,12 +358,12 @@ hipError_t ihipCreateGlobalVarObj(const char* name, hipModule_t hmod, amd::Memor
   device::Program* dev_program = program->getDeviceProgram(*hip::getCurrentDevice()->devices()[0]);
 
   if (dev_program == nullptr) {
-    LogPrintfError("Cannot get Device Function for module: 0x%x", hmod);
+    LogPrintfError("Cannot get Device Function for module: {:#x}", static_cast<void*>(hmod));
     HIP_RETURN(hipErrorInvalidDeviceFunction);
   }
   /* Find the global Symbols */
   if (!dev_program->createGlobalVarObj(amd_mem_obj, dptr, bytes, name)) {
-    LogPrintfError("Cannot create Global Var obj for symbol: %s", name);
+    LogPrintfError("Cannot create Global Var obj for symbol: {}", name);
     HIP_RETURN(hipErrorInvalidSymbol);
   }
 
@@ -895,7 +895,7 @@ hipError_t PlatformState::getDynFunc(hipFunction_t* hfunc, hipModule_t hmod,
 
   auto it = dynCO_map_.find(hmod);
   if (it == dynCO_map_.end()) {
-    LogPrintfError("Cannot find the module: 0x%x", hmod);
+    LogPrintfError("Cannot find the module: {:#x}", static_cast<void*>(hmod));
     return hipErrorNotFound;
   }
   if (0 == strlen(func_name)) {
@@ -910,7 +910,7 @@ hipError_t PlatformState::getFuncCount(unsigned int* count, hipModule_t hmod) {
 
   auto it = dynCO_map_.find(hmod);
   if (it == dynCO_map_.end()) {
-    LogPrintfError("Cannot find the module: 0x%x", hmod);
+    LogPrintfError("Cannot find the module: {:#x}", static_cast<void*>(hmod));
     return hipErrorNotFound;
   }
   return it->second->getFuncCount(count);
@@ -932,7 +932,7 @@ hipError_t PlatformState::getDynGlobalVar(const char* hostVar, hipModule_t hmod,
 
   auto it = dynCO_map_.find(hmod);
   if (it == dynCO_map_.end()) {
-    LogPrintfError("Cannot find the module: 0x%x", hmod);
+    LogPrintfError("Cannot find the module: {:#x}", static_cast<void*>(hmod));
     return hipErrorNotFound;
   }
   if (dev_ptr) {
@@ -966,13 +966,13 @@ hipError_t PlatformState::getDynTexGlobalVar(textureReference* texRef, hipDevice
 
   auto tex_it = texRef_map_.find(texRef);
   if (tex_it == texRef_map_.end()) {
-    LogPrintfError("Cannot find the texRef Entry: 0x%x", texRef);
+    LogPrintfError("Cannot find the texRef Entry: {:#x}", static_cast<const void*>(texRef));
     return hipErrorNotFound;
   }
 
   auto it = dynCO_map_.find(tex_it->second.first);
   if (it == dynCO_map_.end()) {
-    LogPrintfError("Cannot find the module: 0x%x", tex_it->second.first);
+    LogPrintfError("Cannot find the module: {:#x}", static_cast<void*>(tex_it->second.first));
     return hipErrorNotFound;
   }
 
@@ -990,7 +990,7 @@ hipError_t PlatformState::getDynTexRef(const char* hostVar, hipModule_t hmod,
 
   auto it = dynCO_map_.find(hmod);
   if (it == dynCO_map_.end()) {
-    LogPrintfError("Cannot find the module: 0x%x", hmod);
+    LogPrintfError("Cannot find the module: {:#x}", static_cast<void*>(hmod));
     return hipErrorNotFound;
   }
 

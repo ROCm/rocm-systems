@@ -308,7 +308,7 @@ hipError_t hipGraphicsGLRegisterImage(hipGraphicsResource** resource, GLuint ima
   cl_mem_flags cl_flags = 0;
   hipError_t status = HipToClMemoryFlags(flags, &cl_flags);
   if (status != hipSuccess) {
-    LogPrintfError("invalid parameter \"flags\" %u, gl interop can not convert", flags);
+    LogPrintfError("invalid parameter \"flags\" {}, gl interop can not convert", flags);
     HIP_RETURN(status);
   }
 
@@ -598,7 +598,7 @@ hipError_t hipGraphicsGLRegisterImage(hipGraphicsResource** resource, GLuint ima
 
   device::Memory* mem = pImageGL->getDeviceMemory(dev);
   if (nullptr == mem) {
-    LogPrintfError("Can't allocate memory size - 0x%08X bytes!", pImageGL->getSize());
+    LogPrintfError("Can't allocate memory size - {:#08X} bytes!", pImageGL->getSize());
     pImageGL->release();
     HIP_RETURN(hipErrorUnknown);
   }
@@ -625,7 +625,7 @@ hipError_t hipGraphicsGLRegisterBuffer(hipGraphicsResource** resource, GLuint bu
   cl_mem_flags cl_flags = 0;
   hipError_t status = HipToClMemoryFlags(flags, &cl_flags);
   if (status != hipSuccess) {
-    LogPrintfError("invalid parameter \"flags\" %u, gl interop can not convert", flags);
+    LogPrintfError("invalid parameter \"flags\" {}, gl interop can not convert", flags);
     HIP_RETURN(status);
   }
 
@@ -706,7 +706,7 @@ hipError_t hipGraphicsGLRegisterBuffer(hipGraphicsResource** resource, GLuint bu
 
   device::Memory* mem = pBufferGL->getDeviceMemory(dev);
   if (nullptr == mem) {
-    LogPrintfError("Can't allocate memory size - 0x%08X bytes!", pBufferGL->getSize());
+    LogPrintfError("Can't allocate memory size - {:#08X} bytes!", pBufferGL->getSize());
     HIP_RETURN(hipErrorUnknown);
   }
   mem->processGLResource(device::Memory::GLDecompressResource);

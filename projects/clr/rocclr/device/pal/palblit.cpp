@@ -1569,7 +1569,7 @@ bool KernelBlitManager::copyImage(device::Memory& srcMemory, device::Memory& dst
   if (srcFormat.image_channel_order != dstFormat.image_channel_order ||
       srcFormat.image_channel_data_type != dstFormat.image_channel_data_type) {
     // Give hint if any related test fails
-    LogPrintfInfo("srcFormat(order=0x%xh, type=0x%xh) != dstFormat(order=0x%xh, type=0x%xh)",
+    LogPrintfInfo("srcFormat(order={:#x}, type={:#x}) != dstFormat(order={:#x}, type={:#x})",
                   srcFormat.image_channel_order, srcFormat.image_channel_data_type,
                   dstFormat.image_channel_order, dstFormat.image_channel_data_type);
   }

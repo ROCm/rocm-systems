@@ -158,12 +158,12 @@ bool Event::setStatus(int32_t status, uint64_t timeStamp) {
     }
 
     if (profilingInfo().enabled_) {
-      ClPrint(LOG_DETAIL_DEBUG, LOG_CMD, "Command %p complete (Wall: %ld, CPU: %ld, GPU: %ld us)",
-              &command(), ((profilingInfo().end_ - epoch) / 1000),
+      ClPrint(LOG_DETAIL_DEBUG, LOG_CMD, "Command {} complete (Wall: {}, CPU: {}, GPU: {} us)",
+              static_cast<const void*>(&command()), ((profilingInfo().end_ - epoch) / 1000),
               ((profilingInfo().submitted_ - profilingInfo().queued_) / 1000),
               ((profilingInfo().end_ - profilingInfo().start_) / 1000));
     } else {
-      ClPrint(LOG_DETAIL_DEBUG, LOG_CMD, "Command %p complete", &command());
+      ClPrint(LOG_DETAIL_DEBUG, LOG_CMD, "Command {} complete", static_cast<const void*>(&command()));
     }
     release();
   }
@@ -175,7 +175,7 @@ bool Event::setStatus(int32_t status, uint64_t timeStamp) {
 bool Event::resetStatus(int32_t status) {
   int32_t currentStatus = this->status();
   if (currentStatus != CL_COMPLETE) {
-    ClPrint(LOG_ERROR, LOG_CMD, "Command is reset before complete current status :%d",
+    ClPrint(LOG_ERROR, LOG_CMD, "Command is reset before complete current status :{}",
             currentStatus);
   }
   if (!status_.compare_exchange_strong(currentStatus, status, std::memory_order_relaxed)) {
@@ -238,8 +238,8 @@ bool Event::awaitCompletion() {
       return false;
     }
 
-    ClPrint(LOG_DETAIL_DEBUG, LOG_WAIT, "Waiting for event %p to complete, current status %d",
-            this, status());
+    ClPrint(LOG_DETAIL_DEBUG, LOG_WAIT, "Waiting for event {} to complete, current status {}",
+            static_cast<const void*>(this), status());
     auto* queue = command().queue();
     if ((queue != nullptr) && queue->vdev()->ActiveWait()) {
       while (status() > CL_COMPLETE) {
@@ -253,7 +253,7 @@ bool Event::awaitCompletion() {
         lock_.wait();
       }
     }
-    ClPrint(LOG_DETAIL_DEBUG, LOG_WAIT, "Event %p wait completed", this);
+    ClPrint(LOG_DETAIL_DEBUG, LOG_WAIT, "Event {} wait completed", static_cast<const void*>(this));
   }
 
   return status() == CL_COMPLETE;
@@ -350,8 +350,9 @@ void Command::enqueue() {
     Agent::postEventCreate(as_cl(static_cast<Event*>(this)), type_);
   }
 
-  ClPrint(LOG_DETAIL_DEBUG, LOG_CMD, "Command (%s) enqueued: %p to queue: %p",
-          amd::activity_prof::getOclCommandKindString(this->type()), this, queue_);
+  ClPrint(LOG_DETAIL_DEBUG, LOG_CMD, "Command ({}) enqueued: {} to queue: {}",
+          amd::activity_prof::getOclCommandKindString(this->type()), static_cast<void*>(this),
+          static_cast<void*>(queue_));
 
   // Direct dispatch logic below will submit the command immediately, but the command status
   // update will occur later after flush() with a wait
@@ -519,7 +520,7 @@ bool OneMemoryArgCommand::validateMemory() {
   }
   device::Memory* mem = memory_->getDeviceMemory(queue()->device());
   if (NULL == mem) {
-    LogPrintfError("Can't allocate memory size - 0x%08X bytes!", memory_->getSize());
+    LogPrintfError("Can't allocate memory size - {:#08X} bytes!", memory_->getSize());
     return false;
   }
   return true;
@@ -566,12 +567,12 @@ bool TwoMemoryArgsCommand::validateMemory() {
   }
   device::Memory* mem = memory1_->getDeviceMemory(queue()->device());
   if (NULL == mem) {
-    LogPrintfError("Can't allocate memory size - 0x%08X bytes!", memory1_->getSize());
+    LogPrintfError("Can't allocate memory size - {:#08X} bytes!", memory1_->getSize());
     return false;
   }
   mem = memory2_->getDeviceMemory(queue()->device());
   if (NULL == mem) {
-    LogPrintfError("Can't allocate memory size - 0x%08X bytes!", memory2_->getSize());
+    LogPrintfError("Can't allocate memory size - {:#08X} bytes!", memory2_->getSize());
     return false;
   }
   return true;
@@ -648,7 +649,7 @@ bool MigrateMemObjectsCommand::validateMemory() {
   for (const auto& it : memObjects_) {
     device::Memory* mem = it->getDeviceMemory(queue()->device());
     if (NULL == mem) {
-      LogPrintfError("Can't allocate memory size - 0x%08X bytes!", it->getSize());
+      LogPrintfError("Can't allocate memory size - {:#08X} bytes!", it->getSize());
       return false;
     }
   }
@@ -698,7 +699,7 @@ bool ExtObjectsCommand::validateMemory() {
   for (const auto& it : memObjects_) {
     device::Memory* mem = it->getDeviceMemory(queue()->device());
     if (NULL == mem) {
-      LogPrintfError("Can't allocate memory size - 0x%08X bytes!", it->getSize());
+      LogPrintfError("Can't allocate memory size - {:#08X} bytes!", it->getSize());
       return false;
     }
     retVal = processGLResource(mem);
@@ -723,7 +724,7 @@ bool MakeBuffersResidentCommand::validateMemory() {
   for (const auto& it : memObjects_) {
     device::Memory* mem = it->getDeviceMemory(queue()->device());
     if (NULL == mem) {
-      LogPrintfError("Can't allocate memory size - 0x%08X bytes!", it->getSize());
+      LogPrintfError("Can't allocate memory size - {:#08X} bytes!", it->getSize());
       return false;
     }
   }
@@ -743,7 +744,7 @@ bool ThreadTraceMemObjectsCommand::validateMemory() {
         device::Memory* tmpMem = (*tmpIt)->getDeviceMemory(queue()->device());
         delete tmpMem;
       }
-      LogPrintfError("Can't allocate memory size - 0x%08X bytes!", (*it)->getSize());
+      LogPrintfError("Can't allocate memory size - {:#08X} bytes!", (*it)->getSize());
       return false;
     }
   }
@@ -766,7 +767,7 @@ bool CopyMemoryP2PCommand::validateMemory() {
   }
   device::Memory* mem = memory1_->getDeviceMemory(*devices[0]);
   if (nullptr == mem) {
-    LogPrintfError("Can't allocate memory size - 0x%08X bytes!", memory1_->getSize());
+    LogPrintfError("Can't allocate memory size - {:#08X} bytes!", memory1_->getSize());
     return false;
   }
   const std::vector<Device*>& devices2 = memory2_->getContext().devices();
@@ -776,7 +777,7 @@ bool CopyMemoryP2PCommand::validateMemory() {
   }
   mem = memory2_->getDeviceMemory(*devices2[0]);
   if (nullptr == mem) {
-    LogPrintfError("Can't allocate memory size - 0x%08X bytes!", memory2_->getSize());
+    LogPrintfError("Can't allocate memory size - {:#08X} bytes!", memory2_->getSize());
     return false;
   }
   bool p2pStaging = false;
@@ -794,8 +795,8 @@ bool CopyMemoryP2PCommand::validateMemory() {
           devices[0]->P2PStage()->getDeviceMemory(*devices[0]->GlbCtx().devices()[d]);
       if (nullptr == mem) {
         ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
-                "Cannot get P2P stage Device Memory for device: 0x%x \n",
-                devices[0]->GlbCtx().devices()[d]);
+                "Cannot get P2P stage Device Memory for device: {}",
+                static_cast<void*>(devices[0]->GlbCtx().devices()[d]));
         return false;
       }
     }
@@ -807,7 +808,7 @@ bool CopyMemoryP2PCommand::validateMemory() {
 bool SvmPrefetchAsyncCommand::validateMemory() {
   amd::Memory* svmMem = amd::MemObjMap::FindMemObj(dev_ptr());
   if (nullptr == svmMem) {
-    LogPrintfError("SvmPrefetchAsync received unknown memory for prefetch: %p!", dev_ptr());
+    LogPrintfError("SvmPrefetchAsync received unknown memory for prefetch: {}!", dev_ptr());
     return false;
   }
   return true;

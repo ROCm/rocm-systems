@@ -1149,7 +1149,7 @@ bool LinkProgram::LinkComplete(void** bin_out, size_t* size_out) {
   }
 
   std::vector<std::string> exe_options = getLinkOptions(link_args_);
-  LogPrintfInfo("Exe options forwarded to compiler: %s",
+  LogPrintfInfo("Exe options forwarded to compiler: {}",
                 [&]() {
                   std::string ret;
                   for (const auto& i : exe_options) {
@@ -1157,11 +1157,10 @@ bool LinkProgram::LinkComplete(void** bin_out, size_t* size_out) {
                     ret += " ";
                   }
                   return ret;
-                }()
-                    .c_str());
+                }());
   if (!helpers::createExecutable(exec_input_, isa_, exe_options, build_log_, executable_,
                                  data_kind_ == AMD_COMGR_DATA_KIND_SPIRV)) {
-    LogPrintfInfo("Error in hip linker: unable to create exectuable: %s", build_log_.c_str());
+    LogPrintfInfo("Error in hip linker: unable to create exectuable: {}", build_log_);
     return false;
   }
 

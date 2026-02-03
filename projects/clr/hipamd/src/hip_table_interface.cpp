@@ -55,7 +55,7 @@ template <> hipError_t HandleException<hipError_t>() {
     LogPrintfError("HIP Exception: C++ Callback Threw, forwarding.\n");
     e.rethrow_nested();
   } catch (const std::exception& e) {
-    LogPrintfError("HIP Exception: C++ Exception: %s\n", e.what());
+    LogPrintfError("HIP Exception: C++ Exception: {}\n", e.what());
     return hipErrorUnknown;
   } catch (...) {
     assert(false && "HIP Exception: Unhandled.");

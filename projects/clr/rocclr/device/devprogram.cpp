@@ -222,7 +222,7 @@ static amd_comgr_language_t getCOMGRLanguage(bool isHIP, const amd::option::Opti
   }
 
   ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_COMGR,
-           "Cannot set Language version for %s \n", amdOptions.oVariables->CLStd);
+           "Cannot set Language version for {} \n", amdOptions.oVariables->CLStd);
   return AMD_COMGR_LANGUAGE_NONE;
 }
 
@@ -758,7 +758,7 @@ static void dumpCodeObject(const std::string& image) {
   char fname[30];
   static std::atomic<int> index;
   sprintf(fname, "_code_object%04d.o", index++);
-  ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_CODE, "Code object saved in %s\n", fname);
+  ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_CODE, "Code object saved in {}\n", fname);
   std::ofstream ofs;
   ofs.open(fname, std::ios::binary);
   ofs << image;
@@ -1882,11 +1882,11 @@ bool Program::createKernelMetadataMap(void* binary, size_t binSize) {
         codeObjectVer_ = 5;
       } else {
         ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
-                "Unknown code object metadata minor version [%s.%s].", major_version,
+                "Unknown code object metadata minor version [{}.{}].", major_version,
                 minor_version);
       }
     } else {
-      ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "Unknown code object metadata major version [%s.%s].",
+      ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "Unknown code object metadata major version [{}.{}].",
               major_version, minor_version);
     }
 
@@ -2164,7 +2164,7 @@ bool Program::runInitFiniKernel(const std::vector<const Kernel*>& kernels) const
       queue->create();
     }
 
-    LogPrintfInfo("%s is marked init/fini", kernel->name().c_str());
+    LogPrintfInfo("{} is marked init/fini", kernel->name().c_str());
 
     size_t globalWorkOffset[3] = {0};
     size_t globalWorkSize[3] = {1, 1, 1};

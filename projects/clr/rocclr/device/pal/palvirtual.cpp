@@ -404,7 +404,7 @@ bool VirtualGPU::Queue::flush() {
     Pal::Result result = iDev_->AddGpuMemoryReferences(palMemRefs_.size(), &palMemRefs_[0], iQueue_,
                                                        Pal::GpuMemoryRefCantTrim);
     if (Pal::Result::Success != result) {
-      LogPrintfError("PAL failed to make resident resources! result: %d", result);
+      LogPrintfError("PAL failed to make resident resources! result: {}", result);
       return false;
     }
     palMemRefs_.clear();
@@ -414,14 +414,14 @@ bool VirtualGPU::Queue::flush() {
   Pal::Result result;
   result = iCmdBuffs_[cmdBufIdSlot_]->End();
   if (Pal::Result::Success != result) {
-    LogPrintfError("PAL failed to finalize a command buffer! result: %d", result);
+    LogPrintfError("PAL failed to finalize a command buffer! result: {}", result);
     return false;
   }
 
   // Reset the fence. PAL will reset OS event
   result = iDev_->ResetFences(1, &iCmdFences_[cmdBufIdSlot_]);
   if (Pal::Result::Success != result) {
-    LogPrintfError("PAL failed to reset a fence! result:%d", result);
+    LogPrintfError("PAL failed to reset a fence! result:{}", result);
     return false;
   }
 
@@ -461,7 +461,7 @@ bool VirtualGPU::Queue::flush() {
     result = iQueue_->Submit(submitInfo);
   }
   if (Pal::Result::Success != result) {
-    LogPrintfError("PAL failed to submit CMD! result:%d", result);
+    LogPrintfError("PAL failed to submit CMD! result:{}", result);
     if (GPU_ANALYZE_HANG) {
       DumpMemoryReferences();
     }
@@ -500,7 +500,7 @@ bool VirtualGPU::Queue::flush() {
   // Reset command buffer, so CB chunks could be reused
   result = iCmdBuffs_[cmdBufIdSlot_]->Reset(nullptr, false);
   if (Pal::Result::Success != result) {
-    LogPrintfError("PAL failed CB reset! result:%d", result);
+    LogPrintfError("PAL failed CB reset! result:{}", result);
     return false;
   }
   // Start command buffer building
@@ -508,7 +508,7 @@ bool VirtualGPU::Queue::flush() {
   cmdBuildInfo.pMemAllocator = &vlAlloc_;
   result = iCmdBuffs_[cmdBufIdSlot_]->Begin(cmdBuildInfo);
   if (Pal::Result::Success != result) {
-    LogPrintfError("PAL failed CB building initialization! result:%d", result);
+    LogPrintfError("PAL failed CB building initialization! result:{}", result);
     return false;
   }
 
@@ -1189,8 +1189,8 @@ VirtualGPU::~VirtualGPU() {
   }
 
   if (hostcallBuffer_ != nullptr) {
-    ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "deleting hostcall buffer %p for virtual queue %p",
-            hostcallBuffer_, this);
+    ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "deleting hostcall buffer {} for virtual queue {}",
+            static_cast<void*>(hostcallBuffer_), static_cast<void*>(this));
     amd::disableHostcalls(hostcallBuffer_);
     dev().svmFree(hostcallBuffer_);
   }
@@ -2285,8 +2285,8 @@ void VirtualGPU::submitStreamOperation(amd::StreamOperationCommand& cmd) {
     bool result = static_cast<KernelBlitManager&>(blitMgr()).streamOpsWait(*memory, value, offset,
                                                                            sizeBytes, flags, mask);
     ClPrint(amd::LOG_DEBUG, amd::LOG_COPY,
-            "Waiting for value: 0x%lx."
-            " Flags: 0x%lx mask: 0x%lx",
+            "Waiting for value: {:#x}."
+            " Flags: {:#x} mask: {:#x}",
             value, flags, mask);
     if (!result) {
       LogError("submitStreamOperation: Wait failed!");
@@ -2294,7 +2294,7 @@ void VirtualGPU::submitStreamOperation(amd::StreamOperationCommand& cmd) {
   } else if (type == ROCCLR_COMMAND_STREAM_WRITE_VALUE) {
     bool result = static_cast<KernelBlitManager&>(blitMgr()).streamOpsWrite(*memory, value, offset,
                                                                             sizeBytes);
-    ClPrint(amd::LOG_DEBUG, amd::LOG_COPY, "Writing value: 0x%lx", value);
+    ClPrint(amd::LOG_DEBUG, amd::LOG_COPY, "Writing value: {:#x}", value);
     if (!result) {
       LogError("submitStreamOperation: Write failed!");
     }
@@ -2699,7 +2699,7 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
   }
   size_t ldsSize;
 
-  ClPrint(amd::LOG_INFO, amd::LOG_KERN, "!\tkernel : %s\n", hsaKernel.name().c_str());
+  ClPrint(amd::LOG_INFO, amd::LOG_KERN, "!\tkernel : {}\n", hsaKernel.name().c_str());
 
   if (PAL_EMBED_KERNEL_MD) {
     char buf[256];
@@ -2744,7 +2744,7 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
     size_t maxStackSize = device().MaxStackSize();
     if (privateMemSize > maxStackSize) {
       ClPrint(amd::LOG_INFO, amd::LOG_KERN,
-              "Scratch size (%zu) exceeds max allowed (%zu) for kernel : %s", privateMemSize,
+              "Scratch size ({}) exceeds max allowed ({}) for kernel : {}", privateMemSize,
               maxStackSize, hsaKernel.name().c_str());
       LogError("Scratch size exceeds max allowed.");
       return false;
@@ -2950,7 +2950,7 @@ void VirtualGPU::submitPerfCounter(amd::PerfCounterCommand& vcmd) {
       } else {
         LogPrintfError(
             "We failed to allocate a perfcounter in PAL.\
-                    Block: %d, counter: #d, event: %d",
+                    Block: {}, counter: {}, event: {}",
             gpuCounter->info()->blockIndex_, gpuCounter->info()->counterIndex_,
             gpuCounter->info()->eventIndex_);
       }
@@ -3240,7 +3240,7 @@ bool VirtualGPU::awaitCompletion(CommandBatch* cb, const amd::Event* waitingEven
     } else if (head->status() == CL_RUNNING) {
       head->setStatus(CL_COMPLETE);
     } else if ((head->status() != CL_COMPLETE) && (current != nullptr)) {
-      LogPrintfError("Unexpected command status - %d!", head->status());
+      LogPrintfError("Unexpected command status - {}!", head->status());
     }
 
     // Check if it's a waiting command
@@ -3554,7 +3554,7 @@ bool VirtualGPU::profilingCollectResults(CommandBatch* cb, const amd::Event* wai
     } else if (first->status() == CL_RUNNING) {
       first->setStatus(CL_COMPLETE, endTimeStamp);
     } else if ((first->status() != CL_COMPLETE) && (current != nullptr)) {
-      LogPrintfError("Unexpected command status - %d!", first->status());
+      LogPrintfError("Unexpected command status - {}!", first->status());
     }
 
     // Do we wait this event?
@@ -3915,13 +3915,13 @@ void* VirtualGPU::getOrCreateHostcallBuffer() {
   }
 
   ClPrint(amd::LOG_INFO, amd::LOG_QUEUE,
-          "Created hostcall buffer %p (numPackets == %d, size == %d, align == %d) for virtual "
-          "queue %p\n",
-          hostcallBuffer_, numPackets, size, align, this);
+          "Created hostcall buffer {} (numPackets == {}, size == {}, align == {}) for virtual "
+          "queue {}\n",
+          static_cast<void*>(hostcallBuffer_), numPackets, size, align, static_cast<void*>(this));
 
   if (!amd::enableHostcalls(dev(), hostcallBuffer_, numPackets)) {
-    ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE, "Failed to register hostcall buffer %p with listener",
-            hostcallBuffer_);
+    ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE, "Failed to register hostcall buffer {} with listener",
+            static_cast<void*>(hostcallBuffer_));
     return nullptr;
   }
   return hostcallBuffer_;

@@ -48,7 +48,7 @@ bool Kernel::postLoad() {
                                                 &agent, &symbol);
   if (hsaStatus != HSA_STATUS_SUCCESS) {
     ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN,
-             "Cannot Get Symbol : %s, failed with hsa_status: %d \n", symbolName().c_str(),
+             "Cannot Get Symbol : {}, failed with hsa_status: {} \n", symbolName().c_str(),
                       hsaStatus);
     return false;
   }
@@ -57,7 +57,7 @@ bool Kernel::postLoad() {
                                              &kernelCodeHandle_);
   if (hsaStatus != HSA_STATUS_SUCCESS) {
     ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN,
-             " Cannot Get Symbol Info: %s, failed with hsa_status: %d \n ",
+             " Cannot Get Symbol Info: {}, failed with hsa_status: {} \n ",
                       symbolName().c_str(), hsaStatus);
     return false;
   }
@@ -66,7 +66,7 @@ bool Kernel::postLoad() {
       symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_DYNAMIC_CALLSTACK, &kernelHasDynamicCallStack_);
   if (hsaStatus != HSA_STATUS_SUCCESS) {
     ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN,
-             " Cannot Get Dynamic callstack info, failed with hsa_status: %d \n ",
+             " Cannot Get Dynamic callstack info, failed with hsa_status: {} \n ",
                       hsaStatus);
     return false;
   }
@@ -85,7 +85,7 @@ bool Kernel::postLoad() {
                                                   RuntimeHandle().c_str(), &agent, &kernelSymbol);
     if (hsaStatus != HSA_STATUS_SUCCESS) {
       ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN,
-               "Cannot get Kernel Symbol by name: %s, failed with hsa_status: %d \n",
+               "Cannot get Kernel Symbol by name: {}, failed with hsa_status: {} \n",
                         RuntimeHandle().c_str(), hsaStatus);
       return false;
     }
@@ -94,7 +94,7 @@ bool Kernel::postLoad() {
         kernelSymbol, HSA_EXECUTABLE_SYMBOL_INFO_VARIABLE_SIZE, &variable_size);
     if (hsaStatus != HSA_STATUS_SUCCESS) {
       ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN, 
-          "[ROC][Kernel] Cannot get Kernel Symbol Info, failed with hsa_status: %d \n", hsaStatus);
+          "[ROC][Kernel] Cannot get Kernel Symbol Info, failed with hsa_status: {} \n", hsaStatus);
       return false;
     }
 
@@ -102,7 +102,7 @@ bool Kernel::postLoad() {
         kernelSymbol, HSA_EXECUTABLE_SYMBOL_INFO_VARIABLE_ADDRESS, &variable_address);
     if (hsaStatus != HSA_STATUS_SUCCESS) {
       ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN,
-               "[ROC][Kernel] Cannot get Kernel Address, failed with hsa_status: %d \n",
+               "[ROC][Kernel] Cannot get Kernel Address, failed with hsa_status: {} \n",
                         hsaStatus);
       return false;
     }
@@ -114,7 +114,7 @@ bool Kernel::postLoad() {
 
     if (hsaStatus != HSA_STATUS_SUCCESS) {
       ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN,
-               "[ROC][Kernel] HSA Memory copy failed, failed with hsa_status: %d \n",
+               "[ROC][Kernel] HSA Memory copy failed, failed with hsa_status: {} \n",
                         hsaStatus);
       return false;
     }
@@ -128,7 +128,7 @@ bool Kernel::postLoad() {
       Hsa::agent_get_info(program()->rocDevice().getBackendDevice(), HSA_AGENT_INFO_WAVEFRONT_SIZE,
                           &wavefront_size) != HSA_STATUS_SUCCESS) {
     ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN,
-             "[ROC][Kernel] Cannot get Wavefront Size, failed with hsa_status: %d \n",
+             "[ROC][Kernel] Cannot get Wavefront Size, failed with hsa_status: {} \n",
                       hsaStatus);
     return false;
   }

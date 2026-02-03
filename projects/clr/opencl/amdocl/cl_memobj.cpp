@@ -3104,7 +3104,7 @@ RUNTIME_ENTRY_RET(void*, clEnqueueMapBuffer,
   // Make sure we have memory for the command execution
   device::Memory* mem = srcBuffer->getDeviceMemory(hostQueue.device());
   if (NULL == mem) {
-    LogPrintfError("Can't allocate memory size - 0x%08X bytes!", srcBuffer->getSize());
+    LogPrintfError("Can't allocate memory size - {:#08X} bytes!", srcBuffer->getSize());
     *not_null(errcode_ret) = CL_MEM_OBJECT_ALLOCATION_FAILURE;
     return NULL;
   }
@@ -3376,7 +3376,7 @@ RUNTIME_ENTRY_RET(void*, clEnqueueMapImage,
   // Make sure we have memory for the command execution
   device::Memory* mem = srcImage->getDeviceMemory(hostQueue.device());
   if (NULL == mem) {
-    LogPrintfError("Can't allocate memory size - 0x%08X bytes!", srcImage->getSize());
+    LogPrintfError("Can't allocate memory size - {:#08X} bytes!", srcImage->getSize());
     *not_null(errcode_ret) = CL_MEM_OBJECT_ALLOCATION_FAILURE;
     return NULL;
   }

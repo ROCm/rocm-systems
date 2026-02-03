@@ -724,8 +724,8 @@ bool Resource::CreateImage(CreateParams* params, bool forceLinear) {
 
   if (result != Pal::Result::Success) {
     LogPrintfError(
-        "BindGpuMemory return %d, offset_=%zu, req.size=%zu,  "
-        "viewOwner_->iMem()->Desc().size=%zu\n",
+        "BindGpuMemory return {}, offset_={}, req.size={},  "
+        "viewOwner_->iMem()->Desc().size={}\n",
         result, offset_, req.size,
         viewOwner_ && viewOwner_->iMem() ? viewOwner_->iMem()->Desc().size : 0);
     return false;
@@ -1372,8 +1372,8 @@ bool Resource::create(MemoryType memType, CreateParams* params, bool forceLinear
     if (params->owner_->getSvmPtr() == nullptr) {
       params->owner_->setSvmPtr(gpu_virt_addr);
     } else if (params->owner_->getSvmPtr() != gpu_virt_addr) {
-      LogPrintfError("Cannot get different ptrs in va_range, svm_ptr: %p new_svm_ptr:%p \n",
-                     params->owner_->getSvmPtr(), gpu_virt_addr);
+      LogPrintfError("Cannot get different ptrs in va_range, svm_ptr: {} new_svm_ptr:{} \n",
+                     static_cast<void*>(params->owner_->getSvmPtr()), static_cast<void*>(gpu_virt_addr));
       return false;
     }
   }

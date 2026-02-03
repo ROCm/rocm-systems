@@ -236,8 +236,8 @@ address Os::reserveMemory(address start, size_t size, size_t alignment, MemProt 
     if (status) {
       ClPrint(amd::LOG_DEBUG, amd::LOG_CODE,
               "madvise with advice MADV_HUGEPAGE"
-              " starting at address %p and page size 0x%zx, returned %d, errno: %s",
-              aligned, size, status, strerror(errno));
+              " starting at address {} and page size {:#x}, returned {}, errno: {}",
+              static_cast<void*>(aligned), size, status, strerror(errno));
     }
   }
 
@@ -931,7 +931,7 @@ void Os::CloseIpcMemory(const FileDesc desc, const void* ptr, size_t size) {
 void Os::PrintLibraryLocation() {
   Dl_info dl_info;
   if (dladdr(reinterpret_cast<void*>(Os::loadLibrary), &dl_info) && dl_info.dli_fname) {
-    ClPrint(amd::LOG_INFO, amd::LOG_INIT, "HIP Library Path: %s", dl_info.dli_fname);
+    ClPrint(amd::LOG_INFO, amd::LOG_INIT, "HIP Library Path: {}", dl_info.dli_fname);
   } else {
     ClPrint(amd::LOG_INFO, amd::LOG_INIT, "HIP Library Path: <unknown>");
   }
@@ -973,13 +973,13 @@ bool NumaPolicy::GetMemPolicy() {
   if (syscall(__NR_get_mempolicy, &policy, node_map_.data(),
       node_map_.size() * kBitsPerUInt64, nullptr, 0) < 0) {
     ClPrint(amd::LOG_DEBUG, amd::LOG_RESOURCE,
-        "syscall(__NR_get_mempolicy, size=%zu) failed to query policy",
+        "syscall(__NR_get_mempolicy, size={}) failed to query policy",
         node_map_.size() * kBitsPerUInt64);
     return false;
   }
   if (policy < static_cast<int>(Policy::kDefault) || policy > static_cast<int>(Policy::kMax)) {
     ClPrint(amd::LOG_DEBUG, amd::LOG_RESOURCE,
-            "syscall(__NR_get_mempolicy) returned wrong policy %d", policy);
+            "syscall(__NR_get_mempolicy) returned wrong policy {}", policy);
     return false;
   }
   policy_ = static_cast<Policy>(policy);
@@ -1011,7 +1011,7 @@ bool NumaNode::GetAffinity() {
       "/cpumap";
   std::ifstream file(path);
   if (!file) {
-    ClPrint(amd::LOG_DEBUG, amd::LOG_RESOURCE, "%s cannot be opened", path.c_str());
+    ClPrint(amd::LOG_DEBUG, amd::LOG_RESOURCE, "{} cannot be opened", path.c_str());
     return false;
   }
   std::string line;
@@ -1052,7 +1052,7 @@ bool NumaNode::SchedSetAffinity() {
   if (syscall(__NR_sched_setaffinity, 0, size_,
               static_cast<std::vector<uint64_t>*>(affinity_)->data()) < 0) {
     ClPrint(amd::LOG_DEBUG, amd::LOG_RESOURCE,
-            "syscall(__NR_sched_setaffinity, size=%u) failed", size_);
+            "syscall(__NR_sched_setaffinity, size={}) failed", size_);
     return false;
   }
   return true;

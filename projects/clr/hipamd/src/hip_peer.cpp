@@ -136,7 +136,7 @@ hipError_t hipDeviceGetP2PAttribute(int* value, hipDeviceP2PAttr attr, int srcDe
       break;
     }
     default: {
-      LogPrintfError("Invalid attribute attr: %d ", attr);
+      LogPrintfError("Invalid attribute attr: {} ", attr);
       HIP_RETURN(hipErrorInvalidValue);
     }
   }

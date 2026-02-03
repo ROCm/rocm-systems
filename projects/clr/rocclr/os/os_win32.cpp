@@ -75,7 +75,7 @@ bool Os::init() {
   PerformanceFrequency = (double)frequency.QuadPart;
 
   if (!GetThreadGroupAffinity(GetCurrentThread(), &nativeMask_)) {
-    ClPrint(amd::LOG_ERROR, amd::LOG_INIT, "Failed getting main thread affinity with error %d",
+    ClPrint(amd::LOG_ERROR, amd::LOG_INIT, "Failed getting main thread affinity with error {}",
         GetLastError());
   }
 
@@ -689,7 +689,7 @@ void Os::PrintLibraryLocation() {
           (LPCSTR)&Os::loadLibrary, &hm)) {
     char cszDllPath[1024] = {0};
     if (GetModuleFileNameA(hm, cszDllPath, sizeof(cszDllPath))) {
-      ClPrint(amd::LOG_INFO, amd::LOG_INIT, "HIP Library Path: %s", cszDllPath);
+      ClPrint(amd::LOG_INFO, amd::LOG_INIT, "HIP Library Path: {}", cszDllPath);
       return;
     }
   }
@@ -746,7 +746,7 @@ bool NumaNode::GetAffinity() {
   GROUP_AFFINITY *affinity = new GROUP_AFFINITY();
   if (!GetNumaNodeProcessorMaskEx(node_index_, affinity)) {
     ClPrint(amd::LOG_ERROR, amd::LOG_RESOURCE,
-        "Failed getting numa node(%u) affinity with error %d",
+        "Failed getting numa node({}) affinity with error {}",
         node_index_, GetLastError());
     delete affinity;
     return false;
@@ -763,7 +763,7 @@ bool NumaNode::SchedSetAffinity() {
   if (!SetThreadGroupAffinity(GetCurrentThread(),
                               static_cast<GROUP_AFFINITY*>(affinity_), nullptr)) {
     ClPrint(amd::LOG_ERROR, amd::LOG_RESOURCE,
-        "Failed setting numa node(%u) affinity onto thread with error %d",
+        "Failed setting numa node({}) affinity onto thread with error {}",
         node_index_, GetLastError());
     return false;
   }

@@ -532,7 +532,7 @@ bool Program::load(const std::vector<Device*>& devices) {
 
     if (!devProgram.load()) {
       if (!devProgram.buildLog().empty()) {
-        LogPrintfError("devProgram.load() failed with buildLog=%s\n",
+        LogPrintfError("devProgram.load() failed with buildLog={}\n",
                        devProgram.buildLog().c_str());
       }
       return false;

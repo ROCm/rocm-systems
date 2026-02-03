@@ -87,7 +87,7 @@ hipError_t hipModuleGetFunction(hipFunction_t* hfunc, hipModule_t hmod, const ch
   }
 
   if (hipSuccess != PlatformState::instance().getDynFunc(hfunc, hmod, name)) {
-    LogPrintfError("Cannot find the function: %s for module: 0x%x", name, hmod);
+    LogPrintfError("Cannot find the function: {} for module: {:#x}", name, static_cast<void*>(hmod));
     HIP_RETURN(hipErrorNotFound);
   }
 
@@ -115,7 +115,7 @@ hipError_t hipModuleGetGlobal(hipDeviceptr_t* dptr, size_t* bytes, hipModule_t h
   }
   /* Get address and size for the global symbol */
   if (hipSuccess != PlatformState::instance().getDynGlobalVar(name, hmod, dptr, bytes)) {
-    LogPrintfError("Cannot find global Var: %s for module: 0x%x at device: %d", name, hmod,
+    LogPrintfError("Cannot find global Var: {} for module: {:#x} at device: {}", name, static_cast<void*>(hmod),
                    ihipGetDevice());
     HIP_RETURN(hipErrorNotFound);
   }
@@ -275,11 +275,11 @@ hipError_t ihipLaunchKernel_validate(hipFunction_t f, const amd::LaunchParams& l
                                      void** kernelParams, void** extra, int deviceId,
                                      uint32_t params = 0) {
   if (f == nullptr) {
-    LogPrintfError("%s", "Function passed is null");
+    LogPrintfError("{}", "Function passed is null");
     return hipErrorInvalidImage;
   }
   if ((kernelParams != nullptr) && (extra != nullptr)) {
-    LogPrintfError("%s",
+    LogPrintfError("{}",
                    "Both, kernelParams and extra Params are provided, only one should be provided");
     return hipErrorInvalidValue;
   }
@@ -307,7 +307,7 @@ hipError_t ihipLaunchKernel_validate(hipFunction_t f, const amd::LaunchParams& l
   amd::Kernel* kernel = function->kernel();
   const amd::KernelSignature& signature = kernel->signature();
   if ((signature.numParameters() > 0) && (kernelParams == nullptr) && (extra == nullptr)) {
-    LogPrintfError("%s", "At least one of kernelParams or extra Params should be provided");
+    LogPrintfError("{}", "At least one of kernelParams or extra Params should be provided");
     return hipErrorInvalidValue;
   }
   if (!kernel->getDeviceKernel(*device)) {
@@ -316,7 +316,7 @@ hipError_t ihipLaunchKernel_validate(hipFunction_t f, const amd::LaunchParams& l
   // Make sure the launch params are not larger than if specified launch_bounds
   // If it exceeds, then return a failure
   if (launch_params.local_.product() > kernel->getDeviceKernel(*device)->workGroupInfo()->size_) {
-    LogPrintfError("Launch params (%u, %u, %u) are larger than launch bounds (%lu) for kernel %s",
+    LogPrintfError("Launch params ({}, {}, {}) are larger than launch bounds ({}) for kernel {}",
                    launch_params.local_[0], launch_params.local_[1], launch_params.local_[2],
                    kernel->getDeviceKernel(*device)->workGroupInfo()->size_,
                    function->name().c_str());
@@ -457,7 +457,7 @@ hipError_t ihipModuleLaunchKernel(hipFunction_t f, amd::LaunchParams& launch_par
   HIP_RETURN_ONFAIL(PlatformState::instance().initStatManagedVarDevicePtr(deviceId));
 
   if (f == nullptr) {
-    LogPrintfError("%s", "Function passed is null");
+    LogPrintfError("{}", "Function passed is null");
     return hipErrorInvalidResourceHandle;
   }
   hip::DeviceFunc* function = hip::DeviceFunc::asFunction(f);
@@ -1008,13 +1008,13 @@ hipError_t hipModuleGetTexRef(textureReference** texRef, hipModule_t hmod, const
   amd::Device* device = hip::getCurrentDevice()->devices()[0];
   const device::Info& info = device->info();
   if (!info.imageSupport_) {
-    LogPrintfError("Texture not supported on the device %s", info.name_);
+    LogPrintfError("Texture not supported on the device {}", info.name_);
     HIP_RETURN(hipErrorNotSupported);
   }
 
   /* Get address and size for the global symbol */
   if (hipSuccess != PlatformState::instance().getDynTexRef(name, hmod, texRef)) {
-    LogPrintfError("Cannot get texRef for name: %s at module:0x%x", name, hmod);
+    LogPrintfError("Cannot get texRef for name: {} at module:{:#x}", name, static_cast<void*>(hmod));
     HIP_RETURN(hipErrorNotFound);
   }
 
@@ -1223,7 +1223,7 @@ hipError_t hipLaunchKernelExC(const hipLaunchConfig_t* config, const void* fPtr,
         }
         break;
       default:
-        LogPrintfError("Attribute %u not supported", attr.id);
+        LogPrintfError("Attribute {} not supported", attr.id);
         break;
     }
   }
@@ -1266,7 +1266,7 @@ hipError_t hipDrvLaunchKernelEx(const HIP_LAUNCH_CONFIG* config, hipFunction_t f
         break;
       }
       default:
-        LogPrintfError("Attribute %u not supported", attr.id);
+        LogPrintfError("Attribute {} not supported", attr.id);
         break;
     }
   }

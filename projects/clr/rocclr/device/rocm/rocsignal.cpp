@@ -35,7 +35,7 @@ bool Signal::Init(const amd::Device& dev, uint64_t init, device::Signal::WaitSta
   }
 
   ws_ = ws;
-  ClPrint(amd::LOG_DEBUG, amd::LOG_AQL, "Initialize Hostcall signal=0x%zx", signal_);
+  ClPrint(amd::LOG_DEBUG, amd::LOG_AQL, "Initialize Hostcall signal={:#x}", signal_.handle);
   return true;
 }
 

@@ -148,3 +148,10 @@ endif()
 find_package(SIMDe REQUIRED)
 target_link_libraries(rocclr PUBLIC ${SIMDE_TARGET})
 
+# Quill asynchronous logging library
+option(ROCCLR_ENABLE_QUILL_LOGGING "Enable Quill asynchronous logging" ON)
+if(ROCCLR_ENABLE_QUILL_LOGGING)
+  find_package(Quill REQUIRED)
+  target_link_libraries(rocclr PUBLIC ${QUILL_TARGET})
+  target_compile_definitions(rocclr PUBLIC ROCCLR_USE_QUILL_LOGGING)
+endif()

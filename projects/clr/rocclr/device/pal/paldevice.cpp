@@ -208,12 +208,12 @@ bool NullDevice::init() {
 
     std::unique_ptr<NullDevice> nullDevice(new NullDevice());
     if (!nullDevice) {
-      LogPrintfError("Error allocating new instance of offline PAL Device %s", isa->targetId());
+      LogPrintfError("Error allocating new instance of offline PAL Device {}", isa->targetId());
       return false;
     }
     if (!nullDevice->create(palName, *isa, gfxIpLevel, asicRevision)) {
       // Skip over unsupported devices
-      LogPrintfError("Skipping creating new instance of offline PAL Device %s", isa->targetId());
+      LogPrintfError("Skipping creating new instance of offline PAL Device {}", isa->targetId());
       continue;
     }
     nullDevice.release()->registerDevice();
@@ -224,7 +224,7 @@ bool NullDevice::init() {
 bool NullDevice::create(const char* palName, const amd::Isa& isa, Pal::GfxIpLevel ipLevel,
                         Pal::AsicRevision asicRevision) {
   if (!isa.runtimePalSupported()) {
-    LogPrintfError("Offline PAL device %s is not supported", isa.targetId());
+    LogPrintfError("Offline PAL device {} is not supported", isa.targetId());
     return false;
   }
 
@@ -254,17 +254,17 @@ bool NullDevice::create(const char* palName, const amd::Isa& isa, Pal::GfxIpLeve
   // Create setting for the offline target
   if ((palSettings == nullptr) ||
       !palSettings->create(properties, heaps, wscaps, isa)) {
-    LogPrintfError("Unable to create PAL setting for offline PAL device %s", isa.targetId());
+    LogPrintfError("Unable to create PAL setting for offline PAL device {}", isa.targetId());
     return false;
   }
   if (!ValidateComgr()) {
-    LogPrintfError("Code object manager initialization failed for offline PAL device %s",
+    LogPrintfError("Code object manager initialization failed for offline PAL device {}",
                    isa.targetId());
     return false;
   }
 
   if (!amd::Device::create(isa)) {
-    LogPrintfError("Unable to setup device for PAL offline device %s", isa.targetId());
+    LogPrintfError("Unable to setup device for PAL offline device {}", isa.targetId());
     return false;
   }
 
@@ -882,16 +882,16 @@ bool Device::create(Pal::IDevice* device) {
       findIsa(properties().gfxTriple.major, properties().gfxTriple.minor,
               properties().gfxTriple.stepping, isSRAMECCEnabled, isXNACKEnabled);
   if (!isa) {
-    LogPrintfError("Unsupported PAL device with ASIC revision #%d", asicRevision_);
+    LogPrintfError("Unsupported PAL device with ASIC revision #{}", asicRevision_);
     return false;
   }
   if (!isa->runtimePalSupported()) {
-    LogPrintfError("Unsupported PAL device with ISA %s", isa->targetId());
+    LogPrintfError("Unsupported PAL device with ISA {}", isa->targetId());
     return false;
   }
 
   if (!amd::Device::create(*isa)) {
-    LogPrintfError("Unable to setup device for PAL device %s", isa->targetId());
+    LogPrintfError("Unable to setup device for PAL device {}", isa->targetId());
     return false;
   }
 
@@ -2479,12 +2479,12 @@ void* Device::virtualAlloc(void* addr, size_t size, size_t alignment) {
 bool Device::virtualFree(void* addr) {
   auto vaddr_mem_obj = amd::MemObjMap::FindVirtualMemObj(addr);
   if (vaddr_mem_obj == nullptr) {
-    LogPrintfError("Cannot find any mem_obj for addr: 0x%x \n", addr);
+    LogPrintfError("Cannot find any mem_obj for addr: {:#x} \n", addr);
     return false;
   }
 
   if (!vaddr_mem_obj->getContext().devices()[0]->DestroyVirtualBuffer(vaddr_mem_obj)) {
-    LogPrintfError("Cannot destroy mem_obj:0x%x for addr: 0x%x \n", vaddr_mem_obj, addr);
+    LogPrintfError("Cannot destroy mem_obj:{:#x} for addr: {:#x} \n", vaddr_mem_obj, addr);
     return false;
   }
   return true;
@@ -2503,10 +2503,10 @@ bool Device::SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags,
     // if not-mapped then print a different error message. (No functional change due to this check).
     amd_mem_obj = amd::MemObjMap::FindVirtualMemObj(va_addr);
     if (amd_mem_obj == nullptr) {
-      LogPrintfError("Cannot find virtual address: 0x%x \n", va_addr);
+      LogPrintfError("Cannot find virtual address: {:#x} \n", va_addr);
       return false;
     }
-    LogPrintfError("Virtual address present, but not mapped yet: 0x%x \n", va_addr);
+    LogPrintfError("Virtual address present, but not mapped yet: {:#x} \n", va_addr);
   }
 
   address range_end_address = reinterpret_cast<address>(amd_mem_obj->getSvmPtr()) + va_size;
@@ -2543,10 +2543,10 @@ bool Device::GetMemAccess(void* va_addr, VmmAccess* access_flags_ptr) const {
     // if not-mapped then print a different error message. (No functional change due to this check).
     amd::Memory* vaddr_mem_obj = amd::MemObjMap::FindVirtualMemObj(va_addr);
     if (vaddr_mem_obj == nullptr) {
-      LogPrintfError("Cannot find virtual address: 0x%x \n", va_addr);
+      LogPrintfError("Cannot find virtual address: {:#x} \n", va_addr);
       return false;
     }
-    LogPrintfInfo("Virtual address present, but not mapped yet: 0x%x \n", va_addr);
+    LogPrintfInfo("Virtual address present, but not mapped yet: {:#x} \n", va_addr);
     return false;
   }
 
@@ -2742,7 +2742,7 @@ bool Device::createBlitProgram() {
     if (auto retval =
             asm_program->build(devices, opt.c_str(), nullptr, nullptr, false) != CL_SUCCESS) {
       ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN,
-              "Build failed for trap handler with error code: %d\n", retval);
+              "Build failed for trap handler with error code: {}\n", retval);
       asm_program->release();
     } else {
       if (asm_program->load()) {

@@ -119,7 +119,7 @@ void ListAllDeviceWithNoCOFromBundle(
   LogError("Missing CO for these ISAs - ");
   for (const auto& unique_isa : unique_isa_names) {
     if (unique_isa.second.first == 0) {
-      LogPrintfError("     %s", unique_isa.first.c_str());
+      LogPrintfError("     {}", unique_isa.first.c_str());
     }
   }
 }
@@ -373,7 +373,7 @@ static bool PopulateCodeObjectMap(
     comgr_helper::ComgrDataUniqueHandle data_object;
     if (auto comgr_status = data_object.Create(AMD_COMGR_DATA_KIND_FATBIN);
         comgr_status != AMD_COMGR_STATUS_SUCCESS) {
-      LogPrintfError("Creating data object failed with status %d ", comgr_status);
+      LogPrintfError("Creating data object failed with status {} ", comgr_status);
       break;
     }
 
@@ -381,7 +381,7 @@ static bool PopulateCodeObjectMap(
     if (auto comgr_status =
             amd::Comgr::set_data(data_object.get(), 4096, reinterpret_cast<const char*>(image));
         comgr_status != AMD_COMGR_STATUS_SUCCESS) {
-      LogPrintfError("Setting data from file slice failed with status %d ", comgr_status);
+      LogPrintfError("Setting data from file slice failed with status {} ", comgr_status);
       break;
     }
 
@@ -399,7 +399,7 @@ static bool PopulateCodeObjectMap(
     if (auto comgr_status = amd::Comgr::lookup_code_object(
             data_object.get(), query_list_array.data(), unique_isa_names.size());
         comgr_status != AMD_COMGR_STATUS_SUCCESS) {
-      LogPrintfError("Setting data from file slice failed with status %d ", comgr_status);
+      LogPrintfError("Setting data from file slice failed with status {} ", comgr_status);
       break;
     }
 
@@ -500,7 +500,7 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
     }
   }
 
-  LogPrintfInfo("Forcing SPIRV: %s", (HIP_FORCE_SPIRV_CODEOBJECT != 0 ? "true" : "false"));
+  LogPrintfInfo("Forcing SPIRV: {}", (HIP_FORCE_SPIRV_CODEOBJECT != 0 ? "true" : "false"));
   hipError_t hip_status = hipErrorInvalidImage;
   do {
     bool spirv_isa_found = code_obj_map.find(spirv_isa_name) != code_obj_map.end() ||
@@ -514,21 +514,21 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
 
       // If the size is not 0, that means we found the native isa code object
       if (native_co != code_obj_map.end() && !HIP_FORCE_SPIRV_CODEOBJECT) {
-        LogPrintfInfo("Using native code object for device: %s co: %s", device_name.c_str(),
+        LogPrintfInfo("Using native code object for device: {} co: {}", device_name.c_str(),
                       native_co->first.c_str());
         hip_status = AddDevProgram(device, native_co->second.first, native_co->second.second, 0);
         if (hip_status != hipSuccess) {
           break;
         }
       } else if (generic_co != code_obj_map.end() && !HIP_FORCE_SPIRV_CODEOBJECT) {
-        LogPrintfInfo("Using generic code object for device: %s co: %s", device_name.c_str(),
+        LogPrintfInfo("Using generic code object for device: {} co: {}", device_name.c_str(),
                       generic_co->first.c_str());
         hip_status = AddDevProgram(device, generic_co->second.first, generic_co->second.second, 0);
         if (hip_status != hipSuccess) {
           break;
         }
       } else if (spirv_isa_found) {
-        LogPrintfInfo("Using spirv code object for device: %s", device_name.c_str());
+        LogPrintfInfo("Using spirv code object for device: {}", device_name.c_str());
         std::string target_id = device->devices()[0]->isa().targetId();
         std::string isa = "amdgcn-amd-amdhsa--" + target_id;
 
@@ -664,7 +664,7 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
       } else {
         // We found neither a compatible code object nor SPIRV
         LogPrintfError(
-            "No compatible code objects found for: %s, value of HIP_FORCE_SPIRV_CODEOBJECT: %d",
+            "No compatible code objects found for: {}, value of HIP_FORCE_SPIRV_CODEOBJECT: {}",
             device->devices()[0]->isa().targetId(), HIP_FORCE_SPIRV_CODEOBJECT);
         break;
       }
@@ -727,7 +727,7 @@ hipError_t FatBinaryInfo::ExtractKpackBinary(const std::vector<hip::Device*>& de
                              arch_ptrs.data(), arch_ptrs.size(), &code_object, &code_object_size);
 
   if (err != KPACK_SUCCESS) {
-    LogPrintfError("kpack_load_code_object failed with error: %d", err);
+    LogPrintfError("kpack_load_code_object failed with error: {}", err);
     return hipErrorInvalidImage;
   }
 

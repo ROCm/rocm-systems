@@ -370,11 +370,11 @@ hipError_t ihipMalloc(void** ptr, size_t sizeBytes, unsigned int flags) {
       size_t free = 0, total = 0;
       hipError_t err = hipMemGetInfo(&free, &total);
       if (err == hipSuccess) {
-        LogPrintfError("Allocation failed : Device memory : required :%zu | free :%zu | total :%zu",
+        LogPrintfError("Allocation failed : Device memory : required :{} | free :{} | total :{}",
                        sizeBytes, free, total);
       }
     } else {
-      LogPrintfError("Allocation failed : Pinned Memory, size :%zu", sizeBytes);
+      LogPrintfError("Allocation failed : Pinned Memory, size :{}", sizeBytes);
     }
     return hipErrorOutOfMemory;
   }
@@ -402,7 +402,7 @@ hipError_t ihipHostMalloc(void** ptr, size_t sizeBytes, unsigned int flags) {
   if ((flags & coherentFlags) == coherentFlags) {
     LogPrintfError(
         "Cannot have both coherent and non-coherent flags "
-        "at the same time, flags: %u coherent flags: %u",
+        "at the same time, flags: {} coherent flags: {}",
         flags, coherentFlags);
     return hipErrorInvalidValue;
   }
@@ -1036,21 +1036,21 @@ amd::Image* ihipImageCreate(const cl_channel_order channelOrder, const cl_channe
   status = hipSuccess;
   const amd::Image::Format imageFormat({channelOrder, channelType});
   if (!imageFormat.isValid()) {
-    LogPrintfError("Invalid Image format for channel Order:%u Type:%u", channelOrder, channelType);
+    LogPrintfError("Invalid Image format for channel Order:{} Type:{}", channelOrder, channelType);
     status = hipErrorInvalidValue;
     return nullptr;
   }
 
   amd::Context& context = *hip::getCurrentDevice()->asContext();
   if (!imageFormat.isSupported(context, imageType)) {
-    LogPrintfError("Image type: %u not supported", imageType);
+    LogPrintfError("Image type: {} not supported", imageType);
     status = hipErrorInvalidValue;
     return nullptr;
   }
 
   const std::vector<amd::Device*>& devices = context.devices();
   if (!devices[0]->info().imageSupport_) {
-    LogPrintfError("Device: 0x%x does not support image", devices[0]);
+    LogPrintfError("Device: {:#x} does not support image", static_cast<void*>(devices[0]));
     status = hipErrorNotSupported;
     return nullptr;
   }
@@ -1069,7 +1069,7 @@ amd::Image* ihipImageCreate(const cl_channel_order channelOrder, const cl_channe
     // empty for loop
 
     if (mip_levels < numMipLevels) {
-      LogPrintfError("Invalid Mip Levels: %d", numMipLevels);
+      LogPrintfError("Invalid Mip Levels: {}", numMipLevels);
       status = hipErrorInvalidValue;
       return nullptr;
     }
@@ -1094,7 +1094,7 @@ amd::Image* ihipImageCreate(const cl_channel_order channelOrder, const cl_channe
                        imageRowPitch, imageSlicePitch, numMipLevels, offset);
         break;
       default:
-        LogPrintfError("Cannot create image of imageType: 0x%x for external buffer", imageType);
+        LogPrintfError("Cannot create image of imageType: {:#x} for external buffer", imageType);
     }
   } else if (buffer != nullptr) {
     switch (imageType) {
@@ -1107,7 +1107,7 @@ amd::Image* ihipImageCreate(const cl_channel_order channelOrder, const cl_channe
                        numMipLevels, offset);
         break;
       default:
-        LogPrintfError("Cannot create image of imageType: 0x%x", imageType);
+        LogPrintfError("Cannot create image of imageType: {:#x}", imageType);
     }
   } else {
     switch (imageType) {
@@ -1135,7 +1135,7 @@ amd::Image* ihipImageCreate(const cl_channel_order channelOrder, const cl_channe
                        imageWidth * imageHeight * imageFormat.getElementSize(), numMipLevels);
         break;
       default:
-        LogPrintfError("Cannot create image of imageType: 0x%x", imageType);
+        LogPrintfError("Cannot create image of imageType: {:#x}", imageType);
     }
   }
 
@@ -1145,7 +1145,7 @@ amd::Image* ihipImageCreate(const cl_channel_order channelOrder, const cl_channe
   }
 
   if (!image->create(nullptr)) {
-    LogPrintfError("Cannot create image: 0x%x", image);
+    LogPrintfError("Cannot create image: {:#x}", static_cast<void*>(image));
     status = hipErrorOutOfMemory;
     delete image;
     return nullptr;
@@ -1331,7 +1331,7 @@ hipError_t ihipHostRegister(void* hostPtr, size_t sizeBytes, unsigned int flags)
     constexpr bool forceAlloc = true;
     if (!mem->create(hostPtr, sysMemAlloc, skipAlloc, forceAlloc)) {
       mem->release();
-      LogPrintfError("Cannot create memory for size: %u with flags: %d", sizeBytes, flags);
+      LogPrintfError("Cannot create memory for size: {} with flags: {}", sizeBytes, flags);
       return hipErrorInvalidValue;
     }
 
@@ -1387,7 +1387,7 @@ hipError_t ihipHostUnregister(void* hostPtr) {
     return hipSuccess;
   }
 
-  LogPrintfError("Cannot unregister host_ptr: 0x%x", hostPtr);
+  LogPrintfError("Cannot unregister host_ptr: {:#x}", static_cast<void*>(hostPtr));
   return hipErrorHostMemoryNotRegistered;
 }
 
@@ -1436,7 +1436,7 @@ inline hipError_t ihipMemcpySymbol_validate(const void* symbol, size_t sizeBytes
 
   /* Size Check to make sure offset is correct */
   if ((offset + sizeBytes) > sym_size) {
-    LogPrintfError("Trying to access out of bounds, offset: %u sizeBytes: %u sym_size: %u", offset,
+    LogPrintfError("Trying to access out of bounds, offset: {} sizeBytes: {} sym_size: {}", offset,
                    sizeBytes, sym_size);
     HIP_RETURN(hipErrorInvalidValue);
   }
@@ -3351,7 +3351,7 @@ hipError_t hipIpcGetMemHandle(hipIpcMemHandle_t* handle, void* dev_ptr) {
   ihandle->owners_device_id = hip::getCurrentDevice()->deviceId();
 
   if (!device->IpcCreate(dev_ptr, &(ihandle->psize), ihandle->ipc_handle, &(ihandle->poffset))) {
-    LogPrintfError("IPC memory creation failed for memory: 0x%x", dev_ptr);
+    LogPrintfError("IPC memory creation failed for memory: {:#x}", static_cast<void*>(dev_ptr));
     HIP_RETURN(hipErrorInvalidValue);
   }
   ihandle->owners_process_id = amd::Os::getProcessId();
@@ -3393,8 +3393,8 @@ hipError_t hipIpcOpenMemHandle(void** dev_ptr, hipIpcMemHandle_t handle, unsigne
   if (amd_mem_obj == nullptr) {
     if (!device->IpcAttach(ihandle->ipc_handle, ihandle->psize, ihandle->poffset, flags, dev_ptr)) {
       LogPrintfError(
-          "Cannot attach ipc_handle: with ipc_size: %u"
-          "ipc_offset: %u flags: %u",
+          "Cannot attach ipc_handle: with ipc_size: {}"
+          "ipc_offset: {} flags: {}",
           ihandle->psize, ihandle->poffset, flags);
       HIP_RETURN(hipErrorInvalidDevicePointer);
     }
@@ -3432,13 +3432,13 @@ hipError_t hipIpcCloseMemHandle(void* dev_ptr) {
   amd_mem_obj = amd::MemObjMap::FindMemObj(dev_ptr);
   if (amd_mem_obj == nullptr) {
     ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
-             "Memory object for the ptr: 0x%x cannot be null \n", dev_ptr);
+             "Memory object for the ptr: {:#x} cannot be null \n", static_cast<void*>(dev_ptr));
     HIP_RETURN(hipErrorInvalidValue);
   }
 
   if (!amd_mem_obj->ipcShared()) {
     ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
-             "Memory object for the ptr: 0x%x is not ipcShared \n", dev_ptr);
+             "Memory object for the ptr: {:#x} is not ipcShared \n", static_cast<void*>(dev_ptr));
     HIP_RETURN(hipErrorInvalidValue);
   }
 
@@ -3502,7 +3502,7 @@ hipError_t hipPointerGetAttributes(hipPointerAttribute_t* attributes, const void
     // getDeviceMemory can fail, hence validate the sanity of the mem obtained
     if (nullptr == devMem) {
       ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
-               "getDeviceMemory for ptr failed : %p", ptr);
+               "getDeviceMemory for ptr failed : {}", ptr);
       HIP_RETURN(hipErrorMemoryAllocation);
     }
 
@@ -3524,7 +3524,7 @@ hipError_t hipPointerGetAttributes(hipPointerAttribute_t* attributes, const void
     attributes->allocationFlags = 0;
     attributes->device = hipInvalidDeviceId;
     if (ptr != nullptr) {
-      LogPrintfError("Cannot get amd_mem_obj for ptr: %p", ptr);
+      LogPrintfError("Cannot get amd_mem_obj for ptr: {}", ptr);
     }
   }
   HIP_RETURN(hipSuccess);
@@ -3610,7 +3610,7 @@ hipError_t ihipPointerGetAttributes(void* data, hipPointer_attribute attribute,
         // getDeviceMemory can fail, hence validate the sanity of the mem obtained
         if (nullptr == devMem) {
           ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
-               "getDeviceMemory for ptr failed : %p", ptr);
+               "getDeviceMemory for ptr failed : {}", static_cast<void*>(ptr));
           return hipErrorMemoryAllocation;
         }
 
@@ -3728,7 +3728,7 @@ hipError_t ihipPointerGetAttributes(void* data, hipPointer_attribute attribute,
           // getDeviceMemory can fail, hence validate the sanity of the mem obtained
           if (nullptr == devMem) {
             ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
-               "getDeviceMemory for ptr failed : %p", ptr);
+               "getDeviceMemory for ptr failed : {}", static_cast<void*>(ptr));
             return hipErrorMemoryAllocation;
           }
           *reinterpret_cast<hipDeviceptr_t*>(data) =
@@ -3761,13 +3761,13 @@ hipError_t ihipPointerGetAttributes(void* data, hipPointer_attribute attribute,
     }
     case HIP_POINTER_ATTRIBUTE_ALLOWED_HANDLE_TYPES: {
       // hipMemAllocationHandleType is not yet supported
-      LogPrintfWarning("attribute %d is not supported.", attribute);
+      LogPrintfWarning("attribute {} is not supported.", attribute);
       status = hipErrorNotSupported;
       break;
     }
     case HIP_POINTER_ATTRIBUTE_IS_GPU_DIRECT_RDMA_CAPABLE: {
       // GPUDirect RDMA API is not yet supported
-      LogPrintfWarning("attribute %d is not supported.", attribute);
+      LogPrintfWarning("attribute {} is not supported.", attribute);
       status = hipErrorNotSupported;
       break;
     }
@@ -3781,12 +3781,12 @@ hipError_t ihipPointerGetAttributes(void* data, hipPointer_attribute attribute,
     }
     case HIP_POINTER_ATTRIBUTE_MEMPOOL_HANDLE: {
       // allocations from mempool are not yet supported
-      LogPrintfWarning("attribute %d is not supported.", attribute);
+      LogPrintfWarning("attribute {} is not supported.", attribute);
       status = hipErrorNotSupported;
       break;
     }
     default: {
-      LogPrintfError("Invalid attribute: %d ", attribute);
+      LogPrintfError("Invalid attribute: {} ", attribute);
       status = hipErrorInvalidValue;
       break;
     }
@@ -4187,7 +4187,7 @@ hipError_t ihipMipmapArrayCreate(hipMipmappedArray_t* mipmapped_array_pptr,
     }
   }
   if (mipMapSupport == false) {
-    LogPrintfError("Mipmap not supported on one of the devices, Mip Level: %d", num_mipmap_levels);
+    LogPrintfError("Mipmap not supported on one of the devices, Mip Level: {}", num_mipmap_levels);
     return hipErrorNotSupported;
   }
   if (!mipmapped_array_pptr || !mipmapped_array_desc_ptr) {

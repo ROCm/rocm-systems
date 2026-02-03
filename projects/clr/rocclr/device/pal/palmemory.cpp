@@ -207,7 +207,7 @@ bool Memory::create(Resource::MemoryType memType, Resource::CreateParams* params
       memRef()->gpu_ = params->gpu_;
     }
     if (memRef() != nullptr) {
-      ClPrint(amd::LOG_DEBUG, amd::LOG_RESOURCE, "Alloc: %zx bytes, ptr[%llx-%llx], obj[%llx-%llx]",
+      ClPrint(amd::LOG_DEBUG, amd::LOG_RESOURCE, "Alloc: {} bytes, ptr[{:#x}-{:#x}], obj[{:#x}-{:#x}]",
               size(), vmAddress(), vmAddress() + size(), iMem()->Desc().gpuVirtAddr,
               iMem()->Desc().gpuVirtAddr + iMem()->Desc().size);
     }
@@ -437,7 +437,7 @@ bool Memory::createInterop() {
 
 Memory::~Memory() {
   if (memRef() != nullptr) {
-    ClPrint(amd::LOG_DEBUG, amd::LOG_RESOURCE, "Free-: %8llx bytes, VM[%10llx, %10llx]",
+    ClPrint(amd::LOG_DEBUG, amd::LOG_RESOURCE, "Free-: {:8x} bytes, VM[{:10x}, {:10x}]",
             iMem()->Desc().size, iMem()->Desc().gpuVirtAddr,
             iMem()->Desc().gpuVirtAddr + iMem()->Desc().size);
   }

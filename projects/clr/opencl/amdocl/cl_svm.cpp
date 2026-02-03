@@ -187,7 +187,7 @@ RUNTIME_ENTRY_RET_NOERRCODE(void*, clSVMAlloc,
   // if alignment not specified, use largest data type alignment supported
   if (alignment == 0) {
     alignment = minContextAlignment;
-    ClPrint(amd::LOG_INFO, amd::LOG_API, "Assumed alignment %d\n", alignment);
+    ClPrint(amd::LOG_INFO, amd::LOG_API, "Assumed alignment {}", alignment);
   }
 
   amd::Context& amdContext = *as_amd(context);
@@ -737,7 +737,7 @@ RUNTIME_ENTRY(cl_int, clEnqueueSVMMap,
       // Make sure we have memory for the command execution
       device::Memory* mem = svmMem->getDeviceMemory(queue->device());
       if (NULL == mem) {
-        LogPrintfError("Can't allocate memory size - 0x%08X bytes!", svmMem->getSize());
+        LogPrintfError("Can't allocate memory size - {:#08X} bytes!", svmMem->getSize());
         return CL_MEM_OBJECT_ALLOCATION_FAILURE;
       }
       // Attempt to allocate the map target now (whether blocking or non-blocking)
@@ -850,7 +850,7 @@ RUNTIME_ENTRY(cl_int, clEnqueueSVMUnmap,
       // Make sure we have memory for the command execution
       device::Memory* mem = svmMem->getDeviceMemory(queue->device());
       if (NULL == mem) {
-        LogPrintfError("Can't allocate memory size - 0x%08X bytes!", svmMem->getSize());
+        LogPrintfError("Can't allocate memory size - {:#08X} bytes!", svmMem->getSize());
         return CL_INVALID_VALUE;
       }
     }

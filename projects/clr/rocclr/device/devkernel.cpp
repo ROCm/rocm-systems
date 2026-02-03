@@ -64,7 +64,7 @@ bool getValueFromIsaMeta(const std::string& isa, const char* key, std::string& r
   amd_comgr_status_t status = amd::Comgr::get_isa_metadata(isa.c_str(), &isaMeta);
 
   if (status != AMD_COMGR_STATUS_SUCCESS) {
-    ClPrint(amd::LOG_ERROR, amd::LOG_INIT, "getIsaMeta(%s) failed!", isa.c_str());
+    ClPrint(amd::LOG_ERROR, amd::LOG_INIT, "getIsaMeta({}) failed!", isa.c_str());
     return false;
   }
 
@@ -395,7 +395,7 @@ static amd_comgr_status_t populateArgsV3(const amd_comgr_metadata_node_t key,
           amd::Kernel::FindValue<amd::KernelParameterDescriptor::Desc>(amd::Kernel::kArgValueKindV3,
                                                                        buf);
       if (itArgValue == amd::KernelParameterDescriptor::MaxSize) {
-        LogPrintfError("Unknown Kernel arg metadata: %s", buf.c_str());
+        LogPrintfError("Unknown Kernel arg metadata: {}", buf.c_str());
         LogError("This may be due to running HIP app that requires a new HIP runtime version");
         LogError("Please update the display driver");
         return AMD_COMGR_STATUS_ERROR;
@@ -756,7 +756,7 @@ bool Kernel::GetAttrCodePropMetadata() {
   amd_comgr_metadata_node_t kernelMetaNode;
   if (!prog().getKernelMetadata(name(), &kernelMetaNode)) {
     ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN,
-             "Cannot get program kernel metadata for %s \n", name().c_str());
+             "Cannot get program kernel metadata for {} \n", name().c_str());
     return false;
   }
 
@@ -843,7 +843,7 @@ bool Kernel::GetPrintfStr(std::vector<std::string>* printfStr) {
 
       if (status != AMD_COMGR_STATUS_SUCCESS) {
         ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_COMGR,
-                "Comgr API failed with status: %d \n", status);
+                "Comgr API failed with status: {} \n", status);
         amd::Comgr::destroy_metadata(printfMeta);
         return false;
       }
@@ -1016,7 +1016,7 @@ void Kernel::InitPrintf(const std::vector<std::string>& printfInfoStrings) {
     } while (end != std::string::npos);
 
     if (tokens.size() < 2) {
-      LogPrintfError("Invalid PrintInfo string: \"%s\"", str.c_str());
+      LogPrintfError("Invalid PrintInfo string: \"{}\"", str.c_str());
       continue;
     }
 
@@ -1041,7 +1041,7 @@ void Kernel::InitPrintf(const std::vector<std::string>& printfInfoStrings) {
 
     // ensure that we have the correct number of tokens
     if (tokens.size() < end + 1 /*last token is the fmtString*/) {
-      LogPrintfError("Invalid PrintInfo string: \"%s\"", str.c_str());
+      LogPrintfError("Invalid PrintInfo string: \"{}\"", str.c_str());
       continue;
     }
 

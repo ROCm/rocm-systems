@@ -68,7 +68,7 @@ hipError_t ihipCreateTextureObject(hipTextureObject_t* pTexObject, const hipReso
   amd::Device* device = hip::getCurrentDevice()->devices()[0];
   const device::Info& info = device->info();
   if (!info.imageSupport_) {
-    LogPrintfError("Texture not supported on the device %s", info.name_);
+    LogPrintfError("Texture not supported on the device {}", info.name_);
     return hipErrorNotSupported;
   }
 
@@ -92,7 +92,7 @@ hipError_t ihipCreateTextureObject(hipTextureObject_t* pTexObject, const hipReso
     } else if (pResDesc->res.array.array->depth > 0 &&
                pTexDesc->filterMode == hipFilterModeLinear &&
                !strncmp(info.name_, "gfx90a", strlen("gfx90a"))) {
-      LogPrintfInfo("%s doesn't support 3D linear filter!", info.name_);
+      LogPrintfInfo("{} doesn't support 3D linear filter!", info.name_);
       return hipErrorNotSupported;
     }
   }
@@ -393,7 +393,7 @@ hipError_t ihipDestroyTextureObject(hipTextureObject_t texObject) {
   amd::Device* device = hip::getCurrentDevice()->devices()[0];
   const device::Info& info = device->info();
   if (!info.imageSupport_) {
-    LogPrintfError("Texture not supported on the device %s", info.name_);
+    LogPrintfError("Texture not supported on the device {}", info.name_);
     return hipErrorNotSupported;
   }
 
@@ -420,7 +420,7 @@ hipError_t ihipUnbindTexture(textureReference* texRef) {
     amd::Device* device = hip::getCurrentDevice()->devices()[0];
     const device::Info& info = device->info();
     if (!info.imageSupport_) {
-      LogPrintfError("Texture not supported on the device %s", info.name_);
+      LogPrintfError("Texture not supported on the device {}", info.name_);
       HIP_RETURN(hipErrorNotSupported);
     }
 
@@ -450,7 +450,7 @@ hipError_t ihipGetTextureObjectResourceDesc(hipResourceDesc* pResDesc,
   amd::Device* device = hip::getCurrentDevice()->devices()[0];
   const device::Info& info = device->info();
   if (!info.imageSupport_) {
-    LogPrintfError("Texture not supported on the device %s", info.name_);
+    LogPrintfError("Texture not supported on the device {}", info.name_);
     return hipErrorNotSupported;
   }
 
@@ -476,7 +476,7 @@ hipError_t hipGetTextureObjectResourceViewDesc(hipResourceViewDesc* pResViewDesc
   amd::Device* device = hip::getCurrentDevice()->devices()[0];
   const device::Info& info = device->info();
   if (!info.imageSupport_) {
-    LogPrintfError("Texture not supported on the device %s", info.name_);
+    LogPrintfError("Texture not supported on the device {}", info.name_);
     HIP_RETURN(hipErrorNotSupported);
   }
 
@@ -494,7 +494,7 @@ hipError_t hipGetTextureObjectTextureDesc(hipTextureDesc* pTexDesc, hipTextureOb
   amd::Device* device = hip::getCurrentDevice()->devices()[0];
   const device::Info& info = device->info();
   if (!info.imageSupport_) {
-    LogPrintfError("Texture not supported on the device %s", info.name_);
+    LogPrintfError("Texture not supported on the device {}", info.name_);
     HIP_RETURN(hipErrorNotSupported);
   }
 
@@ -507,7 +507,7 @@ inline hipError_t ihipGetTextureAlignmentOffset(size_t* offset, const void* devP
   amd::Device* device = hip::getCurrentDevice()->devices()[0];
   const device::Info& info = device->info();
   if (!info.imageSupport_) {
-    LogPrintfError("Texture not supported on the device %s", info.name_);
+    LogPrintfError("Texture not supported on the device {}", info.name_);
     return hipErrorNotSupported;
   }
 
@@ -518,7 +518,7 @@ inline hipError_t ihipGetTextureAlignmentOffset(size_t* offset, const void* devP
   // If the device memory pointer was returned from hipMalloc(),
   // the offset is guaranteed to be 0 and NULL may be passed as the offset parameter.
   if ((alignedOffset != 0) && (offset == nullptr)) {
-    LogPrintfError("Texture object not aligned with offset %u", alignedOffset);
+    LogPrintfError("Texture object not aligned with offset {}", alignedOffset);
     return hipErrorInvalidValue;
   }
 
@@ -761,7 +761,7 @@ hipError_t hipGetChannelDesc(hipChannelFormatDesc* desc, hipArray_const_t array)
   amd::Device* device = hip::getCurrentDevice()->devices()[0];
   const device::Info& info = device->info();
   if (!info.imageSupport_) {
-    LogPrintfError("Texture not supported on the device %s", info.name_);
+    LogPrintfError("Texture not supported on the device {}", info.name_);
     HIP_RETURN(hipErrorNotSupported);
   }
 
@@ -786,7 +786,7 @@ hipError_t hipGetTextureAlignmentOffset(size_t* offset, const textureReference* 
   amd::Device* device = hip::getCurrentDevice()->devices()[0];
   const device::Info& info = device->info();
   if (!info.imageSupport_) {
-    LogPrintfError("Texture not supported on the device %s", info.name_);
+    LogPrintfError("Texture not supported on the device {}", info.name_);
     HIP_RETURN(hipErrorNotSupported);
   }
 
@@ -805,7 +805,7 @@ hipError_t hipGetTextureReference(const textureReference** texref, const void* s
   amd::Device* device = hip::getCurrentDevice()->devices()[0];
   const device::Info& info = device->info();
   if (!info.imageSupport_) {
-    LogPrintfError("Texture not supported on the device %s", info.name_);
+    LogPrintfError("Texture not supported on the device {}", info.name_);
     HIP_RETURN(hipErrorNotSupported);
   }
 
@@ -824,7 +824,7 @@ hipError_t hipTexRefSetFormat(textureReference* texRef, hipArray_Format fmt,
   amd::Device* device = hip::getCurrentDevice()->devices()[0];
   const device::Info& info = device->info();
   if (!info.imageSupport_) {
-    LogPrintfError("Texture not supported on the device %s", info.name_);
+    LogPrintfError("Texture not supported on the device {}", info.name_);
     HIP_RETURN(hipErrorNotSupported);
   }
 
@@ -843,7 +843,7 @@ hipError_t hipTexRefSetFlags(textureReference* texRef, unsigned int Flags) {
   amd::Device* device = hip::getCurrentDevice()->devices()[0];
   const device::Info& info = device->info();
   if (!info.imageSupport_) {
-    LogPrintfError("Texture not supported on the device %s", info.name_);
+    LogPrintfError("Texture not supported on the device {}", info.name_);
     HIP_RETURN(hipErrorNotSupported);
   }
 
@@ -875,7 +875,7 @@ hipError_t hipTexRefSetFilterMode(textureReference* texRef, hipTextureFilterMode
   amd::Device* device = hip::getCurrentDevice()->devices()[0];
   const device::Info& info = device->info();
   if (!info.imageSupport_) {
-    LogPrintfError("Texture not supported on the device %s", info.name_);
+    LogPrintfError("Texture not supported on the device {}", info.name_);
     HIP_RETURN(hipErrorNotSupported);
   }
 
@@ -895,7 +895,7 @@ hipError_t hipTexRefGetAddressMode(hipTextureAddressMode* pam, const textureRefe
   amd::Device* device = hip::getCurrentDevice()->devices()[0];
   const device::Info& info = device->info();
   if (!info.imageSupport_) {
-    LogPrintfError("Texture not supported on the device %s", info.name_);
+    LogPrintfError("Texture not supported on the device {}", info.name_);
     HIP_RETURN(hipErrorNotSupported);
   }
 
@@ -903,7 +903,7 @@ hipError_t hipTexRefGetAddressMode(hipTextureAddressMode* pam, const textureRefe
   if ((dim != 0) && (dim != 1)) {
     LogPrintfError(
         "Currently only 2 dimensions (0,1) are valid,"
-        "dim : %d",
+        "dim : {}",
         dim);
     HIP_RETURN(hipErrorInvalidValue);
   }
@@ -923,14 +923,14 @@ hipError_t hipTexRefSetAddressMode(textureReference* texRef, int dim, hipTexture
   if ((dim < 0) || (dim > 2)) {
     LogPrintfError(
         "Currently only 3 dimensions (0,1,2) are valid,"
-        "dim : %d",
+        "dim : {}",
         dim);
     HIP_RETURN(hipErrorInvalidValue);
   }
   amd::Device* device = hip::getCurrentDevice()->devices()[0];
   const device::Info& info = device->info();
   if (!info.imageSupport_) {
-    LogPrintfError("Texture not supported on the device %s", info.name_);
+    LogPrintfError("Texture not supported on the device {}", info.name_);
     HIP_RETURN(hipErrorNotSupported);
   }
 
@@ -1028,7 +1028,7 @@ hipError_t hipTexRefGetAddress(hipDeviceptr_t* dptr, const textureReference* tex
   // TODO use ihipGetTextureObjectResourceDesc() to not pollute the API trace.
   hipError_t error = ihipGetTextureObjectResourceDesc(&resDesc, texRef->textureObject);
   if (error != hipSuccess) {
-    LogPrintfError("hipGetTextureObjectResourceDesc failed with error code: %s",
+    LogPrintfError("hipGetTextureObjectResourceDesc failed with error code: {}",
                    ihipGetErrorName(error));
     HIP_RETURN(error);
   }
@@ -1149,7 +1149,7 @@ hipError_t hipTexRefGetBorderColor(float* pBorderColor, const textureReference* 
   amd::Device* device = hip::getCurrentDevice()->devices()[0];
   const device::Info& info = device->info();
   if (!info.imageSupport_) {
-    LogPrintfError("Texture not supported on the device %s", info.name_);
+    LogPrintfError("Texture not supported on the device {}", info.name_);
     HIP_RETURN(hipErrorNotSupported);
   }
 
@@ -1170,7 +1170,7 @@ hipError_t hipTexRefGetFilterMode(hipTextureFilterMode* pfm, const textureRefere
   amd::Device* device = hip::getCurrentDevice()->devices()[0];
   const device::Info& info = device->info();
   if (!info.imageSupport_) {
-    LogPrintfError("Texture not supported on the device %s", info.name_);
+    LogPrintfError("Texture not supported on the device {}", info.name_);
     HIP_RETURN(hipErrorNotSupported);
   }
 
@@ -1189,7 +1189,7 @@ hipError_t hipTexRefGetFlags(unsigned int* pFlags, const textureReference* texRe
   amd::Device* device = hip::getCurrentDevice()->devices()[0];
   const device::Info& info = device->info();
   if (!info.imageSupport_) {
-    LogPrintfError("Texture not supported on the device %s", info.name_);
+    LogPrintfError("Texture not supported on the device {}", info.name_);
     HIP_RETURN(hipErrorNotSupported);
   }
 
@@ -1221,7 +1221,7 @@ hipError_t hipTexRefGetFormat(hipArray_Format* pFormat, int* pNumChannels,
   amd::Device* device = hip::getCurrentDevice()->devices()[0];
   const device::Info& info = device->info();
   if (!info.imageSupport_) {
-    LogPrintfError("Texture not supported on the device %s", info.name_);
+    LogPrintfError("Texture not supported on the device {}", info.name_);
     HIP_RETURN(hipErrorNotSupported);
   }
 
@@ -1241,7 +1241,7 @@ hipError_t hipTexRefGetMaxAnisotropy(int* pmaxAnsio, const textureReference* tex
   amd::Device* device = hip::getCurrentDevice()->devices()[0];
   const device::Info& info = device->info();
   if (!info.imageSupport_) {
-    LogPrintfError("Texture not supported on the device %s", info.name_);
+    LogPrintfError("Texture not supported on the device {}", info.name_);
     HIP_RETURN(hipErrorNotSupported);
   }
 
@@ -1260,7 +1260,7 @@ hipError_t hipTexRefGetMipmapFilterMode(hipTextureFilterMode* pfm, const texture
   amd::Device* device = hip::getCurrentDevice()->devices()[0];
   const device::Info& info = device->info();
   if (!info.imageSupport_) {
-    LogPrintfError("Texture not supported on the device %s", info.name_);
+    LogPrintfError("Texture not supported on the device {}", info.name_);
     HIP_RETURN(hipErrorNotSupported);
   }
 
@@ -1279,7 +1279,7 @@ hipError_t hipTexRefGetMipmapLevelBias(float* pbias, const textureReference* tex
   amd::Device* device = hip::getCurrentDevice()->devices()[0];
   const device::Info& info = device->info();
   if (!info.imageSupport_) {
-    LogPrintfError("Texture not supported on the device %s", info.name_);
+    LogPrintfError("Texture not supported on the device {}", info.name_);
     HIP_RETURN(hipErrorNotSupported);
   }
 
@@ -1300,7 +1300,7 @@ hipError_t hipTexRefGetMipmapLevelClamp(float* pminMipmapLevelClamp, float* pmax
   amd::Device* device = hip::getCurrentDevice()->devices()[0];
   const device::Info& info = device->info();
   if (!info.imageSupport_) {
-    LogPrintfError("Texture not supported on the device %s", info.name_);
+    LogPrintfError("Texture not supported on the device {}", info.name_);
     HIP_RETURN(hipErrorNotSupported);
   }
 
@@ -1320,7 +1320,7 @@ hipError_t hipTexRefGetMipMappedArray(hipMipmappedArray_t* pArray, const texture
   amd::Device* device = hip::getCurrentDevice()->devices()[0];
   const device::Info& info = device->info();
   if (!info.imageSupport_) {
-    LogPrintfError("Texture not supported on the device %s", info.name_);
+    LogPrintfError("Texture not supported on the device {}", info.name_);
     HIP_RETURN(hipErrorNotSupported);
   }
 
@@ -1354,7 +1354,7 @@ hipError_t hipTexRefSetBorderColor(textureReference* texRef, float* pBorderColor
   amd::Device* device = hip::getCurrentDevice()->devices()[0];
   const device::Info& info = device->info();
   if (!info.imageSupport_) {
-    LogPrintfError("Texture not supported on the device %s", info.name_);
+    LogPrintfError("Texture not supported on the device {}", info.name_);
     HIP_RETURN(hipErrorNotSupported);
   }
 
@@ -1374,7 +1374,7 @@ hipError_t hipTexRefSetMaxAnisotropy(textureReference* texRef, unsigned int maxA
   amd::Device* device = hip::getCurrentDevice()->devices()[0];
   const device::Info& info = device->info();
   if (!info.imageSupport_) {
-    LogPrintfError("Texture not supported on the device %s", info.name_);
+    LogPrintfError("Texture not supported on the device {}", info.name_);
     HIP_RETURN(hipErrorNotSupported);
   }
 
@@ -1392,7 +1392,7 @@ hipError_t hipTexRefSetMipmapFilterMode(textureReference* texRef, hipTextureFilt
   amd::Device* device = hip::getCurrentDevice()->devices()[0];
   const device::Info& info = device->info();
   if (!info.imageSupport_) {
-    LogPrintfError("Texture not supported on the device %s", info.name_);
+    LogPrintfError("Texture not supported on the device {}", info.name_);
     HIP_RETURN(hipErrorNotSupported);
   }
 
@@ -1410,7 +1410,7 @@ hipError_t hipTexRefSetMipmapLevelBias(textureReference* texRef, float bias) {
   amd::Device* device = hip::getCurrentDevice()->devices()[0];
   const device::Info& info = device->info();
   if (!info.imageSupport_) {
-    LogPrintfError("Texture not supported on the device %s", info.name_);
+    LogPrintfError("Texture not supported on the device {}", info.name_);
     HIP_RETURN(hipErrorNotSupported);
   }
 
@@ -1429,7 +1429,7 @@ hipError_t hipTexRefSetMipmapLevelClamp(textureReference* texRef, float minMipMa
   amd::Device* device = hip::getCurrentDevice()->devices()[0];
   const device::Info& info = device->info();
   if (!info.imageSupport_) {
-    LogPrintfError("Texture not supported on the device %s", info.name_);
+    LogPrintfError("Texture not supported on the device {}", info.name_);
     HIP_RETURN(hipErrorNotSupported);
   }
 
@@ -1522,7 +1522,7 @@ hipError_t hipTexObjectGetResourceDesc(HIP_RESOURCE_DESC* pResDesc, hipTextureOb
   amd::Device* device = hip::getCurrentDevice()->devices()[0];
   const device::Info& info = device->info();
   if (!info.imageSupport_) {
-    LogPrintfError("Texture not supported on the device %s", info.name_);
+    LogPrintfError("Texture not supported on the device {}", info.name_);
     HIP_RETURN(hipErrorNotSupported);
   }
 
@@ -1541,7 +1541,7 @@ hipError_t hipTexObjectGetResourceViewDesc(HIP_RESOURCE_VIEW_DESC* pResViewDesc,
   amd::Device* device = hip::getCurrentDevice()->devices()[0];
   const device::Info& info = device->info();
   if (!info.imageSupport_) {
-    LogPrintfError("Texture not supported on the device %s", info.name_);
+    LogPrintfError("Texture not supported on the device {}", info.name_);
     HIP_RETURN(hipErrorNotSupported);
   }
 
@@ -1559,7 +1559,7 @@ hipError_t hipTexObjectGetTextureDesc(HIP_TEXTURE_DESC* pTexDesc, hipTextureObje
   amd::Device* device = hip::getCurrentDevice()->devices()[0];
   const device::Info& info = device->info();
   if (!info.imageSupport_) {
-    LogPrintfError("Texture not supported on the device %s", info.name_);
+    LogPrintfError("Texture not supported on the device {}", info.name_);
     HIP_RETURN(hipErrorNotSupported);
   }
 

@@ -206,7 +206,7 @@ void* MemoryPool::AllocateMemory(size_t size, Stream* stream, void* dptr) {
       if (err == hipSuccess) {
         LogPrintfError(
             "Allocation failed : Device memory : required :\
-          %zu | free :%zu | total :%zu",
+          {} | free :{} | total :{}",
             size, free, total);
       }
       return nullptr;
@@ -238,7 +238,7 @@ void* MemoryPool::AllocateMemory(size_t size, Stream* stream, void* dptr) {
   // Increment the reference counter on the pool
   retain();
 
-  ClPrint(amd::LOG_INFO, amd::LOG_MEM_POOL, "Pool AllocMem: %p, %p", memory->getSvmPtr(), memory);
+  ClPrint(amd::LOG_INFO, amd::LOG_MEM_POOL, "Pool AllocMem: {}, {}", static_cast<void*>(memory->getSvmPtr()), static_cast<void*>(memory));
 
   return dev_ptr;
 }
@@ -274,7 +274,7 @@ bool MemoryPool::FreeMemory(amd::Memory* memory, Stream* stream, Event* event) {
       // This pool doesn't contain memory
       return false;
     }
-    ClPrint(amd::LOG_INFO, amd::LOG_MEM_POOL, "Pool FreeMem: %p, %p", memory->getSvmPtr(), memory);
+    ClPrint(amd::LOG_INFO, amd::LOG_MEM_POOL, "Pool FreeMem: {}, {}", static_cast<void*>(memory->getSvmPtr()), static_cast<void*>(memory));
 
     if (memory->getUserData().vaddr_mem_obj != nullptr) {
       auto va_mem = memory->getUserData().vaddr_mem_obj;

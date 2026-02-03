@@ -123,7 +123,7 @@ void* Memory::allocMapTarget(const amd::Coord3D& origin, const amd::Coord3D& reg
     if (!allocateMapMemory(owner()->getSize())) {
       decIndMapCount();
       ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
-               "Cannot allocate Map memory for size: %u", owner()->getSize());
+               "Cannot allocate Map memory for size: {}", owner()->getSize());
       return nullptr;
     }
   } else {
@@ -210,7 +210,7 @@ hsa_status_t Memory::interopMapBuffer(hsa_handle_t fdn, hsa_interop_map_flag_t f
   auto fd = fdn;
   hsa_status_t status = Hsa::interop_map_buffer(1, &agent, fd, flags, &size, &interop_deviceMemory_,
                                                 &metadata_size, (const void**)&metadata);
-  ClPrint(amd::LOG_DEBUG, amd::LOG_MEM, "Map Interop memory %p, size 0x%zx", interop_deviceMemory_,
+  ClPrint(amd::LOG_DEBUG, amd::LOG_MEM, "Map Interop memory {}, size {:#x}", static_cast<void*>(interop_deviceMemory_),
           size);
   deviceMemory_ = static_cast<char*>(interop_deviceMemory_);  // + out.buf_offset;
   if (status != HSA_STATUS_SUCCESS) return status;
@@ -308,7 +308,7 @@ bool Memory::createInteropBuffer(GLenum targetType, int miplevel) {
 void Memory::destroyInteropBuffer() {
   assert(kind_ == MEMORY_KIND_INTEROP && "Memory must be interop type.");
   Hsa::interop_unmap_buffer(interop_deviceMemory_);
-  ClPrint(amd::LOG_DEBUG, amd::LOG_MEM, "Unmap GL memory %p", deviceMemory_);
+  ClPrint(amd::LOG_DEBUG, amd::LOG_MEM, "Unmap GL memory {}", static_cast<void*>(deviceMemory_));
   deviceMemory_ = nullptr;
 }
 
@@ -638,7 +638,7 @@ Buffer::~Buffer() {
       // Detach the memory from HSA
       auto hsa_status = Hsa::ipc_memory_detach(owner()->getSvmPtr());
       if (hsa_status != HSA_STATUS_SUCCESS) {
-        LogPrintfError("HSA failed to detach memory with status: %d", hsa_status);
+        LogPrintfError("HSA failed to detach memory with status: {}", hsa_status);
       }
     }
   }
@@ -777,7 +777,7 @@ bool Buffer::create(bool alloc_local) {
             reinterpret_cast<const amd::IpcBuffer*>(owner())->Handle()),
         owner()->getSize(), ipc_agents_num, dev().IpcAgents(), &orig_dev_ptr);
     if (hsa_status != HSA_STATUS_SUCCESS) {
-      LogPrintfError("HSA failed to attach IPC memory with status: %d", hsa_status);
+      LogPrintfError("HSA failed to attach IPC memory with status: {}", hsa_status);
       return false;
     }
     owner()->setSvmPtr(orig_dev_ptr);
@@ -792,7 +792,7 @@ bool Buffer::create(bool alloc_local) {
       // if interprocess flag is set, then the memory is importable.
       if (!dev().ImportShareableHSAHandle(owner()->getSvmPtr(),
                                           &owner()->getUserData().hsa_handle)) {
-        LogPrintfError("Importing Shareable Memory failed with os_handle: 0x%x",
+        LogPrintfError("Importing Shareable Memory failed with os_handle: {:#x}",
                        owner()->getSvmPtr());
         return false;
       }
@@ -1057,7 +1057,7 @@ bool Buffer::ExportHandle(void* handle) const {
   auto hsa_status = Hsa::ipc_memory_create(orig_dev_ptr, owner()->getSize(),
                                               reinterpret_cast<hsa_amd_ipc_memory_t*>(handle));
   if (hsa_status != HSA_STATUS_SUCCESS) {
-    LogPrintfError("Failed to create memory for IPC, failed with hsa_status: %d", hsa_status);
+    LogPrintfError("Failed to create memory for IPC, failed with hsa_status: {}", hsa_status);
     return false;
   }
   return true;
@@ -1075,7 +1075,7 @@ bool Buffer::GetFDHandleForMem(void* dev_ptr, size_t size, bool vmm, void* handl
     // Retrieve the corresponding phys_mem handle for the mapped dev_ptr.
     hsa_status_t hsa_status = Hsa::vmem_retain_alloc_handle(&mem_handle, dev_ptr);
     if (hsa_status != HSA_STATUS_SUCCESS) {
-      LogPrintfError("Cannot retain alloc handle for dev_ptr: 0x%x hsa returned status: %d",
+      LogPrintfError("Cannot retain alloc handle for dev_ptr: {:#x} hsa returned status: {}",
                      dev_ptr, hsa_status);
       return false;
     }
@@ -1083,7 +1083,7 @@ bool Buffer::GetFDHandleForMem(void* dev_ptr, size_t size, bool vmm, void* handl
     // Now, retrieve the shareable handle (fd in linux) for the phys_mem handle.
     hsa_status = Hsa::vmem_export_shareable_handle(&dmabuffd, mem_handle, 0);
     if (hsa_status != HSA_STATUS_SUCCESS) {
-      LogPrintfError("Cannot get shareable handle for mem_handle: %lu, hsa returned status: %d",
+      LogPrintfError("Cannot get shareable handle for mem_handle: {}, hsa returned status: {}",
                      mem_handle, hsa_status);
       return false;
     }
@@ -1092,14 +1092,14 @@ bool Buffer::GetFDHandleForMem(void* dev_ptr, size_t size, bool vmm, void* handl
     hsa_status_t hsa_status = Hsa::portable_export_dmabuf(dev_ptr, size, &dmabuffd, &offset);
     if (hsa_status != HSA_STATUS_SUCCESS) {
       LogPrintfError(
-          "Cannot export a portable fd for dev_ptr: 0x%x with size: %lu,"
-          "hsa returned status: %d",
+          "Cannot export a portable fd for dev_ptr: {:#x} with size: {},"
+          "hsa returned status: {}",
           dev_ptr, size, hsa_status);
       return false;
     }
   }
   if (dmabuffd <= 0) {
-    LogPrintfError("Invalid file descriptor handle: %d returned", dmabuffd);
+    LogPrintfError("Invalid file descriptor handle: {} returned", dmabuffd);
     return false;
   }
 
@@ -1319,7 +1319,7 @@ bool Image::create(bool alloc_local) {
                                                  permission_, &deviceImageInfo_);
 
   if (status != HSA_STATUS_SUCCESS) {
-    LogPrintfError("Fail to allocate image memory, failed with hsa_status: %d", status);
+    LogPrintfError("Fail to allocate image memory, failed with hsa_status: {}", status);
     return false;
   }
 
@@ -1357,7 +1357,7 @@ bool Image::create(bool alloc_local) {
                              permission_, &hsaImageObject_);
 
   if (status != HSA_STATUS_SUCCESS) {
-    LogPrintfError("[OCL] Fail to allocate image memory, failed with hsa_status: %d \n", status);
+    LogPrintfError("[OCL] Fail to allocate image memory, failed with hsa_status: {} \n", status);
     return false;
   }
 
@@ -1480,7 +1480,7 @@ bool Image::createView(const Memory& parent) {
   }
 
   if (status != HSA_STATUS_SUCCESS) {
-    LogPrintfError("[OCL] Fail to allocate image memory with status: %d \n", status);
+    LogPrintfError("[OCL] Fail to allocate image memory with status: {} \n", status);
     return false;
   }
 

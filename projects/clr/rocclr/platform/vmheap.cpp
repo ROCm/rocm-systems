@@ -58,7 +58,7 @@ bool VmHeap::CommitMemory(void* addr, size_t size) {
   void* ptr = SvmBuffer::malloc(device_->context(), ROCCLR_MEM_PHYMEM, padded_size,
                                 dev_info.memBaseAddrAlign_, nullptr);
   if (ptr == nullptr) {
-    LogPrintfError("Failed to allocate physical memory %zd", padded_size);
+    LogPrintfError("Failed to allocate physical memory {}", padded_size);
     return false;
   }
 
@@ -166,7 +166,7 @@ bool VmHeap::MapPhysMemory(size_t offset, size_t size) {
       if (CommitMemory(address, chunk_size_)) {
         mapped_size_ += chunk_size_;
         if (mapped_size_ > max_mapped_size_) {
-          ClPrint(LOG_INFO, LOG_MEM_POOL, "VM heap grows in physical alloc to %d GB\n",
+          ClPrint(LOG_INFO, LOG_MEM_POOL, "VM heap grows in physical alloc to {} GB\n",
                   static_cast<int>(mapped_size_ / Gi));
         }
         max_mapped_size_ = std::max(max_mapped_size_, mapped_size_);
@@ -257,8 +257,8 @@ address VmHeap::Alloc(size_t size) {
   if (memory->getUserData().data == nullptr) {
     memory->getUserData().data = hb;
   }
-  ClPrint(LOG_INFO, LOG_MEM_POOL, "VmHeap Alloc: %p offset(%zx + %zx) hb(%p)", ptr, hb->Offset(),
-          memory->getSize(), hb);
+  ClPrint(LOG_INFO, LOG_MEM_POOL, "VmHeap Alloc: {} offset({} + {}) hb({})", static_cast<void*>(ptr), hb->Offset(),
+          memory->getSize(), static_cast<void*>(hb));
   return ptr;
 }
 
@@ -276,8 +276,8 @@ void VmHeap::Free(Memory* memory) {
   ScopedLock k(lock_);
   if (memory->getUserData().data != nullptr) {
     auto hb = reinterpret_cast<HeapBlock*>(memory->getUserData().data);
-    ClPrint(LOG_INFO, LOG_MEM_POOL, "VmHeap Free: %p offset(%zx + %zx) hb(%p)", addr, hb->Offset(),
-            memory->getSize(), hb);
+    ClPrint(LOG_INFO, LOG_MEM_POOL, "VmHeap Free: {} offset({} + {}) hb({})", static_cast<void*>(addr), hb->Offset(),
+            memory->getSize(), static_cast<void*>(hb));
     FreeBlock(hb);
   }
   MemObjMap::RemoveMemObj(addr);

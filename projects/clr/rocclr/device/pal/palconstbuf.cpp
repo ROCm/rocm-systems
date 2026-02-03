@@ -49,14 +49,14 @@ bool ManagedBuffer::create(Resource::MemoryType type) {
   for (uint i = 0; i < pool_.size(); ++i) {
     pool_[i].buf = new Memory(const_cast<pal::Device&>(gpu_.dev()), size_);
     if (nullptr == pool_[i].buf || !pool_[i].buf->create(type)) {
-      LogPrintfError("We couldn't create HW constant buffer, size(%d)!", size_);
+      LogPrintfError("We couldn't create HW constant buffer, size({})!", size_);
       return false;
     }
     // Assign virtual gpu to the allocation. Buffer will be used only on a particular queue
     pool_[i].buf->memRef()->gpu_ = &gpu_;
     void* wrtAddress = pool_[i].buf->map(&gpu_);
     if (wrtAddress == nullptr) {
-      LogPrintfError("We couldn't map HW constant buffer, size(%d)!", size_);
+      LogPrintfError("We couldn't map HW constant buffer, size({})!", size_);
       return false;
     }
     // Make sure OCL touches every buffer in the queue to avoid delays on the first submit
@@ -122,7 +122,7 @@ bool ConstantBuffer::Create() {
   // Create sysmem copy for the constant buffer.
   sys_mem_copy_ = reinterpret_cast<address>(amd::AlignedMemory::allocate(size_, 256));
   if (sys_mem_copy_ == nullptr) {
-    LogPrintfError("We couldn't allocate sysmem copy for constant buffer, size(%d)!", size_);
+    LogPrintfError("We couldn't allocate sysmem copy for constant buffer, size({})!", size_);
     return false;
   }
   memset(sys_mem_copy_, 0, size_);

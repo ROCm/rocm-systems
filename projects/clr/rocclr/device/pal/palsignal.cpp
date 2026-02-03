@@ -94,8 +94,8 @@ bool Signal::Init(const amd::Device& dev, uint64_t init, device::Signal::WaitSta
     }
     amdSignal_->event_id = eventOutputInfo.shaderInterrupt.eventId;
     amdSignal_->event_mailbox_ptr = eventOutputInfo.shaderInterrupt.eventMailboxGpuVa;
-    ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Registered SQ event %d with mailbox slot %p",
-            amdSignal_->event_id, amdSignal_->event_mailbox_ptr);
+    ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Registered SQ event {} with mailbox slot {}",
+            amdSignal_->event_id, static_cast<void*>(amdSignal_->event_mailbox_ptr));
 #endif
   }
 

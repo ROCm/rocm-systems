@@ -24,6 +24,7 @@
 #include "device/device.hpp"
 #include "utils/flags.hpp"
 #include "utils/options.hpp"
+#include "utils/debug.hpp"
 #include "platform/context.hpp"
 #include "platform/agent.hpp"
 
@@ -73,7 +74,15 @@ bool Runtime::init() {
     return true;
   }
 
-  if (!Flag::init() || !option::init() ||
+  if (!Flag::init()) {
+    return false;
+  }
+
+  // Initialize logging subsystem after flags are parsed
+  // This allows AMD_LOG_LEVEL and AMD_LOG_LEVEL_FILE to be read
+  init_logging();
+
+  if (!option::init() ||
       !Device::init()
       // Agent initializes last
       || (!amd::IS_HIP && !Agent::init())) {
@@ -81,7 +90,7 @@ bool Runtime::init() {
     return false;
   }
 
-  ClPrint(LOG_INFO, LOG_MISC && !amd::IS_HIP, "ROCclr version: %s", ROCCLR_VERSION_GITHASH);
+  ClPrint(LOG_INFO, LOG_MISC && !amd::IS_HIP, "ROCclr version: {}", ROCCLR_VERSION_GITHASH);
 
   initialized_ = true;
   pid_ = amd::Os::getProcessId();
@@ -96,6 +105,10 @@ void Runtime::tearDown() {
   Agent::tearDown();
   Device::tearDown();
   option::teardown();
+
+  // Note: shutdown_logging() is now called earlier in RuntimeTearDown::~RuntimeTearDown()
+  // to ensure it happens before any teardown callbacks that might still try to log
+
   Flag::tearDown();
   if (outFile != stderr && outFile != nullptr) {
     fclose(outFile);
@@ -115,19 +128,19 @@ class RuntimeTearDown runtime_tear_down{};
 
 // =================================================================================================
 RuntimeTearDown::~RuntimeTearDown() {
-  ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Begin runtime teardown");
 #if !defined(_WIN32) && !defined(BUILD_STATIC_LIBS)
   // Only perform destruction if process matches the initialization,
   // to avoid a call with the child process after fork().
   if (amd::IS_HIP && amd::Os::getProcessId() == Runtime::pid()) {
+    // Shutdown logging early, before we start tearing down objects that might still try to log
+    // This prevents crashes from logging to a closed file or destroyed logger during teardown
+    shutdown_logging();
+    
     // Execute teardown funcs in reverse order of registration.
     for (auto it = tear_down_funcs_.rbegin(); it != tear_down_funcs_.rend(); ++it) {
-      ClPrint(amd::LOG_DEBUG, amd::LOG_INIT, "~RuntimeTearDown invoke callback: %s",
-              it->first.c_str());
       it->second();
     }
     for (auto it : external_) {
-      ClPrint(amd::LOG_DEBUG, amd::LOG_INIT, "~RuntimeTearDown release external object: %p", it);
       it->release();
     }
     Runtime::tearDown();
@@ -138,13 +151,13 @@ RuntimeTearDown::~RuntimeTearDown() {
 // =================================================================================================
 void RuntimeTearDown::RegisterObject(ReferenceCountedObject* obj) {
   external_.push_back(obj);
-  ClPrint(amd::LOG_DEBUG, amd::LOG_INIT, "RuntimeTearDown registered external object: %p", obj);
+  ClPrint(amd::LOG_DEBUG, amd::LOG_INIT, "RuntimeTearDown registered external object: {}", static_cast<void*>(obj));
 }
 
 // =================================================================================================
 void RuntimeTearDown::RegisterTearDownCallback(const std::string& msg, TearDownCallback func) {
   tear_down_funcs_.emplace_back(msg, std::move(func));
-  ClPrint(amd::LOG_DEBUG, amd::LOG_INIT, "RuntimeTearDown registered callback: %s", msg.c_str());
+  ClPrint(amd::LOG_DEBUG, amd::LOG_INIT, "RuntimeTearDown registered callback: {}", msg);
 }
 
 // =================================================================================================

@@ -61,7 +61,7 @@ void init(bool* status) {
   }
 
   // Log version and configuration for diagnostics
-  ClPrint(amd::LOG_INFO, amd::LOG_INIT, "HIP Version: %d.%d.%d.%s, Direct Dispatch: %d",
+  ClPrint(amd::LOG_INFO, amd::LOG_INIT, "HIP Version: {}.{}.{}.{}, Direct Dispatch: {}",
           HIP_VERSION_MAJOR, HIP_VERSION_MINOR, HIP_VERSION_PATCH, HIP_VERSION_GITHASH,
           AMD_DIRECT_DISPATCH);
   amd::Os::PrintLibraryLocation();

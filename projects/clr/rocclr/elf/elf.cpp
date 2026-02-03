@@ -41,28 +41,28 @@
 #ifdef DEBUG_DETAIL
 
 #define ElfTrace(level)                                                                            \
-  ClPrint(level, amd::LOG_CODE, "%-5d: [%zx] %p %s: ", getpid(), std::this_thread::get_id(), this, \
+  ClPrint(level, amd::LOG_CODE, "{:<5}: [{}] {} {}: ", getpid(), std::this_thread::get_id(), static_cast<const void*>(this), \
           __func__)
 
 #define logElfInfo(msg)                                                                            \
-  ClPrint(amd::LOG_INFO, amd::LOG_CODE, "%-5d: [%zx] %p %s: " msg, getpid(),                       \
-          std::this_thread::get_id(), this, __func__)
+  ClPrint(amd::LOG_INFO, amd::LOG_CODE, "{:<5}: [{}] {} {}: " msg, getpid(),                       \
+          std::this_thread::get_id(), static_cast<const void*>(this), __func__)
 
 #define logElfWarning(msg)                                                                         \
-  ClPrint(amd::LOG_WARNING, amd::LOG_CODE, "%-5d: [%zx] %p %s: " msg, getpid(),                    \
-          std::this_thread::get_id(), this, __func__)
+  ClPrint(amd::LOG_WARNING, amd::LOG_CODE, "{:<5}: [{}] {} {}: " msg, getpid(),                    \
+          std::this_thread::get_id(), static_cast<const void*>(this), __func__)
 
 #define LogElfDebug(format, ...)                                                                   \
-  ClPrint(amd::LOG_DEBUG, amd::LOG_CODE, "%-5d: [%zx] %p %s: " format, getpid(),                   \
-          std::this_thread::get_id(), this, __func__, __VA_ARGS__)
+  ClPrint(amd::LOG_DEBUG, amd::LOG_CODE, "{:<5}: [{}] {} {}: " format, getpid(),                   \
+          std::this_thread::get_id(), static_cast<const void*>(this), __func__, __VA_ARGS__)
 
 #define LogElfWarning(format, ...)                                                                 \
-  ClPrint(amd::LOG_WARNING, amd::LOG_CODE, "%-5d: [%zx] %p %s: " format, getpid(),                 \
-          std::this_thread::get_id(), this, __func__, __VA_ARGS__)
+  ClPrint(amd::LOG_WARNING, amd::LOG_CODE, "{:<5}: [{}] {} {}: " format, getpid(),                 \
+          std::this_thread::get_id(), static_cast<const void*>(this), __func__, __VA_ARGS__)
 
 #define LogElfInfo(format, ...)                                                                    \
-  ClPrint(amd::LOG_INFO, amd::LOG_CODE, "%-5d: [%zx] %p %s: " format, getpid(),                    \
-          std::this_thread::get_id(), this, __func__, __VA_ARGS__)
+  ClPrint(amd::LOG_INFO, amd::LOG_CODE, "{:<5}: [{}] {} {}: " format, getpid(),                    \
+          std::this_thread::get_id(), static_cast<const void*>(this), __func__, __VA_ARGS__)
 #else
 #define ElfTrace(level)
 #define logElfInfo(msg)
@@ -73,12 +73,12 @@
 #endif
 
 #define logElfError(msg)                                                                           \
-  ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "%-5d: [%zx] %p %s: " msg, getpid(),                      \
-          std::this_thread::get_id(), this, __func__)
+  ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "{:<5}: [{}] {} {}: " msg, getpid(),                      \
+          std::this_thread::get_id(), static_cast<const void*>(this), __func__)
 
 #define LogElfError(format, ...)                                                                   \
-  ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "%-5d: [%zx] %p %s: " format, getpid(),                   \
-          std::this_thread::get_id(), this, __func__, __VA_ARGS__)
+  ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "{:<5}: [{}] {} {}: " format, getpid(),                   \
+          std::this_thread::get_id(), static_cast<const void*>(this), __func__, __VA_ARGS__)
 
 namespace amd {
 using namespace amd::ELFIO;
@@ -151,7 +151,7 @@ Elf::Elf(unsigned char eclass, const char* rawElfBytes, uint64_t rawElfSize,
       _strtab_ndx(SHN_UNDEF),
       _symtab_ndx(SHN_UNDEF),
       _successful(false) {
-  LogElfInfo("fname=%s, rawElfSize=%lu, elfcmd=%d, %s", _fname.c_str(), _rawElfSize, _elfCmd,
+  LogElfInfo("fname={}, rawElfSize={}, elfcmd={}, {}", _fname.c_str(), _rawElfSize, _elfCmd,
              _elfCmd == ELF_C_WRITE ? "writer" : "reader");
 
   if (rawElfBytes != NULL) {
@@ -168,7 +168,7 @@ Elf::Elf(unsigned char eclass, const char* rawElfBytes, uint64_t rawElfSize,
 }
 
 Elf::~Elf() {
-  LogElfInfo("fname=%s, rawElfSize=%lu, elfcmd=%d", _fname.c_str(), _rawElfSize, _elfCmd);
+  LogElfInfo("fname={}, rawElfSize={}, elfcmd={}", _fname.c_str(), _rawElfSize, _elfCmd);
   elfMemoryRelease();
 }
 
@@ -203,14 +203,14 @@ bool Elf::Init() {
       {
         std::istringstream is{std::string(_rawElfBytes, _rawElfSize)};
         if (!_elfio.load(is)) {
-          LogElfError("failed in _elfio.load(%p, %lu)", _rawElfBytes, _rawElfSize);
+          LogElfError("failed in _elfio.load({}, {})", static_cast<const void*>(_rawElfBytes), _rawElfSize);
           return false;
         }
       }
       break;
 
     default:
-      LogElfError("failed: unexpected cmd %d", _elfCmd);
+      LogElfError("failed: unexpected cmd {}", _elfCmd);
       return false;  // Don't support other mode
   }
 
@@ -319,11 +319,11 @@ bool Elf::InitElf() {
 
     _symtab_ndx = symtab_sec->get_index();
   } else {
-    LogElfError("failed: wrong cmd %d", _elfCmd);
+    LogElfError("failed: wrong cmd {}", _elfCmd);
     return false;
   }
 
-  LogElfInfo("succeeded: secs=%d, segs=%d, _shstrtab_ndx=%u, _strtab_ndx=%u, _symtab_ndx=%u",
+  LogElfInfo("succeeded: secs={}, segs={}, _shstrtab_ndx={}, _strtab_ndx={}, _symtab_ndx={}",
              _elfio.sections.size(), _elfio.segments.size(), _shstrtab_ndx, _strtab_ndx,
              _symtab_ndx);
   return true;
@@ -335,7 +335,7 @@ bool Elf::createElfData(section*& sec, ElfSections id, const char* d_buf, size_t
 
   sec = _elfio.sections[ElfSecDesc[id].name];
   if (sec == nullptr) {
-    LogElfError("failed: null sections(%s)", ElfSecDesc[id].name);
+    LogElfError("failed: null sections({})", ElfSecDesc[id].name);
     return false;
   }
 
@@ -401,7 +401,7 @@ bool Elf::getSection(Elf::ElfSections id, char** dst, size_t* sz) const {
 
   section* sec = _elfio.sections[ElfSecDesc[id].name];
   if (sec == nullptr) {
-    LogElfError("failed: null sections(%s)", ElfSecDesc[id].name);
+    LogElfError("failed: null sections({})", ElfSecDesc[id].name);
     return false;
   }
 
@@ -409,7 +409,7 @@ bool Elf::getSection(Elf::ElfSections id, char** dst, size_t* sz) const {
   *dst = const_cast<char*>(sec->get_data());
   *sz = sec->get_size();
 
-  LogElfInfo("succeeded: *dst=%p, *sz=%zu", *dst, *sz);
+  LogElfInfo("succeeded: *dst={}, *sz={}", static_cast<void*>(*dst), *sz);
   return true;
 }
 
@@ -420,7 +420,7 @@ unsigned int Elf::getSymbolNum() const {
   }
   symbol_section_accessor symbol_reader(_elfio, _elfio.sections[_symtab_ndx]);
   auto num = symbol_reader.get_symbols_num() - 1;  // Exclude the first dummy symbol
-  LogElfInfo(": num=%lu", num);
+  LogElfInfo(": num={}", num);
   return num;
 }
 
@@ -445,7 +445,7 @@ bool Elf::getSymbolInfo(unsigned int index, SymbolInfo* symInfo) const {
   auto num = getSymbolNum();
 
   if (index >= num) {
-    LogElfError(" failed: wrong index %u >= symbols num %lu", index, num);
+    LogElfError(" failed: wrong index {} >= symbols num {}", index, num);
     return false;
   }
 
@@ -460,12 +460,12 @@ bool Elf::getSymbolInfo(unsigned int index, SymbolInfo* symInfo) const {
   // index++ for real index on top of the first dummy symbol
   bool ret = symbol_reader.get_symbol(++index, sym_name, value, size, bind, type, sec_index, other);
   if (!ret) {
-    LogElfError("failed to get_symbol(%u)", index);
+    LogElfError("failed to get_symbol({})", index);
     return false;
   }
   section* sec = _elfio.sections[sec_index];
   if (sec == nullptr) {
-    LogElfError("failed: null section at %u", sec_index);
+    LogElfError("failed: null section at {}", sec_index);
     return false;
   }
 
@@ -478,9 +478,9 @@ bool Elf::getSymbolInfo(unsigned int index, SymbolInfo* symInfo) const {
   symInfo->sym_name = sym_name;
 #if 0
   // For debug purpose
-  LogElfDebug("succeeded at index=%u: sec_addr=%p, sec_size=%lu, address=%p,"
-              " size=%lu, sec_name=%s, sym_name=%s",
-              index, symInfo->sec_addr, symInfo->sec_size, symInfo->address, symInfo->size,
+  LogElfDebug("succeeded at index={}: sec_addr={}, sec_size={}, address={},"
+              " size={}, sec_name={}, sym_name={}",
+              index, static_cast<void*>(symInfo->sec_addr), symInfo->sec_size, static_cast<void*>(symInfo->address), symInfo->size,
               symInfo->sec_name.c_str(), symInfo->sym_name.c_str());
 #endif
   return true;
@@ -493,14 +493,14 @@ bool Elf::addSectionData(Elf_Xword& outOffset, ElfSections id, const void* buffe
   outOffset = 0;
   section* sec = _elfio.sections[ElfSecDesc[id].name];
   if (sec == nullptr) {
-    LogElfError("failed: null sections(%s)", ElfSecDesc[id].name);
+    LogElfError("failed: null sections({})", ElfSecDesc[id].name);
     return false;
   }
 
   outOffset = sec->get_size();
 
   sec->append_data(static_cast<const char*>(buffer), size);
-  LogElfInfo("succeeded: buffer=%p, size=%zu", buffer, size);
+  LogElfInfo("succeeded: buffer={}, size={}", static_cast<void*>(buffer), size);
 
   return true;
 }
@@ -509,7 +509,7 @@ bool Elf::getShstrtabNdx(Elf64_Word& outNdx, const char* name) {
   outNdx = 0;
   auto* section = _elfio.sections[name];
   if (section == nullptr) {
-    LogElfError("failed: sections[%s] = nullptr", name);
+    LogElfError("failed: sections[{}] = nullptr", name);
     return false;
   }
 
@@ -517,11 +517,11 @@ bool Elf::getShstrtabNdx(Elf64_Word& outNdx, const char* name) {
   auto idx = section->get_name_string_offset();
 
   if (idx <= 0) {
-    LogElfError("failed: idx=%d", idx);
+    LogElfError("failed: idx={}", idx);
     return false;
   }
   outNdx = idx;
-  LogElfDebug("Succeeded: name=%s, idx=%d", name, idx);
+  LogElfDebug("Succeeded: name={}, idx={}", name, idx);
   return true;
 }
 
@@ -534,7 +534,7 @@ section* Elf::newSection(Elf::ElfSections id, const char* d_buf, size_t d_size) 
     sec = _elfio.sections.add(ElfSecDesc[id].name);
   }
   if (sec == nullptr) {
-    LogElfError("failed: sections.add(%s) = nullptr", ElfSecDesc[id].name);
+    LogElfError("failed: sections.add({}) = nullptr", ElfSecDesc[id].name);
     return sec;
   }
 
@@ -546,7 +546,7 @@ section* Elf::newSection(Elf::ElfSections id, const char* d_buf, size_t d_size) 
     return nullptr;
   }
 
-  LogElfDebug("succeeded: name=%s, d_buf=%p, d_size=%zu", ElfSecDesc[id].name, d_buf, d_size);
+  LogElfDebug("succeeded: name={}, d_buf={}, d_size={}", ElfSecDesc[id].name, static_cast<void*>(d_buf), d_size);
   return sec;
 }
 
@@ -559,20 +559,20 @@ bool Elf::addSection(ElfSections id, const void* d_buf, size_t d_size) {
   if (sec != nullptr) {
     Elf_Xword sec_offset = 0;
     if (!addSectionData(sec_offset, id, d_buf, d_size)) {
-      LogElfError("failed in addSectionData(name=%s, d_buf=%p, d_size=%zu)", ElfSecDesc[id].name,
+      LogElfError("failed in addSectionData(name={}, d_buf={}, d_size={})", ElfSecDesc[id].name,
                   d_buf, d_size);
       return false;
     }
   } else {
     sec = newSection(id, static_cast<const char*>(d_buf), d_size);
     if (sec == nullptr) {
-      LogElfError("failed in newSection(name=%s, d_buf=%p, d_size=%zu)", ElfSecDesc[id].name, d_buf,
+      LogElfError("failed in newSection(name={}, d_buf={}, d_size={})", ElfSecDesc[id].name, d_buf,
                   d_size);
       return false;
     }
   }
 
-  LogElfDebug("succeeded: name=%s, d_buf=%p, d_size=%zu", ElfSecDesc[id].name, d_buf, d_size);
+  LogElfDebug("succeeded: name={}, d_buf={}, d_size={}", ElfSecDesc[id].name, d_buf, d_size);
   return true;
 }
 
@@ -593,7 +593,7 @@ bool Elf::addSymbol(ElfSections id, const char* symbolName, const void* buffer, 
   if (sec == nullptr) {
     // Create a new section.
     if ((sec = newSection(id, nullptr, 0)) == NULL) {
-      LogElfError("failed in newSection(name=%s)", sectionName);
+      LogElfError("failed in newSection(name={})", sectionName);
       return false;
     }
   }
@@ -606,7 +606,7 @@ bool Elf::addSymbol(ElfSections id, const char* symbolName, const void* buffer, 
   // Put symbolName into .strtab section
   Elf_Xword strtab_offset = 0;
   if (!addSectionData(strtab_offset, STRTAB, symbolName, strlen(symbolName) + 1)) {
-    LogElfError("failed in addSectionData(name=%s, symbolName=%s, length=%zu)",
+    LogElfError("failed in addSectionData(name={}, symbolName={}, length={})",
                 ElfSecDesc[STRTAB].name, symbolName, strlen(symbolName) + 1);
     return false;
   }
@@ -615,7 +615,7 @@ bool Elf::addSymbol(ElfSections id, const char* symbolName, const void* buffer, 
   Elf_Xword sec_offset = 0;
   if ((buffer != nullptr) && (size != 0)) {
     if (!addSectionData(sec_offset, id, buffer, size)) {
-      LogElfError("failed in addSectionData(name=%s, buffer=%p, size=%zu)", sectionName, buffer,
+      LogElfError("failed in addSectionData(name={}, buffer={}, size={})", sectionName, buffer,
                   size);
       return false;
     }
@@ -627,8 +627,8 @@ bool Elf::addSymbol(ElfSections id, const char* symbolName, const void* buffer, 
                                        (isFunction) ? STT_FUNC : STT_OBJECT, 0, sec_ndx);
 
   LogElfDebug(
-      "%s: sectionName=%s symbolName=%s strtab_offset=%lu, sec_offset=%lu, "
-      "size=%zu, sec_ndx=%zu, ret=%d",
+      "{}: sectionName={} symbolName={} strtab_offset={}, sec_offset={}, "
+      "size={}, sec_ndx={}, ret={}",
       ret >= 1 ? "succeeded" : "failed", sectionName, symbolName, strtab_offset, sec_offset, size,
       sec_ndx, ret);
   return ret >= 1;
@@ -667,9 +667,9 @@ bool Elf::getSymbol(ElfSections id, const char* symbolName, char** buffer, size_
   }
 #if 0
   // For debug purpose
-  LogElfDebug("%s: sectionName=%s symbolName=%s value=%lu, buffer=%p, size=%zu, sec_ndx=%u",
+  LogElfDebug("{}: sectionName={} symbolName={} value={}, buffer={}, size={}, sec_ndx={}",
               ret ? "succeeded" : "failed",
-              ElfSecDesc[id].name, symbolName, value, *buffer, *size, sec_ndx);
+              ElfSecDesc[id].name, symbolName, value, static_cast<void*>(*buffer), *size, sec_ndx);
 #endif
   return ret;
 }
@@ -694,7 +694,7 @@ bool Elf::addNote(const char* noteName, const char* noteDesc, size_t descSize) {
   // noteName is null terminated
   note_writer.add_note(0, noteName, noteDesc, descSize);
 
-  LogElfDebug("Succeed: add_note(%s, %s)", noteName, std::string(noteDesc, descSize).c_str());
+  LogElfDebug("Succeed: add_note({}, {})", noteName, std::string(noteDesc, descSize).c_str());
 
   return true;
 }
@@ -729,7 +729,7 @@ bool Elf::getNote(const char* noteName, char** noteDesc, size_t* descSize) {
       if (name == noteName) {
         *noteDesc = static_cast<char*>(desc);
         *descSize = descSize1;
-        LogElfDebug("Succeed: get_note(%s, %s)", name.c_str(),
+        LogElfDebug("Succeed: get_note({}, {})", name.c_str(),
                     std::string(*noteDesc, *descSize).c_str());
         return true;
       }
@@ -776,11 +776,11 @@ bool Elf::dumpImage(char** buff, size_t* len) {
   if (_fname.empty()) {
     dumpFile = generateUUIDV4();
     dumpFile += ".bin";
-    LogElfInfo("Generated temporary dump file: %s", dumpFile.c_str());
+    LogElfInfo("Generated temporary dump file: {}", dumpFile.c_str());
   }
 
   if (!_elfio.save(dumpFile)) {
-    LogElfError("failed in _elfio.save(%s)", dumpFile.c_str());
+    LogElfError("failed in _elfio.save({})", dumpFile.c_str());
     return false;
   }
 
@@ -788,7 +788,7 @@ bool Elf::dumpImage(char** buff, size_t* len) {
     std::ifstream is;
     is.open(dumpFile, std::ifstream::in | std::ifstream::binary);  // open input file
     if (!is.good()) {
-      LogElfError("failed in is.open(%s)", dumpFile.c_str());
+      LogElfError("failed in is.open({})", dumpFile.c_str());
       return false;
     }
     ret = dumpImage(is, buff, len);
@@ -798,7 +798,7 @@ bool Elf::dumpImage(char** buff, size_t* len) {
   if (_fname.empty()) {
     std::remove(dumpFile.c_str());
   }
-  LogElfInfo("%s: buff=%p, len=%zu\n", ret ? "Succeed" : "failed", *buff, *len);
+  LogElfInfo("{}: buff={}, len={}\n", ret ? "Succeed" : "failed", static_cast<void*>(*buff), *len);
   return ret;
 }
 

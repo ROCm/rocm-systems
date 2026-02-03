@@ -184,8 +184,8 @@ void HostQueue::finish(bool cpu_wait) {
 
   size_t batchSize = GetSubmissionBatchSize();
   ClPrint(LOG_DETAIL_DEBUG, LOG_CMD,
-          "finish() called with batch size: %zu, cpu_wait: %d, "
-          "fence dirty: %d",
+          "finish() called with batch size: {}, cpu_wait: {}, "
+          "fence dirty: {}",
           batchSize, cpu_wait, vdev()->isFenceDirty());
 
   // Force marker if the batch wasn't sent for CPU update or fence is dirty
@@ -206,7 +206,7 @@ void HostQueue::finish(bool cpu_wait) {
   static constexpr bool kWaitCompletion = true;
   if (cpu_wait || !device().IsHwEventReady(command->event(), kWaitCompletion, GetSyncPolicy())) {
     ClPrint(LOG_DETAIL_DEBUG, LOG_CMD,
-            "No HW event or batch size is less than %zu, "
+            "No HW event or batch size is less than {}, "
             "await command completion",
             minBatchSize);
     command->awaitCompletion();
@@ -233,7 +233,7 @@ void HostQueue::finish(bool cpu_wait) {
   vdev()->ReleaseAllHwQueues();
 
   command->release();
-  ClPrint(LOG_DEBUG, LOG_CMD, "All commands finished for host queue : %p", this);
+  ClPrint(LOG_DEBUG, LOG_CMD, "All commands finished for host queue : {}", static_cast<void*>(this));
 }
 
 void HostQueue::loop(device::VirtualDevice* virtualDevice) {
@@ -265,15 +265,15 @@ void HostQueue::loop(device::VirtualDevice* virtualDevice) {
     // Process the command's event wait list.
     const Command::EventWaitList& events = command->eventWaitList();
     bool dependencyFailed = false;
-    ClPrint(LOG_DETAIL_DEBUG, LOG_CMD, "Command (%s) processing: %p ,events.size(): %d",
-            amd::activity_prof::getOclCommandKindString(command->type()), command, events.size());
+    ClPrint(LOG_DETAIL_DEBUG, LOG_CMD, "Command ({}) processing: {} ,events.size(): {}",
+            amd::activity_prof::getOclCommandKindString(command->type()), static_cast<void*>(command), events.size());
     for (const auto& it : events) {
       // Only wait if the command is enqueued into another queue.
       if (it->command().queue() != this) {
         // Runtime has to flush the current batch only if the dependent wait is blocking
         if (it->command().status() != CL_COMPLETE) {
-          ClPrint(LOG_DETAIL_DEBUG, LOG_CMD, "Command (%s) %p awaiting event: %p",
-                  amd::activity_prof::getOclCommandKindString(command->type()), command, it);
+          ClPrint(LOG_DETAIL_DEBUG, LOG_CMD, "Command ({}) {} awaiting event: {}",
+                  amd::activity_prof::getOclCommandKindString(command->type()), static_cast<void*>(command), static_cast<const void*>(it));
           virtualDevice->flush(head, true);
           tail = head = NULL;
           dependencyFailed |= !it->awaitCompletion();
@@ -294,8 +294,8 @@ void HostQueue::loop(device::VirtualDevice* virtualDevice) {
       continue;
     }
 
-    ClPrint(LOG_DETAIL_DEBUG, LOG_CMD, "Command (%s) submitted: %p",
-            amd::activity_prof::getOclCommandKindString(command->type()), command);
+    ClPrint(LOG_DETAIL_DEBUG, LOG_CMD, "Command ({}) submitted: {}",
+            amd::activity_prof::getOclCommandKindString(command->type()), static_cast<void*>(command));
 
     command->setStatus(CL_SUBMITTED);
 
