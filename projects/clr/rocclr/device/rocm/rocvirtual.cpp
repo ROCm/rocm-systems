@@ -1317,8 +1317,9 @@ bool VirtualGPU::dispatchGenericAqlPacketBatch(const std::vector<AqlPacket*>& pa
     // Now reserve space for the batch
     uint64_t startIndex = Hsa::queue_add_write_index_screlease(gpu_queue_, batchSize);
 
-    // Make sure the slot is free for usage
-    while ((startIndex - Hsa::queue_load_read_index_scacquire(gpu_queue_)) >= sw_queue_size) {
+    // Make sure the slots for the batch are free for usage
+    while (((startIndex + batchSize - 1) - Hsa::queue_load_read_index_scacquire(gpu_queue_)) >
+           sw_queue_size) {
       amd::Os::yield();
     }
 
@@ -1452,7 +1453,7 @@ bool VirtualGPU::dispatchGenericAqlPacketBatch(const std::vector<AqlPacket*>& pa
                          validSetups[0]);
 
     // Ring doorbell for this batch
-    Hsa::signal_store_screlease(gpu_queue_->doorbell_signal, startIndex);
+    Hsa::signal_store_screlease(gpu_queue_->doorbell_signal, startIndex + batchSize - 1);
 
     processedPackets += batchSize;
 
