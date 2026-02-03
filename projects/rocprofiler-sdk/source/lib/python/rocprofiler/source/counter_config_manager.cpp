@@ -26,6 +26,7 @@
 #include <rocprofiler-sdk/rocprofiler.h>
 
 #include <algorithm>
+#include <mutex>
 #include <stdexcept>
 
 namespace rocprofiler
