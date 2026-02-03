@@ -71,6 +71,8 @@ namespace envvar {
     const var<uint8_t> traffic_class("TRAFFIC_CLASS", "", 0);
     const var<bool> pcie_relaxed_ordering("PCIE_RELAXED_ORDERING", "", false);
     const var<bool> enable_dmabuf("ENABLE_DMABUF", "", false);
+    const var<size_t> num_qps_per_pe_default_ctx("NUM_QPS_PER_PE_DEFAULT_CTX", "", 1);
+    const var<size_t> num_qps_per_pe_usr_ctx("NUM_QPS_PER_PE_USR_CTX", "", 1);
   }  // namespace gda
 
   namespace _detail {
