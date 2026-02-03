@@ -36,26 +36,19 @@ agent_node_id(const metadata& tool_metadata, const rocprofiler_agent_id_t& agent
     return agent.handle == 0 ? -1 : int32_t(tool_metadata.get_agent(agent)->node_id);
 }
 
-// rocpd_kfd_event_data is for encoding arbitrary kfd event data that does not
-// map well into structured rocpd tables. The primary use of this type is to
-// serialize into rocpd_event's extdata column.
-//
-// The structure is simply a map of string:string, which makes parsing on the
-// rocpd side simpler by limiting how much of the kfd implementation internals
-// need to make it into the rocpd::types structures
-
-using rocpd_kfd_event_data = std::map<std::string, std::string>;
-
 // The types defined below are simple wrappers of the
 // rocprofiler_buffer_tracing_kfd_... types, and are defined so that cereal's
 // save() routines invoked on them will lead to proper serialization through the
 // string-based rocpd_kfd_event_data type
+
+#define NVP_APPLY(cb, field) cb(#field, field)
 
 struct rocpd_kfd_event_page_migrate_record_t
 : rocprofiler_buffer_tracing_kfd_event_page_migrate_record_t
 {
     using base_type = rocprofiler_buffer_tracing_kfd_event_page_migrate_record_t;
 
+    rocpd_kfd_event_page_migrate_record_t() = default;
     rocpd_kfd_event_page_migrate_record_t(const base_type& _base, const metadata& _metadata)
     : base_type(_base)
     {
@@ -66,6 +59,17 @@ struct rocpd_kfd_event_page_migrate_record_t
         prefetch_agent_id  = agent_node_id(_metadata, _base.prefetch_agent);
         preferred_agent_id = agent_node_id(_metadata, _base.preferred_agent);
     }
+
+    template <class F>
+    void for_each_nvp(F&& f) const
+    {
+        NVP_APPLY(f, start_address);
+        NVP_APPLY(f, end_address);
+        NVP_APPLY(f, src_agent_id);
+        NVP_APPLY(f, dst_agent_id);
+        NVP_APPLY(f, prefetch_agent_id);
+        NVP_APPLY(f, preferred_agent_id);
+    };
 
     uint64_t value() const { return end_address - start_address; }
 
@@ -82,11 +86,19 @@ struct rocpd_kfd_event_page_fault_record_t
 {
     using base_type = rocprofiler_buffer_tracing_kfd_event_page_fault_record_t;
 
+    rocpd_kfd_event_page_fault_record_t() = default;
     rocpd_kfd_event_page_fault_record_t(const base_type& _base, const metadata& _metadata)
     : base_type(_base)
     {
         agent_id = agent_node_id(_metadata, _base.agent_id);
         address  = _base.address.value;
+    }
+
+    template <class F>
+    void for_each_nvp(F&& f) const
+    {
+        NVP_APPLY(f, agent_id);
+        NVP_APPLY(f, address);
     }
 
     uint64_t value() const { return address; }
@@ -99,10 +111,17 @@ struct rocpd_kfd_event_queue_record_t : rocprofiler_buffer_tracing_kfd_event_que
 {
     using base_type = rocprofiler_buffer_tracing_kfd_event_queue_record_t;
 
+    rocpd_kfd_event_queue_record_t() = default;
     rocpd_kfd_event_queue_record_t(const base_type& _base, const metadata& _metadata)
     : base_type(_base)
     {
         agent_id = agent_node_id(_metadata, _base.agent_id);
+    }
+
+    template <class F>
+    void for_each_nvp(F&& f) const
+    {
+        NVP_APPLY(f, agent_id);
     }
 
     uint64_t value() const { return 1; }
@@ -115,12 +134,21 @@ struct rocpd_kfd_event_unmap_from_gpu_record_t
 {
     using base_type = rocprofiler_buffer_tracing_kfd_event_unmap_from_gpu_record_t;
 
+    rocpd_kfd_event_unmap_from_gpu_record_t() = default;
     rocpd_kfd_event_unmap_from_gpu_record_t(const base_type& _base, const metadata& _metadata)
     : base_type(_base)
     {
         agent_id      = agent_node_id(_metadata, _base.agent_id);
         start_address = _base.start_address.value;
         end_address   = _base.end_address.value;
+    }
+
+    template <class F>
+    void for_each_nvp(F&& f) const
+    {
+        NVP_APPLY(f, agent_id);
+        NVP_APPLY(f, start_address);
+        NVP_APPLY(f, end_address);
     }
 
     uint64_t value() const { return end_address - start_address; }
@@ -135,8 +163,13 @@ struct rocpd_kfd_event_dropped_events_record_t
 {
     using base_type = rocprofiler_buffer_tracing_kfd_event_dropped_events_record_t;
 
+    rocpd_kfd_event_dropped_events_record_t() = default;
     rocpd_kfd_event_dropped_events_record_t(const base_type& _base, const metadata& /*_metadata*/)
     : base_type(_base)
+    {}
+
+    template <class F>
+    void for_each_nvp(F&& /* f*/) const
     {}
 
     uint64_t value() const { return count; }
@@ -146,6 +179,7 @@ struct rocpd_kfd_page_migrate_record_t : rocprofiler_buffer_tracing_kfd_page_mig
 {
     using base_type = rocprofiler_buffer_tracing_kfd_page_migrate_record_t;
 
+    rocpd_kfd_page_migrate_record_t() = default;
     rocpd_kfd_page_migrate_record_t(const base_type& _base, const metadata& _metadata)
     : base_type(_base)
     {
@@ -155,6 +189,17 @@ struct rocpd_kfd_page_migrate_record_t : rocprofiler_buffer_tracing_kfd_page_mig
         dst_agent_id       = agent_node_id(_metadata, _base.dst_agent);
         prefetch_agent_id  = agent_node_id(_metadata, _base.prefetch_agent);
         preferred_agent_id = agent_node_id(_metadata, _base.preferred_agent);
+    }
+
+    template <class F>
+    void for_each_nvp(F&& f) const
+    {
+        NVP_APPLY(f, start_address);
+        NVP_APPLY(f, end_address);
+        NVP_APPLY(f, src_agent_id);
+        NVP_APPLY(f, dst_agent_id);
+        NVP_APPLY(f, prefetch_agent_id);
+        NVP_APPLY(f, preferred_agent_id);
     }
 
     uint64_t value() const { return end_address - start_address; }
@@ -171,11 +216,19 @@ struct rocpd_kfd_page_fault_record_t : rocprofiler_buffer_tracing_kfd_page_fault
 {
     using base_type = rocprofiler_buffer_tracing_kfd_page_fault_record_t;
 
+    rocpd_kfd_page_fault_record_t() = default;
     rocpd_kfd_page_fault_record_t(const base_type& _base, const metadata& _metadata)
     : base_type(_base)
     {
         agent_id = agent_node_id(_metadata, _base.agent_id);
         address  = _base.address.value;
+    }
+
+    template <class F>
+    void for_each_nvp(F&& f) const
+    {
+        NVP_APPLY(f, agent_id);
+        NVP_APPLY(f, address);
     }
 
     uint64_t value() const { return address; }
@@ -188,10 +241,17 @@ struct rocpd_kfd_queue_record_t : rocprofiler_buffer_tracing_kfd_queue_record_t
 {
     using base_type = rocprofiler_buffer_tracing_kfd_queue_record_t;
 
+    rocpd_kfd_queue_record_t() = default;
     rocpd_kfd_queue_record_t(const base_type& _base, const metadata& _metadata)
     : base_type(_base)
     {
         agent_id = agent_node_id(_metadata, _base.agent_id);
+    }
+
+    template <class F>
+    void for_each_nvp(F&& f) const
+    {
+        NVP_APPLY(f, agent_id);
     }
 
     uint64_t value() const { return 1; }
@@ -199,112 +259,197 @@ struct rocpd_kfd_queue_record_t : rocprofiler_buffer_tracing_kfd_queue_record_t
     int64_t agent_id = -1;
 };
 
+// rocpd_kfd_event_data is for encoding arbitrary kfd event data that does not
+// map well into structured rocpd tables. The primary use of this type is to
+// serialize into rocpd_event's extdata column.
+struct rocpd_kfd_event_data_t
+{
+    std::variant<rocpd_kfd_event_page_migrate_record_t,
+                 rocpd_kfd_event_page_fault_record_t,
+                 rocpd_kfd_event_queue_record_t,
+                 rocpd_kfd_event_unmap_from_gpu_record_t,
+                 rocpd_kfd_event_dropped_events_record_t,
+                 rocpd_kfd_page_migrate_record_t,
+                 rocpd_kfd_page_fault_record_t,
+                 rocpd_kfd_queue_record_t>
+        record;
+
+    template <class F>
+    void for_each_nvp(F&& f)
+    {
+        std::visit([&f](const auto& arg) { arg.for_each_nvp(f); }, record);
+    }
+};
+
+#undef NVP_APPLY
+
 }  // namespace tool
 }  // namespace rocprofiler
 
 namespace cereal
 {
-#define KFD_FIELD(FIELD)                                                                           \
-    {                                                                                              \
-#        FIELD, std::to_string(rec.FIELD)                                                          \
-    }
+#define SAVE_DATA_FIELD(FIELD) ar(cereal::make_nvp(#FIELD, rec.FIELD))
+#define LOAD_DATA_FIELD(FIELD) ar(cereal::make_nvp(#FIELD, rec.FIELD))
 
 template <typename ArchiveT>
 void
 save(ArchiveT& ar, const ::rocprofiler::tool::rocpd_kfd_event_page_migrate_record_t& rec)
 {
-    ar(cereal::make_nvp("kfd",
-                        ::rocprofiler::tool::rocpd_kfd_event_data({
-                            KFD_FIELD(start_address),
-                            KFD_FIELD(end_address),
-                            KFD_FIELD(src_agent_id),
-                            KFD_FIELD(dst_agent_id),
-                            KFD_FIELD(prefetch_agent_id),
-                            KFD_FIELD(preferred_agent_id),
-                            KFD_FIELD(error_code),
-                        })));
+    SAVE_DATA_FIELD(start_address);
+    SAVE_DATA_FIELD(end_address);
+    SAVE_DATA_FIELD(src_agent_id);
+    SAVE_DATA_FIELD(dst_agent_id);
+    SAVE_DATA_FIELD(prefetch_agent_id);
+    SAVE_DATA_FIELD(preferred_agent_id);
+    SAVE_DATA_FIELD(error_code);
 }
 
 template <typename ArchiveT>
 void
 save(ArchiveT& ar, const ::rocprofiler::tool::rocpd_kfd_event_page_fault_record_t& rec)
 {
-    ar(cereal::make_nvp("kfd",
-                        ::rocprofiler::tool::rocpd_kfd_event_data({
-                            KFD_FIELD(agent_id),
-                            KFD_FIELD(address),
-                        })));
+    SAVE_DATA_FIELD(agent_id);
+    SAVE_DATA_FIELD(address);
 }
 
 template <typename ArchiveT>
 void
 save(ArchiveT& ar, const ::rocprofiler::tool::rocpd_kfd_event_queue_record_t& rec)
 {
-    ar(cereal::make_nvp("kfd",
-                        ::rocprofiler::tool::rocpd_kfd_event_data({
-                            KFD_FIELD(agent_id),
-                        })));
+    SAVE_DATA_FIELD(agent_id);
 }
 
 template <typename ArchiveT>
 void
 save(ArchiveT& ar, const ::rocprofiler::tool::rocpd_kfd_event_unmap_from_gpu_record_t& rec)
 {
-    ar(cereal::make_nvp("kfd",
-                        ::rocprofiler::tool::rocpd_kfd_event_data({
-                            KFD_FIELD(agent_id),
-                            KFD_FIELD(start_address),
-                            KFD_FIELD(end_address),
-                        })));
+    SAVE_DATA_FIELD(agent_id);
+    SAVE_DATA_FIELD(start_address);
+    SAVE_DATA_FIELD(end_address);
 }
 
 template <typename ArchiveT>
 void
 save(ArchiveT& ar, const ::rocprofiler::tool::rocpd_kfd_event_dropped_events_record_t& rec)
 {
-    ar(cereal::make_nvp("kfd",
-                        ::rocprofiler::tool::rocpd_kfd_event_data({
-                            KFD_FIELD(count),
-                        })));
+    SAVE_DATA_FIELD(count);
 }
 
 template <typename ArchiveT>
 void
 save(ArchiveT& ar, const ::rocprofiler::tool::rocpd_kfd_page_migrate_record_t& rec)
 {
-    ar(cereal::make_nvp("kfd",
-                        ::rocprofiler::tool::rocpd_kfd_event_data({
-                            KFD_FIELD(start_address),
-                            KFD_FIELD(end_address),
-                            KFD_FIELD(src_agent_id),
-                            KFD_FIELD(dst_agent_id),
-                            KFD_FIELD(prefetch_agent_id),
-                            KFD_FIELD(preferred_agent_id),
-                            KFD_FIELD(error_code),
-                        })));
+    SAVE_DATA_FIELD(start_address);
+    SAVE_DATA_FIELD(end_address);
+    SAVE_DATA_FIELD(src_agent_id);
+    SAVE_DATA_FIELD(dst_agent_id);
+    SAVE_DATA_FIELD(prefetch_agent_id);
+    SAVE_DATA_FIELD(preferred_agent_id);
+    SAVE_DATA_FIELD(error_code);
 }
 
 template <typename ArchiveT>
 void
 save(ArchiveT& ar, const ::rocprofiler::tool::rocpd_kfd_page_fault_record_t& rec)
 {
-    ar(cereal::make_nvp("kfd",
-                        ::rocprofiler::tool::rocpd_kfd_event_data({
-                            KFD_FIELD(agent_id),
-                            KFD_FIELD(address),
-                        })));
+    SAVE_DATA_FIELD(agent_id);
+    SAVE_DATA_FIELD(address);
 }
 
 template <typename ArchiveT>
 void
 save(ArchiveT& ar, const ::rocprofiler::tool::rocpd_kfd_queue_record_t& rec)
 {
-    ar(cereal::make_nvp("kfd",
-                        ::rocprofiler::tool::rocpd_kfd_event_data({
-                            KFD_FIELD(agent_id),
-                        })));
+    SAVE_DATA_FIELD(agent_id);
 }
 
-#undef KFD_FIELD
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, const ::rocprofiler::tool::rocpd_kfd_event_data_t& rec)
+{
+    ar(cereal::make_nvp("kfd", rec.record));
+}
+
+template <typename ArchiveT>
+void
+load(ArchiveT& ar, ::rocprofiler::tool::rocpd_kfd_event_page_migrate_record_t& rec)
+{
+    LOAD_DATA_FIELD(start_address);
+    LOAD_DATA_FIELD(end_address);
+    LOAD_DATA_FIELD(src_agent_id);
+    LOAD_DATA_FIELD(dst_agent_id);
+    LOAD_DATA_FIELD(prefetch_agent_id);
+    LOAD_DATA_FIELD(preferred_agent_id);
+    LOAD_DATA_FIELD(error_code);
+}
+
+template <typename ArchiveT>
+void
+load(ArchiveT& ar, ::rocprofiler::tool::rocpd_kfd_event_page_fault_record_t& rec)
+{
+    LOAD_DATA_FIELD(agent_id);
+    LOAD_DATA_FIELD(address);
+}
+
+template <typename ArchiveT>
+void
+load(ArchiveT& ar, ::rocprofiler::tool::rocpd_kfd_event_queue_record_t& rec)
+{
+    LOAD_DATA_FIELD(agent_id);
+}
+
+template <typename ArchiveT>
+void
+load(ArchiveT& ar, ::rocprofiler::tool::rocpd_kfd_event_unmap_from_gpu_record_t& rec)
+{
+    LOAD_DATA_FIELD(agent_id);
+    LOAD_DATA_FIELD(start_address);
+    LOAD_DATA_FIELD(end_address);
+}
+
+template <typename ArchiveT>
+void
+load(ArchiveT& ar, ::rocprofiler::tool::rocpd_kfd_event_dropped_events_record_t& rec)
+{
+    LOAD_DATA_FIELD(count);
+}
+
+template <typename ArchiveT>
+void
+load(ArchiveT& ar, ::rocprofiler::tool::rocpd_kfd_page_migrate_record_t& rec)
+{
+    LOAD_DATA_FIELD(start_address);
+    LOAD_DATA_FIELD(end_address);
+    LOAD_DATA_FIELD(src_agent_id);
+    LOAD_DATA_FIELD(dst_agent_id);
+    LOAD_DATA_FIELD(prefetch_agent_id);
+    LOAD_DATA_FIELD(preferred_agent_id);
+    LOAD_DATA_FIELD(error_code);
+}
+
+template <typename ArchiveT>
+void
+load(ArchiveT& ar, ::rocprofiler::tool::rocpd_kfd_page_fault_record_t& rec)
+{
+    LOAD_DATA_FIELD(agent_id);
+    LOAD_DATA_FIELD(address);
+}
+
+template <typename ArchiveT>
+void
+load(ArchiveT& ar, ::rocprofiler::tool::rocpd_kfd_queue_record_t& rec)
+{
+    LOAD_DATA_FIELD(agent_id);
+}
+
+template <typename ArchiveT>
+void
+load(ArchiveT& ar, ::rocprofiler::tool::rocpd_kfd_event_data_t& rec)
+{
+    ar(cereal::make_nvp("kfd", rec.record));
+}
+
+#undef SAVE_DATA_FIELD
+#undef LOAD_DATA_FIELD
 
 }  // namespace cereal

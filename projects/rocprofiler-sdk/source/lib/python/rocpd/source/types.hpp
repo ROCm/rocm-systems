@@ -250,7 +250,7 @@ struct event
 {
     struct decoded_extdata
     {
-        std::optional<::rocprofiler::tool::rocpd_kfd_event_data> kfd = {};
+        std::optional<::rocprofiler::tool::rocpd_kfd_event_data_t> kfd = {};
     };
 
     uint64_t    id              = 0;
@@ -722,7 +722,16 @@ template <typename ArchiveT>
 void
 load(ArchiveT& ar, rocpd::types::event::decoded_extdata& data)
 {
-    LOAD_DATA_FIELD(kfd);
+    data.kfd.reset();
+
+    // gracefully load kfd data (not all events are KFD related)
+    try
+    {
+        ::rocprofiler::tool::rocpd_kfd_event_data_t kfd_data;
+        cereal::load(ar, kfd_data);
+        data.kfd = std::move(kfd_data);
+    } catch(const cereal::Exception&)
+    {}
 }
 
 template <typename ArchiveT>

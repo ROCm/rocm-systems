@@ -472,11 +472,11 @@ write_perfetto(
                                           auto _extdata = _event.get_extdata();
                                           if(_extdata.kfd)
                                           {
-                                              for(const auto& [key, val] : _extdata.kfd.value())
-                                              {
-                                                  rocprofiler::sdk::add_perfetto_annotation(
-                                                      ctx, key, val);
-                                              }
+                                              _extdata.kfd.value().for_each_nvp(
+                                                  [&ctx](const auto& name, const auto& value) {
+                                                      rocprofiler::sdk::add_perfetto_annotation(
+                                                          ctx, name, value);
+                                                  });
                                           }
                                       }
                                   });
