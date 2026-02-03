@@ -115,7 +115,7 @@ pthread_mutex_t* AMDSmiGPUDevice::get_mutex() {
 }
 
 // cache the compute process list for the device
-static std::atomic<std::chrono::steady_clock::time_point> last_compute_process_list_update_time = {};
+static std::atomic<std::chrono::steady_clock::time_point> last_compute_process_list_update_time{std::chrono::steady_clock::time_point{}};
 static const std::chrono::milliseconds compute_process_list_cache_duration = std::chrono::milliseconds(500); // 500 ms
 static std::mutex compute_process_list_mutex;
 static uint32_t num_running_processes = 0;
