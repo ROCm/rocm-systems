@@ -85,6 +85,31 @@ nested_kernel(float* out, float* in, const int width)
     out[y * width + x] = in[x * width + y];
 }
 
+#define ASM_LINE asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c))
+
+#define REPEAT_2(X)                                                                                \
+    X;                                                                                             \
+    X
+#define REPEAT_4(X)                                                                                \
+    REPEAT_2(X);                                                                                   \
+    REPEAT_2(X)
+#define REPEAT_8(X)                                                                                \
+    REPEAT_4(X);                                                                                   \
+    REPEAT_4(X)
+#define REPEAT_16(X)                                                                               \
+    REPEAT_8(X);                                                                                   \
+    REPEAT_8(X)
+#define REPEAT_32(X)                                                                               \
+    REPEAT_16(X);                                                                                  \
+    REPEAT_16(X)
+#define REPEAT_64(X)                                                                               \
+    REPEAT_32(X);                                                                                  \
+    REPEAT_32(X)
+#define REPEAT_100(X)                                                                              \
+    REPEAT_64(X);                                                                                  \
+    REPEAT_32(X);                                                                                  \
+    REPEAT_4(X)  // 64+32+4=100
+
 __global__ void
 pc_sampling_kernel(const int c)
 {
@@ -92,106 +117,7 @@ pc_sampling_kernel(const int c)
 #pragma nounroll
     for(int i = 0; i < ITER_NUM; i++)
     {
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
-        asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
+        REPEAT_100(ASM_LINE);
     }
 }
 

@@ -359,6 +359,26 @@ get_client_ctx()
 }
 
 void
+set_contexts_active(const context_id_set_t& ctxs, const bool start)
+{
+    constexpr auto null_ctx = rocprofiler_context_id_t{.handle = 0};
+    for(auto ctx : ctxs)
+    {
+        if(ctx != null_ctx)
+        {
+            if(start)
+            {
+                ROCPROFILER_CHECK(rocprofiler_start_context(ctx));
+            }
+            else
+            {
+                ROCPROFILER_CHECK(rocprofiler_stop_context(ctx));
+            }
+        }
+    }
+}
+
+void
 flush()
 {
     constexpr auto null_buffer_id = rocprofiler_buffer_id_t{.handle = 0};
@@ -565,6 +585,22 @@ cntrl_tracing_callback(rocprofiler_callback_tracing_record_t record,
     static auto _once_flag = std::once_flag{};
     std::call_once(_once_flag, [&]() { _first_pause_resume = true; });
 
+    auto roctx_pause_resume_warning = [&record]() {
+        if(auto* _data =
+               static_cast<rocprofiler_callback_tracing_marker_api_data_t*>(record.payload);
+           _data && _data->args.roctxProfilerPause.tid != 0)
+        {
+            ROCP_INFO_IF(_data->args.roctxProfilerPause.tid !=
+                         static_cast<rocprofiler_thread_id_t>(getpid()))
+                << fmt::format("roctxProfilerPause(tid={}) invoked on thread {}. rocprofv3 "
+                               "does not support thread-local pause/resume (only global "
+                               "pause/resume). Use tid=0 or only call from main thread ({}).",
+                               _data->args.roctxProfilerPause.tid,
+                               common::get_tid(),
+                               getpid());
+        }
+    };
+
     if(ctxs && record.kind == ROCPROFILER_CALLBACK_TRACING_MARKER_CONTROL_API)
     {
         if(!tool::get_config().collection_periods.empty())
@@ -578,19 +614,7 @@ cntrl_tracing_callback(rocprofiler_callback_tracing_record_t record,
         {
             // provide warning if thread id is used since rocprofv3 does not support thread-local
             // pause/resume
-            if(auto* _data =
-                   static_cast<rocprofiler_callback_tracing_marker_api_data_t*>(record.payload);
-               _data && _data->args.roctxProfilerPause.tid != 0)
-            {
-                ROCP_INFO_IF(_data->args.roctxProfilerPause.tid !=
-                             static_cast<rocprofiler_thread_id_t>(getpid()))
-                    << fmt::format("roctxProfilerPause(tid={}) invoked on thread {}. rocprofv3 "
-                                   "does not support thread-local pause/resume (only global "
-                                   "pause/resume). Use tid=0 or only call from main thread ({}).",
-                                   _data->args.roctxProfilerPause.tid,
-                                   common::get_tid(),
-                                   getpid());
-            }
+            roctx_pause_resume_warning();
 
             // if using the selected regions reference counting, only pause when the count goes to
             // zero
@@ -604,23 +628,14 @@ cntrl_tracing_callback(rocprofiler_callback_tracing_record_t record,
             else if(_first_pause_resume && tool::get_config().selected_regions &&
                     tool::get_config().selected_regions_ref_count)
             {
-                ROCP_CI_LOG(INFO)
+                ROCP_INFO
                     << "first call to roctxProfilerPause ignored for selected regions profiling "
                        "with the selected regions reference counting mode enabled";
             }
 
             // only pause if there are active contexts and the ref count is zero
             if(_active_contexts != 0 && _ref_count == 0)
-            {
-                for(auto ctx : *ctxs)
-                {
-                    if(ctx != null_context_id)
-                    {
-                        // ignore error code if the context is already stopped
-                        ROCPROFILER_CHECK(rocprofiler_stop_context(ctx));
-                    }
-                }
-            }
+                set_contexts_active(*ctxs, false);
             else if(_ref_count < 0)
             {
                 ROCP_WARNING << fmt::format(
@@ -634,19 +649,7 @@ cntrl_tracing_callback(rocprofiler_callback_tracing_record_t record,
         {
             // provide warning if thread id is used since rocprofv3 does not support thread-local
             // pause/resume
-            if(auto* _data =
-                   static_cast<rocprofiler_callback_tracing_marker_api_data_t*>(record.payload);
-               _data && _data->args.roctxProfilerResume.tid != 0)
-            {
-                ROCP_INFO_IF(_data->args.roctxProfilerResume.tid !=
-                             static_cast<rocprofiler_thread_id_t>(getpid()))
-                    << fmt::format("roctxProfilerResume(tid={}) invoked on thread {}. rocprofv3 "
-                                   "does not support thread-local pause/resume (only global "
-                                   "pause/resume). Use tid=0 or only call from main thread ({}).",
-                                   _data->args.roctxProfilerResume.tid,
-                                   common::get_tid(),
-                                   getpid());
-            }
+            roctx_pause_resume_warning();
 
             // if using the selected regions reference counting, only resume when the count goes to
             // positive (was zero)
@@ -654,15 +657,7 @@ cntrl_tracing_callback(rocprofiler_callback_tracing_record_t record,
                 (tool::get_config().selected_regions_ref_count) ? pause_resume_count++ : int64_t{0};
             // only resume if there are no active contexts and the ref count was zero
             if(_active_contexts == 0 && _ref_count == 0)
-            {
-                for(auto ctx : *ctxs)
-                {
-                    if(ctx != null_context_id)
-                    {
-                        ROCPROFILER_CHECK(rocprofiler_start_context(ctx));
-                    }
-                }
-            }
+                set_contexts_active(*ctxs, true);
             else if(_ref_count < 0)
             {
                 ROCP_WARNING << fmt::format(
