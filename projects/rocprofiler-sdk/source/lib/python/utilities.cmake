@@ -257,3 +257,84 @@ function(rocprofiler_rocprofv3_python)
             COMPONENT tools)
     endforeach()
 endfunction()
+
+function(rocprofiler_counter_python_bindings _VERSION)
+    message(
+        STATUS
+            "Building rocprofiler-sdk counter python bindings for python ${_VERSION}")
+
+    rocprofiler_find_python3(${_VERSION} QUIET)
+
+    set(rocprofiler_PYTHON_INSTALL_DIRECTORY
+        ${CMAKE_INSTALL_LIBDIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages/rocprofiler
+        )
+    set(rocprofiler_PYTHON_OUTPUT_DIRECTORY
+        ${PROJECT_BINARY_DIR}/${rocprofiler_PYTHON_INSTALL_DIRECTORY})
+
+    # Python source files
+    set(rocprofiler_PYTHON_SOURCES
+        __init__.py
+        profiler.py
+        records.py
+        counters.py
+        exceptions.py)
+
+    foreach(_SOURCE ${rocprofiler_PYTHON_SOURCES})
+        configure_file(${CMAKE_CURRENT_LIST_DIR}/${_SOURCE}
+                       ${rocprofiler_PYTHON_OUTPUT_DIRECTORY}/${_SOURCE} @ONLY)
+        install(
+            FILES ${rocprofiler_PYTHON_OUTPUT_DIRECTORY}/${_SOURCE}
+            DESTINATION ${rocprofiler_PYTHON_INSTALL_DIRECTORY}
+            COMPONENT rocprofiler-python)
+    endforeach()
+
+    # C++ extension module
+    add_library(rocprofiler-sdk-counter-python-bindings-${_VERSION} MODULE)
+    target_sources(
+        rocprofiler-sdk-counter-python-bindings-${_VERSION}
+        PRIVATE libpyrocprofiler.cpp
+                libpyrocprofiler.hpp
+                source/profiler_session.cpp
+                source/profiler_session.hpp
+                source/counter_config_manager.cpp
+                source/counter_config_manager.hpp
+                source/record_collector.cpp
+                source/record_collector.hpp
+                source/types.hpp)
+
+    target_include_directories(
+        rocprofiler-sdk-counter-python-bindings-${_VERSION}
+        PRIVATE ${CMAKE_CURRENT_LIST_DIR}
+        SYSTEM PRIVATE ${Python3_INCLUDE_DIRS})
+
+    target_link_libraries(
+        rocprofiler-sdk-counter-python-bindings-${_VERSION}
+        PRIVATE rocprofiler-sdk::rocprofiler-sdk-headers
+                rocprofiler-sdk::rocprofiler-sdk-shared-library
+                rocprofiler-sdk::rocprofiler-sdk-pybind11
+                rocprofiler-sdk::rocprofiler-sdk-build-flags)
+
+    # if "Development" is specified instead of "Development.Module", we need to
+    # link to python libraries
+    if("Development" IN_LIST ROCPROFILER_BUILD_Find_Python3_COMPONENTS)
+        target_link_libraries(rocprofiler-sdk-counter-python-bindings-${_VERSION}
+                              PRIVATE ${Python3_LIBRARIES})
+    endif()
+
+    set_target_properties(
+        rocprofiler-sdk-counter-python-bindings-${_VERSION}
+        PROPERTIES OUTPUT_NAME libpyrocprofiler
+                   RUNTIME_OUTPUT_DIRECTORY ${rocprofiler_PYTHON_OUTPUT_DIRECTORY}
+                   LIBRARY_OUTPUT_DIRECTORY ${rocprofiler_PYTHON_OUTPUT_DIRECTORY}
+                   ARCHIVE_OUTPUT_DIRECTORY ${rocprofiler_PYTHON_OUTPUT_DIRECTORY}
+                   PDB_OUTPUT_DIRECTORY ${rocprofiler_PYTHON_OUTPUT_DIRECTORY}
+                   PREFIX ""
+                   SUFFIX ".${Python3_SOABI}${CMAKE_SHARED_LIBRARY_SUFFIX}"
+                   BUILD_RPATH "${DEFAULT_PYTHON_RPATH}"
+                   INSTALL_RPATH "${DEFAULT_PYTHON_RPATH}")
+
+    install(
+        TARGETS rocprofiler-sdk-counter-python-bindings-${_VERSION}
+        DESTINATION ${rocprofiler_PYTHON_INSTALL_DIRECTORY}
+        COMPONENT rocprofiler-python)
+endfunction()
