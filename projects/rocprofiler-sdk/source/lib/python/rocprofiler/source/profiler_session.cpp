@@ -243,14 +243,9 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         return 1;
     }
 
-    // Start the context (it will be controlled via g_profiling_active flag)
-    status = rocprofiler_start_context(g_context);
-    if(status != ROCPROFILER_STATUS_SUCCESS)
-    {
-        std::cerr << "[rocprofiler-python] Failed to start context: "
-                  << rocprofiler_get_status_string(status) << std::endl;
-        return 1;
-    }
+    // NOTE: Context is NOT started here - it will be started in ProfilerSession::start()
+    // This deferred start avoids conflicts with PyTorch/HIP initialization that may occur
+    // between tool_init() and when the user actually starts profiling.
 
     g_context_created = true;
     g_tool_init_done  = true;
@@ -267,14 +262,19 @@ tool_fini(void* tool_data)
 
     if(g_context_created)
     {
+        // Only stop context if profiling is still active (wasn't stopped by
+        // ProfilerSession::stop())
+        if(g_profiling_active.load(std::memory_order_acquire))
+        {
+            rocprofiler_stop_context(g_context);
+            g_profiling_active.store(false, std::memory_order_release);
+        }
+
         // Flush any remaining records
         if(g_buffer.handle != 0)
         {
             rocprofiler_flush_buffer(g_buffer);
         }
-
-        // Stop context
-        rocprofiler_stop_context(g_context);
 
         // Destroy buffer
         if(g_buffer.handle != 0)
@@ -408,6 +408,15 @@ ProfilerSession::start()
     // Clear any previous records
     record_collector_->clear();
 
+    // Start the context now that we're ready to profile
+    // This deferred start avoids conflicts with PyTorch/HIP initialization
+    auto status = rocprofiler_start_context(g_context);
+    if(status != ROCPROFILER_STATUS_SUCCESS)
+    {
+        throw std::runtime_error(std::string("Failed to start rocprofiler context: ") +
+                                 rocprofiler_get_status_string(status));
+    }
+
     // Set this session as active and enable profiling
     s_active_session_ = this;
     started_          = true;
@@ -426,6 +435,14 @@ ProfilerSession::stop()
 
     // Disable profiling first (prevents new dispatches from being collected)
     g_profiling_active.store(false, std::memory_order_release);
+
+    // Stop the context
+    auto status = rocprofiler_stop_context(g_context);
+    if(status != ROCPROFILER_STATUS_SUCCESS)
+    {
+        std::cerr << "[rocprofiler-python] Warning: Failed to stop context: "
+                  << rocprofiler_get_status_string(status) << std::endl;
+    }
 
     // Flush the global buffer to get remaining records
     if(g_buffer.handle != 0)
