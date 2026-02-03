@@ -61,7 +61,9 @@
 #include "suites/functional/svm_memory.h"
 #include "suites/performance/dispatch_time.h"
 #include "suites/performance/memory_async_copy.h"
+#if ENABLE_COPY_NUMA
 #include "suites/performance/memory_async_copy_numa.h"
+#endif
 #include "suites/performance/memory_async_copy_on_engine.h"
 #include "suites/performance/enqueueLatency.h"
 #include "suites/negative/memory_allocate_negative_tests.h"
@@ -778,10 +780,12 @@ TEST(rocrtstPerf, ENQUEUE_LATENCY) {
   RunGenericTest(&multiPacketequeue);
 }
 
+#if ENABLE_COPY_NUMA
 TEST(rocrtstPerf, DISABLED_Memory_Async_Copy_NUMA) {
   MemoryAsyncCopyNUMA numa;
   RunGenericTest(&numa);
 }
+#endif
 
 TEST(rocrtstPerf, AQL_Dispatch_Time_Single_SpinWait) {
   DispatchTime dt(true, true);

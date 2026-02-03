@@ -43,6 +43,9 @@
  *
  */
 
+#include "suites/performance/memory_async_copy_numa.h"
+
+#if ENABLE_COPY_NUMA
 #include <hwloc.h>
 #include <hwloc/linux-libnuma.h>
 #include <numa.h>
@@ -54,7 +57,6 @@
 #include "suites/test_common/test_base.h"
 #include "hsa/hsa.h"
 #include "hsa/hsa_ext_amd.h"
-#include "suites/performance/memory_async_copy_numa.h"
 #include "common/base_rocr_utils.h"
 #include "common/helper_funcs.h"
 #include "gtest/gtest.h"
@@ -124,10 +126,17 @@ void MemoryAsyncCopyNUMA::Run(void) {
     hwloc_bitmap_free(cpu_bind_set_chk);
 
     // Bind Memory
+#if ENABLE_COPY_NUMA_MEMBIND_NODESET
     ret = hwloc_set_membind_nodeset(topology_, cpu_hwl_numa_nodeset_,
                                      HWLOC_MEMBIND_BIND, 0);
     ASSERT_TRUE(ret == 0 &&
           "hwloc: membind not supported or cannot be enforced. Check errno.");
+#else
+    if (verbosity() >= VERBOSE_STANDARD) {
+      std::cout << "hwloc: membind nodeset not available in linked libhwloc; skipping."
+                << std::endl;
+    }
+#endif
   }
   for (Transaction t : tran_) {
     RunBenchmarkWithVerification(&t);
@@ -360,5 +369,5 @@ void MemoryAsyncCopyNUMA::RunBenchmarkWithVerification(Transaction *t) {
     t->benchmark_copy_time->push_back(GetMeanTime(&time));
   }
 }
-
 #undef RET_IF_HSA_ERR
+#endif
