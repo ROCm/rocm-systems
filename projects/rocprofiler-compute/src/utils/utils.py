@@ -1296,8 +1296,8 @@ def save_torch_trace_inputs(
         shutil.copyfile(src_counter, dst_counter)
         shutil.copyfile(src_marker, dst_marker)
         console_log(
-            "Moved counter collection and marker trace files",
-            "to workload dir for PyTorch trace creation.",
+            "Moved counter collection and marker trace files"
+            "to workload dir for PyTorch trace creation."
         )
         console_log("Counter Collection: ", str(dst_counter))
         console_log("Marker API Trace: ", str(dst_marker))
@@ -1311,14 +1311,14 @@ def save_torch_trace_inputs(
         for src_counter in counter_files:
             dst_counter = str(Path(workload_dir) / f"{fbase}" / Path(src_counter).name)
             shutil.copyfile(src_counter, dst_counter)
-            console_log(f"Copied Counter Collection: {dst_counter}")
+            console_log("torch trace", f"Copied Counter Collection: {dst_counter}")
         for src_marker in marker_files:
             dst_marker = str(Path(workload_dir) / f"{fbase}" / Path(src_marker).name)
             shutil.copyfile(src_marker, dst_marker)
-            console_log("Copied Marker API Trace: ", dst_marker)
+            console_log("torch trace","Copied Marker API Trace: {dst_marker}")
     else:
-        console_warning(
-            f"Unknown output_format: {output_format}", "in save_torch_trace_inputs"
+        console_warning("torch trace",
+            f"Unknown output_format: {output_format} in save_torch_trace_inputs"
         )
 
 
@@ -1350,14 +1350,14 @@ def process_torch_trace_output(
 
     if not existing_csv_files:
         if Path(f"{workload_dir}/torch_trace").exists():
-            console_log(
-                "Torch data has already been processed",
-                f"and saved to {workload_dir}/torch_trace",
+            console_log("torch trace",
+                "Torch data has already been processed"
+                f"and saved to {workload_dir}/torch_trace"
             )
         else:
-            console_warning(
-                "No marker files with corresponding counter files found.",
-                "Ensure profiling was done with '--torch-trace'.",
+            console_warning("torch trace",
+                "No marker files with corresponding counter files found."
+                "Ensure profiling was done with '--torch-trace'."
             )
         return
     # Delete existing torch_trace directory if present
