@@ -400,7 +400,7 @@ if(MPI_CXX_COMPILER)
     add_test(
         NAME test_profile_multi_rank
         COMMAND
-            mpirun -n 2 ${Python3_EXECUTABLE} -m pytest -s -m multi_rank
+            ${PYTHON_TEST_COMMAND} -m pytest -s -m multi_rank
             --junitxml=tests/test_profile_multi_rank.xml ${COV_OPTION}
             tests/test_profile_general.py --with-mpi ${WORKING_DIR_OPTION}
     )
