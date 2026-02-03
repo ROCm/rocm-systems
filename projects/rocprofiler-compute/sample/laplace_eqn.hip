@@ -28,7 +28,8 @@
 
 // The grid is partitioned among multiple MPI processes in the vertical direction.
 // Each process exchanges halo regions with its neighboring processes after each
-// iteration.
+// iteration. Communication uses explicit GPU->Host->MPI->Host->GPU transfers
+// (not GPU-aware MPI) for halo exchange.
 
 // The code allows users to specify the number of iterations and the
 // order of kernel launches via command-line arguments.
@@ -295,27 +296,55 @@ int main(int argc, char *argv[]) {
   int left = rank == 0 ? num_procs - 1 : rank - 1;
   int right = (rank + 1) % num_procs;
 
+  // Allocate host buffers for halo exchange (GPU -> Host -> MPI -> Host -> GPU)
+  // Each problem size needs 4 buffers: send_left, send_right, recv_left, recv_right
+  std::vector<float *> h_send_left(n_sizes.size());
+  std::vector<float *> h_send_right(n_sizes.size());
+  std::vector<float *> h_recv_left(n_sizes.size());
+  std::vector<float *> h_recv_right(n_sizes.size());
+
+  for (size_t i = 0; i < n_sizes.size(); ++i) {
+    h_send_left[i] = new float[n_sizes[i]];
+    h_send_right[i] = new float[n_sizes[i]];
+    h_recv_left[i] = new float[n_sizes[i]];
+    h_recv_right[i] = new float[n_sizes[i]];
+  }
+
   int num_requests = 4 * n_sizes.size();
   std::vector<MPI_Request> requests(num_requests);
 
-  // Number of simulation sizes should be small, so std::size_t to int
-  // conversion should be safe
-  for (int i = 0; i < n_sizes.size(); i++) {
-    // Send data to left node
-    MPI_Isend(&d_U_olds[i][n_sizes[i]], n_sizes[i], MPI_FLOAT, left, 2 * i,
-              MPI_COMM_WORLD, &requests[4 * i]);
-    MPI_Irecv(&d_U_olds[i][n_sizes[i] * n_sizes[i]], n_sizes[i], MPI_FLOAT,
-              right, 2 * i, MPI_COMM_WORLD, &requests[4 * i + 1]);
+  // Initial halo exchange: GPU -> Host -> MPI -> Host -> GPU
+  for (size_t i = 0; i < n_sizes.size(); ++i) {
+    // Copy halo data from GPU to host send buffers
+    HIP_CHECK(hipMemcpy(h_send_left[i], &d_U_olds[i][n_sizes[i]],
+                        n_sizes[i] * sizeof(float), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(h_send_right[i], &d_U_olds[i][n_sizes[i] * (n_sizes[i] + 1)],
+                        n_sizes[i] * sizeof(float), hipMemcpyDeviceToHost));
+  }
 
-    // Send data to right node
-    MPI_Isend(&d_U_olds[i][n_sizes[i] * (n_sizes[i] + 1)], n_sizes[i],
-              MPI_FLOAT, right, 2 * i + 1, MPI_COMM_WORLD,
-              &requests[4 * i + 2]);
-    MPI_Irecv(&d_U_olds[i][0], n_sizes[i], MPI_FLOAT, left, 2 * i + 1,
+  for (size_t i = 0; i < n_sizes.size(); ++i) {
+    // Send data to left node, receive from right node
+    MPI_Isend(h_send_left[i], n_sizes[i], MPI_FLOAT, left, 2 * i,
+              MPI_COMM_WORLD, &requests[4 * i]);
+    MPI_Irecv(h_recv_right[i], n_sizes[i], MPI_FLOAT, right, 2 * i,
+              MPI_COMM_WORLD, &requests[4 * i + 1]);
+
+    // Send data to right node, receive from left node
+    MPI_Isend(h_send_right[i], n_sizes[i], MPI_FLOAT, right, 2 * i + 1,
+              MPI_COMM_WORLD, &requests[4 * i + 2]);
+    MPI_Irecv(h_recv_left[i], n_sizes[i], MPI_FLOAT, left, 2 * i + 1,
               MPI_COMM_WORLD, &requests[4 * i + 3]);
   }
 
   MPI_Waitall(num_requests, requests.data(), MPI_STATUSES_IGNORE);
+
+  // Copy received halo data from host to GPU
+  for (size_t i = 0; i < n_sizes.size(); ++i) {
+    HIP_CHECK(hipMemcpy(&d_U_olds[i][n_sizes[i] * n_sizes[i]], h_recv_right[i],
+                        n_sizes[i] * sizeof(float), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(&d_U_olds[i][0], h_recv_left[i],
+                        n_sizes[i] * sizeof(float), hipMemcpyHostToDevice));
+  }
 #endif // USE_MPI
 
   // Perform Jacobi iterations
@@ -333,19 +362,31 @@ int main(int argc, char *argv[]) {
 #ifdef USE_MPI
     std::vector<MPI_Request> requests(4);
 
-    // Send data to left node
-    MPI_Isend(&d_U_olds[i][n_sizes[i]], n_sizes[i], MPI_FLOAT, left, 0,
-              MPI_COMM_WORLD, &requests[0]);
-    MPI_Irecv(&d_U_olds[i][n_sizes[i] * n_sizes[i]], n_sizes[i], MPI_FLOAT,
-              right, 0, MPI_COMM_WORLD, &requests[1]);
+    // Copy halo data from GPU to host send buffers
+    HIP_CHECK(hipMemcpy(h_send_left[i], &d_U_olds[i][n_sizes[i]],
+                        n_sizes[i] * sizeof(float), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(h_send_right[i], &d_U_olds[i][n_sizes[i] * (n_sizes[i] + 1)],
+                        n_sizes[i] * sizeof(float), hipMemcpyDeviceToHost));
 
-    // Send data to right node
-    MPI_Isend(&d_U_olds[i][n_sizes[i] * (n_sizes[i] + 1)], n_sizes[i],
-              MPI_FLOAT, right, 1, MPI_COMM_WORLD, &requests[2]);
-    MPI_Irecv(&d_U_olds[i][0], n_sizes[i], MPI_FLOAT, left, 1, MPI_COMM_WORLD,
-              &requests[3]);
+    // Send data to left node, receive from right node
+    MPI_Isend(h_send_left[i], n_sizes[i], MPI_FLOAT, left, 0,
+              MPI_COMM_WORLD, &requests[0]);
+    MPI_Irecv(h_recv_right[i], n_sizes[i], MPI_FLOAT, right, 0,
+              MPI_COMM_WORLD, &requests[1]);
+
+    // Send data to right node, receive from left node
+    MPI_Isend(h_send_right[i], n_sizes[i], MPI_FLOAT, right, 1,
+              MPI_COMM_WORLD, &requests[2]);
+    MPI_Irecv(h_recv_left[i], n_sizes[i], MPI_FLOAT, left, 1,
+              MPI_COMM_WORLD, &requests[3]);
 
     MPI_Waitall(4, requests.data(), MPI_STATUSES_IGNORE);
+
+    // Copy received halo data from host to GPU
+    HIP_CHECK(hipMemcpy(&d_U_olds[i][n_sizes[i] * n_sizes[i]], h_recv_right[i],
+                        n_sizes[i] * sizeof(float), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(&d_U_olds[i][0], h_recv_left[i],
+                        n_sizes[i] * sizeof(float), hipMemcpyHostToDevice));
 #endif // USE_MPI
   }
 
@@ -373,6 +414,14 @@ int main(int argc, char *argv[]) {
   delete[] h_U_large;
 
 #ifdef USE_MPI
+  // Free host buffers for halo exchange
+  for (size_t i = 0; i < n_sizes.size(); ++i) {
+    delete[] h_send_left[i];
+    delete[] h_send_right[i];
+    delete[] h_recv_left[i];
+    delete[] h_recv_right[i];
+  }
+
   // Finalize MPI
   MPI_Finalize();
 #endif // USE_MPI
