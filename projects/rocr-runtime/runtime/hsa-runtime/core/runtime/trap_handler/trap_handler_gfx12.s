@@ -68,6 +68,8 @@
 .set SQ_WAVE_TRAP_CTRL_WAVE_END_SHIFT          , 8
 .set SQ_WAVE_TRAP_CTRL_TRAP_AFTER_INST         , 9
 
+// The PC is dword (32bit) aligned, so the 2 LSBs are always zero.
+.set SQ_WAVE_PC_LO_ADDRESS_MASK                , 0xFFFFFFFC
 .set SQ_WAVE_PC_HI_ADDRESS_MASK                , 0xFFFF
 .set SQ_WAVE_PC_HI_TRAP_ID_BFE                 , (SQ_WAVE_PC_HI_TRAP_ID_SHIFT | (SQ_WAVE_PC_HI_TRAP_ID_SIZE << 16))
 .set SQ_WAVE_PC_HI_TRAP_ID_SHIFT               , 28
@@ -101,7 +103,8 @@
 .set SAMPLE_OFF_PC_HOST                        , 0x00         // original PC (host only)
 .set SAMPLE_OFF_EXEC_LOHI                      , 0x08         // saved EXEC low/high
 .set SAMPLE_OFF_WGID_XY                        , 0x10         // WG id X / Y
-.set SAMPLE_OFF_WGID_Z_WAVE                    , 0x18         // WG id Z
+.set SAMPLE_OFF_WGID_Z                         , 0x18         // WG id Z (32-bit)
+.set SAMPLE_OFF_WAVE_IN_GROUP_CHIPLET          , 0x1C         // wave_in_wg[5:0] | reserved_wg[7:6] | chiplet[10:8] | reserved[31:11]
 .set SAMPLE_OFF_TIMESTAMP                      , 0x30         // 64 bit realtime counter
 .set SAMPLE_OFF_HW_ID                          , 0x20         // HW_ID (values combined from the HW_ID1 + HW_ID2)
 .set SAMPLE_OFF_SNAPSHOT_DATA                  , 0x24
@@ -115,6 +118,7 @@
 .set SAMPLE_OFF_EVENT_MAILBOX1                 , 0x20         // Offset for event mailbox pointer for buffer 1
 
 .set WAVE_ID_MASK                              , 0x1f         // Mask to extract Wave ID from TTMP register.
+.set WAVE_ID_WG_BIT_POSITION                   , 25           // Wave ID is stored in bits [29:25] of ttmp8, so we need to shift it right by 25 bits.
 .set BUF_INDEX_MASK                            , 0x7fffffff   // strip bit31 from add_x2
 .set SAMPLE_OFF_BUF_WRITTEN_VAL                , 0x10         // Offset to buf_written_val0/1 in pcs_sampling_data_t
 .set SAMPLE_INDEX_WIDTH                        , 31           // The sample index is 63 bits; the high part is 31 bits.
@@ -405,7 +409,7 @@
   // ttmp4:  Available - Can be freely used
   // ttmp5:  Available - Can be freely used
   // ttmp6:  Initially contains flags  - trap ID and halt status - reused after saving
-  // ttmp7:  Contains WGID_Y in high 16 bits, WGID_Z in low 16 bits
+  // ttmp7:  Contains WGID_Y in low 16 bits, WGID_Z in high 16 bits
   // ttmp8:  Contains dispatch ID in bits [24:0] and debug flag
   // ttmp9:  Contains WGID_X
   // ttmp10: Available - Used next to save exec_lo
@@ -500,17 +504,10 @@
   s_addc_u32        ttmp5, ttmp15, ttmp3                    // ttmp5 = TMA_base_hi + total_offset_hi + carry. This is high part of &bufferX
                                                             // ttmp[4:5] now correctly points to the base of the selected sample buffer array
 
-  s_bitcmp1_b32     ttmp13, TTMP13_HT_FLAG_BIT              // if ttmp13.b22==1, this is hosttrap
-  s_cbranch_scc1    .fill_sample_ht
-  s_bitcmp1_b32     ttmp13, TTMP13_STOCH_FLAG_BIT
-  s_cbranch_scc1    .fill_sample_stoch
-
-  s_mov_b64         ttmp[2:3], exec                         // Restore user v[0:1] backup to ttmp[2:3]
-  v_readlane_b32    ttmp4, v2, 0                            // Backup user v[2:3] to ttmp[4:5] for restore.
-  v_readlane_b32    ttmp5, v3, 0
-  s_branch          .restore_vector_before_exit_trap
-
-.fill_sample_ht:
+.fill_sample_common:
+  // This is a common path for filling fields shared by host-trap and stochastic PC sampling:
+  // timestamp, exec, workgroup information, HW_ID, and correlation ID.
+  //
   // At this point, v[0:1] is local_entry (but v1 is 0)
   // v[2:3] is original user-data
   // ttmp[2:3] is free
@@ -559,32 +556,24 @@
   // ttmp[14:15]=‘tma’, ttmp13.b31 = buf_to_use
   // EXEC is 0x1
 
-  s_and_b32         ttmp1, ttmp1, SQ_WAVE_PC_HI_ADDRESS_MASK // Clear out extra data from PC_HI
-  v_writelane_b32   v2, ttmp0, 0
-  v_writelane_b32   v3, ttmp1, 0
-  global_store_b64  v[0:1], v[2:3], off, offset:SAMPLE_OFF_PC_HOST, scope:SCOPE_SYS  // store out PC
-
+  // Save exec for the sample. exec_lo is inside ttmp10, while exec_hi in ttmp11 for gfx120*
   v_writelane_b32   v2, ttmp10, 0
   v_writelane_b32   v3, ttmp11, 0
   global_store_b64  v[0:1], v[2:3], off, offset:SAMPLE_OFF_EXEC_LOHI, scope:SCOPE_SYS  // store out original EXEC
 
   // Store Workgroup ID X and Y at offset SAMPLE_OFF_WGID_XY (0x10).
   // ttmp9 = WGID_X (from first-level handler).
-  // ttmp7 contains WGID_Y in high 16 bits.
+  // ttmp7 contains WGID_Y in low 16 bits.
   v_writelane_b32   v2, ttmp9, 0                            // wg_id_x
-  s_bfe_u32         ttmp6, ttmp7, (16<<16)                  // extract bits 15:0, wg_id_y
+  s_bfe_u32         ttmp6, ttmp7, (0 | (16 << 16))          // extract bits 15:0, wg_id_y
   v_writelane_b32   v3, ttmp6, 0
   global_store_b64  v[0:1], v[2:3], off, offset:SAMPLE_OFF_WGID_XY, scope:SCOPE_SYS  // store wg_id_x and wg_id_y
 
-  // Store Workgroup ID Z and Wave ID at offset SAMPLE_OFF_WGID_Z_WAVE (0x18).
-  // ttmp7 contains WGID_Z in low 16 bits.
-  // ttmp11 contains Wave ID in low 6 bits (from EXEC_hi).
-  s_bfe_u32         ttmp6, ttmp7, (16|16<<16)               // extract bits 31:16, wg_id_z
+  // Store Workgroup ID Z at offset SAMPLE_OFF_WGID_Z (0x18).
+  // ttmp7 contains WGID_Z in high 16 bits [31:16].
+  s_bfe_u32         ttmp6, ttmp7, (16 | (16 << 16))         // extract bits 31:16, wg_id_z
   v_writelane_b32   v2, ttmp6, 0
-  v_writelane_b32   v3, ttmp8, 0x0                          // wave_in_wg is bits 29:25
-  v_lshrrev_b32     v3, 25, v3                              // Shift wave_in_wg to 4:0
-  v_and_b32         v3, v3, WAVE_ID_MASK                    // put (ttmp8>>25)&0x1f into v3
-  global_store_b64  v[0:1], v[2:3], off, offset:SAMPLE_OFF_WGID_Z_WAVE, scope:SCOPE_SYS  // store wg_id_z and wave_id
+  global_store_b32  v[0:1], v2, off, offset:SAMPLE_OFF_WGID_Z, scope:SCOPE_SYS  // store wg_id_z
 
   // v[0:1] = &buffer[local_entry]
   // v[2:3] = free
@@ -599,6 +588,27 @@
 
   STORE_HW_ID
 
+  // The following is still true
+  // v[0:1] = &buffer[local_entry]
+  // v[2:3] = free
+  // ttmp[2:3] holds backup of original shader's v[0:1]
+  // ttmp[4:5] holds backup of original shader's v[2:3]
+  // ttmp6 = free
+  // ttmp[10:11] holds original shader's [exec_lo,exec_hi]
+  // ttmp[14:15]=tma, ttmp13.b31 = buf_to_use
+  // EXEC is 0x1
+
+  // Store wave_in_group and chiplet information in the following format:
+  // Bits [5:0]   = wave_in_wg (5 bits from ttmp8[29:25])
+  // bits [10:8]  = chiplet (zero on gfx12.0)
+  // Bits [7:6] and [31:11] = reserved and must be zero
+
+  s_bfe_u32         ttmp6, ttmp8, (WAVE_ID_WG_BIT_POSITION | (5 << 16)) // Extract 5 bits
+  v_writelane_b32   v2, ttmp6, 0                            // Store wave_in_group in v2
+
+  // Write wave_in_group and chiplet (0 on gfx12.0)
+  global_store_b32  v[0:1], v2, off, offset:SAMPLE_OFF_WAVE_IN_GROUP_CHIPLET, scope:SCOPE_SYS
+
   // The following is still true as we get ready to jump to correlation ID check
   // v[0:1] = &buffer[local_entry]
   // v[2:3] = free
@@ -610,110 +620,90 @@
   // EXEC is 0x1
 
   STORE_CORRELATION_ID
+
+  // The following is still true
+  // v[0:1] = &buffer[local_entry]
+  // v[2:3] = free
+  // ttmp[2:3] holds backup of original shader's v[0:1]
+  // ttmp[4:5] holds backup of original shader's v[2:3]
+  // ttmp6 = free
+  // ttmp[10:11] holds original shader's [exec_lo,exec_hi]
+  // ttmp[14:15]=tma, ttmp13.b31 = buf_to_use
+  // EXEC is 0x1
+
+  // Check perf_snapshot bit to determine if a trap caused by stochastic sampling.
+  s_bitcmp1_b32     ttmp13, TTMP13_STOCH_FLAG_BIT
+  s_cbranch_scc1    .fill_sample_stoch
+
+.fill_sample_ht:
+  // The following is still true
+  // v[0:1] = &buffer[local_entry]
+  // v[2:3] = free
+  // ttmp[2:3] holds backup of original shader's v[0:1]
+  // ttmp[4:5] holds backup of original shader's v[2:3]
+  // ttmp6 = free
+  // ttmp[10:11] holds original shader's [exec_lo,exec_hi]
+  // ttmp[14:15]=tma, ttmp13.b31 = buf_to_use
+  // EXEC is 0x1
+
+  // Clear out 2 LSBs of the PC_LO (used as scratch bits in ttmp0)
+  v_writelane_b32   v2, ttmp0, 0                             // v[2] = PC_LO
+  v_and_b32         v2, v2, SQ_WAVE_PC_LO_ADDRESS_MASK       // clear out scratch bits
+  // Clear out 7 MSBs of PC_HI (used as scratch bits in ttmp1)
+  v_writelane_b32   v3, ttmp1, 0                             // v[3] = PC_HI
+  v_and_b32         v3, v3, SQ_WAVE_PC_HI_ADDRESS_MASK       // clear out scratch bits
+  global_store_b64  v[0:1], v[2:3], off, offset:SAMPLE_OFF_PC_HOST, scope:SCOPE_SYS  // store out PC
+
   // Ensure all stores have completed before returning and incrementing written_val
   s_wait_storecnt   0
 
-  // Still true after returning back from correlation ID check
-  // v[0:1] = &buffer[local_entry], but we no longer need it
+  // v[0:1] = &buffer[local_entry]
   // v[2:3] = free
-  // ttmp[2:3] holds backup of original shader’s v[0:1]
-  // ttmp[4:5] holds backup of original shader’s v[2:3]
+  // ttmp[2:3] holds backup of original shader's v[0:1]
+  // ttmp[4:5] holds backup of original shader's v[2:3]
   // ttmp6 = free
-  // ttmp[10:11] holds original shader’s [exec_lo,exec_hi]
-  // ttmp[14:15]=‘tma’, ttmp13.b31 = buf_to_use
+  // ttmp[10:11] holds original shader's [exec_lo,exec_hi]
+  // ttmp[14:15]=tma, ttmp13.b31 = buf_to_use
   // EXEC is 0x1
-  //
   s_branch          .ret_from_fill_sample
 
 .fill_sample_stoch:
-  // v0 contains local_entry, v1 is free
-  // v[2:3] is original user-data
-  // ttmp[2:3] is free
-  // ttmp[4:5] holds &buffer
-  // ttmp6 holds buf_to_use
-  // ttmp[10:11] holds original shader’s [exec_lo,exec_hi]
-  // [ttmp14:15]=‘tma’, ttmp13.b31 = buf_to_use
-  // EXEC holds holds backup of original shader’s v[0:1]
-
-  v_readlane_b32    ttmp6, v0, 0x0                            // ttmp2=local_entry
-  s_mul_i32         ttmp2, ttmp6, SAMPLE_OFF_BYTES_PER_SAMPLE // into buffer for 64B objects
-  s_mul_hi_u32      ttmp3, ttmp6, SAMPLE_OFF_BYTES_PER_SAMPLE // ttmp[2:3] now holds the offset
-  s_add_u32         ttmp2, ttmp2, ttmp4
-  s_addc_u32        ttmp3, ttmp3, ttmp5                       // ttmp[2:3]=&bufferX[local_entry]
-  v_readlane_b32    ttmp4, v2, 0x0                            // ttmp[4:5] now holds backup of
-  v_readlane_b32    ttmp5, v3, 0x0                            // user-data from v[2:3]
-  v_writelane_b32   v0, ttmp2, 0x0
-  v_writelane_b32   v1, ttmp3, 0x0                            // v[0:1]=&buffer[local_entry]
-  s_sendmsg_rtn_b64 ttmp[2:3], sendmsg(MSG_RTN_GET_REALTIME)
-  s_wait_kmcnt      0                                         // Wait for timestamp
-
   // v[0:1] = &buffer[local_entry]
   // v[2:3] = free
-  // ttmp[2:3] holds the thing we want to store
-  // ttmp[4:5] holds backup of original shader’s v[2:3]
+  // ttmp[2:3] holds backup of original shader's v[0:1]
+  // ttmp[4:5] holds backup of original shader's v[2:3]
   // ttmp6 = free
-  // ttmp[10:11] holds original shader’s [exec_lo,exec_hi]
-  // ttmp[14:15]=‘tma’, ttmp13.b31 = buf_to_use
-  // EXEC holds backup of original shader’s v[0:1]
-
-  v_writelane_b32   v2, ttmp2, 0                            // bring output data to v[2:3]
-  v_writelane_b32   v3, ttmp3, 0
-  global_store_b64  v[0:1], v[2:3], off, offset:SAMPLE_OFF_TIMESTAMP, scope:SCOPE_SYS  // store out timestamp
-
-  // v[0:1] = &buffer[local_entry]
-  // v[2:3] = free
-  // ttmp[2:3] holds backup of original shader’s v[0:1]
-  // ttmp[4:5] holds backup of original shader’s v[2:3]
-  // ttmp6 = free
-  // ttmp[10:11] holds original shader’s [exec_lo,exec_hi]
-  // ttmp[14:15]=‘tma’, ttmp13.b31 = buf_to_use
+  // ttmp[10:11] holds original shader's [exec_lo,exec_hi]
+  // ttmp[14:15]=tma, ttmp13.b31 = buf_to_use
   // EXEC is 0x1
-  v_writelane_b32   v2, ttmp10, 0
-  v_writelane_b32   v3, ttmp11, 0
-  global_store_b64  v[0:1], v[2:3], off, offset:SAMPLE_OFF_EXEC_LOHI, scope:SCOPE_SYS  // store out original EXEC
-  v_writelane_b32   v2, ttmp9, 0                            // wg_id_x
-  s_bfe_u32         ttmp6, ttmp7, (0 | (16 << 16))          // extract bits 15:0, wg_id_y
-  v_writelane_b32   v3, ttmp6, 0
-  global_store_b64  v[0:1], v[2:3], off, offset:SAMPLE_OFF_WGID_XY, scope:SCOPE_SYS  // store wg_id_x and wg_id_y
-  s_bfe_u32         ttmp6, ttmp7, (16|16<<16)               // extract bits 31:16, wg_id_z
-  v_writelane_b32   v2, ttmp6, 0                            // put wg_id_z in v2
-  v_writelane_b32   v3, ttmp8, 0x0                          // wave_in_wg is bits 29:25
 
-  v_lshrrev_b32     v3, 25, v3                              // Shift wave_in_wg to 4:0
+  // Read performance SNAPSHOT registers and store at offset 0x28 (SAMPLE_OFF_SNAPSHOT_DATA + 4)
+  s_getreg_b32      ttmp6, HW_REG_SQ_PERF_SNAPSHOT_DATA1    // Read snapshot data register 1
+  v_writelane_b32   v2, ttmp6, 0x0                          // stash DATA1 in v2
+  s_getreg_b32      ttmp6, HW_REG_SQ_PERF_SNAPSHOT_DATA2    // Read snapshot data register 2
+  v_writelane_b32   v3, ttmp6, 0x0                          // stash DATA2 in v3
+  // Store snapshot DATA1 and DATA2 at offset SAMPLE_OFF_SNAPSHOT_DATA + 4
+  global_store_b64  v[0:1], v[2:3], off, offset:SAMPLE_OFF_SNAPSHOT_DATA + 4, scope:SCOPE_SYS
 
-  v_and_b32         v3, v3, WAVE_ID_MASK                    // put (ttmp8>>25)&0x1f into v3
-  global_store_b64  v[0:1], v[2:3], off, offset:SAMPLE_OFF_WGID_Z_WAVE, scope:SCOPE_SYS  // store wg_id_z and wave_id
+  // For stochastic sampling, use PC from snapshot registers (actual sampled instruction)
+  // Trap PC points to trap handler entry, not the interrupted instruction
+  s_getreg_b32      ttmp6, HW_REG_SQ_PERF_SNAPSHOT_PC_LO    // Read performance snapshot PC_LO register
+  v_writelane_b32   v2, ttmp6, 0x0                          // stash PC_LO in v2
+  s_getreg_b32      ttmp6, HW_REG_SQ_PERF_SNAPSHOT_PC_HI    // Read performance snapshot PC_HI register
+  v_writelane_b32   v3, ttmp6, 0x0                          // stash PC_HI in v3
 
-  STORE_HW_ID
-
-  //Read SNAPSHOT Data
-  s_getreg_b32      ttmp6, HW_REG_SQ_PERF_SNAPSHOT_DATA1
-  v_writelane_b32   v2, ttmp6, 0x0
-  s_getreg_b32      ttmp6, HW_REG_SQ_PERF_SNAPSHOT_DATA2
-  v_writelane_b32   v3, ttmp6, 0x0
-  global_store_b64  v[0:1], v[2:3], off, offset:SAMPLE_OFF_SNAPSHOT_DATA + 4, scope:SCOPE_SYS  // store snapshot DATA1 and DATA2
-
-  s_getreg_b32      ttmp2, HW_REG_SQ_PERF_SNAPSHOT_DATA
-  v_writelane_b32   v2, ttmp2, 0
+.if .amdgcn.gfx_generation_minor == 0
+  // Store SQ_PERF_SNAPSHOT_DATA at offset 0x24
+  // We access SQ_PERF_SNAPSHOT_DATA last on gfx12.0 as it contains valid bit indicating if the
+  // sample is valid and being read by the sampled wave.
+  s_getreg_b32      ttmp6, HW_REG_SQ_PERF_SNAPSHOT_DATA
+  v_writelane_b32   v2, ttmp6, 0
   global_store_b32  v[0:1], v2, off, offset:SAMPLE_OFF_SNAPSHOT_DATA, scope:SCOPE_SYS  // store perf snapshot DATA
+.endif
 
-  s_getreg_b32      ttmp6, HW_REG_SQ_PERF_SNAPSHOT_PC_LO
-  v_writelane_b32   v2, ttmp6, 0x0
-  s_getreg_b32      ttmp6, HW_REG_SQ_PERF_SNAPSHOT_PC_HI
-  v_writelane_b32   v3, ttmp6, 0x0
-  global_store_b64  v[0:1], v[2:3], off, offset:SAMPLE_OFF_PC_HOST, scope:SCOPE_SYS  // store PC_HI:PC_LO
+  // Store at offset 0x00 (SAMPLE_OFF_PC_HOST)
+  global_store_b64  v[0:1], v[2:3], off, offset:SAMPLE_OFF_PC_HOST, scope:SCOPE_SYS
 
-  // The following is still true as we get ready to jump to correlation ID check
-  // v[0:1] = &buffer[local_entry]
-  // v[2:3] = free
-  // ttmp[2:3] holds backup of original shader’s v[0:1]
-  // ttmp[4:5] holds backup of original shader’s v[2:3]
-  // ttmp6 = free
-  // ttmp[10:11] holds original shader’s [exec_lo,exec_hi]
-  // ttmp[14:15]=tma, ttmp13.b31 tells us buf_to_use
-  // EXEC is 0x1
-
-  STORE_CORRELATION_ID
   // Ensure all stores have completed before returning and incrementing written_val
   s_wait_storecnt   0
 

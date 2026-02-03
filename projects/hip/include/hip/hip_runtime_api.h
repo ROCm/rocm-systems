@@ -1226,6 +1226,7 @@ typedef enum hipMemAllocationType {
    * location while the application is actively using it
    */
   hipMemAllocationTypePinned = 0x1,
+  hipMemAllocationTypeManaged = 0x2,
   hipMemAllocationTypeUncached = 0x40000000,
   hipMemAllocationTypeMax = 0x7FFFFFFF
 } hipMemAllocationType;
@@ -1446,12 +1447,12 @@ void __hipGetPCH(const char** pch, unsigned int* size);
  */
 typedef enum hipGraphicsRegisterFlags {
   hipGraphicsRegisterFlagsNone = 0,
-  hipGraphicsRegisterFlagsReadOnly = 1,  ///< HIP will not write to this registered resource
+  hipGraphicsRegisterFlagsReadOnly = 1,  ///< HIP will not write to this registered resource, read only
   hipGraphicsRegisterFlagsWriteDiscard =
-      2,  ///< HIP will only write and will not read from this registered resource
-  hipGraphicsRegisterFlagsSurfaceLoadStore = 4,  ///< HIP will bind this resource to a surface
+      2,  ///< HIP will only write and will not read from this registered resource, write only
+  hipGraphicsRegisterFlagsSurfaceLoadStore = 4,  ///< HIP will bind this resource to a surface, read and write
   hipGraphicsRegisterFlagsTextureGather =
-      8  ///< HIP will perform texture gather operations on this registered resource
+      8  ///< HIP will perform texture gather operations on this registered resource, read and write or read only
 } hipGraphicsRegisterFlags;
 
 typedef struct _hipGraphicsResource hipGraphicsResource;
@@ -4441,6 +4442,19 @@ hipError_t hipMemPoolExportPointer(hipMemPoolPtrExportData* export_data, void* d
  */
 hipError_t hipMemPoolImportPointer(void** dev_ptr, hipMemPool_t mem_pool,
                                    hipMemPoolPtrExportData* export_data);
+/**
+ * @brief Sets memory pool for memory location and allocation type.
+ *
+ *
+ */
+hipError_t hipMemSetMemPool(hipMemLocation* location, hipMemAllocationType type, hipMemPool_t pool);
+/**
+ * @brief Retrieves memory pool for memory location and allocation type.
+ *
+ *
+ */
+hipError_t hipMemGetMemPool(hipMemPool_t* pool, hipMemLocation* location,
+                            hipMemAllocationType type);
 // Doxygen end of ordered memory allocator
 /**
  * @}
@@ -9615,6 +9629,45 @@ hipError_t hipDestroySurfaceObject(hipSurfaceObject_t surfaceObject);
 /**
  * @}
  */
+
+/**
+ * @brief Enable HIP runtime logging.
+ *
+ * This function enables the HIP runtime logging mechanism, allowing diagnostic
+ * and trace information to be captured during HIP API execution.
+ *
+ * @returns #hipSuccess
+ *
+ * @see hipExtDisableLogging, hipExtSetLoggingParams
+ */
+hipError_t hipExtEnableLogging();
+/**
+ * @brief Disable HIP runtime logging.
+ *
+ * This function disables the HIP runtime logging mechanism, stopping the capture
+ * of diagnostic and trace information during HIP API execution.
+ *
+ * @returns #hipSuccess
+ *
+ * @see hipExtEnableLogging, hipExtSetLoggingParams
+ */
+hipError_t hipExtDisableLogging();
+/**
+ * @brief Set HIP runtime logging parameters.
+ *
+ * This function configures the logging behavior of the HIP runtime, including
+ * the verbosity level, buffer size, and which components to log.
+ *
+ * @param [in] log_level  The logging verbosity level. Higher values produce more detailed output.
+ * @param [in] log_size   Reserved for future use. Currently not implemented.
+ * @param [in] log_mask   A bitmask specifying which HIP runtime components to log.
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue
+ *
+ * @see hipExtEnableLogging, hipExtDisableLogging
+ */
+hipError_t hipExtSetLoggingParams(size_t log_level, size_t log_size, size_t log_mask);
+
 #ifdef __cplusplus
 } /* extern "c" */
 #endif

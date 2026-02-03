@@ -52,11 +52,9 @@ typedef hsa_status_t (*PFN_hsa_amd_portable_export_dmabuf)(const void* ptr, size
 
 // Report failure but clear error and continue
 #define CUCHECKIGNORE(cmd) do {						\
-    hsa_status_t err = pfn_##cmd;						\
-    if( err != HSA_STATUS_SUCCESS ) {						\
-      const char *errStr;						\
-      pfn_hsa_status_string(err, &errStr);			\
-      INFO(NCCL_ALL,"%s:%d HIP failure '%s'", __FILE__, __LINE__, errStr);	\
+    hipError_t err = cmd;						\
+    if( err != hipSuccess ) {						\
+      INFO(NCCL_ALL,"%s:%d HIP failure '%s'", __FILE__, __LINE__, hipGetErrorString(err));	\
     }									\
 } while(false)
 

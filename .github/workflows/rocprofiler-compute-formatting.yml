@@ -41,7 +41,7 @@ jobs:
       working-directory: projects/rocprofiler-compute
       run: |
         python -m pip install --upgrade pip
-        python -m pip install ruff
+        python -m pip install ruff==0.14.11
         if [ -f requirements.txt ]; then python -m pip install -r requirements.txt; fi
     - name: Run Ruff Linter and Import Sorter
       run: |
