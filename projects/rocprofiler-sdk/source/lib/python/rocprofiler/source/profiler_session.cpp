@@ -288,7 +288,8 @@ tool_fini(void* tool_data)
 }
 
 // rocprofiler_configure implementation for force_configure
-extern "C" rocprofiler_tool_configure_result_t*
+// Exported with visibility("default") so preload library can find it
+extern "C" __attribute__((visibility("default"))) rocprofiler_tool_configure_result_t*
 rocprofiler_configure(uint32_t                 version,
                       const char*              runtime_version,
                       uint32_t                 priority,
