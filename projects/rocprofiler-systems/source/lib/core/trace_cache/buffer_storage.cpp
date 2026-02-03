@@ -21,14 +21,12 @@
 // SOFTWARE.
 
 #include "buffer_storage.hpp"
-#include "PTL/Task.hh"
-#include "PTL/TaskGroup.hh"
-#include "PTL/ThreadPool.hh"
-#include "debug.hpp"
-#include "library/runtime.hpp"
-#include <chrono>
+
+#include "logger/debug.hpp"
+
 #include <memory>
 #include <mutex>
+#include <sstream>
 #include <stdexcept>
 #include <thread>
 #include <unistd.h>
@@ -54,15 +52,17 @@ flush_worker_t::start(const pid_t& current_pid)
 {
     if(m_worker_synchronization->is_running)
     {
-        std::stringstream _ss;
-        _ss << "Flush worker is already running";
-        throw std::runtime_error(_ss.str());
+        LOG_WARNING("Flush worker is already running for pid={}", current_pid);
+        throw std::runtime_error("Flush worker is already running");
     }
+
+    LOG_DEBUG("Starting flush worker for pid={}, filepath={}", current_pid, m_filepath);
 
     m_ofs = std::ofstream{ m_filepath, std::ios::binary | std::ios::out };
 
     if(!m_ofs.good())
     {
+        LOG_CRITICAL("Failed to open file for writing: {}", m_filepath);
         std::stringstream _ss;
         _ss << "Error opening file for writing: " << m_filepath;
         throw std::runtime_error(_ss.str());
@@ -71,9 +71,9 @@ flush_worker_t::start(const pid_t& current_pid)
     m_worker_synchronization->origin_pid = current_pid;
     m_worker_synchronization->is_running = true;
 
-    ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
-
     m_flushing_thread = std::make_unique<std::thread>([&]() {
+        LOG_TRACE("Flush worker thread started for pid={}",
+                  m_worker_synchronization->origin_pid);
         std::mutex _shutdown_condition_mutex;
         while(m_worker_synchronization->is_running)
         {
@@ -84,22 +84,28 @@ flush_worker_t::start(const pid_t& current_pid)
                 [&]() { return !m_worker_synchronization->is_running; });
         }
 
+        LOG_TRACE("Flush worker thread performing final flush");
         m_worker_function(m_ofs, true);
         m_ofs.close();
         m_worker_synchronization->exit_finished = true;
         m_worker_synchronization->exit_finished_condition.notify_one();
+        LOG_TRACE("Flush worker thread exiting");
     });
+
+    LOG_DEBUG("Flush worker started successfully for pid={}", current_pid);
 }
 void
 flush_worker_t::stop(const pid_t& current_pid)
 {
+    LOG_DEBUG("Stopping flush worker for pid={}", current_pid);
+
     const bool flushing_thread_exist = m_flushing_thread != nullptr;
     const bool worker_is_running =
         m_worker_synchronization != nullptr && m_worker_synchronization->is_running;
 
     if(flushing_thread_exist && worker_is_running)
     {
-        ROCPROFSYS_DEBUG("Buffer storage shutting down..\n");
+        LOG_TRACE("Signaling flush worker to stop");
         m_worker_synchronization->is_running = false;
         m_worker_synchronization->is_running_condition.notify_all();
 
@@ -107,11 +113,11 @@ flush_worker_t::stop(const pid_t& current_pid)
             current_pid == m_worker_synchronization->origin_pid;
         if(!thread_is_created_in_this_process)
         {
-            ROCPROFSYS_DEBUG(
-                "Buffer storage is not created in same process as shutting down..\n");
+            LOG_DEBUG("Flush worker was created in different process, skipping join");
             return;
         }
 
+        LOG_TRACE("Waiting for flush worker thread to finish");
         std::mutex       _exit_mutex;
         std::unique_lock _exit_lock{ _exit_mutex };
         m_worker_synchronization->exit_finished_condition.wait(
@@ -121,7 +127,14 @@ flush_worker_t::stop(const pid_t& current_pid)
         {
             m_flushing_thread->join();
             m_flushing_thread.reset();
+            LOG_TRACE("Flush worker thread joined successfully");
         }
+
+        LOG_DEBUG("Flush worker stopped for pid={}", current_pid);
+    }
+    else
+    {
+        LOG_TRACE("Flush worker not running or thread doesn't exist, nothing to stop");
     }
 }
 

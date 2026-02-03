@@ -66,7 +66,7 @@ endif()
 
 # AMD only tests
 set(AMD_TEST_SRC
-    unsafeAtomicAdd.cc
+    unsafeAtomicAddDevice.cc
     mbcnt.cc
     bitExtract.cc
     bitInsert.cc
@@ -77,6 +77,7 @@ set(AMD_TEST_SRC
     hipVectorTypesHost.cc
     hipVectorTypesDevice.cc
     hipTestHalf.cc
+    hipTestHalfConstexpr.cc
     hipComplex.cc
     hipTestFMA.cc
     hipTestNativeHalf.cc
@@ -85,7 +86,7 @@ set(AMD_TEST_SRC
     AtomicsWithRandomActiveLanesInWavefront.cc
     fp16_ops.cc
     fp8_host.cc
-    #fp8_e8m0.cc
+    # fp8_e8m0.cc # TODO, reenable it, disabling this test due to failure seen on TheRock,
     fp6_ocp.cc
     fp4_ocp.cc
 )

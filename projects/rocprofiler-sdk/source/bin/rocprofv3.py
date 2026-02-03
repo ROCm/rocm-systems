@@ -984,8 +984,8 @@ def get_args(
 
     import re
 
-    filter_regex = re.compile(filter) if filter != None else None
-    ignored_regex = re.compile(ignore_prev_inp) if ignore_prev_inp != None else None
+    filter_regex = re.compile(filter) if filter is not None else None
+    ignored_regex = re.compile(ignore_prev_inp) if ignore_prev_inp is not None else None
 
     def ensure_type(name, var, type_id):
         if not isinstance(var, type_id):
@@ -1158,7 +1158,9 @@ def run(app_args, args, **kwargs):
     ROCPROF_LIST_AVAIL_TOOL_LIBRARY = (
         f"{ROCM_DIR}/lib/rocprofiler-sdk/librocprofv3-list-avail.so"
     )
-    ROCPROF_ATTACH_TOOL_LIBRARY = f"{ROCM_DIR}/lib/librocprofiler-sdk-rocattach.so"
+    ROCPROF_ATTACH_TOOL_LIBRARY = (
+        f"{ROCM_DIR}/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so"
+    )
 
     ROCPROF_TOOL_LIBRARY = resolve_library_path(ROCPROF_TOOL_LIBRARY, args)
     ROCPROF_SDK_LIBRARY = resolve_library_path(ROCPROF_SDK_LIBRARY, args)

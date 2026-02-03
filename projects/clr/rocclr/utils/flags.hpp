@@ -83,7 +83,9 @@ release(size_t, GPU_PINNED_XFER_SIZE, 32,                                     \
 release(size_t, GPU_PINNED_MIN_XFER_SIZE, 128,                                \
         "The minimal buffer size for pinned read/write transfers in MiB")     \
 release(size_t, GPU_RESOURCE_CACHE_SIZE, 64,                                  \
-        "The resource cache size in MB")                                      \
+        "The resource cache size in MiB")                                      \
+release(size_t, GPU_MAX_RESOURCE_CACHE_SIZE, 16777216,                        \
+        "The max resource cache size in MiB")                                  \
 release(size_t, GPU_MAX_SUBALLOC_SIZE, 4096,                                  \
         "The maximum size accepted for suballocations in KB")                 \
 release(size_t, GPU_NUM_MEM_DEPENDENCY, 256,                                  \
@@ -237,8 +239,6 @@ release(size_t, HIP_INITIAL_DM_SIZE, 8 * Mi,                                  \
         "Set initial heap size for device malloc.")                           \
 release(bool, HIP_FORCE_DEV_KERNARG, true,                                    \
          "Force device mem for kernel args.")                                 \
-release(bool, DEBUG_CLR_GRAPH_PACKET_CAPTURE, true,                           \
-         "Enable/Disable graph packet capturing")                             \
 release(bool, GPU_DEBUG_ENABLE, false,                                        \
         "Enables collection of extra info for debugger at some perf cost")    \
 release(cstring, HIPRTC_COMPILE_OPTIONS_APPEND, "",                           \
@@ -247,14 +247,16 @@ release(cstring, HIPRTC_LINK_OPTIONS_APPEND, "",                              \
         "Set link options needed for hiprtc compilation")                     \
 release(bool, HIP_VMEM_MANAGE_SUPPORT, true,                                  \
         "Virtual Memory Management Support")                                  \
-release(bool, DEBUG_HIP_GRAPH_DOT_PRINT, false,                               \
-         "Enable/Disable graph debug dot print dump")                         \
+release(uint, DEBUG_HIP_GRAPH_DOT_PRINT, 0,                               \
+        "0 = Disable, 1 = Print during Graph Inst, 2 = Print during Graph Launch") \
 release(bool, DEBUG_HIP_FORCE_ASYNC_QUEUE, false,                             \
         "Forces grpahs into async queue mode. DEBUG_HIP_FORCE_GRAPH_QUEUES must be 1") \
 release(uint, DEBUG_HIP_FORCE_GRAPH_QUEUES, 4,                                \
         "Forces the number of streams for the graph parallel execution")      \
 release(uint, DEBUG_HIP_GRAPH_BATCH_SIZE, 256,                                \
         "Number of graph nodes to batch at a time")                           \
+release(uint, DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING, 1,                          \
+        "0 = Disable, 1 = Enable, 2 = Force")                                 \
 release(uint, DEBUG_HIP_BLOCK_SYNC, 50,                                       \
         "Blocks synchronization on CPU until the callback processing is done")\
 release(uint, DEBUG_CLR_MAX_BATCH_SIZE, 1000,                                 \
@@ -265,8 +267,11 @@ release(bool, DEBUG_HIP_KERNARG_COPY_OPT, true,                               \
         "Enable/Disable multiple kern arg copies")                            \
 release(bool, DEBUG_CLR_KERNARG_HDP_FLUSH_WA, false,                          \
         "Toggle kernel arg copy workaround")                                  \
-release(bool, DEBUG_HIP_DYNAMIC_QUEUES, false,                                \
-        "Forces dynamic queue management")                                    \
+release(uint, DEBUG_HIP_DYNAMIC_QUEUES, 2,                                    \
+        "Dynamic queue management: 0=off, 1=Queue depth heuristic,"           \
+        "2= Queue Depth + Pipe distribution")                                 \
+release(bool, DEBUG_HIP_IGNORE_STREAM_PRIORITY, false,                        \
+        "Ignore priority streams")                                            \
 release(uint, HIP_SKIP_ABORT_ON_GPU_ERROR, true,                              \
         "Set this to true, to avoid host side abort for GPU errors")          \
 release(bool, HIP_FORCE_SPIRV_CODEOBJECT, false,                              \

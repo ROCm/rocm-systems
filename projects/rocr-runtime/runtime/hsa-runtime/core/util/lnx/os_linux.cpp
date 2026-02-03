@@ -539,7 +539,7 @@ typedef struct EventDescriptor_ {
 EventHandle CreateOsEvent(bool auto_reset, bool init_state) {
   EventDescriptor* eventDescrp;
   eventDescrp = (EventDescriptor*)malloc(sizeof(EventDescriptor));
-  
+
   if(!eventDescrp) { return nullptr; }
 
   pthread_mutex_init(&eventDescrp->mutex, NULL);
@@ -849,6 +849,16 @@ size_t PageSize() {
   return g_page_size_;
 }
 
+bool UnmapMemory(void* va, size_t size) { return ::munmap(va, size) == 0; }
+
+bool MapMemory(void* va, size_t size, MemProt perms, int fd, uint64_t cpu_addr) {
+  void* mapped_ptr =
+        mmap(va, size, MemProtToOsProt(perms), MAP_SHARED | MAP_FIXED, fd, cpu_addr);
+  if (mapped_ptr != va)
+      return false;
+  return true;
+}
+
 void* ReserveMemory(void* start, size_t size, size_t alignment, MemProt prot) {
   size = AlignUp(size, PageSize());
   // check for invalid input size
@@ -887,7 +897,7 @@ void* ReserveMemory(void* start, size_t size, size_t alignment, MemProt prot) {
   if (size >= kLargePageSize) {
     int status = madvise(aligned, size, MADV_HUGEPAGE);
     if (status) {
-      LogPrint(HSA_AMD_LOG_FLAG_INFO,
+      fprintf(stderr,
               "madvise with advice MADV_HUGEPAGE"
               " starting at address %p and page size 0x%zx, returned %d, errno: %s",
               aligned, size, status, strerror(errno));
@@ -918,6 +928,10 @@ bool UncommitMemory(void* addr, size_t size) {
 
   return ::mmap(addr, size, PROT_NONE, MAP_PRIVATE | MAP_FIXED | MAP_NORESERVE | MAP_ANONYMOUS, -1,
                 0) != MAP_FAILED;
+}
+
+bool ProtectMemory(void* va, size_t size, MemProt perms) {
+  return ::mprotect(va, size, MemProtToOsProt(perms)) == 0;
 }
 
 uint64_t HostTotalPhysicalMemory() {

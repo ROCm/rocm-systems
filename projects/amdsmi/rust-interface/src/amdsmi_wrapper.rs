@@ -126,8 +126,8 @@ pub const AMDSMI_MAX_NUM_XCP: u32 = 8;
 pub const AMDSMI_TIME_FORMAT: &[u8; 20] = b"%02d:%02d:%02d.%03d\0";
 pub const AMDSMI_DATE_FORMAT: &[u8; 35] = b"%04d-%02d-%02d:%02d:%02d:%02d.%03d\0";
 pub const AMDSMI_LIB_VERSION_MAJOR: u32 = 26;
-pub const AMDSMI_LIB_VERSION_MINOR: u32 = 1;
-pub const AMDSMI_LIB_VERSION_RELEASE: u32 = 0;
+pub const AMDSMI_LIB_VERSION_MINOR: u32 = 2;
+pub const AMDSMI_LIB_VERSION_RELEASE: u32 = 1;
 pub const AMDSMI_MAX_NUM_FREQUENCIES: u32 = 33;
 pub const AMDSMI_MAX_FAN_SPEED: u32 = 255;
 pub const AMDSMI_NUM_VOLTAGE_CURVE_POINTS: u32 = 3;
@@ -1156,7 +1156,8 @@ pub struct AmdsmiAsicInfoT {
     pub num_of_compute_units: u32,
     pub target_graphics_version: u64,
     pub subsystem_id: u32,
-    pub reserved: [u32; 21usize],
+    pub flags: u64,
+    pub reserved: [u32; 19usize],
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {

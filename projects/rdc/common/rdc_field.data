@@ -46,6 +46,7 @@ FLD_DESC_ENT(RDC_FI_TARGET_GRAPHICS_VERSION, "GFX version of the device",       
 FLD_DESC_ENT(RDC_FI_NUM_OF_COMPUTE_UNITS, "Number of Compute Units",                    "COMPUTE_UNITS",    true)
 FLD_DESC_ENT(RDC_FI_UUID,                "Unique ID of the device AKA asic_serial",     "UUID",             true)
 FLD_DESC_ENT(RDC_FI_GPU_PARTITION_COUNT, "GPU partition count",                         "PARTITION_COUNT",  true)
+FLD_DESC_ENT(RDC_FI_KFD_ID,              "KFD_ID of GPU",                               "KFD_ID",           true)
 
 FLD_DESC_ENT(RDC_FI_GPU_CLOCK,           "Current GPU clock frequencies",               "GPU_CLOCK",        true)
 FLD_DESC_ENT(RDC_FI_MEM_CLOCK,           "Current Memory clock frequencies",            "MEM_CLOCK",        true)
@@ -55,6 +56,9 @@ FLD_DESC_ENT(RDC_FI_POWER_USAGE,         "Power usage in microwatts",           
 FLD_DESC_ENT(RDC_FI_PCIE_TX,             "PCIe Tx utilization in bytes/second",         "PCIE_TX",          true)
 FLD_DESC_ENT(RDC_FI_PCIE_RX,             "PCIe Rx utilization in bytes/second",         "PCIE_RX",          true)
 FLD_DESC_ENT(RDC_FI_PCIE_BANDWIDTH,      "PCIe bandwidth in Mbps",                      "PCIE_BANDWIDTH",   true)
+FLD_DESC_ENT(RDC_FI_PCIE_LC_PERF_OTHER_END_RECOVERY, "PCIe end recovery counter",       "PCIE_RECOVERY_COUNT", true)
+FLD_DESC_ENT(RDC_FI_PCIE_NAK_RCVD_COUNT_ACC, "PCIe nak received counter",               "PCIE_NAK_RCVD_COUNT", true)
+FLD_DESC_ENT(RDC_FI_PCIE_NAK_SENT_COUNT_ACC, "PCIe nak sent counter",                   "PCIE_NAK_SENT_COUNT", true)
 
 FLD_DESC_ENT(RDC_FI_GPU_UTIL,            "GPU busy percentage",                         "GPU_UTIL",         true)
 FLD_DESC_ENT(RDC_FI_GPU_MEMORY_USAGE,    "Memory usage of the GPU instance in bytes",   "GPU_MEMORY_USAGE", true)
@@ -195,7 +199,6 @@ FLD_DESC_ENT(RDC_FI_PROF_CPF_CPF_TCIU_IDLE,                  "", "CPF_CPF_TCIU_I
 FLD_DESC_ENT(RDC_FI_PROF_CPF_CPF_TCIU_STALL,                 "", "CPF_CPF_TCIU_STALL",                 false)
 // Misc
 FLD_DESC_ENT(RDC_FI_PROF_SIMD_UTILIZATION, "Fraction of time the SIMDs are being utilized", "SIMD_UTILIZATION", false)
-FLD_DESC_ENT(RDC_FI_PROF_KFD_ID,           "GPU_ID from rocprofiler, same as KFD_ID",       "PROF_KFD_ID",      true)
 
 // Events
 FLD_DESC_ENT(RDC_EVNT_XGMI_0_NOP_TX,     "NOPs sent to neighbor 0",                     "XGMI_NOP_0",       false)

@@ -1,3 +1,6 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
+
 # include guard
 include_guard(DIRECTORY)
 
@@ -39,6 +42,9 @@ rocprofiler_systems_add_interface_library(rocprofiler-systems-mpi
 rocprofiler_systems_add_interface_library(rocprofiler-systems-libva
     "Provides VA-API headers"
 )
+rocprofiler_systems_add_interface_library(rocprofiler-systems-ucx
+    "Provides UCX headers"
+)
 rocprofiler_systems_add_interface_library(rocprofiler-systems-bfd
     "Provides Binary File Descriptor (BFD)"
 )
@@ -58,6 +64,9 @@ rocprofiler_systems_add_interface_library(rocprofiler-systems-sqlite3
 )
 rocprofiler_systems_add_interface_library(rocprofiler-systems-json
     "Use nlohmann/json for json data handling"
+)
+rocprofiler_systems_add_interface_library(rocprofiler-systems-spdlog
+                                          "Provides spdlog library"
 )
 rocprofiler_systems_add_interface_library(rocprofiler-systems-timemory
     "Provides timemory libraries"
@@ -127,9 +136,6 @@ endif()
 
 set(CMAKE_THREAD_PREFER_PTHREAD ON)
 set(THREADS_PREFER_PTHREAD_FLAG OFF)
-
-find_library(pthread_LIBRARY NAMES pthread pthreads)
-find_package_handle_standard_args(pthread-library REQUIRED_VARS pthread_LIBRARY)
 
 find_library(pthread_LIBRARY NAMES pthread pthreads)
 find_package_handle_standard_args(pthread-library REQUIRED_VARS pthread_LIBRARY)
@@ -677,6 +683,14 @@ include(SQLite3)
 
 # ----------------------------------------------------------------------------------------#
 #
+# Spdlog
+#
+# ----------------------------------------------------------------------------------------#
+
+include(Spdlog)
+
+# ----------------------------------------------------------------------------------------#
+#
 # NlohmannJson
 #
 # ----------------------------------------------------------------------------------------#
@@ -691,6 +705,7 @@ include(NlohmannJson)
 
 if(ROCPROFSYS_BUILD_TESTING)
     include(GTest)
+    include(GhcFilesystem)
 endif()
 
 # ----------------------------------------------------------------------------------------#
@@ -955,6 +970,9 @@ target_include_directories(
     rocprofiler-systems-libva
     INTERFACE ${LIBVA_HEADERS_INCLUDE_DIR}
 )
+
+find_package(UCX ${rocprofiler_systems_FIND_QUIETLY} REQUIRED)
+target_include_directories(rocprofiler-systems-ucx INTERFACE ${UCX_HEADERS_INCLUDE_DIR})
 
 # ----------------------------------------------------------------------------------------#
 #

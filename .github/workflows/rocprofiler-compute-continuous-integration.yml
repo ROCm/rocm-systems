@@ -1,0 +1,213 @@
+name: rocprofiler-compute Continuous Integration
+run-name: rocprofiler-compute-ci
+
+on:
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Build mode'
+        required: false
+        default: 'continuous'
+        type: choice
+        options:
+          - continuous
+          - nightly
+  push:
+    branches: [ develop ]
+    paths:
+      - '.github/workflows/rocprofiler-compute-continuous-integration.yml'
+      - 'projects/rocprofiler-compute/**'
+      - '!**/*.md'
+      - '!**/*.rtf'
+      - '!**/*.rst'
+      - '!**/.markdownlint-ci2.yaml'
+      - '!**/.readthedocs.yaml'
+      - '!**/.spellcheck.local.yaml'
+      - '!**/.wordlist.txt'
+      - '!projects/rocprofiler-compute/docs/**'
+      - '!projects/rocprofiler-compute/source/docs/**'
+      - '!projects/rocprofiler-compute/source/python/gui/**'
+      - '!projects/rocprofiler-compute/docker/**'
+      - '!projects/rocprofiler-compute/CMakePresets.json'
+  pull_request:
+    paths:
+      - '.github/workflows/rocprofiler-compute-continuous-integration.yml'
+      - 'projects/rocprofiler-compute/**'
+      - '!**/*.md'
+      - '!**/*.rtf'
+      - '!**/*.rst'
+      - '!**/.markdownlint-ci2.yaml'
+      - '!**/.readthedocs.yaml'
+      - '!**/.spellcheck.local.yaml'
+      - '!**/.wordlist.txt'
+      - '!projects/rocprofiler-compute/docs/**'
+      - '!projects/rocprofiler-compute/source/docs/**'
+      - '!projects/rocprofiler-compute/source/python/gui/**'
+      - '!projects/rocprofiler-compute/docker/**'
+      - '!projects/rocprofiler-compute/CMakePresets.json'
+
+env:
+  ROCPROFSYS_CI: ON
+  ROCM_PATH: "/opt/rocm"
+  ROCM_VERSION: "7.0.0"
+
+jobs:
+  prepare_matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.generate_matrix.outputs.matrix }}
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          sparse-checkout: projects/rocprofiler-compute/.github
+
+      - name: Generate and output matrix
+        id: generate_matrix
+        working-directory: projects/rocprofiler-compute/.github
+        run: |
+          if [ '${{ github.event_name }}' = 'schedule' ] || [ '${{ inputs.mode }}' = 'nightly' ]; then
+            MATRIX_CONTENT=$(cat ci-matrix.yml | yq '.matrix-ubuntu-nightly' -I=0 -o=json)
+          else
+            MATRIX_CONTENT=$(cat ci-matrix.yml | yq '.matrix-ubuntu-ci' -I=0 -o=json)
+          fi
+          echo "matrix=${MATRIX_CONTENT}" >> $GITHUB_OUTPUT
+
+  ubuntu:
+    name: Ubuntu ${{ matrix.system.os-release }} • ${{ matrix.system.arch }}
+    needs: prepare_matrix
+    strategy:
+      fail-fast: false
+      matrix:
+        system: ${{ fromJSON(needs.prepare_matrix.outputs.matrix) }}
+    runs-on: ${{ matrix.system.runner }}
+    env:
+      HIP_PLATFORM: "amd"
+      OMPI_ALLOW_RUN_AS_ROOT: 1
+      OMPI_ALLOW_RUN_AS_ROOT_CONFIRM: 1
+    permissions:
+      packages: read
+    container:
+      image: ghcr.io/rocm/rocprofiler-ubuntu:${{ matrix.system.os-release }}-systems-ci-${{ matrix.system.arch }}
+      options:
+        --privileged
+        --ipc host
+        --group-add video
+        --device /dev/kfd
+        --device /dev/dri
+        --cap-add CAP_SYS_ADMIN
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          sparse-checkout: projects/rocprofiler-compute/
+
+      - name: Setup Environment
+        id: setup_env
+        run: |
+          if [ '${{ github.event_name }}' = 'schedule' ] || [ '${{ inputs.mode }}' = 'nightly' ]; then
+            MODE=Nightly
+            EXCLUDED_TESTS=""
+            ADD_COVERAGE="--coverage"
+          else
+            MODE=Continuous
+            EXCLUDED_TESTS="test_profile_live_attach_detach"
+            ADD_COVERAGE=""
+          fi
+          echo "mode=${MODE}" >> $GITHUB_OUTPUT
+          echo "excluded_tests=${EXCLUDED_TESTS}" >> $GITHUB_OUTPUT
+          echo "add_coverage=${ADD_COVERAGE}" >> $GITHUB_OUTPUT
+
+          if [ '${{ matrix.system.os-release }}' = '24.04' ]; then
+            CODE_NAME=noble
+          else
+            CODE_NAME=jammy
+          fi
+          echo "code_name=${CODE_NAME}" >> $GITHUB_OUTPUT
+
+      - name: Install amdgpu and dependencies
+        shell: bash
+        run: |
+          ROCM_MAJOR=$(echo ${{ env.ROCM_VERSION }} | sed 's/\./ /g' | awk '{print $1}')
+          ROCM_MINOR=$(echo ${{ env.ROCM_VERSION }} | sed 's/\./ /g' | awk '{print $2}')
+          ROCM_VERSN=$(( (${ROCM_MAJOR}*10000)+(${ROCM_MINOR}*100) ))
+          wget -N -P /tmp/ https://repo.radeon.com/amdgpu-install/${ROCM_MAJOR}.${ROCM_MINOR}/ubuntu/${{ steps.setup_env.outputs.code_name }}/amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
+          apt-get install -y /tmp/amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
+          apt-get update
+          apt install -y amd-smi-lib libdw-dev hip-dev
+          echo "✅ amdgpu and ROCm dependencies Installed!"
+
+      - name: Install Latest Nightly ROCm
+        run: |
+          set -e
+          TARBALL_ROCM_VERSION=$(ls /opt/*.tar.gz | grep -Eo '*([0-9]+\.[0-9]+\.[0-9]+)*')
+          tar -xf ${{ env.ROCM_PATH }}-${TARBALL_ROCM_VERSION}-${{ matrix.system.arch }}.tar.gz -C ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }}
+          ln -s ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} ${{ env.ROCM_PATH }}
+          echo "ROCm installed to: ${{ env.ROCM_PATH }}"
+          echo "✅ ROCm Installation Complete!"
+
+      - name: Install Python Requirements
+        working-directory: projects/rocprofiler-compute
+        run: |
+          for i in 1 2 3; do
+            pip install -r requirements.txt --break-system-packages --ignore-installed --timeout 60 && break
+            echo "⚠️ pip install attempt $i failed, retrying..."
+            sleep 10
+          done
+          for i in 1 2 3; do
+            pip install -r requirements-test.txt --break-system-packages --ignore-installed --timeout 60 && break
+            echo "⚠️ pip install attempt $i failed, retrying..."
+            sleep 10
+          done
+          echo "✅ pip requirements installed!"
+
+      - name: Configure, Build, and Test
+        id: test
+        continue-on-error: true
+        timeout-minutes: ${{ steps.setup_env.outputs.mode == 'Nightly' && 120 || 90 }}
+        working-directory: projects/rocprofiler-compute
+        run: |
+          set -e
+          git config --global --add safe.directory ${GITHUB_WORKSPACE}
+          git config --global --add safe.directory ${PWD}
+          PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH \
+          LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:${{ env.ROCM_PATH }}/lib/rocm_sysdeps/lib:$LD_LIBRARY_PATH \
+          python3 ./tools/run-ci.py \
+            --name "ROCm/rocprofiler-compute-${{ github.ref_name }}-ubuntu-${{ matrix.system.os-release }}-${{ matrix.system.gpu }}" \
+            --actor "${{ github.actor }}" \
+            --site ${{ matrix.system.runner }} \
+            --mode ${{ steps.setup_env.outputs.mode }} \
+            --build-jobs 16 \
+            ${{ steps.setup_env.outputs.add_coverage }} \
+            -- \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} \
+            -DENABLE_TESTS=ON \
+            -DINSTALL_TESTS=ON \
+            -DPYTEST_NUMPROCS=8 \
+            -- \
+            -E "${{ steps.setup_env.outputs.excluded_tests }}"
+
+      - name: Output Logs
+        if: steps.test.outcome == 'failure'
+        working-directory: projects/rocprofiler-compute
+        run: |
+          echo "❌ Run Failed: Outputting available log files..."
+          for log in build/Testing/Temporary/LastTest*.log build/Testing/Temporary/LastConfigure*.log; do
+            if [ -f "$log" ]; then
+              echo "=== $log ==="
+              cat "$log"
+            fi
+          done
+
+      - name: Check Test Results
+        if: always()
+        shell: bash
+        run: |
+          if [[ "${{ steps.test.outcome }}" == "failure" ]]; then
+            echo "::error::Tests failed - see CDash for details: https://my.cdash.org/index.php?project=rocprofiler-compute"
+            exit 1
+          fi
+          echo "✅ All tests passed!"

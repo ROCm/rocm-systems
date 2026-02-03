@@ -1,6 +1,6 @@
 set(TEST_SRC
     execution_control_common.cc
-    hipFuncGetAttributes.cc
+    hipFuncGetAttributesBasic.cc
     hipLaunchKernel.cc
     hipLaunchCooperativeKernel.cc
     hipLaunchCooperativeKernelMultiDevice.cc

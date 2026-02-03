@@ -23,8 +23,7 @@ set(TEST_SRC
     hipStreamGetId.cc
     hipStreamSetGetAttributes.cc
     # TODO renable it TheRock is not finding it
-    hipStreamCopyAttributes.cc
-  )
+    hipStreamCopyAttributes.cc)
 
 if(HIP_PLATFORM MATCHES "amd")
   set(TEST_SRC ${TEST_SRC} hipStreamGetCUMask.cc hipStreamWithCUMask.cc

@@ -26,6 +26,49 @@ option(BUILD_PERF_TESTS "Build perf tests" OFF)
 option(BUILD_STRESS_TESTS "Build stress tests" OFF)
 option(TEST_CLOCK_CYCLE "Option to use clock64" OFF)
 option(GENERATE_COVERATE "Generate coverage" OFF)
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE "Release")
+endif()
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_HIP_STANDARD 17)
+set(CMAKE_HIP_STANDARD_REQUIRED ON)
+set(CMAKE_INSTALL_RPATH "$ORIGIN;$ORIGIN/../../lib")
+set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
+
+find_package(hip REQUIRED)
+find_package(hiprtc)
+find_package(Git)
+find_package(Python 3 COMPONENTS Interpreter REQUIRED)
+find_program(HIPCONFIG_EXEC hipconfig REQUIRED)
+# hip root dir is 3 levels down the hip-config.cmake file path
+set(HIP_PATH ${hip_DIR}/../../../)
+if(NOT DEFINED ROCM_PATH)
+    set(ROCM_PATH "/opt/rocm")
+    if(NOT EXISTS "${ROCM_PATH}")
+        set(ROCM_PATH ${HIP_PATH})
+    endif()
+endif()
+if(UNIX)
+    find_program(ROCM_AGENT_ENUMERATOR_EXEC rocm_agent_enumerator REQUIRED)
+    find_program(GCC_EXEC gcc)
+    find_program(GXX_EXEC g++)
+else() # Win32
+    find_program(LLVM_RC_EXEC NAMES llvm-rc llvm-rc.exe
+                 PATHS ${HIP_PATH} ${HIP_PATH}../lc/bin ${ROCM_PATH})
+endif()
+find_program(CLANG_CPP_EXEC NAMES clang-cpp clang-cpp.exe
+             PATHS ${HIP_PATH} ${HIP_PATH}../lc/bin ${ROCM_PATH}/llvm/bin)
+message(STATUS "HIP Lib path: ${HIP_LIB_INSTALL_DIR}")
+
+# used by clang to find hip
+set(HIP_PATH_OPT "--hip-path=${HIP_PATH}")
+
+if(TEST_CLOCK_CYCLE)
+    add_definitions(-DTEST_CLOCK_CYCLE)
+endif()
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -136,6 +179,22 @@ else()
   # Setup catch2 manually
   include(FetchContent)
   FetchContent_Declare(
+    message(STATUS "Catch2 v3.8.1 found: ${Catch2_DIR}")
+    # for packaging
+    set(CATCH_ADD_TESTS_SCRIPT ${Catch2_DIR}/CatchAddTests.cmake)
+    file(GLOB CATCH_LIBS "${Catch2_DIR}/../../*Catch2*")
+else()
+    # On Windows, ensure Catch2 uses the same MSVC runtime library and build configuration as our tests
+    if(WIN32)
+        set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build static libraries" FORCE)
+        set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>" CACHE STRING "MSVC runtime library" FORCE)
+        if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+            set(win_disable_warnings -fms-runtime-lib=static_dbg)
+        endif()
+    endif()
+    # Setup catch2 manually
+    include(FetchContent)
+    FetchContent_Declare(
         Catch2
         DOWNLOAD_EXTRACT_TIMESTAMP OFF
         URL "https://rocm-third-party-deps.s3.us-east-2.amazonaws.com/Catch2-3.8.1.tar.gz"
@@ -145,6 +204,10 @@ else()
   # for packaging
   set(CATCH_ADD_TESTS_SCRIPT ${Catch2_SOURCE_DIR}/extras/CatchAddTests.cmake)
   set(CATCH_LIBS $<TARGET_FILE:Catch2>)
+    FetchContent_MakeAvailable(Catch2)
+    # for packaging
+    set(CATCH_ADD_TESTS_SCRIPT ${Catch2_SOURCE_DIR}/extras/CatchAddTests.cmake)
+    set(CATCH_LIBS $<TARGET_FILE:Catch2>)
 endif()
 
 include(cmake/hip-tests.cmake)
@@ -191,6 +254,10 @@ if(HIP_PLATFORM STREQUAL "amd")
     set(win_disable_warnings -Wno-ignored-attributes -Wno-microsoft-cast)
   endif()
   add_compile_options(${HIP_PATH_OPT} -std=c++17 -x hip -Wall -Wextra -Wvla -Wno-deprecated -Wno-option-ignored -Wno-unused-parameter ${win_disable_warnings}) # -Werror)
+    if(WIN32)
+        set(win_disable_warnings ${win_disable_warnings} -Wno-ignored-attributes -Wno-microsoft-cast)
+    endif()
+    add_compile_options(${HIP_PATH_OPT} -std=c++17 -x hip -Wall -Wextra -Wvla -Wno-deprecated -Wno-option-ignored -Wno-unused-parameter ${win_disable_warnings}) # -Werror)
 endif()
 
 # Turn off CMAKE_HIP_ARCHITECTURES Feature if cmake version is 3.21+
@@ -214,6 +281,11 @@ elseif(DEFINED GPU_TARGETS)
   foreach(_hip_gpu_arch ${GPU_TARGETS})
     set(OFFLOAD_ARCH_STR "--offload-arch=${_hip_gpu_arch} ${OFFLOAD_ARCH_STR}")
   endforeach()
+    string(REPLACE "--offload-arch=" "" HIP_GPU_ARCH_LIST ${OFFLOAD_ARCH_STR})
+elseif(DEFINED GPU_TARGETS)
+    foreach(_hip_gpu_arch ${GPU_TARGETS})
+        set(OFFLOAD_ARCH_STR "--offload-arch=${_hip_gpu_arch} ${OFFLOAD_ARCH_STR}")
+    endforeach()
 elseif(NOT DEFINED OFFLOAD_ARCH_STR
    AND EXISTS "${ROCM_AGENT_ENUMERATOR_EXEC}"
    AND HIP_PLATFORM STREQUAL "amd" AND UNIX)
@@ -234,6 +306,19 @@ elseif(NOT DEFINED OFFLOAD_ARCH_STR
   else()
     message(STATUS "ROCm Agent Enumerator found no valid architectures")
   endif()
+    # Trim out gfx000
+    string(REPLACE "gfx000\n" "" HIP_GPU_ARCH ${HIP_GPU_ARCH})
+    if (NOT HIP_GPU_ARCH STREQUAL "")
+        string(REGEX REPLACE "\n" ";" HIP_GPU_ARCH_LIST "${HIP_GPU_ARCH}")
+        list(REMOVE_DUPLICATES  HIP_GPU_ARCH_LIST)
+        list(LENGTH HIP_GPU_ARCH_LIST HIP_GPU_ARCH_LEN)
+        set(OFFLOAD_ARCH_STR "")
+        foreach(_hip_gpu_arch ${HIP_GPU_ARCH_LIST})
+            set(OFFLOAD_ARCH_STR "--offload-arch=${_hip_gpu_arch} ${OFFLOAD_ARCH_STR}")
+        endforeach()
+    else()
+        message(STATUS "ROCm Agent Enumerator found no valid architectures")
+    endif()
 endif()
 
 # Trim any trailing spaces, this trips up the cxx function call
@@ -242,6 +327,7 @@ string(STRIP "${OFFLOAD_ARCH_STR}" OFFLOAD_ARCH_STR)
 message(STATUS "Using offload arch string: ${OFFLOAD_ARCH_STR}")
 if(DEFINED OFFLOAD_ARCH_STR)
   set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} ${OFFLOAD_ARCH_STR}")
+    set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} ${OFFLOAD_ARCH_STR}")
 endif()
 
 # get hip-tests commit short hash
@@ -274,6 +360,13 @@ if(WIN32)
   set(cmd "${CLANG_CPP_EXEC} -P -DGITHASH=\"${HIP_VERSION_GITHASH}\" ${config_file}>${json_file}")
   message(${cmd})
   execute_process(COMMAND cmd.exe /C ${cmd}
+    set(configToUse "config_amd_windows")
+    set(config_file ${CMAKE_SOURCE_DIR}/hipTestMain/config/${configToUse})
+    set(json_file ${HIP_TEST_CONFIG_BINARY_DIR}/${configToUse}.json)
+
+    set(cmd "${CLANG_CPP_EXEC} -P -DGITHASH=\"${HIP_VERSION_GITHASH}\" ${config_file}>${json_file}")
+    message(${cmd})
+    execute_process(COMMAND cmd.exe /C ${cmd}
     RESULT_VARIABLE json_result)
   message(STATUS "${configToUse}.json file generation result: ${json_result}")
 else()
@@ -284,6 +377,13 @@ else()
     set(cmd "${CLANG_CPP_EXEC} -P -D${arch} -DGITHASH=\\\"${HIP_VERSION_GITHASH}\\\" ${config_file}>${json_file}")
     message(${cmd})
     execute_process(COMMAND bash -c ${cmd}
+    set(configToUse "config_amd_linux")
+    foreach(arch ${hip_gpu_arch_list})
+        set(config_file ${CMAKE_SOURCE_DIR}/hipTestMain/config/${configToUse})
+        set(json_file ${HIP_TEST_CONFIG_BINARY_DIR}/${configToUse}_${arch}.json)
+        set(cmd "${CLANG_CPP_EXEC} -P -D${arch} -DGITHASH=\\\"${HIP_VERSION_GITHASH}\\\" ${config_file}>${json_file}")
+        message(${cmd})
+        execute_process(COMMAND bash -c ${cmd}
         RESULT_VARIABLE json_result)
     message(STATUS "${configToUse}_${arch}.json file generation result: ${json_result}")
   endforeach()
@@ -322,6 +422,8 @@ file(COPY ./include/hip_test_context.hh DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/
 if(HIP_PLATFORM STREQUAL "nvidia")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --extended-lambda")
   add_compile_options(-Xcompiler=-Wno-deprecated-declarations)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --extended-lambda")
+    add_compile_options(-Xcompiler=-Wno-deprecated-declarations)
 endif()
 
 # Disable CXX extensions (gnu++11 etc)
@@ -356,6 +458,35 @@ if(GENERATE_COVERATE)
                   WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/../utils/coverage
                   COMMENT "Generating Test Coverage Report")
 endif()
+    add_subdirectory(unit ${CATCH_BUILD_DIR}/unit)
+    add_subdirectory(ABM ${CATCH_BUILD_DIR}/ABM)
+    add_subdirectory(kernels ${CATCH_BUILD_DIR}/kernels)
+    add_subdirectory(hipTestMain ${CATCH_BUILD_DIR}/hipTestMain)
+    add_subdirectory(TypeQualifiers ${CATCH_BUILD_DIR}/TypeQualifiers)
+    if(UNIX)
+      add_subdirectory(multiproc ${CATCH_BUILD_DIR}/multiproc)
+    endif()
+endif()
+if(BUILD_PERF_TESTS)
+    add_subdirectory(perftests ${CATCH_BUILD_DIR}/perftests)
+    add_subdirectory(performance ${CATCH_BUILD_DIR}/performance)
+endif()
+if(BUILD_STRESS_TESTS)
+    add_subdirectory(stress ${CATCH_BUILD_DIR}/stress)
+endif()
+
+add_custom_target(gen_coverage
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/utils/coverage
+    COMMAND ${CMAKE_COMMAND} -B ${CMAKE_CURRENT_BINARY_DIR}/utils/coverage -S ${CMAKE_CURRENT_SOURCE_DIR}/../utils/coverage
+    COMMAND ${CMAKE_COMMAND} --build ${CMAKE_CURRENT_BINARY_DIR}/utils/coverage --target clean-cov-report
+    COMMAND ${CMAKE_COMMAND} --build ${CMAKE_CURRENT_BINARY_DIR}/utils/coverage
+    COMMAND ${CMAKE_CURRENT_BINARY_DIR}/utils/coverage/generateHipAPICoverage ${HIP_PATH}/include ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/utils/coverage/
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    COMMENT "Generating Test Coverage Report"
+    USES_TERMINAL
+    VERBATIM
+)
+set_property(TARGET gen_coverage PROPERTY EXCLUDE_FROM_ALL TRUE)
 
 # packaging the tests
 add_subdirectory(packaging)

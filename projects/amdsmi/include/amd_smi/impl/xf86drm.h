@@ -1,5 +1,5 @@
 /**
- * \file xf86drm.h 
+ * \file xf86drm.h
  * OS-independent header for DRM user-level library interface.
  *
  * \author Rickard E. (Rik) Faith <faith@valinux.com>
@@ -200,9 +200,9 @@ typedef enum {
 typedef enum {
     /** \name Flags for DMA buffer dispatch */
     /*@{*/
-    DRM_DMA_BLOCK        = 0x01, /**< 
+    DRM_DMA_BLOCK        = 0x01, /**<
 				  * Block until buffer dispatched.
-				  * 
+				  *
 				  * \note the buffer may not yet have been
 				  * processed by the hardware -- getting a
 				  * hardware lock with the hardware quiescent
@@ -696,7 +696,7 @@ extern int           drmGetLock(int fd,
 			        drmLockFlags flags);
 extern int           drmUnlock(int fd, drm_context_t context);
 extern int           drmFinish(int fd, int context, drmLockFlags flags);
-extern int	     drmGetContextPrivateMapping(int fd, drm_context_t ctx_id, 
+extern int	     drmGetContextPrivateMapping(int fd, drm_context_t ctx_id,
 						 drm_handle_t * handle);
 
 /* AGP/GART support: X server (root) only */
@@ -782,7 +782,7 @@ typedef struct _drmEventContext {
 	int version;
 
 	void (*vblank_handler)(int fd,
-			       unsigned int sequence, 
+			       unsigned int sequence,
 			       unsigned int tv_sec,
 			       unsigned int tv_usec,
 			       void *user_data);

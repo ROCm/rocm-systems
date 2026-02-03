@@ -41,6 +41,18 @@ generic_add_rocm()
 # provide git to utilities
 find_program(GIT NAMES git)
 
+# Set Lintian Support Flags
+set(BUILD_ENABLE_LINTIAN_OVERRIDES
+    OFF
+    CACHE BOOL
+    "Enable/Disable Lintian Overrides"
+)
+set(BUILD_DEBIAN_PKGING_FLAG
+    OFF
+    CACHE BOOL
+    "Internal Status Flag to indicate Debian Packaging Build"
+)
+
 ## Setup the package version based on git tags.
 set(PKG_VERSION_GIT_TAG_PREFIX "amdsmi_pkg_ver")
 get_version_from_file("include/amd_smi/amdsmi.h" "MAJOR")
@@ -121,7 +133,13 @@ cmake_dependent_option(ENABLE_LDCONFIG "Set library links and caches using ldcon
 set(SHARE_INSTALL_PREFIX "${CMAKE_INSTALL_DATAROOTDIR}/${AMD_SMI}" CACHE STRING "Tests and Example install directory")
 
 # Packaging directives
-set(CPACK_PACKAGE_CONTACT "AMD-SMILib Support <amd-smi.support@amd.com>" CACHE STRING "")
+set(PKG_MAINTAINER_NM "AMD-SMILib Support")
+set(PKG_MAINTAINER_EMAIL "amd-smi.support@amd.com")
+set(CPACK_PACKAGE_CONTACT
+    "${PKG_MAINTAINER_NM} <${PKG_MAINTAINER_EMAIL}>"
+    CACHE STRING
+    ""
+)
 
 generic_package()
 
@@ -131,11 +149,16 @@ pkg_check_modules(DRM REQUIRED IMPORTED_TARGET libdrm)
 pkg_check_modules(DRM_AMDGPU REQUIRED IMPORTED_TARGET libdrm_amdgpu)
 
 # Configuration
-function(get_imported_soname target out_var)
-    get_target_property(link_libs ${target} INTERFACE_LINK_LIBRARIES)
-    set(result)
+function(get_imported_target_info target out_soname out_include_dirs)
+    # Resolve include directories.
+    get_target_property(include_dirs "${target}" INTERFACE_INCLUDE_DIRECTORIES)
+    set("${out_include_dirs}" "${include_dirs}" PARENT_SCOPE)
+
+    # Resolve the soname of the link library so that it can be opened with dlopen.
+    get_target_property(link_libs "${target}" INTERFACE_LINK_LIBRARIES)
+    set(soname)
     foreach(link_lib ${link_libs})
-        if(result)
+        if(soname)
             message(FATAL_ERROR "Target ${target} has multiple link libraries: ${link_libs}")
         endif()
         execute_process(
@@ -151,18 +174,18 @@ function(get_imported_soname target out_var)
             else()
                 message(FATAL_ERROR "Could not find SONAME in objdump output for ${link_lib}")
             endif()
-            set(result "${SONAME_OF_MY_PKG}")
+            set(soname "${SONAME_OF_MY_PKG}")
         else()
             message(FATAL_ERROR "objdump failed for ${link_lib}")
         endif()
     endforeach()
-    if(NOT result)
+    if(NOT soname)
         message(FATAL_ERROR "Could not find SONAME for target ${target} libs: ${link_libs}")
     endif()
-    set("${out_var}" "${result}" PARENT_SCOPE)
+    set("${out_soname}" "${soname}" PARENT_SCOPE)
 endfunction()
 
-get_imported_soname(PkgConfig::DRM_AMDGPU LIBDRM_AMDGPU_SONAME)
+get_imported_target_info(PkgConfig::DRM_AMDGPU LIBDRM_AMDGPU_SONAME LIBDRM_AMDGPU_INCLUDES)
 configure_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/include/config/amd_smi_config.h.in"
     "${CMAKE_CURRENT_BINARY_DIR}/include/config/amd_smi_config.h"
@@ -238,11 +261,12 @@ if(ENABLE_ESMI_LIB)
 endif()
 
 include_directories(
-    ${CMAKE_CURRENT_SOURCE_DIR}/include 
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_BINARY_DIR}/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/shared_mutex                
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/amd_smi 
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/shared_mutex
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/amd_smi
     ${ESMI_INC_DIR}
+    ${LIBDRM_AMDGPU_INCLUDES}
 )
 
 set(CMN_SRC_LIST
@@ -345,13 +369,17 @@ install(
 
 set(CPACK_RPM_PACKAGE_LICENSE "MIT")
 if(ENABLE_ASAN_PACKAGING)
+    set(COMP_TYPE "asan")
     # install license file in share/doc/amd_smi-asan folder
     install(
         FILES ${CPACK_RESOURCE_FILE_LICENSE}
         DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/doc/${CPACK_PACKAGE_NAME}-asan
         RENAME LICENSE.txt
         COMPONENT asan)
+else()
+    set(COMP_TYPE "dev")
 endif()
+
 # docs are installed into different share directory from tests and examples
 install(
     FILES ${CPACK_RESOURCE_FILE_LICENSE}
@@ -505,6 +533,34 @@ set(CPACK_RPM_POST_UNINSTALL_SCRIPT_FILE "${CMAKE_CURRENT_BINARY_DIR}/RPM/postun
 #Set the names now using CPACK utility
 set(CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
 set(CPACK_RPM_FILE_NAME "RPM-DEFAULT")
+
+# Configure Lintian Specific Package Data
+configure_pkg( ${CPACK_PACKAGE_NAME} ${COMP_TYPE} ${CPACK_PACKAGE_VERSION} ${PKG_MAINTAINER_NM} ${PKG_MAINTAINER_EMAIL})
+
+# Custom installation for Debian Lintian File
+if(BUILD_ENABLE_LINTIAN_OVERRIDES AND BUILD_DEBIAN_PKGING_FLAG)
+    set(OVERRIDE_FILE
+        "${CMAKE_BINARY_DIR}/DEBIAN/${DEB_OVERRIDES_INSTALL_FILENM}"
+    )
+    set(OVERRIDE_TEMP_INSTALL_LOC
+        "/_CPack_Packages/Linux/DEB/${CPACK_PACKAGE_NAME}-${CPACK_PACKAGE_VERSION}-Linux/runtime"
+    )
+    if(BUILD_SHARED_LIBS)
+        set(CPACK_INSTALL_COMMANDS
+            "${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}${OVERRIDE_TEMP_INSTALL_LOC}${DEB_OVERRIDES_INSTALL_PATH}"
+            "${CMAKE_COMMAND} -E copy ${OVERRIDE_FILE} ${CMAKE_BINARY_DIR}${OVERRIDE_TEMP_INSTALL_LOC}${DEB_OVERRIDES_INSTALL_PATH}"
+        )
+    else()
+        set(OVERRIDE_FILE_STATIC "${DEB_OVERRIDES_INSTALL_FILENM}-static-dev")
+        set(OVERRIDE_FILE_STATIC_DEST
+            "${CMAKE_BINARY_DIR}${OVERRIDE_TEMP_INSTALL_LOC}${DEB_OVERRIDES_INSTALL_PATH}${OVERRIDE_FILE_STATIC}"
+        )
+        set(CPACK_INSTALL_COMMANDS
+            "${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}${OVERRIDE_TEMP_INSTALL_LOC}${DEB_OVERRIDES_INSTALL_PATH}"
+            "${CMAKE_COMMAND} -E copy ${OVERRIDE_FILE} ${OVERRIDE_FILE_STATIC_DEST}"
+        )
+    endif()
+endif()
 
 include(CPack)
 

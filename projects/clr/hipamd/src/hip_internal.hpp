@@ -32,6 +32,7 @@
 #include <stack>
 #include <mutex>
 #include <iterator>
+#include <algorithm>
 #ifdef _WIN32
 #include <process.h>
 #else
@@ -46,6 +47,8 @@
 #define KMAG "\x1B[35m"
 #define KCYN "\x1B[36m"
 #define KWHT "\x1B[37m"
+
+template <typename T> T ReturnPtrValue(T* ptr) { return (ptr != nullptr) ? *ptr : nullptr; }
 
 namespace hip{
   extern std::once_flag g_ihipInitialized;
@@ -478,6 +481,40 @@ public:
       ~Stream() {};
   };
 
+  // Generic object tracking class of type T
+  template <typename T>
+  class ObjectRegistry {
+  public:
+    // Adds the object to the set. Returns true if successful
+    bool add(T object) {
+      if (object == nullptr) return false;
+
+      std::lock_guard<std::mutex> lock(mtx_);
+      auto result = objects_.insert(object);
+      return result.second;
+    }
+    // Removes the object from the set. Returns true if successful
+    bool remove(T object) {
+      std::lock_guard<std::mutex> lock(mtx_);
+      return objects_.erase(object) > 0;
+    }
+    // Returns true if set contains object
+    bool isValid(T object) const {
+      if (object == nullptr) return false;
+      std::lock_guard<std::mutex> lock(mtx_);
+      return objects_.find(object) != objects_.end();
+    }
+    // Clears the set
+    void clear() {
+      std::lock_guard<std::mutex> lock(mtx_);
+      objects_.clear();
+    }
+
+  private:
+    mutable std::mutex mtx_;
+    std::unordered_set<T> objects_;
+  };
+
   /// HIP Device class
   class Device : public amd::ReferenceCountedObject {
     // Device lock
@@ -504,18 +541,27 @@ public:
     MemoryPool* default_mem_pool_;  //!< Default memory pool for this device
     MemoryPool* current_mem_pool_;
     MemoryPool* graph_mem_pool_;    //!< Memory pool, associated with graphs for this device
+    MemoryPool* current_managed_mem_pool_;  //!< Memory pool for managed allocations
+    MemoryPool* default_managed_mem_pool_;  //!< Memory pool for managed allocations
 
     std::set<MemoryPool*> mem_pools_;
+    // Tracking Objects
+    ObjectRegistry<hipGraphicsResource_t> registeredGraphicsResources_; //!< Track registered graphics resources
+    ObjectRegistry<hipGraphicsResource_t> mappedGraphicsResources_;     //!< Track mapped graphics resources
 
-  public:
-    Device(amd::Context* ctx, int devId): context_(ctx),
-        deviceId_(devId),
-         flags_(hipDeviceScheduleSpin),
-        isActive_(false),
-        default_mem_pool_(nullptr),
-        current_mem_pool_(nullptr),
-        graph_mem_pool_(nullptr)
-        { assert(ctx != nullptr); }
+   public:
+    Device(amd::Context* ctx, int devId)
+        : context_(ctx),
+          deviceId_(devId),
+          flags_(hipDeviceScheduleSpin),
+          isActive_(false),
+          default_mem_pool_(nullptr),
+          current_mem_pool_(nullptr),
+          graph_mem_pool_(nullptr),
+          default_managed_mem_pool_(nullptr),
+          current_managed_mem_pool_(nullptr) {
+      assert(ctx != nullptr);
+    }
     ~Device();
 
     bool Create();
@@ -579,6 +625,15 @@ public:
     /// Get the graph memory pool on the device
     MemoryPool* GetGraphMemoryPool() const { return graph_mem_pool_; }
 
+    /// Set managed memory pool on the device
+    void SetCurrentManagedMemoryPool(MemoryPool* pool) { current_managed_mem_pool_ = pool; }
+
+    /// Get managed memory pool on the device
+    MemoryPool* GetCurrentManagedMemoryPool() const { return current_managed_mem_pool_; }
+
+    /// Get default managed memory pool on the device
+    MemoryPool* GetDefaultManagedMemoryPool() const { return default_managed_mem_pool_; }
+
     /// Add memory pool to the device
     void AddMemoryPool(MemoryPool* pool);
 
@@ -615,6 +670,19 @@ public:
   /// Wait all active streams on the blocking queue. The method enqueues a wait command and
   /// doesn't stall the current thread
     void WaitActiveStreams(hip::Stream* blocking_stream, bool wait_null_stream = false);
+
+    ObjectRegistry<hipGraphicsResource_t>& registeredGraphics() {
+      return registeredGraphicsResources_;
+    };
+
+    ObjectRegistry<hipGraphicsResource_t>& mappedGraphics() {
+      return mappedGraphicsResources_;
+    };
+
+    void clearAllTrackedObjects() {
+      registeredGraphicsResources_.clear();
+      mappedGraphicsResources_.clear();
+    }
   };
 
   /// Thread Local Storage Variables Aggregator Class

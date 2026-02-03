@@ -30,7 +30,6 @@ import math
 import argparse
 from collections import OrderedDict
 
-
 num_stddev = 1.0
 
 

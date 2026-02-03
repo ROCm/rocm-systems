@@ -127,6 +127,9 @@ InterceptQueue::InterceptQueue(std::unique_ptr<Queue> queue)
   buffer_ = SharedArray<AqlPacket, 4096>(wrapped->amd_queue_.hsa_queue.size);
   amd_queue_.hsa_queue.base_address = reinterpret_cast<void*>(&buffer_[0]);
 
+  // Pre-allocate staging buffer with queue size
+  staging_buffer_.resize(256);
+
   // Fill the ring buffer with invalid packet headers.
   // Leave packet content uninitialized to help trigger application errors.
   for (uint32_t pkt_id = 0; pkt_id < wrapped->amd_queue_.hsa_queue.size; ++pkt_id) {
@@ -337,7 +340,7 @@ void InterceptQueue::StoreRelaxed(hsa_signal_value_t value) {
     return;
   }
 
-  ScopedAcquire<KernelMutex> lock(&lock_);
+  std::lock_guard<std::mutex> lock(lock_);
 
   // Submit overflow packets.
   if (!overflow_.empty()) {
@@ -398,8 +401,22 @@ void InterceptQueue::StoreRelaxed(hsa_signal_value_t value) {
     Cursor.interceptor_index = interceptors.size() - 1;
     Cursor.pkt_index = next_packet_;
     auto& handler = interceptors[Cursor.interceptor_index];
-    handler.first(&ring[next_packet_ & mask], packet_count, next_packet_,
-                                                handler.second, PacketWriter);
+
+    // Check if packets wrap around the ring buffer boundary using unmasked indices.
+    // The interceptor callback expects packets to be contiguous in memory.
+    if ((next_packet_ + packet_count) > ((next_packet_ & ~mask) + amd_queue_.hsa_queue.size)) {
+      // Packets wrap around - use pre-allocated staging buffer
+      for (uint64_t j = 0; j < packet_count; ++j) {
+        staging_buffer_[j] = ring[(next_packet_ + j) & mask];
+      }
+      handler.first(staging_buffer_.data(), packet_count, next_packet_,
+                    handler.second, PacketWriter);
+    } else {
+      // Packets are contiguous in the ring buffer
+      handler.first(&ring[next_packet_ & mask], packet_count, next_packet_,
+                                                 handler.second, PacketWriter);
+    }
+
     if (IsDeviceMemRingBuf() && needsPcieOrdering()) {
       // Ensure the packet body is written as header may get reordered when writing over PCIE
       _mm_sfence();
@@ -421,7 +438,9 @@ void InterceptQueue::StoreRelaxed(hsa_signal_value_t value) {
 hsa_status_t InterceptQueue::GetInfo(hsa_queue_info_attribute_t attribute, void* value) {
   switch (attribute) {
     case HSA_AMD_QUEUE_INFO_AGENT:
-    case HSA_AMD_QUEUE_INFO_DOORBELL_ID: {
+    case HSA_AMD_QUEUE_INFO_DOORBELL_ID: 
+    case HSA_QUEUE_INFO_USE_COUNT:
+    case HSA_QUEUE_INFO_HW_ID: {
       if (!AMD::AqlQueue::IsType(wrapped.get())) return HSA_STATUS_ERROR_INVALID_QUEUE;
 
       AMD::AqlQueue* aqlQueue = static_cast<AMD::AqlQueue*>(wrapped.get());

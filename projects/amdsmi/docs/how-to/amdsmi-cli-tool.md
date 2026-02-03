@@ -35,7 +35,7 @@ detected:
 ~$ amd-smi
 usage: amd-smi [-h]  ...
 
-AMD System Management Interface | Version: 26.1.0 | ROCm version: 7.1.0 | Platform: Linux Baremetal
+AMD System Management Interface | Version: 26.2.1 | ROCm version: 7.2.0 | Platform: Linux Baremetal
 
 options:
   -h, --help          show this help message and exit
@@ -343,21 +343,23 @@ CPU Arguments:
   --cpu-c0-res                              Displays C0 residency
   --cpu-lclk-dpm-level NBIOID               Displays lclk dpm level range. Requires socket ID and NBOID as inputs
   --cpu-pwr-svi-telemetry-rails             Displays svi based telemetry for all rails
-  --cpu-io-bandwidth IO_BW LINKID_NAME      Displays current IO bandwidth for the selected CPU.        
-                                             input parameters are bandwidth type(1) and link ID encodings        
+  --cpu-io-bandwidth IO_BW LINKID_NAME      Displays current IO bandwidth for the selected CPU.
+                                             input parameters are bandwidth type(1) and link ID encodings
                                              i.e. P2, P3, G0 - G7
-  --cpu-xgmi-bandwidth XGMI_BW LINKID_NAME  Displays current XGMI bandwidth for the selected CPU        
-                                             input parameters are bandwidth type(1,2,4) and link ID encodings        
+  --cpu-xgmi-bandwidth XGMI_BW LINKID_NAME  Displays current XGMI bandwidth for the selected CPU
+                                             input parameters are bandwidth type(1,2,4) and link ID encodings
                                              i.e. P2, P3, G0 - G7
   --cpu-metrics-ver                         Displays metrics table version
   --cpu-metrics-table                       Displays metric table
   --cpu-socket-energy                       Displays socket energy for the selected CPU socket
-  --cpu-ddr-bandwidth                       Displays per socket max ddr bw, current utilized bw,        
+  --cpu-ddr-bandwidth                       Displays per socket max ddr bw, current utilized bw,
                                              and current utilized ddr bw in percentage
   --cpu-temp                                Displays cpu socket temperature
   --cpu-dimm-temp-range-rate DIMM_ADDR      Displays dimm temperature range and refresh rate
   --cpu-dimm-pow-consumption DIMM_ADDR      Displays dimm power consumption
   --cpu-dimm-thermal-sensor DIMM_ADDR       Displays dimm thermal sensor
+  --cpu-dfcstate-ctrl                       Displays DFCState control status
+  --cpu-railisofreq-policy                  Displays CPU ISO frequency policy
 
 CPU Core Arguments:
   --core-boost-limit                        Get boost limit for the selected cores
@@ -550,7 +552,7 @@ usage: amd-smi set [-h] (-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE ...
                    [--cpu-df-pstate-range MAX_PSTATE MIN_PSTATE] [--cpu-enable-apb]
                    [--cpu-disable-apb DF_PSTATE] [--soc-boost-limit BOOST_LIMIT]
                    [--core-boost-limit BOOST_LIMIT] [--json | --csv] [--file FILE]
-                   [--loglevel LEVEL]
+                   [--loglevel LEVEL] [--cpu-dfcstate-ctrl VALUE] [--cpu-railisofreq-policy VALUE]
 
 If no GPU is specified, will select all GPUs on the system.
 A set argument must be provided; Multiple set arguments are accepted.
@@ -586,7 +588,7 @@ Set Arguments:
 CPU Arguments:
   --cpu-pwr-limit PWR_LIMIT                                      Set power limit for the given socket. Input parameter is power limit value.
   --cpu-xgmi-link-width MIN_WIDTH MAX_WIDTH                      Set max and Min linkwidth. Input parameters are min and max link width values
-  --cpu-lclk-dpm-level NBIOID MIN_DPM MAX_DPM                    Sets the max and min dpm level on a given NBIO.        
+  --cpu-lclk-dpm-level NBIOID MIN_DPM MAX_DPM                    Sets the max and min dpm level on a given NBIO.
                                                                   Input parameters are die_index, min dpm, max dpm.
   --cpu-pwr-eff-mode MODE                                        Sets the power efficency mode policy. Input parameter is mode.
   --cpu-gmi3-link-width MIN_LW MAX_LW                            Sets max and min gmi3 link width range
@@ -595,6 +597,8 @@ CPU Arguments:
   --cpu-enable-apb                                               Enables the DF p-state performance boost algorithm
   --cpu-disable-apb DF_PSTATE                                    Disables the DF p-state performance boost algorithm. Input parameter is DFPstate (0-3)
   --soc-boost-limit BOOST_LIMIT                                  Sets the boost limit for the given socket. Input parameter is socket BOOST_LIMIT value
+  --cpu-dfcstate-ctrl VALUE                                      Sets the DFCState control for the given socket. Input parameter is VALUE (0-1)
+  --cpu-railisofreq-policy VALUE                                 Sets the CPU ISO frequency policy. Input parameter is VALUE (0-1)
 
 CPU Core Arguments:
   --core-boost-limit BOOST_LIMIT                                 Sets the boost limit for the given core. Input parameter is core BOOST_LIMIT value
