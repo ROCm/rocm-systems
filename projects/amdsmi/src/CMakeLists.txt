@@ -165,7 +165,29 @@ if("${CMAKE_BUILD_TYPE}" STREQUAL Release)
     endif()
 endif()
 
-## Add the install directives for the runtime library.
+## Create Python-specific library if BUILD_PYTHON_LIB is enabled
+if(BUILD_PYTHON_LIB)
+    add_library(${AMD_SMI}_python ${SRC_LIST} ${INC_LIST})
+    target_link_libraries(${AMD_SMI}_python PRIVATE
+        rt
+        Threads::Threads
+        ${CMAKE_DL_LIBS}
+        ${FILESYSTEM_LIB}
+    )
+    target_include_directories(${AMD_SMI}_python PRIVATE 
+        ${CMAKE_CURRENT_SOURCE_DIR} 
+        ${PROJECT_SOURCE_DIR}/rocm_smi/include
+        ${PROJECT_SOURCE_DIR}/common/shared_mutex 
+        ${RAS_DECODE_INC_DIR}
+        ${DRM_INCLUDE_DIRS}
+        ${DRM_AMDGPU_INCLUDE_DIRS}                                          
+    )
+    target_include_directories(${AMD_SMI}_python PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+                                                        "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
+    set_property(TARGET ${AMD_SMI}_python PROPERTY SOVERSION "${MAJOR}")
+    set_property(TARGET ${AMD_SMI}_python PROPERTY VERSION "${SO_VERSION_STRING}")
+    set_target_properties(${AMD_SMI}_python PROPERTIES OUTPUT_NAME "amd_smi_python")
+endif()
 install(
     TARGETS ${AMD_SMI}
     EXPORT amd_smiTargets
