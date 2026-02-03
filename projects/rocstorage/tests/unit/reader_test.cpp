@@ -56,7 +56,7 @@ TEST_F(reader_test, create_reader_instance) { ASSERT_NE(m_reader, nullptr); }
 
 TEST_F(reader_test, get_node_list_returns_correct_value)
 {
-    auto node_list = m_reader->get_node_list();
+    auto node_list = m_reader->get_all_nodes();
     ASSERT_EQ(node_list.size(), 1);
 
     ASSERT_EQ(node_list[0]->node_id, 9162464413581981795);

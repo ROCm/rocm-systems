@@ -7,13 +7,22 @@
 #include <rocstorage/storage.hpp>
 
 #include <memory>
-#include <vector>
+#include <optional>
+#include <string>
 
 namespace rocstorage
 {
 
+// ============================================================================
+// Reader Interface
+// ============================================================================
+
 struct reader_t
 {
+    /***
+     * @brief Construct a reader with the given storage backend
+     * @param storage Storage backend to read from (takes ownership)
+     */
     explicit reader_t(std::unique_ptr<rocstorage::storage_t> storage);
 
     virtual ~reader_t();
@@ -24,7 +33,328 @@ struct reader_t
     reader_t(const reader_t&&)            = delete;
     reader_t& operator=(const reader_t&&) = delete;
 
-    [[nodiscard]] data_types::node_info_list_t get_node_list() const;
+    /***
+     *@section Info Table Accessors (Eagerly Loaded, Cached)
+     * These are loaded at construction and cached for the session lifetime.
+     * Returns shared_ptr to cached objects; fast access, no database query.
+     */
+
+    /***
+     * @brief Get all node info from cache
+     * @return List of all node info objects
+     */
+    [[nodiscard]] data_types::node_info_list_t get_all_nodes() const;
+
+    /***
+     * @brief Get all process info from cache
+     * @return List of all process info objects
+     */
+    [[nodiscard]] data_types::process_info_list_t get_all_processes() const;
+
+    /***
+     * @brief Get all thread info from cache
+     * @return List of all thread info objects
+     */
+    [[nodiscard]] data_types::thread_info_list_t get_all_threads() const;
+
+    /***
+     * @brief Get all agent info from cache
+     * @return List of all agent info objects
+     */
+    [[nodiscard]] data_types::agent_info_list_t get_all_agents() const;
+
+    /***
+     * @brief Get all queue info from cache
+     * @return List of all queue info objects
+     */
+    [[nodiscard]] data_types::queue_info_list_t get_all_queues() const;
+
+    /***
+     * @brief Get all stream info from cache
+     * @return List of all stream info objects
+     */
+    [[nodiscard]] data_types::stream_info_list_t get_all_streams() const;
+
+    /***
+     * @brief Get all PMC info from cache
+     * @return List of all PMC info objects
+     */
+    [[nodiscard]] data_types::pmc_info_list_t get_all_pmc_info() const;
+
+    /***
+     * @brief Get all code object info from cache
+     * @return List of all code object info objects
+     */
+    [[nodiscard]] data_types::code_object_info_list_t get_all_code_objects() const;
+
+    /***
+     * @brief Get all kernel symbol info from cache
+     * @return List of all kernel symbol info objects
+     */
+    [[nodiscard]] data_types::kernel_symbol_info_list_t get_all_kernel_symbols() const;
+
+    /***
+     *@section Info By ID Accessors (From Cache)
+     * Returns specific info object by its unique ID, or nullptr if not found.
+     */
+
+    /***
+     * @brief Get node info by ID from cache
+     * @param id Node ID to look up
+     * @return Node info pointer, or nullptr if not found
+     */
+    [[nodiscard]] data_types::node_info_ptr_t get_node_by_id(
+        data_types::node_id_t id) const;
+
+    /***
+     * @brief Get process info by ID from cache
+     * @param id Process ID to look up
+     * @return Process info pointer, or nullptr if not found
+     */
+    [[nodiscard]] data_types::process_info_ptr_t get_process_by_id(
+        data_types::process_id_t id) const;
+
+    /***
+     * @brief Get thread info by ID from cache
+     * @param id Thread ID to look up
+     * @return Thread info pointer, or nullptr if not found
+     */
+    [[nodiscard]] data_types::thread_info_ptr_t get_thread_by_id(
+        data_types::thread_id_t id) const;
+
+    /***
+     * @brief Get agent info by unique ID from cache
+     * @param id Agent unique ID to look up
+     * @return Agent info pointer, or nullptr if not found
+     */
+    [[nodiscard]] data_types::agent_info_ptr_t get_agent_by_id(
+        const data_types::agent_unique_id_t& id) const;
+
+    /***
+     * @brief Get queue info by ID from cache
+     * @param id Queue ID to look up
+     * @return Queue info pointer, or nullptr if not found
+     */
+    [[nodiscard]] data_types::queue_info_ptr_t get_queue_by_id(
+        data_types::queue_id_t id) const;
+
+    /***
+     * @brief Get stream info by ID from cache
+     * @param id Stream ID to look up
+     * @return Stream info pointer, or nullptr if not found
+     */
+    [[nodiscard]] data_types::stream_info_ptr_t get_stream_by_id(
+        data_types::stream_id_t id) const;
+
+    /***
+     * @brief Get PMC info by unique ID from cache
+     * @param id PMC unique ID to look up
+     * @return PMC info pointer, or nullptr if not found
+     */
+    [[nodiscard]] data_types::pmc_info_ptr_t get_pmc_by_id(
+        const data_types::pmc_info_unique_id_t& id) const;
+
+    /***
+     * @brief Get code object info by ID from cache
+     * @param id Code object ID to look up
+     * @return Code object info pointer, or nullptr if not found
+     */
+    [[nodiscard]] data_types::code_object_info_ptr_t get_code_object_by_id(
+        data_types::code_object_id_t id) const;
+
+    /***
+     * @brief Get kernel symbol info by ID from cache
+     * @param id Kernel symbol ID to look up
+     * @return Kernel symbol info pointer, or nullptr if not found
+     */
+    [[nodiscard]] data_types::kernel_symbol_info_ptr_t get_kernel_symbol_by_id(
+        data_types::kernel_symbol_id_t id) const;
+
+    /***
+     *@section Track Accessors (Eagerly Loaded, Cached)
+     * Tracks organize events on the timeline. Each track represents a unique
+     * context (e.g., node+process+thread, or node+agent+queue).
+     */
+
+    /***
+     * @brief Get all track info from cache
+     * @return List of all track info objects
+     */
+    [[nodiscard]] data_types::track_info_list_t get_all_tracks() const;
+
+    /***
+     * @brief Get track info by name from cache
+     * @param name Track name to look up
+     * @return Track info pointer, or nullptr if not found
+     */
+    [[nodiscard]] data_types::track_info_ptr_t get_track_by_name(
+        data_types::track_name_t name) const;
+
+    /***
+     *@section Timeline Event Queries (On-Demand, Not Stored)
+     * These query the database and return lightweight timeline_event_t for display.
+     * The returned vector is owned by the caller; reader does not cache events.
+     * Use get_event_details() to fetch full data for a specific event.
+     */
+
+    /***
+     * @brief Get all events for a track within optional time window
+     * @param track Track to query events for
+     * @param filter Optional filter for time window and pagination
+     * @return List of lightweight timeline events for display
+     */
+    [[nodiscard]] data_types::timeline_event_list_t get_events_for_track(
+        data_types::track_info_ptr_t      track,
+        const data_types::event_filter_t& filter = {}) const;
+
+    /***
+     * @brief Get events across all tracks matching filter
+     * @param filter Optional filter for time window and pagination
+     * @return List of lightweight timeline events for display
+     * @note For large databases, use pagination to limit result size
+     */
+    [[nodiscard]] data_types::timeline_event_list_t get_events(
+        const data_types::event_filter_t& filter = {}) const;
+
+    /***
+     * @brief Get count of events matching filter without fetching data
+     * @param filter Optional filter for time window
+     * @return Number of matching events
+     * @note Useful for pagination UI
+     */
+    [[nodiscard]] size_t get_event_count(
+        const data_types::event_filter_t& filter = {}) const;
+
+    /***
+     *@section Event Details (On-Demand Query by db_id)
+     * Fetch full details for a timeline event. Queries database by db_id.
+     * Returns nullopt if type mismatch or db_id not found.
+     */
+
+    /***
+     * @brief Get full region details for a timeline event
+     * @param event Timeline event to fetch details for
+     * @return Region data, or nullopt if type mismatch or not found
+     */
+    [[nodiscard]] std::optional<data_types::region_data_t> get_region_details(
+        const data_types::timeline_event_t& event) const;
+
+    /***
+     * @brief Get full kernel dispatch details for a timeline event
+     * @param event Timeline event to fetch details for
+     * @return Kernel dispatch data, or nullopt if type mismatch or not found
+     */
+    [[nodiscard]] std::optional<data_types::kernel_dispatch_data_t>
+    get_kernel_dispatch_details(const data_types::timeline_event_t& event) const;
+
+    /***
+     * @brief Get full memory copy details for a timeline event
+     * @param event Timeline event to fetch details for
+     * @return Memory copy data, or nullopt if type mismatch or not found
+     */
+    [[nodiscard]] std::optional<data_types::memory_copy_data_t> get_memory_copy_details(
+        const data_types::timeline_event_t& event) const;
+
+    /***
+     * @brief Get full memory alloc details for a timeline event
+     * @param event Timeline event to fetch details for
+     * @return Memory alloc data, or nullopt if type mismatch or not found
+     */
+    [[nodiscard]] std::optional<data_types::memory_alloc_data_t> get_memory_alloc_details(
+        const data_types::timeline_event_t& event) const;
+
+    /***
+     * @brief Get full sample details for a timeline event
+     * @param event Timeline event to fetch details for
+     * @return Sample data, or nullopt if type mismatch or not found
+     */
+    [[nodiscard]] std::optional<data_types::sample_data_t> get_sample_details(
+        const data_types::timeline_event_t& event) const;
+
+    /***
+     * @brief Get full PMC event details for a timeline event
+     * @param event Timeline event to fetch details for
+     * @return PMC event data, or nullopt if type mismatch or not found
+     */
+    [[nodiscard]] std::optional<data_types::pmc_event_data_t> get_pmc_event_details(
+        const data_types::timeline_event_t& event) const;
+
+    /***
+     *@section Event Property Accessors (On-Demand, Related Data)
+     * Fetch additional properties for a specific event.
+     * These perform database queries on demand.
+     */
+
+    /***
+     * @brief Get call stack for an event
+     * @param event Timeline event to fetch call stack for
+     * @return Call stack data (empty if not available in database)
+     */
+    [[nodiscard]] data_types::call_stack_t get_call_stack(
+        const data_types::timeline_event_t& event) const;
+
+    /***
+     * @brief Get source code context for an event
+     * @param event Timeline event to fetch source context for
+     * @return List of source context entries (empty if not available)
+     */
+    [[nodiscard]] data_types::source_context_list_t get_source_context(
+        const data_types::timeline_event_t& event) const;
+
+    /***
+     * @brief Get function arguments for an event
+     * @param event Timeline event to fetch arguments for (typically region events)
+     * @return List of argument data (empty if not available)
+     */
+    [[nodiscard]] data_types::arg_data_list_t get_arguments(
+        const data_types::timeline_event_t& event) const;
+
+    /***
+     * @brief Get correlated events via stack_id matching
+     * @param event Timeline event to find correlations for
+     * @return List of related events (e.g., CPU region -> GPU kernel correlation)
+     * @note Finds events where stack_id matches and id differs (excludes self)
+     */
+    [[nodiscard]] data_types::timeline_event_list_t get_correlated_events(
+        const data_types::timeline_event_t& event) const;
+
+    /***
+     *@section Summary/Statistics (Aggregate Queries)
+     * Get aggregated statistics for events. These perform GROUP BY queries.
+     */
+    /***
+     * @brief Get aggregated kernel dispatch statistics
+     * @param window Optional time window to filter events
+     * @return List of kernel summary statistics
+     */
+    [[nodiscard]] data_types::event_summary_list_t get_kernel_summary(
+        const data_types::time_window_t& window = {}) const;
+
+    /***
+     * @brief Get aggregated region statistics
+     * @param window Optional time window to filter events
+     * @return List of region summary statistics
+     */
+    [[nodiscard]] data_types::event_summary_list_t get_region_summary(
+        const data_types::time_window_t& window = {}) const;
+
+    /***
+     *@section Database Metadata
+     * Get metadata about the database.
+     */
+    /***
+     * @brief Get time range of all data in the database
+     * @return Time window spanning all events
+     */
+    [[nodiscard]] data_types::time_window_t get_data_time_range() const;
+
+    /***
+     * @brief Get total counts of each event type
+     * @param window Optional time window to filter events
+     * @return Counts for each event type
+     */
+    [[nodiscard]] data_types::event_counts_t get_event_counts(
+        const data_types::time_window_t& window = {}) const;
 
 private:
     struct impl;

@@ -29,62 +29,66 @@ reader_t::impl::impl(std::unique_ptr<rocstorage::storage_t> storage)
 }
 
 data_types::node_info_list_t
-reader_t::impl::get_node_list() const
+reader_t::impl::get_all_nodes()
 {
-    auto                         statement = m_read_statements->node_info_statement();
-    auto                         node_info_list = statement().to_vector();
-    data_types::node_info_list_t node_info_list_ptr;
-    node_info_list_ptr.reserve(node_info_list.size());
-    for(const auto& node_info : node_info_list)
+    if(m_node_info_list.empty())
     {
-        node_info_list_ptr.push_back(
-            std::make_shared<data_types::node_info_t>(node_info));
+        auto statement      = m_read_statements->node_info_statement();
+        auto node_info_list = statement().to_vector();
+
+        m_node_info_list.reserve(node_info_list.size());
+        for(const auto& node_info : node_info_list)
+        {
+            m_node_info_list.push_back(
+                std::make_shared<data_types::node_info_t>(node_info));
+        }
     }
-    return node_info_list_ptr;
+
+    return m_node_info_list;
 }
 
 data_types::process_info_list_t
-reader_t::impl::get_process_list() const
+reader_t::impl::get_process_list()
 {
     return {};
 }
 data_types::thread_info_list_t
-reader_t::impl::get_thread_list() const
+reader_t::impl::get_thread_list()
 {
     return {};
 }
 data_types::agent_info_t
-reader_t::impl::get_agent_list() const
+reader_t::impl::get_agent_list()
 {
     return {};
 }
 data_types::track_info_list_t
-reader_t::impl::get_track_list() const
+reader_t::impl::get_track_list()
 {
     return {};
 }
 data_types::kernel_symbol_info_list_t
-reader_t::impl::get_kernel_symbol_list() const
+reader_t::impl::get_kernel_symbol_list()
 {
     return {};
 }
 data_types::code_object_info_list_t
-reader_t::impl::get_code_object_list() const
+reader_t::impl::get_code_object_list()
 {
     return {};
 }
 data_types::stream_info_list_t
-reader_t::impl::get_stream_list() const
+reader_t::impl::get_stream_list()
 {
     return {};
 }
 data_types::queue_info_list_t
-reader_t::impl::get_queue_list() const
+reader_t::impl::get_queue_list()
 {
     return {};
 }
 data_types::pmc_info_list_t
-reader_t::impl::get_pmc_info_list() const
+reader_t::impl::get_pmc_info_list()
 {
     return {};
 }

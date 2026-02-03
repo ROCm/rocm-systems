@@ -7,6 +7,7 @@
 #include <deque>
 #include <memory>
 #include <optional>
+#include <string>
 #include <vector>
 
 namespace rocstorage::data_types
@@ -647,5 +648,144 @@ struct memory_alloc_data_t
 
 using memory_alloc_data_ptr_t  = std::shared_ptr<memory_alloc_data_t>;
 using memory_alloc_data_list_t = std::vector<memory_alloc_data_ptr_t>;
+
+// ============================================================================
+// Types for reader API
+// ============================================================================
+
+/// Fundamental event kind - determines timeline rendering
+enum class event_kind_t
+{
+    region,  ///< Has start and end, displayed as bar/span
+    instant  ///< Single point in time, displayed as marker/dot
+};
+
+/// Specific event type - determines which data object to fetch
+enum class event_type_t
+{
+    region,           ///< API calls, user markers
+    kernel_dispatch,  ///< GPU kernel execution
+    memory_copy,      ///< Memory transfer
+    memory_allocate,  ///< Memory operation
+    sample,           ///< Instantaneous sample
+    pmc_event         ///< Performance counter
+};
+
+struct unique_event_id_t
+{
+    size_t       id;
+    event_type_t type;
+};
+
+// ============================================================================
+// Timeline Event - Lightweight View for Display
+// ============================================================================
+
+/// Lightweight event representation for timeline display.
+/// Contains only display-necessary fields read from initial query.
+/// Full details fetched on-demand via get_event_details() or type-specific accessors.
+struct timeline_event_t
+{
+    // Identity (for fetching full details)
+    unique_event_id_t unique_id;
+
+    event_kind_t kind;  ///< region vs instant (for rendering)
+
+    timestamp_ns_t start_timestamp;  ///< Start time (or timestamp for instant)
+    timestamp_ns_t end_timestamp;    ///< End time (== start for instant)
+
+    std::string display_name;  ///< Human-readable name
+    std::string category;      ///< Event category (e.g., "HIP_API", "GPU")
+
+    track_info_ptr_t track;  ///< Associated track
+
+    std::optional<double> value;
+
+    [[nodiscard]] timestamp_ns_t duration() const noexcept
+    {
+        return end_timestamp - start_timestamp;
+    }
+
+    [[nodiscard]] bool is_instant() const noexcept
+    {
+        return kind == event_kind_t::instant;
+    }
+    [[nodiscard]] bool is_region() const noexcept { return kind == event_kind_t::region; }
+};
+
+using timeline_event_list_t = std::vector<timeline_event_t>;
+
+// ============================================================================
+// Filter Types
+// ============================================================================
+
+/// Time window filter for queries
+struct time_window_t
+{
+    std::optional<timestamp_ns_t> start{ std::nullopt };  ///< Filter: start >= this
+    std::optional<timestamp_ns_t> end{ std::nullopt };    ///< Filter: end <= this
+};
+
+/// Pagination for large result sets (extension point for chunking)
+struct pagination_t
+{
+    std::optional<size_t> limit{ std::nullopt };   ///< Max events to return
+    std::optional<size_t> offset{ std::nullopt };  ///< Skip first N events
+};
+
+/// Sort order
+enum class sort_order_t
+{
+    ascending,
+    descending
+};
+
+struct sort_t
+{
+    std::string  property  = "start";  ///< Property to sort by
+    sort_order_t direction = sort_order_t::ascending;
+};
+
+/// Combined filter for event queries
+struct event_filter_t
+{
+    time_window_t         time_window;           ///< Time range filter
+    pagination_t          pagination;            ///< Limit/offset for chunking
+    std::optional<sort_t> sort{ std::nullopt };  ///< Sort order
+
+    /// Which event types to include (empty = all)
+    std::vector<event_type_t> types;
+
+    /// Optional WHERE filter
+    std::optional<std::string> where;
+};
+
+// ============================================================================
+// Summary Statistics
+// ============================================================================
+
+/// Aggregated statistics for a group of events
+struct event_summary_t
+{
+    std::string    name;
+    size_t         count;
+    timestamp_ns_t total_duration;
+    timestamp_ns_t avg_duration;
+    timestamp_ns_t min_duration;
+    timestamp_ns_t max_duration;
+};
+
+using event_summary_list_t = std::vector<event_summary_t>;
+
+/// Total counts of each event type
+struct event_counts_t
+{
+    size_t regions;
+    size_t kernel_dispatches;
+    size_t memory_copies;
+    size_t memory_allocations;
+    size_t samples;
+    size_t pmc_events;
+};
 
 }  // namespace rocstorage::data_types
