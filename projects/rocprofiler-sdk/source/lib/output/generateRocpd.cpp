@@ -21,8 +21,8 @@
 // SOFTWARE.
 
 #include "generateRocpd.hpp"
-#include "lib/common/uuid_v7.hpp"
 #include "kfd_info.hpp"
+#include "lib/common/uuid_v7.hpp"
 #include "metadata.hpp"
 #include "output_stream.hpp"
 #include "stream_info.hpp"
