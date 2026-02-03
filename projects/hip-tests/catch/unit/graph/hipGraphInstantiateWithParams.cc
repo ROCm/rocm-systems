@@ -82,13 +82,14 @@ void GraphInstantiateWithParams_DependencyGraph() {
   hipGraphNode_t memset_A, memset_B, memsetKer_C;
   hipGraphNode_t memcpyH2D_A, memcpyH2D_B, memcpyD2H_C;
   hipGraphNode_t kernel_vecAdd;
-  hipKernelNodeParams kernelNodeParams{};
+  hipKernelNodeParams kernelNodeParams1{};
+  hipKernelNodeParams kernelNodeParams2{};
   int *A_d, *B_d, *C_d;
   int *A_h, *B_h, *C_h;
   hipGraphExec_t graphExec;
   hipMemsetParams memsetParams{};
-  int memsetVal{};
-  size_t NElem{N};
+  static int memsetVal = 0;
+  static size_t NElem = N;
 
   HipTest::initArrays(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, N, false);
   unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, N);
@@ -114,13 +115,13 @@ void GraphInstantiateWithParams_DependencyGraph() {
   HIP_CHECK(hipGraphAddMemsetNode(&memset_B, graph, nullptr, 0, &memsetParams));
 
   void* kernelArgs1[] = {&C_d, &memsetVal, reinterpret_cast<void*>(&NElem)};
-  kernelNodeParams.func = reinterpret_cast<void*>(HipTest::memsetReverse<int>);
-  kernelNodeParams.gridDim = dim3(blocks);
-  kernelNodeParams.blockDim = dim3(threadsPerBlock);
-  kernelNodeParams.sharedMemBytes = 0;
-  kernelNodeParams.kernelParams = reinterpret_cast<void**>(kernelArgs1);
-  kernelNodeParams.extra = nullptr;
-  HIP_CHECK(hipGraphAddKernelNode(&memsetKer_C, graph, nullptr, 0, &kernelNodeParams));
+  kernelNodeParams1.func = reinterpret_cast<void*>(HipTest::memsetReverse<int>);
+  kernelNodeParams1.gridDim = dim3(blocks);
+  kernelNodeParams1.blockDim = dim3(threadsPerBlock);
+  kernelNodeParams1.sharedMemBytes = 0;
+  kernelNodeParams1.kernelParams = reinterpret_cast<void**>(kernelArgs1);
+  kernelNodeParams1.extra = nullptr;
+  HIP_CHECK(hipGraphAddKernelNode(&memsetKer_C, graph, nullptr, 0, &kernelNodeParams1));
 
   HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyH2D_A, graph, nullptr, 0, A_d, A_h, Nbytes,
                                     hipMemcpyHostToDevice));
@@ -131,13 +132,13 @@ void GraphInstantiateWithParams_DependencyGraph() {
                                     hipMemcpyDeviceToHost));
 
   void* kernelArgs2[] = {&A_d, &B_d, &C_d, reinterpret_cast<void*>(&NElem)};
-  kernelNodeParams.func = reinterpret_cast<void*>(HipTest::vectorADD<int>);
-  kernelNodeParams.gridDim = dim3(blocks);
-  kernelNodeParams.blockDim = dim3(threadsPerBlock);
-  kernelNodeParams.sharedMemBytes = 0;
-  kernelNodeParams.kernelParams = reinterpret_cast<void**>(kernelArgs2);
-  kernelNodeParams.extra = nullptr;
-  HIP_CHECK(hipGraphAddKernelNode(&kernel_vecAdd, graph, nullptr, 0, &kernelNodeParams));
+  kernelNodeParams2.func = reinterpret_cast<void*>(HipTest::vectorADD<int>);
+  kernelNodeParams2.gridDim = dim3(blocks);
+  kernelNodeParams2.blockDim = dim3(threadsPerBlock);
+  kernelNodeParams2.sharedMemBytes = 0;
+  kernelNodeParams2.kernelParams = reinterpret_cast<void**>(kernelArgs2);
+  kernelNodeParams2.extra = nullptr;
+  HIP_CHECK(hipGraphAddKernelNode(&kernel_vecAdd, graph, nullptr, 0, &kernelNodeParams2));
 
   // Create dependencies
   HIP_CHECK(hipGraphAddDependencies(graph, &memset_A, &memcpyH2D_A, 1));
