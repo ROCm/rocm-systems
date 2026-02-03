@@ -21,6 +21,8 @@
 // SOFTWARE.
 
 #include "ptrace_runner.hpp"
+#include "common/ptrace.hpp"
+#include "common/wait_for_atomic.hpp"
 
 #include "lib/common/logging.hpp"
 
@@ -29,27 +31,7 @@ namespace rocprofiler
 namespace rocattach
 {
 namespace
-{
-template <typename T>
-bool
-wait_for_ne(std::atomic<T>& flag, T condition, size_t timeout_ms)
-{
-    auto start_time       = std::chrono::steady_clock::now();
-    auto timeout_duration = std::chrono::milliseconds(timeout_ms);
-    auto end_time         = start_time + timeout_duration;
-
-    while(std::chrono::steady_clock::now() < end_time)
-    {
-        if(flag.load() != condition)
-        {
-            return true;
-        }
-        std::this_thread::yield();
-    }
-    // Last chance check in case we were scheduled after timeout
-    return flag.load() != condition;
-}
-}  // namespace
+{}  // namespace
 
 PTraceRunner::PTraceRunner(pid_t _pid)
 : m_pid(_pid)
@@ -70,34 +52,70 @@ PTraceRunner::~PTraceRunner()
 }
 
 rocattach_status_t
-PTraceRunner::ptrace_run(__ptrace_request op,
-                         void*            addr,
-                         void*            data,
-                         uint64_t*        ptrace_retval,
-                         int*             ptrace_errno,
-                         size_t           timeout_ms)
+PTraceRunner::ptrace_run(__ptrace_request   op,
+                         ptrace_parameter_t _addr,
+                         ptrace_parameter_t _data,
+                         uint64_t*          ptrace_retval,
+                         int*               ptrace_errno,
+                         size_t             timeout_ms)
 {
     std::lock_guard<std::mutex> lg(m_ptrace_run_mutex);
-    ptrace_data_t               ptrace_data{};
+
+    // This does some work with variants to allow functions to send ptrace operations as if they
+    // were addressing the original ptrace function, that is without strict typing. This is only
+    // slightly safer than using a union, but it is no worse than ptrace's type punning. For our
+    // sake, internally, we address these as uint64_t blobs to make for easier logging and typing on
+    // our end.
+    auto convert_ptrace_parameter = [](ptrace_parameter_t param) {
+        if(std::holds_alternative<uint64_t>(param))
+        {
+            return std::get<uint64_t>(param);
+        }
+        else
+        {
+            return reinterpret_cast<uint64_t>(std::get<void*>(param));
+        }
+    };
+    uint64_t addr = convert_ptrace_parameter(_addr);
+    uint64_t data = convert_ptrace_parameter(_data);
+
+    ROCP_TRACE << "[rocprofiler-sdk-rocattach] ptrace call params(" << ptrace_op_name(op) << "("
+               << op << "), " << m_pid << ", " << addr << ", " << data << ")";
+
+    ptrace_data_t ptrace_data{};
     ptrace_data.op   = op;
     ptrace_data.addr = addr;
     ptrace_data.data = data;
+    // Store parameters for the ptrace operation in m_ptrace_data for retrieval by ptrace_runner()
     m_ptrace_data.store(ptrace_data);
+
+    // Set m_running to true, requesting a ptrace operation be performed in ptrace_runner() with the
+    // parameters in m_ptrace_data
     m_running.store(true);
-    if(!wait_for_ne(m_running, true, timeout_ms))
+    // Wait for m_running to be set to false, which indicates ptrace_runner() has finished the
+    // requested ptrace operation.
+    if(!wait_for_eq(m_running, false, timeout_ms))
     {
         ROCP_ERROR << "[rocprofiler-sdk-rocattach] Timeout during ptrace(" << op << ", " << m_pid
                    << ", " << addr << ", " << data << ") duration: " << timeout_ms << "ms";
         return ROCATTACH_STATUS_ERROR;
     }
-
+    auto result = m_ptrace_data.load();
     if(ptrace_retval)
     {
-        *ptrace_retval = m_ptrace_data.load().retval;
+        *ptrace_retval = result.retval;
     }
     if(ptrace_errno)
     {
-        *ptrace_errno = m_ptrace_data.load().ptrace_errno;
+        *ptrace_errno = result.ptrace_errno;
+    }
+    if(result.ptrace_errno != 0)
+    {
+        // log an error if it occurs, but the ptrace call was a success, so still return success
+        ROCP_ERROR << "[rocprofiler-sdk-rocattach] ptrace call failed. errno: "
+                   << result.ptrace_errno << " - " << strerror(result.ptrace_errno) << ". params("
+                   << ptrace_op_name(op) << "(" << op << "), " << m_pid << ", " << addr << ", "
+                   << data << ")";
     }
     return ROCATTACH_STATUS_SUCCESS;
 }
@@ -110,14 +128,19 @@ PTraceRunner::ptrace_runner(pid_t                       _pid,
 {
     while(thread_done.load() == false)
     {
+        // When running becomes true, a new ptrace operation has been requested with ptrace_data as
+        // its parameters
         if(running.load() == true)
         {
-            errno             = 0;
+            errno = 0;
+            // Load ptrace_data, then call ptrace with its parameters.
             auto _ptrace_data = ptrace_data.load();
             auto retval       = ptrace(_ptrace_data.op, _pid, _ptrace_data.addr, _ptrace_data.data);
+            // Write back the results of the ptrace operation, then store to ptrace_data.
             _ptrace_data.retval       = retval;
             _ptrace_data.ptrace_errno = errno;
             ptrace_data.store(_ptrace_data);
+            // Clear running, indicating the requested operation is complete.
             running.store(false);
         }
         std::this_thread::yield();
