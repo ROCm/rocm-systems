@@ -282,7 +282,7 @@ void model_init(void)
 	for (unsigned node_id = 0; node_id < props.NumNodes; node_id++)
 	{
 		HsaNodeProperties node_props;
-		result = hsakmt_topology_get_node_props(node_id, &node_props);
+		result = hsakmt_topology_get_node_props(&hsakmt_primary_kfd_ctx, node_id, &node_props);
 		if (result != HSAKMT_STATUS_SUCCESS)
 		{
 			fprintf(stderr, "model: Failed to get node %u properties\n", node_id);

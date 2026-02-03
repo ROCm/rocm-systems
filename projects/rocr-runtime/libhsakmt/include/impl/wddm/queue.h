@@ -39,8 +39,8 @@
 // DEALINGS WITH THE SOFTWARE.
 //
 ////////////////////////////////////////////////////////////////////////////////
-#ifndef _WSL_INC_WDDM_QUEUE_H_
-#define _WSL_INC_WDDM_QUEUE_H_
+
+#pragma once
 
 #include <cinttypes>
 #include <condition_variable>
@@ -50,9 +50,9 @@
 #include "impl/wddm/types.h"
 #include "impl/wddm/device.h"
 #include "impl/wddm/gpu_memory.h"
-#include "impl/hsa/hsa_ext_amd.h"
-#include "impl/hsa/amd_hsa_queue.h"
-#include "impl/hsa/amd_hsa_signal.h"
+#include "hsa-runtime/inc/hsa_ext_amd.h"
+#include "hsa-runtime/inc/amd_hsa_queue.h"
+#include "hsa-runtime/inc/amd_hsa_signal.h"
 #include "impl/wddm/cmd_util.h"
 
 namespace wsl {
@@ -78,15 +78,13 @@ public:
             cmdbuf_size(cmdbuf_size),
             queue_engine(engine),
             use_hws(use_hws),
-            prio(thunk_proxy::kNormal) {
-
-  }
+            prio(thunk_proxy::kNormal) {}
 
   virtual ~WDDMQueue() { }
 
   virtual hsa_status_t Init(void) { return HSA_STATUS_SUCCESS; }
   virtual hsa_status_t Fini(void) { return HSA_STATUS_SUCCESS; }
-  virtual void RingDoorbell() { }
+  virtual void RingDoorbell(uint64_t value) { }
   virtual void* GetHsaQueueAddr(void) const { return reinterpret_cast<void*>(GetCmdbufAddr()); }
 
   hsa_status_t SwsInit(void);
@@ -136,6 +134,9 @@ public:
 
   bool use_hws;
   thunk_proxy::SchedLevel prio;
+
+  std::atomic<uint64_t>* ring_wptr = nullptr;
+  std::atomic<uint64_t>* ring_rptr = nullptr;
 };
 
 class ComputeQueue : public WDDMQueue {
@@ -174,8 +175,10 @@ public:
 
   hsa_status_t Process(void);
   uint64_t * GetDoorbellPtr() const { return (uint64_t *)&doorbell_signal_value_; }
-  void RingDoorbell();
-private:
+  void RingDoorbell(uint64_t value);
+  GpuMemory* GetAmdQueueMemory() const { return amd_queue_memory_; }
+
+ private:
   hsa_status_t KernelDispatchAqlToPm4(char *cpu, hsa_kernel_dispatch_packet_t *packet);
   hsa_status_t BarrierGenericAqlToPm4(char *cpu, hsa_barrier_and_packet_t *packet, bool is_or = false);
 
@@ -196,10 +199,8 @@ private:
   hsa_status_t PreSubmit(void);
   hsa_status_t EndSubmit(void);
 
-  void *ring;
-  uint64_t ring_size;
-  std::atomic<uint64_t> *ring_wptr;
-  std::atomic<uint64_t> *ring_rptr;
+  void *ring;         //!< AQL queue, allocated in ROCR and points to the AQL packets
+  uint64_t ring_size; //!< AQL queue size in packets
 
   // ib_start_addr is the current ib start address
   uint64_t ib_start_addr;
@@ -241,8 +242,10 @@ private:
   uint64_t GetKernelObjAddr(uint64_t addr) const;
   void InitScratchSRD();
   GpuMemoryHandle amd_queue_mem_;
+  GpuMemory* amd_queue_memory_;     //!< Memory object associated with amd_queue_t structure from ROCr
   amd_queue_v2_t *amd_queue_;
-  amd_queue_v2_t *amd_queue_rocr_;
+  amd_queue_v2_t *amd_queue_rocr_;  //!< AQL queue, allocated in rocr and pointing to the header
+  uint64_t amd_queue_size_rocr_;    //!< Size of the AQL queue allocated in ROCR, including header
   uint64_t doorbell_signal_value_;
   volatile std::atomic<int64_t> *error_code_;
   std::thread aql_to_pm4_thread_;
@@ -261,6 +264,7 @@ private:
   GpuMemoryHandle scratch_mem_;
 
   std::vector<int> scratch_base_offset_array_;
+  bool aql_;  //!< The queue is configured to the AQL execution
 };
 
 class SDMAQueue : public WDDMQueue {
@@ -286,7 +290,7 @@ public:
   uint64_t * GetRingWptr(void) { return &wptr_next_; }
   uint64_t * GetRingRptr(void) { return WDDMQueue::GetSyncAddr(); }
   uint64_t * GetDoorbellPtr() { return &doorbell_; }
-  void RingDoorbell();
+  void RingDoorbell(uint64_t value);
   void* GetHsaQueueAddr(void) const { return reinterpret_cast<void*>(GetCmdbufAddr()); }
 
 private:
@@ -367,4 +371,3 @@ private:
 } // namespace thunk
 } // namespace wsl
 
-#endif

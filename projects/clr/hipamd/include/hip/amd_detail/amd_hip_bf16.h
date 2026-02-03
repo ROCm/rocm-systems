@@ -1724,7 +1724,7 @@ __BF16_DEVICE_STATIC__ __hip_bfloat16 hfloor(const __hip_bfloat16 h) {
  * \brief Calculate natural log of bfloat16
  */
 __BF16_DEVICE_STATIC__ __hip_bfloat16 hlog(const __hip_bfloat16 h) {
-  return __float2bfloat16(__ocml_log_f32(__bfloat162float(h)));
+  return __float2bfloat16(__builtin_elementwise_log(__bfloat162float(h)));
 }
 
 /**
@@ -1732,7 +1732,7 @@ __BF16_DEVICE_STATIC__ __hip_bfloat16 hlog(const __hip_bfloat16 h) {
  * \brief Calculate log 10 of bfloat16
  */
 __BF16_DEVICE_STATIC__ __hip_bfloat16 hlog10(const __hip_bfloat16 h) {
-  return __float2bfloat16(__ocml_log10_f32(__bfloat162float(h)));
+  return __float2bfloat16(__builtin_elementwise_log10(__bfloat162float(h)));
 }
 
 /**
@@ -1740,7 +1740,7 @@ __BF16_DEVICE_STATIC__ __hip_bfloat16 hlog10(const __hip_bfloat16 h) {
  * \brief Calculate log 2 of bfloat16
  */
 __BF16_DEVICE_STATIC__ __hip_bfloat16 hlog2(const __hip_bfloat16 h) {
-  return __float2bfloat16(__ocml_log2_f32(__bfloat162float(h)));
+  return __float2bfloat16(__builtin_elementwise_log2(__bfloat162float(h)));
 }
 
 /**

@@ -23,21 +23,32 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
-#ifndef LIBHSAKMT_H_INCLUDED
-#define LIBHSAKMT_H_INCLUDED
+#pragma once
 
+#if defined(__linux__)
 #include <pthread.h>
+#else
+#define WIN32_NO_STATUS
+#include <Windows.h>
+#undef WIN32_NO_STATUS
+#include <d3dkmthk.h>
+#include "hsakmt/drm/amdgpu.h"
+#endif
 #include <stdint.h>
 #include <limits.h>
 #include "hsakmt/hsakmt.h"
+#if defined(__linux__)
 #include "hsakmt/hsakmt_drm.h"
-
+#endif
 #include "impl/wddm/va_mgr.h"
 #include "impl/wddm/types.h"
 #include "impl/wddm/device.h"
 #include "dxcore_loader.h"
 
 wsl::thunk::WDDMDevice* get_wddmdev(uint32_t node_id);
+wsl::thunk::WDDMDevice* WddmDevice(uint32_t dev_id);
+int CpuNodes();
+
 uint32_t get_num_wddmdev();
 wsl::thunk::GpuMemory *get_gpu_mem(void *MemoryAddress);
 
@@ -51,17 +62,9 @@ struct hsakmtRuntime {
   hsakmtRuntime()
     : dxg_fd(-1),
     parent_pid(getpid()),
-    is_forked(false),
     hsakmt_debug_level(HSAKMT_DEBUG_LEVEL_DEFAULT),
     dxg_open_count(0),
-    hsakmt_mutex(PTHREAD_MUTEX_INITIALIZER),
-    hsakmt_is_dgpu(false),
-    is_svm_api_supported(false),
-    zfb_support(0),
-    vendor_packet_process(0),
-    check_avail_sysram(false),
     max_single_alloc_size(0),
-    enable_thunk_sub_allocator(0),
     local_heap_space_start_(0),
     local_heap_space_size_(0),
     system_heap_space_start_(0),
@@ -99,47 +102,58 @@ struct hsakmtRuntime {
   ErrorCode HandleApertureAlloc(gpusize size, gpusize *out_gpu_virt_addr);
   void HandleApertureFree(gpusize gpu_addr);
 
-  pthread_mutex_t hsakmt_mutex;
+  std::recursive_mutex hsakmt_mutex;
   const char *dxg_device_name = "/dev/dxg";
   long page_size;
   int page_shift;
   int dxg_fd = -1;
-  pid_t parent_pid = -1;
-  bool is_forked = false;
+  int parent_pid = -1;
   int hsakmt_debug_level = HSAKMT_DEBUG_LEVEL_DEFAULT;
+  int hsakmt_debug_sysmem = 0;
   unsigned long dxg_open_count;
-  bool hsakmt_is_dgpu;
-  bool is_svm_api_supported;
-  int zfb_support;
-  int vendor_packet_process;
-  bool check_avail_sysram;
+
   size_t max_single_alloc_size;
-  int enable_thunk_sub_allocator;
   uint32_t default_node;
 
   /* local heap means bo's backend is vram of all GPUs */
   uint64_t local_heap_space_start_;
   uint64_t local_heap_space_size_;
-
   /* manage the reserved local heap space which shared by CPU and GPUs */
   std::unique_ptr<wsl::thunk::VaMgr> local_heap_mgr_;
 
   /* system heap means bo's backend is system ram */
   uint64_t system_heap_space_start_;
   uint64_t system_heap_space_size_;
-
   /* manage the reserved system heap space which shared by CPU and GPUs */
   std::unique_ptr<wsl::thunk::VaMgr> system_heap_mgr_;
 
   uint64_t handle_aperture_start_;
   uint64_t handle_aperture_size_;
   std::unique_ptr<wsl::thunk::VaMgr> handle_aperture_mgr_;
+  union {
+    struct {
+      uint64_t use_pm4_ : 1;
+      uint64_t is_forked : 1;
+      uint64_t hsakmt_is_dgpu : 1;
+      uint64_t check_avail_sysram : 1;
+      uint64_t zfb_support : 1;
+      uint64_t vendor_packet_process : 1;
+      uint64_t enable_thunk_sub_allocator : 1;
+      uint64_t is_svm_api_supported : 1;
+      uint64_t disable_wait_timeout_ : 1;
+    };
+    uint64_t settings_bits_ = 0;
+  };
 };
 
 extern hsakmtRuntime *dxg_runtime;
 
 #undef HSAKMTAPI
+#if defined(__linux__)
 #define HSAKMTAPI __attribute__((visibility ("default")))
+#else
+#define HSAKMTAPI
+#endif
 
 #if defined(__clang__)
 #if __has_feature(address_sanitizer)
@@ -204,21 +218,21 @@ extern hsakmtRuntime *dxg_runtime;
 #define pr_debug(fmt, ...) \
 	hsakmt_print(HSAKMT_DEBUG_LEVEL_DEBUG, fmt, ##__VA_ARGS__)
 #define pr_err_once(fmt, ...)                   \
-({                                              \
+{                                               \
         static bool __print_once;               \
         if (!__print_once) {                    \
                 __print_once = true;            \
                 pr_err(fmt, ##__VA_ARGS__);     \
         }                                       \
-})
+}
 #define pr_warn_once(fmt, ...)                  \
-({                                              \
+{                                               \
         static bool __print_once;               \
         if (!__print_once) {                    \
                 __print_once = true;            \
                 pr_warn(fmt, ##__VA_ARGS__);    \
         }                                       \
-})
+}
 
 /* Expects HSA_ENGINE_ID.ui32, returns gfxv (full) in hex */
 #define HSA_GET_GFX_VERSION_FULL(ui32) \
@@ -277,13 +291,10 @@ bool queue_release_buffer(void *MemoryAddress);
 uint32_t get_vgpr_size_per_cu(HSA_ENGINE_ID id);
 #define SGPR_SIZE_PER_CU 0x4000
 
-bool is_ipc_sysmemfd(int fd);
+bool is_ipc_sysmemfd(uint64_t fd);
 
-HSAKMT_STATUS import_dmabuf_fd(int DMABufFd,
-                                       uint32_t NodeId,
-                                       bool alloc_va,
-                                       bool is_ipc_memfd,
-                                       wsl::thunk::GpuMemoryHandle *GpuMemHandle);
+HSAKMT_STATUS import_dmabuf_fd(uint64_t DMABufFd, uint32_t NodeId, bool alloc_va, bool is_ipc_memfd,
+                               wsl::thunk::GpuMemoryHandle* GpuMemHandle, bool is_kmt_handle);
 
 bool hsakmt_hsa_loader_init();
-#endif
+
