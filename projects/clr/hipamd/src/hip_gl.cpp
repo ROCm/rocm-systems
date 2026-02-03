@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2021 Advanced Micro Devices, Inc.
+/* Copyright (c) 2010 - 2026 Advanced Micro Devices, Inc.
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -362,7 +362,7 @@ hipError_t hipGraphicsSubResourceGetMappedArray(hipArray_t* array, hipGraphicsRe
     LogError("invalid arrayIndex, arrayIndex higher than zero not implemented");
     HIP_RETURN(hipErrorInvalidValue);
   }
-  
+
   size_t height = image->getHeight();
   size_t width = image->getWidth();
   size_t depth = image->getDepth();
@@ -850,7 +850,7 @@ hipError_t hipGraphicsGLRegisterBuffer(hipGraphicsResource** resource, GLuint bu
   }
   HIP_RETURN(hipSuccess);
 }
- 
+
 hipError_t hipGraphicsMapResources(int count, hipGraphicsResource_t* resources,
                                    hipStream_t stream) {
   HIP_INIT_API(hipGraphicsMapResources, count, resources, stream);
@@ -1070,8 +1070,8 @@ hipError_t hipGraphicsUnregisterResource(hipGraphicsResource_t resource) {
   }
 
   if (device->mappedGraphics().isValid(resource)) {
-    LogError("resource still mapped");
-    HIP_RETURN(hipErrorArrayIsMapped);
+    LogError("resource already mapped");
+    HIP_RETURN(hipErrorAlreadyMapped);
   }
 
   if (!device->registeredGraphics().isValid(resource)) {
