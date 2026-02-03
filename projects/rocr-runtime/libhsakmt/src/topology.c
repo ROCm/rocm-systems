@@ -67,8 +67,21 @@ static bool procfs_topology_available = false;
 static bool check_procfs_topology_available(void)
 {
 	char path[128];
+	DIR *dir;
+
+	/* Try /host_proc_kfd first (for container with bind mount) */
+	snprintf(path, sizeof(path), "/host_proc_kfd/%d/topology/nodes", getpid());
+	dir = opendir(path);
+	if (dir) {
+		closedir(dir);
+		snprintf(procfs_topology_path, sizeof(procfs_topology_path),
+			 "/host_proc_kfd/%d/topology", getpid());
+		return true;
+	}
+
+	/* Fall back to /proc/kfd (native host) */
 	snprintf(path, sizeof(path), "/proc/kfd/%d/topology/nodes", getpid());
-	DIR *dir = opendir(path);
+	dir = opendir(path);
 	if (dir) {
 		closedir(dir);
 		snprintf(procfs_topology_path, sizeof(procfs_topology_path),
