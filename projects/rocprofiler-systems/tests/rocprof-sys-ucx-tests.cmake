@@ -129,9 +129,10 @@ rocprofiler_systems_add_test(
 # Make this test depend on the UCX validation fixture
 foreach(_test_suffix sampling binary-rewrite binary-rewrite-run sys-run)
     if(TEST ucx-perfetto-${_test_suffix})
-        set_tests_properties(
-            ucx-perfetto-${_test_suffix}
-            PROPERTIES FIXTURES_REQUIRED ucx_available
+        set_property(
+            TEST ucx-perfetto-${_test_suffix}
+            APPEND
+            PROPERTY FIXTURES_REQUIRED ucx_available
         )
     endif()
 endforeach()
@@ -215,9 +216,10 @@ rocprofiler_systems_add_test(
 # Make this test depend on the UCX validation fixture
 foreach(_test_suffix sampling binary-rewrite binary-rewrite-run sys-run)
     if(TEST ucx-mpip-integration-${_test_suffix})
-        set_tests_properties(
-            ucx-mpip-integration-${_test_suffix}
-            PROPERTIES FIXTURES_REQUIRED ucx_available
+        set_property(
+            TEST ucx-mpip-integration-${_test_suffix}
+            APPEND
+            PROPERTY FIXTURES_REQUIRED ucx_available
         )
     endif()
 endforeach()
@@ -249,9 +251,10 @@ foreach(_MSG_SIZE 1024 4096 16384)
     # Make the test depend on the UCX validation fixture
     foreach(_test_suffix sampling binary-rewrite binary-rewrite-run sys-run)
         if(TEST ucx-bcast-${_MSG_SIZE}-${_test_suffix})
-            set_tests_properties(
-                ucx-bcast-${_MSG_SIZE}-${_test_suffix}
-                PROPERTIES FIXTURES_REQUIRED ucx_available
+            set_property(
+                TEST ucx-bcast-${_MSG_SIZE}-${_test_suffix}
+                APPEND
+                PROPERTY FIXTURES_REQUIRED ucx_available
             )
         endif()
     endforeach()
@@ -282,9 +285,10 @@ rocprofiler_systems_add_test(
 # Make this test depend on the UCX validation fixture
 foreach(_test_suffix sampling binary-rewrite binary-rewrite-run sys-run)
     if(TEST ucx-active-messages-${_test_suffix})
-        set_tests_properties(
-            ucx-active-messages-${_test_suffix}
-            PROPERTIES FIXTURES_REQUIRED ucx_available
+        set_property(
+            TEST ucx-active-messages-${_test_suffix}
+            APPEND
+            PROPERTY FIXTURES_REQUIRED ucx_available
         )
     endif()
 endforeach()

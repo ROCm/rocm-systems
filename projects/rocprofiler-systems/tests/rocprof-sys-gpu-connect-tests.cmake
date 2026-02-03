@@ -26,6 +26,21 @@
 #
 # -------------------------------------------------------------------------------------- #
 
+# Skip all tests if no valid GPU is detected
+if(NOT _VALID_GPU)
+    message(
+        STATUS
+        "transferBench requires a GPU and no valid GPUs were found; skipping GPU connect tests"
+    )
+    return()
+endif()
+
+# Skip if transferBench target is not available
+if(NOT TARGET transferBench)
+    message(WARNING "transferBench not available; GPU connect tests will be skipped")
+    return()
+endif()
+
 # Use legacy trace mode for AMD SMI counters - cached mode doesn't support real-time counter tracking
 set(_gpu_connect_environment
     "ROCPROFSYS_TRACE=ON"
@@ -43,31 +58,18 @@ set(_gpu_connect_rocpd_validation_rules
     "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/gpu-connect/amd-smi-rules.json"
 )
 
-# Enable ROCPD for tests only if valid ROCm is installed and a valid GPU is detected
-if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU})
+# Enable ROCPD for tests only if valid ROCm is installed
+if(ENABLE_ROCPD_TEST)
     list(APPEND _gpu_connect_environment "ROCPROFSYS_USE_ROCPD=ON")
-endif()
-
-# Skip all tests if no valid GPU is detected
-if(NOT _VALID_GPU)
-    message(
-        STATUS
-        "transferBench requires a GPU and no valid GPUs were found; skipping GPU connect tests"
-    )
-    return()
 endif()
 
 # Add a runtime validation test that checks if transferBench can run successfully
 # This test runs before all other GPU connect tests and acts as a fixture
-if(TARGET transferBench)
-    add_test(
-        NAME transferbench-validation-check
-        COMMAND $<TARGET_FILE:transferBench>
-        WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
-    )
-else()
-    message(WARNING " transferBench not available; " "GPU connect tests will be skipped")
-endif()
+add_test(
+    NAME transferbench-validation-check
+    COMMAND $<TARGET_FILE:transferBench>
+    WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+)
 
 # Set this test as a fixture that must pass for GPU connect tests to run
 set_tests_properties(
@@ -90,10 +92,10 @@ rocprofiler_systems_add_test(
 
 # Make this test depend on the transferBench validation fixture
 if(TEST transferbench-sys-run)
-    set_tests_properties(
-        transferbench-sys-run
+    set_property(
+        TEST transferbench-sys-run
         APPEND
-        PROPERTIES FIXTURES_REQUIRED transferbench_available
+        PROPERTY FIXTURES_REQUIRED transferbench_available
     )
 endif()
 
@@ -111,8 +113,9 @@ if(TEST validate-transferbench-sys-run-perfetto)
         PROPERTY FIXTURES_REQUIRED transferbench_available
     )
 endif()
+
 # Add ROCPD validation if enabled
-if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU})
+if(${ENABLE_ROCPD_TEST} AND TEST transferbench-sys-run)
     set_property(TEST transferbench-sys-run APPEND PROPERTY LABELS rocpd)
 
     rocprofiler_systems_add_validation_test(
@@ -125,9 +128,10 @@ if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU})
 
     # Make ROCPD validation test depend on the transferBench fixture
     if(TEST validate-transferbench-sys-run-rocpd)
-        set_tests_properties(
-            validate-transferbench-sys-run-rocpd
-            PROPERTIES FIXTURES_REQUIRED transferbench_available
+        set_property(
+            TEST validate-transferbench-sys-run-rocpd
+            APPEND
+            PROPERTY FIXTURES_REQUIRED transferbench_available
         )
     endif()
 endif()
