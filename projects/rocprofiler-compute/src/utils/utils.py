@@ -1295,7 +1295,7 @@ def save_torch_trace_inputs(
         # Letting shutil.copyfile raise error if files not found
         shutil.copyfile(src_counter, dst_counter)
         shutil.copyfile(src_marker, dst_marker)
-        console_log(
+        console_log("torch trace",
             "Moved counter collection and marker trace files"
             "to workload dir for PyTorch trace creation."
         )
