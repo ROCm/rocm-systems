@@ -5349,6 +5349,8 @@ PtlFormatMapEntry kPtlFormatMap[] = {
   {"BF16", AMDSMI_PTL_DATA_FORMAT_BF16},
   {"F32",  AMDSMI_PTL_DATA_FORMAT_F32},
   {"F64",  AMDSMI_PTL_DATA_FORMAT_F64},
+  {"F8",   AMDSMI_PTL_DATA_FORMAT_F8},
+  {"VECTOR",AMDSMI_PTL_DATA_FORMAT_VECTOR},
 };
 static constexpr size_t kPtlFormatMapSize =
     sizeof(kPtlFormatMap) / sizeof(kPtlFormatMap[0]);

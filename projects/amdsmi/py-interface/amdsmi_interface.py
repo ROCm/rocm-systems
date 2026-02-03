@@ -610,6 +610,8 @@ class AmdSmiPtlData(IntEnum):
     BF16 = amdsmi_wrapper.AMDSMI_PTL_DATA_FORMAT_BF16
     F32 = amdsmi_wrapper.AMDSMI_PTL_DATA_FORMAT_F32
     F64 = amdsmi_wrapper.AMDSMI_PTL_DATA_FORMAT_F64
+    F8 = amdsmi_wrapper.AMDSMI_PTL_DATA_FORMAT_F8
+    VECTOR = amdsmi_wrapper.AMDSMI_PTL_DATA_FORMAT_VECTOR
     INVALID = amdsmi_wrapper.AMDSMI_PTL_DATA_FORMAT_INVALID
 
 class AmdSmiPowerCapType(IntEnum):
