@@ -7,7 +7,7 @@
 #ifndef COMMON_H_
 #define COMMON_H_
 
-/* typedef enum {NCCL_LOG_NONE=0, NCCL_LOG_VERSION=1, NCCL_LOG_WARN=2, NCCL_LOG_INFO=3, NCCL_LOG_ABORT=4, NCCL_LOG_TRACE=5} ncclDebugLogLevel; */
+/* typedef enum {NCCL_LOG_NONE=0, NCCL_LOG_ERROR=1, NCCL_LOG_VERSION=2, NCCL_LOG_WARN=3, NCCL_LOG_INFO=4, NCCL_LOG_ABORT=5, NCCL_LOG_TRACE=6} ncclDebugLogLevel; */
 /* typedef enum {NCCL_INIT=1, NCCL_COLL=2, NCCL_P2P=4, NCCL_SHM=8, NCCL_NET=16, NCCL_GRAPH=32, NCCL_TUNING=64, NCCL_ENV=128, NCCL_ALLOC=256, NCCL_CALL=512, NCCL_PROXY=1024, NCCL_NVLS=2048, NCCL_BOOTSTRAP=4096, NCCL_REG=8192, NCCL_ALL=~0} ncclDebugLogSubSys; */
 
 /* Data types */
@@ -28,11 +28,12 @@ typedef enum { ncclInt8       = 0, ncclChar       = 0,
 
 typedef enum {
   NCCL_LOG_NONE = 0,
-  NCCL_LOG_VERSION = 1,
-  NCCL_LOG_WARN = 2,
-  NCCL_LOG_INFO = 3,
-  NCCL_LOG_ABORT = 4,
-  NCCL_LOG_TRACE = 5
+  NCCL_LOG_ERROR = 1,
+  NCCL_LOG_VERSION = 2,
+  NCCL_LOG_WARN = 3,
+  NCCL_LOG_INFO = 4,
+  NCCL_LOG_ABORT = 5,
+  NCCL_LOG_TRACE = 6
 } ncclDebugLogLevel;
 
 typedef enum { ncclSuccess                 =  0,
