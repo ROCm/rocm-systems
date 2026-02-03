@@ -117,8 +117,8 @@ ncclResult_t ncclAllGather_impl(const void* sendbuff, void* recvbuff, size_t sen
   }
 
   if (rcclUseAllGatherDirect(comm, msgSize)) {
-     INFO(NCCL_INIT, "RCCL DIRECT ALLGATHER count = %zu, msgSize = %zu, comm = %p, stream = %p, rank = %d, sendbuff = %p, recvbuff = %p", 
-		     sendcount, msgSize, comm, stream, rank, sendbuff, recvbuff);	  
+     INFO(NCCL_INIT, "RCCL DIRECT ALLGATHER count = %zu, msgSize = %zu, comm = %p, stream = %p, rank = %d, sendbuff = %p, recvbuff = %p",
+		     sendcount, msgSize, comm, stream, rank, sendbuff, recvbuff);
      // use direct allgather
      if (sendcount == 0) return ncclSuccess;
      size_t rankOffset = sendcount * ncclTypeSize(datatype);
@@ -249,9 +249,15 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
     NVTX3_PAYLOAD(comm ? comm->commHash : 0, count * ncclTypeSize(datatype), op, datatype));
 
   // RCCL update slice steps for AllReduce if single node
+  const bool isGfx950 = IsArchMatch(comm->archName, "gfx950");
+  int chunkSteps = (isGfx950 && comm->rcclUseOneSlice)? 1 : ALLREDUCE_CHUNKSTEPS;
+  int sliceSteps = comm->rcclUseOneSlice
+      ? (isGfx950 ? 1 : ALLREDUCE_SLICESTEPS_SINGLE_NODE)
+      : ALLREDUCE_SLICESTEPS;
+
   struct ncclInfo info = { ncclFuncAllReduce, "AllReduce",
     sendbuff, recvbuff, count, datatype, op, 0, comm, stream, /* Args */
-    ALLREDUCE_CHUNKSTEPS, comm -> rcclUseOneSlice ? ALLREDUCE_SLICESTEPS_SINGLE_NODE : ALLREDUCE_SLICESTEPS, nullptr };
+    chunkSteps, sliceSteps, nullptr };
 
   if (!mscclIsCaller()) // when msccl falls back to
   {
