@@ -93,7 +93,7 @@ if(NOT WIN32)
 endif() # end win32
 
 # Address sanitizer options
-if(ENABLE_ADDRESS_SANITIZER)
+if(ENABLE_ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN")
     message(STATUS "Building catch tests with Address Sanitizer options")
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=address -shared-libasan -g -gz")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -shared-libasan -g -gz")
