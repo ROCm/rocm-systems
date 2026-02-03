@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2020, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2026, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -40,8 +40,7 @@
 //
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef _WSL_INC_WDDM_THUNKS_H
-#define _WSL_INC_WDDM_THUNKS_H
+#pragma once
 
 #include "impl/wddm/status.h"
 #include "impl/wddm/types.h"
@@ -66,6 +65,8 @@ inline ErrorCode TranslateNtStatus(NTSTATUS status) {
     return ErrorCode::Timeout;
   case STATUS_INVALID_PARAMETER:
     return ErrorCode::InvalidateParams;
+  case STATUS_INVALID_HANDLE:
+    return ErrorCode::InvalidHandle;
   default:
     break;
   }
@@ -128,8 +129,6 @@ inline ErrorCode DestroyAllocation(
             const WinAllocationHandle *alloc_handles) {
 
   D3DKMT_DESTROYALLOCATION2 args{};
-
-  memset(&args, 0, sizeof(args));
   args.hDevice = device;
   if (resource) {
     args.hResource = resource;
@@ -137,7 +136,9 @@ inline ErrorCode DestroyAllocation(
     args.phAllocationList = alloc_handles;
     args.AllocationCount = num_allocations;
   }
-
+  // Avoid stalls in VidMM since runtime is responsible for ensuring memory is not in use
+  // Note: Otherwise OS will wait on the fence, but fence can't reflect HW state in AQL path
+  args.Flags.AssumeNotInUse = 1;
   return TranslateNtStatus(DXCORE_CALL(D3DKMTDestroyAllocation2(&args)));
 }
 
@@ -225,9 +226,14 @@ inline ErrorCode QueryResourceInfoFromNtHandle(D3DKMT_QUERYRESOURCEINFOFROMNTHAN
 inline ErrorCode OpenResourceFromNtHandle(D3DKMT_OPENRESOURCEFROMNTHANDLE *args) {
   return TranslateNtStatus(DXCORE_CALL(D3DKMTOpenResourceFromNtHandle(args)));
 }
+inline ErrorCode QueryResourceInfo(D3DKMT_QUERYRESOURCEINFO *args) {
+  return TranslateNtStatus(DXCORE_CALL(D3DKMTQueryResourceInfo(args)));
+}
 
+inline ErrorCode OpenResource(D3DKMT_OPENRESOURCE *args) {
+  return TranslateNtStatus(DXCORE_CALL(D3DKMTOpenResource(args)));
+}
 } // namespace d3dthunk
 } // namespace thunk
 } // namespace wsl
 
-#endif

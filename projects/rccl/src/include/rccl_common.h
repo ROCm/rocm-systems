@@ -63,6 +63,9 @@ typedef enum {
   RCCL_DIRECT_ALLGATHER = NCCL_NUM_ALGORITHMS, // Direct AllGather
   RCCL_MSCCL,
   RCCL_MSCCLPP,
+#ifdef ENABLE_WARP_SPEED
+  RCCL_WARP_SPEED,
+#endif
   RCCL_ALGO_COUNT
 } rcclAddonAlgos_t;
 
@@ -131,5 +134,7 @@ bool rcclIsArchSupportedForFunc(struct ncclTaskColl* info, char const* archName)
 void rcclSetWarpSpeedCUs(struct ncclComm* comm, int algo, int threadsPerBlock, int& rcclWarpSpeedChannels);
 void rcclSetWarpSpeedSupportAndFinalCuCount(struct ncclComm* comm, struct ncclKernelPlan* plan, int nChannels, int& support, int &cuCount);
 void rcclSetWarpSpeedAuto(struct ncclComm* comm, struct ncclTaskColl* info, size_t nBytes);
+int rcclGetMaxWarpsPerBlock(struct ncclComm* comm);
+bool rcclCanUseWarpSpeedAuto(struct ncclComm* comm, int nNodes);
 #endif
 #endif

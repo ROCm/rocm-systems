@@ -59,16 +59,17 @@ unsupported_data_types = {
         "MALL",
         "MFMA-F4",
         "MFMA-F6",
+        "MFMA-F6F4",
         "MFMA-F8",
         "MFMA-F16",
         "MFMA-BF16",
         "MFMA-F64",
         "MFMA-I8",
     ],  # MI100 series
-    "gfx90a": ["MALL", "MFMA-F4", "MFMA-F6", "MFMA-F8"],  # MI200 series
-    "gfx940": ["MFMA-F4", "MFMA-F6"],  # MI300A_A0
-    "gfx941": ["MFMA-F4", "MFMA-F6"],  # MI300X_A0
-    "gfx942": ["MFMA-F4", "MFMA-F6"],  # MI300A_A1, MI300X_A1, MI308
+    "gfx90a": ["MALL", "MFMA-F4", "MFMA-F6", "MFMA-F6F4", "MFMA-F8"],  # MI200 series
+    "gfx940": ["MFMA-F4", "MFMA-F6", "MFMA-F6F4"],  # MI300A_A0
+    "gfx941": ["MFMA-F4", "MFMA-F6", "MFMA-F6F4"],  # MI300X_A0
+    "gfx942": ["MFMA-F4", "MFMA-F6", "MFMA-F6F4"],  # MI300A_A1, MI300X_A1, MI308
     "gfx950": [],  # MI350, MI355
 }
 
@@ -100,6 +101,7 @@ cache_kernel_selector = {
 mfma_kernel_selector = {
     "F4": "mfma_f8f6f4<FP4_E2M1>",
     "F6": "mfma_f8f6f4<FP6_E2M3>",
+    "F6F4": "mfma_f8f6f4<FP6_FP4_MIXED>",
     "F8": "mfma_f8",
     "F16": "mfma_f16",
     "BF16": "mfma_bf16",
@@ -120,6 +122,7 @@ flops_kernel_selector = {
 mfma_ops = {
     "F4": {"gfx950": 131072},
     "F6": {"gfx950": 131072},
+    "F6F4": {"gfx950": 131072},  # Mixed precision F6 x F4
     "F8": dict.fromkeys(["gfx90a", "gfx940", "gfx941", "gfx942", "gfx950"], 32768),
     "F16": dict.fromkeys(["gfx90a", "gfx940", "gfx941", "gfx942", "gfx950"], 16384),
     "F32": dict.fromkeys(
@@ -852,6 +855,7 @@ using f16_2vec = __attribute__((__vector_size__(2 * sizeof(__2f16))))  float;
 #define FP6_E2M3 2
 #define BF6_E3M2 3
 #define FP4_E2M1 4
+#define FP6_FP4_MIXED 5
 
 template<int datatype> __global__ void mfma_f8f6f4(int iter, float *dummy)
 {
@@ -938,6 +942,22 @@ template<int datatype> __global__ void mfma_f8f6f4(int iter, float *dummy)
                     result,
                     4,
                     4,
+                    0,
+                    0,
+                    0,
+                    0
+                );
+            }
+            break;
+        case FP6_FP4_MIXED: // fp6 x fp4 (mixed precision)
+            for(int i = 0; i < iter; ++i)
+            {
+                result = __builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4(
+                    a,
+                    a,
+                    result,
+                    2,  // FP6_E2M3 for input A
+                    4,  // FP4_E2M1 for input B
                     0,
                     0,
                     0,
@@ -1053,6 +1073,10 @@ def mfma_f6_bench(device: int) -> PerfMetrics:
     return mfma_bench(device, "F6", "FLOP", "GFLOPS")
 
 
+def mfma_f6f4_bench(device: int) -> PerfMetrics:
+    return mfma_bench(device, "F6F4", "FLOP", "GFLOPS")
+
+
 def fp16_benchmark(device: int) -> PerfMetrics:
     return flops_bench(device, "FP16", "FLOP", "GFLOPS")
 
@@ -1091,6 +1115,7 @@ tests = {
     "I64": int64_benchmark,
     "MFMA-F4": mfma_f4_bench,
     "MFMA-F6": mfma_f6_bench,
+    "MFMA-F6F4": mfma_f6f4_bench,
     "MFMA-F8": mfma_f8_bench,
     "MFMA-F16": mfma_f16_bench,
     "MFMA-BF16": mfma_bf16_bench,
@@ -1100,7 +1125,7 @@ tests = {
 }
 
 
-# Run the roofine tests on the specified device
+# Run the roofline tests on the specified device
 def run_benchmark(device: int) -> dict[PerfMetrics]:
     metrics_dict = {}
 
@@ -1148,6 +1173,7 @@ def dump_csv(metrics: dict[dict[PerfMetrics]], file_path: str) -> None:
         "I64": "I64Ops",
         "MFMA-F4": "MFMAF4Flops",
         "MFMA-F6": "MFMAF6Flops",
+        "MFMA-F6F4": "MFMAF6F4Flops",
         "MFMA-F8": "MFMAF8Flops",
         "MFMA-F16": "MFMAF16Flops",
         "MFMA-BF16": "MFMABF16Flops",
