@@ -78,6 +78,7 @@ def binary_handler_profile_rocprof_compute(request):
         attach_detach_para=None,
         skip_app_name=False,
         workload_dir_type="output_directory",  # ["default", "output_directory"],
+        num_ranks=1,  # Number of MPI ranks (1 = no MPI, >1 = use mpirun)
     ):
         if request.config.getoption("--rocprofiler-sdk-tool-path"):
             options.extend(
@@ -120,6 +121,14 @@ def binary_handler_profile_rocprof_compute(request):
                         str(attach_detach_para["attach-duration-msec"]),
                     ]
 
+            # Wrap with mpirun if num_ranks > 1
+            if num_ranks > 1:
+                command_rocprof_compute = [
+                    "mpirun",
+                    "-n",
+                    str(num_ranks),
+                ] + command_rocprof_compute
+
             process = subprocess.run(
                 command_rocprof_compute,
                 text=True,
@@ -161,6 +170,23 @@ def binary_handler_profile_rocprof_compute(request):
                         "--attach-duration-msec",
                         str(attach_detach_para["attach-duration-msec"]),
                     ]
+
+            # For multi-rank, we must use subprocess (can't patch sys.argv for mpirun)
+            if num_ranks > 1:
+                # Use src/rocprof-compute instead of rocprof-compute
+                command_rocprof_compute[0] = "src/rocprof-compute"
+                full_command = [
+                    "mpirun",
+                    "-n",
+                    str(num_ranks),
+                ] + command_rocprof_compute
+                process = subprocess.run(
+                    full_command,
+                    text=True,
+                )
+                if check_success:
+                    assert process.returncode == 0
+                return process.returncode
 
             with pytest.raises(SystemExit) as e:
                 with patch(
