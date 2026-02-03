@@ -396,10 +396,11 @@ add_test(
 )
 
 if(MPI_CXX_COMPILER)
+    # Use absolute Python path for mpirun tests since mpirun may not inherit PATH correctly
     add_test(
         NAME test_profile_multi_rank
         COMMAND
-            mpirun -n 2 ${PYTHON_TEST_COMMAND} -m pytest -s -m multi_rank
+            mpirun -n 2 ${Python3_EXECUTABLE} -m pytest -s -m multi_rank
             --junitxml=tests/test_profile_multi_rank.xml ${COV_OPTION}
             tests/test_profile_general.py --with-mpi ${WORKING_DIR_OPTION}
     )
