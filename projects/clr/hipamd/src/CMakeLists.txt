@@ -23,7 +23,7 @@ include(GNUInstallDirs)
 set(VERSION_MAJOR_AMDHIP ${HIP_VERSION_MAJOR})
 set(VERSION_MINOR_AMDHIP ${HIP_VERSION_MINOR})
 
-if(ADDRESS_SANITIZER)
+if(ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN")
   set(ASAN_LINKER_FLAGS "-fsanitize=address")
   set(ASAN_COMPILER_FLAGS "-fno-omit-frame-pointer -fsanitize=address")
 
