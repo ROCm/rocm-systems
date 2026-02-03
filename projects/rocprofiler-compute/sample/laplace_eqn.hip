@@ -20,8 +20,23 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+
+// This sample code solves the 2D Laplace equation using the Jacobi iterative
+// method on a rectangle with periodic boundary conditions. 
+
+// The domain is initialized with a smooth Dirac delta function at the center.
+
+// The grid is partitioned among multiple MPI processes in the vertical direction.
+// Each process exchanges halo regions with its neighboring processes after each
+// iteration.
+
+// The code allows users to specify the number of iterations and the
+// order of kernel launches via command-line arguments.
+
+
 // Reference:  Finite Difference Methods for Ordinary and Partial Differential
 // Equations by Randall J. LeVeque, Page 69-71
+
 
 #include <algorithm>
 #include <hip/hip_runtime.h>
