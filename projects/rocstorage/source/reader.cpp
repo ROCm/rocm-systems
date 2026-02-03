@@ -26,49 +26,49 @@ reader_t::get_all_nodes() const
 data_types::process_info_list_t
 reader_t::get_all_processes() const
 {
-    return {};
+    return m_impl->get_process_list();
 }
 
 data_types::thread_info_list_t
 reader_t::get_all_threads() const
 {
-    return {};
+    return m_impl->get_thread_list();
 }
 
 data_types::agent_info_list_t
 reader_t::get_all_agents() const
 {
-    return {};
+    return m_impl->get_agent_list();
 }
 
 data_types::queue_info_list_t
 reader_t::get_all_queues() const
 {
-    return {};
+    return m_impl->get_queue_list();
 }
 
 data_types::stream_info_list_t
 reader_t::get_all_streams() const
 {
-    return {};
+    return m_impl->get_stream_list();
 }
 
 data_types::pmc_info_list_t
 reader_t::get_all_pmc_info() const
 {
-    return {};
+    return m_impl->get_pmc_info_list();
 }
 
 data_types::code_object_info_list_t
 reader_t::get_all_code_objects() const
 {
-    return {};
+    return m_impl->get_code_object_list();
 }
 
 data_types::kernel_symbol_info_list_t
 reader_t::get_all_kernel_symbols() const
 {
-    return {};
+    return m_impl->get_kernel_symbol_list();
 }
 
 data_types::node_info_ptr_t
@@ -137,7 +137,7 @@ reader_t::get_kernel_symbol_by_id(data_types::kernel_symbol_id_t id) const
 data_types::track_info_list_t
 reader_t::get_all_tracks() const
 {
-    return {};
+    return m_impl->get_track_list();
 }
 
 data_types::track_info_ptr_t

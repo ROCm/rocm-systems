@@ -312,8 +312,9 @@ private:
     {
         auto query = queries::select::table_select_query{}
                          .select("id",
-                                 "ppid",
+                                 "nid",
                                  "pid",
+                                 "ppid",
                                  "init",
                                  "fini",
                                  "start",
