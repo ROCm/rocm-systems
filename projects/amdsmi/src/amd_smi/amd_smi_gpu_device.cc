@@ -21,6 +21,7 @@
  */
 
 #include <cstring>
+#include <fstream>
 #include <memory>
 #include <unordered_set>
 #include <dirent.h>
@@ -209,7 +210,7 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(GPUComputeProcessList_t& 
                 return 0;  // File doesn't exist or not readable - expected for optional paths
             }
 
-            std::ifstream kfd_file(vram_path.c_str());
+            std::ifstream kfd_file(vram_path);
             if (!kfd_file.is_open()) {
                 return 0;  // Couldn't open file - treat as no data available
             }
