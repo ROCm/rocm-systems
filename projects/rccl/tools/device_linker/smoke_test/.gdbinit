@@ -1,0 +1,1 @@
+set amdgpu precise-memory

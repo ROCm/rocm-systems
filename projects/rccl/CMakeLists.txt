@@ -414,8 +414,17 @@ if (ENABLE_MSCCLPP AND ROCM_VERSION VERSION_LESS "60200")
   message(WARNING "MSCCL++ integration only supported on ROCm 6.2.0 or greater; disabling MSCCL++ build")
 endif()
 
-## Disable WARP_SPEED if the build environment is invalid
-set(WARP_SPEED_SUPPORTED_ARCHS "gfx942" "gfx942:xnack-" "gfx942:xnack+" "gfx950" "gfx950:xnack-" "gfx950:xnack+")
+## Enable/disable WARP_SPEED based on build environment
+# Default to ON, then disable if environment is invalid
+set(ENABLE_WARP_SPEED ON)
+# Include all variants including sramecc+ (used by DEVICE_LINKER)
+# Need CMP0057 for IN_LIST operator
+cmake_policy(SET CMP0057 NEW)
+set(WARP_SPEED_SUPPORTED_ARCHS 
+    "gfx942" "gfx942:xnack-" "gfx942:xnack+" 
+    "gfx942:xnack-:sramecc+" "gfx942:xnack+:sramecc+" "gfx942:sramecc+:xnack-" "gfx942:sramecc+:xnack+"
+    "gfx950" "gfx950:xnack-" "gfx950:xnack+" 
+    "gfx950:xnack-:sramecc+" "gfx950:xnack+:sramecc+" "gfx950:sramecc+:xnack-" "gfx950:sramecc+:xnack+")
 set(ARCH_MATCH_FOUND OFF)
 foreach(ARCH IN LISTS GPU_TARGETS)
   if(ARCH IN_LIST WARP_SPEED_SUPPORTED_ARCHS)
@@ -1301,9 +1310,13 @@ if (DEVICE_LINKER)
     set(obj ${SPECIALIZED_OBJ_DIR}/${name}.o)
     list(APPEND SPECIALIZED_OBJECTS ${obj})
     # Build compile definitions for specialized kernels
+    # IMPORTANT: These must match host compilation to ensure structure layout agreement
     set(SPEC_KERNEL_DEFS -DDEVICE_LINKER -DENABLE_FAULT_INJECTION)
     if(LL128_ENABLED)
       list(APPEND SPEC_KERNEL_DEFS -DENABLE_LL128)
+    endif()
+    if(ENABLE_WARP_SPEED)
+      list(APPEND SPEC_KERNEL_DEFS -DENABLE_WARP_SPEED)
     endif()
     add_custom_command(
       OUTPUT ${obj}

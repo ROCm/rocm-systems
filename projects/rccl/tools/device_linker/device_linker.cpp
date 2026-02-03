@@ -241,6 +241,7 @@ std::vector<uint8_t> extractDeviceCode(const std::string& path) {
 struct KernelInfo {
     std::string name;
     std::vector<uint8_t> code;
+    uint64_t func_offset = 0;       // Offset of ncclDevFunc_ within code (for function table)
     std::vector<uint8_t> kd;        // 64-byte kernel descriptor from .rodata
     std::vector<uint8_t> note;      // kernel's .note section
     std::vector<uint8_t> debug_line; // .debug_line section (if compiled with -gline-tables-only)
@@ -287,9 +288,17 @@ KernelInfo parseKernel(const std::vector<uint8_t>& elf_data) {
             // Look for either ncclDevFunc_ or ncclDevKernel_..._Specialized
             if (strstr(n, "ncclDevFunc_") || strstr(n, "ncclDevKernel_")) {
                 info.name = n;
-                uint64_t off = text->offset + (syms[i].st_value - text->addr);
-                const uint8_t* p = file.at<uint8_t>(off);
-                info.code.assign(p, p + syms[i].st_size);
+                // Extract from beginning of .text through end of ncclDevFunc_
+                // This includes helper functions (like runTreeSplit) that ncclDevFunc_ calls
+                // via PC-relative addressing. Without these, the PC-relative offsets would
+                // point to garbage after merging.
+                uint64_t func_start = syms[i].st_value;
+                uint64_t func_end = func_start + syms[i].st_size;
+                uint64_t extract_size = func_end - text->addr;
+                
+                const uint8_t* p = file.at<uint8_t>(text->offset);
+                info.code.assign(p, p + extract_size);
+                info.func_offset = func_start - text->addr;  // Offset of ncclDevFunc_ within extracted code
                 break;
             }
         }
@@ -607,12 +616,15 @@ private:
             if (funcid < 0 || funcid >= FUNC_COUNT) continue;
             
             // Record address (will be fixed in layout)
+            // rel_addr is where the extracted code block starts
+            // func_offset is where ncclDevFunc_ is within that block
             uint64_t rel_addr = text.data.size();  // Relative to .text start
+            uint64_t func_addr = rel_addr + k.func_offset;  // Where ncclDevFunc_ actually is
             
             switch (unroll) {
-                case 1: table_1_[funcid] = rel_addr; break;
-                case 2: table_2_[funcid] = rel_addr; break;
-                case 4: table_4_[funcid] = rel_addr; break;
+                case 1: table_1_[funcid] = func_addr; break;
+                case 2: table_2_[funcid] = func_addr; break;
+                case 4: table_4_[funcid] = func_addr; break;
                 default: continue;
             }
             

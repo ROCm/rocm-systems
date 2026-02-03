@@ -37,13 +37,17 @@ int main() {
     int devList[2] = {0, 1};
     
     printf("Step 2: Creating communicators with ncclCommInitAll\n");
+    fflush(stdout);
     ncclComm_t comms[2];
     CHECK_NCCL(ncclCommInitAll(comms, nGpus, devList));
     printf("Communicators created!\n");
+    fflush(stdout);
     
     printf("Step 3: Allocating memory\n");
+    fflush(stdout);
     const int count = 1024;
     float *sendbuff0, *sendbuff1, *recvbuff0, *recvbuff1;
+    float *hostbuff = (float*)malloc(count * sizeof(float));
     
     CHECK_HIP(hipSetDevice(0));
     CHECK_HIP(hipMalloc(&sendbuff0, count * sizeof(float)));
@@ -52,10 +56,16 @@ int main() {
     CHECK_HIP(hipSetDevice(1));
     CHECK_HIP(hipMalloc(&sendbuff1, count * sizeof(float)));
     CHECK_HIP(hipMalloc(&recvbuff1, count * sizeof(float)));
+    
+    // Initialize recv buffers to 999 to detect if they're written
+    for (int i = 0; i < count; i++) hostbuff[i] = 999.0f;
+    CHECK_HIP(hipSetDevice(0));
+    CHECK_HIP(hipMemcpy(recvbuff0, hostbuff, count * sizeof(float), hipMemcpyHostToDevice));
+    CHECK_HIP(hipSetDevice(1));
+    CHECK_HIP(hipMemcpy(recvbuff1, hostbuff, count * sizeof(float), hipMemcpyHostToDevice));
     printf("Memory allocated\n");
     
     printf("Step 4: Initializing data\n");
-    float *hostbuff = (float*)malloc(count * sizeof(float));
     
     for (int i = 0; i < count; i++) hostbuff[i] = 1.0f;
     CHECK_HIP(hipSetDevice(0));
@@ -74,10 +84,19 @@ int main() {
     CHECK_HIP(hipStreamCreate(&stream1));
     printf("Streams created\n");
     
-    printf("Step 6: Running AllReduce\n");
+    // Verify input data before AllReduce
+    CHECK_HIP(hipSetDevice(0));
+    CHECK_HIP(hipMemcpy(hostbuff, sendbuff0, count * sizeof(float), hipMemcpyDeviceToHost));
+    printf("  Input GPU 0: %f %f %f %f %f\n", hostbuff[0], hostbuff[1], hostbuff[2], hostbuff[3], hostbuff[4]);
+    CHECK_HIP(hipSetDevice(1));
+    CHECK_HIP(hipMemcpy(hostbuff, sendbuff1, count * sizeof(float), hipMemcpyDeviceToHost));
+    printf("  Input GPU 1: %f %f %f %f %f\n", hostbuff[0], hostbuff[1], hostbuff[2], hostbuff[3], hostbuff[4]);
+    
+    printf("Step 6: Running AllReduce (IN-PLACE)\n");
     CHECK_NCCL(ncclGroupStart());
-    CHECK_NCCL(ncclAllReduce(sendbuff0, recvbuff0, count, ncclFloat, ncclSum, comms[0], stream0));
-    CHECK_NCCL(ncclAllReduce(sendbuff1, recvbuff1, count, ncclFloat, ncclSum, comms[1], stream1));
+    // In-place: use sendbuff for both send and recv
+    CHECK_NCCL(ncclAllReduce(sendbuff0, sendbuff0, count, ncclFloat, ncclSum, comms[0], stream0));
+    CHECK_NCCL(ncclAllReduce(sendbuff1, sendbuff1, count, ncclFloat, ncclSum, comms[1], stream1));
     CHECK_NCCL(ncclGroupEnd());
     
     CHECK_HIP(hipSetDevice(0));
@@ -91,13 +110,18 @@ int main() {
     int errors = 0;
     
     CHECK_HIP(hipSetDevice(0));
-    CHECK_HIP(hipMemcpy(hostbuff, recvbuff0, count * sizeof(float), hipMemcpyDeviceToHost));
+    // For in-place, read from sendbuff
+    CHECK_HIP(hipMemcpy(hostbuff, sendbuff0, count * sizeof(float), hipMemcpyDeviceToHost));
+    printf("  GPU 0: first 5 values: %f %f %f %f %f (expected %f)\n", 
+           hostbuff[0], hostbuff[1], hostbuff[2], hostbuff[3], hostbuff[4], expected);
     for (int i = 0; i < count; i++) {
         if (hostbuff[i] != expected) errors++;
     }
     
     CHECK_HIP(hipSetDevice(1));
-    CHECK_HIP(hipMemcpy(hostbuff, recvbuff1, count * sizeof(float), hipMemcpyDeviceToHost));
+    CHECK_HIP(hipMemcpy(hostbuff, sendbuff1, count * sizeof(float), hipMemcpyDeviceToHost));
+    printf("  GPU 1: first 5 values: %f %f %f %f %f (expected %f)\n",
+           hostbuff[0], hostbuff[1], hostbuff[2], hostbuff[3], hostbuff[4], expected);
     for (int i = 0; i < count; i++) {
         if (hostbuff[i] != expected) errors++;
     }
