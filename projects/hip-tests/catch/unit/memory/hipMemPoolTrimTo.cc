@@ -73,7 +73,7 @@ TEST_CASE("Unit_hipMemPoolTrimTo_Positive_Basic") {
   HIP_CHECK(hipHostMalloc(&notified, sizeof(unsigned int)));
   *notified = 0;
 
-  const size_t allocation_size1 = kPageSize * kPageSize * 2;
+  const size_t allocation_size1 = kPageSize * kPageSize * 8;
   const size_t allocation_size2 = kPageSize / 2;
   MemPoolGuard mempool(MemPools::created, device_id);
 
