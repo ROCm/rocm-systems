@@ -4,6 +4,18 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ***All information listed below is for reference and subject to change.***
 
+## amd_smi_lib for ROCm 7.12.0
+
+### Added
+
+- N/A
+
+### Changed
+
+- **Modified asic_serial to display "N/A" when not available.***
+  - Skipped setting asic_serial when kfd node unique_id is 0.
+  - Python interface will validate against max uint64 to display N/A.
+
 ## amd_smi_lib for ROCm 7.11.0
 
 ### Added
