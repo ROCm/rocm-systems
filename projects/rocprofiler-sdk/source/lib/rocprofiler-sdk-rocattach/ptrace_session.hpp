@@ -35,6 +35,7 @@
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <variant>
 #include <vector>
 
 namespace rocprofiler
@@ -44,6 +45,7 @@ namespace rocattach
 class PTraceSession
 {
 public:
+    using ptrace_parameter_t = PTraceRunner::ptrace_parameter_t;
     explicit PTraceSession(int);
     ~PTraceSession();
 
@@ -77,6 +79,9 @@ public:
                                      void*              second);
 
 private:
+    rocattach_status_t ptrace_call(__ptrace_request   op,
+                                   ptrace_parameter_t addr,
+                                   ptrace_parameter_t data) const;
     rocattach_status_t start_signal_handler();
     rocattach_status_t stop_signal_handler();
     rocattach_status_t wait_for_breakpoint();
@@ -138,7 +143,7 @@ private:
     };
 
     static void ptrace_signal_handler_func(
-        int                                                 pid,
+        pid_t                                               pid,
         const std::shared_ptr<PTraceRunner>&                runner,
         std::atomic<ptrace_session_signal_handler_state_t>& state,
         std::atomic<rocattach_status_t>&                    error);
@@ -150,7 +155,7 @@ private:
 
     std::thread m_ptrace_signal_handler_thread;
 
-    const int                     m_pid = -1;
+    const pid_t                   m_pid = -1;
     std::shared_ptr<PTraceRunner> m_ptrace_runner;
 };
 
