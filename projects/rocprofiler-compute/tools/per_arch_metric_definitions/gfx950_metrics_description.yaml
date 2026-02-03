@@ -101,6 +101,9 @@ System Speed-of-Light:
   CU Utilization:
     rst: The percent of :ref:`total SIMD cycles <total-simd-cycles>` in the kernel where any :ref:`SIMD <desc-valu>` on a CU was actively doing any work, summed over all CUs. Low values (less than 100%) indicate that the accelerator was not fully saturated by the kernel, or a potential load-imbalance issue.
     unit: Percent
+  L2 Cache Hit Rate:
+    rst: The ratio of the number of L2 cache line requests that hit in the L2 cache over the total number of incoming cache line requests to the L2 cache.
+    unit: Percent
 Command processor fetcher (CPF):
   CPF Utilization:
     rst: Percent of total cycles where the CPF was busy actively doing any work. The ratio of CPF busy cycles over total cycles counted by the CPF.
@@ -758,16 +761,16 @@ vL1D cache access metrics:
     rst: The number of bytes transferred across the vL1D-L2 interface as a result of :ref:`VMEM <desc-vmem>` instructions, divided by total duration. The number of bytes is calculated as the number of cache lines requested multiplied by the cache line size. This value does not consider partial requests, so for instance, if only a single value is requested in a cache line, the data movement will still be counted as a full cache line.
     unit: Gbps
   Tag RAM 0 Req:
-    rst: The total number of L2 cache requests from this vL1D that mapped to Tag RAM bank 0, per normalization unit. The vL1D cache uses multiple Tag RAM banks for parallel tag lookups. Distribution across banks affects lookup efficiency.
+    rst: The total number of vL1D cache requests (cache line lookups) that mapped to Tag RAM bank 0 during the vL1D tag lookup process, per normalization unit. The vL1D cache uses multiple Tag RAM banks for parallel tag lookups. Distribution across banks affects lookup efficiency.
     unit: Requests per Normalization Unit
   Tag RAM 1 Req:
-    rst: The total number of L2 cache requests from this vL1D that mapped to Tag RAM bank 1, per normalization unit. The vL1D cache uses multiple Tag RAM banks for parallel tag lookups. Distribution across banks affects lookup efficiency.
+    rst: The total number of vL1D cache requests (cache line lookups) that mapped to Tag RAM bank 1 during the vL1D tag lookup process, per normalization unit. The vL1D cache uses multiple Tag RAM banks for parallel tag lookups. Distribution across banks affects lookup efficiency.
     unit: Requests per Normalization Unit
   Tag RAM 2 Req:
-    rst: The total number of L2 cache requests from this vL1D that mapped to Tag RAM bank 2, per normalization unit. The vL1D cache uses multiple Tag RAM banks for parallel tag lookups. Distribution across banks affects lookup efficiency.
+    rst: The total number of vL1D cache requests (cache line lookups) that mapped to Tag RAM bank 2 during the vL1D tag lookup process, per normalization unit. The vL1D cache uses multiple Tag RAM banks for parallel tag lookups. Distribution across banks affects lookup efficiency.
     unit: Requests per Normalization Unit
   Tag RAM 3 Req:
-    rst: The total number of L2 cache requests from this vL1D that mapped to Tag RAM bank 3, per normalization unit. The vL1D cache uses multiple Tag RAM banks for parallel tag lookups. Distribution across banks affects lookup efficiency.
+    rst: The total number of vL1D cache requests (cache line lookups) that mapped to Tag RAM bank 3 during the vL1D tag lookup process, per normalization unit. The vL1D cache uses multiple Tag RAM banks for parallel tag lookups. Distribution across banks affects lookup efficiency.
     unit: Requests per Normalization Unit
   L1-L2 Read:
     rst: The number of read requests for a vL1D cache line that were not satisfied by the vL1D and must be retrieved from the to the :doc:`L2 Cache <l2-cache>` per :ref:`normalization unit <normalization-units>`.

@@ -475,21 +475,25 @@ Panel Config:
       value is requested in a cache line, the data movement will still be counted
       as a full cache line.
     Tag RAM 0 Req: >-
-      The total number of L2 cache requests from this vL1D that mapped to Tag RAM
-      bank 0, per normalization unit. The vL1D cache uses multiple Tag RAM banks
-      for parallel tag lookups. Distribution across banks affects lookup efficiency.
+      The total number of vL1D cache requests (cache line lookups) that mapped to
+      Tag RAM bank 0 during the vL1D tag lookup process, per normalization unit.
+      The vL1D cache uses multiple Tag RAM banks for parallel tag lookups.
+      Distribution across banks affects lookup efficiency.
     Tag RAM 1 Req: >-
-      The total number of L2 cache requests from this vL1D that mapped to Tag RAM
-      bank 1, per normalization unit. The vL1D cache uses multiple Tag RAM banks
-      for parallel tag lookups. Distribution across banks affects lookup efficiency.
+      The total number of vL1D cache requests (cache line lookups) that mapped to
+      Tag RAM bank 1 during the vL1D tag lookup process, per normalization unit.
+      The vL1D cache uses multiple Tag RAM banks for parallel tag lookups.
+      Distribution across banks affects lookup efficiency.
     Tag RAM 2 Req: >-
-      The total number of L2 cache requests from this vL1D that mapped to Tag RAM
-      bank 2, per normalization unit. The vL1D cache uses multiple Tag RAM banks
-      for parallel tag lookups. Distribution across banks affects lookup efficiency.
+      The total number of vL1D cache requests (cache line lookups) that mapped to
+      Tag RAM bank 2 during the vL1D tag lookup process, per normalization unit.
+      The vL1D cache uses multiple Tag RAM banks for parallel tag lookups.
+      Distribution across banks affects lookup efficiency.
     Tag RAM 3 Req: >-
-      The total number of L2 cache requests from this vL1D that mapped to Tag RAM
-      bank 3, per normalization unit. The vL1D cache uses multiple Tag RAM banks
-      for parallel tag lookups. Distribution across banks affects lookup efficiency.
+      The total number of vL1D cache requests (cache line lookups) that mapped to
+      Tag RAM bank 3 during the vL1D tag lookup process, per normalization unit.
+      The vL1D cache uses multiple Tag RAM banks for parallel tag lookups.
+      Distribution across banks affects lookup efficiency.
     L1-L2 Read: The number of read requests for a vL1D cache line that were not satisfied
       by the vL1D and must be retrieved from the to the L2 Cache per normalization
       unit.
