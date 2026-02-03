@@ -24,14 +24,6 @@ THE SOFTWARE.
 
 #if defined(__clang__) && defined(__HIP__)
 
-// Use constexpr only in C++14 and later where constexpr void is allowed.
-// In C++11, void is not a literal type and cannot be used as constexpr return type.
-#if defined(__cplusplus) && __cplusplus >= 201402L
-  #define __HIP_CONSTEXPR_VOID constexpr
-#else
-  #define __HIP_CONSTEXPR_VOID
-#endif
-
 // abort
 extern "C" __device__ inline __attribute__((weak)) void abort() { __builtin_trap(); }
 
@@ -41,13 +33,13 @@ extern "C" __device__ inline __attribute__((weak)) void abort() { __builtin_trap
 // allows the function to exist as a global although its definition is
 // included in every compilation unit.
 #if defined(_WIN32) || defined(_WIN64)
-extern "C" __device__ __attribute__((noinline)) __attribute__((weak)) __HIP_CONSTEXPR_VOID void _wassert(
+extern "C" __device__ __attribute__((noinline)) __attribute__((weak)) void _wassert(
     const wchar_t* _msg, const wchar_t* _file, unsigned _line) {
   // FIXME: Need `wchar_t` support to generate assertion message.
   __builtin_trap();
 }
 #else /* defined(_WIN32) || defined(_WIN64) */
-extern "C" __device__ __attribute__((noinline)) __attribute__((weak)) __HIP_CONSTEXPR_VOID void __assert_fail(
+extern "C" __device__ __attribute__((noinline)) __attribute__((weak)) void __assert_fail(
     const char* assertion, const char* file, unsigned int line, const char* function) {
   const char fmt[] = "%s:%u: %s: Device-side assertion `%s' failed.\n";
 
@@ -85,7 +77,7 @@ extern "C" __device__ __attribute__((noinline)) __attribute__((weak)) __HIP_CONS
   __builtin_trap();
 }
 
-extern "C" __device__ __attribute__((noinline)) __attribute__((weak)) __HIP_CONSTEXPR_VOID void __assertfail() {
+extern "C" __device__ __attribute__((noinline)) __attribute__((weak)) void __assertfail() {
   // ignore all the args for now.
   __builtin_trap();
 }

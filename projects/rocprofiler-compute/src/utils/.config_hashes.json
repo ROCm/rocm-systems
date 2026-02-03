@@ -1,7 +1,7 @@
 {
   "archs": {
     "gfx908": {
-      "delta_hash": "1417ef1cfc1b47b7907608f2425f9f11",
+      "delta_hash": "6fddde490c716556c736247d34715c52",
       "files": {
         "0000_top_stats.yaml": "2819d96f5b1c3704f2ac50868a246a7f",
         "0100_system_info.yaml": "cefae2b10db8cf4b0d3a971cff5e82c8",
@@ -24,7 +24,7 @@
       }
     },
     "gfx90a": {
-      "delta_hash": "c3ff3aa253d044f895d776eff72279ad",
+      "delta_hash": "61048a1c50728af58298f5abaee79899",
       "files": {
         "0000_top_stats.yaml": "2819d96f5b1c3704f2ac50868a246a7f",
         "0100_system_info.yaml": "cefae2b10db8cf4b0d3a971cff5e82c8",
@@ -47,7 +47,7 @@
       }
     },
     "gfx940": {
-      "delta_hash": "35aa77b45341e2a215b8251ad73f472f",
+      "delta_hash": "fd5a9d0c8a5d64578a48efae8bad0e79",
       "files": {
         "0000_top_stats.yaml": "2819d96f5b1c3704f2ac50868a246a7f",
         "0100_system_info.yaml": "cefae2b10db8cf4b0d3a971cff5e82c8",
@@ -70,7 +70,7 @@
       }
     },
     "gfx941": {
-      "delta_hash": "8057ce09c13a4fa3e4863085c18a158c",
+      "delta_hash": "b7fd784ed8891b43f070684c46135186",
       "files": {
         "0000_top_stats.yaml": "2819d96f5b1c3704f2ac50868a246a7f",
         "0100_system_info.yaml": "cefae2b10db8cf4b0d3a971cff5e82c8",
@@ -93,7 +93,7 @@
       }
     },
     "gfx942": {
-      "delta_hash": "76bacc3fd8b2d4da43c3b8d670a097d9",
+      "delta_hash": "42b62427e446d8910ee78ea2d65509d9",
       "files": {
         "0000_top_stats.yaml": "2819d96f5b1c3704f2ac50868a246a7f",
         "0100_system_info.yaml": "cefae2b10db8cf4b0d3a971cff5e82c8",
@@ -122,7 +122,7 @@
         "0100_system_info.yaml": "cefae2b10db8cf4b0d3a971cff5e82c8",
         "0200_system_speed_of_light.yaml": "8e2a370cba884f1e4f695ee70b3bd7b6",
         "0300_memory_chart.yaml": "2c82fa6f81a0dda679706d36b99e7913",
-        "0400_roofline.yaml": "e39c92773e1499158fd47ce416e7cee5",
+        "0400_roofline.yaml": "f2608d5376db3b9aa8a144fa88e92587",
         "0500_command_processor_cpc_cpf.yaml": "3f7dab1663ad7a6fae3801aec2b1e8d0",
         "0600_workgroup_manager_spi.yaml": "e6546a92d283fed5a5dc6df203efb670",
         "0700_wavefront.yaml": "330468fd711057b422de9b952c5cfe69",
