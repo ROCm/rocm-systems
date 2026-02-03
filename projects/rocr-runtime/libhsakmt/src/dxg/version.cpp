@@ -24,7 +24,12 @@
  */
 
 
-const char rocdxgbuildid[] __attribute__((used)) = "ROCDXG BUILD ID: " STRING(ROCDXG_VERSION);
+#if defined(__linux__)
+const char rocr4wslbuildid[] __attribute__((used)) = "ROCR4WSL BUILD ID: " STRING(ROCR4WSL_VERSION);
+#else
+#define ROCR4WSL_VERSION "0.1"
+const char rocr4wslbuildid[] = "ROCRWINDOWS BUILD ID: " STRING(ROCR4WSL_VERSION);
+#endif
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtGetVersion(HsaVersionInfo *VersionInfo) {
   CHECK_DXG_OPEN();

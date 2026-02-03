@@ -28,12 +28,15 @@
 #include <string.h>
 #include <assert.h>
 #include <sys/types.h>
+#if defined(__linux__)
 #include <sys/mman.h>
 #include <sys/sysinfo.h>
+#endif
 #include <sys/stat.h>
 #include <fcntl.h>
 #include "impl/wddm/gpu_memory.h"
 #include "util/simple_heap.h"
+#include "util/os.h"
 
 struct Allocation {
   Allocation()
@@ -64,14 +67,44 @@ struct Allocation {
 
 static std::map<const void *, Allocation>* allocation_map_ = new std::map<const void *, Allocation>();
 static std::mutex* allocation_map_lock_ = new std::mutex();
+static rocr::SimpleHeap<BlockAllocator>* fragment_allocator_ = new rocr::SimpleHeap<BlockAllocator>();
 
-void clear_allocation_map(void)
-{
+// ================================================================================================
+static Allocation* FindAllocation(const void* ptr, size_t size) {
+  auto it = allocation_map_->upper_bound(ptr);
+  if (it == allocation_map_->begin()) {
+    return nullptr;
+  }
+  --it;
+  auto& alloc = it->second;
+  if (ptr >= it->first &&
+      (reinterpret_cast<const char*>(ptr) + size) <=
+          (reinterpret_cast<const char*>(it->first) + alloc.size)) {
+    return &alloc;
+  } else {
+    return nullptr;
+  }
+}
+
+// ================================================================================================
+void clear_allocation_map(void) {
   //delete allocation_map_lock_;
   allocation_map_lock_ = new std::mutex();
   std::lock_guard<std::mutex> lock(*allocation_map_lock_);
   delete allocation_map_;
   allocation_map_ = new std::map<const void *, Allocation>();
+}
+
+// ================================================================================================
+wsl::thunk::GpuMemory* GetGpuMemoryFromAddress(void* memory_address) {
+  std::lock_guard<std::mutex> guard(*allocation_map_lock_);
+  auto it = allocation_map_->find(memory_address);
+  if (it == allocation_map_->end()) {
+    return nullptr;
+  }
+
+  auto gpu_mem = wsl::thunk::GpuMemory::Convert(it->second.handle);
+  return gpu_mem;
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtSetMemoryPolicy(HSAuint32 Node,
@@ -112,10 +145,14 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtAllocMemory(HSAuint32 PreferredNode,
 #define POWER_OF_2(x) ((x && (!(x & (x - 1)))) ? 1 : 0)
 
 bool isSystemMemoryAvailable(HSAuint64 SizeInBytes) {
+#if defined(__linux__)
   struct sysinfo info;
   if (sysinfo(&info) != 0)
     return false;
   return SizeInBytes <= info.freeram;
+#else
+  return true;
+#endif
 }
 
 void* BlockAllocator::alloc(size_t request_size, size_t& allocated_size) const {
@@ -125,7 +162,7 @@ void* BlockAllocator::alloc(size_t request_size, size_t& allocated_size) const {
   MemFlags.Value = 0;
   MemFlags.ui32.CoarseGrain = 1;
   MemFlags.ui32.NoSubstitute = 1;
-  allocated_size = wsl::AlignUp(request_size, block_size());
+  allocated_size = rocr::AlignUp(request_size, block_size());
   if (HSAKMT_STATUS_SUCCESS == hsaKmtAllocMemoryAlignInternal(1, allocated_size, 0, MemFlags, &address, true))
     return address;
 
@@ -137,14 +174,12 @@ void BlockAllocator::free(void* ptr, size_t length) const {
     pr_err("wsl-thunk: BlockAllocator::free() err, address %p, length:%zu\n", ptr, length);
 }
 
-static wsl::SimpleHeap<BlockAllocator> fragment_allocator_;
-
 void reset_suballocator(void) {
-  fragment_allocator_.reset();
+  fragment_allocator_->reset();
 }
 
 void trim_suballocator(void) {
-  fragment_allocator_.trim();
+  fragment_allocator_->trim();
 }
 
 HSAKMT_STATUS hsaKmtAllocMemoryAlignInternal(HSAuint32 PreferredNode,
@@ -164,7 +199,7 @@ HSAKMT_STATUS hsaKmtAllocMemoryAlignInternal(HSAuint32 PreferredNode,
   } else
     *MemoryAddress = nullptr;
 
-  uint32_t node = (PreferredNode == 0) ? dxg_runtime->default_node : PreferredNode;
+  uint32_t node = (PreferredNode < CpuNodes()) ? dxg_runtime->default_node : PreferredNode;
   wsl::thunk::WDDMDevice *dev = get_wddmdev(node);
   if (!dev)
     return HSAKMT_STATUS_ERROR;
@@ -179,7 +214,7 @@ HSAKMT_STATUS hsaKmtAllocMemoryAlignInternal(HSAuint32 PreferredNode,
 
   create_info.alignment = Alignment;
   create_info.va_hint = reinterpret_cast<gpusize>(*MemoryAddress);
-  if ((PreferredNode == 0 && MemFlags.ui32.HostAccess)
+  if ((PreferredNode < CpuNodes() && MemFlags.ui32.HostAccess)
     || dxg_runtime->zfb_support || MemFlags.ui32.GTTAccess) {
     if (SizeInBytes > dxg_runtime->max_single_alloc_size)
       return HSAKMT_STATUS_NO_MEMORY;
@@ -192,8 +227,11 @@ HSAKMT_STATUS hsaKmtAllocMemoryAlignInternal(HSAuint32 PreferredNode,
       MemFlags.ui32.CoarseGrain = 1;
 
     // AllocateNonPaged == AllocateIPC
+    // @todo it requires a proper solution. In Windows GPU accessible memory isn't pageable
+    // and IPC detection is wrong in general
+#if defined(__linux__)
     create_info.flags.sysmem_ipc_sig_exporter = !!(MemFlags.ui32.NonPaged && !MemFlags.ui32.GTTAccess);
-
+#endif
     create_info.domain = thunk_proxy::AllocDomain::kSystem;
   } else {
     create_info.domain = thunk_proxy::AllocDomain::kLocal;
@@ -205,6 +243,10 @@ HSAKMT_STATUS hsaKmtAllocMemoryAlignInternal(HSAuint32 PreferredNode,
   //In hsa-runtime, only kernarg region set Uncached.
   if (MemFlags.ui32.Uncached)
     create_info.mem_flags |= thunk_proxy::kKernarg;
+
+  if (MemFlags.ui32.QueueObject) {
+    create_info.mem_flags |= thunk_proxy::kQueueObject;
+  }
 
   create_info.flags.physical_only = MemFlags.ui32.NoAddress;
   create_info.flags.alloc_va = !create_info.flags.physical_only;
@@ -219,7 +261,11 @@ HSAKMT_STATUS hsaKmtAllocMemoryAlignInternal(HSAuint32 PreferredNode,
   /*when only alloc virtual or only physical, it's vmm allocation, force to local*/
   if (create_info.flags.virtual_alloc || create_info.flags.physical_only
         || create_info.flags.physical_contiguous) {
-    create_info.domain = thunk_proxy::AllocDomain::kLocal;
+    if (dxg_runtime->hsakmt_debug_sysmem) {
+      create_info.domain = thunk_proxy::AllocDomain::kSystem;
+    } else {
+      create_info.domain = thunk_proxy::AllocDomain::kLocal;
+    }
     SkipSubAlloc = true;
   }
 
@@ -229,12 +275,17 @@ HSAKMT_STATUS hsaKmtAllocMemoryAlignInternal(HSAuint32 PreferredNode,
     /* just quickly skip SA if size is bigger than SA block size.*/
     gpusize real_size;
     if (create_info.size > GPU_HUGE_PAGE_SIZE)
-      real_size = wsl::AlignUp(create_info.size, GPU_HUGE_PAGE_SIZE);
-    else
-      real_size = wsl::AlignUp(create_info.size, getpagesize());
-
-    if (real_size < fragment_allocator_.default_block_size()) {
-      *MemoryAddress = fragment_allocator_.alloc(real_size);
+      real_size = rocr::AlignUp(create_info.size, GPU_HUGE_PAGE_SIZE);
+    else {
+#if defined(__linux__)
+      auto page_size = getpagesize();
+#else
+      gpusize page_size = 4096ULL;
+#endif
+      real_size = rocr::AlignUp(create_info.size, page_size);
+    }
+    if (real_size < fragment_allocator_->default_block_size()) {
+      *MemoryAddress = fragment_allocator_->alloc(real_size);
       if (*MemoryAddress)
         return HSAKMT_STATUS_SUCCESS;
     }
@@ -251,7 +302,8 @@ after_trim:
     std::lock_guard<std::mutex> gard(*allocation_map_lock_);
 
     /* For these physical allcations, use GpuMemory object's address as thunk handle*/
-    if (create_info.flags.physical_only || create_info.dmabuf_fd > 0)
+    if (create_info.flags.physical_only ||
+        (create_info.dmabuf_fd != 0 && create_info.dmabuf_fd != INVALID_DMABUF_FD))
       *MemoryAddress = reinterpret_cast<void*>(gpu_mem->HandleApeAddress());
     else
       *MemoryAddress = reinterpret_cast<void *>(gpu_mem->GpuAddress());
@@ -263,7 +315,7 @@ after_trim:
     return HSAKMT_STATUS_SUCCESS;
   } else if (trim_safe) {
     /* attempt to release memory from the block allocator and retry */
-    fragment_allocator_.trim();
+    fragment_allocator_->trim();
     trim_safe = false;
     goto after_trim;
   }
@@ -291,7 +343,7 @@ HSAKMT_STATUS hsaKmtFreeMemoryInternal(void *MemoryAddress,
     return HSAKMT_STATUS_INVALID_PARAMETER;
 
   if (!SkipSubAlloc) {
-    if (fragment_allocator_.free(MemoryAddress))
+    if (fragment_allocator_->free(MemoryAddress))
       return HSAKMT_STATUS_SUCCESS;
   }
 
@@ -316,7 +368,9 @@ HSAKMT_STATUS hsaKmtFreeMemoryInternal(void *MemoryAddress,
     }
 
     if (it->second.dmabuf_fd >= 0) {
+#if defined(__linux__)
       close(it->second.dmabuf_fd);
+#endif
       it->second.dmabuf_fd = -1;
     }
     allocation_map_->erase(it);
@@ -439,14 +493,19 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtRegisterMemoryWithFlags(
   return HSAKMT_STATUS_SUCCESS;
 }
 
-bool is_ipc_sysmemfd(int fd) {
+bool is_ipc_sysmemfd(uint64_t fd) {
+#if defined(__linux__)
   std::string fdPath = "/proc/self/fd/" + std::to_string(fd);
   char linkTarget[256];
-  ssize_t bytes = readlink(fdPath.c_str(), linkTarget, sizeof(linkTarget) - 1);
+  size_t bytes = readlink(fdPath.c_str(), linkTarget, sizeof(linkTarget) - 1);
   if (bytes == -1)
     return false;
   linkTarget[bytes] = '\0';
   return strstr(linkTarget, "rocr4wsl_gtt") != nullptr;
+#else
+  assert(!"Unimplemeted!");
+  return true;
+#endif
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtRegisterGraphicsHandleToNodes(HSAuint64 GraphicsResourceHandle,
@@ -472,23 +531,28 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtRegisterGraphicsHandleToNodesExt(HSAuint64 Graphic
   uint32_t *gpu_id_array = NULL;
   HSAKMT_STATUS ret = HSAKMT_STATUS_SUCCESS;
 
+#if defined(__linux__)
   if (is_ipc_sysmemfd(GraphicsResourceHandle)) {
     GraphicsResourceInfo->NodeId = dxg_runtime->default_node;
     pr_info("skip register sysmemfd. It would be released in next step\n");
     return HSAKMT_STATUS_SUCCESS;
   }
+#endif
 
   if (NumberOfNodes == 0) {
     RegisterFlags.ui32.requiresVAddr = 0;
     NumberOfNodes = 1;
     NodeArray = (HSAuint32*)&(dxg_runtime->default_node);
   }
+  else {
+    RegisterFlags.ui32.requiresVAddr = 1;
+  }
 
   pr_debug("number of nodes %lu\n", NumberOfNodes);
   wsl::thunk::GpuMemoryHandle mem_handle;
-  ret = import_dmabuf_fd(GraphicsResourceHandle, NodeArray[0],
-                          RegisterFlags.ui32.requiresVAddr,
-                          false, &mem_handle);
+
+  ret = import_dmabuf_fd(GraphicsResourceHandle, NodeArray[0], RegisterFlags.ui32.requiresVAddr,
+                         false, &mem_handle, RegisterFlags.ui32.kmtHandle);
   if (ret != HSAKMT_STATUS_SUCCESS) {
     pr_err("hsaKmtRegisterGraphicsHandleToNodesExt: import_dmabuf_fd failed, "
            "GraphicsResourceHandle: %lu, NodeId: %u\n",
@@ -516,34 +580,28 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtExportDMABufHandle(void *MemoryAddress,
   auto it = allocation_map_->upper_bound(MemoryAddress);
   if (it != allocation_map_->begin()) {
     --it;
-    if (it->second.dmabuf_fd == -1) {
-      auto gpu_mem = wsl::thunk::GpuMemory::Convert(it->second.handle);
+    auto gpu_mem = wsl::thunk::GpuMemory::Convert(it->second.handle);
+    if (gpu_mem->IsSysMemExporter() && it->second.dmabuf_fd == -1) {
       auto code = gpu_mem->ExportPhysicalHandle(DMABufFd);
       if (code != ErrorCode::Success)
         return HSAKMT_STATUS_ERROR;
       it->second.dmabuf_fd = *DMABufFd;
+      *Offset = reinterpret_cast<uint64_t>(MemoryAddress) - it->second.gpu_addr;
     }
+#if defined(__linux__)
     *DMABufFd = dup(it->second.dmabuf_fd);
-    *Offset = reinterpret_cast<uint64_t>(MemoryAddress) - it->second.gpu_addr;
+#else 
+    *DMABufFd = it->second.dmabuf_fd;
+#endif
     return HSAKMT_STATUS_SUCCESS;
   }
 
   return HSAKMT_STATUS_ERROR;
 }
 
-HSAKMT_STATUS HSAKMTAPI
-hsaKmtGetMemoryHandle(void *MemoryAddress, HSAuint64 SizeInBytes,
-                      uint64_t *SharedMemoryHandle) {
-	CHECK_DXG_OPEN();
 
-	return HSAKMT_STATUS_NOT_SUPPORTED;
-}
-
-HSAKMT_STATUS import_dmabuf_fd(int DMABufFd,
-                                       uint32_t NodeId,
-                                       bool alloc_va,
-                                       bool is_ipc_memfd,
-                                       wsl::thunk::GpuMemoryHandle *GpuMemHandle) {
+HSAKMT_STATUS import_dmabuf_fd(uint64_t DMABufFd, uint32_t NodeId, bool alloc_va, bool is_ipc_memfd,
+                               wsl::thunk::GpuMemoryHandle* GpuMemHandle, bool is_kmt_handle) {
   CHECK_DXG_OPEN();
 
   *GpuMemHandle = nullptr;
@@ -552,7 +610,9 @@ HSAKMT_STATUS import_dmabuf_fd(int DMABufFd,
   wsl::thunk::GpuMemoryCreateInfo create_info{};
   create_info.dmabuf_fd = DMABufFd;
   create_info.flags.alloc_va = alloc_va;
+  create_info.flags.kmt_handle_importer = is_kmt_handle ? 1 : 0;
 
+#if defined(__linux__)
   if (is_ipc_memfd) {
     struct stat st;
     fstat(DMABufFd, &st);
@@ -563,6 +623,7 @@ HSAKMT_STATUS import_dmabuf_fd(int DMABufFd,
       create_info.size = st.st_size;
     }
   }
+#endif
 
   gpusize gpu_va = 0;
   auto code = dev->CreateGpuMemory(create_info, &gpu_mem, &gpu_va);
@@ -603,26 +664,57 @@ HSAKMT_STATUS import_dmabuf_fd(int DMABufFd,
     NodeId, gpu_mem->Flags());
 
   return HSAKMT_STATUS_SUCCESS;
-
 }
 
+HSAKMT_STATUS HSAKMTAPI
+hsaKmtGetMemoryHandle(void* va, void* MemoryAddress, HSAuint64 SizeInBytes,
+                      uint64_t* SharedMemoryHandle) {
+  CHECK_DXG_OPEN();
+  // find allocation map for MemorAddress
+  auto phys_mem = GetGpuMemoryFromAddress(MemoryAddress);
+  if (!phys_mem) return HSAKMT_STATUS_INVALID_HANDLE;
+
+  auto va_mem = GetGpuMemoryFromAddress(va);
+  // Check is this va is between range (old va : old va + size)
+  if (!va_mem) {
+    auto alloc = FindAllocation(va, SizeInBytes);
+    if (alloc == nullptr) {
+      return HSAKMT_STATUS_INVALID_HANDLE;
+    }
+  }
+
+  if (dxg_runtime->hsakmt_debug_sysmem) {
+    phys_mem->forceSysMem();
+    phys_mem->SetCpuAddress(va);
+    phys_mem->SetGpuAddress(reinterpret_cast<uint64_t>(va));
+  }
+  bool alloc_phys_mem = !phys_mem->IsPhysicalCreated();
+  if (alloc_phys_mem) { // If phys mem handle is already created
+    auto code =  phys_mem->CreatePhysicalMemory();
+    if (code != ErrorCode::Success) {
+      if (dxg_runtime->hsakmt_debug_sysmem) {
+        phys_mem->SetGpuAddress(0);
+        phys_mem->SetCpuAddress(nullptr);
+      }
+      return HSAKMT_STATUS_OUT_OF_RESOURCES;
+    }
+  }
+  *SharedMemoryHandle = reinterpret_cast<uint64_t>(phys_mem->GetGpuMemoryHandle());
+  return HSAKMT_STATUS_SUCCESS;
+}
 
 HSAKMT_STATUS HSAKMTAPI
 hsaKmtShareMemory(void *MemoryAddress, HSAuint64 SizeInBytes,
                   HsaSharedMemoryHandle *SharedMemoryHandle) {
   CHECK_DXG_OPEN();
-  pr_warn_once("not implemented\n");
-  assert(false);
-  return HSAKMT_STATUS_SUCCESS;
+  return HSAKMT_STATUS_NOT_IMPLEMENTED;
 }
 
 HSAKMT_STATUS HSAKMTAPI
 hsaKmtRegisterSharedHandle(const HsaSharedMemoryHandle *SharedMemoryHandle,
                            void **MemoryAddress, HSAuint64 *SizeInBytes) {
   CHECK_DXG_OPEN();
-  pr_warn_once("not implemented\n");
-  assert(false);
-  return HSAKMT_STATUS_SUCCESS;
+  return HSAKMT_STATUS_NOT_IMPLEMENTED;
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtRegisterSharedHandleToNodes(
@@ -685,8 +777,8 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtDeregisterMemory(void *MemoryAddress) {
       return HSAKMT_STATUS_SUCCESS;
     }
     if (it->second.userptr) {
+      allocation_map_->erase((void*)it->second.gpu_addr);
       allocation_map_->erase(it);
-      allocation_map_->erase((void *)it->second.gpu_addr);
       delete gpu_mem;
       return HSAKMT_STATUS_SUCCESS;
     }
@@ -716,23 +808,23 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMapMemoryToGPUNodes(
     return HSAKMT_STATUS_ERROR;
   }
 
-  uint64_t start = wsl::AlignDown((uint64_t)MemoryAddress, 4096);
+  uint64_t start = rocr::AlignDown((uint64_t)MemoryAddress, 4096);
   uint64_t end =
-      wsl::AlignUp((uint64_t)MemoryAddress + MemorySizeInBytes, 4096);
+      rocr::AlignUp((uint64_t)MemoryAddress + MemorySizeInBytes, 4096);
 
   void *aligned_ptr = (void *)start;
   size_t aligned_size = end - start;
 
   {
-    if (nullptr != fragment_allocator_.block_base(aligned_ptr))
+    if (nullptr != fragment_allocator_->block_base(aligned_ptr))
       return HSAKMT_STATUS_SUCCESS;
   }
 
   {
     std::lock_guard<std::mutex> gard(*allocation_map_lock_);
-    auto it = allocation_map_->find(aligned_ptr);
-    if (it != allocation_map_->end()) {
-      wsl::thunk::GpuMemory *gpu_mem = wsl::thunk::GpuMemory::Convert(it->second.handle);
+    auto it = FindAllocation(aligned_ptr, aligned_size);
+    if (it != nullptr) {
+      wsl::thunk::GpuMemory *gpu_mem = wsl::thunk::GpuMemory::Convert(it->handle);
       wsl::thunk::GpuMemoryDescFlags flags;
       flags.reserved = gpu_mem->Flags();
       // IPC mem
@@ -752,10 +844,12 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMapMemoryToGPUNodes(
 
         return HSAKMT_STATUS_SUCCESS;
       }
-
-      if (!it->second.userptr) {
+      if (gpu_mem->IsVirtual()) {
+        gpu_mem->MapMemoryToVirtualAddress();
+      }
+      if (!it->userptr) {
       // GTT/Local mem
-        if (it->second.size >= MemorySizeInBytes) {
+        if (it->size >= MemorySizeInBytes) {
           *AlternateVAGPU = (uint64_t)MemoryAddress;
           return HSAKMT_STATUS_SUCCESS;
         } else {
@@ -765,12 +859,12 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMapMemoryToGPUNodes(
     }
 
     // userptr mem
-    it = allocation_map_->find(MemoryAddress);
-    if (it != allocation_map_->end()) {
-      if (it->second.userptr && it->second.size >= MemorySizeInBytes) {
+    it = FindAllocation(MemoryAddress, aligned_size);
+    if (it != nullptr) {
+      if (it->userptr && it->size >= MemorySizeInBytes) {
         *AlternateVAGPU =
-            (uintptr_t)it->second.gpu_addr +
-            ((uintptr_t)MemoryAddress - (uintptr_t)it->second.cpu_addr);
+            (uintptr_t)it->gpu_addr +
+            ((uintptr_t)MemoryAddress - (uintptr_t)it->cpu_addr);
         return HSAKMT_STATUS_SUCCESS;
       }
     }
@@ -824,7 +918,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtUnmapMemoryToGPU(void *MemoryAddress) {
   pr_debug("address %p\n", MemoryAddress);
 
   {
-    if (nullptr != fragment_allocator_.block_base(MemoryAddress))
+    if (nullptr != fragment_allocator_->block_base(MemoryAddress))
       return HSAKMT_STATUS_SUCCESS;
   }
 
@@ -886,8 +980,9 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtUnmapGraphicHandle(HSAuint32 NodeId,
 HSAKMT_STATUS HSAKMTAPI hsaKmtGetTileConfig(HSAuint32 NodeId,
                                             HsaGpuTileConfig *config) {
   CHECK_DXG_OPEN();
-  pr_warn_once("not implemented\n");
-  assert(false);
+  wsl::thunk::WDDMDevice* dev = get_wddmdev(NodeId);
+  // Gfx9+ only need GbAddrConfig
+  config->GbAddrConfig = dev->GbAddrConfig();
   return HSAKMT_STATUS_SUCCESS;
 }
 
@@ -948,7 +1043,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtSetMemoryUserData(const void *Pointer,
                                                 void *UserData) {
   CHECK_DXG_OPEN();
 
-  uint64_t aligned_ptr = wsl::AlignDown((uint64_t)Pointer, 4096);
+  uint64_t aligned_ptr = rocr::AlignDown((uint64_t)Pointer, 4096);
 
   std::lock_guard<std::mutex> gard(*allocation_map_lock_);
   auto it = allocation_map_->find((void *)aligned_ptr);

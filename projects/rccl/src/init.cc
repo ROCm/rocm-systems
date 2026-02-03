@@ -90,6 +90,8 @@
 #define NCCL_GROUP_CUDA_STREAM 1 // CGMD: CUDA 9.0,9.1 Need to use an internal CUDA stream
 #endif
 
+#define TEMP_BUFF_SIZE (4 * 1024 * 1024) // Define Size for Temporary Buffer for Direct RS
+
 using namespace rccl;
 
 const char* ncclFuncStr[NCCL_NUM_FUNCTIONS+3] = { "AllGather", "AllReduce", "AlltoAllPivot", "AllToAllGda", "Broadcast", "Reduce", "ReduceScatter", "SendRecv"};
@@ -484,6 +486,13 @@ static ncclResult_t commFree(ncclComm_t comm) {
 
   NCCLCHECK(ncclCeFinalize(comm));
 
+  // tempBuff is allocated per-communicator for direct ReduceScatter on gfx950.
+  // It is owned by the communicator; free it during communicator teardown.
+  if (comm->tempBuff) {
+    NCCLCHECK(ncclCudaFree(comm->tempBuff));
+    comm->tempBuff = nullptr;
+  }
+
   if (comm->symmetricSupport) {
     NCCLCHECK(ncclSymkFinalize(comm));
     NCCLCHECK(ncclDevrFinalize(comm));
@@ -612,6 +621,7 @@ skip_profiling:
   free(comm->topParentRanks);
   free(comm->topParentLocalRanks);
   free(comm->gproxyConn);
+  free(comm->archName);
 
   NCCLCHECK(ncclRegCleanup(comm));
 
@@ -1174,9 +1184,8 @@ NCCL_PARAM(CollNetNodeThreshold, "COLLNET_NODE_THRESHOLD", 2);
 NCCL_PARAM(NvbPreconnect, "NVB_PRECONNECT", 0);
 NCCL_PARAM(AllocP2pNetLLBuffers, "ALLOC_P2P_NET_LL_BUFFERS", 0);
 #ifdef ENABLE_WARP_SPEED
-extern int64_t rcclParamWarpSpeedEnable();
+extern int64_t rcclParamWarpSpeedForceEnable();
 extern int64_t rcclParamWarpSpeedAutoMode();
-extern int64_t rcclParamWarpSpeedCuCount();
 #endif
 // MNNVL: Flag to indicate whether to enable Multi-Node NVLink
 NCCL_PARAM(MNNVLEnable, "MNNVL_ENABLE", 2);
@@ -1570,7 +1579,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
     }
   }
 #ifdef ENABLE_WARP_SPEED
-  comm->topo->warpSpeedEnabled = (rcclParamWarpSpeedEnable() != 0 || rcclParamWarpSpeedAutoMode() != 0 || rcclParamWarpSpeedCuCount() > 0);
+  comm->topo->warpSpeedEnabled = (rcclParamWarpSpeedForceEnable() > 0 || rcclCanUseWarpSpeedAuto(comm, nNodes));
 #endif
 
   // For single node communicators that do not uses the full xgmi links per gpu, i.e., nranks < 8
@@ -1584,12 +1593,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
       allGather3Data[rank].nc = 4;
     }
   }
-#ifdef ENABLE_WARP_SPEED
-  // Double default channels for WarpSpeed enabled communicators
-  if (comm->topo->warpSpeedEnabled) {
-    allGather3Data[rank].nc *= 2;
-  }
-#endif
+
   allGather3Data[rank].pivotA2AEnabled = comm->topo->pivotA2AEnabled && rcclParamPivotAlltoallEnable();
   comm->topo->ll128Enabled =  comm->topo->ll128Enabled || rcclParamLL128ForceEnable();
   allGather3Data[rank].ll128Enabled = comm->topo->ll128Enabled;
@@ -1610,6 +1614,11 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   allGather3Data[rank].cpuVendor = comm->cpuVendor;
 
   comm->nChannels = std::min(treeGraph->nChannels, ringGraph->nChannels);
+
+  //For a 1‑rank job there’s no topology constraint, so ncclTopoCompute drives the ring to its allowed maximum, which results 4 x MAXCHANNELS channels for single rank comms and causes issues.
+  if (comm->nRanks == 1) {
+    comm->nChannels = treeGraph->nChannels = ringGraph->nChannels = 8;
+  }
   NCCLCHECKGOTO(ncclTopoPreset(comm, graphs, &allGather3Data[rank].topoRanks), ret, fail);
 
   NCCLCHECKGOTO(bootstrapAllGather(comm->bootstrap, allGather3Data, sizeof(*allGather3Data)), ret, fail);
@@ -2149,12 +2158,12 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
 
   CUDACHECKGOTO(hipGetDeviceProperties(&devProp, cudaDev), res, fail);
   cuCount = devProp.multiProcessorCount;
-  archName = (char*)malloc(strlen(devProp.gcnArchName) + 1);
-  if (archName == nullptr) {
-    WARN("Failed to allocate memory for architecture name");
+  archName = strdup(devProp.gcnArchName);
+  if (!archName) {
+    res = ncclSystemError;
+    WARN("strdup failed for architecture name");
     goto fail;
   }
-  strcpy(archName, devProp.gcnArchName);
 
   timers[TIMER_INIT_KERNELS] = clockNano();
   NCCLCHECK(ncclInitKernelsForDevice(cudaArch, maxSharedMem, &maxLocalSizeBytes));
@@ -2242,8 +2251,8 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
         return ncclSystemError;
       }
     }
-  
-    NCCLCHECKGOTO(bootstrapBroadcast(comm->bootstrap, comm->rank, comm->nRanks, 0, &rocshmemUniqueId, 
+
+    NCCLCHECKGOTO(bootstrapBroadcast(comm->bootstrap, comm->rank, comm->nRanks, 0, &rocshmemUniqueId,
 			    sizeof(rocshmemUniqueId)), res, fail);
     ret = rocshmem::rocshmem_set_attr_uniqueid_args(job->myrank, job->nranks, &rocshmemUniqueId, &rocshmemAttr);
     if (ret != rocshmem::ROCSHMEM_SUCCESS) {
@@ -2256,11 +2265,11 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
       ERROR("Error in rocshmem_init_attr, Rocshmem cannot be initialized.");
       return ncclSystemError;
     }
-   
+
     comm->sourceRshmem = (void**) malloc(NUM_SYM_BUF * sizeof(void *));
     comm->destRshmem = (void**) malloc(NUM_SYM_BUF * sizeof(void *));
- 
-    for (int i = 0; i < NUM_SYM_BUF; i++) { 
+
+    for (int i = 0; i < NUM_SYM_BUF; i++) {
     	comm->sourceRshmem[i] = (void *)rocshmem::rocshmem_malloc((size_t)(1*1024*1024));
     	comm->destRshmem[i] = (void *)rocshmem::rocshmem_malloc((size_t)(1*1024*1024));
     }
@@ -2279,6 +2288,10 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
   }
 #endif
 
+  // Allocate Temp Buffer for Direct Reduce Scatter
+  if (IsArchMatch(archName,"gfx950")) {
+    NCCLCHECK(ncclCudaMalloc(&(comm->tempBuff), TEMP_BUFF_SIZE));
+  }
 
 #ifdef ENABLE_MSCCLPP
   if (job->parent) {
@@ -3150,9 +3163,9 @@ ncclResult_t ncclCommDestroy_impl(ncclComm_t comm) {
 
 #ifdef ENABLE_ROCSHMEM
   if (comm->enableRocshmem) {
-     for (int i = 0; i < NUM_SYM_BUF; i++) {	  
+     for (int i = 0; i < NUM_SYM_BUF; i++) {
      	rocshmem::rocshmem_free(comm->sourceRshmem[i]);
-     	rocshmem::rocshmem_free(comm->destRshmem[i]);	  
+     	rocshmem::rocshmem_free(comm->destRshmem[i]);
      }
      free(comm->sourceRshmem);
      free(comm->destRshmem);

@@ -74,11 +74,11 @@ auto _thread_pool_cfg = []() {
     _v.use_tbb      = false;
     _v.verbose      = -1;
     _v.initializer  = []() {
-        thread_info::init(true);
-        threading::set_thread_name(
-            JOIN('.', "ptl", PTL::Threading::GetThreadId()).c_str());
-        set_thread_state(ThreadState::Disabled);
-        sampling::block_signals();
+        rocprofsys::thread_info::init(true);
+        tim::threading::set_thread_name(
+            fmt::format("ptl.{}", PTL::Threading::GetThreadId()).c_str());
+        rocprofsys::set_thread_state(rocprofsys::ThreadState::Disabled);
+        rocprofsys::sampling::block_signals();
     };
     _v.finalizer  = []() {};
     _v.priority   = 5;

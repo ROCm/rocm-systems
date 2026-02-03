@@ -336,6 +336,25 @@ class ThunkLoader {
                                       void* MemoryAddress, \
                                       HSAuint64 SizeInBytes, \
                                       uint64_t* SharedMemoryHandle);
+    typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtHandleImport))(const HsaExternalHandleDesc* ImportDesc, \
+                                      HsaHandleImportResult* ImportResult, \
+                                      HsaHandleImportFlags* flags);
+    typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtMemoryVaMap))(HsaMemoryObjectHandle Handle, \
+                                      HSAuint64 offset, \
+                                      HSAuint64 size, \
+                                      HSAuint64 addr, \
+                                      HsaMemoryMapFlags flags);
+    typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtMemoryVaUnmap))(HsaMemoryObjectHandle Handle, \
+                                      HSAuint64 offset, \
+                                      HSAuint64 size, \
+                                      HSAuint64 addr);
+    typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtMemHandleFree))(HsaMemoryObjectHandle Handle);
+    typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtMemoryGetCpuAddr))(HsaAMDGPUDeviceHandle DeviceHandle, \
+                                      HsaMemoryObjectHandle MemoryHandle, \
+                                      HSAint32* fd, \
+                                      HSAuint64* cpu_addr);
+    typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtMemoryCpuMap))(HsaMemoryObjectHandle Handle, \
+                                      void** out_cpu_ptr);
     /* drm API */
     typedef int (DRM_DEF(amdgpu_device_initialize))(int fd, \
                                       uint32_t *major_version, \
@@ -484,6 +503,12 @@ class ThunkLoader {
     HSAKMT_DEF(hsaKmtQueueRingDoorbell)* HSAKMT_PFN(hsaKmtQueueRingDoorbell);
     HSAKMT_DEF(hsaKmtAisReadWriteFile)* HSAKMT_PFN(hsaKmtAisReadWriteFile);
     HSAKMT_DEF(hsaKmtGetMemoryHandle)* HSAKMT_PFN(hsaKmtGetMemoryHandle);
+    HSAKMT_DEF(hsaKmtHandleImport)* HSAKMT_PFN(hsaKmtHandleImport);
+    HSAKMT_DEF(hsaKmtMemoryVaMap)* HSAKMT_PFN(hsaKmtMemoryVaMap);
+    HSAKMT_DEF(hsaKmtMemoryVaUnmap)* HSAKMT_PFN(hsaKmtMemoryVaUnmap);
+    HSAKMT_DEF(hsaKmtMemHandleFree)* HSAKMT_PFN(hsaKmtMemHandleFree);
+    HSAKMT_DEF(hsaKmtMemoryGetCpuAddr)* HSAKMT_PFN(hsaKmtMemoryGetCpuAddr);
+    HSAKMT_DEF(hsaKmtMemoryCpuMap)* HSAKMT_PFN(hsaKmtMemoryCpuMap);
 
     DRM_DEF(amdgpu_device_initialize)* DRM_PFN(amdgpu_device_initialize);
     DRM_DEF(amdgpu_device_deinitialize)* DRM_PFN(amdgpu_device_deinitialize);

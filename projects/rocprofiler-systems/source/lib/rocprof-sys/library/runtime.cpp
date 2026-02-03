@@ -209,7 +209,7 @@ get_main_bundle()
         auto _self = RUSAGE_SELF;
         std::swap(_self, tim::get_rusage_type());
         auto _tmp = std::make_unique<main_bundle_t>(
-            JOIN('/', "rocprofsys/process", process::get_id()),
+            fmt::format("rocprofsys/process/{}", process::get_id()),
             quirk::config<quirk::auto_start>{});
         std::swap(_self, tim::get_rusage_type());
         return _tmp;
@@ -221,7 +221,7 @@ std::unique_ptr<init_bundle_t>&
 get_init_bundle()
 {
     static auto _v = std::make_unique<init_bundle_t>(
-        JOIN('/', "rocprofsys/process", process::get_id()));
+        fmt::format("rocprofsys/process/{}", process::get_id()));
     return _v;
 }
 
@@ -230,7 +230,7 @@ get_preinit_bundle()
 {
     static auto _v =
         (setup_gotchas(), std::make_unique<preinit_bundle_t>(
-                              JOIN('/', "rocprofsys/process", process::get_id()),
+                              fmt::format("rocprofsys/process/{}", process::get_id()),
                               quirk::config<quirk::auto_start>{}));
     return _v;
 }

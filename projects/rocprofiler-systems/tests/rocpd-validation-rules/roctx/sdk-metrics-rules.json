@@ -78,6 +78,20 @@
                     "error_message": "Expected 2 roctxRangeStart marker entries in `regions` table",
                     "expected_result": 2,
                     "query": "SELECT COUNT(*) FROM regions WHERE category = 'rocm_marker_api' AND name LIKE 'roctxRangeStart_%';"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Verify that roctxRangePop markers do not appear in table 'regions'",
+                    "error_message": "Found unexpected roctxRangePop marker entries in `regions` table",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) FROM regions WHERE category = 'rocm_marker_api' AND name LIKE 'roctxRangePop%';"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Verify that roctxRangeStop markers do not appear in table 'regions'",
+                    "error_message": "Found unexpected roctxRangeStop marker entries in `regions` table",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) FROM regions WHERE category = 'rocm_marker_api' AND name LIKE 'roctxRangeStop%';"
                 }
             ]
         },

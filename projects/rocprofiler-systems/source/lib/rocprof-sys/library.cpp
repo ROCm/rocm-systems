@@ -81,7 +81,6 @@
 #include <timemory/signals/types.hpp>
 #include <timemory/units.hpp>
 #include <timemory/utility/backtrace.hpp>
-#include <timemory/utility/join.hpp>
 #include <timemory/utility/procfs/maps.hpp>
 
 #if ROCPROFSYS_USE_ROCM > 0
@@ -98,6 +97,7 @@
 #include <cstdlib>
 #include <mutex>
 #include <pthread.h>
+#include <sstream>
 #include <stdexcept>
 #include <string_view>
 #include <unistd.h>
@@ -224,11 +224,12 @@ ensure_finalization(bool _static_init = false)
     {
         auto _verbose =
             get_verbose_env() + ((get_debug_env() || get_debug_init()) ? 16 : 0);
-        auto _search_paths = JOIN(':', tim::get_env<std::string>("ROCPROFSYS_PATH", ""),
-                                  tim::get_env<std::string>("PWD"), ".",
-                                  tim::get_env<std::string>("LD_LIBRARY_PATH", ""),
-                                  tim::get_env<std::string>("LIBRARY_PATH", ""),
-                                  tim::get_env<std::string>("PATH", ""));
+        auto _search_paths = fmt::format("{}:{}:{}:{}:{}",
+                                         tim::get_env<std::string>("ROCPROFSYS_PATH", ""),
+                                         tim::get_env<std::string>("PWD"), ".",
+                                         tim::get_env<std::string>("LD_LIBRARY_PATH", ""),
+                                         tim::get_env<std::string>("LIBRARY_PATH", ""),
+                                         tim::get_env<std::string>("PATH", ""));
         common::setup_environ(_verbose, _search_paths);
     }
 
@@ -266,7 +267,8 @@ struct fini_bundle
     {
         std::stringstream _ss;
         if(_print_prefix && m_label.length() > 0) _ss << m_label << " : ";
-        _ss << timemory::join::join(", ", std::get<Tp>(m_data)...);
+        size_t _idx = 0;
+        ((_ss << (_idx++ > 0 ? ", " : "") << std::get<Tp>(m_data)), ...);
         return _ss.str();
     }
 
@@ -780,7 +782,7 @@ rocprofsys_reset_preload_hidden(void)
         for(const auto& itr : delimit(_preload_libs, ":"))
         {
             if(itr.find("librocprof-sys") != std::string::npos) continue;
-            _modified_preload += common::join("", ":", itr);
+            _modified_preload += fmt::format(":{}", itr);
         }
         if(!_modified_preload.empty() && _modified_preload.find(':') == 0)
             _modified_preload = _modified_preload.substr(1);
@@ -990,7 +992,7 @@ rocprofsys_finalize_hidden(void)
     // report the high-level metrics for the process
     if(get_main_bundle())
     {
-        std::string _msg = JOIN("", *get_main_bundle());
+        std::string _msg = get_main_bundle()->as_string();
         auto        _pos = _msg.find(">>>  ");
         if(_pos != std::string::npos) _msg = _msg.substr(_pos + 5);
         LOG_INFO("{}", _msg);
@@ -1010,7 +1012,7 @@ rocprofsys_finalize_hidden(void)
             if(itr && itr->get<comp::wall_clock>() &&
                !itr->get<comp::wall_clock>()->get_is_running())
             {
-                std::string _msg = JOIN("", *itr);
+                std::string _msg = itr->as_string();
                 auto        _pos = _msg.find(">>>  ");
                 if(_pos != std::string::npos) _msg = _msg.substr(_pos + 5);
                 if(_thr_verbose >= 0)
