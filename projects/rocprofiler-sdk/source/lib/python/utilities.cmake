@@ -312,7 +312,11 @@ function(rocprofiler_python_preload_library _VERSION)
                        PDB_OUTPUT_DIRECTORY ${rocprofiler_PYTHON_OUTPUT_DIRECTORY}
                        PREFIX "lib"
                        BUILD_RPATH "${DEFAULT_PYTHON_RPATH}"
-                       INSTALL_RPATH "${DEFAULT_PYTHON_RPATH}")
+                       INSTALL_RPATH "${DEFAULT_PYTHON_RPATH}"
+                       # Export all symbols from the core library so Python bindings and
+                       # preload library can use them
+                       CXX_VISIBILITY_PRESET "default"
+                       VISIBILITY_INLINES_HIDDEN OFF)
 
         install(
             TARGETS rocprofiler-sdk-python-core-${_VERSION}
