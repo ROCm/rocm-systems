@@ -231,22 +231,22 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
     const auto* _desc = R"(
 Call-stack sampling profiler for applications without binary instrumentation.
 QUICK REFERENCE:
-  Presets:  --quick (fast), --simple (minimal), --trace-hpc (HPC/MPI), --workload-trace (GPU/ML)
+  Presets:  --balanced (default), --profile-only (minimal), --trace-hpc (HPC/MPI), --workload-trace (GPU/ML)
   Output:   Results saved to rocprof-sys-output/ directory
   Visualize: Open perfetto-trace.proto in https://ui.perfetto.dev
 EXAMPLES:
   Quick Start:
-    rocprof-sys-sample --quick -- ./myapp
+    rocprof-sys-sample --balanced -- ./myapp
   Workload-Specific Presets:
     rocprof-sys-sample --trace-hpc -- ./hpc_app              # HPC/MPI/OpenMP
     rocprof-sys-sample --workload-trace -- python train.py   # AI/ML/GPU workloads
-    rocprof-sys-sample --simple -- ./myapp                   # Minimal overhead
+    rocprof-sys-sample --profile-only -- ./myapp             # Minimal overhead
   Custom Configuration:
     rocprof-sys-sample -f 100 --trace --hip-trace -- ./myapp
     rocprof-sys-sample -o ./results myrun -- ./myapp
     mpirun -n 4 rocprof-sys-sample --trace-hpc -- ./mpi_app
 PROFILING WORKFLOW:
-  1. Profile:   rocprof-sys-sample --quick -- ./app
+  1. Profile:   rocprof-sys-sample --balanced -- ./app
   2. Analyze:   cat rocprof-sys-output/wall_clock.txt
   3. Visualize: Open rocprof-sys-output/perfetto-trace.proto in ui.perfetto.dev
 )";
@@ -364,13 +364,14 @@ PROFILING WORKFLOW:
     parser.start_group("PRESET MODES",
                        "Simplified profiling presets for common use cases");
     parser
-        .add_argument({ "--quick" },
-                      "Quick profiling mode: enables tracing and sampling at 50Hz with "
-                      "default metrics for immediate insights")
+        .add_argument(
+            { "--balanced" },
+            "Balanced profiling mode: moderate overhead with comprehensive data "
+            "(tracing, call-stack profiling, and sampling at 50Hz)")
         .max_count(1)
         .dtype("bool")
         .action([&](parser_t& p) {
-            if(p.get<bool>("quick"))
+            if(p.get<bool>("balanced"))
             {
                 rocprofsys::common::update_env(_env, "ROCPROFSYS_TRACE", true,
                                                update_mode::REPLACE, ":", updated_envs,
@@ -390,14 +391,13 @@ PROFILING WORKFLOW:
             }
         });
     parser
-        .add_argument(
-            { "--simple" },
-            "Simple profiling mode: flat profile only with minimal overhead, no "
-            "detailed trace")
+        .add_argument({ "--profile-only" },
+                      "Profiling-only mode: lightweight profiling without tracing "
+                      "(flat profile, minimal overhead)")
         .max_count(1)
         .dtype("bool")
         .action([&](parser_t& p) {
-            if(p.get<bool>("simple"))
+            if(p.get<bool>("profile-only"))
             {
                 rocprofsys::common::update_env(_env, "ROCPROFSYS_TRACE", false,
                                                update_mode::REPLACE, ":", updated_envs,
@@ -1328,7 +1328,7 @@ PROFILING WORKFLOW:
             "Error! '--profile' argument conflicts with '--flat-profile' argument");
 
     auto active_presets = rocprofsys::common_utils::collect_active_presets(
-        parser, { "quick", "simple", "detailed", "trace-hpc", "workload-trace",
+        parser, { "balanced", "profile-only", "detailed", "trace-hpc", "workload-trace",
                   "sys-trace", "runtime-trace", "trace-gpu", "trace-openmp",
                   "profile-mpi", "trace-hw-counters" });
 

@@ -73,16 +73,17 @@ inline std::string
 get_preset_description(std::string_view preset_mode)
 {
     static const std::unordered_map<std::string_view, std::string> descriptions = {
-        { "--quick", "Fast profiling with sensible defaults\n"
-                     "  ├─ Tracing:         ON (Perfetto timeline)\n"
-                     "  ├─ Profiling:       ON (call-stack based)\n"
-                     "  ├─ CPU Sampling:    ON @ 50 Hz\n"
-                     "  └─ Process Metrics: ON (CPU freq, memory)" },
-        { "--simple", "Minimal overhead flat profiling\n"
-                      "  ├─ Tracing:         OFF\n"
-                      "  ├─ Profiling:       ON (flat profile)\n"
-                      "  ├─ CPU Sampling:    ON @ 100 Hz\n"
-                      "  └─ Process Metrics: OFF" },
+        { "--balanced",
+          "Balanced profiling with moderate overhead and comprehensive data\n"
+          "  ├─ Tracing:         ON (Perfetto timeline)\n"
+          "  ├─ Profiling:       ON (call-stack based)\n"
+          "  ├─ CPU Sampling:    ON @ 50 Hz\n"
+          "  └─ Process Metrics: ON (CPU freq, memory)" },
+        { "--profile-only", "Profiling-only mode without tracing (flat profile)\n"
+                            "  ├─ Tracing:         OFF\n"
+                            "  ├─ Profiling:       ON (flat profile)\n"
+                            "  ├─ CPU Sampling:    ON @ 100 Hz\n"
+                            "  └─ Process Metrics: OFF" },
         { "--detailed", "Comprehensive profiling with full system metrics\n"
                         "  ├─ Tracing:         ON (Perfetto timeline)\n"
                         "  ├─ Profiling:       ON (call-stack based)\n"
@@ -249,8 +250,8 @@ validate_preset_modes(const std::vector<std::string>& active_presets)
         std::cerr
             << "Available presets:\n"
             << "  General Purpose:\n"
-            << "    --quick              Fast profiling with sensible defaults\n"
-            << "    --simple             Flat profile, minimal overhead\n"
+            << "    --balanced           Balanced profiling with moderate overhead\n"
+            << "    --profile-only       Profiling without tracing, minimal overhead\n"
             << "    --detailed           Full trace + hardware counters\n"
             << "  Workload-Specific:\n"
             << "    --trace-hpc          MPI/OpenMP/HPC applications\n"

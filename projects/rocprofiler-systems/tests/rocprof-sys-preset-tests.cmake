@@ -31,21 +31,21 @@
 # -------------------------------------------------------------------------------------- #
 
 rocprofiler_systems_add_bin_test(
-    NAME preset-sample-quick
+    NAME preset-sample-balanced
     TARGET rocprofiler-systems-sample
-    ARGS --quick -v 2 -- ls
+    ARGS --balanced -v 2 -- ls
     LABELS preset sample
     TIMEOUT 60
-    PASS_REGEX "Preset:        --quick"
+    PASS_REGEX "Preset:        --balanced"
 )
 
 rocprofiler_systems_add_bin_test(
-    NAME preset-sample-simple
+    NAME preset-sample-profile-only
     TARGET rocprofiler-systems-sample
-    ARGS --simple -v 2 -- ls
+    ARGS --profile-only -v 2 -- ls
     LABELS preset sample
     TIMEOUT 60
-    PASS_REGEX "Preset:        --simple"
+    PASS_REGEX "Preset:        --profile-only"
 )
 
 rocprofiler_systems_add_bin_test(
@@ -132,7 +132,7 @@ rocprofiler_systems_add_bin_test(
 rocprofiler_systems_add_bin_test(
     NAME preset-sample-mutual-exclusion
     TARGET rocprofiler-systems-sample
-    ARGS --quick --simple -- ls
+    ARGS --balanced --profile-only -- ls
     LABELS preset sample
     TIMEOUT 30
     FAIL_REGEX "Multiple preset modes specified|Only ONE preset"
@@ -144,21 +144,21 @@ rocprofiler_systems_add_bin_test(
 # -------------------------------------------------------------------------------------- #
 
 rocprofiler_systems_add_bin_test(
-    NAME preset-run-quick
+    NAME preset-run-balanced
     TARGET rocprofiler-systems-run
-    ARGS --quick -v 2 -- ls
+    ARGS --balanced -v 2 -- ls
     LABELS preset run
     TIMEOUT 60
-    PASS_REGEX "Preset:        --quick"
+    PASS_REGEX "Preset:        --balanced"
 )
 
 rocprofiler_systems_add_bin_test(
-    NAME preset-run-simple
+    NAME preset-run-profile-only
     TARGET rocprofiler-systems-run
-    ARGS --simple -v 2 -- ls
+    ARGS --profile-only -v 2 -- ls
     LABELS preset run
     TIMEOUT 60
-    PASS_REGEX "Preset:        --simple"
+    PASS_REGEX "Preset:        --profile-only"
 )
 
 rocprofiler_systems_add_bin_test(
@@ -247,101 +247,6 @@ rocprofiler_systems_add_bin_test(
     TARGET rocprofiler-systems-run
     ARGS --trace-hpc --workload-trace -- ls
     LABELS preset run
-    TIMEOUT 30
-    FAIL_REGEX "Multiple preset modes specified|Only ONE preset"
-    PROPERTIES WILL_FAIL ON
-)
-
-# -------------------------------------------------------------------------------------- #
-# rocprof-sys-instrument preset tests
-# -------------------------------------------------------------------------------------- #
-
-rocprofiler_systems_add_bin_test(
-    NAME preset-instrument-quick
-    TARGET rocprofiler-systems-instrument
-    ARGS --quick -v 2 --simulate -- rocprof-sys-sample
-    LABELS preset instrument
-    TIMEOUT 60
-    PASS_REGEX "Preset:        --quick"
-)
-
-rocprofiler_systems_add_bin_test(
-    NAME preset-instrument-trace-hpc
-    TARGET rocprofiler-systems-instrument
-    ARGS --trace-hpc -v 2 --simulate -- rocprof-sys-sample
-    LABELS preset instrument
-    TIMEOUT 60
-    PASS_REGEX "Preset:        --trace-hpc"
-)
-
-rocprofiler_systems_add_bin_test(
-    NAME preset-instrument-workload-trace
-    TARGET rocprofiler-systems-instrument
-    ARGS --workload-trace -v 2 --simulate -- rocprof-sys-sample
-    LABELS preset instrument
-    TIMEOUT 60
-    PASS_REGEX "Preset:        --workload-trace"
-)
-
-rocprofiler_systems_add_bin_test(
-    NAME preset-instrument-sys-trace
-    TARGET rocprofiler-systems-instrument
-    ARGS --sys-trace -v 2 --simulate -- rocprof-sys-sample
-    LABELS preset instrument
-    TIMEOUT 60
-    PASS_REGEX "Preset:        --sys-trace"
-)
-
-rocprofiler_systems_add_bin_test(
-    NAME preset-instrument-runtime-trace
-    TARGET rocprofiler-systems-instrument
-    ARGS --runtime-trace -v 2 --simulate -- rocprof-sys-sample
-    LABELS preset instrument
-    TIMEOUT 60
-    PASS_REGEX "Preset:        --runtime-trace"
-)
-
-rocprofiler_systems_add_bin_test(
-    NAME preset-instrument-trace-gpu
-    TARGET rocprofiler-systems-instrument
-    ARGS --trace-gpu -v 2 --simulate -- rocprof-sys-sample
-    LABELS preset instrument
-    TIMEOUT 60
-    PASS_REGEX "Preset:        --trace-gpu"
-)
-
-rocprofiler_systems_add_bin_test(
-    NAME preset-instrument-trace-openmp
-    TARGET rocprofiler-systems-instrument
-    ARGS --trace-openmp -v 2 --simulate -- rocprof-sys-sample
-    LABELS preset instrument
-    TIMEOUT 60
-    PASS_REGEX "Preset:        --trace-openmp"
-)
-
-rocprofiler_systems_add_bin_test(
-    NAME preset-instrument-profile-mpi
-    TARGET rocprofiler-systems-instrument
-    ARGS --profile-mpi -v 2 --simulate -- rocprof-sys-sample
-    LABELS preset instrument
-    TIMEOUT 60
-    PASS_REGEX "Preset:        --profile-mpi"
-)
-
-rocprofiler_systems_add_bin_test(
-    NAME preset-instrument-trace-hw-counters
-    TARGET rocprofiler-systems-instrument
-    ARGS --trace-hw-counters -v 2 --simulate -- rocprof-sys-sample
-    LABELS preset instrument
-    TIMEOUT 60
-    PASS_REGEX "Preset:        --trace-hw-counters"
-)
-
-rocprofiler_systems_add_bin_test(
-    NAME preset-instrument-mutual-exclusion
-    TARGET rocprofiler-systems-instrument
-    ARGS --profile-mpi --trace-openmp --simulate -- rocprof-sys-sample
-    LABELS preset instrument
     TIMEOUT 30
     FAIL_REGEX "Multiple preset modes specified|Only ONE preset"
     PROPERTIES WILL_FAIL ON

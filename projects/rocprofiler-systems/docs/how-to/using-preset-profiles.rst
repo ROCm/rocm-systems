@@ -26,12 +26,12 @@ Available Presets
 General Purpose Presets
 ------------------------
 
---quick
-~~~~~~~
+--balanced
+~~~~~~~~~~
 
-**Purpose:** Fast profiling with sensible defaults
+**Purpose:** Balanced profiling with moderate overhead and comprehensive data
 
-**Best for:** Quick performance checks, initial profiling runs
+**Best for:** Most profiling scenarios, recommended starting point
 
 **Configuration:**
 
@@ -44,17 +44,17 @@ General Purpose Presets
 
 .. code-block:: shell
 
-   rocprof-sys-sample --quick -- ./myapp
-   rocprof-sys-run --quick -- ./myapp.inst
+   rocprof-sys-sample --balanced -- ./myapp
+   rocprof-sys-run --balanced -- ./myapp.inst
 
-**When to use:** First-time profiling, getting an overview of application behavior
+**When to use:** First-time profiling, getting an overview of application behavior, general-purpose profiling
 
---simple
-~~~~~~~~
+--profile-only
+~~~~~~~~~~~~~~
 
-**Purpose:** Minimal overhead flat profiling
+**Purpose:** Profiling-only mode without tracing (flat profile)
 
-**Best for:** Production environments, low-impact profiling
+**Best for:** Production environments, minimal overhead profiling
 
 **Configuration:**
 
@@ -67,9 +67,9 @@ General Purpose Presets
 
 .. code-block:: shell
 
-   rocprof-sys-sample --simple -- ./production_app
+   rocprof-sys-sample --profile-only -- ./production_app
 
-**When to use:** Profiling production workloads with minimal performance impact
+**When to use:** Profiling production workloads where tracing overhead is unacceptable
 
 --detailed
 ~~~~~~~~~~
@@ -310,11 +310,11 @@ Usage Examples
 Quick Start
 -----------
 
-Start with ``--quick`` for an initial overview:
+Start with ``--balanced`` for an initial overview:
 
 .. code-block:: shell
 
-   rocprof-sys-sample --quick -- ./myapp
+   rocprof-sys-sample --balanced -- ./myapp
 
 This provides a balanced view of performance with moderate overhead.
 
@@ -341,7 +341,7 @@ Presets can be combined with other command-line options:
 .. code-block:: shell
 
    # Use preset with custom output directory
-   rocprof-sys-sample --quick -o ./my-results -- ./myapp
+   rocprof-sys-sample --balanced -o ./my-results -- ./myapp
 
    # Use preset with additional instrumentation options
    rocprof-sys-instrument --trace-hpc -R '^compute_' -o app.inst -- ./app
@@ -373,7 +373,7 @@ Best Practices
 Choosing the Right Preset
 --------------------------
 
-1. **Start simple** - Begin with ``--quick`` or ``--simple`` to minimize overhead
+1. **Start simple** - Begin with ``--balanced`` or ``--profile-only`` to minimize overhead
 2. **Match your workload** - Use workload-specific presets for better insights
 3. **Iterate** - Start with low overhead, increase detail as needed
 
@@ -411,10 +411,10 @@ If you see "Multiple preset modes specified":
 .. code-block:: shell
 
    # Wrong: Multiple presets
-   rocprof-sys-sample --quick --detailed -- ./app
+   rocprof-sys-sample --balanced --detailed -- ./app
 
    # Correct: Single preset
-   rocprof-sys-sample --quick -- ./app
+   rocprof-sys-sample --balanced -- ./app
 
 No Output with Preset
 ---------------------
@@ -423,7 +423,7 @@ Add ``-v`` flag to see preset configuration:
 
 .. code-block:: shell
 
-   rocprof-sys-sample --quick -v 2 -- ./app
+   rocprof-sys-sample --balanced -v 2 -- ./app
 
 This shows which settings are active.
 
@@ -448,8 +448,8 @@ Environment variables can override preset defaults:
 
 .. code-block:: shell
 
-   # Use --quick preset but customize sampling frequency
-   ROCPROFSYS_SAMPLING_FREQ=200 rocprof-sys-sample --quick -- ./app
+   # Use --balanced preset but customize sampling frequency
+   ROCPROFSYS_SAMPLING_FREQ=200 rocprof-sys-sample --balanced -- ./app
 
 Custom Configuration Files
 ---------------------------
