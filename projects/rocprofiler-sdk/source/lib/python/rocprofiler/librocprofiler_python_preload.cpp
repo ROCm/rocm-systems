@@ -33,6 +33,7 @@
  */
 
 #include <rocprofiler-sdk/registration.h>
+#include <rocprofiler-sdk/rocprofiler.h>
 
 #include <iostream>
 
