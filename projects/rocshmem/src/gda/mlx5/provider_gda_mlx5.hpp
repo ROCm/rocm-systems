@@ -238,6 +238,7 @@ union gda_mlx5_bf_buffer {
   uint8_t              data[256];
   __be32               dword[64];
 } __attribute__((__packed__)) __attribute__((__aligned__(64)));
+static_assert(sizeof(gda_mlx5_bf_buffer) == 256, "mlx5 BlueFlame buffers are 256 bytes");
 
 /* BlueFlame buffers are paired into two halves that should be written alternately
  * I think this only matters when using the BlueFlame mechanism, which requires Write Combining
@@ -245,6 +246,7 @@ union gda_mlx5_bf_buffer {
 struct gda_mlx5_doorbell {
   gda_mlx5_bf_buffer bf[2];
 } __attribute__((__packed__)) __attribute__((__aligned__(64)));
+static_assert(sizeof(gda_mlx5_doorbell) == 512, "mlx5 BlueFlame buffer pairs are 512 bytes");
 
 template <typename T>
 struct gda_mlx5_device_queue {
@@ -266,6 +268,8 @@ struct gda_mlx5_device_cq : public gda_mlx5_device_queue<mlx5_cqe64> {
 struct gda_mlx5_device_sq : public gda_mlx5_device_queue<gda_mlx5_wqe> {
 //  uint64_t* db;
   gda_mlx5_doorbell* db;
+  uint64_t post;
+  uint64_t sig;
   uint32_t bf_offset;
   uint16_t depth;
   uint16_t head;
@@ -277,7 +281,8 @@ struct gda_mlx5_device_sq : public gda_mlx5_device_queue<gda_mlx5_wqe> {
 #endif
   __host__ inline gda_mlx5_device_sq(gda_mlx5_wqe* buf, __be32* dbrec,
                                      gda_mlx5_doorbell* db, uint16_t depth)
-    : gda_mlx5_device_queue{buf, dbrec}, db{db}, bf_offset{0}, depth{depth}, head{0}, tail{0} { }
+    : gda_mlx5_device_queue{buf, dbrec},
+      db{db}, post{0}, sig{0}, bf_offset{0}, depth{depth}, head{0}, tail{0} { }
 
   __host__ inline gda_mlx5_device_sq() : gda_mlx5_device_sq{nullptr, nullptr, nullptr, 0} { }
 

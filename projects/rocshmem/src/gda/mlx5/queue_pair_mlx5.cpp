@@ -26,7 +26,6 @@
 #include "util.hpp"
 #include "containers/free_list_impl.hpp"
 #include "gda/endian.hpp"
-#include "segment_builder.hpp"
 
 namespace rocshmem {
 
@@ -104,6 +103,12 @@ __device__ void QueuePair::mlx5_ring_doorbell(uint16_t sq_wqebb_counter, const g
   __hip_atomic_store(db, db_val, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
 #endif
   __hip_atomic_store(&bf->db_reg, db_val, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
+//  __scoped_atomic_thread_fence(__ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
+#ifdef DEBUG
+  printf("SQ: posted WQEs with dbrec(%p)=%x (%hu), dbreg(%p)=%lx (%x, %x)\n",
+         mlx5_sq.dbrec, be_sq_wqebb_counter, sq_wqebb_counter,
+	 &bf->db_reg, db_val.val, db_val.wqe_header.opmod_idx_opcode, db_val.wqe_header.qpn_ds);
+#endif
 }
 
 __device__ void QueuePair::mlx5_check_cqe_error(const mlx5_cqe64* cqe) {
@@ -186,12 +191,22 @@ __device__ void QueuePair::mlx5_check_cqe_error(const mlx5_cqe64* cqe) {
     break;
   case MLX5_CQE_INVALID:
     printf("CQ: invalid completion (%x), check owner bit = %u?\n", opcode, owner);
-    break;
+    // possibly OK
+    return;
+//    break;
   default:
     printf("CQ: unknown completion type (%x)\n", opcode);
     break;
   }
   abort();
+}
+
+template <typename T>
+__device__ static inline bool hip_atomic_compare(T* obj, T* expected, int order, int scope) {
+  T exp = *expected;
+  T val = __hip_atomic_load(obj, order, scope);
+  *expected = val;
+  return val == exp;
 }
 
 __device__ void QueuePair::mlx5_poll_cq_until(uint16_t requested_available_slots) {
@@ -203,18 +218,33 @@ __device__ void QueuePair::mlx5_poll_cq_until(uint16_t requested_available_slots
   // CQ lock (possibly) not needed with CQ collapsing
   //acquire_lock(&mlx5_cq.lock);
 
-  do {
-    struct mlx5_cqe64* cqe = mlx5_cq.buf;
+  uint64_t sq_post = __hip_atomic_load(&mlx5_sq.post, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_AGENT);
+  // don't need to check CQEs if we haven't ever filled SQ and there's enough space left
+  if (sq_post <= static_cast<uint64_t>((sq_depth - requested_available_slots))) {
+    return;
+  }
 
-#ifdef DEBUG
-    mlx5_check_cqe_error(cqe);
-#endif
+  uint64_t sq_sig = __hip_atomic_load(&mlx5_sq.sig, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_AGENT);
+
+  do {
+    /* sq_sig counts the number of posted signaled WQEs
+     *  odd count -> CQ[0]
+     * even count -> CQ[1]
+     * so use CQ[1 - (sq_sig % 2)]
+     * or equivalently CQ[(sq_sig + 1) % 2], etc.
+     */
+    struct mlx5_cqe64* cqe = &mlx5_cq.buf[1 - (sq_sig  % 2)];
 
     /* Update the SQ head
      * This param provides us the sq_wqebb_counter; all our WQEs are exactly one WQEBB (64B) */
-    __be16 be_wqe_counter = __hip_atomic_load(&cqe->wqe_counter, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_SYSTEM);
+//    __be16 be_wqe_counter = __hip_atomic_load(&cqe->wqe_counter, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_SYSTEM);
+    // 32-bit load: big-endian 16-bit field, then two 8-bit fields
+    uint32_t wqecnt_sig_op_own = __hip_atomic_load(reinterpret_cast<uint32_t*>(&cqe->wqe_counter), __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_SYSTEM);
+    // GPU is little-endian, so wqe_counter is loaded into the low half of wqecnt_sig_op_own
+    __be16 be_wqe_counter = static_cast<__be16>(wqecnt_sig_op_own);
+    // GPU is little-endian, so op_own is loaded into the top bits of wqecnt_sig_op_own; and opcode is the top 4 bits of that
+    uint8_t opcode = wqecnt_sig_op_own >> 28;
     uint16_t sq_head = endian::from_be(be_wqe_counter);
-    mlx5_sq.head = sq_head;
 
     /* do we not need to hold the SQ lock here?
      * what happens if one wavefront is in quiet() and another is is post_wqe_rma()?
@@ -237,15 +267,35 @@ __device__ void QueuePair::mlx5_poll_cq_until(uint16_t requested_available_slots
      */
     uint16_t sq_tail = __hip_atomic_load(&mlx5_sq.tail, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_AGENT);
 
-    /* sq_tail > sq_head, except when sq_tail has wrapped around 0xFFFF and sq_head hasn't
-     * but sq_tail - sq_head is correct even when it wraps around
+    // this isn't quite right, but try for now
+    if (opcode == MLX5_CQE_INVALID) {
+#ifdef DEBUG
+      printf("CQ: invalid completion (%x)\n", opcode);
+#endif
+      continue;
+    }
+
+    mlx5_sq.head = sq_head;
+
+#ifdef DEBUG
+    mlx5_check_cqe_error(cqe);
+#endif
+
+    /* sq_tail is an index to the next free WQE i.e. counts number of posted WQEs
+     * sq_head is an index to the *last* completed WQE - need to add one to get *count* of completed WQEs */
+    uint16_t posted = sq_tail;
+    uint16_t completed = sq_head + 1;
+
+    /* posted >= completed, except when posted has wrapped around 0xFFFF and completed hasn't
+     * but posted - completed is correct even when it wraps around
      * in some marginal cases it's maybe possible to see consumed_slots > sq_depth,
      * but in that case available_slots will be very large, > requested_available_slots,
      * and the loop will continue for another iteration */
-    consumed_slots  = sq_tail - sq_head;
+    consumed_slots  = posted - completed;
     available_slots = sq_depth - consumed_slots;
     // can put in __builtin_amdgcn_s_sleep(1) when fail?
-  } while (available_slots < requested_available_slots);
+  } while (available_slots < requested_available_slots ||
+           !hip_atomic_compare(&mlx5_sq.sig, &sq_sig, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_AGENT));
 
   //release_lock(&mlx5_cq.lock);
 }
@@ -285,10 +335,14 @@ __device__ void QueuePair::mlx5_post_wqe_rma(int pe, int32_t length, uintptr_t l
   uint16_t wqe_idx = mlx5_wqe_idx(mlx5_sq, active_lane_id);
   uint16_t sq_idx = wqe_idx % mlx5_sq.depth;
 
-  // construct the WQE on the stack
+  // can we inline the data into the WQE?
   bool send_inline = gda_mlx5_wqe_rma::can_inline(opcode, length, inline_threshold);
+  // only generate CQEs for last WQE
+  //uint8_t fm_ce_se = is_leader ? MLX5_WQE_CTRL_CQ_UPDATE : 0;
+  uint8_t fm_ce_se = MLX5_WQE_CTRL_CQ_UPDATE;
 
-  gda_mlx5_wqe wqe{wqe_idx, opcode, qp_num, MLX5_WQE_CTRL_CQ_UPDATE,
+  // construct the WQE on the stack
+  gda_mlx5_wqe wqe{wqe_idx, opcode, qp_num, fm_ce_se,
                    raddr, rkey, laddr, lkey, static_cast<uint32_t>(length), send_inline};
 
   // copy to SQ
@@ -297,6 +351,9 @@ __device__ void QueuePair::mlx5_post_wqe_rma(int pe, int32_t length, uintptr_t l
   if (is_leader) {
     // increment tail counter
     mlx5_sq.tail += active_lane_count;
+    mlx5_sq.post += active_lane_count;
+    mlx5_sq.sig += active_lane_count;
+    //mlx5_sq.sig += 1;
     // we are the last thread in the wavefront, so we have the last WQE posted
     mlx5_ring_doorbell(mlx5_sq.tail, wqe);
     // release SQ lock
@@ -316,8 +373,10 @@ __device__ void QueuePair::mlx5_post_wqe_rma_single(int pe, int32_t length, uint
   uint16_t wqe_idx = mlx5_sq.tail;
   uint16_t sq_idx = wqe_idx % mlx5_sq.depth;
 
-  // construct the WQE on the stack
+  // can we inline the data into the WQE?
   bool send_inline = gda_mlx5_wqe_rma::can_inline(opcode, length, inline_threshold);
+
+  // construct the WQE on the stack
   gda_mlx5_wqe wqe{wqe_idx, opcode, qp_num, MLX5_WQE_CTRL_CQ_UPDATE,
                    raddr, rkey, laddr, lkey, static_cast<uint32_t>(length), send_inline};
 
@@ -326,6 +385,8 @@ __device__ void QueuePair::mlx5_post_wqe_rma_single(int pe, int32_t length, uint
 
   // increment tail counter
   mlx5_sq.tail += 1;
+  mlx5_sq.post += 1;
+  mlx5_sq.sig += 1;
   // ring doorbell for this WQE (note: need to check this for correctness)
   mlx5_ring_doorbell(mlx5_sq.tail, wqe);
   // release SQ lock
@@ -366,8 +427,12 @@ __device__ uint64_t QueuePair::mlx5_post_wqe_amo(int pe, int32_t length, uintptr
   uint16_t wqe_idx = mlx5_wqe_idx(mlx5_sq, active_lane_id);
   uint16_t sq_idx = wqe_idx % mlx5_sq.depth;
 
+  // only generate CQEs for last WQE
+  //uint8_t fm_ce_se = is_leader ? MLX5_WQE_CTRL_CQ_UPDATE : 0;
+  uint8_t fm_ce_se = MLX5_WQE_CTRL_CQ_UPDATE;
+
   // construct the WQE on the stack
-  gda_mlx5_wqe wqe{wqe_idx, opcode, qp_num, MLX5_WQE_CTRL_CQ_UPDATE,
+  gda_mlx5_wqe wqe{wqe_idx, opcode, qp_num, fm_ce_se,
                    raddr, rkey,
                    static_cast<uint64_t>(atomic_data), static_cast<uint64_t>(atomic_cmp),
                    reinterpret_cast<uintptr_t>(atomic_laddr), atomic_lkey};
@@ -378,6 +443,9 @@ __device__ uint64_t QueuePair::mlx5_post_wqe_amo(int pe, int32_t length, uintptr
   if (is_leader) {
     // increment tail and fetching atomic counters
     mlx5_sq.tail += active_lane_count;
+    mlx5_sq.post += active_lane_count;
+    mlx5_sq.sig += active_lane_count;
+    //mlx5_sq.sig += 1;
     if (fetching) {
       fetching_atomic_idx += active_lane_count;
     }
