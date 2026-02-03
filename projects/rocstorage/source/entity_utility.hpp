@@ -21,11 +21,11 @@ public:
         return m_entity_container.count(entity) > 0;
     }
 
-    template <typename... Entity>
-    void emplace_entity(Entity&&... entity)
+    template <typename... Args>
+    void emplace_entity(Args&&... args)
     {
         std::lock_guard<std::mutex> const lock(m_mutex);
-        m_entity_container.emplace(std::forward<Entity>(entity)...);
+        m_entity_container.emplace(std::forward<Args>(args)...);
     }
 
     template <typename Entity>

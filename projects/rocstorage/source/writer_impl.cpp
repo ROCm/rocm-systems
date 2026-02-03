@@ -226,6 +226,7 @@ writer_t::impl::register_thread_info(const data_types::thread_info_t& thread_inf
 void
 writer_t::impl::register_stream_info(const data_types::stream_info_t& stream_info)
 {
+    // assert("TODO Fix stream id");
     auto& stream_info_utility = m_entity_registry->stream_info();
     if(is_already_registered(stream_info_utility, stream_info)) return;
 
@@ -249,6 +250,7 @@ writer_t::impl::register_stream_info(const data_types::stream_info_t& stream_inf
 void
 writer_t::impl::register_queue_info(const data_types::queue_info_t& queue_info)
 {
+    // assert("TODO Fix queue id");
     auto& queue_info_utility = m_entity_registry->queue_info();
     if(is_already_registered(queue_info_utility, queue_info)) return;
 
@@ -285,9 +287,9 @@ writer_t::impl::register_code_object_info(
                                                       process_pk,
                                                       agent_pk,
                                                       code_object_info.uri,
-                                                      code_object_info.ld_base,
-                                                      code_object_info.ld_size,
-                                                      code_object_info.ld_delta,
+                                                      code_object_info.load_base,
+                                                      code_object_info.load_size,
+                                                      code_object_info.load_delta,
                                                       code_object_info.storage_type,
                                                       code_object_info.extdata);
 
@@ -317,14 +319,14 @@ writer_t::impl::register_kernel_symbol_info(
         kernel_symbol_info.code_obj_id,
         kernel_symbol_info.name,
         kernel_symbol_info.display_name,
-        kernel_symbol_info.kernel_obj,
-        kernel_symbol_info.kernarg_segmnt_size,
+        kernel_symbol_info.kernel_object,
+        kernel_symbol_info.kernarg_segment_size,
         kernel_symbol_info.kernarg_segment_alignment,
         kernel_symbol_info.group_segment_size,
         kernel_symbol_info.private_segment_size,
-        kernel_symbol_info.sgrp_count,
-        kernel_symbol_info.arch_vgrp_count,
-        kernel_symbol_info.accum_vgrp_count,
+        kernel_symbol_info.sgpr_count,
+        kernel_symbol_info.arch_vgpr_count,
+        kernel_symbol_info.accum_vgpr_count,
         kernel_symbol_info.extdata);
 
     kernel_symbol_info_utility.emplace_entity(kernel_symbol_info.id);

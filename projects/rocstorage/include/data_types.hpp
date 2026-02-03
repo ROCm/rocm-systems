@@ -311,9 +311,9 @@ struct code_object_info_t
 {
     code_object_id_t id{};
     const char*      uri{};
-    size_t           ld_base{};
-    size_t           ld_size{};
-    size_t           ld_delta{};
+    size_t           load_base{};
+    size_t           load_size{};
+    size_t           load_delta{};
     const char*      storage_type{};
     const char*      extdata = "{}";
 
@@ -340,14 +340,14 @@ struct kernel_symbol_info_t
     kernel_symbol_id_t id{};
     const char*        name{};
     const char*        display_name{};
-    size_t             kernel_obj{};
-    size_t             kernarg_segmnt_size{};
+    size_t             kernel_object{};
+    size_t             kernarg_segment_size{};
     size_t             kernarg_segment_alignment{};
     size_t             group_segment_size{};
     size_t             private_segment_size{};
-    size_t             sgrp_count{};
-    size_t             arch_vgrp_count{};
-    size_t             accum_vgrp_count{};
+    size_t             sgpr_count{};
+    size_t             arch_vgpr_count{};
+    size_t             accum_vgpr_count{};
     const char*        extdata = "{}";
 
     node_id_t        node_id{};

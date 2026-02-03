@@ -216,9 +216,9 @@ create_test_code_object_info(size_t                                    code_obje
 {
     return rocstorage::data_types::code_object_info_t{ .id  = code_object_id,
                                                        .uri = "file:///test/kernel.co",
-                                                       .ld_base      = 0x1000,
-                                                       .ld_size      = 0x2000,
-                                                       .ld_delta     = 0,
+                                                       .load_base    = 0x1000,
+                                                       .load_size    = 0x2000,
+                                                       .load_delta   = 0,
                                                        .storage_type = "FILE",
                                                        .extdata      = "{}",
                                                        .node_id      = node_id,
@@ -235,14 +235,14 @@ create_test_kernel_symbol_info(size_t kernel_symbol_id = 1,
     return rocstorage::data_types::kernel_symbol_info_t{ .id           = kernel_symbol_id,
                                                          .name         = "test_kernel",
                                                          .display_name = "Test Kernel",
-                                                         .kernel_obj   = 0x1000,
-                                                         .kernarg_segmnt_size       = 64,
+                                                         .kernel_object        = 0x1000,
+                                                         .kernarg_segment_size = 64,
                                                          .kernarg_segment_alignment = 8,
                                                          .group_segment_size        = 256,
                                                          .private_segment_size      = 0,
-                                                         .sgrp_count                = 32,
-                                                         .arch_vgrp_count           = 64,
-                                                         .accum_vgrp_count          = 0,
+                                                         .sgpr_count                = 32,
+                                                         .arch_vgpr_count           = 64,
+                                                         .accum_vgpr_count          = 0,
                                                          .extdata     = "{}",
                                                          .node_id     = node_id,
                                                          .process_id  = process_id,
@@ -683,7 +683,7 @@ TEST_F(writer_test, register_code_object_info_with_valid_dependencies)
 
     ASSERT_EQ(result.rows.size(), 1);
     EXPECT_EQ(result.rows[0][0], "file:///test/kernel.co");
-    EXPECT_EQ(result.rows[0][1], std::to_string(code_obj.ld_base));
+    EXPECT_EQ(result.rows[0][1], std::to_string(code_obj.load_base));
     EXPECT_EQ(result.rows[0][3], "FILE");
 }
 
@@ -2103,9 +2103,9 @@ TEST_F(writer_test, end_to_end_complete_api_coverage)
     auto code_object = rocstorage::data_types::code_object_info_t{
         .id           = 1,
         .uri          = "file:///opt/rocm/lib/e2e_kernel.co",
-        .ld_base      = 0x7F0000000000,
-        .ld_size      = 0x100000,
-        .ld_delta     = 0,
+        .load_base    = 0x7F0000000000,
+        .load_size    = 0x100000,
+        .load_delta   = 0,
         .storage_type = "FILE",
         .extdata      = "{}",
         .node_id      = 1,
@@ -2118,15 +2118,15 @@ TEST_F(writer_test, end_to_end_complete_api_coverage)
         rocstorage::data_types::kernel_symbol_info_t{ .id = 1,
                                                       .name =
                                                           "_Z12vectorAddKernelPfS_S_i",
-                                                      .display_name = "vectorAddKernel",
-                                                      .kernel_obj   = 0x7F0000001000,
-                                                      .kernarg_segmnt_size       = 32,
+                                                      .display_name  = "vectorAddKernel",
+                                                      .kernel_object = 0x7F0000001000,
+                                                      .kernarg_segment_size      = 32,
                                                       .kernarg_segment_alignment = 8,
                                                       .group_segment_size        = 0,
                                                       .private_segment_size      = 0,
-                                                      .sgrp_count                = 16,
-                                                      .arch_vgrp_count           = 32,
-                                                      .accum_vgrp_count          = 0,
+                                                      .sgpr_count                = 16,
+                                                      .arch_vgpr_count           = 32,
+                                                      .accum_vgpr_count          = 0,
                                                       .extdata                   = "{}",
                                                       .node_id                   = 1,
                                                       .process_id                = 12345,
