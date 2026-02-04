@@ -696,6 +696,17 @@ namespace rocshmem
     return GetIbvDeviceList()[nicIndex].numaNode;
   }
 
+  static bool hasExactMatch(const std::string& namesList, const std::string& name) {
+    std::stringstream ss(namesList);
+    std::string token;
+
+    while (std::getline(ss, token, ',')) {
+      if (token == name) {
+        return true;
+      }
+    }
+    return false;
+  }
 
   int GetClosestNicToGpu(int gpuIndex, const char* exclude_list, const char** dev_name)
   {
@@ -712,8 +723,9 @@ namespace rocshmem
 
       // Build up list of NIC bus addresses
       std::vector<std::string> ibvAddressList;
+      std::string excludeList(nullptr == exclude_list? "": exclude_list);
       for (auto const& ibvDevice : ibvDeviceList) {
-        auto is_excluded = (nullptr != strstr(exclude_list, ibvDevice.name.c_str()));
+        auto is_excluded = hasExactMatch(excludeList, ibvDevice.name);
         ibvAddressList.push_back((ibvDevice.hasActivePort && !is_excluded) ? ibvDevice.busId : "");
       }
 
