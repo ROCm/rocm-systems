@@ -66,10 +66,8 @@ class Common(unittest.TestCase):
             self.virt_mode = []
             self.asic_info = []
             self.board_info = []
-            for i, gpu in enumerate(self.processors):
+            for gpu in self.processors:
                 # Get virtualization mode info
-                if False:
-                    self.virt_mode.append(amdsmi.amdsmi_get_gpu_virtualization_mode(gpu))
                 ret = amdsmi.amdsmi_get_gpu_virtualization_mode(gpu)
                 mode_name = self.virtualization_mode_map[str(int(ret['mode']))]
                 self.virt_mode.append({'mode': mode_name})

@@ -36,11 +36,12 @@ In Unit Testing, what is specifically tested within these units includes:
    behavior and ensure the test focuses solely on the unit under examination.
 '''
 
-import common
 import ctypes
 import os
 import sys
 import unittest
+
+import common
 
 amdsmi_path = os.environ.get('AMDSMI_PATH', '/opt/rocm/share/amd_smi')
 if not os.path.exists(amdsmi_path):
@@ -203,7 +204,7 @@ class TestAmdSmiPython(unittest.TestCase):
             # Execute the following to print the asic and board info once
             # per test run
             has_info_printed = True
-            for i, gpu in enumerate(self.common.processors):
+            for i in self.common.processors:
                 msg = f'gpu={i}'
                 self.common.print(msg)
                 msg = f'virtualization mode(gpu={i})'
@@ -724,7 +725,7 @@ class TestAmdSmiPython(unittest.TestCase):
             self.common.print(msg)
             self.skipTest(msg)
 
-        for status_type_name, status_type, status_cond in self.common.status_types:
+        for _, status_type, status_cond in self.common.status_types:
             msg = f'\t### amdsmi_get_esmi_err_msg(status_type={status_type}):'
             try:
                 ret = amdsmi.amdsmi_get_esmi_err_msg(status_type)
@@ -1203,7 +1204,7 @@ class TestAmdSmiPython(unittest.TestCase):
     # print data issues
     def test_get_processor_handles(self):
         self.common.print_func_name('')
-        msg = f'\t### amdsmi_get_processor_handles():'
+        msg = '\t### amdsmi_get_processor_handles():'
         try:
             procs = amdsmi.amdsmi_get_processor_handles()
             self.common.print(msg, [id(addr) for addr in procs])
@@ -1231,7 +1232,7 @@ class TestAmdSmiPython(unittest.TestCase):
     # data print issues
     def test_get_socket_handles(self):
         self.common.print_func_name('')
-        msg = f'\t### amdsmi_get_socket_handles():'
+        msg = '\t### amdsmi_get_socket_handles():'
         try:
             ret = amdsmi.amdsmi_get_socket_handles()
             self.common.print(msg, [id(addr) for addr in ret])
@@ -1418,20 +1419,6 @@ class TestAmdSmiPython(unittest.TestCase):
             raise self.raise_exception
         return
 
-    def test_cpu_socket_boostlimit(self):
-        self.common.print_func_name('')
-
-        if self.common.TODO_SKIP_NOT_COMPLETE:
-            msg = '\tSkipping test_cpu_socket_boostlimit as it is not complete.'
-            self.common.print(msg)
-            self.skipTest(msg)
-
-        # TODO boost_limit = 0
-        boost_limit = 0
-
-        self.RunFunc1(amdsmi_cpu_socket_boostlimit=amdsmi.amdsmi_cpu_socket_boostlimit, boost_limit=boost_limit)
-        return
-
     def test_set_cpu_socket_lclk_dpm_level(self):
         self.common.print_func_name('')
 
@@ -1492,7 +1479,7 @@ class TestAmdSmiPython(unittest.TestCase):
 
         for i, gpu in enumerate(self.common.processors):
             self.common.print_device_header(i, gpu)
-            for clk_type_name, clk_type, clk_cond in self.common.clk_types:
+            for clk_type_name, _, clk_cond in self.common.clk_types:
                 for clk_limit_type_name, clk_limit_type, clk_limit_cond in self.common.clk_limit_types:
                     msg = f'\t### amdsmi_set_gpu_clk_limit(gpu={i}, clk_type={clk_type_name}, clk_limit_type={clk_limit_type_name}, value={value}):'
                     try:
@@ -1504,7 +1491,7 @@ class TestAmdSmiPython(unittest.TestCase):
                             self.common.check_ret(msg, e, clk_cond)
                             self.raise_exception = e
                         elif not clk_limit_type == self.common.PASS:
-                            self.common.check_ret(msg, e, clk_limit_type)
+                            self.common.check_ret(msg, e, clk_limit_cond)
                             self.raise_exception = e
                         else:
                             self.common.check_ret(msg, e, self.common.PASS)
@@ -1524,7 +1511,7 @@ class TestAmdSmiPython(unittest.TestCase):
 
         for i, gpu in enumerate(self.common.processors):
             self.common.print_device_header(i, gpu)
-            for clk_type_name, clk_type, clk_cond in self.common.clk_types:
+            for _, clk_type, clk_cond in self.common.clk_types:
                 msg = f'\t### amdsmi_set_gpu_clk_range(gpu={i}, min_clk_value={min_clk_value}, max_clk_value={max_clk_value}, clk_type={clk_type}):'
                 try:
                     amdsmi.amdsmi_set_gpu_clk_range(gpu, min_clk_value, max_clk_value, clk_type)
@@ -1674,7 +1661,7 @@ class TestAmdSmiPython(unittest.TestCase):
             self.common.print(msg)
             self.skipTest(msg)
 
-        for error_num, error_name in self.common.error_map.items():
+        for error_num, _ in self.common.error_map.items():
             msg = f'\t### amdsmi_status_code_to_string(error_num={error_num}):'
             try:
                 ret = amdsmi.amdsmi_status_code_to_string(ctypes.c_uint32(int(error_num)))
@@ -1732,4 +1719,3 @@ if __name__ == '__main__':
     runner = unittest.TextTestRunner(verbosity=verbose)
     unittest.main(testRunner=runner)
     sys.exit(0)
-
