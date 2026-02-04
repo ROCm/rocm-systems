@@ -29,6 +29,7 @@
 #include <rocprofiler-sdk/version.h>
 
 #include <fmt/format.h>
+#include <fmt/ranges.h>
 
 #include <dlfcn.h>
 #include <link.h>
