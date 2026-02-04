@@ -3343,7 +3343,11 @@ def test_wrapped_mpi(binary_handler_profile_rocprof_compute):
     workload_dir = test_utils.get_output_dir()
 
     returncode = binary_handler_profile_rocprof_compute(
-        config, workload_dir, options=[], check_success=False, app_name="wrapped_mpi",
+        config,
+        workload_dir,
+        options=[],
+        check_success=False,
+        app_name="wrapped_mpi",
     )
 
     # Should fail with exit code 1
