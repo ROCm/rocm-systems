@@ -21,12 +21,16 @@
 // THE SOFTWARE.
 
 #include <rocprofiler-sdk/callback_tracing.h>
+#include <rocprofiler-sdk/defines.h>
 #include <rocprofiler-sdk/registration.h>
 #include <rocprofiler-sdk/rocprofiler.h>
+#include <rocprofiler-sdk/cxx/serialization.hpp>
 
+#include <unistd.h>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <functional>
 #include <iostream>
 #include <mutex>
 
@@ -46,11 +50,21 @@ namespace
 {
 struct api_trace_data_t
 {
-    uint64_t    timestamp;
-    int32_t     kind;
-    int32_t     operation;
-    int32_t     phase;
-    std::string name;
+    uint64_t    timestamp = 0;
+    int32_t     kind      = 0;
+    int32_t     operation = 0;
+    int32_t     phase     = 0;
+    std::string name      = {};
+
+    template <typename ArchiveT>
+    void serialize(ArchiveT& ar)
+    {
+        ar(cereal::make_nvp("timestamp", timestamp));
+        ar(cereal::make_nvp("kind", kind));
+        ar(cereal::make_nvp("operation", operation));
+        ar(cereal::make_nvp("phase", phase));
+        ar(cereal::make_nvp("name", name));
+    }
 };
 
 std::mutex                    trace_mutex;
@@ -135,48 +149,75 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
     return 0;
 }
 
+void
+write_json(const std::vector<api_trace_data_t>& _trace_data)
+{
+    auto ofname = std::string{"late-start-tracing.json"};
+    if(auto* eofname = getenv("ROCPROFILER_TOOL_OUTPUT_FILE")) ofname = eofname;
+
+    std::ostream* ofs     = nullptr;
+    auto          cleanup = std::function<void(std::ostream*&)>{};
+    if(ofname == "stdout")
+        ofs = &std::cout;
+    else if(ofname == "stderr")
+        ofs = &std::cerr;
+    else
+    {
+        ofs = new std::ofstream{ofname};
+        if(ofs && *ofs)
+        {
+            std::cerr << "[" << getpid() << "][" << __FUNCTION__
+                      << "] Outputting collected data to " << ofname << "...\n"
+                      << std::flush;
+            cleanup = [](std::ostream*& _os) { delete _os; };
+        }
+        else
+        {
+            std::cerr << "Error outputting to " << ofname << ". Redirecting to stderr...\n"
+                      << std::flush;
+            ofname = "stderr";
+            ofs    = &std::cerr;
+        }
+    }
+
+    {
+        using JSONOutputArchive = cereal::MinimalJSONOutputArchive;
+
+        constexpr auto json_prec   = 32;
+        constexpr auto json_indent = JSONOutputArchive::Options::IndentChar::space;
+        auto           json_opts   = JSONOutputArchive::Options{json_prec, json_indent, 1};
+        auto           json_ar     = JSONOutputArchive{*ofs, json_opts};
+
+        json_ar.setNextName("late-start-tracing");
+        json_ar.startNode();
+        try
+        {
+            json_ar(cereal::make_nvp("traces", _trace_data));
+
+        } catch(std::exception& e)
+        {
+            std::cerr << "[" << getpid() << "][" << __FUNCTION__
+                      << "] threw an exception: " << e.what() << "\n"
+                      << std::flush;
+        }
+        json_ar.finishNode();
+    }
+
+    *ofs << std::flush;
+
+    if(cleanup) cleanup(ofs);
+
+    std::cout << "[late-start-tool] Wrote " << traces.size() << " traces to " << ofname
+              << std::endl;
+}
+
 // Tool finalization callback - write JSON output
 void
 tool_fini(void* tool_data)
 {
     (void) tool_data;
 
-    const char* output_file = getenv("ROCPROFILER_TOOL_OUTPUT_FILE");
-    if(!output_file) output_file = "late-start-tracing.json";
-
-    std::ofstream ofs(output_file);
-    if(!ofs.is_open())
-    {
-        std::cerr << "Failed to open output file: " << output_file << std::endl;
-        return;
-    }
-
-    std::lock_guard<std::mutex> lock(trace_mutex);
-
-    ofs << "{\n";
-    ofs << "  \"late-start-tracing\": {\n";
-    ofs << "    \"traces\": [\n";
-
-    for(size_t i = 0; i < traces.size(); ++i)
-    {
-        const auto& trace = traces[i];
-        ofs << "      {\n";
-        ofs << "        \"timestamp\": " << trace.timestamp << ",\n";
-        ofs << "        \"kind\": " << trace.kind << ",\n";
-        ofs << "        \"operation\": " << trace.operation << ",\n";
-        ofs << "        \"phase\": " << trace.phase << ",\n";
-        ofs << "        \"name\": \"" << trace.name << "\"\n";
-        ofs << "      }";
-        if(i < traces.size() - 1) ofs << ",";
-        ofs << "\n";
-    }
-
-    ofs << "    ]\n";
-    ofs << "  }\n";
-    ofs << "}\n";
-
-    ofs.close();
-    std::cout << "Wrote " << traces.size() << " traces to " << output_file << std::endl;
+    write_json(traces);
 }
 
 // rocprofiler_configure function (in anonymous namespace)
@@ -207,9 +248,13 @@ configure(uint32_t                 version,
 
 }  // namespace
 
-// Exported init() function - call this to trigger late-start
-extern "C" __attribute__((visibility("default"))) void
-init()
+// Exported late_start_init() function - call this to trigger late-start
+extern "C" {
+void
+late_start_init() ROCPROFILER_PUBLIC_API;
+
+void
+late_start_init()
 {
     rocprofiler_status_t status = rocprofiler_force_configure(configure);
     if(status != ROCPROFILER_STATUS_SUCCESS)
@@ -217,4 +262,5 @@ init()
         std::cerr << "Error: rocprofiler_force_configure failed with status " << status
                   << std::endl;
     }
+}
 }

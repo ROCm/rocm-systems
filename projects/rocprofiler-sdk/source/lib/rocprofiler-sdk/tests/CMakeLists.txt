@@ -17,6 +17,7 @@ set(rocprofiler_lib_sources
     contexts.cpp
     enum_string.cpp
     hsa.cpp
+    late_start.cpp
     naming.cpp
     timestamp.cpp
     version.cpp
@@ -51,15 +52,8 @@ rocprofiler_add_unit_test(
 #
 # -------------------------------------------------------------------------------------- #
 
-set(rocprofiler_shared_lib_sources
-    external_correlation.cpp
-    intercept_table.cpp
-    # late.cpp  # Temporarily disabled - needs internal function export
-    # late_register_integration.cpp  # Temporarily disabled - needs internal function
-    # export
-    registration.cpp
-    roctx.cpp
-    status.cpp)
+set(rocprofiler_shared_lib_sources external_correlation.cpp intercept_table.cpp
+                                   registration.cpp roctx.cpp status.cpp)
 
 add_executable(rocprofiler-sdk-lib-tests-shared)
 target_sources(rocprofiler-sdk-lib-tests-shared PRIVATE ${rocprofiler_shared_lib_sources})

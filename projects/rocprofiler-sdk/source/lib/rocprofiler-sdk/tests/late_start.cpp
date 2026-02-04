@@ -21,10 +21,12 @@
 // SOFTWARE.
 
 #include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/rocprofiler.h>
 
 #include "lib/rocprofiler-sdk/registration/late.hpp"
 #include "lib/rocprofiler-sdk/tests/common.hpp"
 
+#include <fmt/format.h>
 #include <gtest/gtest.h>
 
 #include <dlfcn.h>
@@ -66,10 +68,9 @@ TEST_F(LateStartTest, no_register_loaded)
         // rocprofiler-register not loaded (expected in isolated unit tests)
         auto status = rocprofiler::registration::late::invoke_register_propagation();
 
-        // Should return NOT_AVAILABLE but this is not an error - just means
-        // no runtimes have initialized yet
-        EXPECT_EQ(status, ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE)
-            << "Should return NOT_AVAILABLE when rocprofiler-register not loaded";
+        // Should return INCOMPATIBLE_REGISTER_VERSION since there is no register library
+        EXPECT_EQ(status, ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_REGISTER_VERSION)
+            << "Should return INCOMPATIBLE_REGISTER_VERSION when rocprofiler-register not loaded";
     }
     else
     {
@@ -125,8 +126,12 @@ TEST_F(LateStartTest, register_loaded_no_runtimes)
 
     EXPECT_TRUE(status == ROCPROFILER_STATUS_SUCCESS ||
                 status == ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE ||
+                status == ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_REGISTER_VERSION ||
                 status == ROCPROFILER_STATUS_ERROR)
-        << "Should return a valid status code";
+        << fmt::format("Should return a valid status code. Returned: {} (name={}, description={})",
+                       static_cast<int>(status),
+                       rocprofiler_get_status_name(status),
+                       rocprofiler_get_status_string(status));
 
     // Clean up
     if(handle) dlclose(handle);
@@ -147,8 +152,12 @@ TEST_F(LateStartTest, function_linkage)
     // Any status is fine - we're just verifying it links and executes
     EXPECT_TRUE(status == ROCPROFILER_STATUS_SUCCESS ||
                 status == ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE ||
+                status == ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_REGISTER_VERSION ||
                 status == ROCPROFILER_STATUS_ERROR)
-        << "Function should return a valid status code";
+        << fmt::format("Should return a valid status code. Returned: {} (name={}, description={})",
+                       static_cast<int>(status),
+                       rocprofiler_get_status_name(status),
+                       rocprofiler_get_status_string(status));
 
     SUCCEED() << "invoke_register_propagation() is properly linked and callable";
 }

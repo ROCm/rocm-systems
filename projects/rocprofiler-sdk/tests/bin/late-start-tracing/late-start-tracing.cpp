@@ -43,7 +43,7 @@
 
 // External init() function from the tool library
 extern "C" void
-init();
+late_start_init();
 
 int
 main(int argc, char** argv)
@@ -81,7 +81,7 @@ main(int argc, char** argv)
 
     // Phase 2: Call init() to trigger late-start profiling
     printf("\nPhase 2: Calling init() to trigger late-start...\n");
-    init();
+    late_start_init();
     printf("  Late-start profiling activated\n");
 
     // Phase 3: Post-init HIP calls AFTER late-start (SHOULD be traced)
