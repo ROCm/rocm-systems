@@ -43,6 +43,11 @@ struct processor_t
         static_cast<T*>(this)->handle(sample);
     }
 
+    void handle(const scratch_memory_sample& sample)
+    {
+        static_cast<T*>(this)->handle(sample);
+    }
+
     void handle(const memory_copy_sample& sample)
     {
         static_cast<T*>(this)->handle(sample);
@@ -84,6 +89,7 @@ protected:
 struct processor_view_t
 {
     using kernel_dispatch_fn_t = void (*)(void*, const kernel_dispatch_sample&) noexcept;
+    using scratch_memory_fn_t  = void (*)(void*, const scratch_memory_sample&) noexcept;
     using memory_copy_fn_t     = void (*)(void*, const memory_copy_sample&) noexcept;
 #if(ROCPROFILER_VERSION >= 600)
     using memory_allocate_fn_t = void (*)(void*, const memory_allocate_sample&) noexcept;
@@ -101,6 +107,7 @@ struct processor_view_t
     struct vtable_t
     {
         kernel_dispatch_fn_t handle_kernel_dispatch;
+        scratch_memory_fn_t  handle_scratch_memory;
         memory_copy_fn_t     handle_memory_copy;
 #if(ROCPROFILER_VERSION >= 600)
         memory_allocate_fn_t handle_memory_allocate;
@@ -132,6 +139,11 @@ struct processor_view_t
     ROCPROFSYS_INLINE void handle(const kernel_dispatch_sample& sample) const noexcept
     {
         m_vtable->handle_kernel_dispatch(m_object, sample);
+    }
+
+    ROCPROFSYS_INLINE void handle(const scratch_memory_sample& sample) const noexcept
+    {
+        m_vtable->handle_scratch_memory(m_object, sample);
     }
 
     ROCPROFSYS_INLINE void handle(const memory_copy_sample& sample) const noexcept
@@ -192,6 +204,9 @@ private:
     {
         static const vtable_t vtable{
             +[](void* obj, const kernel_dispatch_sample& sample) noexcept {
+                static_cast<T*>(obj)->handle(sample);
+            },
+            +[](void* obj, const scratch_memory_sample& sample) noexcept {
                 static_cast<T*>(obj)->handle(sample);
             },
             +[](void* obj, const memory_copy_sample& sample) noexcept {
@@ -274,6 +289,9 @@ struct sample_processor_t
                 break;
             case type_identifier_t::kernel_dispatch:
                 handle_sample(static_cast<const kernel_dispatch_sample&>(sample));
+                break;
+            case type_identifier_t::scratch_memory:
+                handle_sample(static_cast<const scratch_memory_sample&>(sample));
                 break;
             case type_identifier_t::memory_copy:
                 handle_sample(static_cast<const memory_copy_sample&>(sample));

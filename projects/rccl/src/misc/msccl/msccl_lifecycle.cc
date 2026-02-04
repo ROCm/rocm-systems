@@ -31,9 +31,16 @@ RCCL_PARAM(MscclEnabled, "MSCCL_ENABLE", 1);
 RCCL_PARAM(MscclForceEnabled, "MSCCL_FORCE_ENABLE", 0);
 RCCL_PARAM(MscclEnableSingleProcess, "MSCCL_ENABLE_SINGLE_PROCESS", 1);
 
+static bool mscclWarn = false;
+
 bool mscclEnabled() {
 #ifdef COMPILE_MSCCL_KERNEL
-  return rcclParamMscclEnabled();
+  int64_t enabled = rcclParamMscclEnabled();
+  if (enabled && !mscclWarn) {
+    WARN("MSCCL is deprecated and will be removed in a future version of RCCL.");
+    mscclWarn = true;
+  }
+  return enabled;
 #else
   return false;
 #endif
@@ -41,7 +48,12 @@ bool mscclEnabled() {
 
 bool mscclForceEnabled() {
 #ifdef COMPILE_MSCCL_KERNEL
-  return rcclParamMscclForceEnabled();
+  int64_t forceEnabled = rcclParamMscclForceEnabled();
+  if (forceEnabled && !mscclWarn) {
+    WARN("MSCCL is deprecated and will be removed in a future version of RCCL.");
+    mscclWarn = true;
+  }
+  return forceEnabled;
 #else
   return false;
 #endif
@@ -525,11 +537,11 @@ static ncclResult_t mscclFallBackSavedParams() {
           param.p.root, param.comm, param.stream));
         break;
       case mscclFuncAllToAll:
-        NCCLCHECK(ncclAllToAll(param.p.sendBuff, param.p.recvBuff, param.p.count, param.p.dataType,
+        NCCLCHECK(ncclAlltoAll(param.p.sendBuff, param.p.recvBuff, param.p.count, param.p.dataType,
           param.comm, param.stream));
         break;
       case mscclFuncAllToAllv:
-        NCCLCHECK(ncclAllToAllv(
+        NCCLCHECK(ncclAlltoAllv(
           param.p.sendBuff, param.p.sendCounts, param.p.sDisPls,
           param.p.recvBuff, param.p.recvCounts, param.p.rDisPls,
           param.p.dataType, param.comm, param.stream));

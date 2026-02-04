@@ -54,6 +54,9 @@
 
 namespace rocr {
 
+constexpr size_t DEFAULT_COUNTED_QUEUE_SIZE = 16384;
+constexpr uint32_t DEFAULT_GPU_HW_QUEUES_MAX = 4;
+
 class Flag {
  public:
   enum SDMA_OVERRIDE { SDMA_DISABLE, SDMA_ENABLE, SDMA_DEFAULT };
@@ -242,7 +245,7 @@ class Flag {
     enable_mwaitx_ = (var == "1") ? true : false;
 
     var = os::GetEnvVar("HSA_ENABLE_IPC_MODE_LEGACY");
-    enable_ipc_mode_legacy_ = (var == "0") ? false : true;
+    enable_ipc_mode_legacy_ = (var == "1") ? true : false;
 
     if (os::IsEnvVarSet("HSA_PCS_MAX_DEVICE_BUFFER_SIZE")) {
       var = os::GetEnvVar("HSA_PCS_MAX_DEVICE_BUFFER_SIZE");
@@ -306,6 +309,16 @@ class Flag {
     core_dump_disable_ = (var == "1");
 
     core_dump_pattern_ = os::GetEnvVar("HSA_COREDUMP_PATTERN");
+
+    // This limits the maximum number of hardware queues that can be created per 
+    // priority level for counted queues on every GPU agent. By default, the limit is set to 4.
+    var = os::GetEnvVar("GPU_MAX_HW_QUEUES");
+    cp_queues_limit_ = var.empty() ? DEFAULT_GPU_HW_QUEUES_MAX : atoi(var.c_str());
+
+    // This allows configuring the size of counted queues created through 
+    // hsa_amd_counted_queue_acquire API. If not set, default queue size is set to 16384.
+    var = os::GetEnvVar("HSA_COUNTED_QUEUE_SIZE");
+    counted_queue_size_ = var.empty() ? DEFAULT_COUNTED_QUEUE_SIZE : atoi(var.c_str());
   }
 
   void parse_masks(uint32_t maxGpu, uint32_t maxCU) {
@@ -426,6 +439,10 @@ class Flag {
 
   size_t co_dmacopy_size() const { return co_dmacopy_size_; }
 
+  uint32_t cp_queues_limit() const { return cp_queues_limit_; }
+
+  size_t counted_queue_size() const { return counted_queue_size_; }
+
   bool dev_mem_queue_buf() const { return dev_mem_queue_buf_; }
 
   uint32_t signal_abort_timeout() const { return signal_abort_timeout_; }
@@ -544,6 +561,9 @@ class Flag {
   bool core_dump_disable_ = false;
   bool enable_core_dump_progress_ = false;
   std::string core_dump_pattern_;
+
+  uint32_t cp_queues_limit_;
+  size_t counted_queue_size_;
 
   // Map GPU index post RVD to its default cu mask.
   std::map<uint32_t, std::vector<uint32_t>> cu_mask_;

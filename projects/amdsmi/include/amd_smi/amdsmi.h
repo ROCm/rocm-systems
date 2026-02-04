@@ -2195,6 +2195,7 @@ typedef struct {
 
 /**
  * @brief This structure contains information specific to a process.
+ * Sum of the process memory is not expected to be the total memory usage.
  *
  * @cond @tag{gpu_bm_linux} @endcond
  */
@@ -6827,7 +6828,7 @@ amdsmi_get_violation_status(amdsmi_processor_handle processor_handle,
 /**
  *  @brief Returns the list of process information running on a given GPU.
  *  If pdh.dll is not present on the system, this API returns
- *  AMDSMI_STATUS_NOT_SUPPORTED.
+ *  AMDSMI_STATUS_NOT_SUPPORTED. Sum of the process memory is not expected to be the total memory usage.
  *
  *  @ingroup tagProcessInfo
  *

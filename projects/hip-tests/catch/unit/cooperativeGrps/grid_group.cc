@@ -273,12 +273,8 @@ TEST_CASE("Unit_Grid_Group_Sync_Positive_Basic") {
   }
 
   auto loops = GENERATE(2, 4, 8, 16);
-  // Launch params for this test are hardcoded as a workaround for an issue reported
-  // SWDEV-429791. When fixed, please enable calls to GenerateBlock/ThreadDimensions()
-  const auto blocks =
-      GENERATE_COPY(dim3(5, 5, 5), dim3(330, 1, 1), dim3(1, 330, 1), dim3(1, 1, 330));
-  const auto threads =
-      GENERATE_COPY(dim3(16, 8, 8), dim3(32, 32, 1), dim3(64, 8, 2), dim3(16, 16, 3));
+  const auto blocks = GenerateBlockDimensions();
+  const auto threads = GenerateThreadDimensions();
   if (!CheckDimensions(device, sync_kernel, blocks, threads)) return;
   INFO("Grid dimensions: x " << blocks.x << ", y " << blocks.y << ", z " << blocks.z);
   INFO("Block dimensions: x " << threads.x << ", y " << threads.y << ", z " << threads.z);

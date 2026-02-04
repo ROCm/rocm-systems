@@ -55,6 +55,10 @@ constexpr char kHipFatBinName_[] = "hipfatbin-";
 constexpr char kOffloadKindHipv4_[] = "hipv4-";  // bundled code objects need the prefix
 constexpr char kOffloadHipV4FatBinName_[] = "hipfatbin-hipv4-";
 
+// Fat binary wrapper magic values
+constexpr uint32_t kHipfMagic = 0x48495046;  // "HIPF" little-endian (normal fat binary)
+constexpr uint32_t kHipkMagic = 0x4B504948;  // "HIPK" little-endian (kpack'd binary)
+
 // Clang Offload bundler description & Header in uncompressed mode.
 struct ClangOffloadBundleInfo {
   uint64_t offset;
@@ -154,6 +158,8 @@ class StatCO : public CodeObject {
 
   // Add/Remove/Digest Fat Binaries passed to us from "__hipRegisterFatBinary"
   FatBinaryInfo** addFatBinary(const void* data, bool initialized, bool& success);
+  FatBinaryInfo** addKpackBinary(const void* hipk_metadata, const void* wrapper_addr,
+                                 bool initialized, bool& success);
   hipError_t removeFatBinary(FatBinaryInfo** module);
   hipError_t digestFatBinary(const void* data, FatBinaryInfo*& programs);
   void RemoveAllFatBinaries();
