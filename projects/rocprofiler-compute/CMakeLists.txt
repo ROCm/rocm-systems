@@ -396,7 +396,6 @@ add_test(
 )
 
 if(MPI_CXX_COMPILER)
-    # Use absolute Python path for mpirun tests since mpirun may not inherit PATH correctly
     add_test(
         NAME test_profile_multi_rank
         COMMAND
