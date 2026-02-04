@@ -21,11 +21,13 @@
 // SOFTWARE.
 
 #include "lib/python/rocpd/source/perfetto.hpp"
+#include "lib/python/rocpd/source/serialization/perfetto.hpp"
 #include "lib/python/rocpd/source/sql_generator.hpp"
 
 #include "lib/common/defines.hpp"
 #include "lib/common/hasher.hpp"
 #include "lib/common/mpl.hpp"
+#include "lib/common/utility.hpp"
 #include "lib/output/generator.hpp"
 #include "lib/output/metadata.hpp"
 #include "lib/output/node_info.hpp"
@@ -41,6 +43,7 @@
 #include <atomic>
 #include <future>
 #include <mutex>
+#include <variant>
 #include <vector>
 
 namespace rocpd
@@ -436,50 +439,65 @@ write_perfetto(
                 auto _event      = (ocfg.annotate_kfd) ? read_event(itr.event_id) : types::event{};
 
                 auto _category = ::perfetto::DynamicCategory{get_category_string(itr.category)};
-                TRACE_EVENT_BEGIN(_category,
-                                  ::perfetto::DynamicString{_name},
-                                  track,
-                                  itr.start,
-                                  ::perfetto::Flow::Global(itr.stack_id ^ uuid_pid),
-                                  "begin_ns",
-                                  itr.start,
-                                  "end_ns",
-                                  itr.end,
-                                  "delta_ns",
-                                  (itr.end - itr.start),
-                                  "tid",
-                                  itr.tid,
-                                  "kind",
-                                  itr.category,
-                                  "operation",
-                                  _operation,
-                                  "corr_id",
-                                  itr.stack_id,
-                                  "ancestor_id",
-                                  itr.parent_stack_id,
-                                  [&](::perfetto::EventContext ctx) {
-                                      for(const auto& pevt : _pmc_events)
-                                      {
-                                          if(const auto* pinfo = read_pmc_info(pevt.pmc_id); pinfo)
-                                          {
-                                              rocprofiler::sdk::add_perfetto_annotation(
-                                                  ctx, pinfo->name, pevt.value);
-                                          }
-                                      }
+                TRACE_EVENT_BEGIN(
+                    _category,
+                    ::perfetto::DynamicString{_name},
+                    track,
+                    itr.start,
+                    ::perfetto::Flow::Global(itr.stack_id ^ uuid_pid),
+                    "begin_ns",
+                    itr.start,
+                    "end_ns",
+                    itr.end,
+                    "delta_ns",
+                    (itr.end - itr.start),
+                    "tid",
+                    itr.tid,
+                    "kind",
+                    itr.category,
+                    "operation",
+                    _operation,
+                    "corr_id",
+                    itr.stack_id,
+                    "ancestor_id",
+                    itr.parent_stack_id,
+                    [&](::perfetto::EventContext ctx) {
+                        for(const auto& pevt : _pmc_events)
+                        {
+                            if(const auto* pinfo = read_pmc_info(pevt.pmc_id); pinfo)
+                            {
+                                rocprofiler::sdk::add_perfetto_annotation(
+                                    ctx, pinfo->name, pevt.value);
+                            }
+                        }
 
-                                      if(_event.has_extdata())
-                                      {
-                                          auto _extdata = _event.get_extdata();
-                                          if(_extdata.kfd)
-                                          {
-                                              _extdata.kfd.value().for_each_nvp(
-                                                  [&ctx](const auto& name, const auto& value) {
-                                                      rocprofiler::sdk::add_perfetto_annotation(
-                                                          ctx, name, value);
-                                                  });
-                                          }
-                                      }
-                                  });
+                        if(_event.has_extdata())
+                        {
+                            auto _extdata = _event.get_extdata();
+                            if(_extdata.kfd)
+                            {
+                                auto ar = ::cereal::PerfettoAnnotationOutputArchive{ctx};
+
+                                std::visit(
+                                    [&ar](const auto& record) {
+                                        namespace common = ::rocprofiler::common;
+                                        using record_type =
+                                            common::mpl::unqualified_type_t<decltype(record)>;
+
+                                        if constexpr(!std::is_same<record_type,
+                                                                   std::monostate>::value)
+                                        {
+                                            cereal::save(ar, record);
+                                        }
+
+                                        // some older compilers will complain 'record' is unused
+                                        // if the record_type is std::monostate
+                                        common::consume_args(record);
+                                    },
+                                    _extdata.kfd.value().record);
+                            }
+                        }
+                    });
 
                 TRACE_EVENT_END(_category, track, itr.end);
 

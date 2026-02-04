@@ -22,9 +22,13 @@
 
 #pragma once
 
+#include "lib/common/mpl.hpp"
 #include "metadata.hpp"
 
-#include <map>
+#include <rocprofiler-sdk/fwd.h>
+
+#include <cstdint>
+#include <variant>
 
 namespace rocprofiler
 {
@@ -55,8 +59,6 @@ agent_node_id(const metadata& tool_metadata, const rocprofiler_agent_id_t& agent
 // save() routines invoked on them will lead to proper serializetion of miscellaneous
 // data into extdata JSON strings in rocpd tables
 
-#define NVP_APPLY(cb, field) cb(#field, field)
-
 struct rocpd_kfd_event_page_migrate_record_t
 : rocprofiler_buffer_tracing_kfd_event_page_migrate_record_t
 {
@@ -73,17 +75,6 @@ struct rocpd_kfd_event_page_migrate_record_t
         prefetch_agent_id  = agent_node_id(_metadata, _base.prefetch_agent);
         preferred_agent_id = agent_node_id(_metadata, _base.preferred_agent);
     }
-
-    template <class F>
-    void for_each_nvp(F&& f) const
-    {
-        NVP_APPLY(f, start_address);
-        NVP_APPLY(f, end_address);
-        NVP_APPLY(f, src_agent_id);
-        NVP_APPLY(f, dst_agent_id);
-        NVP_APPLY(f, prefetch_agent_id);
-        NVP_APPLY(f, preferred_agent_id);
-    };
 
     uint64_t value() const { return end_address - start_address; }
 
@@ -108,13 +99,6 @@ struct rocpd_kfd_event_page_fault_record_t
         address  = _base.address.value;
     }
 
-    template <class F>
-    void for_each_nvp(F&& f) const
-    {
-        NVP_APPLY(f, agent_id);
-        NVP_APPLY(f, address);
-    }
-
     uint64_t value() const { return address; }
 
     int64_t  agent_id = -1;
@@ -132,13 +116,7 @@ struct rocpd_kfd_event_queue_record_t : rocprofiler_buffer_tracing_kfd_event_que
         agent_id = agent_node_id(_metadata, _base.agent_id);
     }
 
-    template <class F>
-    void for_each_nvp(F&& f) const
-    {
-        NVP_APPLY(f, agent_id);
-    }
-
-    uint64_t value() const { return 1; }
+    static uint64_t value() { return 1; }
 
     int64_t agent_id = -1;
 };
@@ -155,14 +133,6 @@ struct rocpd_kfd_event_unmap_from_gpu_record_t
         agent_id      = agent_node_id(_metadata, _base.agent_id);
         start_address = _base.start_address.value;
         end_address   = _base.end_address.value;
-    }
-
-    template <class F>
-    void for_each_nvp(F&& f) const
-    {
-        NVP_APPLY(f, agent_id);
-        NVP_APPLY(f, start_address);
-        NVP_APPLY(f, end_address);
     }
 
     uint64_t value() const { return end_address - start_address; }
@@ -182,10 +152,6 @@ struct rocpd_kfd_event_dropped_events_record_t
     : base_type(_base)
     {}
 
-    template <class F>
-    void for_each_nvp(F&& /* f*/) const
-    {}
-
     uint64_t value() const { return count; }
 };
 
@@ -203,17 +169,6 @@ struct rocpd_kfd_page_migrate_record_t : rocprofiler_buffer_tracing_kfd_page_mig
         dst_agent_id       = agent_node_id(_metadata, _base.dst_agent);
         prefetch_agent_id  = agent_node_id(_metadata, _base.prefetch_agent);
         preferred_agent_id = agent_node_id(_metadata, _base.preferred_agent);
-    }
-
-    template <class F>
-    void for_each_nvp(F&& f) const
-    {
-        NVP_APPLY(f, start_address);
-        NVP_APPLY(f, end_address);
-        NVP_APPLY(f, src_agent_id);
-        NVP_APPLY(f, dst_agent_id);
-        NVP_APPLY(f, prefetch_agent_id);
-        NVP_APPLY(f, preferred_agent_id);
     }
 
     uint64_t value() const { return end_address - start_address; }
@@ -238,13 +193,6 @@ struct rocpd_kfd_page_fault_record_t : rocprofiler_buffer_tracing_kfd_page_fault
         address  = _base.address.value;
     }
 
-    template <class F>
-    void for_each_nvp(F&& f) const
-    {
-        NVP_APPLY(f, agent_id);
-        NVP_APPLY(f, address);
-    }
-
     uint64_t value() const { return address; }
 
     int64_t  agent_id = -1;
@@ -262,13 +210,7 @@ struct rocpd_kfd_queue_record_t : rocprofiler_buffer_tracing_kfd_queue_record_t
         agent_id = agent_node_id(_metadata, _base.agent_id);
     }
 
-    template <class F>
-    void for_each_nvp(F&& f) const
-    {
-        NVP_APPLY(f, agent_id);
-    }
-
-    uint64_t value() const { return 1; }
+    static uint64_t value() { return 1; }
 
     int64_t agent_id = -1;
 };
@@ -276,25 +218,19 @@ struct rocpd_kfd_queue_record_t : rocprofiler_buffer_tracing_kfd_queue_record_t
 // A variant capturing all of the rocpd_kfd_* types
 struct rocpd_kfd_event_data_t
 {
-    std::variant<rocpd_kfd_event_page_migrate_record_t,
-                 rocpd_kfd_event_page_fault_record_t,
-                 rocpd_kfd_event_queue_record_t,
-                 rocpd_kfd_event_unmap_from_gpu_record_t,
-                 rocpd_kfd_event_dropped_events_record_t,
-                 rocpd_kfd_page_migrate_record_t,
-                 rocpd_kfd_page_fault_record_t,
-                 rocpd_kfd_queue_record_t>
-        record;
+    // use std::monostate to indicate no KFD data present
+    using data_type = std::variant<std::monostate,
+                                   rocpd_kfd_event_page_migrate_record_t,
+                                   rocpd_kfd_event_page_fault_record_t,
+                                   rocpd_kfd_event_queue_record_t,
+                                   rocpd_kfd_event_unmap_from_gpu_record_t,
+                                   rocpd_kfd_event_dropped_events_record_t,
+                                   rocpd_kfd_page_migrate_record_t,
+                                   rocpd_kfd_page_fault_record_t,
+                                   rocpd_kfd_queue_record_t>;
 
-    template <class F>
-    void for_each_nvp(F&& f)
-    {
-        std::visit([&f](const auto& arg) { arg.for_each_nvp(f); }, record);
-    }
+    data_type record = {};  // default initialized to monostate
 };
-
-#undef NVP_APPLY
-
 }  // namespace tool
 }  // namespace rocprofiler
 

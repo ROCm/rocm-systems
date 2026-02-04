@@ -552,24 +552,27 @@ GENERATE_FIELD_ACCESSOR(extract_address_field, address, rocprofiler_address_t, 0
 
 namespace
 {
-using kfd_pmc_event_data_t = struct kfd_pmc_event_data
+struct kfd_pmc_event_data_t
 {
-    rocprofiler_buffer_tracing_kind_t kind;
-    std::string_view                  name;
-    uint32_t                          tid;
-    rocprofiler_timestamp_t           start;
-    rocprofiler_timestamp_t           end;
-    uint64_t                          value;
+    rocprofiler_buffer_tracing_kind_t kind      = ROCPROFILER_BUFFER_TRACING_NONE;
+    std::string_view                  name      = {};
+    uint32_t                          tid       = 0;
+    rocprofiler_timestamp_t           start     = 0;
+    rocprofiler_timestamp_t           end       = 0;
+    uint64_t                          value     = 0;
     std::string                       json_data = {};
 };
 
 // trait mapping from KFD record type to its corresponding rocpd type
-template <typename T>
-struct rocpd_wrapper_for;
+namespace impl
+{
+template <typename Tp>
+struct rocpd_kfd_wrapper;
+}
 
 #define GENERATE_KFD_TRAIT_MAPPING(KFD_TYPE)                                                       \
     template <>                                                                                    \
-    struct rocpd_wrapper_for<rocprofiler_buffer_tracing_##KFD_TYPE>                                \
+    struct impl::rocpd_kfd_wrapper<rocprofiler_buffer_tracing_##KFD_TYPE>                          \
     {                                                                                              \
         using type = rocpd_##KFD_TYPE;                                                             \
     };
@@ -583,8 +586,10 @@ GENERATE_KFD_TRAIT_MAPPING(kfd_page_migrate_record_t)
 GENERATE_KFD_TRAIT_MAPPING(kfd_page_fault_record_t)
 GENERATE_KFD_TRAIT_MAPPING(kfd_queue_record_t)
 
-template <typename T>
-using rocpd_wrapper_t = typename rocpd_wrapper_for<T>::type;
+#undef GENERATE_KFD_TRAIT_MAPPING
+
+template <typename Tp>
+using rocpd_kfd_wrapper_t = typename impl::rocpd_kfd_wrapper<Tp>::type;
 
 // helpers to determine timestamp variables for templated KFD records
 template <typename, typename = void>
@@ -627,20 +632,23 @@ get_end(const RecordT& record)
 }
 
 template <typename RecordT>
-void
-fill_kfd_data(kfd_pmc_event_data_t& data, const metadata& tool_metadata, const RecordT& record)
+kfd_pmc_event_data_t
+construct_kfd_pmc_event(const metadata& tool_metadata, const RecordT& record)
 {
+    auto data  = kfd_pmc_event_data_t{};
     data.kind  = record.kind;
     data.name  = tool_metadata.buffer_names.at(data.kind, record.operation);
     data.tid   = record.pid;  // KFD attributes all events to the lead thread
     data.start = get_start(record);
     data.end   = get_end(record);
 
-    auto wrapper   = rocpd_wrapper_t<RecordT>(record, tool_metadata);
+    auto wrapper   = rocpd_kfd_wrapper_t<RecordT>(record, tool_metadata);
     data.value     = wrapper.value();
-    data.json_data = get_json_string([&record, &tool_metadata, &wrapper](auto& ar) {
+    data.json_data = get_json_string([&wrapper](auto& ar) {
         cereal::save(ar, ::rocprofiler::tool::rocpd_kfd_event_data_t{wrapper});
     });
+
+    return data;
 }
 }  // namespace
 
@@ -1541,21 +1549,29 @@ write_rocpd(
     auto insert_kfd_data = [&conn, &tool_metadata, node_id, this_pid](auto& pmc_ids) {
         auto _sqlgenperf_rocpd = get_simple_timer("rocpd_info_pmc: kfd");
 
-        using kfd_pmc_info_t = struct kfd_pmc_info
+        struct kfd_pmc_info_t
         {
-            rocprofiler_buffer_tracing_kind_t kind;
-            std::string_view                  description;
+            rocprofiler_buffer_tracing_kind_t kind        = ROCPROFILER_BUFFER_TRACING_NONE;
+            std::string_view                  description = {};
         };
 
-        const auto kfd_info = std::vector<kfd_pmc_info_t>{
-            {ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE, "KFD page migration events"},
-            {ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_FAULT, "KFD page fault events"},
-            {ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE, "KFD queue eviction/restore events"},
-            {ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU, "KFD unmap from GPU events"},
-            {ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS, "KFD dropped_events events"},
-            {ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE, "KFD page migration paired records"},
-            {ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT, "KFD page fault paired records"},
-            {ROCPROFILER_BUFFER_TRACING_KFD_QUEUE, "KFD queue eviction/restore paired records"}};
+        constexpr auto kfd_info = std::array<kfd_pmc_info_t, 8>{
+            kfd_pmc_info_t{ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE,
+                           "KFD page migration events"},
+            kfd_pmc_info_t{ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_FAULT,
+                           "KFD page fault events"},
+            kfd_pmc_info_t{ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE,
+                           "KFD queue eviction/restore events"},
+            kfd_pmc_info_t{ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU,
+                           "KFD unmap from GPU events"},
+            kfd_pmc_info_t{ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS,
+                           "KFD dropped_events events"},
+            kfd_pmc_info_t{ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE,
+                           "KFD page migration paired records"},
+            kfd_pmc_info_t{ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT,
+                           "KFD page fault paired records"},
+            kfd_pmc_info_t{ROCPROFILER_BUFFER_TRACING_KFD_QUEUE,
+                           "KFD queue eviction/restore paired records"}};
 
         for(const auto& info : kfd_info)
         {
@@ -1588,11 +1604,11 @@ write_rocpd(
             auto _deferred = sql::deferred_transaction{conn};
             for(const auto& itr : _gen.get(pitr))
             {
-                auto data = kfd_pmc_event_data_t{};
-
-                std::visit([&data, &tool_metadata](
-                               const auto& record) { fill_kfd_data(data, tool_metadata, record); },
-                           itr.record);
+                auto data = std::visit(
+                    [&tool_metadata](const auto& record) {
+                        return construct_kfd_pmc_event(tool_metadata, record);
+                    },
+                    itr.record);
 
                 // insert thread info if it doesn't already exist
                 get_thread_id(data.tid);

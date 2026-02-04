@@ -729,7 +729,7 @@ load(ArchiveT& ar, rocpd::types::event::decoded_extdata& data)
     {
         ::rocprofiler::tool::rocpd_kfd_event_data_t kfd_data;
         cereal::load(ar, kfd_data);
-        data.kfd = std::move(kfd_data);
+        data.kfd = kfd_data;
     } catch(const cereal::Exception&)
     {}
 }
