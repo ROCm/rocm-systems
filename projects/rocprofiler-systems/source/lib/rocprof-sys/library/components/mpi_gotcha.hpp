@@ -82,6 +82,9 @@ private:
     int*      m_size_ptr = nullptr;
     uintptr_t m_comm_val = null_comm();
 
+    void        populate_rank_and_size();
+    static void publish_rank_and_size(int rank, int size);
+
     static std::function<void(int rank, int size)> s_on_init_callback;
 };
 }  // namespace component

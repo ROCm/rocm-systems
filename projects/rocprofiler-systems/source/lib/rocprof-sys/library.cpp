@@ -141,7 +141,7 @@ set_metadata_process_end_timestamp(int64_t _ts)
 }
 
 void
-set_metadata_environement_json(const std::string& _environment_json)
+set_metadata_environment_json(const std::string& _environment_json)
 {
     auto process_info        = trace_cache::get_metadata_registry().get_process_info();
     process_info.environment = _environment_json;
@@ -149,7 +149,7 @@ set_metadata_environement_json(const std::string& _environment_json)
 }
 
 std::string
-escape_quotes_for_sql(std::string str)
+escape_quotes(std::string str)
 {
     std::string::size_type pos = 0;
     while((pos = str.find('"', pos)) != std::string::npos)
@@ -388,8 +388,7 @@ rocprofsys_preinit_cache()
     config::print_settings_json(_extdata_stream);
 
     trace_cache::get_metadata_registry().set_process(
-        { getpid(), getppid(), _command, "",
-          escape_quotes_for_sql(_extdata_stream.str()) });
+        { getpid(), getppid(), _command, "", escape_quotes(_extdata_stream.str()) });
 }
 
 void
@@ -800,14 +799,20 @@ rocprofsys_init_hidden(const char* _mode, bool _is_binary_rewrite, const char* _
         rocprofsys_preinit_hidden();
     }
 
-#if defined(ROCPROFSYS_USE_MPI)
-    component::mpi_gotcha::set_on_init_callback([](int rank, int size) {
-        nlohmann::json _environment_json;
-        _environment_json["MPI_COMM_WORLD_SIZE"] = size;
-        _environment_json["MPI_COMM_WORLD_RANK"] = rank;
+#if(defined(ROCPROFSYS_USE_MPI_HEADERS) && ROCPROFSYS_USE_MPI_HEADERS > 0) ||            \
+    (defined(ROCPROFSYS_USE_MPI) && ROCPROFSYS_USE_MPI > 0)
 
-        set_metadata_environement_json(escape_quotes_for_sql(_environment_json.dump()));
-    });
+    if(get_use_mpip())
+    {
+        component::mpi_gotcha::set_on_init_callback([](int rank, int size) {
+            nlohmann::json _environment_json;
+            _environment_json["MPI_COMM_WORLD_SIZE"] = size;
+            _environment_json["MPI_COMM_WORLD_RANK"] = rank;
+
+            set_metadata_environment_json(escape_quotes(_environment_json.dump()));
+        });
+    }
+
 #endif
 }
 
