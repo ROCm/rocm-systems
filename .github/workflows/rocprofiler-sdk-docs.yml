@@ -73,7 +73,7 @@ jobs:
           ../scripts/update-docs.sh
 
   build-docs-from-source:
-    runs-on: linux-mi325-1gpu-ossci-rocm-frac
+    runs-on: linux-mi325-1gpu-ossci-rocm
     container:
       image: docker.io/rocm/rocprofiler-private:ubuntu-22.04-gfx94X-latest
       credentials:
