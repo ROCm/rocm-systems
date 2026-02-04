@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
 
 if(
     CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR
@@ -44,8 +44,6 @@ project(
     HOMEPAGE_URL "https://github.com/ROCm/rocprofiler-systems"
 )
 set(PROJECT_NAME_UNDERSCORED "rocprofiler_systems")
-
-set(CMAKE_COLOR_DIAGNOSTICS ON)
 
 set(BINARY_NAME_PREFIX "rocprof-sys")
 

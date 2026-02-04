@@ -108,6 +108,7 @@ endif()
 add_flag_if_avail(
     "-W" "-Wall" "-Wno-unknown-pragmas" "-Wno-unused-function" "-Wno-ignored-attributes"
     "-Wno-attributes" "-Wno-missing-field-initializers" "-Wno-interference-size"
+    "-fdiagnostics-color=always"
 )
 
 if(ROCPROFSYS_BUILD_DEBUG)
