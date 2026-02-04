@@ -8,8 +8,8 @@
 #include "library/thread_data.hpp"
 
 #if ROCPROFSYS_USE_ROCM > 0
-#    include <amd_smi/amdsmi.h>
 #    include "core/amd_smi.hpp"
+#    include <amd_smi/amdsmi.h>
 #endif
 
 #include <chrono>

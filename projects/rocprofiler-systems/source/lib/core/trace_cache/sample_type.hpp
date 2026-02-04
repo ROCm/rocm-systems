@@ -694,10 +694,10 @@ struct ainic_sample : cacheable_t
     static constexpr type_identifier_t type_identifier = type_identifier_t::ainic_sample;
 
     ainic_sample() = default;
-    ainic_sample(size_t _timestamp,
-                 uint64_t _rx_rdma_cnp_pkts, uint64_t _tx_rdma_cnp_pkts,
-                 uint64_t _rx_ucast_bytes, uint64_t _tx_ucast_bytes,
-                 uint64_t _rx_ucast_pkts, uint64_t _tx_ucast_pkts)
+    ainic_sample(size_t _timestamp, uint64_t _rx_rdma_cnp_pkts,
+                 uint64_t _tx_rdma_cnp_pkts, uint64_t _rx_ucast_bytes,
+                 uint64_t _tx_ucast_bytes, uint64_t _rx_ucast_pkts,
+                 uint64_t _tx_ucast_pkts)
     : timestamp(_timestamp)
     , rx_rdma_cnp_pkts(_rx_rdma_cnp_pkts)
     , tx_rdma_cnp_pkts(_tx_rdma_cnp_pkts)
@@ -720,7 +720,8 @@ template <>
 inline void
 serialize(uint8_t* buffer, const ainic_sample& item)
 {
-    utility::store_value(buffer, static_cast<uint64_t>(item.timestamp), item.rx_rdma_cnp_pkts, item.tx_rdma_cnp_pkts,
+    utility::store_value(buffer, static_cast<uint64_t>(item.timestamp),
+                         item.rx_rdma_cnp_pkts, item.tx_rdma_cnp_pkts,
                          item.rx_ucast_bytes, item.tx_ucast_bytes, item.rx_ucast_pkts,
                          item.tx_ucast_pkts);
 }
@@ -742,9 +743,9 @@ template <>
 inline size_t
 get_size(const ainic_sample& item)
 {
-    return utility::get_size(static_cast<uint64_t>(item.timestamp), item.rx_rdma_cnp_pkts, item.tx_rdma_cnp_pkts,
-                             item.rx_ucast_bytes, item.tx_ucast_bytes, item.rx_ucast_pkts,
-                             item.tx_ucast_pkts);
+    return utility::get_size(static_cast<uint64_t>(item.timestamp), item.rx_rdma_cnp_pkts,
+                             item.tx_rdma_cnp_pkts, item.rx_ucast_bytes,
+                             item.tx_ucast_bytes, item.rx_ucast_pkts, item.tx_ucast_pkts);
 }
 
 struct cpu_freq_sample : cacheable_t
