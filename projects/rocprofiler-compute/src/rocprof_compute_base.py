@@ -84,7 +84,8 @@ class RocProfCompute:
         setattr(self.__args, "loglevel", self.__loglevel)
         set_locale_encoding()
 
-        self.generate_machine_specs()
+        if self.__mode == "profile":
+            self.generate_machine_specs()
 
         self.sanitize()
 
@@ -182,9 +183,6 @@ class RocProfCompute:
             if self.__args.name is None and self.__args.output_directory == str(
                 Path.cwd() / "workloads"
             ):
-                print(f"Path: {self.__args.path}")
-                print(f"Name: {self.__args.name}")
-                print(f"Output_directory: {self.__args.output_directory}")
                 # Remove if statement and the else code block after 8.0 release
                 if self.__args.path == str(Path.cwd() / "workloads"):
                     console_error("Either --output-directory or --name is required")
@@ -253,7 +251,19 @@ class RocProfCompute:
 
     @demarcate
     def load_soc_specs(self, sysinfo: Optional[dict] = None) -> None:
-        """Load OmniSoC instance for RocProfCompute run"""
+        """
+        Load OmniSoC instance for RocProfCompute run
+
+        If sysinfo is provided (e.g., in analyze mode from sysinfo.csv),
+        regenerate the MachineSpecs from that data instead of using the
+        current host's characteristics.
+        """
+        if sysinfo is not None:
+            # Regenerate machine specs based on the provided sysinfo rather than
+            # the current host. This is important for analyze mode where we may
+            # be running on a different machine than the one that produced the data.
+            self.__mspec = generate_machine_specs(self.__args, sysinfo)
+
         arch = self.__mspec.gpu_arch
         soc_module = importlib.import_module(f"rocprof_compute_soc.soc_{arch}")
         soc_class = getattr(soc_module, f"{arch}_soc")
