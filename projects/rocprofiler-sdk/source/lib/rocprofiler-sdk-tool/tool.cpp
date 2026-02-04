@@ -1053,6 +1053,12 @@ buffered_tracing_callback(rocprofiler_context_id_t /*context*/,
                     header->kind == ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_FAULT)
             {
                 // drop these events, which are captured within the corresponding paired record
+                // generate an error in CI so we are aware of it if it is enabled at a later time
+                ROCP_CI_LOG(INFO) << fmt::format(
+                    "dropping KFD event kind: {} :: {}",
+                    header->kind,
+                    tool_metadata->get_kind_name(
+                        static_cast<rocprofiler_buffer_tracing_kind_t>(header->kind)));
             }
             else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE)
             {
@@ -1073,44 +1079,56 @@ buffered_tracing_callback(rocprofiler_context_id_t /*context*/,
                     header->kind == ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT ||
                     header->kind == ROCPROFILER_BUFFER_TRACING_KFD_QUEUE)
             {
-                auto set_kfd_record = [&header](auto& kfd_record) {
+                auto construct_kfd_record = [&header]() -> tool::tool_buffer_tracing_kfd_record_t {
                     if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU)
                     {
-                        kfd_record.record =
-                            *(static_cast<
-                                rocprofiler_buffer_tracing_kfd_event_unmap_from_gpu_record_t*>(
-                                header->payload));
+                        return tool::tool_buffer_tracing_kfd_record_t{
+                            .record =
+                                *(static_cast<
+                                    rocprofiler_buffer_tracing_kfd_event_unmap_from_gpu_record_t*>(
+                                    header->payload))};
                     }
                     else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS)
                     {
-                        kfd_record.record =
-                            *(static_cast<
-                                rocprofiler_buffer_tracing_kfd_event_dropped_events_record_t*>(
-                                header->payload));
+                        return tool::tool_buffer_tracing_kfd_record_t{
+                            .record =
+                                *(static_cast<
+                                    rocprofiler_buffer_tracing_kfd_event_dropped_events_record_t*>(
+                                    header->payload))};
                     }
                     else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE)
                     {
-                        kfd_record.record =
-                            *(static_cast<rocprofiler_buffer_tracing_kfd_page_migrate_record_t*>(
-                                header->payload));
+                        return tool::tool_buffer_tracing_kfd_record_t{
+                            .record = *(
+                                static_cast<rocprofiler_buffer_tracing_kfd_page_migrate_record_t*>(
+                                    header->payload))};
                     }
                     else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT)
                     {
-                        kfd_record.record =
-                            *(static_cast<rocprofiler_buffer_tracing_kfd_page_fault_record_t*>(
-                                header->payload));
+                        return tool::tool_buffer_tracing_kfd_record_t{
+                            .record =
+                                *(static_cast<rocprofiler_buffer_tracing_kfd_page_fault_record_t*>(
+                                    header->payload))};
                     }
                     else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_QUEUE)
                     {
-                        kfd_record.record =
-                            *(static_cast<rocprofiler_buffer_tracing_kfd_queue_record_t*>(
-                                header->payload));
+                        return tool::tool_buffer_tracing_kfd_record_t{
+                            .record = *(static_cast<rocprofiler_buffer_tracing_kfd_queue_record_t*>(
+                                header->payload))};
                     }
+
+                    ROCP_CI_LOG(INFO) << fmt::format(
+                        "unsupported KFD kind: {} :: {}",
+                        header->kind,
+                        tool_metadata->get_kind_name(
+                            static_cast<rocprofiler_buffer_tracing_kind_t>(header->kind)));
+
+                    // returns an invalid record via std::monostate
+                    return tool::tool_buffer_tracing_kfd_record_t{};
                 };
 
-                auto rec = tool::tool_buffer_tracing_kfd_record_t{};
-                set_kfd_record(rec);
-                tool::write_ring_buffer(rec, domain_type::KFD);
+                if(auto rec = construct_kfd_record(); rec.valid())
+                    tool::write_ring_buffer(rec, domain_type::KFD);
             }
             else if(header->kind == ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY)
             {

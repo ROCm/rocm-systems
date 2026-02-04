@@ -37,15 +37,20 @@ namespace tool
 // Wrapper type used by the tool to simplify the passing around of KFD data
 struct tool_buffer_tracing_kfd_record_t
 {
-    std::variant<rocprofiler_buffer_tracing_kfd_event_page_migrate_record_t,
-                 rocprofiler_buffer_tracing_kfd_event_page_fault_record_t,
-                 rocprofiler_buffer_tracing_kfd_event_queue_record_t,
-                 rocprofiler_buffer_tracing_kfd_event_unmap_from_gpu_record_t,
-                 rocprofiler_buffer_tracing_kfd_event_dropped_events_record_t,
-                 rocprofiler_buffer_tracing_kfd_page_migrate_record_t,
-                 rocprofiler_buffer_tracing_kfd_page_fault_record_t,
-                 rocprofiler_buffer_tracing_kfd_queue_record_t>
-        record;
+    // use std::monostate to indicate no KFD data present
+    using data_type = std::variant<std::monostate,
+                                   rocprofiler_buffer_tracing_kfd_event_page_migrate_record_t,
+                                   rocprofiler_buffer_tracing_kfd_event_page_fault_record_t,
+                                   rocprofiler_buffer_tracing_kfd_event_queue_record_t,
+                                   rocprofiler_buffer_tracing_kfd_event_unmap_from_gpu_record_t,
+                                   rocprofiler_buffer_tracing_kfd_event_dropped_events_record_t,
+                                   rocprofiler_buffer_tracing_kfd_page_migrate_record_t,
+                                   rocprofiler_buffer_tracing_kfd_page_fault_record_t,
+                                   rocprofiler_buffer_tracing_kfd_queue_record_t>;
+
+    data_type record = {};  // default initializes to monostate
+
+    bool valid() const { return !std::holds_alternative<std::monostate>(record); }
 };
 
 static auto
@@ -243,7 +248,14 @@ template <typename ArchiveT>
 void
 save(ArchiveT& ar, const ::rocprofiler::tool::tool_buffer_tracing_kfd_record_t& data)
 {
-    std::visit([&ar](const auto record) { cereal::save(ar, record); }, data.record);
+    std::visit(
+        [&ar](const auto record) {
+            using record_type = ::rocprofiler::common::mpl::unqualified_type_t<decltype(record)>;
+
+            if constexpr(!std::is_same<record_type, std::monostate>::value)
+                cereal::save(ar, record);
+        },
+        data.record);
 }
 
 template <typename ArchiveT>

@@ -1606,9 +1606,17 @@ write_rocpd(
             {
                 auto data = std::visit(
                     [&tool_metadata](const auto& record) {
-                        return construct_kfd_pmc_event(tool_metadata, record);
+                        using record_type = common::mpl::unqualified_type_t<decltype(record)>;
+
+                        if constexpr(!std::is_same<record_type, std::monostate>::value)
+                            return construct_kfd_pmc_event(tool_metadata, record);
+
+                        return kfd_pmc_event_data_t{};
                     },
                     itr.record);
+
+                // skip invalid records
+                if(data.kind == ROCPROFILER_BUFFER_TRACING_NONE) continue;
 
                 // insert thread info if it doesn't already exist
                 get_thread_id(data.tid);
