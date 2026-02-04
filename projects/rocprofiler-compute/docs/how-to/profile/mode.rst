@@ -1235,6 +1235,23 @@ to your output directory. The following example is run on the host `amd-ryzen`:
 .. note::
    For profiling multi-rank workloads with MPI communication, use ``--iteration-multiplexing`` and do not turn on PC sampling with `-b 21`.
 
+.. warning::
+   MPI launchers (``mpirun``, ``mpiexec``, ``srun``, ``orterun``) must wrap the
+   ``rocprof-compute`` command, not appear after ``--``. The following is **incorrect**:
+
+   .. code-block:: shell-session
+
+      $ rocprof-compute profile --name my_app -- mpirun -n 4 ./my_application   # WRONG
+
+   Instead, use the correct form where the MPI launcher wraps ``rocprof-compute``:
+
+   .. code-block:: shell-session
+
+      $ mpirun -n 4 rocprof-compute profile --name my_app -- ./my_application   # CORRECT
+
+   If you use an MPI launcher after ``--``, an error will be raised with guidance
+   on the correct usage.
+
 ROCm Compute Profiler supports the following libraries, APIs and job schedulers:
 
 * OpenMPI
