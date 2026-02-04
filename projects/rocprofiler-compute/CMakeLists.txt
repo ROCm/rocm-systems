@@ -254,7 +254,7 @@ find_package(MPI COMPONENTS CXX)
 if(MPI_CXX_COMPILER)
     message(STATUS "MPI CXX compiler found: ${MPI_CXX_COMPILER}")
 else()
-    message(FATAL_ERROR "MPI CXX compiler not found. MPI tests will be skipped.")
+    message(WARNING "MPI CXX compiler not found. MPI tests will be skipped.")
 endif()
 
 option(
