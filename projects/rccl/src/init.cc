@@ -252,7 +252,7 @@ exit:;
 static ncclResult_t ncclInit() {
     // Register atexit handler to detect process shutdown. This must happen
     // early so the handler runs BEFORE HIP runtime static destructors.
-    ncclRegisterShutdownHandler();
+    rcclRegisterShutdownHandler();
 
     char strValue[2048];
     NCCLCHECK(ncclTopoGetStrFromSys("/proc/sys/kernel", "numa_balancing", strValue));
