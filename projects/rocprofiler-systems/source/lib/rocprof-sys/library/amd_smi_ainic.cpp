@@ -78,9 +78,9 @@ nic_data::sample()
     assert(_timestamp < std::numeric_limits<int64_t>::max());
     m_ts = _timestamp;
 
-    trace_cache::get_buffer_storage().store(
-        trace_cache::ainic_sample{ _timestamp, _rx_rdma_cnp_pkts, _tx_rdma_cnp_pkts, _rx_ucast_bytes,
-                                   _tx_ucast_bytes, _rx_ucast_pkts, _tx_ucast_pkts });
+    trace_cache::get_buffer_storage().store(trace_cache::ainic_sample{
+        _timestamp, _rx_rdma_cnp_pkts, _tx_rdma_cnp_pkts, _rx_ucast_bytes,
+        _tx_ucast_bytes, _rx_ucast_pkts, _tx_ucast_pkts });
 }
 
 bool
@@ -101,27 +101,27 @@ metadata_initialize_ainic_smi_tracks(uint32_t nic_index)
 
     trace_cache::get_metadata_registry().add_track(
         { trace_cache::info::annotate_with_nic<category::amd_smi_nic_rx_cnp_pkts>(
-            track_name),
+              track_name),
           thread_id, "{}" });
     trace_cache::get_metadata_registry().add_track(
         { trace_cache::info::annotate_with_nic<category::amd_smi_nic_tx_cnp_pkts>(
-            track_name),
+              track_name),
           thread_id, "{}" });
     trace_cache::get_metadata_registry().add_track(
         { trace_cache::info::annotate_with_nic<category::amd_smi_nic_rx_ucast_bytes>(
-            track_name),
+              track_name),
           thread_id, "{}" });
     trace_cache::get_metadata_registry().add_track(
         { trace_cache::info::annotate_with_nic<category::amd_smi_nic_tx_ucast_bytes>(
-            track_name),
+              track_name),
           thread_id, "{}" });
     trace_cache::get_metadata_registry().add_track(
         { trace_cache::info::annotate_with_nic<category::amd_smi_nic_rx_ucast_pkts>(
-            track_name),
+              track_name),
           thread_id, "{}" });
     trace_cache::get_metadata_registry().add_track(
         { trace_cache::info::annotate_with_nic<category::amd_smi_nic_tx_ucast_pkts>(
-            track_name),
+              track_name),
           thread_id, "{}" });
 }
 
@@ -180,16 +180,16 @@ metadata_initialize_ainic_smi_pmc(uint32_t nic_index)
 void
 nic_config()
 {
-        // Get AI NIC data for all NICs at once.
-        nic_data::nic_stats_collector.update_stats();
+    // Get AI NIC data for all NICs at once.
+    nic_data::nic_stats_collector.update_stats();
 
-        for(uint32_t nic_index = 0; nic_index < nic_data::nic_vec.size(); ++nic_index)
-        {
-            auto nic_bundle = std::deque<nic_data>{};
-            nic_sampler_vec.push_back(nic_bundle);
-            metadata_initialize_ainic_smi_tracks(nic_index);
-            metadata_initialize_ainic_smi_pmc(nic_index);
-        }
+    for(uint32_t nic_index = 0; nic_index < nic_data::nic_vec.size(); ++nic_index)
+    {
+        auto nic_bundle = std::deque<nic_data>{};
+        nic_sampler_vec.push_back(nic_bundle);
+        metadata_initialize_ainic_smi_tracks(nic_index);
+        metadata_initialize_ainic_smi_pmc(nic_index);
+    }
 }
 void
 nic_sample()
@@ -202,7 +202,7 @@ nic_sample()
     for(uint32_t nic_index = 0; nic_index < nic_data::nic_vec.size(); ++nic_index)
     {
         std::string& nic  = nic_data::nic_vec[nic_index];
-        auto         data = nic_data { nic_index, nic };
+        auto         data = nic_data{ nic_index, nic };
         nic_sampler_vec[nic_index].push_back(data);
     }
 }
@@ -229,7 +229,7 @@ nic_data::post_process(size_t nic_index)
     for(auto& itr : nic_sampler_vec[nic_index])
     {
 
-        uint64_t _ts               = itr.m_ts;
+        uint64_t _ts = itr.m_ts;
         if(!_thread_info->is_valid_time(_ts)) continue;
 
         uint32_t _rx_rdma_cnp_pkts = itr._rx_rdma_cnp_pkts;
@@ -249,26 +249,27 @@ nic_data::post_process(size_t nic_index)
         size_t track_index = 0;
 
         TRACE_COUNTER("nic_rx_cnp_pkts", counter_track::at(nic_index, track_index++), _ts,
-            _rx_rdma_cnp_pkts);
+                      _rx_rdma_cnp_pkts);
         TRACE_COUNTER("nic_tx_cnp_pkts", counter_track::at(nic_index, track_index++), _ts,
-            _tx_rdma_cnp_pkts);
+                      _tx_rdma_cnp_pkts);
         TRACE_COUNTER("nic_rx_ucast_bytes", counter_track::at(nic_index, track_index++),
-            _ts, _rx_ucast_bytes);
+                      _ts, _rx_ucast_bytes);
         TRACE_COUNTER("nic_tx_ucast_bytes", counter_track::at(nic_index, track_index++),
-            _ts, _tx_ucast_bytes);
+                      _ts, _tx_ucast_bytes);
         TRACE_COUNTER("nic_rx_ucast_pkts", counter_track::at(nic_index, track_index++),
-            _ts, _rx_ucast_pkts);
+                      _ts, _rx_ucast_pkts);
         TRACE_COUNTER("nic_tx_ucast_pkts", counter_track::at(nic_index, track_index++),
-            _ts, _tx_ucast_pkts);
+                      _ts, _tx_ucast_pkts);
     }
 }
 
 // Parse a comma-separated list of strings.
-static std::vector<std::string> parse_list(const std::string& nic_str)
+static std::vector<std::string>
+parse_list(const std::string& nic_str)
 {
     std::vector<std::string> nic_vec{};
     std::string              current{ "" };
-    for (auto& ch : nic_str)
+    for(auto& ch : nic_str)
     {
         if(ch == ',')
         {
@@ -281,7 +282,7 @@ static std::vector<std::string> parse_list(const std::string& nic_str)
         }
         current += ch;
     }
-    if (current.size() > 0) {
+    if(current.size() > 0) {
         nic_vec.push_back(current);
     }
     return nic_vec;
@@ -314,8 +315,8 @@ nic_setup()
         // Get list of devices from the command line and add those that are
         // valid to nic_vec.
         nic_data::nic_vec = {};
-        auto nic_list = parse_list(_ainic_devices_v);
-        for (auto& nic : nic_list)
+        auto nic_list     = parse_list(_ainic_devices_v);
+        for(auto& nic : nic_list)
         {
             if(nic_data::nic_stats_collector.is_nic_valid(nic))
             {

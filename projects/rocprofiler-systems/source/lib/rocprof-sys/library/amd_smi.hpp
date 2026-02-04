@@ -33,12 +33,12 @@
 #include "core/defines.hpp"
 #include "core/gpu_metrics.hpp"
 #include "core/state.hpp"
-#include "library/thread_data.hpp"
 #include "library/amd_smi_ainic.hpp"
+#include "library/thread_data.hpp"
 
 #if ROCPROFSYS_USE_ROCM > 0
-#    include <amd_smi/amdsmi.h>
 #    include "core/amd_smi.hpp"
+#    include <amd_smi/amdsmi.h>
 #endif
 
 #include <chrono>
@@ -159,7 +159,6 @@ private:
     static bool                          setup();
     static bool                          shutdown();
 };
-
 
 #if !defined(ROCPROFSYS_USE_ROCM) || ROCPROFSYS_USE_ROCM == 0
 

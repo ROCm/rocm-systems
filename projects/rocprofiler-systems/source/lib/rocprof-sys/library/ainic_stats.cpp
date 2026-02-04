@@ -10,12 +10,12 @@ NICData::to_string() const
     std::ostringstream stream;
 
     stream << "[_name=" << _name << ", _netdev=" << _netdev
-        << ", _rx_rdma_ucast_bytes=" << _rx_rdma_ucast_bytes
-        << ", _rx_rdma_ucast_pkts="  << _rx_rdma_ucast_pkts
-        << ", _tx_rdma_ucast_bytes=" << _tx_rdma_ucast_bytes
-        << ", _tx_rdma_ucast_pkts="  << _tx_rdma_ucast_pkts
-        << ", _rx_rdma_cnp_pkts=" << _rx_rdma_cnp_pkts
-        << ", _tx_rdma_cnp_pkts=" << _tx_rdma_cnp_pkts << "]";
+           << ", _rx_rdma_ucast_bytes=" << _rx_rdma_ucast_bytes
+           << ", _rx_rdma_ucast_pkts="  << _rx_rdma_ucast_pkts
+           << ", _tx_rdma_ucast_bytes=" << _tx_rdma_ucast_bytes
+           << ", _tx_rdma_ucast_pkts="  << _tx_rdma_ucast_pkts
+           << ", _rx_rdma_cnp_pkts=" << _rx_rdma_cnp_pkts
+           << ", _tx_rdma_cnp_pkts=" << _tx_rdma_cnp_pkts << "]";
     return stream.str();
 }
 
@@ -28,12 +28,12 @@ const char* NICData::TX_RDMA_CNP_PKTS    = "tx_rdma_cnp_pkts";
 
 AINICStatsCollector::AINICStatsCollector()
 #ifdef USE_AINIC
-    :
-    _amdsmi(amd::smi::AMDSmiSystem::getInstance())
+: _amdsmi(amd::smi::AMDSmiSystem::getInstance())
 #endif
 {}
 
-bool AINICStatsCollector::find_nic(const std::string& nic, NICData& data) const
+bool
+AINICStatsCollector::find_nic(const std::string& nic, NICData& data) const
 {
     auto pair = _nic_params.find(nic);
     if(pair == _nic_params.end())
@@ -44,51 +44,52 @@ bool AINICStatsCollector::find_nic(const std::string& nic, NICData& data) const
     return true;
 }
 
-bool AINICStatsCollector::is_nic_valid(const std::string& nic) const
+bool
+AINICStatsCollector::is_nic_valid(const std::string& nic) const
 {
     return (_nic_params.find(nic) != _nic_params.end());
 }
 
-void AINICStatsCollector::update_stats()
+void
+AINICStatsCollector::update_stats()
 {
 #ifdef USE_AINIC
-    uint32_t soc_count{};
+    uint32_t                                soc_count{};
     std::unique_ptr<amdsmi_socket_handle[]> sockets;
     // Call amdsmi_get_socket_handles with second parameter (socket_handles)
     // nullptr to get the number of socket handles.
     amdsmi_status_t status = amdsmi_get_socket_handles(&soc_count, nullptr);
-    if (status != AMDSMI_STATUS_SUCCESS)
+    if(status != AMDSMI_STATUS_SUCCESS)
     {
-        LOG_ERROR("amdsmi_get_socket_handles failed with status {}", (int)status);
+        LOG_ERROR("amdsmi_get_socket_handles failed with status {}", (int) status);
         return;
     }
 
-    if(soc_count == 0) // Nothing to do.
+    if(soc_count == 0)  // Nothing to do.
         return;
 
     // Allocate a buffer for soc_count socket handles.
     sockets = std::make_unique<amdsmi_socket_handle[]>(soc_count);
     // Get the socket handles.
     status = amdsmi_get_socket_handles(&soc_count, sockets.get());
-    if (status != AMDSMI_STATUS_SUCCESS)
+    if(status != AMDSMI_STATUS_SUCCESS)
     {
-        LOG_ERROR("amdsmi_get_socket_handles failed with status {}", (int)status);
+        LOG_ERROR("amdsmi_get_socket_handles failed with status {}", (int) status);
         return;
     }
 
     // Iterate through all socket handles to find all AI NIC
     // processor handles and update the statistics for each of them.
     std::vector<amd::smi::AMDSmiAINICDevice::AINICInfo> nics;
-    for (uint32_t index = 0 ; index < soc_count; index++)
+    for(uint32_t index = 0 ; index < soc_count; index++)
     {
         uint32_t processor_count = 0;
-        status = amdsmi_get_processor_handles_by_type(
-            sockets[index],
-            AMDSMI_PROCESSOR_TYPE_AMD_NIC,
-            nullptr, &processor_count);
-        if (status != AMDSMI_STATUS_SUCCESS)
+        status                   = amdsmi_get_processor_handles_by_type(
+            sockets[index], AMDSMI_PROCESSOR_TYPE_AMD_NIC, nullptr, &processor_count);
+        if(status != AMDSMI_STATUS_SUCCESS)
         {
-            LOG_ERROR("amdsmi_get_processor_handles_by_type failed with status {}", (int)status);
+            LOG_ERROR("amdsmi_get_processor_handles_by_type failed with status {}",
+                      (int) status);
             return;
         }
         std::vector<amdsmi_processor_handle> processor_handles(processor_count);
@@ -96,14 +97,15 @@ void AINICStatsCollector::update_stats()
             sockets[index],
             AMDSMI_PROCESSOR_TYPE_AMD_NIC,
             processor_handles.data(), &processor_count);
-        if (status != AMDSMI_STATUS_SUCCESS)
+        if(status != AMDSMI_STATUS_SUCCESS)
         {
-            LOG_ERROR("amdsmi_get_processor_handles_by_type failed with status {}", (int)status);
+            LOG_ERROR("amdsmi_get_processor_handles_by_type failed with status {}",
+                      (int) status);
             return;
         }
         for(uint32_t idx = 0; idx < processor_count; ++idx)
         {
-            amd::smi::AMDSmiAINICDevice::AINICInfo ainic_info {};
+            amd::smi::AMDSmiAINICDevice::AINICInfo ainic_info{};
             amdsmi_get_ainic_info(processor_handles[idx], &ainic_info);
 
             // Update info and stats.
@@ -119,23 +121,25 @@ size_t
 AINICStatsCollector::get_nic_count()
 {
 #ifdef USE_AINIC
-    uint32_t soc_count = 10;
+    uint32_t                          soc_count = 10;
     std::vector<amdsmi_socket_handle> sockets(soc_count);
     // Get the sockets of the system
     amdsmi_status_t status = amdsmi_get_socket_handles(&soc_count, &sockets[0]);
-    if (status != AMDSMI_STATUS_SUCCESS){
+    if(status != AMDSMI_STATUS_SUCCESS)
+    {
         return 0;
     }
 
     // For all sockets, find all NIC processor handles.
     size_t nic_count{};
-    for (uint32_t index = 0 ; index < soc_count; index++){
+    for(uint32_t index = 0 ; index < soc_count; index++)
+    {
         uint32_t processor_count = 0;
-        status = amdsmi_get_processor_handles_by_type(
+        status                   = amdsmi_get_processor_handles_by_type(
             sockets[index],
-            AMDSMI_PROCESSOR_TYPE_AMD_NIC,
-            nullptr, &processor_count);
-        if (status != AMDSMI_STATUS_SUCCESS){
+            AMDSMI_PROCESSOR_TYPE_AMD_NIC, nullptr, &processor_count);
+        if(status != AMDSMI_STATUS_SUCCESS)
+        {
             continue;
         }
         nic_count += processor_count;
@@ -146,71 +150,84 @@ AINICStatsCollector::get_nic_count()
 #endif  // USE_AINIC
 }
 
-void AINICStatsCollector::update_data_for_one_nic(amdsmi_processor_handle processor_handle)
+void
+AINICStatsCollector::update_data_for_one_nic(amdsmi_processor_handle processor_handle)
 {
 #ifdef USE_AINIC
     amd::smi::AMDSmiAINICDevice::AINICInfo ainic_info;
     amdsmi_get_ainic_info(processor_handle, &ainic_info);
 
-    for(size_t port_idx = 0; port_idx < ainic_info.port.num_ports; ++port_idx) {
-        for(uint8_t rdma_dev_idx = 0; rdma_dev_idx < ainic_info.rdma_dev.num_rdma_dev; ++rdma_dev_idx) {
-            for(uint8_t rdma_port_idx = 0; rdma_port_idx < ainic_info.rdma_dev.rdma_dev_info[rdma_dev_idx].num_rdma_ports; ++rdma_port_idx) {
+    for(size_t port_idx = 0; port_idx < ainic_info.port.num_ports; ++port_idx)
+    {
+        for(uint8_t rdma_dev_idx = 0; rdma_dev_idx < ainic_info.rdma_dev.num_rdma_dev;
+            ++rdma_dev_idx)
+        {
+            for(uint8_t rdma_port_idx = 0;
+                rdma_port_idx <
+                ainic_info.rdma_dev.rdma_dev_info[rdma_dev_idx].num_rdma_ports;
+                ++rdma_port_idx)
+            {
                 NICData data;
-                data._name = ainic_info.rdma_dev.rdma_dev_info[rdma_dev_idx].rdma_dev;
-                data._netdev = ainic_info.rdma_dev.rdma_dev_info[rdma_dev_idx].rdma_port_info[rdma_port_idx].netdev;
+                data._name   = ainic_info.rdma_dev.rdma_dev_info[rdma_dev_idx].rdma_dev;
+                data._netdev = ainic_info.rdma_dev.rdma_dev_info[rdma_dev_idx]
+                                   .rdma_port_info[rdma_port_idx]
+                                   .netdev;
 
                 std::unique_ptr<amdsmi_nic_stat_t[]> stats;
 
                 // Call *_statistics the first time to get the number of statistics.
                 uint32_t num_stats{};
-                amdsmi_get_nic_rdma_port_statistics(
-                    processor_handle,
-                    rdma_port_idx,
-                    &num_stats,
-                    nullptr
-                );
+                amdsmi_get_nic_rdma_port_statistics(processor_handle, rdma_port_idx,
+                    &num_stats, nullptr);
 
                 // Allocate stats.
                 stats = std::make_unique<amdsmi_nic_stat_t[]>(num_stats);
 
                 // Call *_statistics the second time to get the statistics.
-                amdsmi_get_nic_rdma_port_statistics(
-                    processor_handle,
-                    rdma_port_idx,
-                    &num_stats,
-                    stats.get()
-                );
+                amdsmi_get_nic_rdma_port_statistics(processor_handle, rdma_port_idx,
+                    &num_stats, stats.get());
 
                 // Retrieve relevant stats.
-                for (uint32_t stat_idx{}; stat_idx < num_stats; ++stat_idx)
+                for(uint32_t stat_idx{}; stat_idx < num_stats; ++stat_idx)
                 {
-                    if (strcmp(stats[stat_idx].name, NICData::RX_RDMA_UCAST_BYTES) == 0)
+                    if(strcmp(stats[stat_idx].name, NICData::RX_RDMA_UCAST_BYTES) == 0)
                     {
-                        data._rx_rdma_ucast_bytes = static_cast<std::uint32_t>(stats[stat_idx].value);
+                        data._rx_rdma_ucast_bytes =
+                            static_cast<std::uint32_t>(stats[stat_idx].value);
                     }
-                    else if (strcmp(stats[stat_idx].name, NICData::RX_RDMA_UCAST_PKTS) == 0)
+                    else if(strcmp(stats[stat_idx].name, NICData::RX_RDMA_UCAST_PKTS) ==
+                            0)
                     {
                         data._rx_rdma_ucast_pkts = static_cast<std::uint32_t>(stats[stat_idx].value);
                     }
-                    else if (strcmp(stats[stat_idx].name, NICData::TX_RDMA_UCAST_BYTES) == 0)
+                    else if(strcmp(stats[stat_idx].name, NICData::TX_RDMA_UCAST_BYTES) ==
+                            0)
                     {
-                        data._tx_rdma_ucast_bytes = static_cast<std::uint32_t>(stats[stat_idx].value);
+                        data._tx_rdma_ucast_bytes =
+                            static_cast<std::uint32_t>(stats[stat_idx].value);
                     }
-                    else if (strcmp(stats[stat_idx].name, NICData::TX_RDMA_UCAST_PKTS) == 0)
+                    else if(strcmp(stats[stat_idx].name, NICData::TX_RDMA_UCAST_PKTS) ==
+                            0)
                     {
-                        data._tx_rdma_ucast_pkts = static_cast<std::uint32_t>(stats[stat_idx].value);
+                        data._tx_rdma_ucast_pkts =
+                            static_cast<std::uint32_t>(stats[stat_idx].value);
                     }
-                    else if (strcmp(stats[stat_idx].name, NICData::RX_RDMA_CNP_PKTS) == 0)
+                    else if(strcmp(stats[stat_idx].name, NICData::RX_RDMA_CNP_PKTS) ==
+                            0)
                     {
-                        data._rx_rdma_cnp_pkts = static_cast<std::uint32_t>(stats[stat_idx].value);
+                        data._rx_rdma_cnp_pkts =
+                            static_cast<std::uint32_t>(stats[stat_idx].value);
                     }
-                    else if (strcmp(stats[stat_idx].name, NICData::TX_RDMA_CNP_PKTS) == 0)
+                    else if(strcmp(stats[stat_idx].name, NICData::TX_RDMA_CNP_PKTS) ==
+                            0)
                     {
-                        data._tx_rdma_cnp_pkts = static_cast<std::uint32_t>(stats[stat_idx].value);
+                        data._tx_rdma_cnp_pkts =
+                            static_cast<std::uint32_t>(stats[stat_idx].value);
                     }
                 }
 
-                // We have filled in the fields of data. Now update _nic_params and _nic_delta_params.
+                // We have filled in the fields of data. Now update _nic_params and
+                // _nic_delta_params.
                 auto it = _nic_params.find(data._netdev);
                 if(it == _nic_params.end())  // not found
                 {
@@ -245,23 +262,25 @@ void AINICStatsCollector::update_data_for_one_nic(amdsmi_processor_handle proces
                     new_delta._tx_rdma_ucast_pkts =
                         data._tx_rdma_ucast_pkts - old_data._tx_rdma_ucast_pkts;
 
-                    new_delta._rx_rdma_cnp_pkts = data._rx_rdma_cnp_pkts - old_data._rx_rdma_cnp_pkts;
-                    new_delta._tx_rdma_cnp_pkts = data._tx_rdma_cnp_pkts - old_data._tx_rdma_cnp_pkts;
+                    new_delta._rx_rdma_cnp_pkts =
+                        data._rx_rdma_cnp_pkts - old_data._rx_rdma_cnp_pkts;
+                    new_delta._tx_rdma_cnp_pkts =
+                        data._tx_rdma_cnp_pkts - old_data._tx_rdma_cnp_pkts;
 
-                    _nic_params[data._netdev]   = data;
+                    _nic_params[data._netdev]       = data;
                     _nic_delta_params[data._netdev] = new_delta;
                 }
             }
         }
     }
-#endif //  USE_AINIC
+#endif  //  USE_AINIC
 }
 
 void
 AINICStatsCollector::get_data(const std::string& nic, NICData& data) const
 {
     auto it = _nic_delta_params.find(nic);
-    if(it == _nic_delta_params.end()) // not found
+    if(it == _nic_delta_params.end())  // not found
     {
         data._netdev              = nic;
         data._name                = "";
@@ -279,10 +298,12 @@ AINICStatsCollector::get_data(const std::string& nic, NICData& data) const
     }
 }
 
-std::vector<std::string> AINICStatsCollector::get_nic_list() const
+std::vector<std::string>
+AINICStatsCollector::get_nic_list() const
 {
     std::vector<std::string> nic_list = {};
-    for (auto& it : _nic_params) {
+    for(auto& it : _nic_params)
+    {
         nic_list.push_back(it.first);
     }
     return nic_list;

@@ -12,9 +12,9 @@
 
 struct NICData
 {
-    std::string _name;          // RDMA device name
-    std::string _netdev;        // NIC name
-    uint32_t    _num_stats {};  // Number of stats collected for this NIC
+    std::string _name;         // RDMA device name
+    std::string _netdev;       // NIC name
+    uint32_t    _num_stats{};  // Number of stats collected for this NIC
 
     std::uint32_t _rx_rdma_ucast_bytes{};  // unicast received bytes
     std::uint32_t _rx_rdma_ucast_pkts{};   // unicast received packets
@@ -41,7 +41,6 @@ public:
     using nic_params_t = std::map<std::string, NICData>;
 
 private:
-
 #ifdef USE_AINIC
     amd::smi::AMDSmiSystem&
         _amdsmi;  // Reference to the singleton instance of AMDSmiSystem
