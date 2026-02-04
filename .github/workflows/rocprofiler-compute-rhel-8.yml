@@ -1,8 +1,5 @@
-# This is a basic workflow to help you get started with Actions
+name: rocprofiler-compute RHEL
 
-name: rocprofiler-compute RHEL 8/9
-
-# Controls when the workflow will run
 on:
   push:
     branches:
@@ -32,8 +29,6 @@ on:
       - '!**/.wordlist.txt'
       - '!projects/rocprofiler-compute/docs/**'
       - '!projects/rocprofiler-compute/docker/**'
-
-  # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
 
 concurrency:
@@ -43,9 +38,8 @@ concurrency:
 env:
   ROCM_VERSION: "7.2.0"
 
-# A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
-  build:
+  build-rhel:
     # The type of runner that the job will run on
     # Using rocprofiler-systems images and later installing rocm, the official rocm images for al8 red hat variant are too large- this is a workaround.
     runs-on: ubuntu-latest
@@ -56,6 +50,7 @@ jobs:
       matrix:
         os-release: [ '8.10', '9.4' ]
         build-type: ['Release']
+
     # Steps represent a sequence of tasks that will be executed as part of the job
     # Note- RHEL8 references python3.9 as python39, whereas RHEL9 default version is already 3.9, so we only need to call it as python3
     steps:
@@ -75,6 +70,7 @@ jobs:
           yum -y install cmake3
           yum -y install which
           yum -y install glibc-langpack-en
+
       - name: Install ROCm Packages
         timeout-minutes: 30
         uses: nick-fields/retry@v3
@@ -92,10 +88,12 @@ jobs:
               yum install -y https://repo.radeon.com/amdgpu-install/${ROCM_MAJOR}.${ROCM_MINOR}/rhel/9.4/amdgpu-install-${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1.el9.noarch.rpm
             fi
             yum install -y rocm-dev
+            
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           sparse-checkout: projects/rocprofiler-compute
+
       - name: Install Python prereqs
         working-directory: projects/rocprofiler-compute
         run: |
@@ -109,11 +107,13 @@ jobs:
           cd build
           cmake -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-compute -DPYTEST_NUMPROCS=4 ..
           make install
+
       - name: CTest- Analyze Commands
         working-directory: projects/rocprofiler-compute
         run: |
           cd build
           ctest --verbose -R test_analyze_commands
+
       - name: CTest- Analyze Workloads
         working-directory: projects/rocprofiler-compute
         run: |

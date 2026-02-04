@@ -46,10 +46,6 @@
         "Unit_hipGraphicsUnmapResources_Negative_Parameters",
         "Unit_hipGraphicsUnregisterResource_Negative_Parameters",
         "SWDEV-446588 - Disable graph multi gpu testcases until graph has support for it",
-        "=== Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/210 ===",
-        "Unit_Coalesced_Group_Tiled_Partition_Sync_Positive_Basic - uint8_t",
-        "Unit_Coalesced_Group_Tiled_Partition_Sync_Positive_Basic - uint16_t",
-        "Unit_Coalesced_Group_Tiled_Partition_Sync_Positive_Basic - uint32_t",
         "SWDEV-447384, SWDEV-447932: These tests fail in gfx1100, gfx1101 & gfx1102",
         "SWDEV-445928: These tests fail in PSDB stress test on 09/02/2024",
         "Unit_hipGraphInstantiateWithFlags_StreamCaptureDeviceContextChg",
@@ -143,8 +139,6 @@
         "Unit_hipStreamPerThread_MultiThread",
     #endif
     #if defined gfx90a || defined gfx942 || defined gfx950
-        "=== SWDEV-443630 : Below test failed in stress test on 19/01/24 ===",
-        "Unit_Multi_Grid_Group_Positive_Sync",
         "Unit_Warp_Shfl_Up_Positive_Basic - int",
         "Unit_Warp_Shfl_Up_Positive_Basic - unsigned int",
         "Unit_Warp_Shfl_Up_Positive_Basic - long",
