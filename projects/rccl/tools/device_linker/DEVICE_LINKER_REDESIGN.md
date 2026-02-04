@@ -20,11 +20,11 @@
 
 **Sequential Multi-GPU: WORKING** - Each GPU works when initialized separately.
 
-**Parallel Multi-GPU: DEBUGGING** - Tests still fail, investigating root cause.
+**Parallel Multi-GPU: KERNEL HANG** - Multi-GPU AllReduce hangs indefinitely (kernel never completes). The old COMGR errors are resolved; the issue is now a kernel execution hang during `hipStreamSynchronize()`.
 
-**Specialized Kernel Symbols: WORKING** - 2493 `ncclDevFunc_*` symbols now appear in `.symtab` and show up in `llvm-objdump -d --symbolize-operands` output.
+**Specialized Kernel Symbols: WORKING** - 2493 `ncclDevFunc_*` symbols now appear in `.symtab` with correct addresses (pointing to actual function entry, not code block start).
 
-**Debug Line Tables: IMPLEMENTED** - Support for `-gline-tables-only` debug info has been added to the device linker. Awaiting build system integration to enable compilation with debug flags.
+**Debug Line Tables: WORKING** - Full DWARF5 support including `.debug_line_str` string offset patching. Debuggers now show correct file names and line numbers.
 
 ### Summary
 
@@ -65,29 +65,30 @@ The device linker now correctly maps:
 | Parallel (ncclCommInitAll or threads) | FAIL |
 | IFC build parallel | PASS |
 
-### Root Cause Analysis
+### Root Cause Analysis (Current Issue: Kernel Hang)
 
-The issue is **specific to concurrent code object loading**. When COMGR loads our ELF 
-on multiple devices simultaneously, it fails with "Cannot Find Global Var Sizes". 
+The COMGR concurrent loading issue is **RESOLVED**. The current problem is a **kernel execution hang** during multi-GPU AllReduce.
 
-This happens even though:
-1. Our ELF is valid (works on single GPU and sequentially)
-2. Structure matches IFC exactly
-3. Metadata has been patched to match IFC
-4. Symbol section indices are now correct
+**Symptoms:**
+- Single-GPU AllReduce works correctly
+- Multi-GPU AllReduce hangs indefinitely (kernel never completes)
+- Initialization succeeds, channels are connected, kernel is launched
+- Hang occurs during `hipStreamSynchronize()`
 
-Error from COMGR:
+**Likely Root Cause:**
+The kernel hangs because connection pointers accessed from `ncclShmem.groups[].recvConns[]` 
+and `sendConns[]` are NULL or invalid. These pointers are populated in the Primitives 
+constructor from `channel->peers[peer]`, which comes from `ncclShmem.channel.peers`.
+
+**Key code path (prims_simple.h):**
+```cpp
+// In Primitives constructor:
+if (flags & (RoleWaitRecv|RolePostRecv)) loadRecvConn(channel->peers[peer], ...);
+if (flags & (RoleWaitSend|RolePostSend)) loadSendConn(channel->peers[peer], ...);
 ```
-Error: COMGR failed to get the metadata.
-Error: create kernel metadata map using COMgr
-Error: Cannot Find Global Var Sizes
-Error: Cannot create kernels.
-Error: AMD HSA Code Object Reader create failed: HSA_STATUS_ERROR_INVALID_ARGUMENT
-```
 
-This appears to be a **COMGR bug** where concurrent loading of our post-processed ELF 
-triggers a code path that doesn't handle our ELF format correctly, even though sequential 
-loading works fine.
+The `peers` array is copied from host memory during kernel initialization, but may not 
+contain valid pointers in the device linker build.
 
 ### Systematic ELF Verification (Completed)
 
@@ -104,6 +105,26 @@ loading works fine.
 | Kernel metadata structure | VALID (different from IFC but correct) |
 | Note section msgpack | VALID |
 
+### Compilation Flags (Critical for Structure Layout)
+
+All compilation units MUST have these flags for consistent structure layouts:
+
+| Flag | Purpose | Affects Layout |
+|------|---------|----------------|
+| `DEVICE_LINKER` | Function table dispatch | No |
+| `ENABLE_FAULT_INJECTION` | Adds faults field to ncclShmemData | Yes |
+| `ENABLE_WARP_SPEED` | Adds warpComm/warpChannel fields | Yes |
+| `ENABLE_LL128` | Protocol selection | Possibly |
+
+**Current Flag Status by Unit:**
+
+| Unit | DEVICE_LINKER | ENABLE_FAULT_INJECTION | ENABLE_WARP_SPEED | ENABLE_LL128 |
+|------|---------------|------------------------|-------------------|--------------|
+| Host code (librccl.so) | ✓ | ✓ | ✓ | ✓ |
+| Specialized kernels | ✓ | ✓ | ✓ | ✓ |
+| Dispatcher (CMake) | ✓ | ✓ | ✓ | ✓ |
+| Dispatcher (script) | ✓ | ✓ | ✓ | ✓ |
+
 ### Known Differences from IFC (Acceptable)
 
 1. **Function table symbols**: GLOBAL PROTECTED in .dynsym (IFC: LOCAL HIDDEN in .symtab only)
@@ -112,22 +133,12 @@ loading works fine.
 4. **.rodata flags**: 0x2 (IFC: 0x32 with MERGE|STRINGS) - not critical
 5. **.comment section**: Missing (IFC has it) - not critical
 
-### Next Step: Debug COMGR
+### Next Steps
 
-Build COMGR with debug symbols and investigate the "Cannot Find Global Var Sizes" error path.
-Key things to look for:
-1. Where the error string is generated in COMGR source
-2. What condition triggers it during concurrent loading but not sequential
-3. Whether there's thread-unsafe code accessing shared state
-4. Whether GLOBAL OBJECT symbols in .dynsym trigger special handling
-
-### Potential Solutions
-
-1. **Debug COMGR** - Build with debug symbols, trace the error source
-2. **File ROCm bug report** - COMGR concurrent loading issue with device-linker ELFs
-3. **Serialize code object loading** - Add locking around HIP kernel registration
-4. **Match IFC's note section exactly** - Ensure all msgpack fields are identical
-5. **Use alternative bundling** - Create separate code objects per GPU (defeats size goals)
+1. Compare ncclShmemGroup initialization between system RCCL and device linker build
+2. Verify connection pointer setup in host code
+3. Check if there's a code path difference for multi-GPU that device linker misses
+4. Use `rocgdb` to inspect connection pointers at kernel hang point
 
 ## Goal
 
@@ -447,6 +458,10 @@ llvm-readelf -S merged.elf
 5. **Understand ELF structure** - headers, program headers, section headers all interrelated
 6. **Non-alloc section offsets must be recalculated** - if you modify `.symtab`/`.strtab` after layout, recalculate file offsets before writing
 7. **ELF local/global symbol ordering** - local symbols must precede globals; `sh_info` marks the boundary
+8. **Compilation flag consistency is critical** - structure layout changes (ENABLE_WARP_SPEED, ENABLE_FAULT_INJECTION) must be identical across host, dispatcher, and specialized kernels
+9. **Shared memory declarations** - `__shared__` vs `extern __shared__` affects LDS usage; dynamic allocation requires `extern __shared__` with incomplete array size
+10. **DWARF5 string tables** - when merging `.debug_line_str` sections, must patch `DW_FORM_line_strp` offsets in `.debug_line` prologues
+11. **Specialized kernel symbol addresses** - must account for helper functions before the actual `ncclDevFunc_` entry; use `func_offset` to compute correct `st_value`
 
 ---
 
@@ -482,18 +497,38 @@ Override with `--target <arch>` if needed.
 
 ### Debug Line Tables Support
 
-The device linker supports merging `.debug_line` sections for line-level debugging:**To enable:**
+The device linker supports merging DWARF5 debug info for line-level debugging:
+
+**To enable:**
 1. Add `-gline-tables-only` to specialized kernel compilation flags in CMake
 2. Rebuild specialized kernels
 3. Run device linker - it will automatically:
-   - Extract `.debug_line` from dispatcher and specialized kernels
-   - Concatenate into a merged section
-   - Patch `DW_LNE_set_address` opcodes with correct addresses
+   - Extract `.debug_line` and `.debug_line_str` from dispatcher and specialized kernels
+   - Concatenate sections
+   - Patch `DW_LNE_set_address` opcodes with correct code addresses
+   - **Patch DWARF5 string offsets** (`DW_FORM_line_strp`) when merging `.debug_line_str` sections
+
+**DWARF5 String Offset Fix:**
+DWARF5 stores directory/file names as offsets into `.debug_line_str`. When concatenating multiple 
+`.debug_line_str` sections, the device linker adjusts these offsets via `patchDwarf5StringOffsets()`:
+- Parses DWARF5 line table prologues to find directory and file name entries
+- Identifies entries using `DW_FORM_line_strp` form
+- Adjusts each string offset by `str_offset_base` (cumulative offset from earlier kernels)
+- Handles all DWARF forms including `DW_FORM_data16` (MD5 checksums)
+
+**Symbol Address Fix:**
+Specialized kernel symbols (`ncclDevFunc_*`) now point to the actual function entry, not the 
+start of the extracted code block (which includes helper functions):
+```cpp
+sym.st_value = text_addr_ + text_off + kern->func_offset;  // Actual function entry
+sym.st_size = kern->code.size() - kern->func_offset;       // Function size only
+```
 
 **What works:**
 - Line-based breakpoints in `rocgdb`
 - Line information in stack traces
 - Source stepping through specialized kernel code
+- Correct file names in debugger output
 
 **What doesn't work (limitation of -gline-tables-only):**
 - Variable inspection (no type info)
@@ -533,15 +568,26 @@ The device linker supports merging `.debug_line` sections for line-level debuggi
 | Wrong target arch | "Processing 1 input files", "Mapped 0 kernel functions" | Ensure `--target-arch` matches the .o files |
 | Specialized kernels not found | 0 relocations generated | Check `--input-dir` path and that .o files exist for target arch |
 
+### Resolved Issues
+
+**COMGR Concurrent Loading (FIXED):** The "Cannot Find Global Var Sizes" error during concurrent 
+multi-GPU loading has been resolved. The device linker ELF now loads correctly on multiple GPUs.
+
+**Dispatcher Inclusion (FIXED):** The build system now correctly compiles the dispatcher separately 
+and the device linker merges it with specialized kernels.
+
+**Shared Memory Limit (FIXED):** `ncclShmemPerWarp` now uses `extern __shared__` (dynamic allocation) 
+for CUDA arch >= 700, matching the standard build behavior. This resolved the error:
+`cudaArch 940 ncclMaxSharedMem 32832 exceeds device/fn maxSharedMem 27760`
+
 ### Current Unresolved Issue
 
-**Problem**: `merged_minimal.hip` only contains padding (`__device_linker_padding`), not the dispatcher kernels (`ncclDevKernel_Generic_*`).
+**Problem**: Multi-GPU AllReduce hangs indefinitely during kernel execution.
 
-**Impact**: The device linker produces an ELF without the dispatcher, causing "undefined reference to ncclDevKernel_Generic_*" at link time.
+**Status**: Single-GPU works; multi-GPU kernel launches but never completes.
 
-**Root cause**: When `SPECIALIZED_KERNELS_ONLY` is enabled (which `DEVICE_LINKER_ENABLED` implies), `common.cu` is excluded from the main build. But `merged_minimal.hip` doesn't include the dispatcher code either.
-
-**Needs discussion**: How should the dispatcher be included in the device linker pipeline?
+**Investigation**: Connection pointers in `ncclShmem.groups[].recvConns[]` and `sendConns[]` 
+may be NULL or invalid. Use `rocgdb` to inspect LDS contents at hang point.
 
 ### Build Command Reference
 
