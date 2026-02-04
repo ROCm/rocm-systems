@@ -103,13 +103,16 @@ if hasattr(torch._C, "_dispatch_call"):
         rangePush(full_marker_name)
         try:
             return original_dispatch_call(*args, **kwargs)
+        except Exception as e:
+            console_warning("torch trace",f"Error in {full_marker_name}: {e}")
+            console_warning("torch trace","Cannot inject ROCTX markers for torch._C._dispatch_call")
         finally:
             rangePop()
             marker_stack.pop()
 
     torch._C._dispatch_call = dispatch_call_with_roctx
 else:
-    console_warning("torch._C._dispatch_call not found; skipping dispatcher patching.")
+    console_log("torch._C._dispatch_call not found; skipping dispatcher patching.")
 
 try:
     import torchvision
@@ -147,28 +150,8 @@ try:
             marker_stack.pop()
 
     dist.all_reduce = all_reduce_with_roctx
-except Exception:
-    pass
-
-# try:
-#     import torch.jit
-#     original_jit_script = torch.jit.script
-#     def jit_script_with_roctx(*args, **kwargs):
-#         full_marker_name = "/".join(marker_stack + ["torch.jit.script"])
-#         marker_stack.append("torch.jit.script")
-#         rangePush(full_marker_name)
-#         try:
-#             return original_jit_script(*args, **kwargs)
-#         except Exception as e:
-#             console_warning("Exception in torch.jit.script, popping ROCTX marker")
-#             console_warning(str(e))
-#             return None
-#         finally:
-#             rangePop()
-#             marker_stack.pop()
-#     torch.jit.script = jit_script_with_roctx
-# except Exception:
-#     pass
+except Exception as e:
+    console_warning("torch trace",f"Could not patch torch.distributed.all_reduce: {e}")
 
 try:
     import torch.cuda
