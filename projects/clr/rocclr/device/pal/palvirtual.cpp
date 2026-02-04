@@ -3380,12 +3380,29 @@ bool VirtualGPU::waitAllEngines(CommandBatch* cb) {
 }
 
 void VirtualGPU::waitEventLock(CommandBatch* cb) {
-  bool earlyDone = false;
+  bool earlyDone = true;
+  GpuEvent eventsCopy[AllEngines];
+
   {
-    // Make sure VirtualGPU has an exclusive access to the resources
     amd::ScopedLock lock(execution());
-    earlyDone = waitAllEngines(cb);
+
+    GpuEvent* events = (cb == nullptr) ? events_ : cb->events_;
+
+    // The first loop is to flush all engines and/or check if
+    // engines are idle already
+    for (uint i = 0; i < AllEngines; ++i) {
+      eventsCopy[i] = events[i];
+      earlyDone &= isDone(&events[i]);
+    }
+
+    // Release all pinned memory
+    releasePinnedMem();
   }
+
+  for (uint i = 0; i < AllEngines; ++i) {
+    waitForEvent(&eventsCopy[i]);
+  }
+
   // Get timestamp, incase readjustTimeGPU_ needs to be updated
   uint64_t endTimeStampCPU = amd::Os::timeNanos();
 

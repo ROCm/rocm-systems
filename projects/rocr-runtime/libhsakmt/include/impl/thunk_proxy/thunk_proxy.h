@@ -1,5 +1,10 @@
-#ifndef _WSL_INC_THUNK_PROXY_H_
-#define _WSL_INC_THUNK_PROXY_H_
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+#pragma once
 
 #include <vector>
 
@@ -13,8 +18,9 @@ enum AllocDomain {
 };
 
 enum MemFlag {
-  kFineGrain  = (1ULL << 0),
-  kKernarg    = (1ULL << 1),
+  kFineGrain    = (1ULL << 0),
+  kKernarg      = (1ULL << 1),
+  kQueueObject  = (1ULL << 2),
 };
 
 enum EngineFlag {
@@ -36,14 +42,15 @@ struct HwsInfo {
       uint32_t computeHwsEnabled : 1;
       uint32_t dmaHwsEnabled     : 1;
       uint32_t dma1HwsEnabled    : 1;
-      uint32_t reserved          : 28;
+      uint32_t aql_queue         : 1;  //!< Kernel mode driver supports native AQL queue
+      uint32_t reserved : 27;
     } hwsMask;
     uint32_t osHwsEnableFlags;
   };
-  uint64_t engineOrdinalMask; // Indicates which engines (by ordinal) support MES HWS
+  uint64_t engineOrdinalMask;  // Indicates which engines (by ordinal) support MES HWS
 };
 
-typedef struct {
+struct DeviceInfo {
   int major;
   int minor;
   int stepping;
@@ -93,30 +100,62 @@ typedef struct {
   uint32_t compute_schedid;
   bool state_shadowing_by_cpfw;
   bool platform_atomic_support;
-  void *adapter_info;
+  void* adapter_info;
   uint32_t kmd_version;
-} DeviceInfo;
+  uint32_t gb_addr_config;  //!< Graphics block address configuration
+  uint32_t num_xcc;         //!< Number of XCC units
+};
 
-int EngineOrdinal(int engine, DeviceInfo *device_info);
-bool GetHwsEnabled(int engine, DeviceInfo *device_info);
-bool ShouldDisableGpuTimeout(int engine, DeviceInfo *device_info);
-bool ParseAdapterInfo(D3DKMT_HANDLE adapter, DeviceInfo *device_info);
+int EngineOrdinal(int engine, DeviceInfo* device_info);
+bool GetHwsEnabled(int engine, DeviceInfo* device_info);
+bool ShouldDisableGpuTimeout(int engine, DeviceInfo* device_info);
 bool QueryAdapterSupported(unsigned int device_id);
 
 uint32_t QueueEngine2EngineFlag(uint32_t queue_engine);
-void SetAllocationInfo(void *data, uint64_t size, AllocDomain domain,
-                      uint64_t addr, uint32_t mem_flags, uint32_t engine_flag, const DeviceInfo &device_info);
-void GetAllocPrivDataSize(int *priv_drv_data_size, int *priv_alloc_data_size);
-void FillinAllocPrivDrvData(void *drv_priv, int priv_alloc_data_size);
+void SetAllocationInfo(void* data, uint64_t size, AllocDomain domain, uint64_t addr,
+                       uint32_t mem_flags, uint32_t engine_flag, const DeviceInfo& device_info);
+void GetAllocPrivDataSize(int* priv_drv_data_size, int* priv_alloc_data_size);
+void FillinAllocPrivDrvData(void* drv_priv, int priv_alloc_data_size);
 
 int GetSubmitPrivDataSize();
-void FillinSubmitPrivData(void *priv_data, D3DKMT_HANDLE queue, uint64_t command_addr,
-                        uint64_t command_size, bool is_hw_queue);
+void FillinSubmitPrivData(void* priv_data, D3DKMT_HANDLE queue, uint64_t command_addr,
+                          uint64_t command_size, bool is_hw_queue);
 int GetHwQueuePrivDataSize();
+#if defined(__linux__)
 void FillinHwQueuePrivData(void *priv_data, bool FwManagedGfxState, SchedLevel level = kNormal);
-int GetContextPrivDataSize();
-void FillinContextPrivData(void *priv_data, bool FwManagedGfxState);
-int GetPowerOptPrivDataSize();
-void FillinPowerOptPrivData(void *priv_data, bool restore);
-}
+#else
+void FillinHwQueuePrivData(void* priv_data, bool FwManagedGfxState, SchedLevel level = kNormal,
+                           bool aql = false, uint64_t queue_va = 0, uint64_t queue_size = 0,
+                           uint64_t wptr = 0, uint64_t rptr = 0, D3DKMT_HANDLE aql_queue_desc = 0);
 #endif
+int GetContextPrivDataSize();
+
+int GetPowerOptPrivDataSize();
+void FillinPowerOptPrivData(void* priv_data, bool restore);
+
+#if defined(__linux__)
+void FillinContextPrivData(void *priv_data, bool FwManagedGfxState);
+bool ParseAdapterInfo(D3DKMT_HANDLE adapter, DeviceInfo* device_info);
+#else
+NTSTATUS ParseAdapterInfo(D3DKMT_HANDLE adapter, DeviceInfo* device_info);
+void FillinContextPrivData(void* priv_data, bool FwManagedGfxState, uint32_t schedId = 0);
+
+// AQL queue submit interfaces
+int GetAqlSubmitPrivDataSize();
+void FillinAqlSubmitPrivData(void* priv_data, uint64_t doorbell_value);
+
+// User mode event interfaces
+int GetRegisterEventPrivDataSize();
+void FillinRegisterEventPrivData(void* priv_data, uint64_t handle, uint32_t event_id);
+uint64_t GetRegisterEventMailbox(void* priv_data);
+int GetUnregisterEventPrivDataSize();
+void FillinUnregisterEventPrivData(void* priv_data, uint64_t handle);
+
+// Interop memory interface to get allocation size
+uint64_t GetMemoryAllocationSize(const void* priv_data);
+
+// Get the size of the proxy resource info structure
+size_t GetProxyResourceInfoSize();
+#endif
+}
+

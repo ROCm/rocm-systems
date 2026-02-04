@@ -32,6 +32,8 @@
 extern "C" {
 #endif
 
+/* Forward declaration for debug trap ioctl arguments */
+struct kfd_ioctl_dbg_trap_args;
 
 /**
   "Opens" the HSA kernel driver for user-kernel mode communication.
@@ -401,7 +403,8 @@ hsaKmtGetQueueInfo(
 HSAKMT_STATUS
 HSAKMTAPI
 hsaKmtQueueRingDoorbell(
-    HSA_QUEUEID QueueId
+    HSA_QUEUEID QueueId,
+    HSAuint64 value
 );
 
 /**
@@ -852,8 +855,10 @@ hsaKmtCheckRuntimeDebugSupport(
 /**
   Debug ops call primarily used for KFD testing
  */
-HSAKMT_STATUS HSAKMTAPI hsaKmtDebugTrapIoctl(
-    struct kfd_ioctl_dbg_trap_args *arg,
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtDebugTrapIoctl(
+    struct kfd_ioctl_dbg_trap_args *args,
     HSA_QUEUEID *Queues,
     HSAuint64 *DebugReturn
     );
@@ -1254,10 +1259,10 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtAisReadWriteFile(
 
 /**
  * Check if the HSA KMT Model is enabled
- * 
+ *
  *  Arguments:
  *   @enable (OUT) - true if the HSA KMT Model is enabled, false otherwise
- * 
+ *
  *  Return:
  *   HSAKMT_STATUS_ERROR             - failed
  *   HSAKMT_STATUS_SUCCESS           - successfully complete
@@ -1267,6 +1272,59 @@ HSAKMT_STATUS
 HSAKMTAPI
 hsaKmtModelEnabled(
     bool* enable // OUT
+);
+
+
+/**
+ *  Experimental APIs to abstract DRM calls to thunk
+*/
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtHandleImport(
+    const HsaExternalHandleDesc* ImportDesc,
+    HsaHandleImportResult* ImportResult,
+    HsaHandleImportFlags* Flags
+);
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtMemoryVaMap(
+    HsaMemoryObjectHandle Handle,
+    HSAuint64 offset,
+    HSAuint64 size,
+    HSAuint64 addr,
+    HsaMemoryMapFlags flags
+);
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtMemoryVaUnmap(
+    HsaMemoryObjectHandle Handle,
+    HSAuint64 offset,
+    HSAuint64 size,
+    HSAuint64 addr
+);
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtMemoryCpuMap(
+    HsaMemoryObjectHandle Handle,
+    void** out_cpu_ptr
+);
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtMemHandleFree(
+    HsaMemoryObjectHandle Handle
+);
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtMemoryGetCpuAddr(
+  HsaAMDGPUDeviceHandle DeviceHandle,
+  HsaMemoryObjectHandle MemoryHandle,
+  HSAint32* fd, // OUT
+  HSAuint64* cpu_addr // OUT
 );
 
 #ifdef __cplusplus
