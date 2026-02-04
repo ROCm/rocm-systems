@@ -751,6 +751,7 @@ config()
     nic_config();
 #endif
 
+    amd_smi::set_state(State::Active);
 }
 
 void
