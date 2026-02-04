@@ -535,8 +535,12 @@ def instrument_all_torch_ops():
     op_namespaces = ["aten", "quantized", "ml", "prims"]
     # Only include NVIDIA-specific nvfuser ops when running on a CUDA build
     torch_version = getattr(torch, "version", None)
-    cuda_version = getattr(torch_version, "cuda", None) if torch_version is not None else None
-    hip_version = getattr(torch_version, "hip", None) if torch_version is not None else None
+    cuda_version = (
+        getattr(torch_version, "cuda", None) if torch_version is not None else None
+    )
+    hip_version = (
+        getattr(torch_version, "hip", None) if torch_version is not None else None
+    )
     if cuda_version is not None and hip_version is None:
         op_namespaces.append("nvfuser")
     wrapped_count = 0
