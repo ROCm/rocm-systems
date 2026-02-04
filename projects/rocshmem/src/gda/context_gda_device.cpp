@@ -42,11 +42,29 @@ __host__ GDAContext::GDAContext(Backend *b, unsigned int ctx_id, int gda_provide
   barrier_sync = backend->barrier_sync;
   wrk_sync_pool_bases_ = backend->get_wrk_sync_bases();
 
-  CHECK_HIP(hipMalloc(&qps, sizeof(QueuePair) * num_pes));
-  CHECK_HIP(hipMemset(qps, 0, sizeof(QueuePair) * num_pes));
-  for (int i = 0; i < num_pes; i++) {
-    int offset = num_pes * ctx_id + i;
-    CHECK_HIP(hipMemcpy(&qps[i], &backend->gpu_qps[offset], sizeof(QueuePair), hipMemcpyDefault));
+  ctx_id_ = ctx_id;
+  num_qps_per_pe = ctx_id_?
+      envvar::gda::num_qps_per_pe_usr_ctx.get_value() :
+      envvar::gda::num_qps_per_pe_default_ctx.get_value();
+
+  num_qps = num_qps_per_pe * num_pes;
+
+  // Calculate offset into the backend's GPU QP array
+  int offset = (ctx_id_ > 0) *
+    (envvar::gda::num_qps_per_pe_default_ctx.get_value() +
+     envvar::gda::num_qps_per_pe_usr_ctx.get_value() * (ctx_id_ - 1));
+  offset *= num_pes;
+
+  CHECK_HIP(hipMalloc(&qp_counter, sizeof(uint32_t) * num_pes));
+  CHECK_HIP(hipMemset(qp_counter, 0, sizeof(uint32_t) * num_pes));
+  CHECK_HIP(hipMalloc(&qps, sizeof(QueuePair) * num_qps));
+  CHECK_HIP(hipMemset(qps, 0, sizeof(QueuePair) * num_qps));
+
+  CHECK_HIP(hipMemcpy(qps, &backend->gpu_qps[offset],
+                      num_qps * sizeof(QueuePair),
+                      hipMemcpyDefault));
+
+  for (int i = 0; i < num_qps; i++) {
     qps[i].base_heap = base_heap;
   }
 
@@ -54,12 +72,11 @@ __host__ GDAContext::GDAContext(Backend *b, unsigned int ctx_id, int gda_provide
   ipcImpl_.shm_size = backend->ipcImpl.shm_size;
   ipcImpl_.shm_rank = backend->ipcImpl.shm_rank;
   ipcImpl_.pes_with_ipc_avail = backend->ipcImpl.pes_with_ipc_avail;
-
-  ctx_id_ = ctx_id;
   gda_provider_ = gda_provider;
 }
 
 __host__ GDAContext::~GDAContext() {
+  CHECK_HIP(hipFree(qp_counter));
   CHECK_HIP(hipFree(qps));
 }
 

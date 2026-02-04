@@ -327,6 +327,21 @@ class GDAContext : public Context {
 
   int gda_provider_{0};
 
+  /**
+   * @brief Number of Queue Pairs allocated per PE
+   */
+  uint32_t num_qps_per_pe {1};
+
+  /**
+   * @brief Total number of Queue Pairs allocated = num_qps_per_pe * num_pes
+   */
+  uint32_t num_qps {1};
+
+  /**
+   * @brief Device pointer to the qp_counter variable to pcick next qp index
+   */
+  uint32_t *qp_counter {nullptr};
+
  public:
   QueuePair *qps{nullptr};
 
