@@ -52,12 +52,34 @@ std::unordered_map<std::string, void*> m_target_symbol_addrs  = {};
 auto
 get_this_library_path()
 {
-    const auto libname = fmt::format("{}.{}", ROCATTACH_LIBRARY_NAME, ROCPROFILER_SOVERSION);
-    auto       _this_lib_path =
-        rocprofiler::common::dl::get_linked_path(libname, {RTLD_NOLOAD | RTLD_LAZY});
-    LOG_IF(FATAL, !_this_lib_path)
-        << fmt::format("{} could not locate itself in the list of loaded libraries", libname);
-    return fs::path{*_this_lib_path}.parent_path().string();
+    const auto libnames = std::array<std::string, 3>{
+        fmt::format("{}.{}.{}.{}",
+                    ROCATTACH_LIBRARY_NAME,
+                    ROCPROFILER_VERSION_MAJOR,
+                    ROCPROFILER_VERSION_MINOR,
+                    ROCPROFILER_VERSION_PATCH),
+        fmt::format("{}.{}", ROCATTACH_LIBRARY_NAME, ROCPROFILER_SOVERSION),
+        fmt::format("{}", ROCATTACH_LIBRARY_NAME),
+    };
+
+    for(const auto& itr : libnames)
+    {
+        ROCP_INFO << fmt::format("Searching for {} library path", itr);
+        if(auto _this_lib_path =
+               rocprofiler::common::dl::get_linked_path(itr, {RTLD_NOLOAD | RTLD_LAZY});
+           _this_lib_path)
+        {
+            auto _val = fs::path{*_this_lib_path}.parent_path().string();
+            ROCP_INFO << fmt::format("Found {} library path: {}", itr, _val);
+            return _val;
+        }
+    }
+
+    ROCP_FATAL << fmt::format(
+        "{} could not locate itself in the list of loaded libraries. Tried: {}",
+        ROCATTACH_LIBRARY_NAME,
+        fmt::join(libnames, ", "));
+    return std::string{};
 }
 
 void*

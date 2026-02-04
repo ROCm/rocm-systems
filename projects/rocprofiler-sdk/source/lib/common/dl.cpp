@@ -82,10 +82,11 @@ get_linked_path(std::string_view _name, open_modes_vec_t&& _open_modes)
     dl_iterate_phdr(dl_iterate_callback, &loaded_libs);
     for(const auto& itr : loaded_libs)
     {
+        ROCP_TRACE << fmt::format("Checking loaded library '{}' for match to '{}'", itr, _name);
         if(fs::path{itr}.filename().string().find(_name) == 0)
         {
             ROCP_INFO << fmt::format(
-                "Matched '{}' to '{}' from libraries from dl_iterate_phdr", itr, _name);
+                "+ Matched '{}' to '{}' from libraries from dl_iterate_phdr", itr, _name);
             return fs::absolute(fs::path{itr}).string();
         }
     }
