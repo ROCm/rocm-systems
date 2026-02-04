@@ -611,7 +611,6 @@ __global__ void flops_benchmark(T *buf, int count)
 
 
 def flops_bench(device: int, type: str, unit: str, rate: int) -> PerfMetrics:
-    nFMA = VALU_NFMA
     num_experiments = DEFAULT_NUM_EXPERIMENTS
     workgroup_size = DEFAULT_WORKGROUP_SIZE
     cus = hip.hipGetDeviceProperties(device).multiProcessorCount
@@ -627,7 +626,7 @@ def flops_bench(device: int, type: str, unit: str, rate: int) -> PerfMetrics:
     memblock = hip.hipMalloc(dataset_size)
 
     iterations = flops_kernel_iterations[type]
-    total_flops = threads * iterations * nFMA * 2
+    total_flops = threads * iterations * VALU_NFMA * 2
 
     prog = Program(flops_benchmark_src, [kernel_name])
 
