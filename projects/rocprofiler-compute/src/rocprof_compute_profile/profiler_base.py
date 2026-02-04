@@ -114,6 +114,17 @@ class RocProfCompute_Base:
         resolved_exec_path: Optional[Path] = None
 
         if args.remaining:
+            # Validate that MPI launchers are not used after --
+            MPI_LAUNCHERS = {"mpirun", "mpiexec", "srun", "orterun"}
+            if Path(args.remaining[0]).name in MPI_LAUNCHERS:
+                console_error(
+                    f"MPI launcher '{args.remaining[0]}' cannot be used after '--'.\n"
+                    "Instead, wrap rocprof-compute with the MPI launcher:\n\n"
+                    f"    {args.remaining[0]} -n <ranks> rocprof-compute profile "
+                    "[options] -- ./your_application\n\n"
+                    "See documentation for multi-rank profiling."
+                )
+
             # Ensure that command points to an executable
             exec_candidate = shutil.which(args.remaining[0])
             if not exec_candidate:
