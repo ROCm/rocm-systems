@@ -113,9 +113,23 @@ if hasattr(torch._C, "_dispatch_call"):
 
     def dispatch_call_with_roctx(*args, **kwargs):
         marker_stack = get_marker_stack()
+        context_stack = get_context_stack()
         op_name = str(args[0]) if args else "aten_op"
-        full_marker_name = "/".join(marker_stack + [f"aten::{op_name}"])
         marker_stack.append(f"aten::{op_name}")
+        # Use call count and caller location for context, similar to other wrappers
+        current_frame = inspect.currentframe()
+        caller_frame = current_frame.f_back if current_frame is not None else None
+        if caller_frame is not None:
+            filename = caller_frame.f_code.co_filename
+            location = f"{Path(filename).name}:{caller_frame.f_lineno}"
+        else:
+            location = "unknown:0"
+        # Optionally, use a call counter (not strictly necessary, but for consistency)
+        if not hasattr(dispatch_call_with_roctx, "_call_count"):
+            dispatch_call_with_roctx._call_count = 0
+        dispatch_call_with_roctx._call_count += 1
+        context_stack.append(f"#{dispatch_call_with_roctx._call_count}@{location}")
+        full_marker_name = "/".join(marker_stack) + ":" + "/".join(context_stack)
         rangePush(full_marker_name)
         try:
             return original_dispatch_call(*args, **kwargs)
@@ -127,6 +141,7 @@ if hasattr(torch._C, "_dispatch_call"):
         finally:
             rangePop()
             marker_stack.pop()
+            context_stack.pop()
 
     torch._C._dispatch_call = dispatch_call_with_roctx
 else:
