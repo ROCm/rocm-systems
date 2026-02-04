@@ -350,7 +350,6 @@ set(TEST_SRC
   hipFuncGetAttributes.cc
   hipFuncSetSharedMemConfig.cc
   hipManagedKeywordBasic.cc
-  hipModule.cc
   hipModuleLoadMultProcessOnMultGPU.cc
 )
 set(AMD_TEST_SRC

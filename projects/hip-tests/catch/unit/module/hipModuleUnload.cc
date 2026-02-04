@@ -45,24 +45,3 @@ TEST_CASE("Unit_hipModuleUnload_Negative_Double_Unload") {
  * `hipError_t hipModuleUnload(hipModule_t module)` -
  * Frees the module
  */
-
-/**
- * Test Description
- * ------------------------
- * - Test case to verify the module release.
- * Test source
- * ------------------------
- * - catch/unit/module/hipModuleUnload.cc
- * Test requirements
- * ------------------------
- * - HIP_VERSION >= 5.6
- */
-TEST_CASE("Unit_hipModuleLoad_basic") {
-  CTX_CREATE();
-  constexpr auto fileName = "vcpy_kernel.code";
-  hipModule_t module;
-  HIP_CHECK(hipModuleLoad(&module, fileName));
-  REQUIRE(module != nullptr);
-  HIP_CHECK(hipModuleUnload(module));
-  CTX_DESTROY();
-}

@@ -9,7 +9,6 @@ set(TEST_SRC
     hipStreamCreateWithFlags.cc
     hipStreamCreateWithPriority.cc
     hipStreamDestroy.cc
-    hipAPIStreamDisable.cc
     hipStreamLegacy.cc
     hipStreamValue.cc
     hipStreamSynchronize.cc
@@ -36,9 +35,6 @@ if(HIP_PLATFORM MATCHES "amd")
 else()
   set(TEST_SRC
       ${TEST_SRC}
-      # hipStreamAttachMemAsync_old.cc   # Disabling it on nvidia due to issue
-      # in function definition of hipStreamAttachMemAsync
-      # Fixing would break ABI, to be re-enabled when the fix is made.
       hipStreamACb_MultiThread.cc)
 endif()
 

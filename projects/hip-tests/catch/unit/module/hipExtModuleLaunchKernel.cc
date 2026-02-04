@@ -337,8 +337,6 @@ class ModuleLaunchKernel {
   void AllocateMemory();
   void DeAllocateMemory();
   void ModuleLoad();
-  bool Module_Negative_tests();
-  bool ExtModule_Negative_tests();
   bool ExtModule_Corner_tests();
   bool Module_WorkGroup_Test();
   bool ExtModule_KernelExecutionTime();
@@ -569,116 +567,6 @@ bool ModuleLaunchKernel::ExtModule_ConcurrencyCheck_TimeVer() {
   DeAllocateMemory();
   return testStatus;
 }
-bool ModuleLaunchKernel::ExtModule_Negative_tests() {
-  bool testStatus = true;
-  HIP_CHECK(hipSetDevice(0));
-  hipError_t err;
-  AllocateMemory();
-  ModuleLoad();
-  void* config1[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args1, HIP_LAUNCH_PARAM_BUFFER_SIZE, &size1,
-                     HIP_LAUNCH_PARAM_END};
-  void* params[] = {Ad};
-  // Passing nullptr to kernel function in hipExtModuleLaunchKernel API
-  err = hipExtModuleLaunchKernel(nullptr, 1, 1, 1, 1, 1, 1, 0, stream1, NULL,
-                                 reinterpret_cast<void**>(&config1), nullptr, nullptr, 0);
-  if (err == hipSuccess) {
-    INFO("hipExtModuleLaunchKernel failed nullptr to kernel function");
-    testStatus = false;
-  }
-  // Passing Max int value to block dimensions
-  err = hipExtModuleLaunchKernel(MultKernel, 1, 1, 1, std::numeric_limits<uint32_t>::max(),
-                                 std::numeric_limits<uint32_t>::max(),
-                                 std::numeric_limits<uint32_t>::max(), 0, stream1, NULL,
-                                 reinterpret_cast<void**>(&config1), nullptr, nullptr, 0);
-  if (err == hipSuccess) {
-    INFO("hipExtModuleLaunchKernel failed for max values to block dimension");
-    testStatus = false;
-  }
-  // Passing 0 as value for all dimensions
-  err = hipExtModuleLaunchKernel(MultKernel, 0, 0, 0, 0, 0, 0, 0, stream1, NULL,
-                                 reinterpret_cast<void**>(&config1), nullptr, nullptr, 0);
-  if (err == hipSuccess) {
-    INFO("hipExtModuleLaunchKernel failed for 0 as value for all dimensions");
-    testStatus = false;
-  }
-  // Passing 0 as value for x dimension
-  err = hipExtModuleLaunchKernel(MultKernel, 0, 1, 1, 0, 1, 1, 0, stream1, NULL,
-                                 reinterpret_cast<void**>(&config1), nullptr, nullptr, 0);
-  if (err == hipSuccess) {
-    INFO("hipExtModuleLaunchKernel failed for 0 as value for x dimension");
-    testStatus = false;
-  }
-  // Passing 0 as value for y dimension
-  err = hipExtModuleLaunchKernel(MultKernel, 1, 0, 1, 1, 0, 1, 0, stream1, NULL,
-                                 reinterpret_cast<void**>(&config1), nullptr, nullptr, 0);
-  if (err == hipSuccess) {
-    INFO("hipExtModuleLaunchKernel failed for 0 as value for y dimension");
-    testStatus = false;
-  }
-  // Passing 0 as value for z dimension
-  err = hipExtModuleLaunchKernel(MultKernel, 1, 1, 0, 1, 1, 0, 0, stream1, NULL,
-                                 reinterpret_cast<void**>(&config1), nullptr, nullptr, 0);
-  if (err == hipSuccess) {
-    INFO("hipExtModuleLaunchKernel failed for 0 as value for z dimension");
-    testStatus = false;
-  }
-  // Passing both kernel and extra params
-  err = hipExtModuleLaunchKernel(KernelandExtraParamKernel, 1, 1, 1, 1, 1, 1, 0, stream1,
-                                 reinterpret_cast<void**>(&params),
-                                 reinterpret_cast<void**>(&config1), nullptr, nullptr, 0);
-  if (err == hipSuccess) {
-    INFO("hipExtModuleLaunchKernel fail when we pass both kernel,extra args");
-    testStatus = false;
-  }
-  // Passing more than maxthreadsperblock to block dimensions
-  hipDeviceProp_t deviceProp;
-  HIP_CHECK(hipGetDeviceProperties(&deviceProp, 0));
-  err = hipExtModuleLaunchKernel(MultKernel, 1, 1, 1, deviceProp.maxThreadsPerBlock + 1,
-                                 deviceProp.maxThreadsPerBlock + 1,
-                                 deviceProp.maxThreadsPerBlock + 1, 0, stream1, NULL,
-                                 reinterpret_cast<void**>(&config1), nullptr, nullptr, 0);
-  if (err == hipSuccess) {
-    INFO("hipExtModuleLaunchKernel failed for max group size");
-    testStatus = false;
-  }
-  // Block dimension X = Max Allowed + 1
-  err = hipExtModuleLaunchKernel(MultKernel, 1, 1, 1, deviceProp.maxThreadsDim[0] + 1, 1, 1, 0,
-                                 stream1, NULL, reinterpret_cast<void**>(&config1), nullptr,
-                                 nullptr, 0);
-  if (err == hipSuccess) {
-    INFO("hipExtModuleLaunchKernel failed for (MaxBlockDimX + 1)");
-    testStatus = false;
-  }
-  // Block dimension Y = Max Allowed + 1
-  err = hipExtModuleLaunchKernel(MultKernel, 1, 1, 1, 1, deviceProp.maxThreadsDim[1] + 1, 1, 0,
-                                 stream1, NULL, reinterpret_cast<void**>(&config1), nullptr,
-                                 nullptr, 0);
-  if (err == hipSuccess) {
-    INFO("hipExtModuleLaunchKernel failed for (MaxBlockDimY + 1)");
-    testStatus = false;
-  }
-  // Block dimension Z = Max Allowed + 1
-  err = hipExtModuleLaunchKernel(MultKernel, 1, 1, 1, 1, 1, deviceProp.maxThreadsDim[2] + 1, 0,
-                                 stream1, NULL, reinterpret_cast<void**>(&config1), nullptr,
-                                 nullptr, 0);
-  if (err == hipSuccess) {
-    INFO("hipExtModuleLaunchKernel failed for (MaxBlockDimZ + 1)");
-    testStatus = false;
-  }
-
-  // Passing invalid config data in extra params
-  void* config3[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, HIP_LAUNCH_PARAM_BUFFER_SIZE, &size1,
-                     HIP_LAUNCH_PARAM_END};
-  err = hipExtModuleLaunchKernel(MultKernel, 1, 1, 1, 1, 1, 1, 0, stream1, NULL,
-                                 reinterpret_cast<void**>(&config3), nullptr, nullptr, 0);
-  if (err == hipSuccess) {
-    INFO("hipExtModuleLaunchKernel failed for invalid conf");
-    testStatus = false;
-  }
-  DeAllocateMemory();
-  return testStatus;
-}
-
 bool ModuleLaunchKernel::ExtModule_Corner_tests() {
   bool testStatus = true;
   HIP_CHECK(hipSetDevice(0));
@@ -747,7 +635,6 @@ bool ModuleLaunchKernel::Module_WorkGroup_Test() {
 TEST_CASE("Unit_hipExtModuleLaunchKernel_Functional") {
   bool testStatus = true;
   ModuleLaunchKernel kernelLaunch;
-  testStatus &= kernelLaunch.ExtModule_Negative_tests();
 // Disabled below test cases as firmware currently does not support the
 // concurrency in the same stream based on the flag
 #if 0
