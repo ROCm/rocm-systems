@@ -293,7 +293,7 @@ TEST_CASE("Unit_hipGraphAddDependencies_Negative_Parameters") {
                                       hipMemcpyDeviceToHost));
     hipGraphNode_t from_list[] = {memset_A, memcpyH2D_A};
     hipGraphNode_t to_list[] = {memcpyH2D_A, memcpyD2H_A};
-    HIP_CHECK_ERROR(hipGraphAddDependencies(graph, from_list, to_list, 3), hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipGraphAddDependencies(graph, from_list, to_list, 2), hipErrorInvalidValue);
   }
 
   // Destroy
