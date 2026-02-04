@@ -561,7 +561,7 @@ consolidate_env_entries(std::vector<char*>& envp)
         auto& data = it->second;
         if(data.skip)
         {
-            // Last value wins if duplicated
+            // Preserve value as-is (last value wins if duplicated)
             data.raw_value = std::string{ value };
         }
         else
