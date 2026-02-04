@@ -325,22 +325,17 @@ function(rocprofiler_python_preload_library _VERSION)
     endif()
 
     # Preload library for early rocprofiler registration
-    # Links against the core library to share global state
+    # IMPORTANT: This library uses dlopen/dlsym instead of link-time dependencies
+    # to avoid loading HSA immediately when the preload library is loaded.
+    # It only links to libdl for dlopen/dlsym functionality.
     add_library(rocprofiler-sdk-python-preload-${_VERSION} SHARED)
     target_sources(
         rocprofiler-sdk-python-preload-${_VERSION}
         PRIVATE librocprofiler_python_preload.cpp)
 
-    target_include_directories(
-        rocprofiler-sdk-python-preload-${_VERSION}
-        PRIVATE ${CMAKE_CURRENT_LIST_DIR} SYSTEM
-        PRIVATE ${Python3_INCLUDE_DIRS})
-
     target_link_libraries(
         rocprofiler-sdk-python-preload-${_VERSION}
-        PRIVATE rocprofiler-sdk-python-core-${_VERSION}
-                rocprofiler-sdk::rocprofiler-sdk-headers
-                rocprofiler-sdk::rocprofiler-sdk-shared-library
+        PRIVATE ${CMAKE_DL_LIBS}
                 rocprofiler-sdk::rocprofiler-sdk-build-flags)
 
     set_target_properties(
