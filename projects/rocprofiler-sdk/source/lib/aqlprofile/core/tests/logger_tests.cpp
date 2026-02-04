@@ -176,18 +176,18 @@ TEST_F(LoggerTest, ConcurrentLogging)
 {
     EnableFileLogging();
 
-    const int num_threads         = 4;
-    const int messages_per_thread = 10;
+    static constexpr int num_threads         = 4;
+    static constexpr int messages_per_thread = 10;
 
-    std::vector<std::thread> threads;
-
+    auto threads = std::vector<std::thread>{};
+    threads.reserve(num_threads);
     for(int i = 0; i < num_threads; ++i)
     {
-        threads.emplace_back([i, messages_per_thread]() {
+        threads.emplace_back([i]() {
             Logger& logger = Logger::Instance();
             for(int j = 0; j < messages_per_thread; ++j)
             {
-                logger << "Thread " << i << " Message " << j;
+                logger << "Thread " << i << " Message " << j << "\n";
             }
         });
     }
