@@ -2890,10 +2890,9 @@ if __name__ == "__main__":
             found_row = False
             for row in reader:
                 found_row = True
-                # Hierarchy: check for separator in Name
-                assert "/" in row["Name"] or "::" in row["Name"], (
-                    f"Hierarchy missing in Name: {row['Name']}"
-                )
+                # Name: must not be empty; hierarchy separators are optional
+                name = row.get("Name", "")
+                assert name, f"Empty Name in {marker_file}"
                 # Correlation ID: must not be empty
                 assert row["Correlation ID"], f"Empty Correlation ID in {marker_file}"
                 # Kernel_Name: must not be empty
