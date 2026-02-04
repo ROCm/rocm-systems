@@ -81,5 +81,7 @@ public:
 private:
     size_t get_nic_count();
 
+#ifdef USE_AINIC
     void update_data_for_one_nic(amdsmi_processor_handle processor_handle);
+#endif
 };

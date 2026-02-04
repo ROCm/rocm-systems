@@ -148,10 +148,10 @@ AINICStatsCollector::get_nic_count()
 #endif  // USE_AINIC
 }
 
+#ifdef USE_AINIC
 void
 AINICStatsCollector::update_data_for_one_nic(amdsmi_processor_handle processor_handle)
 {
-#ifdef USE_AINIC
     amd::smi::AMDSmiAINICDevice::AINICInfo ainic_info;
     amdsmi_get_ainic_info(processor_handle, &ainic_info);
 
@@ -270,8 +270,8 @@ AINICStatsCollector::update_data_for_one_nic(amdsmi_processor_handle processor_h
             }
         }
     }
-#endif  //  USE_AINIC
 }
+#endif  //  USE_AINIC
 
 void
 AINICStatsCollector::get_data(const std::string& nic, NICData& data) const
