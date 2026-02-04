@@ -36,6 +36,8 @@ on:
       - '**/.wordlist.txt'
       - 'docs/**'
       - 'projects/*/docs/**'
+      # NOTE: this is temporary speed up to skip CI for WSL work
+      - "projects/rocr-runtime/libhsakmt/src/dxg"
 
 concurrency:
   group: azure-ci-dispatcher-${{ github.event.pull_request.number || github.ref }}
