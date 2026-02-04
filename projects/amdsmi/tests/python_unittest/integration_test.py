@@ -432,12 +432,6 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
             self.common.print(msg)
             self.skipTest(msg)
 
-        #sequence
-        #amdsmi_init_gpu_event_notification(amdsmi_processor_handle processor_handle);
-        #amdsmi_set_gpu_event_notification_mask(amdsmi_processor_handle processor_handle, uint64_t mask);
-        #amdsmi_get_gpu_event_notification(int timeout_ms, uint32_t *num_elem, amdsmi_evt_notification_data_t *data);
-        #amdsmi_status_t amdsmi_stop_gpu_event_notification(amdsmi_processor_handle processor_handle);
-
         mask = 1 << (amdsmi.AmdSmiEvtNotificationType.GPU_PRE_RESET -1) | \
                1 << (amdsmi.AmdSmiEvtNotificationType.GPU_POST_RESET -1)
         timeout_ms = 1000

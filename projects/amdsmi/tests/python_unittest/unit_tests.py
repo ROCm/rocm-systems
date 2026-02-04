@@ -779,11 +779,6 @@ class TestAmdSmiPython(unittest.TestCase):
         self.RunFunc1(amdsmi_get_gpu_bad_page_threshold=amdsmi.amdsmi_get_gpu_bad_page_threshold)
         return
 
-    def test_get_gpu_bad_page_threshold(self):
-        self.common.print_func_name('')
-        self.RunFunc1(amdsmi_get_gpu_bad_page_threshold=amdsmi.amdsmi_get_gpu_bad_page_threshold)
-        return
-
     def test_get_gpu_bdf_id(self):
         self.common.print_func_name('')
         self.RunFunc1(amdsmi_get_gpu_bdf_id=amdsmi.amdsmi_get_gpu_bdf_id)
@@ -984,14 +979,6 @@ class TestAmdSmiPython(unittest.TestCase):
             self.common.print(msg)
             self.skipTest(msg)
         self.RunFunc1(amdsmi_get_gpu_pci_bandwidth=amdsmi.amdsmi_get_gpu_pci_bandwidth)
-        return
-
-    def test_get_gpu_pci_replay_counter(self):
-        self.common.print_func_name('')
-
-        # TODO Check test_get_gpu_pci_replay_counter
-
-        self.RunFunc1(amdsmi_get_gpu_pci_replay_counter=amdsmi.amdsmi_get_gpu_pci_replay_counter)
         return
 
     def test_get_gpu_pci_replay_counter(self):
