@@ -23,11 +23,11 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-import csv
-import os
 from pathlib import Path
 
 import pytest
+
+from validate import load_csv_data
 
 
 def pytest_addoption(parser):
@@ -40,25 +40,16 @@ def pytest_addoption(parser):
 
 
 @pytest.fixture
-def csv_path(request) -> Path:
-    """Return the path to the kernel trace CSV file passed via --csv-input."""
+def csv_data(request):
+    """
+    Return CSV data as a list of dictionaries.
+    
+    This fixture follows the existing format used in other tests.
+    All validation logic has been moved to validate.py.
+    """
     filename = request.config.getoption("--csv-input")
     if not filename:
         raise RuntimeError("--csv-input option is required for this test")
+    
     path = Path(filename)
-    if not path.is_file():
-        raise FileNotFoundError(f"{path} does not exist")
-    return path
-
-
-@pytest.fixture
-def csv_rows(csv_path: Path):
-    """Yield all rows from the kernel trace CSV as a list of dicts."""
-    rows = []
-    with csv_path.open("r", newline="") as inp:
-        reader = csv.DictReader(inp)
-        for row in reader:
-            rows.append(row)
-    if not rows:
-        raise RuntimeError(f"No data rows found in {csv_path}")
-    return rows
+    return load_csv_data(path)
