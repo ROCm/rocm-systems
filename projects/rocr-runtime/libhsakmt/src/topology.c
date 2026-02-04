@@ -1108,6 +1108,226 @@ err_device_initialize:
 	return ret;
 }
 
+// Parse UUID string to bytes
+static bool parse_cuid_string(const char* cuid_str, HSAuint8* cuid_bytes) {
+	if (strlen(cuid_str) != 36) return false;
+
+	char hex[33];
+	int hex_idx = 0;
+
+	// remove dashes
+	for(int i=0; i<36; i++) {
+		if (cuid_str[i] != '-') {
+			hex[hex_idx++] = cuid_str[i];
+		}
+	}
+	hex[32] = '\0';
+
+	// convert to bytes
+	for(int i = 0; i < 16; i++) {
+		char byte_str[3] = {hex[i*2], hex[i*2+1], '\0'};
+		char* endptr;
+		long val = strtol(byte_str, &endptr, 16);
+		if (*endptr != '\0') {
+			return false;
+		}
+		cuid_bytes[i] = (HSAuint8)val;
+	}
+	return true;
+}
+
+// Trims leading and trailing whitespace from a string in place
+static void remove_whitespaces(char *line) {
+    char *start = line;
+	// skip leading whitespaces
+    while (*start && (*start == ' ' || *start == '\t' || *start == '\r' || *start == '\n')) {
+        start++;
+    }
+
+    if (*start == 0) {
+		// return empty string if line was only whitespaces
+        *line = 0;
+        return;
+    }
+
+	// remove trailing whitespaces
+    char *end = start + strlen(start) - 1;
+    while (end > start && (*end == ' ' || *end == '\t' || *end == '\r' || *end == '\n')) {
+        *end-- = '\0';
+    }
+
+    if (start != line) {
+        memmove(line, start, strlen(start) + 1);
+    }
+}
+
+/**
+ * topology_get_node_secondary_cuid
+ *
+ * Assigns a stable secondary CUID to a CPU or GPU node by parsing /tmp/cuid.
+ *
+ * The /tmp/cuid file contains per-device metadata grouped into sections:
+ *   [GPU:<index>]
+ *     derived_cuid=<uuid>
+ *     device_node=/sys/class/drm/renderD<minor>
+ *     ...
+ *
+ *   [CPU:<index>]
+ *     derived_cuid=<uuid>
+ *     package_core_id=<package_id>:<core_id>
+ *     ...
+ *
+ *   [NIC:<index>]      (ignored)
+ *   [PLATFORM]         (ignored)
+ *
+ * Only GPU and CPU sections are considered. NIC and PLATFORM sections
+ * are skipped.
+ *
+ * Returns:
+ *   HSAKMT_STATUS_SUCCESS on success
+ *   HSAKMT_STATUS_ERROR on file read failure or unsupported node type
+ */
+static HSAKMT_STATUS topology_get_node_secondary_cuid(HsaNodeProperties* node_props)
+{
+    FILE* file;
+    char line[256];
+    char device_node[256] = {0};
+    char pending_cuid[64] = {0};
+    bool is_gpu_node = (node_props->NumFComputeCores > 0);
+    bool is_cpu_node = (node_props->NumCPUCores > 0 && node_props->NumFComputeCores == 0);
+
+    enum {
+        SECTION_NONE,
+        SECTION_GPU,
+        SECTION_CPU,
+        SECTION_IGNORE
+    } current_section = SECTION_NONE;
+
+    // Reject unsupported node types
+    if (!is_gpu_node && !is_cpu_node) {
+        pr_err("Invalid node type\n");
+        return HSAKMT_STATUS_ERROR;
+    }
+
+    // Initialize CUID to all 0s
+    memset(node_props->Cuid, 0, 16);
+
+    // Create device_node from node props->drmRenderMinor
+    if (is_gpu_node) {
+        snprintf(device_node, sizeof(device_node),
+                 "/sys/class/drm/renderD%u",
+                 node_props->DrmRenderMinor);
+        pr_debug("GPU device_node = %s\n", device_node);
+    }
+
+    // Build CPU package_core_id using physical_package_id and core_id from system
+    int cpu = node_props->CComputeIdLo;
+    int package_id = -1;
+    int core_id = -1;
+    char cpu_pkg_core[64] = {0};
+
+    if (is_cpu_node) {
+        char path[256];
+        FILE* f;
+
+        snprintf(path, sizeof(path),
+                 "/sys/devices/system/cpu/cpu%d/topology/physical_package_id",
+                 cpu);
+        f = fopen(path, "r");
+        if (f) {
+            fscanf(f, "%d", &package_id);
+            fclose(f);
+        }
+
+        snprintf(path, sizeof(path),
+                 "/sys/devices/system/cpu/cpu%d/topology/core_id",
+                 cpu);
+        f = fopen(path, "r");
+        if (f) {
+            fscanf(f, "%d", &core_id);
+            fclose(f);
+        }
+
+        if (package_id < 0 || core_id < 0) {
+            pr_err("Failed to read CPU topology for cpu%d\n", cpu);
+            return HSAKMT_STATUS_ERROR;
+        }
+
+        snprintf(cpu_pkg_core, sizeof(cpu_pkg_core),
+                 "%d:%d", package_id, core_id);
+        pr_debug("CPU package_core_id = %s\n", cpu_pkg_core);
+    }
+
+    file = fopen("/tmp/cuid", "r");
+    if (!file) {
+        pr_err("/tmp/cuid file not found\n");
+        return HSAKMT_STATUS_ERROR;
+    }
+
+    while (fgets(line, sizeof(line), file)) {
+        remove_whitespaces(line);
+        if (line[0] == '\0') continue;
+
+        // Check which section is being read
+        if (line[0] == '[' && line[strlen(line) - 1] == ']') {
+            pending_cuid[0] = '\0'; // reset previous values when we reach a new section
+            current_section = SECTION_IGNORE;
+
+            if (strncmp(line, "[GPU:", 5) == 0)
+                current_section = SECTION_GPU;
+            else if (strncmp(line, "[CPU:", 5) == 0)
+                current_section = SECTION_CPU;
+            else
+                current_section = SECTION_IGNORE; // ignore NIC/Platform sections
+            continue;
+        }
+
+        if (current_section == SECTION_IGNORE) continue;
+
+		// split key and value
+        char* eq = strchr(line, '=');
+        if (!eq) continue;
+        *eq = '\0';
+        char* key = line;
+        char* value = eq + 1;
+        remove_whitespaces(key);
+        remove_whitespaces(value);
+
+        pr_debug("Key=%s Value=%s\n", key, value);
+
+        if (strcmp(key, "derived_cuid") == 0) {
+            strncpy(pending_cuid, value, sizeof(pending_cuid) - 1);
+            continue;
+        }
+
+        // Match Gpu by device_node from /tmp/cuid
+        if (is_gpu_node &&
+            current_section == SECTION_GPU &&
+            strcmp(key, "device_node") == 0 &&
+            strcmp(value, device_node) == 0) {
+            if (pending_cuid[0] &&
+                parse_cuid_string(pending_cuid, node_props->Cuid)) {
+                pr_debug("Parsed GPU CUID: %s\n", pending_cuid);
+            }
+            break;
+        }
+
+        // Match cpu by package_core_id from /tmp/cuid
+        if (is_cpu_node &&
+            current_section == SECTION_CPU &&
+            strcmp(key, "package_core_id") == 0 &&
+            strcmp(value, cpu_pkg_core) == 0) {
+            if (pending_cuid[0] &&
+                parse_cuid_string(pending_cuid, node_props->Cuid)) {
+                pr_debug("Parsed CPU CUID: %s\n", pending_cuid);
+            }
+            break;
+        }
+    }
+    fclose(file);
+    return HSAKMT_STATUS_SUCCESS;
+}
+
 static HSAKMT_STATUS topology_sysfs_get_node_props(HsaKFDContext *ctx,
 						   uint32_t node_id,
 						   HsaNodeProperties *props,
@@ -1259,6 +1479,9 @@ static HSAKMT_STATUS topology_sysfs_get_node_props(HsaKFDContext *ctx,
 
 	if (!hsakmt_is_svm_api_supported)
 		props->Capability.ui32.SVMAPISupported = 0;
+
+	// Populate secondary CUID for a CPU/GPU node from /tmp/cuid
+	ret = topology_get_node_secondary_cuid(props);
 
 	/* Bail out early, if a CPU node */
 	if (!props->NumFComputeCores)

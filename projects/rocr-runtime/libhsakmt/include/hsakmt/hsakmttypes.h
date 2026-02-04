@@ -356,6 +356,8 @@ typedef struct _HsaNodeProperties
     HSAuint32       LuidLowPart;       // Windows Locally Unique Identifier Low 4 bytes
     HSAuint32       LuidHighPart;      // Windows Locally Unique Identifier High 4 bytes
     HSAuint64       WallClockKHz;      // Wall Clock Frequency in KHz
+
+    HSAuint8        Cuid[16];          // Secondary CUID in UUIDv8 format
 } HsaNodeProperties;
 
 

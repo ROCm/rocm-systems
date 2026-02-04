@@ -1736,6 +1736,14 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
                         properties_.EngineId.ui32.Major >= 12;
       break;
     }
+    case HSA_AMD_AGENT_INFO_CUID: {
+      if (!value) {
+        return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      }
+      // Cuid already populated in node properties during topology discovery
+      memcpy(static_cast<uint8_t*>(value), properties_.Cuid, 16);
+      break;
+    }
     default:
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
       break;

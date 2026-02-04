@@ -88,6 +88,7 @@
 #include "common/common.h"
 #include "suites/functional/counted_queues.h"
 #include "common/os.h"
+#include "suites/functional/cuid.h"
 
 static RocrTstGlobals *sRocrtstGlvalues = nullptr;
 
@@ -636,6 +637,20 @@ TEST(rocrtstFunc, Counted_Queue_Overflow_And_Wraparound_Test) {
   RunCustomTestProlog(&cq);
   cq.CountedQueuesOverflowWrapAroundTest();
   RunCustomTestEpilog(&cq);
+}
+
+TEST(rocrtstFunc, Cuid_GPU_Validation_Test) {
+  CuidTest ct;
+  RunCustomTestProlog(&ct);
+  ct.ValidateGpuCuidTest();
+  RunCustomTestEpilog(&ct);
+}
+
+TEST(rocrtstFunc, Cuid_CPU_Validation_Test) {
+  CuidTest ct;
+  RunCustomTestProlog(&ct);
+  ct.ValidateCpuCuidTest();
+  RunCustomTestEpilog(&ct);
 }
 
 TEST(rocrtstNeg, Memory_Negative_Tests) {
