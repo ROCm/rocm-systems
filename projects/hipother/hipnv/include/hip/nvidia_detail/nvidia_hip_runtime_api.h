@@ -4105,14 +4105,35 @@ inline static hipError_t hipMemPoolImportPointer(void** ptr, hipMemPool_t mem_po
 #endif  // CUDA_VERSION >= CUDA_11020
 
 #if CUDA_VERSION >= CUDA_13000
+static inline CUmemLocation toCUmemLocation(cudaMemLocation* in) {
+  CUmemLocation out{};
+
+  out.id = in->id;
+
+  switch (in->type) {
+    case cudaMemLocationTypeDevice:
+      out.type = CU_MEM_LOCATION_TYPE_DEVICE;
+      break;
+    case cudaMemLocationTypeHostNuma:
+      out.type = CU_MEM_LOCATION_TYPE_HOST_NUMA;
+      break;
+    default:
+      out.type = CU_MEM_LOCATION_TYPE_INVALID;
+      break;
+  }
+  return out;
+}
+
 inline static hipError_t hipMemSetMemPool(hipMemLocation* location, hipMemAllocationType type,
                                           hipMemPool_t pool) {
-  return hipCUDAErrorTohipError(cuMemSetMemPool(location, type, pool));
+  CUmemLocation cu_location = toCUmemLocation(location);
+  return hipCUResultTohipError(cuMemSetMemPool(&cu_location, type, pool));
 }
 
 inline static hipError_t hipMemGetMemPool(hipMemPool_t* pool, hipMemLocation* location,
                                           hipMemAllocationType type) {
-  return hipCUDAErrorTohipError(cuMemGetMemPool(pool, location, type));
+  CUmemLocation cu_location = toCUmemLocation(location);
+  return hipCUResultTohipError(cuMemGetMemPool(pool, &cu_location, type));
 }
 #endif // CUDA_VERSION >= CUDA_13000
 
