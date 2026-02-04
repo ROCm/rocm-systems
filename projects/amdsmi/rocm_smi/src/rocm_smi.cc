@@ -7810,6 +7810,11 @@ rsmi_status_t rsmi_event_notification_stop(uint32_t dv_ind) {
   smi.devices()[dv_ind]->set_evt_notif_anon_file_ptr(nullptr);
   smi.devices()[dv_ind]->set_evt_notif_anon_fd(-1);
 
+  // If the fd is uninitialized, we should not fclose a potentially stale FILE*.
+  if (anon_fd == -1) {
+    return RSMI_STATUS_SUCCESS;
+  }
+
   if (anon_fp) {
     if (fclose(anon_fp) != 0) {
       return amd::smi::ErrnoToRsmiStatus(errno);
