@@ -26,7 +26,7 @@ add_executable(
     $<TARGET_OBJECTS:trace-cache-tests>
     $<TARGET_OBJECTS:demangler-tests>
     $<TARGET_OBJECTS:logger-tests>
-    $<TARGET_OBJECTS:rccl-unit-tests>
+    $<$<TARGET_EXISTS:rccl-unit-tests>:$<TARGET_OBJECTS:rccl-unit-tests>>
 )
 
 target_link_libraries(
