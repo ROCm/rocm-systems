@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier:  MIT
 
 #pragma once
 
@@ -499,10 +480,18 @@ consolidate_env_entries(std::vector<char*>& envp)
 {
     constexpr char delim = ':';
 
+    // Variables that use : in their value syntax and should not be consolidated
+    auto skip_consolidation = [](std::string_view key) -> bool {
+        return key == "ROCPROFSYS_PAPI_EVENTS" ||
+               key == "ROCPROFSYS_SAMPLING_OVERFLOW_EVENT";
+    };
+
     struct key_data
     {
         std::vector<std::string>        parts;
         std::unordered_set<std::string> seen;
+        bool                            skip = false;
+        std::string                     raw_value;
 
         void add_unique(std::string part)
         {
@@ -566,13 +555,22 @@ consolidate_env_entries(std::vector<char*>& envp)
         if(inserted)
         {
             key_order.emplace_back(key);
+            it->second.skip = skip_consolidation(key);
         }
 
-        auto&              data = it->second;
-        std::istringstream stream{ std::string{ value } };
-        for(std::string part; std::getline(stream, part, delim);)
+        auto& data = it->second;
+        if(data.skip)
         {
-            data.add_unique(part);
+            // Last value wins if duplicated
+            data.raw_value = std::string{ value };
+        }
+        else
+        {
+            std::istringstream stream{ std::string{ value } };
+            for(std::string part; std::getline(stream, part, delim);)
+            {
+                data.add_unique(part);
+            }
         }
     }
 
@@ -581,7 +579,16 @@ consolidate_env_entries(std::vector<char*>& envp)
 
     for(auto key : key_order)
     {
-        result.emplace_back(strdup(join_parts(key, key_map[key].parts).c_str()));
+        const auto& data = key_map[key];
+        if(data.skip)
+        {
+            auto entry = std::string{ key } + "=" + data.raw_value;
+            result.emplace_back(strdup(entry.c_str()));
+        }
+        else
+        {
+            result.emplace_back(strdup(join_parts(key, data.parts).c_str()));
+        }
     }
 
     for(auto* entry : envp)
