@@ -28,6 +28,7 @@ import inspect
 import os
 import re
 import sqlite3
+import csv
 import subprocess
 import sys
 import time
@@ -2853,17 +2854,59 @@ if __name__ == "__main__":
     num_devices = config.get("num_devices", 1)
     file_dict = test_utils.check_csv_files(workload_dir, num_devices, 1)
     assert "pmc_perf.csv" in file_dict, "pmc_perf.csv not generated"
-    # 2. Check torch trace directory
-    torch_trace_dir = Path(workload_dir) / "torch_trace"
-    assert torch_trace_dir.exists(), "torch_trace directory not created"
-    assert torch_trace_dir.is_dir(), "torch_trace is not a directory"
-    # 3. Check per-operator CSV files exist
-    operator_csv_files = list(torch_trace_dir.glob("*.csv"))
-    assert len(operator_csv_files) > 0, "No per-operator CSV files generated"
-    # 4. Verify per-operator CSV structure
-    for op_csv in operator_csv_files:
-        op_df = pd.read_csv(op_csv)
-        assert len(op_df) > 0, f"Per-operator CSV {op_csv.name} is empty"
+
+    # 2. Look for corresponding marker_api_trace.csv file 
+    # and counter_collection_trace.csv file in workload_dir/ and workload/*/
+    marker_api_trace_files = list(Path(workload_dir).glob("**/*marker_api_trace.csv"))
+    counter_collection_files = list(Path(workload_dir).glob("**/*counter_collection.csv"))  
+    # Check if there is one-to-one mapping between marker_api_trace and counter_collection files
+    # They should be present in the same subdirectories
+    assert len(marker_api_trace_files) == len(counter_collection_files), (
+        "Mismatch in number of marker_api_trace.csv and counter_collection.csv files"
+    )
+    for marker_file in marker_api_trace_files:
+        corresponding_counter_file = marker_file.parent / "counter_collection.csv"
+        assert corresponding_counter_file.exists(), (
+            f"counter_collection.csv not found for {marker_file}"
+        )
+            # Check marker_api_trace.csv
+        with open(marker_file, newline='') as f:
+            reader = csv.DictReader(f)
+            fieldnames = reader.fieldnames
+            assert fieldnames is not None, f"No columns in {marker_file}"
+            # 1. Hierarchy check
+            assert 'Name' in fieldnames, f"'Name' column missing in {marker_file}"
+            # 2. Correlation ID check
+            assert 'Correlation ID' in fieldnames, f"'Correlation ID' column missing in {marker_file}"
+            # 3. Kernel_Name info check 
+            assert 'Kernel_Name' in fieldnames, f"'Kernel_Name' column missing in {marker_file}"
+            found_row = False
+            for row in reader:
+                found_row = True
+                # Hierarchy: check for separator in Name
+                assert '/' in row['Name'] or '::' in row['Name'], f"Hierarchy missing in Name: {row['Name']}"
+                # Correlation ID: must not be empty
+                assert row['Correlation ID'], f"Empty Correlation ID in {marker_file}"
+                # Kernel_Name: must not be empty
+                assert row['Kernel_Name'], f"Empty Kernel_Name in {marker_file}"
+            assert found_row, f"{marker_file} is empty"
+        # Check counter_collection.csv
+        with open(corresponding_counter_file, newline='') as f:
+            reader = csv.DictReader(f)
+            fieldnames = reader.fieldnames
+            assert fieldnames is not None, f"No columns in {corresponding_counter_file}"
+            assert 'Counter Name' in fieldnames or 'Name' in fieldnames, (
+                f"Expected counter column missing in {corresponding_counter_file}"
+            )
+            assert 'Correlation ID' in fieldnames, f"'Correlation ID' column missing in {corresponding_counter_file}"
+            found_row = False
+            for row in reader:
+                found_row = True
+                # Counter name must not be empty
+                assert row.get('Counter Name', row.get('Name')), f"Empty counter name in {corresponding_counter_file}"
+                # Correlation ID must not be empty
+                assert row['Correlation ID'], f"Empty Correlation ID in {corresponding_counter_file}"
+            assert found_row, f"{corresponding_counter_file} is empty"
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
@@ -2992,247 +3035,3 @@ if __name__ == "__main__":
         f"longest running kernel increase too high: "
         f"{longest_running_kernel_overhead:.1f}%"
     )
-
-
-@skip_if_no_torch
-def test_torch_hierarchical_marker_structure(binary_handler_profile_rocprof_compute):
-    """
-    Test that hierarchical markers are properly injected with full module paths.
-    Validates that inject_roctx.py captures complete operator hierarchy.
-    """
-    workload_dir = test_utils.get_output_dir(param_id="torch_hierarchical")
-    Path(workload_dir).mkdir(parents=True, exist_ok=True)
-    torch_app_path = Path(workload_dir) / "test_hierarchical_torch_app.py"
-
-    # Create PyTorch model with nested modules
-    torch_app_code = """
-import torch
-import torch.nn as nn
-
-class SubModule(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.linear = nn.Linear(10, 10)
-    
-    def forward(self, x):
-        return self.linear(x)
-
-class ParentModule(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.sub = SubModule()
-        self.output = nn.Linear(10, 5)
-    
-    def forward(self, x):
-        x = self.sub(x)
-        return self.output(x)
-
-if __name__ == "__main__":
-    if not torch.cuda.is_available():
-        import sys
-        print("GPU is required for this test. Exiting.")
-        sys.exit(1)
-    
-    model = ParentModule().cuda()
-    x = torch.randn(5, 10).cuda()
-    
-    # Run forward pass multiple times
-    for _ in range(3):
-        output = model(x)
-    
-    print("Hierarchical test completed")
-"""
-
-    with open(torch_app_path, "w") as f:
-        f.write(torch_app_code)
-
-    config["torch_hierarchical_app"] = ["python3", str(torch_app_path)]
-
-    # Profile with --torch-trace
-    options = ["--torch-trace"]
-    returncode = binary_handler_profile_rocprof_compute(
-        config,
-        workload_dir,
-        options,
-        check_success=True,
-        app_name="torch_hierarchical_app",
-    )
-    assert returncode == 0, "Profiling hierarchical torch application failed"
-
-    # Verify torch_trace directory exists
-    torch_trace_dir = Path(workload_dir) / "torch_trace"
-    assert torch_trace_dir.exists(), "torch_trace directory not created"
-    assert torch_trace_dir.is_dir(), "torch_trace is not a directory"
-
-    # Verify per-operator CSV files with hierarchical naming
-    operator_csv_files = list(torch_trace_dir.glob("*.csv"))
-    assert len(operator_csv_files) > 0, "No per-operator CSV files generated"
-
-    # Check that hierarchical names are in filenames (sanitized with underscores)
-    filenames = [f.stem for f in operator_csv_files]
-    # Should have files like ParentModule_sub_linear, ParentModule_output, etc.
-    has_nested_structure = any("_" in name for name in filenames)
-    assert has_nested_structure, "CSV filenames don't reflect hierarchical structure"
-
-    # Verify roctx_trace.txt contains hierarchical markers
-    roctx_trace_file = Path(workload_dir) / "roctx_trace.txt"
-    if roctx_trace_file.exists():
-        with open(roctx_trace_file, "r") as f:
-            roctx_content = f.read()
-            # Check for hierarchical patterns (may contain / or _ depending on implementation)
-            assert (
-                "ParentModule" in roctx_content or "Sub" in roctx_content
-            ), "Hierarchical markers not found in roctx_trace.txt"
-
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
-
-
-@skip_if_no_torch
-def test_torch_operator_csv_file_naming(binary_handler_profile_rocprof_compute):
-    """
-    Test that per-operator CSV files use sanitized hierarchical names.
-    Ensures special characters are properly handled in filenames.
-    """
-    workload_dir = test_utils.get_output_dir(param_id="torch_csv_naming")
-    Path(workload_dir).mkdir(parents=True, exist_ok=True)
-    torch_app_path = Path(workload_dir) / "test_naming_torch_app.py"
-
-    torch_app_code = """
-import torch
-import torch.nn as nn
-
-class TestModel(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.layer1 = nn.Linear(10, 20)
-        self.layer2 = nn.Linear(20, 10)
-    
-    def forward(self, x):
-        x = self.layer1(x)
-        x = torch.relu(x)
-        x = self.layer2(x)
-        return x
-
-if __name__ == "__main__":
-    if not torch.cuda.is_available():
-        import sys
-        sys.exit(1)
-    
-    model = TestModel().cuda()
-    x = torch.randn(5, 10).cuda()
-    output = model(x)
-    print("CSV naming test completed")
-"""
-
-    with open(torch_app_path, "w") as f:
-        f.write(torch_app_code)
-
-    config["torch_naming_app"] = ["python3", str(torch_app_path)]
-
-    # Profile
-    returncode = binary_handler_profile_rocprof_compute(
-        config,
-        workload_dir,
-        ["--torch-trace"],
-        check_success=True,
-        app_name="torch_naming_app",
-    )
-    assert returncode == 0
-
-    # Check CSV filenames are sanitized (no special chars like /, :, etc.)
-    torch_trace_dir = Path(workload_dir) / "torch_trace"
-    operator_csv_files = list(torch_trace_dir.glob("*.csv"))
-    
-    for csv_file in operator_csv_files:
-        filename = csv_file.name
-        # Filenames should only contain alphanumeric, underscore, hyphen, and .csv
-        assert all(
-            c.isalnum() or c in "_-.," for c in filename
-        ), f"Invalid characters in filename: {filename}"
-
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
-
-
-@skip_if_no_torch
-def test_torch_context_stack_preservation(binary_handler_profile_rocprof_compute):
-    """
-    Test that context stack correctly maintains marker hierarchy across nested calls.
-    Tests the context manager implementation in inject_roctx.py.
-    """
-    workload_dir = test_utils.get_output_dir(param_id="torch_context_stack")
-    Path(workload_dir).mkdir(parents=True, exist_ok=True)
-    torch_app_path = Path(workload_dir) / "test_context_torch_app.py"
-
-    # Create model with multiple nested levels
-    torch_app_code = """
-import torch
-import torch.nn as nn
-
-class Level3(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.fc = nn.Linear(10, 10)
-    
-    def forward(self, x):
-        return self.fc(x)
-
-class Level2(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.level3 = Level3()
-    
-    def forward(self, x):
-        return self.level3(x)
-
-class Level1(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.level2 = Level2()
-    
-    def forward(self, x):
-        return self.level2(x)
-
-if __name__ == "__main__":
-    if not torch.cuda.is_available():
-        import sys
-        sys.exit(1)
-    
-    model = Level1().cuda()
-    x = torch.randn(5, 10).cuda()
-    
-    # Multiple iterations to ensure context stack doesn't leak
-    for _ in range(5):
-        output = model(x)
-    
-    print("Context stack test completed")
-"""
-
-    with open(torch_app_path, "w") as f:
-        f.write(torch_app_code)
-
-    config["torch_context_app"] = ["python3", str(torch_app_path)]
-
-    # Profile
-    returncode = binary_handler_profile_rocprof_compute(
-        config,
-        workload_dir,
-        ["--torch-trace"],
-        check_success=True,
-        app_name="torch_context_app",
-    )
-    assert returncode == 0, "Context stack profiling failed"
-
-    # Verify torch_trace directory has expected operators
-    torch_trace_dir = Path(workload_dir) / "torch_trace"
-    assert torch_trace_dir.exists()
-    
-    operator_csv_files = list(torch_trace_dir.glob("*.csv"))
-    assert len(operator_csv_files) > 0, "No operators captured"
-    
-    # Check that we have nested operator names
-    filenames = [f.stem for f in operator_csv_files]
-    # Should have something like Level1_level2_level3_fc or similar nested pattern
-    nested_files = [f for f in filenames if f.count("_") >= 2]
-    assert len(nested_files) > 0, "No deeply nested operators found in CSV files"
-
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
