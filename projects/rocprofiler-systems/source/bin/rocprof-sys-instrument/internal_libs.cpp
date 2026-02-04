@@ -323,6 +323,8 @@ get_internal_basic_libs_impl()
                                             "libunwind-x86_64.so",
                                             "libpapi.so",
                                             "libpfm.so",
+                                            "libhsa-runtime64.so",
+                                            "libomp.so",
                                             "librocm_smi64.so",
                                             "libroctx64.so",
                                             "librocmtools.so",
