@@ -952,7 +952,7 @@ void GDABackend::open_ib_device() {
       const char *select_device = ibv.get_device_name(device_list[i]);
       CHECK_NNULL(select_device, "ibv_get_device_name");
 
-      if (strstr(select_device, requested_nic)) {
+      if (0 == strcmp(select_device, requested_nic)) {
         device = device_list[i];
         break;
       }
