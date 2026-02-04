@@ -11,9 +11,9 @@ NICData::to_string() const
 
     stream << "[_name=" << _name << ", _netdev=" << _netdev
            << ", _rx_rdma_ucast_bytes=" << _rx_rdma_ucast_bytes
-           << ", _rx_rdma_ucast_pkts="  << _rx_rdma_ucast_pkts
+           << ", _rx_rdma_ucast_pkts=" << _rx_rdma_ucast_pkts
            << ", _tx_rdma_ucast_bytes=" << _tx_rdma_ucast_bytes
-           << ", _tx_rdma_ucast_pkts="  << _tx_rdma_ucast_pkts
+           << ", _tx_rdma_ucast_pkts=" << _tx_rdma_ucast_pkts
            << ", _rx_rdma_cnp_pkts=" << _rx_rdma_cnp_pkts
            << ", _tx_rdma_cnp_pkts=" << _tx_rdma_cnp_pkts << "]";
     return stream.str();
@@ -81,7 +81,7 @@ AINICStatsCollector::update_stats()
     // Iterate through all socket handles to find all AI NIC
     // processor handles and update the statistics for each of them.
     std::vector<amd::smi::AMDSmiAINICDevice::AINICInfo> nics;
-    for(uint32_t index = 0 ; index < soc_count; index++)
+    for(uint32_t index = 0; index < soc_count; index++)
     {
         uint32_t processor_count = 0;
         status                   = amdsmi_get_processor_handles_by_type(
@@ -94,9 +94,8 @@ AINICStatsCollector::update_stats()
         }
         std::vector<amdsmi_processor_handle> processor_handles(processor_count);
         status = amdsmi_get_processor_handles_by_type(
-            sockets[index],
-            AMDSMI_PROCESSOR_TYPE_AMD_NIC,
-            processor_handles.data(), &processor_count);
+            sockets[index], AMDSMI_PROCESSOR_TYPE_AMD_NIC, processor_handles.data(),
+            &processor_count);
         if(status != AMDSMI_STATUS_SUCCESS)
         {
             LOG_ERROR("amdsmi_get_processor_handles_by_type failed with status {}",
@@ -132,12 +131,11 @@ AINICStatsCollector::get_nic_count()
 
     // For all sockets, find all NIC processor handles.
     size_t nic_count{};
-    for(uint32_t index = 0 ; index < soc_count; index++)
+    for(uint32_t index = 0; index < soc_count; index++)
     {
         uint32_t processor_count = 0;
         status                   = amdsmi_get_processor_handles_by_type(
-            sockets[index],
-            AMDSMI_PROCESSOR_TYPE_AMD_NIC, nullptr, &processor_count);
+            sockets[index], AMDSMI_PROCESSOR_TYPE_AMD_NIC, nullptr, &processor_count);
         if(status != AMDSMI_STATUS_SUCCESS)
         {
             continue;
@@ -178,14 +176,14 @@ AINICStatsCollector::update_data_for_one_nic(amdsmi_processor_handle processor_h
                 // Call *_statistics the first time to get the number of statistics.
                 uint32_t num_stats{};
                 amdsmi_get_nic_rdma_port_statistics(processor_handle, rdma_port_idx,
-                    &num_stats, nullptr);
+                                                    &num_stats, nullptr);
 
                 // Allocate stats.
                 stats = std::make_unique<amdsmi_nic_stat_t[]>(num_stats);
 
                 // Call *_statistics the second time to get the statistics.
                 amdsmi_get_nic_rdma_port_statistics(processor_handle, rdma_port_idx,
-                    &num_stats, stats.get());
+                                                    &num_stats, stats.get());
 
                 // Retrieve relevant stats.
                 for(uint32_t stat_idx{}; stat_idx < num_stats; ++stat_idx)
@@ -198,7 +196,8 @@ AINICStatsCollector::update_data_for_one_nic(amdsmi_processor_handle processor_h
                     else if(strcmp(stats[stat_idx].name, NICData::RX_RDMA_UCAST_PKTS) ==
                             0)
                     {
-                        data._rx_rdma_ucast_pkts = static_cast<std::uint32_t>(stats[stat_idx].value);
+                        data._rx_rdma_ucast_pkts =
+                            static_cast<std::uint32_t>(stats[stat_idx].value);
                     }
                     else if(strcmp(stats[stat_idx].name, NICData::TX_RDMA_UCAST_BYTES) ==
                             0)
@@ -212,14 +211,12 @@ AINICStatsCollector::update_data_for_one_nic(amdsmi_processor_handle processor_h
                         data._tx_rdma_ucast_pkts =
                             static_cast<std::uint32_t>(stats[stat_idx].value);
                     }
-                    else if(strcmp(stats[stat_idx].name, NICData::RX_RDMA_CNP_PKTS) ==
-                            0)
+                    else if(strcmp(stats[stat_idx].name, NICData::RX_RDMA_CNP_PKTS) == 0)
                     {
                         data._rx_rdma_cnp_pkts =
                             static_cast<std::uint32_t>(stats[stat_idx].value);
                     }
-                    else if(strcmp(stats[stat_idx].name, NICData::TX_RDMA_CNP_PKTS) ==
-                            0)
+                    else if(strcmp(stats[stat_idx].name, NICData::TX_RDMA_CNP_PKTS) == 0)
                     {
                         data._tx_rdma_cnp_pkts =
                             static_cast<std::uint32_t>(stats[stat_idx].value);
