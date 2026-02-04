@@ -34,6 +34,7 @@ option(ENABLE_MSCCLPP_FORMAT_CHECKS            "Enable formatting checks in MSCC
 option(ENABLE_NPKIT                            "Enable NPKit"                                  OFF)
 option(ENABLE_IFC                              "Enable indirect function call"                 OFF)
 option(DEVICE_LINKER                           "Use device linker for fast parallel kernel builds" OFF)
+option(DEBUG_PEER_POINTERS                     "Enable device-side debug output for peer pointers (DEVICE_LINKER only)" OFF)
 option(GENERATE_SYM_KERNELS                    "Generate symmetric memory kernels"             OFF)
 option(INSTALL_DEPENDENCIES                    "Force install dependencies"                    OFF)
 option(REPORT_KERNEL_RESOURCE_USE              "Append -Rpass-analysis=kernel to CXX flags"    OFF)
@@ -1317,6 +1318,9 @@ if (DEVICE_LINKER)
     endif()
     if(ENABLE_WARP_SPEED)
       list(APPEND SPEC_KERNEL_DEFS -DENABLE_WARP_SPEED)
+    endif()
+    if(DEBUG_PEER_POINTERS)
+      list(APPEND SPEC_KERNEL_DEFS -DDEBUG_PEER_POINTERS)
     endif()
     add_custom_command(
       OUTPUT ${obj}

@@ -1,91 +1,63 @@
-// Simple RCCL test to verify device linker build works
 #include <hip/hip_runtime.h>
 #include <rccl/rccl.h>
 #include <stdio.h>
 #include <stdlib.h>
 
-#define CHECK_HIP(cmd) do { \
-    hipError_t e = cmd; \
-    if (e != hipSuccess) { \
-        printf("HIP error %s at %s:%d\n", hipGetErrorString(e), __FILE__, __LINE__); \
-        exit(1); \
-    } \
-} while(0)
-
-#define CHECK_NCCL(cmd) do { \
-    ncclResult_t r = cmd; \
-    if (r != ncclSuccess) { \
-        printf("NCCL error %s at %s:%d\n", ncclGetErrorString(r), __FILE__, __LINE__); \
-        exit(1); \
-    } \
-} while(0)
-
 int main() {
-    printf("=== Simple RCCL Test ===\n\n");
+    printf("=== Single GPU AllReduce Test ===\n");
     
-    // Initialize HIP
-    int deviceCount = 0;
-    CHECK_HIP(hipGetDeviceCount(&deviceCount));
-    printf("Found %d HIP device(s)\n", deviceCount);
-    
-    if (deviceCount == 0) {
-        printf("No HIP devices available\n");
-        return 1;
-    }
-    
-    hipDeviceProp_t props;
-    CHECK_HIP(hipGetDeviceProperties(&props, 0));
-    printf("Using device: %s\n\n", props.name);
-    
-    CHECK_HIP(hipSetDevice(0));
-    
-    // Create NCCL communicator
+    int devList[1] = {0};
     ncclComm_t comm;
-    ncclUniqueId id;
-    CHECK_NCCL(ncclGetUniqueId(&id));
-    CHECK_NCCL(ncclCommInitRank(&comm, 1, id, 0));
-    printf("NCCL communicator created\n");
     
-    // Allocate device memory
-    const int count = 1024;
-    float *sendbuff, *recvbuff;
-    CHECK_HIP(hipMalloc(&sendbuff, count * sizeof(float)));
-    CHECK_HIP(hipMalloc(&recvbuff, count * sizeof(float)));
+    printf("Init...\n");
+    ncclCommInitAll(&comm, 1, devList);
+    printf("Initialized!\n");
     
-    // Initialize send buffer
-    float *hostbuff = (float*)malloc(count * sizeof(float));
-    for (int i = 0; i < count; i++) hostbuff[i] = 1.0f;
-    CHECK_HIP(hipMemcpy(sendbuff, hostbuff, count * sizeof(float), hipMemcpyHostToDevice));
+    printf("Allocating...\n");
+    float *d_send, *d_recv;
+    float *h_send = (float*)malloc(1024 * sizeof(float));
+    float *h_recv = (float*)malloc(1024 * sizeof(float));
     
-    // Create stream
-    hipStream_t stream;
-    CHECK_HIP(hipStreamCreate(&stream));
+    // Initialize host data
+    for (int i = 0; i < 1024; i++) h_send[i] = 1.0f;
     
-    // Run AllReduce
+    hipSetDevice(0);
+    hipMalloc(&d_send, 1024 * sizeof(float));
+    hipMalloc(&d_recv, 1024 * sizeof(float));
+    hipMemcpy(d_send, h_send, 1024 * sizeof(float), hipMemcpyHostToDevice);
+    printf("Allocated!\n");
+    
+    printf("Creating stream...\n");
+    hipStream_t s0;
+    hipStreamCreate(&s0);
+    printf("Stream created!\n");
+    
     printf("Running AllReduce...\n");
-    CHECK_NCCL(ncclAllReduce(sendbuff, recvbuff, count, ncclFloat, ncclSum, comm, stream));
-    CHECK_HIP(hipStreamSynchronize(stream));
-    printf("AllReduce completed!\n");
+    ncclAllReduce(d_send, d_recv, 1024, ncclFloat, ncclSum, comm, s0);
+    printf("AllReduce submitted!\n");
+    
+    printf("Synchronizing...\n");
+    hipStreamSynchronize(s0);
+    printf("Synced!\n");
     
     // Verify result
-    CHECK_HIP(hipMemcpy(hostbuff, recvbuff, count * sizeof(float), hipMemcpyDeviceToHost));
+    hipMemcpy(h_recv, d_recv, 1024 * sizeof(float), hipMemcpyDeviceToHost);
     int errors = 0;
-    for (int i = 0; i < count; i++) {
-        if (hostbuff[i] != 1.0f) errors++;
+    for (int i = 0; i < 1024; i++) {
+        if (h_recv[i] != 1.0f) errors++;
     }
+    printf("Verification: %d errors\n", errors);
+    
+    printf("Cleanup...\n");
+    hipFree(d_send); hipFree(d_recv);
+    free(h_send); free(h_recv);
+    ncclCommDestroy(comm);
     
     if (errors == 0) {
-        printf("\n=== TEST PASSED ===\n");
+        printf("=== PASSED ===\n");
+        return 0;
     } else {
-        printf("\n=== TEST FAILED: %d errors ===\n", errors);
+        printf("=== FAILED ===\n");
+        return 1;
     }
-    
-    // Cleanup
-    CHECK_HIP(hipStreamDestroy(stream));
-    CHECK_HIP(hipFree(sendbuff));
-    CHECK_HIP(hipFree(recvbuff));
-    CHECK_NCCL(ncclCommDestroy(comm));
-    free(hostbuff);
-    
-    return errors > 0 ? 1 : 0;
 }

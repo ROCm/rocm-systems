@@ -504,6 +504,21 @@ public:
         return disp_->valid();
     }
     
+    // Set GPU target and parse architecture number (e.g., "gfx942:sramecc+:xnack-" -> 942)
+    void setGpuTarget(const std::string& target) {
+        gpu_target_ = target;
+        // Parse architecture number from target string
+        std::regex arch_regex("gfx([0-9]+)");
+        std::smatch match;
+        if (std::regex_search(target, match, arch_regex) && match.size() > 1) {
+            gpu_arch_ = std::stoi(match[1].str());
+            printf("Detected GPU architecture: gfx%d\n", gpu_arch_);
+        } else {
+            printf("Warning: Could not parse GPU arch from '%s', using default gfx%d\n",
+                   target.c_str(), gpu_arch_);
+        }
+    }
+    
     void addKernel(const KernelInfo& k) { kernels_.push_back(k); }
     void setFuncIdMap(const std::unordered_map<std::string, FuncIdMapping>& m) { funcid_map_ = m; }
     
@@ -549,6 +564,10 @@ private:
     // Resource maxima
     int max_vgpr_ = 0, max_sgpr_ = 0, max_lds_ = 0, max_stack_ = 0;
     
+    // GPU target info for LDS calculation
+    std::string gpu_target_;
+    int gpu_arch_ = 942;  // Default gfx942
+    
     // Function tables (text offsets per funcId)
     std::vector<uint64_t> table_1_, table_2_, table_4_;
     
@@ -568,6 +587,41 @@ private:
     size_t rela_size_ = 0;
     size_t table_spacing_ = 6880;
     
+    // Calculate required LDS size based on GPU architecture
+    // Must match the host-side calculation in enqueue.cc: rcclShmemDynamicSize()
+    int calculateRequiredLDS() const {
+        // Constants from RCCL source:
+        // NCCL_LL128_SHMEM_ELEMS_PER_THREAD = 8
+        // ncclCollUnroll(cudaArch) = cudaArch >= 800 ? 8 : 4  (for non-12xx)
+        // ncclNvlsUnrollBytes = 64
+        
+        int warpSize = (gpu_arch_ >= 900) ? 64 : 64;  // AMD GFX9+ uses 64-wide warps
+        int maxNthreads = (gpu_arch_ == 950) ? 512 : 256;
+        int ncclCollUnroll = (gpu_arch_ >= 800) ? 8 : 4;
+        int ncclNvlsUnrollBytes = 64;
+        
+        // Per-warp scratch size calculation (matches rcclShmemScratchWarpSize)
+        int ll = 0;
+        int ll128 = (8 * warpSize) * sizeof(uint64_t);  // NCCL_LL128_SHMEM_ELEMS_PER_THREAD * WARP_SIZE * 8
+        int simple = (ncclCollUnroll * warpSize + 1) * 16;
+        int nvls = (gpu_arch_ >= 900) ? (warpSize * ncclNvlsUnrollBytes + 16) : 16;
+        
+        int perWarpScratch = std::max({ll, ll128, simple, nvls});
+        perWarpScratch = (perWarpScratch + 15) & ~15;  // Pad to 16 bytes
+        
+        // Total dynamic shared memory
+        int numWarps = maxNthreads / warpSize;
+        int totalDynamicShared = perWarpScratch * numWarps;
+        
+        printf("LDS calculation for gfx%d: warpSize=%d, maxNthreads=%d, numWarps=%d\n",
+               gpu_arch_, warpSize, maxNthreads, numWarps);
+        printf("  Per-warp scratch: LL=%d, LL128=%d, SIMPLE=%d, NVLS=%d -> max=%d\n",
+               ll, ll128, simple, nvls, perWarpScratch);
+        printf("  Total dynamic shared memory required: %d bytes\n", totalDynamicShared);
+        
+        return totalDynamicShared;
+    }
+    
     // ========== Pass 1: Collect ==========
     bool collectSections() {
         elf_flags_ = disp_->ehdr()->e_flags;
@@ -579,8 +633,17 @@ private:
             max_lds_ = std::max(max_lds_, k.lds);
             max_stack_ = std::max(max_stack_, k.stack);
         }
-        printf("Max resources: VGPR=%d, SGPR=%d, LDS=%d, Stack=%d\n",
+        printf("Max resources from kernels: VGPR=%d, SGPR=%d, LDS=%d, Stack=%d\n",
                max_vgpr_, max_sgpr_, max_lds_, max_stack_);
+        
+        // Calculate required LDS based on RCCL formula (must match host-side calculation)
+        int requiredLDS = calculateRequiredLDS();
+        if (requiredLDS > max_lds_) {
+            printf("NOTE: Adjusting LDS from %d to %d (required by RCCL formula)\n",
+                   max_lds_, requiredLDS);
+            max_lds_ = requiredLDS;
+        }
+        printf("Final LDS size: %d bytes\n", max_lds_);
         
         // Build .text (dispatcher + all kernel code)
         auto* disp_text = disp_->find(".text");
@@ -914,11 +977,6 @@ private:
             // Then add each specialized kernel's .debug_line and .debug_line_str
             for (const auto& [kern, text_off] : kernel_text_offsets_) {
                 if (!kern->debug_line.empty()) {
-                    size_t str_base = merged_debug_line_str_.size();
-                    size_t orig_str_size = kern->debug_line_str.size();
-                    
-                    // Append this kernel's .debug_line_str to merged
-                    if (!kern->debug_line_str.empty()) {
                         merged_debug_line_str_.insert(merged_debug_line_str_.end(),
                                                       kern->debug_line_str.begin(),
                                                       kern->debug_line_str.end());
@@ -1848,10 +1906,12 @@ private:
                 // Use STB_GLOBAL (not STB_LOCAL) because ELF requires local symbols
                 // to precede global symbols, and sh_info marks the boundary.
                 // STV_HIDDEN ensures they don't pollute the dynamic symbol table.
+                // Note: text_off is where the code block starts, but func_offset is the offset
+                // of the ncclDevFunc_ function within that block (helper functions come before it).
                 Elf64_Sym sym = {};
                 sym.st_name = name_off;
-                sym.st_value = text_addr_ + text_off;
-                sym.st_size = kern->code.size();
+                sym.st_value = text_addr_ + text_off + kern->func_offset;
+                sym.st_size = kern->code.size() - kern->func_offset;  // Function size, not whole block
                 sym.st_info = ELF64_ST_INFO(STB_GLOBAL, STT_FUNC);
                 sym.st_other = STV_HIDDEN;
                 sym.st_shndx = text_shndx;
@@ -1974,6 +2034,159 @@ private:
         buildRelocations();
     }
     
+    // Helper to read ULEB128 value from buffer
+    static uint64_t readULEB128(const uint8_t*& p, const uint8_t* end) {
+        uint64_t result = 0;
+        unsigned shift = 0;
+        while (p < end) {
+            uint8_t byte = *p++;
+            result |= (uint64_t)(byte & 0x7f) << shift;
+            if ((byte & 0x80) == 0) break;
+            shift += 7;
+        }
+        return result;
+    }
+    
+    // Patch DWARF5 string offsets in .debug_line prologue
+    // DWARF5 stores directory/file names as offsets into .debug_line_str using DW_FORM_line_strp
+    // When we concatenate multiple .debug_line_str sections, we need to adjust these offsets
+    void patchDwarf5StringOffsets() {
+        SectionInfo* debug_line_sec = nullptr;
+        for (auto& s : sections_) {
+            if (s.name == ".debug_line") { debug_line_sec = &s; break; }
+        }
+        if (!debug_line_sec || debug_line_sec->data.empty()) return;
+        
+        int total_patched = 0;
+        
+        for (const auto& chunk : debug_line_chunks_) {
+            // Skip if no string offset adjustment needed
+            if (chunk.str_offset_base == 0) continue;
+            
+            uint8_t* data = debug_line_sec->data.data() + chunk.merged_offset;
+            size_t size = chunk.size;
+            if (size < 12) continue;
+            
+            // Parse DWARF line table header
+            // Format: unit_length(4) + version(2) + [address_size(1) + seg_sel_size(1) for DWARF5] + header_length(4)
+            uint32_t unit_length;
+            memcpy(&unit_length, data, 4);
+            uint16_t version;
+            memcpy(&version, data + 4, 2);
+            
+            // Only DWARF5 uses .debug_line_str
+            if (version != 5) continue;
+            
+            // DWARF5 header: unit_length(4) + version(2) + addr_size(1) + seg_sel_size(1) + header_length(4)
+            uint8_t addr_size = data[6];
+            // uint8_t seg_sel_size = data[7];
+            uint32_t header_length;
+            memcpy(&header_length, data + 8, 4);
+            
+            // Prologue starts after header_length field (at offset 12)
+            const uint8_t* prologue = data + 12;
+            const uint8_t* prologue_end = data + 12 + header_length;
+            const uint8_t* p = prologue;
+            
+            if (prologue_end > data + size) continue;
+            
+            // Skip: min_inst_len(1), max_ops(1), default_is_stmt(1), line_base(1), line_range(1), opcode_base(1)
+            if (p + 6 > prologue_end) continue;
+            uint8_t opcode_base = p[5];
+            p += 6;
+            
+            // Skip standard_opcode_lengths array (opcode_base - 1 entries)
+            if (p + (opcode_base - 1) > prologue_end) continue;
+            p += (opcode_base - 1);
+            
+            // DW_FORM constants
+            const uint8_t DW_FORM_data1 = 0x0b;      // 1 byte
+            const uint8_t DW_FORM_data2 = 0x05;      // 2 bytes
+            const uint8_t DW_FORM_data4 = 0x06;      // 4 bytes
+            const uint8_t DW_FORM_data8 = 0x07;      // 8 bytes
+            const uint8_t DW_FORM_data16 = 0x1e;     // 16 bytes (MD5 checksum)
+            const uint8_t DW_FORM_udata = 0x0f;      // ULEB128
+            const uint8_t DW_FORM_line_strp = 0x1f;  // 4-byte offset into .debug_line_str (DWARF32)
+            const uint8_t DW_FORM_string = 0x08;     // null-terminated inline string
+            const uint8_t DW_FORM_strp = 0x0e;       // 4-byte offset into .debug_str
+            
+            // Lambda to patch offsets in an entry list
+            auto patchEntries = [&](int entry_count, const std::vector<std::pair<uint8_t, uint8_t>>& formats) {
+                int patched = 0;
+                for (int i = 0; i < entry_count && p < prologue_end; i++) {
+                    for (const auto& [content_type, form] : formats) {
+                        if (p >= prologue_end) break;
+                        
+                        if (form == DW_FORM_line_strp) {
+                            // 4-byte offset for DWARF32
+                            if (p + 4 <= prologue_end) {
+                                uint32_t old_offset;
+                                memcpy(&old_offset, p, 4);
+                                uint32_t new_offset = old_offset + (uint32_t)chunk.str_offset_base;
+                                memcpy(const_cast<uint8_t*>(p), &new_offset, 4);
+                                patched++;
+                            }
+                            p += 4;
+                        } else if (form == DW_FORM_data1) {
+                            p += 1;
+                        } else if (form == DW_FORM_data2) {
+                            p += 2;
+                        } else if (form == DW_FORM_data4 || form == DW_FORM_strp) {
+                            p += 4;
+                        } else if (form == DW_FORM_data8) {
+                            p += 8;
+                        } else if (form == DW_FORM_data16) {
+                            p += 16;  // MD5 checksum
+                        } else if (form == DW_FORM_udata) {
+                            readULEB128(p, prologue_end);
+                        } else if (form == DW_FORM_string) {
+                            // Skip inline null-terminated string
+                            while (p < prologue_end && *p != 0) p++;
+                            if (p < prologue_end) p++;  // Skip null terminator
+                        } else {
+                            // Unknown form - log and skip 4 bytes as guess
+                            // printf("Warning: unknown DWARF form 0x%02x\n", form);
+                            p += 4;
+                        }
+                    }
+                }
+                return patched;
+            };
+            
+            // Directory entry format
+            if (p >= prologue_end) continue;
+            uint8_t dir_format_count = *p++;
+            std::vector<std::pair<uint8_t, uint8_t>> dir_formats;
+            for (int i = 0; i < dir_format_count && p < prologue_end; i++) {
+                uint8_t content_type = (uint8_t)readULEB128(p, prologue_end);
+                uint8_t form = (uint8_t)readULEB128(p, prologue_end);
+                dir_formats.push_back({content_type, form});
+            }
+            
+            // Directory count and entries
+            uint64_t dir_count = readULEB128(p, prologue_end);
+            total_patched += patchEntries((int)dir_count, dir_formats);
+            
+            // File name entry format
+            if (p >= prologue_end) continue;
+            uint8_t file_format_count = *p++;
+            std::vector<std::pair<uint8_t, uint8_t>> file_formats;
+            for (int i = 0; i < file_format_count && p < prologue_end; i++) {
+                uint8_t content_type = (uint8_t)readULEB128(p, prologue_end);
+                uint8_t form = (uint8_t)readULEB128(p, prologue_end);
+                file_formats.push_back({content_type, form});
+            }
+            
+            // File count and entries
+            uint64_t file_count = readULEB128(p, prologue_end);
+            total_patched += patchEntries((int)file_count, file_formats);
+        }
+        
+        if (total_patched > 0) {
+            printf("  Patched %d DWARF5 string offsets in .debug_line\n", total_patched);
+        }
+    }
+    
     void patchDebugLine() {
         if (debug_line_chunks_.empty()) return;
         
@@ -1984,7 +2197,6 @@ private:
         if (!debug_line_sec || debug_line_sec->data.empty()) return;
         
         printf("Patching .debug_line addresses (%zu chunks)...\n", debug_line_chunks_.size());
-        
         int patched = 0;
         for (const auto& chunk : debug_line_chunks_) {
             // Scan this chunk for DW_LNE_set_address opcodes
@@ -2013,6 +2225,10 @@ private:
         }
         
         printf("  Patched %d DW_LNE_set_address opcodes\n", patched);
+        
+        // Patch DWARF5 string offsets in .debug_line
+        // DWARF5 uses DW_FORM_line_strp (4-byte offsets into .debug_line_str) for file/dir names
+        patchDwarf5StringOffsets();
         
         // Calculate the address delta for dispatcher debug sections
         // Dispatcher's original .text address vs merged position
@@ -2606,6 +2822,9 @@ int main(int argc, char** argv) {
     // Link
     DeviceLinker linker(dispatcher);
     if (!linker.load()) { fprintf(stderr, "Cannot load dispatcher\n"); return 1; }
+    
+    // Set GPU target for proper LDS calculation
+    linker.setGpuTarget(g_target_arch);
     
     for (const auto& k : kernels) linker.addKernel(k);
     linker.setFuncIdMap(funcid_map);

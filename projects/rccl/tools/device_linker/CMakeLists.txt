@@ -35,6 +35,12 @@ set(GPU_TARGET "gfx942" CACHE STRING "GPU target architecture")
 set(GPU_TARGET_FULL "${GPU_TARGET}:xnack+:sramecc+")
 set(BUNDLE_TARGET "hipv4-amdgcn-amd-amdhsa--${GPU_TARGET}:sramecc+:xnack+")
 
+# Debug options
+option(DEBUG_PEER_POINTERS "Enable device-side debug output for peer pointer tracking" OFF)
+if(DEBUG_PEER_POINTERS)
+  message(STATUS "DEBUG_PEER_POINTERS enabled - will print peer pointer info from device code")
+endif()
+
 message(STATUS "GPU target: ${GPU_TARGET_FULL}")
 message(STATUS "Bundle target: ${BUNDLE_TARGET}")
 
@@ -143,11 +149,18 @@ foreach(src ${SPECIALIZED_FILES})
     set(INC_FLAGS "${INC_FLAGS} -I${dir}")
   endforeach()
   
+  # Build debug flags if enabled
+  set(DEBUG_FLAGS "")
+  if(DEBUG_PEER_POINTERS)
+    set(DEBUG_FLAGS "-DDEBUG_PEER_POINTERS")
+  endif()
+  
   add_custom_command(
     OUTPUT ${obj}
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/specialized_objs
     COMMAND ${HIPCC} -c -fPIC -fno-gpu-rdc --offload-arch=${GPU_TARGET_FULL}
             -DDEVICE_LINKER -D__HIP_PLATFORM_AMD__ -DENABLE_FAULT_INJECTION
+            ${DEBUG_FLAGS}
             -I${BASE_BUILD_FULL}/include
             -I${HIPIFY_DIR}/src
             -I${HIPIFY_DIR}/src/device
@@ -177,6 +190,9 @@ if(ENABLE_WARP_SPEED)
 endif()
 if(LL128_ENABLED)
   list(APPEND DISPATCHER_DEFS -DENABLE_LL128)
+endif()
+if(DEBUG_PEER_POINTERS)
+  list(APPEND DISPATCHER_DEFS -DDEBUG_PEER_POINTERS)
 endif()
 
 add_custom_command(

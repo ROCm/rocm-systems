@@ -2,9 +2,9 @@
 
 ## Environment
 
-**Machine:** MI350X (cv350-zts-gtu-e11-18)  
-**GPU Target:** gfx950  
-**GPUs Available:** 8  
+**Machine:** MI300A (ringo)  
+**GPU Target:** gfx942  
+**GPUs Available:** 4  
 **ROCm Version:** 7.0  
 **Build Path:** /work/lmeadows/rocm-systems/projects/rccl/build/release
 
@@ -13,9 +13,9 @@
 | Test | Status |
 |------|--------|
 | Single-GPU | WORKING |
-| Multi-GPU | CRASHING (Memory Fault Error) |
+| Multi-GPU | HANGING (kernel never completes) |
 | System RCCL Multi-GPU | WORKING |
-| LDS Size | 73568 bytes (correct) |
+| Shared Memory | FIXED (see fix #5 below) |
 
 ## Changes Made This Session (Feb 3, 2026)
 
@@ -73,6 +73,75 @@ endif()
 
 **Fix:** Added all variants including sramecc combinations.
 
+### 5. Fixed Shared Memory Declaration for Dynamic Scratch
+
+**File:** `src/device/common.h` (and hipified version)
+
+**Problem:** In DEVICE_LINKER mode, `ncclShmemPerWarp` was declared as `__shared__` (static), 
+consuming 37776 bytes of the device's 65536 byte shared memory limit. This left only 27760 
+bytes for dynamic allocation, but the host code expected 32832 bytes of dynamic shared memory.
+
+**Error:** `cudaArch 940 ncclMaxSharedMem 32832 exceeds device/fn maxSharedMem 27760`
+
+**Fix:** Changed `ncclShmemPerWarp` to use `extern __shared__` (dynamic allocation) for 
+CUDA arch >= 700, matching the standard build behavior:
+
+```cpp
+#if __CUDA_ARCH__ >= 700 || NCCL_CUDA_ARCH >= 700
+  // Dynamic scratch - use extern __shared__ with incomplete size for runtime allocation
+  extern __shared__ ulong2 ncclShmemPerWarp[/*ncclShmemDynamicSize()/sizeof(ulong2)*/];
+#else
+  // Static scratch for older archs
+  NCCL_SHMEM_DECL ulong2 ncclShmemPerWarp[ncclShmemScratchWarpSize()*(NCCL_MAX_NTHREADS/WARP_SIZE)/sizeof(ulong2)];
+#endif
+```
+
+**Also updated:** Device linker now calculates and logs required LDS size based on GPU arch.
+
+### 6. Fixed DWARF5 Debug Line String Offsets
+
+**File:** `tools/device_linker/device_linker.cpp`
+
+**Problem:** When merging specialized kernel debug info, the device linker was concatenating 
+`.debug_line_str` sections but not adjusting the string offset references in `.debug_line`. 
+DWARF5 uses `DW_FORM_line_strp` (4-byte offsets into `.debug_line_str`) for file/directory names.
+After merging, these offsets pointed to wrong strings, causing corrupted file names in debugger output.
+
+**Symptoms:** `llvm-dwarfdump --debug-line` showed corrupted file names like:
+```
+name: "m-systems/projects/rccl/build/..."  (truncated)
+name: "se/hipify/gensrc/specialized/..."   (wrong offset)
+```
+
+**Fix:** Added `patchDwarf5StringOffsets()` function that:
+1. Parses DWARF5 line table prologues to find directory and file name entries
+2. Identifies entries using `DW_FORM_line_strp` form
+3. Adjusts each string offset by `str_offset_base` (cumulative offset from earlier kernels)
+4. Properly handles all DWARF forms including `DW_FORM_data16` (MD5 checksums)
+
+### 7. Fixed Specialized Kernel Symbol Addresses
+
+**File:** `tools/device_linker/device_linker.cpp`
+
+**Problem:** Symbol table entries for specialized kernels (`ncclDevFunc_*`) pointed to the 
+start of the extracted code block rather than the actual function. Each extracted block 
+includes helper functions (like `__ockl_fprintf_append_string_n`, `__assert_fail`, `runRing`) 
+before the `ncclDevFunc_` entry point.
+
+**Impact:** Debuggers (like `rocgdb`) would show incorrect addresses and couldn't properly 
+correlate source lines with the actual function code.
+
+**Fix:** Changed symbol value calculation from:
+```cpp
+sym.st_value = text_addr_ + text_off;                    // Wrong: code block start
+sym.st_size = kern->code.size();                         // Wrong: whole block size
+```
+to:
+```cpp
+sym.st_value = text_addr_ + text_off + kern->func_offset; // Correct: actual function
+sym.st_size = kern->code.size() - kern->func_offset;      // Correct: function size only
+```
+
 ## Compilation Flags (Single Source of Truth)
 
 All compilation units MUST have these flags for consistent structure layouts:
@@ -93,38 +162,45 @@ All compilation units MUST have these flags for consistent structure layouts:
 | Dispatcher (CMake) | ✓ | ✓ | ✓ | ✓ |
 | Dispatcher (script) | ✓ | ✓ | ✓ | ✓ |
 
-## Current Issue: Multi-GPU Memory Fault
+## Current Issue: Multi-GPU Kernel Hang
 
 ### Symptoms
 - Single-GPU AllReduce works correctly
-- Multi-GPU AllReduce crashes with "Memory Fault Error"
-- Both TREE and RING algorithms crash
-- Both kernels launch successfully, then crash during execution
+- Multi-GPU AllReduce hangs indefinitely (kernel never completes)
+- Initialization succeeds, channels are connected, kernel is launched
+- Hang occurs during `hipStreamSynchronize()`
 
-### Crash Details
+### Progress (This Session)
+- ✓ Fixed shared memory issue (see fix #5)
+- ✓ Initialization now completes successfully
+- ✓ Channels connect via P2P/direct pointer
+- ✓ Kernel launches (no longer crashes on launch)
+- ✗ Kernel hangs during execution (never completes)
 
-**Location:** Specialized kernel functions (e.g., `ncclDevFunc_AllReduce_TREE_LL_Sum_f32_0_0_1`)
+### Likely Root Cause
+The kernel hangs because connection pointers accessed from `ncclShmem.groups[].recvConns[]` 
+and `sendConns[]` are NULL or invalid. These pointers are populated in the Primitives 
+constructor from `channel->peers[peer]`, which comes from `ncclShmem.channel.peers`.
 
-**Faulting Instruction:** `flat_load_dwordx2` trying to load from computed address
-
-**Register State at Crash (TREE example, offset +5680):**
+**Key code path (prims_simple.h):**
+```cpp
+// In Primitives constructor:
+if (flags & (RoleWaitRecv|RolePostRecv)) loadRecvConn(channel->peers[peer], ...);
+if (flags & (RoleWaitSend|RolePostSend)) loadSendConn(channel->peers[peer], ...);
 ```
-v[6:7] = 0x8        (computed address - invalid!)
-v[8:9] = 0x0        (base pointer - NULL)
-v[10:11] = 0x1      (index/count)
-```
 
-**Root Cause:** NULL connection pointers in `ncclShmemGroup`:
-- Specialized kernels expect `ncclShmem.groups[].recvConns[]` and `sendConns[]` to be valid
-- In device linker build, these are NULL during multi-GPU execution
-- Single-GPU works because no inter-GPU communication is needed
+The `peers` array is copied from host memory during kernel initialization, but may not 
+contain valid pointers in the device linker build.
 
-### Investigation Status
+### Debug Instrumentation Added
+Added `DEBUG_PEER_POINTERS` compile flag to `prims_simple.h` and `prims_ll.h` that prints:
+- `channel->peers` pointer value
+- Peer index being accessed
+- `channel->peers[peer]` value
+- Connection info fields
 
-1. ✓ All compilation flags are now consistent
-2. ✓ LDS size is correct (73568 bytes)
-3. ✓ Function table dispatch works correctly
-4. ✗ Connection pointers are NULL during multi-GPU ops
+**Note:** This debug output increases shared memory usage significantly and may not work 
+without further LDS adjustments.
 
 ## Previously Fixed Issues
 
@@ -133,6 +209,9 @@ v[10:11] = 0x1      (index/count)
 3. **Helper function extraction** - Device linker now extracts complete code blocks
 4. **ENABLE_WARP_SPEED mismatch** - All units now compile with same flag
 5. **Debug info merging** - Added .debug_ranges section handling
+6. **Shared memory limit exceeded** - Fixed `ncclShmemPerWarp` to use dynamic allocation
+7. **DWARF5 debug line string offsets** - Fixed merging of `.debug_line_str` sections (see fix #6 below)
+8. **Specialized kernel symbol addresses** - Fixed to point to actual function, not code block start (see fix #7 below)
 
 ## Build Commands
 
