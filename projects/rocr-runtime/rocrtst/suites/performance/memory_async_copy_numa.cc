@@ -297,7 +297,7 @@ void MemoryAsyncCopyNUMA::RunBenchmarkWithVerification(Transaction *t) {
   }
   ASSERT_NE(cpy_ag, nullptr);
 
-  for (int i = 0; i < kNumGranularity; i++) {
+  for (int i = 0; i < Granularities.size(); i++) {
     if (Granularities[i].Size > size) {
       break;
     }
