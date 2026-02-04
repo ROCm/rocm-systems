@@ -137,6 +137,30 @@ def get_sdk_data(data):
     return sdk_data
 
 
+def validate_json_file_has_profiling_data(json_file):
+    """
+    Validate that a JSON file contains valid profiling data.
+
+    Loads the JSON file, extracts rocprofiler-sdk-tool data, and verifies that
+    it contains either kernel_dispatch or hip_api profiling data.
+
+    Raises AssertionError if validation fails.
+    """
+    data = load_json_file(json_file)
+    assert data is not None, f"Failed to load JSON from {json_file}"
+
+    sdk_data = get_sdk_data(data)
+    assert sdk_data is not None, f"Missing rocprofiler-sdk-tool data in {json_file}"
+    buffer_records = sdk_data.get("buffer_records", {})
+
+    # Should have some kernel or HIP API data
+    has_data = (
+        len(buffer_records.get("kernel_dispatch", [])) > 0
+        or len(buffer_records.get("hip_api", [])) > 0
+    )
+    assert has_data, f"No profiling data found in {json_file}"
+
+
 def test_mpi_ranks_feature(output_dir, test_mode):
     """
     Test the --mpi-ranks feature with different scenarios using simple-transpose application.
@@ -178,21 +202,7 @@ def test_mpi_ranks_feature(output_dir, test_mode):
         ), f"Expected 1 JSON file for rank 0 only, but found {len(json_files)}: {json_files}"
 
         # Verify the file is from rank 0
-        json_file = json_files[0]
-        data = load_json_file(json_file)
-        assert data is not None, f"Failed to load JSON from {json_file}"
-
-        # Check that we have valid profiling data
-        sdk_data = get_sdk_data(data)
-        assert sdk_data is not None, f"Missing rocprofiler-sdk-tool data in {json_file}"
-        buffer_records = sdk_data.get("buffer_records", {})
-
-        # Should have some kernel or HIP API data
-        has_data = (
-            len(buffer_records.get("kernel_dispatch", [])) > 0
-            or len(buffer_records.get("hip_api", [])) > 0
-        )
-        assert has_data, "No profiling data found in rank 0 output"
+        validate_json_file_has_profiling_data(json_files[0])
 
     elif test_mode == "with-mpi-multiple":
         # With --mpi-ranks 0-1,3 and 4 MPI ranks, ranks 0, 1, and 3 should generate output
@@ -211,21 +221,7 @@ def test_mpi_ranks_feature(output_dir, test_mode):
 
         # Verify each file has valid profiling data
         for json_file in json_files:
-            data = load_json_file(json_file)
-            assert data is not None, f"Failed to load JSON from {json_file}"
-
-            sdk_data = get_sdk_data(data)
-            assert (
-                sdk_data is not None
-            ), f"Missing rocprofiler-sdk-tool data in {json_file}"
-            buffer_records = sdk_data.get("buffer_records", {})
-
-            # Should have some kernel or HIP API data
-            has_data = (
-                len(buffer_records.get("kernel_dispatch", [])) > 0
-                or len(buffer_records.get("hip_api", [])) > 0
-            )
-            assert has_data, f"No profiling data found in {json_file}"
+            validate_json_file_has_profiling_data(json_file)
 
     elif test_mode == "without-mpi":
         # Without MPI environment, --mpi-ranks should be ignored and output generated
@@ -235,20 +231,7 @@ def test_mpi_ranks_feature(output_dir, test_mode):
         ), f"Expected at least 1 JSON file for non-MPI run, but found {len(json_files)}: {json_files}"
 
         # Verify the file has valid profiling data
-        json_file = json_files[0]
-        data = load_json_file(json_file)
-        assert data is not None, f"Failed to load JSON from {json_file}"
-
-        sdk_data = get_sdk_data(data)
-        assert sdk_data is not None, f"Missing rocprofiler-sdk-tool data in {json_file}"
-        buffer_records = sdk_data.get("buffer_records", {})
-
-        # Should have some kernel or HIP API data
-        has_data = (
-            len(buffer_records.get("kernel_dispatch", [])) > 0
-            or len(buffer_records.get("hip_api", [])) > 0
-        )
-        assert has_data, "No profiling data found in output"
+        validate_json_file_has_profiling_data(json_files[0])
 
     else:
         pytest.fail(f"Unknown test mode: {test_mode}")
