@@ -27,6 +27,7 @@
 ###############################################################################
 set(CMAKE_BUILD_TYPE "Release" CACHE STRING
       "build type: Release, Debug, RelWithDebInfo, MinSizeRel")
+set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS Release RelWithDebInfo Debug MinSizeRel)
 
 ###############################################################################
 # DEPENDENCIES
@@ -34,39 +35,33 @@ set(CMAKE_BUILD_TYPE "Release" CACHE STRING
 
 # Try to establish ROCM_PATH (for find_package)
 #==================================================================================================
-if(NOT DEFINED ROCM_PATH)
-  # Guess default location
-  set(ROCM_PATH "/opt/rocm")
-  message(WARNING "Unable to find ROCM_PATH: Falling back to ${ROCM_PATH}")
-else()
-  message(STATUS "ROCM_PATH found: ${ROCM_PATH}")
-endif()
-set(ENV{ROCM_PATH} ${ROCM_PATH})
+if (NOT DEFINED CACHE{ROCM_MAJOR_VERSION})
+  find_file(rocm_version_file "version" PATH_SUFFIXES ".info"
+    HINTS ${ROCM_PATH} ENV ROCM_PATH ${ROCM_ROOT} ENV ROCM_ROOT ${hip_ROOT} ENV hip_ROOT ${HIP_ROOT} ENV HIP_ROOT
+    PATHS /opt/rocm
+    REQUIRED)
+  cmake_path(GET rocm_version_file PARENT_PATH version_file_dir)
+  cmake_path(GET version_file_dir PARENT_PATH rocm_path)
 
-## Check for ROCm version
-
-if(ROCM_PATH)
-  message(STATUS "Reading ROCM version from ${ROCM_PATH}/.info/version")
-  file(READ "${ROCM_PATH}/.info/version" rocm_version_string)
-else()
-  message(FATAL_ERROR "Could not determine ROCM version (set EXPLICIT_ROCM_VERSION or set ROCM_PATH to a valid installation)")
-endif()
-string(REGEX MATCH "([0-9]+)\\.([0-9]+)\\.([0-9]+)" rocm_version_matches ${rocm_version_string})
-if (rocm_version_matches)
-  set(ROCM_MAJOR_VERSION ${CMAKE_MATCH_1})
-  set(ROCM_MINOR_VERSION ${CMAKE_MATCH_2})
-  set(ROCM_PATCH_VERSION ${CMAKE_MATCH_3})
-
-  message(STATUS "ROCm version: ${ROCM_MAJOR_VERSION}.${ROCM_MINOR_VERSION}.${ROCM_PATCH_VERSION}")
-else()
-  message(WARNING "Failed to extract ROCm version.")
-endif()
-
-foreach (root ${hip_ROOT} $ENV{hip_ROOT} ${ROCM_ROOT} $ENV{ROCM_ROOT} ${ROCM_PATH} $ENV{ROCM_PATH})
-  if (IS_DIRECTORY ${root})
-    list(PREPEND CMAKE_PREFIX_PATH ${root})
+  ## Check for ROCm version
+  file(READ ${rocm_version_file} rocm_version_string)
+  string(REGEX MATCH "([0-9]+)\\.([0-9]+)\\.([0-9]+)" rocm_version_matches ${rocm_version_string})
+  if (rocm_version_matches)
+    set(ROCM_MAJOR_VERSION ${CMAKE_MATCH_1} CACHE INTERNAL "")
+    set(ROCM_MINOR_VERSION ${CMAKE_MATCH_2} CACHE INTERNAL "")
+    set(ROCM_PATCH_VERSION ${CMAKE_MATCH_3} CACHE INTERNAL "")
+  else()
+    message(FATAL_ERROR "Could not determine ROCm version (set EXPLICIT_ROCM_VERSION or set ROCM_PATH to a valid installation)")
   endif()
-endforeach()
+
+  set(ROCM_PATH "${rocm_path}" CACHE PATH "Location of the ROCm SDK")
+  message(STATUS "ROCm version: ${ROCM_MAJOR_VERSION}.${ROCM_MINOR_VERSION}.${ROCM_PATCH_VERSION} from ${ROCM_PATH}")
+endif()
+
+# Always prefer the ROCm we found
+list(PREPEND CMAKE_PREFIX_PATH ${ROCM_PATH})
+
+# Use hipcc from our rocm install
 if (NOT DEFINED CMAKE_CXX_COMPILER)
   find_program(CMAKE_CXX_COMPILER hipcc PATHS /opt/rocm)
 endif()
@@ -77,6 +72,6 @@ endif()
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_FLAGS_DEBUG "-O0 -ggdb")
+set(CMAKE_CXX_FLAGS_DEBUG "-Og -ggdb")
 
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
