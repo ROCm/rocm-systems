@@ -182,9 +182,6 @@ class RocProfCompute:
             if self.__args.name is None and self.__args.output_directory == str(
                 Path.cwd() / "workloads"
             ):
-                print(f"Path: {self.__args.path}")
-                print(f"Name: {self.__args.name}")
-                print(f"Output_directory: {self.__args.output_directory}")
                 # Remove if statement and the else code block after 8.0 release
                 if self.__args.path == str(Path.cwd() / "workloads"):
                     console_error("Either --output-directory or --name is required")
