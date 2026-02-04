@@ -1246,7 +1246,7 @@ def run(app_args, args, **kwargs):
 
     # Check if this MPI rank should provide profile/trace output
     # If not, run the application without profiling instrumentation
-    if hasattr(args, "mpi_ranks") and args.mpi_ranks is not None:
+    if has_set_attr(args, "mpi_ranks"):
         if not should_rank_provide_output(args.mpi_ranks):
             current_rank = get_mpi_rank()
             if current_rank is not None and args.log_level in ("info", "trace"):

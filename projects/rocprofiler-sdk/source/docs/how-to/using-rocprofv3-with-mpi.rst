@@ -199,18 +199,6 @@ The rank specification syntax supports:
 - **Ranges**: Hyphen-separated start and end values (e.g., ``0-7`` for ranks 0 through 7)
 - **Combined**: Mix of individual ranks and ranges (e.g., ``0-3,8,10-15``)
 
-Environment variable
----------------------
-
-You can also set the rank specification using the ``ROCPROF_MPI_RANKS`` environment variable:
-
-.. code-block:: bash
-
-    export ROCPROF_MPI_RANKS="0-3,8"
-    mpirun -n 16 rocprofv3 --hip-trace -- <application_path>
-
-The command-line option ``--mpi-ranks`` takes precedence over the environment variable.
-
 Behavior
 ---------
 
