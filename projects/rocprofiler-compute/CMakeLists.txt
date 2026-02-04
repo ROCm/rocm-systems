@@ -402,7 +402,7 @@ if(MPI_CXX_COMPILER)
         COMMAND
             ${PYTHON_TEST_COMMAND} -m pytest -s -m multi_rank
             --junitxml=tests/test_profile_multi_rank.xml ${COV_OPTION}
-            tests/test_profile_general.py --with-mpi ${WORKING_DIR_OPTION}
+            tests/test_profile_general.py ${WORKING_DIR_OPTION}
     )
     set_tests_properties(
         test_profile_multi_rank
