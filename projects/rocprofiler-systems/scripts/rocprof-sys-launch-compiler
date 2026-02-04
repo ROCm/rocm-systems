@@ -102,19 +102,32 @@ if [ "$(basename ${1})" = "cmake" ] && [ "${2}" = "-E" ] && [ "${3}" = "__run_co
     fi
 fi
 
-# Handle ccache wrapper (the actual compiler is the next argument after ccache)
+# Known wrappers that may appear before the actual compiler
+KNOWN_WRAPPERS=(
+    "resource_info.py"  # TheRock build profiling
+    "ccache"            # Compiler cache
+)
+
 CCACHE_PREFIX=""
 ACTUAL_COMPILER="${1}"
-if [ "$(basename ${1})" = "ccache" ]; then
-    if [ -z "${2:-}" ]; then
-        echo -e "\nError: ${BASH_SOURCE[0]} detected 'ccache' as a compiler wrapper," >&2
-        echo "but no underlying compiler was specified as the next argument." >&2
-        echo "Usage: ccache <actual-compiler> [args...]" >&2
-        exit 1
+CURRENT_BASENAME="$(basename "${1}")"
+
+for wrapper in "${KNOWN_WRAPPERS[@]}"; do
+    if [[ "${CURRENT_BASENAME}" == "${wrapper}" ]]; then
+        if [ -z "${2:-}" ]; then
+            echo -e "\nError: ${BASH_SOURCE[0]} detected '${wrapper}' as a wrapper," >&2
+            echo "but no underlying command was specified as the next argument." >&2
+            exit 1
+        fi
+        # Preserve ccache so we can re-apply it to the rocprofiler-systems compiler
+        if [[ "${wrapper}" == "ccache" ]]; then
+            CCACHE_PREFIX="${1}"
+        fi
+        shift
+        ACTUAL_COMPILER="${1}"
+        CURRENT_BASENAME="$(basename "${1}")"
     fi
-    CCACHE_PREFIX="${1}"
-    ACTUAL_COMPILER="${2}"
-fi
+done
 
 if [[ "${CXX_COMPILER}" != "${ACTUAL_COMPILER}" ]]; then
     debug-message $@
@@ -127,12 +140,7 @@ else
         exit 1
     fi
 
-    # discard ccache if present
-    if [ -n "${CCACHE_PREFIX}" ]; then
-        shift
-    fi
-
-    # discard the compiler from the command
+    # discard the compiler from the command (wrappers were already shifted in the loop above)
     shift
 
     if [ -n "$(basename ${ROCPROFSYS_COMPILER} | egrep 'amdclang|amdllvm')" ]; then

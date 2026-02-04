@@ -134,8 +134,11 @@ To build and install rocSHMEM with all three backends, run:
 
 .. code-block:: bash
 
-  git clone git@github.com:ROCm/rocSHMEM.git
-  cd rocSHMEM
+  git clone --no-checkout --filter=blob:none git@github.com:ROCm/rocm-systems.git
+  cd rocm-systems
+  git sparse-checkout set --cone projects/rocshmem
+  git checkout develop
+  cd projects/rocshmem
   mkdir build
   cd build
   ../scripts/build_configs/all_backends
@@ -154,8 +157,11 @@ To build and install rocSHMEM with the GDA backends, run:
 
 .. code-block:: bash
 
-  git clone git@github.com:ROCm/rocSHMEM.git
-  cd rocSHMEM
+  git clone --no-checkout --filter=blob:none git@github.com:ROCm/rocm-systems.git
+  cd rocm-systems
+  git sparse-checkout set --cone projects/rocshmem
+  git checkout develop
+  cd projects/rocshmem
   mkdir build
   cd build
 
@@ -175,8 +181,11 @@ To build and install rocSHMEM with the hybrid RO (off-node) and IPC (on-node) ba
 
 .. code-block:: bash
 
-  git clone git@github.com:ROCm/rocSHMEM.git
-  cd rocSHMEM
+  git clone --no-checkout --filter=blob:none git@github.com:ROCm/rocm-systems.git
+  cd rocm-systems
+  git sparse-checkout set --cone projects/rocshmem
+  git checkout develop
+  cd projects/rocshmem
   mkdir build
   cd build
   ../scripts/build_configs/ro_ipc
@@ -195,8 +204,11 @@ To build and install rocSHMEM with the IPC on-node, GPU-to-GPU backend, run:
 
 .. code-block:: bash
 
-  git clone git@github.com:ROCm/rocSHMEM.git
-  cd rocSHMEM
+  git clone --no-checkout --filter=blob:none git@github.com:ROCm/rocm-systems.git
+  cd rocm-systems
+  git sparse-checkout set --cone projects/rocshmem
+  git checkout develop
+  cd projects/rocshmem
   mkdir build
   cd build
   ../scripts/build_configs/ipc_single
