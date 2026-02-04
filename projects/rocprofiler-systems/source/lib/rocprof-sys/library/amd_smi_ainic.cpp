@@ -228,7 +228,6 @@ nic_data::post_process(size_t nic_index)
 
     for(auto& itr : nic_sampler_vec[nic_index])
     {
-
         uint64_t _ts = itr.m_ts;
         if(!_thread_info->is_valid_time(_ts)) continue;
 
@@ -282,7 +281,8 @@ parse_list(const std::string& nic_str)
         }
         current += ch;
     }
-    if(current.size() > 0) {
+    if(current.size() > 0)
+    {
         nic_vec.push_back(current);
     }
     return nic_vec;
