@@ -313,28 +313,28 @@ get_internal_basic_libs_impl()
                                            "liblzma.so" };
 
     // shared libraries used by rocprof-sys
-    const auto _omni_libs = strview_init_t{ "libamd_comgr.so",
-                                            "libamd_smi.so",
-                                            "libgotcha.so",
-                                            "libhsa-runtime64.so",
-                                            "libomp.so",
-                                            "libpapi.so",
-                                            "libpfm.so",
-                                            "librocm_smi64.so",
-                                            "librocmtools.so",
-                                            "librocprofiler-register.so",
-                                            "librocprofiler-sdk-roctx.so",
-                                            "librocprofiler-sdk.so",
-                                            "librocprofiler64.so",
-                                            "libroctracer64.so",
-                                            "libroctx64.so",
-                                            "libstdc++.so.6",
-                                            "libunwind-coredump.so",
-                                            "libunwind-generic.so",
-                                            "libunwind-ptrace.so",
-                                            "libunwind-setjmp.so",
-                                            "libunwind-x86_64.so",
-                                            "libunwind.so" };
+    const auto _rocprof_sys_libs = strview_init_t{ "libstdc++.so.6",
+                                                   "libgotcha.so",
+                                                   "libunwind-coredump.so",
+                                                   "libunwind-generic.so",
+                                                   "libunwind-ptrace.so",
+                                                   "libunwind-setjmp.so",
+                                                   "libunwind.so",
+                                                   "libunwind-x86_64.so",
+                                                   "libpapi.so",
+                                                   "libpfm.so",
+                                                   "libhsa-runtime64.so",
+                                                   "libomp.so",
+                                                   "librocm_smi64.so",
+                                                   "libroctx64.so",
+                                                   "librocmtools.so",
+                                                   "libroctracer64.so",
+                                                   "librocprofiler64.so",
+                                                   "librocprofiler-register.so",
+                                                   "librocprofiler-sdk.so",
+                                                   "librocprofiler-sdk-roctx.so",
+                                                   "libamd_smi.so",
+                                                   "libamd_comgr.so" };
 
     // shared libraries potentially used by timemory
     const auto _3rdparty_libs = strview_init_t{ "libcaliper.so",
@@ -346,7 +346,7 @@ get_internal_basic_libs_impl()
                                                 "libtcmalloc_minimal.so",
                                                 "libtcmalloc_minimal_debug.so" };
 
-    for(const auto& gitr : { _gnu_libs, _dyn_libs, _omni_libs, _3rdparty_libs })
+    for(const auto& gitr : { _gnu_libs, _dyn_libs, _rocprof_sys_libs, _3rdparty_libs })
     {
         for(auto itr : gitr)
         {
