@@ -3330,3 +3330,23 @@ def test_multi_rank_profiling_mpi_comm(
         )
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.multi_rank
+def test_wrapped_mpi(binary_handler_profile_rocprof_compute):
+    """
+    Test that using MPI launchers (mpirun, mpiexec, srun, orterun) after '--'
+    raises an error.
+    """
+    config["wrapped_mpi"] = ["mpirun", "-n", "2", "./tests/occupancy"]
+
+    workload_dir = test_utils.get_output_dir()
+
+    returncode = binary_handler_profile_rocprof_compute(
+        config, workload_dir, options=[], check_success=False, app_name="wrapped_mpi",
+    )
+
+    # Should fail with exit code 1
+    assert returncode == 1
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
