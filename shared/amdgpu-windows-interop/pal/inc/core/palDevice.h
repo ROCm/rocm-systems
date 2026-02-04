@@ -1536,7 +1536,7 @@ struct DeviceProperties
                 uint64 supportFloat8                      :  1; ///< HW supports float 8-bit instructions.
                 uint64 supportInt4                        :  1; ///< HW supports integer 4-bit instructions.
                 uint64 supportCooperativeMatrix2          :  1; ///< HW supports Gfx12 extension cooperative matrix.
-                uint64 placeholder14                      :  2;
+                uint64 placeholder14                      :  3;
                 uint64 reserved                           :  59; ///< Reserved for future use.
             };
             uint64 u64All[2];           ///< Flags packed as 32-bit uint.
@@ -1596,7 +1596,7 @@ struct DeviceProperties
                 {
                     uint32 eccProtectedGprs                    :  1; ///< Whether or not the GPU has ECC protection
                                                                      ///< on its VGPR's
-                    uint32 placeholder0                        :  1;
+                    uint32 supportExpertSchedMode              :  1; ///< HW supports expert scheduling mode.
                     uint32 reserved                            : 30; ///< Reserved for future use.
                 };
                 uint32     u32All;                ///< Flags packed as a 32-bit unsigned integer.

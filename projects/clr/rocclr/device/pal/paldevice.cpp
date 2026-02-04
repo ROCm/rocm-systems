@@ -652,6 +652,7 @@ void NullDevice::fillDeviceInfo(const Pal::DeviceProperties& palProp,
       }
     }
   }
+  info_.hasExpertSchedMode_ = palProp.gfxipProperties.shaderCore.flags.supportExpertSchedMode;
 }
 
 Device::XferBuffers::~XferBuffers() {
