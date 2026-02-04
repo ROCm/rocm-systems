@@ -56,9 +56,17 @@ control the behavior of rocSHMEM.
         | ``1``: Force network conduit.
 
     * - | ``ROCSHMEM_USE_IB_HCA``
-        | Defines which NIC that this PE should be bound to. The default value is an empty string and rocSHMEM auto-detects the most appropriate NIC.
+        | Forces the NIC that this PE uses. When this value is set NIC auto-detection and mapping is disabled, the NIC specified in the variable
+        | will be selected. The default value is an empty string and rocSHMEM auto-detects the most appropriate NIC.
       - `` ``
       - | Example value: ``bnxt_re0``
+
+    * - | ``ROCSHMEM_EXCLUDE_IB_HCAS``
+        | Comma separated list of NIC names that should not be used by rocSHMEM. Unlike ``ROCSHMEM_USE_IB_HCA``, when this variable is set,
+        | NIC auto-detection and mapping still executes, but NICs from the exclude list are discarded before auto-detection runs.
+        | The default value is an empty string and rocSHMEM auto-detects the most appropriate NIC.
+      - `` ``
+      - | Example value: ``bnxt_re1,bnxt_re11``
 
     * - | ``ROCSHMEM_BOOTSTRAP_SOCKET_IFNAME``
         | Chooses the interface to bootstrap rocSHMEM with.
