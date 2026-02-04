@@ -1415,6 +1415,7 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
       desc.device_handle = agent_->libThunkDev();
       desc.fd = reinterpret_cast<HSAint32>(dmabuf_fd);
       desc.type = HSA_EXTERNAL_HANDLE_DMA_BUF;
+      desc.metadata = handle->handle[7];
       HsaHandleImportFlags hflags;
       hflags.ui32.IPCHandle = 1;
       hflags.ui32.SysMem = handle->handle[3];
@@ -1425,7 +1426,6 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
         close(dmabuf_fd);
         return HSA_STATUS_ERROR;
       }
-      handle->handle[7] = res.metadata;
       allocation_map_[ptr].thunk_bo = res.buf_handle;
    }
 #else
