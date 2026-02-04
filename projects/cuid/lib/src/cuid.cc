@@ -175,16 +175,9 @@ amdcuid_status_t amdcuid_get_handle_by_dev_path(const char* dev_path, amdcuid_de
         return AMDCUID_STATUS_INVALID_ARGUMENT;
     }
 
-    int fd = open(dev_path, O_RDONLY);
-    if (fd < 0) {
-        close(fd);
-        return AMDCUID_STATUS_DEVICE_NOT_FOUND;
-    }
-
-    std::string real_dev_path = CuidUtilities::real_dev_path_from_fd(fd);
-    close(fd);
+    std::string real_dev_path = CuidUtilities::get_real_path(dev_path);
     if (real_dev_path.empty()) {
-        return AMDCUID_STATUS_DEVICE_NOT_FOUND;
+         return AMDCUID_STATUS_DEVICE_NOT_FOUND;
     }
 
     amdcuid_status_t status;
@@ -247,6 +240,10 @@ amdcuid_status_t amdcuid_get_handle_by_bdf(const char* bdf, amdcuid_device_type_
         return AMDCUID_STATUS_INVALID_ARGUMENT;
     }
 
+    if (device_type == AMDCUID_DEVICE_TYPE_CPU || device_type == AMDCUID_DEVICE_TYPE_PLATFORM) {
+        return AMDCUID_STATUS_WRONG_DEVICE_TYPE;
+    }
+
     // check mgr first to see if device is already known
     for (const auto& device : mgr.devices()) {
         std::string device_bdf;
@@ -283,13 +280,19 @@ amdcuid_status_t amdcuid_get_handle_by_bdf(const char* bdf, amdcuid_device_type_
     if (device_path.empty()) {
         return AMDCUID_STATUS_DEVICE_NOT_FOUND;
     }
-    int fd = open(device_path.c_str(), O_RDONLY);
-    if (fd < 0) {
+    std::string real_dev_path = device_path;
+    // if device is not a nic, attempt to resolve real device path in case of symlink for more reliable matching
+    if (device_type != AMDCUID_DEVICE_TYPE_NIC
+        || device_path.find("net") == std::string::npos) {
+        int fd = open(device_path.c_str(), O_RDONLY);
+        if (fd < 0) {
+            close(fd);
+            return AMDCUID_STATUS_DEVICE_NOT_FOUND;
+        }
+        real_dev_path = CuidUtilities::real_dev_path_from_fd(fd);
         close(fd);
-        return AMDCUID_STATUS_DEVICE_NOT_FOUND;
     }
-    std::string real_dev_path = CuidUtilities::real_dev_path_from_fd(fd);
-    close(fd);
+
     if (real_dev_path.empty()) {
         return AMDCUID_STATUS_DEVICE_NOT_FOUND;
     }
@@ -320,6 +323,11 @@ amdcuid_status_t amdcuid_get_handle_by_fd(int fd, amdcuid_device_type_t device_t
     if (fd < 0 || !handle) {
         return AMDCUID_STATUS_INVALID_ARGUMENT;
     }
+
+    if (device_type == AMDCUID_DEVICE_TYPE_CPU || device_type == AMDCUID_DEVICE_TYPE_PLATFORM || device_type == AMDCUID_DEVICE_TYPE_NIC) {
+        return AMDCUID_STATUS_WRONG_DEVICE_TYPE;
+    }
+
     std::string device_path = CuidUtilities::real_dev_path_from_fd(fd);
     if (device_path.empty()) {
         return AMDCUID_STATUS_DEVICE_NOT_FOUND;

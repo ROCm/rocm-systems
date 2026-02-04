@@ -49,6 +49,12 @@ void get_hash_from_raw(uint8_t raw_bytes[16], uint8_t out_hash[14]) {
     out_hash[13] = raw_bytes[14] & 0x3F;
 }
 
+void build_derived_id_from_file_entry(const CuidFileEntry& entry, amdcuid_derived_id& id) {
+    id.UUIDv8_representation = entry.derived_cuid;
+    CuidUtilities::remove_UUIDv8_bits(&id.UUIDv8_representation, id.raw_bits);
+    get_hash_from_raw(id.raw_bits, id.hash);
+}
+
 amdcuid_status_t CuidDevice::get_derived_cuid(amdcuid_derived_id& id, cuid_hmac * hmac) const {
     // attempt to find the derived CUID in file first
     CuidFile derived_file(CuidUtilities::cuid_file(), false);
@@ -64,10 +70,7 @@ amdcuid_status_t CuidDevice::get_derived_cuid(amdcuid_derived_id& id, cuid_hmac 
                 CuidFileEntry entry;
                 status = derived_file.find_by_device_type(AMDCUID_DEVICE_TYPE_PLATFORM, entry);
                 if (status == AMDCUID_STATUS_SUCCESS) {
-                    id.UUIDv8_representation = entry.derived_cuid;
-                    CuidUtilities::remove_UUIDv8_bits(&id.UUIDv8_representation, id.raw_bits);
-                    // TODO: figure out how to fill out hash later should involve just removing the reserved bits
-                    get_hash_from_raw(id.raw_bits, id.hash);
+                    build_derived_id_from_file_entry(entry, id);
                     return AMDCUID_STATUS_SUCCESS;
                 }
             }break;
@@ -80,18 +83,9 @@ amdcuid_status_t CuidDevice::get_derived_cuid(amdcuid_derived_id& id, cuid_hmac 
                     CuidFileEntry entry;
                     status = derived_file.find_by_device_node(info.render_node, entry);
                     if (status == AMDCUID_STATUS_SUCCESS) {
-                        id.UUIDv8_representation = entry.derived_cuid;
-                        CuidUtilities::remove_UUIDv8_bits(&id.UUIDv8_representation, id.raw_bits);
-                        // TODO: figure out how to fill out hash later should involve just removing the reserved bits
-                        get_hash_from_raw(id.raw_bits, id.hash);
+                        build_derived_id_from_file_entry(entry, id);
                         return AMDCUID_STATUS_SUCCESS;
                     }
-                    else {
-                        std::cerr << "GPU device not found in file" << std::endl;
-                    }
-                }
-                else {
-                    std::cerr << "GPU device not found" << std::endl;
                 }
             }
             break;
@@ -106,10 +100,7 @@ amdcuid_status_t CuidDevice::get_derived_cuid(amdcuid_derived_id& id, cuid_hmac 
                         CuidFileEntry entry;
                         status = derived_file.find_by_package_core_id(core_id, entry);
                         if (status == AMDCUID_STATUS_SUCCESS) {
-                            id.UUIDv8_representation = entry.derived_cuid;
-                            CuidUtilities::remove_UUIDv8_bits(&id.UUIDv8_representation, id.raw_bits);
-                            // TODO: figure out how to fill out hash later should involve just removing the reserved bits
-                            get_hash_from_raw(id.raw_bits, id.hash);
+                            build_derived_id_from_file_entry(entry, id);
                             return AMDCUID_STATUS_SUCCESS;
                         }
                     }
@@ -124,10 +115,7 @@ amdcuid_status_t CuidDevice::get_derived_cuid(amdcuid_derived_id& id, cuid_hmac 
                         CuidFileEntry entry;
                         amdcuid_status_t status = derived_file.find_by_device_node(info.network_interface, entry);
                         if (status == AMDCUID_STATUS_SUCCESS) {
-                            id.UUIDv8_representation = entry.derived_cuid;
-                            CuidUtilities::remove_UUIDv8_bits(&id.UUIDv8_representation, id.raw_bits);
-                            // TODO: figure out how to fill out hash later should involve just removing the reserved bits
-                            get_hash_from_raw(id.raw_bits, id.hash);
+                            build_derived_id_from_file_entry(entry, id);
                             return AMDCUID_STATUS_SUCCESS;
                         }
                     }

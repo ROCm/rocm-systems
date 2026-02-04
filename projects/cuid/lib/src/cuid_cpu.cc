@@ -304,7 +304,7 @@ amdcuid_status_t CuidCpu::discover_single(amdcuid_cpu_info* cpu_info, const std:
  * PPIN is available on AMD CPUs (CPUID Fn8000_0008.EBX[23]) via MSR 0xC001_083B
  * Requires root privileges to read MSR.
  */
-static bool try_read_ppin(uint64_t& ppin) {
+static bool try_read_ppin(uint64_t& ppin, uint32_t core_id) {
 #ifdef __x86_64__
     // Check if PPIN is supported via CPUID
     uint32_t eax, ebx, ecx, edx;
@@ -318,18 +318,23 @@ static bool try_read_ppin(uint64_t& ppin) {
     
     // Try to read PPIN from MSR 0xC001083B (AMD) or 0x4F (Intel)
     // Requires root privileges
-    std::ifstream msr("/dev/cpu/0/msr", std::ios::binary);
+    std::string msr_path = "/dev/cpu/" + std::to_string(core_id) + "/msr";
+    std::ifstream msr(msr_path, std::ios::binary);
     if (!msr) {
         return false;  // No MSR access (need root or msr module)
     }
     
-    // AMD PPIN MSR
+    // AMD PPIN MSR first, fallback to Intel if not found
     const uint64_t AMD_PPIN_MSR = 0xC001083B;
     msr.seekg(AMD_PPIN_MSR);
     if (!msr.read(reinterpret_cast<char*>(&ppin), sizeof(ppin))) {
-        return false;
+        const uint64_t INTEL_PPIN_MSR = 0x4F;
+        msr.seekg(INTEL_PPIN_MSR);
+        if (!msr.read(reinterpret_cast<char*>(&ppin), sizeof(ppin))) {
+            return false;
+        }
     }
-    
+
     return ppin != 0;
 #else
     return false;
@@ -350,7 +355,7 @@ amdcuid_status_t CuidCpu::get_hardware_fingerprint(uint64_t& fingerprint) const 
     
     // Try to get PPIN (Protected Processor Inventory Number) if available
     uint64_t ppin = 0;
-    if (try_read_ppin(ppin)) {
+    if (try_read_ppin(ppin, m_info.header.fields.cpu.core)) {
         fingerprint = ppin;  // Use PPIN as primary fingerprint if available
         return AMDCUID_STATUS_SUCCESS;
     }

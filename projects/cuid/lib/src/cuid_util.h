@@ -65,6 +65,7 @@ namespace CuidUtilities {
     std::string readlink_bdf(const std::string &device_path);
     std::string bdf_to_device_path(const std::string &bdf, amdcuid_device_type_t device_type);
     std::string real_dev_path_from_fd(int fd);
+    std::string get_real_path(const std::string path);
     amdcuid_status_t generate_derived_cuid(const amdcuid_primary_id* primary_id, amdcuid_derived_id* derived_id, cuid_hmac* hmac);
     amdcuid_status_t generate_primary_cuid(uint64_t serial_number, uint16_t unit_id,
                                  uint8_t revision_id, uint16_t device_id, uint16_t vendor_id,

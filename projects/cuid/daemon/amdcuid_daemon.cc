@@ -52,15 +52,19 @@ static bool g_logging_to_file = false;
 
 static std::ostream& log_out() {
     if (g_logging_to_file && g_log_file && g_log_file->is_open()) {
+        *g_log_file << "timestamp: " << time(nullptr) << ": ";
         return *g_log_file;
     }
+    std::cout << "timestamp: " << time(nullptr) << ": ";
     return std::cout;
 }
 
 static std::ostream& log_err() {
     if (g_logging_to_file && g_log_file && g_log_file->is_open()) {
+        *g_log_file << "timestamp: " << time(nullptr) << ": ";
         return *g_log_file;
     }
+    std::cerr << "timestamp: " << time(nullptr) << ": ";
     return std::cerr;
 }
 

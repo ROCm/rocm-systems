@@ -152,6 +152,14 @@ std::string CuidUtilities::real_dev_path_from_fd(int fd) {
     return "";
 }
 
+std::string CuidUtilities::get_real_path(const std::string path) {
+    char buf[PATH_MAX];
+    if (realpath(path.c_str(), buf) != nullptr) {
+        return std::string(buf) + "/device";
+    }
+    return "";
+}
+
 amdcuid_status_t CuidUtilities::generate_derived_cuid(const amdcuid_primary_id* primary_id, amdcuid_derived_id* derived_id, cuid_hmac* hmac) {
     if (!primary_id || !hmac) {
         // Return invalid on null input

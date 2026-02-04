@@ -23,11 +23,10 @@
 #ifndef AMD_CUID_H
 #define AMD_CUID_H
 
-#ifdef __cplusplus
-#include <cstdint>
-extern "C" {
-#else
 #include <stdint.h>
+
+#ifdef __cplusplus
+extern "C" {
 #endif
 
 //! Major version should be changed for every header change that breaks ABI
@@ -188,7 +187,8 @@ amdcuid_status_t amdcuid_get_handle_by_dev_path(
  * @return AMDCUID_STATUS_SUCCESS on success,
  *         AMDCUID_STATUS_INVALID_ARGUMENT if the provided arguments are invalid,
  *         AMDCUID_STATUS_DEVICE_NOT_FOUND if the device could not be found with the specified BDF
- *         AMDCUID_STATUS_UNSUPPORTED if the device type is not supported
+ *         AMDCUID_STATUS_UNSUPPORTED if the device type is not supported,
+ *         AMDCUID_STATUS_WRONG_DEVICE_TYPE if the device type is inappropriate for BDF lookup (e.g., CPU or platform devices)
  */
 amdcuid_status_t amdcuid_get_handle_by_bdf(
     const char* bdf,
@@ -201,7 +201,11 @@ amdcuid_status_t amdcuid_get_handle_by_bdf(
  * 
  * This function allows users to obtain the CUID handle for a specific device
  * by providing its file descriptor and type. This is useful for obtaining a
- * handle for a specific device associated with an open file descriptor.
+ * handle for a specific device associated with an open file descriptor. Users
+ * should note that only char and block device file descriptors are supported.
+ * For devices that do not have a direct file descriptor representation, such
+ * as NICs or CPUs, amdcuid_get_handle_by_dev_path() or amdcuid_get_handle_by_bdf()
+ * should be used instead.
  * 
  * @param[in] fd The file descriptor associated with the target device.
  * @param[in] device_type The type of the device (see amdcuid_device_type_t).
@@ -210,7 +214,8 @@ amdcuid_status_t amdcuid_get_handle_by_bdf(
  * @return AMDCUID_STATUS_SUCCESS on success,
  *         AMDCUID_STATUS_INVALID_ARGUMENT if the provided arguments are invalid,
  *         AMDCUID_STATUS_DEVICE_NOT_FOUND if the device could not be found for the specified file descriptor
- *         AMDCUID_STATUS_UNSUPPORTED if the device type is not supported
+ *         AMDCUID_STATUS_UNSUPPORTED if the device type is not supported,
+ *         AMDCUID_STATUS_WRONG_DEVICE_TYPE if the device type is inappropriate for file descriptor lookup
  */
 amdcuid_status_t amdcuid_get_handle_by_fd(
     int fd,
