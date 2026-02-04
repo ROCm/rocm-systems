@@ -1085,7 +1085,7 @@ If a rank is detected and no rank placeholder is provided, each rank writes to a
 subdirectory named by its rank to avoid output collisions.
 
 Example Usage
------
+-------------
 
 * With ``--output-directory`` option: 
 
@@ -1193,7 +1193,7 @@ to your output directory. The following example is run on the host `amd-ryzen`:
 
    $ mpirun -n 4 rocprof-compute profile --output-directory /tmp/mpi_profile/%hostname%/%rank% -- ./laplace_eqn -n 1048576 -b 256
 
-   $ ls /tmp/mpi_profile
+   $ ls /tmp/mpi_profile/amd-ryzen/
    0  1  2  3
 
    $ tree /tmp/mpi_profile/amd-ryzen/0
