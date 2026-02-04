@@ -49,6 +49,7 @@ from utils.utils import (
     capture_subprocess_output,
     format_time,
     gen_sysinfo,
+    get_rank,
     pc_sampling_prof,
     print_status,
     run_prof,
@@ -109,6 +110,28 @@ class RocProfCompute_Base:
                 "--attach-pid cannot be used with --iteration-multiplexing. "
                 "Please remove one of these options."
             )
+
+        # Check for multi-rank application warnings
+        if get_rank() is not None:
+            # Warn if using application replay (iteration_multiplexing is None)
+            if args.iteration_multiplexing is None:
+                console_warning(
+                    "Multi-rank application detected. Application replay mode "
+                    "(running the workload multiple times) may fail to collect data. "
+                    "Consider using --iteration-multiplexing to collect all "
+                    "counters in a single run."
+                )
+
+            # Warn if PC sampling is requested (block "21" or alias "pc_sampling")
+            if any(
+                block in ("21", "pc_sampling") or block.startswith("21.")
+                for block in args.filter_blocks
+            ):
+                console_warning(
+                    "Multi-rank application detected with PC sampling enabled. "
+                    "PC sampling may fail to collect data."
+                )
+
         # verify correct formatting for application binary
         args.remaining = args.remaining[1:]
         resolved_exec_path: Optional[Path] = None
