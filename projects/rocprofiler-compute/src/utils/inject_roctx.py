@@ -34,7 +34,6 @@ import os
 import sys
 from pathlib import Path
 import importlib
-from utils.logger import console_log, console_warning
 
 # Add parent directory to Python path for config module
 script_dir = Path(__file__).resolve().parent
@@ -42,7 +41,6 @@ sys.path.insert(0, str(script_dir.parent))
 # Attempt to load ROCTX module from ROCm installation
 rocm_root = os.environ.get("ROCM_PATH", "/opt/rocm")
 python_version = f"python{sys.version_info.major}.{sys.version_info.minor}"
-console_log("torch trace", f"Python version: {python_version}")
 candidate_paths = [
     f"{rocm_root}/lib/{python_version}/site-packages",
     f"{rocm_root}/libexec/rocprofiler-sdk/python",
@@ -51,6 +49,10 @@ candidate_paths = [
 for candidate in candidate_paths:
     if candidate not in sys.path:
         sys.path.insert(0, candidate)
+
+from utils.logger import console_error, console_log, console_warning
+console_log("torch trace", f"Python version: {python_version}")
+
 try:
     from roctx import rangePop, rangePush
 
@@ -59,16 +61,15 @@ try:
         f"ROCTX module loaded from: {Path(rangePush.__code__.co_filename).parent}",
     )
 except ImportError:
-    console_log("torch trace", "Looked for Roctx in :{candidate_paths}")
-    console_warning(
-        "torch trace",
+    console_error(
+        f"Looked for Roctx in :{candidate_paths}"
         "ROCTX Python module not found.\n"
-        "Please ensure that the ROCm SDK (rocprofiler-sdk) is installed"
-        " and that the roctx Python bindings are available for your Python version.\n"
+        "Please ensure that the rocprofiler-sdk is installed"
+        " and that the roctx Python bindings are available for your Python version."
         "You may need to reinstall or rebuild ROCm for your current Python environment.\n"
         "The --torch-trace option requires a valid roctx installation.\n",
     )
-    sys.exit(0)
+    sys.exit(1)
 
 try:
     import torch
