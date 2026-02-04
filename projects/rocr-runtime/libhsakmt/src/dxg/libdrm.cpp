@@ -39,9 +39,12 @@
 // DEALINGS WITH THE SOFTWARE.
 //
 ////////////////////////////////////////////////////////////////////////////////
+
 #include <cstdint>
 
+#if defined(__linux__)
 #include "impl/wddm/types.h"
+#endif
 #include "impl/wddm/device.h"
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtGetAMDGPUDeviceHandle(
@@ -110,14 +113,20 @@ HSAKMTAPI int amdgpu_bo_import(amdgpu_device_handle dev,
     return -1;
   }
 
+  // return if handle is invalid
+  if (static_cast<int>(shared_handle) == -1) {
+    output->buf_handle = 0;
+    return 0;
+  }
 
   wsl::thunk::WDDMDevice *pDevice = reinterpret_cast<wsl::thunk::WDDMDevice *>(dev);
   wsl::thunk::GpuMemoryHandle mem_handle;
   bool is_ipc_memfd = is_ipc_sysmemfd(shared_handle);
   bool alloc_va = is_ipc_memfd;
 
-  HSAKMT_STATUS ret = import_dmabuf_fd(shared_handle, pDevice->NodeId(),
-                                        alloc_va, is_ipc_memfd, &mem_handle);
+  // kmt handle importer is false for dma_buf_fd
+  HSAKMT_STATUS ret = import_dmabuf_fd(shared_handle, pDevice->NodeId(), alloc_va, is_ipc_memfd,
+                                       &mem_handle, false);
   if (ret == HSAKMT_STATUS_SUCCESS) {
     //use GpuMemory object handle as drm buf handle
     output->buf_handle = reinterpret_cast<amdgpu_bo_handle>(mem_handle);
@@ -147,20 +156,30 @@ HSAKMTAPI int amdgpu_bo_va_op(amdgpu_bo_handle bo,
                  reinterpret_cast<void *>(gpu_mem->GpuAddress()), reinterpret_cast<void *>(addr));
           return -1;
         }
-        auto code = gpu_mem->MapGpuVirtualAddress(reinterpret_cast<gpusize>(addr), size, offset);
+        auto code = gpu_mem->MapGpuVirtualAddress(static_cast<gpusize>(addr), size, offset);
         if (code != ErrorCode::Success)
           return -1;
 
         code = gpu_mem->MakeResident();
         if (code != ErrorCode::Success)
           return -1;
+        // Wait on paging fence to ensure map and residency are completed. MakeResident()
+        // updates the same paging fence as Map(), hence it's safe to wait for the last one.
+        if (!gpu_mem->GetDevice()->WaitOnPagingFenceFromCpu()) {
+          return -1;
+        }
       }
       break;
     case AMDGPU_VA_OP_UNMAP:
       {
-        auto code = gpu_mem->UnmapGpuVirtualAddress(reinterpret_cast<gpusize>(addr), size, offset);
+        auto code = gpu_mem->UnmapGpuVirtualAddress(static_cast<gpusize>(addr), size, offset);
         if (code != ErrorCode::Success)
           return -1;
+        // Wait on paging fence to ensure unmap is completed. Evict() doesn't
+        // update the fence.
+        if (!gpu_mem->GetDevice()->WaitOnPagingFenceFromCpu()) {
+          return -1;
+        }
         gpu_mem->Evict();
       }
       break;
@@ -168,15 +187,27 @@ HSAKMTAPI int amdgpu_bo_va_op(amdgpu_bo_handle bo,
   return 0;
 }
 
-HSAKMTAPI int amdgpu_bo_query_info(amdgpu_bo_handle bo, struct amdgpu_bo_info* info) {
-  return 0;
-}
-
-HSAKMTAPI int amdgpu_bo_set_metadata(amdgpu_bo_handle bo, struct amdgpu_bo_metadata* info) {
-  return 0;
-}
-
 HSAKMTAPI int drmCommandWriteRead(int fd, unsigned long drmCommandIndex,
                                   void *data, unsigned long size) {
   return 0;
 }
+
+// ================================================================================================
+int amdgpu_bo_query_info(amdgpu_bo_handle buf_handle, struct amdgpu_bo_info* info) {
+  wsl::thunk::GpuMemory *gpu_mem = reinterpret_cast<wsl::thunk::GpuMemory *>(buf_handle);
+  if (gpu_mem == nullptr) {
+    return -1;
+  }
+  info->alloc_size = gpu_mem->Size();
+  info->preferred_heap = 0;
+  info->phys_alignment = 0;
+  info->alloc_flags = 0;
+  return 0;
+}
+
+// ================================================================================================
+int amdgpu_bo_set_metadata(amdgpu_bo_handle buf_handle, struct amdgpu_bo_metadata* info) {
+  // Currently, we do not use metadata in WSL
+  return 0;
+}
+

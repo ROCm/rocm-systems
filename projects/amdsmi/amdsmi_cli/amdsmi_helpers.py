@@ -1358,6 +1358,11 @@ class AMDSMIHelpers():
         if os.geteuid() == 0:
             return True, None, None
 
+        # Use os.access to check read permission (including ACLs), so that
+        # permissions granted via mechanisms like udev/uaccess are respected.
+        if os.access(path, os.R_OK):
+            return True, None, None
+
         mode = st.st_mode
         uid = st.st_uid
         gid = st.st_gid

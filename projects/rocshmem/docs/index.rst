@@ -8,7 +8,7 @@ rocSHMEM documentation
 
 The ROCm OpenSHMEM (rocSHMEM) is an intra-kernel networking library that provides GPU-centric networking through an OpenSHMEM-like interface. It simplifies application code complexity and enables finer communication and computation overlap than traditional host-driven networking. rocSHMEM uses a single symmetric heap allocated to GPU memories. For more information, see :doc:`introduction`.
 
-The rocSHMEM public repository is located at `<https://github.com/ROCm/rocSHMEM>`_.
+The rocSHMEM public repository is located within the ROCm Systems Super Repo at `<https://github.com/ROCm/rocm-systems/tree/develop/projects/rocshmem>`_.
 
 .. grid:: 2
   :gutter: 3

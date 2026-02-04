@@ -221,8 +221,8 @@ def main():
                 rc = run([
                     PYTHON,
                     GENERATE_DELTAS_SCRIPT,
-                    new_arch_dir,
                     arch_dir,
+                    new_arch_dir,
                     out_delta,
                 ])
                 if rc != 0:
