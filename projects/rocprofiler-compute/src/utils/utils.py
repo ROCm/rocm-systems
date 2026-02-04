@@ -2036,6 +2036,8 @@ def get_rank() -> Optional[str]:
         if value is not None:
             return value
 
+    return None
+
 
 def replace_rank(name: str) -> str:
     def rank(match: re.Match[str]) -> str:
