@@ -23,12 +23,12 @@
 
 ##############################################################################
 
+import csv
 import importlib.util
 import inspect
 import os
 import re
 import sqlite3
-import csv
 import subprocess
 import sys
 import time
@@ -2855,12 +2855,15 @@ if __name__ == "__main__":
     file_dict = test_utils.check_csv_files(workload_dir, num_devices, 1)
     assert "pmc_perf.csv" in file_dict, "pmc_perf.csv not generated"
 
-    # 2. Look for corresponding marker_api_trace.csv file 
+    # 2. Look for corresponding marker_api_trace.csv file
     # and counter_collection_trace.csv file in workload_dir/ and workload/*/
     marker_api_trace_files = list(Path(workload_dir).glob("**/*marker_api_trace.csv"))
-    counter_collection_files = list(Path(workload_dir).glob("**/*counter_collection.csv"))  
-    # Check if there is one-to-one mapping between marker_api_trace and counter_collection files
-    # They should be present in the same subdirectories
+    counter_collection_files = list(
+        Path(workload_dir).glob("**/*counter_collection.csv")
+    )
+    # Check if there is one-to-one mapping between marker_api_trace
+    # and counter_collection files.
+    # They should be present in the same subdirectories.
     assert len(marker_api_trace_files) == len(counter_collection_files), (
         "Mismatch in number of marker_api_trace.csv and counter_collection.csv files"
     )
@@ -2869,43 +2872,55 @@ if __name__ == "__main__":
         assert corresponding_counter_file.exists(), (
             f"counter_collection.csv not found for {marker_file}"
         )
-            # Check marker_api_trace.csv
-        with open(marker_file, newline='') as f:
+        # Check marker_api_trace.csv
+        with open(marker_file, newline="") as f:
             reader = csv.DictReader(f)
             fieldnames = reader.fieldnames
             assert fieldnames is not None, f"No columns in {marker_file}"
             # 1. Hierarchy check
-            assert 'Name' in fieldnames, f"'Name' column missing in {marker_file}"
+            assert "Name" in fieldnames, f"'Name' column missing in {marker_file}"
             # 2. Correlation ID check
-            assert 'Correlation ID' in fieldnames, f"'Correlation ID' column missing in {marker_file}"
-            # 3. Kernel_Name info check 
-            assert 'Kernel_Name' in fieldnames, f"'Kernel_Name' column missing in {marker_file}"
+            assert "Correlation ID" in fieldnames, (
+                f"'Correlation ID' column missing in {marker_file}"
+            )
+            # 3. Kernel_Name info check
+            assert "Kernel_Name" in fieldnames, (
+                f"'Kernel_Name' column missing in {marker_file}"
+            )
             found_row = False
             for row in reader:
                 found_row = True
                 # Hierarchy: check for separator in Name
-                assert '/' in row['Name'] or '::' in row['Name'], f"Hierarchy missing in Name: {row['Name']}"
+                assert "/" in row["Name"] or "::" in row["Name"], (
+                    f"Hierarchy missing in Name: {row['Name']}"
+                )
                 # Correlation ID: must not be empty
-                assert row['Correlation ID'], f"Empty Correlation ID in {marker_file}"
+                assert row["Correlation ID"], f"Empty Correlation ID in {marker_file}"
                 # Kernel_Name: must not be empty
-                assert row['Kernel_Name'], f"Empty Kernel_Name in {marker_file}"
+                assert row["Kernel_Name"], f"Empty Kernel_Name in {marker_file}"
             assert found_row, f"{marker_file} is empty"
         # Check counter_collection.csv
-        with open(corresponding_counter_file, newline='') as f:
+        with open(corresponding_counter_file, newline="") as f:
             reader = csv.DictReader(f)
             fieldnames = reader.fieldnames
             assert fieldnames is not None, f"No columns in {corresponding_counter_file}"
-            assert 'Counter Name' in fieldnames or 'Name' in fieldnames, (
+            assert "Counter Name" in fieldnames or "Name" in fieldnames, (
                 f"Expected counter column missing in {corresponding_counter_file}"
             )
-            assert 'Correlation ID' in fieldnames, f"'Correlation ID' column missing in {corresponding_counter_file}"
+            assert "Correlation ID" in fieldnames, (
+                f"'Correlation ID' column missing in {corresponding_counter_file}"
+            )
             found_row = False
             for row in reader:
                 found_row = True
                 # Counter name must not be empty
-                assert row.get('Counter Name', row.get('Name')), f"Empty counter name in {corresponding_counter_file}"
+                assert row.get("Counter Name", row.get("Name")), (
+                    f"Empty counter name in {corresponding_counter_file}"
+                )
                 # Correlation ID must not be empty
-                assert row['Correlation ID'], f"Empty Correlation ID in {corresponding_counter_file}"
+                assert row["Correlation ID"], (
+                    f"Empty Correlation ID in {corresponding_counter_file}"
+                )
             assert found_row, f"{corresponding_counter_file} is empty"
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 

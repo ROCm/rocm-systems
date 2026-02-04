@@ -42,7 +42,7 @@ sys.path.insert(0, str(script_dir.parent))
 # Attempt to load ROCTX module from ROCm installation
 rocm_root = os.environ.get("ROCM_PATH", "/opt/rocm")
 python_version = f"python{sys.version_info.major}.{sys.version_info.minor}"
-console_log("torch trace",f"Python version: {python_version}")
+console_log("torch trace", f"Python version: {python_version}")
 candidate_paths = [
     f"{rocm_root}/lib/{python_version}/site-packages",
     f"{rocm_root}/libexec/rocprofiler-sdk/python",
@@ -53,19 +53,23 @@ for candidate in candidate_paths:
         sys.path.insert(0, candidate)
 try:
     from roctx import rangePop, rangePush
-    console_log("torch trace", f"ROCTX module loaded from: {Path(rangePush.__code__.co_filename).parent}")
+
+    console_log(
+        "torch trace",
+        f"ROCTX module loaded from: {Path(rangePush.__code__.co_filename).parent}",
+    )
 except ImportError:
     console_log("torch trace", "Looked for Roctx in :{candidate_paths}")
     console_warning(
-        'torch trace',
+        "torch trace",
         "ROCTX Python module not found.\n"
         "Please ensure that the ROCm SDK (rocprofiler-sdk) is installed"
         " and that the roctx Python bindings are available for your Python version.\n"
         "You may need to reinstall or rebuild ROCm for your current Python environment.\n"
-        "The --torch-trace option requires a valid roctx installation.\n"
-        )
+        "The --torch-trace option requires a valid roctx installation.\n",
+    )
     sys.exit(0)
-    
+
 try:
     import torch
     import torch._C

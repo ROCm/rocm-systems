@@ -23,11 +23,12 @@
 
 ##############################################################################
 
+import importlib
 import os
 import shutil
 from pathlib import Path
 from unittest.mock import Mock, patch
-import importlib
+
 import pandas as pd
 import pytest
 import test_utils
@@ -1722,15 +1723,20 @@ def test_list_torch_operators_no_trace_data(binary_handler_analyze_rocprof_compu
     assert code == 0
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
+
 skip_if_no_torch = pytest.mark.skipif(
-    importlib.util.find_spec("torch") is None, reason="PyTorch is required for this test"
+    importlib.util.find_spec("torch") is None,
+    reason=("PyTorch is required for this test"),
 )
 
+
 @skip_if_no_torch
-def test_torch_trace_operator_output(binary_handler_profile_rocprof_compute, test_utils, config):
+def test_torch_trace_operator_output(
+    binary_handler_profile_rocprof_compute, test_utils, config
+):
     """
-    Verifies torch_trace directory, operator CSV file creation, and presence of hierarchy,
-    mapping (operator, kernel, counter values) in those files after profiling.
+    Verifies torch_trace directory, operator CSV file creation, and presence
+    of hierarchy and mapping (operator, kernel, counter values) in output files.
     """
     # 1. Run profiling with --torch-trace
     workload_dir = test_utils.get_output_dir(param_id="torch_ops")
@@ -1788,18 +1794,24 @@ if __name__ == "__main__":
         df = pd.read_csv(op_file)
         assert not df.empty, f"{op_file} is empty"
         # Hierarchy info: check for operator name column and separator
-        op_name_col = 'Operator Name' if 'Operator Name' in df.columns else 'Name'
+        op_name_col = "Operator Name" if "Operator Name" in df.columns else "Name"
         assert op_name_col in df.columns, f"Operator name column missing in {op_file}"
-        assert df[op_name_col].apply(lambda x: '/' in str(x) or '::' in str(x)).all(), \
+        assert df[op_name_col].apply(lambda x: "/" in str(x) or "::" in str(x)).all(), (
             f"Hierarchy missing in operator name column in {op_file}"
+        )
         # Mapping columns
-        assert 'Kernel Name' in df.columns, f"Kernel info column missing in {op_file}"
-        assert df['Kernel Name'].notnull().all() and (df['Kernel Name'] != '').all(), \
+        assert "Kernel Name" in df.columns, f"Kernel info column missing in {op_file}"
+        assert df["Kernel Name"].notnull().all() and (df["Kernel Name"] != "").all(), (
             f"Empty Kernel Name in {op_file}"
-        counter_col = 'Counter Value' if 'Counter Value' in df.columns else 'Value'
+        )
+        counter_col = "Counter Value" if "Counter Value" in df.columns else "Value"
         assert counter_col in df.columns, f"Counter value column missing in {op_file}"
-        assert df[counter_col].notnull().all() and (df[counter_col] != '').all(), \
+        assert df[counter_col].notnull().all() and (df[counter_col] != "").all(), (
             f"Empty Counter Value in {op_file}"
-        assert 'Correlation ID' in df.columns, f"Correlation ID column missing in {op_file}"
-        assert df['Correlation ID'].notnull().all() and (df['Correlation ID'] != '').all(), \
-            f"Empty Correlation ID in {op_file}"
+        )
+        assert "Correlation ID" in df.columns, (
+            f"Correlation ID column missing in {op_file}"
+        )
+        assert (
+            df["Correlation ID"].notnull().all() and (df["Correlation ID"] != "").all()
+        ), f"Empty Correlation ID in {op_file}"
