@@ -33,7 +33,6 @@ Usage: python inject_roctx.py main.py --epochs 1 --batch-size 4
 import os
 import sys
 from pathlib import Path
-import importlib
 
 # Add parent directory to Python path for config module
 script_dir = Path(__file__).resolve().parent
@@ -51,6 +50,7 @@ for candidate in candidate_paths:
         sys.path.insert(0, candidate)
 
 from utils.logger import console_error, console_log, console_warning
+
 console_log("torch trace", f"Python version: {python_version}")
 
 try:
@@ -90,14 +90,29 @@ from functools import wraps
 
 import torch.nn.functional as F
 
-# Global stack for hierarchical marker names
-marker_stack = []
-context_stack = []
+import threading
+
+# Thread-local stacks for hierarchical marker names
+_thread_local = threading.local()
+
+
+def get_marker_stack():
+    if not hasattr(_thread_local, "marker_stack"):
+        _thread_local.marker_stack = []
+    return _thread_local.marker_stack
+
+
+def get_context_stack():
+    if not hasattr(_thread_local, "context_stack"):
+        _thread_local.context_stack = []
+    return _thread_local.context_stack
+
 
 if hasattr(torch._C, "_dispatch_call"):
     original_dispatch_call = torch._C._dispatch_call
 
     def dispatch_call_with_roctx(*args, **kwargs):
+        marker_stack = get_marker_stack()
         op_name = str(args[0]) if args else "aten_op"
         full_marker_name = "/".join(marker_stack + [f"aten::{op_name}"])
         marker_stack.append(f"aten::{op_name}")
@@ -105,8 +120,10 @@ if hasattr(torch._C, "_dispatch_call"):
         try:
             return original_dispatch_call(*args, **kwargs)
         except Exception as e:
-            console_warning("torch trace",f"Error in {full_marker_name}: {e}")
-            console_warning("torch trace","Cannot inject ROCTX markers for torch._C._dispatch_call")
+            console_warning("torch trace", f"Error in {full_marker_name}: {e}")
+            console_warning(
+                "torch trace", "Cannot inject ROCTX markers for torch._C._dispatch_call"
+            )
         finally:
             rangePop()
             marker_stack.pop()
@@ -121,6 +138,7 @@ try:
     original_tv_dispatch_call = torchvision._C._dispatch_call
 
     def tv_dispatch_call_with_roctx(*args, **kwargs):
+        marker_stack = get_marker_stack()
         op_name = str(args[0]) if args else "vision_op"
         full_marker_name = "/".join(marker_stack + [f"torchvision::{op_name}"])
         marker_stack.append(f"torchvision::{op_name}")
@@ -141,6 +159,7 @@ try:
     original_all_reduce = dist.all_reduce
 
     def all_reduce_with_roctx(*args, **kwargs):
+        marker_stack = get_marker_stack()
         full_marker_name = "/".join(marker_stack + ["torch.distributed.all_reduce"])
         marker_stack.append("torch.distributed.all_reduce")
         rangePush(full_marker_name)
@@ -152,7 +171,7 @@ try:
 
     dist.all_reduce = all_reduce_with_roctx
 except Exception as e:
-    console_warning("torch trace",f"Could not patch torch.distributed.all_reduce: {e}")
+    console_warning("torch trace", f"Could not patch torch.distributed.all_reduce: {e}")
 
 try:
     import torch.cuda
@@ -160,6 +179,7 @@ try:
     original_set_device = torch.cuda.set_device
 
     def set_device_with_roctx(*args, **kwargs):
+        marker_stack = get_marker_stack()
         full_marker_name = "/".join(marker_stack + ["torch.cuda.set_device"])
         marker_stack.append("torch.cuda.set_device")
         rangePush(full_marker_name)
@@ -304,6 +324,8 @@ def roctx_wrapper(func, name=None):
             location = "unknown:0"
 
         # Build hierarchical marker name with separate context
+        marker_stack = get_marker_stack()
+        context_stack = get_context_stack()
         marker_stack.append(func_name)
         context_stack.append(f"#{call_counter['count']}@{location}")
         full_marker_name = "/".join(marker_stack) + ":" + "/".join(context_stack)
@@ -413,6 +435,8 @@ def inject_roctx_into_torch():
         else:
             location = "unknown:0"
 
+        marker_stack = get_marker_stack()
+        context_stack = get_context_stack()
         marker_stack.append("torch.Tensor.backward")
         context_stack.append(f"#{backward_counter['count']}@{location}")
         full_marker_name = "/".join(marker_stack) + ":" + "/".join(context_stack)
@@ -443,6 +467,8 @@ def inject_roctx_into_optimizer():
     original_step = Optimizer.step
 
     def step_with_roctx(self, *args, **kwargs):
+        marker_stack = get_marker_stack()
+        context_stack = get_context_stack()
         marker_stack.append(f"optimizer.{self.__class__.__name__}.step")
         context_stack.append("")  # No context for this level
         full_marker_name = (
@@ -486,6 +512,8 @@ def inject_roctx_into_model():
         else:
             location = "unknown:0"
 
+        marker_stack = get_marker_stack()
+        context_stack = get_context_stack()
         marker_stack.append(f"nn.Module.{class_name}.forward")
         context_stack.append(f"#{self._roctx_call_count}@{location}")
         full_marker_name = "/".join(marker_stack) + ":" + "/".join(context_stack)
@@ -533,6 +561,8 @@ def instrument_all_torch_ops():
                 def make_wrapper(original_op, namespace, operation_name):
                     def wrapper(*args, **kwargs):
                         marker_name = f"torch.ops.{namespace}.{operation_name}"
+                        marker_stack = get_marker_stack()
+                        context_stack = get_context_stack()
                         marker_stack.append(marker_name)
                         context_stack.append("")  # torch.ops has no additional context
                         full_marker_name = "/".join(marker_stack) + (

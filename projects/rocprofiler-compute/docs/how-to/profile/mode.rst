@@ -847,9 +847,9 @@ Example with hierarchical naming:
            self.decoder = nn.Linear(1024, 512)
        
        def forward(self, x):
-           x = self.encoder(x)  # Captured as: MyModel/encoder
-           x = self.decoder(x)  # Captured as: MyModel/decoder
-           return x
+            x = self.encoder(x)  # Captured as: nn.Module.MyModel.forward/nn.Module.Linear.forward
+            x = self.decoder(x)  # Captured as: nn.Module.MyModel.forward/nn.Module.Linear.forward
+            return x
 
 **Analyzing captured operators**: After profiling, see :doc:`../analyze/cli` for 
 how to list and filter PyTorch operators in analyze mode.
