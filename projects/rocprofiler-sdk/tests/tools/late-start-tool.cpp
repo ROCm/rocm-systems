@@ -33,6 +33,8 @@
 #include <functional>
 #include <iostream>
 #include <mutex>
+#include <string>
+#include <vector>
 
 #define ROCPROFILER_CALL(result, msg)                                                              \
     {                                                                                              \
@@ -43,8 +45,6 @@
             return -1;                                                                             \
         }                                                                                          \
     }
-#include <string>
-#include <vector>
 
 namespace
 {
@@ -232,7 +232,7 @@ configure(uint32_t                 version,
     (void) priority;
 
     // Set client name
-    client_id->name = "LatestartTool";
+    client_id->name = "LateStartTool";
 
     // Allocate result structure (SDK will free this)
     auto* result =

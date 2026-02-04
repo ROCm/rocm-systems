@@ -149,8 +149,9 @@ typedef rocprofiler_tool_configure_attach_result_t* (*rocprofiler_configure_atta
  *
  * @param [in] callback Callback function to invoke for each valid registered library
  * @param [in] data User data to pass to the callback function
- * @return ::rocprofiler_runtime_error_code_t
- * @retval ::ROCP_REG_SUCCESS Always returned
+ * @return ::rocprofiler_status_t
+ * @retval ::ROCPROFILER_STATUS_SUCCESS if iteration completes successfully
+ * @retval other ::rocprofiler_status_t values if an error occurs
  */
 ROCPROFILER_SDK_EXPERIMENTAL
 rocprofiler_status_t

@@ -55,10 +55,12 @@ int
 rocprofiler_register_iterate_registration_callback(rocprofiler_register_registration_info_t* info,
                                                    void*                                     data)
 {
-    auto* _data = static_cast<std::vector<rocprofiler_runtime_registration_info_t>*>(data);
+    constexpr auto unknown_name = "<unknown>";
+    const auto*    _common_name = (info && info->common_name) ? info->common_name : unknown_name;
+    auto*          _data = static_cast<std::vector<rocprofiler_runtime_registration_info_t>*>(data);
     _data->emplace_back(rocprofiler_runtime_registration_info_t{
         sizeof(rocprofiler_runtime_registration_info_t),
-        info->common_name,
+        _common_name,
         info->lib_version,
         info->api_table_length,
     });
