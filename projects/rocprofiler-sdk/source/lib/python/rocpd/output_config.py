@@ -133,7 +133,9 @@ def add_args(parser):
     )
     io_options.add_argument(
         "-d",
-        "--output-path",
+        "--output-directory",
+        metavar="OUTPUT_DIRECTORY",
+        dest="output_path",
         help="Sets the output path where the output files will be saved (default path: `./rocpd-output-data`)",
         default=os.environ.get("ROCPD_OUTPUT_PATH", "./rocpd-output-data"),
         type=str,
