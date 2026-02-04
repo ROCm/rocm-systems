@@ -2812,8 +2812,8 @@ class AMDSMICommands():
             self.logger.store_multiple_device_output()
             return # Skip printing when there are multiple devices
 
-        # Print output for all formats
-        self.logger.print_output(watching_output=watching_output)
+        if not self.logger.is_json_format() or watching_output:
+            self.logger.print_output(watching_output=watching_output)
 
         if watching_output: # End of single gpu add to watch_output
             self.logger.store_watch_output(multiple_device_enabled=False)
