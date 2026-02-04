@@ -804,7 +804,7 @@ rocprofsys_init_hidden(const char* _mode, bool _is_binary_rewrite, const char* _
 
     if(get_use_mpip())
     {
-        component::mpi_gotcha::set_on_init_callback([](int rank, int size) {
+        component::mpi_gotcha::subscribe_to_init_event([](int rank, int size) {
             nlohmann::json _environment_json;
             _environment_json["MPI_COMM_WORLD_SIZE"] = size;
             _environment_json["MPI_COMM_WORLD_RANK"] = rank;

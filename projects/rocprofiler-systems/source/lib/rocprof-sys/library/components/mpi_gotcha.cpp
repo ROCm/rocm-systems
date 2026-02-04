@@ -150,7 +150,7 @@ auto permit_bindings = strset_t{};
 auto reject_bindings = strset_t{};
 }  // namespace
 
-std::function<void(int, int)> mpi_gotcha::s_on_init_callback = {};
+std::vector<std::function<void(int rank, int size)>> mpi_gotcha::s_on_init_callbacks = {};
 
 void
 mpi_gotcha::configure()
@@ -194,16 +194,13 @@ mpi_gotcha::configure()
 }
 
 void
-mpi_gotcha::set_on_init_callback(
-    const std::function<void(int rank, int size)>& _on_init_callback)
+mpi_gotcha::subscribe_to_init_event(
+    const std::function<void(int rank, int size)>& _callback)
 {
-    if(s_on_init_callback)
+    if(_callback)
     {
-        LOG_CRITICAL("s_on_init_callback already set");
-        return;
+        s_on_init_callbacks.push_back(_callback);
     }
-
-    s_on_init_callback = _on_init_callback;
 }
 
 void
@@ -444,9 +441,12 @@ mpi_gotcha::populate_rank_and_size()
 void
 mpi_gotcha::publish_rank_and_size(int rank, int size)
 {
-    if(s_on_init_callback)
+    for(const auto& callback : s_on_init_callbacks)
     {
-        s_on_init_callback(rank, size);
+        if(callback)
+        {
+            callback(rank, size);
+        }
     }
 }
 

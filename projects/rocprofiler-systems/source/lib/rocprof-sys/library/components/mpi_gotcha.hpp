@@ -72,8 +72,8 @@ struct mpi_gotcha : comp::base<mpi_gotcha, void>
     static uintptr_t null_comm() { return std::numeric_limits<uintptr_t>::max(); }
     static void      disable_comm_intercept();
 
-    static void set_on_init_callback(
-        const std::function<void(int rank, int size)>& _on_init_callback);
+    static void subscribe_to_init_event(
+        const std::function<void(int rank, int size)>& _callback);
 
 private:
     int       m_rank     = 0;
@@ -85,7 +85,7 @@ private:
     void        populate_rank_and_size();
     static void publish_rank_and_size(int rank, int size);
 
-    static std::function<void(int rank, int size)> s_on_init_callback;
+    static std::vector<std::function<void(int rank, int size)>> s_on_init_callbacks;
 };
 }  // namespace component
 
