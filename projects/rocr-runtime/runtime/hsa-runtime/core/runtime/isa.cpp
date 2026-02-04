@@ -288,7 +288,7 @@ const IsaRegistry::IsaMap& IsaRegistry::GetSupportedIsas() {
   if (supported_isas->size() > 0) {
     return *supported_isas;
   }
-  
+
   auto parse_out_minor_ver = [&](const std::string& generic_name) -> int32_t {
       size_t dot_pos = generic_name.find('.');
       int32_t min;
@@ -386,9 +386,7 @@ const IsaRegistry::IsaMap& IsaRegistry::GetSupportedIsas() {
   ISAREG_ENTRY_GEN("gfx90a:sramecc-:xnack+", 9, 0, 10, disabled,    enabled,     64, "")
   ISAREG_ENTRY_GEN("gfx90a:sramecc+:xnack-", 9, 0, 10, enabled,     disabled,    64, "")
   ISAREG_ENTRY_GEN("gfx90a:sramecc+:xnack+", 9, 0, 10, enabled,     enabled,     64, "")
-  ISAREG_ENTRY_GEN("gfx90c",                 9, 0, 12, unsupported, any,         64, "gfx9-generic")
-  ISAREG_ENTRY_GEN("gfx90c:xnack-",          9, 0, 12, unsupported, disabled,    64, "gfx9-generic:xnack-")
-  ISAREG_ENTRY_GEN("gfx90c:xnack+",          9, 0, 12, unsupported, enabled,     64, "gfx9-generic:xnack+")
+  ISAREG_ENTRY_GEN("gfx90c",                 9, 0, 12, unsupported, unsupported, 64, "gfx9-generic")
   ISAREG_ENTRY_GEN("gfx942",                 9, 4, 2,  any,         any,         64, "gfx9-4-generic")
   ISAREG_ENTRY_GEN("gfx942:xnack-",          9, 4, 2,  any,         disabled,    64, "gfx9-4-generic:xnack-")
   ISAREG_ENTRY_GEN("gfx942:xnack+",          9, 4, 2,  any,         enabled,     64, "gfx9-4-generic:xnack+")

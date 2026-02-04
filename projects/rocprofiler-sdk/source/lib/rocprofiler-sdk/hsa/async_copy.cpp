@@ -693,6 +693,16 @@ async_copy_impl(Args... args)
         _corr_id_pop             = _data->correlation_id;
     }
 
+    if(!_data->correlation_id)
+    {
+        // During finalization - cleanup and execute without tracing
+        ROCP_HSA_TABLE_CALL(ERROR, get_core_table()->hsa_signal_destroy_fn(_data->rocp_signal));
+        delete _data;
+        return invoke(get_next_dispatch<TableIdx, OpIdx>(),
+                      std::move(_tied_args),
+                      std::make_index_sequence<N>{});
+    }
+
     // increase the reference count to denote that this correlation id is being used in a kernel
     _data->correlation_id->add_ref_count();
 

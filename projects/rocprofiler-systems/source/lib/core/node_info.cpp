@@ -21,12 +21,13 @@
 // SOFTWARE.
 
 #include "node_info.hpp"
-#include "debug.hpp"
 
 #include <fstream>
 #include <iostream>
 #include <limits>
 #include <sys/utsname.h>
+
+#include "logger/debug.hpp"
 
 namespace rocprofsys
 {
@@ -36,21 +37,21 @@ node_info::node_info()
     auto ifs = std::ifstream{ "/etc/machine-id" };
     if(!ifs.is_open())
     {
-        ROCPROFSYS_WARNING(0, "Error: Unable to open /etc/machine-id!");
+        LOG_WARNING("Error: Unable to open /etc/machine-id!");
         return;
     }
     if(!(ifs >> machine_id) || machine_id.empty())
     {
-        ROCPROFSYS_WARNING(0, "Error: Unable to read machine ID from /etc/machine-id!");
+        LOG_WARNING("Error: Unable to read machine ID from /etc/machine-id!");
     }
 
     hash = std::hash<std::string>{}(machine_id) % std::numeric_limits<int64_t>::max();
     id   = hash % std::numeric_limits<size_t>::max();
 
     struct utsname _sys_info;
-    if(uname(&_sys_info))
+    if(uname(&_sys_info) != 0)
     {
-        ROCPROFSYS_WARNING(0, "Error: Unable to get system information!");
+        LOG_WARNING("Error: Unable to get system information!");
         return;
     }
 

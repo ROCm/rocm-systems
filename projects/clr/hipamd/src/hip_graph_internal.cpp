@@ -19,6 +19,9 @@
  THE SOFTWARE. */
 
 #include "hip_graph_internal.hpp"
+#include <cmath>
+#include <simde/x86/sse2.h>
+
 
 #define CASE_STRING(X, C)                                                                          \
   case X:                                                                                          \
@@ -199,10 +202,12 @@ void Graph::ScheduleOneNode(Node node, int stream_id) {
       reinterpret_cast<hip::ChildGraphNode*>(node)->GraphExec::TopologicalOrder();
     }
     for (auto edge : node->GetEdges()) {
-      ScheduleOneNode(edge, stream_id);
-      // 1. Each extra edge will get a new stream from the pool
-      // 2. Streams will be reused if the number of edges > streams
-      stream_id = (stream_id + 1) % DEBUG_HIP_FORCE_GRAPH_QUEUES;
+      if (edge->stream_id_ == -1) {
+        ScheduleOneNode(edge, stream_id);
+        // 1. Each extra edge will get a new stream from the pool
+        // 2. Streams will be reused if the number of edges > streams
+        stream_id = (stream_id + 1) % DEBUG_HIP_FORCE_GRAPH_QUEUES;
+      }
     }
   }
 }
@@ -1412,6 +1417,11 @@ amd::Command* GraphExec::EnqueueSegmentedGraph(hip::Stream* launch_stream,
   // Map to track the last enqueued command for each segment for dependency tracking
   // This is critical for handling cross-level dependencies with stream reuse
   std::unordered_map<int, amd::Command*> segment_last_command;
+  // Set of segment IDs that have already been explicitly synchronized to the
+  // launch_stream via an earlier cross-stream wait marker. These segments can be
+  // safely excluded from the final "sync all streams to launch_stream" step to
+  // avoid inserting redundant markers.
+  std::unordered_set<int> segments_synced_to_launch;
 
   // Process segments level by level using the pre-calculated max_dependency_level_
   for (int level = 0; level <= max_dependency_level_; ++level) {
@@ -1448,6 +1458,9 @@ amd::Command* GraphExec::EnqueueSegmentedGraph(hip::Stream* launch_stream,
             // Retain command before adding to wait list for proper lifetime management
             cmd_it->second->retain();
             wait_list.push_back(cmd_it->second);
+            if (current_stream == launch_stream) {
+              segments_synced_to_launch.insert(dep_segment_id);
+            }
           }
         }
       }
@@ -1498,21 +1511,24 @@ amd::Command* GraphExec::EnqueueSegmentedGraph(hip::Stream* launch_stream,
 
   for (const auto& pair : segment_last_command) {
     int seg_id = pair.first;
-    amd::Command* cmd = pair.second;
-    auto stream_it = segment_to_stream.find(seg_id);
-    if (stream_it != segment_to_stream.end()) {
-      hip::Stream* stream = stream_it->second;
-      int seg_dependency_level = segments_[seg_id].dependency_level;
 
-      // Only update if this segment is at a strictly higher level
-      // Using strict > ensures deterministic behavior when multiple segments
-      // are at the same level on the same stream
-      auto level_it = stream_max_level.find(stream);
-      if (level_it == stream_max_level.end() ||
-          seg_dependency_level > level_it->second) {
-        stream_max_level[stream] = seg_dependency_level;
-        stream_last_command_map[stream] = cmd;
-      }
+    auto stream_it = segment_to_stream.find(seg_id);
+    if (segments_synced_to_launch.find(seg_id) != segments_synced_to_launch.end() ||
+        stream_it == segment_to_stream.end()) {
+      continue;
+    }
+
+    amd::Command* cmd = pair.second;
+    hip::Stream* stream = stream_it->second;
+    int seg_dependency_level = segments_[seg_id].dependency_level;
+
+    // Only update if this segment is at a strictly higher level
+    // Using strict > ensures deterministic behavior when multiple segments
+    // are at the same level on the same stream
+    auto level_it = stream_max_level.find(stream);
+    if (level_it == stream_max_level.end() || seg_dependency_level > level_it->second) {
+      stream_max_level[stream] = seg_dependency_level;
+      stream_last_command_map[stream] = cmd;
     }
   }
 
@@ -1630,6 +1646,7 @@ hipError_t GraphExec::EnqueueSegment(const Segment& segment, hip::Stream* stream
     auto& node = segment.nodes[i];
     if (DEBUG_HIP_GRAPH_DOT_PRINT) {
       node->stream_id_ = stream->GetStreamId();
+      node->hw_queue_id_ = stream->getQueueID();
     }
     if (!node->GraphCaptureEnabled()) {
       // Node doesn't support capture - execute individually
@@ -1669,11 +1686,15 @@ hipError_t GraphExec::EnqueueSegment(const Segment& segment, hip::Stream* stream
         if (DEBUG_HIP_GRAPH_DOT_PRINT) {
           for(int j = i; j < i + packetBatch.nodeRanges.size(); j++) {
             segment.nodes[j]->stream_id_ = stream->GetStreamId();
+            segment.nodes[j]->hw_queue_id_ = stream->getQueueID();
           }
         }
         // Skip all consecutive captured nodes that belong to this batch
         i += packetBatch.nodeRanges.size() - 1;  // -1 because loop will increment
         ++batchIndex;
+      }
+      if (DEBUG_HIP_GRAPH_DOT_PRINT) {
+        node->hw_queue_id_ = node->GetQueue()->getQueueID();
       }
     }
   }
@@ -1967,16 +1988,6 @@ hipError_t GraphExec::Run(hip::Stream* launch_stream) {
     if (last_cmd != nullptr) {
       last_cmd->release();
     }
-    if (DEBUG_HIP_GRAPH_DOT_PRINT && !graph_dumped_) {
-      graph_dumped_ = true;
-      std::string filename =
-        "graph_" + std::to_string(amd::Os::getProcessId()) + "_dot_print_launch_1";
-      hipError_t status = ihipGraphDebugDotPrint(this, filename.c_str(), 0);
-      if (status == hipSuccess) {
-        ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_CODE, "[hipGraph] graph dump:%s",
-                filename.c_str());
-      }
-    }
   } else if (max_streams_ == 1 && instantiateDeviceId_ != launch_stream->DeviceId()) {
     for (int i = 0; i < topoOrder_.size(); i++) {
       topoOrder_[i]->SetStream(launch_stream);
@@ -1993,6 +2004,15 @@ hipError_t GraphExec::Run(hip::Stream* launch_stream) {
     if (!RunNodes()) {
       LogError("Failed to launch nodes!");
       return hipErrorOutOfMemory;
+    }
+  }
+  if (DEBUG_HIP_GRAPH_DOT_PRINT == 2 && !graph_dumped_) {
+    graph_dumped_ = true;
+    std::string filename =
+        "graph_" + std::to_string(amd::Os::getProcessId()) + "_dot_print_launch_1";
+    hipError_t status = ihipGraphDebugDotPrint(this, filename.c_str(), 0);
+    if (status == hipSuccess) {
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_CODE, "[hipGraph] graph dump:%s", filename.c_str());
     }
   }
   this->retain();
@@ -2093,9 +2113,9 @@ void GraphKernelArgManager::ReadBackOrFlush() {
 
       // Read-modify-write sequence with memory barriers
       volatile unsigned char kSentinel = *sentinel_ptr;
-      _mm_sfence();
+      simde_mm_sfence();
       *sentinel_ptr = kSentinel;
-      _mm_mfence();
+      simde_mm_mfence();
       kSentinel = *sentinel_ptr;
       (void)kSentinel; // Suppress unused variable warning
     }

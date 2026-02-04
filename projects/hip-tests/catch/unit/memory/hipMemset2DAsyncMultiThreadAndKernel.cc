@@ -41,6 +41,7 @@ void queueJobsForhipMemset2DAsync(char* A_d, char* A_h, size_t pitch, size_t wid
   constexpr int memsetval = 0x22;
   HIPCHECK(hipMemset2DAsync(A_d, pitch, memsetval, NUM_W, NUM_H, stream));
   HIPCHECK(hipMemcpy2DAsync(A_h, width, A_d, pitch, NUM_W, NUM_H, hipMemcpyDeviceToHost, stream));
+  HIPCHECK(hipStreamSynchronize(stream));
 }
 
 

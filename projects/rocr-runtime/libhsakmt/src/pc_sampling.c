@@ -52,7 +52,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtPcSamplingQueryCapabilities(HSAuint32 NodeId, void
     CHECK_KFD_OPEN();
     CHECK_KFD_MINOR_VERSION(16);
 
-    HSAKMT_STATUS ret = hsakmt_validate_nodeid(NodeId, &gpu_id);
+    HSAKMT_STATUS ret = hsakmt_validate_nodeid(&hsakmt_primary_kfd_ctx, NodeId, &gpu_id);
     if (ret != HSAKMT_STATUS_SUCCESS) {
         pr_err("[%s] invalid node ID: %d\n", __func__, NodeId);
         return ret;
@@ -99,7 +99,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtPcSamplingCreate(HSAuint32 NodeId, HsaPcSamplingIn
     CHECK_KFD_OPEN();
 
     *traceId = INVALID_TRACE_ID;
-    HSAKMT_STATUS ret = hsakmt_validate_nodeid(NodeId, &gpu_id);
+    HSAKMT_STATUS ret = hsakmt_validate_nodeid(&hsakmt_primary_kfd_ctx, NodeId, &gpu_id);
     if (ret != HSAKMT_STATUS_SUCCESS) {
         pr_err("[%s] invalid node ID: %d\n", __func__, NodeId);
         return ret;
@@ -139,7 +139,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtPcSamplingDestroy(HSAuint32 NodeId, HsaPcSamplingT
 
     CHECK_KFD_OPEN();
 
-    HSAKMT_STATUS ret = hsakmt_validate_nodeid(NodeId, &gpu_id);
+    HSAKMT_STATUS ret = hsakmt_validate_nodeid(&hsakmt_primary_kfd_ctx, NodeId, &gpu_id);
     if (ret != HSAKMT_STATUS_SUCCESS) {
         pr_err("[%s] invalid node ID: %d\n", __func__, NodeId);
         return ret;
@@ -171,7 +171,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtPcSamplingStart(HSAuint32 NodeId, HsaPcSamplingTra
 
     CHECK_KFD_OPEN();
 
-    HSAKMT_STATUS ret = hsakmt_validate_nodeid(NodeId, &gpu_id);
+    HSAKMT_STATUS ret = hsakmt_validate_nodeid(&hsakmt_primary_kfd_ctx, NodeId, &gpu_id);
     if (ret != HSAKMT_STATUS_SUCCESS) {
         pr_err("[%s] invalid node ID: %d\n", __func__, NodeId);
         return ret;
@@ -210,7 +210,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtPcSamplingStop(HSAuint32 NodeId, HsaPcSamplingTrac
 
     CHECK_KFD_OPEN();
 
-    HSAKMT_STATUS ret = hsakmt_validate_nodeid(NodeId, &gpu_id);
+    HSAKMT_STATUS ret = hsakmt_validate_nodeid(&hsakmt_primary_kfd_ctx, NodeId, &gpu_id);
     if (ret != HSAKMT_STATUS_SUCCESS) {
         pr_err("[%s] invalid node ID: %d\n", __func__, NodeId);
         return ret;

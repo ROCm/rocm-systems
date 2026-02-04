@@ -152,6 +152,51 @@
       "auto_subtree_pull": false,
       "auto_subtree_push": true,
       "monorepo_source_of_truth": true
+    },
+    {
+      "name": "rocshmem",
+      "url": "ROCm/rocshmem",
+      "branch": "develop",
+      "category": "projects",
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true,
+      "monorepo_source_of_truth": true
+    },
+    {
+      "name": "rccl",
+      "url": "ROCm/rccl",
+      "branch": "develop",
+      "category": "projects",
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true,
+      "monorepo_source_of_truth": true
+    },
+    {
+      "name": "rccl-tests",
+      "url": "ROCm/rccl-tests",
+      "branch": "develop",
+      "category": "projects",
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true,
+      "monorepo_source_of_truth": true
+    },
+    {
+      "name": "rocdecode",
+      "url": "ROCm/rocDecode",
+      "branch": "develop",
+      "category": "projects",
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true,
+      "monorepo_source_of_truth": true
+    },
+    {
+      "name": "rocjpeg",
+      "url": "ROCm/rocJPEG",
+      "branch": "develop",
+      "category": "projects",
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true,
+      "monorepo_source_of_truth": true
     }
   ]
 }

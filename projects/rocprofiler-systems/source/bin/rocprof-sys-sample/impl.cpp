@@ -294,21 +294,47 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
                                            update_mode::REPLACE, ":", updated_envs,
                                            original_envs);
         });
-    parser.add_argument({ "--debug" }, "Debug output")
+
+    parser.add_argument({ "--log-level" }, "Log level")
+        .max_count(1)
+        .dtype("string")
+        .choices({ "trace", "debug", "info", "warn", "error", "critical", "off" })
+        .action([&](parser_t& p) {
+            rocprofsys::common::update_env(
+                _env, "ROCPROFSYS_LOG_LEVEL", p.get<std::string>("log-level"),
+                update_mode::REPLACE, ":", updated_envs, original_envs);
+        });
+
+    parser.add_argument({ "--debug" }, "[DEPRECATED Use --log-level=debug] Debug output")
         .max_count(1)
         .action([&](parser_t& p) {
             rocprofsys::common::update_env(_env, "ROCPROFSYS_DEBUG", p.get<bool>("debug"),
                                            update_mode::REPLACE, ":", updated_envs,
                                            original_envs);
+
+            rocprofsys::common::update_env(_env, "ROCPROFSYS_LOG_LEVEL", "debug",
+                                           update_mode::REPLACE, ":", updated_envs,
+                                           original_envs);
         });
-    parser.add_argument({ "-v", "--verbose" }, "Verbose output")
+    parser
+        .add_argument({ "-v", "--verbose" },
+                      "[DEPRECATED Use --log-level=trace] Verbose output")
         .count(1)
         .action([&](parser_t& p) {
             auto _v = p.get<int>("verbose");
             verbose = _v;
+
             rocprofsys::common::update_env(_env, "ROCPROFSYS_VERBOSE", _v,
                                            update_mode::REPLACE, ":", updated_envs,
                                            original_envs);
+
+            constexpr std::array<const char*, 5> log_levels = { "off", "info", "debug",
+                                                                "debug", "trace" };
+
+            auto index = std::clamp(_v + 1, 0, static_cast<int>(log_levels.size() - 1));
+            rocprofsys::common::update_env(_env, "ROCPROFSYS_LOG_LEVEL",
+                                           log_levels[index], update_mode::REPLACE, ":",
+                                           updated_envs, original_envs);
         });
 
     parser.start_group("GENERAL OPTIONS",
@@ -347,12 +373,13 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
                                            original_envs);
         });
     parser
-        .add_argument({ "--trace-cached" },
-                      "Generate a detailed trace (perfetto output) from cached data ")
+        .add_argument({ "-L", "--trace-legacy" },
+                      "Use legacy direct mode for tracing instead of deferred trace "
+                      "generation (higher overhead)")
         .max_count(1)
         .action([&](parser_t& p) {
             rocprofsys::common::update_env(
-                _env, "ROCPROFSYS_TRACE_CACHED", p.get<bool>("trace-cached"),
+                _env, "ROCPROFSYS_TRACE_LEGACY", p.get<bool>("trace-legacy"),
                 update_mode::REPLACE, ":", updated_envs, original_envs);
         });
     parser
@@ -836,6 +863,18 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
                                            original_envs);
         });
 
+    parser
+        .add_argument({ "-G", "--gpu-events" },
+                      "Set the GPU hardware counter events to record (ref: "
+                      "`rocprof-sys-avail -H -c GPU`)")
+        .action([&](parser_t& p) {
+            auto _events =
+                join(array_config{ "," }, p.get<std::vector<std::string>>("gpu-events"));
+            rocprofsys::common::update_env(_env, "ROCPROFSYS_ROCM_EVENTS", _events,
+                                           update_mode::REPLACE, ":", updated_envs,
+                                           original_envs);
+        });
+
     parser.start_group("MISCELLANEOUS OPTIONS", "");
     parser
         .add_argument({ "-i", "--inlines" },
@@ -893,4 +932,10 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
             "Error! '--profile' argument conflicts with '--flat-profile' argument");
 
     return _outv;
+}
+
+void
+add_torch_library_path(std::vector<char*>& envp, const std::vector<char*>& argv)
+{
+    rocprofsys::common::add_torch_library_path(envp, argv, verbose > 0, updated_envs);
 }

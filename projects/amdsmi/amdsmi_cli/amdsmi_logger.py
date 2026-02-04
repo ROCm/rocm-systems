@@ -622,10 +622,12 @@ class AMDSMILogger():
             combined_json["partition_profiles"] = self.store_partition_profiles_json_output
         if self.store_partition_resources_json_output:
             combined_json["partition_resources"] = self.store_partition_resources_json_output
-
-        self.destination == 'stdout'
-        json_std_output = json.dumps(combined_json, indent=4)
-        print(json_std_output)
+        if self.destination == 'stdout':
+            json_std_output = json.dumps(combined_json, indent=4)
+            print(json_std_output)
+        else:
+            with self.destination.open('w', encoding="utf-8") as output_file:
+                json.dump(combined_json, output_file, indent=4)
 
 
     def _print_csv_output(self, multiple_device_enabled=False, watching_output=False):
@@ -676,11 +678,13 @@ class AMDSMILogger():
                         writer.writerows(self.watch_output)
             else:
                 with self.destination.open('a', newline = '', encoding="utf-8") as output_file:
-                    # Get the header as a list of the first element to maintain order
-                    csv_header = stored_csv_output[0].keys()
-                    writer = csv.DictWriter(output_file, csv_header)
-                    writer.writeheader()
-                    writer.writerows(stored_csv_output)
+                    # Only write to file if there is data
+                    if stored_csv_output:
+                        # Get the header as a list of the first element to maintain order
+                        csv_header = stored_csv_output[0].keys()
+                        writer = csv.DictWriter(output_file, csv_header)
+                        writer.writeheader()
+                        writer.writerows(stored_csv_output)
 
 
     def _print_dual_csv_output(self, multiple_device_enabled=False, watching_output=False):
@@ -1033,13 +1037,19 @@ class AMDSMILogger():
                 amdgpu_version = str(driver_version['driver_version'])[:80]
         fw_pldm_version = str(output['version_info']['fw pldm version'])
         vbios_version = str(output['version_info']['vbios version'])
+        kernel_version = str(output['version_info']['kernel version'])
 
         # print GPU info
         print(default_line_1)
         # Split the version line into 3 lines, each wrapping to the same width
         print("| AMD-SMI          {0:40s} {1:19s}|".format(amd_smi_version.ljust(40), ""))
-        if amdgpu_version != "N/A":
+
+        # Print amdgpu or kernel version based on availability, if neither then don't print
+        if amdgpu_version.strip() != "N/A":
             print("| amdgpu Version:  {0:40s} {1:19s}|".format(amdgpu_version, ""))
+        elif kernel_version.strip() != "N/A":
+            print("| OS kernel Version:  {0:40s} {1:19s}|".format(kernel_version, ""))
+
         if rocm_version != "N/A":
             print("| ROCm Version:    {0:40s} {1:19s}|".format(rocm_version, ""))
 
@@ -1080,7 +1090,12 @@ class AMDSMILogger():
 
             power_usage = gpu_info['power_usage']
             if power_usage != "N/A":
-                power_usage = f"{gpu_info['power_usage']['current_power']}/{gpu_info['power_usage']['power_limit']} W"
+                power_limit = gpu_info['power_usage']['power_limit']
+                if power_limit != 0:
+                    power_limit = f"/{power_limit}"
+                else:
+                    power_limit = ""
+                power_usage = f"{gpu_info['power_usage']['current_power']}{power_limit} W"
             power_usage = str(power_usage).rjust(13)
 
             gpu_id = str(gpu_info['gpu_id']).rjust(3)
@@ -1100,7 +1115,16 @@ class AMDSMILogger():
 
             mem_usage = gpu_info['mem_usage']
             if mem_usage != "N/A":
-                mem_usage = f"{gpu_info['mem_usage']['used_vram']}/{gpu_info['mem_usage']['total_vram']} MB"
+                # Support both VRAM and GTT memory types for APU-aware display
+                if 'used_gtt' in mem_usage and 'total_gtt' in mem_usage:
+                    # GTT memory selected (likely APU)
+                    mem_usage = f"{gpu_info['mem_usage']['used_gtt']}/{gpu_info['mem_usage']['total_gtt']} MB"
+                elif 'used_vram' in mem_usage and 'total_vram' in mem_usage:
+                    # VRAM memory selected (standard or APU with more VRAM)
+                    mem_usage = f"{gpu_info['mem_usage']['used_vram']}/{gpu_info['mem_usage']['total_vram']} MB"
+                else:
+                    # Fallback if neither format is found
+                    mem_usage = "N/A"
             mem_usage = mem_usage.rjust(21)
 
             print("| {0:12.12s} {1:22.22s} | {2:5.5s}   {3:6.6s}   {4:5.5s}   {5:13.13s} |".format(bdf, market_name, mem_util, temp, u_ecc, power_usage))

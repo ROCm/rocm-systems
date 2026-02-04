@@ -2,7 +2,7 @@ default_stages: [pre-commit]
 fail_fast: true
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v5.0.0
+    rev: v6.0.0
     hooks:
       - id: check-yaml
       - id: end-of-file-fixer
@@ -12,7 +12,7 @@ repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     # Ruff version. Check https://github.com/astral-sh/ruff-pre-commit#version-compatibility
     # for the latest ruff version supported by the hook.
-    rev: v0.12.12
+    rev: v0.14.11
     hooks:
       - id: ruff-check
         args: [--fix]
@@ -23,7 +23,7 @@ repos:
     hooks:
       - id: hash-check
         name: Hash consistency check
-        entry: bash -lc 'cd projects/rocprofiler-compute && python3 tools/config_management/hash_checker.py'
+        entry: bash -lc 'cd projects/rocprofiler-compute && python3 src/utils/hash_checker.py'
         language: system
         pass_filenames: false
         stages: [pre-commit]

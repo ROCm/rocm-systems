@@ -102,7 +102,9 @@ class image_metadata {
   }
 };
 
-namespace MesaInterop {
+namespace GlInterop {
+
+#if !defined(_WIN32)
 enum MESA_INTEROP_KIND { MESA_INTEROP_NONE = 0, MESA_INTEROP_GLX = 1, MESA_INTEROP_EGL = 2 };
 
 union DisplayHandle {
@@ -121,9 +123,6 @@ union ContextHandle {
   ContextHandle(EGLContext context) : eglContext(context) {}
 };
 
-// True if the build supports Mesa interop.
-bool Supported();
-
 // Returns true if the required subsystem is supported on the GL device.
 // Must be called at least once, may be called multiple times.
 bool Init(MESA_INTEROP_KIND Kind);
@@ -133,6 +132,11 @@ bool GetInfo(mesa_glinterop_device_info& info, MESA_INTEROP_KIND Kind, const Dis
 
 bool Export(mesa_glinterop_export_in& in, mesa_glinterop_export_out& out, MESA_INTEROP_KIND Kind,
             const DisplayHandle display, const ContextHandle context);
-}  // namespace MesaInterop
-}  // namespace amd::roc
+#endif
 
+bool glAssociate(Device* device, uint flags, void* GLplatformContext, void* GLdeviceContext);
+bool glDissociate(Device* device, void* GLplatformContext, void* GLdeviceContext);
+bool Export(amd::Memory* mem, GLenum targetType, int miplevel, hsa_handle_t* handle, int* offset);
+
+} // namespace GlInterop
+}  // namespace amd::roc

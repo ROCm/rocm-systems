@@ -5692,6 +5692,22 @@ typedef int hsa_handle_t;
 #endif
 
 /**
+ * @brief Interop map flags.
+ */
+typedef uint32_t hsa_interop_map_flag_t;
+
+#define HSA_INTEROP_MAP_FLAG_NONE        0u
+#define HSA_INTEROP_MAP_FLAG_KMT_HANDLE  (1u << 0)
+
+/**
+ * @brief Platform-independent container for a Windows LUID.
+ */
+typedef struct hsa_luid_s {
+  uint32_t low;         //!< Luid low 4 bytes, valid only on Windows
+  uint32_t high;        //!< Luid high 4 bytes, valid only on Windows
+} hsa_luid_t;
+
+/**
  * @deprecated
  *
  * @brief Get the current value of an attribute for a given code symbol.

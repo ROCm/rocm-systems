@@ -46,6 +46,7 @@ enum class type_identifier_t : uint32_t
     amd_smi_sample          = 0x0006,
     cpu_freq_sample         = 0x0007,
     backtrace_region_sample = 0x0008,
+    scratch_memory          = 0x0009,
     fragmented_space        = 0xFFFF
 };
 
@@ -146,6 +147,83 @@ get_size(const kernel_dispatch_sample& item)
         item.private_segment_size, item.group_segment_size, item.workgroup_size_x,
         item.workgroup_size_y, item.workgroup_size_z, item.grid_size_x, item.grid_size_y,
         item.grid_size_z, static_cast<uint64_t>(item.stream_handle));
+}
+
+struct scratch_memory_sample : cacheable_t
+{
+    static constexpr type_identifier_t type_identifier =
+        type_identifier_t::scratch_memory;
+
+    scratch_memory_sample() = default;
+    scratch_memory_sample(uint64_t _start_timestamp, uint64_t _end_timestamp,
+                          uint64_t _thread_id, uint64_t _agent_id_handle,
+                          uint64_t _queue_id_handle, int32_t _kind, int32_t _operation,
+                          int32_t _flags, uint64_t _allocation_size,
+                          uint64_t _correlation_id_internal,
+                          uint64_t _correlation_id_ancestor, size_t _stream_handle)
+    : start_timestamp(_start_timestamp)
+    , end_timestamp(_end_timestamp)
+    , thread_id(_thread_id)
+    , agent_id_handle(_agent_id_handle)
+    , queue_id_handle(_queue_id_handle)
+    , kind(_kind)
+    , operation(_operation)
+    , flags(_flags)
+    , allocation_size(_allocation_size)
+    , correlation_id_internal(_correlation_id_internal)
+    , correlation_id_ancestor(_correlation_id_ancestor)
+    , stream_handle(_stream_handle)
+    {}
+
+    uint64_t start_timestamp;
+    uint64_t end_timestamp;
+    uint64_t thread_id;
+    uint64_t agent_id_handle;
+    uint64_t queue_id_handle;
+    int32_t  kind;
+    int32_t  operation;
+    int32_t  flags;
+    uint64_t allocation_size;
+    uint64_t correlation_id_internal;
+    uint64_t correlation_id_ancestor;
+    size_t   stream_handle;
+};
+
+template <>
+inline void
+serialize(uint8_t* buffer, const scratch_memory_sample& item)
+{
+    utility::store_value(buffer, item.start_timestamp, item.end_timestamp, item.thread_id,
+                         item.agent_id_handle, item.queue_id_handle, item.kind,
+                         item.operation, item.flags, item.allocation_size,
+                         item.correlation_id_internal, item.correlation_id_ancestor,
+                         static_cast<uint64_t>(item.stream_handle));
+}
+
+template <>
+inline scratch_memory_sample
+deserialize(uint8_t*& buffer)
+{
+    scratch_memory_sample item;
+    uint64_t              stream_handle;
+    utility::parse_value(buffer, item.start_timestamp, item.end_timestamp, item.thread_id,
+                         item.agent_id_handle, item.queue_id_handle, item.kind,
+                         item.operation, item.flags, item.allocation_size,
+                         item.correlation_id_internal, item.correlation_id_ancestor,
+                         stream_handle);
+    item.stream_handle = stream_handle;
+    return item;
+}
+
+template <>
+inline size_t
+get_size(const scratch_memory_sample& item)
+{
+    return utility::get_size(item.start_timestamp, item.end_timestamp, item.thread_id,
+                             item.agent_id_handle, item.queue_id_handle, item.kind,
+                             item.operation, item.flags, item.allocation_size,
+                             item.correlation_id_internal, item.correlation_id_ancestor,
+                             static_cast<uint64_t>(item.stream_handle));
 }
 
 struct memory_copy_sample : cacheable_t

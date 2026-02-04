@@ -1,25 +1,5 @@
-################################################################################
-# Copyright (c) 2024 - 2025 Advanced Micro Devices, Inc.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-#
-################################################################################
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
 cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
 
@@ -157,11 +137,15 @@ if(HIP_FOUND AND rocjpeg_FOUND AND Threads_FOUND AND rocprofiler-register_FOUND)
     target_compile_options(jpegdecode PRIVATE ${_FLAGS})
     copy_image_files_and_make_copies()
 
-    if(ROCPROFSYS_INSTALL_EXAMPLES)
-        install(TARGETS jpegdecode DESTINATION bin COMPONENT rocprofiler-systems-examples)
+    if(ROCPROFSYS_INSTALL_EXAMPLES AND TARGET jpegdecode)
         install(
-            FILES ${CMAKE_BINARY_DIR}/images
-            DESTINATION share/rocprofiler-systems/tests/images
+            TARGETS jpegdecode
+            DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples
+            COMPONENT rocprofiler-systems-examples
+        )
+        install(
+            DIRECTORY ${CMAKE_BINARY_DIR}/images/
+            DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples/images
             COMPONENT rocprofiler-systems-examples
         )
     endif()
