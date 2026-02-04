@@ -122,6 +122,12 @@ INCLUDES=(
 #   - ENABLE_LL128: Affects protocol selection and scratch sizes
 DEFINES="-DDEVICE_LINKER -DENABLE_FAULT_INJECTION -DENABLE_WARP_SPEED -DENABLE_LL128"
 
+# Debug flag for peer pointer tracking (set DEBUG_PEER_POINTERS=1 to enable)
+if [ "${DEBUG_PEER_POINTERS:-0}" = "1" ]; then
+    DEFINES="$DEFINES -DDEBUG_PEER_POINTERS"
+    echo "DEBUG_PEER_POINTERS enabled - will print peer pointer info from device code"
+fi
+
 # CUID (compilation unit ID) - needs to match between device and host compilation
 CUID="devicelinker$(echo -n "$SOURCE" | md5sum | cut -c1-16)"
 
@@ -175,7 +181,7 @@ $CLANG -cc1 \
     -resource-dir "$CLANG_RESOURCE_DIR" \
     "${SYS_INCLUDES[@]}" \
     -include __clang_hip_runtime_wrapper.h \
-    -D DEVICE_LINKER -D ENABLE_FAULT_INJECTION -D ENABLE_WARP_SPEED -D ENABLE_LL128 \
+    $DEFINES \
     "${INCLUDES[@]}" \
     -fhip-new-launch-api \
     -fgnuc-version=4.2.1 \
@@ -249,7 +255,7 @@ $CLANG -cc1 \
     -resource-dir "$CLANG_RESOURCE_DIR" \
     "${SYS_INCLUDES[@]}" \
     -include __clang_hip_runtime_wrapper.h \
-    -D DEVICE_LINKER -D ENABLE_FAULT_INJECTION -D ENABLE_WARP_SPEED -D ENABLE_LL128 \
+    $DEFINES \
     "${INCLUDES[@]}" \
     -fcuda-include-gpubinary "$FATBIN" \
     -cuid=$CUID \
