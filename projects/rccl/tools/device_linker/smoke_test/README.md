@@ -15,23 +15,17 @@ Where `BUILD_DIR` is the RCCL build directory (default: `../../../build/release`
 | Test | Status | Notes |
 |------|--------|-------|
 | test_single_gpu | PASS | Basic AllReduce on single GPU |
-| test_two_gpu | FAIL | Multi-GPU crashes with device linker build |
-| test_multi_gpu_allreduce | FAIL | Multi-GPU crashes with device linker build |
-| test_multi_gpu_broadcast | FAIL | Multi-GPU crashes with device linker build |
-| test_multi_gpu_reducescatter | FAIL | Multi-GPU crashes with device linker build |
+| test_two_gpu | HANG | Multi-GPU kernel hangs with device linker build |
 
 ## Known Issues
 
-**Multi-GPU tests crash with device linker build but pass with production RCCL.**
+**Multi-GPU tests hang with device linker build but pass with production RCCL.**
 
-This indicates an issue in the device linker integration that only affects multi-GPU
-paths. The single-GPU path works correctly, confirming the basic device linker
-mechanism (function tables, specialized kernels) is functional.
+The kernel launches successfully but never completes. Investigation suggests connection 
+pointers in `ncclShmem.groups[].recvConns[]` and `sendConns[]` may be NULL or invalid.
 
-Investigation needed:
-- Check if multi-GPU initialization accesses uninitialized function table entries
-- Verify all unroll variants (1, 2, 4) are properly handled
-- Check for any multi-GPU specific code paths that reference device symbols differently
+Use `rocgdb` to debug - the device linker now produces correct DWARF5 debug info with
+proper line numbers and function symbols.
 
 ## Building Individual Tests
 
