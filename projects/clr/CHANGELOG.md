@@ -8,12 +8,13 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 
 * New HIP APIs
     - Cooperative Groups
-      * Support for `barrier` APIs `barrier_arrive` and `barrier_wait` has been added for both `grid_group` and `thread_block`, enables finer‑grained synchronization within cooperative groups
+      * Support for `barrier` APIs `barrier_arrive` and `barrier_wait` has been added for both `grid_group` and `thread_block` to enable finer‑grained synchronization within cooperative groups
       * Support for `block_rank` in the class `grid_group`, returns the rank of the block in the calling thread
     - Dynamic logging, no matching CUDA APIs exist
       * `hipExtEnableLogging` enables HIP runtime logging
       * `hipExtDisableLogging` disables HIP runtime logging
       * `hipExtSetLoggingParams` sets HIP runtime logging parameters
+
 * New HIP enumeration
     - `hipDeviceAttributeExpertSchedMode` has been added to hipDeviceAttribute_t to indicate whether expert scheduling mode is supported on AMD GPUs
 
@@ -23,7 +24,7 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 
 ### Optimized
 
-* HIP log level control capabilities HIP runtime adds dynamic logging functionalities, enabling applications to programmatically enable, disable, and configure logging at runtime without modifying environment variables or restarting the application. The result is more precise control over diagnostic output, making it easier to debug targeted code paths or minimize log noise during performance‑critical execution.
+* HIP log-level control capabilities HIP runtime adds dynamic logging functionalities, enabling applications to programmatically enable, disable, and configure logging at runtime without modifying environment variables or restarting the application. The result is more precise control over diagnostic output, making it easier to debug targeted code paths or minimize log noise during performance‑critical execution.
 
 ## HIP 7.11 for ROCm 7.11
 
