@@ -36,6 +36,14 @@ if (flags & (RoleWaitRecv|RolePostRecv)) loadRecvConn(channel->peers[peer], ...)
 if (flags & (RoleWaitSend|RolePostSend)) loadSendConn(channel->peers[peer], ...);
 ```
 
+**Investigation findings (from rocgdb):**
+- LDS offset 624 (`warpChannel[0].peers`) contains **0 (NULL)** when specialized kernel reads it
+- Host-side pointers are valid (verified via readback from device global memory)
+- The copy from global memory to LDS either didn't happen or wrote to wrong location
+- LDS sizes differ: dispatcher uses 37776 bytes, specialized kernels use 4944 bytes
+  (compiler only allocates what's accessed, but offsets should still match)
+- See `LDS_LAYOUT.md` for offset map
+
 **Investigation approach:**
 Use `rocgdb` to inspect LDS contents at hang point. Debug info is now working correctly
 (DWARF5 line tables, proper function symbols).
