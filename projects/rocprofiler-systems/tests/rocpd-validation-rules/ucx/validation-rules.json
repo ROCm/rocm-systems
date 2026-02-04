@@ -1,7 +1,7 @@
 {
     "required_tables": [
         {
-            "name_prefix": "rocpd_info_pmc_",
+            "name_prefix": "rocpd_string",
             "required_columns": [
                 "id",
                 "string"

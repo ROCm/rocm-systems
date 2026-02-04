@@ -79,7 +79,20 @@ if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU})
     list(APPEND _ucx_environment "ROCPROFSYS_USE_ROCPD=ON")
 endif()
 
-set(_UCX_PASS_REGEX "ucx_gotcha|category*ucx")
+set(_UCX_PASS_REGEX "ucx_gotcha|category::ucx")
+
+# Helper function to add fixture dependencies to UCX tests
+function(add_ucx_fixture_dependency TEST_BASE_NAME)
+    foreach(_test_suffix sampling binary-rewrite binary-rewrite-run sys-run)
+        if(TEST ${TEST_BASE_NAME}-${_test_suffix})
+            set_property(
+                TEST ${TEST_BASE_NAME}-${_test_suffix}
+                APPEND
+                PROPERTY FIXTURES_REQUIRED ucx_available
+            )
+        endif()
+    endforeach()
+endfunction()
 
 # Add a runtime validation test that checks if UCX is functional
 # This test runs before all other UCX tests and acts as a fixture
@@ -100,14 +113,14 @@ set_tests_properties(
             "PML ucx cannot be selected|UCX is not available|No UCX support found|Failed to select"
 )
 
-# UCX perfetto trace test
+# UCX trace test
 rocprofiler_systems_add_test(
     SKIP_BASELINE SKIP_RUNTIME SKIP_SAMPLING
-    NAME "ucx-perfetto"
+    NAME "ucx-send-recv"
     TARGET mpi-send-recv
     MPI ON
     NUM_PROCS 2
-    LABELS "ucx;perfetto"
+    LABELS "ucx;send-recv"
     REWRITE_ARGS
         -e
         -v
@@ -126,20 +139,12 @@ rocprofiler_systems_add_test(
         "${_UCX_PASS_REGEX}|Using UCX|pml.*ucx"
 )
 
-# Make this test depend on the UCX validation fixture
-foreach(_test_suffix sampling binary-rewrite binary-rewrite-run sys-run)
-    if(TEST ucx-perfetto-${_test_suffix})
-        set_property(
-            TEST ucx-perfetto-${_test_suffix}
-            APPEND
-            PROPERTY FIXTURES_REQUIRED ucx_available
-        )
-    endif()
-endforeach()
+# Add fixture dependency
+add_ucx_fixture_dependency(ucx-send-recv)
 
 # Validation test for UCX perfetto trace to ensure communication tracks are present
 rocprofiler_systems_add_validation_test(
-    NAME ucx-perfetto-sys-run
+    NAME ucx-send-recv-sys-run
     PERFETTO_METRIC "ucx"
     PERFETTO_FILE "merged.proto"
     LABELS "ucx;perfetto"
@@ -147,17 +152,17 @@ rocprofiler_systems_add_validation_test(
 )
 
 # Validation test for UCX rocpd output
-if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU} AND TEST ucx-perfetto-sys-run)
-    set_property(TEST ucx-perfetto-sys-run APPEND PROPERTY LABELS rocpd)
+if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU} AND TEST ucx-send-recv-sys-run)
+    set_property(TEST ucx-send-recv-sys-run APPEND PROPERTY LABELS rocpd)
 
     # For MPI tests, ROCPD creates separate DB files for each rank with PID suffix (rocpd-<pid>.db)
     # Create a setup test that finds and symlinks one of them to a predictable name
     set(UCX_ROCPD_OUTPUT_DIR
-        "${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/ucx-perfetto-sys-run"
+        "${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/ucx-send-recv-sys-run"
     )
 
     add_test(
-        NAME ucx-perfetto-sys-run-rocpd-setup
+        NAME ucx-send-recv-sys-run-rocpd-setup
         COMMAND
             ${CMAKE_COMMAND} -E env bash -c
             "ROCPD_DB=$(ls ${UCX_ROCPD_OUTPUT_DIR}/rocpd-*.db 2>/dev/null | head -1) && ln -sf $(basename \"$ROCPD_DB\") ${UCX_ROCPD_OUTPUT_DIR}/rocpd.db"
@@ -165,25 +170,33 @@ if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU} AND TEST ucx-perfetto-sys-run)
     )
 
     set_tests_properties(
-        ucx-perfetto-sys-run-rocpd-setup
-        PROPERTIES LABELS "ucx;rocpd;setup" DEPENDS ucx-perfetto-sys-run
+        ucx-send-recv-sys-run-rocpd-setup
+        PROPERTIES
+            LABELS "ucx;rocpd;setup"
+            DEPENDS ucx-send-recv-sys-run
+            FIXTURES_REQUIRED ucx_available
     )
 
     # Standard validation test - now it can use the predictable symlink name
     rocprofiler_systems_add_validation_test(
-        NAME ucx-perfetto-sys-run
+        NAME ucx-send-recv-sys-run
         ROCPD_FILE "rocpd.db"
         LABELS "ucx;rocpd"
         ARGS --validation-rules
             "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/ucx/validation-rules.json"
     )
 
-    # Make validation depend on the setup test
-    if(TEST validate-ucx-perfetto-sys-run-rocpd)
+    # Make validation depend on the setup test and UCX fixture
+    if(TEST validate-ucx-send-recv-sys-run-rocpd)
         set_property(
-            TEST validate-ucx-perfetto-sys-run-rocpd
+            TEST validate-ucx-send-recv-sys-run-rocpd
             APPEND
-            PROPERTY DEPENDS ucx-perfetto-sys-run-rocpd-setup
+            PROPERTY DEPENDS ucx-send-recv-sys-run-rocpd-setup
+        )
+        set_property(
+            TEST validate-ucx-send-recv-sys-run-rocpd
+            APPEND
+            PROPERTY FIXTURES_REQUIRED ucx_available
         )
     endif()
 endif()
@@ -213,16 +226,8 @@ rocprofiler_systems_add_test(
     SAMPLING_PASS_REGEX "${_UCX_PASS_REGEX}"
 )
 
-# Make this test depend on the UCX validation fixture
-foreach(_test_suffix sampling binary-rewrite binary-rewrite-run sys-run)
-    if(TEST ucx-mpip-integration-${_test_suffix})
-        set_property(
-            TEST ucx-mpip-integration-${_test_suffix}
-            APPEND
-            PROPERTY FIXTURES_REQUIRED ucx_available
-        )
-    endif()
-endforeach()
+# Add fixture dependency
+add_ucx_fixture_dependency(ucx-mpip-integration)
 
 # UCX with different message sizes
 foreach(_MSG_SIZE 1024 4096 16384)
@@ -248,16 +253,8 @@ foreach(_MSG_SIZE 1024 4096 16384)
         SAMPLING_PASS_REGEX "${_UCX_PASS_REGEX}"
     )
 
-    # Make the test depend on the UCX validation fixture
-    foreach(_test_suffix sampling binary-rewrite binary-rewrite-run sys-run)
-        if(TEST ucx-bcast-${_MSG_SIZE}-${_test_suffix})
-            set_property(
-                TEST ucx-bcast-${_MSG_SIZE}-${_test_suffix}
-                APPEND
-                PROPERTY FIXTURES_REQUIRED ucx_available
-            )
-        endif()
-    endforeach()
+    # Add fixture dependency
+    add_ucx_fixture_dependency(ucx-bcast-${_MSG_SIZE})
 endforeach()
 
 # Test UCX active message functionality
@@ -282,13 +279,5 @@ rocprofiler_systems_add_test(
     REWRITE_RUN_PASS_REGEX "${_UCX_PASS_REGEX}"
 )
 
-# Make this test depend on the UCX validation fixture
-foreach(_test_suffix sampling binary-rewrite binary-rewrite-run sys-run)
-    if(TEST ucx-active-messages-${_test_suffix})
-        set_property(
-            TEST ucx-active-messages-${_test_suffix}
-            APPEND
-            PROPERTY FIXTURES_REQUIRED ucx_available
-        )
-    endif()
-endforeach()
+# Add fixture dependency
+add_ucx_fixture_dependency(ucx-active-messages)
