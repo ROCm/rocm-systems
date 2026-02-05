@@ -2852,6 +2852,56 @@ void VirtualGPU::submitCopyMemoryP2P(amd::CopyMemoryP2PCommand& cmd) {
 }
 
 // ================================================================================================
+void VirtualGPU::submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd) {
+  // Make sure VirtualGPU has an exclusive access to the resources
+  amd::ScopedLock lock(execution());
+
+  profilingBegin(cmd, true);
+
+  const auto& copyOps = cmd.copyOps();
+  if (copyOps.empty()) {
+    profilingEnd();
+    return;
+  }
+
+  bool result = true;
+
+  // Sync caches for all source and destination memory objects
+  device::Memory::SyncFlags syncFlags;
+  syncFlags.skipEntire_ = false;
+
+  for (const auto& op : copyOps) {
+    Memory* srcDevMem = dev().getRocMemory(op.srcMemory);
+    Memory* dstDevMem = dev().getRocMemory(op.dstMemory);
+
+    if (srcDevMem == nullptr || dstDevMem == nullptr) {
+      LogError("submitBatchCopyMemory: Invalid memory objects!");
+      cmd.setStatus(CL_INVALID_MEM_OBJECT);
+      profilingEnd();
+      return;
+    }
+
+    dstDevMem->syncCacheFromHost(*this, syncFlags);
+    srcDevMem->syncCacheFromHost(*this);
+  }
+
+  // Execute batch copy through blit manager
+  result = blitMgr().copyBufferBatch(copyOps, false);
+
+  if (!result) {
+    LogError("submitBatchCopyMemory failed!");
+    cmd.setStatus(CL_OUT_OF_RESOURCES);
+  } else {
+    // Mark all destinations as written
+    for (const auto& op : copyOps) {
+      op.dstMemory->signalWrite(&dev());
+    }
+  }
+
+  profilingEnd();
+}
+
+// ================================================================================================
 void VirtualGPU::submitSvmMapMemory(amd::SvmMapMemoryCommand& cmd) {
   // Make sure VirtualGPU has an exclusive access to the resources
   amd::ScopedLock lock(execution());

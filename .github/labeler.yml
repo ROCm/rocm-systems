@@ -78,6 +78,14 @@
 - changed-files:
   - any-glob-to-any-file: 'projects/roctracer/**/*'
 
+"project: rocjpeg":
+- changed-files:
+  - any-glob-to-any-file: 'projects/rocjpeg/**/*'
+
+  "project: rocdecode":
+- changed-files:
+  - any-glob-to-any-file: 'projects/rocdecode/**/*'
+
 "shared: amdgpu-windows-interop":
 - changed-files:
   - any-glob-to-any-file: 'shared/amdgpu-windows-interop/**/*'
