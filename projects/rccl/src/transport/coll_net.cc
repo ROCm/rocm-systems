@@ -150,7 +150,7 @@ static ncclResult_t canConnect(int* ret, struct ncclComm* comm, struct ncclTopoG
 // Returns the flags to be used by a call to cuMemGetHandleForAddressRange.
 static inline int getHandleForAddressRangeFlags(ncclTopoGdrMode useGdr) {
   int flags = 0;
-#if CUDA_VERSION >= 12080
+#if CUDA_VERSION >= 12080 || HIP_VERSION >= 70000000
   // Force mapping on PCIe on systems with both PCI and C2C attachments.
   if (useGdr == ncclTopoGdrModePci) flags = CU_MEM_RANGE_FLAG_DMA_BUF_MAPPING_TYPE_PCIE;
 #endif
@@ -526,21 +526,36 @@ static ncclResult_t sendProxyConnect(struct ncclProxyConnection* connection, str
 
   int dmabuf_fd = -1;
   (void)dmabuf_fd; /*compiler warnings fix - unused variable*/
-#if CUDA_VERSION >= 11070
+  bool needReg = true;
+#if CUDA_VERSION >= 11070 || HIP_VERSION >= 70000000
   /* DMA-BUF support */
-  if (resources->useGdr && resources->useDmaBuf) {
-    CUCHECK(cuMemGetHandleForAddressRange((void *)&dmabuf_fd, (CUdeviceptr)mapMem->cpuPtr, mapMem->size, CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD, getHandleForAddressRangeFlags(resources->useGdr)));
+  if (resources->useGdr && resources->useDmaBuf && ncclCuMemEnable()) {
+    CUCHECKGOTO(cuMemGetHandleForAddressRange((void *)&dmabuf_fd, (CUdeviceptr)mapMem->cpuPtr, mapMem->size, CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD, getHandleForAddressRangeFlags(resources->useGdr)), ret, peermem_send);
     NCCLCHECKGOTO(proxyState->ncclCollNet->regMrDmaBuf(resources->collNetComm, mapMem->cpuPtr, mapMem->size,
                                                        NCCL_PTR_CUDA, 0ULL, dmabuf_fd,
                                                        &resources->sendMhandles[NCCL_PROTO_SIMPLE]),
-                  ret, fail);
+                  ret, peermem_send);
     (void)close(dmabuf_fd);
-  } else // FALL-THROUGH to nv_peermem GDR path
+    needReg = false;
+  }
+peermem_send:
+#else
+  if (resources->useGdr && resources->useDmaBuf && pfn_hsa_amd_portable_export_dmabuf && proxyState->ncclCollNet->regMrDmaBuf) {
+    uint64_t offset;
+    HSACHECKGOTO(hsa_amd_portable_export_dmabuf((const void*)mapMem->cpuPtr, mapMem->size, &dmabuf_fd, &offset), ret, peermem_send);
+    NCCLCHECKGOTO(proxyState->ncclCollNet->regMrDmaBuf(resources->collNetComm, mapMem->cpuPtr, mapMem->size,
+                                                       NCCL_PTR_CUDA, offset, dmabuf_fd,
+                                                       &resources->sendMhandles[NCCL_PROTO_SIMPLE]),
+                  ret, peermem_send);
+    (void)close(dmabuf_fd);
+    needReg = false;
+  }
+peermem_send:
 #endif
-  {
-    NCCLCHECK(proxyState->ncclCollNet->regMr(resources->collNetComm, mapMem->cpuPtr, mapMem->size,
+  if (needReg) {
+    NCCLCHECKGOTO(proxyState->ncclCollNet->regMr(resources->collNetComm, mapMem->cpuPtr, mapMem->size,
                                             resources->useGdr ? NCCL_PTR_CUDA : NCCL_PTR_HOST,
-                                            &resources->sendMhandles[NCCL_PROTO_SIMPLE]));
+                                            &resources->sendMhandles[NCCL_PROTO_SIMPLE]), ret, fail);
   }
 
   *((struct connectMap**)respBuff) = &resources->map;
@@ -609,21 +624,36 @@ static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, str
   
   int dmabuf_fd = -1;
   (void)dmabuf_fd; /*compiler warnings fix - unused variable*/
-#if CUDA_VERSION >= 11070
+  bool needReg = true;
+#if CUDA_VERSION >= 11070 || HIP_VERSION >= 70000000
   /* DMA-BUF support */
-  if (resources->useGdr && resources->useDmaBuf) {
-    CUCHECK(cuMemGetHandleForAddressRange((void *)&dmabuf_fd, (CUdeviceptr)mapMem->cpuPtr, mapMem->size, CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD, getHandleForAddressRangeFlags(resources->useGdr)));
+  if (resources->useGdr && resources->useDmaBuf && ncclCuMemEnable()) {
+    CUCHECKGOTO(cuMemGetHandleForAddressRange((void *)&dmabuf_fd, (CUdeviceptr)mapMem->cpuPtr, mapMem->size, CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD, getHandleForAddressRangeFlags(resources->useGdr)), ret, peermem_recv);
     NCCLCHECKGOTO(proxyState->ncclCollNet->regMrDmaBuf(resources->collNetComm, mapMem->cpuPtr, mapMem->size,
                                                        NCCL_PTR_CUDA, 0ULL, dmabuf_fd,
                                                        &resources->mhandles[NCCL_PROTO_SIMPLE]),
-                  ret, fail);
+                  ret, peermem_recv);
     (void)close(dmabuf_fd);
-  } else // FALL-THROUGH to nv_peermem GDR path
+    needReg = false;
+  }
+peermem_recv:
+#else
+  if (resources->useGdr && resources->useDmaBuf && pfn_hsa_amd_portable_export_dmabuf && proxyState->ncclCollNet->regMrDmaBuf) {
+    uint64_t offset;
+    HSACHECKGOTO(hsa_amd_portable_export_dmabuf((const void*)mapMem->cpuPtr, mapMem->size, &dmabuf_fd, &offset), ret, peermem_recv);
+    NCCLCHECKGOTO(proxyState->ncclCollNet->regMrDmaBuf(resources->collNetComm, mapMem->cpuPtr, mapMem->size,
+                                                       NCCL_PTR_CUDA, offset, dmabuf_fd,
+                                                       &resources->mhandles[NCCL_PROTO_SIMPLE]),
+                  ret, peermem_recv);
+    (void)close(dmabuf_fd);
+    needReg = false;
+  }
+peermem_recv:
 #endif
-  {
-    NCCLCHECK(proxyState->ncclCollNet->regMr(resources->collNetComm, mapMem->cpuPtr, mapMem->size,
+  if (needReg) {
+    NCCLCHECKGOTO(proxyState->ncclCollNet->regMr(resources->collNetComm, mapMem->cpuPtr, mapMem->size,
                                             resources->useGdr ? NCCL_PTR_CUDA : NCCL_PTR_HOST,
-                                            &resources->mhandles[NCCL_PROTO_SIMPLE]));
+                                            &resources->mhandles[NCCL_PROTO_SIMPLE]), ret, fail);
   }
 
   // Pass info to send side
@@ -1328,19 +1358,27 @@ static ncclResult_t sendProxyRegBuffer(struct ncclProxyConnection* connection, s
   assert(respSize == sizeof(void*));
 
   int dmabuf_fd = -1;
-#if CUDART_VERSION >= 11070
+  #if CUDART_VERSION >= 11070 || HIP_VERSION >= 70000000
   /* DMA-BUF support */
-  if (resources->useGdr && resources->useDmaBuf) {
+  if (resources->useGdr && resources->useDmaBuf && ncclCuMemEnable()) {
     CUCHECKGOTO(cuMemGetHandleForAddressRange((void *)&dmabuf_fd, (CUdeviceptr)info->buffer, info->size, CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD, getHandleForAddressRangeFlags(resources->useGdr)), ret, peermem);
     NCCLCHECKGOTO(proxyState->ncclCollNet->regMrDmaBuf(resources->collNetComm, (void*)info->buffer, info->size, NCCL_PTR_CUDA, 0ULL, dmabuf_fd, &handle), ret, peermem);
+    (void)close(dmabuf_fd);
+    dmabuf_fd = -1;
+    needReg = false;
+  }
+peermem:
+#else
+  if (resources->useGdr && resources->useDmaBuf && pfn_hsa_amd_portable_export_dmabuf && proxyState->ncclCollNet->regMrDmaBuf) {
+    uint64_t offset;
+    HSACHECKGOTO(hsa_amd_portable_export_dmabuf((const void*)info->buffer, info->size, &dmabuf_fd, &offset), ret, peermem);
+    NCCLCHECKGOTO(proxyState->ncclCollNet->regMrDmaBuf(resources->collNetComm, (void*)info->buffer, info->size, NCCL_PTR_CUDA, offset, dmabuf_fd, &handle), ret, peermem);
+    (void)close(dmabuf_fd);
+    dmabuf_fd = -1;
     needReg = false;
   }
 peermem:
 #endif
-  if (dmabuf_fd != -1) {
-    (void)close(dmabuf_fd);
-    dmabuf_fd = -1;
-  }
   if (needReg) {
     NCCLCHECKGOTO(proxyState->ncclCollNet->regMr(resources->collNetComm, (void*)info->buffer, info->size, NCCL_PTR_CUDA, &handle), ret, fail);
   }
@@ -1363,19 +1401,27 @@ static ncclResult_t recvProxyRegBuffer(struct ncclProxyConnection* connection, s
 
   assert(reqSize == sizeof(struct collnetRegInfo));
   assert(respSize == sizeof(void*));
-  #if CUDART_VERSION >= 11070
   int dmabuf_fd = -1;
+#if CUDART_VERSION >= 11070 || HIP_VERSION >= 70000000
   /* DMA-BUF support */
-  if (resources->useGdr && resources->useDmaBuf) {
+  if (resources->useGdr && resources->useDmaBuf && ncclCuMemEnable()) {
     CUCHECKGOTO(cuMemGetHandleForAddressRange((void *)&dmabuf_fd, (CUdeviceptr)info->buffer, info->size, CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD, getHandleForAddressRangeFlags(resources->useGdr)), ret, peermem);
     NCCLCHECKGOTO(proxyState->ncclCollNet->regMrDmaBuf(resources->collNetComm, (void*)info->buffer, info->size, NCCL_PTR_CUDA, 0ULL, dmabuf_fd, &handle), ret, peermem);
+    (void)close(dmabuf_fd);
+    dmabuf_fd = -1;
     needReg = false;
   }
 peermem:
-  if (dmabuf_fd != -1) {
+#else
+  if (resources->useGdr && resources->useDmaBuf && pfn_hsa_amd_portable_export_dmabuf && proxyState->ncclCollNet->regMrDmaBuf) {
+    uint64_t offset;
+    HSACHECKGOTO(hsa_amd_portable_export_dmabuf((const void*)info->buffer, info->size, &dmabuf_fd, &offset), ret, peermem);
+    NCCLCHECKGOTO(proxyState->ncclCollNet->regMrDmaBuf(resources->collNetComm, (void*)info->buffer, info->size, NCCL_PTR_CUDA, offset, dmabuf_fd, &handle), ret, peermem);
     (void)close(dmabuf_fd);
     dmabuf_fd = -1;
+    needReg = false;
   }
+peermem:
 #endif
   if (needReg) {
     NCCLCHECKGOTO(proxyState->ncclCollNet->regMr(resources->collNetComm, (void*)info->buffer, info->size, NCCL_PTR_CUDA, &handle), ret, fail);

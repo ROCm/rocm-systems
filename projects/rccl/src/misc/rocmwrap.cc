@@ -228,6 +228,11 @@ static void initOnceFunc() {
       dmaBufSupport = 1;
       WARN("DMA_BUF Support is force enabled, so explicitly setting RCCL_FORCE_ENABLE_DMABUF=1");
   }
+  else if (ncclCuMemEnable() && ncclParamDmaBufEnable() == 0)
+  {
+    dmaBufSupport = 1;
+    WARN("NCCL_CUMEM_ENABLE is set but NCCL_DMABUF_ENABLE is not. Forcefully enabling DMA-BUF for cuMem.");
+  }
   else if (ncclParamDmaBufEnable() == 0)
   {
     INFO(NCCL_INIT, "Dmabuf feature disabled without NCCL_DMABUF_ENABLE=1");

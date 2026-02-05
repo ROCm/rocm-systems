@@ -344,7 +344,7 @@ static void finishPlan(struct ncclComm* comm, struct ncclKernelPlan* plan) {
   }
 }
 
-#if ROCM_VERSION >= 71100
+#if ROCM_VERSION >= 71200
 NCCL_PARAM(GraphRegister, "GRAPH_REGISTER", 1);
 #else
 NCCL_PARAM(GraphRegister, "GRAPH_REGISTER", 0);

@@ -244,14 +244,16 @@ ncclResult_t ncclCollPreconnectFunc(struct ncclAsyncJob* job_) {
   if (!job_->isThreadMain) CUDACHECK(cudaSetDevice(comm->cudaDev));
   if (!job_->isThreadMain && CPU_COUNT(&comm->cpuAffinity)) sched_setaffinity(0, sizeof(cpu_set_t), &comm->cpuAffinity);
   cudaStreamCaptureMode mode = cudaStreamCaptureModeRelaxed;
-  CUDACHECKGOTO(cudaThreadExchangeStreamCaptureMode(&mode), ret, exit);
+  CUDACHECKGOTO(cudaThreadExchangeStreamCaptureMode(&mode), ret, fail);
   modeChanged = (mode != cudaStreamCaptureModeRelaxed);
-  NCCLCHECKGOTO(ncclCollPreconnect(comm, job->algoNeedConnect), ret, exit);
+  NCCLCHECKGOTO(ncclCollPreconnect(comm, job->algoNeedConnect), ret, fail);
 
 exit:
   if (modeChanged) (void)cudaThreadExchangeStreamCaptureMode(&mode);
   free(job->algoNeedConnect);
   return ret;
+fail:
+  goto exit;
 }
 
 struct ncclGroupSymmetricJob {

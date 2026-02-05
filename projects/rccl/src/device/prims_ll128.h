@@ -144,7 +144,9 @@ private:
     __atomic_signal_fence(__ATOMIC_SEQ_CST);
 
     if (sendConnTailPtr) {
-#if __CUDA_ARCH__ >= 900
+      // Use __threadfence_system() for cross-process visibility with cuMem IPC.
+      // Required on both NVIDIA Hopper+ and AMD GPUs with multi-process P2P.
+#if __CUDA_ARCH__ >= 900 || defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
       __threadfence_system();
 #endif
       STORE((unsigned long long *)sendConnTailPtr, sendConnTail += 1);
