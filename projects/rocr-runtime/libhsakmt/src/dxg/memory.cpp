@@ -1122,8 +1122,8 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtHandleImport(const HsaExternalHandleDesc* import_d
 
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaMap(HsaMemoryObjectHandle Handle,
-    					HSAuint64 offset, HSAuint64 size, HSAuint64 addr,
-						HsaMemoryMapFlags flags)
+              HSAuint64 offset, HSAuint64 size, HSAuint64 addr,
+              HsaMemoryMapFlags flags)
 {
 	CHECK_DXG_OPEN();
   wsl::thunk::GpuMemory* gpu_mem = reinterpret_cast<wsl::thunk::GpuMemory*>(Handle);
@@ -1147,7 +1147,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaMap(HsaMemoryObjectHandle Handle,
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaUnmap(HsaMemoryObjectHandle Handle,
-    					HSAuint64 offset, HSAuint64 size, HSAuint64 addr)
+              HSAuint64 offset, HSAuint64 size, HSAuint64 addr)
 {
 	CHECK_DXG_OPEN();
   wsl::thunk::GpuMemory* gpu_mem = reinterpret_cast<wsl::thunk::GpuMemory*>(Handle);
@@ -1168,14 +1168,17 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaUnmap(HsaMemoryObjectHandle Handle,
 HSAKMT_STATUS HSAKMTAPI hsaKmtMemHandleFree(HsaMemoryObjectHandle Handle)
 {
 	CHECK_DXG_OPEN();
+  wsl::thunk::GpuMemory* gpu_mem = reinterpret_cast<wsl::thunk::GpuMemory*>(Handle);
+  delete gpu_mem;
 	return HSAKMT_STATUS_SUCCESS;
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryCpuMap(HsaMemoryObjectHandle Handle,
-						void** out_cpu_ptr)
+              void** out_cpu_ptr)
 {
 	CHECK_DXG_OPEN();
   wsl::thunk::GpuMemory *gpu_mem = reinterpret_cast<wsl::thunk::GpuMemory *>(Handle);
+  *out_cpu_ptr = nullptr;
   if (gpu_mem->IsSysMemFd()) {
     *out_cpu_ptr = gpu_mem->CpuAddress();
   }
@@ -1183,8 +1186,9 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryCpuMap(HsaMemoryObjectHandle Handle,
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryGetCpuAddr(HsaAMDGPUDeviceHandle DeviceHandle,
-  						HsaMemoryObjectHandle MemoryHandle, HSAint32* fd, HSAuint64* cpu_addr)
+              HsaMemoryObjectHandle MemoryHandle, HSAint32* fd, HSAuint64* cpu_addr)
 {
 	CHECK_DXG_OPEN();
-  return HSAKMT_STATUS_SUCCESS;
+  assert(!"not supported\n");
+  return HSAKMT_STATUS_NOT_SUPPORTED;
 }
