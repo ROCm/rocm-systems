@@ -25,7 +25,7 @@
 namespace hip {
 hipError_t ihipBatchMemOperation(hipStream_t stream, cl_command_type cmdType, unsigned int count,
                                  hipStreamBatchMemOpParams* paramArray, unsigned int flags) {
-  if (stream == nullptr || paramArray == nullptr || flags != 0 || count == 0 || count > 256) {
+  if (paramArray == nullptr || flags != 0 || count == 0 || count > 256) {
     return hipErrorInvalidValue;
   }
 
