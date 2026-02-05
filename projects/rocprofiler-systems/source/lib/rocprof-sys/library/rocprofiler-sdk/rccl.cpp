@@ -127,8 +127,8 @@ rccl_get_event_info_impl(
 {
     rccl_event_info info{};
 
-    auto set_event = [](rccl_event_info& out, bool send, size_t count, ncclDataType_t _dt,
-                        ncclComm_t _comm) {
+    const auto set_event = [](rccl_event_info& out, bool send, size_t count,
+                              ncclDataType_t _dt, ncclComm_t _comm) {
         out.is_send = send;
         out.size    = count * rccl_type_size_or_abort(_dt);
         out.comm    = _comm;
@@ -186,12 +186,7 @@ template <typename Track>
 void
 rccl_metadata_initialize_track()
 {
-    auto _init_track = [](const char* label) {
-        trace_cache::get_metadata_registry().add_track({ label, std::nullopt, "{}" });
-    };
-
-    static std::once_flag _once{};
-    std::call_once(_once, _init_track, Track::label);
+    trace_cache::get_metadata_registry().add_track({ Track::label, std::nullopt, "{}" });
 }
 
 template <typename Tp, typename... Args>
@@ -227,10 +222,9 @@ cache_rccl_comm_data_events(uint32_t rccl_device_idx, size_t bytes, uint64_t tim
     tracking_state.register_gpu(rccl_device_idx);
     uint64_t cumulative = tracking_state.add_bytes(rccl_device_idx, bytes);
 
-    std::string event_metadata =
-        fmt::format(R"({{"transfer_bytes":{}}})", transfer_bytes);
+    const auto event_metadata = fmt::format(R"({{"transfer_bytes":{}}})", transfer_bytes);
 
-    std::string pmc_label = fmt::format("{} GPU {}", Track::label, rccl_device_idx);
+    const auto pmc_label = fmt::format("{} GPU {}", Track::label, rccl_device_idx);
 
     const size_t stack_id        = 0;
     const size_t parent_stack_id = 0;
@@ -309,59 +303,49 @@ rccl_get_device_id(ncclComm_t comm) noexcept
  * @brief Initialize RCCL communication data tracking metadata
  *
  * This function performs one-time initialization of metadata categories
- * and tracking infrastructure for RCCL send/recv operations. It is
- * thread-safe and idempotent due to std::once_flag.
+ * and tracking infrastructure for RCCL send/recv operations.
+ * Called once during SDK initialization when RCCL callbacks are configured.
  */
 void
 rccl_comm_data_initialize()
 {
-    static std::once_flag _once{};
-    std::call_once(_once, []() {
-        rccl_metadata_initialize_categories();
-        rccl_metadata_initialize_track<rccl_send>();
-        rccl_metadata_initialize_track<rccl_recv>();
-    });
+    rccl_metadata_initialize_categories();
+    rccl_metadata_initialize_track<rccl_send>();
+    rccl_metadata_initialize_track<rccl_recv>();
 }
 
 /**
  * @brief Main callback handler for RCCL API tracing events
  *
  * This function is invoked by the profiling framework for each RCCL API call.
- * It extracts communication parameters, determines the device ID from the
- * communicator, and records both cache events and Perfetto counter tracks
- * for send/recv operations.
+ * It determines the device ID from the communicator and records both cache
+ * events and Perfetto counter tracks for send/recv operations.
  *
- * @param record The callback tracing record containing API information
+ * @param operation The RCCL operation ID
+ * @param payload The RCCL API-specific payload data
  * @param begin_ts Timestamp when the API call began (nanoseconds)
  * @param end_ts Timestamp when the API call ended (nanoseconds)
  */
 void
-tool_tracing_callback_rccl(rocprofiler_callback_tracing_record_t record,
+tool_tracing_callback_rccl(uint32_t                                      operation,
+                           rocprofiler_callback_tracing_rccl_api_data_t* payload,
                            uint64_t begin_ts, uint64_t end_ts)
 {
-    if(record.kind == ROCPROFILER_CALLBACK_TRACING_RCCL_API)
+    rccl_event_info info = rccl_get_event_info_impl(operation, *payload);
+
+    if(info.size > 0 && info.comm != nullptr)
     {
-        rccl_comm_data_initialize();
+        uint32_t device_id = rccl_get_device_id(info.comm);
 
-        auto* payload =
-            static_cast<rocprofiler_callback_tracing_rccl_api_data_t*>(record.payload);
-
-        rccl_event_info info = rccl_get_event_info_impl(record.operation, *payload);
-
-        if(info.size > 0 && info.comm != nullptr)
+        if(info.is_send)
         {
-            uint32_t device_id = rccl_get_device_id(info.comm);
-
-            if(info.is_send)
-            {
-                cache_rccl_comm_data_events<rccl_send>(device_id, info.size, end_ts);
-                write_perfetto_counter_track<rccl_send>(info.size, begin_ts, end_ts);
-            }
-            else
-            {
-                cache_rccl_comm_data_events<rccl_recv>(device_id, info.size, end_ts);
-                write_perfetto_counter_track<rccl_recv>(info.size, begin_ts, end_ts);
-            }
+            cache_rccl_comm_data_events<rccl_send>(device_id, info.size, end_ts);
+            write_perfetto_counter_track<rccl_send>(info.size, begin_ts, end_ts);
+        }
+        else
+        {
+            cache_rccl_comm_data_events<rccl_recv>(device_id, info.size, end_ts);
+            write_perfetto_counter_track<rccl_recv>(info.size, begin_ts, end_ts);
         }
     }
 }
