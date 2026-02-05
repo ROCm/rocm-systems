@@ -49,12 +49,27 @@ endif()
 
 # both are not set
 if(NOT DEFINED HIP_PATH AND NOT DEFINED ROCM_PATH)
-    set(HIP_PATH "/opt/rocm")
-    set(ROCM_PATH "/opt/rocm")
+    if(WIN32)
+        # On Windows, default to HIP_PATH from environment or fail
+        if(DEFINED ENV{HIP_PATH})
+            set(HIP_PATH $ENV{HIP_PATH} CACHE STRING "HIP Path")
+            set(ROCM_PATH ${HIP_PATH} CACHE STRING "ROCM Path")
+        else()
+            message(FATAL_ERROR "HIP_PATH environment variable not set. Please set HIP_PATH to your ROCm installation.")
+        endif()
+    else()
+        set(HIP_PATH "/opt/rocm")
+        set(ROCM_PATH "/opt/rocm")
+    endif()
 elseif(DEFINED HIP_PATH AND NOT DEFINED ROCM_PATH)
-    execute_process(COMMAND ${HIP_PATH}/bin/${HIPCONFIG_EXEC} --rocmpath
-                OUTPUT_VARIABLE ROCM_PATH
-                OUTPUT_STRIP_TRAILING_WHITESPACE)
+    if(WIN32)
+        # On Windows, ROCM_PATH is typically the same as HIP_PATH
+        set(ROCM_PATH ${HIP_PATH} CACHE STRING "ROCM Path")
+    else()
+        execute_process(COMMAND ${HIP_PATH}/bin/${HIPCONFIG_EXEC} --rocmpath
+                    OUTPUT_VARIABLE ROCM_PATH
+                    OUTPUT_STRIP_TRAILING_WHITESPACE)
+    endif()
 elseif(DEFINED ROCM_PATH AND NOT DEFINED HIP_PATH)
     set(HIP_PATH ${ROCM_PATH})
 endif()

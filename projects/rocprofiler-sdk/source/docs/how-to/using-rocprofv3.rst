@@ -911,6 +911,19 @@ You can also customize the counters according to the requirement. Such counters 
 
 For a comprehensive list of counters available on MI200, see `MI200 performance counters and metrics <https://rocm.docs.amd.com/en/latest/conceptual/gpu-arch/mi300-mi200-performance-counters.html>`_.
 
+.. note::
+
+   Counter Dimension Collection
+   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+   When collecting counters with multiple dimensions or instances (e.g., ``TCC_MISS`` with ``DIMENSION_INSTANCE[0:15]``), individual dimension values cannot be collected separately using bracket notation such as ``TCC_MISS[0]`` or ``TCC_MISS[15]`` in input files.
+
+   **To collect aggregated values:**
+      Specify the counter name without dimension specifiers (e.g., ``pmc: TCC_MISS``). The ``rocprofv3`` tool will automatically collect accumulated values across all instances.
+
+   **To collect per-instance values:**
+      Use JSON output format, which includes detailed dimension information for individual counter instances.
+   
 Counter collection using input file
 +++++++++++++++++++++++++++++++++++++
 
