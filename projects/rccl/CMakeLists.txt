@@ -1373,6 +1373,14 @@ if (DEVICE_LINKER)
   set(DEVICE_LINKER_BUNDLE_TARGET "hipv4-amdgcn-amd-amdhsa--${DEVICE_LINKER_GPU_BASE}:sramecc+:xnack-")
   message(STATUS "Device linker target: ${DEVICE_LINKER_GPU_TARGET} (bundle: ${DEVICE_LINKER_BUNDLE_TARGET})")
   
+  # Build the device_linker tool itself
+  add_executable(device_linker_tool ${DEVICE_LINKER_DIR}/device_linker.cpp)
+  target_compile_features(device_linker_tool PRIVATE cxx_std_17)
+  set_target_properties(device_linker_tool PROPERTIES
+    OUTPUT_NAME device_linker
+    RUNTIME_OUTPUT_DIRECTORY ${DEVICE_LINKER_DIR}
+  )
+  
   # Create directory for specialized kernel objects
   file(MAKE_DIRECTORY ${SPECIALIZED_OBJ_DIR})
   
@@ -1426,7 +1434,7 @@ if (DEVICE_LINKER)
             ${DEVICE_LINKER_GPU_TARGET}
     DEPENDS 
       specialized_kernels
-      ${DEVICE_LINKER_DIR}/device_linker
+      device_linker_tool
       ${DEVICE_LINKER_DIR}/build_with_device_linker.sh
       ${CMAKE_CURRENT_BINARY_DIR}/hipify/src/device/common.cu.cpp
       hipify_all

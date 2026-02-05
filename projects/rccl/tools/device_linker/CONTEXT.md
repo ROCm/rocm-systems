@@ -36,10 +36,16 @@ if (flags & (RoleWaitRecv|RolePostRecv)) loadRecvConn(channel->peers[peer], ...)
 if (flags & (RoleWaitSend|RolePostSend)) loadSendConn(channel->peers[peer], ...);
 ```
 
+**Confirmed crash location (from GDB):**
+```
+Thread 19 "ncclDevKern-c14f" received signal SIGSEGV, Segmentation fault.
+0x00007fbfa4763eec in ?? () at hipify/src/device/prims_ll.h:670
+670	      loadRecvConn(&channel->peers[recvPeers[nrecv]]->recv[connIndexRecv], nrecv);
+```
+
 **Next debugging step:**
-Use `rocgdb` with `HSA_ENABLE_DEBUG=1` to catch the memory fault and identify which
-pointer access causes it. Debug info (line numbers, symbols) is now working correctly
-after the synthetic `.debug_info` fix.
+Rebuild with the new DWARF merging code, then use `rocgdb` to inspect the actual pointer
+values at the crash site. The new debug info should show function names (not just `??`).
 
 ## Build & Test
 
@@ -92,9 +98,57 @@ the kernel will access wrong memory offsets and crash or hang.
 | `src/device/prims_ll.h` | LL protocol primitives |
 | `src/device/generate_specialized.py` | Generates specialized kernel source files |
 
-## Recently Fixed Issues (Feb 4-5, 2026)
+## Recently Fixed Issues (Feb 5, 2026)
 
-### 1. Debug Line Numbers for Specialized Kernels
+### 1. Device Linker Not Auto-Built
+**Problem:** The `device_linker` tool wasn't being built automatically, causing builds to
+fail silently or use stale binaries.
+**Fix:** Modified `CMakeLists.txt` to add an `add_executable` for `device_linker_tool`:
+```cmake
+add_executable(device_linker_tool ${DEVICE_LINKER_DIR}/device_linker.cpp)
+target_compile_features(device_linker_tool PRIVATE cxx_std_17)
+set_target_properties(device_linker_tool PROPERTIES
+  OUTPUT_NAME device_linker
+  RUNTIME_OUTPUT_DIRECTORY ${DEVICE_LINKER_DIR}
+)
+```
+**Result:** The device linker is now built automatically as part of the main build.
+
+### 2. Proper DWARF Merging (Replacing Synthetic Debug Info)
+**Problem:** GDB showed line numbers but not function names ("No function contains program counter").
+The previous `buildSyntheticDebugInfo()` created minimal compile units that only had address
+ranges and `stmt_list` pointers, but no `DW_TAG_subprogram` DIEs for function names.
+**Root cause:** The synthetic approach discarded the actual DWARF from each kernel, which
+contains `DW_TAG_subprogram` and `DW_TAG_inlined_subroutine` DIEs with function names.
+**Fix:** Replaced `buildSyntheticDebugInfo()` with `mergeDebugInfo()` that does proper
+linker-style DWARF merging:
+1. Merges `.debug_abbrev`, `.debug_str`, `.debug_str_offsets`, `.debug_addr`, 
+   `.debug_rnglists`, `.debug_info` from each kernel
+2. Patches addresses in `.debug_addr` based on code relocation delta
+3. Patches CU header `debug_abbrev_offset` in `.debug_info`
+4. Tracks base offsets for cross-section references
+
+**Key data structure:**
+```cpp
+struct DebugInfoChunk {
+    size_t merged_offset;      // Offset in merged .debug_info
+    size_t size;               // Size of this chunk
+    uint64_t orig_text_addr;   // Original .text address
+    uint64_t new_text_offset;  // New offset in merged .text
+    size_t abbrev_base;        // Base offset in merged .debug_abbrev
+    size_t str_base;           // Base offset in merged .debug_str
+    size_t addr_base;          // Base offset in merged .debug_addr
+    size_t line_base;          // Base offset in merged .debug_line
+    // ... etc
+};
+```
+
+**Result:** GDB should now resolve function names like `loadRecvConn`, `Primitives`, etc.,
+and show the full inline call chain.
+
+## Fixed Issues (Feb 4-5, 2026)
+
+### 3. Debug Line Numbers for Specialized Kernels
 **Problem:** `llvm-symbolizer` and GDB showed `??:0:0` for specialized kernel addresses,
 even though `.debug_line` contained correct line info.
 **Root cause:** The synthetic `.debug_info` was missing or had wrong address ranges.
@@ -113,7 +167,7 @@ ncclDevFunc_AllReduce_RING_LL_Sum_f32_0_0_2()
 /work1/.../build/release/hipify/gensrc/specialized/specialized_all_reduce_ring_ll_sum_f32_unroll2.cpp:13:0
 ```
 
-### 2. LDS Allocation for ncclShmemPerWarp
+### 4. LDS Allocation for ncclShmemPerWarp
 **Problem:** Static LDS allocation was 37776 bytes, exceeding available dynamic LDS.
 **Root cause:** `#if __CUDA_ARCH__ >= 700` was false on AMD GPUs, causing static allocation.
 **Fix:** Modified `src/device/common.h` to use `extern __shared__` for dynamic allocation
@@ -127,7 +181,7 @@ when `DEVICE_LINKER` is defined:
 ```
 **Result:** Static LDS reduced from 37776 to 4944 bytes, dynamic allocation works.
 
-### 3. Malformed RELRO Segment
+### 5. Malformed RELRO Segment
 **Problem:** Third LOAD segment had offset=0, vaddr=0, size=0x79ad0b0 (overlapping everything).
 **Root cause:** `.data.rel.ro` section doesn't exist, so `relro_start=0`.
 **Fix:** In `device_linker.cpp`, use `.dynamic` address if no `.data.rel.ro`:
@@ -135,7 +189,7 @@ when `DEVICE_LINKER` is defined:
 uint64_t relro_start = data_rel_ro_start ? data_rel_ro_start : dyn_sec_addr;
 ```
 
-### 4. Function Table Addend Verification
+### 6. Function Table Addend Verification
 **Investigation:** Suspected wrong addends in R_AMDGPU_RELATIVE64 relocations.
 **Finding:** Addends are CORRECT - they match function symbol addresses.
 For example, funcId 622 uses the unroll=2 variant:
@@ -154,7 +208,7 @@ These are documented in detail in `DEVICE_LINKER_REDESIGN.md`:
 5. Shared memory limit - `extern __shared__` for dynamic allocation
 6. DWARF5 debug line string offsets - `patchDwarf5StringOffsets()`
 7. Specialized kernel symbol addresses - `func_offset` correction
-8. Synthetic `.debug_info` for specialized kernels - `buildSyntheticDebugInfo()` with `DW_AT_comp_dir`
+8. ~~Synthetic `.debug_info`~~ - **Replaced** by proper DWARF merging (see issue #2 above)
 
 ## Understanding Function Pointer Tables
 
