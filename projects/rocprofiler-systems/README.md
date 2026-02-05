@@ -220,13 +220,16 @@ rocprof-sys-sample <rocprof-sys-options> -- <exe> <exe-options>
 rocprof-sys-sample -f 1000 -- ls -la
 ```
 
-### Workload-Specific Presets
+### Preset Profiling Modes
 
 Instead of manually configuring numerous options, use preset modes optimized for common workloads:
 
-- **`--quick`** - Fast profiling with sensible defaults for immediate insights
-- **`--simple`** - Flat profile only, minimal overhead
-- **`--detailed`** - Full trace with hardware counters
+**General Purpose:**
+- **`--balanced`** - Balanced profiling with moderate overhead and comprehensive data
+- **`--profile-only`** - Profiling-only mode without tracing (flat profile, minimal overhead)
+- **`--detailed`** - Comprehensive profiling with full system metrics
+
+**Workload-Specific:**
 - **`--trace-hpc`** - Optimized for HPC/MPI/OpenMP applications
   - Automatically enables OMPT, MPIP, and relevant hardware counters
 - **`--workload-trace`** - Optimized for AI/ML/GPU workloads which are supported by ROCm stack
@@ -236,6 +239,8 @@ Instead of manually configuring numerous options, use preset modes optimized for
 - **`--profile-mpi`** - MPI communication latency profiling
 - **`--trace-hw-counters`** - Hardware counter collection during execution
   - Automatically enables tracing VALU utilization
+
+**API Tracing:**
 - **`--sys-trace`** - Comprehensive system API tracing
 - **`--runtime-trace`** - Runtime API tracing
   - Excludes compiler and low-level HSA
@@ -246,8 +251,8 @@ Instead of manually configuring numerous options, use preset modes optimized for
 # HPC application with MPI
 mpirun -n 4 rocprof-sys-sample --trace-hpc -- ./mpi_app
 
-# Quick profiling any application
-rocprof-sys-sample --quick -- ./myapp
+# Balanced profiling with moderate overhead
+rocprof-sys-sample --balanced -- ./myapp
 ```
 
 ### Pre-Execution Information
