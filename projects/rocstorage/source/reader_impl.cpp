@@ -48,15 +48,15 @@ reader_t::impl::initialize_all_info_lists()
 {
     initialize_string_list();
     m_node_info_list          = get_all_nodes();
-    m_process_info_list       = get_process_list();
-    m_thread_info_list        = get_thread_list();
-    m_agent_info_list         = get_agent_list();
-    m_code_object_info_list   = get_code_object_list();
-    m_kernel_symbol_info_list = get_kernel_symbol_list();
-    m_stream_info_list        = get_stream_list();
-    m_queue_info_list         = get_queue_list();
-    m_pmc_info_list           = get_pmc_info_list();
-    m_track_info_list         = get_track_list();
+    m_process_info_list       = get_all_processes();
+    m_thread_info_list        = get_all_threads();
+    m_agent_info_list         = get_all_agents();
+    m_code_object_info_list   = get_all_code_objects();
+    m_kernel_symbol_info_list = get_all_kernel_symbols();
+    m_stream_info_list        = get_all_streams();
+    m_queue_info_list         = get_all_queues();
+    m_pmc_info_list           = get_all_pmc_infos();
+    m_track_info_list         = get_all_tracks();
 }
 
 reader_types::node_info_list_t
@@ -90,7 +90,7 @@ reader_t::impl::get_all_nodes()
 }
 
 reader_types::process_info_list_t
-reader_t::impl::get_process_list()
+reader_t::impl::get_all_processes()
 {
     if(m_process_info_list.empty())
     {
@@ -126,7 +126,7 @@ reader_t::impl::get_process_list()
 }
 
 reader_types::thread_info_list_t
-reader_t::impl::get_thread_list()
+reader_t::impl::get_all_threads()
 {
     if(m_thread_info_list.empty())
     {
@@ -164,7 +164,7 @@ reader_t::impl::get_thread_list()
     return m_thread_info_list;
 }
 reader_types::agent_info_list_t
-reader_t::impl::get_agent_list()
+reader_t::impl::get_all_agents()
 {
     if(m_agent_info_list.empty())
     {
@@ -216,7 +216,7 @@ reader_t::impl::get_agent_list()
 }
 
 reader_types::track_info_list_t
-reader_t::impl::get_track_list()
+reader_t::impl::get_all_tracks()
 {
     if(m_track_info_list.empty())
     {
@@ -281,7 +281,7 @@ reader_t::impl::get_track_list()
 }
 
 reader_types::kernel_symbol_info_list_t
-reader_t::impl::get_kernel_symbol_list()
+reader_t::impl::get_all_kernel_symbols()
 {
     if(m_kernel_symbol_info_list.empty())
     {
@@ -346,7 +346,7 @@ reader_t::impl::get_kernel_symbol_list()
 }
 
 reader_types::code_object_info_list_t
-reader_t::impl::get_code_object_list()
+reader_t::impl::get_all_code_objects()
 {
     if(m_code_object_info_list.empty())
     {
@@ -398,7 +398,7 @@ reader_t::impl::get_code_object_list()
 }
 
 reader_types::stream_info_list_t
-reader_t::impl::get_stream_list()
+reader_t::impl::get_all_streams()
 {
     if(m_stream_info_list.empty())
     {
@@ -434,7 +434,7 @@ reader_t::impl::get_stream_list()
 }
 
 reader_types::queue_info_list_t
-reader_t::impl::get_queue_list()
+reader_t::impl::get_all_queues()
 {
     if(m_queue_info_list.empty())
     {
@@ -470,7 +470,7 @@ reader_t::impl::get_queue_list()
 }
 
 reader_types::pmc_info_list_t
-reader_t::impl::get_pmc_info_list()
+reader_t::impl::get_all_pmc_infos()
 {
     if(m_pmc_info_list.empty())
     {

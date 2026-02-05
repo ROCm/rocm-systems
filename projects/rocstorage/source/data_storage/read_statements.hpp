@@ -5,7 +5,7 @@
 
 #include "database.hpp"
 
-#include "rocstorage/writer_types.hpp"
+#include "rocstorage/reader_types.hpp"
 
 #include <cstddef>
 #include <functional>
@@ -18,6 +18,19 @@
 namespace rocstorage::data_storage::schema_v3
 {
 
+struct node_info_result
+{
+    size_t      node_id;
+    size_t      hash;
+    std::string machine_id;
+    std::string system_name;
+    std::string hostname;
+    std::string release;
+    std::string version;
+    std::string hardware_name;
+    std::string domain_name;
+};
+
 struct process_info_result
 {
     size_t                     id{};
@@ -28,15 +41,15 @@ struct process_info_result
     std::optional<size_t>      fini;
     std::optional<size_t>      start;
     std::optional<size_t>      end;
-    std::optional<const char*> command;
-    const char*                environment{};
-    const char*                extdata{};
+    std::optional<std::string> command;
+    std::string                environment;
+    std::string                extdata;
 };
 
 struct string_result
 {
     size_t      id{};
-    const char* value;
+    std::string value;
 };
 
 struct stream_info_result
@@ -44,8 +57,8 @@ struct stream_info_result
     size_t                     id{};
     size_t                     nid{};
     size_t                     pid{};
-    std::optional<const char*> name;
-    const char*                extdata{};
+    std::optional<std::string> name;
+    std::string                extdata;
 };
 
 struct queue_info_result
@@ -53,8 +66,8 @@ struct queue_info_result
     size_t                     id{};
     size_t                     nid{};
     size_t                     pid{};
-    std::optional<const char*> name;
-    const char*                extdata{};
+    std::optional<std::string> name;
+    std::string                extdata;
 };
 
 struct thread_info_result
@@ -64,10 +77,10 @@ struct thread_info_result
     std::optional<size_t>      ppid;
     size_t                     pid{};
     size_t                     tid{};
-    std::optional<const char*> name;
+    std::optional<std::string> name;
     std::optional<size_t>      start;
     std::optional<size_t>      end;
-    const char*                extdata{};
+    std::string                extdata;
 };
 
 struct agent_info_result
@@ -75,17 +88,17 @@ struct agent_info_result
     size_t                     id{};
     size_t                     nid{};
     size_t                     pid{};
-    std::optional<const char*> type;
+    std::optional<std::string> type;
     std::optional<size_t>      absolute_index;
     std::optional<size_t>      logical_index;
     std::optional<size_t>      type_index;
     std::optional<size_t>      uuid;
-    std::optional<const char*> name;
-    std::optional<const char*> model_name;
-    std::optional<const char*> vendor_name;
-    std::optional<const char*> product_name;
-    std::optional<const char*> user_name;
-    const char*                extdata{};
+    std::optional<std::string> name;
+    std::optional<std::string> model_name;
+    std::optional<std::string> vendor_name;
+    std::optional<std::string> product_name;
+    std::optional<std::string> user_name;
+    std::string                extdata;
 };
 
 struct track_info_result
@@ -95,7 +108,7 @@ struct track_info_result
     std::optional<size_t> pid;
     std::optional<size_t> tid;
     std::optional<size_t> name_id;
-    const char*           extdata{};
+    std::string           extdata;
 };
 
 struct kernel_symbol_info_result
@@ -104,8 +117,8 @@ struct kernel_symbol_info_result
     size_t                     nid{};
     size_t                     pid{};
     size_t                     code_object_id{};
-    std::optional<const char*> kernel_name;
-    std::optional<const char*> display_name;
+    std::optional<std::string> kernel_name;
+    std::optional<std::string> display_name;
     std::optional<size_t>      kernel_object;
     std::optional<size_t>      kernarg_segment_size;
     std::optional<size_t>      kernarg_segment_alignment;
@@ -114,7 +127,7 @@ struct kernel_symbol_info_result
     std::optional<size_t>      sgpr_count;
     std::optional<size_t>      arch_vgpr_count;
     std::optional<size_t>      accum_vgpr_count;
-    const char*                extdata{};
+    std::string                extdata;
 };
 
 struct code_object_info_result
@@ -123,12 +136,12 @@ struct code_object_info_result
     size_t                     nid{};
     size_t                     pid{};
     std::optional<size_t>      agent_id;
-    std::optional<const char*> uri;
+    std::optional<std::string> uri;
     std::optional<size_t>      load_base;
     std::optional<size_t>      load_size;
     std::optional<size_t>      load_delta;
-    std::optional<const char*> storage_type;
-    const char*                extdata{};
+    std::optional<std::string> storage_type;
+    std::string                extdata;
 };
 
 struct pmc_info_result
@@ -137,21 +150,36 @@ struct pmc_info_result
     size_t                     nid{};
     size_t                     pid{};
     std::optional<size_t>      agent_id;
-    std::optional<const char*> target_arch;
+    std::optional<std::string> target_arch;
     std::optional<size_t>      event_code;
     std::optional<size_t>      instance_id;
-    const char*                name{};
-    const char*                symbol{};
-    std::optional<const char*> description;
-    std::optional<const char*> long_description;
-    std::optional<const char*> component;
-    std::optional<const char*> units;
-    std::optional<const char*> value_type;
-    std::optional<const char*> block;
-    std::optional<const char*> expression;
+    std::string                name{};
+    std::string                symbol{};
+    std::optional<std::string> description;
+    std::optional<std::string> long_description;
+    std::optional<std::string> component;
+    std::optional<std::string> units;
+    std::optional<std::string> value_type;
+    std::optional<std::string> block;
+    std::optional<std::string> expression;
     std::optional<size_t>      is_constant;
     std::optional<size_t>      is_derived;
-    const char*                extdata{};
+    std::string                extdata;
+};
+
+struct timeline_event_result
+{
+    size_t                                 id{};
+    rocstorage::reader_types::event_type_t type{};
+
+    size_t start_timestamp{};
+    size_t end_timestamp{};
+
+    std::optional<size_t> display_name_id;
+    std::optional<size_t> category_id;
+
+    std::optional<size_t> track_id;
+    std::optional<double> value;
 };
 
 struct read_statements
@@ -171,6 +199,11 @@ struct read_statements
         initialize_kernel_symbol_info_statement();
         initialize_code_object_info_statement();
         initialize_pmc_info_statement();
+
+        initialize_region_timeline_event_statement();
+        initialize_kernel_dispatch_timeline_event_statement();
+        initialize_memory_allocate_timeline_event_statement();
+        initialize_memory_copy_timeline_event_statement();
     }
     read_statements()                                  = delete;
     read_statements(const read_statements&)            = delete;
@@ -182,7 +215,7 @@ struct read_statements
     using string_statement_func_t = std::function<statement_result<string_result>()>;
 
     using node_info_statement_func_t =
-        std::function<statement_result<writer_types::node_info_t>()>;
+        std::function<statement_result<node_info_result>()>;
 
     using process_info_statement_func_t =
         std::function<statement_result<process_info_result>()>;
@@ -209,6 +242,9 @@ struct read_statements
         std::function<statement_result<code_object_info_result>()>;
 
     using pmc_info_statement_func_t = std::function<statement_result<pmc_info_result>()>;
+
+    using timeline_event_statement_func_t =
+        std::function<statement_result<timeline_event_result>()>;
 
     [[nodiscard]] string_statement_func_t string_statement() const
     {
@@ -265,6 +301,29 @@ struct read_statements
         return m_pmc_info_statement;
     }
 
+    [[nodiscard]] timeline_event_statement_func_t region_timeline_event_statement() const
+    {
+        return m_region_timeline_event_statement;
+    }
+
+    [[nodiscard]] timeline_event_statement_func_t
+    kernel_dispatch_timeline_event_statement() const
+    {
+        return m_kernel_dispatch_timeline_event_statement;
+    }
+
+    [[nodiscard]] timeline_event_statement_func_t
+    memory_allocate_timeline_event_statement() const
+    {
+        return m_memory_allocate_timeline_event_statement;
+    }
+
+    [[nodiscard]] timeline_event_statement_func_t memory_copy_timeline_event_statement()
+        const
+    {
+        return m_memory_copy_timeline_event_statement;
+    }
+
 private:
     void initialize_string_statement()
     {
@@ -295,17 +354,17 @@ private:
                          .get_query_string();
 
         m_node_info_statement =
-            m_database->create_read_statement_executor<writer_types::node_info_t>(
+            m_database->create_read_statement_executor<node_info_result>(
                 query,
-                &writer_types::node_info_t::node_id,
-                &writer_types::node_info_t::hash,
-                &writer_types::node_info_t::machine_id,
-                &writer_types::node_info_t::system_name,
-                &writer_types::node_info_t::hostname,
-                &writer_types::node_info_t::release,
-                &writer_types::node_info_t::version,
-                &writer_types::node_info_t::hardware_name,
-                &writer_types::node_info_t::domain_name);
+                &node_info_result::node_id,
+                &node_info_result::hash,
+                &node_info_result::machine_id,
+                &node_info_result::system_name,
+                &node_info_result::hostname,
+                &node_info_result::release,
+                &node_info_result::version,
+                &node_info_result::hardware_name,
+                &node_info_result::domain_name);
     }
 
     void initialize_process_info_statement()
@@ -576,6 +635,84 @@ private:
                 &pmc_info_result::extdata);
     }
 
+    void initialize_region_timeline_event_statement()
+    {
+        const auto query =
+            queries::select::table_select_query{}
+                .select("R.id", "R.start", "R.end", "R.name_id", "E.category_id")
+                .from(fmt::format("rocpd_region_{}", m_uuid), "R")
+                .inner_join("rocpd_event", "E", "R.event_id = E.id")
+                .get_query_string();
+
+        m_region_timeline_event_statement =
+            m_database->create_read_statement_executor<timeline_event_result>(
+                query,
+                &timeline_event_result::id,
+                &timeline_event_result::start_timestamp,
+                &timeline_event_result::end_timestamp,
+                &timeline_event_result::display_name_id,
+                &timeline_event_result::category_id);
+    }
+
+    void initialize_kernel_dispatch_timeline_event_statement()
+    {
+        const auto query =
+            queries::select::table_select_query{}
+                .select("K.id", "K.start", "K.end", "KS.display_name_id", "E.category_id")
+                .from(fmt::format("rocpd_kernel_dispatch_{}", m_uuid), "K")
+                .inner_join("rocpd_event", "E", "E.id = K.event_id")
+                .inner_join("rocpd_info_kernel_symbol", "KS", "KS.id = K.kernel_id")
+                .get_query_string();
+
+        m_kernel_dispatch_timeline_event_statement =
+            m_database->create_read_statement_executor<timeline_event_result>(
+                query,
+                &timeline_event_result::id,
+                &timeline_event_result::start_timestamp,
+                &timeline_event_result::end_timestamp,
+                &timeline_event_result::display_name_id,
+                &timeline_event_result::category_id);
+    }
+
+    void initialize_memory_allocate_timeline_event_statement()
+    {
+        const auto query =
+            queries::select::table_select_query{}
+                .select("MA.id", "MA.start", "MA.end", "E.category_id", "E.category_id")
+                .from(fmt::format("rocpd_memory_allocate_{}", m_uuid), "MA")
+                .inner_join("rocpd_event", "E", "E.id = MA.event_id")
+                .get_query_string();
+
+        m_memory_allocate_timeline_event_statement =
+            m_database->create_read_statement_executor<timeline_event_result>(
+                query,
+                &timeline_event_result::id,
+                &timeline_event_result::start_timestamp,
+                &timeline_event_result::end_timestamp,
+                &timeline_event_result::display_name_id,
+                &timeline_event_result::category_id);
+    }
+
+    void initialize_memory_copy_timeline_event_statement()
+    {
+        const auto query =
+            queries::select::table_select_query{}
+                .select(
+                    "MC.id", "MC.start", "MC.end", "MC.region_name_id", "E.category_id")
+                .from(fmt::format("rocpd_memory_copy_{}", m_uuid), "MC")
+                .inner_join("rocpd_event", "E", "MC.event_id = E.id")
+                .get_query_string();
+
+        m_memory_copy_timeline_event_statement =
+            m_database->create_read_statement_executor<timeline_event_result>(
+                query,
+                &timeline_event_result::id,
+                &timeline_event_result::start_timestamp,
+                &timeline_event_result::end_timestamp,
+                &timeline_event_result::display_name_id,
+                &timeline_event_result::category_id);
+    }
+
     std::shared_ptr<database> m_database;
     std::string               m_uuid;
 
@@ -590,5 +727,10 @@ private:
     kernel_symbol_info_statement_func_t m_kernel_symbol_info_statement;
     code_object_info_statement_func_t   m_code_object_info_statement;
     pmc_info_statement_func_t           m_pmc_info_statement;
+
+    timeline_event_statement_func_t m_kernel_dispatch_timeline_event_statement;
+    timeline_event_statement_func_t m_region_timeline_event_statement;
+    timeline_event_statement_func_t m_memory_copy_timeline_event_statement;
+    timeline_event_statement_func_t m_memory_allocate_timeline_event_statement;
 };
 }  // namespace rocstorage::data_storage::schema_v3

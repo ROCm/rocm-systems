@@ -93,83 +93,6 @@ struct reader_t
      */
     [[nodiscard]] reader_types::kernel_symbol_info_list_t get_all_kernel_symbols() const;
 
-    // /***
-    //  *@section Info By ID Accessors (From Cache)
-    //  * Returns specific info object by its unique ID, or nullptr if not found.
-    //  */
-
-    // /***
-    //  * @brief Get node info by ID from cache
-    //  * @param id Node ID to look up
-    //  * @return Node info pointer, or nullptr if not found
-    //  */
-    // [[nodiscard]] reader_types::node_info_ptr_t get_node_by_id(
-    //     reader_types::node_id_t id) const;
-
-    // /***
-    //  * @brief Get process info by ID from cache
-    //  * @param id Process ID to look up
-    //  * @return Process info pointer, or nullptr if not found
-    //  */
-    // [[nodiscard]] reader_types::process_info_ptr_t get_process_by_id(
-    //     reader_types::process_id_t id) const;
-
-    // /***
-    //  * @brief Get thread info by ID from cache
-    //  * @param id Thread ID to look up
-    //  * @return Thread info pointer, or nullptr if not found
-    //  */
-    // [[nodiscard]] reader_types::thread_info_ptr_t get_thread_by_id(
-    //     reader_types::thread_id_t id) const;
-
-    // /***
-    //  * @brief Get agent info by unique ID from cache
-    //  * @param id Agent unique ID to look up
-    //  * @return Agent info pointer, or nullptr if not found
-    //  */
-    // [[nodiscard]] reader_types::agent_info_ptr_t get_agent_by_id(
-    //     const reader_types::agent_unique_id_t& id) const;
-
-    // /***
-    //  * @brief Get queue info by ID from cache
-    //  * @param id Queue ID to look up
-    //  * @return Queue info pointer, or nullptr if not found
-    //  */
-    // [[nodiscard]] reader_types::queue_info_ptr_t get_queue_by_id(
-    //     reader_types::queue_id_t id) const;
-
-    // /***
-    //  * @brief Get stream info by ID from cache
-    //  * @param id Stream ID to look up
-    //  * @return Stream info pointer, or nullptr if not found
-    //  */
-    // [[nodiscard]] reader_types::stream_info_ptr_t get_stream_by_id(
-    //     reader_types::stream_id_t id) const;
-
-    // /***
-    //  * @brief Get PMC info by unique ID from cache
-    //  * @param id PMC unique ID to look up
-    //  * @return PMC info pointer, or nullptr if not found
-    //  */
-    // [[nodiscard]] reader_types::pmc_info_ptr_t get_pmc_by_id(
-    //     const reader_types::pmc_info_unique_id_t& id) const;
-
-    // /***
-    //  * @brief Get code object info by ID from cache
-    //  * @param id Code object ID to look up
-    //  * @return Code object info pointer, or nullptr if not found
-    //  */
-    // [[nodiscard]] reader_types::code_object_info_ptr_t get_code_object_by_id(
-    //     reader_types::code_object_id_t id) const;
-
-    // /***
-    //  * @brief Get kernel symbol info by ID from cache
-    //  * @param id Kernel symbol ID to look up
-    //  * @return Kernel symbol info pointer, or nullptr if not found
-    //  */
-    // [[nodiscard]] reader_types::kernel_symbol_info_ptr_t get_kernel_symbol_by_id(
-    //     reader_types::kernel_symbol_id_t id) const;
-
     /***
      *@section Track Accessors (Eagerly Loaded, Cached)
      * Tracks organize events on the timeline. Each track represents a unique
@@ -181,14 +104,6 @@ struct reader_t
      * @return List of all track info objects
      */
     [[nodiscard]] reader_types::track_info_list_t get_all_tracks() const;
-
-    /***
-     * @brief Get track info by name from cache
-     * @param name Track name to look up
-     * @return Track info pointer, or nullptr if not found
-     */
-    [[nodiscard]] reader_types::track_info_ptr_t get_track_by_name(
-        const std::string& name) const;
 
     /***
      *@section Timeline Event Queries (On-Demand, Not Stored)

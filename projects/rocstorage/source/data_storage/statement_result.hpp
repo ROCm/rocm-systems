@@ -39,13 +39,13 @@ column_value_impl(sqlite3_stmt* stmt, int position, T& value)
             value = inner_value;
         }
     }
-    else if constexpr(common::traits::is_text_bindable_v<decayed_t>)
+    else if constexpr(common::traits::is_string_bindable_v<decayed_t>)
     {
-        constexpr const char* empty_string = "";
-        const unsigned char*  text         = sqlite3_column_text(stmt, position);
+        constexpr std::string_view empty_string;
+        const unsigned char*       text = sqlite3_column_text(stmt, position);
         if(text != nullptr)
         {
-            value = strdup(reinterpret_cast<const char*>(text));
+            value = std::string{ reinterpret_cast<const char*>(text) };
         }
         else
         {

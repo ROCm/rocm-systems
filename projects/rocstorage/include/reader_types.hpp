@@ -411,7 +411,7 @@ struct memory_alloc_data_t
 using memory_alloc_data_ptr_t  = std::shared_ptr<memory_alloc_data_t>;
 using memory_alloc_data_list_t = std::vector<memory_alloc_data_ptr_t>;
 
-struct unique_event_id_t
+struct unique_timeline_event_id_t
 {
     size_t       id;
     event_type_t type;
@@ -419,7 +419,7 @@ struct unique_event_id_t
 
 struct timeline_event_t
 {
-    unique_event_id_t unique_identifier;
+    unique_timeline_event_id_t unique_identifier;
 
     timestamp_ns_t start_timestamp;
     timestamp_ns_t end_timestamp;
@@ -428,15 +428,20 @@ struct timeline_event_t
     std::string category;
 
     track_info_ptr_t track;
-
-    std::optional<double> value;
-
-    [[nodiscard]] timestamp_ns_t duration() const noexcept
-    {
-        return end_timestamp - start_timestamp;
-    }
 };
 
 using timeline_event_list_t = std::vector<timeline_event_t>;
+
+struct counter_timeline_event_t
+{
+    unique_timeline_event_id_t unique_identifier;
+
+    timestamp_ns_t timestamp;
+    size_t         value;
+
+    track_info_ptr_t track;
+};
+
+using counter_timeline_event_list_t = std::vector<counter_timeline_event_t>;
 
 }  // namespace rocstorage::reader_types

@@ -16,8 +16,9 @@ class entity_utility
 {
 public:
     template <typename Entity>
-    bool is_entry_registered(const Entity& entity) const noexcept
+    [[nodiscard]] bool is_entry_registered(const Entity& entity) const noexcept
     {
+        const std::lock_guard<std::mutex> lock(m_mutex);
         return m_entity_container.count(entity) > 0;
     }
 
@@ -29,8 +30,10 @@ public:
     }
 
     template <typename Entity>
-    PrimaryKey get_primary_key_value_for_entity(const Entity& entity) const noexcept
+    [[nodiscard]] PrimaryKey get_primary_key_value_for_entity(
+        const Entity& entity) const noexcept
     {
+        const std::lock_guard<std::mutex> lock(m_mutex);
         if constexpr(common::traits::is_unordered_map_v<EntityContainerType>)
         {
             return m_entity_container.at(entity);
@@ -44,7 +47,7 @@ public:
 
 private:
     EntityContainerType m_entity_container;
-    std::mutex          m_mutex;
+    mutable std::mutex  m_mutex;
 };
 
 }  // namespace rocstorage

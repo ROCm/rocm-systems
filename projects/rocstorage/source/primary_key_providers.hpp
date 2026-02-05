@@ -32,22 +32,22 @@ struct primary_key_providers
     [[nodiscard]] auto& memory_alloc_data() { return m_memory_alloc_data; }
 
 private:
-    autoincrementer<primary_key_t> m_process_info{ "process_info" };
-    autoincrementer<primary_key_t> m_agent_info{ "agent_info" };
-    autoincrementer<primary_key_t> m_pmc_info{ "pmc_info" };
-    autoincrementer<primary_key_t> m_thread_info{ "thread_info" };
-    autoincrementer<primary_key_t> m_stream_info{ "stream_info" };
-    autoincrementer<primary_key_t> m_queue_info{ "queue_info" };
-    autoincrementer<primary_key_t> m_track_info{ "track_info" };
-    autoincrementer<primary_key_t> m_string_info{ "string_info" };
-    autoincrementer<primary_key_t> m_event_data{ "event_data" };
-    autoincrementer<primary_key_t> m_sample_data{ "sample_data" };
-    autoincrementer<primary_key_t> m_region_data{ "region_data" };
-    autoincrementer<primary_key_t> m_arg{ "arg" };
-    autoincrementer<primary_key_t> m_pmc_event_data{ "pmc_event_data" };
-    autoincrementer<primary_key_t> m_kernel_dispatch_data{ "kernel_dispatch_data" };
-    autoincrementer<primary_key_t> m_memory_copy_data{ "memory_copy_data" };
-    autoincrementer<primary_key_t> m_memory_alloc_data{ "memory_alloc_data" };
+    autoincrementer<primary_key_t> m_process_info;
+    autoincrementer<primary_key_t> m_agent_info;
+    autoincrementer<primary_key_t> m_pmc_info;
+    autoincrementer<primary_key_t> m_thread_info;
+    autoincrementer<primary_key_t> m_stream_info;
+    autoincrementer<primary_key_t> m_queue_info;
+    autoincrementer<primary_key_t> m_track_info;
+    autoincrementer<primary_key_t> m_string_info;
+    autoincrementer<primary_key_t> m_event_data;
+    autoincrementer<primary_key_t> m_sample_data;
+    autoincrementer<primary_key_t> m_region_data;
+    autoincrementer<primary_key_t> m_arg;
+    autoincrementer<primary_key_t> m_pmc_event_data;
+    autoincrementer<primary_key_t> m_kernel_dispatch_data;
+    autoincrementer<primary_key_t> m_memory_copy_data;
+    autoincrementer<primary_key_t> m_memory_alloc_data;
 };
 
 }  // namespace rocstorage

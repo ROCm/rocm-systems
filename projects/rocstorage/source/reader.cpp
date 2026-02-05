@@ -26,125 +26,55 @@ reader_t::get_all_nodes() const
 reader_types::process_info_list_t
 reader_t::get_all_processes() const
 {
-    return m_impl->get_process_list();
+    return m_impl->get_all_processes();
 }
 
 reader_types::thread_info_list_t
 reader_t::get_all_threads() const
 {
-    return m_impl->get_thread_list();
+    return m_impl->get_all_threads();
 }
 
 reader_types::agent_info_list_t
 reader_t::get_all_agents() const
 {
-    return m_impl->get_agent_list();
+    return m_impl->get_all_agents();
 }
 
 reader_types::queue_info_list_t
 reader_t::get_all_queues() const
 {
-    return m_impl->get_queue_list();
+    return m_impl->get_all_queues();
 }
 
 reader_types::stream_info_list_t
 reader_t::get_all_streams() const
 {
-    return m_impl->get_stream_list();
+    return m_impl->get_all_streams();
 }
 
 reader_types::pmc_info_list_t
 reader_t::get_all_pmc_info() const
 {
-    return m_impl->get_pmc_info_list();
+    return m_impl->get_all_pmc_infos();
 }
 
 reader_types::code_object_info_list_t
 reader_t::get_all_code_objects() const
 {
-    return m_impl->get_code_object_list();
+    return m_impl->get_all_code_objects();
 }
 
 reader_types::kernel_symbol_info_list_t
 reader_t::get_all_kernel_symbols() const
 {
-    return m_impl->get_kernel_symbol_list();
+    return m_impl->get_all_kernel_symbols();
 }
-
-// reader_types::node_info_ptr_t
-// reader_t::get_node_by_id(reader_types::node_id_t id) const
-// {
-//     (void) id;
-//     return nullptr;
-// }
-
-// reader_types::process_info_ptr_t
-// reader_t::get_process_by_id(reader_types::process_id_t id) const
-// {
-//     (void) id;
-//     return nullptr;
-// }
-
-// reader_types::thread_info_ptr_t
-// reader_t::get_thread_by_id(reader_types::thread_id_t id) const
-// {
-//     (void) id;
-//     return nullptr;
-// }
-
-// reader_types::agent_info_ptr_t
-// reader_t::get_agent_by_id(const reader_types::agent_unique_id_t& id) const
-// {
-//     (void) id;
-//     return nullptr;
-// }
-
-// reader_types::queue_info_ptr_t
-// reader_t::get_queue_by_id(reader_types::queue_id_t id) const
-// {
-//     (void) id;
-//     return nullptr;
-// }
-
-// reader_types::stream_info_ptr_t
-// reader_t::get_stream_by_id(reader_types::stream_id_t id) const
-// {
-//     (void) id;
-//     return nullptr;
-// }
-
-// reader_types::pmc_info_ptr_t
-// reader_t::get_pmc_by_id(const reader_types::pmc_info_unique_id_t& id) const
-// {
-//     (void) id;
-//     return nullptr;
-// }
-
-// reader_types::code_object_info_ptr_t
-// reader_t::get_code_object_by_id(reader_types::code_object_id_t id) const
-// {
-//     (void) id;
-//     return nullptr;
-// }
-
-// reader_types::kernel_symbol_info_ptr_t
-// reader_t::get_kernel_symbol_by_id(reader_types::kernel_symbol_id_t id) const
-// {
-//     (void) id;
-//     return nullptr;
-// }
 
 reader_types::track_info_list_t
 reader_t::get_all_tracks() const
 {
-    return m_impl->get_track_list();
-}
-
-reader_types::track_info_ptr_t
-reader_t::get_track_by_name(const std::string& name) const
-{
-    (void) name;
-    return nullptr;
+    return m_impl->get_all_tracks();
 }
 
 reader_types::timeline_event_list_t

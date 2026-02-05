@@ -206,7 +206,7 @@ database::discover_uuids()
 {
     struct uuid_result
     {
-        const char* uuid;
+        std::string uuid;
     };
     auto uuid_query_executor = create_read_statement_executor<uuid_result>(
         "SELECT DISTINCT replace(name, rtrim(name, replace(name, '_', '')), '') "

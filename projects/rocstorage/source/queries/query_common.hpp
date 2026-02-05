@@ -8,8 +8,8 @@ namespace rocstorage::queries
 
 enum class sort_order
 {
-    asc,
-    desc
+    ascending,
+    descending
 };
 
 enum class join_type

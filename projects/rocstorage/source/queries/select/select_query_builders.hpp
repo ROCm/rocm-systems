@@ -40,7 +40,7 @@ public:
     explicit order_by_clause_builder(std::stringstream& ss);
 
     order_by_clause_builder& order_by(std::string_view column,
-                                      sort_order       order = sort_order::asc);
+                                      sort_order       order = sort_order::ascending);
 
     limit_clause_builder& limit(size_t count);
     limit_clause_builder& offset(size_t count);
@@ -58,7 +58,7 @@ public:
     having_clause_builder& having(std::string_view condition);
 
     order_by_clause_builder& order_by(std::string_view column,
-                                      sort_order       order = sort_order::asc);
+                                      sort_order       order = sort_order::ascending);
     limit_clause_builder&    limit(size_t count);
 
 private:
@@ -82,7 +82,7 @@ public:
 
     having_clause_builder&   having(std::string_view condition);
     order_by_clause_builder& order_by(std::string_view column,
-                                      sort_order       order = sort_order::asc);
+                                      sort_order       order = sort_order::ascending);
     limit_clause_builder&    limit(size_t count);
 
 private:
@@ -108,7 +108,7 @@ public:
 
     having_clause_builder&   having(std::string_view condition);
     order_by_clause_builder& order_by(std::string_view column,
-                                      sort_order       order = sort_order::asc);
+                                      sort_order       order = sort_order::ascending);
     limit_clause_builder&    limit(size_t count);
 
 private:
@@ -148,7 +148,7 @@ public:
 
     having_clause_builder&   having(std::string_view condition);
     order_by_clause_builder& order_by(std::string_view column,
-                                      sort_order       order = sort_order::asc);
+                                      sort_order       order = sort_order::ascending);
     limit_clause_builder&    limit(size_t count);
 
 private:

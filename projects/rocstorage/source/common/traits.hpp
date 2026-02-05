@@ -91,7 +91,7 @@ template <typename T>
 static constexpr bool is_text_bindable_v = std::is_same_v<T, const char*>;
 
 template <typename T>
-static constexpr bool is_stirng_bindable_v = std::is_same_v<T, std::string>;
+static constexpr bool is_string_bindable_v = std::is_same_v<T, std::string>;
 
 template <typename T>
 static constexpr bool is_double_bindable_v = std::is_floating_point_v<T>;

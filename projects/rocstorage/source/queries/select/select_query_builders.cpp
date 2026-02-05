@@ -43,7 +43,7 @@ order_by_clause_builder::order_by(std::string_view column, sort_order order)
     }
 
     m_stream << column;
-    m_stream << (order == sort_order::asc ? " ASC" : " DESC");
+    m_stream << (order == sort_order::ascending ? " ASC" : " DESC");
     return *this;
 }
 

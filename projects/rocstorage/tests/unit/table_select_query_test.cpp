@@ -103,7 +103,7 @@ TEST_F(table_select_query_test, select_with_order_by)
 {
     auto query_string = m_query.select("id", "name")
                             .from("users")
-                            .order_by("name", sort_order::asc)
+                            .order_by("name", sort_order::ascending)
                             .get_query_string();
     EXPECT_EQ(query_string, "SELECT id, name FROM users ORDER BY name ASC");
 }
@@ -112,7 +112,7 @@ TEST_F(table_select_query_test, select_with_order_by_desc)
 {
     auto query_string = m_query.select("id", "created_at")
                             .from("users")
-                            .order_by("created_at", sort_order::desc)
+                            .order_by("created_at", sort_order::descending)
                             .get_query_string();
     EXPECT_EQ(query_string, "SELECT id, created_at FROM users ORDER BY created_at DESC");
 }
@@ -121,8 +121,8 @@ TEST_F(table_select_query_test, select_with_multiple_order_by)
 {
     auto query_string = m_query.select("id", "name", "age")
                             .from("users")
-                            .order_by("name", sort_order::asc)
-                            .order_by("age", sort_order::desc)
+                            .order_by("name", sort_order::ascending)
+                            .order_by("age", sort_order::descending)
                             .get_query_string();
     EXPECT_EQ(query_string,
               "SELECT id, name, age FROM users ORDER BY name ASC, age DESC");
@@ -175,7 +175,7 @@ TEST_F(table_select_query_test, complex_query)
                             .where("u.active = ?")
                             .group_by("u.id", "u.name")
                             .having("COUNT(o.id) > ?")
-                            .order_by("u.name", sort_order::asc)
+                            .order_by("u.name", sort_order::ascending)
                             .limit(100)
                             .get_query_string();
 
@@ -217,7 +217,7 @@ TEST_F(table_select_query_test, select_distinct_with_order_by_and_limit)
     auto query_string = m_query.distinct()
                             .select("name")
                             .from("categories")
-                            .order_by("name", sort_order::asc)
+                            .order_by("name", sort_order::ascending)
                             .limit(100)
                             .get_query_string();
     EXPECT_EQ(query_string,
@@ -260,7 +260,7 @@ TEST_F(table_select_query_test, join_with_group_by_having_order_limit)
                             .inner_join("products", "p", "s.product_id = p.id")
                             .group_by("s.product_id", "p.name")
                             .having("SUM(s.amount) > ?")
-                            .order_by("SUM(s.amount)", sort_order::desc)
+                            .order_by("SUM(s.amount)", sort_order::descending)
                             .limit(10)
                             .get_query_string();
     EXPECT_EQ(query_string,
@@ -293,7 +293,7 @@ TEST_F(table_select_query_test, where_with_or_conditions_and_order_by)
                             .where("role = ?")
                             .or_where("role = ?")
                             .or_where("role = ?")
-                            .order_by("name", sort_order::asc)
+                            .order_by("name", sort_order::ascending)
                             .get_query_string();
     EXPECT_EQ(query_string,
               "SELECT id, name, role FROM users"
@@ -329,9 +329,9 @@ TEST_F(table_select_query_test, multiple_order_by_with_limit_offset)
 {
     auto query_string = m_query.select("id", "name", "department", "salary")
                             .from("employees")
-                            .order_by("department", sort_order::asc)
-                            .order_by("salary", sort_order::desc)
-                            .order_by("name", sort_order::asc)
+                            .order_by("department", sort_order::ascending)
+                            .order_by("salary", sort_order::descending)
+                            .order_by("name", sort_order::ascending)
                             .limit(25)
                             .offset(50)
                             .get_query_string();
@@ -354,8 +354,8 @@ TEST_F(table_select_query_test, full_query_all_clauses)
                             .group_by("t.account_id", "a.name")
                             .having("SUM(t.amount) > ?")
                             .having("COUNT(*) >= ?")
-                            .order_by("SUM(t.amount)", sort_order::desc)
-                            .order_by("a.name", sort_order::asc)
+                            .order_by("SUM(t.amount)", sort_order::descending)
+                            .order_by("a.name", sort_order::ascending)
                             .limit(100)
                             .offset(0)
                             .get_query_string();
@@ -390,7 +390,7 @@ TEST_F(table_select_query_test, right_join_full_query)
                             .from("departments", "d")
                             .right_join("employees", "e", "d.id = e.department_id")
                             .group_by("d.name")
-                            .order_by("COUNT(e.id)", sort_order::desc)
+                            .order_by("COUNT(e.id)", sort_order::descending)
                             .get_query_string();
     EXPECT_EQ(query_string,
               "SELECT d.name, COUNT(e.id) FROM departments d"
@@ -403,7 +403,7 @@ TEST_F(table_select_query_test, skip_optional_clauses_where_directly_to_order)
 {
     auto query_string = m_query.select("id", "name", "price")
                             .from("products")
-                            .order_by("price", sort_order::asc)
+                            .order_by("price", sort_order::ascending)
                             .limit(10)
                             .get_query_string();
     EXPECT_EQ(query_string,
@@ -425,6 +425,21 @@ TEST_F(table_select_query_test, having_without_group_by)
                             .having("total > ?")
                             .get_query_string();
     EXPECT_EQ(query_string, "SELECT category, total FROM stats HAVING total > ?");
+}
+
+TEST_F(table_select_query_test, kernel_dispatch_timeline_event_query)
+{
+    auto query_string =
+        m_query.select("K.id", "K.start", "K.end", "E.category_id", "KS.display_name")
+            .from("rocpd_kernel_dispatch", "K")
+            .inner_join("rocpd_event", "E", "E.id = event_id")
+            .inner_join("rocpd_info_kernel_symbol", "KS", "KS.id = kernel_id")
+            .get_query_string();
+    EXPECT_EQ(
+        query_string,
+        "SELECT K.id, K.start, K.end, E.category_id, KS.display_name FROM "
+        "rocpd_kernel_dispatch K INNER JOIN rocpd_event AS E ON E.id = event_id INNER "
+        "JOIN rocpd_info_kernel_symbol AS KS ON KS.id = kernel_id");
 }
 
 }  // namespace

@@ -69,8 +69,11 @@ template <typename Utility, typename EntityId>
 [[nodiscard]] std::optional<size_t>
 resolve_optional_key(const Utility& utility, const std::optional<EntityId>& entity_id)
 {
-    if(!entity_id.has_value()) return std::nullopt;
-    return utility.get_primary_key_value_for_entity(entity_id.value());
+    if(!entity_id.has_value())
+    {
+        return std::nullopt;
+    }
+    return { utility.get_primary_key_value_for_entity(entity_id.value()) };
 }
 
 }  // namespace
