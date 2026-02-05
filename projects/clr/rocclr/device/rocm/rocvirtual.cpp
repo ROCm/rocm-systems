@@ -314,6 +314,10 @@ bool HsaAmdSignalHandler(hsa_signal_value_t value, void* arg) {
   // Update the batch, since signal is complete
   gpu->updateCommandsState(ts->command().GetBatchHead());
 
+  // Opportunistically try to release the HW queue if it's now idle
+  // This helps reclaim queues in async workloads without explicit sync
+  gpu->ReleaseHwQueue();
+
   // Reset API callback signal. It will release AQL queue and start commands processing
   if (callback_signal.handle != 0 && isBlocking) {
     Hsa::signal_subtract_relaxed(callback_signal, 1);
@@ -1011,9 +1015,10 @@ bool VirtualGPU::processMemObjects(const amd::Kernel& kernel, const_address para
 
 // ================================================================================================
 uint64_t VirtualGPU::getQueueID() {
-  amd::ScopedLock lock(execution());
-  if (gpu_queue_ == nullptr) {
-    gpu_queue_ = roc_device_.AcquireActiveNormalQueue();
+  // Dedicated queues keep their HW queue, never acquire from pool
+  if (!dedicated_queue_ && gpu_queue_ == nullptr) {
+    amd::ScopedLock lock(execution());
+    gpu_queue_ = roc_device_.AcquireActiveQueue(priority_);
   }
   return gpu_queue_->id;
 }
@@ -1611,7 +1616,7 @@ void VirtualGPU::dispatchBarrierValuePacket(uint16_t packetHeader, bool resolveD
   barrier_value_packet_.cond = cond;
 
   // Dependent signal and external signal cant be true at the same time
-  assert(resolveDepSignal & (signal.handle != 0) == 0);
+  assert((resolveDepSignal && (signal.handle != 0)) == false);
   if (resolveDepSignal) {
     auto wait_signals = Barriers().WaitingSignal();
     if (wait_signals.size() > 0) {
@@ -1713,7 +1718,8 @@ bool VirtualGPU::releaseGpuMemoryFence(bool skip_cpu_wait) {
 
 // ================================================================================================
 VirtualGPU::VirtualGPU(Device& device, bool profiling, bool cooperative,
-                       const std::vector<uint32_t>& cuMask, amd::CommandQueue::Priority priority)
+                       const std::vector<uint32_t>& cuMask, amd::CommandQueue::Priority priority,
+                       bool dedicated_queue)
     : device::VirtualDevice(device),
       state_(0),
       gpu_queue_(nullptr),
@@ -1724,13 +1730,14 @@ VirtualGPU::VirtualGPU(Device& device, bool profiling, bool cooperative,
       schedulerThreads_(0),
       schedulerQueue_(nullptr),
       barriers_(*this),
-      managed_buffer_(*this, ManagedBuffer::kPoolNumSignals * device.settings().stagedXferSize_),
-      managed_kernarg_buffer_(*this, device.settings().kernargPoolSize_),
+      managed_buffer_(*this, kStagingPoolNumSignals * device.settings().stagedXferSize_, kStagingPoolNumSignals),
+      managed_kernarg_buffer_(*this, device.settings().kernargPoolSize_, kKernArgPoolNumSignals),
       cuMask_(cuMask),
       priority_(priority),
-     copy_command_type_(0),
-     fence_state_(Device::CacheState::kCacheStateInvalid),
-     fence_dirty_(false) {
+      copy_command_type_(0),
+      fence_state_(Device::CacheState::kCacheStateInvalid),
+      fence_dirty_(false),
+      dedicated_queue_(dedicated_queue) {
   index_ = device.numOfVgpus_++;
   gpu_device_ = device.getBackendDevice();
   printfdbg_ = nullptr;
@@ -1783,12 +1790,17 @@ VirtualGPU::VirtualGPU(Device& device, bool profiling, bool cooperative,
 
 // ================================================================================================
 VirtualGPU::~VirtualGPU() {
+  // Release SDMA engine assignment for this VirtualGPU
+  dev().ReleaseSdmaEngine(this);
+  ClearAssignedSdmaEngine();
+
   delete blitMgr_;
 
   if (tracking_created_) {
     amd::ScopedLock l(execution());
-    if (gpu_queue_ == nullptr) {
-      gpu_queue_ = roc_device_.AcquireActiveNormalQueue();
+    // Dedicated queues keep their HW queue, never acquire from pool
+    if (!dedicated_queue_ && gpu_queue_ == nullptr) {
+      gpu_queue_ = roc_device_.AcquireActiveQueue(priority_);
     }
     // Windows requires an interrupt in more cases than Linux for OS fence updates
     force_irq_ = IS_WINDOWS;
@@ -1835,7 +1847,8 @@ VirtualGPU::~VirtualGPU() {
 bool VirtualGPU::create() {
   // Pick a reasonable queue size
   uint32_t queue_size = ROC_AQL_QUEUE_SIZE;
-  gpu_queue_ = roc_device_.acquireQueue(queue_size, cooperative_, cuMask_, priority_);
+  gpu_queue_ = roc_device_.acquireQueue(queue_size, cooperative_, cuMask_, priority_, false,
+                                         dedicated_queue_);
   if (!gpu_queue_) return false;
 
   if (!managed_kernarg_buffer_.Create(Device::MemorySegment::kKernArg)) {
@@ -1899,7 +1912,7 @@ VirtualGPU::ManagedBuffer::~ManagedBuffer() {
 
 // ================================================================================================
 bool VirtualGPU::ManagedBuffer::Create(Device::MemorySegment mem_segment) {
-  pool_chunk_end_ = pool_size_ / kPoolNumSignals;
+  pool_chunk_end_ = pool_size_ / num_chunk_signals_;
   active_chunk_ = 0;
   // Allocate memory for managed buffer
   if (mem_segment == Device::MemorySegment::kKernArg &&
@@ -1952,14 +1965,14 @@ address VirtualGPU::ManagedBuffer::Acquire(uint32_t size, uint32_t alignment) {
     // Dispatch a barrier packet into the queue
     gpu_.dispatchBarrierPacket(kBarrierPacketHeader, kSkipSignal, pool_signal_[active_chunk_]);
     // Get the next chunk
-    active_chunk_ = ++active_chunk_ % kPoolNumSignals;
+    active_chunk_ = ++active_chunk_ % num_chunk_signals_;
     // Make sure the new active chunk is free
     bool test = WaitForSignal(pool_signal_[active_chunk_], gpu_.ActiveWait());
     assert(test && "Runtime can't fail a wait for chunk!");
     // Make sure the current offset matches the new chunk to avoid possible overlaps
     // between chunks and issues during recycle
     pool_cur_offset_ = (active_chunk_ == 0) ? 0 : pool_chunk_end_;
-    pool_chunk_end_ = pool_cur_offset_ + pool_size_ / kPoolNumSignals;
+    pool_chunk_end_ = pool_cur_offset_ + pool_size_ / num_chunk_signals_;
     result = amd::alignUp(pool_base_ + pool_cur_offset_, alignment);
     pool_cur_offset_ = (result + size) - pool_base_;
   }
@@ -1970,7 +1983,7 @@ address VirtualGPU::ManagedBuffer::Acquire(uint32_t size, uint32_t alignment) {
 // ================================================================================================
 void VirtualGPU::ManagedBuffer::ResetPool() {
   pool_cur_offset_ = 0;
-  pool_chunk_end_ = pool_size_ / kPoolNumSignals;
+  pool_chunk_end_ = pool_size_ / num_chunk_signals_;
   active_chunk_ = 0;
 }
 
@@ -1991,30 +2004,57 @@ address VirtualGPU::allocKernelArguments(size_t size, size_t alignment) {
 }
 
 // ================================================================================================
+void VirtualGPU::ReleaseSdmaEngines() {
+  // Release SDMA engine assignment when queue is idle
+  // This allows the engine to be reassigned to other active streams
+  dev().ReleaseSdmaEngine(this);
+  ClearAssignedSdmaEngine();
+}
+
+// ================================================================================================
 void VirtualGPU::ReleaseAllHwQueues() {
-  if (roc_device_.settings().dynamic_queues_ &&
-      (roc_device_.NumNormalQueues() > GPU_MAX_HW_QUEUES)) {
-    // Lock the device to make the following thread safe
-    amd::ScopedLock lock(roc_device_.vgpusAccess());
-    for (uint idx = 0; idx < roc_device_.vgpus().size(); ++idx) {
-      roc_device_.vgpus()[idx]->ReleaseHwQueue();
+  if (roc_device_.settings().dynamic_queues_) {
+    // Check if any priority level exceeds max_hw_queues_
+    bool should_release = false;
+    for (uint qIdx = 0; qIdx < Device::QueuePriority::Total; ++qIdx) {
+      if (roc_device_.NumQueues(qIdx) > roc_device_.settings().max_hw_queues_) {
+        should_release = true;
+        break;
+      }
+    }
+    if (should_release) {
+      // Lock the device to make the following thread safe
+      amd::ScopedLock lock(roc_device_.vgpusAccess());
+      for (uint idx = 0; idx < roc_device_.vgpus().size(); ++idx) {
+        roc_device_.vgpus()[idx]->ReleaseHwQueue();
+      }
     }
   }
 }
 
 // ================================================================================================
 void VirtualGPU::ReleaseHwQueue() {
-  // Try to release normal queue to the pool of active queues
-  if (roc_device_.settings().dynamic_queues_ &&
-      (priority_ == amd::CommandQueue::Priority::Normal) && !cooperative_ &&
+  // Dedicated queues keep their HW queue, never release to pool
+  if (dedicated_queue_) {
+    return;
+  }
+
+  // Try to release queue to the pool of active queues.
+  // Use tryLock() since this may be called from the HsaAmdSignalHandler
+  // and blocking here could cause deadlock
+  if (roc_device_.settings().dynamic_queues_ > 0 && !cooperative_ &&
       (cuMask_.size() == 0)) {
-    amd::ScopedLock lock(execution());
-    if (gpu_queue_ != nullptr) {
-      if (IsQueueIdle()) {
-        if (roc_device_.ReleaseActiveNormalQueue(gpu_queue_)) {
-          gpu_queue_ = nullptr;
+    // If tryLock fails, skip the release - the queue will be released
+    // on next opportunity
+    if (execution().tryLock()) {
+      if (gpu_queue_ != nullptr) {
+        if (IsQueueIdle()) {
+          if (roc_device_.ReleaseActiveQueue(gpu_queue_, priority_)) {
+            gpu_queue_ = nullptr;
+          }
         }
       }
+      execution().unlock();
     }
   }
 }
@@ -2025,8 +2065,9 @@ void VirtualGPU::ReleaseHwQueue() {
  * and then calls start() to get the current host timestamp.
  */
 void VirtualGPU::profilingBegin(amd::Command& command, bool sdmaProfiling) {
-  if (gpu_queue_ == nullptr) {
-    gpu_queue_ = roc_device_.AcquireActiveNormalQueue();
+  // Dedicated queues keep their HW queue, never acquire from pool
+  if (!dedicated_queue_ && gpu_queue_ == nullptr) {
+    gpu_queue_ = roc_device_.AcquireActiveQueue(priority_);
   }
   // Track the current command
   command_ = &command;
@@ -2806,6 +2847,56 @@ void VirtualGPU::submitCopyMemoryP2P(amd::CopyMemoryP2PCommand& cmd) {
   }
 
   cmd.destination().signalWrite(&dstDevMem->dev());
+
+  profilingEnd();
+}
+
+// ================================================================================================
+void VirtualGPU::submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd) {
+  // Make sure VirtualGPU has an exclusive access to the resources
+  amd::ScopedLock lock(execution());
+
+  profilingBegin(cmd, true);
+
+  const auto& copyOps = cmd.copyOps();
+  if (copyOps.empty()) {
+    profilingEnd();
+    return;
+  }
+
+  bool result = true;
+
+  // Sync caches for all source and destination memory objects
+  device::Memory::SyncFlags syncFlags;
+  syncFlags.skipEntire_ = false;
+
+  for (const auto& op : copyOps) {
+    Memory* srcDevMem = dev().getRocMemory(op.srcMemory);
+    Memory* dstDevMem = dev().getRocMemory(op.dstMemory);
+
+    if (srcDevMem == nullptr || dstDevMem == nullptr) {
+      LogError("submitBatchCopyMemory: Invalid memory objects!");
+      cmd.setStatus(CL_INVALID_MEM_OBJECT);
+      profilingEnd();
+      return;
+    }
+
+    dstDevMem->syncCacheFromHost(*this, syncFlags);
+    srcDevMem->syncCacheFromHost(*this);
+  }
+
+  // Execute batch copy through blit manager
+  result = blitMgr().copyBufferBatch(copyOps, false);
+
+  if (!result) {
+    LogError("submitBatchCopyMemory failed!");
+    cmd.setStatus(CL_OUT_OF_RESOURCES);
+  } else {
+    // Mark all destinations as written
+    for (const auto& op : copyOps) {
+      op.dstMemory->signalWrite(&dev());
+    }
+  }
 
   profilingEnd();
 }
@@ -4038,8 +4129,8 @@ void VirtualGPU::submitMarker(amd::Marker& vcmd) {
       force_irq_ = IS_WINDOWS;
       // It should be safe to call flush directly if there are not pending dispatches without
       // HSA signal callback
-      if (gpu_queue_ == nullptr) {
-        gpu_queue_ = roc_device_.AcquireActiveNormalQueue();
+      if (!dedicated_queue_ && gpu_queue_ == nullptr) {
+        gpu_queue_ = roc_device_.AcquireActiveQueue(priority_);
       }
       flush(vcmd.GetBatchHead());
     } else {

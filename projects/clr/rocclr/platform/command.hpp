@@ -234,15 +234,28 @@ class Event : public RuntimeObject {
 
 union CopyMetadata {
   enum CopyEnginePreference { NONE = 0, BLIT = 1, SDMA = 2, CPDMA = 3 };
+  //! Source access ordering for batch copies
+  enum SrcAccessOrder {
+    kSrcAccessOrderStream = 0,         //!< Access to source must be in stream order
+    kSrcAccessOrderDuringApiCall = 1,  //!< Source access completes before API returns
+    kSrcAccessOrderAny = 2             //!< Source access can be out of stream order
+  };
 
   struct {
     uint32_t isAsync_ : 1;
     uint32_t copyEnginePreference_ : 2;
+    uint32_t srcAccessOrder_ : 2;       //!< Source access ordering for batch copies
+    uint32_t preferOverlapCompute_ : 1; //!< Prefer overlap with compute work
   };
   uint32_t flags_;
   CopyMetadata() : flags_(0) {}
   CopyMetadata(bool isAsync, CopyEnginePreference copyEnginePreference)
-      : isAsync_(isAsync), copyEnginePreference_(copyEnginePreference) {}
+      : isAsync_(isAsync), copyEnginePreference_(copyEnginePreference),
+        srcAccessOrder_(kSrcAccessOrderStream), preferOverlapCompute_(0) {}
+  CopyMetadata(bool isAsync, CopyEnginePreference copyEnginePreference,
+               SrcAccessOrder srcAccessOrder, bool preferOverlap = false)
+      : isAsync_(isAsync), copyEnginePreference_(copyEnginePreference),
+        srcAccessOrder_(srcAccessOrder), preferOverlapCompute_(preferOverlap ? 1 : 0) {}
 };
 
 // Interface to callback to allocate kernel args from the graph kernel arg pool.
@@ -1088,10 +1101,65 @@ class CopyMemoryCommand : public TwoMemoryArgsCommand {
   bool isEntireMemory() const;
 };
 
+//! Structure to hold individual copy operation info for batch copies
+struct BatchCopyOp {
+  Memory* srcMemory;       //!< Source memory object
+  Memory* dstMemory;       //!< Destination memory object
+  size_t srcOffset;        //!< Offset in source buffer
+  size_t dstOffset;        //!< Offset in destination buffer
+  size_t size;             //!< Size of the copy in bytes
+  CopyMetadata metadata;   //!< Copy metadata for this operation
+
+  BatchCopyOp(Memory* src, Memory* dst, size_t srcOff, size_t dstOff,
+              size_t sz, CopyMetadata meta = CopyMetadata())
+      : srcMemory(src), dstMemory(dst), srcOffset(srcOff),
+        dstOffset(dstOff), size(sz), metadata(meta) {}
+};
+
+/*! \brief  A batch copy memory command for multiple buffer-to-buffer copies
+ *
+ *  \details Executes multiple copy operations as a batch. Copies within
+ *           a batch are not guaranteed to execute in any specific order
+ *           relative to each other.
+ */
+class BatchCopyMemoryCommand : public Command {
+ private:
+  std::vector<BatchCopyOp> copyOps_;  //!< Vector of copy operations
+
+ public:
+  BatchCopyMemoryCommand(HostQueue& queue, cl_command_type cmdType,
+                         const EventWaitList& eventWaitList,
+                         std::vector<BatchCopyOp>&& copyOps)
+      : Command(queue, cmdType, eventWaitList),
+        copyOps_(std::move(copyOps)) {}
+
+  BatchCopyMemoryCommand(HostQueue& queue, cl_command_type cmdType,
+                         const EventWaitList& eventWaitList,
+                         const std::vector<BatchCopyOp>& copyOps)
+      : Command(queue, cmdType, eventWaitList),
+        copyOps_(copyOps) {}
+
+  virtual void submit(device::VirtualDevice& device) { device.submitBatchCopyMemory(*this); }
+
+  //! Return the vector of copy operations
+  const std::vector<BatchCopyOp>& copyOps() const { return copyOps_; }
+
+  //! Return the number of copy operations in the batch
+  size_t count() const { return copyOps_.size(); }
+
+  //! Validate peer memory access for all operations
+  bool validatePeerMemory() const {
+    for (const auto& op : copyOps_) {
+      if (op.srcMemory == nullptr || op.dstMemory == nullptr) {
+        return false;
+      }
+    }
+    return true;
+  }
+};
+
 /*! \brief  A generic map memory command. Makes a memory object accessible to the host.
  *
- * @todo:dgladdin   Need to think more about how the pitch parameters operate in
- *                  the context of unified buffer/image commands.
  */
 
 class MapMemoryCommand : public OneMemoryArgCommand {

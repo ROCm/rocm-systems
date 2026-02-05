@@ -64,6 +64,7 @@ class WriteMemoryCommand;
 class FillMemoryCommand;
 class CopyMemoryCommand;
 class CopyMemoryP2PCommand;
+class BatchCopyMemoryCommand;
 class MapMemoryCommand;
 class UnmapMemoryCommand;
 class MigrateMemObjectsCommand;
@@ -667,6 +668,8 @@ struct Info : public amd::EmbeddedObject {
   size_t scratchLimitMax;  //! Maximum size of scratch limit of this device memory in bytes.
 
   uint32_t numberOfXccs_;  //! The number of XCC(s) on the device
+
+  bool hasExpertSchedMode_;  //! Device supports expert scheduling mode
 };
 
 //! Device settings
@@ -1273,6 +1276,7 @@ class VirtualDevice : public amd::ReferenceCountedObject {
   virtual void submitWriteMemory(amd::WriteMemoryCommand& cmd) = 0;
   virtual void submitCopyMemory(amd::CopyMemoryCommand& cmd) = 0;
   virtual void submitCopyMemoryP2P(amd::CopyMemoryP2PCommand& cmd) = 0;
+  virtual void submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd) = 0;
   virtual void submitMapMemory(amd::MapMemoryCommand& cmd) = 0;
   virtual void submitUnmapMemory(amd::UnmapMemoryCommand& cmd) = 0;
   virtual void submitKernel(amd::NDRangeKernelCommand& command) = 0;
@@ -1305,6 +1309,7 @@ class VirtualDevice : public amd::ReferenceCountedObject {
   virtual void submitUserEvent(amd::UserEvent& vcmd) { ShouldNotReachHere(); }
 
   virtual address allocKernelArguments(size_t size, size_t alignment) { return nullptr; }
+  virtual void ReleaseSdmaEngines() {}  //!< Release SDMA engine assignments (ROCm specific)
   virtual void ReleaseAllHwQueues() {}
   virtual void ReleaseHwQueue() {}
 

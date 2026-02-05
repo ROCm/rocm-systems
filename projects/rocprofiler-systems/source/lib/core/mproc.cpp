@@ -22,7 +22,6 @@
 
 #include "mproc.hpp"
 #include "common.hpp"
-#include "debug.hpp"
 
 #include <fstream>
 #include <set>
@@ -31,6 +30,8 @@
 #include <sys/wait.h>
 #include <thread>
 #include <unistd.h>
+
+#include "logger/debug.hpp"
 
 namespace rocprofsys
 {
@@ -42,11 +43,11 @@ get_concurrent_processes(int _ppid)
     std::set<int> _children = {};
     if(_ppid > 0)
     {
-        auto          _inp = JOIN('/', "/proc", _ppid, "task", _ppid, "children");
+        auto          _inp = fmt::format("/proc/{}/task/{}/children", _ppid, _ppid);
         std::ifstream _ifs{ _inp };
         if(!_ifs)
         {
-            ROCPROFSYS_VERBOSE_F(2, "Warning! File '%s' cannot be read\n", _inp.c_str());
+            LOG_WARNING("File '{}' cannot be read. Returning empty set.", _inp);
             return _children;
         }
 
@@ -92,16 +93,8 @@ wait_pid(pid_t _pid, int _opts)
 }
 
 int
-diagnose_status(pid_t _pid, int _status, int _verbose)
+diagnose_status(pid_t _pid, int _status, [[maybe_unused]] int _verbose)
 {
-    if(_verbose >= 3)
-    {
-        fflush(stderr);
-        fflush(stdout);
-        std::cout << std::flush;
-        std::cerr << std::flush;
-    }
-
     bool _normal_exit      = (WIFEXITED(_status) > 0);
     bool _unhandled_signal = (WIFSIGNALED(_status) > 0);
     bool _core_dump        = (WCOREDUMP(_status) > 0);
@@ -110,81 +103,48 @@ diagnose_status(pid_t _pid, int _status, int _verbose)
     int  _stop_signal      = (_stopped) ? WSTOPSIG(_status) : 0;
     int  _ec               = (_unhandled_signal) ? WTERMSIG(_status) : 0;
 
-    if(_verbose >= 4)
-    {
-        TIMEMORY_PRINTF_INFO(
-            stderr,
-            "diagnosing status for process %i :: status: %i... normal exit: %s, "
-            "unhandled signal: %s, core dump: %s, stopped: %s, exit status: %i, stop "
-            "signal: %i, exit code: %i\n",
-            _pid, _status, std::to_string(_normal_exit).c_str(),
-            std::to_string(_unhandled_signal).c_str(), std::to_string(_core_dump).c_str(),
-            std::to_string(_stopped).c_str(), _exit_status, _stop_signal, _ec);
-    }
-    else if(_verbose >= 3)
-    {
-        TIMEMORY_PRINTF_INFO(stderr,
-                             "diagnosing status for process %i :: status: %i ...\n", _pid,
-                             _status);
-    }
+    LOG_TRACE("diagnosing status for process {} :: status: {}... normal exit: {}, "
+              "unhandled signal: {}, core dump: {}, stopped: {}, exit status: {}, stop "
+              "signal: {}, exit code: {}",
+              _pid, _status, std::to_string(_normal_exit),
+              std::to_string(_unhandled_signal), std::to_string(_core_dump),
+              std::to_string(_stopped), _exit_status, _stop_signal, _ec);
 
     if(!_normal_exit)
     {
         if(_ec == 0) _ec = EXIT_FAILURE;
-        if(_verbose >= 0)
-        {
-            TIMEMORY_PRINTF_FATAL(
-                stderr, "process %i terminated abnormally. exit code: %i\n", _pid, _ec);
-        }
+        LOG_ERROR("process {} terminated abnormally. exit code: {}", _pid, _ec);
     }
 
     if(_stopped)
     {
-        if(_verbose >= 0)
-        {
-            TIMEMORY_PRINTF_FATAL(stderr,
-                                  "process %i stopped with signal %i. exit code: %i\n",
-                                  _pid, _stop_signal, _ec);
-        }
+        LOG_ERROR("process {} stopped with signal {}. exit code: {}", _pid, _stop_signal,
+                  _ec);
     }
 
     if(_core_dump)
     {
-        if(_verbose >= 0)
-        {
-            TIMEMORY_PRINTF_FATAL(
-                stderr, "process %i terminated and produced a core dump. exit code: %i\n",
-                _pid, _ec);
-        }
+        LOG_CRITICAL("process {} terminated and produced a core dump. exit code: {}",
+                     _pid, _ec);
     }
 
     if(_unhandled_signal)
     {
-        if(_verbose >= 0)
-        {
-            TIMEMORY_PRINTF_FATAL(stderr,
-                                  "process %i terminated because it received a signal "
-                                  "(%i) that was not handled. exit code: %i\n",
-                                  _pid, _ec, _ec);
-        }
+        LOG_ERROR("process {} terminated because it received a signal "
+                  "({}) that was not handled. exit code: {}",
+                  _pid, _ec, _ec);
     }
 
     if(!_normal_exit && _exit_status > 0)
     {
-        if(_verbose >= 0)
+        if(_exit_status == 127)
         {
-            if(_exit_status == 127)
-            {
-                TIMEMORY_PRINTF_FATAL(
-                    stderr, "execv in process %i failed. exit code: %i\n", _pid, _ec);
-            }
-            else
-            {
-                TIMEMORY_PRINTF_FATAL(
-                    stderr,
-                    "process %i terminated with a non-zero status. exit code: %i\n", _pid,
-                    _ec);
-            }
+            LOG_CRITICAL("execv in process {} failed. exit code: {}", _pid, _ec);
+        }
+        else
+        {
+            LOG_CRITICAL("process {} terminated with a non-zero status. exit code: {}",
+                         _pid, _ec);
         }
     }
 

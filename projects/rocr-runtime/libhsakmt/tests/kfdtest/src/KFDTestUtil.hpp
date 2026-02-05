@@ -29,6 +29,8 @@
 #include "OSWrapper.hpp"
 #include "GoogleTestExtension.hpp"
 #include "hsakmt/hsakmt.h"
+#include "Assemble.hpp"
+#include "ShaderStore.hpp"
 
 class BaseQueue;
 #define ARRAY_SIZE(_x) (sizeof(_x)/sizeof(_x[0]))
@@ -64,6 +66,11 @@ void GetHwQueueInfo(const HsaNodeProperties *props,
                  unsigned int *p_num_sdma_queues_per_engine);
 
 HSAuint64 GetSystemTickCountInMicroSec();
+
+// Copy @size bytes from @src to @dst.
+bool GPUMemCopy(
+    void* dst, void* src, size_t size, unsigned int node,
+    bool useSdma);
 
 class HsaMemoryBuffer {
  public:

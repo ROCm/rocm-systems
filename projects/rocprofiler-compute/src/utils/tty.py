@@ -494,34 +494,43 @@ def show_all(
         if not csv_dir.exists():
             csv_dir.mkdir()
 
+    # Check for valid roofline data once (used to skip roofline tables in the loop)
+    has_valid_roofline = any(
+        hasattr(workload, "roofline_peaks") and not workload.roofline_peaks.empty
+        for workload in runs.values()
+    )
+    roofline_warning_shown = False
+
+    # True if roofline (block 4) is in the active filter
+    # or no filter is applied
+    roofline_in_filter = (
+        any(str(m).split(".")[0] == "4" for m in args.filter_metrics)
+        if args.filter_metrics
+        else (not filter_panel_ids or 400 in filter_panel_ids)
+    )
+
     for panel_id, panel in arch_configs.panel_configs.items():
         # Skip panels that don't support baseline comparison
         if len(args.path) > 1 and panel_id in config.HIDDEN_SECTIONS:
             continue
 
-        # Handle roofline panel (400) with custom display logic, then skip normal
-        # table processing to prevent duplicate printing.
+        # Handle roofline panel (400) with custom display logic
         if panel_id == 400:
-            if is_roofline_shown(args, runs, output, panel, roof_plot, hidden_cols):
-                continue
+            _ = is_roofline_shown(args, runs, output, panel, roof_plot, hidden_cols)
 
         panel_content = ""  # store content of all data_source from one panel
 
         for data_source in panel["data source"]:
             for table_type, table_config in data_source.items():
-                # Skip roofline tables (401, 402) if roofline data is invalid
-                if table_config["id"] in [401, 402]:
-                    has_valid_roofline = any(
-                        hasattr(workload, "roofline_peaks")
-                        and not workload.roofline_peaks.empty
-                        for workload in runs.values()
-                    )
-                    if not has_valid_roofline:
+                # Emit warnings for roofline tables (401, 402)
+                # if roofline data is invalid
+                if table_config["id"] in [401, 402] and not has_valid_roofline:
+                    if not roofline_warning_shown and roofline_in_filter:
                         console_warning(
-                            f"Not showing Roofline table {table_config['id']} "
-                            "due to invalid roofline data."
+                            "Roofline",
+                            "Not showing roofline table due to invalid roofline data",
                         )
-                        continue
+                        roofline_warning_shown = True
 
                 # Block-filter logic:
                 # - If analysis used --filter-metrics, ignore profiling block filters
@@ -587,7 +596,8 @@ def show_all(
                         args, table_config, processed_df, table_type, runs, csv_dir
                     )
 
-        if panel_content:
+        # Roofline printing is handled separately above in is_roofline_shown
+        if panel_content and table_config["id"] not in [401, 402]:
             print(f"\n{'-' * 80}", file=output)
             print(f"{panel_id // 100}. {panel['title']}", file=output)
             print(panel_content, file=output)
@@ -595,9 +605,7 @@ def show_all(
 
 def show_roof_plot(roof_plot: str) -> None:
     # TODO: short term solution to display roofline plot
-    print(f"\n{'-' * 80}")
-    print("4. Roofline")
-    print("4.3 Roofline Plot")
+    print("4.3 Roofline Plot:")
 
     if roof_plot:
         print(roof_plot)

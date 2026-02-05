@@ -548,22 +548,28 @@ hsa_status_t write_core_dump_to_fd(int fd, const SegmentsInfo& segments,
           return (uint32_t)0;
       }
     } (seg.stype);
-    if (size_limit != -1 && (offset + seg.size > size_limit)) {
-      if (show_progress) {
-        printf("Core limit file reached during pipe write\n");
-      }
-      return HSA_STATUS_SUCCESS;
-    }
     phdr.p_offset = alignUp(offset, (uint64_t)1 << phdr.p_align);
     phdrs.push_back(phdr);
     offset += phdr.p_filesz;
   }
 
   // Write all program headers
-  for (const auto& phdr : phdrs) {
-    if (write(fd, &phdr, sizeof(phdr)) != sizeof(phdr)) {
-      perror("Failed to write program header to pipe");
-      return HSA_STATUS_ERROR;
+  if (is_reg_file) {
+    // For regular files, use pwrite to write at specific offset
+    for (size_t i = 0; i < phdrs.size(); i++) {
+      off_t phdr_offset = sizeof(Elf64_Ehdr) + i * sizeof(Elf64_Phdr);
+      if (pwrite(fd, &phdrs[i], sizeof(Elf64_Phdr), phdr_offset) != sizeof(Elf64_Phdr)) {
+        perror("Failed to write program header");
+        return HSA_STATUS_ERROR;
+      }
+    }
+  } else {
+    // For pipes, use sequential write
+    for (const auto& phdr : phdrs) {
+      if (write(fd, &phdr, sizeof(phdr)) != sizeof(phdr)) {
+        perror("Failed to write program header to pipe");
+        return HSA_STATUS_ERROR;
+      }
     }
   }
 
@@ -571,6 +577,15 @@ hsa_status_t write_core_dump_to_fd(int fd, const SegmentsInfo& segments,
   for (size_t idx = 0; idx < segments.size(); idx++) {
     const SegmentInfo& seg = segments[idx];
     const Elf64_Phdr& phdr = phdrs[idx];
+
+    // Check if this segment would exceed size limit
+    if (size_limit != -1 && (phdr.p_offset + phdr.p_filesz > size_limit)) {
+      if (show_progress) {
+        fprintf(stderr, "Core file size limit reached, truncating at segment %zu\n", idx);
+      }
+      // Stop writing segments but return success - we wrote valid headers
+      return HSA_STATUS_SUCCESS;
+    }
 
     if (is_reg_file) {
       int error = posix_fallocate(fd, phdr.p_offset, phdr.p_filesz);
@@ -588,9 +603,21 @@ hsa_status_t write_core_dump_to_fd(int fd, const SegmentsInfo& segments,
       if (st != HSA_STATUS_SUCCESS) {
         return st;
       }
-      if (write(fd, copy_buffer.get(), curr_chunk) != (ssize_t)curr_chunk) {
-        perror("Failed to write segment data to pipe");
-        return HSA_STATUS_ERROR;
+
+      if (is_reg_file) {
+        // For regular files, use pwrite to write at specific offset
+        if (pwrite(fd, copy_buffer.get(), curr_chunk,
+            phdr.p_offset + phdr.p_filesz - remaining) !=
+                                                        (ssize_t)curr_chunk) {
+          perror("Failed to write segment data");
+          return HSA_STATUS_ERROR;
+        }
+      } else {
+        // For pipes, use sequential write
+        if (write(fd, copy_buffer.get(), curr_chunk) != (ssize_t)curr_chunk) {
+          perror("Failed to write segment data to pipe");
+          return HSA_STATUS_ERROR;
+        }
       }
       remaining -= curr_chunk;
     }

@@ -74,6 +74,7 @@ struct ncclProxyOp {
   uint8_t /*ncclDataType_t*/ dtype;
   uint8_t /*ncclDevRedOp_t*/ redOp;
   uint8_t /*ncclFunc_t*/ coll;
+  uint8_t /*ncclFunc_t*/ collAPI;
   uint8_t /*ncclPattern_t*/ pattern;
   uint8_t protocol;
   uint8_t algorithm;
@@ -88,6 +89,8 @@ struct ncclProxyOp {
   int nextRank;
   int prevRank;
   union ncclProxyOpSpecifics specifics;
+  int nChannels;
+  int nPeers;
 
   // Profiler plugin
   union {
@@ -197,11 +200,14 @@ struct ncclProxyArgs {
   uint8_t /*ncclDevRedOp_t*/ redOp;
   uint8_t /*ncclPattern_t*/ pattern;
   uint8_t /*ncclFunc_t*/ coll;
+  uint8_t /*ncclFunc_t*/ collAPI;
   uint8_t protocol;
   uint8_t algorithm;
   int state;
   char* sharedBuff[NCCL_STEPS];
   int sharedSize[NCCL_STEPS];
+  int nChannels;
+  int nPeers;
 
   int idle;
   uint64_t hdp_flushed;
@@ -365,6 +371,11 @@ struct ncclProxyState {
 
   // Progress thread
   struct ncclProxyProgressState progressState;
+
+  // Network plugin
+  void* netContext;
+  ncclNetAttr_t netAttr;
+  void* collNetContext;
 
   // Profiler plugin
   void* profilerContext;

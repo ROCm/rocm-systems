@@ -23,12 +23,14 @@
 
 ##############################################################################
 
+import importlib.util
 import inspect
 import os
 import re
 import sqlite3
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import numpy as np
@@ -37,29 +39,7 @@ import pytest
 import test_utils
 from scipy.stats import zscore
 
-# Globals
-
-# TODO: MI350 What are the gpu models in MI 350 series
-SUPPORTED_ARCHS = {
-    "gfx908": {"mi100": ["MI100"]},
-    "gfx90a": {"mi200": ["MI210", "MI250", "MI250X"]},
-    "gfx940": {"mi300": ["MI300A_A0"]},
-    "gfx941": {"mi300": ["MI300X_A0"]},
-    "gfx942": {"mi300": ["MI300A_A1", "MI300X_A1"]},
-    "gfx950": {"mi350": ["MI350"]},
-}
-
-CHIP_IDS = {
-    "29856": "MI300A_A1",
-    "29857": "MI300X_A1",
-    "29858": "MI308X",
-    "30112": "MI350",
-}
-
-# --
 # Runtime config options
-# --
-
 config = {}
 config["kernel_name_1"] = "vecCopy"
 config["app_1"] = ["./tests/vcopy", "-n", "1048576", "-b", "256", "-i", "3"]
@@ -73,6 +53,8 @@ config["cleanup"] = True
 config["COUNTER_LOGGING"] = False
 config["METRIC_COMPARE"] = False
 config["METRIC_LOGGING"] = False
+
+arch_config = {}
 
 num_kernels = 3
 num_devices = 1
@@ -89,7 +71,7 @@ CSVS = sorted([
 ])
 
 ROOF_ONLY_FILES = sorted([
-    "empirRoof_gpu-0_FP32.pdf",
+    "empirRoof_gpu-0_FP32.html",
     "pmc_perf.csv",
     "roofline.csv",
     "sysinfo.csv",
@@ -245,47 +227,7 @@ def counter_compare(test_name, errors_pd, baseline_df, run_df, threshold=5):
     return errors_pd
 
 
-def gpu_soc():
-    global num_devices
-    ## 1) Parse arch details from rocminfo
-    rocminfo = str(
-        # decode with utf-8 to account for rocm-smi changes in latest rocm
-        subprocess.run(
-            ["rocminfo"], stdout=subprocess.PIPE, stderr=subprocess.PIPE
-        ).stdout.decode("utf-8")
-    )
-    rocminfo = rocminfo.split("\n")
-    soc_regex = re.compile(r"^\s*Name\s*:\s+ ([a-zA-Z0-9]+)\s*$", re.MULTILINE)
-    devices = list(filter(soc_regex.match, rocminfo))
-    gpu_arch = devices[0].split()[1]
-
-    if not gpu_arch in SUPPORTED_ARCHS.keys():
-        print("Cannot find a supported arch in rocminfo")
-        assert 0
-    else:
-        num_devices = (
-            len(devices)
-            if not "CI_VISIBLE_DEVICES" in os.environ
-            else os.environ["CI_VISIBLE_DEVICES"]
-        )
-
-    ## 2) Parse chip id from rocminfo
-    chip_id = re.compile(r"^\s*Chip ID:\s+ ([a-zA-Z0-9]+)\s*", re.MULTILINE)
-    ids = list(filter(chip_id.match, rocminfo))
-    for id in ids:
-        chip_id = re.match(r"^[^()]+", id.split()[2]).group(0)
-
-    ## 3) Deduce gpu model name from arch
-    gpu_model = list(SUPPORTED_ARCHS[gpu_arch].keys())[0].upper()
-    # For testing purposes we only care about gpu model series not the specific model
-    # if gpu_model not in ("MI50", "MI100", "MI200"):
-    #     if chip_id in CHIP_IDS:
-    #         gpu_model = CHIP_IDS[chip_id]
-
-    return gpu_model
-
-
-soc = gpu_soc()
+soc = test_utils.gpu_soc()
 
 os.environ["ROCPROF"] = "rocprofiler-sdk"
 
@@ -642,9 +584,7 @@ def test_path(binary_handler_profile_rocprof_compute):
 
 
 @pytest.mark.path
-def test_path_rocflop(
-    binary_handler_profile_rocprof_compute,
-):
+def test_path_rocflop(binary_handler_profile_rocprof_compute):
     # Test whether multiprocess workloads like rocflop are handled correctly
     workload_dir = test_utils.get_output_dir()
     options = ["--block", "2.1.1"]
@@ -813,9 +753,9 @@ def test_path_csv(
 @pytest.mark.roofline_1
 def test_roof_basic_validation(binary_handler_profile_rocprof_compute):
     """
-    Test basic roofline PDF generation with full validation pipeline.
+    Test basic roofline HTML generation with full validation pipeline.
     This test runs the complete validation flow including counter logging
-    and metric comparison (if enabled in config). Validates that roofline PDFs
+    and metric comparison (if enabled in config). Validates that roofline HTMLs
     are generated with the integrated multi-subplot layout (roofline plot +
     plot points table + kernel names table).
     """
@@ -989,19 +929,19 @@ def test_analyze_rocpd(
         Dispatch,
         Kernel,
         Metadata,
-        Metric,
+        MetricDefinition,
+        MetricValue,
         RooflineData,
-        Value,
         Workload,
     )
 
     table_name_map = {
         "compute_workload": Workload,
-        "compute_metric": Metric,
+        "compute_metric_definition": MetricDefinition,
         "compute_roofline_data": RooflineData,
         "compute_dispatch": Dispatch,
         "compute_kernel": Kernel,
-        "compute_value": Value,
+        "compute_metric_value": MetricValue,
         "compute_metadata": Metadata,
     }
 
@@ -1134,9 +1074,9 @@ def test_roofline_empty_kernel_names_handling(binary_handler_profile_rocprof_com
 
     assert returncode == 1, f"Expected error (returncode=1), got {returncode}"
 
-    pdf_files = list(Path(workload_dir).glob("empirRoof_*.pdf"))
-    assert len(pdf_files) == 0, (
-        "No roofline PDF should be generated when no kernels match"
+    html_files = list(Path(workload_dir).glob("empirRoof_*.html"))
+    assert len(html_files) == 0, (
+        "No roofline HTML should be generated when no kernels match"
     )
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -1212,12 +1152,12 @@ def test_roofline_unsupported_datatype_error(binary_handler_profile_rocprof_comp
     [
         (
             ["--device", "0", "--roof-only", "--roofline-data-type", "FP32"],
-            ["empirRoof_gpu-0_FP32.pdf"],
+            ["empirRoof_gpu-0_FP32.html"],
             "FP32_datatype",
         ),
         (
             ["--device", "0", "--roof-only", "--roofline-data-type", "FP16"],
-            ["empirRoof_gpu-0_FP16.pdf"],
+            ["empirRoof_gpu-0_FP16.html"],
             "FP16_datatype",
         ),
         (
@@ -1325,6 +1265,7 @@ def test_roofline_missing_file_handling(binary_handler_profile_rocprof_compute):
 
     try:
         from roofline import Roofline
+        from utils.schema import Workload
         from utils.specs import generate_machine_specs
 
         class MockArgs:
@@ -1336,6 +1277,7 @@ def test_roofline_missing_file_handling(binary_handler_profile_rocprof_compute):
 
         args = MockArgs()
         mspec = generate_machine_specs(None, None)
+        workload = Workload()
 
         workload_dir = test_utils.get_output_dir()
 
@@ -1350,7 +1292,9 @@ def test_roofline_missing_file_handling(binary_handler_profile_rocprof_compute):
 
         roofline_instance = Roofline(args, mspec, run_parameters)
 
-        result = roofline_instance.cli_generate_plot("FP32")
+        result = roofline_instance.cli_generate_plot(
+            "FP32", workload, config, arch_config
+        )
 
         assert result is None
 
@@ -1377,6 +1321,7 @@ def test_roofline_invalid_datatype_cli(binary_handler_profile_rocprof_compute):
 
     try:
         from roofline import Roofline
+        from utils.schema import Workload
         from utils.specs import generate_machine_specs
 
         class MockArgs:
@@ -1388,6 +1333,7 @@ def test_roofline_invalid_datatype_cli(binary_handler_profile_rocprof_compute):
 
         args = MockArgs()
         mspec = generate_machine_specs(None, None)
+        workload = Workload()
 
         run_parameters = {
             "workload_dir": test_utils.get_output_dir(),
@@ -1400,7 +1346,9 @@ def test_roofline_invalid_datatype_cli(binary_handler_profile_rocprof_compute):
 
         roofline_instance = Roofline(args, mspec, run_parameters)
 
-        result = roofline_instance.cli_generate_plot("INVALID_DATATYPE")
+        result = roofline_instance.cli_generate_plot(
+            "INVALID_DATATYPE", workload, config, arch_config
+        )
 
         assert result is None
 
@@ -1605,12 +1553,12 @@ def test_roofline_bound_status_calculation():
 @pytest.mark.roofline_2
 def test_roofline_many_kernels_dynamic_height(binary_handler_profile_rocprof_compute):
     """
-    Test roofline PDF generation with many kernels (10+) to verify:
+    Test roofline HTML generation with many kernels (10+) to verify:
     - Dynamic height calculation works
-    - PDF is generated successfully
+    - HTML is generated successfully
     - File size is reasonable
 
-    Note: This test uses a regular workload but validates the PDF structure
+    Note: This test uses a regular workload but validates the HTML structure
     can handle the multi-subplot layout properly.
     """
     if soc in ("MI100"):
@@ -1626,19 +1574,19 @@ def test_roofline_many_kernels_dynamic_height(binary_handler_profile_rocprof_com
 
     assert returncode == 0, "Roofline profiling should succeed"
 
-    pdf_files = list(Path(workload_dir).glob("empirRoof_*.pdf"))
-    assert len(pdf_files) > 0, "At least one roofline PDF should be generated"
+    html_files = list(Path(workload_dir).glob("empirRoof_*.html"))
+    assert len(html_files) > 0, "At least one roofline HTML should be generated"
 
-    for pdf_file in pdf_files:
-        assert pdf_file.exists(), f"PDF file {pdf_file} should exist"
-        file_size = pdf_file.stat().st_size
+    for html_file in html_files:
+        assert html_file.exists(), f"HTML file {html_file} should exist"
+        file_size = html_file.stat().st_size
 
-        # PDF should be larger than 10KB (has content) but less than 50MB (reasonable)
+        # HTML should be larger than 10KB (has content) but less than 50MB (reasonable)
         assert file_size > 10000, (
-            f"PDF {pdf_file} too small ({file_size} bytes), may be malformed"
+            f"HTML {html_file} too small ({file_size} bytes), may be malformed"
         )
         assert file_size < 50000000, (
-            f"PDF {pdf_file} too large ({file_size} bytes), may have issues"
+            f"HTML {html_file} too large ({file_size} bytes), may have issues"
         )
 
     file_dict = test_utils.check_csv_files(workload_dir, 1, num_kernels)
@@ -2268,6 +2216,7 @@ def test_live_attach_detach_block(binary_handler_profile_rocprof_compute):
     try:
         # Start workload
         process_workload = subprocess.Popen(config["app_hip_dynamic_shared"], env=env)
+        time.sleep(5)  # Give workload time to start
 
         attach_detach = {
             "attach_pid": process_workload.pid,
@@ -2316,8 +2265,9 @@ def test_live_attach_detach_block_thread_sleep(binary_handler_profile_rocprof_co
     try:
         # Start workload with sleep mode enabled
         process_workload = subprocess.Popen(
-            [config["app_hip_dynamic_shared"], "--enable-sleep"], env=env
+            [*config["app_hip_dynamic_shared"], "--enable-sleep"], env=env
         )
+        time.sleep(5)  # Give workload time to start
 
         attach_detach = {
             "attach_pid": process_workload.pid,
@@ -2358,7 +2308,7 @@ def test_live_attach_detach_block_thread_sleep(binary_handler_profile_rocprof_co
 
 
 @pytest.mark.live_attach_detach
-def test_live_attach_detach_singlepath_launch_stats(
+def test_live_attach_detach_singlepass_launch_stats(
     binary_handler_profile_rocprof_compute,
 ):
     options = ["--set", "launch_stats"]
@@ -2374,6 +2324,7 @@ def test_live_attach_detach_singlepath_launch_stats(
     try:
         # Start workload
         process_workload = subprocess.Popen(config["app_hip_dynamic_shared"], env=env)
+        time.sleep(5)  # Give workload time to start
 
         attach_detach = {
             "attach_pid": process_workload.pid,
@@ -2828,4 +2779,216 @@ def test_iteration_multiplexing_all_counter_accuracy(
     )
     assert are_stochastic_counters_similar(
         [counters_kernel, counters_kernel_launch_params], counters_no_multiplexing
+    )
+
+
+skip_if_no_torch = pytest.mark.skipif(
+    importlib.util.find_spec("torch") is None, reason="torch is required for this test"
+)
+
+
+@skip_if_no_torch
+def test_torch_trace_profile(binary_handler_profile_rocprof_compute):
+    """
+    Test profiling a PyTorch application with --torch-trace option.
+    Verifies that all required files are generated and counter values are valid.
+    NOTE: Not included in the test suite since this requires PyTorch installation.
+    """
+    workload_dir = test_utils.get_output_dir(param_id="torch_ops")
+    Path(workload_dir).mkdir(parents=True, exist_ok=True)
+    torch_app_path = Path(workload_dir) / "test_torch_app.py"
+
+    torch_app_code = """
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+class SimpleNet(nn.Module):
+    def __init__(self):
+        super(SimpleNet, self).__init__()
+        self.fc1 = nn.Linear(10, 20)
+        self.fc2 = nn.Linear(20, 10)
+    def forward(self, x):
+        x = self.fc1(x)
+        x = F.relu(x)
+        x = self.fc2(x)
+        return x
+
+if __name__ == "__main__":
+    if not torch.cuda.is_available():
+        import sys
+        print("GPU is required for this test. Exiting.")
+        sys.exit(1)
+    model = SimpleNet()
+    model = model.cuda()
+    x = torch.randn(5, 10).cuda()
+    # Run a few iterations
+    for epoch in range(1):
+        output = model(x)
+        loss = output.sum()
+        loss.backward()
+        print("Training completed")
+"""
+
+    with open(torch_app_path, "w") as f:
+        f.write(torch_app_code)
+
+    config["torch_test_app"] = ["python3", str(torch_app_path)]
+
+    # Profile with --torch-trace option
+    options = [
+        "--torch-trace",
+    ]
+
+    returncode = binary_handler_profile_rocprof_compute(
+        config,
+        workload_dir,
+        options,
+        check_success=True,
+        app_name="torch_test_app",
+    )
+    assert returncode == 0, "Profiling the torch application failed"
+    # Verify files are generated
+    # 1. Check basic CSV files
+    num_devices = config.get("num_devices", 1)
+    file_dict = test_utils.check_csv_files(workload_dir, num_devices, 1)
+    assert "pmc_perf.csv" in file_dict, "pmc_perf.csv not generated"
+    # 2. Check torch trace directory
+    torch_trace_dir = Path(workload_dir) / "torch_trace"
+    assert torch_trace_dir.exists(), "torch_trace directory not created"
+    assert torch_trace_dir.is_dir(), "torch_trace is not a directory"
+    # 3. Check per-operator CSV files exist
+    operator_csv_files = list(torch_trace_dir.glob("*.csv"))
+    assert len(operator_csv_files) > 0, "No per-operator CSV files generated"
+    # 4. Verify per-operator CSV structure
+    for op_csv in operator_csv_files:
+        op_df = pd.read_csv(op_csv)
+        assert len(op_df) > 0, f"Per-operator CSV {op_csv.name} is empty"
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@skip_if_no_torch
+def test_torch_trace_overhead(binary_handler_profile_rocprof_compute):
+    """
+    Measure overhead introduced by --torch-trace flag.
+    Compares execution time with and without the flag to ensure overhead is acceptable.
+    NOTE: Not included in the test suite since this requires PyTorch installation.
+    """
+    helper_dir = Path(test_utils.get_output_dir(param_id="torch_helper_script"))
+    helper_dir.mkdir(parents=True, exist_ok=True)
+    torch_app_path = helper_dir / "test_torch_app.py"
+    torch_app_code = """
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+class SimpleNet(nn.Module):
+    def __init__(self):
+        super(SimpleNet, self).__init__()
+        self.fc1 = nn.Linear(10, 20)
+        self.fc2 = nn.Linear(20, 10)
+    def forward(self, x):
+        x = self.fc1(x)
+        x = F.relu(x)
+        x = self.fc2(x)
+        return x
+
+if __name__ == "__main__":
+    if not torch.cuda.is_available():
+        import sys
+        print("GPU is required for this test. Exiting.")
+        sys.exit(1)
+    model = SimpleNet()
+    model = model.cuda()
+    x = torch.randn(5, 10).cuda()
+    # Run a few iterations
+    for epoch in range(1):
+        output = model(x)
+        loss = output.sum()
+        loss.backward()
+    print("Training completed")
+"""
+    with open(torch_app_path, "w") as f:
+        f.write(torch_app_code)
+    config["torch_test_app"] = ["python3", str(torch_app_path)]
+    # Run WITHOUT --torch-trace (baseline)
+    workload_dir_baseline = test_utils.get_output_dir(param_id="torch_baseline")
+    start_baseline = time.time()
+    returncode_baseline = binary_handler_profile_rocprof_compute(
+        config,
+        workload_dir_baseline,
+        [],  # No torch-trace flag
+        check_success=True,
+        roof=False,
+        app_name="torch_test_app",
+    )
+    baseline_time = time.time() - start_baseline
+    assert returncode_baseline == 0, "Baseline profiling failed"
+
+    # Read baseline timestamps
+    baseline_df = pd.read_csv(f"{workload_dir_baseline}/pmc_perf.csv")
+    baseline_kernel_duration_total = (
+        baseline_df["End_Timestamp"].max() - baseline_df["Start_Timestamp"].min()
+    )
+    test_utils.clean_output_dir(config["cleanup"], workload_dir_baseline)
+    # Run WITH --torch-trace
+    workload_dir_with_flag = test_utils.get_output_dir(param_id="torch_with_ops")
+    start_with_flag = time.time()
+    returncode_with_flag = binary_handler_profile_rocprof_compute(
+        config,
+        workload_dir_with_flag,
+        ["--torch-trace"],
+        check_success=True,
+        roof=False,
+        app_name="torch_test_app",
+    )
+    with_flag_time = time.time() - start_with_flag
+    assert returncode_with_flag == 0, "Profiling with torch-trace failed"
+    # Read with-flag timestamps
+    with_flag_df = pd.read_csv(f"{workload_dir_with_flag}/pmc_perf.csv")
+    with_flag_kernel_duration_total = (
+        with_flag_df["End_Timestamp"].max() - with_flag_df["Start_Timestamp"].min()
+    )
+    longest_running_kernel_baseline = (
+        baseline_df["End_Timestamp"] - baseline_df["Start_Timestamp"]
+    ).max()
+    longest_running_kernel_with_flag = (
+        with_flag_df["End_Timestamp"] - with_flag_df["Start_Timestamp"]
+    ).max()
+    # Calculate overheads
+    longest_running_kernel_overhead = (
+        (longest_running_kernel_with_flag - longest_running_kernel_baseline)
+        / longest_running_kernel_baseline
+    ) * 100
+    wall_clock_overhead = ((with_flag_time - baseline_time) / baseline_time) * 100
+    kernel_overhead = (
+        (with_flag_kernel_duration_total - baseline_kernel_duration_total)
+        / baseline_kernel_duration_total
+    ) * 100
+    print(f"\n{'=' * 70}")
+    print("Performance Overhead Analysis:")
+    print(f"  Longest running kernel overhead: {longest_running_kernel_overhead:.1f}%")
+    print(f"  Baseline wall-clock time:     {baseline_time:.2f}s")
+    print(f"  With --torch-trace time:  {with_flag_time:.2f}s")
+    print(f"  Wall-clock overhead:          {wall_clock_overhead:.1f}%")
+    print(f"  Baseline kernel duration:     {baseline_kernel_duration_total:.0f} ns")
+    print(f"  With flag kernel duration:    {with_flag_kernel_duration_total:.0f} ns")
+    print(f"  Kernel execution overhead:    {kernel_overhead:.1f}%")
+    print(f"{'=' * 70}\n")
+    # Verify torch trace directory was created
+    torch_trace_dir = Path(workload_dir_with_flag) / "torch_trace"
+    assert torch_trace_dir.exists(), "torch_trace directory should be created"
+    operator_csv_files = list(torch_trace_dir.glob("*.csv"))
+    assert len(operator_csv_files) > 0, "Operator CSV files should be generated"
+    test_utils.clean_output_dir(config["cleanup"], workload_dir_with_flag)
+    # Assert overhead is reasonable (< 100% wall-clock, < 50% kernel)
+    assert wall_clock_overhead < 100, (
+        f"Wall-clock overhead too high: {wall_clock_overhead:.1f}%"
+    )
+    assert kernel_overhead < 50, (
+        f"Kernel execution overhead too high: {kernel_overhead:.1f}%"
+    )
+    assert longest_running_kernel_overhead < 50, (
+        f"longest running kernel increase too high: "
+        f"{longest_running_kernel_overhead:.1f}%"
     )
