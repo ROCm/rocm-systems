@@ -37,7 +37,7 @@ import pandas as pd
 
 import config
 from rocprof_compute_soc.soc_base import OmniSoC_Base
-from utils import file_io, parser, schema
+from utils import file_io, parser, schema, tty
 from utils.logger import (
     console_debug,
     console_error,
@@ -200,22 +200,28 @@ class OmniAnalyze_Base:
         )
         process_torch_trace_output(workload_path)
         torch_trace_dir = Path(workload_path) / "torch_trace"
-        all_operators = sorted([f.stem for f in torch_trace_dir.glob("*.csv")])
-        if not all_operators:
+        all_files = list(torch_trace_dir.glob("*.csv"))
+        print(f"\n{'=' * 80}")
+        print(f"PyTorch Operators in: {workload_path}")
+        print(f"{'=' * 80}\n")
+        operator_count = 0
+        for f in all_files:
+            try:
+                df = pd.read_csv(f)
+                tty.show_torch_operator_hierarchy(str(f.name).replace(".csv", ""), df)
+                operator_count += 1
+            except Exception as e:
+                console_log(f"Failed to read operator from {f.name}: {e}")
+                sys.exit(1)
+
+        if not operator_count:
             console_warning(
                 "No PyTorch operator data found. "
                 "Please ensure profiling was done with --torch-trace option."
             )
-            return
-        print(f"\n{'=' * 80}")
-        print(f"PyTorch Operators in: {workload_path}")
-        print(f"{'=' * 80}\n")
-
-        for i, op in enumerate(all_operators, 1):
-            print(f"  {i:3d}. {op}")
 
         print(f"\n{'=' * 80}")
-        print(f"Total: {len(all_operators)} operators")
+        print(f"Total: {operator_count} operators")
         print(f"{'=' * 80}\n")
         sys.exit(0)
 
