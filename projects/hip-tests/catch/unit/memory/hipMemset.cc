@@ -29,6 +29,7 @@ Testcase Scenarios :
 
 
 #include <hip_test_common.hh>
+#include "hip/nvidia_detail/nvidia_hip_runtime_api.h"
 
 
 // Table with unique number of elements and memset values.
@@ -308,11 +309,11 @@ TEST_CASE("Unit_hipMemset_Capture") {
 TEST_CASE("Unit_hipMemsetD8_Capture") {
   const size_t N = 512;
   void* dst = nullptr;
-  HIP_CHECK(hipMalloc(&dst, N  * sizeof(uint8_t)));
+  HIP_CHECK(hipMalloc(&dst, N * sizeof(uint8_t)));
 
   hipError_t memcpy_err = hipSuccess;
   BEGIN_CAPTURE_SYNC(memcpy_err, false);
-  HIP_CHECK_ERROR(hipMemsetD8(dst, 0xCD, N), memcpy_err);
+  HIP_CHECK_ERROR(hipMemsetD8(reinterpret_cast<hipDeviceptr_t>(dst), 0xCD, N), memcpy_err);
   END_CAPTURE_SYNC(memcpy_err);
 
   HIP_CHECK(hipFree(dst));

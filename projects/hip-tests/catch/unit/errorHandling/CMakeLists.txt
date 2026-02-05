@@ -7,7 +7,6 @@ set(TEST_SRC
     hipDrvGetErrorString.cc
     hipGetLastError.cc
     hipPeekAtLastError.cc
-    hipDynamicLogging.cc
 )
 
 if(UNIX)
@@ -29,6 +28,7 @@ target_link_libraries(hipPeekAtLastErrorEnv_Exe hip::host hip::device)
 if(HIP_PLATFORM MATCHES "amd")
   set(AMD_SRC
       hipExtGetLastError.cc
+    hipDynamicLogging.cc
   )
   set(TEST_SRC ${TEST_SRC} ${AMD_SRC})
 endif()

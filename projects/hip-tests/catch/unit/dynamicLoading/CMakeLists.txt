@@ -46,7 +46,7 @@ if(UNIX AND BUILD_SHARED_LIBS)
     -x cu ${CMAKE_CURRENT_SOURCE_DIR}/liblazyLoad.cc -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
     -I${Catch2_SOURCE_DIR}/src -I${Catch2_BINARY_DIR}/generated-includes -I${HIP_PATH}/include/ -o libLazyLoad.so)
     add_custom_target(bit_extract_kernel.code COMMAND ${CMAKE_HIP_COMPILER} --fatbin
-      -x cu ${CMAKE_CURRENT_SOURCE_DIR}/bit_extract_kernel.cpp
+      -x cu ${CMAKE_CURRENT_SOURCE_DIR}/bit_extract_kernel.cpp -I${HIP_PATH}/include/
       ${OFFLOAD_ARCH_LIST} -o ${CMAKE_CURRENT_BINARY_DIR}/../dynamicLoading/bit_extract_kernel.code
       -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
   endif()
@@ -66,5 +66,6 @@ if(UNIX AND BUILD_SHARED_LIBS)
   endif()
   add_dependencies(build_tests bit_extract_kernel.code libLazyLoad.so vecadd.cc)
 endif()
+set_source_files_properties(${LINUX_TEST_SRC} PROPERTIES LANGUAGE ${GPGPU_LANGUAGE})
 set_target_properties(dynamicLoading PROPERTIES LINKER_LANGUAGE ${GPGPU_LANGUAGE})
 target_link_libraries(dynamicLoading ${GPGPU_LINKER_LIBRARIES})

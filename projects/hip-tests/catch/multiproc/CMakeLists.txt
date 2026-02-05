@@ -45,6 +45,7 @@ if(HIP_PLATFORM MATCHES "nvidia")
                       TEST_TARGET_NAME build_tests
                       LINKER_LIBS nvrtc)
   set_target_properties(MultiProc PROPERTIES COMPILE_FLAGS -arch=compute_75)
+  set_target_properties(MultiProc PROPERTIES LANGUAGE ${GPGPU_LANGUAGE})
   set_target_properties(MultiProc PROPERTIES LINKER_LANGUAGE ${GPGPU_LANGUAGE})
   target_link_libraries(MultiProc cuda hip::host hip::device)
 elseif(HIP_PLATFORM MATCHES "amd")

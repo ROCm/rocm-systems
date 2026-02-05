@@ -19,6 +19,7 @@
 
 #include <hip_test_common.hh>
 #include "mempool_common.hh"
+#include <hip/hip_runtime_api.h>
 
 /**
  * @addtogroup hipMemSetMemPool hipMemSetMemPool

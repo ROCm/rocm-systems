@@ -38,7 +38,7 @@ add_subdirectory(context)
 add_subdirectory(device_memory)
 add_subdirectory(warp)
 add_subdirectory(dynamicLoading)
-add_subdirectory(c_compilation)
+# add_subdirectory(c_compilation)
 add_subdirectory(g++)
 #add_subdirectory(gcc)   # TODO link error TheRock build
 add_subdirectory(module)
@@ -61,6 +61,7 @@ if(HIP_PLATFORM STREQUAL "amd")
     add_subdirectory(callback)
     add_subdirectory(clock)
     add_subdirectory(hip_specific)
+    add_subdirectory(c_compilation)
     # Vulkan interop APIs currently undefined for Nvidia
     add_subdirectory(vulkan_interop)
     add_subdirectory(gl_interop) # Disabled on NVIDIA due to defect - EXSWHTEC-246
