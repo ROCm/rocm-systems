@@ -55,39 +55,39 @@ Panel Config:
           pop: ((100 * $numActiveCUs) / $cu_per_gpu)
         SALU Utilization:
           value: AVG(((100 * SQ_ACTIVE_INST_SCA) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
-          unit: pct
+          unit: Percent
           peak: 100
           pop: AVG(((100 * SQ_ACTIVE_INST_SCA) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
         VALU Utilization:
           value: AVG(((100 * SQ_ACTIVE_INST_VALU) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
-          unit: pct
+          unit: Percent
           peak: 100
           pop: AVG(((100 * SQ_ACTIVE_INST_VALU) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
         MFMA Utilization:
           value: None
-          unit: pct
+          unit: Percent
           peak: 100
           pop: None
         VMEM Utilization:
           value: None
-          unit: pct
+          unit: Percent
           peak: 100
           pop: None
         Branch Utilization:
           value: None
-          unit: pct
+          unit: Percent
           peak: 100
           pop: None
         VALU Active Threads:
           value: AVG(((SQ_THREAD_CYCLES_VALU / SQ_ACTIVE_INST_VALU) if (SQ_ACTIVE_INST_VALU
             != 0) else None))
-          unit: Threads
+          unit: Work-items
           peak: $wave_size
           pop: (100 * AVG((SQ_THREAD_CYCLES_VALU / SQ_ACTIVE_INST_VALU / $wave_size)
             if (SQ_ACTIVE_INST_VALU != 0) else None))
         IPC:
           value: AVG((SQ_INSTS / SQ_BUSY_CU_CYCLES))
-          unit: Instr/cycle
+          unit: Instructions per Cycle
           peak: 5
           pop: ((100 * AVG((SQ_INSTS / SQ_BUSY_CU_CYCLES))) / 5)
         Wavefront Occupancy:
@@ -107,7 +107,7 @@ Panel Config:
         LDS Bank Conflicts/Access:
           value: AVG(((SQ_LDS_BANK_CONFLICT / (SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT))
             if ((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) != 0) else None))
-          unit: Conflicts/access
+          unit: Conflicts per Access
           peak: 32
           pop: ((100 * AVG(((SQ_LDS_BANK_CONFLICT / (SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT))
             if ((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) != 0) else None))) / 32)
@@ -116,7 +116,7 @@ Panel Config:
             + TCP_TCC_ATOMIC_WITH_RET_REQ_sum) + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum))
             / TCP_TOTAL_CACHE_ACCESSES_sum)) if (TCP_TOTAL_CACHE_ACCESSES_sum != 0)
             else None))
-          unit: pct
+          unit: Percent
           peak: 100
           pop: AVG(((100 - ((100 * (((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum)
             + TCP_TCC_ATOMIC_WITH_RET_REQ_sum) + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum))
@@ -131,7 +131,7 @@ Panel Config:
         L2 Cache Hit Rate:
           value: AVG((((100 * TCC_HIT_sum) / (TCC_HIT_sum + TCC_MISS_sum)) if ((TCC_HIT_sum
             + TCC_MISS_sum) != 0) else None))
-          unit: pct
+          unit: Percent
           peak: 100
           pop: AVG((((100 * TCC_HIT_sum) / (TCC_HIT_sum + TCC_MISS_sum)) if ((TCC_HIT_sum
             + TCC_MISS_sum) != 0) else None))
@@ -172,7 +172,7 @@ Panel Config:
         sL1D Cache Hit Rate:
           value: AVG((((100 * SQC_DCACHE_HITS) / (SQC_DCACHE_HITS + SQC_DCACHE_MISSES))
             if ((SQC_DCACHE_HITS + SQC_DCACHE_MISSES) != 0) else None))
-          unit: pct
+          unit: Percent
           peak: 100
           pop: AVG((((100 * SQC_DCACHE_HITS) / (SQC_DCACHE_HITS + SQC_DCACHE_MISSES))
             if ((SQC_DCACHE_HITS + SQC_DCACHE_MISSES) != 0) else None))
@@ -184,7 +184,7 @@ Panel Config:
             64))) / ((($max_sclk / 1000) * 64) * $sqc_per_gpu))
         L1I Hit Rate:
           value: AVG(((100 * SQC_ICACHE_HITS) / (SQC_ICACHE_HITS + SQC_ICACHE_MISSES)))
-          unit: pct
+          unit: Percent
           peak: 100
           pop: AVG(((100 * SQC_ICACHE_HITS) / (SQC_ICACHE_HITS + SQC_ICACHE_MISSES)))
         L1I BW:
@@ -201,7 +201,7 @@ Panel Config:
           coll_level: SQ_IFETCH_LEVEL
         CU Utilization:
           value: AVG(100 * SQ_BUSY_CU_CYCLES / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
-          unit: Pct
+          unit: Percent
           peak: 100
           pop: AVG(100 * SQ_BUSY_CU_CYCLES / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
   metrics_description:

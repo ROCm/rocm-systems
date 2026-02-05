@@ -37,6 +37,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from pathlib import Path
 from typing import Union
@@ -48,6 +49,28 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from config_management import utils_ruamel as cm_utils  # noqa: E402
+
+
+def normalize_unit_for_docs(unit: str) -> str:
+    """
+    Convert template variable units to human-readable format for documentation.
+
+    Patterns like (Requests + $normUnit) become "Requests per Normalization Unit"
+    Patterns like (Cycles + $normUnit) become "Cycles per Normalization Unit"
+    Other units are returned as-is.
+    """
+    if not unit or not isinstance(unit, str):
+        return unit
+
+    # Match patterns like (PREFIX + $normUnit) where PREFIX can contain
+    # letters, hyphens, and spaces
+    match = re.match(r"\(([A-Za-z\-\s]+?)\s+\+\s+\$normUnit\)", unit.strip())
+    if match:
+        prefix = match.group(1).strip()
+        return f"{prefix} per Normalization Unit"
+
+    return unit
+
 
 # Section to panel ID mapping for organizing descriptions
 SECTION_PANEL_MAP: dict[str, int] = {
@@ -126,9 +149,11 @@ def merge_units_as_default(descs: dict, docs_file: Path, per_arch_file: Path) ->
     for section, metrics in descs.items():
         dsec = docs.get(section) or {}
         for metric, data in metrics.items():
-            doc_entry = dsec.get(metric)
-            if doc_entry and "unit" in doc_entry:
-                data["unit"] = doc_entry["unit"]
+            # Only use docs unit as fallback if no unit was extracted from metric_table
+            if "unit" not in data:
+                doc_entry = dsec.get(metric)
+                if doc_entry and "unit" in doc_entry:
+                    data["unit"] = doc_entry["unit"]
     return descs
 
 
@@ -207,6 +232,7 @@ def extract_descriptions_from_arch(
         panel_descriptions: dict = panel_config.get("metrics_description", {})
 
         metrics_with_units: dict[str, dict[str, str]] = {}
+        metrics_sections: dict[str, str] = {}  # Track ALL metrics and their sections
         for ds in panel_config.get("data source", []):
             for key, value in ds.items():
                 if isinstance(value, dict) and "metric" in value:
@@ -215,19 +241,31 @@ def extract_descriptions_from_arch(
                     if not section_name:
                         continue
                     for metric_name, metric_data in value["metric"].items():
-                        unit = metric_data.get("unit")
+                        # Track section for ALL metrics (even those without units)
+                        metrics_sections[metric_name] = section_name
+                        # Check both "unit" and "units" (different files use
+                        # different keys)
+                        unit = metric_data.get("unit") or metric_data.get("units")
                         if unit:
+                            # Normalize units containing template variables for docs
+                            normalized_unit = normalize_unit_for_docs(unit)
                             metrics_with_units[metric_name] = {
                                 "section": section_name,
-                                "unit": unit,
+                                "unit": normalized_unit,
                             }
 
         for metric_name, description in panel_descriptions.items():
+            # First try metrics_with_units (for unit extraction),
+            # then metrics_sections, skip if no section found
             section_name = (
                 metrics_with_units[metric_name]["section"]
                 if metric_name in metrics_with_units
-                else "General"
+                else metrics_sections.get(metric_name)
             )
+            
+            # Skip metrics that don't belong to any known section
+            if section_name is None:
+                continue
 
             if isinstance(description, dict):
                 plain = description.get("plain", "")
@@ -237,6 +275,14 @@ def extract_descriptions_from_arch(
                 plain = description
                 rst = ""
                 unit = None
+
+            # If no RST provided, use plain text as RST
+            if not rst and plain:
+                rst = plain
+
+            # If no unit in metrics_description, fall back to unit from metric_table
+            if unit is None and metric_name in metrics_with_units:
+                unit = metrics_with_units[metric_name]["unit"]
 
             desc_data = {"plain": plain, "rst": rst}
             if unit is not None:
@@ -274,6 +320,12 @@ def update_docs_metrics_file(
     panel_rst_overrides: set,
     panel_unit_overrides: set,
 ) -> bool:
+    """
+    Update docs metrics file incrementally.
+    - Adds new sections/metrics that don't exist in docs
+    - Only updates RST for metrics with explicit panel overrides
+    - Only updates units for metrics with explicit panel overrides
+    """
     docs_path = Path(docs_file)
     existing: dict = {}
     if docs_path.exists():
@@ -283,13 +335,23 @@ def update_docs_metrics_file(
     for section, metrics in descriptions.items():
         existing.setdefault(section, {})
         for metric_name, desc_data in metrics.items():
-            existing[section].setdefault(metric_name, {})
-            # Only overwrite rst if panel provided an explicit override
-            if (section, metric_name) in panel_rst_overrides and desc_data.get("rst"):
-                existing[section][metric_name]["rst"] = desc_data["rst"]
-            # Always keep unit if provided (optional)
-            if (section, metric_name) in panel_unit_overrides and "unit" in desc_data:
-                existing[section][metric_name]["unit"] = desc_data["unit"]
+            # If metric doesn't exist in docs, add it with rst (and unit if present)
+            if metric_name not in existing[section]:
+                existing[section][metric_name] = {"rst": desc_data.get("rst", "")}
+                if "unit" in desc_data:
+                    existing[section][metric_name]["unit"] = desc_data["unit"]
+            else:
+                # Metric exists - only update rst if panel provided an explicit override
+                if (section, metric_name) in panel_rst_overrides and desc_data.get(
+                    "rst"
+                ):
+                    existing[section][metric_name]["rst"] = desc_data["rst"]
+                # Only update unit if panel provided an explicit override
+                if (
+                    section,
+                    metric_name,
+                ) in panel_unit_overrides and "unit" in desc_data:
+                    existing[section][metric_name]["unit"] = desc_data["unit"]
 
     docs_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -379,8 +441,9 @@ def sync_arch(
     # 4) Write per-arch file (plain from panel; rst = panel override or docs default)
     update_per_arch_metrics_file(arch_name, descriptions, per_arch_metrics_dir)
 
-    # 5) Only when latest: update docs, but overwrite 'rst' only for overrides
-    if is_latest and (panel_rst_overrides or panel_unit_overrides):
+    # 5) When latest arch: update docs (adds new sections/metrics,
+    # updates only overrides)
+    if is_latest:
         if not update_docs_metrics_file(
             descriptions,
             docs_metrics_file,

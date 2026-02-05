@@ -19,6 +19,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+cmake_minimum_required(VERSION 3.21.3)
 add_custom_target(build_intro)
 add_subdirectory(bit_extract)
 add_subdirectory(module_api)

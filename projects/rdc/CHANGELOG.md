@@ -2,6 +2,23 @@
 
 Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](https://rocm.docs.amd.com/projects/rdc/en/latest/).
 
+## RDC 1.2.0 for ROCm 7.1.0
+
+### Added
+
+- CPU monitoring support with 30+ CPU field definitions through AMD SMI integration.
+- CPU partition format support (c0.0, c1.0) for monitoring AMD EPYC processors.
+- Mixed GPU/CPU monitoring in single `rdci dmon` command.
+
+### Optimized
+
+- Improved profiler metrics path detection for counter definitions.
+
+### Resolved issues
+
+- Group management issues with listing created/non-created groups.
+- ECC_UNCORRECT field behavior.
+
 ## RDC for ROCm 7.0.0
 
 ### Added
