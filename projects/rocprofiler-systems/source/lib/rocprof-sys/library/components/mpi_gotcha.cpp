@@ -405,13 +405,12 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::outgoing, int _retval)
 void
 mpi_gotcha::populate_rank_and_size()
 {
-    int _comm_rank = -1;
-    int _comm_size = -1;
-
 #if defined(ROCPROFSYS_USE_MPI) && ROCPROFSYS_USE_MPI > 0
     // Full MPI is available
-    int _rank_ret = PMPI_Comm_rank(MPI_COMM_WORLD, &_comm_rank);  // NOLINT
-    int _size_ret = PMPI_Comm_size(MPI_COMM_WORLD, &_comm_size);  // NOLINT
+    int _comm_rank = -1;
+    int _comm_size = -1;
+    int _rank_ret  = PMPI_Comm_rank(MPI_COMM_WORLD, &_comm_rank);  // NOLINT
+    int _size_ret  = PMPI_Comm_size(MPI_COMM_WORLD, &_comm_size);  // NOLINT
 
     if(_rank_ret == MPI_SUCCESS && _size_ret == MPI_SUCCESS)
     {
@@ -425,9 +424,11 @@ mpi_gotcha::populate_rank_and_size()
     }
 #elif defined(ROCPROFSYS_USE_MPI_HEADERS) && ROCPROFSYS_USE_MPI_HEADERS > 0
     // Only MPI headers are available, proceed with process based index
-    auto _pid  = getpid();
-    auto _ppid = getppid();
-    _comm_size = mproc::get_concurrent_processes(_ppid).size();
+    int  _comm_rank = -1;
+    int  _comm_size = -1;
+    auto _pid       = getpid();
+    auto _ppid      = getppid();
+    _comm_size      = mproc::get_concurrent_processes(_ppid).size();
     if(_comm_size > 0)
     {
         mproc_comm_record.comm = _ppid;
