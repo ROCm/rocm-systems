@@ -61,12 +61,13 @@ control the behavior of rocSHMEM.
       - `` ``
       - | Example value: ``bnxt_re0``
 
-    * - | ``ROCSHMEM_EXCLUDE_IB_HCAS``
-        | Comma separated list of NIC names that should not be used by rocSHMEM. Unlike ``ROCSHMEM_USE_IB_HCA``, when this variable is set,
-        | NIC auto-detection and mapping still executes, but NICs from the exclude list are discarded before auto-detection runs.
+    * - | ``ROCSHMEM_HCA_LIST``
+        | Comma separated list of NIC names that can be used by rocSHMEM. Unlike ``ROCSHMEM_USE_IB_HCA``, when this variable is set,
+        | NIC auto-detection and mapping still executes, but NICs that are not in the list are discarded before auto-detection runs.
+        | Prefixing the list with ``^`` turns the list in an _exclude_ list, NICs that are in the list are discarded before auto-detection runs.
         | The default value is an empty string and rocSHMEM auto-detects the most appropriate NIC.
       - `` ``
-      - | Example value: ``bnxt_re1,bnxt_re11``
+      - | Example value: ``bnxt_re1,bnxt_re11``, ``^mlx5_0,mlx5_3``
 
     * - | ``ROCSHMEM_BOOTSTRAP_SOCKET_IFNAME``
         | Chooses the interface to bootstrap rocSHMEM with.

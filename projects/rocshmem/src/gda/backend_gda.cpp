@@ -132,7 +132,7 @@ void GDABackend::select_nic() {
   } else {
     int gpu_dev = 0;
     CHECK_HIP(hipGetDevice(&gpu_dev));
-    int nic_dev = rocshmem::GetClosestNicToGpu(gpu_dev, envvar::excluded_nics.get_value().c_str(), &requested_nic);
+    int nic_dev = rocshmem::GetClosestNicToGpu(gpu_dev, envvar::hca_list.get_value().c_str(), &requested_nic);
     assert (nic_dev != -1);
   }
 }

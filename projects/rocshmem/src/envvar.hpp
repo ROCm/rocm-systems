@@ -428,7 +428,7 @@ namespace envvar {
     extern const var<size_t> max_wavefront_buffers;
 
     extern const var<std::string> requested_nic;
-    extern const var<std::string> excluded_nics;
+    extern const var<std::string> hca_list;
     extern const var<uint32_t> sq_size;
   }  // inline namespace _base
 

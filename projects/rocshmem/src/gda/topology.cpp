@@ -708,7 +708,7 @@ namespace rocshmem
     return false;
   }
 
-  int GetClosestNicToGpu(int gpuIndex, const char* exclude_list, const char** dev_name)
+  int GetClosestNicToGpu(int gpuIndex, const char* hca_list, const char** dev_name)
   {
     static bool isInitialized = false;
     static std::vector<int> closestNicId;
@@ -723,9 +723,11 @@ namespace rocshmem
 
       // Build up list of NIC bus addresses
       std::vector<std::string> ibvAddressList;
-      std::string excludeList(nullptr == exclude_list? "": exclude_list);
+      std::string excludeList((nullptr == hca_list || hca_list[0] != '^')? "": hca_list);
+      std::string includeList((nullptr == hca_list || hca_list[0] == '^')? "": hca_list);
       for (auto const& ibvDevice : ibvDeviceList) {
-        auto is_excluded = hasExactMatch(excludeList, ibvDevice.name);
+        auto is_excluded = hasExactMatch(excludeList, ibvDevice.name)
+                        || (includeList.length() && !hasExactMatch(includeList, ibvDevice.name));
         ibvAddressList.push_back((ibvDevice.hasActivePort && !is_excluded) ? ibvDevice.busId : "");
       }
 
