@@ -1053,12 +1053,6 @@ buffered_tracing_callback(rocprofiler_context_id_t /*context*/,
                     header->kind == ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_FAULT)
             {
                 // drop these events, which are captured within the corresponding paired record
-                // generate an error in CI so we are aware of it if it is enabled at a later time
-                ROCP_CI_LOG(INFO) << fmt::format(
-                    "dropping KFD event kind: {} :: {}",
-                    header->kind,
-                    tool_metadata->get_kind_name(
-                        static_cast<rocprofiler_buffer_tracing_kind_t>(header->kind)));
             }
             else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE)
             {
