@@ -95,7 +95,7 @@ metadata_initialize_ainic_smi_tracks(uint32_t nic_index)
 {
     const auto   thread_id = std::nullopt;
     std::string& nic       = nic_data::nic_vec[nic_index];
-    std::string  track_name{ fmt::format("{} ({})", nic, (int)nic_index) };
+    std::string  track_name{ fmt::format("{} ({})", nic, (int) nic_index) };
 
     trace_cache::get_metadata_registry().add_track(
         { trace_cache::info::annotate_with_nic<category::amd_smi_nic_rx_cnp_pkts>(
