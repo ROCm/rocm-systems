@@ -12,3 +12,11 @@ alwaysApply: true
 3. **Reversible changes only**: Never make a change that can't be easily undone without asking the user.
 
 4. **Code edits**: Do not make any substantial edits to code (more than a few lines) without asking the user.
+
+5. **Build instructions**: Always rebuild completely using install.sh:
+   ```bash
+   cd /work/lmeadows/rocm-systems/projects/rccl
+   rm -rf build
+   ./install.sh --amdgpu_targets=gfx942 --device-linker
+   ```
+   Note: `--amdgpu_targets` should match the current architecture (gfx942 for MI300A). Use `--device-linker` (hyphen, not underscore).
