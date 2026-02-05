@@ -220,11 +220,8 @@ private:
       __atomic_signal_fence(__ATOMIC_SEQ_CST);
     }
     else if((flags & RolePostSend) && dataStored){
-#ifdef __GFX9__
-    __threadfence();
-#else
+    // Use __threadfence_system() for cross-process visibility with IPC-mapped memory
     __threadfence_system();
-#endif
     }
 
     if ((flags & Send*RolePostSend) && next_hdp_reg)
