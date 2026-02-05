@@ -1374,8 +1374,21 @@ if (DEVICE_LINKER)
   message(STATUS "Device linker target: ${DEVICE_LINKER_GPU_TARGET} (bundle: ${DEVICE_LINKER_BUNDLE_TARGET})")
   
   # Build the device_linker tool itself
+  # Use AOMP LLVM for proper DWARF handling
+  set(AOMP_LLVM_DIR "/COD/LATEST/aomp/llvm")
+  
   add_executable(device_linker_tool ${DEVICE_LINKER_DIR}/device_linker.cpp)
   target_compile_features(device_linker_tool PRIVATE cxx_std_17)
+  target_include_directories(device_linker_tool PRIVATE ${AOMP_LLVM_DIR}/include)
+  target_compile_options(device_linker_tool PRIVATE -fno-rtti -fno-exceptions)
+  target_compile_definitions(device_linker_tool PRIVATE
+    _GNU_SOURCE
+    __STDC_CONSTANT_MACROS
+    __STDC_FORMAT_MACROS
+    __STDC_LIMIT_MACROS
+  )
+  target_link_directories(device_linker_tool PRIVATE ${AOMP_LLVM_DIR}/lib)
+  target_link_libraries(device_linker_tool PRIVATE LLVM)
   set_target_properties(device_linker_tool PROPERTIES
     OUTPUT_NAME device_linker
     RUNTIME_OUTPUT_DIRECTORY ${DEVICE_LINKER_DIR}

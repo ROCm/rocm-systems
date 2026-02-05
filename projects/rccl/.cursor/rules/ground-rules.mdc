@@ -13,10 +13,16 @@ alwaysApply: true
 
 4. **Code edits**: Do not make any substantial edits to code (more than a few lines) without asking the user.
 
-5. **Build instructions**: Always rebuild completely using install.sh:
+5. **Build instructions**: Always rebuild completely using install.sh from the workspace root:
    ```bash
-   cd /work/lmeadows/rocm-systems/projects/rccl
    rm -rf build
    ./install.sh --amdgpu_targets=gfx942 --device-linker
    ```
    Note: `--amdgpu_targets` should match the current architecture (gfx942 for MI300A). Use `--device-linker` (hyphen, not underscore).
+
+6. **Experimental branches**: Do NOT create new git branches in the main repo - this affects other users of that directory. Instead, create a separate copy of the repo for experimental work:
+   ```bash
+   cp -r . ../rccl-experiment-name
+   cd ../rccl-experiment-name
+   git checkout -b experiment-branch-name
+   ```

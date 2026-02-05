@@ -47,6 +47,10 @@ Thread 19 "ncclDevKern-c14f" received signal SIGSEGV, Segmentation fault.
 Rebuild with the new DWARF merging code, then use `rocgdb` to inspect the actual pointer
 values at the crash site. The new debug info should show function names (not just `??`).
 
+**Blocker:** `rocgdb` reports "DW_FORM_line_strp pointing outside of .debug_line_str section"
+for some function lookups. See `DWARF_FIX_PROGRESS.md` for details. Next step is to use
+LLVM's `DWARFDebugLine` API instead of manual prologue parsing.
+
 ## Build & Test
 
 ```bash
@@ -85,6 +89,7 @@ the kernel will access wrong memory offsets and crash or hang.
 | `LDS_LAYOUT.md` | Shared memory layout reference - actual offsets from disassembly analysis |
 | `IFC_VS_DEVICE_LINKER_COMPARISON.md` | Detailed ELF comparison with production build |
 | `BUILD_PROCESS.md` | Build pipeline diagrams and data flow |
+| `DWARF_FIX_PROGRESS.md` | **IN PROGRESS** - DWARF5 line table patching for rocgdb compatibility |
 
 ## Key Source Files
 
