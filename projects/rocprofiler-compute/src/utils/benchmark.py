@@ -24,8 +24,12 @@
 ##############################################################################
 
 import csv
+import fcntl
 import math
+import os
 from collections import namedtuple
+from collections.abc import Generator
+from contextlib import contextmanager
 from ctypes import (
     POINTER,
     byref,
@@ -40,6 +44,7 @@ from ctypes import (
     cast,
     sizeof,
 )
+from pathlib import Path
 from typing import Any
 
 import hip.hip as hip
@@ -184,6 +189,37 @@ DEFAULT_WORKGROUPS = 8192
 DEFAULT_THREADS = DEFAULT_WORKGROUP_SIZE * DEFAULT_WORKGROUPS
 DEFAULT_NUM_EXPERIMENTS = 100
 DEFAULT_NUM_ITERS = 10
+
+
+def get_lock_dir() -> Path:
+    """Get directory for GPU benchmark lock files.
+
+    Fallback: ROCPROF_COMPUTE_LOCK_DIR -> TMPDIR -> /tmp
+    """
+    base = os.environ.get("ROCPROF_COMPUTE_LOCK_DIR", os.environ.get("TMPDIR", "/tmp"))
+    lock_dir = Path(base) / "rocprof-compute"
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    return lock_dir
+
+
+def get_gpu_uuid(device: int) -> str:
+    """Get GPU UUID as hex string for the specified device."""
+    props = hip.hipGetDeviceProperties(device)
+    return bytes(props.uuid.uuid).hex()
+
+
+@contextmanager
+def gpu_benchmark_lock(device: int) -> Generator[None, None, None]:
+    """Acquire exclusive lock for benchmarking a specific GPU."""
+    gpu_uuid = get_gpu_uuid(device)
+    lock_file = get_lock_dir() / f"rocprof-compute-benchmark-{gpu_uuid}.lock"
+
+    with open(lock_file, "w") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)  # Blocking exclusive lock
+        try:
+            yield
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)
 
 
 def show_progress(pct: float) -> None:
@@ -1153,23 +1189,24 @@ tests = {
 
 # Run the roofline tests on the specified device
 def run_benchmark(device: int) -> dict[PerfMetrics]:
-    metrics_dict = {}
+    with gpu_benchmark_lock(device):
+        metrics_dict = {}
 
-    arch = get_gfx_arch(device)
-    cus = hip.hipGetDeviceProperties(device).multiProcessorCount
+        arch = get_gfx_arch(device)
+        cus = hip.hipGetDeviceProperties(device).multiProcessorCount
 
-    print(f"GPU Device {device} ({arch}) with {cus} CUs: Profiling...")
+        print(f"GPU Device {device} ({arch}) with {cus} CUs: Profiling...")
 
-    for name, func in tests.items():
-        if arch in unsupported_data_types and name in unsupported_data_types[arch]:
-            print(f"Skipping {name}")
-            metrics = PerfMetrics(0, 0, 0)
-        else:
-            metrics = func(device)
+        for name, func in tests.items():
+            if arch in unsupported_data_types and name in unsupported_data_types[arch]:
+                print(f"Skipping {name}")
+                metrics = PerfMetrics(0, 0, 0)
+            else:
+                metrics = func(device)
 
-        metrics_dict[name] = metrics
+            metrics_dict[name] = metrics
 
-    return metrics_dict
+        return metrics_dict
 
 
 # Run the benchmark test on the specified devices
