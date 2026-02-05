@@ -27,6 +27,7 @@
 #include "scheduler.h"
 #include "common.h"
 #include "api_trace.h"
+#include "rccl_common.h"
 
 #include <cstring> // std::memcpy
 #include <cinttypes> // PRIx64
@@ -161,6 +162,7 @@ static inline int ncclFuncTrafficPerByte(ncclFunc_t func, int nRanks) {
 }
 
 RCCL_PARAM_DECLARE(EnableProxyTrace);
+RCCL_PARAM_DECLARE(DirectReduceScatterThreshold);
 /*****************************************************************************/
 /*       Launch system : synchronization and CUDA kernel launch              */
 /*****************************************************************************/
@@ -412,7 +414,22 @@ ncclResult_t ncclTasksRegAndEnqueue(struct ncclComm* comm) {
         devWork.size = task->count;
     }
 #endif
-
+    // Direct Reduce Scatter
+    if (task->func == ncclFuncReduceScatter && comm->enableDirectReduceScatter) {
+      devWork.enableDirectReduceScatter = comm->enableDirectReduceScatter;
+      int64_t directReduceScatterLimit = rcclParamDirectReduceScatterThreshold();
+      if (directReduceScatterLimit >= 0) {
+        // set threshold to 2MiB hard limit
+        directReduceScatterLimit = std::min(directReduceScatterLimit, (int64_t)2097152);
+        devWork.directReduceScatterLimitBytes = (uint32_t) directReduceScatterLimit;
+      } else {
+        devWork.directReduceScatterLimitBytes = (uint32_t)0;
+      }
+      devWork.tempBuff = (void*)comm->tempBuff;
+      devWork.currentRank = comm->rank;
+      devWork.count = task->count;
+    }
+    
     devWork.isOneRPN = comm->isOneRPN;
     devWork.netRegUsed = devWork.regUsed = 0;
     devWork.gfx9CheapFenceOff = gfx9CheapFenceOff(devWork, comm->gfx9CheapFenceOff);
@@ -680,8 +697,10 @@ static ncclResult_t scheduleCollTasksToPlan(
   int channelId = 0;
   size_t currentTraffic = 0;
 
+#ifdef ENABLE_TRACE
   size_t channelCounts[MAXCHANNELS];
   for (int c=0; c<MAXCHANNELS; c++) channelCounts[c] = 0;
+#endif
 
   while (nPlanColls!=0 && !ncclIntruQueueEmpty(&planner->collTaskQueue)) {
     struct ncclTaskColl* task = ncclIntruQueueHead(&planner->collTaskQueue);
@@ -725,10 +744,12 @@ static ncclResult_t scheduleCollTasksToPlan(
         proxyOp.incWorkCounter = true;
         addWorkBatchToPlan(comm, plan, c, workNode->workType, task->devFuncId, plan->workBytes);
         // Set pattern to profiler to add a proxy profiler for kernel events
-        if (task->func != ncclFuncAllToAllGda) {
+        // for Direct Reduce Scatter (DRS), we don't need to add proxy op
+        bool isDRS = task->func == ncclFuncReduceScatter && comm->enableDirectReduceScatter;
+        if (!isDRS && task->func != ncclFuncAllToAllGda) {
             NCCLCHECK(addProxyOpIfNeeded(comm, plan, &proxyOp));
             NCCLCHECK(addProfilerProxyOpIfNeeded(comm, plan, &proxyOp));
-	}
+        }
       }
     } else { // not task->isCollnet
       int trafficPerByte = ncclFuncTrafficPerByte(task->func, comm->nRanks);
@@ -875,7 +896,9 @@ static ncclResult_t scheduleCollTasksToPlan(
         // Coverity reports "proxyOp->connection" as being possibly uninitialized.  It's hard to
         // determine if that's actually true but it's also not clear if that would be an issue.
         // coverity[uninit_use_in_call:FALSE]
-        if (task->func != ncclFuncAllToAllGda) {
+        // for Direct Reduce Scatter (DRS), we don't need to add proxy op
+        bool isDRS = task->func == ncclFuncReduceScatter && comm->enableDirectReduceScatter;
+        if (!isDRS && task->func != ncclFuncAllToAllGda) {
             NCCLCHECK(addProxyOpIfNeeded(comm, plan, proxyOp));
             NCCLCHECK(addProfilerProxyOpIfNeeded(comm, plan, proxyOp));
         }
@@ -923,9 +946,11 @@ static ncclResult_t scheduleCollTasksToPlan(
           int(devWork->cbd.chunkGrainsMid*rcclProtoGrainSize(task->protocol, comm)),
           int(devWork->cbd.chunkGrainsHi*rcclProtoGrainSize(task->protocol, comm)));
           // channel traffic counter
+#ifdef ENABLE_TRACE
           channelCounts[devWork->channelLo] += (long)devWork->cbd.countLo;
           if (devWork->channelLo != devWork->channelHi) channelCounts[devWork->channelHi] += (long)devWork->cbd.countHi;
           for (int c=devWork->channelLo+1; c<devWork->channelHi; c++) channelCounts[c] += (long)devWork->cbd.countMid;
+#endif
       }
     }
 
@@ -941,6 +966,7 @@ static ncclResult_t scheduleCollTasksToPlan(
     plan->workBytes += workNode->size;
   }
 
+#ifdef ENABLE_TRACE
   char line[1024];
   int offset = 0;
   for (int c=0; c<MAXCHANNELS; c++) {
@@ -948,6 +974,7 @@ static ncclResult_t scheduleCollTasksToPlan(
     offset = strlen(line);
   }
   TRACE(NCCL_COLL, "Channel traffic counts: %s", line);
+#endif
 
   return ncclSuccess;
 }
@@ -1732,18 +1759,13 @@ ncclResult_t ncclLaunchPrepare(struct ncclComm* comm) {
     cudaStream_t deviceStream, launchOrder;
     NCCLCHECKGOTO(ncclStrongStreamAcquire(planner->capturingGraph, &comm->sharedRes->deviceStream, /*concurrent=*/false, &deviceStream), result, failure);
 
-    if (persistent || planner->numStreams != 1) {
-      // userStream[0] waits on each userStream[i]...
-      for (struct ncclCudaStreamList* l=planner->streams->next; l != nullptr; l = l->next) {
-        CUDACHECKGOTO(cudaEventRecord(comm->sharedRes->scratchEvent, l->stream), result, failure);
-        CUDACHECKGOTO(cudaStreamWaitEvent(launchStream, comm->sharedRes->scratchEvent, 0), result, failure);
-      }
-      // userStream[0] waits on deviceStream
-      NCCLCHECKGOTO(ncclStreamWaitStream(launchStream, deviceStream, comm->sharedRes->scratchEvent), result, failure);
-    } else if (planner->streams->stream != comm->lastStream && comm->lastStream != nullptr && !persistent) {
-      // Stream changed from last call, create dependency against last NCCL kernel launch
-      CUDACHECKGOTO(hipStreamWaitEvent(planner->streams->stream, comm->doneEvent, 0), result, failure);
+    // userStream[0] waits on each userStream[i]...
+    for (struct ncclCudaStreamList* l=planner->streams->next; l != nullptr; l = l->next) {
+      CUDACHECKGOTO(cudaEventRecord(comm->sharedRes->scratchEvent, l->stream), result, failure);
+      CUDACHECKGOTO(cudaStreamWaitEvent(launchStream, comm->sharedRes->scratchEvent, 0), result, failure);
     }
+    // userStream[0] waits on deviceStream
+    NCCLCHECKGOTO(ncclStreamWaitStream(launchStream, deviceStream, comm->sharedRes->scratchEvent), result, failure);
 
     bool capturing = ncclCudaGraphValid(planner->capturingGraph);
     enum ncclImplicitOrder implicitOrder;
@@ -1821,21 +1843,10 @@ ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan
   cudaStream_t launchStream = planner->streams->stream;
 
   NCCLCHECK(ncclProfilerStartKernelLaunchEvent(plan, launchStream));
-  
+
   void* extra[] = {plan->kernelArgs, &plan->kernelArgsSize};
 
   auto event = latency_profiler::collTraceAquireEventBaseline(plan, launchStream);
-  if (planner->numStreams == 1 && !plan->persistent) {
-    latency_profiler::collTraceRecordStartEvent(comm, launchStream, event.get());
-    comm->lastStream = planner->streams->stream;
-    CUDACHECKGOTO(hipExtLaunchKernel(plan->kernelFn, grid, block, extra, 0, launchStream, NULL, comm->doneEvent, 0), ret, do_return);
-
-    latency_profiler::collTraceRecordEndEvent(comm, plan, launchStream, std::move(event));
-    return ncclSuccess;
-  }
-
-  // CUfunction fn;
-  // CUDACHECK(cudaGetFuncBySymbol(&fn, sym));
 
 #if !defined(__HIP_PLATFORM_AMD__) || !defined(__HIPCC__)
   int driverVersion;
@@ -1970,7 +1981,6 @@ ncclResult_t ncclLaunchFinish(struct ncclComm* comm) {
     // back to us for reclaiming via callbackQueue.
     ncclIntruQueueConstruct(&planner->planQueue);
 
-    bool capturing = ncclCudaGraphValid(planner->capturingGraph);
     cudaStream_t launchStream = planner->streams->stream; // First user stream gets launch
     cudaStream_t deviceStream, launchOrder;
     cudaEvent_t finishedEvent = comm->sharedRes->scratchEvent;
@@ -1987,25 +1997,24 @@ ncclResult_t ncclLaunchFinish(struct ncclComm* comm) {
       CUDACHECK(cudaEventCreateWithFlags(&comm->sharedRes->scratchEvent, cudaEventDisableTiming));
     }
 
-    if (capturing || planner->numStreams != 1 || ncclParamLaunchOrderImplicit()) {
-      CUDACHECK(cudaEventRecord(finishedEvent, launchStream));
-      // deviceStream waits on userStream[0]
-      NCCLCHECK(ncclStrongStreamAcquiredWorkStream(planner->capturingGraph, &comm->sharedRes->deviceStream, /*concurrent=*/false, &deviceStream));
+    CUDACHECK(cudaEventRecord(finishedEvent, launchStream));
+    // deviceStream waits on userStream[0]
+    NCCLCHECK(ncclStrongStreamAcquiredWorkStream(planner->capturingGraph, &comm->sharedRes->deviceStream, /*concurrent=*/false, &deviceStream));
 
-      // We know that deviceStream is strictly behind the launchStream because launchStream
-      // synced with it before kernel launch. This allows us to to see deviceStream waiting
-      // on launchStream as a fast-forward. When building CUDA graphs fast forwards should
-      // be handled specially so as not to create graphs with a blowup in the number of edges.
-      // So we could do this:
-      //   CUDACHECK(cudaStreamWaitEvent(deviceStream, finishedEvent, 0));
-      // But instead we do:
-      NCCLCHECK(ncclStreamAdvanceToEvent(planner->capturingGraph, deviceStream, finishedEvent));
+    // We know that deviceStream is strictly behind the launchStream because launchStream
+    // synced with it before kernel launch. This allows us to to see deviceStream waiting
+    // on launchStream as a fast-forward. When building CUDA graphs fast forwards should
+    // be handled specially so as not to create graphs with a blowup in the number of edges.
+    // So we could do this:
+    //   CUDACHECK(cudaStreamWaitEvent(deviceStream, finishedEvent, 0));
+    // But instead we do:
+    NCCLCHECK(ncclStreamAdvanceToEvent(planner->capturingGraph, deviceStream, finishedEvent));
 
-      // Each userStream[i] waits on userStream[0]
-      for (struct ncclCudaStreamList* l=planner->streams->next; l != nullptr; l = l->next) {
-        CUDACHECK(cudaStreamWaitEvent(l->stream, finishedEvent, 0));
-      }
+    // Each userStream[i] waits on userStream[0]
+    for (struct ncclCudaStreamList* l=planner->streams->next; l != nullptr; l = l->next) {
+      CUDACHECK(cudaStreamWaitEvent(l->stream, finishedEvent, 0));
     }
+    bool capturing = ncclCudaGraphValid(planner->capturingGraph);
     enum ncclImplicitOrder implicitOrder;
     NCCLCHECK(getImplicitOrder(&implicitOrder, capturing));
     if (implicitOrder != ncclImplicitOrderNone) {
@@ -2101,6 +2110,7 @@ static ncclResult_t updateCollCostTable(
 }
 
 extern int64_t ncclParamMinNchannels();
+extern int64_t ncclParamMaxNchannels();
 
 static ncclResult_t topoGetAlgoInfo(
     struct ncclComm* comm, struct ncclTaskColl* info, size_t nBytes,
@@ -2160,10 +2170,16 @@ static ncclResult_t topoGetAlgoInfo(
   rcclSetPipelining(comm, nBytes, info);
   if (simInfo) simInfo->estimatedTime = time;
   TRACE(NCCL_COLL, "%ld Bytes -> Algo %d proto %d time %f", nBytes, info->algorithm, info->protocol, time);
-#ifdef ENABLE_WARP_SPEED
-  int nc = comm->topo->warpSpeedEnabled? comm->nChannels / 2 : comm->nChannels;
-#else
   int nc = comm->nChannels;
+#ifdef ENABLE_WARP_SPEED
+  if(comm->topo->warpSpeedEnabled) {
+    nc /= comm->warpSpeedChannelMultiplier;
+    // Temporary check as we reduce CU usage for all collectives
+    // TODO: Remove this condition after optimizing all collectives
+    if(IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && comm->nNodes == 1 && comm->nRanks == 8 && info->func != ncclFuncAllReduce && ncclParamMaxNchannels() < 0) {
+      nc *= 2;
+    }
+  }
 #endif
   int nt = comm->maxThreads[info->algorithm][info->protocol];
   int threadThreshold = comm->threadThresholds[info->algorithm][info->protocol];
@@ -2198,7 +2214,7 @@ static ncclResult_t topoGetAlgoInfo(
     INFO(NCCL_INIT, "post-adjustment based on threadThreshold:%i nBytes:%lu nc:%i", threadThreshold, nBytes, nc);
     rcclOverrideChannels(comm, info->func, nBytes, nc);
   }
-  
+
   rcclRestrictMaxChannels(comm, nc);
 
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
@@ -2746,7 +2762,6 @@ static ncclResult_t ncclPlannerSetCapturingGraph(struct ncclComm* comm, struct n
         l->stream = info->stream;
         l->next = planner->streams;
         planner->streams = l;
-        planner->numStreams++;
         break;
       }
       if (l->stream == info->stream)
@@ -2869,7 +2884,7 @@ static ncclResult_t collTaskAppend(
   NCCLCHECK(ncclProfilerStartGroupApiEvent(info, isGraphCaptured));
   NCCLCHECK(ncclProfilerRecordGroupApiEventState(ncclProfilerGroupStartApiStop));
   NCCLCHECK(ncclProfilerStartCollApiEvent(info, isGraphCaptured));
-  
+
   struct ncclTaskColl* t = ncclMemoryPoolAlloc<struct ncclTaskColl>(&comm->memPool_ncclTaskColl, &comm->memPermanent);
   t->func = info->coll;
   t->sendbuff = info->sendbuff;
@@ -2878,7 +2893,7 @@ static ncclResult_t collTaskAppend(
   t->root = info->root;
   t->datatype = info->datatype;
   size_t elementSize = ncclTypeSize(t->datatype);
-  if (t->func == ncclFuncAllGather || t->func == ncclFuncBroadcast || t->func == ncclFuncAlltoAllPivot) {
+  if (t->func == ncclFuncAllGather || t->func == ncclFuncBroadcast || t->func == ncclFuncAlltoAllPivot || t->func == ncclFuncAllToAllGda) {
     t->count *= elementSize;
     t->datatype = ncclInt8;
     elementSize = 1;
@@ -2908,7 +2923,7 @@ static ncclResult_t ceCollTaskAppend(
     struct ncclDevrWindow* recvWin,
     struct ncclDevRedOpFull opDev) {
   struct ncclKernelPlanner *planner = &comm->planner;
-  
+
   // Check if CE needs initialization
   if (comm->ceColl.baseUCSymReadyPtr == NULL && ncclIntruQueueEmpty(&comm->ceInitTaskQueue)) {
     struct ncclCeInitTask* ceTask;
@@ -2982,7 +2997,7 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       ncclDevrFindWindow(comm, info->sendbuff, &sendWin);
       ncclDevrFindWindow(comm, info->recvbuff, &recvWin);
       bool ceImplemented = ncclCeImplemented(info->coll, info->op, info->datatype);
-      
+
       // Append CE collective task if CE is supported and requested by user
       if (comm->symmetricSupport && comm->nNodes == 1 && sendWin && recvWin && (sendWin->winFlags & recvWin->winFlags & NCCL_WIN_COLL_SYMMETRIC) && comm->config.CTAPolicy == NCCL_CTA_POLICY_ZERO && ceImplemented) {
         NCCLCHECK(ceCollTaskAppend(comm, info, sendWin, recvWin, opDev));

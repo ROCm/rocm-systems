@@ -127,29 +127,29 @@ PerfettoSession::~PerfettoSession()
     auto filename = std::string{"results"};
     auto ofs      = tool::get_output_stream(config, filename, ".pftrace", std::ios::binary);
 
-    auto amount_read = std::atomic<size_t>{0};
-    auto is_done     = std::promise<void>{};
-    auto _mtx        = std::mutex{};
-    auto _reader     = [&ofs, &_mtx, &is_done, &amount_read](
-                       ::perfetto::TracingSession::ReadTraceCallbackArgs _args) {
-        auto _lk = std::unique_lock<std::mutex>{_mtx};
-        if(_args.data && _args.size > 0)
-        {
-            ROCP_TRACE << "Writing " << _args.size << " B to trace...";
-            // Write the trace data into file
-            ofs.stream->write(_args.data, _args.size);
-            amount_read += _args.size;
-        }
-        ROCP_INFO_IF(!_args.has_more && amount_read > 0)
-            << "Wrote " << amount_read << " B to perfetto trace file";
-        if(!_args.has_more) is_done.set_value();
-    };
-
+    // NOTE: These variables must be inside the loop to avoid a TSAN race condition.
+    // If is_done is declared outside and reassigned each iteration, the promise's internal
+    // mutex can be destroyed while the callback thread is still unlocking it after set_value().
     for(size_t i = 0; i < 2; ++i)
     {
         ROCP_TRACE << "Reading trace...";
-        amount_read = 0;
-        is_done     = std::promise<void>{};
+        auto amount_read = std::atomic<size_t>{0};
+        auto is_done     = std::promise<void>{};
+        auto _mtx        = std::mutex{};
+        auto _reader     = [&ofs, &_mtx, &is_done, &amount_read](
+                           ::perfetto::TracingSession::ReadTraceCallbackArgs _args) {
+            auto _lk = std::unique_lock<std::mutex>{_mtx};
+            if(_args.data && _args.size > 0)
+            {
+                ROCP_TRACE << "Writing " << _args.size << " B to trace...";
+                // Write the trace data into file
+                ofs.stream->write(_args.data, _args.size);
+                amount_read += _args.size;
+            }
+            ROCP_INFO_IF(!_args.has_more && amount_read > 0)
+                << "Wrote " << amount_read << " B to perfetto trace file";
+            if(!_args.has_more) is_done.set_value();
+        };
         tracing_session->ReadTrace(_reader);
         is_done.get_future().wait();
     }

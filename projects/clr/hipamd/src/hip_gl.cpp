@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2021 Advanced Micro Devices, Inc.
+/* Copyright (c) 2010 - 2026 Advanced Micro Devices, Inc.
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -234,14 +234,8 @@ hipError_t hipGraphicsSubResourceGetMappedArray(hipArray_t* array, hipGraphicsRe
     LogError("invalid arrayIndex, arrayIndex higher than zero not implemented");
     HIP_RETURN(hipErrorInvalidValue);
   }
-  
-  size_t height = image->getHeight();
-  size_t width = image->getWidth();
-  size_t depth = image->getDepth();
-  size_t max_dim = std::max({height, width, depth});
-  unsigned int max_mipLevel = 1 + static_cast<unsigned int>(std::floor(std::log2(max_dim)));
 
-  if (mipLevel > max_mipLevel) {
+  if (mipLevel >= image->getMipLevels()) {
     LogError("invalid mipLevel");
     HIP_RETURN(hipErrorInvalidValue);
   }
@@ -724,7 +718,7 @@ hipError_t hipGraphicsGLRegisterBuffer(hipGraphicsResource** resource, GLuint bu
   }
   HIP_RETURN(hipSuccess);
 }
- 
+
 hipError_t hipGraphicsMapResources(int count, hipGraphicsResource_t* resources,
                                    hipStream_t stream) {
   HIP_INIT_API(hipGraphicsMapResources, count, resources, stream);
@@ -914,19 +908,26 @@ hipError_t hipGraphicsUnmapResources(int count, hipGraphicsResource_t* resources
   if (as_cl(&command->event()) == nullptr) {
     command->release();
   }
+
+  hip::Device* device = hip::getCurrentDevice();
+  if (device == nullptr) {
+    HIP_RETURN(hipErrorNoDevice);
+  }
+
+  const amd::Device* curDev = device->devices()[0];
   for (auto& mobj : memObjects) {
+    device::Memory* mem = reinterpret_cast<device::Memory*>(mobj->getDeviceMemory(*curDev));
+    if (mem) {
+      amd::MemObjMap::RemoveMemObj(reinterpret_cast<void*>(mem->virtualAddress()));
+    }
     mobj->release();
   }
 
   // Remove mapping from registry
-  hip::Device* device = hip::getCurrentDevice();
-  if (device == nullptr) {
-    return hipErrorNoDevice;
-  }
   for (uint8_t i = 0; i < count; i++) {
     if (!device->mappedGraphics().remove(resources[i])) {
       LogError("failed to unmap resource");
-      return hipErrorUnknown;
+      HIP_RETURN(hipErrorUnknown);
     }
   }
   HIP_RETURN(hipSuccess);
@@ -945,8 +946,8 @@ hipError_t hipGraphicsUnregisterResource(hipGraphicsResource_t resource) {
   }
 
   if (device->mappedGraphics().isValid(resource)) {
-    LogError("resource still mapped");
-    HIP_RETURN(hipErrorArrayIsMapped);
+    LogError("resource already mapped");
+    HIP_RETURN(hipErrorAlreadyMapped);
   }
 
   if (!device->registeredGraphics().isValid(resource)) {

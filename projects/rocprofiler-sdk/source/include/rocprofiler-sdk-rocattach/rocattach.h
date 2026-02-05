@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -86,7 +86,9 @@ rocattach_get_version_triplet(rocattach_version_triplet_t* info) ROCATTACH_API R
  *
  * Attempts to attach to a rocm process at the given process identifier (PID). If successful, the
  * target process will then load rocprofiler-sdk, which will subsequently load any tool libraries
- * given in the environment variable ROCP_TOOL_LIBRARIES.
+ * given in the environment variable ROCPROF_ATTACH_TOOL_LIBRARY. This environment variable should
+ * be set for the attacher process before calling rocattach_attach(). It does not need to be set
+ * for the attachee.
  *
  * @param [in] pid Process ID to attach to
  * @return ::rocattach_status_t
@@ -96,13 +98,16 @@ rocattach_status_t
 rocattach_attach(int pid) ROCATTACH_API;
 
 /**
- * @brief Detach a previous attachment
+ * @brief Detach from a process ID
  *
- * Detaches from a previous
+ * Detaches from a previous attachment to the given process identifier (PID). If successful, the
+ * target process pauses rocprofiler-sdk, but the library will remain loaded. The PID can be
+ * attached to again after detach is completed. A PID of 0 can be specified to detach from all
+ * current sessions.
  *
  * @param [in] pid Process ID to detach from
  * @return ::rocattach_status_t
- * @retval ::ROCATTACH_STATUS_SUCCESS Attachment successful
+ * @retval ::ROCATTACH_STATUS_SUCCESS Detachment successful
  */
 rocattach_status_t
 rocattach_detach(int pid) ROCATTACH_API;

@@ -20,11 +20,9 @@
  * SOFTWARE.
  */
 
-#ifndef LIBROCDXG_DXCORE_LOADER_H
-#define LIBROCDXG_DXCORE_LOADER_H
+#pragma once
 
 #include "impl/wddm/types.h"
-#include <dlfcn.h>
 #include <mutex>
 
 #define DXCORE_CALL(function_name)  wsl::thunk::dxcore::DxcoreLoader::Instance().pfn_##function_name
@@ -83,6 +81,9 @@ public:
     typedef NTSTATUS (DXCORE_DEF(D3DKMTCreateHwQueue))(void* args);
     typedef NTSTATUS (DXCORE_DEF(D3DKMTDestroyHwQueue))(void* args);
     typedef NTSTATUS (DXCORE_DEF(D3DKMTSubmitCommandToHwQueue))(void* args);
+    typedef NTSTATUS (DXCORE_DEF(D3DKMTEnumAdapters3))(void* args);
+    typedef NTSTATUS (DXCORE_DEF(D3DKMTQueryResourceInfo))(void* args);
+    typedef NTSTATUS (DXCORE_DEF(D3DKMTOpenResource))(void* args);
 
     static DxcoreLoader& Instance() {
         static DxcoreLoader* instance = new DxcoreLoader();
@@ -126,6 +127,9 @@ public:
     DXCORE_DEF(D3DKMTCreateHwQueue)* DXCORE_PFN(D3DKMTCreateHwQueue);
     DXCORE_DEF(D3DKMTDestroyHwQueue)* DXCORE_PFN(D3DKMTDestroyHwQueue);
     DXCORE_DEF(D3DKMTSubmitCommandToHwQueue)* DXCORE_PFN(D3DKMTSubmitCommandToHwQueue);
+    DXCORE_DEF(D3DKMTEnumAdapters3)* DXCORE_PFN(D3DKMTEnumAdapters3);
+    DXCORE_DEF(D3DKMTQueryResourceInfo) * DXCORE_PFN(D3DKMTQueryResourceInfo);
+    DXCORE_DEF(D3DKMTOpenResource) * DXCORE_PFN(D3DKMTOpenResource);
 
 private:
     DxcoreLoader();
@@ -145,4 +149,3 @@ private:
 } // namespace thunk
 } // namespace wsl
 
-#endif // LIBROCDXG_DXCORE_LOADER_H
