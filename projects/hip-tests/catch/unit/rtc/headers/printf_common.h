@@ -176,57 +176,47 @@ struct CaptureStream {
 #endif
 
 struct CaptureIR {
- public:
   std::filesystem::path CreateDumpDir() {
     std::error_code ec;
-    std::filesystem::path base = std::filesystem::current_path(ec);
-    if (ec) {
-      return {};
-    }
+    const std::filesystem::path base = std::filesystem::current_path(ec);
+    if (ec) return {};
+
     std::string template_path = (base / "ir_dumps_XXXXXX").string();
     std::vector<char> buffer(template_path.begin(), template_path.end());
     buffer.push_back('\0');
     char* result = mkdtemp(buffer.data());
-    if (result == nullptr) {
-      return {};
-    }
-    return std::filesystem::path(result);
+    return result ? std::filesystem::path(result) : std::filesystem::path{};
   }
 
   void Cleanup(const std::filesystem::path& dir) {
-    if (dir.empty()) {
-      return;
-    }
+    if (dir.empty()) return;
     std::error_code ec;
     std::filesystem::remove_all(dir, ec);
   }
 
   std::string ReadDumpFile(const std::filesystem::path& dir) {
-    if (dir.empty()) {
-      return "";
-    }
+    if (dir.empty()) return "";
+
     std::error_code ec;
     std::filesystem::path dump_file;
     for (const auto& entry : std::filesystem::directory_iterator(dir, ec)) {
-      if (ec) {
-        break;
-      }
-      if (!entry.is_regular_file(ec)) {
-        continue;
-      }
+      if (ec) break;
+      if (!entry.is_regular_file(ec)) continue;
       if (!dump_file.empty()) {
         dump_file.clear();
         break;
       }
       dump_file = entry.path();
     }
+
     std::string data;
     if (!dump_file.empty()) {
       std::ifstream file(dump_file, std::ios::binary);
-      if (file.is_open()) {
+      if (file) {
         data.assign((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
       }
     }
+
     Cleanup(dir);
     return data;
   }
