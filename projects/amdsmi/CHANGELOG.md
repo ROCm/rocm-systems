@@ -4,6 +4,32 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ***All information listed below is for reference and subject to change.***
 
+## amd_smi_lib for ROCm 7.12.0
+
+### Added
+
+- N/A
+
+### Changed
+
+- N/A
+
+### Removed
+
+- N/A
+
+### Optimized
+
+- N/A
+
+### Resolved Issues
+
+- **Fixed XGMI PLPD policy parsing in `amdsmi_get_xgmi_plpd()` returning incorrect data**.  
+  - Previously, only the first XGMI PLPD policy was correctly displayed; subsequent policies showed `policy_id=0` with empty descriptions.
+  - Root cause was incorrect usage of `ctypes.string_at()` combined with overly broad exception handling that silently masked errors.
+  - Fix uses direct `.decode()` on c_char arrays, matching the proven pattern in `amdsmi_get_soc_pstate()`.
+  - Affected command: `amd-smi static --xgmi-plpd`
+
 ## amd_smi_lib for ROCm 7.11.0
 
 ### Added
@@ -90,11 +116,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Resolved Issues
 
-- **Fixed XGMI PLPD policy parsing in `amdsmi_get_xgmi_plpd()` returning incorrect data**.  
-  - Previously, only the first XGMI PLPD policy was correctly displayed; subsequent policies showed `policy_id=0` with empty descriptions.
-  - Root cause was incorrect usage of `ctypes.string_at()` combined with overly broad exception handling that silently masked errors.
-  - Fix uses direct `.decode()` on c_char arrays, matching the proven pattern in `amdsmi_get_soc_pstate()`.
-  - Affected command: `amd-smi static --xgmi-plpd`
 - **Fixed `amd-smi set` commands showing an AttributeError when partition attributes are not present**.
   - Resolved `AttributeError: 'Namespace' object has no attribute 'compute_partition'` error
   - Now using safe `getattr()` access pattern for optional arguments in set_gpu function
