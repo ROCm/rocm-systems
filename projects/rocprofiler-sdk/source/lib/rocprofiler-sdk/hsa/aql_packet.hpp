@@ -313,6 +313,7 @@ public:
     std::shared_ptr<SPMMemoryPool>                   pool{};
     void                                             populate_before() override;
     void                                             populate_after() override;
+    bool                                             valid() const { return is_valid; }
 
     const spm::Dlsym sym{};
 

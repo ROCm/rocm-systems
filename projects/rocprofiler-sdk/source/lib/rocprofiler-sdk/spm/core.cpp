@@ -247,19 +247,17 @@ configure_callback_spm_dispatch(rocprofiler_context_id_t                       c
     if(ctx.counter_collection) return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
     if(ctx.device_counter_collection) return ROCPROFILER_STATUS_ERROR_AGENT_DISPATCH_CONFLICT;
     if(!ctx.dispatch_spm)
-    {
-        ctx.dispatch_spm =
+       ctx.dispatch_spm =
             std::make_unique<rocprofiler::context::spm_dispatch_counter_collection_service>();
-        ctx.dispatch_spm->callback = std::make_shared<spm::spm_counter_callback_info>();
-    }
-
-    auto& cb                 = ctx.dispatch_spm->callback;
-    cb->user_cb              = callback;
-    cb->callback_args        = callback_args;
-    cb->context              = context_id;
-    cb->record_callback      = record_callback;
-    cb->record_callback_args = record_callback_args;
-    cb->internal_context     = ctx_p;
+    auto& cb =
+        *ctx.dispatch_spm->callbacks.emplace_back(std::make_shared<rocprofiler::spm::spm_counter_callback_info>());
+  
+    cb.user_cb              = callback;
+    cb.callback_args        = callback_args;
+    cb.context              = context_id;
+    cb.record_callback      = record_callback;
+    cb.record_callback_args = record_callback_args;
+    cb.internal_context     = ctx_p;
 
     return ROCPROFILER_STATUS_SUCCESS;
 }
@@ -288,12 +286,13 @@ start_context(const context::context* ctx)
 
     if(!already_enabled)
     {
-        auto& cb = ctx->dispatch_spm->callback;
-        if(cb->queue_id != rocprofiler::hsa::ClientID{-1}) return;
+       
         // Insert our callbacks into HSA Interceptor. This
         // turns on counter instrumentation.
-
-        cb->queue_id = controller->add_callback(
+        for(auto& cb : ctx->dispatch_spm->callbacks)
+        {
+            if(cb->queue_id != rocprofiler::hsa::ClientID{-1}) continue;
+            cb->queue_id = controller->add_callback(
             std::nullopt,
             [=](const hsa::Queue&                                               q,
                 const hsa::rocprofiler_packet&                                  kern_pkt,
@@ -320,6 +319,7 @@ start_context(const context::context* ctx)
                 kernel_dispatch::profiling_time                    dispatch_time) {
                 post_kernel_call(ctx, cb, session, aql, dispatch_time);
             });
+        }
     }
 }
 
@@ -338,11 +338,13 @@ stop_context(const context::context* ctx)
     ctx->dispatch_spm->enabled.wlock([&](auto& enabled) {
         if(!enabled) return;
         enabled  = false;
-        auto& cb = ctx->dispatch_spm->callback;
-        if(!cb->queue_id) return;
-        // Remove our callbacks from HSA's queue controller
-        controller->remove_callback(cb->queue_id);
     });
+    for(auto& cb : ctx->dispatch_spm->callbacks)
+    {
+        if(!cb->queue_id) continue;
+        // Remove our callbacks from HSA's queue controller
+           controller->remove_callback(cb->queue_id);
+    }
     if(controller) controller->disable_serialization();
 }
 

@@ -745,7 +745,7 @@ spm_dispatch_callback(const rocprofiler_spm_dispatch_counting_service_data_t* di
     }
 
     auto params        = rocprofiler_spm_configuration_t{};
-    params.timeout     = 30;
+    params.timeout     = 0;
     params.buffer_size = 32768;
     params.frequency   = 0.1;
     // Look for the counters contained in counters_to_collect in gpu_counters

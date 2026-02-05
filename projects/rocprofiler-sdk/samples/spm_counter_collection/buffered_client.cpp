@@ -276,7 +276,7 @@ build_profile_for_agent(rocprofiler_agent_id_t       agent,
     auto                                params  = rocprofiler_spm_configuration_t{};
     params.frequency                            = 1.0;
     params.buffer_size                          = 32768;
-    params.timeout                              = 15;
+    params.timeout                              = 0;
     ROCPROFILER_CALL(
         rocprofiler_spm_create_counter_config(
             agent, collect_counters.data(), collect_counters.size(), &params, &profile),

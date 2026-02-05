@@ -200,7 +200,6 @@ rocprofiler_iterate_spm_supported_counters(rocprofiler_agent_id_t              a
             // Create agent-encoded counter ID using the agent's logical_node_id
             rocprofiler_counter_id_t counter_id{.handle = 0};
             rocprofiler::counters::set_base_metric_in_counter_id(counter_id, m.id());
-            rocprofiler::counters::set_agent_in_counter_id(counter_id, agent->logical_node_id);
             ids.push_back(counter_id);
         }
     }
@@ -241,22 +240,19 @@ rocprofiler_configure_buffer_spm_dispatch_service(
     if(ctx.counter_collection) return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
     if(ctx.device_counter_collection) return ROCPROFILER_STATUS_ERROR_AGENT_DISPATCH_CONFLICT;
     if(!ctx.dispatch_spm)
-    {
         ctx.dispatch_spm =
             std::make_unique<rocprofiler::context::spm_dispatch_counter_collection_service>();
-        ctx.dispatch_spm->callback =
-            std::make_shared<rocprofiler::spm::spm_counter_callback_info>();
-    }
-
-    auto& cb          = ctx.dispatch_spm->callback;
-    cb->user_cb       = callback;
-    cb->callback_args = callback_data_args;
-    cb->context       = context_id;
+    auto& cb =
+        *ctx.dispatch_spm->callbacks.emplace_back(std::make_shared<rocprofiler::spm::spm_counter_callback_info>());
+  
+    cb.user_cb       = callback;
+    cb.callback_args = callback_data_args;
+    cb.context       = context_id;
     if(buffer_id.handle != 0)
     {
-        cb->buffer = buffer_id;
+        cb.buffer = buffer_id;
     }
-    cb->internal_context = ctx_p;
+    cb.internal_context = ctx_p;
 
     return ROCPROFILER_STATUS_SUCCESS;
 }

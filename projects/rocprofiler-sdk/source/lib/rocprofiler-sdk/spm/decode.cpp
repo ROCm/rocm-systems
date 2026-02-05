@@ -145,12 +145,6 @@ aql_data_callback(size_t buffer_id, void* data, size_t data_size, int flags, voi
             counters::set_dim_in_rec(
                 instance_id, rocprofiler::counters::ROCPROFILER_DIMENSION_INSTANCE, event.instance);
             counters::set_counter_in_rec(instance_id, event.id);
-            counters::set_dim_in_rec(
-                instance_id,
-                counters::ROCPROFILER_DIMENSION_AGENT,
-                (rocprofiler::agent::get_rocprofiler_agent(spm_packet->GetAgent()))
-                        ->logical_node_id +
-                    counters::AGENT_ENCODING_OFFSET);
             if(!counters.at(i).is_global)
                 counters::set_dim_in_rec(
                     instance_id, rocprofiler::counters::ROCPROFILER_DIMENSION_SHADER_ENGINE, se);
@@ -189,10 +183,8 @@ aql_data_callback(size_t buffer_id, void* data, size_t data_size, int flags, voi
                      spm_packet->dispatch_data);
         for(auto itr : buf_records)
         {
-            if(itr.dispatch_id != spm_packet->dispatch_data.dispatch_info.dispatch_id)
-
-                buf->emplace(
-                    ROCPROFILER_BUFFER_CATEGORY_COUNTERS, ROCPROFILER_COUNTER_RECORD_VALUE, itr);
+            buf->emplace(
+                ROCPROFILER_BUFFER_CATEGORY_COUNTERS, ROCPROFILER_COUNTER_RECORD_VALUE, itr);
         }
     }
     else

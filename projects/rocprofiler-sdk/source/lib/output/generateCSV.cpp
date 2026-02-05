@@ -626,7 +626,6 @@ generate_csv(const output_config&                    cfg,
             auto        lds_block_size_v =
                 (kernel_info->group_segment_size + (lds_block_size - 1)) & ~(lds_block_size - 1);
             auto magnitude = [](rocprofiler_dim3_t dims) { return (dims.x * dims.y * dims.z); };
-
             auto row_ss = std::stringstream{};
             for(auto& [counter_id, counter_value] : counter_id_value)
             {

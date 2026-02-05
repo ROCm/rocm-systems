@@ -169,7 +169,7 @@ typedef void (*rocprofiler_spm_dispatch_counting_record_cb_t)(
  * @brief (experimental) Callback query if dispatch should be profiled
  *
  * @param [in] dispatch_data kernel dispatch data
- * @param [in] config  spm counter config
+ * @param [out] config  spm counter config
  * @param [out] user_data User data unique to this dispatch. Returned in record callback
  * @param [in] callback_data_args Callback supplied via dispatch configure service
  */

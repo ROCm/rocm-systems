@@ -28,6 +28,7 @@
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
+#include "lib/rocprofiler-sdk/hsa/aql_packet.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/profiling_time.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/spm/dispatch_handlers.hpp"
@@ -189,6 +190,14 @@ null_record_callback(const rocprofiler_spm_dispatch_counting_service_data_t*,
                      void*)
 {}
 
+void
+null_buffered_callback(rocprofiler_context_id_t,
+                  rocprofiler_buffer_id_t,
+                  rocprofiler_record_header_t**,
+                  size_t,
+                  void*,
+                  uint64_t)
+{}
 }  // namespace
 
 TEST(spm_core, check_packet_generation)
@@ -381,7 +390,8 @@ TEST(spm_core, check_callbacks)
                 std::make_shared<spm::spm_counter_callback_info>();
             cb_info->user_cb       = user_dispatch_cb;
             cb_info->callback_args = static_cast<void*>(&expected);
-
+            cb_info->record_callback = null_record_callback;
+            cb_info->record_callback_args = nullptr;
             context::correlation_id corr_id;
             corr_id.internal = count++;
 
@@ -419,6 +429,9 @@ TEST(spm_core, check_callbacks)
             auto sess = std::make_shared<hsa::Queue::queue_info_session_t>(std::move(_sess));
             ASSERT_TRUE(ret_pkt.pkt)
                 << fmt::format("Expected a packet to be generated for - {}", metric.name());
+            auto data = std::vector<int>(10, 1);
+            auto* spm_pkt = dynamic_cast<hsa::SPMPacket*>(ret_pkt.pkt.get());
+            rocprofiler::spm::aql_data_callback(0, &(data[0]), data.size(), 0, spm_pkt);
             spm::inst_pkt_t pkts;
             pkts.emplace_back(
                 std::make_pair(std::move(ret_pkt.pkt), static_cast<spm::ClientID>(0)));
@@ -508,11 +521,12 @@ TEST(spm_core, start_stop_callback_ctx)
     auto& ctx = *ctx_p;
 
     ASSERT_TRUE(ctx.dispatch_spm);
-    EXPECT_EQ(ctx.dispatch_spm->callback->user_cb, null_dispatch_callback);
-    EXPECT_EQ(ctx.dispatch_spm->callback->callback_args, (void*) 0x12345);
-    EXPECT_EQ(ctx.dispatch_spm->callback->record_callback, null_record_callback);
-    EXPECT_EQ(ctx.dispatch_spm->callback->record_callback_args, (void*) 0x54321);
-    EXPECT_EQ(ctx.dispatch_spm->callback->context.handle, get_client_ctx().handle);
+    ASSERT_EQ(ctx.dispatch_spm->callbacks.size(), 1);
+    EXPECT_EQ(ctx.dispatch_spm->callbacks.at(0)->user_cb, null_dispatch_callback);
+    EXPECT_EQ(ctx.dispatch_spm->callbacks.at(0)->callback_args, (void*) 0x12345);
+    EXPECT_EQ(ctx.dispatch_spm->callbacks.at(0)->record_callback, null_record_callback);
+    EXPECT_EQ(ctx.dispatch_spm->callbacks.at(0)->record_callback_args, (void*) 0x54321);
+    EXPECT_EQ(ctx.dispatch_spm->callbacks.at(0)->context.handle, get_client_ctx().handle);
 
     bool found = false;
     ctx.dispatch_spm->enabled.rlock([&](const auto& data) { found = data; });
@@ -520,7 +534,7 @@ TEST(spm_core, start_stop_callback_ctx)
 
     found = false;
     hsa::get_queue_controller()->iterate_callbacks([&](auto cid, const auto&) {
-        if(cid == ctx.dispatch_spm->callback->queue_id)
+        if(cid == ctx.dispatch_spm->callbacks.at(0)->queue_id)
         {
             found = true;
         }
@@ -540,6 +554,76 @@ TEST(spm_core, start_stop_callback_ctx)
     registration::finalize();
     context::pop_client(1);
     set_client_ctx(get_client_ctx());
+}
+
+TEST(spm_core, start_stop_buffered_ctx)
+{
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    test_init();
+
+    registration::init_logging();
+    registration::set_init_status(-1);
+    context::push_client(1);
+    ROCPROFILER_CALL(rocprofiler_create_context(&get_client_ctx()), "context creation failed");
+
+    rocprofiler_buffer_id_t opt_buff_id = {.handle = 0};
+    ROCPROFILER_CALL(rocprofiler_create_buffer(get_client_ctx(),
+                                               500 * sizeof(size_t),
+                                               500 * sizeof(size_t),
+                                               ROCPROFILER_BUFFER_POLICY_LOSSLESS,
+                                               null_buffered_callback,
+                                               nullptr,
+                                               &opt_buff_id),
+                     "Could not create buffer");
+
+    ROCPROFILER_CALL(rocprofiler_configure_buffer_spm_dispatch_service(
+                         get_client_ctx(), opt_buff_id, null_dispatch_callback, (void*) 0x12345),
+                     "Could not setup buffered service");
+    ROCPROFILER_CALL(rocprofiler_start_context(get_client_ctx()), "start context");
+
+    /**
+     * Check that the context was actually started
+     */
+    auto* ctx_p = context::get_mutable_registered_context(get_client_ctx());
+    ASSERT_TRUE(ctx_p);
+    auto& ctx = *ctx_p;
+
+    ASSERT_TRUE(ctx.dispatch_spm);
+    ASSERT_EQ(ctx.dispatch_spm->callbacks.size(), 1);
+    EXPECT_EQ(ctx.dispatch_spm->callbacks.at(0)->user_cb, null_dispatch_callback);
+    EXPECT_EQ(ctx.dispatch_spm->callbacks.at(0)->callback_args, (void*) 0x12345);
+    EXPECT_EQ(ctx.dispatch_spm->callbacks.at(0)->context.handle, get_client_ctx().handle);
+    ASSERT_TRUE(ctx.dispatch_spm->callbacks.at(0)->buffer);
+    EXPECT_EQ(ctx.dispatch_spm->callbacks.at(0)->buffer->handle, opt_buff_id.handle);
+
+    bool found = false;
+    ctx.dispatch_spm->enabled.rlock([&](const auto& data) { found = data; });
+    EXPECT_TRUE(found);
+
+    found = false;
+    hsa::get_queue_controller()->iterate_callbacks([&](auto cid, const auto&) {
+        if(cid == ctx.dispatch_spm->callbacks.at(0)->queue_id)
+        {
+            found = true;
+        }
+    });
+    EXPECT_TRUE(found);
+
+    /**
+     * Check if context can be disabled correctly
+     */
+    ROCPROFILER_CALL(rocprofiler_stop_context(get_client_ctx()), "stop context");
+
+    found = false;
+    ctx.dispatch_spm->enabled.rlock([&](const auto& data) { found = data; });
+    EXPECT_FALSE(found);
+
+    rocprofiler_flush_buffer(opt_buff_id);
+    rocprofiler_destroy_buffer(opt_buff_id);
+
+    registration::set_init_status(1);
+
+    registration::finalize();
 }
 
 TEST(spm_core, test_profile_incremental)

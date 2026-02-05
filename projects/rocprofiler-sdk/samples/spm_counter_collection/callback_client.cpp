@@ -179,7 +179,7 @@ dispatch_callback(const rocprofiler_spm_dispatch_counting_service_data_t* dispat
     auto                                params  = rocprofiler_spm_configuration_t{};
     params.frequency                            = 1.0;
     params.buffer_size                          = 32768;
-    params.timeout                              = 15;
+    params.timeout                              = 0;
     ROCPROFILER_CALL(rocprofiler_spm_create_counter_config(dispatch_data->dispatch_info.agent_id,
                                                            collect_counters.data(),
                                                            collect_counters.size(),

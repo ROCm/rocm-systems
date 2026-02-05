@@ -306,9 +306,9 @@ spm_construct_packet(const rocprofiler_agent_id_t         agent_id,
         *aql_cache, *hsa::get_amd_ext_table(), hsa::get_core_table()->hsa_memory_copy_fn);
     const auto* aql_agent = rocprofiler::agent::get_aql_agent(agent->id);
 
-    const double sclk_freq = agent->max_engine_clk_fcompute * 1E6;  // MHz
+    const double sclk_freq = agent->max_engine_clk_fcompute * 1E9;  // GHz
     const size_t sclk_period =
-        static_cast<size_t>(std::roundf(sclk_freq / (static_cast<double>(sample_freq) * 1E6)));
+        static_cast<size_t>(std::roundf(sclk_freq / (static_cast<double>(sample_freq) * 1E9)));
 
     params.clear();
 
@@ -348,7 +348,7 @@ spm_construct_packet(const rocprofiler_agent_id_t         agent_id,
     profile.userdata   = pool.get();
 
     auto pkt = std::make_unique<hsa::SPMPacket>(*aql_agent, profile);
-    ROCP_FATAL_IF(!pkt) << "SPM PAcket creation failed";
+    ROCP_FATAL_IF(!pkt->valid()) << "SPM Packet creation failed";
 
     pool->delete_packets_fn = pkt->sym.delete_packets_fn;
     pool->handle            = pkt->handle;

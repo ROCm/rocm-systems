@@ -85,6 +85,26 @@ rocprofiler_add_integration_execute_test(
     PRELOAD "${PRELOAD_ENV}"
     DISABLED "${IS_DISABLED}")
 
+rocprofiler_add_integration_execute_test(
+    rocprofv3-avail-test-info
+    COMMAND ${Python3_EXECUTABLE} $<TARGET_FILE:rocprofiler-sdk::rocprofv3-avail> info
+    DEPENDS rocprofiler-sdk::rocprofv3-avail
+    TIMEOUT 45
+    LABELS "integration-tests"
+    PRELOAD "${PRELOAD_ENV}"
+    PASS_REGULAR_EXPRESSION "GPU:[0-9]*\\n*";
+    DISABLED "${IS_DISABLED}")
+
+rocprofiler_add_integration_execute_test(
+    rocprofv3-avail-test-list
+    COMMAND ${Python3_EXECUTABLE} $<TARGET_FILE:rocprofiler-sdk::rocprofv3-avail> list
+    DEPENDS rocprofiler-sdk::rocprofv3-avail
+    TIMEOUT 45
+    LABELS "integration-tests"
+    PRELOAD "${PRELOAD_ENV}"
+    PASS_REGULAR_EXPRESSION "GPU"[ \t\r]":[0-9]*\\n*";
+    DISABLED "${IS_DISABLED}")
+
 rocprofiler_add_integration_validate_test(
     rocprofv3-avail-test
     TEST_PATHS validate.py

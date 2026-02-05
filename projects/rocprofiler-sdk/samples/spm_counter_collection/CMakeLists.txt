@@ -25,16 +25,17 @@ foreach(_TYPE DEBUG MINSIZEREL RELEASE RELWITHDEBINFO)
     endif()
 endforeach()
 
-if(ROCPROFILER_MEMCHECK STREQUAL "ThreadSanitizer")
-    set(IS_THREAD_SANITIZER ON)
+if(NOT ROCPROFILER_MEMCHECK STREQUAL "")
+    set(SANITIZER True)
 else()
-    set(IS_THREAD_SANITIZER OFF)
+    set(SANITIZER False)
 endif()
 
 find_package(rocprofiler-sdk REQUIRED)
 
 rocprofiler_sdk_spm_disabled(IS_SPM_DISABLED)
 set(IS_DISABLED ${IS_SPM_DISABLED})
+set(IS_DISABLED True)
 
 add_library(spm-counter-collection-buffer-client SHARED)
 target_sources(spm-counter-collection-buffer-client PRIVATE buffered_client.cpp

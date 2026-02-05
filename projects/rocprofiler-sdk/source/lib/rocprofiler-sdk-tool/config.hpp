@@ -155,7 +155,7 @@ struct config : output_config
     uint64_t att_consecutive_kernels = get_env<uint64_t>("ROCPROF_ATT_CONSECUTIVE_KERNELS", 0);
 
     size_t spm_buffer_size_kb = get_env<size_t>("ROCPROF_SPM_BUFFER_SIZE", 1 << 15);
-    size_t spm_timeout_ms     = get_env<size_t>("ROCPROF_SPM_TIMEOUT_MS", 50);
+    size_t spm_timeout_ms     = get_env<size_t>("ROCPROF_SPM_TIMEOUT_MS", 0);
     float  spm_frequency_ghz  = get_env<float>("ROCPROF_SPM_FREQUENCY", 0.5);
 
     std::string kernel_filter_include   = get_env("ROCPROF_KERNEL_FILTER_INCLUDE_REGEX", ".*");

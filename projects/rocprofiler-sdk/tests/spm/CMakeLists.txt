@@ -17,8 +17,15 @@ else()
     set(PRELOAD_ENV "LD_PRELOAD=$<TARGET_FILE:rocprofiler-sdk-json-tool>")
 endif()
 
+if(NOT ROCPROFILER_MEMCHECK STREQUAL "")
+    set(SANITIZER True)
+else()
+    set(SANITIZER False)
+endif()
+
 rocprofiler_sdk_spm_disabled(IS_SPM_DISABLED)
 set(IS_DISABLED ${IS_SPM_DISABLED})
+set(IS_DISABLED True)
 
 rocprofiler_add_integration_execute_test(
     test-spm-dispatch-collection-execute

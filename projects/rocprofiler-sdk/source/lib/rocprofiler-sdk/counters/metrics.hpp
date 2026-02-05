@@ -70,8 +70,7 @@ public:
 
     void setflags(uint32_t flags) { this->flags_ = flags; }
     void set_id(uint64_t id) { this->id_ = id; }
-    void setspm(bool spm_support) { this->spm_support_ = spm_support; }
-
+ 
     friend bool operator<(Metric const& lhs, Metric const& rhs);
     friend bool operator==(Metric const& lhs, Metric const& rhs);
 
@@ -134,7 +133,6 @@ checkValidMetric(const std::string& agent, const Metric& metric);
  */
 rocprofiler_status_t
 setCustomCounterDefinition(const CustomCounterDefinition& def);
-
 }  // namespace counters
 }  // namespace rocprofiler
 

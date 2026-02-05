@@ -310,7 +310,7 @@ SPMPacket::SPMPacket(aqlprofile_agent_handle_t aql_agent, aqlprofile_spm_profile
 : agent(aql_agent)
 , sym()
 {
-    ROCP_FATAL_IF(!sym.valid()) << "Failed to load aqlprofile SPM library";
+    if(!sym.valid()) return;
     auto status = sym.create_packets_fn(&handle, &aql_desc, &packets, profile, 0);
 
     if(status != HSA_STATUS_SUCCESS) return;
@@ -321,9 +321,9 @@ SPMPacket::SPMPacket(aqlprofile_agent_handle_t aql_agent, aqlprofile_spm_profile
     packets.stop_packet.completion_signal  = hsa_signal_t{.handle = 0};
 
     status = sym.spm_query_fn(aql_desc, AQLPROFILE_SPM_DECODE_QUERY_SEG_SIZE, &spm_desc.seg_size);
-    ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS) << "Failed to query SPM seg_size";
+    if(status != HSA_STATUS_SUCCESS) return;
     status = sym.spm_query_fn(aql_desc, AQLPROFILE_SPM_DECODE_QUERY_NUM_XCC, &spm_desc.buffer_num);
-    ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS) << "Failed to query SPM buffer_num";
+    if(status != HSA_STATUS_SUCCESS) return;
 
     is_valid = true;
     empty    = false;
