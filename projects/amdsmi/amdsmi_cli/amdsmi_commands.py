@@ -5510,7 +5510,7 @@ class AMDSMICommands():
 
     def reset(self, args, multiple_devices=False, gpu=None, gpureset=None,
                 clocks=None, fans=None, profile=None, xgmierr=None, perf_determinism=None,
-                power_cap=None, reload_driver=None, clean_local_data=None):
+                power_cap=None, clean_local_data=None):
         """Issue reset commands to target gpu(s)
 
         Args:
@@ -5550,8 +5550,6 @@ class AMDSMICommands():
             args.perf_determinism = perf_determinism
         if power_cap:
             args.power_cap = power_cap
-        if reload_driver:
-            args.reload_driver = reload_driver
         if clean_local_data:
             args.clean_local_data = clean_local_data
 
@@ -5613,12 +5611,12 @@ class AMDSMICommands():
         # Error if no subcommand args are passed
         if self.helpers.is_baremetal():
             if not any([args.gpureset, args.clocks, args.fans, args.profile, args.xgmierr, \
-                        args.perf_determinism, args.power_cap, args.reload_driver, \
+                        args.perf_determinism, args.power_cap, \
                         args.clean_local_data]):
                 command = " ".join(sys.argv[1:])
                 raise AmdSmiRequiredCommandException(command, self.logger.format)
         else:
-            if not any([args.clean_local_data, args.reload_driver]):
+            if not any([args.clean_local_data]):
                 command = " ".join(sys.argv[1:])
                 raise AmdSmiRequiredCommandException(command, self.logger.format)
 
@@ -5809,93 +5807,6 @@ class AMDSMICommands():
             self.logger.clear_multiple_devices_output()
             return
 
-        # Adding to VMs since, they should also support same reload as baremetal
-        if args.reload_driver:
-            # Check permissions BEFORE starting any processes
-            # Required to avoid permission errors when starting the progress bar
-            try:
-                if os.geteuid() != 0:
-                    result = "[AMDSMI_STATUS_NO_PERM] Command requires elevation"
-                    self.logger.store_output(args.gpu, 'reload_driver', result)
-                    self.logger.print_output()
-                    self.logger.clear_multiple_devices_output()
-                    raise PermissionError('Command requires elevation')
-            except AttributeError:
-                pass # os.geteuid() not available on Windows
-            lock = multiprocessing.Lock()
-            lock.acquire()
-            is_lock_released = False
-            progress_process = None
-            try:
-                self.helpers.increment_set_count()
-                set_count = self.helpers.get_set_count()
-                if set_count == 1:
-                    self.helpers.confirm_gpu_driver_reload_warning()
-                    # Start progress bar in separate process
-                    string_out = f"Reloading driver for all AMD GPUs:"
-                    progress_process = multiprocessing.Process(
-                        target=self.helpers.showProgressbar,
-                        args=(string_out, 140, True)
-                    )
-                    progress_process.start()
-                    # Perform the actual driver reload (this is where permission error occurs)
-                    amdsmi_interface.amdsmi_gpu_driver_reload()
-                    # If we get here, operation was successful
-                    self.helpers.assign_previous_set_success_check(amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_SUCCESS)
-                    result = "Successfully reloaded driver"
-                else:
-                    if self.helpers.get_previous_set_success_check() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_SUCCESS:
-                        result = "Successfully reloaded driver"
-                    elif self.helpers.get_previous_set_success_check() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
-                        result = "[AMDSMI_STATUS_NO_PERM] Command requires elevation"
-                        raise PermissionError('Command requires elevation')
-                    else:
-                        previous_check = self.helpers.get_previous_set_success_check()
-                        temp_exception = amdsmi_exception.AmdSmiLibraryException(previous_check)
-                        str_out = temp_exception.get_error_info(detailed=False)
-                        result = f"[{str_out}] Unable to successfully restart driver"
-            except amdsmi_exception.AmdSmiLibraryException as e:
-                # Handle permission error FIRST, before any cleanup
-                self.helpers.assign_previous_set_success_check(e.get_error_code())
-                if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
-                    self.helpers.assign_previous_set_success_check(amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM)
-                    result = f"[{e.get_error_info(detailed=False)}] Command requires elevation"
-                    # Clean termination of progress bar
-                    if progress_process and progress_process.is_alive():
-                        progress_process.terminate()
-                        progress_process.join(timeout=0.1)  # Wait max 0.1 second
-                        if progress_process.is_alive():
-                            progress_process.kill()  # Force kill if needed
-                        print("\n")  # Clean up progress bar line
-                    # Store result and exit early
-                    self.logger.store_output(args.gpu, 'reload_driver', result)
-                    self.logger.print_output()
-                    self.logger.clear_multiple_devices_output()
-                    if not is_lock_released:
-                        lock.release()
-                        is_lock_released = True
-                    raise PermissionError('Command requires elevation') from e
-                else:
-                    # Handle other errors
-                    self.helpers.assign_previous_set_success_check(e.get_error_code())
-                    result = f"[{e.get_error_info(detailed=False)}] Unable to successfully restart driver"
-            finally:
-                # Always clean up progress bar process
-                if progress_process and progress_process.is_alive():
-                    progress_process.terminate()
-                    progress_process.join(timeout=0.1)
-                    if progress_process.is_alive():
-                        progress_process.kill()
-                    print("\n")  # Clean up progress bar line
-                # Always release lock
-                if not is_lock_released:
-                    lock.release()
-                    is_lock_released = True
-            # Store and print result
-            self.logger.store_output(args.gpu, 'reload_driver', result)
-            self.logger.print_output()
-            self.logger.clear_multiple_devices_output()
-            return
 
     def monitor(self, args, multiple_devices=False, watching_output=False, gpu=None,
                     watch=None, watch_time=None, iterations=None, power_usage=None,
