@@ -1456,10 +1456,17 @@ def process_torch_trace_output(
         # Ensure output directory exists
         Path(f"{workload_dir}/torch_trace").mkdir(parents=True, exist_ok=True)
         output_file = f"{workload_dir}/torch_trace/{sanitized_operator_name}.csv"
-        group.to_csv(output_file, index=False)
-        console_log(
-            f"Saved consolidated trace for {sanitized_operator_name} to {output_file}"
-        )
+        # If the file already exists, append to it, else create new file.
+        if Path(output_file).is_file():
+            group.to_csv(output_file, mode="a", header=False, index=False)
+            console_log(
+                f"Appended trace for {sanitized_operator_name} to existing file {output_file}"
+            )
+        else:
+            group.to_csv(output_file, index=False)
+            console_log(
+                f"Saved consolidated trace for {sanitized_operator_name} to {output_file}"
+            )
     for trace_file in marker_api_trace_csvs + counter_collection_csvs:
         try:
             Path(trace_file).unlink()

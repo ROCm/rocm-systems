@@ -274,6 +274,12 @@ def extract_kernel_name(full_kernel_name: str) -> str:
 
     return main_part.strip()
 
+def show_torch_operator_table(op, df):
+    print(f"\nOperator: {op}")
+    if isinstance(df, pd.DataFrame):
+        print(df.to_markdown(index=False))
+    else:
+        print(df)
 
 def show_torch_operator_hierarchy(operator_name: str, df: pd.DataFrame) -> None:
     """
@@ -356,6 +362,7 @@ def show_torch_operator_hierarchy(operator_name: str, df: pd.DataFrame) -> None:
             print(f"{left_padding.ljust(40)}{kernel_line}")
 
         print()
+
 
 
 def process_table_data(
