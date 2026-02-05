@@ -281,7 +281,7 @@ def show_torch_operator_hierarchy(operator_name: str, df: pd.DataFrame) -> None:
     showing marker hierarchy on the left and kernel launches on the right.
     """
     print(f"\n{'-' * 80}")
-    print(f"Hierarchy for {operator_name}".ljust(40) + "Kernels Launched")
+    print(f"Torch Operator Hierarchy for: {operator_name}")
     print("-" * 80)
 
     # Expect the DataFrame to have columns "Operator_Name", "Kernel_Name",
@@ -290,6 +290,8 @@ def show_torch_operator_hierarchy(operator_name: str, df: pd.DataFrame) -> None:
     unique_op_hierarchies = df["Operator_Name"].unique()
     for i, op in enumerate(unique_op_hierarchies, start=1):
         print(f"  {i:3d}. {op}")
+        print("\nOperator Hierarchy".ljust(50) + "Kernels Launched")
+        print("-" * 80)
         parts = str(op).split("/")
 
         hierarchy_lines = []
@@ -354,7 +356,6 @@ def show_torch_operator_hierarchy(operator_name: str, df: pd.DataFrame) -> None:
             print(f"{left_padding.ljust(40)}{kernel_line}")
 
         print()
-    print("-" * 80)
 
 
 def process_table_data(
