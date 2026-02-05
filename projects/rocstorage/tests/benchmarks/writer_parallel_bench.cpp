@@ -20,9 +20,9 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "rocstorage/data_types.hpp"
 #include "rocstorage/storage.hpp"
 #include "rocstorage/writer.hpp"
+#include "rocstorage/writer_types.hpp"
 
 #include <benchmark/benchmark.h>
 
@@ -38,7 +38,7 @@
 namespace
 {
 
-using namespace rocstorage::data_types;
+using namespace rocstorage::writer_types;
 
 // ============================================================================
 // Benchmark Configuration

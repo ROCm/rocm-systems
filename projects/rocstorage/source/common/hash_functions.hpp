@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "rocstorage/data_types.hpp"
+#include "rocstorage/writer_types.hpp"
 
 #include <cstddef>
 #include <functional>
@@ -14,7 +14,7 @@ namespace rocstorage::hashing
 
 struct agent_unique_id_hash
 {
-    std::size_t operator()(const data_types::agent_unique_id_t& agent) const noexcept
+    std::size_t operator()(const writer_types::agent_unique_id_t& agent) const noexcept
     {
         return std::hash<std::string>{}(agent.agent_type) ^
                std::hash<size_t>{}(agent.type_index);
@@ -23,7 +23,7 @@ struct agent_unique_id_hash
 
 struct pmc_unique_id_hash
 {
-    std::size_t operator()(const data_types::pmc_info_unique_id_t& pmc) const noexcept
+    std::size_t operator()(const writer_types::pmc_info_unique_id_t& pmc) const noexcept
     {
         if(pmc.agent_id.has_value())
         {
@@ -36,7 +36,7 @@ struct pmc_unique_id_hash
 
 struct track_info_hash
 {
-    std::size_t operator()(const data_types::track_info_t& track_info) const noexcept
+    std::size_t operator()(const writer_types::track_info_t& track_info) const noexcept
     {
         std::string const track_name_value =
             track_info.name.has_value() ? track_info.name.value() : "";

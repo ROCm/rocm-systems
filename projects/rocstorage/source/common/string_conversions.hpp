@@ -2,7 +2,7 @@
 // SPDX-License-Identifier:  MIT
 #pragma once
 
-#include "rocstorage/data_types.hpp"
+#include "rocstorage/writer_types.hpp"
 
 #include "spdlog/fmt/bundled/core.h"
 
@@ -31,61 +31,61 @@ is_valid_cstring(const char* str) noexcept
 // ============================================================================
 
 [[nodiscard]] inline auto
-get_key(const data_types::node_info_t& e) noexcept
+get_key(const writer_types::node_info_t& e) noexcept
 {
     return e.node_id;
 }
 
 [[nodiscard]] inline auto
-get_key(const data_types::process_info_t& e) noexcept
+get_key(const writer_types::process_info_t& e) noexcept
 {
     return e.pid;
 }
 
 [[nodiscard]] inline auto
-get_key(const data_types::thread_info_t& e) noexcept
+get_key(const writer_types::thread_info_t& e) noexcept
 {
     return e.thread_id;
 }
 
-[[nodiscard]] inline const data_types::agent_unique_id_t&
-get_key(const data_types::agent_info_t& e) noexcept
+[[nodiscard]] inline const writer_types::agent_unique_id_t&
+get_key(const writer_types::agent_info_t& e) noexcept
 {
     return e.unique_id;
 }
 
-[[nodiscard]] inline const data_types::pmc_info_unique_id_t&
-get_key(const data_types::pmc_info_t& e) noexcept
+[[nodiscard]] inline const writer_types::pmc_info_unique_id_t&
+get_key(const writer_types::pmc_info_t& e) noexcept
 {
     return e.unique_id;
 }
 
 [[nodiscard]] inline auto
-get_key(const data_types::stream_info_t& e) noexcept
+get_key(const writer_types::stream_info_t& e) noexcept
 {
     return e.stream_id;
 }
 
 [[nodiscard]] inline auto
-get_key(const data_types::queue_info_t& e) noexcept
+get_key(const writer_types::queue_info_t& e) noexcept
 {
     return e.queue_id;
 }
 
 [[nodiscard]] inline auto
-get_key(const data_types::code_object_info_t& e) noexcept
+get_key(const writer_types::code_object_info_t& e) noexcept
 {
     return e.id;
 }
 
 [[nodiscard]] inline auto
-get_key(const data_types::kernel_symbol_info_t& e) noexcept
+get_key(const writer_types::kernel_symbol_info_t& e) noexcept
 {
     return e.id;
 }
 
-[[nodiscard]] inline const data_types::track_info_t&
-get_key(const data_types::track_info_t& e) noexcept
+[[nodiscard]] inline const writer_types::track_info_t&
+get_key(const writer_types::track_info_t& e) noexcept
 {
     return e;
 }
@@ -102,13 +102,13 @@ to_string(T value)
 }
 
 [[nodiscard]] inline std::string
-to_string(const data_types::agent_unique_id_t& id)
+to_string(const writer_types::agent_unique_id_t& id)
 {
     return fmt::format("[agent_type={}, type_index={}]", id.agent_type, id.type_index);
 }
 
 [[nodiscard]] inline std::string
-to_string(const data_types::pmc_info_unique_id_t& id)
+to_string(const writer_types::pmc_info_unique_id_t& id)
 {
     if(id.agent_id.has_value())
     {
@@ -119,25 +119,25 @@ to_string(const data_types::pmc_info_unique_id_t& id)
 }
 
 [[nodiscard]] inline std::string
-to_string(const data_types::node_info_t& e)
+to_string(const writer_types::node_info_t& e)
 {
     return fmt::format("[node_info] node_id: {}", e.node_id);
 }
 
 [[nodiscard]] inline std::string
-to_string(const data_types::process_info_t& e)
+to_string(const writer_types::process_info_t& e)
 {
     return fmt::format("[process_info] pid: {}", e.pid);
 }
 
 [[nodiscard]] inline std::string
-to_string(const data_types::thread_info_t& e)
+to_string(const writer_types::thread_info_t& e)
 {
     return fmt::format("[thread_info] thread_id: {}", e.thread_id);
 }
 
 [[nodiscard]] inline std::string
-to_string(const data_types::agent_info_t& e)
+to_string(const writer_types::agent_info_t& e)
 {
     return fmt::format("[agent_info] type: {}, index: {}, name: {}",
                        e.unique_id.agent_type,
@@ -146,7 +146,7 @@ to_string(const data_types::agent_info_t& e)
 }
 
 [[nodiscard]] inline std::string
-to_string(const data_types::pmc_info_t& e)
+to_string(const writer_types::pmc_info_t& e)
 {
     return fmt::format("[pmc_info] name: {}, agent: {}",
                        e.unique_id.name,
@@ -155,31 +155,31 @@ to_string(const data_types::pmc_info_t& e)
 }
 
 [[nodiscard]] inline std::string
-to_string(const data_types::stream_info_t& e)
+to_string(const writer_types::stream_info_t& e)
 {
     return fmt::format("[stream_info] stream_id: {}", e.stream_id);
 }
 
 [[nodiscard]] inline std::string
-to_string(const data_types::queue_info_t& e)
+to_string(const writer_types::queue_info_t& e)
 {
     return fmt::format("[queue_info] queue_id: {}", e.queue_id);
 }
 
 [[nodiscard]] inline std::string
-to_string(const data_types::code_object_info_t& e)
+to_string(const writer_types::code_object_info_t& e)
 {
     return fmt::format("[code_object_info] id: {}", e.id);
 }
 
 [[nodiscard]] inline std::string
-to_string(const data_types::kernel_symbol_info_t& e)
+to_string(const writer_types::kernel_symbol_info_t& e)
 {
     return fmt::format("[kernel_symbol_info] id: {}", e.id);
 }
 
 [[nodiscard]] inline std::string
-to_string(const data_types::track_info_t& e)
+to_string(const writer_types::track_info_t& e)
 {
     return fmt::format(
         "[track_info] node_id: {}, process_id: {}, thread_id: {}, name: {}",

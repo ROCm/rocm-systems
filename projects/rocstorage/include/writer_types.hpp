@@ -5,12 +5,12 @@
 
 #include <cstddef>
 #include <deque>
-#include <memory>
 #include <optional>
-#include <string>
 #include <vector>
 
-namespace rocstorage::data_types
+#include <rocstorage/shared_types.hpp>
+
+namespace rocstorage::writer_types
 {
 
 /***
@@ -118,9 +118,6 @@ struct node_info_t
     const char* domain_name;
 };
 
-using node_info_ptr_t  = std::shared_ptr<node_info_t>;
-using node_info_list_t = std::vector<node_info_ptr_t>;
-
 /***
  * @brief Process info
  * @note This is a struct which will be used to identify the process.
@@ -143,9 +140,6 @@ struct process_info_t
 
     node_id_t node_id{};
 };
-
-using process_info_ptr_t  = std::shared_ptr<process_info_t>;
-using process_info_list_t = std::vector<process_info_ptr_t>;
 
 /***
  * @brief Agent info
@@ -173,9 +167,6 @@ struct agent_info_t
     node_id_t    node_id{};
     process_id_t process_id{};
 };
-
-using agent_info_ptr_t  = std::shared_ptr<agent_info_t>;
-using agent_info_list_t = std::vector<agent_info_ptr_t>;
 
 struct pmc_info_unique_id_t
 {
@@ -224,9 +215,6 @@ struct pmc_info_t
     process_id_t process_id{};
 };
 
-using pmc_info_ptr_t  = std::shared_ptr<pmc_info_t>;
-using pmc_info_list_t = std::vector<pmc_info_ptr_t>;
-
 /***
  * @brief Thread info
  * @note This is a struct which will be used to identify the thread.
@@ -249,9 +237,6 @@ struct thread_info_t
     process_id_t process_id{};
 };
 
-using thread_info_ptr_t  = std::shared_ptr<thread_info_t>;
-using thread_info_list_t = std::vector<thread_info_ptr_t>;
-
 /***
  * @brief Stream info
  * @note This is a struct which will be used to identify the stream.
@@ -271,9 +256,6 @@ struct stream_info_t
     process_id_t process_id{};
 };
 
-using stream_info_ptr_t  = std::shared_ptr<stream_info_t>;
-using stream_info_list_t = std::vector<stream_info_ptr_t>;
-
 /***
  * @brief Queue info
  * @note This is a struct which will be used to identify the queue.
@@ -292,9 +274,6 @@ struct queue_info_t
     node_id_t    node_id{};
     process_id_t process_id{};
 };
-
-using queue_info_ptr_t  = std::shared_ptr<queue_info_t>;
-using queue_info_list_t = std::vector<queue_info_ptr_t>;
 
 /***
  * @brief Code object info
@@ -321,9 +300,6 @@ struct code_object_info_t
     process_id_t                     process_id{};
     std::optional<agent_unique_id_t> agent_id;
 };
-
-using code_object_info_ptr_t  = std::shared_ptr<code_object_info_t>;
-using code_object_info_list_t = std::vector<code_object_info_ptr_t>;
 
 /***
  * @brief Kernel symbol info
@@ -355,9 +331,6 @@ struct kernel_symbol_info_t
     code_object_id_t code_obj_id{};
 };
 
-using kernel_symbol_info_ptr_t  = std::shared_ptr<kernel_symbol_info_t>;
-using kernel_symbol_info_list_t = std::vector<kernel_symbol_info_ptr_t>;
-
 /***
  * @brief Track info
  * @note This is a struct which will be used to identify the track.
@@ -384,99 +357,6 @@ struct track_info_t
     }
 };
 
-using track_info_ptr_t  = std::shared_ptr<track_info_t>;
-using track_info_list_t = std::vector<track_info_ptr_t>;
-
-// --------------------- Call Stack & Line Info Abstract Data Types ------------------
-
-/***
- * @brief Memory address range representing a loaded code object region.
- */
-struct address_range_info_t
-{
-    size_t      address_base;  ///< Base load address of the code object
-    size_t      address_low;   ///< Lower bound of the address range (>= address_base)
-    size_t      address_high;  ///< Upper bound of the address range (>= address_low)
-    const char* extdata = "{}";
-};
-
-using address_range_info_ptr_t  = std::shared_ptr<address_range_info_t>;
-using address_range_info_list_t = std::vector<address_range_info_ptr_t>;
-
-/***
- * @brief Program counter information representing a location in executable code.
- */
-struct program_counter_info_t
-{
-    const char*           function;  ///< Function or symbol name at this program counter
-    const char*           filename;  ///< Source file path (if available)
-    std::optional<size_t> line_number;  ///< Line number in source file (if available)
-    const char*           extdata = "{}";
-};
-
-using program_counter_info_ptr_t  = std::shared_ptr<program_counter_info_t>;
-using program_counter_info_list_t = std::vector<program_counter_info_ptr_t>;
-
-/***
- * @brief A single frame in a call stack.
- */
-struct stack_frame_t
-{
-    std::optional<program_counter_info_t>
-        program_counter;                                ///< Location info for this frame
-    std::optional<address_range_info_t> address_range;  ///< Code object memory range
-    const char*                         extdata = "{}";
-};
-
-using stack_frame_ptr_t  = std::shared_ptr<stack_frame_t>;
-using stack_frame_list_t = std::vector<stack_frame_ptr_t>;
-
-/***
- * @brief Complete call stack as an ordered collection of stack frames.
- * @note Front element (index 0) is the top of the stack (most recent call).
- * Back element is the bottom of the stack (e.g., main). Depth is implicit
- * from position in the deque. Maps to multiple rocpd_call_stack rows in schema v4.
- */
-using call_stack_t = std::deque<stack_frame_t>;
-
-/***
- * @brief Source code context containing actual source lines and disassembly.
- */
-struct source_code_info_t
-{
-    std::optional<const char*> filename;  ///< Source file path
-    std::optional<size_t>
-        starting_line_number;  ///< First line number in source_code_lines
-    std::vector<const char*> source_code_lines;           ///< Actual source code lines
-    std::vector<const char*> assembly_instruction_lines;  ///< Disassembled instructions
-    const char*              extdata = "{}";
-};
-
-using source_code_info_ptr_t  = std::shared_ptr<source_code_info_t>;
-using source_code_info_list_t = std::vector<source_code_info_ptr_t>;
-
-/***
- * @brief Line info entry linking source code context with program counter location.
- */
-struct line_info_entry_t
-{
-    std::optional<source_code_info_t>     source_code;      ///< Source code context
-    std::optional<program_counter_info_t> program_counter;  ///< Code location
-    std::optional<address_range_info_t>
-        address_range;  ///< Code object for program_counter
-};
-
-using line_info_entry_ptr_t  = std::shared_ptr<line_info_entry_t>;
-using line_info_entry_list_t = std::vector<line_info_entry_ptr_t>;
-
-/***
- * @brief Collection of line info entries for an event.
- * @note An event may have multiple source contexts (e.g., inlined functions,
- * multiple relevant source locations). Each entry provides source code and
- * location information. Maps to multiple rocpd_line_info rows in schema v4.
- */
-using source_context_list_t = std::vector<line_info_entry_t>;
-
 // --------------------- Data Tables ---------------------
 
 /***
@@ -490,9 +370,6 @@ struct arg_data_t
     const char* value{};     ///< Serialized argument value
     const char* extdata = "{}";
 };
-
-using arg_data_ptr_t  = std::shared_ptr<arg_data_t>;
-using arg_data_list_t = std::vector<arg_data_ptr_t>;
 
 /***
  * @brief Common event metadata shared by all profiling events.
@@ -509,21 +386,17 @@ struct event_data_t
     size_t parent_stack_id;  ///< Parent stack ID for nested events
     size_t correlation_id;   ///< Correlation ID linking related events
 
-    call_stack_t                   call_stack;      ///< Call stack at event time
-    std::vector<line_info_entry_t> line_info_list;  ///< Source context information
+    shared_types::call_stack_t          call_stack;      ///< Call stack at event time
+    shared_types::source_context_list_t line_info_list;  ///< Source context information
 
     const char* event_category;  ///< Event category name (e.g., "HIP_API", "HSA_API")
     const char* extdata = "{}";
 };
 
-using event_data_ptr_t  = std::shared_ptr<event_data_t>;
-using event_data_list_t = std::vector<event_data_ptr_t>;
-
 /***
  * @brief A named time region representing a span of execution.
  * @note Maps to rocpd_region table. Represents user-annotated regions, API calls,
- * or any named time span. In schema v4, timestamps are stored in rocpd_timestamp
- * table and referenced by ID.
+ * or any named time span.
  */
 struct region_data_t
 {
@@ -537,14 +410,10 @@ struct region_data_t
     std::vector<arg_data_t> args;  ///< Optional function arguments
 };
 
-using region_data_ptr_t  = std::shared_ptr<region_data_t>;
-using region_data_list_t = std::vector<region_data_ptr_t>;
-
 /***
  * @brief A point-in-time sample (instantaneous event).
  * @note Maps to rocpd_sample table. Used for counter samples, markers, or any
  * instantaneous event. Associated with a track for timeline visualization.
- * In schema v4, timestamp is stored in rocpd_timestamp table.
  */
 struct sample_data_t
 {
@@ -552,9 +421,6 @@ struct sample_data_t
     track_info_t   track;
     const char*    extdata = "{}";
 };
-
-using sample_data_ptr_t  = std::shared_ptr<sample_data_t>;
-using sample_data_list_t = std::vector<sample_data_ptr_t>;
 
 /***
  * @brief Performance counter (PMC) event data.
@@ -570,15 +436,11 @@ struct pmc_event_data_t
     sample_data_t               sample;  ///< Timestamp information
 };
 
-using pmc_event_data_ptr_t  = std::shared_ptr<pmc_event_data_t>;
-using pmc_event_data_list_t = std::vector<pmc_event_data_ptr_t>;
-
 /***
  * @brief GPU kernel dispatch event data.
  * @note Maps to rocpd_kernel_dispatch table. Records a GPU kernel execution
  * including launch configuration (grid/workgroup sizes), timing, and kernel
- * identification. In schema v4, timestamps are stored in rocpd_timestamp table
- * and context (agent, queue, stream) is stored via track_id.
+ * identification.
  */
 struct kernel_dispatch_data_t
 {
@@ -600,15 +462,11 @@ struct kernel_dispatch_data_t
     const char* extdata = "{}";
 };
 
-using kernel_dispatch_data_ptr_t  = std::shared_ptr<kernel_dispatch_data_t>;
-using kernel_dispatch_data_list_t = std::vector<kernel_dispatch_data_ptr_t>;
-
 /***
  * @brief Memory copy operation event data.
  * @note Maps to rocpd_memory_copy table. Records a memory transfer operation
  * including source/destination addresses, size, and timing. Used for tracking
- * host-to-device, device-to-host, and device-to-device copies. In schema v4,
- * timestamps are stored in rocpd_timestamp table.
+ * host-to-device, device-to-host, and device-to-device copies.
  */
 struct memory_copy_data_t
 {
@@ -625,14 +483,10 @@ struct memory_copy_data_t
     const char*                      extdata = "{}";
 };
 
-using memory_copy_data_ptr_t  = std::shared_ptr<memory_copy_data_t>;
-using memory_copy_data_list_t = std::vector<memory_copy_data_ptr_t>;
-
 /***
  * @brief Memory allocation event data.
  * @note Maps to rocpd_memory_allocate table. Records memory allocation and
  * deallocation operations including address, size, allocation type, and timing.
- * In schema v4, timestamps are stored in rocpd_timestamp table.
  */
 struct memory_alloc_data_t
 {
@@ -646,146 +500,4 @@ struct memory_alloc_data_t
     const char*           extdata = "{}";
 };
 
-using memory_alloc_data_ptr_t  = std::shared_ptr<memory_alloc_data_t>;
-using memory_alloc_data_list_t = std::vector<memory_alloc_data_ptr_t>;
-
-// ============================================================================
-// Types for reader API
-// ============================================================================
-
-/// Fundamental event kind - determines timeline rendering
-enum class event_kind_t
-{
-    region,  ///< Has start and end, displayed as bar/span
-    instant  ///< Single point in time, displayed as marker/dot
-};
-
-/// Specific event type - determines which data object to fetch
-enum class event_type_t
-{
-    region,           ///< API calls, user markers
-    kernel_dispatch,  ///< GPU kernel execution
-    memory_copy,      ///< Memory transfer
-    memory_allocate,  ///< Memory operation
-    sample,           ///< Instantaneous sample
-    pmc_event         ///< Performance counter
-};
-
-struct unique_event_id_t
-{
-    size_t       id;
-    event_type_t type;
-};
-
-// ============================================================================
-// Timeline Event - Lightweight View for Display
-// ============================================================================
-
-/// Lightweight event representation for timeline display.
-/// Contains only display-necessary fields read from initial query.
-/// Full details fetched on-demand via get_event_details() or type-specific accessors.
-struct timeline_event_t
-{
-    // Identity (for fetching full details)
-    unique_event_id_t unique_id;
-
-    event_kind_t kind;  ///< region vs instant (for rendering)
-
-    timestamp_ns_t start_timestamp;  ///< Start time (or timestamp for instant)
-    timestamp_ns_t end_timestamp;    ///< End time (== start for instant)
-
-    std::string display_name;  ///< Human-readable name
-    std::string category;      ///< Event category (e.g., "HIP_API", "GPU")
-
-    track_info_ptr_t track;  ///< Associated track
-
-    std::optional<double> value;
-
-    [[nodiscard]] timestamp_ns_t duration() const noexcept
-    {
-        return end_timestamp - start_timestamp;
-    }
-
-    [[nodiscard]] bool is_instant() const noexcept
-    {
-        return kind == event_kind_t::instant;
-    }
-    [[nodiscard]] bool is_region() const noexcept { return kind == event_kind_t::region; }
-};
-
-using timeline_event_list_t = std::vector<timeline_event_t>;
-
-// ============================================================================
-// Filter Types
-// ============================================================================
-
-/// Time window filter for queries
-struct time_window_t
-{
-    std::optional<timestamp_ns_t> start{ std::nullopt };  ///< Filter: start >= this
-    std::optional<timestamp_ns_t> end{ std::nullopt };    ///< Filter: end <= this
-};
-
-/// Pagination for large result sets (extension point for chunking)
-struct pagination_t
-{
-    std::optional<size_t> limit{ std::nullopt };   ///< Max events to return
-    std::optional<size_t> offset{ std::nullopt };  ///< Skip first N events
-};
-
-/// Sort order
-enum class sort_order_t
-{
-    ascending,
-    descending
-};
-
-struct sort_t
-{
-    std::string  property  = "start";  ///< Property to sort by
-    sort_order_t direction = sort_order_t::ascending;
-};
-
-/// Combined filter for event queries
-struct event_filter_t
-{
-    time_window_t         time_window;           ///< Time range filter
-    pagination_t          pagination;            ///< Limit/offset for chunking
-    std::optional<sort_t> sort{ std::nullopt };  ///< Sort order
-
-    /// Which event types to include (empty = all)
-    std::vector<event_type_t> types;
-
-    /// Optional WHERE filter
-    std::optional<std::string> where;
-};
-
-// ============================================================================
-// Summary Statistics
-// ============================================================================
-
-/// Aggregated statistics for a group of events
-struct event_summary_t
-{
-    std::string    name;
-    size_t         count;
-    timestamp_ns_t total_duration;
-    timestamp_ns_t avg_duration;
-    timestamp_ns_t min_duration;
-    timestamp_ns_t max_duration;
-};
-
-using event_summary_list_t = std::vector<event_summary_t>;
-
-/// Total counts of each event type
-struct event_counts_t
-{
-    size_t regions;
-    size_t kernel_dispatches;
-    size_t memory_copies;
-    size_t memory_allocations;
-    size_t samples;
-    size_t pmc_events;
-};
-
-}  // namespace rocstorage::data_types
+}  // namespace rocstorage::writer_types

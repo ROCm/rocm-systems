@@ -5,7 +5,7 @@
 
 #include "database.hpp"
 
-#include "rocstorage/data_types.hpp"
+#include "rocstorage/writer_types.hpp"
 
 #include <cstddef>
 #include <functional>
@@ -182,7 +182,7 @@ struct read_statements
     using string_statement_func_t = std::function<statement_result<string_result>()>;
 
     using node_info_statement_func_t =
-        std::function<statement_result<data_types::node_info_t>()>;
+        std::function<statement_result<writer_types::node_info_t>()>;
 
     using process_info_statement_func_t =
         std::function<statement_result<process_info_result>()>;
@@ -295,17 +295,17 @@ private:
                          .get_query_string();
 
         m_node_info_statement =
-            m_database->create_read_statement_executor<data_types::node_info_t>(
+            m_database->create_read_statement_executor<writer_types::node_info_t>(
                 query,
-                &data_types::node_info_t::node_id,
-                &data_types::node_info_t::hash,
-                &data_types::node_info_t::machine_id,
-                &data_types::node_info_t::system_name,
-                &data_types::node_info_t::hostname,
-                &data_types::node_info_t::release,
-                &data_types::node_info_t::version,
-                &data_types::node_info_t::hardware_name,
-                &data_types::node_info_t::domain_name);
+                &writer_types::node_info_t::node_id,
+                &writer_types::node_info_t::hash,
+                &writer_types::node_info_t::machine_id,
+                &writer_types::node_info_t::system_name,
+                &writer_types::node_info_t::hostname,
+                &writer_types::node_info_t::release,
+                &writer_types::node_info_t::version,
+                &writer_types::node_info_t::hardware_name,
+                &writer_types::node_info_t::domain_name);
     }
 
     void initialize_process_info_statement()

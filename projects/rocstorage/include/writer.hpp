@@ -3,8 +3,8 @@
 
 #pragma once
 
-#include <rocstorage/data_types.hpp>
 #include <rocstorage/storage.hpp>
+#include <rocstorage/writer_types.hpp>
 
 #include <memory>
 
@@ -25,56 +25,56 @@ struct writer_t
      * @brief Insert node info into rocpd
      * @param node_info Node info which will be inserted into rocpd
      */
-    void register_node_info(const data_types::node_info_t& node_info);
+    void register_node_info(const writer_types::node_info_t& node_info);
 
     /***
      * @brief Insert process info into rocpd
      * @param process_info Process info which will be inserted into rocpd
      */
-    void register_process_info(const data_types::process_info_t& process_info);
+    void register_process_info(const writer_types::process_info_t& process_info);
 
     /***
      * @brief Insert agent info into rocpd
      * @param agent Agent info which will be inserted into rocpd
      */
-    void register_agent_info(const data_types::agent_info_t& agent);
+    void register_agent_info(const writer_types::agent_info_t& agent);
 
     /***
      * @brief Insert pmc info into rocpd
      * @param pmc_info Pmc info which will be inserted into rocpd
      */
-    void register_pmc_info(const data_types::pmc_info_t& pmc_info);
+    void register_pmc_info(const writer_types::pmc_info_t& pmc_info);
 
     /***
      * @brief Insert thread info into rocpd
      * @param thread_info Thread info which will be inserted into rocpd
      */
-    void register_thread_info(const data_types::thread_info_t& thread_info);
+    void register_thread_info(const writer_types::thread_info_t& thread_info);
 
     /***
      * @brief Insert stream info into rocpd
      * @param stream_info Stream info which will be inserted into rocpd
      */
-    void register_stream_info(const data_types::stream_info_t& stream_info);
+    void register_stream_info(const writer_types::stream_info_t& stream_info);
 
     /***
      * @brief Insert queue info into rocpd
      * @param queue_info Queue info which will be inserted into rocpd
      */
-    void register_queue_info(const data_types::queue_info_t& queue_info);
+    void register_queue_info(const writer_types::queue_info_t& queue_info);
 
     /***
      * @brief Insert code object info into rocpd
      * @param code_object Code object which will be inserted into rocpd
      */
-    void register_code_object_info(const data_types::code_object_info_t& code_object);
+    void register_code_object_info(const writer_types::code_object_info_t& code_object);
 
     /***
      * @brief Insert kernel symbol info into rocpd
      * @param kernel_symbol Kernel symbol which will be inserted into rocpd
      */
     void register_kernel_symbol_info(
-        const data_types::kernel_symbol_info_t& kernel_symbol);
+        const writer_types::kernel_symbol_info_t& kernel_symbol);
 
     /***
      * @brief Insert track info into rocpd
@@ -83,7 +83,7 @@ struct writer_t
      * @param process_id_value Process Id Value - which will uniquely identify the process
      * @param thread_id_value Thread Id Value - which will uniquely identify the thread
      */
-    void register_track_info(const data_types::track_info_t& track);
+    void register_track_info(const writer_types::track_info_t& track);
 
     /***
      * @brief Insert string into rocpd
@@ -97,16 +97,16 @@ struct writer_t
      * @param region_data Region data which will be inserted into rocpd
      * @param trace_environment Trace environment which is connected to the region
      */
-    void insert_region_data(const data_types::region_data_t&       region_data,
-                            const data_types::trace_environment_t& trace_environment);
+    void insert_region_data(const writer_types::region_data_t&       region_data,
+                            const writer_types::trace_environment_t& trace_environment);
 
     /***
      * @brief Insert pmc event data into rocpd
      * @param pmc_event_data Pmc event data which will be inserted into rocpd
      * @param pmc_unique_id Pmc unique id which will uniquely identify the pmc
      */
-    void insert_pmc_event_data(const data_types::pmc_event_data_t&     pmc_event_data,
-                               const data_types::pmc_info_unique_id_t& pmc_unique_id);
+    void insert_pmc_event_data(const writer_types::pmc_event_data_t&     pmc_event_data,
+                               const writer_types::pmc_info_unique_id_t& pmc_unique_id);
 
     /***
      * @brief Insert kernel dispatch data into rocpd
@@ -115,8 +115,8 @@ struct writer_t
      * dispatch
      */
     void insert_kernel_dispatch_data(
-        const data_types::kernel_dispatch_data_t& kernel_dispatch_data,
-        const data_types::trace_environment_t&    trace_environment);
+        const writer_types::kernel_dispatch_data_t& kernel_dispatch_data,
+        const writer_types::trace_environment_t&    trace_environment);
 
     /***
      * @brief Insert memory copy data into rocpd
@@ -124,8 +124,8 @@ struct writer_t
      * @param trace_environment Trace environment which is connected to the memory copy
      */
     void insert_memory_copy_data(
-        const data_types::memory_copy_data_t&  memory_copy_data,
-        const data_types::trace_environment_t& trace_environment);
+        const writer_types::memory_copy_data_t&  memory_copy_data,
+        const writer_types::trace_environment_t& trace_environment);
 
     /***
      * @brief Insert memory alloc data into rocpd
@@ -133,8 +133,8 @@ struct writer_t
      * @param trace_environment Trace environment which is connected to the memory alloc
      */
     void insert_memory_alloc_data(
-        const data_types::memory_alloc_data_t& memory_alloc_data,
-        const data_types::trace_environment_t& trace_environment);
+        const writer_types::memory_alloc_data_t& memory_alloc_data,
+        const writer_types::trace_environment_t& trace_environment);
 
     /***
      * @brief Flush in-memory data to disk

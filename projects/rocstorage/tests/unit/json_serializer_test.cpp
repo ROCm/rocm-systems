@@ -31,7 +31,7 @@ namespace
 {
 
 using namespace rocstorage;
-using namespace rocstorage::data_types;
+using namespace rocstorage::shared_types;
 using json = nlohmann::json;
 
 // --------------------- Call Stack Tests ---------------------

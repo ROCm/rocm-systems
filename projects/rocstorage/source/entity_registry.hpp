@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "rocstorage/data_types.hpp"
+#include "rocstorage/writer_types.hpp"
 
 #include "common/hash_functions.hpp"
 #include "entity_utility.hpp"
@@ -33,36 +33,37 @@ struct entity_registry
     [[nodiscard]] auto& string_info() { return m_string_info; }
 
 private:
-    entity_utility<std::unordered_set<data_types::node_id_t>> m_node_info{};
+    entity_utility<std::unordered_set<writer_types::node_id_t>> m_node_info{};
 
-    entity_utility<std::unordered_map<data_types::process_id_t, primary_key_t>>
+    entity_utility<std::unordered_map<writer_types::process_id_t, primary_key_t>>
         m_process_info{};
 
-    entity_utility<std::unordered_map<data_types::agent_unique_id_t,
+    entity_utility<std::unordered_map<writer_types::agent_unique_id_t,
                                       primary_key_t,
                                       hashing::agent_unique_id_hash>>
         m_agent_info{};
 
-    entity_utility<std::unordered_map<data_types::pmc_info_unique_id_t,
+    entity_utility<std::unordered_map<writer_types::pmc_info_unique_id_t,
                                       primary_key_t,
                                       hashing::pmc_unique_id_hash>>
         m_pmc_info{};
 
-    entity_utility<std::unordered_map<data_types::thread_id_t, primary_key_t>>
+    entity_utility<std::unordered_map<writer_types::thread_id_t, primary_key_t>>
         m_thread_info{};
 
-    entity_utility<std::unordered_map<data_types::stream_id_t, primary_key_t>>
+    entity_utility<std::unordered_map<writer_types::stream_id_t, primary_key_t>>
         m_stream_info{};
 
-    entity_utility<std::unordered_map<data_types::queue_id_t, primary_key_t>>
+    entity_utility<std::unordered_map<writer_types::queue_id_t, primary_key_t>>
         m_queue_info{};
 
-    entity_utility<std::unordered_set<data_types::code_object_id_t>> m_code_object_info{};
+    entity_utility<std::unordered_set<writer_types::code_object_id_t>>
+        m_code_object_info{};
 
-    entity_utility<std::unordered_set<data_types::kernel_symbol_id_t>>
+    entity_utility<std::unordered_set<writer_types::kernel_symbol_id_t>>
         m_kernel_symbol_info{};
 
-    entity_utility<std::unordered_map<data_types::track_info_t,
+    entity_utility<std::unordered_map<writer_types::track_info_t,
                                       primary_key_t,
                                       hashing::track_info_hash>>
         m_track_info{};
