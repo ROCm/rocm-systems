@@ -56,9 +56,7 @@ def test_validate_spm(pmc_json_data, spm_json_data):
     def _collect_counter_totals(json_data, record_kind, kernel_filter):
         data = json_data["rocprofiler-sdk-tool"]
 
-        counters = {
-            itr["id"]["handle"]: itr for itr in data.get("counters", [])
-        }
+        counters = {itr["id"]["handle"]: itr for itr in data.get("counters", [])}
         kernel_symbols = data.get("kernel_symbols", {})
 
         values = {}
@@ -107,9 +105,7 @@ def test_validate_spm_rocpd_csv(counter_csv: pd.DataFrame, spm_json_data):
     within_tolerance = lambda x, y: abs(x - y) < TOLERANCE * max(x, y)
 
     kernel_column = "kernel_name" if "kernel_name" in counter_csv else "Kernel_Name"
-    counter_column = (
-        "counter_name" if "counter_name" in counter_csv else "Counter_Name"
-    )
+    counter_column = "counter_name" if "counter_name" in counter_csv else "Counter_Name"
     value_column = "Counter_Value"
 
     filtered = counter_csv[counter_csv[kernel_column].str.contains("matrixTranspose")]
@@ -124,9 +120,7 @@ def test_validate_spm_rocpd_csv(counter_csv: pd.DataFrame, spm_json_data):
 
     def _collect_spm_totals(json_data, kernel_filter):
         data = json_data["rocprofiler-sdk-tool"]
-        counters = {
-            itr["id"]["handle"]: itr for itr in data.get("counters", [])
-        }
+        counters = {itr["id"]["handle"]: itr for itr in data.get("counters", [])}
         kernel_symbols = data.get("kernel_symbols", {})
 
         values = {}
@@ -184,9 +178,7 @@ def test_validate_spm_rocpd(spm_json_data, rocpd_data):
     assert pmc_table is not None
     assert pmc_event_table is not None
 
-    counters = {
-        itr["id"]["handle"]: itr["name"] for itr in data.get("counters", [])
-    }
+    counters = {itr["id"]["handle"]: itr["name"] for itr in data.get("counters", [])}
 
     spm_counter_names = set()
     for entry in spm_data:

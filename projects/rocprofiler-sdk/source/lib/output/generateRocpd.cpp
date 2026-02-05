@@ -1038,9 +1038,8 @@ write_rocpd(
                     : std::string_view{};
 
             auto agent_node_id = tool_metadata.get_agent(info.agent_id)->node_id;
-            auto thread_id_opt = (thread_id == 0)
-                                     ? std::optional<uint64_t>{}
-                                     : std::optional<uint64_t>{thread_id};
+            auto thread_id_opt =
+                (thread_id == 0) ? std::optional<uint64_t>{} : std::optional<uint64_t>{thread_id};
 
             if(thread_id != 0) get_thread_id(thread_id);
 
@@ -1125,19 +1124,19 @@ write_rocpd(
                         tool_metadata.buffer_names.at(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH);
 
                     // Process this dispatch (SPM dispatch timestamps are not available)
-                    process_dispatch(info.dispatch_id,                // dispatch_id
-                                     info.kernel_id,                  // kernel_id
-                                     dispatch_data.correlation_id,    // corr_id
-                                     info,                            // info
-                                     kind,                            // kind
-                                     record.thread_id,                // thread_id
-                                     get_queue_id(info.queue_id),     // queue_id
+                    process_dispatch(info.dispatch_id,              // dispatch_id
+                                     info.kernel_id,                // kernel_id
+                                     dispatch_data.correlation_id,  // corr_id
+                                     info,                          // info
+                                     kind,                          // kind
+                                     record.thread_id,              // thread_id
+                                     get_queue_id(info.queue_id),   // queue_id
                                      get_stream_id(rocprofiler_stream_id_t{.handle = 0}),
-                                     0,                               // start_timestamp
-                                     0,                               // end_timestamp
-                                     info.grid_size,                  // grid
-                                     info.workgroup_size,             // workgroup
-                                     false                            // enable_duplicate_check
+                                     0,                    // start_timestamp
+                                     0,                    // end_timestamp
+                                     info.grid_size,       // grid
+                                     info.workgroup_size,  // workgroup
+                                     false                 // enable_duplicate_check
                     );
                 }
             }

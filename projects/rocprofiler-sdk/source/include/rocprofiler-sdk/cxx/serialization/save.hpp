@@ -589,6 +589,17 @@ save(ArchiveT& ar, rocprofiler_counter_record_t data)
 
 template <typename ArchiveT>
 void
+save(ArchiveT& ar, rocprofiler_spm_counter_record_t data)
+{
+    ROCP_SDK_SAVE_DATA_FIELD(dispatch_id);
+    ROCP_SDK_SAVE_DATA_FIELD(id);
+    ROCP_SDK_SAVE_DATA_FIELD(agent_id);
+    ROCP_SDK_SAVE_DATA_FIELD(timestamp);
+    ROCP_SDK_SAVE_DATA_FIELD(value);
+}
+
+template <typename ArchiveT>
+void
 save(ArchiveT& ar, rocprofiler_buffer_tracing_hip_api_record_t data)
 {
     save_buffer_tracing_api_record(ar, data);

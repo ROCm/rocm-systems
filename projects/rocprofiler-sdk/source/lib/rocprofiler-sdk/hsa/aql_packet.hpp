@@ -35,6 +35,7 @@
 #include <hsa/hsa_ven_amd_aqlprofile.h>
 
 #include <atomic>
+#include <optional>
 
 namespace rocprofiler
 {
@@ -296,14 +297,14 @@ public:
         container_desc_data = other.container_desc_data;
     }
 
-    void                         kfd_start();
-    void                         kfd_stop();
-    bool                         Valid() const { return is_valid; }
-    hsa_agent_t                  GetAgent() const { return pool ? pool->gpu_agent : hsa_agent_t{}; }
-    aqlprofile_agent_handle_t    agent;
-    rocprofiler_user_data_t*     user_data;
-    void*                        record_callback_args{};
-    aqlprofile_spm_buffer_desc_t aql_desc{};
+    void        kfd_start();
+    void        kfd_stop();
+    hsa_agent_t GetAgent() const { return pool ? pool->gpu_agent : hsa_agent_t{}; }
+    std::optional<rocprofiler_buffer_id_t>           buffer;
+    aqlprofile_agent_handle_t                        agent;
+    rocprofiler_user_data_t*                         user_data;
+    void*                                            record_callback_args{};
+    aqlprofile_spm_buffer_desc_t                     aql_desc{};
     rocprofiler::spm::spm_descriptor_t               spm_desc{};
     rocprofiler_spm_dispatch_counting_record_cb_t    record_cb{};
     rocprofiler_spm_dispatch_counting_service_data_t dispatch_data{};

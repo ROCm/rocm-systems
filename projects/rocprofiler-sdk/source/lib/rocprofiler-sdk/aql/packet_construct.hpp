@@ -127,33 +127,16 @@ private:
     hsa::TraceMemoryPool tracepool;
 };
 
-class SPMPacketConstruct
-{
-public:
-    SPMPacketConstruct(const rocprofiler_agent_id_t         agent_id,
-                       const std::vector<counters::Metric>& metrics,
-                       uint64_t                             sample_freq,
-                       uint64_t                             buffer_size,
-                       uint64_t                             timeout);
+std::unique_ptr<hsa::SPMPacket>
+spm_construct_packet(const rocprofiler_agent_id_t         agent_id,
+                     const std::vector<counters::Metric>& metrics,
+                     float                                sample_freq,
+                     uint64_t                             buffer_size,
+                     uint64_t                             timeout);
 
-    std::unique_ptr<hsa::SPMPacket> construct_packet(const CoreApiTable&, const AmdExtTable&);
-    rocprofiler_status_t            can_collect();
-
-protected:
-    struct AQLProfileMetric
-    {
-        counters::Metric                    metric;
-        std::vector<aqlprofile_pmc_event_t> instances;
-        std::vector<aqlprofile_pmc_event_t> events;
-    };
-
-private:
-    rocprofiler_agent_id_t                   _agent_id{};
-    std::vector<spm::spm_counter_instance_t> id_map{};
-    std::vector<AQLProfileMetric>            _metrics;
-    std::vector<aqlprofile_pmc_event_t>      events{};
-    std::vector<aqlprofile_spm_parameter_t>  params{};
-};
+rocprofiler_status_t
+spm_can_collect(const rocprofiler_agent_id_t         agent_id,
+                const std::vector<counters::Metric>& metrics);
 
 }  // namespace aql
 }  // namespace rocprofiler

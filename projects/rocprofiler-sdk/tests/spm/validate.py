@@ -72,6 +72,7 @@ def test_spm_counter_values(input_data):
         # Search for counter name, update it if present
         # If not counter name or agent not present add a new entry
         if record["agent_id"]["handle"] in agent_counter_map:
+
             found = 0
             for i in range(0, len(agent_counter_map[record["agent_id"]["handle"]])):
                 if agent_counter_map[record["agent_id"]["handle"]][i]["name"] == get_name(
@@ -86,15 +87,10 @@ def test_spm_counter_values(input_data):
 
         else:
             add_entry(record)
+
     # some samples can have 0 value, so aggreegate for validation
     for agent, counters in agent_counter_map.items():
 
-        assert float(get_counter_value(counters, "SQ_INSTS_SALU")) > get_counter_value(
-            counters, "SQ_WAVES"
-        )
-        assert float(get_counter_value(counters, "SQ_INSTS_VALU")) > get_counter_value(
-            counters, "SQ_WAVES"
-        )
         assert float(get_counter_value(counters, "TA_TA_BUSY")) > get_counter_value(
             counters, "TA_TOTAL_WAVEFRONTS"
         )

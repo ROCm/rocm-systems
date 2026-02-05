@@ -2346,12 +2346,14 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 
     if(tool::get_config().spm_counter_collection)
     {
+        ROCPROFILER_CALL(rocprofiler_create_context(&counter_collection_ctx),
+                         "failed to create counter collection context");
         ROCPROFILER_CALL(
             rocprofiler_configure_callback_spm_dispatch_service(
-                get_client_ctx(), spm_dispatch_callback, nullptr, spm_data_callback, nullptr),
+                counter_collection_ctx, spm_dispatch_callback, nullptr, spm_data_callback, nullptr),
             "Could not setup SPM counting service");
 
-        start_context(get_client_ctx(), "SPM counter collection");
+        start_context(counter_collection_ctx, "SPM counter collection");
     }
 
     auto rename_ctx            = rocprofiler_context_id_t{0};

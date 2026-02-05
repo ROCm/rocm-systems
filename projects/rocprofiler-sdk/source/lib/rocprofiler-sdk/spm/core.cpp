@@ -58,6 +58,32 @@ namespace rocprofiler
 namespace spm
 {
 /**
+ *This is a singleton class with lazy initialization
+ */
+class SpmCounterController
+{
+public:
+    SpmCounterController() = default;
+    // Adds a counter collection profile to our global cache.
+    // Note: these profiles can be used across multiple contexts
+    //       and are independent of the context.
+    void spm_add_profile(std::shared_ptr<spm_counter_config>&& config);
+
+    rocprofiler_status_t spm_destroy_profile(uint64_t id);
+    // Setup the SPM counter collection service. spm_counter_callback_info is created here
+
+    std::shared_ptr<spm_counter_config> get_profile_cfg(rocprofiler_spm_counter_config_id_t id);
+
+private:
+    // Cache to contain the map of config id handle to spm counter config
+    common::Synchronized<std::unordered_map<uint64_t, std::shared_ptr<spm_counter_config>>>
+        _configs;
+};
+
+SpmCounterController&
+spm_get_controller();
+
+/**
  * @brief The functions checks if the `ROCPROFILER_SPM_BETA_ENABLED` is set.
  * If so, it will enable SPM service. Otherwise, the API is reported
  * as not implemented.
@@ -99,10 +125,13 @@ SpmCounterController::spm_add_profile(std::shared_ptr<spm_counter_config>&& conf
 /**
  * @brief Removes the profile entry from the global cache
  */
-void
+rocprofiler_status_t
 SpmCounterController::spm_destroy_profile(uint64_t id)
 {
-    _configs.wlock([&](auto& data) { data.erase(id); });
+    return _configs.wlock([&](auto& data) {
+        if(data.erase(id) != 1) return ROCPROFILER_STATUS_ERROR;
+        return ROCPROFILER_STATUS_SUCCESS;
+    });
 }
 
 /**
@@ -116,10 +145,10 @@ SpmCounterController::get_profile_cfg(rocprofiler_spm_counter_config_id_t id)
     return cfg;
 }
 
-void
+rocprofiler_status_t
 destroy_spm_counter_profile(uint64_t id)
 {
-    spm_get_controller().spm_destroy_profile(id);
+    return spm_get_controller().spm_destroy_profile(id);
 }
 
 SpmCounterController&
@@ -130,47 +159,17 @@ spm_get_controller()
 }
 
 /**
- * @brief sets up packet generator in spm counter config
- * spm counter config  is instantiated for each config created by the user
- * Pkt generator is an instance of SPMPacketConstruct that contains SPM parameters and counters
- * Pkt generator is needed to construct aqlprofile packet for SPM
- */
-rocprofiler_status_t
-spm_counter_callback_info::setup_spm_counter_config(std::shared_ptr<spm_counter_config>& profile)
-{
-    /*
-     * If the profile already has pkt generator set up then it returns success
-     */
-    if(profile->pkt_generator)
-    {
-        return ROCPROFILER_STATUS_SUCCESS;
-    }
-
-    // Sets up the packet generator for the profile.
-
-    auto& config           = *profile;
-    profile->pkt_generator = std::make_unique<rocprofiler::aql::SPMPacketConstruct>(
-        config.agent->id,
-        std::vector<counters::Metric>{config.metrics.begin(), config.metrics.end()},
-        config.sample_freq,
-        config.buffer_size,
-        config.timeout);
-    return ROCPROFILER_STATUS_SUCCESS;
-}
-
-/**
  * @brief looks into the config's packet cache to re-use the packet
  * If not, constructs the packet using packet generator
  * updates packet_return map
  */
 rocprofiler_status_t
-spm_counter_callback_info::get_spm_packet(std::unique_ptr<rocprofiler::hsa::AQLPacket>& ret_pkt,
-                                          std::shared_ptr<spm_counter_config>&          profile)
+get_spm_packet(const std::shared_ptr<spm_counter_callback_info>& info,
+               std::unique_ptr<rocprofiler::hsa::AQLPacket>&     ret_pkt,
+               std::shared_ptr<spm_counter_config>&              profile)
 {
-    rocprofiler_status_t status;
     profile->packets.wlock([&](auto& pkt_vector) {
-        status = setup_spm_counter_config(profile);
-        if(!pkt_vector.empty() && status == ROCPROFILER_STATUS_SUCCESS)
+        if(!pkt_vector.empty())
         {
             ret_pkt = std::move(pkt_vector.back());
             pkt_vector.pop_back();
@@ -180,13 +179,16 @@ spm_counter_callback_info::get_spm_packet(std::unique_ptr<rocprofiler::hsa::AQLP
     if(!ret_pkt)
     {
         // If we do not have a packet in the cache, create one.
-        ret_pkt = profile->pkt_generator->construct_packet(
-            CHECK_NOTNULL(hsa::get_queue_controller())->get_core_table(),
-            CHECK_NOTNULL(hsa::get_queue_controller())->get_ext_table());
+        ret_pkt = rocprofiler::aql::spm_construct_packet(
+            profile->agent->id,
+            std::vector<counters::Metric>{profile->metrics.begin(), profile->metrics.end()},
+            profile->sample_freq,
+            profile->buffer_size,
+            profile->timeout);
     };
 
     ret_pkt->clear();
-    packet_return_map.wlock([&](auto& data) { data.emplace(ret_pkt.get(), profile); });
+    info->packet_return_map.wlock([&](auto& data) { data.emplace(ret_pkt.get(), profile); });
 
     return ROCPROFILER_STATUS_SUCCESS;
 }
@@ -199,13 +201,8 @@ rocprofiler_status_t
 create_spm_counter_profile(std::shared_ptr<spm_counter_config> config)
 {
     auto status = ROCPROFILER_STATUS_SUCCESS;
-    if(status = spm_counter_callback_info::setup_spm_counter_config(config);
+    if(status = rocprofiler::aql::spm_can_collect(config->agent->id, config->metrics);
        status != ROCPROFILER_STATUS_SUCCESS)
-    {
-        return status;
-    }
-
-    if(status = config->pkt_generator->can_collect(); status != ROCPROFILER_STATUS_SUCCESS)
     {
         return status;
     }
@@ -248,6 +245,7 @@ configure_callback_spm_dispatch(rocprofiler_context_id_t                       c
     // cannot coexist in the same context for now.
     if(ctx.pc_sampler) return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
     if(ctx.counter_collection) return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
+    if(ctx.device_counter_collection) return ROCPROFILER_STATUS_ERROR_AGENT_DISPATCH_CONFLICT;
     if(!ctx.dispatch_spm)
     {
         ctx.dispatch_spm =

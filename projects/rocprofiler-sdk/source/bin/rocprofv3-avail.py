@@ -452,7 +452,7 @@ def info_pmc(args):
 def process_info(args):
 
     if args.pmc is None and args.pc_sampling is None and args.spm is None:
-        list_basic_agent(args)
+        list_basic_agent(args, True)
     if args.pmc is not None:
         info_pmc(args)
     if args.spm is not None:
@@ -469,7 +469,7 @@ def process_list(args):
         and args.pmc is None
         and args.spm is None
     ):
-        listing(args)
+        listing_pmc(args)
     if args.agent:
         list_basic_agent(args, False)
     if args.pmc:

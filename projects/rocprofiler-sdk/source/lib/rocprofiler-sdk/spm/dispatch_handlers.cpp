@@ -94,7 +94,7 @@ pre_kernel_call(const context::context*                                         
     bool is_enabled = false;
     ctx->dispatch_spm->enabled.rlock([&](const auto& collect_ctx) { is_enabled = collect_ctx; });
 
-    if(!is_enabled || !info->user_cb) return {no_instrumentation(), false};
+    if(!is_enabled || !info->user_cb) return {no_instrumentation(), true};
 
     auto _corr_id_v =
         rocprofiler_async_correlation_id_t{.internal = 0, .external = context::null_user_data};
@@ -132,13 +132,13 @@ pre_kernel_call(const context::context*                                         
 
     info->user_cb(&dispatch_data, &req_profile, user_data, info->callback_args);
 
-    if(req_profile.handle == 0) return {nullptr, true};
+    if(req_profile.handle == 0) return {no_instrumentation(), true};
 
-    auto prof_config = spm_get_controller().get_profile_cfg(req_profile);
+    auto prof_config = get_spm_counter_config(req_profile);
     CHECK(prof_config);
 
     std::unique_ptr<rocprofiler::hsa::AQLPacket> ret_pkt = nullptr;
-    auto ret_status = info->get_spm_packet(ret_pkt, prof_config);
+    auto ret_status = get_spm_packet(info, ret_pkt, prof_config);
 
     CHECK_EQ(ret_status, ROCPROFILER_STATUS_SUCCESS) << rocprofiler_get_status_string(ret_status);
 
@@ -150,10 +150,15 @@ pre_kernel_call(const context::context*                                         
         spm_pkt->populate_before();
         spm_pkt->populate_after();
 
-        spm_pkt->dispatch_data        = dispatch_data;
-        spm_pkt->user_data            = user_data;
-        spm_pkt->record_cb            = info->record_callback;
-        spm_pkt->record_callback_args = info->record_callback_args;
+        spm_pkt->dispatch_data = dispatch_data;
+        spm_pkt->user_data     = user_data;
+        if(info->buffer)
+            spm_pkt->buffer = info->buffer;
+        else
+        {
+            spm_pkt->record_cb            = info->record_callback;
+            spm_pkt->record_callback_args = info->record_callback_args;
+        }
 
         auto& signal_to_start_kfd    = spm_pkt->before_krn_barrier_pkt.at(0).completion_signal;
         auto& signal_kfd_has_started = spm_pkt->before_krn_barrier_pkt.at(1).dep_signal[0];

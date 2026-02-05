@@ -25,6 +25,7 @@
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
+#include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/profiling_time.hpp"
@@ -56,6 +57,9 @@ get_ext_table()
 {
     static auto _v = []() {
         auto val                                  = AmdExtTable{};
+        val.version.major_id                      = HSA_AMD_EXT_API_TABLE_MAJOR_VERSION;
+        val.version.minor_id                      = sizeof(AmdExtTable);
+        val.version.step_id                       = HSA_AMD_EXT_API_TABLE_STEP_VERSION;
         val.hsa_amd_memory_pool_get_info_fn       = hsa_amd_memory_pool_get_info;
         val.hsa_amd_agent_iterate_memory_pools_fn = hsa_amd_agent_iterate_memory_pools;
         val.hsa_amd_memory_pool_allocate_fn       = hsa_amd_memory_pool_allocate;
@@ -77,6 +81,9 @@ get_api_table()
 {
     static auto _v = []() {
         auto val                          = CoreApiTable{};
+        val.version.major_id              = HSA_CORE_API_TABLE_MAJOR_VERSION;
+        val.version.minor_id              = sizeof(CoreApiTable);
+        val.version.step_id               = HSA_CORE_API_TABLE_STEP_VERSION;
         val.hsa_iterate_agents_fn         = hsa_iterate_agents;
         val.hsa_agent_get_info_fn         = hsa_agent_get_info;
         val.hsa_queue_create_fn           = hsa_queue_create;
@@ -141,8 +148,11 @@ test_init()
     HsaApiTable table;
     table.amd_ext_ = &get_ext_table();
     table.core_    = &get_api_table();
+    rocprofiler::hsa::copy_table(table.core_, 0);
+    rocprofiler::hsa::copy_table(table.amd_ext_, 0);
     agent::construct_agent_cache(&table);
     ASSERT_TRUE(hsa::get_queue_controller() != nullptr);
+
     hsa::get_queue_controller()->init(get_api_table(), get_ext_table());
 }
 
@@ -203,32 +213,28 @@ TEST(spm_core, check_packet_generation)
             ROCP_ERROR << fmt::format("Generating packet for {}", metric);
 
             auto params        = rocprofiler_spm_configuration_t{};
-            params.frequency   = 640000;
-            params.buffer_size = 30;
-            params.timeout     = 32768;
+            params.frequency   = 1.0;
+            params.buffer_size = 327;
+            params.timeout     = 30;
             ROCPROFILER_CALL(rocprofiler_spm_create_counter_config(
                                  agent.get_rocp_agent()->id, &id, 1, &params, &cfg_id),
                              "Unable to create profile");
             auto profile = spm::get_spm_counter_config(cfg_id);
             ASSERT_TRUE(profile);
-            EXPECT_EQ(spm::spm_counter_callback_info::setup_spm_counter_config(profile),
-                      ROCPROFILER_STATUS_SUCCESS)
-                << fmt::format("Could not build profile for {}", metric.name());
 
             /**
              * Check that a packet generator was created
              */
-            EXPECT_TRUE(profile->pkt_generator) << "No packet generator created";
 
             /**
              * Check packet generation
              */
-            spm::spm_counter_callback_info  cb_info;
-            std::unique_ptr<hsa::AQLPacket> pkt;
-            EXPECT_EQ(cb_info.get_spm_packet(pkt, profile), ROCPROFILER_STATUS_SUCCESS)
+            auto cb_info = std::make_shared<rocprofiler::spm::spm_counter_callback_info>();
+            std::unique_ptr<hsa::AQLPacket> pkt = nullptr;
+            EXPECT_EQ(get_spm_packet(cb_info, pkt, profile), ROCPROFILER_STATUS_SUCCESS)
                 << "Unable to generate packet";
             EXPECT_TRUE(pkt) << "Expected a packet to be generated";
-            cb_info.packet_return_map.wlock([&](const auto& data) {
+            cb_info->packet_return_map.wlock([&](const auto& data) {
                 EXPECT_EQ(data.size(), 1) << "Incorrect packet size";
                 const auto* ptr = common::get_val(data, pkt.get());
                 EXPECT_TRUE(ptr) << "Could not find pkt";
@@ -361,9 +367,9 @@ TEST(spm_core, check_callbacks)
             expected_dispatch        expected = {};
             rocprofiler_counter_id_t id       = {.handle = metric.id()};
             auto                     params   = rocprofiler_spm_configuration_t{};
-            params.frequency                  = 640000;
-            params.buffer_size                = 30;
-            params.timeout                    = 32768;
+            params.frequency                  = 0.5;
+            params.buffer_size                = 32768;
+            params.timeout                    = 30;
 
             ROCPROFILER_CALL(rocprofiler_spm_create_counter_config(
                                  agent.get_rocp_agent()->id, &id, 1, &params, &expected.id),
@@ -450,9 +456,9 @@ TEST(spm_core, destroy_counter_profile)
             expected_dispatch        expected = {};
             rocprofiler_counter_id_t id       = {.handle = metric.id()};
             auto                     params   = rocprofiler_spm_configuration_t{};
-            params.frequency                  = 640000;
-            params.buffer_size                = 30;
-            params.timeout                    = 32768;
+            params.frequency                  = 0.5;
+            params.buffer_size                = 32768;
+            params.timeout                    = 30;
 
             ROCPROFILER_CALL(rocprofiler_spm_create_counter_config(
                                  agent.get_rocp_agent()->id, &id, 1, &params, &expected.id),
@@ -567,9 +573,9 @@ TEST(spm_core, test_profile_incremental)
             rocprofiler_spm_counter_config_id_t old_id = cfg_id;
             rocprofiler_counter_id_t            id     = {.handle = block_metrics.front().id()};
             auto                                params = rocprofiler_spm_configuration_t{};
-            params.frequency                           = 640000;
-            params.buffer_size                         = 30;
-            params.timeout                             = 32768;
+            params.frequency                           = 0.5;
+            params.buffer_size                         = 32768;
+            params.timeout                             = 30;
             ROCPROFILER_CALL(rocprofiler_spm_create_counter_config(
                                  agent.get_rocp_agent()->id, &id, 1, &params, &cfg_id),
                              "Unable to create profile incrementally when we should be able to");

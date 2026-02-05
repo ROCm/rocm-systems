@@ -189,15 +189,13 @@ static const std::unordered_map<std::string, std::vector<std::vector<std::string
        "SQ",
        "9",
        "<None>",
-       "Count number of waves sent <32 active threads sent to SQs. "
-       "This value represents the number of waves that an each individual SIMD has enqueued during "
-       "the collection timeframe (for dispatch profiling this is the timeframe of kernel "
-       "execution, "
-       "for agent profiling it is the timeframe between start_context and read counter data) with "
-       "less than 32 threads. A sum of all SQ_WAVES_LT_32 values will give the total number of "
-       "waves with 32 threads enqueued during the collection timeframe by the application. "
-       "Returns one value per-SE (aggregates of SIMD values). "
-       "Useful for checking for wavefront occupancy."},
+       "Count number of waves sent <32 active threads sent to SQs. This value represents the "
+       "number of waves that an each individual SIMD has enqueued during the collection timeframe "
+       "(for dispatch profiling this is the timeframe of kernel execution, for agent profiling it "
+       "is the timeframe between start_context and read counter data) with less than 32 threads. A "
+       "sum of all SQ_WAVES_LT_32 values will give the total number of waves with 32 threads "
+       "enqueued during the collection timeframe by the application. Returns one value per-SE "
+       "(aggregates of SIMD values). Useful for checking for wavefront occupancy."},
       {"TCC_ALL_TC_OP_WB_WRITEBACK",
        "TCC",
        "73",

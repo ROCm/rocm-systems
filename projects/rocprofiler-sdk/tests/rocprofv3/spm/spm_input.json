@@ -6,9 +6,9 @@
             "kernel_exclude_regex": "",
             "truncate_kernels": true,
             "spm_beta_enabled": true,
-            "spm_frequency": 50000,
+            "spm_frequency": 1.0,
             "spm_timeout": 50,
-            "spm_buffer_size": "0x30000",
+            "spm_buffer_size": 32768,
             "spm": ["SQ_WAVES"]
         }
     ]

@@ -53,6 +53,13 @@ namespace rocprofiler
 {
 namespace spm
 {
+std::mutex&
+get_buffer_mut()
+{
+    static auto*& mut = common::static_object<std::mutex>::construct();
+    return *CHECK_NOTNULL(mut);
+}
+
 /** @brief Calback for every sample in SPM data buffer
  * [In] timestamp - timestamp of the sample
  * [In] value - value of the sample
@@ -112,8 +119,14 @@ aql_data_callback(size_t buffer_id, void* data, size_t data_size, int flags, voi
     // Decode SPM data and return vector of instances_t in counters list.
     auto status =
         spm_packet->sym.spm_decode_fn(spm_packet->aql_desc, decode_cb, data, data_size, &counters);
+
     if(status != HSA_STATUS_SUCCESS) return;
-    auto records = std::vector<const rocprofiler_spm_counter_record_t*>{};
+
+    auto records     = std::vector<const rocprofiler_spm_counter_record_t*>{};
+    auto buf_records = std::vector<rocprofiler_spm_counter_record_t>{};
+
+    rocprofiler::buffer::instance* buf = nullptr;
+    buf                                = buffer::get_buffer(spm_packet->buffer->handle);
 
     for(size_t i = 0; i < counters.size(); i++)
     {
@@ -143,27 +156,58 @@ aql_data_callback(size_t buffer_id, void* data, size_t data_size, int flags, voi
                     instance_id, rocprofiler::counters::ROCPROFILER_DIMENSION_SHADER_ENGINE, se);
             for(size_t it = 0; it < size; it++)
             {
-                // Construct SPM record and add it to the buffer
-                records.emplace_back(new rocprofiler_spm_counter_record_t{
-                    .size = sizeof(rocprofiler_spm_counter_record_t),
-                    .id   = instance_id,
-                    .agent_id =
+                if(buf)
+                {
+                    buf_records.emplace_back(rocprofiler_spm_counter_record_t{
+                        sizeof(rocprofiler_spm_counter_record_t),
+                        spm_packet->dispatch_data.dispatch_info.dispatch_id,
+                        instance_id,
                         (rocprofiler::agent::get_rocprofiler_agent(spm_packet->GetAgent()))->id,
-                    .timestamp = times[it],
-                    .value     = values[it]});
+                        times[it],
+                        values[it]});
+                }
+                else
+
+                    // Construct SPM record and add it to the buffer
+                    records.emplace_back(new rocprofiler_spm_counter_record_t{
+                        .size        = sizeof(rocprofiler_spm_counter_record_t),
+                        .dispatch_id = spm_packet->dispatch_data.dispatch_info.dispatch_id,
+                        .id          = instance_id,
+                        .agent_id =
+                            (rocprofiler::agent::get_rocprofiler_agent(spm_packet->GetAgent()))->id,
+                        .timestamp = times[it],
+                        .value     = values[it]});
             }
         }
     }
-    // Return the buffer of SPM records to the tool
-    spm_packet->record_cb(&(spm_packet->dispatch_data),
-                          records.data(),
-                          records.size(),
-                          1 << ROCPROFILER_SPM_RECORD_FLAG_DATA | flags,
-                          spm_packet->user_data,
-                          spm_packet->record_callback_args);
-    for(auto record : records)
-        delete(record);
-    records.clear();
+    if(buf)
+    {
+        auto _lk = std::unique_lock{get_buffer_mut()};  // Buffer records need to be in order
+
+        buf->emplace(ROCPROFILER_BUFFER_CATEGORY_COUNTERS,
+                     ROCPROFILER_COUNTER_RECORD_PROFILE_COUNTING_DISPATCH_HEADER,
+                     spm_packet->dispatch_data);
+        for(auto itr : buf_records)
+        {
+            if(itr.dispatch_id != spm_packet->dispatch_data.dispatch_info.dispatch_id)
+
+                buf->emplace(
+                    ROCPROFILER_BUFFER_CATEGORY_COUNTERS, ROCPROFILER_COUNTER_RECORD_VALUE, itr);
+        }
+    }
+    else
+    {
+        // Return the buffer of SPM records to the tool
+        spm_packet->record_cb(&(spm_packet->dispatch_data),
+                              records.data(),
+                              records.size(),
+                              1 << ROCPROFILER_SPM_RECORD_FLAG_DATA | flags,
+                              spm_packet->user_data,
+                              spm_packet->record_callback_args);
+        for(const auto* itr : records)
+            delete(itr);
+        records.clear();
+    }
 }
 
 }  // namespace spm

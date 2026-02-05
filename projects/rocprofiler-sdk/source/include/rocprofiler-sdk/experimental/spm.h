@@ -23,6 +23,7 @@
 #pragma once
 
 #include <rocprofiler-sdk/agent.h>
+#include <rocprofiler-sdk/counters.h>
 #include <rocprofiler-sdk/defines.h>
 #include <rocprofiler-sdk/fwd.h>
 
@@ -74,6 +75,8 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_spm_configuration_t
  * @retval ROCPROFILER_STATUS_ERROR if config could not be created
  * @retval ROCPROFILER_STATUS_ERROR_METRIC_NOT_VALID_FOR_AGENT if agent does not support an input
  counter
+ * @retval ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT if counters count is zero and no existing
+ config is supplied
  * @retval ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_ABI incompatible aqlprofile version is used
  * @retval ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED if the ROCPROFILER_SPM_BETA_ENABLED is not set
  * @retval ROCPROFILER_STATUS_ERROR_EXCEEDS_HW_LIMIT if input counters exceed the hardware limit
@@ -112,7 +115,7 @@ typedef enum ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_spm_record_flag_t
     ROCPROFILER_SPM_RECORD_FLAG_DATA_LOST = 0,  ///< records with data loss
     ROCPROFILER_SPM_RECORD_FLAG_DATA,           ///< records with data
     ROCPROFILER_SPM_RECORD_FLAG_END,            ///< End of agent service
-    ROCPROFILER_SPM_RECORD_FLAG_DATA_NONE,
+    ROCPROFILER_SPM_RECORD_FLAG_DATA_NONE,      //< flag value none
     ROCPROFILER_SPM_RECORD_FLAG_LAST,
 } rocprofiler_spm_record_flag_t;
 
@@ -134,6 +137,8 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_spm_dispatch_counting_se
 typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_spm_counter_record_t
 {
     uint64_t size;  ///< Size of this structure. Used for versioning and validation.
+    rocprofiler_dispatch_id_t
+        dispatch_id;  ///< dispatch id used to determine the dispatch this record belongs to.
     rocprofiler_counter_instance_id_t id;         ///< Counter instance id
     rocprofiler_agent_id_t            agent_id;   ///< Agent on which the record is collected
     rocprofiler_timestamp_t           timestamp;  ///< timestamp of the sample
@@ -176,28 +181,6 @@ typedef void (*rocprofiler_spm_dispatch_counting_service_cb_t)(
     void*                                                   callback_data_args);
 
 /**
- * @defgroup SPM counter
- * @brief Query and config functions related to SPM hardware counters
- * @{
- */
-/**
- * @brief (experimental) Callback that gives a list of counters available on an agent. The
- *        counters variable is owned by rocprofiler and should not be free'd.
- *
- * @param [in] agent_id Agent ID of the current callback
- * @param [in] counters An array of counters that are available on the agent
- *      ::rocprofiler_iterate_spm_supported_counters was called on.
- * @param [in] num_counters Number of counters contained in counters
- * @param [in] user_data User data supplied by
- *      ::rocprofiler_iterate_spm_supported_counters
- */
-ROCPROFILER_SDK_EXPERIMENTAL typedef rocprofiler_status_t (
-    *rocprofiler_available_spm_counters_cb_t)(rocprofiler_agent_id_t    agent_id,
-                                              rocprofiler_counter_id_t* counters,
-                                              size_t                    num_counters,
-                                              void*                     user_data);
-
-/**
  * @brief (experimental) Query Agent SPM Counters Availability.
  *
  * @param [in] agent_id GPU agent identifier
@@ -209,8 +192,8 @@ ROCPROFILER_SDK_EXPERIMENTAL typedef rocprofiler_status_t (
  * @retval ROCPROFILER_STATUS_ERROR_AGENT_ARCH_NOT_SUPPORTED agent has no supported SPM counter
  */
 ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_status_t
-rocprofiler_iterate_spm_supported_counters(rocprofiler_agent_id_t                  agent_id,
-                                           rocprofiler_available_spm_counters_cb_t cb,
+rocprofiler_iterate_spm_supported_counters(rocprofiler_agent_id_t              agent_id,
+                                           rocprofiler_available_counters_cb_t cb,
                                            void* user_data) ROCPROFILER_API ROCPROFILER_NONNULL(2);
 
 /**
@@ -234,6 +217,7 @@ rocprofiler_iterate_spm_supported_counters(rocprofiler_agent_id_t               
  * @retval ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT conflicting services being enabled in the
  * context
  */
+
 ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_status_t
 rocprofiler_configure_callback_spm_dispatch_service(
     rocprofiler_context_id_t                       context_id,
@@ -242,5 +226,31 @@ rocprofiler_configure_callback_spm_dispatch_service(
     rocprofiler_spm_dispatch_counting_record_cb_t  record_callback,
     void* record_callback_args) ROCPROFILER_API ROCPROFILER_NONNULL(2, 4);
 ;
+
+/**
+ * @brief (experimental) Configure buffered dispatch spm service.
+ *        Collects the counters in dispatch packets and stores them
+ *        in a buffer with @p buffer_id. The buffer may contain packets from more than
+ *        one dispatch (denoted by correlation id). Will trigger the
+ *        callback based on the parameters setup in buffer_id_t.
+ *
+ * @param [in] context_id context id
+ * @param [in] buffer_id id of the buffer to use for the counting service
+ * @param [in] callback callback to perform when dispatch is enqueued
+ * @param [in] callback_data_args callback data
+ * @return ::rocprofiler_status_t
+ * @retval ROCPROFILER_STATUS_ERROR_BUFFER_NOT_FOUND
+ * @retval ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID invalid input context has not already been
+ * @retval ROCPROFILER_STATUS_ERROR_AGENT_DISPATCH_CONFLICT
+ * @retval ROCPROFILER_STATUS_SUCCESS if the context can be configured for SPM buffer dispatch
+ * service
+ */
+
+rocprofiler_status_t
+rocprofiler_configure_buffer_spm_dispatch_service(
+    rocprofiler_context_id_t                       context_id,
+    rocprofiler_buffer_id_t                        buffer_id,
+    rocprofiler_spm_dispatch_counting_service_cb_t callback,
+    void* callback_data_args) ROCPROFILER_API ROCPROFILER_NONNULL(3);
 
 ROCPROFILER_EXTERN_C_FINI

@@ -48,7 +48,7 @@ is_dlsym_valid()
     static bool valid = Dlsym().valid();
     return valid;
 }
-}  // namespace SPM
+}  // namespace spm
 }  // namespace rocprofiler
 extern "C" {
 
@@ -67,7 +67,7 @@ rocprofiler_status_t
 rocprofiler_spm_create_counter_config(rocprofiler_agent_id_t               agent_id,
                                       rocprofiler_counter_id_t*            counters_list,
                                       size_t                               counters_count,
-                                      rocprofiler_spm_configuration_t*    parameters,
+                                      rocprofiler_spm_configuration_t*     parameters,
                                       rocprofiler_spm_counter_config_id_t* config_id)
 {
     if(!rocprofiler::spm::is_dlsym_valid()) return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_ABI;
@@ -84,7 +84,8 @@ rocprofiler_spm_create_counter_config(rocprofiler_agent_id_t               agent
 
     auto        metrics_map = rocprofiler::counters::loadMetrics();
     const auto& id_map      = metrics_map->id_to_metric;
-
+    if(config_id->handle == 0 && counters_count == 0)
+        return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
     for(size_t i = 0; i < counters_count; i++)
     {
         auto& counter_id       = counters_list[i];
@@ -103,9 +104,12 @@ rocprofiler_spm_create_counter_config(rocprofiler_agent_id_t               agent
         config->metrics.push_back(*metric_ptr);
     }
 
-    config->timeout     =  parameters->timeout;
-    config->buffer_size =  parameters->buffer_size;
-    config->sample_freq =  parameters->frequency;
+    if(parameters)
+    {
+        config->timeout     = parameters->timeout;
+        config->buffer_size = parameters->buffer_size;
+        config->sample_freq = parameters->frequency;
+    }
 
     if(config_id->handle != 0)
     {
@@ -203,5 +207,57 @@ rocprofiler_iterate_spm_supported_counters(rocprofiler_agent_id_t              a
     if(ids.empty()) return ROCPROFILER_STATUS_ERROR_AGENT_ARCH_NOT_SUPPORTED;
 
     return cb(agent_id, ids.data(), ids.size(), user_data);
+}
+
+/**
+ * @brief Configure buffered dispatch profile Counting Service.
+ *        Collects the counters in dispatch packets and stores them
+ *        in buffer_id. The buffer may contain packets from more than
+ *        one dispatch (denoted by correlation id). Will trigger the
+ *        callback based on the parameters setup in buffer_id_t.
+ *
+ * @param [in] context_id context id
+ * @param [in] buffer_id id of the buffer to use for the counting service
+ * @param [in] profile profile config to use for dispatch
+ * @return ::rocprofiler_status_t
+ */
+rocprofiler_status_t
+rocprofiler_configure_buffer_spm_dispatch_service(
+    rocprofiler_context_id_t                       context_id,
+    rocprofiler_buffer_id_t                        buffer_id,
+    rocprofiler_spm_dispatch_counting_service_cb_t callback,
+    void*                                          callback_data_args)
+{
+    auto* ctx_p = rocprofiler::context::get_mutable_registered_context(context_id);
+    if(!ctx_p) return ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID;
+
+    // checking if the buffer is registered
+    auto const* buff = rocprofiler::buffer::get_buffer(buffer_id);
+    if(!buff) return ROCPROFILER_STATUS_ERROR_BUFFER_NOT_FOUND;
+
+    auto& ctx = *ctx_p;
+
+    if(ctx.pc_sampler) return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
+    if(ctx.counter_collection) return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
+    if(ctx.device_counter_collection) return ROCPROFILER_STATUS_ERROR_AGENT_DISPATCH_CONFLICT;
+    if(!ctx.dispatch_spm)
+    {
+        ctx.dispatch_spm =
+            std::make_unique<rocprofiler::context::spm_dispatch_counter_collection_service>();
+        ctx.dispatch_spm->callback =
+            std::make_shared<rocprofiler::spm::spm_counter_callback_info>();
+    }
+
+    auto& cb          = ctx.dispatch_spm->callback;
+    cb->user_cb       = callback;
+    cb->callback_args = callback_data_args;
+    cb->context       = context_id;
+    if(buffer_id.handle != 0)
+    {
+        cb->buffer = buffer_id;
+    }
+    cb->internal_context = ctx_p;
+
+    return ROCPROFILER_STATUS_SUCCESS;
 }
 }

@@ -42,6 +42,13 @@ namespace rocprofiler
 {
 namespace aql
 {
+struct AQLProfileMetric
+{
+    counters::Metric                    metric;
+    std::vector<aqlprofile_pmc_event_t> instances;
+    std::vector<aqlprofile_pmc_event_t> events;
+};
+
 CounterPacketConstruct::CounterPacketConstruct(rocprofiler_agent_id_t               agent,
                                                const std::vector<counters::Metric>& metrics)
 : _agent(agent)
@@ -279,21 +286,32 @@ CounterPacketConstruct::can_collect()
     return ROCPROFILER_STATUS_SUCCESS;
 }
 
-/** @brief Class contains metrics and input parameters to create AQLPacket for SPM
- * Also populates data used in can collect function to check if counters can be collected together
+/** @brief Constructs the packet using the contained input parameters.
+ * Writes into ID map and spm descriptor used to decode SPM data
  */
-SPMPacketConstruct::SPMPacketConstruct(const rocprofiler_agent_id_t         agent_id,
-                                       const std::vector<counters::Metric>& metrics,
-                                       uint64_t                             sample_freq,
-                                       uint64_t                             buffer_size,
-                                       uint64_t                             timeout)
-: _agent_id(agent_id)
+std::unique_ptr<hsa::SPMPacket>
+spm_construct_packet(const rocprofiler_agent_id_t         agent_id,
+                     const std::vector<counters::Metric>& metrics,
+                     float                                sample_freq,
+                     uint64_t                             buffer_size,
+                     uint64_t                             timeout)
 {
-    const auto*  agent       = CHECK_NOTNULL(rocprofiler::agent::get_agent(_agent_id));
-    const double sclk_freq   = agent->max_engine_clk_fcompute * 1E9;  // GHz
-    const size_t sclk_period = static_cast<size_t>(std::round(sclk_freq / sample_freq));
+    std::vector<aqlprofile_pmc_event_t>      events{};
+    std::vector<aqlprofile_spm_parameter_t>  params{};
+    std::vector<spm::spm_counter_instance_t> id_map{};
+
+    const auto* agent     = CHECK_NOTNULL(rocprofiler::agent::get_agent(agent_id));
+    const auto* aql_cache = rocprofiler::agent::get_agent_cache(agent);
+    auto        pool      = std::make_shared<hsa::SPMMemoryPool>(
+        *aql_cache, *hsa::get_amd_ext_table(), hsa::get_core_table()->hsa_memory_copy_fn);
+    const auto* aql_agent = rocprofiler::agent::get_aql_agent(agent->id);
+
+    const double sclk_freq = agent->max_engine_clk_fcompute * 1E6;  // MHz
+    const size_t sclk_period =
+        static_cast<size_t>(std::roundf(sclk_freq / (static_cast<double>(sample_freq) * 1E6)));
 
     params.clear();
+
     params.push_back({AQLPROFILE_SPM_PARAMETER_TYPE_BUFFER_SIZE, buffer_size * 1024});
     params.push_back({AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL, sclk_period});
     params.push_back({AQLPROFILE_SPM_PARAMETER_TYPE_TIMEOUT, timeout});
@@ -301,9 +319,7 @@ SPMPacketConstruct::SPMPacketConstruct(const rocprofiler_agent_id_t         agen
     events.clear();
     for(const auto& metric : metrics)
     {
-        auto query_info                = get_query_info(_agent_id, metric.block(), metric.name());
-        _metrics.emplace_back().metric = metric;
-
+        auto query_info  = get_query_info(agent_id, metric.block(), metric.name());
         auto event       = aqlprofile_pmc_event_t{};
         event.block_name = static_cast<hsa_ven_amd_aqlprofile_block_name_t>(query_info.id);
         event.event_id =
@@ -312,35 +328,11 @@ SPMPacketConstruct::SPMPacketConstruct(const rocprofiler_agent_id_t         agen
 
         for(unsigned block_index = 0; block_index < query_info.instance_count; ++block_index)
         {
-            _metrics.back().instances.push_back(
-                {.block_index = block_index,
-                 .event_id    = event.event_id,
-                 .flags       = aqlprofile_pmc_event_flags_t{metric.flags()},
-                 .block_name  = static_cast<hsa_ven_amd_aqlprofile_block_name_t>(query_info.id)});
-
-            _metrics.back().events.push_back(
-                {.block_index = block_index,
-                 .event_id    = event.event_id,
-                 .flags       = aqlprofile_pmc_event_flags_t{metric.flags()},
-                 .block_name  = static_cast<hsa_ven_amd_aqlprofile_block_name_t>(query_info.id)});
-
             event.block_index = block_index;
             events.push_back(event);
             id_map.push_back({rocprofiler_counter_id_t{.handle = metric.id()}, block_index});
         }
     }
-}
-
-/** @brief Constructs the packet using the contained input parameters.
- * Writes into ID map and spm descriptor used to decode SPM data
- */
-std::unique_ptr<hsa::SPMPacket>
-SPMPacketConstruct::construct_packet(const CoreApiTable& coreapi, const AmdExtTable& ext)
-{
-    const auto* agent = rocprofiler::agent::get_agent_cache(
-        CHECK_NOTNULL(rocprofiler::agent::get_agent(_agent_id)));
-    auto pool = std::make_shared<hsa::SPMMemoryPool>(*agent, ext, coreapi.hsa_memory_copy_fn);
-    const auto* aql_agent = rocprofiler::agent::get_aql_agent(agent->get_rocp_agent()->id);
 
     aqlprofile_spm_profile_t profile{};
     profile.events          = events.data();
@@ -356,7 +348,7 @@ SPMPacketConstruct::construct_packet(const CoreApiTable& coreapi, const AmdExtTa
     profile.userdata   = pool.get();
 
     auto pkt = std::make_unique<hsa::SPMPacket>(*aql_agent, profile);
-    if(!pkt->Valid()) return nullptr;
+    ROCP_FATAL_IF(!pkt) << "SPM PAcket creation failed";
 
     pool->delete_packets_fn = pkt->sym.delete_packets_fn;
     pool->handle            = pkt->handle;
@@ -384,11 +376,36 @@ SPMPacketConstruct::construct_packet(const CoreApiTable& coreapi, const AmdExtTa
 // Following the PMC check for now
 // ToDO: change this to SPM
 rocprofiler_status_t
-SPMPacketConstruct::can_collect()
+spm_can_collect(const rocprofiler_agent_id_t agent_id, const std::vector<counters::Metric>& metrics)
 {
     // Verify that the counters fit within harrdware limits
     std::map<std::pair<hsa_ven_amd_aqlprofile_block_name_t, uint32_t>, int64_t> counter_count;
     std::map<std::pair<hsa_ven_amd_aqlprofile_block_name_t, uint32_t>, int64_t> max_allowed;
+    auto _metrics = std::vector<AQLProfileMetric>{};
+
+    for(const auto& metric : metrics)
+    {
+        auto query_info                = get_query_info(agent_id, metric.block(), metric.name());
+        _metrics.emplace_back().metric = metric;
+
+        auto event_id =
+            static_cast<uint32_t>(std::stoul(metric.event().c_str(), nullptr) & 0xFFFFFFFF);
+
+        for(unsigned block_index = 0; block_index < query_info.instance_count; ++block_index)
+        {
+            _metrics.back().instances.push_back(
+                {.block_index = block_index,
+                 .event_id    = event_id,
+                 .flags       = aqlprofile_pmc_event_flags_t{metric.flags()},
+                 .block_name  = static_cast<hsa_ven_amd_aqlprofile_block_name_t>(query_info.id)});
+
+            _metrics.back().events.push_back(
+                {.block_index = block_index,
+                 .event_id    = event_id,
+                 .flags       = aqlprofile_pmc_event_flags_t{metric.flags()},
+                 .block_name  = static_cast<hsa_ven_amd_aqlprofile_block_name_t>(query_info.id)});
+        }
+    }
 
     for(auto& metric : _metrics)
     {
@@ -399,7 +416,7 @@ SPMPacketConstruct::can_collect()
             iter->second++;
             if(inserted)
             {
-                max_allowed.emplace(block_pair, get_block_counters(_agent_id, instance));
+                max_allowed.emplace(block_pair, get_block_counters(agent_id, instance));
             }
         }
     }

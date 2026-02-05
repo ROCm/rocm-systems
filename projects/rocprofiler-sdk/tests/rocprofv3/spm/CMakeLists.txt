@@ -26,14 +26,15 @@ rocprofiler_sdk_spm_disabled(IS_SPM_DISABLED)
 set(IS_DISABLED ${IS_SPM_DISABLED})
 
 set(rocprofv3-spm-rocpd-env
-    "PYTHONPATH=${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages")
+    "PYTHONPATH=${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
+    )
 
 # SPM
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-spm-execute
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --spm-beta-enabled=on --spm
-        ${COUNTER_LIST} --spm-frequency 50000 --spm-buffer-size 32768 --kernel-trace -d
+        ${COUNTER_LIST} --spm-frequency 1.0 --spm-buffer-size 32768 --kernel-trace -d
         ${CMAKE_CURRENT_BINARY_DIR}/out_spm --output-format json rocpd -o spm --
         $<TARGET_FILE:simple-transpose>
     DEPENDS simple-transpose
@@ -79,15 +80,19 @@ string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-spm-validate
     TEST_PATHS validate.py
-    ARGS --pmc-json ${CMAKE_CURRENT_BINARY_DIR}/out_spm/pmc_results.json --spm-json
-        ${CMAKE_CURRENT_BINARY_DIR}/out_spm/spm_results.json --rocpd-input
-        ${CMAKE_CURRENT_BINARY_DIR}/out_spm/spm_results.db --counter-csv
-        ${CMAKE_CURRENT_BINARY_DIR}/out_spm/rocpd_csv/out_counter_collection_trace.csv
+    ARGS --pmc-json
+         ${CMAKE_CURRENT_BINARY_DIR}/out_spm/pmc_results.json
+         --spm-json
+         ${CMAKE_CURRENT_BINARY_DIR}/out_spm/spm_results.json
+         --rocpd-input
+         ${CMAKE_CURRENT_BINARY_DIR}/out_spm/spm_results.db
+         --counter-csv
+         ${CMAKE_CURRENT_BINARY_DIR}/out_spm/rocpd_csv/out_counter_collection_trace.csv
     CONFIG pytest.ini
     COPY spm_input.json conftest.py
     LABELS "integration-tests"
     FIXTURES_REQUIRED
-       "rocprofv3-test-spm-execute;rocprofv3-test-spm-compare-to-pmc;rocprofv3-test-spm-rocpd-csv-generation"
+        "rocprofv3-test-spm-execute;rocprofv3-test-spm-compare-to-pmc;rocprofv3-test-spm-rocpd-csv-generation"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
     DISABLED ${IS_DISABLED})
 

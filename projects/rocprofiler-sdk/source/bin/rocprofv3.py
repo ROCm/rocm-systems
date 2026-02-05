@@ -475,7 +475,7 @@ For attachment profiling of running processes:
 
     spm_options.add_argument(
         "--spm-frequency",
-        help="Frequency in Ghz. This is estimated to shader clock count. Default is set to 0.5GHz in tool.",
+        help="Frequency in KGhz. This is estimated to shader clock count. Default is set to 0.5KGHz in tool.",
         default=None,
         type=float,
     )
@@ -1712,7 +1712,7 @@ def run(app_args, args, **kwargs):
         update_env("ROCPROF_PC_SAMPLING_METHOD", args.pc_sampling_method)
         update_env("ROCPROF_PC_SAMPLING_INTERVAL", args.pc_sampling_interval)
 
-    if args.spm or args.spm_buffer_size or args.spm_timeout_ms or args.spm_sclk_count:
+    if args.spm or args.spm_buffer_size or args.spm_timeout or args.spm_sclk_count:
 
         if (
             not args.spm_beta_enabled
@@ -1748,8 +1748,8 @@ def run(app_args, args, **kwargs):
                 "ROCPROF_SPM_BUFFER_SIZE", int_auto(args.spm_buffer_size), overwrite=True
             )
 
-        if args.spm_timeout_ms:
-            update_env("ROCPROF_SPM_TIMEOUT_MS", args.spm_timeout_ms, overwrite=True)
+        if args.spm_timeout:
+            update_env("ROCPROF_SPM_TIMEOUT_MS", args.spm_timeout, overwrite=True)
 
         if args.spm_frequency:
             update_env("ROCPROF_SPM_FREQUENCY", args.spm_frequency, overwrite=True)
