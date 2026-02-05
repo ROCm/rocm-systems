@@ -51,7 +51,7 @@ TEST_CASE("Unit_hipGraphicsUnmapResources_Negative_Parameters") {
   }
 
   SECTION("resources == nullptr") {
-    HIP_CHECK_ERROR(hipGraphicsUnmapResources(1, nullptr, 0), hipErrorUnknown);
+    HIP_CHECK_ERROR(hipGraphicsUnmapResources(1, nullptr, 0), hipErrorInvalidValue);
   }
 
   SECTION("not mapped resource") {
