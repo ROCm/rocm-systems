@@ -287,9 +287,6 @@ def show_torch_operator_hierarchy(operator_name: str, df: pd.DataFrame) -> None:
     # Expect the DataFrame to have columns "Operator_Name", "Kernel_Name",
     # "Context_Id", etc.
 
-    # Shortening the kernel names for better display.
-    df = kernel_name_shortener(df, level=1)
-
     unique_op_hierarchies = df["Operator_Name"].unique()
     for i, op in enumerate(unique_op_hierarchies, start=1):
         print(f"  {i:3d}. {op}")
