@@ -26,6 +26,7 @@ THE SOFTWARE.
 #include "enqueue.h"
 #include <algorithm>
 #include "debug.h"
+#include "include/graph.h"
 
 #ifdef USE_AMDSMI
 #include "amd_smi/amdsmi.h"
@@ -477,7 +478,7 @@ bool rcclUseAllGatherDirect(struct ncclComm* comm, size_t& msgSize) {
 bool rcclUseReduceScatterDirect(struct ncclComm* comm, size_t& msgSize) {
   // Direct ReduceScatter is supported for MI350 (gfx950):
   // Only if PXN is enabled
-  // - 2 nodes: enable for 128KiB .. 2MiB (with PXN enabled 2 nodes support is not enabled)
+  // - 2 nodes: enable for 128KiB .. 2MiB
   // - 4 and 8 nodes: enable up to 2MiB
   static int userDirectReduceScatterInput = -2;
   if (userDirectReduceScatterInput == -2) {
@@ -492,10 +493,7 @@ bool rcclUseReduceScatterDirect(struct ncclComm* comm, size_t& msgSize) {
   if (!archGfx950) return false;
 
   // Check if PXN is disabled - Direct Reduce Scatter requires PXN to be enabled
-  // Match the logic from rcclSetPxn: PXN is disabled if env var is set OR nRanks < threshold
-  const char *pxnInputStr = getenv("NCCL_PXN_DISABLE");
-  const int ranksThreshold = 32;
-  if (pxnInputStr || comm->nRanks < ranksThreshold) {
+  if(ncclPxnDisable(comm) != 0) {
     INFO(NCCL_INIT, "RCCL DIRECT REDUCE-SCATTER disabled due to PXN being disabled.");
     return false;
   }
