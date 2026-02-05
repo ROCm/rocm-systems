@@ -29,6 +29,7 @@
 #include "api_trace.h"
 #include "rccl_common.h"
 
+
 #include <cstring> // std::memcpy
 #include <cinttypes> // PRIx64
 #include <cassert>
@@ -235,6 +236,9 @@ static void addWorkBatchToPlan(
     batch->nextExtends = 0;
     batch->workType = (uint32_t)workType;
     batch->funcId = devFuncId;
+    // Trace funcId for debugging - use NCCL_DEBUG=INFO NCCL_DEBUG_SUBSYS=COLL to enable
+    // Then lookup funcId in build/release/device_linker_output/merged_device_funcid_names.h
+    INFO(NCCL_COLL, "Device kernel batch funcId=%d", devFuncId);
     batch->offsetBase = workOffset;
     batch->offsetBitset = 0;
     offset = 0;
