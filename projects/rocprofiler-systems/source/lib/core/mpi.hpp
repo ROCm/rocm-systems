@@ -44,7 +44,18 @@
 #    define OMPI_SKIP_MPICXX                     1
 #endif
 
+// Undefine timemory's dummy MPI macros before including real MPI headers
+// to avoid macro redefinition warnings
 #if defined(ROCPROFSYS_USE_MPI) || defined(ROCPROFSYS_USE_MPI_HEADERS)
+#    ifdef MPI_INT
+#        undef MPI_INT
+#    endif
+#    ifdef MPI_FLOAT
+#        undef MPI_FLOAT
+#    endif
+#    ifdef MPI_DOUBLE
+#        undef MPI_DOUBLE
+#    endif
 #    include <mpi.h>
 #endif
 
