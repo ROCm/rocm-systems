@@ -357,6 +357,54 @@ bool DmaBlitManager::copyBufferRect(device::Memory& srcMemory, device::Memory& d
 }
 
 // ================================================================================================
+bool DmaBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& copyOps,
+                                     bool entire) const {
+  if (copyOps.empty()) {
+    return true;
+  }
+
+  gpu().releaseGpuMemoryFence(true /* skipCpuWait */);
+
+  // Process each copy operation in the batch
+  // For now, we use the same signal completion approach as single copies
+  // Future optimization: use a shared completion signal for all operations
+  bool result = true;
+
+  for (const auto& op : copyOps) {
+    if (op.srcMemory == nullptr || op.dstMemory == nullptr) {
+      LogError("DmaBlitManager::copyBufferBatch - Invalid memory objects!");
+      return false;
+    }
+
+    // Get device memory for source and destination
+    device::Memory* srcDevMem = op.srcMemory->getDeviceMemory(
+        *op.srcMemory->getContext().devices()[0]);
+    device::Memory* dstDevMem = op.dstMemory->getDeviceMemory(
+        *op.dstMemory->getContext().devices()[0]);
+
+    if (srcDevMem == nullptr || dstDevMem == nullptr) {
+      LogError("DmaBlitManager::copyBufferBatch - Failed to get device memory!");
+      return false;
+    }
+
+    // Fall back to individual copy using hsaCopy
+    amd::Coord3D srcOrigin(op.srcOffset);
+    amd::Coord3D dstOrigin(op.dstOffset);
+    amd::Coord3D size(op.size);
+
+    amd::CopyMetadata metadata = op.metadata;
+
+    if (!hsaCopy(gpuMem(*srcDevMem), gpuMem(*dstDevMem), srcOrigin, dstOrigin, size, metadata)) {
+      LogPrintfError("DmaBlitManager::copyBufferBatch - Copy failed for operation");
+      result = false;
+      break;
+    }
+  }
+
+  return result;
+}
+
+// ================================================================================================
 bool DmaBlitManager::copyImageToBuffer(device::Memory& srcMemory, device::Memory& dstMemory,
                                        const amd::Coord3D& srcOrigin, const amd::Coord3D& dstOrigin,
                                        const amd::Coord3D& size, bool entire, size_t rowPitch,

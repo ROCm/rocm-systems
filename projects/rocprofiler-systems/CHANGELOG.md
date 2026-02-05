@@ -9,6 +9,7 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 ### Changed
 
 - Simplify categorizing like pmc_info events by removing the _<idx> from the "symbol" field. ie., "JpegAct_0" -> "JpegAct".
+- Added `libhsa-runtime64.so` and `libomp.so` to the internal library exclusion list for runtime instrumentation to prevent instrumenting of runtime library internals.
 
 ## ROCm Systems Profiler 1.4.0 for ROCm 7.11.0
 
