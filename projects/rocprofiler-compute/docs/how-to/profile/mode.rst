@@ -1232,26 +1232,6 @@ to your output directory. The following example is run on the host `amd-ryzen`:
     ├── roofline.csv
     └── sysinfo.csv
 
-.. note::
-   For profiling multi-rank workloads with MPI communication, use ``--iteration-multiplexing`` and do not turn on PC sampling with `-b 21`.
-
-.. warning::
-   MPI launchers (``mpirun``, ``mpiexec``, ``srun``, ``orterun``) must wrap the
-   ``rocprof-compute`` command, not appear after ``--``. The following is **incorrect**:
-
-   .. code-block:: shell-session
-
-      $ rocprof-compute profile --name my_app -- mpirun -n 4 ./my_application   # WRONG
-
-   Instead, use the correct form where the MPI launcher wraps ``rocprof-compute``:
-
-   .. code-block:: shell-session
-
-      $ mpirun -n 4 rocprof-compute profile --name my_app -- ./my_application   # CORRECT
-
-   If you use an MPI launcher after ``--``, an error will be raised with guidance
-   on the correct usage.
-
 ROCm Compute Profiler supports the following libraries, APIs and job schedulers:
 
 * OpenMPI
@@ -1271,3 +1251,77 @@ specify the output directory as follows:
 .. code-block:: shell-session
 
    $ mpirun -n 4 rocprof-compute profile --output-directory /tmp/mpi_profile/%env{MY_MPI_RANK}% -- ./my_mpi_application
+
+Limitations and Recommendations
+-------------------------------
+
+When profiling multi-rank applications, be aware of the following limitations:
+
+**MPI Launcher Placement**
+
+MPI launchers (``mpirun``, ``mpiexec``, ``srun``, ``orterun``) must wrap the
+``rocprof-compute`` command, not appear after ``--``. The following is **incorrect**:
+
+.. code-block:: shell-session
+
+   $ rocprof-compute profile --name my_app -- mpirun -n 4 ./my_application   # WRONG
+
+Instead, use the correct form where the MPI launcher wraps ``rocprof-compute``:
+
+.. code-block:: shell-session
+
+   $ mpirun -n 4 rocprof-compute profile --name my_app -- ./my_application   # CORRECT
+
+If you use an MPI launcher after ``--``, an error will be raised with guidance
+on the correct usage.
+
+**Application Replay Mode (Default)**
+
+By default, ROCm Compute Profiler uses application replay mode, which runs the
+workload multiple times to collect all performance counters. This mode fails
+for MPI applications because running the application multiple times results in
+multiple ``MPI_Init`` and ``MPI_Finalize`` calls, which is not permitted by the
+MPI specification.
+
+**PC Sampling**
+
+PC sampling (block 21) may fail to collect data for multi-rank applications with
+MPI communication due to synchronization requirements.
+
+**Recommended Single-Pass Modes**
+
+For multi-rank applications with MPI communication, use one of these single-pass
+profiling modes:
+
+* ``--iteration-multiplexing``: Collects all counters in a single application run
+  by distributing counter collection across kernel dispatches. Recommended for
+  applications with sufficient kernel dispatch counts.
+
+  .. code-block:: shell-session
+
+     $ mpirun -n 4 rocprof-compute profile --name my_mpi_app --iteration-multiplexing -- ./my_mpi_app
+
+* ``--block <N>``: Profiles only specific metric block(s), reducing the number of
+  counters collected to fit in a single pass.
+
+  .. code-block:: shell-session
+
+     $ mpirun -n 4 rocprof-compute profile --name my_mpi_app --block 0 -- ./my_mpi_app
+
+* ``--set <name>``: Profiles a predefined counter set that fits in a single pass.
+
+  .. code-block:: shell-session
+
+     $ mpirun -n 4 rocprof-compute profile --name my_mpi_app --set compute_thruput_util -- ./my_mpi_app
+
+**Multi-Node Profiling**
+
+When profiling across multiple nodes, ensure that:
+
+* Output directories are accessible from all nodes (shared filesystem), or
+* Use node-specific output directories with ``%hostname%`` placeholder
+
+.. code-block:: shell-session
+
+   $ mpirun -n 8 --hostfile hosts.txt rocprof-compute profile \
+       --output-directory /shared/profiles/%hostname%/%rank% -- ./my_mpi_app
