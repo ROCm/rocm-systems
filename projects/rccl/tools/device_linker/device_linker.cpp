@@ -7,6 +7,17 @@
  *   Pass 3: Patch sections with final addresses, write output
  */
 
+// LLVM headers for proper DWARF handling - must come BEFORE <elf.h> to avoid macro conflicts
+#include "llvm/DebugInfo/DWARF/DWARFContext.h"
+#include "llvm/DebugInfo/DWARF/DWARFCompileUnit.h"
+#include "llvm/DebugInfo/DWARF/DWARFDie.h"
+#include "llvm/DebugInfo/DWARF/DWARFFormValue.h"
+#include "llvm/Object/ObjectFile.h"
+#include "llvm/Object/ELFObjectFile.h"
+#include "llvm/Support/MemoryBuffer.h"
+#include "llvm/Support/Error.h"
+#include "llvm/BinaryFormat/Dwarf.h"
+
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -29,6 +40,378 @@
 #include <elf.h>
 
 namespace fs = std::filesystem;
+
+// ============================================================================
+// LLVM DWARF helpers for finding attribute positions that need patching
+// ============================================================================
+
+// Structure to hold positions of attributes that need patching
+struct DwarfAttrPositions {
+    std::vector<std::pair<size_t, uint32_t>> ranges;           // DW_AT_ranges
+    std::vector<std::pair<size_t, uint32_t>> str_offsets_base; // DW_AT_str_offsets_base
+    std::vector<std::pair<size_t, uint32_t>> addr_base;        // DW_AT_addr_base
+    std::vector<std::pair<size_t, uint32_t>> rnglists_base;    // DW_AT_rnglists_base
+    std::vector<std::pair<size_t, uint32_t>> stmt_list;        // DW_AT_stmt_list
+};
+
+// Helper to create a minimal ELF for LLVM parsing
+static std::vector<uint8_t> createMinimalElfForDwarf(
+    const std::vector<uint8_t>& debug_info,
+    const std::vector<uint8_t>& debug_abbrev) {
+    
+    constexpr size_t ELF_HDR_SIZE = sizeof(Elf64_Ehdr);
+    constexpr size_t SHDR_SIZE = sizeof(Elf64_Shdr);
+    constexpr size_t NUM_SECTIONS = 4;
+    
+    const char shstrtab[] = "\0.debug_info\0.debug_abbrev\0.shstrtab\0";
+    constexpr size_t SHSTRTAB_SIZE = sizeof(shstrtab);
+    constexpr size_t SHSTRTAB_DEBUG_INFO = 1;
+    constexpr size_t SHSTRTAB_DEBUG_ABBREV = 13;
+    constexpr size_t SHSTRTAB_SHSTRTAB = 27;
+    
+    size_t shdr_offset = ELF_HDR_SIZE;
+    size_t debug_info_offset = shdr_offset + NUM_SECTIONS * SHDR_SIZE;
+    size_t debug_abbrev_offset = debug_info_offset + debug_info.size();
+    size_t shstrtab_offset = debug_abbrev_offset + debug_abbrev.size();
+    size_t total_size = shstrtab_offset + SHSTRTAB_SIZE;
+    
+    std::vector<uint8_t> elf_data(total_size, 0);
+    
+    Elf64_Ehdr* ehdr = reinterpret_cast<Elf64_Ehdr*>(elf_data.data());
+    ehdr->e_ident[EI_MAG0] = ELFMAG0;
+    ehdr->e_ident[EI_MAG1] = ELFMAG1;
+    ehdr->e_ident[EI_MAG2] = ELFMAG2;
+    ehdr->e_ident[EI_MAG3] = ELFMAG3;
+    ehdr->e_ident[EI_CLASS] = ELFCLASS64;
+    ehdr->e_ident[EI_DATA] = ELFDATA2LSB;
+    ehdr->e_ident[EI_VERSION] = EV_CURRENT;
+    ehdr->e_ident[EI_OSABI] = 64;
+    ehdr->e_type = ET_REL;
+    ehdr->e_machine = 224;
+    ehdr->e_version = EV_CURRENT;
+    ehdr->e_shoff = shdr_offset;
+    ehdr->e_ehsize = ELF_HDR_SIZE;
+    ehdr->e_shentsize = SHDR_SIZE;
+    ehdr->e_shnum = NUM_SECTIONS;
+    ehdr->e_shstrndx = 3;
+    
+    Elf64_Shdr* shdrs = reinterpret_cast<Elf64_Shdr*>(elf_data.data() + shdr_offset);
+    
+    shdrs[1].sh_name = SHSTRTAB_DEBUG_INFO;
+    shdrs[1].sh_type = SHT_PROGBITS;
+    shdrs[1].sh_offset = debug_info_offset;
+    shdrs[1].sh_size = debug_info.size();
+    shdrs[1].sh_addralign = 1;
+    
+    shdrs[2].sh_name = SHSTRTAB_DEBUG_ABBREV;
+    shdrs[2].sh_type = SHT_PROGBITS;
+    shdrs[2].sh_offset = debug_abbrev_offset;
+    shdrs[2].sh_size = debug_abbrev.size();
+    shdrs[2].sh_addralign = 1;
+    
+    shdrs[3].sh_name = SHSTRTAB_SHSTRTAB;
+    shdrs[3].sh_type = SHT_STRTAB;
+    shdrs[3].sh_offset = shstrtab_offset;
+    shdrs[3].sh_size = SHSTRTAB_SIZE;
+    shdrs[3].sh_addralign = 1;
+    
+    memcpy(elf_data.data() + debug_info_offset, debug_info.data(), debug_info.size());
+    memcpy(elf_data.data() + debug_abbrev_offset, debug_abbrev.data(), debug_abbrev.size());
+    memcpy(elf_data.data() + shstrtab_offset, shstrtab, SHSTRTAB_SIZE);
+    
+    return elf_data;
+}
+
+// Helper: decode ULEB128 from data, return value and bytes consumed
+static uint64_t decodeULEB128(const uint8_t* data, size_t max_len, size_t& bytes_read) {
+    uint64_t result = 0;
+    unsigned shift = 0;
+    bytes_read = 0;
+    
+    while (bytes_read < max_len) {
+        uint8_t byte = data[bytes_read++];
+        result |= (uint64_t)(byte & 0x7f) << shift;
+        if ((byte & 0x80) == 0) break;
+        shift += 7;
+    }
+    return result;
+}
+
+// Helper: decode SLEB128 from data
+static int64_t decodeSLEB128(const uint8_t* data, size_t max_len, size_t& bytes_read) {
+    int64_t result = 0;
+    unsigned shift = 0;
+    bytes_read = 0;
+    uint8_t byte;
+    
+    while (bytes_read < max_len) {
+        byte = data[bytes_read++];
+        result |= (int64_t)(byte & 0x7f) << shift;
+        shift += 7;
+        if ((byte & 0x80) == 0) break;
+    }
+    
+    // Sign extend if needed
+    if (shift < 64 && (byte & 0x40)) {
+        result |= -(1LL << shift);
+    }
+    return result;
+}
+
+// Structure to hold parsed abbreviation info
+struct AbbrevAttr {
+    uint16_t attr;    // DW_AT_*
+    uint16_t form;    // DW_FORM_*
+};
+
+struct AbbrevEntry {
+    uint64_t code;
+    uint64_t tag;
+    bool has_children;
+    std::vector<AbbrevAttr> attrs;
+};
+
+// Parse abbreviation table
+static std::unordered_map<uint64_t, AbbrevEntry> parseAbbrevTable(const std::vector<uint8_t>& abbrev) {
+    std::unordered_map<uint64_t, AbbrevEntry> table;
+    size_t pos = 0;
+    
+    while (pos < abbrev.size()) {
+        size_t bytes;
+        uint64_t code = decodeULEB128(&abbrev[pos], abbrev.size() - pos, bytes);
+        pos += bytes;
+        
+        if (code == 0) continue;  // End of abbreviation section
+        
+        AbbrevEntry entry;
+        entry.code = code;
+        entry.tag = decodeULEB128(&abbrev[pos], abbrev.size() - pos, bytes);
+        pos += bytes;
+        
+        entry.has_children = (abbrev[pos++] != 0);
+        
+        // Read attribute specs until (0,0)
+        while (pos < abbrev.size()) {
+            uint64_t attr = decodeULEB128(&abbrev[pos], abbrev.size() - pos, bytes);
+            pos += bytes;
+            uint64_t form = decodeULEB128(&abbrev[pos], abbrev.size() - pos, bytes);
+            pos += bytes;
+            
+            if (attr == 0 && form == 0) break;
+            
+            entry.attrs.push_back({(uint16_t)attr, (uint16_t)form});
+        }
+        
+        table[code] = entry;
+    }
+    
+    return table;
+}
+
+// Calculate size of a DWARF form in bytes (returns 0 for variable-size forms)
+// For variable-size forms, we need to decode them
+static size_t getFormFixedSize(uint16_t form, uint8_t addr_size, uint16_t dwarf_version) {
+    switch (form) {
+        case llvm::dwarf::DW_FORM_addr: return addr_size;
+        case llvm::dwarf::DW_FORM_data1:
+        case llvm::dwarf::DW_FORM_ref1:
+        case llvm::dwarf::DW_FORM_flag:
+        case llvm::dwarf::DW_FORM_strx1:
+        case llvm::dwarf::DW_FORM_addrx1:
+            return 1;
+        case llvm::dwarf::DW_FORM_data2:
+        case llvm::dwarf::DW_FORM_ref2:
+        case llvm::dwarf::DW_FORM_strx2:
+        case llvm::dwarf::DW_FORM_addrx2:
+            return 2;
+        case llvm::dwarf::DW_FORM_strx3:
+        case llvm::dwarf::DW_FORM_addrx3:
+            return 3;
+        case llvm::dwarf::DW_FORM_data4:
+        case llvm::dwarf::DW_FORM_ref4:
+        case llvm::dwarf::DW_FORM_ref_sup4:
+        case llvm::dwarf::DW_FORM_strx4:
+        case llvm::dwarf::DW_FORM_addrx4:
+            return 4;
+        case llvm::dwarf::DW_FORM_data8:
+        case llvm::dwarf::DW_FORM_ref8:
+        case llvm::dwarf::DW_FORM_ref_sig8:
+        case llvm::dwarf::DW_FORM_ref_sup8:
+            return 8;
+        case llvm::dwarf::DW_FORM_sec_offset:
+        case llvm::dwarf::DW_FORM_strp:
+        case llvm::dwarf::DW_FORM_line_strp:
+        case llvm::dwarf::DW_FORM_ref_addr:
+            return (dwarf_version >= 4) ? 4 : addr_size;  // DWARF32
+        case llvm::dwarf::DW_FORM_data16:
+            return 16;
+        case llvm::dwarf::DW_FORM_flag_present:
+        case llvm::dwarf::DW_FORM_implicit_const:
+            return 0;  // No data in DIE
+        default:
+            return 0;  // Variable size - need to decode
+    }
+}
+
+// Skip over a variable-length form, return bytes consumed
+static size_t skipVariableForm(uint16_t form, const uint8_t* data, size_t max_len) {
+    size_t bytes;
+    switch (form) {
+        case llvm::dwarf::DW_FORM_string: {
+            // Null-terminated string
+            size_t len = strnlen((const char*)data, max_len);
+            return len + 1;  // Include null terminator
+        }
+        case llvm::dwarf::DW_FORM_exprloc:
+        case llvm::dwarf::DW_FORM_block: {
+            uint64_t len = decodeULEB128(data, max_len, bytes);
+            return bytes + len;
+        }
+        case llvm::dwarf::DW_FORM_block1:
+            return 1 + data[0];
+        case llvm::dwarf::DW_FORM_block2:
+            return 2 + (data[0] | (data[1] << 8));
+        case llvm::dwarf::DW_FORM_block4:
+            return 4 + (data[0] | (data[1] << 8) | (data[2] << 16) | (data[3] << 24));
+        case llvm::dwarf::DW_FORM_sdata:
+            decodeSLEB128(data, max_len, bytes);
+            return bytes;
+        case llvm::dwarf::DW_FORM_udata:
+        case llvm::dwarf::DW_FORM_ref_udata:
+        case llvm::dwarf::DW_FORM_strx:
+        case llvm::dwarf::DW_FORM_addrx:
+        case llvm::dwarf::DW_FORM_loclistx:
+        case llvm::dwarf::DW_FORM_rnglistx:
+            decodeULEB128(data, max_len, bytes);
+            return bytes;
+        case llvm::dwarf::DW_FORM_indirect: {
+            // Recursive: first is a ULEB128 form, then the actual data
+            uint64_t actual_form = decodeULEB128(data, max_len, bytes);
+            size_t fixed = getFormFixedSize(actual_form, 8, 5);
+            if (fixed > 0) return bytes + fixed;
+            return bytes + skipVariableForm(actual_form, data + bytes, max_len - bytes);
+        }
+        default:
+            return 0;
+    }
+}
+
+// Find byte positions of various DWARF attributes that need patching
+// This function properly parses the abbreviation table and DIE data
+static DwarfAttrPositions findDwarfAttrPositions(
+    const std::vector<uint8_t>& debug_info,
+    const std::vector<uint8_t>& debug_abbrev) {
+    
+    DwarfAttrPositions result;
+    
+    if (debug_info.empty() || debug_abbrev.empty()) {
+        return result;
+    }
+    
+    // Parse abbreviation table
+    auto abbrev_table = parseAbbrevTable(debug_abbrev);
+    
+    // Process each CU in debug_info
+    size_t cu_pos = 0;
+    while (cu_pos < debug_info.size()) {
+        // Parse CU header
+        uint32_t unit_length;
+        memcpy(&unit_length, &debug_info[cu_pos], 4);
+        if (unit_length == 0xffffffff) {
+            // DWARF64 - skip for now
+            break;
+        }
+        
+        size_t cu_end = cu_pos + 4 + unit_length;
+        if (cu_end > debug_info.size()) break;
+        
+        uint16_t version;
+        memcpy(&version, &debug_info[cu_pos + 4], 2);
+        
+        uint8_t addr_size;
+        size_t die_start;
+        
+        if (version == 5) {
+            // DWARF5: unit_length(4) + version(2) + unit_type(1) + addr_size(1) + abbrev_offset(4) = 12
+            addr_size = debug_info[cu_pos + 7];
+            die_start = cu_pos + 12;
+        } else {
+            // DWARF4: unit_length(4) + version(2) + abbrev_offset(4) + addr_size(1) = 11
+            addr_size = debug_info[cu_pos + 10];
+            die_start = cu_pos + 11;
+        }
+        
+        // Parse the root DIE (compile_unit)
+        size_t pos = die_start;
+        size_t bytes;
+        uint64_t abbrev_code = decodeULEB128(&debug_info[pos], cu_end - pos, bytes);
+        pos += bytes;
+        
+        if (abbrev_code == 0) {
+            cu_pos = cu_end;
+            continue;
+        }
+        
+        auto it = abbrev_table.find(abbrev_code);
+        if (it == abbrev_table.end()) {
+            cu_pos = cu_end;
+            continue;
+        }
+        
+        const AbbrevEntry& entry = it->second;
+        
+        // Walk through attributes, recording positions of ones we care about
+        for (const auto& attr : entry.attrs) {
+            size_t attr_pos = pos;  // Position of this attribute's value
+            
+            // Get the size of this form
+            size_t form_size = getFormFixedSize(attr.form, addr_size, version);
+            if (form_size == 0) {
+                form_size = skipVariableForm(attr.form, &debug_info[pos], cu_end - pos);
+            }
+            
+            // Check if this is an attribute we care about with a 4-byte form
+            if (attr.form == llvm::dwarf::DW_FORM_sec_offset ||
+                attr.form == llvm::dwarf::DW_FORM_data4) {
+                
+                uint32_t val;
+                memcpy(&val, &debug_info[attr_pos], 4);
+                
+                switch (attr.attr) {
+                    case llvm::dwarf::DW_AT_ranges:
+                        result.ranges.push_back({attr_pos, val});
+                        break;
+                    case llvm::dwarf::DW_AT_str_offsets_base:
+                        result.str_offsets_base.push_back({attr_pos, val});
+                        break;
+                    case llvm::dwarf::DW_AT_addr_base:
+                        result.addr_base.push_back({attr_pos, val});
+                        break;
+                    case llvm::dwarf::DW_AT_rnglists_base:
+                        result.rnglists_base.push_back({attr_pos, val});
+                        break;
+                    case llvm::dwarf::DW_AT_stmt_list:
+                        result.stmt_list.push_back({attr_pos, val});
+                        break;
+                }
+            }
+            
+            pos += form_size;
+            if (pos >= cu_end) break;
+        }
+        
+        cu_pos = cu_end;
+    }
+    
+    return result;
+}
+
+// Legacy wrapper for code that only needs ranges
+static std::vector<std::pair<size_t, uint32_t>> findRangesOffsets(
+    const std::vector<uint8_t>& debug_info,
+    const std::vector<uint8_t>& debug_abbrev) {
+    return findDwarfAttrPositions(debug_info, debug_abbrev).ranges;
+}
 
 // ============================================================================
 // Constants
@@ -254,6 +637,7 @@ struct KernelInfo {
     std::vector<uint8_t> debug_addr;
     std::vector<uint8_t> debug_rnglists;
     std::vector<uint8_t> debug_ranges;  // DWARF4 ranges (different from DWARF5 rnglists)
+    DwarfAttrPositions dwarf_attr_positions;  // Positions of various DWARF attributes that need patching
     uint64_t orig_text_addr = 0;    // Original .text address for debug_line patching
     int vgpr = 0, sgpr = 0, lds = 0, stack = 0;
 };
@@ -349,6 +733,33 @@ KernelInfo parseKernel(const std::vector<uint8_t>& elf_data) {
             info.debug_line_str = elf.getBytes(*debug_line_str);
         }
         
+        // Apply .rela.debug_line relocations to resolve string offsets
+        // DWARF5 .debug_line sections have R_X86_64_32 relocations for DW_FORM_line_strp offsets
+        auto* rela_debug_line = elf.find(".rela.debug_line");
+        if (rela_debug_line && rela_debug_line->size > 0 && rela_debug_line->entsize >= sizeof(Elf64_Rela)) {
+            const Elf64_Rela* relas = elf.fileAt<Elf64_Rela>(rela_debug_line->offset);
+            size_t num_relas = rela_debug_line->size / sizeof(Elf64_Rela);
+            
+            for (size_t i = 0; i < num_relas; i++) {
+                const Elf64_Rela& r = relas[i];
+                uint32_t rtype = ELF64_R_TYPE(r.r_info);
+                
+                // R_X86_64_32 (type 10) writes a 32-bit value (addend only for section symbols)
+                // R_AMDGPU_ABS32 (type 3) is similar for AMDGPU
+                if ((rtype == 10 || rtype == 3) && r.r_offset + 4 <= info.debug_line.size()) {
+                    // Write the addend as the 32-bit offset into .debug_line_str
+                    uint32_t val = (uint32_t)r.r_addend;
+                    memcpy(&info.debug_line[r.r_offset], &val, 4);
+                }
+                // R_X86_64_64 (type 1) / R_AMDGPU_ABS64 (type 2) for .text addresses
+                else if ((rtype == 1 || rtype == 2) && r.r_offset + 8 <= info.debug_line.size()) {
+                    // Write the addend (relative to .text start)
+                    uint64_t val = (uint64_t)r.r_addend;
+                    memcpy(&info.debug_line[r.r_offset], &val, 8);
+                }
+            }
+        }
+        
         // Extract additional DWARF sections for llvm-objdump --source
         auto* debug_abbrev = elf.find(".debug_abbrev");
         if (debug_abbrev && debug_abbrev->size > 0) {
@@ -377,6 +788,11 @@ KernelInfo parseKernel(const std::vector<uint8_t>& elf_data) {
         auto* debug_ranges = elf.find(".debug_ranges");
         if (debug_ranges && debug_ranges->size > 0) {
             info.debug_ranges = elf.getBytes(*debug_ranges);
+        }
+        
+        // Use LLVM to find DWARF attribute positions for later patching
+        if (!info.debug_info.empty() && !info.debug_abbrev.empty()) {
+            info.dwarf_attr_positions = findDwarfAttrPositions(info.debug_info, info.debug_abbrev);
         }
     }
     
@@ -636,7 +1052,9 @@ private:
         size_t str_offsets_base;   // Base offset in merged .debug_str_offsets
         size_t addr_base;          // Base offset in merged .debug_addr
         size_t rnglists_base;      // Base offset in merged .debug_rnglists
+        size_t ranges_base;        // Base offset in merged .debug_ranges (DWARF4)
         size_t line_base;          // Base offset in merged .debug_line
+        DwarfAttrPositions dwarf_attr_positions;  // Positions of DWARF attributes in this chunk
     };
     std::vector<DebugInfoChunk> debug_info_chunks_;
     std::vector<uint8_t> merged_debug_abbrev_;
@@ -644,6 +1062,7 @@ private:
     std::vector<uint8_t> merged_debug_str_offsets_;
     std::vector<uint8_t> merged_debug_addr_;
     std::vector<uint8_t> merged_debug_rnglists_;
+    std::vector<uint8_t> merged_debug_ranges_;  // DWARF4 ranges (different from DWARF5 rnglists)
     std::vector<uint8_t> merged_debug_info_;
     
     // Output sections
@@ -1130,6 +1549,7 @@ private:
                 auto* disp_debug_str_offsets = disp_->find(".debug_str_offsets");
                 auto* disp_debug_addr = disp_->find(".debug_addr");
                 auto* disp_debug_rnglists = disp_->find(".debug_rnglists");
+                auto* disp_debug_ranges = disp_->find(".debug_ranges");  // DWARF4
                 auto* disp_debug_info = disp_->find(".debug_info");
                 auto* disp_text = disp_->find(".text");
                 
@@ -1146,6 +1566,7 @@ private:
                     chunk.str_offsets_base = merged_debug_str_offsets_.size();
                     chunk.addr_base = merged_debug_addr_.size();
                     chunk.rnglists_base = merged_debug_rnglists_.size();
+                    chunk.ranges_base = merged_debug_ranges_.size();  // DWARF4 ranges
                     chunk.line_base = 0;  // First debug_line chunk
                     
                     // Append dispatcher's debug sections
@@ -1168,6 +1589,16 @@ private:
                     if (disp_debug_rnglists && disp_debug_rnglists->size > 0) {
                         auto data = disp_->getBytes(*disp_debug_rnglists);
                         merged_debug_rnglists_.insert(merged_debug_rnglists_.end(), data.begin(), data.end());
+                    }
+                    if (disp_debug_ranges && disp_debug_ranges->size > 0) {
+                        auto data = disp_->getBytes(*disp_debug_ranges);
+                        merged_debug_ranges_.insert(merged_debug_ranges_.end(), data.begin(), data.end());
+                    }
+                    
+                    // Find DWARF attribute positions in dispatcher's debug_info
+                    if (disp_debug_abbrev && disp_debug_abbrev->size > 0) {
+                        auto abbrev_data = disp_->getBytes(*disp_debug_abbrev);
+                        chunk.dwarf_attr_positions = findDwarfAttrPositions(disp_di, abbrev_data);
                     }
                     merged_debug_info_.insert(merged_debug_info_.end(), disp_di.begin(), disp_di.end());
                     
@@ -1193,6 +1624,7 @@ private:
                         chunk.str_offsets_base = merged_debug_str_offsets_.size();
                         chunk.addr_base = merged_debug_addr_.size();
                         chunk.rnglists_base = merged_debug_rnglists_.size();
+                        chunk.ranges_base = merged_debug_ranges_.size();  // DWARF4 ranges
                         chunk.line_base = line_offset;
                         
                         // Append kernel's debug sections
@@ -1216,8 +1648,15 @@ private:
                             merged_debug_rnglists_.insert(merged_debug_rnglists_.end(),
                                 kern->debug_rnglists.begin(), kern->debug_rnglists.end());
                         }
+                        if (!kern->debug_ranges.empty()) {
+                            merged_debug_ranges_.insert(merged_debug_ranges_.end(),
+                                kern->debug_ranges.begin(), kern->debug_ranges.end());
+                        }
                         merged_debug_info_.insert(merged_debug_info_.end(),
                             kern->debug_info.begin(), kern->debug_info.end());
+                        
+                        // Copy DWARF attribute positions for later patching
+                        chunk.dwarf_attr_positions = kern->dwarf_attr_positions;
                         
                         debug_info_chunks_.push_back(chunk);
                         
@@ -1229,11 +1668,11 @@ private:
                     }
                 }
                 
-                printf("Merged debug sections: abbrev=%zu, str=%zu, str_offsets=%zu, addr=%zu, rnglists=%zu, info=%zu bytes (%zu chunks)\n",
+                printf("Merged debug sections: abbrev=%zu, str=%zu, str_offsets=%zu, addr=%zu, rnglists=%zu, ranges=%zu, info=%zu bytes (%zu chunks)\n",
                        merged_debug_abbrev_.size(), merged_debug_str_.size(), 
                        merged_debug_str_offsets_.size(), merged_debug_addr_.size(),
-                       merged_debug_rnglists_.size(), merged_debug_info_.size(),
-                       debug_info_chunks_.size());
+                       merged_debug_rnglists_.size(), merged_debug_ranges_.size(),
+                       merged_debug_info_.size(), debug_info_chunks_.size());
             }
             
             // Note: mergeDebugInfo() is called later from link() after
@@ -2331,40 +2770,49 @@ private:
                 
                 printf("  CU %zu (DWARF%d): abbrev_offset -> 0x%x\n", i, version, new_abbrev_offset);
                 
-                // For DWARF5, we also need to patch DW_AT_* base attributes in the first DIE
-                // These are at known positions after the CU header for standard AMD clang output
-                if (version == 5) {
-                    // The DIE starts after the 12-byte header
-                    // We need to find and patch: DW_AT_str_offsets_base, DW_AT_stmt_list,
-                    // DW_AT_addr_base, DW_AT_rnglists_base
-                    // 
-                    // These use DW_FORM_sec_offset (4 bytes for DWARF32)
-                    // The exact positions depend on the abbrev table, but for AMD clang
-                    // with -gline-tables-only, the layout is fairly consistent
-                    //
-                    // Rather than fully parsing DWARF, scan for 4-byte values that match
-                    // the expected original offsets and patch them
-                    
-                    size_t die_start = cu_start + 12;
-                    size_t die_end = (i + 1 < debug_info_chunks_.size()) 
-                        ? debug_info_chunks_[i + 1].merged_offset 
-                        : merged_debug_info_.size();
-                    
-                    // Scan first 100 bytes of DIE for sec_offset values to patch
-                    size_t scan_end = std::min(die_start + 100, die_end);
-                    
-                    for (size_t p = die_start; p + 4 <= scan_end; p++) {
-                        uint32_t val;
-                        memcpy(&val, &merged_debug_info_[p], 4);
-                        
-                        // Check if this looks like stmt_list (should be 0 originally, patch to line_base)
-                        // DW_AT_stmt_list is typically early in the DIE
-                        if (val == 0 && chunk.line_base > 0 && p < die_start + 40) {
-                            uint32_t new_val = (uint32_t)chunk.line_base;
-                            memcpy(&merged_debug_info_[p], &new_val, 4);
-                            printf("    Patched stmt_list at +%zu: 0 -> 0x%x\n", p - cu_start, new_val);
+                // Step 2.5: Patch DWARF attributes using positions found by LLVM
+                const auto& attrs = chunk.dwarf_attr_positions;
+                
+                // Helper to patch a list of attributes
+                auto patchAttrs = [&](const std::vector<std::pair<size_t, uint32_t>>& positions,
+                                     size_t base_offset, const char* name) {
+                    int patched = 0;
+                    for (const auto& [offset, orig_val] : positions) {
+                        size_t pos = chunk.merged_offset + offset;
+                        if (pos + 4 <= merged_debug_info_.size()) {
+                            uint32_t new_val = orig_val + (uint32_t)base_offset;
+                            memcpy(&merged_debug_info_[pos], &new_val, 4);
+                            patched++;
                         }
                     }
+                    if (patched > 0) {
+                        printf("    Patched %d %s (base=0x%zx)\n", patched, name, base_offset);
+                    }
+                };
+                
+                // Patch DW_AT_ranges (points to .debug_ranges for DWARF4)
+                if (chunk.ranges_base > 0) {
+                    patchAttrs(attrs.ranges, chunk.ranges_base, "DW_AT_ranges");
+                }
+                
+                // Patch DW_AT_str_offsets_base (points to .debug_str_offsets for DWARF5)
+                if (chunk.str_offsets_base > 0) {
+                    patchAttrs(attrs.str_offsets_base, chunk.str_offsets_base, "DW_AT_str_offsets_base");
+                }
+                
+                // Patch DW_AT_addr_base (points to .debug_addr for DWARF5)
+                if (chunk.addr_base > 0) {
+                    patchAttrs(attrs.addr_base, chunk.addr_base, "DW_AT_addr_base");
+                }
+                
+                // Patch DW_AT_rnglists_base (points to .debug_rnglists for DWARF5)
+                if (chunk.rnglists_base > 0) {
+                    patchAttrs(attrs.rnglists_base, chunk.rnglists_base, "DW_AT_rnglists_base");
+                }
+                
+                // Patch DW_AT_stmt_list (points to .debug_line)
+                if (chunk.line_base > 0) {
+                    patchAttrs(attrs.stmt_list, chunk.line_base, "DW_AT_stmt_list");
                 }
             }
         }
@@ -2423,6 +2871,17 @@ private:
             sec.alignment = 1;
             sec.data = std::move(merged_debug_rnglists_);
             printf("Adding .debug_rnglists: %zu bytes\n", sec.data.size());
+            sections_.push_back(std::move(sec));
+        }
+        
+        if (!merged_debug_ranges_.empty()) {
+            SectionInfo sec;
+            sec.name = ".debug_ranges";
+            sec.type = SHT_PROGBITS;
+            sec.flags = 0;
+            sec.alignment = 1;
+            sec.data = std::move(merged_debug_ranges_);
+            printf("Adding .debug_ranges: %zu bytes\n", sec.data.size());
             sections_.push_back(std::move(sec));
         }
         
