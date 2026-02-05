@@ -1459,14 +1459,10 @@ def process_torch_trace_output(
         # If the file already exists, append to it, else create new file.
         if Path(output_file).is_file():
             group.to_csv(output_file, mode="a", header=False, index=False)
-            console_log(
-                f"Appended trace for {sanitized_operator_name} to existing file {output_file}"
-            )
+            console_log(f"Appended trace to existing file {output_file}")
         else:
             group.to_csv(output_file, index=False)
-            console_log(
-                f"Saved consolidated trace for {sanitized_operator_name} to {output_file}"
-            )
+            console_log(f"Saved consolidated trace to {output_file}")
     for trace_file in marker_api_trace_csvs + counter_collection_csvs:
         try:
             Path(trace_file).unlink()

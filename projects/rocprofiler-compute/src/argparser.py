@@ -620,7 +620,6 @@ Examples:
         type=str,
         dest="torch_operator",
         nargs="+",
-        action="append",
         help="\t\tSpecify operator name for filtering.",
     )
     analyze_group.add_argument(

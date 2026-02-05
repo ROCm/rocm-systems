@@ -109,8 +109,14 @@ class cli_analysis(OmniAnalyze_Base):
                     'option before using "--torch-operator" in analyze mode.'
                 )
 
-            operator_args = getattr(args, "torch_operator", "")
-            operator_list = [op.strip() for op in operator_args.split(",") if op.strip()]
+            operator_args = getattr(args, "torch_operator", [])
+            operator_list = []
+            for op in operator_args:
+                # Support comma-separated or space-separated input
+                operator_list.extend([
+                    o.strip() for o in str(op).split(",") if o.strip()
+                ])
+            operator_list = [o for o in operator_list if o]
 
             for op in operator_list:
                 if "/" in op:
@@ -130,7 +136,6 @@ class cli_analysis(OmniAnalyze_Base):
                         tty.show_torch_operator_table(op, df)
                     else:
                         console_log(f"No data for operator: {op}")
-
 
         if args.list_stats:
             tty.show_kernel_stats(

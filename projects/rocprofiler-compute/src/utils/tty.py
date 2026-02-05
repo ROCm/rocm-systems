@@ -274,12 +274,42 @@ def extract_kernel_name(full_kernel_name: str) -> str:
 
     return main_part.strip()
 
-def show_torch_operator_table(op, df):
-    print(f"\nOperator: {op}")
-    if isinstance(df, pd.DataFrame):
-        print(df.to_markdown(index=False))
-    else:
-        print(df)
+
+def show_torch_operator_table(operator_name: str, df: pd.DataFrame) -> None:
+    """Display torch operator data in a properly formatted table."""
+    if df is None or df.empty:
+        console_log(f"No data available for operator: {operator_name}")
+        return
+
+    console_log(f"\n{operator_name}")
+    console_log("=" * len(operator_name))
+
+    # Create a copy for display formatting
+    display_df = df.copy()
+
+    # Truncate very long column values for better display
+    for col in display_df.columns:
+        if display_df[col].dtype == "object":  # String columns
+            display_df[col] = (
+                display_df[col]
+                .astype(str)
+                .apply(lambda x: string_multiple_lines(x, 50, 3) if len(x) > 50 else x)
+            )
+
+    # Reset index to get numbered rows like other tables
+    display_df = display_df.reset_index(drop=True)
+
+    # Use tabulate for consistent formatting with other tables
+    table_str = tabulate(
+        display_df,
+        headers=display_df.columns,
+        tablefmt="fancy_grid",
+        showindex=True,
+        floatfmt=".2f",
+    )
+
+    console_log(table_str)
+
 
 def show_torch_operator_hierarchy(operator_name: str, df: pd.DataFrame) -> None:
     """
@@ -362,7 +392,6 @@ def show_torch_operator_hierarchy(operator_name: str, df: pd.DataFrame) -> None:
             print(f"{left_padding.ljust(40)}{kernel_line}")
 
         print()
-
 
 
 def process_table_data(
