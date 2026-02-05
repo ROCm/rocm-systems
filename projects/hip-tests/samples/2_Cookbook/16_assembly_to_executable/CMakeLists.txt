@@ -20,7 +20,23 @@
 
 cmake_minimum_required(VERSION 3.21)
 
-if(UNIX)
+# Windows ROCM_PATH setup
+if(WIN32)
+  if(NOT DEFINED ROCM_PATH)
+    if(DEFINED ENV{ROCM_PATH})
+      set(ROCM_PATH $ENV{ROCM_PATH} CACHE STRING "ROCM Path")
+    elseif(DEFINED ENV{HIP_PATH})
+      set(ROCM_PATH $ENV{HIP_PATH} CACHE STRING "ROCM Path from HIP_PATH")
+    else()
+      # Derive from compiler path
+      get_filename_component(COMPILER_DIR "${CMAKE_CXX_COMPILER}" DIRECTORY)
+      get_filename_component(ROCM_PATH "${COMPILER_DIR}/../../.." ABSOLUTE)
+      set(ROCM_PATH "${ROCM_PATH}" CACHE STRING "ROCM Path (from compiler)")
+    endif()
+  endif()
+  set(HIP_PATH ${ROCM_PATH})
+  list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH})
+elseif(UNIX)
   if(NOT DEFINED ROCM_PATH)
     if(DEFINED ENV{ROCM_PATH})
       set(ROCM_PATH $ENV{ROCM_PATH} CACHE STRING "ROCM Path")
@@ -45,20 +61,43 @@ find_package(hip REQUIRED)
 
 # Set compiler and toolchain paths - using amdclang++ directly
 set(HIP_CLANG ${CMAKE_HIP_COMPILER})
-set(CLANG ${HIP_PATH}/llvm/bin/clang)
-set(LLVM_MC ${HIP_PATH}/llvm/bin/llvm-mc)
-set(CLANG_OFFLOAD_BUNDLER ${HIP_PATH}/llvm/bin/clang-offload-bundler)
+if(WIN32)
+  set(CLANG "${ROCM_PATH}/lib/llvm/bin/clang.exe")
+  set(LLVM_MC "${ROCM_PATH}/lib/llvm/bin/llvm-mc.exe")
+  set(CLANG_OFFLOAD_BUNDLER "${ROCM_PATH}/lib/llvm/bin/clang-offload-bundler.exe")
+else()
+  set(CLANG ${HIP_PATH}/llvm/bin/clang)
+  set(LLVM_MC ${HIP_PATH}/llvm/bin/llvm-mc)
+  set(CLANG_OFFLOAD_BUNDLER ${HIP_PATH}/llvm/bin/clang-offload-bundler)
+endif()
 
 set(INCLUDES ${CMAKE_CURRENT_SOURCE_DIR}/../../common)
 
 set(SRCS ${CMAKE_CURRENT_SOURCE_DIR}/square.cpp)
 set(SQ_HOST_ASM ${CMAKE_CURRENT_BINARY_DIR}/square_host.s)
-set(SQ_HOST_OBJ ${CMAKE_CURRENT_BINARY_DIR}/square_host.o)
+if(WIN32)
+  set(SQ_HOST_OBJ ${CMAKE_CURRENT_BINARY_DIR}/square_host.obj)
+  set(SQ_DEVICE_OBJ ${CMAKE_CURRENT_BINARY_DIR}/square_device.obj)
+  set(SQ_ASM_EXE ${CMAKE_CURRENT_BINARY_DIR}/square_asm.exe)
+  set(OBJ_EXT ".obj")
+  set(HOST_TARGET "x86_64-pc-windows-msvc")
+  set(NULL_DEVICE "NUL")
+else()
+  set(SQ_HOST_OBJ ${CMAKE_CURRENT_BINARY_DIR}/square_host.o)
+  set(SQ_DEVICE_OBJ ${CMAKE_CURRENT_BINARY_DIR}/square_device.o)
+  set(SQ_ASM_EXE ${CMAKE_CURRENT_BINARY_DIR}/square_asm.out)
+  set(OBJ_EXT ".o")
+  set(HOST_TARGET "x86_64-linux-gnu")
+  set(NULL_DEVICE "/dev/null")
+endif()
 set(SQ_DEVICE_HIPFB ${CMAKE_CURRENT_BINARY_DIR}/offload_bundle.hipfb)
-set(SQ_DEVICE_OBJ ${CMAKE_CURRENT_BINARY_DIR}/square_device.o)
-set(SQ_ASM_EXE ${CMAKE_CURRENT_BINARY_DIR}/square_asm.out)
 
-set(MCIN_OBJ_GEN ${CMAKE_CURRENT_SOURCE_DIR}/hip_obj_gen.mcin)
+# Use platform-specific mcin file (ELF vs COFF assembly syntax)
+if(WIN32)
+  set(MCIN_OBJ_GEN ${CMAKE_CURRENT_SOURCE_DIR}/hip_obj_gen_win.mcin)
+else()
+  set(MCIN_OBJ_GEN ${CMAKE_CURRENT_SOURCE_DIR}/hip_obj_gen.mcin)
+endif()
 
 # Append Current device arch from amdgpu-arch
 # if amdgpu-arch is not found, support --offload-arch
@@ -69,7 +108,12 @@ else()
   set(ARCH_PATH "${ROCM_PATH}/bin/amdgpu-arch")
 endif()
 
-if(NOT DEFINED OFFLOAD_ARCH_STR
+# On Windows, prefer CMAKE_HIP_ARCHITECTURES if set
+if(WIN32 AND DEFINED CMAKE_HIP_ARCHITECTURES AND NOT CMAKE_HIP_ARCHITECTURES STREQUAL "")
+  foreach(_hip_gpu_arch ${CMAKE_HIP_ARCHITECTURES})
+    list(APPEND GPU_ARCH ${_hip_gpu_arch})
+  endforeach()
+elseif(NOT DEFINED OFFLOAD_ARCH_STR
    AND EXISTS "${ARCH_PATH}"
    AND HIP_PLATFORM STREQUAL "amd")
   execute_process(COMMAND "${ARCH_PATH}"
@@ -101,27 +145,45 @@ endif()
 
 list(JOIN GPU_ARCH "," OFFLOAD_ARCH)
 add_custom_target(src_to_asm ${ALL_OPTION}
-  COMMAND ${HIP_CLANG} -x hip -c -S -I${INCLUDES} --cuda-host-only -fuse-cuid=none -target x86_64-linux-gnu -o ${SQ_HOST_ASM} ${SRCS}
+  COMMAND ${HIP_CLANG} -x hip -c -S -I${INCLUDES} --cuda-host-only -fuse-cuid=none -target ${HOST_TARGET} -o ${SQ_HOST_ASM} ${SRCS}
   COMMAND ${HIP_CLANG} -x hip -c -S -I${INCLUDES} --cuda-device-only --offload-arch=${OFFLOAD_ARCH} ${SRCS}
+  WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
 )
 
-add_custom_command(OUTPUT host_obj COMMAND ${HIP_CLANG} -c ${SQ_HOST_ASM} -o ${SQ_HOST_OBJ})
+add_custom_command(OUTPUT host_obj 
+  COMMAND ${HIP_CLANG} -c ${SQ_HOST_ASM} -o ${SQ_HOST_OBJ}
+  WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+)
 
 foreach(ARCH ${GPU_ARCH})
   list(APPEND TARGETS hip-amdgcn-amd-amdhsa--${ARCH})
-  list(APPEND INPUTS square-hip-amdgcn-amd-amdhsa-${ARCH}.o)
+  list(APPEND INPUTS square-hip-amdgcn-amd-amdhsa-${ARCH}${OBJ_EXT})
   set(arch_obj ${ARCH}_obj)
-  add_custom_command(OUTPUT ${arch_obj} COMMAND ${CLANG} -target amdgcn-amd-amdhsa -mcpu=${ARCH} square-hip-amdgcn-amd-amdhsa-${ARCH}.s -o square-hip-amdgcn-amd-amdhsa-${ARCH}.o)
+  add_custom_command(OUTPUT ${arch_obj} 
+    COMMAND ${CLANG} -target amdgcn-amd-amdhsa -mcpu=${ARCH} square-hip-amdgcn-amd-amdhsa-${ARCH}.s -o square-hip-amdgcn-amd-amdhsa-${ARCH}${OBJ_EXT}
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+  )
   list(APPEND arch_obj_targets ${arch_obj})
 endforeach()
 
 list(JOIN TARGETS "," TARGET_STR)
 list(TRANSFORM INPUTS PREPEND "-input=")
-add_custom_target(asm_to_exec ${ALL_OPTION} DEPENDS src_to_asm host_obj ${arch_obj_targets}
-  COMMAND ${CLANG_OFFLOAD_BUNDLER} -type=o -bundle-align=4096 -targets=host-x86_64-unknown--linux,${TARGET_STR} -input=/dev/null ${INPUTS} -output=${SQ_DEVICE_HIPFB}
-  COMMAND ${LLVM_MC} ${MCIN_OBJ_GEN} -o ${SQ_DEVICE_OBJ} --filetype=obj
-  COMMAND ${HIP_CLANG} ${SQ_HOST_OBJ} ${SQ_DEVICE_OBJ} -o ${SQ_ASM_EXE} -L${ROCM_PATH}/lib -lamdhip64 -Wl,-rpath,${ROCM_PATH}/lib
-)
+
+if(WIN32)
+  set(BUNDLE_HOST_TARGET "host-x86_64-pc-windows-msvc")
+  add_custom_target(asm_to_exec ${ALL_OPTION} DEPENDS src_to_asm host_obj ${arch_obj_targets}
+    COMMAND ${CLANG_OFFLOAD_BUNDLER} -type=o -bundle-align=4096 -targets=${BUNDLE_HOST_TARGET},${TARGET_STR} -input=${NULL_DEVICE} ${INPUTS} -output=${SQ_DEVICE_HIPFB}
+    COMMAND ${LLVM_MC} ${MCIN_OBJ_GEN} -o ${SQ_DEVICE_OBJ} --filetype=obj -triple=x86_64-pc-windows-msvc
+    COMMAND ${HIP_CLANG} ${SQ_HOST_OBJ} ${SQ_DEVICE_OBJ} -o ${SQ_ASM_EXE} -L${ROCM_PATH}/lib ${ROCM_PATH}/lib/amdhip64.lib
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+  )
+else()
+  add_custom_target(asm_to_exec ${ALL_OPTION} DEPENDS src_to_asm host_obj ${arch_obj_targets}
+    COMMAND ${CLANG_OFFLOAD_BUNDLER} -type=o -bundle-align=4096 -targets=host-x86_64-unknown--linux,${TARGET_STR} -input=/dev/null ${INPUTS} -output=${SQ_DEVICE_HIPFB}
+    COMMAND ${LLVM_MC} ${MCIN_OBJ_GEN} -o ${SQ_DEVICE_OBJ} --filetype=obj
+    COMMAND ${HIP_CLANG} ${SQ_HOST_OBJ} ${SQ_DEVICE_OBJ} -o ${SQ_ASM_EXE} -L${ROCM_PATH}/lib -lamdhip64 -Wl,-rpath,${ROCM_PATH}/lib
+  )
+endif()
 
 if(TARGET build_cookbook)
   add_dependencies(build_cookbook src_to_asm asm_to_exec)
