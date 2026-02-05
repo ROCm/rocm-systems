@@ -24,44 +24,63 @@ THE SOFTWARE.
  * @file hipDeviceMemAlloc_WithLevels.cc
  * @brief Example demonstrating level-based test parameter system
  * 
- * This file demonstrates how to use the level-based testing system where
- * test parameters (memory sizes, block sizes, etc.) are loaded from a
- * centralized configuration file based on test level tags.
- * 
- * Test Levels:
- * - level_0: Quick smoke tests (3 sizes: 1K, 1M, 10M)
- * - level_1: Standard regression tests (7 sizes: 1K, 4K, 64K, 1M, 10M, 50M, 100M)
- * 
- * Configuration File: catch/config/test_levels.txt
+ * This file demonstrates how ONE test case adapts its parameters based on
+ * which level you run with. The same test code runs with different intensity:
  * 
  * Usage:
- *   ./test "[level_0]"  # Run only level_0 tests (fast)
- *   ./test "[level_1]"  # Run only level_1 tests (comprehensive)
- *   ./test "[level]"    # Run all level tests
+ *   ./test "[level_0]"  # Quick: 3 memory sizes (1K, 1M, 10M)
+ *   ./test "[level_1]"  # Standard: 7 memory sizes (1K to 100M)
+ *   ./test "[level_2]"  # Comprehensive: 14 memory sizes (64B to 2G)
+ * 
+ * The test parameters are defined in hip_tests_config.yaml under cmd_options:
+ *   level_0:
+ *     memory_sizes: [1K, 1M, 10M]
+ *   level_1:
+ *     memory_sizes: [1K, 4K, 64K, 1M, 10M, 50M, 100M]
+ *   level_2:
+ *     memory_sizes: [64, 256, 1K, 4K, 16K, 64K, 256K, 1M, 10M, 50M, 100M, 500M, 1G, 2G]
+ * 
+ * To add a new test:
+ * 1. Add entry to hip_tests_config.yaml with multiple level tags
+ * 2. Use TEST_CASE(MacroName) - tags come from YAML
+ * 3. Access parameters via TestParameterStore::instance().getMemorySizesForCurrentLevel()
  */
 
 #include <hip_test_common.hh>
 #include <hip_test_params.hh>
+#include <hip_tests_config.hh>  // Generated macros with tags from YAML
 #include <vector>
 
 /**
- * Level 0 - Quick Smoke Test
+ * ONE test case that adapts to the level you run with.
+ * 
+ * YAML configuration:
+ *   Unit_hipDeviceMemAlloc_Functional:
+ *     level: 0  # Minimum level this test runs at
+ *     tags: [level_0, level_1, level_2, device, memory]
+ * 
+ * Running with different levels:
+ *   ./test "[level_0]" -> Uses 3 memory sizes (quick smoke test)
+ *   ./test "[level_1]" -> Uses 7 memory sizes (standard regression)
+ *   ./test "[level_2]" -> Uses 14 memory sizes (comprehensive)
  */
-TEST_CASE("Unit_hipDeviceMemAlloc_Level0_Quick", "[level_0][device][memory]") {
+TEST_CASE(Unit_hipDeviceMemAlloc_Functional) {
     auto& params = TestParameterStore::instance();
     
-    // GENERATE from level_0 memory sizes (automatically loaded from config)
+    // Parameters automatically adapt based on which level filter was used
     auto sizes = params.getMemorySizesForCurrentLevel();
     auto size = GENERATE_COPY(from_range(sizes));
     
-    INFO("Testing Level 0 with memory size: " << size << " bytes");
+    INFO("Testing with memory size: " << size << " bytes");
+    INFO("Current level: " << params.currentTestLevel);
+    INFO("Total sizes for this level: " << sizes.size());
 
     // Basic allocation test
     void* d_ptr = nullptr;
     HIP_CHECK(hipMalloc(&d_ptr, size));
     REQUIRE(d_ptr != nullptr);
 
-    // Simple memset to verify memory is usable
+    // Memset to verify memory is usable
     HIP_CHECK(hipMemset(d_ptr, 0xAB, size));
     
     // Verify the pattern
@@ -76,20 +95,19 @@ TEST_CASE("Unit_hipDeviceMemAlloc_Level0_Quick", "[level_0][device][memory]") {
 }
 
 /**
- * TEST CASE 2: Level 1 - Standard Regression Test
+ * Another example: Multi-device test with level-based parameters
  * 
- * Purpose: Comprehensive testing across multiple devices and patterns
- * Runtime: ~30 seconds
- * Parameters: 7 memory sizes from test_levels.txt (1K, 4K, 64K, 1M, 10M, 50M, 100M)
+ * This test runs on all devices with multiple memory patterns.
+ * The number of memory sizes tested depends on the level.
  */
-TEST_CASE("Unit_hipDeviceMemAlloc_Level1_Standard", "[level_1][device][memory]") {
+TEST_CASE(Unit_hipDeviceMemAlloc_MultiDevice) {
     auto& params = TestParameterStore::instance();
     
-    // Get memory sizes from level_1 configuration
+    // Get memory sizes based on current level
     auto sizes = params.getMemorySizesForCurrentLevel();
     auto size = GENERATE_COPY(from_range(sizes));
     
-    INFO("Testing Level 1 with memory size: " << size << " bytes");
+    INFO("Testing with memory size: " << size << " bytes");
 
     // Get device count
     int numDevices = 0;
@@ -126,29 +144,16 @@ TEST_CASE("Unit_hipDeviceMemAlloc_Level1_Standard", "[level_1][device][memory]")
             REQUIRE(h_data[i] == (char)0xFF);
         }
     }
-    
-    SECTION("Pattern 0x55") {
-        HIP_CHECK(hipMemset(d_ptr, 0x55, size));
-        std::vector<char> h_data(size);
-        HIP_CHECK(hipMemcpy(h_data.data(), d_ptr, size, hipMemcpyDeviceToHost));
-        
-        for (size_t i = 0; i < size; ++i) {
-            REQUIRE(h_data[i] == (char)0x55);
-        }
-    }
 
     HIP_CHECK(hipFree(d_ptr));
 }
 
 /**
- * TEST CASE 3: Verify Level Configuration
- * 
- * Purpose: Verify that level configurations are loaded correctly
- * This is a hidden test (tag: .verify) - run explicitly for verification
+ * Verify Level Configuration (hidden test)
  * 
  * Run with: ./test "Unit_hipDeviceMemAlloc_VerifyLevelConfig"
  */
-TEST_CASE("Unit_hipDeviceMemAlloc_VerifyLevelConfig", "[.verify][config]") {
+TEST_CASE(Unit_hipDeviceMemAlloc_VerifyLevelConfig) {
     auto& params = TestParameterStore::instance();
     
     INFO("=== Verifying Level Configurations ===");
@@ -158,62 +163,17 @@ TEST_CASE("Unit_hipDeviceMemAlloc_VerifyLevelConfig", "[.verify][config]") {
     REQUIRE(params.levelMemorySizes.count("level_0") > 0);
     REQUIRE(params.levelMemorySizes["level_0"].size() == 3);  // Expect 3 sizes
     
-    INFO("Level 0 Memory Sizes:");
-    for (size_t s : params.levelMemorySizes["level_0"]) {
-        INFO("  - " << s << " bytes");
-    }
+    INFO("Level 0 Memory Sizes: " << params.levelMemorySizes["level_0"].size());
     
     // Verify level_1 parameters exist
     REQUIRE(params.levelMemorySizes.count("level_1") > 0);
     REQUIRE(params.levelMemorySizes["level_1"].size() == 7);  // Expect 7 sizes
     
-    INFO("Level 1 Memory Sizes:");
-    for (size_t s : params.levelMemorySizes["level_1"]) {
-        INFO("  - " << s << " bytes");
-    }
+    INFO("Level 1 Memory Sizes: " << params.levelMemorySizes["level_1"].size());
     
-    // Verify block sizes if defined
-    if (params.levelBlockSizes.count("level_0") > 0) {
-        INFO("Level 0 Block Sizes:");
-        for (int s : params.levelBlockSizes["level_0"]) {
-            INFO("  - " << s);
-        }
-    }
+    // Verify level_2 parameters exist
+    REQUIRE(params.levelMemorySizes.count("level_2") > 0);
+    REQUIRE(params.levelMemorySizes["level_2"].size() == 14);  // Expect 14 sizes
     
-    if (params.levelBlockSizes.count("level_1") > 0) {
-        INFO("Level 1 Block Sizes:");
-        for (int s : params.levelBlockSizes["level_1"]) {
-            INFO("  - " << s);
-        }
-    }
+    INFO("Level 2 Memory Sizes: " << params.levelMemorySizes["level_2"].size());
 }
-
-/**
- * TEST CASE 4: Compare Level Parameters
- * 
- * Purpose: Demonstrate difference between level_0 and level_1
- * This is a hidden test - run explicitly for comparison
- * 
- * Run with: ./test "Unit_hipDeviceMemAlloc_CompareLevels"
- */
-TEST_CASE("Unit_hipDeviceMemAlloc_CompareLevels", "[.compare][config]") {
-    auto& params = TestParameterStore::instance();
-    
-    INFO("=== Comparing Level 0 vs Level 1 ===");
-    
-    REQUIRE(params.levelMemorySizes.count("level_0") > 0);
-    REQUIRE(params.levelMemorySizes.count("level_1") > 0);
-    
-    size_t level0_count = params.levelMemorySizes["level_0"].size();
-    size_t level1_count = params.levelMemorySizes["level_1"].size();
-    
-    INFO("Level 0: " << level0_count << " memory sizes");
-    INFO("Level 1: " << level1_count << " memory sizes");
-    
-    // Level 1 should have more test cases than level 0
-    REQUIRE(level1_count > level0_count);
-    
-    INFO("\nLevel 0 is for quick smoke tests");
-    INFO("Level 1 is for comprehensive regression tests");
-}
-

@@ -562,6 +562,17 @@ unit:
     Unit_coopgroups_match_any_coal: *level_2
     Unit_coopgroups_match_all_coal: *level_2
   device:
+    # Example tests demonstrating level-based parameter system
+    # ONE test with multiple level tags - parameters adapt based on which level you run
+    Unit_hipDeviceMemAlloc_Functional:
+      level: 0
+      tags: [level_0, level_1, level_2, device, memory]
+    Unit_hipDeviceMemAlloc_MultiDevice:
+      level: 0
+      tags: [level_0, level_1, level_2, device, memory, multigpu]
+    Unit_hipDeviceMemAlloc_VerifyLevelConfig:
+      <<: *level_2
+      tags: [.verify, config]
     Unit_hipChooseDevice_ValidateDevId: *level_2
     Unit_hipChooseDevice_NegTst: *level_2
     Unit_hipDeviceComputeCapability_Negative: *level_2

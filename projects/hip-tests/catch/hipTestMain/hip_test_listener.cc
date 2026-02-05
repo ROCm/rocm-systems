@@ -27,6 +27,7 @@ THE SOFTWARE.
 #include <hip_test_context.hh>
 #include <regex>
 #include <cstdlib>
+#include <fstream>
 
 /**
  * @brief Event listener for HIP test parameter initialization
@@ -45,23 +46,44 @@ private:
     std::string filterLevel; // Detected level from command-line filter
     
     /**
-     * @brief Parse command-line arguments to detect level filter
-     * Looks for patterns like: ./test "[level_0]" or ./test [level_1]
-     * Also checks HIP_TEST_LEVEL environment variable as fallback
+     * @brief Extract level from Catch2's test spec filter string
+     * Looks for patterns like: "[level_0]" or "[level_1]"
      */
-    std::string detectLevelFromCommandLine() {
-        // Check environment variable first
+    std::string extractLevelFromFilter(const std::string& filter) {
+        std::regex levelRegex("\\[level_(\\d+)\\]");
+        std::smatch match;
+        if (std::regex_search(filter, match, levelRegex)) {
+            return "level_" + match[1].str();
+        }
+        return "";
+    }
+    
+    /**
+     * @brief Detect level filter from environment or command line
+     */
+    std::string detectLevelFilter() {
+        // Priority 1: Check environment variable
         if (const char* envLevel = std::getenv("HIP_TEST_LEVEL")) {
             std::string level = envLevel;
             LogPrintf("[Level Filter] Detected from HIP_TEST_LEVEL: %s\n", level.c_str());
             return level;
         }
         
-        // Parse command-line arguments (stored in Catch2 config)
-        // Unfortunately, Catch2 doesn't expose original argc/argv in listeners
-        // So we'll need to use environment variable or detect from running tests
+        // Priority 2: Read from /proc/self/cmdline on Linux
+        #ifdef __linux__
+        std::ifstream cmdline("/proc/self/cmdline");
+        if (cmdline) {
+            std::string arg;
+            while (std::getline(cmdline, arg, '\0')) {
+                std::string level = extractLevelFromFilter(arg);
+                if (!level.empty()) {
+                    LogPrintf("[Level Filter] Detected from command line: %s\n", level.c_str());
+                    return level;
+                }
+            }
+        }
+        #endif
         
-        // For now, return empty - we'll detect from first test that runs
         return "";
     }
 
@@ -72,10 +94,10 @@ public:
      * Initializes TestParameterStore and detects level filter
      */
     void testRunStarting(Catch::TestRunInfo const& testRunInfo) override {
-        // Detect level filter from environment or command-line
-        filterLevel = detectLevelFromCommandLine();
-        
         TestParameterStore::instance().initialize();
+        
+        // Detect level filter from environment or command-line
+        filterLevel = detectLevelFilter();
         
         // If level was specified, load it immediately
         if (!filterLevel.empty()) {

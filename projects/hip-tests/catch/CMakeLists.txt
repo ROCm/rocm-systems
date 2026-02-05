@@ -138,10 +138,15 @@ endif()
 include(cmake/hip-tests.cmake)
 include(CTest)
 
+# Define build directories early so they can be used in include_directories
+set(CATCH_BUILD_DIR catch_tests)
+set(CATCH_INCLUDE_DIR include)
+
 include_directories(
     "./include"
     "./kernels"
     "${CMAKE_CURRENT_LIST_DIR}/external/picojson"
+    "${CMAKE_CURRENT_BINARY_DIR}/${CATCH_BUILD_DIR}/${CATCH_INCLUDE_DIR}"  # Generated headers
 )
 
 option(RTC_TESTING "Run tests using HIP RTC to compile the kernels" OFF)
@@ -149,8 +154,6 @@ if (RTC_TESTING)
     add_definitions(-DRTC_TESTING=ON)
 endif()
 add_definitions(-DKERNELS_PATH="${CMAKE_CURRENT_SOURCE_DIR}/kernels/")
-
-set(CATCH_BUILD_DIR catch_tests)
 set(HIP_TEST_CONFIG_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/${CATCH_BUILD_DIR}/config)
 file(MAKE_DIRECTORY ${HIP_TEST_CONFIG_BINARY_DIR})
 file(GLOB JSON_FILES "./hipTestMain/config/*.json")
