@@ -595,6 +595,18 @@ rocprofsys_init_tooling_hidden(void)
 
         rocprofsys_preinit_cache();
 
+#if(defined(ROCPROFSYS_USE_MPI_HEADERS) && ROCPROFSYS_USE_MPI_HEADERS > 0) ||            \
+    (defined(ROCPROFSYS_USE_MPI) && ROCPROFSYS_USE_MPI > 0)
+
+        component::mpi_gotcha::subscribe_to_init_event([](int rank, int size) {
+            nlohmann::json _environment_json;
+            _environment_json["MPI_COMM_WORLD_SIZE"] = size;
+            _environment_json["MPI_COMM_WORLD_RANK"] = rank;
+
+            set_metadata_environment_json(escape_quotes(_environment_json.dump()));
+        });
+#endif
+
         if(get_use_process_sampling())
         {
             ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
@@ -798,22 +810,6 @@ rocprofsys_init_hidden(const char* _mode, bool _is_binary_rewrite, const char* _
     {
         rocprofsys_preinit_hidden();
     }
-
-#if(defined(ROCPROFSYS_USE_MPI_HEADERS) && ROCPROFSYS_USE_MPI_HEADERS > 0) ||            \
-    (defined(ROCPROFSYS_USE_MPI) && ROCPROFSYS_USE_MPI > 0)
-
-    if(get_use_mpip())
-    {
-        component::mpi_gotcha::subscribe_to_init_event([](int rank, int size) {
-            nlohmann::json _environment_json;
-            _environment_json["MPI_COMM_WORLD_SIZE"] = size;
-            _environment_json["MPI_COMM_WORLD_RANK"] = rank;
-
-            set_metadata_environment_json(escape_quotes(_environment_json.dump()));
-        });
-    }
-
-#endif
 }
 
 //======================================================================================//
