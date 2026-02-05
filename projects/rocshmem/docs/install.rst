@@ -19,9 +19,18 @@ Requirements
 
   * MI250X
 
-  * MI300X
+  * MI300X, MI308X
 
-  * MI350X (Requires ROCm 7.0 or later)
+  * MI325X
+
+  * MI350X, MI355X (Requires ROCm 7.0 or later)
+
+* The following AMD GPUs have experimental support in rocSHMEM:
+
+  * Radeon AI PRO9700, Radeon RX 9070XT, Radeon RX 9070
+
+  * Radeon Pro W7900, Radeon RX 7900XTX, Radeon RX 7900XT
+
 
   .. note::
 
@@ -71,7 +80,7 @@ GDA NIC dependencies
 
 - GDA on Mellanox NICs should work on any recent version of rdma-core.
 - GDA on Broadcom Thor requires driver version 233.2.108.0 and firmware version 233.2.104.0 or later.
-
+- GDA on AMD Pensando Pollara 400 AI NIC requires a newer driver and firmware version - contact AMD for the latest supported version.
 
 Building rocSHMEM with MPI (Optional)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
