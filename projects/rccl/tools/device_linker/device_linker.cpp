@@ -547,9 +547,9 @@ public:
         printf("\n=== Pass 2: Layout ===\n");
         computeLayout();
         
-        // Build synthetic debug_info after layout (needs text_addr_)
-        printf("\n=== Pass 2b: Build Debug Info ===\n");
-        buildSyntheticDebugInfo();
+        // Merge and patch debug sections after layout (needs text_addr_)
+        printf("\n=== Pass 2b: Merge Debug Info ===\n");
+        mergeDebugInfo();
         
         printf("\n=== Pass 3: Patch and Write ===\n");
         patchSections();
@@ -624,6 +624,27 @@ private:
     std::vector<DebugLineChunk> debug_line_chunks_;
     std::vector<uint8_t> merged_debug_line_str_;  // Merged .debug_line_str data
     std::string debug_comp_dir_;  // Compilation directory for debug info
+    
+    // Merged debug sections for proper DWARF merging
+    struct DebugInfoChunk {
+        size_t merged_offset;      // Offset in merged section
+        size_t size;               // Size of this chunk
+        uint64_t orig_text_addr;   // Original .text address in kernel's ELF
+        uint64_t new_text_offset;  // New offset in merged .text section
+        size_t abbrev_base;        // Base offset in merged .debug_abbrev
+        size_t str_base;           // Base offset in merged .debug_str
+        size_t str_offsets_base;   // Base offset in merged .debug_str_offsets
+        size_t addr_base;          // Base offset in merged .debug_addr
+        size_t rnglists_base;      // Base offset in merged .debug_rnglists
+        size_t line_base;          // Base offset in merged .debug_line
+    };
+    std::vector<DebugInfoChunk> debug_info_chunks_;
+    std::vector<uint8_t> merged_debug_abbrev_;
+    std::vector<uint8_t> merged_debug_str_;
+    std::vector<uint8_t> merged_debug_str_offsets_;
+    std::vector<uint8_t> merged_debug_addr_;
+    std::vector<uint8_t> merged_debug_rnglists_;
+    std::vector<uint8_t> merged_debug_info_;
     
     // Output sections
     std::vector<SectionInfo> sections_;
@@ -1096,7 +1117,126 @@ private:
                 sections_.push_back(std::move(debug_line_str));
             }
             
-            // Note: buildSyntheticDebugInfo() is called later from link() after
+            // Merge other debug sections (.debug_abbrev, .debug_str, .debug_str_offsets,
+            // .debug_addr, .debug_rnglists, .debug_info) from each kernel
+            // These will be patched later in mergeDebugInfo() after layout
+            {
+                // Track current offset in each merged section
+                size_t line_offset = 0;  // Track where each kernel's debug_line starts
+                
+                // First add dispatcher's debug sections if present
+                auto* disp_debug_abbrev = disp_->find(".debug_abbrev");
+                auto* disp_debug_str = disp_->find(".debug_str");
+                auto* disp_debug_str_offsets = disp_->find(".debug_str_offsets");
+                auto* disp_debug_addr = disp_->find(".debug_addr");
+                auto* disp_debug_rnglists = disp_->find(".debug_rnglists");
+                auto* disp_debug_info = disp_->find(".debug_info");
+                auto* disp_text = disp_->find(".text");
+                
+                if (disp_debug_info && disp_debug_info->size > 0) {
+                    auto disp_di = disp_->getBytes(*disp_debug_info);
+                    
+                    DebugInfoChunk chunk;
+                    chunk.merged_offset = merged_debug_info_.size();
+                    chunk.size = disp_di.size();
+                    chunk.orig_text_addr = disp_text ? disp_text->addr : 0;
+                    chunk.new_text_offset = 0;  // Dispatcher is at offset 0
+                    chunk.abbrev_base = merged_debug_abbrev_.size();
+                    chunk.str_base = merged_debug_str_.size();
+                    chunk.str_offsets_base = merged_debug_str_offsets_.size();
+                    chunk.addr_base = merged_debug_addr_.size();
+                    chunk.rnglists_base = merged_debug_rnglists_.size();
+                    chunk.line_base = 0;  // First debug_line chunk
+                    
+                    // Append dispatcher's debug sections
+                    if (disp_debug_abbrev && disp_debug_abbrev->size > 0) {
+                        auto data = disp_->getBytes(*disp_debug_abbrev);
+                        merged_debug_abbrev_.insert(merged_debug_abbrev_.end(), data.begin(), data.end());
+                    }
+                    if (disp_debug_str && disp_debug_str->size > 0) {
+                        auto data = disp_->getBytes(*disp_debug_str);
+                        merged_debug_str_.insert(merged_debug_str_.end(), data.begin(), data.end());
+                    }
+                    if (disp_debug_str_offsets && disp_debug_str_offsets->size > 0) {
+                        auto data = disp_->getBytes(*disp_debug_str_offsets);
+                        merged_debug_str_offsets_.insert(merged_debug_str_offsets_.end(), data.begin(), data.end());
+                    }
+                    if (disp_debug_addr && disp_debug_addr->size > 0) {
+                        auto data = disp_->getBytes(*disp_debug_addr);
+                        merged_debug_addr_.insert(merged_debug_addr_.end(), data.begin(), data.end());
+                    }
+                    if (disp_debug_rnglists && disp_debug_rnglists->size > 0) {
+                        auto data = disp_->getBytes(*disp_debug_rnglists);
+                        merged_debug_rnglists_.insert(merged_debug_rnglists_.end(), data.begin(), data.end());
+                    }
+                    merged_debug_info_.insert(merged_debug_info_.end(), disp_di.begin(), disp_di.end());
+                    
+                    debug_info_chunks_.push_back(chunk);
+                    
+                    // Track debug_line offset for dispatcher
+                    if (!debug_line_chunks_.empty()) {
+                        line_offset = debug_line_chunks_[0].size;
+                    }
+                }
+                
+                // Then add each specialized kernel's debug sections
+                size_t kern_idx = debug_info_chunks_.empty() ? 0 : 1;
+                for (const auto& [kern, text_off] : kernel_text_offsets_) {
+                    if (!kern->debug_info.empty()) {
+                        DebugInfoChunk chunk;
+                        chunk.merged_offset = merged_debug_info_.size();
+                        chunk.size = kern->debug_info.size();
+                        chunk.orig_text_addr = kern->orig_text_addr;
+                        chunk.new_text_offset = text_off;
+                        chunk.abbrev_base = merged_debug_abbrev_.size();
+                        chunk.str_base = merged_debug_str_.size();
+                        chunk.str_offsets_base = merged_debug_str_offsets_.size();
+                        chunk.addr_base = merged_debug_addr_.size();
+                        chunk.rnglists_base = merged_debug_rnglists_.size();
+                        chunk.line_base = line_offset;
+                        
+                        // Append kernel's debug sections
+                        if (!kern->debug_abbrev.empty()) {
+                            merged_debug_abbrev_.insert(merged_debug_abbrev_.end(),
+                                kern->debug_abbrev.begin(), kern->debug_abbrev.end());
+                        }
+                        if (!kern->debug_str.empty()) {
+                            merged_debug_str_.insert(merged_debug_str_.end(),
+                                kern->debug_str.begin(), kern->debug_str.end());
+                        }
+                        if (!kern->debug_str_offsets.empty()) {
+                            merged_debug_str_offsets_.insert(merged_debug_str_offsets_.end(),
+                                kern->debug_str_offsets.begin(), kern->debug_str_offsets.end());
+                        }
+                        if (!kern->debug_addr.empty()) {
+                            merged_debug_addr_.insert(merged_debug_addr_.end(),
+                                kern->debug_addr.begin(), kern->debug_addr.end());
+                        }
+                        if (!kern->debug_rnglists.empty()) {
+                            merged_debug_rnglists_.insert(merged_debug_rnglists_.end(),
+                                kern->debug_rnglists.begin(), kern->debug_rnglists.end());
+                        }
+                        merged_debug_info_.insert(merged_debug_info_.end(),
+                            kern->debug_info.begin(), kern->debug_info.end());
+                        
+                        debug_info_chunks_.push_back(chunk);
+                        
+                        // Track debug_line offset
+                        if (kern_idx < debug_line_chunks_.size()) {
+                            line_offset += debug_line_chunks_[kern_idx].size;
+                        }
+                        kern_idx++;
+                    }
+                }
+                
+                printf("Merged debug sections: abbrev=%zu, str=%zu, str_offsets=%zu, addr=%zu, rnglists=%zu, info=%zu bytes (%zu chunks)\n",
+                       merged_debug_abbrev_.size(), merged_debug_str_.size(), 
+                       merged_debug_str_offsets_.size(), merged_debug_addr_.size(),
+                       merged_debug_rnglists_.size(), merged_debug_info_.size(),
+                       debug_info_chunks_.size());
+            }
+            
+            // Note: mergeDebugInfo() is called later from link() after
             // computeLayout() sets text_addr_
         }
         
@@ -2080,163 +2220,221 @@ private:
         } while (value != 0);
     }
     
-    // Build synthetic .debug_info and .debug_abbrev sections
-    // Creates minimal compile units that map address ranges to debug_line offsets
-    void buildSyntheticDebugInfo() {
-        if (debug_line_chunks_.empty()) {
-            printf("No debug_line chunks, skipping synthetic debug_info\n");
+    // Merge and patch debug sections from all kernels
+    // Patches addresses based on where code ended up, and adjusts cross-section offsets
+    void mergeDebugInfo() {
+        if (debug_info_chunks_.empty()) {
+            printf("No debug_info chunks, skipping debug section merge\n");
             return;
         }
         
-        printf("Building synthetic .debug_info for %zu debug_line chunks...\n", debug_line_chunks_.size());
+        printf("Merging debug sections for %zu chunks...\n", debug_info_chunks_.size());
         
-        // Build .debug_abbrev section
-        // We use a single abbreviation code for all compile units:
-        // Abbrev 1: DW_TAG_compile_unit, no children
-        //   DW_AT_low_pc (DW_FORM_addr)
-        //   DW_AT_high_pc (DW_FORM_addr)  
-        //   DW_AT_stmt_list (DW_FORM_sec_offset)
-        //   DW_AT_comp_dir (DW_FORM_string)
-        std::vector<uint8_t> abbrev_data;
-        
-        // Abbrev code 1
-        writeULEB128(abbrev_data, 1);  // abbrev code
-        writeULEB128(abbrev_data, 0x11);  // DW_TAG_compile_unit
-        abbrev_data.push_back(0);  // DW_CHILDREN_no
-        
-        // DW_AT_low_pc, DW_FORM_addr
-        writeULEB128(abbrev_data, 0x11);  // DW_AT_low_pc
-        writeULEB128(abbrev_data, 0x01);  // DW_FORM_addr
-        
-        // DW_AT_high_pc, DW_FORM_addr
-        writeULEB128(abbrev_data, 0x12);  // DW_AT_high_pc
-        writeULEB128(abbrev_data, 0x01);  // DW_FORM_addr
-        
-        // DW_AT_stmt_list, DW_FORM_sec_offset (4 bytes for DWARF32)
-        writeULEB128(abbrev_data, 0x10);  // DW_AT_stmt_list
-        writeULEB128(abbrev_data, 0x17);  // DW_FORM_sec_offset
-        
-        // DW_AT_comp_dir, DW_FORM_string (null-terminated inline string)
-        writeULEB128(abbrev_data, 0x1b);  // DW_AT_comp_dir
-        writeULEB128(abbrev_data, 0x08);  // DW_FORM_string
-        
-        // End of attributes
-        abbrev_data.push_back(0);
-        abbrev_data.push_back(0);
-        
-        // End of abbrev table
-        abbrev_data.push_back(0);
-        
-        // Build .debug_info section with one compile unit per debug_line chunk
-        std::vector<uint8_t> info_data;
-        
-        for (size_t i = 0; i < debug_line_chunks_.size(); i++) {
-            const auto& chunk = debug_line_chunks_[i];
+        // Step 1: Patch addresses in .debug_addr
+        // DWARF5 .debug_addr format: header (8 bytes) + array of addresses
+        // Header: unit_length(4) + version(2) + address_size(1) + segment_selector_size(1)
+        if (!merged_debug_addr_.empty()) {
+            printf("Patching .debug_addr addresses...\n");
+            size_t pos = 0;
+            size_t chunk_idx = 0;
             
-            // Calculate address range for this chunk
-            uint64_t low_pc = text_addr_ + chunk.new_text_offset;
-            uint64_t high_pc;
+            for (const auto& chunk : debug_info_chunks_) {
+                if (pos >= merged_debug_addr_.size()) break;
+                
+                // Find the end of this chunk's debug_addr contribution
+                size_t chunk_end = (chunk_idx + 1 < debug_info_chunks_.size()) 
+                    ? debug_info_chunks_[chunk_idx + 1].addr_base 
+                    : merged_debug_addr_.size();
+                
+                if (chunk_end <= pos) {
+                    chunk_idx++;
+                    continue;
+                }
+                
+                // Calculate address delta for this chunk
+                int64_t addr_delta = (int64_t)(text_addr_ + chunk.new_text_offset) - (int64_t)chunk.orig_text_addr;
+                
+                // Parse header to find where addresses start
+                if (pos + 8 > chunk_end) {
+                    chunk_idx++;
+                    pos = chunk_end;
+                    continue;
+                }
+                
+                uint32_t unit_length;
+                memcpy(&unit_length, &merged_debug_addr_[pos], 4);
+                uint16_t version;
+                memcpy(&version, &merged_debug_addr_[pos + 4], 2);
+                uint8_t addr_size = merged_debug_addr_[pos + 6];
+                
+                if (version != 5 || addr_size != 8) {
+                    printf("  Chunk %zu: unexpected debug_addr format (version=%d, addr_size=%d)\n",
+                           chunk_idx, version, addr_size);
+                    chunk_idx++;
+                    pos = chunk_end;
+                    continue;
+                }
+                
+                // Addresses start after 8-byte header
+                size_t addr_start = pos + 8;
+                int patched = 0;
+                
+                for (size_t p = addr_start; p + 8 <= chunk_end; p += 8) {
+                    uint64_t addr;
+                    memcpy(&addr, &merged_debug_addr_[p], 8);
+                    
+                    // Only patch addresses that look like they're in the original text range
+                    // (non-zero and within reasonable bounds)
+                    if (addr != 0 && addr >= chunk.orig_text_addr) {
+                        uint64_t new_addr = addr + addr_delta;
+                        memcpy(&merged_debug_addr_[p], &new_addr, 8);
+                        patched++;
+                    }
+                }
+                
+                printf("  Chunk %zu: patched %d addresses (delta=0x%lx)\n", 
+                       chunk_idx, patched, (uint64_t)addr_delta);
+                
+                chunk_idx++;
+                pos = chunk_end;
+            }
+        }
+        
+        // Step 2: Patch .debug_info CU headers and attributes
+        // DWARF5 CU header: unit_length(4) + version(2) + unit_type(1) + addr_size(1) + debug_abbrev_offset(4)
+        // DWARF4 CU header: unit_length(4) + version(2) + debug_abbrev_offset(4) + addr_size(1)
+        if (!merged_debug_info_.empty()) {
+            printf("Patching .debug_info CU headers...\n");
             
-            // High PC is either start of next chunk or end of text
-            if (i + 1 < debug_line_chunks_.size()) {
-                high_pc = text_addr_ + debug_line_chunks_[i + 1].new_text_offset;
-            } else {
-                // Last chunk - find the end by looking at kernel_text_offsets_
-                high_pc = low_pc;
-                for (const auto& [kern, off] : kernel_text_offsets_) {
-                    uint64_t kern_end = text_addr_ + off + kern->code.size();
-                    high_pc = std::max(high_pc, kern_end);
+            for (size_t i = 0; i < debug_info_chunks_.size(); i++) {
+                const auto& chunk = debug_info_chunks_[i];
+                size_t cu_start = chunk.merged_offset;
+                
+                if (cu_start + 12 > merged_debug_info_.size()) continue;
+                
+                // Read version to determine header format
+                uint16_t version;
+                memcpy(&version, &merged_debug_info_[cu_start + 4], 2);
+                
+                size_t abbrev_offset_pos;
+                if (version == 5) {
+                    // DWARF5: unit_length(4) + version(2) + unit_type(1) + addr_size(1) + debug_abbrev_offset(4)
+                    abbrev_offset_pos = cu_start + 8;
+                } else {
+                    // DWARF4: unit_length(4) + version(2) + debug_abbrev_offset(4) + addr_size(1)
+                    abbrev_offset_pos = cu_start + 6;
+                }
+                
+                // Patch debug_abbrev_offset
+                uint32_t new_abbrev_offset = (uint32_t)chunk.abbrev_base;
+                memcpy(&merged_debug_info_[abbrev_offset_pos], &new_abbrev_offset, 4);
+                
+                printf("  CU %zu (DWARF%d): abbrev_offset -> 0x%x\n", i, version, new_abbrev_offset);
+                
+                // For DWARF5, we also need to patch DW_AT_* base attributes in the first DIE
+                // These are at known positions after the CU header for standard AMD clang output
+                if (version == 5) {
+                    // The DIE starts after the 12-byte header
+                    // We need to find and patch: DW_AT_str_offsets_base, DW_AT_stmt_list,
+                    // DW_AT_addr_base, DW_AT_rnglists_base
+                    // 
+                    // These use DW_FORM_sec_offset (4 bytes for DWARF32)
+                    // The exact positions depend on the abbrev table, but for AMD clang
+                    // with -gline-tables-only, the layout is fairly consistent
+                    //
+                    // Rather than fully parsing DWARF, scan for 4-byte values that match
+                    // the expected original offsets and patch them
+                    
+                    size_t die_start = cu_start + 12;
+                    size_t die_end = (i + 1 < debug_info_chunks_.size()) 
+                        ? debug_info_chunks_[i + 1].merged_offset 
+                        : merged_debug_info_.size();
+                    
+                    // Scan first 100 bytes of DIE for sec_offset values to patch
+                    size_t scan_end = std::min(die_start + 100, die_end);
+                    
+                    for (size_t p = die_start; p + 4 <= scan_end; p++) {
+                        uint32_t val;
+                        memcpy(&val, &merged_debug_info_[p], 4);
+                        
+                        // Check if this looks like stmt_list (should be 0 originally, patch to line_base)
+                        // DW_AT_stmt_list is typically early in the DIE
+                        if (val == 0 && chunk.line_base > 0 && p < die_start + 40) {
+                            uint32_t new_val = (uint32_t)chunk.line_base;
+                            memcpy(&merged_debug_info_[p], &new_val, 4);
+                            printf("    Patched stmt_list at +%zu: 0 -> 0x%x\n", p - cu_start, new_val);
+                        }
+                    }
                 }
             }
-            
-            // Skip chunks with invalid ranges
-            if (low_pc >= high_pc) continue;
-            
-            // DWARF32 compile unit header:
-            // unit_length (4 bytes) - length of CU excluding this field
-            // version (2 bytes) - DWARF version (4)
-            // debug_abbrev_offset (4 bytes) - offset into .debug_abbrev
-            // address_size (1 byte) - 8 for 64-bit
-            
-            size_t cu_start = info_data.size();
-            
-            // Placeholder for unit_length (will fill in later)
-            info_data.push_back(0);
-            info_data.push_back(0);
-            info_data.push_back(0);
-            info_data.push_back(0);
-            
-            // Version: 4 (DWARF4)
-            info_data.push_back(4);
-            info_data.push_back(0);
-            
-            // debug_abbrev_offset: 0
-            info_data.push_back(0);
-            info_data.push_back(0);
-            info_data.push_back(0);
-            info_data.push_back(0);
-            
-            // address_size: 8
-            info_data.push_back(8);
-            
-            // DIE: DW_TAG_compile_unit using abbrev code 1
-            writeULEB128(info_data, 1);  // abbrev code
-            
-            // DW_AT_low_pc (8 bytes)
-            for (int b = 0; b < 8; b++) {
-                info_data.push_back((low_pc >> (b * 8)) & 0xff);
-            }
-            
-            // DW_AT_high_pc (8 bytes)
-            for (int b = 0; b < 8; b++) {
-                info_data.push_back((high_pc >> (b * 8)) & 0xff);
-            }
-            
-            // DW_AT_stmt_list (4 bytes - offset into .debug_line)
-            uint32_t stmt_list = (uint32_t)chunk.merged_offset;
-            info_data.push_back(stmt_list & 0xff);
-            info_data.push_back((stmt_list >> 8) & 0xff);
-            info_data.push_back((stmt_list >> 16) & 0xff);
-            info_data.push_back((stmt_list >> 24) & 0xff);
-            
-            // DW_AT_comp_dir (null-terminated string)
-            for (char c : debug_comp_dir_) {
-                info_data.push_back((uint8_t)c);
-            }
-            info_data.push_back(0);  // null terminator
-            
-            // Fill in unit_length (total size minus the 4-byte length field)
-            uint32_t unit_length = info_data.size() - cu_start - 4;
-            info_data[cu_start] = unit_length & 0xff;
-            info_data[cu_start + 1] = (unit_length >> 8) & 0xff;
-            info_data[cu_start + 2] = (unit_length >> 16) & 0xff;
-            info_data[cu_start + 3] = (unit_length >> 24) & 0xff;
-            
-            printf("  CU %zu: [0x%lx, 0x%lx) -> debug_line offset 0x%x\n",
-                   i, low_pc, high_pc, stmt_list);
         }
         
-        // Add sections
-        if (!abbrev_data.empty()) {
-            SectionInfo abbrev;
-            abbrev.name = ".debug_abbrev";
-            abbrev.type = SHT_PROGBITS;
-            abbrev.flags = 0;
-            abbrev.alignment = 1;
-            abbrev.data = std::move(abbrev_data);
-            printf("Built .debug_abbrev: %zu bytes\n", abbrev.data.size());
-            sections_.push_back(std::move(abbrev));
+        // Step 3: Add merged debug sections to output
+        if (!merged_debug_abbrev_.empty()) {
+            SectionInfo sec;
+            sec.name = ".debug_abbrev";
+            sec.type = SHT_PROGBITS;
+            sec.flags = 0;
+            sec.alignment = 1;
+            sec.data = std::move(merged_debug_abbrev_);
+            printf("Adding .debug_abbrev: %zu bytes\n", sec.data.size());
+            sections_.push_back(std::move(sec));
         }
         
-        if (!info_data.empty()) {
-            SectionInfo info;
-            info.name = ".debug_info";
-            info.type = SHT_PROGBITS;
-            info.flags = 0;
-            info.alignment = 1;
-            info.data = std::move(info_data);
-            printf("Built .debug_info: %zu bytes\n", info.data.size());
-            sections_.push_back(std::move(info));
+        if (!merged_debug_str_.empty()) {
+            SectionInfo sec;
+            sec.name = ".debug_str";
+            sec.type = SHT_PROGBITS;
+            sec.flags = SHF_MERGE | SHF_STRINGS;
+            sec.alignment = 1;
+            sec.entsize = 1;
+            sec.data = std::move(merged_debug_str_);
+            printf("Adding .debug_str: %zu bytes\n", sec.data.size());
+            sections_.push_back(std::move(sec));
+        }
+        
+        if (!merged_debug_str_offsets_.empty()) {
+            SectionInfo sec;
+            sec.name = ".debug_str_offsets";
+            sec.type = SHT_PROGBITS;
+            sec.flags = 0;
+            sec.alignment = 1;
+            sec.data = std::move(merged_debug_str_offsets_);
+            printf("Adding .debug_str_offsets: %zu bytes\n", sec.data.size());
+            sections_.push_back(std::move(sec));
+        }
+        
+        if (!merged_debug_addr_.empty()) {
+            SectionInfo sec;
+            sec.name = ".debug_addr";
+            sec.type = SHT_PROGBITS;
+            sec.flags = 0;
+            sec.alignment = 1;
+            sec.data = std::move(merged_debug_addr_);
+            printf("Adding .debug_addr: %zu bytes\n", sec.data.size());
+            sections_.push_back(std::move(sec));
+        }
+        
+        if (!merged_debug_rnglists_.empty()) {
+            SectionInfo sec;
+            sec.name = ".debug_rnglists";
+            sec.type = SHT_PROGBITS;
+            sec.flags = 0;
+            sec.alignment = 1;
+            sec.data = std::move(merged_debug_rnglists_);
+            printf("Adding .debug_rnglists: %zu bytes\n", sec.data.size());
+            sections_.push_back(std::move(sec));
+        }
+        
+        if (!merged_debug_info_.empty()) {
+            SectionInfo sec;
+            sec.name = ".debug_info";
+            sec.type = SHT_PROGBITS;
+            sec.flags = 0;
+            sec.alignment = 1;
+            sec.data = std::move(merged_debug_info_);
+            printf("Adding .debug_info: %zu bytes\n", sec.data.size());
+            sections_.push_back(std::move(sec));
         }
     }
     
@@ -2423,8 +2621,8 @@ private:
         // DWARF5 uses DW_FORM_line_strp (4-byte offsets into .debug_line_str) for file/dir names
         patchDwarf5StringOffsets();
         
-        // Note: We create synthetic .debug_info in buildSyntheticDebugInfo() with correct
-        // address ranges and stmt_list offsets, so no patching of copied debug sections is needed.
+        // Note: Debug sections are merged and patched in mergeDebugInfo() which is called
+        // after layout. It patches .debug_addr addresses and .debug_info CU header offsets.
     }
     
     void buildRelocations() {
