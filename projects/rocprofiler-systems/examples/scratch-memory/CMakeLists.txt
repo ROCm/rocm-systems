@@ -3,6 +3,12 @@
 #
 cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 
+find_package(HIP QUIET)
+if(NOT HIP_FOUND)
+    message(WARNING "HIP is not found. Skip scratch-memory example.")
+    return()
+endif()
+
 if(NOT CMAKE_HIP_COMPILER)
     find_program(
         amdclangpp_EXECUTABLE
