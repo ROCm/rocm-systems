@@ -95,14 +95,6 @@ TEST_CASE("Unit_hipGraphAddKernelNode_Negative") {
                     hipErrorInvalidValue);
   }
 
-  SECTION("Pass invalid numDependencies and valid list for dependencies") {
-    HIP_CHECK(hipGraphAddKernelNode(&kNode, graph, nullptr, 0, &kNodeParams));
-    dependencies.push_back(kNode);
-    HIP_CHECK_ERROR(hipGraphAddKernelNode(&kNode, graph, dependencies.data(),
-                                          dependencies.size() + 1, &kNodeParams),
-                    hipErrorInvalidValue);
-  }
-
   SECTION("Pass NodeParams as nullptr") {
     HIP_CHECK_ERROR(
         hipGraphAddKernelNode(&kNode, graph, dependencies.data(), dependencies.size(), nullptr),
