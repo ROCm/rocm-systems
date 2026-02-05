@@ -40,7 +40,6 @@ public:
     using DecodeFn  = decltype(aqlprofile_spm_decode_stream_v1);
     using QueryFn   = decltype(aqlprofile_spm_decode_query);
     using SupportFn = decltype(aqlprofile_spm_is_event_supported);
-    using DrainFn   = decltype(aqlprofile_spm_drain_counters);
 
     Dlsym();
     ~Dlsym();
@@ -49,19 +48,17 @@ public:
     {
         return create_packets_fn != nullptr && delete_packets_fn != nullptr &&
                spm_start_fn != nullptr && spm_stop_fn != nullptr && spm_decode_fn != nullptr &&
-               spm_query_fn != nullptr && is_supported_fn != nullptr &&
-               spm_drain_counters_fn != nullptr && handle != nullptr;
+               spm_query_fn != nullptr && is_supported_fn != nullptr && handle != nullptr;
     }
 
-    CreateFn*  create_packets_fn     = nullptr;
-    DeleteFn*  delete_packets_fn     = nullptr;
-    StartFn*   spm_start_fn          = nullptr;
-    StopFn*    spm_stop_fn           = nullptr;
-    DecodeFn*  spm_decode_fn         = nullptr;
-    QueryFn*   spm_query_fn          = nullptr;
-    SupportFn* is_supported_fn       = nullptr;
-    DrainFn*   spm_drain_counters_fn = nullptr;
-    void*      handle                = nullptr;
+    CreateFn*  create_packets_fn = nullptr;
+    DeleteFn*  delete_packets_fn = nullptr;
+    StartFn*   spm_start_fn      = nullptr;
+    StopFn*    spm_stop_fn       = nullptr;
+    DecodeFn*  spm_decode_fn     = nullptr;
+    QueryFn*   spm_query_fn      = nullptr;
+    SupportFn* is_supported_fn   = nullptr;
+    void*      handle            = nullptr;
 };
 
 }  // namespace spm

@@ -225,12 +225,14 @@ TEST(spm_core, check_packet_generation)
              */
             spm::spm_counter_callback_info  cb_info;
             std::unique_ptr<hsa::AQLPacket> pkt;
-            bool                            config_switch = false;
-            EXPECT_EQ(cb_info.get_spm_packet(pkt, profile, &config_switch),
-                      ROCPROFILER_STATUS_SUCCESS)
+            EXPECT_EQ(cb_info.get_spm_packet(pkt, profile), ROCPROFILER_STATUS_SUCCESS)
                 << "Unable to generate packet";
             EXPECT_TRUE(pkt) << "Expected a packet to be generated";
-          
+            cb_info.packet_return_map.wlock([&](const auto& data) {
+                EXPECT_EQ(data.size(), 1) << "Incorrect packet size";
+                const auto* ptr = common::get_val(data, pkt.get());
+                EXPECT_TRUE(ptr) << "Could not find pkt";
+            });
         }
     }
 }
@@ -394,7 +396,7 @@ TEST(spm_core, check_callbacks)
             expected.agent_id       = fq.get_agent().get_rocp_agent()->id;
 
             hsa::Queue::queue_info_session_t::external_corr_id_map_t extern_ids = {};
-            
+
             auto user_data       = rocprofiler_user_data_t{.value = corr_id.internal};
             auto ret_pkt         = spm::pre_kernel_call(&ctx,
                                                 cb_info,
@@ -414,7 +416,6 @@ TEST(spm_core, check_callbacks)
             spm::inst_pkt_t pkts;
             pkts.emplace_back(
                 std::make_pair(std::move(ret_pkt.pkt), static_cast<spm::ClientID>(0)));
-            
             post_kernel_call(&ctx, cb_info, sess, pkts, kernel_dispatch::profiling_time{});
         }
     }

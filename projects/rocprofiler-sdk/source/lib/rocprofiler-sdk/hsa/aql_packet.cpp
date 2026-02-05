@@ -21,7 +21,6 @@
 // THE SOFTWARE.
 
 #include "lib/rocprofiler-sdk/hsa/aql_packet.hpp"
-#include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 
 #include <fmt/core.h>
@@ -314,7 +313,6 @@ SPMPacket::SPMPacket(aqlprofile_agent_handle_t aql_agent, aqlprofile_spm_profile
     ROCP_FATAL_IF(!sym.valid()) << "Failed to load aqlprofile SPM library";
     auto status = sym.create_packets_fn(&handle, &aql_desc, &packets, profile, 0);
 
-    hsa_agent = profile.hsa_agent;
     if(status != HSA_STATUS_SUCCESS) return;
 
     packets.start_packet.header            = VENDOR_BIT | BARRIER_BIT;
@@ -334,6 +332,12 @@ SPMPacket::SPMPacket(aqlprofile_agent_handle_t aql_agent, aqlprofile_spm_profile
 void
 SPMPacket::populate_before()
 {
+    hsa_barrier_and_packet_t barrier{};
+    barrier.header = HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE;
+    barrier.header |= BARRIER_BIT;
+
+    before_krn_barrier_pkt.push_back(barrier);
+    before_krn_barrier_pkt.push_back(barrier);
     before_krn_pkt.push_back(packets.start_packet);
 };
 
@@ -350,11 +354,11 @@ SPMPacket::kfd_start()
 
     if(running.exchange(true))
     {
-        ROCP_WARNING << "Double call to KFD start!";
+        ROCP_ERROR << "Double call to KFD start!";
         return;
     }
 
-    auto status = sym.spm_start_fn(this->handle, spm::aql_data_callback, &(this->hsa_agent));
+    auto status = sym.spm_start_fn(this->handle, spm::aql_data_callback, this);
     ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS) << "Unable to acquire KFD thread";
 }
 

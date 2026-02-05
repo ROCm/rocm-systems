@@ -47,14 +47,13 @@ Dlsym::Dlsym()
         return;
     }
 
-    create_packets_fn     = (CreateFn*) dlsym(handle, "aqlprofile_spm_create_packets");
-    delete_packets_fn     = (DeleteFn*) dlsym(handle, "aqlprofile_spm_delete_packets");
-    spm_start_fn          = (StartFn*) dlsym(handle, "aqlprofile_spm_start");
-    spm_stop_fn           = (StopFn*) dlsym(handle, "aqlprofile_spm_stop");
-    spm_decode_fn         = (DecodeFn*) dlsym(handle, "aqlprofile_spm_decode_stream_v1");
-    spm_query_fn          = (QueryFn*) dlsym(handle, "aqlprofile_spm_decode_query");
-    is_supported_fn       = (SupportFn*) dlsym(handle, "aqlprofile_spm_is_event_supported");
-    spm_drain_counters_fn = (DrainFn*) dlsym(handle, "aqlprofile_spm_drain_counters");
+    create_packets_fn = (CreateFn*) dlsym(handle, "aqlprofile_spm_create_packets");
+    delete_packets_fn = (DeleteFn*) dlsym(handle, "aqlprofile_spm_delete_packets");
+    spm_start_fn      = (StartFn*) dlsym(handle, "aqlprofile_spm_start");
+    spm_stop_fn       = (StopFn*) dlsym(handle, "aqlprofile_spm_stop");
+    spm_decode_fn     = (DecodeFn*) dlsym(handle, "aqlprofile_spm_decode_stream_v1");
+    spm_query_fn      = (QueryFn*) dlsym(handle, "aqlprofile_spm_decode_query");
+    is_supported_fn   = (SupportFn*) dlsym(handle, "aqlprofile_spm_is_event_supported");
 }
 
 Dlsym::~Dlsym()

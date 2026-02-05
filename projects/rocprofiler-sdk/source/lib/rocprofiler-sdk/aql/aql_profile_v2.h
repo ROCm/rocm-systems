@@ -192,29 +192,6 @@ typedef enum
                                               // counters disable command buffer
 } aqlprofile_pmc_info_type_t;
 
-/**
- * @brief Forces draining of remaining SPM counters and waits for completion
- *
- * This function signals the producer thread to drain all remaining SPM data from the GPU
- * hardware buffers and blocks until the draining operation is complete. Unlike
- * aqlprofile_spm_stop(), this function does not terminate the SPM session - it only
- * ensures that all pending counter data has been processed and delivered to the data
- * callback function that was passed in during aqlprofile_spm_start().
- *
- * The function is useful when you need to ensure all counter data has been collected
- * at a specific point in time without stopping the entire SPM profiling session.
- *
- * @param[in] handle Handle returned by aqlprofile_spm_create_packets()
- * @retval HSA_STATUS_SUCCESS if draining completed successfully
- * @retval HSA_STATUS_ERROR_NOT_INITIALIZED for invalid handle
- * @retval HSA_STATUS_ERROR if draining did not complete fully
- *
- * @note This is a blocking operation that may take several milliseconds to complete
- * @note The SPM session remains active after this call - use aqlprofile_spm_stop() to terminate
- */
-hsa_status_t
-aqlprofile_spm_drain_counters(aqlprofile_handle_t handle);
-
 hsa_status_t
 aqlprofile_get_pmc_info(const aqlprofile_pmc_profile_t* profile,
                         aqlprofile_pmc_info_type_t      attribute,
