@@ -1215,7 +1215,8 @@ typedef struct {
     char container_name[AMDSMI_MAX_STRING_LENGTH];
     uint32_t cu_occupancy;  //!< Num CUs utilized
     uint32_t evicted_time;    //!< Time that queues are evicted on a GPU in milliseconds
-    uint32_t reserved[10];
+    uint64_t sdma_usage;    //!< SDMA usage in microseconds
+    uint32_t reserved[8];
 } amdsmi_proc_info_t;
 
 /**
@@ -2250,6 +2251,8 @@ typedef enum {
     AMDSMI_PTL_DATA_FORMAT_BF16 = 0x2,      //!< Brain Float 16-bit format
     AMDSMI_PTL_DATA_FORMAT_F32 = 0x3,       //!< Float 32-bit format
     AMDSMI_PTL_DATA_FORMAT_F64 = 0x4,       //!< Float 64-bit format
+    AMDSMI_PTL_DATA_FORMAT_F8 = 0x5,        //!< Float 8-bit format
+    AMDSMI_PTL_DATA_FORMAT_VECTOR = 0x6,    //!< Vector format
     AMDSMI_PTL_DATA_FORMAT_INVALID = 0xFFFFFFFF  //!< Invalid format
 } amdsmi_ptl_data_format_t;
 
