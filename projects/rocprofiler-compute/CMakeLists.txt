@@ -780,6 +780,13 @@ if(INSTALL_TESTS)
         DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/tests
         COMPONENT tests
     )
+    if(MPI_CXX_COMPILER)
+        install(
+            PROGRAMS tests/mpi_aware_laplace_eqn
+            DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/tests
+            COMPONENT tests
+        )
+    endif()
     install(
         FILES requirements-test.txt
         DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}

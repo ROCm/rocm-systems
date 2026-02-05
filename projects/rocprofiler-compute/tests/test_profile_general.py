@@ -49,6 +49,7 @@ config["app_mat_mul_max"] = ["./tests/mat_mul_max"]
 config["app_hip_dynamic_shared"] = ["./tests/hip_dynamic_shared"]
 config["app_laplace_eqn"] = ["./tests/laplace_eqn", "-i", "5000"]
 config["app_laplace_eqn_iter"] = ["./tests/laplace_eqn", "-i", "15000"]
+config["app_mpi_aware_laplace_eqn"] = ["./tests/mpi_aware_laplace_eqn", "-i", "5"]
 config["rocflop"] = ["./tests/rocflop", "--device", "0"]
 config["cleanup"] = True
 config["COUNTER_LOGGING"] = False
@@ -3263,6 +3264,52 @@ def test_multi_rank_profiling_no_mpi_comm(binary_handler_profile_rocprof_compute
         assert rank_dir.exists(), f"Rank directory {rank_dir} does not exist"
 
         file_dict = test_utils.check_csv_files(str(rank_dir), num_devices, num_kernels)
+        if soc == "MI100":
+            assert sorted(list(file_dict.keys())) == CSVS
+        elif soc == "MI200":
+            assert sorted(list(file_dict.keys())) == CSVS
+        elif "MI300" in soc:
+            assert sorted(list(file_dict.keys())) == CSVS
+        elif "MI350" in soc:
+            assert sorted(list(file_dict.keys())) == CSVS
+        else:
+            print(f"Testing isn't supported yet for {soc}")
+            assert 0
+
+        validate(
+            inspect.stack()[0][3],
+            str(rank_dir),
+            file_dict,
+        )
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.multi_rank
+def test_multi_rank_profiling_mpi_comm(
+    binary_handler_profile_rocprof_compute,
+):
+    """
+    Test multi-rank profiling of an MPI application.
+
+    The fixture launches the profiling command with mpirun.
+    """
+    num_ranks = 2
+
+    workload_dir = test_utils.get_output_dir()
+
+    options = ["--iteration-multiplexing"]
+
+    binary_handler_profile_rocprof_compute(
+        config, workload_dir, options, app_name="app_mpi_aware_laplace_eqn", num_ranks=2
+    )
+
+    # Check output for each rank
+    for rank in range(num_ranks):
+        rank_dir = Path(workload_dir) / str(rank)
+        assert rank_dir.exists(), f"Rank directory {rank_dir} does not exist"
+
+        file_dict = test_utils.check_csv_files(str(rank_dir), num_devices, num_kernels)
 
         if soc == "MI100":
             assert sorted(list(file_dict.keys())) == CSVS
@@ -3281,5 +3328,96 @@ def test_multi_rank_profiling_no_mpi_comm(binary_handler_profile_rocprof_compute
             str(rank_dir),
             file_dict,
         )
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.multi_rank
+def test_wrapped_mpi(binary_handler_profile_rocprof_compute):
+    """
+    Test that using MPI launchers (mpirun, mpiexec, srun, orterun) after '--'
+    raises an error.
+    """
+    config["wrapped_mpi"] = ["mpirun", "-n", "2", "./tests/occupancy"]
+
+    workload_dir = test_utils.get_output_dir()
+
+    returncode = binary_handler_profile_rocprof_compute(
+        config,
+        workload_dir,
+        options=[],
+        check_success=False,
+        app_name="wrapped_mpi",
+    )
+
+    # Should fail with exit code 1
+    assert returncode == 1
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.multi_rank
+def test_multi_rank_warning_application_replay(
+    binary_handler_profile_rocprof_compute, monkeypatch
+):
+    """
+    Test that a warning is printed when running a multi-rank application
+    in application replay mode.
+    """
+    # Set MPI environment variable to simulate multi-rank
+    monkeypatch.setenv("OMPI_COMM_WORLD_RANK", "0")
+
+    workload_dir = test_utils.get_output_dir()
+
+    _, stdout, stderr = binary_handler_profile_rocprof_compute(
+        config,
+        workload_dir,
+        app_name="app_1",
+        capture_output=True,
+        check_success=False,
+    )
+
+    # Check that warning message is in output
+    output = stdout + stderr
+    assert "Multi-rank application detected" in output
+    assert "Application replay mode" in output
+    assert "--iteration-multiplexing" in output
+    assert "--block" in output
+    assert "--set" in output
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.multi_rank
+def test_multi_rank_warning_pc_sampling(
+    binary_handler_profile_rocprof_compute, monkeypatch
+):
+    """
+    Test that a warning is printed when running a multi-rank application
+    with PC sampling enabled.
+    """
+    # Set MPI environment variable to simulate multi-rank
+    monkeypatch.setenv("OMPI_COMM_WORLD_RANK", "0")
+
+    workload_dir = test_utils.get_output_dir()
+
+    # Enable PC sampling
+    options = ["--block", "21"]
+
+    _, stdout, stderr = binary_handler_profile_rocprof_compute(
+        config,
+        workload_dir,
+        options,
+        app_name="app_1",
+        capture_output=True,
+        check_success=False,
+    )
+
+    # Check that PC sampling warning is in output
+    output = stdout + stderr
+    assert "Multi-rank application detected with PC sampling enabled" in output
+    assert "--iteration-multiplexing" in output
+    assert "--block" in output
+    assert "--set" in output
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
