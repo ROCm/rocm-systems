@@ -723,8 +723,8 @@ namespace rocshmem
 
       // Build up list of NIC bus addresses
       std::vector<std::string> ibvAddressList;
-      std::string excludeList((nullptr == hca_list || hca_list[0] != '^')? "": hca_list);
-      std::string includeList((nullptr == hca_list || hca_list[0] == '^')? "": hca_list);
+      std::string excludeList((nullptr != hca_list && hca_list[0] == '^')? &hca_list[1]: "");
+      std::string includeList((nullptr != hca_list && hca_list[0] != '^')? hca_list: "");
       for (auto const& ibvDevice : ibvDeviceList) {
         auto is_excluded = hasExactMatch(excludeList, ibvDevice.name)
                         || (includeList.length() && !hasExactMatch(includeList, ibvDevice.name));
@@ -864,6 +864,9 @@ namespace rocshmem
       printf("  %d Supported NIC device(s)\n", numNics);
     }
 
+    // Print out detected NIC topology
+    PrintNicToGPUTopo(outputToCsv);
+
     // Print out detected CPU topology
     printf("\n            %c", sep);
     for (int j = 0; j < numCpus; j++)
@@ -899,8 +902,5 @@ namespace rocshmem
       printf("\n");
     }
     printf("\n");
-
-    // Print out detected NIC topology
-    PrintNicToGPUTopo(outputToCsv);
   }
 }
