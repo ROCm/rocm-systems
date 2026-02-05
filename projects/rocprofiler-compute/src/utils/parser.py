@@ -1044,7 +1044,7 @@ def create_empirical_peaks_dict(empirical_peaks_df: pd.DataFrame) -> dict[str, f
             "L2Bw",
             "L1Bw",
             "LDSBw",
-            "MFMA_FLOPs_F6F4",
+            "MFMAF6F4Flops",
         ]
         # initialize peaks to 0
         for peak_name in peak_names:

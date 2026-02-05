@@ -1215,7 +1215,8 @@ typedef struct {
     char container_name[AMDSMI_MAX_STRING_LENGTH];
     uint32_t cu_occupancy;  //!< Num CUs utilized
     uint32_t evicted_time;    //!< Time that queues are evicted on a GPU in milliseconds
-    uint32_t reserved[10];
+    uint64_t sdma_usage;    //!< SDMA usage in microseconds
+    uint32_t reserved[8];
 } amdsmi_proc_info_t;
 
 /**
@@ -2165,6 +2166,7 @@ typedef struct {
 
 /**
  * @brief This structure contains information specific to a process.
+ * Sum of the process memory is not expected to be the total memory usage.
  *
  * @cond @tag{gpu_bm_linux} @endcond
  */
@@ -2249,6 +2251,8 @@ typedef enum {
     AMDSMI_PTL_DATA_FORMAT_BF16 = 0x2,      //!< Brain Float 16-bit format
     AMDSMI_PTL_DATA_FORMAT_F32 = 0x3,       //!< Float 32-bit format
     AMDSMI_PTL_DATA_FORMAT_F64 = 0x4,       //!< Float 64-bit format
+    AMDSMI_PTL_DATA_FORMAT_F8 = 0x5,        //!< Float 8-bit format
+    AMDSMI_PTL_DATA_FORMAT_VECTOR = 0x6,    //!< Vector format
     AMDSMI_PTL_DATA_FORMAT_INVALID = 0xFFFFFFFF  //!< Invalid format
 } amdsmi_ptl_data_format_t;
 
@@ -6791,7 +6795,7 @@ amdsmi_get_violation_status(amdsmi_processor_handle processor_handle,
 /**
  *  @brief Returns the list of process information running on a given GPU.
  *  If pdh.dll is not present on the system, this API returns
- *  AMDSMI_STATUS_NOT_SUPPORTED.
+ *  AMDSMI_STATUS_NOT_SUPPORTED. Sum of the process memory is not expected to be the total memory usage.
  *
  *  @ingroup tagProcessInfo
  *

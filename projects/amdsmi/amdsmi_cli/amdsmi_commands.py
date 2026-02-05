@@ -393,7 +393,7 @@ class AMDSMICommands():
     def static_gpu(self, args, multiple_devices=False, gpu=None, asic=None, bus=None, vbios=None,
                         limit=None, driver=None, ras=None, board=None, numa=None, vram=None,
                         cache=None, partition=None, dfc_ucode=None, fb_info=None, num_vf=None,
-                        soc_pstate=None, xgmi_plpd=None, process_isolation=None, clock=None):
+                        soc_pstate=None, xgmi_plpd=None, process_isolation=None, clock=None, profile=None):
         """Get Static information for target gpu
 
         Args:
@@ -485,8 +485,10 @@ class AMDSMICommands():
                 args.soc_pstate = soc_pstate
             if xgmi_plpd:
                 args.xgmi_plpd = xgmi_plpd
-            current_platform_args += ["ras", "limit", "soc_pstate", "xgmi_plpd"]
-            current_platform_values += [args.ras, args.limit, args.soc_pstate, args.xgmi_plpd]
+            if profile:
+                args.profile = profile
+            current_platform_args += ["ras", "limit", "soc_pstate", "xgmi_plpd", "profile"]
+            current_platform_values += [args.ras, args.limit, args.soc_pstate, args.xgmi_plpd, args.profile]
 
         if self.helpers.is_linux() and not self.helpers.is_virtual_os():
             if numa:
@@ -956,6 +958,30 @@ class AMDSMICommands():
                     static_dict['policies'] = policies_str
                 else:
                     static_dict['xgmi_plpd'] = policy_info
+        if 'profile' in current_platform_args:
+            if args.profile:
+                try:
+                    profile_status = amdsmi_interface.amdsmi_get_gpu_power_profile_presets(args.gpu, 0)
+                    
+                    # Parse available profiles from bitfield
+                    available_profiles = self.helpers.parse_available_profiles(
+                        profile_status['available_profiles']
+                    )
+                    
+                    # Get current profile name
+                    current_profile = self.helpers.get_profile_name_from_mask(
+                        profile_status['current']
+                    )
+                    
+                    # Store output
+                    static_dict['profile'] = {
+                        'available_profiles': available_profiles,
+                        'current': current_profile,
+                        'num_profiles': profile_status['num_profiles']
+                    }
+                except amdsmi_exception.AmdSmiLibraryException as e:
+                    static_dict['profile'] = e.get_error_info()
+                    logging.debug("Failed to get power profile info for gpu %s | %s", gpu_id, e.get_error_info())
         if 'process_isolation' in current_platform_args:
             if args.process_isolation:
                 try:
@@ -1157,9 +1183,9 @@ class AMDSMICommands():
                             continue
                         freq_dict = {}
                         current_level = frequencies['current']
+                        # Add current_level first for proper output ordering
                         freq_dict.update({'current_level':current_level})
-                        current_frequency = str(self.helpers.convert_SI_unit(frequencies['frequency'][current_level], AMDSMIHelpers.SI_Unit.MICRO)) + "MHz"
-                        freq_dict.update({'current_frequency':current_frequency})
+                        # Add frequency_levels second
                         freq_dict.update({'frequency_levels':{}})
                         if frequencies["num_supported"] != 0:
                             for level in range(len(frequencies['frequency'])):
@@ -1265,7 +1291,7 @@ class AMDSMICommands():
                 board=None, numa=None, vram=None, cache=None, partition=None,
                 dfc_ucode=None, fb_info=None, num_vf=None, cpu=None,
                 interface_ver=None, soc_pstate=None, xgmi_plpd = None, process_isolation=None,
-                clock=None):
+                clock=None, profile=None):
         """Get Static information for target gpu and cpu
 
         Args:
@@ -1317,7 +1343,7 @@ class AMDSMICommands():
         gpu_attributes = ["asic", "bus", "vbios", "limit", "driver", "ras",
                           "board", "numa", "vram", "cache", "partition",
                           "dfc_ucode", "fb_info", "num_vf", "soc_pstate", "xgmi_plpd",
-                          "process_isolation", "clock"]
+                          "process_isolation", "clock", "profile"]
         for attr in gpu_attributes:
             if hasattr(args, attr):
                 if getattr(args, attr):
@@ -1347,8 +1373,8 @@ class AMDSMICommands():
                 self.static_gpu(args, multiple_devices, gpu, asic,
                                     bus, vbios, limit, driver, ras,
                                     board, numa, vram, cache, partition,
-                                    dfc_ucode, fb_info, num_vf, soc_pstate,
-                                    process_isolation, clock)
+                                    dfc_ucode, fb_info, num_vf, soc_pstate, xgmi_plpd,
+                                    process_isolation, clock, profile)
         elif self.helpers.is_amd_hsmp_initialized(): # Only CPU is initialized
             if args.cpu == None:
                 args.cpu = self.cpu_handles
@@ -1363,7 +1389,7 @@ class AMDSMICommands():
                                 bus, vbios, limit, driver, ras,
                                 board, numa, vram, cache, partition,
                                 dfc_ucode, fb_info, num_vf, soc_pstate, xgmi_plpd,
-                                process_isolation, clock)
+                                process_isolation, clock, profile)
         if self.logger.is_json_format():
             self.logger.combine_arrays_to_json()
 
@@ -1755,15 +1781,12 @@ class AMDSMICommands():
                 args.gpu = stored_gpus
 
                 # Print multiple device output
-                if not self.logger.is_json_format():
+                if not self.logger.is_json_format() or watching_output:
                     self.logger.print_output(multiple_device_enabled=True, watching_output=watching_output)
 
                 # Add output to total watch output and clear multiple device output
                 if watching_output:
                     self.logger.store_watch_output(multiple_device_enabled=True)
-
-                    # Flush the watching output
-                    self.logger.print_output(multiple_device_enabled=True, watching_output=watching_output)
 
                 return
             elif len(args.gpu) == 1:
@@ -2789,7 +2812,7 @@ class AMDSMICommands():
             self.logger.store_multiple_device_output()
             return # Skip printing when there are multiple devices
 
-        if not self.logger.is_json_format():
+        if not self.logger.is_json_format() or watching_output:
             self.logger.print_output(watching_output=watching_output)
 
         if watching_output: # End of single gpu add to watch_output
@@ -3517,6 +3540,7 @@ class AMDSMICommands():
                     "gfx": process_info["engine_usage"]["gfx"],
                     "enc": process_info["engine_usage"]["enc"],
                 },
+                "sdma_usage": process_info["sdma_usage"],
                 "cu_occupancy": process_info["cu_occupancy"],
                 "evicted_time": process_info["evicted_time"]
             }
@@ -3524,6 +3548,7 @@ class AMDSMICommands():
             engine_usage_unit = "ns"
             memory_usage_unit = "B"
             evicted_time_unit = "ms"
+            sdma_usage_unit = "us"
 
             if self.logger.is_human_readable_format():
                 process_info['mem_usage'] = self.helpers.convert_bytes_to_readable(process_info['mem_usage'])
@@ -3538,6 +3563,10 @@ class AMDSMICommands():
             process_info['evicted_time'] = self.helpers.unit_format(self.logger,
                                                                  process_info['evicted_time'],
                                                                  evicted_time_unit)
+
+            process_info['sdma_usage'] = self.helpers.unit_format(self.logger,
+                                                                 process_info['sdma_usage'],
+                                                                 sdma_usage_unit)
 
             for usage_metric in process_info['usage']:
                 process_info['usage'][usage_metric] = self.helpers.unit_format(self.logger,
@@ -4701,26 +4730,26 @@ class AMDSMICommands():
 
         # Error if no subcommand args are passed
         if self.helpers.is_baremetal():
-            if not any([args.fan is not None,
-                        args.perf_level,
-                        args.profile,
-                        args.compute_partition,
-                        args.memory_partition,
-                        args.perf_determinism is not None,
-                        args.power_cap is not None,
-                        args.soc_pstate is not None,
-                        args.xgmi_plpd is not None,
-                        args.clk_level is not None,
-                        args.clk_limit is not None,
-                        args.ptl_status is not None,
-                        args.ptl_format is not None,
-                        args.process_isolation is not None]):
+            if not any([getattr(args, 'fan', None) is not None,
+                        getattr(args, 'perf_level', None) is not None,
+                        getattr(args, 'profile', None) is not None,
+                        getattr(args, 'compute_partition', None) is not None,
+                        getattr(args, 'memory_partition', None) is not None,
+                        getattr(args, 'perf_determinism', None) is not None,
+                        getattr(args, 'power_cap', None) is not None,
+                        getattr(args, 'soc_pstate', None) is not None,
+                        getattr(args, 'xgmi_plpd', None) is not None,
+                        getattr(args, 'clk_level', None) is not None,
+                        getattr(args, 'clk_limit', None) is not None,
+                        getattr(args, 'ptl_status', None) is not None,
+                        getattr(args, 'ptl_format', None) is not None,
+                        getattr(args, 'process_isolation', None) is not None]):
                 command = " ".join(sys.argv[1:])
                 raise AmdSmiRequiredCommandException(command, self.logger.format)
         else:
-            if not any([args.power_cap is not None,
-                        args.clk_limit is not None,
-                        args.process_isolation is not None]):
+            if not any([getattr(args, 'power_cap', None) is not None,
+                        getattr(args, 'clk_limit', None) is not None,
+                        getattr(args, 'process_isolation', None) is not None]):
                 command = " ".join(sys.argv[1:])
                 raise AmdSmiRequiredCommandException(command, self.logger.format)
 
@@ -4778,7 +4807,54 @@ class AMDSMICommands():
                 self.logger.clear_multiple_devices_output()
                 return
             if args.profile:
-                self.logger.store_output(args.gpu, 'profile', "Not Yet Implemented")
+                try:
+                    # Parse profile input (name or number)
+                    profile_input = args.profile.upper()
+                    name_mapping = self.helpers.get_power_profile_name_mapping()
+                    
+                    if profile_input in name_mapping:
+                        profile_mask = name_mapping[profile_input]
+                    else:
+                        # Invalid profile - show available ones
+                        try:
+                            profile_status = amdsmi_interface.amdsmi_get_gpu_power_profile_presets(args.gpu, 0)
+                            available = self.helpers.parse_available_profiles(profile_status['available_profiles'])
+                            available_str = ", ".join(available)
+                        except amdsmi_exception.AmdSmiLibraryException as e:
+                            available_str = "Unable to fetch available profiles"
+                            logging.debug(f"Failed to fetch available profiles: {e.get_error_info()}")
+                        
+                        self.logger.store_output(args.gpu, 'profile', 
+                                                f"Invalid profile: {args.profile}\n\nAvailable profiles: {available_str}")
+                        self.logger.print_output()
+                        self.logger.clear_multiple_devices_output()
+                        return
+                    
+                    # Set the profile
+                    amdsmi_interface.amdsmi_set_gpu_power_profile(args.gpu, 0, profile_mask)
+                    
+                    self.logger.store_output(args.gpu, 'profile', 
+                                            f"Successfully set power profile to {profile_input}")
+                except amdsmi_exception.AmdSmiLibraryException as e:
+                    if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
+                        raise PermissionError('Command requires elevation') from e
+                    
+                    # Get available profiles for error message
+                    try:
+                        profile_status = amdsmi_interface.amdsmi_get_gpu_power_profile_presets(args.gpu, 0)
+                        available = self.helpers.parse_available_profiles(profile_status['available_profiles'])
+                        available_str = ", ".join(available)
+                    except amdsmi_exception.AmdSmiLibraryException as get_error:
+                        available_str = "Unable to fetch available profiles"
+                        logging.debug(f"Failed to fetch available profiles: {get_error.get_error_info()}")
+                    
+                    error_msg = f"[{e.get_error_info(detailed=False)}] Unable to set power profile to {args.profile}"
+                    self.logger.store_output(args.gpu, 'profile', error_msg)
+                    print(f"\nAvailable Power Profiles:\n\t{available_str}\n")
+                    self.logger.print_output()
+                    self.logger.clear_multiple_devices_output()
+                    return
+                
                 self.logger.print_output()
                 self.logger.clear_multiple_devices_output()
                 return
@@ -5056,13 +5132,9 @@ class AMDSMICommands():
             if isinstance(args.ptl_status, int):
                 status_string = "Enabled" if args.ptl_status else "Disabled"
                 result = f"Requested PTL status to {status_string}" # This should not print out
-                try:
-                    current_state = amdsmi_interface.amdsmi_get_gpu_ptl_state(args.gpu)
-                    if current_state == args.ptl_status:
-                        result = f"PTL state is already {status_string}"
-                    else:
-                        amdsmi_interface.amdsmi_set_gpu_ptl_state(args.gpu, args.ptl_status)
-                        result = f"Successfully set PTL state to {status_string}"
+                try: # Due to driver requirements, do NOT check current state. Set state regardless of current state.
+                    amdsmi_interface.amdsmi_set_gpu_ptl_state(args.gpu, args.ptl_status)
+                    result = f"Successfully set PTL state to {status_string}"
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                         raise PermissionError('Command requires elevation') from e
@@ -5444,7 +5516,7 @@ class AMDSMICommands():
 
     def reset(self, args, multiple_devices=False, gpu=None, gpureset=None,
                 clocks=None, fans=None, profile=None, xgmierr=None, perf_determinism=None,
-                power_cap=None, reload_driver=None, clean_local_data=None):
+                power_cap=None, clean_local_data=None):
         """Issue reset commands to target gpu(s)
 
         Args:
@@ -5484,8 +5556,6 @@ class AMDSMICommands():
             args.perf_determinism = perf_determinism
         if power_cap:
             args.power_cap = power_cap
-        if reload_driver:
-            args.reload_driver = reload_driver
         if clean_local_data:
             args.clean_local_data = clean_local_data
 
@@ -5496,6 +5566,43 @@ class AMDSMICommands():
         if not self.group_check_printed:
             self.helpers.check_required_groups(check_render=True, check_video=False)
             self.group_check_printed = True
+
+        # Mode-1 gpureset is hive-wide.
+        # Group GPUs by hive and reset each hive only once.
+        gpus_to_reset = []
+
+        if args.gpureset and isinstance(args.gpu, list) and len(args.gpu) > 1:
+            # Group GPUs by their XGMI hive ID.
+            # If GPU not in a hive or no hive info, reset individually.
+            hive_to_gpus = {}
+            gpus_without_hive = []
+
+            for gpu in args.gpu:
+                try:
+                    xgmi_info = amdsmi_interface.amdsmi_get_xgmi_info(gpu)
+                    if isinstance(xgmi_info, dict):
+                        hive_id = xgmi_info.get('xgmi_hive_id', None)
+                        if hive_id is not None and hive_id != 0:
+                            if hive_id not in hive_to_gpus:
+                                hive_to_gpus[hive_id] = []
+                            hive_to_gpus[hive_id].append(gpu)
+                        else:
+                            gpus_without_hive.append(gpu)
+                    else:
+                        gpus_without_hive.append(gpu)
+                except:
+                    gpus_without_hive.append(gpu)
+
+            # For each hive, reset using the first GPU (resets entire hive)
+            for hive_id, gpu_list in hive_to_gpus.items():
+                gpus_to_reset.append(gpu_list[0])
+
+            # Add all non-hive GPUs to reset individually
+            gpus_to_reset.extend(gpus_without_hive)
+
+            # Update args.gpu to only the GPUs to reset
+            if gpus_to_reset:
+                args.gpu = gpus_to_reset
 
         # Handle multiple GPUs
         handled_multiple_gpus, device_handle = self.helpers.handle_gpus(args, self.logger, self.reset)
@@ -5510,12 +5617,12 @@ class AMDSMICommands():
         # Error if no subcommand args are passed
         if self.helpers.is_baremetal():
             if not any([args.gpureset, args.clocks, args.fans, args.profile, args.xgmierr, \
-                        args.perf_determinism, args.power_cap, args.reload_driver, \
+                        args.perf_determinism, args.power_cap, \
                         args.clean_local_data]):
                 command = " ".join(sys.argv[1:])
                 raise AmdSmiRequiredCommandException(command, self.logger.format)
         else:
-            if not any([args.clean_local_data, args.reload_driver]):
+            if not any([args.clean_local_data]):
                 command = " ".join(sys.argv[1:])
                 raise AmdSmiRequiredCommandException(command, self.logger.format)
 
@@ -5706,93 +5813,6 @@ class AMDSMICommands():
             self.logger.clear_multiple_devices_output()
             return
 
-        # Adding to VMs since, they should also support same reload as baremetal
-        if args.reload_driver:
-            # Check permissions BEFORE starting any processes
-            # Required to avoid permission errors when starting the progress bar
-            try:
-                if os.geteuid() != 0:
-                    result = "[AMDSMI_STATUS_NO_PERM] Command requires elevation"
-                    self.logger.store_output(args.gpu, 'reload_driver', result)
-                    self.logger.print_output()
-                    self.logger.clear_multiple_devices_output()
-                    raise PermissionError('Command requires elevation')
-            except AttributeError:
-                pass # os.geteuid() not available on Windows
-            lock = multiprocessing.Lock()
-            lock.acquire()
-            is_lock_released = False
-            progress_process = None
-            try:
-                self.helpers.increment_set_count()
-                set_count = self.helpers.get_set_count()
-                if set_count == 1:
-                    self.helpers.confirm_gpu_driver_reload_warning()
-                    # Start progress bar in separate process
-                    string_out = f"Reloading driver for all AMD GPUs:"
-                    progress_process = multiprocessing.Process(
-                        target=self.helpers.showProgressbar,
-                        args=(string_out, 140, True)
-                    )
-                    progress_process.start()
-                    # Perform the actual driver reload (this is where permission error occurs)
-                    amdsmi_interface.amdsmi_gpu_driver_reload()
-                    # If we get here, operation was successful
-                    self.helpers.assign_previous_set_success_check(amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_SUCCESS)
-                    result = "Successfully reloaded driver"
-                else:
-                    if self.helpers.get_previous_set_success_check() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_SUCCESS:
-                        result = "Successfully reloaded driver"
-                    elif self.helpers.get_previous_set_success_check() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
-                        result = "[AMDSMI_STATUS_NO_PERM] Command requires elevation"
-                        raise PermissionError('Command requires elevation')
-                    else:
-                        previous_check = self.helpers.get_previous_set_success_check()
-                        temp_exception = amdsmi_exception.AmdSmiLibraryException(previous_check)
-                        str_out = temp_exception.get_error_info(detailed=False)
-                        result = f"[{str_out}] Unable to successfully restart driver"
-            except amdsmi_exception.AmdSmiLibraryException as e:
-                # Handle permission error FIRST, before any cleanup
-                self.helpers.assign_previous_set_success_check(e.get_error_code())
-                if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
-                    self.helpers.assign_previous_set_success_check(amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM)
-                    result = f"[{e.get_error_info(detailed=False)}] Command requires elevation"
-                    # Clean termination of progress bar
-                    if progress_process and progress_process.is_alive():
-                        progress_process.terminate()
-                        progress_process.join(timeout=0.1)  # Wait max 0.1 second
-                        if progress_process.is_alive():
-                            progress_process.kill()  # Force kill if needed
-                        print("\n")  # Clean up progress bar line
-                    # Store result and exit early
-                    self.logger.store_output(args.gpu, 'reload_driver', result)
-                    self.logger.print_output()
-                    self.logger.clear_multiple_devices_output()
-                    if not is_lock_released:
-                        lock.release()
-                        is_lock_released = True
-                    raise PermissionError('Command requires elevation') from e
-                else:
-                    # Handle other errors
-                    self.helpers.assign_previous_set_success_check(e.get_error_code())
-                    result = f"[{e.get_error_info(detailed=False)}] Unable to successfully restart driver"
-            finally:
-                # Always clean up progress bar process
-                if progress_process and progress_process.is_alive():
-                    progress_process.terminate()
-                    progress_process.join(timeout=0.1)
-                    if progress_process.is_alive():
-                        progress_process.kill()
-                    print("\n")  # Clean up progress bar line
-                # Always release lock
-                if not is_lock_released:
-                    lock.release()
-                    is_lock_released = True
-            # Store and print result
-            self.logger.store_output(args.gpu, 'reload_driver', result)
-            self.logger.print_output()
-            self.logger.clear_multiple_devices_output()
-            return
 
     def monitor(self, args, multiple_devices=False, watching_output=False, gpu=None,
                     watch=None, watch_time=None, iterations=None, power_usage=None,
@@ -6397,10 +6417,12 @@ class AMDSMICommands():
                 process_info.pop('engine_usage')  # Remove 'engine_usage' value
                 process_info['mem_usage'] = process_info.pop('mem')
                 process_info['cu_occupancy'] = process_info.pop('cu_occupancy')
+                process_info['sdma_usage'] = process_info.pop('sdma_usage')
                 process_info['evicted_time'] = process_info.pop('evicted_time')
 
                 memory_usage_unit = "B"
                 evicted_time_unit = "ms"
+                sdma_usage_unit = "us"
 
                 if self.logger.is_human_readable_format():
                     process_info['mem_usage'] = self.helpers.convert_bytes_to_readable(process_info['mem_usage'])
@@ -6412,9 +6434,23 @@ class AMDSMICommands():
                                                                      process_info['mem_usage'],
                                                                      memory_usage_unit)
 
-                process_info['evicted_time'] = self.helpers.unit_format(self.logger,
+                if self.logger.is_human_readable_format():
+                    process_info['evicted_time'] = self.helpers.convert_time_to_readable(
+                                                                     process_info['evicted_time'],
+                                                                     "ms")
+                else:
+                    process_info['evicted_time'] = self.helpers.unit_format(self.logger,
                                                                      process_info['evicted_time'],
                                                                      evicted_time_unit)
+
+                if self.logger.is_human_readable_format():
+                    process_info['sdma_usage'] = self.helpers.convert_time_to_readable(
+                                                                     process_info['sdma_usage'],
+                                                                     "us")
+                else:
+                    process_info['sdma_usage'] = self.helpers.unit_format(self.logger,
+                                                                     process_info['sdma_usage'],
+                                                                     sdma_usage_unit)
 
                 for usage_metric in process_info['memory_usage']:
                     process_info['memory_usage'][usage_metric] = self.helpers.unit_format(self.logger,
@@ -6449,7 +6485,7 @@ class AMDSMICommands():
             # Build the process table's title and header
             self.logger.secondary_table_title = "PROCESS INFO"
             self.logger.secondary_table_header = 'GPU'.rjust(3) + "NAME".rjust(19) + "PID".rjust(9) + "GTT_MEM".rjust(10) + \
-                                                "CPU_MEM".rjust(10) + "VRAM_MEM".rjust(10) + "MEM_USG".rjust(10) + "CU%".rjust(9) + "EVICT".rjust(10)
+                                                "CPU_MEM".rjust(10) + "VRAM_MEM".rjust(10) + "MEM_USG".rjust(10) + "CU%".rjust(9) + "SDMA".rjust(8) + "EVICT".rjust(8)
 
             if watching_output:
                 self.logger.secondary_table_header = 'TIMESTAMP'.rjust(10) + '  ' + self.logger.secondary_table_header
@@ -7707,12 +7743,13 @@ class AMDSMICommands():
             try:
                 raw_process_list = amdsmi_interface.amdsmi_get_gpu_process_list(processor)
                 for proc in raw_process_list:
-                    proc_info_dict = {"gpu": "N/A", "pid": "N/A", "name": "N/A","gtt": "N/A", "vram": "N/A", "mem_usage": "N/A", "cu_occupancy": "N/A"}
+                    proc_info_dict = {"gpu": "N/A", "pid": "N/A", "name": "N/A","gtt": "N/A", "vram": "N/A", "mem_usage": "N/A", "cu_occupancy": "N/A", "sdma_usage": "N/A"}
                     proc_info_dict['gpu'] = gpu_id
                     proc_info_dict['pid'] = proc['pid']
                     proc_info_dict['name'] = proc['name']
                     proc_info_dict['gtt'] = self.helpers.convert_bytes_to_readable(proc['memory_usage']['gtt_mem'])
                     proc_info_dict['vram'] = self.helpers.convert_bytes_to_readable(proc['memory_usage']['vram_mem'])
+                    proc_info_dict['sdma_usage'] = self.helpers.unit_format(self.logger, proc['sdma_usage'], "us")
                     proc_info_dict['mem_usage'] = self.helpers.convert_bytes_to_readable(proc['mem'])
                     # Handle cu_occupancy conversion safely
                     try:

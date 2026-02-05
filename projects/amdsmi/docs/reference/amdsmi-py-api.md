@@ -1426,11 +1426,12 @@ Field | Description
 ---|---
 `name` | Name of process. If user does not have permission this will be "N/A"
 `pid` | Process ID
-`mem` | Total memory usage by GPU during process in Bytes
+`mem` | Total memory usage by GPU during process in Bytes (sum of the process memory is not expected to be the total memory usage.)
 `engine_usage` | <table><thead><tr> <th> Subfield </th> <th> Description</th> </tr></thead><tbody><tr><td>`gfx`</td><td>GFX engine usage in ns</td></tr><tr><td>`enc`</td><td>Encode engine usage in ns</td></tr></tbody></table>
 `memory_usage` | <table><thead><tr> <th> Subfield </th> <th> Description</th> </tr></thead><tbody><tr><td>`gtt_mem`</td><td>GTT memory usage in Bytes</td></tr><tr><td>`cpu_mem`</td><td>CPU memory usage in Bytes</td></tr><tr><td>`vram_mem`</td><td>Process VRAM memory usage in Bytes</td></tr> </tbody></table>
 `cu_occupancy` | Number of Compute Units utilized
 `evicted_time` | Time that queues are evicted on a GPU in milliseconds
+`sdma_usage`   | SDMA usage in microseconds
 
 Exceptions that can be thrown by `amdsmi_get_gpu_process_list` function:
 
@@ -4223,6 +4224,8 @@ Field | Description
 `sdma_usage` | SDMA usage in microseconds
 `cu_occupancy` | Compute Unit usage in percents
 `evicted_time` | Time that queues are evicted on a GPU in milliseconds
+
+note: Sum of the process memory is not expected to be the total memory usage.
 
 Exceptions that can be thrown by `amdsmi_get_gpu_compute_process_info` function:
 

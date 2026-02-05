@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2020, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2026, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -40,8 +40,7 @@
 //
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef _WSL_INC_WDDM_STATUS_H
-#define _WSL_INC_WDDM_STATUS_H
+#pragma once
 
 enum class ErrorCode {
   Success,
@@ -55,7 +54,6 @@ enum class ErrorCode {
   SyscallFail,
   InvalidateParams,
   SameProcessSameDevice,
+  InvalidHandle,
   Unknown,
 };
-
-#endif

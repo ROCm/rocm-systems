@@ -25,6 +25,7 @@ THE SOFTWARE.
 #include "nccl.h"
 #include "param.h"
 #include "core.h"
+
 typedef enum RcclTunableColls {
   RCCL_UNSUPPORTED_TUNABLE = -1,
   RCCL_RS_TUNABLE = 0,    // reduce_scatter index
@@ -50,6 +51,8 @@ typedef enum RcclTunableColls {
 #define RCCL_DEFAULT_MAX_NTHREADS 256 // for Simple and LL64/LL128 other archs
 #define RCCL_LL_MAX_NTHREADS 256
 #define RCCL_P2P_MAX_NTHREADS 256
+#define RCCL_MI3XX_MAX_MULTI_NODE_CHANNELS 64
+#define RCCL_MI3XX_MAX_SINGLE_NODE_CHANNELS 56
 
 typedef enum {
   RCCL_VALUE_UNSET = -2,
@@ -60,6 +63,9 @@ typedef enum {
   RCCL_DIRECT_ALLGATHER = NCCL_NUM_ALGORITHMS, // Direct AllGather
   RCCL_MSCCL,
   RCCL_MSCCLPP,
+#ifdef ENABLE_WARP_SPEED
+  RCCL_WARP_SPEED,
+#endif
   RCCL_ALGO_COUNT
 } rcclAddonAlgos_t;
 
@@ -112,17 +118,23 @@ NCCL_API(ncclResult_t, rcclGetAlgoInfo, struct ncclComm* comm, ncclFunc_t coll, 
 NCCL_API(ncclResult_t, rcclGetAlgoName, int algo, const char** algoName);
 NCCL_API(ncclResult_t, rcclGetProtocolName, int protocol, const char** algoName);
 bool rcclUseAllGatherDirect(struct ncclComm* comm, size_t& msgSize);
+bool rcclUseReduceScatterDirect(struct ncclComm* comm, size_t& msgSize);
 bool rcclUseAllToAllGda(struct ncclComm* comm);
 void rcclSetPxn(struct ncclComm* comm,  int& rcclPxnDisable);
 void rcclSetP2pNetChunkSize(struct ncclComm* comm,  int& rcclP2pNetChunkSize);
 ncclResult_t rcclFuncMaxSendRecvCount(ncclFunc_t func, int nRanks, size_t count, size_t& maxCount);
 ncclResult_t commSetUnrollFactor(struct ncclComm* comm);
 bool validHsaScratchEnvSetting(const char*hsaScratchEnv, int hipRuntimeVersion, int firmwareVersion, const char* archName);
+
+// Direct ReduceScatter Limit
+RCCL_PARAM_DECLARE(DirectReduceScatterThreshold);
 int getFirmwareVersion();
 bool rcclIsArchSupportedForFunc(struct ncclTaskColl* info, char const* archName);
 #ifdef ENABLE_WARP_SPEED
 void rcclSetWarpSpeedCUs(struct ncclComm* comm, int algo, int threadsPerBlock, int& rcclWarpSpeedChannels);
 void rcclSetWarpSpeedSupportAndFinalCuCount(struct ncclComm* comm, struct ncclKernelPlan* plan, int nChannels, int& support, int &cuCount);
 void rcclSetWarpSpeedAuto(struct ncclComm* comm, struct ncclTaskColl* info, size_t nBytes);
+int rcclGetMaxWarpsPerBlock(struct ncclComm* comm);
+bool rcclCanUseWarpSpeedAuto(struct ncclComm* comm, int nNodes);
 #endif
 #endif
