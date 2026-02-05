@@ -20,6 +20,7 @@
 
 set(TEST_SRC
   hipPerfVMMAlloc.cc
+  hipPerfVMMSetAccess.cc
 )
 
 hip_add_exe_to_target(NAME perfVMMTest
