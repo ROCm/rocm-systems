@@ -30,6 +30,7 @@ RUN set-euo pipefail; \
         apt-get install -y git rocm-openmp-sdk libva-amdgpu-dev rocm-llvm-dev && \
         python3 -m pip install -U awscli pipx && \
         python3 -m pip install -U --user -r /root/requirements.txt; \
+        echo -e 'PKG_CONFIG_PATH="/opt/amdgpu/lib64/pkgconfig:/opt/amdgpu/lib/pkgconfig:/opt/amdgpu/lib/$(uname -p)-linux-gnu/pkgconfig:${PKG_CONFIG_PATH}"\nexport PKG_CONFIG_PATH' > /etc/profile.d/amdgpu-pkg-config.sh; \
     fi;
 
 # RHEL
@@ -64,6 +65,7 @@ RUN set -euo pipefail; \
         export PATH=/opt/rh/gcc-toolset-11/root/usr/bin:${PATH}; \
         python3 -m pip install --upgrade pip; \
         python3 -m pip install --upgrade -r /root/requirements.txt; \
+        echo -e 'PKG_CONFIG_PATH="/opt/amdgpu/lib64/pkgconfig:/opt/amdgpu/lib/pkgconfig:/opt/amdgpu/lib/$(uname -p)-linux-gnu/pkgconfig:${PKG_CONFIG_PATH}"\nexport PKG_CONFIG_PATH' > /etc/profile.d/amdgpu-pkg-config.sh; \
     fi;
 
 # SLES
@@ -84,6 +86,7 @@ RUN set -euo pipefail; \
         cd /tmp; wget https://www.kernel.org/pub/software/scm/git/git-2.52.0.tar.xz; \
         tar -xf git-2.52.0.tar.xz; cd git-2.52.0; make prefix=/usr all -j 32; make prefix=/usr install; \
         cd /tmp; ln -s -f /usr/bin/git /usr/local/bin/git; rm -rf git-2.52.0*; \
+        echo -e 'PKG_CONFIG_PATH="/opt/amdgpu/lib64/pkgconfig:/opt/amdgpu/lib/pkgconfig:/opt/amdgpu/lib/$(uname -p)-linux-gnu/pkgconfig:${PKG_CONFIG_PATH}"\nexport PKG_CONFIG_PATH' > /etc/profile.d/amdgpu-pkg-config.sh; \
     fi;
 
 # Nightly Tarball

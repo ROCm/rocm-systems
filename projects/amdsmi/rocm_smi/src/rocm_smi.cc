@@ -7638,9 +7638,9 @@ rsmi_event_notification_get(int timeout_ms,
             int32_t pid;
             uint32_t addr;
             uint32_t node;
-            char *rw = "\0";
+            char rw = '\0';
 
-            sscanf(message, "%" PRId64 " -%d @%" PRIx32 "(%x) %c\n", &ns, &pid, &addr, &node, rw);
+            sscanf(message, "%" PRId64 " -%d @%" PRIx32 "(%x) %c\n", &ns, &pid, &addr, &node, &rw);
             std::stringstream final_message;
             final_message << "ns: " << std::to_string(ns).c_str()
                           << "  pid: " << std::to_string(pid).c_str()
@@ -7657,9 +7657,9 @@ rsmi_event_notification_get(int timeout_ms,
             int32_t pid;
             uint32_t addr;
             uint32_t node;
-            char *migrate_update = "\0";
+            char migrate_update = '\0';
 
-            sscanf(message, "%" PRId64 " -%d @%" PRIx32 "(%x) %c\n", &ns, &pid, &addr, &node, migrate_update);
+            sscanf(message, "%" PRId64 " -%d @%" PRIx32 "(%x) %c\n", &ns, &pid, &addr, &node, &migrate_update);
             std::stringstream final_message;
             final_message << "ns: " << std::to_string(ns).c_str()
                           << "  pid: " << std::to_string(pid).c_str()
@@ -7692,9 +7692,9 @@ rsmi_event_notification_get(int timeout_ms,
             int64_t ns;
             int32_t pid;
             uint32_t node;
-            char *rescheduled = "\0";
+            char rescheduled = '\0';
 
-            sscanf(message, "%" PRId64 "-%d %x %c\n", &ns, &pid, &node, rescheduled);
+            sscanf(message, "%" PRId64 "-%d %x %c\n", &ns, &pid, &node, &rescheduled);
             std::stringstream final_message;
             final_message << "ns: " << std::to_string(ns).c_str()
                           << "  pid: " << std::to_string(pid).c_str()
@@ -7794,6 +7794,10 @@ rsmi_status_t rsmi_event_notification_stop(uint32_t dv_ind) {
 
   std::lock_guard<std::mutex> guard(*smi.kfd_notif_evt_fh_mutex());
 
+  // Ensure protected access of anon_fp
+  amd::smi::pthread_wrap pw(*amd::smi::GetMutex(dv_ind));
+  amd::smi::ScopedPthread lock(pw);
+
   FILE *anon_fp = smi.devices()[dv_ind]->evt_notif_anon_file_ptr();
   int   anon_fd = smi.devices()[dv_ind]->evt_notif_anon_fd();
 
@@ -7805,6 +7809,11 @@ rsmi_status_t rsmi_event_notification_stop(uint32_t dv_ind) {
   // Clear state first so nobody else can race a second close
   smi.devices()[dv_ind]->set_evt_notif_anon_file_ptr(nullptr);
   smi.devices()[dv_ind]->set_evt_notif_anon_fd(-1);
+
+  // If the fd is uninitialized, we should not fclose a potentially stale FILE*.
+  if (anon_fd == -1) {
+    return RSMI_STATUS_SUCCESS;
+  }
 
   if (anon_fp) {
     if (fclose(anon_fp) != 0) {
