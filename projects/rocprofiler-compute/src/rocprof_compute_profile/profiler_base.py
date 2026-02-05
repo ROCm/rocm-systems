@@ -117,19 +117,32 @@ class RocProfCompute_Base:
             if args.iteration_multiplexing is None:
                 console_warning(
                     "Multi-rank application detected. Application replay mode "
-                    "(running the workload multiple times) may fail to collect data. "
-                    "Consider using --iteration-multiplexing to collect all "
-                    "counters in a single run."
+                    "(running the workload multiple times) may fail to collect "
+                    "data for workloads with MPI communication. "
+                    "Consider using single-pass modes:\n"
+                    "  --iteration-multiplexing  : Collect all counters in a "
+                    "single application run\n"
+                    "  --block <N>               : Profile specific block(s), "
+                    "excluding block 21\n"
+                    "  --set <name>              : Profile a predefined counter set\n"
+                    "See documentation for more information."
                 )
 
-            # Warn if PC sampling is requested (block "21" or alias "pc_sampling")
+            # Warn if PC sampling is requested (block "21")
             if any(
-                block in ("21", "pc_sampling") or block.startswith("21.")
-                for block in args.filter_blocks
+                block == "21" or block.startswith("21.") for block in args.filter_blocks
             ):
                 console_warning(
                     "Multi-rank application detected with PC sampling enabled. "
-                    "PC sampling may fail to collect data."
+                    "PC sampling may fail to collect data for workloads with "
+                    "MPI communication. "
+                    "Consider using single-pass modes without PC sampling:\n"
+                    "  --iteration-multiplexing  : Collect all counters in a "
+                    "single application run\n"
+                    "  --block <N>               : Profile specific block(s), "
+                    "excluding block 21\n"
+                    "  --set <name>              : Profile a predefined counter set\n"
+                    "See documentation for more information."
                 )
 
         # verify correct formatting for application binary
