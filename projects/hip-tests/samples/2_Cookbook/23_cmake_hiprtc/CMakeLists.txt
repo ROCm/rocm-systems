@@ -18,11 +18,22 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-project(cmake_hiprtc_test CXX)
-
 cmake_minimum_required(VERSION 3.10.2)
 
-if(UNIX)
+# Path setup (must be before project())
+if(WIN32)
+  if(NOT DEFINED ROCM_PATH)
+    if(DEFINED ENV{ROCM_PATH})
+      set(ROCM_PATH $ENV{ROCM_PATH} CACHE STRING "ROCM Path")
+    elseif(DEFINED ENV{HIP_PATH})
+      set(ROCM_PATH $ENV{HIP_PATH} CACHE STRING "ROCM Path from HIP_PATH")
+    endif()
+  endif()
+  if(DEFINED ROCM_PATH)
+    list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH})
+  endif()
+  set(CMAKE_CXX_COMPILER "${ROCM_PATH}/lib/llvm/bin/clang++.exe")
+elseif(UNIX)
   if(NOT DEFINED ROCM_PATH)
     if(DEFINED ENV{ROCM_PATH})
       set(ROCM_PATH $ENV{ROCM_PATH} CACHE STRING "ROCM Path")
@@ -34,7 +45,12 @@ if(UNIX)
   list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH})
 endif()
 
-set(CMAKE_CXX_COMPILER "${ROCM_PATH}/llvm/bin/clang++")
+project(cmake_hiprtc_test CXX)
+
+# Set compiler after project() for Linux to avoid reconfiguration loop in subdirectory builds
+if(UNIX)
+  set(CMAKE_CXX_COMPILER "${ROCM_PATH}/llvm/bin/clang++")
+endif()
 
 # Find hiprtc
 find_package(hiprtc REQUIRED)
@@ -49,6 +65,15 @@ set(EXCLUDE_OPTION )
 endif()
 add_executable(test ${EXCLUDE_OPTION} saxpy.cpp)
 
+target_include_directories(test PRIVATE ../../common)
+
+# Add GPU architecture for device code compilation (Windows)
+if(WIN32 AND DEFINED CMAKE_HIP_ARCHITECTURES)
+  foreach(_arch ${CMAKE_HIP_ARCHITECTURES})
+    target_compile_options(test PRIVATE --offload-arch=${_arch})
+  endforeach()
+endif()
+
 # Link with HIPRTC
 target_link_libraries(test hiprtc)
 # Link with HIP
@@ -57,8 +82,6 @@ target_link_libraries(test hip::device)
 if(NOT BUILD_SHARED_LIBS)
   target_link_libraries(test hiprtc-builtins)
 endif()
-
-target_include_directories(test PRIVATE ../../common)
 
 if(TARGET build_cookbook)
 add_dependencies(build_cookbook test)
