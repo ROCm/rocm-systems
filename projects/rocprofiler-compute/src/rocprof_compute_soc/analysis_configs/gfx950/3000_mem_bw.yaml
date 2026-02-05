@@ -11,9 +11,15 @@ Panel Config:
         value: Avg
         unit: Unit
       metric:
+        TA_BUFFER_TOTAL_CYCLES:
+          value: AVG(TA_BUFFER_TOTAL_CYCLES_sum)
+          unit: cycles
         TCP Busy:
           value: AVG(TCP_GATE_EN2_sum)
-          unit: clocks
+          unit: cycles
+        TCP_TCR_TCP_STALL_CYCLES:
+          value: AVG(TCP_TCR_TCP_STALL_CYCLES_sum)
+          unit: cycles
         L1 Cache Backpressured by L2:
           value: AVG((((TCP_TCR_TCP_STALL_CYCLES * 100) / TCP_GATE_EN2_sum) if (TCP_GATE_EN2_sum != 0) else None))
           unit: pct
@@ -24,13 +30,13 @@ Panel Config:
           value: AVG((((TCP_TCP_TA_ADDR_STALL_CYCLES_sum * 100) / TCP_GATE_EN2_sum) if (TCP_GATE_EN2_sum != 0) else None))
           unit: pct
         L1 Cache - VMEM stalled by L1 Cache:
-          value: AVG((((SQ_VMEM_TA_CMD_FIFO_FULL_sum * 100) / SQ_BUSY_sum) if (SQ_BUSY_sum != 0) else None))
+          value: AVG((((SQ_VMEM_TA_CMD_FIFO_FULL * 100) / SQ_BUSY_CYCLES) if (SQ_BUSY_CYCLES != 0) else None))
           unit: pct
         L1 Cache - TCP stalled caused by UTCL1:
           value: AVG((((TCP_UTCL1_STALL_INFLIGHT_MAX_sum * 100) / TCP_GATE_EN2_sum) if (TCP_GATE_EN2_sum != 0) else None))
           unit: pct
         L1 Cache - TCP stalled caused by UTCL2:
-          value: AVG((((TCP_UTCL1_STALL_LFIFO_NOT_RES_sum * 100) / TCP_GATE_EN2_sum) if (TCP_GATE_EN2_sum != 0) else None))
+          value: AVG((((TCP_UTCL1_STALL_LFIFO_NO_RES_sum * 100) / TCP_GATE_EN2_sum) if (TCP_GATE_EN2_sum != 0) else None))
           unit: pct
         L1 Cache - Tag RAM 0 Req:
           value: AVG((TCP_TAGRAM0_REQ_sum / $denom))
