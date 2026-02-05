@@ -10,7 +10,6 @@ set(TEST_SRC
     hipStreamCreateWithPriority.cc
     hipStreamDestroy.cc
     hipAPIStreamDisable.cc
-    hipStreamLegacy.cc
     hipStreamValue.cc
     hipStreamSynchronize.cc
     hipStreamQuery.cc
@@ -33,7 +32,11 @@ if(HIP_PLATFORM MATCHES "amd")
                hipStreamGetPriority_spt.cc
                hipStreamQuery_spt.cc
                hipStreamSynchronize_spt.cc
-               hipStreamBatchMemOp.cc)
+               hipStreamBatchMemOp.cc
+               # disabled on NVIDIA due to lack of hipStreamGetCaptureInfo_v2 in cuda 13.0+
+                hipStreamLegacy.cc
+
+             )
 else()
   set(TEST_SRC
       ${TEST_SRC}

@@ -89,9 +89,6 @@ set(NOT_FOR_gfx90a_AND_ABOVE_TEST
     hipMipmappedArrayCreate.cc
     hipMipmappedArrayDestroy.cc
     hipMipmappedArrayGetLevel.cc
-    hipTextureMipmapObj1D.cc
-    hipTextureMipmapObj2D.cc
-    hipTextureMipmapObj3D.cc
     tex1DLod.cc
     tex1DLayeredLod.cc
     tex2DLod.cc
@@ -103,6 +100,13 @@ set(NOT_FOR_gfx90a_AND_ABOVE_TEST
     hipTexRefSetGetMipmappedArray.cc
     hipMipmappedArrayGetMemoryRequirements.cc
 )
+
+if (HIP_PLATFORM MATCHES "amd")
+  set(${TEST_SRC} ${TEST_SRC} hipTextureMipmapObj1D.cc
+      hipTextureMipmapObj2D.cc
+    hipTextureMipmapObj3D.cc
+)
+endif()
 
 set(gfx90a_AND_ABOVE_TARGETS gfx90a gfx942 gfx950)
 function(CheckRejectedArchs OFFLOAD_ARCH_STR_LOCAL)

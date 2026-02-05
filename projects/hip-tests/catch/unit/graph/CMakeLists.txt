@@ -97,6 +97,12 @@ if(HIP_PLATFORM MATCHES "amd")
     hipGraphExecNodeSetParams.cc
     hipGraphNodeSetParams.cc
     hipGraphExecGetFlags.cc
+    # this file is disable for NVIDIA due to lacking corresponding hipStreamGetCaptureInfo_v3 implementation
+    hipStreamGetCaptureInfo_old.cc
+    hipStreamGetCaptureInfo_v2.cc
+    hipStreamUpdateCaptureDependencies.cc
+    hipStreamGetCaptureInfo_v2_old.cc
+    hipGraphAddNodeBeginCapture.cc
   )
   set(TEST_SRC ${TEST_SRC} ${AMD_SRC})
 endif()
@@ -109,7 +115,6 @@ target_link_libraries(GraphsTest1 ${GPGPU_LINKER_LIBRARIES})
 
 set(TEST_SRC
   hipStreamGetCaptureInfo.cc
-  hipStreamGetCaptureInfo_old.cc
   hipStreamEndCapture.cc
   hipStreamEndCapture_old.cc
   hipGraphMemcpyNodeSetParamsFromSymbol_old.cc
@@ -136,13 +141,10 @@ set(TEST_SRC
   hipGraphNodeGetDependencies_old.cc
   hipGraphHostNodeGetParams.cc
   hipGraphExecChildGraphNodeSetParams.cc
-  hipStreamGetCaptureInfo_v2.cc
   hipGraphCreate.cc
   hipGraphDestroy.cc
-  hipStreamUpdateCaptureDependencies.cc
   hipThreadExchangeStreamCaptureMode.cc
   hipLaunchHostFuncWithGraph.cc
-  hipStreamGetCaptureInfo_v2_old.cc
   hipUserObjectCreate.cc
   hipUserObjectRelease.cc
   hipUserObjectRetain.cc
@@ -155,7 +157,6 @@ set(TEST_SRC
   hipGraphExecDestroy.cc
   hipGraphUpload.cc
   hipGraphKernelNodeCopyAttributes.cc
-  hipGraphAddNodeBeginCapture.cc
   hipGraphCycle.cc
   hipGraphPerf.cc
   hipGraphKernelNodeGetAttribute.cc

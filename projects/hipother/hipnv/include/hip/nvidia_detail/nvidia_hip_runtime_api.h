@@ -1942,6 +1942,7 @@ typedef enum cudaGraphDebugDotFlags hipGraphDebugDotFlags;
 typedef enum CUmemAllocationGranularity_flags_enum hipMemAllocationGranularity_flags;
 typedef enum cudaMemLocationType hipMemLocationType;
 #define hipMemLocationTypeInvalid cudaMemLocationTypeInvalid
+#define hipMemLocationTypeNone cudaMemLocationTypeInvalid
 #define hipMemLocationTypeDevice cudaMemLocationTypeDevice
 #define hipMemLocationTypeHost cudaMemLocationTypeHost
 #define hipMemLocationTypeHostNuma cudaMemLocationTypeHostNuma
@@ -1953,6 +1954,7 @@ typedef enum cudaMemAllocationType hipMemAllocationType;
 #define hipMemAllocationTypeInvalid cudaMemAllocationTypeInvalid
 #define hipMemAllocationTypePinned cudaMemAllocationTypePinned
 #define hipMemAllocationTypeMax cudaMemAllocationTypeMax
+#define hipMemAllocationTypeManaged cudaMemAllocationTypeManaged
 #define hipMemGenericAllocationHandle_t CUmemGenericAllocationHandle
 // CUarrayMapInfo mappings
 typedef CUarrayMapInfo hipArrayMapInfo;
