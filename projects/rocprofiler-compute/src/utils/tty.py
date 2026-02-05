@@ -287,25 +287,41 @@ def show_torch_operator_table(operator_name: str, df: pd.DataFrame) -> None:
     # Create a copy for display formatting
     display_df = df.copy()
 
-    # Truncate very long column values for better display
+    # Define max widths for different column types
+    column_widths = {
+        "Operator_Name": 40,
+        "Context": 35,
+        "Kernel_Name": 35,
+        "default": 20,
+    }
+
+    # Truncate columns to reasonable widths
     for col in display_df.columns:
         if display_df[col].dtype == "object":  # String columns
+            max_width = column_widths.get(col, column_widths["default"])
             display_df[col] = (
                 display_df[col]
                 .astype(str)
-                .apply(lambda x: string_multiple_lines(x, 50, 3) if len(x) > 50 else x)
+                .apply(
+                    lambda x: (
+                        string_multiple_lines(x, max_width, 2)
+                        if len(x) > max_width
+                        else x
+                    )
+                )
             )
 
-    # Reset index to get numbered rows like other tables
+    # Reset index for row numbering
     display_df = display_df.reset_index(drop=True)
 
-    # Use tabulate for consistent formatting with other tables
+    # Use tabulate for consistent formatting
     table_str = tabulate(
         display_df,
         headers=display_df.columns,
         tablefmt="fancy_grid",
         showindex=True,
         floatfmt=".2f",
+        maxcolwidths=list(column_widths.values()),
     )
 
     console_log(table_str)
