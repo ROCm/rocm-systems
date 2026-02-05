@@ -38,7 +38,8 @@ if (flags & (RoleWaitSend|RolePostSend)) loadSendConn(channel->peers[peer], ...)
 
 **Next debugging step:**
 Use `rocgdb` with `HSA_ENABLE_DEBUG=1` to catch the memory fault and identify which
-pointer access causes it. The debug info (line numbers, symbols) is working correctly.
+pointer access causes it. Debug info (line numbers, symbols) is now working correctly
+after the synthetic `.debug_info` fix.
 
 ## Build & Test
 
@@ -93,7 +94,26 @@ the kernel will access wrong memory offsets and crash or hang.
 
 ## Recently Fixed Issues (Feb 4-5, 2026)
 
-### 1. LDS Allocation for ncclShmemPerWarp
+### 1. Debug Line Numbers for Specialized Kernels
+**Problem:** `llvm-symbolizer` and GDB showed `??:0:0` for specialized kernel addresses,
+even though `.debug_line` contained correct line info.
+**Root cause:** The synthetic `.debug_info` was missing or had wrong address ranges.
+The device linker was calling `buildSyntheticDebugInfo()` before `text_addr_` was set,
+resulting in compile units with addresses starting at 0x0 instead of the actual text address.
+Also missing `DW_AT_comp_dir` attribute for GDB source file lookup.
+**Fix:** In `device_linker.cpp`:
+1. Move `buildSyntheticDebugInfo()` call to after `computeLayout()` in `link()`
+2. Add `DW_AT_comp_dir` attribute with absolute path (via `realpath()`) to each compile unit
+3. Each CU covers a specific code range and points to its correct `.debug_line` offset
+
+**Result:** Line numbers now resolve correctly:
+```
+$ echo "0xa361ac" | llvm-symbolizer -e build/release/device_linker_output/merged_device.elf
+ncclDevFunc_AllReduce_RING_LL_Sum_f32_0_0_2()
+/work1/.../build/release/hipify/gensrc/specialized/specialized_all_reduce_ring_ll_sum_f32_unroll2.cpp:13:0
+```
+
+### 2. LDS Allocation for ncclShmemPerWarp
 **Problem:** Static LDS allocation was 37776 bytes, exceeding available dynamic LDS.
 **Root cause:** `#if __CUDA_ARCH__ >= 700` was false on AMD GPUs, causing static allocation.
 **Fix:** Modified `src/device/common.h` to use `extern __shared__` for dynamic allocation
@@ -107,7 +127,7 @@ when `DEVICE_LINKER` is defined:
 ```
 **Result:** Static LDS reduced from 37776 to 4944 bytes, dynamic allocation works.
 
-### 2. Malformed RELRO Segment
+### 3. Malformed RELRO Segment
 **Problem:** Third LOAD segment had offset=0, vaddr=0, size=0x79ad0b0 (overlapping everything).
 **Root cause:** `.data.rel.ro` section doesn't exist, so `relro_start=0`.
 **Fix:** In `device_linker.cpp`, use `.dynamic` address if no `.data.rel.ro`:
@@ -115,7 +135,7 @@ when `DEVICE_LINKER` is defined:
 uint64_t relro_start = data_rel_ro_start ? data_rel_ro_start : dyn_sec_addr;
 ```
 
-### 3. Function Table Addend Verification
+### 4. Function Table Addend Verification
 **Investigation:** Suspected wrong addends in R_AMDGPU_RELATIVE64 relocations.
 **Finding:** Addends are CORRECT - they match function symbol addresses.
 For example, funcId 622 uses the unroll=2 variant:
@@ -134,6 +154,7 @@ These are documented in detail in `DEVICE_LINKER_REDESIGN.md`:
 5. Shared memory limit - `extern __shared__` for dynamic allocation
 6. DWARF5 debug line string offsets - `patchDwarf5StringOffsets()`
 7. Specialized kernel symbol addresses - `func_offset` correction
+8. Synthetic `.debug_info` for specialized kernels - `buildSyntheticDebugInfo()` with `DW_AT_comp_dir`
 
 ## Understanding Function Pointer Tables
 
