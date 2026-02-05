@@ -1,62 +1,34 @@
-# Copyright (c) Advanced Micro Devices, Inc.
-# SPDX-License-Identifier:  MIT
+#
+#
+#
+cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 
-cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
-
-project(rocprofiler-systems-scratch-memory-example LANGUAGES CXX)
-
-if(ROCPROFSYS_DISABLE_EXAMPLES)
-    get_filename_component(_DIR ${CMAKE_CURRENT_LIST_DIR} NAME)
-
-    if(
-        ${PROJECT_NAME} IN_LIST ROCPROFSYS_DISABLE_EXAMPLES
-        OR ${_DIR} IN_LIST ROCPROFSYS_DISABLE_EXAMPLES
+if(NOT CMAKE_HIP_COMPILER)
+    find_program(
+        amdclangpp_EXECUTABLE
+        NAMES amdclang++
+        HINTS ${ROCM_PATH}
+        ENV ROCM_PATH
+        /opt/rocm
+        PATHS ${ROCM_PATH}
+        ENV ROCM_PATH
+        /opt/rocm
+        PATH_SUFFIXES bin llvm/bin NO_CACHE
     )
-        return()
+    mark_as_advanced(amdclangpp_EXECUTABLE)
+
+    if(amdclangpp_EXECUTABLE)
+        set(CMAKE_HIP_COMPILER "${amdclangpp_EXECUTABLE}")
     endif()
 endif()
 
-find_package(hip QUIET HINTS ${ROCmVersion_DIR} PATHS ${ROCmVersion_DIR})
+project(rocprofiler-systems-scratch-memory-example LANGUAGES CXX HIP)
 
-find_program(
-    HIPCC_EXECUTABLE
-    NAMES hipcc
-    HINTS ${ROCmVersion_DIR} ${ROCM_PATH}
-    ENV ROCM_PATH
-    /opt/rocm
-    PATHS ${ROCmVersion_DIR} ${ROCM_PATH}
-    ENV ROCM_PATH
-    /opt/rocm
-    NO_CACHE
-)
-mark_as_advanced(HIPCC_EXECUTABLE)
-
-if(NOT HIPCC_EXECUTABLE)
-    message(AUTHOR_WARNING "hipcc could not be found. Cannot build scratch-memory target")
-    return()
-endif()
-
-if(NOT CMAKE_CXX_COMPILER_IS_HIPCC AND HIPCC_EXECUTABLE)
-    if(
-        CMAKE_CXX_COMPILER STREQUAL HIPCC_EXECUTABLE
-        OR "${CMAKE_CXX_COMPILER}" MATCHES "hipcc"
-    )
-        set(CMAKE_CXX_COMPILER_IS_HIPCC 1 CACHE BOOL "HIP compiler")
+foreach(_TYPE DEBUG MINSIZEREL RELEASE RELWITHDEBINFO)
+    if("${CMAKE_HIP_FLAGS_${_TYPE}}" STREQUAL "")
+        set(CMAKE_HIP_FLAGS_${_TYPE} "${CMAKE_CXX_FLAGS_${_TYPE}}")
     endif()
-endif()
-
-if(
-    (
-        NOT CMAKE_CXX_COMPILER_IS_HIPCC
-        OR (NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND NOT hip_FOUND)
-    )
-    AND (NOT COMMAND rocprofiler_systems_custom_compilation AND NOT HIPCC_EXECUTABLE)
-)
-    message(AUTHOR_WARNING "scratch-memory target could not be built")
-    return()
-endif()
-
-find_package(Threads REQUIRED)
+endforeach()
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -65,44 +37,33 @@ set(CMAKE_HIP_STANDARD 17)
 set(CMAKE_HIP_EXTENSIONS OFF)
 set(CMAKE_HIP_STANDARD_REQUIRED ON)
 
-add_executable(scratch-memory scratch-memory.cpp)
-target_link_libraries(scratch-memory PRIVATE Threads::Threads)
-
-# Specify GPU architectures to compile for
-foreach(arch IN LISTS ROCPROFSYS_GFX_TARGETS)
-    target_compile_options(scratch-memory PRIVATE --offload-arch=${arch})
-    target_link_options(scratch-memory PUBLIC --offload-arch=${arch})
-endforeach()
-
-if(
-    CMAKE_CXX_COMPILER_ID MATCHES "Clang"
-    AND NOT CMAKE_CXX_COMPILER_IS_HIPCC
-    AND NOT HIPCC_EXECUTABLE
+set_source_files_properties(scratch-memory.cpp PROPERTIES LANGUAGE HIP)
+add_executable(scratch-memory)
+target_sources(scratch-memory PRIVATE scratch-memory.cpp)
+target_compile_options(
+    scratch-memory
+    PRIVATE -W -Wall -Wextra -Wpedantic -Wshadow -Werror
 )
-    target_link_libraries(
-        scratch-memory
-        PRIVATE
-            $<TARGET_NAME_IF_EXISTS:rocprofiler-systems::rocprofiler-systems-compile-options>
-            $<TARGET_NAME_IF_EXISTS:hip::host>
-            $<TARGET_NAME_IF_EXISTS:hip::device>
+
+find_library(
+    HSA_RUNTIME_LIBRARY
+    NAMES hsa-runtime64
+    HINTS ${ROCmVersion_DIR} ${ROCM_PATH}
+    ENV ROCM_PATH
+    /opt/rocm
+    PATHS ${ROCmVersion_DIR} ${ROCM_PATH}
+    ENV ROCM_PATH
+    /opt/rocm
+    PATH_SUFFIXES lib lib64
+)
+
+if(NOT HSA_RUNTIME_LIBRARY)
+    message(
+        AUTHOR_WARNING
+        "HSA runtime library not found. Cannot build scratch-memory target"
     )
-else()
-    target_compile_options(scratch-memory PRIVATE -W -Wall)
+    return()
 endif()
 
-if("${CMAKE_BUILD_TYPE}" MATCHES "Release")
-    target_compile_options(scratch-memory PRIVATE -g1)
-endif()
-
-if(NOT CMAKE_CXX_COMPILER_IS_HIPCC AND HIPCC_EXECUTABLE)
-    # defined in MacroUtilities.cmake
-    rocprofiler_systems_custom_compilation(COMPILER ${HIPCC_EXECUTABLE} TARGET scratch-memory)
-endif()
-
-if(ROCPROFSYS_INSTALL_EXAMPLES AND TARGET scratch-memory)
-    install(
-        TARGETS scratch-memory
-        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples
-        COMPONENT rocprofiler-systems-examples
-    )
-endif()
+find_package(Threads REQUIRED)
+target_link_libraries(scratch-memory PRIVATE Threads::Threads ${HSA_RUNTIME_LIBRARY})
