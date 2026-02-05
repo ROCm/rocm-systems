@@ -211,8 +211,9 @@ struct ncclShmemData {
 #endif
 
 NCCL_SHMEM_DECL ncclShmemData ncclShmem;
-#if __CUDA_ARCH__ >= 700
-  NCCL_SHMEM_DECL ulong2 ncclShmemPerWarp[/*ncclShmemDynamicSize()/sizeof(ulong2)*/];
+#if __CUDA_ARCH__ >= 700 || defined(DEVICE_LINKER)
+  // Dynamic shared memory always requires extern __shared__
+  extern __shared__ ulong2 ncclShmemPerWarp[];
 #else
   NCCL_SHMEM_DECL ulong2 ncclShmemPerWarp[ncclShmemScratchWarpSize()*(NCCL_MAX_NTHREADS/WARP_SIZE)/sizeof(ulong2)];
 #endif
