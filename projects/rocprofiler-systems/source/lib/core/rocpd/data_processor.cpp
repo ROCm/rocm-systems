@@ -171,11 +171,10 @@ data_processor::insert_pmc_description(
     auto it = _pmc_descriptor_map.find({ agent_id, name });
     if(it != _pmc_descriptor_map.end())
     {
-        LOG_WARNING("Insert PMC description failed! Error: PMC descriptor "
-                    "Insert PMC description failed! Error: PMC descriptor "
-                    "(name: {}) (ID: {}) already exist!",
-                    name, agent_id);
-        return;
+        throw std::runtime_error(
+            fmt::format("Insert PMC description failed! Error: PMC descriptor "
+                        "agent id: {}, pmc name: {} !",
+                        agent_id, name));
     }
     data_storage::queries::table_insert_query query_builder;
 
@@ -207,10 +206,10 @@ data_processor::insert_pmc_event(size_t event_id, size_t agent_id, const char* p
     auto it = _pmc_descriptor_map.find({ agent_id, pmc_name });
     if(it == _pmc_descriptor_map.end())
     {
-        LOG_WARNING("Insert PMC event failed! Error: non-existing PMC description "
-                    "agent id: {}, pmc name: {} !",
-                    agent_id, pmc_name);
-        return;
+        throw std::runtime_error(
+            fmt::format("Insert PMC event failed! Error: non-existing PMC description "
+                        "agent id: {}, pmc name: {} !",
+                        agent_id, pmc_name));
     }
 
     const auto pmc_description_id = it->second;
@@ -227,8 +226,8 @@ data_processor::insert_sample(const char* track, uint64_t timestamp, size_t even
     auto it = _tracks.find(track);
     if(it == _tracks.end())
     {
-        LOG_WARNING("Insert sample failed! Error: Unexisting track {}!", track);
-        return;
+        throw std::runtime_error(
+            fmt::format("Insert sample failed! Error: Unexisting track {}!", track));
     }
     auto track_info = it->second;
     _insert_sample_statement(_upid.c_str(), track_info.track_id, timestamp, event_id,
