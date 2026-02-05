@@ -3354,3 +3354,70 @@ def test_wrapped_mpi(binary_handler_profile_rocprof_compute):
     assert returncode == 1
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.multi_rank
+def test_multi_rank_warning_application_replay(
+    binary_handler_profile_rocprof_compute, monkeypatch
+):
+    """
+    Test that a warning is printed when running a multi-rank application
+    in application replay mode.
+    """
+    # Set MPI environment variable to simulate multi-rank
+    monkeypatch.setenv("OMPI_COMM_WORLD_RANK", "0")
+
+    workload_dir = test_utils.get_output_dir()
+
+    _, stdout, stderr = binary_handler_profile_rocprof_compute(
+        config,
+        workload_dir,
+        app_name="app_1",
+        capture_output=True,
+        check_success=False,
+    )
+
+    # Check that warning message is in output
+    output = stdout + stderr
+    assert "Multi-rank application detected" in output
+    assert "Application replay mode" in output
+    assert "--iteration-multiplexing" in output
+    assert "--block" in output
+    assert "--set" in output
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.multi_rank
+def test_multi_rank_warning_pc_sampling(
+    binary_handler_profile_rocprof_compute, monkeypatch
+):
+    """
+    Test that a warning is printed when running a multi-rank application
+    with PC sampling enabled.
+    """
+    # Set MPI environment variable to simulate multi-rank
+    monkeypatch.setenv("OMPI_COMM_WORLD_RANK", "0")
+
+    workload_dir = test_utils.get_output_dir()
+
+    # Enable PC sampling
+    options = ["--block", "21"]
+
+    _, stdout, stderr = binary_handler_profile_rocprof_compute(
+        config,
+        workload_dir,
+        options,
+        app_name="app_1",
+        capture_output=True,
+        check_success=False,
+    )
+
+    # Check that PC sampling warning is in output
+    output = stdout + stderr
+    assert "Multi-rank application detected with PC sampling enabled" in output
+    assert "--iteration-multiplexing" in output
+    assert "--block" in output
+    assert "--set" in output
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
