@@ -2281,10 +2281,6 @@ void VirtualGPU::submitStreamOperation(amd::StreamOperationCommand& cmd) {
   Memory* memory = dev().getGpuMemory(amdMemory);
 
   if (type == ROCCLR_COMMAND_STREAM_WAIT_VALUE) {
-    // Even though the blit kernel uses system scope atomic, we still need to add system scope on
-    // the AQLPacket because atomics on kernels can bypass L2 cache on some hardware.
-    addSystemScope();
-
     // Use a blit kernel to perform the wait operation
     // mask is applied on value before performing
     // the comparision defined by 'condition'
@@ -2298,10 +2294,6 @@ void VirtualGPU::submitStreamOperation(amd::StreamOperationCommand& cmd) {
       LogError("submitStreamOperation: Wait failed!");
     }
   } else if (type == ROCCLR_COMMAND_STREAM_WRITE_VALUE) {
-    // Even though the blit kernel uses system scope atomic, we still need to add system scope on
-    // the AQLPacket because atomics on kernels can bypass L2 cache on some hardware.
-    addSystemScope();
-
     bool result;
     switch (flags) {
       case ROCCLR_STREAM_WRITE_VALUE_DEFAULT: {
