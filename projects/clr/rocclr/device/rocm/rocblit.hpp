@@ -142,6 +142,12 @@ class DmaBlitManager : public device::HostBlitManager {
       amd::CopyMetadata copyMetadata = amd::CopyMetadata()  //!< Memory copy MetaData
   ) const;
 
+  //! Copies multiple buffer objects in a batch
+  virtual bool copyBufferBatch(
+      const std::vector<amd::BatchCopyOp>& copyOps,  //!< Batch of copy operations
+      bool entire = false                            //!< Entire buffers will be updated
+  ) const;
+
   //! Copies an image object to a buffer object
   virtual bool copyImageToBuffer(
       device::Memory& srcMemory,                            //!< Source memory object
