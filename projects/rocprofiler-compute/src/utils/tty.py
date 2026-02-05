@@ -281,7 +281,7 @@ def show_torch_operator_hierarchy(operator_name: str, df: pd.DataFrame) -> None:
     showing marker hierarchy on the left and kernel launches on the right.
     """
     print(f"\n{'-' * 80}")
-    print("Hierarchy for {operator_name}".ljust(40) + "Kernels Launched")
+    print(f"Hierarchy for {operator_name}".ljust(40) + "Kernels Launched")
     print("-" * 80)
 
     # Expect the DataFrame to have columns "Operator_Name", "Kernel_Name",
