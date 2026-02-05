@@ -225,11 +225,13 @@ rocprof-sys-sample -f 1000 -- ls -la
 Instead of manually configuring numerous options, use preset modes optimized for common workloads:
 
 **General Purpose:**
+
 - **`--balanced`** - Balanced profiling with moderate overhead and comprehensive data
 - **`--profile-only`** - Profiling-only mode without tracing (flat profile, minimal overhead)
 - **`--detailed`** - Comprehensive profiling with full system metrics
 
 **Workload-Specific:**
+
 - **`--trace-hpc`** - Optimized for HPC/MPI/OpenMP applications
   - Automatically enables OMPT, MPIP, and relevant hardware counters
 - **`--workload-trace`** - Optimized for AI/ML/GPU workloads which are supported by ROCm stack
@@ -241,6 +243,7 @@ Instead of manually configuring numerous options, use preset modes optimized for
   - Automatically enables tracing VALU utilization
 
 **API Tracing:**
+
 - **`--sys-trace`** - Comprehensive system API tracing
 - **`--runtime-trace`** - Runtime API tracing
   - Excludes compiler and low-level HSA
