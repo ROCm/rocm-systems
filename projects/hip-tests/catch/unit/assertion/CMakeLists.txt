@@ -27,7 +27,7 @@ if(HIP_PLATFORM MATCHES "nvidia")
                           TEST_TARGET_NAME build_tests
                           LINKER_LIBS nvrtc)
   set_target_properties(AssertionTest PROPERTIES LINKER_LANGUAGE CUDA)
-  target_link_libraries(AssertionTest cuda)
+  target_link_libraries(AssertionTest cuda hip::host hip::device)
 elseif(HIP_PLATFORM MATCHES "amd")
     set(TEST_SRC
         static_assert.cc

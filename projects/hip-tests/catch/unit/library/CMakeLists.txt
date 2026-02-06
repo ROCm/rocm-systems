@@ -31,7 +31,7 @@ else()
                           TEST_TARGET_NAME build_tests
                           LINKER_LIBS nvrtc)
   set_target_properties(LibraryTests PROPERTIES LINKER_LANGUAGE CUDA)
-  target_link_libraries(LibraryTests cuda)
+  target_link_libraries(LibraryTests cuda hip::host hip::device)
 endif()
 
 add_dependencies(LibraryTests library_code_load.code)
