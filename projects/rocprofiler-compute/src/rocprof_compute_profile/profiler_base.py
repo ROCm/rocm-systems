@@ -111,40 +111,6 @@ class RocProfCompute_Base:
                 "Please remove one of these options."
             )
 
-        # Check for multi-rank application warnings
-        if get_rank() is not None:
-            # Warn if using application replay (iteration_multiplexing is None)
-            if args.iteration_multiplexing is None:
-                console_warning(
-                    "Multi-rank application detected. Application replay mode "
-                    "(running the workload multiple times) may fail to collect "
-                    "data for workloads with MPI communication. "
-                    "Consider using single-pass modes:\n"
-                    "  --iteration-multiplexing  : Collect all counters in a "
-                    "single application run\n"
-                    "  --block <N>               : Profile specific block(s), "
-                    "excluding block 21\n"
-                    "  --set <name>              : Profile a predefined counter set\n"
-                    "See documentation for more information."
-                )
-
-            # Warn if PC sampling is requested (block "21")
-            if any(
-                block == "21" or block.startswith("21.") for block in args.filter_blocks
-            ):
-                console_warning(
-                    "Multi-rank application detected with PC sampling enabled. "
-                    "PC sampling may fail to collect data for workloads with "
-                    "MPI communication. "
-                    "Consider using single-pass modes without PC sampling:\n"
-                    "  --iteration-multiplexing  : Collect all counters in a "
-                    "single application run\n"
-                    "  --block <N>               : Profile specific block(s), "
-                    "excluding block 21\n"
-                    "  --set <name>              : Profile a predefined counter set\n"
-                    "See documentation for more information."
-                )
-
         # verify correct formatting for application binary
         args.remaining = args.remaining[1:]
         resolved_exec_path: Optional[Path] = None
@@ -693,6 +659,46 @@ class RocProfCompute_Base:
         # Run profiling on each input file
         input_files = sorted(Path(args.path).glob("perfmon/*.txt"))
         total_runs = len(input_files)
+
+        # Compute total workload runs including PC sampling for warning check
+        total_workload_runs = total_runs
+        if any(
+            block == "21" or block.startswith("21.") for block in args.filter_blocks
+        ):
+            total_workload_runs += 1
+
+        # Warn about multi-rank profiling when multiple workload runs are needed
+        if total_workload_runs > 1 and get_rank() is not None:
+            console_warning(
+                "Multi-rank application detected. Application replay mode "
+                "(running the workload multiple times) may fail to collect "
+                "data for workloads with MPI communication. "
+                "Consider using single-pass modes:\n"
+                "  --iteration-multiplexing  : Collect all counters in a "
+                "single application run\n"
+                "  --block <N>               : Profile specific block(s), "
+                "excluding block 21\n"
+                "  --set <name>              : Profile a predefined counter set\n"
+                "See documentation for more information."
+            )
+
+        # Warn if PC sampling is requested (block "21") with multi-rank
+        if get_rank() is not None and any(
+            block == "21" or block.startswith("21.") for block in args.filter_blocks
+        ):
+            console_warning(
+                "Multi-rank application detected with PC sampling enabled. "
+                "PC sampling may fail to collect data for workloads with "
+                "MPI communication. "
+                "Consider using single-pass modes without PC sampling:\n"
+                "  --iteration-multiplexing  : Collect all counters in a "
+                "single application run\n"
+                "  --block <N>               : Profile specific block(s), "
+                "excluding block 21\n"
+                "  --set <name>              : Profile a predefined counter set\n"
+                "See documentation for more information."
+            )
+
         total_profiling_time = 0.0
 
         for fname in input_files:
