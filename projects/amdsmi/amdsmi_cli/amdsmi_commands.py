@@ -1183,9 +1183,9 @@ class AMDSMICommands():
                             continue
                         freq_dict = {}
                         current_level = frequencies['current']
+                        # Add current_level first for proper output ordering
                         freq_dict.update({'current_level':current_level})
-                        current_frequency = str(self.helpers.convert_SI_unit(frequencies['frequency'][current_level], AMDSMIHelpers.SI_Unit.MICRO)) + "MHz"
-                        freq_dict.update({'current_frequency':current_frequency})
+                        # Add frequency_levels second
                         freq_dict.update({'frequency_levels':{}})
                         if frequencies["num_supported"] != 0:
                             for level in range(len(frequencies['frequency'])):
@@ -2812,8 +2812,8 @@ class AMDSMICommands():
             self.logger.store_multiple_device_output()
             return # Skip printing when there are multiple devices
 
-        # Print output for all formats
-        self.logger.print_output(watching_output=watching_output)
+        if not self.logger.is_json_format() or watching_output:
+            self.logger.print_output(watching_output=watching_output)
 
         if watching_output: # End of single gpu add to watch_output
             self.logger.store_watch_output(multiple_device_enabled=False)
@@ -3540,6 +3540,7 @@ class AMDSMICommands():
                     "gfx": process_info["engine_usage"]["gfx"],
                     "enc": process_info["engine_usage"]["enc"],
                 },
+                "sdma_usage": process_info["sdma_usage"],
                 "cu_occupancy": process_info["cu_occupancy"],
                 "evicted_time": process_info["evicted_time"]
             }
@@ -3547,6 +3548,7 @@ class AMDSMICommands():
             engine_usage_unit = "ns"
             memory_usage_unit = "B"
             evicted_time_unit = "ms"
+            sdma_usage_unit = "us"
 
             if self.logger.is_human_readable_format():
                 process_info['mem_usage'] = self.helpers.convert_bytes_to_readable(process_info['mem_usage'])
@@ -3561,6 +3563,10 @@ class AMDSMICommands():
             process_info['evicted_time'] = self.helpers.unit_format(self.logger,
                                                                  process_info['evicted_time'],
                                                                  evicted_time_unit)
+
+            process_info['sdma_usage'] = self.helpers.unit_format(self.logger,
+                                                                 process_info['sdma_usage'],
+                                                                 sdma_usage_unit)
 
             for usage_metric in process_info['usage']:
                 process_info['usage'][usage_metric] = self.helpers.unit_format(self.logger,
@@ -6411,10 +6417,12 @@ class AMDSMICommands():
                 process_info.pop('engine_usage')  # Remove 'engine_usage' value
                 process_info['mem_usage'] = process_info.pop('mem')
                 process_info['cu_occupancy'] = process_info.pop('cu_occupancy')
+                process_info['sdma_usage'] = process_info.pop('sdma_usage')
                 process_info['evicted_time'] = process_info.pop('evicted_time')
 
                 memory_usage_unit = "B"
                 evicted_time_unit = "ms"
+                sdma_usage_unit = "us"
 
                 if self.logger.is_human_readable_format():
                     process_info['mem_usage'] = self.helpers.convert_bytes_to_readable(process_info['mem_usage'])
@@ -6426,9 +6434,23 @@ class AMDSMICommands():
                                                                      process_info['mem_usage'],
                                                                      memory_usage_unit)
 
-                process_info['evicted_time'] = self.helpers.unit_format(self.logger,
+                if self.logger.is_human_readable_format():
+                    process_info['evicted_time'] = self.helpers.convert_time_to_readable(
+                                                                     process_info['evicted_time'],
+                                                                     "ms")
+                else:
+                    process_info['evicted_time'] = self.helpers.unit_format(self.logger,
                                                                      process_info['evicted_time'],
                                                                      evicted_time_unit)
+
+                if self.logger.is_human_readable_format():
+                    process_info['sdma_usage'] = self.helpers.convert_time_to_readable(
+                                                                     process_info['sdma_usage'],
+                                                                     "us")
+                else:
+                    process_info['sdma_usage'] = self.helpers.unit_format(self.logger,
+                                                                     process_info['sdma_usage'],
+                                                                     sdma_usage_unit)
 
                 for usage_metric in process_info['memory_usage']:
                     process_info['memory_usage'][usage_metric] = self.helpers.unit_format(self.logger,
@@ -6463,7 +6485,7 @@ class AMDSMICommands():
             # Build the process table's title and header
             self.logger.secondary_table_title = "PROCESS INFO"
             self.logger.secondary_table_header = 'GPU'.rjust(3) + "NAME".rjust(19) + "PID".rjust(9) + "GTT_MEM".rjust(10) + \
-                                                "CPU_MEM".rjust(10) + "VRAM_MEM".rjust(10) + "MEM_USG".rjust(10) + "CU%".rjust(9) + "EVICT".rjust(10)
+                                                "CPU_MEM".rjust(10) + "VRAM_MEM".rjust(10) + "MEM_USG".rjust(10) + "CU%".rjust(9) + "SDMA".rjust(8) + "EVICT".rjust(8)
 
             if watching_output:
                 self.logger.secondary_table_header = 'TIMESTAMP'.rjust(10) + '  ' + self.logger.secondary_table_header
@@ -7721,12 +7743,13 @@ class AMDSMICommands():
             try:
                 raw_process_list = amdsmi_interface.amdsmi_get_gpu_process_list(processor)
                 for proc in raw_process_list:
-                    proc_info_dict = {"gpu": "N/A", "pid": "N/A", "name": "N/A","gtt": "N/A", "vram": "N/A", "mem_usage": "N/A", "cu_occupancy": "N/A"}
+                    proc_info_dict = {"gpu": "N/A", "pid": "N/A", "name": "N/A","gtt": "N/A", "vram": "N/A", "mem_usage": "N/A", "cu_occupancy": "N/A", "sdma_usage": "N/A"}
                     proc_info_dict['gpu'] = gpu_id
                     proc_info_dict['pid'] = proc['pid']
                     proc_info_dict['name'] = proc['name']
                     proc_info_dict['gtt'] = self.helpers.convert_bytes_to_readable(proc['memory_usage']['gtt_mem'])
                     proc_info_dict['vram'] = self.helpers.convert_bytes_to_readable(proc['memory_usage']['vram_mem'])
+                    proc_info_dict['sdma_usage'] = self.helpers.unit_format(self.logger, proc['sdma_usage'], "us")
                     proc_info_dict['mem_usage'] = self.helpers.convert_bytes_to_readable(proc['mem'])
                     # Handle cu_occupancy conversion safely
                     try:
