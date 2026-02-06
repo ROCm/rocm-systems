@@ -822,17 +822,13 @@ def test_path_csv(
 
 
 @pytest.mark.path
-def test_output_directory_hostname(
-    binary_handler_profile_rocprof_compute, monkeypatch
-):
+def test_output_directory_hostname(binary_handler_profile_rocprof_compute, monkeypatch):
     """Test that %hostname% placeholder is replaced with the actual hostname."""
     from rocprof_compute_base import RocProfCompute
 
     hostname = "test_node"
 
-    monkeypatch.setattr(
-        RocProfCompute, "create_profiler", lambda self: MockProfiler()
-    )
+    monkeypatch.setattr(RocProfCompute, "create_profiler", lambda self: MockProfiler())
     monkeypatch.setattr(socket, "gethostname", lambda: hostname)
 
     workload_base_dir = test_utils.get_output_dir(param_id="hostname")
@@ -847,15 +843,11 @@ def test_output_directory_hostname(
 
 
 @pytest.mark.path
-def test_output_directory_gpumodel(
-    binary_handler_profile_rocprof_compute, monkeypatch
-):
+def test_output_directory_gpumodel(binary_handler_profile_rocprof_compute, monkeypatch):
     """Test that %gpumodel% placeholder is replaced with the GPU model name."""
     from rocprof_compute_base import RocProfCompute
 
-    monkeypatch.setattr(
-        RocProfCompute, "create_profiler", lambda self: MockProfiler()
-    )
+    monkeypatch.setattr(RocProfCompute, "create_profiler", lambda self: MockProfiler())
     monkeypatch.setattr(
         RocProfCompute, "generate_machine_specs", mock_generate_machine_specs
     )
@@ -880,9 +872,7 @@ def test_output_directory_rank_ignored_without_mpi(
     from rocprof_compute_base import RocProfCompute
 
     clear_rank_env(monkeypatch)
-    monkeypatch.setattr(
-        RocProfCompute, "create_profiler", lambda self: MockProfiler()
-    )
+    monkeypatch.setattr(RocProfCompute, "create_profiler", lambda self: MockProfiler())
 
     workload_base_dir = test_utils.get_output_dir(param_id="no_rank")
     workload_dir = os.path.join(workload_base_dir, "%rank%_output")
@@ -905,9 +895,7 @@ def test_output_directory_rank_replaced_with_mpi(
     clear_rank_env(monkeypatch)
     rank = "3"
 
-    monkeypatch.setattr(
-        RocProfCompute, "create_profiler", lambda self: MockProfiler()
-    )
+    monkeypatch.setattr(RocProfCompute, "create_profiler", lambda self: MockProfiler())
 
     for key in RANK_ENV_VARS:
         monkeypatch.setenv(key, rank)
@@ -932,9 +920,7 @@ def test_output_directory_env_variable(
     from rocprof_compute_base import RocProfCompute
 
     monkeypatch.setenv("ENV_1", "custom_env")
-    monkeypatch.setattr(
-        RocProfCompute, "create_profiler", lambda self: MockProfiler()
-    )
+    monkeypatch.setattr(RocProfCompute, "create_profiler", lambda self: MockProfiler())
 
     workload_base_dir = test_utils.get_output_dir(param_id="env")
     workload_dir = os.path.join(workload_base_dir, "%env{ENV_1}%")
@@ -956,9 +942,7 @@ def test_output_directory_env_variable_unset(
     from rocprof_compute_base import RocProfCompute
 
     monkeypatch.delenv("ENV_2", raising=False)
-    monkeypatch.setattr(
-        RocProfCompute, "create_profiler", lambda self: MockProfiler()
-    )
+    monkeypatch.setattr(RocProfCompute, "create_profiler", lambda self: MockProfiler())
 
     workload_base_dir = test_utils.get_output_dir(param_id="no_env")
     workload_dir = os.path.join(workload_base_dir, "%env{ENV_2}%")
@@ -980,9 +964,7 @@ def test_output_directory_all_placeholders_combined(
     hostname = "test_node"
     rank = "3"
 
-    monkeypatch.setattr(
-        RocProfCompute, "create_profiler", lambda self: MockProfiler()
-    )
+    monkeypatch.setattr(RocProfCompute, "create_profiler", lambda self: MockProfiler())
     monkeypatch.setattr(socket, "gethostname", lambda: hostname)
     monkeypatch.setattr(
         RocProfCompute, "generate_machine_specs", mock_generate_machine_specs
@@ -1023,9 +1005,7 @@ def test_output_directory_default_with_rank(
     rank = "3"
     original_cwd = os.getcwd()
 
-    monkeypatch.setattr(
-        RocProfCompute, "create_profiler", lambda self: MockProfiler()
-    )
+    monkeypatch.setattr(RocProfCompute, "create_profiler", lambda self: MockProfiler())
     monkeypatch.setattr(
         RocProfCompute, "generate_machine_specs", mock_generate_machine_specs
     )
@@ -1067,9 +1047,7 @@ def test_output_directory_default_without_rank(
     clear_rank_env(monkeypatch)
     original_cwd = os.getcwd()
 
-    monkeypatch.setattr(
-        RocProfCompute, "create_profiler", lambda self: MockProfiler()
-    )
+    monkeypatch.setattr(RocProfCompute, "create_profiler", lambda self: MockProfiler())
     monkeypatch.setattr(
         RocProfCompute, "generate_machine_specs", mock_generate_machine_specs
     )
@@ -1105,9 +1083,7 @@ def test_output_directory_no_name_with_output_dir(
     """Test that --output-directory works without --name."""
     from rocprof_compute_base import RocProfCompute
 
-    monkeypatch.setattr(
-        RocProfCompute, "create_profiler", lambda self: MockProfiler()
-    )
+    monkeypatch.setattr(RocProfCompute, "create_profiler", lambda self: MockProfiler())
     monkeypatch.setattr(
         RocProfCompute, "generate_machine_specs", mock_generate_machine_specs
     )
@@ -1131,9 +1107,7 @@ def test_output_directory_no_name_no_output_dir(
     """Test that profiling fails when neither --name nor --output-directory is given."""
     from rocprof_compute_base import RocProfCompute
 
-    monkeypatch.setattr(
-        RocProfCompute, "create_profiler", lambda self: MockProfiler()
-    )
+    monkeypatch.setattr(RocProfCompute, "create_profiler", lambda self: MockProfiler())
     monkeypatch.setattr(
         RocProfCompute, "generate_machine_specs", mock_generate_machine_specs
     )
