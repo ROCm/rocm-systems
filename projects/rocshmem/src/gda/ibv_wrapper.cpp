@@ -27,6 +27,7 @@
 
 #include "rocshmem/rocshmem.hpp"
 #include <dlfcn.h>
+#include <sys/utsname.h>
 
 namespace rocshmem {
 
@@ -52,6 +53,9 @@ IBVWrapper::IBVWrapper() {
     DPRINTF("Could not construct InfiniBand Verbs function table. Disabled.\n");
     return;
   }
+
+  init_dmabuf_support_flag();
+
   is_initialized = true;
 }
 
@@ -60,6 +64,61 @@ IBVWrapper::~IBVWrapper() {
   if (ibv_handle != nullptr) {
     dlclose(ibv_handle);
   }
+}
+
+void IBVWrapper::init_dmabuf_support_flag() {
+  const char kernel_opt1[] = "CONFIG_DMABUF_MOVE_NOTIFY=y";
+  const char kernel_opt2[] = "CONFIG_PCI_P2PDMA=y";
+  int found_opt1           = 0;
+  int found_opt2           = 0;
+  FILE *fp;
+  struct utsname utsname;
+  char kernel_conf_file[128];
+  char buf[256];
+
+  if (ibv.reg_dmabuf_mr == NULL) {
+    DPRINTF("ibv_reg_dmabuf_mr not present in verbs library");
+    dmabuf_is_supported = 0;
+    return;
+  }
+
+  if (uname(&utsname) == -1) {
+    DPRINTF("could not get kernel name");
+    dmabuf_is_supported = 0;
+    return;
+  }
+
+  snprintf(kernel_conf_file, sizeof(kernel_conf_file),
+           "/boot/config-%s", utsname.release);
+  fp = fopen(kernel_conf_file, "r");
+  if (fp == NULL) {
+    DPRINTF("could not open kernel conf file %s error: %m",
+            kernel_conf_file);
+    dmabuf_is_supported = 0;
+    return;
+  }
+
+  while (fgets(buf, sizeof(buf), fp) != NULL) {
+    if (strstr(buf, kernel_opt1) != NULL) {
+      found_opt1 = 1;
+    }
+    if (strstr(buf, kernel_opt2) != NULL) {
+      found_opt2 = 1;
+    }
+    if (found_opt1 && found_opt2) {
+      dmabuf_is_supported = 1;
+      fclose(fp);
+      return;
+    }
+  }
+  fclose(fp);
+
+  dmabuf_is_supported = 0;
+  return;
+}
+
+int IBVWrapper::is_dmabuf_supported() {
+  return dmabuf_is_supported;
 }
 
 int IBVWrapper::init_function_table() {
@@ -75,6 +134,7 @@ int IBVWrapper::init_function_table() {
   DLSYM_HELPER(ibv, ibv_, ibv_handle, alloc_pd);
   DLSYM_HELPER(ibv, ibv_, ibv_handle, dealloc_pd);
   DLSYM_HELPER(ibv, ibv_, ibv_handle, reg_mr);
+  DLSYM_OPT_HELPER(ibv, ibv_, ibv_handle, reg_dmabuf_mr);
   DLSYM_HELPER(ibv, ibv_, ibv_handle, reg_mr_iova2);
   DLSYM_HELPER(ibv, ibv_, ibv_handle, dereg_mr);
   DLSYM_HELPER(ibv, ibv_, ibv_handle, destroy_cq);
@@ -153,13 +213,26 @@ int IBVWrapper::dealloc_pd(struct ibv_pd *pd) {
 }
 
 struct ibv_mr* IBVWrapper::reg_mr(struct ibv_pd* pd, void* addr, size_t length, int access) {
-  // Passthrough function for ibv_reg_mr macro in verbs.h
-  int is_access_const = __builtin_constant_p(((int)(access) & IBV_ACCESS_OPTIONAL_RANGE) == 0);
+  if (is_dmabuf_supported()) {
+    uint64_t offset = 0;
+    int fd = 0;
 
-  if (is_access_const && (access & IBV_ACCESS_OPTIONAL_RANGE) == 0)
-    return ibv.reg_mr(pd, addr, length, (int)access);
-  else
-    return ibv.reg_mr_iova2(pd, addr, length, (uintptr_t)addr, access);
+    DPRINTF("Using ibv_reg_dmabuf_mr()\n");
+
+    CHECK_HSA(hsa_amd_portable_export_dmabuf(addr, length, &fd, &offset));
+
+    return ibv.reg_dmabuf_mr(pd, offset, length, (uint64_t) addr, fd, access);
+  } else {
+    DPRINTF("Using ibv_reg_mr()\n");
+
+    // Passthrough function for ibv_reg_mr macro in verbs.h
+    int is_access_const = __builtin_constant_p(((int)(access) & IBV_ACCESS_OPTIONAL_RANGE) == 0);
+
+    if (is_access_const && (access & IBV_ACCESS_OPTIONAL_RANGE) == 0)
+      return ibv.reg_mr(pd, addr, length, (int)access);
+    else
+      return ibv.reg_mr_iova2(pd, addr, length, (uintptr_t)addr, access);
+  }
 }
 
 int IBVWrapper::dereg_mr(struct ibv_mr *mr) {

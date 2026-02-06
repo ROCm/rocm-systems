@@ -95,6 +95,22 @@ namespace rocshmem {
   }                                                         \
 } while(0)
 
+/**
+ * @name CHECK_HSA
+ * @brief Checks if HSA command succeeded. If it is not not success then it exits the program.
+ *
+ * @param[in] cmd HSA function to run and check
+ *
+ */
+#define CHECK_HSA(cmd)                                                    \
+  do {                                                                    \
+    hsa_status_t error = cmd;                                             \
+    if (error != HSA_STATUS_SUCCESS) {                                    \
+      fprintf(stderr, "error: %d at %s:%d\n", error, __FILE__, __LINE__); \
+      exit(EXIT_FAILURE);                                                 \
+    }                                                                     \
+} while (0)
+
 #ifdef DEBUG
 #define DPRINTF(...)     \
   do {                   \
