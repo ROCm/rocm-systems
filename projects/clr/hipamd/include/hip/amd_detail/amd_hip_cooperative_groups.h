@@ -1361,7 +1361,11 @@ __CG_QUALIFIER__ auto reduce(const TyGroup& group, TyVal&& val, TyFn&& op) -> de
   using Op  = std::decay_t<TyFn>;
   using Val = std::decay_t<TyVal>;
   static_assert(is_op_type_same<TyVal, decltype(op(val, val))>::value, "Operator input and output types differ");
-  lane_mask mask = __activemask();
+
+  // we cannot simply use the __activemask() here, because more than one tile could have active
+  // threads at a time
+  unsigned long long mask = ~0ull >> (64 - group.num_threads());
+  mask <<= (((threadIdx.x % warpSize) / group.num_threads()) * group.num_threads());
 
   if constexpr (std::is_same<Op, cooperative_groups::plus<Val>>::value) {
     return __reduce_add_sync(mask, val);
