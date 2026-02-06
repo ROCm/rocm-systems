@@ -137,22 +137,37 @@ CREATE TABLE IF NOT EXISTS
         FOREIGN KEY (agent_id) REFERENCES `rocpd_info_agent{{uuid}}` (id) ON UPDATE CASCADE
     );
 
--- PC sampling field registration
+-- Binary blob schema (self-describing layout)
 CREATE TABLE IF NOT EXISTS
-    `rocpd_info_pc_sample{{uuid}}` (
+    `rocpd_info_blob_schema{{uuid}}` (
         "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
         "guid" TEXT DEFAULT "{{guid}}" NOT NULL,
         "nid" INTEGER NOT NULL,
         "pid" INTEGER NOT NULL,
-        "agent_id" INTEGER,
         "name" TEXT NOT NULL,
         "description" TEXT,
-        "value_type" TEXT CHECK ("value_type" IN ('INT', 'REAL', 'TEXT')),
-        "units" TEXT DEFAULT "",
+        "byte_order" TEXT CHECK ("byte_order" IN ('little', 'big')),
+        "alignment" INTEGER NOT NULL,
+        "struct_size" INTEGER NOT NULL,
+        "version" INTEGER NOT NULL,
         "extdata" JSONB DEFAULT "{}" NOT NULL,
         FOREIGN KEY (nid) REFERENCES `rocpd_info_node{{uuid}}` (id) ON UPDATE CASCADE,
-        FOREIGN KEY (pid) REFERENCES `rocpd_info_process{{uuid}}` (id) ON UPDATE CASCADE,
-        FOREIGN KEY (agent_id) REFERENCES `rocpd_info_agent{{uuid}}` (id) ON UPDATE CASCADE
+        FOREIGN KEY (pid) REFERENCES `rocpd_info_process{{uuid}}` (id) ON UPDATE CASCADE
+    );
+
+CREATE TABLE IF NOT EXISTS
+    `rocpd_info_blob_field{{uuid}}` (
+        "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+        "guid" TEXT DEFAULT "{{guid}}" NOT NULL,
+        "schema_id" INTEGER NOT NULL,
+        "name" TEXT NOT NULL,
+        "offset" INTEGER NOT NULL,
+        "size" INTEGER NOT NULL,
+        "data_type" TEXT NOT NULL,
+        "is_signed" INTEGER NOT NULL,
+        "description" TEXT,
+        "extdata" JSONB DEFAULT "{}" NOT NULL,
+        FOREIGN KEY (schema_id) REFERENCES `rocpd_info_blob_schema{{uuid}}` (id) ON UPDATE CASCADE
     );
 
 CREATE TABLE IF NOT EXISTS
@@ -256,17 +271,42 @@ CREATE TABLE IF NOT EXISTS
         FOREIGN KEY (event_id) REFERENCES `rocpd_event{{uuid}}` (id) ON UPDATE CASCADE
     );
 
--- PC sampling field values per event
+-- GPU PC sampling data (hybrid: columns for common fields + blob for arch-specific fields)
 CREATE TABLE IF NOT EXISTS
-    `rocpd_pc_sample_event{{uuid}}` (
+    `rocpd_gpu_pc_sample{{uuid}}` (
         "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
         "guid" TEXT DEFAULT "{{guid}}" NOT NULL,
-        "event_id" INTEGER NOT NULL,
-        "field_id" INTEGER NOT NULL,
-        "value" ANY,           -- Supports INT, TEXT, REAL based on field definition
-        "extdata" JSONB DEFAULT "{}" NOT NULL,
-        FOREIGN KEY (field_id) REFERENCES `rocpd_info_pc_sample{{uuid}}` (id) ON UPDATE CASCADE,
-        FOREIGN KEY (event_id) REFERENCES `rocpd_event{{uuid}}` (id) ON UPDATE CASCADE
+        "timestamp" BIGINT NOT NULL,
+        "nid" INTEGER NOT NULL,
+        "pid" INTEGER NOT NULL,
+        "tid" INTEGER NOT NULL,
+        "agent_id" INTEGER,
+        "dispatch_id" INTEGER,
+        "stack_id" INTEGER,
+        "parent_stack_id" INTEGER,
+        "correlation_id" INTEGER,
+        "sampling_method" TEXT,
+        "exec_mask" BIGINT,
+        "instruction" TEXT,
+        "instruction_comment" TEXT,
+        "code_object_id" INTEGER,
+        "code_object_offset" INTEGER,
+        "wave_in_group" INTEGER,
+        "workgroup_id_x" INTEGER,
+        "workgroup_id_y" INTEGER,
+        "workgroup_id_z" INTEGER,
+        "wave_issued" INTEGER,
+        "inst_type" TEXT,
+        "stall_reason" TEXT,
+        "wave_count" INTEGER,
+        "extdata_schema_id" INTEGER,
+        "extdata_blob" BLOB,
+        FOREIGN KEY (nid) REFERENCES `rocpd_info_node{{uuid}}` (id) ON UPDATE CASCADE,
+        FOREIGN KEY (pid) REFERENCES `rocpd_info_process{{uuid}}` (id) ON UPDATE CASCADE,
+        FOREIGN KEY (tid) REFERENCES `rocpd_info_thread{{uuid}}` (id) ON UPDATE CASCADE,
+        FOREIGN KEY (agent_id) REFERENCES `rocpd_info_agent{{uuid}}` (id) ON UPDATE CASCADE,
+        FOREIGN KEY (extdata_schema_id) REFERENCES `rocpd_info_blob_schema{{uuid}}` (id)
+            ON UPDATE CASCADE
     );
 
 -- Region with a start/stop on the same thread (CPU)

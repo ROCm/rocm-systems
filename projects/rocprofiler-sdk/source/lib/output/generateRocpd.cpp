@@ -63,6 +63,7 @@
 #include <dlfcn.h>
 #include <atomic>
 #include <cctype>
+#include <cstring>
 #include <chrono>
 #include <filesystem>
 #include <future>
@@ -982,7 +983,8 @@ write_rocpd(
         }
     };
 
-    auto insert_kernel_dispatch_data = [&, node_id, this_pid](auto& dispatch_evt_ids) {
+    auto insert_kernel_dispatch_data =
+        [&, node_id, this_pid](auto& dispatch_evt_ids, auto& dispatch_agent_ids) {
         auto _sqlgenperf_rocpd = get_simple_timer("rocpd_kernel_dispatch");
 
         auto process_dispatch = [&](uint64_t    dispatch_id,
@@ -1040,6 +1042,10 @@ write_rocpd(
                     : std::string_view{};
 
             auto agent_node_id = tool_metadata.get_agent(info.agent_id)->node_id;
+
+            if(dispatch_agent_ids.size() < dispatch_id + 1)
+                common::container::resize(dispatch_agent_ids, dispatch_id + 1, 0UL);
+            dispatch_agent_ids.at(dispatch_id) = agent_node_id;
 
             // Insert into kernel dispatch table
             auto stmt = get_insert_statement(
@@ -1462,219 +1468,324 @@ write_rocpd(
         }
     };
 
-    auto dispatch_to_evt_id = common::container::stable_vector<uint64_t, 512>{};
+    auto dispatch_to_evt_id   = common::container::stable_vector<uint64_t, 512>{};
+    auto dispatch_to_agent_id = common::container::stable_vector<uint64_t, 512>{};
 
     auto insert_pc_sampling_data = [conn,
                                     node_id,
                                     this_pid,
-                                    &string_entries,
-                                    &dispatch_to_evt_id,
+                                    &dispatch_to_agent_id,
                                     &get_instruction_info](const auto&        pc_sampling_gen,
                                                            const std::string& sampling_method) {
         if(pc_sampling_gen.empty()) return;
 
-        auto _sqlgenperf_rocpd = get_simple_timer("rocpd_pc_sample_event");
-        // Cache for PC sampling field IDs to avoid redundant lookups and inserts
-        struct agent_id_hash
-        {
-            size_t operator()(const rocprofiler_agent_id_t& v) const noexcept
-            {
-                return std::hash<uint64_t>{}(v.handle);
-            }
-        };
-
-        struct agent_id_equal
-        {
-            bool operator()(const rocprofiler_agent_id_t& lhs,
-                            const rocprofiler_agent_id_t& rhs) const noexcept
-            {
-                return lhs.handle == rhs.handle;
-            }
-        };
-
-        std::unordered_map<rocprofiler_agent_id_t,
-                           std::unordered_map<std::string_view, uint64_t>,
-                           agent_id_hash,
-                           agent_id_equal>
-            pc_sampling_field_ids;
+        auto _sqlgenperf_rocpd = get_simple_timer("rocpd_gpu_pc_sample");
 
         std::unordered_map<int64_t, std::pair<std::string, std::string>> instruction_cache;
 
-        constexpr size_t k_sample_batch_size   = 1024;
-        constexpr size_t k_pc_field_batch_size = 4096;
-        auto             sample_value_rows     = std::vector<std::string>{};
-        auto             pc_field_value_rows   = std::vector<std::string>{};
+        // Self-describing, fixed-layout blob schema for architecture-specific fields
+#pragma pack(push, 1)
+        struct pc_sample_extdata_v1
+        {
+            uint32_t hw_id_chiplet             = 0;
+            uint32_t hw_id_wave_id             = 0;
+            uint32_t hw_id_simd_id             = 0;
+            uint32_t hw_id_pipe_id             = 0;
+            uint32_t hw_id_cu_or_wgp_id        = 0;
+            uint32_t hw_id_shader_array_id     = 0;
+            uint32_t hw_id_shader_engine_id    = 0;
+            uint32_t hw_id_workgroup_id        = 0;
+            uint32_t hw_id_vm_id               = 0;
+            uint32_t hw_id_queue_id            = 0;
+            uint32_t hw_id_microengine_id      = 0;
 
-        sample_value_rows.reserve(k_sample_batch_size);
-        pc_field_value_rows.reserve(k_pc_field_batch_size);
-
-        auto flush_sample_batch = [&]() {
-            if(sample_value_rows.empty()) return;
-            auto stmt =
-                fmt::format("INSERT INTO {} (track_id, timestamp, event_id) VALUES {};",
-                            replace_uuid("rocpd_sample{{uuid}}"),
-                            fmt::join(sample_value_rows.begin(), sample_value_rows.end(), ", "));
-            execute_raw_sql_statements(conn, stmt);
-            sample_value_rows.clear();
+            uint8_t dual_issue_valu            = 0;
+            uint8_t arb_state_issue_valu       = 0;
+            uint8_t arb_state_issue_matrix     = 0;
+            uint8_t arb_state_issue_lds        = 0;
+            uint8_t arb_state_issue_lds_direct = 0;
+            uint8_t arb_state_issue_scalar     = 0;
+            uint8_t arb_state_issue_vmem_tex   = 0;
+            uint8_t arb_state_issue_flat       = 0;
+            uint8_t arb_state_issue_exp        = 0;
+            uint8_t arb_state_issue_misc       = 0;
+            uint8_t arb_state_issue_brmsg      = 0;
+            uint8_t arb_state_stall_valu       = 0;
+            uint8_t arb_state_stall_matrix     = 0;
+            uint8_t arb_state_stall_lds        = 0;
+            uint8_t arb_state_stall_lds_direct = 0;
+            uint8_t arb_state_stall_scalar     = 0;
+            uint8_t arb_state_stall_vmem_tex   = 0;
+            uint8_t arb_state_stall_flat       = 0;
+            uint8_t arb_state_stall_exp        = 0;
+            uint8_t arb_state_stall_misc       = 0;
+            uint8_t arb_state_stall_brmsg      = 0;
         };
+#pragma pack(pop)
 
-        auto flush_pc_field_batch = [&]() {
-            if(pc_field_value_rows.empty()) return;
-            auto stmt = fmt::format(
-                "INSERT INTO {} (event_id, field_id, value) VALUES {};",
-                replace_uuid("rocpd_pc_sample_event{{uuid}}"),
-                fmt::join(pc_field_value_rows.begin(), pc_field_value_rows.end(), ", "));
-            execute_raw_sql_statements(conn, stmt);
-            pc_field_value_rows.clear();
-        };
-
-        // Function to register a PC sampling field in rocpd_info_pc_sample
-        auto register_pc_sample_field = [&](const std::string& field_name,
-                                            const std::string& description,
-                                            const std::string& value_type = "TEXT",
-                                            uint64_t           agent_id   = 0) -> uint64_t {
-            auto  agent_key = rocprofiler_agent_id_t{agent_id};
-            auto& agent_map = pc_sampling_field_ids[agent_key];
-            auto  itr       = agent_map.find(field_name);
-            if(itr != agent_map.end()) return itr->second;
-
-            // Field not registered yet, insert into rocpd_info_pc_sample
-            auto stmt = agent_id > 0
-                            ? get_insert_statement(
-                                  "rocpd_info_pc_sample{{uuid}}",
-                                  {insert_value("nid", node_id),
-                                   insert_value("pid", this_pid),
-                                   insert_value("name", field_name),
-                                   insert_value("description", description, allow_empty_string{}),
-                                   insert_value("value_type", value_type),
-                                   insert_value("agent_id", agent_id)})
-                            : get_insert_statement(
-                                  "rocpd_info_pc_sample{{uuid}}",
-                                  {insert_value("nid", node_id),
-                                   insert_value("pid", this_pid),
-                                   insert_value("name", field_name),
-                                   insert_value("description", description, allow_empty_string{}),
-                                   insert_value("value_type", value_type)});
+        auto register_blob_schema = [&]() {
+            auto stmt = get_insert_statement(
+                "rocpd_info_blob_schema{{uuid}}",
+                {insert_value("nid", node_id),
+                 insert_value("pid", this_pid),
+                 insert_value("name", "pc_sample_extdata_v1"),
+                 insert_value("description",
+                              "PC sampling architecture-specific fields (packed)",
+                              allow_empty_string{}),
+                 insert_value("byte_order", "little"),
+                 insert_value("alignment", 1),
+                 insert_value("struct_size", static_cast<int>(sizeof(pc_sample_extdata_v1))),
+                 insert_value("version", 1)});
 
             execute_raw_sql_statements(conn, stmt);
-            auto field_id         = sqlite3_last_insert_rowid(conn);
-            agent_map[field_name] = field_id;
-            return field_id;
-        };
+            auto schema_id = sqlite3_last_insert_rowid(conn);
 
-        // Register all field types once and cache field ids
-        const auto field_sampling_method = register_pc_sample_field(
-            "sampling_method", "PC sampling method (host_trap or stochastic)", "TEXT");
-        const auto field_instruction = register_pc_sample_field(
-            "instruction", "Disassembled instruction at the program counter", "TEXT");
-        const auto field_instruction_comment =
-            register_pc_sample_field("instruction_comment", "Comment for the instruction", "TEXT");
-        const auto field_code_object_id = register_pc_sample_field(
-            "code_object_id", "ID of the code object containing the sampled PC", "INT");
-        const auto field_code_object_offset = register_pc_sample_field(
-            "code_object_offset", "Offset within the code object for the sampled PC", "INT");
-        const auto field_exec_mask =
-            register_pc_sample_field("exec_mask", "Active SIMD lanes execution mask", "INT");
-        const auto field_wave_in_group =
-            register_pc_sample_field("wave_in_group", "Wave index within the workgroup", "INT");
-
-        const auto field_workgroup_id_x =
-            register_pc_sample_field("workgroup_id_x", "X dimension of workgroup ID", "INT");
-        const auto field_workgroup_id_y =
-            register_pc_sample_field("workgroup_id_y", "Y dimension of workgroup ID", "INT");
-        const auto field_workgroup_id_z =
-            register_pc_sample_field("workgroup_id_z", "Z dimension of workgroup ID", "INT");
-
-        const auto field_hw_id_chiplet =
-            register_pc_sample_field("hw_id_chiplet", "HW ID chiplet", "INT");
-        const auto field_hw_id_wave_id =
-            register_pc_sample_field("hw_id_wave_id", "HW ID wave ID", "INT");
-        const auto field_hw_id_simd_id =
-            register_pc_sample_field("hw_id_simd_id", "HW ID SIMD ID", "INT");
-        const auto field_hw_id_pipe_id =
-            register_pc_sample_field("hw_id_pipe_id", "HW ID pipe ID", "INT");
-        const auto field_hw_id_cu_or_wgp_id =
-            register_pc_sample_field("hw_id_cu_or_wgp_id", "HW ID CU/WGP ID", "INT");
-        const auto field_hw_id_shader_array_id =
-            register_pc_sample_field("hw_id_shader_array_id", "HW ID shader array ID", "INT");
-        const auto field_hw_id_shader_engine_id =
-            register_pc_sample_field("hw_id_shader_engine_id", "HW ID shader engine ID", "INT");
-        const auto field_hw_id_workgroup_id =
-            register_pc_sample_field("hw_id_workgroup_id", "HW ID workgroup ID", "INT");
-        const auto field_hw_id_vm_id =
-            register_pc_sample_field("hw_id_vm_id", "HW ID VM ID", "INT");
-        const auto field_hw_id_queue_id =
-            register_pc_sample_field("hw_id_queue_id", "HW ID queue ID", "INT");
-        const auto field_hw_id_microengine_id =
-            register_pc_sample_field("hw_id_microengine_id", "HW ID microengine ID", "INT");
-
-        const auto field_wave_issued =
-            register_pc_sample_field("wave_issued", "Whether the wave was issued", "INT");
-        const auto field_inst_type =
-            register_pc_sample_field("inst_type", "Type of instruction sampled", "TEXT");
-        const auto field_wave_count = register_pc_sample_field(
-            "wave_count", "Number of active waves on the CU at time of sampling", "INT");
-        const auto field_stall_reason =
-            register_pc_sample_field("stall_reason", "Reason for wave stalling", "TEXT");
-
-        const auto field_dual_issue_valu =
-            register_pc_sample_field("dual_issue_valu", "Dual issue VALU", "INT");
-        const auto field_arb_state_issue_valu = register_pc_sample_field(
-            "arb_state_issue_valu", "Arbiter issued VALU instruction", "INT");
-        const auto field_arb_state_issue_matrix = register_pc_sample_field(
-            "arb_state_issue_matrix", "Arbiter issued matrix instruction", "INT");
-        const auto field_arb_state_issue_lds = register_pc_sample_field(
-            "arb_state_issue_lds", "Arbiter issued LDS instruction", "INT");
-        const auto field_arb_state_issue_lds_direct = register_pc_sample_field(
-            "arb_state_issue_lds_direct", "Arbiter issued LDS direct instruction", "INT");
-        const auto field_arb_state_issue_scalar = register_pc_sample_field(
-            "arb_state_issue_scalar", "Arbiter issued scalar instruction", "INT");
-        const auto field_arb_state_issue_vmem_tex = register_pc_sample_field(
-            "arb_state_issue_vmem_tex", "Arbiter issued vmem/tex instruction", "INT");
-        const auto field_arb_state_issue_flat = register_pc_sample_field(
-            "arb_state_issue_flat", "Arbiter issued flat instruction", "INT");
-        const auto field_arb_state_issue_exp = register_pc_sample_field(
-            "arb_state_issue_exp", "Arbiter issued export instruction", "INT");
-        const auto field_arb_state_issue_misc = register_pc_sample_field(
-            "arb_state_issue_misc", "Arbiter issued misc instruction", "INT");
-        const auto field_arb_state_issue_brmsg = register_pc_sample_field(
-            "arb_state_issue_brmsg", "Arbiter issued branch/message instruction", "INT");
-        const auto field_arb_state_stall_valu =
-            register_pc_sample_field("arb_state_stall_valu", "VALU stall", "INT");
-        const auto field_arb_state_stall_matrix =
-            register_pc_sample_field("arb_state_stall_matrix", "Matrix stall", "INT");
-        const auto field_arb_state_stall_lds =
-            register_pc_sample_field("arb_state_stall_lds", "LDS stall", "INT");
-        const auto field_arb_state_stall_lds_direct =
-            register_pc_sample_field("arb_state_stall_lds_direct", "LDS direct stall", "INT");
-        const auto field_arb_state_stall_scalar =
-            register_pc_sample_field("arb_state_stall_scalar", "Scalar stall", "INT");
-        const auto field_arb_state_stall_vmem_tex =
-            register_pc_sample_field("arb_state_stall_vmem_tex", "VMEM/TEX stall", "INT");
-        const auto field_arb_state_stall_flat =
-            register_pc_sample_field("arb_state_stall_flat", "Flat stall", "INT");
-        const auto field_arb_state_stall_exp =
-            register_pc_sample_field("arb_state_stall_exp", "Export stall", "INT");
-        const auto field_arb_state_stall_misc =
-            register_pc_sample_field("arb_state_stall_misc", "Misc stall", "INT");
-        const auto field_arb_state_stall_brmsg =
-            register_pc_sample_field("arb_state_stall_brmsg", "Branch/message stall", "INT");
-
-        auto add_pc_sample_value_id =
-            [&](uint64_t event_id, uint64_t field_id, auto&& value, bool force_insert = false) {
-                using value_t = std::decay_t<decltype(value)>;
-
-                if constexpr(common::mpl::is_string_type<value_t>::value)
-                {
-                    if(!force_insert && std::string_view{value}.empty()) return;
-                }
-                auto value_literal = insert_value("value", value, allow_empty_string{}).value;
-                pc_field_value_rows.emplace_back(
-                    fmt::format("({}, {}, {})", event_id, field_id, value_literal));
-                if(pc_field_value_rows.size() >= k_pc_field_batch_size) flush_pc_field_batch();
+            auto add_field = [&](std::string_view name,
+                                 size_t          offset,
+                                 size_t          size,
+                                 std::string_view dtype,
+                                 bool            is_signed,
+                                 std::string_view desc) {
+                auto field_stmt = get_insert_statement(
+                    "rocpd_info_blob_field{{uuid}}",
+                    {insert_value("schema_id", schema_id),
+                     insert_value("name", std::string{name}),
+                     insert_value("offset", static_cast<int>(offset)),
+                     insert_value("size", static_cast<int>(size)),
+                     insert_value("data_type", std::string{dtype}),
+                     insert_value("is_signed", is_signed ? 1 : 0),
+                     insert_value("description", std::string{desc}, allow_empty_string{})});
+                execute_raw_sql_statements(conn, field_stmt);
             };
 
-        // Process PC sampling records
+            add_field("hw_id_chiplet",
+                      offsetof(pc_sample_extdata_v1, hw_id_chiplet),
+                      sizeof(uint32_t),
+                      "UINT32",
+                      false,
+                      "HW ID chiplet");
+            add_field("hw_id_wave_id",
+                      offsetof(pc_sample_extdata_v1, hw_id_wave_id),
+                      sizeof(uint32_t),
+                      "UINT32",
+                      false,
+                      "HW ID wave ID");
+            add_field("hw_id_simd_id",
+                      offsetof(pc_sample_extdata_v1, hw_id_simd_id),
+                      sizeof(uint32_t),
+                      "UINT32",
+                      false,
+                      "HW ID SIMD ID");
+            add_field("hw_id_pipe_id",
+                      offsetof(pc_sample_extdata_v1, hw_id_pipe_id),
+                      sizeof(uint32_t),
+                      "UINT32",
+                      false,
+                      "HW ID pipe ID");
+            add_field("hw_id_cu_or_wgp_id",
+                      offsetof(pc_sample_extdata_v1, hw_id_cu_or_wgp_id),
+                      sizeof(uint32_t),
+                      "UINT32",
+                      false,
+                      "HW ID CU/WGP ID");
+            add_field("hw_id_shader_array_id",
+                      offsetof(pc_sample_extdata_v1, hw_id_shader_array_id),
+                      sizeof(uint32_t),
+                      "UINT32",
+                      false,
+                      "HW ID shader array ID");
+            add_field("hw_id_shader_engine_id",
+                      offsetof(pc_sample_extdata_v1, hw_id_shader_engine_id),
+                      sizeof(uint32_t),
+                      "UINT32",
+                      false,
+                      "HW ID shader engine ID");
+            add_field("hw_id_workgroup_id",
+                      offsetof(pc_sample_extdata_v1, hw_id_workgroup_id),
+                      sizeof(uint32_t),
+                      "UINT32",
+                      false,
+                      "HW ID workgroup ID");
+            add_field("hw_id_vm_id",
+                      offsetof(pc_sample_extdata_v1, hw_id_vm_id),
+                      sizeof(uint32_t),
+                      "UINT32",
+                      false,
+                      "HW ID VM ID");
+            add_field("hw_id_queue_id",
+                      offsetof(pc_sample_extdata_v1, hw_id_queue_id),
+                      sizeof(uint32_t),
+                      "UINT32",
+                      false,
+                      "HW ID queue ID");
+            add_field("hw_id_microengine_id",
+                      offsetof(pc_sample_extdata_v1, hw_id_microengine_id),
+                      sizeof(uint32_t),
+                      "UINT32",
+                      false,
+                      "HW ID microengine ID");
+
+            add_field("dual_issue_valu",
+                      offsetof(pc_sample_extdata_v1, dual_issue_valu),
+                      sizeof(uint8_t),
+                      "UINT8",
+                      false,
+                      "Dual issue VALU");
+            add_field("arb_state_issue_valu",
+                      offsetof(pc_sample_extdata_v1, arb_state_issue_valu),
+                      sizeof(uint8_t),
+                      "UINT8",
+                      false,
+                      "Arbiter issued VALU instruction");
+            add_field("arb_state_issue_matrix",
+                      offsetof(pc_sample_extdata_v1, arb_state_issue_matrix),
+                      sizeof(uint8_t),
+                      "UINT8",
+                      false,
+                      "Arbiter issued matrix instruction");
+            add_field("arb_state_issue_lds",
+                      offsetof(pc_sample_extdata_v1, arb_state_issue_lds),
+                      sizeof(uint8_t),
+                      "UINT8",
+                      false,
+                      "Arbiter issued LDS instruction");
+            add_field("arb_state_issue_lds_direct",
+                      offsetof(pc_sample_extdata_v1, arb_state_issue_lds_direct),
+                      sizeof(uint8_t),
+                      "UINT8",
+                      false,
+                      "Arbiter issued LDS direct instruction");
+            add_field("arb_state_issue_scalar",
+                      offsetof(pc_sample_extdata_v1, arb_state_issue_scalar),
+                      sizeof(uint8_t),
+                      "UINT8",
+                      false,
+                      "Arbiter issued scalar instruction");
+            add_field("arb_state_issue_vmem_tex",
+                      offsetof(pc_sample_extdata_v1, arb_state_issue_vmem_tex),
+                      sizeof(uint8_t),
+                      "UINT8",
+                      false,
+                      "Arbiter issued vmem/tex instruction");
+            add_field("arb_state_issue_flat",
+                      offsetof(pc_sample_extdata_v1, arb_state_issue_flat),
+                      sizeof(uint8_t),
+                      "UINT8",
+                      false,
+                      "Arbiter issued flat instruction");
+            add_field("arb_state_issue_exp",
+                      offsetof(pc_sample_extdata_v1, arb_state_issue_exp),
+                      sizeof(uint8_t),
+                      "UINT8",
+                      false,
+                      "Arbiter issued export instruction");
+            add_field("arb_state_issue_misc",
+                      offsetof(pc_sample_extdata_v1, arb_state_issue_misc),
+                      sizeof(uint8_t),
+                      "UINT8",
+                      false,
+                      "Arbiter issued misc instruction");
+            add_field("arb_state_issue_brmsg",
+                      offsetof(pc_sample_extdata_v1, arb_state_issue_brmsg),
+                      sizeof(uint8_t),
+                      "UINT8",
+                      false,
+                      "Arbiter issued branch/message instruction");
+            add_field("arb_state_stall_valu",
+                      offsetof(pc_sample_extdata_v1, arb_state_stall_valu),
+                      sizeof(uint8_t),
+                      "UINT8",
+                      false,
+                      "VALU stall");
+            add_field("arb_state_stall_matrix",
+                      offsetof(pc_sample_extdata_v1, arb_state_stall_matrix),
+                      sizeof(uint8_t),
+                      "UINT8",
+                      false,
+                      "Matrix stall");
+            add_field("arb_state_stall_lds",
+                      offsetof(pc_sample_extdata_v1, arb_state_stall_lds),
+                      sizeof(uint8_t),
+                      "UINT8",
+                      false,
+                      "LDS stall");
+            add_field("arb_state_stall_lds_direct",
+                      offsetof(pc_sample_extdata_v1, arb_state_stall_lds_direct),
+                      sizeof(uint8_t),
+                      "UINT8",
+                      false,
+                      "LDS direct stall");
+            add_field("arb_state_stall_scalar",
+                      offsetof(pc_sample_extdata_v1, arb_state_stall_scalar),
+                      sizeof(uint8_t),
+                      "UINT8",
+                      false,
+                      "Scalar stall");
+            add_field("arb_state_stall_vmem_tex",
+                      offsetof(pc_sample_extdata_v1, arb_state_stall_vmem_tex),
+                      sizeof(uint8_t),
+                      "UINT8",
+                      false,
+                      "VMEM/TEX stall");
+            add_field("arb_state_stall_flat",
+                      offsetof(pc_sample_extdata_v1, arb_state_stall_flat),
+                      sizeof(uint8_t),
+                      "UINT8",
+                      false,
+                      "Flat stall");
+            add_field("arb_state_stall_exp",
+                      offsetof(pc_sample_extdata_v1, arb_state_stall_exp),
+                      sizeof(uint8_t),
+                      "UINT8",
+                      false,
+                      "Export stall");
+            add_field("arb_state_stall_misc",
+                      offsetof(pc_sample_extdata_v1, arb_state_stall_misc),
+                      sizeof(uint8_t),
+                      "UINT8",
+                      false,
+                      "Misc stall");
+            add_field("arb_state_stall_brmsg",
+                      offsetof(pc_sample_extdata_v1, arb_state_stall_brmsg),
+                      sizeof(uint8_t),
+                      "UINT8",
+                      false,
+                      "Branch/message stall");
+
+            return static_cast<uint64_t>(schema_id);
+        };
+
+        static uint64_t ext_schema_id = 0;
+        if(ext_schema_id == 0) ext_schema_id = register_blob_schema();
+
+        auto insert_stmt_sql = fmt::format(
+            "INSERT INTO {} (timestamp, nid, pid, tid, agent_id, dispatch_id, stack_id, "
+            "parent_stack_id, correlation_id, sampling_method, exec_mask, instruction, "
+            "instruction_comment, code_object_id, code_object_offset, wave_in_group, "
+            "workgroup_id_x, workgroup_id_y, workgroup_id_z, wave_issued, inst_type, "
+            "stall_reason, wave_count, extdata_schema_id, extdata_blob) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?);",
+            replace_uuid("rocpd_gpu_pc_sample{{uuid}}"));
+
+        sqlite3_stmt* insert_stmt = nullptr;
+        SQLITE3_CHECK(
+            sqlite3_prepare_v2(conn, insert_stmt_sql.c_str(), -1, &insert_stmt, nullptr));
+        auto _finalize = common::scope_destructor{[&]() { sqlite3_finalize(insert_stmt); }};
+
+        auto bind_text_or_null = [](sqlite3_stmt* stmt, int idx, const std::string& value) {
+            if(value.empty())
+                sqlite3_bind_null(stmt, idx);
+            else
+                sqlite3_bind_text(stmt, idx, value.c_str(), -1, SQLITE_TRANSIENT);
+        };
+
+        auto bind_int_or_null = [](sqlite3_stmt* stmt, int idx, std::optional<int64_t> value) {
+            if(value)
+                sqlite3_bind_int64(stmt, idx, *value);
+            else
+                sqlite3_bind_null(stmt, idx);
+        };
+
         auto _deferred = sql::deferred_transaction{conn};
         for(auto pitr : pc_sampling_gen)
         {
@@ -1708,100 +1819,28 @@ write_rocpd(
                     instruction_comment = sanitize_sql_string(info.second);
                 }
 
-                // Determine parent event ID (link to kernel dispatch)
-                uint64_t parent_evt_id = 0;
-                if(record.dispatch_id < dispatch_to_evt_id.size())
-                {
-                    parent_evt_id = dispatch_to_evt_id[record.dispatch_id];
-                }
+                uint64_t agent_id = 0;
+                if(record.dispatch_id < dispatch_to_agent_id.size())
+                    agent_id = dispatch_to_agent_id[record.dispatch_id];
 
-                // Create event for PC sample with parent_id linking to dispatch
-                auto evt_id =
-                    parent_evt_id > 0
-                        ? create_event(
-                              conn,
-                              {insert_value("category_id", string_entries.at("pc_sample")),
-                               insert_value("stack_id", record.correlation_id.internal),
-                               insert_value("parent_stack_id", record.correlation_id.internal),
-                               insert_value("correlation_id", record.correlation_id.external.value),
-                               insert_value("parent_id", parent_evt_id)})
-                        : create_event(
-                              conn,
-                              {insert_value("category_id", string_entries.at("pc_sample")),
-                               insert_value("stack_id", record.correlation_id.internal),
-                               insert_value("parent_stack_id", record.correlation_id.internal),
-                               insert_value("correlation_id",
-                                            record.correlation_id.external.value)});
+                pc_sample_extdata_v1 extdata = {};
+                extdata.hw_id_chiplet             = static_cast<uint32_t>(record.hw_id.chiplet);
+                extdata.hw_id_wave_id             = static_cast<uint32_t>(record.hw_id.wave_id);
+                extdata.hw_id_simd_id             = static_cast<uint32_t>(record.hw_id.simd_id);
+                extdata.hw_id_pipe_id             = static_cast<uint32_t>(record.hw_id.pipe_id);
+                extdata.hw_id_cu_or_wgp_id        =
+                    static_cast<uint32_t>(record.hw_id.cu_or_wgp_id);
+                extdata.hw_id_shader_array_id     =
+                    static_cast<uint32_t>(record.hw_id.shader_array_id);
+                extdata.hw_id_shader_engine_id    =
+                    static_cast<uint32_t>(record.hw_id.shader_engine_id);
+                extdata.hw_id_workgroup_id        =
+                    static_cast<uint32_t>(record.hw_id.workgroup_id);
+                extdata.hw_id_vm_id               = static_cast<uint32_t>(record.hw_id.vm_id);
+                extdata.hw_id_queue_id            = static_cast<uint32_t>(record.hw_id.queue_id);
+                extdata.hw_id_microengine_id      =
+                    static_cast<uint32_t>(record.hw_id.microengine_id);
 
-                // Create track_id
-                auto pc_track_id = get_track_id(conn,
-                                                node_id,
-                                                this_pid,
-                                                record.correlation_id.internal,
-                                                string_entries.at("pc_sample"),
-                                                R"({})");
-
-                // Create sample record
-                sample_value_rows.emplace_back(
-                    fmt::format("({}, {}, {})", pc_track_id, record.timestamp, evt_id));
-                if(sample_value_rows.size() >= k_sample_batch_size) flush_sample_batch();
-
-                // Add common fields as PC sample events - only skip empty strings
-                add_pc_sample_value_id(evt_id, field_sampling_method, sampling_method);
-
-                if(!instruction.empty())
-                {
-                    add_pc_sample_value_id(evt_id, field_instruction, instruction);
-                }
-
-                if(!instruction_comment.empty())
-                {
-                    add_pc_sample_value_id(evt_id, field_instruction_comment, instruction_comment);
-                }
-
-                add_pc_sample_value_id(evt_id, field_code_object_id, record.pc.code_object_id);
-                add_pc_sample_value_id(
-                    evt_id, field_code_object_offset, record.pc.code_object_offset);
-                add_pc_sample_value_id(
-                    evt_id, field_exec_mask, static_cast<uint64_t>(record.exec_mask));
-                add_pc_sample_value_id(
-                    evt_id, field_wave_in_group, static_cast<uint32_t>(record.wave_in_group));
-
-                // Add workgroup dimensions
-                add_pc_sample_value_id(evt_id, field_workgroup_id_x, record.workgroup_id.x);
-                add_pc_sample_value_id(evt_id, field_workgroup_id_y, record.workgroup_id.y);
-                add_pc_sample_value_id(evt_id, field_workgroup_id_z, record.workgroup_id.z);
-
-                // Add hardware ID fields
-                add_pc_sample_value_id(
-                    evt_id, field_hw_id_chiplet, static_cast<uint64_t>(record.hw_id.chiplet));
-                add_pc_sample_value_id(
-                    evt_id, field_hw_id_wave_id, static_cast<uint64_t>(record.hw_id.wave_id));
-                add_pc_sample_value_id(
-                    evt_id, field_hw_id_simd_id, static_cast<uint64_t>(record.hw_id.simd_id));
-                add_pc_sample_value_id(
-                    evt_id, field_hw_id_pipe_id, static_cast<uint64_t>(record.hw_id.pipe_id));
-                add_pc_sample_value_id(evt_id,
-                                       field_hw_id_cu_or_wgp_id,
-                                       static_cast<uint64_t>(record.hw_id.cu_or_wgp_id));
-                add_pc_sample_value_id(evt_id,
-                                       field_hw_id_shader_array_id,
-                                       static_cast<uint64_t>(record.hw_id.shader_array_id));
-                add_pc_sample_value_id(evt_id,
-                                       field_hw_id_shader_engine_id,
-                                       static_cast<uint64_t>(record.hw_id.shader_engine_id));
-                add_pc_sample_value_id(evt_id,
-                                       field_hw_id_workgroup_id,
-                                       static_cast<uint64_t>(record.hw_id.workgroup_id));
-                add_pc_sample_value_id(
-                    evt_id, field_hw_id_vm_id, static_cast<uint64_t>(record.hw_id.vm_id));
-                add_pc_sample_value_id(
-                    evt_id, field_hw_id_queue_id, static_cast<uint64_t>(record.hw_id.queue_id));
-                add_pc_sample_value_id(evt_id,
-                                       field_hw_id_microengine_id,
-                                       static_cast<uint64_t>(record.hw_id.microengine_id));
-
-                // Add stochastic-specific data
                 if(sampling_method == "stochastic")
                 {
                     if constexpr(std::is_same_v<
@@ -1809,122 +1848,159 @@ write_rocpd(
                                      generator<rocprofiler_tool_pc_sampling_stochastic_record_t>>)
                     {
                         const auto& stochastic_record = record;
+#define SET_ARB_STATE_FIELD_IF_TRUE(field, field_ref)                                              \
+    if(static_cast<bool>(stochastic_record.snapshot.field))                                        \
+        field_ref = 1;
 
-                        // Get enum string representations
+                        SET_ARB_STATE_FIELD_IF_TRUE(dual_issue_valu, extdata.dual_issue_valu);
+                        SET_ARB_STATE_FIELD_IF_TRUE(arb_state_issue_valu,
+                                                    extdata.arb_state_issue_valu);
+                        SET_ARB_STATE_FIELD_IF_TRUE(arb_state_issue_matrix,
+                                                    extdata.arb_state_issue_matrix);
+                        SET_ARB_STATE_FIELD_IF_TRUE(arb_state_issue_lds,
+                                                    extdata.arb_state_issue_lds);
+                        SET_ARB_STATE_FIELD_IF_TRUE(arb_state_issue_lds_direct,
+                                                    extdata.arb_state_issue_lds_direct);
+                        SET_ARB_STATE_FIELD_IF_TRUE(arb_state_issue_scalar,
+                                                    extdata.arb_state_issue_scalar);
+                        SET_ARB_STATE_FIELD_IF_TRUE(arb_state_issue_vmem_tex,
+                                                    extdata.arb_state_issue_vmem_tex);
+                        SET_ARB_STATE_FIELD_IF_TRUE(arb_state_issue_flat,
+                                                    extdata.arb_state_issue_flat);
+                        SET_ARB_STATE_FIELD_IF_TRUE(arb_state_issue_exp,
+                                                    extdata.arb_state_issue_exp);
+                        SET_ARB_STATE_FIELD_IF_TRUE(arb_state_issue_misc,
+                                                    extdata.arb_state_issue_misc);
+                        SET_ARB_STATE_FIELD_IF_TRUE(arb_state_issue_brmsg,
+                                                    extdata.arb_state_issue_brmsg);
+                        SET_ARB_STATE_FIELD_IF_TRUE(arb_state_stall_valu,
+                                                    extdata.arb_state_stall_valu);
+                        SET_ARB_STATE_FIELD_IF_TRUE(arb_state_stall_matrix,
+                                                    extdata.arb_state_stall_matrix);
+                        SET_ARB_STATE_FIELD_IF_TRUE(arb_state_stall_lds,
+                                                    extdata.arb_state_stall_lds);
+                        SET_ARB_STATE_FIELD_IF_TRUE(arb_state_stall_lds_direct,
+                                                    extdata.arb_state_stall_lds_direct);
+                        SET_ARB_STATE_FIELD_IF_TRUE(arb_state_stall_scalar,
+                                                    extdata.arb_state_stall_scalar);
+                        SET_ARB_STATE_FIELD_IF_TRUE(arb_state_stall_vmem_tex,
+                                                    extdata.arb_state_stall_vmem_tex);
+                        SET_ARB_STATE_FIELD_IF_TRUE(arb_state_stall_flat,
+                                                    extdata.arb_state_stall_flat);
+                        SET_ARB_STATE_FIELD_IF_TRUE(arb_state_stall_exp,
+                                                    extdata.arb_state_stall_exp);
+                        SET_ARB_STATE_FIELD_IF_TRUE(arb_state_stall_misc,
+                                                    extdata.arb_state_stall_misc);
+                        SET_ARB_STATE_FIELD_IF_TRUE(arb_state_stall_brmsg,
+                                                    extdata.arb_state_stall_brmsg);
+#undef SET_ARB_STATE_FIELD_IF_TRUE
+                    }
+                }
+
+                auto ext_blob = std::vector<uint8_t>{};
+                ext_blob.resize(sizeof(pc_sample_extdata_v1));
+                std::memcpy(ext_blob.data(), &extdata, sizeof(pc_sample_extdata_v1));
+
+                SQLITE3_CHECK(sqlite3_bind_int64(insert_stmt, 1, record.timestamp));
+                SQLITE3_CHECK(sqlite3_bind_int64(insert_stmt, 2, node_id));
+                SQLITE3_CHECK(sqlite3_bind_int64(insert_stmt, 3, this_pid));
+                SQLITE3_CHECK(
+                    sqlite3_bind_int64(insert_stmt, 4, record.correlation_id.internal));
+                if(agent_id > 0)
+                    SQLITE3_CHECK(sqlite3_bind_int64(insert_stmt, 5, agent_id));
+                else
+                    SQLITE3_CHECK(sqlite3_bind_null(insert_stmt, 5));
+                SQLITE3_CHECK(
+                    sqlite3_bind_int64(insert_stmt, 6, record.dispatch_id));
+                SQLITE3_CHECK(
+                    sqlite3_bind_int64(insert_stmt, 7, record.correlation_id.internal));
+                SQLITE3_CHECK(
+                    sqlite3_bind_int64(insert_stmt, 8, record.correlation_id.internal));
+                SQLITE3_CHECK(sqlite3_bind_int64(insert_stmt,
+                                                 9,
+                                                 record.correlation_id.external.value));
+                SQLITE3_CHECK(sqlite3_bind_text(
+                    insert_stmt, 10, sampling_method.c_str(), -1, SQLITE_TRANSIENT));
+                SQLITE3_CHECK(
+                    sqlite3_bind_int64(insert_stmt, 11, static_cast<int64_t>(record.exec_mask)));
+                bind_text_or_null(insert_stmt, 12, instruction);
+                bind_text_or_null(insert_stmt, 13, instruction_comment);
+                SQLITE3_CHECK(
+                    sqlite3_bind_int64(insert_stmt, 14, record.pc.code_object_id));
+                SQLITE3_CHECK(
+                    sqlite3_bind_int64(insert_stmt, 15, record.pc.code_object_offset));
+                SQLITE3_CHECK(
+                    sqlite3_bind_int64(insert_stmt, 16, record.wave_in_group));
+                SQLITE3_CHECK(
+                    sqlite3_bind_int64(insert_stmt, 17, record.workgroup_id.x));
+                SQLITE3_CHECK(
+                    sqlite3_bind_int64(insert_stmt, 18, record.workgroup_id.y));
+                SQLITE3_CHECK(
+                    sqlite3_bind_int64(insert_stmt, 19, record.workgroup_id.z));
+
+                std::optional<int64_t> wave_issued;
+                std::optional<int64_t> wave_count;
+                std::string            inst_type;
+                std::string            stall_reason;
+
+                if(sampling_method == "stochastic")
+                {
+                    if constexpr(std::is_same_v<
+                                     std::decay_t<decltype(pc_sampling_gen)>,
+                                     generator<rocprofiler_tool_pc_sampling_stochastic_record_t>>)
+                    {
+                        const auto& stochastic_record = record;
+                        wave_issued                   = static_cast<int64_t>(stochastic_record.wave_issued);
+                        wave_count                    = static_cast<int64_t>(stochastic_record.wave_count);
+
                         const char* inst_type_name =
                             rocprofiler_get_pc_sampling_instruction_type_name(
                                 static_cast<rocprofiler_pc_sampling_instruction_type_t>(
                                     stochastic_record.inst_type));
-
                         const char* reason_not_issued_name =
                             rocprofiler_get_pc_sampling_instruction_not_issued_reason_name(
                                 static_cast<
                                     rocprofiler_pc_sampling_instruction_not_issued_reason_t>(
                                     stochastic_record.snapshot.reason_not_issued));
 
-                        // For instruction type
-                        std::string inst_type_str;
                         if(inst_type_name)
-                        {
-                            inst_type_str = inst_type_name;
-                        }
+                            inst_type = inst_type_name;
                         else
-                        {
-                            ROCP_CI_LOG(WARNING)
-                                << "Unknown instruction type enum value: "
-                                << stochastic_record.inst_type
-                                << " - consider updating "
-                                   "rocprofiler_get_pc_sampling_instruction_type_name";
-                            inst_type_str = std::to_string(stochastic_record.inst_type);
-                        }
+                            inst_type = std::to_string(stochastic_record.inst_type);
 
-                        // For stall reason
-                        std::string reason_str;
                         if(reason_not_issued_name)
-                        {
-                            reason_str = reason_not_issued_name;
-                        }
+                            stall_reason = reason_not_issued_name;
                         else
-                        {
-                            ROCP_CI_LOG(WARNING)
-                                << "Unknown stall reason enum value: "
-                                << stochastic_record.snapshot.reason_not_issued
-                                << " - consider updating "
-                                   "rocprofiler_get_pc_sampling_instruction_not_issued_reason_name";
-                            reason_str =
+                            stall_reason =
                                 std::to_string(stochastic_record.snapshot.reason_not_issued);
-                        }
-
-                        // Add stochastic fields
-                        add_pc_sample_value_id(evt_id,
-                                               field_wave_issued,
-                                               static_cast<int>(stochastic_record.wave_issued));
-
-                        if(!inst_type_str.empty())
-                        {
-                            add_pc_sample_value_id(
-                                evt_id, field_inst_type, sanitize_sql_string(inst_type_str));
-                        }
-
-                        add_pc_sample_value_id(
-                            evt_id, field_wave_count, stochastic_record.wave_count);
-
-                        if(!reason_str.empty())
-                        {
-                            add_pc_sample_value_id(
-                                evt_id, field_stall_reason, sanitize_sql_string(reason_str));
-                        }
-
-                        // Add snapshot fields
-#define ADD_ARB_STATE_FIELD_IF_TRUE(field, field_id)                                               \
-    if(static_cast<bool>(stochastic_record.snapshot.field))                                        \
-        add_pc_sample_value_id(evt_id, field_id, 1);
-
-                        ADD_ARB_STATE_FIELD_IF_TRUE(dual_issue_valu, field_dual_issue_valu);
-                        ADD_ARB_STATE_FIELD_IF_TRUE(arb_state_issue_valu,
-                                                    field_arb_state_issue_valu);
-                        ADD_ARB_STATE_FIELD_IF_TRUE(arb_state_issue_matrix,
-                                                    field_arb_state_issue_matrix);
-                        ADD_ARB_STATE_FIELD_IF_TRUE(arb_state_issue_lds, field_arb_state_issue_lds);
-                        ADD_ARB_STATE_FIELD_IF_TRUE(arb_state_issue_lds_direct,
-                                                    field_arb_state_issue_lds_direct);
-                        ADD_ARB_STATE_FIELD_IF_TRUE(arb_state_issue_scalar,
-                                                    field_arb_state_issue_scalar);
-                        ADD_ARB_STATE_FIELD_IF_TRUE(arb_state_issue_vmem_tex,
-                                                    field_arb_state_issue_vmem_tex);
-                        ADD_ARB_STATE_FIELD_IF_TRUE(arb_state_issue_flat,
-                                                    field_arb_state_issue_flat);
-                        ADD_ARB_STATE_FIELD_IF_TRUE(arb_state_issue_exp, field_arb_state_issue_exp);
-                        ADD_ARB_STATE_FIELD_IF_TRUE(arb_state_issue_misc,
-                                                    field_arb_state_issue_misc);
-                        ADD_ARB_STATE_FIELD_IF_TRUE(arb_state_issue_brmsg,
-                                                    field_arb_state_issue_brmsg);
-                        ADD_ARB_STATE_FIELD_IF_TRUE(arb_state_stall_valu,
-                                                    field_arb_state_stall_valu);
-                        ADD_ARB_STATE_FIELD_IF_TRUE(arb_state_stall_matrix,
-                                                    field_arb_state_stall_matrix);
-                        ADD_ARB_STATE_FIELD_IF_TRUE(arb_state_stall_lds, field_arb_state_stall_lds);
-                        ADD_ARB_STATE_FIELD_IF_TRUE(arb_state_stall_lds_direct,
-                                                    field_arb_state_stall_lds_direct);
-                        ADD_ARB_STATE_FIELD_IF_TRUE(arb_state_stall_scalar,
-                                                    field_arb_state_stall_scalar);
-                        ADD_ARB_STATE_FIELD_IF_TRUE(arb_state_stall_vmem_tex,
-                                                    field_arb_state_stall_vmem_tex);
-                        ADD_ARB_STATE_FIELD_IF_TRUE(arb_state_stall_flat,
-                                                    field_arb_state_stall_flat);
-                        ADD_ARB_STATE_FIELD_IF_TRUE(arb_state_stall_exp, field_arb_state_stall_exp);
-                        ADD_ARB_STATE_FIELD_IF_TRUE(arb_state_stall_misc,
-                                                    field_arb_state_stall_misc);
-                        ADD_ARB_STATE_FIELD_IF_TRUE(arb_state_stall_brmsg,
-                                                    field_arb_state_stall_brmsg);
-#undef ADD_ARB_STATE_FIELD_IF_TRUE
                     }
                 }
+
+                bind_int_or_null(insert_stmt, 20, wave_issued);
+                bind_text_or_null(insert_stmt, 21, inst_type);
+                bind_text_or_null(insert_stmt, 22, stall_reason);
+                bind_int_or_null(insert_stmt, 23, wave_count);
+
+                SQLITE3_CHECK(sqlite3_bind_int64(insert_stmt, 24, ext_schema_id));
+                if(ext_blob.empty())
+                    SQLITE3_CHECK(sqlite3_bind_null(insert_stmt, 25));
+                else
+                    SQLITE3_CHECK(sqlite3_bind_blob(
+                        insert_stmt,
+                        25,
+                        ext_blob.data(),
+                        static_cast<int>(ext_blob.size()),
+                        SQLITE_TRANSIENT));
+
+                auto step_rc = sqlite3_step(insert_stmt);
+                if(step_rc != SQLITE_DONE)
+                {
+                    ROCP_FATAL << "sqlite3_step(insert_stmt) failed with error code " << step_rc;
+                }
+                SQLITE3_CHECK(sqlite3_reset(insert_stmt));
+                SQLITE3_CHECK(sqlite3_clear_bindings(insert_stmt));
             }
         }
-
-        flush_sample_batch();
-        flush_pc_field_batch();
     };
 
     insert_node_data();
@@ -1946,7 +2022,7 @@ write_rocpd(
         insert_api_data(rocdecode_api_gen);
     }
 
-    insert_kernel_dispatch_data(dispatch_to_evt_id);
+    insert_kernel_dispatch_data(dispatch_to_evt_id, dispatch_to_agent_id);
     insert_pmc_event_data(dispatch_to_evt_id);
     insert_memory_copy_data(memory_copy_gen);
     insert_pc_sampling_data(pc_sampling_host_trap_gen, "host_trap");

@@ -725,36 +725,39 @@ GROUP BY
     PMC_I.name,
     K.agent_id;
 
--- PC Sampling normalized view
+-- GPU PC Sampling view with agent information (hybrid: columns + blob)
 CREATE VIEW IF NOT EXISTS
-    `pc_sample` AS
+    `gpu_pc_sample_with_agents` AS
 SELECT
-    R.id AS sample_id,
-    R.guid,
-    R.timestamp,
-    T.nid,
-    P.pid,
-    TH.tid,
+    PS.id,
+    PS.guid,
+    PS.timestamp,
+    PS.nid,
+    PS.pid,
+    PS.tid,
     A.name AS agent_name,
     A.type AS agent_type,
-    R.track_id,
-    R.event_id,
-    E.stack_id,
-    E.parent_stack_id,
-    E.correlation_id AS corr_id,
-    PSF.name AS field_name,
-    PSF.description AS field_description,
-    PSF.value_type,
-    PSE.value AS field_value
+    PS.dispatch_id,
+    PS.stack_id,
+    PS.parent_stack_id,
+    PS.correlation_id AS corr_id,
+    PS.sampling_method,
+    PS.exec_mask,
+    PS.instruction,
+    PS.instruction_comment,
+    PS.code_object_id,
+    PS.code_object_offset,
+    PS.wave_in_group,
+    PS.workgroup_id_x,
+    PS.workgroup_id_y,
+    PS.workgroup_id_z,
+    PS.wave_issued,
+    PS.inst_type,
+    PS.stall_reason,
+    PS.wave_count,
+    PS.extdata_schema_id,
+    PS.extdata_blob
 FROM
-    `rocpd_sample{{uuid}}` R
-    INNER JOIN `rocpd_track{{uuid}}` T ON T.id = R.track_id AND T.guid = R.guid
-    INNER JOIN `rocpd_info_process{{uuid}}` P ON P.id = T.pid AND P.guid = T.guid
-    INNER JOIN `rocpd_info_thread{{uuid}}` TH ON TH.id = T.tid AND TH.guid = T.guid
-    INNER JOIN `rocpd_event{{uuid}}` E ON E.id = R.event_id AND E.guid = R.guid
-    INNER JOIN `rocpd_pc_sample_event{{uuid}}` PSE ON PSE.event_id = R.event_id AND PSE.guid = R.guid
-    INNER JOIN `rocpd_info_pc_sample{{uuid}}` PSF ON PSF.id = PSE.field_id AND PSF.guid = PSE.guid
-    LEFT JOIN `rocpd_event{{uuid}}` PE ON PE.id = E.parent_id AND PE.guid = E.guid
-    LEFT JOIN `rocpd_kernel_dispatch{{uuid}}` KD ON KD.event_id = PE.id AND KD.guid = PE.guid
-    LEFT JOIN `rocpd_info_agent{{uuid}}` A ON A.id = KD.agent_id AND A.guid = KD.guid
+    `rocpd_gpu_pc_sample{{uuid}}` PS
+    LEFT JOIN `rocpd_info_agent{{uuid}}` A ON A.id = PS.agent_id AND A.guid = PS.guid
 ;
