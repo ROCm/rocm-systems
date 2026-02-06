@@ -30,6 +30,17 @@ endif()
 
 project(rocprofiler-systems-scratch-memory-example LANGUAGES CXX HIP)
 
+if(ROCPROFSYS_DISABLE_EXAMPLES)
+    get_filename_component(_DIR ${CMAKE_CURRENT_LIST_DIR} NAME)
+
+    if(
+        ${PROJECT_NAME} IN_LIST ROCPROFSYS_DISABLE_EXAMPLES
+        OR ${_DIR} IN_LIST ROCPROFSYS_DISABLE_EXAMPLES
+    )
+        return()
+    endif()
+endif()
+
 foreach(_TYPE DEBUG MINSIZEREL RELEASE RELWITHDEBINFO)
     if("${CMAKE_HIP_FLAGS_${_TYPE}}" STREQUAL "")
         set(CMAKE_HIP_FLAGS_${_TYPE} "${CMAKE_CXX_FLAGS_${_TYPE}}")
