@@ -92,8 +92,6 @@ void GDABackend::bnxt_create_cqs(int cqe) {
   struct bnxt_re_dv_umem_reg_attr umem_attr;
 
   int dmabuf_enabled = ibv.is_dmabuf_supported();
-  uint64_t offset = 0;
-  int fd = 0;
 
   /* Ignore value of cqe as we only need of length 1 to use CQE compression */
   cqe = 1;
@@ -117,7 +115,8 @@ void GDABackend::bnxt_create_cqs(int cqe) {
     if (dmabuf_enabled) {
       CHECK_HSA(hsa_amd_portable_export_dmabuf(bnxt_scqs[i].buf,
                                                bnxt_scqs[i].length,
-                                               &fd, &offset));
+                                               &bnxt_scqs[i].dmabuf_fd,
+                                               &bnxt_scqs[i].dmabuf_offset));
     }
 
     /* Register SCQ UMEM */
@@ -125,7 +124,7 @@ void GDABackend::bnxt_create_cqs(int cqe) {
     umem_attr.addr         = bnxt_scqs[i].buf;
     umem_attr.size         = bnxt_scqs[i].length;
     umem_attr.access_flags = IBV_ACCESS_LOCAL_WRITE;
-    umem_attr.dmabuf_fd    = fd;
+    umem_attr.dmabuf_fd    = dmabuf_enabled ? bnxt_scqs[i].dmabuf_fd : 0;
 
     bnxt_scqs[i].umem_handle = bnxt_re_dv.umem_reg(context, &umem_attr);
     CHECK_NNULL(bnxt_scqs[i].umem_handle, "bnxt_re_dv_umem_reg(scq_buf)");
@@ -156,7 +155,8 @@ void GDABackend::bnxt_create_cqs(int cqe) {
     if (dmabuf_enabled) {
       CHECK_HSA(hsa_amd_portable_export_dmabuf(bnxt_rcqs[i].buf,
                                                bnxt_rcqs[i].length,
-                                               &fd, &offset));
+                                               &bnxt_rcqs[i].dmabuf_fd,
+                                               &bnxt_rcqs[i].dmabuf_offset));
     }
 
     /* Register RCQ UMEM */
@@ -164,7 +164,7 @@ void GDABackend::bnxt_create_cqs(int cqe) {
     umem_attr.addr         = bnxt_rcqs[i].buf;
     umem_attr.size         = bnxt_rcqs[i].length;
     umem_attr.access_flags = IBV_ACCESS_LOCAL_WRITE;
-    umem_attr.dmabuf_fd    = fd;
+    umem_attr.dmabuf_fd    = dmabuf_enabled ? bnxt_rcqs[i].dmabuf_fd : 0;
 
     bnxt_rcqs[i].umem_handle = bnxt_re_dv.umem_reg(context, &umem_attr);
     CHECK_NNULL(bnxt_rcqs[i].umem_handle, "bnxt_re_dv_umem_reg(rcq_buf)");
@@ -192,8 +192,6 @@ void GDABackend::bnxt_create_qps(int sq_length) {
   int err;
 
   int dmabuf_enabled = ibv.is_dmabuf_supported();
-  uint64_t offset = 0;
-  int fd = 0;
 
   for (int i = 0; i < qps.size(); i++) {
     /* IB QP Init Attr */
@@ -222,7 +220,8 @@ void GDABackend::bnxt_create_qps(int sq_length) {
     if (dmabuf_enabled) {
       CHECK_HSA(hsa_amd_portable_export_dmabuf(sq_ptr,
                                                bnxt_qps[i].mem_info.sq_len,
-                                               &fd, &offset));
+                                               &bnxt_qps[i].sq_dmabuf_fd,
+                                               &bnxt_qps[i].sq_dmabuf_offset));
     }
 
     /* Obtain MSN Table Pointer */
@@ -236,7 +235,7 @@ void GDABackend::bnxt_create_qps(int sq_length) {
     umem_attr.addr         = (void*) bnxt_qps[i].mem_info.sq_va;
     umem_attr.size         = bnxt_qps[i].mem_info.sq_len;
     umem_attr.access_flags = IBV_ACCESS_LOCAL_WRITE;
-    umem_attr.dmabuf_fd    = fd;
+    umem_attr.dmabuf_fd    = dmabuf_enabled ? bnxt_qps[i].sq_dmabuf_fd : 0;
 
     sq_umem_handle = bnxt_re_dv.umem_reg(context, &umem_attr);
     CHECK_NNULL(sq_umem_handle, "bnxt_re_dv_umem_reg(sq)");
@@ -250,7 +249,8 @@ void GDABackend::bnxt_create_qps(int sq_length) {
     if (dmabuf_enabled) {
       CHECK_HSA(hsa_amd_portable_export_dmabuf(rq_ptr,
                                                bnxt_qps[i].mem_info.rq_len,
-                                               &fd, &offset));
+                                               &bnxt_qps[i].rq_dmabuf_fd,
+                                               &bnxt_qps[i].rq_dmabuf_offset));
     }
 
     /* Register RQ UMEM */
@@ -258,7 +258,7 @@ void GDABackend::bnxt_create_qps(int sq_length) {
     umem_attr.addr         = (void*) bnxt_qps[i].mem_info.rq_va;
     umem_attr.size         = bnxt_qps[i].mem_info.rq_len;
     umem_attr.access_flags = IBV_ACCESS_LOCAL_WRITE;
-    umem_attr.dmabuf_fd    = fd;
+    umem_attr.dmabuf_fd    = dmabuf_enabled ? bnxt_qps[i].rq_dmabuf_fd : 0;
 
     rq_umem_handle = bnxt_re_dv.umem_reg(context, &umem_attr);
     CHECK_NNULL(rq_umem_handle, "bnxt_re_dv_umem_reg(rq)");
