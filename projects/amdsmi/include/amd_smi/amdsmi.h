@@ -2567,23 +2567,6 @@ amdsmi_status_t amdsmi_shut_down(void);
  */
 amdsmi_status_t amdsmi_get_socket_handles(uint32_t *socket_count, amdsmi_socket_handle* socket_handles);
 
-/**
- *  @brief Returns the index of the given processor handle
- *
- *  @ingroup tagProcDiscovery
- *
- *  @platform{gpu_bm_linux} @platform{host} @platform{cpu_bm} @platform{guest_1vf}
- *  @platform{guest_mvf} @platform{guest_windows}
- *
- *  @param[in] processor_handle Processor handle for which to query
- *
- *  @param[out] processor_index Pointer to integer to store the processor index. Must be
- *  allocated by user.
- *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
- */
-amdsmi_status_t amdsmi_get_index_from_processor_handle(amdsmi_processor_handle processor_handle, uint32_t *processor_index);
-
 #ifdef ENABLE_ESMI_LIB
 
 /**
@@ -2659,37 +2642,6 @@ amdsmi_status_t amdsmi_get_socket_info(amdsmi_socket_handle socket_handle, size_
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_get_processor_info(amdsmi_processor_handle processor_handle, size_t len, char *name);
-
-/**
- *  @brief Get the list of cpu socket handles in the system.
- *
- *  @ingroup tagProcDiscovery
- *
- *  @platform{cpu_bm}
- *
- *  @details Depends on AMDSMI_INIT_AMD_CPUS flag passed to ::amdsmi_init.
- *  The socket handles can be used to query the processor handles in that socket, which
- *  will be used in other APIs to get processor detail information.
- *
- *  @param[in,out] socket_count As input, the value passed
- *  through this parameter is the number of ::amdsmi_cpusocket_handle that
- *  may be safely written to the memory pointed to by @p socket_handles. This is the
- *  limit on how many socket handles will be written to @p socket_handles. On return, @p
- *  socket_count will contain the number of socket handles written to @p socket_handles,
- *  or the number of socket handles that could have been written if enough memory had been
- *  provided.
- *  If @p socket_handles is NULL, as output, @p socket_count will contain
- *  how many sockets are available to read in the system.
- *
- *  @param[in,out] socket_handles A pointer to a block of memory to which the
- *  ::amdsmi_cpusocket_handle values will be written. This value may be NULL.
- *  In this case, this function can be used to query how many sockets are
- *  available to read in the system.
- *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
- */
-amdsmi_status_t amdsmi_get_cpusocket_handles(uint32_t *socket_count,
-                amdsmi_cpusocket_handle* socket_handles);
 
 /**
  *  @brief Get respective processor counts from the processor handles
@@ -2874,25 +2826,6 @@ amdsmi_status_t amdsmi_get_cpucore_handles(uint32_t *cores_count,
 amdsmi_status_t amdsmi_get_processor_type(amdsmi_processor_handle processor_handle, processor_type_t* processor_type);
 
 /**
- *  @brief Returns the processor handle from the given processor index
- *
- *  @ingroup tagProcDiscovery
- *
- *  @platform{gpu_bm_linux} @platform{host} @platform{cpu_bm} @platform{guest_1vf}
- *  @platform{guest_mvf} @platform{guest_windows}
- *
- *  @param[in] processor_index Function processor_index to query
- *
- *  @note On the @platform{host} this function currently supports only AMD GPU indexes.
- *
- *  @param[out] processor_handle Reference to the processor handle.
- *  Must be allocated by user.
- *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
- */
-amdsmi_status_t amdsmi_get_processor_handle_from_index(uint32_t processor_index, amdsmi_processor_handle *processor_handle);
-
-/**
  *  @brief Get processor handle with the matching bdf.
  *
  *  @ingroup tagProcDiscovery
@@ -2927,38 +2860,6 @@ amdsmi_status_t amdsmi_get_processor_handle_from_bdf(amdsmi_bdf_t bdf, amdsmi_pr
  */
 amdsmi_status_t
 amdsmi_get_gpu_device_bdf(amdsmi_processor_handle processor_handle, amdsmi_bdf_t *bdf);
-
-/**
- *  @brief Returns BDF of the given device
- *
- *  @ingroup tagProcDiscovery
- *
- *  @platform{gpu_bm_linux} @platform{host} @platform{guest_1vf} @platform{guest_mvf}
- *  @platform{guest_windows}
- *
- *  @param[in] processor_handle Device which to query
- *
- *  @param[out] bdf Reference to BDF. Must be allocated by user.
- *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
- */
-amdsmi_status_t amdsmi_get_processor_bdf(amdsmi_processor_handle processor_handle, amdsmi_bdf_t *bdf);
-
-/**
- *  @brief Returns the processor handle from the given UUID
- *
- *  @ingroup tagProcDiscovery
- *
- *  @platform{gpu_bm_linux} @platform{host} @platform{guest_windows}
- *
- *  @param[in] uuid Function UUID to query.
- *
- *  @param[out] processor_handle Reference to the processor handle.
- *  Must be allocated by user.
- *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
- */
-amdsmi_status_t amdsmi_get_processor_handle_from_uuid(const char *uuid, amdsmi_processor_handle *processor_handle);
 
 /**
  *  @brief Returns the UUID of the device
@@ -5137,52 +5038,6 @@ amdsmi_status_t amdsmi_get_afids_from_cper(char* cper_buffer, uint32_t buf_size,
 amdsmi_status_t amdsmi_get_gpu_ras_feature_info(amdsmi_processor_handle processor_handle, amdsmi_ras_feature_t *ras_feature);
 
 /**
- * @brief Get the RAS policy info for a device
- *
- * @ingroup tagRasInfo
- *
- * @platform{gpu_bm_linux} @platform{host}
- *
- * @details Given a processor handle @p processor_handle, this function will retrieve
- * the RAS policy information for the device.
- *
- * @param[in] processor_handle PF of a processor for which to query
- *
- * @param[out] info RAS policy info for the device. Must be allocated by user.
- *
- * @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
- */
-amdsmi_status_t amdsmi_get_gpu_ras_policy_info(amdsmi_processor_handle processor_handle,
-                                               amdsmi_gpu_ras_policy_info_t *info);
-
-/**
- * @brief Get the bad page threshold for a device
- *
- *  @ingroup tagRasInfo
- *
- * @platform{gpu_bm_linux}  @platform{host}
- *
- * @details Given a processor handle @p processor_handle and a pointer to a uint32_t @p threshold,
- * this function will retrieve the  bad page threshold value associated
- * with device @p processor_handle and store the value at location pointed to by
- * @p threshold.
- *
- * @note This function requires the admin/sudo privileges on @platform{gpu_bm_linux}
- *
- * @param[in] processor_handle a processor handle
- *
- * @param[in,out] threshold pointer to location where  bad page threshold value will
- * be written.
- * If this parameter is nullptr, this function will return
- * ::AMDSMI_STATUS_INVAL if the function is supported with the provided,
- * arguments and ::AMDSMI_STATUS_NOT_SUPPORTED if it is not supported with the
- * provided arguments.
- *
- * @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
- */
-amdsmi_status_t amdsmi_get_bad_page_threshold(amdsmi_processor_handle processor_handle, uint32_t *threshold);
-
-/**
  * @brief Retrieve CPER entries cached in the driver.
  *
  * The user will pass buffers to hold the CPER data and CPER headers. The library will
@@ -6028,27 +5883,6 @@ amdsmi_status_t
 amdsmi_set_gpu_compute_partition(amdsmi_processor_handle processor_handle,
                                  amdsmi_compute_partition_type_t compute_partition);
 
-/**
- *  @brief Reverts a selected device's compute partition setting back to its
- *  boot state.
- *
- *  @ingroup tagComputePartition
- *
- *  @platform{gpu_bm_linux}
- *
- *  @details Given a processor handle @p processor_handle, this function will attempt to
- *  revert its compute partition setting back to its boot state.
- *
- *  @param[in] processor_handle Device which to query
- *
- *  @retval ::AMDSMI_STATUS_SUCCESS call was successful
- *  @retval ::AMDSMI_STATUS_PERMISSION function requires admin/sudo privileges
- *  @retval ::AMDSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
- *  support this function
- *  @return ::amdsmi_status_t
- */
-amdsmi_status_t amdsmi_reset_gpu_compute_partition(amdsmi_processor_handle processor_handle);
-
 /** @} End tagComputePartition */
 
 /*****************************************************************************/
@@ -6125,29 +5959,6 @@ amdsmi_get_gpu_memory_partition(amdsmi_processor_handle processor_handle, char *
 amdsmi_status_t
 amdsmi_set_gpu_memory_partition(amdsmi_processor_handle processor_handle,
                                   amdsmi_memory_partition_type_t memory_partition);
-
-/**
- *  @brief Reverts a selected device's memory partition setting back to its
- *  boot state.
- *
- *  @ingroup tagMemoryPartition
- *
- *  @platform{gpu_bm_linux}
- *
- *  @details Given a processor handle @p processor_handle, this function will attempt to
- *  revert its current memory partition setting back to its boot state.
- *
- *  @param[in] processor_handle Device which to query
- *
- *  @retval ::AMDSMI_STATUS_SUCCESS call was successful
- *  @retval ::AMDSMI_STATUS_PERMISSION function requires admin/sudo privileges
- *  @retval ::AMDSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
- *  support this function
- *  @retval ::AMDSMI_STATUS_AMDGPU_RESTART_ERR could not successfully restart
- *  the amdgpu driver
- *  @return ::amdsmi_status_t
- */
-amdsmi_status_t amdsmi_reset_gpu_memory_partition(amdsmi_processor_handle processor_handle);
 
 /**
  *  @brief Returns current gpu memory partition capabilities
