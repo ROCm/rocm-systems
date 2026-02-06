@@ -1189,6 +1189,8 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryGetCpuAddr(HsaAMDGPUDeviceHandle DeviceHandl
               HsaMemoryObjectHandle MemoryHandle, HSAint32* fd, HSAuint64* cpu_addr)
 {
 	CHECK_DXG_OPEN();
-  assert(!"not supported\n");
-  return HSAKMT_STATUS_NOT_SUPPORTED;
+  wsl::thunk::GpuMemory* gpu_mem = reinterpret_cast<wsl::thunk::GpuMemory*>(MemoryHandle);
+  assert(gpu_mem != nullptr);
+  cpu_addr =  static_cast<HSAuint64*>(gpu_mem->CpuAddress());
+  return HSAKMT_STATUS_SUCCESS;
 }
