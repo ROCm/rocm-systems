@@ -1431,6 +1431,7 @@ Field | Description
 `memory_usage` | <table><thead><tr> <th> Subfield </th> <th> Description</th> </tr></thead><tbody><tr><td>`gtt_mem`</td><td>GTT memory usage in Bytes</td></tr><tr><td>`cpu_mem`</td><td>CPU memory usage in Bytes</td></tr><tr><td>`vram_mem`</td><td>Process VRAM memory usage in Bytes</td></tr> </tbody></table>
 `cu_occupancy` | Number of Compute Units utilized
 `evicted_time` | Time that queues are evicted on a GPU in milliseconds
+`sdma_usage`   | SDMA usage in microseconds
 
 Exceptions that can be thrown by `amdsmi_get_gpu_process_list` function:
 

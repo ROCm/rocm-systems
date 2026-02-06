@@ -275,9 +275,8 @@ def pytest_report_header(config) -> list[str]:
 
     # Offload extractor
     offload_msg = None
-    offload_extractor = get_offload_extractor(rocprof_config.rocm_path)
-    if offload_extractor:
-        tool_path, is_llvm_too_old = offload_extractor
+    tool_path, is_llvm_too_old = get_offload_extractor(rocprof_config.rocm_path)
+    if tool_path:
         if tool_path.name == "llvm-objdump":
             offload_msg = f"{tool_path}"
         elif tool_path.name == "roc-obj-ls":

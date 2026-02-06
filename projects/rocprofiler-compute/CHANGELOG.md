@@ -22,6 +22,9 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * Roofline binaries compiled from [rocm-amdgpu-bench](https://github.com/ROCm/rocm-amdgpu-bench) repository have been removed from the project, as Roofline runtime compilation performs the same work as the Roofline binaries.
   * You can collect standalone Roofline empirical peaks without running the entire ROCm Compute Profiler's profile mode, through an entry point in [benchmark.py](https://github.com/ROCm/rocm-systems/blob/HEAD/projects/rocprofiler-compute/src/utils/benchmark.py). Running the `benchmark.py` Python file replaces calling standalone Roofline binary.
 
+* Synced latest metric descriptions to public facing documentation
+    * Updated metric units to be more human readable in public facing documentation
+
 ### Changed
 
 * Default output format for the underlying ROCprofiler-SDK tool has been changed from ``csv`` to ``rocpd``.

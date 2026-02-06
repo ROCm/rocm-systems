@@ -188,23 +188,26 @@ HSAKMT_STATUS hsakmt_init_kfd_version(void);
 
 #define IS_SOC15(gfxv) ((gfxv) >= GFX_VERSION_VEGA10)
 
-HSAKMT_STATUS hsakmt_validate_nodeid(uint32_t nodeid, uint32_t *gpu_id);
-HSAKMT_STATUS hsakmt_gpuid_to_nodeid(uint32_t gpu_id, uint32_t* node_id);
-uint32_t hsakmt_get_gfxv_by_node_id(HSAuint32 node_id);
-bool hsakmt_prefer_ats(HSAuint32 node_id);
-uint16_t hsakmt_get_device_id_by_node_id(HSAuint32 node_id);
-uint16_t hsakmt_get_device_id_by_gpu_id(HSAuint32 gpu_id);
-uint32_t hsakmt_get_direct_link_cpu(uint32_t gpu_node);
+HSAKMT_STATUS hsakmt_validate_nodeid(HsaKFDContext *ctx, uint32_t nodeid, uint32_t *gpu_id);
+HSAKMT_STATUS hsakmt_gpuid_to_nodeid(HsaKFDContext *ctx, uint32_t gpu_id, uint32_t* node_id);
+uint32_t hsakmt_get_gfxv_by_node_id(HsaKFDContext *ctx, HSAuint32 node_id);
+bool hsakmt_prefer_ats(HsaKFDContext *ctx, HSAuint32 node_id);
+uint16_t hsakmt_get_device_id_by_node_id(HsaKFDContext *ctx, HSAuint32 node_id);
+uint16_t hsakmt_get_device_id_by_gpu_id(HsaKFDContext *ctx, HSAuint32 gpu_id);
+uint32_t hsakmt_get_direct_link_cpu(HsaKFDContext *ctx, uint32_t gpu_node);
 int get_drm_render_fd_by_gpu_id(HSAuint32 gpu_id);
-HSAKMT_STATUS hsakmt_validate_nodeid_array(uint32_t **gpu_id_array,
+HSAKMT_STATUS hsakmt_validate_nodeid_array(HsaKFDContext *ctx,
+		uint32_t **gpu_id_array,
 		uint32_t NumberOfNodes, uint32_t *NodeArray);
 
 HSAKMT_STATUS hsakmt_topology_sysfs_get_system_props(HsaKFDContext *ctx, HsaSystemProperties *props);
-HSAKMT_STATUS hsakmt_topology_get_node_props(HSAuint32 NodeId,
+HSAKMT_STATUS hsakmt_topology_get_node_props(HsaKFDContext *ctx,
+				      HSAuint32 NodeId,
 				      HsaNodeProperties *NodeProperties);
-HSAKMT_STATUS hsakmt_topology_get_iolink_props(HSAuint32 NodeId,
-					HSAuint32 NumIoLinks,
-					HsaIoLinkProperties *IoLinkProperties);
+HSAKMT_STATUS hsakmt_topology_get_iolink_props(HsaKFDContext *ctx,
+				      HSAuint32 NodeId,
+				      HSAuint32 NumIoLinks,
+				      HsaIoLinkProperties *IoLinkProperties);
 void hsakmt_topology_setup_is_dgpu_param(HsaNodeProperties *props);
 bool hsakmt_topology_is_svm_needed(HSA_ENGINE_ID EngineId);
 
@@ -212,7 +215,7 @@ HSAuint32 hsakmt_PageSizeFromFlags(unsigned int pageSizeFlags);
 HSAuint64 MapDrmPerm(HsaMemoryMapFlags flags);
 
 void* hsakmt_allocate_exec_aligned_memory_gpu(HsaKFDContext *ctx,
-					   uint32_t size, uint32_t align,
+				       uint32_t size, uint32_t align,
 				       uint32_t gpu_id,
 				       uint32_t NodeId, bool NonPaged,
 				       bool DeviceLocal, bool Uncached);
@@ -221,11 +224,11 @@ void hsakmt_free_exec_aligned_memory_gpu(HsaKFDContext *ctx,
 HSAKMT_STATUS hsakmt_init_process_doorbells(HsaKFDContext *ctx,
 					   unsigned int NumNodes);
 void hsakmt_destroy_process_doorbells(HsaKFDContext *ctx);
-HSAKMT_STATUS hsakmt_init_device_debugging_memory(unsigned int NumNodes);
-void hsakmt_destroy_device_debugging_memory(void);
-bool hsakmt_debug_get_reg_status(uint32_t node_id);
-HSAKMT_STATUS hsakmt_init_counter_props(unsigned int NumNodes);
-void hsakmt_destroy_counter_props(void);
+HSAKMT_STATUS hsakmt_init_device_debugging_memory(HsaKFDContext *ctx, unsigned int NumNodes);
+void hsakmt_destroy_device_debugging_memory(HsaKFDContext *ctx);
+bool hsakmt_debug_get_reg_status(HsaKFDContext *ctx, uint32_t node_id);
+HSAKMT_STATUS hsakmt_init_counter_props(HsaKFDContext *ctx, unsigned int NumNodes);
+void hsakmt_destroy_counter_props(HsaKFDContext *ctx);
 uint32_t *hsakmt_convert_queue_ids(HSAuint32 NumQueues, HSA_QUEUEID *Queues);
 
 extern int hsakmt_ioctl(int fd, unsigned long request, void *arg);
@@ -250,7 +253,7 @@ void hsakmt_clear_events_page(HsaKFDContext *ctx);
 void hsakmt_fmm_clear_all_mem(HsaKFDContext *ctx);
 void hsakmt_fmm_clear_all_aperture(HsaKFDContext *ctx);
 void hsakmt_clear_process_doorbells(HsaKFDContext *ctx);
-uint32_t hsakmt_get_num_sysfs_nodes(void);
+uint32_t hsakmt_get_num_sysfs_nodes(HsaKFDContext *ctx);
 
 bool hsakmt_is_forked_child(void);
 
