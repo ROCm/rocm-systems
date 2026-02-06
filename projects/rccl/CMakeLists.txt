@@ -1385,6 +1385,50 @@ if (HAVE_PARALLEL_JOBS)
 endif()
 if(BUILD_ADDRESS_SANITIZER)
   target_link_options(rccl PRIVATE -fuse-ld=lld)
+
+  ## ---- ASAN device-link acceleration ----------------------------------------
+  ## With -fgpu-rdc, the offload linker merges device bitcode from all object
+  ## files and performs full LTO (optimization + codegen) for each GPU target.
+  ## For ASAN/debug builds this is the dominant bottleneck for a
+  ## single GPU arch.
+  ##
+  ## The device LLD has three independent knobs that the amdclang++ driver
+  ## populates with defaults (--lto-partitions=8, -plugin-opt=O1, --lto-CGO1).
+  ## We override all three via -Xoffload-linker (last-wins semantics):
+  ##
+  ## --lto-O0:  Skip all LTO optimization passes (inlining, SROA, InstCombine,
+  ##   LICM, loop opts, etc.) on the merged device bitcode.  The bitcode is
+  ##   still linked and backend codegen still runs, but the expensive mid-level
+  ##   optimization pipeline is completely bypassed.  For ASAN builds, optimized
+  ##   device code is counterproductive — it can hide bugs by reordering memory
+  ##   accesses or eliminating loads/stores.
+  ##
+  ## --lto-CGO0:  Set the backend CodeGen optimization level to 0.  This is
+  ##   separate from --lto-O0 — even at LTO O0 the backend (ISel, RegAlloc,
+  ##   scheduling) still runs at whatever CGO level the driver injected (O1 by
+  ##   default).  CGO0 disables machine-level optimizations, further reducing
+  ##   link time while preserving correct ASAN instrumentation.
+  ##
+  ## --lto-partitions=N:  Split the merged device module into N independent
+  ##   partitions for parallel backend codegen.  The driver defaults to 8;
+  ##   setting it to num_linker_jobs allows the AMDGPU backend to better
+  ##   utilize all available cores during the codegen phase.
+  ## --------------------------------------------------------------------------
+  target_link_options(rccl PRIVATE "SHELL:-Xoffload-linker --lto-O0")
+  target_link_options(rccl PRIVATE "SHELL:-Xoffload-linker --lto-CGO0")
+  if (HAVE_PARALLEL_JOBS)
+    target_link_options(rccl PRIVATE "SHELL:-Xoffload-linker --lto-partitions=${num_linker_jobs}")
+  endif()
+elseif(CMAKE_BUILD_TYPE MATCHES "Debug|RelWithDebInfo")
+  ## ---- Debug build device-link acceleration ---------------------------------
+  ## For Debug/RelWithDebInfo builds (non-ASAN), increase device LTO partitions
+  ## to improve link-time parallelism. Unlike Release builds where more
+  ## partitions may reduce cross-partition IPO opportunities, Debug builds
+  ## benefit from faster iteration time with negligible runtime perf impact.
+  ## --------------------------------------------------------------------------
+  if (HAVE_PARALLEL_JOBS)
+    target_link_options(rccl PRIVATE "SHELL:-Xoffload-linker --lto-partitions=${num_linker_jobs}")
+  endif()
 endif()
 if(TIMETRACE)
   target_link_options(rccl PRIVATE -ftime-trace)
