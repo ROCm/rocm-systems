@@ -11,13 +11,12 @@ jobs:
     steps:
       - name: Generate GitHub App token
         id: generate-token
-        uses: actions/create-github-app-token@v2.1.1
+        uses: actions/create-github-app-token@df432ceedc7162793a195dd1713ff69aefc7379e # v2.0.6
         with:
           app-id: ${{ secrets.APP_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
-          owner: ${{ secrets.INTERNAL_ORG }}
-          repositories: ${{ secrets.INTERNAL_REPO }}
-
+          owner: ${{ github.repository_owner }}
+          
       - name: Trigger ROCm CI workflow
         env:
           TARGET_REPO: "${{ secrets.INTERNAL_ORG }}/${{ secrets.INTERNAL_REPO }}"
