@@ -98,10 +98,6 @@ class thread_group {
    *           be avoided with synchronization of the group.
    */
   __CG_QUALIFIER__ void sync() const;
-  //! Returns the mask of the group.
-  __CG_QUALIFIER__ unsigned int get_mask() const {
-    return (coalesced_info.member_mask);
-  }
 };
 /**
  *  @defgroup CooperativeG Cooperative Groups
