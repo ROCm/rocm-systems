@@ -529,7 +529,7 @@ configure_settings(bool _init)
                               "names should be separated by "
                               "commas, e.g. eno8303,enp7s0.",
                               std::string{ "none" }, "amd_smi", "rocm",
-                              "process_sampling");
+                              "sampling", "process_sampling");
 
     ROCPROFSYS_CONFIG_SETTING(
         std::string, "ROCPROFSYS_SAMPLING_GPUS",
