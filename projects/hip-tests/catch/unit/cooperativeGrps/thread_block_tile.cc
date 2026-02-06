@@ -19,7 +19,6 @@ THE SOFTWARE.
 
 #include "cooperative_groups_common.hh"
 #include "cg_common_kernels.hh"
-
 #include <array>
 #include <random>
 
@@ -554,6 +553,39 @@ TEMPLATE_TEST_CASE("Unit_Thread_Block_Tile_Sync_Positive_Basic", "", uint8_t, ui
   SECTION("Global memory") { BlockTileSyncTest<true, TestType, 2, 16, 32>(); }
   SECTION("Shared memory") { BlockTileSyncTest<false, TestType, 2, 16, 32>(); }
 }
+
+template <size_t WavefrontSize>
+void __global__ simpleSum(int* result)
+{
+   int sum = 1;
+   cg::thread_block mygroup = cg::this_thread_block();
+   auto mytile = cg::tiled_partition<WavefrontSize>(mygroup);
+   *result = cg::reduce(mytile, sum, cg::plus<int>());
+}
+
+TEMPLATE_TEST_CASE("Unit_Thread_Block_Tile_Reduce_Basic", "", int)
+{
+  unsigned int wavefrontSize = getWarpSize();
+  LinearAllocGuard<int> h_result(LinearAllocs::malloc, sizeof(int));
+  LinearAllocGuard<int> d_result(LinearAllocs::hipMalloc, sizeof(int));
+  dim3 gridDim = { 1 };
+  dim3 blockDim = { wavefrontSize };
+  void* devicePtr = d_result.ptr();
+  void* args[] = { &devicePtr };
+
+  if (wavefrontSize == 32) {
+    HIP_CHECK(hipLaunchCooperativeKernel((void*)simpleSum<32>, gridDim, blockDim, args, 0, nullptr));
+  } else {
+    HIP_CHECK(hipLaunchCooperativeKernel((void*)simpleSum<64>, gridDim, blockDim, args, 0, nullptr));
+  }
+
+  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipMemcpy(h_result.host_ptr(), d_result.ptr(),
+                      h_result.size_bytes(), hipMemcpyDeviceToHost));
+  REQUIRE(*h_result.host_ptr() == wavefrontSize);
+}
+
 
 /**
  * End doxygen group DeviceLanguageTest.

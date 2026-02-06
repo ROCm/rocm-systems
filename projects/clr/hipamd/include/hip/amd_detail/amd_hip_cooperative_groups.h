@@ -1308,65 +1308,77 @@ template <typename TyLhs, typename TyRhs>
 using is_op_type_same = __hip_internal::is_same<remove_qual<TyLhs>, remove_qual<TyRhs>
 >;
 
-// Retrieve mask of coalesced groups and tiles
-template <typename TyGroup>
-__CG_STATIC_QUALIFIER__ unsigned int get_mask(const TyGroup &group) {
-    return group.get_mask();
-}
-
 template <class T>
-struct MinOp {
-  T operator()(const T& lhs, const T& rhs) const
+struct plus {
+  __CG_QUALIFIER__ T operator()(const T& lhs, const T& rhs) const
   {
-    return std::min(lhs, rhs);
+    return lhs + rhs;
   }
 };
 
 template <class T>
-struct MaxOp {
-  T operator()(const T& lhs, const T& rhs) const
+struct less {
+  __CG_QUALIFIER__ T operator()(const T& lhs, const T& rhs) const
   {
-    return std::max(lhs, rhs);
+    return lhs < rhs? lhs : rhs;
   }
 };
 
 template <class T>
-struct XorOp {
-  __host__ __device__ T operator()(const T& lhs, const T& rhs)
+struct greater {
+  __CG_QUALIFIER__ T operator()(const T& lhs, const T& rhs) const
   {
-    return (!lhs) != (!rhs) == 1;
+    return lhs < rhs? rhs : lhs;
+  }
+};
+
+template <class T>
+struct bit_and {
+  __CG_QUALIFIER__ T operator()(const T& lhs, const T& rhs) const
+  {
+    return lhs | rhs;
+  }
+};
+
+template <class T>
+struct bit_xor {
+  __CG_QUALIFIER__ T operator()(const T& lhs, const T& rhs) const
+  {
+    return lhs ^ rhs;
+  }
+};
+
+template <class T>
+struct bit_or {
+  __CG_QUALIFIER__ T operator()(const T& lhs, const T& rhs) const
+  {
+    return lhs | rhs;
   }
 };
 
 template <typename TyGroup, typename TyVal, typename TyFn>
 __CG_QUALIFIER__ auto reduce(const TyGroup& group, TyVal&& val, TyFn&& op) -> decltype(op(val, val)) {
-  static_assert(is_op_type_same<TyVal, decltype(op(val, val))>::value, "Operator input and output types differ");
-
-  if constexpr (!std::is_same<TyGroup, cooperative_groups::tiled_group>::value &&
-                !std::is_same<TyGroup, cooperative_groups::coalesced_group>::value) {
-    static_assert(std::is_void<TyGroup>::value, "This group does not exclusively represent a tile");
-  }
-  unsigned mask = get_mask(group);
-
   using Op  = std::decay_t<TyFn>;
   using Val = std::decay_t<TyVal>;
+  static_assert(is_op_type_same<TyVal, decltype(op(val, val))>::value, "Operator input and output types differ");
+  lane_mask mask = __activemask();
 
-  if constexpr (std::is_same<Op, std::plus<Val>>::value) {
+  if constexpr (std::is_same<Op, cooperative_groups::plus<Val>>::value) {
     return __reduce_add_sync(mask, val);
   }
-  else if constexpr (std::is_same<Op, std::logical_and<Val>>::value) {
+  else if constexpr (std::is_same<Op, cooperative_groups::bit_and<Val>>::value) {
     return __reduce_and_sync(mask, val);
   }
-  else if constexpr (std::is_same<Op, std::logical_or<Val>>::value) {
+  else if constexpr (std::is_same<Op, cooperative_groups::bit_or<Val>>::value) {
     return __reduce_or_sync(mask, val);
   }
-  else if constexpr (std::is_same<Op, MinOp<Val>>::value) {
+  else if constexpr (std::is_same<Op, cooperative_groups::less<Val>>::value) {
     return __reduce_min_sync(mask, val);
   }
-  else if constexpr (std::is_same<Op, MaxOp<Val>>::value) {
+  else if constexpr (std::is_same<Op, cooperative_groups::greater<Val>>::value) {
     return __reduce_max_sync(mask, val);
   }
-  else if constexpr (std::is_same<Op, XorOp<Val>>::value) {
+  else if constexpr (std::is_same<Op, cooperative_groups::bit_xor<Val>>::value) {
     return __reduce_xor_sync(mask, val);
   }
   else {
