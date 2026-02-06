@@ -181,6 +181,7 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(GPUComputeProcessList_t& 
         // Copy the kfd stats from rsmi_process_info_t to amdsmi_proc_info_t
         amdsmi_proc_info.cu_occupancy = rsmi_proc_info.cu_occupancy;
         amdsmi_proc_info.evicted_time = rsmi_proc_info.evicted_time;
+        amdsmi_proc_info.sdma_usage = rsmi_proc_info.sdma_usage;
 
         // Safely handle KFD processes to get total memory_usage of the process
         uint64_t kfd_gpu_id = get_kfd_gpu_id();

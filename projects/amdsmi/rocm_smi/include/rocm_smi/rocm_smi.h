@@ -1487,6 +1487,8 @@ typedef enum {
     RSMI_PTL_DATA_FORMAT_BF16 = 0x2,      //!< Brain Float 16-bit format
     RSMI_PTL_DATA_FORMAT_F32 = 0x3,       //!< Float 32-bit format
     RSMI_PTL_DATA_FORMAT_F64 = 0x4,       //!< Float 64-bit format
+    RSMI_PTL_DATA_FORMAT_F8 = 0x5,        //!< Float 8-bit format
+    RSMI_PTL_DATA_FORMAT_VECTOR = 0x6,    //!< Vector format
     RSMI_PTL_DATA_FORMAT_INVALID = 0xFFFFFFFF  //!< Invalid format
 } rsmi_ptl_data_format_t;
 

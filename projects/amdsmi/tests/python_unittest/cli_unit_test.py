@@ -126,7 +126,7 @@ class TestAmdSmiCli(unittest.TestCase):
         self.compute_partition_modes = ['SPX', 'DPX', 'TPX', 'QPX', 'CPX']
         self.memory_partition_modes = ['NPS1', 'NPS2', 'NPS4', 'NPS8']
         self.power_types = ['ppt0', 'ppt1']
-        self.ptl_formats = ['I8', 'F16', 'BF16', 'F32', 'F64']
+        self.ptl_formats = ['I8', 'F16', 'BF16', 'F32', 'F64', 'F8', 'VECTOR']
         self.clk_limits = ['SCLK', 'MCLK']
         self.limit_types = ['MIN', 'MAX']
         self.clk_levels = ['SCLK', 'MCLK', 'FCLK', 'SOCCLK', 'PCIE']

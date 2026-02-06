@@ -1189,6 +1189,42 @@ class AMDSMIHelpers():
             bytes_input /= 1024
         return f"{bytes_input:.1f} YB"
 
+    def convert_time_to_readable(self, time_value, base_unit="us"):
+        """Convert time values to readable format, auto-scaling units to keep value under 1000.
+        
+        Keeps the numeric value to max 3 digits by bumping units:
+        us (microseconds) -> ms (milliseconds) -> s (seconds)
+        
+        params:
+            time_value - the time value to convert
+            base_unit - the base unit of the input ("us" or "ms")
+        return:
+            str: formatted time string (e.g., "123 us", "45 ms", "2 s")
+        """
+        if isinstance(time_value, str) or time_value == "N/A":
+            return "N/A"
+        
+        # Define unit progression
+        if base_unit == "us":
+            units = [("us", 1), ("ms", 1000), ("s", 1000000)]
+        elif base_unit == "ms":
+            units = [("ms", 1), ("s", 1000)]
+        else:
+            return f"{time_value} {base_unit}"
+        
+        # Find appropriate unit (keep rounded value under 1000)
+        for unit_name, divisor in units:
+            scaled_value = time_value / divisor
+            rounded_value = round(scaled_value)
+            if rounded_value < 1000:
+                return f"{rounded_value} {unit_name}"
+        
+        # If value is huge, use the largest unit
+        unit_name, divisor = units[-1]
+        return f"{int(time_value / divisor)} {unit_name}"
+
+
+
 
     def unit_format(self, logger, value, unit):
         """This function will format output with unit based on the logger output format
