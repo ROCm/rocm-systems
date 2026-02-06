@@ -610,6 +610,8 @@ class AmdSmiPtlData(IntEnum):
     BF16 = amdsmi_wrapper.AMDSMI_PTL_DATA_FORMAT_BF16
     F32 = amdsmi_wrapper.AMDSMI_PTL_DATA_FORMAT_F32
     F64 = amdsmi_wrapper.AMDSMI_PTL_DATA_FORMAT_F64
+    F8 = amdsmi_wrapper.AMDSMI_PTL_DATA_FORMAT_F8
+    VECTOR = amdsmi_wrapper.AMDSMI_PTL_DATA_FORMAT_VECTOR
     INVALID = amdsmi_wrapper.AMDSMI_PTL_DATA_FORMAT_INVALID
 
 class AmdSmiPowerCapType(IntEnum):
@@ -3065,6 +3067,7 @@ def amdsmi_get_gpu_process_list(
                 "vram_mem": process_list[index].memory_usage.vram_mem,
             },
             "cu_occupancy": _validate_if_max_uint(process_list[index].cu_occupancy, MaxUIntegerTypes.UINT32_T),
+            "sdma_usage": _validate_if_max_uint(process_list[index].sdma_usage, MaxUIntegerTypes.UINT64_T),
             "evicted_time": _validate_if_max_uint(process_list[index].evicted_time, MaxUIntegerTypes.UINT32_T)
         })
 

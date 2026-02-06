@@ -1451,7 +1451,8 @@ struct_amdsmi_proc_info_t._fields_ = [
     ('container_name', ctypes.c_char * 256),
     ('cu_occupancy', ctypes.c_uint32),
     ('evicted_time', ctypes.c_uint32),
-    ('reserved', ctypes.c_uint32 * 10),
+    ('sdma_usage', ctypes.c_uint64),
+    ('reserved', ctypes.c_uint32 * 8),
 ]
 
 amdsmi_proc_info_t = struct_amdsmi_proc_info_t
@@ -2364,6 +2365,8 @@ amdsmi_ptl_data_format_t__enumvalues = {
     2: 'AMDSMI_PTL_DATA_FORMAT_BF16',
     3: 'AMDSMI_PTL_DATA_FORMAT_F32',
     4: 'AMDSMI_PTL_DATA_FORMAT_F64',
+    5: 'AMDSMI_PTL_DATA_FORMAT_F8',
+    6: 'AMDSMI_PTL_DATA_FORMAT_VECTOR',
     4294967295: 'AMDSMI_PTL_DATA_FORMAT_INVALID',
 }
 AMDSMI_PTL_DATA_FORMAT_I8 = 0
@@ -2371,6 +2374,8 @@ AMDSMI_PTL_DATA_FORMAT_F16 = 1
 AMDSMI_PTL_DATA_FORMAT_BF16 = 2
 AMDSMI_PTL_DATA_FORMAT_F32 = 3
 AMDSMI_PTL_DATA_FORMAT_F64 = 4
+AMDSMI_PTL_DATA_FORMAT_F8 = 5
+AMDSMI_PTL_DATA_FORMAT_VECTOR = 6
 AMDSMI_PTL_DATA_FORMAT_INVALID = 4294967295
 amdsmi_ptl_data_format_t = ctypes.c_uint32 # enum
 class struct_amdsmi_smu_fw_version_t(Structure):
@@ -3417,8 +3422,9 @@ __all__ = \
     'AMDSMI_PROCESSOR_TYPE_NON_AMD_GPU',
     'AMDSMI_PROCESSOR_TYPE_UNKNOWN', 'AMDSMI_PTL_DATA_FORMAT_BF16',
     'AMDSMI_PTL_DATA_FORMAT_F16', 'AMDSMI_PTL_DATA_FORMAT_F32',
-    'AMDSMI_PTL_DATA_FORMAT_F64', 'AMDSMI_PTL_DATA_FORMAT_I8',
-    'AMDSMI_PTL_DATA_FORMAT_INVALID',
+    'AMDSMI_PTL_DATA_FORMAT_F64', 'AMDSMI_PTL_DATA_FORMAT_F8',
+    'AMDSMI_PTL_DATA_FORMAT_I8', 'AMDSMI_PTL_DATA_FORMAT_INVALID',
+    'AMDSMI_PTL_DATA_FORMAT_VECTOR',
     'AMDSMI_PWR_PROF_PRST_3D_FULL_SCR_MASK',
     'AMDSMI_PWR_PROF_PRST_BOOTUP_DEFAULT',
     'AMDSMI_PWR_PROF_PRST_COMPUTE_MASK',
