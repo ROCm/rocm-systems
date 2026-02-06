@@ -32,6 +32,8 @@ public:
 
     limit_clause_builder& limit(size_t count);
     limit_clause_builder& offset(size_t count);
+
+    void reset();
 };
 
 class order_by_clause_builder : public query_builder_base
@@ -44,6 +46,8 @@ public:
 
     limit_clause_builder& limit(size_t count);
     limit_clause_builder& offset(size_t count);
+
+    void reset();
 
 private:
     bool                 m_has_order_by{ false };
@@ -60,6 +64,8 @@ public:
     order_by_clause_builder& order_by(std::string_view column,
                                       sort_order       order = sort_order::ascending);
     limit_clause_builder&    limit(size_t count);
+
+    void reset();
 
 private:
     order_by_clause_builder m_order_by_builder;
@@ -84,6 +90,8 @@ public:
     order_by_clause_builder& order_by(std::string_view column,
                                       sort_order       order = sort_order::ascending);
     limit_clause_builder&    limit(size_t count);
+
+    void reset();
 
 private:
     having_clause_builder m_having_builder;
@@ -111,6 +119,8 @@ public:
                                       sort_order       order = sort_order::ascending);
     limit_clause_builder&    limit(size_t count);
 
+    void reset();
+
 private:
     bool                    m_has_where{ false };
     group_by_clause_builder m_group_by_builder;
@@ -118,6 +128,8 @@ private:
 
 class join_clause_builder : public query_builder_base
 {
+    friend class from_clause_builder;
+
 public:
     explicit join_clause_builder(std::stringstream& ss);
 
@@ -143,6 +155,7 @@ public:
                   std::enable_if_t<(common::traits::is_string_literal<Columns>() && ...)>>
     having_clause_builder& group_by(Columns&&... columns)
     {
+        restore_base();
         return m_where_builder.group_by(std::forward<Columns>(columns)...);
     }
 
@@ -151,7 +164,12 @@ public:
                                       sort_order       order = sort_order::ascending);
     limit_clause_builder&    limit(size_t count);
 
+    void reset();
+
 private:
+    void restore_base();
+
+    std::streampos       m_base_pos{ -1 };
     where_clause_builder m_where_builder;
 };
 
@@ -162,6 +180,8 @@ public:
 
     join_clause_builder& from(std::string_view table);
     join_clause_builder& from(std::string_view table, std::string_view alias);
+
+    void reset();
 
 private:
     join_clause_builder m_join_builder;
@@ -189,6 +209,8 @@ public:
     from_clause_builder& select_all();
 
     select_columns_builder& distinct();
+
+    void reset();
 
 private:
     bool                m_distinct{ false };

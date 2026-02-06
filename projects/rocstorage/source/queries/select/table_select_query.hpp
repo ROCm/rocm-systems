@@ -130,6 +130,7 @@ struct table_select_query
     from_clause_builder& select(Columns&&... columns)
     {
         m_ss.str("");
+        m_select_builder.reset();
         return m_select_builder.select(std::forward<Columns>(columns)...);
     }
 
@@ -140,6 +141,7 @@ struct table_select_query
     from_clause_builder& select_all()
     {
         m_ss.str("");
+        m_select_builder.reset();
         return m_select_builder.select_all();
     }
 
@@ -151,6 +153,7 @@ struct table_select_query
     select_columns_builder& distinct()
     {
         m_ss.str("");
+        m_select_builder.reset();
         return m_select_builder.distinct();
     }
 

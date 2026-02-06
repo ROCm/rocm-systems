@@ -442,4 +442,36 @@ TEST_F(table_select_query_test, kernel_dispatch_timeline_event_query)
         "JOIN rocpd_info_kernel_symbol AS KS ON KS.id = kernel_id");
 }
 
+TEST_F(table_select_query_test, query_reusability)
+{
+    auto query_builder = m_query.select("id", "name").from("users");
+    EXPECT_EQ(query_builder.get_query_string(), "SELECT id, name FROM users");
+
+    auto query1 = query_builder.where("age > ?").get_query_string();
+    EXPECT_EQ(query1, "SELECT id, name FROM users WHERE age > ?");
+
+    auto query2 = query_builder.where("name LIKE '?'").get_query_string();
+    EXPECT_EQ(query2, "SELECT id, name FROM users WHERE name LIKE '?'");
+}
+
+TEST_F(table_select_query_test, query_reusability_with_join)
+{
+    auto query_builder = m_query.select("id", "name")
+                             .from("users")
+                             .inner_join("orders", "users.id = orders.user_id");
+    EXPECT_EQ(
+        query_builder.get_query_string(),
+        "SELECT id, name FROM users INNER JOIN orders ON users.id = orders.user_id");
+
+    auto query1 = query_builder.where("age > ?").get_query_string();
+    EXPECT_EQ(query1,
+              "SELECT id, name FROM users INNER JOIN orders ON users.id = orders.user_id "
+              "WHERE age > ?");
+
+    auto query2 = query_builder.where("name LIKE '?'").get_query_string();
+    EXPECT_EQ(query2,
+              "SELECT id, name FROM users INNER JOIN orders ON users.id = orders.user_id "
+              "WHERE name LIKE '?'");
+}
+
 }  // namespace
