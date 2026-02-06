@@ -2654,7 +2654,8 @@ TEST_CASE("Unit_hipGetProcAddress_spt_Stream") {
 
     for (int s = 0; s < Ns; s++) {
       int startIndex = s * (N / Ns);
-      addOneKernel<<<1, 1, 0, stream[s]>>>(devMem + startIndex, N / Ns);
+      int threadsPerBlock = 1024;
+      addOneKernel<<<N/threadsPerBlock, threadsPerBlock, 0, stream[s]>>>(devMem + startIndex, N / Ns);
     }
 
     for (int s = 0; s < Ns; s++) {
