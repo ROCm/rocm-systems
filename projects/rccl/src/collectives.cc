@@ -98,7 +98,6 @@ ncclResult_t ncclAllGather_impl(const void* sendbuff, void* recvbuff, size_t sen
     int sliceSteps = comm->rcclUseOneSlice
       ? (isGfx950 ? 1 : ALLGATHER_SLICESTEPS_SINGLE_NODE)
       : ALLGATHER_SLICESTEPS;
-
   struct ncclInfo info = { ncclFuncAllGather, "AllGather",
     sendbuff, recvbuff, sendcount, datatype, ncclSum, 0, comm, stream, /* Args */
     chunkSteps, sliceSteps, nullptr };
