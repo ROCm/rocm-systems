@@ -19,6 +19,10 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 - Fixed an issue where JPEG engine activity PMC events were not being collected for MI35X systems. Only the first 32 JPEG engines were being collected.
 
+### Resolved issues
+
+- Fixed MPI perfetto trace file merging when using trace cache mode with `ROCPROFSYS_PERFETTO_COMBINE_TRACES=ON`. Previously, each MPI rank would produce a separate trace file; now all ranks' traces are correctly merged into a single output file.
+
 ## ROCm Systems Profiler 1.4.0 for ROCm 7.11.0
 
 ### Added
