@@ -550,6 +550,76 @@ amdsmi_status_t amdsmi_get_node_handle(amdsmi_processor_handle processor_handle,
 
 }
 
+amdsmi_status_t amdsmi_get_device_handle_from_node(amdsmi_node_handle node_handle,
+                                                   amdsmi_processor_handle *processor_handle) {
+    AMDSMI_CHECK_INIT();
+
+    if (node_handle == nullptr || processor_handle == nullptr) {
+        return AMDSMI_STATUS_INVAL;
+    }
+
+    std::string* board_path_ptr = reinterpret_cast<std::string*>(node_handle);
+    std::string board_path = *board_path_ptr;
+    namespace fs = std::filesystem;
+
+    try {
+        fs::path device_path = fs::path(board_path).parent_path();
+        std::vector<amdsmi_processor_handle> handles;
+
+        // Get socket handles
+        uint32_t socket_count = 0;
+        amdsmi_status_t r = amdsmi_get_socket_handles(&socket_count, nullptr);
+        if (r != AMDSMI_STATUS_SUCCESS) {
+            return r;
+        }
+
+        std::vector<amdsmi_socket_handle> sockets(socket_count);
+        r = amdsmi_get_socket_handles(&socket_count, sockets.data());
+        if (r != AMDSMI_STATUS_SUCCESS) {
+            return r;
+        }
+
+        // Get processor handle for sockets
+        for (uint32_t s = 0; s < socket_count; s++) {
+            uint32_t processor_count = 0;
+            r = amdsmi_get_processor_handles(sockets[s], &processor_count, nullptr);
+            if (r != AMDSMI_STATUS_SUCCESS) {
+                continue;
+            }
+
+            size_t offset = handles.size();
+            handles.resize(offset + processor_count);
+            r = amdsmi_get_processor_handles(sockets[s], &processor_count, handles.data() + offset);
+            if (r != AMDSMI_STATUS_SUCCESS) {
+                handles.resize(offset);
+            }
+        }
+
+        // Find the processor handle corresponds to the node
+        for (uint32_t i = 0; i < handles.size(); i++) {
+            amdsmi_enumeration_info_t enumeration_info;
+            r = amdsmi_get_gpu_enumeration_info(handles[i], &enumeration_info);
+            if (r != AMDSMI_STATUS_SUCCESS) {
+                continue;
+            }
+
+            // Check for OAM ID 0 and get processor_handle
+            amdsmi_asic_info_t asic_info;
+            r = amdsmi_get_gpu_asic_info(handles[i], &asic_info);
+            if (r != AMDSMI_STATUS_SUCCESS || asic_info.oam_id != 0) {
+                continue;
+            }
+            *processor_handle = handles[i];
+            return AMDSMI_STATUS_SUCCESS;
+        }
+
+        return AMDSMI_STATUS_NOT_FOUND;
+
+    } catch (...) {
+        return AMDSMI_STATUS_FILE_ERROR;
+    }
+}
+
 #ifdef ENABLE_ESMI_LIB
 amdsmi_status_t amdsmi_get_processor_count_from_handles(amdsmi_processor_handle* processor_handles,
                                                         uint32_t* processor_count, uint32_t* nr_cpusockets,
