@@ -116,7 +116,13 @@ function(hip_gen_exe_target)
     endforeach()
     # add binary to global list of binaries to install
     set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS ${_EXE_NAME})
-    catch_discover_tests("${_EXE_NAME}" DISCOVERY_MODE PRE_TEST PROPERTIES SKIP_REGULAR_EXPRESSION "HIP_SKIP_THIS_TEST")
+    catch_discover_tests(
+      "${_EXE_NAME}"
+      DISCOVERY_MODE PRE_TEST
+      ADD_TAGS_AS_LABELS
+      PROPERTIES
+        SKIP_REGULAR_EXPRESSION "HIP_SKIP_THIS_TEST"
+    )
     file(GLOB CTEST_INC_FILES "${CMAKE_CURRENT_BINARY_DIR}/${_EXE_NAME}-*_include.cmake")
     set_property(GLOBAL APPEND PROPERTY G_INSTALL_CTEST_INCLUDE_FILES ${CTEST_INC_FILES})
 
