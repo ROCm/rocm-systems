@@ -218,10 +218,7 @@ def gpu_benchmark_lock(device: int) -> Generator[None, None, None]:
             msg = f"Acquired lock for GPU {device}, proceeding with benchmark."
             print(msg, flush=True)
             console_log(msg)
-        try:
-            yield
-        finally:
-            fcntl.flock(f, fcntl.LOCK_UN)
+        yield
 
 
 def show_progress(pct: float) -> None:
