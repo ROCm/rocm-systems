@@ -27,12 +27,12 @@ import importlib.util
 import inspect
 import os
 import re
+import socket
 import sqlite3
 import subprocess
 import sys
 import time
 from pathlib import Path
-import socket
 
 import numpy as np
 import pandas as pd
