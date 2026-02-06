@@ -23,6 +23,7 @@
  *****************************************************************************/
 
 #include "ibv_wrapper.hpp"
+#include "envvar.hpp"
 #include "util.hpp"
 
 #include "rocshmem/rocshmem.hpp"
@@ -77,6 +78,11 @@ void IBVWrapper::init_dmabuf_support_flag() {
   struct utsname utsname;
   char kernel_conf_file[128];
   char buf[256];
+
+  if (false == envvar::gda::enable_dmabuf) {
+    dmabuf_is_supported = 0;
+    return;
+  }
 
   if (ibv.reg_dmabuf_mr == NULL) {
     DPRINTF("ibv_reg_dmabuf_mr not present in verbs library");
