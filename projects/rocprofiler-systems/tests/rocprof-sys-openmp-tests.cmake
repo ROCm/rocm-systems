@@ -145,7 +145,6 @@ if(ROCPROFSYS_OMPVV_HOST_TESTS)
 
     foreach(OFFLOAD_TEST_NAME ${ROCPROFSYS_OMPVV_OFFLOAD_TESTS})
         rocprofiler_systems_add_test(
-            SKIP_RUNTIME
             NAME ${OFFLOAD_TEST_NAME}
             TARGET ${OFFLOAD_TEST_NAME}-exec
             GPU ON
@@ -154,7 +153,7 @@ if(ROCPROFSYS_OMPVV_HOST_TESTS)
             SAMPLING_TIMEOUT 300
             REWRITE_TIMEOUT 300
             ENVIRONMENT
-              "${_ompvv_offload_environment}"
+              "${_ompvv_offload_environment};ROCPROFSYS_CI_SKIP_PUSH_POP_CHECK=ON"
             REWRITE_RUN_PASS_REGEX
               "${_OMPVV_OFFLOAD_PASS_REGEX}"
         )
