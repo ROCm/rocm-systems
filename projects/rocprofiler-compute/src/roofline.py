@@ -285,9 +285,6 @@ class Roofline:
         else:
             return "Compute Bound"
 
-    def set_workload_dir(self, workload_dir: str) -> None:
-        self.__run_parameters["workload_dir"] = workload_dir
-
     @demarcate
     def empirical_roofline(
         self, ret_df: dict[str, pd.DataFrame]

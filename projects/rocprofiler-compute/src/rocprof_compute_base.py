@@ -480,12 +480,6 @@ class RocProfCompute:
     @demarcate
     def run_profiler(self) -> None:
         self.print_graphic()
-        self.load_soc_specs()
-
-        if self.__args.list_metrics is not None or self.__args.list_available_metrics:
-            self.list_metrics()
-        elif self.__args.list_sets:
-            self.list_sets()
 
         # Replace parameters in output directory when either:
         # 1. --output-directory is explicitly given by user
@@ -499,6 +493,13 @@ class RocProfCompute:
             # Set path to output_directory for roofline
             # Remove this while removing roofline from profiling mode
             self.__args.path = self.__args.output_directory
+
+        self.load_soc_specs()
+
+        if self.__args.list_metrics is not None or self.__args.list_available_metrics:
+            self.list_metrics()
+        elif self.__args.list_sets:
+            self.list_sets()
 
         # instantiate desired profiler
         profiler = self.create_profiler()

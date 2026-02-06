@@ -730,8 +730,6 @@ class OmniSoC_Base:
                 workload, workload.path, is_gui=False, debug=False
             )
 
-            self.roofline_obj.set_workload_dir(args.path)
-
             self.roofline_obj.post_processing(filtered_pmc)
 
     @abstractmethod
