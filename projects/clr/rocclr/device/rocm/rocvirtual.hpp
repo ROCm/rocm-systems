@@ -470,8 +470,6 @@ class VirtualGPU : public device::VirtualDevice {
   //! Wake up the device queue monitor thread when scheduler enqueues a kernel
   void WakeupDeviceQueueMonitor() {
     if (monitorThreadRunning_.load(std::memory_order_relaxed)) {
-      ClPrint(amd::LOG_DEBUG, amd::LOG_QUEUE,
-              "Waking up device queue monitor thread for queue: %p", schedulerQueue_);
       // Ensure all scheduler kernel operations are visible before wakeup
       std::atomic_thread_fence(std::memory_order_seq_cst);
 
@@ -479,16 +477,13 @@ class VirtualGPU : public device::VirtualDevice {
         std::lock_guard<std::mutex> lock(monitor_mutex_);
         monitor_cv_.notify_one();
       }
-      ClPrint(amd::LOG_DEBUG, amd::LOG_QUEUE,
-        "Notification sent to wake up monitor thread for queue: %p", schedulerQueue_);
-    } else {
-      ClPrint(amd::LOG_DEBUG, amd::LOG_QUEUE,
-              "Monitor thread not running, cannot wake up for queue: %p", schedulerQueue_);
     }
   }
 
   //! Start the device queue monitor thread on first use
-  void StartDeviceQueueMonitorThread(hsa_queue_t* queue);
+  void StartDeviceQueueMonitorThread();
+  //! Wait for the monitor thread to finish processing all enqueued packets
+  void WaitForMonitorCompletion();
 #endif  // _WIN32
 
   //! Analyzes a crashed AQL queue to find a broken AQL packet

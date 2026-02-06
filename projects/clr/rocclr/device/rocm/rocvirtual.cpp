@@ -1838,8 +1838,8 @@ VirtualGPU::~VirtualGPU() {
         deviceQueueMonitorThread_.join();
       }
     }
-    Hsa::queue_destroy(schedulerQueue_);
 #endif  // _WIN32
+    Hsa::queue_destroy(schedulerQueue_);
   }
 
   if (nullptr != virtualQueue_) {
@@ -3466,7 +3466,7 @@ bool VirtualGPU::createSchedulerParam() {
     }
 
 #if defined(_WIN32)
-    StartDeviceQueueMonitorThread(schedulerQueue_);
+    StartDeviceQueueMonitorThread();
 #endif  // _WIN32
     return true;
   }
@@ -3481,21 +3481,10 @@ bool VirtualGPU::createSchedulerParam() {
 
 // ================================================================================================
 #if defined(_WIN32)
-void VirtualGPU::StartDeviceQueueMonitorThread(hsa_queue_t* queue) {
-  if (queue == nullptr) {
-    LogError("StartDeviceQueueMonitorThread: queue is null");
-    return;
-  }
-  if (monitorThreadRunning_.load(std::memory_order_relaxed)) {
-    LogError("StartDeviceQueueMonitorThread: monitor thread already running");
-    return;
-  }
-
+void VirtualGPU::StartDeviceQueueMonitorThread() {
   monitorThreadRunning_.store(true, std::memory_order_relaxed);
 
   deviceQueueMonitorThread_ = std::thread([this]() {
-    ClPrint(amd::LOG_DEBUG, amd::LOG_QUEUE,
-            "Thread started to monitor scheduler queue: %p", schedulerQueue_);
 
     while (monitorThreadRunning_.load(std::memory_order_relaxed)) {
       // Wait for the monitor thread to wake up
@@ -3503,50 +3492,51 @@ void VirtualGPU::StartDeviceQueueMonitorThread(hsa_queue_t* queue) {
         std::unique_lock<std::mutex> lock(monitor_mutex_);
         monitor_cv_.wait(lock);
       }
-      ClPrint(amd::LOG_DEBUG, amd::LOG_QUEUE, "Monitor thread woke up");
 
-      if (!monitorThreadRunning_.load(std::memory_order_relaxed)) {
-        ClPrint(amd::LOG_DEBUG, amd::LOG_QUEUE, "Monitor thread terminated");
-        break;
-      }
+      std::atomic_thread_fence(std::memory_order_seq_cst);
+      // After wakeup, check the read index and write index
+      constexpr int kTotalIterations = 100;
+      int poll_iterations = 0;
 
-      if (schedulerQueue_ != nullptr) {
-        std::atomic_thread_fence(std::memory_order_seq_cst);
+      while (monitorThreadRunning_.load(std::memory_order_relaxed)) {
+        // Read queue indices with proper memory ordering
+        uint64_t read_index = Hsa::queue_load_read_index_scacquire(schedulerQueue_);
+        uint64_t write_index = Hsa::queue_load_write_index_scacquire(schedulerQueue_);
 
-        // After wakeup, poll for some time to check for new packets.
-        constexpr int kTotalIterations = 100;
-        int poll_iterations = 0;
-        uint64_t last_processed_write = 0;
+        if (write_index != read_index && write_index > 0) {
 
-        while (monitorThreadRunning_.load(std::memory_order_relaxed)) {
-          // Read queue indices with proper memory ordering
-          uint64_t read_index = Hsa::queue_load_read_index_scacquire(schedulerQueue_);
-          uint64_t write_index = Hsa::queue_load_write_index_scacquire(schedulerQueue_);
-          ClPrint(amd::LOG_DEBUG, amd::LOG_QUEUE, "Monitor thread read=%llu, write=%llu, last_processed=%llu",
-                  read_index, write_index, last_processed_write);
-
-          if (write_index > 0 && write_index > read_index && write_index > last_processed_write) {
-            ClPrint(amd::LOG_DEBUG, amd::LOG_QUEUE, "Processing new packets - write_index=%llu", write_index);
-
-            // Ring doorbell if there is new work
-            Hsa::signal_store_screlease(schedulerQueue_->doorbell_signal, write_index);
-            last_processed_write = write_index;
-            poll_iterations = 0;
-          } else {
-            // No new packets to process, wait for wakeup
-            if (++poll_iterations >= kTotalIterations) {
-              ClPrint(amd::LOG_DEBUG, amd::LOG_QUEUE, "No packets after %d polls, waiting for wakeup", poll_iterations);
-              break;
-            }
-            amd::Os::sleep(1);
+          // Ring doorbell if there is new work
+          Hsa::signal_store_screlease(schedulerQueue_->doorbell_signal, write_index - 1);
+          poll_iterations = 0;
+        } else {
+          // No new packets to process, wait for wakeup
+          if (++poll_iterations >= kTotalIterations) {
+            break;
           }
+          amd::Os::sleep(1);
         }
       }
     }
-
-    ClPrint(amd::LOG_DEBUG, amd::LOG_QUEUE,
-            "Monitor thread terminated for queue: %p", schedulerQueue_);
   });
+}
+
+void VirtualGPU::WaitForMonitorCompletion() {
+  const int kMaxWaitMs = 5000;
+  int elapsed_ms = 0;
+
+  while (elapsed_ms < kMaxWaitMs) {
+    uint64_t read_idx = Hsa::queue_load_read_index_scacquire(schedulerQueue_);
+    uint64_t write_idx = Hsa::queue_load_write_index_scacquire(schedulerQueue_);
+
+    if (read_idx >= write_idx && write_idx > 0) {
+      std::atomic_thread_fence(std::memory_order_seq_cst);
+      break;
+    }
+
+    amd::Os::sleep(1);
+    elapsed_ms++;
+  }
+  return;
 }
 #endif  // _WIN32
 
