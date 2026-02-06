@@ -227,7 +227,7 @@ data_processor::insert_sample(const char* track, uint64_t timestamp, size_t even
     if(it == _tracks.end())
     {
         throw std::runtime_error(
-            fmt::format("Insert sample failed! Error: Unexisting track {}!", track));
+            fmt::format("Insert sample failed! Error: non-existing track {}!", track));
     }
     auto track_info = it->second;
     _insert_sample_statement(_upid.c_str(), track_info.track_id, timestamp, event_id,
