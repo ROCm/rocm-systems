@@ -541,36 +541,44 @@ HIP_TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Sync_Positive_Basic, uint8_t, uint
   SECTION("Shared memory") { BlockTileSyncTest<false, TestType, 2, 16, 32>(); }
 }
 
-template <size_t WavefrontSize>
+template <size_t TileSize>
 void __global__ simpleSum(int* result)
 {
    int sum = 1;
    cg::thread_block mygroup = cg::this_thread_block();
-   auto mytile = cg::tiled_partition<WavefrontSize>(mygroup);
+   auto mytile = cg::tiled_partition<TileSize>(mygroup);
    *result = cg::reduce(mytile, sum, cg::plus<int>());
+}
+
+template <size_t TileSize>
+void testReduceForTileSize()
+{
+  LinearAllocGuard<int> h_result(LinearAllocs::malloc, sizeof(int));
+  LinearAllocGuard<int> d_result(LinearAllocs::hipMalloc, sizeof(int));
+  dim3 gridDim = { 1 };
+  dim3 blockDim = { static_cast<unsigned short>(getWarpSize()) };
+  void* devicePtr = d_result.ptr();
+  void* args[] = { &devicePtr };
+
+  HIP_CHECK(hipLaunchCooperativeKernel((void*)simpleSum<TileSize>, gridDim, blockDim, args, 0, nullptr));
+  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipMemcpy(h_result.host_ptr(), d_result.ptr(),
+                      h_result.size_bytes(), hipMemcpyDeviceToHost));
+  REQUIRE(*h_result.host_ptr() == TileSize);
 }
 
 TEMPLATE_TEST_CASE("Unit_Thread_Block_Tile_Reduce_Basic", "", int)
 {
   unsigned int wavefrontSize = getWarpSize();
-  LinearAllocGuard<int> h_result(LinearAllocs::malloc, sizeof(int));
-  LinearAllocGuard<int> d_result(LinearAllocs::hipMalloc, sizeof(int));
-  dim3 gridDim = { 1 };
-  dim3 blockDim = { wavefrontSize };
-  void* devicePtr = d_result.ptr();
-  void* args[] = { &devicePtr };
 
-  if (wavefrontSize == 32) {
-    HIP_CHECK(hipLaunchCooperativeKernel((void*)simpleSum<32>, gridDim, blockDim, args, 0, nullptr));
-  } else {
-    HIP_CHECK(hipLaunchCooperativeKernel((void*)simpleSum<64>, gridDim, blockDim, args, 0, nullptr));
+  testReduceForTileSize<8>();
+  testReduceForTileSize<16>();
+  testReduceForTileSize<32>();
+
+  if (wavefrontSize > 32) {
+    testReduceForTileSize<64>();
   }
-
-  HIP_CHECK(hipDeviceSynchronize());
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipMemcpy(h_result.host_ptr(), d_result.ptr(),
-                      h_result.size_bytes(), hipMemcpyDeviceToHost));
-  REQUIRE(*h_result.host_ptr() == wavefrontSize);
 }
 
 
