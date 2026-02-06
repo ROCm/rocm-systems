@@ -153,6 +153,8 @@ static_assert(__hip_internal::is_trivial<hip_bfloat16>{},
               "hip_bfloat16 is not a trivial type, and thus is "
               "incompatible with C.");
 #if !defined(__HIPCC_RTC__)
+#include <ostream>
+
 static_assert(sizeof(hip_bfloat16) == sizeof(hip_bfloat16_public) &&
                   offsetof(hip_bfloat16, data) == offsetof(hip_bfloat16_public, data),
               "internal hip_bfloat16 does not match public hip_bfloat16");

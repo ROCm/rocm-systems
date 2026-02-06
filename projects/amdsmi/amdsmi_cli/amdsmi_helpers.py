@@ -890,6 +890,34 @@ class AMDSMIHelpers():
         return power_profiles_str
 
 
+    def get_power_profile_name_mapping(self):
+        """Returns dict mapping friendly names to enum values"""
+        return {
+            'CUSTOM': amdsmi_interface.AmdSmiPowerProfilePresetMasks.CUSTOM_MASK,
+            'VIDEO': amdsmi_interface.AmdSmiPowerProfilePresetMasks.VIDEO_MASK,
+            'POWER_SAVING': amdsmi_interface.AmdSmiPowerProfilePresetMasks.POWER_SAVING_MASK,
+            'COMPUTE': amdsmi_interface.AmdSmiPowerProfilePresetMasks.COMPUTE_MASK,
+            'VR': amdsmi_interface.AmdSmiPowerProfilePresetMasks.VR_MASK,
+            '3D_FULL_SCREEN': amdsmi_interface.AmdSmiPowerProfilePresetMasks.THREE_D_FULL_SCR_MASK,
+            'BOOTUP_DEFAULT': amdsmi_interface.AmdSmiPowerProfilePresetMasks.BOOTUP_DEFAULT,
+        }
+
+
+    def get_profile_name_from_mask(self, mask):
+        """Convert mask value to friendly name"""
+        reverse_mapping = {v: k for k, v in self.get_power_profile_name_mapping().items()}
+        return reverse_mapping.get(mask, 'UNKNOWN')
+
+
+    def parse_available_profiles(self, available_profiles_bitfield):
+        """Extract list of profile names from bitfield"""
+        profiles = []
+        for name, mask in self.get_power_profile_name_mapping().items():
+            if available_profiles_bitfield & mask:
+                profiles.append(name)
+        return profiles
+
+
     def get_perf_det_levels(self):
         perf_det_level_str = [level.name for level in amdsmi_interface.AmdSmiDevPerfLevel]
         if 'UNKNOWN' in perf_det_level_str:
@@ -943,6 +971,35 @@ class AMDSMIHelpers():
             converted = self.convert_SI_unit(value, AMDSMIHelpers.SI_Unit.MICRO)
             return f"{converted} W"
         return value
+
+
+    def get_fan_support(self):
+        """Check if fan control is supported on the first device.
+
+        Returns:
+            str: "0-255 or 0-100%%" if fan control is supported, "N/A" otherwise
+        """
+        device_handles = amdsmi_interface.amdsmi_get_processor_handles()
+        for dev in device_handles:
+            try:
+                # Try to get both fan speed and max fan speed
+                # If both succeed, fan control is supported
+                _ = amdsmi_interface.amdsmi_get_gpu_fan_speed(dev, 0)
+                _ = amdsmi_interface.amdsmi_get_gpu_fan_speed_max(dev, 0)
+                # Fan control is supported on this device
+                return "0-255 or 0-100%%"
+            except amdsmi_interface.AmdSmiLibraryException as e:
+                logging.debug(f"AMDSMIHelpers.get_fan_support - Unable to get fan info for device {dev}: {str(e)}")
+                if e.err_code == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED:
+                    logging.debug(f"AMDSMIHelpers.get_fan_support - Device {dev} does not support fan control")
+                    return "N/A"
+                return "N/A"
+            except Exception as e:
+                logging.debug(f"AMDSMIHelpers.get_fan_support - Unexpected error occurred --> Unable to get fan info for device {dev}: {str(e)}")
+                return "N/A"
+            # Only check the first device (socket device, never partition)
+            break
+        return "N/A"
 
 
     def get_soc_pstates(self):
@@ -1132,6 +1189,42 @@ class AMDSMIHelpers():
             bytes_input /= 1024
         return f"{bytes_input:.1f} YB"
 
+    def convert_time_to_readable(self, time_value, base_unit="us"):
+        """Convert time values to readable format, auto-scaling units to keep value under 1000.
+        
+        Keeps the numeric value to max 3 digits by bumping units:
+        us (microseconds) -> ms (milliseconds) -> s (seconds)
+        
+        params:
+            time_value - the time value to convert
+            base_unit - the base unit of the input ("us" or "ms")
+        return:
+            str: formatted time string (e.g., "123 us", "45 ms", "2 s")
+        """
+        if isinstance(time_value, str) or time_value == "N/A":
+            return "N/A"
+        
+        # Define unit progression
+        if base_unit == "us":
+            units = [("us", 1), ("ms", 1000), ("s", 1000000)]
+        elif base_unit == "ms":
+            units = [("ms", 1), ("s", 1000)]
+        else:
+            return f"{time_value} {base_unit}"
+        
+        # Find appropriate unit (keep rounded value under 1000)
+        for unit_name, divisor in units:
+            scaled_value = time_value / divisor
+            rounded_value = round(scaled_value)
+            if rounded_value < 1000:
+                return f"{rounded_value} {unit_name}"
+        
+        # If value is huge, use the largest unit
+        unit_name, divisor = units[-1]
+        return f"{int(time_value / divisor)} {unit_name}"
+
+
+
 
     def unit_format(self, logger, value, unit):
         """This function will format output with unit based on the logger output format
@@ -1299,6 +1392,11 @@ class AMDSMIHelpers():
 
         # root can always read
         if os.geteuid() == 0:
+            return True, None, None
+
+        # Use os.access to check read permission (including ACLs), so that
+        # permissions granted via mechanisms like udev/uaccess are respected.
+        if os.access(path, os.R_OK):
             return True, None, None
 
         mode = st.st_mode

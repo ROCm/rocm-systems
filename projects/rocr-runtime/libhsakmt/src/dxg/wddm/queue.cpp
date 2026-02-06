@@ -47,8 +47,9 @@
 #include "impl/wddm/queue.h"
 #include "impl/registers.h"
 
-#include "impl/hsa/hsa.h"
-#include "impl/hsa/hsa_ven_amd_loader.h"
+#include "hsa-runtime/inc/hsa.h"
+#include "hsa-runtime/inc/hsa_ven_amd_loader.h"
+
 extern hsa_signal_value_t hsakmt_hsa_signal_load_relaxed(hsa_signal_t signal);
 extern hsa_signal_value_t hsakmt_hsa_signal_wait_relaxed(
     hsa_signal_t signal, hsa_signal_condition_t condition,
@@ -58,6 +59,7 @@ extern void hsakmt_hsa_signal_store_screlease(hsa_signal_t hsa_signal,
                                       hsa_signal_value_t value);
 extern hsa_status_t hsakmt_hsa_ven_amd_loader_query_host_address(
     const void *device_address, const void **host_address);
+extern wsl::thunk::GpuMemory* GetGpuMemoryFromAddress(void* memory_address);
 
 namespace wsl {
 namespace thunk {
@@ -73,11 +75,13 @@ hsa_status_t WDDMQueue::SwsInit(void) {
 
     create_info.domain = thunk_proxy::kUserQueue;
     create_info.size = device->GetSwsQueueSize();
-    create_info.engine_flag = thunk_proxy::QueueEngine2EngineFlag(queue_engine);
+    // GetComputeEngine returns schedId instead of engine flag
+    create_info.engine_flag = device->GetComputeEngine();
 
     auto code = device->CreateGpuMemory(create_info, &gpu_mem);
     if (code != ErrorCode::Success) {
       device->DestroySyncobj(syncobj);
+      syncobj = 0;
       return HSA_STATUS_ERROR;
     }
 
@@ -89,7 +93,15 @@ hsa_status_t WDDMQueue::SwsInit(void) {
 }
 
 hsa_status_t WDDMQueue::SwsFini(void) {
-  device->DestroySyncobj(syncobj);
+  if (device->AllocUserQueueMemFromUMD()) {
+    auto gpu_mem = GpuMemory::Convert(queue_mem);
+    delete gpu_mem;
+  }
+
+  if (syncobj) {
+    device->DestroySyncobj(syncobj);
+    syncobj = 0;
+  }
 
   return HSA_STATUS_SUCCESS;
 }
@@ -230,18 +242,18 @@ void ComputeQueue::AqlToPm4Thread(ComputeQueue *queue) {
 ComputeQueue::ComputeQueue(WDDMDevice *device,
                void *ring,
                uint64_t ring_size,
-               std::atomic<uint64_t> *ring_wptr,
-               std::atomic<uint64_t> *ring_rptr,
+               std::atomic<uint64_t>* _ring_wptr,
+               std::atomic<uint64_t>* _ring_rptr,
                volatile int64_t *error_addr,
                uint32_t cmdbuf_size,
                uint32_t engine,
-               bool use_hws) :
-               WDDMQueue(device, 0, cmdbuf_size, engine, use_hws),
+               bool use_hws)
+    : WDDMQueue(
+          device, device->IsAqlSupported() ? reinterpret_cast<uintptr_t>(ring) : 0,
+               device->IsAqlSupported() ? ring_size * 64 : cmdbuf_size, engine, use_hws),
                ring(ring),
                ring_size(ring_size),
-               ring_wptr(ring_wptr),
-               ring_rptr(ring_rptr),
-               error_code_(reinterpret_cast<volatile std::atomic<long int>*>(error_addr)),
+               error_code_(reinterpret_cast<volatile std::atomic<int64_t>*>(error_addr)),
                ib_start_addr(0),
                ib_size(0),
                sync_point(0),
@@ -258,6 +270,11 @@ ComputeQueue::ComputeQueue(WDDMDevice *device,
                scratch_size_(0),
                total_scratch_size_(0),
                scratch_base_(nullptr) {
+  ring_wptr = _ring_wptr;
+  ring_rptr = _ring_rptr;
+  amd_queue_rocr_ = (amd_queue_v2_t*)((char*)ring_rptr - offsetof(amd_queue_t, read_dispatch_id));
+  amd_queue_memory_ = GetGpuMemoryFromAddress(amd_queue_rocr_);
+  aql_ = device->DeviceInfo().hwsInfo.hwsMask.aql_queue;
   bool ret = device->CreateQueue(this);
   assert(ret);
 
@@ -271,7 +288,10 @@ ComputeQueue::ComputeQueue(WDDMDevice *device,
   amd_queue_ = reinterpret_cast<amd_queue_v2_t*>(gpu_mem->GpuAddress());
 
   amd_queue_rocr_ = (amd_queue_v2_t*)((char*)ring_rptr - offsetof(amd_queue_v2_t, read_dispatch_id));
-  aql_to_pm4_thread_ = std::thread(AqlToPm4Thread, this);
+  // Don't start the PM4 thread for AQL queue
+  if (!aql_) {
+    aql_to_pm4_thread_ = std::thread(AqlToPm4Thread, this);
+  }
 
   if (device->Major() >= 11)
     scratch_mem_alignment_size_ = 256;
@@ -280,11 +300,13 @@ ComputeQueue::ComputeQueue(WDDMDevice *device,
 }
 
 ComputeQueue::~ComputeQueue() {
-  thread_cond_lock_.lock();
-  thread_stop_ = true;
-  thread_cond_lock_.unlock();
-  thread_cond_.notify_one();
-  aql_to_pm4_thread_.join();
+  if (!aql_) {
+    thread_cond_lock_.lock();
+    thread_stop_ = true;
+    thread_cond_lock_.unlock();
+    thread_cond_.notify_one();
+    aql_to_pm4_thread_.join();
+  }
 
   //doorbell_signal_->Release();
 
@@ -462,7 +484,7 @@ uint64_t ComputeQueue::CalcDispatchGroups(hsa_kernel_dispatch_packet_t *packet)
   const uint32_t cu_count = device->ComputeUnitCount();
   const uint32_t engines = device->NumShaderEngine();
 
-  const uint32_t symmetric_cus = AlignDown(cu_count, engines);
+  const uint32_t symmetric_cus = rocr::AlignDown(cu_count, engines);
   const uint32_t asymmetryPerRound = cu_count - symmetric_cus;
   const uint64_t rounds = groups / cu_count;
   const uint64_t asymmetricGroups = rounds * asymmetryPerRound;
@@ -496,7 +518,7 @@ uint64_t ComputeQueue::CalcDispatchWavesPerGroup(hsa_kernel_dispatch_packet_t *p
 
 bool ComputeQueue::UpdateScratch(hsa_kernel_dispatch_packet_t *packet, bool wave32) {
   const uint32_t lanes_per_wave = wave32 ? 32 : 64;
-  const uint64_t size_per_thread = AlignUp(packet->private_segment_size,
+  const uint64_t size_per_thread = rocr::AlignUp(packet->private_segment_size,
                                   scratch_mem_alignment_size_ / lanes_per_wave);
 
   uint64_t groups = CalcDispatchGroups(packet);
@@ -605,18 +627,28 @@ uint64_t ComputeQueue::GetKernelObjAddr(uint64_t addr) const {
   return 0;
 }
 
-void ComputeQueue::RingDoorbell() {
-  thread_cond_lock_.lock();
-  thread_cond_lock_.unlock();
-  pr_debug("notify %p wptr=%" PRIx64 " rptr=%" PRIx64 "\n",
-           ring, GetRingWptr()->load(), GetRingRptr()->load());
-  thread_cond_.notify_one();
+void ComputeQueue::RingDoorbell(uint64_t value) {
+  if (!aql_) {
+    thread_cond_lock_.lock();
+    thread_cond_lock_.unlock();
+    pr_debug("notify %p wptr=%" PRIx64 " rptr=%" PRIx64 "\n", ring, GetRingWptr()->load(),
+             GetRingRptr()->load());
+    thread_cond_.notify_one();
+  } else {
+    constexpr uint32_t kSizeOfAqlPacket = 64;
+    auto aql_addr = reinterpret_cast<uintptr_t>(reinterpret_cast<char*>(ring) +
+                                                (value % ring_size) * kSizeOfAqlPacket);
+    if (!device->SubmitToAqlQueue(this, aql_addr, kSizeOfAqlPacket, value)) {
+      assert(!"Doorbell failed!");
+    }
+  }
 }
 
 hsa_status_t ComputeQueue::Init(void) {
   hsa_status_t ret = use_hws ? HwsInit() : SwsInit();
-  if (ret)
+  if (ret) {
     return ret;
+  }
 
   ib_start_addr = cmdbuf_addr;
   cmdbuf_aql_frame_size = device->GetAqlFrameSize();
@@ -994,10 +1026,12 @@ hsa_status_t ComputeQueue::SwitchAql2PM4(void) {
     // Stop merging packages util below conditions are met:
     // 1) The kernel with completion signal;
     // 2) The cmdbuf_aql_frame_write_index reaches the end of cmdbuf
-    // 3) The queue is empty now, submit the package right now.
+    // 3) The HW queue is empty now, submit the packet right now.
+    // 4) The AQL queue is empty now, submit the packet right now.
     if (!(aql_packet->completion_signal.handle) &&
         (cmdbuf_aql_frame_write_index % WDDMDevice::GetAqlFrameNum()) &&
-        (*sync_addr != sync_point))
+        (*sync_addr != sync_point) &&
+        (cmdbuf_aql_frame_write_index != GetRingWptr()->load()))
       return HSA_STATUS_SUCCESS;
 
     break;
@@ -1060,7 +1094,7 @@ hsa_status_t ComputeQueue::Process(void) {
       if (!device->CpuWait(&syncobj, &cmdbuf_aql_frame_write_index, 1, false))
         return HSA_STATUS_ERROR;
       //CPU update completional signal
-      atomic::Decrement(signal_addr_);
+      rocr::atomic::Decrement(signal_addr_);
       signal_addr_ = NULL;
     }
 
@@ -1160,7 +1194,7 @@ SDMAQueue::~SDMAQueue() {
   device->DestroyQueue(this);
 }
 
-void SDMAQueue::RingDoorbell() {
+void SDMAQueue::RingDoorbell(uint64_t value) {
   pr_debug("ringdoorbell %#lx %#lx\n", wptr_pre_, wptr_next_);
   thread_cond_lock_.lock();
 

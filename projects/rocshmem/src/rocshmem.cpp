@@ -86,7 +86,7 @@ rocshmem_ctx_t ROCSHMEM_HOST_CTX_DEFAULT;
 BackendType get_backend_type() { return backend->get_backend_type(); }
 
 #if defined(USE_GDA) && defined(USE_RO) && defined(USE_IPC)
-static BackendType select_backend_type() {
+static BackendType select_backend_type(MPI_Comm comm, TcpBootstrap *bootstrap) {
   BackendType type;
 
   /* Check whether the user explicitely requests a particular backend type */
@@ -113,10 +113,19 @@ static BackendType select_backend_type() {
       return BackendType::RO_BACKEND;
     }
     if (envstr.find("ipc") != std::string::npos) {
+      if (IPCBackend::backend_can_run(comm, bootstrap) != ROCSHMEM_SUCCESS) {
+          fprintf(stderr, "Error: ROCSHMEM_BACKEND=ipc requested but IPC backend cannot run.\n"
+                        "Most likely cause is PEs distributed to more than one node.\n");
+        exit(1);
+      }
       return BackendType::IPC_BACKEND;
     }
   }
 
+  if (IPCBackend::backend_can_run(comm, bootstrap) == ROCSHMEM_SUCCESS) {
+    DPRINTF("IPCBackend::backend_can_run returned success\n");
+    return BackendType::IPC_BACKEND;
+  }
   if (GDABackend::backend_can_run() == ROCSHMEM_SUCCESS) {
     DPRINTF("GDABackend::backend_can_run returned success\n");
     return BackendType::GDA_BACKEND;
@@ -126,6 +135,11 @@ static BackendType select_backend_type() {
     return BackendType::RO_BACKEND;
   }
 
+  fprintf(stderr, "No backend capable of executing the job. This is most likely\n"
+                  "a system or runtime configuration error. Aborting.\n");
+  exit(1);
+
+  // Return code left in to satisfy compiler.
   return BackendType::IPC_BACKEND;
 }
 #endif
@@ -165,7 +179,7 @@ static void setFilesLimit() {
   mpi_instance = new MPIInstance(comm);
 
 #if defined(USE_GDA) && defined(USE_RO) && defined(USE_IPC)
-  BackendType type = select_backend_type();
+  BackendType type = select_backend_type(comm, nullptr);
   switch (type) {
   case BackendType::GDA_BACKEND:
     DPRINTF("Initializing GDA backend using MPI\n");
@@ -274,7 +288,7 @@ static void setFilesLimit() {
   rocm_init();
 
 #if defined(USE_GDA) && defined(USE_RO) && defined(USE_IPC)
-  BackendType type = select_backend_type();
+  BackendType type = select_backend_type(MPI_COMM_NULL, bootstrap);
   switch (type) {
   case BackendType::GDA_BACKEND:
     DPRINTF("Initializing GDA backend with TCP bootstrapping\n");

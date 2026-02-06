@@ -18,9 +18,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-cmake_minimum_required(VERSION 3.10)
-
-project(generic_target)
+cmake_minimum_required(VERSION 3.21)
 
 if(UNIX)
   if(NOT DEFINED ROCM_PATH)
@@ -34,56 +32,77 @@ if(UNIX)
   list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH})
 endif()
 
+project(generic_target LANGUAGES CXX HIP)
+
 # Find hiprtc
-find_package(hiprtc)
-# Find hip
-find_package(hip)
+find_package(hiprtc REQUIRED)
+
+# Find hip (for HIP_PLATFORM check)
+find_package(hip REQUIRED)
 
 if(NOT HIP_PLATFORM MATCHES "amd")
-message("Generic target is only supporte on AMD GPU")
-return()
+  message("Generic target is only supported on AMD GPU")
+  return()
 endif()
-
-# Set compiler and linker
-set(CMAKE_CXX_COMPILER ${HIP_HIPCC_EXECUTABLE})
-set(CMAKE_CXX_LINKER   ${HIP_HIPCC_EXECUTABLE})
 
 # Create the excutable
 if(TARGET build_intro)
 set(EXCLUDE_OPTION EXCLUDE_FROM_ALL)
 else()
-set(EXCLUDE_OPTION )
+set(EXCLUDE_OPTION)
 endif()
 
 # Test generic target without feature
 set(OFFLOAD_ARCH_GENERIC_STR "--offload-arch=gfx9-generic --offload-arch=gfx9-4-generic --offload-arch=gfx10-1-generic --offload-arch=gfx10-3-generic --offload-arch=gfx11-generic --offload-arch=gfx12-generic")
+separate_arguments(OFFLOAD_ARCH_GENERIC_LIST UNIX_COMMAND "${OFFLOAD_ARCH_GENERIC_STR}")
+
+# Mark source files as HIP code (contains __global__ kernels and uses HIP APIs)
+set_source_files_properties(square.cpp PROPERTIES LANGUAGE HIP)
+set_source_files_properties(../../../catch/hipTestMain/hip_test_features.cc PROPERTIES LANGUAGE HIP)
 
 add_executable(squareGenericTarget ${EXCLUDE_OPTION} square.cpp ../../../catch/hipTestMain/hip_test_features.cc)
 target_include_directories(squareGenericTarget PRIVATE ../../common ${CMAKE_CURRENT_SOURCE_DIR}/../../../catch/include/)
-set_target_properties(squareGenericTarget PROPERTIES COMPILE_FLAGS "-mcode-object-version=6 -w ${OFFLOAD_ARCH_GENERIC_STR}")
-target_link_libraries(squareGenericTarget hip::host)
+target_compile_options(squareGenericTarget PRIVATE 
+  $<$<COMPILE_LANGUAGE:HIP>:-mcode-object-version=6>
+  $<$<COMPILE_LANGUAGE:HIP>:-w>
+  $<$<COMPILE_LANGUAGE:HIP>:${OFFLOAD_ARCH_GENERIC_LIST}>
+)
 
 # Test generic target with features
 set(OFFLOAD_ARCH_GENERIC_FEATURE_STR "--offload-arch=gfx9-generic --offload-arch=gfx9-4-generic:sramecc+:xnack- --offload-arch=gfx9-4-generic:sramecc-:xnack- --offload-arch=gfx9-4-generic:xnack+ --offload-arch=gfx10-1-generic --offload-arch=gfx10-3-generic --offload-arch=gfx11-generic --offload-arch=gfx12-generic")
+separate_arguments(OFFLOAD_ARCH_GENERIC_FEATURE_LIST UNIX_COMMAND "${OFFLOAD_ARCH_GENERIC_FEATURE_STR}")
 
 add_executable(squareGenericTargetWithFeatures ${EXCLUDE_OPTION} square.cpp ../../../catch/hipTestMain/hip_test_features.cc)
 target_include_directories(squareGenericTargetWithFeatures PRIVATE ../../common ${CMAKE_CURRENT_SOURCE_DIR}/../../../catch/include/)
-set_target_properties(squareGenericTargetWithFeatures PROPERTIES COMPILE_FLAGS "-mcode-object-version=6 -w ${OFFLOAD_ARCH_GENERIC_FEATURE_STR}")
-target_link_libraries(squareGenericTargetWithFeatures hip::host)
+target_compile_options(squareGenericTargetWithFeatures PRIVATE 
+  $<$<COMPILE_LANGUAGE:HIP>:-mcode-object-version=6>
+  $<$<COMPILE_LANGUAGE:HIP>:-w>
+  $<$<COMPILE_LANGUAGE:HIP>:${OFFLOAD_ARCH_GENERIC_FEATURE_LIST}>
+)
 
-# Create the excutable
+# Create the excutable for HIPRTC test
+# Mark source files as HIP code (contains __global__ kernels and uses HIP APIs)
+set_source_files_properties(saxpy.cpp PROPERTIES LANGUAGE HIP)
+# hip_test_features.cc already marked above
+
 add_executable(saxpyGenericTarget ${EXCLUDE_OPTION} saxpy.cpp ../../../catch/hipTestMain/hip_test_features.cc)
+target_include_directories(saxpyGenericTarget PRIVATE ../../common ${CMAKE_CURRENT_SOURCE_DIR}/../../../catch/include/)
 
 # Link with HIPRTC
 target_link_libraries(saxpyGenericTarget hiprtc)
 # Link with HIP
-target_link_libraries(saxpyGenericTarget hip::device)
 
 if(NOT BUILD_SHARED_LIBS)
   target_link_libraries(saxpyGenericTarget hiprtc-builtins)
 endif()
 
-target_include_directories(saxpyGenericTarget PRIVATE ../../common ${CMAKE_CURRENT_SOURCE_DIR}/../../../catch/include/)
+# Set RPATH so executables can find HIP libraries at runtime
+if(UNIX)
+  set_target_properties(squareGenericTarget squareGenericTargetWithFeatures saxpyGenericTarget PROPERTIES
+    BUILD_RPATH "${ROCM_PATH}/lib"
+    INSTALL_RPATH "${ROCM_PATH}/lib"
+  )
+endif()
 
 if(TARGET build_intro)
 add_dependencies(build_intro saxpyGenericTarget)

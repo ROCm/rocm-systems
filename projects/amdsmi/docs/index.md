@@ -15,6 +15,13 @@ system's drivers and GPUs.
 
 Find the source code at <https://github.com/ROCm/amdsmi>.
 
+```{important}
+This AMD SMI project supports Linux bare metal and Linux virtual machine guest
+environments. For documentation regarding virtualization on SR-IOV Linux hosts,
+refer to the [AMD SMI for Virtualization
+documentation](https://instinct.docs.amd.com/projects/amd-smi-virt/en/latest/).
+```
+
 ```{note}
 AMD SMI is the successor to <https://github.com/ROCm/rocm_smi_lib>.
 ```

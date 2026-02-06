@@ -540,7 +540,8 @@ class Runtime {
           size_requested(0),
           alloc_flags(core::MemoryRegion::AllocateNoFlags),
           user_ptr(nullptr),
-          ldrm_bo(NULL) {}
+          ldrm_bo(nullptr),
+          thunk_bo(nullptr) {}
     AllocationRegion(const MemoryRegion* region_arg, size_t size_arg, size_t size_requested,
                      MemoryRegion::AllocateFlags alloc_flags)
         : region(region_arg),
@@ -548,7 +549,8 @@ class Runtime {
           size_requested(size_requested),
           alloc_flags(alloc_flags),
           user_ptr(nullptr),
-          ldrm_bo(NULL) {}
+          ldrm_bo(nullptr),
+          thunk_bo(nullptr) {}
 
     struct notifier_t {
       void* ptr;
@@ -563,6 +565,7 @@ class Runtime {
     void* user_ptr;
     std::unique_ptr<std::vector<notifier_t>> notifiers;
     amdgpu_bo_handle ldrm_bo;
+    HsaMemoryObjectHandle thunk_bo;
   };
 
   struct AsyncEventsInfo;
@@ -691,6 +694,8 @@ class Runtime {
     bool monitor_exceptions;
     AsyncEvents events;
     ConcurrentAsyncEvents new_events;
+    // control must be declared last so that events is initialized before the
+    // thread starts accessing it in AsyncEventsControl constructor
     AsyncEventsControl control;
   };
 
@@ -843,9 +848,6 @@ class Runtime {
   // Deprecated HSA Region API GPU (for legacy APU support only)
   Agent* region_gpu_;
 
-  lazy_ptr<AsyncEventsInfo> asyncSignals_;
-  lazy_ptr<AsyncEventsInfo> asyncExceptions_;
-
   // System clock frequency.
   uint64_t sys_clock_freq_;
 
@@ -905,6 +907,8 @@ class Runtime {
   std::map<uint64_t, int> ipc_sock_server_conns_;
   std::mutex ipc_sock_server_lock_;
 
+  lazy_ptr<AsyncEventsInfo> asyncSignals_;
+  lazy_ptr<AsyncEventsInfo> asyncExceptions_;
  private:
   void CheckVirtualMemApiSupport();
   int GetAmdgpuDeviceArgs(Agent *agent, ShareableHandle handle, int *drm_fd,
@@ -1012,7 +1016,8 @@ class Runtime {
   bool ipc_dmabuf_supported_;
   int  IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle,
                        unsigned int numNodes, HSAuint32 *nodes,
-                       void **importAddress, HSAuint64 *importSize, bool isdmabufSysmem);
+                       void **importAddress, HSAuint64 *importSize,
+                       bool isdmabufSysmem, uint32_t shared_handle);
 };
 
 }  // namespace core
