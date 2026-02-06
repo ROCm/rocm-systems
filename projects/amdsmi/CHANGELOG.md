@@ -4,6 +4,50 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ***All information listed below is for reference and subject to change.***
 
+## amd_smi_lib for ROCm 7.2.1
+
+### Added
+
+- **Added gpu_board and base_board temperatures to monitor**.  
+  - Added GPU board and base board temperature sensors to `amd-smi monitor` command.
+
+### Changed
+
+- N/A
+
+### Removed
+
+- N/A
+
+### Optimized
+
+- N/A
+
+### Resolved Issues
+
+- **Fixed `amd-smi metric` JSON output under watch mode**.  
+  - Resolved issue where JSON output was not formatted correctly when using watch mode with metrics.
+
+- **Fixed `amd-smi` not redirecting output to file when `--json` option is used**.  
+  - Resolved issue where output was not properly redirected to file when using JSON format.
+
+- **Fixed `amd-smi ras --cper` component not being redirected to output file with `--follow`**.  
+  - Resolved issue where CPER component output was not redirected when using the follow option.
+
+- **Fixed list of AFIDs printing garbage values when given invalid CPER files**.  
+  - Resolved issue where invalid CPER files caused garbage output for AFID lists.
+
+- **Fixed JSON output for `amd-smi reset`**.  
+  - Resolved issue where JSON output was not formatted correctly for reset commands.
+
+### Upcoming Changes
+
+- N/A
+
+### Known Issues
+
+- N/A
+
 ## amd_smi_lib for ROCm 7.2.0
 
 ### Added
@@ -77,7 +121,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - New C++ API added:
     - amdsmi_get_supported_power_cap(): Returns which power cap types are supported on the device (PPT0, PPT1). This will allow users to know which power cap types they can get/set.
     - Original APIs remain the same but now can get/set both PPT0 and PPT1 limits (on supported hardware):
-      - amdsmi_get_power_cap_info() 
+      - amdsmi_get_power_cap_info()
       - amdsmi_set_power_cap()
   - New C++ type added:
     - `amdsmi_power_cap_type_t`: The power cap type, either PPT0 or PPT1
@@ -117,8 +161,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
    ...
   ```
 
-- **`amd-smi set --power-cap` now requires sepcification of the power cap type**.  
+- **`amd-smi set --power-cap` now accepts sepcification of the power cap type**.  
   - Command now takes the form: `amd-smi set --power-cap <power-cap-type> <new-cap>`
+  - Default power cap type will be ppt0
   - Acceptable power cap types are "ppt0" and "ppt1"
 
   ```console
@@ -131,8 +176,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **`amd-smi reset --power-cap` will attempt to reset both power caps**.  
   - When using the reset command, both PPT0 and PPT1 power caps will be reset to their default values. If a device only has PPT0, then only PPT0 will be reset.  
     Ex.
+
     ```console
-    $ sudo amd-smi reset --power-cap ppt1 1150
+    $ sudo amd-smi reset --power-cap
     GPU: 0
       POWERCAP:
           PPT0: Successfully reset power cap to 203W
