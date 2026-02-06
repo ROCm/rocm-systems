@@ -306,7 +306,7 @@ Examples:
 
 .. code-block:: shell-session
 
-   $ rocprof-compute profile --output-directory /tmp/profiles/%hostname%/%rank% -- ./vcopy -n 1048576 -b 256
+   $ mpirun -n 4 rocprof-compute profile --output-directory /tmp/profiles/%hostname%/%rank% -- ./vcopy -n 1048576 -b 256
 
    $ tree /tmp/profiles/amd-ryzen/0
 
