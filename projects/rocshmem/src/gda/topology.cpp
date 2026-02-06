@@ -775,9 +775,9 @@ namespace rocshmem
 #endif
 
           int minDistance = std::numeric_limits<int>::max();
-          for (int j = 0; j < ibvDeviceList.size(); j++) {
-            if (ibvDeviceList[j].busId != "") {
-              int distance = GetBusIdDistance(hipPciBusId, ibvDeviceList[j].busId);
+          for (int j = 0; j < ibvAddressList.size(); j++) {
+            if (ibvAddressList[j] != "") {
+              int distance = GetBusIdDistance(hipPciBusId, ibvAddressList[j]);
               if (distance < minDistance && distance >= 0) {
                 minDistance = distance;
                 closestIdx = j;
@@ -793,7 +793,7 @@ namespace rocshmem
 
     DPRINTF("GPU Device id: %d closest NIC id : %d name: %s\n", gpuIndex, closestNicId[gpuIndex],
            ibvDeviceList[closestNicId[gpuIndex]].name.c_str());
-    if (dev_name != nullptr) {
+    if (dev_name != nullptr && closestNicId[gpuIndex] != -1) {
       *dev_name = strdup(ibvDeviceList[closestNicId[gpuIndex]].name.c_str());
     }
 
