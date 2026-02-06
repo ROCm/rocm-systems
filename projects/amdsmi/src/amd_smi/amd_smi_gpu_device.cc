@@ -24,6 +24,7 @@
 #include <unordered_set>
 #include <dirent.h>
 #include <sys/types.h>
+#include <atomic>
 
 #include "amd_smi/impl/amd_smi_gpu_device.h"
 #include "amd_smi/impl/fdinfo.h"
@@ -113,6 +114,14 @@ pthread_mutex_t* AMDSmiGPUDevice::get_mutex() {
     return amd::smi::GetMutex(gpu_id_);
 }
 
+// cache the compute process list for the device
+static std::atomic<std::chrono::steady_clock::time_point> last_compute_process_list_update_time{std::chrono::steady_clock::time_point{}};
+static const std::chrono::milliseconds compute_process_list_cache_duration = std::chrono::milliseconds(500); // 500 ms
+static std::mutex compute_process_list_mutex;
+static uint32_t num_running_processes = 0;
+static std::unique_ptr<rsmi_process_info_t[]> list_all_processes_ptr = nullptr;
+static std::unordered_map<uint32_t, amdsmi_proc_info_t> process_info_cache_map;
+
 int32_t AMDSmiGPUDevice::get_compute_process_list_impl(GPUComputeProcessList_t& compute_process_list,
                                                        ComputeProcessListType_t list_type)
 {
@@ -127,30 +136,42 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(GPUComputeProcessList_t& 
      *  rsmi_process_info_t currently running on the system.
      */
     auto status_code(rsmi_status_t::RSMI_STATUS_SUCCESS);
-    auto num_running_processes = uint32_t(0);
+    // only get new data if cache duration has expired
+    if (std::chrono::steady_clock::now() - last_compute_process_list_update_time.load() > compute_process_list_cache_duration) {
+        // double-check locking pattern here
+        std::lock_guard<std::mutex> lock(compute_process_list_mutex);
+        if (std::chrono::steady_clock::now() - last_compute_process_list_update_time.load() <= compute_process_list_cache_duration) {
+            // another thread already updated the data while we were waiting for the lock
+            // so just return the existing data
+            return rsmi_status_t::RSMI_STATUS_SUCCESS;
+        }
 
-    status_code = rsmi_compute_process_info_get(nullptr, &num_running_processes);
-    if ((status_code != rsmi_status_t::RSMI_STATUS_SUCCESS) || (num_running_processes <= 0)) {
-        return status_code;
-    }
+        // Clear the process info cache when refreshing
+        process_info_cache_map.clear();
 
-    /**
-     *  Make a type safe pointer, then
-     *
-     * second call to rsmi_compute_process_info_get() g
-     *  the allocated rsmi_process_info_t array.
-     */
-    using RsmiDeviceList_t = uint32_t[];
-    using RsmiProcessList_t = rsmi_process_info_t[];
-    std::unique_ptr<RsmiProcessList_t> list_all_processes_ptr = std::make_unique<RsmiProcessList_t>(num_running_processes);
+        status_code = rsmi_compute_process_info_get(nullptr, &num_running_processes);
+        if ((status_code != rsmi_status_t::RSMI_STATUS_SUCCESS) || (num_running_processes <= 0)) {
+            return status_code;
+        }
 
-    status_code = rsmi_compute_process_info_get(list_all_processes_ptr.get(), &num_running_processes);
-    if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS) {
-        return status_code;
-    }
+        /**
+         *  Make a type safe pointer, then
+         *
+         * second call to rsmi_compute_process_info_get() to get the actual data into
+         *  the allocated rsmi_process_info_t array.
+         */
+        list_all_processes_ptr = std::make_unique<rsmi_process_info_t[]>(num_running_processes);
 
-    if (num_running_processes <= 0) {
-        return rsmi_status_t::RSMI_STATUS_SUCCESS; // No processes running
+        status_code = rsmi_compute_process_info_get(list_all_processes_ptr.get(), &num_running_processes);
+        if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS) {
+            return status_code;
+        }
+
+        if (num_running_processes <= 0) {
+            return rsmi_status_t::RSMI_STATUS_SUCCESS; // No processes running
+        }
+
+        last_compute_process_list_update_time = std::chrono::steady_clock::now();
     }
 
     /**
@@ -218,7 +239,7 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(GPUComputeProcessList_t& 
     auto update_list_by_running_device = [&](rsmi_process_info_t rsmi_proc_info) {
         // Get all devices running this process into list_device_ptr
         auto status_result(true);
-        std::unique_ptr<RsmiDeviceList_t> list_device_ptr = std::make_unique<RsmiDeviceList_t>(num_running_devices);
+        std::unique_ptr<uint32_t[]> list_device_ptr = std::make_unique<uint32_t[]>(num_running_devices);
         list_device_allocation_size = num_running_devices;
         auto status_code = rsmi_compute_process_gpus_get(rsmi_proc_info.process_id, list_device_ptr.get(), &list_device_allocation_size);
         if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS) {
@@ -229,11 +250,21 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(GPUComputeProcessList_t& 
         for (auto device_idx = uint32_t(0); device_idx < list_device_allocation_size; ++device_idx) {
             // Is this device running this process?
             if (list_device_ptr[device_idx] == get_gpu_id()) {
-                std::unordered_set<uint64_t> gpu_set;
-                gpu_set.insert(get_kfd_gpu_id());
-                GetProcessInfoForPID(rsmi_proc_info.process_id, &rsmi_proc_info, &gpu_set);
                 amdsmi_proc_info_t tmp_amdsmi_proc_info{};
-                get_process_info(rsmi_proc_info, tmp_amdsmi_proc_info);
+
+                auto cached_amdsmi_proc = process_info_cache_map.find(rsmi_proc_info.process_id);
+                if (cached_amdsmi_proc != process_info_cache_map.end()) {
+                    // Use cached info
+                    tmp_amdsmi_proc_info = cached_amdsmi_proc->second;
+                }
+                else {
+                    // Need to get new info from system
+                    std::unordered_set<uint64_t> gpu_set;
+                    gpu_set.insert(get_kfd_gpu_id());
+                    GetProcessInfoForPID(rsmi_proc_info.process_id, &rsmi_proc_info, &gpu_set);
+                    get_process_info(rsmi_proc_info, tmp_amdsmi_proc_info);
+                    process_info_cache_map[rsmi_proc_info.process_id] = tmp_amdsmi_proc_info;
+                }
                 compute_process_list.emplace(rsmi_proc_info.process_id, tmp_amdsmi_proc_info);
            }
         }
@@ -249,8 +280,8 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(GPUComputeProcessList_t& 
     for (auto process_idx = uint32_t(0); process_idx < num_running_processes; ++process_idx) {
         if (list_type == ComputeProcessListType_t::kAllProcesses ||
             list_type == ComputeProcessListType_t::kAllProcessesOnDevice) {
-            if (update_list_by_running_device(list_all_processes_ptr[process_idx])) {
-            }
+                std::lock_guard<std::mutex> lock(compute_process_list_mutex);
+                update_list_by_running_device(list_all_processes_ptr[process_idx]);
         }
     }
 
