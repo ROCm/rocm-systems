@@ -1,5 +1,10 @@
-#ifndef _WSL_INC_PM4_CMDS_H_
-#define _WSL_INC_PM4_CMDS_H_
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+#pragma once
 
 #include <cstdint>
 
@@ -1087,4 +1092,3 @@ struct EndofKernelNotifyTemplate {
 
 } // gfx11 namespace
 
-#endif

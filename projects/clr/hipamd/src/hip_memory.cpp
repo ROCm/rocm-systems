@@ -2802,6 +2802,163 @@ hipError_t hipDrvMemcpy3DAsync(const HIP_MEMCPY3D* pCopy, hipStream_t stream) {
   HIP_RETURN_DURATION(ihipMemcpyParam3D(pCopy, stream, true));
 }
 
+// ================================================================================================
+static amd::CopyMetadata buildCopyMetadataFromAttrs(hipMemcpyAttributes* attrs, size_t* attrsIdxs,
+                                                     size_t numAttrs, size_t copyIdx, bool isAsync) {
+  amd::CopyMetadata metadata(isAsync, amd::CopyMetadata::CopyEnginePreference::NONE);
+
+  if (attrs == nullptr || numAttrs == 0) {
+    return metadata;
+  }
+
+  // Find which attribute applies to this copy
+  size_t attrIdx = 0;
+  for (size_t i = 0; i < numAttrs; ++i) {
+    if (copyIdx >= attrsIdxs[i]) {
+      attrIdx = i;
+    } else {
+      break;
+    }
+  }
+
+  // Map hipMemcpySrcAccessOrder to CopyMetadata::SrcAccessOrder
+  switch (attrs[attrIdx].srcAccessOrder) {
+    case hipMemcpySrcAccessOrderStream:
+      metadata.srcAccessOrder_ = amd::CopyMetadata::kSrcAccessOrderStream;
+      break;
+    case hipMemcpySrcAccessOrderDuringApiCall:
+      metadata.srcAccessOrder_ = amd::CopyMetadata::kSrcAccessOrderDuringApiCall;
+      break;
+    case hipMemcpySrcAccessOrderAny:
+      metadata.srcAccessOrder_ = amd::CopyMetadata::kSrcAccessOrderAny;
+      break;
+    default:
+      metadata.srcAccessOrder_ = amd::CopyMetadata::kSrcAccessOrderStream;
+      break;
+  }
+
+  // Map flags
+  if (attrs[attrIdx].flags & hipMemcpyFlagPreferOverlapWithCompute) {
+    metadata.preferOverlapCompute_ = 1;
+  }
+
+  return metadata;
+}
+
+// ================================================================================================
+hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t count,
+                           hipMemcpyAttributes* attrs, size_t* attrsIdxs, size_t numAttrs,
+                           hip::Stream& stream, bool isAsync) {
+  // Validate all copies first
+  for (size_t i = 0; i < count; ++i) {
+    hipError_t status = ihipMemcpy_validate(dsts[i], srcs[i], sizes[i], hipMemcpyDefault);
+    if (status != hipSuccess) {
+      return status;
+    }
+  }
+
+  // Classify copies by type and group them
+  std::vector<size_t> bufferCopyIndices;
+  std::vector<size_t> hostToHostIndices;
+  std::vector<size_t> writeBufferIndices;
+  std::vector<size_t> readBufferIndices;
+  std::vector<size_t> p2pIndices;
+
+  for (size_t i = 0; i < count; ++i) {
+    hip::MemcpyType type = ihipGetMemcpyType(srcs[i], dsts[i], hipMemcpyDefault);
+    switch (type) {
+      case hipCopyBuffer:
+      case hipCopyBufferSDMA:
+        bufferCopyIndices.push_back(i);
+        break;
+      case hipHostToHost:
+        hostToHostIndices.push_back(i);
+        break;
+      case hipWriteBuffer:
+        writeBufferIndices.push_back(i);
+        break;
+      case hipReadBuffer:
+        readBufferIndices.push_back(i);
+        break;
+      case hipCopyBufferP2P:
+        p2pIndices.push_back(i);
+        break;
+    }
+  }
+
+  hipError_t status = hipSuccess;
+
+  // Handle Host-to-Host copies synchronously
+  if (!hostToHostIndices.empty()) {
+    stream.finish();  // Wait for prior work before CPU copy
+    for (size_t idx : hostToHostIndices) {
+      memcpy(dsts[idx], srcs[idx], sizes[idx]);
+    }
+  }
+
+  // Handle buffer-to-buffer copies as a batch
+  if (!bufferCopyIndices.empty()) {
+    std::vector<amd::BatchCopyOp> copyOps;
+    copyOps.reserve(bufferCopyIndices.size());
+
+    for (size_t idx : bufferCopyIndices) {
+      size_t sOffset = 0;
+      amd::Memory* srcMemory = getMemoryObject(srcs[idx], sOffset);
+      size_t dOffset = 0;
+      amd::Memory* dstMemory = getMemoryObject(dsts[idx], dOffset);
+
+      if (srcMemory == nullptr || dstMemory == nullptr) {
+        return hipErrorInvalidValue;
+      }
+
+      amd::CopyMetadata metadata = buildCopyMetadataFromAttrs(attrs, attrsIdxs, numAttrs, idx, isAsync);
+      copyOps.emplace_back(srcMemory, dstMemory, sOffset, dOffset, sizes[idx], metadata);
+    }
+
+    // Create and enqueue batch copy command
+    amd::Command::EventWaitList waitList;
+    amd::BatchCopyMemoryCommand* batchCmd = new amd::BatchCopyMemoryCommand(
+        stream, ROCCLR_COMMAND_BATCH_COPY_BUFFER, waitList, std::move(copyOps));
+
+    if (batchCmd == nullptr) {
+      return hipErrorOutOfMemory;
+    }
+
+    batchCmd->enqueue();
+    if (!isAsync) {
+      batchCmd->queue()->finishCommand(batchCmd);
+    }
+    batchCmd->release();
+  }
+
+  // Handle write buffer (host to device) copies
+  for (size_t idx : writeBufferIndices) {
+    status = ihipMemcpy(dsts[idx], srcs[idx], sizes[idx], hipMemcpyDefault, stream, isAsync, true);
+    if (status != hipSuccess) {
+      return status;
+    }
+  }
+
+  // Handle read buffer (device to host) copies
+  for (size_t idx : readBufferIndices) {
+    status = ihipMemcpy(dsts[idx], srcs[idx], sizes[idx], hipMemcpyDefault, stream, isAsync, true);
+    if (status != hipSuccess) {
+      return status;
+    }
+  }
+
+  // Handle P2P copies
+  for (size_t idx : p2pIndices) {
+    status = ihipMemcpy(dsts[idx], srcs[idx], sizes[idx], hipMemcpyDefault, stream, isAsync, true);
+    if (status != hipSuccess) {
+      return status;
+    }
+  }
+
+  return hipSuccess;
+}
+
+// ================================================================================================
 hipError_t hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* sizes, size_t count,
                                hipMemcpyAttributes* attrs, size_t* attrsIdxs, size_t numAttrs,
                                size_t* failIdx, hipStream_t stream) {
@@ -2811,32 +2968,57 @@ hipError_t hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* sizes, size_t c
   if (!hip::isValid(stream)) {
     HIP_RETURN(hipErrorInvalidResourceHandle);
   }
+
   // validate inputs
-  if (dsts == nullptr || srcs == nullptr || sizes == nullptr || failIdx == nullptr || count == 0) {
+  if (dsts == nullptr || srcs == nullptr || sizes == nullptr || count == 0) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  // no support for memcpy attributes
+  // Validate attributes structure if provided
   if (numAttrs > 0) {
-    HIP_RETURN(hipErrorNotSupported);
+    if (attrs == nullptr || attrsIdxs == nullptr) {
+      HIP_RETURN(hipErrorInvalidValue);
+    }
+    // First index must be 0
+    if (attrsIdxs[0] != 0) {
+      HIP_RETURN(hipErrorInvalidValue);
+    }
+    // numAttrs must not exceed count
+    if (numAttrs > count) {
+      HIP_RETURN(hipErrorInvalidValue);
+    }
+    // Validate attrsIdxs is monotonically increasing
+    for (size_t i = 1; i < numAttrs; ++i) {
+      if (attrsIdxs[i] <= attrsIdxs[i - 1] || attrsIdxs[i] >= count) {
+        HIP_RETURN(hipErrorInvalidValue);
+      }
+    }
+    // Validate srcAccessOrder values
+    for (size_t i = 0; i < numAttrs; ++i) {
+      if (attrs[i].srcAccessOrder < hipMemcpySrcAccessOrderStream ||
+          attrs[i].srcAccessOrder > hipMemcpySrcAccessOrderAny) {
+        HIP_RETURN(hipErrorInvalidValue);
+      }
+    }
   }
 
-  hipError_t status = hipSuccess;
-
-  *failIdx = SIZE_MAX;
-  for (int i = 0; i < count; ++i) {
+  // Validate individual sizes and find first error
+  for (size_t i = 0; i < count; ++i) {
     if (sizes[i] == 0) {
-      *failIdx = i;
-      status = hipErrorInvalidValue;
-      break;
-    }
-    status = ihipMemcpy(dsts[i], srcs[i], sizes[i], hipMemcpyDefault, *hip::getStream(stream), true,
-                        true);
-    if (status != hipSuccess) {
-      *failIdx = i;
-      break;
+      if (failIdx != nullptr) *failIdx = i;
+      HIP_RETURN(hipErrorInvalidValue);
     }
   }
+
+  if (failIdx != nullptr) *failIdx = SIZE_MAX;
+
+  // Call internal batch implementation
+  hipError_t status = ihipMemcpyBatch(
+      dsts, srcs, sizes, count,
+      attrs, attrsIdxs, numAttrs,
+      *hip::getStream(stream),
+      true);
+
   HIP_RETURN(status);
 }
 
