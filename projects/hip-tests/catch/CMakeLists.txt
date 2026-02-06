@@ -29,8 +29,7 @@ find_package(Git)
 find_package(Python 3 COMPONENTS Interpreter REQUIRED)
 find_program(HIPCONFIG_EXEC hipconfig REQUIRED)
 
-# hip root dir is 3 levels down the hip-config.cmake file path
-set(HIP_PATH ${hip_DIR}/../../../)
+set(HIP_PATH ${HIP_PACKAGE_PREFIX_DIR})
 if(NOT DEFINED ROCM_PATH)
     set(ROCM_PATH "/opt/rocm")
     if(NOT EXISTS "${ROCM_PATH}")
