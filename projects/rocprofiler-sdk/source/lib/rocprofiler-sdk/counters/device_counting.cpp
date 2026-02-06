@@ -95,15 +95,6 @@ submitPacket(hsa_queue_t* queue, const void* packet)
 
 namespace
 {
-// Returns true if device lock should be acquired at configuration time (OLD behavior).
-// Returns false if device lock should be acquired at context start time (NEW behavior, default).
-bool
-use_device_lock_at_start()
-{
-    static bool value = rocprofiler::common::get_env("ROCPROFILER_DEVICE_LOCK_AT_START", false);
-    return value;
-}
-
 uint16_t
 header_pkt(hsa_packet_type_t type)
 {

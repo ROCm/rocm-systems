@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "lib/rocprofiler-sdk/counters/ioctl.hpp"
+#include "lib/common/environment.hpp"
 #include "lib/rocprofiler-sdk/details/kfd_ioctl.h"
 #include "lib/rocprofiler-sdk/pc_sampling/ioctl/ioctl_adapter.hpp"
 
@@ -119,6 +120,13 @@ ptl_control_supported()
     args.op                      = KFD_IOC_PROFILER_VERSION;
     int ret = ioctl(pc_sampling::ioctl::get_kfd_fd(), AMDKFD_IOC_PROFILER, &args);
     return (ret == 0);
+}
+
+bool
+use_device_lock_at_start()
+{
+    static bool value = rocprofiler::common::get_env("ROCPROFILER_DEVICE_LOCK_AT_START", false);
+    return value;
 }
 
 rocprofiler_status_t
