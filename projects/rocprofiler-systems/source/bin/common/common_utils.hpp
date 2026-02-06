@@ -162,8 +162,10 @@ print_pre_execution_info(std::string_view tool_name, std::string_view preset_mod
         constexpr size_t           box_inner_width = box_width - 2;
         constexpr std::string_view box_line =
             "════════════════════════════════════════════════════════════";
-        constexpr std::string_view prefix = "ROCm Systems Profiler - ";
-        const size_t padding = box_inner_width - prefix.size() - tool_name.size();
+        constexpr std::string_view prefix       = "ROCm Systems Profiler - ";
+        const size_t               content_size = prefix.size() + tool_name.size();
+        const size_t               padding =
+            content_size < box_inner_width ? box_inner_width - content_size : 0;
 
         std::cout << "\n"
                   << "╔" << box_line << "╗\n"
@@ -260,8 +262,7 @@ check_rocm_available()
 #if !defined(ROCPROFSYS_USE_ROCM) || ROCPROFSYS_USE_ROCM == 0
     return false;
 #else
-    return (system("which hipconfig > /dev/null 2>&1") == 0 ||
-            access("/opt/rocm/bin/hipconfig", X_OK) == 0);
+    return (access("/opt/rocm/bin/hipconfig", X_OK) == 0);
 #endif
 }
 
