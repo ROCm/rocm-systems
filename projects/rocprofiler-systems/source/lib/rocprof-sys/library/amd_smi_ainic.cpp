@@ -38,6 +38,7 @@
 #include <stdexcept>
 #include <string>
 #include <sys/resource.h>
+#include <unordered_set>
 
 namespace rocprofsys
 {
@@ -314,15 +315,22 @@ nic_setup()
         // valid to nic_vec.
         nic_data::nic_vec = {};
         auto nic_list     = parse_list(_ainic_devices_v);
+        std::unordered_set<std::string> nic_set{}; // Set of NICs found so far; used
+                                                   // for detecting duplicates.
         for(auto& nic : nic_list)
         {
-            if(nic_data::nic_stats_collector.is_nic_valid(nic))
+            if(!nic_data::nic_stats_collector.is_nic_valid(nic))
             {
-                nic_data::nic_vec.push_back(nic);
+                LOG_WARNING("Invalid NIC: {}", nic);
+            }
+            else if (nic_set.find(nic) != nic_set.end())
+            {
+                LOG_WARNING("Repeated NIC: {}", nic);
             }
             else
             {
-                LOG_WARNING("Invalid NIC: {}", nic);
+                nic_data::nic_vec.push_back(nic);
+                nic_set.insert(nic);
             }
         }
     }
