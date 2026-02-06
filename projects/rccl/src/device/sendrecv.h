@@ -17,11 +17,11 @@ struct RunWorkBatch<ncclFuncSendRecv, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPL
   static_assert(sizeof(T)==1, "SendRecv only works on single byte types T.");
 
   template<typename Proto>
-  __device__ void runSend(int tid, int tn, int group, struct ncclDevWorkP2p* work) {
+  __device__ void runSend(int tid, int tn, int group, struct ncclDevWorkP2p* work, struct ncclShmemData* ncclShmem, void* ncclShmemPerWarp) {
     size_t bytes = work->sendBytes;
-    bool useLargeChunk = (work->sendIpcReg && ncclShmem.comm.isAllNvlink) || work->sendNetReg;
+    bool useLargeChunk = (work->sendIpcReg && ncclShmem->comm.isAllNvlink) || work->sendNetReg;
     int chunkSize = useLargeChunk ? NCCL_MAX_NET_SIZE : u32fp8Decode(work->sendChunkSize_u32fp8);
-    int stepSize = useLargeChunk ? NCCL_MAX_NET_SIZE : ncclShmem.comm.p2pChunkSize;
+    int stepSize = useLargeChunk ? NCCL_MAX_NET_SIZE : ncclShmem->comm.p2pChunkSize;
 
 #if defined(ENABLE_NPKIT)
     bool isNpKitThread = (tid == 0);
@@ -31,20 +31,20 @@ struct RunWorkBatch<ncclFuncSendRecv, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPL
 #if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_TIME_SYNC_CPU)
     if (isNpKitThread) {
       NpKit::CollectGpuEvent(NPKIT_EVENT_TIME_SYNC_CPU, 0, 0, NPKIT_GET_CPU_TIMESTAMP_FROM_BLOCK,
-          ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
+          ncclShmem->comm.npKitEventCollectContexts + npKitCtxIdx);
     }
 #endif
 
 #if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_TIME_SYNC_GPU)
     if (isNpKitThread) {
       NpKit::CollectGpuEvent(NPKIT_EVENT_TIME_SYNC_GPU, 0, 0, NPKIT_GET_GPU_TIMESTAMP(),
-          ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
+          ncclShmem->comm.npKitEventCollectContexts + npKitCtxIdx);
     }
 #endif
 
     Primitives<T, RedOp, FanAsymmetric<0, 1>, 0, Proto, 1>
       prims(tid, tn, nullptr, &work->sendRank, work->sendAddr, nullptr,
-            /*redOpArg(ignored)=*/0, group, work->sendConnIndex, work->sendConnIndex, nullptr, work, stepSize);
+            /*redOpArg(ignored)=*/0, ncclShmem, ncclShmemPerWarp, group, work->sendConnIndex, work->sendConnIndex, nullptr, work, stepSize, primsModeDefault);
 
 #if defined(ENABLE_NPKIT)
       if (isNpKitThread) {
@@ -55,7 +55,7 @@ struct RunWorkBatch<ncclFuncSendRecv, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPL
 #if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_SEND_RECV_SEND_ENTRY)
       if (isNpKitThread) {
         NpKit::CollectGpuEvent(NPKIT_EVENT_SEND_RECV_SEND_ENTRY, bytes*sizeof(T), 0, NPKIT_GET_GPU_TIMESTAMP(),
-            ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
+            ncclShmem->comm.npKitEventCollectContexts + npKitCtxIdx);
         prims.npKitDataProcessTotalTime = 0;
       }
 #endif
@@ -70,17 +70,17 @@ struct RunWorkBatch<ncclFuncSendRecv, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPL
 #if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_SEND_RECV_SEND_EXIT)
       if (isNpKitThread) {
         NpKit::CollectGpuEvent(NPKIT_EVENT_SEND_RECV_SEND_EXIT, bytes*sizeof(T), prims.npKitDataProcessTotalTime, NPKIT_GET_GPU_TIMESTAMP(),
-            ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
+            ncclShmem->comm.npKitEventCollectContexts + npKitCtxIdx);
       }
 #endif
   }
 
   template<typename Proto>
-  __device__ void runRecv(int tid, int tn, int group, struct ncclDevWorkP2p* work) {
+  __device__ void runRecv(int tid, int tn, int group, struct ncclDevWorkP2p* work, struct ncclShmemData* ncclShmem, void* ncclShmemPerWarp) {
     size_t bytes = work->recvBytes;
-    bool useLargeChunk = (work->recvIpcReg && ncclShmem.comm.isAllNvlink) || work->recvNetReg;
+    bool useLargeChunk = (work->recvIpcReg && ncclShmem->comm.isAllNvlink) || work->recvNetReg;
     int chunkSize = useLargeChunk ? NCCL_MAX_NET_SIZE : u32fp8Decode(work->recvChunkSize_u32fp8);
-    int stepSize = useLargeChunk ? NCCL_MAX_NET_SIZE : ncclShmem.comm.p2pChunkSize;
+    int stepSize = useLargeChunk ? NCCL_MAX_NET_SIZE : ncclShmem->comm.p2pChunkSize;
 
 #if defined(ENABLE_NPKIT)
     bool isNpKitThread = (tid == 0);
@@ -90,20 +90,20 @@ struct RunWorkBatch<ncclFuncSendRecv, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPL
 #if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_TIME_SYNC_CPU)
     if (isNpKitThread) {
       NpKit::CollectGpuEvent(NPKIT_EVENT_TIME_SYNC_CPU, 0, 0, NPKIT_GET_CPU_TIMESTAMP_FROM_BLOCK,
-          ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
+          ncclShmem->comm.npKitEventCollectContexts + npKitCtxIdx);
     }
 #endif
 
 #if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_TIME_SYNC_GPU)
     if (isNpKitThread) {
       NpKit::CollectGpuEvent(NPKIT_EVENT_TIME_SYNC_GPU, 0, 0, NPKIT_GET_GPU_TIMESTAMP(),
-          ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
+          ncclShmem->comm.npKitEventCollectContexts + npKitCtxIdx);
     }
 #endif
 
     Primitives<T, RedOp, FanAsymmetric<1, 0>, 0, Proto, 1>
       prims(tid, tn, &work->recvRank, nullptr, nullptr, work->recvAddr,
-            /*redOpArg(ignored)=*/0, group, work->recvConnIndex, work->recvConnIndex, nullptr, work, stepSize);
+            /*redOpArg(ignored)=*/0, ncclShmem, ncclShmemPerWarp, group, work->recvConnIndex, work->recvConnIndex, nullptr, work, stepSize, primsModeDefault);
 
 #if defined(ENABLE_NPKIT)
       if (isNpKitThread) {
@@ -114,7 +114,7 @@ struct RunWorkBatch<ncclFuncSendRecv, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPL
 #if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_SEND_RECV_RECV_ENTRY)
       if (isNpKitThread) {
         NpKit::CollectGpuEvent(NPKIT_EVENT_SEND_RECV_RECV_ENTRY, bytes*sizeof(T), 0, NPKIT_GET_GPU_TIMESTAMP(),
-            ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
+            ncclShmem->comm.npKitEventCollectContexts + npKitCtxIdx);
         prims.npKitDataProcessTotalTime = 0;
       }
 #endif
@@ -129,15 +129,15 @@ struct RunWorkBatch<ncclFuncSendRecv, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPL
 #if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_SEND_RECV_RECV_EXIT)
       if (isNpKitThread) {
         NpKit::CollectGpuEvent(NPKIT_EVENT_SEND_RECV_RECV_EXIT, bytes*sizeof(T), prims.npKitDataProcessTotalTime, NPKIT_GET_GPU_TIMESTAMP(),
-            ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
+            ncclShmem->comm.npKitEventCollectContexts + npKitCtxIdx);
       }
 #endif
   }
 
 #if defined(USE_INDIRECT_FUNCTION_CALL) && !defined(__gfx942__) && !defined(__gfx950__)
-  __device__  void run() {
+  __device__  void run(struct ncclShmemData* ncclShmem, void* ncclShmemPerWarp) {
 #else
-  __device__  __attribute__((noinline)) void run() {
+  __device__  __attribute__((noinline)) void run(struct ncclShmemData* ncclShmem, void* ncclShmemPerWarp) {
 #endif
     const int tid = threadIdx.x;
     const int tn = blockDim.x;
@@ -149,10 +149,10 @@ struct RunWorkBatch<ncclFuncSendRecv, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPL
       uint32_t workSendMask; // bitmasks of which work indices have send/recv
       uint32_t workRecvMask;
     };
-    Shared* shared = (Shared*)ncclScratchForWarp(0);
+    Shared* shared = (Shared*)ncclScratchForWarp(ncclShmemPerWarp, 0);
 
-    struct ncclDevWorkP2p* works = (ncclDevWorkP2p*)ncclShmem.workStorage;
-    int nWorks = ncclShmem.nWorks;
+    struct ncclDevWorkP2p* works = (ncclDevWorkP2p*)ncclShmem->workStorage;
+    int nWorks = ncclShmem->nWorks;
 
     if (wid == 0) {
       // Modify the memory range of each work[] to reflect this channel's
@@ -165,7 +165,7 @@ struct RunWorkBatch<ncclFuncSendRecv, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPL
         struct ncclDevWorkP2p* work = &works[workIx];
         size_t bytes = isSend ? work->sendBytes : work->recvBytes;
         int nParts = isSend ? work->nSendChannels : work->nRecvChannels;
-        int part = ncclP2pChannelToPart(work->nP2pChannels, work->channelBase, ncclShmem.channelId, ncclShmem.comm.p2pnChannelsPerPeer, ncclShmem.comm.nNodes);
+        int part = ncclP2pChannelToPart(work->nP2pChannels, work->channelBase, ncclShmem->channelId, ncclShmem->comm.p2pnChannelsPerPeer, ncclShmem->comm.nNodes);
         hasWork = (part < nParts);
         if (nParts != 0) {
           size_t partBeg, partEnd;
@@ -231,7 +231,7 @@ struct RunWorkBatch<ncclFuncSendRecv, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPL
     struct ncclDevWorkP2p* work = &works[workIx];
     bool hasSend = 1 & (workSendMask>>workIx);
     bool hasRecv = 1 & (workRecvMask>>workIx);
-    bool isCopy = work->sendRank == ncclShmem.comm.rank;
+    bool isCopy = work->sendRank == ncclShmem->comm.rank;
     bool isSend = !hasRecv || (hasSend && subtid < nSendWarpPerWork*WARP_SIZE);
 
     if (!isCopy && hasSend && hasRecv) {
@@ -255,26 +255,26 @@ struct RunWorkBatch<ncclFuncSendRecv, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPL
 #endif
     } else if (isSend) {
       if (work->sendProtoLL) {
-        runSend<ProtoLL>(subtid, subtn, group, work);
+        runSend<ProtoLL>(subtid, subtn, group, work, ncclShmem, ncclShmemPerWarp);
       } else {
 #if defined(__gfx90a__)
-        runSend<ProtoSimple<1,1,0,8>>(subtid, subtn, group, work);
+        runSend<ProtoSimple<1,1,0,8>>(subtid, subtn, group, work, ncclShmem, ncclShmemPerWarp);
 #elif defined(__gfx908__) || defined(__gfx942__) || defined(__gfx950__)
-        runSend<ProtoSimple<1,1,0,4>>(subtid, subtn, group, work);
+        runSend<ProtoSimple<1,1,0,4>>(subtid, subtn, group, work, ncclShmem, ncclShmemPerWarp);
 #else
-        runSend<ProtoSimple<1,1>>(subtid, subtn, group, work);
+        runSend<ProtoSimple<1,1>>(subtid, subtn, group, work, ncclShmem, ncclShmemPerWarp);
 #endif
       }
     } else {
       if (work->recvProtoLL) {
-        runRecv<ProtoLL>(subtid, subtn, group, work);
+        runRecv<ProtoLL>(subtid, subtn, group, work, ncclShmem, ncclShmemPerWarp);
       } else {
 #if defined(__gfx90a__)
-        runRecv<ProtoSimple<1,1,0,8>>(subtid, subtn, group, work);
+        runRecv<ProtoSimple<1,1,0,8>>(subtid, subtn, group, work, ncclShmem, ncclShmemPerWarp);
 #elif defined(__gfx908__) || defined(__gfx942__) || defined(__gfx950__)
-        runRecv<ProtoSimple<1,1,0,4>>(subtid, subtn, group, work);
+        runRecv<ProtoSimple<1,1,0,4>>(subtid, subtn, group, work, ncclShmem, ncclShmemPerWarp);
 #else
-        runRecv<ProtoSimple<1,1>>(subtid, subtn, group, work);
+        runRecv<ProtoSimple<1,1>>(subtid, subtn, group, work, ncclShmem, ncclShmemPerWarp);
 #endif
       }
     }
