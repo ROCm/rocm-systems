@@ -706,6 +706,11 @@ amdsmi_get_gpu_device_uuid(amdsmi_processor_handle processor_handle,
     return status;
 }
 
+// Add a static cache for KFD nodes with initialization flag
+static std::once_flag kfd_nodes_initialized;
+static std::map<uint64_t, std::shared_ptr<amd::smi::KFDNode>> cached_nodes;
+static uint32_t cached_smallest_node_id = std::numeric_limits<uint32_t>::max();
+
 amdsmi_status_t
 amdsmi_get_gpu_enumeration_info(amdsmi_processor_handle processor_handle,
                                 amdsmi_enumeration_info_t *info){
@@ -734,25 +739,26 @@ amdsmi_get_gpu_enumeration_info(amdsmi_processor_handle processor_handle,
     info->drm_render = gpu_device->get_drm_render_minor();
 
     // Retrieve HIP ID (difference from the smallest node ID) and HSA ID
-    std::map<uint64_t, std::shared_ptr<amd::smi::KFDNode>> nodes;
-    if (amd::smi::DiscoverKFDNodes(&nodes) == 0) {
-        uint32_t smallest_node_id = std::numeric_limits<uint32_t>::max();
-        for (const auto& node_pair : nodes) {
-            uint32_t node_id = 0;
-            if (node_pair.second->get_node_id(&node_id) == 0) {
-                smallest_node_id = std::min(smallest_node_id, node_id);
+    // Initialize KFD nodes once
+    std::call_once(kfd_nodes_initialized, []() {
+        if (amd::smi::DiscoverKFDNodes(&cached_nodes) == 0) {
+            for (const auto& node_pair : cached_nodes) {
+                uint32_t node_id = 0;
+                if (node_pair.second->get_node_id(&node_id) == 0) {
+                    cached_smallest_node_id = std::min(cached_smallest_node_id, node_id);
+                }
             }
         }
+    });
 
-        // Default to 0xffffffff as not supported
-        info->hsa_id = std::numeric_limits<uint32_t>::max();
-        info->hip_id = std::numeric_limits<uint32_t>::max();
-        amdsmi_kfd_info_t kfd_info;
-        status = amdsmi_get_gpu_kfd_info(processor_handle, &kfd_info);
-        if (status == AMDSMI_STATUS_SUCCESS) {
-            info->hsa_id = kfd_info.node_id;
-            info->hip_id = kfd_info.node_id - smallest_node_id;
-        }
+    // Default to 0xffffffff as not supported
+    info->hsa_id = std::numeric_limits<uint32_t>::max();
+    info->hip_id = std::numeric_limits<uint32_t>::max();
+    amdsmi_kfd_info_t kfd_info;
+    status = amdsmi_get_gpu_kfd_info(processor_handle, &kfd_info);
+    if (status == AMDSMI_STATUS_SUCCESS) {
+        info->hsa_id = kfd_info.node_id;
+        info->hip_id = kfd_info.node_id - cached_smallest_node_id;
     }
 
     // Retrieve HIP UUID
