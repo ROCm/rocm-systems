@@ -30,7 +30,9 @@ Follow this systematic approach to optimize GPU performance:
       rocprofv3 --stats --<tracing_option> -- <application_path>
 
    Collect metrics on kernel execution time, memory bandwidth, occupancy, and
-   CU utilization. For more details on using ``rocprofv3`` for application tracing and profiling, see :doc:`rocprofv3 documentation <rocprofiler-sdk:how-to/using-rocprofv3>`.
+   CU utilization. For more details on using ``rocprofv3`` for application
+   tracing and profiling, see :doc:`rocprofv3 documentation
+   <rocprofiler-sdk:how-to/using-rocprofv3>`.
 
 2. **Analyze metrics to identify bottlenecks**
 
@@ -50,6 +52,146 @@ Follow this systematic approach to optimize GPU performance:
 5. **Iterate**
 
    Repeat until performance goals are met.
+
+Profiling and analysis tools
+=============================
+
+ROCm provides comprehensive profiling and analysis tools for understanding and
+optimizing GPU performance. These tools are essential for diagnosing
+bottlenecks and measuring the impact of optimizations.
+
+ROCm Profiler (rocprofv3)
+-------------------------
+
+The ROCm Profiler (``rocprofv3``) provides command-line-driven profiling for
+detailed performance analysis. It collects metrics on kernel execution time,
+memory bandwidth, wavefront occupancy, VALU utilization, and instruction-level
+counters.
+
+``rocprofv3`` integrates with the rocProfiler-SDK and rocTracer frameworks to
+collect hardware traces and API-level timing data. The collected data can be
+exported in JSON and CSV formats for further analysis or visualization.
+
+Key capabilities:
+
+* Kernel execution profiling
+* Memory bandwidth analysis
+* Wavefront occupancy metrics
+* Compute unit utilization
+* Instruction-level performance counters
+* API call tracing
+* Hardware event collection
+
+For detailed usage instructions, see the :doc:`rocprofv3 documentation
+<rocprofiler-sdk:how-to/using-rocprofv3>`.
+
+ROCprof Compute Viewer
+----------------------
+
+ROCprof Compute Viewer provides a GUI-based environment for analyzing GPU
+kernel performance data. It specializes in kernel-level analysis, offering
+counter correlation and hierarchical performance breakdowns that make it easier
+to understand kernel execution patterns and identify optimization opportunities.
+
+Key features:
+
+* Kernel performance counter analysis
+* Counter correlation and visualization
+* Hierarchical kernel performance breakdown
+* Interactive performance data exploration
+* Kernel-level optimization insights
+
+For more information, see the
+`ROCprof Compute Viewer documentation <https://rocm.docs.amd.com/projects/rocprof_compute_viewer/en/latest/>`__.
+
+Perfetto trace viewer
+---------------------
+
+For application-level tracing, including API calls, library calls, and
+host-device synchronization, use the Perfetto trace viewer at
+https://ui.perfetto.dev. The ``rocprofv3`` tool can generate traces in
+Perfetto-compatible format, allowing you to visualize the complete timeline of
+application execution.
+
+Perfetto provides a web-based interface for analyzing traces, showing the
+temporal relationship between host operations, kernel launches, memory
+transfers, and synchronization events. This holistic view helps identify
+performance issues related to API overhead, inefficient synchronization, or
+suboptimal overlap between computation and data transfer.
+
+Key capabilities:
+
+* Timeline visualization of application traces
+* HIP API call tracking and timing
+* ROCm library call analysis
+* Host-device synchronization visualization
+* Memory transfer tracking
+* Interactive trace exploration and filtering
+
+AMD System Management Interface
+--------------------------------
+
+The AMD System Management Interface (``amd-smi``) is a command-line utility for
+querying, monitoring, and managing AMD GPUs. It provides system administrators
+and developers with detailed, real-time information about GPU hardware,
+utilization, and power metrics.
+
+``amd-smi`` reports the following categories of information:
+
+* GPU identity information such as the card name, device ID, and PCI bus
+  location
+* Live utilization metrics, including GPU activity, memory usage, clock speeds,
+  and active processes
+* Power and thermal readings, such as temperature, fan speed, voltage, and
+  power draw
+* Performance states and limits, such as available frequency levels, clock
+  throttling, and voltage controls
+
+These metrics are retrieved through the ROCm SMI C API, which exposes a stable,
+scriptable interface for system and performance monitoring tools.
+
+``amd-smi`` also supports management operations, including:
+
+* Setting power caps and performance profiles
+* Adjusting clock frequencies
+* Performing GPU resets and controlling persistence mode
+* Reporting or controlling ECC status on supported data center GPUs
+
+Output can be formatted as human-readable text or JSON (``--json``), commonly
+used for integration into automated monitoring pipelines.
+
+Basic usage examples:
+
+.. code-block:: shell
+
+   # Display GPU information
+   amd-smi static
+
+   # Monitor GPU utilization and metrics
+   amd-smi metric --usage
+
+   # Show detailed information in JSON format
+   amd-smi static --json
+
+For complete documentation, see the :doc:`AMD SMI documentation <amdsmi:index>`.
+
+Typical workflow
+----------------
+
+For comprehensive ROCm performance analysis:
+
+1. Use ``rocprofv3`` to collect profiling data and generate traces
+2. Use ROCprof Compute Viewer for detailed kernel performance analysis and
+   counter correlation
+3. Use Perfetto to visualize application traces, API calls, and timeline
+   behavior
+4. Use ``amd-smi`` to monitor GPU utilization and system health
+5. Iterate between profiling and optimization, verifying improvements with
+   each change
+
+This multi-tool approach provides kernel-level metrics, application-level
+tracing, system monitoring, and visual context to understand overall
+performance behavior.
 
 .. _parallel execution:
 
@@ -151,7 +293,8 @@ eliminates an extra copy through a staging buffer and achieves higher bandwidth.
 
 On integrated GPUs (APUs), the CPU and GPU share the same physical memory.
 Mapped page-locked memory allows zero-copy access, where the GPU reads directly
-from host memory without requiring an explicit transfer, eliminating redundant copies.
+from host memory without requiring an explicit transfer, eliminating redundant
+copies.
 
 .. code-block:: cuda
 
@@ -246,9 +389,9 @@ as matrix multiplication.
 
 **Avoid bank conflicts in shared memory**
 
-Shared memory is organized into banks, each capable of servicing one request per
-cycle. When multiple threads in a warp access the same bank simultaneously, the
-requests are serialized, reducing throughput. Padding arrays by one element
+Shared memory is organized into banks, each capable of servicing one request
+per cycle. When multiple threads in a warp access the same bank simultaneously,
+the requests are serialized, reducing throughput. Padding arrays by one element
 shifts addresses to avoid systematic conflicts.
 
 .. code-block:: cuda
@@ -267,7 +410,8 @@ For bank conflict theory, see :ref:`bank_conflicts_theory`.
 
 Texture memory provides hardware-accelerated 2D filtering and caching optimized
 for spatial locality. It automatically handles boundary conditions and can
-interpolate values, making it ideal for image processing and nearby-neighbor access patterns.
+interpolate values, making it ideal for image processing and nearby-neighbor
+access patterns.
 
 .. code-block:: cuda
 
@@ -290,7 +434,8 @@ Arithmetic instructions
 
 Division requires many more hardware cycles than multiplication. Similarly,
 bitwise operations (shifts, AND, OR) are single-cycle instructions on integer
-units, making them far more efficient than equivalent arithmetic for power-of-two calculations.
+units, making them far more efficient than equivalent arithmetic for
+power-of-two calculations.
 
 .. code-block:: cuda
 
@@ -306,7 +451,8 @@ units, making them far more efficient than equivalent arithmetic for power-of-tw
 
 AMD GPUs have significantly higher throughput for single-precision (FP32)
 operations compared to double-precision (FP64). Using single-precision math
-functions can deliver substantial performance gains when FP64 accuracy is not required.
+functions can deliver substantial performance gains when FP64 accuracy is not
+required.
 
 .. code-block:: cuda
 
@@ -342,7 +488,8 @@ Control flow optimization
 
 When threads in a wavefront take different execution paths, the hardware
 serializes both branches, executing each path with only the relevant threads
-active. This reduces effective parallelism and wastes cycles on inactive threads.
+active. This reduces effective parallelism and wastes cycles on inactive
+threads.
 
 .. code-block:: cuda
 
@@ -478,9 +625,10 @@ are typically less restrictive.
 
 **Adjust launch bounds**
 
-The ``__launch_bounds__`` attribute provides hints to the compiler about expected
-thread block size and minimum blocks per CU. This guides register allocation
-decisions, potentially trading per-thread register count for higher occupancy.
+The ``__launch_bounds__`` attribute provides hints to the compiler about
+expected thread block size and minimum blocks per CU. This guides register
+allocation decisions, potentially trading per-thread register count for higher
+occupancy.
 
 .. code-block:: cuda
 
@@ -493,10 +641,11 @@ decisions, potentially trading per-thread register count for higher occupancy.
 **Check register usage during compilation**
 
 The compiler can report per-kernel register usage statistics. Monitoring this
-output helps identify kernels consuming excessive registers, guiding optimization
-efforts toward reducing register pressure in the most impactful areas.
+output helps identify kernels consuming excessive registers, guiding
+optimization efforts toward reducing register pressure in the most impactful
+areas.
 
-.. code-block:: bash
+.. code-block:: shell
 
    hipcc --resource-usage kernel.hip
 
@@ -514,8 +663,9 @@ Use techniques from "Managing register pressure" above.
 **Reduce shared memory usage per block**
 
 Each CU has limited shared memory that must be divided among resident blocks.
-Reducing per-block shared memory usage allows more blocks to reside simultaneously,
-increasing occupancy and improving latency hiding through greater thread-level parallelism.
+Reducing per-block shared memory usage allows more blocks to reside
+simultaneously, increasing occupancy and improving latency hiding through
+greater thread-level parallelism.
 
 .. code-block:: cuda
 
@@ -545,9 +695,10 @@ of 64 prevents partial wavefronts that waste execution slots. Larger blocks
 
 Profiling tools report the ratio of active wavefronts to maximum possible
 wavefronts per CU. Low occupancy suggests resource constraints (registers or
-shared memory) are limiting parallelism and may indicate opportunities for optimization.
+shared memory) are limiting parallelism and may indicate opportunities for
+optimization.
 
-.. code-block:: bash
+.. code-block:: shell
 
    rocprofv3 --occupancy ./your_application
 
@@ -585,23 +736,25 @@ of memory management and maintains better memory locality.
 
 **Avoid allocating all available memory**
 
-Reserving some memory headroom prevents allocation failures and system instability.
-The driver and runtime need workspace for internal operations, and leaving a
-safety margin ensures stable operation without unexpected out-of-memory errors.
+Reserving some memory headroom prevents allocation failures and system
+instability. The driver and runtime need workspace for internal operations, and
+leaving a safety margin ensures stable operation without unexpected
+out-of-memory errors.
 
 .. code-block:: cuda
 
-   size_t free, total;
+   std::size_t free, total;
    hipMemGetInfo(&free, &total);
 
    // Don't allocate all free memory
-   size_t safe_size = free * 0.9;  // Leave some margin
+   std::size_t safe_size = free * 0.9;  // Leave some margin
 
 **Use managed memory for oversubscription**
 
 Managed memory automatically migrates data between host and device on demand,
 allowing allocations larger than physical GPU memory. Prefetching hints help
-the runtime optimize page placement, reducing migration overhead during kernel execution.
+the runtime optimize page placement, reducing migration overhead during kernel
+execution.
 
 .. code-block:: cuda
 
@@ -618,10 +771,12 @@ Summary
 Key optimization techniques:
 
 * **Profile first**: Use ``rocprofv3`` to identify actual bottlenecks
-* **Parallelize effectively**: Maximize work at all levels (application, device, CU)
+* **Parallelize effectively**: Maximize work at all levels (application, device,
+  CU)
 * **Optimize memory**: Minimize transfers, maximize coalescing, use LDS
 * **Manage resources**: Balance registers, shared memory, and occupancy
 * **Minimize divergence**: Structure control flow to keep warps coherent
 
 For understanding the theory behind these techniques, refer to
-:doc:`../understand/performance_optimization` and :doc:`../understand/hardware_implementation`.
+:doc:`../understand/performance_optimization` and
+:doc:`../understand/hardware_implementation`.
