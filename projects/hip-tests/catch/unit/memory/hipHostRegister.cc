@@ -74,8 +74,8 @@ void doMemCopy(size_t numElements, int offset, T* A, T* Bh, T* Bd, bool internal
 
   // Reset
   for (size_t i = 0; i < numElements; i++) {
-    A[i] = static_cast<float>(i);
-    Bh[i] = 0.0f;
+    A[i] = static_cast<T>(i);
+    Bh[i] = static_cast<T>(0);
   }
 
   HIP_CHECK(hipMemset(Bd, memsetval, sizeBytes));
@@ -97,7 +97,7 @@ void doMemCopy(size_t numElements, int offset, T* A, T* Bh, T* Bd, bool internal
  *    - This testcase verifies the hipHostRegister API by
  * 1. Allocating the memory using malloc
  * 2. hipHostRegister that variable
- * 3. Getting the corresponding device pointer of the registered varible
+ * 3. Getting the corresponding device pointer of the registered variable
  * 4. Launching kernel and access the device pointer variable
  * 5. performing hipMemset on the device pointer variable
  * Test source
@@ -503,9 +503,9 @@ TEST_CASE("Unit_hipHostRegister_Oversubscription") {
   uint8_t* A = reinterpret_cast<uint8_t*>(malloc(allocsize));
   REQUIRE(A != nullptr);
   size_t used_size = LEN;
-  // Inititalize only the first used_size bytes chunk
+  // Initialize only the first used_size bytes chunk
   memset(A, INITIAL_VAL, used_size);
-  // Inititalize only the last used_size bytes chunk
+  // Initialize only the last used_size bytes chunk
   memset((A + allocsize - used_size), INITIAL_VAL, used_size);
   // Register the entire host memory chunk
   HIP_CHECK(hipHostRegister(A, allocsize, 0));
@@ -894,11 +894,6 @@ TEMPLATE_TEST_CASE("Unit_hipHostRegister_Memcpy", "", int, float, double) {
   HIP_CHECK(hipFree(Bd));
 }
 
-template <typename T> __global__ void fill_kernel(T* dataPtr, T value) {
-  size_t tid{blockIdx.x * blockDim.x + threadIdx.x};
-  dataPtr[tid] = value;
-}
-
 /**
  * Test Description
  * ------------------------
@@ -920,14 +915,12 @@ TEMPLATE_TEST_CASE("Unit_hipHostRegister_Flags", "", int, float, double) {
     bool valid;
   };
 
-  /* EXSWCPHIPT-29 - 0x08 is hipHostRegisterReadOnly which currently doesn't
-  have a definition in the headers */
   /* hipHostRegisterIoMemory is a valid flag but requires access to I/O mapped
   memory to be tested */
   FlagType flags = GENERATE(
       FlagType{hipHostRegisterDefault, true}, FlagType{hipHostRegisterPortable, true},
-      FlagType{0x08, true}, FlagType{hipHostRegisterPortable | hipHostRegisterMapped, true},
-      FlagType{hipHostRegisterPortable | hipHostRegisterMapped | 0x08, true},
+      FlagType{hipHostRegisterReadOnly, true}, FlagType{hipHostRegisterPortable | hipHostRegisterMapped, true},
+      FlagType{hipHostRegisterPortable | hipHostRegisterMapped | hipHostRegisterReadOnly, true},
 #if (HT_AMD == 1) && (HT_LINUX == 1)
       FlagType{hipHostRegisterIoMemory, true},
       FlagType{hipExtHostRegisterUncached, true},
@@ -937,6 +930,7 @@ TEMPLATE_TEST_CASE("Unit_hipHostRegister_Flags", "", int, float, double) {
 
 #if (HT_AMD == 1) && (HT_LINUX == 1)
   if (IsNavi4X() && (flags.value & hipExtHostRegisterUncached)) {
+    free(hostPtr);
     return;
   }
 #endif
