@@ -3,7 +3,6 @@ set(TEST_SRC
     hipFuncGetAttributesBasic.cc
     hipLaunchKernel.cc
     hipLaunchCooperativeKernel.cc
-    hipLaunchCooperativeKernelMultiDevice.cc
 )
 
 if(HIP_PLATFORM MATCHES "amd")
@@ -12,6 +11,7 @@ if(HIP_PLATFORM MATCHES "amd")
         hipExtLaunchMultiKernelMultiDevice.cc
         launch_api.cc
         hipGetProcAddressLaunchCbExecCtrlApis.cc
+    hipLaunchCooperativeKernelMultiDevice.cc
     )
 else()
   # These functions are currently unimplemented on AMD

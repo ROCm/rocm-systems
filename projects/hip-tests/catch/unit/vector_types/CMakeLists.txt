@@ -32,7 +32,7 @@ hip_add_exe_to_target(NAME VectorTypesTest
                       TEST_TARGET_NAME build_tests
                       LINKER_LIBS nvrtc)
 	set_target_properties(VectorTypesTest PROPERTIES LINKER_LANGUAGE CUDA)
-  target_link_libraries(VectorTypesTest cuda)
+  target_link_libraries(VectorTypesTest cuda hip::host hip::device)
 elseif(HIP_PLATFORM MATCHES "amd")
 hip_add_exe_to_target(NAME VectorTypesTest
                       TEST_SRC ${TEST_SRC}

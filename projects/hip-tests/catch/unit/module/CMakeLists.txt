@@ -365,7 +365,7 @@ hip_add_exe_to_target(NAME ModuleTest
   COMMON_SHARED_SRC ${COMMON_SHARED_SRC})
 
 if(HIP_PLATFORM MATCHES "nvidia")
-  target_link_libraries(ModuleTest cuda)
+  target_link_libraries(ModuleTest cuda hip::host hip::device)
 endif()
 
 if(NOT WIN32)
