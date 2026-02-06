@@ -25,6 +25,7 @@
 
 import csv
 import fcntl
+import logging
 import math
 from collections import namedtuple
 from collections.abc import Generator
@@ -190,40 +191,34 @@ DEFAULT_NUM_EXPERIMENTS = 100
 DEFAULT_NUM_ITERS = 10
 
 
-def get_lock_dir() -> Path:
-    """Get directory for GPU benchmark lock files."""
-    lock_dir = Path("/tmp/rocprof-compute")
-    lock_dir.mkdir(parents=True, exist_ok=True)
-    return lock_dir
-
-
-def get_gpu_uuid(device: int) -> str:
-    """Get GPU UUID as hex string for the specified device."""
-    props = hip.hipGetDeviceProperties(device)
-    return bytes(props.uuid.uuid).hex()
-
-
 @contextmanager
 def gpu_benchmark_lock(device: int) -> Generator[None, None, None]:
     """Acquire exclusive lock for benchmarking a specific GPU."""
-    gpu_uuid = get_gpu_uuid(device)
-    lock_file = get_lock_dir() / f"rocprof-compute-benchmark-{gpu_uuid}.lock"
+    # Get GPU UUID
+    gpu_uuid = bytes(hip.hipGetDeviceProperties(device).uuid.uuid).hex()
 
-    with open(lock_file, "w") as f:
+    # Get/create lock directory with sticky bit for multi-user safety
+    lock_dir = Path("/tmp/rocprof-compute-benchmark")
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    lock_dir.chmod(0o1777)  # rwx for all + sticky bit
+
+    lock_file = lock_dir / f"rocprof-compute-benchmark-{gpu_uuid}.lock"
+
+    with open(lock_file, "a") as f:
         try:
             fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
-            print(
+            msg = (
                 f"Waiting for GPU {device} (UUID: {gpu_uuid[:8]}...) - "
-                "another rocprof-compute benchmark is in progress...",
-                flush=True,
+                "another rocprof-compute benchmark is in progress..."
             )
+            print(msg, flush=True)
+            logging.info(msg)
             fcntl.flock(f, fcntl.LOCK_EX)  # Blocking wait
-            print(f"Acquired lock for GPU {device}, proceeding with benchmark.")
-        try:
-            yield
-        finally:
-            fcntl.flock(f, fcntl.LOCK_UN)
+            msg = f"Acquired lock for GPU {device}, proceeding with benchmark."
+            print(msg)
+            logging.info(msg)
+        yield
 
 
 def show_progress(pct: float) -> None:
