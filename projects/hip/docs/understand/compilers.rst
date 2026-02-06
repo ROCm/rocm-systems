@@ -71,7 +71,7 @@ A GFX version is expressed as a short string, for example:
 
 * ``gfx90a`` — CDNA 2 (MI250 series)
 * ``gfx942`` — CDNA 3 (MI300 series)
-* ``gfx1200`` — RDNA 3 (RX 7900 series)
+* ``gfx1100`` — RDNA 3 (RX 7900 series)
 
 Most GFX IP versions are composed of three numerical fields, which act roughly
 like a major-minor-subminor versioning system:
@@ -127,7 +127,7 @@ version. For example:
 
 * ``gfx90a`` corresponds to CDNA2 (MI250 series)
 * ``gfx942`` corresponds to CDNA3 (MI300 series)
-* ``gfx1200`` corresponds to RDNA3 consumer GPUs
+* ``gfx1100`` corresponds to RDNA3 consumer GPUs
 
 Each version defines its unique instruction encodings, supported data types,
 and pipeline behavior. Compiled GPU kernels must target a specific :ref:`GFX

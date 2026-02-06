@@ -18,6 +18,8 @@ decisions.
 For practical optimization techniques and step-by-step guidance, see
 :doc:`../how-to/performance_guidelines`.
 
+.. _performance_bottlenecks:
+
 Performance bottlenecks
 =======================
 
@@ -82,7 +84,7 @@ slope equals the memory bandwidth (in bytes per second). Because slope is
    and achievable performance. The memory bandwidth ceiling represents
    the GPU's memory bandwidth limit, while the compute ceiling shows the
    maximum achievable TFLOPs. Kernels falling into the area to the left
-   of the red line are memory-bound, while they are compute-bound if they
+   of the ridge point are memory-bound, while they are compute-bound if they
    fall into the right area.
 
 A kernel's position on the x-axis indicates whether it is fundamentally
@@ -282,6 +284,8 @@ wavefronts with independent work. The number of instructions required from
 other wavefronts to hide latency depends on the specific memory latency and
 instruction throughput characteristics of the GPU.
 
+.. _littles_law:
+
 Little's Law
 ------------
 
@@ -462,6 +466,8 @@ Memory types by speed:
 3. **L1 cache**: Fast, on-chip (per-CU cache)
 4. **L2 cache**: Moderate, on-chip (shared across CUs)
 5. **HBM (global memory)**: Slower, off-chip but high bandwidth
+
+.. _memory_coalescing_theory:
 
 Memory coalescing theory
 -------------------------
@@ -734,6 +740,8 @@ Actual performance is always below peak due to various inefficiencies.
 Utilization metrics
 -------------------
 
+.. _pipe_utilization:
+
 Pipe utilization
 ~~~~~~~~~~~~~~~~
 
@@ -779,6 +787,8 @@ Together, these form the pipe utilization profile—showing how well each
 instruction pipeline is being fed with eligible wavefronts and how close
 the kernel is to saturating the hardware's arithmetic or memory throughput.
 
+.. _issue_efficiency:
+
 Issue efficiency
 ~~~~~~~~~~~~~~~~
 
@@ -810,6 +820,8 @@ By combining these metrics, you can estimate how efficiently the scheduler
 keeps the CU's pipelines fed. Low issue efficiency typically signals
 insufficient concurrency (low occupancy) or high memory latency, both of
 which prevent the hardware from issuing instructions continuously.
+
+.. _cu_utilization:
 
 CU utilization
 ~~~~~~~~~~~~~~
@@ -846,6 +858,8 @@ In summary, CU utilization captures how actively the GPU's compute units
 are engaged in running wavefronts. High CU utilization indicates good
 parallel workload distribution, while low CU utilization may point to poor
 occupancy, launch configuration limits, or insufficient concurrency.
+
+.. _branch_efficiency:
 
 Branch efficiency
 ~~~~~~~~~~~~~~~~~
@@ -887,6 +901,8 @@ Divergence forces EXEC to toggle individual bits to deactivate lanes
 following a different control path. High branch efficiency implies minimal
 EXEC manipulation, meaning nearly all lanes execute the same instruction
 stream simultaneously—maximizing SIMD efficiency and overall throughput.
+
+.. _theoretical_performance_limits:
 
 Theoretical performance limits
 ==============================

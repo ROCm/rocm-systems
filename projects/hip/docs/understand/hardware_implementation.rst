@@ -113,6 +113,8 @@ Workgroup-to-CU mapping is non-deterministic and based on available resources.
 You should not assume any specific mapping pattern, as the same kernel
 launched multiple times can have different workgroup distributions.
 
+.. _sl1:
+
 Scalar L1 data cache (sL1D)
 ---------------------------
 
@@ -163,6 +165,8 @@ while some wait for data.
 
    Internal architecture of an AMD CDNA compute unit
 
+.. _wave-scheduling:
+
 Sequencer and scheduling
 ------------------------
 
@@ -211,6 +215,8 @@ Execution pipelines
 Each compute unit contains multiple specialized execution pipelines that
 process different types of instructions in parallel, enabling efficient
 utilization of the hardware resources.
+
+.. _valu:
 
 Vector arithmetic logic unit (VALU)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -286,6 +292,8 @@ entire wavefronts. Note that the branch unit handles wavefront-level control
 flow, not execution mask updates for thread divergence, which are handled
 through predication.
 
+.. _sfu:
+
 Special function unit (SFU)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -323,6 +331,8 @@ For programmers targeting ROCm and/or HIP, these SFU-accelerated operations
 are typically accessed through math intrinsics such as ``__expf``, ``__logf``,
 and/or ``__sinf``, which the compiler lowers to the corresponding AMDGPU ISA
 instructions at compile time.
+
+.. _lsu:
 
 Load/store unit (LSU)
 ^^^^^^^^^^^^^^^^^^^^^
@@ -398,6 +408,8 @@ The MFMA units use both standard VGPRs and additional accumulation VGPRs
 (AGPRs) on supported architectures, providing up to 512 KiB of combined
 register storage per CU.
 
+.. _dme:
+
 Data movement engine (CDNA3+)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -471,6 +483,8 @@ Conflicts are resolved by serializing accesses across multiple cycles. Address
 conflicts (multiple threads atomically updating the same address) are similarly
 serialized. Broadcasting from the same address to multiple threads is handled
 efficiently without conflicts.
+
+.. _vl1:
 
 Vector L1 cache
 ---------------
@@ -551,6 +565,8 @@ Fabric to the appropriate memory location, which could be:
 
 The interface categorizes requests by type (read and/or write), size (32B
 and/or 64B), and destination for optimal routing.
+
+.. _memory_coherence:
 
 Memory coherence
 ----------------
@@ -651,8 +667,7 @@ fundamental architectural changes:
   RDNA3 work group processor architecture
 
 **Wave32 execution**: Primary execution mode uses 32-thread wavefronts,
-reducing divergence penalties and register pressure. Wave64 mode is available
-for backward compatibility.
+reducing divergence penalties and register pressure.
 
 **Dual compute units**: The work group processor (WGP) replaces standalone
 CUs, containing two closely coupled compute units sharing resources:

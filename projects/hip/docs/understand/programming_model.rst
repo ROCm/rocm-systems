@@ -354,8 +354,12 @@ Warp (or Wavefront)
   
   Wavefronts are signified by the set of communication primitives at their
   disposal, as discussed in :ref:`warp-cross-lane`. On modern AMD datacenter
-  GPUs like MI300X, each CU can support up to 64 concurrent wavefronts, each
-  containing 64 threads, for a total of 4,096 active threads per CU.
+  GPUs, the number of resident wavefronts per CU is limited by architectural  
+  wave slots and available resources (such as registers and LDS). For example,  
+  if a CU supports 64 resident wavefronts, each containing 64 threads, this  
+  would correspond to 4,096 threads in flight; actual limits are  
+  architecture-specific and described in the hardware implementation  
+  documentation. 
   
   When a wavefront issues an instruction whose operands are not yet ready, for
   instance, a global memory load from :ref:`HBM <hbm>`, it becomes stalled.
