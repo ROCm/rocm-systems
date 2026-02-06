@@ -2994,8 +2994,8 @@ hsa_status_t GpuAgent::PcSamplingStop(pcs::PcsRuntime::PcSamplingSession& sessio
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
   // Wake up pcs_hosttrap_thread_ if it is waiting for data
-  HSA::hsa_signal_store_screlease(pcs_data->device_data->done_sig0, -1);
-  HSA::hsa_signal_store_screlease(pcs_data->device_data->done_sig1, -1);
+  core::Signal::Convert(pcs_data->device_data->done_sig0)->StoreRelease(-1);
+  core::Signal::Convert(pcs_data->device_data->done_sig1)->StoreRelease(-1);
 
   // Wait for the thread to finish and clean up
   os::WaitForThread(pcs_data->thread);
@@ -3227,13 +3227,13 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffers(
       PM4_PRED_EXEC_DW2_EXEC_COUNT(i - pred_exec_cmd_sz) | PM4_PRED_EXEC_DW2_VIRTUALXCCID_SELECT(0x1);
   }
 
-  HSA::hsa_signal_store_screlease(exec_pm4_signal, 1);
+  core::Signal::Convert(exec_pm4_signal)->StoreRelease(1);
 
   queues_[QueuePCSampling]->ExecutePM4(
       cmd_data, i * sizeof(uint32_t), HSA_FENCE_SCOPE_NONE, HSA_FENCE_SCOPE_SYSTEM, &exec_pm4_signal);
   do {
-    hsa_signal_value_t val = HSA::hsa_signal_wait_scacquire(
-        exec_pm4_signal, HSA_SIGNAL_CONDITION_LT, 1, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
+    hsa_signal_value_t val = core::Signal::Convert(exec_pm4_signal)->WaitAcquire(
+        HSA_SIGNAL_CONDITION_LT, 1, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
     if (val == -1) return HSA_STATUS_SUCCESS;
     if (val == 0) break;
   } while (true);
@@ -3336,12 +3336,12 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffers(
       PM4_PRED_EXEC_DW2_EXEC_COUNT(i - pred_exec_cmd_sz) | PM4_PRED_EXEC_DW2_VIRTUALXCCID_SELECT(0x1);
   }
 
-  HSA::hsa_signal_store_screlease(exec_pm4_signal, 1);
+  core::Signal::Convert(exec_pm4_signal)->StoreRelease(1);
   queues_[QueuePCSampling]->ExecutePM4(cmd_data, i * sizeof(uint32_t), HSA_FENCE_SCOPE_NONE,
                                        HSA_FENCE_SCOPE_SYSTEM, &exec_pm4_signal);
   do {
-    hsa_signal_value_t val = HSA::hsa_signal_wait_scacquire(
-        exec_pm4_signal, HSA_SIGNAL_CONDITION_LT, 1, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
+    hsa_signal_value_t val = core::Signal::Convert(exec_pm4_signal)->WaitAcquire(
+        HSA_SIGNAL_CONDITION_LT, 1, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
     if (val == -1) return HSA_STATUS_SUCCESS;
     if (val == 0) break;
   } while (true);
@@ -3363,17 +3363,19 @@ void GpuAgent::PcSamplingThread(pcs_data_t& pcs_data, const char* thread_name) {
     uint8_t* host_buffer_begin = pcs_data.host_buffer;
     uint8_t* host_buffer_end = pcs_data.host_buffer + pcs_data.host_buffer_size;
 
-    hsa_signal_t done_sig[] = {pcs_data.device_data->done_sig0, pcs_data.device_data->done_sig1};
+    core::Signal* done_sig[] = {
+        core::Signal::Convert(pcs_data.device_data->done_sig0),
+        core::Signal::Convert(pcs_data.device_data->done_sig1)};
 
     while (pcs_data.session->isActive()) {
       // Wait for the signal to process the buffer
       do {
-        hsa_signal_value_t val = HSA::hsa_signal_wait_scacquire(
-            done_sig[which_buffer], HSA_SIGNAL_CONDITION_LT, 1, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
+        hsa_signal_value_t val = done_sig[which_buffer]->WaitAcquire(
+            HSA_SIGNAL_CONDITION_LT, 1, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
         if (val == -1) goto thread_exit;
         if (val == 0) break;
       } while (true);
-      HSA::hsa_signal_store_screlease(done_sig[which_buffer], 1);
+      done_sig[which_buffer]->StoreRelease(1);
 
       // Lock buffer to ensure thread-safe access
       std::lock_guard<std::mutex> lock(pcs_data.host_buffer_mutex);
