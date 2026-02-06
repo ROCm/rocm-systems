@@ -26,6 +26,7 @@
 #define LIBRARY_SRC_GDA_IBV_WRAPPER_HPP_
 
 #include <infiniband/verbs.h>
+#include <map>
 
 namespace rocshmem {
 
@@ -138,6 +139,13 @@ class IBVWrapper {
      * @brief dmabuf support state
      */
     int dmabuf_is_supported = -1;
+
+    /**
+     * @brief dmabuf map so we can close fds
+     *        The key is ibv_mr pointer
+     *        The value is the fd
+     */
+    std::map<uintptr_t, int> dmabuf_fd_map;
 };
 
 } // namespace rocshmem

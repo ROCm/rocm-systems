@@ -29,6 +29,7 @@
 #include <dlfcn.h>
 #include <sys/utsname.h>
 #include <cstring>
+#include <unistd.h> // close(fd)
 
 namespace rocshmem {
 
@@ -215,6 +216,7 @@ int IBVWrapper::dealloc_pd(struct ibv_pd *pd) {
 
 struct ibv_mr* IBVWrapper::reg_mr(struct ibv_pd* pd, void* addr, size_t length, int access) {
   if (is_dmabuf_supported()) {
+    struct ibv_mr *mr;
     uint64_t offset = 0;
     int fd = 0;
 
@@ -222,7 +224,11 @@ struct ibv_mr* IBVWrapper::reg_mr(struct ibv_pd* pd, void* addr, size_t length, 
 
     CHECK_HSA(hsa_amd_portable_export_dmabuf(addr, length, &fd, &offset));
 
-    return ibv.reg_dmabuf_mr(pd, offset, length, (uint64_t) addr, fd, access);
+    mr = ibv.reg_dmabuf_mr(pd, offset, length, (uint64_t) addr, fd, access);
+
+    dmabuf_fd_map[(uintptr_t) mr] = fd;
+
+    return mr;
   } else {
     DPRINTF("Using ibv_reg_mr()\n");
 
@@ -237,6 +243,10 @@ struct ibv_mr* IBVWrapper::reg_mr(struct ibv_pd* pd, void* addr, size_t length, 
 }
 
 int IBVWrapper::dereg_mr(struct ibv_mr *mr) {
+  if (is_dmabuf_supported()) {
+    int fd = dmabuf_fd_map.erase((uintptr_t) mr);
+    close(fd);
+  }
   return ibv.dereg_mr(mr);
 }
 
