@@ -234,6 +234,7 @@ class Program:
 
         return hip.hipModuleGetFunction(self.module, kernel_name)
 
+
 # Helper method for launching kernel
 def launch_kernel(
     func: POINTER,
@@ -624,7 +625,7 @@ def flops_bench(device: int, type: str, unit: str, rate: int) -> PerfMetrics:
     kernel_name = flops_kernel_selector[type][0]
     type_size = flops_kernel_selector[type][1]
 
-    # Each thread reads a vec4 
+    # Each thread reads a vec4
     dataset_size = 4 * type_size * threads
     memblock = hip.hipMalloc(dataset_size)
 
@@ -637,7 +638,12 @@ def flops_bench(device: int, type: str, unit: str, rate: int) -> PerfMetrics:
 
     # Warmup
     launch_kernel(
-        func, [workgroups, 1, 1], [workgroup_size, 1, 1], 0, None, [memblock, iterations]
+        func,
+        [workgroups, 1, 1],
+        [workgroup_size, 1, 1],
+        0,
+        None,
+        [memblock, iterations],
     )
     hip.hipDeviceSynchronize()
 
