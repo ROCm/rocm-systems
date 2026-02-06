@@ -210,7 +210,16 @@ def gpu_benchmark_lock(device: int) -> Generator[None, None, None]:
     lock_file = get_lock_dir() / f"rocprof-compute-benchmark-{gpu_uuid}.lock"
 
     with open(lock_file, "w") as f:
-        fcntl.flock(f, fcntl.LOCK_EX)  # Blocking exclusive lock
+        try:
+            fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            print(
+                f"Waiting for GPU {device} (UUID: {gpu_uuid[:8]}...) - "
+                "another rocprof-compute benchmark is in progress...",
+                flush=True,
+            )
+            fcntl.flock(f, fcntl.LOCK_EX)  # Blocking wait
+            print(f"Acquired lock for GPU {device}, proceeding with benchmark.")
         try:
             yield
         finally:
