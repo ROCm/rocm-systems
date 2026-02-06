@@ -239,6 +239,11 @@ class RocProfCompute:
         self.__args.output_directory = replace_env(self.__args.output_directory)
 
         # Replace %rank% with actual rank value in workload path
+        if "%rank%" in self.__args.output_directory and get_rank() is None:
+            console_warning(
+                "Ignoring %%rank%% placeholder in output directory"
+                " since no MPI rank was detected."
+            )
         self.__args.output_directory = replace_rank(self.__args.output_directory)
 
     @demarcate

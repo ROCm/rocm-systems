@@ -252,7 +252,7 @@ The output directory can be parameterized with the following keywords:
 
 * ``%hostname%``: Host name
 * ``%gpumodel%``: GPU model
-* ``%rank%``: MPI process rank (defaults to ``0`` if no rank is detected)
+* ``%rank%``: MPI process rank (ignored with a warning if no rank is detected)
 * ``%env{NAME}%``: Environment variable ``NAME`` (empty string if unset)
 
 If MPI rank is detected and the output directory does not include ``%rank%``,

@@ -852,7 +852,7 @@ def test_output_directory(binary_handler_profile_rocprof_compute, monkeypatch):
 
         binary_handler_profile_rocprof_compute(config, workload_dir)
 
-        workload_dir = workload_dir.replace("%rank%", "0")
+        workload_dir = workload_dir.replace("%rank%", "")
         assert os.path.exists(workload_dir)
 
         test_utils.clean_output_dir(config["cleanup"], workload_base_dir)

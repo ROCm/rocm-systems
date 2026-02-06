@@ -2043,12 +2043,12 @@ def replace_rank(name: str) -> str:
     def rank(match: re.Match[str]) -> str:
         value = get_rank()
         if value is not None:
-            return value
+            return value + match.group(1)  # preserve trailing slash
         else:
-            return "0"  # Default rank if no MPI environment variable is found
+            return ""  # Ignore %rank% and trailing slash
 
-    # Replace %rank% with MPI process rank
-    pattern = re.compile(r"%rank%")
+    # Replace %rank% (and optional trailing slash) with MPI process rank
+    pattern = re.compile(r"%rank%(/?)")
 
     return pattern.sub(rank, name)
 
