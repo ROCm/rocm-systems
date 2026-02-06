@@ -314,7 +314,7 @@ nic_setup()
         // Get list of devices from the command line and add those that are
         // valid to nic_vec.
         nic_data::nic_vec                        = {};
-        auto nic_list                            = parse_list(_ainic_devices_v);
+        auto                            nic_list = parse_list(_ainic_devices_v);
         std::unordered_set<std::string> nic_set{};  // Set of NICs found so far; used
                                                     // for detecting duplicates.
         for(auto& nic : nic_list)
