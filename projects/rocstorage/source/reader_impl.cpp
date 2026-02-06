@@ -8,6 +8,7 @@
 
 #include "queries/select/table_select_query.hpp"
 
+#include <algorithm>
 #include <memory>
 #include <stdexcept>
 #include <utility>
@@ -274,6 +275,13 @@ reader_t::impl::get_all_tracks()
 
             m_track_info_list.push_back(track_info_ptr);
             m_track_info_utility.emplace(track_info.id, track_info_ptr);
+            m_track_ptr_to_db_id.emplace(track_info_ptr, track_info.id);
+
+            topology_key_t topo{ track_info.nid,
+                                 track_info.pid.value_or(0),
+                                 track_info.tid.value_or(0) };
+            m_track_ptr_to_topology.emplace(track_info_ptr, topo);
+            m_topology_to_track_ptr.emplace(topo, track_info_ptr);
         }
     }
 
@@ -527,6 +535,243 @@ reader_t::impl::get_all_pmc_infos()
     return m_pmc_info_list;
 }
 
-// TODO: Write reader functions for tracks and other data events when defined
+reader_types::timeline_event_list_t
+reader_t::impl::build_timeline_events(
+    const std::vector<data_storage::schema_v3::timeline_event_result>& results,
+    reader_types::event_type_t                                         type)
+{
+    reader_types::timeline_event_list_t events;
+    events.reserve(results.size());
+
+    for(const auto& result : results)
+    {
+        reader_types::timeline_event_t event;
+        event.unique_identifier = { result.id, type };
+        event.start_timestamp   = result.start_timestamp;
+        event.end_timestamp     = result.end_timestamp;
+
+        if(result.display_name_id.has_value())
+        {
+            auto it = m_string_info_utility.find(result.display_name_id.value());
+            if(it != m_string_info_utility.end())
+            {
+                event.display_name = it->second;
+            }
+        }
+
+        if(result.category_id.has_value())
+        {
+            auto it = m_string_info_utility.find(result.category_id.value());
+            if(it != m_string_info_utility.end())
+            {
+                event.category = it->second;
+            }
+        }
+
+        // Track resolution: try sample-based track_id first, fall back to topology
+        if(result.track_id.has_value())
+        {
+            auto it = m_track_info_utility.find(result.track_id.value());
+            if(it != m_track_info_utility.end())
+            {
+                event.track = it->second;
+            }
+        }
+
+        if(!event.track)
+        {
+            topology_key_t topo{ result.nid,
+                                 result.pid.value_or(0),
+                                 result.tid.value_or(0) };
+            auto           it = m_topology_to_track_ptr.find(topo);
+            if(it != m_topology_to_track_ptr.end())
+            {
+                event.track = it->second;
+            }
+        }
+
+        events.push_back(std::move(event));
+    }
+
+    return events;
+}
+
+void
+reader_t::impl::apply_pagination(reader_types::timeline_event_list_t& events,
+                                 const reader_types::pagination_t&    pagination)
+{
+    if(pagination.offset.has_value())
+    {
+        auto off = pagination.offset.value();
+        if(off >= events.size())
+        {
+            events.clear();
+            return;
+        }
+        events.erase(events.begin(), events.begin() + static_cast<ptrdiff_t>(off));
+    }
+
+    if(pagination.limit.has_value())
+    {
+        auto lim = pagination.limit.value();
+        if(lim < events.size())
+        {
+            events.resize(lim);
+        }
+    }
+}
+
+reader_types::timeline_event_list_t
+reader_t::impl::get_events(const reader_types::event_filter_t& filter)
+{
+    reader_types::timeline_event_list_t all_events;
+
+    bool query_all    = filter.types.empty();
+    auto should_query = [&](reader_types::event_type_t t) {
+        return query_all || std::find(filter.types.begin(), filter.types.end(), t) !=
+                                filter.types.end();
+    };
+
+    bool has_time =
+        filter.time_window.start.has_value() && filter.time_window.end.has_value();
+
+    auto query_event_type =
+        [&](const data_storage::schema_v3::read_statements::timeline_event_statement_set&
+                                       stmts,
+            reader_types::event_type_t type) {
+            std::vector<data_storage::schema_v3::timeline_event_result> results;
+            if(has_time)
+            {
+                results = stmts
+                              .time_filtered(filter.time_window.end.value(),
+                                             filter.time_window.start.value())
+                              .to_vector();
+            }
+            else
+            {
+                results = stmts.base().to_vector();
+            }
+
+            auto events = build_timeline_events(results, type);
+            all_events.insert(all_events.end(),
+                              std::make_move_iterator(events.begin()),
+                              std::make_move_iterator(events.end()));
+        };
+
+    if(should_query(reader_types::event_type_t::region))
+    {
+        query_event_type(m_read_statements->region_statements(),
+                         reader_types::event_type_t::region);
+    }
+
+    if(should_query(reader_types::event_type_t::kernel_dispatch))
+    {
+        query_event_type(m_read_statements->kernel_dispatch_statements(),
+                         reader_types::event_type_t::kernel_dispatch);
+    }
+
+    if(should_query(reader_types::event_type_t::memory_allocate))
+    {
+        query_event_type(m_read_statements->memory_allocate_statements(),
+                         reader_types::event_type_t::memory_allocate);
+    }
+
+    if(should_query(reader_types::event_type_t::memory_copy))
+    {
+        query_event_type(m_read_statements->memory_copy_statements(),
+                         reader_types::event_type_t::memory_copy);
+    }
+
+    apply_pagination(all_events, filter.pagination);
+    return all_events;
+}
+
+reader_types::timeline_event_list_t
+reader_t::impl::get_events_for_track(reader_types::track_info_ptr_t      track,
+                                     const reader_types::event_filter_t& filter)
+{
+    if(!track) return {};
+
+    auto topo_it = m_track_ptr_to_topology.find(track);
+    if(topo_it == m_track_ptr_to_topology.end()) return {};
+
+    auto db_id_it = m_track_ptr_to_db_id.find(track);
+    if(db_id_it == m_track_ptr_to_db_id.end()) return {};
+
+    const auto& topo  = topo_it->second;
+    auto        db_id = db_id_it->second;
+
+    reader_types::timeline_event_list_t all_events;
+
+    bool query_all    = filter.types.empty();
+    auto should_query = [&](reader_types::event_type_t t) {
+        return query_all || std::find(filter.types.begin(), filter.types.end(), t) !=
+                                filter.types.end();
+    };
+
+    bool has_time =
+        filter.time_window.start.has_value() && filter.time_window.end.has_value();
+
+    auto query_event_type =
+        [&](const data_storage::schema_v3::read_statements::timeline_event_statement_set&
+                                       stmts,
+            reader_types::event_type_t type) {
+            std::vector<data_storage::schema_v3::timeline_event_result> results;
+            if(has_time)
+            {
+                results = stmts
+                              .track_and_time_filtered(topo.nid,
+                                                       topo.pid,
+                                                       topo.tid,
+                                                       db_id,
+                                                       filter.time_window.end.value(),
+                                                       filter.time_window.start.value())
+                              .to_vector();
+            }
+            else
+            {
+                results =
+                    stmts.track_filtered(topo.nid, topo.pid, topo.tid, db_id).to_vector();
+            }
+
+            auto events = build_timeline_events(results, type);
+            all_events.insert(all_events.end(),
+                              std::make_move_iterator(events.begin()),
+                              std::make_move_iterator(events.end()));
+        };
+
+    if(should_query(reader_types::event_type_t::region))
+    {
+        query_event_type(m_read_statements->region_statements(),
+                         reader_types::event_type_t::region);
+    }
+
+    if(should_query(reader_types::event_type_t::kernel_dispatch))
+    {
+        query_event_type(m_read_statements->kernel_dispatch_statements(),
+                         reader_types::event_type_t::kernel_dispatch);
+    }
+
+    if(should_query(reader_types::event_type_t::memory_allocate))
+    {
+        query_event_type(m_read_statements->memory_allocate_statements(),
+                         reader_types::event_type_t::memory_allocate);
+    }
+
+    if(should_query(reader_types::event_type_t::memory_copy))
+    {
+        query_event_type(m_read_statements->memory_copy_statements(),
+                         reader_types::event_type_t::memory_copy);
+    }
+
+    apply_pagination(all_events, filter.pagination);
+    return all_events;
+}
+
+size_t
+reader_t::impl::get_event_count(const reader_types::event_filter_t& filter)
+{
+    return get_events(filter).size();
+}
 
 }  // namespace rocstorage

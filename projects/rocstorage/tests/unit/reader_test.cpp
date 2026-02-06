@@ -228,4 +228,90 @@ TEST_F(reader_test, get_pmc_info_list_first_item_has_correct_values)
     ASSERT_EQ(pmc_list[0]->node_info->node_id, 9162464413581981795);
 }
 
+TEST_F(reader_test, get_events_returns_non_empty_list)
+{
+    auto events = m_reader->get_events();
+    ASSERT_GT(events.size(), 0);
+}
+
+TEST_F(reader_test, get_events_with_type_filter_region)
+{
+    rocstorage::reader_types::event_filter_t filter;
+    filter.types = { rocstorage::reader_types::event_type_t::region };
+    auto events  = m_reader->get_events(filter);
+    ASSERT_GT(events.size(), 0);
+
+    for(const auto& event : events)
+    {
+        ASSERT_EQ(event.unique_identifier.type,
+                  rocstorage::reader_types::event_type_t::region);
+    }
+}
+
+TEST_F(reader_test, get_events_region_has_correct_fields)
+{
+    rocstorage::reader_types::event_filter_t filter;
+    filter.types      = { rocstorage::reader_types::event_type_t::region };
+    filter.pagination = { 1, std::nullopt };
+    auto events       = m_reader->get_events(filter);
+    ASSERT_GE(events.size(), 1);
+
+    const auto& event = events[0];
+    ASSERT_EQ(event.unique_identifier.type,
+              rocstorage::reader_types::event_type_t::region);
+    ASSERT_GT(event.unique_identifier.id, 0);
+    ASSERT_GT(event.start_timestamp, 0);
+    ASSERT_GE(event.end_timestamp, event.start_timestamp);
+    ASSERT_FALSE(event.display_name.empty());
+}
+
+TEST_F(reader_test, get_events_with_pagination_limit)
+{
+    rocstorage::reader_types::event_filter_t filter;
+    filter.pagination = { 5, std::nullopt };
+    auto events       = m_reader->get_events(filter);
+    ASSERT_LE(events.size(), 5);
+    ASSERT_GT(events.size(), 0);
+}
+
+TEST_F(reader_test, get_events_with_pagination_offset)
+{
+    auto all_events = m_reader->get_events();
+
+    rocstorage::reader_types::event_filter_t filter;
+    filter.pagination  = { std::nullopt, 2 };
+    auto offset_events = m_reader->get_events(filter);
+
+    ASSERT_EQ(offset_events.size(), all_events.size() - 2);
+}
+
+TEST_F(reader_test, get_events_for_track_returns_events)
+{
+    auto tracks = m_reader->get_all_tracks();
+    ASSERT_GT(tracks.size(), 0);
+
+    bool found_events = false;
+    for(const auto& track : tracks)
+    {
+        auto events = m_reader->get_events_for_track(track);
+        if(!events.empty())
+        {
+            found_events = true;
+            for(const auto& event : events)
+            {
+                ASSERT_NE(event.track, nullptr);
+            }
+            break;
+        }
+    }
+    ASSERT_TRUE(found_events);
+}
+
+TEST_F(reader_test, get_event_count_matches_events_size)
+{
+    auto count  = m_reader->get_event_count();
+    auto events = m_reader->get_events();
+    ASSERT_EQ(count, events.size());
+}
+
 }  // namespace

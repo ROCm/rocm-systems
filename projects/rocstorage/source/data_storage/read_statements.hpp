@@ -169,8 +169,7 @@ struct pmc_info_result
 
 struct timeline_event_result
 {
-    size_t                                 id{};
-    rocstorage::reader_types::event_type_t type{};
+    size_t id{};
 
     size_t start_timestamp{};
     size_t end_timestamp{};
@@ -178,8 +177,18 @@ struct timeline_event_result
     std::optional<size_t> display_name_id;
     std::optional<size_t> category_id;
 
+    size_t                nid{};
+    std::optional<size_t> pid;
+    std::optional<size_t> tid;
     std::optional<size_t> track_id;
-    std::optional<double> value;
+};
+
+struct sample_timeline_event_result
+{
+    size_t                id{};
+    size_t                timestamp{};
+    std::optional<size_t> category_id;
+    size_t                track_id{};
 };
 
 struct read_statements
@@ -200,10 +209,10 @@ struct read_statements
         initialize_code_object_info_statement();
         initialize_pmc_info_statement();
 
-        initialize_region_timeline_event_statement();
-        initialize_kernel_dispatch_timeline_event_statement();
-        initialize_memory_allocate_timeline_event_statement();
-        initialize_memory_copy_timeline_event_statement();
+        initialize_region_timeline_event_statements();
+        initialize_kernel_dispatch_timeline_event_statements();
+        initialize_memory_allocate_timeline_event_statements();
+        initialize_memory_copy_timeline_event_statements();
     }
     read_statements()                                  = delete;
     read_statements(const read_statements&)            = delete;
@@ -245,6 +254,15 @@ struct read_statements
 
     using timeline_event_statement_func_t =
         std::function<statement_result<timeline_event_result>()>;
+
+    using timeline_event_time_filtered_func_t =
+        std::function<statement_result<timeline_event_result>(size_t, size_t)>;
+
+    using timeline_event_track_filtered_func_t = std::function<
+        statement_result<timeline_event_result>(size_t, size_t, size_t, size_t)>;
+
+    using timeline_event_track_and_time_filtered_func_t = std::function<statement_result<
+        timeline_event_result>(size_t, size_t, size_t, size_t, size_t, size_t)>;
 
     [[nodiscard]] string_statement_func_t string_statement() const
     {
@@ -301,27 +319,32 @@ struct read_statements
         return m_pmc_info_statement;
     }
 
-    [[nodiscard]] timeline_event_statement_func_t region_timeline_event_statement() const
+    struct timeline_event_statement_set
     {
-        return m_region_timeline_event_statement;
+        timeline_event_statement_func_t               base;
+        timeline_event_time_filtered_func_t           time_filtered;
+        timeline_event_track_filtered_func_t          track_filtered;
+        timeline_event_track_and_time_filtered_func_t track_and_time_filtered;
+    };
+
+    [[nodiscard]] const timeline_event_statement_set& region_statements() const
+    {
+        return m_region_statements;
     }
 
-    [[nodiscard]] timeline_event_statement_func_t
-    kernel_dispatch_timeline_event_statement() const
+    [[nodiscard]] const timeline_event_statement_set& kernel_dispatch_statements() const
     {
-        return m_kernel_dispatch_timeline_event_statement;
+        return m_kernel_dispatch_statements;
     }
 
-    [[nodiscard]] timeline_event_statement_func_t
-    memory_allocate_timeline_event_statement() const
+    [[nodiscard]] const timeline_event_statement_set& memory_allocate_statements() const
     {
-        return m_memory_allocate_timeline_event_statement;
+        return m_memory_allocate_statements;
     }
 
-    [[nodiscard]] timeline_event_statement_func_t memory_copy_timeline_event_statement()
-        const
+    [[nodiscard]] const timeline_event_statement_set& memory_copy_statements() const
     {
-        return m_memory_copy_timeline_event_statement;
+        return m_memory_copy_statements;
     }
 
 private:
@@ -635,82 +658,156 @@ private:
                 &pmc_info_result::extdata);
     }
 
-    void initialize_region_timeline_event_statement()
+    // Helper: initialize all 4 variants for a timeline event type using
+    // query builder reusability (base query reused for each WHERE variant)
+    template <typename JoinBuilder>
+    void initialize_timeline_event_variants(JoinBuilder&                  base,
+                                            std::string_view              alias,
+                                            timeline_event_statement_set& out)
     {
-        const auto query =
-            queries::select::table_select_query{}
-                .select("R.id", "R.start", "R.end", "R.name_id", "E.category_id")
-                .from(fmt::format("rocpd_region_{}", m_uuid), "R")
-                .inner_join("rocpd_event", "E", "R.event_id = E.id")
-                .get_query_string();
+        const auto a = std::string(alias);
 
-        m_region_timeline_event_statement =
-            m_database->create_read_statement_executor<timeline_event_result>(
-                query,
+        out.base = m_database->create_read_statement_executor<timeline_event_result>(
+            base.get_query_string(),
+            &timeline_event_result::id,
+            &timeline_event_result::start_timestamp,
+            &timeline_event_result::end_timestamp,
+            &timeline_event_result::display_name_id,
+            &timeline_event_result::category_id,
+            &timeline_event_result::nid,
+            &timeline_event_result::pid,
+            &timeline_event_result::tid,
+            &timeline_event_result::track_id);
+
+        out.time_filtered =
+            m_database->create_read_statement_executor<timeline_event_result,
+                                                       bind_types<size_t, size_t>>(
+                base.where(a + ".start <= ?")
+                    .and_where(a + ".end >= ?")
+                    .get_query_string(),
                 &timeline_event_result::id,
                 &timeline_event_result::start_timestamp,
                 &timeline_event_result::end_timestamp,
                 &timeline_event_result::display_name_id,
-                &timeline_event_result::category_id);
+                &timeline_event_result::category_id,
+                &timeline_event_result::nid,
+                &timeline_event_result::pid,
+                &timeline_event_result::tid,
+                &timeline_event_result::track_id);
+
+        const auto track_where = "(" + a + ".nid = ? AND " + a + ".pid = ? AND " + a +
+                                 ".tid = ?) OR S.track_id = ?";
+
+        out.track_filtered = m_database->create_read_statement_executor<
+            timeline_event_result,
+            bind_types<size_t, size_t, size_t, size_t>>(
+            base.where(track_where).get_query_string(),
+            &timeline_event_result::id,
+            &timeline_event_result::start_timestamp,
+            &timeline_event_result::end_timestamp,
+            &timeline_event_result::display_name_id,
+            &timeline_event_result::category_id,
+            &timeline_event_result::nid,
+            &timeline_event_result::pid,
+            &timeline_event_result::tid,
+            &timeline_event_result::track_id);
+
+        out.track_and_time_filtered = m_database->create_read_statement_executor<
+            timeline_event_result,
+            bind_types<size_t, size_t, size_t, size_t, size_t, size_t>>(
+            base.where("(" + track_where + ")")
+                .and_where(a + ".start <= ?")
+                .and_where(a + ".end >= ?")
+                .get_query_string(),
+            &timeline_event_result::id,
+            &timeline_event_result::start_timestamp,
+            &timeline_event_result::end_timestamp,
+            &timeline_event_result::display_name_id,
+            &timeline_event_result::category_id,
+            &timeline_event_result::nid,
+            &timeline_event_result::pid,
+            &timeline_event_result::tid,
+            &timeline_event_result::track_id);
     }
 
-    void initialize_kernel_dispatch_timeline_event_statement()
+    void initialize_region_timeline_event_statements()
     {
-        const auto query =
-            queries::select::table_select_query{}
-                .select("K.id", "K.start", "K.end", "KS.display_name_id", "E.category_id")
-                .from(fmt::format("rocpd_kernel_dispatch_{}", m_uuid), "K")
-                .inner_join("rocpd_event", "E", "E.id = K.event_id")
-                .inner_join("rocpd_info_kernel_symbol", "KS", "KS.id = K.kernel_id")
-                .get_query_string();
+        queries::select::table_select_query query;
+        auto&                               base = query
+                         .select("R.id",
+                                 "R.start",
+                                 "R.end",
+                                 "R.name_id",
+                                 "E.category_id",
+                                 "R.nid",
+                                 "R.pid",
+                                 "R.tid",
+                                 "S.track_id")
+                         .from(fmt::format("rocpd_region_{}", m_uuid), "R")
+                         .inner_join("rocpd_event", "E", "R.event_id = E.id")
+                         .left_join("rocpd_sample", "S", "S.event_id = R.event_id");
 
-        m_kernel_dispatch_timeline_event_statement =
-            m_database->create_read_statement_executor<timeline_event_result>(
-                query,
-                &timeline_event_result::id,
-                &timeline_event_result::start_timestamp,
-                &timeline_event_result::end_timestamp,
-                &timeline_event_result::display_name_id,
-                &timeline_event_result::category_id);
+        initialize_timeline_event_variants(base, "R", m_region_statements);
     }
 
-    void initialize_memory_allocate_timeline_event_statement()
+    void initialize_kernel_dispatch_timeline_event_statements()
     {
-        const auto query =
-            queries::select::table_select_query{}
-                .select("MA.id", "MA.start", "MA.end", "E.category_id", "E.category_id")
-                .from(fmt::format("rocpd_memory_allocate_{}", m_uuid), "MA")
-                .inner_join("rocpd_event", "E", "E.id = MA.event_id")
-                .get_query_string();
+        queries::select::table_select_query query;
+        auto&                               base = query
+                         .select("K.id",
+                                 "K.start",
+                                 "K.end",
+                                 "K.region_name_id",
+                                 "E.category_id",
+                                 "K.nid",
+                                 "K.pid",
+                                 "K.tid",
+                                 "S.track_id")
+                         .from(fmt::format("rocpd_kernel_dispatch_{}", m_uuid), "K")
+                         .inner_join("rocpd_event", "E", "E.id = K.event_id")
+                         .left_join("rocpd_sample", "S", "S.event_id = K.event_id");
 
-        m_memory_allocate_timeline_event_statement =
-            m_database->create_read_statement_executor<timeline_event_result>(
-                query,
-                &timeline_event_result::id,
-                &timeline_event_result::start_timestamp,
-                &timeline_event_result::end_timestamp,
-                &timeline_event_result::display_name_id,
-                &timeline_event_result::category_id);
+        initialize_timeline_event_variants(base, "K", m_kernel_dispatch_statements);
     }
 
-    void initialize_memory_copy_timeline_event_statement()
+    void initialize_memory_allocate_timeline_event_statements()
     {
-        const auto query =
-            queries::select::table_select_query{}
-                .select(
-                    "MC.id", "MC.start", "MC.end", "MC.region_name_id", "E.category_id")
-                .from(fmt::format("rocpd_memory_copy_{}", m_uuid), "MC")
-                .inner_join("rocpd_event", "E", "MC.event_id = E.id")
-                .get_query_string();
+        queries::select::table_select_query query;
+        auto&                               base = query
+                         .select("MA.id",
+                                 "MA.start",
+                                 "MA.end",
+                                 "E.category_id",
+                                 "E.category_id",
+                                 "MA.nid",
+                                 "MA.pid",
+                                 "MA.tid",
+                                 "S.track_id")
+                         .from(fmt::format("rocpd_memory_allocate_{}", m_uuid), "MA")
+                         .inner_join("rocpd_event", "E", "E.id = MA.event_id")
+                         .left_join("rocpd_sample", "S", "S.event_id = MA.event_id");
 
-        m_memory_copy_timeline_event_statement =
-            m_database->create_read_statement_executor<timeline_event_result>(
-                query,
-                &timeline_event_result::id,
-                &timeline_event_result::start_timestamp,
-                &timeline_event_result::end_timestamp,
-                &timeline_event_result::display_name_id,
-                &timeline_event_result::category_id);
+        initialize_timeline_event_variants(base, "MA", m_memory_allocate_statements);
+    }
+
+    void initialize_memory_copy_timeline_event_statements()
+    {
+        queries::select::table_select_query query;
+        auto&                               base = query
+                         .select("MC.id",
+                                 "MC.start",
+                                 "MC.end",
+                                 "MC.region_name_id",
+                                 "E.category_id",
+                                 "MC.nid",
+                                 "MC.pid",
+                                 "MC.tid",
+                                 "S.track_id")
+                         .from(fmt::format("rocpd_memory_copy_{}", m_uuid), "MC")
+                         .inner_join("rocpd_event", "E", "MC.event_id = E.id")
+                         .left_join("rocpd_sample", "S", "S.event_id = MC.event_id");
+
+        initialize_timeline_event_variants(base, "MC", m_memory_copy_statements);
     }
 
     std::shared_ptr<database> m_database;
@@ -728,9 +825,9 @@ private:
     code_object_info_statement_func_t   m_code_object_info_statement;
     pmc_info_statement_func_t           m_pmc_info_statement;
 
-    timeline_event_statement_func_t m_kernel_dispatch_timeline_event_statement;
-    timeline_event_statement_func_t m_region_timeline_event_statement;
-    timeline_event_statement_func_t m_memory_copy_timeline_event_statement;
-    timeline_event_statement_func_t m_memory_allocate_timeline_event_statement;
+    timeline_event_statement_set m_region_statements;
+    timeline_event_statement_set m_kernel_dispatch_statements;
+    timeline_event_statement_set m_memory_allocate_statements;
+    timeline_event_statement_set m_memory_copy_statements;
 };
 }  // namespace rocstorage::data_storage::schema_v3

@@ -81,23 +81,19 @@ reader_types::timeline_event_list_t
 reader_t::get_events_for_track(reader_types::track_info_ptr_t      track,
                                const reader_types::event_filter_t& filter) const
 {
-    (void) track;
-    (void) filter;
-    return {};
+    return m_impl->get_events_for_track(std::move(track), filter);
 }
 
 reader_types::timeline_event_list_t
 reader_t::get_events(const reader_types::event_filter_t& filter) const
 {
-    (void) filter;
-    return {};
+    return m_impl->get_events(filter);
 }
 
 size_t
 reader_t::get_event_count(const reader_types::event_filter_t& filter) const
 {
-    (void) filter;
-    return 0;
+    return m_impl->get_event_count(filter);
 }
 
 std::optional<reader_types::region_data_t>
