@@ -28,6 +28,7 @@
 #include "rocshmem/rocshmem.hpp"
 #include <dlfcn.h>
 #include <sys/utsname.h>
+#include <cstring>
 
 namespace rocshmem {
 
