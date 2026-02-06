@@ -451,10 +451,12 @@ between threads in a workgroup.
 
    Local data share organization and SIMD connections
 
-**Organization**: The LDS contains 32 banks, each 4-bytes wide, providing 128
-bytes per cycle total bandwidth. Banks can be accessed independently each cycle
-for reads, writes, and/or atomic operations. The SIMDs connect to the LDS in
-pairs, with each pair sharing a 64-byte bidirectional port.
+**Organization**: The LDS contains 32 (CDNA, CDNA2, and CDNA3) or 64 (CDNA4+ and
+RDNA2+) banks, each 4-bytes wide, providing 128 (CDNA, CDNA2, and CDNA3) or 256
+(CDNA4+ and RDNA2+) bytes per cycle total bandwidth. Banks can be accessed
+independently each cycle for reads, writes, and/or atomic operations. The SIMDs
+connect to the LDS in pairs, with each pair sharing a 64-byte bidirectional
+port.
 
 **Access patterns**: A single wavefront can achieve up to 64 bytes per cycle
 throughput (16 lanes per cycle). The actual bandwidth depends on data size and
