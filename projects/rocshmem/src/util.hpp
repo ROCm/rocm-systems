@@ -80,7 +80,7 @@ namespace rocshmem {
 
 /**
  * @name CHECK_HIP
- * @brief Checks if HIP command succeeded. If it is not not success then it exits the program.
+ * @brief Checks if HIP command succeeded. If it is not success then it exits the program.
  *
  * @param[in] instr    HIP function to run and check
  *
