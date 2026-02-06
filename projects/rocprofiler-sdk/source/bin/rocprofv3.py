@@ -123,29 +123,59 @@ def strtobool(val):
         raise ValueError(f"invalid truth value {val} (type={val_type})")
 
 
-def get_mpi_rank():
-    """Detect MPI rank from various MPI implementation environment variables.
-    Returns the rank as an integer, or None if not running under MPI.
+def get_mpi_rank_and_size(custom_rank_env=None, custom_size_env=None):
+    """Detect MPI rank and size from the same MPI implementation's environment variables.
+
+    This ensures that rank and size come from the same source (e.g., both from OpenMPI,
+    not mixing OpenMPI rank with SLURM size).
+
+    Args:
+        custom_rank_env: Optional custom environment variable name for rank detection.
+        custom_size_env: Optional custom environment variable name for size detection.
+
+    Returns:
+        Tuple of (rank, size) as integers, or (None, None) if not running under MPI.
     """
+    # If custom environment variables are specified, use them exclusively
+    if custom_rank_env is not None and custom_size_env is not None:
+        rank = int(os.environ[custom_rank_env]) if custom_rank_env in os.environ else None
+        size = int(os.environ[custom_size_env]) if custom_size_env in os.environ else None
+        return (rank, size)
+
+    # Try each MPI implementation in order, ensuring both rank and size come from the same source
     # OpenMPI
-    if "OMPI_COMM_WORLD_RANK" in os.environ:
-        return int(os.environ["OMPI_COMM_WORLD_RANK"])
+    if "OMPI_COMM_WORLD_RANK" in os.environ and "OMPI_COMM_WORLD_SIZE" in os.environ:
+        return (
+            int(os.environ["OMPI_COMM_WORLD_RANK"]),
+            int(os.environ["OMPI_COMM_WORLD_SIZE"]),
+        )
+
     # MVAPICH2
-    elif "MV2_COMM_WORLD_RANK" in os.environ:
-        return int(os.environ["MV2_COMM_WORLD_RANK"])
-    # SLURM
-    elif "SLURM_PROCID" in os.environ:
-        return int(os.environ["SLURM_PROCID"])
+    if "MV2_COMM_WORLD_RANK" in os.environ and "MV2_COMM_WORLD_SIZE" in os.environ:
+        return (
+            int(os.environ["MV2_COMM_WORLD_RANK"]),
+            int(os.environ["MV2_COMM_WORLD_SIZE"]),
+        )
+
+    # SLURM (try SLURM_PROCID with both SLURM_NPROCS and SLURM_NTASKS)
+    if "SLURM_PROCID" in os.environ:
+        if "SLURM_NPROCS" in os.environ:
+            return (int(os.environ["SLURM_PROCID"]), int(os.environ["SLURM_NPROCS"]))
+        elif "SLURM_NTASKS" in os.environ:
+            return (int(os.environ["SLURM_PROCID"]), int(os.environ["SLURM_NTASKS"]))
+
     # PMI (used by some MPI implementations)
-    elif "PMI_RANK" in os.environ:
-        return int(os.environ["PMI_RANK"])
+    if "PMI_RANK" in os.environ and "PMI_SIZE" in os.environ:
+        return (int(os.environ["PMI_RANK"]), int(os.environ["PMI_SIZE"]))
+
     # Flux
-    elif "FLUX_TASK_RANK" in os.environ:
-        return int(os.environ["FLUX_TASK_RANK"])
-    # MPICH
-    elif "PMI_ID" in os.environ:
-        return int(os.environ["PMI_ID"])
-    return None
+    if "FLUX_TASK_RANK" in os.environ and "FLUX_JOB_SIZE" in os.environ:
+        return (int(os.environ["FLUX_TASK_RANK"]), int(os.environ["FLUX_JOB_SIZE"]))
+
+    # MPICH (PMI_ID is rank-like, but no corresponding size variable in this check)
+    # Skip this to avoid returning incomplete information
+
+    return (None, None)
 
 
 def parse_rank_specification(rank_spec):
@@ -181,11 +211,15 @@ def parse_rank_specification(rank_spec):
     return ranks
 
 
-def should_rank_provide_output(mpi_ranks_spec=None):
+def should_rank_provide_output(
+    mpi_ranks_spec=None, custom_rank_env=None, custom_size_env=None
+):
     """Check if the current MPI rank should provide profile/trace output.
     Args:
         mpi_ranks_spec: String specification of ranks (e.g., "0-3,8,10-15")
                        If None, all ranks provide output (default behavior).
+        custom_rank_env: Optional custom environment variable name for rank detection.
+        custom_size_env: Optional custom environment variable name for world size detection.
     Returns:
         True if this rank should provide output, False otherwise.
     """
@@ -193,7 +227,8 @@ def should_rank_provide_output(mpi_ranks_spec=None):
     if not mpi_ranks_spec:
         return True
 
-    current_rank = get_mpi_rank()
+    # Get both rank and size from the same source
+    current_rank, world_size = get_mpi_rank_and_size(custom_rank_env, custom_size_env)
 
     # If we can't detect the rank, assume we should provide output
     if current_rank is None:
@@ -201,6 +236,15 @@ def should_rank_provide_output(mpi_ranks_spec=None):
 
     # Parse the rank specification
     selected_ranks = parse_rank_specification(mpi_ranks_spec)
+
+    # Validate that selected ranks are within the valid range
+    if world_size is not None and selected_ranks:
+        max_selected_rank = max(selected_ranks)
+        if max_selected_rank >= world_size:
+            fatal_error(
+                f"Invalid rank specification: rank {max_selected_rank} is out of range. "
+                f"MPI world size is {world_size} (valid ranks: 0-{world_size-1})"
+            )
 
     # Check if current rank is in the selected set
     return current_rank in selected_ranks
@@ -315,8 +359,8 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
 
 For MPI applications, select specific ranks to provide profile/trace output:
 
-    $ mpirun -n 16 rocprofv3 --hip-trace --mpi-ranks 0-3,8 -- ./mympiapp
-    $ srun -n 32 rocprofv3 --hip-trace --mpi-ranks 0 -- ./myapp
+    $ mpirun -n 16 rocprofv3 --hip-trace --profile-mpi-ranks 0-3,8 -- ./mympiapp
+    $ srun -n 32 rocprofv3 --hip-trace --profile-mpi-ranks 0 -- ./myapp
 
 For attachment profiling of running processes:
 
@@ -657,11 +701,25 @@ For attachment profiling of running processes:
     filter_options = parser.add_argument_group("Filtering options")
 
     filter_options.add_argument(
-        "--mpi-ranks",
+        "--profile-mpi-ranks",
         help="Specify which MPI ranks should provide profile/trace output using comma-separated ranges and individual ranks (e.g., '0-3,8,10-15'). If not specified, all ranks provide output. The tool runs on all ranks but only selected ranks generate output files.",
         default=os.environ.get("ROCPROF_MPI_RANKS", None),
         type=str,
         metavar="RANK_SPECIFICATION",
+    )
+    filter_options.add_argument(
+        "--mpi-world-rank-var",
+        help="Specify the environment variable to use for determining the MPI rank (e.g., 'MY_CUSTOM_RANK_VAR'). If not specified, the tool will automatically detect the rank from common MPI environment variables.",
+        default=None,
+        type=str,
+        metavar="ENVIRONMENT_VARIABLE",
+    )
+    filter_options.add_argument(
+        "--mpi-world-size-var",
+        help="Specify the environment variable to use for determining the MPI world size (e.g., 'MY_CUSTOM_SIZE_VAR'). If not specified, the tool will automatically detect the world size from common MPI environment variables.",
+        default=None,
+        type=str,
+        metavar="ENVIRONMENT_VARIABLE",
     )
     filter_options.add_argument(
         "--kernel-include-regex",
@@ -1244,15 +1302,43 @@ def run(app_args, args, **kwargs):
     use_execv = kwargs.get("use_execv", True)
     app_pass = kwargs.get("pass_id", None)
 
+    # Validate custom MPI environment variables
+    # If one custom variable is specified, both must be provided
+    custom_rank_env = (
+        args.mpi_world_rank_var if has_set_attr(args, "mpi_world_rank_var") else None
+    )
+    custom_size_env = (
+        args.mpi_world_size_var if has_set_attr(args, "mpi_world_size_var") else None
+    )
+
+    if (custom_rank_env is not None and custom_size_env is None) or (
+        custom_rank_env is None and custom_size_env is not None
+    ):
+        fatal_error(
+            "When using custom MPI environment variables, "
+            "both --mpi-world-rank-var and --mpi-world-size-var must be specified"
+        )
+
+    # Set MPI_RANK and MPI_SIZE environment variables for use by the C++ code
+    # These variables are used for %rank% and %size% expansion in output paths
+    # Use get_mpi_rank_and_size to ensure rank and size come from the same source
+    mpi_rank, mpi_size = get_mpi_rank_and_size(custom_rank_env, custom_size_env)
+    if mpi_rank is not None:
+        app_env["MPI_RANK"] = str(mpi_rank)
+    if mpi_size is not None:
+        app_env["MPI_SIZE"] = str(mpi_size)
+
     # Check if this MPI rank should provide profile/trace output
     # If not, run the application without profiling instrumentation
-    if has_set_attr(args, "mpi_ranks"):
-        if not should_rank_provide_output(args.mpi_ranks):
-            current_rank = get_mpi_rank()
-            if current_rank is not None and args.log_level in ("info", "trace"):
+    if has_set_attr(args, "profile_mpi_ranks"):
+        if not should_rank_provide_output(
+            args.profile_mpi_ranks, custom_rank_env, custom_size_env
+        ):
+            # We already have mpi_rank from above, just use it for logging
+            if mpi_rank is not None and args.log_level in ("info", "trace"):
                 sys.stderr.write(
-                    f"[rocprofv3] MPI rank {current_rank} not in selected ranks "
-                    f"({args.mpi_ranks}), running application without profiling\n"
+                    f"[rocprofv3] MPI rank {mpi_rank} not in selected ranks "
+                    f"({args.profile_mpi_ranks}), running application without profiling\n"
                 )
                 sys.stderr.flush()
             # Execute application without profiling

@@ -34,7 +34,8 @@ if(MPIRUN_EXECUTABLE)
             $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --hip-trace --kernel-trace
             --output-format csv json -d
             ${CMAKE_CURRENT_BINARY_DIR}/mpi-ranks-trace/rank.%env{OMPI_COMM_WORLD_RANK}%
-            -o out --mpi-ranks 0 ${PRELOAD_ARGS} -- $<TARGET_FILE:simple-transpose>
+            -o out --profile-mpi-ranks 0 ${PRELOAD_ARGS} --
+            $<TARGET_FILE:simple-transpose>
         DEPENDS simple-transpose
         TIMEOUT 120
         LABELS "integration-tests" "mpi-tests"
@@ -50,7 +51,8 @@ if(MPIRUN_EXECUTABLE)
             $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --hip-trace --kernel-trace
             --output-format csv json -d
             ${CMAKE_CURRENT_BINARY_DIR}/mpi-ranks-multiple-trace/rank.%env{OMPI_COMM_WORLD_RANK}%
-            -o out --mpi-ranks 0-1,3 ${PRELOAD_ARGS} -- $<TARGET_FILE:simple-transpose>
+            -o out --profile-mpi-ranks 0-1,3 ${PRELOAD_ARGS} --
+            $<TARGET_FILE:simple-transpose>
         DEPENDS simple-transpose
         TIMEOUT 120
         LABELS "integration-tests" "mpi-tests"
@@ -86,7 +88,7 @@ rocprofiler_add_integration_execute_test(
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --hip-trace --kernel-trace
         --output-format csv json -d ${CMAKE_CURRENT_BINARY_DIR}/no-mpi-trace -o out
-        --mpi-ranks 0 ${PRELOAD_ARGS} -- $<TARGET_FILE:simple-transpose>
+        --profile-mpi-ranks 0 ${PRELOAD_ARGS} -- $<TARGET_FILE:simple-transpose>
     DEPENDS simple-transpose
     TIMEOUT 120
     LABELS "integration-tests"
