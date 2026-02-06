@@ -38,6 +38,9 @@ if(NOT CMAKE_HIP_COMPILER)
 endif()
 
 # Enable HIP as a project language
+# Explicitly control HIP GPU architectures to avoid toolchain-dependent defaults.
+# Using OFF keeps behavior aligned with compiler defaults while remaining deterministic.
+set(CMAKE_HIP_ARCHITECTURES OFF CACHE STRING "HIP GPU architectures for tests" FORCE)
 enable_language(HIP)
 
 # Set HIP compilation flags to match CXX flags
