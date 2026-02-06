@@ -32,7 +32,7 @@ class MemPoolSetAttributeBenchmark : public Benchmark<MemPoolSetAttributeBenchma
     hipMemPoolProps pool_props = CreateMemPoolProps(0, hipMemHandleTypeNone);
     HIP_CHECK(hipMemPoolCreate(&mem_pool, &pool_props));
 
-    int value{0};
+    uint64_t value{0};
 
     TIMED_SECTION(kTimerTypeCpu) { HIP_CHECK(hipMemPoolSetAttribute(mem_pool, attribute, &value)); }
 
