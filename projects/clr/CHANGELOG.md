@@ -2,16 +2,52 @@
 
 Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs.amd.com/projects/HIP/en/latest/index.html)
 
-## HIP 8.0 for ROCm 8.0
+## HIP 7.12 for ROCm 7.12
 
 ### Added
 
 * New HIP APIs
-    - `hipKernelGetParamInfo`   returns the offset and size of a kernel parameter
-* Support for `barrier_arrive` and `barrier_wait` for `grid_group` and `thread_block`.
+    - Cooperative Groups
+      * Support for `barrier` APIs `barrier_arrive` and `barrier_wait` has been added for both `grid_group` and `thread_block` to enable finer‑grained synchronization within cooperative groups
+      * Support for `block_rank` in the class `grid_group`, returns the rank of the block in the calling thread
+    - Dynamic logging, no matching CUDA APIs exist
+      * `hipExtEnableLogging` enables HIP runtime logging
+      * `hipExtDisableLogging` disables HIP runtime logging
+      * `hipExtSetLoggingParams` sets HIP runtime logging parameters
 
-* New HIP supports
-    - `grid_group::block_rank()` returns the rank of the block in the calling thread
+* New HIP enumeration
+    - `hipDeviceAttributeExpertSchedMode` has been added to hipDeviceAttribute_t to indicate whether expert scheduling mode is supported on AMD GPUs
+
+### Resolved issues
+
+* An error that occurred during HIP graph stream capture in thread‑local capture mode has been fixed. The HIP runtime now updates its validation logic to ensure that captures running in other threads on different streams no longer invalidate or block the thread‑local capture in the current thread.
+
+### Optimized
+
+* HIP log-level control capabilities HIP runtime adds dynamic logging functionalities, enabling applications to programmatically enable, disable, and configure logging at runtime without modifying environment variables or restarting the application. The result is more precise control over diagnostic output, making it easier to debug targeted code paths or minimize log noise during performance‑critical execution.
+
+## HIP 7.11 for ROCm 7.11
+
+### Added
+
+* New HIP API
+    - `hipKernelGetParamInfo` returns the offset and size of a kernel parameter.
+* New HIP flag
+    - `HIP_POINTER_ATTRIBUTE_IS_LEGACY_HIP_IPC_CAPABLE` is now supported in the `hipPointerGetAttribute` API, providing parity with the equivalent CUDA attribute.
+
+### Resolved issues
+
+* A bug in inter‑GPU copy operations has been fixed by ensuring that the SDMA engine allocator is always queried for inter‑GPU transfers instead of reusing a previously cached engine. Because the allocator applies specialized logic to choose high‑bandwidth engines for each source–destination agent pair, reusing an engine selected for a different copy type could lead to reduced performance or incorrect behavior.
+* An error in `hipMemRangeGetAttribute` that occurred when memory was allocated with `hipMallocAsync` has been resolved. The HIP runtime now correctly handles coherency‑range mode for memory‑pool pointers in the ROCm device implementation.
+* A race condition in the packet batch‑write logic has been fixed, where the Command Processor (CP) fetcher could read malformed packets. The update now invalidates all packet headers before writing packet bodies and then validates the headers in a defined order to prevent the fetcher from accessing incomplete packets.
+* A deadlock that occurred when `hipMallocAsync` was used after launching a persistent or long‑running kernel in another stream has been resolved. The HIP runtime now removes the default‑stream wait during mapping operations, preventing the stall.
+* An incorrect granularity value returned for device memory when requesting the recommended granularity through the `hipMemGetAllocationGranularity` API has been fixed.
+
+### Optimized
+
+* HIP runtime implemented a global SDMA engine allocator with per‑stream affinity to improve memory copy performance.
+* Packet batch‑dispatch optimization: A new graph‑segment scheduling mechanism has been added to the HIP runtime to reduce CPU overhead during HIP graph launches. It uses hierarchical path discovery to construct execution segments that can be dispatched efficiently in parallel, replacing the traditional topological‑ordering approach.
+* Improved `hipGraphLaunch` parallelism for complex data‑parallel graphs. The HIP runtime now eliminates recursion, applies topological ordering, and removes an extra loop in `hipGraphLaunch` to streamline execution.
 
 ## HIP 7.2 for ROCm 7.2
 

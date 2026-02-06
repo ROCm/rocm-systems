@@ -249,9 +249,9 @@
   s_getreg_b32      ttmp2, hwreg(HW_REG_EXCP_FLAG_PRIV)     // EXCP_FLAG_PRIV.b10=stochastic_sample_trap
   s_bitcmp1_b32     ttmp2, SQ_WAVE_EXCP_FLAG_PRIV_PERF_SNAPSHOT // Test Performance Snapshot bit.
 
-  s_cbranch_scc0    .handle_sw_trap                       // If not Stochastic, continue to check trap ID
+  s_cbranch_scc0    .handle_sw_trap                         // If not Stochastic, continue to check trap ID
 
-  s_load_b64           ttmp[14:15], ttmp[14:15], 0x8, scope:SCOPE_CU         // ttmp[14:15]=*stoch_trap_buf
+  s_load_b64        ttmp[14:15], ttmp[14:15], 0x8, scope:SCOPE_CU  // ttmp[14:15]=*stoch_trap_buf
   s_wait_kmcnt      0
 
   s_bitset1_b32     ttmp13, TTMP13_STOCH_FLAG_BIT           // set bit 21 in TTMP13
@@ -264,7 +264,7 @@
   // Extract TrapID from ttmp1 (which contains PC_HI).
   // Branch if not a trap (an exception instead).
   s_bfe_u32         ttmp2, ttmp1, SQ_WAVE_PC_HI_TRAP_ID_BFE // ttmp2 = TrapID
-  s_cbranch_scc0       .check_exceptions			             // If TrapID is 0, it's an exception, so branch.
+  s_cbranch_scc0    .check_exceptions			                  // If TrapID is 0, it's an exception, so branch.
 
   // If caused by s_trap then advance PC, then figure out the trap ID:
   // - if trapID is DEBUGTRAP and debugger is attach, report WAVE_TRAP,

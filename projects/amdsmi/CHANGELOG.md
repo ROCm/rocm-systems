@@ -8,6 +8,20 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Added
 
+- **Added `--hex` flag to `amd-smi bad-pages` command**.  
+  - Added `--hex` option to display page addresses and sizes in hexadecimal format with `0x` prefix
+
+  ```console
+  $ amd-smi bad-pages --hex
+  GPU: 0
+      RETIRED:
+          PAGE_ADDRESS: 0x7f8000
+          PAGE_SIZE: 0x1000
+          STATUS: RESERVED
+      PENDING: N/A
+      UN_RES: N/A
+   ```
+
 - **Added Power Profile set/get/reset to amd-smi CLI**.  
   - New `amd-smi static --profile` command to display current and available power profiles.
   - New `amd-smi set --profile <PROFILE>` command to set the power profile.
