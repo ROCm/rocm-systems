@@ -791,10 +791,11 @@ namespace rocshmem
       isInitialized = true;
     }
 
-    DPRINTF("GPU Device id: %d closest NIC id : %d name: %s\n", gpuIndex, closestNicId[gpuIndex],
-           ibvDeviceList[closestNicId[gpuIndex]].name.c_str());
-    if (dev_name != nullptr && closestNicId[gpuIndex] != -1) {
-      *dev_name = strdup(ibvDeviceList[closestNicId[gpuIndex]].name.c_str());
+    int closestIdx = closestNicId[gpuIndex];
+    DPRINTF("GPU Device id: %d closest NIC id : %d name: %s\n", gpuIndex, closestIdx,
+           (-1 != closestIdx)? ibvDeviceList[closestIdx].name.c_str(): "none-found");
+    if (dev_name != nullptr && closestIdx != -1) {
+      *dev_name = strdup(ibvDeviceList[closestIdx].name.c_str());
     }
 
     return closestNicId[gpuIndex];
