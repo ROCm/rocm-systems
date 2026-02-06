@@ -4,7 +4,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ***All information listed below is for reference and subject to change.***
 
-## amd_smi_lib for ROCm 7.11.0
+## amd_smi_lib for ROCm 7.12.0
 
 ### Added
 
@@ -60,6 +60,50 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Added `os_kernel_version` to `amd-smi static --driver` and `amd-smi` output**.  
   - Displays the Linux kernel version from `os.uname().release`.
 
+### Changed
+
+- N/A
+
+### Removed
+
+- **Removed `amd-smi reset --reload-driver` option from CLI only.**
+  - Use modprobe to reload driver, e.g.,
+
+  ```console
+  sudo modprobe -r amdgpu
+  sudo modprobe amdgpu
+  ```
+
+  - For historical reference; this option has been removed [<i><b>Separated driver reload from `amdsmi_set_gpu_memory_partition()` / `amdsmi_set_gpu_memory_partition_mode()` and CLI (`sudo amd-smi set -M <NPS mode>`)</b></i>](#separate-driver-reload-anchor)
+
+### Optimized
+
+- N/A
+
+### Resolved Issues
+
+- **Fixed `amd-smi set` commands showing an AttributeError when partition attributes are not present**.  
+  - Resolved `AttributeError: 'Namespace' object has no attribute 'compute_partition'` error
+  - Now using safe `getattr()` access pattern for optional arguments in set_gpu function
+
+## amd_smi_lib for ROCm 7.11.0
+
+### Added
+
+- **Added `--hex` flag to `amd-smi bad-pages` command**.  
+  - Added `--hex` option to display page addresses and sizes in hexadecimal format with `0x` prefix
+
+  ```console
+  $ amd-smi bad-pages --hex
+  GPU: 0
+      RETIRED:
+          PAGE_ADDRESS: 0x7f8000
+          PAGE_SIZE: 0x1000
+          STATUS: RESERVED
+      PENDING: N/A
+      UN_RES: N/A
+  ```
+
 - **Added flexible argument ordering for `amd-smi set --power-cap`**.  
   - The `--power-cap` option now accepts arguments in any order, improving usability.
     - Both syntaxes are now supported:
@@ -80,6 +124,52 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
     ...
   ```
 
+- **Added support for CPUISOFreqPolicy and DFCState Control APIs**.  
+  - Set/get CPU ISO frequency policy:
+    - `amd-smi set --cpu-railisofreq-policy (0-1)`
+    - `amd-smi metric --cpu-railisofreq-policy`
+  - Set/get Data Fabric C-state control:
+    - `amd-smi set --cpu-dfcstate-ctrl (0-1)`
+    - `amd-smi metric --cpu-dfcstate-ctrl`
+
+  ```console
+  $amd-smi set --cpu-railisofreq-policy 0
+  CPU: 0
+    CPURAILISO:
+        STATE: Set CPU ISO frequency policy operation successful
+
+  CPU: 1
+    CPURAILISO:
+        STATE: Set CPU ISO frequency policy operation successful
+
+  $amd-smi metric --cpu-railisofreq-policy
+  CPU: 0
+    CPURAILISO:
+        CPURAILISOFREQ_POLICY: 0
+
+  CPU: 1
+    CPURAILISO:
+        CPURAILISOFREQ_POLICY: 0
+
+  $amd-smi set --cpu-dfcstate-ctrl 0
+  CPU: 0
+    DFCSTATECTRL:
+        STATE: DFCState control operation successful
+
+  CPU: 1
+    DFCSTATECTRL:
+        STATE: DFCState control operation successful
+
+  $amd-smi metric --cpu-dfcstate-ctrl
+  CPU: 0
+    DFCSTATE:
+        DFCSTATECTRL_STATUS: 0
+
+  CPU: 1
+    DFCSTATE:
+        DFCSTATECTRL_STATUS: 0
+  ```
+
 ### Changed
 
 - **Modified output file handling options for `--file` argument**.
@@ -90,13 +180,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Removed
 
-- **Removed `amd-smi reset --reload-driver` option from CLI only.**
-  - Use modprobe to reload driver, e.g.,
-  ```bash
-  sudo modprobe -r amdgpu
-  sudo modprobe amdgpu
-  ```
-  - For historical reference; this option has been removed [<i><b>Separated driver reload from `amdsmi_set_gpu_memory_partition()` / `amdsmi_set_gpu_memory_partition_mode()` and CLI (`sudo amd-smi set -M <NPS mode>`)</b></i>](#separate-driver-reload-anchor)
+- N/A
 
 ### Optimized
 
@@ -104,9 +188,8 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Resolved Issues
 
-- **Fixed `amd-smi set` commands showing an AttributeError when partition attributes are not present**.
-  - Resolved `AttributeError: 'Namespace' object has no attribute 'compute_partition'` error
-  - Now using safe `getattr()` access pattern for optional arguments in set_gpu function
+- **Fixed structure mismatch bug in `amdsmi_get_soc_pstate()` and `amdsmi_get_xgmi_plpd()`**.  
+  - This issue caused all policy IDs to display as 0.
 
 ## amd_smi_lib for ROCm 7.2.0
 
@@ -2672,7 +2755,7 @@ GPU: 0
 ### Removed
 
 - **Removed `amd-smi reset --compute-partition` and `... --memory-partition` and associated APIs**.  
-  - This change is part of the partition redesign. Reset functionality will be reintroduced in a later update.
+  - This change is part of the partition redesign.
   - associated APIs include `amdsmi_reset_gpu_compute_partition()` and `amdsmi_reset_gpu_memory_partition()`
 
 - **Removed usage of _validate_positive in Parser and replaced with _positive_int and _not_negative_int as appropriate**.  
