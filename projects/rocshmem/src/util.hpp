@@ -102,13 +102,14 @@ namespace rocshmem {
  * @param[in] cmd HSA function to run and check
  *
  */
-#define CHECK_HSA(cmd)                                                    \
-  do {                                                                    \
-    hsa_status_t error = cmd;                                             \
-    if (error != HSA_STATUS_SUCCESS) {                                    \
-      fprintf(stderr, "error: %d at %s:%d\n", error, __FILE__, __LINE__); \
-      exit(EXIT_FAILURE);                                                 \
-    }                                                                     \
+#define CHECK_HSA(cmd)                                                           \
+  do {                                                                           \
+    hsa_status_t error = cmd;                                                    \
+    if (error != HSA_STATUS_SUCCESS) {                                           \
+      fprintf(stderr, "Error: " #cmd ": %d at RocSHMEM::%s:%d\n",                \
+              error, __FILE__, __LINE__);                                        \
+      exit(EXIT_FAILURE);                                                        \
+    }                                                                            \
 } while (0)
 
 #ifdef DEBUG
