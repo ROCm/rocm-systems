@@ -1429,6 +1429,24 @@ amd::Command* GraphExec::EnqueueSegmentedGraph(hip::Stream* launch_stream,
     if (level_it == segments_per_level_.end()) {
       continue;
     }
+    if (level == 0) {
+      // Synchronize internal streams with launch stream's last command if available
+      amd::Command* launch_last_cmd = launch_stream->getLastQueuedCommand(true);
+      if (launch_last_cmd != nullptr) {
+        amd::Command::EventWaitList launch_wait_list;
+        launch_wait_list.push_back(launch_last_cmd);
+
+        // For each segment at level 0, if it's on a different stream
+        // add a wait marker using enqueueMarker
+        for (int segment_id : level_it->second) {
+          hip::Stream* seg_stream = segment_to_stream[segment_id];
+          if (seg_stream != launch_stream) {
+            enqueueMarker(seg_stream, launch_wait_list);
+          }
+        }
+        launch_last_cmd->release();
+      }
+    }
 
     const auto& segments_at_level = level_it->second;
 
