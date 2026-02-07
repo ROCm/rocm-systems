@@ -32,9 +32,9 @@ from utils.utils import METRIC_ID_RE
 
 # Experimental Feature Registry
 #
-# Adding a new experimental feature ONLY require:
+# Adding a new experimental feature ONLY requires:
 #   1) Adding a new entry here
-#   2) Adding the option to appropriate mode
+#   2) Adding the option to the appropriate mode
 #
 # Promotion to stable = remove entry from this list + update option help.
 
