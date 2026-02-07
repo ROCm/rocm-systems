@@ -30,6 +30,19 @@ from typing import Optional
 
 from utils.utils import METRIC_ID_RE
 
+# Experimental Feature Registry
+#
+# Adding a new experimental feature ONLY require:
+#   1) Adding a new entry here
+#   2) Adding the option to approriate mode
+#
+# Promotion to stable = remove entry from this list + update option help.
+
+EXPERIMENTAL_FEATURES = [
+    # --spatial-multiplexing
+    {"label": "Spatial multiplexing", "flags": ["--spatial-multiplexing"]},
+]
+
 
 def validate_block(value: str) -> str:
     if METRIC_ID_RE.match(value):
@@ -59,6 +72,7 @@ def add_general_group(
     rocprof_compute_home: Path,
     supported_archs: dict[str, str],
     rocprof_compute_version: dict[str, Optional[str]],
+    show_experimental_help: bool = False,
 ) -> None:
     general_group = parser.add_argument_group("General Options")
 
@@ -105,12 +119,34 @@ def add_general_group(
             "-s", "--specs", action="store_true", help="Print system specs and exit."
         )
 
+    general_group.add_argument(
+        "--experimental",
+        action="store_true",
+        default=False,
+        help=(
+            "Enable experimental feature(s):\n"
+            + (
+                (
+                    ""
+                    + "".join(
+                        f"   {f['label']} ({' '.join(f['flags'])})\n"
+                        for f in EXPERIMENTAL_FEATURES
+                    )
+                )
+                if show_experimental_help
+                else ""
+            )
+        ),
+    )
+
 
 def omniarg_parser(
     parser: argparse.ArgumentParser,
     rocprof_compute_home: Path,
     supported_archs: dict[str, str],
     rocprof_compute_version: dict[str, Optional[str]],
+    experimental_enabled: bool = False,
+    show_experimental_help: bool = False,
 ) -> None:
     # -----------------------------------------
     # Parse arguments (dependent on mode)
@@ -119,7 +155,11 @@ def omniarg_parser(
     ## General Command Line Options
     ## ----------------------------
     add_general_group(
-        parser, rocprof_compute_home, supported_archs, rocprof_compute_version
+        parser,
+        rocprof_compute_home,
+        supported_archs,
+        rocprof_compute_version,
+        show_experimental_help,
     )
     parser._positionals.title = "Modes"
     parser._optionals.title = "Help"
@@ -155,7 +195,11 @@ Examples:
     profile_parser._optionals.title = "Help"
 
     add_general_group(
-        profile_parser, rocprof_compute_home, supported_archs, rocprof_compute_version
+        profile_parser,
+        rocprof_compute_home,
+        supported_archs,
+        rocprof_compute_version,
+        show_experimental_help,
     )
     profile_group = profile_parser.add_argument_group("Profile Options")
     roofline_group = profile_parser.add_argument_group("Standalone Roofline Options")
@@ -365,16 +409,6 @@ Examples:
         help="\t\t\tProvide command for profiling after double dash.",
     )
     profile_group.add_argument(
-        "--spatial-multiplexing",
-        type=int,
-        metavar="",
-        nargs="+",
-        dest="spatial_multiplexing",
-        required=False,
-        default=None,
-        help="\t\t\tProvide Node ID and GPU number per node.",
-    )
-    profile_group.add_argument(
         "--format-rocprof-output",
         required=False,
         metavar="",
@@ -548,6 +582,22 @@ Examples:
     #     help="\t\t\tNumber of iterations (DEFAULT: 10)"
     # )
 
+    ## ----------------------------
+    # Experimental Features
+    ## ----------------------------
+
+    if experimental_enabled:
+        profile_group.add_argument(
+            "--spatial-multiplexing",
+            type=int,
+            metavar="",
+            nargs="+",
+            dest="spatial_multiplexing",
+            required=False,
+            default=None,
+            help="\t\t\tEXPERIMENTAL: Provide Node ID and GPU number per node.",
+        )
+
     ## Analyze Command Line Options
     ## ----------------------------
     analyze_parser = subparsers.add_parser(
@@ -572,7 +622,11 @@ Examples:
     analyze_parser._optionals.title = "Help"
 
     add_general_group(
-        analyze_parser, rocprof_compute_home, supported_archs, rocprof_compute_version
+        analyze_parser,
+        rocprof_compute_home,
+        supported_archs,
+        rocprof_compute_version,
+        show_experimental_help,
     )
     analyze_group = analyze_parser.add_argument_group("Analyze Options")
     analyze_advanced_group = analyze_parser.add_argument_group("Advanced Options")
@@ -632,14 +686,6 @@ Examples:
         metavar="",
         nargs="+",
         help="\t\tSpecify GPU id(s) for filtering.",
-    )
-    analyze_group.add_argument(
-        "--spatial-multiplexing",
-        dest="spatial_multiplexing",
-        required=False,
-        default=False,
-        action="store_true",
-        help="\t\tMode of spatial multiplexing.",
     )
     analyze_group.add_argument(
         "--output-format",
@@ -842,3 +888,16 @@ Examples:
             "Enable it without node names means ALL."
         ),
     )
+
+    ## ----------------------------
+    # Experimental Features
+    ## ----------------------------
+    if experimental_enabled:
+        analyze_group.add_argument(
+            "--spatial-multiplexing",
+            dest="spatial_multiplexing",
+            required=False,
+            default=False,
+            action="store_true",
+            help="\t\tEXPERIMENTAL: Mode of spatial multiplexing.",
+        )
