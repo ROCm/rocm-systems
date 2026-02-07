@@ -586,17 +586,20 @@ Examples:
     # Experimental Features
     ## ----------------------------
 
-    if experimental_enabled:
-        profile_group.add_argument(
-            "--spatial-multiplexing",
-            type=int,
-            metavar="",
-            nargs="+",
-            dest="spatial_multiplexing",
-            required=False,
-            default=None,
-            help="\t\t\tEXPERIMENTAL: Provide Node ID and GPU number per node.",
-        )
+    profile_group.add_argument(
+        "--spatial-multiplexing",
+        type=int,
+        metavar="",
+        nargs="+",
+        dest="spatial_multiplexing",
+        required=False,
+        default=None,
+        help=(
+            "\t\t\tEXPERIMENTAL: Provide Node ID and GPU number per node."
+            if experimental_enabled
+            else argparse.SUPPRESS
+        ),
+    )
 
     ## Analyze Command Line Options
     ## ----------------------------
@@ -892,12 +895,15 @@ Examples:
     ## ----------------------------
     # Experimental Features
     ## ----------------------------
-    if experimental_enabled:
-        analyze_group.add_argument(
-            "--spatial-multiplexing",
-            dest="spatial_multiplexing",
-            required=False,
-            default=False,
-            action="store_true",
-            help="\t\tEXPERIMENTAL: Mode of spatial multiplexing.",
-        )
+    analyze_group.add_argument(
+        "--spatial-multiplexing",
+        dest="spatial_multiplexing",
+        required=False,
+        default=False,
+        action="store_true",
+        help=(
+            "\t\tEXPERIMENTAL: Mode of spatial multiplexing."
+            if experimental_enabled
+            else argparse.SUPPRESS
+        ),
+    )
