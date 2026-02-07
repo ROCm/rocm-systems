@@ -34,7 +34,7 @@ from utils.utils import METRIC_ID_RE
 #
 # Adding a new experimental feature ONLY require:
 #   1) Adding a new entry here
-#   2) Adding the option to approriate mode
+#   2) Adding the option to appropriate mode
 #
 # Promotion to stable = remove entry from this list + update option help.
 
