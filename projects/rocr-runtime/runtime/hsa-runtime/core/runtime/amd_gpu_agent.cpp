@@ -417,7 +417,7 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
            {kCodeTrapHandlerV2_12, sizeof(kCodeTrapHandlerV2_12), 2, 4},    // gfx12
            {kCodeTrapHandlerV2_1250, sizeof(kCodeTrapHandlerV2_1250), 2, 4},  // gfx1250 rev 1+
            {kCodeTrapHandlerV2_1250_rev0, sizeof(kCodeTrapHandlerV2_1250_rev0), 2, 4},  // gfx1250 rev 0
-           {NULL, 0, 0, 0},                                                 // gfx13
+           {kCodeTrapHandlerV2_13, sizeof(kCodeTrapHandlerV2_13), 2, 4},    // gfx13
        }},
       {"CopyAligned",
        {
