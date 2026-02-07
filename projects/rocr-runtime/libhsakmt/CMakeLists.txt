@@ -145,7 +145,6 @@ else()
                      "src/dxg/pc_sampling.cpp"
                      "src/dxg/hsakmtmodel.cpp"
                      "src/dxg/events.cpp"
-                     "src/dxg/thunk_proxy/thunk_proxy.cpp"
                      "src/dxg/wddm/device.cpp"
                      "src/dxg/wddm/event.cpp"
                      "src/dxg/wddm/gpu_memory.cpp"
@@ -263,6 +262,9 @@ else()
     if(HAVE_MEMFD_CREATE)
       target_compile_definitions(${HSAKMT_TARGET} PRIVATE -DHAVE_MEMFD_CREATE=1)
     endif()
+  else()
+    ## Link Window Kernel Mode Interface
+    target_link_libraries(${HSAKMT_TARGET} ${CMAKE_CURRENT_SOURCE_DIR}/src/dxg/wkmi/win/wkmi.lib)
   endif()
 
   ## Define default paths and packages.
