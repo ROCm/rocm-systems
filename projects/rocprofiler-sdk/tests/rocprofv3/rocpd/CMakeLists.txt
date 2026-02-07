@@ -382,3 +382,121 @@ rocprofiler_add_integration_execute_test(
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
     DISABLED "${MULTIPROC_IS_DISABLED}"
     FIXTURES_REQUIRED rocprofv3-test-rocpd-merge-generation-using-package-multiproc)
+
+#########################################################################################
+#
+# AI analysis module tests
+#
+#########################################################################################
+
+# Test the analyze --help flag works
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-rocpd-analyze-help
+    COMMAND ${Python3_EXECUTABLE} -m rocpd analyze --help
+    DEPENDS rocprofiler-sdk::rocprofv3
+    TIMEOUT 120
+    LABELS "integration-tests;rocpd"
+    ENVIRONMENT "${rocprofv3-rocpd-env}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+# Test standalone module help
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-rocpd-module-analyze-help
+    COMMAND ${Python3_EXECUTABLE} -m rocpd.analyze --help
+    DEPENDS rocprofiler-sdk::rocprofv3
+    TIMEOUT 120
+    LABELS "integration-tests;rocpd"
+    ENVIRONMENT "${rocprofv3-rocpd-env}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+# Test analyze on existing database (removed fixture dependency)
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-rocpd-analyze
+    COMMAND
+        ${Python3_EXECUTABLE} -m rocpd analyze -i
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.db --top-kernels 5
+    DEPENDS rocprofiler-sdk::rocprofv3
+    TIMEOUT 120
+    LABELS "integration-tests;rocpd"
+    ENVIRONMENT "${rocprofv3-rocpd-env}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+# Test analyze with JSON output format (removed fixture dependency)
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-rocpd-analyze-json
+    COMMAND
+        ${Python3_EXECUTABLE} -m rocpd analyze -i
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.db --format json -o
+        analysis_results -d ${CMAKE_CURRENT_BINARY_DIR}/rocpd-analyze-output
+    DEPENDS rocprofiler-sdk::rocprofv3
+    TIMEOUT 120
+    LABELS "integration-tests;rocpd"
+    ENVIRONMENT "${rocprofv3-rocpd-env}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+# Test analyze with custom top-kernels (removed fixture dependency)
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-rocpd-analyze-top-kernels
+    COMMAND
+        ${Python3_EXECUTABLE} -m rocpd analyze -i
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.db --top-kernels 20
+    DEPENDS rocprofiler-sdk::rocprofv3
+    TIMEOUT 120
+    LABELS "integration-tests;rocpd"
+    ENVIRONMENT "${rocprofv3-rocpd-env}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+# Test analyze with custom prompt (no LLM, just metadata) (removed fixture dependency)
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-rocpd-analyze-custom-prompt
+    COMMAND
+        ${Python3_EXECUTABLE} -m rocpd analyze -i
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.db --prompt
+        "Why is this kernel slow?"
+    DEPENDS rocprofiler-sdk::rocprofv3
+    TIMEOUT 120
+    LABELS "integration-tests;rocpd"
+    ENVIRONMENT "${rocprofv3-rocpd-env}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+# Test analyze on multiproc database
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-rocpd-analyze-multiproc
+    COMMAND
+        ${Python3_EXECUTABLE} -m rocpd analyze -i
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data-multiproc/out_mp_0_results.db
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data-multiproc/out_mp_1_results.db
+        --top-kernels 5
+    DEPENDS rocprofiler-sdk::rocprofv3
+    TIMEOUT 120
+    LABELS "integration-tests;rocpd"
+    ENVIRONMENT "${rocprofv3-rocpd-env}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+    DISABLED "${MULTIPROC_IS_DISABLED}"
+    FIXTURES_REQUIRED rocprofv3-test-rocpd-multiproc)
+
+# Test AI analysis Python API import
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-rocpd-ai-analysis-api
+    COMMAND
+        ${Python3_EXECUTABLE} -c
+        "from rocpd.ai_analysis import analyze_database; print('AI analysis API imported successfully')"
+    DEPENDS rocprofiler-sdk::rocprofv3
+    TIMEOUT 120
+    LABELS "integration-tests;rocpd"
+    ENVIRONMENT "${rocprofv3-rocpd-env}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+# Copy test_analyze.py to build directory to avoid conftest.py issues
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/test_analyze.py
+               ${CMAKE_CURRENT_BINARY_DIR}/test_analyze_standalone.py COPYONLY)
+
+# Test analyze unit tests (run from build dir to avoid conftest.py issues)
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-rocpd-analyze-unit-tests
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/test_analyze_standalone.py
+    DEPENDS rocprofiler-sdk::rocprofv3
+    TIMEOUT 120
+    LABELS "integration-tests;rocpd;pytest"
+    ENVIRONMENT "${rocprofv3-rocpd-env}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")

@@ -178,7 +178,8 @@ function(rocprofiler_rocpd_python_bindings _VERSION)
         query.py
         schema.py
         summary.py
-        time_window.py)
+        time_window.py
+        analyze.py)
 
     foreach(_SOURCE ${rocpd_PYTHON_SOURCES})
         configure_file(${CMAKE_CURRENT_LIST_DIR}/${_SOURCE}
@@ -186,6 +187,23 @@ function(rocprofiler_rocpd_python_bindings _VERSION)
         install(
             FILES ${rocpd_PYTHON_OUTPUT_DIRECTORY}/${_SOURCE}
             DESTINATION ${rocpd_PYTHON_INSTALL_DIRECTORY}
+            COMPONENT rocpd)
+    endforeach()
+
+    # Copy ai_analysis directory and its contents (including subdirectories)
+    file(GLOB_RECURSE rocpd_AI_ANALYSIS_FILES
+         "${CMAKE_CURRENT_LIST_DIR}/ai_analysis/*.py"
+         "${CMAKE_CURRENT_LIST_DIR}/ai_analysis/*.md"
+         "${CMAKE_CURRENT_LIST_DIR}/ai_analysis/README.md")
+
+    foreach(_AI_FILE ${rocpd_AI_ANALYSIS_FILES})
+        file(RELATIVE_PATH _REL_PATH "${CMAKE_CURRENT_LIST_DIR}" "${_AI_FILE}")
+        get_filename_component(_REL_DIR "${_REL_PATH}" DIRECTORY)
+        configure_file(${_AI_FILE}
+                       ${rocpd_PYTHON_OUTPUT_DIRECTORY}/${_REL_PATH} COPYONLY)
+        install(
+            FILES ${rocpd_PYTHON_OUTPUT_DIRECTORY}/${_REL_PATH}
+            DESTINATION ${rocpd_PYTHON_INSTALL_DIRECTORY}/${_REL_DIR}
             COMPONENT rocpd)
     endforeach()
 

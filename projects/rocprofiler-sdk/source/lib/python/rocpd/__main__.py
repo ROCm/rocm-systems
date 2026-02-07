@@ -38,6 +38,7 @@ def main(argv=None, config=None):
 
     """
     import argparse
+    from . import analyze
     from . import csv
     from . import merge
     from . import otf2
@@ -124,6 +125,24 @@ Example usage:
     $ rocpd summary -i db{0,1}.db --region-categories HIP MARKERS --domain-summary --format html
 
 """
+
+    analyze_examples = """
+
+Example usage:
+
+    Analyze performance of a single database
+    $ rocpd analyze -i db0.db
+
+    Analyze with output to file
+    $ rocpd analyze -i db0.db --format text -d ./output/ -o analysis
+
+    Analyze top 20 kernels instead of default 10
+    $ rocpd analyze -i db{0..3}.db --top-kernels 20
+
+    Analyze with custom prompt (for future LLM integration)
+    $ rocpd analyze -i db0.db --prompt "Why is my application slow?"
+
+"""
     input_help_string = "Input path and filename to one or more database(s). Wildcards accepted, as well as .rpdb folders"
 
     # Add the subparsers
@@ -193,6 +212,14 @@ Example usage:
         epilog=summary_examples,
     )
 
+    analyzer = subparsers.add_parser(
+        "analyze",
+        description="Analyze GPU performance traces with AI-powered insights",
+        allow_abbrev=False,
+        formatter_class=argparse.RawTextHelpFormatter,
+        epilog=analyze_examples,
+    )
+
     def get_output_type(val):
         return val.lower().replace("perfetto", "pftrace")
 
@@ -213,6 +240,7 @@ Example usage:
     add_required_args(packager)
     add_required_args(query_reporter)
     add_required_args(generate_summary)
+    add_required_args(analyzer)
 
     # converter: add args from any sub-modules
     process_converter_args = []
@@ -242,6 +270,12 @@ Example usage:
     process_generate_summary_args.append(output_config.add_args(generate_summary))
     process_generate_summary_args.append(summary.add_args(generate_summary))
     process_generate_summary_args.append(time_window.add_args(generate_summary))
+
+    # analyze: subparser args
+    process_analyzer_args = []
+    process_analyzer_args.append(output_config.add_args(analyzer))
+    process_analyzer_args.append(analyze.add_args(analyzer))
+    process_analyzer_args.append(time_window.add_args(analyzer))
 
     # parse the command line arguments
     args = parser.parse_args(argv)
@@ -354,6 +388,23 @@ Example usage:
             summary_args.update(pitr(input, args))
 
         summary.generate_all_summaries(input, **summary_args)
+
+    # if the user requested AI analysis, execute the analyzer
+    elif args.command == "analyze":
+        # construct the rocpd import data object
+        input = RocpdImportData(
+            args.input,
+            automerge_limit=getattr(
+                args, "automerge_limit", package.IDEAL_NUMBER_OF_DATABASE_FILES
+            ),
+        )
+
+        # analyzer subparser args
+        analyzer_args = {}
+        for pitr in process_analyzer_args:
+            analyzer_args.update(pitr(input, args))
+
+        analyze.execute(input, **analyzer_args)
 
     print("Done. Exiting...")
 
