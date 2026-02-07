@@ -982,6 +982,10 @@ core::Blit* GpuAgent::CreateBlitSdma(bool use_xgmi, int rec_eng) {
       }
       copy_size_override = copy_size_overrides[1];
       break;
+    case 13:
+      sdma = new BlitSdmaV6();
+      copy_size_override = copy_size_overrides[1];
+      break;
     default:
       assert(false && "Unexpected device major version.");
       return nullptr;

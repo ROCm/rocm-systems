@@ -81,6 +81,7 @@ const unsigned int SDMA_MEMORY_SCOPE_DEV = 2; /* device scope */
 const unsigned int SDMA_MEMORY_SCOPE_SYS = 3; /* system scope */
 
 // clang-format off
+// Copy Linear pre-GFX13
 typedef struct SDMA_PKT_COPY_LINEAR_TAG {
   union {
     struct {
@@ -148,6 +149,77 @@ typedef struct SDMA_PKT_COPY_LINEAR_TAG {
 
   static const size_t kMaxSize_ = 0x3fffe0;
 } SDMA_PKT_COPY_LINEAR;
+
+// Copy Linear for GFX13
+typedef struct SDMA_PKT_COPY_LINEAR_GFX13_TAG {
+  union {
+    struct {
+      unsigned int op : 8;
+      unsigned int sub_op : 8;
+      unsigned int reserved_0 : 12;
+      unsigned int npd : 1;
+      unsigned int reserved_1 : 3;
+    };
+    unsigned int DW_0_DATA;
+  } HEADER_UNION;
+
+  union {
+    struct {
+      unsigned int count : 30;
+      unsigned int reserved_0 : 2;
+    };
+    unsigned int DW_1_DATA;
+  } COUNT_UNION;
+
+  union {
+    struct {
+      unsigned int reserved_0 : 18;
+      unsigned int dst_scope : 2;
+      unsigned int dst_temporal_hint : 3;
+      unsigned int reserved_1 : 3;
+      unsigned int src_scope : 2;
+      unsigned int src_temporal_hint : 3;
+      unsigned int reserved_2 : 1;
+    };
+    unsigned int DW_2_DATA;
+  } PARAMETER_UNION;
+
+  union {
+    struct {
+      unsigned int unused:32;
+    };
+    unsigned int DW_3_DATA;
+  } COMPRESSION_UNION;
+
+  union {
+    struct {
+      unsigned int src_addr_31_0 : 32;
+    };
+    unsigned int DW_4_DATA;
+  } SRC_ADDR_LO_UNION;
+
+  union {
+    struct {
+      unsigned int src_addr_63_32 : 32;
+    };
+    unsigned int DW_5_DATA;
+  } SRC_ADDR_HI_UNION;
+
+  union {
+    struct {
+      unsigned int dst_addr_31_0 : 32;
+    };
+    unsigned int DW_6_DATA;
+  } DST_ADDR_LO_UNION;
+
+  union {
+    struct {
+      unsigned int dst_addr_63_32 : 32;
+    };
+    unsigned int DW_7_DATA;
+  } DST_ADDR_HI_UNION;
+
+} SDMA_PKT_COPY_LINEAR_GFX13;
 
 // linear copy (broadcast) packet (SDMA5.2+)
 typedef struct SDMA_PKT_COPY_LINEAR_BROADCAST_TAG {
