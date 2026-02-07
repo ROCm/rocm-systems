@@ -1,6 +1,6 @@
-#
-#
-#
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
+
 cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 
 find_package(HIP QUIET)
