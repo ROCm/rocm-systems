@@ -304,6 +304,11 @@ hipError_t hipMemMap(void* ptr, size_t size, size_t offset, hipMemGenericAllocat
   cmd->awaitCompletion();
   cmd->release();
 
+  // Ensure the mapping is fully visible at HSA layer before returning.
+  // This prevents race conditions where subsequent hipMemSetAccess calls
+  // may not find the mapped handle in sequential allocation scenarios.
+  queue.finish();
+
   HIP_RETURN(hipSuccess);
 }
 
