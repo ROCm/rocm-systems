@@ -72,8 +72,9 @@ MERGED_ELF="$OUTPUT_DIR/merged_device.elf"
 FATBIN="$OUTPUT_DIR/merged.hipfb"
 FINAL_OBJ="$OUTPUT_DIR/dispatcher_final.o"
 
-# Specialized kernel directory (from CMake build)
-SPECIALIZED_OBJ_DIR="$BUILD_DIR/specialized_objs"
+# Specialized kernel directory (from CMake OBJECT library output)
+# CMake preserves source directory structure, so specialized kernels are in hipify/gensrc/specialized/
+SPECIALIZED_OBJ_DIR="$BUILD_DIR/CMakeFiles/specialized_kernels_device.dir/hipify/gensrc/specialized"
 
 # Host table for funcId mapping
 HOST_TABLE="$HIPIFY_DIR/gensrc/host_table.cpp"
@@ -152,64 +153,15 @@ SYS_INCLUDES=(
     "-internal-externc-isystem" "/usr/include"
 )
 
-# Step 1: Compile dispatcher device code
-echo "Step 1: Compiling device code..."
-# Derive ISA version from GPU target (e.g., gfx950 -> 950)
-ISA_VERSION=$(echo "$GPU_TARGET" | sed 's/gfx//')
-$CLANG -cc1 \
-    -triple amdgcn-amd-amdhsa \
-    -aux-triple x86_64-unknown-linux-gnu \
-    -O3 \
-    -emit-obj \
-    -debug-info-kind=line-tables-only \
-    -fcuda-is-device \
-    -fno-threadsafe-statics \
-    -mllvm -amdgpu-internalize-symbols \
-    -fvisibility=hidden \
-    -fapply-global-visibility-to-externs \
-    -aux-target-cpu x86-64 \
-    -mlink-builtin-bitcode "$BITCODE_DIR/ocml.bc" \
-    -mlink-builtin-bitcode "$BITCODE_DIR/ockl.bc" \
-    -mlink-builtin-bitcode "$BITCODE_DIR/oclc_daz_opt_off.bc" \
-    -mlink-builtin-bitcode "$BITCODE_DIR/oclc_unsafe_math_off.bc" \
-    -mlink-builtin-bitcode "$BITCODE_DIR/oclc_finite_only_off.bc" \
-    -mlink-builtin-bitcode "$BITCODE_DIR/oclc_correctly_rounded_sqrt_on.bc" \
-    -mlink-builtin-bitcode "$BITCODE_DIR/oclc_wavefrontsize64_on.bc" \
-    -mlink-builtin-bitcode "$BITCODE_DIR/oclc_isa_version_${ISA_VERSION}.bc" \
-    -mlink-builtin-bitcode "$BITCODE_DIR/oclc_abi_version_600.bc" \
-    -target-cpu $GPU_TARGET \
-    -resource-dir "$CLANG_RESOURCE_DIR" \
-    "${SYS_INCLUDES[@]}" \
-    -include __clang_hip_runtime_wrapper.h \
-    $DEFINES \
-    "${INCLUDES[@]}" \
-    -fhip-new-launch-api \
-    -fgnuc-version=4.2.1 \
-    -fcxx-exceptions -fexceptions \
-    -cuid=$CUID \
-    -fcuda-allow-variadic-functions \
-    -o "$DEVICE_OBJ" \
-    -x hip "$SOURCE"
-
-echo "  Output: $DEVICE_OBJ ($(ls -lh "$DEVICE_OBJ" | awk '{print $5}'))"
-
-# Step 2: Link dispatcher device code
-echo "Step 2: Linking device code..."
-$LLD -flavor gnu \
-    -m elf64_amdgpu \
-    --no-undefined \
-    -shared \
-    -plugin-opt=-amdgpu-internalize-symbols \
-    --lto-partitions=8 \
-    -plugin-opt=mcpu=$GPU_TARGET \
-    -plugin-opt=O3 \
-    --lto-CGO3 \
-    --whole-archive \
-    -o "$DEVICE_ELF" \
-    "$DEVICE_OBJ" \
-    --no-whole-archive
-
-echo "  Output: $DEVICE_ELF ($(ls -lh "$DEVICE_ELF" | awk '{print $5}'))"
+# Steps 1-2: Dispatcher device code compilation is now handled by CMake
+# CMake compiles dispatcher_combined.hip to dispatcher_device.elf using the same
+# compiler driver and flags as the specialized kernels (inheriting from rccl target)
+# Check that CMake has generated the dispatcher device ELF
+if [ ! -f "$DEVICE_ELF" ]; then
+    echo "Error: Dispatcher device ELF not found: $DEVICE_ELF"
+    echo "CMake should have generated this file. Check that dispatcher_device_elf target built successfully."
+    exit 1
+fi
 
 # Step 3: Device linker merges dispatcher + specialized kernels + onerank
 echo "Step 3: Running device linker..."

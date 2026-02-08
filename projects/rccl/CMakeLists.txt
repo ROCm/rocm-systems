@@ -177,21 +177,24 @@ if (BUILD_ADDRESS_SANITIZER)
   SET(GPU_TARGETS "${amdgpu_targets}")
 endif()
 
-# Modify GPU architectures for Device Linker builds by appending ":xnack-:sramecc+"
-# This ensures the device ELF has correct flags matching the target GPUs
-# Note: Most production MI300X systems use xnack- (disabled)
-if (DEVICE_LINKER)
-  SET(amdgpu_targets "")
-  foreach(amdgpu_target IN LISTS GPU_TARGETS)
-    if(NOT amdgpu_target STREQUAL "")
-      # Strip any existing suffixes and add the full spec
-      string(REGEX REPLACE ":.*" "" base_arch "${amdgpu_target}")
-      list(APPEND amdgpu_targets "${base_arch}:xnack-:sramecc+")
-    endif()
-  endforeach()
-  SET(GPU_TARGETS "${amdgpu_targets}")
-  message(STATUS "Device linker: modified GPU_TARGETS to ${GPU_TARGETS}")
-endif()
+# COMMENTED OUT: Modify GPU architectures for Device Linker builds
+# This code was forcing ":xnack-:sramecc+" on all GPU_TARGETS for device linker builds,
+# but there's no similar modification for non-device-linker builds, and it's unclear
+# why this is necessary. The device linker GPU target selection logic (around line 1297)
+# already handles adding these suffixes when needed. Need to verify with RCCL maintainers
+# if this modification is actually required.
+# if (DEVICE_LINKER)
+#   SET(amdgpu_targets "")
+#   foreach(amdgpu_target IN LISTS GPU_TARGETS)
+#     if(NOT amdgpu_target STREQUAL "")
+#       # Strip any existing suffixes and add the full spec
+#       string(REGEX REPLACE ":.*" "" base_arch "${amdgpu_target}")
+#       list(APPEND amdgpu_targets "${base_arch}:xnack-:sramecc+")
+#     endif()
+#   endforeach()
+#   SET(GPU_TARGETS "${amdgpu_targets}")
+#   message(STATUS "Device linker: modified GPU_TARGETS to ${GPU_TARGETS}")
+# endif()
 
 # Check if clang compiler can offload to GPU_TARGETS
 if (COMMAND rocm_check_target_ids)
@@ -1363,15 +1366,24 @@ endif()
 if (DEVICE_LINKER)
   
   set(DEVICE_LINKER_DIR ${CMAKE_CURRENT_SOURCE_DIR}/tools/device_linker)
-  set(SPECIALIZED_OBJ_DIR ${CMAKE_CURRENT_BINARY_DIR}/specialized_objs)
   set(FINAL_DISPATCH_OBJ ${CMAKE_CURRENT_BINARY_DIR}/final_dispatch.o)
   set(HIPCC_COMPILER /opt/rocm/bin/hipcc)
   
-  # Get the first GPU target for device linker
-  list(GET GPU_TARGETS 0 DEVICE_LINKER_GPU_TARGET)
-  string(REGEX REPLACE ":.*" "" DEVICE_LINKER_GPU_BASE "${DEVICE_LINKER_GPU_TARGET}")
-  set(DEVICE_LINKER_BUNDLE_TARGET "hipv4-amdgcn-amd-amdhsa--${DEVICE_LINKER_GPU_BASE}:sramecc+:xnack-")
-  message(STATUS "Device linker target: ${DEVICE_LINKER_GPU_TARGET} (bundle: ${DEVICE_LINKER_BUNDLE_TARGET})")
+  # COMMENTED OUT: Get the GPU target for device linker
+  # BUILD_LOCAL_GPU_TARGET_ONLY already sets DEFAULT_GPUS via rocm_local_targets() (line 82),
+  # and GPU_TARGETS is set from DEFAULT_GPUS (line 89), so this code is redundant.
+  # if(BUILD_LOCAL_GPU_TARGET_ONLY AND DEFINED DEFAULT_GPUS)
+  #   list(GET DEFAULT_GPUS 0 DEVICE_LINKER_GPU_TARGET)
+  #   # Add device linker suffix if not already present
+  #   string(REGEX REPLACE ":.*" "" base_arch "${DEVICE_LINKER_GPU_TARGET}")
+  #   set(DEVICE_LINKER_GPU_TARGET "${base_arch}:xnack-:sramecc+")
+  # else()
+  #   # Use first target from GPU_TARGETS (which already has device linker suffixes applied)
+  #   list(GET GPU_TARGETS 0 DEVICE_LINKER_GPU_TARGET)
+  # endif()
+  # string(REGEX REPLACE ":.*" "" DEVICE_LINKER_GPU_BASE "${DEVICE_LINKER_GPU_TARGET}")
+  # set(DEVICE_LINKER_BUNDLE_TARGET "hipv4-amdgcn-amd-amdhsa--${DEVICE_LINKER_GPU_BASE}:sramecc+:xnack-")
+  # message(STATUS "Device linker target: ${DEVICE_LINKER_GPU_TARGET} (bundle: ${DEVICE_LINKER_BUNDLE_TARGET})")
   
   # Build the device_linker tool itself
   # Use AOMP LLVM for proper DWARF handling
@@ -1394,49 +1406,158 @@ if (DEVICE_LINKER)
     RUNTIME_OUTPUT_DIRECTORY ${DEVICE_LINKER_DIR}
   )
   
-  # Create directory for specialized kernel objects
-  file(MAKE_DIRECTORY ${SPECIALIZED_OBJ_DIR})
+  # Step 1: Compile specialized kernels to device-only objects using CMake OBJECT library
+  # Using --cuda-device-only --offload-arch --no-gpu-bundle-output produces device-only ELF files directly
+  add_library(specialized_kernels_device OBJECT ${SPECIALIZED_KERNEL_FILES})
   
-  # Step 1: Compile specialized kernels separately (NOT linked into rccl)
-  # These .o files are only used by the device linker
-  set(SPECIALIZED_OBJECTS "")
-  foreach(src ${SPECIALIZED_KERNEL_FILES})
-    get_filename_component(name ${src} NAME_WE)
-    set(obj ${SPECIALIZED_OBJ_DIR}/${name}.o)
-    list(APPEND SPECIALIZED_OBJECTS ${obj})
-    # Build compile definitions for specialized kernels
-    # IMPORTANT: These must match host compilation to ensure structure layout agreement
-    set(SPEC_KERNEL_DEFS -DDEVICE_LINKER -DENABLE_FAULT_INJECTION)
-    if(LL128_ENABLED)
-      list(APPEND SPEC_KERNEL_DEFS -DENABLE_LL128)
-    endif()
-    if(ENABLE_WARP_SPEED)
-      list(APPEND SPEC_KERNEL_DEFS -DENABLE_WARP_SPEED)
-    endif()
-    if(DEBUG_PEER_POINTERS)
-      list(APPEND SPEC_KERNEL_DEFS -DDEBUG_PEER_POINTERS)
-    endif()
-    add_custom_command(
-      OUTPUT ${obj}
-      COMMAND ${HIPCC_COMPILER} -c -fPIC -fno-gpu-rdc --offload-device-only --offload-arch=${DEVICE_LINKER_GPU_TARGET}
-              ${SPEC_KERNEL_DEFS}
-              -I${CMAKE_CURRENT_BINARY_DIR}/hipify/src
-              -I${CMAKE_CURRENT_BINARY_DIR}/hipify/src/include
-              -I${CMAKE_CURRENT_BINARY_DIR}/hipify/src/include/nccl_device
-              -I${CMAKE_CURRENT_BINARY_DIR}/hipify/src/include/plugin
-              -I${CMAKE_CURRENT_BINARY_DIR}/hipify/src/device
-              -I${CMAKE_CURRENT_BINARY_DIR}/hipify/gensrc
-              -I${PROJECT_BINARY_DIR}/include
-              ${src} -o ${obj}
-      DEPENDS ${src} hipify_all
-      COMMENT "Compiling specialized kernel (device-only): ${name}"
-    )
-  endforeach()
-  add_custom_target(specialized_kernels DEPENDS ${SPECIALIZED_OBJECTS})
+  # Copy include directories from rccl target
+  get_target_property(RCCL_INCLUDES rccl INCLUDE_DIRECTORIES)
+  if(RCCL_INCLUDES)
+    target_include_directories(specialized_kernels_device PRIVATE ${RCCL_INCLUDES})
+  endif()
+  
+  # Copy compile definitions from rccl target and add device-only defines
+  get_target_property(RCCL_DEFS rccl COMPILE_DEFINITIONS)
+  if(RCCL_DEFS)
+    target_compile_definitions(specialized_kernels_device PRIVATE ${RCCL_DEFS})
+  endif()
+  # Add definitions that may be set after rccl target is created (based on CMake options)
+  # These must match rccl target definitions for structure layout agreement
+  if(FAULT_INJECTION)
+    target_compile_definitions(specialized_kernels_device PRIVATE ENABLE_FAULT_INJECTION)
+  endif()
+  if(LL128_ENABLED)
+    target_compile_definitions(specialized_kernels_device PRIVATE ENABLE_LL128)
+  endif()
+  # Add device linker definition (not in rccl target since it's only for device linker builds)
+  target_compile_definitions(specialized_kernels_device PRIVATE DEVICE_LINKER)
+  
+  # Filter compile options from rccl target for device-only compilation (shared by specialized kernels and dispatcher)
+  # Remove flags that are incompatible with device-only compilation:
+  # - -fno-gpu-rdc (not needed for device-only)
+  # - -Xclang followed by -triple=... (we use --offload-arch instead)
+  # - -mcpu=... (we use --offload-arch instead)
+  # - --offload-arch (we'll add our own)
+  # - -MF, -MD (dependency file flags not compatible with --cuda-device-only)
+  get_target_property(RCCL_OPTS rccl COMPILE_OPTIONS)
+  set(DEVICE_ONLY_OPTS "")
+  set(skip_next false)
+  if(RCCL_OPTS)
+    foreach(opt ${RCCL_OPTS})
+      if(skip_next)
+        set(skip_next false)
+        continue()
+      endif()
+      if(opt MATCHES "^-fno-gpu-rdc$")
+        # Skip this flag
+      elseif(opt MATCHES "^-Xclang$")
+        # Skip -Xclang and check if next is -triple
+        set(skip_next true)
+      elseif(opt MATCHES "^-triple=")
+        # Skip -triple= (shouldn't happen if skip_next worked)
+      elseif(opt MATCHES "^-mcpu=")
+        # Skip -mcpu=
+      elseif(opt MATCHES "^--offload-arch=")
+        # Skip --offload-arch (we'll add our own)
+      elseif(opt MATCHES "^-MF" OR opt MATCHES "^-MD")
+        # Skip dependency file flags (CMake adds these automatically, but they're incompatible)
+        # Note: These are usually added by the build system, not in COMPILE_OPTIONS
+      else()
+        list(APPEND DEVICE_ONLY_OPTS ${opt})
+      endif()
+    endforeach()
+  endif()
+  # Add device-only compilation flags - using --cuda-device-only --offload-arch --no-gpu-bundle-output produces device ELF directly
+  list(GET GPU_TARGETS 0 FIRST_GPU_TARGET)
+  message(STATUS "Setting device-only flags for specialized_kernels_device: --offload-arch=${FIRST_GPU_TARGET}")
+  target_compile_options(specialized_kernels_device PRIVATE 
+    "-x" "hip"
+    "--cuda-device-only"
+    "--offload-arch=${FIRST_GPU_TARGET}"
+    "--no-gpu-bundle-output"
+    "-Wno-unused-command-line-argument"  # CMake automatically adds -MF dependency file flags for OBJECT libraries,
+                                           # but these are ignored/unused during --cuda-device-only compilation
+  )
+  # Also add the filtered options from rccl target
+  if(DEVICE_ONLY_OPTS)
+    target_compile_options(specialized_kernels_device PRIVATE ${DEVICE_ONLY_OPTS})
+  endif()
+  
+  # Ensure specialized kernel sources are generated before compilation
+  add_dependencies(specialized_kernels_device hipify_all)
+  
+  # Use OBJECT library outputs directly where CMake places them
+  # CMake OBJECT libraries output to CMakeFiles/specialized_kernels_device.dir/<source>.o
+  # The device linker will look in this directory
+  add_custom_target(specialized_kernels DEPENDS specialized_kernels_device)
+  
+  # Compile dispatcher device code using CMake (same approach as specialized kernels)
+  # dispatcher_combined.hip includes common.cu.cpp and onerank.cu.cpp
+  set(DEVICE_LINKER_OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/device_linker_output)
+  set(DISPATCHER_SOURCE ${DEVICE_LINKER_DIR}/dispatcher_combined.hip)
+  set(DISPATCHER_DEVICE_ELF ${DEVICE_LINKER_OUTPUT_DIR}/dispatcher_device.elf)
+  
+  # Build compile definitions for dispatcher - must match specialized kernels and rccl target
+  set(DISPATCHER_DEFS -DDEVICE_LINKER)
+  if(FAULT_INJECTION)
+    list(APPEND DISPATCHER_DEFS -DENABLE_FAULT_INJECTION)
+  endif()
+  if(LL128_ENABLED)
+    list(APPEND DISPATCHER_DEFS -DENABLE_LL128)
+  endif()
+  if(ENABLE_WARP_SPEED)
+    list(APPEND DISPATCHER_DEFS -DENABLE_WARP_SPEED)
+  endif()
+  if(DEBUG_PEER_POINTERS)
+    list(APPEND DISPATCHER_DEFS -DDEBUG_PEER_POINTERS)
+  endif()
+  if(COLLTRACE)
+    list(APPEND DISPATCHER_DEFS -DENABLE_COLLTRACE)
+  endif()
+  if(PROFILE)
+    list(APPEND DISPATCHER_DEFS -DENABLE_PROFILING)
+  endif()
+  
+  # Get include directories from rccl target and build include flags
+  get_target_property(RCCL_INCLUDES rccl INCLUDE_DIRECTORIES)
+  set(DISPATCHER_INCLUDE_FLAGS "")
+  if(RCCL_INCLUDES)
+    foreach(inc ${RCCL_INCLUDES})
+      list(APPEND DISPATCHER_INCLUDE_FLAGS "-I${inc}")
+    endforeach()
+  endif()
+  
+  # Use the same filtered compile options as specialized kernels (DEVICE_ONLY_OPTS defined above)
+  
+  # Compile dispatcher to device-only ELF using same flags as specialized kernels
+  list(GET GPU_TARGETS 0 FIRST_GPU_TARGET)
+  add_custom_command(
+    OUTPUT ${DISPATCHER_DEVICE_ELF}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${DEVICE_LINKER_OUTPUT_DIR}
+    COMMAND ${CMAKE_CXX_COMPILER}
+            ${DISPATCHER_DEFS}
+            ${DISPATCHER_INCLUDE_FLAGS}
+            ${DEVICE_ONLY_OPTS}
+            -std=c++17
+            -x hip
+            --cuda-device-only
+            --offload-arch=${FIRST_GPU_TARGET}
+            --no-gpu-bundle-output
+            -gline-tables-only
+            -O3
+            -c
+            ${DISPATCHER_SOURCE}
+            -o ${DISPATCHER_DEVICE_ELF}
+    DEPENDS ${DISPATCHER_SOURCE} hipify_all
+    COMMENT "Compiling dispatcher device code: dispatcher_device.elf"
+    VERBATIM
+  )
+  
+  add_custom_target(dispatcher_device_elf DEPENDS ${DISPATCHER_DEVICE_ELF})
   
   # Option B: Build dispatcher using 5-step device linker pipeline
-  # This compiles common.cu separately and merges with specialized kernels
-  set(DEVICE_LINKER_OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/device_linker_output)
+  # Steps 1-2 are now done by CMake (dispatcher_device_elf target above)
+  # Steps 3-5 are done by build_with_device_linker.sh
   set(DISPATCHER_FINAL_OBJ ${DEVICE_LINKER_OUTPUT_DIR}/dispatcher_final.o)
   
   add_custom_command(
@@ -1444,8 +1565,9 @@ if (DEVICE_LINKER)
     COMMAND ${CMAKE_COMMAND} -E make_directory ${DEVICE_LINKER_OUTPUT_DIR}
     COMMAND ${DEVICE_LINKER_DIR}/build_with_device_linker.sh
             ${CMAKE_CURRENT_BINARY_DIR}
-            ${DEVICE_LINKER_GPU_TARGET}
+            ${FIRST_GPU_TARGET}
     DEPENDS 
+      dispatcher_device_elf
       specialized_kernels
       device_linker_tool
       ${DEVICE_LINKER_DIR}/build_with_device_linker.sh
