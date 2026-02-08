@@ -6340,8 +6340,13 @@ private:
         // Write file
         FILE* f = fopen(path.c_str(), "wb");
         if (!f) { fprintf(stderr, "Cannot write %s\n", path.c_str()); return false; }
-        fwrite(out.data(), 1, out.size(), f);
+        size_t written = fwrite(out.data(), 1, out.size(), f);
         fclose(f);
+        if (written != out.size()) {
+            fprintf(stderr, "Error: Failed to write all data to %s (wrote %zu of %zu bytes)\n", 
+                    path.c_str(), written, out.size());
+            return false;
+        }
 
         printf("Wrote %s: %zu bytes\n", path.c_str(), out.size());
         return true;
@@ -6354,7 +6359,7 @@ private:
 
 void printUsage(const char* prog) {
     fprintf(stderr, "Usage: %s -o output.elf --dispatcher dispatcher.elf --host-table table.cpp [--target arch] [--input-dir dir]\n", prog);
-    fprintf(stderr, "  --input-dir: directory containing *.device.o device binaries (not host fat binaries)\n");
+    fprintf(stderr, "  --input-dir: directory containing .o device binaries (not host fat binaries)\n");
 }
 
 int main(int argc, char** argv) {
@@ -6386,15 +6391,21 @@ int main(int argc, char** argv) {
 
     if (output.empty() || dispatcher.empty()) { printUsage(argv[0]); return 1; }
 
-    // Collect input files: expect device-only binaries (*.device.o), not host fat binaries
+    // Collect input files: search for all .o files in the input directory
     if (!input_dir.empty()) {
-        for (const auto& e : fs::directory_iterator(input_dir)) {
-            if (e.path().extension() == ".o" && e.path().string().find(".device.o") != std::string::npos)
+        std::error_code ec;
+        for (const auto& e : fs::directory_iterator(input_dir, ec)) {
+            if (!ec && e.is_regular_file() && e.path().extension() == ".o") {
                 inputs.push_back(e.path().string());
+            }
+        }
+        if (ec) {
+            fprintf(stderr, "Error reading input directory %s: %s\n", input_dir.c_str(), ec.message().c_str());
+            return 1;
         }
         std::sort(inputs.begin(), inputs.end());
         if (inputs.empty()) {
-            fprintf(stderr, "No *.device.o files found in --input-dir. Build specialized kernels as device-only (e.g. compile_specialized_device.sh).\n");
+            fprintf(stderr, "No .o files found in --input-dir (%s). Build specialized kernels as device-only.\n", input_dir.c_str());
             return 1;
         }
     }
@@ -6469,7 +6480,10 @@ int main(int argc, char** argv) {
     auto dot = header_path.rfind('.');
     if (dot != std::string::npos) header_path = header_path.substr(0, dot);
     header_path += "_funcid_names.h";
-    linker.writeFuncIdHeader(header_path);
+    if (!linker.writeFuncIdHeader(header_path)) {
+        fprintf(stderr, "Error: Failed to write funcId header file\n");
+        return 1;
+    }
 
     return 0;
 }
