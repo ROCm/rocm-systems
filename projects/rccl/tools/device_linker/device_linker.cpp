@@ -1102,7 +1102,7 @@ std::pair<std::string, int> demangleFunc(const std::string& mangled) {
 
 class DeviceLinker {
     // Phase 3 (DWARF_LLVM_REWRITE_PLAN): set true to use LLVM emission for merged .debug_* (not implemented yet)
-    static constexpr bool kUsePhase3Emission = true;
+    static constexpr bool kUsePhase3Emission = false;
 public:
     DeviceLinker(const std::string& dispatcher_path) : disp_path_(dispatcher_path) {}
 
@@ -1150,6 +1150,7 @@ public:
     void setFuncIdMap(const std::unordered_map<std::string, FuncIdMapping>& m) { funcid_map_ = m; }
 
     bool link(const std::string& output_path) {
+        fatal_error_ = false;
         printf("=== Pass 1: Collect and Size ===\n");
         if (!collectSections()) return false;
 
@@ -1164,9 +1165,11 @@ public:
             mergeDebugSectionsViaLLVMEmission();
         else
             mergeDebugInfo();
+        if (fatal_error_) return false;
 
         printf("\n=== Pass 3: Patch and Write ===\n");
         patchSections();
+        if (fatal_error_) return false;
 
         return writeOutput(output_path);
     }
@@ -1296,6 +1299,12 @@ private:
     uint64_t rela_addr_ = 0;
     size_t rela_size_ = 0;
     size_t table_spacing_ = 6880;
+
+    bool fatal_error_ = false;
+    void setFatalError(const char* msg = nullptr) {
+        fatal_error_ = true;
+        if (msg) fprintf(stderr, "Error: %s\n", msg);
+    }
 
     // Calculate required LDS size based on GPU architecture
     // Must match the host-side calculation in enqueue.cc: rcclShmemDynamicSize()
@@ -2859,7 +2868,7 @@ private:
         patchDebugLine();
 
         // Build .rela.dyn section with R_AMDGPU_RELATIVE64 relocations
-        buildRelocations();
+        if (!buildRelocations()) return;
     }
 
     // Helper to read ULEB128 value from buffer
@@ -2910,11 +2919,11 @@ private:
                     debug_line_chunks_[i].size = emitted.size();
                     new_line.insert(new_line.end(), emitted.begin(), emitted.end());
                 } else {
-                    // Fallback: copy original chunk unchanged (will be patched by Phase 2 path if we called it)
-                    size_t off = new_line.size();
-                    new_line.insert(new_line.end(), chunk_data, chunk_data + chunk.size);
-                    debug_line_chunks_[i].merged_offset = off;
-                    debug_line_chunks_[i].size = chunk.size;
+                    // Re-emission failed (e.g. unexpected .debug_line format). Do not fall back:
+                    // the copied chunk would have wrong line_strp offsets. Fail so we fix the emitter.
+                    fprintf(stderr, "Error: Re-emitting .debug_line chunk %zu failed (chunk size %zu)\n", i, chunk.size);
+                    setFatalError("emitDebugLineChunk failed; .debug_line format may be unsupported for this input");
+                    return;
                 }
             }
             if (!new_line.empty()) {
@@ -3436,14 +3445,18 @@ private:
                 llvm::object::ObjectFile::createObjectFile(buf->getMemBufferRef());
             if (!obj_or) {
                 llvm::consumeError(obj_or.takeError());
-                continue;
+                setFatalError("LLVM failed to parse debug line chunk (see above for details)");
+                return;
             }
             std::unique_ptr<llvm::object::ObjectFile> obj = std::move(obj_or.get());
             std::unique_ptr<llvm::DWARFContext> ctx =
                 llvm::DWARFContext::create(*obj, llvm::DWARFContext::ProcessDebugRelocations::Ignore,
                                             nullptr, "", llvm::WithColor::defaultErrorHandler,
                                             llvm::WithColor::defaultWarningHandler, false);
-            if (!ctx) continue;
+            if (!ctx) {
+                setFatalError("LLVM failed to create DWARF context for debug line chunk");
+                return;
+            }
 
             bool has_unit = false;
             const llvm::DWARFDebugLine::LineTable* line_table = nullptr;
@@ -3494,8 +3507,8 @@ private:
                             if (new_val >= line_str_size) {
                                 out_of_bounds++;
                                 if (out_of_bounds <= 3)  // cap noise
-                                    printf("  warning: .debug_line chunk %zu line_strp 0x%x + base 0x%zx = 0x%x exceeds .debug_line_str size %zu\n",
-                                           chunk_idx, old_val, chunk.str_offset_base, new_val, line_str_size);
+                                    fprintf(stderr, "Error: .debug_line chunk %zu line_strp 0x%x + base 0x%zx = 0x%x exceeds .debug_line_str size %zu\n",
+                                            chunk_idx, old_val, chunk.str_offset_base, new_val, line_str_size);
                                 new_val = (line_str_size > 0) ? (uint32_t)(line_str_size - 1) : 0;
                             }
                             memcpy(const_cast<uint8_t*>(p), &new_val, 4);
@@ -3530,7 +3543,8 @@ private:
             printf("  Patched %d DWARF5 string offsets in .debug_line (Phase 2: LLVM-validated)\n", total_patched);
         }
         if (out_of_bounds > 0) {
-            printf("  warning: %d line_strp offset(s) would exceed .debug_line_str size (clamped); check chunk str_offset_base / relocations\n", out_of_bounds);
+            fprintf(stderr, "Error: %d line_strp offset(s) would exceed .debug_line_str size (check chunk str_offset_base)\n", out_of_bounds);
+            setFatalError("DWARF .debug_line line_strp offsets out of bounds");
         }
     }
 
@@ -3583,15 +3597,15 @@ private:
         // after layout. It patches .debug_addr addresses and .debug_info CU header offsets.
     }
 
-    void buildRelocations() {
+    bool buildRelocations() {
         // Find the existing .rela.dyn section (created as placeholder)
         SectionInfo* rela_sec = nullptr;
         for (auto& s : sections_) {
             if (s.name == ".rela.dyn") { rela_sec = &s; break; }
         }
         if (!rela_sec) {
-            fprintf(stderr, "Error: .rela.dyn section not found\n");
-            return;
+            setFatalError(".rela.dyn section not found");
+            return false;
         }
 
         // Build R_AMDGPU_RELATIVE64 relocations for function tables (like IFC)
@@ -3656,6 +3670,7 @@ private:
 
         // Now populate .dynamic section with final rela addresses
         populateDynamicSection();
+        return true;
     }
 
     void populateDynamicSection() {
@@ -3974,7 +3989,8 @@ private:
 // ============================================================================
 
 void printUsage(const char* prog) {
-    fprintf(stderr, "Usage: %s -o output.o --dispatcher disp.o --host-table table.cpp [--target arch] [--input-dir dir | files...]\n", prog);
+    fprintf(stderr, "Usage: %s -o output.elf --dispatcher dispatcher.elf --host-table table.cpp [--target arch] [--input-dir dir]\n", prog);
+    fprintf(stderr, "  --input-dir: directory containing *.device.o device binaries (not host fat binaries)\n");
 }
 
 int main(int argc, char** argv) {
@@ -4006,26 +4022,21 @@ int main(int argc, char** argv) {
 
     if (output.empty() || dispatcher.empty()) { printUsage(argv[0]); return 1; }
 
-    // Collect input files
-    bool extract = false;
+    // Collect input files: expect device-only binaries (*.device.o), not host fat binaries
     if (!input_dir.empty()) {
         for (const auto& e : fs::directory_iterator(input_dir)) {
             if (e.path().extension() == ".o" && e.path().string().find(".device.o") != std::string::npos)
                 inputs.push_back(e.path().string());
         }
-        if (inputs.empty()) {
-            extract = true;
-            for (const auto& e : fs::directory_iterator(input_dir)) {
-                std::string n = e.path().filename().string();
-                if (e.path().extension() == ".o" && n.find("specialized_") == 0 && n.find(".device.o") == std::string::npos)
-                    inputs.push_back(e.path().string());
-            }
-        }
         std::sort(inputs.begin(), inputs.end());
+        if (inputs.empty()) {
+            fprintf(stderr, "No *.device.o files found in --input-dir. Build specialized kernels as device-only (e.g. compile_specialized_device.sh).\n");
+            return 1;
+        }
     }
 
     if (inputs.empty()) { fprintf(stderr, "No input files\n"); return 1; }
-    printf("Processing %zu input files\n", inputs.size());
+    printf("Processing %zu device binary input(s)\n", inputs.size());
 
     auto funcid_map = parseHostTable(host_table);
     printf("Loaded %zu funcId mappings\n", funcid_map.size());
@@ -4037,12 +4048,14 @@ int main(int argc, char** argv) {
 
     auto worker = [&](size_t start, size_t end) {
         for (size_t i = start; i < end; i++) {
-            auto data = extract ? extractDeviceCode(inputs[i]) : [&]() {
+            // Inputs are device binaries (.device.o = amdgpu ELF); read directly, no extraction from host fat binary
+            std::vector<uint8_t> data;
+            {
                 MappedFile f(inputs[i]);
-                if (!f.valid()) return std::vector<uint8_t>();
+                if (!f.valid()) { kernels[i] = parseKernel(data); continue; }
                 const uint8_t* p = static_cast<const uint8_t*>(f.data());
-                return std::vector<uint8_t>(p, p + f.size());
-            }();
+                data.assign(p, p + f.size());
+            }
             kernels[i] = parseKernel(data);
 
             std::lock_guard<std::mutex> lock(mtx);
