@@ -1,0 +1,25 @@
+# GDB commands to find where "invalid abbreviation" error is printed
+
+# Method 1: Break on fprintf/stderr writes containing "invalid abbreviation"
+break fprintf
+condition 1 strstr((char*)$rdi, "invalid abbreviation") != 0 || strstr((char*)$rdi, "valid abbreviations") != 0
+
+# Method 2: Break on the warning handler (might catch it)
+break llvmDwarfWarningHandler
+
+# Method 3: Break on error handler
+break llvmDwarfErrorHandler
+
+# Method 4: Search for the string in memory (if it's in a library)
+# rbreak .*invalid.*abbreviation
+
+# Run the program
+run
+
+# When it breaks, get stack trace
+bt
+frame 0
+list
+
+# Continue to see all occurrences
+continue

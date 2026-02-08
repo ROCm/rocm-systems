@@ -141,6 +141,7 @@ consistency across all compilation units.
 | `IFC_VS_DEVICE_LINKER_COMPARISON.md` | Detailed ELF comparison with production build |
 | `BUILD_PROCESS.md` | Build pipeline diagrams and data flow |
 | `DWARF_FIX_PROGRESS.md` | **IN PROGRESS** - DWARF5 line table patching for rocgdb compatibility |
+| `DWARFLINKER_STATUS.md` | **CURRENT WORK** - Status of DWARFLinker integration, debugging "invalid abbreviation" error |
 
 ## Key Source Files
 
