@@ -53,8 +53,15 @@ static std::atomic<bool> g_llvm_dwarf_error{false};
 static void llvmDwarfErrorHandler(llvm::Error e) {
     g_llvm_dwarf_error = true;
     llvm::handleAllErrors(std::move(e), [](const llvm::ErrorInfoBase& ei) {
-        ei.log(llvm::errs());
-        llvm::errs() << "\n";
+        std::string msg_str;
+        llvm::raw_string_ostream msg(msg_str);
+        ei.log(msg);
+        // Always log .debug_str_offsets errors for debugging
+        if (msg_str.find(".debug_str_offsets") != std::string::npos) {
+            fprintf(stderr, "DWARF ERROR: ");
+            ei.log(llvm::errs());
+            llvm::errs() << "\n";
+        }
     });
 }
 static void llvmDwarfWarningHandler(llvm::Error e) {
@@ -76,31 +83,181 @@ struct DwarfAttrPositions {
     std::vector<std::pair<size_t, uint32_t>> addr_base;        // DW_AT_addr_base
     std::vector<std::pair<size_t, uint32_t>> rnglists_base;    // DW_AT_rnglists_base
     std::vector<std::pair<size_t, uint32_t>> stmt_list;        // DW_AT_stmt_list
+    std::vector<std::pair<size_t, uint64_t>> low_pc;           // DW_AT_low_pc (8-byte addresses, DWARF4)
+    std::vector<std::pair<size_t, uint64_t>> high_pc;          // DW_AT_high_pc (when DW_FORM_addr, 8-byte addresses)
 };
 
-// Helper to create a minimal ELF for LLVM parsing
+// Return DWARF version from the first CU in .debug_info (version at offset 4). Returns 0 if invalid/short.
+static uint16_t getDwarfVersionFromDebugInfo(const uint8_t* data, size_t size) {
+    if (data == nullptr || size < 6) return 0;
+    uint16_t version;
+    memcpy(&version, data + 4, 2);
+    return version;
+}
+
+// DWARF5 .debug_str_offsets minimum header: 20 bytes to match compiler output format.
+// unit_length=16 (version 2 + padding 2 + 12 bytes offset entries), version=5.
+// unit_length excludes itself, so: 4 (unit_length) + 16 (version + padding + 12 bytes offsets) = 20 bytes total
+// This matches what the compiler generates for minimal kernels
+static const uint8_t kMinimalStrOffsetsHeader[20] = { 
+    16, 0, 0, 0,  // unit_length = 16
+    5, 0,         // version = 5
+    0, 0,         // padding
+    0, 0, 0, 0,   // offset entries (all zeros - empty .debug_str)
+    0, 0, 0, 0,
+    0, 0, 0, 0
+};
+
+// Minimal .debug_str_offsets size: 20 bytes (one DWARF5 header with offset entries). We pass debug_info with
+// DW_AT_str_offsets_base patched to 8 (patchStrOffsetsBaseToZero) so LLVM reads offsets starting after the header.
+static constexpr size_t kMinimalStrOffsetsSize = 20;
+
+// Helper to create a minimal ELF for LLVM parsing. Includes all necessary DWARF sections
+// so that llvm-dwarfdump --verify passes and readelf works correctly.
 static std::vector<uint8_t> createMinimalElfForDwarf(
     const std::vector<uint8_t>& debug_info,
-    const std::vector<uint8_t>& debug_abbrev) {
+    const std::vector<uint8_t>& debug_abbrev,
+    const std::vector<uint8_t>& debug_str = {},
+    const std::vector<uint8_t>& debug_line = {},
+    const std::vector<uint8_t>& debug_line_str = {},
+    const std::vector<uint8_t>& debug_addr = {}) {
 
     constexpr size_t ELF_HDR_SIZE = sizeof(Elf64_Ehdr);
     constexpr size_t SHDR_SIZE = sizeof(Elf64_Shdr);
-    constexpr size_t NUM_SECTIONS = 4;
+    
+    // Count sections: always have .debug_info, .debug_abbrev, .debug_str_offsets, .debug_str, .shstrtab
+    // Optionally add .debug_line, .debug_line_str, .debug_addr
+    size_t num_sections = 5;  // null, debug_info, debug_abbrev, debug_str_offsets, debug_str
+    if (!debug_line.empty()) num_sections++;
+    if (!debug_line_str.empty()) num_sections++;
+    if (!debug_addr.empty()) num_sections++;
+    num_sections++;  // shstrtab
 
-    const char shstrtab[] = "\0.debug_info\0.debug_abbrev\0.shstrtab\0";
-    constexpr size_t SHSTRTAB_SIZE = sizeof(shstrtab);
-    constexpr size_t SHSTRTAB_DEBUG_INFO = 1;
-    constexpr size_t SHSTRTAB_DEBUG_ABBREV = 13;
-    constexpr size_t SHSTRTAB_SHSTRTAB = 27;
+    // Build shstrtab with all section names (must be null-separated)
+    std::vector<uint8_t> shstrtab_data;
+    shstrtab_data.push_back(0);  // First entry is always empty (for section 0)
+    
+    uint32_t shstrtab_debug_info = shstrtab_data.size();
+    shstrtab_data.insert(shstrtab_data.end(), (const uint8_t*)".debug_info", (const uint8_t*)".debug_info" + 11);
+    shstrtab_data.push_back(0);
+    
+    uint32_t shstrtab_debug_abbrev = shstrtab_data.size();
+    shstrtab_data.insert(shstrtab_data.end(), (const uint8_t*)".debug_abbrev", (const uint8_t*)".debug_abbrev" + 13);
+    shstrtab_data.push_back(0);
+    
+    uint32_t shstrtab_debug_str_offsets = shstrtab_data.size();
+    shstrtab_data.insert(shstrtab_data.end(), (const uint8_t*)".debug_str_offsets", (const uint8_t*)".debug_str_offsets" + 18);
+    shstrtab_data.push_back(0);
+    
+    uint32_t shstrtab_debug_str = shstrtab_data.size();
+    shstrtab_data.insert(shstrtab_data.end(), (const uint8_t*)".debug_str", (const uint8_t*)".debug_str" + 10);
+    shstrtab_data.push_back(0);
+    
+    uint32_t shstrtab_debug_line = 0;
+    uint32_t shstrtab_debug_line_str = 0;
+    uint32_t shstrtab_debug_addr = 0;
+    
+    if (!debug_line.empty()) {
+        shstrtab_debug_line = shstrtab_data.size();
+        shstrtab_data.insert(shstrtab_data.end(), (const uint8_t*)".debug_line", (const uint8_t*)".debug_line" + 11);
+        shstrtab_data.push_back(0);
+        
+        if (!debug_line_str.empty()) {
+            shstrtab_debug_line_str = shstrtab_data.size();
+            shstrtab_data.insert(shstrtab_data.end(), (const uint8_t*)".debug_line_str", (const uint8_t*)".debug_line_str" + 15);
+            shstrtab_data.push_back(0);
+            
+            if (!debug_addr.empty()) {
+                shstrtab_debug_addr = shstrtab_data.size();
+                shstrtab_data.insert(shstrtab_data.end(), (const uint8_t*)".debug_addr", (const uint8_t*)".debug_addr" + 11);
+                shstrtab_data.push_back(0);
+            }
+        } else if (!debug_addr.empty()) {
+            shstrtab_debug_addr = shstrtab_data.size();
+            shstrtab_data.insert(shstrtab_data.end(), (const uint8_t*)".debug_addr", (const uint8_t*)".debug_addr" + 11);
+            shstrtab_data.push_back(0);
+        }
+    } else {
+        if (!debug_line_str.empty()) {
+            shstrtab_debug_line_str = shstrtab_data.size();
+            shstrtab_data.insert(shstrtab_data.end(), (const uint8_t*)".debug_line_str", (const uint8_t*)".debug_line_str" + 15);
+            shstrtab_data.push_back(0);
+            
+            if (!debug_addr.empty()) {
+                shstrtab_debug_addr = shstrtab_data.size();
+                shstrtab_data.insert(shstrtab_data.end(), (const uint8_t*)".debug_addr", (const uint8_t*)".debug_addr" + 11);
+                shstrtab_data.push_back(0);
+            }
+        } else if (!debug_addr.empty()) {
+            shstrtab_debug_addr = shstrtab_data.size();
+            shstrtab_data.insert(shstrtab_data.end(), (const uint8_t*)".debug_addr", (const uint8_t*)".debug_addr" + 11);
+            shstrtab_data.push_back(0);
+        }
+    }
+    
+    uint32_t shstrtab_shstrtab = shstrtab_data.size();
+    shstrtab_data.insert(shstrtab_data.end(), (const uint8_t*)".shstrtab", (const uint8_t*)".shstrtab" + 9);
+    shstrtab_data.push_back(0);
 
+    // Use actual debug_str if provided, otherwise minimal empty string
+    const std::vector<uint8_t>& actual_debug_str = debug_str.empty() ? 
+        std::vector<uint8_t>(1, 0) : debug_str;
+    
+    // Build .debug_str_offsets section based on actual strings
+    // Parse .debug_str to find all string offsets
+    std::vector<uint32_t> str_offsets;
+    if (!actual_debug_str.empty()) {
+        size_t offset = 0;
+        while (offset < actual_debug_str.size()) {
+            str_offsets.push_back(offset);
+            // Find next null terminator
+            while (offset < actual_debug_str.size() && actual_debug_str[offset] != 0) {
+                offset++;
+            }
+            if (offset < actual_debug_str.size()) {
+                offset++;  // Skip null terminator
+            }
+        }
+    } else {
+        str_offsets.push_back(0);  // At least one entry for empty string
+    }
+    
+    // Ensure we have at least 3 offset entries (12 bytes) to match compiler output format
+    while (str_offsets.size() < 3) {
+        str_offsets.push_back(0);
+    }
+    
+    // Build .debug_str_offsets: header (8 bytes) + offset entries (4 bytes each)
+    // unit_length excludes the 4-byte unit_length field itself
+    uint32_t str_offsets_data_size = 2 + 2 + str_offsets.size() * 4;  // version(2) + padding(2) + offsets
+    uint32_t unit_length = str_offsets_data_size;  // unit_length = rest of contribution
+    std::vector<uint8_t> debug_str_offsets_data;
+    debug_str_offsets_data.resize(4 + str_offsets_data_size);
+    memcpy(&debug_str_offsets_data[0], &unit_length, 4);
+    uint16_t version = 5;
+    uint16_t padding = 0;
+    memcpy(&debug_str_offsets_data[4], &version, 2);
+    memcpy(&debug_str_offsets_data[6], &padding, 2);
+    for (size_t i = 0; i < str_offsets.size(); i++) {
+        uint32_t offset = str_offsets[i];
+        memcpy(&debug_str_offsets_data[8 + i * 4], &offset, 4);
+    }
+
+    // Calculate offsets
     size_t shdr_offset = ELF_HDR_SIZE;
-    size_t debug_info_offset = shdr_offset + NUM_SECTIONS * SHDR_SIZE;
+    size_t debug_info_offset = shdr_offset + num_sections * SHDR_SIZE;
     size_t debug_abbrev_offset = debug_info_offset + debug_info.size();
-    size_t shstrtab_offset = debug_abbrev_offset + debug_abbrev.size();
-    size_t total_size = shstrtab_offset + SHSTRTAB_SIZE;
+    size_t debug_str_offsets_offset = debug_abbrev_offset + debug_abbrev.size();
+    size_t debug_str_offset = debug_str_offsets_offset + debug_str_offsets_data.size();
+    size_t debug_line_offset = debug_str_offset + actual_debug_str.size();
+    size_t debug_line_str_offset = debug_line_offset + (debug_line.empty() ? 0 : debug_line.size());
+    size_t debug_addr_offset = debug_line_str_offset + (debug_line_str.empty() ? 0 : debug_line_str.size());
+    size_t shstrtab_offset = debug_addr_offset + (debug_addr.empty() ? 0 : debug_addr.size());
+    size_t total_size = shstrtab_offset + shstrtab_data.size();
 
     std::vector<uint8_t> elf_data(total_size, 0);
 
+    // ELF header
     Elf64_Ehdr* ehdr = reinterpret_cast<Elf64_Ehdr*>(elf_data.data());
     ehdr->e_ident[EI_MAG0] = ELFMAG0;
     ehdr->e_ident[EI_MAG1] = ELFMAG1;
@@ -116,32 +273,89 @@ static std::vector<uint8_t> createMinimalElfForDwarf(
     ehdr->e_shoff = shdr_offset;
     ehdr->e_ehsize = ELF_HDR_SIZE;
     ehdr->e_shentsize = SHDR_SIZE;
-    ehdr->e_shnum = NUM_SECTIONS;
-    ehdr->e_shstrndx = 3;
+    ehdr->e_shnum = num_sections;
+    ehdr->e_shstrndx = num_sections - 1;  // shstrtab is last section
 
+    // Section headers
     Elf64_Shdr* shdrs = reinterpret_cast<Elf64_Shdr*>(elf_data.data() + shdr_offset);
+    size_t shdr_idx = 1;
 
-    shdrs[1].sh_name = SHSTRTAB_DEBUG_INFO;
-    shdrs[1].sh_type = SHT_PROGBITS;
-    shdrs[1].sh_offset = debug_info_offset;
-    shdrs[1].sh_size = debug_info.size();
-    shdrs[1].sh_addralign = 1;
+    shdrs[shdr_idx].sh_name = shstrtab_debug_info;
+    shdrs[shdr_idx].sh_type = SHT_PROGBITS;
+    shdrs[shdr_idx].sh_offset = debug_info_offset;
+    shdrs[shdr_idx].sh_size = debug_info.size();
+    shdrs[shdr_idx].sh_addralign = 1;
+    shdr_idx++;
 
-    shdrs[2].sh_name = SHSTRTAB_DEBUG_ABBREV;
-    shdrs[2].sh_type = SHT_PROGBITS;
-    shdrs[2].sh_offset = debug_abbrev_offset;
-    shdrs[2].sh_size = debug_abbrev.size();
-    shdrs[2].sh_addralign = 1;
+    shdrs[shdr_idx].sh_name = shstrtab_debug_abbrev;
+    shdrs[shdr_idx].sh_type = SHT_PROGBITS;
+    shdrs[shdr_idx].sh_offset = debug_abbrev_offset;
+    shdrs[shdr_idx].sh_size = debug_abbrev.size();
+    shdrs[shdr_idx].sh_addralign = 1;
+    shdr_idx++;
 
-    shdrs[3].sh_name = SHSTRTAB_SHSTRTAB;
-    shdrs[3].sh_type = SHT_STRTAB;
-    shdrs[3].sh_offset = shstrtab_offset;
-    shdrs[3].sh_size = SHSTRTAB_SIZE;
-    shdrs[3].sh_addralign = 1;
+    shdrs[shdr_idx].sh_name = shstrtab_debug_str_offsets;
+    shdrs[shdr_idx].sh_type = SHT_PROGBITS;
+    shdrs[shdr_idx].sh_offset = debug_str_offsets_offset;
+    shdrs[shdr_idx].sh_size = debug_str_offsets_data.size();
+    shdrs[shdr_idx].sh_addralign = 1;
+    shdr_idx++;
 
+    shdrs[shdr_idx].sh_name = shstrtab_debug_str;
+    shdrs[shdr_idx].sh_type = SHT_PROGBITS;
+    shdrs[shdr_idx].sh_offset = debug_str_offset;
+    shdrs[shdr_idx].sh_size = actual_debug_str.size();
+    shdrs[shdr_idx].sh_addralign = 1;
+    shdr_idx++;
+
+    if (!debug_line.empty()) {
+        shdrs[shdr_idx].sh_name = shstrtab_debug_line;
+        shdrs[shdr_idx].sh_type = SHT_PROGBITS;
+        shdrs[shdr_idx].sh_offset = debug_line_offset;
+        shdrs[shdr_idx].sh_size = debug_line.size();
+        shdrs[shdr_idx].sh_addralign = 1;
+        shdr_idx++;
+    }
+
+    if (!debug_line_str.empty()) {
+        shdrs[shdr_idx].sh_name = shstrtab_debug_line_str;
+        shdrs[shdr_idx].sh_type = SHT_PROGBITS;
+        shdrs[shdr_idx].sh_offset = debug_line_str_offset;
+        shdrs[shdr_idx].sh_size = debug_line_str.size();
+        shdrs[shdr_idx].sh_addralign = 1;
+        shdr_idx++;
+    }
+
+    if (!debug_addr.empty()) {
+        shdrs[shdr_idx].sh_name = shstrtab_debug_addr;
+        shdrs[shdr_idx].sh_type = SHT_PROGBITS;
+        shdrs[shdr_idx].sh_offset = debug_addr_offset;
+        shdrs[shdr_idx].sh_size = debug_addr.size();
+        shdrs[shdr_idx].sh_addralign = 1;
+        shdr_idx++;
+    }
+
+    shdrs[shdr_idx].sh_name = shstrtab_shstrtab;
+    shdrs[shdr_idx].sh_type = SHT_STRTAB;
+    shdrs[shdr_idx].sh_offset = shstrtab_offset;
+    shdrs[shdr_idx].sh_size = shstrtab_data.size();
+    shdrs[shdr_idx].sh_addralign = 1;
+
+    // Copy section data
     memcpy(elf_data.data() + debug_info_offset, debug_info.data(), debug_info.size());
     memcpy(elf_data.data() + debug_abbrev_offset, debug_abbrev.data(), debug_abbrev.size());
-    memcpy(elf_data.data() + shstrtab_offset, shstrtab, SHSTRTAB_SIZE);
+    memcpy(elf_data.data() + debug_str_offsets_offset, debug_str_offsets_data.data(), debug_str_offsets_data.size());
+    memcpy(elf_data.data() + debug_str_offset, actual_debug_str.data(), actual_debug_str.size());
+    if (!debug_line.empty()) {
+        memcpy(elf_data.data() + debug_line_offset, debug_line.data(), debug_line.size());
+    }
+    if (!debug_line_str.empty()) {
+        memcpy(elf_data.data() + debug_line_str_offset, debug_line_str.data(), debug_line_str.size());
+    }
+    if (!debug_addr.empty()) {
+        memcpy(elf_data.data() + debug_addr_offset, debug_addr.data(), debug_addr.size());
+    }
+    memcpy(elf_data.data() + shstrtab_offset, shstrtab_data.data(), shstrtab_data.size());
 
     return elf_data;
 }
@@ -154,13 +368,14 @@ static std::vector<uint8_t> createMinimalElfForLineTable(
 
     // Minimal .debug_abbrev: one entry code 1, DW_TAG_compile_unit, no children, DW_AT_stmt_list DW_FORM_sec_offset, (0,0)
     const uint8_t minimal_abbrev[] = { 1, 0x11, 0, 0x10, 0x17, 0, 0 };  // code, tag, no_children, AT_stmt_list, FORM_sec_offset, 0,0
-    // Minimal .debug_info: DWARF4 CU header + one DIE (abbrev 1, stmt_list=0)
-    // unit_length(4)=12, version(2)=4, abbrev_offset(4)=0, addr_size(1)=8, ULEB(1), 4-byte 0
+    // Minimal .debug_info: DWARF5 CU header + one DIE (abbrev 1, stmt_list=0)
+    // unit_length(4)=13, version(2)=5, unit_type(1)=0, addr_size(1)=8, abbrev_offset(4)=0, ULEB(1), 4-byte 0
     const uint8_t minimal_info[] = {
-        12, 0, 0, 0,   // unit_length
-        4, 0,          // version
-        0, 0, 0, 0,    // abbrev_offset
+        13, 0, 0, 0,   // unit_length (rest of unit)
+        5, 0,          // version
+        0,             // unit_type (DW_UT_compile)
         8,             // addr_size
+        0, 0, 0, 0,    // abbrev_offset
         1,             // abbrev code 1
         0, 0, 0, 0     // DW_AT_stmt_list = 0
     };
@@ -323,7 +538,7 @@ static size_t getFormFixedSize(uint16_t form, uint8_t addr_size, uint16_t dwarf_
         case llvm::dwarf::DW_FORM_strp:
         case llvm::dwarf::DW_FORM_line_strp:
         case llvm::dwarf::DW_FORM_ref_addr:
-            return (dwarf_version >= 4) ? 4 : addr_size;  // DWARF32
+            return 4;  // DWARF5 32-bit format
         case llvm::dwarf::DW_FORM_data16:
             return 16;
         case llvm::dwarf::DW_FORM_flag_present:
@@ -380,6 +595,37 @@ static size_t skipVariableForm(uint16_t form, const uint8_t* data, size_t max_le
     }
 }
 
+// Abbrev entry: (attr, form) for patching specific attributes without LLVM.
+using AbbrevAttrsForms = std::vector<std::pair<uint16_t, uint16_t>>;
+// Parse .debug_abbrev and return map: abbrev_code -> (has_children, (attr,form)*).
+static std::map<uint64_t, std::pair<bool, AbbrevAttrsForms>> parseAbbrevTableWithAttrs(
+    const uint8_t* data, size_t size) {
+    std::map<uint64_t, std::pair<bool, AbbrevAttrsForms>> map;
+    const uint8_t* p = data;
+    const uint8_t* end = data + size;
+    while (p < end) {
+        size_t n;
+        uint64_t code = decodeULEB128(p, (size_t)(end - p), n);
+        p += n;
+        if (code == 0) break;
+        uint64_t tag = decodeULEB128(p, (size_t)(end - p), n);
+        p += n;
+        if (p >= end) break;
+        uint8_t has_children = *p++;
+        AbbrevAttrsForms attrs_forms;
+        while (p < end) {
+            uint64_t attr = decodeULEB128(p, (size_t)(end - p), n);
+            p += n;
+            uint64_t form = decodeULEB128(p, (size_t)(end - p), n);
+            p += n;
+            if (attr == 0 && form == 0) break;
+            attrs_forms.push_back({(uint16_t)attr, (uint16_t)form});
+        }
+        map[code] = { (has_children != llvm::dwarf::DW_CHILDREN_no), std::move(attrs_forms) };
+    }
+    return map;
+}
+
 // Parse .debug_abbrev and return map: abbrev_code -> (has_children, forms).
 // Abbrev format: code(ULEB), tag(ULEB), has_children(1), (attr(ULEB), form(ULEB))* (0,0).
 static std::map<uint64_t, std::pair<bool, std::vector<uint16_t>>> parseAbbrevTable(
@@ -420,8 +666,9 @@ static std::vector<std::pair<size_t, uint32_t>> findLineStrpInChunkManual(
     std::vector<std::pair<size_t, uint32_t>> result;
     if (info_size < 8 || abbrev_map.empty()) return result;
 
-    // CU header: unit_length(4), version(2); DWARF5: unit_type(1), addr_size(1), abbrev_offset(4); DWARF4: abbrev_offset(4), addr_size(1)
-    size_t die_start = (version >= 5) ? 12 : 11;
+    // DWARF5 CU header: unit_length(4), version(2), unit_type(1), addr_size(1), abbrev_offset(4) = 12
+    constexpr size_t kDWARF5CuHeaderSize = 12;
+    size_t die_start = kDWARF5CuHeaderSize;
     if (die_start > info_size) return result;
 
     std::function<size_t(size_t)> parseDIE;
@@ -464,19 +711,60 @@ static std::vector<std::pair<size_t, uint32_t>> findLineStrpInChunkManual(
     return result;
 }
 
-// Phase 1: Use LLVM to read DWARF and find attribute positions for patching.
-// Creates a minimal ELF from debug_info + debug_abbrev, parses with DWARFContext,
-// iterates compile units and root DIE attributes to build the patch list.
-static DwarfAttrPositions findDwarfAttrPositionsUsingLLVM(
+// Patch all DW_AT_str_offsets_base to 8 in a copy of debug_info so the minimal ELF
+// matches compiler output format (offsets start after the 8-byte header).
+// DWARF4 has no DW_AT_str_offsets_base; return copy unchanged.
+static std::vector<uint8_t> patchStrOffsetsBaseToZero(
     const std::vector<uint8_t>& debug_info,
     const std::vector<uint8_t>& debug_abbrev) {
+    std::vector<uint8_t> out = debug_info;
+    if (out.size() < 8 || debug_abbrev.empty()) return out;
+    uint16_t version;
+    memcpy(&version, &out[4], 2);
+    if (version == 4) return out;  // DWARF4: no str_offsets_base to patch
 
+    auto abbrev_map = parseAbbrevTableWithAttrs(debug_abbrev.data(), debug_abbrev.size());
+    if (abbrev_map.empty()) return out;
+
+    size_t pos = 0;
+    while (pos + 4 <= out.size()) {
+        uint32_t unit_length;
+        memcpy(&unit_length, &out[pos], 4);
+        if (unit_length == 0xffffffff || unit_length + 4 > out.size() - pos) break;
+        size_t cu_end = pos + 4 + unit_length;
+        // DWARF5 CU header: unit_length(4), version(2), unit_type(1), addr_size(1), abbrev_offset(4) = 12
+        constexpr size_t kDWARF5CuHeaderSize = 12;
+        if (pos + kDWARF5CuHeaderSize > cu_end) { pos = cu_end; continue; }
+        size_t die_start = pos + kDWARF5CuHeaderSize;
+        size_t n;
+        uint64_t code = decodeULEB128(out.data() + die_start, cu_end - die_start, n);
+        size_t attr_pos = die_start + n;
+        auto it = abbrev_map.find(code);
+        if (it == abbrev_map.end()) { pos = cu_end; continue; }
+        uint8_t addr_size = out[pos + 8];  // DWARF5: addr_size at offset 8
+        constexpr uint16_t kDWARFVersion = 5;
+        for (const auto& [attr, form] : it->second.second) {
+            if (attr_pos >= cu_end) break;
+            size_t form_sz = getFormFixedSize(form, addr_size, kDWARFVersion);
+            if (form_sz == 0) form_sz = skipVariableForm(form, out.data() + attr_pos, cu_end - attr_pos);
+            if (form_sz == 0) break;
+            if (attr == llvm::dwarf::DW_AT_str_offsets_base && form_sz == 4 && attr_pos + 4 <= cu_end) {
+                uint32_t base_offset = 8;  // Offsets start after the 8-byte header (matches compiler output)
+                memcpy(&out[attr_pos], &base_offset, 4);
+            }
+            attr_pos += form_sz;
+        }
+        pos = cu_end;
+    }
+    return out;
+}
+
+// Phase 1a: Use real ELF with LLVM (dispatcher). LLVM sees all sections including .debug_str_offsets.
+static DwarfAttrPositions findDwarfAttrPositionsFromElf(const uint8_t* elf_data, size_t elf_size) {
     DwarfAttrPositions result;
-    if (debug_info.empty() || debug_abbrev.empty())
-        return result;
+    if (elf_data == nullptr || elf_size == 0) return result;
 
-    std::vector<uint8_t> elf_data = createMinimalElfForDwarf(debug_info, debug_abbrev);
-    llvm::StringRef elf_ref(reinterpret_cast<const char*>(elf_data.data()), elf_data.size());
+    llvm::StringRef elf_ref(reinterpret_cast<const char*>(elf_data), elf_size);
     std::unique_ptr<llvm::MemoryBuffer> buf = llvm::MemoryBuffer::getMemBufferCopy(elf_ref, "");
     llvm::Expected<std::unique_ptr<llvm::object::ObjectFile>> obj_or =
         llvm::object::ObjectFile::createObjectFile(buf->getMemBufferRef());
@@ -489,11 +777,21 @@ static DwarfAttrPositions findDwarfAttrPositionsUsingLLVM(
         llvm::DWARFContext::create(*obj, llvm::DWARFContext::ProcessDebugRelocations::Ignore,
                                     nullptr, "", llvmDwarfErrorHandler,
                                     llvmDwarfWarningHandler, false);
-    if (!ctx)
-        return result;
+    if (!ctx) return result;
 
-    const uint8_t* info_data = debug_info.data();
-    const size_t info_size = debug_info.size();
+    // Get .debug_info section content from the object for offset calculations
+    const uint8_t* info_data = nullptr;
+    size_t info_size = 0;
+    for (auto it = obj->section_begin(); it != obj->section_end(); ++it) {
+        llvm::Expected<llvm::StringRef> name_or = it->getName();
+        if (!name_or || *name_or != ".debug_info") continue;
+        llvm::Expected<llvm::StringRef> contents_or = it->getContents();
+        if (!contents_or) break;
+        info_data = reinterpret_cast<const uint8_t*>(contents_or->data());
+        info_size = contents_or->size();
+        break;
+    }
+    if (info_data == nullptr || info_size == 0) return result;
 
     for (const std::unique_ptr<llvm::DWARFUnit>& unit_ptr : ctx->info_section_units()) {
         llvm::DWARFUnit* unit = unit_ptr.get();
@@ -544,6 +842,15 @@ static DwarfAttrPositions findDwarfAttrPositionsUsingLLVM(
                     default:
                         break;
                 }
+            } else if (form == llvm::dwarf::DW_FORM_addr && attr_value_offset + 8 <= info_size) {
+                // DW_AT_low_pc and DW_AT_high_pc can use DW_FORM_addr (8-byte address) - needed for DWARF4 address patching
+                uint64_t val;
+                memcpy(&val, info_data + attr_value_offset, 8);
+                if (attr == llvm::dwarf::DW_AT_low_pc) {
+                    result.low_pc.push_back({attr_value_offset, val});
+                } else if (attr == llvm::dwarf::DW_AT_high_pc) {
+                    result.high_pc.push_back({attr_value_offset, val});
+                }
             }
             pos += form_sz;
             if (pos >= info_size)
@@ -551,6 +858,58 @@ static DwarfAttrPositions findDwarfAttrPositionsUsingLLVM(
         }
     }
     return result;
+}
+
+// Phase 1b: Use minimal ELF with LLVM (kernels). Kernel .device.o often have .debug_str_offsets
+// too small or missing, so we build a minimal ELF with patched str_offsets_base and proper sections.
+static DwarfAttrPositions findDwarfAttrPositionsUsingLLVM(
+    const std::vector<uint8_t>& debug_info,
+    const std::vector<uint8_t>& debug_abbrev,
+    const std::vector<uint8_t>& debug_str = {},
+    const std::vector<uint8_t>& debug_line = {},
+    const std::vector<uint8_t>& debug_line_str = {},
+    const std::vector<uint8_t>& debug_addr = {}) {
+    DwarfAttrPositions result;
+    if (debug_info.empty() || debug_abbrev.empty()) return result;
+    
+    // Reset error flag before parsing
+    g_llvm_dwarf_error = false;
+    
+    std::vector<uint8_t> info_for_llvm = patchStrOffsetsBaseToZero(debug_info, debug_abbrev);
+    std::vector<uint8_t> elf_data = createMinimalElfForDwarf(info_for_llvm, debug_abbrev, 
+                                                              debug_str, debug_line, debug_line_str, debug_addr);
+    
+    // Verify minimal ELF has correct .debug_str_offsets header
+    // Find .debug_str_offsets section by searching section headers
+    Elf64_Ehdr* ehdr = reinterpret_cast<Elf64_Ehdr*>(elf_data.data());
+    Elf64_Shdr* shdrs = reinterpret_cast<Elf64_Shdr*>(elf_data.data() + ehdr->e_shoff);
+    const char* shstrtab = reinterpret_cast<const char*>(elf_data.data() + shdrs[ehdr->e_shstrndx].sh_offset);
+    
+    for (size_t i = 1; i < ehdr->e_shnum; i++) {
+        if (strcmp(shstrtab + shdrs[i].sh_name, ".debug_str_offsets") == 0) {
+            uint32_t unit_length;
+            uint16_t version;
+            memcpy(&unit_length, &elf_data[shdrs[i].sh_offset], 4);
+            memcpy(&version, &elf_data[shdrs[i].sh_offset + 4], 2);
+            if (version != 5) {
+                fprintf(stderr, "WARNING: Minimal ELF .debug_str_offsets header invalid: version=%u (expected 5)\n", version);
+            }
+            break;
+        }
+    }
+    
+    // Write minimal ELF to file for debugging/verification
+    static int minimal_elf_counter = 0;
+    char minimal_elf_filename[256];
+    snprintf(minimal_elf_filename, sizeof(minimal_elf_filename), "/tmp/minimal_elf_%d.o", minimal_elf_counter++);
+    FILE* f = fopen(minimal_elf_filename, "wb");
+    if (f) {
+        fwrite(elf_data.data(), 1, elf_data.size(), f);
+        fclose(f);
+        fprintf(stderr, "DEBUG: Wrote minimal ELF to %s\n", minimal_elf_filename);
+    }
+    
+    return findDwarfAttrPositionsFromElf(elf_data.data(), elf_data.size());
 }
 
 // Find all DW_FORM_line_strp (offset, value) in .debug_info for patching when merging .debug_line_str.
@@ -562,7 +921,8 @@ static std::vector<std::pair<size_t, uint32_t>> findLineStrpPositionsInDebugInfo
     std::vector<std::pair<size_t, uint32_t>> result;
     if (debug_info.empty() || debug_abbrev.empty()) return result;
 
-    std::vector<uint8_t> elf_data = createMinimalElfForDwarf(debug_info, debug_abbrev);
+    std::vector<uint8_t> info_for_llvm = patchStrOffsetsBaseToZero(debug_info, debug_abbrev);
+    std::vector<uint8_t> elf_data = createMinimalElfForDwarf(info_for_llvm, debug_abbrev, {}, {}, {}, {});
     llvm::StringRef elf_ref(reinterpret_cast<const char*>(elf_data.data()), elf_data.size());
     std::unique_ptr<llvm::MemoryBuffer> buf = llvm::MemoryBuffer::getMemBufferCopy(elf_ref, "");
     llvm::Expected<std::unique_ptr<llvm::object::ObjectFile>> obj_or =
@@ -834,6 +1194,7 @@ std::vector<uint8_t> extractDeviceCode(const std::string& path) {
 
 struct KernelInfo {
     std::string name;
+    std::string source_file;  // Original file path for error reporting
     std::vector<uint8_t> code;
     uint64_t func_offset = 0;       // Offset of ncclDevFunc_ within code (for function table)
     std::vector<uint8_t> kd;        // 64-byte kernel descriptor from .rodata
@@ -847,14 +1208,16 @@ struct KernelInfo {
     std::vector<uint8_t> debug_str_offsets;
     std::vector<uint8_t> debug_addr;
     std::vector<uint8_t> debug_rnglists;
-    std::vector<uint8_t> debug_ranges;  // DWARF4 ranges (different from DWARF5 rnglists)
+    std::vector<uint8_t> debug_ranges;  // Legacy .debug_ranges (DWARF5 uses .debug_rnglists)
+    uint16_t dwarf_version = 0;        // DWARF version from first CU (0 if no .debug_info); device linker supports 4 or 5
     DwarfAttrPositions dwarf_attr_positions;  // Positions of various DWARF attributes that need patching
     uint64_t orig_text_addr = 0;    // Original .text address for debug_line patching
     int vgpr = 0, sgpr = 0, lds = 0, stack = 0;
 };
 
-KernelInfo parseKernel(const std::vector<uint8_t>& elf_data) {
+KernelInfo parseKernel(const std::vector<uint8_t>& elf_data, const std::string& source_file = "") {
     KernelInfo info;
+    info.source_file = source_file;
     if (elf_data.empty()) return info;
 
     std::string tmp = "/tmp/kern_" + std::to_string(rand()) + ".o";
@@ -979,6 +1342,7 @@ KernelInfo parseKernel(const std::vector<uint8_t>& elf_data) {
         auto* debug_info = elf.find(".debug_info");
         if (debug_info && debug_info->size > 0) {
             info.debug_info = elf.getBytes(*debug_info);
+            info.dwarf_version = getDwarfVersionFromDebugInfo(info.debug_info.data(), info.debug_info.size());
         }
         auto* debug_str = elf.find(".debug_str");
         if (debug_str && debug_str->size > 0) {
@@ -996,14 +1360,73 @@ KernelInfo parseKernel(const std::vector<uint8_t>& elf_data) {
         if (debug_rnglists && debug_rnglists->size > 0) {
             info.debug_rnglists = elf.getBytes(*debug_rnglists);
         }
+
+        // Apply relocations to debug sections before merging
+        // These relocations resolve section-relative offsets that need to be applied
+        auto applyRelocations = [&](const char* rela_name, std::vector<uint8_t>& section_data) {
+            auto* rela_sec = elf.find(rela_name);
+            if (!rela_sec || rela_sec->size == 0 || rela_sec->entsize < sizeof(Elf64_Rela)) return;
+            
+            const Elf64_Rela* relas = elf.fileAt<Elf64_Rela>(rela_sec->offset);
+            size_t num_relas = rela_sec->size / sizeof(Elf64_Rela);
+            
+            for (size_t i = 0; i < num_relas; i++) {
+                const Elf64_Rela& r = relas[i];
+                uint32_t rtype = ELF64_R_TYPE(r.r_info);
+                
+                // Apply relocation if offset is within section bounds
+                // For section-relative relocations (R_AMDGPU_ABS32 type 6, R_X86_64_32 type 10, R_AMDGPU_ABS32 type 3),
+                // the addend contains the offset into the target section
+                if (r.r_offset + 4 <= section_data.size()) {
+                    if (rtype == 10 || rtype == 3 || rtype == 6) {  // R_X86_64_32, R_AMDGPU_ABS32 (various types) - 32-bit
+                        uint32_t val = (uint32_t)r.r_addend;
+                        memcpy(&section_data[r.r_offset], &val, 4);
+                    } else if (rtype == 1 || rtype == 2) {  // R_X86_64_64 or R_AMDGPU_ABS64 - 64-bit
+                        if (r.r_offset + 8 <= section_data.size()) {
+                            uint64_t val = (uint64_t)r.r_addend;
+                            memcpy(&section_data[r.r_offset], &val, 8);
+                        }
+                    }
+                }
+            }
+        };
+
+        // Apply relocations to each debug section
+        if (!info.debug_info.empty()) {
+            applyRelocations(".rela.debug_info", info.debug_info);
+        }
+        if (!info.debug_str_offsets.empty()) {
+            applyRelocations(".rela.debug_str_offsets", info.debug_str_offsets);
+        }
+        if (!info.debug_addr.empty()) {
+            applyRelocations(".rela.debug_addr", info.debug_addr);
+        }
         auto* debug_ranges = elf.find(".debug_ranges");
         if (debug_ranges && debug_ranges->size > 0) {
             info.debug_ranges = elf.getBytes(*debug_ranges);
         }
 
-        // Use LLVM to find DWARF attribute positions for later patching
+        // Use LLVM to find DWARF attribute positions (minimal ELF: kernel .device.o often have bad .debug_str_offsets)
         if (!info.debug_info.empty() && !info.debug_abbrev.empty()) {
-            info.dwarf_attr_positions = findDwarfAttrPositionsUsingLLVM(info.debug_info, info.debug_abbrev);
+            // Write minimal ELF to file for debugging/verification (only for first few kernels to avoid spam)
+            static int minimal_elf_counter_parse = 0;
+            if (minimal_elf_counter_parse < 5) {
+                std::vector<uint8_t> info_for_llvm = patchStrOffsetsBaseToZero(info.debug_info, info.debug_abbrev);
+                std::vector<uint8_t> elf_data = createMinimalElfForDwarf(info_for_llvm, info.debug_abbrev,
+                                                                          info.debug_str, info.debug_line,
+                                                                          info.debug_line_str, info.debug_addr);
+                char minimal_elf_filename[256];
+                snprintf(minimal_elf_filename, sizeof(minimal_elf_filename), "/tmp/minimal_elf_parse_%d.o", minimal_elf_counter_parse++);
+                FILE* f = fopen(minimal_elf_filename, "wb");
+                if (f) {
+                    fwrite(elf_data.data(), 1, elf_data.size(), f);
+                    fclose(f);
+                    fprintf(stderr, "DEBUG: Wrote minimal ELF to %s\n", minimal_elf_filename);
+                }
+            }
+            info.dwarf_attr_positions = findDwarfAttrPositionsUsingLLVM(info.debug_info, info.debug_abbrev,
+                                                                        info.debug_str, info.debug_line, 
+                                                                        info.debug_line_str, info.debug_addr);
         }
     }
 
@@ -1121,8 +1544,8 @@ std::pair<std::string, int> demangleFunc(const std::string& mangled) {
 // ============================================================================
 
 class DeviceLinker {
-    // Phase 3 (DWARF_LLVM_REWRITE_PLAN): set true to use LLVM emission for merged .debug_* (not implemented yet)
-    static constexpr bool kUsePhase3Emission = false;
+    // Phase 3 (DWARF_LLVM_REWRITE_PLAN): set true to use LLVM emission for merged .debug_*
+    static constexpr bool kUsePhase3Emission = true;
 public:
     DeviceLinker(const std::string& dispatcher_path) : disp_path_(dispatcher_path) {}
 
@@ -1273,10 +1696,12 @@ private:
         size_t str_offsets_base;   // Base offset in merged .debug_str_offsets
         size_t addr_base;          // Base offset in merged .debug_addr
         size_t rnglists_base;      // Base offset in merged .debug_rnglists
-        size_t ranges_base;        // Base offset in merged .debug_ranges (DWARF4)
+        size_t ranges_base;        // Base offset in merged .debug_ranges (legacy; DWARF5 uses .debug_rnglists)
         size_t line_base;          // Base offset in merged .debug_line
         size_t line_str_offset_base;  // Base offset in merged .debug_line_str (for patching DW_FORM_line_strp in .debug_info)
         DwarfAttrPositions dwarf_attr_positions;  // Positions of DWARF attributes in this chunk
+        uint16_t dwarf_version;    // 4 or 5 (CU header layout and attributes differ)
+        std::string source_file;   // Original file path for error reporting
     };
     std::vector<DebugInfoChunk> debug_info_chunks_;
     std::vector<uint8_t> merged_debug_abbrev_;
@@ -1284,7 +1709,7 @@ private:
     std::vector<uint8_t> merged_debug_str_offsets_;
     std::vector<uint8_t> merged_debug_addr_;
     std::vector<uint8_t> merged_debug_rnglists_;
-    std::vector<uint8_t> merged_debug_ranges_;  // DWARF4 ranges (different from DWARF5 rnglists)
+    std::vector<uint8_t> merged_debug_ranges_;  // Legacy .debug_ranges (DWARF5 prefers .debug_rnglists)
     std::vector<uint8_t> merged_debug_info_;
 
     // Output sections
@@ -1801,12 +2226,17 @@ private:
                 auto* disp_debug_str_offsets = disp_->find(".debug_str_offsets");
                 auto* disp_debug_addr = disp_->find(".debug_addr");
                 auto* disp_debug_rnglists = disp_->find(".debug_rnglists");
-                auto* disp_debug_ranges = disp_->find(".debug_ranges");  // DWARF4
+                auto* disp_debug_ranges = disp_->find(".debug_ranges");  // Legacy section
                 auto* disp_debug_info = disp_->find(".debug_info");
                 auto* disp_text = disp_->find(".text");
 
                 if (disp_debug_info && disp_debug_info->size > 0) {
                     auto disp_di = disp_->getBytes(*disp_debug_info);
+                    uint16_t disp_version = getDwarfVersionFromDebugInfo(disp_di.data(), disp_di.size());
+                    if (disp_version != 0 && disp_version != 4 && disp_version != 5) {
+                        setFatalError("Dispatcher has unsupported DWARF version; device linker requires DWARF4 or DWARF5");
+                        return false;
+                    }
 
                     DebugInfoChunk chunk;
                     chunk.merged_offset = merged_debug_info_.size();
@@ -1818,9 +2248,11 @@ private:
                     chunk.str_offsets_base = merged_debug_str_offsets_.size();
                     chunk.addr_base = merged_debug_addr_.size();
                     chunk.rnglists_base = merged_debug_rnglists_.size();
-                    chunk.ranges_base = merged_debug_ranges_.size();  // DWARF4 ranges
+                    chunk.ranges_base = merged_debug_ranges_.size();  // Legacy .debug_ranges
                     chunk.line_base = 0;  // First debug_line chunk
                     chunk.line_str_offset_base = debug_line_chunks_.empty() ? 0 : debug_line_chunks_[0].str_offset_base;
+                    chunk.dwarf_version = (disp_version != 0) ? disp_version : 5;
+                    chunk.source_file = "(dispatcher)";
 
                     // Append dispatcher's debug sections
                     if (disp_debug_abbrev && disp_debug_abbrev->size > 0) {
@@ -1837,7 +2269,12 @@ private:
                         if (data.size() >= 8)
                             merged_debug_str_offsets_.insert(merged_debug_str_offsets_.end(), data.begin(), data.end());
                         else
-                            merged_debug_str_offsets_.resize(merged_debug_str_offsets_.size() + 8, 0);
+                            merged_debug_str_offsets_.insert(merged_debug_str_offsets_.end(),
+                                kMinimalStrOffsetsHeader, kMinimalStrOffsetsHeader + 8);
+                    } else {
+                        // Chunk has .debug_info (may have DW_AT_str_offsets_base) but no section: add valid 8-byte header
+                        merged_debug_str_offsets_.insert(merged_debug_str_offsets_.end(),
+                            kMinimalStrOffsetsHeader, kMinimalStrOffsetsHeader + 8);
                     }
                     if (disp_debug_addr && disp_debug_addr->size > 0) {
                         auto data = disp_->getBytes(*disp_debug_addr);
@@ -1852,11 +2289,9 @@ private:
                         merged_debug_ranges_.insert(merged_debug_ranges_.end(), data.begin(), data.end());
                     }
 
-                    // Find DWARF attribute positions in dispatcher's debug_info (Phase 1: LLVM)
-                    if (disp_debug_abbrev && disp_debug_abbrev->size > 0) {
-                        auto abbrev_data = disp_->getBytes(*disp_debug_abbrev);
-                        chunk.dwarf_attr_positions = findDwarfAttrPositionsUsingLLVM(disp_di, abbrev_data);
-                    }
+                    // Find DWARF attribute positions in dispatcher's debug_info (use real ELF so LLVM sees all sections)
+                    chunk.dwarf_attr_positions = findDwarfAttrPositionsFromElf(
+                        static_cast<const uint8_t*>(disp_file_->data()), disp_file_->size());
                     merged_debug_info_.insert(merged_debug_info_.end(), disp_di.begin(), disp_di.end());
 
                     debug_info_chunks_.push_back(chunk);
@@ -1881,10 +2316,12 @@ private:
                         chunk.str_offsets_base = merged_debug_str_offsets_.size();
                         chunk.addr_base = merged_debug_addr_.size();
                         chunk.rnglists_base = merged_debug_rnglists_.size();
-                        chunk.ranges_base = merged_debug_ranges_.size();  // DWARF4 ranges
+                        chunk.ranges_base = merged_debug_ranges_.size();  // Legacy .debug_ranges
                         chunk.line_base = line_offset;
                         chunk.line_str_offset_base = (!kern->debug_line.empty() && kern_idx < debug_line_chunks_.size())
                             ? debug_line_chunks_[kern_idx].str_offset_base : 0;
+                        chunk.dwarf_version = (kern->dwarf_version != 0) ? kern->dwarf_version : 5;
+                        chunk.source_file = kern->source_file.empty() ? "(unknown)" : kern->source_file;
 
                         // Append kernel's debug sections
                         if (!kern->debug_abbrev.empty()) {
@@ -1901,7 +2338,12 @@ private:
                                 merged_debug_str_offsets_.insert(merged_debug_str_offsets_.end(),
                                     kern->debug_str_offsets.begin(), kern->debug_str_offsets.end());
                             else
-                                merged_debug_str_offsets_.resize(merged_debug_str_offsets_.size() + 8, 0);
+                                merged_debug_str_offsets_.insert(merged_debug_str_offsets_.end(),
+                                    kMinimalStrOffsetsHeader, kMinimalStrOffsetsHeader + 8);
+                        } else {
+                            // Chunk has .debug_info (may have DW_AT_str_offsets_base) but no section: add valid 8-byte header
+                            merged_debug_str_offsets_.insert(merged_debug_str_offsets_.end(),
+                                kMinimalStrOffsetsHeader, kMinimalStrOffsetsHeader + 8);
                         }
                         if (!kern->debug_addr.empty()) {
                             merged_debug_addr_.insert(merged_debug_addr_.end(),
@@ -2936,6 +3378,38 @@ private:
                 const auto& chunk = debug_line_chunks_[i];
                 if (chunk.merged_offset + chunk.size > debug_line_sec->data.size()) continue;
                 const uint8_t* chunk_data = debug_line_sec->data.data() + chunk.merged_offset;
+                
+                // Check DWARF version: Phase 3 re-emission only supports DWARF5 (uses DW_FORM_line_strp)
+                // For DWARF4, copy chunk as-is and patch addresses separately (Phase 2 handles this)
+                uint16_t line_version = 0;
+                if (chunk.size >= 6) {
+                    memcpy(&line_version, chunk_data + 4, 2);
+                }
+                bool is_dwarf4 = (line_version == 4);
+                
+                if (is_dwarf4) {
+                    // DWARF4: copy chunk as-is, then patch addresses (no line_strp to patch)
+                    if (i == 0) debug_line_chunks_[i].merged_offset = 0;
+                    else debug_line_chunks_[i].merged_offset = new_line.size();
+                    size_t copy_start = new_line.size();
+                    new_line.insert(new_line.end(), chunk_data, chunk_data + chunk.size);
+                    
+                    // Patch DW_LNE_set_address opcodes in the copied DWARF4 chunk
+                    int64_t address_delta = (int64_t)(text_addr_ + chunk.new_text_offset) - (int64_t)chunk.orig_text_addr;
+                    uint8_t* copied_data = new_line.data() + copy_start;
+                    size_t copied_size = chunk.size;
+                    for (size_t j = 0; j + 11 <= copied_size; j++) {
+                        // Look for: 00 09 02 <8-byte-addr>
+                        if (copied_data[j] == 0x00 && copied_data[j+1] == 0x09 && copied_data[j+2] == 0x02) {
+                            uint64_t addr;
+                            memcpy(&addr, copied_data + j + 3, 8);
+                            addr = (uint64_t)((int64_t)addr + address_delta);
+                            memcpy(copied_data + j + 3, &addr, 8);
+                        }
+                    }
+                    continue;
+                }
+                
                 int64_t address_delta = (int64_t)(text_addr_ + chunk.new_text_offset) - (int64_t)chunk.orig_text_addr;
                 std::vector<uint8_t> emitted = emitDebugLineChunk(
                     chunk_data, chunk.size,
@@ -2968,6 +3442,522 @@ private:
 
     // Merge and patch debug sections from all kernels
     // Patches addresses based on where code ended up, and adjusts cross-section offsets
+    // Create a temporary ELF from merged debug sections for LLVM parsing
+    std::vector<uint8_t> createTempElfForMergedDebugSections() {
+        constexpr size_t ELF_HDR_SIZE = sizeof(Elf64_Ehdr);
+        constexpr size_t SHDR_SIZE = sizeof(Elf64_Shdr);
+        
+        // Count sections: always have .debug_info, .debug_abbrev, .shstrtab
+        // Optionally add .debug_str, .debug_str_offsets, .debug_addr, .debug_rnglists
+        size_t num_sections = 3;  // null, debug_info, debug_abbrev
+        if (!merged_debug_str_.empty()) num_sections++;
+        if (!merged_debug_str_offsets_.empty()) num_sections++;
+        if (!merged_debug_addr_.empty()) num_sections++;
+        if (!merged_debug_rnglists_.empty()) num_sections++;
+        num_sections++;  // shstrtab
+
+        // Build shstrtab
+        std::vector<uint8_t> shstrtab_data;
+        shstrtab_data.push_back(0);  // First entry is always empty
+        
+        uint32_t shstrtab_debug_info = shstrtab_data.size();
+        shstrtab_data.insert(shstrtab_data.end(), (const uint8_t*)".debug_info", (const uint8_t*)".debug_info" + 11);
+        shstrtab_data.push_back(0);
+        
+        uint32_t shstrtab_debug_abbrev = shstrtab_data.size();
+        shstrtab_data.insert(shstrtab_data.end(), (const uint8_t*)".debug_abbrev", (const uint8_t*)".debug_abbrev" + 13);
+        shstrtab_data.push_back(0);
+        
+        uint32_t shstrtab_debug_str = 0, shstrtab_debug_str_offsets = 0, shstrtab_debug_addr = 0, shstrtab_debug_rnglists = 0;
+        
+        if (!merged_debug_str_.empty()) {
+            shstrtab_debug_str = shstrtab_data.size();
+            shstrtab_data.insert(shstrtab_data.end(), (const uint8_t*)".debug_str", (const uint8_t*)".debug_str" + 10);
+            shstrtab_data.push_back(0);
+        }
+        if (!merged_debug_str_offsets_.empty()) {
+            shstrtab_debug_str_offsets = shstrtab_data.size();
+            shstrtab_data.insert(shstrtab_data.end(), (const uint8_t*)".debug_str_offsets", (const uint8_t*)".debug_str_offsets" + 18);
+            shstrtab_data.push_back(0);
+        }
+        if (!merged_debug_addr_.empty()) {
+            shstrtab_debug_addr = shstrtab_data.size();
+            shstrtab_data.insert(shstrtab_data.end(), (const uint8_t*)".debug_addr", (const uint8_t*)".debug_addr" + 11);
+            shstrtab_data.push_back(0);
+        }
+        if (!merged_debug_rnglists_.empty()) {
+            shstrtab_debug_rnglists = shstrtab_data.size();
+            shstrtab_data.insert(shstrtab_data.end(), (const uint8_t*)".debug_rnglists", (const uint8_t*)".debug_rnglists" + 15);
+            shstrtab_data.push_back(0);
+        }
+        
+        uint32_t shstrtab_shstrtab = shstrtab_data.size();
+        shstrtab_data.insert(shstrtab_data.end(), (const uint8_t*)".shstrtab", (const uint8_t*)".shstrtab" + 9);
+        shstrtab_data.push_back(0);
+
+        // Calculate offsets
+        size_t shdr_offset = ELF_HDR_SIZE;
+        size_t debug_info_offset = shdr_offset + num_sections * SHDR_SIZE;
+        size_t debug_abbrev_offset = debug_info_offset + merged_debug_info_.size();
+        size_t debug_str_offset = debug_abbrev_offset + merged_debug_abbrev_.size();
+        size_t debug_str_offsets_offset = debug_str_offset + (merged_debug_str_.empty() ? 0 : merged_debug_str_.size());
+        size_t debug_addr_offset = debug_str_offsets_offset + (merged_debug_str_offsets_.empty() ? 0 : merged_debug_str_offsets_.size());
+        size_t debug_rnglists_offset = debug_addr_offset + (merged_debug_addr_.empty() ? 0 : merged_debug_addr_.size());
+        size_t shstrtab_offset = debug_rnglists_offset + (merged_debug_rnglists_.empty() ? 0 : merged_debug_rnglists_.size());
+        size_t total_size = shstrtab_offset + shstrtab_data.size();
+
+        std::vector<uint8_t> elf_data(total_size, 0);
+
+        // ELF header
+        Elf64_Ehdr* ehdr = reinterpret_cast<Elf64_Ehdr*>(elf_data.data());
+        ehdr->e_ident[EI_MAG0] = ELFMAG0;
+        ehdr->e_ident[EI_MAG1] = ELFMAG1;
+        ehdr->e_ident[EI_MAG2] = ELFMAG2;
+        ehdr->e_ident[EI_MAG3] = ELFMAG3;
+        ehdr->e_ident[EI_CLASS] = ELFCLASS64;
+        ehdr->e_ident[EI_DATA] = ELFDATA2LSB;
+        ehdr->e_ident[EI_VERSION] = EV_CURRENT;
+        ehdr->e_ident[EI_OSABI] = 64;
+        ehdr->e_type = ET_REL;
+        ehdr->e_machine = 224;
+        ehdr->e_version = EV_CURRENT;
+        ehdr->e_shoff = shdr_offset;
+        ehdr->e_ehsize = ELF_HDR_SIZE;
+        ehdr->e_shentsize = SHDR_SIZE;
+        ehdr->e_shnum = num_sections;
+        ehdr->e_shstrndx = num_sections - 1;
+
+        // Section headers
+        Elf64_Shdr* shdrs = reinterpret_cast<Elf64_Shdr*>(elf_data.data() + shdr_offset);
+        size_t shdr_idx = 1;
+
+        shdrs[shdr_idx].sh_name = shstrtab_debug_info;
+        shdrs[shdr_idx].sh_type = SHT_PROGBITS;
+        shdrs[shdr_idx].sh_offset = debug_info_offset;
+        shdrs[shdr_idx].sh_size = merged_debug_info_.size();
+        shdrs[shdr_idx].sh_addralign = 1;
+        shdr_idx++;
+
+        shdrs[shdr_idx].sh_name = shstrtab_debug_abbrev;
+        shdrs[shdr_idx].sh_type = SHT_PROGBITS;
+        shdrs[shdr_idx].sh_offset = debug_abbrev_offset;
+        shdrs[shdr_idx].sh_size = merged_debug_abbrev_.size();
+        shdrs[shdr_idx].sh_addralign = 1;
+        shdr_idx++;
+
+        if (!merged_debug_str_.empty()) {
+            shdrs[shdr_idx].sh_name = shstrtab_debug_str;
+            shdrs[shdr_idx].sh_type = SHT_PROGBITS;
+            shdrs[shdr_idx].sh_offset = debug_str_offset;
+            shdrs[shdr_idx].sh_size = merged_debug_str_.size();
+            shdrs[shdr_idx].sh_addralign = 1;
+            shdr_idx++;
+        }
+
+        if (!merged_debug_str_offsets_.empty()) {
+            shdrs[shdr_idx].sh_name = shstrtab_debug_str_offsets;
+            shdrs[shdr_idx].sh_type = SHT_PROGBITS;
+            shdrs[shdr_idx].sh_offset = debug_str_offsets_offset;
+            shdrs[shdr_idx].sh_size = merged_debug_str_offsets_.size();
+            shdrs[shdr_idx].sh_addralign = 1;
+            shdr_idx++;
+        }
+
+        if (!merged_debug_addr_.empty()) {
+            shdrs[shdr_idx].sh_name = shstrtab_debug_addr;
+            shdrs[shdr_idx].sh_type = SHT_PROGBITS;
+            shdrs[shdr_idx].sh_offset = debug_addr_offset;
+            shdrs[shdr_idx].sh_size = merged_debug_addr_.size();
+            shdrs[shdr_idx].sh_addralign = 1;
+            shdr_idx++;
+        }
+
+        if (!merged_debug_rnglists_.empty()) {
+            shdrs[shdr_idx].sh_name = shstrtab_debug_rnglists;
+            shdrs[shdr_idx].sh_type = SHT_PROGBITS;
+            shdrs[shdr_idx].sh_offset = debug_rnglists_offset;
+            shdrs[shdr_idx].sh_size = merged_debug_rnglists_.size();
+            shdrs[shdr_idx].sh_addralign = 1;
+            shdr_idx++;
+        }
+
+        shdrs[shdr_idx].sh_name = shstrtab_shstrtab;
+        shdrs[shdr_idx].sh_type = SHT_STRTAB;
+        shdrs[shdr_idx].sh_offset = shstrtab_offset;
+        shdrs[shdr_idx].sh_size = shstrtab_data.size();
+        shdrs[shdr_idx].sh_addralign = 1;
+
+        // Copy section data
+        memcpy(elf_data.data() + debug_info_offset, merged_debug_info_.data(), merged_debug_info_.size());
+        memcpy(elf_data.data() + debug_abbrev_offset, merged_debug_abbrev_.data(), merged_debug_abbrev_.size());
+        if (!merged_debug_str_.empty()) {
+            memcpy(elf_data.data() + debug_str_offset, merged_debug_str_.data(), merged_debug_str_.size());
+        }
+        if (!merged_debug_str_offsets_.empty()) {
+            memcpy(elf_data.data() + debug_str_offsets_offset, merged_debug_str_offsets_.data(), merged_debug_str_offsets_.size());
+        }
+        if (!merged_debug_addr_.empty()) {
+            memcpy(elf_data.data() + debug_addr_offset, merged_debug_addr_.data(), merged_debug_addr_.size());
+        }
+        if (!merged_debug_rnglists_.empty()) {
+            memcpy(elf_data.data() + debug_rnglists_offset, merged_debug_rnglists_.data(), merged_debug_rnglists_.size());
+        }
+        memcpy(elf_data.data() + shstrtab_offset, shstrtab_data.data(), shstrtab_data.size());
+
+        return elf_data;
+    }
+
+    // Use LLVM DWARF API to parse and patch addresses
+    void patchAddressesUsingLLVM(llvm::DWARFContext& ctx) {
+        printf("Using LLVM DWARF API to parse and patch addresses...\n");
+        
+        // Reset error flag
+        g_llvm_dwarf_error = false;
+        
+        int total_addr_patched = 0;
+        int total_rnglists_patched = 0;
+
+        // Iterate through compile units
+        for (const std::unique_ptr<llvm::DWARFUnit>& unit_ptr : ctx.info_section_units()) {
+            llvm::DWARFUnit* unit = unit_ptr.get();
+            if (!unit) continue;
+            
+            // Find which chunk this unit belongs to by matching its offset in merged_debug_info_
+            uint64_t unit_offset = unit->getOffset();
+            size_t chunk_idx = SIZE_MAX;
+            for (size_t i = 0; i < debug_info_chunks_.size(); i++) {
+                if (unit_offset >= debug_info_chunks_[i].merged_offset &&
+                    unit_offset < debug_info_chunks_[i].merged_offset + debug_info_chunks_[i].size) {
+                    chunk_idx = i;
+                    break;
+                }
+            }
+            if (chunk_idx == SIZE_MAX) {
+                printf("  Warning: Unit at offset 0x%lx not found in any chunk\n", unit_offset);
+                continue;
+            }
+            
+            const auto& chunk = debug_info_chunks_[chunk_idx];
+            int64_t addr_delta = (int64_t)(text_addr_ + chunk.new_text_offset) - (int64_t)chunk.orig_text_addr;
+            
+            printf("  Chunk %zu (%s): unit_offset=0x%lx, addr_delta=0x%lx\n", 
+                   chunk_idx, chunk.source_file.c_str(), unit_offset, (uint64_t)addr_delta);
+            
+            // Check for errors after processing this chunk
+            if (g_llvm_dwarf_error) {
+                fprintf(stderr, "\nERROR: DWARF error detected while processing chunk %zu from file: %s\n",
+                        chunk_idx, chunk.source_file.c_str());
+                fprintf(stderr, "  Unit offset: 0x%lx, Merged offset: 0x%zx, Size: %zu\n",
+                        unit_offset, chunk.merged_offset, chunk.size);
+                setFatalError("DWARF error detected during LLVM parsing");
+                return;
+            }
+            
+            // Get address ranges for this unit using LLVM
+            llvm::DWARFDie die = unit->getUnitDIE(false);
+            if (die.isValid()) {
+                // Check for errors before accessing Expected values
+                if (g_llvm_dwarf_error) {
+                    fprintf(stderr, "\nERROR: DWARF error detected before processing address ranges for chunk %zu from file: %s\n",
+                            chunk_idx, chunk.source_file.c_str());
+                    fprintf(stderr, "  Unit offset: 0x%lx, Merged offset: 0x%zx, Size: %zu\n",
+                            unit_offset, chunk.merged_offset, chunk.size);
+                    setFatalError("DWARF error detected during LLVM parsing");
+                    return;
+                }
+                
+                // Try to get address ranges - LLVM will parse .debug_rnglists or .debug_ranges for us
+                llvm::Expected<llvm::DWARFAddressRangesVector> ranges_or = die.getAddressRanges();
+                if (!ranges_or) {
+                    fprintf(stderr, "\nERROR: Failed to get address ranges for chunk %zu from file: %s\n",
+                            chunk_idx, chunk.source_file.c_str());
+                    llvm::handleAllErrors(ranges_or.takeError(), [](const llvm::ErrorInfoBase& ei) {
+                        std::string msg_str;
+                        llvm::raw_string_ostream msg(msg_str);
+                        ei.log(msg);
+                        fprintf(stderr, "  Error: %s\n", msg_str.c_str());
+                    });
+                    setFatalError("Failed to get address ranges");
+                    return;
+                }
+                const auto& ranges = *ranges_or;
+                printf("    Found %zu address ranges\n", ranges.size());
+                
+                // Use LLVM to understand the structure, then patch the raw bytes
+                // For .debug_addr, we need to patch addresses that LLVM parsed
+                if (!merged_debug_addr_.empty() && chunk.addr_base < merged_debug_addr_.size()) {
+                    // Parse header to find where addresses start
+                    size_t pos = chunk.addr_base;
+                    size_t chunk_end = (chunk_idx + 1 < debug_info_chunks_.size())
+                        ? debug_info_chunks_[chunk_idx + 1].addr_base
+                        : merged_debug_addr_.size();
+                    
+                    if (pos + 8 <= chunk_end) {
+                        uint32_t unit_length;
+                        memcpy(&unit_length, &merged_debug_addr_[pos], 4);
+                        uint16_t version;
+                        memcpy(&version, &merged_debug_addr_[pos + 4], 2);
+                        uint8_t addr_size = merged_debug_addr_[pos + 6];
+                        
+                        if (version == 5 && addr_size == 8) {
+                            // Addresses start after 8-byte header
+                            size_t addr_start = pos + 8;
+                            
+                            // First pass: find minimum address from all addresses in .debug_addr (excluding 0 and UINT64_MAX)
+                            uint64_t min_addr = UINT64_MAX;
+                            for (size_t p = addr_start; p + 8 <= chunk_end; p += 8) {
+                                uint64_t addr;
+                                memcpy(&addr, &merged_debug_addr_[p], 8);
+                                if (addr != 0 && addr != UINT64_MAX && addr < min_addr) {
+                                    min_addr = addr;
+                                }
+                            }
+                            
+                            // If no valid addresses found, try ranges as fallback
+                            if (min_addr == UINT64_MAX && !ranges.empty()) {
+                                for (const auto& range : ranges) {
+                                    if (range.LowPC < min_addr) {
+                                        min_addr = range.LowPC;
+                                    }
+                                }
+                            }
+                            
+                            int patched = 0;
+                            
+                            // Patch all addresses in this chunk's contribution
+                            for (size_t p = addr_start; p + 8 <= chunk_end; p += 8) {
+                                uint64_t addr;
+                                memcpy(&addr, &merged_debug_addr_[p], 8);
+                                
+                                // Patch all addresses (skip UINT64_MAX as that's typically used as a sentinel/invalid value)
+                                if (addr != UINT64_MAX) {
+                                    uint64_t new_addr;
+                                    if (addr == 0) {
+                                        // If address is 0, patch it to minimum address + delta (for CU's DW_AT_low_pc)
+                                        if (min_addr != UINT64_MAX) {
+                                            new_addr = (uint64_t)((int64_t)min_addr + addr_delta);
+                                        } else {
+                                            // No valid addresses found, skip patching 0
+                                            continue;
+                                        }
+                                    } else {
+                                        new_addr = (uint64_t)((int64_t)addr + addr_delta);
+                                    }
+                                    if (new_addr != addr) {
+                                        memcpy(&merged_debug_addr_[p], &new_addr, 8);
+                                        patched++;
+                                        if (p == addr_start && addr == 0) {
+                                            printf("    Patched CU DW_AT_low_pc (index 0) from 0x0 to 0x%lx (min_addr=0x%lx + delta=0x%lx)\n", 
+                                                   new_addr, min_addr, (uint64_t)addr_delta);
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            if (patched > 0) {
+                                printf("    Patched %d addresses in .debug_addr\n", patched);
+                                total_addr_patched += patched;
+                            }
+                        }
+                    }
+                }
+            } else {
+                // No ranges found, fall back to patching all addresses normally
+                // Use LLVM to understand the structure, then patch the raw bytes
+                // For .debug_addr, we need to patch addresses that LLVM parsed
+                if (!merged_debug_addr_.empty() && chunk.addr_base < merged_debug_addr_.size()) {
+                    // Parse header to find where addresses start
+                    size_t pos = chunk.addr_base;
+                    size_t chunk_end = (chunk_idx + 1 < debug_info_chunks_.size())
+                        ? debug_info_chunks_[chunk_idx + 1].addr_base
+                        : merged_debug_addr_.size();
+                    
+                    if (pos + 8 <= chunk_end) {
+                        uint32_t unit_length;
+                        memcpy(&unit_length, &merged_debug_addr_[pos], 4);
+                        uint16_t version;
+                        memcpy(&version, &merged_debug_addr_[pos + 4], 2);
+                        uint8_t addr_size = merged_debug_addr_[pos + 6];
+                        
+                        if (version == 5 && addr_size == 8) {
+                            // Addresses start after 8-byte header
+                            size_t addr_start = pos + 8;
+                            int patched = 0;
+                            
+                            // Patch all addresses in this chunk's contribution
+                            for (size_t p = addr_start; p + 8 <= chunk_end; p += 8) {
+                                uint64_t addr;
+                                memcpy(&addr, &merged_debug_addr_[p], 8);
+                                
+                                // Patch all non-zero addresses
+                                if (addr != 0 && addr != UINT64_MAX) {
+                                    uint64_t new_addr = (uint64_t)((int64_t)addr + addr_delta);
+                                    memcpy(&merged_debug_addr_[p], &new_addr, 8);
+                                    patched++;
+                                }
+                            }
+                            
+                            if (patched > 0) {
+                                printf("    Patched %d addresses in .debug_addr\n", patched);
+                                total_addr_patched += patched;
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // For .debug_rnglists, use LLVM's understanding to guide patching
+            if (!merged_debug_rnglists_.empty() && chunk.rnglists_base < merged_debug_rnglists_.size()) {
+                size_t pos = chunk.rnglists_base;
+                size_t chunk_end = (chunk_idx + 1 < debug_info_chunks_.size())
+                    ? debug_info_chunks_[chunk_idx + 1].rnglists_base
+                    : merged_debug_rnglists_.size();
+                
+                if (pos + 8 <= chunk_end) {
+                    // Parse DWARF5 .debug_rnglists header
+                    uint32_t unit_length;
+                    memcpy(&unit_length, &merged_debug_rnglists_[pos], 4);
+                    uint16_t version;
+                    memcpy(&version, &merged_debug_rnglists_[pos + 4], 2);
+                    uint8_t addr_size = merged_debug_rnglists_[pos + 6];
+                    uint8_t seg_selector_size = merged_debug_rnglists_[pos + 7];
+                    
+                    if (version == 5 && addr_size == 8) {
+                        // Read offset_entry_count (ULEB128) after 8-byte header
+                        size_t offset_pos = pos + 8;
+                        uint64_t offset_entry_count = 0;
+                        int shift = 0;
+                        while (offset_pos < chunk_end) {
+                            uint8_t byte = merged_debug_rnglists_[offset_pos++];
+                            offset_entry_count |= ((uint64_t)(byte & 0x7f) << shift);
+                            if ((byte & 0x80) == 0) break;
+                            shift += 7;
+                        }
+                        
+                        // Skip offset table (offset_entry_count ULEB128 offsets)
+                        size_t range_lists_start = offset_pos;
+                        for (uint64_t i = 0; i < offset_entry_count && range_lists_start < chunk_end; i++) {
+                            while (range_lists_start < chunk_end) {
+                                uint8_t byte = merged_debug_rnglists_[range_lists_start++];
+                                if ((byte & 0x80) == 0) break;
+                            }
+                        }
+                        
+                        // Now patch range lists
+                        size_t range_pos = range_lists_start;
+                        int patched = 0;
+                        
+                        while (range_pos < chunk_end) {
+                            uint8_t entry_kind = merged_debug_rnglists_[range_pos++];
+                            
+                            if (entry_kind == 0) {  // DW_RLE_end_of_list
+                                break;
+                            } else if (entry_kind == 1) {  // DW_RLE_base_addressx
+                                // ULEB128 index into .debug_addr
+                                uint64_t index = 0;
+                                int shift = 0;
+                                while (range_pos < chunk_end) {
+                                    uint8_t byte = merged_debug_rnglists_[range_pos++];
+                                    index |= ((uint64_t)(byte & 0x7f) << shift);
+                                    if ((byte & 0x80) == 0) break;
+                                    shift += 7;
+                                }
+                                // Index references .debug_addr - already patched above
+                            } else if (entry_kind == 2) {  // DW_RLE_startx_endx
+                                // Two ULEB128 indices into .debug_addr
+                                for (int i = 0; i < 2 && range_pos < chunk_end; i++) {
+                                    while (range_pos < chunk_end) {
+                                        uint8_t byte = merged_debug_rnglists_[range_pos++];
+                                        if ((byte & 0x80) == 0) break;
+                                    }
+                                }
+                                // Indices reference .debug_addr - already patched above
+                            } else if (entry_kind == 3) {  // DW_RLE_startx_length
+                                // ULEB128 index + ULEB128 length
+                                for (int i = 0; i < 2 && range_pos < chunk_end; i++) {
+                                    while (range_pos < chunk_end) {
+                                        uint8_t byte = merged_debug_rnglists_[range_pos++];
+                                        if ((byte & 0x80) == 0) break;
+                                    }
+                                }
+                                // Index references .debug_addr - already patched above
+                            } else if (entry_kind == 4) {  // DW_RLE_offset_pair
+                                // Two ULEB128 offsets (relative to base address)
+                                for (int i = 0; i < 2 && range_pos < chunk_end; i++) {
+                                    while (range_pos < chunk_end) {
+                                        uint8_t byte = merged_debug_rnglists_[range_pos++];
+                                        if ((byte & 0x80) == 0) break;
+                                    }
+                                }
+                            } else if (entry_kind == 5) {  // DW_RLE_base_address
+                                // 8-byte address (direct)
+                                if (range_pos + 8 <= chunk_end) {
+                                    uint64_t addr;
+                                    memcpy(&addr, &merged_debug_rnglists_[range_pos], 8);
+                                    if (addr != 0 && addr != UINT64_MAX) {
+                                        uint64_t new_addr = (uint64_t)((int64_t)addr + addr_delta);
+                                        memcpy(&merged_debug_rnglists_[range_pos], &new_addr, 8);
+                                        patched++;
+                                    }
+                                    range_pos += 8;
+                                } else {
+                                    break;
+                                }
+                            } else if (entry_kind == 6) {  // DW_RLE_start_end
+                                // Two 8-byte addresses (direct)
+                                if (range_pos + 16 <= chunk_end) {
+                                    for (int i = 0; i < 2; i++) {
+                                        uint64_t addr;
+                                        memcpy(&addr, &merged_debug_rnglists_[range_pos], 8);
+                                        if (addr != 0 && addr != UINT64_MAX) {
+                                            uint64_t new_addr = (uint64_t)((int64_t)addr + addr_delta);
+                                            memcpy(&merged_debug_rnglists_[range_pos], &new_addr, 8);
+                                            patched++;
+                                        }
+                                        range_pos += 8;
+                                    }
+                                } else {
+                                    break;
+                                }
+                            } else if (entry_kind == 7) {  // DW_RLE_start_length
+                                // 8-byte address + ULEB128 length
+                                if (range_pos + 8 <= chunk_end) {
+                                    uint64_t addr;
+                                    memcpy(&addr, &merged_debug_rnglists_[range_pos], 8);
+                                    if (addr != 0 && addr != UINT64_MAX) {
+                                        uint64_t new_addr = (uint64_t)((int64_t)addr + addr_delta);
+                                        memcpy(&merged_debug_rnglists_[range_pos], &new_addr, 8);
+                                        patched++;
+                                    }
+                                    range_pos += 8;
+                                    // Skip ULEB128 length
+                                    while (range_pos < chunk_end) {
+                                        uint8_t byte = merged_debug_rnglists_[range_pos++];
+                                        if ((byte & 0x80) == 0) break;
+                                    }
+                                } else {
+                                    break;
+                                }
+                            } else {
+                                // Unknown entry kind, skip
+                                printf("    Warning: Unknown rnglists entry kind %d at offset %zu\n", entry_kind, range_pos - 1);
+                                break;
+                            }
+                        }
+                        
+                        if (patched > 0) {
+                            printf("    Patched %d addresses in .debug_rnglists\n", patched);
+                            total_rnglists_patched += patched;
+                        }
+                    }
+                }
+            }
+        }
+        
+        printf("LLVM-based patching complete: %d addresses in .debug_addr, %d addresses in .debug_rnglists\n", 
+               total_addr_patched, total_rnglists_patched);
+    }
+
     void mergeDebugInfo() {
         if (debug_info_chunks_.empty()) {
             printf("No debug_info chunks, skipping debug section merge\n");
@@ -2976,75 +3966,69 @@ private:
 
         printf("Merging debug sections for %zu chunks...\n", debug_info_chunks_.size());
 
-        // Step 1: Patch addresses in .debug_addr
-        // DWARF5 .debug_addr format: header (8 bytes) + array of addresses
-        // Header: unit_length(4) + version(2) + address_size(1) + segment_selector_size(1)
-        if (!merged_debug_addr_.empty()) {
-            printf("Patching .debug_addr addresses...\n");
-            size_t pos = 0;
-            size_t chunk_idx = 0;
-
-            for (const auto& chunk : debug_info_chunks_) {
-                if (pos >= merged_debug_addr_.size()) break;
-
-                // Find the end of this chunk's debug_addr contribution
-                size_t chunk_end = (chunk_idx + 1 < debug_info_chunks_.size())
-                    ? debug_info_chunks_[chunk_idx + 1].addr_base
-                    : merged_debug_addr_.size();
-
-                if (chunk_end <= pos) {
-                    chunk_idx++;
-                    continue;
-                }
-
-                // Calculate address delta for this chunk
-                int64_t addr_delta = (int64_t)(text_addr_ + chunk.new_text_offset) - (int64_t)chunk.orig_text_addr;
-
-                // Parse header to find where addresses start
-                if (pos + 8 > chunk_end) {
-                    chunk_idx++;
-                    pos = chunk_end;
-                    continue;
-                }
-
-                uint32_t unit_length;
-                memcpy(&unit_length, &merged_debug_addr_[pos], 4);
-                uint16_t version;
-                memcpy(&version, &merged_debug_addr_[pos + 4], 2);
-                uint8_t addr_size = merged_debug_addr_[pos + 6];
-
-                if (version != 5 || addr_size != 8) {
-                    printf("  Chunk %zu: unexpected debug_addr format (version=%d, addr_size=%d)\n",
-                           chunk_idx, version, addr_size);
-                    chunk_idx++;
-                    pos = chunk_end;
-                    continue;
-                }
-
-                // Addresses start after 8-byte header
-                size_t addr_start = pos + 8;
-                int patched = 0;
-
-                for (size_t p = addr_start; p + 8 <= chunk_end; p += 8) {
-                    uint64_t addr;
-                    memcpy(&addr, &merged_debug_addr_[p], 8);
-
-                    // Only patch addresses that look like they're in the original text range
-                    // (non-zero and within reasonable bounds)
-                    if (addr != 0 && addr >= chunk.orig_text_addr) {
-                        uint64_t new_addr = addr + addr_delta;
-                        memcpy(&merged_debug_addr_[p], &new_addr, 8);
-                        patched++;
-                    }
-                }
-
-                printf("  Chunk %zu: patched %d addresses (delta=0x%lx)\n",
-                       chunk_idx, patched, (uint64_t)addr_delta);
-
-                chunk_idx++;
-                pos = chunk_end;
+        // Step 0: Patch CU headers first (abbrev_offset, etc.) so LLVM can parse correctly
+        // This must happen before creating the temporary ELF for LLVM parsing
+        if (!merged_debug_info_.empty()) {
+            printf("Patching .debug_info CU headers (abbrev_offset, etc.)...\n");
+            
+            for (size_t i = 0; i < debug_info_chunks_.size(); i++) {
+                const auto& chunk = debug_info_chunks_[i];
+                size_t cu_start = chunk.merged_offset;
+                uint16_t ver = chunk.dwarf_version;
+                size_t cu_header_size = (ver == 4) ? 11 : 12;
+                size_t abbrev_offset_pos = (ver == 4) ? (cu_start + 6) : (cu_start + 8);
+                
+                if (cu_start + cu_header_size > merged_debug_info_.size()) continue;
+                
+                // Patch debug_abbrev_offset in CU header
+                uint32_t new_abbrev_offset = (uint32_t)chunk.abbrev_base;
+                memcpy(&merged_debug_info_[abbrev_offset_pos], &new_abbrev_offset, 4);
             }
         }
+
+        // Step 1: Use LLVM to parse and patch addresses in .debug_addr and .debug_rnglists
+        // Create a temporary ELF with merged sections and use LLVM to parse addresses
+        if (!merged_debug_addr_.empty() || !merged_debug_rnglists_.empty()) {
+            printf("Patching addresses using LLVM DWARF API...\n");
+            
+            // Build a temporary ELF with merged debug sections for LLVM parsing
+            // Note: CU headers are already patched above
+            std::vector<uint8_t> temp_elf = createTempElfForMergedDebugSections();
+            if (!temp_elf.empty()) {
+                llvm::StringRef elf_ref(reinterpret_cast<const char*>(temp_elf.data()), temp_elf.size());
+                std::unique_ptr<llvm::MemoryBuffer> buf = llvm::MemoryBuffer::getMemBufferCopy(elf_ref, "");
+                llvm::Expected<std::unique_ptr<llvm::object::ObjectFile>> obj_or =
+                    llvm::object::ObjectFile::createObjectFile(buf->getMemBufferRef());
+                if (!obj_or) {
+                    fprintf(stderr, "ERROR: Failed to create ObjectFile from temporary ELF: ");
+                    llvm::handleAllErrors(obj_or.takeError(), [](const llvm::ErrorInfoBase& ei) {
+                        std::string msg_str;
+                        llvm::raw_string_ostream msg(msg_str);
+                        ei.log(msg);
+                        fprintf(stderr, "%s\n", msg_str.c_str());
+                    });
+                    setFatalError("Failed to parse temporary ELF for LLVM DWARF parsing");
+                    return;
+                }
+                std::unique_ptr<llvm::object::ObjectFile> obj = std::move(obj_or.get());
+                std::unique_ptr<llvm::DWARFContext> ctx =
+                    llvm::DWARFContext::create(*obj, llvm::DWARFContext::ProcessDebugRelocations::Ignore,
+                                                nullptr, "", llvmDwarfErrorHandler,
+                                                llvmDwarfWarningHandler, false);
+                if (!ctx) {
+                    fprintf(stderr, "ERROR: Failed to create DWARFContext from temporary ELF\n");
+                    setFatalError("Failed to create DWARFContext");
+                    return;
+                }
+                patchAddressesUsingLLVM(*ctx);
+                if (g_llvm_dwarf_error) {
+                    fprintf(stderr, "ERROR: LLVM reported DWARF errors during address patching (see above)\n");
+                    setFatalError("DWARF errors detected during LLVM-based patching");
+                    return;
+                }
+            }
+        }
+
 
         // Step 1.5: Patch offsets in .debug_str_offsets
         // DWARF5 .debug_str_offsets format: header (8 bytes) + array of 4-byte offsets into .debug_str
@@ -3115,36 +4099,93 @@ private:
             }
         }
 
+        // Step 1.6: Patch addresses in .debug_ranges (legacy ranges, used by DWARF4 and some DWARF5)
+        // .debug_ranges format: pairs of (start_addr, end_addr) as 8-byte addresses, terminated by (0, 0)
+        if (!merged_debug_ranges_.empty()) {
+            printf("Patching .debug_ranges addresses...\n");
+            size_t pos = 0;
+            size_t chunk_idx = 0;
+
+            for (const auto& chunk : debug_info_chunks_) {
+                if (pos >= merged_debug_ranges_.size()) break;
+
+                // Find the end of this chunk's debug_ranges contribution
+                size_t chunk_end = (chunk_idx + 1 < debug_info_chunks_.size())
+                    ? debug_info_chunks_[chunk_idx + 1].ranges_base
+                    : merged_debug_ranges_.size();
+
+                if (chunk_end <= pos) {
+                    chunk_idx++;
+                    continue;
+                }
+
+                // Calculate address delta for this chunk
+                int64_t addr_delta = (int64_t)(text_addr_ + chunk.new_text_offset) - (int64_t)chunk.orig_text_addr;
+                int patched = 0;
+
+                // Walk through address pairs: (start, end), terminated by (0, 0)
+                for (size_t p = pos; p + 16 <= chunk_end; p += 16) {
+                    uint64_t start_addr, end_addr;
+                    memcpy(&start_addr, &merged_debug_ranges_[p], 8);
+                    memcpy(&end_addr, &merged_debug_ranges_[p + 8], 8);
+
+                    // Terminator: (0, 0) or (0xffffffffffffffff, 0xffffffffffffffff)
+                    if ((start_addr == 0 && end_addr == 0) ||
+                        (start_addr == UINT64_MAX && end_addr == UINT64_MAX)) {
+                        // End of this chunk's ranges, move to next chunk
+                        break;
+                    }
+
+                    // Base address selector: (base_addr, 0xffffffffffffffff) - don't patch the base
+                    if (end_addr == UINT64_MAX) {
+                        continue;
+                    }
+
+                    // Patch both addresses (patch all non-zero addresses, not just those >= orig_text_addr)
+                    // The >= check was too restrictive; addresses in ranges can be relative or absolute
+                    if (start_addr != 0 && start_addr != UINT64_MAX) {
+                        uint64_t new_start = (uint64_t)((int64_t)start_addr + addr_delta);
+                        memcpy(&merged_debug_ranges_[p], &new_start, 8);
+                        patched++;
+                    }
+                    if (end_addr != 0 && end_addr != UINT64_MAX) {
+                        uint64_t new_end = (uint64_t)((int64_t)end_addr + addr_delta);
+                        memcpy(&merged_debug_ranges_[p + 8], &new_end, 8);
+                        patched++;
+                    }
+                }
+
+                if (patched > 0) {
+                    printf("  Chunk %zu: patched %d address pairs in .debug_ranges (delta=0x%lx)\n",
+                           chunk_idx, patched / 2, (uint64_t)addr_delta);
+                }
+
+                chunk_idx++;
+                pos = chunk_end;
+            }
+        }
+
+
         // Step 2: Patch .debug_info CU headers and attributes
-        // DWARF5 CU header: unit_length(4) + version(2) + unit_type(1) + addr_size(1) + debug_abbrev_offset(4)
-        // DWARF4 CU header: unit_length(4) + version(2) + debug_abbrev_offset(4) + addr_size(1)
+        // DWARF4 CU header: unit_length(4) + version(2) + abbrev_offset(4) + addr_size(1) = 11
+        // DWARF5 CU header: unit_length(4) + version(2) + unit_type(1) + addr_size(1) + debug_abbrev_offset(4) = 12
         if (!merged_debug_info_.empty()) {
             printf("Patching .debug_info CU headers...\n");
 
             for (size_t i = 0; i < debug_info_chunks_.size(); i++) {
                 const auto& chunk = debug_info_chunks_[i];
                 size_t cu_start = chunk.merged_offset;
+                uint16_t ver = chunk.dwarf_version;
+                size_t cu_header_size = (ver == 4) ? 11 : 12;
+                size_t abbrev_offset_pos = (ver == 4) ? (cu_start + 6) : (cu_start + 8);
 
-                if (cu_start + 12 > merged_debug_info_.size()) continue;
-
-                // Read version to determine header format
-                uint16_t version;
-                memcpy(&version, &merged_debug_info_[cu_start + 4], 2);
-
-                size_t abbrev_offset_pos;
-                if (version == 5) {
-                    // DWARF5: unit_length(4) + version(2) + unit_type(1) + addr_size(1) + debug_abbrev_offset(4)
-                    abbrev_offset_pos = cu_start + 8;
-                } else {
-                    // DWARF4: unit_length(4) + version(2) + debug_abbrev_offset(4) + addr_size(1)
-                    abbrev_offset_pos = cu_start + 6;
-                }
+                if (cu_start + cu_header_size > merged_debug_info_.size()) continue;
 
                 // Patch debug_abbrev_offset
                 uint32_t new_abbrev_offset = (uint32_t)chunk.abbrev_base;
                 memcpy(&merged_debug_info_[abbrev_offset_pos], &new_abbrev_offset, 4);
 
-                printf("  CU %zu (DWARF%d): abbrev_offset -> 0x%x\n", i, version, new_abbrev_offset);
+                printf("  CU %zu (DWARF%u): abbrev_offset -> 0x%x\n", i, (unsigned)ver, new_abbrev_offset);
 
                 // Step 2.5: Patch DWARF attributes using positions found by LLVM
                 const auto& attrs = chunk.dwarf_attr_positions;
@@ -3166,38 +4207,107 @@ private:
                     }
                 };
 
-                // Patch DW_AT_ranges (points to .debug_ranges for DWARF4)
+                // Patch DW_AT_ranges (points to .debug_ranges; both DWARF4 and DWARF5)
                 if (chunk.ranges_base > 0) {
                     patchAttrs(attrs.ranges, chunk.ranges_base, "DW_AT_ranges");
                 }
 
-                // Patch DW_AT_str_offsets_base (points to .debug_str_offsets for DWARF5)
-                if (chunk.str_offsets_base > 0) {
-                    patchAttrs(attrs.str_offsets_base, chunk.str_offsets_base, "DW_AT_str_offsets_base");
+                // DWARF5-only attributes (DWARF4 uses .debug_str / .debug_ranges, no str_offsets/rnglists)
+                if (ver == 5) {
+                    if (chunk.str_offsets_base > 0) {
+                        patchAttrs(attrs.str_offsets_base, chunk.str_offsets_base, "DW_AT_str_offsets_base");
+                    }
+                    if (chunk.rnglists_base > 0) {
+                        patchAttrs(attrs.rnglists_base, chunk.rnglists_base, "DW_AT_rnglists_base");
+                    }
                 }
-
-                // Patch DW_AT_addr_base (points to .debug_addr for DWARF5)
                 if (chunk.addr_base > 0) {
                     patchAttrs(attrs.addr_base, chunk.addr_base, "DW_AT_addr_base");
-                }
-
-                // Patch DW_AT_rnglists_base (points to .debug_rnglists for DWARF5)
-                if (chunk.rnglists_base > 0) {
-                    patchAttrs(attrs.rnglists_base, chunk.rnglists_base, "DW_AT_rnglists_base");
                 }
 
                 // Patch DW_AT_stmt_list (points to .debug_line)
                 if (chunk.line_base > 0) {
                     patchAttrs(attrs.stmt_list, chunk.line_base, "DW_AT_stmt_list");
                 }
+
+                // Patch DW_AT_low_pc and DW_AT_high_pc addresses (8-byte addresses, needed for DWARF4 which doesn't use .debug_addr)
+                // Note: If a compile unit has both DW_AT_low_pc and DW_AT_ranges, DW_AT_low_pc should match the first range start
+                // or be removed (set to 0). We try to set it to first range start; if that fails, remove it.
+                if (!attrs.low_pc.empty() || !attrs.high_pc.empty()) {
+                    int64_t address_delta = (int64_t)(text_addr_ + chunk.new_text_offset) - (int64_t)chunk.orig_text_addr;
+                    int patched_low = 0, patched_high = 0;
+                    
+                    // For compile units with ranges, try to set DW_AT_low_pc to first range start
+                    // Read the patched DW_AT_ranges offset (we patched it above, so read from merged_debug_info_)
+                    bool has_ranges = !attrs.ranges.empty();
+                    uint64_t first_range_start = 0;
+                    if (has_ranges && chunk.ranges_base > 0) {
+                        // Read the patched DW_AT_ranges value from .debug_info (it was patched above)
+                        size_t ranges_attr_pos = chunk.merged_offset + attrs.ranges[0].first;
+                        if (ranges_attr_pos + 4 <= merged_debug_info_.size()) {
+                            uint32_t patched_ranges_offset;
+                            memcpy(&patched_ranges_offset, &merged_debug_info_[ranges_attr_pos], 4);
+                            if (patched_ranges_offset + 16 <= merged_debug_ranges_.size()) {
+                                uint64_t start, end;
+                                memcpy(&start, &merged_debug_ranges_[patched_ranges_offset], 8);
+                                memcpy(&end, &merged_debug_ranges_[patched_ranges_offset + 8], 8);
+                                // Skip base address selectors (end == UINT64_MAX) and terminators (start == 0 && end == 0)
+                                if (end != UINT64_MAX && start != 0) {
+                                    first_range_start = start;
+                                } else if (patched_ranges_offset + 32 <= merged_debug_ranges_.size()) {
+                                    // Try next pair if first was base selector
+                                    memcpy(&start, &merged_debug_ranges_[patched_ranges_offset + 16], 8);
+                                    memcpy(&end, &merged_debug_ranges_[patched_ranges_offset + 24], 8);
+                                    if (end != UINT64_MAX && start != 0) {
+                                        first_range_start = start;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
+                    for (const auto& [offset, orig_addr] : attrs.low_pc) {
+                        size_t pos = chunk.merged_offset + offset;
+                        if (pos + 8 <= merged_debug_info_.size()) {
+                            uint64_t new_addr;
+                            // If this is a compile unit with ranges, use first range start; otherwise remove it (set to 0)
+                            if (has_ranges) {
+                                if (first_range_start != 0) {
+                                    new_addr = first_range_start;
+                                } else {
+                                    // Can't determine first range start, remove DW_AT_low_pc (set to 0)
+                                    new_addr = 0;
+                                }
+                            } else {
+                                new_addr = (uint64_t)((int64_t)orig_addr + address_delta);
+                            }
+                            memcpy(&merged_debug_info_[pos], &new_addr, 8);
+                            patched_low++;
+                        }
+                    }
+                    for (const auto& [offset, orig_addr] : attrs.high_pc) {
+                        size_t pos = chunk.merged_offset + offset;
+                        if (pos + 8 <= merged_debug_info_.size()) {
+                            uint64_t new_addr = (uint64_t)((int64_t)orig_addr + address_delta);
+                            memcpy(&merged_debug_info_[pos], &new_addr, 8);
+                            patched_high++;
+                        }
+                    }
+                    if (patched_low > 0 || patched_high > 0) {
+                        printf("    Patched %d DW_AT_low_pc, %d DW_AT_high_pc addresses (delta=0x%lx%s)\n",
+                               patched_low, patched_high, (uint64_t)address_delta,
+                               (has_ranges && first_range_start != 0) ? ", CU low_pc set to first range start" : "");
+                    }
+                }
             }
         }
 
-        // Patch DW_FORM_line_strp in .debug_info (e.g. DW_AT_decl_file) so offsets point into merged .debug_line_str
+        // Patch DW_FORM_line_strp in .debug_info (e.g. DW_AT_decl_file) so offsets point into merged .debug_line_str (DWARF5 only)
         if (!merged_debug_info_.empty() && !merged_debug_abbrev_.empty()) {
             int line_strp_patched = 0;
             for (size_t i = 0; i < debug_info_chunks_.size(); i++) {
                 const auto& chunk = debug_info_chunks_[i];
+                if (chunk.dwarf_version != 5) continue;  // DWARF4 does not use .debug_line_str / DW_FORM_line_strp
                 if (chunk.line_str_offset_base == 0) continue;
                 if (chunk.merged_offset + chunk.size > merged_debug_info_.size()) continue;
 
@@ -3211,7 +4321,7 @@ private:
                 if (chunk_info_size < 12) continue;
                 uint16_t cu_version;
                 memcpy(&cu_version, chunk_info_ptr + 4, 2);
-                uint8_t cu_addr_size = (cu_version >= 5) ? chunk_info_ptr[9] : chunk_info_ptr[10];
+                uint8_t cu_addr_size = chunk_info_ptr[9];  // DWARF5: addr_size at offset 9
                 std::vector<uint8_t> chunk_abbrev(merged_debug_abbrev_.begin() + chunk.abbrev_base,
                                                  merged_debug_abbrev_.begin() + chunk.abbrev_base + abbrev_size);
                 auto abbrev_map = parseAbbrevTable(chunk_abbrev.data(), chunk_abbrev.size());
@@ -4085,7 +5195,7 @@ int main(int argc, char** argv) {
                 const uint8_t* p = static_cast<const uint8_t*>(f.data());
                 data.assign(p, p + f.size());
             }
-            kernels[i] = parseKernel(data);
+            kernels[i] = parseKernel(data, inputs[i]);
 
             std::lock_guard<std::mutex> lock(mtx);
             if (++done % 100 == 0) printf("  %d/%zu...\n", done, inputs.size());
@@ -4102,6 +5212,14 @@ int main(int argc, char** argv) {
         if (s < e) threads.emplace_back(worker, s, e);
     }
     for (auto& th : threads) th.join();
+
+    for (size_t i = 0; i < kernels.size(); i++) {
+        if (kernels[i].dwarf_version != 0 && kernels[i].dwarf_version != 4 && kernels[i].dwarf_version != 5) {
+            fprintf(stderr, "Error: %s has DWARF version %u; device linker requires DWARF4 or DWARF5\n",
+                    i < inputs.size() ? inputs[i].c_str() : "(kernel)", (unsigned)kernels[i].dwarf_version);
+            return 1;
+        }
+    }
 
     if (g_llvm_dwarf_error) {
         fprintf(stderr, "Error: LLVM reported DWARF errors during kernel parsing (see above). Exiting.\n");
