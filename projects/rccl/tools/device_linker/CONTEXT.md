@@ -35,6 +35,35 @@ Phase 3 of the DWARF rewrite (see `tools/device_linker/DWARF_LLVM_REWRITE_PLAN.m
 - **(b) .debug_info:** clone+emit or patch-from-LLVM — not yet done.
 - **(c) Optional DWARFLinker** — not yet done.
 
+## Device-Only Binaries (Feb 2026)
+
+Specialized kernels and the device linker now use **device-only** objects instead of host fat binaries:
+
+- **Specialized kernels:** Built with `compile_specialized_device.sh` (clang -cc1 -fcuda-is-device -emit-obj) → output `*.device.o` (raw amdgpu ELF). No host code, no fat binary.
+- **Main CMakeLists.txt:** Step 1 compiles each specialized kernel via the script → `specialized_objs/${name}.device.o`.
+- **Device linker:** `--input-dir` accepts only `*.device.o`; reads each file as the device ELF directly (no extraction from host .o via llvm-objcopy/clang-offload-bundler).
+- **Standalone build:** `tools/device_linker/CMakeLists.txt` also builds specialized kernels as `.device.o` via the script.
+
+Dispatcher is already built as device ELF in `build_with_device_linker.sh` (Steps 1–2); no change there.
+
+## LLVM/DWARF Debugger Messages and Fixes (Feb 2026)
+
+When parsing DWARF (e.g. during kernel parsing or merge), LLVM can emit many non-fatal errors/warnings. The device linker now **exits on any such message** so the build fails instead of continuing.
+
+### Messages seen (from LLVM)
+
+- **`error: invalid reference to or invalid content in .debug_str_offsets[.dwo]: insufficient space for 32 bit header prefix`**  
+  Caused when LLVM parses DWARF and finds `DW_AT_str_offsets_base` but the `.debug_str_offsets` section is missing or smaller than 8 bytes (DWARF5 header). Fix: (1) **Minimal ELF:** `createMinimalElfForDwarf()` now includes a `.debug_str_offsets` section with an 8-byte valid DWARF5 header so LLVM can parse without error. (2) **Merging:** When appending dispatcher or kernel `.debug_str_offsets`, if size &lt; 8 use the same 8-byte header; if the chunk has no section at all, append 8 bytes so the merged section stays parseable.
+
+- **`error: invalid reference to or invalid content in .debug_str_offsets[.dwo]: section offset exceeds section size`**  
+  Occurs when LLVM parses a minimal ELF that has `.debug_info` with `DW_AT_str_offsets_base` but no (or undersized) `.debug_str_offsets`; e.g. 807× during kernel parsing. The device linker uses minimal ELFs (`.debug_info` + `.debug_abbrev` only) for attribute finding; LLVM still validates cross-section references and reports this.
+
+### Fixes applied
+
+1. **Exit on LLVM DWARF errors/warnings:** Custom handlers `llvmDwarfErrorHandler(llvm::Error)` and `llvmDwarfWarningHandler(llvm::Error)` (signature required by `DWARFContext::create`). They set `g_llvm_dwarf_error` and log the error; after kernel parsing we check the flag and exit with status 1 so the build fails.
+2. **`.debug_str_offsets` padding:** When merging, if a chunk’s size is &lt; 8 bytes, get an 8-byte valid header (minimal ELF also includes .debug_str_offsets for parsing).
+3. **Phase 3 off:** `kUsePhase3Emission = false` to avoid the re-emission path that was triggering `.debug_str_offsets` issues.
+
 ## Known Issues (Feb 8, 2026)
 
 ### DWARF Info Still Has Issues
@@ -118,6 +147,7 @@ consistency across all compilation units.
 | File | Purpose |
 |------|---------|
 | `tools/device_linker/device_linker.cpp` | The device linker tool - merges ELFs, patches debug info |
+| `tools/device_linker/compile_specialized_device.sh` | Compiles one specialized kernel source to device-only `.device.o` (no host fat binary) |
 | `tools/device_linker/func_ptr_test.hip` | Simple test showing how function pointer tables work in GPU code |
 | `src/device/common.cu` | Dispatcher kernels (`ncclDevKernel_Generic_*`) |
 | `src/device/common.h` | Function table declarations, dispatch logic |

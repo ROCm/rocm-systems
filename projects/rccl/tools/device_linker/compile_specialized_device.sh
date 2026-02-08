@@ -90,6 +90,8 @@ SYS_INCLUDES=(
 )
 
 # Compile to device object only (no host, no fat binary)
+# Set VERBOSE=1 (or V=1) to print the full clang -cc1 command before running
+if [ -n "${VERBOSE:-}" ] || [ -n "${V:-}" ]; then set -x; fi
 $CLANG -cc1 \
     -triple amdgcn-amd-amdhsa \
     -aux-triple x86_64-unknown-linux-gnu \

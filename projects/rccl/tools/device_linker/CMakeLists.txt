@@ -147,15 +147,39 @@ set(COMMON_FLAGS
   -O3
 )
 
+# Build fix_device_dwarf tool (must be before specialized kernels use it)
+add_executable(fix_device_dwarf ${DEVICE_LINKER_DIR}/fix_device_dwarf.cpp)
+target_compile_options(fix_device_dwarf PRIVATE -std=c++17 -O3)
+
 # Step 5: Compile specialized kernels to device-only .device.o (NOT host fat binaries)
 # Device linker reads these ELFs directly
 set(SPECIALIZED_OBJECTS "")
-if(FAULT_INJECTION) set(FAULT_INJECTION_ENV "1") else() set(FAULT_INJECTION_ENV "0") endif()
-if(ENABLE_WARP_SPEED) set(ENABLE_WARP_SPEED_ENV "1") else() set(ENABLE_WARP_SPEED_ENV "0") endif()
-if(ENABLE_LL128) set(ENABLE_LL128_ENV "1") else() set(ENABLE_LL128_ENV "0") endif()
+if(FAULT_INJECTION)
+  set(FAULT_INJECTION_ENV "1")
+else()
+  set(FAULT_INJECTION_ENV "0")
+endif()
+if(ENABLE_WARP_SPEED)
+  set(ENABLE_WARP_SPEED_ENV "1")
+else()
+  set(ENABLE_WARP_SPEED_ENV "0")
+endif()
+if(ENABLE_LL128)
+  set(ENABLE_LL128_ENV "1")
+else()
+  set(ENABLE_LL128_ENV "0")
+endif()
 set(DEBUG_PEER_POINTERS_ENV "0")
-if(COLLTRACE) set(COLLTRACE_ENV "1") else() set(COLLTRACE_ENV "0") endif()
-if(PROFILE) set(PROFILE_ENV "1") else() set(PROFILE_ENV "0") endif()
+if(COLLTRACE)
+  set(COLLTRACE_ENV "1")
+else()
+  set(COLLTRACE_ENV "0")
+endif()
+if(PROFILE)
+  set(PROFILE_ENV "1")
+else()
+  set(PROFILE_ENV "0")
+endif()
 foreach(src ${SPECIALIZED_FILES})
   get_filename_component(name ${src} NAME_WE)
   set(obj ${CMAKE_CURRENT_BINARY_DIR}/specialized_objs/${name}.device.o)
@@ -175,6 +199,7 @@ foreach(src ${SPECIALIZED_FILES})
             ${GPU_TARGET_FULL}
             ${src}
             ${obj}
+    # COMMAND $<TARGET_FILE:fix_device_dwarf> ${obj}  # Disabled - tool removed from build flow
     DEPENDS ${src} ${DEVICE_LINKER_DIR}/compile_specialized_device.sh
     COMMENT "Compiling specialized kernel (device-only): ${name}"
   )
