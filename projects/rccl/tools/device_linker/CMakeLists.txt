@@ -35,11 +35,22 @@ set(GPU_TARGET "gfx942" CACHE STRING "GPU target architecture")
 set(GPU_TARGET_FULL "${GPU_TARGET}:xnack+:sramecc+")
 set(BUNDLE_TARGET "hipv4-amdgcn-amd-amdhsa--${GPU_TARGET}:sramecc+:xnack+")
 
-# Debug options
+# Build options - these MUST match the main RCCL build to ensure structure layout agreement
+# See CONTEXT.md for details on which flags affect struct layouts
+option(FAULT_INJECTION "Enable fault injection (adds faults field to ncclShmemData)" ON)
+option(ENABLE_WARP_SPEED "Enable warp speed (adds warpComm/warpChannel fields)" ON)
+option(ENABLE_LL128 "Enable LL128 protocol" ON)
 option(DEBUG_PEER_POINTERS "Enable device-side debug output for peer pointer tracking" OFF)
-if(DEBUG_PEER_POINTERS)
-  message(STATUS "DEBUG_PEER_POINTERS enabled - will print peer pointer info from device code")
-endif()
+option(COLLTRACE "Enable collective trace (adds collTrace/collTraceTail to ncclShmemData)" ON)
+option(PROFILE "Enable profiling (adds prof field to ncclShmemData)" OFF)
+
+message(STATUS "Build options:")
+message(STATUS "  FAULT_INJECTION: ${FAULT_INJECTION}")
+message(STATUS "  ENABLE_WARP_SPEED: ${ENABLE_WARP_SPEED}")
+message(STATUS "  ENABLE_LL128: ${ENABLE_LL128}")
+message(STATUS "  DEBUG_PEER_POINTERS: ${DEBUG_PEER_POINTERS}")
+message(STATUS "  COLLTRACE: ${COLLTRACE}")
+message(STATUS "  PROFILE: ${PROFILE}")
 
 message(STATUS "GPU target: ${GPU_TARGET_FULL}")
 message(STATUS "Bundle target: ${BUNDLE_TARGET}")
@@ -149,18 +160,26 @@ foreach(src ${SPECIALIZED_FILES})
     set(INC_FLAGS "${INC_FLAGS} -I${dir}")
   endforeach()
   
-  # Build debug flags if enabled
-  set(DEBUG_FLAGS "")
+  # Build define flags based on options
+  set(OPTION_DEFS "-DDEVICE_LINKER -D__HIP_PLATFORM_AMD__")
+  if(FAULT_INJECTION)
+    set(OPTION_DEFS "${OPTION_DEFS} -DENABLE_FAULT_INJECTION")
+  endif()
+  if(ENABLE_WARP_SPEED)
+    set(OPTION_DEFS "${OPTION_DEFS} -DENABLE_WARP_SPEED")
+  endif()
+  if(ENABLE_LL128)
+    set(OPTION_DEFS "${OPTION_DEFS} -DENABLE_LL128")
+  endif()
   if(DEBUG_PEER_POINTERS)
-    set(DEBUG_FLAGS "-DDEBUG_PEER_POINTERS")
+    set(OPTION_DEFS "${OPTION_DEFS} -DDEBUG_PEER_POINTERS")
   endif()
   
   add_custom_command(
     OUTPUT ${obj}
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/specialized_objs
     COMMAND ${HIPCC} -c -fPIC -fno-gpu-rdc --offload-arch=${GPU_TARGET_FULL}
-            -DDEVICE_LINKER -D__HIP_PLATFORM_AMD__ -DENABLE_FAULT_INJECTION
-            ${DEBUG_FLAGS}
+            ${OPTION_DEFS}
             -I${BASE_BUILD_FULL}/include
             -I${HIPIFY_DIR}/src
             -I${HIPIFY_DIR}/src/device
@@ -184,11 +203,14 @@ add_custom_target(specialized_kernels ALL DEPENDS ${SPECIALIZED_OBJECTS})
 # Step 6: Compile merged_minimal.hip (the dispatcher)
 set(DISPATCHER_OBJ ${CMAKE_CURRENT_BINARY_DIR}/merged_minimal.o)
 # Build dispatcher defines - MUST match host compilation for structure layout agreement
-set(DISPATCHER_DEFS -DDEVICE_LINKER -D__HIP_PLATFORM_AMD__ -DENABLE_FAULT_INJECTION)
+set(DISPATCHER_DEFS -DDEVICE_LINKER -D__HIP_PLATFORM_AMD__)
+if(FAULT_INJECTION)
+  list(APPEND DISPATCHER_DEFS -DENABLE_FAULT_INJECTION)
+endif()
 if(ENABLE_WARP_SPEED)
   list(APPEND DISPATCHER_DEFS -DENABLE_WARP_SPEED)
 endif()
-if(LL128_ENABLED)
+if(ENABLE_LL128)
   list(APPEND DISPATCHER_DEFS -DENABLE_LL128)
 endif()
 if(DEBUG_PEER_POINTERS)
@@ -219,7 +241,17 @@ add_custom_command(
 # Step 7: Build skeleton librccl.so (host code + dispatcher, NO specialized device code)
 add_library(rccl SHARED ${HOST_SOURCES})
 target_include_directories(rccl PRIVATE ${INCLUDE_DIRS})
-target_compile_definitions(rccl PRIVATE DEVICE_LINKER __HIP_PLATFORM_AMD__ RCCL_ROCM_BUILD ENABLE_FAULT_INJECTION)
+# Host compile definitions - MUST match device compilation for structure layout agreement
+target_compile_definitions(rccl PRIVATE DEVICE_LINKER __HIP_PLATFORM_AMD__ RCCL_ROCM_BUILD)
+if(FAULT_INJECTION)
+  target_compile_definitions(rccl PRIVATE ENABLE_FAULT_INJECTION)
+endif()
+if(ENABLE_WARP_SPEED)
+  target_compile_definitions(rccl PRIVATE ENABLE_WARP_SPEED)
+endif()
+if(ENABLE_LL128)
+  target_compile_definitions(rccl PRIVATE ENABLE_LL128)
+endif()
 target_compile_options(rccl PRIVATE -fPIC -O3)
 target_link_libraries(rccl PRIVATE hip::host pthread dl rt)
 target_link_options(rccl PRIVATE ${DISPATCHER_OBJ})

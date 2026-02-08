@@ -1406,7 +1406,10 @@ if (DEVICE_LINKER)
     list(APPEND SPECIALIZED_OBJECTS ${obj})
     # Build compile definitions for specialized kernels
     # IMPORTANT: These must match host compilation to ensure structure layout agreement
-    set(SPEC_KERNEL_DEFS -DDEVICE_LINKER -DENABLE_FAULT_INJECTION)
+    set(SPEC_KERNEL_DEFS -DDEVICE_LINKER)
+    if(FAULT_INJECTION)
+      list(APPEND SPEC_KERNEL_DEFS -DENABLE_FAULT_INJECTION)
+    endif()
     if(LL128_ENABLED)
       list(APPEND SPEC_KERNEL_DEFS -DENABLE_LL128)
     endif()
@@ -1415,6 +1418,12 @@ if (DEVICE_LINKER)
     endif()
     if(DEBUG_PEER_POINTERS)
       list(APPEND SPEC_KERNEL_DEFS -DDEBUG_PEER_POINTERS)
+    endif()
+    if(COLLTRACE)
+      list(APPEND SPEC_KERNEL_DEFS -DENABLE_COLLTRACE)
+    endif()
+    if(PROFILE)
+      list(APPEND SPEC_KERNEL_DEFS -DENABLE_PROFILING)
     endif()
     add_custom_command(
       OUTPUT ${obj}
@@ -1439,10 +1448,49 @@ if (DEVICE_LINKER)
   set(DEVICE_LINKER_OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/device_linker_output)
   set(DISPATCHER_FINAL_OBJ ${DEVICE_LINKER_OUTPUT_DIR}/dispatcher_final.o)
   
+  # Convert CMake booleans to shell-compatible 0/1
+  if(FAULT_INJECTION)
+    set(FAULT_INJECTION_ENV "1")
+  else()
+    set(FAULT_INJECTION_ENV "0")
+  endif()
+  if(ENABLE_WARP_SPEED)
+    set(ENABLE_WARP_SPEED_ENV "1")
+  else()
+    set(ENABLE_WARP_SPEED_ENV "0")
+  endif()
+  if(LL128_ENABLED)
+    set(ENABLE_LL128_ENV "1")
+  else()
+    set(ENABLE_LL128_ENV "0")
+  endif()
+  if(DEBUG_PEER_POINTERS)
+    set(DEBUG_PEER_POINTERS_ENV "1")
+  else()
+    set(DEBUG_PEER_POINTERS_ENV "0")
+  endif()
+  if(COLLTRACE)
+    set(COLLTRACE_ENV "1")
+  else()
+    set(COLLTRACE_ENV "0")
+  endif()
+  if(PROFILE)
+    set(PROFILE_ENV "1")
+  else()
+    set(PROFILE_ENV "0")
+  endif()
+  
   add_custom_command(
     OUTPUT ${DISPATCHER_FINAL_OBJ}
     COMMAND ${CMAKE_COMMAND} -E make_directory ${DEVICE_LINKER_OUTPUT_DIR}
-    COMMAND ${DEVICE_LINKER_DIR}/build_with_device_linker.sh
+    COMMAND ${CMAKE_COMMAND} -E env 
+            "ENABLE_FAULT_INJECTION=${FAULT_INJECTION_ENV}"
+            "ENABLE_WARP_SPEED=${ENABLE_WARP_SPEED_ENV}"
+            "ENABLE_LL128=${ENABLE_LL128_ENV}"
+            "DEBUG_PEER_POINTERS=${DEBUG_PEER_POINTERS_ENV}"
+            "ENABLE_COLLTRACE=${COLLTRACE_ENV}"
+            "ENABLE_PROFILING=${PROFILE_ENV}"
+            ${DEVICE_LINKER_DIR}/build_with_device_linker.sh
             ${CMAKE_CURRENT_BINARY_DIR}
             ${DEVICE_LINKER_GPU_TARGET}
     DEPENDS 

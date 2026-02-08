@@ -15,41 +15,29 @@
 | Test | Status |
 |------|--------|
 | Single-GPU | WORKING |
-| Multi-GPU | **MEMORY FAULT** (illegal memory access in kernel) |
+| Multi-GPU | WORKING |
 | System RCCL Multi-GPU | WORKING |
 
-## Current Problem: Multi-GPU Memory Fault
+## Recent Fix: Multi-GPU Memory Fault (Feb 5, 2026)
 
-**Symptoms:**
-- Single-GPU AllReduce works correctly
-- Multi-GPU AllReduce crashes with "illegal memory access" during kernel execution
-- Error reported at `hipStreamSynchronize()` but fault occurs in the AllReduce kernel
-- This is PROGRESS from previous "infinite hang" - now the function dispatch appears to be working
+The multi-GPU memory fault was caused by an `ncclShmemData` structure layout mismatch.
 
-**Likely Root Cause:**
-Connection pointers in `ncclShmem.groups[].recvConns[]` and `sendConns[]` are NULL or invalid.
-These are populated from `channel->peers[peer]` in the Primitives constructor.
+**Root Cause:**
+The `COLLTRACE` CMake option is `ON` by default, which defines `ENABLE_COLLTRACE` for the
+host library build. This adds two pointer fields (`collTrace`, `collTraceTail`) to 
+`ncclShmemData` - 16 bytes total. However, these flags were NOT being propagated to:
+1. The dispatcher compilation (`build_with_device_linker.sh`)
+2. The specialized kernel compilation
 
-**Key code path (`prims_simple.h`):**
-```cpp
-if (flags & (RoleWaitRecv|RolePostRecv)) loadRecvConn(channel->peers[peer], ...);
-if (flags & (RoleWaitSend|RolePostSend)) loadSendConn(channel->peers[peer], ...);
-```
+This caused all field offsets after `devicePlugin` in `ncclShmemData` to be wrong by 16 bytes,
+leading to NULL pointer dereferences when accessing `channel->peers[peer]`.
 
-**Confirmed crash location (from GDB):**
-```
-Thread 19 "ncclDevKern-c14f" received signal SIGSEGV, Segmentation fault.
-0x00007fbfa4763eec in ?? () at hipify/src/device/prims_ll.h:670
-670	      loadRecvConn(&channel->peers[recvPeers[nrecv]]->recv[connIndexRecv], nrecv);
-```
-
-**Next debugging step:**
-Rebuild with the new DWARF merging code, then use `rocgdb` to inspect the actual pointer
-values at the crash site. The new debug info should show function names (not just `??`).
-
-**Blocker:** `rocgdb` reports "DW_FORM_line_strp pointing outside of .debug_line_str section"
-for some function lookups. See `DWARF_FIX_PROGRESS.md` for details. Next step is to use
-LLVM's `DWARFDebugLine` API instead of manual prologue parsing.
+**Fix:**
+Added `ENABLE_COLLTRACE` and `ENABLE_PROFILING` propagation to all device compilation units:
+- `CMakeLists.txt`: Added to `SPEC_KERNEL_DEFS` and environment variables for dispatcher build
+- `build_with_device_linker.sh`: Added handling for these environment variables
+- `build_skeleton_dispatcher.sh`: Same
+- `tools/device_linker/CMakeLists.txt`: Added corresponding options
 
 ## Build & Test
 
@@ -74,12 +62,17 @@ All compilation units MUST have identical flags for consistent structure layouts
 | Flag | Purpose | Affects Layout |
 |------|---------|----------------|
 | `DEVICE_LINKER` | Function table dispatch | No |
-| `ENABLE_FAULT_INJECTION` | Adds faults field to ncclShmemData | **Yes** |
-| `ENABLE_WARP_SPEED` | Adds warpComm/warpChannel fields | **Yes** |
+| `ENABLE_FAULT_INJECTION` | Adds `faults` field to ncclShmemData | **Yes** |
+| `ENABLE_WARP_SPEED` | Adds `warpComm`/`warpChannel` fields | **Yes** |
 | `ENABLE_LL128` | Protocol selection | Possibly |
+| `ENABLE_COLLTRACE` | Adds `collTrace`/`collTraceTail` fields | **Yes** |
+| `ENABLE_PROFILING` | Adds `prof` field to ncclShmemData | **Yes** |
 
 If structure layouts mismatch between host, dispatcher, and specialized kernels, 
 the kernel will access wrong memory offsets and crash or hang.
+
+These flags are now properly propagated via CMake and environment variables to ensure
+consistency across all compilation units.
 
 ## Key Documents
 
@@ -105,7 +98,20 @@ the kernel will access wrong memory offsets and crash or hang.
 
 ## Recently Fixed Issues (Feb 5, 2026)
 
-### 1. Device Linker Not Auto-Built
+### 1. ENABLE_COLLTRACE/ENABLE_PROFILING Not Propagated to Device Code
+**Problem:** Multi-GPU AllReduce crashed with "illegal memory access" (SIGSEGV) at 
+`channel->peers[peer]` in `prims_ll.h:670`.
+**Root cause:** The `COLLTRACE` CMake option (ON by default) defines `ENABLE_COLLTRACE`
+for the host library, adding 16 bytes (`collTrace`, `collTraceTail` pointers) to
+`ncclShmemData`. These flags were NOT passed to dispatcher or specialized kernel builds,
+causing a structure layout mismatch - all fields after `devicePlugin` had wrong offsets.
+**Fix:** 
+- Added `ENABLE_COLLTRACE` and `ENABLE_PROFILING` to `SPEC_KERNEL_DEFS` in main `CMakeLists.txt`
+- Added environment variable propagation to `build_with_device_linker.sh`
+- Updated `build_skeleton_dispatcher.sh` and `tools/device_linker/CMakeLists.txt`
+**Result:** Multi-GPU AllReduce now works correctly.
+
+### 2. Device Linker Not Auto-Built
 **Problem:** The `device_linker` tool wasn't being built automatically, causing builds to
 fail silently or use stale binaries.
 **Fix:** Modified `CMakeLists.txt` to add an `add_executable` for `device_linker_tool`:
@@ -119,7 +125,7 @@ set_target_properties(device_linker_tool PROPERTIES
 ```
 **Result:** The device linker is now built automatically as part of the main build.
 
-### 2. Proper DWARF Merging (Replacing Synthetic Debug Info)
+### 3. Proper DWARF Merging (Replacing Synthetic Debug Info)
 **Problem:** GDB showed line numbers but not function names ("No function contains program counter").
 The previous `buildSyntheticDebugInfo()` created minimal compile units that only had address
 ranges and `stmt_list` pointers, but no `DW_TAG_subprogram` DIEs for function names.
@@ -153,7 +159,7 @@ and show the full inline call chain.
 
 ## Fixed Issues (Feb 4-5, 2026)
 
-### 3. Debug Line Numbers for Specialized Kernels
+### 4. Debug Line Numbers for Specialized Kernels
 **Problem:** `llvm-symbolizer` and GDB showed `??:0:0` for specialized kernel addresses,
 even though `.debug_line` contained correct line info.
 **Root cause:** The synthetic `.debug_info` was missing or had wrong address ranges.
@@ -172,7 +178,7 @@ ncclDevFunc_AllReduce_RING_LL_Sum_f32_0_0_2()
 /work1/.../build/release/hipify/gensrc/specialized/specialized_all_reduce_ring_ll_sum_f32_unroll2.cpp:13:0
 ```
 
-### 4. LDS Allocation for ncclShmemPerWarp
+### 5. LDS Allocation for ncclShmemPerWarp
 **Problem:** Static LDS allocation was 37776 bytes, exceeding available dynamic LDS.
 **Root cause:** `#if __CUDA_ARCH__ >= 700` was false on AMD GPUs, causing static allocation.
 **Fix:** Modified `src/device/common.h` to use `extern __shared__` for dynamic allocation
@@ -186,7 +192,7 @@ when `DEVICE_LINKER` is defined:
 ```
 **Result:** Static LDS reduced from 37776 to 4944 bytes, dynamic allocation works.
 
-### 5. Malformed RELRO Segment
+### 6. Malformed RELRO Segment
 **Problem:** Third LOAD segment had offset=0, vaddr=0, size=0x79ad0b0 (overlapping everything).
 **Root cause:** `.data.rel.ro` section doesn't exist, so `relro_start=0`.
 **Fix:** In `device_linker.cpp`, use `.dynamic` address if no `.data.rel.ro`:
@@ -194,7 +200,7 @@ when `DEVICE_LINKER` is defined:
 uint64_t relro_start = data_rel_ro_start ? data_rel_ro_start : dyn_sec_addr;
 ```
 
-### 6. Function Table Addend Verification
+### 7. Function Table Addend Verification
 **Investigation:** Suspected wrong addends in R_AMDGPU_RELATIVE64 relocations.
 **Finding:** Addends are CORRECT - they match function symbol addresses.
 For example, funcId 622 uses the unroll=2 variant:
@@ -213,7 +219,7 @@ These are documented in detail in `DEVICE_LINKER_REDESIGN.md`:
 5. Shared memory limit - `extern __shared__` for dynamic allocation
 6. DWARF5 debug line string offsets - `patchDwarf5StringOffsets()`
 7. Specialized kernel symbol addresses - `func_offset` correction
-8. ~~Synthetic `.debug_info`~~ - **Replaced** by proper DWARF merging (see issue #2 above)
+8. ~~Synthetic `.debug_info`~~ - **Replaced** by proper DWARF merging (see issue #3 above)
 
 ## Understanding Function Pointer Tables
 
