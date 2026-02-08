@@ -758,9 +758,18 @@ perfetto_processor_t::handle(const region_sample& _rs)
 
     auto emit_trace = [&](auto category_tag) {
         using CategoryT = decltype(category_tag);
-        tracing::push_perfetto_ts(CategoryT{}, _name.c_str(), _beg_ts,
-                                  ::perfetto::Flow::ProcessScoped(_corr_id),
-                                  add_annotations);
+        if(_corr_id != 0)
+        {
+            tracing::push_perfetto_ts(CategoryT{}, _name.c_str(), _beg_ts,
+                                      ::perfetto::Flow::ProcessScoped(_corr_id),
+                                      add_annotations);
+        }
+        else
+        {
+            tracing::push_perfetto_ts(CategoryT{}, _name.c_str(), _beg_ts,
+                                      add_annotations);
+        }
+
         tracing::pop_perfetto_ts(CategoryT{}, _name.c_str(), _end_ts);
     };
 
