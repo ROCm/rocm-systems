@@ -1375,7 +1375,11 @@ if (DEVICE_LINKER)
   
   # Build the device_linker tool itself
   # Use AOMP LLVM for proper DWARF handling
-  set(AOMP_LLVM_DIR "/COD/LATEST/aomp/llvm")
+  # Can be overridden with: cmake -DAOMP_LLVM_DIR=/path/to/llvm ...
+  if(NOT DEFINED AOMP_LLVM_DIR)
+    set(AOMP_LLVM_DIR "/COD/LATEST/aomp/llvm")
+  endif()
+  message(STATUS "Using LLVM from: ${AOMP_LLVM_DIR}")
   
   add_executable(device_linker_tool ${DEVICE_LINKER_DIR}/device_linker.cpp)
   target_compile_features(device_linker_tool PRIVATE cxx_std_17)

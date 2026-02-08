@@ -1,0 +1,26 @@
+# GDB commands to find where "invalid abbreviation" error is printed
+# The error likely comes from LLVM's WithColor::error() or errs() stream
+
+# Method 1: Break on WithColor::error
+break llvm::WithColor::error
+
+# Method 2: Break on errs() stream writes
+break std::basic_ostream<char>::operator<<
+
+# Method 3: Break on the warning/error handlers we set up
+break llvmDwarfWarningHandler
+break llvmDwarfErrorHandler
+
+# Method 4: Search for the string in memory
+# rbreak .*contains.*invalid.*abbreviation
+
+# Run
+run
+
+# When it breaks, get stack trace
+bt
+frame 0
+list
+
+# Continue to see all occurrences
+continue
