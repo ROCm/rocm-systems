@@ -1690,13 +1690,14 @@ class AMDSMIParser(argparse.ArgumentParser):
 
     def _add_node_parser(self, subparsers: argparse._SubParsersAction, func):
         # Subparser help text
-        node_help = "Gets power information for the node"
+        node_help = "Gets power and baseboard information for the node"
         node_subcommand_help = f"{self.description}\n\nReturns information for node 0 on the system.\
                                 \nIf no node argument is provided, all node information will be displayed."
         node_optionals_title = "Node arguments"
 
         # Help text for Node arguments
         power_management_help = "Displays power management information"
+        base_board_temps_help = "Displays baseboard temperatures"
 
         node_parser = subparsers.add_parser("node", help=node_help, description=node_subcommand_help)
         node_parser._optionals.title = node_optionals_title
@@ -1705,6 +1706,7 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         # Optional Args
         node_parser.add_argument('-p', '--power-management', action='store_true', required=False, help=power_management_help)
+        node_parser.add_argument('-b', '--base-board-temps', action='store_true', required=False, help=base_board_temps_help)
 
         # Add Universal Arguments
         self._add_command_modifiers(node_parser)
