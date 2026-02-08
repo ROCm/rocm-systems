@@ -97,6 +97,8 @@
 
 **Phase 2 sign-off:** All of 2.1–2.6 satisfied.
 
+**Phase 2 implemented:** `patchDwarf5StringOffsets()` now builds a minimal ELF per chunk (`.debug_info` CU with `stmt_list=0`, `.debug_abbrev`, `.debug_line`, `.debug_line_str`), parses with `DWARFContext::create` and `getLineTableForUnit()`. If parsing succeeds, the chunk is validated. The format-driven walk (directory/file format from buffer, patch `DW_FORM_line_strp` using `getFormFixedSize`/`skipVariableForm`) runs for every chunk so all `line_strp` offsets are patched even when LLVM parse fails. Address patching (`DW_LNE_set_address`) is unchanged. `llvm-dwarfdump --verify` and the disassembly integration test pass.
+
 ---
 
 ## Phase 3: Optional — Use LLVM to Emit Merged DWARF (or DWARFLinker)

@@ -15,10 +15,9 @@ alwaysApply: true
 
 5. **Build instructions**: Always rebuild completely using install.sh from the workspace root:
    ```bash
-   rm -rf build
-   ./install.sh --amdgpu_targets=gfx942 --device-linker
+   rm -rf build; ./install.sh -l --device-linker
    ```
-   Note: `--amdgpu_targets` should match the current architecture (gfx942 for MI300A). Use `--device-linker` (hyphen, not underscore).
+   Use `--device-linker` (hyphen, not underscore).
 
 6. **Experimental branches**: Do NOT create new git branches in the main repo - this affects other users of that directory. Instead, create a separate copy of the repo for experimental work:
    ```bash
