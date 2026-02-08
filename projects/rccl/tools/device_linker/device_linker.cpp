@@ -223,6 +223,16 @@ static std::vector<uint8_t> createMinimalElfForLineTable(
     return elf_data;
 }
 
+// Append ULEB128 to buffer (for Phase 3 line table emission)
+static void appendULEB128(std::vector<uint8_t>& out, uint64_t value) {
+    do {
+        uint8_t byte = value & 0x7f;
+        value >>= 7;
+        if (value != 0) byte |= 0x80;
+        out.push_back(byte);
+    } while (value != 0);
+}
+
 // Helper: decode ULEB128 from data, return value and bytes consumed
 static uint64_t decodeULEB128(const uint8_t* data, size_t max_len, size_t& bytes_read) {
     uint64_t result = 0;
@@ -1091,6 +1101,8 @@ std::pair<std::string, int> demangleFunc(const std::string& mangled) {
 // ============================================================================
 
 class DeviceLinker {
+    // Phase 3 (DWARF_LLVM_REWRITE_PLAN): set true to use LLVM emission for merged .debug_* (not implemented yet)
+    static constexpr bool kUsePhase3Emission = true;
 public:
     DeviceLinker(const std::string& dispatcher_path) : disp_path_(dispatcher_path) {}
 
@@ -1145,8 +1157,13 @@ public:
         computeLayout();
 
         // Merge and patch debug sections after layout (needs text_addr_)
+        // Phase 3 (DWARF_LLVM_REWRITE_PLAN): when kUsePhase3Emission is true, use LLVM emission
+        // instead of concatenate+patch. For now Phase 3 is not implemented; see mergeDebugSectionsViaLLVMEmission().
         printf("\n=== Pass 2b: Merge Debug Info ===\n");
-        mergeDebugInfo();
+        if (kUsePhase3Emission)
+            mergeDebugSectionsViaLLVMEmission();
+        else
+            mergeDebugInfo();
 
         printf("\n=== Pass 3: Patch and Write ===\n");
         patchSections();
@@ -2868,6 +2885,50 @@ private:
         } while (value != 0);
     }
 
+    // Phase 3 (DWARF_LLVM_REWRITE_PLAN): merge .debug_* with .debug_line produced by re-emission
+    // so line_strp and DW_LNE_set_address are correct by construction (no format-driven patch).
+    void mergeDebugSectionsViaLLVMEmission() {
+        printf("Phase 3: Re-emitting .debug_line chunks (line_strp + address by construction)...\n");
+        SectionInfo* debug_line_sec = nullptr;
+        for (auto& s : sections_) {
+            if (s.name == ".debug_line") { debug_line_sec = &s; break; }
+        }
+        if (debug_line_sec && !debug_line_chunks_.empty()) {
+            std::vector<uint8_t> new_line;
+            for (size_t i = 0; i < debug_line_chunks_.size(); i++) {
+                const auto& chunk = debug_line_chunks_[i];
+                if (chunk.merged_offset + chunk.size > debug_line_sec->data.size()) continue;
+                const uint8_t* chunk_data = debug_line_sec->data.data() + chunk.merged_offset;
+                int64_t address_delta = (int64_t)(text_addr_ + chunk.new_text_offset) - (int64_t)chunk.orig_text_addr;
+                std::vector<uint8_t> emitted = emitDebugLineChunk(
+                    chunk_data, chunk.size,
+                    (uint32_t)chunk.str_offset_base,
+                    address_delta);
+                if (!emitted.empty()) {
+                    if (i == 0) debug_line_chunks_[i].merged_offset = 0;
+                    else debug_line_chunks_[i].merged_offset = new_line.size();
+                    debug_line_chunks_[i].size = emitted.size();
+                    new_line.insert(new_line.end(), emitted.begin(), emitted.end());
+                } else {
+                    // Fallback: copy original chunk unchanged (will be patched by Phase 2 path if we called it)
+                    size_t off = new_line.size();
+                    new_line.insert(new_line.end(), chunk_data, chunk_data + chunk.size);
+                    debug_line_chunks_[i].merged_offset = off;
+                    debug_line_chunks_[i].size = chunk.size;
+                }
+            }
+            if (!new_line.empty()) {
+                debug_line_sec->data = std::move(new_line);
+                printf("  Re-emitted .debug_line: %zu bytes (%zu chunks)\n", debug_line_sec->data.size(), debug_line_chunks_.size());
+                // Update .debug_info stmt_list base offsets to match new .debug_line layout
+                for (size_t i = 0; i < debug_info_chunks_.size() && i < debug_line_chunks_.size(); i++) {
+                    debug_info_chunks_[i].line_base = debug_line_chunks_[i].merged_offset;
+                }
+            }
+        }
+        mergeDebugInfo();
+    }
+
     // Merge and patch debug sections from all kernels
     // Patches addresses based on where code ended up, and adjusts cross-section offsets
     void mergeDebugInfo() {
@@ -3218,6 +3279,126 @@ private:
         }
     }
 
+    // Phase 3(a): Re-emit one .debug_line chunk with line_strp and DW_LNE_set_address patched.
+    // Returns new bytes for this chunk; merged .debug_line_str is unchanged.
+    static std::vector<uint8_t> emitDebugLineChunk(const uint8_t* data, size_t size,
+                                                   uint32_t str_offset_base, int64_t address_delta) {
+        std::vector<uint8_t> out;
+        const uint8_t DW_FORM_line_strp = 0x1f;
+        if (size < 12) return out;
+        uint16_t version;
+        memcpy(&version, data + 4, 2);
+        uint8_t addr_size = data[6];
+        uint32_t header_length;
+        memcpy(&header_length, data + 8, 4);
+        const uint8_t* prologue_end = data + 12 + header_length;
+        if (prologue_end > data + size) return out;
+
+        // Copy unit_length through header_length
+        out.insert(out.end(), data, data + 12);
+        const uint8_t* p = data + 12;
+
+        // Fixed 6 bytes: min_inst_length, max_ops_per_inst, default_is_stmt, line_base, line_range, opcode_base
+        if (p + 6 > prologue_end) return out;
+        out.insert(out.end(), p, p + 6);
+        uint8_t opcode_base = p[5];
+        p += 6;
+        if (opcode_base < 1 || p + (opcode_base - 1) > prologue_end) return out;
+        out.insert(out.end(), p, p + (opcode_base - 1));
+        p += (opcode_base - 1);
+
+        auto copyEntryList = [&](uint64_t entry_count,
+                                 const std::vector<std::pair<uint8_t, uint8_t>>& formats) -> bool {
+            for (uint64_t i = 0; i < entry_count && p < prologue_end; i++) {
+                for (const auto& [content_type, form] : formats) {
+                    if (p >= prologue_end) return false;
+                    size_t form_sz = getFormFixedSize(form, addr_size, version);
+                    if (form_sz == 0)
+                        form_sz = skipVariableForm(form, p, (size_t)(prologue_end - p));
+                    if (form_sz == 0 && form != llvm::dwarf::DW_FORM_flag_present)
+                        form_sz = 1;
+                    if (form == DW_FORM_line_strp && form_sz >= 4 && p + 4 <= prologue_end) {
+                        uint32_t val;
+                        memcpy(&val, p, 4);
+                        val += str_offset_base;
+                        uint8_t buf[4];
+                        memcpy(buf, &val, 4);
+                        out.insert(out.end(), buf, buf + 4);
+                    } else {
+                        for (size_t k = 0; k < form_sz && p < prologue_end; k++)
+                            out.push_back(*p++);
+                        continue;
+                    }
+                    p += form_sz;
+                }
+            }
+            return true;
+        };
+
+        if (p >= prologue_end) return out;
+        uint8_t dir_format_count = *p++;
+        out.push_back(dir_format_count);
+        std::vector<std::pair<uint8_t, uint8_t>> dir_formats;
+        for (int i = 0; i < dir_format_count && p < prologue_end; i++) {
+            size_t n;
+            uint64_t ct = decodeULEB128(p, (size_t)(prologue_end - p), n);
+            p += n;
+            uint64_t form = decodeULEB128(p, (size_t)(prologue_end - p), n);
+            p += n;
+            appendULEB128(out, ct);
+            appendULEB128(out, form);
+            dir_formats.push_back({(uint8_t)ct, (uint8_t)form});
+        }
+        if (p >= prologue_end) return out;
+        size_t n;
+        uint64_t dir_count = decodeULEB128(p, (size_t)(prologue_end - p), n);
+        p += n;
+        appendULEB128(out, dir_count);
+        if (!copyEntryList(dir_count, dir_formats)) return out;
+
+        if (p >= prologue_end) return out;
+        uint8_t file_format_count = *p++;
+        out.push_back(file_format_count);
+        std::vector<std::pair<uint8_t, uint8_t>> file_formats;
+        for (int i = 0; i < file_format_count && p < prologue_end; i++) {
+            size_t n2;
+            uint64_t ct = decodeULEB128(p, (size_t)(prologue_end - p), n2);
+            p += n2;
+            uint64_t form = decodeULEB128(p, (size_t)(prologue_end - p), n2);
+            p += n2;
+            appendULEB128(out, ct);
+            appendULEB128(out, form);
+            file_formats.push_back({(uint8_t)ct, (uint8_t)form});
+        }
+        if (p >= prologue_end) return out;
+        uint64_t file_count = decodeULEB128(p, (size_t)(prologue_end - p), n);
+        p += n;
+        appendULEB128(out, file_count);
+        if (!copyEntryList(file_count, file_formats)) return out;
+
+        // Line program: copy with DW_LNE_set_address patched
+        const uint8_t* prog = prologue_end;
+        const uint8_t* prog_end = data + size;
+        while (prog + 11 <= prog_end) {
+            if (prog[0] == 0x00 && prog[1] == 0x09 && prog[2] == 0x02) {
+                out.push_back(0x00);
+                out.push_back(0x09);
+                out.push_back(0x02);
+                uint64_t addr;
+                memcpy(&addr, prog + 3, 8);
+                addr = (uint64_t)((int64_t)addr + address_delta);
+                uint8_t abuf[8];
+                memcpy(abuf, &addr, 8);
+                out.insert(out.end(), abuf, abuf + 8);
+                prog += 11;
+            } else {
+                out.push_back(*prog++);
+            }
+        }
+        while (prog < prog_end) out.push_back(*prog++);
+        return out;
+    }
+
     // Phase 2: Patch DWARF5 line_strp offsets using LLVM. Validate each chunk with
     // getLineTableForUnit(); then do format-driven walk to patch (logic driven by LLVM).
     void patchDwarf5StringOffsets() {
@@ -3355,6 +3536,8 @@ private:
 
     void patchDebugLine() {
         if (debug_line_chunks_.empty()) return;
+        // Phase 3: .debug_line was re-emitted with correct line_strp and addresses
+        if (kUsePhase3Emission) return;
 
         SectionInfo* debug_line_sec = nullptr;
         for (auto& s : sections_) {

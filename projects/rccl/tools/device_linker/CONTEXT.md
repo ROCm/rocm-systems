@@ -27,6 +27,14 @@ kernels.** Structure layout mismatches (from missing `ENABLE_COLLTRACE`, `ENABLE
 etc.) caused crashes, hangs, and incorrect memory access. See "Critical Constraint: 
 Compilation Flags" section below.
 
+## Phase 3 (DWARF emission) — Partially implemented
+
+Phase 3 of the DWARF rewrite (see `tools/device_linker/DWARF_LLVM_REWRITE_PLAN.md`) will switch to **emission** for merged `.debug_*` sections so line_strp and addresses are correct by construction.
+
+- **Phase 3(a) — Implemented:** When `kUsePhase3Emission` is `true` (in `device_linker.cpp`, default `false`), `mergeDebugSectionsViaLLVMEmission()` re-emits each `.debug_line` chunk with `line_strp` and `DW_LNE_set_address` patched into the output buffer instead of concatenating raw bytes and patching in place. This removes the format-driven prologue walk and avoids desync issues (e.g. `DW_FORM_flag_present`). Entry point: `mergeDebugSectionsViaLLVMEmission()` rebuilds `.debug_line` via `emitDebugLineChunk()` per chunk, then calls `mergeDebugInfo()`; `patchDebugLine()` is skipped when Phase 3 is enabled.
+- **(b) .debug_info:** clone+emit or patch-from-LLVM — not yet done.
+- **(c) Optional DWARFLinker** — not yet done.
+
 ## Known Issues (Feb 8, 2026)
 
 ### DWARF Info Still Has Issues
