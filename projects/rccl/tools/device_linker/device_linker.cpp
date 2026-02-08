@@ -17,6 +17,7 @@
 #include "llvm/Object/ELFObjectFile.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Error.h"
+#include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/WithColor.h"
 #include "llvm/BinaryFormat/Dwarf.h"
 
@@ -28,6 +29,7 @@
 #include <vector>
 #include <map>
 #include <unordered_map>
+#include <atomic>
 #include <algorithm>
 #include <thread>
 #include <mutex>
@@ -44,6 +46,24 @@
 #include <elf.h>
 
 namespace fs = std::filesystem;
+
+// Set by LLVM DWARF error handler when any error is reported; checked so device linker exits on errors
+static std::atomic<bool> g_llvm_dwarf_error{false};
+// DWARFContext::create expects std::function<void(Error)>, not void(const std::string&)
+static void llvmDwarfErrorHandler(llvm::Error e) {
+    g_llvm_dwarf_error = true;
+    llvm::handleAllErrors(std::move(e), [](const llvm::ErrorInfoBase& ei) {
+        ei.log(llvm::errs());
+        llvm::errs() << "\n";
+    });
+}
+static void llvmDwarfWarningHandler(llvm::Error e) {
+    g_llvm_dwarf_error = true;  // treat warnings as fatal so we exit on e.g. .debug_str_offsets issues
+    llvm::handleAllErrors(std::move(e), [](const llvm::ErrorInfoBase& ei) {
+        ei.log(llvm::errs());
+        llvm::errs() << "\n";
+    });
+}
 
 // ============================================================================
 // LLVM DWARF helpers for finding attribute positions that need patching
@@ -467,8 +487,8 @@ static DwarfAttrPositions findDwarfAttrPositionsUsingLLVM(
     std::unique_ptr<llvm::object::ObjectFile> obj = std::move(obj_or.get());
     std::unique_ptr<llvm::DWARFContext> ctx =
         llvm::DWARFContext::create(*obj, llvm::DWARFContext::ProcessDebugRelocations::Ignore,
-                                    nullptr, "", llvm::WithColor::defaultErrorHandler,
-                                    llvm::WithColor::defaultWarningHandler, false);
+                                    nullptr, "", llvmDwarfErrorHandler,
+                                    llvmDwarfWarningHandler, false);
     if (!ctx)
         return result;
 
@@ -554,8 +574,8 @@ static std::vector<std::pair<size_t, uint32_t>> findLineStrpPositionsInDebugInfo
     std::unique_ptr<llvm::object::ObjectFile> obj = std::move(obj_or.get());
     std::unique_ptr<llvm::DWARFContext> ctx =
         llvm::DWARFContext::create(*obj, llvm::DWARFContext::ProcessDebugRelocations::Ignore,
-                                    nullptr, "", llvm::WithColor::defaultErrorHandler,
-                                    llvm::WithColor::defaultWarningHandler, false);
+                                    nullptr, "", llvmDwarfErrorHandler,
+                                    llvmDwarfWarningHandler, false);
     if (!ctx) return result;
 
     const uint8_t* info_data = debug_info.data();
@@ -1813,7 +1833,11 @@ private:
                     }
                     if (disp_debug_str_offsets && disp_debug_str_offsets->size > 0) {
                         auto data = disp_->getBytes(*disp_debug_str_offsets);
-                        merged_debug_str_offsets_.insert(merged_debug_str_offsets_.end(), data.begin(), data.end());
+                        // DWARF5 .debug_str_offsets unit needs at least 8 bytes (unit_length + version + padding)
+                        if (data.size() >= 8)
+                            merged_debug_str_offsets_.insert(merged_debug_str_offsets_.end(), data.begin(), data.end());
+                        else
+                            merged_debug_str_offsets_.resize(merged_debug_str_offsets_.size() + 8, 0);
                     }
                     if (disp_debug_addr && disp_debug_addr->size > 0) {
                         auto data = disp_->getBytes(*disp_debug_addr);
@@ -1872,8 +1896,12 @@ private:
                                 kern->debug_str.begin(), kern->debug_str.end());
                         }
                         if (!kern->debug_str_offsets.empty()) {
-                            merged_debug_str_offsets_.insert(merged_debug_str_offsets_.end(),
-                                kern->debug_str_offsets.begin(), kern->debug_str_offsets.end());
+                            // DWARF5 .debug_str_offsets unit needs at least 8 bytes (unit_length + version + padding)
+                            if (kern->debug_str_offsets.size() >= 8)
+                                merged_debug_str_offsets_.insert(merged_debug_str_offsets_.end(),
+                                    kern->debug_str_offsets.begin(), kern->debug_str_offsets.end());
+                            else
+                                merged_debug_str_offsets_.resize(merged_debug_str_offsets_.size() + 8, 0);
                         }
                         if (!kern->debug_addr.empty()) {
                             merged_debug_addr_.insert(merged_debug_addr_.end(),
@@ -3451,8 +3479,8 @@ private:
             std::unique_ptr<llvm::object::ObjectFile> obj = std::move(obj_or.get());
             std::unique_ptr<llvm::DWARFContext> ctx =
                 llvm::DWARFContext::create(*obj, llvm::DWARFContext::ProcessDebugRelocations::Ignore,
-                                            nullptr, "", llvm::WithColor::defaultErrorHandler,
-                                            llvm::WithColor::defaultWarningHandler, false);
+                                            nullptr, "", llvmDwarfErrorHandler,
+                                            llvmDwarfWarningHandler, false);
             if (!ctx) {
                 setFatalError("LLVM failed to create DWARF context for debug line chunk");
                 return;
@@ -4038,6 +4066,7 @@ int main(int argc, char** argv) {
     if (inputs.empty()) { fprintf(stderr, "No input files\n"); return 1; }
     printf("Processing %zu device binary input(s)\n", inputs.size());
 
+    g_llvm_dwarf_error = false;
     auto funcid_map = parseHostTable(host_table);
     printf("Loaded %zu funcId mappings\n", funcid_map.size());
 
@@ -4073,6 +4102,11 @@ int main(int argc, char** argv) {
         if (s < e) threads.emplace_back(worker, s, e);
     }
     for (auto& th : threads) th.join();
+
+    if (g_llvm_dwarf_error) {
+        fprintf(stderr, "Error: LLVM reported DWARF errors during kernel parsing (see above). Exiting.\n");
+        return 1;
+    }
 
     // Link
     DeviceLinker linker(dispatcher);
