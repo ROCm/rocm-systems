@@ -120,13 +120,30 @@ INCLUDES=(
 #   - ENABLE_FAULT_INJECTION: Adds faults field to ncclShmemData
 #   - ENABLE_WARP_SPEED: Affects ncclShmemData layout (warpComm, warpChannel fields) and kernel args size
 #   - ENABLE_LL128: Affects protocol selection and scratch sizes
-DEFINES="-DDEVICE_LINKER -DENABLE_FAULT_INJECTION -DENABLE_WARP_SPEED -DENABLE_LL128"
-
-# Debug flag for peer pointer tracking (set DEBUG_PEER_POINTERS=1 to enable)
+#   - ENABLE_COLLTRACE: Adds collTrace/collTraceTail fields to ncclShmemData
+#   - ENABLE_PROFILING: Adds prof field to ncclShmemData
+# These are now passed via environment variables from CMakeLists.txt
+DEFINES="-DDEVICE_LINKER"
+if [ "${ENABLE_FAULT_INJECTION:-1}" = "1" ]; then
+    DEFINES="$DEFINES -DENABLE_FAULT_INJECTION"
+fi
+if [ "${ENABLE_WARP_SPEED:-1}" = "1" ]; then
+    DEFINES="$DEFINES -DENABLE_WARP_SPEED"
+fi
+if [ "${ENABLE_LL128:-1}" = "1" ]; then
+    DEFINES="$DEFINES -DENABLE_LL128"
+fi
 if [ "${DEBUG_PEER_POINTERS:-0}" = "1" ]; then
     DEFINES="$DEFINES -DDEBUG_PEER_POINTERS"
     echo "DEBUG_PEER_POINTERS enabled - will print peer pointer info from device code"
 fi
+if [ "${ENABLE_COLLTRACE:-1}" = "1" ]; then
+    DEFINES="$DEFINES -DENABLE_COLLTRACE"
+fi
+if [ "${ENABLE_PROFILING:-0}" = "1" ]; then
+    DEFINES="$DEFINES -DENABLE_PROFILING"
+fi
+echo "Build defines: $DEFINES"
 
 # CUID (compilation unit ID) - needs to match between device and host compilation
 CUID="devicelinker$(echo -n "$SOURCE" | md5sum | cut -c1-16)"
@@ -162,6 +179,7 @@ $CLANG -cc1 \
     -O3 \
     -emit-obj \
     -debug-info-kind=line-tables-only \
+    -dwarf-version=5 \
     -fcuda-is-device \
     -fno-threadsafe-statics \
     -mllvm -amdgpu-internalize-symbols \

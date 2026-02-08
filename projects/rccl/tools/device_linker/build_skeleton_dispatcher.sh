@@ -60,8 +60,24 @@ echo ""
 HIPCC=/opt/rocm/bin/hipcc
 CFLAGS="-c -fPIC -fno-gpu-rdc --offload-arch=$GPU_TARGET"
 
-# Defines
-DEFINES="-DDEVICE_LINKER -DENABLE_FAULT_INJECTION"
+# Defines - read from environment variables (defaults match typical build)
+DEFINES="-DDEVICE_LINKER"
+if [ "${ENABLE_FAULT_INJECTION:-1}" = "1" ]; then
+    DEFINES="$DEFINES -DENABLE_FAULT_INJECTION"
+fi
+if [ "${ENABLE_WARP_SPEED:-1}" = "1" ]; then
+    DEFINES="$DEFINES -DENABLE_WARP_SPEED"
+fi
+if [ "${ENABLE_LL128:-1}" = "1" ]; then
+    DEFINES="$DEFINES -DENABLE_LL128"
+fi
+if [ "${ENABLE_COLLTRACE:-1}" = "1" ]; then
+    DEFINES="$DEFINES -DENABLE_COLLTRACE"
+fi
+if [ "${ENABLE_PROFILING:-0}" = "1" ]; then
+    DEFINES="$DEFINES -DENABLE_PROFILING"
+fi
+echo "Build defines: $DEFINES"
 
 # Include paths (order matters)
 INCLUDES=(
