@@ -1302,11 +1302,7 @@ if (DEVICE_LINKER)
   
   # Build the device_linker tool itself
   # Use AOMP LLVM for proper DWARF handling
-  # Can be overridden with: cmake -DAOMP_LLVM_DIR=/path/to/llvm ...
-  if(NOT DEFINED AOMP_LLVM_DIR)
-    set(AOMP_LLVM_DIR "/COD/LATEST/aomp/llvm")
-  endif()
-  message(STATUS "Using LLVM from: ${AOMP_LLVM_DIR}")
+  set(AOMP_LLVM_DIR "/COD/LATEST/aomp/llvm")
   
   add_executable(device_linker_tool ${DEVICE_LINKER_DIR}/device_linker.cpp)
   target_compile_features(device_linker_tool PRIVATE cxx_std_17)
@@ -1328,81 +1324,52 @@ if (DEVICE_LINKER)
   # Create directory for specialized kernel objects
   file(MAKE_DIRECTORY ${SPECIALIZED_OBJ_DIR})
   
-  # Convert CMake booleans to shell-compatible 0/1 (used by compile_specialized_device.sh and build_with_device_linker.sh)
-  if(FAULT_INJECTION)
-    set(FAULT_INJECTION_ENV "1")
-  else()
-    set(FAULT_INJECTION_ENV "0")
-  endif()
-  if(ENABLE_WARP_SPEED)
-    set(ENABLE_WARP_SPEED_ENV "1")
-  else()
-    set(ENABLE_WARP_SPEED_ENV "0")
-  endif()
-  if(LL128_ENABLED)
-    set(ENABLE_LL128_ENV "1")
-  else()
-    set(ENABLE_LL128_ENV "0")
-  endif()
-  if(DEBUG_PEER_POINTERS)
-    set(DEBUG_PEER_POINTERS_ENV "1")
-  else()
-    set(DEBUG_PEER_POINTERS_ENV "0")
-  endif()
-  if(COLLTRACE)
-    set(COLLTRACE_ENV "1")
-  else()
-    set(COLLTRACE_ENV "0")
-  endif()
-  if(PROFILE)
-    set(PROFILE_ENV "1")
-  else()
-    set(PROFILE_ENV "0")
-  endif()
-  
-  # Step 1: Compile specialized kernels to device-only objects (.device.o)
-  # No host fat binary - device linker uses these ELFs directly
+  # Step 1: Compile specialized kernels separately (NOT linked into rccl)
+  # These .o files are only used by the device linker
   set(SPECIALIZED_OBJECTS "")
   foreach(src ${SPECIALIZED_KERNEL_FILES})
     get_filename_component(name ${src} NAME_WE)
-    set(obj ${SPECIALIZED_OBJ_DIR}/${name}.device.o)
+    set(obj ${SPECIALIZED_OBJ_DIR}/${name}.o)
     list(APPEND SPECIALIZED_OBJECTS ${obj})
+    # Build compile definitions for specialized kernels
+    # IMPORTANT: These must match host compilation to ensure structure layout agreement
+    set(SPEC_KERNEL_DEFS -DDEVICE_LINKER -DENABLE_FAULT_INJECTION)
+    if(LL128_ENABLED)
+      list(APPEND SPEC_KERNEL_DEFS -DENABLE_LL128)
+    endif()
+    if(ENABLE_WARP_SPEED)
+      list(APPEND SPEC_KERNEL_DEFS -DENABLE_WARP_SPEED)
+    endif()
+    if(DEBUG_PEER_POINTERS)
+      list(APPEND SPEC_KERNEL_DEFS -DDEBUG_PEER_POINTERS)
+    endif()
     add_custom_command(
       OUTPUT ${obj}
-      COMMAND ${CMAKE_COMMAND} -E env
-              "ENABLE_FAULT_INJECTION=${FAULT_INJECTION_ENV}"
-              "ENABLE_WARP_SPEED=${ENABLE_WARP_SPEED_ENV}"
-              "ENABLE_LL128=${ENABLE_LL128_ENV}"
-              "DEBUG_PEER_POINTERS=${DEBUG_PEER_POINTERS_ENV}"
-              "ENABLE_COLLTRACE=${COLLTRACE_ENV}"
-              "ENABLE_PROFILING=${PROFILE_ENV}"
-              ${DEVICE_LINKER_DIR}/compile_specialized_device.sh
-              ${CMAKE_CURRENT_BINARY_DIR}
-              ${DEVICE_LINKER_GPU_TARGET}
-              ${src}
-              ${obj}
-      DEPENDS ${src} hipify_all ${DEVICE_LINKER_DIR}/compile_specialized_device.sh
+      COMMAND ${HIPCC_COMPILER} -c -fPIC -fno-gpu-rdc --offload-device-only --offload-arch=${DEVICE_LINKER_GPU_TARGET}
+              ${SPEC_KERNEL_DEFS}
+              -I${CMAKE_CURRENT_BINARY_DIR}/hipify/src
+              -I${CMAKE_CURRENT_BINARY_DIR}/hipify/src/include
+              -I${CMAKE_CURRENT_BINARY_DIR}/hipify/src/include/nccl_device
+              -I${CMAKE_CURRENT_BINARY_DIR}/hipify/src/include/plugin
+              -I${CMAKE_CURRENT_BINARY_DIR}/hipify/src/device
+              -I${CMAKE_CURRENT_BINARY_DIR}/hipify/gensrc
+              -I${PROJECT_BINARY_DIR}/include
+              ${src} -o ${obj}
+      DEPENDS ${src} hipify_all
       COMMENT "Compiling specialized kernel (device-only): ${name}"
     )
   endforeach()
   add_custom_target(specialized_kernels DEPENDS ${SPECIALIZED_OBJECTS})
   
   # Option B: Build dispatcher using 5-step device linker pipeline
-  # This compiles common.cu separately and merges with specialized kernels (dispatcher is already device ELF)
+  # This compiles common.cu separately and merges with specialized kernels
   set(DEVICE_LINKER_OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/device_linker_output)
   set(DISPATCHER_FINAL_OBJ ${DEVICE_LINKER_OUTPUT_DIR}/dispatcher_final.o)
   
   add_custom_command(
     OUTPUT ${DISPATCHER_FINAL_OBJ}
     COMMAND ${CMAKE_COMMAND} -E make_directory ${DEVICE_LINKER_OUTPUT_DIR}
-    COMMAND ${CMAKE_COMMAND} -E env 
-            "ENABLE_FAULT_INJECTION=${FAULT_INJECTION_ENV}"
-            "ENABLE_WARP_SPEED=${ENABLE_WARP_SPEED_ENV}"
-            "ENABLE_LL128=${ENABLE_LL128_ENV}"
-            "DEBUG_PEER_POINTERS=${DEBUG_PEER_POINTERS_ENV}"
-            "ENABLE_COLLTRACE=${COLLTRACE_ENV}"
-            "ENABLE_PROFILING=${PROFILE_ENV}"
-            ${DEVICE_LINKER_DIR}/build_with_device_linker.sh
+    COMMAND ${DEVICE_LINKER_DIR}/build_with_device_linker.sh
             ${CMAKE_CURRENT_BINARY_DIR}
             ${DEVICE_LINKER_GPU_TARGET}
     DEPENDS 
