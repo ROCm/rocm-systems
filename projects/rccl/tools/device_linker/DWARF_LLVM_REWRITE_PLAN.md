@@ -103,14 +103,19 @@
 
 ## Phase 3: Optional — Use LLVM to Emit Merged DWARF (or DWARFLinker)
 
-**Scope:** Either re-emit DWARF from LLVM structures with new base offsets and addresses, or use `DWARFLinker` (or equivalent) with a custom emitter that writes into the device linker’s section buffers.
+**Scope:** Either re-emit DWARF from LLVM structures with new base offsets and addresses, or use `DWARFLinker` (or equivalent) with a custom emitter that writes into the device linker’s section buffers. **Phase 3 is when "LLVM for everything" applies:** merged `.debug_*` sections are produced by LLVM emission (or DWARFLinker), so line_strp and other offsets are correct by construction and manual format walks are no longer needed.
+
+**Relationship to Phase 2:** Phase 2 still uses a format-driven walk over the `.debug_line` prologue to patch line_strp because LLVM's `LineTable` API does not expose the byte offsets of each line_strp in the prologue. Phase 3 removes that by using LLVM to *emit* the line table (and optionally .debug_info) with correct offsets from the start.
 
 ### Steps
 
 1. **Emit side**  
    Use LLVM’s emission APIs where they fit (e.g. line table and prologue emission for `.debug_line` / `.debug_line_str`; for `.debug_info`, either “clone this unit with patched base offsets” using `DWARFUnit`/`DWARFDie` and LLVM form emission, or continue “concatenate + patch” but with patch positions coming only from LLVM). If full “link” semantics are desired (e.g. type uniquing, ODR), evaluate `llvm::dwarf_linker::classic::DWARFLinker`: implement a `DwarfEmitter` that writes into your own buffers; feed it the same inputs and an address map (orig → new per object); if the API allows per-object address mapping, encode your deltas per chunk.
 
-2. **Scope**  
+2. **Suggested implementation order**  
+   (a) Line table emission first: for each chunk, build an LLVM line table (from parsed `LineTable` or from source) with address and string-offset deltas applied, then emit via MCDwarf (or equivalent) into a buffer; concatenate chunk buffers. This replaces `patchDwarf5StringOffsets` and the manual prologue walk. (b) Then .debug_info: either clone units with patched bases via emission, or keep concatenate + patch but with positions from LLVM only. (c) Optional: adopt DWARFLinker for full link semantics and future symbol/type support.
+
+3. **Scope**  
    Phase 3 is optional and can follow Phases 1–2. It is the place to add full symbol/type support when needed.
 
 ### Phase 3 validation criteria
