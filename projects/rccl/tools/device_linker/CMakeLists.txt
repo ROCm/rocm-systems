@@ -147,54 +147,36 @@ set(COMMON_FLAGS
   -O3
 )
 
-# Step 5: Compile specialized kernels to .o files (NOT linked into rccl)
+# Step 5: Compile specialized kernels to device-only .device.o (NOT host fat binaries)
+# Device linker reads these ELFs directly
 set(SPECIALIZED_OBJECTS "")
+if(FAULT_INJECTION) set(FAULT_INJECTION_ENV "1") else() set(FAULT_INJECTION_ENV "0") endif()
+if(ENABLE_WARP_SPEED) set(ENABLE_WARP_SPEED_ENV "1") else() set(ENABLE_WARP_SPEED_ENV "0") endif()
+if(ENABLE_LL128) set(ENABLE_LL128_ENV "1") else() set(ENABLE_LL128_ENV "0") endif()
+set(DEBUG_PEER_POINTERS_ENV "0")
+if(COLLTRACE) set(COLLTRACE_ENV "1") else() set(COLLTRACE_ENV "0") endif()
+if(PROFILE) set(PROFILE_ENV "1") else() set(PROFILE_ENV "0") endif()
 foreach(src ${SPECIALIZED_FILES})
   get_filename_component(name ${src} NAME_WE)
-  set(obj ${CMAKE_CURRENT_BINARY_DIR}/specialized_objs/${name}.o)
+  set(obj ${CMAKE_CURRENT_BINARY_DIR}/specialized_objs/${name}.device.o)
   list(APPEND SPECIALIZED_OBJECTS ${obj})
-  
-  # Build include flags string
-  set(INC_FLAGS "")
-  foreach(dir ${INCLUDE_DIRS})
-    set(INC_FLAGS "${INC_FLAGS} -I${dir}")
-  endforeach()
-  
-  # Build define flags based on options
-  set(OPTION_DEFS "-DDEVICE_LINKER -D__HIP_PLATFORM_AMD__")
-  if(FAULT_INJECTION)
-    set(OPTION_DEFS "${OPTION_DEFS} -DENABLE_FAULT_INJECTION")
-  endif()
-  if(ENABLE_WARP_SPEED)
-    set(OPTION_DEFS "${OPTION_DEFS} -DENABLE_WARP_SPEED")
-  endif()
-  if(ENABLE_LL128)
-    set(OPTION_DEFS "${OPTION_DEFS} -DENABLE_LL128")
-  endif()
-  if(DEBUG_PEER_POINTERS)
-    set(OPTION_DEFS "${OPTION_DEFS} -DDEBUG_PEER_POINTERS")
-  endif()
-  
   add_custom_command(
     OUTPUT ${obj}
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/specialized_objs
-    COMMAND ${HIPCC} -c -fPIC -fno-gpu-rdc --offload-arch=${GPU_TARGET_FULL}
-            ${OPTION_DEFS}
-            -I${BASE_BUILD_FULL}/include
-            -I${HIPIFY_DIR}/src
-            -I${HIPIFY_DIR}/src/device
-            -I${HIPIFY_DIR}/src/device/network/unpack
-            -I${HIPIFY_DIR}/src/include
-            -I${HIPIFY_DIR}/src/include/mlx5
-            -I${HIPIFY_DIR}/src/include/nccl_device
-            -I${HIPIFY_DIR}/src/include/ionic
-            -I${HIPIFY_DIR}/src/include/plugin
-            -I${GEN_DIR}
-            -I/opt/rocm/include
-            -I/opt/rocm/include/hsa
-            ${src} -o ${obj}
-    DEPENDS ${src}
-    COMMENT "Compiling specialized kernel: ${name}"
+    COMMAND ${CMAKE_COMMAND} -E env
+            "ENABLE_FAULT_INJECTION=${FAULT_INJECTION_ENV}"
+            "ENABLE_WARP_SPEED=${ENABLE_WARP_SPEED_ENV}"
+            "ENABLE_LL128=${ENABLE_LL128_ENV}"
+            "DEBUG_PEER_POINTERS=${DEBUG_PEER_POINTERS_ENV}"
+            "ENABLE_COLLTRACE=${COLLTRACE_ENV}"
+            "ENABLE_PROFILING=${PROFILE_ENV}"
+            ${DEVICE_LINKER_DIR}/compile_specialized_device.sh
+            ${BASE_BUILD_FULL}
+            ${GPU_TARGET_FULL}
+            ${src}
+            ${obj}
+    DEPENDS ${src} ${DEVICE_LINKER_DIR}/compile_specialized_device.sh
+    COMMENT "Compiling specialized kernel (device-only): ${name}"
   )
 endforeach()
 
