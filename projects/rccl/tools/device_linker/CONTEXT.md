@@ -17,6 +17,27 @@
 | Single-GPU | WORKING |
 | Multi-GPU | WORKING |
 | System RCCL Multi-GPU | WORKING |
+| Smoke Test | PASSED |
+| Multi-GPU Unit Tests | IN PROGRESS - some failures |
+
+## Key Lesson Learned
+
+**Most problems were caused by the dispatcher not having the same defines as the specialized 
+kernels.** Structure layout mismatches (from missing `ENABLE_COLLTRACE`, `ENABLE_PROFILING`, 
+etc.) caused crashes, hangs, and incorrect memory access. See "Critical Constraint: 
+Compilation Flags" section below.
+
+## Known Issues (Feb 8, 2026)
+
+### DWARF Info Still Has Issues
+There is probably still something wrong with the DWARF debug info. For example, when 
+trying to print the address of `ncclShmem` in rocgdb, errors occur. The DWARF sections
+pass `llvm-dwarfdump --verify` but rocgdb may have stricter requirements.
+
+**Recent fix attempt:** Changed dispatcher compilation to use `-dwarf-version=5` to ensure
+consistent DWARF5 across all compilation units (dispatcher was previously DWARF4, specialized
+kernels were DWARF5). This resolved the `DW_FORM_line_strp pointing outside of .debug_line_str`
+error from llvm-dwarfdump, but rocgdb issues may persist.
 
 ## Recent Fix: Multi-GPU Memory Fault (Feb 5, 2026)
 
