@@ -243,7 +243,7 @@ def should_rank_provide_output(
         if max_selected_rank >= world_size:
             fatal_error(
                 f"Invalid rank specification: rank {max_selected_rank} is out of range. "
-                f"MPI world size is {world_size} (valid ranks: 0-{world_size-1})"
+                f"MPI world size is {world_size} (valid ranks: 0-{world_size - 1})"
             )
 
     # Check if current rank is in the selected set
