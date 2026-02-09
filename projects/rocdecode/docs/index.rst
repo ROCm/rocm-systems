@@ -10,7 +10,7 @@ rocDecode provides APIs, utilities, and samples that you can use to easily acces
 features of your media engines (VCNs). It also allows interoperability with other compute engines on
 the GPU using Video Acceleration API (VA-API)/HIP. To learn more, see :doc:`what-is-rocDecode`
 
-The rocDecode public repository is located at `https://github.com/ROCm/rocDecode <https://github.com/ROCm/rocDecode>`_.
+The rocDecode project is located in https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode.
 
 .. grid:: 2
   :gutter: 3
