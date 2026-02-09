@@ -265,6 +265,51 @@ struct track_info_t
 using track_info_ptr_t  = std::shared_ptr<track_info_t>;
 using track_info_list_t = std::vector<track_info_ptr_t>;
 
+// --------------------- Call Stack & Source Context (string-owning) -------
+
+struct address_range_info_t
+{
+    size_t      address_base{};
+    size_t      address_low{};
+    size_t      address_high{};
+    std::string extdata = "{}";
+};
+
+struct program_counter_info_t
+{
+    std::string           function;
+    std::string           filename;
+    std::optional<size_t> line_number;
+    std::string           extdata = "{}";
+};
+
+struct stack_frame_t
+{
+    std::optional<program_counter_info_t> program_counter;
+    std::optional<address_range_info_t>   address_range;
+    std::string                           extdata = "{}";
+};
+
+using call_stack_t = std::deque<stack_frame_t>;
+
+struct source_code_info_t
+{
+    std::optional<std::string> filename;
+    std::optional<size_t>      starting_line_number;
+    std::vector<std::string>   source_code_lines;
+    std::vector<std::string>   assembly_instruction_lines;
+    std::string                extdata = "{}";
+};
+
+struct line_info_entry_t
+{
+    std::optional<source_code_info_t>     source_code;
+    std::optional<program_counter_info_t> program_counter;
+    std::optional<address_range_info_t>   address_range;
+};
+
+using source_context_list_t = std::vector<line_info_entry_t>;
+
 // --------------------- Data Tables ---------------------
 
 struct arg_data_t
@@ -285,8 +330,8 @@ struct event_data_t
     size_t parent_stack_id;  ///< Parent stack ID for nested events
     size_t correlation_id;   ///< Correlation ID linking related events
 
-    shared_types::call_stack_t          call_stack;      ///< Call stack at event time
-    shared_types::source_context_list_t line_info_list;  ///< Source context information
+    call_stack_t          call_stack;      ///< Call stack at event time
+    source_context_list_t line_info_list;  ///< Source context information
 
     std::string event_category;  ///< Event category name (e.g., "HIP_API", "HSA_API")
     std::string extdata;

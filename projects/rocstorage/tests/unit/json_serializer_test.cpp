@@ -25,6 +25,7 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
+#include <array>
 #include <string>
 
 namespace
@@ -386,6 +387,151 @@ TEST(json_serializer_test, source_context_with_null_pointers)
     }
 
     EXPECT_FALSE(sc_json.contains("assembly_instruction_lines"));
+}
+
+// ============================================================================
+// Deserialization tests
+// ============================================================================
+
+TEST(json_serializer_test, deserialize_call_stack_empty_json)
+{
+    auto result = json_serializers::deserialize_call_stack("{}");
+    ASSERT_TRUE(result.empty());
+}
+
+TEST(json_serializer_test, deserialize_call_stack_empty_string)
+{
+    auto result = json_serializers::deserialize_call_stack("");
+    ASSERT_TRUE(result.empty());
+}
+
+TEST(json_serializer_test, deserialize_call_stack_malformed_json)
+{
+    auto result = json_serializers::deserialize_call_stack("not json");
+    ASSERT_TRUE(result.empty());
+}
+
+TEST(json_serializer_test, deserialize_call_stack_single_frame)
+{
+    // Build a call stack, serialize, then deserialize and compare
+    call_stack_t stack;
+
+    program_counter_info_t pc_info;
+    pc_info.function    = "main";
+    pc_info.filename    = "/path/to/main.cpp";
+    pc_info.line_number = 42;
+    pc_info.extdata     = "";
+
+    address_range_info_t addr_range;
+    addr_range.address_base = 0x1000;
+    addr_range.address_low  = 0x1000;
+    addr_range.address_high = 0x2000;
+    addr_range.extdata      = "";
+
+    stack_frame_t frame;
+    frame.program_counter = pc_info;
+    frame.address_range   = addr_range;
+    frame.extdata         = "";
+
+    stack.push_back(frame);
+
+    std::string serialized   = json_serializers::serialize_call_stack(stack);
+    auto        deserialized = json_serializers::deserialize_call_stack(serialized);
+
+    ASSERT_EQ(deserialized.size(), 1);
+    ASSERT_TRUE(deserialized[0].program_counter.has_value());
+    EXPECT_EQ(deserialized[0].program_counter->function, "main");
+    EXPECT_EQ(deserialized[0].program_counter->filename, "/path/to/main.cpp");
+    ASSERT_TRUE(deserialized[0].program_counter->line_number.has_value());
+    EXPECT_EQ(deserialized[0].program_counter->line_number.value(), 42);
+
+    ASSERT_TRUE(deserialized[0].address_range.has_value());
+    EXPECT_EQ(deserialized[0].address_range->address_base, 0x1000);
+    EXPECT_EQ(deserialized[0].address_range->address_low, 0x1000);
+    EXPECT_EQ(deserialized[0].address_range->address_high, 0x2000);
+}
+
+TEST(json_serializer_test, deserialize_call_stack_multiple_frames)
+{
+    // Strings must outlive the call_stack since stack_frame_t uses const char*
+    std::array<std::string, 3> func_names = { "func_0", "func_1", "func_2" };
+
+    call_stack_t stack;
+    for(int i = 0; i < 3; ++i)
+    {
+        program_counter_info_t pc_info;
+        pc_info.function    = func_names[i].c_str();
+        pc_info.filename    = "";
+        pc_info.line_number = static_cast<size_t>(i * 10);
+        pc_info.extdata     = "";
+
+        stack_frame_t frame;
+        frame.program_counter = pc_info;
+        frame.extdata         = "";
+        stack.push_back(frame);
+    }
+
+    std::string serialized   = json_serializers::serialize_call_stack(stack);
+    auto        deserialized = json_serializers::deserialize_call_stack(serialized);
+
+    ASSERT_EQ(deserialized.size(), 3);
+    EXPECT_EQ(deserialized[0].program_counter->function, "func_0");
+    EXPECT_EQ(deserialized[1].program_counter->function, "func_1");
+    EXPECT_EQ(deserialized[2].program_counter->function, "func_2");
+}
+
+TEST(json_serializer_test, deserialize_source_context_empty_json)
+{
+    auto result = json_serializers::deserialize_source_context("{}");
+    ASSERT_TRUE(result.empty());
+}
+
+TEST(json_serializer_test, deserialize_source_context_empty_string)
+{
+    auto result = json_serializers::deserialize_source_context("");
+    ASSERT_TRUE(result.empty());
+}
+
+TEST(json_serializer_test, deserialize_source_context_with_source_code)
+{
+    source_context_list_t list;
+
+    source_code_info_t source_code;
+    source_code.filename                   = "/path/to/source.cpp";
+    source_code.starting_line_number       = 10;
+    source_code.source_code_lines          = { "line 10 content", "line 11 content" };
+    source_code.assembly_instruction_lines = { "mov rax, rbx", "ret" };
+    source_code.extdata                    = "";
+
+    program_counter_info_t pc_info;
+    pc_info.function    = "test_func";
+    pc_info.filename    = "/path/to/source.cpp";
+    pc_info.line_number = 10;
+    pc_info.extdata     = "";
+
+    line_info_entry_t entry;
+    entry.source_code     = source_code;
+    entry.program_counter = pc_info;
+
+    list.push_back(entry);
+
+    std::string serialized   = json_serializers::serialize_source_context(list);
+    auto        deserialized = json_serializers::deserialize_source_context(serialized);
+
+    ASSERT_EQ(deserialized.size(), 1);
+
+    ASSERT_TRUE(deserialized[0].source_code.has_value());
+    ASSERT_TRUE(deserialized[0].source_code->filename.has_value());
+    EXPECT_EQ(deserialized[0].source_code->filename.value(), "/path/to/source.cpp");
+    ASSERT_TRUE(deserialized[0].source_code->starting_line_number.has_value());
+    EXPECT_EQ(deserialized[0].source_code->starting_line_number.value(), 10);
+    ASSERT_EQ(deserialized[0].source_code->source_code_lines.size(), 2);
+    EXPECT_EQ(deserialized[0].source_code->source_code_lines[0], "line 10 content");
+    ASSERT_EQ(deserialized[0].source_code->assembly_instruction_lines.size(), 2);
+    EXPECT_EQ(deserialized[0].source_code->assembly_instruction_lines[0], "mov rax, rbx");
+
+    ASSERT_TRUE(deserialized[0].program_counter.has_value());
+    EXPECT_EQ(deserialized[0].program_counter->function, "test_func");
 }
 
 }  // namespace

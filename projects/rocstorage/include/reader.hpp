@@ -205,7 +205,7 @@ struct reader_t
      * @param event Timeline event to fetch call stack for
      * @return Call stack data (empty if not available in database)
      */
-    [[nodiscard]] shared_types::call_stack_t get_call_stack(
+    [[nodiscard]] reader_types::call_stack_t get_call_stack(
         const reader_types::timeline_event_t& event) const;
 
     /***
@@ -213,7 +213,7 @@ struct reader_t
      * @param event Timeline event to fetch source context for
      * @return List of source context entries (empty if not available)
      */
-    [[nodiscard]] shared_types::source_context_list_t get_source_context(
+    [[nodiscard]] reader_types::source_context_list_t get_source_context(
         const reader_types::timeline_event_t& event) const;
 
     /***

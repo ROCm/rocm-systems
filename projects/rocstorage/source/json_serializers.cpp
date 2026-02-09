@@ -176,4 +176,190 @@ serialize_source_context(
     return j.dump();
 }
 
+namespace
+{
+
+reader_types::address_range_info_t
+parse_address_range(const json_t& j)
+{
+    reader_types::address_range_info_t addr;
+    addr.address_base = j.value("address_base", size_t{ 0 });
+    addr.address_low  = j.value("address_low", size_t{ 0 });
+    addr.address_high = j.value("address_high", size_t{ 0 });
+    if(j.contains("extdata") && j["extdata"].is_string())
+    {
+        addr.extdata = j["extdata"].get<std::string>();
+    }
+    return addr;
+}
+
+reader_types::program_counter_info_t
+parse_program_counter(const json_t& j)
+{
+    reader_types::program_counter_info_t pc;
+    if(j.contains("function") && j["function"].is_string())
+    {
+        pc.function = j["function"].get<std::string>();
+    }
+    if(j.contains("filename") && j["filename"].is_string())
+    {
+        pc.filename = j["filename"].get<std::string>();
+    }
+    if(j.contains("line_number") && j["line_number"].is_number())
+    {
+        pc.line_number = j["line_number"].get<size_t>();
+    }
+    if(j.contains("extdata") && j["extdata"].is_string())
+    {
+        pc.extdata = j["extdata"].get<std::string>();
+    }
+    return pc;
+}
+
+reader_types::stack_frame_t
+parse_stack_frame(const json_t& j)
+{
+    reader_types::stack_frame_t frame;
+    if(j.contains("program_counter") && j["program_counter"].is_object())
+    {
+        frame.program_counter = parse_program_counter(j["program_counter"]);
+    }
+    if(j.contains("address_range") && j["address_range"].is_object())
+    {
+        frame.address_range = parse_address_range(j["address_range"]);
+    }
+    if(j.contains("extdata") && j["extdata"].is_string())
+    {
+        frame.extdata = j["extdata"].get<std::string>();
+    }
+    return frame;
+}
+
+reader_types::source_code_info_t
+parse_source_code(const json_t& j)
+{
+    reader_types::source_code_info_t sc;
+    if(j.contains("filename") && j["filename"].is_string())
+    {
+        sc.filename = j["filename"].get<std::string>();
+    }
+    if(j.contains("starting_line_number") && j["starting_line_number"].is_number())
+    {
+        sc.starting_line_number = j["starting_line_number"].get<size_t>();
+    }
+    if(j.contains("source_code_lines") && j["source_code_lines"].is_array())
+    {
+        for(const auto& line : j["source_code_lines"])
+        {
+            if(line.is_string())
+            {
+                sc.source_code_lines.push_back(line.get<std::string>());
+            }
+        }
+    }
+    if(j.contains("assembly_instruction_lines") &&
+       j["assembly_instruction_lines"].is_array())
+    {
+        for(const auto& line : j["assembly_instruction_lines"])
+        {
+            if(line.is_string())
+            {
+                sc.assembly_instruction_lines.push_back(line.get<std::string>());
+            }
+        }
+    }
+    if(j.contains("extdata") && j["extdata"].is_string())
+    {
+        sc.extdata = j["extdata"].get<std::string>();
+    }
+    return sc;
+}
+
+reader_types::line_info_entry_t
+parse_line_info_entry(const json_t& j)
+{
+    reader_types::line_info_entry_t entry;
+    if(j.contains("source_code") && j["source_code"].is_object())
+    {
+        entry.source_code = parse_source_code(j["source_code"]);
+    }
+    if(j.contains("program_counter") && j["program_counter"].is_object())
+    {
+        entry.program_counter = parse_program_counter(j["program_counter"]);
+    }
+    if(j.contains("address_range") && j["address_range"].is_object())
+    {
+        entry.address_range = parse_address_range(j["address_range"]);
+    }
+    return entry;
+}
+
+}  // namespace
+
+reader_types::call_stack_t
+deserialize_call_stack(const std::string& json)
+{
+    reader_types::call_stack_t result;
+
+    if(json.empty() || json == "{}")
+    {
+        return result;
+    }
+
+    try
+    {
+        auto j = json_t::parse(json);
+        if(!j.contains("frames") || !j["frames"].is_array())
+        {
+            return result;
+        }
+
+        for(const auto& frame_json : j["frames"])
+        {
+            if(frame_json.is_object())
+            {
+                result.push_back(parse_stack_frame(frame_json));
+            }
+        }
+    } catch(const json_t::exception&)
+    {
+        return {};
+    }
+
+    return result;
+}
+
+reader_types::source_context_list_t
+deserialize_source_context(const std::string& json)
+{
+    reader_types::source_context_list_t result;
+
+    if(json.empty() || json == "{}")
+    {
+        return result;
+    }
+
+    try
+    {
+        auto j = json_t::parse(json);
+        if(!j.contains("entries") || !j["entries"].is_array())
+        {
+            return result;
+        }
+
+        for(const auto& entry_json : j["entries"])
+        {
+            if(entry_json.is_object())
+            {
+                result.push_back(parse_line_info_entry(entry_json));
+            }
+        }
+    } catch(const json_t::exception&)
+    {
+        return {};
+    }
+
+    return result;
+}
+
 }  // namespace rocstorage::json_serializers

@@ -99,29 +99,25 @@ reader_t::get_event_count(const reader_types::event_filter_t& filter) const
 std::optional<reader_types::region_data_t>
 reader_t::get_region_details(const reader_types::timeline_event_t& event) const
 {
-    (void) event;
-    return std::nullopt;
+    return m_impl->get_region_details(event);
 }
 
 std::optional<reader_types::kernel_dispatch_data_t>
 reader_t::get_kernel_dispatch_details(const reader_types::timeline_event_t& event) const
 {
-    (void) event;
-    return std::nullopt;
+    return m_impl->get_kernel_dispatch_details(event);
 }
 
 std::optional<reader_types::memory_copy_data_t>
 reader_t::get_memory_copy_details(const reader_types::timeline_event_t& event) const
 {
-    (void) event;
-    return std::nullopt;
+    return m_impl->get_memory_copy_details(event);
 }
 
 std::optional<reader_types::memory_alloc_data_t>
 reader_t::get_memory_alloc_details(const reader_types::timeline_event_t& event) const
 {
-    (void) event;
-    return std::nullopt;
+    return m_impl->get_memory_alloc_details(event);
 }
 
 std::optional<reader_types::sample_data_t>
@@ -138,32 +134,28 @@ reader_t::get_pmc_event_details(const reader_types::timeline_event_t& event) con
     return std::nullopt;
 }
 
-shared_types::call_stack_t
+reader_types::call_stack_t
 reader_t::get_call_stack(const reader_types::timeline_event_t& event) const
 {
-    (void) event;
-    return {};
+    return m_impl->get_call_stack(event);
 }
 
-shared_types::source_context_list_t
+reader_types::source_context_list_t
 reader_t::get_source_context(const reader_types::timeline_event_t& event) const
 {
-    (void) event;
-    return {};
+    return m_impl->get_source_context(event);
 }
 
 reader_types::arg_data_list_t
 reader_t::get_arguments(const reader_types::timeline_event_t& event) const
 {
-    (void) event;
-    return {};
+    return m_impl->get_arguments(event);
 }
 
 reader_types::timeline_event_list_t
 reader_t::get_correlated_events(const reader_types::timeline_event_t& event) const
 {
-    (void) event;
-    return {};
+    return m_impl->get_correlated_events(event);
 }
 
 reader_types::event_summary_list_t
@@ -183,14 +175,13 @@ reader_t::get_region_summary(const reader_types::time_window_t& window) const
 reader_types::time_window_t
 reader_t::get_data_time_range() const
 {
-    return {};
+    return m_impl->get_data_time_range();
 }
 
 reader_types::event_counts_t
 reader_t::get_event_counts(const reader_types::time_window_t& window) const
 {
-    (void) window;
-    return {};
+    return m_impl->get_event_counts(window);
 }
 
 }  // namespace rocstorage

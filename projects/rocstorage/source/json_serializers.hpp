@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "rocstorage/reader_types.hpp"
 #include "rocstorage/shared_types.hpp"
 
 #include <nlohmann/json_fwd.hpp>
@@ -60,5 +61,21 @@ to_json(const rocstorage::shared_types::line_info_entry_t& line_info);
 std::string
 serialize_source_context(
     const rocstorage::shared_types::source_context_list_t& line_info_list);
+
+/**
+ * @brief Deserialize call_stack_t from JSON string
+ * @param json JSON string containing call stack data
+ * @return Parsed call stack (empty if json is empty or malformed)
+ */
+rocstorage::reader_types::call_stack_t
+deserialize_call_stack(const std::string& json);
+
+/**
+ * @brief Deserialize source_context_list_t from JSON string
+ * @param json JSON string containing source context data
+ * @return Parsed source context list (empty if json is empty or malformed)
+ */
+rocstorage::reader_types::source_context_list_t
+deserialize_source_context(const std::string& json);
 
 }  // namespace rocstorage::json_serializers

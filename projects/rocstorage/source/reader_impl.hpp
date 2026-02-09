@@ -12,6 +12,7 @@
 #include "entity_utility.hpp"
 
 #include <memory>
+#include <optional>
 
 namespace rocstorage
 {
@@ -65,9 +66,49 @@ struct reader_t::impl
 
     [[nodiscard]] size_t get_event_count(const reader_types::event_filter_t& filter);
 
+    // Event detail queries
+    [[nodiscard]] std::optional<reader_types::region_data_t> get_region_details(
+        const reader_types::timeline_event_t& event);
+
+    [[nodiscard]] std::optional<reader_types::kernel_dispatch_data_t>
+    get_kernel_dispatch_details(const reader_types::timeline_event_t& event);
+
+    [[nodiscard]] std::optional<reader_types::memory_copy_data_t> get_memory_copy_details(
+        const reader_types::timeline_event_t& event);
+
+    [[nodiscard]] std::optional<reader_types::memory_alloc_data_t>
+    get_memory_alloc_details(const reader_types::timeline_event_t& event);
+
+    // Event property queries
+    [[nodiscard]] reader_types::call_stack_t get_call_stack(
+        const reader_types::timeline_event_t& event);
+
+    [[nodiscard]] reader_types::source_context_list_t get_source_context(
+        const reader_types::timeline_event_t& event);
+
+    [[nodiscard]] reader_types::arg_data_list_t get_arguments(
+        const reader_types::timeline_event_t& event);
+
+    [[nodiscard]] reader_types::timeline_event_list_t get_correlated_events(
+        const reader_types::timeline_event_t& event);
+
+    // Database metadata
+    [[nodiscard]] reader_types::time_window_t  get_data_time_range();
+    [[nodiscard]] reader_types::event_counts_t get_event_counts(
+        const reader_types::time_window_t& window);
+
 private:
     void initialize_string_list();
     void initialize_all_info_lists();
+
+    // Resolve event metadata from event-specific table by db_id and type.
+    // Returns event_id_result containing event_id + stack_id + call_stack JSON etc.
+    [[nodiscard]] std::optional<data_storage::schema_v3::event_id_result>
+    resolve_event_metadata(const reader_types::timeline_event_t& event);
+
+    // Build event_data_t from event_id (queries rocpd_event, parses JSON)
+    [[nodiscard]] reader_types::event_data_ptr_t build_event_data(
+        const data_storage::schema_v3::event_id_result& event_meta);
 
     // Converts raw SQL results to timeline_event_t, resolving FKs
     [[nodiscard]] reader_types::timeline_event_list_t build_timeline_events(

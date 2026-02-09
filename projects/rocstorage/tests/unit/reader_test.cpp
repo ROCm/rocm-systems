@@ -314,4 +314,349 @@ TEST_F(reader_test, get_event_count_matches_events_size)
     ASSERT_EQ(count, events.size());
 }
 
+// ============================================================================
+// Event detail tests
+// ============================================================================
+
+TEST_F(reader_test, get_region_details_first_region_has_correct_values)
+{
+    // First region in DB: id=1, start=23040314699996, end=23040314726875, name="mbind"
+    rocstorage::reader_types::event_filter_t filter;
+    filter.types      = { rocstorage::reader_types::event_type_t::region };
+    filter.pagination = { 1, std::nullopt };
+    auto events       = m_reader->get_events(filter);
+    ASSERT_GE(events.size(), 1);
+
+    auto details = m_reader->get_region_details(events[0]);
+    ASSERT_TRUE(details.has_value());
+    ASSERT_EQ(details->start_timestamp, 23040314699996);
+    ASSERT_EQ(details->end_timestamp, 23040314726875);
+    ASSERT_EQ(details->name, "mbind");
+}
+
+TEST_F(reader_test, get_region_details_has_event_metadata)
+{
+    rocstorage::reader_types::event_filter_t filter;
+    filter.types      = { rocstorage::reader_types::event_type_t::region };
+    filter.pagination = { 1, std::nullopt };
+    auto events       = m_reader->get_events(filter);
+    ASSERT_GE(events.size(), 1);
+
+    auto details = m_reader->get_region_details(events[0]);
+    ASSERT_TRUE(details.has_value());
+    ASSERT_NE(details->event, nullptr);
+    // First region event_id=28 has category_id=3302 -> "numa"
+    ASSERT_EQ(details->event->event_category, "numa");
+}
+
+TEST_F(reader_test, get_region_details_returns_nullopt_for_wrong_type)
+{
+    rocstorage::reader_types::event_filter_t filter;
+    filter.types      = { rocstorage::reader_types::event_type_t::kernel_dispatch };
+    filter.pagination = { 1, std::nullopt };
+    auto events       = m_reader->get_events(filter);
+    ASSERT_GE(events.size(), 1);
+
+    auto details = m_reader->get_region_details(events[0]);
+    ASSERT_FALSE(details.has_value());
+}
+
+TEST_F(reader_test, get_kernel_dispatch_details_has_correct_values)
+{
+    // DB has 1 kernel dispatch: id=1, dispatch_id=1, wg=256x1x1, grid=131072x1x1
+    rocstorage::reader_types::event_filter_t filter;
+    filter.types      = { rocstorage::reader_types::event_type_t::kernel_dispatch };
+    filter.pagination = { 1, std::nullopt };
+    auto events       = m_reader->get_events(filter);
+    ASSERT_GE(events.size(), 1);
+
+    auto details = m_reader->get_kernel_dispatch_details(events[0]);
+    ASSERT_TRUE(details.has_value());
+    ASSERT_EQ(details->dispatch_id, 1);
+    ASSERT_EQ(details->start_timestamp, 23040497580868);
+    ASSERT_EQ(details->end_timestamp, 23040497591788);
+    ASSERT_EQ(details->workgroup_size_x, 256);
+    ASSERT_EQ(details->workgroup_size_y, 1);
+    ASSERT_EQ(details->workgroup_size_z, 1);
+    ASSERT_EQ(details->grid_size_x, 131072);
+    ASSERT_EQ(details->grid_size_y, 1);
+    ASSERT_EQ(details->grid_size_z, 1);
+}
+
+TEST_F(reader_test, get_kernel_dispatch_details_resolves_kernel_symbol)
+{
+    rocstorage::reader_types::event_filter_t filter;
+    filter.types      = { rocstorage::reader_types::event_type_t::kernel_dispatch };
+    filter.pagination = { 1, std::nullopt };
+    auto events       = m_reader->get_events(filter);
+    ASSERT_GE(events.size(), 1);
+
+    auto details = m_reader->get_kernel_dispatch_details(events[0]);
+    ASSERT_TRUE(details.has_value());
+    // kernel_id=11 -> display_name contains "bit_extract_kernel"
+    ASSERT_NE(details->kernel_symbol_info, nullptr);
+    EXPECT_NE(details->kernel_symbol_info->display_name.find("bit_extract_kernel"),
+              std::string::npos);
+}
+
+TEST_F(reader_test, get_kernel_dispatch_details_resolves_node_and_process)
+{
+    rocstorage::reader_types::event_filter_t filter;
+    filter.types      = { rocstorage::reader_types::event_type_t::kernel_dispatch };
+    filter.pagination = { 1, std::nullopt };
+    auto events       = m_reader->get_events(filter);
+    ASSERT_GE(events.size(), 1);
+
+    auto details = m_reader->get_kernel_dispatch_details(events[0]);
+    ASSERT_TRUE(details.has_value());
+    ASSERT_NE(details->node_info, nullptr);
+    ASSERT_EQ(details->node_info->node_id, 9162464413581981795);
+    ASSERT_NE(details->process_info, nullptr);
+    ASSERT_EQ(details->process_info->pid, 67979);
+}
+
+TEST_F(reader_test, get_memory_copy_details_has_correct_values)
+{
+    // DB has 2 memory copies. First: id=1, size=4000000, name=MEMORY_COPY_HOST_TO_DEVICE
+    rocstorage::reader_types::event_filter_t filter;
+    filter.types      = { rocstorage::reader_types::event_type_t::memory_copy };
+    filter.pagination = { 1, std::nullopt };
+    auto events       = m_reader->get_events(filter);
+    ASSERT_GE(events.size(), 1);
+
+    auto details = m_reader->get_memory_copy_details(events[0]);
+    ASSERT_TRUE(details.has_value());
+    ASSERT_EQ(details->start_timestamp, 23040496787705);
+    ASSERT_EQ(details->end_timestamp, 23040496865705);
+    ASSERT_EQ(details->size, 4000000);
+    ASSERT_EQ(details->name, "MEMORY_COPY_HOST_TO_DEVICE");
+}
+
+TEST_F(reader_test, get_memory_copy_details_resolves_agents)
+{
+    rocstorage::reader_types::event_filter_t filter;
+    filter.types      = { rocstorage::reader_types::event_type_t::memory_copy };
+    filter.pagination = { 1, std::nullopt };
+    auto events       = m_reader->get_events(filter);
+    ASSERT_GE(events.size(), 1);
+
+    auto details = m_reader->get_memory_copy_details(events[0]);
+    ASSERT_TRUE(details.has_value());
+    // dst_agent_id=3, src_agent_id=1
+    ASSERT_NE(details->dst_agent_id, nullptr);
+    ASSERT_NE(details->src_agent_id, nullptr);
+}
+
+TEST_F(reader_test, get_memory_alloc_details_has_correct_values)
+{
+    // Inserted test data: id=1, type=ALLOC, level=REAL, size=4096, address=1048576
+    rocstorage::reader_types::event_filter_t filter;
+    filter.types      = { rocstorage::reader_types::event_type_t::memory_allocate };
+    filter.pagination = { 1, std::nullopt };
+    auto events       = m_reader->get_events(filter);
+    ASSERT_GE(events.size(), 1);
+
+    auto details = m_reader->get_memory_alloc_details(events[0]);
+    ASSERT_TRUE(details.has_value());
+    ASSERT_EQ(details->type, "ALLOC");
+    ASSERT_EQ(details->level, "REAL");
+    ASSERT_EQ(details->start_timestamp, 23040314700000);
+    ASSERT_EQ(details->end_timestamp, 23040314710000);
+    ASSERT_TRUE(details->address.has_value());
+    ASSERT_EQ(details->address.value(), 1048576);
+    ASSERT_EQ(details->size, 4096);
+}
+
+TEST_F(reader_test, get_memory_alloc_details_has_event_with_call_stack)
+{
+    // The inserted memory_allocate event has call_stack JSON with hipMalloc
+    rocstorage::reader_types::event_filter_t filter;
+    filter.types      = { rocstorage::reader_types::event_type_t::memory_allocate };
+    filter.pagination = { 1, std::nullopt };
+    auto events       = m_reader->get_events(filter);
+    ASSERT_GE(events.size(), 1);
+
+    auto details = m_reader->get_memory_alloc_details(events[0]);
+    ASSERT_TRUE(details.has_value());
+    ASSERT_NE(details->event, nullptr);
+
+    // call_stack should be deserialized from JSON
+    ASSERT_FALSE(details->event->call_stack.empty());
+    ASSERT_TRUE(details->event->call_stack.front().program_counter.has_value());
+    ASSERT_EQ(details->event->call_stack.front().program_counter->function, "hipMalloc");
+    ASSERT_EQ(details->event->call_stack.front().program_counter->filename,
+              "/opt/rocm/hip/src/hip_memory.cpp");
+    ASSERT_TRUE(
+        details->event->call_stack.front().program_counter->line_number.has_value());
+    ASSERT_EQ(details->event->call_stack.front().program_counter->line_number.value(),
+              123);
+
+    // line_info should also be deserialized
+    ASSERT_FALSE(details->event->line_info_list.empty());
+    ASSERT_TRUE(details->event->line_info_list.front().program_counter.has_value());
+    ASSERT_EQ(details->event->line_info_list.front().program_counter->function,
+              "hipMalloc");
+}
+
+// ============================================================================
+// Event property tests
+// ============================================================================
+
+TEST_F(reader_test, get_call_stack_for_memory_alloc_returns_hipMalloc)
+{
+    // The inserted memory_allocate event has call_stack with hipMalloc
+    rocstorage::reader_types::event_filter_t filter;
+    filter.types      = { rocstorage::reader_types::event_type_t::memory_allocate };
+    filter.pagination = { 1, std::nullopt };
+    auto events       = m_reader->get_events(filter);
+    ASSERT_GE(events.size(), 1);
+
+    auto stack = m_reader->get_call_stack(events[0]);
+    ASSERT_EQ(stack.size(), 1);
+    ASSERT_TRUE(stack.front().program_counter.has_value());
+    ASSERT_EQ(stack.front().program_counter->function, "hipMalloc");
+
+    ASSERT_TRUE(stack.front().address_range.has_value());
+    ASSERT_EQ(stack.front().address_range->address_base, 4096);
+    ASSERT_EQ(stack.front().address_range->address_high, 8192);
+}
+
+TEST_F(reader_test, get_source_context_for_memory_alloc_returns_entry)
+{
+    rocstorage::reader_types::event_filter_t filter;
+    filter.types      = { rocstorage::reader_types::event_type_t::memory_allocate };
+    filter.pagination = { 1, std::nullopt };
+    auto events       = m_reader->get_events(filter);
+    ASSERT_GE(events.size(), 1);
+
+    auto context = m_reader->get_source_context(events[0]);
+    ASSERT_EQ(context.size(), 1);
+    ASSERT_TRUE(context.front().program_counter.has_value());
+    ASSERT_EQ(context.front().program_counter->function, "hipMalloc");
+}
+
+TEST_F(reader_test, get_call_stack_returns_empty_for_no_call_stack)
+{
+    // Region events in this DB have empty call_stack JSON
+    rocstorage::reader_types::event_filter_t filter;
+    filter.types      = { rocstorage::reader_types::event_type_t::region };
+    filter.pagination = { 1, std::nullopt };
+    auto events       = m_reader->get_events(filter);
+    ASSERT_GE(events.size(), 1);
+
+    auto stack = m_reader->get_call_stack(events[0]);
+    ASSERT_TRUE(stack.empty());
+}
+
+TEST_F(reader_test, get_arguments_for_hipGetDevice_has_correct_values)
+{
+    // Region id=23 (hipGetDevice, event_id=86) has 1 arg: pos=0, type=int*, name=deviceId
+    // Region id=22 (hipGetDevice, event_id=85) has 0 args
+    // Find the hipGetDevice instance that has args and verify values
+    rocstorage::reader_types::event_filter_t filter;
+    filter.types = { rocstorage::reader_types::event_type_t::region };
+    auto events  = m_reader->get_events(filter);
+    ASSERT_GT(events.size(), 0);
+
+    bool found = false;
+    for(const auto& event : events)
+    {
+        if(event.display_name != "hipGetDevice") continue;
+
+        auto args = m_reader->get_arguments(event);
+        if(args.empty()) continue;
+
+        ASSERT_EQ(args.size(), 1);
+        ASSERT_EQ(args[0]->position, 0);
+        ASSERT_EQ(args[0]->type, "int*");
+        ASSERT_EQ(args[0]->name, "deviceId");
+        ASSERT_EQ(args[0]->value, "0");
+        found = true;
+        break;
+    }
+    ASSERT_TRUE(found) << "No hipGetDevice region with arguments found";
+}
+
+TEST_F(reader_test, get_arguments_returns_empty_for_event_without_args)
+{
+    // First region (mbind) has event_id=28 with 0 args
+    rocstorage::reader_types::event_filter_t filter;
+    filter.types      = { rocstorage::reader_types::event_type_t::region };
+    filter.pagination = { 1, std::nullopt };
+    auto events       = m_reader->get_events(filter);
+    ASSERT_GE(events.size(), 1);
+
+    auto args = m_reader->get_arguments(events[0]);
+    ASSERT_TRUE(args.empty());
+}
+
+TEST_F(reader_test, get_correlated_events_finds_related_events)
+{
+    // stack_id=7 has 2 events (event_id 182 and 203).
+    // event_id=203 is in memory_copy (MC id=1)
+    // We need to find the memory_copy event, then check its correlated events
+    rocstorage::reader_types::event_filter_t filter;
+    filter.types = { rocstorage::reader_types::event_type_t::memory_copy };
+    auto events  = m_reader->get_events(filter);
+    ASSERT_GE(events.size(), 1);
+
+    auto correlated = m_reader->get_correlated_events(events[0]);
+    // Should find at least 1 correlated event (the region with the same stack_id)
+    ASSERT_GE(correlated.size(), 1);
+    // Correlated events should have valid IDs and not be the same event
+    for(const auto& ce : correlated)
+    {
+        ASSERT_GT(ce.unique_identifier.id, 0);
+    }
+}
+
+// ============================================================================
+// Database metadata tests
+// ============================================================================
+
+TEST_F(reader_test, get_data_time_range_has_correct_values)
+{
+    auto range = m_reader->get_data_time_range();
+    ASSERT_TRUE(range.start.has_value());
+    ASSERT_TRUE(range.end.has_value());
+    // min across all tables: 23040260707644, max: 23040498732102
+    ASSERT_EQ(range.start.value(), 23040260707644);
+    ASSERT_EQ(range.end.value(), 23040498732102);
+}
+
+TEST_F(reader_test, get_event_counts_has_correct_values)
+{
+    auto counts = m_reader->get_event_counts();
+
+    // DB: 59 regions, 1 kernel dispatch, 2 memory copies, 1 memory allocate
+    auto region_it = counts.find(rocstorage::reader_types::event_type_t::region);
+    ASSERT_NE(region_it, counts.end());
+    ASSERT_EQ(region_it->second, 59);
+
+    auto kd_it = counts.find(rocstorage::reader_types::event_type_t::kernel_dispatch);
+    ASSERT_NE(kd_it, counts.end());
+    ASSERT_EQ(kd_it->second, 1);
+
+    auto mc_it = counts.find(rocstorage::reader_types::event_type_t::memory_copy);
+    ASSERT_NE(mc_it, counts.end());
+    ASSERT_EQ(mc_it->second, 2);
+
+    auto ma_it = counts.find(rocstorage::reader_types::event_type_t::memory_allocate);
+    ASSERT_NE(ma_it, counts.end());
+    ASSERT_EQ(ma_it->second, 1);
+}
+
+TEST_F(reader_test, get_event_counts_total_matches_get_events)
+{
+    auto counts = m_reader->get_event_counts();
+    auto events = m_reader->get_events();
+
+    size_t total = 0;
+    for(const auto& [type, count] : counts)
+    {
+        total += count;
+    }
+    ASSERT_EQ(total, events.size());
+}
+
 }  // namespace

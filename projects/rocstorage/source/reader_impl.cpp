@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include "reader_impl.hpp"
+#include "json_serializers.hpp"
 #include "rocstorage/reader.hpp"
 #include "rocstorage/storage.hpp"
 #include "storage_impl.hpp"
@@ -9,6 +10,7 @@
 #include "queries/select/table_select_query.hpp"
 
 #include <algorithm>
+#include <limits>
 #include <memory>
 #include <stdexcept>
 #include <utility>
@@ -772,6 +774,415 @@ size_t
 reader_t::impl::get_event_count(const reader_types::event_filter_t& filter)
 {
     return get_events(filter).size();
+}
+
+// ============================================================================
+// Event metadata resolution helpers
+// ============================================================================
+
+std::optional<data_storage::schema_v3::event_id_result>
+reader_t::impl::resolve_event_metadata(const reader_types::timeline_event_t& event)
+{
+    auto db_id = event.unique_identifier.id;
+
+    std::vector<data_storage::schema_v3::event_id_result> results;
+    switch(event.unique_identifier.type)
+    {
+        case reader_types::event_type_t::region:
+            results = m_read_statements->region_event_id()(db_id).to_vector();
+            break;
+        case reader_types::event_type_t::kernel_dispatch:
+            results = m_read_statements->kernel_dispatch_event_id()(db_id).to_vector();
+            break;
+        case reader_types::event_type_t::memory_copy:
+            results = m_read_statements->memory_copy_event_id()(db_id).to_vector();
+            break;
+        case reader_types::event_type_t::memory_allocate:
+            results = m_read_statements->memory_alloc_event_id()(db_id).to_vector();
+            break;
+        default: return std::nullopt;
+    }
+
+    if(results.empty()) return std::nullopt;
+    return results.front();
+}
+
+reader_types::event_data_ptr_t
+reader_t::impl::build_event_data(
+    const data_storage::schema_v3::event_id_result& event_meta)
+{
+    auto event_data             = std::make_shared<reader_types::event_data_t>();
+    event_data->stack_id        = event_meta.stack_id.value_or(0);
+    event_data->parent_stack_id = event_meta.parent_stack_id.value_or(0);
+    event_data->correlation_id  = event_meta.correlation_id.value_or(0);
+    event_data->extdata         = event_meta.event_extdata;
+
+    if(event_meta.category_id.has_value())
+    {
+        auto it = m_string_info_utility.find(event_meta.category_id.value());
+        if(it != m_string_info_utility.end())
+        {
+            event_data->event_category = it->second;
+        }
+    }
+
+    event_data->call_stack =
+        json_serializers::deserialize_call_stack(event_meta.call_stack);
+    event_data->line_info_list =
+        json_serializers::deserialize_source_context(event_meta.line_info);
+
+    return event_data;
+}
+
+// ============================================================================
+// Event detail methods
+// ============================================================================
+
+std::optional<reader_types::region_data_t>
+reader_t::impl::get_region_details(const reader_types::timeline_event_t& event)
+{
+    if(event.unique_identifier.type != reader_types::event_type_t::region)
+        return std::nullopt;
+
+    auto results =
+        m_read_statements->region_detail()(event.unique_identifier.id).to_vector();
+    if(results.empty()) return std::nullopt;
+
+    const auto& r = results.front();
+
+    reader_types::region_data_t data;
+    data.start_timestamp = r.start;
+    data.end_timestamp   = r.end;
+    data.extdata         = r.extdata;
+
+    if(r.name_id.has_value())
+    {
+        auto it = m_string_info_utility.find(r.name_id.value());
+        if(it != m_string_info_utility.end()) data.name = it->second;
+    }
+
+    if(r.event_id.has_value())
+    {
+        auto event_meta = resolve_event_metadata(event);
+        if(event_meta.has_value()) data.event = build_event_data(event_meta.value());
+    }
+
+    return data;
+}
+
+std::optional<reader_types::kernel_dispatch_data_t>
+reader_t::impl::get_kernel_dispatch_details(const reader_types::timeline_event_t& event)
+{
+    if(event.unique_identifier.type != reader_types::event_type_t::kernel_dispatch)
+        return std::nullopt;
+
+    auto results = m_read_statements->kernel_dispatch_detail()(event.unique_identifier.id)
+                       .to_vector();
+    if(results.empty()) return std::nullopt;
+
+    const auto& r = results.front();
+
+    reader_types::kernel_dispatch_data_t data;
+    data.dispatch_id          = r.dispatch_id;
+    data.start_timestamp      = r.start;
+    data.end_timestamp        = r.end;
+    data.private_segment_size = r.private_segment_size.value_or(0);
+    data.group_segment_size   = r.group_segment_size.value_or(0);
+    data.workgroup_size_x     = r.workgroup_size_x;
+    data.workgroup_size_y     = r.workgroup_size_y;
+    data.workgroup_size_z     = r.workgroup_size_z;
+    data.grid_size_x          = r.grid_size_x;
+    data.grid_size_y          = r.grid_size_y;
+    data.grid_size_z          = r.grid_size_z;
+    data.extdata              = r.extdata;
+
+    if(r.region_name_id.has_value())
+    {
+        auto it = m_string_info_utility.find(r.region_name_id.value());
+        if(it != m_string_info_utility.end()) data.name = it->second;
+    }
+
+    if(r.kernel_id.has_value())
+    {
+        auto it = m_kernel_symbol_info_utility.find(r.kernel_id.value());
+        if(it != m_kernel_symbol_info_utility.end())
+        {
+            data.kernel_symbol_info = it->second;
+            if(it->second && it->second->code_object_info)
+                data.code_object_info = it->second->code_object_info;
+        }
+    }
+
+    auto node_it = m_node_info_utility.find(r.nid);
+    if(node_it != m_node_info_utility.end()) data.node_info = node_it->second;
+
+    if(r.pid.has_value())
+    {
+        auto it = m_process_info_utility.find(r.pid.value());
+        if(it != m_process_info_utility.end()) data.process_info = it->second;
+    }
+
+    if(r.tid.has_value())
+    {
+        auto it = m_thread_info_utility.find(r.tid.value());
+        if(it != m_thread_info_utility.end()) data.thread_info = it->second;
+    }
+
+    if(r.event_id.has_value())
+    {
+        auto event_meta = resolve_event_metadata(event);
+        if(event_meta.has_value()) data.event = build_event_data(event_meta.value());
+    }
+
+    return data;
+}
+
+std::optional<reader_types::memory_copy_data_t>
+reader_t::impl::get_memory_copy_details(const reader_types::timeline_event_t& event)
+{
+    if(event.unique_identifier.type != reader_types::event_type_t::memory_copy)
+        return std::nullopt;
+
+    auto results =
+        m_read_statements->memory_copy_detail()(event.unique_identifier.id).to_vector();
+    if(results.empty()) return std::nullopt;
+
+    const auto& r = results.front();
+
+    reader_types::memory_copy_data_t data;
+    data.start_timestamp = r.start;
+    data.end_timestamp   = r.end;
+    data.dst_address     = r.dst_address;
+    data.src_address     = r.src_address;
+    data.size            = r.size;
+    data.extdata         = r.extdata;
+
+    if(r.name_id.has_value())
+    {
+        auto it = m_string_info_utility.find(r.name_id.value());
+        if(it != m_string_info_utility.end()) data.name = it->second;
+    }
+
+    if(r.region_name_id.has_value())
+    {
+        auto it = m_string_info_utility.find(r.region_name_id.value());
+        if(it != m_string_info_utility.end()) data.region_name = it->second;
+    }
+
+    if(r.dst_agent_id.has_value())
+    {
+        auto it = m_agent_info_utility.find(r.dst_agent_id.value());
+        if(it != m_agent_info_utility.end()) data.dst_agent_id = it->second;
+    }
+
+    if(r.src_agent_id.has_value())
+    {
+        auto it = m_agent_info_utility.find(r.src_agent_id.value());
+        if(it != m_agent_info_utility.end()) data.src_agent_id = it->second;
+    }
+
+    auto node_it = m_node_info_utility.find(r.nid);
+    if(node_it != m_node_info_utility.end()) data.node_info = node_it->second;
+
+    if(r.pid.has_value())
+    {
+        auto it = m_process_info_utility.find(r.pid.value());
+        if(it != m_process_info_utility.end()) data.process_info = it->second;
+    }
+
+    if(r.tid.has_value())
+    {
+        auto it = m_thread_info_utility.find(r.tid.value());
+        if(it != m_thread_info_utility.end()) data.thread_info = it->second;
+    }
+
+    if(r.event_id.has_value())
+    {
+        auto event_meta = resolve_event_metadata(event);
+        if(event_meta.has_value()) data.event = build_event_data(event_meta.value());
+    }
+
+    return data;
+}
+
+std::optional<reader_types::memory_alloc_data_t>
+reader_t::impl::get_memory_alloc_details(const reader_types::timeline_event_t& event)
+{
+    if(event.unique_identifier.type != reader_types::event_type_t::memory_allocate)
+        return std::nullopt;
+
+    auto results =
+        m_read_statements->memory_alloc_detail()(event.unique_identifier.id).to_vector();
+    if(results.empty()) return std::nullopt;
+
+    const auto& r = results.front();
+
+    reader_types::memory_alloc_data_t data;
+    data.type            = r.type.value_or("");
+    data.level           = r.level.value_or("");
+    data.start_timestamp = r.start;
+    data.end_timestamp   = r.end;
+    data.address         = r.address;
+    data.size            = r.size;
+    data.extdata         = r.extdata;
+
+    auto node_it = m_node_info_utility.find(r.nid);
+    if(node_it != m_node_info_utility.end()) data.node_info = node_it->second;
+
+    if(r.pid.has_value())
+    {
+        auto it = m_process_info_utility.find(r.pid.value());
+        if(it != m_process_info_utility.end()) data.process_info = it->second;
+    }
+
+    if(r.tid.has_value())
+    {
+        auto it = m_thread_info_utility.find(r.tid.value());
+        if(it != m_thread_info_utility.end()) data.thread_info = it->second;
+    }
+
+    if(r.event_id.has_value())
+    {
+        auto event_meta = resolve_event_metadata(event);
+        if(event_meta.has_value()) data.event = build_event_data(event_meta.value());
+    }
+
+    return data;
+}
+
+// ============================================================================
+// Event property methods
+// ============================================================================
+
+reader_types::call_stack_t
+reader_t::impl::get_call_stack(const reader_types::timeline_event_t& event)
+{
+    auto event_meta = resolve_event_metadata(event);
+    if(!event_meta.has_value()) return {};
+
+    return json_serializers::deserialize_call_stack(event_meta->call_stack);
+}
+
+reader_types::source_context_list_t
+reader_t::impl::get_source_context(const reader_types::timeline_event_t& event)
+{
+    auto event_meta = resolve_event_metadata(event);
+    if(!event_meta.has_value()) return {};
+
+    return json_serializers::deserialize_source_context(event_meta->line_info);
+}
+
+reader_types::arg_data_list_t
+reader_t::impl::get_arguments(const reader_types::timeline_event_t& event)
+{
+    auto event_meta = resolve_event_metadata(event);
+    if(!event_meta.has_value() || !event_meta->event_id.has_value()) return {};
+
+    auto results =
+        m_read_statements->arg_detail()(event_meta->event_id.value()).to_vector();
+
+    reader_types::arg_data_list_t args;
+    args.reserve(results.size());
+    for(const auto& r : results)
+    {
+        auto arg      = std::make_shared<reader_types::arg_data_t>();
+        arg->position = r.position;
+        arg->type     = r.type;
+        arg->name     = r.name;
+        arg->value    = r.value;
+        arg->extdata  = r.extdata;
+        args.push_back(std::move(arg));
+    }
+    return args;
+}
+
+reader_types::timeline_event_list_t
+reader_t::impl::get_correlated_events(const reader_types::timeline_event_t& event)
+{
+    auto event_meta = resolve_event_metadata(event);
+    if(!event_meta.has_value() || !event_meta->stack_id.has_value()) return {};
+
+    auto stack_id          = event_meta->stack_id.value();
+    auto excluded_event_id = event_meta->event_id.value_or(0);
+
+    reader_types::timeline_event_list_t all_events;
+
+    const auto& stmts = m_read_statements->correlated_event_statements();
+
+    auto query_type = [&](const auto& stmt, reader_types::event_type_t type) {
+        auto results = stmt(stack_id, excluded_event_id).to_vector();
+        auto events  = build_timeline_events(results, type);
+        all_events.insert(all_events.end(),
+                          std::make_move_iterator(events.begin()),
+                          std::make_move_iterator(events.end()));
+    };
+
+    query_type(stmts.region, reader_types::event_type_t::region);
+    query_type(stmts.kernel_dispatch, reader_types::event_type_t::kernel_dispatch);
+    query_type(stmts.memory_copy, reader_types::event_type_t::memory_copy);
+    query_type(stmts.memory_allocate, reader_types::event_type_t::memory_allocate);
+
+    return all_events;
+}
+
+// ============================================================================
+// Database metadata methods
+// ============================================================================
+
+reader_types::time_window_t
+reader_t::impl::get_data_time_range()
+{
+    size_t global_min = std::numeric_limits<size_t>::max();
+    size_t global_max = 0;
+
+    auto process_range = [&](const auto& stmt) {
+        auto results = stmt().to_vector();
+        if(!results.empty())
+        {
+            if(results.front().min_start.has_value())
+                global_min = std::min(global_min, results.front().min_start.value());
+            if(results.front().max_end.has_value())
+                global_max = std::max(global_max, results.front().max_end.value());
+        }
+    };
+
+    process_range(m_read_statements->region_time_range());
+    process_range(m_read_statements->kernel_dispatch_time_range());
+    process_range(m_read_statements->memory_copy_time_range());
+    process_range(m_read_statements->memory_alloc_time_range());
+
+    reader_types::time_window_t window;
+    if(global_min != std::numeric_limits<size_t>::max())
+    {
+        window.start = global_min;
+        window.end   = global_max;
+    }
+    return window;
+}
+
+reader_types::event_counts_t
+reader_t::impl::get_event_counts(const reader_types::time_window_t& window)
+{
+    (void) window;  // TODO: time-filtered counts
+
+    reader_types::event_counts_t counts;
+
+    auto get_count = [](const auto& stmt) -> size_t {
+        auto results = stmt().to_vector();
+        if(!results.empty()) return results.front().count;
+        return 0;
+    };
+
+    counts[reader_types::event_type_t::region] =
+        get_count(m_read_statements->region_count());
+    counts[reader_types::event_type_t::kernel_dispatch] =
+        get_count(m_read_statements->kernel_dispatch_count());
+    counts[reader_types::event_type_t::memory_copy] =
+        get_count(m_read_statements->memory_copy_count());
+    counts[reader_types::event_type_t::memory_allocate] =
+        get_count(m_read_statements->memory_alloc_count());
+
+    return counts;
 }
 
 }  // namespace rocstorage
