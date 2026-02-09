@@ -114,8 +114,6 @@ if(NOT ROCM_FOUND)
     find_package( ROCM 0.7.3 REQUIRED CONFIG PATHS ${PROJECT_EXTERN_DIR}/rocm-cmake )
 endif()
 
-set(CMAKE_INSTALL_LIBDIR lib CACHE STRING "Define install directory for libraries" FORCE)
-
 # Find or download/install fmt
 find_package(fmt QUIET)
 if(NOT fmt_FOUND)
