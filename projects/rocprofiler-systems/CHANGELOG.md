@@ -16,9 +16,6 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 ### Added
 
 - Per-GPU RCCL communication data counters (Send/Recv) in `rocpd` output with multi-GPU device attribution using `ncclCommCuDevice` API.
-- 39 comprehensive unit tests for RCCL functionality using template-based dependency injection pattern.
-- `rccl_internal.hpp` header exposing testable GPU tracking state for unit testing.
-- Validation rules for RCCL communication data in `rocpd` output (`tests/rocpd-validation-rules/rccl/rccl-comm-rules.json`).
 - Presets profiles that configure the rocprofiler-system tools for common profiling scenarios, offering optimized configurations for specific use cases.
 
 ### Resolved issues
