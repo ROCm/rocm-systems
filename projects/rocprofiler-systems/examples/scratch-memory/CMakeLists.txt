@@ -3,12 +3,17 @@
 
 cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 
-project(rocprofiler-systems-scratch-memory-example LANGUAGES CXX HIP)
+project(rocprofiler-systems-scratch-memory-example LANGUAGES CXX)
 
-find_package(HIP QUIET)
-if(NOT HIP_FOUND)
-    message(WARNING "HIP is not found. Skip scratch-memory example.")
-    return()
+if(ROCPROFSYS_DISABLE_EXAMPLES)
+    get_filename_component(_DIR ${CMAKE_CURRENT_LIST_DIR} NAME)
+
+    if(
+        ${PROJECT_NAME} IN_LIST ROCPROFSYS_DISABLE_EXAMPLES
+        OR ${_DIR} IN_LIST ROCPROFSYS_DISABLE_EXAMPLES
+    )
+        return()
+    endif()
 endif()
 
 if(NOT CMAKE_HIP_COMPILER)
@@ -30,15 +35,11 @@ if(NOT CMAKE_HIP_COMPILER)
     endif()
 endif()
 
-if(ROCPROFSYS_DISABLE_EXAMPLES)
-    get_filename_component(_DIR ${CMAKE_CURRENT_LIST_DIR} NAME)
-
-    if(
-        ${PROJECT_NAME} IN_LIST ROCPROFSYS_DISABLE_EXAMPLES
-        OR ${_DIR} IN_LIST ROCPROFSYS_DISABLE_EXAMPLES
-    )
-        return()
-    endif()
+if(CMAKE_HIP_COMPILER)
+    enable_language(HIP)
+else()
+    message(WARNING "HIP compiler not found. Cannot build scratch-memory target.")
+    return()
 endif()
 
 foreach(_TYPE DEBUG MINSIZEREL RELEASE RELWITHDEBINFO)
@@ -84,3 +85,11 @@ endif()
 
 find_package(Threads REQUIRED)
 target_link_libraries(scratch-memory PRIVATE Threads::Threads ${HSA_RUNTIME_LIBRARY})
+
+if(ROCPROFSYS_INSTALL_EXAMPLES AND TARGET scratch-memory)
+    install(
+        TARGETS scratch-memory
+        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples
+        COMPONENT rocprofiler-systems-examples
+    )
+endif()
