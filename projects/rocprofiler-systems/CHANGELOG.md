@@ -6,15 +6,10 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 ## ROCm Systems Profiler 1.5.0 for ROCm x.y.z (unreleased)
 
-### Added
-
-- Per-GPU RCCL communication data counters (Send/Recv) in `rocpd` output with device attribution using `ncclCommCuDevice`.
-
 ### Changed
 
 - Simplify categorizing like pmc_info events by removing the _<idx> from the "symbol" field. ie., "JpegAct_0" -> "JpegAct".
 - Added `libhsa-runtime64.so` and `libomp.so` to the internal library exclusion list for runtime instrumentation to prevent instrumenting of runtime library internals.
-- `insert_pmc_event` now throws `std::runtime_error` when PMC descriptor is missing instead of logging a warning.
 
 ### Added
 
