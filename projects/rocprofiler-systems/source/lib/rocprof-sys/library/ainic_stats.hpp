@@ -41,11 +41,6 @@ public:
     using nic_params_t = std::map<std::string, nic_stats>;
 
 private:
-#ifdef USE_AINIC
-    amd::smi::AMDSmiSystem&
-        _amdsmi;  // Reference to the singleton instance of AMDSmiSystem
-#endif
-
     // _nic_params and _nic_delta_params both hold network stats. _nic_params holds the
     // total values as read on sysfs via amd-smi. _nic_delta_params hold the differences
     // between the latest read and the read before that.
