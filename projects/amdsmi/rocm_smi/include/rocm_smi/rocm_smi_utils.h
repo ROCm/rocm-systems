@@ -114,6 +114,30 @@ bool is_sudo_user();
 rsmi_status_t rsmi_get_gfx_target_version(uint32_t dv_ind, std::string *gfx_version);
 rsmi_status_t rsmi_dev_number_of_computes_get(uint32_t dv_ind, uint32_t* num_computes);
 
+// Check if running inside a container (Docker, LXC, Podman, etc.)
+bool is_running_in_container();
+
+// Check if device is bound to vfio-pci driver (passthrough indicator)
+// pci_sysfs_path: e.g., "/sys/class/drm/renderD128/device"
+bool is_device_vfio_bound(const std::string& pci_sysfs_path);
+
+// Check SR-IOV status for a device
+// pci_sysfs_path: e.g., "/sys/class/drm/renderD128/device"
+// Returns: tuple<has_sriov_capability, has_active_vfs>
+std::tuple<bool, bool> get_sriov_status(const std::string& pci_sysfs_path);
+
+// Comprehensive virtualization mode detection via sysfs (no root required)
+// render_path: the render node name, e.g., "renderD128"
+// Returns tuple:
+//   0: is_vm_guest         - hypervisor flag detected in /proc/cpuinfo
+//   1: is_container        - running inside docker/lxc/podman container
+//   2: has_sriov_capability - device supports SR-IOV (could read sriov_totalvfs)
+//   3: has_active_vfs      - VFs are provisioned (indicates HOST mode)
+//   4: is_vfio_bound       - device bound to vfio-pci (passthrough indicator)
+//   5: sysfs_accessible    - could access device sysfs path at all
+std::tuple<bool, bool, bool, bool, bool, bool> detect_virtualization_mode_sysfs(
+    const std::string& render_path);
+
 std::string leftTrim(const std::string &s);
 std::string rightTrim(const std::string &s);
 std::string trim(const std::string &s);

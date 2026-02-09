@@ -20,10 +20,8 @@
  * THE SOFTWARE.
  */
 
-#define _GNU_SOURCE 1 // REQUIRED: to utilize some GNU features/functions, see
-                      // _GNU_SOURCE functions which check
-#include <cassert>
-#include <cerrno>
+#define _GNU_SOURCE 1  // REQUIRED: to utilize some GNU features/functions, see
+                       // _GNU_SOURCE functions which check
 #include <sys/stat.h>
 #include <unistd.h>
 #include <dirent.h>
@@ -1342,4 +1340,189 @@ uint64_t bdfid_from_domain(uint64_t bdfid, uint64_t domain) {
   bdfid |= (domain & 0xFFFFFFFF) << 32;  // Add domain to top of pci_id
   return bdfid;
 }
-} // namespace amd::smi
+
+//--------------------------------------------------------------------------
+// TODO(amdsmi_team): May remove the below functions and add to anothe PR...
+//--------------------------------------------------------------------------
+
+// Structure to hold virtualization detection results
+// This provides multiple signals to help determine the virtualization mode
+// without false positives in container environments
+struct VirtModeDetectionResult {
+  bool is_vm_guest;           // hypervisor flag in /proc/cpuinfo
+  bool is_container;          // running inside docker/lxc/podman container
+  bool has_sriov_capability;  // device supports SR-IOV (sriov_totalvfs > 0)
+  bool has_active_vfs;        // VFs are provisioned (sriov_numvfs > 0) -> HOST
+  bool is_vfio_bound;         // device bound to vfio-pci driver -> passthrough candidate
+};
+
+// Check if running inside a container (Docker, LXC, Podman, etc.)
+// This is important because container environments can give false positives
+// for VM detection since they may not have access to all sysfs paths
+bool is_running_in_container() {
+  std::ostringstream ss;
+
+  // Check for Docker
+  if (FileExists("/.dockerenv")) {
+    ss << __PRETTY_FUNCTION__ << " | Detected Docker container (/.dockerenv exists)";
+    LOG_DEBUG(ss);
+    return true;
+  }
+
+  // Check for Podman/other container runtimes
+  if (FileExists("/run/.containerenv")) {
+    ss << __PRETTY_FUNCTION__ << " | Detected container (/run/.containerenv exists)";
+    LOG_DEBUG(ss);
+    return true;
+  }
+
+  // Check cgroup for container indicators
+  std::ifstream cgroup_file("/proc/1/cgroup");
+  if (cgroup_file.is_open()) {
+    std::string line;
+    while (std::getline(cgroup_file, line)) {
+      if (line.find("docker") != std::string::npos ||
+          line.find("lxc") != std::string::npos ||
+          line.find("kubepods") != std::string::npos ||
+          line.find("containerd") != std::string::npos) {
+        ss << __PRETTY_FUNCTION__ << " | Detected container via cgroup: " << line;
+        LOG_DEBUG(ss);
+        return true;
+      }
+    }
+  }
+
+  // Check for container environment variables (less reliable but useful)
+  const char* container_env = std::getenv("container");
+  if (container_env != nullptr) {
+    ss << __PRETTY_FUNCTION__ << " | Detected container via $container env var: " << container_env;
+    LOG_DEBUG(ss);
+    return true;
+  }
+
+  return false;
+}
+
+// Check if device is bound to vfio-pci driver (passthrough indicator)
+// pci_sysfs_path should be like "/sys/class/drm/renderD128/device"
+bool is_device_vfio_bound(const std::string& pci_sysfs_path) {
+  std::ostringstream ss;
+  std::string driver_link = pci_sysfs_path + "/driver";
+  char buf[256];
+
+  ssize_t len = readlink(driver_link.c_str(), buf, sizeof(buf) - 1);
+  if (len > 0) {
+    buf[len] = '\0';
+    std::string driver(buf);
+    ss << __PRETTY_FUNCTION__ << " | Device driver: " << driver;
+    LOG_DEBUG(ss);
+
+    if (driver.find("vfio-pci") != std::string::npos) {
+      ss << __PRETTY_FUNCTION__ << " | Device bound to vfio-pci (passthrough)";
+      LOG_INFO(ss);
+      return true;
+    }
+  }
+  return false;
+}
+
+// Check SR-IOV status for a device
+// pci_sysfs_path should be like "/sys/class/drm/renderD128/device"
+// Returns: tuple<has_sriov_capability, has_active_vfs>
+std::tuple<bool, bool> get_sriov_status(const std::string& pci_sysfs_path) {
+  std::ostringstream ss;
+  bool has_capability = false;
+  bool has_active_vfs = false;
+
+  // Check for SR-IOV total VFs (capability)
+  std::string sriov_total_path = pci_sysfs_path + "/sriov_totalvfs";
+  std::ifstream total_file(sriov_total_path);
+  if (total_file.is_open()) {
+    int total_vfs = 0;
+    total_file >> total_vfs;
+    total_file.close();
+
+    if (total_vfs > 0) {
+      has_capability = true;
+      ss << __PRETTY_FUNCTION__ << " | sriov_totalvfs = " << total_vfs;
+      LOG_DEBUG(ss);
+    }
+  }
+
+  // Check for active VFs (indicates HOST mode)
+  std::string sriov_num_path = pci_sysfs_path + "/sriov_numvfs";
+  std::ifstream num_file(sriov_num_path);
+  if (num_file.is_open()) {
+    int num_vfs = 0;
+    num_file >> num_vfs;
+    num_file.close();
+
+    if (num_vfs > 0) {
+      has_active_vfs = true;
+      ss << __PRETTY_FUNCTION__ << " | sriov_numvfs = " << num_vfs << " (HOST mode)";
+      LOG_INFO(ss);
+    }
+  }
+
+  return std::make_tuple(has_capability, has_active_vfs);
+}
+
+// Comprehensive virtualization mode detection via sysfs (no root required)
+// render_path: the render node name, e.g., "renderD128"
+// Returns tuple:
+//   0: is_vm_guest         - hypervisor flag detected in /proc/cpuinfo
+//   1: is_container        - running inside docker/lxc/podman container
+//   2: has_sriov_capability - device supports SR-IOV (could read sriov_totalvfs)
+//   3: has_active_vfs      - VFs are provisioned (indicates HOST mode)
+//   4: is_vfio_bound       - device bound to vfio-pci (passthrough indicator)
+//   5: sysfs_accessible    - could access device sysfs path at all
+std::tuple<bool, bool, bool, bool, bool, bool> detect_virtualization_mode_sysfs(
+    const std::string& render_path) {
+  std::ostringstream ss;
+  bool is_vm = is_vm_guest();
+  bool is_ctr = is_running_in_container();
+  bool has_sriov_cap = false;
+  bool has_active_vfs = false;
+  bool is_vfio = false;
+  bool sysfs_accessible = false;
+
+  ss << __PRETTY_FUNCTION__
+     << " | is_vm_guest: " << (is_vm ? "true" : "false")
+     << " | is_container: " << (is_ctr ? "true" : "false");
+  LOG_DEBUG(ss);
+
+  // If render_path is empty, we can only provide VM/container info
+  if (render_path.empty()) {
+    ss << __PRETTY_FUNCTION__ << " | render_path is empty, cannot check sysfs";
+    LOG_INFO(ss);
+    return std::make_tuple(is_vm, is_ctr, false, false, false, false);
+  }
+
+  // Build the PCI device sysfs path
+  std::string pci_sysfs_path = "/sys/class/drm/" + render_path + "/device";
+
+  // Check if we can access sysfs at all (for container awareness)
+  struct stat st;
+  if (stat(pci_sysfs_path.c_str(), &st) == 0) {
+    sysfs_accessible = true;
+  }
+
+  // Check SR-IOV status
+  std::tie(has_sriov_cap, has_active_vfs) = get_sriov_status(pci_sysfs_path);
+
+  // Check if device is bound to vfio-pci (passthrough indicator)
+  is_vfio = is_device_vfio_bound(pci_sysfs_path);
+
+  ss << __PRETTY_FUNCTION__
+     << " | render_path: " << render_path
+     << " | sysfs_accessible: " << (sysfs_accessible ? "true" : "false")
+     << " | has_sriov_capability: " << (has_sriov_cap ? "true" : "false")
+     << " | has_active_vfs: " << (has_active_vfs ? "true" : "false")
+     << " | is_vfio_bound: " << (is_vfio ? "true" : "false");
+  LOG_INFO(ss);
+
+  return std::make_tuple(is_vm, is_ctr, has_sriov_cap,
+                         has_active_vfs, is_vfio, sysfs_accessible);
+}
+
+}  // namespace amd::smi

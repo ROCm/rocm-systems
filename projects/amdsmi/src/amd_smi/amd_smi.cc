@@ -6177,10 +6177,60 @@ amdsmi_get_gpu_virtualization_mode(amdsmi_processor_handle processor_handle,
     amdsmi_status_t status;
     SMIGPUDEVICE_MUTEX(gpu_device->get_mutex())
 
+    auto get_virt_mode_fallback = [&ss, gpu_device](const std::string& render_name,
+                                        amdsmi_virtualization_mode_t* mode)
+                                        -> amdsmi_status_t {
+        std::string render_name_local;
+        if (render_name.empty()) {
+            render_name_local = "renderD" + std::to_string(gpu_device->get_drm_render_minor());
+        } else {
+            render_name_local = render_name;
+        }
+        auto [is_vm_guest, is_container, has_sriov_cap, has_active_vfs, is_vfio, sysfs_accessible] =
+            amd::smi::detect_virtualization_mode_sysfs(render_name_local);
+
+        ss << __PRETTY_FUNCTION__ << " | sysfs fallback detection"
+        << " | is_vm_guest: " << std::boolalpha << is_vm_guest
+        << " | is_container: " << std::boolalpha << is_container
+        << " | has_sriov_cap: " << std::boolalpha << has_sriov_cap
+        << " | has_active_vfs: " << std::boolalpha << has_active_vfs
+        << " | is_vfio: " << std::boolalpha << is_vfio
+        << " | sysfs_accessible: " << std::boolalpha << sysfs_accessible;
+        LOG_INFO(ss);
+
+        if (has_active_vfs) {
+            // VFs are provisioned = HOST mode (definitive, if we can see sysfs)
+            *mode = AMDSMI_VIRTUALIZATION_MODE_HOST;
+        } else if (is_vfio) {
+            // Device bound to vfio-pci = PASSTHROUGH
+            *mode = AMDSMI_VIRTUALIZATION_MODE_PASSTHROUGH;
+        } else if (is_vm_guest) {
+            // hypervisor flag = GUEST (containers inherit this correctly)
+            *mode = AMDSMI_VIRTUALIZATION_MODE_GUEST;
+        } else if (!is_vm_guest && !is_container) {
+            // Not VM, not container = safe to say BAREMETAL
+            *mode = AMDSMI_VIRTUALIZATION_MODE_BAREMETAL;
+        } else if (!is_vm_guest && is_container) {
+            // In container, no hypervisor flag = likely BAREMETAL
+            // BUT we can't be 100% sure without sysfs access
+            // Check if we could read any sysfs at all
+            if (sysfs_accessible) {
+                *mode = AMDSMI_VIRTUALIZATION_MODE_BAREMETAL;
+            } else {
+                // Container with no sysfs access - be conservative
+                *mode = AMDSMI_VIRTUALIZATION_MODE_UNKNOWN;
+            }
+        } else {
+            *mode = AMDSMI_VIRTUALIZATION_MODE_UNKNOWN;
+        }
+        return ((*mode == AMDSMI_VIRTUALIZATION_MODE_UNKNOWN) ?
+                 AMDSMI_STATUS_NOT_SUPPORTED : AMDSMI_STATUS_SUCCESS);
+    };
+
     std::string render_name = gpu_device->get_gpu_path();
     std::string path = "/dev/dri/" + render_name;
     if (render_name.empty()) {
-        return AMDSMI_STATUS_NOT_SUPPORTED;
+        return get_virt_mode_fallback(render_name, mode);
     }
 
     ScopedFD drm_fd(path.c_str(), O_RDWR | O_CLOEXEC);
@@ -6252,7 +6302,7 @@ amdsmi_get_gpu_virtualization_mode(amdsmi_processor_handle processor_handle,
        << "." << patch_version << "\n"
        << "; Returning: " << (isDRMVersionSupported ?
             smi_amdgpu_get_status_string(AMDSMI_STATUS_SUCCESS, false):
-            smi_amdgpu_get_status_string(AMDSMI_STATUS_NOT_SUPPORTED, false));
+            "Need to use fallback method");
     LOG_INFO(ss);
 
     // Check if the version is supported
@@ -6260,7 +6310,7 @@ amdsmi_get_gpu_virtualization_mode(amdsmi_processor_handle processor_handle,
     if (isDRMVersionSupported == false) {
         drm_free_version(drm_version);
         libdrm.unload();
-        return AMDSMI_STATUS_NOT_SUPPORTED;
+        return get_virt_mode_fallback(render_name, mode);
     }
 
     // Get the device info
