@@ -336,10 +336,9 @@ private:
             return;
         }
 
-        pmc::gpu::enabled_metrics effective_metrics = {
-            .value =
-                static_cast<uint32_t>(enabled_metrics.value & supported_metrics.value)
-        };
+        pmc::gpu::enabled_metrics effective_metrics;
+        effective_metrics.value =
+            static_cast<uint32_t>(enabled_metrics.value & supported_metrics.value);
 
         if(effective_metrics.value == 0)
         {
