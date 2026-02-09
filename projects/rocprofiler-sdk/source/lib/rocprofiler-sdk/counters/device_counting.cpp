@@ -587,10 +587,12 @@ stop_agent_ctx(const context::context* ctx)
         if(!callback_data.profile->reqired_hw_counters.empty())
         {
             // Remove when AQL is updated to not require stop to be called first
+            callback_data.packet->packets.stop_packet.completion_signal = callback_data.completion;
+            hsa::get_core_table()->hsa_signal_store_relaxed_fn(callback_data.completion, 2);
             submitPacket(agent->profile_queue(), &callback_data.packet->packets.stop_packet);
         }
 
-        // Wait for the stop packet to complete
+        // Wait for the stop packet to complete (device decrements signal from 2 to 1)
         hsa::get_core_table()->hsa_signal_wait_relaxed_fn(callback_data.completion,
                                                           HSA_SIGNAL_CONDITION_EQ,
                                                           1,
