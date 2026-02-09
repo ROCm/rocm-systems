@@ -54,7 +54,7 @@ struct nic_data
 
     static void post_process(size_t nic_index);
 
-    static AINICStatsCollector nic_stats_collector;
+    static ai_nic_stats_collector nic_stats_collector;
 
     timestamp_t m_ts = 0;
 

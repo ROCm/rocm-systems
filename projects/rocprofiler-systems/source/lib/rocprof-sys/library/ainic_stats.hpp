@@ -10,7 +10,7 @@
 #    include <amd_smi/amd_smi_system.h>
 #endif
 
-struct NICData
+struct nic_stats
 {
     std::string _name;         // RDMA device name
     std::string _netdev;       // NIC name
@@ -35,10 +35,10 @@ struct NICData
     static const char* TX_RDMA_CNP_PKTS;
 };
 
-class AINICStatsCollector
+class ai_nic_stats_collector
 {
 public:
-    using nic_params_t = std::map<std::string, NICData>;
+    using nic_params_t = std::map<std::string, nic_stats>;
 
 private:
 #ifdef USE_AINIC
@@ -49,10 +49,10 @@ private:
     // _nic_params and _nic_delta_params both hold network stats. _nic_params holds the
     // total values as read on sysfs via amd-smi. _nic_delta_params hold the differences
     // between the latest read and the read before that.
-    // e.g. field rx_rdma_cnp_pkts in one instance of NICData contains 1100000 and the
+    // e.g. field rx_rdma_cnp_pkts in one instance of nic_stats contains 1100000 and the
     // previous one was 1000000. That means the total number of CNP packets received in
     // the time interval between the two reads was 100000, so the equivalent field
-    // rx_rdma_cnp_pkts in the instance of NICData pointed to in _nic_delta_params will
+    // rx_rdma_cnp_pkts in the instance of nic_stats pointed to in _nic_delta_params will
     // get the value 100000. The total value are read from amd-smi, but the sampling code
     // in rocprof-sys needs to get the differences between two reads.
     nic_params_t _nic_params;  // Mapping NIC name -> NIC statistics
@@ -62,19 +62,19 @@ public:
     // Get data associated with the specified NIC in _nic_delta_params.
     // If the data for nic don't exist, set all measure values to 0 (as a protection
     // in case the caller is requesting stats for a nonexistent NIC).
-    void get_data(const std::string& nic, NICData& data) const;
+    void get_data(const std::string& nic, nic_stats& data) const;
 
     // get_nic_list returns the list of NICs on the system.
     std::vector<std::string> get_nic_list() const;
 
-    AINICStatsCollector();
+    ai_nic_stats_collector();
 
     // Update the statistics for all NICs.
     void update_stats();
 
     // Find nic and fill in the data.
     // If the nic is not found, return false.
-    bool find_nic(const std::string& nic, NICData& data) const;
+    bool find_nic(const std::string& nic, nic_stats& data) const;
 
     bool is_nic_valid(const std::string& nic) const;
 
