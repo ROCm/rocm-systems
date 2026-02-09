@@ -114,17 +114,76 @@ __device__ void rocshmem_wg_finalize() {}
 
 
 /******************************************************************************
-* These host APIs use Device side symbol - ROCSHMEM_CTX_DEFAULT so it needs
+* These host API use Device side symbol - ROCSHMEM_CTX_DEFAULT so it needs
 * to stay here to avoid getting pulled into other places in compilation
 ******************************************************************************/
 
-__host__ void * rocshmem_get_device_ctx() {
-  rocshmem_ctx_t ctx;
-
+__host__ int rocshmem_hipmodule_init(hipModule_t module, hipStream_t stream) {
+  // Step 1: Get the host-side device context
+  rocshmem_ctx_t ctx = {nullptr, nullptr};
   CHECK_HIP(hipMemcpyFromSymbol(&ctx, HIP_SYMBOL(ROCSHMEM_CTX_DEFAULT),
-                             sizeof(rocshmem_ctx_t)));
-  return ctx.ctx_opaque;
+                                 sizeof(rocshmem_ctx_t)));
+  void *host_ctx = ctx.ctx_opaque;
 
+  if (host_ctx == nullptr) {
+    fprintf(stderr, "[rocSHMEM] Error: Failed to get ROCSHMEM_CTX_DEFAULT\n");
+    return -1;
+  }
+
+  // Step 2: Query the device symbol from the HIP module
+  void *device_ctx = nullptr;
+  size_t symbol_size = 0;
+
+  // Try to get the symbol address from the module
+  hipError_t err = hipModuleGetGlobal(
+      &device_ctx,
+      &symbol_size,
+      module,
+      "ROCSHMEM_CTX_DEFAULT"
+  );
+
+  if (err != hipSuccess) {
+    fprintf(stderr, "[rocSHMEM] Error: Failed to get ROCSHMEM_CTX_DEFAULT symbol from module: %s\n",
+            hipGetErrorString(err));
+    return -1;
+  }
+
+  if (symbol_size != sizeof(rocshmem_ctx_t)) {
+    fprintf(stderr, "[rocSHMEM] Error: Symbol size mismatch. Expected %zu, got %zu\n",
+            sizeof(rocshmem_ctx_t), symbol_size);
+    return -1;
+  }
+
+  // Step 3: Copy the context to device using stream-ordered memcpy
+  // hipMemcpyAsync is compatible with CUDA graphs and explicit streams
+  if (stream == nullptr) {
+    stream = hipStreamPerThread;
+  }
+
+  err = hipMemcpyAsync(
+      device_ctx,
+      &host_ctx,
+      sizeof(rocshmem_ctx_t),
+      hipMemcpyHostToDevice,
+      stream
+  );
+
+  if (err != hipSuccess) {
+    fprintf(stderr, "[rocSHMEM] Error: Failed to copy context to device: %s\n",
+            hipGetErrorString(err));
+    return -1;
+  }
+
+  // Optionally synchronize the stream to ensure initialization completes
+  // Comment this out if you want fully async behavior
+  err = hipStreamSynchronize(stream);
+  if (err != hipSuccess) {
+    fprintf(stderr, "[rocSHMEM] Warning: Failed to synchronize stream: %s\n",
+            hipGetErrorString(err));
+    // Don't fail here, as async initialization might still work
+  }
+
+  return 0;
 }
 
 /******************************************************************************

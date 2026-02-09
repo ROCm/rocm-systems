@@ -77,15 +77,22 @@ constexpr char VERSION[] = "3.2.1";
  */
 __host__ void rocshmem_init(void);
 
+
 /**
- * @brief Query rocSHMEM context from host API
+ * @brief Initialize rocSHMEM device context for a specific HIP module
  *
- * @param[out] ctx      Returns ROCSHMEM_CTX_DEFAULT device pointer that users
- *                      can query from one instance of rocshmem host library and
- *                      use use later for dynamic module initialization in
- *                      kernel bitcode device library in the same application
+ * This function queries the ROCSHMEM_CTX_DEFAULT symbol from the provided
+ * HIP module and initializes it with the host-side context using stream-ordered
+ * memory operations. This is required for CUDA graph compatibility.
+ *
+ * @param[in] module    HIP module containing rocSHMEM device code
+ * @param[in] stream    HIP stream to use for context initialization (optional,
+ *                      uses current stream if NULL)
+ *
+ * @return int          0 on success, non-zero on failure
+ *
  */
-__host__ void * rocshmem_get_device_ctx();
+__host__ int rocshmem_hipmodule_init(hipModule_t module, hipStream_t stream = nullptr);
 
 /**
  * @brief Query rocSHMEM remote symmetric heap pointer
