@@ -2469,6 +2469,20 @@ void Runtime::Unload() {
   asyncSignals_.reset();
   asyncExceptions_.reset();
 
+  // Notify tools that async handler threads have been destroyed.
+  // System event handlers are still valid here (tool libraries not dlclose'd
+  // until CloseTools() at the end of Unload).
+  {
+    auto system_event_handlers = GetSystemEventHandlers();
+    if (!system_event_handlers.empty()) {
+      hsa_amd_event_t async_destroy_event = {};
+      async_destroy_event.event_type = HSA_AMD_SYSTEM_ASYNC_HANDLER_DESTROY_EVENT;
+      for (auto& callback : system_event_handlers) {
+        callback.first(&async_destroy_event, callback.second);
+      }
+    }
+  }
+
   if (vm_fault_signal_ != nullptr) {
     vm_fault_signal_.reset();
   }

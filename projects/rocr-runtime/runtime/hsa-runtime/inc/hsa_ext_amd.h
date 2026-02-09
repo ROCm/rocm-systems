@@ -2681,6 +2681,14 @@ typedef enum hsa_amd_event_type_s {
     - All other fields in hsa_amd_event_t are unused
    */
   HSA_AMD_SYSTEM_SHUTDOWN_EVENT,
+  /*
+   Async event handler threads have been destroyed.
+   Fired after asyncSignals and asyncExceptions threads are torn down
+   during runtime shutdown. Tools should use this event to detect that
+   async signal/exception handlers (e.g., PC sampling) are no longer operational.
+    - All other fields in hsa_amd_event_t are unused
+   */
+  HSA_AMD_SYSTEM_ASYNC_HANDLER_DESTROY_EVENT,
 } hsa_amd_event_type_t;
 
 /**
