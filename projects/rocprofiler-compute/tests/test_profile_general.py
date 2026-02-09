@@ -2783,13 +2783,20 @@ def test_iteration_multiplexing_all_counter_accuracy(
     )
 
 
-skip_if_no_torch = pytest.mark.skipif(
-    importlib.util.find_spec("torch") is None, reason="torch is required for this test"
+skip_if_no_torch_gpu = pytest.mark.skipif(
+    (
+        importlib.util.find_spec("torch") is None
+        or not __import__("torch").cuda.is_available()
+    ),
+    reason=("PyTorch and GPU access are required for this test"),
 )
 
 
-@skip_if_no_torch
-def test_torch_trace_profile(binary_handler_profile_rocprof_compute):
+@skip_if_no_torch_gpu
+@pytest.mark.torch_operators
+def test_torch_trace_profile(
+    binary_handler_profile_rocprof_compute, retain_output=True
+):
     """
     Test profiling a PyTorch application with --torch-trace option.
     Verifies that all required files are generated and counter values are valid.
@@ -2921,10 +2928,14 @@ if __name__ == "__main__":
                     f"Empty Correlation ID in {corresponding_counter_file}"
                 )
             assert found_row, f"{corresponding_counter_file} is empty"
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+    if not retain_output:
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+    else:
+        print(f"Retaining output directory: {workload_dir}")
 
 
-@skip_if_no_torch
+@skip_if_no_torch_gpu
+@pytest.mark.torch_operators
 def test_torch_trace_overhead(binary_handler_profile_rocprof_compute):
     """
     Measure overhead introduced by --torch-trace flag.

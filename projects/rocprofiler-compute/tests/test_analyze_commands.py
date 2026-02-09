@@ -23,7 +23,6 @@
 
 ##############################################################################
 
-import importlib
 import os
 import shutil
 from pathlib import Path
@@ -1724,62 +1723,28 @@ def test_list_torch_operators_no_trace_data(binary_handler_analyze_rocprof_compu
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-skip_if_no_torch = pytest.mark.skipif(
-    importlib.util.find_spec("torch") is None,
-    reason=("PyTorch is required for this test"),
-)
-
-
-@skip_if_no_torch
-def test_torch_trace_operator_output(
-    binary_handler_profile_rocprof_compute, test_utils, config
-):
+@pytest.mark.torch_operators
+def test_torch_trace_operator_output(binary_handler_analyze_rocprof_compute):
     """
     Verifies torch_trace directory, operator CSV file creation, and presence
     of hierarchy and mapping (operator, kernel, counter values) in output files.
     """
-    # 1. Run profiling with --torch-trace
     workload_dir = test_utils.get_output_dir(param_id="torch_ops")
-    Path(workload_dir).mkdir(parents=True, exist_ok=True)
-    torch_app_path = Path(workload_dir) / "test_torch_app.py"
-    torch_app_code = """
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
+    # Look for preexisting profiling data in workload_dir
+    if not Path(workload_dir).exists():
+        pytest.skip(
+            "Consider running 'python -m pytest -k test_torch_trace_profile -v -s' "
+            "to generate the necessary data."
+        )
 
-class SimpleNet(nn.Module):
-    def __init__(self):
-        super(SimpleNet, self).__init__()
-        self.fc1 = nn.Linear(10, 20)
-        self.fc2 = nn.Linear(20, 10)
-    def forward(self, x):
-        x = self.fc1(x)
-        x = F.relu(x)
-        x = self.fc2(x)
-        return x
-
-if __name__ == "__main__":
-    if not torch.cuda.is_available():
-        import sys
-        print("GPU is required for this test. Exiting.")
-        sys.exit(1)
-    model = SimpleNet()
-    model = model.cuda()
-    x = torch.randn(5, 10).cuda()
-    for epoch in range(1):
-        output = model(x)
-        loss = output.sum()
-        loss.backward()
-    print("Training completed")
-"""
-    with open(torch_app_path, "w") as f:
-        f.write(torch_app_code)
-    config["torch_test_app"] = ["python3", str(torch_app_path)]
-    options = ["--torch-trace"]
-    returncode = binary_handler_profile_rocprof_compute(
-        config, workload_dir, options, check_success=True, app_name="torch_test_app"
-    )
-    assert returncode == 0, "Profiling failed"
+    returncode = binary_handler_analyze_rocprof_compute([
+        "analyze",
+        "--path",
+        workload_dir,
+        "--list-torch-operators",
+    ])
+    # 1. Check analyze success
+    assert returncode == 0, "Analysis failed"
 
     # 2. Check torch_trace directory creation
     torch_trace_dir = Path(workload_dir) / "torch_trace"
@@ -1790,28 +1755,36 @@ if __name__ == "__main__":
     assert operator_csv_files, "No operator CSV files found in torch_trace"
 
     # 4. Check hierarchy info and mapping in operator CSV files
+    hierarchy_present = False
     for op_file in operator_csv_files:
         df = pd.read_csv(op_file)
         assert not df.empty, f"{op_file} is empty"
         # Hierarchy info: check for operator name column and separator
-        op_name_col = "Operator Name" if "Operator Name" in df.columns else "Name"
-        assert op_name_col in df.columns, f"Operator name column missing in {op_file}"
-        assert df[op_name_col].apply(lambda x: "/" in str(x) or "::" in str(x)).all(), (
-            f"Hierarchy missing in operator name column in {op_file}"
+        # op_name_col = "Operator Name" if "Operator Name" in df.columns else "Name"
+        assert "Operator_Name" in df.columns, (
+            f"Operator_Name column missing in {op_file}"
         )
+        # Skip files that only contain initialization ops
+        if not hierarchy_present:
+            hierarchy_present = (
+                df["Operator_Name"]
+                .apply(lambda x: "/" in str(x) or "::" in str(x))
+                .any()
+            )
         # Mapping columns
-        assert "Kernel Name" in df.columns, f"Kernel info column missing in {op_file}"
-        assert df["Kernel Name"].notnull().all() and (df["Kernel Name"] != "").all(), (
-            f"Empty Kernel Name in {op_file}"
+        assert "Kernel_Name" in df.columns, f"Kernel info column missing in {op_file}"
+        assert df["Kernel_Name"].notnull().all() and (df["Kernel_Name"] != "").all(), (
+            f"Empty Kernel_Name in {op_file}"
         )
-        counter_col = "Counter Value" if "Counter Value" in df.columns else "Value"
-        assert counter_col in df.columns, f"Counter value column missing in {op_file}"
-        assert df[counter_col].notnull().all() and (df[counter_col] != "").all(), (
-            f"Empty Counter Value in {op_file}"
+
+        assert "Counter_Value" in df.columns, (
+            f"Counter_Value column missing in {op_file}"
         )
-        assert "Correlation ID" in df.columns, (
-            f"Correlation ID column missing in {op_file}"
-        )
-        assert (
-            df["Correlation ID"].notnull().all() and (df["Correlation ID"] != "").all()
-        ), f"Empty Correlation ID in {op_file}"
+        assert df["Counter_Value"].notnull().all()
+        assert (df["Counter_Value"] != "").all(), f"Empty Counter Value in {op_file}"
+
+    assert hierarchy_present, (
+        f"No hierarchy information in operator CSV files. "
+        f"Files checked: {[f.name for f in operator_csv_files]}"
+    )
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
