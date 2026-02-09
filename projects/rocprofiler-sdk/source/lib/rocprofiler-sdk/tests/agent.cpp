@@ -360,37 +360,42 @@ TEST(rocprofiler_lib, agent_local_topology)
 
     EXPECT_EQ(status, ROCPROFILER_STATUS_SUCCESS);
 
-    EXPECT_EQ(agents.size(), 5) << "Expected five agents when using local topology!";
+    EXPECT_EQ(agents.size(), 6) << "Expected six agents when using local topology!";
 
     EXPECT_EQ(agents.at(0)->cpu_cores_count, 24);
     EXPECT_EQ(agents.at(1)->cpu_cores_count, 0);
     EXPECT_EQ(agents.at(2)->cpu_cores_count, 0);
     EXPECT_EQ(agents.at(3)->cpu_cores_count, 0);
     EXPECT_EQ(agents.at(4)->cpu_cores_count, 0);
+    EXPECT_EQ(agents.at(5)->cpu_cores_count, 0);
 
     EXPECT_EQ(agents.at(0)->simd_count, 0);
     EXPECT_EQ(agents.at(1)->simd_count, 240);
     EXPECT_EQ(agents.at(2)->simd_count, 56);
     EXPECT_EQ(agents.at(3)->simd_count, 64);
     EXPECT_EQ(agents.at(4)->simd_count, 1216);
+    EXPECT_EQ(agents.at(5)->simd_count, 1024);
 
     EXPECT_EQ(agents.at(0)->gfx_target_version, 0);
     EXPECT_EQ(agents.at(1)->gfx_target_version, 90006);
     EXPECT_EQ(agents.at(2)->gfx_target_version, 110002);
     EXPECT_EQ(agents.at(3)->gfx_target_version, 100302);
     EXPECT_EQ(agents.at(4)->gfx_target_version, 90402);
+    EXPECT_EQ(agents.at(5)->gfx_target_version, 90500);
 
     EXPECT_EQ(agents.at(0)->max_waves_per_simd, 0);
     EXPECT_EQ(agents.at(1)->max_waves_per_simd, 10);
     EXPECT_EQ(agents.at(2)->max_waves_per_simd, 16);
     EXPECT_EQ(agents.at(3)->max_waves_per_simd, 16);
     EXPECT_EQ(agents.at(4)->max_waves_per_simd, 8);
+    EXPECT_EQ(agents.at(5)->max_waves_per_simd, 8);
 
     EXPECT_EQ(agents.at(0)->cu_per_simd_array, 0);
     EXPECT_EQ(agents.at(1)->cu_per_simd_array, 16);
     EXPECT_EQ(agents.at(2)->cu_per_simd_array, 8);
     EXPECT_EQ(agents.at(3)->cu_per_simd_array, 8);
     EXPECT_EQ(agents.at(4)->cu_per_simd_array, 10);
+    EXPECT_EQ(agents.at(5)->cu_per_simd_array, 9);
 
     hsa_init();
     {
