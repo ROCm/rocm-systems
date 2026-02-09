@@ -1730,12 +1730,16 @@ def test_torch_trace_operator_output(binary_handler_analyze_rocprof_compute):
     of hierarchy and mapping (operator, kernel, counter values) in output files.
     """
     workload_dir = test_utils.get_output_dir(param_id="torch_ops_analyze")
-    # Look for preexisting profiling data in workload_dir
-    if not Path(workload_dir).exists():
+    # Move files from preexisting profiling run
+    source_dir = workload_dir.replace("test_torch_trace_operator_output","test_torch_trace_profile")
+    # Get preexisting profiling data from workload_dir
+    if not Path(source_dir).exists():
         pytest.skip(
             "Consider running 'python -m pytest -k test_torch_trace_profile -v -s' "
             "to generate the necessary data."
         )
+
+    shutil.copytree(source_dir, workload_dir, dirs_exist_ok=True)
 
     returncode = binary_handler_analyze_rocprof_compute([
         "analyze",
