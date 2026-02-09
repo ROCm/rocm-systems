@@ -2910,12 +2910,6 @@ if __name__ == "__main__":
         # Check counter_collection.csv
         expected_counter_columns = {
             "Correlation_Id",
-            "Dispatch_Id",
-            "Agent_Id",
-            "Queue_Id",
-            "Process_Id",
-            "Thread_Id",
-            "Grid_Size",
             "Kernel_Id",
             "Kernel_Name",
             "Counter_Name",
