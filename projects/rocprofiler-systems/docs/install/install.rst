@@ -141,11 +141,6 @@ Optional third-party packages
     (By default, if ROCm Systems Profiler cannot find an OpenMPI MPI distribution, it uses a local copy
     of the OpenMPI ``mpi.h``.)
 
-* UCX
-
-  * ``ROCPROFSYS_USE_UCX`` enables UCX (Unified Communication X) support for tracing UCX communication functions
-    used as a transport layer for MPI and other communication libraries
-
 .. csv-table::
    :header: "Third-Party Library", "CMake Enable Option"
    :widths: 15, 45
@@ -154,7 +149,6 @@ Optional third-party packages
    "PAPI", "``ROCPROFSYS_USE_PAPI`` (default: ON)"
    "MPI", "``ROCPROFSYS_USE_MPI`` (default: OFF)"
    "MPI (header-only)", "``ROCPROFSYS_USE_MPI_HEADERS`` (default: ON)"
-   "UCX", "``ROCPROFSYS_USE_UCX`` (default: OFF, runtime configurable)"
 
 Installing Dyninst
 -----------------------------------
