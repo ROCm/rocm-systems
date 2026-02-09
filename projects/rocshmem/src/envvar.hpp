@@ -205,6 +205,32 @@ namespace envvar {
       }
     };
 
+    // Specialization for uint8_t
+    template <> inline
+    std::istream& parse<uint8_t>::operator()(std::istream& is, uint8_t& value) const {
+      int temp;
+      is >> std::dec >> temp;
+      if (is && temp >= 0 && temp <= 255) {
+        value = static_cast<uint8_t>(temp);
+      } else if (is) {
+        is.setstate(std::ios::failbit);
+      }
+      return is;
+    }
+
+    // Specialization for int8_t
+    template <> inline
+    std::istream& parse<int8_t>::operator()(std::istream& is, int8_t& value) const {
+      int temp;
+      is >> std::dec >> temp;
+      if (is && temp >= -128 && temp <= 127) {
+        value = static_cast<int8_t>(temp);
+      } else if (is) {
+        is.setstate(std::ios::failbit);
+      }
+      return is;
+    };
+
     // hexadecimal integer parser
     template <typename T, std::enable_if_t<std::is_integral_v<T>, bool> = true>
     struct parse_hex {
