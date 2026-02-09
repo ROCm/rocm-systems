@@ -275,6 +275,7 @@ class Command : public Event {
   std::string* capturedKernelName_ = nullptr;  //!< Kenrnel under capture
  protected:
   bool cpu_wait_ = false;  //!< If true, then the command was issued for CPU/GPU sync
+  bool cloned_ = false;
 
   //! The Events that need to complete before this command is submitted.
   EventWaitList eventWaitList_;
@@ -311,6 +312,8 @@ class Command : public Event {
   virtual Command *Clone() {
     return nullptr;
   }
+
+  bool isCloned() const { return cloned_; }
 
   virtual void Compare(Command *lhs) {  }
 
@@ -1266,13 +1269,18 @@ class NDRangeKernelCommand : public Command {
   uint32_t firstDevice_;     //!< Device index of the first device in the gridc
   uint32_t numWorkgroups_;   //!< Total number of workgroups in the current launch
 
-  bool cloned_ = false;
+  uint32_t numUsages_ = 0;
+
  public:
   enum {
     CooperativeGroups = 0x01,
     CooperativeMultiDeviceGroups = 0x02,
     AnyOrderLaunch = 0x04,
   };
+
+  uint32_t getNumUsages() const {
+    return numUsages_;
+  }
 
   Command *Clone() override {
     auto cmd = new NDRangeKernelCommand(*queue(), eventWaitList_, kernel_,
@@ -1283,6 +1291,8 @@ class NDRangeKernelCommand : public Command {
     cmd->profilingInfo_ = profilingInfo_;
     cmd->profilingInfo_.clear();
     cmd->cloned_ = true;
+    cmd->numUsages_ = ++numUsages_;
+
     // XPUT("Cloning %p command eventWaitList_ %d", this, (int)eventWaitList_.size());
     return cmd;
   }

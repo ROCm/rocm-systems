@@ -77,6 +77,20 @@ namespace amd::roc {
 // (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE) invalidates L1, L2 and flushes
 // L2
 
+template <typename T>
+inline void XWriteAqlArgAt(unsigned char* dst,  //!< The write pointer to the buffer
+                          T src,               //!< The source pointer
+                          uint size,           //!< The size in bytes to copy
+                          size_t offset  //!< The alignment to follow while writing to the buffer
+) {
+  assert(sizeof(T) <= size && "Argument's size mismatches ABI!");
+  // if (memcmp(dst + offset, &src, sizeof(T))==0) {
+  //   XPUT("Arg at %X of size %X did not change", offset, size);
+  // }
+
+  *(reinterpret_cast<T*>(dst + offset)) = src;
+}
+
 static constexpr uint16_t kInvalidAql = (HSA_PACKET_TYPE_INVALID << HSA_PACKET_HEADER_TYPE);
 
 static constexpr uint16_t kBarrierPacketHeader =
@@ -842,12 +856,17 @@ bool VirtualGPU::processMemObjects(const amd::Kernel& kernel, const_address para
     }
   }
 
+  bool ok = kernel.name().find("amd_rocclr") == std::string::npos;
+  // if(ok) XPUT("processMem for kernel %s getNumberOfSvmPtr %d", 
+  //   kernel.name().c_str(), count);
   // Check all parameters for the current kernel
   for (size_t i = 0; i < signature.numParameters(); ++i) {
     const amd::KernelParameterDescriptor& desc = signature.at(i);
     Memory* gpuMem = nullptr;
     amd::Memory* mem = nullptr;
 
+    // if(ok)
+    // XPUT("%d: params Xtype %d at: %X of size %X", (int)i, desc.type_, desc.offset_, desc.size_);
     // Find if current argument is a buffer
     if (desc.type_ == T_POINTER) {
       if (desc.addressQualifier_ == CL_KERNEL_ARG_ADDRESS_LOCAL) {
@@ -952,6 +971,9 @@ bool VirtualGPU::processMemObjects(const amd::Kernel& kernel, const_address para
       WriteAqlArgAt(const_cast<address>(params), vqVA, sizeof(vqVA), desc.offset_);
     } else if (desc.type_ == T_VOID) {
       const_address srcArgPtr = params + desc.offset_;
+      // RCCL args are of type T_VOID / ValueObject (4096 bytes)
+      // we do not copy it! the object is alredy there..
+      // XPUT("T_VOID oclObject %d sz %X", (int)desc.info_.oclObject_, desc.size_);
       if (desc.info_.oclObject_ == amd::KernelParameterDescriptor::ReferenceObject) {
         void* mem = allocKernArg(desc.size_, 128);
         memcpy(mem, srcArgPtr, desc.size_);
@@ -1238,7 +1260,7 @@ void VirtualGPU::dispatchBlockingWait() {
 bool VirtualGPU::dispatchAqlPacket(hsa_kernel_dispatch_packet_t* packet, uint16_t header,
                                    uint16_t rest, bool blocking, bool capturing,
                                    const uint8_t* aqlPacket, bool attach_signal) {
-  if (capturing == true) {
+  if (unlikely(capturing == true)) {
     packet->header = header;
     packet->setup = rest;
     std::memcpy(const_cast<uint8_t*>(aqlPacket), packet, sizeof(hsa_kernel_dispatch_packet_t));
@@ -3616,10 +3638,39 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
     global[i] = static_cast<uint32_t>(sizes.global()[i]);
     local[i] = static_cast<uint16_t>(local_size[i]);
   }
+
+/*
+inline void WriteAqlArgAt(unsigned char* dst,  //!< The write pointer to the buffer
+                          T src,               //!< The source pointer
+                          uint size,           //!< The size in bytes to copy
+                          size_t offset  //!< The alignment to follow while writing to the buffer
+) {
+  assert(sizeof(T) <= size && "Argument's size mismatches ABI!");
+  *(reinterpret_cast<T*>(dst + offset)) = src;
+}
+*/
+
+  // TODO: we need to prefill 'hidden_arguments' if they can be prefilled 
+  // for cloned nodes, also it makes sense to try rebuilding RCCL without 
+  // large arg block
+
+
+  bool ok = kernel.name().find("amd_rocclr") == std::string::npos;
+
+  bool do_param_update = true;
+  if(vcmd) {
+    // XPUT("%s num usages %d", kernel.name().c_str(), vcmd->getNumUsages());
+    do_param_update = vcmd->getNumUsages() <= 1; // the kernel shall run at least once to skip the update
+  }
+
   uint64_t spVA = 0;
   // Check if runtime has to setup hidden arguments
-  for (uint32_t i = signature.numParameters(); i < signature.numParametersAll(); ++i) {
+  for (uint32_t i = signature.numParameters(); do_param_update && i < signature.numParametersAll(); ++i) {
     const auto& it = signature.at(i);
+    // if(ok)
+    //   XPUT("%d: hidden arg %d at: %X of size %X", (int)i, it.info_.oclObject_, it.offset_, it.size_);
+
+    // XPUT("%d hidden arg %s", i, ss.c_str());
     switch (it.info_.oclObject_) {
       case amd::KernelParameterDescriptor::HiddenNone:
         break;
@@ -3807,6 +3858,11 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
           allocKernArg(gpuKernel.KernargSegmentByteSize(), gpuKernel.KernargSegmentAlignment()));
     }
 
+    // if(vcmd)
+    // XPUT("argSize = %lu kernel %s largeBar: %d", 
+    //   argSize, vcmd->kernel().name().c_str(), roc_device_.info().largeBar_);
+
+
     nontemporalMemcpy(argBuffer, parameters, argSize);
 
     if (roc_device_.info().largeBar_ && !isGraphCapture) {
@@ -3884,7 +3940,7 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
     aql_packet->setup = sizes.dimensions() << HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS;
   }
 
-  if (isGraphCapture) {
+  if (unlikely(isGraphCapture)) {
     // Dispatch the packet
     if (!dispatchAqlPacket(&dispatchPacket, aqlHeaderWithOrder,
                            (sizes.dimensions() << HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS),

@@ -453,17 +453,16 @@ NDRangeKernelCommand::NDRangeKernelCommand(HostQueue& queue, const EventWaitList
 void NDRangeKernelCommand::releaseResources() {
 
   if(cloned_) return;
-  XPUT("%p releasing all resources cloned %d -- %d #events %d", 
-    this, cloned_, (int)kernel_.referenceCount(), (int)eventWaitList().size());
+  // XPUT("%p releasing all resources cloned %d -- %d #events %d", 
+  //   this, cloned_, (int)kernel_.referenceCount(), (int)eventWaitList().size());
   kernel_.parameters().release(parameters_);
   DEBUG_ONLY(parameters_ = NULL);
   kernel_.release();
   
   const auto& events = eventWaitList();
-  for(auto evt: events) {
-    XPUT("event ref cnt %d -- %s", (int)evt->referenceCount(), evt->command().Xstring().c_str());
-  }
-
+  // for(auto evt: events) {
+  //   XPUT("event ref cnt %d -- %s", (int)evt->referenceCount(), evt->command().Xstring().c_str());
+  // }
   Command::releaseResources();
 }
 
