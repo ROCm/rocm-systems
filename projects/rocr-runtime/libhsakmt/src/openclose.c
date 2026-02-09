@@ -110,8 +110,8 @@ static void clear_after_fork(HsaKFDContext *ctx)
 
 	int fd = ctx->fd;
 	if (fd >= 0) {
-		hsakmt_kfdcontext_clear_context(ctx);
 		close(fd);
+		hsakmt_kfdcontext_clear_context(ctx);
  	}
 	if (hsakmt_udmabuf_dev_fd > 0) {
 		close(hsakmt_udmabuf_dev_fd);
