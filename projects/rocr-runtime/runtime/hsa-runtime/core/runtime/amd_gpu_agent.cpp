@@ -3266,6 +3266,11 @@ void GpuAgent::InvalidateCodeCaches(void *ptr, size_t size) {
     assert(false && "Code cache invalidation not implemented for this agent");
   }
 
+  if (core::Runtime::runtime_singleton_->flag().enable_dtif() &&
+      core::Runtime::runtime_singleton_->flag().enable_dtif_skip_inv_code_cache()) {
+    return;
+  }
+
   // Invalidate caches which may hold lines of code object allocation.
   uint32_t cache_inv[8] = {0};
   uint32_t cache_inv_size_dw;
