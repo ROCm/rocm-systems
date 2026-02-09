@@ -49,7 +49,7 @@ using nic_bundle_t          = std::deque<nic_data>;
 using nic_sampler_instances = thread_data<nic_bundle_t, category::amd_smi_nic>;
 std::vector<nic_bundle_t> nic_sampler_vec   = {};
 std::vector<std::string>  nic_data::nic_vec = {};
-AINICStatsCollector       nic_data::nic_stats_collector;
+ai_nic_stats_collector       nic_data::nic_stats_collector;
 
 namespace
 {
@@ -66,7 +66,7 @@ nic_data::nic_data(uint32_t nic_index, const std::string& nic)
 void
 nic_data::sample()
 {
-    NICData stats;
+    nic_stats stats;
     nic_data::nic_stats_collector.get_data(_nic, stats);
     _rx_rdma_cnp_pkts = stats._rx_rdma_cnp_pkts;
     _tx_rdma_cnp_pkts = stats._tx_rdma_cnp_pkts;
