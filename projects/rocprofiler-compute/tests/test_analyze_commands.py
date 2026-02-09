@@ -1731,7 +1731,9 @@ def test_torch_trace_operator_output(binary_handler_analyze_rocprof_compute):
     """
     workload_dir = test_utils.get_output_dir(param_id="torch_ops_analyze")
     # Move files from preexisting profiling run
-    source_dir = workload_dir.replace("test_torch_trace_operator_output","test_torch_trace_profile")
+    source_dir = workload_dir.replace(
+        "test_torch_trace_operator_output", "test_torch_trace_profile"
+    )
     # Get preexisting profiling data from workload_dir
     if not Path(source_dir).exists():
         pytest.skip(
