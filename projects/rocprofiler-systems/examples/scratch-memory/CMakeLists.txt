@@ -3,6 +3,8 @@
 
 cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 
+project(rocprofiler-systems-scratch-memory-example LANGUAGES CXX HIP)
+
 find_package(HIP QUIET)
 if(NOT HIP_FOUND)
     message(WARNING "HIP is not found. Skip scratch-memory example.")
@@ -27,8 +29,6 @@ if(NOT CMAKE_HIP_COMPILER)
         set(CMAKE_HIP_COMPILER "${amdclangpp_EXECUTABLE}")
     endif()
 endif()
-
-project(rocprofiler-systems-scratch-memory-example LANGUAGES CXX HIP)
 
 if(ROCPROFSYS_DISABLE_EXAMPLES)
     get_filename_component(_DIR ${CMAKE_CURRENT_LIST_DIR} NAME)
