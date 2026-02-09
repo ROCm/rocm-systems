@@ -30,6 +30,28 @@ namespace rocprofiler
 {
 namespace rocattach
 {
+template <typename T>
+bool
+wait_for(std::atomic<T>& flag, T condition, size_t timeout_ms, bool equal)
+{
+    auto cond_check = [&]() {
+        if(equal) return flag.load() == condition;
+        return flag.load() != condition;
+    };
+    auto start_time       = std::chrono::steady_clock::now();
+    auto timeout_duration = std::chrono::milliseconds(timeout_ms);
+    auto end_time         = start_time + timeout_duration;
+    while(std::chrono::steady_clock::now() < end_time)
+    {
+        if(cond_check())
+        {
+            return true;
+        }
+        std::this_thread::yield();
+    }
+    // Last chance check in case we were scheduled after timeout
+    return cond_check();
+}
 // Blocks until flag is NOT equal to condition or timeout_ms milliseconds have elapsed.
 // Returns true if the flag is not equal
 // Returns false if timeout occurred
@@ -37,22 +59,8 @@ template <typename T>
 bool
 wait_for_ne(std::atomic<T>& flag, T condition, size_t timeout_ms)
 {
-    auto start_time       = std::chrono::steady_clock::now();
-    auto timeout_duration = std::chrono::milliseconds(timeout_ms);
-    auto end_time         = start_time + timeout_duration;
-
-    while(std::chrono::steady_clock::now() < end_time)
-    {
-        if(flag.load() != condition)
-        {
-            return true;
-        }
-        std::this_thread::yield();
-    }
-    // Last chance check in case we were scheduled after timeout
-    return flag.load() != condition;
+    return wait_for(flag, condition, timeout_ms, false);
 }
-
 // Blocks until flag is equal to condition or timeout_ms milliseconds have elapsed.
 // Returns true if the flag is equal
 // Returns false if timeout occurred
@@ -60,20 +68,7 @@ template <typename T>
 bool
 wait_for_eq(std::atomic<T>& flag, T condition, size_t timeout_ms)
 {
-    auto start_time       = std::chrono::steady_clock::now();
-    auto timeout_duration = std::chrono::milliseconds(timeout_ms);
-    auto end_time         = start_time + timeout_duration;
-
-    while(std::chrono::steady_clock::now() < end_time)
-    {
-        if(flag.load() == condition)
-        {
-            return true;
-        }
-        std::this_thread::yield();
-    }
-    // Last chance check in case we were scheduled after timeout
-    return flag.load() == condition;
+    return wait_for(flag, condition, timeout_ms, true);
 }
 
 }  // namespace rocattach
