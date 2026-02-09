@@ -37,6 +37,8 @@ THE SOFTWARE.
 #include <hip/amd_detail/hip_cooperative_groups_helper.h>
 #endif
 
+#include <type_traits>
+#include <cstddef>
 namespace cooperative_groups {
 
 /** \brief The base type of all cooperative group types.
@@ -1362,6 +1364,7 @@ __CG_QUALIFIER__ auto reduce(const TyGroup& group, TyVal&& val, TyFn&& op) -> de
   using Val = std::decay_t<TyVal>;
   static_assert(is_op_type_same<TyVal, decltype(op(val, val))>::value, "Operator input and output types differ");
 
+  // TODO g-h-c check that all the threads in tile and only those the tile are active
   // we cannot simply use the __activemask() here, because more than one tile could have active
   // threads at a time
   unsigned long long mask = ~0ull >> (64 - group.num_threads());
