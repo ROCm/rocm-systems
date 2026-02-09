@@ -1198,10 +1198,6 @@ perfetto_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& _gpu_pmc)
 
     if(_gpu_pmc.enabled_metric.bits.pcie)
     {
-        auto make_track_name = [&](const char* metric) {
-            return fmt::format("GPU [{}] {} (S)", _device_id, metric);
-        };
-
         if(!amd_smi_pcie_link_width_track::exists(_device_id))
         {
             amd_smi_pcie_link_width_track::emplace(
