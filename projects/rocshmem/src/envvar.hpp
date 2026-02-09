@@ -201,7 +201,7 @@ namespace envvar {
     template <> inline
     std::istream& parse<uint8_t>::operator()(std::istream& is, uint8_t& value) const {
       int temp;
-      is >> std::dec >> temp;
+      is >> std::setbase(0) >> temp;
       if (is && temp >= std::numeric_limits<uint8_t>::min() && temp <= std::numeric_limits<uint8_t>::max()) {
         value = static_cast<uint8_t>(temp);
       } else if (is) {
