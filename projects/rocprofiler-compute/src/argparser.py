@@ -125,15 +125,11 @@ def add_general_group(
         help=(
             "Enable experimental feature(s):\n"
             + (
-                (
-                    ""
-                    + "".join(
-                        f"   {f['label']} ({' '.join(f['flags'])})\n"
-                        for f in EXPERIMENTAL_FEATURES
-                    )
+                ""
+                + "".join(
+                    f"   {f['label']} ({' '.join(f['flags'])})\n"
+                    for f in EXPERIMENTAL_FEATURES
                 )
-                if show_experimental_help
-                else ""
             )
         ),
     )

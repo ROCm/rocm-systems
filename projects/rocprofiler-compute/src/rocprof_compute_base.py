@@ -193,6 +193,10 @@ class RocProfCompute:
 
     def parse_args(self) -> None:
         argv = sys.argv[1:]
+
+        if "--" in argv:
+            argv = argv[: argv.index("--")]
+
         experimental_requested = "--experimental" in argv
         show_experimental_help = experimental_requested and (
             "-h" in argv or "--help" in argv
@@ -281,9 +285,9 @@ class RocProfCompute:
         )
         if arch in self.__supported_archs.keys():
             ac = schema.ArchConfig()
-            ac.panel_configs = file_io.load_panel_configs(
-                [str(Path(self.__args.config_dir) / arch)]
-            )
+            ac.panel_configs = file_io.load_panel_configs([
+                str(Path(self.__args.config_dir) / arch)
+            ])
             sys_info = (
                 self.__mspec.get_class_members().iloc[0] if for_current_arch else None
             )
@@ -306,9 +310,9 @@ class RocProfCompute:
         )
         if arch in self.__supported_archs.keys():
             ac = schema.ArchConfig()
-            ac.panel_configs = file_io.load_panel_configs(
-                [str(Path(self.__args.config_dir) / arch)]
-            )
+            ac.panel_configs = file_io.load_panel_configs([
+                str(Path(self.__args.config_dir) / arch)
+            ])
             sys_info = (
                 self.__mspec.get_class_members().iloc[0] if for_current_arch else None
             )

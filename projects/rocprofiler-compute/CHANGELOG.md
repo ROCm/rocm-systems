@@ -25,6 +25,9 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Synced latest metric descriptions to public facing documentation
     * Updated metric units to be more human readable in public facing documentation
 
+* Added `--experimental` flag to enable experimental features that are under development. This flag
+  is required when using any experimental features. Use `rocprof-compute --experimental --help` to see currently available experimental features.
+
 ### Changed
 
 * Default output format for the underlying ROCprofiler-SDK tool has been changed from ``csv`` to ``rocpd``.
