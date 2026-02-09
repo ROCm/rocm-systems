@@ -51,6 +51,10 @@ add_subdirectory(components)
 add_subdirectory(coverage)
 add_subdirectory(tracing)
 
+if(ROCPROFSYS_BUILD_TESTING)
+    add_subdirectory(tests)
+endif()
+
 set(ndebug_sources
     ${CMAKE_CURRENT_LIST_DIR}/components/mpi_gotcha.cpp
     ${CMAKE_CURRENT_LIST_DIR}/components/backtrace_metrics.cpp
