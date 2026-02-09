@@ -25,7 +25,6 @@
 
 import csv
 import fcntl
-import logging
 import math
 from collections import namedtuple
 from collections.abc import Generator
@@ -49,6 +48,7 @@ from typing import Any
 
 import hip.hip as hip
 import hip.hiprtc as hiprtc
+from utils.logger import console_log
 
 lds_sizes = {
     "gfx908": 64 * 1024,
@@ -213,7 +213,7 @@ def gpu_benchmark_lock(device: int) -> Generator[None, None, None]:
                 "another rocprof-compute benchmark is in progress..."
             )
             print(msg, flush=True)
-            logging.info(msg)
+            console_log(msg)
             fcntl.flock(f, fcntl.LOCK_EX)  # Blocking wait
             msg = f"Acquired lock for GPU {device}, proceeding with benchmark."
             print(msg, flush=True)
