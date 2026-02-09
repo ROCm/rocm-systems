@@ -63,6 +63,7 @@
 #include "wavefront_primitives.hpp"
 #include "workgroup_primitives.hpp"
 #include "flood_tester.hpp"
+#include "hipmodule_init_tester.hpp"
 
 #include "backend_bc.hpp"
 extern Backend* backend;
@@ -554,6 +555,10 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
     case FloodGTestType:
       if (rank == 0) std::cout << "Flood G (multidirectional) ###" << std::endl;
       testers.push_back(new FloodTester(args));
+      return testers;
+    case HipModuleInitTestType:
+      if (rank == 0) std::cout << "HIP Module Init Test ###" << std::endl;
+      testers.push_back(new HipModuleInitTester(args));
       return testers;
     default:
       if (rank == 0) std::cout << "Empty Test ###" << std::endl;

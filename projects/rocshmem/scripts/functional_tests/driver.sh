@@ -122,6 +122,7 @@ declare -A TEST_NUMBERS=(
   ["flood_get"]="86"
   ["flood_getnbi"]="87"
   ["flood_g"]="88"
+  ["hipmodule_init"]="89"
 )
 
 ExecTest() {
