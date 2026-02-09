@@ -115,6 +115,11 @@ class RuntimeTearDown runtime_tear_down{};
 
 // =================================================================================================
 RuntimeTearDown::~RuntimeTearDown() {
+  // Flush and stop async logging. Note: Windows will destroy other threads by now
+  FlushAsyncLogsInCurrentThread();
+  if (IsAsyncLoggingEnabled()) {
+    EnableAsyncLogging(false);
+  }
   ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Begin runtime teardown");
 #if !defined(_WIN32) && !defined(BUILD_STATIC_LIBS)
   // Only perform destruction if process matches the initialization,
