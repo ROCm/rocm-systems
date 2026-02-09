@@ -7,7 +7,7 @@
 #include "core/amd_smi.hpp"
 
 #ifdef USE_AINIC
-#    include <amdsmi.h>
+#    include <amd_smi/amdsmi.h>
 #endif
 
 struct nic_stats
