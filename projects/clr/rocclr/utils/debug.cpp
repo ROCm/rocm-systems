@@ -119,20 +119,17 @@ class AsyncLogger {
       readIndex_.fetch_add(1, std::memory_order_release);
     }
 
-    // Write to buffer
-    {
-      std::lock_guard<std::mutex> lock(writeMutex_);
-      LogEntry& entry = buffer_[currentWrite % kBufferSize];
-      entry.level = level;
-      entry.file = file ? file : "";
-      entry.line = line;
-      entry.message = message ? message : "";
-      entry.timestamp = timestamp;
-      entry.pid = Os::getProcessId();
-      entry.tid = std::this_thread::get_id();
-      entry.duration = duration;
-      entry.hasDuration = hasDuration;
-    }
+    // Write to buffer (lock-free)
+    LogEntry& entry = buffer_[currentWrite % kBufferSize];
+    entry.level = level;
+    entry.file = file ? file : "";
+    entry.line = line;
+    entry.message = message ? message : "";
+    entry.timestamp = timestamp;
+    entry.pid = Os::getProcessId();
+    entry.tid = std::this_thread::get_id();
+    entry.duration = duration;
+    entry.hasDuration = hasDuration;
 
     writeIndex_.fetch_add(1, std::memory_order_release);
   }
@@ -164,7 +161,6 @@ class AsyncLogger {
   std::thread workerThread_;               //!< Background worker thread for flushing
   std::mutex flushMutex_;                  //!< Mutex for flush condition variable
   std::condition_variable flushCV_;        //!< Condition variable for worker wakeup
-  std::mutex writeMutex_;                  //!< Protects buffer writes
 
   void workerLoop() {
     while (running_.load(std::memory_order_relaxed)) {
