@@ -24,6 +24,7 @@
 #include <vector>
 #include <cstdint>
 #include "include/amd_cuid.h"
+#include <climits>
 
 int main() {
     amdcuid_status_t err;
@@ -143,9 +144,11 @@ int main() {
         std::cout << " Handle: " << amdcuid_id_to_string(cpu_handles[i]) << std::endl;
         std::cout << std::endl;
     }
+    std::string example_device_path;
+    uint32_t path_length = PATH_MAX;
+    amdcuid_status_t status = amdcuid_query_device_property(gpu_handles[0], AMDCUID_QUERY_DEVICE_PATH, &example_device_path, &path_length);
 
     // example for getting specific device handle by device path and querying its properties
-    std::string example_device_path = "/sys/class/drm/renderD128"; // Update this path to an actual device on your system
     amdcuid_id_t device_handle = {};
     err = amdcuid_get_handle_by_dev_path(example_device_path.c_str(), AMDCUID_DEVICE_TYPE_GPU, &device_handle);
     if (err != AMDCUID_STATUS_SUCCESS) {
@@ -157,8 +160,11 @@ int main() {
     // handle itself is also the derived CUID, so we can print it directly
     std::cout << "Device at path " << example_device_path << " has derived CUID: " << amdcuid_id_to_string(device_handle) << std::endl;
 
+    std::string example_bdf;
+    uint32_t bdf_length = 64;
+    status = amdcuid_query_device_property(gpu_handles[0], AMDCUID_QUERY_DEVICE_PATH, &example_bdf, &bdf_length);
+
     // example for getting a specific device handle by BDF and querying its properties
-    std::string example_bdf = "0000:00:01.0"; // Update this BDF to an actual device on your system
     amdcuid_id_t bdf_device_handle = {};
     err = amdcuid_get_handle_by_bdf(example_bdf.c_str(), AMDCUID_DEVICE_TYPE_GPU, &bdf_device_handle);
     if (err != AMDCUID_STATUS_SUCCESS) {
