@@ -39,6 +39,12 @@ add_library(
     STATIC
     $<TARGET_OBJECTS:rocprofiler-systems-object-library>
 )
+
+target_sources(
+    rocprofiler-systems-static-library
+    PRIVATE $<TARGET_OBJECTS:rocprofiler-systems-pmc-library>
+)
+
 add_library(
     rocprofiler-systems::librocprofiler-systems-static
     ALIAS rocprofiler-systems-static-library
@@ -68,6 +74,12 @@ add_library(
     SHARED
     $<TARGET_OBJECTS:rocprofiler-systems-object-library>
 )
+
+target_sources(
+    rocprofiler-systems-shared-library
+    PRIVATE $<TARGET_OBJECTS:rocprofiler-systems-pmc-library>
+)
+
 add_library(
     rocprofiler-systems::librocprofiler-systems-shared
     ALIAS rocprofiler-systems-shared-library

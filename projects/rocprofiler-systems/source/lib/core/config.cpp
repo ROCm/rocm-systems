@@ -2558,6 +2558,12 @@ get_caching_perfetto()
     return _v;
 }
 
+bool
+get_use_cache_output()
+{
+    return get_use_rocpd() || get_caching_perfetto();
+}
+
 int
 get_kill_delay()
 {

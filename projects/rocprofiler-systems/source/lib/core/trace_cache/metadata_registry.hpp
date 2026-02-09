@@ -32,6 +32,7 @@
 #include <cstring>
 #include <memory>
 #include <optional>
+#include <spdlog/fmt/ranges.h>
 #include <vector>
 #if ROCPROFSYS_USE_ROCM > 0
 #    include <rocprofiler-sdk/callback_tracing.h>
@@ -40,7 +41,6 @@
 #include <initializer_list>
 #include <map>
 #include <set>
-#include <sstream>
 #include <stdint.h>
 #include <string.h>
 #include <string>
@@ -61,18 +61,6 @@ struct process
     uint32_t    start;
     uint32_t    end;
 };
-
-template <typename Category>
-inline std::string
-annotate_category(std::optional<int> first_section  = std::nullopt,
-                  std::optional<int> second_section = std::nullopt)
-{
-    std::stringstream ss;
-    ss << std::string(tim::trait::name<Category>::value);
-    if(first_section) ss << "_" << std::to_string(*first_section);
-    if(second_section) ss << "_" << std::to_string(*second_section);
-    return ss.str();
-}
 
 struct pmc
 {
@@ -131,16 +119,12 @@ struct thread
 
 template <typename Category>
 inline std::string
-annotate_with_device_id(uint32_t           device_id,
-                        std::optional<int> first_section  = std::nullopt,
-                        std::optional<int> second_section = std::nullopt)
+format_track_name(std::optional<int> first_section  = std::nullopt,
+                  std::optional<int> second_section = std::nullopt)
 {
-    std::stringstream ss;
-    ss << std::string(tim::trait::name<Category>::value) + " [" +
-              std::to_string(device_id) + "]";
-    if(first_section) ss << "_" << std::to_string(*first_section);
-    if(second_section) ss << "_" << std::to_string(*second_section);
-    return ss.str();
+    return fmt::format("{}{}{}", tim::trait::name<Category>::value,
+                       first_section ? fmt::format("_{}", *first_section) : "",
+                       second_section ? fmt::format("_{}", *second_section) : "");
 }
 
 struct track

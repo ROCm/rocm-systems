@@ -20,23 +20,17 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-set(UNIT_TEST_OBJECTS
-    $<TARGET_OBJECTS:lib-common-tests>
-    $<TARGET_OBJECTS:trace-cache-tests>
-    $<TARGET_OBJECTS:demangler-tests>
-    $<TARGET_OBJECTS:logger-tests>
-)
-
-if(ROCPROFSYS_USE_ROCM)
-    list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:pmc-common-tests>)
-endif()
-
-add_executable(rocprof-sys-unit-tests ${UNIT_TEST_OBJECTS})
+add_library(pmc-gpu-collector-tests OBJECT test_device.cpp)
 
 target_link_libraries(
-    rocprof-sys-unit-tests
-    PRIVATE
+    pmc-gpu-collector-tests
+    PUBLIC
+        rocprofiler-systems-pmc-library
         rocprofiler-systems-googletest-library
-        rocprofiler-systems-common-library
-        rocprofiler-systems-core-library
+        rocprofiler-systems-logger
+)
+
+target_include_directories(
+    pmc-gpu-collector-tests
+    PRIVATE ${PROJECT_SOURCE_DIR}/source/lib ${PROJECT_SOURCE_DIR}/source/lib/rocprof-sys
 )

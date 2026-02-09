@@ -20,7 +20,6 @@ set(library_headers
     ${CMAKE_CURRENT_LIST_DIR}/perf.hpp
     ${CMAKE_CURRENT_LIST_DIR}/ptl.hpp
     ${CMAKE_CURRENT_LIST_DIR}/rocm.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/amd_smi.hpp
     ${CMAKE_CURRENT_LIST_DIR}/rocprofiler-sdk.hpp
     ${CMAKE_CURRENT_LIST_DIR}/runtime.hpp
     ${CMAKE_CURRENT_LIST_DIR}/sampling.hpp
@@ -41,11 +40,12 @@ if(ROCPROFSYS_USE_ROCM)
         PRIVATE
             ${CMAKE_CURRENT_LIST_DIR}/rocm.cpp
             ${CMAKE_CURRENT_LIST_DIR}/rocprofiler-sdk.cpp
-            ${CMAKE_CURRENT_LIST_DIR}/amd_smi.cpp
     )
     add_subdirectory(rocprofiler-sdk)
+    # PMC (Performance Metric Counter) subdirectory for tests and other files
 endif()
 
+add_subdirectory(pmc)
 add_subdirectory(causal)
 add_subdirectory(components)
 add_subdirectory(coverage)
@@ -55,7 +55,6 @@ set(ndebug_sources
     ${CMAKE_CURRENT_LIST_DIR}/components/mpi_gotcha.cpp
     ${CMAKE_CURRENT_LIST_DIR}/components/backtrace_metrics.cpp
     ${CMAKE_CURRENT_LIST_DIR}/kokkosp.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/amd_smi.cpp
 )
 
 set_source_files_properties(

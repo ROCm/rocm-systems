@@ -356,207 +356,131 @@ rocpd_processor_t::handle([[maybe_unused]] const pmc_event_with_sample& _pmc)
 #endif
 }
 
-void
-rocpd_processor_t::handle([[maybe_unused]] const amd_smi_sample& _amd_smi)
-{
 #if ROCPROFSYS_USE_ROCM > 0
-
+void
+rocpd_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& _gpu_pmc)
+{
     const auto* _name            = trait::name<category::amd_smi>::value;
     auto        name_primary_key = m_data_processor->insert_string(_name);
     auto        event_id = m_data_processor->insert_event(name_primary_key, 0, 0, 0);
 
     auto base_id =
-        m_agent_manager->get_agent_by_type_index(_amd_smi.device_id, agent_type::GPU)
+        m_agent_manager->get_agent_by_type_index(_gpu_pmc.device_id, agent_type::GPU)
             .base_id;
 
-    auto insert_event_and_sample = [&](bool enabled, const char* pmc_name,
-                                       const char* track_name, double value) {
+    auto insert_metric = [&](bool enabled, const char* pmc_name, const char* track_name,
+                             double value) {
         if(!enabled) return;
         m_data_processor->insert_pmc_event(event_id, base_id, pmc_name, value);
-        m_data_processor->insert_sample(track_name, _amd_smi.timestamp, event_id);
+        m_data_processor->insert_sample(track_name, _gpu_pmc.timestamp, event_id);
     };
 
-    using pos = trace_cache::amd_smi_sample::settings_positions;
-    std::bitset<8> settings_bits(_amd_smi.settings);
-    bool           is_busy_enabled  = settings_bits.test(static_cast<int>(pos::busy));
-    bool           is_temp_enabled  = settings_bits.test(static_cast<int>(pos::temp));
-    bool           is_power_enabled = settings_bits.test(static_cast<int>(pos::power));
-    bool is_mem_usage_enabled = settings_bits.test(static_cast<int>(pos::mem_usage));
+    const auto& m       = _gpu_pmc.metric_values;
+    const auto& enabled = _gpu_pmc.enabled_metric;
 
-    bool is_vcn_enabled  = settings_bits.test(static_cast<int>(pos::vcn_activity));
-    bool is_jpeg_enabled = settings_bits.test(static_cast<int>(pos::jpeg_activity));
-    bool is_xgmi_enabled = settings_bits.test(static_cast<int>(pos::xgmi));
-    bool is_pcie_enabled = settings_bits.test(static_cast<int>(pos::pcie));
+    auto insert_scalar = [&](const char* name, const std::string& track, bool is_enabled,
+                             double value) {
+        insert_metric(is_enabled, name, track.c_str(), value);
+    };
 
-    insert_event_and_sample(
-        is_busy_enabled, trait::name<category::amd_smi_gfx_busy>::value,
-        info::annotate_with_device_id<category::amd_smi_gfx_busy>(_amd_smi.device_id)
-            .c_str(),
-        _amd_smi.gfx_activity);
-    insert_event_and_sample(
-        is_busy_enabled, trait::name<category::amd_smi_umc_busy>::value,
-        info::annotate_with_device_id<category::amd_smi_umc_busy>(_amd_smi.device_id)
-            .c_str(),
-        _amd_smi.umc_activity);
-    insert_event_and_sample(
-        is_busy_enabled, trait::name<category::amd_smi_mm_busy>::value,
-        info::annotate_with_device_id<category::amd_smi_mm_busy>(_amd_smi.device_id)
-            .c_str(),
-        _amd_smi.mm_activity);
-    insert_event_and_sample(
-        is_temp_enabled, trait::name<category::amd_smi_temp>::value,
-        info::annotate_with_device_id<category::amd_smi_temp>(_amd_smi.device_id).c_str(),
-        _amd_smi.temperature);
+    insert_scalar(trait::name<category::amd_smi_gfx_busy>::value,
+                  info::format_track_name<category::amd_smi_gfx_busy>(),
+                  enabled.bits.gfx_activity, m.gfx_activity);
+    insert_scalar(trait::name<category::amd_smi_umc_busy>::value,
+                  info::format_track_name<category::amd_smi_umc_busy>(),
+                  enabled.bits.umc_activity, m.umc_activity);
+    insert_scalar(trait::name<category::amd_smi_mm_busy>::value,
+                  info::format_track_name<category::amd_smi_mm_busy>(),
+                  enabled.bits.mm_activity, m.mm_activity);
+    insert_scalar(trait::name<category::amd_smi_temp>::value,
+                  info::format_track_name<category::amd_smi_temp>(),
+                  enabled.bits.hotspot_temperature, m.hotspot_temperature);
+    insert_scalar(trait::name<category::amd_smi_power>::value,
+                  info::format_track_name<category::amd_smi_power>(),
+                  enabled.bits.current_socket_power || enabled.bits.average_socket_power,
+                  enabled.bits.current_socket_power ? m.current_socket_power
+                                                    : m.average_socket_power);
+    insert_scalar(trait::name<category::amd_smi_memory_usage>::value,
+                  info::format_track_name<category::amd_smi_memory_usage>(),
+                  enabled.bits.memory_usage, m.memory_usage / 1024.0);
 
-    insert_event_and_sample(
-        is_power_enabled, trait::name<category::amd_smi_power>::value,
-        info::annotate_with_device_id<category::amd_smi_power>(_amd_smi.device_id)
-            .c_str(),
-        _amd_smi.power);
-    insert_event_and_sample(
-        is_mem_usage_enabled, trait::name<category::amd_smi_memory_usage>::value,
-        info::annotate_with_device_id<category::amd_smi_memory_usage>(_amd_smi.device_id)
-            .c_str(),
-        _amd_smi.mem_usage);
-
-    if(!is_vcn_enabled && !is_jpeg_enabled && !is_xgmi_enabled && !is_pcie_enabled)
-        return;
-
-    gpu::gpu_metrics_t              gpu_metrics;
-    gpu::gpu_metrics_capabilities_t capabilities;
-    gpu::deserialize_gpu_metrics(_amd_smi.gpu_activity, gpu_metrics, is_vcn_enabled,
-                                 is_jpeg_enabled, is_xgmi_enabled, is_pcie_enabled,
-                                 capabilities);
-
-    // Insert VCN and JPEG activity metrics
-    auto insert_decode_vector_metrics = [&](auto category, bool _is_enabled,
-                                            const std::vector<uint16_t>& data,
-                                            std::optional<size_t> _idx = std::nullopt) {
-        if(!_is_enabled) return;
-
-        using Category = std::decay_t<decltype(category)>;
-
-        for(size_t i = 0; i < data.size(); ++i)
+    auto insert_xcp_metrics = [&](const char* base_name, const std::string& base_track,
+                                  bool is_enabled, const auto& get_array) {
+        if(!is_enabled) return;
+        for(size_t xcp = 0; xcp < m.xcp_stats.size(); ++xcp)
         {
-            const auto value = data[i];
-            if(value == std::numeric_limits<uint16_t>::max()) continue;
-
-            auto pmc_name = info::annotate_category<Category>(_idx, i);
-            auto track_name =
-                info::annotate_with_device_id<Category>(_amd_smi.device_id, _idx, i);
-
-            insert_event_and_sample(_is_enabled, pmc_name.c_str(), track_name.c_str(),
-                                    static_cast<double>(value));
+            const auto& arr = get_array(m.xcp_stats[xcp]);
+            for(size_t i = 0; i < arr.size(); ++i)
+            {
+                auto suffix =
+                    "_xcp" + std::to_string(xcp) + "[" + std::to_string(i) + "]";
+                auto pmc_name   = std::string(base_name) + suffix;
+                auto track_name = base_track + suffix;
+                insert_metric(true, pmc_name.c_str(), track_name.c_str(), arr[i]);
+            }
         }
     };
 
-    // Insert XGMI read/write data metrics
-    auto insert_xgmi_vector_metrics = [&](auto category, bool _is_enabled,
-                                          const std::vector<uint64_t>& data,
-                                          std::optional<size_t> _idx = std::nullopt) {
-        if(!_is_enabled) return;
+    insert_xcp_metrics(trait::name<category::amd_smi_vcn_activity>::value,
+                       info::format_track_name<category::amd_smi_vcn_activity>(),
+                       enabled.bits.vcn_busy,
+                       [](const auto& xcp) -> const auto& { return xcp.vcn_busy; });
+    insert_xcp_metrics(trait::name<category::amd_smi_jpeg_activity>::value,
+                       info::format_track_name<category::amd_smi_jpeg_activity>(),
+                       enabled.bits.jpeg_busy,
+                       [](const auto& xcp) -> const auto& { return xcp.jpeg_busy; });
 
-        using Category = std::decay_t<decltype(category)>;
-
-        for(size_t i = 0; i < data.size(); ++i)
+    auto insert_device_level_metrics = [&](const std::string_view base_name,
+                                           bool is_enabled, const auto& arr) {
+        if(!is_enabled) return;
+        for(size_t i = 0; i < arr.size(); ++i)
         {
-            const auto value = data[i];
-            if(value == std::numeric_limits<uint64_t>::max()) continue;
+            auto suffix     = "_" + std::to_string(i);
+            auto pmc_name   = std::string(base_name) + suffix;
+            auto track_name = pmc_name;
 
-            auto pmc_name = info::annotate_category<Category>(_idx, i);
-            auto track_name =
-                info::annotate_with_device_id<Category>(_amd_smi.device_id, _idx, i);
-
-            insert_event_and_sample(_is_enabled, pmc_name.c_str(), track_name.c_str(),
-                                    static_cast<double>(value));
+            LOG_INFO("Inserting metric: pmc_name: {}, track_name: {}, value: {}",
+                     pmc_name, track_name, arr[i]);
+            insert_metric(true, pmc_name.c_str(), track_name.c_str(), arr[i]);
         }
     };
 
-    // Insert VCN activity metrics
-    if(capabilities.flags.vcn_is_device_level_only)
-    {
-        // Device-level: use vcn_activity vector
-        insert_decode_vector_metrics(category::amd_smi_vcn_activity{}, is_vcn_enabled,
-                                     gpu_metrics.vcn_activity, std::nullopt);
-    }
-    else
-    {
-        // Per-XCP: iterate through actual XCPs in vcn_busy
-        for(size_t xcp = 0; xcp < gpu_metrics.vcn_busy.size(); ++xcp)
-        {
-            insert_decode_vector_metrics(category::amd_smi_vcn_activity{}, is_vcn_enabled,
-                                         gpu_metrics.vcn_busy[xcp], xcp);
-        }
-    }
+    insert_device_level_metrics(info::format_track_name<category::amd_smi_vcn_activity>(),
+                                enabled.bits.vcn_activity, m.vcn_activity);
 
-    // Insert JPEG activity metrics
-    if(capabilities.flags.jpeg_is_device_level_only)
-    {
-        // Device-level: use jpeg_activity vector
-        insert_decode_vector_metrics(category::amd_smi_jpeg_activity{}, is_jpeg_enabled,
-                                     gpu_metrics.jpeg_activity, std::nullopt);
-    }
-    else
-    {
-        // Per-XCP: iterate through actual XCPs in jpeg_busy
-        for(size_t xcp = 0; xcp < gpu_metrics.jpeg_busy.size(); ++xcp)
-        {
-            insert_decode_vector_metrics(category::amd_smi_jpeg_activity{},
-                                         is_jpeg_enabled, gpu_metrics.jpeg_busy[xcp],
-                                         xcp);
-        }
-    }
+    insert_device_level_metrics(
+        info::format_track_name<category::amd_smi_jpeg_activity>(),
+        enabled.bits.jpeg_activity, m.jpeg_activity);
 
-    // Insert XGMI metrics (scalar values)
-    insert_event_and_sample(
-        is_xgmi_enabled, trait::name<category::amd_smi_xgmi_link_width>::value,
-        info::annotate_with_device_id<category::amd_smi_xgmi_link_width>(
-            _amd_smi.device_id)
-            .c_str(),
-        gpu_metrics.xgmi_link_width);
-
-    insert_event_and_sample(
-        is_xgmi_enabled, trait::name<category::amd_smi_xgmi_link_speed>::value,
-        info::annotate_with_device_id<category::amd_smi_xgmi_link_speed>(
-            _amd_smi.device_id)
-            .c_str(),
-        gpu_metrics.xgmi_link_speed);
-
-    insert_xgmi_vector_metrics(category::amd_smi_xgmi_read_data{}, is_xgmi_enabled,
-                               gpu_metrics.xgmi_read_data_acc, std::nullopt);
-
-    insert_xgmi_vector_metrics(category::amd_smi_xgmi_write_data{}, is_xgmi_enabled,
-                               gpu_metrics.xgmi_write_data_acc, std::nullopt);
-
-    insert_event_and_sample(
-        is_pcie_enabled, trait::name<category::amd_smi_pcie_link_width>::value,
-        info::annotate_with_device_id<category::amd_smi_pcie_link_width>(
-            _amd_smi.device_id)
-            .c_str(),
-        gpu_metrics.pcie_link_width);
-
-    insert_event_and_sample(
-        is_pcie_enabled, trait::name<category::amd_smi_pcie_link_speed>::value,
-        info::annotate_with_device_id<category::amd_smi_pcie_link_speed>(
-            _amd_smi.device_id)
-            .c_str(),
-        gpu_metrics.pcie_link_speed);
-
-    insert_event_and_sample(
-        is_pcie_enabled, trait::name<category::amd_smi_pcie_bandwidth_acc>::value,
-        info::annotate_with_device_id<category::amd_smi_pcie_bandwidth_acc>(
-            _amd_smi.device_id)
-            .c_str(),
-        static_cast<double>(gpu_metrics.pcie_bandwidth_acc));
-
-    insert_event_and_sample(
-        is_pcie_enabled, trait::name<category::amd_smi_pcie_bandwidth_inst>::value,
-        info::annotate_with_device_id<category::amd_smi_pcie_bandwidth_inst>(
-            _amd_smi.device_id)
-            .c_str(),
-        static_cast<double>(gpu_metrics.pcie_bandwidth_inst));
-#endif
+    insert_scalar(trait::name<category::amd_smi_pcie_link_width>::value,
+                  info::format_track_name<category::amd_smi_pcie_link_width>(),
+                  enabled.bits.pcie, m.pcie.link.width);
+    insert_scalar(trait::name<category::amd_smi_pcie_link_speed>::value,
+                  info::format_track_name<category::amd_smi_pcie_link_speed>(),
+                  enabled.bits.pcie, m.pcie.link.speed);
+    insert_scalar(trait::name<category::amd_smi_pcie_bandwidth_acc>::value,
+                  info::format_track_name<category::amd_smi_pcie_bandwidth_acc>(),
+                  enabled.bits.pcie, m.pcie.bandwidth.acc);
+    insert_scalar(trait::name<category::amd_smi_pcie_bandwidth_inst>::value,
+                  info::format_track_name<category::amd_smi_pcie_bandwidth_inst>(),
+                  enabled.bits.pcie, m.pcie.bandwidth.inst);
+    /*
+        //TODO: XGMI metrics
+        insert_scalar(trait::name<category::amd_smi_xgmi_link_width>::value,
+                      info::format_track_name<category::amd_smi_xgmi_link_width>(),
+                      enabled.bits.xgmi, m.xgmi.link.width);
+        insert_scalar(trait::name<category::amd_smi_xgmi_link_speed>::value,
+                      info::format_track_name<category::amd_smi_xgmi_link_speed>(),
+                      enabled.bits.xgmi, m.xgmi.link.speed);
+        insert_scalar(trait::name<category::amd_smi_xgmi_read_data_acc>::value,
+                      info::format_track_name<category::amd_smi_xgmi_read_data_acc>(),
+                      enabled.bits.xgmi, m.xgmi.data_acc.read);
+        insert_scalar(trait::name<category::amd_smi_xgmi_write_data_acc>::value,
+                      info::format_track_name<category::amd_smi_xgmi_write_data_acc>(),
+                      enabled.bits.xgmi, m.xgmi.data_acc.write);
+    */
 }
+#endif
 
 void
 rocpd_processor_t::handle([[maybe_unused]] const cpu_freq_sample& _cpu_freq_sample)
@@ -790,6 +714,9 @@ rocpd_processor_t::post_process_metadata()
             m_agent_manager
                 ->get_agent_by_type_index(pmc_info.agent_type_index, pmc_info.type)
                 .base_id;
+
+        LOG_INFO("Inserting PMC description: agent_primary_key: {}, pmc_info: {}",
+                 agent_primary_key, pmc_info.name);
 
         m_data_processor->insert_pmc_description(
             n_info.id, process_info.pid, agent_primary_key, pmc_info.target_arch.c_str(),
