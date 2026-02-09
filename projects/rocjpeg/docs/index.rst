@@ -10,7 +10,7 @@ rocJPEG provides APIs and samples that you can use to easily access the JPEG dec
 features of your media engines (VCNs). It also allows interoperability with other compute engines on
 the GPU using Video Acceleration API (VA-API)/HIP. To learn more, see :doc:`what-is-rocJPEG`
 
-The rocJPEG public repository is located at `https://github.com/ROCm/rocJPEG <https://github.com/ROCm/rocJPEG>`_.
+The rocJPEG project is located in https://github.com/ROCm/rocm-systems/tree/develop/projects/rocjpeg.
 
 .. grid:: 2
   :gutter: 3
