@@ -18,6 +18,6 @@ target_sources(rocprofiler-sdk-object-library PRIVATE ${ROCPROFILER_PC_SAMPLING_
 
 add_subdirectory(ioctl)
 
-if(ROCPROFILER_BUILD_TESTS OR ROCPROFILER_THEROCK_PACKAGING)
+if(ROCPROFILER_BUILD_TESTS)
     add_subdirectory(tests)
 endif()

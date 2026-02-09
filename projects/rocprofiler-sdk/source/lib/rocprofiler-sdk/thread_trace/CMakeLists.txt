@@ -6,6 +6,6 @@ target_sources(
     rocprofiler-sdk-object-library PRIVATE ${ROCPROFILER_LIB_THREAD_TRACE_SOURCES}
                                            ${ROCPROFILER_LIB_THREAD_TRACE_HEADERS})
 
-if(ROCPROFILER_BUILD_TESTS OR ROCPROFILER_THEROCK_PACKAGING)
+if(ROCPROFILER_BUILD_TESTS)
     add_subdirectory(tests)
 endif()

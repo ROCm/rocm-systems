@@ -7,6 +7,6 @@ target_sources(
     rocprofiler-sdk-object-library PRIVATE ${ROCPROFILER_LIB_KFD_EVENT_SOURCES}
                                            ${ROCPROFILER_LIB_KFD_EVENT_HEADERS})
 
-if(ROCPROFILER_BUILD_TESTS OR ROCPROFILER_THEROCK_PACKAGING)
+if(ROCPROFILER_BUILD_TESTS)
     add_subdirectory(tests)
 endif()

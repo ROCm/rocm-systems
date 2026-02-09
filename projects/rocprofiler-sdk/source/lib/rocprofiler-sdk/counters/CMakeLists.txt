@@ -25,6 +25,6 @@ target_sources(rocprofiler-sdk-object-library PRIVATE ${ROCPROFILER_LIB_COUNTERS
                                                       ${ROCPROFILER_LIB_COUNTERS_HEADERS})
 add_subdirectory(parser)
 
-if(ROCPROFILER_BUILD_TESTS OR ROCPROFILER_THEROCK_PACKAGING)
+if(ROCPROFILER_BUILD_TESTS)
     add_subdirectory(tests)
 endif()

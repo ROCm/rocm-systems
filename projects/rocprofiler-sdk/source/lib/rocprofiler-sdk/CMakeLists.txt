@@ -144,7 +144,7 @@ set_target_properties(
 #
 # ----------------------------------------------------------------------------------------#
 
-if(ROCPROFILER_BUILD_TESTS OR ROCPROFILER_THEROCK_PACKAGING)
+if(ROCPROFILER_BUILD_TESTS)
     add_subdirectory(tests)
 endif()
 
