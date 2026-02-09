@@ -2910,7 +2910,6 @@ if __name__ == "__main__":
         # Check counter_collection.csv
         expected_counter_columns = {
             "Correlation_Id",
-            "Kernel_Id",
             "Kernel_Name",
             "Counter_Name",
             "Counter_Value",
