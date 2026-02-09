@@ -218,7 +218,7 @@ ai_nic_stats_collector::update_data_for_one_nic(amdsmi_processor_handle processo
                             static_cast<std::uint32_t>(stats[stat_idx].value);
                     }
                     else if(strcmp(stats[stat_idx].name, nic_stats::TX_RDMA_CNP_PKTS) ==
-                                   0)
+                            0)
                     {
                         data._tx_rdma_cnp_pkts =
                             static_cast<std::uint32_t>(stats[stat_idx].value);
