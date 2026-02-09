@@ -26,8 +26,7 @@ const char* nic_stats::TX_RDMA_UCAST_PKTS  = "tx_rdma_ucast_pkts";
 const char* nic_stats::RX_RDMA_CNP_PKTS    = "rx_rdma_cnp_pkts";
 const char* nic_stats::TX_RDMA_CNP_PKTS    = "tx_rdma_cnp_pkts";
 
-ai_nic_stats_collector::ai_nic_stats_collector()
-{}
+ai_nic_stats_collector::ai_nic_stats_collector() {}
 
 bool
 ai_nic_stats_collector::find_nic(const std::string& nic, nic_stats& data) const
@@ -101,11 +100,10 @@ ai_nic_stats_collector::update_stats()
         }
         for(uint32_t idx = 0; idx < processor_count; ++idx)
         {
-            amdsmi_status_t status;
+            amdsmi_status_t                status;
             amdsmi_nic_rdma_devices_info_t info;
             status = amdsmi_get_nic_rdma_dev_info(processor_handles[idx], &info);
-            if(status != AMDSMI_STATUS_SUCCESS)
-                continue;
+            if(status != AMDSMI_STATUS_SUCCESS) continue;
 
             // Update info and stats.
             update_data_for_one_nic(processor_handles[idx]);
