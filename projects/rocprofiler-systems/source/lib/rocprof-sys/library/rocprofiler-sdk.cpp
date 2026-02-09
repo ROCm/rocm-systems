@@ -2283,10 +2283,6 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
 {
     auto domains = settings::instance()->at("ROCPROFSYS_ROCM_DOMAINS");
 
-    static int counter = 0;
-
-    LOG_INFO("Tool init called. Counter {}", counter++);
-
     std::stringstream _domains_ss;
     for(const auto& itr : domains->get_choices())
         _domains_ss << "- " << itr << "\n";
