@@ -199,7 +199,8 @@ ai_nic_stats_collector::update_data_for_one_nic(amdsmi_processor_handle processo
                         data._rx_rdma_ucast_pkts =
                             static_cast<std::uint32_t>(stats[stat_idx].value);
                     }
-                    else if(strcmp(stats[stat_idx].name, nic_stats::TX_RDMA_UCAST_BYTES) ==
+                    else if(strcmp(stats[stat_idx].name,
+                                   nic_stats::TX_RDMA_UCAST_BYTES) ==
                             0)
                     {
                         data._tx_rdma_ucast_bytes =
@@ -211,12 +212,14 @@ ai_nic_stats_collector::update_data_for_one_nic(amdsmi_processor_handle processo
                         data._tx_rdma_ucast_pkts =
                             static_cast<std::uint32_t>(stats[stat_idx].value);
                     }
-                    else if(strcmp(stats[stat_idx].name, nic_stats::RX_RDMA_CNP_PKTS) == 0)
+                    else if(strcmp(stats[stat_idx].name, nic_stats::RX_RDMA_CNP_PKTS) ==
+                                   0)
                     {
                         data._rx_rdma_cnp_pkts =
                             static_cast<std::uint32_t>(stats[stat_idx].value);
                     }
-                    else if(strcmp(stats[stat_idx].name, nic_stats::TX_RDMA_CNP_PKTS) == 0)
+                    else if(strcmp(stats[stat_idx].name, nic_stats::TX_RDMA_CNP_PKTS) ==
+                                   0)
                     {
                         data._tx_rdma_cnp_pkts =
                             static_cast<std::uint32_t>(stats[stat_idx].value);
