@@ -124,7 +124,7 @@ mfma_ops = {
     "F6": {"gfx950": 131072},
     "F6F4": {"gfx950": 131072},  # Mixed precision F6 x F4
     "F8": dict.fromkeys(["gfx90a", "gfx940", "gfx941", "gfx942", "gfx950"], 32768),
-    "F16": dict.fromkeys(["gfx90a", "gfx940", "gfx941", "gfx942", "gfx950"], 16384),
+    "F16": dict.fromkeys(["gfx90a", "gfx940", "gfx941", "gfx942",], 16384) | dict.fromkeys(["gfx950"], 32768),
     "F32": dict.fromkeys(
         ["gfx908", "gfx90a", "gfx940", "gfx941", "gfx942", "gfx950"], 4096
     ),
@@ -679,24 +679,41 @@ extern "C" __global__ void mfma_f32(int iter, float *dummy)
 mfma_f16_src = """
 
 using f32_16vec = __attribute__((__vector_size__(16 * sizeof(float)))) float;
-using f16_2vec = __attribute__((__vector_size__(2 * sizeof(__2f16))))  float;
+using f16_8vec = __attribute__((__vector_size__(8 * sizeof(_Float16)))) _Float16;
+using f16_4vec = __attribute__((__vector_size__(4 * sizeof(_Float16))))  _Float16;
 
 extern "C" __global__ void mfma_f16(int iter, float *dummy)
 {
-    // Input: 2 F32 registers
-    f16_2vec a;
-    a[1] = a[0] = threadIdx.x;
+#if defined(____gfx950__)
+    // Input: 8 F16 registers
+    f16_8vec a = threadIdx.x;
 
-    //Output: 16 F32 registers
+    // Accumulator: 16 F32 registers
     f32_16vec result = {0};
 
-    // CDNA2: v_mfma_f32_32x32x8f16 ops: 32x32x8x2 = 16384
-    // CDNA3: v_mfma_f32_32x32x8_f16
-    for(int i = 0; i < iter; ++i)
+    for(int i = 0; i < iter / 4; ++i)
+    {
+        result = __builtin_amdgcn_mfma_f32_32x32x16_f16(a, a, result, 0, 0, 0);
+        result = __builtin_amdgcn_mfma_f32_32x32x16_f16(a, a, result, 0, 0, 0);
+        result = __builtin_amdgcn_mfma_f32_32x32x16_f16(a, a, result, 0, 0, 0);
+        result = __builtin_amdgcn_mfma_f32_32x32x16_f16(a, a, result, 0, 0, 0);
+    }
+#else
+    // Input: 4 F16 registers
+    f16_4vec a;
+    a[1] = a[0] = threadIdx.x;
+
+    // Accumulator: 16 F32 registers
+    f32_16vec result = {0};
+
+    for(int i = 0; i < iter / 4; ++i)
     {
         result = __builtin_amdgcn_mfma_f32_32x32x8f16(a, a, result, 0, 0, 0);
+        result = __builtin_amdgcn_mfma_f32_32x32x8f16(a, a, result, 0, 0, 0);
+        result = __builtin_amdgcn_mfma_f32_32x32x8f16(a, a, result, 0, 0, 0);
+        result = __builtin_amdgcn_mfma_f32_32x32x8f16(a, a, result, 0, 0, 0);
     }
-
+#endif
     if (result[0] != 2*result[0])
     {
         dummy[0] = result[0];
