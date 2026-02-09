@@ -16,6 +16,25 @@ set(_DISABLED "@RAUT_DISABLED@")
 set(_ENVIRONMENT "@RAUT_ENVIRONMENT@")
 set(_PREFIX "@RAUT_TEST_PREFIX@")
 
+# Helper to merge/append environment overrides.
+set(_ENV_LIST ${_ENVIRONMENT})
+set(_NEW_ENV_LIST "")
+set(_LDLP_FOUND OFF)
+
+foreach(_KV IN LISTS _ENV_LIST)
+   if(DEFINED ENV{LD_LIBRARY_PATH} AND _KV MATCHES "^LD_LIBRARY_PATH=(.*)")
+        set(_LDLP_FOUND ON)
+       set(_KV "LD_LIBRARY_PATH=${CMAKE_MATCH_1}:$ENV{LD_LIBRARY_PATH}")
+   endif()
+   list(APPEND _NEW_ENV_LIST "${_KV}")
+endforeach()
+
+if(DEFINED ENV{LD_LIBRARY_PATH} AND NOT _LDLP_FOUND)
+   list(APPEND _NEW_ENV_LIST "LD_LIBRARY_PATH=$ENV{LD_LIBRARY_PATH}")
+endif()
+
+set(_ENVIRONMENT "${_NEW_ENV_LIST}")
+
 # test sources are in a subfolder
 set(_TEST_SOURCES)
 foreach(_FILE ${_SOURCES})
