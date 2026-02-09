@@ -1729,7 +1729,7 @@ def test_torch_trace_operator_output(binary_handler_analyze_rocprof_compute):
     Verifies torch_trace directory, operator CSV file creation, and presence
     of hierarchy and mapping (operator, kernel, counter values) in output files.
     """
-    workload_dir = test_utils.get_output_dir(param_id="torch_ops")
+    workload_dir = test_utils.get_output_dir(param_id="torch_ops_analyze")
     # Look for preexisting profiling data in workload_dir
     if not Path(workload_dir).exists():
         pytest.skip(

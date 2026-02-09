@@ -28,6 +28,7 @@ import importlib.util
 import inspect
 import os
 import re
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -2794,9 +2795,7 @@ skip_if_no_torch_gpu = pytest.mark.skipif(
 
 @skip_if_no_torch_gpu
 @pytest.mark.torch_operators
-def test_torch_trace_profile(
-    binary_handler_profile_rocprof_compute, retain_output=True
-):
+def test_torch_trace_profile(binary_handler_profile_rocprof_compute):
     """
     Test profiling a PyTorch application with --torch-trace option.
     Verifies that all required files are generated and counter values are valid.
@@ -2875,7 +2874,9 @@ if __name__ == "__main__":
         "Mismatch in number of marker_api_trace.csv and counter_collection.csv files"
     )
     for marker_file in marker_api_trace_files:
-        corresponding_counter_file = marker_file.parent / "counter_collection.csv"
+        corresponding_counter_file = Path(
+            str(marker_file).replace("marker_api_trace", "counter_collection")
+        )
         assert corresponding_counter_file.exists(), (
             f"counter_collection.csv not found for {marker_file}"
         )
@@ -2928,10 +2929,11 @@ if __name__ == "__main__":
                     f"Empty Correlation ID in {corresponding_counter_file}"
                 )
             assert found_row, f"{corresponding_counter_file} is empty"
-    if not retain_output:
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
-    else:
-        print(f"Retaining output directory: {workload_dir}")
+
+    destination_dir = test_utils.get_output_dir(param_id="torch_ops_analyze")
+    # Saving the profiler output to analyze with the torch trace analyzer script
+    shutil.copytree(workload_dir, destination_dir, dirs_exist_ok=True)
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @skip_if_no_torch_gpu
