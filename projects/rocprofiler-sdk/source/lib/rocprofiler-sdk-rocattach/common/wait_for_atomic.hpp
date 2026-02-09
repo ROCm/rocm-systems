@@ -30,7 +30,6 @@ namespace rocprofiler
 {
 namespace rocattach
 {
-<<<<<<< HEAD
 template <typename T>
 bool
 wait_for(std::atomic<T>& flag, T condition, size_t timeout_ms, bool equal)
@@ -53,8 +52,6 @@ wait_for(std::atomic<T>& flag, T condition, size_t timeout_ms, bool equal)
     // Last chance check in case we were scheduled after timeout
     return cond_check();
 }
-=======
->>>>>>> cc1e939f84 (Address review comments and fix overall typing of ptrace operations)
 // Blocks until flag is NOT equal to condition or timeout_ms milliseconds have elapsed.
 // Returns true if the flag is not equal
 // Returns false if timeout occurred
