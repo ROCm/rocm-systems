@@ -168,7 +168,6 @@ class BaseRunner(ABC):
         mpi_ranks: int = 0,
         working_directory: Optional[Path] = None,
     ):
-
         self.config = config
         self.target = target
         self.target_exe = config.get_target_executable(target)
@@ -234,47 +233,62 @@ class BaseRunner(ABC):
 
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-        command = self.build_command()
+        try:
+            command = self.build_command()
+        except FileNotFoundError as e:
+            return TestResult(
+                returncode=-1,
+                test_output=f"{e}",
+                output_dir=self.output_dir,
+                command="Failed to build command",
+                environment=self.env,
+                duration=0,
+            )
+
         command = self._wrap_with_mpi(command)
 
         start_time = time.time()
 
-        try:
-            result = subprocess.run(
-                command,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                timeout=self.timeout,
-                env=self.env,
-                cwd=self.working_directory,
-            )
-
-            duration = time.time() - start_time
-            test_result = TestResult(
-                returncode=result.returncode,
-                test_output=result.stdout,
-                output_dir=self.output_dir,
-                command=command,
-                environment=self.env,
-                duration=duration,
-            )
-
-        except subprocess.TimeoutExpired as e:
-            duration = time.time() - start_time
-            stdout = _decode_bytes(e.stdout)
-            stderr = _decode_bytes(e.stderr)
-
-            test_result = TestResult(
-                returncode=-1,
-                test_output=stdout,
-                extra_output=f"Timeout after {self.timeout}s\n{stderr}",
-                output_dir=self.output_dir,
-                command=command,
-                environment=self.env,
-                duration=duration,
-            )
-
+        # Always capture via file and NOT PIPE. PIPE deadlocks when the subprocess forks and
+        # the child inherits the pipe FDs. Redirect to file, read into test_output, then remove file.
+        capture_path = self.output_dir / "stdout_stderr.capture"
+        with open(capture_path, "w+", encoding="utf-8") as f:
+            try:
+                result = subprocess.run(
+                    command,
+                    stdin=subprocess.DEVNULL,
+                    stdout=f,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    timeout=self.timeout,
+                    env=self.env,
+                    cwd=self.working_directory,
+                )
+                f.seek(0)
+                test_output = f.read()
+                duration = time.time() - start_time
+                test_result = TestResult(
+                    returncode=result.returncode,
+                    test_output=test_output,
+                    output_dir=self.output_dir,
+                    command=command,
+                    environment=self.env,
+                    duration=duration,
+                )
+            except subprocess.TimeoutExpired:
+                duration = time.time() - start_time
+                f.seek(0)
+                test_output = f.read()
+                test_result = TestResult(
+                    returncode=-1,
+                    test_output=test_output,
+                    extra_output=f"Timeout after {self.timeout}s",
+                    output_dir=self.output_dir,
+                    command=command,
+                    environment=self.env,
+                    duration=duration,
+                )
+        _safe_remove_file(capture_path)
         return test_result
 
 
@@ -412,6 +426,7 @@ class BinaryRewriteRunner(BaseRunner):
         try:
             result = subprocess.run(
                 command,
+                stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
@@ -528,7 +543,7 @@ class RuntimeInstrumentRunner(BaseRunner):
         config: RocprofsysConfig,
         target: str,
         output_dir: Path,
-        instrument_args: Optional[list[str]] = None,
+        runtime_args: Optional[list[str]] = None,
         **kwargs,
     ):
         """Initialize runtime instrument runner.
@@ -537,16 +552,16 @@ class RuntimeInstrumentRunner(BaseRunner):
             config: rocprofiler-systems configuration
             target: Name of target executable
             output_dir: Directory for output files
-            instrument_args: Arguments for rocprof-sys-instrument
+            runtime_args: Arguments for rocprof-sys-instrument
             **kwargs: Additional arguments passed to BaseRunner
         """
         super().__init__(config, target, output_dir, **kwargs)
-        self.instrument_args = instrument_args or []
+        self.runtime_args = runtime_args or []
 
     def build_command(self) -> list[str]:
         return (
             [str(self.config.rocprofsys_instrument)]
-            + self.instrument_args
+            + self.runtime_args
             + ["--print-instrumented", "functions"]
             + ["--", str(self.target_exe)]
             + self.run_args
@@ -583,3 +598,95 @@ class SysRunRunner(BaseRunner):
             + ["--", str(self.target_exe)]
             + self.run_args
         )
+
+
+class CausalRunner(BaseRunner):
+    """Run target with rocprof-sys-causal wrapper."""
+
+    def __init__(
+        self,
+        config: RocprofsysConfig,
+        target: str,
+        output_dir: Path,
+        causal_mode: str,
+        causal_args: Optional[list[str]] = None,
+        **kwargs,
+    ):
+        """Initialize causal runner.
+
+        Args:
+            config: rocprofiler-systems configuration
+            target: Name of target executable
+            output_dir: Directory for output files
+            causal_mode: Causal mode (function/func or line)
+            causal_args: Arguments for rocprof-sys-causal
+            **kwargs: Additional arguments passed to BaseRunner
+        """
+        super().__init__(config, target, output_dir, **kwargs)
+        self.causal_mode = causal_mode
+        self.causal_args = causal_args or []
+
+    def build_command(self) -> list[str]:
+        return (
+            [str(self.config.rocprofsys_causal)]
+            + ["--reset", "-m", str(self.causal_mode)]
+            + self.causal_args
+            + ["--", str(self.target_exe)]
+            + self.run_args
+        )
+
+
+class PythonRunner(BaseRunner):
+    """Run Python target script."""
+
+    def __init__(
+        self,
+        config: RocprofsysConfig,
+        target: str,
+        output_dir: Path,
+        run_args: Optional[list[str]] = None,
+        timeout: int = 300,
+        mpi_ranks: int = 0,
+        working_directory: Optional[Path] = None,
+        env: Optional[dict[str, str]] = None,
+        profile_args: Optional[list[str]] = None,
+        python_version: Optional[str] = None,
+        annotated: bool = False,
+        standalone: bool = False,
+        **kwargs,
+    ):
+        self.config = config
+        self.target = target
+        self.target_exe = config.get_target_executable(target, python_version)
+        self.output_dir = Path(output_dir)
+        self.run_args = run_args or []
+        self.timeout = timeout
+        self.mpi_ranks = mpi_ranks
+        self.working_directory = working_directory or config.rocprofsys_build_dir
+        self.env = config.get_fundamental_environment()
+        self.env.update(config.get_base_python_environment())
+        self.env["ROCPROFSYS_OUTPUT_PATH"] = str(self.output_dir)
+        if env:
+            self.env.update(env)
+
+        self.python_version = python_version
+        self.annotated = annotated
+        self.standalone = standalone
+        self.profile_args = profile_args or []
+
+    def build_command(self) -> list[str]:
+        try:
+            python_executable = self.config.get_python_executable(self.python_version)
+        except FileNotFoundError as e:
+            raise FileNotFoundError(f"{e}")
+
+        command = [str(python_executable)]
+        if not self.standalone:
+            command.extend(["-m", "rocprofsys"])
+            if self.profile_args:
+                command.extend(self.profile_args)
+            if self.annotated:
+                command.extend(["--annotate-trace"])
+            command.extend(["--"])
+        command.extend([str(self.target_exe), *self.run_args])
+        return command

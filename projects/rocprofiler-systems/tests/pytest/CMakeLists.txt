@@ -16,6 +16,7 @@ set(ROCPROFSYS_PYTEST_PACKAGE_FILES
     ${CMAKE_CURRENT_LIST_DIR}/rocprofsys/gpu.py
     ${CMAKE_CURRENT_LIST_DIR}/rocprofsys/runners.py
     ${CMAKE_CURRENT_LIST_DIR}/rocprofsys/validators.py
+    ${CMAKE_CURRENT_LIST_DIR}/rocprofsys/capabilities.py
 )
 
 file(GLOB ROCPROFSYS_PYTEST_TEST_FILES "${CMAKE_CURRENT_LIST_DIR}/test_*.py")
@@ -47,28 +48,28 @@ add_custom_target(
 )
 
 if(ROCPROFSYS_INSTALL_TESTING)
-    # Under install mode, run build_standalone.sh under default mode
+    # Build PyInstaller standalone (bundles Python + pytest; no Python/pip on target)
+    set(ROCPROFSYS_STANDALONE_OUTPUT_DIR
+        ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests
+    )
+    set(ROCPROFSYS_STANDALONE_EXE ${ROCPROFSYS_STANDALONE_OUTPUT_DIR}/rocprofsys-tests)
     add_custom_command(
-        OUTPUT ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests/rocprofsys-tests.pyz
+        OUTPUT ${ROCPROFSYS_STANDALONE_EXE}
         COMMAND
-            ${CMAKE_CURRENT_LIST_DIR}/build_standalone.sh --output-dir
-            ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests
+            ${CMAKE_CURRENT_LIST_DIR}/build_standalone.sh --pyinstaller --output-dir
+            ${ROCPROFSYS_STANDALONE_OUTPUT_DIR}
         DEPENDS
             ${CMAKE_CURRENT_LIST_DIR}/build_standalone.sh
             ${ROCPROFSYS_PYTEST_PACKAGE_FILES}
             ${ROCPROFSYS_PYTEST_FILES}
-        COMMENT "Building standalone pytest binary"
+        COMMENT "Building standalone pytest binary (PyInstaller)"
         VERBATIM
     )
 
-    add_custom_target(
-        build-standalone-pytest
-        ALL
-        DEPENDS ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests/rocprofsys-tests.pyz
-    )
+    add_custom_target(build-standalone-pytest ALL DEPENDS ${ROCPROFSYS_STANDALONE_EXE})
 
     install(
-        FILES ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests/rocprofsys-tests.pyz
+        PROGRAMS ${ROCPROFSYS_STANDALONE_EXE}
         DESTINATION share/rocprofiler-systems/tests
         COMPONENT rocprofiler-systems-tests
     )
