@@ -32,7 +32,7 @@ The supported communication runtimes span multiple layers of the parallel comput
    **Automatic Detection and Default Behavior:**
 
    * **MPI** (``ROCPROFSYS_USE_MPIP``): Enabled by default (``ON``). When using binary instrumentation, ROCm Systems Profiler automatically detects MPI symbols in the target application and enables MPI support.
-   * **UCX** (``ROCPROFSYS_USE_UCX``): **Disabled by default** (``OFF``). Must be explicitly enabled to trace UCX operations. This is a runtime user-configurable option.
+   * **UCX** (``ROCPROFSYS_USE_UCX``): Disabled by default (``OFF``). Must be explicitly enabled to trace UCX operations. This is a runtime user-configurable option.
    * **RCCL** (``ROCPROFSYS_USE_RCCLP``): Disabled by default (``OFF``). Must be explicitly enabled to trace RCCL operations.
 
    These settings can be controlled at runtime using their respective environment variables to enable or disable tracing as needed.
