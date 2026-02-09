@@ -76,23 +76,36 @@ HSAKMTAPI int amdgpu_query_gpu_info(amdgpu_device_handle dev,
   return 0;
 }
 
-HSAKMTAPI int amdgpu_device_get_fd(amdgpu_device_handle dev) {
+int amdgpu_device_get_fd_impl(amdgpu_device_handle dev) {
   return dxg_runtime->dxg_fd;
 }
 
-HSAKMTAPI int amdgpu_bo_cpu_map(amdgpu_bo_handle bo, void **cpu) {
+HSAKMTAPI int amdgpu_device_get_fd(amdgpu_device_handle dev) {
+  return amdgpu_device_get_fd_impl(dev);
+}
+
+int amdgpu_bo_cpu_map_impl(amdgpu_bo_handle bo, void **cpu) {
   wsl::thunk::GpuMemory *gpu_mem = reinterpret_cast<wsl::thunk::GpuMemory *>(bo);
   if (gpu_mem->IsSysMemFd())
     *cpu = gpu_mem->CpuAddress();
   return 0;
 }
 
-HSAKMTAPI int amdgpu_bo_free(amdgpu_bo_handle buf_handle) {
+HSAKMTAPI int amdgpu_bo_cpu_map(amdgpu_bo_handle bo, void **cpu) {
+  return amdgpu_bo_cpu_map_impl(bo, cpu);
+}
+
+int amdgpu_bo_free_impl(amdgpu_bo_handle buf_handle) {
   wsl::thunk::GpuMemory *gpu_mem = reinterpret_cast<wsl::thunk::GpuMemory *>(buf_handle);
   void *MemoryAddress = gpu_mem->IsVaAllocated() ? (void*)gpu_mem->GpuAddress() : (void*)gpu_mem->HandleApeAddress();
   auto ret = hsaKmtFreeMemory((void*)MemoryAddress, gpu_mem->Size());
   return ret == HSAKMT_STATUS_SUCCESS ? 0 : -1;
 }
+
+HSAKMTAPI int amdgpu_bo_free(amdgpu_bo_handle buf_handle) {
+  return amdgpu_bo_free_impl(buf_handle);
+}
+
 
 HSAKMTAPI int amdgpu_bo_export(amdgpu_bo_handle bo,
                                enum amdgpu_bo_handle_type type,
@@ -101,7 +114,7 @@ HSAKMTAPI int amdgpu_bo_export(amdgpu_bo_handle bo,
   return 0;
 }
 
-HSAKMTAPI int amdgpu_bo_import(amdgpu_device_handle dev,
+int amdgpu_bo_import_impl(amdgpu_device_handle dev,
                                enum amdgpu_bo_handle_type type,
                                uint32_t shared_handle,
                                struct amdgpu_bo_import_result *output) {
@@ -121,13 +134,21 @@ HSAKMTAPI int amdgpu_bo_import(amdgpu_device_handle dev,
   if (ret == HSAKMT_STATUS_SUCCESS) {
     //use GpuMemory object handle as drm buf handle
     output->buf_handle = reinterpret_cast<amdgpu_bo_handle>(mem_handle);
+    output->alloc_size = wsl::thunk::GpuMemory::Convert(mem_handle)->ClientSize();
     return 0;
   } else {
     return -1;
   }
 }
 
-HSAKMTAPI int amdgpu_bo_va_op(amdgpu_bo_handle bo,
+HSAKMTAPI int amdgpu_bo_import(amdgpu_device_handle dev,
+                               enum amdgpu_bo_handle_type type,
+                               uint32_t shared_handle,
+                               struct amdgpu_bo_import_result *output) {
+  return amdgpu_bo_import_impl(dev, type, shared_handle, output);
+}
+
+int amdgpu_bo_va_op_impl(amdgpu_bo_handle bo,
                               uint64_t offset,
                               uint64_t size,
                               uint64_t addr,
@@ -166,6 +187,15 @@ HSAKMTAPI int amdgpu_bo_va_op(amdgpu_bo_handle bo,
       break;
   }
   return 0;
+}
+
+HSAKMTAPI int amdgpu_bo_va_op(amdgpu_bo_handle bo,
+                              uint64_t offset,
+                              uint64_t size,
+                              uint64_t addr,
+                              uint64_t flags,
+                              uint32_t ops) {
+  return amdgpu_bo_va_op_impl(bo, offset, size, addr, flags, ops);
 }
 
 HSAKMTAPI int amdgpu_bo_query_info(amdgpu_bo_handle bo, struct amdgpu_bo_info* info) {

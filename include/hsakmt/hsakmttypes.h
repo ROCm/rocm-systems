@@ -1510,6 +1510,7 @@ typedef union
     struct
     {
         unsigned int requiresVAddr : 1;  // Requires virtual address
+        unsigned int kmtHandle     : 1;  // Handle is a KMT handle
     } ui32;
 } HSA_REGISTER_MEM_FLAGS;
 
@@ -1520,6 +1521,49 @@ typedef enum _HsaAisFlags {
     HSA_AIS_WRITE= 0x2
 } HsaAisFlags;
 
+/* memory object handle used for translating drm BO object*/
+typedef struct _HsaMemoryObjectHandle* HsaMemoryObjectHandle;
+
+/* Access Permissions for memory mapping */
+typedef enum _HsaMemoryMapFlags {
+    HSA_MEMORY_ACCESS_NONE = 0,
+    HSA_MEMORY_ACCESS_RO   = 1,
+    HSA_MEMORY_ACCESS_WO   = 2,
+    HSA_MEMORY_ACCESS_RW   = 3
+} HsaMemoryMapFlags;
+
+/* Handle type for import */
+typedef enum _HsaExternalHandleType{
+    HSA_EXTERNAL_HANDLE_GEM_FLINK_NAME = 0,
+    HSA_EXTERNAL_HANDLE_KMS     = 1,
+    HSA_EXTERNAL_HANDLE_DMA_BUF = 2
+} HsaExternalHandleType;
+
+typedef struct _HsaExternalHandleDesc {
+    HsaAMDGPUDeviceHandle device_handle; // GPU device handle (used for import only)
+    HSAint32 fd; // dmabuf fd
+    HsaExternalHandleType type; // handle type
+    HSAuint32 metadata; // Used for IPC handles
+} HsaExternalHandleDesc;
+
+typedef struct _HsaHandleImportResult {
+    HsaMemoryObjectHandle buf_handle; // Thunk buffer object handle
+    HSAuint64 alloc_size; // allocation size for import
+    HSAuint32 metadata; // Used for IPC handles
+} HsaHandleImportResult;
+
+typedef struct _HsaMemoryExportResult {
+    HSAint32 fd; // dmabuf fd
+} HsaMemoryExportResult;
+
+typedef struct _HsaHandleImportFlags {
+    struct {
+        unsigned int IPCHandle      : 1; // Handle type is IPC
+        unsigned int SysMem         : 1; // Memory type is System Memory
+        unsigned int UpdateMetadata : 1; // Update metadata with IPC handle
+        unsigned int Reserved       : 29;
+    } ui32;
+} HsaHandleImportFlags;
 
 #ifdef __cplusplus
 }   //extern "C"

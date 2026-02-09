@@ -1261,6 +1261,22 @@ out:
 }
 
 HSAKMT_STATUS HSAKMTAPI
+hsaKmtGetNodeWallclockFrequency(HSAuint32 NodeId, uint64_t* Frequency) {
+  if (!Frequency)
+    return HSAKMT_STATUS_INVALID_PARAMETER;
+
+  CHECK_DXG_OPEN();
+
+  wsl::thunk::WDDMDevice *device_ = get_wddmdev(NodeId);
+  if (device_ == nullptr)
+    return HSAKMT_STATUS_INVALID_NODE_UNIT;
+
+  *Frequency = device_->GPUCounterFrequency();
+  return HSAKMT_STATUS_SUCCESS;
+}
+
+
+HSAKMT_STATUS HSAKMTAPI
 hsaKmtGetNodeMemoryProperties(HSAuint32 NodeId, HSAuint32 NumBanks,
                               HsaMemoryProperties *MemoryProperties) {
   HSAKMT_STATUS err = HSAKMT_STATUS_SUCCESS;

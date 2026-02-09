@@ -286,4 +286,23 @@ HSAKMT_STATUS import_dmabuf_fd(int DMABufFd,
                                        wsl::thunk::GpuMemoryHandle *GpuMemHandle);
 
 bool hsakmt_hsa_loader_init();
+
+int amdgpu_device_get_fd_impl(amdgpu_device_handle dev);
+
+int amdgpu_bo_cpu_map_impl(amdgpu_bo_handle bo, void **cpu);
+
+int amdgpu_bo_free_impl(amdgpu_bo_handle buf_handle);
+
+int amdgpu_bo_import_impl(amdgpu_device_handle dev,
+                               enum amdgpu_bo_handle_type type,
+                               uint32_t shared_handle,
+                               struct amdgpu_bo_import_result *output);
+
+int amdgpu_bo_va_op_impl(amdgpu_bo_handle bo,
+                              uint64_t offset,
+                              uint64_t size,
+                              uint64_t addr,
+                              uint64_t flags,
+                              uint32_t ops);
+
 #endif
