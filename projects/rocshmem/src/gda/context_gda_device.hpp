@@ -27,6 +27,7 @@
 
 #include "context.hpp"
 #include "team.hpp"
+#include "queue_pair.hpp"
 
 namespace rocshmem {
 
@@ -310,6 +311,10 @@ class GDAContext : public Context {
                                           int nelems, GDATeam *team_obj,
                                           int n_seg, int seg_size, int chunk_size);
 
+  /**
+   * @brief Get the Queue Pair index to use for a given PE
+   */
+  __device__ __forceinline__ uint32_t get_qp_index(int pe, ActiveWFInfo wf_info);
 
   //Temporary scratchpad memory used by internal barrier algorithms.
   int64_t *barrier_sync{nullptr};

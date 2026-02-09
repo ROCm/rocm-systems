@@ -30,7 +30,6 @@
 #include "backend_gda.hpp"
 #include "context_gda_device.hpp"
 #include "context_gda_tmpl_device.hpp"
-#include "queue_pair.hpp"
 
 namespace rocshmem {
 

@@ -52,6 +52,81 @@ namespace rocshmem {
 
 class GDABackend;
 
+/**
+ * @brief Scope at which WQEs are issued and completed. This is used to
+ * determine how to synchronize threads and when to poll the CQ for
+ * completions.
+ * thread: Each thread issues WQEs independently
+ * wave: Thread 0 in each wave issues WQE
+ * wg: Thread 0 of WAVE 0 issues WQE
+ */
+
+enum class ThreadScope {
+  thread,
+  wave,
+  wg
+};
+
+class ActiveWFInfo {
+ public:
+  /**
+   * @brief Mask of active threads in the wave. This is used to determine which
+   * threads are participating in posting WQEs and waiting for their completion
+   */
+  uint64_t     activemask{0};
+  uint8_t      num_active_lanes{0};
+
+  //---- is this required? -----
+  uint8_t      my_logical_lane_id{0};
+  bool         is_leader{false};
+  uint64_t     leader_phys_lane_id{0};
+  //----------------------------
+
+  ThreadScope  scope{ThreadScope::thread};
+  uint64_t     pe_group_mask{0};
+  int          pe{-1};
+
+  // Number of active lanes in the wave with the same PE
+  uint8_t      num_pe_group_lanes{0};
+  // Logical lane id within the group of threads with the same PE.
+  uint8_t      pe_group_logical_lane_id{0};
+  // True if this thread is the leader of the group of threads with the same PE.
+  bool         is_pe_group_leader{false};
+  // Physical lane id of the leader of the group of threads with the same PE.
+  uint64_t     pe_group_leader_phys_lane_id{0};
+
+  __device__ explicit ActiveWFInfo(int pe, ThreadScope scope = ThreadScope::thread)
+      : pe(pe), scope(scope) {
+    // Get active lane mask
+    activemask          = get_active_lane_mask();
+    // Get number of active lanes in the wave
+    num_active_lanes    = get_active_lane_count(activemask);
+    my_logical_lane_id  = get_active_lane_num(activemask);
+    is_leader           = (my_logical_lane_id == 0);
+    leader_phys_lane_id = get_first_active_lane_id(activemask);
+
+    // Get mask of active lanes with the same PE
+    pe_group_mask       = __match_any_sync(activemask, pe);
+    num_pe_group_lanes  = get_active_lane_count(pe_group_mask);
+    pe_group_logical_lane_id = get_active_lane_num(pe_group_mask);
+    is_pe_group_leader  = (pe_group_logical_lane_id == 0);
+    pe_group_leader_phys_lane_id = get_first_active_lane_id(pe_group_mask);
+  }
+
+  __device__ void printInfo() {
+    printf("PE: %d, Scope: %d, activemask: %lx, num_active_lanes: %d, "
+           "my_logical_lane_id: %d, is_leader: %d, leader_phys_lane_id: %lx, "
+           "pe_group_mask: %lx, num_pe_group_lanes: %d, "
+           "pe_group_logical_lane_id: %d, is_pe_group_leader: %d, "
+           "pe_group_leader_phys_lane_id: %lx\n",
+           pe, static_cast<int>(scope), activemask, num_active_lanes,
+           my_logical_lane_id, is_leader, leader_phys_lane_id,
+           pe_group_mask, num_pe_group_lanes,
+           pe_group_logical_lane_id, is_pe_group_leader,
+           pe_group_leader_phys_lane_id);
+  }
+};
+
 class QueuePair {
  public:
   friend GDABackend;
