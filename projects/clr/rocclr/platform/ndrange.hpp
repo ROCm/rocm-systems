@@ -129,12 +129,19 @@ struct LaunchParams {
   uint32_t sharedMemBytes_;  //!< Shared Memory bytes
   bool validConfig_;         //!< Flag will be set to false when config is not correct.
 
-  LaunchParams(size_t globalX, size_t globalY, size_t globalZ, uint32_t localX,
-               uint32_t localY, uint32_t localZ, uint32_t sharedMemBytes)
+  LaunchParams(size_t globalX, size_t globalY, size_t globalZ, uint32_t localX, uint32_t localY,
+               uint32_t localZ, uint32_t sharedMemBytes)
       : global_(globalX, globalY, globalZ),
         local_(localX, localY, localZ),
         sharedMemBytes_(sharedMemBytes),
-        validConfig_(true) {}
+        validConfig_(true) {
+    if (globalX == 0 || globalY == 0 || globalZ == 0) {
+      validConfig_ = false;
+    }
+    if (localX == 0 || localY == 0 || localZ == 0) {
+      validConfig_ = false;
+    }
+  }
 
   bool IsValidConfig() const { return validConfig_; }
 };
@@ -152,6 +159,12 @@ struct HIPLaunchParams : public LaunchParams {
     if (global_[0] > std::numeric_limits<uint32_t>::max() ||
         global_[1] > std::numeric_limits<uint32_t>::max() ||
         global_[2] > std::numeric_limits<uint32_t>::max()) {
+      validConfig_ = false;
+    }
+    // Definitions below must match the one in clr/hipamd/src/hip_device.cpp
+    constexpr auto int32_max = static_cast<uint64_t>(std::numeric_limits<int32_t>::max());
+    constexpr auto uint16_max = static_cast<uint64_t>(std::numeric_limits<uint16_t>::max()) + 1;
+    if (gridX > int32_max || gridY > uint16_max || gridZ > uint16_max) {
       validConfig_ = false;
     }
   }

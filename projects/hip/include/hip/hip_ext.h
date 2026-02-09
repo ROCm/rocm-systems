@@ -58,7 +58,8 @@ THE SOFTWARE.
  * the kernel launch. The event must be created before calling this API.
  * @param [in] flags  The value of hipExtAnyOrderLaunch, signifies if kernel can be
  * launched in any order.
- * @returns #hipSuccess, #hipInvalidDeviceId, #hipErrorNotInitialized, #hipErrorInvalidValue.
+ * @returns #hipSuccess, #hipInvalidDeviceId, #hipErrorNotInitialized, #hipErrorInvalidValue,
+ * #hipErrorInvalidConfiguration.
  *
  * HIP/ROCm actually updates the start event when the associated kernel completes.
  * Currently, timing between startEvent and stopEvent does not include the time it takes to perform

@@ -6693,7 +6693,8 @@ hipError_t hipLinkDestroy(hipLinkState_t state);
  * size gridDim x blockDim >= 2^32. So gridDim.x * blockDim.x, gridDim.y * blockDim.y
  * and gridDim.z * blockDim.z are always less than 2^32.
  *
- * @returns #hipSuccess, #hipErrorNotInitialized, #hipErrorInvalidValue
+ * @returns #hipSuccess, #hipErrorNotInitialized, #hipErrorInvalidValue,
+ * #hipErrorInvalidConfiguration.
  */
 hipError_t hipModuleLaunchKernel(hipFunction_t f, unsigned int gridDimX, unsigned int gridDimY,
                                  unsigned int gridDimZ, unsigned int blockDimX,

@@ -142,50 +142,50 @@ TEST_CASE("Unit_hipModuleLaunchCooperativeKernel_Negative_Parameters") {
 
   SECTION("gridDim.x == 0") {
     HIP_CHECK_ERROR(hipModuleLaunchCooperativeKernel(f, 0, 1, 1, 1, 1, 1, 0, nullptr, nullptr),
-                    hipErrorInvalidValue);
+                    hipErrorInvalidConfiguration);
   }
 
   SECTION("gridDim.y == 0") {
     HIP_CHECK_ERROR(hipModuleLaunchCooperativeKernel(f, 1, 0, 1, 1, 1, 1, 0, nullptr, nullptr),
-                    hipErrorInvalidValue);
+                    hipErrorInvalidConfiguration);
   }
 
   SECTION("gridDim.z == 0") {
     HIP_CHECK_ERROR(hipModuleLaunchCooperativeKernel(f, 1, 1, 0, 1, 1, 1, 0, nullptr, nullptr),
-                    hipErrorInvalidValue);
+                    hipErrorInvalidConfiguration);
   }
 
   SECTION("blockDim.x == 0") {
     HIP_CHECK_ERROR(hipModuleLaunchCooperativeKernel(f, 1, 1, 1, 0, 1, 1, 0, nullptr, nullptr),
-                    hipErrorInvalidValue);
+                    hipErrorInvalidConfiguration);
   }
 
   SECTION("blockDim.y == 0") {
     HIP_CHECK_ERROR(hipModuleLaunchCooperativeKernel(f, 1, 1, 1, 1, 0, 1, 0, nullptr, nullptr),
-                    hipErrorInvalidValue);
+                    hipErrorInvalidConfiguration);
   }
 
   SECTION("blockDim.z == 0") {
     HIP_CHECK_ERROR(hipModuleLaunchCooperativeKernel(f, 1, 1, 1, 1, 1, 0, 0, nullptr, nullptr),
-                    hipErrorInvalidValue);
+                    hipErrorInvalidConfiguration);
   }
 
   SECTION("blockDim.x > maxBlockDimX") {
     const unsigned int x = GetDeviceAttribute(hipDeviceAttributeMaxBlockDimX, 0) + 1u;
     HIP_CHECK_ERROR(hipModuleLaunchCooperativeKernel(f, 1, 1, 1, x, 1, 1, 0, nullptr, nullptr),
-                    hipErrorInvalidValue);
+                    hipErrorInvalidConfiguration);
   }
 
   SECTION("blockDim.y > maxBlockDimY") {
     const unsigned int y = GetDeviceAttribute(hipDeviceAttributeMaxBlockDimY, 0) + 1u;
     HIP_CHECK_ERROR(hipModuleLaunchCooperativeKernel(f, 1, 1, 1, 1, y, 1, 0, nullptr, nullptr),
-                    hipErrorInvalidValue);
+                    hipErrorInvalidConfiguration);
   }
 
   SECTION("blockDim.z > maxBlockDimZ") {
     const unsigned int z = GetDeviceAttribute(hipDeviceAttributeMaxBlockDimZ, 0) + 1u;
     HIP_CHECK_ERROR(hipModuleLaunchCooperativeKernel(f, 1, 1, 1, 1, 1, z, 0, nullptr, nullptr),
-                    hipErrorInvalidValue);
+                    hipErrorInvalidConfiguration);
   }
 
   SECTION("blockDim.x * blockDim.y * blockDim.z > maxThreadsPerBlock") {
@@ -193,7 +193,7 @@ TEST_CASE("Unit_hipModuleLaunchCooperativeKernel_Negative_Parameters") {
     const unsigned int dim = std::ceil(std::cbrt(max));
     HIP_CHECK_ERROR(
         hipModuleLaunchCooperativeKernel(f, 1, 1, 1, dim, dim, dim, 0, nullptr, nullptr),
-        hipErrorInvalidValue);
+        hipErrorInvalidConfiguration);
   }
 
 #if HT_AMD  // Disabled due to defect EXSWHTEC-351

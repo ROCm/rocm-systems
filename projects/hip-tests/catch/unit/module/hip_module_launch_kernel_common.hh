@@ -117,10 +117,9 @@ template <ExtModuleLaunchKernelSig* func> void ModuleLaunchKernelNegativeParamet
                                                            bool extLaunch = false) {
   auto mg = ModuleGuard::InitModule("launch_kernel_module.code");
   hipFunction_t f = GetKernel(mg.module(), "NOPKernel");
-  hipError_t expectedErrorLaunchParam = (extLaunch == true) ? hipErrorInvalidConfiguration
-                                                             : hipErrorInvalidValue;
+  hipError_t expectedErrorLaunchParam = hipErrorInvalidConfiguration;
   hipError_t expectedErrorOverCapacityGridDim = (extLaunch == true) ? hipSuccess
-                                                                    : hipErrorInvalidValue;
+                                                                    : hipErrorInvalidConfiguration;
 
   SECTION("f == nullptr") {
     HIP_CHECK_ERROR(
@@ -160,6 +159,7 @@ template <ExtModuleLaunchKernelSig* func> void ModuleLaunchKernelNegativeParamet
 
   SECTION("gridDimX > maxGridDimX") {
     const unsigned int x = GetDeviceAttribute(hipDeviceAttributeMaxGridDimX, 0) + 1u;
+
     HIP_CHECK_ERROR(func(f, x, 1, 1, 1, 1, 1, 0, nullptr, nullptr, nullptr, nullptr, nullptr, 0u),
                     expectedErrorOverCapacityGridDim);
   }
