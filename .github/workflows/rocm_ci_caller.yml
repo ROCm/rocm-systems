@@ -15,7 +15,8 @@ jobs:
         with:
           app-id: ${{ secrets.APP_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
+          owner: ${{ secrets.INTERNAL_ORG }}
+          repositories: ${{ secrets.INTERNAL_REPO }}
           
       - name: Trigger ROCm CI workflow
         env:
