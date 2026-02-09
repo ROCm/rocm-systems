@@ -166,10 +166,11 @@ const char *CopyWordsIsa =
 
         .if (.amdgcn.gfx_generation_number >= 12)
             FLAT_LOAD_DWORDX2_NSS  v[0:1], v[2:3] scope:SCOPE_DEV
+            s_wait_loadcnt 0
         .else
             FLAT_LOAD_DWORDX2_NSS  v[0:1], v[2:3] slc
+            s_waitcnt vmcnt(0) & lgkmcnt(0)
         .endif
-        s_waitcnt vmcnt(0) & lgkmcnt(0)
 
         .if (.amdgcn.gfx_generation_number >= 10)
             v_add_nc_u32 v4, 8, v2
@@ -180,19 +181,21 @@ const char *CopyWordsIsa =
         v_mov_b32 v5, v3
         .if (.amdgcn.gfx_generation_number >= 12)
             FLAT_LOAD_DWORDX2_NSS  v[6:7], v[4:5] scope:SCOPE_DEV
+            s_wait_loadcnt 0
         .else
             FLAT_LOAD_DWORDX2_NSS v[6:7], v[4:5] slc
+            s_waitcnt vmcnt(0) & lgkmcnt(0)
         .endif
-        s_waitcnt vmcnt(0) & lgkmcnt(0)
 
         v_mov_b32 v8, s2
         v_mov_b32 v9, s3
         .if (.amdgcn.gfx_generation_number >= 12)
             FLAT_LOAD_DWORD_NSS v10, v[8:9] scope:SCOPE_DEV
+            s_wait_loadcnt 0
         .else
             FLAT_LOAD_DWORD_NSS v10, v[8:9] slc
+            s_waitcnt vmcnt(0) & lgkmcnt(0)
         .endif
-        s_waitcnt vmcnt(0) & lgkmcnt(0)
         v_mov_b32 v8, v10
 
         v_mov_b32 v9, 0
@@ -285,7 +288,7 @@ const char *ScratchCopyDwordIsa =
 
             // cast a pointer from private address space to flat address space for gfx1250+
             // reference: gfx1250 Shader Programming Guide 4.9.2.1. Global Shared Scratch Addressing
-            .if (.amdgcn.gfx_generation_number > 12) || (.amdgcn.gfx_generation_minor >= 5)
+            .if (.amdgcn.gfx_generation_number == 12) && (.amdgcn.gfx_generation_minor >= 5)
                 v_mbcnt_lo_u32_b32 v6, -1, 0 // Calculate TID per lane
                 v_lshlrev_b32 v6, 20, v6 // shift TID into address-bits[56:52]
                 v_mov_b32 v7, 0x10000000 // gfx1250+ private base high
