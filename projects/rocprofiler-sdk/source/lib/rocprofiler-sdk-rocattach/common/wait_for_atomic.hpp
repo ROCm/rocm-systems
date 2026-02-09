@@ -24,19 +24,14 @@
 
 #include <atomic>
 #include <chrono>
-<<<<<<< HEAD
 #include <functional>
 #include <thread>
 #include <type_traits>
-=======
-#include <thread>
->>>>>>> 5c65eca0a4 (Address review comments and fix overall typing of ptrace operations)
 
 namespace rocprofiler
 {
 namespace rocattach
 {
-<<<<<<< HEAD
 // Blocks until predicate(flag) == true or timeout_ms milliseconds have elapsed.
 // Returns true if predicate(flag) was true
 // Returns false if timeout occurred
@@ -55,29 +50,12 @@ wait_for(std::atomic<Tp>& flag, size_t timeout_ms, PredicateT&& predicate)
     while(std::chrono::steady_clock::now() < end_time)
     {
         if(std::invoke(std::forward<PredicateT>(predicate), std::forward<std::atomic<Tp>&>(flag)))
-=======
-// Blocks until flag is NOT equal to condition or timeout_ms milliseconds have elapsed.
-// Returns true if the flag is not equal
-// Returns false if timeout occurred
-template <typename T>
-bool
-wait_for_ne(std::atomic<T>& flag, T condition, size_t timeout_ms)
-{
-    auto start_time       = std::chrono::steady_clock::now();
-    auto timeout_duration = std::chrono::milliseconds(timeout_ms);
-    auto end_time         = start_time + timeout_duration;
-
-    while(std::chrono::steady_clock::now() < end_time)
-    {
-        if(flag.load() != condition)
->>>>>>> 5c65eca0a4 (Address review comments and fix overall typing of ptrace operations)
         {
             return true;
         }
         std::this_thread::yield();
     }
     // Last chance check in case we were scheduled after timeout
-<<<<<<< HEAD
     return std::invoke(std::forward<PredicateT>(predicate), std::forward<std::atomic<Tp>&>(flag));
 }
 // Blocks until flag is NOT equal to value or timeout_ms milliseconds have elapsed.
@@ -91,41 +69,14 @@ wait_for_ne(std::atomic<T>& flag, T value, size_t timeout_ms)
     return wait_for(flag, timeout_ms, predicate);
 }
 // Blocks until flag is equal to value or timeout_ms milliseconds have elapsed.
-=======
-    return flag.load() != condition;
-}
-
-// Blocks until flag is equal to condition or timeout_ms milliseconds have elapsed.
->>>>>>> 5c65eca0a4 (Address review comments and fix overall typing of ptrace operations)
 // Returns true if the flag is equal
 // Returns false if timeout occurred
 template <typename T>
 bool
-<<<<<<< HEAD
 wait_for_eq(std::atomic<T>& flag, T value, size_t timeout_ms)
 {
     auto predicate = [value](std::atomic<T>& a) { return a.load() == value; };
     return wait_for(flag, timeout_ms, predicate);
 }
-=======
-wait_for_eq(std::atomic<T>& flag, T condition, size_t timeout_ms)
-{
-    auto start_time       = std::chrono::steady_clock::now();
-    auto timeout_duration = std::chrono::milliseconds(timeout_ms);
-    auto end_time         = start_time + timeout_duration;
-
-    while(std::chrono::steady_clock::now() < end_time)
-    {
-        if(flag.load() == condition)
-        {
-            return true;
-        }
-        std::this_thread::yield();
-    }
-    // Last chance check in case we were scheduled after timeout
-    return flag.load() == condition;
-}
-
->>>>>>> 5c65eca0a4 (Address review comments and fix overall typing of ptrace operations)
 }  // namespace rocattach
 }  // namespace rocprofiler
