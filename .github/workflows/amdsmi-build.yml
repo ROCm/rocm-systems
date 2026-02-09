@@ -110,10 +110,14 @@ jobs:
           
           # Detect which Python to use for wheel building
           PYTHON_CMD=python3
-          if command -v python3.11 &> /dev/null; then
-            PYTHON_CMD=python3.11
-            echo "Using Python 3.11 for wheel building"
-          else
+          for ver in 12 11 10 9 8; do
+            if command -v python3.$ver &> /dev/null; then
+              PYTHON_CMD=python3.$ver
+              echo "Using Python 3.$ver for wheel building"
+              break
+            fi
+          done
+          if [ "$PYTHON_CMD" == "python3" ]; then
             echo "Using system Python 3 for wheel building"
           fi
           
@@ -257,10 +261,13 @@ jobs:
           
           # Detect which Python to use
           PYTHON_CMD=python3
-          if command -v python3.11 &> /dev/null; then
-            PYTHON_CMD=python3.11
-            echo "Using Python 3.11 for wheel"
-          fi
+          for ver in 12 11 10 9 8; do
+            if command -v python3.$ver &> /dev/null; then
+              PYTHON_CMD=python3.$ver
+              echo "Using Python 3.$ver for wheel"
+              break
+            fi
+          done
           
           $PYTHON_CMD -m pip install --ignore-installed pip setuptools wheel
           cd $BUILD_FOLDER/py-interface/python_package
@@ -560,17 +567,17 @@ jobs:
           done
           echo "Build completed on ${{ matrix.os }}"
 
-      - name: Install Python 3.11 for Wheel Building
+      - name: Install Latest Python for Wheel Building
         if: matrix.os == 'RHEL8' || matrix.os == 'AlmaLinux8' || matrix.os == 'SLES'
         run: |
           set -e
-          echo 'Installing Python 3.11 on ${{ matrix.os }}'
+          echo 'Installing latest Python on ${{ matrix.os }}'
           case "${{ matrix.os }}" in
             RHEL8|AlmaLinux8)
-              dnf install -y python3.11 python3.11-pip || echo "Python 3.11 installation failed, will try with system python"
+              dnf install -y python3.11 python3.11-pip || dnf install -y python3.9 python3.9-pip || echo "Latest Python installation failed, will use system python"
               ;;
             SLES)
-              zypper install -y python311 python311-pip || echo "Python 3.11 installation failed, will try with system python"
+              zypper install -y python311 python311-pip || zypper install -y python39 python39-pip || echo "Latest Python installation failed, will use system python"
               ;;
           esac
 
@@ -583,10 +590,14 @@ jobs:
           
           # Detect which Python to use for wheel building
           PYTHON_CMD=python3
-          if command -v python3.11 &> /dev/null; then
-            PYTHON_CMD=python3.11
-            echo "Using Python 3.11 for wheel building"
-          else
+          for ver in 12 11 10 9 8; do
+            if command -v python3.$ver &> /dev/null; then
+              PYTHON_CMD=python3.$ver
+              echo "Using Python 3.$ver for wheel building"
+              break
+            fi
+          done
+          if [ "$PYTHON_CMD" == "python3" ]; then
             echo "Using system Python 3 for wheel building"
           fi
           
@@ -788,10 +799,13 @@ jobs:
           
           # Detect which Python to use
           PYTHON_CMD=python3
-          if command -v python3.11 &> /dev/null; then
-            PYTHON_CMD=python3.11
-            echo "Using Python 3.11 for wheel"
-          fi
+          for ver in 12 11 10 9 8; do
+            if command -v python3.$ver &> /dev/null; then
+              PYTHON_CMD=python3.$ver
+              echo "Using Python 3.$ver for wheel"
+              break
+            fi
+          done
           
           $PYTHON_CMD -m pip install --ignore-installed pip setuptools wheel
           cd $BUILD_FOLDER/py-interface/python_package
@@ -841,10 +855,13 @@ jobs:
           
           # Detect which Python to use
           PYTHON_CMD=python3
-          if command -v python3.11 &> /dev/null; then
-            PYTHON_CMD=python3.11
-            echo "Using Python 3.11 for wheel"
-          fi
+          for ver in 12 11 10 9 8; do
+            if command -v python3.$ver &> /dev/null; then
+              PYTHON_CMD=python3.$ver
+              echo "Using Python 3.$ver for wheel"
+              break
+            fi
+          done
           
           $PYTHON_CMD -m pip install --ignore-installed pip setuptools wheel
           cd $BUILD_FOLDER/py-interface/python_package
