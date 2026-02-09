@@ -1200,6 +1200,9 @@ endif()
 if(LL128_ENABLED)
   target_compile_definitions(rccl PRIVATE ENABLE_LL128)
 endif()
+if (GENERATE_SYM_KERNELS)
+  target_compile_definitions(rccl PRIVATE GENERATE_SYM_KERNELS)
+endif()
 
 ## Set RCCL compile options
 if (HAVE_PARALLEL_JOBS)
