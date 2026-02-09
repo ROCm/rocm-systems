@@ -226,6 +226,38 @@ TEST_F(EnvVarTestFixture, parse_bool_other) {
   EXPECT_EQ(var_.get_value(), false);
 }
 
+TEST_F(EnvVarTestFixture, parse_uint8_zero) {
+  this->setenv("0");
+  const envvar::var<uint8_t> var_{this->var_name_, this->var_doc_};
+  EXPECT_FALSE(var_.is_default());
+  EXPECT_EQ(var_.get_default(), 0);
+  EXPECT_EQ(var_.get_value(), 0);
+}
+
+TEST_F(EnvVarTestFixture, parse_uint8_sixteen) {
+  this->setenv("16");
+  const envvar::var<uint8_t> var_{this->var_name_, this->var_doc_};
+  EXPECT_FALSE(var_.is_default());
+  EXPECT_EQ(var_.get_default(), 0);
+  EXPECT_EQ(var_.get_value(), 16);
+}
+
+TEST_F(EnvVarTestFixture, parse_uint8_negative) {
+  this->setenv("-1");
+  const envvar::var<uint8_t> var_{this->var_name_, this->var_doc_};
+  EXPECT_TRUE(var_.is_default());
+  EXPECT_EQ(var_.get_default(), 0);
+  EXPECT_EQ(var_.get_value(), var_.get_default());
+}
+
+TEST_F(EnvVarTestFixture, parse_uint8_too_large) {
+  this->setenv("256");
+  const envvar::var<uint8_t> var_{this->var_name_, this->var_doc_};
+  EXPECT_TRUE(var_.is_default());
+  EXPECT_EQ(var_.get_default(), 0);
+  EXPECT_EQ(var_.get_value(), var_.get_default());
+}
+
 TEST_F(EnvVarTestFixture, parse_socket_family_unspec) {
   this->setenv("UNSPEC");
   const envvar::var<envvar::types::socket_family> var_{this->var_name_, this->var_doc_};
