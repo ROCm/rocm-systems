@@ -136,7 +136,12 @@ RCCL Profiling Output
 
 When RCCL profiling is enabled, rocprofiler-systems generates:
 
-* **ROCm Profiling Data (rocpd)**: When ``ROCPROFSYS_USE_ROCPD=ON`` is set, RCCL profiling data is output in a SQLite3 database format with per-GPU device attribution for multi-GPU systems. See :ref:`rocprof_sys_rocpd_output` for details on this output format. You can visualize RCCL operations in a timeline view showing communication patterns, operation durations, and concurrency using `ROCm Optiq <https://rocm.docs.amd.com/projects/roc-optiq/en/latest/what-is-optiq.html>`_.
+* **ROCm Profiling Data (rocpd)**: When ``ROCPROFSYS_USE_ROCPD=ON`` is set, RCCL profiling
+  data is output in a SQLite3 database format with per-GPU device attribution for
+  multi-GPU systems. See :ref:`rocprof_sys_rocpd_output` for details on this output
+  format. You can visualize RCCL operations in a timeline view showing communication
+  patterns, operation durations, and concurrency using `ROCm Optiq
+  <https://rocm.docs.amd.com/projects/roc-optiq/en/latest/what-is-optiq.html>`_.
 * **Perfetto traces**: Visualize RCCL operations on a timeline, showing communication patterns, operation durations, and concurrency
 * **Communication data**: Track send/receive volumes separately for each GPU in multi-GPU configurations
 
@@ -148,10 +153,9 @@ The image below shows an example of a Perfetto trace with RCCL communication dat
 In the Perfetto trace, you can observe:
 
 * RCCL collective operations on dedicated tracks
-* Communication volume and direction (per-GPU in multi-GPU systems)
+* Per-GPU communication volume, direction, and patterns in multi-GPU systems
 * Overlap between computation and communication
 * Synchronization points and barriers
-* Device-specific communication patterns across multiple GPUs
 
 .. note::
 
