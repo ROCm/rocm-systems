@@ -197,23 +197,33 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
 class TestAmdSmiPython(unittest.TestCase):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.common = common.Common(verbose)
+        return
 
-        global has_info_printed
-        if verbose and has_info_printed is False:
-            # Execute the following to print the asic and board info once
-            # per test run
-            has_info_printed = True
-            for i, _ in enumerate(self.common.processors):
+    @classmethod
+    def setUpClass(cls):
+        cls.verbose = 1
+        if '-q' in sys.argv or '--quiet' in sys.argv:
+            cls.verbose = 0
+        elif '-v' in sys.argv or '--verbose' in sys.argv:
+            cls.verbose = 2
+        cls.common = common.Common(cls.verbose)
+
+        if cls.verbose:
+            # Execute the following to print the asic and board info once per test run
+            for i, _ in enumerate(cls.common.processors):
                 msg = f'gpu={i}'
-                self.common.print(msg)
+                cls.common.print(msg)
                 msg = f'virtualization mode(gpu={i})'
-                self.common.print(msg, self.common.virt_mode[i])
+                cls.common.print(msg, cls.common.virt_mode[i])
                 msg = f'asic info(gpu={i})'
-                self.common.print(msg, self.common.asic_info[i])
+                cls.common.print(msg, cls.common.asic_info[i])
                 msg = f'board info(gpu={i})'
-                self.common.print(msg, self.common.board_info[i])
-                self.common.print('')
+                cls.common.print(msg, cls.common.board_info[i])
+                cls.common.print('')
+        return
+
+    @classmethod
+    def tearDownClass(cls):
         return
 
     def FuncWithOnlyArgs(self, **kwargs):
@@ -1710,22 +1720,26 @@ class TestAmdSmiPython(unittest.TestCase):
         return
 
 if __name__ == '__main__':
-    verbose=1
-    if '-q' in sys.argv or '--quiet' in sys.argv:
-        verbose=0
-    elif '-v' in sys.argv or '--verbose' in sys.argv:
-        verbose=2
-    has_info_printed = False
-
-    if verbose:
-        print('AMD SMI Unit Tests')
-
     # Detect if ran without sudo or root privileges
     if os.geteuid() != 0:
-        print('Warning: Some tests may require elevated privileges (sudo/root) to run completely.\n')
-        print('Please relaunch with elevated privileges.\n')
+        print('Warning: Some tests may require elevated privileges (sudo/root) to run completely.\n', file=sys.stderr)
+        print('Please relaunch with elevated privileges.\n', file=sys.stderr)
         sys.exit(1)
 
-    runner = unittest.TextTestRunner(verbosity=verbose)
+    verbose = 1
+    if '-q' in sys.argv or '--quiet' in sys.argv:
+        verbose = 0
+    elif '-v' in sys.argv or '--verbose' in sys.argv:
+        verbose = 2
+
+    # If no -k or --keyword argument is given, print all available tests
+    if not ('-k' in sys.argv or '--keyword' in sys.argv):
+        common.print_tests(__name__)
+    common.print_legend()
+
+    if verbose == 2:
+        print('AMD SMI Integration Tests')
+
+    runner = unittest.TextTestRunner(stream=sys.stderr, verbosity=verbose)
     unittest.main(testRunner=runner)
     sys.exit(0)

@@ -33,14 +33,11 @@ In integration testing, what is specifically tested:
    achieve a broader system goal
 '''
 
-import common
-import json
-import inspect
-import multiprocessing
 import os
 import sys
-import threading
 import unittest
+
+import common
 
 amdsmi_path = os.environ.get('AMDSMI_PATH', '/opt/rocm/share/amd_smi')
 if not os.path.exists(amdsmi_path):
@@ -53,52 +50,69 @@ except ImportError:
 
 
 class TestAmdSmiInit(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.verbose = 1
+        if '-q' in sys.argv or '--quiet' in sys.argv:
+            cls.verbose = 0
+        elif '-v' in sys.argv or '--verbose' in sys.argv:
+            cls.verbose = 2
+        cls.common = common.Common(verbose)
+        return
+
+    @classmethod
+    def tearDownClass(cls):
+        return
+
     def test_init_shutdown(self):
-        if verbose == 2:
-            print('', flush=True)
-            print(f'## test_init()', flush=True)
+        self.common.print(f'## test_init_shutdown()')
 
         msg = f'\t### amdsmi_init():'
         try:
             ret = amdsmi.amdsmi_init()
-            if verbose == 2:
-                print(msg, ret)
+            self.common.print(msg, ret)
         except amdsmi.AmdSmiLibraryException as e:
-            if verbose == 2:
-                print(msg)
+            self.common.print(msg, e)
             raise e
 
         msg = f'\t### amdsmi_shut_down():'
         try:
             ret = amdsmi.amdsmi_shut_down()
-            if verbose == 2:
-                print(msg, ret)
+            self.common.print(msg, ret)
         except amdsmi.AmdSmiLibraryException as e:
-            if verbose == 2:
-                print(msg)
+            self.common.print(msg, e)
             raise e
         return
 
-class TestAmdSmiPythonInterface(unittest.TestCase):
+class TestAmdSmiPython(unittest.TestCase):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.common = common.Common(verbose)
 
-        global has_info_printed
-        if verbose and has_info_printed is False:
-            # Execute the following to print the asic and board info once
-            # per test run
-            has_info_printed = True
-            for i, gpu in enumerate(self.common.processors):
+    @classmethod
+    def setUpClass(cls):
+        cls.verbose = 1
+        if '-q' in sys.argv or '--quiet' in sys.argv:
+            cls.verbose = 0
+        elif '-v' in sys.argv or '--verbose' in sys.argv:
+            cls.verbose = 2
+        cls.common = common.Common(cls.verbose)
+
+        if cls.verbose:
+            # Execute the following to print the asic and board info once per test run
+            for i, _ in enumerate(cls.common.processors):
                 msg = f'gpu={i}'
-                self.common.print(msg)
+                cls.common.print(msg)
                 msg = f'virtualization mode(gpu={i})'
-                self.common.print(msg, self.common.virt_mode[i])
+                cls.common.print(msg, cls.common.virt_mode[i])
                 msg = f'asic info(gpu={i})'
-                self.common.print(msg, self.common.asic_info[i])
+                cls.common.print(msg, cls.common.asic_info[i])
                 msg = f'board info(gpu={i})'
-                self.common.print(msg, self.common.board_info[i])
-                self.common.print('')
+                cls.common.print(msg, cls.common.board_info[i])
+                cls.common.print('')
+        return
+
+    @classmethod
+    def tearDownClass(cls):
         return
 
     def setUp(self):
@@ -1101,6 +1115,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
             raise self.raise_exception
         return
 
+    # import multiprocessing
     # Unstable on workstation cards
     # def test_walkthrough_multiprocess(self):
     #     print("\n\n========> test_walkthrough_multiprocess start <========\n")
@@ -1121,6 +1136,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
     #     p3.join()
     #     print("\n========> test_walkthrough_multiprocess end <========\n")
 
+    # import threading
     # Unstable on workstation cards
     # def test_walkthrough_multithread(self):
     #     print("\n\n========> test_walkthrough_multithread start <========\n")
@@ -1189,46 +1205,28 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
     #         # t3.join()
     #     print('\n========> test_z_gpureset_asicinfo_multithread end <========\n')
 
-def print_test_ids(suite):
-    for test in suite:
-        if isinstance(test, unittest.TestSuite):
-            print_test_ids(test)
-        else:
-            print(' -', test.id())
-
 if __name__ == '__main__':
-    verbose=1
-    if '-q' in sys.argv or '--quiet' in sys.argv:
-        verbose=0
-    elif '-v' in sys.argv or '--verbose' in sys.argv:
-        verbose=2
-    has_info_printed = False
-
-    if verbose:
-        print('AMD SMI Integration Tests')
-
-    if False:
-        # If no -k or --keyword argument is given, print all available tests
-        if not ('-k' in sys.argv or '--keyword' in sys.argv):
-            loader = unittest.TestLoader()
-            suite = loader.loadTestsFromModule(sys.modules[__name__])
-            print('==============================================================')
-            print('Available tests:')
-            print_test_ids(suite)
-
-        # Provide Legend for test results, otherwise it is not clear what the output means
-        print('==============================================================')
-        print('Legend: . = pass, s = skipped, F = fail, E = error')
-        print('==============================================================')
-        print('Running tests...\n')
-
     # Detect if ran without sudo or root privileges
     if os.geteuid() != 0:
-        print('Warning: Some tests may require elevated privileges (sudo/root) to run completely.\n')
-        print('Please relaunch with elevated privileges.\n')
+        print('Warning: Some tests may require elevated privileges (sudo/root) to run completely.\n', file=sys.stderr)
+        print('Please relaunch with elevated privileges.\n', file=sys.stderr)
         sys.exit(1)
 
-    runner = unittest.TextTestRunner(verbosity=verbose)
+    verbose = 1
+    if '-q' in sys.argv or '--quiet' in sys.argv:
+        verbose = 0
+    elif '-v' in sys.argv or '--verbose' in sys.argv:
+        verbose = 2
+
+    # If no -k or --keyword argument is given, print all available tests
+    if not ('-k' in sys.argv or '--keyword' in sys.argv):
+        common.print_tests(__name__)
+    common.print_legend()
+
+    if verbose == 2:
+        print('AMD SMI Integration Tests')
+
+    runner = unittest.TextTestRunner(stream=sys.stderr, verbosity=verbose)
     unittest.main(testRunner=runner)
     sys.exit(0)
 
