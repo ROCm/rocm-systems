@@ -40,8 +40,10 @@ import ctypes
 import os
 import sys
 import unittest
-
 import common
+
+# Module-level default: match unittest's default verbosity (1 = dots)
+verbose = 1
 
 amdsmi_path = os.environ.get('AMDSMI_PATH', '/opt/rocm/share/amd_smi')
 if not os.path.exists(amdsmi_path):
@@ -199,31 +201,40 @@ class TestAmdSmiPython(unittest.TestCase):
         super().__init__(*args, **kwargs)
         return
 
+    @property
+    def common(self):
+        return self.__class__.common
+
     @classmethod
     def setUpClass(cls):
-        cls.verbose = 1
-        if '-q' in sys.argv or '--quiet' in sys.argv:
-            cls.verbose = 0
-        elif '-v' in sys.argv or '--verbose' in sys.argv:
-            cls.verbose = 2
-        cls.common = common.Common(cls.verbose)
+        cls.common = common.Common(verbose)
 
-        if cls.verbose:
+        if cls.common.verbose > 0:
             # Execute the following to print the asic and board info once per test run
             for i, _ in enumerate(cls.common.processors):
                 msg = f'gpu={i}'
                 cls.common.print(msg)
-                msg = f'virtualization mode(gpu={i})'
-                cls.common.print(msg, cls.common.virt_mode[i])
-                msg = f'asic info(gpu={i})'
-                cls.common.print(msg, cls.common.asic_info[i])
-                msg = f'board info(gpu={i})'
-                cls.common.print(msg, cls.common.board_info[i])
+                if i < len(cls.common.virt_mode):
+                    msg = f'virtualization mode(gpu={i})'
+                    cls.common.print(msg, cls.common.virt_mode[i])
+                if i < len(cls.common.asic_info):
+                    msg = f'asic info(gpu={i})'
+                    cls.common.print(msg, cls.common.asic_info[i])
+                if i < len(cls.common.board_info):
+                    msg = f'board info(gpu={i})'
+                    cls.common.print(msg, cls.common.board_info[i])
                 cls.common.print('')
         return
 
-    @classmethod
-    def tearDownClass(cls):
+    def setUp(self):
+        # Called before each test by unittest framework
+        self.raise_exception = None
+        self.common.amdsmi_smart_init()
+        return
+
+    def tearDown(self):
+        # Called after each test by unittest framework
+        amdsmi.amdsmi_shut_down()
         return
 
     def FuncWithOnlyArgs(self, **kwargs):
@@ -448,17 +459,6 @@ class TestAmdSmiPython(unittest.TestCase):
                 self.common.print('')
         if self.raise_exception:
             raise self.raise_exception
-        return
-
-    def setUp(self):
-        # Called before each test by unittest framework
-        self.raise_exception = None
-        amdsmi.amdsmi_init()
-        return
-
-    def tearDown(self):
-        # Called after each test by unittest framework
-        amdsmi.amdsmi_shut_down()
         return
 
     def test_clean_gpu_local_data(self):
@@ -1726,20 +1726,27 @@ if __name__ == '__main__':
         print('Please relaunch with elevated privileges.\n', file=sys.stderr)
         sys.exit(1)
 
-    verbose = 1
+    # Suppress unittest progress chars (., s, F, E), only show if in quiet mode
+    runner_verbosity = 0 # default
+
+    # Parse verbosity from command line (updates the module-level default)
     if '-q' in sys.argv or '--quiet' in sys.argv:
-        verbose = 0
+        verbose=0
+        runner_verbosity = 1
     elif '-v' in sys.argv or '--verbose' in sys.argv:
-        verbose = 2
+        verbose=1
+    elif '-vv' in sys.argv:
+        verbose=2
 
     # If no -k or --keyword argument is given, print all available tests
     if not ('-k' in sys.argv or '--keyword' in sys.argv):
-        common.print_tests(__name__)
+        if verbose > 0:
+            common.print_tests(__name__)
     common.print_legend()
 
-    if verbose == 2:
-        print('AMD SMI Integration Tests')
-
-    runner = unittest.TextTestRunner(stream=sys.stderr, verbosity=verbose)
+    if verbose > 0:
+        print(f'AMD SMI Unit Tests (verbose: {verbose}, runner_verbosity: {runner_verbosity})\n')
+        print('Running tests...\n')
+    runner = unittest.TextTestRunner(stream=sys.stderr, verbosity=runner_verbosity)
     unittest.main(testRunner=runner)
     sys.exit(0)

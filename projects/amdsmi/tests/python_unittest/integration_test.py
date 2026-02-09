@@ -36,8 +36,10 @@ In integration testing, what is specifically tested:
 import os
 import sys
 import unittest
-
 import common
+
+# Module-level default: match unittest's default verbosity (1 = dots)
+verbose = 1
 
 amdsmi_path = os.environ.get('AMDSMI_PATH', '/opt/rocm/share/amd_smi')
 if not os.path.exists(amdsmi_path):
@@ -52,11 +54,6 @@ except ImportError:
 class TestAmdSmiInit(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.verbose = 1
-        if '-q' in sys.argv or '--quiet' in sys.argv:
-            cls.verbose = 0
-        elif '-v' in sys.argv or '--verbose' in sys.argv:
-            cls.verbose = 2
         cls.common = common.Common(verbose)
         return
 
@@ -69,7 +66,7 @@ class TestAmdSmiInit(unittest.TestCase):
 
         msg = f'\t### amdsmi_init():'
         try:
-            ret = amdsmi.amdsmi_init()
+            ret = self.common.amdsmi_smart_init()[0]
             self.common.print(msg, ret)
         except amdsmi.AmdSmiLibraryException as e:
             self.common.print(msg, e)
@@ -88,26 +85,28 @@ class TestAmdSmiPython(unittest.TestCase):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
+    @property
+    def common(self):
+        return self.__class__.common
+
     @classmethod
     def setUpClass(cls):
-        cls.verbose = 1
-        if '-q' in sys.argv or '--quiet' in sys.argv:
-            cls.verbose = 0
-        elif '-v' in sys.argv or '--verbose' in sys.argv:
-            cls.verbose = 2
-        cls.common = common.Common(cls.verbose)
+        cls.common = common.Common(verbose)
 
-        if cls.verbose:
+        if cls.common.verbose > 0:
             # Execute the following to print the asic and board info once per test run
             for i, _ in enumerate(cls.common.processors):
                 msg = f'gpu={i}'
                 cls.common.print(msg)
-                msg = f'virtualization mode(gpu={i})'
-                cls.common.print(msg, cls.common.virt_mode[i])
-                msg = f'asic info(gpu={i})'
-                cls.common.print(msg, cls.common.asic_info[i])
-                msg = f'board info(gpu={i})'
-                cls.common.print(msg, cls.common.board_info[i])
+                if i < len(cls.common.virt_mode):
+                    msg = f'virtualization mode(gpu={i})'
+                    cls.common.print(msg, cls.common.virt_mode[i])
+                if i < len(cls.common.asic_info):
+                    msg = f'asic info(gpu={i})'
+                    cls.common.print(msg, cls.common.asic_info[i])
+                if i < len(cls.common.board_info):
+                    msg = f'board info(gpu={i})'
+                    cls.common.print(msg, cls.common.board_info[i])
                 cls.common.print('')
         return
 
@@ -118,7 +117,7 @@ class TestAmdSmiPython(unittest.TestCase):
     def setUp(self):
         # Called before each test by unittest framework
         self.raise_exception = None
-        amdsmi.amdsmi_init()
+        self.common.amdsmi_smart_init()
         return
 
     def tearDown(self):
@@ -946,14 +945,42 @@ class TestAmdSmiPython(unittest.TestCase):
         return
 
     # integration
-    def test_power_cap(self):
+    def test_gpu_power_cap(self):
         self.common.print_func_name('')
 
         for i, gpu in enumerate(self.common.processors):
+            # Check if this card is suspended
+            # try:
+            #     enumeration_info = amdsmi.amdsmi_get_gpu_enumeration_info(gpu)
+            #     is_suspended = self.common.check_runtime_pm_status(enumeration_info['drm_render'])
+            #     self.common.print(f'gpu={i} runtime PM status: {"suspended" if is_suspended else "active"}')
+            #     if is_suspended:
+            #         self.common.print(f'gpu={i} is suspended. Attempting to wake the device.')
+            #         self.common.wake_device(enumeration_info['drm_render'])
+            #         # Check if the device is awake now
+            #         is_suspended = self.common.check_runtime_pm_status(enumeration_info['drm_render'])
+            #         if is_suspended:
+            #             self.common.print(f'gpu={i} is still suspended after wake attempt. Skipping power cap test for this gpu.')
+            #             continue
+            # except amdsmi.AmdSmiLibraryException as e:
+            #     if self.common.check_ret(f'Checking runtime pm status for gpu={i}', e, self.common.PASS):
+            #         self.raise_exception = e
+            #     continue
+
             # Get Power Cap Info
-            msg = f'\t### amdsmi_get_power_cap_info(gpu={i}):'
             try:
-                power_cap_info = amdsmi.amdsmi_get_power_cap_info(gpu)
+                msg = f'\t### amdsmi_get_supported_power_cap(gpu={i}):'
+                power_cap_types = amdsmi.amdsmi_get_supported_power_cap(gpu)
+                # TODO(amdsmi_team): we should be iterating through all supported power cap sensors,
+                #                    but for now we will just test the first one.
+                #                    See amdsmi_get_supported_power_cap for more details
+                #                    on the structure of power_cap_types
+                sensor_type = power_cap_types['sensor_types'][0]
+                self.common.print(msg, power_cap_types)
+                self.common.check_ret('', '', self.common.PASS)
+
+                msg = f'\t### amdsmi_get_power_cap_info(gpu={i}):'
+                power_cap_info = amdsmi.amdsmi_get_power_cap_info(gpu, sensor_type)
                 self.common.print(msg, power_cap_info)
                 self.common.check_ret('', '', self.common.PASS)
                 cap =  int((power_cap_info['max_power_cap'] + power_cap_info['min_power_cap']) / 2)
@@ -965,9 +992,9 @@ class TestAmdSmiPython(unittest.TestCase):
                 continue
 
             # Set to Average Power Cap
-            msg = f'\t### amdsmi_set_power_cap(gpu={i}, index=0, power_cap={cap}):'
+            msg = f'\t### amdsmi_set_power_cap(gpu={i}, sensor={sensor_type}, power_cap={cap}):'
             try:
-                ret = amdsmi.amdsmi_set_power_cap(gpu, 0, cap)
+                ret = amdsmi.amdsmi_set_power_cap(gpu, sensor_type, cap)
                 self.common.print(msg, ret)
                 self.common.check_ret('', '', self.common.PASS)
             except amdsmi.AmdSmiLibraryException as e:
@@ -975,9 +1002,9 @@ class TestAmdSmiPython(unittest.TestCase):
                     self.raise_exception = e
 
             # Restore Power Cap
-            msg = f'\t### amdsmi_set_power_cap(gpu={i}, index=0, power_cap={current_cap}):'
+            msg = f'\t### amdsmi_set_power_cap(gpu={i}, sensor={sensor_type}, power_cap={current_cap}):'
             try:
-                ret = amdsmi.amdsmi_set_power_cap(gpu, 0, current_cap)
+                ret = amdsmi.amdsmi_set_power_cap(gpu, sensor_type, current_cap)
                 self.common.print(msg, ret)
                 self.common.check_ret('', '', self.common.PASS)
             except amdsmi.AmdSmiLibraryException as e:
@@ -1212,21 +1239,28 @@ if __name__ == '__main__':
         print('Please relaunch with elevated privileges.\n', file=sys.stderr)
         sys.exit(1)
 
-    verbose = 1
+    # Suppress unittest progress chars (., s, F, E), only show if in quiet mode
+    runner_verbosity = 0 # default
+
+    # Parse verbosity from command line (updates the module-level default)
     if '-q' in sys.argv or '--quiet' in sys.argv:
-        verbose = 0
+        verbose=0
+        runner_verbosity = 1
     elif '-v' in sys.argv or '--verbose' in sys.argv:
-        verbose = 2
+        verbose=1
+    elif '-vv' in sys.argv:
+        verbose=2
 
     # If no -k or --keyword argument is given, print all available tests
     if not ('-k' in sys.argv or '--keyword' in sys.argv):
-        common.print_tests(__name__)
+        if verbose > 0:
+            common.print_tests(__name__)
     common.print_legend()
 
-    if verbose == 2:
-        print('AMD SMI Integration Tests')
-
-    runner = unittest.TextTestRunner(stream=sys.stderr, verbosity=verbose)
+    if verbose > 0:
+        print(f'AMD SMI Integration Tests (verbose: {verbose}, runner_verbosity: {runner_verbosity})\n')
+        print('Running tests...\n')
+    runner = unittest.TextTestRunner(stream=sys.stderr, verbosity=runner_verbosity)
     unittest.main(testRunner=runner)
     sys.exit(0)
 

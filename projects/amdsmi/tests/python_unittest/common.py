@@ -24,8 +24,11 @@ import json
 import os
 import sys
 import unittest
+import fcntl
+import pathlib
 
 amdsmi_path = os.environ.get('AMDSMI_PATH', '/opt/rocm/share/amd_smi')
+
 if not os.path.exists(amdsmi_path):
     raise FileNotFoundError(f'AMDSMI_PATH "{amdsmi_path}" does not exist. Please set the correct path in your environment.')
 sys.path.append(amdsmi_path)
@@ -34,6 +37,9 @@ try:
 except ImportError as e:
     raise ImportError(f'Could not import the "amdsmi" module from "{amdsmi_path}"') from e
 
+#################################################
+# Module level functions, not part of the class #
+#################################################
 
 def print_test_ids(suite):
     for test in suite:
@@ -56,7 +62,7 @@ def print_legend():
     print('==============================================================', file=sys.stderr)
     print('Legend: . = pass, s = skipped, F = fail, E = error', file=sys.stderr)
     print('==============================================================', file=sys.stderr)
-    print('Running tests...\n', file=sys.stderr)
+    print('\n', file=sys.stderr)
     return
 
 
@@ -82,8 +88,16 @@ class Common(unittest.TestCase):
             '4': 'PASSTHROUGH'
         }
 
+        self.driver_init_flags = \
+        [ ('INIT_ALL_PROCESSORS', amdsmi.AmdSmiInitFlags.INIT_ALL_PROCESSORS),
+          ('INIT_AMD_GPUS', amdsmi.AmdSmiInitFlags.INIT_AMD_GPUS),
+          ('INIT_AMD_APUS', amdsmi.AmdSmiInitFlags.INIT_AMD_APUS),
+          ('INIT_AMD_CPUS', amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS)
+        ]
+        self.driver_init_flags_map = {flag_val: flag_name for flag_name, flag_val in self.driver_init_flags}
+
         try:
-            amdsmi.amdsmi_init()
+            self.amdsmi_smart_init()
 
             # Get gpu
             self.processors = amdsmi.amdsmi_get_processor_handles()
@@ -92,9 +106,14 @@ class Common(unittest.TestCase):
             self.board_info = []
             for gpu in self.processors:
                 # Get virtualization mode info
-                ret = amdsmi.amdsmi_get_gpu_virtualization_mode(gpu)
-                mode_name = self.virtualization_mode_map[str(int(ret['mode']))]
-                self.virt_mode.append({'mode': mode_name})
+                try:
+                    ret = amdsmi.amdsmi_get_gpu_virtualization_mode(gpu)
+                    mode_name = self.virtualization_mode_map[str(int(ret['mode']))]
+                    self.virt_mode.append({'mode': mode_name})
+                except amdsmi.AmdSmiLibraryException as e:
+                    if self.verbose > 0:
+                        print(f'In class Common, Cannot get virtualization mode information for gpu {gpu}, {e}')
+                    self.virt_mode.append({'mode': 'UNKNOWN'})
 
                 # Get asic info
                 self.asic_info.append(amdsmi.amdsmi_get_gpu_asic_info(gpu))
@@ -103,7 +122,8 @@ class Common(unittest.TestCase):
 
             amdsmi.amdsmi_shut_down()
         except amdsmi.AmdSmiLibraryException as e:
-            print(f'In class Common, Cannot get processor information, {e}')
+            if self.verbose > 0:
+                print(f'In class Common, Cannot get processor information, {e}')
 
         self.not_supported_error_codes = \
         [
@@ -445,8 +465,12 @@ class Common(unittest.TestCase):
             ('UNKNOWN', amdsmi.AmdSmiDevPerfLevel.UNKNOWN, self.FAIL)
         ]
 
+    #########################
+    # Class level functions #
+    #########################
+
     def print(self, msg, data=None):
-        if self.verbose == 2:
+        if self.verbose > 0:
             if data is None:
                 print(msg, flush=True)
             elif any(data in value for value in self.not_supported_error_codes):
@@ -541,9 +565,148 @@ class Common(unittest.TestCase):
         else:
             status_msg = f'\tTest FAILED with expected result {expected_code_name} but received {error_code_name}'
             status_ret = True
-        if self.verbose == 2 and printIt:
+        if self.verbose > 0 and printIt:
             if msg:
                 print(f'{msg}\n', end='')
             print(f'{status_msg}', flush=True)
         return status_ret
+
+    # Keeping just incase this will be needed for future tests
+    # Have an example in integration power_cap test (commented out atm)
+    def check_runtime_pm_status(self, render_minor: int) -> bool:
+        """Check if device is in runtime suspend state."""
+        try:
+            # Read runtime_enabled
+            device_path = f"/sys/class/drm/renderD{render_minor}/device"
+            enabled_path = os.path.join(device_path, "power/runtime_enabled")
+            with open(enabled_path, 'r') as f:
+                enabled = f.read().strip()
+
+            if "disabled" in enabled or "forbidden" in enabled:
+                return False
+
+            # Read runtime_status
+            status_path = os.path.join(device_path, "power/runtime_status")
+            with open(status_path, 'r') as f:
+                status = f.read().strip()
+
+            return "suspended" in status
+        except (IOError, OSError):
+            return False
+
+    # Keeping just incase this will be needed for future tests
+    # Have an example in integration power_cap test (commented out atm)
+    def wake_device(self, render_minor: int) -> bool:
+        """Wake device from runtime suspend using DRM ioctl."""
+        render_path = f"/dev/dri/renderD{render_minor}"
+
+        try:
+            fd = os.open(render_path, os.O_RDWR | os.O_CLOEXEC)
+            try:
+                # DRM_IOCTL_AMDGPU_INFO = 0xc0206405 (from libdrm headers)
+                # Just issuing any ioctl wakes the device
+                DRM_IOCTL_AMDGPU_INFO = 0xc0206405
+                request = bytes(32)  # Empty drm_amdgpu_info struct
+                fcntl.ioctl(fd, DRM_IOCTL_AMDGPU_INFO, request)
+            finally:
+                os.close(fd)
+            return True
+        except (IOError, OSError) as e:
+            print(f"Failed to wake device: {e}")
+            return False
+
+    # Keeping just incase this will be needed for future tests
+    def get_gpu_id_from_device_handle(self, input_device_handle):
+        """Get the gpu index from the device_handle.
+        amdsmi_get_processor_handles() returns the list of device_handles in order of gpu_index
+        """
+        device_handles = amdsmi.amdsmi_get_processor_handles()
+        for gpu_index, device_handle in enumerate(device_handles):
+            if input_device_handle.value == device_handle.value:
+                return gpu_index
+
+    def check_amdgpu_driver(self):
+        """ Returns true if amdgpu is found in the list of initialized modules """
+        amd_gpu_status_file = pathlib.Path("/sys/module/amdgpu/initstate")
+        if amd_gpu_status_file.exists():
+            try: 
+                return amd_gpu_status_file.read_text(encoding="ascii").strip() == "live"
+            except OSError:
+                pass
+
+        # If the driver is loaded either as a module OR built in, this dir will be populated
+        drv = pathlib.Path("/sys/bus/pci/drivers/amdgpu")
+        if not drv.exists():
+            return False
+
+        # Check if a symlink exists that loosely matches PCI BDF format
+        # ex: 0000:03:00.0
+        for p in drv.iterdir():
+            if p.is_symlink() and ":" in p.name and "." in p.name:
+                return True
+        return False
+
+    def check_amd_hsmp_driver(self):
+        """ Returns true if amd_hsmp or hsmp_acpi is found in the list of initialized modules """
+        amd_cpu_status_file = pathlib.Path("/dev/hsmp")
+        if amd_cpu_status_file.exists():
+                return True
+        return False
+
+    def amdsmi_smart_init(self):
+        """ Initializes AMDSMI Library based on live drivers found in the system.
+
+        Checks for the presence of the amdgpu, amd_hsmp or hsmp_acpi drivers and initializes the
+        AMD SMI library based on the live drivers found.
+
+        Return:
+            tuple: A tuple containing:
+                - ret: The return value from amdsmi_init() (typically None on success)
+                - init_flag: The flag used to initialize the AMD SMI library without error
+                    (one of: INIT_AMD_APUS, INIT_AMD_GPUS, or INIT_AMD_CPUS)
+
+        Raises:
+            AmdSmiLibraryException: If initialization fails for reasons other than driver not loaded
+            AmdSmiParameterException: If invalid parameters are passed to amdsmi_init
+            SystemExit: If no compatible AMD drivers are detected on the system
+        """
+        ret = None
+        init_flag = amdsmi.AmdSmiInitFlags.INIT_ALL_PROCESSORS
+        if self.check_amdgpu_driver() and self.check_amd_hsmp_driver():
+            init_flag = amdsmi.AmdSmiInitFlags.INIT_AMD_APUS
+            try:
+                ret = amdsmi.amdsmi_init(init_flag)
+            except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
+                if e.err_code in (amdsmi.amdsmi_wrapper.AMDSMI_STATUS_NOT_INIT,
+                                  amdsmi.amdsmi_wrapper.AMDSMI_STATUS_DRIVER_NOT_LOADED):
+                    self.print(f"Drivers not loaded (amdgpu, amd_hsmp or hsmp_acpi drivers not found in modules)")
+                    sys.exit(-1)
+                else:
+                    raise e
+        elif self.check_amdgpu_driver():
+            init_flag = amdsmi.AmdSmiInitFlags.INIT_AMD_GPUS
+            try:
+                ret = amdsmi.amdsmi_init(init_flag)
+            except (amdsmi.amdsmi_interface.AmdSmiLibraryException, amdsmi.amdsmi_interface.AmdSmiParameterException) as e:
+                if e.err_code in (amdsmi.amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_INIT,
+                                    amdsmi.amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_DRIVER_NOT_LOADED):
+                    self.print(f"Driver not loaded (amdgpu not found in modules)")
+                    sys.exit(-1)
+                else:
+                    raise e
+        elif self.check_amd_hsmp_driver():
+            init_flag = amdsmi.amdsmi_interface.AmdSmiInitFlags.INIT_AMD_CPUS
+            try:
+                ret = amdsmi.amdsmi_init(init_flag)
+            except (amdsmi.amdsmi_interface.AmdSmiLibraryException, amdsmi.amdsmi_interface.AmdSmiParameterException) as e:
+                if e.err_code in (amdsmi.amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_INIT,
+                                  amdsmi.amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_DRIVER_NOT_LOADED):
+                    self.print(f"Driver not loaded (amd_hsmp or hsmp_acpi not found in modules)")
+                    sys.exit(-1)
+                else:
+                    raise e
+
+        flag_name = self.driver_init_flags_map.get(init_flag, 'UNKNOWN')
+        self.print(f"AMDSMI initialized with atleast one driver successfully | init flag: {flag_name} ({init_flag})")
+        return ret, init_flag
 
