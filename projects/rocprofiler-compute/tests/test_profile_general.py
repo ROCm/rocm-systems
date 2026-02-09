@@ -3421,6 +3421,13 @@ def test_multi_rank_profiling_mpi_comm(
 
     The fixture launches the profiling command with mpirun.
     """
+    # Skip test if mpi_aware_laplace_eqn is not available
+    app_path = config.get("app_mpi_aware_laplace_eqn", [None])[0]
+    if not (app_path and Path(app_path).exists()):
+        pytest.skip(
+            f"mpi_aware_laplace_eqn not found, skipping {inspect.stack()[0][3]}"
+        )
+
     num_ranks = 2
 
     workload_dir = test_utils.get_output_dir()

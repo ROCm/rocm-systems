@@ -24,6 +24,7 @@
 ##############################################################################
 
 import os
+import shutil
 import subprocess
 import sys
 from importlib.machinery import SourceFileLoader
@@ -103,6 +104,10 @@ def binary_handler_profile_rocprof_compute(request):
         num_ranks=1,
         capture_output=False,
     ):
+        # Skip test if multiple ranks are requested but mpirun is not available
+        if num_ranks > 1 and shutil.which("mpirun") is None:
+            pytest.skip(f"mpirun not found, skipping {request.node.name}")
+
         if request.config.getoption("--rocprofiler-sdk-tool-path"):
             options.extend(
                 [
