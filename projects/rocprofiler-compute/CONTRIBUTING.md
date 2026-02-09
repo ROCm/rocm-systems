@@ -36,6 +36,84 @@ and apply your changes there. For more help reference GitHub's ['About Forking']
 > [!TIP]
 > To ensure you meet all formatting requirements before publishing, we recommend you utilize our included [*pre-commit hooks*](https://pre-commit.com/#introduction). For more information on how to use pre-commit hooks please see the [section below](#using-pre-commit-hooks).
 
+
+### Adding Experimental Features
+
+This project uses a centralized registry for experimental features in `src/argparser.py`. The experimental flag system allows users to opt-in to unstable or preview features that are under development.
+
+#### How It Works
+
+The `--experimental` flag acts as a master toggle that:
+- Shows help text for experimental features when enabled
+- Controls visibility of experimental options in the argument parser
+- Allows gradual rollout of new features without affecting stable functionality
+
+#### Adding a New Experimental Feature
+
+To add a new experimental feature, follow these 2 steps:
+
+**1. Register the feature in `EXPERIMENTAL_FEATURES`**
+
+Add an entry to the `EXPERIMENTAL_FEATURES` list in `src/argparser.py`:
+
+```python
+EXPERIMENTAL_FEATURES = [
+    # --spatial-multiplexing
+    {"label": "Spatial multiplexing", "flags": ["--spatial-multiplexing"]},
+    # Your new feature
+    {"label": "Your feature description", "flags": ["--your-flag"]},
+]
+```
+
+**2. Add the option to the appropriate parser mode**
+
+Add your argument to the relevant parser (profile, analyze, etc.) with conditional help text:
+
+```python
+profile_group.add_argument(
+    "--your-flag",
+    type=str,
+    dest="your_flag",
+    required=False,
+    default=None,
+    help=experimental_help(experimental_enabled,
+            "Description to your feature",
+        ),
+)
+```
+
+The `experimental_enabled` parameter is automatically passed to the parser functions and controls whether the help text is shown or suppressed.
+
+#### Example: Spatial Multiplexing Feature
+
+See `src/argparser.py` for the spatial multiplexing implementation:
+- Registered in `EXPERIMENTAL_FEATURES`
+- Added to profile mode with conditional help
+- Added to analyze mode with conditional help
+
+#### Promoting Features to Stable
+
+When a feature is ready to graduate from experimental to stable:
+
+1. Remove the entry from the `EXPERIMENTAL_FEATURES` list
+2. Update the help text to remove function call `experimental_help()`
+3. Update any relevant documentation
+
+#### Testing Experimental Features
+
+Users can enable experimental features by passing the `--experimental` flag:
+
+```bash
+# View available experimental features
+rocprof-compute profile --experimental --help
+
+# Use an experimental feature
+rocprof-compute profile --experimental --spatial-multiplexing 0 1 -- ./app
+```
+
+Without `--experimental`, experimental features remain hidden and unavailable.
+
+
 ## Using pre-commit hooks
 
 Our project supports optional [*pre-commit hooks*](https://pre-commit.com/#introduction) which developers can leverage to verify formatting before publishing their code. Once enabled, any commits you propose to the repository will be automatically checked for formatting. Initial setup is as follows:

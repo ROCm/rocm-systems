@@ -31,17 +31,16 @@ from typing import Optional
 from utils.utils import METRIC_ID_RE
 
 # Experimental Feature Registry
-#
-# Adding a new experimental feature ONLY requires:
-#   1) Adding a new entry here
-#   2) Adding the option to the appropriate mode
-#
-# Promotion to stable = remove entry from this list + update option help.
-
 EXPERIMENTAL_FEATURES = [
     # --spatial-multiplexing
     {"label": "Spatial multiplexing", "flags": ["--spatial-multiplexing"]},
 ]
+
+
+def experimental_help(experimental_enabled: bool, description: str) -> str:
+    if experimental_enabled:
+        return f"EXPERIMENTAL: {description}"
+    return argparse.SUPPRESS
 
 
 def validate_block(value: str) -> str:
@@ -594,10 +593,8 @@ Examples:
         dest="spatial_multiplexing",
         required=False,
         default=None,
-        help=(
-            "\t\t\tEXPERIMENTAL: Provide Node ID and GPU number per node."
-            if experimental_enabled
-            else argparse.SUPPRESS
+        help=experimental_help(
+            experimental_enabled, "Provide Node ID and GPU number per node."
         ),
     )
 
@@ -901,9 +898,5 @@ Examples:
         required=False,
         default=False,
         action="store_true",
-        help=(
-            "\t\tEXPERIMENTAL: Mode of spatial multiplexing."
-            if experimental_enabled
-            else argparse.SUPPRESS
-        ),
+        help=experimental_help(experimental_enabled, "Mode of spatial multiplexing."),
     )
