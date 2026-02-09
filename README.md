@@ -51,7 +51,7 @@ Run the following commands in your WSL console:
 1. Clone librocdxg repository to your local WSL.
 
 ```bash
-git clone git@github.com:ROCm/librocdxg.git
+git clone https://github.com/ROCm/librocdxg.git
 cd librocdxg
 ```
 
@@ -122,7 +122,30 @@ Agent 2
 
 ```
 
-See [Installing the all open use case](https://amdgpu-install.readthedocs.io/en/latest/install-installing.html#installing-the-all-open-use-case) for additional troubleshooting tips.
+### 6. Container Launch – WSL-Specific Flags
+
+When you launch the container, add these WSL-specific arguments (they do not replace the native-Linux GPU flags):
+
+| Flag | Purpose |
+| ---- | ------- |
+| `--device /dev/dxg` | Pass the `/dev/dxg` device node into the container so applications inside the container can access the GPU. |
+| `-v /usr/lib/wsl/lib/libdxcore.so:/usr/lib/libdxcore.so`<br>`-v /opt/rocm/lib/librocdxg.so:/usr/lib/librocdxg.so` | Make the AMD ROCDXG and Microsoft DXCore libraries available inside the container so that ROCm/HIP applications can route their GPU compute calls through ROCDXG and DXCore to communicate with the GPU. |
+| `-e HSA_ENABLE_DXG_DETECTION=1` | Tells the HSA runtime to detect GPU exposed via the DXG device (`/dev/dxg`) and to load the ROCDXG library. |
+
+Example docker run command:
+
+```bash
+docker run -it  \
+    -v /usr/lib/wsl/lib/libdxcore.so:/usr/lib/libdxcore.so \
+    -v /opt/rocm/lib/librocdxg.so:/usr/lib/librocdxg.so \
+    -e HSA_ENABLE_DXG_DETECTION=1 \
+    --device=/dev/dxg \
+    --cap-add=SYS_PTRACE \
+    --security-opt seccomp=unconfined \
+    --ipc=host \
+    --shm-size 8G \
+    rocm/pytorch:latest
+```
 
 ## WSL Compatiblity Matrix
 - Windows 11
@@ -134,7 +157,8 @@ See [Installing the all open use case](https://amdgpu-install.readthedocs.io/en/
 | 1.1.0                  | 7.2              | AMD Windows x86 drivers can be directly downloaded from [AMD Driver](https://www.amd.com/en/support/download/drivers.html) | ***Radeon***<br><br>AMD Radeon RX 9070<br>AMD Radeon RX 9070 XT<br>AMD Radeon RX 9070 GRE<br>AMD Radeon AI PRO R9700<br>AMD Radeon RX 9060<br>AMD Radeon RX 9060 XT<br>AMD Radeon RX 7900 XTX<br>AMD Radeon RX 7900 XT<br>AMD Radeon RX 7900 GRE<br>AMD Radeon PRO W7900<br>AMD Radeon PRO W7900 Dual Slot<br>AMD Radeon PRO W7800<br>AMD Radeon PRO W7800 48GB<br>AMD Radeon RX 7800 XT<br>AMD Radeon PRO W7700<br><br>***Ryzen***<br><br>AMD Ryzen AI Max+ 395<br>AMD Ryzen AI Max 390<br>AMD Ryzen AI Max 385<br>AMD Ryzen AI 9 HX 375<br>AMD Ryzen AI 9 HX 370<br>AMD Ryzen AI 9 365 |
 
 ## Documentation
-For detailed documentation including installation guides, configuration options, and metric descriptions, please refer to [Use ROCm on Radeon and Ryzen](https://rocm.docs.amd.com/projects/radeon-ryzen/en/latest/index.html#)
+
+For detailed documentation—including ROCm installation guides, configuration options, and metric descriptions—see "[Use ROCm on Radeon and Ryzen](https://rocm.docs.amd.com/projects/radeon-ryzen/en/latest/index.html#)".
 
 ## Contributing
 See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on setting up your WSL environment, building, and submitting pull requests.
