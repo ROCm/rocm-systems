@@ -13,6 +13,7 @@ include(GoogleTest)
 
 set(rocprofiler_lib_sources
     agent.cpp
+    async_wait_manager.cpp
     buffer.cpp
     contexts.cpp
     enum_string.cpp

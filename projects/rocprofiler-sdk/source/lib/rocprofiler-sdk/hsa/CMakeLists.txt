@@ -4,6 +4,7 @@ set(ROCPROFILER_LIB_HSA_SOURCES
     agent_cache.cpp
     aql_packet.cpp
     async_copy.cpp
+    async_wait_manager.cpp
     hsa_barrier.cpp
     hsa.cpp
     memory_allocation.cpp
@@ -17,6 +18,7 @@ set(ROCPROFILER_LIB_HSA_HEADERS
     agent_cache.hpp
     aql_packet.hpp
     async_copy.hpp
+    async_wait_manager.hpp
     memory_allocation.hpp
     defines.hpp
     hsa_barrier.hpp

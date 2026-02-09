@@ -29,6 +29,7 @@
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
+#include "lib/rocprofiler-sdk/hsa/async_wait_manager.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/tracing/fwd.hpp"
@@ -282,11 +283,11 @@ active_signals::sync()
 
     if(m_count.load() > 0)
     {
-        auto _cnt_beg      = m_count.load();
-        auto _signal_value = get_core_table()->hsa_signal_wait_scacquire_fn(
-            m_signal, HSA_SIGNAL_CONDITION_LT, 1, timeout, HSA_WAIT_STATE_ACTIVE);
+        auto _cnt_beg = m_count.load();
+        auto result   = wait_or_shutdown(
+            m_signal, HSA_SIGNAL_CONDITION_LT, 1, "async_copy::active_signals::sync()", timeout);
         auto _cnt_end = m_count.load();
-        if(_signal_value != 0)
+        if(result != wait_result::completed)
         {
             ROCP_CI_LOG_IF(WARNING, _cnt_end > 0)
                 << "rocprofiler-sdk timed out after " << timeout_sec.count()

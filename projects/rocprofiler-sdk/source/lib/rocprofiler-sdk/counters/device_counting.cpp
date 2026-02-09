@@ -29,6 +29,7 @@
 #include "lib/rocprofiler-sdk/counters/core.hpp"
 #include "lib/rocprofiler-sdk/counters/id_decode.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
+#include "lib/rocprofiler-sdk/hsa/async_wait_manager.hpp"
 #include "lib/rocprofiler-sdk/hsa/details/fmt.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
@@ -264,11 +265,12 @@ init_callback_data(rocprofiler::counters::agent_callback_data& callback_data,
             submitPacket(callback_data.queue, (void*) &pkt);
             constexpr auto timeout_hint =
                 std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::seconds{1});
-            if(hsa::get_core_table()->hsa_signal_wait_relaxed_fn(callback_data.completion,
-                                                                 HSA_SIGNAL_CONDITION_EQ,
-                                                                 0,
-                                                                 timeout_hint.count(),
-                                                                 HSA_WAIT_STATE_ACTIVE) != 0)
+            auto result = hsa::wait_or_shutdown(callback_data.completion,
+                                                HSA_SIGNAL_CONDITION_EQ,
+                                                0,
+                                                "device_counting::init_callback_data()",
+                                                timeout_hint.count());
+            if(result != hsa::wait_result::completed)
             {
                 ROCP_FATAL << "Could not set agent to be profiled";
             }
@@ -320,11 +322,10 @@ read_agent_ctx(const context::context*                    ctx,
             if((flags & ROCPROFILER_COUNTER_FLAG_ASYNC) == 0)
             {
                 // Wait for any inprogress samples to complete before returning
-                hsa::get_core_table()->hsa_signal_wait_relaxed_fn(callback_data.completion,
-                                                                  HSA_SIGNAL_CONDITION_EQ,
-                                                                  1,
-                                                                  UINT64_MAX,
-                                                                  HSA_WAIT_STATE_ACTIVE);
+                hsa::wait_or_shutdown(callback_data.completion,
+                                      HSA_SIGNAL_CONDITION_EQ,
+                                      1,
+                                      "device_counting::read_agent_ctx()");
             }
         };
 
@@ -510,11 +511,10 @@ start_agent_ctx(const context::context* ctx)
         submitPacket(agent->profile_queue(), &callback_data.packet->packets.start_packet);
 
         // Wait for startup to finish before continuing
-        hsa::get_core_table()->hsa_signal_wait_relaxed_fn(callback_data.start_signal,
-                                                          HSA_SIGNAL_CONDITION_EQ,
-                                                          0,
-                                                          UINT64_MAX,
-                                                          HSA_WAIT_STATE_ACTIVE);
+        hsa::wait_or_shutdown(callback_data.start_signal,
+                              HSA_SIGNAL_CONDITION_EQ,
+                              0,
+                              "device_counting::start_agent_ctx()");
     }
 
     agent_ctx.status.exchange(rocprofiler::context::device_counting_service::state::ENABLED);
@@ -566,11 +566,10 @@ stop_agent_ctx(const context::context* ctx)
         }
 
         // Wait for the stop packet to complete
-        hsa::get_core_table()->hsa_signal_wait_relaxed_fn(callback_data.completion,
-                                                          HSA_SIGNAL_CONDITION_EQ,
-                                                          1,
-                                                          UINT64_MAX,
-                                                          HSA_WAIT_STATE_ACTIVE);
+        hsa::wait_or_shutdown(callback_data.completion,
+                              HSA_SIGNAL_CONDITION_EQ,
+                              1,
+                              "device_counting::stop_agent_ctx()");
     }
 
     agent_ctx.status.exchange(rocprofiler::context::device_counting_service::state::DISABLED);

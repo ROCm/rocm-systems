@@ -25,6 +25,7 @@
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
+#include "lib/rocprofiler-sdk/hsa/async_wait_manager.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
@@ -114,9 +115,7 @@ public:
 
     void WaitOn() const
     {
-        auto wait_fn = hsa::get_core_table()->hsa_signal_wait_scacquire_fn;
-        while(wait_fn(signal, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED) != 0)
-        {}
+        hsa::wait_or_shutdown(signal, HSA_SIGNAL_CONDITION_EQ, 0, "thread_trace::Signal::WaitOn()");
     }
 
     hsa_signal_t      signal;

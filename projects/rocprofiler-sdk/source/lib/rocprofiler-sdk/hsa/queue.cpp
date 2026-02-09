@@ -25,6 +25,7 @@
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/code_object/code_object.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
+#include "lib/rocprofiler-sdk/hsa/async_wait_manager.hpp"
 #include "lib/rocprofiler-sdk/hsa/details/fmt.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
@@ -620,11 +621,14 @@ Queue::Queue(
                 counters::submitPacket(_intercept_queue, &pkt);
                 constexpr auto timeout_hint =
                     std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::seconds{1});
-                if(core_api.hsa_signal_wait_relaxed_fn(completion,
-                                                       HSA_SIGNAL_CONDITION_EQ,
-                                                       0,
-                                                       timeout_hint.count(),
-                                                       HSA_WAIT_STATE_ACTIVE) != 0)
+                auto result = wait_or_shutdown(completion,
+                                               HSA_SIGNAL_CONDITION_EQ,
+                                               0,
+                                               "Queue::profiler_activation()",
+                                               timeout_hint.count(),
+                                               100000000ULL,
+                                               &core_api);
+                if(result != wait_result::completed)
                 {
                     ROCP_FATAL << "Could not set agent to be profiled";
                 }
@@ -676,8 +680,13 @@ Queue::sync() const
 {
     if(_active_kernels.handle != 0u)
     {
-        _core_api.hsa_signal_wait_relaxed_fn(
-            _active_kernels, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_ACTIVE);
+        wait_or_shutdown(_active_kernels,
+                         HSA_SIGNAL_CONDITION_EQ,
+                         0,
+                         "Queue::sync()",
+                         UINT64_MAX,
+                         100000000ULL,
+                         &_core_api);
     }
 }
 
