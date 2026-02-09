@@ -2883,13 +2883,13 @@ if __name__ == "__main__":
         )
         # Check marker_api_trace.csv
         expected_marker_columns = {
-            'Domain',
-            'Function',
-            'Process_Id',
-            'Thread_Id',
-            'Correlation_Id',
-            'Start_Timestamp',
-            'End_Timestamp'
+            "Domain",
+            "Function",
+            "Process_Id",
+            "Thread_Id",
+            "Correlation_Id",
+            "Start_Timestamp",
+            "End_Timestamp",
         }
         with open(marker_file, newline="") as f:
             reader = csv.DictReader(f)
@@ -2909,19 +2909,19 @@ if __name__ == "__main__":
             assert found_row, f"{marker_file} is empty"
         # Check counter_collection.csv
         expected_counter_columns = {
-            'Correlation_Id',
-            'Dispatch_Id',
-            'Agent_Id',
-            'Queue_Id',
-            'Process_Id',
-            'Thread_Id',
-            'Grid_Size',
-            'Kernel_Id',
-            'Kernel_Name',
-            'Counter_Name',
-            'Counter_Value',
-            'Start_Timestamp',
-            'End_Timestamp'
+            "Correlation_Id",
+            "Dispatch_Id",
+            "Agent_Id",
+            "Queue_Id",
+            "Process_Id",
+            "Thread_Id",
+            "Grid_Size",
+            "Kernel_Id",
+            "Kernel_Name",
+            "Counter_Name",
+            "Counter_Value",
+            "Start_Timestamp",
+            "End_Timestamp",
         }
         with open(corresponding_counter_file, newline="") as f:
             reader = csv.DictReader(f)

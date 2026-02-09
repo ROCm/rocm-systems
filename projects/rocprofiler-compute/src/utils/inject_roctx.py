@@ -158,7 +158,7 @@ try:
         context_stack = get_context_stack()
         op_name = str(args[0]) if args else "vision_op"
         marker_stack.append(f"torchvision::{op_name}")
-        
+
         current_frame = inspect.currentframe()
         caller_frame = current_frame.f_back if current_frame is not None else None
         if caller_frame is not None:
@@ -166,12 +166,12 @@ try:
             location = f"{Path(filename).name}:{caller_frame.f_lineno}"
         else:
             location = "unknown:0"
-        
+
         if not hasattr(tv_dispatch_call_with_roctx, "_call_count"):
             tv_dispatch_call_with_roctx._call_count = 0
         tv_dispatch_call_with_roctx._call_count += 1
         context_stack.append(f"#{tv_dispatch_call_with_roctx._call_count}@{location}")
-        
+
         full_marker_name = "/".join(marker_stack) + ":" + "/".join(context_stack)
         rangePush(full_marker_name)
         try:
@@ -194,7 +194,7 @@ try:
         marker_stack = get_marker_stack()
         context_stack = get_context_stack()
         marker_stack.append("torch.distributed.all_reduce")
-        
+
         current_frame = inspect.currentframe()
         caller_frame = current_frame.f_back if current_frame is not None else None
         if caller_frame is not None:
@@ -202,12 +202,12 @@ try:
             location = f"{Path(filename).name}:{caller_frame.f_lineno}"
         else:
             location = "unknown:0"
-        
+
         if not hasattr(all_reduce_with_roctx, "_call_count"):
             all_reduce_with_roctx._call_count = 0
         all_reduce_with_roctx._call_count += 1
         context_stack.append(f"#{all_reduce_with_roctx._call_count}@{location}")
-        
+
         full_marker_name = "/".join(marker_stack) + ":" + "/".join(context_stack)
         rangePush(full_marker_name)
         try:
@@ -230,7 +230,7 @@ try:
         marker_stack = get_marker_stack()
         context_stack = get_context_stack()
         marker_stack.append("torch.cuda.set_device")
-        
+
         current_frame = inspect.currentframe()
         caller_frame = current_frame.f_back if current_frame is not None else None
         if caller_frame is not None:
@@ -238,12 +238,12 @@ try:
             location = f"{Path(filename).name}:{caller_frame.f_lineno}"
         else:
             location = "unknown:0"
-        
+
         if not hasattr(set_device_with_roctx, "_call_count"):
             set_device_with_roctx._call_count = 0
         set_device_with_roctx._call_count += 1
         context_stack.append(f"#{set_device_with_roctx._call_count}@{location}")
-        
+
         full_marker_name = "/".join(marker_stack) + ":" + "/".join(context_stack)
         rangePush(full_marker_name)
         try:
@@ -420,7 +420,7 @@ def inject_roctx_into_optimizer():
         marker_stack = get_marker_stack()
         context_stack = get_context_stack()
         marker_stack.append(f"optimizer.{self.__class__.__name__}.step")
-        
+
         current_frame = inspect.currentframe()
         caller_frame = current_frame.f_back if current_frame is not None else None
         if caller_frame is not None:
@@ -428,12 +428,12 @@ def inject_roctx_into_optimizer():
             location = f"{Path(filename).name}:{caller_frame.f_lineno}"
         else:
             location = "unknown:0"
-        
+
         if not hasattr(self, "_roctx_step_call_count"):
             self._roctx_step_call_count = 0
         self._roctx_step_call_count += 1
         context_stack.append(f"#{self._roctx_step_call_count}@{location}")
-        
+
         full_marker_name = "/".join(marker_stack) + ":" + "/".join(context_stack)
         rangePush(full_marker_name)
         try:
