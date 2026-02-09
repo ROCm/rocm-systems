@@ -187,9 +187,9 @@ data_processor::insert_pmc_event(size_t event_id, size_t agent_id, const char* p
     auto it = _pmc_descriptor_map.find({ agent_id, pmc_name });
     if(it == _pmc_descriptor_map.end())
     {
-        LOG_ERROR("Insert PMC event failed! Error: non-existing PMC description "
-                  "agent id: {}, pmc name: {}",
-                  agent_id, pmc_name);
+        LOG_WARNING("Insert PMC event failed! Error: non-existing PMC description "
+                    "agent id: {}, pmc name: {} !",
+                    agent_id, pmc_name);
         return;
     }
 

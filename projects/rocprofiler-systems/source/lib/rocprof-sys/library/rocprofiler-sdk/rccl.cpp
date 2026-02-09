@@ -234,9 +234,8 @@ rccl_type_size_or_abort(ncclDataType_t datatype) noexcept
     auto size = rccl_type_size(datatype);
     if(size == 0)
     {
-        LOG_CRITICAL("Unsupported RCCL datatype: {}", static_cast<int>(datatype));
-        ::rocprofsys::set_state(::rocprofsys::State::Finalized);
-        std::abort();
+        LOG_WARNING("Unsupported RCCL datatype: {}", static_cast<int>(datatype));
+        return 0;
     }
     return size;
 }
