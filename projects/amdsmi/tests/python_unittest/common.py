@@ -31,8 +31,8 @@ if not os.path.exists(amdsmi_path):
 sys.path.append(amdsmi_path)
 try:
     import amdsmi
-except ImportError:
-    raise ImportError(f'Could not import the "amdsmi" module from "{amdsmi_path}"')
+except ImportError as e:
+    raise ImportError(f'Could not import the "amdsmi" module from "{amdsmi_path}"') from e
 
 
 def print_test_ids(suite):
@@ -472,7 +472,7 @@ class Common(unittest.TestCase):
                 print(msg, flush=True)
         return
 
-    def print_device_header(self, i, gpu):
+    def print_device_header(self, i, _):
         # Print virtualization mode info
         msg = f'virtualization mode(gpu={i})'
         self.print(f'\t{msg}')
@@ -500,7 +500,7 @@ class Common(unittest.TestCase):
         return (error_code, error_code_name)
 
     def check_ret(self, msg, exc, expected_code_name=None, printIt=True):
-        if isinstance(exc, str) and not len(exc):
+        if isinstance(exc, str) and len(exc) == 0:
             error_code_name = expected_code_name
             if error_code_name in self.error_map.values():
                 for key, value in self.error_map.items():
@@ -512,7 +512,7 @@ class Common(unittest.TestCase):
         elif hasattr(exc, 'get_error_code'):
             error_code, error_code_name = self.get_error_code(exc)
         else:
-            error_code = str(exc).split(':')[0]
+            error_code = str(exc).split(':', maxsplit=1)[0]
             error_code_name = 'AMDSMI_STATUS_INVAL'
 
         # Check for when there are multiple passing conditions
