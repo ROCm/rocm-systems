@@ -131,6 +131,7 @@ if hasattr(torch._C, "_dispatch_call"):
         context_stack.append(f"#{dispatch_call_with_roctx._call_count}@{location}")
         full_marker_name = "/".join(marker_stack) + ":" + "/".join(context_stack)
         rangePush(full_marker_name)
+        # using try / finally to ensure rangePop is called.
         try:
             return original_dispatch_call(*args, **kwargs)
         except Exception as e:
@@ -154,15 +155,31 @@ try:
 
     def tv_dispatch_call_with_roctx(*args, **kwargs):
         marker_stack = get_marker_stack()
+        context_stack = get_context_stack()
         op_name = str(args[0]) if args else "vision_op"
-        full_marker_name = "/".join(marker_stack + [f"torchvision::{op_name}"])
         marker_stack.append(f"torchvision::{op_name}")
+        
+        current_frame = inspect.currentframe()
+        caller_frame = current_frame.f_back if current_frame is not None else None
+        if caller_frame is not None:
+            filename = caller_frame.f_code.co_filename
+            location = f"{Path(filename).name}:{caller_frame.f_lineno}"
+        else:
+            location = "unknown:0"
+        
+        if not hasattr(tv_dispatch_call_with_roctx, "_call_count"):
+            tv_dispatch_call_with_roctx._call_count = 0
+        tv_dispatch_call_with_roctx._call_count += 1
+        context_stack.append(f"#{tv_dispatch_call_with_roctx._call_count}@{location}")
+        
+        full_marker_name = "/".join(marker_stack) + ":" + "/".join(context_stack)
         rangePush(full_marker_name)
         try:
             return original_tv_dispatch_call(*args, **kwargs)
         finally:
             rangePop()
             marker_stack.pop()
+            context_stack.pop()
 
     torchvision._C._dispatch_call = tv_dispatch_call_with_roctx
 except Exception:
@@ -175,14 +192,30 @@ try:
 
     def all_reduce_with_roctx(*args, **kwargs):
         marker_stack = get_marker_stack()
-        full_marker_name = "/".join(marker_stack + ["torch.distributed.all_reduce"])
+        context_stack = get_context_stack()
         marker_stack.append("torch.distributed.all_reduce")
+        
+        current_frame = inspect.currentframe()
+        caller_frame = current_frame.f_back if current_frame is not None else None
+        if caller_frame is not None:
+            filename = caller_frame.f_code.co_filename
+            location = f"{Path(filename).name}:{caller_frame.f_lineno}"
+        else:
+            location = "unknown:0"
+        
+        if not hasattr(all_reduce_with_roctx, "_call_count"):
+            all_reduce_with_roctx._call_count = 0
+        all_reduce_with_roctx._call_count += 1
+        context_stack.append(f"#{all_reduce_with_roctx._call_count}@{location}")
+        
+        full_marker_name = "/".join(marker_stack) + ":" + "/".join(context_stack)
         rangePush(full_marker_name)
         try:
             return original_all_reduce(*args, **kwargs)
         finally:
             rangePop()
             marker_stack.pop()
+            context_stack.pop()
 
     dist.all_reduce = all_reduce_with_roctx
 except Exception as e:
@@ -195,14 +228,30 @@ try:
 
     def set_device_with_roctx(*args, **kwargs):
         marker_stack = get_marker_stack()
-        full_marker_name = "/".join(marker_stack + ["torch.cuda.set_device"])
+        context_stack = get_context_stack()
         marker_stack.append("torch.cuda.set_device")
+        
+        current_frame = inspect.currentframe()
+        caller_frame = current_frame.f_back if current_frame is not None else None
+        if caller_frame is not None:
+            filename = caller_frame.f_code.co_filename
+            location = f"{Path(filename).name}:{caller_frame.f_lineno}"
+        else:
+            location = "unknown:0"
+        
+        if not hasattr(set_device_with_roctx, "_call_count"):
+            set_device_with_roctx._call_count = 0
+        set_device_with_roctx._call_count += 1
+        context_stack.append(f"#{set_device_with_roctx._call_count}@{location}")
+        
+        full_marker_name = "/".join(marker_stack) + ":" + "/".join(context_stack)
         rangePush(full_marker_name)
         try:
             return original_set_device(*args, **kwargs)
         finally:
             rangePop()
             marker_stack.pop()
+            context_stack.pop()
 
     torch.cuda.set_device = set_device_with_roctx
 except Exception:
@@ -371,13 +420,21 @@ def inject_roctx_into_optimizer():
         marker_stack = get_marker_stack()
         context_stack = get_context_stack()
         marker_stack.append(f"optimizer.{self.__class__.__name__}.step")
-        context_stack.append("")  # No context for this level
-        full_marker_name = (
-            "/".join(marker_stack) + ":" + "/".join(context_stack)
-            if context_stack
-            else "/".join(marker_stack)
-        )
-
+        
+        current_frame = inspect.currentframe()
+        caller_frame = current_frame.f_back if current_frame is not None else None
+        if caller_frame is not None:
+            filename = caller_frame.f_code.co_filename
+            location = f"{Path(filename).name}:{caller_frame.f_lineno}"
+        else:
+            location = "unknown:0"
+        
+        if not hasattr(self, "_roctx_step_call_count"):
+            self._roctx_step_call_count = 0
+        self._roctx_step_call_count += 1
+        context_stack.append(f"#{self._roctx_step_call_count}@{location}")
+        
+        full_marker_name = "/".join(marker_stack) + ":" + "/".join(context_stack)
         rangePush(full_marker_name)
         try:
             return original_step(self, *args, **kwargs)
@@ -394,7 +451,6 @@ def inject_roctx_into_model():
     """Wrap nn.Module forward() method with call counter."""
 
     from torch import nn
-    from typing import Any
 
     original_call = nn.Module.__call__
 
@@ -469,9 +525,10 @@ def instrument_all_torch_ops():
                         marker_stack = get_marker_stack()
                         context_stack = get_context_stack()
                         marker_stack.append(marker_name)
-                        context_stack.append("")  # torch.ops has no additional context
+                        # Filter empty strings from context_stack
+                        filtered_context = [c for c in context_stack if c]
                         full_marker_name = "/".join(marker_stack) + (
-                            ":" + "/".join(context_stack) if any(context_stack) else ""
+                            ":" + "/".join(filtered_context) if filtered_context else ""
                         )
 
                         rangePush(full_marker_name)
@@ -480,7 +537,6 @@ def instrument_all_torch_ops():
                         finally:
                             rangePop()
                             marker_stack.pop()
-                            context_stack.pop()
 
                     wrapper._roctx_wrapped = True
                     return wrapper

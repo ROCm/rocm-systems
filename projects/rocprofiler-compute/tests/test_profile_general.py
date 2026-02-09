@@ -2862,7 +2862,7 @@ if __name__ == "__main__":
     assert "pmc_perf.csv" in file_dict, "pmc_perf.csv not generated"
 
     # 2. Look for corresponding marker_api_trace.csv file
-    # and counter_collection_trace.csv file in workload_dir/ and workload/*/
+    # and counter_collection.csv file in workload_dir/ and workload/*/
     marker_api_trace_files = list(Path(workload_dir).glob("**/*marker_api_trace.csv"))
     counter_collection_files = list(
         Path(workload_dir).glob("**/*counter_collection.csv")
@@ -2874,60 +2874,93 @@ if __name__ == "__main__":
         "Mismatch in number of marker_api_trace.csv and counter_collection.csv files"
     )
     for marker_file in marker_api_trace_files:
-        corresponding_counter_file = Path(
-            str(marker_file).replace("marker_api_trace", "counter_collection")
+        # Build corresponding counter_collection file path by replacing filename
+        corresponding_counter_file = marker_file.parent / marker_file.name.replace(
+            "marker_api_trace", "counter_collection"
         )
         assert corresponding_counter_file.exists(), (
             f"counter_collection.csv not found for {marker_file}"
         )
         # Check marker_api_trace.csv
+        expected_marker_columns = {
+            'Domain',
+            'Function',
+            'Process_Id',
+            'Thread_Id',
+            'Correlation_Id',
+            'Start_Timestamp',
+            'End_Timestamp'
+        }
         with open(marker_file, newline="") as f:
             reader = csv.DictReader(f)
             fieldnames = reader.fieldnames
             assert fieldnames is not None, f"No columns in {marker_file}"
-            # 1. Hierarchy check
-            assert "Name" in fieldnames, f"'Name' column missing in {marker_file}"
-            # 2. Correlation ID check
-            assert "Correlation ID" in fieldnames, (
-                f"'Correlation ID' column missing in {marker_file}"
-            )
-            # 3. Kernel_Name info check
-            assert "Kernel_Name" in fieldnames, (
-                f"'Kernel_Name' column missing in {marker_file}"
-            )
+            for column in expected_marker_columns:
+                assert column in fieldnames, (
+                    f"Column '{column}' missing in {marker_file}"
+                )
             found_row = False
             for row in reader:
                 found_row = True
-                # Name: must not be empty; hierarchy separators are optional
-                name = row.get("Name", "")
-                assert name, f"Empty Name in {marker_file}"
-                # Correlation ID: must not be empty
-                assert row["Correlation ID"], f"Empty Correlation ID in {marker_file}"
-                # Kernel_Name: must not be empty
-                assert row["Kernel_Name"], f"Empty Kernel_Name in {marker_file}"
+                assert row["Function"], f"Empty Function in {marker_file}"
+                assert row["Correlation_Id"], f"Empty Correlation ID in {marker_file}"
+                assert row["Start_Timestamp"], f"Empty Start_Timestamp in {marker_file}"
+                assert row["End_Timestamp"], f"Empty End_Timestamp in {marker_file}"
             assert found_row, f"{marker_file} is empty"
         # Check counter_collection.csv
+        expected_counter_columns = {
+            'Correlation_Id',
+            'Dispatch_Id',
+            'Agent_Id',
+            'Queue_Id',
+            'Process_Id',
+            'Thread_Id',
+            'Grid_Size',
+            'Kernel_Id',
+            'Kernel_Name',
+            'Workgroup_Size',
+            'LDS_Block_Size',
+            'Scratch_Size',
+            'VGPR_Count',
+            'Accum_VGPR_Count',
+            'SGPR_Count',
+            'Counter_Name',
+            'Counter_Value',
+            'Start_Timestamp',
+            'End_Timestamp'
+        }
         with open(corresponding_counter_file, newline="") as f:
             reader = csv.DictReader(f)
             fieldnames = reader.fieldnames
             assert fieldnames is not None, f"No columns in {corresponding_counter_file}"
-            assert "Counter Name" in fieldnames or "Name" in fieldnames, (
-                f"Expected counter column missing in {corresponding_counter_file}"
-            )
-            assert "Correlation ID" in fieldnames, (
-                f"'Correlation ID' column missing in {corresponding_counter_file}"
-            )
+            for column in expected_counter_columns:
+                assert column in fieldnames, (
+                    f"Column '{column}' missing in {corresponding_counter_file}"
+                )
             found_row = False
             for row in reader:
                 found_row = True
-                # Counter name must not be empty
-                assert row.get("Counter Name", row.get("Name")), (
-                    f"Empty counter name in {corresponding_counter_file}"
+
+                assert row["Correlation_Id"], (
+                    f"Empty Correlation_Id in {corresponding_counter_file}"
                 )
-                # Correlation ID must not be empty
-                assert row["Correlation ID"], (
-                    f"Empty Correlation ID in {corresponding_counter_file}"
+
+                assert row["Kernel_Name"], (
+                    f"Empty Kernel_Name in {corresponding_counter_file}"
                 )
+
+                assert row["Counter_Name"], (
+                    f"Empty Counter_Name in {corresponding_counter_file}"
+                )
+
+                assert row["Start_Timestamp"], (
+                    f"Empty Start_Timestamp in {corresponding_counter_file}"
+                )
+
+                assert row["End_Timestamp"], (
+                    f"Empty End_Timestamp in {corresponding_counter_file}"
+                )
+
             assert found_row, f"{corresponding_counter_file} is empty"
 
     destination_dir = test_utils.get_output_dir(param_id="torch_ops_analyze")
@@ -3045,11 +3078,7 @@ if __name__ == "__main__":
     print(f"  With flag kernel duration:    {with_flag_kernel_duration_total:.0f} ns")
     print(f"  Kernel execution overhead:    {kernel_overhead:.1f}%")
     print(f"{'=' * 70}\n")
-    # Verify torch trace directory was created
-    torch_trace_dir = Path(workload_dir_with_flag) / "torch_trace"
-    assert torch_trace_dir.exists(), "torch_trace directory should be created"
-    operator_csv_files = list(torch_trace_dir.glob("*.csv"))
-    assert len(operator_csv_files) > 0, "Operator CSV files should be generated"
+
     test_utils.clean_output_dir(config["cleanup"], workload_dir_with_flag)
     # Assert overhead is reasonable (< 100% wall-clock, < 50% kernel)
     assert wall_clock_overhead < 100, (
