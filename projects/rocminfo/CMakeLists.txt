@@ -91,6 +91,9 @@ set(PKG_VERSION_GIT_TAG_PREFIX "rocminfo_pkg_ver")
 
 find_program (GIT NAMES git)
 
+# LINTIAN-CPACK interferes with inbox packaging, add an option to disable it but don't disable by default
+option(DISABLE_LINTIAN_SUPPORT "disable LINTIAN from building" OFF)
+
 # Set Lintian Support Flags
 set(BUILD_ENABLE_LINTIAN_OVERRIDES
     OFF
@@ -285,8 +288,10 @@ if(NOT BUILD_SHARED_LIBS)
   string(REPLACE "hsa-rocr" "hsa-rocr-static-devel" CPACK_RPM_PACKAGE_REQUIRES ${CPACK_RPM_PACKAGE_REQUIRES})
 endif()
 
-# Configure Lintian Specific Package Data
-configure_pkg( ${CPACK_PACKAGE_NAME} ${COMP_TYPE} ${CPACK_PACKAGE_VERSION} ${PKG_MAINTAINER_NM} ${PKG_MAINTAINER_EMAIL})
+if(NOT DISABLE_LINTIAN_SUPPORT)
+    # Configure Lintian Specific Package Data
+    configure_pkg( ${CPACK_PACKAGE_NAME} ${COMP_TYPE} ${CPACK_PACKAGE_VERSION} ${PKG_MAINTAINER_NM} ${PKG_MAINTAINER_EMAIL})
+endif()
 
 # Custom installation for Debian Lintian File
 if(BUILD_ENABLE_LINTIAN_OVERRIDES AND BUILD_DEBIAN_PKGING_FLAG)

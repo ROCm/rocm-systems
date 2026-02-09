@@ -22,8 +22,10 @@
 
 cmake_minimum_required(VERSION 3.18.0 FATAL_ERROR)
 set( ROCPROFILER "rocprofiler" )
-set( BUILD_ENABLE_LINTIAN_OVERRIDES ON CACHE BOOL "Enable/Disable Lintian Overrides" )
-set( BUILD_DEBIAN_PKGING_FLAG ON CACHE BOOL "Internal Status Flag to indicate Debian Packaging Build" )
+# LINTIAN-CPACK interferes with inbox packaging, add an option to disable it but don't disable by default
+option(DISABLE_LINTIAN_SUPPORT "disable LINTIAN from building" OFF)
+set( BUILD_ENABLE_LINTIAN_OVERRIDES OFF CACHE BOOL "Enable/Disable Lintian Overrides" )
+set( BUILD_DEBIAN_PKGING_FLAG OFF CACHE BOOL "Internal Status Flag to indicate Debian Packaging Build" )
 
 set(CMAKE_C_FLAGS_COVERAGE_INIT
     "-Og -g3 -fno-omit-frame-pointer -fprofile-abs-path -fprofile-arcs -ftest-coverage --coverage"
@@ -460,7 +462,10 @@ if(${LIBRARY_TYPE} STREQUAL SHARED)
 	set( COMP_TYPE "runtime" )
     endif()
 
-    configure_pkg( ${ROCPROFILER} ${COMP_TYPE} ${CPACK_PACKAGE_VERSION} ${PKG_MAINTAINER_NM} ${PKG_MAINTAINER_EMAIL} )
+    if(NOT DISABLE_LINTIAN_SUPPORT)
+        # Configure Lintian Specific Package Data
+        configure_pkg( ${ROCPROFILER} ${COMP_TYPE} ${CPACK_PACKAGE_VERSION} ${PKG_MAINTAINER_NM} ${PKG_MAINTAINER_EMAIL} )
+    endif()
 
     include(CPack)
 

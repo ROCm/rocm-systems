@@ -58,9 +58,11 @@ include(ExternalProject)
 include(GNUInstallDirs)
 include(utils.cmake)
 
-set(BUILD_ENABLE_LINTIAN_OVERRIDES ON CACHE BOOL "Enable/Disable Lintian Overrides")
+# LINTIAN-CPACK interferes with inbox packaging, add an option to disable it but don't disable by default
+option(DISABLE_LINTIAN_SUPPORT "disable LINTIAN from building" OFF)
+set(BUILD_ENABLE_LINTIAN_OVERRIDES OFF CACHE BOOL "Enable/Disable Lintian Overrides")
 set(BUILD_DEBIAN_PKGING_FLAG
-    ON
+    OFF
     CACHE BOOL
     "Internal Status Flag to indicate Debian Packaging Build"
 )
@@ -1156,6 +1158,9 @@ set(CPACK_SOURCE_IGNORE_FILES
     /build
 )
 
-configure_pkg(${PACKAGE_NAME} ${COMP_TYPE} ${CPACK_PACKAGE_VERSION} ${PKG_MAINTAINER_NM} ${PKG_MAINTAINER_EMAIL})
+if(NOT DISABLE_LINTIAN_SUPPORT)
+    # Configure Lintian Specific Package Data
+    configure_pkg( ${PACKAGE_NAME} ${COMP_TYPE} ${CPACK_PACKAGE_VERSION} ${PKG_MAINTAINER_NM} ${PKG_MAINTAINER_EMAIL})
+endif()
 
 include(CPack)

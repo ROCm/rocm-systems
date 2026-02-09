@@ -7,8 +7,10 @@ set ( AQLPROFILE_NAME "hsa-amd-aqlprofile" )
 set ( AQLPROFILE_TARGET "${AQLPROFILE_NAME}64" )
 set ( AQLPROFILE_LIBRARY "lib${AQLPROFILE_TARGET}" )
 project ( ${AQLPROFILE_NAME} )
-set( BUILD_ENABLE_LINTIAN_OVERRIDES ON CACHE BOOL "Enable/Disable Lintian Overrides" )
-set( BUILD_DEBIAN_PKGING_FLAG ON CACHE BOOL "Internal Status Flag to indicate Debian Packaging Build" )
+# LINTIAN-CPACK interferes with inbox packaging, add an option to disable it but don't disable by default
+option(DISABLE_LINTIAN_SUPPORT "disable LINTIAN from building" OFF)
+set( BUILD_ENABLE_LINTIAN_OVERRIDES OFF CACHE BOOL "Enable/Disable Lintian Overrides" )
+set( BUILD_DEBIAN_PKGING_FLAG OFF CACHE BOOL "Internal Status Flag to indicate Debian Packaging Build" )
 
 include(GNUInstallDirs)
 ## Adding default path cmake modules
@@ -234,7 +236,10 @@ string(JOIN ", " CPACK_RPM_ASAN_PACKAGE_REQUIRES ${AQLPROFILE_RPM_ASAN_REQUIRES}
 string(JOIN ", " CPACK_DEBIAN_TESTS_PACKAGE_DEPENDS ${AQLPROFILE_DEBIAN_TESTS_DEPENDS})
 string(JOIN ", " CPACK_RPM_TESTS_PACKAGE_REQUIRES ${AQLPROFILE_RPM_TESTS_REQUIRES})
 
-configure_pkg( ${AQLPROFILE_NAME} ${COMP_TYPE} ${CPACK_PACKAGE_VERSION} ${PKG_MAINTAINER_NM} ${PKG_MAINTAINER_EMAIL} )
+if(NOT DISABLE_LINTIAN_SUPPORT)
+    # Configure Lintian Specific Package Data
+    configure_pkg( ${AQLPROFILE_NAME} ${COMP_TYPE} ${CPACK_PACKAGE_VERSION} ${PKG_MAINTAINER_NM} ${PKG_MAINTAINER_EMAIL} )
+endif()
 
 include ( CPack )
 
