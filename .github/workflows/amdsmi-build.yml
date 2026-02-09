@@ -109,15 +109,20 @@ jobs:
           echo 'Building Python wheel on ${{ matrix.os }}'
           
           # Detect which Python to use for wheel building
-          PYTHON_CMD=python3
-          for ver in 12 11 10 9 8; do
-            if command -v python3.$ver &> /dev/null; then
-              PYTHON_CMD=python3.$ver
-              echo "Using Python 3.$ver for wheel building"
-              break
+          if [[ "${{ matrix.os }}" == "RHEL8" || "${{ matrix.os }}" == "AlmaLinux8" || "${{ matrix.os }}" == "SLES" ]]; then
+            PYTHON_CMD=python3
+            for ver in 12 11 10 9 8; do
+              if command -v python3.$ver &> /dev/null; then
+                PYTHON_CMD=python3.$ver
+                echo "Using Python 3.$ver for wheel building"
+                break
+              fi
+            done
+            if [ "$PYTHON_CMD" == "python3" ]; then
+              echo "Using system Python 3 for wheel building"
             fi
-          done
-          if [ "$PYTHON_CMD" == "python3" ]; then
+          else
+            PYTHON_CMD=python3
             echo "Using system Python 3 for wheel building"
           fi
           
@@ -260,14 +265,18 @@ jobs:
           echo 'Building Python wheel on ${{ matrix.os }}'
           
           # Detect which Python to use
-          PYTHON_CMD=python3
-          for ver in 12 11 10 9 8; do
-            if command -v python3.$ver &> /dev/null; then
-              PYTHON_CMD=python3.$ver
-              echo "Using Python 3.$ver for wheel"
-              break
-            fi
-          done
+          if [[ "${{ matrix.os }}" == "RHEL8" || "${{ matrix.os }}" == "AlmaLinux8" || "${{ matrix.os }}" == "SLES" ]]; then
+            PYTHON_CMD=python3
+            for ver in 12 11 10 9 8; do
+              if command -v python3.$ver &> /dev/null; then
+                PYTHON_CMD=python3.$ver
+                echo "Using Python 3.$ver for wheel"
+                break
+              fi
+            done
+          else
+            PYTHON_CMD=python3
+          fi
           
           $PYTHON_CMD -m pip install --ignore-installed pip setuptools wheel
           cd $BUILD_FOLDER/py-interface/python_package
@@ -589,15 +598,20 @@ jobs:
           echo 'Building Python wheel on ${{ matrix.os }}'
           
           # Detect which Python to use for wheel building
-          PYTHON_CMD=python3
-          for ver in 12 11 10 9 8; do
-            if command -v python3.$ver &> /dev/null; then
-              PYTHON_CMD=python3.$ver
-              echo "Using Python 3.$ver for wheel building"
-              break
+          if [[ "${{ matrix.os }}" == "RHEL8" || "${{ matrix.os }}" == "AlmaLinux8" || "${{ matrix.os }}" == "SLES" ]]; then
+            PYTHON_CMD=python3
+            for ver in 12 11 10 9 8; do
+              if command -v python3.$ver &> /dev/null; then
+                PYTHON_CMD=python3.$ver
+                echo "Using Python 3.$ver for wheel building"
+                break
+              fi
+            done
+            if [ "$PYTHON_CMD" == "python3" ]; then
+              echo "Using system Python 3 for wheel building"
             fi
-          done
-          if [ "$PYTHON_CMD" == "python3" ]; then
+          else
+            PYTHON_CMD=python3
             echo "Using system Python 3 for wheel building"
           fi
           
@@ -798,14 +812,18 @@ jobs:
           echo 'Building Python wheel on ${{ matrix.os }}'
           
           # Detect which Python to use
-          PYTHON_CMD=python3
-          for ver in 12 11 10 9 8; do
-            if command -v python3.$ver &> /dev/null; then
-              PYTHON_CMD=python3.$ver
-              echo "Using Python 3.$ver for wheel"
-              break
-            fi
-          done
+          if [[ "${{ matrix.os }}" == "RHEL8" || "${{ matrix.os }}" == "AlmaLinux8" || "${{ matrix.os }}" == "SLES" ]]; then
+            PYTHON_CMD=python3
+            for ver in 12 11 10 9 8; do
+              if command -v python3.$ver &> /dev/null; then
+                PYTHON_CMD=python3.$ver
+                echo "Using Python 3.$ver for wheel"
+                break
+              fi
+            done
+          else
+            PYTHON_CMD=python3
+          fi
           
           $PYTHON_CMD -m pip install --ignore-installed pip setuptools wheel
           cd $BUILD_FOLDER/py-interface/python_package
@@ -854,14 +872,18 @@ jobs:
           echo 'Building Python wheel on ${{ matrix.os }}'
           
           # Detect which Python to use
-          PYTHON_CMD=python3
-          for ver in 12 11 10 9 8; do
-            if command -v python3.$ver &> /dev/null; then
-              PYTHON_CMD=python3.$ver
-              echo "Using Python 3.$ver for wheel"
-              break
-            fi
-          done
+          if [[ "${{ matrix.os }}" == "RHEL8" || "${{ matrix.os }}" == "AlmaLinux8" || "${{ matrix.os }}" == "SLES" ]]; then
+            PYTHON_CMD=python3
+            for ver in 12 11 10 9 8; do
+              if command -v python3.$ver &> /dev/null; then
+                PYTHON_CMD=python3.$ver
+                echo "Using Python 3.$ver for wheel"
+                break
+              fi
+            done
+          else
+            PYTHON_CMD=python3
+          fi
           
           $PYTHON_CMD -m pip install --ignore-installed pip setuptools wheel
           cd $BUILD_FOLDER/py-interface/python_package
