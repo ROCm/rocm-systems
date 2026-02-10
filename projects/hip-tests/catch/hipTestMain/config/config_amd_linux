@@ -138,7 +138,7 @@
         "=== Test does not reflect a valid use case - SWDEV-569454",
         "Unit_hipStreamPerThread_MultiThread",
     #endif
-    #if defined gfx90a || defined gfx942 || defined gfx950
+    #if defined gfx90a || defined gfx942 || defined gfx950 || defined amdgcnspirv
         "Unit_Warp_Shfl_Up_Positive_Basic - int",
         "Unit_Warp_Shfl_Up_Positive_Basic - unsigned int",
         "Unit_Warp_Shfl_Up_Positive_Basic - long",
@@ -160,7 +160,7 @@
         "Unit_Warp_Shfl_Down_Positive_Basic - __half",
         "Unit_Warp_Shfl_Down_Positive_Basic - __half2",
     #endif
-    #if defined gfx1200 || defined gfx1201
+    #if defined gfx1200 || defined gfx1201 || defined amdgcnspirv
         "=== SWDEV-470751 : Fine Grain memory is MTYPE_NC due to HW bug.",
         "Unit_hipEventCreateWithFlags_DisableSystemFence_CohHstMem",
     #endif
