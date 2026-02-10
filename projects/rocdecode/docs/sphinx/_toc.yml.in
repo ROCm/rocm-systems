@@ -14,7 +14,7 @@ subtrees:
     title: Installing rocDecode with the package installer
   - file: install/rocDecode-build-and-install.rst
     title: Installing rocDecode from its source code
-  - url: https://github.com/ROCm/rocDecode/tree/develop/docker
+  - url: https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode/docker
     title: rocDecode Docker containers
 
 - caption: Conceptual
