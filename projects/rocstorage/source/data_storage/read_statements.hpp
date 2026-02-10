@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "database.hpp"
+#include "backends/sqlite_backend.hpp"
 
 #include "rocstorage/reader_types.hpp"
 
@@ -312,8 +312,8 @@ struct time_range_result
 
 struct read_statements
 {
-    explicit read_statements(std::shared_ptr<database> db, std::string uuid)
-    : m_database{ std::move(db) }
+    explicit read_statements(std::shared_ptr<sqlite_backend> backend, std::string uuid)
+    : m_backend{ std::move(backend) }
     , m_uuid{ std::move(uuid) }
     {
         initialize_string_statement();
@@ -346,68 +346,74 @@ struct read_statements
     read_statements& operator=(read_statements&&)      = delete;
     virtual ~read_statements()                         = default;
 
-    using string_statement_func_t = std::function<statement_result<string_result>()>;
+    using string_statement_func_t =
+        std::function<sqlite_backend::result_set<string_result>()>;
 
     using node_info_statement_func_t =
-        std::function<statement_result<node_info_result>()>;
+        std::function<sqlite_backend::result_set<node_info_result>()>;
 
     using process_info_statement_func_t =
-        std::function<statement_result<process_info_result>()>;
+        std::function<sqlite_backend::result_set<process_info_result>()>;
 
     using stream_info_statement_func_t =
-        std::function<statement_result<stream_info_result>()>;
+        std::function<sqlite_backend::result_set<stream_info_result>()>;
 
     using queue_info_statement_func_t =
-        std::function<statement_result<queue_info_result>()>;
+        std::function<sqlite_backend::result_set<queue_info_result>()>;
 
     using thread_info_statement_func_t =
-        std::function<statement_result<thread_info_result>()>;
+        std::function<sqlite_backend::result_set<thread_info_result>()>;
 
     using agent_info_statement_func_t =
-        std::function<statement_result<agent_info_result>()>;
+        std::function<sqlite_backend::result_set<agent_info_result>()>;
 
     using track_info_statement_func_t =
-        std::function<statement_result<track_info_result>()>;
+        std::function<sqlite_backend::result_set<track_info_result>()>;
 
     using kernel_symbol_info_statement_func_t =
-        std::function<statement_result<kernel_symbol_info_result>()>;
+        std::function<sqlite_backend::result_set<kernel_symbol_info_result>()>;
 
     using code_object_info_statement_func_t =
-        std::function<statement_result<code_object_info_result>()>;
+        std::function<sqlite_backend::result_set<code_object_info_result>()>;
 
-    using pmc_info_statement_func_t = std::function<statement_result<pmc_info_result>()>;
+    using pmc_info_statement_func_t =
+        std::function<sqlite_backend::result_set<pmc_info_result>()>;
 
     using timeline_event_statement_func_t =
-        std::function<statement_result<timeline_event_result>()>;
+        std::function<sqlite_backend::result_set<timeline_event_result>()>;
 
     using timeline_event_time_filtered_func_t =
-        std::function<statement_result<timeline_event_result>(size_t, size_t)>;
+        std::function<sqlite_backend::result_set<timeline_event_result>(size_t, size_t)>;
 
-    using timeline_event_track_filtered_func_t = std::function<
-        statement_result<timeline_event_result>(size_t, size_t, size_t, size_t)>;
+    using timeline_event_track_filtered_func_t = std::function<sqlite_backend::result_set<
+        timeline_event_result>(size_t, size_t, size_t, size_t)>;
 
-    using timeline_event_track_and_time_filtered_func_t = std::function<statement_result<
-        timeline_event_result>(size_t, size_t, size_t, size_t, size_t, size_t)>;
+    using timeline_event_track_and_time_filtered_func_t =
+        std::function<sqlite_backend::result_set<
+            timeline_event_result>(size_t, size_t, size_t, size_t, size_t, size_t)>;
 
     // Detail statement func types (parameterized by id)
     using region_detail_func_t =
-        std::function<statement_result<region_detail_result>(size_t)>;
+        std::function<sqlite_backend::result_set<region_detail_result>(size_t)>;
     using kernel_dispatch_detail_func_t =
-        std::function<statement_result<kernel_dispatch_detail_result>(size_t)>;
+        std::function<sqlite_backend::result_set<kernel_dispatch_detail_result>(size_t)>;
     using memory_copy_detail_func_t =
-        std::function<statement_result<memory_copy_detail_result>(size_t)>;
+        std::function<sqlite_backend::result_set<memory_copy_detail_result>(size_t)>;
     using memory_alloc_detail_func_t =
-        std::function<statement_result<memory_alloc_detail_result>(size_t)>;
+        std::function<sqlite_backend::result_set<memory_alloc_detail_result>(size_t)>;
     using event_detail_func_t =
-        std::function<statement_result<event_detail_result>(size_t)>;
-    using arg_detail_func_t = std::function<statement_result<arg_detail_result>(size_t)>;
-    using event_id_func_t   = std::function<statement_result<event_id_result>(size_t)>;
-    using count_func_t      = std::function<statement_result<count_result>()>;
-    using time_range_func_t = std::function<statement_result<time_range_result>()>;
+        std::function<sqlite_backend::result_set<event_detail_result>(size_t)>;
+    using arg_detail_func_t =
+        std::function<sqlite_backend::result_set<arg_detail_result>(size_t)>;
+    using event_id_func_t =
+        std::function<sqlite_backend::result_set<event_id_result>(size_t)>;
+    using count_func_t = std::function<sqlite_backend::result_set<count_result>()>;
+    using time_range_func_t =
+        std::function<sqlite_backend::result_set<time_range_result>()>;
 
     // Correlated events: bind (stack_id, excluded_event_id)
     using correlated_event_func_t =
-        std::function<statement_result<timeline_event_result>(size_t, size_t)>;
+        std::function<sqlite_backend::result_set<timeline_event_result>(size_t, size_t)>;
 
     [[nodiscard]] string_statement_func_t string_statement() const
     {
@@ -582,14 +588,14 @@ struct read_statements
 private:
     void initialize_string_statement()
     {
-        const auto uuid = m_database->get_uuid();
+        const auto uuid = m_backend->get_uuid();
 
         queries::select::table_select_query query_builder = {};
         const auto                          query = query_builder.select("id", "string")
                                .from(fmt::format("rocpd_string_{}", uuid))
                                .get_query_string();
 
-        m_string_statement = m_database->create_read_statement_executor<string_result>(
+        m_string_statement = m_backend->create_read_statement_executor<string_result>(
             query, &string_result::id, &string_result::value);
     }
 
@@ -609,7 +615,7 @@ private:
                          .get_query_string();
 
         m_node_info_statement =
-            m_database->create_read_statement_executor<node_info_result>(
+            m_backend->create_read_statement_executor<node_info_result>(
                 query,
                 &node_info_result::node_id,
                 &node_info_result::hash,
@@ -640,7 +646,7 @@ private:
                          .get_query_string();
 
         m_process_info_statement =
-            m_database->create_read_statement_executor<process_info_result>(
+            m_backend->create_read_statement_executor<process_info_result>(
                 query,
                 &process_info_result::id,
                 &process_info_result::nid,
@@ -663,7 +669,7 @@ private:
                          .get_query_string();
 
         m_stream_info_statement =
-            m_database->create_read_statement_executor<stream_info_result>(
+            m_backend->create_read_statement_executor<stream_info_result>(
                 query,
                 &stream_info_result::id,
                 &stream_info_result::nid,
@@ -680,7 +686,7 @@ private:
                          .get_query_string();
 
         m_queue_info_statement =
-            m_database->create_read_statement_executor<queue_info_result>(
+            m_backend->create_read_statement_executor<queue_info_result>(
                 query,
                 &queue_info_result::id,
                 &queue_info_result::nid,
@@ -699,7 +705,7 @@ private:
                 .get_query_string();
 
         m_thread_info_statement =
-            m_database->create_read_statement_executor<thread_info_result>(
+            m_backend->create_read_statement_executor<thread_info_result>(
                 query,
                 &thread_info_result::id,
                 &thread_info_result::nid,
@@ -733,7 +739,7 @@ private:
                          .get_query_string();
 
         m_agent_info_statement =
-            m_database->create_read_statement_executor<agent_info_result>(
+            m_backend->create_read_statement_executor<agent_info_result>(
                 query,
                 &agent_info_result::id,
                 &agent_info_result::nid,
@@ -759,7 +765,7 @@ private:
                          .get_query_string();
 
         m_track_info_statement =
-            m_database->create_read_statement_executor<track_info_result>(
+            m_backend->create_read_statement_executor<track_info_result>(
                 query,
                 &track_info_result::id,
                 &track_info_result::nid,
@@ -791,7 +797,7 @@ private:
                          .get_query_string();
 
         m_kernel_symbol_info_statement =
-            m_database->create_read_statement_executor<kernel_symbol_info_result>(
+            m_backend->create_read_statement_executor<kernel_symbol_info_result>(
                 query,
                 &kernel_symbol_info_result::id,
                 &kernel_symbol_info_result::nid,
@@ -827,7 +833,7 @@ private:
                          .get_query_string();
 
         m_code_object_info_statement =
-            m_database->create_read_statement_executor<code_object_info_result>(
+            m_backend->create_read_statement_executor<code_object_info_result>(
                 query,
                 &code_object_info_result::id,
                 &code_object_info_result::nid,
@@ -866,28 +872,27 @@ private:
                          .from(fmt::format("rocpd_info_pmc_{}", m_uuid))
                          .get_query_string();
 
-        m_pmc_info_statement =
-            m_database->create_read_statement_executor<pmc_info_result>(
-                query,
-                &pmc_info_result::id,
-                &pmc_info_result::nid,
-                &pmc_info_result::pid,
-                &pmc_info_result::agent_id,
-                &pmc_info_result::target_arch,
-                &pmc_info_result::event_code,
-                &pmc_info_result::instance_id,
-                &pmc_info_result::name,
-                &pmc_info_result::symbol,
-                &pmc_info_result::description,
-                &pmc_info_result::long_description,
-                &pmc_info_result::component,
-                &pmc_info_result::units,
-                &pmc_info_result::value_type,
-                &pmc_info_result::block,
-                &pmc_info_result::expression,
-                &pmc_info_result::is_constant,
-                &pmc_info_result::is_derived,
-                &pmc_info_result::extdata);
+        m_pmc_info_statement = m_backend->create_read_statement_executor<pmc_info_result>(
+            query,
+            &pmc_info_result::id,
+            &pmc_info_result::nid,
+            &pmc_info_result::pid,
+            &pmc_info_result::agent_id,
+            &pmc_info_result::target_arch,
+            &pmc_info_result::event_code,
+            &pmc_info_result::instance_id,
+            &pmc_info_result::name,
+            &pmc_info_result::symbol,
+            &pmc_info_result::description,
+            &pmc_info_result::long_description,
+            &pmc_info_result::component,
+            &pmc_info_result::units,
+            &pmc_info_result::value_type,
+            &pmc_info_result::block,
+            &pmc_info_result::expression,
+            &pmc_info_result::is_constant,
+            &pmc_info_result::is_derived,
+            &pmc_info_result::extdata);
     }
 
     template <typename JoinBuilder>
@@ -897,7 +902,7 @@ private:
     {
         const auto a = std::string(alias);
 
-        out.base = m_database->create_read_statement_executor<timeline_event_result>(
+        out.base = m_backend->create_read_statement_executor<timeline_event_result>(
             base.get_query_string(),
             &timeline_event_result::id,
             &timeline_event_result::start_timestamp,
@@ -910,8 +915,8 @@ private:
             &timeline_event_result::track_id);
 
         out.time_filtered =
-            m_database->create_read_statement_executor<timeline_event_result,
-                                                       bind_types<size_t, size_t>>(
+            m_backend->create_read_statement_executor<timeline_event_result,
+                                                      bind_types<size_t, size_t>>(
                 base.where(a + ".start <= ?")
                     .and_where(a + ".end >= ?")
                     .get_query_string(),
@@ -928,7 +933,7 @@ private:
         const auto track_where = "(" + a + ".nid = ? AND " + a + ".pid = ? AND " + a +
                                  ".tid = ?) OR S.track_id = ?";
 
-        out.track_filtered = m_database->create_read_statement_executor<
+        out.track_filtered = m_backend->create_read_statement_executor<
             timeline_event_result,
             bind_types<size_t, size_t, size_t, size_t>>(
             base.where(track_where).get_query_string(),
@@ -942,7 +947,7 @@ private:
             &timeline_event_result::tid,
             &timeline_event_result::track_id);
 
-        out.track_and_time_filtered = m_database->create_read_statement_executor<
+        out.track_and_time_filtered = m_backend->create_read_statement_executor<
             timeline_event_result,
             bind_types<size_t, size_t, size_t, size_t, size_t, size_t>>(
             base.where("(" + track_where + ")")
@@ -1057,8 +1062,8 @@ private:
                             .where("id = ?")
                             .get_query_string();
 
-        m_region_detail = m_database->create_read_statement_executor<region_detail_result,
-                                                                     bind_types<size_t>>(
+        m_region_detail = m_backend->create_read_statement_executor<region_detail_result,
+                                                                    bind_types<size_t>>(
             region_q,
             &region_detail_result::id,
             &region_detail_result::start,
@@ -1096,8 +1101,8 @@ private:
                         .get_query_string();
 
         m_kernel_dispatch_detail =
-            m_database->create_read_statement_executor<kernel_dispatch_detail_result,
-                                                       bind_types<size_t>>(
+            m_backend->create_read_statement_executor<kernel_dispatch_detail_result,
+                                                      bind_types<size_t>>(
                 kd_q,
                 &kernel_dispatch_detail_result::id,
                 &kernel_dispatch_detail_result::dispatch_id,
@@ -1141,8 +1146,8 @@ private:
                         .get_query_string();
 
         m_memory_copy_detail =
-            m_database->create_read_statement_executor<memory_copy_detail_result,
-                                                       bind_types<size_t>>(
+            m_backend->create_read_statement_executor<memory_copy_detail_result,
+                                                      bind_types<size_t>>(
                 mc_q,
                 &memory_copy_detail_result::id,
                 &memory_copy_detail_result::start,
@@ -1179,8 +1184,8 @@ private:
                         .get_query_string();
 
         m_memory_alloc_detail =
-            m_database->create_read_statement_executor<memory_alloc_detail_result,
-                                                       bind_types<size_t>>(
+            m_backend->create_read_statement_executor<memory_alloc_detail_result,
+                                                      bind_types<size_t>>(
                 ma_q,
                 &memory_alloc_detail_result::id,
                 &memory_alloc_detail_result::type,
@@ -1210,7 +1215,7 @@ private:
                         .get_query_string();
 
         m_event_detail =
-            m_database
+            m_backend
                 ->create_read_statement_executor<event_detail_result, bind_types<size_t>>(
                     ev_q,
                     &event_detail_result::id,
@@ -1231,7 +1236,7 @@ private:
                          .get_query_string();
 
         m_arg_detail =
-            m_database
+            m_backend
                 ->create_read_statement_executor<arg_detail_result, bind_types<size_t>>(
                     arg_q,
                     &arg_detail_result::position,
@@ -1252,7 +1257,7 @@ private:
                             fmt::format("{}_{}", table, m_uuid),
                             m_uuid);
 
-            return m_database
+            return m_backend
                 ->create_read_statement_executor<event_id_result, bind_types<size_t>>(
                     q,
                     &event_id_result::event_id,
@@ -1288,8 +1293,8 @@ private:
                             fmt::arg("u", m_uuid),
                             fmt::arg("dn", display_name_col));
 
-            return m_database->create_read_statement_executor<timeline_event_result,
-                                                              bind_types<size_t, size_t>>(
+            return m_backend->create_read_statement_executor<timeline_event_result,
+                                                             bind_types<size_t, size_t>>(
                 q,
                 &timeline_event_result::id,
                 &timeline_event_result::start_timestamp,
@@ -1316,7 +1321,7 @@ private:
     {
         auto make_count_stmt = [&](const std::string& table) {
             auto q = fmt::format("SELECT COUNT(*) FROM {}_{}", table, m_uuid);
-            return m_database->create_read_statement_executor<count_result>(
+            return m_backend->create_read_statement_executor<count_result>(
                 q, &count_result::count);
         };
 
@@ -1330,7 +1335,7 @@ private:
     {
         auto make_time_range_stmt = [&](const std::string& table) {
             auto q = fmt::format("SELECT MIN(start), MAX(end) FROM {}_{}", table, m_uuid);
-            return m_database->create_read_statement_executor<time_range_result>(
+            return m_backend->create_read_statement_executor<time_range_result>(
                 q, &time_range_result::min_start, &time_range_result::max_end);
         };
 
@@ -1340,8 +1345,8 @@ private:
         m_memory_alloc_time_range    = make_time_range_stmt("rocpd_memory_allocate");
     }
 
-    std::shared_ptr<database> m_database;
-    std::string               m_uuid;
+    std::shared_ptr<sqlite_backend> m_backend;
+    std::string                     m_uuid;
 
     string_statement_func_t             m_string_statement;
     node_info_statement_func_t          m_node_info_statement;

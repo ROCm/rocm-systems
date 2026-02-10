@@ -6,7 +6,7 @@
 #include "rocstorage/writer.hpp"
 #include "rocstorage/writer_types.hpp"
 
-#include "data_storage/database.hpp"
+#include "data_storage/backends/sqlite_backend.hpp"
 #include "data_storage/insert_statements.hpp"
 #include "entity_registry.hpp"
 #include "insert_validator.hpp"
@@ -62,7 +62,7 @@ private:
 
     std::unique_ptr<rocstorage::storage_t> m_storage;
 
-    std::shared_ptr<data_storage::database>                     m_database;
+    std::shared_ptr<data_storage::sqlite_backend>               m_backend;
     std::string                                                 m_uuid;
     std::unique_ptr<data_storage::schema_v3::insert_statements> m_insert_statements;
     std::shared_ptr<entity_registry>                            m_entity_registry;

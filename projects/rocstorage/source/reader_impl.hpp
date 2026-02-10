@@ -7,7 +7,7 @@
 #include "rocstorage/reader_types.hpp"
 #include "rocstorage/storage.hpp"
 
-#include "data_storage/database.hpp"
+#include "data_storage/backends/sqlite_backend.hpp"
 #include "data_storage/read_statements.hpp"
 #include "entity_utility.hpp"
 
@@ -120,7 +120,7 @@ private:
                           const reader_types::pagination_t&    pagination);
 
     std::unique_ptr<rocstorage::storage_t>                    m_storage;
-    std::shared_ptr<data_storage::database>                   m_database;
+    std::shared_ptr<data_storage::sqlite_backend>             m_backend;
     std::shared_ptr<data_storage::schema_v3::read_statements> m_read_statements;
 
     reader_types::node_info_list_t          m_node_info_list;

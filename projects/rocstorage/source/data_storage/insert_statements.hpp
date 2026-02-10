@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "database.hpp"
+#include "backends/sqlite_backend.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -19,7 +19,7 @@ using integer_foreign_key_t = size_t;
 
 struct insert_statements
 {
-    explicit insert_statements(std::shared_ptr<database> database, std::string uuid);
+    explicit insert_statements(std::shared_ptr<sqlite_backend> backend, std::string uuid);
     insert_statements()                                    = delete;
     insert_statements(const insert_statements&)            = delete;
     insert_statements(insert_statements&&)                 = delete;
@@ -371,8 +371,8 @@ private:
     void initialize_memory_copy_statement();
     void initialize_memory_alloc_statement();
 
-    std::shared_ptr<database> m_database;
-    std::string               m_uuid;
+    std::shared_ptr<sqlite_backend> m_backend;
+    std::string                     m_uuid;
 
     string_statement_func_t             m_string_statement;
     node_info_statement_func_t          m_node_info_statement;

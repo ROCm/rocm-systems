@@ -50,13 +50,13 @@ is_already_registered(Utility& utility, const Entity& entity)
 
 writer_t::impl::impl(std::unique_ptr<rocstorage::storage_t> storage)
 : m_storage(std::move(storage))
-, m_database(m_storage->m_impl->create_database(storage_t::impl::storage_type_t::write))
+, m_backend(m_storage->m_impl->create_database(storage_t::impl::storage_type_t::write))
 , m_uuid(m_storage->m_impl->get_uuid())
 , m_entity_registry(std::make_shared<entity_registry>())
 , m_key_providers(std::make_shared<primary_key_providers>())
 , m_validator(std::make_shared<insert_validator>(m_entity_registry))
 {
-    if(!m_database)
+    if(!m_backend)
     {
         throw std::invalid_argument("Provided pointer to a non-existing database!");
     }
@@ -66,9 +66,9 @@ writer_t::impl::impl(std::unique_ptr<rocstorage::storage_t> storage)
         throw std::invalid_argument("Empty UUID provided!");
     }
 
-    m_database->initialize_schema();
+    m_backend->initialize_schema();
     m_insert_statements =
-        std::make_unique<data_storage::schema_v3::insert_statements>(m_database, m_uuid);
+        std::make_unique<data_storage::schema_v3::insert_statements>(m_backend, m_uuid);
 }
 
 void
@@ -489,7 +489,7 @@ writer_t::impl::insert_region_data(
     const writer_types::region_data_t&       region_data,
     const writer_types::trace_environment_t& trace_environment)
 {
-    auto transaction_block = m_database->create_transaction_block();
+    auto transaction_block = m_backend->begin_transaction();
 
     m_validator->require_node(trace_environment.node_id)
         .require_process(trace_environment.process_id)
@@ -561,7 +561,7 @@ writer_t::impl::insert_pmc_event_data(
     const writer_types::pmc_event_data_t&     pmc_event_data,
     const writer_types::pmc_info_unique_id_t& pmc_unique_id)
 {
-    auto transaction_block = m_database->create_transaction_block();
+    auto transaction_block = m_backend->begin_transaction();
 
     m_validator->require_pmc(pmc_unique_id);
 
@@ -584,7 +584,7 @@ writer_t::impl::insert_kernel_dispatch_data(
     const writer_types::kernel_dispatch_data_t& kernel_dispatch_data,
     const writer_types::trace_environment_t&    trace_environment)
 {
-    auto transaction_block = m_database->create_transaction_block();
+    auto transaction_block = m_backend->begin_transaction();
 
     m_validator->require_node(trace_environment.node_id)
         .require_process(trace_environment.process_id)
@@ -664,7 +664,7 @@ writer_t::impl::insert_memory_copy_data(
     const writer_types::memory_copy_data_t&  memory_copy_data,
     const writer_types::trace_environment_t& trace_environment)
 {
-    auto transaction_block = m_database->create_transaction_block();
+    auto transaction_block = m_backend->begin_transaction();
 
     m_validator->require_node(trace_environment.node_id)
         .require_process(trace_environment.process_id)
@@ -754,7 +754,7 @@ writer_t::impl::insert_memory_alloc_data(
     const writer_types::memory_alloc_data_t& memory_alloc_data,
     const writer_types::trace_environment_t& trace_environment)
 {
-    auto transaction_block = m_database->create_transaction_block();
+    auto transaction_block = m_backend->begin_transaction();
 
     m_validator->require_node(trace_environment.node_id)
         .require_process(trace_environment.process_id)
@@ -849,7 +849,7 @@ writer_t::impl::insert_memory_alloc_data(
 void
 writer_t::impl::flush_in_memory_data_to_disk()
 {
-    m_database->flush();
+    m_backend->flush();
 }
 
 }  // namespace rocstorage

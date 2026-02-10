@@ -21,7 +21,7 @@
 # SOFTWARE.
 
 set(data_storage_sources
-    ${CMAKE_CURRENT_LIST_DIR}/database.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/backends/sqlite_backend.cpp
     ${CMAKE_CURRENT_LIST_DIR}/insert_statements.cpp
 )
 

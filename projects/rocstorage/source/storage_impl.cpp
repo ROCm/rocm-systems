@@ -5,7 +5,7 @@
 #include "rocstorage/storage.hpp"
 #include "rocstorage/storage_types.hpp"
 
-#include "data_storage/database.hpp"
+#include "data_storage/backends/sqlite_backend.hpp"
 
 #include <memory>
 #include <stdexcept>
@@ -17,7 +17,7 @@ namespace rocstorage
 
 struct storage_t::impl::database_factory_t
 {
-    static std::shared_ptr<data_storage::database> create_database(
+    static std::shared_ptr<data_storage::sqlite_backend> create_database(
         const std::string&    database_path,
         const std::string&    uuid,
         const storage_type_t& storage_type)
@@ -25,15 +25,15 @@ struct storage_t::impl::database_factory_t
         switch(storage_type)
         {
             case storage_type_t::read:
-                return std::make_shared<data_storage::database>(
+                return data_storage::sqlite_backend::create(
                     database_path,
                     uuid,
-                    data_storage::database::database_type_t::on_disk);
+                    data_storage::sqlite_backend::storage_mode_t::on_disk);
             case storage_type_t::write:
-                return std::make_shared<data_storage::database>(
+                return data_storage::sqlite_backend::create(
                     database_path,
                     uuid,
-                    data_storage::database::database_type_t::in_memory);
+                    data_storage::sqlite_backend::storage_mode_t::in_memory);
             default:
                 throw std::invalid_argument(
                     "Invalid storage type: " +
@@ -65,7 +65,7 @@ storage_t::impl::get_storage_version() const
     return m_version;
 }
 
-std::shared_ptr<data_storage::database>
+std::shared_ptr<data_storage::sqlite_backend>
 storage_t::impl::create_database(const storage_type_t& storage_type)
 {
     if(!m_database)

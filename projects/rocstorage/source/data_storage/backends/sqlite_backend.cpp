@@ -1,13 +1,11 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
 
-#include "database.hpp"
+#include "sqlite_backend.hpp"
 
 #include "debug.hpp"
 #include "directory.hpp"
-#include "transaction.hpp"
 
-#include <cstddef>
 #include <filesystem>
 #include <stdexcept>
 #include <string>
@@ -55,25 +53,6 @@ create_directory_for_database_file(const std::string& db_file)
         rocstorage::common::makedir(db_dirname);
     }
 }
-
-#if !defined(USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD) ||                                   \
-    USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD == 0
-std::string
-process_schema_template(std::string_view schema_content, const std::string& upid)
-{
-    std::string query = std::string(schema_content);
-
-    std::regex upid_pattern("\\{\\{uuid\\}\\}");
-    std::regex guid_pattern("\\{\\{guid\\}\\}");
-    std::regex view_upid_pattern("\\{\\{view_upid\\}\\}");
-
-    query = std::regex_replace(query, upid_pattern, "_" + upid);
-    query = std::regex_replace(query, guid_pattern, upid);
-    query = std::regex_replace(query, view_upid_pattern, "");
-
-    return query;
-}
-#endif
 
 #if defined(USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD) &&                                    \
     USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD > 0
@@ -151,7 +130,17 @@ get_schema_query(rocpd_sql_schema_kind_t schema_kind, const std::string& uuid)
                                      std::to_string(schema_kind));
     }
 
-    return process_schema_template(schema_content, uuid);
+    std::string query_str = std::string(schema_content);
+
+    std::regex upid_pattern("\\{\\{uuid\\}\\}");
+    std::regex guid_pattern("\\{\\{guid\\}\\}");
+    std::regex view_upid_pattern("\\{\\{view_upid\\}\\}");
+
+    query_str = std::regex_replace(query_str, upid_pattern, "_" + uuid);
+    query_str = std::regex_replace(query_str, guid_pattern, uuid);
+    query_str = std::regex_replace(query_str, view_upid_pattern, "");
+
+    return query_str;
 #endif
 }
 
@@ -159,50 +148,62 @@ get_schema_query(rocpd_sql_schema_kind_t schema_kind, const std::string& uuid)
 
 namespace rocstorage::data_storage
 {
-database::database(std::string db_path, std::string uuid, database_type_t database_type)
+
+std::shared_ptr<sqlite_backend>
+sqlite_backend::create(std::string db_path, std::string uuid, storage_mode_t mode)
+{
+    auto backend = std::shared_ptr<sqlite_backend>(
+        new sqlite_backend(std::move(db_path), std::move(uuid), mode));
+
+    // discover_uuids() uses create_read_statement_executor which calls
+    // shared_from_this(). This must happen after the shared_ptr is fully
+    // constructed -- calling shared_from_this() inside the constructor
+    // throws bad_weak_ptr.
+    if(backend->m_initialized)
+    {
+        auto uuids = backend->discover_uuids();
+        if(uuids.size() == 1)
+        {
+            backend->m_uuid = uuids[0];
+        }
+    }
+
+    return backend;
+}
+
+sqlite_backend::sqlite_backend(std::string db_path, std::string uuid, storage_mode_t mode)
 : m_db_path{ std::move(db_path) }
 , m_uuid{ std::move(uuid) }
-, m_database_type{ database_type }
+, m_mode{ mode }
 {
     if(std::filesystem::exists(m_db_path))
     {
-        m_database_type = database_type_t::on_disk;
-        m_initialized   = true;
+        m_mode        = storage_mode_t::on_disk;
+        m_initialized = true;
     }
     else
     {
         create_directory_for_database_file(m_db_path);
     }
 
-    // Open database before any queries
-    if(m_database_type == database_type_t::in_memory)
+    if(m_mode == storage_mode_t::in_memory)
     {
         validate_sqlite3_result(
             sqlite3_open(":memory:", &m_sqlite3), "", "database open failed!");
     }
-    else if(m_database_type == database_type_t::on_disk)
+    else if(m_mode == storage_mode_t::on_disk)
     {
         validate_sqlite3_result(
             sqlite3_open(m_db_path.c_str(), &m_sqlite3), "", "database open failed!");
     }
 
-    // Discover UUIDs from existing database
-    if(m_initialized)
-    {
-        auto uuids = discover_uuids();
-        if(uuids.size() == 1)
-        {
-            m_uuid = uuids[0];
-        }
-    }
-
     LOG_INFO("rocstorage database initialized (uuid: {}, path: {})", m_uuid, m_db_path);
 }
 
-database::~database() { sqlite3_close(m_sqlite3); }
+sqlite_backend::~sqlite_backend() { sqlite3_close(m_sqlite3); }
 
 std::vector<std::string>
-database::discover_uuids()
+sqlite_backend::discover_uuids()
 {
     struct uuid_result
     {
@@ -226,13 +227,13 @@ database::discover_uuids()
 }
 
 std::string
-database::get_uuid() const
+sqlite_backend::get_uuid() const
 {
     return m_uuid;
 }
 
 void
-database::initialize_schema()
+sqlite_backend::initialize_schema()
 {
     if(m_initialized)
     {
@@ -268,7 +269,7 @@ database::initialize_schema()
 }
 
 void
-database::execute_query(const std::string& query)
+sqlite_backend::execute(const std::string& query)
 {
     validate_sqlite3_result(
         sqlite3_exec(m_sqlite3, query.c_str(), nullptr, nullptr, nullptr),
@@ -276,19 +277,13 @@ database::execute_query(const std::string& query)
         query);
 }
 
-size_t
-database::get_last_insert_id() const
-{
-    return static_cast<size_t>(sqlite3_last_insert_rowid(m_sqlite3));
-}
-
 void
-database::flush()
+sqlite_backend::flush()
 {
-    if(m_database_type != database_type_t::in_memory)
+    if(m_mode != storage_mode_t::in_memory)
     {
         LOG_WARNING("Flushing database is not supported for database type: {}",
-                    static_cast<int>(m_database_type));
+                    static_cast<int>(m_mode));
         return;
     }
 

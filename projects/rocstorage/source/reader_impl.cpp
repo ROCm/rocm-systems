@@ -20,10 +20,10 @@ namespace rocstorage
 
 reader_t::impl::impl(std::unique_ptr<rocstorage::storage_t> storage)
 : m_storage(std::move(storage))
-, m_database(m_storage->m_impl->create_database(storage_t::impl::storage_type_t::read))
+, m_backend(m_storage->m_impl->create_database(storage_t::impl::storage_type_t::read))
 , m_read_statements(
-      std::make_shared<data_storage::schema_v3::read_statements>(m_database,
-                                                                 m_database->get_uuid()))
+      std::make_shared<data_storage::schema_v3::read_statements>(m_backend,
+                                                                 m_backend->get_uuid()))
 {
     if(!m_storage)
     {
