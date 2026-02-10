@@ -75,26 +75,16 @@ install(TARGETS amdcuid_shared
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}    # Windows DLLs go here
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}    # Linux .so
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}    # Static libs & Windows import libs
+    COMPONENT library
 )
 
 # Static library
 install(TARGETS amdcuid_static
-    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT library
 )
 
 # Install public headers
 set(PUBLIC_HEADERS
     include/amd_cuid.h
 )
-install(FILES ${PUBLIC_HEADERS} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
-
-# Create HMAC key file if it does not exist
-install(CODE "
-    set(KEY_FILE \"\$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_SYSCONFDIR}/hmac_key.bin\")
-    if(NOT EXISTS \"\${KEY_FILE}\")
-        file(WRITE \"\${KEY_FILE}\" \"\")
-        execute_process(COMMAND chmod 600 \"\${KEY_FILE}\")
-        message(STATUS \"Created empty HMAC key file: \${KEY_FILE}\")
-        message(STATUS \"WARNING: User must set or generate HMAC key before using CUID library.\")
-    endif()"
-)
+install(FILES ${PUBLIC_HEADERS} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR} COMPONENT library)

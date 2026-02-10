@@ -36,7 +36,7 @@ target_link_libraries(amdcuid_daemon amdcuid_static OpenSSL::Crypto)
 target_include_directories(amdcuid_daemon PRIVATE ${CMAKE_SOURCE_DIR}/lib)
 
 # Install the tool
-install(TARGETS amdcuid_daemon DESTINATION bin)
+install(TARGETS amdcuid_daemon DESTINATION bin COMPONENT daemon)
 
 # Platform-specific config directory
 if(WIN32)
@@ -45,7 +45,7 @@ else()
     set(CONFIG_INSTALL_DIR "${CMAKE_INSTALL_SYSCONFDIR}")
 endif()
 
-install(FILES amdcuid_daemon.conf DESTINATION ${CONFIG_INSTALL_DIR})
+install(FILES amdcuid_daemon.conf DESTINATION ${CONFIG_INSTALL_DIR} COMPONENT daemon)
 
 # udev rules for Linux; TODO: need to figure out Windows service/driver registration for device event handling
 if(UNIX AND NOT APPLE)

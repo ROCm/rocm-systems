@@ -55,4 +55,4 @@ else()
 endif()
 
 # Install the test binary
-install(TARGETS amdcuid_test DESTINATION ${TESTS_INSTALL_DIR})
+install(TARGETS amdcuid_test DESTINATION ${TESTS_INSTALL_DIR} COMPONENT tests)

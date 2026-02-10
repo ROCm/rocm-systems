@@ -363,9 +363,8 @@ int main() {
     }
 
     // if no HMAC key exists, generate and store it
-    int fd = open("/opt/amdcuid/etc/hmac_key.bin", O_RDONLY);
+    int fd = open(daemon_hmac.key_file_path.c_str(), O_RDONLY);
     if (fd < 0) {
-        close(fd);
         uint8_t key[32];
         amdcuid_status_t key_status = amdcuid_generate_hash_key(key);
         if (key_status != AMDCUID_STATUS_SUCCESS) {

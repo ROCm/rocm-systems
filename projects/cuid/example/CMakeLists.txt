@@ -30,6 +30,5 @@ add_executable(amdcuid_example main.cc)
 target_include_directories(amdcuid_example PRIVATE ${CMAKE_SOURCE_DIR}/lib)
 target_link_libraries(amdcuid_example PRIVATE amdcuid_static OpenSSL::Crypto pthread)
 
-# Platform-specific config directory
-install(FILES main.cc DESTINATION ${CMAKE_INSTALL_DOCDIR})
-install(TARGETS amdcuid_example DESTINATION ${CMAKE_INSTALL_DOCDIR})
+# Install example source and binary into documentation
+install(FILES main.cc DESTINATION ${CMAKE_INSTALL_DOCDIR} COMPONENT example)

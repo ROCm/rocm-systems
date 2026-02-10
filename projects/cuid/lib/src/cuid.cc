@@ -126,7 +126,6 @@ DevicePtr discover_device_by_path(const char* dev_path, amdcuid_device_type_t de
     int fd = open(dev_path, O_RDONLY);
     if (fd < 0) {
         // unable to open device path
-        close(fd);
         return nullptr;
     }
 
@@ -286,7 +285,6 @@ amdcuid_status_t amdcuid_get_handle_by_bdf(const char* bdf, amdcuid_device_type_
         || device_path.find("net") == std::string::npos) {
         int fd = open(device_path.c_str(), O_RDONLY);
         if (fd < 0) {
-            close(fd);
             return AMDCUID_STATUS_DEVICE_NOT_FOUND;
         }
         real_dev_path = CuidUtilities::real_dev_path_from_fd(fd);
