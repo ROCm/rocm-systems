@@ -684,9 +684,10 @@ using f16_4vec = __attribute__((__vector_size__(4 * sizeof(_Float16))))  _Float1
 
 extern "C" __global__ void mfma_f16(int iter, float *dummy)
 {
-#if defined(____gfx950__)
+#if defined(__gfx950__)
     // Input: 8 F16 registers
-    f16_8vec a = threadIdx.x;
+    f16_8vec a;
+    a[1] = a[0] = threadIdx.x;
 
     // Accumulator: 16 F32 registers
     f32_16vec result = {0};
