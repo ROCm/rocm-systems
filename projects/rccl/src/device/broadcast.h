@@ -4,11 +4,14 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
+#ifndef NCCL_DEVICE_BROADCAST_H_
+#define NCCL_DEVICE_BROADCAST_H_
+
 #include "device.h"
 #include "collectives.h"
 #include "primitives.h"
 
-namespace {
+namespace ncclDevBroadcast {
   template<typename T, typename RedOp, typename Proto>
 #if defined(USE_INDIRECT_FUNCTION_CALL) && !defined(__gfx942__) && !defined(__gfx950__)
   __device__ void runRing(int tid, int nthreads, struct ncclDevWorkColl* work, struct ncclShmemData* ncclShmem, void* ncclShmemPerWarp) {
@@ -119,20 +122,22 @@ template<typename T, typename RedOp>
 struct RunWorkColl<ncclFuncBroadcast, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE> {
   __device__ __forceinline__ void run(int tid, int nthreads, struct ncclDevWorkColl* work, struct ncclShmemData* ncclShmem, void* ncclShmemPerWarp) {
     using Proto = ProtoSimple<BROADCAST_CHUNKSTEPS/BROADCAST_SLICESTEPS, BROADCAST_SLICESTEPS>;
-    runRing<T, RedOp, Proto>(tid, nthreads, work, ncclShmem, ncclShmemPerWarp);
+    ncclDevBroadcast::runRing<T, RedOp, Proto>(tid, nthreads, work, ncclShmem, ncclShmemPerWarp);
   }
 };
 
 template<typename T, typename RedOp>
 struct RunWorkColl<ncclFuncBroadcast, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_LL> {
   __device__ __forceinline__ void run(int tid, int nthreads, struct ncclDevWorkColl* work, struct ncclShmemData* ncclShmem, void* ncclShmemPerWarp) {
-    runRing<T, RedOp, ProtoLL>(tid, nthreads, work, ncclShmem, ncclShmemPerWarp);
+    ncclDevBroadcast::runRing<T, RedOp, ProtoLL>(tid, nthreads, work, ncclShmem, ncclShmemPerWarp);
   }
 };
 
 template<typename T, typename RedOp>
 struct RunWorkColl<ncclFuncBroadcast, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_LL128> {
   __device__ __forceinline__ void run(int tid, int nthreads, struct ncclDevWorkColl* work, struct ncclShmemData* ncclShmem, void* ncclShmemPerWarp) {
-    runRing<T, RedOp, ProtoLL128>(tid, nthreads, work, ncclShmem, ncclShmemPerWarp);
+    ncclDevBroadcast::runRing<T, RedOp, ProtoLL128>(tid, nthreads, work, ncclShmem, ncclShmemPerWarp);
   }
 };
+
+#endif // NCCL_DEVICE_BROADCAST_H_

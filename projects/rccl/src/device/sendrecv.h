@@ -5,6 +5,9 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
+#ifndef NCCL_DEVICE_SENDRECV_H_
+#define NCCL_DEVICE_SENDRECV_H_
+
 #include "device.h"
 #include "collectives.h"
 #include "primitives.h"
@@ -280,3 +283,5 @@ struct RunWorkBatch<ncclFuncSendRecv, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPL
     }
   }
 };
+
+#endif // NCCL_DEVICE_SENDRECV_H_

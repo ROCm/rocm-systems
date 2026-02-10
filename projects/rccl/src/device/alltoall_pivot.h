@@ -4,11 +4,14 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
+#ifndef NCCL_DEVICE_ALLTOALL_PIVOT_H_
+#define NCCL_DEVICE_ALLTOALL_PIVOT_H_
+
 #include "device.h"
 #include "collectives.h"
 #include "primitives.h"
 
-namespace {
+namespace ncclDevAlltoAllPivot {
   template<typename T, typename RedOp, typename Proto>
 #if defined(USE_INDIRECT_FUNCTION_CALL) && !defined(__gfx942__) && !defined(__gfx950__)
   __device__ void runRing(int tid, int nthreads, struct ncclDevWorkColl* work, struct ncclShmemData* ncclShmem, void* ncclShmemPerWarp) {
@@ -78,6 +81,8 @@ template<typename T, typename RedOp>
 struct RunWorkColl<ncclFuncAlltoAllPivot, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE> {
   __device__ __forceinline__ void run(int tid, int nThreads, struct ncclDevWorkColl* work, struct ncclShmemData* ncclShmem, void* ncclShmemPerWarp) {
     using Proto = ProtoSimple<ALLTOALL_PIVOT_CHUNKSTEPS/ALLTOALL_PIVOT_SLICESTEPS, ALLTOALL_PIVOT_SLICESTEPS>;
-    runRing<T, RedOp, Proto>(tid, nThreads, work, ncclShmem, ncclShmemPerWarp);
+    ncclDevAlltoAllPivot::runRing<T, RedOp, Proto>(tid, nThreads, work, ncclShmem, ncclShmemPerWarp);
   }
 };
+
+#endif // NCCL_DEVICE_ALLTOALL_PIVOT_H_

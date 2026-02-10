@@ -34,6 +34,7 @@ option(ENABLE_MSCCLPP_FORMAT_CHECKS            "Enable formatting checks in MSCC
 option(MSCCLPP_APPLY_PATCHES                   "Apply source code patches to MSCCL++"          ON)
 option(ENABLE_NPKIT                            "Enable NPKit"                                  OFF)
 option(ENABLE_IFC                              "Enable indirect function call"                 OFF)
+option(ENABLE_UNITY_DEVICE_BUILD               "Build device code as single TU (no -fgpu-rdc)" ON)
 option(GENERATE_SYM_KERNELS                    "Generate symmetric memory kernels"             OFF)
 option(INSTALL_DEPENDENCIES                    "Force install dependencies"                    OFF)
 option(REPORT_KERNEL_RESOURCE_USE              "Append -Rpass-analysis=kernel to CXX flags"    OFF)
@@ -919,10 +920,83 @@ endif()
 # Find the generated files in the output directory
 file(GLOB_RECURSE GENERATED_FILES "${GEN_DIR}/*")
 
-# Append all found generated files to the list
-foreach(file ${GENERATED_FILES})
-  list(APPEND HIP_SOURCES ${file})
-endforeach()
+if(ENABLE_UNITY_DEVICE_BUILD)
+  message(STATUS "Unity device build enabled - compiling all device code as a single TU")
+
+  # In unity mode, device_unity.cpp #includes all collective device code,
+  # common.cu.cpp, and onerank.cu.cpp. These individual files must NOT be
+  # compiled on their own (they're pulled in via #include in the unity file).
+  #
+  # MSCCL and symmetric kernel files are self-contained __global__ kernels
+  # that don't reference device symbols from other TUs, so they can still
+  # be compiled individually without -fgpu-rdc.
+
+  set(HIPIFY_DEVICE_DIR "${HIPIFY_DIR}/src/device")
+
+  foreach(file ${GENERATED_FILES})
+    get_filename_component(fname ${file} NAME)
+
+    # Skip the unity file itself - it will be added separately as a source
+    if(fname STREQUAL "device_unity.cpp")
+      continue()
+    endif()
+
+    # Host-only files: compile individually (no device code cross-TU issues)
+    if(fname STREQUAL "host_table.cpp" OR fname STREQUAL "device_table.cpp" OR fname MATCHES ".*_host\\.cc$")
+      list(APPEND HIP_SOURCES ${file})
+      continue()
+    endif()
+
+    # MSCCL kernel files: self-contained __global__ kernels, compile individually
+    if(fname MATCHES "^msccl_kernel_.*\\.cpp$")
+      list(APPEND HIP_SOURCES ${file})
+      continue()
+    endif()
+
+    # Symmetric kernel files (in gensrc/symmetric/): self-contained, compile individually
+    string(FIND "${file}" "/symmetric/" _sym_pos)
+    if(NOT _sym_pos EQUAL -1)
+      list(APPEND HIP_SOURCES ${file})
+      continue()
+    endif()
+
+    # All remaining generated files are collective device .cpp files
+    # (e.g. all_reduce_sum_f32.cpp). These define ncclDevFunc_* functions
+    # and are #included by device_unity.cpp. Mark as HEADER_FILE_ONLY
+    # so they appear in IDE tooling but aren't compiled individually.
+    list(APPEND HIP_SOURCES ${file})
+    set_source_files_properties(${file} PROPERTIES HEADER_FILE_ONLY TRUE)
+  endforeach()
+
+  # Mark the hipified common.cu.cpp and onerank.cu.cpp as header-only
+  # (they are #included by the unity file)
+  foreach(cu_file "common.cu.cpp" "onerank.cu.cpp")
+    set(cu_path "${HIPIFY_DEVICE_DIR}/${cu_file}")
+    if(EXISTS ${cu_path})
+      set_source_files_properties(${cu_path} PROPERTIES HEADER_FILE_ONLY TRUE)
+    endif()
+  endforeach()
+
+  # Add the unity file as the single device compilation unit.
+  # It needs the hipified device dir on its include path so that
+  # #include "common.cu.cpp" and #include "onerank.cu.cpp" resolve.
+  set(UNITY_FILE "${GEN_DIR}/device_unity.cpp")
+  list(APPEND HIP_SOURCES ${UNITY_FILE})
+  set_source_files_properties(${UNITY_FILE} PROPERTIES
+    INCLUDE_DIRECTORIES "${HIPIFY_DEVICE_DIR}"
+  )
+
+else()
+  # Standard build: compile each generated file individually (requires -fgpu-rdc)
+  foreach(file ${GENERATED_FILES})
+    get_filename_component(fname ${file} NAME)
+    # Exclude the unity file from standard builds to avoid duplicate symbols
+    if(fname STREQUAL "device_unity.cpp")
+      continue()
+    endif()
+    list(APPEND HIP_SOURCES ${file})
+  endforeach()
+endif()
 
 # Create an initial git_version.cpp file (that will be updated with latest git version)
 #==================================================================================================
@@ -1220,7 +1294,9 @@ target_compile_options(rccl PRIVATE -Wall)
 target_compile_options(rccl PRIVATE -Werror=deprecated-copy-with-user-provided-copy)
 target_compile_options(rccl PRIVATE -Wno-format-nonliteral)
 target_compile_options(rccl PRIVATE -Wno-unused-function)
-target_compile_options(rccl PRIVATE -fgpu-rdc)
+if(NOT ENABLE_UNITY_DEVICE_BUILD)
+  target_compile_options(rccl PRIVATE -fgpu-rdc)
+endif()
 
 if(QUIET_WARNINGS)
   target_compile_options(rccl PRIVATE -Wno-invalid-offsetof)
@@ -1340,7 +1416,9 @@ endif()
 if (ROCTX_ENABLE)
   target_link_libraries(rccl PRIVATE ${ROCTX_LIB})
 endif()
-target_link_libraries(rccl PRIVATE   -fgpu-rdc)             # Required when linking relocatable device code
+if(NOT ENABLE_UNITY_DEVICE_BUILD)
+  target_link_libraries(rccl PRIVATE   -fgpu-rdc)           # Required when linking relocatable device code
+endif()
 target_link_libraries(rccl PRIVATE   Threads::Threads)
 target_link_libraries(rccl INTERFACE hip::host)
 target_link_libraries(rccl PRIVATE   hip::device)
@@ -1410,14 +1488,23 @@ set_property(TARGET rccl PROPERTY RULE_LAUNCH_LINK "${CMAKE_COMMAND} -E time")
 rocm_set_soversion(rccl "1.0")
 
 if(NOT BUILD_SHARED_LIBS)
-  # To create a static lib with `-fgpu-rdc`, you need `--emit-static-lib` and `--hip-link`.
-  # You also need to invoke amdclang++ again to trigger GPU code generation.
-  set(static_link_flags
-    ${CXXFLAGS}
-    --hip-link
-    -fgpu-rdc
-    --emit-static-lib
-  )
+  if(ENABLE_UNITY_DEVICE_BUILD)
+    # Unity build: no -fgpu-rdc needed for static lib
+    set(static_link_flags
+      ${CXXFLAGS}
+      --hip-link
+      --emit-static-lib
+    )
+  else()
+    # To create a static lib with `-fgpu-rdc`, you need `--emit-static-lib` and `--hip-link`.
+    # You also need to invoke amdclang++ again to trigger GPU code generation.
+    set(static_link_flags
+      ${CXXFLAGS}
+      --hip-link
+      -fgpu-rdc
+      --emit-static-lib
+    )
+  endif()
 
   # Find all the libraries we need to link at link time to include them in the clang link
   # command line.

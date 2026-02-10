@@ -5,6 +5,9 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
+#ifndef NCCL_DEVICE_ALL_REDUCE_H_
+#define NCCL_DEVICE_ALL_REDUCE_H_
+
 #include "device.h"
 #include "collectives.h"
 #include "primitives.h"
@@ -13,7 +16,7 @@
 #include "npkit/npkit.h"
 #endif
 
-namespace {
+namespace ncclDevAllReduce {
   template<typename T, typename RedOp, typename Proto, int RCCLMetadata>
 #if defined(USE_INDIRECT_FUNCTION_CALL) && !defined(__gfx942__) && !defined(__gfx950__)
   __device__ void runRing(int tid, int nthreads, struct ncclDevWorkColl* work, struct ncclShmemData* ncclShmem, void* ncclShmemPerWarp) {
@@ -574,26 +577,26 @@ namespace {
 #define rcclAllReduceRunRingSimpleProtoImpl(tid, nthreads, work, ncclShmem, ncclShmemPerWarp) \
   if(work->rcclUseOneSlice){ \
     using Proto = ProtoSimple<ALLREDUCE_CHUNKSTEPS/ALLREDUCE_SLICESTEPS_SINGLE_NODE, ALLREDUCE_SLICESTEPS_SINGLE_NODE>; \
-    runRing<T, RedOp, Proto, RCCL_METADATA_EMPTY>(tid, nthreads, work, ncclShmem, ncclShmemPerWarp); \
+    ncclDevAllReduce::runRing<T, RedOp, Proto, RCCL_METADATA_EMPTY>(tid, nthreads, work, ncclShmem, ncclShmemPerWarp); \
   } \
   else{ \
     using Proto = ProtoSimple<ALLREDUCE_CHUNKSTEPS/ALLREDUCE_SLICESTEPS, ALLREDUCE_SLICESTEPS>; \
-    runRing<T, RedOp, Proto, RCCL_METADATA_EMPTY>(tid, nthreads, work, ncclShmem, ncclShmemPerWarp); \
+    ncclDevAllReduce::runRing<T, RedOp, Proto, RCCL_METADATA_EMPTY>(tid, nthreads, work, ncclShmem, ncclShmemPerWarp); \
   }
 #elif defined(__gfx950__) // Use a single slice and single step per slice per simple primitive for a single node on some gfx950 devices.
 #define rcclAllReduceRunRingSimpleProtoImpl(tid, nthreads, work, ncclShmem, ncclShmemPerWarp) \
   if(work->rcclUseOneSlice){ \
     using Proto = ProtoSimple<1, 1>; \
-    runRing<T, RedOp, Proto, RCCL_METADATA_EMPTY>(tid, nthreads, work, ncclShmem, ncclShmemPerWarp); \
+    ncclDevAllReduce::runRing<T, RedOp, Proto, RCCL_METADATA_EMPTY>(tid, nthreads, work, ncclShmem, ncclShmemPerWarp); \
   } \
   else{ \
     using Proto = ProtoSimple<ALLREDUCE_CHUNKSTEPS/ALLREDUCE_SLICESTEPS, ALLREDUCE_SLICESTEPS>; \
-    runRing<T, RedOp, Proto, RCCL_METADATA_EMPTY>(tid, nthreads, work, ncclShmem, ncclShmemPerWarp); \
+    ncclDevAllReduce::runRing<T, RedOp, Proto, RCCL_METADATA_EMPTY>(tid, nthreads, work, ncclShmem, ncclShmemPerWarp); \
   }
 #else
 #define rcclAllReduceRunRingSimpleProtoImpl(tid, nthreads, work, ncclShmem, ncclShmemPerWarp) \
   using Proto = ProtoSimple<ALLREDUCE_CHUNKSTEPS/ALLREDUCE_SLICESTEPS, ALLREDUCE_SLICESTEPS>; \
-  runRing<T, RedOp, Proto, RCCL_METADATA_EMPTY>(tid, nthreads, work, ncclShmem, ncclShmemPerWarp);
+  ncclDevAllReduce::runRing<T, RedOp, Proto, RCCL_METADATA_EMPTY>(tid, nthreads, work, ncclShmem, ncclShmemPerWarp);
 #endif
 
 template<typename T, typename RedOp>
@@ -608,9 +611,9 @@ struct RunWorkColl<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_TREE, NCCL_PROTO_SIMPL
   __device__ __forceinline__ void run(int tid, int nthreads, struct ncclDevWorkColl* work, struct ncclShmemData* ncclShmem, void* ncclShmemPerWarp) {
     using Proto = ProtoSimple<1, 1>;
     if (work->acc != nullptr) {
-      runTreeSplit<T, RedOp, Proto>(tid, nthreads, work, ncclShmem, ncclShmemPerWarp);
+      ncclDevAllReduce::runTreeSplit<T, RedOp, Proto>(tid, nthreads, work, ncclShmem, ncclShmemPerWarp);
     } else {
-      runTreeUpDown<T, RedOp, Proto>(tid, nthreads, work, ncclShmem, ncclShmemPerWarp);
+      ncclDevAllReduce::runTreeUpDown<T, RedOp, Proto>(tid, nthreads, work, ncclShmem, ncclShmemPerWarp);
     }
     // Check-here
     // #if CUDART_VERSION >= 11020 && CUDART_VERSION < 11040 && __CUDA_ARCH__ >= 800
@@ -1127,27 +1130,29 @@ struct RunWorkColl<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_COLLNET_CHAIN, NCCL_PR
 template<typename T, typename RedOp>
 struct RunWorkColl<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_LL> {
   __device__ __forceinline__ void run(int tid, int nthreads, struct ncclDevWorkColl* work, struct ncclShmemData* ncclShmem, void* ncclShmemPerWarp) {
-    runRing<T, RedOp, ProtoLL, RCCL_METADATA_EMPTY>(tid, nthreads, work, ncclShmem, ncclShmemPerWarp);
+    ncclDevAllReduce::runRing<T, RedOp, ProtoLL, RCCL_METADATA_EMPTY>(tid, nthreads, work, ncclShmem, ncclShmemPerWarp);
   }
 };
 
 template<typename T, typename RedOp>
 struct RunWorkColl<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_TREE, NCCL_PROTO_LL> {
   __device__ __forceinline__ void run(int tid, int nthreads, struct ncclDevWorkColl* work, struct ncclShmemData* ncclShmem, void* ncclShmemPerWarp) {
-    runTreeSplit<T, RedOp, ProtoLL>(tid, nthreads, work, ncclShmem, ncclShmemPerWarp);
+    ncclDevAllReduce::runTreeSplit<T, RedOp, ProtoLL>(tid, nthreads, work, ncclShmem, ncclShmemPerWarp);
   }
 };
 
 template<typename T, typename RedOp>
 struct RunWorkColl<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_LL128> {
   __device__ __forceinline__ void run(int tid, int nthreads, struct ncclDevWorkColl* work, struct ncclShmemData* ncclShmem, void* ncclShmemPerWarp) {
-    runRing<T, RedOp, ProtoLL128, RCCL_METADATA_EMPTY>(tid, nthreads, work, ncclShmem, ncclShmemPerWarp);
+    ncclDevAllReduce::runRing<T, RedOp, ProtoLL128, RCCL_METADATA_EMPTY>(tid, nthreads, work, ncclShmem, ncclShmemPerWarp);
   }
 };
 
 template<typename T, typename RedOp>
 struct RunWorkColl<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_TREE, NCCL_PROTO_LL128> {
   __device__ __forceinline__ void run(int tid, int nthreads, struct ncclDevWorkColl* work, struct ncclShmemData* ncclShmem, void* ncclShmemPerWarp) {
-    runTreeSplit<T, RedOp, ProtoLL128>(tid, nthreads, work, ncclShmem, ncclShmemPerWarp);
+    ncclDevAllReduce::runTreeSplit<T, RedOp, ProtoLL128>(tid, nthreads, work, ncclShmem, ncclShmemPerWarp);
   }
 };
+
+#endif // NCCL_DEVICE_ALL_REDUCE_H_

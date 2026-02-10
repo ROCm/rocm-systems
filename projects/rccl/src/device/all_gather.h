@@ -5,11 +5,14 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
+#ifndef NCCL_DEVICE_ALL_GATHER_H_
+#define NCCL_DEVICE_ALL_GATHER_H_
+
 #include "device.h"
 #include "collectives.h"
 #include "primitives.h"
 
-namespace {
+namespace ncclDevAllGather {
   template<typename T, typename RedOp, typename Proto, bool isNetOffload = false>
 #if defined(USE_INDIRECT_FUNCTION_CALL) && !defined(__gfx942__) && !defined(__gfx950__)
   __device__ void runRing(int tid, int nthreads, struct ncclDevWorkColl* work, struct ncclShmemData* ncclShmem, void* ncclShmemPerWarp = nullptr) {
@@ -187,13 +190,13 @@ namespace {
 #if defined(__gfx942__) || defined(__gfx950__) // Use a single slice per simple primitive for a single node on some GFX9 devices.
 #define rcclAllGatherRunRingSimpleProtoImpl(tid, nthreads, work, ncclShmem, ncclShmemPerWarp) \
   if(work->rcclUseOneSlice){ \
-    runRing<T, RedOp, ProtoSimple<ALLGATHER_CHUNKSTEPS/ALLGATHER_SLICESTEPS_SINGLE_NODE, ALLGATHER_SLICESTEPS_SINGLE_NODE>, false>(tid, nthreads, work, ncclShmem, ncclShmemPerWarp); \
+    ncclDevAllGather::runRing<T, RedOp, ProtoSimple<ALLGATHER_CHUNKSTEPS/ALLGATHER_SLICESTEPS_SINGLE_NODE, ALLGATHER_SLICESTEPS_SINGLE_NODE>, false>(tid, nthreads, work, ncclShmem, ncclShmemPerWarp); \
   } else{ \
-    runRing<T, RedOp, ProtoSimple<ALLGATHER_CHUNKSTEPS/ALLGATHER_SLICESTEPS, ALLGATHER_SLICESTEPS>, false>(tid, nthreads, work, ncclShmem, ncclShmemPerWarp); \
+    ncclDevAllGather::runRing<T, RedOp, ProtoSimple<ALLGATHER_CHUNKSTEPS/ALLGATHER_SLICESTEPS, ALLGATHER_SLICESTEPS>, false>(tid, nthreads, work, ncclShmem, ncclShmemPerWarp); \
   }
 #else
 #define rcclAllGatherRunRingSimpleProtoImpl(tid, nthreads, work, ncclShmem, ncclShmemPerWarp) \
-  runRing<T, RedOp, ProtoSimple<ALLGATHER_CHUNKSTEPS/ALLGATHER_SLICESTEPS, ALLGATHER_SLICESTEPS>, false>(tid, nthreads, work, ncclShmem, ncclShmemPerWarp);
+  ncclDevAllGather::runRing<T, RedOp, ProtoSimple<ALLGATHER_CHUNKSTEPS/ALLGATHER_SLICESTEPS, ALLGATHER_SLICESTEPS>, false>(tid, nthreads, work, ncclShmem, ncclShmemPerWarp);
 #endif
 
 template<typename T, typename RedOp>
@@ -205,7 +208,7 @@ struct RunWorkColl<ncclFuncAllGather, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPL
     bool isNetOffload = work->isOneRPN && work->netRegUsed;
 #endif
     if (isNetOffload)
-      runRing<T, RedOp, ProtoSimple<1, 1>, true>(tid, nthreads, work, ncclShmem, ncclShmemPerWarp);
+      ncclDevAllGather::runRing<T, RedOp, ProtoSimple<1, 1>, true>(tid, nthreads, work, ncclShmem, ncclShmemPerWarp);
     else
       rcclAllGatherRunRingSimpleProtoImpl(tid, nthreads, work, ncclShmem, ncclShmemPerWarp);
   }
@@ -214,14 +217,14 @@ struct RunWorkColl<ncclFuncAllGather, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPL
 template<typename T, typename RedOp>
 struct RunWorkColl<ncclFuncAllGather, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_LL> {
   __device__ __forceinline__ void run(int tid, int nthreads, struct ncclDevWorkColl* work, struct ncclShmemData* ncclShmem, void* ncclShmemPerWarp) {
-    runRing<T, RedOp, ProtoLL>(tid, nthreads, work, ncclShmem, ncclShmemPerWarp);
+    ncclDevAllGather::runRing<T, RedOp, ProtoLL>(tid, nthreads, work, ncclShmem, ncclShmemPerWarp);
   }
 };
 
 template<typename T, typename RedOp>
 struct RunWorkColl<ncclFuncAllGather, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_LL128> {
   __device__ __forceinline__ void run(int tid, int nthreads, struct ncclDevWorkColl* work, struct ncclShmemData* ncclShmem, void* ncclShmemPerWarp) {
-    runRing<T, RedOp, ProtoLL128>(tid, nthreads, work, ncclShmem, ncclShmemPerWarp);
+    ncclDevAllGather::runRing<T, RedOp, ProtoLL128>(tid, nthreads, work, ncclShmem, ncclShmemPerWarp);
   }
 };
 
@@ -682,3 +685,5 @@ struct RunWorkColl<ncclFuncAllGather, T, RedOp, NCCL_ALGO_COLLNET_DIRECT, NCCL_P
     }
   }
 };
+
+#endif // NCCL_DEVICE_ALL_GATHER_H_

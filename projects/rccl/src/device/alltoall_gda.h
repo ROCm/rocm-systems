@@ -4,6 +4,9 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
+#ifndef NCCL_DEVICE_ALLTOALL_GDA_H_
+#define NCCL_DEVICE_ALLTOALL_GDA_H_
+
 #include "device.h"
 #include "collectives.h"
 #include "primitives.h"
@@ -31,3 +34,4 @@ struct RunWorkColl<ncclFuncAllToAllGda, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIM
 };
 #endif
 
+#endif // NCCL_DEVICE_ALLTOALL_GDA_H_
