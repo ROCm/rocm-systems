@@ -34,6 +34,7 @@
 #include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/tracing/tracing.hpp"
+#include "lib/rocprofiler-sdk/tracing/tracing_data_pool.hpp"
 
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/external_correlation.h>
@@ -241,7 +242,8 @@ WriteInterceptor(const void* packets,
         return;
     }
 
-    auto tracing_data_v = tracing::tracing_data{};
+    auto tracing_data_wrapper = tracing::pooled_tracing_data{};
+    auto& tracing_data_v = *tracing_data_wrapper;  // Reference to pooled object
     tracing::populate_contexts(ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,
                                ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
                                tracing_data_v);
