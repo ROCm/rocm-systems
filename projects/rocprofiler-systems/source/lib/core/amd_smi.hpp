@@ -20,11 +20,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include "core/mock/amdsmi_mock.hpp"
 #include "core/timemory.hpp"
-
-#if ROCPROFSYS_USE_ROCM > 0
-#    include <amd_smi/amdsmi.h>
-#endif
 
 #if ROCPROFSYS_AINIC_STAT_ENABLED > 0
 #    define USE_AINIC

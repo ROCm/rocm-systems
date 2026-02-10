@@ -63,6 +63,7 @@ target_sources(rocprofiler-systems-core-library PRIVATE ${core_sources} ${core_h
 add_subdirectory(binary)
 add_subdirectory(components)
 add_subdirectory(containers)
+add_subdirectory(mock)
 add_subdirectory(rocpd)
 add_subdirectory(trace_cache)
 
@@ -99,6 +100,7 @@ target_link_libraries(
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-static-libstdcxx-optional>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-sanitizer>
         $<BUILD_INTERFACE:$<IF:$<BOOL:${ROCPROFSYS_BUILD_LTO}>,rocprofiler-systems::rocprofiler-systems-lto,>>
+        $<BUILD_INTERFACE:rocprofiler-systems-amdsmi-mock>
 )
 
 set_target_properties(

@@ -9,7 +9,7 @@
 
 #if ROCPROFSYS_USE_ROCM > 0
 #    include "core/amd_smi.hpp"
-#    include <amd_smi/amdsmi.h>
+#    include "core/mock/amdsmi_mock.hpp"
 #endif
 
 #include <chrono>

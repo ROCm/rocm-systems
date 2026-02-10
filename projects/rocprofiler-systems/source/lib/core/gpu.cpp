@@ -427,10 +427,13 @@ get_processor_count()
     return processors::total_processor_count;
 }
 
-amdsmi_processor_handle
+std::optional<amdsmi_processor_handle>
 get_handle_from_id(uint32_t dev_id)
 {
-    return processors::processors_list[dev_id];
+    return (dev_id >= processors::processors_list.size())
+               ? std::nullopt
+               : std::optional<amdsmi_processor_handle>(
+                     processors::processors_list[dev_id]);
 }
 #endif
 

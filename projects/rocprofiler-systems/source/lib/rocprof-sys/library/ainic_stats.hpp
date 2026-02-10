@@ -5,10 +5,7 @@
 #include <string>
 
 #include "core/amd_smi.hpp"
-
-#ifdef USE_AINIC
-#    include <amd_smi/amdsmi.h>
-#endif
+#include "core/mock/amdsmi_mock.hpp"
 
 struct nic_stats
 {
@@ -77,7 +74,7 @@ private:
     size_t get_nic_count();
 
 #ifdef USE_AINIC
-    void update_data_for_one_nic(amdsmi_processor_handle processor_handle,
+    void update_data_for_one_nic(amdsmi_processor_handle         processor_handle,
                                  amdsmi_nic_rdma_devices_info_t& info);
 #endif
 };

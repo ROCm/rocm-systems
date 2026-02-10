@@ -27,7 +27,7 @@
 #include <string>
 
 #if ROCPROFSYS_USE_ROCM > 0
-#    include <amd_smi/amdsmi.h>
+#    include "core/mock/amdsmi_mock.hpp"
 #    include <rocprofiler-sdk/agent.h>
 #endif
 

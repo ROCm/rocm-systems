@@ -22,8 +22,9 @@
 
 #pragma once
 
+#include <optional>
 #if ROCPROFSYS_USE_ROCM > 0
-#    include <amd_smi/amdsmi.h>
+#    include "core/mock/amdsmi_mock.hpp"
 #endif
 
 namespace rocprofsys
@@ -37,7 +38,7 @@ get_processor_handles();
 uint32_t
 get_processor_count();
 
-amdsmi_processor_handle
+std::optional<amdsmi_processor_handle>
 get_handle_from_id(uint32_t dev_id);
 
 bool
@@ -72,9 +73,10 @@ struct processors
     static std::vector<amdsmi_processor_handle> ainic_list;
 
 private:
-    friend void                    rocprofsys::gpu::get_processor_handles();
-    friend uint32_t                rocprofsys::gpu::get_processor_count();
-    friend amdsmi_processor_handle rocprofsys::gpu::get_handle_from_id(uint32_t dev_id);
+    friend void     rocprofsys::gpu::get_processor_handles();
+    friend uint32_t rocprofsys::gpu::get_processor_count();
+    friend std::optional<amdsmi_processor_handle> rocprofsys::gpu::get_handle_from_id(
+        uint32_t dev_id);
     friend bool rocprofsys::gpu::vcn_is_device_level_only(uint32_t dev_id);
     friend bool rocprofsys::gpu::jpeg_is_device_level_only(uint32_t dev_id);
     friend bool rocprofsys::gpu::is_vcn_busy_supported(uint32_t dev_id);

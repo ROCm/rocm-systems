@@ -1,10 +1,10 @@
 #include "library/amd_smi_ainic.hpp"
 
 #include "core/agent.hpp"
+#include "core/mock/amdsmi_mock.hpp"
 #include "core/trace_cache/cache_manager.hpp"
 #include "core/trace_cache/cacheable.hpp"
 #include "core/trace_cache/sample_type.hpp"
-#include <amd_smi/amdsmi.h>
 #include <cstdint>
 #if defined(NDEBUG)
 #    undef NDEBUG

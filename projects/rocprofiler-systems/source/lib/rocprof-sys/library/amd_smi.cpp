@@ -27,10 +27,10 @@
 // THE SOFTWARE.
 
 #include "core/agent.hpp"
+#include "core/mock/amdsmi_mock.hpp"
 #include "core/trace_cache/cache_manager.hpp"
 #include "core/trace_cache/cacheable.hpp"
 #include "core/trace_cache/sample_type.hpp"
-#include <amd_smi/amdsmi.h>
 #include <cstdint>
 #if defined(NDEBUG)
 #    undef NDEBUG
@@ -537,7 +537,13 @@ data::sample(uint32_t _device_id)
         }                                                                                \
     }
 
-    amdsmi_processor_handle sample_handle = gpu::get_handle_from_id(_device_id);
+    auto sample_handle_opt = gpu::get_handle_from_id(_device_id);
+    if(!sample_handle_opt.has_value())
+    {
+        LOG_ERROR("Failed to get AMD SMI processor handle for device ID: {}", _device_id);
+        return;
+    }
+    auto& sample_handle = sample_handle_opt.value();
     ROCPROFSYS_AMDSMI_GET(get_settings(m_dev_id).busy, amdsmi_get_gpu_activity,
                           sample_handle, &m_busy_perc);
     ROCPROFSYS_AMDSMI_GET(get_settings(m_dev_id).temp, amdsmi_get_temp_metric,

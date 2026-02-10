@@ -80,21 +80,23 @@ ai_nic_stats_collector::update_stats()
     for(uint32_t index = 0; index < soc_count; index++)
     {
         uint32_t processor_count = 0;
-        status                   = amdsmi_get_processor_handles_by_type(
-            sockets[index], AMDSMI_PROCESSOR_TYPE_AMD_NIC, nullptr, &processor_count);
+
+        // Use mock-specific function for AINIC discovery when ROCm is enabled
+        // This allows testing with mock AINIC devices without physical hardware
+        status = rocprofsys_mock_ainic_get_processor_handles(sockets[index], nullptr,
+                                                             &processor_count);
         if(status != AMDSMI_STATUS_SUCCESS)
         {
-            LOG_ERROR("amdsmi_get_processor_handles_by_type failed with status {}",
+            LOG_ERROR("rocprofsys_mock_ainic_get_processor_handles failed with status {}",
                       (int) status);
             return;
         }
         std::vector<amdsmi_processor_handle> processor_handles(processor_count);
-        status = amdsmi_get_processor_handles_by_type(
-            sockets[index], AMDSMI_PROCESSOR_TYPE_AMD_NIC, processor_handles.data(),
-            &processor_count);
+        status = rocprofsys_mock_ainic_get_processor_handles(
+            sockets[index], processor_handles.data(), &processor_count);
         if(status != AMDSMI_STATUS_SUCCESS)
         {
-            LOG_ERROR("amdsmi_get_processor_handles_by_type failed with status {}",
+            LOG_ERROR("rocprofsys_mock_ainic_get_processor_handles failed with status {}",
                       (int) status);
             return;
         }
@@ -131,8 +133,9 @@ ai_nic_stats_collector::get_nic_count()
     for(uint32_t index = 0; index < soc_count; index++)
     {
         uint32_t processor_count = 0;
-        status                   = amdsmi_get_processor_handles_by_type(
-            sockets[index], AMDSMI_PROCESSOR_TYPE_AMD_NIC, nullptr, &processor_count);
+        // Use mock-specific function for AINIC discovery
+        status = rocprofsys_mock_ainic_get_processor_handles(sockets[index], nullptr,
+                                                             &processor_count);
         if(status != AMDSMI_STATUS_SUCCESS)
         {
             continue;
@@ -150,15 +153,14 @@ void
 ai_nic_stats_collector::update_data_for_one_nic(amdsmi_processor_handle processor_handle,
                                                 amdsmi_nic_rdma_devices_info_t& info)
 {
-    for(uint8_t rdma_dev_idx = 0; rdma_dev_idx < info.num_rdma_dev;
-            ++rdma_dev_idx)
+    for(uint8_t rdma_dev_idx = 0; rdma_dev_idx < info.num_rdma_dev; ++rdma_dev_idx)
     {
         amdsmi_nic_rdma_dev_info_t dev_info = info.rdma_dev_info[rdma_dev_idx];
-        for(uint8_t rdma_port_idx = 0;
-            rdma_port_idx < dev_info.num_rdma_ports;
+        for(uint8_t rdma_port_idx = 0; rdma_port_idx < dev_info.num_rdma_ports;
             ++rdma_port_idx)
         {
-            amdsmi_nic_rdma_port_info_t port_info = dev_info.rdma_port_info[rdma_port_idx];
+            amdsmi_nic_rdma_port_info_t port_info =
+                dev_info.rdma_port_info[rdma_port_idx];
             nic_stats data;
             data._name   = dev_info.rdma_dev;
             data._netdev = port_info.netdev;
@@ -185,32 +187,27 @@ ai_nic_stats_collector::update_data_for_one_nic(amdsmi_processor_handle processo
                     data._rx_rdma_ucast_bytes =
                         static_cast<std::uint32_t>(stats[stat_idx].value);
                 }
-                else if(strcmp(stats[stat_idx].name, nic_stats::RX_RDMA_UCAST_PKTS) ==
-                        0)
+                else if(strcmp(stats[stat_idx].name, nic_stats::RX_RDMA_UCAST_PKTS) == 0)
                 {
                     data._rx_rdma_ucast_pkts =
                         static_cast<std::uint32_t>(stats[stat_idx].value);
                 }
-                else if(strcmp(stats[stat_idx].name,
-                            nic_stats::TX_RDMA_UCAST_BYTES) == 0)
+                else if(strcmp(stats[stat_idx].name, nic_stats::TX_RDMA_UCAST_BYTES) == 0)
                 {
                     data._tx_rdma_ucast_bytes =
                         static_cast<std::uint32_t>(stats[stat_idx].value);
                 }
-                else if(strcmp(stats[stat_idx].name, nic_stats::TX_RDMA_UCAST_PKTS) ==
-                        0)
+                else if(strcmp(stats[stat_idx].name, nic_stats::TX_RDMA_UCAST_PKTS) == 0)
                 {
                     data._tx_rdma_ucast_pkts =
                         static_cast<std::uint32_t>(stats[stat_idx].value);
                 }
-                else if(strcmp(stats[stat_idx].name, nic_stats::RX_RDMA_CNP_PKTS) ==
-                        0)
+                else if(strcmp(stats[stat_idx].name, nic_stats::RX_RDMA_CNP_PKTS) == 0)
                 {
                     data._rx_rdma_cnp_pkts =
                         static_cast<std::uint32_t>(stats[stat_idx].value);
                 }
-                else if(strcmp(stats[stat_idx].name, nic_stats::TX_RDMA_CNP_PKTS) ==
-                        0)
+                else if(strcmp(stats[stat_idx].name, nic_stats::TX_RDMA_CNP_PKTS) == 0)
                 {
                     data._tx_rdma_cnp_pkts =
                         static_cast<std::uint32_t>(stats[stat_idx].value);
