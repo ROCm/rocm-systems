@@ -392,7 +392,7 @@ void compare_e8m0_results(const std::vector<T>& out, const std::vector<T>& exp) 
         REQUIRE(std::isnan(out[i]));
       } else {
         REQUIRE_THAT(out[i],
-                     Catch::WithinAbs(exp[i], (T)1e-6) || Catch::WithinRel(exp[i], (T)1e-3));
+                     Catch::Matchers::WithinAbs(exp[i], (T)1e-6) || Catch::Matchers::WithinRel(exp[i], (T)1e-3));
       }
     } else {
       REQUIRE(out[i] == exp[i]);
