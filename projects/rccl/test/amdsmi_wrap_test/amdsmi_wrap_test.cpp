@@ -142,19 +142,22 @@ bool test_getDeviceIndexByPciBusId() {
         return true;
     }
 
-    // Get bus ID for device 0
-    char busId[32] = {0};
-    res = amd_smi_getDevicePciBusIdString(0, busId, sizeof(busId));
-    TEST_ASSERT(res == ncclSuccess, "amd_smi_getDevicePciBusIdString() should succeed");
+    // Test for all devices
+    for (uint32_t i = 0; i < numDevs; i++) {
+        // Get bus ID for device i
+        char busId[32] = {0};
+        res = amd_smi_getDevicePciBusIdString(i, busId, sizeof(busId));
+        TEST_ASSERT(res == ncclSuccess, "amd_smi_getDevicePciBusIdString() should succeed");
 
-    // Look up device index by bus ID
-    uint32_t deviceIndex = 0xFFFFFFFF;
-    res = amd_smi_getDeviceIndexByPciBusId(busId, &deviceIndex);
-    TEST_ASSERT(res == ncclSuccess, "amd_smi_getDeviceIndexByPciBusId() should return ncclSuccess");
+        // Look up device index by bus ID
+        uint32_t deviceIndex = 0xFFFFFFFF;
+        res = amd_smi_getDeviceIndexByPciBusId(busId, &deviceIndex);
+        TEST_ASSERT(res == ncclSuccess, "amd_smi_getDeviceIndexByPciBusId() should return ncclSuccess");
 
-    std::cout << "  Bus ID " << busId << " -> Device Index: " << deviceIndex << std::endl;
-    TEST_ASSERT(deviceIndex == 0, "Device index should be 0 for first device's bus ID");
-    TEST_PASS("amd_smi_getDeviceIndexByPciBusId() succeeded");
+        std::cout << "  Bus ID " << busId << " -> Device Index: " << deviceIndex << std::endl;
+        TEST_ASSERT(deviceIndex == i, "Device index should match the original device");
+    }
+    TEST_PASS("amd_smi_getDeviceIndexByPciBusId() succeeded for all devices");
 
     amd_smi_shutdown();
     return true;

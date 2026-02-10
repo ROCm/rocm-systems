@@ -298,7 +298,8 @@ ncclResult_t amd_smi_getDevicePciBusIdString(uint32_t deviceIndex, char* busId, 
       }
       // borrowing NCCL's format from utils.cc:int64ToBusId
       // !! To be reconciled after discussion with amdsmi team !!
-      snprintf(busId, len, "%04lx:%02lx:%02lx.%01lx", (id) >> 20, (id & 0xff000) >> 12, (id & 0xff0) >> 4, (id & 0xf));
+      snprintf(busId, len, "%04lx:%02lx:%02lx.%01lx", (id & 0xffffffff) >> 32, (id & 0xff00) >> 8, (id & 0xf8) >> 3, (id & 0x7));
+      // snprintf(busId, len, "%04lx:%02lx:%02lx.%01lx", (id) >> 20, (id & 0xff000) >> 12, (id & 0xff0) >> 4, (id & 0xf));
     } else {
     // rocm-smi format
       ARSMICHECK(ARSMI_dev_pci_id_get(deviceIndex, &id));
@@ -335,17 +336,17 @@ ncclResult_t amd_smi_getDeviceIndexByPciBusId(const char* pciBusId, uint32_t* de
 
       amdsmi_bdf_t bdf = {};
       // This is the format that matches amd-smi BDF
-      bdf.function_number = (busid & 0x7);
-      bdf.device_number = (busid & 0xf8) >> 3;
-      bdf.bus_number = (busid & 0xff00) >> 8;
-      bdf.domain_number = (busid & 0xffffffffffff0000) >> 16;
+      // bdf.function_number = (busid & 0x7);
+      // bdf.device_number = (busid & 0xf8) >> 3;
+      // bdf.bus_number = (busid & 0xff00) >> 8;
+      // bdf.domain_number = (busid & 0xffffffffffff0000) >> 16;
 
       // However, it is incompatible with the format enforced by NCCL in utils.cc:int64ToBusId
       // !! To be reconciled after discussion with amdsmi team !!
-      // bdf.function_number = (busid & 0xf);
-      // bdf.device_number = (busid & 0xff) >> 4;
-      // bdf.bus_number = (busid & 0xff000) >> 12;
-      // bdf.domain_number = busid >> 20;
+      bdf.function_number = (busid & 0xf);
+      bdf.device_number = (busid & 0xff) >> 4;
+      bdf.bus_number = (busid & 0xff000) >> 12;
+      bdf.domain_number = busid >> 20;
 
       AMDSMITRY(amdsmi_get_processor_handle_from_bdf, bdf, &processor_handle);
 
