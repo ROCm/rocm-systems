@@ -54,8 +54,6 @@ namespace rocshmem
       pages[i] = (char*)pages[i-1] + pageSize;
     }
 
-    fprintf(stderr, "topology.cpp:57\n");
-
     long const retCode = numa.move_pages(0, numPages, pages.data(), NULL, status.data(), 0);
     if (retCode) {
       fprintf(stderr, "Unable to collect page table information for allocated memory. "

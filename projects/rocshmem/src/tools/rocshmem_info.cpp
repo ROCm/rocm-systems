@@ -162,9 +162,7 @@ int main (int argc, char **argv) {
   }
 
   printf("################################################################################\n");
-//  rocshmem::rocshmem_init();
   rocshmem::DisplayTopology(false);
-//  rocshmem::rocshmem_finalize();
   printf("################################################################################\n");
   return 0;
 }
