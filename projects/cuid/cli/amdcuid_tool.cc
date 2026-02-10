@@ -52,9 +52,12 @@ void print_usage(const char* program_name) {
     std::cout << "Usage: " << program_name << " [OPTIONS]\n\n";
     std::cout << "AMD Component Unified Identifier (CUID) Tool\n\n";
     std::cout << "Options:\n";
-    std::cout << "  --generate-cuid [key_file]   Generate/refresh CUID registry from discovered devices\n";
-    std::cout << "                               Optionally specify HMAC key file (32 bytes)\n";
+    std::cout << "  --generate-cuid              Generate/refresh CUID registry from discovered devices\n";
     std::cout << "                               Requires root privileges\n";
+    std::cout << "                               Must use --generate-key or --set-key to provide HMAC key\n";
+    std::cout << "  --generate-key               Generate a new random HMAC key (use with --generate-cuid)\n";
+    std::cout << "  --set-key <key_file>         Set HMAC key from file (32 bytes, use with --generate-cuid)\n";
+    std::cout << "  --notify-daemon              Notify daemon to refresh device registry (for udev integration)\n";
     std::cout << "  --list                       List all devices and their CUIDs\n";
     std::cout << "  --type <type>                Filter by device type (gpu, cpu, nic, platform)\n";
     std::cout << "                               Use with --list or --query-device\n";
@@ -64,10 +67,12 @@ void print_usage(const char* program_name) {
     std::cout << "  --version                    Show library version\n";
     std::cout << "  --help, -h                   Show this help message\n";
     std::cout << "\nExamples:\n";
-    std::cout << "  # Generate/refresh CUID registry (requires root)\n";
-    std::cout << "  sudo " << program_name << " --generate-cuid\n\n";
-    std::cout << "  # Generate with custom HMAC key file\n";
-    std::cout << "  sudo " << program_name << " --generate-cuid /path/to/hmac_key.bin\n\n";
+    std::cout << "  # Generate CUID registry with a new random key (requires root)\n";
+    std::cout << "  sudo " << program_name << " --generate-cuid --generate-key\n\n";
+    std::cout << "  # Generate CUID registry with existing key file\n";
+    std::cout << "  sudo " << program_name << " --generate-cuid --set-key /path/to/hmac_key.bin\n\n";
+    std::cout << "  # Notify daemon of device changes (called by udev)\n";
+    std::cout << "  " << program_name << " --notify-daemon\n\n";
     std::cout << "  # List all devices with their CUIDs\n";
     std::cout << "  " << program_name << " --list\n\n";
     std::cout << "  # List all GPUs with their CUIDs\n";
@@ -118,6 +123,26 @@ bool load_key_from_file(const std::string& key_file, uint8_t key[32]) {
 }
 
 /**
+ * @brief Notify the daemon to refresh device registry
+ * 
+ * This function is called by udev when device changes are detected.
+ * It triggers the daemon to re-scan devices via IPC.
+ * 
+ * @return 0 on success, 1 on failure
+ */
+int notify_daemon() {
+    amdcuid_status_t status = amdcuid_refresh();
+    
+    if (status != AMDCUID_STATUS_SUCCESS) {
+        // Silently fail for udev context - don't spam logs
+        // The daemon may not be running, which is acceptable
+        return (status == AMDCUID_STATUS_IPC_ERROR) ? 0 : 1;
+    }
+    
+    return 0;
+}
+
+/**
  * @brief Query a string property from a device handle
  * @param handle The device handle
  * @param query The query type
@@ -144,7 +169,7 @@ amdcuid_status_t query_string_property(amdcuid_id_t handle, amdcuid_query_t quer
     return status;
 }
 
-int generate_cuid_files(const std::string& key_file) {
+int generate_cuid_files(const std::string& key_file, bool generate_key) {
     std::cout << "Generating/refreshing CUID registry...\n" << std::endl;
     
     // Check for root privileges
@@ -154,8 +179,24 @@ int generate_cuid_files(const std::string& key_file) {
         return 1;
     }
     
-    // If key file is provided, load and set the HMAC key
+    // Validate key options - must specify exactly one
+    if (key_file.empty() && !generate_key) {
+        std::cerr << "Error: Must specify either --generate-key or --set-key <file> with --generate-cuid\n";
+        std::cerr << "Use --generate-key to create a new random key, or\n";
+        std::cerr << "Use --set-key <file> to load an existing key from a file." << std::endl;
+        return 1;
+    }
+    
+    if (!key_file.empty() && generate_key) {
+        std::cerr << "Error: Cannot use both --generate-key and --set-key together.\n";
+        std::cerr << "Use --generate-key to create a new random key, or\n";
+        std::cerr << "Use --set-key <file> to load an existing key from a file." << std::endl;
+        return 1;
+    }
+    
+    // Handle key setup
     if (!key_file.empty()) {
+        // Load key from file
         uint8_t key[32];
         if (!load_key_from_file(key_file, key)) {
             std::cerr << "Error: Failed to read HMAC key from file: " << key_file << std::endl;
@@ -169,8 +210,8 @@ int generate_cuid_files(const std::string& key_file) {
             return 1;
         }
         std::cout << "HMAC key loaded from: " << key_file << std::endl;
-    } else {
-        // Generate a new key if none provided
+    } else if (generate_key) {
+        // Generate a new random key
         uint8_t key[32];
         amdcuid_status_t status = amdcuid_generate_hash_key(key);
         if (status != AMDCUID_STATUS_SUCCESS) {
@@ -410,7 +451,10 @@ int query_device(const std::string& identifier, bool show_primary, const std::st
 
 int main(int argc, char* argv[]) {
     static struct option long_options[] = {
-        {"generate-cuid",      optional_argument, 0, 'g'},
+        {"generate-cuid",      no_argument,       0, 'g'},
+        {"generate-key",       no_argument,       0, 'k'},
+        {"set-key",            required_argument, 0, 's'},
+        {"notify-daemon",      no_argument,       0, 'n'},
         {"list",               no_argument,       0, 'l'},
         {"type",               required_argument, 0, 't'},
         {"show-primary",       no_argument,       0, 'p'},
@@ -424,6 +468,8 @@ int main(int argc, char* argv[]) {
     std::string filter_type;
     std::string query_identifier;
     bool do_generate = false;
+    bool generate_key = false;
+    bool do_notify = false;
     bool do_list = false;
     bool show_primary = false;
     bool do_query = false;
@@ -431,17 +477,19 @@ int main(int argc, char* argv[]) {
     int opt;
     int option_index = 0;
     
-    while ((opt = getopt_long(argc, argv, "g::lt:pq:vh", long_options, &option_index)) != -1) {
+    while ((opt = getopt_long(argc, argv, "gks:nlt:pq:vh", long_options, &option_index)) != -1) {
         switch (opt) {
             case 'g':
                 do_generate = true;
-                if (optarg) {
-                    key_file = optarg;
-                } else if (optind < argc && argv[optind] != nullptr && argv[optind][0] != '-') {
-                    // Handle case where argument follows with a space: --generate-cuid /path/to/key
-                    key_file = argv[optind];
-                    optind++;
-                }
+                break;
+            case 'k':
+                generate_key = true;
+                break;
+            case 's':
+                key_file = optarg;
+                break;
+            case 'n':
+                do_notify = true;
                 break;
             case 'l':
                 do_list = true;
@@ -468,9 +516,17 @@ int main(int argc, char* argv[]) {
         }
     }
     
+    // Validate key options usage
+    if ((generate_key || !key_file.empty()) && !do_generate) {
+        std::cerr << "Error: --generate-key and --set-key can only be used with --generate-cuid" << std::endl;
+        return 1;
+    }
+    
     // Execute requested operation
     if (do_generate) {
-        return generate_cuid_files(key_file);
+        return generate_cuid_files(key_file, generate_key);
+    } else if (do_notify) {
+        return notify_daemon();
     } else if (do_list) {
         return list_devices(show_primary, filter_type.empty() ? nullptr : &filter_type);
     } else if (do_query) {
