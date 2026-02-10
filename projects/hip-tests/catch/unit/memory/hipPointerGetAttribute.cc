@@ -280,6 +280,7 @@ TEST_CASE("Unit_hipPointerGetAttribute_Negative") {
             hipErrorInvalidValue);
 #endif
   }
+#if !defined(ENABLE_ADDRESS_SANITIZER)
   SECTION("DeAllocateMem and get the pointer info") {
     char* B_d;
     HIP_CHECK(hipMalloc(&B_d, Nbytes));
@@ -287,6 +288,8 @@ TEST_CASE("Unit_hipPointerGetAttribute_Negative") {
     REQUIRE(hipPointerGetAttribute(&data, HIP_POINTER_ATTRIBUTE_DEVICE_POINTER,
                                    reinterpret_cast<hipDeviceptr_t>(B_d)) == hipErrorInvalidValue);
   }
+#endif
+
   SECTION("Get Start address of host pointer") {
     REQUIRE(hipPointerGetAttribute(&data, HIP_POINTER_ATTRIBUTE_RANGE_START_ADDR,
                                    reinterpret_cast<hipDeviceptr_t>(A_h)) == hipErrorInvalidValue);
