@@ -1798,11 +1798,16 @@ hsa_status_t GpuAgent::QueueCreate(size_t size, hsa_queue_type32_t queue_type, u
   scratch.main_queue_base = nullptr;
   scratch.main_queue_process_offset = 0;
 
-  MAKE_NAMED_SCOPE_GUARD(scratchGuard, [&]() { ReleaseQueueMainScratch(scratch); });
+  MAKE_NAMED_SCOPE_GUARD(scratchGuard, [&]() {
+    if (scratch.main_queue_base != nullptr) ReleaseQueueMainScratch(scratch);
+  });
 
   if (scratch.main_size != 0) {
     AcquireQueueMainScratch(scratch);
     if (scratch.main_queue_base == nullptr) {
+      LogPrint(HSA_AMD_LOG_FLAG_INFO,
+               "Failed to allocate scratch memory for queue, size=%zu, node=%u",
+               scratch.main_size, node_id());
       return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
     }
   }
@@ -1831,7 +1836,11 @@ hsa_status_t GpuAgent::QueueCreate(size_t size, hsa_queue_type32_t queue_type, u
             node_id()));
   }
 
-  if (!shared_queue) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  if (!shared_queue) {
+    LogPrint(HSA_AMD_LOG_FLAG_INFO,
+             "Failed to allocate shared queue descriptor memory, node=%u", node_id());
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
 
   auto aql_queue = new AqlQueue(shared_queue, this, size, node_id(), scratch, event_callback, data,
                                 flags);
