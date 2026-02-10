@@ -104,17 +104,17 @@ reader_t::impl::get_all_processes()
         for(const auto& process_info : process_info_list)
         {
             auto process_info_ptr     = std::make_shared<reader_types::process_info_t>();
-            process_info_ptr->ppid    = process_info.ppid.value_or(0);
+            process_info_ptr->ppid    = process_info.ppid;
             process_info_ptr->pid     = process_info.pid;
-            process_info_ptr->init    = process_info.init.value_or(0);
-            process_info_ptr->fini    = process_info.fini.value_or(0);
-            process_info_ptr->start   = process_info.start.value_or(0);
-            process_info_ptr->end     = process_info.end.value_or(0);
-            process_info_ptr->command = process_info.command.value_or(nullptr);
+            process_info_ptr->init    = process_info.init;
+            process_info_ptr->fini    = process_info.fini;
+            process_info_ptr->start   = process_info.start;
+            process_info_ptr->end     = process_info.end;
+            process_info_ptr->command = process_info.command.value_or("");
             process_info_ptr->environment = process_info.environment;
             process_info_ptr->extdata     = process_info.extdata;
 
-            auto node_it = m_node_info_utility.find(process_info.nid);
+            const auto node_it = m_node_info_utility.find(process_info.nid);
             if(node_it != m_node_info_utility.end() && node_it->second)
             {
                 process_info_ptr->node_info = node_it->second;
@@ -140,20 +140,20 @@ reader_t::impl::get_all_threads()
         for(const auto& thread_info : thread_info_list)
         {
             auto thread_info_ptr = std::make_shared<reader_types::thread_info_t>();
-            thread_info_ptr->parent_process_id = thread_info.ppid.value_or(0);
+            thread_info_ptr->parent_process_id = thread_info.ppid;
             thread_info_ptr->thread_id         = thread_info.tid;
-            thread_info_ptr->name              = thread_info.name.value_or(nullptr);
-            thread_info_ptr->start             = thread_info.start.value_or(0);
-            thread_info_ptr->end               = thread_info.end.value_or(0);
+            thread_info_ptr->name              = thread_info.name.value_or("");
+            thread_info_ptr->start             = thread_info.start;
+            thread_info_ptr->end               = thread_info.end;
             thread_info_ptr->extdata           = thread_info.extdata;
 
-            auto node_it = m_node_info_utility.find(thread_info.nid);
+            const auto node_it = m_node_info_utility.find(thread_info.nid);
             if(node_it != m_node_info_utility.end() && node_it->second)
             {
                 thread_info_ptr->node_info = node_it->second;
             }
 
-            auto process_it = m_process_info_utility.find(thread_info.pid);
+            const auto process_it = m_process_info_utility.find(thread_info.pid);
             if(process_it != m_process_info_utility.end() && process_it->second)
             {
                 thread_info_ptr->process_info = process_it->second;
@@ -186,16 +186,16 @@ reader_t::impl::get_all_agents()
             }
 
             auto agent_info_ptr        = std::make_shared<reader_types::agent_info_t>();
-            agent_info_ptr->agent_type = agent_info.type.value_or(nullptr);
-            agent_info_ptr->type_index = agent_info.type_index.value_or(0);
-            agent_info_ptr->absolute_index = agent_info.absolute_index.value_or(0);
-            agent_info_ptr->logical_index  = agent_info.logical_index.value_or(0);
-            agent_info_ptr->uuid           = agent_info.uuid.value_or(0);
-            agent_info_ptr->name           = agent_info.name.value_or(nullptr);
-            agent_info_ptr->model_name     = agent_info.model_name.value_or(nullptr);
-            agent_info_ptr->vendor_name    = agent_info.vendor_name.value_or(nullptr);
-            agent_info_ptr->product_name   = agent_info.product_name.value_or(nullptr);
-            agent_info_ptr->user_name      = agent_info.user_name.value_or(nullptr);
+            agent_info_ptr->agent_type = agent_info.type.value();
+            agent_info_ptr->type_index = agent_info.type_index.value();
+            agent_info_ptr->absolute_index = agent_info.absolute_index;
+            agent_info_ptr->logical_index  = agent_info.logical_index;
+            agent_info_ptr->uuid           = agent_info.uuid;
+            agent_info_ptr->name           = agent_info.name.value_or("");
+            agent_info_ptr->model_name     = agent_info.model_name.value_or("");
+            agent_info_ptr->vendor_name    = agent_info.vendor_name.value_or("");
+            agent_info_ptr->product_name   = agent_info.product_name.value_or("");
+            agent_info_ptr->user_name      = agent_info.user_name.value_or("");
             agent_info_ptr->extdata        = agent_info.extdata;
 
             auto node_it = m_node_info_utility.find(agent_info.nid);
@@ -303,27 +303,23 @@ reader_t::impl::get_all_kernel_symbols()
         {
             auto kernel_symbol_info_ptr =
                 std::make_shared<reader_types::kernel_symbol_info_t>();
-            kernel_symbol_info_ptr->id = kernel_symbol_info.id;
-            kernel_symbol_info_ptr->name =
-                kernel_symbol_info.kernel_name.value_or(nullptr);
+            kernel_symbol_info_ptr->id   = kernel_symbol_info.id;
+            kernel_symbol_info_ptr->name = kernel_symbol_info.kernel_name.value_or("");
             kernel_symbol_info_ptr->display_name =
-                kernel_symbol_info.display_name.value_or(nullptr);
-            kernel_symbol_info_ptr->kernel_object =
-                kernel_symbol_info.kernel_object.value_or(0);
+                kernel_symbol_info.display_name.value_or("");
+            kernel_symbol_info_ptr->kernel_object = kernel_symbol_info.kernel_object;
             kernel_symbol_info_ptr->kernarg_segment_size =
-                kernel_symbol_info.kernarg_segment_size.value_or(0);
+                kernel_symbol_info.kernarg_segment_size;
             kernel_symbol_info_ptr->kernarg_segment_alignment =
-                kernel_symbol_info.kernarg_segment_alignment.value_or(0);
+                kernel_symbol_info.kernarg_segment_alignment;
             kernel_symbol_info_ptr->group_segment_size =
-                kernel_symbol_info.group_segment_size.value_or(0);
+                kernel_symbol_info.group_segment_size;
             kernel_symbol_info_ptr->private_segment_size =
-                kernel_symbol_info.private_segment_size.value_or(0);
-            kernel_symbol_info_ptr->sgpr_count =
-                kernel_symbol_info.sgpr_count.value_or(0);
-            kernel_symbol_info_ptr->arch_vgpr_count =
-                kernel_symbol_info.arch_vgpr_count.value_or(0);
+                kernel_symbol_info.private_segment_size;
+            kernel_symbol_info_ptr->sgpr_count      = kernel_symbol_info.sgpr_count;
+            kernel_symbol_info_ptr->arch_vgpr_count = kernel_symbol_info.arch_vgpr_count;
             kernel_symbol_info_ptr->accum_vgpr_count =
-                kernel_symbol_info.accum_vgpr_count.value_or(0);
+                kernel_symbol_info.accum_vgpr_count;
             kernel_symbol_info_ptr->extdata = kernel_symbol_info.extdata;
 
             auto node_it = m_node_info_utility.find(kernel_symbol_info.nid);
@@ -369,12 +365,12 @@ reader_t::impl::get_all_code_objects()
             auto code_object_info_ptr =
                 std::make_shared<reader_types::code_object_info_t>();
             code_object_info_ptr->id         = code_object_info.id;
-            code_object_info_ptr->uri        = code_object_info.uri.value_or(nullptr);
-            code_object_info_ptr->load_base  = code_object_info.load_base.value_or(0);
-            code_object_info_ptr->load_size  = code_object_info.load_size.value_or(0);
-            code_object_info_ptr->load_delta = code_object_info.load_delta.value_or(0);
+            code_object_info_ptr->uri        = code_object_info.uri.value_or("");
+            code_object_info_ptr->load_base  = code_object_info.load_base;
+            code_object_info_ptr->load_size  = code_object_info.load_size;
+            code_object_info_ptr->load_delta = code_object_info.load_delta;
             code_object_info_ptr->storage_type =
-                code_object_info.storage_type.value_or(nullptr);
+                code_object_info.storage_type.value_or("");
             code_object_info_ptr->extdata = code_object_info.extdata;
 
             auto node_it = m_node_info_utility.find(code_object_info.nid);
@@ -420,7 +416,7 @@ reader_t::impl::get_all_streams()
         {
             auto stream_info_ptr       = std::make_shared<reader_types::stream_info_t>();
             stream_info_ptr->stream_id = stream_info.id;
-            stream_info_ptr->name      = stream_info.name.value_or(nullptr);
+            stream_info_ptr->name      = stream_info.name.value_or("");
             stream_info_ptr->extdata   = stream_info.extdata;
 
             auto node_it = m_node_info_utility.find(stream_info.nid);
@@ -456,7 +452,7 @@ reader_t::impl::get_all_queues()
         {
             auto queue_info_ptr      = std::make_shared<reader_types::queue_info_t>();
             queue_info_ptr->queue_id = queue_info.id;
-            queue_info_ptr->name     = queue_info.name.value_or(nullptr);
+            queue_info_ptr->name     = queue_info.name.value_or("");
             queue_info_ptr->extdata  = queue_info.extdata;
 
             auto node_it = m_node_info_utility.find(queue_info.nid);
@@ -493,19 +489,19 @@ reader_t::impl::get_all_pmc_infos()
             auto pmc_info_ptr  = std::make_shared<reader_types::pmc_info_t>();
             pmc_info_ptr->name = pmc_info.name;
 
-            pmc_info_ptr->target_arch      = pmc_info.target_arch.value_or(nullptr);
-            pmc_info_ptr->event_code       = pmc_info.event_code.value_or(0);
-            pmc_info_ptr->instance_id      = pmc_info.instance_id.value_or(0);
+            pmc_info_ptr->target_arch      = pmc_info.target_arch.value_or("");
+            pmc_info_ptr->event_code       = pmc_info.event_code;
+            pmc_info_ptr->instance_id      = pmc_info.instance_id;
             pmc_info_ptr->symbol           = pmc_info.symbol;
-            pmc_info_ptr->description      = pmc_info.description.value_or(nullptr);
-            pmc_info_ptr->long_description = pmc_info.long_description.value_or(nullptr);
-            pmc_info_ptr->component        = pmc_info.component.value_or(nullptr);
-            pmc_info_ptr->units            = pmc_info.units.value_or(nullptr);
-            pmc_info_ptr->value_type       = pmc_info.value_type.value_or(nullptr);
-            pmc_info_ptr->block            = pmc_info.block.value_or(nullptr);
-            pmc_info_ptr->expression       = pmc_info.expression.value_or(nullptr);
-            pmc_info_ptr->is_constant      = pmc_info.is_constant.value_or(0);
-            pmc_info_ptr->is_derived       = pmc_info.is_derived.value_or(0);
+            pmc_info_ptr->description      = pmc_info.description.value_or("");
+            pmc_info_ptr->long_description = pmc_info.long_description.value_or("");
+            pmc_info_ptr->component        = pmc_info.component.value_or("");
+            pmc_info_ptr->units            = pmc_info.units.value_or("");
+            pmc_info_ptr->value_type       = pmc_info.value_type.value_or("");
+            pmc_info_ptr->block            = pmc_info.block.value_or("");
+            pmc_info_ptr->expression       = pmc_info.expression.value_or("");
+            pmc_info_ptr->is_constant      = pmc_info.is_constant;
+            pmc_info_ptr->is_derived       = pmc_info.is_derived;
             pmc_info_ptr->extdata          = pmc_info.extdata;
 
             auto node_it = m_node_info_utility.find(pmc_info.nid);
@@ -842,11 +838,16 @@ std::optional<reader_types::region_data_t>
 reader_t::impl::get_region_details(const reader_types::timeline_event_t& event)
 {
     if(event.unique_identifier.type != reader_types::event_type_t::region)
+    {
         return std::nullopt;
+    }
 
     auto results =
         m_read_statements->region_detail()(event.unique_identifier.id).to_vector();
-    if(results.empty()) return std::nullopt;
+    if(results.empty())
+    {
+        return std::nullopt;
+    }
 
     const auto& r = results.front();
 
@@ -858,13 +859,19 @@ reader_t::impl::get_region_details(const reader_types::timeline_event_t& event)
     if(r.name_id.has_value())
     {
         auto it = m_string_info_utility.find(r.name_id.value());
-        if(it != m_string_info_utility.end()) data.name = it->second;
+        if(it != m_string_info_utility.end())
+        {
+            data.name = it->second;
+        }
     }
 
     if(r.event_id.has_value())
     {
         auto event_meta = resolve_event_metadata(event);
-        if(event_meta.has_value()) data.event = build_event_data(event_meta.value());
+        if(event_meta.has_value())
+        {
+            data.event = build_event_data(event_meta.value());
+        }
     }
 
     return data;
@@ -1140,9 +1147,13 @@ reader_t::impl::get_data_time_range()
         if(!results.empty())
         {
             if(results.front().min_start.has_value())
+            {
                 global_min = std::min(global_min, results.front().min_start.value());
+            }
             if(results.front().max_end.has_value())
+            {
                 global_max = std::max(global_max, results.front().max_end.value());
+            }
         }
     };
 

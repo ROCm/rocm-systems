@@ -105,15 +105,15 @@ using node_info_list_t = std::vector<node_info_ptr_t>;
 
 struct process_info_t
 {
-    size_t      ppid{};
-    size_t      pid{};
-    size_t      init{};
-    size_t      fini{};
-    size_t      start{};
-    size_t      end{};
-    std::string command{};
-    std::string environment{};
-    std::string extdata{};
+    std::optional<size_t> ppid{};
+    size_t                pid{};
+    std::optional<size_t> init{};
+    std::optional<size_t> fini{};
+    std::optional<size_t> start{};
+    std::optional<size_t> end{};
+    std::string           command{};
+    std::string           environment{};
+    std::string           extdata{};
 
     std::shared_ptr<node_info_t> node_info;
 };
@@ -123,17 +123,17 @@ using process_info_list_t = std::vector<process_info_ptr_t>;
 
 struct agent_info_t
 {
-    std::string agent_type;
-    size_t      type_index;
-    size_t      absolute_index{};
-    size_t      logical_index{};
-    size_t      uuid;
-    std::string name;
-    std::string model_name;
-    std::string vendor_name;
-    std::string product_name;
-    std::string user_name;
-    std::string extdata{};
+    std::string           agent_type;
+    size_t                type_index;
+    std::optional<size_t> absolute_index{};
+    std::optional<size_t> logical_index{};
+    std::optional<size_t> uuid;
+    std::string           name;
+    std::string           model_name;
+    std::string           vendor_name;
+    std::string           product_name;
+    std::string           user_name;
+    std::string           extdata{};
 
     std::shared_ptr<node_info_t>    node_info;
     std::shared_ptr<process_info_t> process_info;
@@ -147,20 +147,20 @@ struct pmc_info_t
     std::string                   name{};
     std::shared_ptr<agent_info_t> agent_info;
 
-    std::string target_arch{};
-    size_t      event_code{};
-    size_t      instance_id{};
-    std::string symbol{};
-    std::string description{};
-    std::string long_description{};
-    std::string component{};
-    std::string units{};
-    std::string value_type{};
-    std::string block{};
-    std::string expression{};
-    size_t      is_constant{};
-    size_t      is_derived{};
-    std::string extdata{};
+    std::string           target_arch{};
+    std::optional<size_t> event_code{};
+    std::optional<size_t> instance_id{};
+    std::string           symbol{};
+    std::string           description{};
+    std::string           long_description{};
+    std::string           component{};
+    std::string           units{};
+    std::string           value_type{};
+    std::string           block{};
+    std::string           expression{};
+    std::optional<size_t> is_constant{};
+    std::optional<size_t> is_derived{};
+    std::string           extdata{};
 
     std::shared_ptr<node_info_t>    node_info;
     std::shared_ptr<process_info_t> process_info;
@@ -171,12 +171,12 @@ using pmc_info_list_t = std::vector<pmc_info_ptr_t>;
 
 struct thread_info_t
 {
-    size_t      parent_process_id{};
-    size_t      thread_id{};
-    std::string name{};
-    size_t      start{};
-    size_t      end{};
-    std::string extdata{};
+    std::optional<size_t> parent_process_id{};
+    size_t                thread_id{};
+    std::string           name{};
+    std::optional<size_t> start{};
+    std::optional<size_t> end{};
+    std::string           extdata{};
 
     std::shared_ptr<node_info_t>    node_info;
     std::shared_ptr<process_info_t> process_info;
@@ -213,13 +213,13 @@ using queue_info_list_t = std::vector<queue_info_ptr_t>;
 
 struct code_object_info_t
 {
-    size_t      id{};
-    std::string uri{};
-    size_t      load_base{};
-    size_t      load_size{};
-    size_t      load_delta{};
-    std::string storage_type{};
-    std::string extdata{};
+    size_t                id{};
+    std::string           uri{};
+    std::optional<size_t> load_base{};
+    std::optional<size_t> load_size{};
+    std::optional<size_t> load_delta{};
+    std::string           storage_type{};
+    std::string           extdata{};
 
     std::shared_ptr<node_info_t>    node_info;
     std::shared_ptr<process_info_t> process_info;
@@ -231,18 +231,18 @@ using code_object_info_list_t = std::vector<code_object_info_ptr_t>;
 
 struct kernel_symbol_info_t
 {
-    size_t      id{};
-    std::string name{};
-    std::string display_name{};
-    size_t      kernel_object{};
-    size_t      kernarg_segment_size{};
-    size_t      kernarg_segment_alignment{};
-    size_t      group_segment_size{};
-    size_t      private_segment_size{};
-    size_t      sgpr_count{};
-    size_t      arch_vgpr_count{};
-    size_t      accum_vgpr_count{};
-    std::string extdata{};
+    size_t                id{};
+    std::string           name{};
+    std::string           display_name{};
+    std::optional<size_t> kernel_object{};
+    std::optional<size_t> kernarg_segment_size{};
+    std::optional<size_t> kernarg_segment_alignment{};
+    std::optional<size_t> group_segment_size{};
+    std::optional<size_t> private_segment_size{};
+    std::optional<size_t> sgpr_count{};
+    std::optional<size_t> arch_vgpr_count{};
+    std::optional<size_t> accum_vgpr_count{};
+    std::string           extdata{};
 
     std::shared_ptr<node_info_t>        node_info;
     std::shared_ptr<process_info_t>     process_info;
@@ -382,16 +382,17 @@ struct kernel_dispatch_data_t
     timestamp_ns_t start_timestamp{};  ///< Kernel start time (nanoseconds)
     timestamp_ns_t end_timestamp{};    ///< Kernel end time (nanoseconds)
 
-    size_t      private_segment_size{};  ///< Private memory per work-item (bytes)
-    size_t      group_segment_size{};    ///< LDS memory per workgroup (bytes)
-    size_t      workgroup_size_x{};      ///< Workgroup size in X dimension
-    size_t      workgroup_size_y{};      ///< Workgroup size in Y dimension
-    size_t      workgroup_size_z{};      ///< Workgroup size in Z dimension
-    size_t      grid_size_x{};           ///< Grid size in X dimension
-    size_t      grid_size_y{};           ///< Grid size in Y dimension
-    size_t      grid_size_z{};           ///< Grid size in Z dimension
-    std::string name;                    ///< Kernel name
-    std::string extdata;
+    std::optional<size_t>
+        private_segment_size{};                  ///< Private memory per work-item (bytes)
+    std::optional<size_t> group_segment_size{};  ///< LDS memory per workgroup (bytes)
+    size_t                workgroup_size_x{};    ///< Workgroup size in X dimension
+    size_t                workgroup_size_y{};    ///< Workgroup size in Y dimension
+    size_t                workgroup_size_z{};    ///< Workgroup size in Z dimension
+    size_t                grid_size_x{};         ///< Grid size in X dimension
+    size_t                grid_size_y{};         ///< Grid size in Y dimension
+    size_t                grid_size_z{};         ///< Grid size in Z dimension
+    std::string           name;                  ///< Kernel name
+    std::string           extdata;
 
     event_data_ptr_t         event;
     node_info_ptr_t          node_info;
