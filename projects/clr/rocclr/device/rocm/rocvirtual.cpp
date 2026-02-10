@@ -3492,51 +3492,23 @@ void VirtualGPU::StartDeviceQueueMonitorThread() {
         std::unique_lock<std::mutex> lock(monitor_mutex_);
         monitor_cv_.wait(lock);
       }
-
+      // Ensure all scheduler kernel operations are visible
       std::atomic_thread_fence(std::memory_order_seq_cst);
-      // After wakeup, check the read index and write index
-      constexpr int kTotalIterations = 100;
-      int poll_iterations = 0;
 
       while (monitorThreadRunning_.load(std::memory_order_relaxed)) {
         // Read queue indices with proper memory ordering
         uint64_t read_index = Hsa::queue_load_read_index_scacquire(schedulerQueue_);
         uint64_t write_index = Hsa::queue_load_write_index_scacquire(schedulerQueue_);
-
-        if (write_index != read_index && write_index > 0) {
-
+        if (write_index > read_index && write_index > 0) {
           // Ring doorbell if there is new work
           Hsa::signal_store_screlease(schedulerQueue_->doorbell_signal, write_index - 1);
-          poll_iterations = 0;
         } else {
-          // No new packets to process, wait for wakeup
-          if (++poll_iterations >= kTotalIterations) {
-            break;
-          }
-          amd::Os::sleep(1);
+          // No new packets, yield the thread
+          amd::Os::yield();
         }
       }
     }
   });
-}
-
-void VirtualGPU::WaitForMonitorCompletion() {
-  const int kMaxWaitMs = 5000;
-  int elapsed_ms = 0;
-
-  while (elapsed_ms < kMaxWaitMs) {
-    uint64_t read_idx = Hsa::queue_load_read_index_scacquire(schedulerQueue_);
-    uint64_t write_idx = Hsa::queue_load_write_index_scacquire(schedulerQueue_);
-
-    if (read_idx >= write_idx && write_idx > 0) {
-      std::atomic_thread_fence(std::memory_order_seq_cst);
-      break;
-    }
-
-    amd::Os::sleep(1);
-    elapsed_ms++;
-  }
-  return;
 }
 #endif  // _WIN32
 

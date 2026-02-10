@@ -2772,8 +2772,6 @@ bool KernelBlitManager::runScheduler(uint64_t vqVM, hsa_queue_t* schedulerQueue,
   std::atomic_thread_fence(std::memory_order_seq_cst);
   // Scheduler has enqueued a kernel, wake up the device queue monitor thread
   gpu().WakeupDeviceQueueMonitor();
-  // Wait for monitor thread to finish submitting all packets
-  gpu().WaitForMonitorCompletion();
 #endif  // _WIN32
 
   // Wait for the scheduler to finish all operations
