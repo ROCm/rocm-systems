@@ -95,8 +95,8 @@ test_kern_medium(uint64_t* output)
 __global__ void
 test_kern_small(uint64_t* output)
 {
-    uint64_t result = 0;
-    int      test[2] = {0};
+    uint64_t result  = 0;
+    int      test[2] = { 0 };
     for(int& i : test)
     {
         i = i + 7;
