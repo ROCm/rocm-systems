@@ -41,6 +41,7 @@ import os
 import sys
 import unittest
 import common
+from common import Common
 
 # Module-level default: match unittest's default verbosity (1 = dots)
 verbose = 1
@@ -202,7 +203,7 @@ class TestAmdSmiPython(unittest.TestCase):
         return
 
     @property
-    def common(self):
+    def common(self) -> Common:
         return self.__class__.common
 
     @classmethod

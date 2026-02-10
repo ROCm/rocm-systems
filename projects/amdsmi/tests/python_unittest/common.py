@@ -67,6 +67,14 @@ def print_legend():
 
 
 class Common(unittest.TestCase):
+    DRIVER_INIT_FLAGS = \
+        [ ('INIT_ALL_PROCESSORS', amdsmi.AmdSmiInitFlags.INIT_ALL_PROCESSORS),
+          ('INIT_AMD_GPUS', amdsmi.AmdSmiInitFlags.INIT_AMD_GPUS),
+          ('INIT_AMD_APUS', amdsmi.AmdSmiInitFlags.INIT_AMD_APUS),
+          ('INIT_AMD_CPUS', amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS)
+        ]
+    DRIVER_INIT_FLAGS_MAP = {flag_val: flag_name for flag_name, flag_val in DRIVER_INIT_FLAGS}
+
     def __init__(self, verbose, *args, **kwargs):
         self.verbose = verbose
         self.max_num_physical_devices = amdsmi.amdsmi_interface.AMDSMI_MAX_NUM_XCP * amdsmi.amdsmi_interface.AMDSMI_MAX_DEVICES
@@ -87,14 +95,6 @@ class Common(unittest.TestCase):
             '3': 'GUEST',
             '4': 'PASSTHROUGH'
         }
-
-        self.driver_init_flags = \
-        [ ('INIT_ALL_PROCESSORS', amdsmi.AmdSmiInitFlags.INIT_ALL_PROCESSORS),
-          ('INIT_AMD_GPUS', amdsmi.AmdSmiInitFlags.INIT_AMD_GPUS),
-          ('INIT_AMD_APUS', amdsmi.AmdSmiInitFlags.INIT_AMD_APUS),
-          ('INIT_AMD_CPUS', amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS)
-        ]
-        self.driver_init_flags_map = {flag_val: flag_name for flag_name, flag_val in self.driver_init_flags}
 
         try:
             self.amdsmi_smart_init()
@@ -625,7 +625,7 @@ class Common(unittest.TestCase):
             if input_device_handle.value == device_handle.value:
                 return gpu_index
 
-    def check_amdgpu_driver(self):
+    def _check_amdgpu_driver(self):
         """ Returns true if amdgpu is found in the list of initialized modules """
         amd_gpu_status_file = pathlib.Path("/sys/module/amdgpu/initstate")
         if amd_gpu_status_file.exists():
@@ -646,12 +646,24 @@ class Common(unittest.TestCase):
                 return True
         return False
 
-    def check_amd_hsmp_driver(self):
+    def _check_amd_hsmp_driver(self):
         """ Returns true if amd_hsmp or hsmp_acpi is found in the list of initialized modules """
         amd_cpu_status_file = pathlib.Path("/dev/hsmp")
         if amd_cpu_status_file.exists():
                 return True
         return False
+
+    def _init_with_flag(self, init_flag, driver_msg):
+        try:
+            return amdsmi.amdsmi_init(init_flag)
+        except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
+            if e.err_code in (
+                amdsmi.amdsmi_wrapper.AMDSMI_STATUS_NOT_INIT,
+                amdsmi.amdsmi_wrapper.AMDSMI_STATUS_DRIVER_NOT_LOADED,
+            ):
+                self.print(driver_msg)
+                sys.exit(-1)
+            raise
 
     def amdsmi_smart_init(self):
         """ Initializes AMDSMI Library based on live drivers found in the system.
@@ -670,43 +682,21 @@ class Common(unittest.TestCase):
             AmdSmiParameterException: If invalid parameters are passed to amdsmi_init
             SystemExit: If no compatible AMD drivers are detected on the system
         """
-        ret = None
         init_flag = amdsmi.AmdSmiInitFlags.INIT_ALL_PROCESSORS
-        if self.check_amdgpu_driver() and self.check_amd_hsmp_driver():
+
+        if self._check_amdgpu_driver() and self._check_amd_hsmp_driver():
             init_flag = amdsmi.AmdSmiInitFlags.INIT_AMD_APUS
-            try:
-                ret = amdsmi.amdsmi_init(init_flag)
-            except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
-                if e.err_code in (amdsmi.amdsmi_wrapper.AMDSMI_STATUS_NOT_INIT,
-                                  amdsmi.amdsmi_wrapper.AMDSMI_STATUS_DRIVER_NOT_LOADED):
-                    self.print(f"Drivers not loaded (amdgpu, amd_hsmp or hsmp_acpi drivers not found in modules)")
-                    sys.exit(-1)
-                else:
-                    raise e
-        elif self.check_amdgpu_driver():
+            ret = self._init_with_flag(init_flag, "Drivers not loaded (amdgpu, amd_hsmp or hsmp_acpi drivers not found in modules)")
+        elif self._check_amdgpu_driver():
             init_flag = amdsmi.AmdSmiInitFlags.INIT_AMD_GPUS
-            try:
-                ret = amdsmi.amdsmi_init(init_flag)
-            except (amdsmi.amdsmi_interface.AmdSmiLibraryException, amdsmi.amdsmi_interface.AmdSmiParameterException) as e:
-                if e.err_code in (amdsmi.amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_INIT,
-                                    amdsmi.amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_DRIVER_NOT_LOADED):
-                    self.print(f"Driver not loaded (amdgpu not found in modules)")
-                    sys.exit(-1)
-                else:
-                    raise e
-        elif self.check_amd_hsmp_driver():
-            init_flag = amdsmi.amdsmi_interface.AmdSmiInitFlags.INIT_AMD_CPUS
-            try:
-                ret = amdsmi.amdsmi_init(init_flag)
-            except (amdsmi.amdsmi_interface.AmdSmiLibraryException, amdsmi.amdsmi_interface.AmdSmiParameterException) as e:
-                if e.err_code in (amdsmi.amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_INIT,
-                                  amdsmi.amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_DRIVER_NOT_LOADED):
-                    self.print(f"Driver not loaded (amd_hsmp or hsmp_acpi not found in modules)")
-                    sys.exit(-1)
-                else:
-                    raise e
+            ret = self._init_with_flag(init_flag, "Driver not loaded (amdgpu not found in modules)")
+        elif self._check_amd_hsmp_driver():
+            init_flag = amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS
+            ret = self._init_with_flag(init_flag, "Driver not loaded (amd_hsmp or hsmp_acpi not found in modules)")
+        else:
+            self.print("Drivers not loaded (amdgpu, amd_hsmp or hsmp_acpi drivers not found in modules)")
+            sys.exit(-1)
 
-        flag_name = self.driver_init_flags_map.get(init_flag, 'UNKNOWN')
-        self.print(f"AMDSMI initialized with atleast one driver successfully | init flag: {flag_name} ({init_flag})")
+        flag_name = self.DRIVER_INIT_FLAGS_MAP.get(init_flag, "UNKNOWN")
+        self.print(f"AMDSMI initialized with at least one driver successfully | init flag: {flag_name} ({init_flag})")
         return ret, init_flag
-
