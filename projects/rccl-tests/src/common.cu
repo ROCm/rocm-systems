@@ -151,6 +151,9 @@ static int local_register = 0;
 #endif
 static int minCudaArch = 1<<30;
 
+// Test bias
+static int test_bias = 0;
+
 Reporter::Reporter(std::string fileName, std::string outputFormat) : _outputFormat(outputFormat) {
   if (!fileName.empty()) {
     if (isMainThread()) {
@@ -1546,8 +1549,10 @@ testResult_t run() {
   // Reserve 1GiB of memory for each 16GiB installed, but limit to a max of 4GiB
   const size_t GB = (1ULL << 30);
   size_t reserveMem =  std::min(DIVUP(maxMem, 16*GB) * 1*GB, 4*GB);
-  // We need sendbuff, recvbuff, expected (when datacheck enabled), plus 1G for the rest.
-  size_t memMaxBytes = (maxMem - reserveMem - 1*GB) / (datacheck ? 3 : 2);
+  // If the program is all_reduce_bias, enable bias
+  if (strcmp(program_invocation_short_name, "all_reduce_bias_perf") == 0) test_bias = 1;
+  // We need sendbuff, recvbuff, expected (when datacheck enabled), bias (when bias enabled), plus 1G for the rest.
+  size_t memMaxBytes = (maxMem - reserveMem - 1*GB) / (datacheck ? (test_bias ? 4 : 3) : (test_bias ? 3 : 2));
   if (maxBytes > memMaxBytes) {
     maxBytes = memMaxBytes;
     if (minBytes > maxBytes) minBytes = maxBytes;
@@ -1578,7 +1583,11 @@ testResult_t run() {
   for (int i=0; i<nGpus*nThreads; i++) {
     gpus[i] = ((gpu0 != -1 ? gpu0 : localRank*nThreads*nGpus) + i)%numDevices;
     CUDACHECK(cudaSetDevice(gpus[i]));
-    TESTCHECK(AllocateBuffs(sendbuffs.data()+i, sendBytes, recvbuffs.data()+i, recvBytes, expected.data()+i, (size_t)maxBytes, bias.data()+i));
+    if(test_bias) {
+      TESTCHECK(AllocateBuffs(sendbuffs.data()+i, sendBytes, recvbuffs.data()+i, recvBytes, expected.data()+i, (size_t)maxBytes, bias.data()+i));
+    } else {
+      TESTCHECK(AllocateBuffs(sendbuffs.data()+i, sendBytes, recvbuffs.data()+i, recvBytes, expected.data()+i, (size_t)maxBytes, NULL));
+    }
     if (streamnull) {
       streams[i] = NULL;
     }

@@ -22,11 +22,11 @@ if(NOT EXISTS "${ROCM_LLVM_LIB_PATH}/libomptarget.so" AND ROCPROFSYS_USE_ROCM)
 endif()
 
 set(_ompt_environment
-    "ROCPROFSYS_TRACE_LEGACY=OFF"
-    "ROCPROFSYS_TRACE_CACHED=ON"
+    "ROCPROFSYS_TRACE=ON"
     "ROCPROFSYS_PROFILE=ON"
     "ROCPROFSYS_TIME_OUTPUT=OFF"
     "ROCPROFSYS_USE_OMPT=ON"
+    "ROCPROFSYS_LOG_LEVEL=trace"
     "ROCPROFSYS_TIMEMORY_COMPONENTS=wall_clock,trip_count,peak_rss"
     "${_test_openmp_env}"
     "${_test_library_path}"

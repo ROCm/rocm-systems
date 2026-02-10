@@ -73,7 +73,7 @@ rocprofiler_systems_add_test(
         --min-instructions
         0
     ENVIRONMENT
-        "${_base_environment};ROCPROFSYS_VERBOSE=1;ROCPROFSYS_TRACE_CACHED=OFF;ROCPROFSYS_TRACE_LEGACY=ON;ROCPROFSYS_PERFETTO_COMBINE_TRACES=ON"
+        "${_base_environment};ROCPROFSYS_VERBOSE=1;ROCPROFSYS_TRACE_LEGACY=ON;ROCPROFSYS_PERFETTO_COMBINE_TRACES=ON"
     REWRITE_RUN_PASS_REGEX
         "Successfully executed: .+rocprof-sys-merge-output.sh.*"
     REWRITE_RUN_FAIL_REGEX
@@ -126,8 +126,7 @@ rocprofiler_systems_add_test(
 )
 
 set(_mpip_environment
-    "ROCPROFSYS_TRACE_LEGACY=OFF"
-    "ROCPROFSYS_TRACE_CACHED=ON"
+    "ROCPROFSYS_TRACE=ON"
     "ROCPROFSYS_PROFILE=ON"
     "ROCPROFSYS_USE_SAMPLING=OFF"
     "ROCPROFSYS_USE_PROCESS_SAMPLING=OFF"
@@ -136,14 +135,14 @@ set(_mpip_environment
     "ROCPROFSYS_USE_MPIP=ON"
     "ROCPROFSYS_DEBUG=OFF"
     "ROCPROFSYS_VERBOSE=2"
+    "ROCPROFSYS_LOG_LEVEL=trace"
     "ROCPROFSYS_DL_VERBOSE=2"
     "${_test_openmp_env}"
     "${_test_library_path}"
 )
 
 set(_mpip_all2all_environment
-    "ROCPROFSYS_TRACE_LEGACY=OFF"
-    "ROCPROFSYS_TRACE_CACHED=ON"
+    "ROCPROFSYS_TRACE=ON"
     "ROCPROFSYS_PROFILE=ON"
     "ROCPROFSYS_USE_SAMPLING=OFF"
     "ROCPROFSYS_USE_PROCESS_SAMPLING=OFF"
@@ -152,6 +151,7 @@ set(_mpip_all2all_environment
     "ROCPROFSYS_USE_MPIP=ON"
     "ROCPROFSYS_DEBUG=ON"
     "ROCPROFSYS_VERBOSE=3"
+    "ROCPROFSYS_LOG_LEVEL=trace"
     "ROCPROFSYS_DL_VERBOSE=3"
     "${_test_openmp_env}"
     "${_test_library_path}"
@@ -182,50 +182,3 @@ foreach(
         ENVIRONMENT "${_mpip_${_EXAMPLE}_environment}"
     )
 endforeach()
-
-if(ENABLE_FORTRAN_MPI_CTESTS)
-    set(_fortran_mpip_flat_environment
-        "ROCPROFSYS_FLAT_PROFILE=ON"
-        "ROCPROFSYS_COUT_OUTPUT=ON"
-        "ROCPROFSYS_TIMELINE_PROFILE=OFF"
-        "ROCPROFSYS_COLLAPSE_PROCESSES=ON"
-        "ROCPROFSYS_COLLAPSE_THREADS=ON"
-        "ROCPROFSYS_SAMPLING_FREQ=50"
-        "ROCPROFSYS_TIMEMORY_COMPONENTS=wall_clock,trip_count"
-        "${_mpip_environment}"
-    )
-
-    if(ROCPROFSYS_USE_MPI)
-        set(MPI_FORTRAN_REWRITE_RUN_REGEX
-            ">>> MPI_Init(.*\n.*)>>> MPI_Send(.*\n.*)>>> MPI_Recv(.*\n.*)>>> MPI_Comm_size(.*\n.*)>>> MPI_Comm_rank(.*\n.*)"
-        )
-    else()
-        set(MPI_FORTRAN_REWRITE_RUN_REGEX
-            ">>> PMPI_Init(.*\n.*)>>> PMPI_Send(.*\n.*)>>> PMPI_Recv(.*\n.*)>>> PMPI_Comm_size(.*\n.*)>>> PMPI_Comm_rank(.*\n.*)"
-        )
-    endif()
-
-    foreach(_FORTRAN_EXAMPLE intervals)
-        rocprofiler_systems_add_test(
-            SKIP_RUNTIME
-            NAME "mpi-fortran-${_FORTRAN_EXAMPLE}"
-            TARGET mpi-fortran-${_FORTRAN_EXAMPLE}
-            MPI ON
-            NUM_PROCS 2
-            LABELS "mpip;fortran"
-            REWRITE_ARGS
-                -e
-                -v
-                2
-                --label
-                file
-                line
-                args
-                --min-instructions
-                0
-            ENVIRONMENT "${_fortran_mpip_flat_environment}"
-            REWRITE_RUN_PASS_REGEX
-                ">>> mpi-fortran-${_FORTRAN_EXAMPLE}.inst(.*\n.*)${MPI_FORTRAN_REWRITE_RUN_REGEX}"
-        )
-    endforeach()
-endif()

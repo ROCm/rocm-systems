@@ -321,6 +321,7 @@ class VirtualGPU : public device::VirtualDevice {
   void submitWriteMemory(amd::WriteMemoryCommand& vcmd);
   void submitCopyMemory(amd::CopyMemoryCommand& vcmd);
   void submitCopyMemoryP2P(amd::CopyMemoryP2PCommand& vcmd);
+  void submitBatchCopyMemory(amd::BatchCopyMemoryCommand& vcmd);
   void submitMapMemory(amd::MapMemoryCommand& vcmd);
   void submitUnmapMemory(amd::UnmapMemoryCommand& vcmd);
   void submitKernel(amd::NDRangeKernelCommand& vcmd);
@@ -628,7 +629,7 @@ class VirtualGPU : public device::VirtualDevice {
   ) {
     amd::Memory* mem = new (amdImage.getContext()) amd::Buffer(amdImage, 0, 0, amdImage.getSize());
     mem->setVirtualDevice(this);
-    if ((mem != nullptr) && !mem->create()) {
+    if (!mem->create()) {
       mem->release();
     }
     return mem;

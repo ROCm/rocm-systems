@@ -23,8 +23,15 @@
 rocprofiler_activate_clang_tidy()
 
 add_library(rocprofiler-sdk-rocattach-shared-library SHARED)
-target_sources(rocprofiler-sdk-rocattach-shared-library PRIVATE rocattach.cpp
-                                                                ptrace_session.cpp)
+add_library(rocprofiler-sdk::rocprofiler-sdk-rocattach-shared-library ALIAS
+            rocprofiler-sdk-rocattach-shared-library)
+target_sources(rocprofiler-sdk-rocattach-shared-library
+               PRIVATE rocattach.cpp auxv.cpp ptrace_session.cpp symbol_lookup.cpp)
+target_include_directories(
+    rocprofiler-sdk-rocattach-shared-library
+    INTERFACE $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/source/include>
+              $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/source/include>
+              $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 
 target_link_libraries(
     rocprofiler-sdk-rocattach-shared-library
@@ -40,8 +47,10 @@ set_target_properties(
                LIBRARY_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}
                SOVERSION ${PROJECT_VERSION_MAJOR}
                VERSION ${PROJECT_VERSION}
-               BUILD_RPATH "\$ORIGIN:\$ORIGIN/.."
-               INSTALL_RPATH "\$ORIGIN:\$ORIGIN/..")
+               SKIP_BUILD_RPATH OFF
+               BUILD_RPATH "\$ORIGIN"
+               INSTALL_RPATH "\$ORIGIN"
+               DEFINE_SYMBOL ROCATTACH_EXPORTS)
 
 install(
     TARGETS rocprofiler-sdk-rocattach-shared-library

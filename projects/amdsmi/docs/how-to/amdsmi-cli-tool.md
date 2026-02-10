@@ -358,6 +358,8 @@ CPU Arguments:
   --cpu-dimm-temp-range-rate DIMM_ADDR      Displays dimm temperature range and refresh rate
   --cpu-dimm-pow-consumption DIMM_ADDR      Displays dimm power consumption
   --cpu-dimm-thermal-sensor DIMM_ADDR       Displays dimm thermal sensor
+  --cpu-dfcstate-ctrl                       Displays DFCState control status
+  --cpu-railisofreq-policy                  Displays CPU ISO frequency policy
 
 CPU Core Arguments:
   --core-boost-limit                        Get boost limit for the selected cores
@@ -550,7 +552,7 @@ usage: amd-smi set [-h] (-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE ...
                    [--cpu-df-pstate-range MAX_PSTATE MIN_PSTATE] [--cpu-enable-apb]
                    [--cpu-disable-apb DF_PSTATE] [--soc-boost-limit BOOST_LIMIT]
                    [--core-boost-limit BOOST_LIMIT] [--json | --csv] [--file FILE]
-                   [--loglevel LEVEL]
+                   [--loglevel LEVEL] [--cpu-dfcstate-ctrl VALUE] [--cpu-railisofreq-policy VALUE]
 
 If no GPU is specified, will select all GPUs on the system.
 A set argument must be provided; Multiple set arguments are accepted.
@@ -595,6 +597,8 @@ CPU Arguments:
   --cpu-enable-apb                                               Enables the DF p-state performance boost algorithm
   --cpu-disable-apb DF_PSTATE                                    Disables the DF p-state performance boost algorithm. Input parameter is DFPstate (0-3)
   --soc-boost-limit BOOST_LIMIT                                  Sets the boost limit for the given socket. Input parameter is socket BOOST_LIMIT value
+  --cpu-dfcstate-ctrl VALUE                                      Sets the DFCState control for the given socket. Input parameter is VALUE (0-1)
+  --cpu-railisofreq-policy VALUE                                 Sets the CPU ISO frequency policy. Input parameter is VALUE (0-1)
 
 CPU Core Arguments:
   --core-boost-limit BOOST_LIMIT                                 Sets the boost limit for the given core. Input parameter is core BOOST_LIMIT value

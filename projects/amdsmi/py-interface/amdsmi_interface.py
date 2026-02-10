@@ -610,6 +610,8 @@ class AmdSmiPtlData(IntEnum):
     BF16 = amdsmi_wrapper.AMDSMI_PTL_DATA_FORMAT_BF16
     F32 = amdsmi_wrapper.AMDSMI_PTL_DATA_FORMAT_F32
     F64 = amdsmi_wrapper.AMDSMI_PTL_DATA_FORMAT_F64
+    F8 = amdsmi_wrapper.AMDSMI_PTL_DATA_FORMAT_F8
+    VECTOR = amdsmi_wrapper.AMDSMI_PTL_DATA_FORMAT_VECTOR
     INVALID = amdsmi_wrapper.AMDSMI_PTL_DATA_FORMAT_INVALID
 
 class AmdSmiPowerCapType(IntEnum):
@@ -1788,6 +1790,63 @@ def amdsmi_get_hsmp_metrics_table_version(
 
     return metric_tbl_version.value
 
+def amdsmi_set_cpu_rail_isofreq_policy(
+    processor_handle: processor_handle_t,
+    value: int):
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(
+            processor_handle, amdsmi_wrapper.amdsmi_processor_handle
+        )
+
+    _check_res(
+        amdsmi_wrapper.amdsmi_set_cpu_rail_isofreq_policy(processor_handle, value)
+    )
+
+def amdsmi_get_cpu_rail_isofreq_policy(
+    processor_handle: processor_handle_t,
+) -> int:
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(
+            processor_handle, amdsmi_wrapper.amdsmi_processor_handle
+        )
+
+    cpurailiso = ctypes.c_uint8()
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_cpu_rail_isofreq_policy(
+            processor_handle, ctypes.byref(cpurailiso)
+        )
+    )
+
+    return cpurailiso.value
+
+def amdsmi_get_dfc_ctrl(
+    processor_handle: processor_handle_t,
+) -> int:
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(
+            processor_handle, amdsmi_wrapper.amdsmi_processor_handle
+        )
+
+    dfc_ctrl = ctypes.c_uint8()
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_dfc_ctrl(
+            processor_handle, ctypes.byref(dfc_ctrl)
+        )
+    )
+
+    return dfc_ctrl.value
+
+def amdsmi_set_dfc_ctrl(
+    processor_handle: processor_handle_t,
+    value: int):
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(
+            processor_handle, amdsmi_wrapper.amdsmi_processor_handle
+        )
+
+    _check_res(
+        amdsmi_wrapper.amdsmi_set_dfc_ctrl(processor_handle, value)
+    )
 
 # Get 2's complement of 32 bit unsigned integer
 def check_msb_32(num):
@@ -3008,6 +3067,7 @@ def amdsmi_get_gpu_process_list(
                 "vram_mem": process_list[index].memory_usage.vram_mem,
             },
             "cu_occupancy": _validate_if_max_uint(process_list[index].cu_occupancy, MaxUIntegerTypes.UINT32_T),
+            "sdma_usage": _validate_if_max_uint(process_list[index].sdma_usage, MaxUIntegerTypes.UINT64_T),
             "evicted_time": _validate_if_max_uint(process_list[index].evicted_time, MaxUIntegerTypes.UINT32_T)
         })
 
@@ -3029,6 +3089,7 @@ def amdsmi_get_gpu_driver_info(
         )
     )
 
+    # Not including os_kernel_version here due to it just being os.uname().release
     driver_info = {
         "driver_name": info.driver_name.decode("utf-8"),
         "driver_version": info.driver_version.decode("utf-8"),
@@ -4533,6 +4594,34 @@ def amdsmi_get_node_handle(processor_handle):
     )
 
     return node_handle
+
+
+def amdsmi_get_device_handle_from_node(node_handle):
+    """
+    Get the processor (device) handle associated with a node handle.
+
+    This function retrieves the processor (device) handle from a node handle.
+    This is the inverse operation of amdsmi_get_node_handle.
+
+    Args:
+        node_handle: A node handle (amdsmi_node_handle) to get the device handle from.
+
+    Returns:
+        amdsmi_processor_handle: The processor handle associated with the node.
+
+    Raises:
+        AmdSmiParameterException: If node_handle is not the correct type.
+        AmdSmiLibraryException: If the library call fails.
+    """
+    if not isinstance(node_handle, amdsmi_wrapper.amdsmi_node_handle):
+        raise AmdSmiParameterException(node_handle, amdsmi_wrapper.amdsmi_node_handle)
+
+    processor_handle = amdsmi_wrapper.amdsmi_processor_handle()
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_device_handle_from_node(node_handle, ctypes.byref(processor_handle))
+    )
+
+    return processor_handle
 
 
 def amdsmi_get_npm_info(node_handle: processor_handle_t) -> Dict[str, Any]:
