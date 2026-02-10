@@ -166,14 +166,14 @@ ai_nic_stats_collector::update_data_for_one_nic(amdsmi_processor_handle processo
 
             // Call *_statistics the first time to get the number of statistics.
             uint32_t num_stats{};
-            amdsmi_get_nic_rdma_port_statistics(processor_handle, rdma_port_idx,
+            amdsmi_get_nic_rdma_port_statistics(processor_handle, port_info.rdma_port,
                                                 &num_stats, nullptr);
 
             // Allocate stats.
             stats = std::make_unique<amdsmi_nic_stat_t[]>(num_stats);
 
             // Call *_statistics the second time to get the statistics.
-            amdsmi_get_nic_rdma_port_statistics(processor_handle, rdma_port_idx,
+            amdsmi_get_nic_rdma_port_statistics(processor_handle, port_info.rdma_port,
                                                 &num_stats, stats.get());
 
             // Retrieve relevant stats.
