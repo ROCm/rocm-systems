@@ -46,12 +46,12 @@ THE SOFTWARE.
  *  - HIP_VERSION >= 5.2
  */
 #if HT_AMD
-TEMPLATE_TEST_CASE("Unit_atomicMin_system_Positive_Peer_GPUs_Same_Address",
-                   "[multigpu]", int, unsigned int, unsigned long,
+TEMPLATE_TEST_CASE(Unit_atomicMin_system_Positive_Peer_GPUs_Same_Address,
+                   int, unsigned int, unsigned long,
                    unsigned long long, float, double) {
 #else
-TEMPLATE_TEST_CASE("Unit_atomicMin_system_Positive_Peer_GPUs_Same_Address",
-                   "[multigpu]", int, unsigned int, unsigned long,
+TEMPLATE_TEST_CASE(Unit_atomicMin_system_Positive_Peer_GPUs_Same_Address,
+                   int, unsigned int, unsigned long,
                    unsigned long long) {
 #endif
   for (auto current = 0; current < 1; ++current) {
@@ -77,11 +77,11 @@ TEMPLATE_TEST_CASE("Unit_atomicMin_system_Positive_Peer_GPUs_Same_Address",
  */
 #if HT_AMD
 TEMPLATE_TEST_CASE(
-    "Unit_atomicMin_system_Positive_Peer_GPUs_Adjacent_Addresses", "[multigpu]",
+    Unit_atomicMin_system_Positive_Peer_GPUs_Adjacent_Addresses,
     int, unsigned int, unsigned long, unsigned long long, float, double) {
 #else
 TEMPLATE_TEST_CASE(
-    "Unit_atomicMin_system_Positive_Peer_GPUs_Adjacent_Addresses", "[multigpu]",
+    Unit_atomicMin_system_Positive_Peer_GPUs_Adjacent_Addresses,
     int, unsigned int, unsigned long, unsigned long long) {
 #endif
   int warp_size = 0;
@@ -110,13 +110,13 @@ TEMPLATE_TEST_CASE(
  */
 #if HT_AMD
 TEMPLATE_TEST_CASE(
-    "Unit_atomicMin_system_Positive_Peer_GPUs_Scattered_Addresses",
-    "[multigpu]", int, unsigned int, unsigned long, unsigned long long, float,
+    Unit_atomicMin_system_Positive_Peer_GPUs_Scattered_Addresses,
+    int, unsigned int, unsigned long, unsigned long long, float,
     double) {
 #else
 TEMPLATE_TEST_CASE(
-    "Unit_atomicMin_system_Positive_Peer_GPUs_Scattered_Addresses",
-    "[multigpu]", int, unsigned int, unsigned long, unsigned long long) {
+    Unit_atomicMin_system_Positive_Peer_GPUs_Scattered_Addresses,
+    int, unsigned int, unsigned long, unsigned long long) {
 #endif
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));

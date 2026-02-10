@@ -44,7 +44,7 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
-TEST_CASE("Unit_hipGetDriverEntryPoint_Positive") {
+TEST_CASE(Unit_hipGetDriverEntryPoint_Positive) {
   void* funcPtr = nullptr;
   hipDriverEntryPointQueryResult status;
 
@@ -90,7 +90,7 @@ TEST_CASE("Unit_hipGetDriverEntryPoint_Positive") {
  *  - HIP_VERSION >= 7.1
  */
 
-TEST_CASE("Unit_hipGetDriverEntryPoint_Negative") {
+TEST_CASE(Unit_hipGetDriverEntryPoint_Negative) {
   void* funcPtr = nullptr;
   hipDriverEntryPointQueryResult status;
 
@@ -136,7 +136,7 @@ TEST_CASE("Unit_hipGetDriverEntryPoint_Negative") {
  *  - HIP_VERSION >= 7.1
  */
 
-TEST_CASE("Unit_hipGetDriverEntryPoint_spt_Positive") {
+TEST_CASE(Unit_hipGetDriverEntryPoint_spt_Positive) {
   void* funcPtr = nullptr;
   hipDriverEntryPointQueryResult status;
 
@@ -182,7 +182,7 @@ TEST_CASE("Unit_hipGetDriverEntryPoint_spt_Positive") {
  *  - HIP_VERSION >= 7.1
  */
 
-TEST_CASE("Unit_hipGetDriverEntryPoint_spt_Negative") {
+TEST_CASE(Unit_hipGetDriverEntryPoint_spt_Negative) {
   void* funcPtr = nullptr;
   hipDriverEntryPointQueryResult status;
 

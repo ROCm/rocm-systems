@@ -43,7 +43,7 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit___hip_atomic_fetch_or_Positive_Wavefront_SameAddress", "", int,
+TEMPLATE_TEST_CASE(Unit___hip_atomic_fetch_or_Positive_Wavefront_SameAddress, int,
                    unsigned int, unsigned long, unsigned long long) {
   for (auto current = 0; current < cmd_options.iterations; ++current) {
     DYNAMIC_SECTION("Same address " << current) {
@@ -66,7 +66,7 @@ TEMPLATE_TEST_CASE("Unit___hip_atomic_fetch_or_Positive_Wavefront_SameAddress", 
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit___hip_atomic_fetch_or_Positive_Wavefront_Adjacent_Addresses", "", int,
+TEMPLATE_TEST_CASE(Unit___hip_atomic_fetch_or_Positive_Wavefront_Adjacent_Addresses, int,
                    unsigned int, unsigned long, unsigned long long) {
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
@@ -93,7 +93,7 @@ TEMPLATE_TEST_CASE("Unit___hip_atomic_fetch_or_Positive_Wavefront_Adjacent_Addre
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit___hip_atomic_fetch_or_Positive_Wavefront_Scattered_Addresses", "", int,
+TEMPLATE_TEST_CASE(Unit___hip_atomic_fetch_or_Positive_Wavefront_Scattered_Addresses, int,
                    unsigned int, unsigned long, unsigned long long) {
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
@@ -121,7 +121,7 @@ TEMPLATE_TEST_CASE("Unit___hip_atomic_fetch_or_Positive_Wavefront_Scattered_Addr
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit___hip_atomic_fetch_or_Positive_Workgroup_SameAddress", "", int,
+TEMPLATE_TEST_CASE(Unit___hip_atomic_fetch_or_Positive_Workgroup_SameAddress, int,
                    unsigned int, unsigned long, unsigned long long) {
   for (auto current = 0; current < cmd_options.iterations; ++current) {
     DYNAMIC_SECTION("Same address " << current) {
@@ -144,7 +144,7 @@ TEMPLATE_TEST_CASE("Unit___hip_atomic_fetch_or_Positive_Workgroup_SameAddress", 
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit___hip_atomic_fetch_or_Positive_Workgroup_Adjacent_Addresses", "", int,
+TEMPLATE_TEST_CASE(Unit___hip_atomic_fetch_or_Positive_Workgroup_Adjacent_Addresses, int,
                    unsigned int, unsigned long, unsigned long long) {
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
@@ -171,7 +171,7 @@ TEMPLATE_TEST_CASE("Unit___hip_atomic_fetch_or_Positive_Workgroup_Adjacent_Addre
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit___hip_atomic_fetch_or_Positive_Workgroup_Scattered_Addresses", "", int,
+TEMPLATE_TEST_CASE(Unit___hip_atomic_fetch_or_Positive_Workgroup_Scattered_Addresses, int,
                    unsigned int, unsigned long, unsigned long long) {
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));

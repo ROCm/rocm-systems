@@ -45,7 +45,7 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_atomicMax_Positive_SameAddress", "", int, unsigned int, unsigned long,
+TEMPLATE_TEST_CASE(Unit_atomicMax_Positive_SameAddress, int, unsigned int, unsigned long,
                    unsigned long long, float, double) {
   for (auto current = 0; current < cmd_options.iterations; ++current) {
     DYNAMIC_SECTION("Same address " << current) {
@@ -67,7 +67,7 @@ TEMPLATE_TEST_CASE("Unit_atomicMax_Positive_SameAddress", "", int, unsigned int,
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_atomicMax_Positive_Adjacent_Addresses", "", int, unsigned int,
+TEMPLATE_TEST_CASE(Unit_atomicMax_Positive_Adjacent_Addresses, int, unsigned int,
                    unsigned long, unsigned long long, float, double) {
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
@@ -92,7 +92,7 @@ TEMPLATE_TEST_CASE("Unit_atomicMax_Positive_Adjacent_Addresses", "", int, unsign
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_atomicMax_Positive_Scattered_Addresses", "", int, unsigned int,
+TEMPLATE_TEST_CASE(Unit_atomicMax_Positive_Scattered_Addresses, int, unsigned int,
                    unsigned long, unsigned long long, float, double) {
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
@@ -118,7 +118,7 @@ TEMPLATE_TEST_CASE("Unit_atomicMax_Positive_Scattered_Addresses", "", int, unsig
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_atomicMax_Positive_Multi_Kernel_Same_Address", "", int, unsigned int,
+TEMPLATE_TEST_CASE(Unit_atomicMax_Positive_Multi_Kernel_Same_Address, int, unsigned int,
                    unsigned long, unsigned long long, float, double) {
   for (auto current = 0; current < cmd_options.iterations; ++current) {
     DYNAMIC_SECTION("Same address " << current) {
@@ -140,7 +140,7 @@ TEMPLATE_TEST_CASE("Unit_atomicMax_Positive_Multi_Kernel_Same_Address", "", int,
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_atomicMax_Positive_Multi_Kernel_Adjacent_Addresses", "", int, unsigned int,
+TEMPLATE_TEST_CASE(Unit_atomicMax_Positive_Multi_Kernel_Adjacent_Addresses, int, unsigned int,
                    unsigned long, unsigned long long, float, double) {
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
@@ -165,7 +165,7 @@ TEMPLATE_TEST_CASE("Unit_atomicMax_Positive_Multi_Kernel_Adjacent_Addresses", ""
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_atomicMax_Positive_Multi_Kernel_Scattered_Addresses", "", int,
+TEMPLATE_TEST_CASE(Unit_atomicMax_Positive_Multi_Kernel_Scattered_Addresses, int,
                    unsigned int, unsigned long, unsigned long long, float, double) {
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
@@ -191,7 +191,7 @@ TEMPLATE_TEST_CASE("Unit_atomicMax_Positive_Multi_Kernel_Scattered_Addresses", "
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_atomicMax_Negative_Parameters_RTC") {
+TEST_CASE(Unit_atomicMax_Negative_Parameters_RTC) {
   hiprtcProgram program{};
 
   const auto program_source = GENERATE(kAtomicMax_int, kAtomicMax_uint, kAtomicMax_ulong,

@@ -51,7 +51,7 @@ __device__ __constant__ int globalConst[SIZE];
 
 /* Test verifies hipGraphExecMemcpyNodeSetParamsFromSymbol API Negative scenarios.
  */
-TEST_CASE("Unit_hipGraphExecMemcpyNodeSetParamsFromSymbol_Negative") {
+TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParamsFromSymbol_Negative) {
   constexpr size_t Nbytes = SIZE * sizeof(int);
   int *A_d{nullptr}, *B_d{nullptr};
   int *A_h{nullptr}, *B_h{nullptr};
@@ -232,7 +232,7 @@ static void hipGraphExecMemcpyNodeSetParamsFromSymbol_GlobalMem(bool useConstVar
   obtain executable graph and update the node params with set exec api call.
   Make sure they are taking effect.
  */
-TEST_CASE("Unit_hipGraphExecMemcpyNodeSetParamsFromSymbol_Functional") {
+TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParamsFromSymbol_Functional) {
   SECTION("Check and update with Global Device Symbol Memory") {
     hipGraphExecMemcpyNodeSetParamsFromSymbol_GlobalMem(false);
   }

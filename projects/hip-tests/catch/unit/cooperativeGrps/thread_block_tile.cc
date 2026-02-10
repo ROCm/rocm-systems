@@ -120,7 +120,7 @@ template <bool dynamic, size_t... tile_sizes> void BlockPartitionGettersBasicTes
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Thread_Block_Tile_Getters_Positive_Basic") {
+TEST_CASE(Unit_Thread_Block_Tile_Getters_Positive_Basic) {
   BlockPartitionGettersBasicTest<false, 2, 4, 8, 16, 32>();
 }
 
@@ -137,7 +137,7 @@ TEST_CASE("Unit_Thread_Block_Tile_Getters_Positive_Basic") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Thread_Block_Tile_Dynamic_Getters_Positive_Basic") {
+TEST_CASE(Unit_Thread_Block_Tile_Dynamic_Getters_Positive_Basic) {
   BlockPartitionGettersBasicTest<true, 2, 4, 8, 16, 32>();
 }
 
@@ -203,7 +203,7 @@ template <typename T, size_t... tile_sizes> void BlockTileShflUpTest() {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_Thread_Block_Tile_Shfl_Up_Positive_Basic", "", int, unsigned int, long,
+TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Shfl_Up_Positive_Basic, int, unsigned int, long,
                    unsigned long, long long, unsigned long long, float, double) {
   BlockTileShflUpTest<TestType, 2, 16, 32>();
 }
@@ -282,7 +282,7 @@ template <typename T, size_t... tile_sizes> void BlockTileShflDownTest() {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_Thread_Block_Tile_Shfl_Down_Positive_Basic", "", int, unsigned int, long,
+TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Shfl_Down_Positive_Basic, int, unsigned int, long,
                    unsigned long, long long, unsigned long long, float, double) {
   BlockTileShflDownTest<TestType, 2, 16, 32>();
 }
@@ -356,7 +356,7 @@ template <typename T, size_t... tile_sizes> void BlockTileShflXORTest() {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_Thread_Block_Tile_Shfl_XOR_Positive_Basic", "", int, unsigned int, long,
+TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Shfl_XOR_Positive_Basic, int, unsigned int, long,
                    unsigned long, long long, unsigned long long, float, double) {
   BlockTileShflXORTest<TestType, 2, 16, 32>();
 }
@@ -436,7 +436,7 @@ template <typename T, size_t... tile_sizes> void BlockTileShflTest() {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_Thread_Block_Tile_Shfl_Positive_Basic", "", int, unsigned int, long,
+TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Shfl_Positive_Basic, int, unsigned int, long,
                    unsigned long, long long, unsigned long long, float, double) {
   BlockTileShflTest<TestType, 2, 16, 32>();
 }
@@ -550,7 +550,7 @@ template <bool global_memory, typename T, size_t... tile_sizes> void BlockTileSy
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_Thread_Block_Tile_Sync_Positive_Basic", "", uint8_t, uint16_t, uint32_t) {
+TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Sync_Positive_Basic, uint8_t, uint16_t, uint32_t) {
   SECTION("Global memory") { BlockTileSyncTest<true, TestType, 2, 16, 32>(); }
   SECTION("Shared memory") { BlockTileSyncTest<false, TestType, 2, 16, 32>(); }
 }

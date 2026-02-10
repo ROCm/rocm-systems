@@ -67,7 +67,7 @@ static __global__ void f1(float *a) { *a = 1.0; }
  * ------------------------
  * - HIP_VERSION >= 7.1
  */
-TEST_CASE("Unit_hipOccupancyAvailableDynamicSMemPerBlock_Negative") {
+TEST_CASE(Unit_hipOccupancyAvailableDynamicSMemPerBlock_Negative) {
   size_t dynamicSmemSize;
   int numBlocks = 1;
   SECTION("Number of blocks are zero") {
@@ -108,7 +108,7 @@ TEST_CASE("Unit_hipOccupancyAvailableDynamicSMemPerBlock_Negative") {
  * ------------------------
  * - HIP_VERSION >= 7.1
  */
-TEST_CASE("Unit_hipOccupancyAvailableDynamicSMemPerBlock_Positive") {
+TEST_CASE(Unit_hipOccupancyAvailableDynamicSMemPerBlock_Positive) {
   size_t dynamicSmemSize = 0;
   int numBlocks = 1;
   int inputArray[SIZE], expectedOutput[SIZE], actualOutput[SIZE];

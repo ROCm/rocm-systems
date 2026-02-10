@@ -19,7 +19,7 @@ THE SOFTWARE.
 
 #include <hip_test_common.hh>
 
-TEST_CASE("Unit_hipStreamPerThread_EventRecord") {
+TEST_CASE(Unit_hipStreamPerThread_EventRecord) {
   hipEvent_t event;
   HIP_CHECK(hipEventCreate(&event));
   HIP_CHECK(hipEventRecord(event, hipStreamPerThread));
@@ -36,7 +36,7 @@ __global__ void update_even_odd(unsigned int N, int* out) {
     }
   }
 }
-TEST_CASE("Unit_hipStreamPerThread_EventSynchronize") {
+TEST_CASE(Unit_hipStreamPerThread_EventSynchronize) {
   int* A_h = nullptr;
   int* A_d = nullptr;
   unsigned int size = 1000;

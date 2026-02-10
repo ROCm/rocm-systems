@@ -151,7 +151,7 @@ TEST_CASE(Unit_hipDeviceMemAlloc_MultiDevice) {
 /**
  * Verify Level Configuration (hidden test)
  * 
- * Run with: ./test "Unit_hipDeviceMemAlloc_VerifyLevelConfig"
+ * Run with: ./test Unit_hipDeviceMemAlloc_VerifyLevelConfig
  */
 TEST_CASE(Unit_hipDeviceMemAlloc_VerifyLevelConfig) {
     auto& params = TestParameterStore::instance();

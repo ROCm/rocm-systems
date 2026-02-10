@@ -40,6 +40,8 @@ THE SOFTWARE.
 #include <sys/resource.h>
 #endif
 
+#include <hip_tests_config.hh>  // Generated macros with tags from YAML
+
 #if !defined(__HIP_ATOMIC_BACKWARD_COMPAT)
 #define __HIP_ATOMIC_BACKWARD_COMPAT 1
 #endif
@@ -387,7 +389,7 @@ inline bool isP2PSupported(int& d1, int& d2) {
   int supported  = 1;
   for (auto i = 0u; i < num_devices; ++i) {
     int canAccess = 0;
-    for (auto j = 0u; j < num_devices; ++j) {  
+    for (auto j = 0u; j < num_devices; ++j) {
       if (i != j) {
         HIP_CHECK(hipDeviceCanAccessPeer(&canAccess, i, j));
         if (!canAccess) {
@@ -616,7 +618,7 @@ class BlockingContext {
   if (!HipTest::isPcieAtomicSupported()) {                                                        \
     HipTest::HIP_SKIP_TEST("Device doesn't support pcie atomic, Skipped");                         \
     return;                                                                                        \
-  }   
+  }
 
 #define CHECK_P2P_SUPPORT                                                                          \
   int d1, d2;                                                                                      \
