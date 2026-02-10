@@ -751,20 +751,64 @@ tracer<LogLevel>::leave (std::tuple<Args...> &&out_args,
   return std::move (result) ();
 }
 
+struct trace_scope_no_ret
+{
+};
+
+template <>
+inline std::string
+to_string (trace_scope_no_ret)
+{
+  return "<no ret>";
+}
+
 #if defined(WITH_API_TRACING)
 
 #define TRACE_BEGIN_HELPER(level, prefix, ...)                                \
-  amd::dbgapi::tracer<level> _tracer (prefix, __FUNCTION__);                  \
-  auto&& _closure = _tracer.enter (std::make_tuple (__VA_ARGS__), [&] () {
+  TRACE_BEGIN_HELPER_S (_, level, prefix, __VA_ARGS__)
+#define TRACE_END_HELPER(...) TRACE_END_HELPER_S (_, __VA_ARGS__)
 
-#define TRACE_END_HELPER(...)                                                 \
+#define TRACE_BEGIN_HELPER_S(varsuffix, level, prefix, ...)                   \
+  amd::dbgapi::tracer<level> _tracer##varsuffix (prefix, __FUNCTION__);       \
+  auto&& _closure ## varsuffix = _tracer ## varsuffix.enter (std::make_tuple (__VA_ARGS__), [&] () {
+
+#define TRACE_BEGIN_HELPER_S_NORET(varsuffix, level, prefix, ...)             \
+  amd::dbgapi::tracer<level> _tracer##varsuffix (prefix, __FUNCTION__);       \
+  auto&& _closure ## varsuffix						\
+  = _tracer ## varsuffix.enter (std::make_tuple (__VA_ARGS__), [&] ()	\
+    -> trace_scope_no_ret {
+
+#define TRACE_END_HELPER_S_NORET(varsuffix, ...)                              \
+  return trace_scope_no_ret{};                                                \
   });                                                                         \
-  return _tracer.leave (std::make_tuple (__VA_ARGS__), std::move (_closure));
+  _tracer##varsuffix.leave (std::make_tuple (__VA_ARGS__),                    \
+                            std::move (_closure##varsuffix));
+
+#define TRACE_END_HELPER_NORET(...) TRACE_END_HELPER_S_NORET (_, ...)
+
+#define TRACE_END_HELPER_S(varsuffix, ...)                                    \
+  });                                                                         \
+  return _tracer##varsuffix.leave (std::make_tuple (__VA_ARGS__),             \
+                                   std::move (_closure##varsuffix));
 
 #define TRACE_BEGIN(...)                                                      \
   TRACE_BEGIN_HELPER (AMD_DBGAPI_LOG_LEVEL_TRACE, "", __VA_ARGS__)
 
 #define TRACE_END(...) TRACE_END_HELPER (__VA_ARGS__)
+
+#define TRACE_END_NORET(...) TRACE_END_HELPER_NORET (__VA_ARGS__)
+
+#define TRACE_BEGIN_S(varsuffix, ...)                                         \
+  TRACE_BEGIN_HELPER_S (varsuffix, AMD_DBGAPI_LOG_LEVEL_TRACE, "", __VA_ARGS__)
+
+#define TRACE_END_S(varsuffix, ...) TRACE_END_HELPER_S (varsuffix, __VA_ARGS__)
+
+#define TRACE_BEGIN_S_NORET(varsuffix, ...)                                   \
+  TRACE_BEGIN_HELPER_S_NORET (varsuffix, AMD_DBGAPI_LOG_LEVEL_TRACE, "",      \
+                              __VA_ARGS__)
+
+#define TRACE_END_S_NORET(varsuffix, ...)                                     \
+  TRACE_END_HELPER_S_NORET (varsuffix, __VA_ARGS__)
 
 #define TRACE_CALLBACK_BEGIN(...)                                             \
   TRACE_BEGIN_HELPER (AMD_DBGAPI_LOG_LEVEL_VERBOSE, "callback: ", __VA_ARGS__)
