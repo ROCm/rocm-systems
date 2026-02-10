@@ -161,7 +161,7 @@ void HipModuleInitTester::launchKernel(dim3 gridSize, dim3 blockSize,
   (void)size;
 
   if (my_pe == 0) {
-    printf("\n=== CUDA/HIP graph capture test ===\n");
+    printf("\n=== HIP graph capture test ===\n");
   }
 
   // Reset result buffer
