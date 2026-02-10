@@ -53,6 +53,7 @@ Error CustomStreamer::init(Triple TheTriple,
                            StringRef Swift5ReflectionSegmentName) {
   std::string ErrorStr;
   std::string TripleName;
+  const char *emptystr = "";
 
   // Get the target.
   const Target *TheTarget =
@@ -77,11 +78,11 @@ Error CustomStreamer::init(Triple TheTriple,
     return createStringError(std::errc::invalid_argument,
                              "no asm info for target %s", TripleName.c_str());
 
-  MSTI.reset(TheTarget->createMCSubtargetInfo(TheTriple, CPU, FeatureStr));
+  MSTI.reset(TheTarget->createMCSubtargetInfo(TheTriple, CPU, emptystr));
   if (!MSTI)
     return createStringError(std::errc::invalid_argument,
                              "no subtarget info for target %s-%s:%s",
-                             TripleName.c_str(), CPU, FeatureStr);
+                             TripleName.c_str(), CPU, emptystr);
 
   MC.reset(new MCContext(TheTriple, MAI.get(), MRI.get(), MSTI.get(), nullptr,
                          nullptr, true, Swift5ReflectionSegmentName));
@@ -131,7 +132,7 @@ Error CustomStreamer::init(Triple TheTriple,
                              TripleName.c_str());
 
   // Finally create the AsmPrinter we'll use to emit the DIEs.
-  TM.reset(TheTarget->createTargetMachine(TheTriple, CPU, FeatureStr,
+  TM.reset(TheTarget->createTargetMachine(TheTriple, CPU, emptystr,
                       TargetOptions(), std::nullopt));
   if (!TM)
     return createStringError(std::errc::invalid_argument,
