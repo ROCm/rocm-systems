@@ -22,15 +22,15 @@ subtree_to_project_map = {
 
 project_map = {
     "core": {
-        "cmake_options": "-DTHEROCK_ENABLE_CORE=ON -DTHEROCK_ENABLE_HIP_RUNTIME=ON -DTHEROCK_ENABLE_ALL=OFF",
+        "cmake_options": "-DTHEROCK_ENABLE_ALL=ON",
         "projects_to_test": "hip-tests",
     },
     "profiler": {
-        "cmake_options": "-DTHEROCK_ENABLE_PROFILER=ON -DTHEROCK_ENABLE_ALL=OFF",
+        "cmake_options": "-DTHEROCK_ENABLE_ALL=ON",
         "projects_to_test": "rocprofiler-tests",
     },
     "all": {
-        "cmake_options": "-DTHEROCK_ENABLE_CORE=ON -DTHEROCK_ENABLE_PROFILER=ON -DTHEROCK_ENABLE_ALL=OFF",
+        "cmake_options": "-DTHEROCK_ENABLE_ALL=ON",
         "projects_to_test": "hip-tests, rocprofiler-tests",
     },
 }
