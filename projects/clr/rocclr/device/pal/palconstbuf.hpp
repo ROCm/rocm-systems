@@ -79,7 +79,11 @@ class ManagedBuffer : public amd::EmbeddedObject {
 };
 
 //! Constant buffer
+#ifdef ATI_OS_WIN
 class ConstantBuffer : public amd::HeapObject {
+#else
+class ConstantBuffer {
+#endif
  public:
   //! Constructor for the ConstBuffer class
   ConstantBuffer(ManagedBuffer& mbuf,  //!< Managed buffer

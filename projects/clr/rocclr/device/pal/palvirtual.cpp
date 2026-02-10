@@ -26,6 +26,9 @@
 #include <sstream>
 #include <algorithm>
 #include <thread>
+#include <cstddef>
+#include <limits>
+#include <utility>
 #include "palQueue.h"
 #include "palFence.h"
 #include "palQueueSemaphore.h"
@@ -161,6 +164,7 @@ VirtualGPU::Queue* VirtualGPU::Queue::Create(VirtualGPU& gpu, Pal::QueueType que
   size_t allocSize = qSize + max_command_buffers * (cmdSize + fSize);
   VirtualGPU::Queue* queue =
       new (allocSize) VirtualGPU::Queue(gpu, palDev, residency_limit, max_command_buffers);
+  
   if (queue != nullptr) {
     address addrQ = nullptr;
     if (((qCreateInfo.engineType == Pal::EngineTypeCompute) ||

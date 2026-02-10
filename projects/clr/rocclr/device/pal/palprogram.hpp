@@ -32,7 +32,11 @@ namespace amd::pal {
 using namespace amd::hsa::loader;
 class Program;
 
+#ifdef ATI_OS_WIN
 class Segment : public amd::HeapObject {
+#else
+class Segment {
+#endif
  public:
   Segment();
   ~Segment();

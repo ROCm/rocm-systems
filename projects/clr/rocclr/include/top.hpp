@@ -150,7 +150,10 @@ class MemoryPoolObject {
   void operator delete(void*, void* address) {}
 };
 
+#ifdef ATI_OS_WIN
 /*! \brief For objects allocated on the C-heap.
+ *  \note Windows-only: Required for PAL backend to ensure consistent
+ *        heap allocation/deallocation across DLL boundaries.
  */
 class HeapObject {
  public:
@@ -161,6 +164,7 @@ class HeapObject {
   };
   void operator delete(void* obj, size_t extSize) { HeapObject::operator delete(obj); }
 };
+#endif  // ATI_OS_WIN
 
 /*! \brief For all reference counted objects.
  */

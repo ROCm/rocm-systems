@@ -40,7 +40,11 @@ class Kernel;
 class VirtualGPU;
 class Memory;
 
+#ifdef ATI_OS_WIN
 class PrintfDbg : public amd::HeapObject {
+#else
+class PrintfDbg {
+#endif
  public:
   //! Debug buffer size per workitem
   static constexpr uint WorkitemDebugSize = 4096;
