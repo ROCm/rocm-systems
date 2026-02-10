@@ -1,8 +1,6 @@
 import os
 import sys
-import math
 import re
-import statistics
 #from matplotlib import pyplot as plt
 import xlsxwriter
 from datetime import datetime
@@ -22,14 +20,14 @@ rocm_version = ""
 hip_version = ""
 minmsgsize = 16
 
-if len(sys.argv) == 0:
+if len(sys.argv) <= 1:
     print("No input directory providing. Aborting")
     sys.exit()
 
 files_in_dir = {}
 files = 0
 
-for dir in sys.argv:
+for dir in sys.argv[1:]:
     file_names = []
     if not os.path.isdir (dir):
         continue

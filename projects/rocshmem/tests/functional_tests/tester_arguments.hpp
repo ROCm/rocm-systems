@@ -72,7 +72,7 @@ public:
   unsigned algorithm = 0;
   size_t min_msg_size = 1;
   size_t max_msg_size = 1 << 20;
-  unsigned max_volume_size = 0;
+  size_t max_volume_size = 0;
   unsigned wg_size = 64;
   unsigned thread_access = 64;
   unsigned coal_coef = 64;

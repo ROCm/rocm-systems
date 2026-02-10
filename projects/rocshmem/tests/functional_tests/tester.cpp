@@ -146,7 +146,7 @@ Tester::Tester(TesterArguments args) : args(args) {
     }
     if (max_msg_size == 0) {
       if (args.myid == 0) {
-        std::cerr << "Requested communication volume is smaller than what is required to send at least 1 byte per operation, adjust -w, -z, and -v to match, or  remove -v.";
+        std::cerr << "Requested communication volume is smaller than what is required to send at least 1 byte per operation, adjust -w, -z, and -v to match, or remove -v.";
       }
       exit(-1);
     }
