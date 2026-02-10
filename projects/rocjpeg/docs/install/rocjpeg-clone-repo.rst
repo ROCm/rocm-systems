@@ -6,7 +6,7 @@
 Cloning the rocJPEG project  
 *********************************
 
-The rocJPEG source code is available from the `ROCm libraries GitHub Repository <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocjpeg>`_. Use sparse checkout when cloning the rocJPEG project:
+The rocJPEG source code is available from the `ROCm systems GitHub repository <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocjpeg>`_. Use sparse checkout when cloning the rocJPEG project:
 
 .. code::
 

@@ -6,7 +6,7 @@
 Building and installing rocJPEG from source code
 ********************************************************************
 
-These instructions are for building rocJPEG from its source code. If you will not be contributing to the rocJPEG code base or previewing features, :doc:`package installers <./rocjpeg-package-install.html>`_ are available.
+These instructions are for building rocJPEG from its source code. If you will not be contributing to the rocJPEG code base or previewing features, :doc:`package installers <./rocjpeg-package-install>` are available.
 
 .. note::
 
