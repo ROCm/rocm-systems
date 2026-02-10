@@ -151,9 +151,9 @@ ncclResult_t amd_smi_init() {
   if (rcclParamUseAmdSmiLib()) {
 #if !AMDSMI_DIRECT
     if (pfn_amdsmi_init == nullptr) {
-      static void *libhandle = dlopen("libamdsmi.so.1", RTLD_NOW);
+      static void *libhandle = dlopen("libamd_smi.so", RTLD_NOW);
       if (libhandle == nullptr) {
-        WARN("Failed to open libamdsmi.so.1");
+        WARN("Failed to open libamd_smi.so");
         return ncclSuccess;
       }
 
@@ -335,17 +335,17 @@ ncclResult_t amd_smi_getDeviceIndexByPciBusId(const char* pciBusId, uint32_t* de
 
       amdsmi_bdf_t bdf = {};
       // This is the format that matches amd-smi BDF
-      // bdf.function_number = (busid & 0x7);
-      // bdf.device_number = (busid & 0xf8) >> 3;
-      // bdf.bus_number = (busid & 0xff00) >> 8;
-      // bdf.domain_number = (busid & 0xffffffffffff0000) >> 16;
+      bdf.function_number = (busid & 0x7);
+      bdf.device_number = (busid & 0xf8) >> 3;
+      bdf.bus_number = (busid & 0xff00) >> 8;
+      bdf.domain_number = (busid & 0xffffffffffff0000) >> 16;
 
       // However, it is incompatible with the format enforced by NCCL in utils.cc:int64ToBusId
       // !! To be reconciled after discussion with amdsmi team !!
-      bdf.function_number = (busid & 0xf);
-      bdf.device_number = (busid & 0xff) >> 4;
-      bdf.bus_number = (busid & 0xff000) >> 12;
-      bdf.domain_number = busid >> 20;
+      // bdf.function_number = (busid & 0xf);
+      // bdf.device_number = (busid & 0xff) >> 4;
+      // bdf.bus_number = (busid & 0xff000) >> 12;
+      // bdf.domain_number = busid >> 20;
 
       AMDSMITRY(amdsmi_get_processor_handle_from_bdf, bdf, &processor_handle);
 
@@ -558,6 +558,7 @@ ncclResult_t amd_smi_ensureFabricInitialized() {
 
     amdsmi_processor_handle procHandle;
     if (getProcessorHandle(d, &procHandle) != ncclSuccess || !amd_smi_FabricFunctionsLoaded()) {
+      WARN("AMD SMI fabric: unable to get processor handle or fabric functions not loaded for device %u, skipping fabric detection", d);
       devInfo->fabricSupported = false;
       continue;
     }
@@ -576,7 +577,8 @@ ncclResult_t amd_smi_ensureFabricInitialized() {
     // Populate cached info from v1 structure
     const amdsmi_fabric_info_v1_t* v1 = &fabricInfo.info.v1;
     devInfo->fabricSupported = (v1->fabric_type == AMDSMI_FABRIC_TYPE_UALOE &&
-                                v1->accel_state == AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_ACTIVE);
+                               (v1->accel_state == AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_ACTIVE ||
+                                v1->accel_state == AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_READY));
     devInfo->fabricType = v1->fabric_type;
     devInfo->state = v1->accel_state;
     devInfo->acceleratorId = v1->accelerator_id;
@@ -595,7 +597,7 @@ ncclResult_t amd_smi_ensureFabricInitialized() {
 
   }
 
-  fabricInitResult = ncclSuccess;
+  fabricInitResult = amd_smi_FabricFunctionsLoaded()? ncclSuccess : ncclInternalError;
   return fabricInitResult;
 }
 
