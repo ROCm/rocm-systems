@@ -49,6 +49,7 @@ from utils.utils import (
     capture_subprocess_output,
     format_time,
     gen_sysinfo,
+    get_rank,
     pc_sampling_prof,
     print_status,
     run_prof,
@@ -109,11 +110,23 @@ class RocProfCompute_Base:
                 "--attach-pid cannot be used with --iteration-multiplexing. "
                 "Please remove one of these options."
             )
+
         # verify correct formatting for application binary
         args.remaining = args.remaining[1:]
         resolved_exec_path: Optional[Path] = None
 
         if args.remaining:
+            # Validate that MPI launchers are not used after --
+            MPI_LAUNCHERS = {"mpirun", "mpiexec", "srun", "orterun"}
+            if Path(args.remaining[0]).name in MPI_LAUNCHERS:
+                console_error(
+                    f"MPI launcher '{args.remaining[0]}' cannot be used after '--'.\n"
+                    "Instead, wrap rocprof-compute with the MPI launcher:\n\n"
+                    f"    {args.remaining[0]} -n <ranks> rocprof-compute profile "
+                    "[options] -- ./your_application\n\n"
+                    "See documentation for multi-rank profiling."
+                )
+
             # Ensure that command points to an executable
             exec_candidate = shutil.which(args.remaining[0])
             if not exec_candidate:
@@ -646,6 +659,46 @@ class RocProfCompute_Base:
         # Run profiling on each input file
         input_files = sorted(Path(args.path).glob("perfmon/*.txt"))
         total_runs = len(input_files)
+
+        # Compute total workload runs including PC sampling for warning check
+        total_workload_runs = total_runs
+        if any(
+            block == "21" or block.startswith("21.") for block in args.filter_blocks
+        ):
+            total_workload_runs += 1
+
+        # Warn about multi-rank profiling when multiple workload runs are needed
+        if total_workload_runs > 1 and get_rank() is not None:
+            console_warning(
+                "Multi-rank application detected. Application replay mode "
+                "(running the workload multiple times) may fail to collect "
+                "data for workloads with MPI communication. "
+                "Consider using single-pass modes:\n"
+                "  --iteration-multiplexing  : Collect all counters in a "
+                "single application run\n"
+                "  --block <N>               : Profile specific block(s), "
+                "excluding block 21\n"
+                "  --set <name>              : Profile a predefined counter set\n"
+                "See documentation for more information."
+            )
+
+        # Warn if PC sampling is requested (block "21") with multi-rank
+        if get_rank() is not None and any(
+            block == "21" or block.startswith("21.") for block in args.filter_blocks
+        ):
+            console_warning(
+                "Multi-rank application detected with PC sampling enabled. "
+                "PC sampling may fail to collect data for workloads with "
+                "MPI communication. "
+                "Consider using single-pass modes without PC sampling:\n"
+                "  --iteration-multiplexing  : Collect all counters in a "
+                "single application run\n"
+                "  --block <N>               : Profile specific block(s), "
+                "excluding block 21\n"
+                "  --set <name>              : Profile a predefined counter set\n"
+                "See documentation for more information."
+            )
+
         total_profiling_time = 0.0
 
         for fname in input_files:
