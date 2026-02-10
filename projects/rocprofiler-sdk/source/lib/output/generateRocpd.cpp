@@ -74,6 +74,7 @@
 #include <type_traits>
 #include <unordered_map>
 #include <utility>
+#include <variant>
 
 ROCPROFILER_SDK_CEREAL_NAMESPACE_BEGIN
 
@@ -133,15 +134,11 @@ replace_all(std::string val, Tp from, std::string_view to)
 std::string
 sanitize_sql_string(std::string input)
 {
-    // Special characters that need to be escaped/sanitized in SQL strings
+    // Remove control/separator characters; no quote escaping when binding parameters.
     constexpr auto ESCAPE_CHARS = std::string_view{";\n\r\t\b\f\v"};
-    using strpair_t             = std::pair<std::string_view, std::string_view>;
 
     for(char c : ESCAPE_CHARS)
         input = replace_all(input, c, "");
-
-    for(auto&& itr : {strpair_t{"'", "''"}})
-        input = replace_all(input, itr.first, itr.second);
 
     return input;
 }
@@ -294,8 +291,8 @@ iterate_args_callback(rocprofiler_buffer_tracing_kind_t /*kind*/,
 
 struct sql_insert_value
 {
-    std::string_view name  = {};
-    std::string      value = {};
+    std::string_view                                                                     name  = {};
+    std::variant<std::monostate, int64_t, uint64_t, double, std::string, std::nullptr_t> value = {};
 };
 
 struct allow_empty_string
@@ -329,13 +326,32 @@ insert_value(std::string_view _name, const Tp& _value, TraitT = {})
             {
                 ROCP_CI_LOG(WARNING)
                     << fmt::format("sql text value for {} is empty. Using NULL instead", _name);
-                return sql_insert_value{_name, std::string{"NULL"}};
+                return sql_insert_value{_name, nullptr};
             }
         }
-        // Sanitize string values before embedding into SQL to escape quotes and remove
-        // problematic control/separator characters.
+        // Sanitize string values to remove problematic control/separator characters.
         auto _sanitized = sanitize_sql_string(std::string{_value});
-        return sql_insert_value{_name, fmt::format("'{}'", _sanitized)};
+        return sql_insert_value{_name, _sanitized};
+    }
+    else if constexpr(std::is_enum_v<value_type>)
+    {
+        return sql_insert_value{_name, static_cast<int64_t>(_value)};
+    }
+    else if constexpr(std::is_integral_v<value_type>)
+    {
+        if constexpr(std::is_unsigned_v<value_type>)
+        {
+            auto _uval = static_cast<uint64_t>(_value);
+            if(_uval > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()))
+                return sql_insert_value{_name, static_cast<double>(_uval)};
+            return sql_insert_value{_name, _uval};
+        }
+        else
+            return sql_insert_value{_name, static_cast<int64_t>(_value)};
+    }
+    else if constexpr(std::is_floating_point_v<value_type>)
+    {
+        return sql_insert_value{_name, static_cast<double>(_value)};
     }
     else
     {
@@ -355,27 +371,151 @@ insert_value(std::string_view _name, const std::optional<Tp>& _value, TraitT = {
     return insert_value(_name, _value.value(), TraitT{});
 }
 
+sqlite3*&
+get_active_sqlite_connection()
+{
+    static sqlite3* _conn = nullptr;
+    return _conn;
+}
+
+std::unordered_map<std::string, sqlite3_stmt*>&
+get_prepared_statement_cache()
+{
+    static auto _cache = std::unordered_map<std::string, sqlite3_stmt*>{};
+    return _cache;
+}
+
+void
+set_active_sqlite_connection(sqlite3* conn)
+{
+    auto& current = get_active_sqlite_connection();
+    if(current == conn) return;
+
+    if(current != nullptr)
+    {
+        for(auto& [key, stmt] : get_prepared_statement_cache())
+        {
+            if(stmt) sqlite3_finalize(stmt);
+        }
+        get_prepared_statement_cache().clear();
+    }
+
+    current = conn;
+}
+
+void
+finalize_prepared_statements()
+{
+    for(auto& [key, stmt] : get_prepared_statement_cache())
+    {
+        if(stmt) sqlite3_finalize(stmt);
+    }
+    get_prepared_statement_cache().clear();
+}
+
 template <template <typename...> class ContainerT, typename... TypesT>
 auto
 get_insert_statement_impl(std::string_view _table, ContainerT<sql_insert_value, TypesT...>&& _data)
 {
     auto fields = std::vector<std::string_view>{};
-    auto values = std::vector<std::string_view>{};
+    auto values = std::vector<sql_insert_value>{};
 
     fields.reserve(_data.size() + 1);
     values.reserve(_data.size() + 1);
     for(auto&& itr : _data)
     {
-        if(itr.name.empty() && itr.value.empty()) continue;
+        if(itr.name.empty()) continue;
 
         fields.emplace_back(itr.name);
-        values.emplace_back(itr.value);
+        values.emplace_back(itr);
     }
 
-    return fmt::format(R"(INSERT INTO {} ({}) VALUES ({});)",
-                       replace_uuid(_table),
-                       fmt::join(fields.begin(), fields.end(), ", "),
-                       fmt::join(values.begin(), values.end(), ", "));
+    if(fields.empty()) return std::string{};
+
+    auto& conn  = get_active_sqlite_connection();
+    auto& cache = get_prepared_statement_cache();
+
+    ROCP_FATAL_IF(conn == nullptr) << "SQLite connection not set for prepared statements";
+
+    auto table = replace_uuid(_table);
+    auto key   = fmt::format("{}:{}", table, fmt::join(fields, ","));
+
+    auto& stmt = cache[key];
+    if(!stmt)
+    {
+        auto placeholders = std::string{};
+        for(size_t i = 0; i < fields.size(); ++i)
+        {
+            if(i > 0) placeholders += ", ";
+            placeholders += "?";
+        }
+
+        auto sql = fmt::format(
+            "INSERT INTO {} ({}) VALUES ({});", table, fmt::join(fields, ", "), placeholders);
+
+        int rc = sqlite3_prepare_v2(conn, sql.c_str(), -1, &stmt, nullptr);
+        if(rc != SQLITE_OK)
+        {
+            ROCP_FATAL << fmt::format(
+                "[{}] Failed to prepare statement: {}", rc, sqlite3_errmsg(conn));
+            throw std::runtime_error("sqlite3_prepare_v2 failed");
+        }
+    }
+
+    for(size_t i = 0; i < values.size(); ++i)
+    {
+        int idx = static_cast<int>(i + 1);
+        std::visit(
+            [&](auto&& val) {
+                using T = std::decay_t<decltype(val)>;
+                int rc  = SQLITE_OK;
+                if constexpr(std::is_same_v<T, std::monostate>)
+                {
+                    rc = sqlite3_bind_null(stmt, idx);
+                }
+                else if constexpr(std::is_same_v<T, std::nullptr_t>)
+                {
+                    rc = sqlite3_bind_null(stmt, idx);
+                }
+                else if constexpr(std::is_same_v<T, int64_t>)
+                {
+                    rc = sqlite3_bind_int64(stmt, idx, val);
+                }
+                else if constexpr(std::is_same_v<T, uint64_t>)
+                {
+                    rc = sqlite3_bind_int64(stmt, idx, static_cast<int64_t>(val));
+                }
+                else if constexpr(std::is_same_v<T, double>)
+                {
+                    rc = sqlite3_bind_double(stmt, idx, val);
+                }
+                else if constexpr(std::is_same_v<T, std::string>)
+                {
+                    rc = sqlite3_bind_text(stmt, idx, val.c_str(), -1, SQLITE_TRANSIENT);
+                }
+
+                if(rc != SQLITE_OK)
+                {
+                    ROCP_FATAL << fmt::format("[{}] Failed to bind parameter at index {}: {}",
+                                              rc,
+                                              idx,
+                                              sqlite3_errmsg(conn));
+                    throw std::runtime_error("sqlite3_bind failed");
+                }
+            },
+            values[i].value);
+    }
+
+    int rc = sqlite3_step(stmt);
+    if(rc != SQLITE_DONE)
+    {
+        ROCP_FATAL << fmt::format("[{}] Failed to execute statement: {}", rc, sqlite3_errmsg(conn));
+        throw std::runtime_error("sqlite3_step failed");
+    }
+
+    sqlite3_reset(stmt);
+
+    return std::string{};
 }
 
 template <template <typename...> class ContainerT, typename... TypesT>
@@ -706,6 +846,7 @@ write_rocpd(
         SQLITE3_CHECK(sqlite3_open_v2(
             output_file.c_str(), &conn, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nullptr));
         SQLITE3_CHECK(sqlite3_busy_handler(conn, &sql::busy_handler, nullptr));
+        set_active_sqlite_connection(conn);
 
         ROCP_ERROR << fmt::format("Opened result file: {} (UUID={})", output_file, uuid_v7);
 
@@ -1703,6 +1844,8 @@ write_rocpd(
         execute_raw_sql_statements(conn, indexes_schema);
     }
 
+    finalize_prepared_statements();
+    set_active_sqlite_connection(nullptr);
     SQLITE3_CHECK(sqlite3_close_v2(conn));
 
     // Clear UUID/GUID state at end of write to prepare for potential re-attach
