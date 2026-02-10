@@ -99,7 +99,7 @@ class TestROCTx(RocprofsysTest):
         )
         self.assert_regex(result)
 
-    @pytest.mark.disable("assert_rocpd")
+    @pytest.mark.ci_disable("assert_rocpd")
     @pytest.mark.rocpd("roctx_env")
     def test_sampling(
         self,

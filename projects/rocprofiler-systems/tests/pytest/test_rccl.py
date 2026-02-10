@@ -11,7 +11,12 @@ from __future__ import annotations
 import pytest
 from conftest import RocprofsysTest
 
-pytestmark = [pytest.mark.rccl, pytest.mark.disable("all")]
+pytestmark = [
+    pytest.mark.rccl,
+    pytest.mark.mpi,
+    pytest.mark.gpu,
+    pytest.mark.ci_disable("all"),
+]
 
 # =============================================================================
 # RCCL fixtures
@@ -57,7 +62,6 @@ RCCL_TARGETS = [
 ]
 
 
-@pytest.mark.mpi
 @pytest.mark.parametrize(
     "rccl_target",
     RCCL_TARGETS,

@@ -31,8 +31,8 @@ class RocprofsysConfig:
         - rocm_path: Path to ROCm installation directory
         - rocprofsys_lib_dir: Path to rocprofsys library directory
         - rocprofsys_bin_dir: Path to rocprofsys binary directory
-        - rocprofsys_examples_dir:
-            In build mode, this is the root of the build directory.
+        - rocprofsys_examples_dir: Path
+            In build mode, this is the root of the build directory (most examples lie here).
             In install mode, this is the examples/ directory.
         - rocprofsys_tests_dir: Path to rocprofsys tests directory
         - test_output_dir: Path to test output directory
@@ -169,7 +169,7 @@ class RocprofsysConfig:
 
         else:
             # Python check
-            exe = self.rocprofsys_examples_dir / "python" / "tests" / name
+            exe = self.rocprofsys_examples_dir / "examples" / "python" / name
             if exe.exists() and exe.is_file():
                 return exe
 
@@ -180,7 +180,7 @@ class RocprofsysConfig:
 
             # code-coverage.py lies in the code-coverage directory
             if name == "code-coverage.py":
-                exe = self.rocprofsys_examples_dir / "code-coverage" / name
+                exe = self.rocprofsys_examples_dir / "examples" / "code-coverage" / name
                 if exe.exists() and exe.is_file():
                     return exe
 
@@ -299,6 +299,9 @@ class RocprofsysConfig:
 
 def _find_rocm_path() -> Optional[Path]:
     """Find ROCm installation path."""
+    if os.environ.get("ROCPROFSYS_USE_ROCM") == "OFF":
+        return None
+
     for candidate in [
         os.environ.get("ROCM_PATH"),
         "/opt/rocm",
@@ -504,6 +507,9 @@ def discover_install_config(
     Raises:
         FileNotFoundError: If build/installation dirs and executables are not found
     """
+
+    if os.environ.get("ROCPROFSYS_USE_ROCM") == "OFF":
+        raise FileNotFoundError("Install mode does not support ROCPROFSYS_USE_ROCM=OFF")
 
     if install_dir is None:
         env_install = os.environ.get("ROCPROFSYS_INSTALL_DIR")

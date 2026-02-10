@@ -140,7 +140,7 @@ class TestPython(RocprofsysTest):
     @pytest.mark.parametrize(
         "annotated, exclude",
         [
-            (False, False),  # No explicit id = no trailing dash
+            pytest.param(False, False, id="base"),
             pytest.param(True, False, id="annotated"),
             pytest.param(False, True, id="inefficient"),
             pytest.param(True, True, id="inefficient-annotated"),

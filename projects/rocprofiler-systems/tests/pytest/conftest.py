@@ -108,6 +108,12 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         help="Show the test configuration at the beginning of the session",
     )
     group.addoption(
+        "--show-config-only",
+        action="store_true",
+        default=False,
+        help="Show the test configuration and exit without running any tests",
+    )
+    group.addoption(
         "--output-dir",
         action="store",
         default=None,
@@ -175,6 +181,12 @@ def pytest_configure(config: pytest.Config) -> None:
 
     configure_mode(config)
 
+    if config.getoption("--show-config-only", default=False):
+        header = _generate_rocprofsys_config_header(config)
+        for line in header:
+            print(line)
+        pytest.exit(reason="Header generated", returncode=0)
+
     is_monochrome = config.getoption("--monochrome", default=False)
     if is_monochrome:
         config.option.color = "no"
@@ -204,7 +216,7 @@ def pytest_configure(config: pytest.Config) -> None:
     )
     config.addinivalue_line(
         "markers",
-        "disable(name): Use 'all' to skip entire test, or assertion name (e.g., 'assert_rocpd') to disable subtest (CI mode only).",
+        "ci_disable(name): Use 'all' to skip entire test, or assertion name (e.g., 'assert_rocpd') to disable subtest (CI mode only).",
     )
     config.addinivalue_line(
         "markers",
@@ -277,14 +289,10 @@ def pytest_configure(config: pytest.Config) -> None:
     for label in label_list:
         config.addinivalue_line("markers", f"{label}: label test as {label}")
 
-    # Ignore unknown marker warnings when plugins are not installed (e.g. in PyInstaller bundle)
+    # Ignore unknown marker warnings when plugins are not installed
     config.addinivalue_line(
         "filterwarnings",
         "ignore:Unknown pytest.mark.xdist_group:pytest.PytestUnknownMarkWarning",
-    )
-    config.addinivalue_line(
-        "filterwarnings",
-        "ignore:Unknown pytest.mark.order:pytest.PytestUnknownMarkWarning",
     )
 
     # Check if xdist is being used without loadgroup distribution
@@ -355,117 +363,9 @@ def pytest_sessionstart(session):
 
 
 def pytest_report_header(config) -> list[str]:
-    """Add test configuration to pytest header output."""
-
-    try:
-        rocprof_config = get_rocprof_config()
-    except Exception as e:
-        return [f"{e}"]
-
-    gpuInfo = get_gpu_info()
-
     if not config.getoption("--show-config", default=False):
         return []
-
-    # Rocminfo
-    rocminfo_path = get_rocminfo(rocprof_config.rocm_path)
-    if not rocminfo_path:
-        rocminfo_err_msg = "Not found - Ensure rocminfo is in ROCM_PATH or PATH - Assuming no GPU configuration"
-
-    # Offload extractor
-    offload_msg = None
-    tool_path, is_llvm_too_old = get_offload_extractor(rocprof_config.rocm_path)
-    if tool_path:
-        if tool_path.name == "llvm-objdump":
-            offload_msg = f"{tool_path}"
-        elif tool_path.name == "roc-obj-ls":
-            if not is_llvm_too_old:
-                offload_msg = f"Using deprecated {tool_path} - Set ROCM_LLVM_OBJDUMP to use llvm-objdump instead"
-            else:
-                offload_msg = f"{tool_path}"
-
-    if not offload_msg:
-        offload_msg = (
-            "Not found - Set ROCM_LLVM_OBJDUMP to path of llvm-objdump (v20+), "
-            "or to path of roc-obj-ls if llvm-objdump < v20"
-        )
-
-    rocm_version = (
-        ".".join(map(str, rocprof_config.rocm_version))
-        if rocprof_config.rocm_version
-        else "Not found"
-    )
-
-    lines = [
-        "",
-        "=" * 70,
-        "Test Configuration:",
-        "=" * 70,
-        f"  ROCm version:         {rocm_version}",
-        f"  ROCm path:            {rocprof_config.rocm_path}",
-        f"  Is installed:         {rocprof_config.is_installed}",
-        f"  Output dir:           {rocprof_config.test_output_dir}",
-        f"  Log file:             {getattr(config, '_output_log_path', None) or 'Disabled'}",
-        f"  Validate ROCPD:       {check_use_rocpd()}",
-        f"  Validate Perfetto:    {check_use_perfetto()}",
-        "-" * 70,
-        "System Capabilities:",
-        f"  Detected num procs:   {rocprof_config.capabilities.num_procs}",
-        f"  MPI impl:             {rocprof_config.capabilities.mpi_implementation}",
-        f"  UCX available:        {rocprof_config.capabilities.ucx_availability}",
-        f"  Default NIC:          {rocprof_config.capabilities.default_nic}",
-        f"  PAPI available:       {rocprof_config.capabilities.papi_availability}",
-        f"  PAPI NIC events:      {rocprof_config.capabilities.papi_nic_events}",
-        f"  Perf event paranoid:  {rocprof_config.capabilities.perf_event_paranoid}",
-        f"  CAP_SYS_ADMIN:        {rocprof_config.capabilities.cap_sys_admin}",
-        f"  CAP_PERFMON:          {rocprof_config.capabilities.cap_perfmon}",
-        f"  Ptrace scope:         {rocprof_config.capabilities.ptrace_scope}",
-        "-" * 70,
-        "GPU Information:",
-        f"  rocminfo:             {rocminfo_path if rocminfo_path else rocminfo_err_msg}",
-        f"  Available:            {gpuInfo.available}",
-        f"  Architectures:        {gpuInfo.architectures}",
-        f"  Device count:         {gpuInfo.device_count}",
-        f"  Categories:           {gpuInfo.categories}",
-        "-" * 70,
-        "Directories:",
-        f"  Build dir:            {rocprof_config.rocprofsys_build_dir}",
-        f"  Lib dir:              {rocprof_config.rocprofsys_lib_dir}",
-        f"  Bin dir:              {rocprof_config.rocprofsys_bin_dir}",
-        f"  Tests dir:            {rocprof_config.rocprofsys_tests_dir}",
-        f"  Examples dir:         {rocprof_config.rocprofsys_examples_dir}",
-        f"  Validation dir:       {rocprof_config.rocpd_validation_rules}",
-        "-" * 70,
-        "Executables:",
-        f"  Instrument:           {rocprof_config.rocprofsys_instrument}",
-        f"  Run:                  {rocprof_config.rocprofsys_run}",
-        f"  Sample:               {rocprof_config.rocprofsys_sample}",
-        f"  Avail:                {rocprof_config.rocprofsys_avail}",
-        f"  Causal:               {rocprof_config.rocprofsys_causal}",
-        f"  MPI exec:             {rocprof_config.mpiexec}",
-        f"  Offload tool:         {offload_msg}",
-        "-" * 70,
-        "Python:",
-        f"  Module Path:          {rocprof_config.python_module_path or '(none)'}",
-    ]
-    if rocprof_config.python_versions and rocprof_config.python_executables:
-        for version, exe in zip(
-            rocprof_config.python_versions, rocprof_config.python_executables
-        ):
-            lines.append(f"  {version}:                 {exe}")
-    else:
-        lines.append("  Executables:          (none found)")
-    lines.extend(
-        [
-            "-" * 70,
-            "System Environment:",
-        ]
-    )
-    fundamental_env = rocprof_config.get_fundamental_environment()
-    for key, value in sorted(fundamental_env.items()):
-        lines.append(f"  {key}:{' ' * (17 - len(key))}{value}")
-    lines.extend(["=" * 70, ""])
-    return lines
+    return _generate_rocprofsys_config_header(config)
 
 
 # ----------------------------------------------------------------------------
@@ -613,7 +513,7 @@ def pytest_collection_modifyitems(config, items) -> None:
                     )
         if "run_if_gpu_category" in item.keywords:
             if not gpu_info.available:
-                pytest.skip(skip_gpu)
+                item.add_marker(skip_gpu)
             expr = item.get_closest_marker("run_if_gpu_category").args[0]
             try:
                 result = eval(expr, {"__builtins__": {}}, gpu_category_eval_context)
@@ -634,7 +534,7 @@ def pytest_collection_modifyitems(config, items) -> None:
         if config.getoption("--ci-mode", default=False) and not config.getoption(
             "--allow-disabled", default=False
         ):
-            marker = item.get_closest_marker("disable")
+            marker = item.get_closest_marker("ci_disable")
             if marker and "all" in marker.args:
                 deselected_tests.append(item)
             elif item.get_closest_marker("slow"):
@@ -815,6 +715,122 @@ def configure_mode(config: pytest.Config) -> None:
         config.option.tbstyle = "short"  # --tb=short
         if "s" not in config.option.reportchars:  # -rs
             config.option.reportchars += "s"
+
+
+def _generate_rocprofsys_config_header(config: pytest.Config) -> list[str]:
+    try:
+        rocprof_config = get_rocprof_config()
+    except Exception as e:
+        return [f"{e}"]
+
+    gpuInfo = get_gpu_info()
+
+    if rocprof_config.rocm_path:
+        # Rocm version
+        rocm_version = (
+            ".".join(map(str, rocprof_config.rocm_version))
+            if rocprof_config.rocm_version
+            else "Not found"
+        )
+
+        # Rocminfo
+        rocminfo_path = get_rocminfo(rocprof_config.rocm_path)
+        if not rocminfo_path:
+            rocminfo_err_msg = "Not found - Ensure rocminfo is in ROCM_PATH or PATH - Assuming no GPU configuration"
+
+        # Offload extractor
+        offload_msg = None
+        tool_path, is_llvm_too_old = get_offload_extractor(rocprof_config.rocm_path)
+        if tool_path:
+            if tool_path.name == "llvm-objdump":
+                offload_msg = f"{tool_path}"
+            elif tool_path.name == "roc-obj-ls":
+                if not is_llvm_too_old:
+                    offload_msg = f"Using deprecated {tool_path} - Set ROCM_LLVM_OBJDUMP to use llvm-objdump instead"
+                else:
+                    offload_msg = f"{tool_path}"
+
+        if not offload_msg:
+            offload_msg = (
+                "Not found - Set ROCM_LLVM_OBJDUMP to path of llvm-objdump (v20+), "
+                "or to path of roc-obj-ls if llvm-objdump < v20"
+            )
+    else:
+        rocm_version = "Not found"
+        rocminfo_err_msg = "Requires ROCPROFSYS_USE_ROCM=ON"
+        offload_msg = "Requires ROCPROFSYS_USE_ROCM=ON"
+        rocminfo_path = None
+
+    header = [
+        "",
+        "=" * 70,
+        "Test Configuration:",
+        "=" * 70,
+        f"  ROCm version:         {rocm_version}",
+        f"  ROCm path:            {rocprof_config.rocm_path}",
+        f"  Is installed:         {rocprof_config.is_installed}",
+        f"  Output dir:           {rocprof_config.test_output_dir}",
+        f"  Log file:             {getattr(config, '_output_log_path', None) or 'Disabled'}",
+        f"  Validate ROCPD:       {check_use_rocpd()}",
+        f"  Validate Perfetto:    {check_use_perfetto()}",
+        "-" * 70,
+        "System Capabilities:",
+        f"  Detected num procs:   {rocprof_config.capabilities.num_procs}",
+        f"  MPI impl:             {rocprof_config.capabilities.mpi_implementation}",
+        f"  UCX available:        {rocprof_config.capabilities.ucx_availability}",
+        f"  Default NIC:          {rocprof_config.capabilities.default_nic}",
+        f"  PAPI available:       {rocprof_config.capabilities.papi_availability}",
+        f"  PAPI NIC events:      {rocprof_config.capabilities.papi_nic_events}",
+        f"  Perf event paranoid:  {rocprof_config.capabilities.perf_event_paranoid}",
+        f"  CAP_SYS_ADMIN:        {rocprof_config.capabilities.cap_sys_admin}",
+        f"  CAP_PERFMON:          {rocprof_config.capabilities.cap_perfmon}",
+        f"  Ptrace scope:         {rocprof_config.capabilities.ptrace_scope}",
+        "-" * 70,
+        "GPU Information:",
+        f"  rocminfo:             {rocminfo_path if rocminfo_path else rocminfo_err_msg}",
+        f"  Available:            {gpuInfo.available}",
+        f"  Architectures:        {gpuInfo.architectures if gpuInfo.architectures else 'None'}",
+        f"  Device count:         {gpuInfo.device_count}",
+        f"  Categories:           {gpuInfo.categories if gpuInfo.categories else 'None'}",
+        "-" * 70,
+        "Directories:",
+        f"  Build dir:            {rocprof_config.rocprofsys_build_dir}",
+        f"  Lib dir:              {rocprof_config.rocprofsys_lib_dir}",
+        f"  Bin dir:              {rocprof_config.rocprofsys_bin_dir}",
+        f"  Tests dir:            {rocprof_config.rocprofsys_tests_dir}",
+        f"  Examples dir:         {rocprof_config.rocprofsys_examples_dir}",
+        f"  Validation dir:       {rocprof_config.rocpd_validation_rules}",
+        "-" * 70,
+        "Executables:",
+        f"  Instrument:           {rocprof_config.rocprofsys_instrument}",
+        f"  Run:                  {rocprof_config.rocprofsys_run}",
+        f"  Sample:               {rocprof_config.rocprofsys_sample}",
+        f"  Avail:                {rocprof_config.rocprofsys_avail}",
+        f"  Causal:               {rocprof_config.rocprofsys_causal}",
+        f"  MPI exec:             {rocprof_config.mpiexec}",
+        f"  Offload tool:         {offload_msg}",
+        "-" * 70,
+        "Python:",
+        f"  Module Path:          {rocprof_config.python_module_path or '(none)'}",
+    ]
+    if rocprof_config.python_versions and rocprof_config.python_executables:
+        for version, exe in zip(
+            rocprof_config.python_versions, rocprof_config.python_executables
+        ):
+            header.append(f"  {version}:                 {exe}")
+    else:
+        header.append("  Executables:          (none found)")
+    header.extend(
+        [
+            "-" * 70,
+            "System Environment:",
+        ]
+    )
+    fundamental_env = rocprof_config.get_fundamental_environment()
+    for key, value in sorted(fundamental_env.items()):
+        header.append(f"  {key}:{' ' * (17 - len(key))}{value}")
+    header.extend(["=" * 70, ""])
+    return header
 
 
 def add_marker_if(
@@ -1676,7 +1692,7 @@ def assert_regex(subtests, record_subtest_failure, request):
     if request.config.getoption(
         "--ci-mode", default=False
     ) and not request.config.getoption("--allow-disabled", default=False):
-        for marker in request.node.iter_markers("disable"):
+        for marker in request.node.iter_markers("ci_disable"):
             disabled_subtests.update(marker.args)
 
     def _assert_regex(
@@ -1722,7 +1738,7 @@ def assert_file_regex(subtests, record_subtest_failure, request):
     if request.config.getoption(
         "--ci-mode", default=False
     ) and not request.config.getoption("--allow-disabled", default=False):
-        for marker in request.node.iter_markers("disable"):
+        for marker in request.node.iter_markers("ci_disable"):
             disabled_subtests.update(marker.args)
 
     def _assert_file_regex(
@@ -1776,7 +1792,7 @@ def assert_perfetto(
     if request.config.getoption(
         "--ci-mode", default=False
     ) and not request.config.getoption("--allow-disabled", default=False):
-        for marker in request.node.iter_markers("disable"):
+        for marker in request.node.iter_markers("ci_disable"):
             disabled_subtests.update(marker.args)
 
     def _assert_perfetto(
@@ -1869,7 +1885,7 @@ def assert_rocpd(subtests, tests_dir, record_subtest_failure, request):
     if request.config.getoption(
         "--ci-mode", default=False
     ) and not request.config.getoption("--allow-disabled", default=False):
-        for marker in request.node.iter_markers("disable"):
+        for marker in request.node.iter_markers("ci_disable"):
             disabled_subtests.update(marker.args)
 
     def _assert_rocpd(
@@ -1943,7 +1959,7 @@ def assert_timemory(subtests, tests_dir, record_subtest_failure, request):
     if request.config.getoption(
         "--ci-mode", default=False
     ) and not request.config.getoption("--allow-disabled", default=False):
-        for marker in request.node.iter_markers("disable"):
+        for marker in request.node.iter_markers("ci_disable"):
             disabled_subtests.update(marker.args)
 
     def _assert_timemory(
@@ -2014,7 +2030,7 @@ def assert_file_exists(subtests, record_subtest_failure, request):
     if request.config.getoption(
         "--ci-mode", default=False
     ) and not request.config.getoption("--allow-disabled", default=False):
-        for marker in request.node.iter_markers("disable"):
+        for marker in request.node.iter_markers("ci_disable"):
             disabled_subtests.update(marker.args)
 
     def _assert_file_exists(
@@ -2059,7 +2075,7 @@ def assert_causal_json(subtests, tests_dir, record_subtest_failure, request):
     if request.config.getoption(
         "--ci-mode", default=False
     ) and not request.config.getoption("--allow-disabled", default=False):
-        for marker in request.node.iter_markers("disable"):
+        for marker in request.node.iter_markers("ci_disable"):
             disabled_subtests.update(marker.args)
 
     def _assert_causal_json(

@@ -10,7 +10,7 @@ import pytest
 from conftest import RocprofsysTest
 
 # TODO: Test is disabled as it also fails in CTest
-pytestmark = [pytest.mark.attach, pytest.mark.disable("all")]
+pytestmark = [pytest.mark.attach, pytest.mark.ci_disable("all")]
 
 # ====================================================================================== #
 # Attach fixtures

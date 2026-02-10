@@ -87,8 +87,8 @@ class TestCodeCoverage(RocprofsysTest):
             collect_output_path("store", key, result.output_dir)
 
     @pytest.mark.python_versions
-    @pytest.mark.order(after="test")
     def test_python(self, python_version, collect_output_path):
+        # Get the coverage paths from the previously ran tests
         brw_coverage_path = collect_output_path("get", "basic_blocks_coverage_brw")
         ri_coverage_path = collect_output_path("get", "basic_blocks_hybrid_coverage_ri")
         if not brw_coverage_path or not ri_coverage_path:
