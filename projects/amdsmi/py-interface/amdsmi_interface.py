@@ -4618,6 +4618,8 @@ def amdsmi_get_npm_info(node_handle: processor_handle_t) -> Dict[str, Any]:
     dict_ret = {
         "limit": npm_info.limit,
         "status": npm_info.status,
+        "ubb_power": npm_info.ubb_power,
+        "ubb_power_limit": npm_info.ubb_power_limit,
     }
     return dict_ret
 

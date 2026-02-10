@@ -7553,11 +7553,18 @@ class AMDSMICommands():
             if isinstance(npm_info, dict):
                 limit = npm_info.get('limit', "N/A")
                 status = npm_info.get('status', npm_info.get('current', "N/A"))
+                ubb_power = npm_info.get('ubb_power', "N/A")
+                ubb_power_limit = npm_info.get('ubb_power_limit', "N/A")
 
-                if limit !="N/A":
+                if limit != "N/A":
                     npm_dict['limit'] = limit
                 status = "DISABLED" if status == amdsmi_interface.amdsmi_wrapper.AMDSMI_NPM_STATUS_DISABLED else "ENABLED"
                 npm_dict.update({"status": status})
+                # Add UBB power info if available (not UINT64_MAX sentinel)
+                if ubb_power != "N/A" and ubb_power != 0xFFFFFFFFFFFFFFFF:
+                    npm_dict['ubb_power'] = ubb_power
+                if ubb_power_limit != "N/A" and ubb_power_limit != 0xFFFFFFFFFFFFFFFF:
+                    npm_dict['ubb_power_limit'] = ubb_power_limit
 
         # Get base board temperatures using node_handle
         if args.base_board_temps:

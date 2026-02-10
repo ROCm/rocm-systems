@@ -613,7 +613,9 @@ typedef struct
 {
   rsmi_npm_status_t status; //!< NPM status (enabled/disabled).
   uint64_t limit;  //!< Node-level power limit in Watts.
-  uint64_t reserved[6];
+  uint64_t ubb_power;  //!< Current UBB (baseboard) power in Watts.
+  uint64_t ubb_power_limit;  //!< UBB power limit threshold in Watts.
+  uint64_t reserved[4];
 } rsmi_npm_info_t;
 
 /**

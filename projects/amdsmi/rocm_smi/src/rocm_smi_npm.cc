@@ -97,4 +97,55 @@ rsmi_status_t get_npm_board_limit(const std::string &board_path, uint64_t *limit
   }
 }
 
+
+rsmi_status_t get_ubb_power(const std::string &board_path, uint64_t *power) {
+  if (power == nullptr) return RSMI_STATUS_INVALID_ARGS;
+  if (board_path.empty()) return RSMI_STATUS_INVALID_ARGS;
+
+  fs::path bd(board_path);
+  if (!fs::exists(bd) || !fs::is_directory(bd)) return RSMI_STATUS_NOT_SUPPORTED;
+
+  fs::path p = bd / "baseboard_power";
+  if (!fs::exists(p) || !fs::is_regular_file(p)) return RSMI_STATUS_NOT_SUPPORTED;
+
+  std::string s;
+  rsmi_status_t r = read_npm_file(p, s);
+  if (r != RSMI_STATUS_SUCCESS) return RSMI_STATUS_NOT_SUPPORTED;
+
+  try {
+    size_t idx = 0;
+    unsigned long long v = std::stoull(s, &idx, 10);
+    if (idx != s.size()) return RSMI_STATUS_UNEXPECTED_DATA;
+    *power = static_cast<uint64_t>(v);
+    return RSMI_STATUS_SUCCESS;
+  } catch (...) {
+    return RSMI_STATUS_UNEXPECTED_DATA;
+  }
+}
+
+rsmi_status_t get_ubb_power_limit(const std::string &board_path, uint64_t *limit) {
+  if (limit == nullptr) return RSMI_STATUS_INVALID_ARGS;
+  if (board_path.empty()) return RSMI_STATUS_INVALID_ARGS;
+
+  fs::path bd(board_path);
+  if (!fs::exists(bd) || !fs::is_directory(bd)) return RSMI_STATUS_NOT_SUPPORTED;
+
+  fs::path p = bd / "baseboard_power_limit";
+  if (!fs::exists(p) || !fs::is_regular_file(p)) return RSMI_STATUS_NOT_SUPPORTED;
+
+  std::string s;
+  rsmi_status_t r = read_npm_file(p, s);
+  if (r != RSMI_STATUS_SUCCESS) return RSMI_STATUS_NOT_SUPPORTED;
+
+  try {
+    size_t idx = 0;
+    unsigned long long v = std::stoull(s, &idx, 10);
+    if (idx != s.size()) return RSMI_STATUS_UNEXPECTED_DATA;
+    *limit = static_cast<uint64_t>(v);
+    return RSMI_STATUS_SUCCESS;
+  } catch (...) {
+    return RSMI_STATUS_UNEXPECTED_DATA;
+  }
+}
+
 }  // end namespace

@@ -2353,7 +2353,9 @@ struct_amdsmi_npm_info_t._fields_ = [
     ('status', amdsmi_npm_status_t),
     ('PADDING_0', ctypes.c_ubyte * 4),
     ('limit', ctypes.c_uint64),
-    ('reserved', ctypes.c_uint64 * 6),
+    ('ubb_power', ctypes.c_uint64),
+    ('ubb_power_limit', ctypes.c_uint64),
+    ('reserved', ctypes.c_uint64 * 4),
 ]
 
 amdsmi_npm_info_t = struct_amdsmi_npm_info_t
