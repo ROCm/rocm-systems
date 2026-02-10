@@ -29,7 +29,7 @@ The rocJPEG project is located in https://github.com/ROCm/rocm-systems/tree/deve
 
   .. grid-item-card:: Samples
 
-    * `rocJPEG samples on GitHub <https://github.com/ROCm/rocJPEG/tree/develop/samples>`_
+    * `rocJPEG samples on GitHub <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocjpeg/samples>`_
 
   .. grid-item-card:: Reference
 
