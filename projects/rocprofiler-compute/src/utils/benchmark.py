@@ -128,8 +128,8 @@ mfma_ops = {
     "F32": dict.fromkeys(
         ["gfx908", "gfx90a", "gfx940", "gfx941", "gfx942", "gfx950"], 4096
     ),
-    "BF16": dict.fromkeys(["gfx940", "gfx941", "gfx942", "gfx950"], 16384)
-    | dict.fromkeys(["gfx90a"], 8192),
+    "BF16": dict.fromkeys(["gfx940", "gfx941", "gfx942"], 16384)
+    | dict.fromkeys(["gfx90a"], 8192) | dict.fromkeys(["gfx950"], 32768),
     "I8": dict.fromkeys(["gfx940", "gfx941", "gfx942", "gfx950"], 32768)
     | dict.fromkeys(["gfx90a"], 16384),
     "F64": dict.fromkeys(["gfx90a", "gfx940", "gfx941", "gfx942", "gfx950"], 2048),
@@ -725,38 +725,58 @@ extern "C" __global__ void mfma_f16(int iter, float *dummy)
 mfma_bf16_src = """
 
 using f32_16vec = __attribute__((__vector_size__(16 * sizeof(float)))) float;
-using bf16_4vec = __attribute__((__vector_size__(2 * sizeof(__2i16))))  short;
-using bf16_2vec = __attribute__((__vector_size__(1 * sizeof(__2i16))))  short;
+using bf16_8vec = __attribute__((__vector_size__(8 * sizeof(short)))) short;
+using bf16_4vec = __attribute__((__vector_size__(4 * sizeof(short))))  short;
+using bf16_2vec = __attribute__((__vector_size__(1 * sizeof(short))))  short;
 
 extern "C" __global__ void mfma_bf16(int iter, float *dummy)
 {
     // Output: 16 F32 registers
     f32_16vec result = {0};
 
-// MI100/MI200
 #if defined(__gfx908__) or defined(__gfx90a__)
+    // MI100/MI200
     // Input: 1 F32 register
     // builtin mfma expects 2 short registers
     bf16_2vec a;
     a[1] = a[0]= threadIdx.x;
 
     // CDNA1/2: v_mfma_f32_32x32x4bf16 ops: 32x32x4x2 = 8192
-    for(int i = 0; i < iter; ++i)
+    for(int i = 0; i < iter / 4; ++i)
     {
         result = __builtin_amdgcn_mfma_f32_32x32x4bf16(a, a, result, 0, 0, 0);
+        result = __builtin_amdgcn_mfma_f32_32x32x4bf16(a, a, result, 0, 0, 0);
+        result = __builtin_amdgcn_mfma_f32_32x32x4bf16(a, a, result, 0, 0, 0);
+        result = __builtin_amdgcn_mfma_f32_32x32x4bf16(a, a, result, 0, 0, 0);
     }
-//MI300 series
-#else
-    // Input: 2 F32 registers
-    // builting mfma expects 4 short registers
+#elif defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__)
+    //MI300 series
+    // Input: 4 BF16 registers
     bf16_4vec a;
     a[3] = a[2] = a[1] = a[0]= threadIdx.x;
 
     // CDNA3: v_mfma_f32_32x32x8_bf16 ops: 32x32x8x2 = 16384
-    for(int i = 0; i < iter; ++i)
+    for(int i = 0; i < iter / 4; ++i)
     {
         result = __builtin_amdgcn_mfma_f32_32x32x8bf16_1k(a, a, result, 0, 0, 0);
+        result = __builtin_amdgcn_mfma_f32_32x32x8bf16_1k(a, a, result, 0, 0, 0);
+        result = __builtin_amdgcn_mfma_f32_32x32x8bf16_1k(a, a, result, 0, 0, 0);
+        result = __builtin_amdgcn_mfma_f32_32x32x8bf16_1k(a, a, result, 0, 0, 0);
     }
+#elif defined(__gfx950__)
+    // Input: 8 BF16 registers
+    bf16_8vec a;
+    a[0] = threadIdx.x;
+    
+    for(int i = 0; i < iter / 4; ++i)
+    {
+        result = __builtin_amdgcn_mfma_f32_32x32x16_bf16(a, a, result, 0, 0, 0);
+        result = __builtin_amdgcn_mfma_f32_32x32x16_bf16(a, a, result, 0, 0, 0);
+        result = __builtin_amdgcn_mfma_f32_32x32x16_bf16(a, a, result, 0, 0, 0);
+        result = __builtin_amdgcn_mfma_f32_32x32x16_bf16(a, a, result, 0, 0, 0);
+    }
+#else
+#error "Unknown gfx arch"
 #endif
 
     if (result[0] != 2*result[0])
