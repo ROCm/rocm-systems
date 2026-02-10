@@ -445,25 +445,64 @@ hipError_t hipEventRecordWithFlags(hipEvent_t event, hipStream_t stream, unsigne
 }
 
 // ================================================================================================
+static hipError_t checkEventCaptureRestrictions(hipEvent_t event) {
+  auto* e = reinterpret_cast<hip::Event*>(event);
+  const auto hip_stream = e->GetCaptureStream();
+
+  // Case 1: Event was recorded during an active stream capture and is part of an active capture.
+  if (hip_stream != nullptr && hip_stream != hipStreamLegacy) {
+    auto* s = reinterpret_cast<hip::Stream*>(hip_stream);
+    if (s->GetCaptureStatus() == hipStreamCaptureStatusActive && s->IsEventCaptured(event)) {
+      s->SetCaptureStatus(hipStreamCaptureStatusInvalidated);
+      return hipErrorCapturedEvent;
+    }
+  }
+  // Case 2: The event was recorded on a stream that is neither actively capturing nor part of an
+  // active capture session (proceed to next checks).
+
+  // Allow everything in RELAXED mode
+  if (hip::tls.stream_capture_mode_ == hipStreamCaptureModeRelaxed) {
+    return hipSuccess;
+  }
+
+  // Block in GLOBAL mode if any global captures are ongoing
+  if (hip::tls.stream_capture_mode_ == hipStreamCaptureModeGlobal) {
+    amd::ScopedLock lock(g_captureStreamsLock);
+    if (!g_captureStreams.empty()) {
+      for (auto stream : g_captureStreams) {
+        stream->SetCaptureStatus(hipStreamCaptureStatusInvalidated);
+      }
+      return hipErrorStreamCaptureUnsupported;
+    }
+  }
+
+  // Block if calling thread itself is capturing (both GLOBAL and THREAD_LOCAL)
+  if (!hip::tls.capture_streams_.empty()) {
+    for (auto stream : hip::tls.capture_streams_) {
+      stream->SetCaptureStatus(hipStreamCaptureStatusInvalidated);
+    }
+    return hipErrorStreamCaptureUnsupported;
+  }
+
+  return hipSuccess;
+}
+
+// ================================================================================================
 hipError_t hipEventSynchronize(hipEvent_t event) {
   HIP_INIT_API(hipEventSynchronize, event);
 
   if (event == nullptr) {
     HIP_RETURN(hipErrorInvalidHandle);
   }
-  hip::Event* e = reinterpret_cast<hip::Event*>(event);
-  auto hip_stream = e->GetCaptureStream();
-  hip::Stream* s = reinterpret_cast<hip::Stream*>(hip_stream);
-  if ((hip_stream != nullptr && hip_stream != hipStreamLegacy) &&
-      (s->GetCaptureStatus() == hipStreamCaptureStatusActive)) {
-    s->SetCaptureStatus(hipStreamCaptureStatusInvalidated);
-    HIP_RETURN(hipErrorCapturedEvent);
-  }
-  if (hip::Stream::StreamCaptureOngoing(hip_stream) == true) {
-    HIP_RETURN(hipErrorStreamCaptureUnsupported);
+
+  // Check capture mode restrictions
+  hipError_t captureStatus = checkEventCaptureRestrictions(event);
+  if (captureStatus != hipSuccess) {
+    HIP_RETURN(captureStatus);
   }
 
-  hipError_t status = e->synchronize();
+  auto* e = reinterpret_cast<hip::Event*>(event);
+  const auto status = e->synchronize();
   // Release freed memory for all memory pools on the device
   g_devices[e->deviceId()]->ReleaseFreedMemory();
   HIP_RETURN(status);
@@ -475,20 +514,17 @@ hipError_t ihipEventQuery(hipEvent_t event) {
     return hipErrorInvalidHandle;
   }
 
-  hip::Event* e = reinterpret_cast<hip::Event*>(event);
-  auto hip_stream = e->GetCaptureStream();
-  hip::Stream* s = reinterpret_cast<hip::Stream*>(hip_stream);
-  if ((hip_stream != nullptr && hip_stream != hipStreamLegacy) &&
-      (s->GetCaptureStatus() == hipStreamCaptureStatusActive)) {
-    s->SetCaptureStatus(hipStreamCaptureStatusInvalidated);
-    HIP_RETURN(hipErrorCapturedEvent);
+  // Check capture mode restrictions
+  hipError_t captureStatus = checkEventCaptureRestrictions(event);
+  if (captureStatus != hipSuccess) {
+    return captureStatus;
   }
-  if (hip::Stream::StreamCaptureOngoing(e->GetCaptureStream())) {
-    HIP_RETURN(hipErrorStreamCaptureUnsupported);
-  }
+
+  auto* e = reinterpret_cast<hip::Event*>(event);
   return e->query();
 }
 
+// ================================================================================================
 hipError_t hipEventQuery(hipEvent_t event) {
   HIP_INIT_API(hipEventQuery, event);
   HIP_RETURN(ihipEventQuery(event));
