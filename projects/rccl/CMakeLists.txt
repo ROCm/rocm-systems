@@ -1313,12 +1313,51 @@ if (DEVICE_LINKER)
   # message(STATUS "Device linker target: ${DEVICE_LINKER_GPU_TARGET} (bundle: ${DEVICE_LINKER_BUNDLE_TARGET})")
   
   # Build the device_linker tool itself
-  # Use AOMP LLVM for proper DWARF handling
-  set(AOMP_LLVM_DIR "/COD/LATEST/aomp/llvm")
+  # Use local LLVM build for proper DWARF handling with debug symbols
+  set(LLVM_DIR "/work2/lmeadows/llvm/lib/cmake/llvm")
+  find_package(LLVM REQUIRED CONFIG PATHS ${LLVM_DIR})
+  
+  message(STATUS "Found LLVM ${LLVM_VERSION}")
+  
+  # Use llvm-config to get proper link flags for shared library
+  # Try to use llvm-config if available, otherwise use known paths
+  set(LLVM_CONFIG_PATH "/work2/lmeadows/llvm/bin/llvm-config")
+  set(LLVM_LIBDIR "/work2/lmeadows/llvm/lib")
+  set(LLVM_LIBNAME "LLVM-23git")
+  if(EXISTS ${LLVM_CONFIG_PATH})
+    execute_process(
+      COMMAND ${LLVM_CONFIG_PATH} --ldflags --libs
+      OUTPUT_VARIABLE LLVM_LINK_FLAGS
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+      ERROR_QUIET
+      RESULT_VARIABLE LLVM_CONFIG_RESULT
+    )
+    if(LLVM_CONFIG_RESULT EQUAL 0 AND LLVM_LINK_FLAGS)
+      # Parse the output: "-L/path -llibname" (may have newlines)
+      string(REPLACE "\n" " " LLVM_LINK_FLAGS "${LLVM_LINK_FLAGS}")
+      string(STRIP "${LLVM_LINK_FLAGS}" LLVM_LINK_FLAGS)
+      # Extract -L path and -l library name
+      string(REGEX MATCH "-L([^ ]+)" LLVM_LIBDIR_MATCH "${LLVM_LINK_FLAGS}")
+      if(LLVM_LIBDIR_MATCH)
+        string(REGEX REPLACE "-L" "" LLVM_LIBDIR "${LLVM_LIBDIR_MATCH}")
+        string(STRIP "${LLVM_LIBDIR}" LLVM_LIBDIR)
+      endif()
+      string(REGEX MATCH "-l([^ ]+)" LLVM_LIBNAME_MATCH "${LLVM_LINK_FLAGS}")
+      if(LLVM_LIBNAME_MATCH)
+        string(REGEX REPLACE "-l" "" LLVM_LIBNAME "${LLVM_LIBNAME_MATCH}")
+        string(STRIP "${LLVM_LIBNAME}" LLVM_LIBNAME)
+      endif()
+      message(STATUS "Using llvm-config: libdir='${LLVM_LIBDIR}', lib='${LLVM_LIBNAME}'")
+    else()
+      message(STATUS "llvm-config failed (result=${LLVM_CONFIG_RESULT}), using known paths")
+    endif()
+  else()
+    message(STATUS "llvm-config not found, using known LLVM paths")
+  endif()
   
   add_executable(device_linker_tool ${DEVICE_LINKER_DIR}/device_linker.cpp)
   target_compile_features(device_linker_tool PRIVATE cxx_std_17)
-  target_include_directories(device_linker_tool PRIVATE ${AOMP_LLVM_DIR}/include)
+  target_include_directories(device_linker_tool PRIVATE ${LLVM_INCLUDE_DIRS})
   target_compile_options(device_linker_tool PRIVATE -fno-rtti -fno-exceptions)
   target_compile_definitions(device_linker_tool PRIVATE
     _GNU_SOURCE
@@ -1326,8 +1365,10 @@ if (DEVICE_LINKER)
     __STDC_FORMAT_MACROS
     __STDC_LIMIT_MACROS
   )
-  target_link_directories(device_linker_tool PRIVATE ${AOMP_LLVM_DIR}/lib)
-  target_link_libraries(device_linker_tool PRIVATE LLVM)
+  
+  # Link against shared LLVM library using llvm-config values
+  target_link_directories(device_linker_tool PRIVATE ${LLVM_LIBDIR})
+  target_link_libraries(device_linker_tool PRIVATE ${LLVM_LIBNAME})
   set_target_properties(device_linker_tool PROPERTIES
     OUTPUT_NAME device_linker
     RUNTIME_OUTPUT_DIRECTORY ${DEVICE_LINKER_DIR}

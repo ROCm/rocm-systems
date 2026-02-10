@@ -25,3 +25,31 @@ alwaysApply: true
    cd ../rccl-experiment-name
    git checkout -b experiment-branch-name
    ```
+
+7. **Feature completion criteria**: After initial implementation, every feature must have clear, testable completion criteria defined before testing begins. A feature is not complete until:
+   - All completion criteria are met
+   - Tests verify the criteria
+   - No known issues remain unresolved
+
+8. **Problem understanding**: Never ignore or casually dismiss any problem. Every issue must be fully understood before proceeding:
+   - Investigate root causes, not just symptoms
+   - Document findings and hypotheses
+   - If understanding is incomplete, stop and discuss with the user
+
+9. **Discussion before implementation**: Before implementing any feature or bug fix:
+   - Stop and discuss the approach with the user
+   - Explain what will be changed and why
+   - Get explicit approval before proceeding
+   - Do not proceed with implementation without user confirmation
+
+10. **Testing at every stage**: Use tests to verify features and bug fixes at every stage:
+   - Write or identify tests before implementing
+   - Run tests after each significant change
+   - Verify tests pass before declaring completion
+   - If tests fail, understand why before continuing
+
+11. **Debug loop limits**: Do not enter long debug loops without explicit permission:
+   - After 2-3 iterations of a fix-test cycle, stop and discuss with the user
+   - Present findings, hypotheses, and proposed next steps
+   - Wait for user direction before continuing
+   - Do not continue debugging independently if stuck
