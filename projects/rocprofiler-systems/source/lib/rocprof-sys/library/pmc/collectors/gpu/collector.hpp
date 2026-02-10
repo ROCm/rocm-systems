@@ -171,7 +171,7 @@ struct collector
                 try
                 {
                     auto _supported_metrics = device->get_supported_metrics();
-                    auto _gpu_metrics       = device->get_gpu_metrics();
+                    auto _gpu_metrics       = device->get_gpu_metrics(m_enabled_metrics);
                     auto _device_id         = device->get_index();
 
                     CacheApi::store_sample(_device_id, m_enabled_metrics,

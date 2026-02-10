@@ -53,6 +53,16 @@ protected:
     }
 
     /**
+     * @brief Get enabled_metrics with all metrics enabled (for testing).
+     */
+    static enabled_metrics all_metrics_enabled()
+    {
+        enabled_metrics metrics;
+        metrics.value = 0xFFFF;  // Enable all metrics
+        return metrics;
+    }
+
+    /**
      * @brief Configure mock to return GPU metrics with all valid values.
      */
     void SetupAllMetricsSupported()
@@ -271,7 +281,7 @@ TEST_F(DeviceTest, device_construction_no_support)
     EXPECT_EQ(supported.value, 0U);
 
     // Verify get_gpu_metrics returns all zeros
-    auto metrics = dev.get_gpu_metrics();
+    auto metrics = dev.get_gpu_metrics(all_metrics_enabled());
     EXPECT_EQ(metrics.current_socket_power, 0U);
     EXPECT_EQ(metrics.average_socket_power, 0U);
     EXPECT_EQ(metrics.memory_usage, 0ULL);
@@ -375,7 +385,7 @@ TEST_F(DeviceTest, current_socket_power_collection)
     EXPECT_TRUE(dev.get_supported_metrics().bits.current_socket_power);
 
     // Collect metrics
-    auto collected_metrics = dev.get_gpu_metrics();
+    auto collected_metrics = dev.get_gpu_metrics(all_metrics_enabled());
 
     // Verify current power value was collected
     EXPECT_EQ(collected_metrics.current_socket_power, 150U);
@@ -407,7 +417,7 @@ TEST_F(DeviceTest, average_socket_power_collection)
     EXPECT_TRUE(dev.get_supported_metrics().bits.average_socket_power);
 
     // Collect metrics
-    auto collected_metrics = dev.get_gpu_metrics();
+    auto collected_metrics = dev.get_gpu_metrics(all_metrics_enabled());
 
     // Verify average power value was collected
     EXPECT_EQ(collected_metrics.average_socket_power, 140U);
@@ -432,7 +442,7 @@ TEST_F(DeviceTest, power_metrics_not_collected_when_unsupported)
     EXPECT_FALSE(supported.bits.average_socket_power);
 
     // Collect metrics
-    auto collected_metrics = dev.get_gpu_metrics();
+    auto collected_metrics = dev.get_gpu_metrics(all_metrics_enabled());
 
     // Verify power values remain zero
     EXPECT_EQ(collected_metrics.current_socket_power, 0U);
@@ -469,7 +479,7 @@ TEST_F(DeviceTest, hotspot_temperature_collection)
     EXPECT_TRUE(dev.get_supported_metrics().bits.hotspot_temperature);
 
     // Collect metrics
-    auto collected_metrics = dev.get_gpu_metrics();
+    auto collected_metrics = dev.get_gpu_metrics(all_metrics_enabled());
 
     // Verify hotspot temperature value was collected
     EXPECT_EQ(collected_metrics.hotspot_temperature, 75000);
@@ -501,7 +511,7 @@ TEST_F(DeviceTest, edge_temperature_collection)
     EXPECT_TRUE(dev.get_supported_metrics().bits.edge_temperature);
 
     // Collect metrics
-    auto collected_metrics = dev.get_gpu_metrics();
+    auto collected_metrics = dev.get_gpu_metrics(all_metrics_enabled());
 
     // Verify edge temperature value was collected
     EXPECT_EQ(collected_metrics.edge_temperature, 70000);
@@ -526,7 +536,7 @@ TEST_F(DeviceTest, temperature_metrics_not_collected_when_unsupported)
     EXPECT_FALSE(supported.bits.edge_temperature);
 
     // Collect metrics
-    auto collected_metrics = dev.get_gpu_metrics();
+    auto collected_metrics = dev.get_gpu_metrics(all_metrics_enabled());
 
     // Verify temperature values remain zero
     EXPECT_EQ(collected_metrics.hotspot_temperature, 0);
@@ -563,7 +573,7 @@ TEST_F(DeviceTest, gfx_activity_collection)
     EXPECT_TRUE(dev.get_supported_metrics().bits.gfx_activity);
 
     // Collect metrics
-    auto collected_metrics = dev.get_gpu_metrics();
+    auto collected_metrics = dev.get_gpu_metrics(all_metrics_enabled());
 
     // Verify GFX activity value was collected
     EXPECT_EQ(collected_metrics.gfx_activity, 85U);
@@ -595,7 +605,7 @@ TEST_F(DeviceTest, umc_activity_collection)
     EXPECT_TRUE(dev.get_supported_metrics().bits.umc_activity);
 
     // Collect metrics
-    auto collected_metrics = dev.get_gpu_metrics();
+    auto collected_metrics = dev.get_gpu_metrics(all_metrics_enabled());
 
     // Verify UMC activity value was collected
     EXPECT_EQ(collected_metrics.umc_activity, 60U);
@@ -627,7 +637,7 @@ TEST_F(DeviceTest, mm_activity_collection)
     EXPECT_TRUE(dev.get_supported_metrics().bits.mm_activity);
 
     // Collect metrics
-    auto collected_metrics = dev.get_gpu_metrics();
+    auto collected_metrics = dev.get_gpu_metrics(all_metrics_enabled());
 
     // Verify MM activity value was collected
     EXPECT_EQ(collected_metrics.mm_activity, 40U);
@@ -664,7 +674,7 @@ TEST_F(DeviceTest, all_activity_metrics_collection)
     EXPECT_TRUE(supported.bits.mm_activity);
 
     // Collect metrics
-    auto collected_metrics = dev.get_gpu_metrics();
+    auto collected_metrics = dev.get_gpu_metrics(all_metrics_enabled());
 
     // Verify all three activity values were collected correctly
     EXPECT_EQ(collected_metrics.gfx_activity, 85U);
@@ -701,7 +711,7 @@ TEST_F(DeviceTest, vram_memory_usage_collection_success)
     EXPECT_TRUE(dev.get_supported_metrics().bits.memory_usage);
 
     // Collect metrics
-    auto collected_metrics = dev.get_gpu_metrics();
+    auto collected_metrics = dev.get_gpu_metrics(all_metrics_enabled());
 
     // Verify memory usage value was collected
     EXPECT_EQ(collected_metrics.memory_usage, 8589934592ULL);
@@ -731,7 +741,7 @@ TEST_F(DeviceTest, memory_usage_collection_failure)
     EXPECT_FALSE(dev.get_supported_metrics().bits.memory_usage);
 
     // Collect metrics
-    auto collected_metrics = dev.get_gpu_metrics();
+    auto collected_metrics = dev.get_gpu_metrics(all_metrics_enabled());
 
     // Verify memory usage remains zero
     EXPECT_EQ(collected_metrics.memory_usage, 0ULL);
@@ -759,7 +769,7 @@ TEST_F(DeviceTest, memory_usage_not_collected_when_unsupported)
         .Times(0);  // Should not be called during get_gpu_metrics()
 
     // Collect metrics
-    auto collected_metrics = dev.get_gpu_metrics();
+    auto collected_metrics = dev.get_gpu_metrics(all_metrics_enabled());
 
     // Verify memory usage remains zero
     EXPECT_EQ(collected_metrics.memory_usage, 0ULL);
@@ -805,7 +815,7 @@ TEST_F(DeviceTest, vcn_busy_collection_all_xcps)
     EXPECT_FALSE(dev.get_supported_metrics().bits.vcn_activity);
 
     // Collect metrics
-    auto collected_metrics = dev.get_gpu_metrics();
+    auto collected_metrics = dev.get_gpu_metrics(all_metrics_enabled());
 
     // Verify all XCP VCN arrays were copied correctly
     for(size_t xcp = 0; xcp < AMDSMI_MAX_NUM_XCP; ++xcp)
@@ -853,7 +863,7 @@ TEST_F(DeviceTest, jpeg_activity_collection_all_xcps)
     EXPECT_TRUE(dev.get_supported_metrics().bits.jpeg_activity);
 
     // Collect metrics
-    auto collected_metrics = dev.get_gpu_metrics();
+    auto collected_metrics = dev.get_gpu_metrics(all_metrics_enabled());
 
     // Verify all XCP JPEG arrays were copied correctly
     for(size_t xcp = 0; xcp < AMDSMI_MAX_NUM_XCP; ++xcp)
@@ -885,7 +895,7 @@ TEST_F(DeviceTest, xcp_metrics_not_collected_when_unsupported)
     EXPECT_FALSE(supported.bits.jpeg_activity);
 
     // Collect metrics
-    auto collected_metrics = dev.get_gpu_metrics();
+    auto collected_metrics = dev.get_gpu_metrics(all_metrics_enabled());
 
     // Verify XCP arrays remain default-initialized (all zeros)
     for(size_t xcp = 0; xcp < AMDSMI_MAX_NUM_XCP; ++xcp)
@@ -938,7 +948,7 @@ TEST_F(DeviceTest, mixed_vcn_jpeg_support)
     EXPECT_FALSE(supported.bits.jpeg_activity);
 
     // Collect metrics
-    auto collected_metrics = dev.get_gpu_metrics();
+    auto collected_metrics = dev.get_gpu_metrics(all_metrics_enabled());
 
     // Verify VCN arrays are populated
     for(size_t xcp = 0; xcp < AMDSMI_MAX_NUM_XCP; ++xcp)
@@ -990,7 +1000,7 @@ TEST_F(DeviceTest, xgmi_link_width_collection)
     EXPECT_TRUE(dev.get_supported_metrics().bits.xgmi);
 
     // Collect metrics
-    auto collected_metrics = dev.get_gpu_metrics();
+    auto collected_metrics = dev.get_gpu_metrics(all_metrics_enabled());
 
     // Verify XGMI link width was collected
     EXPECT_EQ(collected_metrics.xgmi.link.width, 16U);
@@ -1022,7 +1032,7 @@ TEST_F(DeviceTest, xgmi_link_speed_collection)
     EXPECT_TRUE(dev.get_supported_metrics().bits.xgmi);
 
     // Collect metrics
-    auto collected_metrics = dev.get_gpu_metrics();
+    auto collected_metrics = dev.get_gpu_metrics(all_metrics_enabled());
 
     // Verify XGMI link speed was collected
     EXPECT_EQ(collected_metrics.xgmi.link.speed, 25U);
@@ -1060,7 +1070,7 @@ TEST_F(DeviceTest, xgmi_read_write_data_collection_all_links)
     EXPECT_TRUE(dev.get_supported_metrics().bits.xgmi);
 
     // Collect metrics
-    auto collected_metrics = dev.get_gpu_metrics();
+    auto collected_metrics = dev.get_gpu_metrics(all_metrics_enabled());
 
     // Verify all XGMI link read/write data was collected
     for(size_t i = 0; i < AMDSMI_MAX_NUM_XGMI_LINKS; ++i)
@@ -1105,7 +1115,7 @@ TEST_F(DeviceTest, xgmi_sentinel_value_handling)
     EXPECT_TRUE(dev.get_supported_metrics().bits.xgmi);
 
     // Collect metrics
-    auto collected_metrics = dev.get_gpu_metrics();
+    auto collected_metrics = dev.get_gpu_metrics(all_metrics_enabled());
 
     // Verify valid values are collected and sentinels are zeroed
     EXPECT_EQ(collected_metrics.xgmi.link.width, 16U);
@@ -1133,7 +1143,7 @@ TEST_F(DeviceTest, xgmi_not_collected_when_unsupported)
     EXPECT_FALSE(dev.get_supported_metrics().bits.xgmi);
 
     // Collect metrics
-    auto collected_metrics = dev.get_gpu_metrics();
+    auto collected_metrics = dev.get_gpu_metrics(all_metrics_enabled());
 
     // Verify all XGMI metrics remain default-initialized (zeros)
     EXPECT_EQ(collected_metrics.xgmi.link.width, 0U);
@@ -1176,7 +1186,7 @@ TEST_F(DeviceTest, pcie_link_width_collection)
     EXPECT_TRUE(dev.get_supported_metrics().bits.pcie);
 
     // Collect metrics
-    auto collected_metrics = dev.get_gpu_metrics();
+    auto collected_metrics = dev.get_gpu_metrics(all_metrics_enabled());
 
     // Verify PCIe link width was collected
     EXPECT_EQ(collected_metrics.pcie.link.width, 16U);
@@ -1208,7 +1218,7 @@ TEST_F(DeviceTest, pcie_link_speed_collection)
     EXPECT_TRUE(dev.get_supported_metrics().bits.pcie);
 
     // Collect metrics
-    auto collected_metrics = dev.get_gpu_metrics();
+    auto collected_metrics = dev.get_gpu_metrics(all_metrics_enabled());
 
     // Verify PCIe link speed was collected
     EXPECT_EQ(collected_metrics.pcie.link.speed, 16000U);
@@ -1240,7 +1250,7 @@ TEST_F(DeviceTest, pcie_bandwidth_accumulator_collection)
     EXPECT_TRUE(dev.get_supported_metrics().bits.pcie);
 
     // Collect metrics
-    auto collected_metrics = dev.get_gpu_metrics();
+    auto collected_metrics = dev.get_gpu_metrics(all_metrics_enabled());
 
     // Verify PCIe bandwidth accumulator was collected
     EXPECT_EQ(collected_metrics.pcie.bandwidth.acc, 500000000U);
@@ -1272,7 +1282,7 @@ TEST_F(DeviceTest, pcie_bandwidth_instantaneous_collection)
     EXPECT_TRUE(dev.get_supported_metrics().bits.pcie);
 
     // Collect metrics
-    auto collected_metrics = dev.get_gpu_metrics();
+    auto collected_metrics = dev.get_gpu_metrics(all_metrics_enabled());
 
     // Verify PCIe instantaneous bandwidth was collected
     EXPECT_EQ(collected_metrics.pcie.bandwidth.inst, 10000000U);
@@ -1308,7 +1318,7 @@ TEST_F(DeviceTest, pcie_sentinel_value_handling)
     EXPECT_TRUE(dev.get_supported_metrics().bits.pcie);
 
     // Collect metrics
-    auto collected_metrics = dev.get_gpu_metrics();
+    auto collected_metrics = dev.get_gpu_metrics(all_metrics_enabled());
 
     // Verify valid values are collected and sentinels are zeroed
     EXPECT_EQ(collected_metrics.pcie.link.width, 16U);
@@ -1334,7 +1344,7 @@ TEST_F(DeviceTest, pcie_not_collected_when_unsupported)
     EXPECT_FALSE(dev.get_supported_metrics().bits.pcie);
 
     // Collect metrics
-    auto collected_metrics = dev.get_gpu_metrics();
+    auto collected_metrics = dev.get_gpu_metrics(all_metrics_enabled());
 
     // Verify all PCIe metrics remain default-initialized (zeros)
     EXPECT_EQ(collected_metrics.pcie.link.width, 0U);
@@ -1683,7 +1693,7 @@ TEST_F(DeviceTest, vcn_activity_in_both_fields)
     EXPECT_TRUE(dev.get_supported_metrics().bits.vcn_activity);
 
     // Collect metrics
-    auto collected_metrics = dev.get_gpu_metrics();
+    auto collected_metrics = dev.get_gpu_metrics(all_metrics_enabled());
 
     // Verify XCP stats were collected (current implementation)
     EXPECT_EQ(collected_metrics.xcp_stats[0].vcn_busy[0], 80U);
@@ -1763,7 +1773,7 @@ TEST_F(DeviceTest, vcn_activity_collection_priority)
 
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
 
-    auto collected = dev.get_gpu_metrics();
+    auto collected = dev.get_gpu_metrics(all_metrics_enabled());
 
     // Current implementation collects from XCP stats only
     EXPECT_EQ(collected.xcp_stats[0].vcn_busy[0], 80U);
@@ -1831,7 +1841,7 @@ TEST_F(DeviceTest, get_metrics_info_failure)
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
 
     // Call get_gpu_metrics() - should not throw
-    auto metrics = dev.get_gpu_metrics();
+    auto metrics = dev.get_gpu_metrics(all_metrics_enabled());
 
     // Verify returns default-initialized metrics (all zeros)
     EXPECT_EQ(metrics.current_socket_power, 0U);
@@ -1886,7 +1896,7 @@ TEST_F(DeviceTest, multiple_metric_collections)
     // Collect metrics 10 times in a row
     for(int i = 0; i < 10; ++i)
     {
-        auto metrics = dev.get_gpu_metrics();
+        auto metrics = dev.get_gpu_metrics(all_metrics_enabled());
         // Each collection should succeed
         EXPECT_GT(metrics.current_socket_power, 0U);
     }
@@ -1920,7 +1930,7 @@ TEST_F(DeviceTest, large_array_indices_xgmi)
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
 
     // Collect metrics - should not crash or cause buffer overflow
-    auto collected_metrics = dev.get_gpu_metrics();
+    auto collected_metrics = dev.get_gpu_metrics(all_metrics_enabled());
 
     // Verify all links were processed correctly
     for(size_t i = 0; i < AMDSMI_MAX_NUM_XGMI_LINKS; ++i)
@@ -1960,7 +1970,7 @@ TEST_F(DeviceTest, large_array_indices_xcp)
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
 
     // Collect metrics - should not crash
-    auto collected_metrics = dev.get_gpu_metrics();
+    auto collected_metrics = dev.get_gpu_metrics(all_metrics_enabled());
 
     // Verify all XCP stats were processed correctly
     for(size_t xcp = 0; xcp < AMDSMI_MAX_NUM_XCP; ++xcp)
@@ -2004,7 +2014,7 @@ TEST_F(DeviceTest, large_array_indices_jpeg)
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
 
     // Collect metrics - should not crash
-    auto collected_metrics = dev.get_gpu_metrics();
+    auto collected_metrics = dev.get_gpu_metrics(all_metrics_enabled());
 
     // Verify all JPEG engines were processed correctly
     for(size_t xcp = 0; xcp < AMDSMI_MAX_NUM_XCP; ++xcp)
@@ -2059,15 +2069,15 @@ TEST_F(DeviceTest, concurrent_device_objects)
     device<MockDriver> dev2(mock_driver2, handle2, test_processor_type, 1);
 
     // Collect from device 1
-    auto result1 = dev1.get_gpu_metrics();
+    auto result1 = dev1.get_gpu_metrics(all_metrics_enabled());
     EXPECT_EQ(result1.current_socket_power, 100U);
 
     // Collect from device 2
-    auto result2 = dev2.get_gpu_metrics();
+    auto result2 = dev2.get_gpu_metrics(all_metrics_enabled());
     EXPECT_EQ(result2.current_socket_power, 200U);
 
     // Collect from device 1 again - should still return 100W
-    result1 = dev1.get_gpu_metrics();
+    result1 = dev1.get_gpu_metrics(all_metrics_enabled());
     EXPECT_EQ(result1.current_socket_power, 100U);
 
     // Verify devices maintain independent state
@@ -2156,19 +2166,19 @@ TEST_F(DeviceTest, full_lifecycle_with_realistic_data)
     device<MockDriver> dev(mock, test_handle, test_processor_type, test_index);
 
     // Collection 1: Idle
-    auto result1 = dev.get_gpu_metrics();
+    auto result1 = dev.get_gpu_metrics(all_metrics_enabled());
     EXPECT_EQ(result1.current_socket_power, 150U);
     EXPECT_EQ(result1.hotspot_temperature, 70000);
     EXPECT_EQ(result1.gfx_activity, 50U);
 
     // Collection 2: Heavy
-    auto result2 = dev.get_gpu_metrics();
+    auto result2 = dev.get_gpu_metrics(all_metrics_enabled());
     EXPECT_EQ(result2.current_socket_power, 180U);
     EXPECT_EQ(result2.hotspot_temperature, 75000);
     EXPECT_EQ(result2.gfx_activity, 90U);
 
     // Collection 3: Moderate
-    auto result3 = dev.get_gpu_metrics();
+    auto result3 = dev.get_gpu_metrics(all_metrics_enabled());
     EXPECT_EQ(result3.current_socket_power, 160U);
     EXPECT_EQ(result3.hotspot_temperature, 73000);
     EXPECT_EQ(result3.gfx_activity, 60U);

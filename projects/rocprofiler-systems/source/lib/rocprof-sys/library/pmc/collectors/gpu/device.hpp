@@ -89,7 +89,7 @@ public:
         return m_device_handle;
     }
 
-    [[nodiscard]] metrics get_gpu_metrics() const
+    [[nodiscard]] metrics get_gpu_metrics(const enabled_metrics& user_enabled) const
     {
         metrics metrics{};
 
@@ -100,64 +100,71 @@ public:
             return metrics;
         }
 
-        collect_power_metrics(amd_smi_metrics, metrics);
-        collect_temperature_metrics(amd_smi_metrics, metrics);
-        collect_activity_metrics(amd_smi_metrics, metrics);
-        collect_memory_metrics(metrics);
-        collect_xcp_metrics(amd_smi_metrics, metrics);
-        collect_xgmi_metrics(amd_smi_metrics, metrics);
-        collect_pcie_metrics(amd_smi_metrics, metrics);
+        collect_power_metrics(amd_smi_metrics, metrics, user_enabled);
+        collect_temperature_metrics(amd_smi_metrics, metrics, user_enabled);
+        collect_activity_metrics(amd_smi_metrics, metrics, user_enabled);
+        collect_memory_metrics(metrics, user_enabled);
+        collect_xcp_metrics(amd_smi_metrics, metrics, user_enabled);
+        collect_xgmi_metrics(amd_smi_metrics, metrics, user_enabled);
+        collect_pcie_metrics(amd_smi_metrics, metrics, user_enabled);
 
         return metrics;
     }
 
 private:
-    void collect_power_metrics(const amdsmi_gpu_metrics_t& gpu_metrics,
-                               metrics&                    metrics) const
+    void collect_power_metrics(const amdsmi_gpu_metrics_t& gpu_metrics, metrics& metrics,
+                               const enabled_metrics& user_enabled) const
     {
-        if(m_supported_metrics.bits.current_socket_power)
+        if(m_supported_metrics.bits.current_socket_power &&
+           user_enabled.bits.current_socket_power)
         {
             metrics.current_socket_power = gpu_metrics.current_socket_power;
         }
-        if(m_supported_metrics.bits.average_socket_power)
+        if(m_supported_metrics.bits.average_socket_power &&
+           user_enabled.bits.average_socket_power)
         {
             metrics.average_socket_power = gpu_metrics.average_socket_power;
         }
     }
 
     void collect_temperature_metrics(const amdsmi_gpu_metrics_t& gpu_metrics,
-                                     metrics&                    metrics) const
+                                     metrics&                    metrics,
+                                     const enabled_metrics&      user_enabled) const
     {
-        if(m_supported_metrics.bits.hotspot_temperature)
+        if(m_supported_metrics.bits.hotspot_temperature &&
+           user_enabled.bits.hotspot_temperature)
         {
             metrics.hotspot_temperature = gpu_metrics.temperature_hotspot;
         }
-        if(m_supported_metrics.bits.edge_temperature)
+        if(m_supported_metrics.bits.edge_temperature &&
+           user_enabled.bits.edge_temperature)
         {
             metrics.edge_temperature = gpu_metrics.temperature_edge;
         }
     }
 
     void collect_activity_metrics(const amdsmi_gpu_metrics_t& gpu_metrics,
-                                  metrics&                    metrics) const
+                                  metrics&                    metrics,
+                                  const enabled_metrics&      user_enabled) const
     {
-        if(m_supported_metrics.bits.gfx_activity)
+        if(m_supported_metrics.bits.gfx_activity && user_enabled.bits.gfx_activity)
         {
             metrics.gfx_activity = gpu_metrics.average_gfx_activity;
         }
-        if(m_supported_metrics.bits.umc_activity)
+        if(m_supported_metrics.bits.umc_activity && user_enabled.bits.umc_activity)
         {
             metrics.umc_activity = gpu_metrics.average_umc_activity;
         }
-        if(m_supported_metrics.bits.mm_activity)
+        if(m_supported_metrics.bits.mm_activity && user_enabled.bits.mm_activity)
         {
             metrics.mm_activity = gpu_metrics.average_mm_activity;
         }
     }
 
-    void collect_memory_metrics(metrics& metrics) const
+    void collect_memory_metrics(metrics&               metrics,
+                                const enabled_metrics& user_enabled) const
     {
-        if(!m_supported_metrics.bits.memory_usage)
+        if(!m_supported_metrics.bits.memory_usage || !user_enabled.bits.memory_usage)
         {
             return;
         }
@@ -170,11 +177,11 @@ private:
         }
     }
 
-    void collect_xcp_metrics(const amdsmi_gpu_metrics_t& gpu_metrics,
-                             metrics&                    metrics) const
+    void collect_xcp_metrics(const amdsmi_gpu_metrics_t& gpu_metrics, metrics& metrics,
+                             const enabled_metrics& user_enabled) const
     {
         // Per-XCP VCN busy metrics (MI300)
-        if(m_supported_metrics.bits.vcn_busy)
+        if(m_supported_metrics.bits.vcn_busy && user_enabled.bits.vcn_busy)
         {
             for(size_t xcp = 0; xcp < AMDSMI_MAX_NUM_XCP; ++xcp)
             {
@@ -185,14 +192,13 @@ private:
         }
 
         // Device-level VCN activity (Radeon)
-        if(m_supported_metrics.bits.vcn_activity)
+        if(m_supported_metrics.bits.vcn_activity && user_enabled.bits.vcn_activity)
         {
             std::copy(std::begin(gpu_metrics.vcn_activity),
                       std::end(gpu_metrics.vcn_activity), metrics.vcn_activity.begin());
         }
 
-        // Per-XCP JPEG busy metrics (MI300)
-        if(m_supported_metrics.bits.jpeg_busy)
+        if(m_supported_metrics.bits.jpeg_busy && user_enabled.bits.jpeg_busy)
         {
             for(size_t xcp = 0; xcp < AMDSMI_MAX_NUM_XCP; ++xcp)
             {
@@ -202,18 +208,17 @@ private:
             }
         }
 
-        // Device-level JPEG activity (Radeon)
-        if(m_supported_metrics.bits.jpeg_activity)
+        if(m_supported_metrics.bits.jpeg_activity && user_enabled.bits.jpeg_activity)
         {
             std::copy(std::begin(gpu_metrics.jpeg_activity),
                       std::end(gpu_metrics.jpeg_activity), metrics.jpeg_activity.begin());
         }
     }
 
-    void collect_xgmi_metrics(const amdsmi_gpu_metrics_t& gpu_metrics,
-                              metrics&                    metrics) const
+    void collect_xgmi_metrics(const amdsmi_gpu_metrics_t& gpu_metrics, metrics& metrics,
+                              const enabled_metrics& user_enabled) const
     {
-        if(!m_supported_metrics.bits.xgmi)
+        if(!m_supported_metrics.bits.xgmi || !user_enabled.bits.xgmi)
         {
             return;
         }
@@ -230,10 +235,10 @@ private:
         }
     }
 
-    void collect_pcie_metrics(const amdsmi_gpu_metrics_t& gpu_metrics,
-                              metrics&                    metrics) const
+    void collect_pcie_metrics(const amdsmi_gpu_metrics_t& gpu_metrics, metrics& metrics,
+                              const enabled_metrics& user_enabled) const
     {
-        if(!m_supported_metrics.bits.pcie)
+        if(!m_supported_metrics.bits.pcie || !user_enabled.bits.pcie)
         {
             return;
         }

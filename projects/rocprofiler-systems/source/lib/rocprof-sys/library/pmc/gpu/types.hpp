@@ -85,10 +85,10 @@ union enabled_metrics
         uint32_t gfx_activity         : 1;
         uint32_t umc_activity         : 1;
         uint32_t mm_activity          : 1;
-        uint32_t vcn_activity         : 1;  // Device-level VCN activity (Radeon)
-        uint32_t jpeg_activity        : 1;  // Device-level JPEG activity (Radeon)
-        uint32_t vcn_busy             : 1;  // Per-XCP VCN busy (MI300)
-        uint32_t jpeg_busy            : 1;  // Per-XCP JPEG busy (MI300)
+        uint32_t vcn_activity         : 1;
+        uint32_t jpeg_activity        : 1;
+        uint32_t vcn_busy             : 1;  // Per-XCP VCN busy
+        uint32_t jpeg_busy            : 1;  // Per-XCP JPEG busy
         uint32_t xgmi                 : 1;
         uint32_t pcie                 : 1;
     } bits;

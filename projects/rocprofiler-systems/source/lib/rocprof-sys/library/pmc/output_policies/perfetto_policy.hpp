@@ -499,7 +499,6 @@ private:
                    supported_metric_config.bits.jpeg_activity);
         });
 
-        // Per-XCP JPEG busy metrics (MI300)
         if(effective_metrics.bits.jpeg_busy &&
            !tracks.at(JPEG_ACTIVITY_VALUE).track_indexes.empty())
         {
@@ -521,7 +520,6 @@ private:
             }
         }
 
-        // Device-level JPEG activity (Radeon)
         if(effective_metrics.bits.jpeg_activity &&
            !tracks.at(JPEG_ACTIVITY_VALUE).track_indexes.empty())
         {
