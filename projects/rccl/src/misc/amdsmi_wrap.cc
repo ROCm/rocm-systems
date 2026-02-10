@@ -259,6 +259,7 @@ ncclResult_t amd_smi_getDevicePciBusIdString(uint32_t deviceIndex, char* busId, 
       AMDSMITRY(amdsmi_get_socket_handles, &socket_count, nullptr);
       std::vector<amdsmi_socket_handle> sockets(socket_count);
       AMDSMITRY(amdsmi_get_socket_handles, &socket_count, sockets.data());
+      bool found = false;
       id = 0;
       for (auto& socket : sockets) {
         uint32_t processor_handle_count = 0;
@@ -278,10 +279,16 @@ ncclResult_t amd_smi_getDevicePciBusIdString(uint32_t deviceIndex, char* busId, 
             AMDSMITRY(amdsmi_get_gpu_enumeration_info, proc, &info);
             if(info.hip_id == deviceIndex) {
               AMDSMITRY(amdsmi_get_gpu_bdf_id, proc, &id);
+              found = true;
               break;
             }
           }
         }
+        if (found) break;
+      }
+      if (!found) {
+        ERROR("amdsmi_lib: device index %u not found", deviceIndex);
+        return ncclInternalError;
       }
       // borrowing NCCL's format from utils.cc:int64ToBusId
       // !! To be reconciled after discussion with amdsmi team !!
@@ -420,6 +427,7 @@ ncclResult_t amd_smi_getLinkInfo(int srcIndex, int dstIndex, amdsmi_link_type_t*
             }
           }
         }
+        if (found_src && found_dst) break;
       }
       if (!found_src) ERROR("amd-smi could not find processor handle for srcIndex: %d", srcIndex);
       if (!found_dst) ERROR("amd-smi could not find processor handle for dstIndex: %d", dstIndex);
