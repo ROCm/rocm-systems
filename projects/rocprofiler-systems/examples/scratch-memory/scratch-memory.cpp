@@ -5,24 +5,14 @@
 #include <hip/hip_runtime.h>
 #include <hsa/hsa.h>
 #include <hsa/hsa_ext_amd.h>
-#include <iomanip>
 #include <iostream>
 #include <numeric>
 #include <vector>
-
-#define HIP_HOST_ALLOC_FUNC hipHostMalloc
-#define HIP_HOST_FREE_FUNC  hipHostFree
 
 #define hipCheckErr(errval)                                                              \
     do                                                                                   \
     {                                                                                    \
         hipCheckAndFail((errval), __FILE__, __LINE__);                                   \
-    } while(0)
-
-#define hipCheckLastError()                                                              \
-    do                                                                                   \
-    {                                                                                    \
-        hipCheckErr(hipGetLastError());                                                  \
     } while(0)
 
 #define HSA_CALL2(cmd)                                                                   \
@@ -73,13 +63,14 @@ test_kern_large(uint64_t* output)
 {
     uint64_t result = 0;
     int      test[4000];
-    memset(test, 5, 4000);
+    memset(test, 5, sizeof(test));
     for(int& i : test)
     {
         i = i + 7;
         *output += i;
         result += i;
     }
+    // Double XOR cancels out but forces the compiler to keep the computation
     *output ^= result;
     *output ^= result;
 }
@@ -89,13 +80,14 @@ test_kern_medium(uint64_t* output)
 {
     uint64_t result = 0;
     int      test[175];
-    memset(test, 5, 175);
+    memset(test, 5, sizeof(test));
     for(int& i : test)
     {
         i = i + 7;
         *output += i;
         result += i;
     }
+    // Double XOR cancels out but forces the compiler to keep the computation
     *output ^= result;
     *output ^= result;
 }
@@ -104,13 +96,14 @@ __global__ void
 test_kern_small(uint64_t* output)
 {
     uint64_t result = 0;
-    int      test[2];
+    int      test[2] = {0};
     for(int& i : test)
     {
         i = i + 7;
         *output += i;
         result += i;
     }
+    // Double XOR cancels out but forces the compiler to keep the computation
     *output ^= result;
     *output ^= result;
 }
@@ -153,7 +146,7 @@ int
 test_scratch()
 {
     uint64_t* data_ptr = nullptr;
-    hipCheckErr(HIP_HOST_ALLOC_FUNC(&data_ptr, sizeof(uint64_t), 0));
+    hipCheckErr(hipHostMalloc(&data_ptr, sizeof(uint64_t), 0));
 
     auto   host_floats = std::vector<float>(1024, 0.0f);
     float* dev         = nullptr;
@@ -205,6 +198,8 @@ test_scratch()
     hipCheckErr(hipDeviceSynchronize());
     printf("Running Large - done\n");
 
+    hipCheckErr(hipHostFree(data_ptr));
+
     return 0;
 }
 
@@ -216,7 +211,7 @@ main()
     std::vector<hsa_agent_t> agents;
     HSA_CALL2(hsa_iterate_agents(find_gpu_agents, &agents));
     size_t numAgents = agents.size();
-    printf("Detected %ld agents\n", numAgents);
+    printf("Detected %zu agents\n", numAgents);
 
     for(size_t i = 0; i < agents.size(); ++i)
     {
