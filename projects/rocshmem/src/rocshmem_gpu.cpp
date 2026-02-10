@@ -134,12 +134,12 @@ __host__ int rocshmem_hipmodule_init(hipModule_t module, hipStream_t stream) {
   if (err != hipSuccess) {
     fprintf(stderr, "[rocSHMEM] Error: Failed to get address of built-in ROCSHMEM_CTX_DEFAULT: %s\n",
             hipGetErrorString(err));
-    return -1;
+    return ROCSHMEM_ERROR;
   }
 
   if (source_ctx_device == nullptr) {
     fprintf(stderr, "[rocSHMEM] Error: Built-in ROCSHMEM_CTX_DEFAULT has null address\n");
-    return -1;
+    return ROCSHMEM_ERROR;
   }
 
   // Step 2: Query the device symbol address from the user's HIP module
@@ -156,13 +156,13 @@ __host__ int rocshmem_hipmodule_init(hipModule_t module, hipStream_t stream) {
   if (err != hipSuccess) {
     fprintf(stderr, "[rocSHMEM] Error: Failed to get ROCSHMEM_CTX_DEFAULT symbol from module: %s\n",
             hipGetErrorString(err));
-    return -1;
+    return ROCSHMEM_ERROR;
   }
 
   if (symbol_size != sizeof(rocshmem_ctx_t)) {
     fprintf(stderr, "[rocSHMEM] Error: Symbol size mismatch. Expected %zu, got %zu\n",
             sizeof(rocshmem_ctx_t), symbol_size);
-    return -1;
+    return ROCSHMEM_ERROR;
   }
 
   // Step 3: Device-to-device copy using stream-ordered memcpy
@@ -182,7 +182,7 @@ __host__ int rocshmem_hipmodule_init(hipModule_t module, hipStream_t stream) {
   if (err != hipSuccess) {
     fprintf(stderr, "[rocSHMEM] Error: Failed to copy context to device: %s\n",
             hipGetErrorString(err));
-    return -1;
+    return ROCSHMEM_ERROR;
   }
 
   return 0;
