@@ -1377,7 +1377,7 @@ def process_torch_trace_output(
         join_keys: list = ("Correlation_ID"),
     ) -> pd.DataFrame:
         """Merge a pair of marker and counter csv files on specified keys,
-           return the merged dataframe.
+        return the merged dataframe.
         """
         marker_df = pd.read_csv(marker_path)
         counter_df = pd.read_csv(counter_path)
