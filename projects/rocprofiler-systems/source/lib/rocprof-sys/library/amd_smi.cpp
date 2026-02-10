@@ -75,6 +75,10 @@ namespace amd_smi
 using bundle_t          = std::deque<data>;
 using sampler_instances = thread_data<bundle_t, category::amd_smi>;
 
+#ifndef AMDSMI_MAX_NUM_JPEG_ENG_V1
+#    define AMDSMI_MAX_NUM_JPEG_ENG_V1 AMDSMI_MAX_NUM_JPEG
+#endif
+
 namespace
 {
 void
@@ -120,7 +124,7 @@ metadata_initialize_smi_tracks(size_t gpu_id)
     };
 
     auto add_jpeg_track = [&](std::optional<int> xcp_idx) {
-        for(auto clk = 0; clk < AMDSMI_MAX_NUM_JPEG; ++clk)
+        for(auto clk = 0; clk < AMDSMI_MAX_NUM_JPEG_ENG_V1; ++clk)
         {
             auto name = trace_cache::info::annotate_with_device_id<
                 category::amd_smi_jpeg_activity>(gpu_id, xcp_idx, clk);
@@ -269,7 +273,7 @@ metadata_initialize_smi_pmc(size_t gpu_id)
     };
 
     auto add_jpeg_pmc = [&](std::optional<int> xcp_idx) {
-        for(auto clk = 0; clk < AMDSMI_MAX_NUM_JPEG; ++clk)
+        for(auto clk = 0; clk < AMDSMI_MAX_NUM_JPEG_ENG_V1; ++clk)
         {
             std::stringstream name_ss;
             name_ss << trait::name<category::amd_smi_jpeg_activity>::value;

@@ -158,6 +158,29 @@ IPCBackend::~IPCBackend() {
   }
 }
 
+int IPCBackend::backend_can_run(MPI_Comm comm, TcpBootstrap* bootstrap) {
+  int ret = ROCSHMEM_ERROR;
+
+  if (comm != MPI_COMM_NULL) {
+    int comm_size;
+    mpilib_ftable_.Comm_size(comm, &comm_size);
+    MPI_Comm shmcomm;
+    mpilib_ftable_.Comm_split_type(comm, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL,
+                                  &shmcomm);
+    int shm_comm_size;
+    mpilib_ftable_.Comm_size(shmcomm, &shm_comm_size);
+    if (shm_comm_size == comm_size)
+      ret = ROCSHMEM_SUCCESS;
+
+  } else if (bootstrap != nullptr) {
+      int world_size = bootstrap->getNranks();
+      int shm_size = bootstrap->getNranksPerNode();
+      if (shm_size == world_size)
+        ret = ROCSHMEM_SUCCESS;
+  }
+
+  return ret;
+}
 void IPCBackend::setup_ctxs() {
   CHECK_HIP(hipMalloc(&ctx_array, sizeof(IPCContext) * envvar::max_num_contexts));
   // 0th context is default context

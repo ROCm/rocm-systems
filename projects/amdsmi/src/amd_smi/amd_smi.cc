@@ -30,6 +30,7 @@
 
 
 #include <cstdlib>
+#include <cctype>
 #include <string>
 #include <algorithm>
 #include <sstream>
@@ -549,6 +550,76 @@ amdsmi_status_t amdsmi_get_node_handle(amdsmi_processor_handle processor_handle,
 
 }
 
+amdsmi_status_t amdsmi_get_device_handle_from_node(amdsmi_node_handle node_handle,
+                                                   amdsmi_processor_handle *processor_handle) {
+    AMDSMI_CHECK_INIT();
+
+    if (node_handle == nullptr || processor_handle == nullptr) {
+        return AMDSMI_STATUS_INVAL;
+    }
+
+    std::string* board_path_ptr = reinterpret_cast<std::string*>(node_handle);
+    std::string board_path = *board_path_ptr;
+    namespace fs = std::filesystem;
+
+    try {
+        fs::path device_path = fs::path(board_path).parent_path();
+        std::vector<amdsmi_processor_handle> handles;
+
+        // Get socket handles
+        uint32_t socket_count = 0;
+        amdsmi_status_t r = amdsmi_get_socket_handles(&socket_count, nullptr);
+        if (r != AMDSMI_STATUS_SUCCESS) {
+            return r;
+        }
+
+        std::vector<amdsmi_socket_handle> sockets(socket_count);
+        r = amdsmi_get_socket_handles(&socket_count, sockets.data());
+        if (r != AMDSMI_STATUS_SUCCESS) {
+            return r;
+        }
+
+        // Get processor handle for sockets
+        for (uint32_t s = 0; s < socket_count; s++) {
+            uint32_t processor_count = 0;
+            r = amdsmi_get_processor_handles(sockets[s], &processor_count, nullptr);
+            if (r != AMDSMI_STATUS_SUCCESS) {
+                continue;
+            }
+
+            size_t offset = handles.size();
+            handles.resize(offset + processor_count);
+            r = amdsmi_get_processor_handles(sockets[s], &processor_count, handles.data() + offset);
+            if (r != AMDSMI_STATUS_SUCCESS) {
+                handles.resize(offset);
+            }
+        }
+
+        // Find the processor handle corresponds to the node
+        for (uint32_t i = 0; i < handles.size(); i++) {
+            amdsmi_enumeration_info_t enumeration_info;
+            r = amdsmi_get_gpu_enumeration_info(handles[i], &enumeration_info);
+            if (r != AMDSMI_STATUS_SUCCESS) {
+                continue;
+            }
+
+            // Check for OAM ID 0 and get processor_handle
+            amdsmi_asic_info_t asic_info;
+            r = amdsmi_get_gpu_asic_info(handles[i], &asic_info);
+            if (r != AMDSMI_STATUS_SUCCESS || asic_info.oam_id != 0) {
+                continue;
+            }
+            *processor_handle = handles[i];
+            return AMDSMI_STATUS_SUCCESS;
+        }
+
+        return AMDSMI_STATUS_NOT_FOUND;
+
+    } catch (...) {
+        return AMDSMI_STATUS_FILE_ERROR;
+    }
+}
+
 #ifdef ENABLE_ESMI_LIB
 amdsmi_status_t amdsmi_get_processor_count_from_handles(amdsmi_processor_handle* processor_handles,
                                                         uint32_t* processor_count, uint32_t* nr_cpusockets,
@@ -705,6 +776,11 @@ amdsmi_get_gpu_device_uuid(amdsmi_processor_handle processor_handle,
     return status;
 }
 
+// Add a static cache for KFD nodes with initialization flag
+static std::once_flag kfd_nodes_initialized;
+static std::map<uint64_t, std::shared_ptr<amd::smi::KFDNode>> cached_nodes;
+static uint32_t cached_smallest_node_id = std::numeric_limits<uint32_t>::max();
+
 amdsmi_status_t
 amdsmi_get_gpu_enumeration_info(amdsmi_processor_handle processor_handle,
                                 amdsmi_enumeration_info_t *info){
@@ -733,25 +809,26 @@ amdsmi_get_gpu_enumeration_info(amdsmi_processor_handle processor_handle,
     info->drm_render = gpu_device->get_drm_render_minor();
 
     // Retrieve HIP ID (difference from the smallest node ID) and HSA ID
-    std::map<uint64_t, std::shared_ptr<amd::smi::KFDNode>> nodes;
-    if (amd::smi::DiscoverKFDNodes(&nodes) == 0) {
-        uint32_t smallest_node_id = std::numeric_limits<uint32_t>::max();
-        for (const auto& node_pair : nodes) {
-            uint32_t node_id = 0;
-            if (node_pair.second->get_node_id(&node_id) == 0) {
-                smallest_node_id = std::min(smallest_node_id, node_id);
+    // Initialize KFD nodes once
+    std::call_once(kfd_nodes_initialized, []() {
+        if (amd::smi::DiscoverKFDNodes(&cached_nodes) == 0) {
+            for (const auto& node_pair : cached_nodes) {
+                uint32_t node_id = 0;
+                if (node_pair.second->get_node_id(&node_id) == 0) {
+                    cached_smallest_node_id = std::min(cached_smallest_node_id, node_id);
+                }
             }
         }
+    });
 
-        // Default to 0xffffffff as not supported
-        info->hsa_id = std::numeric_limits<uint32_t>::max();
-        info->hip_id = std::numeric_limits<uint32_t>::max();
-        amdsmi_kfd_info_t kfd_info;
-        status = amdsmi_get_gpu_kfd_info(processor_handle, &kfd_info);
-        if (status == AMDSMI_STATUS_SUCCESS) {
-            info->hsa_id = kfd_info.node_id;
-            info->hip_id = kfd_info.node_id - smallest_node_id;
-        }
+    // Default to 0xffffffff as not supported
+    info->hsa_id = std::numeric_limits<uint32_t>::max();
+    info->hip_id = std::numeric_limits<uint32_t>::max();
+    amdsmi_kfd_info_t kfd_info;
+    status = amdsmi_get_gpu_kfd_info(processor_handle, &kfd_info);
+    if (status == AMDSMI_STATUS_SUCCESS) {
+        info->hsa_id = kfd_info.node_id;
+        info->hip_id = kfd_info.node_id - cached_smallest_node_id;
     }
 
     // Retrieve HIP UUID
@@ -2592,7 +2669,7 @@ amdsmi_get_gpu_memory_partition_config(amdsmi_processor_handle processor_handle,
 
     // current memory partition
     constexpr uint32_t kCurrentPartitionSize = 5;
-    char current_mem_partition[kCurrentPartitionSize];
+    char current_mem_partition[kCurrentPartitionSize] = {};
     std::string current_mem_partition_str = "N/A";
     amdsmi_status_t status = amdsmi_get_gpu_memory_partition(processor_handle,
                                             current_mem_partition, kCurrentPartitionSize);
@@ -2614,7 +2691,7 @@ amdsmi_get_gpu_memory_partition_config(amdsmi_processor_handle processor_handle,
 
     // Add memory partition capabilities here
     constexpr uint32_t kLenCapsSize = 30;
-    char memory_caps[kLenCapsSize];
+    char memory_caps[kLenCapsSize] = {};
     auto status_mem_caps = rsmi_wrapper(rsmi_dev_memory_partition_capabilities_get,
                                           processor_handle, 0,
                                           memory_caps, kLenCapsSize);
@@ -3664,67 +3741,118 @@ amdsmi_status_t  amdsmi_get_clk_freq(amdsmi_processor_handle processor_handle,
     AMDSMI_CHECK_INIT();
     // nullptr api supported
 
-    // Get from gpu_metrics
+    // Read VCLK/DCLK from sysfs pp_dpm files instead of gpu_metrics
     if (clk_type == AMDSMI_CLK_TYPE_VCLK0 ||
         clk_type == AMDSMI_CLK_TYPE_VCLK1 ||
         clk_type == AMDSMI_CLK_TYPE_DCLK0 ||
         clk_type == AMDSMI_CLK_TYPE_DCLK1 ) {
-        // Default unit is MHz
-        char unit = 'M';
 
-        // when f == nullptr -> check if metrics are supported
-        amdsmi_gpu_metrics_t metric_info;
-        amdsmi_gpu_metrics_t * metric_info_p = nullptr;
-
-        if (f != nullptr) {
-            metric_info_p = &metric_info;
+        // Get the GPU device to access renderD number
+        amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
+        amdsmi_status_t status = get_gpu_device_from_handle(processor_handle, &gpu_device);
+        if (status != AMDSMI_STATUS_SUCCESS) {
+            return status;
         }
 
-        // when metric_info_p == nullptr - this will not return AMDSMI_STATUS_SUCCESS
-        auto r_status =  amdsmi_get_gpu_metrics_info(
-                processor_handle, metric_info_p);
-        if (r_status != AMDSMI_STATUS_SUCCESS)
-            return r_status;
+        // Get renderD number for this GPU
+        uint32_t drm_render = gpu_device->get_drm_render_minor();
+
+        // Determine the sysfs file name based on clock type
+        const char* pp_dpm_file = nullptr;
+        if (clk_type == AMDSMI_CLK_TYPE_VCLK0) {
+            pp_dpm_file = "pp_dpm_vclk";
+        } else if (clk_type == AMDSMI_CLK_TYPE_VCLK1) {
+            pp_dpm_file = "pp_dpm_vclk1";
+        } else if (clk_type == AMDSMI_CLK_TYPE_DCLK0) {
+            pp_dpm_file = "pp_dpm_dclk";
+        } else if (clk_type == AMDSMI_CLK_TYPE_DCLK1) {
+            pp_dpm_file = "pp_dpm_dclk1";
+        }
+
+        // Construct the sysfs path: /sys/class/drm/renderD<num>/device/pp_dpm_*
+        std::string sysfs_path = "/sys/class/drm/renderD" + std::to_string(drm_render) + "/device/" + pp_dpm_file;
+
+        // Check if the file exists
+        std::ifstream file(sysfs_path);
+        if (!file.good()) {
+            // File doesn't exist, fallback to gpu_metrics for backward compatibility
+            // or return not supported
+            return AMDSMI_STATUS_NOT_SUPPORTED;
+        }
+
+        // Parse the pp_dpm file
+        // Format example:
+        // 0: 200Mhz
+        // 1: 400Mhz *
+        // 2: 800Mhz
+        if (f == nullptr) {
+            return AMDSMI_STATUS_INVAL;
+        }
 
         f->num_supported = 0;
-        if (clk_type == AMDSMI_CLK_TYPE_VCLK0) {
-            f->current = 0;
-            f->frequency[0] = std::numeric_limits<uint64_t>::max();
-            if (metric_info_p->current_vclk0 != std::numeric_limits<uint16_t>::max()) {
-                f->frequency[0] = static_cast<uint64_t>(metric_info_p->current_vclk0)
-                    * amd::smi::get_multiplier_from_char(unit);  // match MHz ROCm SMI provides
-                f->num_supported = 1;
+        f->current = 0;
+        f->has_deep_sleep = 0;
+
+        std::string line;
+        uint32_t level_index = 0;
+
+        while (std::getline(file, line) && level_index < AMDSMI_MAX_NUM_FREQUENCIES) {
+            // Parse line format: "0: 200Mhz" or "1: 400Mhz *"
+            size_t colon_pos = line.find(':');
+            if (colon_pos == std::string::npos) {
+                continue;
             }
-        }
-        if (clk_type == AMDSMI_CLK_TYPE_VCLK1) {
-            f->current = 0;
-            f->frequency[0] = std::numeric_limits<uint64_t>::max();
-            if (metric_info_p->current_vclk1 != std::numeric_limits<uint16_t>::max()) {
-                f->frequency[0] = static_cast<uint64_t>(metric_info_p->current_vclk1)
-                    * amd::smi::get_multiplier_from_char(unit);  // match MHz ROCm SMI provides
-                f->num_supported = 1;
+
+            // Extract level number
+            std::string level_str = line.substr(0, colon_pos);
+            level_str.erase(0, level_str.find_first_not_of(" \t"));
+            level_str.erase(level_str.find_last_not_of(" \t") + 1);
+
+            // Extract frequency value
+            std::string freq_str = line.substr(colon_pos + 1);
+
+            // Check if this is the current level (marked with *)
+            bool is_current = (freq_str.find('*') != std::string::npos);
+            if (is_current) {
+                f->current = level_index;
             }
-        }
-        if (clk_type == AMDSMI_CLK_TYPE_DCLK0) {
-            f->current = 0;
-            f->frequency[0] = std::numeric_limits<uint64_t>::max();
-            if (metric_info_p->current_dclk0 != std::numeric_limits<uint16_t>::max()) {
-                f->frequency[0] = static_cast<uint64_t>(metric_info_p->current_dclk0)
-                    * amd::smi::get_multiplier_from_char(unit);  // match MHz ROCm SMI provides
-                f->num_supported = 1;
+
+            // Remove asterisk and spaces
+            freq_str.erase(std::remove(freq_str.begin(), freq_str.end(), '*'), freq_str.end());
+            freq_str.erase(0, freq_str.find_first_not_of(" \t"));
+            freq_str.erase(freq_str.find_last_not_of(" \t") + 1);
+
+            // Parse frequency value (e.g., "200Mhz" or "200 Mhz")
+            uint64_t freq_value = 0;
+            char unit = 'M';  // Default to MHz
+
+            size_t unit_pos = freq_str.find_first_not_of("0123456789 ");
+            if (unit_pos != std::string::npos) {
+                std::string value_str = freq_str.substr(0, unit_pos);
+                value_str.erase(std::remove(value_str.begin(), value_str.end(), ' '), value_str.end());
+
+                try {
+                    freq_value = std::stoull(value_str);
+                } catch (...) {
+                    continue;  // Skip invalid lines
+                }
+
+                // Extract unit (M for MHz, G for GHz, etc.)
+                std::string unit_str = freq_str.substr(unit_pos);
+                if (!unit_str.empty()) {
+                    unit = static_cast<char>(std::toupper(static_cast<unsigned char>(unit_str[0])));
+                }
             }
-        }
-        if (clk_type == AMDSMI_CLK_TYPE_DCLK1) {
-            f->current = 0;
-            f->frequency[0] = std::numeric_limits<uint64_t>::max();
-            if (metric_info_p->current_dclk1 != std::numeric_limits<uint16_t>::max()) {
-                f->frequency[0] = static_cast<uint64_t>(metric_info_p->current_dclk1)
-                    * amd::smi::get_multiplier_from_char(unit);  // match MHz ROCm SMI provides
-                f->num_supported = 1;
-            }
+
+            // Convert to Hz based on unit
+            f->frequency[level_index] = freq_value * amd::smi::get_multiplier_from_char(unit);
+            level_index++;
         }
 
-        return r_status;
+        f->num_supported = level_index;
+        file.close();
+
+        return (f->num_supported > 0) ? AMDSMI_STATUS_SUCCESS : AMDSMI_STATUS_NOT_SUPPORTED;
     }
 
     return rsmi_wrapper(rsmi_dev_gpu_clk_freq_get, processor_handle, 0,
@@ -5349,6 +5477,8 @@ PtlFormatMapEntry kPtlFormatMap[] = {
   {"BF16", AMDSMI_PTL_DATA_FORMAT_BF16},
   {"F32",  AMDSMI_PTL_DATA_FORMAT_F32},
   {"F64",  AMDSMI_PTL_DATA_FORMAT_F64},
+  {"F8",   AMDSMI_PTL_DATA_FORMAT_F8},
+  {"VECTOR",AMDSMI_PTL_DATA_FORMAT_VECTOR},
 };
 static constexpr size_t kPtlFormatMapSize =
     sizeof(kPtlFormatMap) / sizeof(kPtlFormatMap[0]);
