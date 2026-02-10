@@ -20,9 +20,6 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-set(data_storage_sources
-    ${CMAKE_CURRENT_LIST_DIR}/backends/sqlite_backend.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/insert_statements.cpp
-)
+set(data_storage_sources ${CMAKE_CURRENT_LIST_DIR}/backends/sqlite_backend.cpp)
 
 target_sources(rocstorage PRIVATE ${data_storage_sources})
