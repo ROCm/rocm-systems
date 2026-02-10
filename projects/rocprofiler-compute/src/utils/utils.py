@@ -1335,7 +1335,6 @@ def process_torch_trace_output(
         - Groups by Operator_Name, saving one CSV per operator
         - Output file is saved to workload/torch_trace/ directory
     """
-    # marker_trace_csv_file_path = f"{workload_dir}/out/pmc_1/"
     # Find all marker_api_trace CSV files
     console_log(f"Looking for marker and counter csv files in {workload_dir}")
     marker_api_trace_csvs = list(Path(workload_dir).glob("**/*_marker_api_trace.csv"))
@@ -1368,17 +1367,25 @@ def process_torch_trace_output(
     if Path(f"{workload_dir}/torch_trace").exists():
         shutil.rmtree(Path(f"{workload_dir}/torch_trace"))
         console_log(
-            f"Removed previous torch_trace directory : {workload_dir}/torch_trace"
+            f"Removed previous torch_trace directory: {workload_dir}/torch_trace"
         )
 
     # Join marker and counter data
     def _merge_pair(
         marker_path: Path,
         counter_path: Path,
-        join_keys: list = ("Correlation_Id"),
+        join_keys: list = ("Correlation_ID"),
     ) -> pd.DataFrame:
         marker_df = pd.read_csv(marker_path)
         counter_df = pd.read_csv(counter_path)
+        # Normalize column names to handle case inconsistencies
+        marker_df.columns = marker_df.columns.str.replace(
+            "Correlation_Id", "Correlation_ID"
+        )
+        counter_df.columns = counter_df.columns.str.replace(
+            "Correlation_Id", "Correlation_ID"
+        )
+
         return pd.merge(
             marker_df,
             counter_df,
@@ -1391,9 +1398,9 @@ def process_torch_trace_output(
     # If csv format, pairs are present in workload/{fbase}/ one pair per process
     # Extracting the output_format used in profiling from the path of a marker file
     if Path(workload_dir).resolve() == existing_csv_files[0][0].parent.resolve():
-        join_keys = ("Correlation_Id", "GUID")  # output_format "rocpd"
+        join_keys = ("Correlation_ID", "GUID")  # output_format "rocpd"
     else:
-        join_keys = ("Correlation_Id",)  # output_format "csv"
+        join_keys = ("Correlation_ID",)  # output_format "csv"
     consolidated_df = pd.concat(
         [_merge_pair(f[0], f[1], join_keys) for f in existing_csv_files],
         ignore_index=True,
@@ -1450,14 +1457,19 @@ def process_torch_trace_output(
         return
     grouped = consolidated_df.groupby("Operator_Name")
     for operator_name, group in grouped:
-        sanitized_operator_name = operator_name.replace("torch.", "").replace(".", "_")
+        # Extract the operator name from hierarchy
+        last_operator = operator_name.split("/")[-1]
+        sanitized_operator_name = last_operator.replace("torch.", "").replace(".", "_")
         # Ensure output directory exists
         Path(f"{workload_dir}/torch_trace").mkdir(parents=True, exist_ok=True)
         output_file = f"{workload_dir}/torch_trace/{sanitized_operator_name}.csv"
-        group.to_csv(output_file, index=False)
-        console_log(
-            f"Saved consolidated trace for {sanitized_operator_name} to {output_file}"
-        )
+        # If the file already exists, append to it, else create new file.
+        if Path(output_file).is_file():
+            group.to_csv(output_file, mode="a", header=False, index=False)
+            console_log(f"Appended trace to existing file {output_file}")
+        else:
+            group.to_csv(output_file, index=False)
+            console_log(f"Saved consolidated trace to {output_file}")
     for trace_file in marker_api_trace_csvs + counter_collection_csvs:
         try:
             Path(trace_file).unlink()

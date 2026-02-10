@@ -275,76 +275,139 @@ def extract_kernel_name(full_kernel_name: str) -> str:
     return main_part.strip()
 
 
+def show_torch_operator_table(operator_name: str, df: pd.DataFrame) -> None:
+    """Display torch operator data in a properly formatted table."""
+    if df is None or df.empty:
+        console_log(f"No data available for operator: {operator_name}")
+        return
+
+    console_log(f"\n{operator_name}")
+    console_log("=" * len(operator_name))
+
+    # Create a copy for display formatting
+    display_df = df.copy()
+
+    # Define max widths for different column types
+    column_widths = {
+        "Operator_Name": 40,
+        "Context": 35,
+        "Kernel_Name": 35,
+        "default": 20,
+    }
+
+    # Truncate columns to reasonable widths
+    for col in display_df.columns:
+        if display_df[col].dtype == "object":  # String columns
+            max_width = column_widths.get(col, column_widths["default"])
+            display_df[col] = (
+                display_df[col]
+                .astype(str)
+                .apply(
+                    lambda x: (
+                        string_multiple_lines(x, max_width, 2)
+                        if len(x) > max_width
+                        else x
+                    )
+                )
+            )
+
+    # Reset index for row numbering
+    display_df = display_df.reset_index(drop=True)
+
+    # Use tabulate for consistent formatting
+    table_str = tabulate(
+        display_df,
+        headers=display_df.columns,
+        tablefmt="fancy_grid",
+        showindex=True,
+        floatfmt=".2f",
+        maxcolwidths=list(column_widths.values()),
+    )
+
+    console_log(table_str)
+
+
 def show_torch_operator_hierarchy(operator_name: str, df: pd.DataFrame) -> None:
     """
     Display the hierarchy for each unique operator name in the DataFrame,
     showing marker hierarchy on the left and kernel launches on the right.
     """
     print(f"\n{'-' * 80}")
-    print("Marker Hierarchy (Stack)".ljust(40) + "Kernel Launches")
+    print(f"Torch Operator Hierarchy for: {operator_name}")
     print("-" * 80)
 
-    if df is not None and not df.empty and "Operator_Name" in df.columns:
-        unique_ops = df["Operator_Name"].unique()
-        for op in unique_ops:
-            parts = str(op).split("/")
+    # Expect the DataFrame to have columns "Operator_Name", "Kernel_Name",
+    # "Context_Id", etc.
 
-            hierarchy_lines = []
-            # Display the hierarchy tree
-            for i, part in enumerate(parts):
-                if i == 0:
-                    # Top level - just the module name
-                    hierarchy_lines.append(f"{part}")
+    unique_op_hierarchies = df["Operator_Name"].unique()
+    for i, op in enumerate(unique_op_hierarchies, start=1):
+        print(f"  {i:3d}. {op}")
+        print("\nOperator Hierarchy".ljust(50) + "Kernels Launched")
+        print("-" * 80)
+        parts = str(op).split("/")
+
+        hierarchy_lines = []
+        # Display the hierarchy tree
+        for i, part in enumerate(parts):
+            if i == 0:
+                # Top level - just the module name
+                hierarchy_lines.append(f"{part}")
+            else:
+                indent = "  " * i
+                prefix = "└─ "
+                hierarchy_lines.append(f"{indent}{prefix}{part}")
+
+        # Get kernels for this operator hierarchy
+        kernels_info = []
+        op_data = df[df["Operator_Name"] == op]
+        # Group by extracted kernel name
+        kernel_counts = {}
+        kernel_context = {}
+        for _, row in op_data.iterrows():
+            full_kernel_name = row["Kernel_Name"]
+            kernel_name = extract_kernel_name(full_kernel_name)
+
+            if kernel_name not in kernel_counts:
+                kernel_counts[kernel_name] = 0
+                kernel_context[kernel_name] = {
+                    "full_name": full_kernel_name,
+                    "contexts": {},
+                }
+            kernel_counts[kernel_name] += 1
+            topmost_location = str(row["Context_Id"]).split("/")[0]
+            _, location = topmost_location.split("@")
+            file_name, line_num = location.split(":")
+            if file_name not in kernel_context[kernel_name]["contexts"]:
+                kernel_context[kernel_name]["contexts"][file_name] = {line_num: 1}
+            else:
+                if line_num not in kernel_context[kernel_name]["contexts"][file_name]:
+                    kernel_context[kernel_name]["contexts"][file_name][line_num] = 1
                 else:
-                    indent = "  " * i
-                    prefix = "└─ "
-                    hierarchy_lines.append(f"{indent}{prefix}{part}")
+                    kernel_context[kernel_name]["contexts"][file_name][line_num] += 1
 
-            # Get kernels for this operator
-            kernels_info = []
-            op_data = df[df["Operator_Name"] == op]
-            if not op_data.empty and "Kernel_Name" in op_data.columns:
-                # Group by extracted kernel name and aggregate correlation IDs
-                kernel_groups = {}
-                for idx, row in op_data.iterrows():
-                    full_kernel_name = row["Kernel_Name"]
-                    kernel_name = extract_kernel_name(full_kernel_name)
-
-                    if kernel_name not in kernel_groups:
-                        kernel_groups[kernel_name] = []
-
-                    # Get correlation ID and context ID
-                    corr_id = ""
-                    if "Correlation_Id" in row:
-                        corr_id = str(row["Correlation_Id"])
-                    context_id_str = str(row["Context_Id"])
-                    kernel_groups[kernel_name].append(corr_id + "_" + context_id_str)
-
-                # Format output for each unique kernel
-                for kernel_name, corr_ids in kernel_groups.items():
-                    count = len(corr_ids)
-                    corr_list = ", ".join(corr_ids)
-                    kernel_info = (
-                        f"|--> {kernel_name} ({count} calls)\n"
-                        f"     Correlation_Ids: {corr_list}\n"
-                        f"     Context Info: ..."
+        # Format output for each unique kernel
+        for kernel_name, num_launches in kernel_counts.items():
+            kernel_info = f"|--> {kernel_name} ({num_launches} launches)\n"
+            kernels_info.append(kernel_info)
+            for file_name, line_count in kernel_context[kernel_name][
+                "contexts"
+            ].items():
+                for line_num, count in line_count.items():
+                    kernels_info.append(
+                        f"      {file_name}:{line_num} ({count} launches)\n"
                     )
-                    kernels_info.append(kernel_info)
 
-            # Print hierarchy lines (left column)
-            for line in hierarchy_lines:
-                print(f"{line.ljust(40)}|")
+        # Print hierarchy lines (left column)
+        for line in hierarchy_lines:
+            print(f"{line.ljust(40)}|")
 
-            # Print kernel lines aligned to the deepest level
-            deepest_indent = "  " * len(parts)
-            for kernel_line in kernels_info:
-                left_padding = deepest_indent + "    "
-                print(f"{left_padding.ljust(40)}{kernel_line}")
+        # Print kernel lines aligned to the deepest level
+        deepest_indent = "  " * len(parts)
+        for kernel_line in kernels_info:
+            left_padding = deepest_indent + "    "
+            print(f"{left_padding.ljust(40)}{kernel_line}")
 
-            print()
-    else:
-        console_log("No operator names found in data.")
-    print("-" * 80)
+        print()
 
 
 def process_table_data(
