@@ -144,7 +144,7 @@ ncclResult_t amd_smi_init() {
   }
 
   if (rcclParamUseAmdSmiLib()) {
-#if !NCCL_NVML_DIRECT
+#if !AMDSMI_DIRECT
     if (pfn_amdsmi_init == nullptr) {
       void *libhandle = dlopen("libamdsmi.so.1", RTLD_NOW);
       if (libhandle == nullptr) {
@@ -170,6 +170,10 @@ ncclResult_t amd_smi_init() {
         // UALoE support
         {(void**)&pfn_amdsmi_get_gpu_fabric_info, "amdsmi_get_gpu_fabric_info"},
         {(void**)&pfn_amdsmi_fabric_telem_id_to_string, "amdsmi_fabric_telem_id_to_string"},
+        // UALoE Telemetry support
+        {(void**)&pfn_amdsmi_alloc_fabric_telemetry, "amdsmi_alloc_fabric_telemetry"},
+        {(void**)&pfn_amdsmi_get_fabric_telemetry_data, "amdsmi_get_fabric_telemetry_data"},
+        {(void**)&pfn_amdsmi_free_fabric_telemetry, "amdsmi_free_fabric_telemetry"},
       };
       for(Symbol sym: symbols) {
         *sym.ppfn = dlsym(libhandle, sym.name);
