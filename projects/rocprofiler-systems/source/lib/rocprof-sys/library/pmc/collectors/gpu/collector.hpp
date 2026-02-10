@@ -297,6 +297,21 @@ private:
                 index++;
             }
         }
+
+        // Warn about invalid device indices that user specified but don't exist
+        if(filter.mode == device_selection_mode::SPECIFIC)
+        {
+            for(auto requested_index : filter.indices)
+            {
+                if(requested_index >= index)
+                {
+                    LOG_WARNING("Requested GPU device index {} does not exist. Available "
+                                "devices: "
+                                "0-{}",
+                                requested_index, index > 0 ? index - 1 : 0);
+                }
+            }
+        }
     }
 
     device_vector_t m_gpu_devices;  ///< List of enabled GPU devices for sampling
