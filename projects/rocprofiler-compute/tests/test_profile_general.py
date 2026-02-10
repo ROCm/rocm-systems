@@ -2951,9 +2951,6 @@ if __name__ == "__main__":
             assert found_row, f"{corresponding_counter_file} is empty"
 
     destination_dir = test_utils.get_output_dir(param_id="torch_ops_analyze")
-    destination_dir = destination_dir.replace(
-        "test_torch_trace_profile", "test_torch_trace_operator_output"
-    )
     # Saving the profiler output to analyze with the torch trace analyzer script
     shutil.copytree(workload_dir, destination_dir, dirs_exist_ok=True)
     test_utils.clean_output_dir(config["cleanup"], workload_dir)

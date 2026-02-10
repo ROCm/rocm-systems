@@ -1335,7 +1335,6 @@ def process_torch_trace_output(
         - Groups by Operator_Name, saving one CSV per operator
         - Output file is saved to workload/torch_trace/ directory
     """
-    # marker_trace_csv_file_path = f"{workload_dir}/out/pmc_1/"
     # Find all marker_api_trace CSV files
     console_log(f"Looking for marker and counter csv files in {workload_dir}")
     marker_api_trace_csvs = list(Path(workload_dir).glob("**/*_marker_api_trace.csv"))
@@ -1368,7 +1367,7 @@ def process_torch_trace_output(
     if Path(f"{workload_dir}/torch_trace").exists():
         shutil.rmtree(Path(f"{workload_dir}/torch_trace"))
         console_log(
-            f"Removed previous torch_trace directory : {workload_dir}/torch_trace"
+            f"Removed previous torch_trace directory: {workload_dir}/torch_trace"
         )
 
     # Join marker and counter data
