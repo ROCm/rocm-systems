@@ -491,13 +491,10 @@ private:
             }
         }
 
-        static std::once_flag once_flag;
-        std::call_once(once_flag, [&]() {
-            printf("JPEG activity: %d, enabled: %d, supported: %d\n",
-                   effective_metrics.bits.jpeg_activity,
-                   enabled_metric_config.bits.jpeg_activity,
-                   supported_metric_config.bits.jpeg_activity);
-        });
+        LOG_DEBUG("JPEG activity: {}, enabled: {}, supported: {}",
+                  effective_metrics.bits.jpeg_activity,
+                  enabled_metric_config.bits.jpeg_activity,
+                  supported_metric_config.bits.jpeg_activity);
 
         if(effective_metrics.bits.jpeg_busy &&
            !tracks.at(JPEG_ACTIVITY_VALUE).track_indexes.empty())

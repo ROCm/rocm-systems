@@ -100,8 +100,9 @@ to_string(const enabled_metrics& metrics)
 {
     std::stringstream ss;
     ss << "[SMI enabled metrics] ";
-    ss << "Current socket power: " << metrics.bits.current_socket_power
-       << ", Average socket power: " << metrics.bits.average_socket_power
+    ss << "Current socket power: " << static_cast<bool>(metrics.bits.current_socket_power)
+       << ", Average socket power: "
+       << static_cast<bool>(metrics.bits.average_socket_power)
        << ", Memory usage: " << static_cast<bool>(metrics.bits.memory_usage)
        << ", Hotspot temperature: " << static_cast<bool>(metrics.bits.hotspot_temperature)
        << ", Edge temperature: " << static_cast<bool>(metrics.bits.edge_temperature)
