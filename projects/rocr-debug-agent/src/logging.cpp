@@ -63,9 +63,10 @@ log (log_level_t level, const char *format, ...)
   va_end (va);
 
   va_start (va, format);
-  std::string str (size, '\0');
-  vsprintf (&str[0], format, va);
+  std::string str (size + 1, '\0');
+  vsnprintf (&str[0], size + 1, format, va);
   va_end (va);
+  str.resize (size);
 
   agent_out << str << std::endl;
 }

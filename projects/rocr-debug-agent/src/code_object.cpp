@@ -154,8 +154,8 @@ code_object_t::open ()
   std::string decoded_path;
   decoded_path.reserve (path.length ());
   for (size_t i = 0; i < path.length (); ++i)
-    if (path[i] == '%' && std::isxdigit (path[i + 1])
-        && std::isxdigit (path[i + 2]))
+    if (path[i] == '%' && (i + 2) < path.length ()
+        && std::isxdigit (path[i + 1]) && std::isxdigit (path[i + 2]))
       {
         decoded_path += std::stoi (path.substr (i + 1, 2), 0, 16);
         i += 2;
@@ -318,14 +318,16 @@ code_object_t::open ()
       elf_begin (fd, ELF_C_READ, nullptr), [] (Elf *elf) { elf_end (elf); });
   if (!elf)
     {
-      agent_warning ("elf_begin failed for `%s'", m_uri.c_str ());
+      agent_warning ("elf_begin failed for `%s': %s", m_uri.c_str (),
+                     elf_errmsg (0));
       return;
     }
 
   size_t phnum;
   if (elf_getphdrnum (elf.get (), &phnum) != 0)
     {
-      agent_warning ("elf_getphdrnum failed for `%s'", m_uri.c_str ());
+      agent_warning ("elf_getphdrnum failed for `%s': %s", m_uri.c_str (),
+                     elf_errmsg (0));
       return;
     }
 
@@ -335,7 +337,8 @@ code_object_t::open ()
       GElf_Phdr *phdr = gelf_getphdr (elf.get (), i, &phdr_mem);
       if (!phdr)
         {
-          agent_warning ("gelf_getphdr failed for `%s'", m_uri.c_str ());
+          agent_warning ("gelf_getphdr failed for `%s': %s", m_uri.c_str (),
+                         elf_errmsg (0));
           return;
         }
 
@@ -417,8 +420,12 @@ code_object_t::load_symbol_map ()
               || sym->st_shndx == SHN_UNDEF)
             continue;
 
-          std::string symbol_name{ elf_strptr (elf.get (), shdr->sh_link,
-                                               sym->st_name) };
+          const char *sym_name = elf_strptr (elf.get (), shdr->sh_link,
+                                            sym->st_name);
+          if (!sym_name)
+            continue;
+
+          std::string symbol_name{ sym_name };
 
           auto [it, success] = m_symbol_map->emplace (
               m_load_address + sym->st_value,
@@ -432,7 +439,7 @@ code_object_t::load_symbol_map ()
         }
     }
 
-  /* TODO: If we did not see a symbtab, check the dynamic segment.  */
+  /* TODO: If we did not see a symtab, check the dynamic segment.  */
 }
 
 void
@@ -679,7 +686,7 @@ code_object_t::disassemble (amd_dbgapi_architecture_id_t architecture_id,
           prev_file_name = file_name;
           prev_line_number = line_number;
 
-          /* If the start_pc address is not the begining of a line number
+          /* If the start_pc address is not the beginning of a line number
              block, then print ... to show that the following instruction is
              not the first in the block.  */
           if (addr == start_pc && start_pc != saved_start_pc)
@@ -746,7 +753,7 @@ code_object_t::disassemble (amd_dbgapi_architecture_id_t architecture_id,
       addr += size;
     }
 
-  /* If the end_pc address (addr) is not the begining of a new line number
+  /* If the end_pc address (addr) is not the beginning of a new line number
      block, then print ... to show that the previous instruction was
      not the last of the instructions associated with the previous source ine
      printed.  */

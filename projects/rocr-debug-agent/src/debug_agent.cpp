@@ -108,7 +108,7 @@ using code_object_map_t
 
 std::optional<std::string> g_code_objects_dir;
 bool g_all_wavefronts{ false };
-bool g_precise_emmory{ false };
+bool g_precise_memory{ false };
 bool g_precise_alu_exceptions{ false };
 
 /* Global state accessed by the dbgapi callbacks.  */
@@ -981,7 +981,7 @@ process_dbgapi_events (amd_dbgapi_process_id_t process_id, bool all_wavefronts,
               = stop_reason_bits ^ (stop_reason_bits & (stop_reason_bits - 1));
           stop_reason_bits ^= one_bit;
 
-          switch (stop_reason)
+          switch (one_bit)
             {
             case AMD_DBGAPI_WAVE_STOP_REASON_NONE:
             case AMD_DBGAPI_WAVE_STOP_REASON_DEBUG_TRAP:
@@ -1285,7 +1285,7 @@ DebugAgentWorker::DebugAgentWorker ()
   m_write_pipe = pipefd[1];
 
   m_worker_thread = std::thread (dbgapi_worker, pipefd[0], g_all_wavefronts,
-                                 g_precise_emmory, g_precise_alu_exceptions);
+                                 g_precise_memory, g_precise_alu_exceptions);
 
   /* Wait for the worker thread to have setup dbgapi.  */
   init_future.wait ();
@@ -1333,7 +1333,7 @@ DebugAgentWorker::update_code_object_list () const
                  strerror (errno));
   agent_assert (written == 1);
 
-  /* Wait for the worker thread to acknoledge code object update has proceded
+  /* Wait for the worker thread to acknowledge code object update has proceeded
      and reset the synch structure so it can be reused in a later call.  */
   update_brk_future.wait ();
   g_rbrk_sync.promise.reset ();
@@ -1526,7 +1526,7 @@ OnLoad (void *table, uint64_t runtime_version, uint64_t failed_tool_count,
           break;
 
         case 'p': /* -p or --precise-memory  */
-          g_precise_emmory = true;
+          g_precise_memory = true;
           break;
 
         case 'e': /* -e or --precise-alu-exceptions  */
