@@ -464,21 +464,20 @@ rocpd_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& _gpu_pmc)
     insert_scalar(trait::name<category::amd_smi_pcie_bandwidth_inst>::value,
                   info::format_track_name<category::amd_smi_pcie_bandwidth_inst>(),
                   enabled.bits.pcie, m.pcie.bandwidth.inst);
-    /*
-        //TODO: XGMI metrics
-        insert_scalar(trait::name<category::amd_smi_xgmi_link_width>::value,
-                      info::format_track_name<category::amd_smi_xgmi_link_width>(),
-                      enabled.bits.xgmi, m.xgmi.link.width);
-        insert_scalar(trait::name<category::amd_smi_xgmi_link_speed>::value,
-                      info::format_track_name<category::amd_smi_xgmi_link_speed>(),
-                      enabled.bits.xgmi, m.xgmi.link.speed);
-        insert_scalar(trait::name<category::amd_smi_xgmi_read_data_acc>::value,
-                      info::format_track_name<category::amd_smi_xgmi_read_data_acc>(),
-                      enabled.bits.xgmi, m.xgmi.data_acc.read);
-        insert_scalar(trait::name<category::amd_smi_xgmi_write_data_acc>::value,
-                      info::format_track_name<category::amd_smi_xgmi_write_data_acc>(),
-                      enabled.bits.xgmi, m.xgmi.data_acc.write);
-    */
+
+    // XGMI metrics
+    insert_scalar(trait::name<category::amd_smi_xgmi_link_width>::value,
+                  info::format_track_name<category::amd_smi_xgmi_link_width>(),
+                  enabled.bits.xgmi, m.xgmi.link.width);
+    insert_scalar(trait::name<category::amd_smi_xgmi_link_speed>::value,
+                  info::format_track_name<category::amd_smi_xgmi_link_speed>(),
+                  enabled.bits.xgmi, m.xgmi.link.speed);
+    insert_device_level_metrics(
+        info::format_track_name<category::amd_smi_xgmi_read_data>(), enabled.bits.xgmi,
+        m.xgmi.data_acc.read);
+    insert_device_level_metrics(
+        info::format_track_name<category::amd_smi_xgmi_write_data>(), enabled.bits.xgmi,
+        m.xgmi.data_acc.write);
 }
 #endif
 

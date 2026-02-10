@@ -21,7 +21,6 @@
 // SOFTWARE.
 
 #pragma once
-#include "common/defines.h"
 #include "core/trace_cache/cacheable.hpp"
 #include "core/trace_cache/sample_type.hpp"
 
