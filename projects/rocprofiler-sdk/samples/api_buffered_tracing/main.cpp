@@ -368,9 +368,27 @@ run_migrate(int rank, int tid, hipStream_t stream, int, char** argv)
     for(auto& itr : page_data)
         itr = init_v;
 
-    test_page_migrate<<<1, 1024, 0, stream>>>(page_data.data(), incr_v);
+    data_type* d_data = nullptr;
+    HIP_API_CALL(hipMalloc(&d_data, page_data.size() * sizeof(data_type)));
+
+    HIP_API_CALL(hipMemcpyAsync(d_data,
+                                page_data.data(),
+                                page_data.size() * sizeof(data_type),
+                                hipMemcpyHostToDevice,
+                                stream));
+
+    test_page_migrate<<<1, 1024, 0, stream>>>(d_data, incr_v);
+    check_hip_error();
+
+    HIP_API_CALL(hipMemcpyAsync(page_data.data(),
+                                d_data,
+                                page_data.size() * sizeof(data_type),
+                                hipMemcpyDeviceToHost,
+                                stream));
 
     HIP_API_CALL(hipStreamSynchronize(stream));
+
+    HIP_API_CALL(hipFree(d_data));
 
     for(auto& itr : page_data)
     {
