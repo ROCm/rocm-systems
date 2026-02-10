@@ -60,13 +60,13 @@ struct nic_data
 
 private:
     std::string _nic;
-    uint32_t    _nic_index;
-    uint32_t    _rx_rdma_cnp_pkts;
-    uint32_t    _tx_rdma_cnp_pkts;
-    uint32_t    _rx_ucast_bytes;
-    uint32_t    _tx_ucast_bytes;
-    uint32_t    _rx_ucast_pkts;
-    uint32_t    _tx_ucast_pkts;
+    uint32_t    _nic_index        = 0;
+    uint32_t    _rx_rdma_cnp_pkts = 0;
+    uint32_t    _tx_rdma_cnp_pkts = 0;
+    uint32_t    _rx_ucast_bytes   = 0;
+    uint32_t    _tx_ucast_bytes   = 0;
+    uint32_t    _rx_ucast_pkts    = 0;
+    uint32_t    _tx_ucast_pkts    = 0;
 };
 
 }  // namespace amd_smi
