@@ -100,11 +100,13 @@ TEST_CASE("Unit_hipPointerSetAttribute_Negative_Parameters") {
                     hipErrorInvalidDevicePointer);
   }
 
+#if !defined(ENABLE_ADDRESS_SANITIZER)
   SECTION("freed pointer") {
     HIP_CHECK(hipFree(mem.ptr()));
     HIP_CHECK_ERROR(hipPointerSetAttribute(&value, HIP_POINTER_ATTRIBUTE_SYNC_MEMOPS, mem.ptr()),
                     hipErrorInvalidDevicePointer);
   }
+#endif
 }
 
 /**

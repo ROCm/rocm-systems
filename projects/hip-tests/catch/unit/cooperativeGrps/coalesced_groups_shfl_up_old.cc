@@ -47,15 +47,14 @@ __device__ int prefix_sum_kernel(coalesced_group const& g, int val) {
   return val;
 }
 
-__global__ void kernel_shfl_up(int* dPtr, int* dResults, int lane_delta, int cg_sizes) {
+__global__ void kernel_shfl_up(int* dPtr, int* dResults, int lane_delta, int cg_sizes, int group_size) {
   int id = threadIdx.x + blockIdx.x * blockDim.x;
 
   if (id % cg_sizes == 0) {
     coalesced_group g = coalesced_threads();
     int rank = g.thread_rank();
     int val = dPtr[rank];
-    dResults[rank] = g.shfl_up(val, lane_delta);
-    return;
+    if (rank < group_size) dResults[rank] = g.shfl_up(val, lane_delta);
   }
 }
 
@@ -202,7 +201,7 @@ static void test_shfl_up() {
     HIPCHECK(hipMemcpy(dPtr, hPtr, group_size_in_bytes, hipMemcpyHostToDevice));
     // Launch Kernel
     hipLaunchKernelGGL(kernel_shfl_up, blockSize, threadsPerBlock, threadsPerBlock * sizeof(int), 0,
-                       dPtr, dResults, lane_delta, i);
+                       dPtr, dResults, lane_delta, i, group_size);
     HIPCHECK(hipMemcpy(hPtr, dResults, group_size_in_bytes, hipMemcpyDeviceToHost));
     HIP_CHECK(hipGetLastError());
     err = hipDeviceSynchronize();

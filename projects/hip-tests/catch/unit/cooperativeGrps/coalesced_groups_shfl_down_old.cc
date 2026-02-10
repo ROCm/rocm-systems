@@ -54,15 +54,15 @@ __device__ int reduction_kernel_shfl_down(coalesced_group const& g, int val) {
   }
 }
 
-__global__ void kernel_shfl_down(int* dPtr, int* dResults, int lane_delta, int cg_sizes) {
+__global__ void kernel_shfl_down(int* dPtr, int* dResults, int lane_delta, int cg_sizes,
+                                 int max_res_size) {
   int id = threadIdx.x + blockIdx.x * blockDim.x;
 
   if (id % cg_sizes == 0) {
     coalesced_group const& g = coalesced_threads();
     int rank = g.thread_rank();
     int val = dPtr[rank];
-    dResults[rank] = g.shfl_down(val, lane_delta);
-    return;
+    if (rank < max_res_size) dResults[rank] = g.shfl_down(val, lane_delta);
   }
 }
 
@@ -95,7 +95,8 @@ __global__ void kernel_cg_group_partition_shfl_down(int* result, unsigned int ti
           "   Sum of all ranks 0..%d in this tiledPartition group using shfl_down is %d (expected "
           "%d)\n",
           tiledPartition.size() - 1, outputSum, expectedSum);
-      result[threadBlockCGTy.thread_rank() / (tileSz)] = outputSum;
+      if ((threadBlockCGTy.thread_rank() / tileSz) < tileSz)
+        result[threadBlockCGTy.thread_rank() / (tileSz)] = outputSum;
     }
     return;
   }
@@ -146,10 +147,10 @@ static void test_group_partition(unsigned int tileSz) {
     int* dResult = NULL;
     int* hResult = NULL;
 
-    HIPCHECK(hipHostMalloc(&hResult, numTiles * sizeof(int), hipHostMallocDefault));
+    HIPCHECK(hipHostMalloc(&hResult, 64 * sizeof(int), hipHostMallocDefault));
     memset(hResult, 0, numTiles * sizeof(int));
 
-    HIPCHECK(hipMalloc(&dResult, numTiles * sizeof(int)));
+    HIPCHECK(hipMalloc(&dResult, 64 /* hard coded */ * sizeof(int)));
 
 
     // Launch Kernel
@@ -214,7 +215,7 @@ static void test_shfl_down() {
     HIPCHECK(hipMemcpy(dPtr, hPtr, group_size_in_bytes, hipMemcpyHostToDevice));
     // Launch Kernel
     hipLaunchKernelGGL(kernel_shfl_down, blockSize, threadsPerBlock, threadsPerBlock * sizeof(int),
-                       0, dPtr, dResults, lane_delta, i);
+                       0, dPtr, dResults, lane_delta, i, group_size);
     HIP_CHECK(hipGetLastError());
     HIPCHECK(hipMemcpy(hPtr, dResults, group_size_in_bytes, hipMemcpyDeviceToHost));
     err = hipDeviceSynchronize();

@@ -164,7 +164,7 @@ __global__ void kernel_cg_coalesced_group_partition(unsigned int tileSz, int* re
           " obtained from meta_group_rank : %d and number of tiles created : %d\n",
           tiledPartition.size() - 1, outputSum, tiledPartition.meta_group_rank(),
           tiledPartition.meta_group_size());
-      result[input / (tileSz)] = outputSum;
+      if ((input / tileSz) < tileSz) result[input / tileSz] = outputSum;
     }
     return;
   }
@@ -250,7 +250,6 @@ void verifyResultsSimpleCoalescedGroups(int* hPtr, int* dPtr, int size) {
   }
 }
 
-
 static void test_group_partition(unsigned int tileSz, bool useGlobalMem) {
   hipError_t err;
   int blockSize = 1;
@@ -275,15 +274,15 @@ static void test_group_partition(unsigned int tileSz, bool useGlobalMem) {
     }
 
     int* dResult = NULL;
-    HIPCHECK(hipMalloc(&dResult, sizeof(int) * numTiles));
+    HIP_CHECK(hipMalloc(&dResult, sizeof(int) * 64 /* hardcodes for max size*/));
 
     int* globalMem = NULL;
     if (useGlobalMem) {
-      HIPCHECK(hipMalloc((void**)&globalMem, threadsPerBlock * sizeof(int)));
+      HIP_CHECK(hipMalloc((void**)&globalMem, threadsPerBlock * sizeof(int)));
     }
 
     int* hResult = NULL;
-    HIPCHECK(hipHostMalloc(&hResult, numTiles * sizeof(int), hipHostMallocDefault));
+    HIP_CHECK(hipHostMalloc(&hResult, numTiles * sizeof(int), hipHostMallocDefault));
     memset(hResult, 0, numTiles * sizeof(int));
 
     // Launch Kernel
@@ -308,13 +307,14 @@ static void test_group_partition(unsigned int tileSz, bool useGlobalMem) {
       }
     }
 
-    HIPCHECK(hipMemcpy(hResult, dResult, numTiles * sizeof(int), hipMemcpyDeviceToHost));
+    std::cout << "size::: " << numTiles * sizeof(int) << std::endl;
+    HIP_CHECK(hipMemcpy(hResult, dResult, numTiles * sizeof(int), hipMemcpyDeviceToHost));
     verifyResultsSimpleCoalescedGroups(expectedSum, hResult, numTiles);
     // Free all allocated memory on host and device
-    HIPCHECK(hipFree(dResult));
-    HIPCHECK(hipHostFree(hResult));
+    HIP_CHECK(hipFree(dResult));
+    HIP_CHECK(hipHostFree(hResult));
     if (useGlobalMem) {
-      HIPCHECK(hipFree(globalMem));
+      HIP_CHECK(hipFree(globalMem));
     }
     delete[] expectedSum;
 
@@ -470,8 +470,6 @@ TEST_CASE("Unit_coalesced_groups") {
   HIP_CHECK(hipGetDevice(&deviceId));
   hipDeviceProp_t deviceProperties;
   HIP_CHECK(hipGetDeviceProperties(&deviceProperties, deviceId));
-
-  std::cout << "Now testing coalesced_groups" << '\n' << std::endl;
 
   int *data_to_filter, *filtered_data, nres = 0;
   int *d_data_to_filter, *d_filtered_data, *d_nres;

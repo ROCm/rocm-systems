@@ -211,8 +211,8 @@ void GraphInstantiateWithFlags_StreamCapture(bool deviceContextChg = false) {
 
 
   HIP_CHECK(hipStreamCreate(&stream));
-  constexpr unsigned blocks = 512;
   constexpr unsigned threadsPerBlock = 256;
+  constexpr unsigned blocks = (N / threadsPerBlock) + 1;
 
   HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
   HIP_CHECK(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyHostToDevice, stream));

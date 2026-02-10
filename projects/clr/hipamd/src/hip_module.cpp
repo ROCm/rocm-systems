@@ -815,6 +815,9 @@ hipError_t hipGetFuncBySymbol(hipFunction_t* functionPtr, const void* symbolPtr)
 
 hipError_t hipLaunchKernel_common(const void* hostFunction, dim3 gridDim, dim3 blockDim,
                                   void** args, size_t sharedMemBytes, hipStream_t stream) {
+  if (!hip::isValid(stream)) {
+    return hipErrorInvalidValue;
+  }
   STREAM_CAPTURE(hipLaunchKernel, stream, hostFunction, gridDim, blockDim, args, sharedMemBytes);
   return ihipLaunchKernel(hostFunction, gridDim, blockDim, args, sharedMemBytes, stream, nullptr,
                           nullptr, 0);
@@ -854,7 +857,7 @@ hipError_t hipLaunchCooperativeKernel_common(const void* f, dim3 gridDim, dim3 b
                                              void** kernelParams, uint32_t sharedMemBytes,
                                              hipStream_t hStream) {
   if (!hip::isValid(hStream)) {
-    return hipErrorInvalidHandle;
+    return hipErrorInvalidValue;
   }
 
   STREAM_CAPTURE(hipLaunchCooperativeKernel, hStream, f, gridDim, blockDim, kernelParams,
