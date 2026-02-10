@@ -7489,13 +7489,16 @@ class AMDSMICommands():
             time.sleep(1)
 
 
-    def node(self, args, multiple_devices=False, nodes=None, power_management=None):
+    def node(self, args, multiple_devices=False, nodes=None, power_management=None, base_board_temps=None):
         """List node informations
 
         Args:
             args (Namespace): Namespace containing the parsed CLI args
             multiple_devices (bool, optional): True if checking for multiple devices.
                 Defaults to False.
+            nodes (node_handle, optional): node_handle for target node. Defaults to None.
+            power_management (bool, optional): Value override for args.power_management. Defaults to None.
+            base_board_temps (bool, optional): Value override for args.base_board_temps. Defaults to None.
 
         Returns:
             None: Print output via AMDSMILogger to destination
@@ -7503,8 +7506,20 @@ class AMDSMICommands():
         # Set args.* to passed in arguments
         if nodes:
             args.nodes = nodes
-        if power_management:
-            args.power_management = power_management
+        # Store args that are applicable to the current platform
+        current_platform_args = ["power_management", "base_board_temps"]
+
+        # Check if any node-specific options were passed via command line
+        current_platform_values = []
+        if args.power_management:
+            current_platform_values += [args.power_management]
+        if args.base_board_temps:
+            current_platform_values += [args.base_board_temps]
+
+        # If no node options are passed, enable all by default
+        if not any(current_platform_values):
+            for arg in current_platform_args:
+                setattr(args, arg, True)
         if getattr(args, 'nodes', None) is None:
             args.nodes = self.node_handle
 
@@ -7512,42 +7527,76 @@ class AMDSMICommands():
             self.helpers.check_required_groups(check_render=True, check_video=False)
             self.group_check_printed = True
 
-        # Get NPM info
-        if args.nodes is not None:
-            try:
-                npm_info = amdsmi_interface.amdsmi_get_npm_info(args.nodes)
-            except amdsmi_exception.AmdSmiLibraryException as e:
-                logging.debug("amdsmi_get_npm_info failed: %s", e.get_error_info())
-                npm_info = "N/A"
-        else:
-            logging.debug('No node handle available to query NPM info')
-            npm_info = "N/A"
-
-        # Log outputs
+        # Initialize variables for both power management and base board temps
         npm_dict = {"limit": "N/A", "status": "N/A"}
-        power_unit ="W"
-
+        power_unit = "W"
         limit = "N/A"
-        if isinstance(npm_info, dict):
-            limit = npm_info.get('limit', "N/A")
-            status = npm_info.get('status', npm_info.get('current', "N/A"))
+        base_board_temp_dict = {}
 
-            if limit !="N/A":
-                npm_dict['limit'] = limit
-            status = "DISABLED" if status == amdsmi_interface.amdsmi_wrapper.AMDSMI_NPM_STATUS_DISABLED else "ENABLED"
-            npm_dict.update({"status": status})
+        # Get NPM info
+        if args.power_management:
+            if args.nodes is not None:
+                try:
+                    npm_info = amdsmi_interface.amdsmi_get_npm_info(args.nodes)
+                except amdsmi_exception.AmdSmiLibraryException as e:
+                    logging.debug("amdsmi_get_npm_info failed: %s", e.get_error_info())
+                    npm_info = "N/A"
+            else:
+                logging.debug('No node handle available to query NPM info')
+                npm_info = "N/A"
+
+            if isinstance(npm_info, dict):
+                limit = npm_info.get('limit', "N/A")
+                status = npm_info.get('status', npm_info.get('current', "N/A"))
+
+                if limit !="N/A":
+                    npm_dict['limit'] = limit
+                status = "DISABLED" if status == amdsmi_interface.amdsmi_wrapper.AMDSMI_NPM_STATUS_DISABLED else "ENABLED"
+                npm_dict.update({"status": status})
+
+        # Get base board temperatures using node_handle
+        if args.base_board_temps:
+            if args.nodes is not None:
+                try:
+                    # Get device_handle from node_handle
+                    device_handle = amdsmi_interface.amdsmi_get_device_handle_from_node(args.nodes)
+                    gpu_id = self.helpers.get_gpu_id_from_device_handle(device_handle)
+                    base_board_temp_dict = self.helpers.get_base_board_temperatures(device_handle, gpu_id, self.logger)
+                except amdsmi_exception.AmdSmiLibraryException as e:
+                    logging.debug("Failed to get device handle from node: %s", e.get_error_info())
+                    base_board_temp_dict = {}
+
+        # Print output
         if self.logger.is_human_readable_format() and self.logger.destination == 'stdout':
-            print(f"NODE:\n    POWER_MANAGEMENT:\n        LIMIT: {npm_dict.get('limit', 'N/A')} {power_unit}\n        STATUS: {npm_dict.get('status', 'N/A')}")
+            node_output = ["NODE:"]
+            if args.power_management:
+                node_output.append("    POWER_MANAGEMENT:")
+                node_output.append(f"        LIMIT: {npm_dict.get('limit', 'N/A')} {power_unit}")
+                node_output.append(f"        STATUS: {npm_dict.get('status', 'N/A')}")
+            if args.base_board_temps and base_board_temp_dict:
+                node_output.append("    BASEBOARD:")
+                node_output.append("        TEMPERATURE:")
+                for temp_name, temp_value in base_board_temp_dict.items():
+                    node_output.append(f"            {temp_name.upper()}: {temp_value}")
+            print("\n".join(node_output))
         else:
             if self.logger.is_csv_format():
                 csv_dict = {}
-                csv_dict['limit'] = npm_dict.get('limit', "N/A")
-                csv_dict['status'] = npm_dict.get('status', "N/A")
+                if args.power_management:
+                    csv_dict['limit'] = npm_dict.get('limit', "N/A")
+                    csv_dict['status'] = npm_dict.get('status', "N/A")
+                if args.base_board_temps and base_board_temp_dict:
+                    csv_dict.update(base_board_temp_dict)
                 self.logger.output = csv_dict
             else:
                 # For JSON and human readable format with file output
-                npm_dict["limit"] = self.helpers.unit_format(self.logger, limit, power_unit)
-                self.logger.output = {'node': {'power_management': npm_dict}}
+                node_output = {}
+                if args.power_management:
+                    npm_dict["limit"] = self.helpers.unit_format(self.logger, limit, power_unit)
+                    node_output['power_management'] = npm_dict
+                if args.base_board_temps and base_board_temp_dict:
+                    node_output['base_board'] = {'temperature': base_board_temp_dict}
+                self.logger.output = {'node': node_output}
                 if multiple_devices:
                     self.logger.store_multiple_device_output()
                     return

@@ -50,10 +50,13 @@ from utils.specs import MachineSpecs, generate_machine_specs
 from utils.utils import (
     detect_rocprof,
     get_panel_alias,
+    get_rank,
     get_submodules,
     get_version,
     get_version_display,
     parse_sets_yaml,
+    replace_env,
+    replace_rank,
     set_locale_encoding,
 )
 
@@ -80,6 +83,9 @@ class RocProfCompute:
         )
         setattr(self.__args, "loglevel", self.__loglevel)
         set_locale_encoding()
+
+        if self.__mode == "profile":
+            self.generate_machine_specs()
 
         self.sanitize()
 
@@ -167,13 +173,101 @@ class RocProfCompute:
             )
             self.__args.format_rocprof_output = "csv"
 
+        # Validate name and output directory arguments in profiling mode
+        # Skip validation if only listing metrics or sets
+        if self.__mode == "profile" and (
+            self.__args.list_metrics is None
+            and not getattr(self.__args, "list_available_metrics", False)
+            and not getattr(self.__args, "list_sets", False)
+        ):
+            if self.__args.name is None and self.__args.output_directory == str(
+                Path.cwd() / "workloads"
+            ):
+                # Remove if statement and the else code block in a future release.
+                if self.__args.path == str(Path.cwd() / "workloads"):
+                    console_error("Either --output-directory or --name is required")
+                else:
+                    console_warning(
+                        "--path is deprecated and will be removed in future releases."
+                    )
+
+                if self.__args.subpath != "gpu_model":
+                    console_warning(
+                        "--subpath is deprecated and will be removed in future releases."
+                    )
+
+            if self.__args.name is not None and "/" in self.__args.name:
+                console_error('"/" is not permitted in profile name')
+
+    def replace_parameters_in_output_directory(self) -> None:
+        """Replace parameters in output directory path"""
+        # Add --name to output directory if --output-directory is not given
+        if self.__args.output_directory == str(Path.cwd() / "workloads"):
+            self.__args.output_directory = str(
+                Path(self.__args.output_directory) / self.__args.name
+            )
+
+            # Add MPI rank to workload path if available
+            if get_rank() is not None:
+                self.__args.output_directory = str(
+                    Path(self.__args.output_directory) / f"{get_rank()}"
+                )
+            # OR, Add gpu model name to workload path
+            else:
+                self.__args.output_directory = str(
+                    Path(self.__args.output_directory) / self.__mspec.gpu_model
+                )
+            return  # exit function after this block
+        elif self.__args.name is not None:
+            console_warning(
+                "--name is ignored when --output-directory is explicitly specified."
+            )
+
+        # Add MPI rank to workload path if %rank% is not present in output directory
+        # and rank is available
+        if "%rank%" not in self.__args.output_directory and get_rank() is not None:
+            self.__args.output_directory = str(
+                Path(self.__args.output_directory) / f"{get_rank()}"
+            )
+
+        # Replace parameters with actual values in workload path
+        self.__args.output_directory = self.__args.output_directory.replace(
+            "%hostname%", socket.gethostname()
+        ).replace("%gpumodel%", self.__mspec.gpu_model)
+
+        # Replace environment variables in workload path
+        self.__args.output_directory = replace_env(self.__args.output_directory)
+
+        # Replace %rank% with actual rank value in workload path
+        if "%rank%" in self.__args.output_directory and get_rank() is None:
+            console_warning(
+                "Ignoring %%rank%% placeholder in output directory"
+                " since no MPI rank was detected."
+            )
+        self.__args.output_directory = replace_rank(self.__args.output_directory)
+
     @demarcate
-    def load_soc_specs(self, sysinfo: Optional[dict] = None) -> None:
-        """Load OmniSoC instance for RocProfCompute run"""
-        self.__mspec = generate_machine_specs(self.__args, sysinfo)
+    def generate_machine_specs(self) -> None:
+        """Generate MachineSpecs for RocProfCompute"""
+        self.__mspec = generate_machine_specs(self.__args)
         if self.__args and self.__args.specs:
             print(self.__mspec)
             sys.exit(0)
+
+    @demarcate
+    def load_soc_specs(self, sysinfo: Optional[dict] = None) -> None:
+        """
+        Load OmniSoC instance for RocProfCompute run
+
+        If sysinfo is provided (e.g., in analyze mode from sysinfo.csv),
+        regenerate the MachineSpecs from that data instead of using the
+        current host's characteristics.
+        """
+        if sysinfo is not None:
+            # Regenerate machine specs based on the provided sysinfo rather than
+            # the current host. This is important for analyze mode where we may
+            # be running on a different machine than the one that produced the data.
+            self.__mspec = generate_machine_specs(self.__args, sysinfo)
 
         arch = self.__mspec.gpu_arch
         soc_module = importlib.import_module(f"rocprof_compute_soc.soc_{arch}")
@@ -391,33 +485,30 @@ class RocProfCompute:
     @demarcate
     def run_profiler(self) -> None:
         self.print_graphic()
+
+        # Replace parameters in output directory when either:
+        # 1. --output-directory is explicitly given by user
+        # 2. --path and --output-directory are set to default workload directory.
+        # NOTE: --output-directory is given higher priority than --path
+        # as --path is deprecated and will be removed in future releases.
+        if self.__args.output_directory != str(
+            Path.cwd() / "workloads"
+        ) or self.__args.path == str(Path.cwd() / "workloads"):
+            self.replace_parameters_in_output_directory()
+            # Set path to output_directory for roofline
+            # Remove this while removing roofline from profiling mode
+            self.__args.path = self.__args.output_directory
+
         self.load_soc_specs()
 
         if self.__args.list_metrics is not None or self.__args.list_available_metrics:
             self.list_metrics()
         elif self.__args.list_sets:
             self.list_sets()
-        elif self.__args.name is None:
-            sys.exit("Either --list-name or --name is required")
-
-        if "/" in self.__args.name:
-            console_error('"/" is not permitted in profile name')
 
         # instantiate desired profiler
         profiler = self.create_profiler()
         profiler.sanitize()
-
-        # Add --name to workload path if --path is not given
-        if self.__args.path == str(Path.cwd() / "workloads"):
-            if not hasattr(self.__args, "name") or not self.__args.name:
-                console_error("-n/--name is required")
-            self.__args.path = str(Path(self.__args.path) / self.__args.name)
-            # Add node name to workload path
-            if self.__args.subpath == "node_name":
-                self.__args.path = str(Path(self.__args.path) / socket.gethostname())
-            # OR, Add gpu model name to workload path
-            elif self.__args.subpath == "gpu_model":
-                self.__args.path = str(Path(self.__args.path) / self.__mspec.gpu_model)
 
         # Create workload directory if it does not exist
         p = Path(self.__args.path)
