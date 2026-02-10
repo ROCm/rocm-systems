@@ -177,6 +177,100 @@ typedef struct {
     uint32_t reserved[14];
 } amdsmi_fabric_info_t;
 
+typedef enum {
+    AMDSMI_FW_ID_SMU = 1,                   /**< System Management Unit (power management,
+                                                 clock control, thermal monitoring, etc...) */
+    AMDSMI_FW_ID_FIRST = AMDSMI_FW_ID_SMU,
+    AMDSMI_FW_ID_CP_CE,                     //!< Compute Processor - Command_Engine (fetch, decode, dispatch)
+    AMDSMI_FW_ID_CP_PFP,                    //!< Compute Processor - Pixel Front End Processor (pixelating process)
+    AMDSMI_FW_ID_CP_ME,                     //!< Compute Processor - Micro Engine (specialize processing)
+    AMDSMI_FW_ID_CP_MEC_JT1,                //!< Compute Processor - Micro Engine Controler Job Table 1 (queues, scheduling)
+    AMDSMI_FW_ID_CP_MEC_JT2,                //!< Compute Processor - Micro Engine Controler Job Table 2 (queues, scheduling)
+    AMDSMI_FW_ID_CP_MEC1,                   //!< Compute Processor - Micro Engine Controler 1 (scheduling, managing resources)
+    AMDSMI_FW_ID_CP_MEC2,                   //!< Compute Processor - Micro Engine Controler 2 (scheduling, managing resources)
+    AMDSMI_FW_ID_RLC,                       //!< Rasterizer and L2 Cache (rasterization processs)
+    AMDSMI_FW_ID_SDMA0,                     //!< System Direct Memory Access 0 (high speed data transfers)
+    AMDSMI_FW_ID_SDMA1,                     //!< System Direct Memory Access 1 (high speed data transfers)
+    AMDSMI_FW_ID_SDMA2,                     //!< System Direct Memory Access 2 (high speed data transfers)
+    AMDSMI_FW_ID_SDMA3,                     //!< System Direct Memory Access 3 (high speed data transfers)
+    AMDSMI_FW_ID_SDMA4,                     //!< System Direct Memory Access 4 (high speed data transfers)
+    AMDSMI_FW_ID_SDMA5,                     //!< System Direct Memory Access 5 (high speed data transfers)
+    AMDSMI_FW_ID_SDMA6,                     //!< System Direct Memory Access 6 (high speed data transfers)
+    AMDSMI_FW_ID_SDMA7,                     //!< System Direct Memory Access 7 (high speed data transfers)
+    AMDSMI_FW_ID_VCN,                       //!< Video Core Next (encoding and decoding)
+    AMDSMI_FW_ID_UVD,                       //!< Unified Video Decoder (decode specific video formats)
+    AMDSMI_FW_ID_VCE,                       //!< Video Coding Engine (Encoding video)
+    AMDSMI_FW_ID_ISP,                       //!< Image Signal Processor (processing raw image data from sensors)
+    AMDSMI_FW_ID_DMCU_ERAM,                 //!< Digital Micro Controller Unit - Embedded RAM (memory used by DMU)
+    AMDSMI_FW_ID_DMCU_ISR,                  //!< Digital Micro Controller Unit - Interrupt Service Routine (interrupt handlers)
+    AMDSMI_FW_ID_RLC_RESTORE_LIST_GPM_MEM,  //!< Rasterizier and L2 Cache Restore List Graphics Processor Memory
+    AMDSMI_FW_ID_RLC_RESTORE_LIST_SRM_MEM,  //!< Rasterizier and L2 Cache Restore List System RAM Memory
+    AMDSMI_FW_ID_RLC_RESTORE_LIST_CNTL,     //!< Rasterizier and L2 Cache Restore List Control
+    AMDSMI_FW_ID_RLC_V,                     //!< Rasterizier and L2 Cache Virtual memory
+    AMDSMI_FW_ID_MMSCH,                     //!< Multi-Media Shader Hardware Scheduler
+    AMDSMI_FW_ID_PSP_SYSDRV,                //!< Platform Security Processor System Driver
+    AMDSMI_FW_ID_PSP_SOSDRV,                //!< Platform Security Processor Secure Operating System Driver
+    AMDSMI_FW_ID_PSP_TOC,                   //!< Platform Security Processor Table of Contents
+    AMDSMI_FW_ID_PSP_KEYDB,                 //!< Platform Security Processor Table of Contents
+    AMDSMI_FW_ID_DFC,                       //!< Data Fabric Controler (bandwidth and coherency)
+    AMDSMI_FW_ID_PSP_SPL,                   //!< Platform Security Processor Secure Program Loader
+    AMDSMI_FW_ID_DRV_CAP,                   //!< Driver Capabilities (capabilities, features)
+    AMDSMI_FW_ID_MC,                        //!< Memory Contoller (RAM and VRAM)
+    AMDSMI_FW_ID_PSP_BL,                    //!< Platform Security Processor Bootloader (initial firmware)
+    AMDSMI_FW_ID_CP_PM4,                    //!< Compute Processor Packet Processor 4 (processing command packets)
+    AMDSMI_FW_ID_RLC_P,                     //!< Rasterizier and L2 Cache Partition
+    AMDSMI_FW_ID_SEC_POLICY_STAGE2,         //!< Security Policy Stage 2 (security features)
+    AMDSMI_FW_ID_REG_ACCESS_WHITELIST,      //!< Register Access Whitelist (Prevent unathorizied access)
+    AMDSMI_FW_ID_IMU_DRAM,                  //!< Input/Output Memory Management Unit - Dynamic RAM
+    AMDSMI_FW_ID_IMU_IRAM,                  //!< Input/Output Memory Management Unit - Instruction RAM
+    AMDSMI_FW_ID_SDMA_TH0,                  //!< System Direct Memory Access - Thread Handler 0
+    AMDSMI_FW_ID_SDMA_TH1,                  //!< System Direct Memory Access - Thread Handler 1
+    AMDSMI_FW_ID_CP_MES,                    //!< Compute Processor - Micro Engine Scheduler
+    AMDSMI_FW_ID_MES_KIQ,                   //!< Micro Engine Scheduler - Kernel Indirect Queue
+    AMDSMI_FW_ID_MES_STACK,                 //!< Micro Engine Scheduler - Stack
+    AMDSMI_FW_ID_MES_THREAD1,               //!< Micro Engine Scheduler - Thread 1
+    AMDSMI_FW_ID_MES_THREAD1_STACK,         //!< Micro Engine Scheduler - Thread 1 Stack
+    AMDSMI_FW_ID_RLX6,                      //!< Hardware Block RLX6
+    AMDSMI_FW_ID_RLX6_DRAM_BOOT,            //!< Hardware Block RLX6 - Dynamic Ram Boot
+    AMDSMI_FW_ID_RS64_ME,                   //!< Hardware Block RS64 - Micro Engine
+    AMDSMI_FW_ID_RS64_ME_P0_DATA,           //!< Hardware Block RS64 - Micro Engine Partition 0 Data
+    AMDSMI_FW_ID_RS64_ME_P1_DATA,           //!< Hardware Block RS64 - Micro Engine Partition 1 Data
+    AMDSMI_FW_ID_RS64_PFP,                  //!< Hardware Block RS64 - Pixel Front End Processor
+    AMDSMI_FW_ID_RS64_PFP_P0_DATA,          //!< Hardware Block RS64 - Pixel Front End Processor Partition 0 Data
+    AMDSMI_FW_ID_RS64_PFP_P1_DATA,          //!< Hardware Block RS64 - Pixel Front End Processor Partition 1 Data
+    AMDSMI_FW_ID_RS64_MEC,                  //!< Hardware Block RS64 - Micro Engine Controller
+    AMDSMI_FW_ID_RS64_MEC_P0_DATA,          //!< Hardware Block RS64 - Micro Engine Controller Partition 0 Data
+    AMDSMI_FW_ID_RS64_MEC_P1_DATA,          //!< Hardware Block RS64 - Micro Engine Controller Partition 1 Data
+    AMDSMI_FW_ID_RS64_MEC_P2_DATA,          //!< Hardware Block RS64 - Micro Engine Controller Partition 2 Data
+    AMDSMI_FW_ID_RS64_MEC_P3_DATA,          //!< Hardware Block RS64 - Micro Engine Controller Partition 3 Data
+    AMDSMI_FW_ID_PPTABLE,                   //!< Power Policy Table (power management policies)
+    AMDSMI_FW_ID_PSP_SOC,                   //!< Platform Security Processor - System On a Chip
+    AMDSMI_FW_ID_PSP_DBG,                   //!< Platform Security Processor - Debug
+    AMDSMI_FW_ID_PSP_INTF,                  //!< Platform Security Processor - Interface
+    AMDSMI_FW_ID_RLX6_CORE1,                //!< Hardware Block RLX6 - Core 1
+    AMDSMI_FW_ID_RLX6_DRAM_BOOT_CORE1,      //!< Hardware Block RLX6 Core 1 - Dynamic RAM Boot
+    AMDSMI_FW_ID_RLCV_LX7,                  //!< Hardware Block RLCV - Subsystem LX7
+    AMDSMI_FW_ID_RLC_SAVE_RESTORE_LIST,     //!< Rasterizier and L2 Cache - Save Restore List
+    AMDSMI_FW_ID_ASD,                       //!< Asynchronous Shader Dispatcher
+    AMDSMI_FW_ID_TA_RAS,                    //!< Trusted Applications - Reliablity Availability and Serviceability
+    AMDSMI_FW_ID_TA_XGMI,                   //!< Trusted Applications - Reliablity XGMI
+    AMDSMI_FW_ID_RLC_SRLG,                  //!< Rasterizier and L2 Cache - Shared Resource Local Group
+    AMDSMI_FW_ID_RLC_SRLS,                  //!< Rasterizier and L2 Cache - Shared Resource Local Segment
+    AMDSMI_FW_ID_PM,                        //!< Power Management Firmware
+    AMDSMI_FW_ID_DMCU,                      //!< Display Micro-Controller Unit
+    AMDSMI_FW_ID_PLDM_BUNDLE,               //!< Platform Level Data Model Firmware Bundle
+    AMDSMI_FW_ID__MAX
+} amdsmi_fw_block_t;
+typedef struct {
+    uint8_t num_fw_info;
+    struct fw_info_list_ {
+        amdsmi_fw_block_t fw_id;
+        uint64_t fw_version;
+        uint64_t reserved[2];
+    } fw_info_list[AMDSMI_FW_ID__MAX];
+    uint32_t reserved[7];
+} amdsmi_fw_info_t;
+
 /** @} End rcclFabricCompat */
 
 
@@ -403,7 +497,7 @@ ncclResult_t amd_smi_getNumDevice(uint32_t* num_devs);
 ncclResult_t amd_smi_getDevicePciBusIdString(uint32_t deviceIndex, char* pciBusId, size_t len);
 ncclResult_t amd_smi_getDeviceIndexByPciBusId(const char* pciBusId, uint32_t* deviceIndex);
 ncclResult_t amd_smi_getLinkInfo(int srcDev, int dstDev, amdsmi_link_type_t* type, int *hops, int *count);
-
+ncclResult_t amd_smi_getFirmwareVersion(uint32_t deviceIndex, uint64_t* fwVersion);
 /*************************************************************************
  * UALoE Fabric Wrapper Functions
  *

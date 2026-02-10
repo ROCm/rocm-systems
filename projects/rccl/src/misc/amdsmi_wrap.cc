@@ -8,7 +8,10 @@
 #include <vector>
 #include <cstring>
 #include <mutex>
-
+#include "rocm_smi/rocm_smi.h"
+#ifdef HAVE_ROCM_SMI64CONFIG
+#include "rocm_smi/rocm_smi64Config.h"
+#endif
 static int is_wsl2 = -1;
 
 #define AMDSMICHECK(cmd) do {                \
@@ -24,7 +27,7 @@ static int is_wsl2 = -1;
 #define ARSMICHECK(cmd) do {         \
   int ret = cmd;                     \
   if( ret != 0 ) {                   \
-    ERROR("ARSMI failure: %d", ret);   \
+    ERROR("ARSMI failure: %d", ret); \
     return ncclInternalError;        \
   }                                  \
 } while(false)
@@ -74,6 +77,8 @@ namespace {
   RCCL_AMDSMI_FN(amdsmi_get_fabric_telemetry_data, amdsmi_status_t, (amdsmi_processor_handle processor_handle, amdsmi_fabric_telemetry_t *telemetry))
   RCCL_AMDSMI_FN(amdsmi_free_fabric_telemetry, amdsmi_status_t, (amdsmi_processor_handle processor_handle, amdsmi_fabric_telemetry_t *telemetry))
   RCCL_AMDSMI_FN(amdsmi_fabric_telem_id_to_string, const char*, (uint64_t telem_id))
+  // Firmware info
+  RCCL_AMDSMI_FN(amdsmi_get_fw_info, amdsmi_status_t, (amdsmi_processor_handle processor_handle, amdsmi_fw_info_t *info))
 }
 
 /*************************************************************************
@@ -174,6 +179,7 @@ ncclResult_t amd_smi_init() {
         {(void**)&pfn_amdsmi_alloc_fabric_telemetry, "amdsmi_alloc_fabric_telemetry"},
         {(void**)&pfn_amdsmi_get_fabric_telemetry_data, "amdsmi_get_fabric_telemetry_data"},
         {(void**)&pfn_amdsmi_free_fabric_telemetry, "amdsmi_free_fabric_telemetry"},
+        {(void**)&pfn_amdsmi_get_fw_info, "amdsmi_get_fw_info"},
       };
       for(Symbol sym: symbols) {
         *sym.ppfn = dlsym(libhandle, sym.name);
@@ -457,6 +463,43 @@ ncclResult_t amd_smi_getLinkInfo(int srcIndex, int dstIndex, amdsmi_link_type_t*
     }
   }
 
+  return ncclSuccess;
+}
+
+ncclResult_t amd_smi_getFirmwareVersion(uint32_t deviceIndex, uint64_t* fwVersion) {
+  if (__atomic_load_n(&is_wsl2, __ATOMIC_ACQUIRE)) {
+    *fwVersion = 0;
+    return ncclSuccess;  // Firmware query not supported on WSL2
+  }
+
+  if (rcclParamUseAmdSmiLib()) {
+    // Use AMD SMI library
+    amdsmi_processor_handle procHandle;
+    NCCLCHECK(getProcessorHandle(deviceIndex, &procHandle));
+
+    if (pfn_amdsmi_get_fw_info == nullptr) {
+      ERROR("amdsmi_get_fw_info symbol not loaded");
+      return ncclInternalError;
+    }
+
+    amdsmi_fw_info_t info;
+    memset(&info, 0, sizeof(info));
+    AMDSMITRY(amdsmi_get_fw_info, procHandle, &info);
+    *fwVersion = info.fw_info_list[0].fw_version;
+  } else {
+    rsmi_status_t ret;
+    ret = rsmi_init(0);
+    if (ret != RSMI_STATUS_SUCCESS) {
+      ERROR("Could not initialize rocm-smi");
+      return ncclInternalError;
+    }
+
+    ret = rsmi_dev_firmware_version_get(0, RSMI_FW_BLOCK_MEC, fwVersion);
+    if (ret != RSMI_STATUS_SUCCESS) {
+      ERROR("Could not query firmware info using rocm-smi");
+      return ncclInternalError;
+    }
+  }
   return ncclSuccess;
 }
 
