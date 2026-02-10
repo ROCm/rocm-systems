@@ -256,6 +256,8 @@ WriteInterceptor(const void* packets,
 
     const auto* packets_arr         = static_cast<const rocprofiler_packet*>(packets);
     auto        transformed_packets = std::vector<rocprofiler_packet>{};
+    // Pre-allocate to avoid reallocation in hot path
+    transformed_packets.reserve(pkt_count + 16);  // +16 for potential barrier packets
 
     // Searching accross all the packets given during this write
     for(size_t i = 0; i < pkt_count; ++i)
