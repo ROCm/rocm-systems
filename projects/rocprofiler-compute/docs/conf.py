@@ -62,7 +62,7 @@ html_css_files = ["o_custom.css"]
 
 # Load per-arch metrics YAMLs
 arch_metrics = {}
-for arch in ['gfx908', 'gfx90a', 'gfx942', 'gfx950']:
+for arch in ["gfx908", "gfx90a", "gfx942", "gfx950"]:
     with open(f"data/metrics/{arch}_metrics.yaml") as f:
         arch_metrics[arch] = yaml.safe_load(f)
 
@@ -107,7 +107,7 @@ section_map = {
 # Generate per-arch jinja contexts (4 contexts per section)
 jinja_contexts = {}
 for context_name, section_name in section_map.items():
-    for arch in ['gfx908', 'gfx90a', 'gfx942', 'gfx950']:
+    for arch in ["gfx908", "gfx90a", "gfx942", "gfx950"]:
         # Handle missing sections in gfx908 (only 30 sections vs 34)
         if section_name in arch_metrics[arch]:
             jinja_contexts[f"{context_name}-{arch}"] = {

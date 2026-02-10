@@ -241,7 +241,7 @@ def update_per_arch_metrics_file(
         for metric_name, desc_data in metrics.items():
             entry = {
                 "plain": desc_data.get("plain", ""),
-                "rst": desc_data.get("rst", "")
+                "rst": desc_data.get("rst", ""),
             }
             if "unit" in desc_data:
                 entry["unit"] = desc_data["unit"]
@@ -260,10 +260,7 @@ def load_existing_per_arch(arch_name: str, per_arch_dir: Union[str, Path]) -> di
     return {}
 
 
-def preserve_manual_rst_edits(
-    new_descriptions: dict,
-    existing_per_arch: dict
-) -> dict:
+def preserve_manual_rst_edits(new_descriptions: dict, existing_per_arch: dict) -> dict:
     """
     Preserve manually edited RST and existing metrics from per-arch YAMLs.
 
@@ -285,18 +282,19 @@ def preserve_manual_rst_edits(
                 continue
 
             existing_data = existing_per_arch[section][metric_name]
-            existing_rst = existing_data.get('rst', '')
-            existing_plain = existing_data.get('plain', '')
+            existing_rst = existing_data.get("rst", "")
+            existing_plain = existing_data.get("plain", "")
 
             # If RST differs from plain, it was manually edited → preserve it
             if existing_rst and existing_rst != existing_plain:
-                new_data['rst'] = existing_rst  # PRESERVE manual edit
+                new_data["rst"] = existing_rst  # PRESERVE manual edit
                 # Don't print - this is routine
 
             # Otherwise, use new auto-generated RST (plain→rst conversion)
 
-    # Second pass: Preserve metrics that exist in per-arch but not extracted from panels
-    # (e.g., metrics defined in panel tables but lacking descriptions in metrics_description)
+    # Second pass: Preserve metrics that exist in per-arch but not extracted
+    # from panels (e.g., metrics defined in panel tables but lacking
+    # descriptions in metrics_description)
     preserved_count = 0
     for section, existing_metrics in existing_per_arch.items():
         if section not in new_descriptions:
@@ -307,12 +305,16 @@ def preserve_manual_rst_edits(
             # Check for individual metrics missing from panel extraction
             for metric_name, existing_data in existing_metrics.items():
                 if metric_name not in new_descriptions[section]:
-                    # Metric exists in per-arch but not in panel extraction - preserve it
+                    # Metric exists in per-arch but not in panel extraction
+                    # preserve it
                     new_descriptions[section][metric_name] = existing_data
                     preserved_count += 1
 
     if preserved_count > 0:
-        print(f"  Preserved {preserved_count} metrics from per-arch YAML (not in panel descriptions)")
+        print(
+            f"  Preserved {preserved_count} metrics from per-arch YAML "
+            "(not in panel descriptions)"
+        )
 
     return new_descriptions
 
@@ -320,7 +322,7 @@ def preserve_manual_rst_edits(
 def generate_docs_from_per_arch(
     per_arch_dir: Union[str, Path],
     docs_output_dir: Union[str, Path],
-    target_archs: list[str] = None
+    target_archs: list[str] = None,
 ) -> bool:
     """
     Generate per-arch documentation YAMLs from per-arch metric definitions.
@@ -334,7 +336,7 @@ def generate_docs_from_per_arch(
     """
     if target_archs is None:
         # Default: skip gfx940, gfx941 (redundant)
-        target_archs = ['gfx908', 'gfx90a', 'gfx942', 'gfx950']
+        target_archs = ["gfx908", "gfx90a", "gfx942", "gfx950"]
 
     docs_output_dir = Path(docs_output_dir)
     docs_output_dir.mkdir(parents=True, exist_ok=True)
@@ -358,10 +360,10 @@ def generate_docs_from_per_arch(
             for metric_name, metric_info in metrics.items():
                 # Extract only RST and unit (drop 'plain' text)
                 entry = {}
-                if 'rst' in metric_info:
-                    entry['rst'] = metric_info['rst']
-                if 'unit' in metric_info:
-                    entry['unit'] = metric_info['unit']
+                if "rst" in metric_info:
+                    entry["rst"] = metric_info["rst"]
+                if "unit" in metric_info:
+                    entry["unit"] = metric_info["unit"]
                 docs_data[section][metric_name] = entry
 
         cm_utils.save_yaml(docs_data, dst_file)
@@ -469,9 +471,11 @@ def main() -> int:
     parser.add_argument(
         "--generate-docs",
         action="store_true",
-        help="Generate per-arch docs YAMLs from per-arch definitions"
+        help="Generate per-arch docs YAMLs from per-arch definitions",
     )
-    parser.add_argument("configs_dir", nargs='?', help="Path to analysis_configs directory")
+    parser.add_argument(
+        "configs_dir", nargs="?", help="Path to analysis_configs directory"
+    )
     parser.add_argument(
         "--per-arch-output",
         default="tools/per_arch_metric_definitions",
@@ -480,7 +484,7 @@ def main() -> int:
     parser.add_argument(
         "--docs-output-dir",
         default="docs/data/metrics",
-        help="Output directory for per-arch docs files"
+        help="Output directory for per-arch docs files",
     )
 
     args = parser.parse_args()
@@ -489,7 +493,7 @@ def main() -> int:
         ok = generate_docs_from_per_arch(
             args.per_arch_output,
             args.docs_output_dir,
-            target_archs=['gfx908', 'gfx90a', 'gfx942', 'gfx950']
+            target_archs=["gfx908", "gfx90a", "gfx942", "gfx950"],
         )
         return 0 if ok else 1
 
