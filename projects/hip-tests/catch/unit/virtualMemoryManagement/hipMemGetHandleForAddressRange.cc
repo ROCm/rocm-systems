@@ -51,7 +51,7 @@ size_t GetGranularity(hipDevice_t device) {
   size_t granularity = 0;
   HIP_CHECK(
       hipMemGetAllocationGranularity(&granularity, &prop, hipMemAllocationGranularityMinimum));
-  assert(granularity > 0);
+  REQUIRE(granularity > 0);
   return granularity;
 }
 
@@ -198,7 +198,6 @@ void* createDeviceMemoryAndFillData(int size) {
 hipDeviceptr_t createVirtualMemoryAndFillData(int size, int* reservedAddrSize, int device = 0) {
   size_t granularity = GetGranularity(device);
   if (granularity <= 0) {
-    std::cout << "Invalid Granularity" << std::endl;
     return 0;
   }
 
@@ -240,7 +239,6 @@ bool validateHandle(int handle, int size, int device = 0) {
 
   size_t granularity = GetGranularity(device);
   if (granularity <= 0) {
-    std::cout << "Invalid Granularity" << std::endl;
     return false;
   }
   int sizeBytes = size * sizeof(int);

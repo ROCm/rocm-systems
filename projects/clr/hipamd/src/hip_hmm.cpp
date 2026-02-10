@@ -177,11 +177,9 @@ hipError_t hipMemRangeGetAttributes(void** data, size_t* data_sizes,
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  if (*data_sizes > 0) {
-    for (int i = 0; i < *data_sizes; i++) {
-      if (!data[i]) {
-        HIP_RETURN(hipErrorInvalidValue);
-      }
+  for (int i = 0; i < num_attributes; i++) {
+    if (!data[i]) {
+      HIP_RETURN(hipErrorInvalidValue);
     }
   }
 
