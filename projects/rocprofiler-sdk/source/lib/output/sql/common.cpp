@@ -34,6 +34,7 @@
 #include <fmt/ranges.h>
 #include <sqlite3.h>
 
+#include <cctype>
 #include <iomanip>
 #include <sstream>
 #include <thread>
@@ -96,7 +97,16 @@ execute_raw_sql_statements_impl(sqlite3*         conn,
                                 void*            data,
                                 int              line)
 {
-    int64_t row_id = -1;
+    int64_t row_id   = -1;
+    auto    is_blank = [](std::string_view value) {
+        for(char c : value)
+        {
+            if(!std::isspace(static_cast<unsigned char>(c))) return false;
+        }
+        return true;
+    };
+
+    if(stmts.empty() || is_blank(stmts)) return row_id;
     // NOLINTNEXTLINE(performance-for-range-copy)
     for(auto stmt : sdk::parse::tokenize(stmts, ";"))
     {
