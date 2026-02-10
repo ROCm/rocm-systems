@@ -286,9 +286,10 @@ TEST_CASE("Unit_hipMemRangeGetAttributes_NegativeTst") {
         IfTestPassed = false;
       }
     }
-    for (int i = 0; i < 4; ++i) {
-      delete Outpt[i];
-    }
+    delete Outpt[0];
+    delete Outpt[1];
+    delete[] Outpt[2];
+    delete Outpt[3];
     REQUIRE(IfTestPassed);
 
     HIP_CHECK(hipFree(Hmm));

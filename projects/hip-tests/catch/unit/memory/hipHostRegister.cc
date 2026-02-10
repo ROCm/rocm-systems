@@ -57,7 +57,7 @@ static constexpr auto SMALL_CHUNK_LEN{10 * LEN};
 
 template <typename T> __global__ void Inc(T* Ad) {
   int tx = threadIdx.x + blockIdx.x * blockDim.x;
-  Ad[tx] = Ad[tx] + static_cast<T>(1);
+  atomicAdd(Ad + tx, static_cast<T>(1));
 }
 
 template <typename T>
@@ -981,7 +981,7 @@ TEMPLATE_TEST_CASE("Unit_hipHostRegister_Negative", "", int, float, double) {
   REQUIRE(hostMemFree > 0);
 
   // which is the limiter cpu or gpu
-  size_t memFree = (std::max)(devMemFree, hostMemFree);
+  size_t memFree = std::min(devMemFree, hostMemFree);
 
   SECTION("hipHostRegister Negative Test - invalid memory size") {
     HIP_CHECK_ERROR(hipHostRegister(hostPtr, memFree, 0), hipErrorInvalidValue);

@@ -418,9 +418,6 @@ TEST_CASE("Unit_hipMallocAsync_Multidevice_MultiStream", "[multigpu]") {
   // Deallocate resources in each device
   for (int idx = 0; idx < num_devices; idx++) {
     HIP_CHECK(hipSetDevice(idx));
-    // Destroy resources
-    tesObjBuf[streamPerAsic * idx]->freeHostBuf();
-    tesObjBuf[streamPerAsic * idx + 1]->freeHostBuf();
     HIP_CHECK(hipStreamDestroy(stream_buf[streamPerAsic * idx]));
     HIP_CHECK(hipStreamDestroy(stream_buf[streamPerAsic * idx + 1]));
     delete tesObjBuf[streamPerAsic * idx];

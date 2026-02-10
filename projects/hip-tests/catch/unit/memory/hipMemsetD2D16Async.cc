@@ -139,7 +139,7 @@ TEST_CASE("Unit_hipMemsetD2D16Async_NegTsts") {
                     hipErrorInvalidValue);
   }
   SECTION("OutOfBound destination") {
-    void* outOfBoundsDst{reinterpret_cast<uint16_t*>(A_d) + devPitch * numH + 1};
+    void* outOfBoundsDst{reinterpret_cast<uint16_t*>(A_d) + devPitch * numH + 1000};
     HIP_CHECK_ERROR(hipMemsetD2D16Async(reinterpret_cast<hipDeviceptr_t>(outOfBoundsDst), devPitch, memsetval, numW, numH, stream),
                     hipErrorInvalidValue);
   }

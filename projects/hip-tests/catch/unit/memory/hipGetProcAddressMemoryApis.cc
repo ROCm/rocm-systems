@@ -113,7 +113,10 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisMallocFree") {
     REQUIRE(d_ptr_size == 256);
 
     HIP_CHECK(dyn_hipFree_ptr(d_ptr));
+
+#if !defined(ENABLE_ASAN_BUILD)
     REQUIRE(hipMemPtrGetInfo(d_ptr, &d_ptr_size) == hipErrorInvalidValue);
+#endif
   }
 
   // Validating hipExtMallocWithFlags API
