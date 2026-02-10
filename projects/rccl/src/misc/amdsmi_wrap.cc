@@ -8,9 +8,9 @@
 #include <vector>
 #include <cstring>
 #include <mutex>
-#include "rocm_smi/rocm_smi.h"
+// #include "rocm_smi/rocm_smi.h"  // Disabled to avoid conflict with libamd_smi
 #ifdef HAVE_ROCM_SMI64CONFIG
-#include "rocm_smi/rocm_smi64Config.h"
+// #include "rocm_smi/rocm_smi64Config.h"
 #endif
 static int is_wsl2 = -1;
 
@@ -488,18 +488,9 @@ ncclResult_t amd_smi_getFirmwareVersion(uint32_t deviceIndex, uint64_t* fwVersio
     AMDSMITRY(amdsmi_get_fw_info, procHandle, &info);
     *fwVersion = info.fw_info_list[0].fw_version;
   } else {
-    rsmi_status_t ret;
-    ret = rsmi_init(0);
-    if (ret != RSMI_STATUS_SUCCESS) {
-      ERROR("Could not initialize rocm-smi");
-      return ncclInternalError;
-    }
-
-    ret = rsmi_dev_firmware_version_get(0, RSMI_FW_BLOCK_MEC, fwVersion);
-    if (ret != RSMI_STATUS_SUCCESS) {
-      ERROR("Could not query firmware info using rocm-smi");
-      return ncclInternalError;
-    }
+    // Use ARSMI fallback - avoid direct rsmi calls that can conflict with libamd_smi.so
+    // ARSMI doesn't have a firmware query API, so return 0
+    *fwVersion = 0;
   }
   return ncclSuccess;
 }
