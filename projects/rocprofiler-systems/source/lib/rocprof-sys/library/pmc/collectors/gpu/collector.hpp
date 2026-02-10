@@ -269,6 +269,13 @@ private:
                     driver->get_processor_type(processor_handle, &processor_type),
                     "Failed to get processor type!");
 
+                // Only process AMD GPU devices, skip other processor types
+                if(processor_type != AMDSMI_PROCESSOR_TYPE_AMD_GPU)
+                {
+                    index++;
+                    continue;
+                }
+
                 auto device = std::make_shared<device_t>(driver, processor_handle,
                                                          processor_type, index);
 
