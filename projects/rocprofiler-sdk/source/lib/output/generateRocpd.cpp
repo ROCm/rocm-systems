@@ -61,6 +61,7 @@
 #include <unistd.h>
 
 #include <dlfcn.h>
+#include <array>
 #include <atomic>
 #include <cctype>
 #include <cstring>
@@ -1474,12 +1475,16 @@ write_rocpd(
     auto insert_pc_sampling_data = [conn,
                                     node_id,
                                     this_pid,
+                                    &dispatch_to_evt_id,
                                     &dispatch_to_agent_id,
+                                    &string_entries,
                                     &get_instruction_info](const auto&        pc_sampling_gen,
                                                            const std::string& sampling_method) {
         if(pc_sampling_gen.empty()) return;
 
         auto _sqlgenperf_rocpd = get_simple_timer("rocpd_gpu_pc_sample");
+        
+        constexpr size_t kBatchSizeCap = 256;
 
         std::unordered_map<int64_t, std::pair<std::string, std::string>> instruction_cache;
 
@@ -1758,35 +1763,282 @@ write_rocpd(
         static uint64_t ext_schema_id = 0;
         if(ext_schema_id == 0) ext_schema_id = register_blob_schema();
 
-        auto insert_stmt_sql = fmt::format(
-            "INSERT INTO {} (timestamp, nid, pid, tid, agent_id, dispatch_id, stack_id, "
-            "parent_stack_id, correlation_id, sampling_method, exec_mask, instruction, "
-            "instruction_comment, code_object_id, code_object_offset, wave_in_group, "
-            "workgroup_id_x, workgroup_id_y, workgroup_id_z, wave_issued, inst_type, "
-            "stall_reason, wave_count, extdata_schema_id, extdata_blob) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?);",
-            replace_uuid("rocpd_gpu_pc_sample{{uuid}}"));
+        const auto pc_sample_name_id = string_entries.at("pc_sample");
+        const auto is_stochastic     = (sampling_method == "stochastic");
 
-        sqlite3_stmt* insert_stmt = nullptr;
-        SQLITE3_CHECK(
-            sqlite3_prepare_v2(conn, insert_stmt_sql.c_str(), -1, &insert_stmt, nullptr));
-        auto _finalize = common::scope_destructor{[&]() { sqlite3_finalize(insert_stmt); }};
-
-        auto bind_text_or_null = [](sqlite3_stmt* stmt, int idx, const std::string& value) {
-            if(value.empty())
-                sqlite3_bind_null(stmt, idx);
-            else
-                sqlite3_bind_text(stmt, idx, value.c_str(), -1, SQLITE_TRANSIENT);
+        struct event_row
+        {
+            uint64_t                id = 0;
+            uint64_t                category_id = 0;
+            uint64_t                stack_id = 0;
+            uint64_t                parent_stack_id = 0;
+            uint64_t                correlation_id = 0;
+            std::optional<uint64_t> parent_id = std::nullopt;
         };
 
-        auto bind_int_or_null = [](sqlite3_stmt* stmt, int idx, std::optional<int64_t> value) {
+        struct sample_row
+        {
+            uint64_t track_id = 0;
+            uint64_t timestamp = 0;
+            uint64_t event_id = 0;
+        };
+
+        struct pc_sample_row
+        {
+            uint64_t timestamp = 0;
+            uint64_t nid = 0;
+            uint64_t pid = 0;
+            uint64_t tid = 0;
+            std::optional<uint64_t> agent_id = std::nullopt;
+            uint64_t dispatch_id = 0;
+            uint64_t stack_id = 0;
+            uint64_t parent_stack_id = 0;
+            uint64_t correlation_id = 0;
+            int64_t exec_mask = 0;
+            std::string instruction;
+            std::string instruction_comment;
+            uint64_t code_object_id = 0;
+            uint64_t code_object_offset = 0;
+            uint64_t wave_in_group = 0;
+            uint64_t workgroup_id_x = 0;
+            uint64_t workgroup_id_y = 0;
+            uint64_t workgroup_id_z = 0;
+            std::optional<int64_t> wave_issued = std::nullopt;
+            std::string inst_type;
+            std::string stall_reason;
+            std::optional<int64_t> wave_count = std::nullopt;
+            std::array<uint8_t, sizeof(pc_sample_extdata_v1)> ext_blob = {};
+        };
+
+        constexpr size_t kEventCols = 6;
+        constexpr size_t kSampleCols = 3;
+        constexpr size_t kPcSampleCols = 25;
+
+        const auto max_vars = sqlite3_limit(conn, SQLITE_LIMIT_VARIABLE_NUMBER, -1);
+        const auto batch_by_limit =
+            (max_vars > 0) ? static_cast<size_t>(max_vars) / kPcSampleCols : size_t{1};
+        const auto kBatchSize =
+            std::max<size_t>(1, std::min(kBatchSizeCap, batch_by_limit));
+
+        auto event_rows = std::vector<event_row>{};
+        auto sample_rows = std::vector<sample_row>{};
+        auto pc_sample_rows = std::vector<pc_sample_row>{};
+
+        event_rows.reserve(kBatchSize);
+        sample_rows.reserve(kBatchSize);
+        pc_sample_rows.reserve(kBatchSize);
+
+        auto build_insert_sql = [&](std::string_view table,
+                                    std::string_view columns,
+                                    size_t           column_count,
+                                    size_t           row_count) {
+            auto values = std::string{};
+            values.reserve(row_count * column_count * 2);
+            for(size_t row = 0; row < row_count; ++row)
+            {
+                if(row > 0) values += ",";
+                values += "(";
+                for(size_t col = 0; col < column_count; ++col)
+                {
+                    if(col > 0) values += ",";
+                    values += "?";
+                }
+                values += ")";
+            }
+            return fmt::format("INSERT INTO {} ({}) VALUES {};",
+                               replace_uuid(table),
+                               columns,
+                               values);
+        };
+
+        auto prepare_stmt = [&](const std::string& sql) {
+            sqlite3_stmt* stmt = nullptr;
+            auto          rc   = sqlite3_prepare_v2(conn, sql.c_str(), -1, &stmt, nullptr);
+            if(rc != SQLITE_OK)
+            {
+                ROCP_FATAL << "sqlite3_prepare_v2 failed: " << sqlite3_errmsg(conn)
+                           << "\n\tSQL: " << sql;
+            }
+            return stmt;
+        };
+
+        const auto event_columns =
+            std::string_view{"id, category_id, stack_id, parent_stack_id, correlation_id, "
+                              "parent_id"};
+        const auto sample_columns = std::string_view{"track_id, timestamp, event_id"};
+        const auto pc_sample_columns =
+            std::string_view{"timestamp, nid, pid, tid, agent_id, dispatch_id, stack_id, "
+                              "parent_stack_id, correlation_id, sampling_method, exec_mask, "
+                              "instruction, instruction_comment, code_object_id, "
+                              "code_object_offset, wave_in_group, workgroup_id_x, "
+                              "workgroup_id_y, workgroup_id_z, wave_issued, inst_type, "
+                              "stall_reason, wave_count, extdata_schema_id, extdata_blob"};
+
+        auto event_stmt_sql =
+            build_insert_sql("rocpd_event{{uuid}}", event_columns, kEventCols, kBatchSize);
+        auto sample_stmt_sql =
+            build_insert_sql("rocpd_sample{{uuid}}", sample_columns, kSampleCols, kBatchSize);
+        auto pc_sample_stmt_sql = build_insert_sql("rocpd_gpu_pc_sample{{uuid}}",
+                                                   pc_sample_columns,
+                                                   kPcSampleCols,
+                                                   kBatchSize);
+
+        auto* event_stmt = prepare_stmt(event_stmt_sql);
+        auto* sample_stmt = prepare_stmt(sample_stmt_sql);
+        auto* pc_sample_stmt = prepare_stmt(pc_sample_stmt_sql);
+
+        auto _finalize_event = common::scope_destructor{[&]() { sqlite3_finalize(event_stmt); }};
+        auto _finalize_sample =
+            common::scope_destructor{[&]() { sqlite3_finalize(sample_stmt); }};
+        auto _finalize_pc_sample =
+            common::scope_destructor{[&]() { sqlite3_finalize(pc_sample_stmt); }};
+
+        auto bind_int64_or_null = [](sqlite3_stmt* stmt, int idx, std::optional<int64_t> value) {
             if(value)
                 sqlite3_bind_int64(stmt, idx, *value);
             else
                 sqlite3_bind_null(stmt, idx);
         };
 
+        auto bind_text_or_null =
+            [](sqlite3_stmt* stmt, int idx, std::string_view value, bool allow_empty) {
+                if(value.empty() && !allow_empty)
+                    sqlite3_bind_null(stmt, idx);
+                else
+                    sqlite3_bind_text(stmt,
+                                      idx,
+                                      value.data(),
+                                      static_cast<int>(value.size()),
+                                      SQLITE_TRANSIENT);
+            };
+
+        auto bind_event_row = [&](sqlite3_stmt* stmt, size_t row_idx, const event_row& row) {
+            const auto base = static_cast<int>(row_idx * kEventCols);
+            sqlite3_bind_int64(stmt, base + 1, static_cast<sqlite3_int64>(row.id));
+            sqlite3_bind_int64(stmt, base + 2, static_cast<sqlite3_int64>(row.category_id));
+            sqlite3_bind_int64(stmt, base + 3, static_cast<sqlite3_int64>(row.stack_id));
+            sqlite3_bind_int64(stmt, base + 4, static_cast<sqlite3_int64>(row.parent_stack_id));
+            sqlite3_bind_int64(stmt, base + 5, static_cast<sqlite3_int64>(row.correlation_id));
+            bind_int64_or_null(stmt,
+                               base + 6,
+                               row.parent_id.has_value()
+                                   ? std::optional<int64_t>{
+                                         static_cast<int64_t>(row.parent_id.value())}
+                                   : std::nullopt);
+        };
+
+        auto bind_sample_row = [&](sqlite3_stmt* stmt, size_t row_idx, const sample_row& row) {
+            const auto base = static_cast<int>(row_idx * kSampleCols);
+            sqlite3_bind_int64(stmt, base + 1, static_cast<sqlite3_int64>(row.track_id));
+            sqlite3_bind_int64(stmt, base + 2, static_cast<sqlite3_int64>(row.timestamp));
+            sqlite3_bind_int64(stmt, base + 3, static_cast<sqlite3_int64>(row.event_id));
+        };
+
+        auto bind_pc_sample_row = [&](sqlite3_stmt* stmt,
+                                      size_t        row_idx,
+                                      const pc_sample_row& row) {
+            const auto base = static_cast<int>(row_idx * kPcSampleCols);
+            sqlite3_bind_int64(stmt, base + 1, static_cast<sqlite3_int64>(row.timestamp));
+            sqlite3_bind_int64(stmt, base + 2, static_cast<sqlite3_int64>(row.nid));
+            sqlite3_bind_int64(stmt, base + 3, static_cast<sqlite3_int64>(row.pid));
+            sqlite3_bind_int64(stmt, base + 4, static_cast<sqlite3_int64>(row.tid));
+            bind_int64_or_null(stmt,
+                               base + 5,
+                               row.agent_id.has_value()
+                                   ? std::optional<int64_t>{
+                                         static_cast<int64_t>(row.agent_id.value())}
+                                   : std::nullopt);
+            sqlite3_bind_int64(stmt, base + 6, static_cast<sqlite3_int64>(row.dispatch_id));
+            sqlite3_bind_int64(stmt, base + 7, static_cast<sqlite3_int64>(row.stack_id));
+            sqlite3_bind_int64(stmt, base + 8, static_cast<sqlite3_int64>(row.parent_stack_id));
+            sqlite3_bind_int64(stmt,
+                               base + 9,
+                               static_cast<sqlite3_int64>(row.correlation_id));
+            bind_text_or_null(stmt, base + 10, sampling_method, true);
+            sqlite3_bind_int64(stmt, base + 11, static_cast<sqlite3_int64>(row.exec_mask));
+            bind_text_or_null(stmt, base + 12, row.instruction, false);
+            bind_text_or_null(stmt, base + 13, row.instruction_comment, false);
+            sqlite3_bind_int64(stmt, base + 14, static_cast<sqlite3_int64>(row.code_object_id));
+            sqlite3_bind_int64(stmt,
+                               base + 15,
+                               static_cast<sqlite3_int64>(row.code_object_offset));
+            sqlite3_bind_int64(stmt,
+                               base + 16,
+                               static_cast<sqlite3_int64>(row.wave_in_group));
+            sqlite3_bind_int64(stmt, base + 17, static_cast<sqlite3_int64>(row.workgroup_id_x));
+            sqlite3_bind_int64(stmt, base + 18, static_cast<sqlite3_int64>(row.workgroup_id_y));
+            sqlite3_bind_int64(stmt, base + 19, static_cast<sqlite3_int64>(row.workgroup_id_z));
+            bind_int64_or_null(stmt, base + 20, row.wave_issued);
+            bind_text_or_null(stmt, base + 21, row.inst_type, false);
+            bind_text_or_null(stmt, base + 22, row.stall_reason, false);
+            bind_int64_or_null(stmt, base + 23, row.wave_count);
+            sqlite3_bind_int64(stmt, base + 24, static_cast<sqlite3_int64>(ext_schema_id));
+            sqlite3_bind_blob(stmt,
+                              base + 25,
+                              row.ext_blob.data(),
+                              static_cast<int>(row.ext_blob.size()),
+                              SQLITE_TRANSIENT);
+        };
+
+        auto step_and_reset = [&](sqlite3_stmt* stmt) {
+            auto rc = sqlite3_step(stmt);
+            if(rc != SQLITE_DONE)
+            {
+                ROCP_FATAL << "sqlite3_step failed with error code " << rc << ": "
+                           << sqlite3_errmsg(conn);
+            }
+            SQLITE3_CHECK(sqlite3_reset(stmt));
+            SQLITE3_CHECK(sqlite3_clear_bindings(stmt));
+        };
+
+        auto execute_batch = [&](size_t count) {
+            if(count == 0) return;
+
+            sqlite3_stmt* evt_stmt = event_stmt;
+            sqlite3_stmt* sam_stmt = sample_stmt;
+            sqlite3_stmt* pc_stmt  = pc_sample_stmt;
+
+            std::unique_ptr<sqlite3_stmt, decltype(&sqlite3_finalize)> evt_tmp(nullptr,
+                                                                                sqlite3_finalize);
+            std::unique_ptr<sqlite3_stmt, decltype(&sqlite3_finalize)> sam_tmp(nullptr,
+                                                                                sqlite3_finalize);
+            std::unique_ptr<sqlite3_stmt, decltype(&sqlite3_finalize)> pc_tmp(nullptr,
+                                                                               sqlite3_finalize);
+
+            if(count != kBatchSize)
+            {
+                evt_tmp.reset(prepare_stmt(build_insert_sql("rocpd_event{{uuid}}",
+                                                          event_columns,
+                                                          kEventCols,
+                                                          count)));
+                sam_tmp.reset(prepare_stmt(build_insert_sql("rocpd_sample{{uuid}}",
+                                                          sample_columns,
+                                                          kSampleCols,
+                                                          count)));
+                pc_tmp.reset(prepare_stmt(build_insert_sql("rocpd_gpu_pc_sample{{uuid}}",
+                                                         pc_sample_columns,
+                                                         kPcSampleCols,
+                                                         count)));
+                evt_stmt = evt_tmp.get();
+                sam_stmt = sam_tmp.get();
+                pc_stmt  = pc_tmp.get();
+            }
+
+            for(size_t idx = 0; idx < count; ++idx)
+                bind_event_row(evt_stmt, idx, event_rows.at(idx));
+            step_and_reset(evt_stmt);
+
+            for(size_t idx = 0; idx < count; ++idx)
+                bind_sample_row(sam_stmt, idx, sample_rows.at(idx));
+            step_and_reset(sam_stmt);
+
+            for(size_t idx = 0; idx < count; ++idx)
+                bind_pc_sample_row(pc_stmt, idx, pc_sample_rows.at(idx));
+            step_and_reset(pc_stmt);
+        };
+
         auto _deferred = sql::deferred_transaction{conn};
+        
         for(auto pitr : pc_sampling_gen)
         {
             for(auto itr : pc_sampling_gen.get(pitr))
@@ -1819,9 +2071,12 @@ write_rocpd(
                     instruction_comment = sanitize_sql_string(info.second);
                 }
 
-                uint64_t agent_id = 0;
+                uint64_t agent_id     = 0;
+                uint64_t parent_evt_id = 0;
                 if(record.dispatch_id < dispatch_to_agent_id.size())
                     agent_id = dispatch_to_agent_id[record.dispatch_id];
+                if(record.dispatch_id < dispatch_to_evt_id.size())
+                    parent_evt_id = dispatch_to_evt_id[record.dispatch_id];
 
                 pc_sample_extdata_v1 extdata = {};
                 extdata.hw_id_chiplet             = static_cast<uint32_t>(record.hw_id.chiplet);
@@ -1841,7 +2096,7 @@ write_rocpd(
                 extdata.hw_id_microengine_id      =
                     static_cast<uint32_t>(record.hw_id.microengine_id);
 
-                if(sampling_method == "stochastic")
+                if(is_stochastic)
                 {
                     if constexpr(std::is_same_v<
                                      std::decay_t<decltype(pc_sampling_gen)>,
@@ -1897,53 +2152,35 @@ write_rocpd(
                     }
                 }
 
-                auto ext_blob = std::vector<uint8_t>{};
-                ext_blob.resize(sizeof(pc_sample_extdata_v1));
-                std::memcpy(ext_blob.data(), &extdata, sizeof(pc_sample_extdata_v1));
+                pc_sample_row pc_row = {};
+                std::memcpy(pc_row.ext_blob.data(), &extdata, sizeof(pc_sample_extdata_v1));
 
-                SQLITE3_CHECK(sqlite3_bind_int64(insert_stmt, 1, record.timestamp));
-                SQLITE3_CHECK(sqlite3_bind_int64(insert_stmt, 2, node_id));
-                SQLITE3_CHECK(sqlite3_bind_int64(insert_stmt, 3, this_pid));
-                SQLITE3_CHECK(
-                    sqlite3_bind_int64(insert_stmt, 4, record.correlation_id.internal));
-                if(agent_id > 0)
-                    SQLITE3_CHECK(sqlite3_bind_int64(insert_stmt, 5, agent_id));
-                else
-                    SQLITE3_CHECK(sqlite3_bind_null(insert_stmt, 5));
-                SQLITE3_CHECK(
-                    sqlite3_bind_int64(insert_stmt, 6, record.dispatch_id));
-                SQLITE3_CHECK(
-                    sqlite3_bind_int64(insert_stmt, 7, record.correlation_id.internal));
-                SQLITE3_CHECK(
-                    sqlite3_bind_int64(insert_stmt, 8, record.correlation_id.internal));
-                SQLITE3_CHECK(sqlite3_bind_int64(insert_stmt,
-                                                 9,
-                                                 record.correlation_id.external.value));
-                SQLITE3_CHECK(sqlite3_bind_text(
-                    insert_stmt, 10, sampling_method.c_str(), -1, SQLITE_TRANSIENT));
-                SQLITE3_CHECK(
-                    sqlite3_bind_int64(insert_stmt, 11, static_cast<int64_t>(record.exec_mask)));
-                bind_text_or_null(insert_stmt, 12, instruction);
-                bind_text_or_null(insert_stmt, 13, instruction_comment);
-                SQLITE3_CHECK(
-                    sqlite3_bind_int64(insert_stmt, 14, record.pc.code_object_id));
-                SQLITE3_CHECK(
-                    sqlite3_bind_int64(insert_stmt, 15, record.pc.code_object_offset));
-                SQLITE3_CHECK(
-                    sqlite3_bind_int64(insert_stmt, 16, record.wave_in_group));
-                SQLITE3_CHECK(
-                    sqlite3_bind_int64(insert_stmt, 17, record.workgroup_id.x));
-                SQLITE3_CHECK(
-                    sqlite3_bind_int64(insert_stmt, 18, record.workgroup_id.y));
-                SQLITE3_CHECK(
-                    sqlite3_bind_int64(insert_stmt, 19, record.workgroup_id.z));
+                auto pc_track_id = get_track_id(conn,
+                                                node_id,
+                                                this_pid,
+                                                record.correlation_id.internal,
+                                                pc_sample_name_id,
+                                                R"({})");
+
+                auto evt_id = get_event_id();
+
+                event_rows.emplace_back(event_row{
+                    evt_id,
+                    pc_sample_name_id,
+                    record.correlation_id.internal,
+                    record.correlation_id.internal,
+                    record.correlation_id.external.value,
+                    (parent_evt_id > 0) ? std::optional<uint64_t>{parent_evt_id} : std::nullopt});
+
+                sample_rows.emplace_back(
+                    sample_row{pc_track_id, record.timestamp, static_cast<uint64_t>(evt_id)});
 
                 std::optional<int64_t> wave_issued;
                 std::optional<int64_t> wave_count;
                 std::string            inst_type;
                 std::string            stall_reason;
 
-                if(sampling_method == "stochastic")
+                if(is_stochastic)
                 {
                     if constexpr(std::is_same_v<
                                      std::decay_t<decltype(pc_sampling_gen)>,
@@ -1975,31 +2212,51 @@ write_rocpd(
                                 std::to_string(stochastic_record.snapshot.reason_not_issued);
                     }
                 }
+                
+                pc_row.timestamp          = record.timestamp;
+                pc_row.nid                = node_id;
+                pc_row.pid                = this_pid;
+                pc_row.tid                = record.correlation_id.internal;
+                pc_row.agent_id           = (agent_id > 0) ? std::optional<uint64_t>{agent_id}
+                                                          : std::nullopt;
+                pc_row.dispatch_id        = record.dispatch_id;
+                pc_row.stack_id           = record.correlation_id.internal;
+                pc_row.parent_stack_id    = record.correlation_id.internal;
+                pc_row.correlation_id     = record.correlation_id.external.value;
+                pc_row.exec_mask          = static_cast<int64_t>(record.exec_mask);
+                pc_row.instruction        = instruction;
+                pc_row.instruction_comment = instruction_comment;
+                pc_row.code_object_id     = record.pc.code_object_id;
+                pc_row.code_object_offset = record.pc.code_object_offset;
+                pc_row.wave_in_group      = record.wave_in_group;
+                pc_row.workgroup_id_x     = record.workgroup_id.x;
+                pc_row.workgroup_id_y     = record.workgroup_id.y;
+                pc_row.workgroup_id_z     = record.workgroup_id.z;
+                pc_row.wave_issued        = wave_issued;
+                pc_row.inst_type          = inst_type;
+                pc_row.stall_reason       = stall_reason;
+                pc_row.wave_count         = wave_count;
 
-                bind_int_or_null(insert_stmt, 20, wave_issued);
-                bind_text_or_null(insert_stmt, 21, inst_type);
-                bind_text_or_null(insert_stmt, 22, stall_reason);
-                bind_int_or_null(insert_stmt, 23, wave_count);
-
-                SQLITE3_CHECK(sqlite3_bind_int64(insert_stmt, 24, ext_schema_id));
-                if(ext_blob.empty())
-                    SQLITE3_CHECK(sqlite3_bind_null(insert_stmt, 25));
-                else
-                    SQLITE3_CHECK(sqlite3_bind_blob(
-                        insert_stmt,
-                        25,
-                        ext_blob.data(),
-                        static_cast<int>(ext_blob.size()),
-                        SQLITE_TRANSIENT));
-
-                auto step_rc = sqlite3_step(insert_stmt);
-                if(step_rc != SQLITE_DONE)
+                pc_sample_rows.emplace_back(std::move(pc_row));
+                
+                // Flush if batch is full
+                if(event_rows.size() >= kBatchSize)
                 {
-                    ROCP_FATAL << "sqlite3_step(insert_stmt) failed with error code " << step_rc;
+                    execute_batch(kBatchSize);
+                    event_rows.clear();
+                    sample_rows.clear();
+                    pc_sample_rows.clear();
                 }
-                SQLITE3_CHECK(sqlite3_reset(insert_stmt));
-                SQLITE3_CHECK(sqlite3_clear_bindings(insert_stmt));
             }
+        }
+
+        // Flush remaining rows
+        if(!event_rows.empty())
+        {
+            execute_batch(event_rows.size());
+            event_rows.clear();
+            sample_rows.clear();
+            pc_sample_rows.clear();
         }
     };
 
