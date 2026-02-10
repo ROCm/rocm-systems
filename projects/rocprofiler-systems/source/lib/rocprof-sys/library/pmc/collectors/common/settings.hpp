@@ -29,6 +29,7 @@
 #pragma once
 
 #include "core/config.hpp"
+#include "library/pmc/cpu/types.hpp"
 #include "library/pmc/gpu/types.hpp"
 #include "logger/debug.hpp"
 
@@ -98,6 +99,42 @@ struct settings_policy
     }
 
     static bool get_use_perfetto_legacy_metrics() { return get_use_perfetto(); }
+
+    // --- CPU settings ---
+
+    static device_filter get_cpu_device_filter() noexcept
+    {
+        auto filter = rocprofsys::get_sampling_cpus();
+        if(filter == "all" || filter == "on" || filter.empty())
+        {
+            device_filter result;
+            result.mode = device_selection_mode::ALL;
+            return result;
+        }
+
+        if(filter == "none" || filter == "off")
+        {
+            device_filter result;
+            result.mode = device_selection_mode::NONE;
+            return result;
+        }
+
+        auto          enabled_cpus = parse_numeric_range(filter);
+        device_filter result;
+        result.mode    = device_selection_mode::SPECIFIC;
+        result.indices = enabled_cpus;
+        return result;
+    }
+
+    static pmc::cpu::enabled_metrics get_cpu_enabled_metrics() noexcept
+    {
+        pmc::cpu::enabled_metrics result;
+        // Enable all CPU metrics by default
+        result.value = 0x1FF;  // 9 bits all set
+        return result;
+    }
+
+    static bool get_cpu_freq_enabled() { return rocprofsys::get_cpu_freq_enabled(); }
 
 private:
     static gpu::enabled_metrics parse_enabled_metrics(const std::string& input)

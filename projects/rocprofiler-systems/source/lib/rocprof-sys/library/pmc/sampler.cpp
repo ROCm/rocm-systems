@@ -32,6 +32,12 @@
 #include "library/pmc/output_policies/cache_policy.hpp"
 #include "library/pmc/output_policies/perfetto_policy.hpp"
 
+// CPU collector includes (always available, no ROCM dependency)
+#include "library/pmc/collectors/cpu/collector.hpp"
+#include "library/pmc/device_providers/procfs/provider.hpp"
+#include "library/pmc/output_policies/cpu_cache_policy.hpp"
+#include "library/pmc/output_policies/cpu_perfetto_policy.hpp"
+
 #include "core/common.hpp"
 #include "core/components/fwd.hpp"
 #include "core/state.hpp"
@@ -236,3 +242,100 @@ ROCPROFSYS_INSTANTIATE_EXTERN_COMPONENT(
     double)
 
 #endif
+
+// --- CPU PMC collector (always available, no ROCM dependency) ---
+
+#include <timemory/components/timing/backends.hpp>
+
+namespace rocprofsys
+{
+namespace cpu_pmc
+{
+namespace
+{
+
+struct cpu_production_config
+{
+    using SettingsApi    = pmc::collectors::settings_policy;
+    using CpuPerfettoApi = pmc::output_policies::cpu_perfetto_policy;
+    using CpuCacheApi    = pmc::output_policies::cpu_cache_policy;
+};
+
+using cpu_provider_factory_t =
+    pmc::device_providers::procfs::provider_factory<pmc::drivers::procfs::driver_factory>;
+using cpu_provider_t   = cpu_provider_factory_t::provider_t;
+using cpu_collector_t   = pmc::collectors::cpu::collector<cpu_provider_t,
+                                                          cpu_production_config>;
+
+bool&
+is_cpu_initialized()
+{
+    static bool _v = false;
+    return _v;
+}
+
+std::shared_ptr<cpu_provider_t> g_cpu_provider;
+std::optional<cpu_collector_t>  g_cpu_collector;
+
+}  // namespace
+
+void
+setup()
+{
+    if(is_cpu_initialized()) return;
+
+    try
+    {
+        g_cpu_provider = cpu_provider_factory_t::create();
+        g_cpu_collector.emplace(g_cpu_provider);
+        g_cpu_collector->setup();
+        is_cpu_initialized() = true;
+    }
+    catch(std::runtime_error& _e)
+    {
+        LOG_ERROR("Exception thrown when initializing CPU PMC sampler: {}", _e.what());
+    }
+}
+
+void
+config()
+{
+    if(g_cpu_collector) g_cpu_collector->config();
+}
+
+void
+sample()
+{
+    if(g_cpu_collector)
+        g_cpu_collector->sample(tim::get_clock_real_now<size_t, std::nano>);
+}
+
+void
+shutdown()
+{
+    if(!is_cpu_initialized()) return;
+
+    LOG_INFO("Shutting down CPU PMC sampler.");
+
+    try
+    {
+        if(g_cpu_collector) g_cpu_collector->shutdown();
+        g_cpu_provider.reset();
+    }
+    catch(std::runtime_error& _e)
+    {
+        LOG_ERROR("Exception thrown when shutting down CPU PMC sampler: {}", _e.what());
+    }
+
+    is_cpu_initialized() = false;
+}
+
+void
+post_process()
+{
+    LOG_DEBUG("Post-processing CPU PMC samples.");
+    if(g_cpu_collector) g_cpu_collector->post_process();
+}
+
+}  // namespace cpu_pmc
+}  // namespace rocprofsys

@@ -2,6 +2,7 @@
 
 # Add subdirectories
 add_subdirectory(common)
+add_subdirectory(cpu)
 if(ROCPROFSYS_USE_ROCM)
     add_subdirectory(gpu)
 endif()
@@ -19,6 +20,7 @@ set(pmc_sampler_sources
 set(pmc_sources
     ${pmc_sampler_sources}
     ${pmc_common_types_sources}
+    ${pmc_cpu_types_sources}
     ${pmc_gpu_types_sources}
     ${pmc_device_provider_sources}
     ${pmc_output_policies_sources}

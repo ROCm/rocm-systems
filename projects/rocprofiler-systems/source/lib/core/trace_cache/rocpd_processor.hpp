@@ -54,7 +54,7 @@ public:
 #if ROCPROFSYS_USE_ROCM > 0
     void handle(const pmc::gpu::sample& sample);
 #endif
-    void handle(const cpu_freq_sample& sample);
+    void handle(const cpu_pmc_sample& sample);
     void handle(const backtrace_region_sample& sample);
 
 private:

@@ -2,6 +2,8 @@
 set(pmc_output_policies_sources
     ${CMAKE_CURRENT_LIST_DIR}/perfetto_policy.hpp
     ${CMAKE_CURRENT_LIST_DIR}/cache_policy.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/cpu_perfetto_policy.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/cpu_cache_policy.hpp
 )
 
 # Add to parent variable (will be used by pmc CMakeLists.txt)

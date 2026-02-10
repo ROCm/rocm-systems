@@ -97,6 +97,25 @@ postfork_parent_reinit()
 #endif
 
 }  // namespace pmc
+
+namespace cpu_pmc
+{
+void
+setup();
+
+void
+config();
+
+void
+sample();
+
+void
+shutdown();
+
+void
+post_process();
+}  // namespace cpu_pmc
+
 }  // namespace rocprofsys
 
 #if defined(ROCPROFSYS_USE_ROCM) && ROCPROFSYS_USE_ROCM > 0

@@ -22,7 +22,6 @@
 
 #include "library/process_sampler.hpp"
 #include "core/config.hpp"
-#include "library/cpu_freq.hpp"
 #include "library/pmc/sampler.hpp"
 #include "library/runtime.hpp"
 
@@ -151,12 +150,12 @@ sampler::setup()
 
     if(get_cpu_freq_enabled())
     {
-        auto& _cpu_freq         = instances.emplace_back(std::make_unique<instance>());
-        _cpu_freq->setup        = []() { cpu_freq::setup(); };
-        _cpu_freq->shutdown     = []() { cpu_freq::shutdown(); };
-        _cpu_freq->post_process = []() { cpu_freq::post_process(); };
-        _cpu_freq->config       = []() { cpu_freq::config(); };
-        _cpu_freq->sample       = []() { cpu_freq::sample(); };
+        auto& _cpu_pmc         = instances.emplace_back(std::make_unique<instance>());
+        _cpu_pmc->setup        = []() { cpu_pmc::setup(); };
+        _cpu_pmc->shutdown     = []() { cpu_pmc::shutdown(); };
+        _cpu_pmc->post_process = []() { cpu_pmc::post_process(); };
+        _cpu_pmc->config       = []() { cpu_pmc::config(); };
+        _cpu_pmc->sample       = []() { cpu_pmc::sample(); };
     }
 
     for(auto& itr : instances)

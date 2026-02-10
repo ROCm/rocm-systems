@@ -29,6 +29,7 @@
 #if ROCPROFSYS_USE_ROCM > 0
 #    include "library/pmc/gpu/sample.hpp"
 #endif
+#include "library/pmc/cpu/sample.hpp"
 #include "library/runtime.hpp"
 #include <memory>
 #include <unistd.h>
@@ -42,14 +43,14 @@ namespace trace_cache
 using storage_parser_t =
     storage_parser<type_identifier_t, kernel_dispatch_sample, memory_copy_sample,
                    memory_allocate_sample, region_sample, in_time_sample,
-                   pmc_event_with_sample, pmc::gpu::sample, cpu_freq_sample,
+                   pmc_event_with_sample, pmc::gpu::sample, pmc::cpu::sample,
                    backtrace_region_sample, scratch_memory_sample>;
 
 #else
 using storage_parser_t =
     storage_parser<type_identifier_t, kernel_dispatch_sample, memory_copy_sample,
                    memory_allocate_sample, region_sample, in_time_sample,
-                   pmc_event_with_sample, cpu_freq_sample, backtrace_region_sample,
+                   pmc_event_with_sample, pmc::cpu::sample, backtrace_region_sample,
                    scratch_memory_sample>;
 
 #endif
