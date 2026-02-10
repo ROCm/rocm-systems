@@ -146,7 +146,7 @@ ncclResult_t amd_smi_init() {
   if (rcclParamUseAmdSmiLib()) {
 #if !AMDSMI_DIRECT
     if (pfn_amdsmi_init == nullptr) {
-      void *libhandle = dlopen("libamdsmi.so.1", RTLD_NOW);
+      static void *libhandle = dlopen("libamdsmi.so.1", RTLD_NOW);
       if (libhandle == nullptr) {
         WARN("Failed to open libamdsmi.so.1");
         return ncclSuccess;
