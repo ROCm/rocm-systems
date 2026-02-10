@@ -843,11 +843,17 @@ Examples:
         ),
     )
 
-    # Experimental Feature Toggle controlling all functionalities
+    # NOTE: Experimental Feature Toggle controlling all functionalities
     # pertaining to "Memory Bandwidth Guided Analysis"
+    profile_group.add_argument(
+        "--membw-analysis",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
 
     analyze_group.add_argument(
         "--membw-analysis",
         action="store_true",
         help=argparse.SUPPRESS,
     )
+
