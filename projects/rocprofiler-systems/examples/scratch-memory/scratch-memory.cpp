@@ -147,17 +147,10 @@ test_scratch()
 {
     uint64_t* data_ptr = nullptr;
     hipCheckErr(hipHostMalloc(&data_ptr, sizeof(uint64_t), 0));
-
-    auto   host_floats = std::vector<float>(1024, 0.0f);
-    float* dev         = nullptr;
-
-    std::iota(host_floats.begin(), host_floats.end(), 1.0f);
-
-    hipCheckErr(hipMalloc((void**) &dev, host_floats.size() * sizeof(float)));
-    hipCheckErr(hipMemcpy(dev, host_floats.data(), host_floats.size() * sizeof(float),
-                          hipMemcpyHostToDevice));
-
     *data_ptr = 0;
+
+    auto host_floats = std::vector<float>(1024, 0.0f);
+    std::iota(host_floats.begin(), host_floats.end(), 1.0f);
 
     printf("Running test_primary_then_uso========================\n");
     test_primary_then_uso(data_ptr);
@@ -194,7 +187,6 @@ test_scratch()
 
     printf("Running Large\n");
     test_kern_large<<<1000, 1>>>(data_ptr);
-    hipCheckErr(hipFree(dev));
     hipCheckErr(hipDeviceSynchronize());
     printf("Running Large - done\n");
 
