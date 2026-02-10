@@ -26,7 +26,7 @@ subtrees:
 
 - caption: Samples
   entries:
-  - url: https://github.com/ROCm/rocJPEG/tree/develop/samples
+  - url: https://github.com/ROCm/rocm-systems/tree/develop/projects/rocjpeg/samples
     title: rocJPEG samples on GitHub
 
     
