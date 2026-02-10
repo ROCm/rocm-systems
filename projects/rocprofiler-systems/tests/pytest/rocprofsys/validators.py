@@ -30,8 +30,8 @@ def _python_for_validation_scripts() -> str:
     """Return the Python executable to use when running validation scripts.
 
     When running inside a PyInstaller/frozen binary, sys.executable is the
-    binary itself (e.g. rocprofsys-tests), which does not accept script paths
-    and validation args. Use system Python instead.
+    binary itself, which does not accept script paths and validation args.
+    Use system Python instead.
     """
     if getattr(sys, "frozen", False):
         env_py = os.environ.get("ROCPROFSYS_VALIDATION_PYTHON")

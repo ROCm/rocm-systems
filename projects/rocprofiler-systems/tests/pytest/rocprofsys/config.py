@@ -178,6 +178,12 @@ class RocprofsysConfig:
             if exe.exists() and exe.is_file():
                 return exe
 
+            # code-coverage.py lies in the code-coverage directory
+            if name == "code-coverage.py":
+                exe = self.rocprofsys_examples_dir / "code-coverage" / name
+                if exe.exists() and exe.is_file():
+                    return exe
+
             exe = self.rocprofsys_examples_dir / "examples" / name / name
             if exe.exists() and exe.is_file():
                 return exe

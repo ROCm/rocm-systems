@@ -272,6 +272,7 @@ def pytest_configure(config: pytest.Config) -> None:
         "lulesh",
         "unit_tests",
         "hip_stream",
+        "presets",
     ]
     for label in label_list:
         config.addinivalue_line("markers", f"{label}: label test as {label}")
@@ -327,14 +328,14 @@ def pytest_sessionstart(session):
 
     log_file = config.getoption("--output-log", default="@output_dir@/pytest-output.txt")
 
-    if log_file.lower() == "none":
+    # With pytest-xdist, we require that only the master writes to the log file.
+    if log_file.lower() == "none" or hasattr(config, "workerinput"):
         config._output_log_path = None
         config._log_file_handle = None
     else:
         log_file = log_file.replace("@output_dir@", str(rocprof_config.test_output_dir))
-        config._output_log_path = Path(log_file)
-
-        log_path = config._output_log_path
+        log_path = Path(log_file)
+        config._output_log_path = log_path
         log_path.parent.mkdir(parents=True, exist_ok=True)
         config._log_file_handle = open(log_path, "w")
 
