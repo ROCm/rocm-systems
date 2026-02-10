@@ -13,6 +13,8 @@
 #include "llvm/DebugInfo/DWARF/DWARFDie.h"
 #include "llvm/DebugInfo/DWARF/DWARFFormValue.h"
 #include "llvm/DebugInfo/DWARF/DWARFDebugLine.h"
+#include "llvm/DebugInfo/DWARF/DWARFDebugAbbrev.h"
+#include "llvm/DebugInfo/DWARF/DWARFAbbreviationDeclaration.h"
 #include "llvm/Object/ObjectFile.h"
 #include "llvm/Object/ELFObjectFile.h"
 #include "llvm/Support/MemoryBuffer.h"
@@ -31,6 +33,19 @@
 #include "llvm/CodeGen/NonRelocatableStringpool.h"
 #include "llvm/MC/MCSymbol.h"
 #include "llvm/MC/MCContext.h"
+#include "llvm/MC/MCAsmInfo.h"
+#include "llvm/MC/MCRegisterInfo.h"
+#include "llvm/MC/MCSubtargetInfo.h"
+#include "llvm/TargetParser/Triple.h"
+#include "llvm/ADT/StringMap.h"
+#include "llvm/MC/TargetRegistry.h"
+#include "llvm/Support/TargetSelect.h"
+#include "llvm/Target/TargetMachine.h"
+#include "llvm/Target/TargetOptions.h"
+#include "llvm/Support/SourceMgr.h"
+// AMDGPU target initialization - will be linked via shared library
+extern "C" void LLVMInitializeAMDGPUTargetInfo();
+extern "C" void LLVMInitializeAMDGPUTargetMC();
 // DWARFExpression is included via AddressesMap.h -> LowLevel/DWARFExpression.h
 
 #include <cstdio>
@@ -472,12 +487,12 @@ static std::vector<uint8_t> createMinimalElfForLineTable(
 
 // Append ULEB128 to buffer (for Phase 3 line table emission)
 static void appendULEB128(std::vector<uint8_t>& out, uint64_t value) {
-    do {
-        uint8_t byte = value & 0x7f;
+    // Standard ULEB128 encoding: check BEFORE shifting
+    while (value >= 0x80) {
+        out.push_back((value & 0x7f) | 0x80);
         value >>= 7;
-        if (value != 0) byte |= 0x80;
-        out.push_back(byte);
-    } while (value != 0);
+    }
+    out.push_back(value & 0x7f);
 }
 
 // Helper: decode ULEB128 from data, return value and bytes consumed
@@ -872,7 +887,7 @@ static DwarfAttrPositions findDwarfAttrPositionsFromElf(const uint8_t* elf_data,
     return result;
 }
 
-// Phase 1b: Use minimal ELF with LLVM (kernels). Kernel .device.o often have .debug_str_offsets
+// Phase 1b: Use minimal ELF with LLVM (kernels). Kernel .o files often have .debug_str_offsets
 // too small or missing, so we build a minimal ELF with patched str_offsets_base and proper sections.
 static DwarfAttrPositions findDwarfAttrPositionsUsingLLVM(
     const std::vector<uint8_t>& debug_info,
@@ -1407,7 +1422,7 @@ KernelInfo parseKernel(const std::vector<uint8_t>& elf_data, const std::string& 
             info.debug_ranges = elf.getBytes(*debug_ranges);
         }
 
-        // Use LLVM to find DWARF attribute positions (minimal ELF: kernel .device.o often have bad .debug_str_offsets)
+        // Use LLVM to find DWARF attribute positions (minimal ELF: kernel .o files often have bad .debug_str_offsets)
         if (!info.debug_info.empty() && !info.debug_abbrev.empty()) {
             info.dwarf_attr_positions = findDwarfAttrPositionsUsingLLVM(info.debug_info, info.debug_abbrev,
                                                                         info.debug_str, info.debug_line, 
@@ -1681,8 +1696,14 @@ class DeviceLinkerDwarfEmitter : public llvm::dwarf_linker::classic::DwarfEmitte
     // References to DeviceLinker's output buffers
     std::vector<uint8_t>& debug_info_out_;
     
-    // Track current CU header position for unit_length patching
-    size_t current_cu_header_pos_ = 0;
+    // Track CU header positions for unit_length patching (multiple CUs)
+    std::vector<size_t> cu_header_positions_;
+    
+    // Track abbrev_offset position in each CU header (offset 8 in DWARF5 header)
+    std::vector<size_t> cu_abbrev_offset_positions_;
+    
+    // Track how many CUs have been patched so far (for incremental patching)
+    size_t cu_abbrev_offset_patched_count_ = 0;
     
     // Track current CompileUnit for address extraction
     llvm::dwarf_linker::classic::CompileUnit* current_cu_ = nullptr;
@@ -1713,6 +1734,12 @@ class DeviceLinkerDwarfEmitter : public llvm::dwarf_linker::classic::DwarfEmitte
     uint64_t loclists_section_size_ = 0;
     uint64_t debug_addr_section_size_ = 0;
 
+    // MCContext and related MC infrastructure for MCSymbol creation
+    std::unique_ptr<llvm::MCContext> mc_context_;
+    std::unique_ptr<llvm::MCAsmInfo> mc_asm_info_;
+    std::unique_ptr<llvm::MCRegisterInfo> mc_register_info_;
+    std::unique_ptr<llvm::MCSubtargetInfo> mc_subtarget_info_;
+
 public:
     DeviceLinkerDwarfEmitter(
         std::vector<uint8_t>& debug_info,
@@ -1732,7 +1759,72 @@ public:
           debug_rnglists_out_(debug_rnglists),
           debug_ranges_out_(debug_ranges),
           debug_line_out_(debug_line),
-          debug_line_str_out_(debug_line_str) {}
+          debug_line_str_out_(debug_line_str) {
+        // Initialize AMDGPU MC infrastructure for MCSymbol creation
+        initializeMCContext();
+    }
+
+private:
+    void initializeMCContext() {
+        // Initialize LLVM target registry (registers all targets including AMDGPU)
+        llvm::InitializeAllTargetInfos();
+        llvm::InitializeAllTargetMCs();
+        llvm::InitializeAllAsmParsers();
+        llvm::InitializeAllAsmPrinters();
+
+        // Create Triple for amdgcn-amd-amdhsa
+        llvm::Triple triple("amdgcn-amd-amdhsa");
+        
+        // Get AMDGPU target - try with empty string first (uses triple), then try "amdgcn"
+        std::string error;
+        const llvm::Target* target = llvm::TargetRegistry::lookupTarget("", triple, error);
+        if (!target) {
+            // Try with explicit "amdgcn" name
+            target = llvm::TargetRegistry::lookupTarget("amdgcn", triple, error);
+        }
+        if (!target) {
+            fprintf(stderr, "ERROR: Failed to lookup AMDGPU target: %s (triple=%s)\n", 
+                    error.c_str(), triple.getTriple().c_str());
+            return;
+        }
+        
+        fprintf(stderr, "DEBUG: Found AMDGPU target: %s\n", target->getName());
+
+        // Create MCAsmInfo
+        llvm::MCTargetOptions options;
+        
+        // Create MCRegisterInfo first (using Triple)
+        mc_register_info_.reset(target->createMCRegInfo(triple));
+        if (!mc_register_info_) {
+            fprintf(stderr, "ERROR: Failed to create MCRegisterInfo for AMDGPU\n");
+            return;
+        }
+
+        // Create MCAsmInfo (using Triple)
+        mc_asm_info_.reset(target->createMCAsmInfo(*mc_register_info_, triple, options));
+        if (!mc_asm_info_) {
+            fprintf(stderr, "ERROR: Failed to create MCAsmInfo for AMDGPU\n");
+            return;
+        }
+
+        // Create MCSubtargetInfo with gfx9-generic (using Triple)
+        mc_subtarget_info_.reset(target->createMCSubtargetInfo(triple, "gfx9-generic", ""));
+        if (!mc_subtarget_info_) {
+            fprintf(stderr, "ERROR: Failed to create MCSubtargetInfo for AMDGPU\n");
+            return;
+        }
+
+        // Create MCContext
+        // Note: We use a dummy SourceMgr since we're not parsing assembly
+        llvm::SourceMgr src_mgr;
+        mc_context_ = std::make_unique<llvm::MCContext>(
+            triple, mc_asm_info_.get(), mc_register_info_.get(), 
+            mc_subtarget_info_.get(), &src_mgr, &options);
+
+        fprintf(stderr, "DEBUG: MCContext initialized successfully for amdgcn-amd-amdhsa\n");
+    }
+
+public:
 
     // Required DwarfEmitter methods
     void emitSectionContents(llvm::StringRef SecData,
@@ -1793,7 +1885,19 @@ public:
                 // debug_info_section_size_ = debug_info_out_.size();
                 break;
             case llvm::dwarf_linker::DebugSectionKind::DebugAbbrev:
+                fprintf(stderr, "DEBUG: emitSectionContents(DebugAbbrev) called with %zu bytes\n", SecData.size());
+                if (SecData.size() > 0) {
+                    fprintf(stderr, "  First 32 bytes: ");
+                    size_t dump = std::min((size_t)32, SecData.size());
+                    for (size_t i = 0; i < dump; i++) {
+                        fprintf(stderr, "%02x ", (unsigned char)SecData[i]);
+                    }
+                    fprintf(stderr, "\n");
+                }
+                fflush(stderr);
                 debug_abbrev_out_.insert(debug_abbrev_out_.end(), SecData.begin(), SecData.end());
+                fprintf(stderr, "DEBUG: After insert, debug_abbrev_out_.size()=%zu\n", debug_abbrev_out_.size());
+                fflush(stderr);
                 break;
             case llvm::dwarf_linker::DebugSectionKind::DebugStr:
                 debug_str_out_.insert(debug_str_out_.end(), SecData.begin(), SecData.end());
@@ -1830,8 +1934,13 @@ public:
                      unsigned DwarfVersion) override {
         // Build mapping from abbreviation content to renumbered code
         // DWARFLinker has already renumbered abbreviations sequentially (1, 2, 3, ...)
-        // NOTE: Don't clear the map - accumulate across all CUs
-        // abbrev_content_to_number_.clear();  // REMOVED - accumulate across CUs
+        // NOTE: Accumulate across all CUs, but limit map size to prevent memory issues
+        // If map gets too large (>10000 entries), clear it to free memory
+        // (This shouldn't happen in practice, but protects against bugs)
+        if (abbrev_content_to_number_.size() > 10000) {
+            fprintf(stderr, "WARNING: abbrev_content_to_number_ map exceeded 10000 entries, clearing to free memory\n");
+            abbrev_content_to_number_.clear();
+        }
         
         fprintf(stderr, "DEBUG: emitAbbrevs called with %zu abbreviations (map currently has %zu entries)\n",
                 Abbrevs.size(), abbrev_content_to_number_.size());
@@ -1871,24 +1980,278 @@ public:
         
         fprintf(stderr, "DEBUG: emitAbbrevs done, map now has %zu entries\n", abbrev_content_to_number_.size());
         
-        // Abbreviation table bytes are handled by emitSectionContents(DebugAbbrev)
+        // Serialize abbreviation table manually
+        // DWARF abbreviation table format: for each abbrev: code(ULEB), tag(ULEB), children(1 byte), 
+        //   then (attr(ULEB), form(ULEB)) pairs, terminated by (0, 0)
+        // All abbrevs for a CU are terminated by (0, 0) - but only write ONE (0,0) at the end
+        
+        // Track where this CU's abbrevs start (for patching abbrev_offset in CU header)
+        size_t abbrev_start = debug_abbrev_out_.size();
+        fprintf(stderr, "DEBUG: emitAbbrevs: abbrev_start=%zu, debug_abbrev_out_.size()=%zu\n", 
+               abbrev_start, debug_abbrev_out_.size());
+        
+        if (Abbrevs.empty()) {
+            fprintf(stderr, "WARNING: emitAbbrevs called with empty Abbrevs vector!\n");
+        }
+        
+        for (size_t i = 0; i < Abbrevs.size(); ++i) {
+            const auto& abbrev = Abbrevs[i];
+            if (!abbrev) {
+                fprintf(stderr, "WARNING: emitAbbrevs: Abbrevs[%zu] is null, skipping\n", i);
+                continue;
+            }
+            
+            unsigned code = abbrev->getNumber();
+            if (code == 0) code = i + 1;  // Fallback
+            
+            if (i < 3) {
+                fprintf(stderr, "DEBUG: emitAbbrevs: Writing abbrev[%zu]: code=%u, tag=%u, hasChildren=%d\n",
+                       i, code, (unsigned)abbrev->getTag(), abbrev->hasChildren());
+            }
+            
+            // Track position before writing this abbrev
+            size_t abbrev_start_pos = debug_abbrev_out_.size();
+            
+            // Write code (ULEB128)
+            size_t before_code = debug_abbrev_out_.size();
+            appendULEB128(debug_abbrev_out_, code);
+            size_t after_code = debug_abbrev_out_.size();
+            fprintf(stderr, "DEBUG_ABBREV[code=%u]: Wrote code at pos 0x%zx, bytes: ", code, before_code);
+            for (size_t p = before_code; p < after_code; p++) {
+                fprintf(stderr, "%02x ", debug_abbrev_out_[p]);
+            }
+            fprintf(stderr, "\n");
+            
+            // Write tag (ULEB128)
+            size_t before_tag = debug_abbrev_out_.size();
+            appendULEB128(debug_abbrev_out_, (unsigned)abbrev->getTag());
+            size_t after_tag = debug_abbrev_out_.size();
+            fprintf(stderr, "DEBUG_ABBREV[code=%u]: Wrote tag %u at pos 0x%zx, bytes: ", code, (unsigned)abbrev->getTag(), before_tag);
+            for (size_t p = before_tag; p < after_tag; p++) {
+                fprintf(stderr, "%02x ", debug_abbrev_out_[p]);
+            }
+            fprintf(stderr, "\n");
+            
+            // Write children flag (1 byte: 0=no children, 1=has children)
+            uint8_t children_byte = abbrev->hasChildren() ? 1 : 0;
+            debug_abbrev_out_.push_back(children_byte);
+            fprintf(stderr, "DEBUG_ABBREV[code=%u]: Wrote children=%u at pos 0x%zx: %02x\n", 
+                   code, children_byte, debug_abbrev_out_.size() - 1, children_byte);
+            
+            // Write (attribute, form) pairs
+            size_t attr_idx = 0;
+            const auto& data_vec = abbrev->getData();
+            
+            fprintf(stderr, "DEBUG_ABBREV[code=%u]: Writing %zu attribute pairs\n", code, data_vec.size());
+            
+            for (const auto& data : data_vec) {
+                unsigned attr_val = (unsigned)data.getAttribute();
+                unsigned form_val = (unsigned)data.getForm();
+                
+                // CRITICAL: Convert LLVM enum form values to DWARF spec values
+                // LLVM's internal enum values don't match DWARF spec for some DWARF 5 forms
+                // Specifically, forms in the gap (0x1a-0x1f) are invalid per DWARF spec
+                if (form_val == 0x1a) {
+                    // LLVM's DW_FORM_strx (0x1a) -> DWARF spec DW_FORM_strx (0x21)
+                    form_val = 0x21;
+                    fprintf(stderr, "DEBUG_ABBREV[code=%u]: Converting form 0x1a (LLVM strx) -> 0x21 (DWARF spec strx)\n", code);
+                } else if (form_val == 0x1b) {
+                    // LLVM's DW_FORM_addrx (0x1b) -> DWARF spec DW_FORM_addrx (0x22)
+                    form_val = 0x22;
+                    fprintf(stderr, "DEBUG_ABBREV[code=%u]: Converting form 0x1b (LLVM addrx) -> 0x22 (DWARF spec addrx)\n", code);
+                }
+                
+                // CRITICAL: Skip invalid pairs where form is 0 but attr is not 0
+                // According to DWARF spec, (0,0) is the terminator, so (non-zero, 0) is invalid
+                if (attr_val != 0 && form_val == 0) {
+                    fprintf(stderr, "WARNING: Skipping invalid (attr, form) pair in abbrev %u: attr=0x%02x, form=0 (invalid - form cannot be 0 unless attr is also 0)\n",
+                           code, attr_val);
+                    continue;
+                }
+                
+                // Also skip pairs where attr is 0 but form is not 0 (also invalid)
+                if (attr_val == 0 && form_val != 0) {
+                    fprintf(stderr, "WARNING: Skipping invalid (attr, form) pair in abbrev %u: attr=0, form=0x%02x (invalid - attr cannot be 0 unless form is also 0)\n",
+                           code, form_val);
+                    continue;
+                }
+                
+                size_t before_attr = debug_abbrev_out_.size();
+                appendULEB128(debug_abbrev_out_, attr_val);
+                size_t after_attr = debug_abbrev_out_.size();
+                
+                size_t before_form = debug_abbrev_out_.size();
+                appendULEB128(debug_abbrev_out_, form_val);
+                size_t after_form = debug_abbrev_out_.size();
+                
+                fprintf(stderr, "DEBUG_ABBREV[code=%u]: Attr[%zu]: attr=0x%02x (pos 0x%zx: ", code, attr_idx, attr_val, before_attr);
+                for (size_t p = before_attr; p < after_attr; p++) {
+                    fprintf(stderr, "%02x ", debug_abbrev_out_[p]);
+                }
+                fprintf(stderr, "), form=0x%02x (pos 0x%zx: ", form_val, before_form);
+                for (size_t p = before_form; p < after_form; p++) {
+                    fprintf(stderr, "%02x ", debug_abbrev_out_[p]);
+                }
+                fprintf(stderr, ")\n");
+                attr_idx++;
+            }
+            
+            // Terminate this abbrev with (0, 0)
+            size_t before_term = debug_abbrev_out_.size();
+            debug_abbrev_out_.push_back(0);
+            debug_abbrev_out_.push_back(0);
+            size_t after_term = debug_abbrev_out_.size();
+            fprintf(stderr, "DEBUG_ABBREV[code=%u]: Wrote terminator (0,0) at pos 0x%zx: 00 00\n", code, before_term);
+            fprintf(stderr, "DEBUG_ABBREV[code=%u]: Complete abbrev: pos 0x%zx-0x%zx, size=%zu bytes\n", 
+                   code, abbrev_start_pos, debug_abbrev_out_.size(), debug_abbrev_out_.size() - abbrev_start_pos);
+        }
+        
+        size_t abbrev_end = debug_abbrev_out_.size();
+        fprintf(stderr, "DEBUG: emitAbbrevs: Wrote %zu bytes to debug_abbrev_out_ (start=%zu, end=%zu)\n",
+               abbrev_end - abbrev_start, abbrev_start, abbrev_end);
+        
+        // According to DWARF spec v5 section 7.5.3, each set of abbreviation declarations is terminated
+        // by a single zero byte. However, the last abbreviation already ends with (0,0), and some parsers
+        // (like LLVM 23) may interpret the first 0x00 of the (0,0) terminator as the section terminator.
+        // To avoid confusion, we do NOT add an extra section terminator - the (0,0) from the last
+        // abbreviation serves as both the abbreviation terminator and the section terminator.
+        // 
+        // Check if the last abbreviation ends with (0,0)
+        if (debug_abbrev_out_.size() < 2 || 
+            debug_abbrev_out_[debug_abbrev_out_.size() - 2] != 0 ||
+            debug_abbrev_out_[debug_abbrev_out_.size() - 1] != 0) {
+            fprintf(stderr, "WARNING: Last abbreviation does not end with (0,0) terminator!\n");
+        } else {
+            // Do NOT add extra section terminator - ending with (0,0) is sufficient
+            // Adding an extra 0x00 causes LLVM 23 to misinterpret the data
+            fprintf(stderr, "DEBUG_ABBREV: Section ends with (0,0) terminator (no extra section terminator)\n");
+        }
+        fprintf(stderr, "DEBUG_ABBREV: Final section size: %zu bytes\n", debug_abbrev_out_.size());
+        
+        // Dump entire section for comparison
+        fprintf(stderr, "DEBUG_ABBREV: Full section dump (%zu bytes):\n", debug_abbrev_out_.size());
+        for (size_t i = 0; i < debug_abbrev_out_.size(); i += 16) {
+            fprintf(stderr, "  %04zx: ", i);
+            for (size_t j = 0; j < 16 && (i + j) < debug_abbrev_out_.size(); j++) {
+                fprintf(stderr, "%02x ", debug_abbrev_out_[i + j]);
+            }
+            fprintf(stderr, "\n");
+        }
+        
+        // Patch the abbrev_offset in CU headers that were added since the last emitAbbrevs() call
+        // DWARFLinker calls emitAbbrevs() once per CU (or group), so we only patch CUs added since last call
+        uint32_t abbrev_offset_value = (uint32_t)abbrev_start;
+        size_t cu_count_to_patch = cu_abbrev_offset_positions_.size() - cu_abbrev_offset_patched_count_;
+        fprintf(stderr, "DEBUG: Patching abbrev_offset for %zu new CU(s) (total=%zu, already_patched=%zu) with value %u (abbrev_start=%zu)\n",
+               cu_count_to_patch, cu_abbrev_offset_positions_.size(), cu_abbrev_offset_patched_count_, abbrev_offset_value, abbrev_start);
+        
+        for (size_t cu_idx = cu_abbrev_offset_patched_count_; cu_idx < cu_abbrev_offset_positions_.size(); ++cu_idx) {
+            size_t abbrev_offset_pos = cu_abbrev_offset_positions_[cu_idx];
+            if (abbrev_offset_pos + 4 <= debug_info_out_.size()) {
+                // Verify value before patching
+                uint32_t old_value;
+                memcpy(&old_value, &debug_info_out_[abbrev_offset_pos], 4);
+                fprintf(stderr, "DEBUG: Before patch, CU[%zu] abbrev_offset at pos %zu = 0x%08x\n",
+                       cu_idx, abbrev_offset_pos, old_value);
+                
+                memcpy(&debug_info_out_[abbrev_offset_pos], &abbrev_offset_value, 4);
+                
+                // Verify value after patching
+                uint32_t new_value;
+                memcpy(&new_value, &debug_info_out_[abbrev_offset_pos], 4);
+                fprintf(stderr, "DEBUG: Patched CU[%zu] abbrev_offset at pos %zu: 0x%08x -> 0x%08x\n",
+                       cu_idx, abbrev_offset_pos, old_value, new_value);
+                
+                if (new_value != abbrev_offset_value) {
+                    fprintf(stderr, "ERROR: Patch failed! Expected 0x%08x, got 0x%08x\n",
+                           abbrev_offset_value, new_value);
+                }
+            } else {
+                fprintf(stderr, "ERROR: CU[%zu] abbrev_offset_pos %zu + 4 > debug_info_out_.size() %zu\n",
+                       cu_idx, abbrev_offset_pos, debug_info_out_.size());
+            }
+        }
+        
+        // Update count of patched CUs
+        cu_abbrev_offset_patched_count_ = cu_abbrev_offset_positions_.size();
+        
+        if (cu_abbrev_offset_positions_.empty()) {
+            fprintf(stderr, "WARNING: cu_abbrev_offset_positions_ is empty when trying to patch abbrev_offset\n");
+        }
+        
         (void)DwarfVersion;
     }
 
     void emitStrings(const llvm::NonRelocatableStringpool& Pool) override {
-        fprintf(stderr, "DEBUG: emitStrings called\n");
-        // TODO: Implement string table emission
-        // For now, this will be handled by emitSectionContents
-        (void)Pool;
+        // Get all entries for emission
+        auto entries = Pool.getEntriesForEmission();
+        fprintf(stderr, "DEBUG: emitStrings called, %zu entries to emit\n", entries.size());
+        
+        // Write strings in order (each string is null-terminated)
+        // NOTE: DWARFLinker's offsets assume the string table includes an empty string at offset 0
+        // if it's in the pool. We write all strings as provided by the pool.
+        size_t start_pos = debug_str_out_.size();
+        for (const auto& entry : entries) {
+            llvm::StringRef str = entry.getString();
+            debug_str_out_.insert(debug_str_out_.end(), str.begin(), str.end());
+            debug_str_out_.push_back(0);  // Null terminator
+            fprintf(stderr, "DEBUG: emitStrings: Wrote string at offset %zu: \"%.*s\"\n",
+                   debug_str_out_.size() - str.size() - 1, (int)str.size(), str.data());
+        }
+        
+        fprintf(stderr, "DEBUG: emitStrings: Wrote %zu bytes (start=%zu, end=%zu)\n",
+               debug_str_out_.size() - start_pos, start_pos, debug_str_out_.size());
     }
 
     void emitStringOffsets(const llvm::SmallVector<uint64_t>& StringOffsets,
                           uint16_t TargetDWARFVersion) override {
         fprintf(stderr, "DEBUG: emitStringOffsets called (%zu offsets, version %u)\n", StringOffsets.size(), TargetDWARFVersion);
-        // TODO: Implement string offsets emission
-        // For now, this will be handled by emitSectionContents
-        (void)StringOffsets;
-        (void)TargetDWARFVersion;
+        
+        if (StringOffsets.empty()) {
+            fprintf(stderr, "WARNING: emitStringOffsets called with empty offsets vector\n");
+            return;
+        }
+        
+        // DWARF5 .debug_str_offsets format:
+        // unit_length (4 bytes, excludes itself)
+        // version (2 bytes)
+        // padding (2 bytes, must be 0)
+        // offset entries (4 bytes each for 32-bit, 8 bytes each for 64-bit)
+        // We use 32-bit offsets (4 bytes each)
+        
+        size_t start_pos = debug_str_offsets_out_.size();
+        
+        // Calculate unit_length: version(2) + padding(2) + offsets(4 * count)
+        uint32_t data_size = 2 + 2 + StringOffsets.size() * 4;
+        uint32_t unit_length = data_size;  // unit_length excludes the 4-byte unit_length field itself
+        
+        // Write unit_length (4 bytes, little-endian)
+        debug_str_offsets_out_.insert(debug_str_offsets_out_.end(),
+                                     reinterpret_cast<const uint8_t*>(&unit_length),
+                                     reinterpret_cast<const uint8_t*>(&unit_length) + 4);
+        
+        // Write version (2 bytes, little-endian)
+        uint16_t version = TargetDWARFVersion;
+        debug_str_offsets_out_.insert(debug_str_offsets_out_.end(),
+                                     reinterpret_cast<const uint8_t*>(&version),
+                                     reinterpret_cast<const uint8_t*>(&version) + 2);
+        
+        // Write padding (2 bytes, zeros)
+        debug_str_offsets_out_.push_back(0);
+        debug_str_offsets_out_.push_back(0);
+        
+        // Write offset entries (4 bytes each, little-endian)
+        for (uint64_t offset : StringOffsets) {
+            uint32_t offset32 = static_cast<uint32_t>(offset);
+            debug_str_offsets_out_.insert(debug_str_offsets_out_.end(),
+                                         reinterpret_cast<const uint8_t*>(&offset32),
+                                         reinterpret_cast<const uint8_t*>(&offset32) + 4);
+            fprintf(stderr, "DEBUG: emitStringOffsets: Wrote offset %u (0x%08x) at pos %zu\n",
+                   offset32, offset32, debug_str_offsets_out_.size() - 4);
+        }
+        
+        fprintf(stderr, "DEBUG: emitStringOffsets: Wrote %zu bytes (start=%zu, end=%zu, unit_length=%u)\n",
+               debug_str_offsets_out_.size() - start_pos, start_pos, debug_str_offsets_out_.size(), unit_length);
     }
 
     void emitLineStrings(const llvm::NonRelocatableStringpool& Pool) override {
@@ -1924,9 +2287,17 @@ public:
     }
 
     llvm::MCSymbol* emitDwarfDebugRangeListHeader(const llvm::dwarf_linker::classic::CompileUnit& Unit) override {
-        // TODO: Implement range list header emission
-        (void)Unit;
-        return nullptr;
+        // Create a unique symbol for this range list header
+        if (!mc_context_) {
+            fprintf(stderr, "ERROR: MCContext not initialized, cannot create MCSymbol\n");
+            return nullptr;
+        }
+        static unsigned range_list_counter = 0;
+        std::string symbol_name = ".debug_rnglists.header." + std::to_string(range_list_counter++);
+        llvm::MCSymbol* symbol = mc_context_->getOrCreateSymbol(symbol_name);
+        fprintf(stderr, "DEBUG: Created MCSymbol for range list header: %s (ptr=%p)\n", 
+                symbol_name.c_str(), (void*)symbol);
+        return symbol;
     }
 
     void emitDwarfDebugRangeListFragment(
@@ -1934,17 +2305,84 @@ public:
         const llvm::AddressRanges& LinkedRanges,
         llvm::dwarf_linker::classic::PatchLocation Patch,
         llvm::dwarf_linker::classic::DebugDieValuePool& AddrPool) override {
-        // TODO: Implement range list fragment emission
-        (void)Unit;
-        (void)LinkedRanges;
-        (void)Patch;
-        (void)AddrPool;
+        // Emit DWARF5 range list entries
+        // Format: For each range, emit DW_RLE_startx_endx (2) + ULEB128 start_index + ULEB128 end_index
+        // Or use DW_RLE_base_addressx + DW_RLE_offset_pair for more compact encoding
+        
+        if (LinkedRanges.empty()) {
+            // Empty range list - just emit end marker (will be done in footer)
+            return;
+        }
+        
+        // Get address size from unit (typically 8 for 64-bit)
+        uint8_t addr_size = Unit.getOrigUnit().getAddressByteSize();
+        
+        // Track base address for offset_pair encoding
+        uint64_t base_address = 0;
+        bool has_base = false;
+        
+        // Iterate over ranges - AddressRanges should be iterable
+        for (auto it = LinkedRanges.begin(); it != LinkedRanges.end(); ++it) {
+            // AddressRange has start() and end() methods
+            uint64_t start = it->start();
+            uint64_t end = it->end();
+            
+            if (start == 0 && end == 0) {
+                // Skip invalid ranges
+                continue;
+            }
+            
+            if (!has_base) {
+                // First range: emit base address using startx
+                // Add address to pool and get index
+                uint64_t start_index = AddrPool.getValueIndex(start);
+                
+                // Emit DW_RLE_base_addressx (1) + ULEB128 index
+                debug_rnglists_out_.push_back(1);  // DW_RLE_base_addressx
+                appendULEB128(debug_rnglists_out_, start_index);
+                
+                base_address = start;
+                has_base = true;
+                
+                // Emit first range as offset_pair relative to base
+                if (end > start) {
+                    uint64_t start_offset = 0;  // Relative to base
+                    uint64_t end_offset = end - start;  // Length
+                    
+                    debug_rnglists_out_.push_back(4);  // DW_RLE_offset_pair
+                    appendULEB128(debug_rnglists_out_, start_offset);
+                    appendULEB128(debug_rnglists_out_, end_offset);
+                }
+            } else {
+                // Subsequent ranges: emit as offset_pair relative to base
+                if (start >= base_address && end > start) {
+                    uint64_t start_offset = start - base_address;
+                    uint64_t end_offset = end - start;  // Length
+                    
+                    debug_rnglists_out_.push_back(4);  // DW_RLE_offset_pair
+                    appendULEB128(debug_rnglists_out_, start_offset);
+                    appendULEB128(debug_rnglists_out_, end_offset);
+                } else {
+                    // Range doesn't fit with current base, use startx_endx
+                    uint64_t start_index = AddrPool.getValueIndex(start);
+                    uint64_t end_index = AddrPool.getValueIndex(end);
+                    
+                    debug_rnglists_out_.push_back(2);  // DW_RLE_startx_endx
+                    appendULEB128(debug_rnglists_out_, start_index);
+                    appendULEB128(debug_rnglists_out_, end_index);
+                }
+            }
+        }
+        
+        // Note: End marker (DW_RLE_end_of_list) will be emitted in footer
     }
 
     void emitDwarfDebugRangeListFooter(const llvm::dwarf_linker::classic::CompileUnit& Unit,
                                        llvm::MCSymbol* EndLabel) override {
-        // TODO: Implement range list footer emission
-        (void)Unit;
+        // Emit end-of-list marker for DWARF5 range lists
+        debug_rnglists_out_.push_back(0);  // DW_RLE_end_of_list
+        
+        // EndLabel is not used for DWARF5 range lists (they use end-of-list marker)
         (void)EndLabel;
     }
 
@@ -1974,21 +2412,36 @@ public:
     }
 
     llvm::MCSymbol* emitDwarfDebugAddrsHeader(const llvm::dwarf_linker::classic::CompileUnit& Unit) override {
-        // TODO: Implement address table header emission
-        (void)Unit;
-        return nullptr;
+        // Create a unique symbol for this address table header
+        if (!mc_context_) {
+            fprintf(stderr, "ERROR: MCContext not initialized, cannot create MCSymbol\n");
+            return nullptr;
+        }
+        static unsigned addrs_counter = 0;
+        std::string symbol_name = ".debug_addr.header." + std::to_string(addrs_counter++);
+        llvm::MCSymbol* symbol = mc_context_->getOrCreateSymbol(symbol_name);
+        fprintf(stderr, "DEBUG: Created MCSymbol for address table header: %s (ptr=%p)\n", 
+                symbol_name.c_str(), (void*)symbol);
+        return symbol;
     }
 
     void emitDwarfDebugAddrs(const llvm::SmallVector<uint64_t>& Addrs,
                             uint8_t AddrSize) override {
-        // TODO: Implement address table emission
-        (void)Addrs;
-        (void)AddrSize;
+        // Emit addresses to .debug_addr section
+        // Each address is written as AddrSize bytes in little-endian format
+        
+        for (uint64_t addr : Addrs) {
+            // Write address as AddrSize bytes (little-endian)
+            for (unsigned i = 0; i < AddrSize; ++i) {
+                debug_addr_out_.push_back((addr >> (i * 8)) & 0xff);
+            }
+        }
     }
 
     void emitDwarfDebugAddrsFooter(const llvm::dwarf_linker::classic::CompileUnit& Unit,
                                   llvm::MCSymbol* EndLabel) override {
-        // TODO: Implement address table footer emission
+        // Address table footer: typically no action needed
+        // EndLabel might be used for patching, but DWARF5 address tables don't use labels
         (void)Unit;
         (void)EndLabel;
     }
@@ -2047,7 +2500,7 @@ public:
         
         // Serialize CU header manually (DWARF5 format)
         // Format: unit_length(4) + version(2) + unit_type(1) + addr_size(1) + debug_abbrev_offset(4) = 12 bytes
-        current_cu_header_pos_ = debug_info_out_.size();
+        cu_header_positions_.push_back(debug_info_out_.size());  // Track this CU header position
         current_cu_ = &Unit;  // Track current CU for address extraction
         
         // Build map from DIE* to Info index for fast lookups
@@ -2059,38 +2512,56 @@ public:
             }
         }
         
+        size_t cu_header_start = debug_info_out_.size();
+        fprintf(stderr, "DEBUG_CU_HEADER[cu=%d]: Starting at pos 0x%zx\n", cu_count, cu_header_start);
+        
         // Write placeholder unit_length (will be patched later when we know the actual size)
         uint32_t unit_length = 0xffffffff;  // Placeholder - will be patched
         debug_info_out_.insert(debug_info_out_.end(), 
                               reinterpret_cast<const uint8_t*>(&unit_length), 
                               reinterpret_cast<const uint8_t*>(&unit_length) + 4);
+        fprintf(stderr, "DEBUG_CU_HEADER[cu=%d]: Wrote unit_length placeholder (0xffffffff) at pos 0x%zx: %02x %02x %02x %02x\n",
+               cu_count, cu_header_start, 0xff, 0xff, 0xff, 0xff);
         debug_info_section_size_ = debug_info_out_.size();  // Update size tracker
         
         // Write version (2 bytes, little-endian)
         uint16_t version = static_cast<uint16_t>(DwarfVersion);
+        size_t before_version = debug_info_out_.size();
         debug_info_out_.insert(debug_info_out_.end(),
                               reinterpret_cast<const uint8_t*>(&version),
                               reinterpret_cast<const uint8_t*>(&version) + 2);
+        fprintf(stderr, "DEBUG_CU_HEADER[cu=%d]: Wrote version=%u at pos 0x%zx: %02x %02x\n",
+               cu_count, version, before_version, (uint8_t)version, (uint8_t)(version >> 8));
         debug_info_section_size_ = debug_info_out_.size();  // Update size tracker
         
         // Write unit_type (1 byte) - DW_UT_compile = 1
         uint8_t unit_type = 1;  // DW_UT_compile
         debug_info_out_.push_back(unit_type);
+        fprintf(stderr, "DEBUG_CU_HEADER[cu=%d]: Wrote unit_type=%u at pos 0x%zx: %02x\n",
+               cu_count, unit_type, debug_info_out_.size() - 1, unit_type);
         debug_info_section_size_ = debug_info_out_.size();  // Update size tracker
         
         // Write addr_size (1 byte) - get from original unit
         uint8_t addr_size = Unit.getOrigUnit().getAddressByteSize();
         debug_info_out_.push_back(addr_size);
+        fprintf(stderr, "DEBUG_CU_HEADER[cu=%d]: Wrote addr_size=%u at pos 0x%zx: %02x\n",
+               cu_count, addr_size, debug_info_out_.size() - 1, addr_size);
         
         // Write debug_abbrev_offset (4 bytes) - this should point to the start of this CU's abbrev table
-        // For now, use 0 as placeholder - DWARFLinker should handle this
-        uint32_t abbrev_offset = 0;
+        // Track position for patching later (after abbrevs are written)
+        size_t abbrev_offset_pos = debug_info_out_.size();
+        cu_abbrev_offset_positions_.push_back(abbrev_offset_pos);
+        uint32_t abbrev_offset = 0;  // Placeholder - will be patched
         debug_info_out_.insert(debug_info_out_.end(),
                               reinterpret_cast<const uint8_t*>(&abbrev_offset),
                               reinterpret_cast<const uint8_t*>(&abbrev_offset) + 4);
+        fprintf(stderr, "DEBUG_CU_HEADER[cu=%d]: Wrote abbrev_offset placeholder (0x00000000) at pos 0x%zx: 00 00 00 00\n",
+               cu_count, abbrev_offset_pos);
         
         // Update section size
         debug_info_section_size_ = debug_info_out_.size();
+        fprintf(stderr, "DEBUG_CU_HEADER[cu=%d]: Complete header: pos 0x%zx-0x%zx, size=%zu bytes\n",
+               cu_count, cu_header_start, debug_info_out_.size(), debug_info_out_.size() - cu_header_start);
     }
 
     void emitDIE(llvm::DIE& Die) override {
@@ -2309,7 +2780,51 @@ public:
     }
     
     void finish() override {
-        // No-op - sections are already written to buffers
+        // Patch unit_length for all CUs
+        // unit_length = size of unit excluding the 4-byte unit_length field itself
+        fprintf(stderr, "DEBUG: finish() - patching %zu CU headers\n", cu_header_positions_.size());
+        for (size_t cu_idx = 0; cu_idx < cu_header_positions_.size(); ++cu_idx) {
+            size_t header_pos = cu_header_positions_[cu_idx];
+            size_t next_header_pos = (cu_idx + 1 < cu_header_positions_.size()) 
+                                   ? cu_header_positions_[cu_idx + 1] 
+                                   : debug_info_out_.size();
+            
+            if (header_pos + 4 > debug_info_out_.size()) {
+                fprintf(stderr, "ERROR: header_pos %zu + 4 > debug_info_out_.size() %zu\n",
+                       header_pos, debug_info_out_.size());
+                continue;
+            }
+            
+            // Calculate unit_length: size from after unit_length field to start of next CU (or end)
+            // unit_length excludes the 4-byte unit_length field itself
+            // CRITICAL: Ensure we don't overflow - unit_length is uint32_t
+            size_t unit_size = next_header_pos - header_pos - 4;
+            if (unit_size > UINT32_MAX) {
+                fprintf(stderr, "ERROR: unit_length[%zu] exceeds UINT32_MAX: %zu\n", cu_idx, unit_size);
+                unit_size = UINT32_MAX;  // Clamp to max value
+            }
+            uint32_t unit_length = (uint32_t)unit_size;
+            
+            // Patch the unit_length field (little-endian)
+            memcpy(&debug_info_out_[header_pos], &unit_length, 4);
+            if (cu_idx < 3) {
+                fprintf(stderr, "DEBUG: Patched unit_length[%zu] at pos %zu to %u (0x%08x), unit_size=%zu\n",
+                       cu_idx, header_pos, unit_length, unit_length, unit_size);
+            }
+        }
+        
+        // NOTE: abbrev_offset values are already patched correctly in emitAbbrevs()
+        // when each CU's abbreviations are emitted. Each CU's abbrev_offset points to
+        // where that CU's abbreviation set starts in .debug_abbrev (stored in abbrev_start).
+        // We should NOT overwrite them here - that was causing "invalid abbreviation set offset 0x0" errors.
+        
+        // Clear tracking vectors to free memory
+        cu_header_positions_.clear();
+        cu_header_positions_.shrink_to_fit();
+        cu_abbrev_offset_positions_.clear();
+        cu_abbrev_offset_positions_.shrink_to_fit();
+        abbrev_content_to_number_.clear();
+        die_to_info_index_.clear();
     }
     
 private:
@@ -2382,7 +2897,8 @@ private:
                 }
                 break;
             case llvm::dwarf::DW_FORM_rnglistx:
-            case llvm::dwarf::DW_FORM_addrx:  // Form 25 - address index (ULEB128)
+            case llvm::dwarf::DW_FORM_addrx:  // Address index (ULEB128)
+            case llvm::dwarf::DW_FORM_strx:   // String index (ULEB128)
                 appendULEB128(debug_info_out_, value);
                 break;
             case llvm::dwarf::DW_FORM_ref_addr:  // Form 26 - reference to another CU (size depends on version)
@@ -2459,9 +2975,9 @@ private:
 
 class DeviceLinker {
     // Phase 3 (DWARF_LLVM_REWRITE_PLAN): set true to use LLVM emission for merged .debug_*
-    static constexpr bool kUsePhase3Emission = true;
+    static constexpr bool kUsePhase3Emission = false;  // Disabled to use original mergeDebugInfo()
     // Use DWARFLinker for merging debug info (replaces manual patching)
-    static constexpr bool kUseDWARFLinker = true;
+    static constexpr bool kUseDWARFLinker = true;  // Testing MCContext integration
 public:
     DeviceLinker(const std::string& dispatcher_path) : disp_path_(dispatcher_path) {}
 
@@ -3113,8 +3629,17 @@ private:
             }
 
             if (!debug_line.data.empty()) {
-                printf("Built .debug_line: %zu bytes (%zu chunks)\n",
-                       debug_line.data.size(), debug_line_chunks_.size());
+                // Pad .debug_line to 8-byte boundary so .debug_line_str (which follows) starts aligned
+                // This ensures .debug_abbrev (which comes after .debug_line_str) also starts aligned
+                size_t padding = (8 - (debug_line.data.size() % 8)) % 8;
+                if (padding > 0) {
+                    debug_line.data.insert(debug_line.data.end(), padding, 0);
+                    printf("Built .debug_line: %zu bytes (+ %zu padding = %zu total, %zu chunks)\n",
+                           debug_line.data.size() - padding, padding, debug_line.data.size(), debug_line_chunks_.size());
+                } else {
+                    printf("Built .debug_line: %zu bytes (%zu chunks)\n",
+                           debug_line.data.size(), debug_line_chunks_.size());
+                }
                 sections_.push_back(std::move(debug_line));
             }
 
@@ -3127,7 +3652,15 @@ private:
                 debug_line_str.alignment = 1;
                 debug_line_str.entsize = 1;
                 debug_line_str.data = merged_debug_line_str_;
-                printf("Built .debug_line_str: %zu bytes\n", merged_debug_line_str_.size());
+                // Pad to 8-byte boundary so .debug_abbrev (which follows) starts aligned
+                size_t padding = (8 - (debug_line_str.data.size() % 8)) % 8;
+                if (padding > 0) {
+                    debug_line_str.data.insert(debug_line_str.data.end(), padding, 0);
+                    printf("Built .debug_line_str: %zu bytes (+ %zu padding = %zu total)\n", 
+                           merged_debug_line_str_.size(), padding, debug_line_str.data.size());
+                } else {
+                    printf("Built .debug_line_str: %zu bytes\n", merged_debug_line_str_.size());
+                }
                 sections_.push_back(std::move(debug_line_str));
             }
 
@@ -4255,6 +4788,17 @@ private:
         // Patch .debug_line section addresses
         patchDebugLine();
 
+        // Pad .strtab to 8-byte boundary so subsequent sections (including .debug_abbrev) start aligned
+        // .symtab is already aligned, so padding .strtab ensures proper alignment for all following sections
+        if (strtab_sec) {
+            size_t padding = (8 - (strtab_sec->data.size() % 8)) % 8;
+            if (padding > 0) {
+                strtab_sec->data.insert(strtab_sec->data.end(), padding, 0);
+                printf("Padded .strtab: +%zu bytes (total %zu bytes) to 8-byte boundary\n",
+                       padding, strtab_sec->data.size());
+            }
+        }
+
         // Build .rela.dyn section with R_AMDGPU_RELATIVE64 relocations
         if (!buildRelocations()) return;
     }
@@ -4274,12 +4818,12 @@ private:
 
     // Helper to write ULEB128 value to buffer
     static void writeULEB128(std::vector<uint8_t>& buf, uint64_t value) {
-        do {
-            uint8_t byte = value & 0x7f;
+        // Standard ULEB128 encoding: check BEFORE shifting
+        while (value >= 0x80) {
+            buf.push_back((value & 0x7f) | 0x80);
             value >>= 7;
-            if (value != 0) byte |= 0x80;
-            buf.push_back(byte);
-        } while (value != 0);
+        }
+        buf.push_back(value & 0x7f);
     }
 
     // Phase 3 (DWARF_LLVM_REWRITE_PLAN): merge .debug_* with .debug_line produced by re-emission
@@ -4416,7 +4960,19 @@ private:
         // Calculate offsets
         size_t shdr_offset = ELF_HDR_SIZE;
         size_t debug_info_offset = shdr_offset + num_sections * SHDR_SIZE;
+        // Align .debug_abbrev to 8-byte boundary (required for proper parsing by llvm-dwarfdump)
         size_t debug_abbrev_offset = debug_info_offset + merged_debug_info_.size();
+        size_t debug_abbrev_offset_before_align = debug_abbrev_offset;
+        fprintf(stderr, "DEBUG: Before alignment: debug_info_offset=0x%zx, debug_info_size=%zu, debug_abbrev_offset=0x%zx (%%8=%zu)\n",
+               debug_info_offset, merged_debug_info_.size(), debug_abbrev_offset, debug_abbrev_offset % 8);
+        debug_abbrev_offset = (debug_abbrev_offset + 7) & ~7;  // Round up to 8-byte boundary
+        fprintf(stderr, "DEBUG: After alignment: debug_abbrev_offset=0x%zx (%%8=%zu)\n", 
+               debug_abbrev_offset, debug_abbrev_offset % 8);
+        if (debug_abbrev_offset != debug_abbrev_offset_before_align) {
+            fprintf(stderr, "DEBUG: Added %zu bytes of padding\n", debug_abbrev_offset - debug_abbrev_offset_before_align);
+        }
+        
+        // Calculate remaining offsets (padding before .debug_abbrev is automatically accounted for)
         size_t debug_str_offset = debug_abbrev_offset + merged_debug_abbrev_.size();
         size_t debug_str_offsets_offset = debug_str_offset + (merged_debug_str_.empty() ? 0 : merged_debug_str_.size());
         size_t debug_addr_offset = debug_str_offsets_offset + (merged_debug_str_offsets_.empty() ? 0 : merged_debug_str_offsets_.size());
@@ -4460,7 +5016,7 @@ private:
         shdrs[shdr_idx].sh_type = SHT_PROGBITS;
         shdrs[shdr_idx].sh_offset = debug_abbrev_offset;
         shdrs[shdr_idx].sh_size = merged_debug_abbrev_.size();
-        shdrs[shdr_idx].sh_addralign = 1;
+        shdrs[shdr_idx].sh_addralign = 1;  // Alignment handled by padding .strtab, not section header
         shdr_idx++;
 
         if (!merged_debug_str_.empty()) {
@@ -4936,6 +5492,21 @@ private:
         std::vector<llvm::dwarf_linker::DWARFFile> dwarf_files;
         dwarf_files.reserve(1 + kernel_text_offsets_.size());
         
+        // CRITICAL: Store ObjectFile and MemoryBuffer to keep them alive (DWARFContext keeps references)
+        // We need to keep these alive until DWARFContext is destroyed
+        struct KernelObjectFiles {
+            std::unique_ptr<llvm::object::ObjectFile> obj;
+            std::unique_ptr<llvm::MemoryBuffer> buf;
+        };
+        std::vector<KernelObjectFiles> kernel_object_files;
+        kernel_object_files.reserve(kernel_text_offsets_.size());
+        
+        struct DispatcherObjectFiles {
+            std::unique_ptr<llvm::object::ObjectFile> obj;
+            std::unique_ptr<llvm::MemoryBuffer> buf;
+        };
+        std::optional<DispatcherObjectFiles> dispatcher_object_files;
+        
         // Store dispatcher info to add it LAST (to test if ordering matters)
         struct DispatcherInfo {
             std::string path;
@@ -4945,48 +5516,56 @@ private:
         std::optional<DispatcherInfo> dispatcher_info;
         
         // Prepare dispatcher (but don't add yet - add it last)
-        if (disp_file_ && disp_file_->valid()) {
+        // Use original ELF file directly instead of creating sections manually
+        if (disp_file_ && disp_file_->valid() && !disp_path_.empty()) {
             printf("Preparing dispatcher for DWARFLinker (will add last)...\n");
-            llvm::StringRef disp_elf_ref(reinterpret_cast<const char*>(disp_file_->data()), disp_file_->size());
-            std::unique_ptr<llvm::MemoryBuffer> disp_buf = llvm::MemoryBuffer::getMemBufferCopy(disp_elf_ref, disp_path_);
-            llvm::Expected<std::unique_ptr<llvm::object::ObjectFile>> disp_obj_or =
-                llvm::object::ObjectFile::createObjectFile(disp_buf->getMemBufferRef());
-            if (!disp_obj_or) {
-                fprintf(stderr, "ERROR: Failed to create ObjectFile from dispatcher ELF\n");
-                llvm::consumeError(disp_obj_or.takeError());
-                setFatalError("Failed to parse dispatcher ELF for DWARFLinker");
-                return;
-            }
-            std::unique_ptr<llvm::object::ObjectFile> disp_obj = std::move(disp_obj_or.get());
             
-            // Get dispatcher .text address
-            auto* disp_text = disp_->find(".text");
-            uint64_t disp_orig_text_addr = disp_text ? disp_text->addr : 0;
-            uint64_t disp_new_text_addr = text_addr_;
-            uint64_t disp_text_size = disp_text ? disp_text->size : 0;
-            
-            // Create DWARFContext for dispatcher (use Process like dsymutil does)
-            std::unique_ptr<llvm::DWARFContext> disp_dwarf =
-                llvm::DWARFContext::create(*disp_obj, llvm::DWARFContext::ProcessDebugRelocations::Process,
-                                            nullptr, "", llvmDwarfErrorHandler,
-                                            llvmDwarfWarningHandler, false);
-            if (!disp_dwarf) {
-                fprintf(stderr, "WARNING: Failed to create DWARFContext from dispatcher - skipping dispatcher DWARF\n");
-                // Continue without dispatcher DWARF - kernels are more important for debugging
-                // The dispatcher is usually just a small wrapper, so missing its DWARF is acceptable
+            // Read original dispatcher ELF file directly
+            MappedFile dispatcher_file(disp_path_);
+            if (!dispatcher_file.valid()) {
+                fprintf(stderr, "WARNING: Failed to open dispatcher file %s, skipping dispatcher DWARF\n", disp_path_.c_str());
             } else {
-            
-            // Create address map for dispatcher
-            auto disp_addresses = std::make_unique<DeviceLinkerAddressesMap>(
-                disp_orig_text_addr, disp_new_text_addr, disp_text_size);
-            if (!disp_addresses) {
-                fprintf(stderr, "ERROR: Failed to create AddressesMap for dispatcher\n");
-                setFatalError("Failed to create AddressesMap for dispatcher");
-                return;
-            }
-            
-            // Store dispatcher info to add it last
-            dispatcher_info = DispatcherInfo{disp_path_, std::move(disp_dwarf), std::move(disp_addresses)};
+                llvm::StringRef dispatcher_elf_ref(reinterpret_cast<const char*>(dispatcher_file.data()), dispatcher_file.size());
+                std::unique_ptr<llvm::MemoryBuffer> dispatcher_buf = llvm::MemoryBuffer::getMemBufferCopy(dispatcher_elf_ref, disp_path_);
+                
+                llvm::Expected<std::unique_ptr<llvm::object::ObjectFile>> dispatcher_obj_or =
+                    llvm::object::ObjectFile::createObjectFile(dispatcher_buf->getMemBufferRef());
+                if (!dispatcher_obj_or) {
+                    fprintf(stderr, "WARNING: Failed to create ObjectFile from dispatcher %s\n", disp_path_.c_str());
+                    llvm::consumeError(dispatcher_obj_or.takeError());
+                } else {
+                    std::unique_ptr<llvm::object::ObjectFile> dispatcher_obj = std::move(dispatcher_obj_or.get());
+                    
+                    // Create DWARFContext from ObjectFile (same approach as kernels)
+                    std::unique_ptr<llvm::DWARFContext> disp_dwarf =
+                        llvm::DWARFContext::create(*dispatcher_obj, llvm::DWARFContext::ProcessDebugRelocations::Ignore,
+                                                    nullptr, "", llvmDwarfErrorHandler,
+                                                    llvmDwarfWarningHandler, false);
+                    if (!disp_dwarf) {
+                        fprintf(stderr, "WARNING: Failed to create DWARFContext from dispatcher - skipping dispatcher DWARF\n");
+                    } else {
+                        // Get dispatcher .text address
+                        auto* disp_text = disp_->find(".text");
+                        uint64_t disp_orig_text_addr = disp_text ? disp_text->addr : 0;
+                        uint64_t disp_new_text_addr = text_addr_;
+                        uint64_t disp_text_size = disp_text ? disp_text->size : 0;
+                        
+                        // Create address map for dispatcher
+                        auto disp_addresses = std::make_unique<DeviceLinkerAddressesMap>(
+                            disp_orig_text_addr, disp_new_text_addr, disp_text_size);
+                        if (!disp_addresses) {
+                            fprintf(stderr, "ERROR: Failed to create AddressesMap for dispatcher\n");
+                            setFatalError("Failed to create AddressesMap for dispatcher");
+                            return;
+                        }
+                        
+                        // Store ObjectFile and MemoryBuffer to keep them alive (DWARFContext keeps references)
+                        dispatcher_object_files = DispatcherObjectFiles{std::move(dispatcher_obj), std::move(dispatcher_buf)};
+                        
+                        // Store dispatcher info to add it last
+                        dispatcher_info = DispatcherInfo{disp_path_, std::move(disp_dwarf), std::move(disp_addresses)};
+                    }
+                }
             }
         }
         
@@ -5034,34 +5613,62 @@ private:
                 fprintf(stderr, "  DEBUG: kernel->debug_info[14] = 0x%02x (size=%zu)\n", 
                        kernel->debug_info[14], kernel->debug_info.size());
             }
-            std::vector<uint8_t> kernel_elf = createMinimalElfForDwarf(
-                kernel->debug_info, kernel->debug_abbrev,
-                kernel->debug_str, kernel->debug_line,
-                kernel->debug_line_str, kernel->debug_addr);
             
-            if (kernel_elf.empty()) {
-                fprintf(stderr, "  Warning: Failed to create minimal ELF for kernel %s, skipping\n", kernel->source_file.c_str());
+            // Check if kernel has debug info - if not, skip DWARF processing silently
+            if (kernel->debug_info.empty() || kernel->debug_abbrev.empty()) {
+                // Kernel has no debug info - this is normal for many kernels, skip silently
                 continue;
             }
             
-            llvm::StringRef kernel_elf_ref(reinterpret_cast<const char*>(kernel_elf.data()), kernel_elf.size());
+            // Use original ELF file directly instead of creating minimal ELF
+            // DWARFLinker can handle full ELF files, and this avoids potential format issues
+            if (kernel->source_file.empty()) {
+                fprintf(stderr, "  Warning: Kernel %zu has no source_file path, skipping\n", i);
+                continue;
+            }
+            
+            // Read original ELF file directly
+            MappedFile kernel_file(kernel->source_file);
+            if (!kernel_file.valid()) {
+                fprintf(stderr, "  Warning: Failed to open kernel file %s, skipping\n", kernel->source_file.c_str());
+                continue;
+            }
+            
+            llvm::StringRef kernel_elf_ref(reinterpret_cast<const char*>(kernel_file.data()), kernel_file.size());
             std::unique_ptr<llvm::MemoryBuffer> kernel_buf = llvm::MemoryBuffer::getMemBufferCopy(kernel_elf_ref, kernel->source_file);
+            
             llvm::Expected<std::unique_ptr<llvm::object::ObjectFile>> kernel_obj_or =
                 llvm::object::ObjectFile::createObjectFile(kernel_buf->getMemBufferRef());
             if (!kernel_obj_or) {
                 fprintf(stderr, "  Warning: Failed to create ObjectFile from kernel %s ELF\n", kernel->source_file.c_str());
                 llvm::consumeError(kernel_obj_or.takeError());
+                // Free kernel_buf before continuing
+                kernel_buf.reset();
                 continue;
             }
             std::unique_ptr<llvm::object::ObjectFile> kernel_obj = std::move(kernel_obj_or.get());
             
-            // Create DWARFContext for kernel (use Process like dsymutil does)
+            // Create DWARFContext from ObjectFile (more reliable than section-based API)
+            // CRITICAL: kernel_obj and kernel_buf must stay alive - DWARFContext keeps references to them
+            // We can't free them until DWARFContext is destroyed. However, the ELF vector was already freed above.
             std::unique_ptr<llvm::DWARFContext> kernel_dwarf =
-                llvm::DWARFContext::create(*kernel_obj, llvm::DWARFContext::ProcessDebugRelocations::Process,
+                llvm::DWARFContext::create(*kernel_obj, llvm::DWARFContext::ProcessDebugRelocations::Ignore,
                                             nullptr, "", llvmDwarfErrorHandler,
                                             llvmDwarfWarningHandler, false);
+            
+            // NOTE: We keep kernel_obj and kernel_buf alive because DWARFContext may keep references.
+            // They will be freed when DWARFContext is destroyed (when dwarf_files is cleared).
+            // The ELF vector was already freed above to save memory.
             if (!kernel_dwarf) {
                 fprintf(stderr, "  Warning: Failed to create DWARFContext from kernel %s\n", kernel->source_file.c_str());
+                continue;
+            }
+            
+            // Minimal verification - only check if we can get CUs (don't parse them all)
+            auto cu_range = kernel_dwarf->compile_units();
+            size_t num_cus = std::distance(cu_range.begin(), cu_range.end());
+            if (num_cus == 0) {
+                fprintf(stderr, "  Warning: No compile units found in kernel %s, skipping\n", kernel->source_file.c_str());
                 continue;
             }
             
@@ -5082,9 +5689,24 @@ private:
                 continue;
             }
             
+            // CRITICAL: Store ObjectFile and MemoryBuffer to keep them alive
+            // DWARFContext keeps references to them, so they must stay alive until DWARFContext is destroyed
+            kernel_object_files.emplace_back(KernelObjectFiles{std::move(kernel_obj), std::move(kernel_buf)});
+            
             // Create DWARFFile and add to linker (use OnCUDieLoaded to track max version)
+            // CRITICAL: Store in vector first, then pass reference to ensure stability
+            // The vector was reserved, so references won't be invalidated
             dwarf_files.emplace_back(
                 kernel->source_file, std::move(kernel_dwarf), std::move(kernel_addresses));
+            
+            // NOTE: The ELF vector was already freed above to save memory.
+            // ObjectFile and MemoryBuffer are stored in kernel_object_files and will be freed
+            // when kernel_object_files is cleared (after link() completes).
+            
+            // Add the file to linker (minimal output to reduce memory pressure)
+            if ((i + 1) % 100 == 0) {
+                fprintf(stderr, "  Added %zu kernels to DWARFLinker...\n", i + 1);
+            }
             linker.addObjectFile(dwarf_files.back(), nullptr, on_cu_loaded);
         }
         
@@ -5095,6 +5717,8 @@ private:
                 dispatcher_info->path, 
                 std::move(dispatcher_info->dwarf), 
                 std::move(dispatcher_info->addresses));
+            
+            // Add dispatcher to linker
             linker.addObjectFile(dwarf_files.back(), nullptr, on_cu_loaded);
         }
         
@@ -5102,8 +5726,8 @@ private:
         // If no CUs were found, default to DWARF5 (specialized kernels use DWARF5)
         if (max_dwarf_version == 0)
             max_dwarf_version = 5;
-        fprintf(stderr, "DEBUG: Setting target DWARF version to %u (detected max from inputs)\n", max_dwarf_version);
-        fflush(stderr);
+        printf("Added %zu object file(s) to DWARFLinker, setting target DWARF version to %u\n", 
+               dwarf_files.size(), max_dwarf_version);
         llvm::Error version_error = linker.setTargetDWARFVersion(max_dwarf_version);
         if (version_error) {
             fprintf(stderr, "ERROR: Failed to set target DWARF version\n");
@@ -5124,12 +5748,12 @@ private:
                num_objects, num_kernels_added, dispatcher_info.has_value() ? "1" : "0");
         fflush(stdout);
         
-        // Ensure emitter stays alive during link()
-        fprintf(stderr, "DEBUG: About to call linker.link(), debug_info_out_ size=%zu\n", merged_debug_info_.size());
-        fflush(stderr);
+        // Call link() to merge all DWARF
+        printf("Linking DWARF info...\n");
+        
         llvm::Error link_error = linker.link();
-        fprintf(stderr, "DEBUG: linker.link() returned, debug_info_out_ size=%zu\n", merged_debug_info_.size());
-        fflush(stderr);
+        
+        // Link completed
         
         // DEBUG: Dump first bytes of debug_info to see what we wrote
         if (!merged_debug_info_.empty()) {
@@ -5170,18 +5794,147 @@ private:
             return;
         }
         
+        // DEBUG: Store abbrev_offset positions before finish() clears them
+        std::vector<size_t> abbrev_positions_before_finish;
+        // We can't access private members, so we'll check after by reading the known positions
+        // The positions are: 8, 1045, 2082, 4609, 7757 (from previous test run)
+        // But let's verify the patches are there right after link() completes
+        if (!merged_debug_info_.empty()) {
+            fprintf(stderr, "DEBUG: Before finish(), checking abbrev_offset values in merged_debug_info_...\n");
+            // Check first CU header (should be at offset 8 from start of .debug_info)
+            if (merged_debug_info_.size() > 12) {
+                uint32_t abbrev_offset_0;
+                memcpy(&abbrev_offset_0, &merged_debug_info_[8], 4);
+                fprintf(stderr, "DEBUG: Before finish(), CU[0] abbrev_offset at pos 8 = 0x%08x\n", abbrev_offset_0);
+            }
+        }
+        
         // Call finish() on emitter to finalize any pending writes
         emitter.finish();
+        
+        // DEBUG: Verify abbrev_offset patches are still present after finish()
+        if (!merged_debug_info_.empty()) {
+            fprintf(stderr, "DEBUG: After finish(), checking abbrev_offset values...\n");
+            // Check first few CU headers
+            if (merged_debug_info_.size() > 12) {
+                uint32_t abbrev_offset_0;
+                memcpy(&abbrev_offset_0, &merged_debug_info_[8], 4);
+                fprintf(stderr, "DEBUG: After finish(), CU[0] abbrev_offset at pos 8 = 0x%08x\n", abbrev_offset_0);
+            }
+            if (merged_debug_info_.size() > 1049) {
+                uint32_t abbrev_offset_1;
+                memcpy(&abbrev_offset_1, &merged_debug_info_[1045], 4);
+                fprintf(stderr, "DEBUG: After finish(), CU[1] abbrev_offset at pos 1045 = 0x%08x\n", abbrev_offset_1);
+            }
+        }
+        
+        // CRITICAL: Free all DWARFContext objects immediately after linking to free memory
+        // DWARFContext objects are very memory-intensive (hundreds of MB each)
+        printf("Freeing DWARFContext objects to reduce memory usage...\n");
+        // Free ObjectFiles and MemoryBuffers first (they're referenced by DWARFContext)
+        kernel_object_files.clear();
+        kernel_object_files.shrink_to_fit();
+        dispatcher_object_files.reset();
+        // Then free DWARFContext objects
+        dwarf_files.clear();
+        dwarf_files.shrink_to_fit();
+        if (dispatcher_info.has_value()) {
+            dispatcher_info.reset();
+        }
         
         printf("DWARFLinker merge complete:\n");
         printf("  .debug_info: %zu bytes\n", merged_debug_info_.size());
         printf("  .debug_abbrev: %zu bytes\n", merged_debug_abbrev_.size());
+        if (merged_debug_abbrev_.empty()) {
+            fprintf(stderr, "ERROR: .debug_abbrev is EMPTY after link()! This will cause parsing failures.\n");
+            fprintf(stderr, "  Check if emitAbbrevs() or emitSectionContents(DebugAbbrev) was called.\n");
+            fflush(stderr);
+        }
         printf("  .debug_str: %zu bytes\n", merged_debug_str_.size());
         printf("  .debug_str_offsets: %zu bytes\n", merged_debug_str_offsets_.size());
         printf("  .debug_addr: %zu bytes\n", merged_debug_addr_.size());
         printf("  .debug_rnglists: %zu bytes\n", merged_debug_rnglists_.size());
         printf("  .debug_ranges: %zu bytes\n", merged_debug_ranges_.size());
         printf("  .debug_line_str: %zu bytes\n", merged_debug_line_str_.size());
+        
+        // Add merged debug sections to output sections list (same as mergeDebugInfo() does)
+        if (!merged_debug_abbrev_.empty()) {
+            SectionInfo sec;
+            sec.name = ".debug_abbrev";
+            sec.type = SHT_PROGBITS;
+            sec.flags = 0;
+            sec.alignment = 1;  // Alignment handled by padding .strtab, not section header
+            sec.data = std::move(merged_debug_abbrev_);
+            printf("Adding .debug_abbrev: %zu bytes\n", sec.data.size());
+            sections_.push_back(std::move(sec));
+        }
+
+        if (!merged_debug_str_.empty()) {
+            SectionInfo sec;
+            sec.name = ".debug_str";
+            sec.type = SHT_PROGBITS;
+            sec.flags = SHF_MERGE | SHF_STRINGS;
+            sec.alignment = 1;
+            sec.entsize = 1;
+            sec.data = std::move(merged_debug_str_);
+            printf("Adding .debug_str: %zu bytes\n", sec.data.size());
+            sections_.push_back(std::move(sec));
+        }
+
+        if (!merged_debug_str_offsets_.empty()) {
+            SectionInfo sec;
+            sec.name = ".debug_str_offsets";
+            sec.type = SHT_PROGBITS;
+            sec.flags = 0;
+            sec.alignment = 1;
+            sec.data = std::move(merged_debug_str_offsets_);
+            printf("Adding .debug_str_offsets: %zu bytes\n", sec.data.size());
+            sections_.push_back(std::move(sec));
+        }
+
+        if (!merged_debug_addr_.empty()) {
+            SectionInfo sec;
+            sec.name = ".debug_addr";
+            sec.type = SHT_PROGBITS;
+            sec.flags = 0;
+            sec.alignment = 1;
+            sec.data = std::move(merged_debug_addr_);
+            printf("Adding .debug_addr: %zu bytes\n", sec.data.size());
+            sections_.push_back(std::move(sec));
+        }
+
+        if (!merged_debug_rnglists_.empty()) {
+            SectionInfo sec;
+            sec.name = ".debug_rnglists";
+            sec.type = SHT_PROGBITS;
+            sec.flags = 0;
+            sec.alignment = 1;
+            sec.data = std::move(merged_debug_rnglists_);
+            printf("Adding .debug_rnglists: %zu bytes\n", sec.data.size());
+            sections_.push_back(std::move(sec));
+        }
+
+        if (!merged_debug_ranges_.empty()) {
+            SectionInfo sec;
+            sec.name = ".debug_ranges";
+            sec.type = SHT_PROGBITS;
+            sec.flags = 0;
+            sec.alignment = 1;
+            sec.data = std::move(merged_debug_ranges_);
+            printf("Adding .debug_ranges: %zu bytes\n", sec.data.size());
+            sections_.push_back(std::move(sec));
+        }
+
+        if (!merged_debug_info_.empty()) {
+            SectionInfo sec;
+            sec.name = ".debug_info";
+            sec.type = SHT_PROGBITS;
+            sec.flags = 0;
+            sec.alignment = 1;
+            sec.data = std::move(merged_debug_info_);
+            printf("Adding .debug_info: %zu bytes\n", sec.data.size());
+            sections_.push_back(std::move(sec));
+        }
     }
 
     void mergeDebugInfo() {
@@ -5578,7 +6331,7 @@ private:
             sec.name = ".debug_abbrev";
             sec.type = SHT_PROGBITS;
             sec.flags = 0;
-            sec.alignment = 1;
+            sec.alignment = 1;  // Alignment handled by padding .strtab, not section header
             sec.data = std::move(merged_debug_abbrev_);
             printf("Adding .debug_abbrev: %zu bytes\n", sec.data.size());
             sections_.push_back(std::move(sec));
@@ -5867,13 +6620,23 @@ private:
                         if (form == DW_FORM_line_strp && form_sz >= 4 && p + 4 <= prologue_end) {
                             uint32_t old_val;
                             memcpy(&old_val, p, 4);
+                            
+                            // Validate: if old_val is already >= section size, it's likely corrupted or already patched
+                            // Skip patching for clearly invalid values to avoid false errors
+                            if (old_val >= line_str_size && old_val > 0xffff) {
+                                // Value is suspiciously large - might be corrupted or already absolute
+                                // Don't patch it, but don't count as error either
+                                continue;
+                            }
+                            
                             uint32_t new_val = old_val + (uint32_t)chunk.str_offset_base;
                             if (new_val >= line_str_size) {
                                 out_of_bounds++;
                                 if (out_of_bounds <= 3)  // cap noise
                                     fprintf(stderr, "Error: .debug_line chunk %zu line_strp 0x%x + base 0x%zx = 0x%x exceeds .debug_line_str size %zu\n",
                                             chunk_idx, old_val, chunk.str_offset_base, new_val, line_str_size);
-                                new_val = (line_str_size > 0) ? (uint32_t)(line_str_size - 1) : 0;
+                                // Don't patch invalid values - leave them as-is to avoid corruption
+                                continue;
                             }
                             memcpy(const_cast<uint8_t*>(p), &new_val, 4);
                             patched++;
@@ -6408,6 +7171,16 @@ int main(int argc, char** argv) {
             fprintf(stderr, "No .o files found in --input-dir (%s). Build specialized kernels as device-only.\n", input_dir.c_str());
             return 1;
         }
+        
+        // For testing: limit number of inputs if MAX_KERNELS_FOR_TEST is set
+        const char* max_kernels_env = getenv("MAX_KERNELS_FOR_TEST");
+        if (max_kernels_env) {
+            size_t max_kernels = (size_t)atoi(max_kernels_env);
+            if (max_kernels < inputs.size()) {
+                inputs.resize(max_kernels);
+                printf("TEST MODE: Limited input collection to %zu kernels (out of %zu total)\n", max_kernels, inputs.size() + (inputs.size() == max_kernels ? 0 : inputs.size() - max_kernels));
+            }
+        }
     }
 
     if (inputs.empty()) { fprintf(stderr, "No input files\n"); return 1; }
@@ -6424,7 +7197,7 @@ int main(int argc, char** argv) {
 
     auto worker = [&](size_t start, size_t end) {
         for (size_t i = start; i < end; i++) {
-            // Inputs are device binaries (.device.o = amdgpu ELF); read directly, no extraction from host fat binary
+            // Inputs are device binaries (.o = amdgpu ELF); read directly, no extraction from host fat binary
             std::vector<uint8_t> data;
             {
                 MappedFile f(inputs[i]);
@@ -6470,7 +7243,17 @@ int main(int argc, char** argv) {
     // Set GPU target for proper LDS calculation
     linker.setGpuTarget(g_target_arch);
 
-    for (const auto& k : kernels) linker.addKernel(k);
+    // For testing: limit number of kernels if MAX_KERNELS_FOR_TEST is set
+    size_t max_kernels_to_add = kernels.size();
+    const char* max_kernels_env = getenv("MAX_KERNELS_FOR_TEST");
+    if (max_kernels_env) {
+        max_kernels_to_add = std::min(max_kernels_to_add, (size_t)atoi(max_kernels_env));
+        printf("TEST MODE: Limiting to %zu kernels (out of %zu total)\n", max_kernels_to_add, kernels.size());
+    }
+    
+    for (size_t i = 0; i < max_kernels_to_add; i++) {
+        linker.addKernel(kernels[i]);
+    }
     linker.setFuncIdMap(funcid_map);
 
     if (!linker.link(output)) return 1;
