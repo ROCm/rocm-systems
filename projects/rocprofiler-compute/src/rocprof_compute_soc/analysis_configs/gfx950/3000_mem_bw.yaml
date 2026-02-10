@@ -20,36 +20,77 @@ Panel Config:
         TCP_TCR_TCP_STALL_CYCLES:
           value: AVG(TCP_TCR_TCP_STALL_CYCLES_sum)
           unit: cycles
-        L1 Cache Backpressured by L2:
-          value: AVG((((TCP_TCR_TCP_STALL_CYCLES * 100) / TCP_GATE_EN2_sum) if (TCP_GATE_EN2_sum != 0) else None))
+        L1 Cache stalled by L2:
+          value: SUM((TCP_TCR_TCP_STALL_CYCLES * 100)) / SUM(TCP_GATE_EN2_sum)
           unit: pct
         L1 Cache - TA coalesce rate:
-          value: AVG(((((4 * TA_BUFFER_WAVEFRONTS_sum) * 100) / TA_BUFFER_TOTAL_CYCLES_sum) if (TCP_GATE_EN2_sum != 0) else None))
+          value: SUM(((4 * TA_BUFFER_WAVEFRONTS_sum) * 100)) / SUM(TA_BUFFER_TOTAL_CYCLES_sum)
           unit: pct
         L1 Cache - TA stalled by TCP:
-          value: AVG((((TCP_TCP_TA_ADDR_STALL_CYCLES_sum * 100) / TCP_GATE_EN2_sum) if (TCP_GATE_EN2_sum != 0) else None))
+          value: SUM((TCP_TCP_TA_ADDR_STALL_CYCLES_sum * 100)) / SUM(TCP_GATE_EN2_sum)
           unit: pct
         L1 Cache - VMEM stalled by L1 Cache:
-          value: AVG((((SQ_VMEM_TA_CMD_FIFO_FULL * 100) / SQ_BUSY_CYCLES) if (SQ_BUSY_CYCLES != 0) else None))
+          value: SUM((SQ_VMEM_TA_CMD_FIFO_FULL * 100)) / SUM(SQ_BUSY_CYCLES)
           unit: pct
         L1 Cache - TCP stalled caused by UTCL1:
-          value: AVG((((TCP_UTCL1_STALL_INFLIGHT_MAX_sum * 100) / TCP_GATE_EN2_sum) if (TCP_GATE_EN2_sum != 0) else None))
+          value: SUM((TCP_UTCL1_STALL_INFLIGHT_MAX_sum * 100)) / SUM(TCP_GATE_EN2_sum)
           unit: pct
         L1 Cache - TCP stalled caused by UTCL2:
-          value: AVG((((TCP_UTCL1_STALL_LFIFO_NO_RES_sum * 100) / TCP_GATE_EN2_sum) if (TCP_GATE_EN2_sum != 0) else None))
+          value: SUM((TCP_UTCL1_STALL_LFIFO_NO_RES_sum * 100)) / SUM(TCP_GATE_EN2_sum)
           unit: pct
         L1 Cache - Tag RAM 0 Req:
-          value: AVG((TCP_TAGRAM0_REQ_sum / $denom))
+          value: SUM(TCP_TAGRAM0_REQ_sum) / $denom
           unit: (Requests + $normUnit)
         L1 Cache - Tag RAM 1 Req:
-          value: AVG((TCP_TAGRAM1_REQ_sum / $denom))
+          value: SUM(TCP_TAGRAM1_REQ_sum) / $denom
           unit: (Requests + $normUnit)
         L1 Cache - Tag RAM 2 Req:
-          value: AVG((TCP_TAGRAM2_REQ_sum / $denom))
+          value: SUM(TCP_TAGRAM2_REQ_sum) / $denom
           unit: (Requests + $normUnit)
         L1 Cache - Tag RAM 3 Req:
-          value: AVG((TCP_TAGRAM3_REQ_sum / $denom))
+          value: SUM(TCP_TAGRAM3_REQ_sum) / $denom
           unit: (Requests + $normUnit)
+  - metric_table:
+      id: 3002
+      title: Throughputs & Misc
+      header:
+        metric: Metric
+        value: Avg
+        unit: Unit
+      metric:
+        SQ_WAVE_CYCLES:
+          value: AVG(SQ_WAVE_CYCLES)
+          unit: cycles
+        SQ_INSTS_VMEM:
+          value: AVG(SQ_INSTS_VMEM)
+          unit: insts
+        VMEM issue rate:
+          value: SUM(SQ_INSTS_VMEM) / SUM(SQ_WAVE_CYCLES)
+          unit: insts/cycle
+        CU-L1 throughput:
+          value: SUM(TCP_TOTAL_ACCESSES_sum) / SUM(TCP_GATE_EN2_sum)
+          unit: requests/cycle
+        L1 latency:
+          value: SUM(TCP_TCP_LATENCY_sum) / SUM(TCP_TOTAL_ACCESSES_sum)
+          unit: cycles/request
+        L1 utilization:
+          value: SUM((TCP_GATE_EN2_sum * 100)) / SUM(TCP_GATE_EN1_sum)
+          unit: pct
+        L1 in bound traffic:
+          value: SUM(TA_TOTAL_WAVEFRONTS_sum)
+          unit: insts
+        L1-CU throughput:
+          value: SUM(TD_LOAD_WAVEFRONT_sum) / SUM(TD_TD_BUSY_sum)
+          unit: insts/cycle
+        L1-L2 throughput:
+          value: SUM((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_LATENCY_sum)) / SUM(TCP_GATE_EN2_sum)
+          unit: insts/cycle
+        L2 read latency:
+          value: SUM(TCP_TCC_READ_REQ_LATENCY_sum) / SUM(TCP_TCC_READ_REQ_sum)
+          unit: cycles/request
+        L2 write latency:
+          value: SUM(TCP_TCC_WRITE_REQ_LATENCY_sum) / SUM(TCP_TCC_WRITE_REQ_sum)
+          unit: cycles/request
   metrics_description:
     TCP Busy: The number of cycles TCP is processing pending requests.
     L1 Cache - L1 stalled by L2: Measures backpressure from L2 Cache to L1 Cache. A high stall rate of 10% indicates that L2 is the bottleneck.
