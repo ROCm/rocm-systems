@@ -1438,8 +1438,6 @@ if (DEVICE_LINKER)
     __STDC_FORMAT_MACROS
     __STDC_LIMIT_MACROS
   )
-  
-  # Link against shared LLVM library using llvm-config values
   target_link_directories(device_linker_tool PRIVATE ${LLVM_LIBDIR})
   target_link_libraries(device_linker_tool PRIVATE ${LLVM_LIBNAME})
   set_target_properties(device_linker_tool PROPERTIES

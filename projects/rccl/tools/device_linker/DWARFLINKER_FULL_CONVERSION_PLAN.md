@@ -166,14 +166,91 @@ Remove or stop using in one pass:
 ## 8. Suggested Implementation Order
 
 1. **Implement DeviceLinkerAddressesMap** (per-object delta; `hasValidRelocs` true; reloc adjustment = `new_text_addr - orig_text_addr`). Unit test with a single object if possible.
-2. **Switch to ProcessDebugRelocations::Process** when creating `DWARFContext` for each input in the current `mergeDebugInfoWithDWARFLinker()` and feed **real ELF files** (dispatcher path + kernel path from `kernel->source_file`). Keep the current custom emitter temporarily; see if “invalid abbreviation” goes away with Process + real files.
-3. If the current custom emitter still fails, **implement Option A:** buffer stream + `DwarfStreamer::createStreamer` + parse output ELF to get `.debug_*` and add to `sections_`. Remove the old custom emitter.
-4. **Remove** all manual merge/patch code and the `mergeDebugInfo()` path in one pass as in §5.
-5. **Run** `llvm-dwarfdump --verify` and tests; fix any regressions.
+2. **Call `linker.setNumThreads(1)`** before `linker.link()` so the linker unloads each file’s `DWARFContext` after cloning it; avoids ~200 GiB peak RSS (see §9).
+3. **Switch to ProcessDebugRelocations::Process** when creating `DWARFContext` for each input in the current `mergeDebugInfoWithDWARFLinker()` and feed **real ELF files** (dispatcher path + kernel path from `kernel->source_file`). Keep the current custom emitter temporarily; see if “invalid abbreviation” goes away with Process + real files.
+4. If the current custom emitter still fails, **implement Option A:** buffer stream + `DwarfStreamer::createStreamer` + parse output ELF to get `.debug_*` and add to `sections_`. Remove the old custom emitter.
+5. **Remove** all manual merge/patch code and the `mergeDebugInfo()` path in one pass as in §5.
+6. **Run** `llvm-dwarfdump --verify` and tests; fix any regressions.
+7. **Measure** DWARF phase time and peak RSS; if unacceptable, apply one of the options in §10 (e.g. make full DWARF optional for the default fast path).
 
 ---
 
-## 9. Files to Touch
+## 9. Avoiding High Memory (200 GiB RSS)
+
+The 200 GiB spike comes from having **all** DWARFContexts (dispatcher + 859 kernels) in memory at once. The Classic DWARFLinker already supports freeing each file’s context after it’s processed, but only when it runs **single-threaded**.
+
+### How the linker uses memory
+
+- **Multi-threaded** (`Options.Threads > 1`): It runs **AnalyzeAll** in parallel (one thread per object). That loads **every** `DWARFContext` and parses full DIEs for all of them before **CloneAll** runs. So peak memory = all 860+ contexts.
+- **Single-threaded** (`Options.Threads == 1`): It does, for each object in order: **AnalyzeLambda(I)**, **CloneLambda(I)**, then **cleanupAuxiliarryData(OptContext)**. `cleanupAuxiliarryData` calls **`Context.clear()`**, which calls **`File.unload()`** and thus **`Dwarf.reset(); Addresses.reset()`**. So each file’s `DWARFContext` (and `AddressesMap`) is released before the next file is analyzed. Peak memory ≈ **one** context (plus linker output and your emitter buffers).
+
+### What to do
+
+1. **Force single-threaded linking**  
+   Before **`linker.link()`**, call:
+   ```cpp
+   linker.setNumThreads(1);
+   ```
+   That makes the linker process one object at a time and unload it before the next, avoiding the 200 GiB peak. Link time will increase (no parallel analyze/clone), but RSS should stay in the low GiB range (e.g. one kernel’s DWARF + merged output).
+
+2. **Keep your `DWARFFile` / object storage**  
+   You can keep a `std::vector<DWARFFile>` and pass each to `addObjectFile()`. When the linker calls `File.unload()` after cloning that file, it only clears the **contents** of that `DWARFFile` (the `unique_ptr`s to `DWARFContext` and `AddressesMap`). Your vector can stay; the heavy data is already freed.
+
+3. **Optional: release ObjectFile / MemoryBuffer after addObjectFile**  
+   Today you keep `kernel_object_files` (ObjectFile + MemoryBuffer per kernel) until after `link()`. The `DWARFContext` holds references into that buffer. So you **must** keep the buffers alive until the linker has finished with that file. In single-threaded mode the linker unloads each file after cloning it, so you could in principle **overwrite or clear** that kernel’s `ObjectFile` and `MemoryBuffer` after the linker has processed it—but the linker does not give you a callback “done with file I.” So the safe approach is: keep all ObjectFiles/MemoryBuffers until **after** `link()` returns, and rely on **setNumThreads(1)** to free `DWARFContext`s one by one. That alone removes the 200 GiB (contexts are the big part; the raw ELF buffers are much smaller).
+
+4. **If you ever need parallelism**  
+   You’d need a different strategy (e.g. batch linking: link 50 objects → merged object 1, link next 50 → merged object 2, … then link the merged objects; or upstream support for “streaming” add/unload). For now, **setNumThreads(1)** is the way to avoid keeping all DWARFContexts around.
+
+### Summary
+
+- **Call `linker.setNumThreads(1)`** before `linker.link()` so only one input’s `DWARFContext` is live at a time; the linker will call `File.unload()` after each file’s clone. That should bring peak RSS down from ~200 GiB to a few GiB.
+
+---
+
+## 10. Performance Constraint and Escape Hatches
+
+**Constraint:** The device linker exists for **build time improvement**. Building the specialized objects is embarrassingly parallel; without DWARF, linking them is trivial. **The DWARF linking phase must not add significant time to the build.** If it does, we need a way to improve or bypass it.
+
+**Tension:** Using `setNumThreads(1)` fixes the 200 GiB peak but makes DWARF linking sequential (analyze + clone one file at a time). With 860 files, that phase could become the new bottleneck. A real linker like LLD can link many small objects without huge memory; the issue is DWARFLinker’s current design (load full `DWARFContext` per file; in parallel mode, keep all in memory).
+
+Proceed with the plan and measure. If DWARF linking time or memory is unacceptable, use one or more of the following.
+
+### 10.1 Make full DWARF merge optional (fast path by default)
+
+- **Default (Release / no `-g`):** Skip DWARF merge entirely, or emit only minimal debug (e.g. no `.debug_info` / no line tables). The link stays trivial; no DWARFLinker run. Build time is preserved.
+- **When debug is requested:** e.g. `-DCMAKE_BUILD_TYPE=RelWithDebInfo`, or an explicit flag like `RCCL_DEVICE_LINKER_DEBUG=ON`, run the full DWARFLinker path. Accept that this path may be slower/heavier until improved; document it.
+- **Implementation:** In the device linker, before building the list of inputs and calling the linker, check a flag or “do we have any debug sections?”. If the fast path is chosen, do not add debug sections to the output (or add empty/minimal). No DWARFLinker call.
+
+This keeps the common case (fast builds) unaffected and confines cost to the “want debug” case.
+
+### 10.2 Batch linking (bounded memory, some parallelism)
+
+- **Idea:** Instead of one `link()` over 860 files, run multiple links in batches (e.g. 50–100 objects per batch). Each batch produces a merged object (with its own `.debug_*`). Then run the linker once more to merge the batch outputs (or concatenate/merge the batch debug sections in a second stage).
+- **Memory:** Peak is bounded by batch size (e.g. 50 contexts at a time if multi-threaded, or 1 if single-threaded per batch). Total memory can be tuned by batch size.
+- **Time:** You can run batches in parallel (e.g. 4 batches of 215 objects each, 4 processes), so wall time need not be “860 × single-file time”. Final merge is one extra pass.
+- **Complexity:** Non-trivial (batch outputs must be merged correctly; address maps and section layout across batches need to be consistent). Implement only if the single-pass approach proves too slow or memory-heavy.
+
+### 10.3 Improve DWARFLinker usage (without forking LLVM)
+
+- **Single-threaded + unload:** Already in the plan; measure time. If it’s acceptable (e.g. &lt; 30 s), no further change. If not, consider batching (10.2) or optional DWARF (10.1).
+- **Multi-threaded with smaller footprint:** Today the linker doesn’t support “process N files, unload them, then next N.” If upstream adds a mode or API for that (or for streaming/bounded parallelism), we could use it to keep parallelism without holding all contexts. Track LLVM for such changes; consider contributing a patch or feature request.
+
+### 10.4 Use a real linker (e.g. LLD) for the non-debug link
+
+- **Idea:** The actual code merge (`.text`, tables, etc.) could be done by LLD or another linker that handles many small objects efficiently. The device linker would then only run DWARFLinker when full debug output is requested, and only for the purpose of producing merged `.debug_*` sections to attach to the already-linked image.
+- **Benefit:** Separates “fast link” (no/minimal debug) from “full debug” (slower, more memory). Requires refactoring how the final object is produced (LLD output + our debug sections, or two-stage link).
+
+### 10.5 Recommendation
+
+1. **Implement the full conversion** as in the plan (single path, DWARFLinker, `setNumThreads(1)` for now).
+2. **Measure** DWARF phase time and peak RSS on a representative build (e.g. 860 kernels).
+3. **If acceptable:** Document the numbers; no further change.
+4. **If not acceptable:** Add **optional full DWARF** (10.1) first: default = no or minimal debug (no DWARFLinker call); full debug = current path behind a flag or build type. That preserves build time for the common case. Then consider batching (10.2) or upstream improvements (10.3) if full-debug builds still need to be faster or lighter.
+
+---
+
+## 11. Files to Touch
 
 - **device_linker.cpp:** Main changes (single merge path, remove manual DWARF, add Option A or B, AddressesMap, input feeding).
 - **CMakeLists.txt (project):** No change if already linking full LLVM (with DWARFLinker and MC). If you switch to a custom buffer emitter that uses only DWARFLinker (no MC), you might avoid pulling in AMDGPU MC; otherwise keep as is.
@@ -181,7 +258,7 @@ Remove or stop using in one pass:
 
 ---
 
-## 10. Summary
+## 12. Summary
 
 | Current | After full conversion |
 |--------|------------------------|

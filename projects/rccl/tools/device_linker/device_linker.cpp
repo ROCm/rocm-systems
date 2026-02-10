@@ -26,9 +26,11 @@
 // DWARFLinker includes
 #include "llvm/DWARFLinker/Classic/DWARFLinker.h"
 #include "llvm/DWARFLinker/Classic/DWARFLinkerCompileUnit.h"
+#include "llvm/DWARFLinker/Classic/DWARFStreamer.h"
 #include "llvm/DWARFLinker/DWARFLinkerBase.h"
 #include "llvm/DWARFLinker/AddressesMap.h"
 #include "llvm/DWARFLinker/DWARFFile.h"
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/CodeGen/DIE.h"
 #include "llvm/CodeGen/NonRelocatableStringpool.h"
 #include "llvm/MC/MCSymbol.h"
@@ -43,9 +45,12 @@
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetOptions.h"
 #include "llvm/Support/SourceMgr.h"
+
 // AMDGPU target initialization - will be linked via shared library
 extern "C" void LLVMInitializeAMDGPUTargetInfo();
+extern "C" void LLVMInitializeAMDGPUTarget();
 extern "C" void LLVMInitializeAMDGPUTargetMC();
+extern "C" void LLVMInitializeAMDGPUAsmPrinter();
 // DWARFExpression is included via AddressesMap.h -> LowLevel/DWARFExpression.h
 
 #include <cstdio>
@@ -2110,21 +2115,14 @@ public:
         fprintf(stderr, "DEBUG: emitAbbrevs: Wrote %zu bytes to debug_abbrev_out_ (start=%zu, end=%zu)\n",
                abbrev_end - abbrev_start, abbrev_start, abbrev_end);
         
-        // According to DWARF spec v5 section 7.5.3, each set of abbreviation declarations is terminated
-        // by a single zero byte. However, the last abbreviation already ends with (0,0), and some parsers
-        // (like LLVM 23) may interpret the first 0x00 of the (0,0) terminator as the section terminator.
-        // To avoid confusion, we do NOT add an extra section terminator - the (0,0) from the last
-        // abbreviation serves as both the abbreviation terminator and the section terminator.
-        // 
-        // Check if the last abbreviation ends with (0,0)
-        if (debug_abbrev_out_.size() < 2 || 
-            debug_abbrev_out_[debug_abbrev_out_.size() - 2] != 0 ||
-            debug_abbrev_out_[debug_abbrev_out_.size() - 1] != 0) {
-            fprintf(stderr, "WARNING: Last abbreviation does not end with (0,0) terminator!\n");
-        } else {
-            // Do NOT add extra section terminator - ending with (0,0) is sufficient
-            // Adding an extra 0x00 causes LLVM 23 to misinterpret the data
-            fprintf(stderr, "DEBUG_ABBREV: Section ends with (0,0) terminator (no extra section terminator)\n");
+        // DWARF spec 7.5.3: the set of abbreviation declarations is terminated by a null entry
+        // consisting of a single zero byte (code 0). Each abbrev ends with (0,0); the set then
+        // needs one more 0 byte.
+        if (debug_abbrev_out_.size() >= 2 &&
+            debug_abbrev_out_[debug_abbrev_out_.size() - 2] == 0 &&
+            debug_abbrev_out_[debug_abbrev_out_.size() - 1] == 0) {
+            debug_abbrev_out_.push_back(0);
+            fprintf(stderr, "DEBUG_ABBREV: Added set terminator (single 0 byte)\n");
         }
         fprintf(stderr, "DEBUG_ABBREV: Final section size: %zu bytes\n", debug_abbrev_out_.size());
         
@@ -5435,32 +5433,6 @@ private:
     void mergeDebugInfoWithDWARFLinker() {
         printf("Merging debug info using DWARFLinker...\n");
         
-        // Clear existing merged sections - DWARFLinker will populate them
-        merged_debug_info_.clear();
-        merged_debug_abbrev_.clear();
-        merged_debug_str_.clear();
-        merged_debug_str_offsets_.clear();
-        merged_debug_addr_.clear();
-        merged_debug_rnglists_.clear();
-        merged_debug_ranges_.clear();
-        merged_debug_line_str_.clear();
-        
-        // Create a temporary vector for debug_line (DWARFLinker may write to it)
-        std::vector<uint8_t> merged_debug_line_temp;
-        
-        // Create emitter that writes to our buffers
-        DeviceLinkerDwarfEmitter emitter(
-            merged_debug_info_,
-            merged_debug_abbrev_,
-            merged_debug_str_,
-            merged_debug_str_offsets_,
-            merged_debug_addr_,
-            merged_debug_rnglists_,
-            merged_debug_ranges_,
-            merged_debug_line_temp,  // debug_line - handled separately
-            merged_debug_line_str_
-        );
-        
         // Create DWARFLinker with error handlers
         auto error_handler = [](const llvm::Twine& Err, llvm::StringRef Context, const llvm::DWARFDie* DIE) {
             fprintf(stderr, "DWARFLinker error: %s (context: %s)\n", Err.str().c_str(), Context.str().c_str());
@@ -5470,12 +5442,40 @@ private:
         };
         auto strings_translator = [](llvm::StringRef Str) { return Str; };  // No translation needed
         
+        // DwarfStreamer only: no custom emitter. Valid DWARF by construction.
+        // Ensure AMDGPU target is registered. Use triple that encodes GPU so backend gets correct MCSubtargetInfo (avoids TargetID assert in finish()).
+        LLVMInitializeAMDGPUTargetInfo();
+        LLVMInitializeAMDGPUTarget();
+        LLVMInitializeAMDGPUTargetMC();
+        LLVMInitializeAMDGPUAsmPrinter();
+        std::string triple_str = "amdgcn-amd-amdhsa";
+        if (!gpu_target_.empty()) {
+            triple_str += "--";
+            for (char c : gpu_target_)
+                triple_str += (c == ':' ? ',' : c);
+        }
+        llvm::Triple triple(triple_str);
+        llvm::SmallVector<char, 0> dwarf_streamer_buffer;
+        llvm::raw_svector_ostream dwarf_stream(dwarf_streamer_buffer);
+        auto streamer_or = llvm::dwarf_linker::classic::DwarfStreamer::createStreamer(
+            triple,
+            llvm::dwarf_linker::DWARFLinkerBase::OutputFileType::Object,
+            dwarf_stream,
+            warning_handler);
+        if (!streamer_or) {
+            fprintf(stderr, "ERROR: DwarfStreamer::createStreamer failed (required; custom emitter removed)\n");
+            llvm::handleAllErrors(streamer_or.takeError(), [](const llvm::ErrorInfoBase& ei) {
+                ei.log(llvm::errs());
+                llvm::errs() << "\n";
+            });
+            setFatalError("DwarfStreamer::createStreamer failed");
+            return;
+        }
+        std::unique_ptr<llvm::dwarf_linker::classic::DwarfStreamer> dwarf_streamer = std::move(*streamer_or);
+        printf("Using LLVM DwarfStreamer for DWARF emission\n");
+
         llvm::dwarf_linker::classic::DWARFLinker linker(error_handler, warning_handler, strings_translator);
-        linker.setOutputDWARFEmitter(&emitter);
-        
-        // Verify emitter is set and check initial state
-        fprintf(stderr, "DEBUG: Set emitter, debug_info_out_ size=%zu\n", merged_debug_info_.size());
-        fflush(stderr);
+        linker.setOutputDWARFEmitter(dwarf_streamer.get());
         
         // Set options to simplify linking (no ODR, full update not just indexes)
         linker.setNoODR(true);  // Don't unique types - simpler for device code
@@ -5538,7 +5538,7 @@ private:
                     
                     // Create DWARFContext from ObjectFile (same approach as kernels)
                     std::unique_ptr<llvm::DWARFContext> disp_dwarf =
-                        llvm::DWARFContext::create(*dispatcher_obj, llvm::DWARFContext::ProcessDebugRelocations::Ignore,
+                        llvm::DWARFContext::create(*dispatcher_obj, llvm::DWARFContext::ProcessDebugRelocations::Process,
                                                     nullptr, "", llvmDwarfErrorHandler,
                                                     llvmDwarfWarningHandler, false);
                     if (!disp_dwarf) {
@@ -5652,7 +5652,7 @@ private:
             // CRITICAL: kernel_obj and kernel_buf must stay alive - DWARFContext keeps references to them
             // We can't free them until DWARFContext is destroyed. However, the ELF vector was already freed above.
             std::unique_ptr<llvm::DWARFContext> kernel_dwarf =
-                llvm::DWARFContext::create(*kernel_obj, llvm::DWARFContext::ProcessDebugRelocations::Ignore,
+                llvm::DWARFContext::create(*kernel_obj, llvm::DWARFContext::ProcessDebugRelocations::Process,
                                             nullptr, "", llvmDwarfErrorHandler,
                                             llvmDwarfWarningHandler, false);
             
@@ -5748,40 +5748,14 @@ private:
                num_objects, num_kernels_added, dispatcher_info.has_value() ? "1" : "0");
         fflush(stdout);
         
+        // Limit memory: process one file at a time so each DWARFContext is unloaded after clone (see plan §9).
+        linker.setNumThreads(1);
+        
         // Call link() to merge all DWARF
         printf("Linking DWARF info...\n");
         
         llvm::Error link_error = linker.link();
         
-        // Link completed
-        
-        // DEBUG: Dump first bytes of debug_info to see what we wrote
-        if (!merged_debug_info_.empty()) {
-            fprintf(stderr, "DEBUG: debug_info size after link(): %zu bytes\n", merged_debug_info_.size());
-            fprintf(stderr, "DEBUG: First 64 bytes of debug_info: ");
-            size_t dump_size = std::min((size_t)64, merged_debug_info_.size());
-            for (size_t i = 0; i < dump_size; i++) {
-                fprintf(stderr, "%02x ", merged_debug_info_[i]);
-            }
-            fprintf(stderr, "\n");
-            // Check offset 0x0e (14 bytes) where error says invalid code 1303 is
-            if (merged_debug_info_.size() > 14) {
-                fprintf(stderr, "DEBUG: Byte at offset 0x0e (14): 0x%02x\n", merged_debug_info_[14]);
-                // Try to decode as ULEB128
-                uint64_t decoded = 0;
-                int shift = 0;
-                for (size_t i = 14; i < std::min((size_t)20, merged_debug_info_.size()); i++) {
-                    decoded |= ((uint64_t)(merged_debug_info_[i] & 0x7f)) << shift;
-                    if ((merged_debug_info_[i] & 0x80) == 0) {
-                        fprintf(stderr, "DEBUG: Decoded ULEB128 at offset 0x0e: %llu (0x%llx)\n", 
-                               (unsigned long long)decoded, (unsigned long long)decoded);
-                        break;
-                    }
-                    shift += 7;
-                }
-            }
-            fflush(stderr);
-        }
         if (link_error) {
             fprintf(stderr, "ERROR: DWARFLinker.link() failed\n");
             llvm::handleAllErrors(std::move(link_error), [](const llvm::ErrorInfoBase& ei) {
@@ -5794,147 +5768,58 @@ private:
             return;
         }
         
-        // DEBUG: Store abbrev_offset positions before finish() clears them
-        std::vector<size_t> abbrev_positions_before_finish;
-        // We can't access private members, so we'll check after by reading the known positions
-        // The positions are: 8, 1045, 2082, 4609, 7757 (from previous test run)
-        // But let's verify the patches are there right after link() completes
-        if (!merged_debug_info_.empty()) {
-            fprintf(stderr, "DEBUG: Before finish(), checking abbrev_offset values in merged_debug_info_...\n");
-            // Check first CU header (should be at offset 8 from start of .debug_info)
-            if (merged_debug_info_.size() > 12) {
-                uint32_t abbrev_offset_0;
-                memcpy(&abbrev_offset_0, &merged_debug_info_[8], 4);
-                fprintf(stderr, "DEBUG: Before finish(), CU[0] abbrev_offset at pos 8 = 0x%08x\n", abbrev_offset_0);
-            }
-        }
-        
-        // Call finish() on emitter to finalize any pending writes
-        emitter.finish();
-        
-        // DEBUG: Verify abbrev_offset patches are still present after finish()
-        if (!merged_debug_info_.empty()) {
-            fprintf(stderr, "DEBUG: After finish(), checking abbrev_offset values...\n");
-            // Check first few CU headers
-            if (merged_debug_info_.size() > 12) {
-                uint32_t abbrev_offset_0;
-                memcpy(&abbrev_offset_0, &merged_debug_info_[8], 4);
-                fprintf(stderr, "DEBUG: After finish(), CU[0] abbrev_offset at pos 8 = 0x%08x\n", abbrev_offset_0);
-            }
-            if (merged_debug_info_.size() > 1049) {
-                uint32_t abbrev_offset_1;
-                memcpy(&abbrev_offset_1, &merged_debug_info_[1045], 4);
-                fprintf(stderr, "DEBUG: After finish(), CU[1] abbrev_offset at pos 1045 = 0x%08x\n", abbrev_offset_1);
-            }
-        }
+        dwarf_streamer->finish();
         
         // CRITICAL: Free all DWARFContext objects immediately after linking to free memory
-        // DWARFContext objects are very memory-intensive (hundreds of MB each)
         printf("Freeing DWARFContext objects to reduce memory usage...\n");
-        // Free ObjectFiles and MemoryBuffers first (they're referenced by DWARFContext)
         kernel_object_files.clear();
         kernel_object_files.shrink_to_fit();
         dispatcher_object_files.reset();
-        // Then free DWARFContext objects
         dwarf_files.clear();
         dwarf_files.shrink_to_fit();
         if (dispatcher_info.has_value()) {
             dispatcher_info.reset();
         }
         
-        printf("DWARFLinker merge complete:\n");
-        printf("  .debug_info: %zu bytes\n", merged_debug_info_.size());
-        printf("  .debug_abbrev: %zu bytes\n", merged_debug_abbrev_.size());
-        if (merged_debug_abbrev_.empty()) {
-            fprintf(stderr, "ERROR: .debug_abbrev is EMPTY after link()! This will cause parsing failures.\n");
-            fprintf(stderr, "  Check if emitAbbrevs() or emitSectionContents(DebugAbbrev) was called.\n");
-            fflush(stderr);
+        // Parse streamer output ELF and add .debug_* sections
+        llvm::StringRef buffer_ref(dwarf_streamer_buffer.data(), dwarf_streamer_buffer.size());
+        auto mem_buf = llvm::MemoryBuffer::getMemBufferCopy(buffer_ref, "dwarf_streamer_output");
+        auto obj_or = llvm::object::ObjectFile::createObjectFile(mem_buf->getMemBufferRef());
+        if (!obj_or) {
+            fprintf(stderr, "ERROR: Failed to parse DwarfStreamer output as object file\n");
+            llvm::handleAllErrors(obj_or.takeError(), [](const llvm::ErrorInfoBase& ei) {
+                ei.log(llvm::errs());
+                llvm::errs() << "\n";
+            });
+            setFatalError("DwarfStreamer output parse failed");
+            return;
         }
-        printf("  .debug_str: %zu bytes\n", merged_debug_str_.size());
-        printf("  .debug_str_offsets: %zu bytes\n", merged_debug_str_offsets_.size());
-        printf("  .debug_addr: %zu bytes\n", merged_debug_addr_.size());
-        printf("  .debug_rnglists: %zu bytes\n", merged_debug_rnglists_.size());
-        printf("  .debug_ranges: %zu bytes\n", merged_debug_ranges_.size());
-        printf("  .debug_line_str: %zu bytes\n", merged_debug_line_str_.size());
-        
-        // Add merged debug sections to output sections list (same as mergeDebugInfo() does)
-        if (!merged_debug_abbrev_.empty()) {
-            SectionInfo sec;
-            sec.name = ".debug_abbrev";
-            sec.type = SHT_PROGBITS;
-            sec.flags = 0;
-            sec.alignment = 1;  // Alignment handled by padding .strtab, not section header
-            sec.data = std::move(merged_debug_abbrev_);
-            printf("Adding .debug_abbrev: %zu bytes\n", sec.data.size());
-            sections_.push_back(std::move(sec));
+        llvm::object::ObjectFile& obj = **obj_or;
+        static const char* const debug_section_names[] = {
+            ".debug_abbrev", ".debug_info", ".debug_str", ".debug_str_offsets",
+            ".debug_addr", ".debug_rnglists", ".debug_ranges", ".debug_line",
+            ".debug_line_str"
+        };
+        for (const char* sec_name : debug_section_names) {
+            for (auto it = obj.section_begin(); it != obj.section_end(); ++it) {
+                auto name_err = it->getName();
+                if (!name_err || *name_err != sec_name) continue;
+                auto contents = it->getContents();
+                if (!contents) continue;
+                SectionInfo sec;
+                sec.name = sec_name;
+                sec.type = SHT_PROGBITS;
+                sec.flags = (strcmp(sec_name, ".debug_str") == 0) ? (SHF_MERGE | SHF_STRINGS) : 0;
+                sec.alignment = 1;
+                if (strcmp(sec_name, ".debug_str") == 0) sec.entsize = 1;
+                sec.data.assign(contents->begin(), contents->end());
+                printf("Adding %s: %zu bytes (from DwarfStreamer)\n", sec_name, sec.data.size());
+                sections_.push_back(std::move(sec));
+                break;
+            }
         }
-
-        if (!merged_debug_str_.empty()) {
-            SectionInfo sec;
-            sec.name = ".debug_str";
-            sec.type = SHT_PROGBITS;
-            sec.flags = SHF_MERGE | SHF_STRINGS;
-            sec.alignment = 1;
-            sec.entsize = 1;
-            sec.data = std::move(merged_debug_str_);
-            printf("Adding .debug_str: %zu bytes\n", sec.data.size());
-            sections_.push_back(std::move(sec));
-        }
-
-        if (!merged_debug_str_offsets_.empty()) {
-            SectionInfo sec;
-            sec.name = ".debug_str_offsets";
-            sec.type = SHT_PROGBITS;
-            sec.flags = 0;
-            sec.alignment = 1;
-            sec.data = std::move(merged_debug_str_offsets_);
-            printf("Adding .debug_str_offsets: %zu bytes\n", sec.data.size());
-            sections_.push_back(std::move(sec));
-        }
-
-        if (!merged_debug_addr_.empty()) {
-            SectionInfo sec;
-            sec.name = ".debug_addr";
-            sec.type = SHT_PROGBITS;
-            sec.flags = 0;
-            sec.alignment = 1;
-            sec.data = std::move(merged_debug_addr_);
-            printf("Adding .debug_addr: %zu bytes\n", sec.data.size());
-            sections_.push_back(std::move(sec));
-        }
-
-        if (!merged_debug_rnglists_.empty()) {
-            SectionInfo sec;
-            sec.name = ".debug_rnglists";
-            sec.type = SHT_PROGBITS;
-            sec.flags = 0;
-            sec.alignment = 1;
-            sec.data = std::move(merged_debug_rnglists_);
-            printf("Adding .debug_rnglists: %zu bytes\n", sec.data.size());
-            sections_.push_back(std::move(sec));
-        }
-
-        if (!merged_debug_ranges_.empty()) {
-            SectionInfo sec;
-            sec.name = ".debug_ranges";
-            sec.type = SHT_PROGBITS;
-            sec.flags = 0;
-            sec.alignment = 1;
-            sec.data = std::move(merged_debug_ranges_);
-            printf("Adding .debug_ranges: %zu bytes\n", sec.data.size());
-            sections_.push_back(std::move(sec));
-        }
-
-        if (!merged_debug_info_.empty()) {
-            SectionInfo sec;
-            sec.name = ".debug_info";
-            sec.type = SHT_PROGBITS;
-            sec.flags = 0;
-            sec.alignment = 1;
-            sec.data = std::move(merged_debug_info_);
-            printf("Adding .debug_info: %zu bytes\n", sec.data.size());
-            sections_.push_back(std::move(sec));
-        }
+        printf("DWARFLinker merge complete: %zu total streamer bytes\n",
+               (size_t)dwarf_streamer_buffer.size());
     }
 
     void mergeDebugInfo() {
