@@ -605,6 +605,14 @@ Examples:
         action="store_true",
     )
     analyze_group.add_argument(
+        "--torch-operator",
+        metavar="",
+        type=str,
+        dest="torch_operator",
+        nargs="+",
+        help="\t\tSpecify operator name for filtering.",
+    )
+    analyze_group.add_argument(
         "-k",
         "--kernel",
         metavar="",
@@ -613,14 +621,6 @@ Examples:
         nargs="+",
         action="append",
         help="\t\tSpecify kernel id(s) from --list-stats for filtering.",
-    )
-    analyze_group.add_argument(
-        "--torch-operator",
-        metavar="",
-        type=str,
-        dest="torch_operator",
-        nargs="+",
-        help="\t\tSpecify operator name for filtering.",
     )
     analyze_group.add_argument(
         "-d",

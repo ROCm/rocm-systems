@@ -1374,10 +1374,18 @@ def process_torch_trace_output(
     def _merge_pair(
         marker_path: Path,
         counter_path: Path,
-        join_keys: list = ("Correlation_Id"),
+        join_keys: list = ("Correlation_ID"),
     ) -> pd.DataFrame:
         marker_df = pd.read_csv(marker_path)
         counter_df = pd.read_csv(counter_path)
+        # Normalize column names to handle case inconsistencies
+        marker_df.columns = marker_df.columns.str.replace(
+            "Correlation_Id", "Correlation_ID"
+        )
+        counter_df.columns = counter_df.columns.str.replace(
+            "Correlation_Id", "Correlation_ID"
+        )
+
         return pd.merge(
             marker_df,
             counter_df,
@@ -1390,9 +1398,9 @@ def process_torch_trace_output(
     # If csv format, pairs are present in workload/{fbase}/ one pair per process
     # Extracting the output_format used in profiling from the path of a marker file
     if Path(workload_dir).resolve() == existing_csv_files[0][0].parent.resolve():
-        join_keys = ("Correlation_Id", "GUID")  # output_format "rocpd"
+        join_keys = ("Correlation_ID", "GUID")  # output_format "rocpd"
     else:
-        join_keys = ("Correlation_Id",)  # output_format "csv"
+        join_keys = ("Correlation_ID",)  # output_format "csv"
     consolidated_df = pd.concat(
         [_merge_pair(f[0], f[1], join_keys) for f in existing_csv_files],
         ignore_index=True,
