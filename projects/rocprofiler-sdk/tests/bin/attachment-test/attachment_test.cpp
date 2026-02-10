@@ -27,16 +27,21 @@
 #include <csignal>
 #include <cstdlib>
 #include <iostream>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
 
 // Signal handler - handles signal without affecting execution
+namespace
+{
+int signal_received = 0;
 void
 signal_handler(int signum)
 {
-    std::cout << "Attachment test process " << getpid() << " received signal " << signum << "\n";
+    signal_received = signum;
 }
+}  // namespace
 
 /* Macro for checking GPU API return values */
 #define HIP_ASSERT(call)                                                                           \
@@ -86,8 +91,13 @@ execute_kernels(const size_t tid, const size_t device_id)
     }
 
     // Run kernels in a loop for a while
-    std::cout << "Starting kernel execution loop for thread " << tid << " on device " << device_id
-              << "...\n";
+    {
+        // compose string first to avoid multithreaded handling of cout << operator
+        std::stringstream msg;
+        msg << "Starting kernel execution loop for thread " << tid << " on device " << device_id
+            << "...\n";
+        std::cout << msg.str();
+    }
     const int num_iterations = 30;
 
     for(int iter = 0; iter < num_iterations; ++iter)
@@ -143,8 +153,13 @@ execute_kernels(const size_t tid, const size_t device_id)
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
     }
 
-    std::cout << "Kernel execution loop completed for thread " << tid << " on device " << device_id
-              << "...\n";
+    {
+        // compose string first to avoid multithreaded handling of cout << operator
+        std::stringstream msg;
+        msg << "Kernel execution loop completed for thread " << tid << " on device " << device_id
+            << "...\n";
+        std::cout << msg.str();
+    }
 
     HIP_ASSERT(hipStreamDestroy(stream));
     // Cleanup
@@ -191,7 +206,7 @@ main(int argc, char** argv)
     if(ndevices > device_count)
     {
         std::cout << "Using " << device_count << " HIP devices instead of the requested "
-                  << ndevices << "\n";
+                  << ndevices << std::endl;
         ndevices = device_count;
     }
 
@@ -205,6 +220,11 @@ main(int argc, char** argv)
     for(auto& itr : _threads)
         itr.join();
 
+    if(signal_received)
+    {
+        std::cout << "Attachment test process " << getpid() << " received signal "
+                  << signal_received << std::endl;
+    }
     std::cout << "Attachment test app finished" << std::endl;
 
     return 0;
