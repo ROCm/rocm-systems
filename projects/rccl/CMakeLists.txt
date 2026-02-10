@@ -1385,66 +1385,10 @@ if (DEVICE_LINKER)
   # set(DEVICE_LINKER_BUNDLE_TARGET "hipv4-amdgcn-amd-amdhsa--${DEVICE_LINKER_GPU_BASE}:sramecc+:xnack-")
   # message(STATUS "Device linker target: ${DEVICE_LINKER_GPU_TARGET} (bundle: ${DEVICE_LINKER_BUNDLE_TARGET})")
   
-  # Build the device_linker tool itself
-  # Use local LLVM build for proper DWARF handling with debug symbols
-  set(LLVM_DIR "/work2/lmeadows/llvm/lib/cmake/llvm")
-  find_package(LLVM REQUIRED CONFIG PATHS ${LLVM_DIR})
-  
-  message(STATUS "Found LLVM ${LLVM_VERSION}")
-  
-  # Use llvm-config to get proper link flags for shared library
-  # Try to use llvm-config if available, otherwise use known paths
-  set(LLVM_CONFIG_PATH "/work2/lmeadows/llvm/bin/llvm-config")
-  set(LLVM_LIBDIR "/work2/lmeadows/llvm/lib")
-  set(LLVM_LIBNAME "LLVM-23git")
-  if(EXISTS ${LLVM_CONFIG_PATH})
-    execute_process(
-      COMMAND ${LLVM_CONFIG_PATH} --ldflags --libs
-      OUTPUT_VARIABLE LLVM_LINK_FLAGS
-      OUTPUT_STRIP_TRAILING_WHITESPACE
-      ERROR_QUIET
-      RESULT_VARIABLE LLVM_CONFIG_RESULT
-    )
-    if(LLVM_CONFIG_RESULT EQUAL 0 AND LLVM_LINK_FLAGS)
-      # Parse the output: "-L/path -llibname" (may have newlines)
-      string(REPLACE "\n" " " LLVM_LINK_FLAGS "${LLVM_LINK_FLAGS}")
-      string(STRIP "${LLVM_LINK_FLAGS}" LLVM_LINK_FLAGS)
-      # Extract -L path and -l library name
-      string(REGEX MATCH "-L([^ ]+)" LLVM_LIBDIR_MATCH "${LLVM_LINK_FLAGS}")
-      if(LLVM_LIBDIR_MATCH)
-        string(REGEX REPLACE "-L" "" LLVM_LIBDIR "${LLVM_LIBDIR_MATCH}")
-        string(STRIP "${LLVM_LIBDIR}" LLVM_LIBDIR)
-      endif()
-      string(REGEX MATCH "-l([^ ]+)" LLVM_LIBNAME_MATCH "${LLVM_LINK_FLAGS}")
-      if(LLVM_LIBNAME_MATCH)
-        string(REGEX REPLACE "-l" "" LLVM_LIBNAME "${LLVM_LIBNAME_MATCH}")
-        string(STRIP "${LLVM_LIBNAME}" LLVM_LIBNAME)
-      endif()
-      message(STATUS "Using llvm-config: libdir='${LLVM_LIBDIR}', lib='${LLVM_LIBNAME}'")
-    else()
-      message(STATUS "llvm-config failed (result=${LLVM_CONFIG_RESULT}), using known paths")
-    endif()
-  else()
-    message(STATUS "llvm-config not found, using known LLVM paths")
-  endif()
-  
-  add_executable(device_linker_tool ${DEVICE_LINKER_DIR}/device_linker.cpp)
-  target_compile_features(device_linker_tool PRIVATE cxx_std_17)
-  target_include_directories(device_linker_tool PRIVATE ${LLVM_INCLUDE_DIRS})
-  target_compile_options(device_linker_tool PRIVATE -fno-rtti -fno-exceptions)
-  target_compile_definitions(device_linker_tool PRIVATE
-    _GNU_SOURCE
-    __STDC_CONSTANT_MACROS
-    __STDC_FORMAT_MACROS
-    __STDC_LIMIT_MACROS
-  )
-  target_link_directories(device_linker_tool PRIVATE ${LLVM_LIBDIR})
-  target_link_libraries(device_linker_tool PRIVATE ${LLVM_LIBNAME})
-  set_target_properties(device_linker_tool PROPERTIES
-    OUTPUT_NAME device_linker
-    RUNTIME_OUTPUT_DIRECTORY ${DEVICE_LINKER_DIR}
-  )
-  
+  # Device linker binary is NOT built here. Build it by hand from tools/device_linker/:
+  #   cd tools/device_linker && cmake -B build -S . -DLLVM_DIR=... && cmake --build build
+  # Binary must exist at tools/device_linker/device_linker for the pipeline below to run.
+  #
   # Step 1: Compile specialized kernels to device-only objects using CMake OBJECT library
   # Using --cuda-device-only --offload-arch --no-gpu-bundle-output produces device-only ELF files directly
   add_library(specialized_kernels_device OBJECT ${SPECIALIZED_KERNEL_FILES})
@@ -1599,6 +1543,9 @@ if (DEVICE_LINKER)
   # Steps 3-5 are done by build_with_device_linker.sh
   set(DISPATCHER_FINAL_OBJ ${DEVICE_LINKER_OUTPUT_DIR}/dispatcher_final.o)
   
+  # Device linker binary is NOT built by this project. Build it from tools/device_linker/:
+  #   cd tools/device_linker && cmake -B build -S . -DLLVM_DIR=... && cmake --build build
+  # Binary must exist at tools/device_linker/device_linker for the pipeline below to run.
   add_custom_command(
     OUTPUT ${DISPATCHER_FINAL_OBJ}
     COMMAND ${CMAKE_COMMAND} -E make_directory ${DEVICE_LINKER_OUTPUT_DIR}
@@ -1608,7 +1555,6 @@ if (DEVICE_LINKER)
     DEPENDS 
       dispatcher_device_elf
       specialized_kernels
-      device_linker_tool
       ${DEVICE_LINKER_DIR}/build_with_device_linker.sh
       ${CMAKE_CURRENT_BINARY_DIR}/hipify/src/device/common.cu.cpp
       hipify_all
