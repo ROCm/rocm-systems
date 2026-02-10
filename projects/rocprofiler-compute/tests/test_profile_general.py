@@ -29,6 +29,7 @@ import inspect
 import os
 import re
 import socket
+import shutil
 import sqlite3
 import subprocess
 import sys
