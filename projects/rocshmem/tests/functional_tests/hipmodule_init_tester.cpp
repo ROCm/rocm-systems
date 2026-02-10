@@ -27,6 +27,8 @@
 #include <hip/hiprtc.h>
 #include <cstring>
 #include <cassert>
+#include <cstdio>
+#include <cstdlib>
 
 // Helper macro for HIPRTC error checking
 #define CHECK_HIPRTC(cmd) \
@@ -151,37 +153,96 @@ void HipModuleInitTester::resetBuffers(size_t size) {
 
 void HipModuleInitTester::launchKernel(dim3 gridSize, dim3 blockSize,
                                         int loop, size_t size) {
-
-  // This API reads ROCSHMEM_CTX_DEFAULT from host context and 
-  // copies to device global symbol residing in given moddule.
-  int ret = rocshmem_hipmodule_init(test_module, nullptr);
-
-  if (ret != 0) {
-    if (my_pe == 0) { // to avoid duplicate prints in case of failure from multiple ranks
-      fprintf(stderr, "❌ rocshmem_hipmodule_init failed with code %d\n", ret);
-    }
-    return;
-  }
+  // Note: This test intentionally ignores gridSize/blockSize parameters and uses
+  // a simple 1x1x1 launch.
+  (void)gridSize;
+  (void)blockSize;
+  (void)loop;
+  (void)size;
 
   if (my_pe == 0) {
-    printf("✅ rocshmem_hipmodule_init succeeded\n");
+    printf("\n=== CUDA/HIP graph capture test ===\n");
   }
 
-  // Launch the test kernel to verify the module works
+  // Reset result buffer
+  CHECK_HIP(hipMemset(device_result, 0, sizeof(int)));
+
+  // Create a stream for graph capture
+  hipStream_t stream;
+  CHECK_HIP(hipStreamCreate(&stream));
+
+  // Begin graph capture
+  hipGraph_t graph;
+  CHECK_HIP(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
+
+  // Call rocshmem_hipmodule_init within graph capture
+  // verifies device-to-device copy for device global symbols work in graph.
+  // Make sure this API does not issue any operation on legacy/default stream
+  // while HIP graph capturing is active on another stream.
+  int ret = rocshmem_hipmodule_init(test_module, stream);
+
+  if (ret != 0) {
+    fprintf(stderr, "[Rank %d] FAIL: rocshmem_hipmodule_init in graph failed with code %d\n", my_pe, ret);
+    CHECK_HIP(hipStreamEndCapture(stream, &graph));  // Clean up
+    rocshmem_global_exit(1);
+  }
+
+  // Launch kernel within the graph
   void *args[] = {&device_result};
   CHECK_HIP(hipModuleLaunchKernel(
       kernel_func,
       1, 1, 1,    // gridDim
       1, 1, 1,    // blockDim
       0,          // sharedMem
-      nullptr,    // stream
-      args,       // kernel arguments
-      nullptr));  // extra
+      stream,     // Use the capturing stream
+      args,
+      nullptr));
 
-  CHECK_HIP(hipDeviceSynchronize());
+  // End graph capture
+  CHECK_HIP(hipStreamEndCapture(stream, &graph));
+  if (my_pe == 0) {
+    printf("PASS: Graph capture completed successfully\n");
+  }
+
+  // Instantiate the captured graph
+  hipGraphExec_t graph_exec;
+  CHECK_HIP(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
+  if (my_pe == 0) {
+    printf("PASS: Graph instantiated successfully\n");
+  }
+
+  // Execute the graph
+  CHECK_HIP(hipGraphLaunch(graph_exec, stream));
+  CHECK_HIP(hipStreamSynchronize(stream));
+  if (my_pe == 0) {
+    printf("PASS: Graph executed successfully\n");
+  }
+
+  // Verify result from graph execution
+  int host_result = 0;
+  CHECK_HIP(hipMemcpy(&host_result, device_result, sizeof(int),
+                      hipMemcpyDeviceToHost));
+
+  if (host_result != 42) {
+    fprintf(stderr, "[Rank %d] FAIL: Graph execution failed (expected 42, got %d)\n",
+            my_pe, host_result);
+    rocshmem_global_exit(1);
+  }
+
+  if (my_pe == 0) {
+    printf("PASS: Graph execution verified (result = %d)\n", host_result);
+    printf("PASS: rocshmem_hipmodule_init is CUDA graph compatible!\n");
+  }
+
+  // Cleanup graph resources
+  CHECK_HIP(hipGraphExecDestroy(graph_exec));
+  CHECK_HIP(hipGraphDestroy(graph));
+  CHECK_HIP(hipStreamDestroy(stream));
 }
 
 void HipModuleInitTester::verifyResults(size_t size) {
+  (void)size;  // Not used in this verification test
+
   // Verify the kernel executed correctly
   int host_result = 0;
   CHECK_HIP(hipMemcpy(&host_result, device_result, sizeof(int),
@@ -189,12 +250,13 @@ void HipModuleInitTester::verifyResults(size_t size) {
 
   if (host_result == 42) {
     if (my_pe == 0) {
-      printf("✅ Kernel execution verified (result = %d)\n", host_result);
+      printf("PASS: Kernel execution verified (result = %d)\n", host_result);
     }
   } else {
-    if (my_pe == 0) {
-      fprintf(stderr, "❌ Kernel verification failed (expected 42, got %d)\n",
-              host_result);
-    }
+    // Explicitly fail the test when verification fails
+    fprintf(stderr, "[Rank %d] FAIL: Kernel verification failed (expected 42, got %d)\n",
+            my_pe, host_result);
+    // Exit with error to ensure test is reported as failed
+    rocshmem_global_exit(1);
   }
 }

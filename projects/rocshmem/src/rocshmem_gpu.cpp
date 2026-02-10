@@ -118,25 +118,36 @@ __device__ void rocshmem_wg_finalize() {}
 * to stay here to avoid getting pulled into other places in compilation
 ******************************************************************************/
 
-__host__ int rocshmem_hipmodule_init(hipModule_t module, hipStream_t stream) {
-  // Step 1: Get the host-side device context
+__host__ void * rocshmem_get_device_ctx() {
   rocshmem_ctx_t ctx = {nullptr, nullptr};
   CHECK_HIP(hipMemcpyFromSymbol(&ctx, HIP_SYMBOL(ROCSHMEM_CTX_DEFAULT),
-                                 sizeof(rocshmem_ctx_t)));
-  void *host_ctx = ctx.ctx_opaque;
+                                sizeof(rocshmem_ctx_t)));
+  return ctx.ctx_opaque;
+}
 
-  if (host_ctx == nullptr) {
-    fprintf(stderr, "[rocSHMEM] Error: Failed to get ROCSHMEM_CTX_DEFAULT\n");
+__host__ int rocshmem_hipmodule_init(hipModule_t module, hipStream_t stream) {
+  // Step 1: Get device address of rocSHMEM's built-in ROCSHMEM_CTX_DEFAULT symbol
+  // Use hipGetSymbolAddress for graph-capture compatibility (device-to-device path)
+  void *source_ctx_device = nullptr;
+  hipError_t err = hipGetSymbolAddress(&source_ctx_device, HIP_SYMBOL(ROCSHMEM_CTX_DEFAULT));
+
+  if (err != hipSuccess) {
+    fprintf(stderr, "[rocSHMEM] Error: Failed to get address of built-in ROCSHMEM_CTX_DEFAULT: %s\n",
+            hipGetErrorString(err));
     return -1;
   }
 
-  // Step 2: Query the device symbol from the HIP module
-  void *device_ctx = nullptr;
+  if (source_ctx_device == nullptr) {
+    fprintf(stderr, "[rocSHMEM] Error: Built-in ROCSHMEM_CTX_DEFAULT has null address\n");
+    return -1;
+  }
+
+  // Step 2: Query the device symbol address from the user's HIP module
+  void *target_ctx_device = nullptr;
   size_t symbol_size = 0;
 
-  // Try to get the symbol address from the module
-  hipError_t err = hipModuleGetGlobal(
-      &device_ctx,
+  err = hipModuleGetGlobal(
+      &target_ctx_device,
       &symbol_size,
       module,
       "ROCSHMEM_CTX_DEFAULT"
@@ -154,17 +165,17 @@ __host__ int rocshmem_hipmodule_init(hipModule_t module, hipStream_t stream) {
     return -1;
   }
 
-  // Step 3: Copy the context to device using stream-ordered memcpy
-  // hipMemcpyAsync is compatible with CUDA graphs and explicit streams
+  // Step 3: Device-to-device copy using stream-ordered memcpy
+  // This is fully graph-capture compatible since both source and target are device memory
   if (stream == nullptr) {
     stream = hipStreamPerThread;
   }
 
   err = hipMemcpyAsync(
-      device_ctx,
-      &host_ctx,
+      target_ctx_device,
+      source_ctx_device,
       sizeof(rocshmem_ctx_t),
-      hipMemcpyHostToDevice,
+      hipMemcpyDeviceToDevice,  // Device-to-device copy for graph capture compatibility
       stream
   );
 
@@ -172,15 +183,6 @@ __host__ int rocshmem_hipmodule_init(hipModule_t module, hipStream_t stream) {
     fprintf(stderr, "[rocSHMEM] Error: Failed to copy context to device: %s\n",
             hipGetErrorString(err));
     return -1;
-  }
-
-  // Optionally synchronize the stream to ensure initialization completes
-  // Comment this out if you want fully async behavior
-  err = hipStreamSynchronize(stream);
-  if (err != hipSuccess) {
-    fprintf(stderr, "[rocSHMEM] Warning: Failed to synchronize stream: %s\n",
-            hipGetErrorString(err));
-    // Don't fail here, as async initialization might still work
   }
 
   return 0;

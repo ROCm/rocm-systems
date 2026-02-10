@@ -680,6 +680,7 @@ bool Tester::peLaunchesKernel() {
     case FloodGetTestType:
     case FloodGetNBITestType:
     case FloodGTestType:
+    case HipModuleInitTestType:
       is_launcher = true;
       break;
     default:

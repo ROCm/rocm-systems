@@ -79,6 +79,21 @@ __host__ void rocshmem_init(void);
 
 
 /**
+ * @brief Query rocSHMEM context from host API (DEPRECATED)
+ *
+ * @deprecated This API is deprecated. Use rocshmem_hipmodule_init() instead,
+ *             which provides better CUDA graph compatibility and automatic
+ *             module initialization.
+ *
+ * @param[out] ctx      Returns ROCSHMEM_CTX_DEFAULT device pointer that users
+ *                      can query from one instance of rocshmem host library and
+ *                      use later for dynamic module initialization in
+ *                      kernel bitcode device library in the same application
+ */
+[[deprecated("Use rocshmem_hipmodule_init() instead")]]
+__host__ void * rocshmem_get_device_ctx();
+
+/**
  * @brief Initialize rocSHMEM device context for a specific HIP module
  *
  * This function queries the ROCSHMEM_CTX_DEFAULT symbol from the provided
@@ -87,10 +102,13 @@ __host__ void rocshmem_init(void);
  *
  * @param[in] module    HIP module containing rocSHMEM device code
  * @param[in] stream    HIP stream to use for context initialization (optional,
- *                      uses current stream if NULL)
+ *                      uses hipStreamPerThread if nullptr)
  *
  * @return int          0 on success, non-zero on failure
  *
+ * @note This function does not synchronize the stream, allowing it to be
+ *       used in CUDA graph capture contexts. The caller is responsible for
+ *       synchronization if needed.
  */
 __host__ int rocshmem_hipmodule_init(hipModule_t module, hipStream_t stream = nullptr);
 
