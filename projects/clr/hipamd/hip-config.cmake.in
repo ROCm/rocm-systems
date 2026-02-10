@@ -119,7 +119,7 @@ if(NOT DEFINED HIP_PLATFORM)
 
     # Fallback to finding a hipconfig executable on PATH if needed.
     if(NOT DEFINED HIP_PLATFORM OR HIP_PLATFORM STREQUAL "")
-      find_program(HIPCONFIG_EXEC hipconfig REQUIRED)
+      find_program(HIPCONFIG_EXEC hipconfig)
       execute_process(
         COMMAND ${HIPCONFIG_EXEC} --platform
         OUTPUT_VARIABLE HIP_PLATFORM
