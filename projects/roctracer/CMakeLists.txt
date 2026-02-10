@@ -20,7 +20,7 @@
 ## IN THE SOFTWARE.
 ################################################################################
 
-cmake_minimum_required(VERSION 3.18.0)
+cmake_minimum_required(VERSION 3.21.0)
 
 include( utils.cmake )
 set( CORE_TARGET "roctracer" )
