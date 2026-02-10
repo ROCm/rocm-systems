@@ -21,7 +21,7 @@ hip_version = ""
 minmsgsize = 16
 
 if len(sys.argv) <= 1:
-    print("No input directory providing. Aborting")
+    print("No input directory provided. Aborting")
     sys.exit()
 
 files_in_dir = {}
