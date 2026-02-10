@@ -54,24 +54,26 @@ namespace rocshmem
       pages[i] = (char*)pages[i-1] + pageSize;
     }
 
+    fprintf(stderr, "topology.cpp:57\n");
+
     long const retCode = numa.move_pages(0, numPages, pages.data(), NULL, status.data(), 0);
     if (retCode) {
-      fprintf(stderr,"Unable to collect page table information for allocated memory. "
-              "Ensure NUMA library is installed properly");
+      fprintf(stderr, "Unable to collect page table information for allocated memory. "
+              "Ensure NUMA library is installed properly\n");
       return -1;
     }
 
     size_t mistakeCount = 0;
     for (size_t i = 0; i < numPages; i++) {
       if (status[i] < 0) {
-        fprintf(stderr, "Unexpected page status (%d) for page %zu", status[i], i);
+        fprintf(stderr, "Unexpected page status (%d) for page %zu\n", status[i], i);
         return -1;
       }
       if (status[i] != targetId) mistakeCount++;
     }
     if (mistakeCount > 0) {
-      fprintf(stderr, "%lu out of %lu pages for memory allocation were not on NUMA node %d."
-              " This could be due to hardware memory issues, or the use of numa-rebalancing daemons such as numad",
+      fprintf(stderr, "%lu out of %lu pages for memory allocation were not on NUMA node %d.\n"
+              " This could be due to hardware memory issues, or the use of numa-rebalancing daemons such as numad\n",
               mistakeCount, numPages, targetId);
       return -1;
     }

@@ -32,6 +32,7 @@
 
 #include <rocm-core/rocm_version.h>
 #include <rocshmem/rocshmem.hpp>
+#include "gda/topology.hpp"
 
 #define NAME_COLUMN_WIDTH (28)
 #define INFO_COLUMN_WIDTH (47)
@@ -160,6 +161,10 @@ int main (int argc, char **argv) {
     parse_config_file();
   }
 
+  printf("################################################################################\n");
+//  rocshmem::rocshmem_init();
+  rocshmem::DisplayTopology(false);
+//  rocshmem::rocshmem_finalize();
   printf("################################################################################\n");
   return 0;
 }
