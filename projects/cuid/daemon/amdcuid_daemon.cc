@@ -363,7 +363,7 @@ int main() {
     }
 
     // if no HMAC key exists, generate and store it
-    int fd = open("/opt/cuid/hmac_key.bin", O_RDONLY);
+    int fd = open("/opt/amdcuid/etc/hmac_key.bin", O_RDONLY);
     if (fd < 0) {
         close(fd);
         uint8_t key[32];
@@ -381,7 +381,7 @@ int main() {
     close(fd);
 
     // read config file first get logging options and whether to run as a daemon or only on boot
-    std::ifstream config_file("/opt/cuid/amdcuid_daemon.conf");
+    std::ifstream config_file("/opt/amdcuid/etc/amdcuid_daemon.conf");
     std::vector<std::string> config_lines;
 
     if (config_file.is_open()) {

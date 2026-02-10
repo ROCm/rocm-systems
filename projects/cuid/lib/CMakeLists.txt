@@ -19,7 +19,7 @@
 # THE SOFTWARE.
 
 cmake_minimum_required(VERSION 3.10)
-project(cuid_lib)
+project(amdcuid_lib)
 
 set(CMAKE_CXX_STANDARD 14)
 
@@ -68,4 +68,33 @@ target_include_directories(amdcuid_static
 target_include_directories(amdcuid_shared 
     PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+
+# Shared library
+install(TARGETS amdcuid_shared
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}    # Windows DLLs go here
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}    # Linux .so
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}    # Static libs & Windows import libs
+)
+
+# Static library
+install(TARGETS amdcuid_static
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+)
+
+# Install public headers
+set(PUBLIC_HEADERS
+    include/amd_cuid.h
+)
+install(FILES ${PUBLIC_HEADERS} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+
+# Create HMAC key file if it does not exist
+install(CODE "
+    set(KEY_FILE \"\$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_SYSCONFDIR}/hmac_key.bin\")
+    if(NOT EXISTS \"\${KEY_FILE}\")
+        file(WRITE \"\${KEY_FILE}\" \"\")
+        execute_process(COMMAND chmod 600 \"\${KEY_FILE}\")
+        message(STATUS \"Created empty HMAC key file: \${KEY_FILE}\")
+        message(STATUS \"WARNING: User must set or generate HMAC key before using CUID library.\")
+    endif()"
 )

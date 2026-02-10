@@ -36,4 +36,4 @@ target_link_libraries(amdcuid_tool amdcuid_static OpenSSL::Crypto)
 target_include_directories(amdcuid_tool PRIVATE ${CMAKE_SOURCE_DIR}/lib)
 
 # Install the tool
-install(TARGETS amdcuid_tool DESTINATION bin)
+install(TARGETS amdcuid_tool DESTINATION ${CMAKE_INSTALL_BINDIR})
