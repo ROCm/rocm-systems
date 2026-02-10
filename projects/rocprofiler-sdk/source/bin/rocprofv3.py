@@ -719,6 +719,19 @@ For attachment profiling of running processes:
         help="Use region names defined by roctxRangePush/roctxRangePop regions to rename the kernels. Known as --roctx-rename in earlier rocprof versions",
     )
 
+    optimization_options = parser.add_argument_group("Optimization options")
+
+    add_parser_bool_argument(
+        optimization_options,
+        "--disable-stream-tracking",
+        help="Disable stream data collection to reduce overhead. Stream information will not be available in the output.",
+    )
+    add_parser_bool_argument(
+        optimization_options,
+        "--disable-kernel-rename",
+        help="Disable kernel rename tracking to reduce overhead. Kernel renaming via roctxRangePush/roctxRangePop will not be available.",
+    )
+
     filter_options = parser.add_argument_group("Filtering options")
 
     filter_options.add_argument(
@@ -1800,6 +1813,8 @@ def run(app_args, args, **kwargs):
     for opt, env_val in dict(
         [
             ["kernel_rename", "KERNEL_RENAME"],
+            ["disable_stream_tracking", "DISABLE_STREAM_TRACKING"],
+            ["disable_kernel_rename", "DISABLE_KERNEL_RENAME"],
         ]
     ).items():
         val = getattr(args, f"{opt}")

@@ -147,11 +147,12 @@ find_library(void*& addr, int inpid, const std::string& library)
 {
     std::stringstream searchname;
     searchname << inpid << "::" << library;
-    // TODO: add this back
-    // if (target_library_addrs.find(searchname.str()) != target_library_addrs.end())
-    //{
-    //    return target_library_addrs[searchname.str()];
-    //}
+    // Check cache first to avoid expensive /proc/maps scan
+    if (m_target_library_addrs.find(searchname.str()) != m_target_library_addrs.end())
+    {
+        addr = m_target_library_addrs[searchname.str()];
+        return true;
+    }
 
     // uses "maps" file to find where library has been loaded in target process
     // does not require this process to be attached
@@ -193,7 +194,8 @@ find_library(void*& addr, int inpid, const std::string& library)
 
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
     addr = reinterpret_cast<void*>(std::stoull(line, nullptr, 16));
-    //  target_library_addrs[searchname.str()] = addr;
+    // Cache the result to avoid rescanning /proc/maps
+    m_target_library_addrs[searchname.str()] = addr;
     return true;
 }
 

@@ -207,6 +207,10 @@ SPECIALIZE_SET_ENV(uint64_t)
 
 env_store::env_store(std::initializer_list<env_config>&& _container)
 {
+    // Pre-allocate to avoid reallocation during loop
+    m_original.reserve(_container.size());
+    m_modified.reserve(_container.size());
+
     for(const auto& itr : _container)
     {
         m_original.emplace_back(env_config{itr.env_name, get_env(itr.env_name, ""), 1});
