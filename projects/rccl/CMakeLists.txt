@@ -355,6 +355,21 @@ if (ENABLE_MSCCLPP AND ROCM_VERSION VERSION_LESS "60200")
   message(WARNING "MSCCL++ integration only supported on ROCm 6.2.0 or greater; disabling MSCCL++ build")
 endif()
 
+## Disable WARP_SPEED if the build environment is invalid
+set(WARP_SPEED_SUPPORTED_ARCHS "gfx950" "gfx950:xnack-" "gfx950:xnack+")
+set(ARCH_MATCH_FOUND OFF)
+foreach(ARCH IN LISTS GPU_TARGETS)
+  if(ARCH IN_LIST WARP_SPEED_SUPPORTED_ARCHS)
+    set(ARCH_MATCH_FOUND ON)
+  endif()
+endforeach()
+if (NOT ARCH_MATCH_FOUND)
+  set(ENABLE_WARP_SPEED OFF)
+  message(WARNING "Can only build WARP_SPEED for supported GPU_TARGETS: ${WARP_SPEED_SUPPORTED_ARCHS}; current GPU_TARGETS: ${GPU_TARGETS}; so disabling WARP_SPEED build")
+endif()
+
+
+>>>>>>> ca987a1c8f (disable gfx942 from supported architectures for warpSpeed)
 # cmake_host_system_information(RESULT HOST_OS_ID QUERY DISTRIB_ID) ## Requires cmake 3.22
 execute_process(
   COMMAND bash -c "grep '^ID=' /etc/os-release | cut -d'=' -f2 | cut -d'\"' -f2"
