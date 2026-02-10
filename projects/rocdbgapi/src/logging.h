@@ -754,17 +754,32 @@ tracer<LogLevel>::leave (std::tuple<Args...> &&out_args,
 #if defined(WITH_API_TRACING)
 
 #define TRACE_BEGIN_HELPER(level, prefix, ...)                                \
-  amd::dbgapi::tracer<level> _tracer (prefix, __FUNCTION__);                  \
-  auto&& _closure = _tracer.enter (std::make_tuple (__VA_ARGS__), [&] () {
+  TRACE_BEGIN_HELPER_2 (_, level, prefix, __VA_ARGS__)
+#define TRACE_END_HELPER(...) TRACE_END_HELPER_2 (_, __VA_ARGS__)
 
-#define TRACE_END_HELPER(...)                                                 \
+#define TRACE_BEGIN_HELPER_2(varsuffix, level, prefix, ...)                   \
+  amd::dbgapi::tracer<level> _tracer##varsuffix (prefix, __FUNCTION__);       \
+  auto&& _closure ## varsuffix = _tracer ## varsuffix.enter (std::make_tuple (__VA_ARGS__), [&] () {
+
+#define TRACE_END_HELPER_2_NORET(varsuffix, ...)                              \
   });                                                                         \
-  return _tracer.leave (std::make_tuple (__VA_ARGS__), std::move (_closure));
+  _tracer##varsuffix.leave (std::make_tuple (__VA_ARGS__),                    \
+                            std::move (_closure##varsuffix));
+
+#define TRACE_END_HELPER_2(varsuffix, ...)                                    \
+  });                                                                         \
+  return _tracer##varsuffix.leave (std::make_tuple (__VA_ARGS__),             \
+                                   std::move (_closure##varsuffix));
 
 #define TRACE_BEGIN(...)                                                      \
   TRACE_BEGIN_HELPER (AMD_DBGAPI_LOG_LEVEL_TRACE, "", __VA_ARGS__)
 
 #define TRACE_END(...) TRACE_END_HELPER (__VA_ARGS__)
+
+#define TRACE_BEGIN_2(varsuffix, ...)                                         \
+  TRACE_BEGIN_HELPER_2 (varsuffix, AMD_DBGAPI_LOG_LEVEL_TRACE, "", __VA_ARGS__)
+
+#define TRACE_END_2(varsuffix, ...) TRACE_END_HELPER_2 (varsuffix, __VA_ARGS__)
 
 #define TRACE_CALLBACK_BEGIN(...)                                             \
   TRACE_BEGIN_HELPER (AMD_DBGAPI_LOG_LEVEL_VERBOSE, "callback: ", __VA_ARGS__)
