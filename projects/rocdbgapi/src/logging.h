@@ -36,6 +36,7 @@
 #include <tuple>
 #include <type_traits>
 #include <utility>
+#include <chrono>
 
 #define dbgapi_log(level, format, ...)                                        \
   do                                                                          \
@@ -614,9 +615,16 @@ to_cstring (T &&value, std::string &&tmp = {})
 namespace detail
 {
 
+using fmilliseconds = std::chrono::duration<double, std::milli>;
+
+struct tracer_closure_base
+{
+  fmilliseconds m_elapsed;
+};
+
 template <typename Functor,
           typename Result = decltype (std::declval<Functor> () ())>
-struct tracer_closure
+struct tracer_closure : tracer_closure_base
 {
   Result m_result;
 
@@ -629,7 +637,8 @@ struct tracer_closure
   std::string str () const { return to_string (m_result); }
 };
 
-template <typename Functor> struct tracer_closure<Functor, void>
+template <typename Functor>
+struct tracer_closure<Functor, void> : tracer_closure_base
 {
   tracer_closure (Functor &&f) { std::forward<Functor> (f) (); }
   void operator() () && {}
@@ -676,14 +685,33 @@ tracer<LogLevel>::enter (std::tuple<Args...> &&in_args, Functor &&func)
                to_cstring (std::move (in_args)));
   ++detail::log_indent_depth;
 
+  using clock = std::chrono::steady_clock;
+
+  clock::time_point start = clock::now ();
+
+#define LOG_DURATION 1
+
   try
     {
-      return detail::tracer_closure (std::forward<Functor> (func));
+      auto res = detail::tracer_closure (std::forward<Functor> (func));
+
+      clock::time_point end = clock::now ();
+
+      res.m_elapsed = end - start;
+      return res;
     }
   catch (...)
     {
+      clock::time_point end = clock::now ();
+      detail::fmilliseconds elapsed = end - start;
+
       --detail::log_indent_depth;
-      dbgapi_log (LogLevel, "%s} throw", m_prefix);
+
+      if (LOG_DURATION)
+	dbgapi_log (LogLevel, "%s} throw (took %.3f ms)", m_prefix,
+		    elapsed.count ());
+      else
+	dbgapi_log (LogLevel, "%s} throw", m_prefix);
       throw;
     }
 }
@@ -711,7 +739,12 @@ tracer<LogLevel>::leave (std::tuple<Args...> &&out_args,
           results_str += ", " + out_args_str;
 
       --detail::log_indent_depth;
-      detail::log (LogLevel, "%s} = %s", m_prefix, results_str.c_str ());
+
+      if (LOG_DURATION)
+	detail::log (LogLevel, "%s} = %s (took %.3f ms)",
+		     m_prefix, results_str.c_str (), result.m_elapsed.count ());
+      else
+	detail::log (LogLevel, "%s} = %s", m_prefix, results_str.c_str ());
     }
 
   return std::move (result) ();
