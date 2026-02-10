@@ -1330,7 +1330,7 @@ def process_torch_trace_output(
 ) -> None:
     """
     Joins counter_collection and marker_api_trace data.
-        - Performs inner join on Correlation_Id, filtering out unmatched entries
+        - Performs inner join on Correlation_ID, filtering out unmatched entries
         - Consolidates data across passes
         - Groups by Operator_Name, saving one CSV per operator
         - Output file is saved to workload/torch_trace/ directory
@@ -1376,6 +1376,9 @@ def process_torch_trace_output(
         counter_path: Path,
         join_keys: list = ("Correlation_ID"),
     ) -> pd.DataFrame:
+        """Merge a pair of marker and counter csv files on specified keys,
+           return the merged dataframe.
+        """
         marker_df = pd.read_csv(marker_path)
         counter_df = pd.read_csv(counter_path)
         # Normalize column names to handle case inconsistencies
