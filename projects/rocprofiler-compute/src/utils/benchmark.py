@@ -130,8 +130,8 @@ mfma_ops = {
     ),
     "BF16": dict.fromkeys(["gfx940", "gfx941", "gfx942"], 16384)
     | dict.fromkeys(["gfx90a"], 8192) | dict.fromkeys(["gfx950"], 32768),
-    "I8": dict.fromkeys(["gfx940", "gfx941", "gfx942", "gfx950"], 32768)
-    | dict.fromkeys(["gfx90a"], 16384),
+    "I8": dict.fromkeys(["gfx940", "gfx941", "gfx942"], 32768)
+    | dict.fromkeys(["gfx90a"], 16384) | dict.fromkeys(["gfx950"], 65536),
     "F64": dict.fromkeys(["gfx90a", "gfx940", "gfx941", "gfx942", "gfx950"], 2048),
 }
 
@@ -815,6 +815,7 @@ extern "C" __global__ void mfma_f64(int iter, float *dummy)
 
 mfma_i8_src = """
 using int32_8vec = __attribute__((__vector_size__(8 * sizeof(int)))) int;
+using int32_4vec = __attribute__((__vector_size__(4 * sizeof(int)))) int;
 using int32_16vec = __attribute__((__vector_size__(16 * sizeof(int)))) int;
 
 extern "C" __global__ void mfma_i8(int iter, float *dummy)
@@ -833,7 +834,7 @@ extern "C" __global__ void mfma_i8(int iter, float *dummy)
         result = __builtin_amdgcn_mfma_i32_32x32x8i8(a, a, result, 0, 0, 0);
     }
 // MI300 series
-#else
+#elif defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__)
     // Input: 2 I32 registers
     // builting mfma expects I64 input
     long a =  threadIdx.x;
@@ -843,8 +844,20 @@ extern "C" __global__ void mfma_i8(int iter, float *dummy)
     {
         result = __builtin_amdgcn_mfma_i32_32x32x16_i8(a, a, result, 0, 0, 0);
     }
+#elif defined(__gfx950__)
+    int32_4vec a;
+    a[0] = a[1] = threadIdx.x;
+    
+    for(int i = 0; i < iter / 4; ++i)
+    {
+        result = __builtin_amdgcn_mfma_i32_32x32x32_i8(a, a, result, 0, 0, 0);
+        result = __builtin_amdgcn_mfma_i32_32x32x32_i8(a, a, result, 0, 0, 0);
+        result = __builtin_amdgcn_mfma_i32_32x32x32_i8(a, a, result, 0, 0, 0);
+        result = __builtin_amdgcn_mfma_i32_32x32x32_i8(a, a, result, 0, 0, 0);
+    }
+#else
+#error "Unknown gfx arch"
 #endif
-
     if (result[0] != 2*result[0])
     {
         dummy[0] = result[0];
