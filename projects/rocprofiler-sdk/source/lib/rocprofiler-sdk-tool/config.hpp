@@ -141,6 +141,8 @@ struct config : output_config
     bool   selected_regions            = get_env("ROCPROF_SELECTED_REGIONS", false);
     bool   selected_regions_ref_count  = get_env("ROCPROF_SELECTED_REGIONS_REF_COUNT", false);
     bool   output_config_file          = get_env("ROCPROF_OUTPUT_CONFIG_FILE", false);
+    bool   disable_stream_tracking     = get_env("ROCPROF_DISABLE_STREAM_TRACKING", false);
+    bool   disable_kernel_rename       = get_env("ROCPROF_DISABLE_KERNEL_RENAME", false);
     bool   pc_sampling_host_trap       = false;
     bool   pc_sampling_stochastic      = false;
     size_t pc_sampling_interval        = get_env("ROCPROF_PC_SAMPLING_INTERVAL", 1);
