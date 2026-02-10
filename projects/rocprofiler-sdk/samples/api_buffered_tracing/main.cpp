@@ -363,7 +363,7 @@ run_migrate(int rank, int tid, hipStream_t stream, int, char** argv)
     auto        page_data = std::vector<data_type>(1024, 0);
 
     HIP_API_CALL(hipHostRegister(
-        page_data.data(), page_data.size() * sizeof(data_type), hipHostRegisterMapped));
+        page_data.data(), page_data.size() * sizeof(data_type), hipHostRegisterDefault));
 
     data_type* d_ptr = nullptr;
     HIP_API_CALL(hipHostGetDevicePointer((void**) &d_ptr, page_data.data(), 0));
