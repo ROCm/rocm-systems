@@ -232,10 +232,18 @@ def pytest_configure(config: pytest.Config) -> None:
         "python_versions: Test will be parametrized by Python version",
     )
 
+    # See pytest_collection_modifyitems
+    generic_functional_markers = [
+        "ucx",
+        "mpi",
+        "overflow",
+        "attach",
+        "mpi",
+        "rocm",
+    ]
+
     # Non-functional informational markers
 
-    config.addinivalue_line("markers", "mpi: mark test as requiring MPI")
-    config.addinivalue_line("markers", "rocm: mark test as requiring ROCm")
     config.addinivalue_line(
         "markers", "rocprofiler: mark test as using ROCProfiler counters"
     )
@@ -243,7 +251,7 @@ def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line("markers", "loops: mark test as testing loop instrumentation")
 
     # Can be described using generic desc below
-    label_list = [
+    non_functional_markers = [
         "avail",
         "instrument",
         "baseline",
@@ -269,20 +277,17 @@ def pytest_configure(config: pytest.Config) -> None:
         "roctx",
         "time_window",
         "transpose",
-        "ucx",
         "nic",
         "network",
         "fork",
         "user_api",
         "thread_limit",
         "pthreads",
-        "overflow",
         "rewrite_caller",
         "locks",
         "caller_include",
         "causal",
         "causal_e2e",
-        "attach",
         "annotate",
         "papi",
         "code_coverage",
@@ -291,7 +296,7 @@ def pytest_configure(config: pytest.Config) -> None:
         "hip_stream",
         "presets",
     ]
-    for label in label_list:
+    for label in non_functional_markers + generic_functional_markers:
         config.addinivalue_line("markers", f"{label}: label test as {label}")
 
     # Ignore unknown marker warnings when plugins are not installed
@@ -305,12 +310,10 @@ def pytest_configure(config: pytest.Config) -> None:
         numprocesses = config.getoption("numprocesses", default=None)
         dist_mode = config.getoption("dist", default=None)
         if numprocesses and numprocesses != 0 and dist_mode != "loadgroup":
-            import warnings
-
-            warnings.warn(
+            pytest.exit(
                 f"Running with xdist (-n {numprocesses}) but --dist={dist_mode}. "
                 "For proper test grouping with @pytest.mark.xdist_group, use --dist=loadgroup",
-                UserWarning,
+                returncode=1,
             )
     except (ValueError, AttributeError):
         pass  # xdist not installed or option not available
@@ -425,6 +428,7 @@ def pytest_collection_modifyitems(config, items) -> None:
         reason=f"Requires ptrace_scope to be 0. "
         "Run 'echo 0 | sudo tee /proc/sys/kernel/yama/ptrace_scope' to enable attaching to process"
     )
+    skip_rocm = pytest.mark.skip(reason="ROCm not available")
 
     # Conditions
     overflow_available = (
@@ -492,6 +496,8 @@ def pytest_collection_modifyitems(config, items) -> None:
             item.add_marker(skip_overflow)
         if "attach" in item.keywords and not attach_available:
             item.add_marker(skip_attach)
+        if "rocm" in item.keywords and not rocprof_config.rocm_path:
+            item.add_marker(skip_rocm)
         if "rocm_min_version" in item.keywords:
             req_version = item.get_closest_marker("rocm_min_version").args[0]
             system_version = rocprof_config.rocm_version
