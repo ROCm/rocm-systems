@@ -2520,7 +2520,7 @@ get_perfetto_output_filename_with_suffix(std::string_view suffix)
     auto _cfg = settings::compose_filename_config{
         !_explicitly_set && !suffix.empty(),  // use_suffix only if not explicitly set
         suffix,                               // suffix value
-        true,                                 // make_dir
+        false,                                // make_dir
         _dir                                  // explicit_path
     };
 

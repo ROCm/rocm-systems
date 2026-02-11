@@ -32,6 +32,7 @@
 #pragma once
 
 #include <chrono>
+#include <time.h>
 
 namespace Util
 {
@@ -49,6 +50,9 @@ public:
 private:
     char m_data[64];
 };
+
+/// Returns the current time in the local timezone.
+struct tm GetCurrentLocalTime();
 
 #if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 873
 /// Seconds stored as a float instead of an integer.
