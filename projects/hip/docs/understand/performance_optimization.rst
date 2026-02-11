@@ -707,14 +707,12 @@ The relationship between registers and occupancy:
 Performance metrics explained
 ==============================
 
-Understanding performance metrics helps you analyze GPU behavior:
+Understanding performance metrics is essential for analyzing GPU behavior:
 
 Peak rate
 ---------
 
-Peak rate is the theoretical maximum throughput at which a hardware system
-can complete work. It defines the absolute upper bound of GPU
-performance—the "speed of light" for that architecture.
+Peak rate is the theoretical maximum throughput a hardware system can achieve. It represents the absolute upper bound of GPU performance—the architecture’s effective ‘speed of light.’
 
 Peak rate assumes ideal conditions: every compute unit is fully active, all
 execution pipelines are perfectly fed, and no constraints (e.g., register
