@@ -219,8 +219,7 @@ struct formatter<::rocprofiler::common::thread_activity::status>
             case status::Sleeping: return fmt::format_to(ctx.out(), "Sleeping");
             case status::RunnableWaiting: return fmt::format_to(ctx.out(), "RunnableWaiting");
             case status::ActiveOnCPU: return fmt::format_to(ctx.out(), "ActiveOnCPU");
-            case status::Unknown:
-            default: return fmt::format_to(ctx.out(), "Unknown");
+            case status::Unknown: return fmt::format_to(ctx.out(), "Unknown");
         }
     }
 };
