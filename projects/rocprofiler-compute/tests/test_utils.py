@@ -8412,10 +8412,23 @@ def test_gpu_benchmark_locking(tmp_path, monkeypatch, capsys):
     # --- Setup: redirect lock directory to temp path ---
     lock_dir = tmp_path / "locks"
     lock_dir.mkdir()
-    monkeypatch.setattr(benchmark, "_LOCK_DIR", lock_dir)
 
     # Mock GPU UUID
-    monkeypatch.setattr(benchmark, "_get_gpu_uuid", lambda d: "01020304")
+    monkeypatch.setattr(
+        benchmark.hip,
+        "hipGetDeviceProperties",
+        lambda d: mock.Mock(uuid=mock.Mock(uuid=bytes([0x01, 0x02, 0x03, 0x04]))),
+    )
+
+    # Mock Path to use our temp directory
+    original_path = Path
+
+    def mock_path(p):
+        if p == "/tmp/rocprof-compute-benchmark":
+            return lock_dir
+        return original_path(p)
+
+    monkeypatch.setattr(benchmark, "Path", mock_path)
 
     # --- Test lock acquisition and lock file creation ---
     with benchmark.gpu_benchmark_lock(0):
@@ -8446,34 +8459,3 @@ def test_gpu_benchmark_locking(tmp_path, monkeypatch, capsys):
     assert "Waiting for GPU 0" in output
     assert "another rocprof-compute benchmark is in progress" in output
     assert "Acquired lock for GPU 0" in output
-
-    # --- Test get_shared_roofline_csv_path returns correct path ---
-    shared_path = benchmark.get_shared_roofline_csv_path(0)
-    assert shared_path == lock_dir / "roofline-01020304.csv"
-
-    # --- Test shared cache: first call creates, second call reuses ---
-    import shutil
-
-    workload_dir_a = tmp_path / "workload_a"
-    workload_dir_a.mkdir()
-    workload_dir_b = tmp_path / "workload_b"
-    workload_dir_b.mkdir()
-
-    shared_csv = benchmark.get_shared_roofline_csv_path(0)
-
-    # No cache yet
-    assert not shared_csv.exists()
-
-    # Simulate first process: write to shared cache and copy to workload
-    shared_csv.write_text("Device,HBMBw\n0,1000\n")
-    shutil.copy2(shared_csv, workload_dir_a / "roofline.csv")
-
-    assert shared_csv.exists()
-    assert (workload_dir_a / "roofline.csv").exists()
-
-    # Simulate second process: reuse shared cache
-    assert shared_csv.is_file()
-    shutil.copy2(shared_csv, workload_dir_b / "roofline.csv")
-
-    assert (workload_dir_b / "roofline.csv").exists()
-    assert (workload_dir_b / "roofline.csv").read_text() == "Device,HBMBw\n0,1000\n"

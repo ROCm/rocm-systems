@@ -35,7 +35,6 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * GPU benchmark locking for Roofline benchmarking to prevent concurrent profiling conflicts on the same GPU
     * Multiple rocprof-compute processes can safely profile on different GPUs in parallel
     * Processes attempting to benchmark on the same GPU will wait with user-visible feedback and execute sequentially
-    * Concurrent processes reuse cached roofline.csv per GPU to avoid redundant microbenchmarks
     * Lock applies specifically to the roofline.csv file generated during benchmarking, not other files generated in profile mode
 
 ### Changed

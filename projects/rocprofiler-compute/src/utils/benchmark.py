@@ -190,28 +190,21 @@ DEFAULT_THREADS = DEFAULT_WORKGROUP_SIZE * DEFAULT_WORKGROUPS
 DEFAULT_NUM_EXPERIMENTS = 100
 DEFAULT_NUM_ITERS = 10
 
-# Shared directory for GPU benchmark lock files and cached roofline data
-_LOCK_DIR = Path("/tmp/rocprof-compute-benchmark")
-
-
-def _get_gpu_uuid(device: int) -> str:
-    """Get the hex UUID string for a specific GPU device."""
-    return bytes(hip.hipGetDeviceProperties(device).uuid.uuid).hex()
-
-
-def _ensure_lock_dir() -> None:
-    """Create the lock directory with sticky bit for multi-user safety."""
-    _LOCK_DIR.mkdir(parents=True, exist_ok=True)
-    _LOCK_DIR.chmod(0o1777)  # rwx for all + sticky bit
-
 
 @contextmanager
 def gpu_benchmark_lock(device: int) -> Generator[None, None, None]:
     """Acquire exclusive lock for benchmarking a specific GPU."""
-    gpu_uuid = _get_gpu_uuid(device)
-    _ensure_lock_dir()
+    gpu_uuid = bytes(hip.hipGetDeviceProperties(device).uuid.uuid).hex()
 
-    lock_file = _LOCK_DIR / f"rocprof-compute-benchmark-{gpu_uuid}.lock"
+    # Get/create lock directory with sticky bit for multi-user safety
+    lock_dir = Path("/tmp/rocprof-compute-benchmark")
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        lock_dir.chmod(0o1777)  # rwx for all + sticky bit
+    except PermissionError:
+        pass  # Already created by another user with correct permissions
+
+    lock_file = lock_dir / f"rocprof-compute-benchmark-{gpu_uuid}.lock"
 
     with open(lock_file, "a") as f:
         try:
@@ -228,13 +221,6 @@ def gpu_benchmark_lock(device: int) -> Generator[None, None, None]:
             print(msg, flush=True)
             console_log(msg)
         yield
-
-
-def get_shared_roofline_csv_path(device: int) -> Path:
-    """Get the path to the shared roofline.csv cache file for a specific GPU."""
-    gpu_uuid = _get_gpu_uuid(device)
-    _ensure_lock_dir()
-    return _LOCK_DIR / f"roofline-{gpu_uuid}.csv"
 
 
 def show_progress(pct: float) -> None:
@@ -1204,23 +1190,24 @@ tests = {
 
 # Run the roofline tests on the specified device
 def run_benchmark(device: int) -> dict[PerfMetrics]:
-    metrics_dict = {}
+    with gpu_benchmark_lock(device):
+        metrics_dict = {}
 
-    arch = get_gfx_arch(device)
-    cus = hip.hipGetDeviceProperties(device).multiProcessorCount
+        arch = get_gfx_arch(device)
+        cus = hip.hipGetDeviceProperties(device).multiProcessorCount
 
-    print(f"GPU Device {device} ({arch}) with {cus} CUs: Profiling...")
+        print(f"GPU Device {device} ({arch}) with {cus} CUs: Profiling...")
 
-    for name, func in tests.items():
-        if arch in unsupported_data_types and name in unsupported_data_types[arch]:
-            print(f"Skipping {name}")
-            metrics = PerfMetrics(0, 0, 0)
-        else:
-            metrics = func(device)
+        for name, func in tests.items():
+            if arch in unsupported_data_types and name in unsupported_data_types[arch]:
+                print(f"Skipping {name}")
+                metrics = PerfMetrics(0, 0, 0)
+            else:
+                metrics = func(device)
 
-        metrics_dict[name] = metrics
+            metrics_dict[name] = metrics
 
-    return metrics_dict
+        return metrics_dict
 
 
 # Run the benchmark test on the specified devices

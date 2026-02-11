@@ -27,7 +27,6 @@ import argparse
 import math
 import os
 import re
-import shutil
 import sys
 from abc import abstractmethod
 from pathlib import Path
@@ -685,45 +684,17 @@ class OmniSoC_Base:
             console_log(
                 "roofline", f"Checking for roofline.csv in {self.get_args().path}"
             )
-            device = self.get_args().device
-            workload_roofline_csv = Path(self.get_args().path) / "roofline.csv"
-            shared_roofline_csv = benchmark.get_shared_roofline_csv_path(device)
-
-            with benchmark.gpu_benchmark_lock(device):
-                # Check if shared cache exists
-                if shared_roofline_csv.is_file():
-                    # Copy from shared cache to workload directory
-                    shutil.copy2(shared_roofline_csv, workload_roofline_csv)
-                    console_log(
+            if not (Path(self.get_args().path) / "roofline.csv").is_file():
+                try:
+                    result = benchmark.run_on_devices([self.get_args().device])
+                    benchmark.dump_csv(result, f"{self.get_args().path}/roofline.csv")
+                except Exception as e:
+                    console_error(
                         "roofline",
-                        "Reusing cached roofline.csv"
-                        f" for GPU {device}"
-                        f" from {shared_roofline_csv}",
+                        f"Benchmark execution failed: {e}. Skipping roofline.",
+                        exit=False,
                     )
-                else:
-                    # Run benchmarks and create shared cache
-                    try:
-                        result = benchmark.run_on_devices([device])
-                        # Write to shared cache location first
-                        benchmark.dump_csv(result, str(shared_roofline_csv))
-                        # Copy to workload directory
-                        shutil.copy2(
-                            shared_roofline_csv,
-                            workload_roofline_csv,
-                        )
-                        console_log(
-                            "roofline",
-                            "Created roofline.csv cache"
-                            f" for GPU {device}"
-                            f" at {shared_roofline_csv}",
-                        )
-                    except Exception as e:
-                        console_error(
-                            "roofline",
-                            f"Benchmark execution failed: {e}. Skipping roofline.",
-                            exit=False,
-                        )
-                        return
+                    return
 
             # Validate roofline.csv before post-processing
             is_valid, error_msg = validate_roofline_csv(self.get_args().path)
