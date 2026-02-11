@@ -510,8 +510,8 @@ add_test(
 add_test(
     NAME test_misc
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_misc.xml
-        ${COV_OPTION} tests/test_misc.py ${WORKING_DIR_OPTION}
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_misc.xml ${COV_OPTION}
+        tests/test_misc.py ${WORKING_DIR_OPTION}
 )
 
 # -----------------------------------
