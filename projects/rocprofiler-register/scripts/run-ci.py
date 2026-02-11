@@ -439,7 +439,7 @@ if __name__ == "__main__":
         )
     finally:
         echo_files = []
-        if "-VV" not in ctest_args and not args.quiet:
+        if not args.quiet:
             for file in glob.glob(
                 os.path.join(args.binary_dir, "Testing/Temporary/**"),
                 recursive=True,
@@ -472,14 +472,14 @@ if __name__ == "__main__":
                         echo_files_sorted.append(file)
             echo_files_sorted += [x for x in echo_files if x not in echo_files_sorted]
             for file in echo_files_sorted:
-                print(f"\n\n\n###### Reading {file}... ######\n\n\n")
+                print(f"###### Reading {file}... ######")
                 with open(file, "r") as inpf:
                     fdata = inpf.read()
                     oname = os.path.basename(file)
                     if "LastTest" not in oname and "Coverage" not in oname:
                         print(fdata)
-                    if oname.endswith(".log"):
+                    if not oname.endswith(".log"):
                         oname += ".log"
                     with open(os.path.join(args.binary_dir, oname), "w") as outf:
-                        print(f"\n\n###### Writing {oname}... ######\n\n")
+                        print(f"###### Writing {oname}... ######")
                         outf.write(fdata)
