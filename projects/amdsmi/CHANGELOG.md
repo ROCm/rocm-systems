@@ -59,6 +59,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
     the fallback line now uses consistent padding so the table stays aligned.
   - Fixes `amd-smi` default output formatting.
 
+- **Fixed virtualization detection utilities when libDRM is unavailable or version < 3.62.0**.  
+  - New functions for detecting container, VM, SR-IOV, and vfio-pci binding status.
+  - Enables `amdsmi_get_gpu_virtualization_mode()` to work when libDRM is unavailable.
+
 ### Upcoming changes
 
 - N/A

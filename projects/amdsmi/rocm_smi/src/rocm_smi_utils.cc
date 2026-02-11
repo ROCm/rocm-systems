@@ -1341,21 +1341,6 @@ uint64_t bdfid_from_domain(uint64_t bdfid, uint64_t domain) {
   return bdfid;
 }
 
-//--------------------------------------------------------------------------
-// TODO(amdsmi_team): May remove the below functions and add to anothe PR...
-//--------------------------------------------------------------------------
-
-// Structure to hold virtualization detection results
-// This provides multiple signals to help determine the virtualization mode
-// without false positives in container environments
-struct VirtModeDetectionResult {
-  bool is_vm_guest;           // hypervisor flag in /proc/cpuinfo
-  bool is_container;          // running inside docker/lxc/podman container
-  bool has_sriov_capability;  // device supports SR-IOV (sriov_totalvfs > 0)
-  bool has_active_vfs;        // VFs are provisioned (sriov_numvfs > 0) -> HOST
-  bool is_vfio_bound;         // device bound to vfio-pci driver -> passthrough candidate
-};
-
 // Check if running inside a container (Docker, LXC, Podman, etc.)
 // This is important because container environments can give false positives
 // for VM detection since they may not have access to all sysfs paths
@@ -1469,33 +1454,19 @@ std::tuple<bool, bool> get_sriov_status(const std::string& pci_sysfs_path) {
 
 // Comprehensive virtualization mode detection via sysfs (no root required)
 // render_path: the render node name, e.g., "renderD128"
-// Returns tuple:
-//   0: is_vm_guest         - hypervisor flag detected in /proc/cpuinfo
-//   1: is_container        - running inside docker/lxc/podman container
-//   2: has_sriov_capability - device supports SR-IOV (could read sriov_totalvfs)
-//   3: has_active_vfs      - VFs are provisioned (indicates HOST mode)
-//   4: is_vfio_bound       - device bound to vfio-pci (passthrough indicator)
-//   5: sysfs_accessible    - could access device sysfs path at all
-std::tuple<bool, bool, bool, bool, bool, bool> detect_virtualization_mode_sysfs(
-    const std::string& render_path) {
+// Returns VirtModeDetectionResult
+VirtModeDetectionResult detect_virtualization_mode_sysfs(
+                                            const std::string& render_path) {
   std::ostringstream ss;
-  bool is_vm = is_vm_guest();
-  bool is_ctr = is_running_in_container();
-  bool has_sriov_cap = false;
-  bool has_active_vfs = false;
-  bool is_vfio = false;
-  bool sysfs_accessible = false;
-
-  ss << __PRETTY_FUNCTION__
-     << " | is_vm_guest: " << (is_vm ? "true" : "false")
-     << " | is_container: " << (is_ctr ? "true" : "false");
-  LOG_DEBUG(ss);
+  VirtModeDetectionResult result{};
+  result.is_vm_guest = is_vm_guest();
+  result.is_container = is_running_in_container();
 
   // If render_path is empty, we can only provide VM/container info
   if (render_path.empty()) {
     ss << __PRETTY_FUNCTION__ << " | render_path is empty, cannot check sysfs";
     LOG_INFO(ss);
-    return std::make_tuple(is_vm, is_ctr, false, false, false, false);
+    return result;
   }
 
   // Build the PCI device sysfs path
@@ -1504,25 +1475,16 @@ std::tuple<bool, bool, bool, bool, bool, bool> detect_virtualization_mode_sysfs(
   // Check if we can access sysfs at all (for container awareness)
   struct stat st;
   if (stat(pci_sysfs_path.c_str(), &st) == 0) {
-    sysfs_accessible = true;
+    result.sysfs_accessible = true;
   }
 
   // Check SR-IOV status
-  std::tie(has_sriov_cap, has_active_vfs) = get_sriov_status(pci_sysfs_path);
+  std::tie(result.has_sriov_capability, result.has_active_vfs) = get_sriov_status(pci_sysfs_path);
 
   // Check if device is bound to vfio-pci (passthrough indicator)
-  is_vfio = is_device_vfio_bound(pci_sysfs_path);
+  result.is_vfio_bound = is_device_vfio_bound(pci_sysfs_path);
 
-  ss << __PRETTY_FUNCTION__
-     << " | render_path: " << render_path
-     << " | sysfs_accessible: " << (sysfs_accessible ? "true" : "false")
-     << " | has_sriov_capability: " << (has_sriov_cap ? "true" : "false")
-     << " | has_active_vfs: " << (has_active_vfs ? "true" : "false")
-     << " | is_vfio_bound: " << (is_vfio ? "true" : "false");
-  LOG_INFO(ss);
-
-  return std::make_tuple(is_vm, is_ctr, has_sriov_cap,
-                         has_active_vfs, is_vfio, sysfs_accessible);
+  return result;
 }
 
 }  // namespace amd::smi

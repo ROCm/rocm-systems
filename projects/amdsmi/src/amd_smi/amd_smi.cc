@@ -1545,7 +1545,7 @@ amdsmi_get_gpu_board_info(amdsmi_processor_handle processor_handle, amdsmi_board
         LOG_INFO(ss);
     }
 
-    if (std::string(board_info->manufacturer_name) == "0x1002") {
+    if (board_info != nullptr && std::string(board_info->manufacturer_name) == "0x1002") {
         std::string amd_name = "Advanced Micro Devices Inc. [AMD/ATI]";
         smi_clear_char_and_reinitialize(board_info->manufacturer_name,
                                     AMDSMI_MAX_STRING_LENGTH, amd_name);
@@ -2799,7 +2799,7 @@ amdsmi_status_t amdsmi_get_gpu_vram_info(
 
     SMIGPUDEVICE_MUTEX(gpu_device->get_mutex());
 
-    auto log_vram_info = [](std::ostringstream& ss, const amdsmi_vram_info_t* info) {
+    auto log_vram_info = [&ss](const amdsmi_vram_info_t* info) {
         ss << __PRETTY_FUNCTION__
            << " | info->vram_type: " << std::dec << info->vram_type << "\n"
            << "; info->vram_size (MB): " << std::dec << info->vram_size << "\n"
@@ -2843,7 +2843,7 @@ amdsmi_status_t amdsmi_get_gpu_vram_info(
            << " | render_name is empty, cannot get remaining vram info from libdrm. "
            << "Libdrm is likely not installed. ";
         LOG_INFO(ss);
-        log_vram_info(ss, info);
+        log_vram_info(info);
         return AMDSMI_STATUS_SUCCESS;  // Return what we have so far, even if libDRM parts fail
     }
 
@@ -2915,7 +2915,7 @@ amdsmi_status_t amdsmi_get_gpu_vram_info(
     libdrm.unload();
     // if vram type is greater than the max enum set it to unknown
     if (info->vram_type > AMDSMI_VRAM_TYPE__MAX) info->vram_type = AMDSMI_VRAM_TYPE_UNKNOWN;
-    log_vram_info(ss, info);
+    log_vram_info(info);
     return AMDSMI_STATUS_SUCCESS;
 }
 
@@ -6186,42 +6186,38 @@ amdsmi_get_gpu_virtualization_mode(amdsmi_processor_handle processor_handle,
         } else {
             render_name_local = render_name;
         }
-        auto [is_vm_guest, is_container, has_sriov_cap, has_active_vfs, is_vfio, sysfs_accessible] =
-            amd::smi::detect_virtualization_mode_sysfs(render_name_local);
+        auto result = amd::smi::detect_virtualization_mode_sysfs(render_name_local);
 
         ss << __PRETTY_FUNCTION__ << " | sysfs fallback detection"
-        << " | is_vm_guest: " << std::boolalpha << is_vm_guest
-        << " | is_container: " << std::boolalpha << is_container
-        << " | has_sriov_cap: " << std::boolalpha << has_sriov_cap
-        << " | has_active_vfs: " << std::boolalpha << has_active_vfs
-        << " | is_vfio: " << std::boolalpha << is_vfio
-        << " | sysfs_accessible: " << std::boolalpha << sysfs_accessible;
+           << " | render_path: " << (render_name_local.empty() ? "<empty>" : render_name_local)
+           << " | has_sriov_capability: " << std::boolalpha << result.has_sriov_capability
+           << " | has_active_vfs: " << std::boolalpha << result.has_active_vfs
+           << " | is_vfio_bound: " << std::boolalpha << result.is_vfio_bound
+           << " | is_vm_guest: " << std::boolalpha << result.is_vm_guest
+           << " | is_container: " << std::boolalpha << result.is_container
+           << " | sysfs_accessible: " << std::boolalpha << result.sysfs_accessible;
         LOG_INFO(ss);
 
-        if (has_active_vfs) {
-            // VFs are provisioned = HOST mode (definitive, if we can see sysfs)
+        *mode = AMDSMI_VIRTUALIZATION_MODE_UNKNOWN;
+        if (result.has_sriov_capability || result.has_active_vfs) {
+            // Device has SR-IOV capability OR active VFs = HOST mode
             *mode = AMDSMI_VIRTUALIZATION_MODE_HOST;
-        } else if (is_vfio) {
+        } else if (result.is_vfio_bound) {
             // Device bound to vfio-pci = PASSTHROUGH
             *mode = AMDSMI_VIRTUALIZATION_MODE_PASSTHROUGH;
-        } else if (is_vm_guest) {
+        } else if (result.is_vm_guest) {
             // hypervisor flag = GUEST (containers inherit this correctly)
             *mode = AMDSMI_VIRTUALIZATION_MODE_GUEST;
-        } else if (!is_vm_guest && !is_container) {
+        } else if (!result.is_vm_guest && !result.is_container) {
             // Not VM, not container = safe to say BAREMETAL
             *mode = AMDSMI_VIRTUALIZATION_MODE_BAREMETAL;
-        } else if (!is_vm_guest && is_container) {
+        } else if (!result.is_vm_guest && result.is_container) {
             // In container, no hypervisor flag = likely BAREMETAL
             // BUT we can't be 100% sure without sysfs access
             // Check if we could read any sysfs at all
-            if (sysfs_accessible) {
+            if (result.sysfs_accessible) {
                 *mode = AMDSMI_VIRTUALIZATION_MODE_BAREMETAL;
-            } else {
-                // Container with no sysfs access - be conservative
-                *mode = AMDSMI_VIRTUALIZATION_MODE_UNKNOWN;
             }
-        } else {
-            *mode = AMDSMI_VIRTUALIZATION_MODE_UNKNOWN;
         }
         return ((*mode == AMDSMI_VIRTUALIZATION_MODE_UNKNOWN) ?
                  AMDSMI_STATUS_NOT_SUPPORTED : AMDSMI_STATUS_SUCCESS);
