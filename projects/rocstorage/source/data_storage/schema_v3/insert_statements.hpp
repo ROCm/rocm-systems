@@ -51,7 +51,6 @@ struct insert_statements
     insert_statements(insert_statements&&)                 = delete;
     insert_statements& operator=(const insert_statements&) = delete;
     insert_statements& operator=(insert_statements&&)      = delete;
-    virtual ~insert_statements()                           = default;
 
     template <typename... Ts>
     using statement_t = typename Backend::template prepared_insert_statement<Ts...>;
@@ -371,6 +370,12 @@ public:
     }
 
 private:
+    template <typename... Ts>
+    void create_statement(statement_t<Ts...>& target, const std::string& query)
+    {
+        target = m_backend->template create_write_statement_executor<Ts...>(query);
+    }
+
     void initialize_string_statement()
     {
         rocstorage::queries::insert::table_insert_query query_builder;
@@ -378,9 +383,7 @@ private:
                          .set_columns("id", "string")
                          .set_values('?', '?')
                          .get_query_string();
-        m_string_statement =
-            m_backend->template create_write_statement_executor<size_t, const char*>(
-                query);
+        create_statement(m_string_statement, query);
     }
 
     void initialize_node_info_statement()
@@ -399,16 +402,7 @@ private:
                              "domain_name")
                 .set_values('?', '?', '?', '?', '?', '?', '?', '?', '?')
                 .get_query_string();
-        m_node_info_statement =
-            m_backend->template create_write_statement_executor<integer_primary_key_t,
-                                                                size_t,
-                                                                const char*,
-                                                                const char*,
-                                                                const char*,
-                                                                const char*,
-                                                                const char*,
-                                                                const char*,
-                                                                const char*>(query);
+        create_statement(m_node_info_statement, query);
     }
 
     void initialize_process_info_statement()
@@ -429,18 +423,7 @@ private:
                              "extdata")
                 .set_values('?', '?', '?', '?', '?', '?', '?', '?', '?', '?', '?')
                 .get_query_string();
-        m_process_info_statement =
-            m_backend->template create_write_statement_executor<integer_primary_key_t,
-                                                                integer_foreign_key_t,
-                                                                std::optional<size_t>,
-                                                                size_t,
-                                                                std::optional<size_t>,
-                                                                std::optional<size_t>,
-                                                                std::optional<size_t>,
-                                                                std::optional<size_t>,
-                                                                const char*,
-                                                                const char*,
-                                                                const char*>(query);
+        create_statement(m_process_info_statement, query);
     }
 
     void initialize_thread_info_statement()
@@ -452,16 +435,7 @@ private:
                     "id", "nid", "ppid", "pid", "tid", "name", "start", "end", "extdata")
                 .set_values('?', '?', '?', '?', '?', '?', '?', '?', '?')
                 .get_query_string();
-        m_thread_info_statement =
-            m_backend->template create_write_statement_executor<integer_primary_key_t,
-                                                                integer_foreign_key_t,
-                                                                std::optional<size_t>,
-                                                                integer_foreign_key_t,
-                                                                size_t,
-                                                                const char*,
-                                                                std::optional<size_t>,
-                                                                std::optional<size_t>,
-                                                                const char*>(query);
+        create_statement(m_thread_info_statement, query);
     }
 
     void initialize_agent_info_statement()
@@ -486,21 +460,7 @@ private:
                 .set_values(
                     '?', '?', '?', '?', '?', '?', '?', '?', '?', '?', '?', '?', '?', '?')
                 .get_query_string();
-        m_agent_info_statement =
-            m_backend->template create_write_statement_executor<integer_primary_key_t,
-                                                                integer_foreign_key_t,
-                                                                integer_foreign_key_t,
-                                                                const char*,
-                                                                std::optional<size_t>,
-                                                                std::optional<size_t>,
-                                                                size_t,
-                                                                std::optional<size_t>,
-                                                                const char*,
-                                                                const char*,
-                                                                const char*,
-                                                                const char*,
-                                                                const char*,
-                                                                const char*>(query);
+        create_statement(m_agent_info_statement, query);
     }
 
     void initialize_pmc_info_statement()
@@ -547,26 +507,7 @@ private:
                             '?',
                             '?')
                 .get_query_string();
-        m_pmc_info_statement = m_backend->template create_write_statement_executor<
-            integer_primary_key_t,
-            integer_foreign_key_t,
-            integer_foreign_key_t,
-            std::optional<integer_foreign_key_t>,
-            const char*,
-            std::optional<size_t>,
-            std::optional<size_t>,
-            const char*,
-            const char*,
-            const char*,
-            const char*,
-            const char*,
-            const char*,
-            const char*,
-            const char*,
-            const char*,
-            std::optional<size_t>,
-            std::optional<size_t>,
-            const char*>(query);
+        create_statement(m_pmc_info_statement, query);
     }
 
     void initialize_stream_info_statement()
@@ -577,12 +518,7 @@ private:
                 .set_columns("id", "nid", "pid", "name", "extdata")
                 .set_values('?', '?', '?', '?', '?')
                 .get_query_string();
-        m_stream_info_statement =
-            m_backend->template create_write_statement_executor<integer_primary_key_t,
-                                                                integer_foreign_key_t,
-                                                                integer_foreign_key_t,
-                                                                const char*,
-                                                                const char*>(query);
+        create_statement(m_stream_info_statement, query);
     }
 
     void initialize_queue_info_statement()
@@ -593,12 +529,7 @@ private:
                 .set_columns("id", "nid", "pid", "name", "extdata")
                 .set_values('?', '?', '?', '?', '?')
                 .get_query_string();
-        m_queue_info_statement =
-            m_backend->template create_write_statement_executor<integer_primary_key_t,
-                                                                integer_foreign_key_t,
-                                                                integer_foreign_key_t,
-                                                                const char*,
-                                                                const char*>(query);
+        create_statement(m_queue_info_statement, query);
     }
 
     void initialize_kernel_symbol_info_statement()
@@ -638,22 +569,7 @@ private:
                             '?',
                             '?')
                 .get_query_string();
-        m_kernel_symbol_info_statement =
-            m_backend->template create_write_statement_executor<integer_primary_key_t,
-                                                                integer_foreign_key_t,
-                                                                integer_foreign_key_t,
-                                                                integer_foreign_key_t,
-                                                                const char*,
-                                                                const char*,
-                                                                std::optional<size_t>,
-                                                                std::optional<size_t>,
-                                                                std::optional<size_t>,
-                                                                std::optional<size_t>,
-                                                                std::optional<size_t>,
-                                                                std::optional<size_t>,
-                                                                std::optional<size_t>,
-                                                                std::optional<size_t>,
-                                                                const char*>(query);
+        create_statement(m_kernel_symbol_info_statement, query);
     }
 
     void initialize_code_object_info_statement()
@@ -673,18 +589,7 @@ private:
                              "extdata")
                 .set_values('?', '?', '?', '?', '?', '?', '?', '?', '?', '?')
                 .get_query_string();
-        m_code_object_info_statement =
-            m_backend->template create_write_statement_executor<
-                integer_primary_key_t,
-                integer_foreign_key_t,
-                integer_foreign_key_t,
-                std::optional<integer_foreign_key_t>,
-                const char*,
-                std::optional<size_t>,
-                std::optional<size_t>,
-                std::optional<size_t>,
-                const char*,
-                const char*>(query);
+        create_statement(m_code_object_info_statement, query);
     }
 
     void initialize_track_info_statement()
@@ -694,13 +599,7 @@ private:
                          .set_columns("id", "nid", "pid", "tid", "name_id", "extdata")
                          .set_values('?', '?', '?', '?', '?', '?')
                          .get_query_string();
-        m_track_info_statement = m_backend->template create_write_statement_executor<
-            integer_primary_key_t,
-            integer_foreign_key_t,
-            std::optional<integer_foreign_key_t>,
-            std::optional<integer_foreign_key_t>,
-            std::optional<integer_foreign_key_t>,
-            const char*>(query);
+        create_statement(m_track_info_statement, query);
     }
 
     void initialize_event_statement()
@@ -717,15 +616,7 @@ private:
                                       "extdata")
                          .set_values('?', '?', '?', '?', '?', '?', '?', '?')
                          .get_query_string();
-        m_event_statement = m_backend->template create_write_statement_executor<
-            integer_primary_key_t,
-            std::optional<integer_foreign_key_t>,
-            std::optional<size_t>,
-            std::optional<size_t>,
-            std::optional<size_t>,
-            const char*,
-            const char*,
-            const char*>(query);
+        create_statement(m_event_statement, query);
     }
 
     void initialize_arg_statement()
@@ -737,14 +628,7 @@ private:
                     "id", "event_id", "position", "type", "name", "value", "extdata")
                 .set_values('?', '?', '?', '?', '?', '?', '?')
                 .get_query_string();
-        m_arg_statement =
-            m_backend->template create_write_statement_executor<integer_primary_key_t,
-                                                                integer_foreign_key_t,
-                                                                size_t,
-                                                                const char*,
-                                                                const char*,
-                                                                const char*,
-                                                                const char*>(query);
+        create_statement(m_arg_statement, query);
     }
 
     void initialize_pmc_event_statement()
@@ -755,12 +639,7 @@ private:
                 .set_columns("id", "event_id", "pmc_id", "value", "extdata")
                 .set_values('?', '?', '?', '?', '?')
                 .get_query_string();
-        m_pmc_event_statement = m_backend->template create_write_statement_executor<
-            integer_primary_key_t,
-            std::optional<integer_foreign_key_t>,
-            integer_foreign_key_t,
-            double,
-            const char*>(query);
+        create_statement(m_pmc_event_statement, query);
     }
 
     void initialize_region_statement()
@@ -778,16 +657,7 @@ private:
                                       "extdata")
                          .set_values('?', '?', '?', '?', '?', '?', '?', '?', '?')
                          .get_query_string();
-        m_region_statement = m_backend->template create_write_statement_executor<
-            integer_primary_key_t,
-            integer_foreign_key_t,
-            integer_foreign_key_t,
-            integer_foreign_key_t,
-            uint64_t,
-            uint64_t,
-            integer_foreign_key_t,
-            std::optional<integer_foreign_key_t>,
-            const char*>(query);
+        create_statement(m_region_statement, query);
     }
 
     void initialize_sample_statement()
@@ -798,12 +668,7 @@ private:
                 .set_columns("id", "track_id", "timestamp", "event_id", "extdata")
                 .set_values('?', '?', '?', '?', '?')
                 .get_query_string();
-        m_sample_statement = m_backend->template create_write_statement_executor<
-            integer_primary_key_t,
-            integer_foreign_key_t,
-            uint64_t,
-            std::optional<integer_foreign_key_t>,
-            const char*>(query);
+        create_statement(m_sample_statement, query);
     }
 
     void initialize_kernel_dispatch_statement()
@@ -856,29 +721,7 @@ private:
                             '?',
                             '?')
                 .get_query_string();
-        m_kernel_dispatch_statement = m_backend->template create_write_statement_executor<
-            integer_primary_key_t,
-            integer_foreign_key_t,
-            integer_foreign_key_t,
-            std::optional<integer_foreign_key_t>,
-            integer_foreign_key_t,
-            integer_foreign_key_t,
-            size_t,
-            integer_foreign_key_t,
-            integer_foreign_key_t,
-            uint64_t,
-            uint64_t,
-            std::optional<size_t>,
-            std::optional<size_t>,
-            size_t,
-            size_t,
-            size_t,
-            size_t,
-            size_t,
-            size_t,
-            std::optional<integer_foreign_key_t>,
-            std::optional<integer_foreign_key_t>,
-            const char*>(query);
+        create_statement(m_kernel_dispatch_statement, query);
     }
 
     void initialize_memory_copy_statement()
@@ -921,24 +764,7 @@ private:
                             '?',
                             '?')
                 .get_query_string();
-        m_memory_copy_statement = m_backend->template create_write_statement_executor<
-            integer_primary_key_t,
-            integer_foreign_key_t,
-            integer_foreign_key_t,
-            std::optional<integer_foreign_key_t>,
-            uint64_t,
-            uint64_t,
-            integer_foreign_key_t,
-            std::optional<integer_foreign_key_t>,
-            std::optional<size_t>,
-            std::optional<integer_foreign_key_t>,
-            std::optional<size_t>,
-            size_t,
-            std::optional<integer_foreign_key_t>,
-            std::optional<integer_foreign_key_t>,
-            std::optional<integer_foreign_key_t>,
-            std::optional<integer_foreign_key_t>,
-            const char*>(query);
+        create_statement(m_memory_copy_statement, query);
     }
 
     void initialize_memory_alloc_statement()
@@ -977,22 +803,7 @@ private:
                             '?',
                             '?')
                 .get_query_string();
-        m_memory_alloc_statement = m_backend->template create_write_statement_executor<
-            integer_primary_key_t,
-            integer_foreign_key_t,
-            integer_foreign_key_t,
-            std::optional<integer_foreign_key_t>,
-            std::optional<integer_foreign_key_t>,
-            const char*,
-            const char*,
-            uint64_t,
-            uint64_t,
-            std::optional<size_t>,
-            size_t,
-            std::optional<integer_foreign_key_t>,
-            std::optional<integer_foreign_key_t>,
-            std::optional<integer_foreign_key_t>,
-            const char*>(query);
+        create_statement(m_memory_alloc_statement, query);
     }
 
     std::shared_ptr<Backend> m_backend;
