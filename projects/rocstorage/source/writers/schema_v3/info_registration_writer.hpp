@@ -46,8 +46,10 @@ class info_registration_writer<data_storage::schema_v3_tag>
 {
 public:
     explicit info_registration_writer(
-        std::shared_ptr<writer_context>                                        ctx,
-        std::shared_ptr<data_storage::schema_v3::insert_statements>            stmts,
+        std::shared_ptr<writer_context> ctx,
+        std::shared_ptr<
+            data_storage::schema_v3::insert_statements<data_storage::sqlite_backend>>
+                                                                               stmts,
         std::shared_ptr<common_insert_operations<data_storage::schema_v3_tag>> common_ops)
     : m_ctx(std::move(ctx))
     , m_stmts(std::move(stmts))
@@ -349,8 +351,10 @@ public:
     void register_string_impl(const char* str) { m_common_ops->register_string(str); }
 
 private:
-    std::shared_ptr<writer_context>                                        m_ctx;
-    std::shared_ptr<data_storage::schema_v3::insert_statements>            m_stmts;
+    std::shared_ptr<writer_context> m_ctx;
+    std::shared_ptr<
+        data_storage::schema_v3::insert_statements<data_storage::sqlite_backend>>
+                                                                           m_stmts;
     std::shared_ptr<common_insert_operations<data_storage::schema_v3_tag>> m_common_ops;
 };
 

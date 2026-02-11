@@ -19,8 +19,9 @@ namespace rocstorage
 
 struct writer_policy_v3
 {
-    using schema_tag_t             = data_storage::schema_v3_tag;
-    using insert_statements_t      = data_storage::schema_v3::insert_statements;
+    using schema_tag_t = data_storage::schema_v3_tag;
+    using insert_statements_t =
+        data_storage::schema_v3::insert_statements<data_storage::sqlite_backend>;
     using common_ops_t             = common_insert_operations<schema_tag_t>;
     using info_writer_t            = info_registration_writer<schema_tag_t>;
     using region_writer_t          = region_writer<schema_tag_t>;

@@ -25,8 +25,10 @@ class common_insert_operations<data_storage::schema_v3_tag>
 {
 public:
     explicit common_insert_operations(
-        std::shared_ptr<writer_context>                             ctx,
-        std::shared_ptr<data_storage::schema_v3::insert_statements> stmts)
+        std::shared_ptr<writer_context> ctx,
+        std::shared_ptr<
+            data_storage::schema_v3::insert_statements<data_storage::sqlite_backend>>
+            stmts)
     : m_ctx(std::move(ctx))
     , m_stmts(std::move(stmts))
     {}
@@ -159,8 +161,10 @@ public:
     }
 
 private:
-    std::shared_ptr<writer_context>                             m_ctx;
-    std::shared_ptr<data_storage::schema_v3::insert_statements> m_stmts;
+    std::shared_ptr<writer_context> m_ctx;
+    std::shared_ptr<
+        data_storage::schema_v3::insert_statements<data_storage::sqlite_backend>>
+        m_stmts;
 };
 
 }  // namespace rocstorage

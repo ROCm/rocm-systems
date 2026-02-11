@@ -93,6 +93,48 @@ public:
     };
 
     // =========================================================================
+    // Prepared insert statement
+    //
+    // Concrete callable type that replaces std::function for write executors.
+    // Eliminates heap allocation and indirect call overhead of std::function.
+    // =========================================================================
+    template <typename... Values>
+    class prepared_insert_statement
+    {
+        friend class sqlite_backend;
+
+    public:
+        prepared_insert_statement() = default;
+
+        void operator()(Values... value) const
+        {
+            auto* raw      = m_stmt.raw();
+            int   position = 1;
+
+            ((m_backend->bind_value(
+                 raw, position++, std::forward<Values>(value), m_query)),
+             ...);
+
+            m_backend->validate_sqlite3_result(
+                sqlite3_step(raw), m_query.c_str(), "Failed to execute step");
+            sqlite3_reset(raw);
+        }
+
+    private:
+        prepared_insert_statement(std::shared_ptr<sqlite_backend> backend,
+                                  statement_handle                stmt,
+                                  std::string                     query)
+        : m_backend(std::move(backend))
+        , m_stmt(std::move(stmt))
+        , m_query(std::move(query))
+        {}
+
+        std::shared_ptr<sqlite_backend> m_backend;
+        statement_handle                m_stmt;
+        std::string                     m_query;
+    };
+
+    // =========================================================================
     // Result set -- replaces statement_result<T>
     //
     // Captures shared_ptr<sqlite_backend> for lifetime safety.
@@ -175,22 +217,12 @@ public:
     // Connection stays alive as long as any statement does.
     // =========================================================================
     template <typename... Values>
-    auto create_write_statement_executor(const std::string& query)
+    prepared_insert_statement<Values...> create_write_statement_executor(
+        const std::string& query)
     {
-        auto self = shared_from_this();
-        auto stmt = prepare(query);
-
-        return [self, stmt, query](Values... value) {
-            auto* raw      = stmt.raw();
-            int   position = 1;
-
-            ((self->bind_value(raw, position++, std::forward<Values>(value), query)),
-             ...);
-
-            self->validate_sqlite3_result(
-                sqlite3_step(raw), query.c_str(), "Failed to execute step");
-            sqlite3_reset(raw);
-        };
+        return prepared_insert_statement<Values...>{ shared_from_this(),
+                                                     prepare(query),
+                                                     query };
     }
 
     // =========================================================================
