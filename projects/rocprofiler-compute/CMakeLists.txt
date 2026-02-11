@@ -794,7 +794,6 @@ message(STATUS "Install tests: ${INSTALL_TESTS}")
 
 # Standalone binary creation during install
 if(STANDALONEBINARY)
-    # Ensure Python3 is found for Nuitka
     # We use Nuitka 2.6 which requires exactly Python 3.11.x (any patch version)
     find_package(Python3 3.11 COMPONENTS Interpreter REQUIRED)
 
