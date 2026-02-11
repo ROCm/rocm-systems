@@ -986,6 +986,20 @@ ncclResult_t rocmIbInit(void** ctx, uint64_t commId, ncclNetCommConfig_t* config
       // for AINIC, these params are defaulted to enabled unless user forces it to disable(0).
       rcclCtsInlineData = ((rcclParamCtsInlineData() == 0) ? false : true);
       rcclCtsOffloadEnabled = ((rcclParamCtsOffloadEnabled() == 0) ? false : true);
+
+      // CTS Offload and CTS Inline are not yet compatible with NIC Fusion
+      // (NCCL_IB_MERGE_NICS). Temporarily disable them when merge is enabled.
+      if (ncclParamRocmIbMergeNics()) {
+        if (rcclCtsInlineData) {
+          INFO(NCCL_INIT|NCCL_NET, "NET/IB : NIC Fusion enabled - disabling CTS Inline Data (not yet supported with merge)");
+          rcclCtsInlineData = false;
+        }
+        if (rcclCtsOffloadEnabled) {
+          INFO(NCCL_INIT|NCCL_NET, "NET/IB : NIC Fusion enabled - disabling CTS Offload (not yet supported with merge)");
+          rcclCtsOffloadEnabled = false;
+        }
+      }
+
       // for AINIC IbUseInline is enabled by default always
       ncclIbUseInline = true;
       // for AINIC GDR flush is disabled by default
