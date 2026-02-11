@@ -608,6 +608,8 @@ struct ncclComm {
   struct ncclKernelComm* devComm; // actually = &ncclKernelCommAndChannels::comm
 
   uint32_t workArgsBytes; // max size of kernel args
+  void* kernelArgsBufDev; // device buffer for kernel args (HIP: host args are copied here before launch)
+  void* kernelDebugBufDev; // small device buffer for kernel to write debug dump (host reads back)
   uint32_t workFifoBytes; // size of workFifoBuf, power of 2
   void* workFifoBuf;
   void* workFifoBufDev;

@@ -550,6 +550,23 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
   if (tid < sizeof(ncclDevKernelArgs)/sizeof(uint32_t)) {
     ((uint32_t*)&ncclShmem.args)[tid] = ((uint32_t*)args)[tid];
   }
+  // Optional debug dump: first thread of first block writes args and first batch for host to read back.
+  if (tid == 0 && blockIdx.x == 0 && args->debugOut) {
+    volatile uint64_t* out = (volatile uint64_t*)args->debugOut;
+#ifdef NCCL_DEVICE_DEBUG_TRAP
+    __asm__ __volatile__ ("s_trap 3");
+    out[0] = 1;  /* trap 1: args copied */
+#endif
+    out[0] = (uint64_t)args->comm;
+    out[1] = args->channelMask.masks[0];
+    out[2] = (uint64_t)args->workStorageType;
+    struct ncclDevWorkBatch const* batch0 = (struct ncclDevWorkBatch const*)(args+1);
+    out[3] = batch0[0].offsetBitset;
+    out[4] = (uint64_t)batch0[0].workType;
+    out[5] = (uint64_t)batch0[0].funcId;
+    out[6] = (uint64_t)batch0[0].offsetBase;
+    out[7] = (uint64_t)batch0[0].flags;
+  }
 
   // To map blockId to channelId, we need the n'th set bit of channelMask which
   // is the inverse of counting the number of set bits among the the first n.
@@ -646,6 +663,20 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
 #endif
   __syncthreads(); // publish shmem
 
+  // Optional debug dump (cont'd): first work struct sendbuff/recvbuff and nWorks (after load).
+  if (tid == 0 && blockIdx.x == 0 && args->debugOut) {
+    volatile uint64_t* out = (volatile uint64_t*)args->debugOut;
+#ifdef NCCL_DEVICE_DEBUG_TRAP
+    __asm__ __volatile__ ("s_trap 3");
+    out[0] = 2;  /* trap 2: work loaded, before while loop */
+#endif
+    struct ncclDevWorkColl const* work = (struct ncclDevWorkColl const*)ncclShmem.workStorage;
+    out[8] = (uint64_t)work->sendbuff;
+    out[9] = (uint64_t)work->recvbuff;
+    out[10] = (uint64_t)ncclShmem.nWorks;
+    out[11] = (uint64_t)work->cbd.countLo;
+  }
+
 #ifdef ENABLE_WARP_SPEED
   // Determine per-warp channel assignment for WarpSpeed enablement
   total = 0;
@@ -705,12 +736,24 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
       SpecializedRunWorkBatch().run();
     } else {
 #if defined(DEVICE_LINKER) || defined(USE_INDIRECT_FUNCTION_CALL)
+#ifdef NCCL_DEVICE_DEBUG_TRAP
+      if (tid == 0 && blockIdx.x == 0 && args->debugOut) {
+        __asm__ __volatile__ ("s_trap 3");
+        ((volatile uint64_t*)args->debugOut)[0] = 3;  /* trap 3: about to call specialized kernel */
+      }
+#endif
       if (COLL_UNROLL == 1)
         ncclDevFuncTable_1[ncclShmem.funcId]();
       else if (COLL_UNROLL == 2)
         ncclDevFuncTable_2[ncclShmem.funcId]();
       else
         ncclDevFuncTable_4[ncclShmem.funcId]();
+#ifdef NCCL_DEVICE_DEBUG_TRAP
+      if (tid == 0 && blockIdx.x == 0 && args->debugOut) {
+        __asm__ __volatile__ ("s_trap 3");
+        ((volatile uint64_t*)args->debugOut)[0] = 5;  /* trap 5: after specialized function returns */
+      }
+#endif
 #else
       if (COLL_UNROLL == 1)
         NCCL_CALL_FUNCTIONS_1(ncclShmem.funcId);
@@ -718,6 +761,12 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
         NCCL_CALL_FUNCTIONS_2(ncclShmem.funcId);
       else
         NCCL_CALL_FUNCTIONS_4(ncclShmem.funcId);
+#ifdef NCCL_DEVICE_DEBUG_TRAP
+      if (tid == 0 && blockIdx.x == 0 && args->debugOut) {
+        __asm__ __volatile__ ("s_trap 3");
+        ((volatile uint64_t*)args->debugOut)[0] = 5;  /* trap 5: after specialized function returns */
+      }
+#endif
 #endif
     }
 #endif
@@ -748,6 +797,12 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
     __syncthreads();
     copyToShmem16(tid, ncclShmem.comm.devProf+MAXCHANNELS*ncclShmem.prof.seq+blockIdx.x, &ncclShmem.prof, sizeof(struct ncclProf));
     if (tid == 0) ncclShmem.comm.devProf[blockIdx.x].seq++;
+  }
+#endif
+#ifdef NCCL_DEVICE_DEBUG_TRAP
+  if (tid == 0 && blockIdx.x == 0 && args->debugOut) {
+    __asm__ __volatile__ ("s_trap 3");
+    ((volatile uint64_t*)args->debugOut)[0] = 4;  /* trap 4: about to exit kernel */
   }
 #endif
 }

@@ -7,6 +7,11 @@
  *   array_length  Elements per rank (default 1024)
  *
  * Each rank i fills its input with (i+1). Expected result on all ranks: sum(1..num_gpus).
+ *
+ * Build (no script required):
+ *   System ROCm:  hipcc -O2 -I/opt/rocm/include test_smoke_allreduce.cpp -L/opt/rocm/lib -lrccl -Wl,-rpath,/opt/rocm/lib -o test_smoke_allreduce
+ *   RCCL build:  hipcc -O2 -I$BUILD_DIR/include test_smoke_allreduce.cpp -L$BUILD_DIR -lrccl -Wl,-rpath,$BUILD_DIR -o test_smoke_allreduce
+ * Run:           ./test_smoke_allreduce [num_gpus] [array_length]
  */
 
 #include <hip/hip_runtime.h>
@@ -14,6 +19,22 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <vector>
+
+#define CHECK_HIP(cmd) do { \
+    hipError_t e = cmd; \
+    if (e != hipSuccess) { \
+        printf("HIP error %s at %s:%d\n", hipGetErrorString(e), __FILE__, __LINE__); \
+        exit(1); \
+    } \
+} while(0)
+
+#define CHECK_NCCL(cmd) do { \
+    ncclResult_t r = cmd; \
+    if (r != ncclSuccess) { \
+        printf("NCCL error %s at %s:%d\n", ncclGetErrorString(r), __FILE__, __LINE__); \
+        exit(1); \
+    } \
+} while(0)
 
 static int getIntArg(int argc, char** argv, int idx, int defaultVal) {
     if (idx < argc) {
@@ -32,6 +53,16 @@ int main(int argc, char** argv) {
         return 0;
     }
 
+    int deviceCount = 0;
+    if (hipGetDeviceCount(&deviceCount) != hipSuccess) {
+        printf("Skip: hipGetDeviceCount failed (no GPUs or driver issue).\n");
+        return 0;
+    }
+    if (deviceCount < numGpus) {
+        printf("Skip: need %d GPUs but only %d available.\n", numGpus, deviceCount);
+        return 0;
+    }
+
     printf("Smoke test: AllReduce out-of-place SUM float32\n");
     printf("  GPUs: %d, elements per rank: %d\n", numGpus, N);
 
@@ -39,10 +70,7 @@ int main(int argc, char** argv) {
     for (int i = 0; i < numGpus; i++) devList[i] = i;
 
     ncclComm_t* comms = (ncclComm_t*)malloc(numGpus * sizeof(ncclComm_t));
-    if (ncclCommInitAll(comms, numGpus, devList.data()) != ncclSuccess) {
-        printf("FAIL: ncclCommInitAll\n");
-        return 1;
-    }
+    CHECK_NCCL(ncclCommInitAll(comms, numGpus, devList.data()));
 
     size_t bytes = (size_t)N * sizeof(float);
     std::vector<float*> d_in(numGpus, nullptr);
@@ -50,35 +78,33 @@ int main(int argc, char** argv) {
     std::vector<hipStream_t> streams(numGpus, 0);
 
     for (int i = 0; i < numGpus; i++) {
-        hipSetDevice(i);
-        if (hipMalloc(&d_in[i], bytes) != hipSuccess || hipMalloc(&d_out[i], bytes) != hipSuccess) {
-            printf("FAIL: hipMalloc on GPU %d\n", i);
-            return 1;
-        }
-        if (hipStreamCreate(&streams[i]) != hipSuccess) {
-            printf("FAIL: hipStreamCreate on GPU %d\n", i);
-            return 1;
-        }
+        CHECK_HIP(hipSetDevice(i));
+        CHECK_HIP(hipMalloc(&d_in[i], bytes));
+        CHECK_HIP(hipMalloc(&d_out[i], bytes));
+        CHECK_HIP(hipStreamCreate(&streams[i]));
+    }
+    for (int i = 0; i < numGpus; i++) {
+        printf("  [host] GPU %d: d_in=%p d_out=%p bytes=%zu (N=%d)\n", i, (void*)d_in[i], (void*)d_out[i], bytes, N);
     }
 
     // Host buffers: fill input for each rank (rank i has value (i+1) everywhere)
     std::vector<std::vector<float>> h_in(numGpus);
     for (int i = 0; i < numGpus; i++) {
         h_in[i].resize(N, (float)(i + 1));
-        hipSetDevice(i);
-        hipMemcpy(d_in[i], h_in[i].data(), bytes, hipMemcpyHostToDevice);
+        CHECK_HIP(hipSetDevice(i));
+        CHECK_HIP(hipMemcpy(d_in[i], h_in[i].data(), bytes, hipMemcpyHostToDevice));
     }
 
     // AllReduce SUM out-of-place
     ncclGroupStart();
     for (int i = 0; i < numGpus; i++) {
-        ncclAllReduce(d_in[i], d_out[i], N, ncclFloat, ncclSum, comms[i], streams[i]);
+        CHECK_NCCL(ncclAllReduce(d_in[i], d_out[i], N, ncclFloat, ncclSum, comms[i], streams[i]));
     }
     ncclGroupEnd();
 
     for (int i = 0; i < numGpus; i++) {
-        hipSetDevice(i);
-        hipStreamSynchronize(streams[i]);
+        CHECK_HIP(hipSetDevice(i));
+        CHECK_HIP(hipStreamSynchronize(streams[i]));
     }
 
     // Expected: sum(1..numGpus) = numGpus*(numGpus+1)/2
@@ -87,8 +113,8 @@ int main(int argc, char** argv) {
     std::vector<float> h_out(N);
 
     for (int g = 0; g < numGpus && pass; g++) {
-        hipSetDevice(g);
-        hipMemcpy(h_out.data(), d_out[g], bytes, hipMemcpyDeviceToHost);
+        CHECK_HIP(hipSetDevice(g));
+        CHECK_HIP(hipMemcpy(h_out.data(), d_out[g], bytes, hipMemcpyDeviceToHost));
         for (int i = 0; i < N; i++) {
             if (h_out[i] != expected) {
                 printf("FAIL: GPU %d index %d: got %f expected %f\n", g, i, h_out[i], expected);
@@ -99,11 +125,11 @@ int main(int argc, char** argv) {
     }
 
     for (int i = 0; i < numGpus; i++) {
-        ncclCommDestroy(comms[i]);
-        hipSetDevice(i);
-        hipFree(d_in[i]);
-        hipFree(d_out[i]);
-        hipStreamDestroy(streams[i]);
+        CHECK_NCCL(ncclCommDestroy(comms[i]));
+        CHECK_HIP(hipSetDevice(i));
+        CHECK_HIP(hipFree(d_in[i]));
+        CHECK_HIP(hipFree(d_out[i]));
+        CHECK_HIP(hipStreamDestroy(streams[i]));
     }
     free(comms);
 
