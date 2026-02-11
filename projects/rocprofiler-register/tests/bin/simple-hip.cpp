@@ -60,8 +60,8 @@ namespace
 {
 using auto_lock_t = std::unique_lock<std::mutex>;
 auto   print_lock = std::mutex{};
-size_t xdim       = 4960 * 2;
-size_t ydim       = 4960 * 2;
+size_t xdim       = 4096 * 2;
+size_t ydim       = 4096 * 2;
 size_t nthreads   = 2;
 size_t nitr       = 1;
 }  // namespace
