@@ -6,30 +6,31 @@
 #include "rocstorage/writer.hpp"
 #include "rocstorage/writer_types.hpp"
 
-#include "data_storage/schema_v3/insert_statements.hpp"
-#include "data_storage/schema_version.hpp"
 #include "rocstorage/storage.hpp"
 
-#include "writers/common_insert_operations.hpp"
-#include "writers/info_registration_writer.hpp"
-#include "writers/kernel_dispatch_writer.hpp"
-#include "writers/memory_alloc_writer.hpp"
-#include "writers/memory_copy_writer.hpp"
-#include "writers/pmc_event_writer.hpp"
-#include "writers/region_writer.hpp"
 #include "writers/writer_context.hpp"
+#include "writers/writer_policy_traits.hpp"
+
+#include "writers/schema_v3/writer_policy.hpp"
 
 #include <memory>
 
 namespace rocstorage
 {
 
-using active_schema = data_storage::schema_v3_tag;
-
-struct writer_t::impl
+template <typename Policy>
+class writer_impl_core
 {
+    static_assert(is_valid_writer_policy_v<Policy>,
+                  "Policy must satisfy writer policy requirements: "
+                  "provide all required type aliases and writer types "
+                  "must inherit from their CRTP interfaces");
+
+    using stmts_t      = typename Policy::insert_statements_t;
+    using common_ops_t = typename Policy::common_ops_t;
+
 public:
-    explicit impl(std::unique_ptr<rocstorage::storage_t> storage);
+    explicit writer_impl_core(std::shared_ptr<writer_context> ctx);
 
     void register_node_info(const writer_types::node_info_t& node_info)
     {
@@ -121,17 +122,27 @@ public:
     void flush_in_memory_data_to_disk() { m_ctx->backend->flush(); }
 
 private:
-    std::unique_ptr<rocstorage::storage_t> m_storage;
+    std::shared_ptr<writer_context>                            m_ctx;
+    std::shared_ptr<stmts_t>                                   m_stmts;
+    std::shared_ptr<common_ops_t>                              m_common_ops;
+    std::unique_ptr<typename Policy::info_writer_t>            m_info_writer;
+    std::unique_ptr<typename Policy::kernel_dispatch_writer_t> m_kernel_dispatch_writer;
+    std::unique_ptr<typename Policy::memory_copy_writer_t>     m_memory_copy_writer;
+    std::unique_ptr<typename Policy::memory_alloc_writer_t>    m_memory_alloc_writer;
+    std::unique_ptr<typename Policy::region_writer_t>          m_region_writer;
+    std::unique_ptr<typename Policy::pmc_event_writer_t>       m_pmc_event_writer;
+};
 
-    std::shared_ptr<writer_context>                             m_ctx;
-    std::shared_ptr<data_storage::schema_v3::insert_statements> m_stmts;
-    std::shared_ptr<common_insert_operations<active_schema>>    m_common_ops;
-    std::unique_ptr<info_registration_writer<active_schema>>    m_info_writer;
-    std::unique_ptr<kernel_dispatch_writer<active_schema>>      m_kernel_dispatch_writer;
-    std::unique_ptr<memory_copy_writer<active_schema>>          m_memory_copy_writer;
-    std::unique_ptr<memory_alloc_writer<active_schema>>         m_memory_alloc_writer;
-    std::unique_ptr<region_writer<active_schema>>               m_region_writer;
-    std::unique_ptr<pmc_event_writer<active_schema>>            m_pmc_event_writer;
+using active_policy_t = writer_policy_v3;
+
+struct writer_t::impl : writer_impl_core<active_policy_t>
+{
+    explicit impl(std::unique_ptr<rocstorage::storage_t> storage);
+
+private:
+    static std::shared_ptr<writer_context> create_writer_context(storage_t& storage);
+
+    std::unique_ptr<rocstorage::storage_t> m_storage;
 };
 
 }  // namespace rocstorage
