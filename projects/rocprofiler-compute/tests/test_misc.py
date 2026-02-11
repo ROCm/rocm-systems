@@ -79,7 +79,6 @@ class TestExperimentalFlag:
                 mock_config["supported_archs"],
                 mock_config["rocprof_compute_version"],
                 experimental_enabled=False,
-                show_experimental_help=False,
             )
 
             # Parse args with --experimental flag
@@ -99,7 +98,6 @@ class TestExperimentalFlag:
                 mock_config["supported_archs"],
                 mock_config["rocprof_compute_version"],
                 experimental_enabled=False,
-                show_experimental_help=False,
             )
 
             # Parse args without --experimental flag
@@ -119,7 +117,6 @@ class TestExperimentalFlag:
                 mock_config["supported_archs"],
                 mock_config["rocprof_compute_version"],
                 experimental_enabled=False,
-                show_experimental_help=False,
             )
 
             # Parse with flag
@@ -147,7 +144,6 @@ class TestExperimentalFlag:
                 mock_config["supported_archs"],
                 mock_config["rocprof_compute_version"],
                 experimental_enabled=False,
-                show_experimental_help=True,
             )
 
             # Get help text
@@ -176,7 +172,6 @@ class TestExperimentalFlag:
                 mock_config["supported_archs"],
                 mock_config["rocprof_compute_version"],
                 experimental_enabled=False,
-                show_experimental_help=True,
             )
 
             # Get help text
@@ -199,7 +194,6 @@ class TestExperimentalFlag:
                 mock_config["supported_archs"],
                 mock_config["rocprof_compute_version"],
                 experimental_enabled=False,
-                show_experimental_help=True,
             )
 
             # Get help text
@@ -220,7 +214,6 @@ class TestExperimentalFlag:
                 mock_config["supported_archs"],
                 mock_config["rocprof_compute_version"],
                 experimental_enabled=False,
-                show_experimental_help=False,
             )
 
             # Parse profile mode with experimental flag
@@ -240,7 +233,6 @@ class TestExperimentalFlag:
                 mock_config["supported_archs"],
                 mock_config["rocprof_compute_version"],
                 experimental_enabled=False,
-                show_experimental_help=False,
             )
 
             # Parse analyze mode with experimental flag
@@ -265,7 +257,6 @@ class TestExperimentalFlag:
                 mock_config["supported_archs"],
                 mock_config["rocprof_compute_version"],
                 experimental_enabled=False,
-                show_experimental_help=False,
             )
 
             # Test with experimental flag before mode
@@ -288,7 +279,6 @@ class TestExperimentalFlag:
                 mock_config["supported_archs"],
                 mock_config["rocprof_compute_version"],
                 experimental_enabled=False,
-                show_experimental_help=False,
             )
 
             # Should handle multiple occurrences gracefully
@@ -307,7 +297,6 @@ class TestExperimentalFlag:
                 mock_config["supported_archs"],
                 mock_config["rocprof_compute_version"],
                 experimental_enabled=False,
-                show_experimental_help=False,
             )
 
             # Version should exit with code 0
@@ -327,7 +316,6 @@ class TestExperimentalFlag:
                 mock_config["supported_archs"],
                 mock_config["rocprof_compute_version"],
                 experimental_enabled=False,
-                show_experimental_help=False,
             )
 
             # Main parser (no mode)
