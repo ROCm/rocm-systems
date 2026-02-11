@@ -74,8 +74,8 @@ ai_nic_stats_collector::update_stats()
         return;
     }
 
-    // Iterate through all socket handles to find all AI NIC
-    // processor handles and update the statistics for each of them.
+    // Iterate through all socket handles to find all AI NIC processor
+    // handles and update the statistics for each of them.
     std::vector<amdsmi_nic_rdma_devices_info_t> nics;
     for(uint32_t index = 0; index < soc_count; index++)
     {
