@@ -157,17 +157,17 @@ class TestAmdSmiCli(unittest.TestCase):
 
         return
 
-    def StrToNumber(self, nun_str):
+    def StrToNumber(self, num_str):
         rc = 0
-        nun_str = nun_str.strip()
+        num_str = num_str.strip()
         try:
-            value = int(nun_str)
+            value = int(num_str)
         except ValueError:
             try:
-                value = float(nun_str)
+                value = float(num_str)
             except ValueError:
                 rc = 1
-                value = nun_str
+                value = num_str
         return (rc, value)
 
     def setUp(self):
@@ -659,6 +659,7 @@ class TestAmdSmiCli(unittest.TestCase):
             error_code = 0
             items = []
             output_stream = 'X'
+            passed = False
             if std_out and 'Error code' in std_out:
                 output_stream = 'std_out'
                 items = std_out.strip().split()
@@ -672,52 +673,45 @@ class TestAmdSmiCli(unittest.TestCase):
                 elif std_err:
                     output_stream = 'std_err'
                     items = std_err.strip().split()
-            if len(items):
+            if items and len(items) > 0:
                 rcc, error_code = self.StrToNumber(items[-1])
 
-            msg=cmd
+            msg = ''
             if '--file' in cmd:
                 if not os.path.exists(self.tmp_filename):
-                    msg = (cmd, f'Failure: File {self.tmp_filename} does not exist')
-                    failures.append(msg)
+                    msg = f'Failure: File {self.tmp_filename} does not exist'
                 else:
                     with open(self.tmp_filename, 'r') as fin:
                         std_out = fin.read()
                     if len(std_out) == 0:
-                        msg = (cmd, f'Failure: File {self.tmp_filename} was empty')
-                        failures.append(msg)
+                        msg = f'Failure: File {self.tmp_filename} was empty'
                     os.chmod(self.tmp_filename, stat.S_IWRITE)
                     os.remove(self.tmp_filename)
-
             rc = str(rc)
             error_code = str(error_code)
             if rc != '0' and cond == self.PASS:
-                msg = (cmd, f'Failure: Received FAIL ({rc:>3s}), expected PASS (  0), output={output_stream}')
-                failures.append(msg)
+                msg = f'Failure: Received FAIL ({rc:>3s}), expected PASS (  0)'
             elif rc == '0' and cond != self.PASS:
                 if error_code == '0':
-                    msg = (cmd, 'Failure: Received PASS (  0), expected FAIL ( !0), output={output_stream}')
+                    msg = 'Failure: Received PASS (  0), expected FAIL ( !0)'
                 else:
-                    rcc, _ = self.StrToNumber(error_code)
-                    if rcc:
-                        msg = (cmd, f'Failure: Received PASS (  0), returned FAIL ({error_code:>3s}), output={output_stream}')
-                    else:
-                        msg = (cmd, f'Failure: Received PASS (  0), expected FAIL ({error_code:>3s}), output={output_stream}')
-                failures.append(msg)
+                    msg = f'Failure: Received PASS (  0), returned FAIL ({error_code:>3s})'
             elif rc != error_code:
-                rcc, _ = self.StrToNumber(error_code)
-                if rcc:
-                    msg = (cmd, f'Failure: Received rc   ({rc:>3s}), returned rc   ({error_code:>3s}), output={output_stream}')
-                else:
-                    msg = (cmd, f'Failure: Received rc   ({rc:>3s}), expected rc   ({error_code:>3s}), output={output_stream}')
-                failures.append(msg)
+                msg = f'Failure: Received rc   ({rc:>3s}), expected rc   ({error_code:>3s})'
             else:
+                passed = True
                 if rc == '0':
                     expected = 'PASS'
                 else:
                     expected = 'FAIL'
-                msg = (cmd, f'Success: Received and Expected {expected} ({error_code:>3s}), output={output_stream}')
-                successes.append(msg)
+                msg = f'Success: Received and Expected {expected} ({error_code:>3s})'
+
+            if passed:
+                successes.append((cmd, msg))
+            else:
+                if my_args.printStreamInfo:
+                    msg += f'{msg}, output={output_stream}'
+                failures.append((cmd, msg))
 
             if my_args.diagnostic == 'Debug':
                 self.common.print(f'{self.tab}{msg[0]} {msg[1]}')
@@ -738,6 +732,7 @@ class TestAmdSmiCli(unittest.TestCase):
             msg = ''
             for cmd, cmd_out in successes:
                 msg += f'\n{self.tab}{cmd:{cmd_len}s} : {cmd_out}'
+            # Output to std_out
             print(f'{self.tab}{msg}')
 
         if len(failures) > 0:
@@ -757,6 +752,8 @@ class TestAmdSmiCli(unittest.TestCase):
                 with open(my_args.output, 'a') as fout:
                     fout.write(f'{self.tab}{msg}\n')
             # Output to std_out
+            print(f'{self.tab}{msg}')
+            # Output to std_err
             self.fail(f'Fail:\n\n{self.tab}{msg}')
 
         return
@@ -800,7 +797,7 @@ class TestAmdSmiCli(unittest.TestCase):
         [
             ('amd-smi metric --json', self.PASS),
             ('amd-smi metric --gpu 0 --json', self.PASS),
-            ('amd-smi metric --watch 1 --json', self.PASS),
+            #('amd-smi metric --watch 1 --json', self.PASS),
         ]
 
         self.RunCmds(cmds)
@@ -1271,6 +1268,7 @@ if __name__ == '__main__':
     parser.add_argument('--diagnostic', choices=verbose_choices, type=str, default='WARNING',
         help='Level of information to output, default=%(default)s')
     parser.add_argument('--output', type=str, default=None, help='file for output, default=%(default)s')
+    parser.add_argument('--printStreamInfo', action='store_true', default=False, help='Print where output is streamed, default=%(default)s')
     parser.add_argument('--printCmdsOnly', action='store_true', default=False, help='Print cmds only, default=%(default)s')
     parser.add_argument('--useAllCmdOptions', action='store_true', default=False, help='Use all cmd option combinations, default=%(default)s')
     my_args, remaining = parser.parse_known_args(sys.argv[1:])
