@@ -35,7 +35,9 @@ TEST_CASE("Unit_library_negative") {
   }
 
   SECTION("Load random code") {
-    const char* code = "call me ishmael";  // definitely not compile-able
+    // code size should be more than header size (24 bytes) otherwise it cause buffer overflow
+    // with ASAN enabled in std:memcmp.
+    const char* code = "call me ishmaelxxxxxxxxxxxxxxxx";  // definitely not compile-able
     hipLibrary_t lib;
     hipKernel_t kernel;
     // Default behavior is lazy load, so if we pass anything to it, it should pass
