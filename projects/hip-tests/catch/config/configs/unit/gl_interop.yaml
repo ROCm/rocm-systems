@@ -1,0 +1,74 @@
+---
+gl_interop:
+  Unit_hipGLGetDevices_Positive_Basic:
+    <<: *level_2
+    # SWDEV-439004: Below tests failing randomly in CQE staging
+    disabled: [amd_wsl]
+  Unit_hipGLGetDevices_Positive_Parameters:
+    <<: *level_2
+    # SWDEV-439004: Below tests failing randomly in CQE staging
+    disabled: [amd_wsl]
+  Unit_hipGLGetDevices_Negative_Parameters:
+    <<: *level_2
+    # SWDEV-439004: Below tests failing randomly in CQE staging
+    disabled: [amd_wsl]
+  Unit_hipGraphicsGLRegisterBuffer_Positive_Basic:
+    <<: *level_2
+    # SWDEV-439004: Below tests failing randomly in CQE staging
+    disabled: [amd_wsl]
+  Unit_hipGraphicsGLRegisterBuffer_Positive_Register_Twice:
+    <<: *level_2
+    # SWDEV-439004: Below tests failing randomly in CQE staging
+    disabled: [amd_wsl]
+  Unit_hipGraphicsGLRegisterBuffer_Negative_Parameters:
+    <<: *level_2
+    # SWDEV-439004: Below tests failing randomly in CQE staging
+    disabled: [amd_wsl]
+  Unit_hipGraphicsGLRegisterImage_Positive_Basic:
+    <<: *level_2
+    # SWDEV-439004: Below tests failing randomly in CQE staging
+    disabled: [amd_wsl]
+  Unit_hipGraphicsGLRegisterImage_Positive_Register_Twice:
+    <<: *level_2
+    # SWDEV-439004: Below tests failing randomly in CQE staging
+    disabled: [amd_wsl]
+  Unit_hipGraphicsGLRegisterImage_Negative_Parameters:
+    <<: *level_2
+    # SWDEV-439004: Below tests failing randomly in CQE staging
+    disabled: [amd_wsl]
+  Unit_hipGraphicsMapResources_Positive_Basic:
+    <<: *level_2
+    # SWDEV-439004: Below tests failing randomly in CQE staging
+    disabled: [amd_wsl]
+  Unit_hipGraphicsMapResources_Negative_Parameters:
+    <<: *level_2
+    # SWDEV-439004: Below tests failing randomly in CQE staging
+    disabled: [amd_linux, amd_wsl]
+  Unit_hipGraphicsResourceGetMappedPointer_Positive_Basic:
+    <<: *level_2
+    # SWDEV-439004: Below tests failing randomly in CQE staging
+    disabled: [amd_wsl]
+  Unit_hipGraphicsResourceGetMappedPointer_Positive_Parameters:
+    <<: *level_2
+    # SWDEV-439004: Below tests failing randomly in CQE staging
+    disabled: [amd_linux, amd_wsl]
+  Unit_hipGraphicsResourceGetMappedPointer_Negative_Parameters:
+    <<: *level_2
+    # SWDEV-439004: Below tests failing randomly in CQE staging
+    disabled: [amd_linux, amd_wsl]
+  Unit_hipGraphicsSubResourceGetMappedArray_Positive_Basic:
+    <<: *level_2
+    # SWDEV-439004: Below tests failing randomly in CQE staging
+    disabled: [amd_wsl]
+  Unit_hipGraphicsSubResourceGetMappedArray_Negative_Parameters:
+    <<: *level_2
+    # SWDEV-439004: Below tests failing randomly in CQE staging
+    disabled: [amd_linux, amd_wsl]
+  Unit_hipGraphicsUnmapResources_Negative_Parameters:
+    <<: *level_2
+    # SWDEV-439004: Below tests failing randomly in CQE staging
+    disabled: [amd_linux, amd_wsl]
+  Unit_hipGraphicsUnregisterResource_Negative_Parameters:
+    <<: *level_2
+    # SWDEV-439004: Below tests failing randomly in CQE staging
+    disabled: [amd_linux, amd_wsl]
