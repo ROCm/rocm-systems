@@ -27,6 +27,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <mutex>
@@ -110,6 +111,12 @@ main(int argc, char** argv)
 
         for(auto& itr : threads)
             itr.join();
+    }
+
+    std::ifstream maps_file("/proc/self/maps");
+    std::string line;
+    while (std::getline(maps_file, line)) {
+        std::cout << line << std::endl;
     }
 
     return 0;
