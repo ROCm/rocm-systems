@@ -1236,6 +1236,91 @@ struct KernelInfo {
     int vgpr = 0, sgpr = 0, lds = 0, stack = 0;
 };
 
+// Read one msgpack integer at data[off]: fixint, uint8 (0xcc), or uint16 (0xcd). Returns value and bytes consumed (0 if invalid).
+static int readMsgpackIntAt(const uint8_t* data, size_t size, size_t off, size_t* out_consumed) {
+    if (off >= size) { *out_consumed = 0; return 0; }
+    uint8_t b = data[off];
+    if (b <= 0x7f) { *out_consumed = 1; return b; }
+    if (b == 0xcc && off + 1 < size) { *out_consumed = 2; return data[off + 1]; }
+    if (b == 0xcd && off + 2 < size) { *out_consumed = 3; return ((uint32_t)data[off + 1] << 8) | data[off + 2]; }
+    *out_consumed = 0;
+    return 0;
+}
+
+// Find all occurrences of key in note data and return the maximum integer value after each key.
+static int maxIntInNote(const std::vector<uint8_t>& data, const char* key) {
+    size_t key_len = strlen(key);
+    if (data.size() < key_len + 1) return 0;
+    std::string_view view((const char*)data.data(), data.size());
+    int max_val = 0;
+    size_t pos = 0;
+    while (pos + key_len < data.size()) {
+        size_t found = view.find(key, pos);
+        if (found == std::string_view::npos) break;
+        size_t val_off = found + key_len;
+        size_t consumed = 0;
+        int v = readMsgpackIntAt(data.data(), data.size(), val_off, &consumed);
+        if (v > max_val) max_val = v;
+        pos = consumed ? val_off + consumed : val_off + 1;
+    }
+    return max_val;
+}
+
+// Max of first max_count occurrences of key (0 = no limit). Used to exclude oneRank from dispatcher LDS.
+static int maxIntInNoteFirstN(const std::vector<uint8_t>& data, const char* key, int max_count) {
+    if (max_count <= 0) return maxIntInNote(data, key);
+    size_t key_len = strlen(key);
+    if (data.size() < key_len + 1) return 0;
+    std::string_view view((const char*)data.data(), data.size());
+    int max_val = 0;
+    size_t pos = 0;
+    int count = 0;
+    while (count < max_count && pos + key_len < data.size()) {
+        size_t found = view.find(key, pos);
+        if (found == std::string_view::npos) break;
+        size_t val_off = found + key_len;
+        size_t consumed = 0;
+        int v = readMsgpackIntAt(data.data(), data.size(), val_off, &consumed);
+        if (v > max_val) max_val = v;
+        count++;
+        pos = consumed ? val_off + consumed : val_off + 1;
+    }
+    return max_val;
+}
+
+// Find occurrences of key in note data, print each with index (up to max_kernels; 0 = all), return values. If any differ in that set, warn.
+static std::vector<int> printAllLDSInNote(const std::vector<uint8_t>& data, const char* key, const char* label, int max_kernels = 0) {
+    std::vector<int> values;
+    size_t key_len = strlen(key);
+    if (data.size() < key_len + 1) return values;
+    std::string_view view((const char*)data.data(), data.size());
+    size_t pos = 0;
+    int idx = 0;
+    while (pos + key_len < data.size()) {
+        if (max_kernels > 0 && idx >= max_kernels) break;
+        size_t found = view.find(key, pos);
+        if (found == std::string_view::npos) break;
+        size_t val_off = found + key_len;
+        size_t consumed = 0;
+        int v = readMsgpackIntAt(data.data(), data.size(), val_off, &consumed);
+        printf("  .note LDS %s kernel %d: %d\n", label, idx, v);
+        values.push_back(v);
+        idx++;
+        pos = consumed ? val_off + consumed : val_off + 1;
+    }
+    if (values.size() > 1) {
+        int first = values[0];
+        for (size_t i = 1; i < values.size(); i++) {
+            if (values[i] != first) {
+                printf("WARNING: %s has different LDS values (e.g. kernel 0=%d, kernel %zu=%d)\n",
+                       label, first, i, values[i]);
+                break;
+            }
+        }
+    }
+    return values;
+}
+
 KernelInfo parseKernel(const std::vector<uint8_t>& elf_data, const std::string& source_file = "") {
     KernelInfo info;
     info.source_file = source_file;
@@ -1307,6 +1392,7 @@ KernelInfo parseKernel(const std::vector<uint8_t>& elf_data, const std::string& 
         info.sgpr = findInt(".sgpr_count");
         info.lds = findInt(".group_segment_fixed_size");
         info.stack = findInt(".private_segment_fixed_size");
+        printf("  .note LDS (%s): %d\n", info.name.empty() ? "(no name)" : info.name.c_str(), info.lds);
     }
 
     // Extract kernel descriptor from .rodata (64 bytes)
@@ -1739,6 +1825,7 @@ public:
 
     void addKernel(const KernelInfo& k) { kernels_.push_back(k); }
     void setFuncIdMap(const std::unordered_map<std::string, FuncIdMapping>& m) { funcid_map_ = m; }
+    void setOmitDwarf(bool v) { omit_dwarf_ = v; }
 
     bool link(const std::string& output_path) {
         fatal_error_ = false;
@@ -1749,9 +1836,13 @@ public:
         computeLayout();
 
         // Merge and patch debug sections after layout (needs text_addr_)
-        printf("\n=== Pass 2b: Merge Debug Info ===\n");
-        mergeDebugInfoWithDWARFLinker();
-        if (fatal_error_) return false;
+        if (!omit_dwarf_) {
+            printf("\n=== Pass 2b: Merge Debug Info ===\n");
+            mergeDebugInfoWithDWARFLinker();
+            if (fatal_error_) return false;
+        } else {
+            printf("\n=== Pass 2b: Omitting DWARF (--omit-dwarf) ===\n");
+        }
 
         printf("\n=== Pass 3: Patch and Write ===\n");
         patchSections();
@@ -1806,6 +1897,7 @@ public:
 
 private:
     std::string disp_path_;
+    bool omit_dwarf_ = false;
     std::unique_ptr<MappedFile> disp_file_;
     std::unique_ptr<ElfParser> disp_;
     std::vector<KernelInfo> kernels_;
@@ -1894,63 +1986,72 @@ private:
         if (msg) fprintf(stderr, "Error: %s\n", msg);
     }
 
-    // Calculate required LDS size based on GPU architecture
-    // Must match the host-side calculation in enqueue.cc: rcclShmemDynamicSize()
-    int calculateRequiredLDS() const {
-        // Constants from RCCL source:
-        // NCCL_LL128_SHMEM_ELEMS_PER_THREAD = 8
-        // ncclCollUnroll(cudaArch) = cudaArch >= 800 ? 8 : 4  (for non-12xx)
-        // ncclNvlsUnrollBytes = 64
-
-        int warpSize = (gpu_arch_ >= 900) ? 64 : 64;  // AMD GFX9+ uses 64-wide warps
-        int maxNthreads = (gpu_arch_ == 950) ? 512 : 256;
-        int ncclCollUnroll = (gpu_arch_ >= 800) ? 8 : 4;
-        int ncclNvlsUnrollBytes = 64;
-
-        // Per-warp scratch size calculation (matches rcclShmemScratchWarpSize)
-        int ll = 0;
-        int ll128 = (8 * warpSize) * sizeof(uint64_t);  // NCCL_LL128_SHMEM_ELEMS_PER_THREAD * WARP_SIZE * 8
-        int simple = (ncclCollUnroll * warpSize + 1) * 16;
-        int nvls = (gpu_arch_ >= 900) ? (warpSize * ncclNvlsUnrollBytes + 16) : 16;
-
-        int perWarpScratch = std::max({ll, ll128, simple, nvls});
-        perWarpScratch = (perWarpScratch + 15) & ~15;  // Pad to 16 bytes
-
-        // Total dynamic shared memory
-        int numWarps = maxNthreads / warpSize;
-        int totalDynamicShared = perWarpScratch * numWarps;
-
-        printf("LDS calculation for gfx%d: warpSize=%d, maxNthreads=%d, numWarps=%d\n",
-               gpu_arch_, warpSize, maxNthreads, numWarps);
-        printf("  Per-warp scratch: LL=%d, LL128=%d, SIMPLE=%d, NVLS=%d -> max=%d\n",
-               ll, ll128, simple, nvls, perWarpScratch);
-        printf("  Total dynamic shared memory required: %d bytes\n", totalDynamicShared);
-
-        return totalDynamicShared;
-    }
-
     // ========== Pass 1: Collect ==========
     bool collectSections() {
         elf_flags_ = disp_->ehdr()->e_flags;
 
-        // Compute max resources from kernels
+        // Include dispatcher .note in max. Only first 6 kernels (Generic + Debug) have LDS; oneRank (6-17) excluded.
+        static const int DISPATCHER_LDS_KERNEL_COUNT = 6;
+        // Allow 0 in dispatcher LDS for current debug kernels; remove when fixed.
+        static const bool DISPATCHER_LDS_ALLOW_ZERO = true;
+        auto* disp_note = disp_->find(".note");
+        if (!disp_note) {
+            fprintf(stderr, "Error: dispatcher has no .note section\n");
+            return false;
+        }
+        int disp_lds_max = 0;
+        {
+            std::vector<uint8_t> note_data = disp_->getBytes(*disp_note);
+            std::vector<int> disp_lds_vals = printAllLDSInNote(note_data, ".group_segment_fixed_size", "dispatcher", DISPATCHER_LDS_KERNEL_COUNT);
+            int d_vgpr = maxIntInNote(note_data, ".vgpr_count");
+            int d_sgpr = maxIntInNote(note_data, ".sgpr_count");
+            int d_lds = maxIntInNoteFirstN(note_data, ".group_segment_fixed_size", DISPATCHER_LDS_KERNEL_COUNT);
+            int d_stack = maxIntInNote(note_data, ".private_segment_fixed_size");
+            disp_lds_max = d_lds;
+            max_vgpr_ = std::max(max_vgpr_, d_vgpr);
+            max_sgpr_ = std::max(max_sgpr_, d_sgpr);
+            max_lds_ = std::max(max_lds_, d_lds);
+            max_stack_ = std::max(max_stack_, d_stack);
+            // Check: first 6 dispatcher kernels should all be same size or 0 (0 allowed for debug kernels only).
+            int nonzero = -1;
+            for (int v : disp_lds_vals) {
+                if (v != 0) {
+                    if (nonzero >= 0 && v != nonzero) {
+                        printf("RED FLAG: dispatcher LDS inconsistent (expected all same or 0): saw %d and %d\n", nonzero, v);
+                        break;
+                    }
+                    nonzero = v;
+                }
+            }
+            if (!DISPATCHER_LDS_ALLOW_ZERO && nonzero >= 0) {
+                for (int v : disp_lds_vals)
+                    if (v == 0) { printf("RED FLAG: dispatcher kernel has LDS 0 (DISPATCHER_LDS_ALLOW_ZERO will be removed when fixed)\n"); break; }
+            }
+            printf("Max resources from dispatcher .note (LDS from first %d kernels only): VGPR=%d, SGPR=%d, LDS=%d, Stack=%d\n",
+                   DISPATCHER_LDS_KERNEL_COUNT, d_vgpr, d_sgpr, d_lds, d_stack);
+        }
+
+        // Compute max resources from specialized kernels. Take max over dispatcher and all specialized.
+        // Check: we expect all sizes the same; smaller than dispatcher = red flag, bigger = warn but take max.
+        int first_spec_lds = -1;
         for (const auto& k : kernels_) {
             max_vgpr_ = std::max(max_vgpr_, k.vgpr);
             max_sgpr_ = std::max(max_sgpr_, k.sgpr);
             max_lds_ = std::max(max_lds_, k.lds);
             max_stack_ = std::max(max_stack_, k.stack);
+            if (first_spec_lds < 0) first_spec_lds = k.lds;
+            else if (k.lds != first_spec_lds)
+                printf("WARNING: specialized kernel LDS differs (%s: %d vs first %d)\n", k.name.c_str(), k.lds, first_spec_lds);
+            if (disp_lds_max >= 0 && k.lds < disp_lds_max)
+                printf("RED FLAG: kernel %s LDS %d < dispatcher %d\n", k.name.c_str(), k.lds, disp_lds_max);
+            if (disp_lds_max >= 0 && k.lds > disp_lds_max)
+                printf("WARNING: kernel %s LDS %d > dispatcher %d (using max; kernel may use extra shared memory)\n", k.name.c_str(), k.lds, disp_lds_max);
         }
-        printf("Max resources from kernels: VGPR=%d, SGPR=%d, LDS=%d, Stack=%d\n",
+        if (disp_lds_max >= 0 && !kernels_.empty() && first_spec_lds >= 0 && disp_lds_max != first_spec_lds)
+            printf("WARNING: dispatcher .note LDS (%d) != specialized kernel LDS (%d)\n", disp_lds_max, first_spec_lds);
+        printf("Max resources from kernels (dispatcher + specialized): VGPR=%d, SGPR=%d, LDS=%d, Stack=%d\n",
                max_vgpr_, max_sgpr_, max_lds_, max_stack_);
-
-        // Calculate required LDS based on RCCL formula (must match host-side calculation)
-        int requiredLDS = calculateRequiredLDS();
-        if (requiredLDS > max_lds_) {
-            printf("NOTE: Adjusting LDS from %d to %d (required by RCCL formula)\n",
-                   max_lds_, requiredLDS);
-            max_lds_ = requiredLDS;
-        }
-        printf("Final LDS size: %d bytes\n", max_lds_);
+        printf("Final LDS size: %d bytes (from .note/KD only)\n", max_lds_);
 
         // Build .text (dispatcher + all kernel code)
         auto* disp_text = disp_->find(".text");
@@ -2056,7 +2157,6 @@ private:
         sections_.push_back(std::move(bss));
 
         // Build .note (dispatcher only - specialized kernels are called as functions, not launched)
-        auto* disp_note = disp_->find(".note");
         if (disp_note) {
             SectionInfo note;
             note.name = ".note";
@@ -2248,7 +2348,8 @@ private:
         }
 
         // Build merged .debug_line and .debug_line_str sections from dispatcher and specialized kernels
-        // (if any have debug info from -gline-tables-only compilation)
+        // (if any have debug info from -gline-tables-only compilation). Skipped when --omit-dwarf.
+        if (!omit_dwarf_) {
         {
             SectionInfo debug_line;
             debug_line.name = ".debug_line";
@@ -2543,6 +2644,7 @@ private:
             // Note: mergeDebugInfo() is called later from link() after
             // computeLayout() sets text_addr_
         }
+        }  // !omit_dwarf_
 
         return true;
     }
@@ -2653,6 +2755,12 @@ private:
         }
         if (patch_count2 > 0) {
             printf("  .note: patched %d private_segment_fixed_size to %d\n", patch_count2, max_stack_);
+        }
+
+        // Patch group_segment_fixed_size to max_lds_ so .note matches patched KD
+        int lds_patched = expandIntField(".group_segment_fixed_size", max_lds_);
+        if (lds_patched > 0) {
+            printf("  .note: patched %d .group_segment_fixed_size to %d\n", lds_patched, max_lds_);
         }
 
         int vgpr_patched = expandIntField(".vgpr_count", max_vgpr_);
@@ -3025,11 +3133,19 @@ private:
                 uint32_t stack = max_stack_;
                 memcpy(kd + 4, &stack, 4);
 
-                // RSRC1 at offset 0x30: VGPR/SGPR
+                // RSRC1 at offset 0x30: VGPR/SGPR (6 bits VGPR granulated, 4 bits SGPR granulated)
                 uint32_t rsrc1;
                 memcpy(&rsrc1, kd + 0x30, 4);
                 int vgpr_g = (max_vgpr_ + 3) / 4 - 1;
                 int sgpr_g = (max_sgpr_ + 7) / 8 - 1;
+                if (vgpr_g > 0x3F) {
+                    printf("  WARNING: clamping VGPR granulated %d to 63 (max 256 VGPRs); max_vgpr_=%d\n", vgpr_g, max_vgpr_);
+                    vgpr_g = 0x3F;
+                }
+                if (sgpr_g > 0xF) {
+                    printf("  WARNING: clamping SGPR granulated %d to 15 (max 128 SGPRs); max_sgpr_=%d\n", sgpr_g, max_sgpr_);
+                    sgpr_g = 0xF;
+                }
                 rsrc1 = (rsrc1 & ~0x3FF) | (vgpr_g & 0x3F) | ((sgpr_g & 0xF) << 6);
                 memcpy(kd + 0x30, &rsrc1, 4);
 
@@ -3088,8 +3204,10 @@ private:
                 }
             };
 
-            // Patch dispatcher KDs (first 3)
-            for (size_t kd_off : {0UL, 64UL, 128UL}) {
+            // Patch dispatcher KDs. .rodata has 18 KDs: 3 Generic, 3 Debug (profiling), 12 oneRank.
+            // Patch the first 6 (Generic + Debug) with layout delta and max resources; oneRank
+            // KDs are from separately compiled code in dispatcher .text and are left as-is.
+            for (size_t kd_off : {0UL, 64UL, 128UL, 192UL, 256UL, 320UL}) {
                 if (kd_off + 64 > rodata_sec->data.size()) continue;
                 uint8_t* kd = rodata_sec->data.data() + kd_off;
                 patchKD(kd, kd_off, false);
@@ -3101,8 +3219,8 @@ private:
                 uint8_t* kd = rodata_sec->data.data() + kd_offset;
                 patchKD(kd, kd_offset, true, text_off);
             }
-            printf("Patched %zu dispatcher KDs + %zu specialized KDs\n",
-                   3UL, specialized_kd_offsets_.size());
+            printf("Patched 6 dispatcher KDs (3 Generic + 3 Debug) + %zu specialized KDs\n",
+                   specialized_kd_offsets_.size());
         }
 
         // Patch .dynsym symbol values for all relocated sections
@@ -3448,15 +3566,8 @@ private:
             }
         }
 
-        // Patch ABS symbols for resource maxima
-        // These symbols are in .symtab and .strtab with format:
-        // kernelname.suffix
-        // strtab_sec is already set above
-        //
-        // NOTE: We DO NOT patch .private_seg_size - it must match KD and metadata (both 0)
-        // The Generic kernels dispatch via function pointers; the called functions
-        // handle their own stack requirements.
-
+        // Patch ABS symbols for resource maxima (must match KD and .note)
+        // These symbols are in .symtab and .strtab with format: kernelname.suffix
         if (symtab_sec && strtab_sec) {
             const char* strtab = (const char*)strtab_sec->data.data();
             for (size_t i = 0; i + 24 <= symtab_sec->data.size(); i += 24) {
@@ -3471,11 +3582,12 @@ private:
                     const char* name = strtab + name_idx;
                     size_t len = strlen(name);
 
-                    // DO NOT patch .private_seg_size - must match KD (0)
-                    // const char* suffix1 = ".private_seg_size";
-                    // if (len > strlen(suffix1) && strcmp(name + len - strlen(suffix1), suffix1) == 0) {
-                    //     // Leave at original value (0) to match KD and metadata
-                    // }
+                    // Patch .private_seg_size to max_stack_ so ABS matches KD
+                    const char* suffix1 = ".private_seg_size";
+                    if (len > strlen(suffix1) && strcmp(name + len - strlen(suffix1), suffix1) == 0) {
+                        uint64_t new_val = max_stack_;
+                        memcpy(sym + 8, &new_val, 8);
+                    }
 
                     // Patch .num_vgpr to max_vgpr_
                     const char* suffix2 = ".num_vgpr";
@@ -4361,8 +4473,9 @@ private:
 // ============================================================================
 
 void printUsage(const char* prog) {
-    fprintf(stderr, "Usage: %s -o output.elf --dispatcher dispatcher.elf --host-table table.cpp [--target arch] [--input-dir dir]\n", prog);
+    fprintf(stderr, "Usage: %s -o output.elf --dispatcher dispatcher.elf --host-table table.cpp [--target arch] [--input-dir dir] [--omit-dwarf]\n", prog);
     fprintf(stderr, "  --input-dir: directory containing .o device binaries (not host fat binaries)\n");
+    fprintf(stderr, "  --omit-dwarf: do not add DWARF sections to the merged ELF (use if loader rejects code object with debug)\n");
 }
 
 int main(int argc, char** argv) {
@@ -4370,6 +4483,7 @@ int main(int argc, char** argv) {
     std::string output, dispatcher, host_table, input_dir;
     std::vector<std::string> inputs;
 
+    bool omit_dwarf = false;
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
         if (arg == "-o" && i + 1 < argc) output = argv[++i];
@@ -4377,6 +4491,7 @@ int main(int argc, char** argv) {
         else if (arg == "--host-table" && i + 1 < argc) host_table = argv[++i];
         else if (arg == "--input-dir" && i + 1 < argc) input_dir = argv[++i];
         else if (arg == "--target" && i + 1 < argc) g_target_arch = argv[++i];
+        else if (arg == "--omit-dwarf") omit_dwarf = true;
         else if (arg[0] != '-') inputs.push_back(arg);
     }
 
@@ -4482,6 +4597,10 @@ int main(int argc, char** argv) {
 
     // Set GPU target for proper LDS calculation
     linker.setGpuTarget(g_target_arch);
+    if (omit_dwarf) {
+        linker.setOmitDwarf(true);
+        printf("Device Linker: omitting DWARF sections (--omit-dwarf)\n");
+    }
 
     // For testing: limit number of kernels if MAX_KERNELS_FOR_TEST is set
     size_t max_kernels_to_add = kernels.size();
