@@ -56,13 +56,13 @@ if(ROCPROFSYS_INSTALL_TESTING)
     add_custom_command(
         OUTPUT ${ROCPROFSYS_STANDALONE_EXE}
         COMMAND
-            ${CMAKE_CURRENT_LIST_DIR}/build_standalone.sh --pyinstaller --output-dir
+            ${CMAKE_CURRENT_LIST_DIR}/build_standalone.sh --output-dir
             ${ROCPROFSYS_STANDALONE_OUTPUT_DIR}
         DEPENDS
             ${CMAKE_CURRENT_LIST_DIR}/build_standalone.sh
             ${ROCPROFSYS_PYTEST_PACKAGE_FILES}
             ${ROCPROFSYS_PYTEST_FILES}
-        COMMENT "Building standalone pytest binary (PyInstaller)"
+        COMMENT "Building standalone pytest binary"
         VERBATIM
     )
 
