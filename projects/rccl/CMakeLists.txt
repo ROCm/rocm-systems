@@ -1343,15 +1343,15 @@ if (DEVICE_LINKER)
   target_compile_definitions(specialized_kernels_device PRIVATE DEVICE_LINKER)
   
   # Filter compile options from rccl target for device-only compilation (shared by specialized kernels and dispatcher)
-  # Remove flags that are incompatible with device-only compilation:
-  # - -fno-gpu-rdc (not needed for device-only)
-  # - -Xclang followed by -triple=... (we use --offload-arch instead)
-  # - -mcpu=... (we use --offload-arch instead)
-  # - --offload-arch (we'll add our own)
-  # - -MF, -MD (dependency file flags not compatible with --cuda-device-only)
+  # Remove only flags incompatible with device-only. Keep only the *first* --offload-arch from rccl so we get the same
+  # arch string (including features) as the normal build but build only one arch per file (device linker merges one target).
+  # If rccl has no --offload-arch (e.g. device linker build), fall back to GPU_TARGETS so -l (local arch) works.
+  # Skip: -fno-gpu-rdc, -Xclang/-triple=, -mcpu=, -MF/-MD (dependency flags).
+  list(GET GPU_TARGETS 0 FIRST_GPU_TARGET)  # used for fallback and later for dispatcher/build_with_device_linker.sh
   get_target_property(RCCL_OPTS rccl COMPILE_OPTIONS)
   set(DEVICE_ONLY_OPTS "")
   set(skip_next false)
+  set(FIRST_OFFLOAD_ARCH_SEEN OFF)
   if(RCCL_OPTS)
     foreach(opt ${RCCL_OPTS})
       if(skip_next)
@@ -1368,7 +1368,11 @@ if (DEVICE_LINKER)
       elseif(opt MATCHES "^-mcpu=")
         # Skip -mcpu=
       elseif(opt MATCHES "^--offload-arch=")
-        # Skip --offload-arch (we'll add our own)
+        # Keep only the first --offload-arch so we build one arch per file (avoids 10x+ slowdown from multi-arch)
+        if(NOT FIRST_OFFLOAD_ARCH_SEEN)
+          list(APPEND DEVICE_ONLY_OPTS ${opt})
+          set(FIRST_OFFLOAD_ARCH_SEEN ON)
+        endif()
       elseif(opt MATCHES "^-MF" OR opt MATCHES "^-MD")
         # Skip dependency file flags (CMake adds these automatically, but they're incompatible)
         # Note: These are usually added by the build system, not in COMPILE_OPTIONS
@@ -1377,13 +1381,14 @@ if (DEVICE_LINKER)
       endif()
     endforeach()
   endif()
-  # Add device-only compilation flags - using --cuda-device-only --offload-arch --no-gpu-bundle-output produces device ELF directly
-  list(GET GPU_TARGETS 0 FIRST_GPU_TARGET)
-  message(STATUS "Setting device-only flags for specialized_kernels_device: --offload-arch=${FIRST_GPU_TARGET}")
+  # When rccl has no --offload-arch (e.g. device linker), use GPU_TARGETS so -l gives local arch (gfx942 not gfx906).
+  if(NOT FIRST_OFFLOAD_ARCH_SEEN)
+    list(APPEND DEVICE_ONLY_OPTS "--offload-arch=${FIRST_GPU_TARGET}")
+  endif()
+  # Device-only tweaks: -x hip, --cuda-device-only, --no-gpu-bundle-output. Arch from rccl (or FIRST_GPU_TARGET fallback).
   target_compile_options(specialized_kernels_device PRIVATE 
     "-x" "hip"
     "--cuda-device-only"
-    "--offload-arch=${FIRST_GPU_TARGET}"
     "--no-gpu-bundle-output"
     "-Wno-unused-command-line-argument"  # CMake automatically adds -MF dependency file flags for OBJECT libraries,
                                            # but these are ignored/unused during --cuda-device-only compilation

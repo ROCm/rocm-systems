@@ -29,15 +29,17 @@ GPU_TARGET_FULL="${2:-${GPU_TARGET:-gfx942}}"
 GPU_TARGET=$(echo "$GPU_TARGET_FULL" | sed 's/:.*$//')
 # Keep full target for bundler (e.g., gfx942:sramecc+:xnack+)
 # Extract features after the first colon (if any)
+# Pass through target as from CMake; do not add feature strings (match non-device-linker build).
 if [[ "$GPU_TARGET_FULL" == *:* ]]; then
     GPU_TARGET_FEATURES=$(echo "$GPU_TARGET_FULL" | sed 's/^[^:]*://' | tr ':' '\n' | sort | tr '\n' ':' | sed 's/:$//')
 else
     GPU_TARGET_FEATURES=""
 fi
-if [ -z "$GPU_TARGET_FEATURES" ]; then
-    GPU_TARGET_FEATURES="sramecc+:xnack-"
+if [ -n "$GPU_TARGET_FEATURES" ]; then
+    BUNDLE_TARGET="hipv4-amdgcn-amd-amdhsa--${GPU_TARGET}:${GPU_TARGET_FEATURES}"
+else
+    BUNDLE_TARGET="hipv4-amdgcn-amd-amdhsa--${GPU_TARGET}"
 fi
-BUNDLE_TARGET="hipv4-amdgcn-amd-amdhsa--${GPU_TARGET}:${GPU_TARGET_FEATURES}"
 
 # Output directory - use build directory
 OUTPUT_DIR="$BUILD_DIR/device_linker_output"
@@ -169,12 +171,18 @@ DEVICE_LINKER_ARGS=(
     -o "$MERGED_ELF"
     --dispatcher "$DEVICE_ELF"
     --host-table "$HOST_TABLE"
-    --target "${GPU_TARGET}:${GPU_TARGET_FEATURES:-sramecc+:xnack-}"
+    --target "${GPU_TARGET_FULL}"
 )
 
 if [ -d "$SPECIALIZED_OBJ_DIR" ] && [ "$(ls -A "$SPECIALIZED_OBJ_DIR"/*.o 2>/dev/null)" ]; then
     DEVICE_LINKER_ARGS+=(--input-dir "$SPECIALIZED_OBJ_DIR/")
     echo "  Including specialized kernels from: $SPECIALIZED_OBJ_DIR"
+fi
+
+# Omit DWARF from merged ELF if requested (e.g. to avoid loader rejecting the code object)
+if [ -n "${RCCL_DEVICE_LINKER_OMIT_DWARF:-}" ] || [ "${3:-}" = "omit-dwarf" ] || [ "${3:-}" = "--omit-dwarf" ]; then
+    DEVICE_LINKER_ARGS+=(--omit-dwarf)
+    echo "  Omitting DWARF sections (RCCL_DEVICE_LINKER_OMIT_DWARF or 3rd arg)"
 fi
 
 # Note: onerank.cu is now compiled as part of dispatcher_combined.hip

@@ -148,6 +148,8 @@ The unroll factor is determined by GPU architecture:
 
 When `BUILD_LOCAL_GPU_TARGET_ONLY=OFF`, all unroll factors (1, 2, 4) are generated to match production behavior.
 
+When `BUILD_LOCAL_GPU_TARGET_ONLY=ON` and only one GPU arch is present (e.g. `-l` on a single-GPU machine), only one unroll variant is generated (e.g. unroll 2 for gfx942). In that case `ncclDevFuncTable_1` and `ncclDevFuncTable_4` have no valid entries. The host avoids dispatching to them by forcing `comm->unroll` to the single build unroll: `generate.py` writes `rccl_build_unroll.h` with `RCCL_BUILD_SINGLE_UNROLL` and `RCCL_BUILD_UNROLL_INDEX`, and `commSetUnrollFactor()` uses that so only the populated table is ever used.
+
 ## Build Process
 
 1. **CMake Configure**: Generates specialized kernel `.cpp` files
@@ -159,6 +161,19 @@ When `BUILD_LOCAL_GPU_TARGET_ONLY=OFF`, all unroll factors (1, 2, 4) are generat
    - Run `device_linker` to merge all device functions
    - Bundle merged device code with host registration code
 4. **Final Link**: Link librccl.so with merged kernel object
+
+## Testing
+
+Start with the **RCCL unit tests** (in `test/`). Build and run them from the repo root:
+
+```bash
+./install.sh -l --device-linker -t    # build with unit tests
+./install.sh -l --device-linker -r    # build and run quick tests (AllReduce.*)
+```
+
+Or run the full unit test binary from the build directory: `./build/release/test/rccl-UnitTests`. Use `--run_tests_all` with install.sh to run the full suite.
+
+Additional small tests are in **`tools/device_linker/smoke_test/`**; see that directory’s README. Some of those tests are known bad (link errors or wrong expectations) and are skipped by default.
 
 ## Runtime Behavior
 
