@@ -2656,11 +2656,7 @@ extern "C"
         uint32_t patch = version % 100;
 
         // generate info string
-        auto info = std::stringstream{};
-        info << id->name << " is using rocprofiler-sdk v" << major << "." << minor << "."
-             << patch << " (" << runtime_version << ")";
-
-        LOG_DEBUG("{}", info.str());
+      LOG_DEBUG("{} is using rocprofiler-sdk v{}.{}.{} ({})", id->name, major, minor, patch, runtime_version);
         LOG_DEBUG("client_id={}, priority={}", id->handle, priority);
 
         ROCPROFILER_CALL(rocprofiler_at_internal_thread_create(
