@@ -229,6 +229,121 @@ an Instinct MI210 vs an Instinct MI250.
    -rw-r--r-- 1 auser agroup   650 Mar  1 15:15 sysinfo.csv
    -rw-r--r-- 1 auser agroup   399 Mar  1 15:15 timestamps.csv
 
+Output directory configuration
+------------------------------
+
+Profile mode writes results into a workload directory. By default, the output
+directory is derived from ``--name`` and the target system information:
+
+* Without MPI rank detection, the default is ``./workloads/<name>/<gpu_model>``.
+* With MPI rank detection, the default is ``./workloads/<name>/<rank>``.
+
+You can override the output directory with ``--output-directory``. The
+``--path`` (``-p``) argument is deprecated for profile mode. When ``--output-directory`` is
+explicitly provided, ``--name`` is ignored.
+
+.. note::
+
+   ``--path`` and ``--subpath`` are deprecated for profile mode and will be
+   removed in a future release. Use ``--output-directory`` with parameterized
+   placeholders instead.
+
+The output directory can be parameterized with the following keywords:
+
+* ``%hostname%``: Host name
+* ``%gpumodel%``: GPU model
+* ``%rank%``: MPI process rank (ignored with a warning if no rank is detected)
+* ``%env{NAME}%``: Environment variable ``NAME`` (empty string if unset)
+
+If MPI rank is detected and the output directory does not include ``%rank%``,
+ROCm Compute Profiler appends ``/<rank>`` to avoid collisions across ranks.
+
+Examples:
+
+* Profiling without MPI:
+
+.. code-block:: shell-session
+
+   $ rocprof-compute profile --name vcopy -- ./vcopy -n 1048576 -b 256
+
+   $ tree workloads/vcopy
+
+   └── MI200
+    ├── empirRoof_gpu-0_FP32.html
+    ├── log.txt
+    ├── perfmon
+    │   ├── pmc_perf_0.txt
+    │   ├── pmc_perf_0.yaml
+    │   ├── pmc_perf_1.txt
+    │   ├── pmc_perf_1.yaml
+    │   ├── pmc_perf_2.txt
+    │   ├── pmc_perf_2.yaml
+    │   ├── pmc_perf_3.txt
+    │   ├── pmc_perf_3.yaml
+    │   ├── pmc_perf_4.txt
+    │   ├── pmc_perf_4.yaml
+    │   ├── pmc_perf_5.txt
+    │   ├── SQC_DCACHE_INFLIGHT_LEVEL.txt
+    │   ├── SQC_DCACHE_INFLIGHT_LEVEL.yaml
+    │   ├── SQC_ICACHE_INFLIGHT_LEVEL.txt
+    │   ├── SQC_ICACHE_INFLIGHT_LEVEL.yaml
+    │   ├── SQ_IFETCH_LEVEL.txt
+    │   ├── SQ_IFETCH_LEVEL.yaml
+    │   ├── SQ_INST_LEVEL_LDS.txt
+    │   ├── SQ_INST_LEVEL_LDS.yaml
+    │   ├── SQ_INST_LEVEL_SMEM.txt
+    │   ├── SQ_INST_LEVEL_SMEM.yaml
+    │   ├── SQ_INST_LEVEL_VMEM.txt
+    │   ├── SQ_INST_LEVEL_VMEM.yaml
+    │   ├── SQ_LEVEL_WAVES.txt
+    │   └── SQ_LEVEL_WAVES.yaml
+    ├── pmc_perf.csv
+    ├── profiling_config.yaml
+    ├── roofline.csv
+    └── sysinfo.csv
+
+* Profiling with MPI at host ``amd-ryzen``:
+
+.. code-block:: shell-session
+
+   $ mpirun -n 4 rocprof-compute profile --output-directory /tmp/profiles/%hostname%/%rank% -- ./vcopy -n 1048576 -b 256
+
+   $ tree /tmp/profiles/amd-ryzen/0
+
+   └── MI200
+    ├── empirRoof_gpu-0_FP32.html
+    ├── log.txt
+    ├── perfmon
+    │   ├── pmc_perf_0.txt
+    │   ├── pmc_perf_0.yaml
+    │   ├── pmc_perf_1.txt
+    │   ├── pmc_perf_1.yaml
+    │   ├── pmc_perf_2.txt
+    │   ├── pmc_perf_2.yaml
+    │   ├── pmc_perf_3.txt
+    │   ├── pmc_perf_3.yaml
+    │   ├── pmc_perf_4.txt
+    │   ├── pmc_perf_4.yaml
+    │   ├── pmc_perf_5.txt
+    │   ├── SQC_DCACHE_INFLIGHT_LEVEL.txt
+    │   ├── SQC_DCACHE_INFLIGHT_LEVEL.yaml
+    │   ├── SQC_ICACHE_INFLIGHT_LEVEL.txt
+    │   ├── SQC_ICACHE_INFLIGHT_LEVEL.yaml
+    │   ├── SQ_IFETCH_LEVEL.txt
+    │   ├── SQ_IFETCH_LEVEL.yaml
+    │   ├── SQ_INST_LEVEL_LDS.txt
+    │   ├── SQ_INST_LEVEL_LDS.yaml
+    │   ├── SQ_INST_LEVEL_SMEM.txt
+    │   ├── SQ_INST_LEVEL_SMEM.yaml
+    │   ├── SQ_INST_LEVEL_VMEM.txt
+    │   ├── SQ_INST_LEVEL_VMEM.yaml
+    │   ├── SQ_LEVEL_WAVES.txt
+    │   └── SQ_LEVEL_WAVES.yaml
+    ├── pmc_perf.csv
+    ├── profiling_config.yaml
+    ├── roofline.csv
+    └── sysinfo.csv
+
 .. _profiling-output-format:
 
 Profiling output format
@@ -961,3 +1076,252 @@ Iteration multiplexing feature comes with some caveats to be considered when pro
 * **Non-deterministic workloads**
 
   Workloads which dispatch kernels with non-deterministic names and launch parameters may trigger warnings for insufficient dispatch counts because iteration multiplexing identifies unique kernels by their names and optionally by their launch parameters; this is especially true of large AI workloads that dispatch kernels non-deterministically based on the model layers being used for the current input, and in such cases kernel filtering of common kernels is recommended.
+
+Multi-rank profiling
+========================
+
+When profiling MPI workloads, ROCm Compute Profiler can isolate outputs by rank.
+If a rank is detected and no rank placeholder is provided, each rank writes to a
+subdirectory named by its rank to avoid output collisions.
+
+Example Usage
+-------------
+
+* With ``--output-directory`` option: 
+
+.. code-block:: shell-session
+
+   $ mpirun -n 4 rocprof-compute profile --output-directory /tmp/mpi_profile -- ./laplace_eqn -n 1048576 -b 256
+
+The example above produces:
+
+.. code-block:: shell-session
+
+   $ ls /tmp/mpi_profile
+   0  1  2  3
+
+   $ tree /tmp/mpi_profile/0
+
+   └── MI200
+    ├── empirRoof_gpu-0_FP32.html
+    ├── log.txt
+    ├── perfmon
+    │   ├── pmc_perf_0.txt
+    │   ├── pmc_perf_0.yaml
+    │   ├── pmc_perf_1.txt
+    │   ├── pmc_perf_1.yaml
+    │   ├── pmc_perf_2.txt
+    │   ├── pmc_perf_2.yaml
+    │   ├── pmc_perf_3.txt
+    │   ├── pmc_perf_3.yaml
+    │   ├── pmc_perf_4.txt
+    │   ├── pmc_perf_4.yaml
+    │   ├── pmc_perf_5.txt
+    │   ├── SQC_DCACHE_INFLIGHT_LEVEL.txt
+    │   ├── SQC_DCACHE_INFLIGHT_LEVEL.yaml
+    │   ├── SQC_ICACHE_INFLIGHT_LEVEL.txt
+    │   ├── SQC_ICACHE_INFLIGHT_LEVEL.yaml
+    │   ├── SQ_IFETCH_LEVEL.txt
+    │   ├── SQ_IFETCH_LEVEL.yaml
+    │   ├── SQ_INST_LEVEL_LDS.txt
+    │   ├── SQ_INST_LEVEL_LDS.yaml
+    │   ├── SQ_INST_LEVEL_SMEM.txt
+    │   ├── SQ_INST_LEVEL_SMEM.yaml
+    │   ├── SQ_INST_LEVEL_VMEM.txt
+    │   ├── SQ_INST_LEVEL_VMEM.yaml
+    │   ├── SQ_LEVEL_WAVES.txt
+    │   └── SQ_LEVEL_WAVES.yaml
+    ├── pmc_perf.csv
+    ├── profiling_config.yaml
+    ├── roofline.csv
+    └── sysinfo.csv
+
+* With ``--name`` option:
+
+.. code-block:: shell-session
+
+   $ mpirun -n 4 rocprof-compute profile --name laplace -- ./laplace_eqn -n 1048576 -b 256
+
+The example above produces:
+
+.. code-block:: shell-session
+
+   $ ls ./workloads/laplace_eqn
+   0  1  2  3
+
+   $ tree ./workloads/laplace_eqn/0
+
+   └── MI200
+    ├── empirRoof_gpu-0_FP32.html
+    ├── log.txt
+    ├── perfmon
+    │   ├── pmc_perf_0.txt
+    │   ├── pmc_perf_0.yaml
+    │   ├── pmc_perf_1.txt
+    │   ├── pmc_perf_1.yaml
+    │   ├── pmc_perf_2.txt
+    │   ├── pmc_perf_2.yaml
+    │   ├── pmc_perf_3.txt
+    │   ├── pmc_perf_3.yaml
+    │   ├── pmc_perf_4.txt
+    │   ├── pmc_perf_4.yaml
+    │   ├── pmc_perf_5.txt
+    │   ├── SQC_DCACHE_INFLIGHT_LEVEL.txt
+    │   ├── SQC_DCACHE_INFLIGHT_LEVEL.yaml
+    │   ├── SQC_ICACHE_INFLIGHT_LEVEL.txt
+    │   ├── SQC_ICACHE_INFLIGHT_LEVEL.yaml
+    │   ├── SQ_IFETCH_LEVEL.txt
+    │   ├── SQ_IFETCH_LEVEL.yaml
+    │   ├── SQ_INST_LEVEL_LDS.txt
+    │   ├── SQ_INST_LEVEL_LDS.yaml
+    │   ├── SQ_INST_LEVEL_SMEM.txt
+    │   ├── SQ_INST_LEVEL_SMEM.yaml
+    │   ├── SQ_INST_LEVEL_VMEM.txt
+    │   ├── SQ_INST_LEVEL_VMEM.yaml
+    │   ├── SQ_LEVEL_WAVES.txt
+    │   └── SQ_LEVEL_WAVES.yaml
+    ├── pmc_perf.csv
+    ├── profiling_config.yaml
+    ├── roofline.csv
+    └── sysinfo.csv
+
+
+To control output placement explicitly, add ``%rank%`` (and other placeholders)
+to your output directory. The following example is run on the host `amd-ryzen`:
+
+.. code-block:: shell-session
+
+   $ mpirun -n 4 rocprof-compute profile --output-directory /tmp/mpi_profile/%hostname%/%rank% -- ./laplace_eqn -n 1048576 -b 256
+
+   $ ls /tmp/mpi_profile/amd-ryzen/
+   0  1  2  3
+
+   $ tree /tmp/mpi_profile/amd-ryzen/0
+
+   └── MI200
+    ├── empirRoof_gpu-0_FP32.html
+    ├── log.txt
+    ├── perfmon
+    │   ├── pmc_perf_0.txt
+    │   ├── pmc_perf_0.yaml
+    │   ├── pmc_perf_1.txt
+    │   ├── pmc_perf_1.yaml
+    │   ├── pmc_perf_2.txt
+    │   ├── pmc_perf_2.yaml
+    │   ├── pmc_perf_3.txt
+    │   ├── pmc_perf_3.yaml
+    │   ├── pmc_perf_4.txt
+    │   ├── pmc_perf_4.yaml
+    │   ├── pmc_perf_5.txt
+    │   ├── SQC_DCACHE_INFLIGHT_LEVEL.txt
+    │   ├── SQC_DCACHE_INFLIGHT_LEVEL.yaml
+    │   ├── SQC_ICACHE_INFLIGHT_LEVEL.txt
+    │   ├── SQC_ICACHE_INFLIGHT_LEVEL.yaml
+    │   ├── SQ_IFETCH_LEVEL.txt
+    │   ├── SQ_IFETCH_LEVEL.yaml
+    │   ├── SQ_INST_LEVEL_LDS.txt
+    │   ├── SQ_INST_LEVEL_LDS.yaml
+    │   ├── SQ_INST_LEVEL_SMEM.txt
+    │   ├── SQ_INST_LEVEL_SMEM.yaml
+    │   ├── SQ_INST_LEVEL_VMEM.txt
+    │   ├── SQ_INST_LEVEL_VMEM.yaml
+    │   ├── SQ_LEVEL_WAVES.txt
+    │   └── SQ_LEVEL_WAVES.yaml
+    ├── pmc_perf.csv
+    ├── profiling_config.yaml
+    ├── roofline.csv
+    └── sysinfo.csv
+
+ROCm Compute Profiler supports the following libraries, APIs and job schedulers:
+
+* OpenMPI
+* MPICH
+* MVAPICH2
+* Slurm
+* Flux Core
+* PMI
+* PMIx
+* PALS
+
+For other MPI implementations or job schedulers, please use the ``%env{NAME}%``
+placeholder to include environment variables that identify the rank. For example,
+if your MPI implementation sets the ``MY_MPI_RANK`` environment variable, you can
+specify the output directory as follows:
+
+.. code-block:: shell-session
+
+   $ mpirun -n 4 rocprof-compute profile --output-directory /tmp/mpi_profile/%env{MY_MPI_RANK}% -- ./my_mpi_application
+
+Limitations and Recommendations
+-------------------------------
+
+When profiling multi-rank applications, be aware of the following limitations:
+
+**MPI Launcher Placement**
+
+MPI launchers (``mpirun``, ``mpiexec``, ``srun``, ``orterun``) must wrap the
+``rocprof-compute`` command, not appear after ``--``. The following is **incorrect**:
+
+.. code-block:: shell-session
+
+   $ rocprof-compute profile --name my_app -- mpirun -n 4 ./my_application   # WRONG
+
+Instead, use the correct form where the MPI launcher wraps ``rocprof-compute``:
+
+.. code-block:: shell-session
+
+   $ mpirun -n 4 rocprof-compute profile --name my_app -- ./my_application   # CORRECT
+
+If you use an MPI launcher after ``--``, an error will be raised with guidance
+on the correct usage.
+
+**Application Replay Mode (Default)**
+
+By default, ROCm Compute Profiler uses application replay mode, which runs the
+workload multiple times to collect all performance counters. This mode fails
+for MPI applications because running the application multiple times results in
+multiple ``MPI_Init`` and ``MPI_Finalize`` calls, which is not permitted by the
+MPI specification.
+
+**PC Sampling**
+
+PC sampling (block 21) may fail to collect data for multi-rank applications with
+MPI communication due to synchronization requirements.
+
+**Recommended Single-Pass Modes**
+
+For multi-rank applications with MPI communication, use one of these single-pass
+profiling modes:
+
+* ``--iteration-multiplexing``: Collects all counters in a single application run
+  by distributing counter collection across kernel dispatches. Recommended for
+  applications with sufficient kernel dispatch counts.
+
+  .. code-block:: shell-session
+
+     $ mpirun -n 4 rocprof-compute profile --name my_mpi_app --iteration-multiplexing -- ./my_mpi_app
+
+* ``--block <N>``: Profiles only specific metric block(s), reducing the number of
+  counters collected to fit in a single pass.
+
+  .. code-block:: shell-session
+
+     $ mpirun -n 4 rocprof-compute profile --name my_mpi_app --block 0 -- ./my_mpi_app
+
+* ``--set <name>``: Profiles a predefined counter set that fits in a single pass.
+
+  .. code-block:: shell-session
+
+     $ mpirun -n 4 rocprof-compute profile --name my_mpi_app --set compute_thruput_util -- ./my_mpi_app
+
+**Multi-Node Profiling**
+
+When profiling across multiple nodes, ensure that:
+
+* Output directories are accessible from all nodes (shared filesystem), or
+* Use node-specific output directories with ``%hostname%`` placeholder
+
+.. code-block:: shell-session
+
+   $ mpirun -n 8 --hostfile hosts.txt rocprof-compute profile \
+       --output-directory /shared/profiles/%hostname%/%rank% -- ./my_mpi_app

@@ -1715,7 +1715,9 @@ pub struct AmdsmiProcInfoT {
     pub memory_usage: AmdsmiProcInfoTMemoryUsage,
     pub container_name: [::std::os::raw::c_char; 256usize],
     pub cu_occupancy: u32,
-    pub reserved: [u32; 11usize],
+    pub evicted_time: u32,
+    pub sdma_usage: u64,
+    pub reserved: [u32; 9usize],
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -1778,8 +1780,12 @@ const _: () = {
         [::std::mem::offset_of!(AmdsmiProcInfoT, container_name) - 400usize];
     ["Offset of field: AmdsmiProcInfoT::cu_occupancy"]
         [::std::mem::offset_of!(AmdsmiProcInfoT, cu_occupancy) - 656usize];
+    ["Offset of field: AmdsmiProcInfoT::evicted_time"]
+        [::std::mem::offset_of!(AmdsmiProcInfoT, evicted_time) - 660usize];
+    ["Offset of field: AmdsmiProcInfoT::sdma_usage"]
+        [::std::mem::offset_of!(AmdsmiProcInfoT, sdma_usage) - 664usize];
     ["Offset of field: AmdsmiProcInfoT::reserved"]
-        [::std::mem::offset_of!(AmdsmiProcInfoT, reserved) - 660usize];
+        [::std::mem::offset_of!(AmdsmiProcInfoT, reserved) - 672usize];
 };
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]

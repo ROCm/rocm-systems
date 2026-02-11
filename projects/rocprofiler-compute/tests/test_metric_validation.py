@@ -36,15 +36,6 @@ soc = test_utils.gpu_soc()
 # workload -> gfx -> metric definition
 VALIDATE_METRICS = {
     "memcopy": {
-        "MI100": [
-            {
-                "name": "HBM Bandwidth",
-                "metric_id": "4.1.8",
-                "csv_file": "4.1_Roofline_Performance_Rates.csv",
-                "column": "Value",
-                "expected_values": [1044.48],
-            },
-        ],
         "MI200": [
             {
                 "name": "HBM Bandwidth",
