@@ -263,13 +263,11 @@ TEST_F(EnvVarTestFixture, parse_uint8_too_large) {
 // parse<uint8_t> parses first into an unsigned int; check behavior is correct when this overflows
 TEST_F(EnvVarTestFixture, parse_uint8_way_too_large) {
   this->setenv("4294967296");
-  const envvar::var<uint8_t> var_{this->var_name_, this->var_doc_,
-                                  envvar::parser::parse_hex<uint8_t>{}};
+  const envvar::var<uint8_t> var_{this->var_name_, this->var_doc_};
   EXPECT_TRUE(var_.is_default());
   EXPECT_EQ(var_.get_default(), 0);
   EXPECT_EQ(var_.get_value(), var_.get_default());
 }
-
 // parse<char> should parse as a character, but parse<unsigned char> AKA parse<uint8_t> should not
 TEST_F(EnvVarTestFixture, parse_uint8_char) {
   this->setenv("x");
