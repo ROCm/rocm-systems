@@ -165,10 +165,10 @@ ai_nic_stats_collector::update_data_for_one_nic(amdsmi_processor_handle processo
             std::unique_ptr<amdsmi_nic_stat_t[]> stats;
 
             // Call *_statistics the first time to get the number of statistics.
-            uint32_t num_stats{};
+            uint32_t        num_stats{};
             amdsmi_status_t status;
-            status = amdsmi_get_nic_rdma_port_statistics(processor_handle, port_info.rdma_port,
-                                                &num_stats, nullptr);
+            status = amdsmi_get_nic_rdma_port_statistics(
+                processor_handle, port_info.rdma_port, &num_stats, nullptr);
             if(status != AMDSMI_STATUS_SUCCESS) continue;
 
             // Allocate stats.
@@ -179,26 +179,28 @@ ai_nic_stats_collector::update_data_for_one_nic(amdsmi_processor_handle processo
             amdsmi_get_nic_rdma_port_statistics(processor_handle, port_info.rdma_port,
                                                 &num_stats, stats.get());
 
-            const std::unordered_map<std::string_view, std::function<void(nic_stats&, uint32_t)>>
+            const std::unordered_map<std::string_view,
+                                     std::function<void(nic_stats&, uint32_t)>>
                 stat_handlers = {
-                    {nic_stats::RX_RDMA_UCAST_BYTES, [](nic_stats& d, uint32_t v) {
-                        d._rx_rdma_ucast_bytes = v; }},
-                    {nic_stats::RX_RDMA_UCAST_PKTS, [](nic_stats& d, uint32_t v) {
-                        d._rx_rdma_ucast_pkts = v; }},
-                    {nic_stats::TX_RDMA_UCAST_BYTES, [](nic_stats& d, uint32_t v) {
-                        d._tx_rdma_ucast_bytes = v; }},
-                    {nic_stats::TX_RDMA_UCAST_PKTS, [](nic_stats& d, uint32_t v) {
-                        d._tx_rdma_ucast_pkts = v; }},
-                    {nic_stats::RX_RDMA_CNP_PKTS, [](nic_stats& d, uint32_t v) {
-                        d._rx_rdma_cnp_pkts = v; }},
-                    {nic_stats::TX_RDMA_CNP_PKTS, [](nic_stats& d, uint32_t v) {
-                        d._tx_rdma_cnp_pkts = v; }},
+                    { nic_stats::RX_RDMA_UCAST_BYTES,
+                      [](nic_stats& d, uint32_t v) { d._rx_rdma_ucast_bytes = v; } },
+                    { nic_stats::RX_RDMA_UCAST_PKTS,
+                      [](nic_stats& d, uint32_t v) { d._rx_rdma_ucast_pkts = v; } },
+                    { nic_stats::TX_RDMA_UCAST_BYTES,
+                      [](nic_stats& d, uint32_t v) { d._tx_rdma_ucast_bytes = v; } },
+                    { nic_stats::TX_RDMA_UCAST_PKTS,
+                      [](nic_stats& d, uint32_t v) { d._tx_rdma_ucast_pkts = v; } },
+                    { nic_stats::RX_RDMA_CNP_PKTS,
+                      [](nic_stats& d, uint32_t v) { d._rx_rdma_cnp_pkts = v; } },
+                    { nic_stats::TX_RDMA_CNP_PKTS,
+                      [](nic_stats& d, uint32_t v) { d._tx_rdma_cnp_pkts = v; } },
                 };
 
             // Retrieve relevant stats.
             for(uint32_t stat_idx{}; stat_idx < num_stats; ++stat_idx)
             {
-                if (auto it = stat_handlers.find(stats[stat_idx].name); it != stat_handlers.end())
+                if (auto it = stat_handlers.find(stats[stat_idx].name);
+                    it != stat_handlers.end())
                 {
                     it->second(data, stats[stat_idx].value);
                 }
