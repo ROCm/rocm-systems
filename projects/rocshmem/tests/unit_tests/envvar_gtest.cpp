@@ -268,6 +268,7 @@ TEST_F(EnvVarTestFixture, parse_uint8_way_too_large) {
   EXPECT_EQ(var_.get_default(), 0);
   EXPECT_EQ(var_.get_value(), var_.get_default());
 }
+
 // parse<char> should parse as a character, but parse<unsigned char> AKA parse<uint8_t> should not
 TEST_F(EnvVarTestFixture, parse_uint8_char) {
   this->setenv("x");
