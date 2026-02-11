@@ -7,6 +7,11 @@ function(
     MAINTAINER_NM_T
     MAINTAINER_EMAIL_T
 )
+    if("${COMPONENT_NAME_T}" STREQUAL "asan")
+        set(LINTIAN_DOCS_DIR "${CMAKE_INSTALL_DATADIR}/doc/${ROCM_SMI_PACKAGE}-asan")
+    else()
+        set(LINTIAN_DOCS_DIR "${CMAKE_INSTALL_DATADIR}/doc/${ROCM_SMI_PACKAGE}")
+    endif()
     # Check If Debian Platform
     find_file(DEBIAN debian_version debconf.conf PATHS /etc)
     if(DEBIAN)
@@ -33,17 +38,25 @@ function(
         # Install copyright file
         install(
             FILES "${CMAKE_BINARY_DIR}/DEBIAN/copyright"
-            DESTINATION "${CMAKE_INSTALL_DOCDIR}"
+            DESTINATION ${LINTIAN_DOCS_DIR}
             COMPONENT ${COMPONENT_NAME_T}
         )
 
         # Configure the changelog file
-        configure_file(
+        set(CHANGELOG_DATA_FILES
+            "${CMAKE_SOURCE_DIR}/DEBIAN/changelog.in"
             "${CMAKE_SOURCE_DIR}/CHANGELOG.md"
-            "${CMAKE_BINARY_DIR}/DEBIAN/CHANGELOG.md"
+        )
+        set(CHANGELOG_DATA_APPENDED "${CMAKE_BINARY_DIR}/DEBIAN/changelog.in")
+        file(WRITE "${CHANGELOG_DATA_APPENDED}" "")
+        foreach(changelog_data ${CHANGELOG_DATA_FILES})
+            append_file("${changelog_data}" "${CHANGELOG_DATA_APPENDED}")
+        endforeach()
+        configure_file(
+            "${CHANGELOG_DATA_APPENDED}"
+            "${CMAKE_BINARY_DIR}/DEBIAN/changelog.Debian"
             @ONLY
         )
-
         # Install Change Log
         find_program(DEB_GZIP_EXEC gzip)
         if(EXISTS "${CMAKE_BINARY_DIR}/DEBIAN/CHANGELOG.md")
@@ -60,7 +73,7 @@ function(
             endif()
             install(
                 FILES "${CMAKE_BINARY_DIR}/DEBIAN/${DEB_CHANGELOG_INSTALL_FILENM}"
-                DESTINATION ${CMAKE_INSTALL_DOCDIR}
+		DESTINATION ${LINTIAN_DOCS_DIR}
                 COMPONENT ${COMPONENT_NAME_T}
             )
         endif()
@@ -68,7 +81,7 @@ function(
         # License file
         install(
             FILES ${LICENSE_FILE}
-            DESTINATION ${CMAKE_INSTALL_DOCDIR}
+	    DESTINATION ${LINTIAN_DOCS_DIR}
             RENAME LICENSE.txt
             COMPONENT ${COMPONENT_NAME_T}
         )
@@ -101,25 +114,45 @@ function(
         CACHE STRING
         "Debian Package Maintainer Email"
     )
-    set(DEB_COPYRIGHT_YEAR "2025" CACHE STRING "Debian Package Copyright Year")
     set(DEB_LICENSE "MIT" CACHE STRING "Debian Package License Type")
     set(DEB_CHANGELOG_INSTALL_FILENM
         "CHANGELOG.md.gz"
         CACHE STRING
         "Debian Package ChangeLog File Name"
     )
-
+    # BUILD_ENABLE_LINTIAN_OVERRIDES not supported
+    
     # Get TimeStamp
     find_program(DEB_DATE_TIMESTAMP_EXEC date)
+    if(NOT DEB_DATE_TIMESTAMP_EXEC)
+        message(
+            FATAL_ERROR
+            "date command not found: Failed to Configure the timestamp for Copyright/Changelog."
+        )
+    endif()
     set(DEB_TIMESTAMP_FORMAT_OPTION "-R")
     execute_process(
         COMMAND ${DEB_DATE_TIMESTAMP_EXEC} ${DEB_TIMESTAMP_FORMAT_OPTION}
         OUTPUT_VARIABLE TIMESTAMP_T
+        OUTPUT_STRIP_TRAILING_WHITESPACE
     )
     set(DEB_TIMESTAMP
         "${TIMESTAMP_T}"
         CACHE STRING
         "Current Time Stamp for Copyright/Changelog"
+    )
+
+    # Get Copyright Year
+    set(DEB_YEAR_FORMAT_OPTION "+%Y")
+    execute_process(
+        COMMAND ${DEB_DATE_TIMESTAMP_EXEC} ${DEB_YEAR_FORMAT_OPTION}
+        OUTPUT_VARIABLE DEB_COPYRIGHT_YEAR_T
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    set(DEB_COPYRIGHT_YEAR
+        "${DEB_COPYRIGHT_YEAR_T}"
+        CACHE STRING
+        "Debian Package Copyright Year"
     )
 
     message(STATUS "DEB_PACKAGE_NAME             : ${DEB_PACKAGE_NAME}")

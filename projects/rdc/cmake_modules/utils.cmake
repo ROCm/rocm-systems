@@ -134,6 +134,11 @@ function(
     MAINTAINER_NM_T
     MAINTAINER_EMAIL_T
 )
+    if("${COMPONENT_NAME_T}" STREQUAL "asan")
+        set(LINTIAN_DOCS_DIR "${CMAKE_INSTALL_DOCDIR}-asan")
+    else()
+        set(LINTIAN_DOCS_DIR ${CMAKE_INSTALL_DOCDIR})
+    endif()
     # Check If Debian Platform
     find_file(DEBIAN debian_version debconf.conf PATHS /etc)
     if(DEBIAN)
@@ -160,7 +165,7 @@ function(
         # Install copyright file
         install(
             FILES "${CMAKE_BINARY_DIR}/DEBIAN/copyright"
-            DESTINATION "${CMAKE_INSTALL_DOCDIR}"
+	    DESTINATION "${LINTIAN_DOCS_DIR}"
             COMPONENT ${COMPONENT_NAME_T}
         )
 
@@ -184,20 +189,15 @@ function(
             if(NOT ${result} EQUAL 0)
                 message(FATAL_ERROR "Failed to compress: ${error}")
             endif()
-            install(
-                FILES "${CMAKE_BINARY_DIR}/DEBIAN/${DEB_CHANGELOG_INSTALL_FILENM}"
-                DESTINATION ${CMAKE_INSTALL_DOCDIR}
-                COMPONENT ${COMPONENT_NAME_T}
-            )
+            install ( FILES "${CMAKE_BINARY_DIR}/DEBIAN/${DEB_CHANGELOG_INSTALL_FILENM}"
+                DESTINATION ${LINTIAN_DOCS_DIR}
+                COMPONENT ${COMPONENT_NAME_T})
         endif()
     else()
         # License file
-        install(
-            FILES ${LICENSE_FILE}
-            DESTINATION ${CMAKE_INSTALL_DOCDIR}
-            RENAME LICENSE.txt
-            COMPONENT ${COMPONENT_NAME_T}
-        )
+        install ( FILES ${LICENSE_FILE}
+            DESTINATION ${LINTIAN_DOCS_DIR} RENAME LICENSE.txt
+            COMPONENT ${COMPONENT_NAME_T})
     endif()
 endfunction()
 
@@ -233,6 +233,7 @@ function(
     execute_process(
         COMMAND ${DEB_DATE_TIMESTAMP_EXEC} ${DEB_TIMESTAMP_FORMAT_OPTION}
         OUTPUT_VARIABLE TIMESTAMP_T
+        OUTPUT_STRIP_TRAILING_WHITESPACE
     )
     set(DEB_TIMESTAMP "${TIMESTAMP_T}" CACHE STRING "Current Time Stamp for Copyright/Changelog")
 

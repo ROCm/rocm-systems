@@ -184,6 +184,11 @@ function(
     MAINTAINER_NM_T
     MAINTAINER_EMAIL_T
 )
+    if("${COMPONENT_NAME_T}" STREQUAL "asan")
+        set(LINTIAN_DOCS_DIR "${CMAKE_INSTALL_DATADIR}/doc/${ROCM_SMI_PACKAGE}-asan")
+    else()
+        set(LINTIAN_DOCS_DIR "${CMAKE_INSTALL_DATADIR}/doc/${ROCM_SMI_PACKAGE}")
+    endif()
     # Check If Debian Platform
     find_file(DEBIAN debian_version debconf.conf PATHS /etc)
     if(DEBIAN)
@@ -209,7 +214,7 @@ function(
         # Install copyright file
         install(
             FILES "${CMAKE_BINARY_DIR}/DEBIAN/copyright"
-            DESTINATION ${CMAKE_INSTALL_DATADIR}/doc/${ROCM_SMI_PACKAGE}
+	    DESTINATION ${LINTIAN_DOCS_DIR}
             COMPONENT ${COMPONENT_NAME_T}
         )
 
@@ -246,8 +251,9 @@ function(
                 message(FATAL_ERROR "Failed to compress: ${error}")
             endif()
             install(
-                FILES "${CMAKE_BINARY_DIR}/DEBIAN/${DEB_CHANGELOG_INSTALL_FILENM}"
-                DESTINATION ${CMAKE_INSTALL_DATADIR}/doc/${ROCM_SMI_PACKAGE}
+                FILES
+                    "${CMAKE_BINARY_DIR}/DEBIAN/${DEB_CHANGELOG_INSTALL_FILENM}"
+                DESTINATION ${LINTIAN_DOCS_DIR}
                 COMPONENT ${COMPONENT_NAME_T}
             )
         endif()

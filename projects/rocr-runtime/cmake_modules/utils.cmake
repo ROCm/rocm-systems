@@ -258,7 +258,7 @@ function( configure_pkg PACKAGE_NAME_T COMPONENT_NAME_T PACKAGE_VERSION_T MAINTA
 
         # Install copyright file
         install ( FILES "${CMAKE_BINARY_DIR}/DEBIAN/copyright"
-                DESTINATION "${LINTIAN_DOCS_DIR}"
+                DESTINATION ${LINTIAN_DOCS_DIR}
                 COMPONENT ${COMPONENT_NAME_T} )
 
         # Configure the changelog file
@@ -312,6 +312,7 @@ function( set_pkg_cmake_flags DEB_PACKAGE_NAME_T DEB_PACKAGE_VERSION_T DEB_MAINT
     execute_process (
         COMMAND ${DEB_DATE_TIMESTAMP_EXEC} ${DEB_TIMESTAMP_FORMAT_OPTION}
         OUTPUT_VARIABLE TIMESTAMP_T
+        OUTPUT_STRIP_TRAILING_WHITESPACE
     )
     set( DEB_TIMESTAMP                "${TIMESTAMP_T}" CACHE STRING "Current Time Stamp for Copyright/Changelog" )
 
