@@ -131,6 +131,11 @@ if [ "${DEBUG_PEER_POINTERS:-0}" = "1" ]; then
     echo "DEBUG_PEER_POINTERS enabled - will print peer pointer info from device code"
 fi
 
+# Device debug traps for ROCgdb (set NCCL_DEVICE_DEBUG_TRAP=1 to enable)
+if [ "${NCCL_DEVICE_DEBUG_TRAP:-0}" = "1" ]; then
+    DEFINES="$DEFINES -DNCCL_DEVICE_DEBUG_TRAP"
+fi
+
 # CUID (compilation unit ID) - needs to match between device and host compilation
 CUID="devicelinker$(echo -n "$SOURCE" | md5sum | cut -c1-16)"
 

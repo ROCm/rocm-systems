@@ -30,17 +30,29 @@ These are smaller, standalone tests. Run them only if you want an extra check be
 | test_smoke_allreduce | AllReduce out-of-place SUM float32; checks result | `test_smoke_allreduce [num_gpus] [array_length]` (defaults: 2, 1024) |
 | test_smoke_allreduce_batched | Batched AllReduce (many ops in one group) SUM float32; checks all batches | `test_smoke_allreduce_batched [num_gpus] [array_length] [num_batches]` (defaults: 2, 1024, 16) |
 
+### Build and run (no script required)
+
+Use the same library at build and run time (headers + link + rpath). No env vars required.
+
+**With system ROCm:**
 ```bash
-./run_tests.sh [--build-dir DIR] [test_smoke_allreduce ...]
+hipcc -O2 -I/opt/rocm/include test_smoke_allreduce.cpp -L/opt/rocm/lib -lrccl -Wl,-rpath,/opt/rocm/lib -o test_smoke_allreduce
+./test_smoke_allreduce
 ```
 
-To run with different GPU count or size (after building):
+**With RCCL build directory:**
 ```bash
-./bin/test_smoke_allreduce 4 8192
-./bin/test_smoke_allreduce_batched 2 1024 32
+hipcc -O2 -I$BUILD_DIR/include test_smoke_allreduce.cpp -L$BUILD_DIR -lrccl -Wl,-rpath,$BUILD_DIR -o test_smoke_allreduce
+./test_smoke_allreduce
 ```
 
-Where `BUILD_DIR` is the RCCL build directory (default: `../../../build/release`).
+The test must pass with system RCCL; if it fails, the test or environment is broken, not the device-linker build.
+
+**Different GPU count or size:** `./test_smoke_allreduce 4 8192`
+
+### Optional: run_tests.sh
+
+`run_tests.sh` is only a convenience (build many tests, set NCCL channel env for device-linker runs). You do not need it to build or run the smoke test.
 
 ## Test Status
 
@@ -59,10 +71,6 @@ Where `BUILD_DIR` is the RCCL build directory (default: `../../../build/release`
 
 **Some tests are bad:** They have link errors (test_no_nccl) or wrong verification (test_single_gpu). These are skipped by default so the smoke run can pass.
 
-## Building Individual Tests
+## Building other tests (no script)
 
-```bash
-hipcc -O2 -I$BUILD_DIR/include test_single_gpu.cpp \
-    -L$BUILD_DIR -lrccl -Wl,-rpath,$BUILD_DIR \
-    -o test_single_gpu
-```
+Same pattern: use the same include path and library (and rpath) at build time so the binary finds the right lib at run time. No script or LD_LIBRARY_PATH needed if rpath is set.

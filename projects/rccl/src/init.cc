@@ -888,6 +888,19 @@ static ncclResult_t devCommSetup(ncclComm_t comm) {
 
   comm->workArgsBytes = std::min<size_t>(ncclParamWorkArgsBytes(), ncclMaxKernelArgsSize(comm->cudaArch));
 
+#if defined(__HIP_PLATFORM_AMD__) && defined(__HIPCC__)
+  /* Device buffer for kernel args: host plan->kernelArgs is copied here before
+   * launch so the kernel can read it (host pointer is not device-accessible). */
+  NCCLCHECKGOTO(ncclCudaCalloc(&comm->kernelArgsBufDev, comm->workArgsBytes), ret, fail);
+  ncclCommPushCudaFree(comm, comm->kernelArgsBufDev);
+  /* Small device buffer for kernel to write debug dump (args, first batch); host reads back when enabled. */
+  NCCLCHECKGOTO(ncclCudaCalloc(&comm->kernelDebugBufDev, 128), ret, fail);
+  ncclCommPushCudaFree(comm, comm->kernelDebugBufDev);
+#else
+  comm->kernelArgsBufDev = nullptr;
+  comm->kernelDebugBufDev = nullptr;
+#endif
+
 #if !defined(__HIP_PLATFORM_AMD__) && !defined(__HIPCC__)
   memset(&ccStatus, 0, sizeof(ccStatus));
   ccEnable = (ncclSuccess == ncclNvmlGetCCStatus(&ccStatus)) && (ccStatus.CCEnabled || ccStatus.multiGpuProtectedPCIE || ccStatus.multiGpuNVLE);

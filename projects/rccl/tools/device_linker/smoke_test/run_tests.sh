@@ -6,6 +6,7 @@
 #
 # Options:
 #   --build-dir DIR   RCCL build directory (default: ../../../build/release)
+#   --system-lib      Build and run against system ROCm lib (e.g. /opt/rocm); no build dir required
 #   --all             Run all tests including known-failing multi-GPU tests
 #   --list            List all available tests and exit
 #   --help            Show this help message
@@ -29,9 +30,10 @@ RUN_ALL=0
 LIST_ONLY=0
 BUILD_DIR=""
 SPECIFIC_TESTS=""
+SYSTEM_LIB=0
 
 show_help() {
-    head -20 "$0" | tail -18 | sed 's/^#//' | sed 's/^ //'
+    head -25 "$0" | tail -23 | sed 's/^#//' | sed 's/^ //'
     exit 0
 }
 
@@ -48,6 +50,10 @@ while [ $# -gt 0 ]; do
         --build-dir)
             BUILD_DIR="$2"
             shift 2
+            ;;
+        --system-lib)
+            SYSTEM_LIB=1
+            shift
             ;;
         --help|-h)
             show_help
@@ -69,6 +75,9 @@ while [ $# -gt 0 ]; do
 done
 
 BUILD_DIR="${BUILD_DIR:-$RCCL_ROOT/build/release}"
+
+# System ROCm path (for --system-lib)
+ROCM_PATH="${ROCM_PATH:-/opt/rocm}"
 
 # Find all test source files
 ALL_TEST_SOURCES=$(find "$SCRIPT_DIR" -maxdepth 1 -name "test_*.cpp" | sort)
@@ -96,28 +105,41 @@ if [ $LIST_ONLY -eq 1 ]; then
     exit 0
 fi
 
-# Check librccl.so exists
-if [ ! -f "$BUILD_DIR/librccl.so" ]; then
+# Check librccl.so exists (unless using system lib)
+if [ $SYSTEM_LIB -eq 0 ] && [ ! -f "$BUILD_DIR/librccl.so" ]; then
     echo "Error: librccl.so not found in $BUILD_DIR"
-    echo "Build RCCL first with: cmake -DDEVICE_LINKER=ON .. && ninja"
+    echo "Build RCCL first, or use --system-lib to run against system ROCm."
     exit 1
 fi
 
 # Compiler and flags
-HIPCC=/opt/rocm/bin/hipcc
+HIPCC="${HIPCC:-/opt/rocm/bin/hipcc}"
 CFLAGS="-O2"
-INCLUDES="-I$BUILD_DIR/include"
-LDFLAGS="-L$BUILD_DIR -lrccl -lpthread -Wl,-rpath,$BUILD_DIR"
+if [ $SYSTEM_LIB -eq 1 ]; then
+    INCLUDES="-I$ROCM_PATH/include"
+    LDFLAGS="-L$ROCM_PATH/lib -lrccl -lpthread -Wl,-rpath,$ROCM_PATH/lib"
+else
+    INCLUDES="-I$BUILD_DIR/include"
+    LDFLAGS="-L$BUILD_DIR -lrccl -lpthread -Wl,-rpath,$BUILD_DIR"
+fi
 
 # Output directory for binaries
 BIN_DIR="$SCRIPT_DIR/bin"
 mkdir -p "$BIN_DIR"
 
 echo "=========================================="
-echo "  Device Linker RCCL Smoke Tests"
+if [ $SYSTEM_LIB -eq 1 ]; then
+    echo "  RCCL Smoke Tests (system lib: $ROCM_PATH)"
+else
+    echo "  Device Linker RCCL Smoke Tests"
+fi
 echo "=========================================="
 echo ""
-echo "Build directory: $BUILD_DIR"
+if [ $SYSTEM_LIB -eq 1 ]; then
+    echo "Using system ROCm: $ROCM_PATH (include + lib)"
+else
+    echo "Build directory: $BUILD_DIR"
+fi
 echo "Output directory: $BIN_DIR"
 echo ""
 
@@ -169,7 +191,18 @@ done
 echo ""
 
 # Run all tests
-echo "=== Running Tests ==="
+# With device-linker build we use 2 channels for easier debugging; with system lib use env default or leave unset
+if [ $SYSTEM_LIB -eq 1 ]; then
+    export NCCL_MIN_NCHANNELS="${NCCL_MIN_NCHANNELS:-}"
+    export NCCL_MAX_NCHANNELS="${NCCL_MAX_NCHANNELS:-}"
+    echo "=== Running Tests ==="
+    echo "  (system lib: no forced channel count; set NCCL_MIN_NCHANNELS/NCCL_MAX_NCHANNELS if needed)"
+else
+    export NCCL_MIN_NCHANNELS=${NCCL_MIN_NCHANNELS:-2}
+    export NCCL_MAX_NCHANNELS=${NCCL_MAX_NCHANNELS:-2}
+    echo "=== Running Tests ==="
+    echo "  NCCL_MIN_NCHANNELS=$NCCL_MIN_NCHANNELS NCCL_MAX_NCHANNELS=$NCCL_MAX_NCHANNELS"
+fi
 PASSED=0
 FAILED=0
 FAILED_TESTS=""

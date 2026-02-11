@@ -284,6 +284,7 @@ static void finishPlan(struct ncclComm* comm, struct ncclKernelPlan* plan) {
   plan->kernelArgs->comm = comm->devComm;
   plan->kernelArgs->channelMask = plan->channelMask;
   plan->kernelArgs->workStorageType = plan->workStorageType;
+  plan->kernelArgs->debugOut = comm->kernelDebugBufDev; // optional; kernel writes args/first-batch dump when non-null
 
   // Put batches into the kernel arguments. The first batch for each channel
   // must be located at batchZero[blockIdx.x]. To achieve this we round robin
@@ -1860,8 +1861,62 @@ ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan
   NCCLCHECK(ncclProfilerStartKernelLaunchEvent(plan, launchStream));
 
   void* extra[] = {plan->kernelArgs, &plan->kernelArgsSize};
+  /* HIP: kernel args must be in device memory (host pointer not visible to GPU).
+   * Copy once and use the same pointer for all launch paths. */
+  kernelArgsToPass = plan->kernelArgs;
+#if defined(__HIP_PLATFORM_AMD__) && defined(__HIPCC__)
+  if (comm->kernelArgsBufDev != nullptr) {
+    CUDACHECKGOTO(hipMemcpyAsync(comm->kernelArgsBufDev, plan->kernelArgs, plan->kernelArgsSize, hipMemcpyHostToDevice, launchStream), ret, do_return);
+    kernelArgsToPass = comm->kernelArgsBufDev;
+  }
+#endif
+  extra[0] = kernelArgsToPass;
+  extra[1] = &plan->kernelArgsSize;
 
-  auto event = latency_profiler::collTraceAquireEventBaseline(plan, launchStream);
+  if (planner->numStreams == 1 && !plan->persistent) {
+#if defined(__HIP_PLATFORM_AMD__) && defined(__HIPCC__)
+    /* HIP: clamp dynamic LDS so total does not exceed device max. */
+    int maxOptin = 0;
+    hipFuncAttributes attr = {0};
+    CUDACHECKGOTO(hipDeviceGetAttribute(&maxOptin, hipDeviceAttributeSharedMemPerBlockOptin, comm->cudaDev), ret, do_return);
+    if (hipFuncGetAttributes(&attr, plan->kernelFn) == hipSuccess) {
+      size_t dynamicMax = (maxOptin > (int)attr.sharedSizeBytes) ? (size_t)(maxOptin - attr.sharedSizeBytes) : 0;
+      if (dynamicMax < (size_t)smem) smem = (int)dynamicMax;
+    }
+#endif
+    latency_profiler::collTraceRecordStartEvent(comm, launchStream, event.get());
+    comm->lastStream = planner->streams->stream;
+    INFO(NCCL_ALL, "NCCL: Launching kernel grid=(%u,%u,%u) block=(%u,%u,%u)", grid.x, grid.y, grid.z, block.x, block.y, block.z);
+    CUDACHECKGOTO(hipExtLaunchKernel(plan->kernelFn, grid, block, extra, smem, launchStream, NULL, comm->doneEvent, 0), ret, do_return);
+    INFO(NCCL_ALL, "NCCL: Kernel launch returned success");
+
+    latency_profiler::collTraceRecordEndEvent(comm, plan, launchStream, std::move(event));
+#if defined(__HIP_PLATFORM_AMD__) && defined(__HIPCC__)
+    /* Device debug dump: read back what the kernel wrote (args + first batch) for multi-GPU debugging. */
+    if (comm->kernelDebugBufDev != nullptr) {
+      /* Host view: what we put in the plan (first channel's first work) for comparison with kernel debug. */
+      struct ncclDevWorkBatch const* batchZero = (struct ncclDevWorkBatch const*)(plan->kernelArgs + 1);
+      struct ncclDevWorkColl const* hostWork0 = (struct ncclDevWorkColl const*)((char const*)plan->kernelArgs + batchZero[0].offsetBase);
+      INFO(NCCL_ALL, "NCCL host plan work0: sendbuff=%p recvbuff=%p countLo=%zu",
+           hostWork0->sendbuff, hostWork0->recvbuff, (size_t)hostWork0->cbd.countLo);
+      INFO(NCCL_ALL, "NCCL: Waiting for kernel completion (hipStreamSynchronize)...");
+      CUDACHECKGOTO(hipStreamSynchronize(launchStream), ret, do_return);
+      INFO(NCCL_ALL, "NCCL: Stream synchronized (kernel completed)");
+      uint64_t kbuf[16];
+      CUDACHECKGOTO(hipMemcpy(kbuf, comm->kernelDebugBufDev, sizeof(kbuf), hipMemcpyDeviceToHost), ret, do_return);
+      INFO(NCCL_ALL, "NCCL kernel debug: comm=%p channelMask0=0x%llx workStorageType=%llu batch0: offsetBitset=0x%llx workType=%llu funcId=%llu offsetBase=%llu flags=0x%llx",
+           (void*)kbuf[0], (unsigned long long)kbuf[1], (unsigned long long)kbuf[2], (unsigned long long)kbuf[3],
+           (unsigned long long)kbuf[4], (unsigned long long)kbuf[5], (unsigned long long)kbuf[6], (unsigned long long)kbuf[7]);
+      INFO(NCCL_ALL, "NCCL kernel debug work0: sendbuff=%p recvbuff=%p nWorks=%llu countLo=%llu",
+           (void*)kbuf[8], (void*)kbuf[9], (unsigned long long)kbuf[10], (unsigned long long)kbuf[11]);
+    }
+#endif
+    return ncclSuccess;
+  }
+
+  // CUfunction fn;
+  // CUDACHECK(cudaGetFuncBySymbol(&fn, sym));
+>>>>>>> 97f52924a7 (Mostly for debugging, require careful review)
 
 #if !defined(__HIP_PLATFORM_AMD__) || !defined(__HIPCC__)
   int driverVersion;
