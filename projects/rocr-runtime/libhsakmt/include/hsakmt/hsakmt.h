@@ -556,6 +556,7 @@ hsaKmtExportDMABufHandle(
     HSAuint64 *Offset			//OUT
     );
 
+#if defined(_WIN32)
 /**
   Export GPU Memory handle
 */
@@ -567,6 +568,7 @@ hsaKmtGetMemoryHandle(
     HSAuint64 SizeInBytes,        // IN
     uint64_t* SharedMemoryHandle  // OUT
 );
+#endif
 
 /**
  Export a memory buffer for sharing with other processes
