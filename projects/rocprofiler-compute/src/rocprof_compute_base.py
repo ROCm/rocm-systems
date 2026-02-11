@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Optional
 
 import config
-from argparser import EXPERIMENTAL_FEATURES, omniarg_parser
+from argparser import omniarg_parser
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils import file_io, parser, schema
 from utils.logger import (
@@ -67,7 +67,6 @@ class RocProfCompute:
         self.__version: dict[str, Optional[str]] = {"ver": None, "ver_pretty": None}
         self.__supported_archs = mi_gpu_specs.get_gpu_series_dict()
         self.__mspec: MachineSpecs  # to be initialized in load_soc_specs()
-        self.__experimental_used_labels: list[str] = []
 
         setup_console_handler()
         self.set_version()
@@ -136,16 +135,6 @@ class RocProfCompute:
             self.__analyze_mode = "cli"
 
     def sanitize(self) -> None:
-        # Experimental feature gating
-        if (
-            getattr(self.__args, "experimental", False)
-            and self.__experimental_used_labels
-        ):
-            console_warning(
-                "Using experimental features which are not stable: "
-                f"{', '.join(self.__experimental_used_labels)}"
-            )
-
         block = False
         if (hasattr(self.__args, "filter_metrics") and self.__args.filter_metrics) or (
             hasattr(self.__args, "filter_blocks") and self.__args.filter_blocks
@@ -192,27 +181,12 @@ class RocProfCompute:
         self.__soc[arch] = soc_class(self.__args, self.__mspec)
 
     def parse_args(self) -> None:
-        argv = sys.argv[1:]
+        from argparser import detect_experimental_config
 
-        if "--" in argv:
-            argv = argv[: argv.index("--")]
+        # Detect if --experimental flag is present (for help text control)
+        experimental_requested: bool = detect_experimental_config()
 
-        experimental_requested = "--experimental" in argv
-        show_experimental_help = experimental_requested and (
-            "-h" in argv or "--help" in argv
-        )
-        self.__experimental_used_labels = [
-            feat["label"]
-            for feat in EXPERIMENTAL_FEATURES
-            if any(flag in argv for flag in feat["flags"])
-        ]
-
-        if self.__experimental_used_labels and not experimental_requested:
-            console_error(
-                "Provide --experimental to enable experimental feature: "
-                + ", ".join(self.__experimental_used_labels)
-            )
-
+        # Build full parser with experimental knowledge
         parser = argparse.ArgumentParser(
             description=(
                 "Command line interface for AMD's GPU profiler, ROCm Compute Profiler"
@@ -228,8 +202,7 @@ class RocProfCompute:
             config.rocprof_compute_home,
             self.__supported_archs,
             self.__version,
-            experimental_enabled=experimental_requested,
-            show_experimental_help=show_experimental_help,
+            experimental_requested,
         )
         self.__args = parser.parse_args()
 

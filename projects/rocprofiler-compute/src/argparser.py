@@ -28,6 +28,7 @@ import os
 from pathlib import Path
 from typing import Optional
 
+from utils.logger import console_warning
 from utils.utils import METRIC_ID_RE
 
 # Experimental Feature Registry
@@ -37,10 +38,93 @@ EXPERIMENTAL_FEATURES = [
 ]
 
 
-def experimental_help(experimental_enabled: bool, description: str) -> str:
-    if experimental_enabled:
-        return f"EXPERIMENTAL: {description}"
-    return argparse.SUPPRESS
+def detect_experimental_config() -> bool:
+    """
+    Detect if --experimental flag is present (for help text control).
+    """
+    # Preliminary parser for --experimental
+    prelim_parser = argparse.ArgumentParser(add_help=False)
+    prelim_parser.add_argument("--experimental", action="store_true", default=False)
+
+    # Parse only known args (respects -- separator)
+    prelim_args, _ = prelim_parser.parse_known_args()
+
+    return prelim_args.experimental
+
+
+class ExperimentalAction(argparse.Action):
+    """
+    Custom action that enforces experimental feature gating.
+    - Suppresses help text when experimental mode is disabled
+    - Errors if feature used without --experimental flag
+    - Warns when experimental feature is used
+    """
+
+    def __init__(
+        self,
+        option_strings: list[str],
+        dest: str,
+        experimental_enabled: bool = False,
+        feature_label: str = "",
+        help_indent: str = "\t\t\t",
+        nargs=None,  # noqa: ANN001
+        const=None,  # noqa: ANN001
+        default=None,  # noqa: ANN001
+        type=None,  # noqa: ANN001
+        choices=None,  # noqa: ANN001
+        required: bool = False,
+        metavar=None,  # noqa: ANN001
+        help: Optional[str] = None,
+        **kwargs,  # noqa: ANN003
+    ) -> None:
+        self.experimental_enabled = experimental_enabled
+        self.feature_label = feature_label
+
+        # Modify help text based on experimental mode
+        if experimental_enabled:
+            help = (
+                f"{help_indent}EXPERIMENTAL: {help}"
+                if help
+                else f"{help_indent}EXPERIMENTAL"
+            )
+        else:
+            help = argparse.SUPPRESS
+
+        # Initialize with the help text and standard argparse.Action behavior
+        super().__init__(
+            option_strings=option_strings,
+            dest=dest,
+            nargs=nargs,
+            const=const,
+            default=default,
+            type=type,
+            choices=choices,
+            required=required,
+            help=help,
+            metavar=metavar,
+            **kwargs,  # noqa: ANN001
+        )
+
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values,  # noqa: ANN001
+    ) -> None:
+        # Import here to avoid circular dependency
+
+        # Error if experimental feature used without --experimental flag
+        if not self.experimental_enabled:
+            parser.error(
+                f"{self.feature_label} is an experimental feature. "
+                f"Use --experimental to enable it."
+            )
+
+        console_warning(
+            f"{self.feature_label} is experimental and may change in future releases."
+        )
+
+        setattr(namespace, self.dest, values)
 
 
 def validate_block(value: str) -> str:
@@ -71,7 +155,6 @@ def add_general_group(
     rocprof_compute_home: Path,
     supported_archs: dict[str, str],
     rocprof_compute_version: dict[str, Optional[str]],
-    show_experimental_help: bool = False,
 ) -> None:
     general_group = parser.add_argument_group("General Options")
 
@@ -141,7 +224,6 @@ def omniarg_parser(
     supported_archs: dict[str, str],
     rocprof_compute_version: dict[str, Optional[str]],
     experimental_enabled: bool = False,
-    show_experimental_help: bool = False,
 ) -> None:
     # -----------------------------------------
     # Parse arguments (dependent on mode)
@@ -154,7 +236,6 @@ def omniarg_parser(
         rocprof_compute_home,
         supported_archs,
         rocprof_compute_version,
-        show_experimental_help,
     )
     parser._positionals.title = "Modes"
     parser._optionals.title = "Help"
@@ -194,7 +275,6 @@ Examples:
         rocprof_compute_home,
         supported_archs,
         rocprof_compute_version,
-        show_experimental_help,
     )
     profile_group = profile_parser.add_argument_group("Profile Options")
     roofline_group = profile_parser.add_argument_group("Standalone Roofline Options")
@@ -583,15 +663,16 @@ Examples:
 
     profile_group.add_argument(
         "--spatial-multiplexing",
-        type=int,
-        metavar="",
-        nargs="+",
         dest="spatial_multiplexing",
         required=False,
         default=None,
-        help=experimental_help(
-            experimental_enabled, "Provide Node ID and GPU number per node."
-        ),
+        action=ExperimentalAction,
+        experimental_enabled=experimental_enabled,
+        feature_label="Spatial multiplexing",
+        type=int,
+        nargs="*",
+        metavar="",
+        help="Provide Node ID and GPU number per node.",
     )
 
     ## Analyze Command Line Options
@@ -622,7 +703,6 @@ Examples:
         rocprof_compute_home,
         supported_archs,
         rocprof_compute_version,
-        show_experimental_help,
     )
     analyze_group = analyze_parser.add_argument_group("Analyze Options")
     analyze_advanced_group = analyze_parser.add_argument_group("Advanced Options")
@@ -893,6 +973,11 @@ Examples:
         dest="spatial_multiplexing",
         required=False,
         default=False,
-        action="store_true",
-        help=experimental_help(experimental_enabled, "Mode of spatial multiplexing."),
+        action=ExperimentalAction,
+        experimental_enabled=experimental_enabled,
+        feature_label="Spatial multiplexing",
+        help_indent="\t\t",
+        nargs=0,
+        const=True,
+        help="Mode of spatial multiplexing.",
     )

@@ -44,8 +44,10 @@ This project uses a centralized registry for experimental features in `src/argpa
 #### How It Works
 
 The `--experimental` flag acts as a master toggle that:
-- Shows help text for experimental features when enabled
-- Controls visibility of experimental options in the argument parser
+- Shows help text for experimental features when enabled (prefixed with "EXPERIMENTAL:")
+- Hides experimental options completely when disabled (using `argparse.SUPPRESS`)
+- Prevents usage of experimental features without the flag (raises parser error)
+- Displays a warning when experimental features are used
 - Allows gradual rollout of new features without affecting stable functionality
 
 #### Adding a New Experimental Feature
@@ -65,53 +67,54 @@ EXPERIMENTAL_FEATURES = [
 ]
 ```
 
-**2. Add the option to the appropriate parser mode**
+**2. Add the option to the appropriate parser mode using `ExperimentalAction`**
 
-Add your argument to the relevant parser (profile, analyze, etc.) with conditional help text:
+Add your argument to the relevant parser (profile, analyze, etc.) using the `ExperimentalAction` custom action:
 
 ```python
 profile_group.add_argument(
     "--your-flag",
-    type=str,
     dest="your_flag",
     required=False,
     default=None,
-    help=experimental_help(experimental_enabled,
-            "Description to your feature",
-        ),
+    action=ExperimentalAction,
+    experimental_enabled=experimental_enabled,
+    feature_label="Your feature description",
+    help_indent="\t\t\t", # "\t\t" if analyze_group
+    type=str,  # Optional: specify type if needed
+    nargs="*",  # Optional: specify nargs if needed
+    metavar="",  # Optional: specify metavar for help text
+    help="Description of your feature",
 )
 ```
 
-The `experimental_enabled` parameter is automatically passed to the parser functions and controls whether the help text is shown or suppressed.
+The `ExperimentalAction` class automatically:
+- Suppresses help text when `experimental_enabled=False`
+- Prefixes help text with "EXPERIMENTAL:" when enabled
+- Raises an error if the feature is used without `--experimental`
+- Displays a warning message when the feature is used
 
-#### Example: Spatial Multiplexing Feature
-
-See `src/argparser.py` for the spatial multiplexing implementation:
-- Registered in `EXPERIMENTAL_FEATURES`
-- Added to profile mode with conditional help
-- Added to analyze mode with conditional help
 
 #### Promoting Features to Stable
 
 When a feature is ready to graduate from experimental to stable:
 
 1. Remove the entry from the `EXPERIMENTAL_FEATURES` list
-2. Update the help text to remove function call `experimental_help()`
-3. Update any relevant documentation
+2. Change `action=ExperimentalAction` to `action="store_true"` (or appropriate action)
+3. Remove the `experimental_enabled`, `feature_label`, and `help_indent` parameters
+4. Update the help text to remove "EXPERIMENTAL:" prefix
+5. Update any relevant documentation
 
 #### Testing Experimental Features
 
 Users can enable experimental features by passing the `--experimental` flag:
 
 ```bash
-# View available experimental features
+# View available experimental features (in profile mode)
 rocprof-compute profile --experimental --help
-
-# Use an experimental feature
-rocprof-compute profile --experimental --spatial-multiplexing 0 1 -- ./app
 ```
 
-Without `--experimental`, experimental features remain hidden and unavailable.
+Without `--experimental`, experimental features remain hidden and will raise an error if used.
 
 
 ## Using pre-commit hooks
