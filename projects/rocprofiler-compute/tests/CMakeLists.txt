@@ -1,3 +1,5 @@
+find_package(MPI COMPONENTS CXX)
+
 set(CMAKE_HIP_COMPILER "amdclang++" CACHE STRING "desired c++ compiler" FORCE)
 if(CMAKE_HIP_COMPILER_ID STREQUAL "Clang" OR CMAKE_HIP_COMPILER_ID STREQUAL "ROCMClang")
     message(STATUS "Using ${CMAKE_HIP_COMPILER} to build for amdgpu backend")
@@ -67,6 +69,19 @@ set_target_properties(
     laplace_eqn
     PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/tests
 )
+
+if(MPI_CXX_COMPILER)
+    message(STATUS "Building laplace_eqn with MPI support")
+    add_executable(mpi_aware_laplace_eqn ${LAPLACE_EQN_SOURCES})
+    set_target_properties(
+        mpi_aware_laplace_eqn
+        PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/tests
+    )
+    target_compile_definitions(mpi_aware_laplace_eqn PRIVATE USE_MPI)
+    # Link MPI libraries and include directories
+    target_include_directories(mpi_aware_laplace_eqn PRIVATE ${MPI_INCLUDE_PATH})
+    target_link_libraries(mpi_aware_laplace_eqn PRIVATE MPI::MPI_CXX)
+endif()
 
 set(ROCFLOP_SOURCES ../sample/rocflop.cpp)
 set_source_files_properties(${ROCFLOP_SOURCES} PROPERTIES LANGUAGE HIP)
