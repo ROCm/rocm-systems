@@ -129,7 +129,7 @@ struct ncclChannelToUd {
     bool udAllocated;
 };
 
-static ncclChannelToUd nccl_channel_ud_map[MAXCHANNELS][ncclIbChannelTypeMax];
+static ncclChannelToUd nccl_channel_ud_map[MAX_IB_DEVS][MAXCHANNELS][ncclIbChannelTypeMax];
 static bool nccl_channel_last_ud[MAX_IB_DEVS][ncclIbChannelTypeMax];
 
 // With ncclNet_v11_t the NCCL core initializes the network plugin per-communicator
@@ -1494,14 +1494,14 @@ ncclResult_t ncclIbCreateQp(uint8_t ib_port, struct ncclIbNetCommDevBase* base,
   qpInitAttr.qp_type = IBV_QPT_RC;
 
   if (rcclAinicRoce) {
-    if (!nccl_channel_ud_map[channel_id][channel_type].udAllocated) {
+    if (!nccl_channel_ud_map[base->ibDevN][channel_id][channel_type].udAllocated) {
       bool lud = nccl_channel_last_ud[base->ibDevN][channel_type];
-      nccl_channel_ud_map[channel_id][channel_type].udId = lud;
-      nccl_channel_ud_map[channel_id][channel_type].udAllocated = true;
+      nccl_channel_ud_map[base->ibDevN][channel_id][channel_type].udId = lud;
+      nccl_channel_ud_map[base->ibDevN][channel_id][channel_type].udAllocated = true;
       nccl_channel_last_ud[base->ibDevN][channel_type] =
           !(nccl_channel_last_ud[base->ibDevN][channel_type]);
     }
-    if (nccl_channel_ud_map[channel_id][channel_type].udId) {
+    if (nccl_channel_ud_map[base->ibDevN][channel_id][channel_type].udId) {
         wrap_ionicdv_pd_set_udma_mask(base->pd, IONIC_UDMA_MASK_HIGH);
     } else {
         wrap_ionicdv_pd_set_udma_mask(base->pd, IONIC_UDMA_MASK_LOW);
