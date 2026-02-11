@@ -1,0 +1,36 @@
+---
+definitions:
+  level_0: &level_0
+    level: 0
+  level_1: &level_1
+    level: 1
+  level_2: &level_2
+    level: 2
+  level_3: &level_3
+    level: 3
+  level_5: &level_5
+    level: 5
+  disabled_all: &disabled_all
+    disabled:
+      - amd_linux
+      - amd_windows
+      - amd_wsl
+      - nvidia_linux
+      - nvidia_windows
+  disabled_amd: &disabled_amd
+    disabled:
+      - amd_linux
+      - amd_windows
+      - amd_wsl
+  disabled_nvidia: &disabled_nvidia
+    disabled:
+      - nvidia_linux
+      - nvidia_windows
+  disabled_linux: &disabled_linux
+    disabled:
+      - amd_linux
+      - nvidia_linux
+  disabled_windows: &disabled_windows
+    disabled:
+      - amd_windows
+      - nvidia_windows
