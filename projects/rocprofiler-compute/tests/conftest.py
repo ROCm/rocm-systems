@@ -67,6 +67,18 @@ def pytest_addoption(parser):
     )
 
 
+@pytest.fixture(autouse=True)
+def skip_monkeypatch_with_binary(request):
+    """Auto-skip tests using monkeypatch when --call-binary is used.
+
+    Tests that use monkeypatch to patch Python functions/classes/modules
+    cannot work with --call-binary mode because the binary runs in a separate
+    process where Python patches don't apply.
+    """
+    if request.config.getoption("--call-binary") and "monkeypatch" in request.fixturenames:
+        pytest.skip("Test uses monkeypatch which is incompatible with --call-binary mode")
+
+
 @pytest.fixture
 def binary_handler_profile_rocprof_compute(request):
     """
