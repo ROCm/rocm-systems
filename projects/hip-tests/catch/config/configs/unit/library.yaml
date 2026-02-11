@@ -1,0 +1,6 @@
+---
+library:
+  Unit_library_negative: *level_2
+  Unit_hip_library_load_co: *level_2
+  Unit_hipKernelGetParamInfo_Negative: *level_2
+  Unit_hip_library_load_rtc: *level_2
