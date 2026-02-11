@@ -109,10 +109,9 @@ class ExperimentalAction(argparse.Action):
         self,
         parser: argparse.ArgumentParser,
         namespace: argparse.Namespace,
-        values,  # noqa: ANN001
+        values,  # noqa: ANN001,
+        option_string: Optional[str] = None,  # noqa: ANN001, ARG002
     ) -> None:
-        # Import here to avoid circular dependency
-
         # Error if experimental feature used without --experimental flag
         if not self.experimental_enabled:
             parser.error(
@@ -207,12 +206,9 @@ def add_general_group(
         default=False,
         help=(
             "Enable experimental feature(s):\n"
-            + (
-                ""
-                + "".join(
-                    f"   {f['label']} ({' '.join(f['flags'])})\n"
-                    for f in EXPERIMENTAL_FEATURES
-                )
+            + "".join(
+                f"   {f['label']} ({' '.join(f['flags'])})\n"
+                for f in EXPERIMENTAL_FEATURES
             )
         ),
     )

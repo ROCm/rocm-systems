@@ -503,9 +503,9 @@ add_test(
         tests/test_utils.py ${WORKING_DIR_OPTION}
 )
 
- # -----------------------------------
- # Experimental flag/Misc tests
- # -----------------------------------
+# -----------------------------------
+# Experimental flag/Misc tests
+# -----------------------------------
 
 add_test(
     NAME test_misc
