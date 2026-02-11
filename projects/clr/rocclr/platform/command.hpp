@@ -1243,6 +1243,14 @@ class UnmapMemoryCommand : public OneMemoryArgCommand {
   Memory& memory() const { return *memory_; }
   //! Read the map pointer
   void* mapPtr() const { return mapPtr_; }
+  //! Update memory object
+  void updateMemory(Memory* memory) {
+    if (memory_) {
+      memory_->release();
+    }
+    memory_ = memory;
+    memory_->retain();
+  }
 };
 
 /*! \brief      Migrate memory objects command.

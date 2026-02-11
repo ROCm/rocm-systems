@@ -3111,13 +3111,15 @@ void VirtualGPU::submitUnmapMemory(amd::UnmapMemoryCommand& cmd) {
   image = devMemory->owner()->asImage();
   if (image && (image->getMipLevels() > 1) &&
       (mapInfo->baseMip_ != nullptr)) {
-    // Assign mip level view
+    // Assign mip leveled view
     image = mapInfo->baseMip_;
     // Clear unmap flags from the parent image
     devMemory->clearUnmapInfo(cmd.mapPtr());
     devMemory = dev().getGpuMemory(image);
     unmapMip = true;
     mapInfo = devMemory->writeMapInfo(cmd.mapPtr());
+    // Let cmd own the leveled view
+    cmd.updateMemory(image);
   }
 
   // Force buffer write for IMAGE1D_BUFFER
@@ -3195,12 +3197,9 @@ void VirtualGPU::submitUnmapMemory(amd::UnmapMemoryCommand& cmd) {
 
   profilingEnd();
   }
-  // Release a view for a mipmap map
   if (unmapMip) {
-    // Memory release should be outside of the execution lock,
-    // because mapMemory_ isn't marked for a specifc GPU
-    cmd.awaitCompletion();
-    image->release();
+    // The leveled view can be released when cmd is finished
+    image>release();
   }
 }
 
