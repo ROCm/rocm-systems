@@ -99,15 +99,22 @@ cache_kernel_selector = {
 }
 
 mfma_kernel_selector = {
-    "F4": "mfma_f8f6f4<FP4_E2M1>",
-    "F6": "mfma_f8f6f4<FP6_E2M3>",
-    "F6F4": "mfma_f8f6f4<FP6_FP4_MIXED>",
-    "F8": "mfma_f8",
-    "F16": "mfma_f16",
-    "BF16": "mfma_bf16",
-    "F32": "mfma_f32",
-    "F64": "mfma_f64",
-    "I8": "mfma_i8",
+    "F4": {"gfx950": "mfma_f8f6f4<FP4_E2M1>"},
+    "F6": {"gfx950": "mfma_f8f6f4<FP6_E2M3>"},
+    "F6F4": {"gfx950": "mfma_f8f6f4<FP6_FP4_MIXED>"},
+    "F8": dict.fromkeys(["gfx940"], "mfma_f8")
+    | dict.fromkeys(["gfx950"], "mfma_f8f6f4<FP8_E4M3>"),
+    "F16": dict.fromkeys(
+        ["gfx90a", "gfx940", "gfx941", "gfx942", "gfx950"], "mfma_f16"
+    ),
+    "BF16": dict.fromkeys(["gfx940", "gfx941", "gfx942", "gfx950"], "mfma_bf16"),
+    "F32": dict.fromkeys(
+        ["gfx908", "gfx90a", "gfx940", "gfx941", "gfx942", "gfx950"], "mfma_f32"
+    ),
+    "F64": dict.fromkeys(
+        ["gfx90a", "gfx940", "gfx941", "gfx942", "gfx950"], "mfma_f64"
+    ),
+    "I8": dict.fromkeys(["gfx90a", "gfx940", "gfx941", "gfx942", "gfx950"], "mfma_i8"),
 }
 
 flops_kernel_selector = {
@@ -123,15 +130,27 @@ mfma_ops = {
     "F4": {"gfx950": 131072},
     "F6": {"gfx950": 131072},
     "F6F4": {"gfx950": 131072},  # Mixed precision F6 x F4
-    "F8": dict.fromkeys(["gfx90a", "gfx940", "gfx941", "gfx942", "gfx950"], 32768),
-    "F16": dict.fromkeys(["gfx90a", "gfx940", "gfx941", "gfx942",], 16384) | dict.fromkeys(["gfx950"], 32768),
+    "F8": dict.fromkeys(["gfx90a", "gfx940", "gfx941", "gfx942"], 32768)
+    | dict.fromkeys(["gfx950"], 262144),
+    "F16": dict.fromkeys(
+        [
+            "gfx90a",
+            "gfx940",
+            "gfx941",
+            "gfx942",
+        ],
+        16384,
+    )
+    | dict.fromkeys(["gfx950"], 32768),
     "F32": dict.fromkeys(
         ["gfx908", "gfx90a", "gfx940", "gfx941", "gfx942", "gfx950"], 4096
     ),
     "BF16": dict.fromkeys(["gfx940", "gfx941", "gfx942"], 16384)
-    | dict.fromkeys(["gfx90a"], 8192) | dict.fromkeys(["gfx950"], 32768),
+    | dict.fromkeys(["gfx90a"], 8192)
+    | dict.fromkeys(["gfx950"], 32768),
     "I8": dict.fromkeys(["gfx940", "gfx941", "gfx942"], 32768)
-    | dict.fromkeys(["gfx90a"], 16384) | dict.fromkeys(["gfx950"], 65536),
+    | dict.fromkeys(["gfx90a"], 16384)
+    | dict.fromkeys(["gfx950"], 65536),
     "F64": dict.fromkeys(["gfx90a", "gfx940", "gfx941", "gfx942", "gfx950"], 2048),
 }
 
@@ -1042,12 +1061,15 @@ def mfma_bench(device: int, type: str, unit: str, rate: int) -> PerfMetrics:
 
     dummy = hip.hipMalloc(64 * sizeof(c_float))
 
-    kernel_name = mfma_kernel_selector[type]
+    kernel_name = mfma_kernel_selector[type][arch]
 
     if type == "F32":
         src = mfma_f32_src
     elif type == "F8":
-        src = mfma_f8_src
+        if arch == "gfx950":
+            src = mfma_f8f6f4_src
+        else:
+            src = mfma_f8_src
     elif type == "F16":
         src = mfma_f16_src
     elif type == "BF16":
