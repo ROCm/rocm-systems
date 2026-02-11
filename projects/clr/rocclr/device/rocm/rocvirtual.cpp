@@ -3058,6 +3058,15 @@ void VirtualGPU::submitMapMemory(amd::MapMemoryCommand& cmd) {
     } else if (type == CL_COMMAND_MAP_IMAGE) {
       amd::Image* image = cmd.memory().asImage();
       if (mapMemory != nullptr) {
+        if (cmd.memory().parent() != nullptr) {
+          amd::Image* amdImage = cmd.memory().parent()->asImage();
+          if ((amdImage != nullptr) && (amdImage->getMipLevels() > 1)) {
+            // Save map write info in the parent object
+            dev().getGpuMemory(amdImage)->saveMapInfo(cmd.mapPtr(), cmd.origin(), cmd.size(),
+                                                      cmd.mapFlags(), cmd.isEntireMemory(),
+                                                      cmd.memory().asImage());
+          }
+        }
         roc::Memory* hsaMapMemory =
             static_cast<roc::Memory*>(mapMemory->getDeviceMemory(dev(), false));
         result =
@@ -3082,6 +3091,9 @@ void VirtualGPU::submitMapMemory(amd::MapMemoryCommand& cmd) {
 
 // ================================================================================================
 void VirtualGPU::submitUnmapMemory(amd::UnmapMemoryCommand& cmd) {
+  bool unmapMip = false;
+  amd::Image* image = nullptr;
+  {
   // Make sure VirtualGPU has an exclusive access to the resources
   amd::ScopedLock lock(execution());
 
@@ -3094,6 +3106,19 @@ void VirtualGPU::submitUnmapMemory(amd::UnmapMemoryCommand& cmd) {
   }
 
   profilingBegin(cmd, true);
+
+  // Check if image is a mipmap and assign a saved view
+  image = devMemory->owner()->asImage();
+  if (image && (image->getMipLevels() > 1) &&
+      (mapInfo->baseMip_ != nullptr)) {
+    // Assign mip level view
+    image = mapInfo->baseMip_;
+    // Clear unmap flags from the parent image
+    devMemory->clearUnmapInfo(cmd.mapPtr());
+    devMemory = dev().getGpuMemory(image);
+    unmapMip = true;
+    mapInfo = devMemory->writeMapInfo(cmd.mapPtr());
+  }
 
   // Force buffer write for IMAGE1D_BUFFER
   bool imageBuffer = (cmd.memory().getType() == CL_MEM_OBJECT_IMAGE1D_BUFFER);
@@ -3118,8 +3143,7 @@ void VirtualGPU::submitUnmapMemory(amd::UnmapMemoryCommand& cmd) {
       bool result = false;
 
       amd::Memory* mapMemory = devMemory->mapMemory();
-      if (cmd.memory().asImage() && !imageBuffer) {
-        amd::Image* image = cmd.memory().asImage();
+      if (image && !imageBuffer) {
         if (mapMemory != nullptr) {
           roc::Memory* hsaMapMemory =
               static_cast<roc::Memory*>(mapMemory->getDeviceMemory(dev(), false));
@@ -3164,12 +3188,20 @@ void VirtualGPU::submitUnmapMemory(amd::UnmapMemoryCommand& cmd) {
       }
     }
 
-    cmd.memory().signalWrite(&dev());
+    devMemory->owner()->signalWrite(&dev());
   }
 
   devMemory->clearUnmapInfo(cmd.mapPtr());
 
   profilingEnd();
+  }
+  // Release a view for a mipmap map
+  if (unmapMip) {
+    // Memory release should be outside of the execution lock,
+    // because mapMemory_ isn't marked for a specifc GPU
+    cmd.awaitCompletion();
+    image->release();
+  }
 }
 
 // ================================================================================================
