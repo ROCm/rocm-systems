@@ -24,6 +24,7 @@
 
 #include "lib/common/static_object.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/defines.hpp"
+#include "lib/rocprofiler-sdk-attach/table.h"
 
 #include <hsa/hsa_api_trace.h>
 #include <rocprofiler-sdk/callback_tracing.h>
@@ -119,6 +120,9 @@ private:
 
 void
 initialize(HsaApiTable* table);
+
+void
+initialize(RocAttachDispatchTable* table);
 
 void
 finalize();
