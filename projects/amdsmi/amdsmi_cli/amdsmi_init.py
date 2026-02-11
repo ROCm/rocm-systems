@@ -56,7 +56,20 @@ def check_amdgpu_driver():
     """ Returns true if amdgpu is found in the list of initialized modules """
     amd_gpu_status_file = Path("/sys/module/amdgpu/initstate")
     if amd_gpu_status_file.exists():
-        if amd_gpu_status_file.read_text(encoding="ascii").strip() == "live":
+        try: 
+            return amd_gpu_status_file.read_text(encoding="ascii").strip() == "live"
+        except OSError:
+            pass
+
+    # If the driver is loaded either as a module OR built in, this dir will be populated
+    drv = Path("/sys/bus/pci/drivers/amdgpu")
+    if not drv.exists():
+        return False
+
+    # Check if a symlink exists that loosely matches PCI BDF format
+    # ex: 0000:03:00.0
+    for p in drv.iterdir():
+        if p.is_symlink() and ":" in p.name and "." in p.name:
             return True
     return False
 

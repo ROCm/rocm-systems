@@ -110,7 +110,7 @@ static const std::map<rdc_field_t, const char*> temp_field_map_k = {
     {RDC_FI_PROF_SIMD_UTILIZATION, "SIMD_UTILIZATION"},
 };
 
-double RdcRocpBase::run_profiler(uint32_t agent_index, rdc_field_t field) {
+rdc_status_t RdcRocpBase::run_profiler(uint32_t agent_index, rdc_field_t field, double* value) {
   thread_local std::vector<rocprofiler_record_counter_t> records;
 
   auto counter_sampler = CounterSampler::get_samplers()[agent_index];
@@ -134,12 +134,13 @@ double RdcRocpBase::run_profiler(uint32_t agent_index, rdc_field_t field) {
   }
 
   // Aggregate counter values. Rocprof v1/v2 summed values across dimensions.
-  double value = 0.0;
+  double temp_value = 0.0;
   for (auto& record : records) {
-    value += record.counter_value;  // Summing up values from all dimensions.
+    temp_value += record.counter_value;  // Summing up values from all dimensions.
   }
+  *value = temp_value;
 
-  return value;
+  return RDC_ST_OK;
 }
 
 const char* RdcRocpBase::get_field_id_from_name(rdc_field_t field) {
@@ -317,11 +318,13 @@ RdcRocpBase::RdcRocpBase() {
 }
 
 RdcRocpBase::~RdcRocpBase() {
-  hsa_status_t status = HSA_STATUS_SUCCESS;
-  status = hsa_shut_down();
-  assert(status == HSA_STATUS_SUCCESS);
-  status = hsa_shut_down();
-  assert(status == HSA_STATUS_ERROR_NOT_INITIALIZED);
+  if (m_is_initialized == false) {
+    return;
+  }
+  const hsa_status_t status = hsa_shut_down();
+  if ((status == HSA_STATUS_SUCCESS) || (status == HSA_STATUS_ERROR_NOT_INITIALIZED)) {
+    m_is_initialized = false;
+  }
 }
 
 rdc_status_t RdcRocpBase::rocp_lookup(rdc_gpu_field_t gpu_field, rdc_field_value_data* data,
@@ -341,17 +344,29 @@ rdc_status_t RdcRocpBase::rocp_lookup(rdc_gpu_field_t gpu_field, rdc_field_value
 
   const auto start_time = std::chrono::high_resolution_clock::now();
   // direct read from rocprofiler
-  const double read_dbl = run_profiler(agent_index, field);
+  double read_dbl = 0.0;
+  const auto status = run_profiler(agent_index, field, &read_dbl);
+
+  if (status != RDC_ST_OK) {
+    RDC_LOG(RDC_ERROR, "Profiler failed!");
+    return status;
+  }
+
   const auto stop_time = std::chrono::high_resolution_clock::now();
   const double elapsed = std::chrono::duration<double, std::milli>(stop_time - start_time).count();
 
   // For OCC_ELAPSED, we need to read the occupancy metric as well
   std::map<std::string, double> sampled_values;
   if (field == RDC_FI_PROF_OCC_ELAPSED) {
-    const double occupancy_val = run_profiler(agent_index, RDC_FI_PROF_OCC_PER_ACTIVE_CU);
+    double occ_val = 0.0;
+    const auto status = run_profiler(agent_index, RDC_FI_PROF_OCC_PER_ACTIVE_CU, &occ_val);
+    if (status != RDC_ST_OK) {
+      RDC_LOG(RDC_ERROR, "Occupancy read failed!");
+      return status;
+    }
     auto occ_field_it = field_to_metric.find(RDC_FI_PROF_OCC_PER_ACTIVE_CU);
     if (occ_field_it != field_to_metric.end()) {
-      sampled_values[occ_field_it->second] = occupancy_val;
+      sampled_values[occ_field_it->second] = occ_val;
     }
   }
 

@@ -19,11 +19,32 @@
 #include <string.h>
 #include <unordered_map>
 #include "rccl_vars.h"
+#include <atomic>
+#include <mutex>
 
 #if CUDART_VERSION >= 11030
 #include <cuda.h>
 #include "cudawrap.h"
 #endif
+
+// Global flag to detect process shutdown. Set by atexit handler before
+// HIP runtime static destructors run. This prevents use-after-free crashes
+// when RCCL proxy threads try to free GPU memory during process exit.
+inline std::atomic<bool>& rcclShutdownFlag() {
+  static std::atomic<bool> flag{false};
+  return flag;
+}
+
+inline void rcclShutdownHandler() {
+  rcclShutdownFlag().store(true, std::memory_order_release);
+}
+
+inline void rcclRegisterShutdownHandler() {
+  static std::once_flag once;
+  std::call_once(once, []() {
+    atexit(rcclShutdownHandler);
+  });
+}
 
 uint64_t clockNano(); // from utils.h with which we have a circular dependency
 
@@ -210,6 +231,12 @@ finish:
 }
 
 static inline ncclResult_t ncclCudaHostFree(void* ptr) {
+  if (ptr == NULL) return ncclSuccess;
+  // Check if process is shutting down to avoid use-after-free in HIP runtime
+  if (rcclShutdownFlag().load(std::memory_order_acquire)) {
+    INFO(NCCL_ALLOC, "ncclCudaHostFree: Skipping free (process shutdown) pointer %p", ptr);
+    return ncclSuccess;
+  }
   CUDACHECK(cudaFreeHost(ptr));
   return ncclSuccess;
 }
@@ -301,6 +328,11 @@ static inline ncclResult_t ncclCuMemAllocAddr(void **ptr, CUmemGenericAllocation
 
 static inline ncclResult_t ncclCuMemFreeAddr(void *ptr) {
   if (ptr == NULL) return ncclSuccess;
+  // Check if process is shutting down to avoid use-after-free in HIP runtime
+  if (rcclShutdownFlag().load(std::memory_order_acquire)) {
+    INFO(NCCL_ALLOC, "ncclCuMemFreeAddr: Skipping free (process shutdown) pointer %p", ptr);
+    return ncclSuccess;
+  }
   ncclResult_t result = ncclSuccess;
   size_t size = 0;
   CUCHECK(cuMemGetAddressRange(NULL, &size, (CUdeviceptr)ptr));
@@ -363,6 +395,11 @@ static inline ncclResult_t ncclCuMemAlloc(void **ptr, CUmemGenericAllocationHand
 
 static inline ncclResult_t ncclCuMemFree(void *ptr) {
   if (ptr == NULL) return ncclSuccess;
+  // Check if process is shutting down to avoid use-after-free in HIP runtime
+  if (rcclShutdownFlag().load(std::memory_order_acquire)) {
+    INFO(NCCL_ALLOC, "ncclCuMemFree: Skipping free (process shutdown) pointer %p", ptr);
+    return ncclSuccess;
+  }
   ncclResult_t result = ncclSuccess;
   CUmemGenericAllocationHandle handle;
   size_t size = 0;
@@ -530,12 +567,22 @@ finish:
 
 template <typename T>
 ncclResult_t ncclCudaFree(T* ptr) {
+  if (ptr == NULL) return ncclSuccess;
+
+  // Check if process is shutting down. The atexit handler sets this flag
+  // BEFORE HIP runtime static destructors run, so we can safely skip the free.
+  // The OS will reclaim all memory when the process exits anyway.
+  if (rcclShutdownFlag().load(std::memory_order_acquire)) {
+    INFO(NCCL_ALLOC, "ncclCudaFree: Skipping free (process shutdown) pointer %p", ptr);
+    return ncclSuccess;
+  }
+
   ncclResult_t result = ncclSuccess;
   cudaStreamCaptureMode mode = cudaStreamCaptureModeRelaxed;
   TRACE(NCCL_ALLOC, "Cuda Free pointer %p", ptr);
 
-  // get the size of the allocation
-  if (ptr != NULL) {
+  // get the size of the allocation for tracking
+  {
      CUdeviceptr baseAddress;
      size_t retrievedSize;
 
