@@ -90,7 +90,7 @@ class EnvVarSetTestFixture : public EnvVarTestFixture
     static void SetUpTestSuite() {
       using namespace envvar::parser::_type_traits;
       std::ostringstream oss{};
-      // operator<<(std::istream&, {un}signed char) prints output as a character
+      // operator<<(std::ostream&, {un}signed char) prints output as a character
       // so signed or unsigned char need to be widened to a larger type
       if constexpr (is_standard_integer_v<T> && is_narrow_character_v<T>) {
         using parsechar_t = std::conditional_t<std::is_signed_v<T>, signed int, unsigned int>;
