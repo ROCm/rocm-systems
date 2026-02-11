@@ -249,46 +249,39 @@ class BaseRunner(ABC):
 
         start_time = time.time()
 
-        # Always capture via file and NOT PIPE. PIPE deadlocks when the subprocess forks and
-        # the child inherits the pipe FDs. Redirect to file, read into test_output, then remove file.
-        capture_path = self.output_dir / "stdout_stderr.capture"
-        with open(capture_path, "w+", encoding="utf-8") as f:
-            try:
-                result = subprocess.run(
-                    command,
-                    stdin=subprocess.DEVNULL,
-                    stdout=f,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    timeout=self.timeout,
-                    env=self.env,
-                    cwd=self.working_directory,
-                )
-                f.seek(0)
-                test_output = f.read()
-                duration = time.time() - start_time
-                test_result = TestResult(
-                    returncode=result.returncode,
-                    test_output=test_output,
-                    output_dir=self.output_dir,
-                    command=command,
-                    environment=self.env,
-                    duration=duration,
-                )
-            except subprocess.TimeoutExpired:
-                duration = time.time() - start_time
-                f.seek(0)
-                test_output = f.read()
-                test_result = TestResult(
-                    returncode=-1,
-                    test_output=test_output,
-                    extra_output=f"Timeout after {self.timeout}s",
-                    output_dir=self.output_dir,
-                    command=command,
-                    environment=self.env,
-                    duration=duration,
-                )
-        _safe_remove_file(capture_path)
+        try:
+            result = subprocess.run(
+                command,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                timeout=self.timeout,
+                env=self.env,
+                cwd=self.working_directory,
+            )
+            duration = time.time() - start_time
+            test_result = TestResult(
+                returncode=result.returncode,
+                test_output=result.stdout,
+                output_dir=self.output_dir,
+                command=command,
+                environment=self.env,
+                duration=duration,
+            )
+        except subprocess.TimeoutExpired as e:
+            duration = time.time() - start_time
+            stdout = _decode_bytes(e.stdout)
+            stderr = _decode_bytes(e.stderr)
+            test_result = TestResult(
+                returncode=-1,
+                test_output=stdout,
+                extra_output=f"Timeout after {self.timeout}s\n{stderr}",
+                output_dir=self.output_dir,
+                command=command,
+                environment=self.env,
+                duration=duration,
+            )
         return test_result
 
 
@@ -434,7 +427,6 @@ class BinaryRewriteRunner(BaseRunner):
                 env=self.env,
                 cwd=self.config.rocprofsys_build_dir,
             )
-
             duration = time.time() - start_time
             test_result = TestResult(
                 returncode=result.returncode,
@@ -445,16 +437,14 @@ class BinaryRewriteRunner(BaseRunner):
                 duration=duration,
                 _instrumented_files=self._instrumented_files.copy(),
             )
-
         except subprocess.TimeoutExpired as e:
             duration = time.time() - start_time
             stdout = _decode_bytes(e.stdout)
             stderr = _decode_bytes(e.stderr)
-
             test_result = TestResult(
                 returncode=-1,
                 test_output=stdout,
-                extra_output=f"Timeout after {self.timeout}s\n{stderr}",
+                extra_output=f"Timeout after {self.timeout}s (rewrite phase)\n{stderr}",
                 output_dir=self.output_dir,
                 command=command,
                 environment=self.env,

@@ -51,10 +51,7 @@ class TestFork(RocprofsysTest):
     REWRITE_ARGS = ["-e", "-v", "2", "--print-instrumented", "modules", "-i", "16"]
     RUNTIME_ARGS = ["-e", "-v", "1", "--label", "file", "-i", "16"]
 
-    def test(self, mode, target, fork_env, is_xdist_used):
-        if is_xdist_used:
-            pytest.skip("Fork tests are not supported in xdist mode")
-
+    def test(self, mode, target, fork_env):
         if target == "hipMallocConcurrencyMproc":
             pass_regex = ["Validation PASSED|fork.. called on PID"]
         else:

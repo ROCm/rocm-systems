@@ -8,14 +8,16 @@ This module provides shared fixtures and configuration for all test modules.
 """
 
 from __future__ import annotations
-import os
-import sys
-import shutil
 from concurrent.futures import ThreadPoolExecutor
-import re
 from pathlib import Path
 from functools import lru_cache
 from typing import Callable, Generator, Optional
+
+import re
+import os
+import sys
+import shutil
+import json
 
 # Add the pytest directory to Python path for rocprofsys package
 sys.path.insert(0, str(Path(__file__).parent))
@@ -162,11 +164,13 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=False,
         help="Allow disabled subtests to run (CI/CTest integration mode developer flag : default off)",
     )
+    # "--collect-only" does not capture the markers associated with the tests. We need this for CTest labels
     group.addoption(
         "--ctest-mode",
-        action="store_true",
-        default=False,
-        help="Enable CTest integration mode (developer flag : default off)",
+        action="store",
+        default="off",
+        choices=("off", "collect", "run"),
+        help="CTest integration mode (developer flag): 'off' (default), 'collect', or 'run'",
     )
     group.addoption(
         "--dev",
@@ -395,16 +399,24 @@ def pytest_generate_tests(metafunc):
 
 def pytest_collection_modifyitems(config, items) -> None:
     """Skip tests based on markers and available resources."""
-    # Clean up trailing dashes in test node IDs (from empty parameter IDs)
-    for item in items:
-        if "-]" in item._nodeid or "--" in item._nodeid:
-            # Fix trailing dashes: [3.12-] -> [3.12], [3.12-annotated-] -> [3.12-annotated]
-            item._nodeid = re.sub(r"-+\]", "]", item._nodeid)
-            item._nodeid = re.sub(r"--+", "-", item._nodeid)
-        if "-]" in item.name or "--" in item.name:
-            # Also update the display name
-            item.name = re.sub(r"-+\]", "]", item.name)
-            item.name = re.sub(r"--+", "-", item.name)
+
+    # Collect node ids and their markers for CTest
+    if config.getoption("--ctest-mode", default="off") == "collect":
+        node_info = []
+        for item in items:
+            _standardize_test_name(item)
+            node_info.append(
+                {
+                    "nodeid": item._nodeid,
+                    "markers": [
+                        {"name": m.name}
+                        for m in item.iter_markers()
+                        if m.name != "parametrize"
+                    ],
+                }
+            )
+        print(json.dumps(node_info, indent=4))
+        pytest.exit(reason="Collected tests with markers", returncode=0)
 
     selected_tests = []
     deselected_tests = []
@@ -446,6 +458,7 @@ def pytest_collection_modifyitems(config, items) -> None:
     )
 
     for item in items:
+        _standardize_test_name(item)
         # ----------------------------------------------------------------------------
         # Handle <name>_optional markers
         # If <name>_optional passes, then <name> marker is added
@@ -696,17 +709,19 @@ def configure_mode(config: pytest.Config) -> None:
 
     # MPI is disabled in CI mode, this is done in collection_modifyitems
     ci_mode = config.getoption("--ci-mode", default=False)
-    ctest_mode = config.getoption("--ctest-mode", default=False)
+    ctest_mode = config.getoption("--ctest-mode", default="off") == "run"
     dev_mode = config.getoption("--dev", default=False)
 
     if ci_mode or ctest_mode:
         config.option.output_log = "none"  # Already reported to dashboard
-        config.option.show_config = True
         config.option.show_output_on_subtest_fail = True
         config.option.verbose = max(config.option.verbose, 1)  # -v
         config.option.tbstyle = "short"  # --tb=short
         if "s" not in config.option.reportchars:  # -rs
             config.option.reportchars += "s"
+
+    if ci_mode:
+        config.option.show_config = True
 
     if dev_mode:
         config.option.show_config = True
@@ -715,6 +730,17 @@ def configure_mode(config: pytest.Config) -> None:
         config.option.tbstyle = "short"  # --tb=short
         if "s" not in config.option.reportchars:  # -rs
             config.option.reportchars += "s"
+
+
+def _standardize_test_name(item: pytest.Item) -> None:
+    if "-]" in item._nodeid or "--" in item._nodeid:
+        # Fix trailing dashes
+        item._nodeid = re.sub(r"-+\]", "]", item._nodeid)
+        item._nodeid = re.sub(r"--+", "-", item._nodeid)
+    if "-]" in item.name or "--" in item.name:
+        # Also update the display name
+        item.name = re.sub(r"-+\]", "]", item.name)
+        item.name = re.sub(r"--+", "-", item.name)
 
 
 def _generate_rocprofsys_config_header(config: pytest.Config) -> list[str]:
