@@ -386,6 +386,7 @@ print_registers (amd_dbgapi_wave_id_t wave_id)
   free (register_class_ids);
 }
 
+template <typename T = uint32_t, size_t num_columns = 32 / sizeof (T)>
 void
 print_memory (amd_dbgapi_process_id_t process_id, amd_dbgapi_wave_id_t wave_id,
               amd_dbgapi_lane_id_t lane_id,
@@ -393,24 +394,34 @@ print_memory (amd_dbgapi_process_id_t process_id, amd_dbgapi_wave_id_t wave_id,
               amd_dbgapi_segment_address_t segment_address,
               amd_dbgapi_size_t size, std::string header = {})
 {
-  std::vector<uint32_t> buffer (1024);
+  std::vector<T> buffer (1024);
+  static constexpr amd_dbgapi_size_t word_size = sizeof (buffer[0]);
+
+  /* Make sure the segment address and the size are aligned, the rest of
+     this function relies on it.  */
+  auto end_address = (segment_address + size + word_size - 1) & -word_size;
+  segment_address &= -word_size;
+
+  /* size == -1 means we are reading as much as we can, so do not align.  */
+  if (size != ~amd_dbgapi_size_t{ 0 })
+    size = end_address - segment_address;
 
   if (!header.empty ())
     agent_out << std::endl << header;
 
-  if (auto pad = segment_address % 0x20; pad != 0)
+  if (auto pad = segment_address % (num_columns * word_size); pad != 0)
     {
       agent_out << std::endl
                 << "    0x" << std::setfill ('0') << std::setw (4)
                 << (segment_address - pad) << ":";
-      for (size_t i = 0; i < pad; i += 4)
-        agent_out << "         ";
+      for (size_t i = 0; i < pad; i += word_size)
+        agent_out << std::setfill (' ') << std::setw (2 * word_size + 1)
+                  << ' ';
     }
 
   while (true)
     {
-      size_t requested_size
-          = std::min (buffer.size () * sizeof (buffer[0]), size);
+      size_t requested_size = std::min (buffer.size () * word_size, size);
       size_t bytes_read = requested_size;
       if (amd_dbgapi_read_memory (process_id, wave_id, lane_id,
                                   address_space_id, segment_address,
@@ -418,22 +429,22 @@ print_memory (amd_dbgapi_process_id_t process_id, amd_dbgapi_wave_id_t wave_id,
           != AMD_DBGAPI_STATUS_SUCCESS)
         break;
 
-      agent_assert ((bytes_read % sizeof (buffer[0])) == 0);
-      buffer.resize (bytes_read / sizeof (buffer[0]));
+      agent_assert ((bytes_read % word_size) == 0);
+      buffer.resize (bytes_read / word_size);
 
-      for (size_t i = 0, column = (segment_address % 0x20) / 4;
+      for (size_t i = 0, column = (segment_address / word_size) % num_columns;
            i < buffer.size (); ++i)
         {
-          if ((column++ % 8) == 0)
+          if ((column++ % num_columns) == 0)
             {
               agent_out << std::endl
                         << "    0x" << std::setfill ('0') << std::setw (4)
-                        << (segment_address + i * sizeof (buffer[0])) << ":";
+                        << (segment_address + i * word_size) << ":";
               column = 1;
             }
 
-          agent_out << " " << std::hex << std::setfill ('0') << std::setw (8)
-                    << buffer[i];
+          agent_out << " " << std::hex << std::setfill ('0')
+                    << std::setw (2 * word_size) << +buffer[i];
         }
 
       segment_address += bytes_read;
