@@ -5,6 +5,7 @@ add_subdirectory(tests)
 set(pmc_gpu_sources
     ${CMAKE_CURRENT_LIST_DIR}/collector.hpp
     ${CMAKE_CURRENT_LIST_DIR}/device.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/gpu_traits.hpp
 )
 
 # Add to parent variable (will be used by collectors CMakeLists.txt)
