@@ -199,8 +199,8 @@ ai_nic_stats_collector::update_data_for_one_nic(amdsmi_processor_handle processo
             // Retrieve relevant stats.
             for(uint32_t stat_idx{}; stat_idx < num_stats; ++stat_idx)
             {
-                if (auto it = stat_handlers.find(stats[stat_idx].name);
-                    it != stat_handlers.end())
+                if(auto it = stat_handlers.find(stats[stat_idx].name);
+                   it != stat_handlers.end())
                 {
                     it->second(data, stats[stat_idx].value);
                 }
