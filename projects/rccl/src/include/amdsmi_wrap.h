@@ -13,170 +13,37 @@
  *
  * The following types and functions provide support for AMD's UALoE
  * scale-up fabric, which is AMD's
- * equivalent to NVIDIA's NVLink switch fabric (MNNVL).
  *
  * When the full amdsmi fabric API is available in the system headers,
- * define AMDSMI_DIRECT=1 to use the native types.
+ * define AMDSMI_FABRIC_DIRECT=1 to use the native types.
  * Otherwise, the compatibility types below will be used.
  ************************************************************************/
-
 #ifndef AMDSMI_DIRECT
-#define AMDSMI_DIRECT 0
+  #if __has_include(<amd_smi/amdsmi.h>)
+    #define AMDSMI_DIRECT 1
+  #else
+    #define AMDSMI_DIRECT 0
+  #endif
 #endif
+
 #if AMDSMI_DIRECT
-#include "amd_smi/amdsmi.h"
-#else
+#include <amd_smi/amdsmi.h>
+#endif
 
-/*****************************************************************************/
-/** @defgroup rcclFabricCompat Fabric Compatibility Types
- *  Compatibility types for UALoE fabric support when amdsmi fabric API
- *  is not yet available amdsmi headers.
- *  @{
- */
+// Define when amdsmi fabric API is available in amdsmi headers, otherwise use compatibility types defined below
+#ifndef AMDSMI_FABRIC_DIRECT
+#define AMDSMI_FABRIC_DIRECT 0
+#elif AMDSMI_DIRECT
+#define AMDSMI_FABRIC_DIRECT 1
+#endif
 
-/**
- * @brief Fabric telemetry categories
- */
-typedef enum {
-    AMDSMI_FABRIC_TELEMETRY_CATEGORY_UNKNOWN         = -1,
-    AMDSMI_FABRIC_TELEMETRY_CATEGORY_UALOE           = 0, //!< UALOE telemetry
-    AMDSMI_FABRIC_TELEMETRY_CATEGORY_SWITCH          = 1, //!< Switch telemetry
-    AMDSMI_FABRIC_TELEMETRY_CATEGORY_CRYPTO          = 2, //!< Crypto telemetry
-    AMDSMI_FABRIC_TELEMETRY_CATEGORY_PFC             = 3, //!< PFC telemetry
-    AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT         = 4, //!< Network Port telemetry
-    AMDSMI_FABRIC_TELEMETRY_CATEGORY_DERIVED_UALOE   = 5, //!< Derived UALOE telemetry
-    AMDSMI_FABRIC_TELEMETRY_CATEGORY_DERIVED_NETPORT = 6, //!< Derived Network Port telemetry
-    AMDSMI_FABRIC_TELEMETRY_CATEGORY_MAX             = 7  //!< Maximum number of categories
-} amdsmi_fabric_telemetry_category_t;
 
-/**
- * @brief Fabric telemetry category bitmask constructor
- */
-#define AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK(cat) (1U << AMDSMI_FABRIC_TELEMETRY_CATEGORY_ ## cat)
-
-/**
- * @brief Fabric telemetry item structure
- */
-typedef struct {
-    uint64_t id;      //!< Identifier of the telemetry item
-    uint64_t value;   //!< Value of the telemetry item
-} amdsmi_fabric_telemetry_item_t;
-
-/**
- * @brief Fabric textual label structure
- */
-typedef struct {
-    char text[32];  //!< Textual label content
-} amdsmi_fabric_label_t;
-
-/**
- * @brief Fabric telemetry instance structure
- */
-typedef struct {
-    amdsmi_fabric_label_t name;               //!< Name for this instance
-    unsigned logical_idx;                     //!< Logical index for this instance
-    unsigned item_count;                      //!< Number of telemetry items in the set
-    amdsmi_fabric_telemetry_item_t items[];   //!< Pointer to array of telemetry items
-} amdsmi_fabric_telemetry_instance_t;
-
-/**
- * @brief Fabric telemetry dataset structure
- */
-typedef struct {
-    amdsmi_fabric_telemetry_category_t category;  //!< Telemetry category
-    uint64_t generation_count;                    //!< Sequence number incremented each time telemetry is written
-    struct timespec timestamp;                    //!< UTC timestamp seconds since epoch
-    unsigned instance_count;                      //!< Number of instances for this category
-    amdsmi_fabric_telemetry_instance_t *instances[]; //!< Array of pointers to instances
-} amdsmi_fabric_telemetry_dataset_t;
-
-/**
- * @brief Fabric telemetry structure
- */
-typedef struct {
-    amdsmi_fabric_telemetry_dataset_t *datasets[AMDSMI_FABRIC_TELEMETRY_CATEGORY_MAX];
-} amdsmi_fabric_telemetry_t;
-
-#define AMDSMI_FABRIC_ACTIVE_ACCELERATORS_BITMAP_SIZE 32
-#define AMDSMI_FABRIC_MAX_LOCAL_GPUS 8
-
-/**
- * @brief Fabric type
- */
-typedef enum {
-    AMDSMI_FABRIC_TYPE_UALOE,
-    AMDSMI_FABRIC_TYPE_UALLINK
-} amdsmi_fabric_type_t;
-
-/**
- * @brief Fabric NHT address mode
- */
-typedef enum {
-    AMDSMI_FABRIC_NHT_ADDRESS_MODE_SOURCE_ALIASING,
-    AMDSMI_FABRIC_NHT_ADDRESS_MODE_SOURCE_IDENTIFICATION
-} amdsmi_fabric_nht_address_mode_t;
-
-/**
- * @brief Fabric accelerator vPoD state
- */
-typedef enum {
-    AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_UNCONFIGURED,
-    AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_CONFIGURED,
-    AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_READY,
-    AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_ACTIVE,
-    AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_ERROR
-} amdsmi_fabric_accelerator_vpod_state_t;
-
-/**
- * @brief Fabric device configuration information (version 1)
- */
-typedef struct {
-    uint32_t accelerator_id; //!< Accelerator identifier (range 0 to 1023)
-    amdsmi_fabric_type_t fabric_type; //!< UALOE or UALLINK
-    uint32_t bandwidth; //!< Station bandwidth share in Mb/s
-    uint32_t latency; //!< Latency in nanoseconds
-    uint64_t ppod_id; //!< Physical PoD Identifier
-    uint32_t ppod_size; //!< Physical PoD size
-    uint32_t vpod_id; //!< Virtual PoD Identifier
-    uint32_t vpod_size; //!< Virtual PoD size
-    uint32_t vpod_active_accelerators[AMDSMI_FABRIC_ACTIVE_ACCELERATORS_BITMAP_SIZE];
-    uint32_t local_accelerators[AMDSMI_FABRIC_MAX_LOCAL_GPUS]; //!< Local Accelerator IDs
-    amdsmi_fabric_nht_address_mode_t addr_mode; //!< Source aliasing or identification mode
-    amdsmi_fabric_accelerator_vpod_state_t accel_state; //!< Accelerator vPoD State
-} amdsmi_fabric_info_v1_t;
-
-typedef struct {
-    uint32_t version;
-    union {
-        amdsmi_fabric_info_v1_t v1;
-    };
-} amdsmi_fabric_info_ver_t;
-
-typedef union {
-    struct bdf_ {
-        uint64_t function_number : 3;
-        uint64_t device_number : 5;
-        uint64_t bus_number : 8;
-        uint64_t domain_number : 48;
-    } bdf;
-    struct {
-        uint64_t function_number : 3;
-        uint64_t device_number : 5;
-        uint64_t bus_number : 8;
-        uint64_t domain_number : 48;
-    };
-    uint64_t as_uint;
-} amdsmi_bdf_t;
-
-/**
- * @brief Fabric device information structure
- */
-typedef struct {
-    amdsmi_bdf_t bdf;      //!< BDF of the Fabric device
-    amdsmi_fabric_info_ver_t info;
-    uint32_t reserved[14];
-} amdsmi_fabric_info_t;
-
+// Added to faciliate builds when amdsmi headers are not available
+// In these cases, the rsmi wrapper will be used by default
+#if !AMDSMI_DIRECT
+/*************************************************************************
+ * Pre-UALoE AMDSMI Definitions
+ ************************************************************************/
 typedef enum {
     AMDSMI_FW_ID_SMU = 1,                   /**< System Management Unit (power management,
                                                  clock control, thermal monitoring, etc...) */
@@ -261,6 +128,23 @@ typedef enum {
     AMDSMI_FW_ID_PLDM_BUNDLE,               //!< Platform Level Data Model Firmware Bundle
     AMDSMI_FW_ID__MAX
 } amdsmi_fw_block_t;
+
+typedef union {
+    struct bdf_ {
+        uint64_t function_number : 3;
+        uint64_t device_number : 5;
+        uint64_t bus_number : 8;
+        uint64_t domain_number : 48;
+    } bdf;
+    struct {
+        uint64_t function_number : 3;
+        uint64_t device_number : 5;
+        uint64_t bus_number : 8;
+        uint64_t domain_number : 48;
+    };
+    uint64_t as_uint;
+} amdsmi_bdf_t;
+
 typedef struct {
     uint8_t num_fw_info;
     struct fw_info_list_ {
@@ -270,13 +154,6 @@ typedef struct {
     } fw_info_list[AMDSMI_FW_ID__MAX];
     uint32_t reserved[7];
 } amdsmi_fw_info_t;
-
-/** @} End rcclFabricCompat */
-
-
-/*************************************************************************
- * Pre-UALoE AMDSMI Definitions
- ************************************************************************/
 
 typedef enum {
     AMDSMI_STATUS_SUCCESS = 0,              //!< Call succeeded
@@ -415,6 +292,144 @@ amdsmi_get_minmax_bandwidth_between_processors(amdsmi_processor_handle processor
                                                 uint64_t *min_bandwidth,
                                                 uint64_t *max_bandwidth);
 
+#endif // !AMDSMI_DIRECT
+
+
+#if !AMDSMI_FABRIC_DIRECT
+/*****************************************************************************/
+/** @defgroup rcclFabricCompat Fabric Compatibility Types
+ *  Compatibility types for UALoE fabric support when amdsmi fabric API
+ *  is not yet available amdsmi headers.
+ *  @{
+ */
+
+/**
+ * @brief Fabric telemetry categories
+ */
+typedef enum {
+    AMDSMI_FABRIC_TELEMETRY_CATEGORY_UNKNOWN         = -1,
+    AMDSMI_FABRIC_TELEMETRY_CATEGORY_UALOE           = 0, //!< UALOE telemetry
+    AMDSMI_FABRIC_TELEMETRY_CATEGORY_SWITCH          = 1, //!< Switch telemetry
+    AMDSMI_FABRIC_TELEMETRY_CATEGORY_CRYPTO          = 2, //!< Crypto telemetry
+    AMDSMI_FABRIC_TELEMETRY_CATEGORY_PFC             = 3, //!< PFC telemetry
+    AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT         = 4, //!< Network Port telemetry
+    AMDSMI_FABRIC_TELEMETRY_CATEGORY_DERIVED_UALOE   = 5, //!< Derived UALOE telemetry
+    AMDSMI_FABRIC_TELEMETRY_CATEGORY_DERIVED_NETPORT = 6, //!< Derived Network Port telemetry
+    AMDSMI_FABRIC_TELEMETRY_CATEGORY_MAX             = 7  //!< Maximum number of categories
+} amdsmi_fabric_telemetry_category_t;
+
+/**
+ * @brief Fabric telemetry category bitmask constructor
+ */
+#define AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK(cat) (1U << AMDSMI_FABRIC_TELEMETRY_CATEGORY_ ## cat)
+
+/**
+ * @brief Fabric telemetry item structure
+ */
+typedef struct {
+    uint64_t id;      //!< Identifier of the telemetry item
+    uint64_t value;   //!< Value of the telemetry item
+} amdsmi_fabric_telemetry_item_t;
+
+/**
+ * @brief Fabric textual label structure
+ */
+typedef struct {
+    char text[32];  //!< Textual label content
+} amdsmi_fabric_label_t;
+
+/**
+ * @brief Fabric telemetry instance structure
+ */
+typedef struct {
+    amdsmi_fabric_label_t name;               //!< Name for this instance
+    unsigned logical_idx;                     //!< Logical index for this instance
+    unsigned item_count;                      //!< Number of telemetry items in the set
+    amdsmi_fabric_telemetry_item_t items[];   //!< Pointer to array of telemetry items
+} amdsmi_fabric_telemetry_instance_t;
+
+/**
+ * @brief Fabric telemetry dataset structure
+ */
+typedef struct {
+    amdsmi_fabric_telemetry_category_t category;  //!< Telemetry category
+    uint64_t generation_count;                    //!< Sequence number incremented each time telemetry is written
+    struct timespec timestamp;                    //!< UTC timestamp seconds since epoch
+    unsigned instance_count;                      //!< Number of instances for this category
+    amdsmi_fabric_telemetry_instance_t *instances[]; //!< Array of pointers to instances
+} amdsmi_fabric_telemetry_dataset_t;
+
+/**
+ * @brief Fabric telemetry structure
+ */
+typedef struct {
+    amdsmi_fabric_telemetry_dataset_t *datasets[AMDSMI_FABRIC_TELEMETRY_CATEGORY_MAX];
+} amdsmi_fabric_telemetry_t;
+
+#define AMDSMI_FABRIC_ACTIVE_ACCELERATORS_BITMAP_SIZE 32
+#define AMDSMI_FABRIC_MAX_LOCAL_GPUS 8
+
+/**
+ * @brief Fabric type
+ */
+typedef enum {
+    AMDSMI_FABRIC_TYPE_UALOE,
+    AMDSMI_FABRIC_TYPE_UALLINK
+} amdsmi_fabric_type_t;
+
+/**
+ * @brief Fabric NHT address mode
+ */
+typedef enum {
+    AMDSMI_FABRIC_NHT_ADDRESS_MODE_SOURCE_ALIASING,
+    AMDSMI_FABRIC_NHT_ADDRESS_MODE_SOURCE_IDENTIFICATION
+} amdsmi_fabric_nht_address_mode_t;
+
+/**
+ * @brief Fabric accelerator vPoD state
+ */
+typedef enum {
+    AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_UNCONFIGURED,
+    AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_CONFIGURED,
+    AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_READY,
+    AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_ACTIVE,
+    AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_ERROR
+} amdsmi_fabric_accelerator_vpod_state_t;
+
+/**
+ * @brief Fabric device configuration information (version 1)
+ */
+typedef struct {
+    uint32_t accelerator_id; //!< Accelerator identifier (range 0 to 1023)
+    amdsmi_fabric_type_t fabric_type; //!< UALOE or UALLINK
+    uint32_t bandwidth; //!< Station bandwidth share in Mb/s
+    uint32_t latency; //!< Latency in nanoseconds
+    uint64_t ppod_id; //!< Physical PoD Identifier
+    uint32_t ppod_size; //!< Physical PoD size
+    uint32_t vpod_id; //!< Virtual PoD Identifier
+    uint32_t vpod_size; //!< Virtual PoD size
+    uint32_t vpod_active_accelerators[AMDSMI_FABRIC_ACTIVE_ACCELERATORS_BITMAP_SIZE];
+    uint32_t local_accelerators[AMDSMI_FABRIC_MAX_LOCAL_GPUS]; //!< Local Accelerator IDs
+    amdsmi_fabric_nht_address_mode_t addr_mode; //!< Source aliasing or identification mode
+    amdsmi_fabric_accelerator_vpod_state_t accel_state; //!< Accelerator vPoD State
+} amdsmi_fabric_info_v1_t;
+
+typedef struct {
+    uint32_t version;
+    union {
+        amdsmi_fabric_info_v1_t v1;
+    };
+} amdsmi_fabric_info_ver_t;
+
+/**
+ * @brief Fabric device information structure
+ */
+typedef struct {
+    amdsmi_bdf_t bdf;      //!< BDF of the Fabric device
+    amdsmi_fabric_info_ver_t info;
+    uint32_t reserved[14];
+} amdsmi_fabric_info_t;
+
 /*************************************************************************
  * UALoE Fabric Functions
  ************************************************************************/
@@ -459,7 +474,9 @@ amdsmi_status_t amdsmi_get_gpu_fabric_info(amdsmi_processor_handle processor_han
  */
 const char* amdsmi_fabric_telem_id_to_string(uint64_t telem_id);
 
-#endif // !AMDSMI_DIRECT
+/** @} End rcclFabricCompat */
+#endif // AMDSMI_FABRIC_DIRECT
+
 
 /*************************************************************************
  * AMD SMI Fabric Info Cache

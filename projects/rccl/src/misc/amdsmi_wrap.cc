@@ -8,10 +8,7 @@
 #include <vector>
 #include <cstring>
 #include <mutex>
-// #include "rocm_smi/rocm_smi.h"  // Disabled to avoid conflict with libamd_smi
-#ifdef HAVE_ROCM_SMI64CONFIG
-// #include "rocm_smi/rocm_smi64Config.h"
-#endif
+
 static int is_wsl2 = -1;
 
 #define AMDSMICHECK(cmd) do {                \
@@ -46,12 +43,11 @@ static int is_wsl2 = -1;
 
 RCCL_PARAM(UseAmdSmiLib, "USE_AMD_SMI_LIB", 0); // Opt-in environment variable for enabling using amd_smi_lib instead of internal code
 
-#if AMDSMI_DIRECT
-  #define RCCL_AMDSMI_FN(name, rettype, arglist) constexpr rettype(*pfn_##name)arglist = name;
-#else
-  #include <dlfcn.h>
-  #define RCCL_AMDSMI_FN(name, rettype, arglist) rettype(*pfn_##name)arglist = nullptr;
-#endif
+
+#include <dlfcn.h>
+#define RCCL_AMDSMI_FN(name, rettype, arglist) rettype(*pfn_##name)arglist = nullptr;
+
+
 namespace {
   // Core AMD SMI functions
   RCCL_AMDSMI_FN(amdsmi_init, amdsmi_status_t, (uint64_t init_flags))
@@ -149,7 +145,6 @@ ncclResult_t amd_smi_init() {
   }
 
   if (rcclParamUseAmdSmiLib()) {
-#if !AMDSMI_DIRECT
     if (pfn_amdsmi_init == nullptr) {
       static void *libhandle = dlopen("libamd_smi.so", RTLD_NOW);
       if (libhandle == nullptr) {
@@ -185,7 +180,6 @@ ncclResult_t amd_smi_init() {
         *sym.ppfn = dlsym(libhandle, sym.name);
       }
     }
-#endif
 
     // initialize amd-smi for AMD GPUs
     AMDSMITRY(amdsmi_init, AMDSMI_INIT_AMD_GPUS);
