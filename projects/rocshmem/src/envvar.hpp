@@ -144,7 +144,7 @@ namespace envvar {
 
   namespace parser {
     inline namespace _type_traits {
-      // see [basic.fundamental]/p7 for defintion of 'narrow character type'
+      // see [basic.fundamental]/p7 for definition of 'narrow character type'
       inline namespace _narrow_character {
         template <typename T> struct _is_narrow_character      : std::false_type { };
         template <> struct _is_narrow_character<char>          : std::true_type  { };
