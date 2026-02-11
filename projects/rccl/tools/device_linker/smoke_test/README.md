@@ -23,8 +23,21 @@ Use `-t` to build the unit test binary; use `-r` to run the quick tests (AllRedu
 
 These are smaller, standalone tests. Run them only if you want an extra check beyond the unit tests.
 
+**Recommended smoke tests** (parameterized, single-process, verify results):
+
+| Test | Description | Usage |
+|------|-------------|--------|
+| test_smoke_allreduce | AllReduce out-of-place SUM float32; checks result | `test_smoke_allreduce [num_gpus] [array_length]` (defaults: 2, 1024) |
+| test_smoke_allreduce_batched | Batched AllReduce (many ops in one group) SUM float32; checks all batches | `test_smoke_allreduce_batched [num_gpus] [array_length] [num_batches]` (defaults: 2, 1024, 16) |
+
 ```bash
-./run_tests.sh [BUILD_DIR]
+./run_tests.sh [--build-dir DIR] [test_smoke_allreduce ...]
+```
+
+To run with different GPU count or size (after building):
+```bash
+./bin/test_smoke_allreduce 4 8192
+./bin/test_smoke_allreduce_batched 2 1024 32
 ```
 
 Where `BUILD_DIR` is the RCCL build directory (default: `../../../build/release`).
