@@ -1484,6 +1484,18 @@ def record_subtest_failure(request):
     return _record
 
 
+def _is_assert_disabled(request: pytest.FixtureRequest, subtest_name: str) -> bool:
+    """Check if a subtest is disabled via ci_disable marker in CI mode."""
+    if not request.config.getoption(
+        "--ci-mode", default=False
+    ) or request.config.getoption("--allow-disabled", default=False):
+        return False
+    for marker in request.node.iter_markers("ci_disable"):
+        if subtest_name in marker.args:
+            return True
+    return False
+
+
 # ============================================================================
 # Base Test Class
 # ============================================================================
@@ -1703,12 +1715,8 @@ def assert_regex(subtests, record_subtest_failure, request):
         fail_message: Custom message for failure (defaults to validation message)
         **kwargs: Mode-specific regexes like rewrite_pass_regex, sys_run_fail_regex, etc.
     """
-    disabled_subtests: set[str] = set()
-    if request.config.getoption(
-        "--ci-mode", default=False
-    ) and not request.config.getoption("--allow-disabled", default=False):
-        for marker in request.node.iter_markers("ci_disable"):
-            disabled_subtests.update(marker.args)
+    if _is_assert_disabled(request, "assert_regex"):
+        return lambda *args, **kwargs: None
 
     def _assert_regex(
         result: TestResult,
@@ -1721,9 +1729,6 @@ def assert_regex(subtests, record_subtest_failure, request):
         fail_message: Optional[str] = None,
         **kwargs,
     ) -> None:
-        if "assert_regex" in disabled_subtests:
-            return
-
         # If mode is provided, look up mode-specific regexes from kwargs
         if mode is not None:
             # Normalize mode name (hyphens to underscores)
@@ -1749,12 +1754,8 @@ def assert_regex(subtests, record_subtest_failure, request):
 @pytest.fixture
 def assert_file_regex(subtests, record_subtest_failure, request):
     """Variant of assert_regex that validates against a file."""
-    disabled_subtests: set[str] = set()
-    if request.config.getoption(
-        "--ci-mode", default=False
-    ) and not request.config.getoption("--allow-disabled", default=False):
-        for marker in request.node.iter_markers("ci_disable"):
-            disabled_subtests.update(marker.args)
+    if _is_assert_disabled(request, "assert_file_regex"):
+        return lambda *args, **kwargs: None
 
     def _assert_file_regex(
         file_path: Path,
@@ -1765,9 +1766,6 @@ def assert_file_regex(subtests, record_subtest_failure, request):
         skip_on_fail: bool = False,
         fail_message: Optional[str] = None,
     ) -> None:
-        if "assert_file_regex" in disabled_subtests:
-            return
-
         with subtests.test(subtest_name):
             validation = validate_file_regex(
                 file_path,
@@ -1803,12 +1801,8 @@ def assert_perfetto(
         skip_on_fail: If True, skip instead of fail when validation fails
         fail_message: Custom message for failure (defaults to validation message)
     """
-    disabled_subtests: set[str] = set()
-    if request.config.getoption(
-        "--ci-mode", default=False
-    ) and not request.config.getoption("--allow-disabled", default=False):
-        for marker in request.node.iter_markers("ci_disable"):
-            disabled_subtests.update(marker.args)
+    if _is_assert_disabled(request, "assert_perfetto"):
+        return lambda *args, **kwargs: None
 
     def _assert_perfetto(
         result: TestResult,
@@ -1830,9 +1824,6 @@ def assert_perfetto(
         skip_on_fail: bool = False,
         fail_message: Optional[str] = None,
     ) -> None:
-        if "assert_perfetto" in disabled_subtests:
-            return
-
         with subtests.test(subtest_name):
             if not check_use_perfetto():
                 pytest.skip("Perfetto is disabled")
@@ -1896,12 +1887,8 @@ def assert_rocpd(subtests, tests_dir, record_subtest_failure, request):
         skip_on_fail: If True, skip instead of fail when validation fails
         fail_message: Custom message for failure (defaults to validation message)
     """
-    disabled_subtests: set[str] = set()
-    if request.config.getoption(
-        "--ci-mode", default=False
-    ) and not request.config.getoption("--allow-disabled", default=False):
-        for marker in request.node.iter_markers("ci_disable"):
-            disabled_subtests.update(marker.args)
+    if _is_assert_disabled(request, "assert_rocpd"):
+        return lambda *args, **kwargs: None
 
     def _assert_rocpd(
         result: TestResult,
@@ -1913,9 +1900,6 @@ def assert_rocpd(subtests, tests_dir, record_subtest_failure, request):
         skip_on_fail: bool = False,
         fail_message: Optional[str] = None,
     ) -> None:
-        if "assert_rocpd" in disabled_subtests:
-            return
-
         with subtests.test(subtest_name):
             if not check_use_rocpd():
                 pytest.skip("ROCpd is disabled")
@@ -1970,12 +1954,8 @@ def assert_timemory(subtests, tests_dir, record_subtest_failure, request):
         skip_on_fail: If True, skip instead of fail when validation fails
         fail_message: Custom message for failure (defaults to validation message)
     """
-    disabled_subtests: set[str] = set()
-    if request.config.getoption(
-        "--ci-mode", default=False
-    ) and not request.config.getoption("--allow-disabled", default=False):
-        for marker in request.node.iter_markers("ci_disable"):
-            disabled_subtests.update(marker.args)
+    if _is_assert_disabled(request, "assert_timemory"):
+        return lambda *args, **kwargs: None
 
     def _assert_timemory(
         result: TestResult,
@@ -1992,9 +1972,6 @@ def assert_timemory(subtests, tests_dir, record_subtest_failure, request):
         skip_on_fail: bool = False,
         fail_message: Optional[str] = None,
     ) -> None:
-        if "assert_timemory" in disabled_subtests:
-            return
-
         with subtests.test(subtest_name):
             timemory_file = result.output_dir / file_name
             if not timemory_file.exists():
@@ -2041,12 +2018,8 @@ def assert_file_exists(subtests, record_subtest_failure, request):
         skip_on_fail: If True, skip instead of fail when validation fails
         fail_message: Custom message for failure (defaults to validation message)
     """
-    disabled_subtests: set[str] = set()
-    if request.config.getoption(
-        "--ci-mode", default=False
-    ) and not request.config.getoption("--allow-disabled", default=False):
-        for marker in request.node.iter_markers("ci_disable"):
-            disabled_subtests.update(marker.args)
+    if _is_assert_disabled(request, "assert_file_exists"):
+        return lambda *args, **kwargs: None
 
     def _assert_file_exists(
         path: Path | list[Path],
@@ -2055,9 +2028,6 @@ def assert_file_exists(subtests, record_subtest_failure, request):
         skip_on_fail: bool = False,
         fail_message: Optional[str] = None,
     ) -> None:
-        if "assert_file_exists" in disabled_subtests:
-            return
-
         paths = [path] if isinstance(path, Path) else path
         with subtests.test(subtest_name):
             for p in paths:
@@ -2086,12 +2056,8 @@ def assert_causal_json(subtests, tests_dir, record_subtest_failure, request):
         skip_on_fail: If True, skip instead of fail when validation fails
         fail_message: Custom message for failure (defaults to validation message)
     """
-    disabled_subtests: set[str] = set()
-    if request.config.getoption(
-        "--ci-mode", default=False
-    ) and not request.config.getoption("--allow-disabled", default=False):
-        for marker in request.node.iter_markers("ci_disable"):
-            disabled_subtests.update(marker.args)
+    if _is_assert_disabled(request, "assert_causal_json"):
+        return lambda *args, **kwargs: None
 
     def _assert_causal_json(
         result: TestResult,
@@ -2105,9 +2071,6 @@ def assert_causal_json(subtests, tests_dir, record_subtest_failure, request):
         skip_on_fail: bool = False,
         fail_message: Optional[str] = None,
     ) -> None:
-        if "assert_causal_json" in disabled_subtests:
-            return
-
         with subtests.test(subtest_name):
             causal_file = result.output_dir / file_name
             if not causal_file.exists():
