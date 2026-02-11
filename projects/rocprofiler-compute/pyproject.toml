@@ -112,4 +112,5 @@ markers = [
     "iteration_multiplexing_stochastic",
     "noise_clamp",
     "torch_ops",
+    "multi_rank",
 ]
