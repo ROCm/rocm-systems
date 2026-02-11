@@ -1,0 +1,85 @@
+---
+event:
+  Unit_hipEventCreate_NullCheck: *level_2
+  Unit_hipEventCreateWithFlags_NullCheck: *level_2
+  Unit_hipEventCreate_IncompatibleFlags: *level_2
+  Unit_hipEventSynchronize_NullCheck: *level_2
+  Unit_hipEventQuery_NullCheck: *level_2
+  Unit_hipEventDestroy_NullCheck: *level_2
+  Unit_hipEvent:
+    <<: *level_2
+    # SWDEV-411303 fails in WSL. Profiling not support in WSL
+    disabled: [amd_wsl]
+  Unit_hipEventElapsedTime_NullCheck: *level_2
+  Unit_hipEventElapsedTime_DisableTiming: *level_2
+  Unit_hipEventElapsedTime_DifferentDevices:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipEventElapsedTime_NotReady_Negative:
+    <<: *level_2
+    # SWDEV-411303 fails in WSL. Profiling not support in WSL
+    disabled: [amd_wsl]
+  Unit_hipEventElapsedTime: *level_2
+  Unit_hipEventElapsedTime_Verify_Capture: *level_2
+  Unit_hipEventRecord:
+    <<: *level_2
+    disabled: [amd_windows]
+  Unit_hipEventRecord_Negative:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipEventIpc:
+    <<: *level_2
+    # (amd_wsl) Below tests fail in stress test on 24/07/23
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipEventDestroy_Unfinished:
+    <<: *level_2
+    # SWDEV-411303 fails in WSL. Profiling not support in WSL
+    disabled: [amd_wsl]
+  Unit_hipEventDestroy_WithWaitingStream:
+    <<: *level_2
+    # SWDEV-402054 fails in external github build
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipEventDestroy_Negative: *level_2
+  Unit_hipEventDestroy_Verify_Capture: *level_2
+  Unit_hipEventCreate_Positive: *level_2
+  Unit_hipEventCreate_Verify_Capture: *level_2
+  Unit_hipEventCreateWithFlags_Positive: *level_2
+  Unit_hipEventCreateWithFlags_DisableSystemFence_HstVisMem:
+    <<: *level_2
+    # Note: intermittent Seg fault failure
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipEventCreateWithFlags_DefaultFlg_HstVisMem:
+    <<: *level_2
+    # Note: intermittent Seg fault failure
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipEventCreateWithFlags_DisableSystemFence_NonCohHstMem:
+    <<: *level_2
+    # Note: intermittent Seg fault failure
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipEventCreateWithFlags_DefaultFlg_NonCohHstMem:
+    <<: *level_2
+    # Note: intermittent Seg fault failure
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipEventCreateWithFlags_DisableSystemFence_CohHstMem:
+    <<: *level_2
+    # (amd_linux) SWDEV-470751 : Fine Grain memory is MTYPE_NC due to HW bug.
+    # (amd_windows) Note: intermittent Seg fault failure
+    disabled: [gfx1200, gfx1201, amd_windows, amd_wsl]
+  Unit_hipEventCreateWithFlags_DefaultFlg_CohHstMem:
+    <<: *level_2
+    # Note: intermittent Seg fault failure
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipEventCreateWithFlags_Verify_Capture: *level_2
+  Unit_hipEventSynchronize_Default_Positive: *level_2
+  Unit_hipEventSynchronize_NoEventRecord_Positive: *level_2
+  Unit_hipEventMGpuMThreads_1: *level_2
+  Unit_hipEventMGpuMThreads_2:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipEventMGpuMThreads_3:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipEventQuery_DifferentDevice:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipEventIpc_shm_cleanup: *level_2
