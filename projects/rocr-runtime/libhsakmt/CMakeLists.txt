@@ -264,7 +264,11 @@ else()
     endif()
   else()
     ## Link Window Kernel Mode Interface
-    target_link_libraries(${HSAKMT_TARGET} ${CMAKE_CURRENT_SOURCE_DIR}/src/dxg/wkmi/win/wkmi.lib)
+    if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+      target_link_libraries(${HSAKMT_TARGET} ${CMAKE_CURRENT_SOURCE_DIR}/src/dxg/wkmi/win/dbg/wkmi.lib)
+    else()
+      target_link_libraries(${HSAKMT_TARGET} ${CMAKE_CURRENT_SOURCE_DIR}/src/dxg/wkmi/win/rel/wkmi.lib)
+    endif()
   endif()
 
   ## Define default paths and packages.
