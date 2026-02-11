@@ -121,19 +121,21 @@ struct sample
     operator bool() const;
 };
 
+using task_set_t        = std::set<task_info>;
+using task_status_map_t = std::map<task_info, status>;
 // return true from predicate if we should stop polling, false to keep polling until timeout
-using poll_tasks_predicate_t = std::function<bool(const std::map<task_info, status>&)>;
+using poll_tasks_predicate_t = std::function<bool(const task_status_map_t&)>;
 
-std::set<task_info>
-get_tasks(pid_t pid = getpid(), const std::set<task_info>& exclude_tasks = {});
+task_set_t
+get_tasks(pid_t pid = getpid(), const task_set_t& exclude_tasks = {});
 
 sample
 get_sample(const task_info& task);
 
 // if predicate is not provided, will keep polling until all tasks are either Gone or Unknown, or
 // until timeout
-std::map<task_info, status>
-poll_tasks(std::set<task_info>&      tasks,
+task_status_map_t
+poll_tasks(task_set_t&               tasks,
            poll_tasks_predicate_t    predicate    = nullptr,
            std::chrono::milliseconds min_interval = std::chrono::milliseconds{1},
            std::chrono::milliseconds timeout      = std::chrono::milliseconds{1000});

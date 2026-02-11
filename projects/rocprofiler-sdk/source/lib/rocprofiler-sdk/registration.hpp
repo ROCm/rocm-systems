@@ -45,6 +45,13 @@ namespace rocprofiler
 {
 namespace registration
 {
+enum class finalize_mode
+{
+    tool_induced,
+    exit_handler,
+    static_destructor,
+};
+
 // initialize google logging
 void
 init_logging();
@@ -54,8 +61,7 @@ void
 initialize();
 
 // finalize the clients
-void
-finalize();
+void finalize(finalize_mode);
 
 // get the randomly generated client offset number
 uint32_t

@@ -136,16 +136,21 @@ read_stat(const task_info& task)
 status
 classify(const sample& _data)
 {
+    constexpr auto min_runtime_ns   = 0UL;
+    constexpr auto min_time_ticks   = 0UL;
+    constexpr auto min_run_queue_ns = 0UL;
+
     // Strongest signals first
-    if(_data.schedstat.has_value() && _data.schedstat->run_time_ns > 0)
+    if(_data.schedstat.has_value() && _data.schedstat->run_time_ns > min_runtime_ns)
     {
         return status::ActiveOnCPU;
     }
-    else if(_data.stat.has_value() && (_data.stat->utime_ticks + _data.stat->stime_ticks) > 0)
+    else if(_data.stat.has_value() &&
+            (_data.stat->utime_ticks + _data.stat->stime_ticks) > min_time_ticks)
     {
         return status::ActiveOnCPU;
     }
-    else if(_data.schedstat.has_value() && _data.schedstat->run_queue_ns > 0)
+    else if(_data.schedstat.has_value() && _data.schedstat->run_queue_ns > min_run_queue_ns)
     {
         return status::RunnableWaiting;
     }
@@ -164,7 +169,7 @@ classify(const sample& _data)
 }
 
 bool
-default_poll_tasks_predicate(const std::map<task_info, status>& data)
+default_poll_tasks_predicate(const task_status_map_t& data)
 {
     uint64_t gone    = 0;
     uint64_t unknown = 0;
@@ -302,10 +307,10 @@ task_info::operator bool() const
 
 sample::operator bool() const { return (task && (schedstat.has_value() || stat.has_value())); }
 
-std::set<task_info>
-get_tasks(pid_t _pid, const std::set<task_info>& exclude_tasks)
+task_set_t
+get_tasks(pid_t _pid, const task_set_t& exclude_tasks)
 {
-    auto _tasks = std::set<task_info>{};
+    auto _tasks = task_set_t{};
 
     ROCP_TRACE << fmt::format("Reading tasks in /proc/{}/task/*", _pid);
     for(const auto& itr : fs::directory_iterator{fs::path{fmt::format("/proc/{}/task", _pid)}})
@@ -340,13 +345,13 @@ get_sample(const task_info& task)
     return sample{task, read_schedstat(task), read_stat(task)};
 }
 
-std::map<task_info, status>
-poll_tasks(std::set<task_info>&      tasks,
+task_status_map_t
+poll_tasks(task_set_t&               tasks,
            poll_tasks_predicate_t    predicate,
            std::chrono::milliseconds min_interval,
            std::chrono::milliseconds timeout)
 {
-    auto _data       = std::map<task_info, status>{};
+    auto _data       = task_status_map_t{};
     auto _start_time = std::chrono::steady_clock::now();
 
     if(!predicate) predicate = &default_poll_tasks_predicate;

@@ -29,6 +29,7 @@
 #include "lib/common/logging.hpp"
 #include "lib/common/static_object.hpp"
 #include "lib/common/static_tl_object.hpp"
+#include "lib/common/thread_activity.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/code_object/code_object.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
@@ -511,6 +512,13 @@ get_registration_mutex()
     return _v;
 }
 
+auto*
+get_initial_tasks()
+{
+    static auto*& _v = common::static_object<common::thread_activity::task_set_t>::construct();
+    return _v;
+}
+
 bool
 invoke_client_configures()
 {
@@ -600,9 +608,9 @@ invoke_client_initializers()
     if(!get_clients()) return false;
 
     // if there is only one client, just fully finalize
-    rocprofiler_client_finalize_t client_fini_func =
-        (get_clients()->size() == 1) ? [](rocprofiler_client_id_t) -> void { finalize(); }
-                                     : &invoke_client_finalizer;
+    rocprofiler_client_finalize_t client_fini_func = (get_clients()->size() == 1)
+        ? [](rocprofiler_client_id_t) -> void { finalize(finalize_mode::tool_induced); }
+    : &invoke_client_finalizer;
 
     for(auto& itr : *get_clients())
     {
@@ -824,7 +832,7 @@ initialize()
         // initialization is in process
         set_init_status(-1);
         std::atexit([]() {
-            finalize();
+            finalize(finalize_mode::exit_handler);
             common::destroy_static_tl_objects();
             common::destroy_static_objects();
         });
@@ -836,6 +844,14 @@ initialize()
 
         if(get_num_clients() > 0)
         {
+            // right after configuration, populate the initial tasks so that we know the main tid
+            // and all of the tids created by rocprofiler-sdk (and maybe the clients) so that we
+            // can exclude them from our polling during finalization
+            if(auto* initial_tasks = get_initial_tasks(); initial_tasks)
+            {
+                *initial_tasks = common::thread_activity::get_tasks(getpid());
+            }
+
             for(const auto& itr : *get_clients())
             {
                 if(!itr) continue;
@@ -864,7 +880,7 @@ initialize()
 }
 
 void
-finalize()
+finalize(finalize_mode mode)
 {
 #if defined(CODECOV) && CODECOV > 0
     if(get_fini_status() > 0) __gcov_dump();
@@ -888,8 +904,74 @@ finalize()
     ROCP_INFO << "finalizing rocprofiler (value=" << get_fini_status() << ")";
 
     static auto _once = std::once_flag{};
-    std::call_once(_once, []() {
+    std::call_once(_once, [mode]() {
         auto num_clients = get_num_clients();
+        if(mode == finalize_mode::exit_handler || mode == finalize_mode::static_destructor)
+        {
+            namespace thread_activity = common::thread_activity;
+
+            // poll the thread activity at least every 0.1 seconds.
+            // after 1 second, stop polling and return.
+            constexpr auto min_interval = std::chrono::milliseconds{10};
+            constexpr auto timeout      = std::chrono::milliseconds{500};
+
+            auto _tasks_predicate = [](const thread_activity::task_status_map_t& data) {
+                uint64_t waiting = 0;
+                uint64_t active  = 0;
+                for(const auto& [task, status] : data)
+                {
+                    ROCP_TRACE << fmt::format("Task {} status: {}", task, status);
+                    if(status == thread_activity::status::RunnableWaiting)
+                        ++waiting;
+                    else if(status == thread_activity::status::ActiveOnCPU)
+                        ++active;
+                }
+
+                ROCP_TRACE << fmt::format("finalize thread activity: {}/{} tasks are runnable but "
+                                          "waiting ({}) or actively running ({})",
+                                          waiting + active,
+                                          data.size(),
+                                          waiting,
+                                          active);
+
+                // return true if all tasks are neither runnable but waiting or active, if any tasks
+                // are waiting/active, keep polling by returning false
+                return ((waiting + active) == 0);
+            };
+
+            auto _initial_tasks =
+                get_initial_tasks() ? *get_initial_tasks() : common::thread_activity::task_set_t{};
+            auto _tasks    = common::thread_activity::get_tasks(getpid(), _initial_tasks);
+            auto _activity = common::thread_activity::poll_tasks(
+                _tasks, _tasks_predicate, min_interval, timeout);
+
+            for(const auto& itr : _activity)
+            {
+                const auto& task   = itr.first;
+                const auto& status = itr.second;
+                ROCP_TRACE << fmt::format("Task {} status: {}", task, status);
+                if(status != thread_activity::status::Gone)
+                {
+                    auto get_msg = [&]() {
+                        return fmt::format(
+                            "rocprofiler-sdk is proceeding with finalization (after "
+                            "waiting {} msec) despite thread {} still having status {}",
+                            timeout.count(),
+                            task.id,
+                            status);
+                    };
+                    if(status == thread_activity::status::RunnableWaiting ||
+                       status == thread_activity::status::ActiveOnCPU)
+                    {
+                        ROCP_WARNING << get_msg();
+                    }
+                    else
+                    {
+                        ROCP_INFO << get_msg();
+                    }
+                }
+            }
+        }
         set_fini_status(-1);
         hsa::async_copy_fini();
         counters::device_counting_service_finalize();

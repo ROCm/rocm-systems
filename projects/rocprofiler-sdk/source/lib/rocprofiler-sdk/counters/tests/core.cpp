@@ -478,7 +478,7 @@ TEST(core, check_callbacks)
     }
     registration::set_init_status(1);
 
-    registration::finalize();
+    registration::finalize(registration::finalize_mode::tool_induced);
 }
 
 TEST(core, destroy_counter_profile)
@@ -516,7 +516,7 @@ TEST(core, destroy_counter_profile)
     }
     registration::set_init_status(1);
 
-    registration::finalize();
+    registration::finalize(registration::finalize_mode::tool_induced);
 }
 
 TEST(core, start_stop_buffered_ctx)
@@ -586,7 +586,7 @@ TEST(core, start_stop_buffered_ctx)
 
     registration::set_init_status(1);
 
-    registration::finalize();
+    registration::finalize(registration::finalize_mode::tool_induced);
 }
 
 TEST(core, start_stop_callback_ctx)
@@ -709,7 +709,7 @@ TEST(core, test_profile_incremental)
 
     registration::set_init_status(1);
 
-    registration::finalize();
+    registration::finalize(registration::finalize_mode::tool_induced);
 }
 
 TEST(core, public_api_iterate_agents)
@@ -774,7 +774,7 @@ rocprofiler-sdk:
       description: cycles
       properties: []
       definitions:
-        - architectures:  
+        - architectures:
           - gfx950
           - gfx942
           - gfx10
@@ -822,12 +822,12 @@ TEST(core, check_load_counter_def)
     const std::string test_yaml = R"(
 rocprofiler-sdk:
   counters-schema-version: 1
-  counters:  
+  counters:
     - name: GRBM_GUI_ACTIVE
       description: The GUI is Active
       properties: []
       definitions:
-        - architectures:  
+        - architectures:
           - gfx950
           - gfx942
           - gfx941
@@ -859,7 +859,7 @@ rocprofiler-sdk:
       description: cycles
       properties: []
       definitions:
-        - architectures:  
+        - architectures:
           - gfx950
           - gfx942
           - gfx10
