@@ -386,7 +386,7 @@ T calculateExpected(const T* input, Op op, unsigned long long mask)
   T result;
   int wavefrontSize = getWarpSize();
 
-  if (std::is_same<Op, std::plus<T>>::value) {
+  if constexpr (std::is_same<Op, std::plus<T>>::value || std::is_same<Op, cooperative_groups::plus<T>>::value) {
     T tmp[64] = { 0 };
 
     for (int i = 0; i < wavefrontSize; i++) {
