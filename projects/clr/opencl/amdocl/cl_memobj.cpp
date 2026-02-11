@@ -3350,7 +3350,7 @@ RUNTIME_ENTRY_RET(void*, clEnqueueMapImage,
       return NULL;
     }
     // Reset the mip level value to 0, since a view was created
-    if (srcImage->getDims() <= 3) {
+    if (srcImage->getDims() < 3) {
       srcOrigin.c[srcImage->getDims()] = 0;
     }
     srcImage->incMapCount();
