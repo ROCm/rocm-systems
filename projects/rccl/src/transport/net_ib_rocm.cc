@@ -2819,14 +2819,15 @@ ncclResult_t rocmIbIrecv(void* recvComm, int n, void** data, size_t* sizes, int*
     struct ibv_recv_wr* bad_wr;
     int qpIndex = comm->base.qpIndex;
     for (int i = 0; i < nqps; i++) {
-      struct ncclIbQp* qp = comm->base.qps + comm->base.qpIndex;
+      int curQpIndex = rcclAinicRoce ? qpIndex : comm->base.qpIndex;
+      struct ncclIbQp* qp = comm->base.qps + curQpIndex;
       ncclIbAddEvent(req, qp->devIndex, &comm->devs[qp->devIndex].base);
 #ifdef NCCL_ENABLE_NET_PROFILING
       // Start a QP event for every request in the multirecv and every qp
       for (int r = 0; r < n; r++) {
         int nEventHandles = req->pInfo[r].nEventHandles;
         assert(nEventHandles < MAX_QPS_PER_REQ);
-        req->pInfo[r].qpIndex[nEventHandles] = comm->base.qpIndex;
+        req->pInfo[r].qpIndex[nEventHandles] = curQpIndex;
         // Store info for profiler
         int64_t pluginId = NCCL_PROFILER_NET_TYPE_IB | NCCL_PROFILER_NET_IB_VER;
         req->pInfo[r].data.type = ncclProfileQp;
