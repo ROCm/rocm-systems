@@ -19,7 +19,6 @@
 # IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-import ctypes
 import inspect
 import json
 import os
@@ -34,6 +33,31 @@ try:
     import amdsmi
 except ImportError:
     raise ImportError(f'Could not import the "amdsmi" module from "{amdsmi_path}"')
+
+
+def print_test_ids(suite):
+    for test in suite:
+        if isinstance(test, unittest.TestSuite):
+            print_test_ids(test)
+        else:
+            print(f' -{test.id()}', file=sys.stderr)
+    return
+
+def print_tests(module_name):
+    loader = unittest.TestLoader()
+    suite = loader.loadTestsFromModule(sys.modules[module_name])
+    print('==============================================================', file=sys.stderr)
+    print('Available tests:', file=sys.stderr)
+    print_test_ids(suite)
+    return
+
+def print_legend():
+    # Provide Legend for test results, otherwise it is not clear what the output means
+    print('==============================================================', file=sys.stderr)
+    print('Legend: . = pass, s = skipped, F = fail, E = error', file=sys.stderr)
+    print('==============================================================', file=sys.stderr)
+    print('Running tests...\n', file=sys.stderr)
+    return
 
 
 class Common(unittest.TestCase):
@@ -66,16 +90,8 @@ class Common(unittest.TestCase):
             self.virt_mode = []
             self.asic_info = []
             self.board_info = []
-            #self.uuids = []
-            #self.bdfs = []
-            for i, gpu in enumerate(self.processors):
-                #uuid = amdsmi.amdsmi_get_gpu_device_uuid(gpu)
-                #self.uuids.append(uuid)
-                #bdf = amdsmi.amdsmi_get_gpu_device_bdf(gpu)
-                #self.bdfs.append(bdf)
+            for gpu in self.processors:
                 # Get virtualization mode info
-                if False:
-                    self.virt_mode.append(amdsmi.amdsmi_get_gpu_virtualization_mode(gpu))
                 ret = amdsmi.amdsmi_get_gpu_virtualization_mode(gpu)
                 mode_name = self.virtualization_mode_map[str(int(ret['mode']))]
                 self.virt_mode.append({'mode': mode_name})
@@ -517,7 +533,7 @@ class Common(unittest.TestCase):
         status_msg = ''
         status_ret = False
         if any(error_code in value for value in self.not_supported_error_codes):
-            status_msg = f'\tAPI RETURNED {error_code_name}'
+            status_msg = f'\tAMDSMI API Returned {error_code_name}'
         elif error_code_name == expected_code_name:
             status_msg = f'\tTest PASSED with expected result {expected_code_name}'
         elif error_code_name != self.PASS and expected_code_name == self.ANY_FAIL:
