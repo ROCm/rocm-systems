@@ -528,3 +528,4 @@ hipExtEnableLogging
 hipExtSetLoggingParams
 hipMemSetMemPool
 hipMemGetMemPool
+hipMipmappedArrayGetMemoryRequirements
