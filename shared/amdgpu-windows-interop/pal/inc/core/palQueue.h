@@ -305,7 +305,8 @@ struct PresentDirectInfo
             uint32 notifyOnly          :  1; ///< Indicates that a present occurred outside of PAL. PAL must not
                                              ///  execute a present if this is true but may update internal
                                              ///  tracking state.
-            uint32 reserved            : 28; ///< Reserved for future use.
+            uint32 frameIdValid        :  1; ///< Indicate frameId value is valid
+            uint32 reserved            : 27; ///< Reserved for future use.
         };
         uint32 u32All;       ///< Flags packed as 32-bit uint.
     } flags;                 ///< Present flags.
@@ -331,6 +332,8 @@ struct PresentDirectInfo
         IGpuMemory*    pDstTypedBuffer; ///< The typed buffer to be presented.  If null, the present will not occur
                                         ///  but PAL may still call into the OS on certain platforms that expect it.
     };
+
+    uint64               frameId;       ///< The frameId will be linearly incremented by the UMD at present time
 
 };
 
@@ -365,6 +368,10 @@ struct PresentSwapChainInfo
                                 ///  presentation has no associated presentId. A non-zero presentId must be greater
                                 ///  than any non-zero presentId passed previously by the application for the same
                                 ///  swapchain.
+    uint64  frameId;            ///< The frameId will be incremented by the UMD at present time. Only implemented on
+                                ///  WsiPlatform::Win32. XGL/OGLP must fall back to WsiPlatform::Win32 if frameId is
+                                ///  required, otherwise DXXP will update frameId for DXGI presents.
+
     union
     {
         struct
@@ -380,7 +387,8 @@ struct PresentSwapChainInfo
             uint32 turboSyncEnabled     :  1; ///< Whether TurboSync is enabled.
             uint32 syncIntervalOverride :  1; ///< Override default syncInterval with the value in syncInterval
                                               ///  Supported only on Windows wsiPlatforms.
-            uint32 reserved             : 28; ///< Reserved for future use.
+            uint32 frameIdValid         :  1; ///< Indicates that frameId is valid.
+            uint32 reserved             : 27; ///< Reserved for future use.
         };
         uint32 u32All; ///< Flags packed as 32-bit uint.
     } flags;           ///< PresentSwapChainInfo flags.

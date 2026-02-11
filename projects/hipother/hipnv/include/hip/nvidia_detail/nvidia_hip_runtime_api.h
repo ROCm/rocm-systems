@@ -2100,8 +2100,8 @@ inline static hipError_t hipMemPrefetchAsync_v2(const void* dev_ptr, size_t coun
 inline static hipError_t hipMemAdvise_v2(const void* dev_ptr, size_t count, hipMemoryAdvise advice,
                                          hipMemLocation location) {
 #if CUDA_VERSION >= 13000
-  return hipCUDAErrorTohipError(cudaMemAdvise(dev_ptr, count,
-      hipMemoryAdviseTocudaMemoryAdvise(advice), location));
+  return hipCUDAErrorTohipError(
+      cudaMemAdvise(dev_ptr, count, hipMemoryAdviseTocudaMemoryAdvise(advice), location));
 #else
   return hipCUDAErrorTohipError(
       cudaMemAdvise_v2(dev_ptr, count, hipMemoryAdviseTocudaMemoryAdvise(advice), location));
@@ -2476,6 +2476,12 @@ inline static hipError_t hipMemcpy3DPeer(hipMemcpy3DPeerParms* p) {
 }
 inline static hipError_t hipMemcpy3DPeerAsync(hipMemcpy3DPeerParms* p, hipStream_t stream) {
   return hipCUDAErrorTohipError(cudaMemcpy3DPeerAsync(p, stream));
+}
+inline static hipError_t hipMipmappedArrayGetMemoryRequirements(
+    hipArrayMemoryRequirements* memoryRequirements, hipMipmappedArray_t mipmap,
+    hipDevice_t device) {
+  return hipCUDAErrorTohipError(
+      cudaMipmappedArrayGetMemoryRequirements(memoryRequirements, mipmap, device));
 }
 
 __HIP_DEPRECATED inline static hipError_t hipMemcpyToArray(hipArray_t dst, size_t wOffset,
@@ -3385,7 +3391,7 @@ inline static hipError_t hipStreamGetFlags(hipStream_t stream, unsigned int* fla
   return hipCUDAErrorTohipError(cudaStreamGetFlags(stream, flags));
 }
 
-inline static hipError_t hipStreamGetId(hipStream_t stream, unsigned long long *streamId) {
+inline static hipError_t hipStreamGetId(hipStream_t stream, unsigned long long* streamId) {
   return hipCUDAErrorTohipError(cudaStreamGetId(stream, streamId));
 }
 
