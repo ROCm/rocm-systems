@@ -73,7 +73,7 @@ static int ncclCumemHostEnable = -1;
 int ncclCuMemHostEnable() {
   if (ncclCumemHostEnable != -1)
     return ncclCumemHostEnable;
-#if ROCM_VERSION < 70200 || HIP_VERSION < 70200000
+#if HIP_VERSION < 70200000
   ncclCumemHostEnable = 0;
   return ncclCumemHostEnable;
 #else
