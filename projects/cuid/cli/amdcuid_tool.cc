@@ -54,7 +54,7 @@ void print_usage(const char* program_name) {
     std::cout << "Options:\n";
     std::cout << "  --generate-cuid              Generate/refresh CUID registry from discovered devices\n";
     std::cout << "                               Requires root privileges\n";
-    std::cout << "                               Must use --generate-key or --set-key to provide HMAC key\n";
+    std::cout << "                               Uses existing key or specify --generate-key/--set-key\n";
     std::cout << "  --generate-key               Generate a new random HMAC key (use with --generate-cuid)\n";
     std::cout << "  --set-key <key_file>         Set HMAC key from file (32 bytes, use with --generate-cuid)\n";
     std::cout << "  --notify-daemon              Notify daemon to refresh device registry (for udev integration)\n";
@@ -71,6 +71,8 @@ void print_usage(const char* program_name) {
     std::cout << "  sudo " << program_name << " --generate-cuid --generate-key\n\n";
     std::cout << "  # Generate CUID registry with existing key file\n";
     std::cout << "  sudo " << program_name << " --generate-cuid --set-key /path/to/hmac_key.bin\n\n";
+    std::cout << "  # Generate CUID registry using previously set key\n";
+    std::cout << "  sudo " << program_name << " --generate-cuid\n\n";
     std::cout << "  # Notify daemon of device changes (called by udev)\n";
     std::cout << "  " << program_name << " --notify-daemon\n\n";
     std::cout << "  # List all devices with their CUIDs\n";
@@ -179,14 +181,7 @@ int generate_cuid_files(const std::string& key_file, bool generate_key) {
         return 1;
     }
     
-    // Validate key options - must specify exactly one
-    if (key_file.empty() && !generate_key) {
-        std::cerr << "Error: Must specify either --generate-key or --set-key <file> with --generate-cuid\n";
-        std::cerr << "Use --generate-key to create a new random key, or\n";
-        std::cerr << "Use --set-key <file> to load an existing key from a file." << std::endl;
-        return 1;
-    }
-    
+    // Validate key options - cannot use both together
     if (!key_file.empty() && generate_key) {
         std::cerr << "Error: Cannot use both --generate-key and --set-key together.\n";
         std::cerr << "Use --generate-key to create a new random key, or\n";
@@ -226,13 +221,17 @@ int generate_cuid_files(const std::string& key_file, bool generate_key) {
         }
         std::cout << "Generated new HMAC key." << std::endl;
     }
+    // else: No key option specified - attempt to use existing key (will be validated by amdcuid_refresh)
+    // else: No key option specified - attempt to use existing key (will be validated by amdcuid_refresh)
     
     // Use amdcuid_refresh() to discover devices and generate CUID files
     amdcuid_status_t status = amdcuid_refresh();
     
     if (status != AMDCUID_STATUS_SUCCESS) {
         std::cerr << "Error: Failed to refresh CUID registry: " << amdcuid_status_to_string(status) << std::endl;
-        if (status == AMDCUID_STATUS_PERMISSION_DENIED) {
+        if (status == AMDCUID_STATUS_KEY_ERROR) {
+            std::cerr << "No HMAC key found. Please use --generate-key or --set-key <file> to create a key first." << std::endl;
+        } else if (status == AMDCUID_STATUS_PERMISSION_DENIED) {
             std::cerr << "Some devices may require root privileges to discover." << std::endl;
         }
         return 1;
