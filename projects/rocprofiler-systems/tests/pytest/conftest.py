@@ -143,6 +143,7 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     group.addoption(
         "--num-processes",
         action="store",
+        type=int,
         default=2,
         help="Set the number of processes to use for transpose MPI tests (default 2)",
     )
@@ -399,24 +400,6 @@ def pytest_generate_tests(metafunc):
 
 def pytest_collection_modifyitems(config, items) -> None:
     """Skip tests based on markers and available resources."""
-
-    # Collect node ids and their markers for CTest
-    if config.getoption("--ctest-mode", default="off") == "collect":
-        node_info = []
-        for item in items:
-            _standardize_test_name(item)
-            node_info.append(
-                {
-                    "nodeid": item._nodeid,
-                    "markers": [
-                        {"name": m.name}
-                        for m in item.iter_markers()
-                        if m.name != "parametrize"
-                    ],
-                }
-            )
-        print(json.dumps(node_info, indent=4))
-        pytest.exit(reason="Collected tests with markers", returncode=0)
 
     selected_tests = []
     deselected_tests = []

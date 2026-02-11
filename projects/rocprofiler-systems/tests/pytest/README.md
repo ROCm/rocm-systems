@@ -110,8 +110,8 @@ pytest <build-dir>/share/rocprofiler-systems/tests/pytest/ -n auto --dist=loadgr
 pytest <build-dir>/share/rocprofiler-systems/tests/pytest/ -n 4 --dist=loadgroup     # Use 4 workers
 ```
 
-> **Note:** You must use `--dist=loadgroup` to ensure tets ordering is respeced.
-
+> **Note:** You must use `--dist=loadgroup` to ensure test ordering is respected.
+>
 > **Warning:** Running tests in parallel can cause timeouts due to resource contention, especially for `runtime_instrument` tests. If you experience unexpected timeouts, try reducing the number of workers or running sequentially.
 
 ### Custom Flags

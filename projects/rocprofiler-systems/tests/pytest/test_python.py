@@ -252,7 +252,9 @@ class TestPython(RocprofsysTest):
             )
 
     @pytest.mark.rocpd("python_rocpd_env")
-    def python_source(self, python_version, python_rocpd_env, python_source_rocpd_rules):
+    def test_python_source(
+        self, python_version, python_rocpd_env, python_source_rocpd_rules
+    ):
         result = self.run_test(
             "python",
             target="source.py",

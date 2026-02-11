@@ -205,8 +205,10 @@ class RocprofsysConfig:
 
             raise FileNotFoundError(
                 f"Target executable '{name}' not found. Searched in:\n"
-                f"  - {self.rocprofsys_examples_dir}/python/tests/{name}\n"
+                f"  - {self.rocprofsys_examples_dir}/examples/python/{name}\n"
                 f"  - {self.rocprofsys_examples_dir}/{name}\n"
+                f"  - {self.rocprofsys_examples_dir}/examples/code-coverage/{name}\n"
+                f"  - {self.rocprofsys_examples_dir}/examples/rccl/{name}\n"
                 f"  - {self.rocprofsys_examples_dir}/examples/{name}/{name}\n"
                 f"  - {self.rocprofsys_bin_dir}/{name}\n"
                 f"  - PATH"
@@ -468,7 +470,6 @@ def _find_rocprofsys_executables(search_paths: list[Path]) -> dict[str, Optional
     rocprof_run = _find_executable("rocprof-sys-run", search_paths)
     rocprof_causal = _find_executable("rocprof-sys-causal", search_paths)
     rocprof_avail = _find_executable("rocprof-sys-avail", search_paths)
-    rocprof_causal = _find_executable("rocprof-sys-causal", search_paths)
 
     required_executables = {
         "rocprof-sys-instrument": rocprof_instrument,

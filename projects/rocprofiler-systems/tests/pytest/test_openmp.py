@@ -212,7 +212,7 @@ class TestOpenMPLU(RocprofsysTest):
     def test_sampling_duration(self, ompt_sampling_env):
         result = self.run_test(
             "sampling",
-            target="openmp-cg",
+            target="openmp-lu",
             env=ompt_sampling_env,
             timeout=300,
         )

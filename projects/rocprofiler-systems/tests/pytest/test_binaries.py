@@ -35,7 +35,7 @@ def get_ls_command() -> tuple[str, list[str]]:
 
 
 @pytest.mark.instrument
-class RocprofilerSystemsInstrument(RocprofsysTest):
+class TestRocprofilerSystemsInstrument(RocprofsysTest):
     """Tests for rocprof-sys-instrument binary."""
 
     target = "rocprof-sys-instrument"
@@ -62,7 +62,6 @@ class RocprofilerSystemsInstrument(RocprofsysTest):
         self.assert_regex(result, pass_regex=pass_regex)
 
     def test_simulate_ls(self):
-        self,
         ls_name, ls_args = get_ls_command()
 
         test_args = [
