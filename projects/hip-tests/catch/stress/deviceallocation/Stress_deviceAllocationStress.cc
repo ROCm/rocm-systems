@@ -440,7 +440,7 @@ TEST_CASE("Stress_deviceAllocation_Negative") {
  * Scenario: This test performs stress test of malloc/free in a loop
  * using single kernel.
  */
-TEST_CASE("Stress_deviceAllocation_malloc_loop_singlekernel") {
+TEST_CASE(Stress_deviceAllocation_malloc_loop_singlekernel) {
   REQUIRE(true == TestMemoryAllocationInLoop(TEST_MALLOC_FREE, false));
 }
 
@@ -448,7 +448,7 @@ TEST_CASE("Stress_deviceAllocation_malloc_loop_singlekernel") {
  * Scenario: This test performs stress test of new/delete in a loop
  * using single kernel.
  */
-TEST_CASE("Stress_deviceAllocation_new_loop_singlekernel") {
+TEST_CASE(Stress_deviceAllocation_new_loop_singlekernel) {
   REQUIRE(true == TestMemoryAllocationInLoop(TEST_NEW_DELETE, false));
 }
 
@@ -456,7 +456,7 @@ TEST_CASE("Stress_deviceAllocation_new_loop_singlekernel") {
  * Scenario: This test performs stress test of malloc/free in a loop
  * using multiple kernel.
  */
-TEST_CASE("Stress_deviceAllocation_malloc_loop_multkernel") {
+TEST_CASE(Stress_deviceAllocation_malloc_loop_multkernel) {
   REQUIRE(true == TestMemoryAllocationInLoop(TEST_MALLOC_FREE, true));
 }
 
@@ -464,6 +464,6 @@ TEST_CASE("Stress_deviceAllocation_malloc_loop_multkernel") {
  * Scenario: This test performs stress test of new/delete in a loop
  * using multiple kernel.
  */
-TEST_CASE("Stress_deviceAllocation_new_loop_multkernel") {
+TEST_CASE(Stress_deviceAllocation_new_loop_multkernel) {
   REQUIRE(true == TestMemoryAllocationInLoop(TEST_NEW_DELETE, true));
 }
