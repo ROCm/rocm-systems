@@ -12,6 +12,7 @@ set(common_sources
     parse.cpp
     regex.cpp
     sha256.cpp
+    thread_activity.cpp
     uuid_v7.cpp)
 
 add_executable(common-tests)

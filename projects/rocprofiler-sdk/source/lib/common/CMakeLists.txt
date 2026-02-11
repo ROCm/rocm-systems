@@ -15,6 +15,7 @@ set(common_sources
     static_object.cpp
     static_tl_object.cpp
     string_entry.cpp
+    thread_activity.cpp
     utility.cpp
     uuid_v7.cpp)
 set(common_headers
@@ -37,6 +38,7 @@ set(common_headers
     string_entry.hpp
     stringize_arg.hpp
     synchronized.hpp
+    thread_activity.hpp
     units.hpp
     utility.hpp
     uuid_v7.hpp)
