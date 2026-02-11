@@ -382,7 +382,7 @@ Block (Work-group)
   share data or synchronize with one another, as described in
   :ref:`memory_hierarchy`.
   
-  All wavefronts of a block execute on the same compute unit, ensuring they can
+  All wavefronts of a block execute on the same CU, ensuring they can
   access the same LDS and synchronize efficiently. This locality is crucial for
   performance when threads need to cooperate on shared data.
   
@@ -446,7 +446,7 @@ Grid
   * Overall parallelism of the computation
   
   The unique ID of each block within a grid can be 1, 2, or 3-dimensional, as
-  provided by the API and is queryable by every thread within the block through
+  provided by the API, and is accessible to every thread in the block through
   the ``blockIdx`` built-in variable.
   
   Grid dimensions are limited by queryable hardware capabilities.
@@ -551,7 +551,7 @@ Shared memory
   * Write results back to global memory, optionally using atomics for
     inter-work-group coordination
   
-  Each compute unit provides a fixed amount of LDS (the size depending on the
+  Each CU provides a fixed amount of LDS (the size depending on the
   architecture), shared among all resident work-groups. How much LDS a kernel
   consumes directly influences occupancy, since larger allocations reduce the
   number of active work-groups per CU.
@@ -859,7 +859,7 @@ Deep learning with MIOpen
 
 MIOpen provides GPU-accelerated primitives for deep neural networks, offering a
 programming model centered on neural network operations rather than explicit
-kernels. It occupies the same software layer as rocBLAS but specializes in deep
+kernels. It occupies the same software layer as rocBLAS but is specialized for deep
 learning workloads.
 
 Programming model characteristics

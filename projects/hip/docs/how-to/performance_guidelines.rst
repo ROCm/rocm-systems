@@ -56,9 +56,7 @@ Follow this systematic approach to optimize GPU performance:
 Profiling and analysis tools
 =============================
 
-ROCm provides comprehensive profiling and analysis tools for understanding and
-optimizing GPU performance. These tools are essential for diagnosing
-bottlenecks and measuring the impact of optimizations.
+ROCm offers a comprehensive suite of profiling and analysis tools that help developers understand and optimize GPU performance. These tools are essential for identifying bottlenecks and evaluating the effectiveness of performance optimizations.
 
 ROCm Profiler (rocprofv3)
 -------------------------
@@ -89,9 +87,7 @@ ROCprof Compute Viewer
 ----------------------
 
 ROCprof Compute Viewer provides a GUI-based environment for analyzing GPU
-kernel performance data. It specializes in kernel-level analysis, offering
-counter correlation and hierarchical performance breakdowns that make it easier
-to understand kernel execution patterns and identify optimization opportunities.
+kernel performance data. It delivers detailed kernel‑level insights, including counter correlation and hierarchical performance breakdowns, helping developers interpret execution patterns and identify optimization opportunities.
 
 Key features:
 
@@ -113,11 +109,7 @@ https://ui.perfetto.dev. The ``rocprofv3`` tool can generate traces in
 Perfetto-compatible format, allowing you to visualize the complete timeline of
 application execution.
 
-Perfetto provides a web-based interface for analyzing traces, showing the
-temporal relationship between host operations, kernel launches, memory
-transfers, and synchronization events. This holistic view helps identify
-performance issues related to API overhead, inefficient synchronization, or
-suboptimal overlap between computation and data transfer.
+Perfetto provides a web‑based interface for analyzing traces, visualizing the temporal relationships among host operations, kernel launches, memory transfers, and synchronization events. This holistic perspective helps identify performance issues caused from API overhead, inefficient synchronization, or insufficient overlap between computation and data movement.
 
 Key capabilities:
 

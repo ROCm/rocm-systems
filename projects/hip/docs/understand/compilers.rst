@@ -102,7 +102,7 @@ GFX IP acts as a virtual hardware target, decoupling high-level programming
 models (HIP, OpenMP, OpenCL) from the underlying physical GPU design.
 
 While AMD does not explicitly name its compatibility model as "onion-layered,"
-the GFX IP system follows a similar principle: newer architectures typically
+the GFX IP system follows a similar principle: newer architectures generally
 extend, rather than break, existing instruction sets.
 
 Thus, code compiled for an older architecture (for example, ``gfx90a``) can
@@ -154,10 +154,7 @@ In this syntax:
 * Specialized matrix instructions (``v_mfma_*``) invoke the :ref:`Matrix Core
   (MFMA) hardware units <mfma_units>`.
 
-Although AMDGPU assembly can be written by hand, doing so is rare. Instead,
-developers typically view or analyze compiler-generated assembly when
-optimizing kernels, debugging register pressure, or tuning memory access
-patterns.
+Although AMDGPU assembly can be written by hand, this is uncommon. Developers typically inspect compiler‑generated assembly when optimizing kernels, diagnosing register pressure, or tuning memory‑access patterns
 
 The ROCm disassembler (``llvm-objdump``) and ROCm profiler (``rocprofv3``)
 allow inspection of generated GFX ISA alongside high-level HIP or OpenMP source
@@ -182,7 +179,7 @@ is one of the key outputs of the ROCm compiler toolchain, produced by
 AMD's documentation refers to this layer as both a virtual instruction set and
 a target-specific dialect of LLVM IR. From a programmer's perspective, AMDGPU
 IR defines a virtual machine model for parallel thread execution: compilers and
-optimizers emit this IR knowing that it will execute with consistent semantics
+optimizers emit this IR with the expectation that it will execute with consistent semantics
 across multiple generations of AMD hardware, including future architectures not
 yet released.
 
@@ -192,7 +189,7 @@ abstracting the details of the physical :ref:`compute units <compute_unit>`,
 providing explicit control over threads, registers, and memory spaces.
 
 Unlike traditional CPU ISAs, AMDGPU IR is not executed directly. Instead, it is
-further compiled (just-in-time or ahead-of-time) into GFX ISA, the
+further compiled (either just‑in‑time or ahead‑of‑time) into GFX ISA, the
 device-specific binary that runs on a given GPU architecture (for example,
 ``gfx942`` for CDNA3 MI300X or ``gfx1200`` for RDNA3). This multi-stage
 compilation allows forward compatibility: kernels compiled for one generation
@@ -224,9 +221,9 @@ These instructions represent operations in the virtual machine model:
 The AMDGPU IR machine model reflects the hardware reality of AMD GPUs: a single
 instruction stream drives a :ref:`wavefront <wavefront>` of 64 threads that
 execute in lockstep on the SIMD pipelines, each maintaining its own register
-state but sharing program flow and :ref:`local memory <lds>`. Wavefronts
+state while sharing program flow and :ref:`local memory <lds>`. Wavefronts
 cooperate through the :ref:`Local Data Share (LDS) <lds>` and synchronize via
-barriers, the same abstractions visible in the high-level ROCm programming
+barriers, the same abstractions exposed in the high-level ROCm programming
 model.
 
 Since AMDGPU IR is integrated with the open-source LLVM compiler
@@ -247,7 +244,7 @@ distributed as standalone ``.hsaco`` files.
 
 The ``llvm-objdump`` utility provides multiple capabilities for analyzing GPU
 binaries. With the ``--offloading`` flag, it can list and extract information
-about the contents of ROCm binaries, including code object metadata, kernel
+from the contents of ROCm binaries, including code object metadata, kernel
 symbols, target architectures (for example, ``gfx90a``, ``gfx1100``), and
 linkage details. It supports both standalone ``.hsaco`` files and "fat
 binaries" embedded within host executables. With the ``--triple=amdgcn`` flag,
