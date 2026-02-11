@@ -33,7 +33,7 @@ THE SOFTWARE.
   CAST_KERNEL_DEF(kern_name, Float16, T)                                                           \
   CAST_REF_DEF(kern_name, Float16, T)                                                              \
                                                                                                    \
-  TEST_CASE(Unit_Device_ #kern_name "_Accuracy_Positive") {                                      \
+  TEST_CASE("Unit_Device_" #kern_name "_Accuracy_Positive") {                                      \
     Float16 (*ref)(T) = kern_name##_ref;                                                           \
     CastIntRangeTest(kern_name##_kernel, ref, EqValidatorBuilderFactory<Float16>());               \
   }
@@ -282,7 +282,7 @@ CAST_INT2HALF_RN_TEST_DEF(__ushort2half_ru, unsigned short)
   CAST_KERNEL_DEF(kern_name, Float16, T)                                                           \
   CAST_REF_DEF(kern_name, Float16, T)                                                              \
                                                                                                    \
-  TEST_CASE(Unit_Device_ #kern_name "_Accuracy_Positive") {                                      \
+  TEST_CASE("Unit_Device_" #kern_name "_Accuracy_Positive") {                                      \
     Float16 (*ref)(T) = kern_name##_ref;                                                           \
     CastIntBruteForceTest(kern_name##_kernel, ref, EqValidatorBuilderFactory<Float16>());          \
   }

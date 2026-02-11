@@ -32,7 +32,7 @@ THE SOFTWARE.
   CAST_KERNEL_DEF(kern_name, T, float)                                                             \
   CAST_F2I_REF_DEF(kern_name, T, float, ref_func)                                                  \
                                                                                                    \
-  TEST_CASE(Unit_Device_ #kern_name "_Positive") {                                               \
+  TEST_CASE("Unit_Device_" #kern_name "_Positive") {                                               \
     T (*ref)(float) = kern_name##_ref;                                                             \
     UnarySinglePrecisionRangeTest(kern_name##_kernel, ref, EqValidatorBuilderFactory<T>(),         \
                                   std::numeric_limits<float>::lowest(),                            \
@@ -43,7 +43,7 @@ THE SOFTWARE.
   CAST_KERNEL_DEF(kern_name, T, float)                                                             \
   CAST_F2I_RZ_REF_DEF(kern_name, T, float)                                                         \
                                                                                                    \
-  TEST_CASE(Unit_Device_ #kern_name "_Positive") {                                               \
+  TEST_CASE("Unit_Device_" #kern_name "_Positive") {                                               \
     T (*ref)(float) = kern_name##_ref;                                                             \
     UnarySinglePrecisionRangeTest(kern_name##_kernel, ref, EqValidatorBuilderFactory<T>(),         \
                                   std::numeric_limits<float>::lowest(),                            \
@@ -203,7 +203,7 @@ TEST_CASE(Unit_Device___float2uint_Negative_RTC) { NegativeTestRTCWrapper<12>(kF
   CAST_KERNEL_DEF(kern_name, T, float)                                                             \
   CAST_F2I_REF_DEF(kern_name, T, float, ref_func)                                                  \
                                                                                                    \
-  TEST_CASE(Unit_Device_ #kern_name "_Positive") {                                               \
+  TEST_CASE("Unit_Device_" #kern_name "_Positive") {                                               \
     T (*ref)(float) = kern_name##_ref;                                                             \
     UnarySinglePrecisionRangeTest(kern_name##_kernel, ref, EqValidatorBuilderFactory<T>(),         \
                                   static_cast<float>(std::numeric_limits<T>::min()),               \
@@ -214,7 +214,7 @@ TEST_CASE(Unit_Device___float2uint_Negative_RTC) { NegativeTestRTCWrapper<12>(kF
   CAST_KERNEL_DEF(kern_name, T, float)                                                             \
   CAST_F2I_RZ_REF_DEF(kern_name, T, float)                                                         \
                                                                                                    \
-  TEST_CASE(Unit_Device_ #kern_name "_Positive") {                                               \
+  TEST_CASE("Unit_Device_" #kern_name "_Positive") {                                               \
     T (*ref)(float) = kern_name##_ref;                                                             \
     UnarySinglePrecisionRangeTest(kern_name##_kernel, ref, EqValidatorBuilderFactory<T>(),         \
                                   static_cast<float>(std::numeric_limits<T>::min()),               \

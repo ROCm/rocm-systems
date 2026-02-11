@@ -73,12 +73,12 @@ TEST_CASE(Unit_Device_fdividef_Negative_RTC) { NegativeTestRTCWrapper<4>(kFdivid
     }                                                                                              \
   }                                                                                                \
                                                                                                    \
-  TEST_CASE(Unit_Device_ #kern_name "_Accuracy_Positive - float") {                              \
+  TEST_CASE("Unit_Device_" #kern_name "_Accuracy_Positive - float") {                              \
     bool (*ref)(double) = ref_func;                                                                \
     UnarySinglePrecisionTest(kern_name##_kernel<float>, ref, EqValidatorBuilderFactory<bool>());   \
   }                                                                                                \
                                                                                                    \
-  TEST_CASE(Unit_Device_ #kern_name "_Accuracy_Positive - double") {                             \
+  TEST_CASE("Unit_Device_" #kern_name "_Accuracy_Positive - double") {                             \
     bool (*ref)(long double) = ref_func;                                                           \
     UnaryDoublePrecisionTest(kern_name##_kernel<double>, ref, EqValidatorBuilderFactory<bool>());  \
   }

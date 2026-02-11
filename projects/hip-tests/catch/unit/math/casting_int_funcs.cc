@@ -32,7 +32,7 @@ THE SOFTWARE.
   CAST_KERNEL_DEF(kern_name, T1, T2)                                                               \
   CAST_RND_REF_DEF(kern_name, T1, T2, round_dir)                                                   \
                                                                                                    \
-  TEST_CASE(Unit_Device_ #kern_name "_Positive") {                                               \
+  TEST_CASE("Unit_Device_" #kern_name "_Positive") {                                               \
     T1 (*ref)(T2) = kern_name##_ref;                                                               \
     CastIntRangeTest(kern_name##_kernel, ref, EqValidatorBuilderFactory<T1>());                    \
   }
@@ -41,7 +41,7 @@ THE SOFTWARE.
   CAST_KERNEL_DEF(kern_name, T1, T2)                                                               \
   CAST_REF_DEF(kern_name, T1, T2)                                                                  \
                                                                                                    \
-  TEST_CASE(Unit_Device_ #kern_name "_Positive") {                                               \
+  TEST_CASE("Unit_Device_" #kern_name "_Positive") {                                               \
     T1 (*ref)(T2) = kern_name##_ref;                                                               \
     CastIntRangeTest(kern_name##_kernel, ref, EqValidatorBuilderFactory<T1>());                    \
   }
@@ -256,7 +256,7 @@ TEST_CASE(Unit_Device___uint2double_Negative_RTC) { NegativeTestRTCWrapper<3>(kU
   CAST_KERNEL_DEF(kern_name, T1, T2)                                                               \
   CAST_RND_REF_DEF(kern_name, T1, T2, round_dir)                                                   \
                                                                                                    \
-  TEST_CASE(Unit_Device_ #kern_name "_Positive") {                                               \
+  TEST_CASE("Unit_Device_" #kern_name "_Positive") {                                               \
     T1 (*ref)(T2) = kern_name##_ref;                                                               \
     CastIntBruteForceTest(kern_name##_kernel, ref, EqValidatorBuilderFactory<T1>());               \
   }
@@ -265,7 +265,7 @@ TEST_CASE(Unit_Device___uint2double_Negative_RTC) { NegativeTestRTCWrapper<3>(kU
   CAST_KERNEL_DEF(kern_name, T1, T2)                                                               \
   CAST_REF_DEF(kern_name, T1, T2)                                                                  \
                                                                                                    \
-  TEST_CASE(Unit_Device_ #kern_name "_Positive") {                                               \
+  TEST_CASE("Unit_Device_" #kern_name "_Positive") {                                               \
     T1 (*ref)(T2) = kern_name##_ref;                                                               \
     CastIntBruteForceTest(kern_name##_kernel, ref, EqValidatorBuilderFactory<T1>());               \
   }

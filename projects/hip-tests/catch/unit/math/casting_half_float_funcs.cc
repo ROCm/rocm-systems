@@ -33,7 +33,7 @@ THE SOFTWARE.
   CAST_KERNEL_DEF(kern_name, Float16, float)                                                       \
   CAST_RND_REF_DEF(kern_name, Float16, float, round_dir)                                           \
                                                                                                    \
-  TEST_CASE(Unit_Device_ #kern_name "_Accuracy_Limited_Positive") {                              \
+  TEST_CASE("Unit_Device_" #kern_name "_Accuracy_Limited_Positive") {                              \
     Float16 (*ref)(float) = kern_name##_ref;                                                       \
     UnarySinglePrecisionRangeTest(kern_name##_kernel, ref, EqValidatorBuilderFactory<Float16>(),   \
                                   std::numeric_limits<float>::lowest(), 0.f);                      \
@@ -45,7 +45,7 @@ THE SOFTWARE.
   CAST_KERNEL_DEF(kern_name, Float16, float)                                                       \
   CAST_REF_DEF(kern_name, Float16, float)                                                          \
                                                                                                    \
-  TEST_CASE(Unit_Device_ #kern_name "_Accuracy_Positive") {                                      \
+  TEST_CASE("Unit_Device_" #kern_name "_Accuracy_Positive") {                                      \
     Float16 (*ref)(float) = kern_name##_ref;                                                       \
     UnarySinglePrecisionRangeTest(kern_name##_kernel, ref, EqValidatorBuilderFactory<Float16>(),   \
                                   std::numeric_limits<float>::lowest(),                            \

@@ -33,7 +33,7 @@ THE SOFTWARE.
   CAST_KERNEL_DEF(kern_name, T, Float16)                                                           \
   CAST_F2I_RZ_REF_DEF(kern_name, T, Float16)                                                       \
                                                                                                    \
-  TEST_CASE(Unit_Device_ #kern_name "_Accuracy_Positive") {                                      \
+  TEST_CASE("Unit_Device_" #kern_name "_Accuracy_Positive") {                                      \
     T (*ref)(Float16) = kern_name##_ref;                                                           \
     CastUnaryHalfPrecisionTest(kern_name##_kernel, ref, EqValidatorBuilderFactory<T>());           \
   }
