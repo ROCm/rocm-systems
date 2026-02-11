@@ -589,7 +589,7 @@ template<typename T, int nFMA>
 __global__ void flops_benchmark(T *buf, int count)
 {
     static_assert(nFMA % 4 == 0, "nFMA must be divisible by 4 for vec4 operations");
-    
+
     const T k = (T)1.1;
 
     const int grid_size = gridDim.x * blockDim.x;
