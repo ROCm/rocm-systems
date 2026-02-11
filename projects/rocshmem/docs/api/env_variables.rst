@@ -94,3 +94,9 @@ control the behavior of rocSHMEM.
       - | ``0``: Disabled.
         | ``1``: Enabled.
 
+    * - | ``ROCSHMEM_GDA_ENABLE_DMABUF``
+        | Enable dmabuf support for memory registration.
+      - ``0``
+      - | ``0``: Disabled.
+        | ``1``: Enabled.
+
