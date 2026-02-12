@@ -1,3 +1,5 @@
+#ifndef NCCL_DEVICE_PRIMS_LL_H_
+#define NCCL_DEVICE_PRIMS_LL_H_
 /*************************************************************************
  * Copyright (c) 2016-2022, NVIDIA CORPORATION. All rights reserved.
  * Modifications Copyright (c) 2019-2022 Advanced Micro Devices, Inc. All rights reserved.
@@ -854,3 +856,5 @@ public:
     return mscclGenericOp<0,1,0,0>(&srcs, 1, &dsts, 1, eltN);
   }
 };
+
+#endif // NCCL_DEVICE_PRIMS_LL_H_
