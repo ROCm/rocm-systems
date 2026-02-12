@@ -37,8 +37,10 @@ THE SOFTWARE.
 #include <hip/amd_detail/hip_cooperative_groups_helper.h>
 #endif
 
+#if !defined(__HIPCC_RTC__)
 #include <type_traits>
-#include <cstddef>
+#endif
+
 namespace cooperative_groups {
 
 /** \brief The base type of all cooperative group types.
@@ -1302,14 +1304,6 @@ __CG_QUALIFIER__ coalesced_group binary_partition(const thread_block_tile<size, 
   }
 }
 
-// Non-STL utility templates
-template <typename Ty>
-using remove_qual = typename __hip_internal::remove_cv<typename std::remove_reference<Ty>::type>::type;
-
-template <typename TyLhs, typename TyRhs>
-using is_op_type_same = __hip_internal::is_same<remove_qual<TyLhs>, remove_qual<TyRhs>
->;
-
 template <class T>
 struct plus {
   __CG_QUALIFIER__ T operator()(const T& lhs, const T& rhs) const
@@ -1358,11 +1352,17 @@ struct bit_or {
   }
 };
 
+namespace impl {
+  template <typename T, typename U>
+  using is_param_type_same = __hip_internal::is_same<typename __hip_internal::remove_cvref<T>,
+                                                     typename __hip_internal::remove_cvref<U>>;
+}
+
 template <typename TyGroup, typename TyVal, typename TyFn>
 __CG_QUALIFIER__ auto reduce(const TyGroup& group, TyVal&& val, TyFn&& op) -> decltype(op(val, val)) {
-  using Op  = std::decay_t<TyFn>;
-  using Val = std::decay_t<TyVal>;
-  static_assert(is_op_type_same<TyVal, decltype(op(val, val))>::value, "Operator input and output types differ");
+  using Op = typename __hip_internal::remove_cvref<TyFn>::type;
+  using Val = typename __hip_internal::remove_cvref<TyVal>::type;
+  static_assert(impl::is_param_type_same<Val, decltype(op(val, val))>::value, "Operator input and output types differ");
 
   // TODO g-h-c check that all the threads in tile and only those the tile are active
   // we cannot simply use the __activemask() here, because more than one tile could have active
@@ -1370,22 +1370,22 @@ __CG_QUALIFIER__ auto reduce(const TyGroup& group, TyVal&& val, TyFn&& op) -> de
   unsigned long long mask = ~0ull >> (64 - group.num_threads());
   mask <<= (((threadIdx.x % warpSize) / group.num_threads()) * group.num_threads());
 
-  if constexpr (std::is_same<Op, cooperative_groups::plus<Val>>::value) {
+  if constexpr (__hip_internal::is_same<Op, cooperative_groups::plus<Val>>::value) {
     return __reduce_add_sync(mask, val);
   }
-  else if constexpr (std::is_same<Op, cooperative_groups::bit_and<Val>>::value) {
+  else if constexpr (__hip_internal::is_same<Op, cooperative_groups::bit_and<Val>>::value) {
     return __reduce_and_sync(mask, val);
   }
-  else if constexpr (std::is_same<Op, cooperative_groups::bit_or<Val>>::value) {
+  else if constexpr (__hip_internal::is_same<Op, cooperative_groups::bit_or<Val>>::value) {
     return __reduce_or_sync(mask, val);
   }
-  else if constexpr (std::is_same<Op, cooperative_groups::less<Val>>::value) {
+  else if constexpr (__hip_internal::is_same<Op, cooperative_groups::less<Val>>::value) {
     return __reduce_min_sync(mask, val);
   }
-  else if constexpr (std::is_same<Op, cooperative_groups::greater<Val>>::value) {
+  else if constexpr (__hip_internal::is_same<Op, cooperative_groups::greater<Val>>::value) {
     return __reduce_max_sync(mask, val);
   }
-  else if constexpr (std::is_same<Op, cooperative_groups::bit_xor<Val>>::value) {
+  else if constexpr (__hip_internal::is_same<Op, cooperative_groups::bit_xor<Val>>::value) {
     return __reduce_xor_sync(mask, val);
   }
   else {

@@ -157,6 +157,24 @@ template <class T> struct remove_cv<const volatile T> {
   typedef T type;
 };
 
+template <typename T>
+struct remove_reference
+{ using type = T; };
+
+template <typename T>
+struct remove_reference<T&>
+{ using type = T; };
+
+template <typename T>
+struct remove_reference<T&&>
+{ using type = T; };
+
+template <typename T>
+struct remove_cvref {
+  using type = typename remove_cv<typename remove_reference<T>::type>::type;
+};
+
+
 template <class T> struct is_void : public is_same<void, typename remove_cv<T>::type> {};
 
 template <class From, class To> struct is_convertible
