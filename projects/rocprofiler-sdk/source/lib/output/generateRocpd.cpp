@@ -462,6 +462,15 @@ get_insert_statement_impl(std::string_view _table, ContainerT<sql_insert_value, 
         }
     }
 
+    auto needs_cleanup = true;
+    auto cleanup_guard = common::scope_destructor{[&]() {
+        if(needs_cleanup && stmt)
+        {
+            sqlite3_reset(stmt);
+            sqlite3_clear_bindings(stmt);
+        }
+    }};
+
     for(size_t i = 0; i < values.size(); ++i)
     {
         int idx = static_cast<int>(i + 1);
@@ -515,6 +524,7 @@ get_insert_statement_impl(std::string_view _table, ContainerT<sql_insert_value, 
 
     SQLITE3_CHECK(sqlite3_reset(stmt));
     SQLITE3_CHECK(sqlite3_clear_bindings(stmt));
+    needs_cleanup = false;
 
     return std::string{};
 }
