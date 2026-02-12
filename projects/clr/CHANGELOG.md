@@ -2,6 +2,18 @@
 
 Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs.amd.com/projects/HIP/en/latest/index.html)
 
+## HIP 7.2.1 for ROCm 7.2.1
+
+### Resolved issues
+
+* Corrected the validation of stream capture in global‑capture mode. It is no longer affected by any thread‑local capture‑mode sequences occurring in other threads. 
+* Corrected the return value of `hipEventQuery` and `hipEventSynchronize`. HIP also added an additional function to properly handle and restrict stream-capture. 
+* Corrected an issue in the batch-dispatch doorbell for AQL packets to avoid a potential CPU hang.
+
+### Optimized
+
+* HIP disables memory‑object reference counting in direct‑dispatch mode. This prevents potential delays in memory‑object destruction that could otherwise affect application logic.
+
 ## HIP 7.2 for ROCm 7.2
 
 ### Added
