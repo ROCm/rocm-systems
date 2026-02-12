@@ -70,7 +70,7 @@ class AMDSMIParser(argparse.ArgumentParser):
     """
     def __init__(self, version, list, static, firmware, bad_pages, metric,
                  process, profile, event, topology, set_value, reset, monitor,
-                 xgmi, partition, ras, node, rocm_smi, default, sys_argv=None,
+                 xgmi, partition, ras, node, memory, _rocm_smi, default, sys_argv=None,
                  helpers=None):
 
         # Helper variables
@@ -144,7 +144,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         self.possible_commands = ['version', 'list', 'static', 'firmware', 'ucode', 'bad-pages',
                                   'metric', 'process', 'profile', 'event', 'topology', 'set',
                                   'reset', 'monitor', 'dmon', 'xgmi', 'partition', 'ras',
-                                  'node', 'default']
+                                  'node', 'memory', 'default']
 
         # Add all subparsers
         if sys_argv is not None:
@@ -166,6 +166,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                 self._add_partition_parser(self.subparsers, partition)
                 self._add_ras_parser(self.subparsers, ras)
                 self._add_node_parser(self.subparsers, node)
+                self._add_memory_parser(self.subparsers, memory)
             elif any(arg in sys_argv for arg in ['version']):
                 self._add_version_parser(self.subparsers, version)
             elif any(arg in sys_argv for arg in ['list']):
@@ -200,6 +201,8 @@ class AMDSMIParser(argparse.ArgumentParser):
                 self._add_ras_parser(self.subparsers, ras)
             elif any(arg in sys_argv for arg in ['node']):
                 self._add_node_parser(self.subparsers, node)
+            elif any(arg in sys_argv for arg in ['memory']):
+                self._add_memory_parser(self.subparsers, memory)
             else:
                 # If no subcommand is given, add the default parser
                 self._add_default_parser(self.subparsers, default)
@@ -227,6 +230,23 @@ class AMDSMIParser(argparse.ArgumentParser):
             raise amdsmi_cli_exceptions.AmdSmiMissingParameterValueException(sub_arg, outputformat)
         else:
             raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(sys.argv[1], int_value, outputformat)
+
+
+    def _positive_float(self, float_value, sub_arg=None):
+        # Argument type validator for positive float values
+        try:
+            value = float(float_value)
+            if value > 0:
+                return value
+        except ValueError:
+            # Non-numeric values are handled via custom CLI exceptions below
+            pass
+
+        outputformat = self.helpers.get_output_format()
+        if float_value == "":
+            raise amdsmi_cli_exceptions.AmdSmiMissingParameterValueException(sub_arg, outputformat)
+        else:
+            raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(sys.argv[1], float_value, outputformat)
 
 
     def _is_valid_string(self, string_value, sub_arg=None):
@@ -1750,6 +1770,42 @@ class AMDSMIParser(argparse.ArgumentParser):
         # Add Universal Arguments
         self._add_device_arguments(partition_parser, required=False)
         self._add_command_modifiers(partition_parser)
+
+
+    def _add_memory_parser(self, subparsers: argparse._SubParsersAction, func):
+        if not self.helpers.is_amdgpu_initialized():
+            # The memory subcommand is only applicable to systems with amdgpu initialized
+            return
+
+        # Subparser help text
+        memory_help = "Display and configure GPU memory settings"
+        memory_subcommand_help = f"{self.description}\n\nManage VRAM carveout (dedicated GPU memory) and GTT (shared GPU memory) settings.\
+                                \nWithout arguments, displays current memory configuration.\
+                                \nSetting memory values requires system reboot to take effect."
+        memory_optionals_title = "Memory arguments"
+
+        # Options help text
+        vram_help = "Set VRAM carveout size by option index. Use without arguments to see available options."
+        gtt_help = "Set GTT (shared GPU memory) size in GB."
+        reset_gtt_help = "Reset GTT (shared GPU memory) to system default."
+
+        # Create memory subparser
+        memory_parser = subparsers.add_parser('memory', help=memory_help, description=memory_subcommand_help)
+        memory_parser._optionals.title = memory_optionals_title
+        memory_parser.formatter_class = AMDSMISubparserHelpFormatter
+        memory_parser.set_defaults(func=func)
+
+        # Handle Memory Options
+        memory_parser.add_argument('-v', '--vram', action='store', type=lambda value: self._not_negative_int(value, '--vram'),
+                                  required=False, help=vram_help, metavar='INDEX')
+        memory_parser.add_argument('-t', '--gtt', action='store', type=lambda value: self._positive_float(value, '--gtt'),
+                                  required=False, help=gtt_help, metavar='GB')
+        memory_parser.add_argument('-r', '--reset-gtt', action='store_true',
+                                  required=False, help=reset_gtt_help)
+
+        # Add Universal Arguments
+        self._add_device_arguments(memory_parser, required=False)
+        self._add_command_modifiers(memory_parser)
 
 
     def _add_ras_parser(self, subparsers: argparse._SubParsersAction, func):

@@ -6760,3 +6760,101 @@ def amdsmi_get_gpu_busy_percent(processor_handle: processor_handle_t):
     gpu_busy_percent = ctypes.c_uint32(0)
     _check_res(amdsmi_wrapper.amdsmi_get_gpu_busy_percent(processor_handle, ctypes.byref(gpu_busy_percent)))
     return gpu_busy_percent.value
+
+
+# Memory Size Management Functions
+
+def amdsmi_get_gpu_uma_carveout_info(processor_handle: processor_handle_t):
+    """
+    Get UMA carveout information for a GPU.
+
+    Args:
+        processor_handle: GPU processor handle
+
+    Returns:
+        dict: Dictionary with 'current_index', 'num_options', and 'options' list
+
+    Raises:
+        AmdSmiParameterException: If processor_handle is invalid
+        AmdSmiException: If the function fails
+    """
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+
+    info = amdsmi_wrapper.amdsmi_uma_carveout_info_t()
+    _check_res(amdsmi_wrapper.amdsmi_get_gpu_uma_carveout_info(processor_handle, ctypes.byref(info)))
+
+    # Convert to Python dict
+    result = {
+        'current_index': info.current_index,
+        'num_options': info.num_options,
+        'options': []
+    }
+
+    for i in range(info.num_options):
+        opt = {
+            'index': info.options[i].index,
+            'description': info.options[i].description.decode('utf-8') if isinstance(info.options[i].description, bytes) else info.options[i].description
+        }
+        result['options'].append(opt)
+
+    return result
+
+
+def amdsmi_set_gpu_uma_carveout(processor_handle: processor_handle_t, option_index: int):
+    """
+    Set UMA carveout size by option index.
+
+    Args:
+        processor_handle: GPU processor handle
+        option_index: Index of the carveout option to set
+
+    Raises:
+        AmdSmiParameterException: If processor_handle is invalid
+        AmdSmiException: If the function fails
+    """
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+
+    _check_res(amdsmi_wrapper.amdsmi_set_gpu_uma_carveout(processor_handle, option_index))
+
+
+def amdsmi_get_ttm_info():
+    """
+    Get Translation Table Manager (TTM) memory information.
+
+    Returns:
+        dict: Dictionary with 'current_pages'
+
+    Raises:
+        AmdSmiException: If the function fails
+    """
+    info = amdsmi_wrapper.amdsmi_ttm_info_t()
+    _check_res(amdsmi_wrapper.amdsmi_get_ttm_info(ctypes.byref(info)))
+
+    return {
+        'current_pages': info.current_pages
+    }
+
+
+def amdsmi_set_ttm_pages_limit(pages: int):
+    """
+    Set TTM memory limit in pages.
+
+    Args:
+        pages: Number of pages to set as TTM limit
+
+    Raises:
+        AmdSmiException: If the function fails
+    """
+    _check_res(amdsmi_wrapper.amdsmi_set_ttm_pages_limit(pages))
+
+
+def amdsmi_reset_ttm_pages_limit():
+    """
+    Reset TTM memory limit to system default.
+
+    Raises:
+        AmdSmiException: If the function fails
+    """
+    _check_res(amdsmi_wrapper.amdsmi_reset_ttm_pages_limit())

@@ -1174,6 +1174,49 @@ class TestAmdSmiCli(unittest.TestCase):
         self.RunCmds(cmds)
         return
 
+    def test_memory(self):
+        """Test memory command (display mode only - no write operations in automated tests)"""
+        self.common.print_func_name('')
+        msg = f'{self.tab}### amd-smi memory'
+        self.common.print(msg)
+
+        # Test display mode (no arguments - read-only)
+        cmd = 'amd-smi memory'
+        (rc, data, std_err) = self.util.RunCmdSync(cmd)
+        self.assertEqual(rc, self.PASS, f"Command '{cmd}' failed with rc={rc}")
+
+        # Test display mode with JSON output
+        cmd = 'amd-smi memory --json'
+        (rc, data, std_err) = self.util.RunCmdSync(cmd)
+        self.assertEqual(rc, self.PASS, f"Command '{cmd}' failed with rc={rc}")
+        if data:
+            try:
+                json_data = json.loads(data)
+                self.assertIsInstance(json_data, (list, dict))
+            except json.JSONDecodeError:
+                self.fail(f"Invalid JSON output for command '{cmd}'")
+
+        # Test display mode with CSV output
+        cmd = 'amd-smi memory --csv'
+        (rc, data, std_err) = self.util.RunCmdSync(cmd)
+        self.assertEqual(rc, self.PASS, f"Command '{cmd}' failed with rc={rc}")
+
+        # Test help
+        cmd = 'amd-smi memory --help'
+        (rc, data, std_err) = self.util.RunCmdSync(cmd)
+        self.assertEqual(rc, self.PASS, f"Command '{cmd}' failed with rc={rc}")
+        self.assertIn('memory', data.lower())
+
+        # Note: We do NOT test --vram, --gtt, or --reset-gtt in automated tests because:
+        # 1. They require root/sudo permissions
+        # 2. They require system reboot to take effect
+        # 3. They could interfere with the test system configuration
+        # These options should be tested manually or in dedicated integration test environments
+
+        msg = f'{self.tab}Memory command tests passed (display mode only)'
+        self.common.print(msg)
+        return
+
 
 if __name__ == '__main__':
     verbose=1

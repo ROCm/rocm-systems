@@ -1448,6 +1448,45 @@ class AMDSMIHelpers():
         return valid_clock_input, input_clock_type
 
 
+    # Memory Size Management Helper Functions (using library functions)
+
+    def gb_to_pages(self, gb):
+        """Convert GB to pages.
+
+        Args:
+            gb: Size in gigabytes (float)
+
+        Returns:
+            int: Number of pages
+        """
+        page_size = 4096
+        bytes_value = gb * (1024 ** 3)
+        return int(bytes_value / page_size)
+
+    def confirm_reboot_required_warning(self, auto_respond=False):
+        """Print warning that a reboot is required and prompt user.
+
+        Args:
+            auto_respond: Response to automatically provide for all prompts
+        """
+        print('''
+            ******WARNING******
+
+            This operation requires a system reboot to take effect.
+
+            Please save all your work before proceeding.
+            You will need to manually reboot the system after this operation completes.
+            ''')
+        if not auto_respond:
+            user_input = input('Do you want to continue? [y/n] ')
+        else:
+            user_input = auto_respond
+        if user_input in ['y', 'Y', 'yes', 'Yes', 'YES']:
+            return
+        else:
+            sys.exit('Confirmation not given. Exiting without making changes')
+
+
     def confirm_out_of_spec_warning(self, auto_respond=False):
         """ Print the warning for running outside of specification and prompt user to accept the terms.
 
@@ -2756,3 +2795,65 @@ class AMDSMIHelpers():
                     "message": error_msg
                 }
             return error_msg
+
+    def prompt_reboot(self):
+        """Prompt user to reboot and execute if confirmed
+
+        Returns:
+            bool: True if reboot was successful or user declined, False on error
+        """
+        try:
+            response = input("Would you like to reboot the system now? (y/n): ").strip().lower()
+            if response in ("y", "yes"):
+                return self._reboot_system()
+            return True
+        except (KeyboardInterrupt, EOFError):
+            print()  # New line after Ctrl+C
+            return True
+
+    def _reboot_system(self):
+        """Reboot the system using logind D-Bus interface
+
+        Returns:
+            bool: True if reboot initiated successfully, False otherwise
+        """
+        # Try systemd logind first (modern systems)
+        if self._reboot_logind():
+            return True
+
+        # Fallback to systemctl/reboot command
+        print("D-Bus reboot failed, falling back to systemctl...")
+        import subprocess
+        try:
+            subprocess.run(["systemctl", "reboot"], check=True)
+            return True
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            try:
+                subprocess.run(["reboot"], check=True)
+                return True
+            except (subprocess.CalledProcessError, FileNotFoundError):
+                print("Failed to initiate reboot. Please reboot manually.")
+                return False
+
+    def _reboot_logind(self):
+        """Reboot using systemd-logind D-Bus interface
+
+        Returns:
+            bool: True if reboot initiated successfully, False otherwise
+        """
+        # Try dbus library (most common)
+        try:
+            import dbus
+            bus = dbus.SystemBus()
+            obj = bus.get_object("org.freedesktop.login1", "/org/freedesktop/login1")
+            intf = dbus.Interface(obj, "org.freedesktop.login1.Manager")
+            intf.Reboot(True)  # True = interactive authentication
+            # Give the system a brief moment to begin shutting down before continuing
+            time.sleep(5)
+            return True
+        except ImportError:
+            pass
+        except (dbus.DBusException, OSError, RuntimeError) as e:
+            logging.debug(f"D-Bus reboot failed: {e}")
+
+        return False

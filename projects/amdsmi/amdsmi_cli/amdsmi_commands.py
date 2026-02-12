@@ -25,6 +25,7 @@ import json
 import logging
 import multiprocessing
 import os
+import shutil
 import signal
 import sys
 import threading
@@ -713,7 +714,8 @@ class AMDSMICommands():
     def static_gpu(self, args, multiple_devices=False, gpu=None, asic=None, bus=None, vbios=None,
                         limit=None, driver=None, ras=None, board=None, numa=None, vram=None,
                         cache=None, partition=None, dfc_ucode=None, fb_info=None, num_vf=None,
-                        soc_pstate=None, xgmi_plpd=None, process_isolation=None, clock=None, profile=None):
+                        soc_pstate=None, xgmi_plpd=None, process_isolation=None, clock=None, profile=None,
+                        mem_size=None):
         """Get Static information for target gpu
 
         Args:
@@ -767,6 +769,8 @@ class AMDSMICommands():
             args.partition = partition
         if clock:
             args.clock = clock
+        if mem_size:
+            args.mem_size = mem_size
 
         # args.clock defaults to False so if it was overwritten to empty list, that indicates that it was given as an arguments but with an empty list
         if args.clock == []:
@@ -1788,7 +1792,7 @@ class AMDSMICommands():
                 board=None, numa=None, vram=None, cache=None, partition=None,
                 dfc_ucode=None, fb_info=None, num_vf=None, cpu=None, nic=None,
                 interface_ver=None, soc_pstate=None, xgmi_plpd = None, process_isolation=None,
-                clock=None, profile=None):
+                clock=None, profile=None, mem_size=None):
         """Get Static information for target gpu and cpu
 
         Args:
@@ -1849,7 +1853,7 @@ class AMDSMICommands():
         gpu_attributes = ["asic", "bus", "vbios", "limit", "driver", "ras",
                           "board", "numa", "vram", "cache", "partition",
                           "dfc_ucode", "fb_info", "num_vf", "soc_pstate", "xgmi_plpd",
-                          "process_isolation", "clock", "profile"]
+                          "process_isolation", "clock", "profile", "mem_size"]
         for attr in gpu_attributes:
             if hasattr(args, attr):
                 if getattr(args, attr):
@@ -1880,7 +1884,7 @@ class AMDSMICommands():
                                     bus, vbios, limit, driver, ras,
                                     board, numa, vram, cache, partition,
                                     dfc_ucode, fb_info, num_vf, soc_pstate, xgmi_plpd,
-                                    process_isolation, clock, profile)
+                                    process_isolation, clock, profile, mem_size)
         elif self.helpers.is_amd_hsmp_initialized(): # Only CPU is initialized
             if args.cpu == None:
                 args.cpu = self.cpu_handles
@@ -1895,7 +1899,7 @@ class AMDSMICommands():
                                 bus, vbios, limit, driver, ras,
                                 board, numa, vram, cache, partition,
                                 dfc_ucode, fb_info, num_vf, soc_pstate, xgmi_plpd,
-                                process_isolation, clock, profile)
+                                process_isolation, clock, profile, mem_size)
 
         if args.nic:
             self.logger.output = {}
@@ -8651,6 +8655,239 @@ class AMDSMICommands():
                 else:
                     with self.logger.destination.open('a', encoding="utf-8") as output_file:
                         output_file.write(legend_output + '\n')
+
+
+    def memory(self, args, multiple_devices=False, gpu=None, vram=None, gtt=None, reset_gtt=None):
+        """ Display and configure GPU memory settings (VRAM carveout and GTT/shared memory)
+        param:
+            args - argparser args to pass to subcommand
+            multiple_devices (bool) - True if checking for multiple devices
+            gpu (device_handle) - device_handle for target device
+            vram (int) - VRAM carveout index to set
+            gtt (float) - GTT size in GB to set
+            reset_gtt (bool) - Reset GTT to system default
+        returns:
+            nothing
+        """
+
+        if gpu:
+            args.gpu = gpu
+        if vram is not None:
+            args.vram = vram
+        if gtt is not None:
+            args.gtt = gtt
+        if reset_gtt is not None:
+            args.reset_gtt = reset_gtt
+
+        # Default gpu to all devices if not specified
+        if args.gpu is None:
+            args.gpu = self.device_handles
+        if not isinstance(args.gpu, list):
+            args.gpu = [args.gpu]
+
+        if not self.group_check_printed:
+            self.helpers.check_required_groups(check_render=True, check_video=False)
+            self.group_check_printed = True
+
+        ###########################################
+        # amd-smi memory (no args - display)     #
+        ###########################################
+        if args.vram is None and args.gtt is None and not args.reset_gtt:
+            # Display current memory configuration
+            vram_col_width = 40
+            self.logger.table_header = ''.rjust(7)
+            current_header = "GPU_ID".ljust(8) + \
+                             "VRAM".ljust(vram_col_width) + \
+                             "GTT".ljust(13)
+            self.logger.table_header = current_header + self.logger.table_header.strip()
+
+            tabular_output = []
+
+            # Get TTM info once (it's system-wide)
+            gtt_display = "N/A"
+            try:
+                ttm_info = amdsmi_interface.amdsmi_get_ttm_info()
+                page_size = 4096
+                current_gb = (ttm_info['current_pages'] * page_size) / (1024 ** 3)
+                gtt_display = f"{current_gb:.2f} GB"
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                logging.debug("TTM pages_limit not available | %s", e.get_error_info())
+
+            for gpu_index, device in enumerate(args.gpu):
+                gpu_id = self.helpers.get_gpu_id_from_device_handle(device)
+
+                # VRAM Carveout (Dedicated GPU Memory)
+                try:
+                    uma_info = amdsmi_interface.amdsmi_get_gpu_uma_carveout_info(device)
+                    current_index = uma_info['current_index']
+
+                    # Display each option as a separate row, mark current with * at the beginning
+                    for opt_idx, opt in enumerate(uma_info['options']):
+                        if opt['index'] == current_index:
+                            vram_desc = f"* {opt['index']}: {opt['description']}".ljust(vram_col_width)
+                        else:
+                            vram_desc = f"  {opt['index']}: {opt['description']}".ljust(vram_col_width)
+
+                        tabular_output_dict = {
+                            "gpu_id": gpu_id if opt_idx == 0 else "",  # Only show GPU ID on first row
+                            "vram_carveout": vram_desc,
+                            "gtt": gtt_display if gpu_index == 0 and opt_idx == 0 else ""
+                        }
+                        tabular_output.append(tabular_output_dict)
+
+                except amdsmi_exception.AmdSmiLibraryException as e:
+                    logging.debug("UMA carveout not available for gpu %s | %s", gpu_id, e.get_error_info())
+                    # If UMA not available, show at least GTT
+                    tabular_output_dict = {
+                        "gpu_id": gpu_id,
+                        "vram_carveout": "N/A".ljust(vram_col_width),
+                        "gtt": gtt_display if gpu_index == 0 else ""
+                    }
+                    tabular_output.append(tabular_output_dict)
+
+            self.logger.multiple_device_output = tabular_output
+            self.logger.table_title = "MEMORY"
+            self.logger.print_output(multiple_device_enabled=True, tabular=True, dynamic=True)
+            self.logger.clear_multiple_devices_output()
+
+            return
+
+        ###########################################
+        # amd-smi memory --vram INDEX            #
+        ###########################################
+        if args.vram is not None:
+            # Only set on one GPU at a time
+            if len(args.gpu) > 1:
+                self.logger.store_output(args.gpu[0], 'vram_carveout',
+                    "VRAM carveout setting applies per-GPU. Please specify a single GPU with --gpu")
+                self.logger.print_output()
+                self.logger.clear_multiple_devices_output()
+                return
+
+            args.gpu = args.gpu[0]
+
+            # Get UMA carveout info using library function
+            try:
+                uma_info = amdsmi_interface.amdsmi_get_gpu_uma_carveout_info(args.gpu)
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED:
+                    self.logger.store_output(args.gpu, 'vram_carveout', "VRAM carveout not available on this GPU")
+                else:
+                    self.logger.store_output(args.gpu, 'vram_carveout', f"[{e.get_error_info(detailed=False)}] Unable to get UMA carveout info")
+                self.logger.print_output()
+                self.logger.clear_multiple_devices_output()
+                return
+
+            # Validate the index
+            requested_index = args.vram
+            if requested_index >= uma_info['num_options']:
+                options_list = [f"{opt['index']}: {opt['description']}" for opt in uma_info['options']]
+                self.logger.store_output(args.gpu, 'vram_carveout',
+                    f"Invalid carveout index {requested_index}. Valid options:\n\t" + "\n\t".join(options_list))
+                self.logger.print_output()
+                self.logger.clear_multiple_devices_output()
+                return
+
+            # Check if already set
+            current_index = uma_info['current_index']
+            if current_index == requested_index:
+                selected_option = uma_info['options'][requested_index]
+                self.logger.store_output(args.gpu, 'vram_carveout',
+                    f"VRAM carveout is already set to {requested_index}: {selected_option['description']}")
+                self.logger.print_output()
+                self.logger.clear_multiple_devices_output()
+                return
+
+            # Set using library function
+            try:
+                amdsmi_interface.amdsmi_set_gpu_uma_carveout(args.gpu, requested_index)
+                selected_option = uma_info['options'][requested_index]
+                self.logger.store_output(args.gpu, 'vram_carveout',
+                    f"Successfully set VRAM carveout to {requested_index}: {selected_option['description']}\n" +
+                    "**REBOOT REQUIRED** for changes to take effect")
+                self.logger.print_output()
+                self.logger.clear_multiple_devices_output()
+
+                # Prompt for reboot
+                self.helpers.prompt_reboot()
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
+                    self.logger.store_output(args.gpu, 'vram_carveout',
+                        "Permission denied. This command requires root/sudo privileges.")
+                else:
+                    self.logger.store_output(args.gpu, 'vram_carveout', f"[{e.get_error_info(detailed=False)}] Failed to set UMA carveout")
+                self.logger.print_output()
+                self.logger.clear_multiple_devices_output()
+
+            return
+
+        ###########################################
+        # amd-smi memory --gtt GB                #
+        ###########################################
+        if args.gtt is not None:
+            # GTT size setting (system-wide, not GPU-specific)
+            gb_value = args.gtt
+
+            # Convert GB to pages
+            pages = self.helpers.gb_to_pages(gb_value)
+
+            # Set using library function
+            try:
+                amdsmi_interface.amdsmi_set_ttm_pages_limit(pages)
+                message = f"Successfully configured GTT size to {gb_value:.2f} GB ({pages} pages)\n" + \
+                          "Configuration written to /etc/modprobe.d/ttm.conf"
+                # Check if dracut exists on PATH to inform user about initramfs rebuild
+                if shutil.which("dracut") is not None:
+                    message += "\nInitramfs rebuilt with dracut"
+                message += "\n**REBOOT REQUIRED** for changes to take effect"
+                self.logger.store_output(args.gpu[0], 'gtt_size', message)
+                self.logger.print_output()
+                self.logger.clear_multiple_devices_output()
+
+                # Prompt for reboot
+                self.helpers.prompt_reboot()
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
+                    self.logger.store_output(args.gpu[0], 'gtt_size',
+                        "Permission denied. This command requires root/sudo privileges.")
+                else:
+                    self.logger.store_output(args.gpu[0], 'gtt_size', f"[{e.get_error_info(detailed=False)}] Failed to set TTM pages limit")
+                self.logger.print_output()
+                self.logger.clear_multiple_devices_output()
+
+            return
+
+        ###########################################
+        # amd-smi memory --reset-gtt             #
+        ###########################################
+        if args.reset_gtt:
+            # GTT reset (system-wide, not GPU-specific)
+
+            # Reset using library function
+            try:
+                amdsmi_interface.amdsmi_reset_ttm_pages_limit()
+                message = "Successfully reset GTT to system default\n" + \
+                          "Configuration file /etc/modprobe.d/ttm.conf removed"
+                # Check if dracut exists on PATH to inform user about initramfs rebuild
+                if shutil.which("dracut") is not None:
+                    message += "\nInitramfs rebuilt with dracut"
+                message += "\n**REBOOT REQUIRED** for changes to take effect"
+                self.logger.store_output(args.gpu[0], 'gtt_reset', message)
+                self.logger.print_output()
+                self.logger.clear_multiple_devices_output()
+
+                # Prompt for reboot
+                self.helpers.prompt_reboot()
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
+                    self.logger.store_output(args.gpu[0], 'gtt_reset',
+                        "Permission denied. This command requires root/sudo privileges.")
+                else:
+                    self.logger.store_output(args.gpu[0], 'gtt_reset', f"[{e.get_error_info(detailed=False)}] Failed to reset TTM pages limit")
+                self.logger.print_output()
+                self.logger.clear_multiple_devices_output()
+
+            return
 
 
     def ras(self, args, multiple_devices=False, gpu=None, cper=None, afid=None,

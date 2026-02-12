@@ -23,6 +23,7 @@
 #ifndef AMD_SMI_INCLUDE_IMPL_AMD_SMI_DRM_H_
 #define AMD_SMI_INCLUDE_IMPL_AMD_SMI_DRM_H_
 
+#include <libdrm/amdgpu_drm.h>
 #include <unistd.h>
 
 #include <vector>
@@ -32,7 +33,6 @@
 
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_lib_loader.h"
-#include "amd_smi/impl/amdgpu_drm.h"
 #include "amd_smi/impl/xf86drm.h"
 #include "amd_smi/impl/scoped_fd.h"
 
