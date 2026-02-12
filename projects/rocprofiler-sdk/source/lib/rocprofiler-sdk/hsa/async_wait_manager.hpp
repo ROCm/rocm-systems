@@ -76,7 +76,7 @@ wait_or_shutdown(hsa_signal_t           signal,
 wait_result
 wait_or_shutdown(std::condition_variable&      cv,
                  std::unique_lock<std::mutex>& lock,
-                 std::function<bool()>         predicate,
+                 const std::function<bool()>&  predicate,
                  std::string_view              callsite,
                  uint64_t                      timeout_ns = UINT64_MAX,
                  std::chrono::milliseconds     interval   = std::chrono::milliseconds{100});

@@ -114,9 +114,9 @@ wait_or_shutdown(hsa_signal_t           signal,
                  uint64_t               poll_interval_ns,
                  const CoreApiTable*    core_api)
 {
-    auto& mgr          = async_wait_manager::instance();
-    auto* resolved_api = (core_api != nullptr) ? core_api : get_core_table();
-    auto  start        = std::chrono::steady_clock::now();
+    auto&       mgr          = async_wait_manager::instance();
+    const auto* resolved_api = (core_api != nullptr) ? core_api : get_core_table();
+    auto        start        = std::chrono::steady_clock::now();
 
     while(!mgr.is_shutdown())
     {
@@ -151,7 +151,7 @@ wait_or_shutdown(hsa_signal_t           signal,
 wait_result
 wait_or_shutdown(std::condition_variable&      cv,
                  std::unique_lock<std::mutex>& lock,
-                 std::function<bool()>         predicate,
+                 const std::function<bool()>&  predicate,
                  std::string_view              callsite,
                  uint64_t                      timeout_ns,
                  std::chrono::milliseconds     interval)
