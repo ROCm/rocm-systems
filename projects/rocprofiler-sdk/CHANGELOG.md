@@ -2,12 +2,6 @@
 
 Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projects/rocprofiler-sdk](https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/index.html)
 
-## ROCprofiler-SDK 1.2.0
-
-### Changed
-
-- Version updated to 1.2.0 to support better library compatibility detection for downstream dependencies
-
 ## ROCprofiler-SDK for AFAR I
 
 ### Added
@@ -264,3 +258,9 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 - Addressed OpenMP Tools task scheduling null pointer exception.
 - Fixed stream ID errors arising during process attachment.
 - Fixed issues arising during dynamic code object loading.
+
+## ROCprofiler-SDK 1.2.0 for ROCm release 7.3
+
+### Changed
+
+- Version updated to 1.2.0 to support better library compatibility detection for downstream dependencies
