@@ -70,7 +70,7 @@ namespace rocshmem
       if (status[i] != targetId) mistakeCount++;
     }
     if (mistakeCount > 0) {
-      fprintf(stderr, "%lu out of %lu pages for memory allocation were not on NUMA node %d.\n"
+      fprintf(stderr, "%zu out of %zu pages for memory allocation were not on NUMA node %d.\n"
               " This could be due to hardware memory issues, or the use of numa-rebalancing daemons such as numad\n",
               mistakeCount, numPages, targetId);
       return -1;
