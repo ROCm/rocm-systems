@@ -59,22 +59,6 @@ class ExperimentalAction(argparse.Action):
                 "append, append_const, count, extend"
             )
 
-        # Set required parameters for specific action types
-        if base_action in [
-            "store_true",
-            "store_false",
-            "count",
-            "store_const",
-            "append_const",
-        ]:
-            kwargs["nargs"] = 0
-
-        # Set const for boolean actions
-        if base_action == "store_true":
-            kwargs.setdefault("const", True)
-        elif base_action == "store_false":
-            kwargs.setdefault("const", False)
-
         if self.experimental_enabled:
             leading_whitespace = help[: len(help) - len(help.lstrip())]
             help_content = help.lstrip()

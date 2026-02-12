@@ -136,8 +136,7 @@ When a feature is ready to graduate from experimental to stable:
 1. Remove the entry from the `--experimental` flag help text
 2. Change `action=ExperimentalAction` to `action="store"` (or appropriate standard action)
 3. Remove the `experimental_enabled`, `feature_label`, and `base_action` parameters
-4. Remove the "EXPERIMENTAL:" prefix from help text manually if needed
-5. Update any relevant documentation and tests
+4. Update any relevant documentation and tests
 
 #### Testing Experimental Features
 
