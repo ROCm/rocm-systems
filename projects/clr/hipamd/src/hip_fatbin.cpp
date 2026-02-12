@@ -204,19 +204,41 @@ static std::string TargetToGeneric(std::string input) {
   return generic_name;
 }
 
-static bool IsCodeObjectUncompressed(const void* image) {
-  return std::memcmp(image,
-                     reinterpret_cast<const void*>(symbols::kOffloadBundleUncompressedMagicStr),
-                     sizeof(symbols::kOffloadBundleUncompressedMagicStr) - 1) == 0;
+
+static bool PrefixMatch(const void* buf, const void* prefix, size_t len) {
+  const auto* b = static_cast<const unsigned char*>(buf);
+  const auto* p = static_cast<const unsigned char*>(prefix);
+  for (size_t i = 0; i < len; ++i) {
+    if (b[i] != p[i]) return false;
+  }
+  return true;
 }
 
-static bool IsCodeObjectCompressed(const void* image) {
-  return std::memcmp(image,
-                     reinterpret_cast<const void*>(symbols::kOffloadBundleCompressedMagicStr),
-                     sizeof(symbols::kOffloadBundleCompressedMagicStr) - 1) == 0;
+static bool IsCodeObjectUncompressed(const void* image, size_t image_size) {
+  constexpr size_t kMagicSize = sizeof(symbols::kOffloadBundleUncompressedMagicStr) - 1;
+  if (image_size < kMagicSize) {
+    return false;
+  }
+  return PrefixMatch(image, symbols::kOffloadBundleUncompressedMagicStr, kMagicSize);
 }
 
-static bool IsCodeObjectElf(const void* image) {
+static bool IsCodeObjectCompressed(const void* image, size_t image_size) {
+  constexpr size_t kMagicSize = sizeof(symbols::kOffloadBundleCompressedMagicStr) - 1;
+  if (image_size < kMagicSize) {
+    return false;
+  }
+  return PrefixMatch(image, symbols::kOffloadBundleCompressedMagicStr, kMagicSize);
+}
+
+static bool IsCodeObjectElf(const void* image, size_t image_size) {
+  if (image_size < sizeof(amd::Elf64_Ehdr)) {
+    return false;
+  }
+  // Verify 4-byte ELF magic before accessing deeper header fields
+  static constexpr unsigned char kElfMagic[] = {0x7f, 'E', 'L', 'F'};
+  if (!PrefixMatch(image, kElfMagic, sizeof(kElfMagic))) {
+    return false;
+  }
   const amd::Elf64_Ehdr* ehdr = reinterpret_cast<const amd::Elf64_Ehdr*>(image);
   return ehdr->e_machine == EM_AMDGPU && ehdr->e_ident[EI_OSABI] == ELFOSABI_AMDGPU_HSA;
 }
@@ -450,12 +472,20 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
   guarantee(image_ != nullptr, "Image cannot be nullptr, file:%s did not map for some reason",
             fname_.c_str());
 
-  bool is_compressed = IsCodeObjectCompressed(image_),
-       is_uncompressed = IsCodeObjectUncompressed(image_);
+  // Determine image size for bounds checking in magic string comparisons.
+  // For file-mapped images use the known file size; for direct-pointer images
+  // (compiler-embedded or user-provided) the size is not tracked, so use SIZE_MAX
+  // to allow the checks to proceed (caller is responsible for valid data).
+  const size_t image_size = (image_mapped_ && ufd_)
+                                ? (ufd_->fsize_ - foffset_)
+                                : SIZE_MAX;
+
+  bool is_compressed = IsCodeObjectCompressed(image_, image_size),
+       is_uncompressed = IsCodeObjectUncompressed(image_, image_size);
 
   // It better be elf if its neither compressed nor uncompressed
   if (!is_compressed && !is_uncompressed) {
-    if (IsCodeObjectElf(image_)) {
+    if (IsCodeObjectElf(image_, image_size)) {
       // Load the binary directly
       auto elf_size = amd::Elf::getElfSize(image_);
       for (size_t i = 0; i < devices.size(); i++) {
