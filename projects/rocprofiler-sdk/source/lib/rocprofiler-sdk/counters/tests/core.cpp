@@ -746,8 +746,7 @@ TEST(core, public_api_iterate_agents)
         auto expected = findDeviceMetrics(agent, {});
         for(const auto& x : expected)
         {
-            // Counter IDs from API now include agent encoding. Extract base metric ID for
-            // comparison.
+            // Extract base metric ID for comparison.
             bool found = false;
             for(auto it = from_api.begin(); it != from_api.end(); ++it)
             {

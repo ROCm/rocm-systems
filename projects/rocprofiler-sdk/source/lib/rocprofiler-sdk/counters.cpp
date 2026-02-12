@@ -237,7 +237,7 @@ rocprofiler_query_counter_info(rocprofiler_counter_id_t              counter_id,
                 {
                     auto& rec = instances.emplace_back();
                     counters::set_dim_in_rec(rec.instance_id, metric_dim.type(), i);
-                    // Store full agent-encoded counter ID in instance record
+                    // Store counter ID in instance record
                     counters::set_counter_in_rec(rec.instance_id, counter_id);
                 }
             }
@@ -251,7 +251,7 @@ rocprofiler_query_counter_info(rocprofiler_counter_id_t              counter_id,
                     {
                         auto& rec = tmp.emplace_back(instance);
                         counters::set_dim_in_rec(rec.instance_id, metric_dim.type(), i);
-                        // Store full agent-encoded counter ID in instance record
+                        // Store counter ID in instance record
                         counters::set_counter_in_rec(rec.instance_id, counter_id);
                     }
                 }
