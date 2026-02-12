@@ -2454,6 +2454,12 @@ void Runtime::Unload() {
     ipc_sock_server_thread_ = nullptr;
   }
 
+  if (ipc_sock_server_thread_) {
+    os::WaitForThread(ipc_sock_server_thread_);
+    os::CloseThread(ipc_sock_server_thread_);
+    ipc_sock_server_thread_ = nullptr;
+  }
+
   svm_profile_.reset(nullptr);
 
   UnloadTools();
