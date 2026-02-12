@@ -247,7 +247,8 @@ SQTTBufferingPackets::query_buffer_status()
     if(!ret.needs_swap) return {};
 
     // Ensure aqlprofile and SDK agrees on which is the current buffer
-    ROCP_CI_LOG_IF(ERROR, (current_buffer++) != ret.num_swaps) << "Mismatch of AQL and SDK buffer states!";
+    ROCP_CI_LOG_IF(ERROR, (current_buffer++) != ret.num_swaps)
+        << "Mismatch of AQL and SDK buffer states!";
 
     auto query     = sqtt_buffer_status_t{};
     query.data     = ret.data;
