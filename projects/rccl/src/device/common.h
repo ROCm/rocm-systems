@@ -12,7 +12,9 @@
 #include "device.h"
 #include "op128.h"
 #include "reduce_kernel.h"
+#ifndef NCCL_FUNC_ONLY
 #include "device_table.h"
+#endif
 #include "network/unpack/unpack_defs.h"
 #define NCCL_MAX_DEV_ARITY (NCCL_MAX_TREE_ARITY-1)  // Using balanced tree instead of split tree
 
@@ -504,6 +506,11 @@ __device__ __forceinline__ void profiler(struct ncclShmemData& ncclShmem, int ac
   }
 }
 
+// ncclKernelMain and kernel declarations are only needed by common.cu (the dispatch TU).
+// When NCCL_FUNC_ONLY is defined, generated TUs skip this to avoid pulling in the
+// device function table and cross-TU symbol references.
+#ifndef NCCL_FUNC_ONLY
+
 template<int SpecializedFnId, typename SpecializedRunWorkBatch, bool COLLTRACE, int COLL_UNROLL>
 __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* args, ncclShmemData& ncclShmem, void* ncclShmemPerWarp) {
   const int tid = threadIdx.x;
@@ -730,7 +737,17 @@ __global__ void ncclDevKernelDebug_Generic_4(ncclDevKernelArgsDefaultStorage NCC
 #define DEFINE_ncclDevKernel_nop(suffix, coll, redop, ty, algo, proto, specializedFnId) \
   __global__ void ncclDevKernel_##suffix(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {}
 
-#ifdef USE_INDIRECT_FUNCTION_CALL
+#endif // !NCCL_FUNC_ONLY
+
+#ifdef NCCL_FUNC_ONLY
+// When compiling individual TUs to assembly without a kernel in the same TU,
+// __attribute__((used)) prevents the linker/compiler from dead-code-eliminating
+// the device functions. These will be merged with the kernel TU at the assembly level.
+#define DEFINE_ncclDevFunc(suffix, coll, redop, ty, algo, proto, acc, pipeline, unroll) \
+  __attribute__((used)) __device__ void ncclDevFunc_##suffix(struct ncclShmemData* ncclShmem, void* ncclShmemPerWarp) { \
+    RunWorkBatch<coll, ty, redop<ty>, algo, proto, acc, unroll, pipeline>().run(ncclShmem, ncclShmemPerWarp); \
+  }
+#elif defined(USE_INDIRECT_FUNCTION_CALL)
 #define DEFINE_ncclDevFunc(suffix, coll, redop, ty, algo, proto, acc, pipeline, unroll) \
   __device__ void ncclDevFunc_##suffix(struct ncclShmemData& ncclShmem, void* ncclShmemPerWarp) { \
     RunWorkBatch<coll, ty, redop<ty>, algo, proto, acc, unroll, pipeline>().run(ncclShmem, ncclShmemPerWarp); \

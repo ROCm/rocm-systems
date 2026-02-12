@@ -1,3 +1,5 @@
+#ifndef NCCL_DEVICE_ALL_GATHER_H_
+#define NCCL_DEVICE_ALL_GATHER_H_
 /*************************************************************************
  * Copyright (c) 2015-2022, NVIDIA CORPORATION. All rights reserved.
  * Modifications Copyright (c) 2019-2022 Advanced Micro Devices, Inc. All rights reserved.
@@ -689,3 +691,5 @@ struct RunWorkColl<ncclFuncAllGather, T, RedOp, NCCL_ALGO_COLLNET_DIRECT, NCCL_P
     }
   }
 };
+
+#endif // NCCL_DEVICE_ALL_GATHER_H_
