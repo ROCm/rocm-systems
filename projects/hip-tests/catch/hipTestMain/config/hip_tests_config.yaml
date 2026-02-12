@@ -87,8 +87,8 @@ cmd_options:
 unit:
   assertion:
     Unit_StaticAssert_Positive_Basic_RTC:
-      tags: [device_lib, assert]
       <<: *level_2
+      tags: [device_lib, assert]
       # Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/210
       disabled: [amd_windows]
     Unit_StaticAssert_Negative_Basic_RTC:
@@ -415,20 +415,20 @@ unit:
       <<: *level_2
       tags: [callback]
     Unit_hipGetStreamDeviceId_Positive_Multithreaded_Basic:
-      tags: [multigpu, callback]
       <<: *level_2
+      tags: [multigpu, callback]
     Unit_hipGetStreamDeviceId_Negative_Parameters:
       <<: *level_2
       tags: [callback]
     Unit_hipKernelNameRef_Positive_Basic:
-      tags: [callback]
       <<: *level_2
+      tags: [callback]
       # (amd_windows) Note: intermittent Seg fault failure
       # (amd_wsl) Note: intermittent Seg fault failure
       disabled: [amd_windows, amd_wsl]
     Unit_hipKernelNameRef_Negative_Parameters:
-      tags: [callback]
       <<: *level_2
+      tags: [callback]
       # (amd_windows) Note: intermittent Seg fault failure
       # (amd_wsl) Note: intermittent Seg fault failure
       # (amd_wsl) Note: Linux disabled
@@ -461,19 +461,19 @@ unit:
       disabled: [nvidia_windows]
     Unit_ChannelDescriptor_Positive_FormatNone: *level_2
     Unit_ChannelDescriptor_Positive_16BitFloatingPoint:
-      tags: [texture]
       <<: *level_2
+      tags: [texture]
       # (amd_wsl) Note: devicelib hangs and failures
       disabled: [amd_windows, amd_wsl]
   clock:
     Unit_hipClock64_Positive_Basic:
-      tags: [device_lib, timing]
       <<: *level_2
+      tags: [device_lib, timing]
       # SWDEV-555665
       disabled: [amd_windows]
     Unit_hipClock_Positive_Basic:
-      tags: [device_lib, timing]
       <<: *level_2
+      tags: [device_lib, timing]
       # SWDEV-555665
       disabled: [amd_windows]
     Unit_hipWallClock64_Positive_Basic:
@@ -514,8 +514,8 @@ unit:
       <<: *level_2
       tags: [rtc, integration]
     Unit_test_generic_target_only_in_compressed_fatbin:
-      tags: [rtc, integration]
       <<: *level_2
+      tags: [rtc, integration]
       # Rock_Linux_Failures_on_gfx94X
       disabled: [amd_linux]
     Unit_test_generic_target_only_in_regular_fatbin:
@@ -579,8 +579,8 @@ unit:
     hipDevicePrimaryCtxGetState_Negative: *level_2
   cooperativeGrps:
     Unit_Thread_Block_Getters_Positive_Basic:
-      tags: [cooperative, groups, cooperativeLaunch]
       <<: *level_2
+      tags: [cooperative, groups, cooperativeLaunch]
       # Below tests are failing PSDB
       disabled: [amd_windows]
     Unit_Thread_Block_Getters_Via_Base_Type_Positive_Basic:
@@ -591,13 +591,13 @@ unit:
       tags: [cooperative, groups, cooperativeLaunch]
     Unit_Thread_Block_Sync_Positive_Basic: *level_2
     Unit_Thread_Block_Tile_Getters_Positive_Basic:
-      tags: [cooperative, groups, cooperativeLaunch]
       <<: *level_2
+      tags: [cooperative, groups, cooperativeLaunch]
       # SWDEV-441604: Below tests take long time to run in stress test on 12/01/24
       disabled: [amd_windows]
     Unit_Thread_Block_Tile_Dynamic_Getters_Positive_Basic:
-      tags: [cooperative, groups, cooperativeLaunch]
       <<: *level_2
+      tags: [cooperative, groups, cooperativeLaunch]
       # SWDEV-441604: Below tests take long time to run in stress test on 12/01/24
       disabled: [amd_windows]
     Unit_Thread_Block_Tile_Shfl_Up_Positive_Basic:
@@ -621,8 +621,8 @@ unit:
       # Below tests hang in Jenkins PSDB
       disabled: [amd_windows]
     Unit_Coalesced_Group_Tiled_Partition_Getters_Positive_Basic:
-      tags: [cooperative, groups, cooperativeLaunch]
       <<: *level_2
+      tags: [cooperative, groups, cooperativeLaunch]
       # SWDEV-486448 - Following tests disabled due to taking too much time to execute, ~700s per test
       disabled: [amd_windows]
     Unit_Coalesced_Group_Tiled_Partition_Shfl_Up_Positive_Basic:
@@ -642,11 +642,11 @@ unit:
       <<: *level_2
       tags: [cooperative, groups, cooperativeLaunch]
     Unit_hipCGMultiGridGroupType_Basic:
-      tags: [multigpu, cooperative, groups, cooperativeLaunch]
       <<: *level_2
+      tags: [multigpu, cooperative, groups, cooperativeLaunch]
     Unit_hipCGMultiGridGroupType_Barrier:
-      tags: [multigpu, cooperative, groups, cooperativeLaunch]
       <<: *level_2
+      tags: [multigpu, cooperative, groups, cooperativeLaunch]
     Unit_hipCGGridGroupType_Basic:
       <<: *level_2
       tags: [cooperative, groups, cooperativeLaunch]
@@ -663,38 +663,38 @@ unit:
       <<: *level_2
       tags: [cooperative, ops, cooperativeLaunch]
     Unit_coalesced_groups:
-      tags: [cooperative, groups, cooperativeLaunch]
       <<: *level_2
+      tags: [cooperative, groups, cooperativeLaunch]
       # Below tests hang in Jenkins PSDB
       disabled: [amd_windows]
     Unit_hipLaunchCooperativeKernel_Basic:
       <<: *level_2
       tags: [cooperative, launch, cooperativeLaunch]
     Unit_hipLaunchCooperativeKernelMultiDevice_Basic:
+      <<: *level_2
       tags: [multigpu, cooperative, launch, cooperativeLaunch]
-      <<: *level_2
     Unit_Multi_Grid_Group_Getters_Positive_Basic:
-      tags: [multigpu, cooperative, groups, cooperativeLaunch]
       <<: *level_2
+      tags: [multigpu, cooperative, groups, cooperativeLaunch]
     Unit_Multi_Grid_Group_Getters_Positive_Base_Type:
-      tags: [multigpu, cooperative, groups, cooperativeLaunch]
       <<: *level_2
+      tags: [multigpu, cooperative, groups, cooperativeLaunch]
     Unit_Multi_Grid_Group_Getters_Positive_Non_Member_Functions:
-      tags: [multigpu, cooperative, groups, cooperativeLaunch]
       <<: *level_2
+      tags: [multigpu, cooperative, groups, cooperativeLaunch]
     Unit_Multi_Grid_Group_Positive_Sync:
-      tags: [multigpu, cooperative, groups, cooperativeLaunch]
       <<: *level_2
+      tags: [multigpu, cooperative, groups, cooperativeLaunch]
       # SWDEV-443630 : Below test failed in stress test on 19/01/24
       disabled: [gfx90a, gfx942, gfx950]
     Unit_coalesced_groups_shfl_down:
-      tags: [cooperative, ops, cooperativeLaunch]
       <<: *level_2
+      tags: [cooperative, ops, cooperativeLaunch]
       # Below tests hang in Jenkins PSDB
       disabled: [amd_windows]
     Unit_coalesced_groups_shfl_up:
-      tags: [cooperative, ops, cooperativeLaunch]
       <<: *level_2
+      tags: [cooperative, ops, cooperativeLaunch]
       # Below tests hang in Jenkins PSDB
       disabled: [amd_windows]
     Unit_Coalesced_Group_Getters_Positive_Basic:
@@ -810,14 +810,14 @@ unit:
       <<: *level_2
       tags: [device_mgmt, query]
     Unit_hipDeviceName_gcnArchName_And_rocm_agent_enumerator:
-      tags: [device_mgmt, query, multigpu]
       <<: *level_2
+      tags: [device_mgmt, query, multigpu]
     Unit_hipDeviceGetPCIBusId_Check_PciBusID_WithAttr:
       <<: *level_2
       tags: [device_mgmt, query]
     Unit_hipDeviceGetPCIBusId_Negative_PartialFill:
-      tags: [device_mgmt, query]
       <<: *level_2
+      tags: [device_mgmt, query]
       # (amd_windows) SWDEV-347670 - blocking tests have TDR, causing hangs
       disabled: [amd_windows, amd_wsl]
     Unit_hipDeviceGetPCIBusId_NegTst:
@@ -833,13 +833,13 @@ unit:
       <<: *level_2
       tags: [device_mgmt, sync]
     Unit_hipDeviceSynchronize_Positive_Nullstream:
-      tags: [device_mgmt, sync]
       <<: *level_2
+      tags: [device_mgmt, sync]
       # Disabling tests which no longer behave the same on nvidia platform
       disabled: [nvidia_windows]
     Unit_hipDeviceSynchronize_Functional:
-      tags: [device_mgmt, sync]
       <<: *level_2
+      tags: [device_mgmt, sync]
       # Disabling tests which no longer behave the same on nvidia platform
       disabled: [nvidia_windows]
     Unit_hipDeviceTotalMem_NegTst:
@@ -849,8 +849,8 @@ unit:
       <<: *level_2
       tags: [device_mgmt, query]
     Unit_hipDeviceTotalMem_NonSelectedDevice:
-      tags: [device_mgmt, query, multigpu]
       <<: *level_2
+      tags: [device_mgmt, query, multigpu]
     Unit_hipGetDeviceAttribute_CheckAttrValues:
       <<: *level_2
       tags: [device_mgmt, query]
@@ -869,8 +869,8 @@ unit:
       tags: [device_mgmt, query]
     Print_Out_Device_Count: *level_2
     Unit_hipGetDeviceProperties_ArchPropertiesTst:
-      tags: [device_mgmt, query, multigpu]
       <<: *level_2
+      tags: [device_mgmt, query, multigpu]
     Unit_hipGetDeviceProperties_NegTst:
       <<: *level_2
       tags: [device_mgmt, query]
@@ -895,8 +895,8 @@ unit:
       <<: *level_2
       tags: [device_mgmt, config]
     Unit_hipGetDeviceFlags_Positive_Context:
-      tags: [device_mgmt, config]
       <<: *level_2
+      tags: [device_mgmt, config]
       # (amd_windows) SWDEV-347670 - blocking tests have TDR, causing hangs
       # (amd_wsl) Note: Windows disabled
       disabled: [amd_windows, amd_wsl]
@@ -904,14 +904,14 @@ unit:
       <<: *level_2
       tags: [device_mgmt, config]
     Unit_hipSetDevice_BasicSetGet:
-      tags: [device_mgmt, query, multigpu]
       <<: *level_2
+      tags: [device_mgmt, query, multigpu]
     Unit_hipGetSetDevice_MultiThreaded:
-      tags: [device_mgmt, query, multigpu]
       <<: *level_2
+      tags: [device_mgmt, query, multigpu]
     Unit_hipSetGetDevice_Positive_Threaded_Basic:
-      tags: [device_mgmt, query, multigpu]
       <<: *level_2
+      tags: [device_mgmt, query, multigpu]
     Unit_hipSetGetDevice_Negative:
       <<: *level_2
       tags: [device_mgmt, query]
@@ -919,8 +919,8 @@ unit:
       <<: *level_2
       tags: [device_mgmt, query]
     Unit_hipDeviceGetUuid_Positive:
-      tags: [device_mgmt, query]
       <<: *level_2
+      tags: [device_mgmt, query]
       # (amd_windows) Note: UUID returned empty on some windows nodes
       # (amd_wsl) Note: UUID returned empty on some windows nodes
       disabled: [amd_windows, amd_wsl]
@@ -928,19 +928,19 @@ unit:
       <<: *level_2
       tags: [device_mgmt, query]
     Unit_hipDeviceGetUuid_From_RocmInfo:
-      tags: [device_mgmt, query, multigpu]
       <<: *level_2
+      tags: [device_mgmt, query, multigpu]
     Unit_hipDeviceGetUuid_VerifyUuidFrm_hipGetDeviceProperties:
+      <<: *level_2
       tags: [device_mgmt, query, multigpu]
-      <<: *level_2
     Unit_Uuid_FntlTstsFor_SetEnv_HIP_VISIBLE_DEVICES:
-      tags: [device_mgmt, query]
       <<: *level_2
+      tags: [device_mgmt, query]
       # Rock_Window_Failures_on_gfx1151
       disabled: [amd_windows]
     Unit_UUID_setEnv_Thread:
-      tags: [device_mgmt, query]
       <<: *level_2
+      tags: [device_mgmt, query]
       # Rock_Window_Failures_on_gfx1151
       disabled: [amd_windows]
     Unit_hipDeviceAPUCheck:
@@ -959,14 +959,14 @@ unit:
       <<: *level_2
       tags: [device_mgmt]
     Unit_hipDeviceEnableDisablePeerAccess_positive:
-      tags: [device_mgmt, multigpu]
       <<: *level_2
+      tags: [device_mgmt, multigpu]
     Unit_hipDeviceEnablePeerAccess_negative:
-      tags: [device_mgmt, multigpu]
       <<: *level_2
+      tags: [device_mgmt, multigpu]
     Unit_hipDeviceDisablePeerAccess_negative:
-      tags: [device_mgmt, multigpu]
       <<: *level_2
+      tags: [device_mgmt, multigpu]
     Unit_hipExtGetLinkTypeAndHopCount_Positive_Basic:
       <<: *level_2
       tags: [device_mgmt, query]
@@ -974,8 +974,8 @@ unit:
       <<: *level_2
       tags: [device_mgmt, query]
     Unit_hipDeviceSetLimit_SetGet:
-      tags: [device_mgmt, config, multigpu]
       <<: *level_2
+      tags: [device_mgmt, config, multigpu]
     Unit_hipDeviceSetLimit_Positive_StackSize:
       <<: *level_2
       tags: [device_mgmt, config]
@@ -992,13 +992,13 @@ unit:
       <<: *level_2
       tags: [device_mgmt, config]
     Unit_hipDeviceSetLimit_Negative_Parameters:
-      tags: [device_mgmt, config]
       <<: *level_2
+      tags: [device_mgmt, config]
       # Below 2 tests are disabled due to defect EXSWHTEC-342
       disabled: [nvidia_windows]
     Unit_hipDeviceGetLimit_Negative_Parameters:
-      tags: [device_mgmt, config]
       <<: *level_2
+      tags: [device_mgmt, config]
       # Below 2 tests are disabled due to defect EXSWHTEC-342
       disabled: [nvidia_windows]
     Unit_hipDeviceGetSetLimit_Scratch_Negative:
@@ -1014,8 +1014,8 @@ unit:
       <<: *level_2
       tags: [device_mgmt, config]
     Unit_hipDeviceGetSetLimit_Scratch_MultiDevice:
-      tags: [device_mgmt, config, multigpu]
       <<: *level_2
+      tags: [device_mgmt, config, multigpu]
     Unit_hipDeviceGetSetLimit_Scratch_InThread:
       <<: *level_2
       tags: [device_mgmt, config]
@@ -1035,14 +1035,14 @@ unit:
       <<: *level_2
       tags: [device_mgmt, config]
     Unit_hipDeviceGetSharedMemConfig_Positive_Basic:
-      tags: [device_mgmt, config]
       <<: *level_2
+      tags: [device_mgmt, config]
       # (amd_windows) SWDEV-347670 - blocking tests have TDR, causing hangs
       # (amd_wsl) Note: Linux disabled
       disabled: [amd_windows, amd_wsl]
     Unit_hipDeviceGetSharedMemConfig_Positive_Threaded:
-      tags: [device_mgmt, config]
       <<: *level_2
+      tags: [device_mgmt, config]
       # (amd_windows) SWDEV-347670 - blocking tests have TDR, causing hangs
       # (amd_wsl) Note: Linux disabled
       disabled: [amd_windows, amd_wsl]
@@ -1050,14 +1050,14 @@ unit:
       <<: *level_2
       tags: [device_mgmt, config]
     Unit_hipDeviceReset_Positive_Basic:
-      tags: [device_mgmt, sync]
       <<: *level_2
+      tags: [device_mgmt, sync]
       # (amd_wsl) Note: Windows disabled
       # (nvidia_windows) Disabling tests which no longer behave the same on nvidia platform
       disabled: [amd_wsl, nvidia_windows]
     Unit_hipDeviceReset_Positive_Threaded:
-      tags: [device_mgmt, sync]
       <<: *level_2
+      tags: [device_mgmt, sync]
       # (amd_wsl) Note: Windows disabled
       # (nvidia_windows) Disabling tests which no longer behave the same on nvidia platform
       disabled: [amd_wsl, nvidia_windows]
@@ -1083,8 +1083,8 @@ unit:
       <<: *level_2
       tags: [device_mgmt, init]
     Unit_hipInit_Negative:
-      tags: [device_mgmt, init]
       <<: *level_2
+      tags: [device_mgmt, init]
       # (amd_windows) SWDEV-347670 - blocking tests have TDR, causing hangs
       # (amd_wsl) Note: Windows disabled
       disabled: [amd_windows, amd_wsl]
@@ -1101,8 +1101,8 @@ unit:
       <<: *level_2
       tags: [device_mgmt, config]
     Unit_hipSetValidDevices_Positive_Basic:
-      tags: [device_mgmt, config, multigpu]
       <<: *level_2
+      tags: [device_mgmt, config, multigpu]
     Unit_hipSetValidDevices_WithAllDevicesInSystem:
       <<: *level_2
       tags: [device_mgmt, config]
@@ -1122,11 +1122,11 @@ unit:
       <<: *level_2
       tags: [device_mgmt]
     Unit_hipGetProcAddress_PeerDeviceAccessAPIs:
-      tags: [device_mgmt, multigpu]
       <<: *level_2
+      tags: [device_mgmt, multigpu]
     Unit_hipGetProcAddress_SetGetMemPoolAPIs:
-      tags: [device_mgmt, multigpu]
       <<: *level_2
+      tags: [device_mgmt, multigpu]
     Unit_hipGetDriverEntryPoint_Positive:
       <<: *level_2
       tags: [device_mgmt]
@@ -1146,19 +1146,19 @@ unit:
       <<: *level_2
       tags: [device_mgmt]
     Unit_hipIpcOpenMemHandle_Negative_Open_In_Creating_Process:
-      tags: [device_mgmt]
       <<: *level_2
+      tags: [device_mgmt]
       # Note: Windows disabled
       disabled: [amd_wsl]
     Unit_hipIpcOpenMemHandle_Negative_Open_In_Two_Contexts_Same_Device:
-      tags: [device_mgmt]
       <<: *level_2
+      tags: [device_mgmt]
       # (amd_linux) SWDEV-511679 : Below tests fail in stress test
       # (amd_wsl) Note: hsa_amd_ipc_ is dummy
       disabled: [amd_linux, amd_wsl]
     Unit_hipIpcGetMemHandle_Positive_Unique_Handles_Separate_Allocations:
-      tags: [device_mgmt]
       <<: *level_2
+      tags: [device_mgmt]
       # Note: Test disabled due to defect - EXSWHTEC-207
       disabled: [amd_wsl]
     Unit_hipIpcGetMemHandle_Positive_Unique_Handles_Reused_Memory:
@@ -1172,14 +1172,14 @@ unit:
       <<: *level_2
       tags: [device_mgmt]
     Unit_hipIpcCloseMemHandle_Positive_Reference_Counting:
-      tags: [device_mgmt]
       <<: *level_2
+      tags: [device_mgmt]
       # (amd_linux) SWDEV-511679 : Below tests fail in stress test
       # (amd_wsl) Note: hsa_amd_ipc_ is dummy
       disabled: [amd_linux, amd_wsl]
     Unit_hipIpcCloseMemHandle_Negative_Close_In_Originating_Process:
-      tags: [device_mgmt]
       <<: *level_2
+      tags: [device_mgmt]
       # Note: Windows disabled
       disabled: [amd_wsl]
   device_memory:
@@ -1223,8 +1223,8 @@ unit:
       <<: *level_2
       tags: [device_lib, bitops]
     Unit_threadfence_system:
-      tags: [multigpu, device_lib]
       <<: *level_2
+      tags: [multigpu, device_lib]
     Unit_syncthreads_and:
       <<: *level_2
       tags: [device_lib, sync]
@@ -1235,77 +1235,77 @@ unit:
       <<: *level_2
       tags: [device_lib, sync]
     Unit_deviceAllocation_Malloc_PerThread_PrimitiveDataType:
-      tags: [device_lib, memory]
       <<: *level_2
+      tags: [device_lib, memory]
       # Note: devicelib hangs and failures
       disabled: [amd_windows, amd_wsl]
     Unit_deviceAllocation_New_PerThread_PrimitiveDataType:
-      tags: [device_lib, memory]
       <<: *level_2
+      tags: [device_lib, memory]
       # Note: devicelib hangs and failures
       disabled: [amd_windows, amd_wsl]
     Unit_deviceAllocation_Malloc_PerThread_StructDataType:
-      tags: [device_lib, memory]
       <<: *level_2
+      tags: [device_lib, memory]
       # Note: devicelib hangs and failures
       disabled: [amd_windows, amd_wsl]
     Unit_deviceAllocation_New_PerThread_StructDataType:
-      tags: [device_lib, memory]
       <<: *level_2
+      tags: [device_lib, memory]
       # Note: devicelib hangs and failures
       disabled: [amd_windows, amd_wsl]
     Unit_deviceAllocation_InOneThread_AccessInAllThreads:
-      tags: [device_lib, memory]
       <<: *level_2
+      tags: [device_lib, memory]
       # (amd_windows) Note: this tests were disabled because some seemed to hang the machine on Windows with Navi32;
       # (amd_windows) all the ones calling TestMemoryAcrossMulKernels()/TestMemoryAcrossMulKernelsUsingGraph() were disabled
       # (amd_wsl) SWDEV-427101:Below test fails randomly in PSDB
       disabled: [amd_windows, amd_wsl]
     Unit_deviceAllocation_Malloc_AcrossKernels:
-      tags: [device_lib, memory]
       <<: *level_2
+      tags: [device_lib, memory]
       # Note: this tests were disabled because some seemed to hang the machine on Windows with Navi32;
       # all the ones calling TestMemoryAcrossMulKernels()/TestMemoryAcrossMulKernelsUsingGraph() were disabled
       disabled: [amd_windows, amd_wsl]
     Unit_deviceAllocation_New_AcrossKernels:
-      tags: [device_lib, memory]
       <<: *level_2
+      tags: [device_lib, memory]
       # Note: this tests were disabled because some seemed to hang the machine on Windows with Navi32;
       # all the ones calling TestMemoryAcrossMulKernels()/TestMemoryAcrossMulKernelsUsingGraph() were disabled
       disabled: [amd_windows, amd_wsl]
     Unit_deviceAllocation_Malloc_ComplexDataType:
-      tags: [device_lib, memory]
       <<: *level_2
+      tags: [device_lib, memory]
       # Note: this tests were disabled because some seemed to hang the machine on Windows with Navi32;
       # all the ones calling TestMemoryAcrossMulKernels()/TestMemoryAcrossMulKernelsUsingGraph() were disabled
       disabled: [amd_windows]
     Unit_deviceAllocation_New_ComplexDataType:
-      tags: [device_lib, memory]
       <<: *level_2
+      tags: [device_lib, memory]
       # Note: this tests were disabled because some seemed to hang the machine on Windows with Navi32;
       # all the ones calling TestMemoryAcrossMulKernels()/TestMemoryAcrossMulKernelsUsingGraph() were disabled
       disabled: [amd_windows, amd_wsl]
     Unit_deviceAllocation_Malloc_UnionType:
-      tags: [device_lib, memory]
       <<: *level_2
+      tags: [device_lib, memory]
       # Note: this tests were disabled because some seemed to hang the machine on Windows with Navi32;
       # all the ones calling TestMemoryAcrossMulKernels()/TestMemoryAcrossMulKernelsUsingGraph() were disabled
       disabled: [amd_windows, amd_wsl]
     Unit_deviceAllocation_New_UnionType:
-      tags: [device_lib, memory]
       <<: *level_2
+      tags: [device_lib, memory]
       # Note: this tests were disabled because some seemed to hang the machine on Windows with Navi32;
       # all the ones calling TestMemoryAcrossMulKernels()/TestMemoryAcrossMulKernelsUsingGraph() were disabled
       disabled: [amd_windows, amd_wsl]
     Unit_deviceAllocation_Malloc_SingleCodeObj:
-      tags: [device_lib, memory]
       <<: *level_2
+      tags: [device_lib, memory]
       # Note: this tests were disabled because some seemed to hang the machine on Windows with Navi32;
       # all the ones calling TestMemoryAcrossMulKernels()/TestMemoryAcrossMulKernelsUsingGraph() were disabled
       disabled: [amd_windows, amd_wsl]
     Unit_deviceAllocation_New_SingleCodeObj:
-      tags: [device_lib, memory]
       <<: *level_2
+      tags: [device_lib, memory]
       # Note: this tests were disabled because some seemed to hang the machine on Windows with Navi32;
       # all the ones calling TestMemoryAcrossMulKernels()/TestMemoryAcrossMulKernelsUsingGraph() were disabled
       disabled: [amd_windows, amd_wsl]
@@ -1316,40 +1316,40 @@ unit:
       <<: *level_2
       tags: [device_lib, memory]
     Unit_deviceAllocation_Malloc_PerThread_Graph:
-      tags: [device_lib, memory]
       <<: *level_2
+      tags: [device_lib, memory]
       # Note: this tests were disabled because some seemed to hang the machine on Windows with Navi32;
       # all the ones calling TestMemoryAcrossMulKernels()/TestMemoryAcrossMulKernelsUsingGraph() were disabled
       disabled: [amd_windows, amd_wsl]
     Unit_deviceAllocation_New_PerThread_Graph:
-      tags: [device_lib, memory]
       <<: *level_2
+      tags: [device_lib, memory]
       # Note: this tests were disabled because some seemed to hang the machine on Windows with Navi32;
       # all the ones calling TestMemoryAcrossMulKernels()/TestMemoryAcrossMulKernelsUsingGraph() were disabled
       disabled: [amd_windows, amd_wsl]
     Unit_deviceAllocation_Malloc_DeviceFunc:
-      tags: [device_lib, memory]
       <<: *level_2
+      tags: [device_lib, memory]
       # Note: devicelib hangs and failures
       disabled: [amd_windows, amd_wsl]
     Unit_deviceAllocation_New_DeviceFunc:
-      tags: [device_lib, memory]
       <<: *level_2
+      tags: [device_lib, memory]
       # Note: devicelib hangs and failures
       disabled: [amd_windows, amd_wsl]
     Unit_deviceAllocation_VirtualFunction:
-      tags: [device_lib, memory]
       <<: *level_2
+      tags: [device_lib, memory]
       # Note: devicelib hangs and failures
       disabled: [amd_windows, amd_wsl]
     Unit_deviceAllocation_Malloc_MulKernels_MulThreads:
-      tags: [device_lib, memory]
       <<: *level_2
+      tags: [device_lib, memory]
       # Note: devicelib hangs and failures
       disabled: [amd_windows, amd_wsl]
     Unit_deviceAllocation_New_MulKernels_MulThreads:
-      tags: [device_lib, memory]
       <<: *level_2
+      tags: [device_lib, memory]
       # Note: devicelib hangs and failures
       disabled: [amd_windows, amd_wsl]
     Unit_deviceAllocation_Malloc_SingKernels_MulThreads:
@@ -1359,13 +1359,13 @@ unit:
       <<: *level_2
       tags: [device_lib, memory]
     Unit_deviceAllocation_Malloc_MulCodeObj:
-      tags: [device_lib, memory]
       <<: *level_2
+      tags: [device_lib, memory]
       # Note: devicelib hangs and failures
       disabled: [amd_windows, amd_wsl]
     Unit_deviceAllocation_New_MulCodeObj:
-      tags: [device_lib, memory]
       <<: *level_2
+      tags: [device_lib, memory]
       # Note: devicelib hangs and failures
       disabled: [amd_windows, amd_wsl]
     Unit_AtomicFunctions_Inc:
@@ -1501,8 +1501,8 @@ unit:
       <<: *level_2
       tags: [device_lib, types]
     Unit_hipVectorTypes_test_on_device:
-      tags: [device_lib, types]
       <<: *level_2
+      tags: [device_lib, types]
       # SWDEV-444987 - Below tests fail in stress testing on 25/01/2023
       disabled: [amd_windows, amd_wsl]
     Unit_hipTestHalf:
@@ -1518,8 +1518,8 @@ unit:
       <<: *level_2
       tags: [device_lib, types]
     Unit_Test_makechar_functionality:
-      tags: [device_lib, types]
       <<: *level_2
+      tags: [device_lib, types]
       # Rock_Linux_Failures_on_gfx94X
       disabled: [amd_linux]
     Unit_bf16_basic:
@@ -1675,8 +1675,8 @@ unit:
       <<: *level_2
       tags: [device_lib, math]
     Unit_BuiltInAtomicAdd_NonCoherentGlobalMemWithRtc:
-      tags: [device_lib, math]
       <<: *level_2
+      tags: [device_lib, math]
       # Rock_Linux_Failures_on_gfx94X
       disabled: [amd_linux]
     Unit_unsafeAtomicAdd_CoherentRTCnounsafeatomicflag: *level_2
@@ -1711,8 +1711,8 @@ unit:
     Dynamic_Alloca: *level_2
   dynamicLoading:
     Unit_dynamic_loading_device_kernels_from_library:
-      tags: [module]
       <<: *level_2
+      tags: [module]
       # Rock_Linux_Failures_on_gfx94X
       disabled: [amd_linux]
     Unit_hipApiDynamicLoad_hipGetProcAddress:
@@ -1753,8 +1753,8 @@ unit:
       <<: *level_2
       tags: [error_handling]
     Unit_hipGetLastError_with_hipMemcpyPeerAsync:
-      tags: [error_handling, multigpu]
       <<: *level_2
+      tags: [error_handling, multigpu]
     Unit_hipGetLastError_with_hipMemcpyDtoHAsync:
       <<: *level_2
       tags: [error_handling]
@@ -1864,8 +1864,8 @@ unit:
       <<: *level_2
       tags: [error_handling]
     Unit_hipGetLastError_KernelFailure_TwoDevices:
-      tags: [error_handling, multigpu]
       <<: *level_2
+      tags: [error_handling, multigpu]
     Unit_hipGetLastError_KernelFailure_TwoStreams:
       <<: *level_2
       tags: [error_handling]
@@ -1876,8 +1876,8 @@ unit:
       <<: *level_2
       tags: [error_handling]
     Unit_hipExtGetLastError_with_hipMemcpyPeerAsync:
-      tags: [error_handling, multigpu]
       <<: *level_2
+      tags: [error_handling, multigpu]
     Unit_hipExtGetLastError_with_hipMemcpyDtoHAsync:
       <<: *level_2
       tags: [error_handling]
@@ -1952,8 +1952,8 @@ unit:
       <<: *level_2
       tags: [event]
     Unit_hipEvent:
-      tags: [event]
       <<: *level_2
+      tags: [event]
       # SWDEV-411303 fails in WSL. Profiling not support in WSL
       disabled: [amd_wsl]
     Unit_hipEventElapsedTime_NullCheck:
@@ -1963,11 +1963,11 @@ unit:
       <<: *level_2
       tags: [event, sync]
     Unit_hipEventElapsedTime_DifferentDevices:
+      <<: *level_2
       tags: [event, sync, multigpu]
-      <<: *level_2
     Unit_hipEventElapsedTime_NotReady_Negative:
-      tags: [event, sync]
       <<: *level_2
+      tags: [event, sync]
       # SWDEV-411303 fails in WSL. Profiling not support in WSL
       disabled: [amd_wsl]
     Unit_hipEventElapsedTime:
@@ -1977,25 +1977,25 @@ unit:
       <<: *level_2
       tags: [event, sync]
     Unit_hipEventRecord:
-      tags: [event, sync]
       <<: *level_2
+      tags: [event, sync]
       disabled: [amd_windows]
     Unit_hipEventRecord_Negative:
+      <<: *level_2
       tags: [event, sync, multigpu]
-      <<: *level_2
     Unit_hipEventIpc:
-      tags: [event, ipc]
       <<: *level_2
+      tags: [event, ipc]
       # (amd_wsl) Below tests fail in stress test on 24/07/23
       disabled: [amd_windows, amd_wsl]
     Unit_hipEventDestroy_Unfinished:
-      tags: [event, lifecycle]
       <<: *level_2
+      tags: [event, lifecycle]
       # SWDEV-411303 fails in WSL. Profiling not support in WSL
       disabled: [amd_wsl]
     Unit_hipEventDestroy_WithWaitingStream:
-      tags: [event, lifecycle]
       <<: *level_2
+      tags: [event, lifecycle]
       # SWDEV-402054 fails in external github build
       disabled: [amd_windows, amd_wsl]
     Unit_hipEventDestroy_Negative:
@@ -2014,34 +2014,34 @@ unit:
       <<: *level_2
       tags: [event, lifecycle]
     Unit_hipEventCreateWithFlags_DisableSystemFence_HstVisMem:
-      tags: [event, lifecycle]
       <<: *level_2
+      tags: [event, lifecycle]
       # Note: intermittent Seg fault failure
       disabled: [amd_windows, amd_wsl]
     Unit_hipEventCreateWithFlags_DefaultFlg_HstVisMem:
-      tags: [event, lifecycle]
       <<: *level_2
+      tags: [event, lifecycle]
       # Note: intermittent Seg fault failure
       disabled: [amd_windows, amd_wsl]
     Unit_hipEventCreateWithFlags_DisableSystemFence_NonCohHstMem:
-      tags: [event, lifecycle]
       <<: *level_2
+      tags: [event, lifecycle]
       # Note: intermittent Seg fault failure
       disabled: [amd_windows, amd_wsl]
     Unit_hipEventCreateWithFlags_DefaultFlg_NonCohHstMem:
-      tags: [event, lifecycle]
       <<: *level_2
+      tags: [event, lifecycle]
       # Note: intermittent Seg fault failure
       disabled: [amd_windows, amd_wsl]
     Unit_hipEventCreateWithFlags_DisableSystemFence_CohHstMem:
-      tags: [event, lifecycle]
       <<: *level_2
+      tags: [event, lifecycle]
       # (amd_linux) SWDEV-470751 : Fine Grain memory is MTYPE_NC due to HW bug.
       # (amd_windows) Note: intermittent Seg fault failure
       disabled: [gfx1200, gfx1201, amd_windows, amd_wsl]
     Unit_hipEventCreateWithFlags_DefaultFlg_CohHstMem:
-      tags: [event, lifecycle]
       <<: *level_2
+      tags: [event, lifecycle]
       # Note: intermittent Seg fault failure
       disabled: [amd_windows, amd_wsl]
     Unit_hipEventCreateWithFlags_Verify_Capture:
@@ -2057,21 +2057,21 @@ unit:
       <<: *level_2
       tags: [event]
     Unit_hipEventMGpuMThreads_2:
-      tags: [event, multigpu]
       <<: *level_2
+      tags: [event, multigpu]
     Unit_hipEventMGpuMThreads_3:
+      <<: *level_2
       tags: [event, multigpu]
-      <<: *level_2
     Unit_hipEventQuery_DifferentDevice:
-      tags: [event, sync, multigpu]
       <<: *level_2
+      tags: [event, sync, multigpu]
     Unit_hipEventIpc_shm_cleanup:
       <<: *level_2
       tags: [event, ipc]
   executionControl:
     Unit_hipFuncGetAttributes_Positive_Basic:
-      tags: [kernel, attributes]
       <<: *level_2
+      tags: [kernel, attributes]
       # NOTE: The following test is disabled due to defect - EXSWHTEC-242
       disabled: [amd_linux, amd_windows]
     Unit_hipFuncGetAttributes_Negative_Parameters:
@@ -2084,8 +2084,8 @@ unit:
       <<: *level_2
       tags: [kernel, launch]
     Unit_hipLaunchKernel_Negative_Parameters:
-      tags: [kernel, launch]
       <<: *level_2
+      tags: [kernel, launch]
       # Below tests are failing PSDB
       disabled: [amd_windows]
     Unit_hipLaunchKernel_Verify_Capture: *level_2
@@ -2100,11 +2100,11 @@ unit:
       tags: [kernel]
     Unit_hipLaunchCooperativeKernel_Verify_Capture: *level_2
     Unit_hipLaunchCooperativeKernelMultiDevice_Positive_Basic:
-      tags: [multigpu, kernel]
       <<: *level_2
+      tags: [multigpu, kernel]
     Unit_hipLaunchCooperativeKernelMultiDevice_Negative_Parameters:
-      tags: [multigpu, kernel]
       <<: *level_2
+      tags: [multigpu, kernel]
     Unit_hipLaunchCooperativeKernelMultiDevice_Negative_MultiKernelSameDevice:
       <<: *level_2
       tags: [kernel]
@@ -2121,11 +2121,11 @@ unit:
       <<: *level_2
       tags: [kernel, launch]
     Unit_hipExtLaunchMultiKernelMultiDevice_Positive_Basic:
-      tags: [multigpu, kernel, launch]
       <<: *level_2
+      tags: [multigpu, kernel, launch]
     Unit_hipExtLaunchMultiKernelMultiDevice_Negative_Parameters:
-      tags: [multigpu, kernel, launch]
       <<: *level_2
+      tags: [multigpu, kernel, launch]
       # NOTE: The following test is disabled due to defect - EXSWHTEC-244
       disabled: [amd_linux, amd_windows]
     Unit_hipExtLaunchMultiKernelMultiDevice_Negative_MultiKernelSameDevice:
@@ -2151,21 +2151,21 @@ unit:
       <<: *level_2
       tags: [kernel]
     Unit_hipFuncSetCacheConfig_Positive_Basic:
-      tags: [kernel, attributes]
       <<: *level_2
+      tags: [kernel, attributes]
       # Note: intermittent Seg fault failure
       disabled: [amd_windows, amd_wsl]
     Unit_hipFuncSetCacheConfig_Negative_Parameters:
-      tags: [kernel, attributes]
       <<: *level_2
+      tags: [kernel, attributes]
       # Note: intermittent Seg fault failure
       disabled: [amd_windows, amd_wsl]
     Unit_hipFuncSetCacheConfig_Negative_Not_Supported:
       <<: *level_2
       tags: [kernel, attributes]
     Unit_hipFuncSetSharedMemConfig_Positive_Basic:
-      tags: [kernel, attributes]
       <<: *level_2
+      tags: [kernel, attributes]
       # Note: intermittent Seg fault failure
       disabled: [amd_windows, amd_wsl]
     Unit_hipFuncSetSharedMemConfig_Negative_Parameters:
@@ -2178,8 +2178,8 @@ unit:
       <<: *level_2
       tags: [kernel, attributes]
     Unit_hipFuncSetAttribute_Positive_PreferredSharedMemoryCarveout:
-      tags: [kernel, attributes]
       <<: *level_2
+      tags: [kernel, attributes]
       # Note: intermittent Seg fault failure
       disabled: [amd_windows, amd_wsl]
     Unit_hipFuncSetAttribute_Positive_Parameters:
@@ -2207,93 +2207,93 @@ unit:
       tags: [compiler]
   gl_interop:
     Unit_hipGLGetDevices_Positive_Basic:
-      tags: [interop, gl]
       <<: *level_2
+      tags: [interop, gl]
       # SWDEV-439004: Below tests failing randomly in CQE staging
       disabled: [amd_wsl]
     Unit_hipGLGetDevices_Positive_Parameters:
-      tags: [interop, gl]
       <<: *level_2
+      tags: [interop, gl]
       # SWDEV-439004: Below tests failing randomly in CQE staging
       disabled: [amd_wsl]
     Unit_hipGLGetDevices_Negative_Parameters:
-      tags: [interop, gl]
       <<: *level_2
+      tags: [interop, gl]
       # SWDEV-439004: Below tests failing randomly in CQE staging
       disabled: [amd_wsl]
     Unit_hipGraphicsGLRegisterBuffer_Positive_Basic:
-      tags: [interop, gl]
       <<: *level_2
+      tags: [interop, gl]
       # SWDEV-439004: Below tests failing randomly in CQE staging
       disabled: [amd_wsl]
     Unit_hipGraphicsGLRegisterBuffer_Positive_Register_Twice:
-      tags: [interop, gl]
       <<: *level_2
+      tags: [interop, gl]
       # SWDEV-439004: Below tests failing randomly in CQE staging
       disabled: [amd_wsl]
     Unit_hipGraphicsGLRegisterBuffer_Negative_Parameters:
-      tags: [interop, gl]
       <<: *level_2
+      tags: [interop, gl]
       # SWDEV-439004: Below tests failing randomly in CQE staging
       disabled: [amd_wsl]
     Unit_hipGraphicsGLRegisterImage_Positive_Basic:
-      tags: [interop, gl]
       <<: *level_2
+      tags: [interop, gl]
       # SWDEV-439004: Below tests failing randomly in CQE staging
       disabled: [amd_wsl]
     Unit_hipGraphicsGLRegisterImage_Positive_Register_Twice:
-      tags: [interop, gl]
       <<: *level_2
+      tags: [interop, gl]
       # SWDEV-439004: Below tests failing randomly in CQE staging
       disabled: [amd_wsl]
     Unit_hipGraphicsGLRegisterImage_Negative_Parameters:
-      tags: [interop, gl]
       <<: *level_2
+      tags: [interop, gl]
       # SWDEV-439004: Below tests failing randomly in CQE staging
       disabled: [amd_wsl]
     Unit_hipGraphicsMapResources_Positive_Basic:
-      tags: [interop, gl]
       <<: *level_2
+      tags: [interop, gl]
       # SWDEV-439004: Below tests failing randomly in CQE staging
       disabled: [amd_wsl]
     Unit_hipGraphicsMapResources_Negative_Parameters:
-      tags: [interop, gl]
       <<: *level_2
+      tags: [interop, gl]
       # SWDEV-439004: Below tests failing randomly in CQE staging
       disabled: [amd_linux, amd_wsl]
     Unit_hipGraphicsResourceGetMappedPointer_Positive_Basic:
-      tags: [interop, gl]
       <<: *level_2
+      tags: [interop, gl]
       # SWDEV-439004: Below tests failing randomly in CQE staging
       disabled: [amd_wsl]
     Unit_hipGraphicsResourceGetMappedPointer_Positive_Parameters:
-      tags: [interop, gl]
       <<: *level_2
+      tags: [interop, gl]
       # SWDEV-439004: Below tests failing randomly in CQE staging
       disabled: [amd_linux, amd_wsl]
     Unit_hipGraphicsResourceGetMappedPointer_Negative_Parameters:
-      tags: [interop, gl]
       <<: *level_2
+      tags: [interop, gl]
       # SWDEV-439004: Below tests failing randomly in CQE staging
       disabled: [amd_linux, amd_wsl]
     Unit_hipGraphicsSubResourceGetMappedArray_Positive_Basic:
-      tags: [interop, gl]
       <<: *level_2
+      tags: [interop, gl]
       # SWDEV-439004: Below tests failing randomly in CQE staging
       disabled: [amd_wsl]
     Unit_hipGraphicsSubResourceGetMappedArray_Negative_Parameters:
-      tags: [interop, gl]
       <<: *level_2
+      tags: [interop, gl]
       # SWDEV-439004: Below tests failing randomly in CQE staging
       disabled: [amd_linux, amd_wsl]
     Unit_hipGraphicsUnmapResources_Negative_Parameters:
-      tags: [interop, gl]
       <<: *level_2
+      tags: [interop, gl]
       # SWDEV-439004: Below tests failing randomly in CQE staging
       disabled: [amd_linux, amd_wsl]
     Unit_hipGraphicsUnregisterResource_Negative_Parameters:
-      tags: [interop, gl]
       <<: *level_2
+      tags: [interop, gl]
       # SWDEV-439004: Below tests failing randomly in CQE staging
       disabled: [amd_linux, amd_wsl]
   graph:
@@ -2325,13 +2325,13 @@ unit:
       <<: *level_2
       tags: [graph, node]
     Unit_hipGraphAddEventRecordNode_Functional_WithoutFlags:
-      tags: [graph, node]
       <<: *level_2
+      tags: [graph, node]
       # Note: intermittent Seg fault failure
       disabled: [amd_windows, amd_wsl]
     Unit_hipGraphAddEventRecordNode_Functional_ElapsedTime:
-      tags: [graph, node]
       <<: *level_2
+      tags: [graph, node]
       # (amd_windows) SWDEV-347670 - blocking tests have TDR, causing hangs
       # (amd_wsl) Note: Windows disabled
       disabled: [amd_windows, amd_wsl]
@@ -2339,8 +2339,8 @@ unit:
       <<: *level_2
       tags: [graph, node]
     Unit_hipGraphAddEventRecordNode_MultipleRun:
-      tags: [graph, node]
       <<: *level_2
+      tags: [graph, node]
       # (amd_windows) SWDEV-347670 - blocking tests have TDR, causing hangs
       # (amd_wsl) Note: Windows disabled
       disabled: [amd_windows, amd_wsl]
@@ -2384,8 +2384,8 @@ unit:
       <<: *level_2
       tags: [graph, node]
     Unit_hipGraphAddMemcpyNode_Negative_Parameters:
-      tags: [graph, node]
       <<: *level_2
+      tags: [graph, node]
       # NOTE: The following test is disabled due to defect - EXSWHTEC-245
       disabled: [amd_windows]
     Unit_hipGraphAddMemcpyNode_Negative:
@@ -2395,8 +2395,8 @@ unit:
       <<: *level_2
       tags: [graph, node]
     Unit_hipGraphAddMemcpyNode_PeerAccessFunctional:
-      tags: [graph, node, multigpu]
       <<: *level_2
+      tags: [graph, node, multigpu]
     Unit_hipGraphAddMemcpyNode_HostToHost:
       <<: *level_2
       tags: [graph, node]
@@ -2404,8 +2404,8 @@ unit:
       <<: *level_2
       tags: [graph, lifecycle]
     Unit_hipGraphClone_Functional:
-      tags: [graph, lifecycle, multigpu]
       <<: *level_2
+      tags: [graph, lifecycle, multigpu]
     Unit_hipGraphClone_MultiThreaded:
       <<: *level_2
       tags: [graph, lifecycle]
@@ -2416,46 +2416,46 @@ unit:
       <<: *level_2
       tags: [graph, lifecycle]
     Unit_hipGraphInstantiateWithFlags_DependencyGraphDeviceCtxtChg:
-      tags: [graph, lifecycle, multigpu]
       <<: *level_2
+      tags: [graph, lifecycle, multigpu]
       # Enable the below test when multi-device graph launches are fully supported
       disabled: [amd_linux]
     Unit_hipGraphInstantiateWithFlags_StreamCapture:
       <<: *level_2
       tags: [graph, lifecycle]
     Unit_hipGraphInstantiateWithFlags_StreamCaptureDeviceContextChg:
-      tags: [graph, lifecycle, multigpu]
       <<: *level_2
+      tags: [graph, lifecycle, multigpu]
       # SWDEV-445928: These tests fail in PSDB stress test on 09/02/2024
       disabled: [amd_linux]
     Unit_hipGraphInstantiateWithFlags_FlagAutoFreeOnLaunch_check:
-      tags: [graph, lifecycle]
       <<: *level_2
+      tags: [graph, lifecycle]
       # SWDEV-402082 - PAL Backend fails to reserve address on GPU except first one
       disabled: [amd_windows, amd_wsl]
     Unit_hipGraphInstantiateWithFlags_AutoFreeOnLaunchInLoop:
-      tags: [graph, lifecycle]
       <<: *level_2
+      tags: [graph, lifecycle]
       # SWDEV-517063 Below tests are temporarily disabled due to PSDB failure
       disabled: [amd_windows]
     Unit_hipGraphInstantiateWithFlags_AutoFreeOnLaunchFillKernel:
-      tags: [graph, lifecycle]
       <<: *level_2
+      tags: [graph, lifecycle]
       # SWDEV-517063 Below tests are temporarily disabled due to PSDB failure
       disabled: [amd_windows]
     Unit_hipGraphInstantiateWithFlags_AutoFreeOnLaunchDoubleKernel:
-      tags: [graph, lifecycle]
       <<: *level_2
+      tags: [graph, lifecycle]
       # SWDEV-517063 Below tests are temporarily disabled due to PSDB failure
       disabled: [amd_windows]
     Unit_hipGraphInstantiateWithFlags_WithDefaultAndAutoFreeOnLaunch:
-      tags: [graph, lifecycle]
       <<: *level_2
+      tags: [graph, lifecycle]
       # SWDEV-517063 Below tests are temporarily disabled due to PSDB failure
       disabled: [amd_windows]
     Unit_hipGraphInstantiateWithParams_Negative:
-      tags: [graph, lifecycle]
       <<: *level_2
+      tags: [graph, lifecycle]
       # Unit_hipGraphInstantiateWithParams_Negative
       disabled: [nvidia_windows]
     Unit_hipGraphInstantiateWithParams_DependencyGraph:
@@ -2468,8 +2468,8 @@ unit:
       <<: *level_2
       tags: [graph, node]
     Unit_hipGraphAddHostNode_ClonedGraphWithHostNode:
-      tags: [graph, node]
       <<: *level_2
+      tags: [graph, node]
       # (amd_wsl) Note: Windows disabled
       disabled: [amd_windows, amd_wsl]
     Unit_hipGraphAddHostNode_VectorSquare:
@@ -2488,11 +2488,11 @@ unit:
       <<: *level_2
       tags: [graph, node]
     Unit_hipGraphAddMemcpyNodeFromSymbol_GlobalMemoryPeerDevice:
-      tags: [graph, node, multigpu]
       <<: *level_2
+      tags: [graph, node, multigpu]
     Unit_hipGraphAddMemcpyNodeFromSymbol_GlobalConstMemoryPeerDevice:
-      tags: [graph, node, multigpu]
       <<: *level_2
+      tags: [graph, node, multigpu]
     Unit_hipGraphAddMemcpyNodeFromSymbol_GlobalMemoryWithKernel:
       <<: *level_2
       tags: [graph, node]
@@ -2539,11 +2539,11 @@ unit:
       <<: *level_2
       tags: [graph, node]
     Unit_hipGraphAddMemcpyNodeToSymbol_GlobalConstMemoryPeerDevice:
-      tags: [graph, node, multigpu]
       <<: *level_2
+      tags: [graph, node, multigpu]
     Unit_hipGraphAddMemcpyNodeToSymbol_MemcpyToSymbolNodeWithKernel:
-      tags: [graph, node, multigpu]
       <<: *level_2
+      tags: [graph, node, multigpu]
     Unit_hipGraphAddMemcpyNodeToSymbol_Positive_Basic:
       <<: *level_2
       tags: [graph, node]
@@ -2552,24 +2552,24 @@ unit:
       tags: [graph, node]
     Unit_hipGraphExecMemsetNodeSetParams_Positive_Basic: *level_2
     Unit_hipGraphExecMemsetNodeSetParams_Negative_Parameters:
+      <<: *level_2
       tags: [graph, exec, multigpu]
-      <<: *level_2
     Unit_hipGraphExecMemsetNodeSetParams_Negative_Updating_Non1D_Node:
-      tags: [graph, exec]
       <<: *level_2
+      tags: [graph, exec]
       # Note: Test disabled due to defect - EXSWHTEC-207
       disabled: [amd_windows, amd_wsl]
     Unit_hipGraphMemcpyNodeSetParamsToSymbol_Negative:
       <<: *level_2
       tags: [graph, node]
     Unit_hipGraphMemcpyNodeSetParamsToSymbol_Functional:
-      tags: [graph, node]
       <<: *level_2
+      tags: [graph, node]
       # (amd_wsl) Note: Windows disabled
       disabled: [amd_windows, amd_wsl]
     Unit_hipGraphMemcpyNodeSetParamsToSymbol_Positive_Basic:
-      tags: [graph, node]
       <<: *level_2
+      tags: [graph, node]
       # Note: intermittent Seg fault failure
       disabled: [amd_windows, amd_wsl]
     Unit_hipGraphMemcpyNodeSetParamsToSymbol_Negative_Parameters:
@@ -2585,18 +2585,18 @@ unit:
       <<: *level_2
       tags: [graph, lifecycle]
     Unit_hipGraphDestroyNode_Complx_ChkNumOfNodesNDep:
-      tags: [graph, lifecycle]
       <<: *level_2
+      tags: [graph, lifecycle]
       # Note: intermittent Seg fault failure
       disabled: [amd_windows, amd_wsl]
     Unit_hipGraphDestroyNode_Complx_ChkNumOfNodesNDep_ClonedGrph:
-      tags: [graph, lifecycle]
       <<: *level_2
+      tags: [graph, lifecycle]
       # Note: intermittent Seg fault failure
       disabled: [amd_windows, amd_wsl]
     Unit_hipGraphDestroyNode_Complx_ChkNumOfNodesNDep_ChldNode:
-      tags: [graph, lifecycle]
       <<: *level_2
+      tags: [graph, lifecycle]
       # Note: intermittent Seg fault failure
       disabled: [amd_windows, amd_wsl]
     Unit_hipGraphGetNodes_Positive_Functional:
@@ -2663,8 +2663,8 @@ unit:
       <<: *level_2
       tags: [graph, node]
     Unit_hipGraphAddChildGraphNode_OrgGraphAsChildGraph:
-      tags: [graph, node]
       <<: *level_2
+      tags: [graph, node]
       # Disabling tests which no longer behave the same on nvidia platform
       disabled: [nvidia_windows]
     Unit_hipGraphAddChildGraphNode_ExecuteChildGraph:
@@ -2692,8 +2692,8 @@ unit:
       <<: *level_2
       tags: [graph, node]
     Unit_hipGraphAddChildGraphNode_CmplxNstGrph_UpdKerFun_Clone:
-      tags: [graph, node]
       <<: *level_2
+      tags: [graph, node]
       # Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/92
       disabled: [amd_wsl]
     Unit_hipGraphAddChildGraphNode_CmplxNstGrph_UpdKerDim:
@@ -2712,13 +2712,13 @@ unit:
       <<: *level_2
       tags: [graph, node]
     Unit_hipGraphAddChildGraphNode_MultGraphsAsSingleGraph:
-      tags: [graph, node]
       <<: *level_2
+      tags: [graph, node]
       # Note: intermittent Seg fault failure
       disabled: [amd_windows, amd_wsl]
     Unit_hipGraphAddChildGraphNode_CmplxNstGrph_MultGPU:
-      tags: [graph, node, multigpu]
       <<: *level_2
+      tags: [graph, node, multigpu]
     Unit_hipGraphNodeGetType_Negative:
       <<: *level_2
       tags: [graph, query]
@@ -2744,8 +2744,8 @@ unit:
       <<: *level_2
       tags: [graph, exec]
     Unit_hipGraphExecMemcpyNodeSetParams1D_Negative:
-      tags: [graph, exec]
       <<: *level_2
+      tags: [graph, exec]
       # SWDEV-439004: Below tests failing randomly in CQE staging
       disabled: [amd_wsl]
     Unit_hipGraphExecMemcpyNodeSetParams1D_Positive_Basic:
@@ -2839,8 +2839,8 @@ unit:
       <<: *level_2
       tags: [graph, exec]
     Unit_hipGraphExecUpdate_Negative_MultiDevice_Context_Changed:
-      tags: [graph, exec, multigpu]
       <<: *level_2
+      tags: [graph, exec, multigpu]
       # SWDEV-446588 - Disable graph multi gpu testcases until graph has support for it
       disabled: [amd_windows]
     Unit_hipGraphExecUpdate_Functional_KernelFunction_Changed:
@@ -2853,8 +2853,8 @@ unit:
       <<: *level_2
       tags: [graph, exec]
     Unit_hipGraphExecEventRecordNodeSetEvent_Positive_DifferentDevices:
-      tags: [graph, exec, multigpu]
       <<: *level_2
+      tags: [graph, exec, multigpu]
     Unit_hipGraphExecEventRecordNodeSetEvent_Negative:
       <<: *level_2
       tags: [graph, exec]
@@ -2884,13 +2884,13 @@ unit:
       <<: *level_2
       tags: [graph, exec]
     Unit_hipGraphExecMemcpyNodeSetParamsFromSymbol_Positive_Basic:
-      tags: [graph, exec]
       <<: *level_2
+      tags: [graph, exec]
       # Note: intermittent Seg fault failure
       disabled: [amd_windows, amd_wsl]
     Unit_hipGraphExecMemcpyNodeSetParamsFromSymbol_Negative_Parameters:
-      tags: [graph, exec]
       <<: *level_2
+      tags: [graph, exec]
       # SWDEV-396617 ExecMemcpyNodeSetParamsFromSymbol fails in direction
       disabled: [amd_wsl]
     Unit_hipGraphEventRecordNodeGetEvent_Functional:
@@ -2981,8 +2981,8 @@ unit:
       <<: *level_2
       tags: [graph, capture]
     Unit_hipStreamBeginCapture_Positive_MultiGPU:
-      tags: [graph, capture, multigpu]
       <<: *level_2
+      tags: [graph, capture, multigpu]
     Unit_hipStreamBeginCapture_Positive_nestedStreamCapture:
       <<: *level_2
       tags: [graph, capture]
@@ -3005,8 +3005,8 @@ unit:
       <<: *level_2
       tags: [graph, capture]
     Unit_hipGraphAddMemcpyNode1D_Functional:
-      tags: [graph, node, multigpu]
       <<: *level_2
+      tags: [graph, node, multigpu]
     Unit_hipGraphAddMemcpyNode1D_Negative:
       <<: *level_2
       tags: [graph, node]
@@ -3080,8 +3080,8 @@ unit:
       <<: *level_2
       tags: [graph, capture]
     Unit_hipStreamBeginCapture_MultiGPU:
-      tags: [graph, capture, multigpu]
       <<: *level_2
+      tags: [graph, capture, multigpu]
     Unit_hipStreamBeginCapture_nestedStreamCapture:
       <<: *level_2
       tags: [graph, capture]
@@ -3089,8 +3089,8 @@ unit:
       <<: *level_2
       tags: [graph, capture]
     Unit_hipStreamBeginCapture_captureComplexGraph:
-      tags: [graph, capture]
       <<: *level_2
+      tags: [graph, capture]
       # (amd_windows) SWDEV-347670 - blocking tests have TDR, causing hangs
       # (amd_wsl) Note: Windows disabled
       disabled: [amd_windows, amd_wsl]
@@ -3134,8 +3134,8 @@ unit:
       <<: *level_2
       tags: [graph, query]
     Unit_hipGraphMemFreeNodeGetParams_InvalidArgs:
-      tags: [graph, query]
       <<: *level_2
+      tags: [graph, query]
       # Rock_Linux_Failures_on_gfx94X
       disabled: [amd_linux]
     Unit_hipGraphUserObj_Int_float_Objects:
@@ -3148,8 +3148,8 @@ unit:
       <<: *level_2
       tags: [graph, userobj]
     Unit_hipGraphUserObj_ClonedGraph:
-      tags: [graph, userobj]
       <<: *level_2
+      tags: [graph, userobj]
       # Test Unit_hipGraphUserObj_ClonedGraph disabled due to SWDEV-483112
       disabled: [amd_windows]
     Unit_hipGraphUserObj_ManualGraph:
@@ -3189,8 +3189,8 @@ unit:
       <<: *level_2
       tags: [graph, capture]
     Unit_hipStreamBeginCaptureToGraph_CaptureDepGraph:
-      tags: [graph, capture]
       <<: *level_2
+      tags: [graph, capture]
       # SWDEV-454245, SWDEV-454247 : Below tests fail on 29/03/24
       disabled: [amd_windows]
     Unit_hipStreamBeginCaptureToGraph_ComplexGraph:
@@ -3227,8 +3227,8 @@ unit:
       <<: *level_2
       tags: [graph, capture]
     Unit_hipStreamBeginCaptureToGraph_IndepGraphsThreads:
-      tags: [graph, capture]
       <<: *level_2
+      tags: [graph, capture]
       # SWDEV-454245, SWDEV-454247 : Below tests fail on 29/03/24
       disabled: [amd_windows]
     Unit_hipGetProcAddress_GraphAPIs_StreamCapture:
@@ -3347,8 +3347,8 @@ unit:
       <<: *level_2
       tags: [graph, node]
     Unit_hipGraphMemcpyNodeSetParamsFromSymbol_Positive_Basic:
-      tags: [graph, node]
       <<: *level_2
+      tags: [graph, node]
       # Note: intermittent Seg fault failure
       disabled: [amd_windows, amd_wsl]
     Unit_hipGraphMemcpyNodeSetParamsFromSymbol_Negative_Parameters:
@@ -3419,8 +3419,8 @@ unit:
       <<: *level_2
       tags: [graph, node]
     Unit_hipGraphMemcpyNodeSetParams_Functional:
-      tags: [graph, node]
       <<: *level_2
+      tags: [graph, node]
       # (amd_windows) SWDEV-347670 - blocking tests have TDR, causing hangs
       # (amd_wsl) Note: Windows disabled
       disabled: [amd_windows, amd_wsl]
@@ -3458,8 +3458,8 @@ unit:
       <<: *level_2
       tags: [graph, exec]
     Unit_hipGraphLaunch_Functional_multidevice_test:
-      tags: [graph, exec, multigpu]
       <<: *level_2
+      tags: [graph, exec, multigpu]
     Unit_hipGraphLaunch_Functional_MultipleLaunch:
       <<: *level_2
       tags: [graph, exec]
@@ -3479,18 +3479,18 @@ unit:
       <<: *level_2
       tags: [graph, exec]
     Unit_hipGraphExecMemcpyNodeSetParamsToSymbol_Functional:
-      tags: [graph, exec]
       <<: *level_2
+      tags: [graph, exec]
       # (amd_wsl) Note: Windows disabled
       disabled: [amd_windows, amd_wsl]
     Unit_hipGraphExecMemcpyNodeSetParamsToSymbol_Positive_Basic:
-      tags: [graph, exec]
       <<: *level_2
+      tags: [graph, exec]
       # Note: intermittent Seg fault failure
       disabled: [amd_windows, amd_wsl]
     Unit_hipGraphExecMemcpyNodeSetParamsToSymbol_Negative_Parameters:
-      tags: [graph, exec, multigpu]
       <<: *level_2
+      tags: [graph, exec, multigpu]
     Unit_hipGraphNodeGetDependentNodes_Positive_Functional:
       <<: *level_2
       tags: [graph, dependency]
@@ -3498,8 +3498,8 @@ unit:
       <<: *level_2
       tags: [graph, dependency]
     Unit_hipGraphNodeGetDependentNodes_Functional:
-      tags: [graph, dependency]
       <<: *level_2
+      tags: [graph, dependency]
       # (amd_windows) SWDEV-347670 - blocking tests have TDR, causing hangs
       # (amd_wsl) Note: Windows disabled
       disabled: [amd_windows, amd_wsl]
@@ -3513,8 +3513,8 @@ unit:
       <<: *level_2
       tags: [graph, dependency]
     Unit_hipGraphNodeGetDependencies_Functional:
-      tags: [graph, dependency]
       <<: *level_2
+      tags: [graph, dependency]
       # (amd_windows) SWDEV-347670 - blocking tests have TDR, causing hangs
       # (amd_wsl) Note: Windows disabled
       disabled: [amd_windows, amd_wsl]
@@ -3540,8 +3540,8 @@ unit:
       <<: *level_2
       tags: [graph, exec]
     Unit_hipGraphExecChildGraphNodeSetParams_ChildTopology:
-      tags: [graph, exec]
       <<: *level_2
+      tags: [graph, exec]
       # (amd_windows) SWDEV-347670 - blocking tests have TDR, causing hangs
       # (amd_wsl) Note: Windows disabled
       disabled: [amd_windows, amd_wsl]
@@ -3567,8 +3567,8 @@ unit:
       <<: *level_2
       tags: [graph, lifecycle]
     Unit_hipStreamSetCaptureDependencies_Positive_Functional:
-      tags: [graph, capture]
       <<: *level_2
+      tags: [graph, capture]
       # Note: Following four tests disabled due to defect - EXSWHTEC-203
       disabled: [amd_windows, amd_wsl]
     Unit_hipStreamAddCaptureDependencies_Positive_Functional:
@@ -3669,13 +3669,13 @@ unit:
       <<: *level_2
       tags: [graph, lifecycle]
     Unit_hipGraphClone_Test_hipGraphExecMemcpyNodeSetParams:
-      tags: [graph, lifecycle]
       <<: *level_2
+      tags: [graph, lifecycle]
       # Below tests fail in stress test on 23/06/23
       disabled: [amd_wsl]
     Unit_hipGraphClone_Test_hipGraphMemcpyNodeSetParams1D_and_exec:
-      tags: [graph, lifecycle]
       <<: *level_2
+      tags: [graph, lifecycle]
       # Below tests fail in stress test on 23/06/23
       disabled: [amd_wsl]
     Unit_hipGraphClone_hipGraphMemcpyNodeSetParamsFromSymbol_exec:
@@ -3700,14 +3700,14 @@ unit:
       <<: *level_2
       tags: [graph, lifecycle]
     Unit_hipGraphClone_address_change_in_loop:
-      tags: [graph, lifecycle, multigpu]
       <<: *level_2
+      tags: [graph, lifecycle, multigpu]
     Unit_hipGraphClone_address_change_in_thread:
-      tags: [graph, lifecycle, multigpu]
       <<: *level_2
+      tags: [graph, lifecycle, multigpu]
     Unit_hipGraphClone_multi_GPU_test:
-      tags: [graph, lifecycle, multigpu]
       <<: *level_2
+      tags: [graph, lifecycle, multigpu]
     Unit_hipGraphClone_hipUserObject_hipGraphUserObject:
       <<: *level_2
       tags: [graph, lifecycle]
@@ -3748,8 +3748,8 @@ unit:
       <<: *level_2
       tags: [graph, exec]
     Unit_hipGraphUpload_Functional_multidevice_test:
-      tags: [graph, exec, multigpu]
       <<: *level_2
+      tags: [graph, exec, multigpu]
       # (amd_linux) SWDEV-553920 disabled until multi device graph issues are resolved
       # (amd_windows) SWDEV-446588 - Disable graph multi gpu testcases until graph has support for it
       disabled: [amd_linux, amd_windows]
@@ -3757,8 +3757,8 @@ unit:
       <<: *level_2
       tags: [graph, exec]
     Unit_hipGraphUpload_Negative_Parameters:
-      tags: [graph, exec]
       <<: *level_2
+      tags: [graph, exec]
       # SWDEV-434878: Below tests failed in stress test on 24/11/23
       disabled: [amd_windows, amd_wsl]
     Unit_hipGraphKernelNodeCopyAttributes_Functional:
@@ -3801,47 +3801,47 @@ unit:
       <<: *level_2
       tags: [graph, exec]
     Unit_hipGraph_PerfCheck_hipGraphExecKernelNodeSetParams:
-      tags: [graph, exec, multigpu]
       <<: *level_2
+      tags: [graph, exec, multigpu]
     Unit_hipGraph_PerfCheck_hipGraphExecKernelNodeSetParams_inLoop:
-      tags: [graph, exec, multigpu]
       <<: *level_2
+      tags: [graph, exec, multigpu]
     Unit_hipGraph_PerfCheck_hipGraphExecMemcpyNodeSetParams:
       <<: *level_2
       tags: [graph, exec]
     Unit_hipGraph_PerfCheck_hipGraphExecMemcpyNodeSetParams_inLoop:
-      tags: [graph, exec, multigpu]
       <<: *level_2
+      tags: [graph, exec, multigpu]
     Unit_hipGraph_PerfCheck_hipGraphExecMemcpyNodeSetParams1D_inLoop:
-      tags: [graph, exec, multigpu]
       <<: *level_2
+      tags: [graph, exec, multigpu]
     Unit_hipGraph_PerfCheck_hipGraphExecMemcpyNodeSetParamsFrmSymbol:
-      tags: [graph, exec, multigpu]
       <<: *level_2
+      tags: [graph, exec, multigpu]
     Unit_hipGraph_PerfCheck_hipGraphExecMemcpyNodeSetParamsToSymbol:
-      tags: [graph, exec, multigpu]
       <<: *level_2
+      tags: [graph, exec, multigpu]
     Unit_hipGraph_PerfCheck_hipGraphExecMemsetNodeSetParams:
-      tags: [graph, exec, multigpu]
       <<: *level_2
+      tags: [graph, exec, multigpu]
     Unit_hipGraph_PerfCheck_hipGraphExecChildGraphNodeSetParams:
-      tags: [graph, exec, multigpu]
       <<: *level_2
+      tags: [graph, exec, multigpu]
     Unit_hipGraph_PerfCheck_hipGraphExecEventRecordNodeSetEvent:
-      tags: [graph, exec, multigpu]
       <<: *level_2
+      tags: [graph, exec, multigpu]
     Unit_hipGraph_PerfCheck_hipGraphExecEventWaitNodeSetEvent:
-      tags: [graph, exec, multigpu]
       <<: *level_2
+      tags: [graph, exec, multigpu]
     Unit_hipGraph_PerfCheck_hipGraphExecHostNodeSetParams:
-      tags: [graph, exec, multigpu]
       <<: *level_2
+      tags: [graph, exec, multigpu]
     Unit_hipGraph_PerfCheck_hipGraphExecUpdate:
-      tags: [graph, exec, multigpu]
       <<: *level_2
+      tags: [graph, exec, multigpu]
     Unit_hipGraph_PerfCheck_hipGraphExecUpdate_kernel_inLoop:
-      tags: [graph, exec, multigpu]
       <<: *level_2
+      tags: [graph, exec, multigpu]
     Unit_hipGraphKernelNodeGetAttribute_Negative_Parameters:
       <<: *level_2
       tags: [graph, query]
@@ -3858,21 +3858,21 @@ unit:
       <<: *level_2
       tags: [graph, query]
     Unit_hipGraphMem_Alloc_Free_NodeGetParams_Functional_MultiDevice:
-      tags: [graph, query, multigpu]
       <<: *level_2
+      tags: [graph, query, multigpu]
       # SWDEV-446588 - Disable graph multi gpu testcases until graph has support for it
       disabled: [amd_windows]
     Unit_hipGraphMem_Alloc_Free_NodeGetParams_Functional_2:
       <<: *level_2
       tags: [graph, query]
     Unit_hipGraphMem_Alloc_Free_NodeGetParams_Functional_3:
-      tags: [graph, query]
       <<: *level_2
+      tags: [graph, query]
       # Below tests are failing PSDB
       disabled: [amd_windows]
     Unit_hipGraphMem_Alloc_Free_NodeGetParams_Negative:
-      tags: [graph, query]
       <<: *level_2
+      tags: [graph, query]
       # (amd_linux) Rock_Linux_Failures_on_gfx94X
       # (amd_wsl) SWDEV-430116:Below tests failed in stress test on 27/10/23
       disabled: [amd_linux, amd_wsl]
@@ -3883,8 +3883,8 @@ unit:
       <<: *level_2
       tags: [graph, node]
     Unit_hipGraphAddMemAllocNode_Positive_FreeInGraph:
-      tags: [graph, node]
       <<: *level_2
+      tags: [graph, node]
       # Below tests are failing PSDB
       disabled: [amd_windows]
     Unit_hipGraphAddMemAllocNode_Positive_FreeOutsideStream:
@@ -3900,14 +3900,14 @@ unit:
       <<: *level_2
       tags: [graph, node]
     Unit_hipGraphAddMemAllocNode_Functional_2:
-      tags: [graph, node, multigpu]
       <<: *level_2
+      tags: [graph, node, multigpu]
     Unit_hipGraphAddMemAllocNode_Functional_3:
-      tags: [graph, node, multigpu]
       <<: *level_2
+      tags: [graph, node, multigpu]
     Unit_hipGraphAddMemAllocNode_Functional_4:
-      tags: [graph, node, multigpu]
       <<: *level_2
+      tags: [graph, node, multigpu]
     Unit_hipGraphAddMemAllocNode_Argument_Check:
       <<: *level_2
       tags: [graph, node]
@@ -3915,8 +3915,8 @@ unit:
       <<: *level_2
       tags: [graph, node]
     Unit_hipGraphAddMemAllocNode_Negative_Free_Alloc_Memory_Again:
-      tags: [graph, node]
       <<: *level_2
+      tags: [graph, node]
       # (amd_linux) SWDEV-457316 Below test is skipped due ref count logic (Discussed with German)
       # (amd_windows) SWDEV-457316 Below test is skipped due ref count logic (Discussed with German)
       disabled: [amd_linux, amd_windows]
@@ -3927,8 +3927,8 @@ unit:
       <<: *level_2
       tags: [graph, node]
     Unit_hipGraphAddMemFreeNode_Negative_NotSupported:
-      tags: [graph, node]
       <<: *level_2
+      tags: [graph, node]
       # SWDEV-457316 Below tests are disabled temporarily to avoid combined PSDB
       disabled: [amd_windows]
     Unit_hipGraphAddMemFreeNode_Functional:
@@ -3965,8 +3965,8 @@ unit:
       <<: *level_2
       tags: [graph, query]
     Unit_hipDeviceGetGraphMemAttribute_Functional_Multi_Device:
-      tags: [graph, query, multigpu]
       <<: *level_2
+      tags: [graph, query, multigpu]
     Unit_hipDeviceGetGraphMemAttribute_Negative:
       <<: *level_2
       tags: [graph, query]
@@ -4015,33 +4015,33 @@ unit:
       <<: *level_2
       tags: [graph, node]
     Unit_hipDrvGraphAddMemsetNode_hipMallocPitch_2D:
-      tags: [graph, node]
       <<: *level_2
+      tags: [graph, node]
       # Below tests are failing PSDB
       disabled: [amd_windows]
     Unit_hipDrvGraphAddMemsetNode_hipMallocPitch_1D:
-      tags: [graph, node]
       <<: *level_2
+      tags: [graph, node]
       # Below tests are failing PSDB
       disabled: [amd_windows]
     Unit_hipDrvGraphAddMemsetNode_hipMalloc3D_2D:
-      tags: [graph, node]
       <<: *level_2
+      tags: [graph, node]
       # Below tests are failing PSDB
       disabled: [amd_windows]
     Unit_hipDrvGraphAddMemsetNode_hipMalloc3D_1D:
-      tags: [graph, node]
       <<: *level_2
+      tags: [graph, node]
       # Below tests are failing PSDB
       disabled: [amd_windows]
     Unit_hipDrvGraphAddMemsetNode_hipMalloc_1D:
-      tags: [graph, node]
       <<: *level_2
+      tags: [graph, node]
       # Below tests are failing PSDB
       disabled: [amd_windows]
     Unit_hipDrvGraphAddMemsetNode_hipMallocManaged:
-      tags: [graph, node]
       <<: *level_2
+      tags: [graph, node]
       # Below tests are failing PSDB
       disabled: [amd_windows]
     Unit_hipDrvGraphAddMemcpyNode_Negative:
@@ -4051,8 +4051,8 @@ unit:
       <<: *level_2
       tags: [graph, node]
     Unit_hipDrvGraphAddMemcpyNode_MulitDevice:
-      tags: [graph, node, multigpu]
       <<: *level_2
+      tags: [graph, node, multigpu]
     Unit_hipDrvGraphAddMemcpyNode_Positive_Basic:
       <<: *level_2
       tags: [graph, node]
@@ -4088,8 +4088,8 @@ unit:
       <<: *level_2
       tags: [kernel, attributes]
     Unit_hipDynamicShared:
-      tags: [kernel, memory]
       <<: *level_2
+      tags: [kernel, memory]
       # Below tests are failing PSDB
       disabled: [amd_windows]
     Unit_hipDynamicShared2:
@@ -4144,11 +4144,11 @@ unit:
       <<: *level_2
       tags: [kernel, launch]
     Unit_kernel_ChkPrintf:
+      <<: *level_2
       tags: [multigpu, kernel, language]
-      <<: *level_2
     Unit_hipExtLaunchKernelGGL:
-      tags: [kernel, launch]
       <<: *level_2
+      tags: [kernel, launch]
       # SWDEV-438524: Below tests causing TDR & machine down in stress test on 15/12/23
       disabled: [amd_windows, amd_wsl]
     Unit_hipSetupArgument_Simple:
@@ -4168,13 +4168,13 @@ unit:
       <<: *level_2
       tags: [kernel, attributes]
     Unit_Kernel_Launch_bounds_Negative_OutOfBounds:
-      tags: [kernel, attributes]
       <<: *level_2
+      tags: [kernel, attributes]
       # Below tests are failing PSDB
       disabled: [amd_windows]
     Unit_Kernel_Launch_bounds_Negative_Parameters_RTC:
-      tags: [kernel, attributes]
       <<: *level_2
+      tags: [kernel, attributes]
       # Below tests are failing PSDB
       disabled: [amd_windows]
   library:
@@ -4413,8 +4413,8 @@ unit:
     Unit_Device_modf_Accuracy_Positive_float: *level_2
     Unit_Device_modf_Accuracy_Positive_double: *level_2
     Unit_Device_modf_modff_Negative_RTC:
-      tags: [device_lib, math]
       <<: *level_2
+      tags: [device_lib, math]
       # float* can be casted to double* [math_remainder_rounding_negative_kernels_rtc.hh:247]
       <<: *disabled_linux
     Unit_Device___frcp_rn_Accuracy_Positive:
@@ -4563,23 +4563,23 @@ unit:
       <<: *level_2
       tags: [device_lib, math]
     Unit_Device___hadd_Sanity_Positive:
-      tags: [device_lib, math]
       <<: *level_2
+      tags: [device_lib, math]
       # Below 4 tests are disable due to defect EXSWHTEC-355
       disabled: [amd_windows]
     Unit_Device___uhadd_Sanity_Positive:
-      tags: [device_lib, math]
       <<: *level_2
+      tags: [device_lib, math]
       # Below 4 tests are disable due to defect EXSWHTEC-355
       disabled: [amd_windows]
     Unit_Device___rhadd_Sanity_Positive:
-      tags: [device_lib, math]
       <<: *level_2
+      tags: [device_lib, math]
       # Below 4 tests are disable due to defect EXSWHTEC-355
       disabled: [amd_windows]
     Unit_Device___urhadd_Sanity_Positive:
-      tags: [device_lib, math]
       <<: *level_2
+      tags: [device_lib, math]
       # Below 4 tests are disable due to defect EXSWHTEC-355
       disabled: [amd_windows]
     Unit_Device___mulhi_Sanity_Positive:
@@ -4696,13 +4696,13 @@ unit:
       <<: *level_2
       tags: [device_lib, math]
     Unit_Device_ilogbf_Accuracy_Positive:
-      tags: [device_lib, math]
       <<: *level_2
+      tags: [device_lib, math]
       # Below 2 tests are disable due to defect EXSWHTEC-369
       disabled: [amd_linux, amd_windows]
     Unit_Device_ilogb_Accuracy_Positive:
-      tags: [device_lib, math]
       <<: *level_2
+      tags: [device_lib, math]
       # Below 2 tests are disable due to defect EXSWHTEC-369
       disabled: [amd_linux, amd_windows]
     Unit_Device_ilogb_ilogbf_Negative_RTC:
@@ -4764,8 +4764,8 @@ unit:
       <<: *level_2
       tags: [device_lib, math]
     Unit_Device_tgammaf_Accuracy_Limited_Positive:
-      tags: [device_lib, math]
       <<: *level_2
+      tags: [device_lib, math]
       # TODO
       disabled: [amd_linux]
     Unit_Device_tgamma_Accuracy_Limited_Positive:
@@ -5134,13 +5134,13 @@ unit:
       # (nvidia_linux) TODO rounding error
       disabled: [amd_windows, nvidia_linux]
     Unit_Device___half_as_short_Accuracy_Positive:
-      tags: [device_lib, math]
       <<: *level_2
+      tags: [device_lib, math]
       # Below tests cause timeout in stress test of 09/02/24
       disabled: [amd_windows]
     Unit_Device___half_as_ushort_Accuracy_Positive:
-      tags: [device_lib, math]
       <<: *level_2
+      tags: [device_lib, math]
       # Below tests cause timeout in stress test of 09/02/24
       disabled: [amd_windows]
     Unit_Device___int2half_rn_Accuracy_Positive:
@@ -5257,13 +5257,13 @@ unit:
       # Below tests cause timeout in stress test of 09/02/24
       disabled: [amd_windows]
     Unit_Device___short_as_half_Accuracy_Positive:
-      tags: [device_lib, math]
       <<: *level_2
+      tags: [device_lib, math]
       # Below tests cause timeout in stress test of 09/02/24
       disabled: [amd_windows]
     Unit_Device___ushort_as_half_Accuracy_Positive:
-      tags: [device_lib, math]
       <<: *level_2
+      tags: [device_lib, math]
       # Below tests cause timeout in stress test of 09/02/24
       disabled: [amd_windows]
     Unit_Device___float2half_rd_Accuracy_Limited_Positive:
@@ -5296,8 +5296,8 @@ unit:
       <<: *level_2
       tags: [device_lib, math]
     Unit_Device___half2float_Accuracy_Positive:
-      tags: [device_lib, math]
       <<: *level_2
+      tags: [device_lib, math]
       # Below tests cause timeout in stress test of 09/02/24
       disabled: [amd_windows]
     Unit_Device_exp_Accuracy_Positive_float: *level_2
@@ -5357,83 +5357,83 @@ unit:
       <<: *level_2
       tags: [device_lib, math]
     Unit_Device___half2half2_Accuracy_Positive:
-      tags: [device_lib, math]
       <<: *level_2
+      tags: [device_lib, math]
       # Below tests cause timeout in stress test of 09/02/24
       disabled: [amd_windows]
     Unit_Device_make_half2_Accuracy_Positive:
-      tags: [device_lib, math]
       <<: *level_2
+      tags: [device_lib, math]
       # Below tests cause timeout in stress test of 09/02/24
       disabled: [amd_windows]
     Unit_Device___halves2half2_Accuracy_Positive:
-      tags: [device_lib, math]
       <<: *level_2
+      tags: [device_lib, math]
       # Below tests cause timeout in stress test of 09/02/24
       disabled: [amd_windows]
     Unit_Device___low2half_Accuracy_Positive:
-      tags: [device_lib, math]
       <<: *level_2
+      tags: [device_lib, math]
       # Below tests cause timeout in stress test of 09/02/24
       disabled: [amd_windows]
     Unit_Device___high2half_Accuracy_Positive:
-      tags: [device_lib, math]
       <<: *level_2
+      tags: [device_lib, math]
       # Below tests cause timeout in stress test of 09/02/24
       disabled: [amd_windows]
     Unit_Device___low2half2_Accuracy_Positive:
-      tags: [device_lib, math]
       <<: *level_2
+      tags: [device_lib, math]
       # Below tests cause timeout in stress test of 09/02/24
       disabled: [amd_windows]
     Unit_Device___high2half2_Accuracy_Positive:
-      tags: [device_lib, math]
       <<: *level_2
+      tags: [device_lib, math]
       # Below tests cause timeout in stress test of 09/02/24
       disabled: [amd_windows]
     Unit_Device___lowhigh2highlow_Accuracy_Positive:
-      tags: [device_lib, math]
       <<: *level_2
+      tags: [device_lib, math]
       # Below tests cause timeout in stress test of 09/02/24
       disabled: [amd_windows]
     Unit_Device___lows2half2_Accuracy_Positive:
-      tags: [device_lib, math]
       <<: *level_2
+      tags: [device_lib, math]
       # Below tests cause timeout in stress test of 09/02/24
       disabled: [amd_windows]
     Unit_Device___highs2half2_Accuracy_Positive:
-      tags: [device_lib, math]
       <<: *level_2
+      tags: [device_lib, math]
       # Below tests cause timeout in stress test of 09/02/24
       disabled: [amd_windows]
     Unit_Device___float2half2_rn_Accuracy_Positive:
-      tags: [device_lib, math]
       <<: *level_2
+      tags: [device_lib, math]
       # Below tests cause timeout in stress test of 09/02/24
       disabled: [amd_windows]
     Unit_Device___floats2half2_rn_Accuracy_Positive:
-      tags: [device_lib, math]
       <<: *level_2
+      tags: [device_lib, math]
       # Below tests cause timeout in stress test of 09/02/24
       disabled: [amd_windows]
     Unit_Device___float22half2_rn_Accuracy_Positive:
-      tags: [device_lib, math]
       <<: *level_2
+      tags: [device_lib, math]
       # Below tests cause timeout in stress test of 09/02/24
       disabled: [amd_windows]
     Unit_Device___low2float_Accuracy_Positive:
-      tags: [device_lib, math]
       <<: *level_2
+      tags: [device_lib, math]
       # Below tests cause timeout in stress test of 09/02/24
       disabled: [amd_windows]
     Unit_Device___high2float_Accuracy_Positive:
-      tags: [device_lib, math]
       <<: *level_2
+      tags: [device_lib, math]
       # Below tests cause timeout in stress test of 09/02/24
       disabled: [amd_windows]
     Unit_Device___half22float2_Accuracy_Positive:
-      tags: [device_lib, math]
       <<: *level_2
+      tags: [device_lib, math]
       # Below tests cause timeout in stress test of 09/02/24
       disabled: [amd_windows]
     Unit_Device_hcos_Accuracy_Positive:
@@ -5847,8 +5847,8 @@ unit:
       <<: *level_2
       tags: [memory]
     Unit_hipMemcpy2DToArray_Positive_Default:
-      tags: [memory, transfer, multigpu]
       <<: *level_2
+      tags: [memory, transfer, multigpu]
     Unit_hipMemcpy2DToArray_Positive_Synchronization_Behavior:
       <<: *level_2
       tags: [memory, transfer]
@@ -5871,20 +5871,20 @@ unit:
       <<: *level_2
       tags: [memory, transfer]
     Unit_hipMemcpy2DToArray_multiDevicePinnedMemPeerGpu:
-      tags: [memory, transfer, multigpu]
       <<: *level_2
+      tags: [memory, transfer, multigpu]
     Unit_hipMemcpy2DToArray_multiDeviceDeviceContextChange:
-      tags: [memory, transfer, multigpu]
       <<: *level_2
+      tags: [memory, transfer, multigpu]
     Unit_hipMemcpy2DToArray_Negative:
       <<: *level_2
       tags: [memory, transfer]
     Unit_hipMemcpy2DToArrayAsync_Positive_Default:
+      <<: *level_2
       tags: [memory, transfer, multigpu]
-      <<: *level_2
     Unit_hipMemcpy2DToArrayAsync_Positive_Synchronization_Behavior:
-      tags: [memory, transfer]
       <<: *level_2
+      tags: [memory, transfer]
       # Disabling tests tracked with SWDEV-389647..
       disabled: [amd_wsl]
     Unit_hipMemcpy2DToArrayAsync_Positive_ZeroWidthHeight:
@@ -5906,11 +5906,11 @@ unit:
       <<: *level_2
       tags: [memory, transfer]
     Unit_hipMemcpy2DToArrayAsync_multiDevicePinnedHostMem:
-      tags: [memory, transfer, multigpu]
       <<: *level_2
+      tags: [memory, transfer, multigpu]
     Unit_hipMemcpy2DToArrayAsync_multiDeviceDeviceContextChange:
-      tags: [memory, transfer, multigpu]
       <<: *level_2
+      tags: [memory, transfer, multigpu]
     Unit_hipMemcpy2DToArrayAsync_Negative:
       <<: *level_2
       tags: [memory, transfer]
@@ -5918,8 +5918,8 @@ unit:
       <<: *level_2
       tags: [memory, transfer]
     Unit_hipMemcpy3D_Positive_Synchronization_Behavior:
-      tags: [memory, transfer]
       <<: *level_2
+      tags: [memory, transfer]
       # Below tests tests fail in PSDB
       disabled: [nvidia_windows]
     Unit_hipMemcpy3D_Positive_DeviceToDevice_Synchronization_Behavior:
@@ -5948,8 +5948,8 @@ unit:
       <<: *level_2
       tags: [multigpu]
     Unit_hipMemcpy3D_multiDevice_Basic_Size_Test:
-      tags: [memory, transfer, multigpu]
       <<: *level_2
+      tags: [memory, transfer, multigpu]
     Unit_hipMemcpy3DAsync_Positive_Basic:
       <<: *level_2
       tags: [memory, transfer]
@@ -5985,11 +5985,11 @@ unit:
       <<: *level_2
       tags: [memory, transfer]
     Unit_hipMemcpyParam2D_Positive_Basic:
+      <<: *level_2
       tags: [memory, transfer, multigpu]
-      <<: *level_2
     Unit_hipMemcpyParam2D_Positive_Synchronization_Behavior:
-      tags: [memory, transfer]
       <<: *level_2
+      tags: [memory, transfer]
       # Below tests tests fail in PSDB
       disabled: [nvidia_windows]
     Unit_hipMemcpyParam2D_Positive_Parameters:
@@ -6017,8 +6017,8 @@ unit:
       <<: *level_2
       tags: [memory, transfer]
     Unit_hipMemcpyParam2DAsync_Positive_Basic:
-      tags: [memory, transfer, multigpu]
       <<: *level_2
+      tags: [memory, transfer, multigpu]
     Unit_hipMemcpyParam2DAsync_Positive_Synchronization_Behavior:
       <<: *level_2
       tags: [memory, transfer]
@@ -6052,11 +6052,11 @@ unit:
       <<: *level_2
       tags: [memory, transfer]
     Unit_hipMemcpy2D_Positive_Basic:
+      <<: *level_2
       tags: [memory, transfer, multigpu]
-      <<: *level_2
     Unit_hipMemcpy2D_Positive_Synchronization_Behavior:
-      tags: [memory, transfer]
       <<: *level_2
+      tags: [memory, transfer]
       # Below tests tests fail in PSDB
       disabled: [nvidia_windows]
     Unit_hipMemcpy2D_Positive_Parameters:
@@ -6090,11 +6090,11 @@ unit:
       <<: *level_2
       tags: [memory, transfer]
     Unit_hipMemcpy2D_multiDevice_Basic_Size_Test:
-      tags: [memory, transfer, multigpu]
       <<: *level_2
+      tags: [memory, transfer, multigpu]
     Unit_hipMemcpy2DAsync_Positive_Basic:
-      tags: [memory, transfer, multigpu]
       <<: *level_2
+      tags: [memory, transfer, multigpu]
     Unit_hipMemcpy2DAsync_Positive_Synchronization_Behavior:
       <<: *level_2
       tags: [memory, transfer]
@@ -6122,11 +6122,11 @@ unit:
       <<: *level_2
       tags: [memory, transfer]
     Unit_hipMemcpy2DAsync_multiDevice_Basic_Size_Test:
-      tags: [memory, transfer, multigpu]
       <<: *level_2
+      tags: [memory, transfer, multigpu]
     Unit_hipMemcpy2DFromArray_Positive_Default:
-      tags: [memory, transfer, multigpu]
       <<: *level_2
+      tags: [memory, transfer, multigpu]
     Unit_hipMemcpy2DFromArray_Positive_Synchronization_Behavior:
       <<: *level_2
       tags: [memory, transfer]
@@ -6149,20 +6149,20 @@ unit:
       <<: *level_2
       tags: [memory, transfer]
     Unit_hipMemcpy2DFromArray_multiDevicePinnedMemPeerGpu:
-      tags: [memory, transfer, multigpu]
       <<: *level_2
+      tags: [memory, transfer, multigpu]
     Unit_hipMemcpy2DFromArray_multiDeviceContextChange:
-      tags: [memory, transfer, multigpu]
       <<: *level_2
+      tags: [memory, transfer, multigpu]
     Unit_hipMemcpy2DFromArray_Negative:
       <<: *level_2
       tags: [memory, transfer]
     Unit_hipMemcpy2DFromArrayAsync_Positive_Default:
+      <<: *level_2
       tags: [memory, transfer, multigpu]
-      <<: *level_2
     Unit_hipMemcpy2DFromArrayAsync_Positive_Synchronization_Behavior:
-      tags: [memory, transfer]
       <<: *level_2
+      tags: [memory, transfer]
       # SWDEV-396963
       disabled: [amd_wsl]
     Unit_hipMemcpy2DFromArrayAsync_Positive_ZeroWidthHeight:
@@ -6181,11 +6181,11 @@ unit:
       <<: *level_2
       tags: [memory, transfer]
     Unit_hipMemcpy2DFromArrayAsync_multiDevicePinnedHostMem:
-      tags: [memory, transfer, multigpu]
       <<: *level_2
+      tags: [memory, transfer, multigpu]
     Unit_hipMemcpy2DFromArrayAsync_multiDeviceContextChange:
-      tags: [memory, transfer, multigpu]
       <<: *level_2
+      tags: [memory, transfer, multigpu]
     Unit_hipMemcpy2DFromArrayAsync_Negative:
       <<: *level_2
       tags: [memory, transfer]
@@ -6255,13 +6255,13 @@ unit:
       <<: *level_2
       tags: [memory, transfer]
     Unit_hipMemcpyHtoAAsync_BasicTstsWithDiffStreams:
-      tags: [memory, transfer]
       <<: *level_2
+      tags: [memory, transfer]
       # Rock_Linux_Failures_on_gfx94X
       disabled: [amd_linux]
     Unit_hipMemcpyHtoAAsync_MultiDevice:
-      tags: [memory, transfer, multigpu]
       <<: *level_2
+      tags: [memory, transfer, multigpu]
     UnitHipMemcpyHtoAAsync_Capture:
       <<: *level_2
       tags: [memory, transfer]
@@ -6362,13 +6362,13 @@ unit:
       <<: *level_2
       tags: [memory, alloc]
     Unit_hipHostGetFlags_flagCombos:
-      tags: [memory, query]
       <<: *level_2
+      tags: [memory, query]
       # Note: CONFIG_NUMA disabled
       disabled: [amd_wsl]
     Unit_hipHostGetFlags_DifferentThreads:
-      tags: [memory, query]
       <<: *level_2
+      tags: [memory, query]
       # Note: CONFIG_NUMA disabled
       disabled: [amd_wsl]
     Unit_hipHostGetFlags_InvalidArgs:
@@ -6378,8 +6378,8 @@ unit:
       <<: *level_2
       tags: [memory, query]
     Unit_hipHostGetDevicePointer_Negative:
-      tags: [memory, query]
       <<: *level_2
+      tags: [memory, query]
       # Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/96
       disabled: [amd_windows, amd_wsl]
     Unit_hipHostGetDevicePointer_UseCase:
@@ -6410,8 +6410,8 @@ unit:
       <<: *level_2
       tags: [memory, alloc]
     Unit_hipMemAllocHost_VerifyAccess:
-      tags: [memory, alloc, multigpu]
       <<: *level_2
+      tags: [memory, alloc, multigpu]
     Unit_hipMemAllocHost_Capture:
       <<: *level_2
       tags: [memory, alloc]
@@ -6422,8 +6422,8 @@ unit:
       <<: *level_2
       tags: [memory, alloc]
     Unit_hipMallocManaged_MultiChunkMultiDevice:
-      tags: [memory, alloc, multigpu]
       <<: *level_2
+      tags: [memory, alloc, multigpu]
     Unit_hipMallocManaged_OverSubscription:
       <<: *level_2
       tags: [memory, alloc]
@@ -6487,8 +6487,8 @@ unit:
       <<: *level_2
       tags: [memory, memset]
     Unit_hipMemset3DAsync_capturehipMemset3DAsync:
-      tags: [memory, memset]
       <<: *level_2
+      tags: [memory, memset]
       # Below tests are failing PSDB
       disabled: [amd_windows]
     Unit_hipMemset2D_BasicFunctional:
@@ -6501,8 +6501,8 @@ unit:
       <<: *level_2
       tags: [memory, memset]
     Unit_hipMemset2DAsync_capturehipMemset2DAsync:
-      tags: [memory, memset]
       <<: *level_2
+      tags: [memory, memset]
       # Below tests are failing PSDB
       disabled: [amd_windows]
     Unit_hipHostMalloc_ArgValidation:
@@ -6533,20 +6533,20 @@ unit:
       <<: *level_2
       tags: [memory, memset]
     Unit_hipMemset3D_RegressInLoop:
-      tags: [memory, memset, multigpu]
       <<: *level_2
+      tags: [memory, memset, multigpu]
     Unit_hipMemset3DAsync_RegressInLoop:
-      tags: [memory, memset, multigpu]
       <<: *level_2
+      tags: [memory, memset, multigpu]
     Unit_hipMemset3DAsync_ConcurrencyMthread:
       <<: *level_2
       tags: [memory, memset]
     Unit_hipMallocManaged_FlgParam:
-      tags: [memory, alloc, multigpu]
       <<: *level_2
+      tags: [memory, alloc, multigpu]
     Unit_hipMallocManaged_AccessMultiStream:
-      tags: [memory, alloc, multigpu]
       <<: *level_2
+      tags: [memory, alloc, multigpu]
     Unit_hipMemPrefetchAsyncAdviseFlgTst:
       <<: *level_2
       tags: [memory, query]
@@ -6557,8 +6557,8 @@ unit:
       <<: *level_2
       tags: [memory, query]
     Unit_hipMemPrefetchAsync_NonPageSz:
-      tags: [memory, query]
       <<: *level_2
+      tags: [memory, query]
       # Disabling below tests temporarily due to change in API behavior
       disabled: [amd_windows, amd_wsl]
     Unit_hipMemAdvise_MmapMem:
@@ -6568,8 +6568,8 @@ unit:
       <<: *level_2
       tags: [memory, alloc]
     Unit_hipMallocManaged_Advanced:
-      tags: [memory, alloc]
       <<: *level_2
+      tags: [memory, alloc]
       # Note: Windows disabled
       disabled: [amd_windows, amd_wsl]
     Unit_hipMallocManaged_Large:
@@ -6600,13 +6600,13 @@ unit:
       <<: *level_2
       tags: [memory, query]
     Unit_hipMemRangeGetAttribute_Positive_AccessedBy_Basic:
-      tags: [memory, query]
       <<: *level_2
+      tags: [memory, query]
       # NOTE: The following 2 tests are disabled due to defect - EXSWHTEC-238
       disabled: [amd_linux, amd_wsl]
     Unit_hipMemRangeGetAttribute_Positive_AccessedBy_Partial_Range:
-      tags: [memory, query]
       <<: *level_2
+      tags: [memory, query]
       # NOTE: The following 2 tests are disabled due to defect - EXSWHTEC-238
       disabled: [amd_linux, amd_wsl]
     Unit_hipMemRangeGetAttribute_Positive_AccessedBy_MultiDevice:
@@ -6619,24 +6619,24 @@ unit:
       <<: *level_2
       tags: [memory, query]
     Unit_hipMemRangeGetAttribute_NegativeTests:
-      tags: [memory, query]
       <<: *level_2
+      tags: [memory, query]
       disabled: [amd_windows, amd_wsl]
     Unit_hipMemRangeGetAttribute_AccessedBy1:
-      tags: [memory, query]
       <<: *level_2
+      tags: [memory, query]
       disabled: [amd_windows, amd_wsl]
     Unit_hipMemRangeGetAttribte_3:
-      tags: [memory, query]
       <<: *level_2
+      tags: [memory, query]
       disabled: [amd_windows, amd_wsl]
     Unit_hipMemRangeGetAttribute_4:
-      tags: [memory, query]
       <<: *level_2
+      tags: [memory, query]
       disabled: [amd_windows, amd_wsl]
     Unit_hipMemRangeGetAttribute_PrefetchAndGtAttr:
-      tags: [memory, query]
       <<: *level_2
+      tags: [memory, query]
       disabled: [amd_windows, amd_wsl]
     Unit_hipHostMalloc_CoherentTst:
       <<: *level_2
@@ -6645,13 +6645,13 @@ unit:
       <<: *level_2
       tags: [memory, query]
     Unit_hipMallocManaged_CoherentTstWthAdvise:
-      tags: [memory, query]
       <<: *level_2
+      tags: [memory, query]
       # Note: Windows disabled
       disabled: [amd_windows, amd_wsl]
     Unit_hipMalloc_CoherentTst:
-      tags: [memory, query]
       <<: *level_2
+      tags: [memory, query]
       # Note: Windows disabled
       disabled: [amd_windows, amd_wsl]
     Unit_hipExtMallocWithFlags_CoherentTst:
@@ -6784,8 +6784,8 @@ unit:
       <<: *level_2
       tags: [memory, transfer, multigpu]
     Unit_hipMemcpy3DPeerAsync_BasicFunctional:
-      tags: [memory, transfer, multigpu]
       <<: *level_2
+      tags: [memory, transfer, multigpu]
       # Rock_Linux_Failures_on_gfx94X
       disabled: [amd_linux]
     Unit_hipMemcpy3DPeerAsync_NegativeTsts:
@@ -6825,23 +6825,23 @@ unit:
       <<: *level_2
       tags: [memory, query]
     Unit_hipPointerGetAttributes_ClusterAlloc:
-      tags: [memory, query, multigpu]
       <<: *level_2
+      tags: [memory, query, multigpu]
     Unit_hipPointerGetAttributes_TinyClusterAlloc:
-      tags: [memory, query, multigpu]
       <<: *level_2
+      tags: [memory, query, multigpu]
     Unit_hipPointerGetAttributes_Negative:
       <<: *level_2
       tags: [memory, query]
     Unit_hipPointerGetAttributes_GpuIter:
-      tags: [memory, query, multigpu]
       <<: *level_2
+      tags: [memory, query, multigpu]
     Unit_hipPointerGetAttributes_GpuIter_Managed__Memory:
-      tags: [memory, query, multigpu]
       <<: *level_2
+      tags: [memory, query, multigpu]
     Unit_hipPointerGetAttributes_GpuIter_Unregistered_Memory:
-      tags: [memory, query, multigpu]
       <<: *level_2
+      tags: [memory, query, multigpu]
     Unit_hipExtMallocWithFlags_Positive_Basic:
       <<: *level_2
       tags: [memory, alloc]
@@ -6855,11 +6855,11 @@ unit:
       <<: *level_2
       tags: [memory, alloc]
     Unit_hipMallocManaged_MultiThread:
-      tags: [memory, alloc, multigpu]
       <<: *level_2
+      tags: [memory, alloc, multigpu]
     Unit_hipMallocManaged_MGpuMThread:
-      tags: [memory, alloc, multigpu]
       <<: *level_2
+      tags: [memory, alloc, multigpu]
     Unit_hipMallocManaged_MultiKrnlComnHmm:
       <<: *level_2
       tags: [memory, alloc]
@@ -6873,13 +6873,13 @@ unit:
       <<: *level_2
       tags: [memory, alloc]
     Unit_hipMemVmm_Basic:
-      tags: [vmm]
       <<: *level_2
+      tags: [vmm]
       # SWDEV-396616 hipMemMap returns invalid error
       disabled: [amd_windows, amd_wsl]
     Unit_hipMemVmm_Uncached:
-      tags: [memory, alloc]
       <<: *level_2
+      tags: [memory, alloc]
       # Rock_Window_Failures_on_gfx1151
       disabled: [amd_windows]
     Unit_hipArray_Valid:
@@ -6943,8 +6943,8 @@ unit:
       <<: *level_2
       tags: [memory]
     Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated:
-      tags: [memory, multigpu]
       <<: *level_2
+      tags: [memory, multigpu]
     Unit_hipGetProcAddress_MemoryApisMemcpy3DRelated:
       <<: *level_2
       tags: [memory]
@@ -6958,11 +6958,11 @@ unit:
       <<: *level_2
       tags: [memory]
     Unit_hipGetProcAddress_MemoryApisPeerToPeer:
+      <<: *level_2
       tags: [memory, multigpu]
-      <<: *level_2
     Unit_hipMemPrefetchAsync_v2_Device_Host:
-      tags: [memory, query, multigpu]
       <<: *level_2
+      tags: [memory, query, multigpu]
     Unit_hipMemPrefetchAsync_v2_HostNuma_HostNumaCurrent:
       <<: *level_2
       tags: [memory, query]
@@ -6970,8 +6970,8 @@ unit:
       <<: *level_2
       tags: [memory, query]
     Unit_hipMemAdvise_v2_Device_Host:
-      tags: [memory, query, multigpu]
       <<: *level_2
+      tags: [memory, query, multigpu]
     Unit_hipMemAdvise_v2_HostNuma_HostNumaCurrent:
       <<: *level_2
       tags: [memory, query]
@@ -6979,8 +6979,8 @@ unit:
       <<: *level_2
       tags: [memory, query]
     Unit_hipPointerSetAttribute_Positive_SyncMemops:
-      tags: [memory, query]
       <<: *level_2
+      tags: [memory, query]
       # Below test is disabled due to defect EXSWHTEC-347
       disabled: [amd_windows]
     Unit_hipPointerSetAttribute_Negative_Parameters:
@@ -6996,26 +6996,26 @@ unit:
       <<: *level_2
       tags: [memory, transfer]
     Unit_hipPtrGetAttribute_Simple:
-      tags: [memory, query, multigpu]
       <<: *level_2
+      tags: [memory, query, multigpu]
     Unit_hipMemPoolApi_Basic:
       <<: *level_2
       tags: [stream]
     Unit_hipMemPoolApi_BasicAlloc:
-      tags: [memory, alloc]
       <<: *level_2
+      tags: [memory, alloc]
       disabled: [amd_windows, amd_wsl]
     Unit_hipMemPoolApi_BasicTrim:
-      tags: [memory, alloc]
       <<: *level_2
+      tags: [memory, alloc]
       disabled: [amd_windows, amd_wsl]
     Unit_hipMemPoolApi_BasicReuse:
-      tags: [memory, alloc]
       <<: *level_2
+      tags: [memory, alloc]
       disabled: [amd_windows, amd_wsl]
     Unit_hipMemPoolApi_Opportunistic:
-      tags: [memory, alloc]
       <<: *level_2
+      tags: [memory, alloc]
       disabled: [amd_windows, amd_wsl]
     Unit_hipMemPoolApi_Default:
       <<: *level_2
@@ -7027,8 +7027,8 @@ unit:
       <<: *level_2
       tags: [memory, alloc]
     Unit_hipDeviceGetMemPool_Multidevice:
-      tags: [memory, alloc, multigpu]
       <<: *level_2
+      tags: [memory, alloc, multigpu]
     Unit_hipDeviceGetDefaultMemPool_Functional:
       <<: *level_2
       tags: [memory, alloc]
@@ -7036,8 +7036,8 @@ unit:
       <<: *level_2
       tags: [memory, alloc]
     Unit_hipDeviceSetMemPool_DestroyCurrentMempool:
-      tags: [memory, alloc, multigpu]
       <<: *level_2
+      tags: [memory, alloc, multigpu]
     Unit_hipDeviceSetMemPool_functional:
       <<: *level_2
       tags: [memory, alloc]
@@ -7048,26 +7048,26 @@ unit:
       <<: *level_2
       tags: [memory, alloc]
     Unit_hipMemPoolSetGetAccess_Positive_MultipleGPU:
-      tags: [memory, alloc, multigpu]
       <<: *level_2
+      tags: [memory, alloc, multigpu]
       disabled: [amd_windows]
     Unit_hipMemPoolSetGetAccess_Positive_P2P:
+      <<: *level_2
       tags: [memory, alloc, multigpu]
-      <<: *level_2
     Unit_hipMemPoolSetAccess_Negative_Parameters:
-      tags: [memory, alloc]
       <<: *level_2
+      tags: [memory, alloc]
       # SWDEV-435667: Below tests failing randomly in stress test on 08/12/23
       disabled: [amd_windows]
     Unit_hipMemPoolSetAccess_SetAccess:
-      tags: [memory, alloc, multigpu]
       <<: *level_2
+      tags: [memory, alloc, multigpu]
     Unit_hipMemPoolSetAccess_NegTst:
       <<: *level_2
       tags: [memory, alloc]
     Unit_hipMemPoolGetAccess_Negative_Parameters:
-      tags: [memory, alloc]
       <<: *level_2
+      tags: [memory, alloc]
       # Below tests are failing PSDB
       disabled: [amd_windows]
     Unit_hipMemPoolGetAccess_SetGet:
@@ -7086,21 +7086,21 @@ unit:
       <<: *level_2
       tags: [memory, alloc]
     Unit_hipMemPoolSetAttribute_EventDependencies:
-      tags: [memory, alloc]
       <<: *level_2
+      tags: [memory, alloc]
       # mlsejenkins_Window_Failures_on_gfx1201
       disabled: [amd_windows]
     Unit_hipMemPoolSetAttribute_Negative_Parameters:
-      tags: [memory, alloc]
       <<: *level_2
+      tags: [memory, alloc]
       # Below tests are failing PSDB
       disabled: [amd_windows]
     Unit_hipMemPoolSetAttribute_ResetMemHighAttr:
       <<: *level_2
       tags: [memory, alloc]
     Unit_hipMemPoolGetAttribute_Negative_Parameters:
-      tags: [memory, alloc]
       <<: *level_2
+      tags: [memory, alloc]
       # Below tests are failing PSDB
       disabled: [amd_windows]
     Unit_hipMemPoolGetAttribute_SetGet:
@@ -7131,8 +7131,8 @@ unit:
       <<: *level_2
       tags: [memory, alloc]
     Unit_hipMemPoolCreate_DeviceTest:
-      tags: [memory, alloc, multigpu]
       <<: *level_2
+      tags: [memory, alloc, multigpu]
     Unit_hipMemPoolDestroy_Negative_Parameter:
       <<: *level_2
       tags: [memory, alloc]
@@ -7152,8 +7152,8 @@ unit:
       <<: *level_2
       tags: [memory, alloc]
     Unit_hipMemPoolTrimTo_Multithreaded:
-      tags: [memory, alloc]
       <<: *level_2
+      tags: [memory, alloc]
       disabled: [amd_windows]
     Unit_hipMallocFromPoolAsync_Basic_OneAlloc:
       <<: *level_2
@@ -7177,24 +7177,24 @@ unit:
       <<: *level_2
       tags: [memory, alloc]
     Unit_hipMallocFromPoolAsync_ReleaseThreshold_Mgpu:
-      tags: [memory, alloc, multigpu]
       <<: *level_2
+      tags: [memory, alloc, multigpu]
     Unit_hipMallocFromPoolAsync_Multidevice_Concurrent:
-      tags: [memory, alloc, multigpu]
       <<: *level_2
+      tags: [memory, alloc, multigpu]
     Unit_hipMallocFromPoolAsync_Multidevice_MultiStream:
-      tags: [memory, alloc, multigpu]
       <<: *level_2
+      tags: [memory, alloc, multigpu]
     Unit_hipMallocFromPoolAsync_MThread_DefaultThresh:
       <<: *level_2
       tags: [memory, alloc]
     Unit_hipMallocFromPoolAsync_MThread_MaxThresh:
-      tags: [memory, alloc]
       <<: *level_2
+      tags: [memory, alloc]
       disabled: [amd_windows]
     Unit_hipMallocFromPoolAsync_MThread_CommonMpool_DefaultMempool:
-      tags: [memory, alloc]
       <<: *level_2
+      tags: [memory, alloc]
       disabled: [amd_windows]
     Unit_hipMallocFromPoolAsync_MThread_CommonMpool_MaxThresh:
       <<: *level_2
@@ -7218,51 +7218,51 @@ unit:
       <<: *level_2
       tags: [memory, alloc]
     Unit_hipMemcpyPeer_Positive_Default:
-      tags: [memory, transfer, multigpu, multigpu]
       <<: *level_2
+      tags: [memory, transfer, multigpu, multigpu]
     Unit_hipMemcpyPeer_Positive_Synchronization_Behavior:
-      tags: [memory, transfer, multigpu, multigpu]
       <<: *level_2
+      tags: [memory, transfer, multigpu, multigpu]
     Unit_hipMemcpyPeer_Positive_ZeroSize:
-      tags: [memory, transfer, multigpu, multigpu]
       <<: *level_2
+      tags: [memory, transfer, multigpu, multigpu]
       # Disabling test tracked SWDEV-391555
       disabled: [amd_windows, amd_wsl]
     Unit_hipMemcpyPeer_Negative_Parameters:
-      tags: [memory, transfer, multigpu, multigpu]
       <<: *level_2
+      tags: [memory, transfer, multigpu, multigpu]
     Unit_hipMemcpyPeer_Negative:
-      tags: [memory, transfer, multigpu, multigpu]
       <<: *level_2
+      tags: [memory, transfer, multigpu, multigpu]
     Unit_hipMemcpyPeer_Basic:
-      tags: [memory, transfer, multigpu, multigpu]
       <<: *level_2
+      tags: [memory, transfer, multigpu, multigpu]
     Unit_hipMemcpyPeerAsync_Positive_Default:
-      tags: [memory, transfer, multigpu, multigpu]
       <<: *level_2
+      tags: [memory, transfer, multigpu, multigpu]
     Unit_hipMemcpyPeerAsync_Positive_Synchronization_Behavior:
-      tags: [memory, transfer, multigpu, multigpu]
       <<: *level_2
+      tags: [memory, transfer, multigpu, multigpu]
     Unit_hipMemcpyPeerAsync_Positive_ZeroSize:
-      tags: [memory, transfer, multigpu, multigpu]
       <<: *level_2
+      tags: [memory, transfer, multigpu, multigpu]
       # Disabling test tracked SWDEV-391555
       disabled: [amd_windows, amd_wsl]
     Unit_hipMemcpyPeerAsync_Negative_Parameters:
-      tags: [memory, transfer, multigpu, multigpu]
       <<: *level_2
+      tags: [memory, transfer, multigpu, multigpu]
     Unit_hipMemcpyPeerAsync_Capture:
       <<: *level_2
       tags: [memory, transfer, multigpu]
     Unit_hipMemcpyPeerAsync_Negative:
-      tags: [memory, transfer, multigpu, multigpu]
       <<: *level_2
+      tags: [memory, transfer, multigpu, multigpu]
     Unit_hipMemcpyPeerAsync_Basic:
-      tags: [memory, transfer, multigpu, multigpu]
       <<: *level_2
+      tags: [memory, transfer, multigpu, multigpu]
     Unit_hipMemcpyPeerAsync_StreamOnDiffDevice:
-      tags: [memory, transfer, multigpu, multigpu]
       <<: *level_2
+      tags: [memory, transfer, multigpu, multigpu]
     Unit_hipMemcpyWithStream_TestWithOneStream:
       <<: *level_2
       tags: [memory, transfer]
@@ -7276,17 +7276,17 @@ unit:
       <<: *level_2
       tags: [memory, transfer]
     Unit_hipMemcpyWithStream_TestkindDtoD:
-      tags: [memory, transfer, multigpu]
       <<: *level_2
+      tags: [memory, transfer, multigpu]
     Unit_hipMemcpyWithStream_TestOnMultiGPUwithOneStream:
-      tags: [memory, transfer, multigpu]
       <<: *level_2
+      tags: [memory, transfer, multigpu]
     Unit_hipMemcpyWithStream_TestkindDefault:
       <<: *level_2
       tags: [memory, transfer]
     Unit_hipMemcpyWithStream_TestkindDefaultForDtoD:
-      tags: [memory, transfer, multigpu]
       <<: *level_2
+      tags: [memory, transfer, multigpu]
     Unit_hipMemcpyWithStream_TestDtoDonSameDevice:
       <<: *level_2
       tags: [memory, transfer]
@@ -7294,8 +7294,8 @@ unit:
       <<: *level_2
       tags: [memory, transfer]
     Unit_hipMemcpy_Positive_Synchronization_Behavior:
-      tags: [memory, transfer]
       <<: *level_2
+      tags: [memory, transfer]
       # Below tests tests fail in PSDB
       disabled: [nvidia_windows]
     Unit_hipMemcpy_Negative_Parameters:
@@ -7305,8 +7305,8 @@ unit:
       <<: *level_2
       tags: [memory, transfer]
     Unit_hipMemcpyWithStream_MultiThread:
-      tags: [memory, transfer, multigpu]
       <<: *level_2
+      tags: [memory, transfer, multigpu]
     Unit_hipMemsetAsync_VerifyExecutionWithKernel:
       <<: *level_2
       tags: [memory, memset]
@@ -7326,8 +7326,8 @@ unit:
       <<: *level_2
       tags: [memory, alloc]
     Unit_hipMalloc_Multithreaded_MultiGPU:
-      tags: [memory, alloc, multigpu]
       <<: *level_2
+      tags: [memory, alloc, multigpu]
     Unit_hipMemcpyDtoD_Basic:
       <<: *level_2
       tags: [multigpu]
@@ -7356,13 +7356,13 @@ unit:
       <<: *level_2
       tags: [memory, alloc]
     Unit_hipHostMalloc_AllocateMoreThanAvailGPUMemory:
-      tags: [memory, alloc]
       <<: *level_2
+      tags: [memory, alloc]
       # SWDEV-431191:Below tests failed in stress test on 03/11/23
       disabled: [amd_windows, amd_wsl]
     Unit_hipHostMalloc_AllocateUseMoreThanAvailGPUMemory:
-      tags: [memory, alloc]
       <<: *level_2
+      tags: [memory, alloc]
       # SWDEV-431191:Below tests failed in stress test on 03/11/23
       disabled: [amd_windows, amd_wsl]
     Unit_hipHostMalloc_Capture:
@@ -7412,8 +7412,8 @@ unit:
       <<: *level_2
       tags: [memory, transfer]
     Unit_hipMemcpyAsync_Negative_Parameters:
-      tags: [memory, transfer]
       <<: *level_2
+      tags: [memory, transfer]
       # Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/18
       disabled: [amd_windows, amd_wsl]
     Unit_hipMemcpyAsync_Capture:
@@ -7435,8 +7435,8 @@ unit:
       <<: *level_2
       tags: [memory, transfer]
     Unit_hipMemcpyDtoHAsync_Negative_Parameters:
-      tags: [memory, transfer]
       <<: *level_2
+      tags: [memory, transfer]
       # Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/18
       disabled: [amd_windows, amd_wsl]
     Unit_hipMemcpyHtoDAsync_Positive_Basic:
@@ -7446,8 +7446,8 @@ unit:
       <<: *level_2
       tags: [memory, transfer]
     Unit_hipMemcpyHtoDAsync_Negative_Parameters:
-      tags: [memory, transfer]
       <<: *level_2
+      tags: [memory, transfer]
       # Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/18
       disabled: [amd_windows, amd_wsl]
     Unit_hipMemcpyDtoDAsync_Positive_Basic:
@@ -7457,8 +7457,8 @@ unit:
       <<: *level_2
       tags: [memory, transfer]
     Unit_hipMemcpyDtoDAsync_Negative_Parameters:
-      tags: [memory, transfer]
       <<: *level_2
+      tags: [memory, transfer]
       # Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/18
       disabled: [amd_windows, amd_wsl]
     Unit_hipMemcpyDtoHAsync_Capture:
@@ -7522,26 +7522,26 @@ unit:
       <<: *level_2
       tags: [memory, alloc]
     Unit_hipMalloc_Allocate90PercentOfDeviceMemory:
-      tags: [memory, alloc]
       <<: *level_2
+      tags: [memory, alloc]
       # Rock_Window_Failures_on_gfx1151
       disabled: [amd_windows]
     Unit_hipMalloc3D_ValidatePitch:
-      tags: [memory, alloc]
       <<: *level_2
+      tags: [memory, alloc]
       # Note: Windows disabled
       disabled: [amd_windows, amd_wsl]
     Unit_hipMemAllocPitch_ValidatePitch:
-      tags: [memory, alloc]
       <<: *level_2
+      tags: [memory, alloc]
       # Note: Windows disabled
       disabled: [amd_windows, amd_wsl]
     Unit_hipMallocPitch_ValidatePitch:
       <<: *level_2
       tags: [memory, alloc]
     Unit_hipMalloc3D_Negative:
-      tags: [memory, alloc]
       <<: *level_2
+      tags: [memory, alloc]
       # Note: Windows disabled
       disabled: [amd_windows, amd_wsl]
     Unit_hipMallocPitch_Negative:
@@ -7561,8 +7561,8 @@ unit:
       tags: [hipMallocPitch]
     Unit_hipMallocPitch_Memcpy2D: *level_2
     Unit_hipMallocPitch_MultiThread:
-      tags: [memory, alloc, multigpu]
       <<: *level_2
+      tags: [memory, alloc, multigpu]
     Unit_hipMallocPitch_KernelLaunch: *level_2
     Unit_hipMalloc3D_Basic:
       <<: *level_2
@@ -7571,14 +7571,14 @@ unit:
       <<: *level_2
       tags: [memory, alloc]
     Unit_hipMalloc3D_MultiThread:
-      tags: [memory, alloc, multigpu]
       <<: *level_2
+      tags: [memory, alloc, multigpu]
     Unit_hipMalloc3DArray_DiffSizes:
       <<: *level_2
       tags: [memory, alloc]
     Unit_hipMalloc3DArray_MultiThread:
-      tags: [memory, alloc, multigpu]
       <<: *level_2
+      tags: [memory, alloc, multigpu]
     Unit_hipMalloc3DArray_happy: *level_2
     Unit_hipMalloc3DArray_MaxTexture: *level_2
     Unit_hipMalloc3DArray_Negative_NullArrayPtr:
@@ -7597,28 +7597,28 @@ unit:
       <<: *level_2
       tags: [memory, alloc]
     Unit_hipMalloc3DArray_Negative_InvalidFormat:
-      tags: [memory, alloc]
       <<: *level_2
+      tags: [memory, alloc]
       # SWDEV-475987 : Disable tests to merge hipother change 12/08/2024
       disabled: [nvidia_windows]
     Unit_hipMalloc3DArray_Negative_BadChannelLayout:
-      tags: [memory, alloc]
       <<: *level_2
+      tags: [memory, alloc]
       # SWDEV-475987 : Disable tests to merge hipother change 12/08/2024
       disabled: [nvidia_windows]
     Unit_hipMalloc3DArray_Negative_8BitFloat:
-      tags: [memory, alloc]
       <<: *level_2
+      tags: [memory, alloc]
       # SWDEV-475987 : Disable tests to merge hipother change 12/08/2024
       disabled: [nvidia_windows]
     Unit_hipMalloc3DArray_Negative_DifferentChannelSizes:
-      tags: [memory, alloc]
       <<: *level_2
+      tags: [memory, alloc]
       # SWDEV-475987 : Disable tests to merge hipother change 12/08/2024
       disabled: [nvidia_windows]
     Unit_hipMalloc3DArray_Negative_BadChannelSize:
-      tags: [memory, alloc]
       <<: *level_2
+      tags: [memory, alloc]
       # SWDEV-475987 : Disable tests to merge hipother change 12/08/2024
       disabled: [nvidia_windows]
     Unit_hipMalloc3DArray_Negative_NumericLimit:
@@ -7656,16 +7656,16 @@ unit:
       <<: *level_2
       tags: [memory, transfer]
     Unit_hipDrvMemcpy3D_Positive_Synchronization_Behavior:
-      tags: [memory, transfer]
       <<: *level_2
+      tags: [memory, transfer]
       # Below tests tests fail in PSDB
       disabled: [nvidia_windows]
     Unit_hipDrvMemcpy3D_Positive_Parameters:
       <<: *level_2
       tags: [memory, transfer]
     Unit_hipDrvMemcpy3D_Positive_Array:
-      tags: [memory, transfer]
       <<: *level_2
+      tags: [memory, transfer]
       # NOTE: The following 2 tests are disabled due to defect - EXSWHTEC-238
       disabled: [amd_windows, amd_wsl]
     Unit_hipDrvMemcpy3D_Negative_Parameters:
@@ -7685,14 +7685,14 @@ unit:
       <<: *level_2
       tags: [memory, transfer]
     Unit_hipDrvMemcpy3D_H2DDeviceContextChange:
-      tags: [memory, transfer, multigpu]
       <<: *level_2
+      tags: [memory, transfer, multigpu]
     Unit_hipDrvMemcpy3D_Host2ArrayDeviceContextChange:
-      tags: [memory, transfer, multigpu]
       <<: *level_2
+      tags: [memory, transfer, multigpu]
     Unit_hipDrvMemcpy3D_multiDevice_Basic_Size_Test:
-      tags: [memory, transfer, multigpu]
       <<: *level_2
+      tags: [memory, transfer, multigpu]
     Unit_hipDrvMemcpy3DAsync_Positive_Basic:
       <<: *level_2
       tags: [memory, transfer]
@@ -7703,8 +7703,8 @@ unit:
       <<: *level_2
       tags: [memory, transfer]
     Unit_hipDrvMemcpy3DAsync_Positive_Array:
-      tags: [memory, transfer]
       <<: *level_2
+      tags: [memory, transfer]
       # NOTE: The following 2 tests are disabled due to defect - EXSWHTEC-238
       disabled: [amd_windows, amd_wsl]
     Unit_hipDrvMemcpy3DAsync_Negative_Parameters:
@@ -7724,14 +7724,14 @@ unit:
       <<: *level_2
       tags: [memory, transfer]
     Unit_hipDrvMemcpy3DAsync_H2DDeviceContextChange:
-      tags: [memory, transfer, multigpu]
       <<: *level_2
+      tags: [memory, transfer, multigpu]
     Unit_hipDrvMemcpy3DAsync_Host2ArrayDeviceContextChange:
-      tags: [memory, transfer, multigpu]
       <<: *level_2
+      tags: [memory, transfer, multigpu]
     Unit_hipDrvMemcpy3DAsync_multiDevice_Basic_Size_Test:
-      tags: [memory, transfer, multigpu]
       <<: *level_2
+      tags: [memory, transfer, multigpu]
     Unit_hipPointerGetAttribute_MemoryTypes:
       <<: *level_2
       tags: [memory, query]
@@ -7739,8 +7739,8 @@ unit:
       <<: *level_2
       tags: [memory, query]
     Unit_hipPointerGetAttribute_PeerGPU:
-      tags: [memory, query, multigpu]
       <<: *level_2
+      tags: [memory, query, multigpu]
     Unit_hipPointerGetAttribute_BufferID:
       <<: *level_2
       tags: [memory, query]
@@ -7778,13 +7778,13 @@ unit:
       <<: *level_2
       tags: [memory, query]
     Unit_hipFreeImplicitSyncDev:
-      tags: [memory, alloc]
       <<: *level_2
+      tags: [memory, alloc]
       # Note: TDR
       disabled: [amd_wsl]
     Unit_hipFreeImplicitSyncHost:
-      tags: [memory, alloc]
       <<: *level_2
+      tags: [memory, alloc]
       # Note: TDR
       disabled: [amd_wsl]
     Unit_hipFreeImplicitSyncArray: *level_2
@@ -7842,8 +7842,8 @@ unit:
       <<: *level_2
       tags: [memory, transfer]
     Unit_hipMemsetSync:
-      tags: [memory, memset]
       <<: *level_2
+      tags: [memory, memset]
       # Note: TDR (random fail)
       disabled: [amd_wsl]
     Unit_hipMemsetDSync:
@@ -7851,13 +7851,13 @@ unit:
       # SWDEV-400049 tdr intermittently
       disabled: [amd_windows, amd_wsl]
     Unit_hipMemset2DSync:
-      tags: [memory, memset]
       <<: *level_2
+      tags: [memory, memset]
       # SWDEV-398977 fails in stress tests
       disabled: [amd_wsl]
     Unit_hipMemset3DSync:
-      tags: [memory, memset]
       <<: *level_2
+      tags: [memory, memset]
       # Note: Following four tests disabled due to defect - EXSWHTEC-203
       disabled: [amd_wsl]
     Unit_hipMemsetASyncMulti:
@@ -7871,36 +7871,36 @@ unit:
       <<: *level_2
       tags: [memory, memset]
     Unit_hipMemAdvise_TstFlags:
-      tags: [memory, query]
       <<: *level_2
+      tags: [memory, query]
       # Note: Windows disabled
       disabled: [amd_windows, amd_wsl]
     Unit_hipMemAdvise_NegtveTsts:
-      tags: [memory, query]
       <<: *level_2
+      tags: [memory, query]
       # intermittent issue: failure expected but success returned
       disabled: [amd_wsl]
     Unit_hipMemAdvise_PrefrdLoc:
-      tags: [memory, query, multigpu]
       <<: *level_2
+      tags: [memory, query, multigpu]
       # Note: Windows disabled
       disabled: [amd_windows, amd_wsl]
     Unit_hipMemAdvise_ReadMostly:
-      tags: [memory, query]
       <<: *level_2
+      tags: [memory, query]
       # Note: Windows disabled
       disabled: [amd_windows, amd_wsl]
     Unit_hipMemAdvise_TstFlgOverrideEffect:
-      tags: [memory, query]
       <<: *level_2
+      tags: [memory, query]
       # Note: Windows disabled
       disabled: [amd_windows, amd_wsl]
     Unit_hipMemAdvise_TstAccessedByPeer:
+      <<: *level_2
       tags: [memory, query, multigpu]
-      <<: *level_2
     Unit_hipMemAdvise_TstAccessedByFlg:
-      tags: [memory, query]
       <<: *level_2
+      tags: [memory, query]
       # Note: Windows disabled
       disabled: [amd_windows, amd_wsl]
     Unit_hipMemAdvise_TstAccessedByFlg2:
@@ -7910,47 +7910,47 @@ unit:
       <<: *level_2
       tags: [memory, query]
     Unit_hipMemAdvise_TstAccessedByFlg4:
-      tags: [memory, query]
       <<: *level_2
+      tags: [memory, query]
       # Note: Windows disabled
       disabled: [amd_windows, amd_wsl]
     Unit_hipMemAdvise_TstAlignedAllocMem:
       <<: *level_2
       tags: [memory, query]
     Unit_hipMemAdvise_TstAlignedAllocMem_XNACK:
-      tags: [memory, query]
       <<: *level_2
+      tags: [memory, query]
       # Rock_Linux_Failures_on_gfx94X
       disabled: [amd_linux]
     Unit_hipMemAdvise_TstMemAdvisePrefrdLoc:
-      tags: [memory, query]
       <<: *level_2
+      tags: [memory, query]
       # Note: Windows disabled
       disabled: [amd_windows, amd_wsl]
     Unit_hipMemAdvise_TstMemAdviseLstPreftchLoc:
+      <<: *level_2
       tags: [memory, query, multigpu]
-      <<: *level_2
     Unit_hipMemAdvise_TstMemAdviseMultiFlag:
-      tags: [memory, query]
       <<: *level_2
+      tags: [memory, query]
       # Note: Windows disabled
       disabled: [amd_windows, amd_wsl]
     Unit_hipMemAdvise_ReadMosltyMgpuTst:
-      tags: [memory, query, multigpu]
       <<: *level_2
+      tags: [memory, query, multigpu]
       # Note: Windows disabled
       disabled: [amd_windows, amd_wsl]
     Unit_hipMemAdvise_TstSetUnsetPrfrdLoc:
-      tags: [memory, query]
       <<: *level_2
+      tags: [memory, query]
       # Note: Windows disabled
       disabled: [amd_windows, amd_wsl]
     Unit_hipMemAdvise_Set_Unset_Basic:
       <<: *level_2
       tags: [memory, query]
     Unit_hipMemAdvise_No_Flag_Interference:
-      tags: [memory, query]
       <<: *level_2
+      tags: [memory, query]
       # (amd_linux) NOTE: The following test is disabled due to defect - EXSWHTEC-244
       # (amd_windows) Note: intermittent Seg fault failure
       # (amd_wsl) Note: intermittent Seg fault failure
@@ -7962,14 +7962,14 @@ unit:
       <<: *level_2
       tags: [memory, query]
     Unit_hipMemAdvise_Read_Write_After_Advise:
-      tags: [memory, query, multigpu]
       <<: *level_2
+      tags: [memory, query, multigpu]
     Unit_hipMemAdvise_Prefetch_After_Advise:
       <<: *level_2
       tags: [memory, query]
     Unit_hipMemAdvise_AccessedBy_All_Devices:
-      tags: [memory, query]
       <<: *level_2
+      tags: [memory, query]
       # Note: intermittent Seg fault failure
       disabled: [amd_wsl]
     Unit_hipMemAdvise_Negative_Parameters:
@@ -7982,13 +7982,13 @@ unit:
       <<: *level_2
       tags: [memory, query]
     Unit_hipFreeAsync_Negative_Parameters:
-      tags: [memory, alloc]
       <<: *level_2
+      tags: [memory, alloc]
       # Below tests are failing PSDB
       disabled: [amd_windows]
     Unit_hipFreeAsync_capturehipFreeAsync:
-      tags: [memory, alloc]
       <<: *level_2
+      tags: [memory, alloc]
       # Rock_Linux_Failures_on_gfx94X
       disabled: [amd_linux]
     Unit_hipFreeHost_InvalidMemory:
@@ -8025,14 +8025,14 @@ unit:
       <<: *level_2
       tags: [memory, alloc]
     Unit_hipMallocAsync_Multidevice:
-      tags: [memory, alloc, multigpu]
       <<: *level_2
+      tags: [memory, alloc, multigpu]
     Unit_hipMallocAsync_Multidevice_Concurrent:
-      tags: [memory, alloc, multigpu]
       <<: *level_2
+      tags: [memory, alloc, multigpu]
     Unit_hipMallocAsync_Multidevice_MultiStream:
-      tags: [memory, alloc, multigpu]
       <<: *level_2
+      tags: [memory, alloc, multigpu]
     Unit_hipMallocAsync_ByUsinghipMalloc:
       <<: *level_2
       tags: [memory, alloc]
@@ -8055,8 +8055,8 @@ unit:
       <<: *level_2
       tags: [memory, query]
     Unit_hipStreamAttachMemAsync_Positive_AttachGlobal:
-      tags: [memory, query, multigpu]
       <<: *level_2
+      tags: [memory, query, multigpu]
     Unit_hipStreamAttachMemAsync_Positive_AttachHost:
       <<: *level_2
       tags: [memory, query]
@@ -8064,8 +8064,8 @@ unit:
       <<: *level_2
       tags: [memory, query]
     Unit_hipStreamAttachMemAsync_Negative_Parameters:
-      tags: [memory, query]
       <<: *level_2
+      tags: [memory, query]
       # Below tests soft hang in stress test on 13/09/23
       disabled: [amd_wsl]
     Unit_hipMemRangeGetAttributes_TstFlgs:
@@ -8075,23 +8075,23 @@ unit:
       <<: *level_2
       tags: [memory, query]
     Unit_hipMemGetAddressRange_Positive:
-      tags: [memory, query]
       <<: *level_2
+      tags: [memory, query]
       # Note: intermittent Seg fault failure
       disabled: [amd_windows, amd_wsl]
     Unit_hipMemGetAddressRange_Negative:
-      tags: [memory, query]
       <<: *level_2
+      tags: [memory, query]
       # Note: intermittent Seg fault failure
       disabled: [amd_wsl]
     Unit_hipMallocMipmappedArray_DiffSizes:
-      tags: [memory, alloc]
       <<: *level_2
+      tags: [memory, alloc]
       # Below tests are failing PSDB
       disabled: [amd_windows]
     Unit_hipMallocMipmappedArray_MultiThread:
-      tags: [memory, alloc, multigpu]
       <<: *level_2
+      tags: [memory, alloc, multigpu]
       # Below tests are failing PSDB
       disabled: [amd_windows]
     Unit_hipMallocMipmappedArray_happy: *level_2
@@ -8108,33 +8108,33 @@ unit:
       <<: *level_2
       tags: [memory, alloc]
     Unit_hipMallocMipmappedArray_Negative_InvalidFlags:
-      tags: [memory, alloc]
       <<: *level_2
+      tags: [memory, alloc]
       # Below tests are failing PSDB
       disabled: [amd_windows]
     Unit_hipMallocMipmappedArray_Negative_InvalidFormat:
-      tags: [memory, alloc]
       <<: *level_2
+      tags: [memory, alloc]
       # SWDEV-475987 : Disable tests to merge hipother change 12/08/2024
       disabled: [nvidia_windows]
     Unit_hipMallocMipmappedArray_Negative_BadChannelLayout:
-      tags: [memory, alloc]
       <<: *level_2
+      tags: [memory, alloc]
       # SWDEV-475987 : Disable tests to merge hipother change 12/08/2024
       disabled: [nvidia_windows]
     Unit_hipMallocMipmappedArray_Negative_8BitFloat:
-      tags: [memory, alloc]
       <<: *level_2
+      tags: [memory, alloc]
       # SWDEV-475987 : Disable tests to merge hipother change 12/08/2024
       disabled: [nvidia_windows]
     Unit_hipMallocMipmappedArray_Negative_DifferentChannelSizes:
-      tags: [memory, alloc]
       <<: *level_2
+      tags: [memory, alloc]
       # SWDEV-475987 : Disable tests to merge hipother change 12/08/2024
       disabled: [nvidia_windows]
     Unit_hipMallocMipmappedArray_Negative_BadChannelSize:
-      tags: [memory, alloc]
       <<: *level_2
+      tags: [memory, alloc]
       # SWDEV-475987 : Disable tests to merge hipother change 12/08/2024
       disabled: [nvidia_windows]
     Unit_hipMallocMipmappedArray_Negative_NumericLimit:
@@ -8145,8 +8145,8 @@ unit:
       <<: *level_2
       tags: [memory, alloc]
     Unit_hipGetMipmappedArrayLevel_Negative:
-      tags: [memory, alloc]
       <<: *level_2
+      tags: [memory, alloc]
       # Below tests are failing PSDB
       disabled: [amd_windows]
     Unit_hipFreeMipmappedArrayImplicitSyncArray: *level_2
@@ -8161,13 +8161,13 @@ unit:
       <<: *level_2
       tags: [memory, alloc]
     Unit_hipMallocArray_MultiThread:
-      tags: [memory, alloc, multigpu]
       <<: *level_2
+      tags: [memory, alloc, multigpu]
     Unit_hipMallocArray_happy: *level_2
     Unit_hipMallocArray_MaxTexture_Default: *level_2
     Unit_hipMallocArray_Negative_DifferentChannelSizes:
-      tags: [memory, alloc]
       <<: *level_2
+      tags: [memory, alloc]
       # SWDEV-475987 : Disable tests to merge hipother change 12/08/2024
       disabled: [nvidia_windows]
     Unit_hipMallocArray_Negative_ZeroWidth:
@@ -8187,23 +8187,23 @@ unit:
       # SWDEV-475987 : Disable tests to merge hipother change 12/08/2024
       disabled: [nvidia_windows]
     Unit_hipMallocArray_Negative_BadNumberOfBits:
-      tags: [memory, alloc]
       <<: *level_2
+      tags: [memory, alloc]
       # SWDEV-475987 : Disable tests to merge hipother change 12/08/2024
       disabled: [nvidia_windows]
     Unit_hipMallocArray_Negative_3ChannelElement:
-      tags: [memory, alloc]
       <<: *level_2
+      tags: [memory, alloc]
       # SWDEV-475987 : Disable tests to merge hipother change 12/08/2024
       disabled: [nvidia_windows]
     Unit_hipMallocArray_Negative_ChannelAfterZeroChannel:
-      tags: [memory, alloc]
       <<: *level_2
+      tags: [memory, alloc]
       # SWDEV-475987 : Disable tests to merge hipother change 12/08/2024
       disabled: [nvidia_windows]
     Unit_hipMallocArray_Negative_InvalidChannelFormat:
-      tags: [memory, alloc]
       <<: *level_2
+      tags: [memory, alloc]
       # SWDEV-475987 : Disable tests to merge hipother change 12/08/2024
       disabled: [nvidia_windows]
     Unit_hipMallocArray_Negative_NumericLimit:
@@ -8219,28 +8219,28 @@ unit:
       <<: *level_2
       tags: [memory, alloc]
     Unit_hipHostAlloc_Basic:
-      tags: [memory, alloc]
       <<: *level_2
+      tags: [memory, alloc]
       # SWDEV-468258 Below tests are temporarily disabled - windows PSDB failed
       disabled: [amd_windows]
     Unit_hipHostAlloc_Default:
-      tags: [memory, alloc]
       <<: *level_2
+      tags: [memory, alloc]
       # SWDEV-468258 Below tests are temporarily disabled - windows PSDB failed
       disabled: [amd_windows]
     Unit_hipHostAlloc_Negative_NonCoherent:
-      tags: [memory, alloc]
       <<: *level_2
+      tags: [memory, alloc]
       # SWDEV-468258 Below tests are temporarily disabled - windows PSDB failed
       disabled: [amd_windows]
     Unit_hipHostAlloc_Negative_Coherent:
-      tags: [memory, alloc]
       <<: *level_2
+      tags: [memory, alloc]
       # SWDEV-468258 Below tests are temporarily disabled - windows PSDB failed
       disabled: [amd_windows]
     Unit_hipHostAlloc_Negative_NumaUser:
-      tags: [memory, alloc]
       <<: *level_2
+      tags: [memory, alloc]
       # SWDEV-468258 Below tests are temporarily disabled - windows PSDB failed
       disabled: [amd_windows]
     Unit_hipHostAlloc_AllocateMoreThanAvailGPUMemory:
@@ -8259,8 +8259,8 @@ unit:
       <<: *level_2
       tags: [memory, transfer]
     Unit_hipDrvMemcpy2DUnaligned_Positive_Basic:
-      tags: [memory, transfer, multigpu]
       <<: *level_2
+      tags: [memory, transfer, multigpu]
     Unit_hipDrvMemcpy2DUnaligned_Positive_Synchronization_Behavior:
       <<: *level_2
       tags: [memory, transfer]
@@ -8274,14 +8274,14 @@ unit:
       <<: *level_2
       tags: [memory, query]
     Unit_hipArrayGetDescriptor_1D_2D_ArrayParameterChk:
-      tags: [memory, query, multigpu]
       <<: *level_2
+      tags: [memory, query, multigpu]
     Unit_hipArrayGetDescriptor_MultiThreadScenarioFor1D_2D_Array:
-      tags: [memory, query, multigpu]
       <<: *level_2
+      tags: [memory, query, multigpu]
     Unit_hipArrayGetDescriptor_Host2Array_Array2Host:
-      tags: [memory, query, multigpu]
       <<: *level_2
+      tags: [memory, query, multigpu]
     Unit_hipArrayGetDescriptor_Negative_Scenarios:
       <<: *level_2
       tags: [memory, query]
@@ -8315,34 +8315,34 @@ unit:
       tags: [multigpu]
   module:
     Unit_hipModuleLaunchCooperativeKernel_Positive_Basic:
-      tags: [module, launch]
       <<: *level_2
+      tags: [module, launch]
       # Rock_Window_Failures_on_gfx1151
       disabled: [amd_windows]
     Unit_hipModuleLaunchCooperativeKernel_Positive_Parameters:
-      tags: [module, launch]
       <<: *level_2
+      tags: [module, launch]
       # Rock_Window_Failures_on_gfx1151
       disabled: [amd_windows]
     Unit_hipModuleLaunchCooperativeKernel_Negative_Parameters:
-      tags: [module, launch]
       <<: *level_2
+      tags: [module, launch]
       # Rock_Window_Failures_on_gfx1151
       disabled: [amd_windows]
     Unit_hipModuleLaunchCooperativeKernel_Verify_Capture: *level_2
     Unit_hipModuleLaunchKernel_Positive_Basic:
-      tags: [module, launch]
       <<: *level_2
+      tags: [module, launch]
       # Rock_Window_Failures_on_gfx1151
       disabled: [amd_windows]
     Unit_hipModuleLaunchKernel_Positive_Parameters:
-      tags: [module, launch]
       <<: *level_2
+      tags: [module, launch]
       # Rock_Window_Failures_on_gfx1151
       disabled: [amd_windows]
     Unit_hipModuleLaunchKernel_Negative_Parameters:
-      tags: [multigpu, module, launch]
       <<: *level_2
+      tags: [multigpu, module, launch]
       # Below tests are failing PSDB
       disabled: [amd_windows]
     Unit_hipModuleLaunchKernel_Fntl:
@@ -8356,18 +8356,18 @@ unit:
       <<: *level_2
       tags: [module, launch]
     Unit_hipModuleLoadDataEx_Positive_Basic:
-      tags: [module, load]
       <<: *level_2
+      tags: [module, load]
       # Below tests tests fail in PSDB
       disabled: [nvidia_windows]
     Unit_hipModuleLoadDataEx_Negative_Parameters:
-      tags: [module, load]
       <<: *level_2
+      tags: [module, load]
       # Below tests tests fail in PSDB
       disabled: [nvidia_windows]
     Unit_hipModuleLoadDataEx_Negative_Image_Is_An_Empty_String:
-      tags: [module, load]
       <<: *level_2
+      tags: [module, load]
       # Note: Following two tests disabled due to defect - EXSWHTEC-153
       disabled: [amd_windows]
     Unit_hipGetFuncBySymbol_PositiveTest:
@@ -8437,8 +8437,8 @@ unit:
       <<: *level_2
       tags: [module, launch]
     Unit_hipDrvLaunchKernelEx_With_CooperativeKernelWithArgs:
-      tags: [module, launch]
       <<: *level_2
+      tags: [module, launch]
       # Rock_Linux_Failures_on_gfx94X
       disabled: [amd_linux]
     Unit_hipDrvLaunchKernelEx_With_MaxBlockDims:
@@ -8448,55 +8448,55 @@ unit:
       <<: *level_2
       tags: [multigpu, module, launch]
     Unit_hipModuleLoadData_Positive_Basic:
-      tags: [module, load]
       <<: *level_2
+      tags: [module, load]
       # Below tests tests fail in PSDB
       disabled: [nvidia_windows]
     Unit_hipModuleLoadData_Negative_Parameters:
-      tags: [module, load]
       <<: *level_2
+      tags: [module, load]
       # Below tests tests fail in PSDB
       disabled: [nvidia_windows]
     Unit_hipModuleLoadData_Negative_Image_Is_An_Empty_String:
-      tags: [module, load]
       <<: *level_2
+      tags: [module, load]
       # Note: Following two tests disabled due to defect - EXSWHTEC-153
       disabled: [amd_windows]
     Unit_hipModuleLoadData_Functional:
       <<: *level_2
       tags: [module, load]
     Unit_hipModuleLoad_Positive_Basic:
-      tags: [module, load]
       <<: *level_2
+      tags: [module, load]
       # Below tests tests fail in PSDB
       disabled: [nvidia_windows]
     Unit_hipModuleLoad_Negative_Parameters:
       <<: *level_2
       tags: [module, load]
     Unit_hipModuleLoad_Negative_Load_From_A_File_That_Is_Not_A_Module:
-      tags: [module, load]
       <<: *level_2
+      tags: [module, load]
       # Below tests tests fail in PSDB
       disabled: [nvidia_windows]
     Unit_hipFuncSetSharedMemConfig_functional:
       <<: *level_2
       tags: [module, function]
     Unit_hipModuleUnload_Negative_Module_Is_Nullptr:
-      tags: [module, load]
       <<: *level_2
+      tags: [module, load]
       # Note: Test disabled due to defect - EXSWHTEC-152
       disabled: [amd_windows]
     Unit_hipModuleUnload_Negative_Double_Unload:
-      tags: [module, load]
       <<: *level_2
+      tags: [module, load]
       # Below test fails in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/215
       <<: *disabled_nvidia
     Unit_hipModuleLoad_basic:
       <<: *level_2
       tags: [module, load]
     Unit_hipModuleGetFunctionCount_Functional:
-      tags: [module, function]
       <<: *level_2
+      tags: [module, function]
       # (amd_linux) Rock_Linux_Failures_on_gfx94X
       # (amd_windows) Rock_Window_Failures_on_gfx1151
       disabled: [amd_linux, amd_windows]
@@ -8510,8 +8510,8 @@ unit:
       <<: *level_2
       tags: [multigpu, module, load]
     Unit_hip_linker_spirv_input:
-      tags: [module, resource]
       <<: *level_2
+      tags: [module, resource]
       # Rock_Window_Failures_on_gfx1151
       disabled: [amd_windows]
     Unit_hipLinkCreate_Negative:
@@ -8524,8 +8524,8 @@ unit:
       <<: *level_2
       tags: [module, resource]
     Unit_hipModuleLaunchCooperativeKernelMultiDevice_Positive_Basic:
-      tags: [multigpu, module, launch]
       <<: *level_2
+      tags: [multigpu, module, launch]
       # Rock_Window_Failures_on_gfx1151
       disabled: [amd_windows]
     Unit_hipModuleLaunchCooperativeKernelMultiDevice_Negative_Parameters:
@@ -8547,18 +8547,18 @@ unit:
       <<: *level_2
       tags: [module, resource]
     Unit_hipModuleGetGlobal_Negative_Hmod_Is_Nullptr:
-      tags: [module, resource]
       <<: *level_2
+      tags: [module, resource]
       # Note: Test disabled due to defect - EXSWHTEC-163
       disabled: [amd_windows]
     Unit_hipModuleGetGlobal_Negative_Name_Is_Empty_String:
-      tags: [module, resource]
       <<: *level_2
+      tags: [module, resource]
       # Note: Test disabled due to defect - EXSWHTEC-164
       disabled: [amd_windows]
     Unit_hipModuleGetGlobal_Negative_Dptr_And_Bytes_Are_Nullptr:
-      tags: [module, resource]
       <<: *level_2
+      tags: [module, resource]
       # Note: Test disabled due to defect - EXSWHTEC-165
       disabled: [amd_windows]
     Unit_hipModuleGetGlobal_DiffDevice:
@@ -8568,24 +8568,24 @@ unit:
       <<: *level_2
       tags: [module, load]
     Unit_hipModuleGetTexRef_Positive_Basic:
-      tags: [module, resource]
       <<: *level_2
+      tags: [module, resource]
       # (amd_windows) Below tests are failing PSDB
       # (nvidia_windows) Disabling tests which no longer behave the same on nvidia platform
       <<: *disabled_windows
     Unit_hipModuleGetTexRef_Negative_Parameters:
-      tags: [module, resource]
       <<: *level_2
+      tags: [module, resource]
       # Rock_Window_Failures_on_gfx1151
       disabled: [amd_windows]
     Unit_hipModuleGetTexRef_Negative_Hmod_Is_Nullptr:
-      tags: [module, resource]
       <<: *level_2
+      tags: [module, resource]
       # Note: Test disabled due to defect - EXSWHTEC-166
       disabled: [amd_windows]
     Unit_hipModuleGetTexRef_Negative_Name_Is_Empty_String:
-      tags: [module, resource]
       <<: *level_2
+      tags: [module, resource]
       # Note: Test disabled due to defect - EXSWHTEC-167
       disabled: [amd_windows]
     Unit_hipFuncSetAttribute_Basic:
@@ -8595,26 +8595,26 @@ unit:
       <<: *level_2
       tags: [module, launch]
     Unit_hipExtModuleLaunchKernel_NonUniformWorkGroup:
-      tags: [module, launch]
       <<: *level_2
+      tags: [module, launch]
       # Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/96
       disabled: [amd_windows, amd_wsl]
     Unit_hipExtModuleLaunchKernel_UniformWorkGroup:
       <<: *level_2
       tags: [module, launch]
     Unit_hipExtModuleLaunchKernel_Positive_Parameters:
-      tags: [module, launch]
       <<: *level_2
+      tags: [module, launch]
       # Rock_Window_Failures_on_gfx1151
       disabled: [amd_windows]
     Unit_hipExtModuleLaunchKernel_Negative_Parameters:
-      tags: [multigpu, module, launch]
       <<: *level_2
+      tags: [multigpu, module, launch]
       # Below tests are failing PSDB
       disabled: [amd_windows]
     Unit_hipExtModuleLaunchKernel_Functional:
-      tags: [module, launch]
       <<: *level_2
+      tags: [module, launch]
       # SWDEV-438524: Below tests causing TDR & machine down in stress test on 15/12/23
       disabled: [amd_windows, amd_wsl]
     Unit_hipFuncGetAttributes_basic:
@@ -8628,29 +8628,29 @@ unit:
       <<: *level_2
       tags: [device_mgmt, multithread]
     Unit_hipMultiThreadDevice_SerialPyramid:
-      tags: [device_mgmt, multithread]
       <<: *level_2
+      tags: [device_mgmt, multithread]
       # Rock_Linux_Failures_on_gfx94X
       disabled: [amd_linux]
     Unit_hipMultiThreadDevice_ParallelPyramid:
       <<: *level_2
       tags: [device_mgmt, multithread]
     Unit_hipMultiThreadDevice_NearZero:
-      tags: [device_mgmt, multithread]
       <<: *level_2
+      tags: [device_mgmt, multithread]
       # Note: Windows disabled
       disabled: [amd_windows, amd_wsl]
     Unit_hipMultiThreadStreams1_AsyncSync:
       <<: *level_2
       tags: [stream, multithread]
     Unit_hipMultiThreadStreams1_AsyncAsync:
-      tags: [stream, multithread]
       <<: *level_2
+      tags: [stream, multithread]
       # Rock_Window_Failures_on_gfx1151
       disabled: [amd_windows]
     Unit_hipMultiThreadStreams1_AsyncSame:
-      tags: [stream, multithread]
       <<: *level_2
+      tags: [stream, multithread]
       # Rock_Window_Failures_on_gfx1151
       disabled: [amd_windows]
     Unit_hipMultiThreadStreams2:
@@ -8658,8 +8658,8 @@ unit:
       tags: [stream, multithread]
   occupancy:
     Unit_hipOccupancyMaxActiveBlocksPerMultiprocessor_Negative_Parameters:
-      tags: [occupancy]
       <<: *level_2
+      tags: [occupancy]
       # Note: intermittent Seg fault failure
       disabled: [amd_windows, amd_wsl]
     Unit_hipOccupancyMaxActiveBlocksPerMultiprocessor_Positive_RangeValidation:
@@ -8696,41 +8696,41 @@ unit:
       <<: *level_2
       tags: [occupancy]
     Unit_hipModuleOccupancyMaxPotentialBlockSize_Negative_Parameters:
-      tags: [occupancy]
       <<: *level_2
+      tags: [occupancy]
       # SWDEV-434878: Below tests failed in stress test on 24/11/23
       disabled: [amd_windows, amd_wsl]
     Unit_hipModuleOccupancyMaxPotentialBlockSize_Positive_RangeValidation:
-      tags: [occupancy]
       <<: *level_2
+      tags: [occupancy]
       # SWDEV-434878: Below tests failed in stress test on 24/11/23
       disabled: [amd_windows, amd_wsl]
     Unit_hipModuleOccupancyMaxPotentialBlockSizeWithFlags_Negative_Parameters:
-      tags: [occupancy]
       <<: *level_2
+      tags: [occupancy]
       # Note: intermittent Seg fault failure
       disabled: [amd_windows, amd_wsl]
     Unit_hipModuleOccupancyMaxPotentialBlockSizeWithFlags_Positive_RangeValidation:
-      tags: [occupancy]
       <<: *level_2
+      tags: [occupancy]
       # SWDEV-434878: Below tests failed in stress test on 24/11/23
       disabled: [amd_windows, amd_wsl]
     Unit_hipModuleOccupancyMaxActiveBlocksPerMultiprocessor_Negative_Parameters:
-      tags: [occupancy]
       <<: *level_2
+      tags: [occupancy]
       # SWDEV-434878: Below tests failed in stress test on 24/11/23
       disabled: [amd_windows, amd_wsl]
     Unit_hipModuleOccupancyMaxActiveBlocksPerMultiprocessor_Positive_RangeValidation:
-      tags: [occupancy]
       <<: *level_2
+      tags: [occupancy]
       # SWDEV-434878: Below tests failed in stress test on 24/11/23
       disabled: [amd_windows, amd_wsl]
     Unit_OccupancyAPIs_StreamCapture:
       <<: *level_2
       tags: [occupancy]
     Unit_hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags_Negative_Parameters:
-      tags: [occupancy]
       <<: *level_2
+      tags: [occupancy]
       # Note: intermittent Seg fault failure
       disabled: [amd_windows, amd_wsl]
     Unit_hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags_Positive_RangeValidation:
@@ -8741,8 +8741,8 @@ unit:
       <<: *level_2
       tags: [occupancy]
     Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_mgpu:
-      tags: [multigpu, occupancy]
       <<: *level_2
+      tags: [multigpu, occupancy]
     Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_Functor:
       <<: *level_2
       tags: [occupancy]
@@ -8753,8 +8753,8 @@ unit:
       <<: *level_2
       tags: [occupancy]
     Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_Functional:
-      tags: [occupancy]
       <<: *level_2
+      tags: [occupancy]
       # Below tests are failing PSDB
       disabled: [amd_windows]
     Unit_hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags_ValidArgs:
@@ -8781,13 +8781,13 @@ unit:
       tags: [peer]
   printf:
     Unit_Printf_flags_Sanity_Positive:
-      tags: [printf]
       <<: *level_2
+      tags: [printf]
       # Below test fails in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/274
       disabled: [amd_windows]
     Unit_Printf_length_Sanity_Positive:
-      tags: [printf]
       <<: *level_2
+      tags: [printf]
       # Below test fails in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/274
       disabled: [amd_windows]
     Unit_Printf_specifier_Sanity_Positive:
@@ -8818,8 +8818,8 @@ unit:
       <<: *level_2
       tags: [printf]
     Unit_Printf_ManyDevicesTest:
-      tags: [multigpu, printf]
       <<: *level_2
+      tags: [multigpu, printf]
     Unit_Printf_PrintfStar:
       <<: *level_2
       tags: [printf]
@@ -8876,8 +8876,8 @@ unit:
       <<: *level_2
       tags: [rtc, link]
     Unit_RTC_LinkDestroy_Default:
-      tags: [rtc, link]
       <<: *level_2
+      tags: [rtc, link]
       # SWDEV-450909: Test failed in stress testing
       disabled: [amd_windows]
     Unit_RTC_LinkerAPI:
@@ -8896,13 +8896,13 @@ unit:
       <<: *level_2
       tags: [rtc, integration]
     Unit_Rtc_ReduceRandom:
-      tags: [rtc, compile]
       <<: *level_2
+      tags: [rtc, compile]
       # Rock_Linux_Failures_on_gfx94X
       disabled: [amd_linux]
     Unit_hiprtc_stdheaders:
-      tags: [rtc, header]
       <<: *level_2
+      tags: [rtc, header]
       # Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
       disabled: [amd_wsl]
     Unit_Rtc_MathConstants_header:
@@ -8980,8 +8980,8 @@ unit:
     Unit_hiprtcEnabledTrappingMathComplrOptnTst: *level_2
     Unit_hiprtcDisabledTrappingMathComplrOptnTst: *level_2
     Unit_hiprtcCombiComplrOptnTst:
-      tags: [rtc, compile]
       <<: *level_2
+      tags: [rtc, compile]
       # Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/327
       disabled: [amd_wsl]
   stream:
@@ -9046,8 +9046,8 @@ unit:
       <<: *level_2
       tags: [stream, lifecycle]
     Unit_hipStreamCreateWithFlags_DefaultStreamInteraction:
-      tags: [stream, lifecycle]
       <<: *level_2
+      tags: [stream, lifecycle]
       # (amd_windows) Disabling below tests temporarily due to change in API behavior
       # (amd_wsl) Note: Following four tests disabled due to defect - EXSWHTEC-203
       disabled: [amd_windows, amd_wsl]
@@ -9055,13 +9055,13 @@ unit:
       <<: *level_2
       tags: [stream, lifecycle]
     Unit_hipStreamCreateWithPriority_MulthreadDefaultflag:
-      tags: [stream, lifecycle]
       <<: *level_2
+      tags: [stream, lifecycle]
       # SWDEV-398981 fails in stress test
       disabled: [amd_wsl]
     Unit_hipStreamCreateWithPriority_MulthreadNonblockingflag:
-      tags: [stream, lifecycle]
       <<: *level_2
+      tags: [stream, lifecycle]
       # Disabling test tracked SWDEV-394199
       disabled: [amd_windows, amd_wsl]
     Unit_hipStreamCreateWithPriority_NegTst:
@@ -9071,8 +9071,8 @@ unit:
       <<: *level_2
       tags: [stream, lifecycle]
     Unit_hipStreamCreateWithPriority_ValidateWithEvents:
-      tags: [stream, lifecycle]
       <<: *level_2
+      tags: [stream, lifecycle]
       # Below tests fail in stress test on 24/07/23
       disabled: [amd_windows, amd_wsl]
     Unit_hipStreamCreateWithPriority_TestMultipleStreamWithPriority:
@@ -9088,8 +9088,8 @@ unit:
       <<: *level_2
       tags: [stream, lifecycle]
     Unit_hipStreamDestroy_WithPendingWork:
-      tags: [stream, lifecycle]
       <<: *level_2
+      tags: [stream, lifecycle]
       # Note: TDR
       disabled: [amd_wsl]
     Unit_hipStreamCreate_MultistreamBasicFunctionalities:
@@ -9203,13 +9203,13 @@ unit:
       <<: *level_2
       tags: [stream, sync]
     Unit_hipStreamSynchronize_FinishWork:
-      tags: [stream, sync]
       <<: *level_2
+      tags: [stream, sync]
       # Note: TDR (pass)
       disabled: [amd_wsl]
     Unit_hipStreamSynchronize_NullStreamSynchronization:
-      tags: [stream, sync]
       <<: *level_2
+      tags: [stream, sync]
       # (amd_windows) mlsejenkins_Window_Failures_on_gfx1201
       # (amd_wsl) Note: TDR (pass)
       disabled: [amd_windows, amd_wsl]
@@ -9217,31 +9217,31 @@ unit:
       <<: *level_2
       tags: [stream, sync]
     Unit_hipStreamSynchronize_NullStreamAndStreamPerThread:
-      tags: [stream, sync]
       <<: *level_2
+      tags: [stream, sync]
       # Note: needs to be enabled when streamPerThread issues are fixed
       disabled: [amd_windows, amd_wsl]
     Unit_hipStreamQuery_WithNoWork:
       <<: *level_2
       tags: [stream, sync]
     Unit_hipStreamQuery_WithFinishedWork:
-      tags: [stream, sync]
       <<: *level_2
+      tags: [stream, sync]
       # Note: Windows disabled
       disabled: [amd_windows, amd_wsl]
     Unit_hipStreamQuery_SubmitWorkOnStreamAndQueryNullStream:
-      tags: [stream, sync]
       <<: *level_2
+      tags: [stream, sync]
       # Note: TDR (pass)
       disabled: [amd_wsl]
     Unit_hipStreamQuery_NullStreamQuery:
-      tags: [stream, sync]
       <<: *level_2
+      tags: [stream, sync]
       # Note: TDR (pass)
       disabled: [amd_wsl]
     Unit_hipStreamQuery_WithPendingWork:
-      tags: [stream, sync]
       <<: *level_2
+      tags: [stream, sync]
       # (amd_linux) Rock_Linux_Failures_on_gfx94X
       # (amd_wsl) Note: TDR (pass)
       disabled: [amd_linux, amd_wsl]
@@ -9249,8 +9249,8 @@ unit:
       <<: *level_2
       tags: [stream]
     Unit_hipStreamAddCallback_StrmSyncTiming:
-      tags: [stream, callback]
       <<: *level_2
+      tags: [stream, callback]
       # (amd_windows) SWDEV-400049 tdr intermittently
       # (amd_wsl) Note: Following four tests disabled due to defect - EXSWHTEC-203
       disabled: [amd_windows, amd_wsl]
@@ -9261,22 +9261,22 @@ unit:
       <<: *level_2
       tags: [stream, callback]
     Unit_hipLaunchHostFunc_streams:
-      tags: [stream, callback]
       <<: *level_2
+      tags: [stream, callback]
       # Rock_Linux_Failures_on_gfx94X
       disabled: [amd_linux]
     Unit_hipLaunchHostFunc_multistreams:
-      tags: [stream, callback]
       <<: *level_2
+      tags: [stream, callback]
       # SWDEV-430116:Below tests failed in stress test on 27/10/23
       disabled: [amd_wsl]
     Unit_hipLaunchHostFunc_KernelHost:
-      tags: [stream, callback]
       <<: *level_2
+      tags: [stream, callback]
       disabled: [amd_windows, amd_wsl]
     Unit_hipLaunchHostFunc_multidevice:
-      tags: [stream, callback, multigpu]
       <<: *level_2
+      tags: [stream, callback, multigpu]
     Unit_hipLaunchHostFunc_Samepriority:
       <<: *level_2
       tags: [stream, callback]
@@ -9284,24 +9284,24 @@ unit:
       <<: *level_2
       tags: [stream, callback]
     Unit_hipLaunchHostFunc_Graph:
-      tags: [stream, callback]
       <<: *level_2
+      tags: [stream, callback]
       disabled: [amd_windows, amd_wsl]
     Unit_hipStreamGetDevice_Negative:
       <<: *level_2
       tags: [stream]
     Unit_hipStreamGetDevice_Usecase:
-      tags: [stream, multigpu]
       <<: *level_2
+      tags: [stream, multigpu]
     Unit_hipStreamGetDevice_MThread:
       <<: *level_2
       tags: [stream]
     Unit_hipStreamGetDevice_SetDiffDevice:
-      tags: [stream, multigpu]
       <<: *level_2
+      tags: [stream, multigpu]
     Unit_hipStreamGetDevice_NullStream:
-      tags: [stream, multigpu]
       <<: *level_2
+      tags: [stream, multigpu]
     Unit_hipStreamLegacy_WithBlockingStream:
       <<: *level_2
       tags: [stream]
@@ -9318,23 +9318,23 @@ unit:
       <<: *level_2
       tags: [stream]
     Unit_hipStreamLegacy_MultiDevice:
-      tags: [stream, multigpu]
       <<: *level_2
+      tags: [stream, multigpu]
     Unit_hipStreamLegacy_H2H_H2D_D2D_D2H_Default:
       <<: *level_2
       tags: [stream]
     Unit_hipStreamLegacy_MultiDeviceMultiOperation:
-      tags: [stream, multigpu]
       <<: *level_2
+      tags: [stream, multigpu]
     Unit_hipStreamLegacy_TwoThreadsEachOneDiffOperation:
       <<: *level_2
       tags: [stream]
     Unit_hipStreamLegacy_TwoDevicesEachOneDiffOperation:
-      tags: [stream, multigpu]
       <<: *level_2
+      tags: [stream, multigpu]
     Unit_hipStreamLegacy_TwoThreadsInTwoDevicesEachOneDiffOperation:
-      tags: [stream, multigpu]
       <<: *level_2
+      tags: [stream, multigpu]
     Unit_hipStreamLegacy_InChildProcess:
       <<: *level_2
       tags: [stream]
@@ -9363,8 +9363,8 @@ unit:
       <<: *level_2
       tags: [stream]
     Unit_hipStreamGetId_MultiDevice:
-      tags: [stream, multigpu]
       <<: *level_2
+      tags: [stream, multigpu]
     Unit_hipStreamGetId_MultiProcess:
       <<: *level_2
       tags: [stream]
@@ -9384,8 +9384,8 @@ unit:
       <<: *level_2
       tags: [stream]
     Unit_hipExtStreamCreateWithCUMask_NegTst:
-      tags: [stream]
       <<: *level_2
+      tags: [stream]
       # Rock_Linux_Failures_on_gfx94X
       disabled: [amd_linux]
     Unit_hipStreamAddCallback_MultipleThreads:
@@ -9398,8 +9398,8 @@ unit:
       <<: *level_2
       tags: [stream, sync]
     Unit_hipStreamWaitEvent_DifferentStreams:
-      tags: [stream, sync]
       <<: *level_2
+      tags: [stream, sync]
       # Note: Windows disabled
       disabled: [amd_windows, amd_wsl]
     Unit_hipStreamGetFlags_spt_Basic:
@@ -9424,31 +9424,31 @@ unit:
       <<: *level_2
       tags: [stream, sync]
     Unit_hipStreamQuery_spt_WithFinishedWork:
-      tags: [stream, sync]
       <<: *level_2
+      tags: [stream, sync]
       # Following tests disabled due to SWDEV-486363
       disabled: [amd_windows]
     Unit_hipStreamQuery_spt_NegativeCases:
-      tags: [stream, sync]
       <<: *level_2
+      tags: [stream, sync]
       # Following tests disabled due to SWDEV-486363
       disabled: [amd_windows]
     Unit_hipStreamQuery_spt_WithPendingWork:
-      tags: [stream, sync]
       <<: *level_2
+      tags: [stream, sync]
       # Following tests disabled due to SWDEV-486363
       disabled: [amd_windows]
     Unit_hipStreamSynchronize_spt_EmptyStream:
       <<: *level_2
       tags: [stream, sync]
     Unit_hipStreamSynchronize_spt_FinishWork:
-      tags: [stream, sync]
       <<: *level_2
+      tags: [stream, sync]
       # Following tests disabled due to SWDEV-486363
       disabled: [amd_windows]
     Unit_hipStreamSynchronize_spt_SynchronizeStreamAndQueryNullStream:
-      tags: [stream, sync]
       <<: *level_2
+      tags: [stream, sync]
       # Following tests disabled due to SWDEV-486363
       disabled: [amd_windows]
     Unit_hipStreamBatchMemOp_Negative_Tests:
@@ -9501,13 +9501,13 @@ unit:
       <<: *level_2
       tags: [stream, stream_per_thread]
     Unit_hipStreamPerThread_MultiThread:
-      tags: [stream, stream_per_thread]
       <<: *level_2
+      tags: [stream, stream_per_thread]
       # Disabling test tracked SWDEV-395683
       disabled: [amd_wsl]
     Unit_hipStreamPerThread_DeviceReset_1:
-      tags: [stream, stream_per_thread]
       <<: *level_2
+      tags: [stream, stream_per_thread]
       # Note: Windows disabled
       disabled: [amd_windows, amd_wsl]
     Unit_hipStreamPerThread_DeviceReset_2:
@@ -9526,8 +9526,8 @@ unit:
       <<: *level_2
       tags: [stream, stream_per_thread]
     Unit_hipStreamPerThread_StrmWaitEvt:
-      tags: [stream, stream_per_thread]
       <<: *level_2
+      tags: [stream, stream_per_thread]
       # Note: Windows disabled
       disabled: [amd_windows, amd_wsl]
     Unit_hipStreamPerThread_CoopLaunch:
@@ -9635,17 +9635,17 @@ unit:
       <<: *level_2
       tags: [sync, coherency]
     Unit_cache_coherency_gpu_gpu:
-      tags: [multigpu, sync, coherency]
       <<: *level_2
+      tags: [multigpu, sync, coherency]
   syncthreads:
     Unit___syncthreads_Positive_Basic:
-      tags: [device_lib, sync, block]
       <<: *level_2
+      tags: [device_lib, sync, block]
       # Below tests are failing PSDB
       disabled: [amd_windows]
     Unit___syncthreads_count_Positive_Basic:
-      tags: [device_lib, sync, block]
       <<: *level_2
+      tags: [device_lib, sync, block]
       # Below tests are failing PSDB
       disabled: [amd_windows]
     Unit___syncthreads_count_Positive_Predicate_Zero:
@@ -9667,8 +9667,8 @@ unit:
       <<: *level_2
       tags: [device_lib, sync, block]
     Unit___syncthreads_and_Positive_Basic:
-      tags: [device_lib, sync, block]
       <<: *level_2
+      tags: [device_lib, sync, block]
       # Below tests are failing PSDB
       disabled: [amd_windows]
     Unit___syncthreads_and_Positive_Predicate_Zero:
@@ -9690,8 +9690,8 @@ unit:
       <<: *level_2
       tags: [device_lib, sync, block]
     Unit___syncthreads_or_Positive_Basic:
-      tags: [device_lib, sync, block]
       <<: *level_2
+      tags: [device_lib, sync, block]
       # Below tests are failing PSDB
       disabled: [amd_windows]
     Unit___syncthreads_or_Positive_Predicate_Zero:
@@ -9735,13 +9735,13 @@ unit:
       <<: *level_2
       tags: [texture, texobj]
     Unit_Layered1DTexture_Check_HostBufferToFromLayered1DArray:
-      tags: [texture, sample]
       <<: *level_2
+      tags: [texture, sample]
       # SWDEV-431191:Below tests failed in stress test on 03/11/23
       disabled: [amd_wsl]
     Unit_Layered1DTexture_Check_DeviceBufferToFromLayered1DArray:
-      tags: [texture, sample]
       <<: *level_2
+      tags: [texture, sample]
       # SWDEV-431191:Below tests failed in stress test on 03/11/23
       # SWDEV-432250:Below tests failed in stress test on 10/11/23
       disabled: [amd_wsl]
@@ -9749,8 +9749,8 @@ unit:
       <<: *level_2
       tags: [texture, sample]
     Unit_Layered2DTexture_Check_DeviceBufferToFromLayered2DArray:
-      tags: [texture, sample]
       <<: *level_2
+      tags: [texture, sample]
       # SWDEV-431191:Below tests failed in stress test on 03/11/23
       # SWDEV-432250:Below tests failed in stress test on 10/11/23
       disabled: [amd_wsl]
@@ -9779,8 +9779,8 @@ unit:
       <<: *level_2
       tags: [texture, texobj]
     Unit_hipGetChannelDesc_Negative_Parameters:
-      tags: [texture, texobj]
       <<: *level_2
+      tags: [texture, texobj]
       # Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/92
       disabled: [amd_windows, amd_wsl]
     Unit_hipGetTextureAlignmentOffset_Positive:
@@ -9799,93 +9799,93 @@ unit:
       <<: *level_2
       tags: [texture, texobj]
     Unit_hipTexRefSetArray_Positive:
-      tags: [texture, texref]
       <<: *level_2
+      tags: [texture, texref]
       # Rock_Window_Failures_on_gfx1151
       disabled: [amd_windows]
     Unit_hipTexRefSetArray_CheckData:
-      tags: [texture, texref]
       <<: *level_2
+      tags: [texture, texref]
       # Rock_Window_Failures_on_gfx1151
       disabled: [amd_windows]
     Unit_hipTexRefSetArray_Negative:
-      tags: [texture, texref]
       <<: *level_2
+      tags: [texture, texref]
       # Rock_Window_Failures_on_gfx1151
       disabled: [amd_windows]
     Unit_hipTexRefGetArray_Positive:
-      tags: [texture, texref]
       <<: *level_2
+      tags: [texture, texref]
       # Rock_Window_Failures_on_gfx1151
       disabled: [amd_windows]
     Unit_hipTexRefGetArray_Negative:
-      tags: [texture, texref]
       <<: *level_2
+      tags: [texture, texref]
       # Rock_Window_Failures_on_gfx1151
       disabled: [amd_windows]
     Unit_hipTexRefGetBorderColor_Negative:
-      tags: [texture, texref]
       <<: *level_2
+      tags: [texture, texref]
       # Rock_Window_Failures_on_gfx1151
       disabled: [amd_windows]
     Unit_hipTexRefSetBorderColor_Negative:
-      tags: [texture, texref]
       <<: *level_2
+      tags: [texture, texref]
       # Rock_Window_Failures_on_gfx1151
       disabled: [amd_windows]
     Unit_hipTexRefGetAddress_Positive:
-      tags: [texture, texref]
       <<: *level_2
+      tags: [texture, texref]
       # Rock_Window_Failures_on_gfx1151
       disabled: [amd_windows]
     Unit_hipTexRefGetAddress_Negative:
-      tags: [texture, texref]
       <<: *level_2
+      tags: [texture, texref]
       # Rock_Window_Failures_on_gfx1151
       disabled: [amd_windows]
     Unit_hipTexRefGetAddress_AdressNotSet:
-      tags: [texture, texref]
       <<: *level_2
+      tags: [texture, texref]
       # Rock_Window_Failures_on_gfx1151
       disabled: [amd_windows]
     Unit_hipTexRefSetAddress_Basic:
-      tags: [texture, texref]
       <<: *level_2
+      tags: [texture, texref]
       # Rock_Window_Failures_on_gfx1151
       disabled: [amd_windows]
     Unit_hipTexRefSetAddress_Positive:
-      tags: [texture, texref]
       <<: *level_2
+      tags: [texture, texref]
       # Rock_Window_Failures_on_gfx1151
       disabled: [amd_windows]
     Unit_hipTexRefSetAddress_Negative:
-      tags: [texture, texref]
       <<: *level_2
+      tags: [texture, texref]
       # Rock_Window_Failures_on_gfx1151
       disabled: [amd_windows]
     Unit_hipTexRefGetFormat_Basic:
-      tags: [texture, texref]
       <<: *level_2
+      tags: [texture, texref]
       # Rock_Window_Failures_on_gfx1151
       disabled: [amd_windows]
     Unit_hipTexRefGetFormat_Positive:
-      tags: [texture, texref]
       <<: *level_2
+      tags: [texture, texref]
       # Rock_Window_Failures_on_gfx1151
       disabled: [amd_windows]
     Unit_hipTexRefGetFormat_Negative:
-      tags: [texture, texref]
       <<: *level_2
+      tags: [texture, texref]
       # Rock_Window_Failures_on_gfx1151
       disabled: [amd_windows]
     Unit_hipTexRefSetFormat_Positive:
-      tags: [texture, texref]
       <<: *level_2
+      tags: [texture, texref]
       # Rock_Window_Failures_on_gfx1151
       disabled: [amd_windows]
     Unit_hipTexRefSetFormat_Negative:
-      tags: [texture, texref]
       <<: *level_2
+      tags: [texture, texref]
       # Rock_Window_Failures_on_gfx1151
       disabled: [amd_windows]
     Unit_hipCreateTextureObject_tex1DfetchVerification:
@@ -9986,33 +9986,33 @@ unit:
       <<: *level_2
       tags: [texture, texobj]
     Unit_hipTexRefSetAddress2D_Negative_Parameters:
-      tags: [texture, texref]
       <<: *level_2
+      tags: [texture, texref]
       # Rock_Window_Failures_on_gfx1151
       disabled: [amd_windows]
     Unit_hipTexRefSetAddress2D_Positive:
-      tags: [texture, texref]
       <<: *level_2
+      tags: [texture, texref]
       # Rock_Window_Failures_on_gfx1151
       disabled: [amd_windows]
     Unit_hipTexRefSetMaxAnisotropy_Negative_Parameters:
-      tags: [texture, texref]
       <<: *level_2
+      tags: [texture, texref]
       # Rock_Window_Failures_on_gfx1151
       disabled: [amd_windows]
     Unit_hipTexRefSetMaxAnisotropy_Positive:
-      tags: [texture, texref]
       <<: *level_2
+      tags: [texture, texref]
       # Rock_Window_Failures_on_gfx1151
       disabled: [amd_windows]
     Unit_hipTexRefGetMaxAnisotropy_Negative_Parameters:
-      tags: [texture, texref]
       <<: *level_2
+      tags: [texture, texref]
       # Rock_Window_Failures_on_gfx1151
       disabled: [amd_windows]
     Unit_hipTexRefGetMaxAnisotropy_Positive:
-      tags: [texture, texref]
       <<: *level_2
+      tags: [texture, texref]
       # Rock_Window_Failures_on_gfx1151
       disabled: [amd_windows]
     Unit_hipUnbindTexture_Null_Texture:
@@ -10028,13 +10028,13 @@ unit:
       <<: *level_2
       tags: [texture, texref]
     Unit_hipTexRefSetFlags_Negative_Parameters:
-      tags: [texture, texref]
       <<: *level_2
+      tags: [texture, texref]
       # Rock_Window_Failures_on_gfx1151
       disabled: [amd_windows]
     Unit_hipTexRefSetFlags_Positive:
-      tags: [texture, texref]
       <<: *level_2
+      tags: [texture, texref]
       # Rock_Window_Failures_on_gfx1151
       disabled: [amd_windows]
     Unit_hipBindTextureToArray_Negative_Parameters:
@@ -10050,33 +10050,33 @@ unit:
       <<: *level_2
       tags: [texture, texref]
     Unit_hipTexRefGetFlags_Negative_Parameters:
-      tags: [texture, texref]
       <<: *level_2
+      tags: [texture, texref]
       # Rock_Window_Failures_on_gfx1151
       disabled: [amd_windows]
     Unit_hipTexRefGetFlags_Positive:
-      tags: [texture, texref]
       <<: *level_2
+      tags: [texture, texref]
       # Rock_Window_Failures_on_gfx1151
       disabled: [amd_windows]
     Unit_hipTexRefSetAddressMode_Negative_Parameters:
-      tags: [texture, texref]
       <<: *level_2
+      tags: [texture, texref]
       # Rock_Window_Failures_on_gfx1151
       disabled: [amd_windows]
     Unit_hipTexRefSetAddressMode_Positive:
-      tags: [texture, texref]
       <<: *level_2
+      tags: [texture, texref]
       # Rock_Window_Failures_on_gfx1151
       disabled: [amd_windows]
     Unit_hipTexRefGetAddressMode_Negative_Parameters:
-      tags: [texture, texref]
       <<: *level_2
+      tags: [texture, texref]
       # Rock_Window_Failures_on_gfx1151
       disabled: [amd_windows]
     Unit_hipTexRefGetAddressMode_Positive:
-      tags: [texture, texref]
       <<: *level_2
+      tags: [texture, texref]
       # Rock_Window_Failures_on_gfx1151
       disabled: [amd_windows]
     Unit_hipTexRefSetGetFilterMode:
@@ -10095,13 +10095,13 @@ unit:
       <<: *level_2
       tags: [texture, texref]
     Unit_hipTextureMipmapRef2D_Positive_Check:
-      tags: [texture, texref]
       <<: *level_2
+      tags: [texture, texref]
       # Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/92
       disabled: [amd_wsl]
     Unit_hipTextureMipmapRef2D_Negative_Parameters:
-      tags: [texture, texref]
       <<: *level_2
+      tags: [texture, texref]
       # Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/92
       disabled: [amd_wsl]
     Unit_hipMallocMipmappedArray_Negative_Parameters:
@@ -10202,8 +10202,8 @@ unit:
       <<: *level_2
       tags: [sync, fence]
     Unit___threadfence_block_Positive_Basic_Peer:
-      tags: [multigpu, sync, fence]
       <<: *level_2
+      tags: [multigpu, sync, fence]
     Unit___threadfence_Positive_Basic_Shared:
       <<: *level_2
       tags: [sync, fence]
@@ -10217,11 +10217,11 @@ unit:
       <<: *level_2
       tags: [sync, fence]
     Unit___threadfence_Positive_Basic_Peer:
-      tags: [multigpu, sync, fence]
       <<: *level_2
+      tags: [multigpu, sync, fence]
     Unit___threadfence_system_Positive_Basic_Peer:
-      tags: [multigpu, sync, fence]
       <<: *level_2
+      tags: [multigpu, sync, fence]
     Unit___threadfence_system_Positive_Basic_Host:
       <<: *level_2
       tags: [sync, fence]
@@ -10276,25 +10276,25 @@ unit:
       # Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
       disabled: [amd_wsl]
     Unit_hipMemGetAllocationGranularity_AllGPUs:
-      tags: [vmm]
       <<: *level_2
+      tags: [vmm]
       # Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
       disabled: [amd_wsl]
     Unit_hipMemGetAllocationGranularity_NegativeTests:
-      tags: [vmm]
       <<: *level_2
+      tags: [vmm]
       # Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
       disabled: [amd_wsl]
     Unit_hipMemGetAllocationGranularity_Capture:
       <<: *level_2
       tags: [vmm]
     Unit_hipMemRetainAllocationHandle_SetGet:
-      tags: [vmm]
       <<: *level_2
+      tags: [vmm]
       disabled: [amd_wsl]
     Unit_hipMemRetainAllocationHandle_NegTst:
-      tags: [vmm]
       <<: *level_2
+      tags: [vmm]
       disabled: [amd_wsl]
     Unit_hipMemRetainAllocationHandle_Capture:
       <<: *level_2
@@ -10327,11 +10327,11 @@ unit:
       <<: *level_2
       tags: [vmm]
     Unit_hipMemGetHandleForAddressRange_DeviceMemory_InAnotherDevice:
-      tags: [multigpu, vmm]
       <<: *level_2
+      tags: [multigpu, vmm]
     Unit_hipMemGetHandleForAddressRange_VM_InAnotherDevice:
-      tags: [multigpu, vmm]
       <<: *level_2
+      tags: [multigpu, vmm]
     Unit_hipMemGetHandleForAddressRange_MulProc_Socket_DeviceMem:
       <<: *level_2
       tags: [vmm]
@@ -10357,8 +10357,8 @@ unit:
       <<: *level_2
       tags: [vmm]
     Unit_hipMemAddressFree_negative:
-      tags: [vmm]
       <<: *level_2
+      tags: [vmm]
       # (amd_windows) NOTE: The following test is disabled due to defect - EXSWHTEC-244
       # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
       disabled: [amd_windows, amd_wsl]
@@ -10366,8 +10366,8 @@ unit:
       <<: *level_2
       tags: [vmm]
     Unit_hipMemAddressReserve_AlignmentTest:
-      tags: [vmm]
       <<: *level_2
+      tags: [vmm]
       # (amd_windows) NOTE: The following test is disabled due to defect - EXSWHTEC-245
       # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
       disabled: [amd_windows, amd_wsl]
@@ -10378,129 +10378,129 @@ unit:
       <<: *level_2
       tags: [vmm]
     Unit_hipMemCreate_BasicAllocateDeAlloc_MultGranularity:
-      tags: [vmm]
       <<: *level_2
+      tags: [vmm]
       # Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
       disabled: [amd_wsl]
     Unit_hipMemCreate_ChkDev2HstMemcpy_ReleaseHdlPostUnmap:
-      tags: [vmm]
       <<: *level_2
+      tags: [vmm]
       # Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
       disabled: [amd_wsl]
     Unit_hipMemCreate_ChkDev2HstMemcpy_ReleaseHdlPreUse:
-      tags: [vmm]
       <<: *level_2
+      tags: [vmm]
       # Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
       disabled: [amd_wsl]
     Unit_hipMemCreate_ChkWithKerLaunch:
-      tags: [vmm]
       <<: *level_2
+      tags: [vmm]
       # (amd_windows) SWDEV-396615 mGPUs not considered correctly
       # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
       disabled: [amd_windows, amd_wsl]
     Unit_hipMemCreate_MapNonContiguousChunks:
-      tags: [vmm]
       <<: *level_2
+      tags: [vmm]
       # (amd_windows) SWDEV-396615 mGPUs not considered correctly
       # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
       disabled: [amd_windows, amd_wsl]
     Unit_hipMemCreate_ChkWithMemset:
-      tags: [vmm]
       <<: *level_2
+      tags: [vmm]
       # Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
       disabled: [amd_wsl]
     Unit_hipMemCreate_Negative:
-      tags: [vmm]
       <<: *level_2
+      tags: [vmm]
       # Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
       disabled: [amd_wsl]
     Unit_hipMemCreate_Capture:
       <<: *level_2
       tags: [vmm]
     Unit_hipMemSetAccess_SetGet:
-      tags: [vmm]
       <<: *level_2
+      tags: [vmm]
       # (amd_windows) SWDEV-396615 mGPUs not considered correctly
       # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
       disabled: [amd_windows, amd_wsl]
     Unit_hipMemSetAccess_MultDevSetGet:
-      tags: [vmm]
       <<: *level_2
+      tags: [vmm]
       # (amd_windows) SWDEV-396615 mGPUs not considered correctly
       # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
       disabled: [amd_windows, amd_wsl]
     Unit_hipMemSetAccess_EntireVMMRangeSetGet:
-      tags: [vmm]
       <<: *level_2
+      tags: [vmm]
       # (amd_windows) SWDEV-396615 mGPUs not considered correctly
       # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
       disabled: [amd_windows, amd_wsl]
     Unit_hipMemGetAccess_NegTst:
-      tags: [vmm]
       <<: *level_2
+      tags: [vmm]
       disabled: [amd_windows, amd_wsl]
     Unit_hipMemSetAccess_FuncTstOnMultDev:
-      tags: [multigpu, vmm]
       <<: *level_2
+      tags: [multigpu, vmm]
       # (amd_windows) SWDEV-396615 mGPUs not considered correctly
       # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
       disabled: [amd_windows, amd_wsl]
     Unit_hipMemSetAccess_ChangeAccessProp:
-      tags: [vmm]
       <<: *level_2
+      tags: [vmm]
       # (amd_windows) SWDEV-413997: VMM test still failing in windows
       # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
       disabled: [amd_windows, amd_wsl]
     Unit_hipMemSetAccess_Vmm2UnifiedMemCpy:
-      tags: [vmm]
       <<: *level_2
+      tags: [vmm]
       # (amd_windows) SWDEV-396615 mGPUs not considered correctly
       # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
       disabled: [amd_windows, amd_wsl]
     Unit_hipMemSetAccess_Vmm2DevMemCpy:
-      tags: [vmm]
       <<: *level_2
+      tags: [vmm]
       # (amd_windows) SWDEV-444041: These tests fail randomly in gfx1030 MGU
       # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
       disabled: [amd_windows, amd_wsl]
     Unit_hipMemSetAccess_Vmm2PeerDevMemCpy:
-      tags: [multigpu, vmm]
       <<: *level_2
+      tags: [multigpu, vmm]
       # (amd_windows) SWDEV-396615 mGPUs not considered correctly
       # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
       disabled: [amd_windows, amd_wsl]
     Unit_hipMemSetAccess_Vmm2PeerPeerMemCpy:
-      tags: [multigpu, vmm]
       <<: *level_2
+      tags: [multigpu, vmm]
       # Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
       disabled: [amd_wsl]
     Unit_hipMemSetAccess_Vmm2VMMMemCpy:
-      tags: [vmm]
       <<: *level_2
+      tags: [vmm]
       # (amd_windows) SWDEV-444041: These tests fail in gfx1100 MGPU
       # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
       disabled: [amd_windows, amd_wsl]
     Unit_hipMemSetAccess_Vmm2VMMInterDevMemCpy:
-      tags: [multigpu, vmm]
       <<: *level_2
+      tags: [multigpu, vmm]
       # (amd_windows) SWDEV-396615 mGPUs not considered correctly
       # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
       disabled: [amd_windows, amd_wsl]
     Unit_hipMemSetAccess_GrowVMM:
-      tags: [vmm]
       <<: *level_2
+      tags: [vmm]
       # (amd_windows) SWDEV-396615 mGPUs not considered correctly
       # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
       disabled: [amd_windows, amd_wsl]
     Unit_hipMemSetAccess_Multithreaded:
-      tags: [vmm]
       <<: *level_2
+      tags: [vmm]
       # (amd_windows) SWDEV-444031: This test fails in gfx1101 MGPU
       # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
       disabled: [amd_windows, amd_wsl]
     Unit_hipMemSetAccess_negative:
-      tags: [vmm]
       <<: *level_2
+      tags: [vmm]
       # (amd_windows) SWDEV-396615 mGPUs not considered correctly
       # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
       disabled: [amd_windows, amd_wsl]
@@ -10508,69 +10508,69 @@ unit:
       <<: *level_2
       tags: [vmm]
     Unit_hipMemSetAccessHostDevice_hostalloc:
-      tags: [vmm]
       <<: *level_2
+      tags: [vmm]
       # SWDEV-555665
       disabled: [amd_windows]
     Unit_hipMemSetAccessHost_devicealloc:
       <<: *level_2
       tags: [vmm]
     Unit_hipMemGetAllocationPropertiesFromHandle_functional:
-      tags: [vmm]
       <<: *level_2
+      tags: [vmm]
       # Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
       disabled: [amd_wsl]
     Unit_hipMemGetAllocationPropertiesFromHandle_Negative:
-      tags: [vmm]
       <<: *level_2
+      tags: [vmm]
       # Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
       disabled: [amd_wsl]
     Unit_hipMemGetAllocationPropertiesFromHandle_Capture:
       <<: *level_2
       tags: [vmm]
     Unit_hipMemMap_SameMemoryReuse:
-      tags: [vmm]
       <<: *level_2
+      tags: [vmm]
       # (amd_windows) SWDEV-444041: These tests fail randomly in gfx1030 MGU
       # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
       disabled: [amd_windows, amd_wsl]
     Unit_hipMemMap_PhysicalMemoryReuse_SingleGPU:
-      tags: [vmm]
       <<: *level_2
+      tags: [vmm]
       # (amd_windows) SWDEV-444041: These tests fail in gfx1100 MGPU
       # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
       disabled: [amd_windows, amd_wsl]
     Unit_hipMemMap_PhysicalMemory_Map2MultVMMs:
-      tags: [vmm]
       <<: *level_2
+      tags: [vmm]
       # (amd_windows) SWDEV-444041: These tests fail in gfx1100 MGPU
       # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
       disabled: [amd_windows, amd_wsl]
     Unit_hipMemMap_PhysicalMemoryReuse_MultiDev:
-      tags: [multigpu, vmm]
       <<: *level_2
+      tags: [multigpu, vmm]
       # (amd_windows) SWDEV-444041: These tests fail in gfx1100 MGPU
       # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
       disabled: [amd_windows, amd_wsl]
     Unit_hipMemMap_VMMMemoryReuse_SingleGPU:
-      tags: [vmm]
       <<: *level_2
+      tags: [vmm]
       # Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
       disabled: [amd_wsl]
     Unit_hipMemMap_VMMMemoryReuse_MultiGPU:
-      tags: [multigpu, vmm]
       <<: *level_2
+      tags: [multigpu, vmm]
       # (amd_windows) SWDEV-396615 mGPUs not considered correctly
       # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
       disabled: [amd_windows, amd_wsl]
     Unit_hipMemMap_MapPartialVMMMem:
-      tags: [vmm]
       <<: *level_2
+      tags: [vmm]
       # Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
       disabled: [amd_wsl]
     Unit_hipMemMap_negative:
-      tags: [vmm]
       <<: *level_2
+      tags: [vmm]
       # (amd_windows) SWDEV-444041: These tests fail randomly in gfx1030 MGU
       # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
       disabled: [amd_windows, amd_wsl]
@@ -10578,24 +10578,24 @@ unit:
       <<: *level_2
       tags: [vmm]
     Unit_hipMemRelease_negative:
-      tags: [vmm]
       <<: *level_2
+      tags: [vmm]
       # Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
       disabled: [amd_wsl]
     Unit_hipMemRelease_Capture:
       <<: *level_2
       tags: [vmm]
     Unit_hipMemUnmap_negative:
-      tags: [vmm]
       <<: *level_2
+      tags: [vmm]
       # Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
       disabled: [amd_wsl]
     Unit_hipMemUnmap_Capture:
       <<: *level_2
       tags: [vmm]
     Unit_hipMemMapArrayAsync_Positive_Basic:
-      tags: [vmm]
       <<: *level_2
+      tags: [vmm]
       # Below tests are failing PSDB
       <<: *disabled_nvidia
   vulkan_interop:
