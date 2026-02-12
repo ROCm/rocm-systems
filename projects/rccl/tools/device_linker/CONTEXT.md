@@ -198,3 +198,55 @@ with the simple test ELF.
 - Verify address calculation consistency
 - Ensure all function table entries have corresponding symbols in `.dynsym`
 - Test symbol-based relocations with `R_AMDGPU_ABS64` type
+
+---
+
+## Session Summary (Feb 11-12, 2026)
+
+### Code Cleanup: Dead DWARF Code Removal
+
+Removed **~1071 lines** (~21%) of dead code from `device_linker.cpp`. This code was related to manual DWARF parsing and debug section merging that was superseded by the DWARFLinker integration.
+
+**Removed:**
+- `findLineStrpPositionsInDebugInfo()` - never called
+- `findDwarfAttrPositionsFromElf()` and `findDwarfAttrPositionsUsingLLVM()` - populated data that was never used
+- `DwarfAttrPositions` struct - data never consumed
+- `createMinimalElfForDwarf()` and `createMinimalElfForLineTable()` - only called by dead code
+- `patchStrOffsetsBaseToZero()` - only called by dead code
+- `parseAbbrevTableWithAttrs()` and `parseAbbrevTable()` - only used by dead code
+- `findLineStrpInChunkManual()` - only used by dead code
+- `getFormFixedSize()`, `skipVariableForm()` - DWARF form parsing helpers, now dead
+- `appendULEB128()`, `decodeULEB128()`, `decodeSLEB128()` - ULEB/SLEB helpers, now dead
+- `patchDebugLine()` - was a no-op when DWARFLinker enabled
+- Large block of manual debug section merging in `collectSections()` - superseded by DWARFLinker
+
+**Simplified:**
+- `DebugInfoChunk` struct now only contains `orig_text_addr` and `new_text_offset` (essential for DWARFLinker address remapping)
+
+Build verified successful after cleanup.
+
+### Test Investigation: AllReduce Verification Failure
+
+Investigated `test_smoke_allreduce_batched` which was failing. This led to discovering a **fundamental issue**: AllReduce operations in the device linker build launch successfully but don't actually compute results (output buffers remain unchanged).
+
+**Key Finding:** `test_minimal_allreduce` does NOT verify results - it only checks that the operation doesn't crash or hang. This violates the completion criteria requirement that tests should verify correctness.
+
+**Symptoms:**
+- Kernel launches with correct funcId (e.g., 368 for AllReduce_TREE_LL_Sum_f32)
+- Kernel "completes" (hipStreamSynchronize returns)
+- Output buffers contain 0 instead of expected sum
+- System RCCL (non-device-linker) works correctly with same test
+
+**Ruled Out:**
+- Define mismatches (CMake generates correct flags for both dispatcher and specialized kernels)
+- LDS allocation (matches between dispatcher and specialized functions)
+- Function code existence (17KB of real code with LDS operations after s_trap patching)
+- Algorithm/protocol specifics (Ring, Tree, LL, LL128, Simple all fail)
+
+**Root Cause (identified by user via rocgdb):** Missing noinline problem - related to function inlining behavior in specialized kernels.
+
+### Action Items for Next Session
+
+1. **Fix noinline issue** - User has identified the specific problem through rocgdb debugging
+2. **Add result verification to test_minimal_allreduce** - Current test is not a valid completion test
+3. **Consider moving dispatcher build steps 3-5 from shell script to CMake** - Would ensure flag consistency automatically (though the immediate issue was not a flag mismatch)
