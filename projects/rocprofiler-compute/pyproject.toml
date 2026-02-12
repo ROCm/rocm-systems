@@ -113,4 +113,5 @@ markers = [
     "noise_clamp",
     "torch_ops",
     "multi_rank",
+    "experimental_feature",
 ]
