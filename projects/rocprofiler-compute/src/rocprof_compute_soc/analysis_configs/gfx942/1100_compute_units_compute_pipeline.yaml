@@ -263,8 +263,7 @@ Panel Config:
       MFMA instructions.
     MFMA FLOPs (F8): >-
       The total number of 8-bit floating point MFMA operations executed per
-      second. Note: this does not include any 8-bit floating point operations from
-      VALU instructions. This is also presented as a percent of the peak theoretical
+      second. This is also presented as a percent of the peak theoretical
       F8 MFMA operations achievable on the specific accelerator.
     MFMA FLOPs (BF16): >-
       The total number of 16-bit brain floating point MFMA operations executed
