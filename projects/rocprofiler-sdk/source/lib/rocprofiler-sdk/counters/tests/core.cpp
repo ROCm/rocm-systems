@@ -478,7 +478,7 @@ TEST(core, check_callbacks)
     }
     registration::set_init_status(1);
 
-    registration::finalize();
+    registration::finalize(registration::finalize_mode::tool_induced);
 }
 
 TEST(core, destroy_counter_profile)
@@ -516,7 +516,7 @@ TEST(core, destroy_counter_profile)
     }
     registration::set_init_status(1);
 
-    registration::finalize();
+    registration::finalize(registration::finalize_mode::tool_induced);
 }
 
 TEST(core, start_stop_buffered_ctx)
@@ -586,7 +586,7 @@ TEST(core, start_stop_buffered_ctx)
 
     registration::set_init_status(1);
 
-    registration::finalize();
+    registration::finalize(registration::finalize_mode::tool_induced);
 }
 
 TEST(core, start_stop_callback_ctx)
@@ -709,7 +709,7 @@ TEST(core, test_profile_incremental)
 
     registration::set_init_status(1);
 
-    registration::finalize();
+    registration::finalize(registration::finalize_mode::tool_induced);
 }
 
 TEST(core, public_api_iterate_agents)

@@ -601,9 +601,9 @@ invoke_client_initializers()
     if(!get_clients()) return false;
 
     // if there is only one client, just fully finalize
-    rocprofiler_client_finalize_t client_fini_func =
-        (get_clients()->size() == 1) ? [](rocprofiler_client_id_t) -> void { finalize(); }
-                                     : &invoke_client_finalizer;
+    rocprofiler_client_finalize_t client_fini_func = (get_clients()->size() == 1)
+        ? [](rocprofiler_client_id_t) -> void { finalize(finalize_mode::tool_induced); }
+    : &invoke_client_finalizer;
 
     for(auto& itr : *get_clients())
     {
@@ -825,7 +825,7 @@ initialize()
         // initialization is in process
         set_init_status(-1);
         std::atexit([]() {
-            finalize();
+            finalize(finalize_mode::exit_handler);
             common::destroy_static_tl_objects();
             common::destroy_static_objects();
         });
@@ -865,7 +865,7 @@ initialize()
 }
 
 void
-finalize()
+finalize(finalize_mode mode)
 {
 #if defined(CODECOV) && CODECOV > 0
     if(get_fini_status() > 0) __gcov_dump();
@@ -874,6 +874,17 @@ finalize()
     if(get_fini_status() != 0)
     {
         ROCP_INFO << "ignoring finalization request (value=" << get_fini_status() << ")";
+        return;
+    }
+
+    // When called from an exit handler or static destructor, defer finalization
+    // until HSA fires HSA_AMD_SYSTEM_ASYNC_HANDLER_DESTROY_EVENT (which means
+    // HSA async threads are destroyed and it is safe to retire correlation IDs).
+    if((mode == finalize_mode::exit_handler || mode == finalize_mode::static_destructor) &&
+       hsa::is_async_wait_initialized() && !hsa::is_async_shutdown())
+    {
+        ROCP_INFO << "deferring finalization until HSA async handler shutdown";
+        hsa::register_shutdown_callback([]() { finalize(finalize_mode::exit_handler); });
         return;
     }
 

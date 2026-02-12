@@ -34,6 +34,10 @@ namespace hsa
 {
 namespace
 {
+std::atomic<bool>     s_initialized{false};
+std::function<void()> s_shutdown_callback = nullptr;
+std::mutex            s_callback_mutex;
+
 class async_wait_manager
 {
 public:
@@ -51,15 +55,26 @@ private:
     std::atomic<bool> _shutdown{false};
 };
 
+#ifdef HSA_AMD_SYSTEM_ASYNC_HANDLER_DESTROY_EVENT
 hsa_status_t
 system_event_handler(const hsa_amd_event_t* event, void* /*data*/)
 {
     if(event && event->event_type == HSA_AMD_SYSTEM_ASYNC_HANDLER_DESTROY_EVENT)
     {
         async_wait_manager::instance().notify_shutdown();
+
+        // Invoke deferred finalization callback if registered
+        std::function<void()> cb;
+        {
+            std::lock_guard<std::mutex> lock(s_callback_mutex);
+            cb                  = std::move(s_shutdown_callback);
+            s_shutdown_callback = nullptr;
+        }
+        if(cb) cb();
     }
     return HSA_STATUS_SUCCESS;
 }
+#endif
 
 bool
 signal_condition_satisfied(hsa_signal_condition_t cond,
@@ -80,11 +95,16 @@ signal_condition_satisfied(hsa_signal_condition_t cond,
 void
 async_wait_manager_init()
 {
+    async_wait_manager::instance().reset();
+    s_initialized.store(true, std::memory_order_release);
+
+#ifdef HSA_AMD_SYSTEM_ASYNC_HANDLER_DESTROY_EVENT
     auto* ext_table = get_amd_ext_table();
     if(ext_table && ext_table->hsa_amd_register_system_event_handler_fn)
     {
         ext_table->hsa_amd_register_system_event_handler_fn(system_event_handler, nullptr);
     }
+#endif
 }
 
 void
@@ -103,6 +123,19 @@ bool
 is_async_shutdown()
 {
     return async_wait_manager::instance().is_shutdown();
+}
+
+bool
+is_async_wait_initialized()
+{
+    return s_initialized.load(std::memory_order_acquire);
+}
+
+void
+register_shutdown_callback(shutdown_callback_t callback)
+{
+    std::lock_guard<std::mutex> lock(s_callback_mutex);
+    s_shutdown_callback = std::move(callback);
 }
 
 wait_result

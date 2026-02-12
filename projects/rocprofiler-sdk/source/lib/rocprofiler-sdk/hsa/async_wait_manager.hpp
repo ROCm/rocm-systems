@@ -57,9 +57,22 @@ notify_async_shutdown();
 void
 reset_async_shutdown();
 
-/// Check if the async handler has been destroyed (for testing).
+/// Check if the async handler has been destroyed.
 bool
 is_async_shutdown();
+
+/// Check if async_wait_manager_init() has been called (i.e. HSA was loaded).
+bool
+is_async_wait_initialized();
+
+/// Register a callback to be invoked when HSA async handler shutdown is detected.
+/// Used for deferred finalization: if finalize() is called before HSA shuts down,
+/// it registers a callback here and returns. When the event fires, the callback
+/// triggers finalization at the right time.
+using shutdown_callback_t = std::function<void()>;
+
+void
+register_shutdown_callback(shutdown_callback_t callback);
 
 /// HSA signal wait with shutdown awareness. Polls the signal at poll_interval_ns intervals
 /// and checks the shutdown flag between polls.

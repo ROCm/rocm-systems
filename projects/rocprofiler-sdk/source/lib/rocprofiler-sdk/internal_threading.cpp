@@ -245,7 +245,7 @@ initialize()
         // registration or else the static objects it is pointing to
         // will be destroyed before finalize is invoked.
         create_callback_thread();
-        ::atexit(&registration::finalize);
+        ::atexit([]() { registration::finalize(registration::finalize_mode::exit_handler); });
         // ensure the callback threads are created on the forked process
         ::pthread_atfork(nullptr, nullptr, create_forked_callback_threads);
     });

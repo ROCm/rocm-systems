@@ -56,7 +56,7 @@ lifetime::~lifetime()
     if(common::get_env("ROCPROFILER_LIBRARY_DTOR", false))
     {
         ROCP_INFO << "Finalizing rocprofiler-sdk library...";
-        registration::finalize();
+        registration::finalize(registration::finalize_mode::static_destructor);
         ROCP_INFO << "rocprofiler-sdk library finalized";
     }
 }

@@ -639,7 +639,7 @@ protected:
         CHECK(test_ran);
 
         registration::set_init_status(1);
-        registration::finalize();
+        registration::finalize(registration::finalize_mode::tool_induced);
     }
 };
 

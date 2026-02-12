@@ -217,7 +217,7 @@ TEST(hsa_barrier, no_block_single)
     }
 
     registration::set_init_status(1);
-    registration::finalize();
+    registration::finalize(registration::finalize_mode::tool_induced);
 }
 
 TEST(hsa_barrier, no_block_multi)
@@ -255,7 +255,7 @@ TEST(hsa_barrier, no_block_multi)
     }
 
     registration::set_init_status(1);
-    registration::finalize();
+    registration::finalize(registration::finalize_mode::tool_induced);
 }
 
 TEST(hsa_barrier, block_single)
@@ -315,7 +315,7 @@ TEST(hsa_barrier, block_single)
     }
 
     registration::set_init_status(1);
-    registration::finalize();
+    registration::finalize(registration::finalize_mode::tool_induced);
 }
 
 TEST(hsa_barrier, block_multi)
@@ -386,5 +386,5 @@ TEST(hsa_barrier, block_multi)
     }
 
     registration::set_init_status(1);
-    registration::finalize();
+    registration::finalize(registration::finalize_mode::tool_induced);
 }
