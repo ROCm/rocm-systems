@@ -49,6 +49,17 @@ config["app_mat_mul_max"] = ["./tests/mat_mul_max"]
 config["app_hip_dynamic_shared"] = ["./tests/hip_dynamic_shared"]
 config["app_laplace_eqn"] = ["./tests/laplace_eqn", "-i", "5000"]
 config["app_laplace_eqn_iter"] = ["./tests/laplace_eqn", "-i", "15000"]
+config["app_laplace_eqn_insufficient"] = ["./tests/laplace_eqn", "-i", "3", "-o", "0"]
+config["app_vcopy_multikernel_iter"] = [
+    "./tests/vcopy",
+    "-n",
+    "1048576",
+    "-b",
+    "256",
+    "-i",
+    "500",
+    "--multikernel",
+]
 config["app_mpi_aware_laplace_eqn"] = ["./tests/mpi_aware_laplace_eqn", "-i", "5"]
 config["rocflop"] = ["./tests/rocflop", "--device", "0"]
 config["cleanup"] = True
@@ -999,7 +1010,8 @@ def test_output_directory_all_placeholders_combined(
 def test_output_directory_default_with_rank(
     binary_handler_profile_rocprof_compute, monkeypatch
 ):
-    """Test that rank is appended to the default output directory when MPI rank is set."""
+    """Test that rank is appended to the default output directory
+    when MPI rank is set."""
     from rocprof_compute_base import RocProfCompute
 
     rank = "3"
@@ -3553,5 +3565,260 @@ def test_multi_rank_warning_pc_sampling(
     assert "--iteration-multiplexing" in output
     assert "--block" in output
     assert "--set" in output
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.roofline_iteration_multiplexing
+def test_roofline_iteration_multiplexing_laplace_eqn(
+    binary_handler_profile_rocprof_compute,
+    binary_handler_analyze_rocprof_compute,
+):
+    """
+    Test roofline analysis with iteration multiplexed profiling data using
+    laplace_eqn (single kernel, 3 launch configs).
+
+    Profiles with and without iteration multiplexing using roofline counters
+    (block 4), compares counter accuracy, and verifies analysis mode roofline
+    pipeline completes successfully on multiplexed data.
+    """
+    if soc in ("MI100"):
+        pytest.skip("Roofline not supported on MI100")
+        return
+
+    # Profile baseline (no multiplexing) with roofline counters
+    options_baseline = ["--block", "4"]
+    workload_dir_baseline = test_utils.get_output_dir(
+        param_id="roof_iter_mplx_baseline"
+    )
+    binary_handler_profile_rocprof_compute(
+        config,
+        workload_dir_baseline,
+        options_baseline,
+        check_success=True,
+        roof=True,
+        app_name="app_laplace_eqn",
+    )
+    counters_baseline = test_utils.check_csv_files(
+        workload_dir_baseline, num_devices, num_kernels
+    )["pmc_perf.csv"]
+
+    # Profile with iteration multiplexing (kernel_launch_params)
+    options_mux = [
+        "--block",
+        "4",
+        "--iteration-multiplexing",
+        "kernel_launch_params",
+    ]
+    workload_dir_mux = test_utils.get_output_dir(param_id="roof_iter_mplx_klp")
+    binary_handler_profile_rocprof_compute(
+        config,
+        workload_dir_mux,
+        options_mux,
+        check_success=True,
+        roof=True,
+        app_name="app_laplace_eqn",
+    )
+    counters_mux = test_utils.check_csv_files(
+        workload_dir_mux, num_devices, num_kernels
+    )["pmc_perf.csv"]
+
+    # Compare roofline counters against baseline
+    assert are_deterministic_counters_equal([counters_mux], counters_baseline)
+    assert are_stochastic_counters_similar([counters_mux], counters_baseline)
+
+    # Verify roofline.csv exists and is valid in multiplexed workload
+    assert os.path.exists(f"{workload_dir_mux}/roofline.csv")
+    roofline_df = pd.read_csv(f"{workload_dir_mux}/roofline.csv")
+    assert len(roofline_df) >= num_devices
+
+    # Run analysis on multiplexed workload
+    code = binary_handler_analyze_rocprof_compute([
+        "analyze",
+        "--path",
+        workload_dir_mux,
+    ])
+    assert code == 0
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir_baseline)
+    test_utils.clean_output_dir(config["cleanup"], workload_dir_mux)
+
+
+@pytest.mark.roofline_iteration_multiplexing
+def test_roofline_iteration_multiplexing_vcopy_multikernel(
+    binary_handler_profile_rocprof_compute,
+    binary_handler_analyze_rocprof_compute,
+):
+    """
+    Test roofline analysis with iteration multiplexed profiling data using
+    vcopy --multikernel (2 kernel names: vecCopy, vecCopy_2).
+
+    Covers the multi-kernel case that laplace_eqn does not exercise.
+    """
+    if soc in ("MI100"):
+        pytest.skip("Roofline not supported on MI100")
+        return
+
+    num_kernels_vcopy = 2  # vecCopy and vecCopy_2
+
+    # Profile baseline (no multiplexing) with roofline counters
+    options_baseline = ["--block", "4"]
+    workload_dir_baseline = test_utils.get_output_dir(
+        param_id="roof_iter_mplx_vcopy_baseline"
+    )
+    binary_handler_profile_rocprof_compute(
+        config,
+        workload_dir_baseline,
+        options_baseline,
+        check_success=True,
+        roof=True,
+        app_name="app_vcopy_multikernel_iter",
+    )
+    counters_baseline = test_utils.check_csv_files(
+        workload_dir_baseline, num_devices, num_kernels_vcopy
+    )["pmc_perf.csv"]
+
+    # Profile with iteration multiplexing (kernel_launch_params)
+    options_mux = [
+        "--block",
+        "4",
+        "--iteration-multiplexing",
+        "kernel_launch_params",
+    ]
+    workload_dir_mux = test_utils.get_output_dir(param_id="roof_iter_mplx_vcopy_klp")
+    binary_handler_profile_rocprof_compute(
+        config,
+        workload_dir_mux,
+        options_mux,
+        check_success=True,
+        roof=True,
+        app_name="app_vcopy_multikernel_iter",
+    )
+    counters_mux = test_utils.check_csv_files(
+        workload_dir_mux, num_devices, num_kernels_vcopy
+    )["pmc_perf.csv"]
+
+    # Compare roofline counters against baseline
+    assert are_deterministic_counters_equal([counters_mux], counters_baseline)
+    assert are_stochastic_counters_similar([counters_mux], counters_baseline)
+
+    # Verify roofline.csv exists and is valid
+    assert os.path.exists(f"{workload_dir_mux}/roofline.csv")
+    roofline_df = pd.read_csv(f"{workload_dir_mux}/roofline.csv")
+    assert len(roofline_df) >= num_devices
+
+    # Run analysis on multiplexed workload
+    code = binary_handler_analyze_rocprof_compute([
+        "analyze",
+        "--path",
+        workload_dir_mux,
+    ])
+    assert code == 0
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir_baseline)
+    test_utils.clean_output_dir(config["cleanup"], workload_dir_mux)
+
+
+@pytest.mark.roofline_iteration_multiplexing
+def test_roofline_iteration_multiplexing_insufficient_dispatches(
+    binary_handler_profile_rocprof_compute,
+    binary_handler_analyze_rocprof_compute,
+):
+    """
+    Corner case: too few dispatches for iteration multiplexing to cover all
+    counter subsets. Uses laplace_eqn -i 3 -o 0 (3 dispatches, single launch
+    config) which is well below the ~20 replay minimum.
+
+    Verifies profiling warns about missing counters and analysis handles
+    the situation gracefully without crashing.
+    """
+    if soc in ("MI100"):
+        pytest.skip("Roofline not supported on MI100")
+        return
+
+    options = [
+        "--block",
+        "4",
+        "--iteration-multiplexing",
+        "kernel_launch_params",
+    ]
+    workload_dir = test_utils.get_output_dir(param_id="roof_iter_mplx_insufficient")
+    binary_handler_profile_rocprof_compute(
+        config,
+        workload_dir,
+        options,
+        check_success=True,
+        roof=True,
+        app_name="app_laplace_eqn_insufficient",
+    )
+
+    # Verify profiling_config.yaml records missing counters
+    assert test_utils.check_file_pattern(
+        "kernels_with_missing_counters",
+        f"{workload_dir}/profiling_config.yaml",
+    )
+
+    # Analysis should handle gracefully (no crash)
+    code = binary_handler_analyze_rocprof_compute([
+        "analyze",
+        "--path",
+        workload_dir,
+    ])
+    # Accept exit code 0 (graceful completion) or 1 (expected error due to
+    # insufficient data) -- the key assertion is no unhandled exception/crash
+    assert code in (0, 1)
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.roofline_iteration_multiplexing
+def test_roofline_iteration_multiplexing_data_types(
+    binary_handler_profile_rocprof_compute,
+    binary_handler_analyze_rocprof_compute,
+):
+    """
+    Corner case: verify roofline analysis works with different
+    --roofline-data-type values (FP32 and FP16) on multiplexed data.
+    """
+    if soc in ("MI100"):
+        pytest.skip("Roofline not supported on MI100")
+        return
+
+    # Profile with iteration multiplexing and roofline counters
+    options = [
+        "--block",
+        "4",
+        "--iteration-multiplexing",
+        "kernel_launch_params",
+    ]
+    workload_dir = test_utils.get_output_dir(param_id="roof_iter_mplx_dtypes")
+    binary_handler_profile_rocprof_compute(
+        config,
+        workload_dir,
+        options,
+        check_success=True,
+        roof=True,
+        app_name="app_laplace_eqn",
+    )
+
+    # Analyze with FP32 data type
+    code_fp32 = binary_handler_analyze_rocprof_compute([
+        "analyze",
+        "--path",
+        workload_dir,
+        "--roofline-data-type",
+        "FP32",
+    ])
+    assert code_fp32 == 0
+
+    # Analyze with FP16 data type
+    code_fp16 = binary_handler_analyze_rocprof_compute([
+        "analyze",
+        "--path",
+        workload_dir,
+        "--roofline-data-type",
+        "FP16",
+    ])
+    assert code_fp16 == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
