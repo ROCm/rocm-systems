@@ -57,6 +57,7 @@ from utils.utils import (
     parse_sets_yaml,
     replace_env,
     replace_rank,
+    resolve_rocm_library_path,
     set_locale_encoding,
 )
 
@@ -158,13 +159,16 @@ class RocProfCompute:
             console_error("Cannot use --list-available-metrics with --blocks")
 
         # fallback to csv output format, if rocpd public api not available
+        rocpd_path = resolve_rocm_library_path(
+            str(
+                Path(self.__args.rocprofiler_sdk_tool_path).parents[1]
+                / "librocprofiler-sdk-rocpd.so"
+            )
+        )
         if (
             self.__mode == "profile"
             and self.__args.format_rocprof_output == "rocpd"
-            and not (
-                Path(self.__args.rocprofiler_sdk_tool_path).parents[1]
-                / "librocprofiler-sdk-rocpd.so"
-            ).exists()
+            and not Path(rocpd_path).exists()
         ):
             console_warning(
                 "rocpd output format is not supported with the "

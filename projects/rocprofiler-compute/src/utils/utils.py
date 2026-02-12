@@ -67,6 +67,57 @@ rocprof_cmd = ""
 rocprof_args = ""
 
 
+def resolve_rocm_library_path(library_path: str) -> str:
+    """
+    Resolve ROCm library path with automatic version fallback.
+
+    Linux shared libraries follow the pattern:
+      libfoo.so -> libfoo.so.X -> libfoo.so.X.Y.Z
+
+    This function tries:
+    1. Exact path (e.g., libfoo.so)
+    2. Any versioned variant in same directory (e.g., libfoo.so.*)
+
+    Args:
+        library_path: Path to library (versioned or unversioned)
+
+    Returns:
+        Resolved library path (original if not found)
+
+    Example:
+        Input:  /path/libfoo.so
+        Tries:  /path/libfoo.so
+                /path/libfoo.so.* (using glob)
+        Returns: /path/libfoo.so.1 (if that's what exists)
+    """
+    if not library_path:
+        return library_path
+
+    path = Path(library_path)
+
+    # Try exact path first (handles both unversioned and explicit versioned paths)
+    if path.exists():
+        console_debug(f"Resolved library (exact match): {path}")
+        return str(path)
+
+    # Try finding any versioned variant: libfoo.so.*
+    # This will match .so.1, .so.1.2.3, .so.15, etc.
+    versioned_pattern = f"{library_path}.*"
+    matches = glob.glob(versioned_pattern)
+
+    if matches:
+        # Sort to get most specific version (e.g., .so.1.2.3 before .so.1)
+        # Then pick the most specific one
+        matches_sorted = sorted(matches, key=lambda x: x.count('.'), reverse=True)
+        resolved = matches_sorted[0]
+        console_debug(f"Resolved library (versioned): {library_path} -> {resolved}")
+        return resolved
+
+    # Not found, return original (validation will handle error later)
+    console_debug(f"Library not found (will try original path): {library_path}")
+    return library_path
+
+
 def is_tcc_channel_counter(counter: str) -> bool:
     return counter.startswith("TCC") and counter.endswith("]")
 
