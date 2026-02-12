@@ -150,7 +150,9 @@ TEMPLATE_TEST_CASE("Unit_unsafe_atomic_add_half_and_bfloat", "", __half2, __hip_
   }
 
   TestType* out;
-  HIP_CHECK(hipMalloc(&out, sizeof(TestType)));
+  // Why its 2* , its implementation detail, look at unsafeAtomicAdd.
+  HIP_CHECK(hipMalloc(&out, 2 * sizeof(TestType)));
+
   HIP_CHECK(hipMemset(out, 0, sizeof(TestType)));
   kernel<<<1, 32>>>(out, val);
 

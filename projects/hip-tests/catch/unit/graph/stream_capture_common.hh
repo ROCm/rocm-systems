@@ -71,8 +71,8 @@ void captureSequenceBranched(T* hostMem1, T* devMem1, T* hostMem2, T* devMem2, s
 template <typename T>
 void captureSequenceCompute(T* devMem1, T* hostMem2, T* devMem2, size_t N, hipStream_t stream) {
   size_t Nbytes = N * sizeof(T);
-  constexpr unsigned blocks = 512;
   constexpr unsigned threadsPerBlock = 256;
+  const unsigned blocks = (N / threadsPerBlock) + 1;
 
   hipLaunchKernelGGL(HipTest::vector_square, dim3(blocks), dim3(threadsPerBlock), 0, stream,
                      devMem1, devMem2, N);

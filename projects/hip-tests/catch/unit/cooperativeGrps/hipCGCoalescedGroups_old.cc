@@ -164,7 +164,7 @@ __global__ void kernel_cg_coalesced_group_partition(unsigned int tileSz, int* re
           " obtained from meta_group_rank : %d and number of tiles created : %d\n",
           tiledPartition.size() - 1, outputSum, tiledPartition.meta_group_rank(),
           tiledPartition.meta_group_size());
-      result[input / (tileSz)] = outputSum;
+      if ((input / tileSz) < tileSz) result[input / tileSz] = outputSum;
     }
     return;
   }
@@ -250,7 +250,6 @@ void verifyResultsSimpleCoalescedGroups(int* hPtr, int* dPtr, int size) {
   }
 }
 
-
 static void test_group_partition(unsigned int tileSz, bool useGlobalMem) {
   hipError_t err;
   int blockSize = 1;
@@ -275,7 +274,7 @@ static void test_group_partition(unsigned int tileSz, bool useGlobalMem) {
     }
 
     int* dResult = NULL;
-    HIPCHECK(hipMalloc(&dResult, sizeof(int) * numTiles));
+    HIPCHECK(hipMalloc(&dResult, sizeof(int) * tileSz));
 
     int* globalMem = NULL;
     if (useGlobalMem) {

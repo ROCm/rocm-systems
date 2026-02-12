@@ -114,7 +114,8 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisMallocFree") {
 
     HIP_CHECK(dyn_hipFree_ptr(d_ptr));
 
-#if !defined(ENABLE_ASAN_BUILD)
+    // With ASAN Enabled, this might pass since we do not release the memory at the line above
+#if !defined(ENABLE_ADDRESS_SANITIZER)
     REQUIRE(hipMemPtrGetInfo(d_ptr, &d_ptr_size) == hipErrorInvalidValue);
 #endif
   }

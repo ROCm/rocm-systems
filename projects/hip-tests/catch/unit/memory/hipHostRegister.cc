@@ -281,9 +281,9 @@ TEST_CASE("Unit_hipHostRegister_SameChunkRepeat") {
   HIP_CHECK(hipGetDeviceProperties(&prop, 0));
   std::string arch = prop.gcnArchName;
   TEST_SKIP(arch, "Xnack+ is not supported. Skipping the test ...")
-  size_t sizeBytes{LEN * sizeof(uint8_t)};
-  uint8_t* A;
-  A = reinterpret_cast<uint8_t*>(malloc(sizeBytes));
+  size_t sizeBytes{LEN * sizeof(int)};
+  int* A;
+  A = reinterpret_cast<int*>(malloc(sizeBytes));
   REQUIRE(A != nullptr);
   for (int iter = 0; iter < ITERATION; iter++) {
     // Initialize buffer with data
@@ -321,21 +321,21 @@ TEST_CASE("Unit_hipHostRegister_Chunks_SingleAttempt") {
   HIP_CHECK(hipGetDeviceProperties(&prop, 0));
   std::string arch = prop.gcnArchName;
   TEST_SKIP(arch, "Xnack+ is not supported. Skipping the test ...")
-  size_t sizeBytes{LARGE_CHUNK_LEN * sizeof(uint8_t)};
-  size_t sizeBytesChunk{SMALL_CHUNK_LEN * sizeof(uint8_t)};
-  uint8_t* A;
-  A = reinterpret_cast<uint8_t*>(malloc(sizeBytes));
+  size_t sizeBytes{LARGE_CHUNK_LEN * sizeof(int)};
+  size_t sizeBytesChunk{SMALL_CHUNK_LEN * sizeof(int)};
+  int* A;
+  A = reinterpret_cast<int*>(malloc(sizeBytes));
   REQUIRE(A != nullptr);
   // Initialize buffer with data
   memset(A, INITIAL_VAL, sizeBytes);
-  uint8_t* arrPtr[LARGE_CHUNK_LEN / SMALL_CHUNK_LEN];
+  int* arrPtr[LARGE_CHUNK_LEN / SMALL_CHUNK_LEN];
   for (int cnt = 0; cnt < (LARGE_CHUNK_LEN / SMALL_CHUNK_LEN); cnt++) {
     arrPtr[cnt] = A + (cnt * sizeBytesChunk);
     HIP_CHECK(hipHostRegister(arrPtr[cnt], sizeBytesChunk, 0));
   }
   // Reference each registered chunk inside the kernel:
   for (int cnt = 0; cnt < (LARGE_CHUNK_LEN / SMALL_CHUNK_LEN); cnt++) {
-    uint8_t* ptrA = arrPtr[cnt];
+    int* ptrA = arrPtr[cnt];
     hipLaunchKernelGGL(Inc, dim3(SMALL_CHUNK_LEN / 32), dim3(32), 0, 0, ptrA);
     HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipDeviceSynchronize());
@@ -369,15 +369,15 @@ TEST_CASE("Unit_hipHostRegister_Chunks_RoundRobin") {
   HIP_CHECK(hipGetDeviceProperties(&prop, 0));
   std::string arch = prop.gcnArchName;
   TEST_SKIP(arch, "Xnack+ is not supported. Skipping the test ...")
-  size_t sizeBytes{LARGE_CHUNK_LEN * sizeof(uint8_t)};
-  size_t sizeBytesChunk{SMALL_CHUNK_LEN * sizeof(uint8_t)};
-  uint8_t* A;
-  A = reinterpret_cast<uint8_t*>(malloc(sizeBytes));
+  size_t sizeBytes{LARGE_CHUNK_LEN * sizeof(int)};
+  size_t sizeBytesChunk{SMALL_CHUNK_LEN * sizeof(int)};
+  int* A;
+  A = reinterpret_cast<int*>(malloc(sizeBytes));
   REQUIRE(A != nullptr);
   // Initialize buffer with data
   memset(A, INITIAL_VAL, sizeBytes);
   for (int cnt = 0; cnt < (LARGE_CHUNK_LEN / SMALL_CHUNK_LEN); cnt++) {
-    uint8_t* ptrA = A + (cnt * sizeBytesChunk);
+    int* ptrA = A + (cnt * sizeBytesChunk);
     HIP_CHECK(hipHostRegister(ptrA, sizeBytesChunk, 0));
     hipLaunchKernelGGL(Inc, dim3(SMALL_CHUNK_LEN / 32), dim3(32), 0, 0, ptrA);
     HIP_CHECK(hipGetLastError());
@@ -408,9 +408,9 @@ TEST_CASE("Unit_hipHostRegister_Perform_hipMemset") {
   HIP_CHECK(hipGetDeviceProperties(&prop, 0));
   std::string arch = prop.gcnArchName;
   TEST_SKIP(arch, "Xnack+ is not supported. Skipping the test ...")
-  size_t sizeBytes{LEN * sizeof(uint8_t)};
-  uint8_t* A;
-  A = reinterpret_cast<uint8_t*>(malloc(sizeBytes));
+  size_t sizeBytes{LEN * sizeof(int)};
+  int* A;
+  A = reinterpret_cast<int*>(malloc(sizeBytes));
   REQUIRE(A != nullptr);
   // Register the host pointer
   HIP_CHECK(hipHostRegister(A, sizeBytes, 0));
@@ -445,11 +445,11 @@ TEST_CASE("Unit_hipHostRegister_Perform_hipMemcpy") {
   HIP_CHECK(hipGetDeviceProperties(&prop, 0));
   std::string arch = prop.gcnArchName;
   TEST_SKIP(arch, "Xnack+ is not supported. Skipping the test ...")
-  size_t sizeBytes{LEN * sizeof(uint8_t)};
-  uint8_t *A, *B;
-  A = reinterpret_cast<uint8_t*>(malloc(sizeBytes));
+  size_t sizeBytes{LEN * sizeof(int)};
+  int *A, *B;
+  A = reinterpret_cast<int*>(malloc(sizeBytes));
   REQUIRE(A != nullptr);
-  B = reinterpret_cast<uint8_t*>(malloc(sizeBytes));
+  B = reinterpret_cast<int*>(malloc(sizeBytes));
   REQUIRE(B != nullptr);
   memset(B, INITIAL_VAL, sizeBytes);
   // Register the host pointer
@@ -500,7 +500,7 @@ TEST_CASE("Unit_hipHostRegister_Oversubscription") {
     HipTest::HIP_SKIP_TEST("Available Host Memory is not sufficient ...");
     return;
   }
-  uint8_t* A = reinterpret_cast<uint8_t*>(malloc(allocsize));
+  int* A = reinterpret_cast<int*>(malloc(allocsize));
   REQUIRE(A != nullptr);
   size_t used_size = LEN;
   // Inititalize only the first used_size bytes chunk
@@ -517,7 +517,7 @@ TEST_CASE("Unit_hipHostRegister_Oversubscription") {
     REQUIRE(A[i] == EXPECTED_VAL);
   }
   // Reference only the last used_size bytes chunk
-  uint8_t* B = (A + allocsize - used_size);
+  int* B = (A + allocsize - used_size);
   hipLaunchKernelGGL(Inc, dim3(used_size / 32), dim3(32), 0, 0, B);
   HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipDeviceSynchronize());
@@ -801,9 +801,9 @@ TEST_CASE("Unit_hipHostRegister_MemAdvise_SetGet") {
     return;
   }
   int numDevices = HipTest::getDeviceCount();
-  size_t sizeBytes{LEN * sizeof(uint8_t)};
-  uint8_t* A;
-  A = reinterpret_cast<uint8_t*>(malloc(sizeBytes));
+  size_t sizeBytes{LEN * sizeof(int)};
+  int* A;
+  A = reinterpret_cast<int*>(malloc(sizeBytes));
   REQUIRE(A != nullptr);
   memset(A, INITIAL_VAL, sizeBytes);
   HIP_CHECK(hipHostRegister(A, sizeBytes, 0));
@@ -981,9 +981,11 @@ TEMPLATE_TEST_CASE("Unit_hipHostRegister_Negative", "", int, float, double) {
   REQUIRE(hostMemFree > 0);
 
   // which is the limiter cpu or gpu
-  size_t memFree = std::min(devMemFree, hostMemFree);
+  size_t memFree = std::max(devMemFree, hostMemFree);
 
   SECTION("hipHostRegister Negative Test - invalid memory size") {
+    INFO("Trying to allocate: " << memFree);
+    INFO("Host: " << hostMemFree << " device: " << devMemFree);
     HIP_CHECK_ERROR(hipHostRegister(hostPtr, memFree, 0), hipErrorInvalidValue);
   }
 

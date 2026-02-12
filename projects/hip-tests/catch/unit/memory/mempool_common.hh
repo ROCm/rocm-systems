@@ -417,9 +417,9 @@ class streamMemAllocTest {
   // Validate the data returned from device.
   bool validateResult() {
     for (int i = 0; i < size; i++) {
-      if (C_h[i] != (A_h[i] + B_h[i])) {
-        return false;
-      }
+      auto res = A_h[i] + B_h[i];
+      INFO("Comparing: " << A_h[i] << " + " << B_h[i] << " = " << res << " got: " << C_h[i]);
+      REQUIRE(res == C_h[i]);
     }
     return true;
   }
