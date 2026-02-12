@@ -256,16 +256,16 @@ namespace
 
 struct cpu_production_config
 {
-    using SettingsApi    = pmc::collectors::settings_policy;
-    using CpuPerfettoApi = pmc::output_policies::cpu_perfetto_policy;
-    using CpuCacheApi    = pmc::output_policies::cpu_cache_policy;
+    using SettingsApi = pmc::collectors::settings_policy;
+    using PerfettoApi = pmc::output_policies::cpu_perfetto_policy;
+    using CacheApi    = pmc::output_policies::cpu_cache_policy;
 };
 
 using cpu_provider_factory_t =
     pmc::device_providers::procfs::provider_factory<pmc::drivers::procfs::driver_factory>;
-using cpu_provider_t   = cpu_provider_factory_t::provider_t;
-using cpu_collector_t   = pmc::collectors::cpu::collector<cpu_provider_t,
-                                                          cpu_production_config>;
+using cpu_provider_t = cpu_provider_factory_t::provider_t;
+using cpu_collector_t =
+    pmc::collectors::cpu::collector<cpu_provider_t, cpu_production_config>;
 
 bool&
 is_cpu_initialized()
@@ -290,8 +290,7 @@ setup()
         g_cpu_collector.emplace(g_cpu_provider);
         g_cpu_collector->setup();
         is_cpu_initialized() = true;
-    }
-    catch(std::runtime_error& _e)
+    } catch(std::runtime_error& _e)
     {
         LOG_ERROR("Exception thrown when initializing CPU PMC sampler: {}", _e.what());
     }
@@ -321,8 +320,7 @@ shutdown()
     {
         if(g_cpu_collector) g_cpu_collector->shutdown();
         g_cpu_provider.reset();
-    }
-    catch(std::runtime_error& _e)
+    } catch(std::runtime_error& _e)
     {
         LOG_ERROR("Exception thrown when shutting down CPU PMC sampler: {}", _e.what());
     }

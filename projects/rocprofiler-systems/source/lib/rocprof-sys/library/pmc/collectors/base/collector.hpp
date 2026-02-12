@@ -275,95 +275,15 @@ private:
 
     /**
      * @brief Enumerate devices from provider and create device objects.
+     *
+     * Delegates to the traits-specific enumerate_devices() method to handle
+     * device-specific enumeration logic (GPU multi-device vs CPU single-device).
      */
     void enumerate_devices()
     {
         auto filter = Traits::template get_device_filter<SettingsApi>();
-        auto driver = m_device_provider->get_driver();
-
-        if(filter.mode == device_selection_mode::NONE)
-        {
-            LOG_DEBUG("{} sampling disabled via configuration", Traits::device_name);
-            return;
-        }
-
-        auto   socket_handles = m_device_provider->get_socket_handles();
-        size_t index          = 0;
-
-        for(auto& socket_handle : socket_handles)
-        {
-            auto processor_handles =
-                Traits::get_processor_handles(*m_device_provider, socket_handle);
-
-            for(auto& processor_handle : processor_handles)
-            {
-                if constexpr(Traits::filter_by_processor_type())
-                {
-                    processor_type_t processor_type;
-                    auto             status =
-                        driver->get_processor_type(processor_handle, &processor_type);
-
-                    if(status != AMDSMI_STATUS_SUCCESS)
-                    {
-                        LOG_DEBUG("Failed to get processor type for handle at index {}",
-                                  index);
-                        index++;
-                        continue;
-                    }
-
-                    if(processor_type != Traits::expected_processor_type())
-                    {
-                        index++;
-                        continue;
-                    }
-                }
-
-                bool should_include = false;
-                switch(filter.mode)
-                {
-                    case device_selection_mode::ALL: should_include = true; break;
-                    case device_selection_mode::NONE: should_include = false; break;
-                    case device_selection_mode::SPECIFIC:
-                        should_include = filter.indices.count(index) > 0;
-                        break;
-                }
-
-                if(should_include)
-                {
-                    auto device =
-                        Traits::create_device(driver, processor_handle,
-                                              Traits::expected_processor_type(), index);
-                    if(Traits::is_device_supported(device))
-                    {
-                        m_devices.emplace_back(std::move(device));
-                    }
-                }
-
-                index++;
-            }
-        }
-
-        warn_invalid_indices(filter, index);
-    }
-
-    /**
-     * @brief Warn about invalid device indices specified by the user.
-     */
-    void warn_invalid_indices(const device_filter& filter, size_t max_index)
-    {
-        if(filter.mode == device_selection_mode::SPECIFIC)
-        {
-            for(auto requested_index : filter.indices)
-            {
-                if(requested_index >= max_index)
-                {
-                    LOG_WARNING("Requested {} device index {} does not exist. Available "
-                                "devices: 0-{}",
-                                Traits::device_name, requested_index,
-                                max_index > 0 ? max_index - 1 : 0);
-                }
-            }
-        }
+        m_devices   = Traits::template enumerate_devices<device_provider, SettingsApi>(
+            *m_device_provider, filter);
     }
 
     container_t                      m_devices;          ///< List of enabled devices

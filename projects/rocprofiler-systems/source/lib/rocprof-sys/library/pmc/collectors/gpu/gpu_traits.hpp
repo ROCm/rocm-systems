@@ -242,6 +242,96 @@ struct gpu_traits
     {
         return device->is_supported();
     }
+
+    // Device enumeration
+
+    /**
+     * @brief Enumerate GPU devices from provider and create device objects.
+     *
+     * Iterates through sockets and processors, filtering by type and user selection.
+     */
+    template <typename Provider, typename Settings>
+    static container_t enumerate_devices(Provider& provider, const device_filter& filter)
+    {
+        container_t devices;
+        auto        driver = provider.get_driver();
+
+        if(filter.mode == device_selection_mode::NONE)
+        {
+            LOG_DEBUG("{} sampling disabled via configuration", device_name);
+            return devices;
+        }
+
+        auto   socket_handles = provider.get_socket_handles();
+        size_t index          = 0;
+
+        for(auto& socket_handle : socket_handles)
+        {
+            auto processor_handles = get_processor_handles(provider, socket_handle);
+
+            for(auto& processor_handle : processor_handles)
+            {
+                if constexpr(filter_by_processor_type())
+                {
+                    processor_type_t processor_type;
+                    auto             status =
+                        driver->get_processor_type(processor_handle, &processor_type);
+
+                    if(status != AMDSMI_STATUS_SUCCESS)
+                    {
+                        LOG_DEBUG("Failed to get processor type for handle at index {}",
+                                  index);
+                        index++;
+                        continue;
+                    }
+
+                    if(processor_type != expected_processor_type())
+                    {
+                        index++;
+                        continue;
+                    }
+                }
+
+                bool should_include = false;
+                switch(filter.mode)
+                {
+                    case device_selection_mode::ALL: should_include = true; break;
+                    case device_selection_mode::NONE: should_include = false; break;
+                    case device_selection_mode::SPECIFIC:
+                        should_include = filter.indices.count(index) > 0;
+                        break;
+                }
+
+                if(should_include)
+                {
+                    auto device = create_device(driver, processor_handle,
+                                                expected_processor_type(), index);
+                    if(is_device_supported(device))
+                    {
+                        devices.emplace_back(std::move(device));
+                    }
+                }
+
+                index++;
+            }
+        }
+
+        // Warn about invalid device indices
+        if(filter.mode == device_selection_mode::SPECIFIC)
+        {
+            for(auto requested_index : filter.indices)
+            {
+                if(requested_index >= index)
+                {
+                    LOG_WARNING("Requested {} device index {} does not exist. Available "
+                                "devices: 0-{}",
+                                device_name, requested_index, index > 0 ? index - 1 : 0);
+                }
+            }
+        }
+
+        return devices;
+    }
 };
 
 #endif  // ROCPROFSYS_USE_ROCM > 0

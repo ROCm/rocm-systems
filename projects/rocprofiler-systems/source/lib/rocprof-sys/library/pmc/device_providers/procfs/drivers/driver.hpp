@@ -33,10 +33,8 @@
 #include <cstdint>
 #include <cstring>
 #include <fcntl.h>
-#include <fstream>
 #include <map>
 #include <memory>
-#include <sstream>
 #include <string>
 #include <string_view>
 #include <unistd.h>
@@ -181,9 +179,10 @@ public:
             if(m_proc_stat_fd < 0) return result;
         }
 
-        // Single atomic read from offset 0
-        ssize_t bytes = ::pread(m_proc_stat_fd, m_stat_buffer.data(),
-                                m_stat_buffer.size(), 0);
+        // Reset to beginning and read
+        ::lseek(m_proc_stat_fd, 0, SEEK_SET);
+        ssize_t bytes = ::read(m_proc_stat_fd, m_stat_buffer.data(),
+                               m_stat_buffer.size());
         if(bytes <= 0) return result;
 
         // Zero-copy parsing
@@ -205,8 +204,9 @@ public:
             if(m_proc_cpuinfo_fd < 0) return result;
         }
 
-        ssize_t bytes = ::pread(m_proc_cpuinfo_fd, m_cpuinfo_buffer.data(),
-                                m_cpuinfo_buffer.size(), 0);
+        ::lseek(m_proc_cpuinfo_fd, 0, SEEK_SET);
+        ssize_t bytes = ::read(m_proc_cpuinfo_fd, m_cpuinfo_buffer.data(),
+                               m_cpuinfo_buffer.size());
         if(bytes <= 0) return result;
 
         parse_cpuinfo(std::string_view(m_cpuinfo_buffer.data(), bytes), result);
@@ -246,8 +246,9 @@ public:
             if(m_proc_statm_fd < 0) return snap;
         }
 
-        ssize_t bytes = ::pread(m_proc_statm_fd, m_statm_buffer.data(),
-                                m_statm_buffer.size(), 0);
+        ::lseek(m_proc_statm_fd, 0, SEEK_SET);
+        ssize_t bytes = ::read(m_proc_statm_fd, m_statm_buffer.data(),
+                               m_statm_buffer.size());
         if(bytes > 0)
         {
             parse_statm(std::string_view(m_statm_buffer.data(), bytes), snap);
@@ -346,7 +347,9 @@ private:
                     size_t pos = colon + 1;
                     while(pos < line.size() && std::isspace(line[pos])) ++pos;
                     // from_chars for float requires C++17 full support, use strtof
-                    std::string temp(line.data() + pos, line.find_first_of(" \t\r\n", pos) - pos);
+                    size_t end_pos = line.find_first_of(" \t\r\n", pos);
+                    if(end_pos == std::string_view::npos) end_pos = line.size();
+                    std::string temp(line.data() + pos, end_pos - pos);
                     char* end = nullptr;
                     float freq = std::strtof(temp.c_str(), &end);
                     if(end != temp.c_str()) result[current_cpu] = freq;
