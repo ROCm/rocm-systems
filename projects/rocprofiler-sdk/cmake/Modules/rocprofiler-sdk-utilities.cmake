@@ -110,8 +110,7 @@ function(rocprofiler_sdk_pc_sampling_stochastic_disabled _VAR)
     endif()
 endfunction()
 
-# Checks whether triple buffer is implemented for architecture (tests)
-# Double buffer only implemented so far for gfx12 and MI3xx
+# Checks whether triple buffer is implemented for architecture: MI3xx and gfx12
 function(rocprofiler_sdk_sqtt_triple_buffer_disabled _VAR)
     cmake_parse_arguments(ARG "ECHO" "PREFIX" "" ${ARGN})
 

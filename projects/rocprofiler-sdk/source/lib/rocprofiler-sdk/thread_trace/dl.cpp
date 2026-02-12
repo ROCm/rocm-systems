@@ -22,8 +22,6 @@
 
 #include "lib/rocprofiler-sdk/thread_trace/dl.hpp"
 #include "lib/common/filesystem.hpp"
-#include "lib/common/logging.hpp"
-#include "lib/common/static_object.hpp"
 
 #include <dlfcn.h>
 #include <cassert>
@@ -53,53 +51,6 @@ DL::~DL()
 {
     if(handle) dlclose(handle);
 }
-
-/*
-AQLProfileDL::AQLProfileDL()
-{
-    // Try to load libhsa-amd-aqlprofile64.so.1
-    const char* lib_names[] = {
-        "libhsa-amd-aqlprofile64.so.1",
-        "libhsa-amd-aqlprofile64.so",
-    };
-
-    for(const char* lib_name : lib_names)
-    {
-        handle = dlopen(lib_name, RTLD_LAZY | RTLD_LOCAL);
-        if(handle) break;
-    }
-
-    if(!handle)
-    {
-        ROCP_WARNING << "Failed to load libhsa-amd-aqlprofile64.so.1: " << dlerror();
-        return;
-    }
-
-    get_buffer_packets_fn =
-        reinterpret_cast<GetBufferPacketsFn*>(dlsym(handle, "aqlprofile_att_get_buffer_packets"));
-    update_buffer_status_fn = reinterpret_cast<UpdateBufferStatusFn*>(
-        dlsym(handle, "aqlprofile_att_update_buffer_status"));
-}
-
-AQLProfileDL::~AQLProfileDL()
-{
-    if(handle) dlclose(handle);
-}
-
-AQLProfileDL::AQLProfileDL(AQLProfileDL&& other) noexcept
-{
-    this->update_buffer_status_fn = other.update_buffer_status_fn;
-    this->get_buffer_packets_fn   = other.get_buffer_packets_fn;
-    this->handle                  = other.handle;
-    other.handle                  = nullptr;
-}
-
-const AQLProfileDL&
-get_aqlprofile_dl()
-{
-    static auto*& instance = common::static_object<AQLProfileDL>::construct(AQLProfileDL());
-    return *CHECK_NOTNULL(instance);
-}*/
 
 }  // namespace thread_trace
 }  // namespace rocprofiler
