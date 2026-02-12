@@ -1565,7 +1565,67 @@ if(ENABLE_SPLIT_DEVICE_COMPILE)
   list(GET GPU_TARGETS 0 _split_gpu_arch)
   message(STATUS "Split device compile: targeting ${_split_gpu_arch}")
 
-  # Extract include directories, compile definitions, and compile options
+  # ── Detect the correct clang-offload-bundler target strings ──────────────
+  # The bundler target format varies across ROCm versions (e.g. "hipv4-" vs
+  # "hip-" prefix).  We compile a tiny probe file and ask the bundler what
+  # target strings the current toolchain produces natively.  This ensures our
+  # fat objects are created with targets that `amdclang++ --hip-link` can find.
+  set(_probe_src "${CMAKE_CURRENT_BINARY_DIR}/_split_probe.hip")
+  set(_probe_obj "${CMAKE_CURRENT_BINARY_DIR}/_split_probe.o")
+  file(WRITE ${_probe_src} "__device__ void _split_probe() {}\n")
+
+  execute_process(
+    COMMAND ${CMAKE_CXX_COMPILER}
+      -x hip -fgpu-rdc --offload-arch=${_split_gpu_arch} -c -O0
+      -o ${_probe_obj} ${_probe_src}
+    RESULT_VARIABLE _probe_compile_rc
+    OUTPUT_QUIET ERROR_QUIET
+  )
+  if(NOT _probe_compile_rc EQUAL 0)
+    message(FATAL_ERROR "Split device compile: failed to compile bundler probe (exit ${_probe_compile_rc})")
+  endif()
+
+  execute_process(
+    COMMAND ${ROCM_PATH}/llvm/bin/clang-offload-bundler --list --type=o --input=${_probe_obj}
+    OUTPUT_VARIABLE _probe_targets
+    RESULT_VARIABLE _probe_list_rc
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+  )
+  if(NOT _probe_list_rc EQUAL 0)
+    message(FATAL_ERROR "Split device compile: failed to list bundler targets (exit ${_probe_list_rc})")
+  endif()
+
+  # Parse the device and host target strings from the probe output.
+  # Expected output is two lines, e.g.:
+  #   hip-amdgcn-amd-amdhsa--gfx942
+  #   host-x86_64-unknown-linux-gnu-
+  set(_bundler_device_target "")
+  set(_bundler_host_target "")
+  string(REPLACE "\n" ";" _probe_lines "${_probe_targets}")
+  foreach(_line ${_probe_lines})
+    string(STRIP "${_line}" _line)
+    if(_line MATCHES "^hip.*amdgcn")
+      set(_bundler_device_target "${_line}")
+    elseif(_line MATCHES "^host-")
+      set(_bundler_host_target "${_line}")
+    endif()
+  endforeach()
+
+  if(NOT _bundler_device_target)
+    message(FATAL_ERROR "Split device compile: could not detect device bundler target from probe output:\n${_probe_targets}")
+  endif()
+  if(NOT _bundler_host_target)
+    message(FATAL_ERROR "Split device compile: could not detect host bundler target from probe output:\n${_probe_targets}")
+  endif()
+  message(STATUS "Split device compile: detected bundler targets:")
+  message(STATUS "  device: ${_bundler_device_target}")
+  message(STATUS "  host:   ${_bundler_host_target}")
+
+  # Clean up probe files
+  file(REMOVE ${_probe_src} ${_probe_obj})
+
+  # ── Extract target properties for the split pipeline ─────────────────────
+  # Read include directories, compile definitions, and compile options
   # directly from the rccl target so the split pipeline always stays in
   # sync -- no manual mirroring required.
   get_target_property(_split_include_dirs rccl INCLUDE_DIRECTORIES)
@@ -1594,6 +1654,8 @@ if(ENABLE_SPLIT_DEVICE_COMPILE)
     INCLUDE_DIRS        ${_split_include_dirs}
     COMPILE_DEFS        ${_split_compile_defs}
     COMPILE_OPTS        ${_split_compile_opts}
+    BUNDLER_DEVICE_TARGET ${_bundler_device_target}
+    BUNDLER_HOST_TARGET   ${_bundler_host_target}
   )
 
   # Make rccl depend on all the split-compiled fat objects.
