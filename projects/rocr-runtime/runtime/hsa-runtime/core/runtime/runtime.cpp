@@ -1461,7 +1461,7 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
     // Spin server client acceptance into a socket server thread.
     // Socket server needs to last for the lifetime of the runtime instance
     // as the attach life cycle is unknown.
-    os::CreateThread(AsyncIPCSockServerConnLoop, NULL);
+    ipc_sock_server_thread_ = os::CreateThread(AsyncIPCSockServerConnLoop, NULL);
   }
 #else
   assert(!"Unimplemented! Do we really need this?");
@@ -2358,8 +2358,8 @@ Runtime::Runtime()
       internal_queue_create_notifier_user_data_(nullptr),
       ref_count_(0),
       kfd_version{},
-      ipc_sock_server_fd_(0) {
-
+      ipc_sock_server_fd_(0),
+      ipc_sock_server_thread_(nullptr) {
   virtual_mem_api_supported_ = false;
   ipc_dmabuf_supported_ = false;
   xnack_enabled_ = false;
@@ -2448,6 +2448,12 @@ void Runtime::Unload() {
   if (ipc_sock_server_conns_.size())
     IPCClientImport(getpid(), IPC_SOCK_SERVER_CONN_CLOSE_HANDLE,
                     0, nullptr, nullptr, nullptr, false, 0);
+
+  if (ipc_sock_server_thread_) {
+    os::WaitForThread(ipc_sock_server_thread_);
+    os::CloseThread(ipc_sock_server_thread_);
+    ipc_sock_server_thread_ = nullptr;
+  }
 
   svm_profile_.reset(nullptr);
 
