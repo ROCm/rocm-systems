@@ -12,13 +12,15 @@
  * UALoE Fabric Support
  *
  * The following types and functions provide support for AMD's UALoE
- * scale-up fabric, which is AMD's
- *
+ * scale-up fabric technology.
  * When the full amdsmi fabric API is available in the system headers,
- * define AMDSMI_FABRIC_DIRECT=1 to use the native types.
+ * define AMDSMI_FABRIC_DIRECT=1 to use the header types/functions directly.
  * Otherwise, the compatibility types below will be used.
  ************************************************************************/
-#ifndef AMDSMI_DIRECT
+ // Set AMDSMI_DIRECT to 1 at build time if the required amdsmi headers (even before UALoE support) are available,
+ // otherwise 0 to use compatibility types defined below
+
+ #ifndef AMDSMI_DIRECT
   #if __has_include(<amd_smi/amdsmi.h>)
     #define AMDSMI_DIRECT 1
   #else
