@@ -8,7 +8,7 @@
 | **GPU Target** | gfx942 |
 | **GPUs Available** | 4 |
 | **ROCm Version** | 7.0 |
-| **Build Path** | `/work/lmeadows/rocm-systems/projects/rccl/build/release` |
+| **Build Path** | `/work2/lmeadows/rocm-systems/projects/rccl/build/release` |
 
 ## Current Status
 
@@ -18,7 +18,6 @@
 | Multi-GPU | WORKING |
 | System RCCL Multi-GPU | WORKING |
 | Smoke Test | PASSED |
-| Multi-GPU Unit Tests | IN PROGRESS - some failures |
 
 ## Key Lesson Learned
 
@@ -27,13 +26,12 @@ kernels.** Structure layout mismatches (from missing `ENABLE_COLLTRACE`, `ENABLE
 etc.) caused crashes, hangs, and incorrect memory access. See "Critical Constraint: 
 Compilation Flags" section below.
 
-## Phase 3 (DWARF emission) — Partially implemented
+## DWARFLinker Integration (Current)
 
-Phase 3 of the DWARF rewrite (see `tools/device_linker/DWARF_LLVM_REWRITE_PLAN.md`) will switch to **emission** for merged `.debug_*` sections so line_strp and addresses are correct by construction.
+The device linker now uses **LLVM's DWARFLinker** (`llvm::dwarf_linker::classic::DWARFLinker`) to merge DWARF debug information from dispatcher and specialized kernels. This replaces the previous manual patching approach and ensures correct DWARF5 format compliance.
 
-- **Phase 3(a) — Implemented:** When `kUsePhase3Emission` is `true` (in `device_linker.cpp`, default `false`), `mergeDebugSectionsViaLLVMEmission()` re-emits each `.debug_line` chunk with `line_strp` and `DW_LNE_set_address` patched into the output buffer instead of concatenating raw bytes and patching in place. This removes the format-driven prologue walk and avoids desync issues (e.g. `DW_FORM_flag_present`). Entry point: `mergeDebugSectionsViaLLVMEmission()` rebuilds `.debug_line` via `emitDebugLineChunk()` per chunk, then calls `mergeDebugInfo()`; `patchDebugLine()` is skipped when Phase 3 is enabled.
-- **(b) .debug_info:** clone+emit or patch-from-LLVM — not yet done.
-- **(c) Optional DWARFLinker** — not yet done.
+- **Implementation:** `mergeDebugInfoWithDWARFLinker()` uses `CustomStreamer` to capture merged DWARF sections
+- **Status:** DWARF sections are merged correctly, but some issues remain (see Known Issues below)
 
 ## Device-Only Binaries (Feb 2026)
 
@@ -66,50 +64,33 @@ When parsing DWARF (e.g. during kernel parsing or merge), LLVM can emit many non
 
 ## Known Issues (Feb 8, 2026)
 
-### DWARF Info Still Has Issues
-There is probably still something wrong with the DWARF debug info. For example, when 
-trying to print the address of `ncclShmem` in rocgdb, errors occur. The DWARF sections
-pass `llvm-dwarfdump --verify` but rocgdb may have stricter requirements.
+### DWARF Debug Info
+- DWARF sections pass `llvm-dwarfdump --verify` but some issues may remain with rocgdb compatibility
+- `abbr_offset = 0x0000` problem in DWARF CU headers - investigation ongoing
 
-**Recent fix attempt:** Changed dispatcher compilation to use `-dwarf-version=5` to ensure
-consistent DWARF5 across all compilation units (dispatcher was previously DWARF4, specialized
-kernels were DWARF5). This resolved the `DW_FORM_line_strp pointing outside of .debug_line_str`
-error from llvm-dwarfdump, but rocgdb issues may persist.
+### Symbol-Based Relocations (In Progress)
+- Converting relocations from absolute addresses to symbol indices (`R_AMDGPU_ABS64` with symbol index)
+- Adding `ncclDevFunc_*` and oneRankReduce symbols to `.dynsym` as LOCAL HIDDEN (matching specialized kernel `.o` files)
+- Address calculation verification needed to ensure symbol addresses match function table addresses
 
-## Recent Fix: Multi-GPU Memory Fault (Feb 5, 2026)
-
-The multi-GPU memory fault was caused by an `ncclShmemData` structure layout mismatch.
-
-**Root Cause:**
-The `COLLTRACE` CMake option is `ON` by default, which defines `ENABLE_COLLTRACE` for the
-host library build. This adds two pointer fields (`collTrace`, `collTraceTail`) to 
-`ncclShmemData` - 16 bytes total. However, these flags were NOT being propagated to:
-1. The dispatcher compilation (`build_with_device_linker.sh`)
-2. The specialized kernel compilation
-
-This caused all field offsets after `devicePlugin` in `ncclShmemData` to be wrong by 16 bytes,
-leading to NULL pointer dereferences when accessing `channel->peers[peer]`.
-
-**Fix:**
-Added `ENABLE_COLLTRACE` and `ENABLE_PROFILING` propagation to all device compilation units:
-- `CMakeLists.txt`: Added to `SPEC_KERNEL_DEFS` and environment variables for dispatcher build
-- `build_with_device_linker.sh`: Added handling for these environment variables
-- `build_skeleton_dispatcher.sh`: Same
-- `tools/device_linker/CMakeLists.txt`: Added corresponding options
 
 ## Build & Test
 
 ```bash
 # Full rebuild
-cd /work/lmeadows/rocm-systems/projects/rccl
+cd /work2/lmeadows/rocm-systems/projects/rccl
 rm -rf build
-./install.sh --amdgpu_targets=gfx942 --device-linker
+./install.sh -l --device-linker
+
+# Rebuild device linker only (after code changes)
+cd tools/device_linker
+./build.sh
 
 # Test single-GPU (should pass)
-cd tools/device_linker/smoke_test
+cd smoke_test
 ./run_tests.sh test_single_gpu
 
-# Test multi-GPU (currently crashes with memory fault)
+# Test multi-GPU
 ./run_tests.sh test_two_gpu_simple
 ```
 
@@ -140,8 +121,8 @@ consistency across all compilation units.
 | `LDS_LAYOUT.md` | Shared memory layout reference - actual offsets from disassembly analysis |
 | `IFC_VS_DEVICE_LINKER_COMPARISON.md` | Detailed ELF comparison with production build |
 | `BUILD_PROCESS.md` | Build pipeline diagrams and data flow |
-| `DWARF_FIX_PROGRESS.md` | **IN PROGRESS** - DWARF5 line table patching for rocgdb compatibility |
-| `DWARFLINKER_STATUS.md` | **CURRENT WORK** - Status of DWARFLinker integration, debugging "invalid abbreviation" error |
+| `DWARF_FIX_PROGRESS.md` | DWARF5 line table patching for rocgdb compatibility |
+| `DWARFLINKER_STATUS.md` | Status of DWARFLinker integration |
 
 ## Key Source Files
 
@@ -156,130 +137,24 @@ consistency across all compilation units.
 | `src/device/prims_ll.h` | LL protocol primitives |
 | `src/device/generate_specialized.py` | Generates specialized kernel source files |
 
-## Recently Fixed Issues (Feb 5, 2026)
+## Fixed Issues
 
-### 1. ENABLE_COLLTRACE/ENABLE_PROFILING Not Propagated to Device Code
-**Problem:** Multi-GPU AllReduce crashed with "illegal memory access" (SIGSEGV) at 
-`channel->peers[peer]` in `prims_ll.h:670`.
-**Root cause:** The `COLLTRACE` CMake option (ON by default) defines `ENABLE_COLLTRACE`
-for the host library, adding 16 bytes (`collTrace`, `collTraceTail` pointers) to
-`ncclShmemData`. These flags were NOT passed to dispatcher or specialized kernel builds,
-causing a structure layout mismatch - all fields after `devicePlugin` had wrong offsets.
-**Fix:** 
-- Added `ENABLE_COLLTRACE` and `ENABLE_PROFILING` to `SPEC_KERNEL_DEFS` in main `CMakeLists.txt`
-- Added environment variable propagation to `build_with_device_linker.sh`
-- Updated `build_skeleton_dispatcher.sh` and `tools/device_linker/CMakeLists.txt`
-**Result:** Multi-GPU AllReduce now works correctly.
+### Structure Layout Mismatches
+- **ENABLE_COLLTRACE/ENABLE_PROFILING propagation:** Fixed multi-GPU crashes caused by `ncclShmemData` layout mismatches. Flags now properly propagated to all compilation units.
+- **ENABLE_WARP_SPEED mismatch:** Ensured consistent flags across dispatcher and specialized kernels.
 
-### 2. Device Linker Not Auto-Built
-**Problem:** The `device_linker` tool wasn't being built automatically, causing builds to
-fail silently or use stale binaries.
-**Fix:** Modified `CMakeLists.txt` to add an `add_executable` for `device_linker_tool`:
-```cmake
-add_executable(device_linker_tool ${DEVICE_LINKER_DIR}/device_linker.cpp)
-target_compile_features(device_linker_tool PRIVATE cxx_std_17)
-set_target_properties(device_linker_tool PROPERTIES
-  OUTPUT_NAME device_linker
-  RUNTIME_OUTPUT_DIRECTORY ${DEVICE_LINKER_DIR}
-)
-```
-**Result:** The device linker is now built automatically as part of the main build.
+### DWARF Debug Information
+- **DWARFLinker integration:** Replaced manual DWARF patching with LLVM's DWARFLinker for proper DWARF5 merging
+- **Debug line numbers:** Fixed line number resolution for specialized kernels
+- **Function names:** Proper DWARF merging ensures function names resolve in GDB
 
-### 3. Proper DWARF Merging (Replacing Synthetic Debug Info)
-**Problem:** GDB showed line numbers but not function names ("No function contains program counter").
-The previous `buildSyntheticDebugInfo()` created minimal compile units that only had address
-ranges and `stmt_list` pointers, but no `DW_TAG_subprogram` DIEs for function names.
-**Root cause:** The synthetic approach discarded the actual DWARF from each kernel, which
-contains `DW_TAG_subprogram` and `DW_TAG_inlined_subroutine` DIEs with function names.
-**Fix:** Replaced `buildSyntheticDebugInfo()` with `mergeDebugInfo()` that does proper
-linker-style DWARF merging:
-1. Merges `.debug_abbrev`, `.debug_str`, `.debug_str_offsets`, `.debug_addr`, 
-   `.debug_rnglists`, `.debug_info` from each kernel
-2. Patches addresses in `.debug_addr` based on code relocation delta
-3. Patches CU header `debug_abbrev_offset` in `.debug_info`
-4. Tracks base offsets for cross-section references
+### ELF Structure
+- **LDS allocation:** Fixed static LDS allocation exceeding limits by using dynamic allocation
+- **RELRO segment:** Fixed malformed RELRO segment when `.data.rel.ro` doesn't exist
+- **Function tables:** Verified function pointer table relocations are correct
 
-**Key data structure:**
-```cpp
-struct DebugInfoChunk {
-    size_t merged_offset;      // Offset in merged .debug_info
-    size_t size;               // Size of this chunk
-    uint64_t orig_text_addr;   // Original .text address
-    uint64_t new_text_offset;  // New offset in merged .text
-    size_t abbrev_base;        // Base offset in merged .debug_abbrev
-    size_t str_base;           // Base offset in merged .debug_str
-    size_t addr_base;          // Base offset in merged .debug_addr
-    size_t line_base;          // Base offset in merged .debug_line
-    // ... etc
-};
-```
-
-**Result:** GDB should now resolve function names like `loadRecvConn`, `Primitives`, etc.,
-and show the full inline call chain.
-
-## Fixed Issues (Feb 4-5, 2026)
-
-### 4. Debug Line Numbers for Specialized Kernels
-**Problem:** `llvm-symbolizer` and GDB showed `??:0:0` for specialized kernel addresses,
-even though `.debug_line` contained correct line info.
-**Root cause:** The synthetic `.debug_info` was missing or had wrong address ranges.
-The device linker was calling `buildSyntheticDebugInfo()` before `text_addr_` was set,
-resulting in compile units with addresses starting at 0x0 instead of the actual text address.
-Also missing `DW_AT_comp_dir` attribute for GDB source file lookup.
-**Fix:** In `device_linker.cpp`:
-1. Move `buildSyntheticDebugInfo()` call to after `computeLayout()` in `link()`
-2. Add `DW_AT_comp_dir` attribute with absolute path (via `realpath()`) to each compile unit
-3. Each CU covers a specific code range and points to its correct `.debug_line` offset
-
-**Result:** Line numbers now resolve correctly:
-```
-$ echo "0xa361ac" | llvm-symbolizer -e build/release/device_linker_output/merged_device.elf
-ncclDevFunc_AllReduce_RING_LL_Sum_f32_0_0_2()
-/work1/.../build/release/hipify/gensrc/specialized/specialized_all_reduce_ring_ll_sum_f32_unroll2.cpp:13:0
-```
-
-### 5. LDS Allocation for ncclShmemPerWarp
-**Problem:** Static LDS allocation was 37776 bytes, exceeding available dynamic LDS.
-**Root cause:** `#if __CUDA_ARCH__ >= 700` was false on AMD GPUs, causing static allocation.
-**Fix:** Modified `src/device/common.h` to use `extern __shared__` for dynamic allocation
-when `DEVICE_LINKER` is defined:
-```cpp
-#if __CUDA_ARCH__ >= 700 || defined(DEVICE_LINKER)
-  extern __shared__ ulong2 ncclShmemPerWarp[];
-#else
-  // static allocation fallback
-#endif
-```
-**Result:** Static LDS reduced from 37776 to 4944 bytes, dynamic allocation works.
-
-### 6. Malformed RELRO Segment
-**Problem:** Third LOAD segment had offset=0, vaddr=0, size=0x79ad0b0 (overlapping everything).
-**Root cause:** `.data.rel.ro` section doesn't exist, so `relro_start=0`.
-**Fix:** In `device_linker.cpp`, use `.dynamic` address if no `.data.rel.ro`:
-```cpp
-uint64_t relro_start = data_rel_ro_start ? data_rel_ro_start : dyn_sec_addr;
-```
-
-### 7. Function Table Addend Verification
-**Investigation:** Suspected wrong addends in R_AMDGPU_RELATIVE64 relocations.
-**Finding:** Addends are CORRECT - they match function symbol addresses.
-For example, funcId 622 uses the unroll=2 variant:
-- `_Z43ncclDevFunc_AllReduce_RING_LL_Sum_f32_0_0_2v` at 0xa361ac
-- Relocation addend: 0xa361ac ✓
-**Conclusion:** The function dispatch mechanism is working correctly.
-
-## Previously Fixed Issues
-
-These are documented in detail in `DEVICE_LINKER_REDESIGN.md`:
-
-1. COMGR "Cannot Find Global Var Sizes" - `__clang_gpu_used_external` symbol
-2. PC-relative addressing - preserved .rodata layout
-3. Helper function extraction - complete code blocks
-4. ENABLE_WARP_SPEED mismatch - consistent flags
-5. Shared memory limit - `extern __shared__` for dynamic allocation
-6. DWARF5 debug line string offsets - `patchDwarf5StringOffsets()`
-7. Specialized kernel symbol addresses - `func_offset` correction
-8. ~~Synthetic `.debug_info`~~ - **Replaced** by proper DWARF merging (see issue #3 above)
+### Build System
+- **Device linker build:** Device linker must be built manually via `tools/device_linker/build.sh` before running `install.sh --device-linker`
 
 ## Understanding Function Pointer Tables
 
@@ -301,3 +176,25 @@ s_swappc_b64 s[30:31], s[18:19]        # Call function
 
 The device linker replicates this pattern correctly - verified by comparing
 with the simple test ELF.
+
+---
+
+## Current Work Status (Feb 8, 2026)
+
+### Symbol-Based Relocations
+**Goal:** Convert relocations from absolute addresses to symbol indices for better compatibility and correctness.
+
+**Recent Changes:**
+- Added `ncclDevFunc_*` symbols to `.dynsym` as LOCAL HIDDEN (matching specialized kernel `.o` files)
+- Added oneRankReduce symbols to `.dynsym` as LOCAL HIDDEN
+- Updated `sh_info` calculation to correctly mark LOCAL/GLOBAL boundary
+- Enhanced diagnostics to show which symbols are missing from `.dynsym`
+
+**Current Issue:**
+- Address mismatch: Symbols added to `.dynsym` have different addresses than those referenced in function tables
+- Need to verify address calculation: `text_addr_ + text_off + kern->func_offset` vs `text_addr_ + table_2_[i]`
+
+**Next Steps:**
+- Verify address calculation consistency
+- Ensure all function table entries have corresponding symbols in `.dynsym`
+- Test symbol-based relocations with `R_AMDGPU_ABS64` type

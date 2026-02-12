@@ -1415,6 +1415,8 @@ if (DEVICE_LINKER)
   endif()
   # Add device linker definition (not in rccl target since it's only for device linker builds)
   target_compile_definitions(specialized_kernels_device PRIVATE DEVICE_LINKER)
+  # NDEBUG for specialized kernels: disables asserts so ncclDevFunc_ symbols are emitted
+  target_compile_definitions(specialized_kernels_device PRIVATE NDEBUG)
   
   # Filter compile options from rccl target for device-only compilation (shared by specialized kernels and dispatcher)
   # Remove only flags incompatible with device-only. Keep only the *first* --offload-arch from rccl so we get the same
