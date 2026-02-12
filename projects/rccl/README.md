@@ -131,6 +131,8 @@ See the rccl-tests README for more information on how to build and run those tes
 
 RCCL can use rocSHMEM's GPU Direct Async (GDA) backend to accelerate the **AllToAll** collective on supported multi-node setups. This is the only collective that currently uses rocSHMEM GDA inside RCCL.
 
+Please consult the [rocSHMEM documentation](https://rocm.docs.amd.com/projects/rocSHMEM/en/latest/install.html#gda-nic-dependencies) to see which NICs and drivers are required for GDA alltoall support. 
+
 **Building with rocSHMEM**
 
 - Using the install script:
