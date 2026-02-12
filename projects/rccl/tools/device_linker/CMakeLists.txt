@@ -1,7 +1,7 @@
 # Device linker executable only.
 # Build by hand from this directory. Binary is placed here (outside main build tree).
 #
-#   cmake -B build -S . -DLLVM_DIR=/path/to/llvm/lib/cmake/llvm
+#   cmake -B build -S . -DLLVM_DIR=/path/to/llvm
 #   cmake --build build
 #
 # Output: device_linker (in this directory, tools/device_linker/)
@@ -14,19 +14,19 @@
 # Backup of the previous standalone full-pipeline CMake: CMakeLists_full_pipeline.txt
 #
 cmake_minimum_required(VERSION 3.21)
-project(rccl_device_linker LANGUAGES CXX)
+project(rccl_device_linker LANGUAGES CXX C)
 
 set(DEVICE_LINKER_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 
-# LLVM (required for DWARF linking). Override via -DLLVM_DIR=...
-set(LLVM_DIR "/work2/lmeadows/llvm/lib/cmake/llvm" CACHE PATH "Path to LLVM config")
-find_package(LLVM REQUIRED CONFIG PATHS ${LLVM_DIR})
+# LLVM (required for DWARF linking)
+message(STATUS "Using LLVM_DIR ${LLVM_DIR}")
+
+
+find_package(LLVM REQUIRED CONFIG PATHS "${LLVM_DIR}/lib/cmake" NO_DEFAULT_PATH)
 
 message(STATUS "Found LLVM ${LLVM_VERSION}")
 
-set(LLVM_CONFIG_PATH "/work2/lmeadows/llvm/bin/llvm-config")
-set(LLVM_LIBDIR "/work2/lmeadows/llvm/lib")
-set(LLVM_LIBNAME "LLVM-23git")
+set(LLVM_CONFIG_PATH "${LLVM_TOOLS_BINARY_DIR}/llvm-config")
 if(EXISTS "${LLVM_CONFIG_PATH}")
   execute_process(
     COMMAND ${LLVM_CONFIG_PATH} --ldflags --libs
