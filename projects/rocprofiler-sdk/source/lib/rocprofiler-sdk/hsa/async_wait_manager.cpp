@@ -26,6 +26,7 @@
 
 #include <hsa/hsa_ext_amd.h>
 
+#include <optional>
 #include <thread>
 
 namespace rocprofiler
@@ -90,6 +91,34 @@ signal_condition_satisfied(hsa_signal_condition_t cond,
     }
     return false;
 }
+
+/// Returns shutdown or timeout if applicable, otherwise nullopt to continue polling.
+std::optional<wait_result>
+check_shutdown_or_timeout(std::string_view                      callsite,
+                          uint64_t                              timeout_ns,
+                          std::chrono::steady_clock::time_point start)
+{
+    if(async_wait_manager::instance().is_shutdown())
+    {
+        ROCP_WARNING << "wait interrupted by HSA async handler shutdown at " << callsite;
+        return wait_result::shutdown;
+    }
+
+    if(timeout_ns != UINT64_MAX)
+    {
+        auto elapsed_ns =
+            static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                      std::chrono::steady_clock::now() - start)
+                                      .count());
+        if(elapsed_ns >= timeout_ns)
+        {
+            ROCP_ERROR << "wait timed out at " << callsite;
+            return wait_result::timeout;
+        }
+    }
+
+    return std::nullopt;
+}
 }  // namespace
 
 void
@@ -147,23 +176,20 @@ wait_or_shutdown(hsa_signal_t           signal,
                  uint64_t               poll_interval_ns,
                  const CoreApiTable*    core_api)
 {
-    auto&       mgr          = async_wait_manager::instance();
     const auto* resolved_api = (core_api != nullptr) ? core_api : get_core_table();
     auto        start        = std::chrono::steady_clock::now();
 
-    while(!mgr.is_shutdown())
+    while(true)
     {
+        if(auto r = check_shutdown_or_timeout(callsite, timeout_ns, start)) return *r;
+
         auto remaining_ns = timeout_ns;
         if(timeout_ns != UINT64_MAX)
         {
-            auto now        = std::chrono::steady_clock::now();
-            auto elapsed_ns = static_cast<uint64_t>(
-                std::chrono::duration_cast<std::chrono::nanoseconds>(now - start).count());
-            if(elapsed_ns >= timeout_ns)
-            {
-                ROCP_ERROR << "signal wait timed out at " << callsite;
-                return wait_result::timeout;
-            }
+            auto elapsed_ns =
+                static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                          std::chrono::steady_clock::now() - start)
+                                          .count());
             remaining_ns = timeout_ns - elapsed_ns;
         }
 
@@ -171,14 +197,8 @@ wait_or_shutdown(hsa_signal_t           signal,
         auto result   = resolved_api->hsa_signal_wait_relaxed_fn(
             signal, cond, value, interval, HSA_WAIT_STATE_BLOCKED);
 
-        if(signal_condition_satisfied(cond, result, value))
-        {
-            return wait_result::completed;
-        }
+        if(signal_condition_satisfied(cond, result, value)) return wait_result::completed;
     }
-
-    ROCP_WARNING << "signal wait interrupted by HSA async handler shutdown at " << callsite;
-    return wait_result::shutdown;
 }
 
 wait_result
@@ -189,23 +209,11 @@ wait_or_shutdown(std::condition_variable&      cv,
                  uint64_t                      timeout_ns,
                  std::chrono::milliseconds     interval)
 {
-    auto& mgr   = async_wait_manager::instance();
-    auto  start = std::chrono::steady_clock::now();
+    auto start = std::chrono::steady_clock::now();
 
     while(!predicate())
     {
-        if(mgr.is_shutdown())
-        {
-            ROCP_WARNING << "cv wait interrupted by HSA async handler shutdown at " << callsite;
-            return wait_result::shutdown;
-        }
-        auto now     = std::chrono::steady_clock::now();
-        auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(now - start).count();
-        if(timeout_ns != UINT64_MAX && static_cast<uint64_t>(elapsed) >= timeout_ns)
-        {
-            ROCP_ERROR << "cv wait timed out at " << callsite;
-            return wait_result::timeout;
-        }
+        if(auto r = check_shutdown_or_timeout(callsite, timeout_ns, start)) return *r;
         cv.wait_for(lock, interval);
     }
     return wait_result::completed;
@@ -218,23 +226,11 @@ wait_or_shutdown(std::atomic<T>&  atomic_val,
                  std::string_view callsite,
                  uint64_t         timeout_ns)
 {
-    auto& mgr   = async_wait_manager::instance();
-    auto  start = std::chrono::steady_clock::now();
+    auto start = std::chrono::steady_clock::now();
 
     while(atomic_val.load(std::memory_order_acquire) != expected)
     {
-        if(mgr.is_shutdown())
-        {
-            ROCP_WARNING << "atomic wait interrupted by HSA async handler shutdown at " << callsite;
-            return wait_result::shutdown;
-        }
-        auto now     = std::chrono::steady_clock::now();
-        auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(now - start).count();
-        if(timeout_ns != UINT64_MAX && static_cast<uint64_t>(elapsed) >= timeout_ns)
-        {
-            ROCP_ERROR << "atomic wait timed out at " << callsite;
-            return wait_result::timeout;
-        }
+        if(auto r = check_shutdown_or_timeout(callsite, timeout_ns, start)) return *r;
         std::this_thread::yield();
     }
     return wait_result::completed;
