@@ -47,7 +47,7 @@
 #define HIP_API_TABLE_STEP_VERSION 0
 #define HIP_COMPILER_API_TABLE_STEP_VERSION 0
 #define HIP_TOOLS_API_TABLE_STEP_VERSION 0
-#define HIP_RUNTIME_API_TABLE_STEP_VERSION 25
+#define HIP_RUNTIME_API_TABLE_STEP_VERSION 26
 
 // HIP API interface
 // HIP compiler dispatch functions
@@ -1116,6 +1116,16 @@ typedef hipError_t (*t_hipMemGetMemPool)(hipMemPool_t* pool, hipMemLocation* loc
                                          hipMemAllocationType type);
 typedef hipError_t (*t_hipMipmappedArrayGetMemoryRequirements)(
     hipArrayMemoryRequirements* memoryRequirements, hipMipmappedArray_t mipmap, hipDevice_t device);
+typedef hipError_t (*t_hipGreenCtxCreate)(hipGreenCtx_t* ctx, hipDevResourceDesc_t desc, int device,
+                                         unsigned int flags);
+typedef hipError_t (*t_hipGreenCtxDestroy)(hipGreenCtx_t ctx);
+typedef hipError_t (*t_hipGreenCtxStreamCreate)(hipStream_t* stream, hipGreenCtx_t greenctx,
+                                                unsigned int flags, int priority);
+typedef hipError_t (*t_hipStreamGetGreenCtx)(hipStream_t hStream, hipGreenCtx_t* greenCtx);
+typedef hipError_t (*t_hipGreenCtxRecordEvent)(hipGreenCtx_t greenCtx, hipEvent_t event);
+typedef hipError_t (*t_hipGreenCtxWaitEvent)(hipGreenCtx_t greenCtx, hipEvent_t event);
+typedef hipError_t (*t_hipCtxFromGreenCtx)(hipCtx_t* ctx, hipGreenCtx_t greenCtx);
+
 // HIP Compiler dispatch table
 struct HipCompilerDispatchTable {
   // HIP_COMPILER_API_TABLE_STEP_VERSION == 0
@@ -1719,7 +1729,6 @@ struct HipDispatchTable {
 
   // HIP_RUNTIME_API_TABLE_STEP_VERSION == 23
   t_hipMipmappedArrayGetMemoryRequirements hipMipmappedArrayGetMemoryRequirements_fn;
-
   // HIP_RUNTIME_API_TABLE_STEP_VERSION == 24
   t_hipKernelGetAttribute hipKernelGetAttribute_fn;
 
@@ -1727,8 +1736,18 @@ struct HipDispatchTable {
   t_hipKernelSetAttribute hipKernelSetAttribute_fn;
   t_hipKernelGetFunction hipKernelGetFunction_fn;
 
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 26
+  t_hipGreenCtxCreate hipGreenCtxCreate_fn;
+  t_hipGreenCtxDestroy hipGreenCtxDestroy_fn;
+  t_hipGreenCtxStreamCreate hipGreenCtxStreamCreate_fn;
+  t_hipStreamGetGreenCtx hipStreamGetGreenCtx_fn;
+  t_hipGreenCtxRecordEvent hipGreenCtxRecordEvent_fn;
+  t_hipGreenCtxWaitEvent hipGreenCtxWaitEvent_fn;
+  t_hipCtxFromGreenCtx hipCtxFromGreenCtx_fn;
+
+
   // DO NOT EDIT ABOVE!
-  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 25
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 26
 
   // ******************************************************************************************* //
   //

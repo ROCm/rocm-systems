@@ -897,6 +897,15 @@ hipError_t hipKernelGetAttribute(int* pi, hipFunction_attribute attrib, hipKerne
                                  hipDevice_t dev);
 hipError_t hipKernelSetAttribute(hipFunction_attribute attrib, int value, hipKernel_t kernel, hipDevice_t dev);
 hipError_t hipKernelGetFunction(hipFunction_t* pFunc, hipKernel_t kernel);
+hipError_t hipGreenCtxCreate(hipGreenCtx_t* ctx, hipDevResourceDesc_t desc, int device,
+                             unsigned int flags);
+hipError_t hipGreenCtxDestroy(hipGreenCtx_t ctx);
+hipError_t hipGreenCtxStreamCreate(hipStream_t* stream, hipGreenCtx_t greenctx,
+                                   unsigned int flags, int priority);
+hipError_t hipStreamGetGreenCtx(hipStream_t hStream, hipGreenCtx_t* greenCtx);
+hipError_t hipGreenCtxRecordEvent(hipGreenCtx_t greenCtx, hipEvent_t event);
+hipError_t hipGreenCtxWaitEvent(hipGreenCtx_t greenCtx, hipEvent_t event);
+hipError_t hipCtxFromGreenCtx(hipCtx_t* ctx, hipGreenCtx_t greenCtx);
 }  // namespace hip
 
 namespace hip {
@@ -1454,6 +1463,13 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipKernelGetAttribute_fn = hip::hipKernelGetAttribute;
   ptrDispatchTable->hipKernelSetAttribute_fn = hip::hipKernelSetAttribute;
   ptrDispatchTable->hipKernelGetFunction_fn = hip::hipKernelGetFunction;
+  ptrDispatchTable->hipGreenCtxCreate_fn = hip::hipGreenCtxCreate;
+  ptrDispatchTable->hipGreenCtxDestroy_fn = hip::hipGreenCtxDestroy;
+  ptrDispatchTable->hipGreenCtxStreamCreate_fn = hip::hipGreenCtxStreamCreate;
+  ptrDispatchTable->hipStreamGetGreenCtx_fn = hip::hipStreamGetGreenCtx;
+  ptrDispatchTable->hipGreenCtxRecordEvent_fn = hip::hipGreenCtxRecordEvent;
+  ptrDispatchTable->hipGreenCtxWaitEvent_fn = hip::hipGreenCtxWaitEvent;
+  ptrDispatchTable->hipCtxFromGreenCtx_fn = hip::hipCtxFromGreenCtx;
 }
 
 #if HIP_ROCPROFILER_REGISTER > 0
@@ -2150,15 +2166,23 @@ HIP_ENFORCE_ABI(HipDispatchTable, hipKernelGetAttribute_fn, 514);
 // HIP_RUNTIME_API_TABLE_STEP_VERSION == 25
 HIP_ENFORCE_ABI(HipDispatchTable, hipKernelSetAttribute_fn, 515);
 HIP_ENFORCE_ABI(HipDispatchTable, hipKernelGetFunction_fn, 516);
+// HIP_RUNTIME_API_TABLE_STEP_VERSION == 26
+HIP_ENFORCE_ABI(HipDispatchTable, hipGreenCtxCreate_fn, 517);
+HIP_ENFORCE_ABI(HipDispatchTable, hipGreenCtxDestroy_fn, 518);
+HIP_ENFORCE_ABI(HipDispatchTable, hipGreenCtxStreamCreate_fn, 519);
+HIP_ENFORCE_ABI(HipDispatchTable, hipStreamGetGreenCtx_fn, 520);
+HIP_ENFORCE_ABI(HipDispatchTable, hipGreenCtxRecordEvent_fn, 521);
+HIP_ENFORCE_ABI(HipDispatchTable, hipGreenCtxWaitEvent_fn, 522);
+HIP_ENFORCE_ABI(HipDispatchTable, hipCtxFromGreenCtx_fn, 523);
 // if HIP_ENFORCE_ABI entries are added for each new function pointer in the table, the number below
 // will be +1 of the number in the last HIP_ENFORCE_ABI line. E.g.:
 //
 //  HIP_ENFORCE_ABI(<table>, <functor>, 8)
 //
 //  HIP_ENFORCE_ABI_VERSIONING(<table>, 9) <- 8 + 1 = 9
-HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 517)
+HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 524)
 
-static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 25,
+static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 26,
               "If you get this error, add new HIP_ENFORCE_ABI(...) code for the new function "
               "pointers and then update this check so it is true");
 #endif

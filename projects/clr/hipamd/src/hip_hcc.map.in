@@ -657,3 +657,16 @@ global:
 local:
     *;
 } hip_7.1;
+
+hip_7.3 {
+global:
+    hipGreenCtxCreate;
+    hipGreenCtxDestroy;
+    hipGreenCtxStreamCreate;
+    hipStreamGetGreenCtx;
+    hipGreenCtxRecordEvent;
+    hipGreenCtxWaitEvent;
+    hipCtxFromGreenCtx;
+local:
+    *;
+} hip_7.2;

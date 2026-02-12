@@ -532,3 +532,10 @@ hipMipmappedArrayGetMemoryRequirements
 hipKernelGetAttribute
 hipKernelSetAttribute
 hipKernelGetFunction
+hipGreenCtxCreate
+hipGreenCtxDestroy
+hipGreenCtxStreamCreate
+hipStreamGetGreenCtx
+hipGreenCtxRecordEvent
+hipGreenCtxWaitEvent
+hipCtxFromGreenCtx

@@ -478,6 +478,8 @@ typedef enum cudaLimit hipLimit_t;
 typedef enum cudaFuncAttribute hipFuncAttribute;
 typedef enum cudaFuncCache hipFuncCache_t;
 typedef CUcontext hipCtx_t;
+typedef CUgreenCtx hipGreenCtx_t;
+typedef CUdevResourceDesc hipDevResourceDesc_t;
 typedef enum cudaSharedMemConfig hipSharedMemConfig;
 typedef CUfunc_cache hipFuncCache;
 typedef CUjitInputType hipJitInputType;
@@ -3548,6 +3550,36 @@ inline static hipError_t hipCtxCreate(hipCtx_t* ctx, unsigned int flags, hipDevi
 
 inline static hipError_t hipCtxDestroy(hipCtx_t ctx) {
   return hipCUResultTohipError(cuCtxDestroy(ctx));
+}
+
+inline static hipError_t hipGreenCtxCreate(hipGreenCtx_t* ctx, hipDevResourceDesc_t desc,
+                                           int device, unsigned int flags) {
+  return hipCUResultTohipError(cuGreenCtxCreate(ctx, desc, device, flags));
+}
+
+inline static hipError_t hipGreenCtxDestroy(hipGreenCtx_t ctx) {
+  return hipCUResultTohipError(cuGreenCtxDestroy(ctx));
+}
+
+inline static hipError_t hipGreenCtxStreamCreate(hipStream_t* stream, hipGreenCtx_t greenctx,
+                                                 unsigned int flags, int priority) {
+  return hipCUResultTohipError(cuGreenCtxStreamCreate(stream, greenctx, flags, priority));
+}
+
+inline static hipError_t hipStreamGetGreenCtx(hipStream_t hStream, hipGreenCtx_t* greenCtx) {
+  return hipCUResultTohipError(cuStreamGetGreenCtx(hStream, greenCtx));
+}
+
+inline static hipError_t hipGreenCtxRecordEvent(hipGreenCtx_t greenCtx, hipEvent_t event) {
+  return hipCUResultTohipError(cuGreenCtxRecordEvent(greenCtx, event));
+}
+
+inline static hipError_t hipGreenCtxWaitEvent(hipGreenCtx_t greenCtx, hipEvent_t event) {
+  return hipCUResultTohipError(cuGreenCtxWaitEvent(greenCtx, event));
+}
+
+inline static hipError_t hipCtxFromGreenCtx(hipCtx_t* ctx, hipGreenCtx_t greenCtx) {
+  return hipCUResultTohipError(cuCtxFromGreenCtx(ctx, greenCtx));
 }
 
 inline static hipError_t hipCtxPopCurrent(hipCtx_t* ctx) {

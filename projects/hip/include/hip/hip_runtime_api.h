@@ -669,6 +669,8 @@ extern "C" {
 //---
 // API-visible structures
 typedef struct ihipCtx_t* hipCtx_t;
+typedef struct ihipGreenCtx_t* hipGreenCtx_t;
+typedef struct ihipDevResourceDesc_t* hipDevResourceDesc_t;
 // Note many APIs also use integer deviceIds as an alternative to the device pointer:
 typedef int hipDevice_t;
 typedef enum hipDeviceP2PAttr {
@@ -5976,6 +5978,25 @@ hipError_t hipMemcpyPeerAsync(void* dst, int dstDeviceId, const void* src, int s
                               size_t sizeBytes, hipStream_t stream __dparm(0));
 
 // doxygen end PeerToPeer
+/**
+ * @}
+ */
+/**
+ *-------------------------------------------------------------------------------------------------
+ *-------------------------------------------------------------------------------------------------
+ *  @defgroup GreenContext Green Context Management
+ *  @{
+ *  This section describes green context management functions of HIP runtime API.
+ */
+hipError_t hipGreenCtxCreate(hipGreenCtx_t* ctx, hipDevResourceDesc_t desc, int device,
+                             unsigned int flags);
+hipError_t hipGreenCtxDestroy(hipGreenCtx_t ctx);
+hipError_t hipGreenCtxStreamCreate(hipStream_t* stream, hipGreenCtx_t greenctx, unsigned int flags,
+                                   int priority);
+hipError_t hipStreamGetGreenCtx(hipStream_t hStream, hipGreenCtx_t* greenCtx);
+hipError_t hipGreenCtxRecordEvent(hipGreenCtx_t greenCtx, hipEvent_t event);
+hipError_t hipGreenCtxWaitEvent(hipGreenCtx_t greenCtx, hipEvent_t event);
+hipError_t hipCtxFromGreenCtx(hipCtx_t* ctx, hipGreenCtx_t greenCtx);
 /**
  * @}
  */

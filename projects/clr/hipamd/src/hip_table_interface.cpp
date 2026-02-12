@@ -3204,3 +3204,40 @@ hipError_t hipKernelGetFunction(hipFunction_t* pFunc, hipKernel_t kernel) {
   return hip::GetHipDispatchTable()->hipKernelGetFunction_fn(pFunc, kernel) ;
   CATCH;
 }
+hipError_t hipGreenCtxCreate(hipGreenCtx_t* ctx, hipDevResourceDesc_t desc, int device,
+                             unsigned int flags) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipGreenCtxCreate_fn(ctx, desc, device, flags);
+  CATCH;
+}
+hipError_t hipGreenCtxDestroy(hipGreenCtx_t ctx) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipGreenCtxDestroy_fn(ctx);
+  CATCH;
+}
+hipError_t hipGreenCtxStreamCreate(hipStream_t* stream, hipGreenCtx_t greenctx, unsigned int flags,
+                                   int priority) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipGreenCtxStreamCreate_fn(stream, greenctx, flags, priority);
+  CATCH;
+}
+hipError_t hipStreamGetGreenCtx(hipStream_t hStream, hipGreenCtx_t* greenCtx) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipStreamGetGreenCtx_fn(hStream, greenCtx);
+  CATCH;
+}
+hipError_t hipGreenCtxRecordEvent(hipGreenCtx_t greenCtx, hipEvent_t event) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipGreenCtxRecordEvent_fn(greenCtx, event);
+  CATCH;
+}
+hipError_t hipGreenCtxWaitEvent(hipGreenCtx_t greenCtx, hipEvent_t event) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipGreenCtxWaitEvent_fn(greenCtx, event);
+  CATCH;
+}
+hipError_t hipCtxFromGreenCtx(hipCtx_t* ctx, hipGreenCtx_t greenCtx) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipCtxFromGreenCtx_fn(ctx, greenCtx);
+  CATCH;
+}

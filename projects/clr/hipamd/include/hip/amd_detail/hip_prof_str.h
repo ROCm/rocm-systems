@@ -482,7 +482,14 @@ enum hip_api_id_t {
   HIP_API_ID_hipKernelGetAttribute = 457,
   HIP_API_ID_hipKernelSetAttribute = 458,
   HIP_API_ID_hipKernelGetFunction = 459,
-  HIP_API_ID_LAST = 459,
+  HIP_API_ID_hipGreenCtxCreate = 460,
+  HIP_API_ID_hipGreenCtxDestroy = 461,
+  HIP_API_ID_hipCtxFromGreenCtx = 463,
+  HIP_API_ID_hipGreenCtxRecordEvent = 463,
+  HIP_API_ID_hipGreenCtxStreamCreate = 464,
+  HIP_API_ID_hipGreenCtxWaitEvent = 465,
+  HIP_API_ID_hipStreamGetGreenCtx = 466,
+  HIP_API_ID_LAST = 466,
 
   HIP_API_ID_hipChooseDevice = HIP_API_ID_CONCAT(HIP_API_ID_,hipChooseDevice),
   HIP_API_ID_hipGetDeviceProperties = HIP_API_ID_CONCAT(HIP_API_ID_,hipGetDeviceProperties),
@@ -536,6 +543,7 @@ static inline const char* hip_api_name(const uint32_t id) {
     case HIP_API_ID_hipCtxDestroy: return "hipCtxDestroy";
     case HIP_API_ID_hipCtxDisablePeerAccess: return "hipCtxDisablePeerAccess";
     case HIP_API_ID_hipCtxEnablePeerAccess: return "hipCtxEnablePeerAccess";
+    case HIP_API_ID_hipCtxFromGreenCtx: return "hipCtxFromGreenCtx";
     case HIP_API_ID_hipCtxGetApiVersion: return "hipCtxGetApiVersion";
     case HIP_API_ID_hipCtxGetCacheConfig: return "hipCtxGetCacheConfig";
     case HIP_API_ID_hipCtxGetCurrent: return "hipCtxGetCurrent";
@@ -733,6 +741,11 @@ static inline const char* hip_api_name(const uint32_t id) {
     case HIP_API_ID_hipGraphicsSubResourceGetMappedArray: return "hipGraphicsSubResourceGetMappedArray";
     case HIP_API_ID_hipGraphicsUnmapResources: return "hipGraphicsUnmapResources";
     case HIP_API_ID_hipGraphicsUnregisterResource: return "hipGraphicsUnregisterResource";
+    case HIP_API_ID_hipGreenCtxCreate: return "hipGreenCtxCreate";
+    case HIP_API_ID_hipGreenCtxDestroy: return "hipGreenCtxDestroy";
+    case HIP_API_ID_hipGreenCtxRecordEvent: return "hipGreenCtxRecordEvent";
+    case HIP_API_ID_hipGreenCtxStreamCreate: return "hipGreenCtxStreamCreate";
+    case HIP_API_ID_hipGreenCtxWaitEvent: return "hipGreenCtxWaitEvent";
     case HIP_API_ID_hipHccModuleLaunchKernel: return "hipHccModuleLaunchKernel";
     case HIP_API_ID_hipHostAlloc: return "hipHostAlloc";
     case HIP_API_ID_hipHostFree: return "hipHostFree";
@@ -930,6 +943,7 @@ static inline const char* hip_api_name(const uint32_t id) {
     case HIP_API_ID_hipStreamGetCaptureInfo_v2: return "hipStreamGetCaptureInfo_v2";
     case HIP_API_ID_hipStreamGetDevice: return "hipStreamGetDevice";
     case HIP_API_ID_hipStreamGetFlags: return "hipStreamGetFlags";
+    case HIP_API_ID_hipStreamGetGreenCtx: return "hipStreamGetGreenCtx";
     case HIP_API_ID_hipStreamGetId: return "hipStreamGetId";
     case HIP_API_ID_hipStreamGetPriority: return "hipStreamGetPriority";
     case HIP_API_ID_hipStreamIsCapturing: return "hipStreamIsCapturing";
@@ -989,6 +1003,7 @@ static inline uint32_t hipApiIdByName(const char* name) {
   if (strcmp("hipCtxDestroy", name) == 0) return HIP_API_ID_hipCtxDestroy;
   if (strcmp("hipCtxDisablePeerAccess", name) == 0) return HIP_API_ID_hipCtxDisablePeerAccess;
   if (strcmp("hipCtxEnablePeerAccess", name) == 0) return HIP_API_ID_hipCtxEnablePeerAccess;
+  if (strcmp("hipCtxFromGreenCtx", name) == 0) return HIP_API_ID_hipCtxFromGreenCtx;
   if (strcmp("hipCtxGetApiVersion", name) == 0) return HIP_API_ID_hipCtxGetApiVersion;
   if (strcmp("hipCtxGetCacheConfig", name) == 0) return HIP_API_ID_hipCtxGetCacheConfig;
   if (strcmp("hipCtxGetCurrent", name) == 0) return HIP_API_ID_hipCtxGetCurrent;
@@ -1186,6 +1201,11 @@ static inline uint32_t hipApiIdByName(const char* name) {
   if (strcmp("hipGraphicsSubResourceGetMappedArray", name) == 0) return HIP_API_ID_hipGraphicsSubResourceGetMappedArray;
   if (strcmp("hipGraphicsUnmapResources", name) == 0) return HIP_API_ID_hipGraphicsUnmapResources;
   if (strcmp("hipGraphicsUnregisterResource", name) == 0) return HIP_API_ID_hipGraphicsUnregisterResource;
+  if (strcmp("hipGreenCtxCreate", name) == 0) return HIP_API_ID_hipGreenCtxCreate;
+  if (strcmp("hipGreenCtxDestroy", name) == 0) return HIP_API_ID_hipGreenCtxDestroy;
+  if (strcmp("hipGreenCtxRecordEvent", name) == 0) return HIP_API_ID_hipGreenCtxRecordEvent;
+  if (strcmp("hipGreenCtxStreamCreate", name) == 0) return HIP_API_ID_hipGreenCtxStreamCreate;
+  if (strcmp("hipGreenCtxWaitEvent", name) == 0) return HIP_API_ID_hipGreenCtxWaitEvent;
   if (strcmp("hipHccModuleLaunchKernel", name) == 0) return HIP_API_ID_hipHccModuleLaunchKernel;
   if (strcmp("hipHostAlloc", name) == 0) return HIP_API_ID_hipHostAlloc;
   if (strcmp("hipHostFree", name) == 0) return HIP_API_ID_hipHostFree;
@@ -1383,6 +1403,7 @@ static inline uint32_t hipApiIdByName(const char* name) {
   if (strcmp("hipStreamGetCaptureInfo_v2", name) == 0) return HIP_API_ID_hipStreamGetCaptureInfo_v2;
   if (strcmp("hipStreamGetDevice", name) == 0) return HIP_API_ID_hipStreamGetDevice;
   if (strcmp("hipStreamGetFlags", name) == 0) return HIP_API_ID_hipStreamGetFlags;
+  if (strcmp("hipStreamGetGreenCtx", name) == 0) return HIP_API_ID_hipStreamGetGreenCtx;
   if (strcmp("hipStreamGetId", name) == 0) return HIP_API_ID_hipStreamGetId;
   if (strcmp("hipStreamGetPriority", name) == 0) return HIP_API_ID_hipStreamGetPriority;
   if (strcmp("hipStreamIsCapturing", name) == 0) return HIP_API_ID_hipStreamIsCapturing;
@@ -1517,6 +1538,11 @@ typedef struct hip_api_data_s {
       hipCtx_t peerCtx;
       unsigned int flags;
     } hipCtxEnablePeerAccess;
+    struct {
+      hipCtx_t* ctx;
+      hipCtx_t ctx__val;
+      hipGreenCtx_t greenCtx;
+    } hipCtxFromGreenCtx;
     struct {
       hipCtx_t ctx;
       unsigned int* apiVersion;
@@ -2634,6 +2660,31 @@ typedef struct hip_api_data_s {
     struct {
       hipGraphicsResource_t resource;
     } hipGraphicsUnregisterResource;
+    struct {
+      hipGreenCtx_t* ctx;
+      hipGreenCtx_t ctx__val;
+      hipDevResourceDesc_t desc;
+      int device;
+      unsigned int flags;
+    } hipGreenCtxCreate;
+    struct {
+      hipGreenCtx_t ctx;
+    } hipGreenCtxDestroy;
+    struct {
+      hipGreenCtx_t greenCtx;
+      hipEvent_t event;
+    } hipGreenCtxRecordEvent;
+    struct {
+      hipStream_t* stream;
+      hipStream_t stream__val;
+      hipGreenCtx_t greenctx;
+      unsigned int flags;
+      int priority;
+    } hipGreenCtxStreamCreate;
+    struct {
+      hipGreenCtx_t greenCtx;
+      hipEvent_t event;
+    } hipGreenCtxWaitEvent;
     struct {
       hipFunction_t f;
       unsigned int globalWorkSizeX;
@@ -3918,6 +3969,11 @@ typedef struct hip_api_data_s {
       unsigned int flags__val;
     } hipStreamGetFlags;
     struct {
+      hipStream_t hStream;
+      hipGreenCtx_t* greenCtx;
+      hipGreenCtx_t greenCtx__val;
+    } hipStreamGetGreenCtx;
+    struct {
       hipStream_t stream;
       unsigned long long* streamId;
       unsigned long long streamId__val;
@@ -4220,6 +4276,11 @@ typedef struct hip_api_data_s {
 #define INIT_hipCtxEnablePeerAccess_CB_ARGS_DATA(cb_data) { \
   cb_data.args.hipCtxEnablePeerAccess.peerCtx = (hipCtx_t)peerCtx; \
   cb_data.args.hipCtxEnablePeerAccess.flags = (unsigned int)flags; \
+};
+// hipCtxFromGreenCtx[('hipCtx_t*', 'ctx'), ('hipGreenCtx_t', 'greenCtx')]
+#define INIT_hipCtxFromGreenCtx_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipCtxFromGreenCtx.ctx = (hipCtx_t*)ctx; \
+  cb_data.args.hipCtxFromGreenCtx.greenCtx = (hipGreenCtx_t)greenCtx; \
 };
 // hipCtxGetApiVersion[('hipCtx_t', 'ctx'), ('unsigned int*', 'apiVersion')]
 #define INIT_hipCtxGetApiVersion_CB_ARGS_DATA(cb_data) { \
@@ -5346,6 +5407,34 @@ typedef struct hip_api_data_s {
 // hipGraphicsUnregisterResource[('hipGraphicsResource_t', 'resource')]
 #define INIT_hipGraphicsUnregisterResource_CB_ARGS_DATA(cb_data) { \
   cb_data.args.hipGraphicsUnregisterResource.resource = (hipGraphicsResource_t)resource; \
+};
+// hipGreenCtxCreate[('hipGreenCtx_t*', 'ctx'), ('hipDevResourceDesc_t', 'desc'), ('int', 'device'), ('unsigned int', 'flags')]
+#define INIT_hipGreenCtxCreate_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipGreenCtxCreate.ctx = (hipGreenCtx_t*)ctx; \
+  cb_data.args.hipGreenCtxCreate.desc = (hipDevResourceDesc_t)desc; \
+  cb_data.args.hipGreenCtxCreate.device = (int)device; \
+  cb_data.args.hipGreenCtxCreate.flags = (unsigned int)flags; \
+};
+// hipGreenCtxDestroy[('hipGreenCtx_t', 'ctx')]
+#define INIT_hipGreenCtxDestroy_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipGreenCtxDestroy.ctx = (hipGreenCtx_t)ctx; \
+};
+// hipGreenCtxRecordEvent[('hipGreenCtx_t', 'greenCtx'), ('hipEvent_t', 'event')]
+#define INIT_hipGreenCtxRecordEvent_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipGreenCtxRecordEvent.greenCtx = (hipGreenCtx_t)greenCtx; \
+  cb_data.args.hipGreenCtxRecordEvent.event = (hipEvent_t)event; \
+};
+// hipGreenCtxStreamCreate[('hipStream_t*', 'stream'), ('hipGreenCtx_t', 'greenctx'), ('unsigned int', 'flags'), ('int', 'priority')]
+#define INIT_hipGreenCtxStreamCreate_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipGreenCtxStreamCreate.stream = (hipStream_t*)stream; \
+  cb_data.args.hipGreenCtxStreamCreate.greenctx = (hipGreenCtx_t)greenctx; \
+  cb_data.args.hipGreenCtxStreamCreate.flags = (unsigned int)flags; \
+  cb_data.args.hipGreenCtxStreamCreate.priority = (int)priority; \
+};
+// hipGreenCtxWaitEvent[('hipGreenCtx_t', 'greenCtx'), ('hipEvent_t', 'event')]
+#define INIT_hipGreenCtxWaitEvent_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipGreenCtxWaitEvent.greenCtx = (hipGreenCtx_t)greenCtx; \
+  cb_data.args.hipGreenCtxWaitEvent.event = (hipEvent_t)event; \
 };
 // hipHccModuleLaunchKernel[('hipFunction_t', 'f'), ('unsigned int', 'globalWorkSizeX'), ('unsigned int', 'globalWorkSizeY'), ('unsigned int', 'globalWorkSizeZ'), ('unsigned int', 'blockDimX'), ('unsigned int', 'blockDimY'), ('unsigned int', 'blockDimZ'), ('size_t', 'sharedMemBytes'), ('hipStream_t', 'hStream'), ('void**', 'kernelParams'), ('void**', 'extra'), ('hipEvent_t', 'startEvent'), ('hipEvent_t', 'stopEvent')]
 #define INIT_hipHccModuleLaunchKernel_CB_ARGS_DATA(cb_data) { \
@@ -6660,6 +6749,11 @@ typedef struct hip_api_data_s {
   cb_data.args.hipStreamGetFlags.stream = (hipStream_t)stream; \
   cb_data.args.hipStreamGetFlags.flags = (unsigned int*)flags; \
 };
+// hipStreamGetGreenCtx[('hipStream_t', 'hStream'), ('hipGreenCtx_t*', 'greenCtx')]
+#define INIT_hipStreamGetGreenCtx_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipStreamGetGreenCtx.hStream = (hipStream_t)hStream; \
+  cb_data.args.hipStreamGetGreenCtx.greenCtx = (hipGreenCtx_t*)greenCtx; \
+};
 // hipStreamGetId[('hipStream_t', 'stream'), ('unsigned long long*', 'streamId')]
 #define INIT_hipStreamGetId_CB_ARGS_DATA(cb_data) { \
   cb_data.args.hipStreamGetId.stream = (hipStream_t)stream; \
@@ -6990,6 +7084,10 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
       break;
 // hipCtxEnablePeerAccess[('hipCtx_t', 'peerCtx'), ('unsigned int', 'flags')]
     case HIP_API_ID_hipCtxEnablePeerAccess:
+      break;
+// hipCtxFromGreenCtx[('hipCtx_t*', 'ctx'), ('hipGreenCtx_t', 'greenCtx')]
+    case HIP_API_ID_hipCtxFromGreenCtx:
+      if (data->args.hipCtxFromGreenCtx.ctx) data->args.hipCtxFromGreenCtx.ctx__val = *(data->args.hipCtxFromGreenCtx.ctx);
       break;
 // hipCtxGetApiVersion[('hipCtx_t', 'ctx'), ('unsigned int*', 'apiVersion')]
     case HIP_API_ID_hipCtxGetApiVersion:
@@ -7778,6 +7876,23 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
 // hipGraphicsUnregisterResource[('hipGraphicsResource_t', 'resource')]
     case HIP_API_ID_hipGraphicsUnregisterResource:
       break;
+// hipGreenCtxCreate[('hipGreenCtx_t*', 'ctx'), ('hipDevResourceDesc_t', 'desc'), ('int', 'device'), ('unsigned int', 'flags')]
+    case HIP_API_ID_hipGreenCtxCreate:
+      if (data->args.hipGreenCtxCreate.ctx) data->args.hipGreenCtxCreate.ctx__val = *(data->args.hipGreenCtxCreate.ctx);
+      break;
+// hipGreenCtxDestroy[('hipGreenCtx_t', 'ctx')]
+    case HIP_API_ID_hipGreenCtxDestroy:
+      break;
+// hipGreenCtxRecordEvent[('hipGreenCtx_t', 'greenCtx'), ('hipEvent_t', 'event')]
+    case HIP_API_ID_hipGreenCtxRecordEvent:
+      break;
+// hipGreenCtxStreamCreate[('hipStream_t*', 'stream'), ('hipGreenCtx_t', 'greenctx'), ('unsigned int', 'flags'), ('int', 'priority')]
+    case HIP_API_ID_hipGreenCtxStreamCreate:
+      if (data->args.hipGreenCtxStreamCreate.stream) data->args.hipGreenCtxStreamCreate.stream__val = *(data->args.hipGreenCtxStreamCreate.stream);
+      break;
+// hipGreenCtxWaitEvent[('hipGreenCtx_t', 'greenCtx'), ('hipEvent_t', 'event')]
+    case HIP_API_ID_hipGreenCtxWaitEvent:
+      break;
 // hipHccModuleLaunchKernel[('hipFunction_t', 'f'), ('unsigned int', 'globalWorkSizeX'), ('unsigned int', 'globalWorkSizeY'), ('unsigned int', 'globalWorkSizeZ'), ('unsigned int', 'blockDimX'), ('unsigned int', 'blockDimY'), ('unsigned int', 'blockDimZ'), ('size_t', 'sharedMemBytes'), ('hipStream_t', 'hStream'), ('void**', 'kernelParams'), ('void**', 'extra'), ('hipEvent_t', 'startEvent'), ('hipEvent_t', 'stopEvent')]
     case HIP_API_ID_hipHccModuleLaunchKernel:
       if (data->args.hipHccModuleLaunchKernel.kernelParams) data->args.hipHccModuleLaunchKernel.kernelParams__val = *(data->args.hipHccModuleLaunchKernel.kernelParams);
@@ -8539,6 +8654,10 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
     case HIP_API_ID_hipStreamGetFlags:
       if (data->args.hipStreamGetFlags.flags) data->args.hipStreamGetFlags.flags__val = *(data->args.hipStreamGetFlags.flags);
       break;
+// hipStreamGetGreenCtx[('hipStream_t', 'hStream'), ('hipGreenCtx_t*', 'greenCtx')]
+    case HIP_API_ID_hipStreamGetGreenCtx:
+      if (data->args.hipStreamGetGreenCtx.greenCtx) data->args.hipStreamGetGreenCtx.greenCtx__val = *(data->args.hipStreamGetGreenCtx.greenCtx);
+      break;
 // hipStreamGetId[('hipStream_t', 'stream'), ('unsigned long long*', 'streamId')]
     case HIP_API_ID_hipStreamGetId:
       if (data->args.hipStreamGetId.streamId) data->args.hipStreamGetId.streamId__val = *(data->args.hipStreamGetId.streamId);
@@ -8820,6 +8939,13 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       oss << "hipCtxEnablePeerAccess(";
       oss << "peerCtx="; roctracer::hip_support::detail::operator<<(oss, data->args.hipCtxEnablePeerAccess.peerCtx);
       oss << ", flags="; roctracer::hip_support::detail::operator<<(oss, data->args.hipCtxEnablePeerAccess.flags);
+      oss << ")";
+    break;
+    case HIP_API_ID_hipCtxFromGreenCtx:
+      oss << "hipCtxFromGreenCtx(";
+      if (data->args.hipCtxFromGreenCtx.ctx == NULL) oss << "ctx=NULL";
+      else { oss << "ctx="; roctracer::hip_support::detail::operator<<(oss, data->args.hipCtxFromGreenCtx.ctx__val); }
+      oss << ", greenCtx="; roctracer::hip_support::detail::operator<<(oss, data->args.hipCtxFromGreenCtx.greenCtx);
       oss << ")";
     break;
     case HIP_API_ID_hipCtxGetApiVersion:
@@ -10345,6 +10471,41 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
     case HIP_API_ID_hipGraphicsUnregisterResource:
       oss << "hipGraphicsUnregisterResource(";
       oss << "resource="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGraphicsUnregisterResource.resource);
+      oss << ")";
+    break;
+    case HIP_API_ID_hipGreenCtxCreate:
+      oss << "hipGreenCtxCreate(";
+      if (data->args.hipGreenCtxCreate.ctx == NULL) oss << "ctx=NULL";
+      else { oss << "ctx="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGreenCtxCreate.ctx__val); }
+      oss << ", desc="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGreenCtxCreate.desc);
+      oss << ", device="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGreenCtxCreate.device);
+      oss << ", flags="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGreenCtxCreate.flags);
+      oss << ")";
+    break;
+    case HIP_API_ID_hipGreenCtxDestroy:
+      oss << "hipGreenCtxDestroy(";
+      oss << "ctx="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGreenCtxDestroy.ctx);
+      oss << ")";
+    break;
+    case HIP_API_ID_hipGreenCtxRecordEvent:
+      oss << "hipGreenCtxRecordEvent(";
+      oss << "greenCtx="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGreenCtxRecordEvent.greenCtx);
+      oss << ", event="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGreenCtxRecordEvent.event);
+      oss << ")";
+    break;
+    case HIP_API_ID_hipGreenCtxStreamCreate:
+      oss << "hipGreenCtxStreamCreate(";
+      if (data->args.hipGreenCtxStreamCreate.stream == NULL) oss << "stream=NULL";
+      else { oss << "stream="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGreenCtxStreamCreate.stream__val); }
+      oss << ", greenctx="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGreenCtxStreamCreate.greenctx);
+      oss << ", flags="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGreenCtxStreamCreate.flags);
+      oss << ", priority="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGreenCtxStreamCreate.priority);
+      oss << ")";
+    break;
+    case HIP_API_ID_hipGreenCtxWaitEvent:
+      oss << "hipGreenCtxWaitEvent(";
+      oss << "greenCtx="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGreenCtxWaitEvent.greenCtx);
+      oss << ", event="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGreenCtxWaitEvent.event);
       oss << ")";
     break;
     case HIP_API_ID_hipHccModuleLaunchKernel:
@@ -12028,6 +12189,13 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       oss << "stream="; roctracer::hip_support::detail::operator<<(oss, data->args.hipStreamGetFlags.stream);
       if (data->args.hipStreamGetFlags.flags == NULL) oss << ", flags=NULL";
       else { oss << ", flags="; roctracer::hip_support::detail::operator<<(oss, data->args.hipStreamGetFlags.flags__val); }
+      oss << ")";
+    break;
+    case HIP_API_ID_hipStreamGetGreenCtx:
+      oss << "hipStreamGetGreenCtx(";
+      oss << "hStream="; roctracer::hip_support::detail::operator<<(oss, data->args.hipStreamGetGreenCtx.hStream);
+      if (data->args.hipStreamGetGreenCtx.greenCtx == NULL) oss << ", greenCtx=NULL";
+      else { oss << ", greenCtx="; roctracer::hip_support::detail::operator<<(oss, data->args.hipStreamGetGreenCtx.greenCtx__val); }
       oss << ")";
     break;
     case HIP_API_ID_hipStreamGetId:
