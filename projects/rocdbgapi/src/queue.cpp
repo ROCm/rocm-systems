@@ -615,6 +615,8 @@ aql_queue_t::get_os_queue_packet_id (
 void
 aql_queue_t::update_waves ()
 {
+  TRACE_BEGIN ();
+
   /* Value used to mark waves that are found in the context save area. When
      sweeping, any wave found with a mark less than the current mark will be
      deleted, as these waves are no longer active.  */
@@ -862,6 +864,8 @@ aql_queue_t::update_waves ()
       it = process.destroy (it);
     else
       ++it;
+
+  TRACE_END ();
 }
 
 std::pair<agent_address_t /* address */, amd_dbgapi_size_t /* size */>

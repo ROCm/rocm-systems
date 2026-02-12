@@ -567,6 +567,8 @@ memory_cache_t::prefetch (agent_address_t address, amd_dbgapi_size_t size)
 void
 memory_cache_t::write_back (agent_address_t address, amd_dbgapi_size_t size)
 {
+  TRACE_BEGIN (param_in (address), param_in (size));
+
   std::exception_ptr exception;
   if (size == 0)
     return;
@@ -643,6 +645,8 @@ memory_cache_t::write_back (agent_address_t address, amd_dbgapi_size_t size)
 
   if (exception)
     std::rethrow_exception (exception);
+
+  TRACE_END ();
 }
 
 void
