@@ -126,8 +126,11 @@ def test_kernel_trace(kernel_input_data):
         "matrixTranspose(float*, float*, int)",
     )
 
-    assert len(kernel_input_data) == 1
+    # memory copies maybe less than two if rocr decides to use blit kernels they show up in kernel data.
+    assert len(kernel_input_data) >= 1
     for row in kernel_input_data:
+        if re.search(r"__amd_rocclr_copyBuffer.*", row["Kernel_Name"]):
+            continue
         assert row["Kind"] == "KERNEL_DISPATCH"
         assert int(row["Agent_Id"].split(" ")[-1]) >= 0
         assert int(row["Queue_Id"]) > 0
@@ -185,7 +188,8 @@ def test_kernel_trace_json(json_data):
         "matrixTranspose(float*, float*, int)",
     )
     kernel_dispatch_data = data["buffer_records"]["kernel_dispatch"]
-    assert len(kernel_dispatch_data) == 1
+    # memory copies maybe less than two if rocr decides to use blit kernels they show up in kernel data.
+    assert len(kernel_dispatch_data) >= 1
     for dispatch in kernel_dispatch_data:
         dispatch_info = dispatch["dispatch_info"]
         kernel_name = get_kernel_name(dispatch_info["kernel_id"])
@@ -195,9 +199,9 @@ def test_kernel_trace_json(json_data):
         assert dispatch_info["agent_id"]["handle"] > 0
         assert dispatch_info["queue_id"]["handle"] > 0
         assert dispatch_info["kernel_id"] > 0
-        if not re.search(r"__amd_rocclr_.*", kernel_name):
-            assert kernel_name in valid_kernel_names
-
+        if re.search(r"__amd_rocclr_copyBuffer.*", kernel_name):
+            continue
+        assert kernel_name in valid_kernel_names
         assert dispatch_info["workgroup_size"]["x"] == 4
         assert dispatch_info["workgroup_size"]["y"] == 4
         assert dispatch_info["workgroup_size"]["z"] == 1
@@ -214,15 +218,16 @@ def test_memory_copy_trace(agent_info_input_data, memory_copy_input_data):
                 return row
         return None
 
+    # memory copies maybe less than two if rocr decides to use blit kernels
+    assert len(memory_copy_input_data) > 0
+
+    directions = set()
+    valid_directions = ("MEMORY_COPY_HOST_TO_DEVICE", "MEMORY_COPY_DEVICE_TO_HOST")
     for row in memory_copy_input_data:
         assert row["Kind"] == "MEMORY_COPY"
-
-    assert len(memory_copy_input_data) == 2
-
-    def test_row(idx, direction):
-        assert direction in ("MEMORY_COPY_HOST_TO_DEVICE", "MEMORY_COPY_DEVICE_TO_HOST")
-        row = memory_copy_input_data[idx]
-        assert row["Direction"] == direction
+        direction = row["Direction"]
+        assert direction in valid_directions
+        directions.add(direction)
         src_agent = get_agent(row["Source_Agent_Id"].split(" ")[-1])
         dst_agent = get_agent(row["Destination_Agent_Id"].split(" ")[-1])
         assert src_agent is not None and dst_agent is not None, f"{agent_info_input_data}"
@@ -235,8 +240,7 @@ def test_memory_copy_trace(agent_info_input_data, memory_copy_input_data):
         assert int(row["Correlation_Id"]) > 0
         assert int(row["End_Timestamp"]) >= int(row["Start_Timestamp"])
 
-    test_row(0, "MEMORY_COPY_HOST_TO_DEVICE")
-    test_row(1, "MEMORY_COPY_DEVICE_TO_HOST")
+    assert directions, "Expected at least one memory copy direction"
 
 
 def test_memory_copy_json_trace(json_data):
@@ -256,28 +260,29 @@ def test_memory_copy_json_trace(json_data):
         return None
 
     # one threads * two directions
-    assert len(memory_copy_data) >= 2, f"{memory_copy_data}"
-    assert (len(memory_copy_data) % 2) == 0, f"{memory_copy_data}"
+    # memory copies maybe less than two if rocr decides to use blit kernels
+    assert len(memory_copy_data) > 0, f"{memory_copy_data}"
 
-    def test_row(idx, direction):
-        assert direction in ("MEMORY_COPY_HOST_TO_DEVICE", "MEMORY_COPY_DEVICE_TO_HOST")
-        row = memory_copy_data[idx]
+    directions = set()
+    valid_directions = ("MEMORY_COPY_HOST_TO_DEVICE", "MEMORY_COPY_DEVICE_TO_HOST")
+    for row in memory_copy_data:
         src_agent = get_agent(row["src_agent_id"])
         dst_agent = get_agent(row["dst_agent_id"])
         assert get_kind_name(row["kind"]) == "MEMORY_COPY"
         assert src_agent is not None, f"{row}"
         assert dst_agent is not None, f"{row}"
-        if direction == "MEMORY_COPY_HOST_TO_DEVICE":
-            assert src_agent["type"] == 1
-            assert dst_agent["type"] == 2
+        if src_agent["type"] == 1 and dst_agent["type"] == 2:
+            directions.add("MEMORY_COPY_HOST_TO_DEVICE")
+        elif src_agent["type"] == 2 and dst_agent["type"] == 1:
+            directions.add("MEMORY_COPY_DEVICE_TO_HOST")
         else:
-            assert src_agent["type"] == 2
-            assert dst_agent["type"] == 1
+            assert (
+                False
+            ), f"Unexpected agent types: {src_agent['type']} -> {dst_agent['type']}"
         assert row["correlation_id"]["internal"] > 0
         assert row["end_timestamp"] >= row["start_timestamp"]
 
-    test_row(0, "MEMORY_COPY_HOST_TO_DEVICE")
-    test_row(1, "MEMORY_COPY_DEVICE_TO_HOST")
+    assert directions, "Expected at least one memory copy direction"
 
 
 def test_marker_api_trace(marker_input_data):
