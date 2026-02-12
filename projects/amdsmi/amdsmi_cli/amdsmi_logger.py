@@ -1179,25 +1179,26 @@ class AMDSMILogger():
         ######################################################
         # print GPU info
         print(default_line_1)
-        # Split the version line into 3 lines, each wrapping to the same width
-        print("| AMD-SMI            {0:40s} {1:17s}|".format(amd_smi_version.ljust(40), ""))
+        print("| AMD-SMI            {0:<57s} |".format(amd_smi_version))
 
         # Print amdgpu or kernel version based on availability, if neither then don't print
+        # Split the version line into 3 lines, each wrapping to the same width
         if amdgpu_version.strip() != "N/A":
-            print("| amdgpu Version:    {0:40s} {1:17s}|".format(amdgpu_version, ""))
+            print("| amdgpu Version:    {0:<57s} |".format(amdgpu_version))
         elif kernel_version.strip() != "N/A":
-            print("| OS kernel Version: {0:40s} {1:17s}|".format(kernel_version, ""))
+            print("| OS kernel Version: {0:<57s} |".format(kernel_version))
 
         if rocm_version != "N/A":
-            print("| ROCm Version:      {0:40s} {1:17s}|".format(rocm_version, ""))
+            print("| ROCm Version:      {0:<57s} |".format(rocm_version))
 
         # only print if the version is not "N/A"
         if vbios_version != "N/A":
-            print("| VBIOS Version:     {0:22s}  {1:33s} |".format(vbios_version, ""))
+            print("| VBIOS Version:     {0:<57s} |".format(vbios_version))
         if fw_pldm_version != "N/A":
-            print("| FW PLDM:           {0:15s}  {1:40s} |".format(fw_pldm_version, ""))
+            print("| FW PLDM:           {0:<57s} |".format(fw_pldm_version))
 
-        print("| Platform:          {0:25.25s} {1:32s}|".format(str(self.helpers.os_info()), ""))
+        print("| Platform:          {0:<57s} |".format(str(self.helpers.os_info())))
+
         print(default_line_2)
         print("| BDF                        GPU-Name | Mem-Uti   Temp   UEC       Power-Usage |")
         print("| GPU  HIP-ID  OAM-ID  Partition-Mode | GFX-Uti    Fan               Mem-Usage |")
