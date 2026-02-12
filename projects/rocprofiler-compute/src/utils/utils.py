@@ -1406,6 +1406,7 @@ def process_torch_trace_output(
         - Consolidates data across passes
         - Groups by Operator_Name, saving one CSV per operator
         - Output file is saved to workload/torch_trace/ directory
+        - Retains the original csv files in the workload directory
     """
     # Find all marker_api_trace CSV files
     console_log(f"Looking for marker and counter csv files in {workload_dir}")
@@ -1547,12 +1548,6 @@ def process_torch_trace_output(
         else:
             group.to_csv(output_file, index=False)
             console_log(f"Saved consolidated trace to {output_file}")
-    for trace_file in marker_api_trace_csvs + counter_collection_csvs:
-        try:
-            Path(trace_file).unlink()
-            console_debug(f"Removed temporary torch trace file: {trace_file}")
-        except OSError as e:
-            console_warning(f"Error removing temporary file {trace_file}: {e}")
 
 
 @demarcate
