@@ -26,37 +26,31 @@
 
 #include <hsa/hsa_ext_amd.h>
 
+#include <thread>
+
 namespace rocprofiler
 {
 namespace hsa
 {
-async_wait_manager&
-async_wait_manager::instance()
-{
-    static async_wait_manager mgr;
-    return mgr;
-}
-
-bool
-async_wait_manager::is_shutdown() const
-{
-    return _shutdown.load(std::memory_order_acquire);
-}
-
-void
-async_wait_manager::notify_shutdown()
-{
-    _shutdown.store(true, std::memory_order_release);
-}
-
-void
-async_wait_manager::reset()
-{
-    _shutdown.store(false, std::memory_order_release);
-}
-
 namespace
 {
+class async_wait_manager
+{
+public:
+    static async_wait_manager& instance()
+    {
+        static async_wait_manager mgr;
+        return mgr;
+    }
+
+    bool is_shutdown() const { return _shutdown.load(std::memory_order_acquire); }
+    void notify_shutdown() { _shutdown.store(true, std::memory_order_release); }
+    void reset() { _shutdown.store(false, std::memory_order_release); }
+
+private:
+    std::atomic<bool> _shutdown{false};
+};
+
 hsa_status_t
 system_event_handler(const hsa_amd_event_t* event, void* /*data*/)
 {
@@ -66,20 +60,7 @@ system_event_handler(const hsa_amd_event_t* event, void* /*data*/)
     }
     return HSA_STATUS_SUCCESS;
 }
-}  // namespace
 
-void
-async_wait_manager_init()
-{
-    auto* ext_table = get_amd_ext_table();
-    if(ext_table && ext_table->hsa_amd_register_system_event_handler_fn)
-    {
-        ext_table->hsa_amd_register_system_event_handler_fn(system_event_handler, nullptr);
-    }
-}
-
-namespace
-{
 bool
 signal_condition_satisfied(hsa_signal_condition_t cond,
                            hsa_signal_value_t     result,
@@ -96,11 +77,39 @@ signal_condition_satisfied(hsa_signal_condition_t cond,
 }
 }  // namespace
 
+void
+async_wait_manager_init()
+{
+    auto* ext_table = get_amd_ext_table();
+    if(ext_table && ext_table->hsa_amd_register_system_event_handler_fn)
+    {
+        ext_table->hsa_amd_register_system_event_handler_fn(system_event_handler, nullptr);
+    }
+}
+
+void
+notify_async_shutdown()
+{
+    async_wait_manager::instance().notify_shutdown();
+}
+
+void
+reset_async_shutdown()
+{
+    async_wait_manager::instance().reset();
+}
+
+bool
+is_async_shutdown()
+{
+    return async_wait_manager::instance().is_shutdown();
+}
+
 wait_result
 wait_or_shutdown(hsa_signal_t           signal,
                  hsa_signal_condition_t cond,
                  hsa_signal_value_t     value,
-                 const std::string&     callsite,
+                 std::string_view       callsite,
                  uint64_t               timeout_ns,
                  uint64_t               poll_interval_ns,
                  const CoreApiTable*    core_api)
@@ -143,7 +152,7 @@ wait_result
 wait_or_shutdown(std::condition_variable&      cv,
                  std::unique_lock<std::mutex>& lock,
                  std::function<bool()>         predicate,
-                 const std::string&            callsite,
+                 std::string_view              callsite,
                  uint64_t                      timeout_ns,
                  std::chrono::milliseconds     interval)
 {
@@ -168,6 +177,38 @@ wait_or_shutdown(std::condition_variable&      cv,
     }
     return wait_result::completed;
 }
+
+template <typename T>
+wait_result
+wait_or_shutdown(std::atomic<T>&  atomic_val,
+                 T                expected,
+                 std::string_view callsite,
+                 uint64_t         timeout_ns)
+{
+    auto& mgr   = async_wait_manager::instance();
+    auto  start = std::chrono::steady_clock::now();
+
+    while(atomic_val.load(std::memory_order_acquire) != expected)
+    {
+        if(mgr.is_shutdown())
+        {
+            ROCP_WARNING << "atomic wait interrupted by HSA async handler shutdown at " << callsite;
+            return wait_result::shutdown;
+        }
+        auto now     = std::chrono::steady_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(now - start).count();
+        if(timeout_ns != UINT64_MAX && static_cast<uint64_t>(elapsed) >= timeout_ns)
+        {
+            ROCP_ERROR << "atomic wait timed out at " << callsite;
+            return wait_result::timeout;
+        }
+        std::this_thread::yield();
+    }
+    return wait_result::completed;
+}
+
+template wait_result
+wait_or_shutdown(std::atomic<int>&, int, std::string_view, uint64_t);
 
 }  // namespace hsa
 }  // namespace rocprofiler

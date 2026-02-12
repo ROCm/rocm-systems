@@ -35,28 +35,25 @@ using namespace rocprofiler::hsa;
 class async_wait_manager_test : public ::testing::Test
 {
 protected:
-    void TearDown() override { async_wait_manager::instance().reset(); }
+    void TearDown() override { reset_async_shutdown(); }
 };
 
 // --- async_wait_manager basic state tests ---
 
-TEST_F(async_wait_manager_test, initial_state_not_shutdown)
-{
-    EXPECT_FALSE(async_wait_manager::instance().is_shutdown());
-}
+TEST_F(async_wait_manager_test, initial_state_not_shutdown) { EXPECT_FALSE(is_async_shutdown()); }
 
 TEST_F(async_wait_manager_test, notify_sets_shutdown_flag)
 {
-    async_wait_manager::instance().notify_shutdown();
-    EXPECT_TRUE(async_wait_manager::instance().is_shutdown());
+    notify_async_shutdown();
+    EXPECT_TRUE(is_async_shutdown());
 }
 
 TEST_F(async_wait_manager_test, reset_clears_shutdown_flag)
 {
-    async_wait_manager::instance().notify_shutdown();
-    EXPECT_TRUE(async_wait_manager::instance().is_shutdown());
-    async_wait_manager::instance().reset();
-    EXPECT_FALSE(async_wait_manager::instance().is_shutdown());
+    notify_async_shutdown();
+    EXPECT_TRUE(is_async_shutdown());
+    reset_async_shutdown();
+    EXPECT_FALSE(is_async_shutdown());
 }
 
 // --- Atomic wait tests ---
@@ -97,7 +94,7 @@ TEST_F(async_wait_manager_test, atomic_shutdown_interrupts)
 
     std::thread shutdown_trigger([]() {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        async_wait_manager::instance().notify_shutdown();
+        notify_async_shutdown();
     });
 
     auto result = wait_or_shutdown(value, 1, "test::atomic_shutdown_interrupts", 30'000'000'000ULL);
@@ -163,7 +160,7 @@ TEST_F(async_wait_manager_test, cv_shutdown_interrupts)
 
     std::thread shutdown_trigger([]() {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        async_wait_manager::instance().notify_shutdown();
+        notify_async_shutdown();
     });
 
     std::unique_lock<std::mutex> lock(mtx);
