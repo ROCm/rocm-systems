@@ -2111,6 +2111,55 @@ void VirtualGPU::submitCopyMemoryP2P(amd::CopyMemoryP2PCommand& cmd) {
   profilingEnd(cmd);
 }
 
+void VirtualGPU::submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd) {
+  // Make sure VirtualGPU has an exclusive access to the resources
+  amd::ScopedLock lock(execution());
+
+  profilingBegin(cmd);
+
+  auto& copyOps = cmd.copyOps();
+  if (copyOps.empty()) {
+    profilingEnd(cmd);
+    return;
+  }
+
+  // Sync caches for all source and destination memory objects
+  device::Memory::SyncFlags syncFlags;
+  syncFlags.skipEntire_ = false;
+
+  for (auto& op : copyOps) {
+    Memory* srcDevMem = dev().getGpuMemory(op.srcMemory);
+    Memory* dstDevMem = dev().getGpuMemory(op.dstMemory);
+
+    if (srcDevMem == nullptr || dstDevMem == nullptr) {
+      LogError("submitBatchCopyMemory: Invalid memory objects!");
+      cmd.setStatus(CL_INVALID_MEM_OBJECT);
+      profilingEnd(cmd);
+      return;
+    }
+
+    dstDevMem->syncCacheFromHost(*this, syncFlags);
+    srcDevMem->syncCacheFromHost(*this);
+  }
+
+  bool result = true;
+
+  // Execute batch copy through blit manager
+  result = blitMgr().copyBufferBatch(copyOps, false);
+
+  if (!result) {
+    LogError("submitBatchCopyMemory failed!");
+    cmd.setStatus(CL_OUT_OF_RESOURCES);
+  } else {
+    // Mark all destinations as written
+    for (const auto& op : copyOps) {
+      op.dstMemory->signalWrite(&dev());
+    }
+  }
+
+  profilingEnd(cmd);
+}
+
 void VirtualGPU::submitSvmMapMemory(amd::SvmMapMemoryCommand& vcmd) {
   // Make sure VirtualGPU has an exclusive access to the resources
   amd::ScopedLock lock(execution());
@@ -3380,12 +3429,29 @@ bool VirtualGPU::waitAllEngines(CommandBatch* cb) {
 }
 
 void VirtualGPU::waitEventLock(CommandBatch* cb) {
-  bool earlyDone = false;
+  bool earlyDone = true;
+  GpuEvent eventsCopy[AllEngines];
+
   {
-    // Make sure VirtualGPU has an exclusive access to the resources
     amd::ScopedLock lock(execution());
-    earlyDone = waitAllEngines(cb);
+
+    GpuEvent* events = (cb == nullptr) ? events_ : cb->events_;
+
+    // The first loop is to flush all engines and/or check if
+    // engines are idle already
+    for (uint i = 0; i < AllEngines; ++i) {
+      eventsCopy[i] = events[i];
+      earlyDone &= isDone(&events[i]);
+    }
+
+    // Release all pinned memory
+    releasePinnedMem();
   }
+
+  for (uint i = 0; i < AllEngines; ++i) {
+    waitForEvent(&eventsCopy[i]);
+  }
+
   // Get timestamp, incase readjustTimeGPU_ needs to be updated
   uint64_t endTimeStampCPU = amd::Os::timeNanos();
 

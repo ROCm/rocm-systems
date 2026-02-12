@@ -20,7 +20,7 @@ Panel Config:
             if ((CPF_CPF_STAT_BUSY + CPF_CPF_STAT_IDLE) != 0) else None))
           max: MAX((((100 * CPF_CPF_STAT_BUSY) / (CPF_CPF_STAT_BUSY + CPF_CPF_STAT_IDLE))
             if ((CPF_CPF_STAT_BUSY + CPF_CPF_STAT_IDLE) != 0) else None))
-          unit: pct
+          unit: Percent
         CPF Stall:
           avg: AVG((((100 * CPF_CPF_STAT_STALL) / CPF_CPF_STAT_BUSY) if (CPF_CPF_STAT_BUSY
             != 0) else None))
@@ -28,7 +28,7 @@ Panel Config:
             != 0) else None))
           max: MAX((((100 * CPF_CPF_STAT_STALL) / CPF_CPF_STAT_BUSY) if (CPF_CPF_STAT_BUSY
             != 0) else None))
-          unit: pct
+          unit: Percent
         CPF-L2 Utilization:
           avg: AVG((((100 * CPF_CPF_TCIU_BUSY) / (CPF_CPF_TCIU_BUSY + CPF_CPF_TCIU_IDLE))
             if ((CPF_CPF_TCIU_BUSY + CPF_CPF_TCIU_IDLE) != 0) else None))
@@ -36,7 +36,7 @@ Panel Config:
             if ((CPF_CPF_TCIU_BUSY + CPF_CPF_TCIU_IDLE) != 0) else None))
           max: MAX((((100 * CPF_CPF_TCIU_BUSY) / (CPF_CPF_TCIU_BUSY + CPF_CPF_TCIU_IDLE))
             if ((CPF_CPF_TCIU_BUSY + CPF_CPF_TCIU_IDLE) != 0) else None))
-          unit: pct
+          unit: Percent
         CPF-L2 Stall:
           avg: AVG((((100 * CPF_CPF_TCIU_STALL) / CPF_CPF_TCIU_BUSY) if (CPF_CPF_TCIU_BUSY
             != 0) else None))
@@ -44,7 +44,7 @@ Panel Config:
             != 0) else None))
           max: MAX((((100 * CPF_CPF_TCIU_STALL) / CPF_CPF_TCIU_BUSY) if (CPF_CPF_TCIU_BUSY
             != 0) else None))
-          unit: pct
+          unit: Percent
         CPF-UTCL1 Stall:
           avg: AVG(((100 * CPF_CMP_UTCL1_STALL_ON_TRANSLATION) / CPF_CPF_STAT_BUSY)
             if (CPF_CPF_STAT_BUSY != 0) else None)
@@ -52,7 +52,7 @@ Panel Config:
             if (CPF_CPF_STAT_BUSY != 0) else None)
           max: MAX(((100 * CPF_CMP_UTCL1_STALL_ON_TRANSLATION) / CPF_CPF_STAT_BUSY)
             if (CPF_CPF_STAT_BUSY != 0) else None)
-          unit: pct
+          unit: Percent
   - metric_table:
       id: 502
       title: Command processor packet processor (CPC)
@@ -70,7 +70,7 @@ Panel Config:
             != 0) else None)
           max: MAX((100 * CPC_SYNC_FIFO_FULL) / CPC_SYNC_WRREQ_FIFO_BUSY if (CPC_SYNC_WRREQ_FIFO_BUSY
             != 0) else None)
-          unit: pct
+          unit: Percent
         CPC CANE Stall Rate:
           avg: AVG((100 * CPC_CANE_STALL) / CPC_CANE_BUSY if (CPC_CANE_BUSY != 0)
             else None)
@@ -78,12 +78,12 @@ Panel Config:
             else None)
           max: MAX((100 * CPC_CANE_STALL) / CPC_CANE_BUSY if (CPC_CANE_BUSY != 0)
             else None)
-          unit: pct
+          unit: Percent
         CPC ADC Utilization:
           avg: AVG((100 * CPC_TG_SEND) / CPC_GD_BUSY if (CPC_GD_BUSY != 0) else None)
           min: MIN((100 * CPC_TG_SEND) / CPC_GD_BUSY if (CPC_GD_BUSY != 0) else None)
           max: MAX((100 * CPC_TG_SEND) / CPC_GD_BUSY if (CPC_GD_BUSY != 0) else None)
-          unit: pct
+          unit: Percent
         CPC Utilization:
           avg: AVG((((100 * CPC_CPC_STAT_BUSY) / (CPC_CPC_STAT_BUSY + CPC_CPC_STAT_IDLE))
             if ((CPC_CPC_STAT_BUSY + CPC_CPC_STAT_IDLE) != 0) else None))
@@ -91,7 +91,7 @@ Panel Config:
             if ((CPC_CPC_STAT_BUSY + CPC_CPC_STAT_IDLE) != 0) else None))
           max: MAX((((100 * CPC_CPC_STAT_BUSY) / (CPC_CPC_STAT_BUSY + CPC_CPC_STAT_IDLE))
             if ((CPC_CPC_STAT_BUSY + CPC_CPC_STAT_IDLE) != 0) else None))
-          unit: pct
+          unit: Percent
         CPC Stall Rate:
           avg: AVG((((100 * CPC_CPC_STAT_STALL) / CPC_CPC_STAT_BUSY) if (CPC_CPC_STAT_BUSY
             != 0) else None))
@@ -99,7 +99,7 @@ Panel Config:
             != 0) else None))
           max: MAX((((100 * CPC_CPC_STAT_STALL) / CPC_CPC_STAT_BUSY) if (CPC_CPC_STAT_BUSY
             != 0) else None))
-          unit: pct
+          unit: Percent
         CPC Packet Decoding Utilization:
           avg: AVG((100 * CPC_ME1_BUSY_FOR_PACKET_DECODE) / CPC_CPC_STAT_BUSY if (CPC_CPC_STAT_BUSY
             != 0) else None)
@@ -107,7 +107,7 @@ Panel Config:
             != 0) else None)
           max: MAX((100 * CPC_ME1_BUSY_FOR_PACKET_DECODE) / CPC_CPC_STAT_BUSY if (CPC_CPC_STAT_BUSY
             != 0) else None)
-          unit: pct
+          unit: Percent
         CPC-Workgroup Manager Utilization:
           avg: AVG((100 * CPC_ME1_DC0_SPI_BUSY) / CPC_CPC_STAT_BUSY if (CPC_CPC_STAT_BUSY
             != 0) else None)
@@ -115,7 +115,7 @@ Panel Config:
             != 0) else None)
           max: MAX((100 * CPC_ME1_DC0_SPI_BUSY) / CPC_CPC_STAT_BUSY if (CPC_CPC_STAT_BUSY
             != 0) else None)
-          unit: Pct
+          unit: Percent
         CPC-L2 Utilization:
           avg: AVG((((100 * CPC_CPC_TCIU_BUSY) / (CPC_CPC_TCIU_BUSY + CPC_CPC_TCIU_IDLE))
             if ((CPC_CPC_TCIU_BUSY + CPC_CPC_TCIU_IDLE) != 0) else None))
@@ -123,7 +123,7 @@ Panel Config:
             if ((CPC_CPC_TCIU_BUSY + CPC_CPC_TCIU_IDLE) != 0) else None))
           max: MAX((((100 * CPC_CPC_TCIU_BUSY) / (CPC_CPC_TCIU_BUSY + CPC_CPC_TCIU_IDLE))
             if ((CPC_CPC_TCIU_BUSY + CPC_CPC_TCIU_IDLE) != 0) else None))
-          unit: pct
+          unit: Percent
         CPC-UTCL1 Stall:
           avg: AVG(((100 * CPC_UTCL1_STALL_ON_TRANSLATION) / CPC_CPC_STAT_BUSY) if
             (CPC_CPC_STAT_BUSY != 0) else None)
@@ -131,7 +131,7 @@ Panel Config:
             (CPC_CPC_STAT_BUSY != 0) else None)
           max: MAX(((100 * CPC_UTCL1_STALL_ON_TRANSLATION) / CPC_CPC_STAT_BUSY) if
             (CPC_CPC_STAT_BUSY != 0) else None)
-          unit: pct
+          unit: Percent
         CPC-UTCL2 Utilization:
           avg: AVG((((100 * CPC_CPC_UTCL2IU_BUSY) / (CPC_CPC_UTCL2IU_BUSY + CPC_CPC_UTCL2IU_IDLE))
             if ((CPC_CPC_UTCL2IU_BUSY + CPC_CPC_UTCL2IU_IDLE) != 0) else None))
@@ -139,7 +139,7 @@ Panel Config:
             if ((CPC_CPC_UTCL2IU_BUSY + CPC_CPC_UTCL2IU_IDLE) != 0) else None))
           max: MAX((((100 * CPC_CPC_UTCL2IU_BUSY) / (CPC_CPC_UTCL2IU_BUSY + CPC_CPC_UTCL2IU_IDLE))
             if ((CPC_CPC_UTCL2IU_BUSY + CPC_CPC_UTCL2IU_IDLE) != 0) else None))
-          unit: pct
+          unit: Percent
   metrics_description:
     CPF Utilization: Percent of total cycles where the CPF was busy actively doing
       any work. The ratio of CPF busy cycles over total cycles counted by the CPF.

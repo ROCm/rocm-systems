@@ -79,6 +79,20 @@ bool Device::Create() {
 
   // Current is default pool after device creation
   current_mem_pool_ = default_mem_pool_;
+
+  // Create managed memory pool
+  hipMemPoolProps props = {.allocType = hipMemAllocationTypeManaged,
+                           .handleTypes = hipMemHandleTypeNone,
+                           .location = {.type = hipMemLocationTypeDevice, .id = deviceId_},
+                           .win32SecurityAttributes = nullptr,
+                           .maxSize = 0,
+                           .reserved = {}};
+  default_managed_mem_pool_ = new MemoryPool(this, &props);
+  if (default_managed_mem_pool_ == nullptr) {
+    return false;
+  }
+  current_managed_mem_pool_ = default_managed_mem_pool_;
+
   return true;
 }
 
@@ -329,6 +343,10 @@ Device::~Device() {
 
   if (graph_mem_pool_ != nullptr) {
     graph_mem_pool_->release();
+  }
+
+  if (default_managed_mem_pool_ != nullptr) {
+    default_managed_mem_pool_->release();
   }
 
   if (null_stream_ != nullptr) {
