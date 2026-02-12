@@ -1920,6 +1920,11 @@ private:
     std::vector<std::string> onerank_names_;      // oneRankReduce kernel names (parallel to onerank_text_offsets_)
     std::unordered_map<std::string, FuncIdMapping> funcid_map_;
 
+    // Pre-allocation tracking for .dynsym/.dynstr (set during collectSections, used in patchSections)
+    size_t prealloc_dynstr_orig_size_ = 0;     // Original .dynstr size before pre-allocation
+    size_t prealloc_dynsym_orig_count_ = 0;    // Original .dynsym symbol count before pre-allocation
+    size_t prealloc_dynsym_insert_idx_ = 0;    // Index where new LOCAL symbols were pre-allocated
+
     // Debug line info: (offset in merged .debug_line, size, orig_text_addr, new_text_offset)
     struct DebugLineChunk {
         size_t merged_offset;      // Offset in merged .debug_line section
@@ -2313,6 +2318,64 @@ private:
                 sec.entsize = s->entsize;
                 sec.data = disp_->getBytes(*s);
                 sections_.push_back(std::move(sec));
+            }
+        }
+
+        // Pre-allocate space in .dynsym and .dynstr for symbols to be added in Pass 3
+        // This ensures computeLayout() accounts for the final section sizes
+        {
+            SectionInfo* dynsym_sec = nullptr;
+            SectionInfo* dynstr_sec = nullptr;
+            for (auto& s : sections_) {
+                if (s.name == ".dynsym") dynsym_sec = &s;
+                if (s.name == ".dynstr") dynstr_sec = &s;
+            }
+            
+            if (dynsym_sec && dynstr_sec && (!kernel_text_offsets_.empty() || !onerank_text_offsets_.empty())) {
+                // Calculate space needed for symbol names in .dynstr
+                size_t names_size = 0;
+                for (const auto& [kern, text_off] : kernel_text_offsets_) {
+                    names_size += kern->name.size() + 1;  // +1 for null terminator
+                }
+                for (const auto& name : onerank_names_) {
+                    names_size += name.size() + 1;
+                }
+                
+                size_t num_new_symbols = kernel_text_offsets_.size() + onerank_text_offsets_.size();
+                
+                // Record original sizes for later reference
+                prealloc_dynstr_orig_size_ = dynstr_sec->data.size();
+                prealloc_dynsym_orig_count_ = dynsym_sec->data.size() / 24;
+                
+                // Find first global symbol position in .dynsym
+                size_t first_global_idx = dynsym_sec->data.size() / 24;
+                for (size_t i = 0; i * 24 < dynsym_sec->data.size(); i++) {
+                    uint8_t* sym = dynsym_sec->data.data() + i * 24;
+                    uint8_t binding = ELF64_ST_BIND(sym[4]);  // st_info byte
+                    if (binding == STB_GLOBAL || binding == STB_WEAK) {
+                        first_global_idx = i;
+                        break;
+                    }
+                }
+                prealloc_dynsym_insert_idx_ = first_global_idx;
+                
+                // Pre-allocate .dynstr (append space at end)
+                dynstr_sec->data.resize(dynstr_sec->data.size() + names_size);
+                
+                // Pre-allocate .dynsym (insert placeholder LOCAL symbols before first GLOBAL)
+                // This shifts GLOBAL symbols down, maintaining proper LOCAL/GLOBAL ordering
+                std::vector<uint8_t> placeholder_syms(num_new_symbols * 24, 0);
+                if (first_global_idx * 24 < dynsym_sec->data.size()) {
+                    dynsym_sec->data.insert(dynsym_sec->data.begin() + first_global_idx * 24,
+                                           placeholder_syms.begin(), placeholder_syms.end());
+                } else {
+                    dynsym_sec->data.insert(dynsym_sec->data.end(),
+                                           placeholder_syms.begin(), placeholder_syms.end());
+                }
+                
+                printf("Pre-allocated for %zu symbols: .dynstr +%zu bytes (now %zu), .dynsym +%zu entries (now %zu) at idx %zu\n",
+                       num_new_symbols, names_size, dynstr_sec->data.size(),
+                       num_new_symbols, dynsym_sec->data.size() / 24, first_global_idx);
             }
         }
 
@@ -3432,40 +3495,31 @@ private:
                 patchSymbol(sym, dynsym_strtab->data.data(), dynsym_strtab->data.size());
             }
 
-            // Add ncclDevFunc_* symbols to .dynsym for symbol-based relocations
-            // These are internal functions that need to be in .dynsym so relocations can
-            // reference them by symbol index instead of absolute address.
-            // Prefer LOCAL HIDDEN (like specialized kernel .o files), but if that's not
-            // possible due to ordering constraints, use GLOBAL HIDDEN (not PROTECTED).
-            if (!kernel_text_offsets_.empty()) {
-                printf("Adding %zu ncclDevFunc_* symbols to .dynsym for relocations...\n", kernel_text_offsets_.size());
+            // Add ncclDevFunc_* and oneRankReduce symbols to .dynsym for symbol-based relocations
+            // Space was pre-allocated in collectSections() to ensure layout is correct
+            // We fill in the pre-allocated space here with actual symbol data
+            if (!kernel_text_offsets_.empty() || !onerank_text_offsets_.empty()) {
+                printf("Filling %zu ncclDevFunc_* + %zu oneRankReduce symbols into pre-allocated .dynsym/.dynstr...\n",
+                       kernel_text_offsets_.size(), onerank_text_offsets_.size());
                 
                 uint16_t text_shndx = 0;
                 for (size_t j = 0; j < sections_.size(); j++) {
                     if (sections_[j].name == ".text") { text_shndx = j + 1; break; }
                 }
 
-                // Find first global symbol index (for LOCAL symbol insertion)
-                size_t first_global_idx = dynsym_sec->data.size() / 24;
-                for (size_t i = 0; i * 24 < dynsym_sec->data.size(); i++) {
-                    uint8_t* sym = dynsym_sec->data.data() + i * 24;
-                    uint8_t binding = ELF64_ST_BIND(sym[4]);
-                    if (binding == STB_GLOBAL || binding == STB_WEAK) {
-                        first_global_idx = i;
-                        break;
-                    }
-                }
-
-                // Build LOCAL HIDDEN symbols
-                std::vector<uint8_t> local_syms;
+                // Current position in pre-allocated .dynstr space
+                size_t dynstr_pos = prealloc_dynstr_orig_size_;
+                // Current slot in pre-allocated .dynsym space
+                size_t dynsym_slot = prealloc_dynsym_insert_idx_;
+                
+                // Fill in ncclDevFunc_* symbols
                 for (const auto& [kern, text_off] : kernel_text_offsets_) {
-                    // Append name to .dynstr
-                    uint32_t name_off = dynsym_strtab->data.size();
-                    dynsym_strtab->data.insert(dynsym_strtab->data.end(),
-                                              kern->name.begin(), kern->name.end());
-                    dynsym_strtab->data.push_back('\0');
+                    // Write name to pre-allocated .dynstr space
+                    uint32_t name_off = dynstr_pos;
+                    memcpy(dynsym_strtab->data.data() + dynstr_pos, kern->name.c_str(), kern->name.size() + 1);
+                    dynstr_pos += kern->name.size() + 1;
 
-                    // Create Elf64_Sym entry as LOCAL HIDDEN (preferred)
+                    // Create Elf64_Sym entry as LOCAL HIDDEN
                     Elf64_Sym sym = {};
                     sym.st_name = name_off;
                     sym.st_value = text_addr_ + text_off + kern->func_offset;
@@ -3474,54 +3528,18 @@ private:
                     sym.st_other = STV_HIDDEN;
                     sym.st_shndx = text_shndx;
 
-                    const uint8_t* p = reinterpret_cast<const uint8_t*>(&sym);
-                    local_syms.insert(local_syms.end(), p, p + sizeof(sym));
-                }
-
-                // Insert LOCAL symbols before first global symbol
-                if (first_global_idx * 24 < dynsym_sec->data.size()) {
-                    dynsym_sec->data.insert(dynsym_sec->data.begin() + first_global_idx * 24,
-                                          local_syms.begin(), local_syms.end());
-                } else {
-                    // No global symbols yet, append at end
-                    dynsym_sec->data.insert(dynsym_sec->data.end(),
-                                          local_syms.begin(), local_syms.end());
-                }
-                printf("  Added %zu LOCAL HIDDEN symbols to .dynsym (now %zu total)\n", 
-                       kernel_text_offsets_.size(), dynsym_sec->data.size() / 24);
-            }
-            
-            // Add oneRankReduce symbols to .dynsym for symbol-based relocations
-            // These are also internal functions that need symbols for relocations.
-            // Use LOCAL HIDDEN if possible (like ncclDevFunc_* symbols).
-            if (!onerank_text_offsets_.empty()) {
-                printf("Adding %zu oneRankReduce symbols to .dynsym for relocations...\n", onerank_text_offsets_.size());
-                
-                uint16_t text_shndx = 0;
-                for (size_t j = 0; j < sections_.size(); j++) {
-                    if (sections_[j].name == ".text") { text_shndx = j + 1; break; }
+                    // Write to pre-allocated .dynsym slot
+                    memcpy(dynsym_sec->data.data() + dynsym_slot * 24, &sym, sizeof(sym));
+                    dynsym_slot++;
                 }
                 
-                // Find first global symbol index (for LOCAL symbol insertion)
-                size_t first_global_idx = dynsym_sec->data.size() / 24;
-                for (size_t i = 0; i * 24 < dynsym_sec->data.size(); i++) {
-                    uint8_t* sym = dynsym_sec->data.data() + i * 24;
-                    uint8_t binding = ELF64_ST_BIND(sym[4]);
-                    if (binding == STB_GLOBAL || binding == STB_WEAK) {
-                        first_global_idx = i;
-                        break;
-                    }
-                }
-                
-                // Build LOCAL HIDDEN symbols
-                std::vector<uint8_t> local_syms;
+                // Fill in oneRankReduce symbols
                 for (size_t i = 0; i < onerank_text_offsets_.size(); i++) {
-                    // Append name to .dynstr
-                    uint32_t name_off = dynsym_strtab->data.size();
+                    // Write name to pre-allocated .dynstr space
+                    uint32_t name_off = dynstr_pos;
                     const std::string& name = (i < onerank_names_.size()) ? onerank_names_[i] : "<unknown>";
-                    dynsym_strtab->data.insert(dynsym_strtab->data.end(),
-                                              name.begin(), name.end());
-                    dynsym_strtab->data.push_back('\0');
+                    memcpy(dynsym_strtab->data.data() + dynstr_pos, name.c_str(), name.size() + 1);
+                    dynstr_pos += name.size() + 1;
                     
                     // Create Elf64_Sym entry as LOCAL HIDDEN
                     Elf64_Sym sym = {};
@@ -3532,21 +3550,14 @@ private:
                     sym.st_other = STV_HIDDEN;
                     sym.st_shndx = text_shndx;
                     
-                    const uint8_t* p = reinterpret_cast<const uint8_t*>(&sym);
-                    local_syms.insert(local_syms.end(), p, p + sizeof(sym));
+                    // Write to pre-allocated .dynsym slot
+                    memcpy(dynsym_sec->data.data() + dynsym_slot * 24, &sym, sizeof(sym));
+                    dynsym_slot++;
                 }
                 
-                // Insert LOCAL symbols before first global symbol
-                if (first_global_idx * 24 < dynsym_sec->data.size()) {
-                    dynsym_sec->data.insert(dynsym_sec->data.begin() + first_global_idx * 24,
-                                          local_syms.begin(), local_syms.end());
-                } else {
-                    // No global symbols yet, append at end
-                    dynsym_sec->data.insert(dynsym_sec->data.end(),
-                                          local_syms.begin(), local_syms.end());
-                }
-                printf("  Added %zu LOCAL HIDDEN oneRankReduce symbols to .dynsym (now %zu total)\n",
-                       onerank_text_offsets_.size(), dynsym_sec->data.size() / 24);
+                printf("  Filled %zu symbols in .dynsym (total %zu), .dynstr used %zu/%zu bytes\n",
+                       kernel_text_offsets_.size() + onerank_text_offsets_.size(),
+                       dynsym_sec->data.size() / 24, dynstr_pos, dynsym_strtab->data.size());
             }
         }
 
@@ -4246,8 +4257,13 @@ private:
         std::unordered_map<uint64_t, uint32_t> addr_to_symidx;
         printf("Building address-to-symbol-index map from .dynsym...\n");
         uint16_t text_shndx = 0;
+        uint64_t text_size = 0;
         for (size_t j = 0; j < sections_.size(); j++) {
-            if (sections_[j].name == ".text") { text_shndx = j + 1; break; }
+            if (sections_[j].name == ".text") {
+                text_shndx = j + 1;
+                text_size = sections_[j].size();
+                break;
+            }
         }
         
         for (size_t sym_idx = 0; sym_idx * 24 < dynsym_sec->data.size(); sym_idx++) {
@@ -4260,7 +4276,7 @@ private:
             memcpy(&name_idx, sym, 4);
             
             // Only map symbols in .text section (functions)
-            if (sym_shndx == text_shndx && sym_val >= text_addr_ && sym_val < text_addr_ + 0x100000) {
+            if (sym_shndx == text_shndx && sym_val >= text_addr_ && sym_val < text_addr_ + text_size) {
                 // Get symbol name for debugging
                 const char* sym_name = "";
                 if (name_idx < dynsym_strtab->data.size()) {

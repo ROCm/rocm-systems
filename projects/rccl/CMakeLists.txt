@@ -1297,25 +1297,6 @@ if (DEVICE_LINKER)
   set(FINAL_DISPATCH_OBJ ${CMAKE_CURRENT_BINARY_DIR}/final_dispatch.o)
   set(HIPCC_COMPILER /opt/rocm/bin/hipcc)
   
-  # COMMENTED OUT: Get the GPU target for device linker
-  # BUILD_LOCAL_GPU_TARGET_ONLY already sets DEFAULT_GPUS via rocm_local_targets() (line 82),
-  # and GPU_TARGETS is set from DEFAULT_GPUS (line 89), so this code is redundant.
-  # if(BUILD_LOCAL_GPU_TARGET_ONLY AND DEFINED DEFAULT_GPUS)
-  #   list(GET DEFAULT_GPUS 0 DEVICE_LINKER_GPU_TARGET)
-  #   # Add device linker suffix if not already present
-  #   string(REGEX REPLACE ":.*" "" base_arch "${DEVICE_LINKER_GPU_TARGET}")
-  #   set(DEVICE_LINKER_GPU_TARGET "${base_arch}:xnack-:sramecc+")
-  # else()
-  #   # Use first target from GPU_TARGETS (which already has device linker suffixes applied)
-  #   list(GET GPU_TARGETS 0 DEVICE_LINKER_GPU_TARGET)
-  # endif()
-  # string(REGEX REPLACE ":.*" "" DEVICE_LINKER_GPU_BASE "${DEVICE_LINKER_GPU_TARGET}")
-  # set(DEVICE_LINKER_BUNDLE_TARGET "hipv4-amdgcn-amd-amdhsa--${DEVICE_LINKER_GPU_BASE}:sramecc+:xnack-")
-  # message(STATUS "Device linker target: ${DEVICE_LINKER_GPU_TARGET} (bundle: ${DEVICE_LINKER_BUNDLE_TARGET})")
-  
-  # Device linker binary is NOT built here. Build it by hand from tools/device_linker/:
-  #   cd tools/device_linker && cmake -B build -S . -DLLVM_DIR=... && cmake --build build
-  # Binary must exist at tools/device_linker/device_linker for the pipeline below to run.
   #
   # Step 1: Compile specialized kernels to device-only objects using CMake OBJECT library
   # Using --cuda-device-only --offload-arch --no-gpu-bundle-output produces device-only ELF files directly
@@ -1482,9 +1463,8 @@ if (DEVICE_LINKER)
   # Steps 3-5 are done by build_with_device_linker.sh
   set(DISPATCHER_FINAL_OBJ ${DEVICE_LINKER_OUTPUT_DIR}/dispatcher_final.o)
   
-  # Device linker binary is NOT built by this project. Build it from tools/device_linker/:
-  #   cd tools/device_linker && cmake -B build -S . -DLLVM_DIR=... && cmake --build build
-  # Binary must exist at tools/device_linker/device_linker for the pipeline below to run.
+  # Device linker binary is NOT built by this project.
+
   add_custom_command(
     OUTPUT ${DISPATCHER_FINAL_OBJ}
     COMMAND ${CMAKE_COMMAND} -E make_directory ${DEVICE_LINKER_OUTPUT_DIR}
