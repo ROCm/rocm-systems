@@ -30,26 +30,74 @@ namespace {
       ssize_t numElementsPerBlock = elementsPerBlock + (blockIdx.x < remainderElements ? 1 : 0);
       ssize_t channelOffset = blockIdx.x * elementsPerBlock + min((ssize_t)blockIdx.x, remainderElements);
 
-      // Array of src pointers pointing to rank offsets in tempBuff
-      void** srcPtrs = (void**)ncclScratchForWarp(0); 
-      if (tid == 0) {
-        for (int i = 0; i < nRanks; i++) {
-          // Define offset into tempbuff for each rank's data
-          const ssize_t srcOffset = i * numElements + channelOffset;
-          srcPtrs[i] = (void*)((T*)work->tempBuff + srcOffset);
-        }
-      }
-      // Sync threads to ensure all srcPtrs are set before reduction
-      __syncthreads();
-
       T* recvbuff = (T*)work->recvbuff;
-      // Array for destination pointer to recvbuff
-      void* dstPtrs[1];
-      dstPtrs[0] = (void*)(recvbuff + channelOffset);
-      if (tid < nthreads) {
-        // Call reduction across all rank offsets in tempbuff and store in recvbuff
-        reduceCopy<COLL_UNROLL, USE_ACC, RedOp, T, 0, 1, 64, 0, 1, 1, 0>
-          (tid, nthreads, ncclShmem.redOpArgs[0], ncclShmem.redOpArgs, false, nRanks, srcPtrs, 1, dstPtrs, numElementsPerBlock);
+      
+      // Multi-pass reduction for >64 ranks
+      // reduceCopy has a hard limit of 64 for MaxSrcs due to register pressure
+      constexpr int maxRanksPerPass = 64;
+      
+      if (nRanks <= maxRanksPerPass) {
+        // Single-pass for ≤64 ranks (original implementation)
+        // Array of src pointers pointing to rank offsets in tempBuff
+        void** srcPtrs = (void**)ncclScratchForWarp(0); 
+        if (tid == 0) {
+          for (int i = 0; i < nRanks; i++) {
+            // Define offset into tempbuff for each rank's data
+            const ssize_t srcOffset = i * numElements + channelOffset;
+            srcPtrs[i] = (void*)((T*)work->tempBuff + srcOffset);
+          }
+        }
+        // Sync threads to ensure all srcPtrs are set before reduction
+        __syncthreads();
+
+        // Array for destination pointer to recvbuff
+        void* dstPtrs[1];
+        dstPtrs[0] = (void*)(recvbuff + channelOffset);
+        if (tid < nthreads) {
+          // Call reduction across all rank offsets in tempbuff and store in recvbuff
+          reduceCopy<COLL_UNROLL, USE_ACC, RedOp, T, 0, 1, 64, 0, 1, 1, 0>
+            (tid, nthreads, ncclShmem.redOpArgs[0], ncclShmem.redOpArgs, false, nRanks, srcPtrs, 1, dstPtrs, numElementsPerBlock);
+        }
+      } else {
+        // Multi-pass reduction for >64 ranks
+        // Pass 0: Reduce first batch of ranks into recvbuff
+        // Pass 1+: Reduce next batch with recvbuff content (accumulation)
+        
+        int numPasses = (nRanks + maxRanksPerPass - 1) / maxRanksPerPass;
+        
+        for (int pass = 0; pass < numPasses; pass++) {
+          int rankStart = pass * maxRanksPerPass;
+          int rankEnd = min(rankStart + maxRanksPerPass, nRanks);
+          int ranksThisPass = rankEnd - rankStart;
+          
+          // Setup source pointers for this pass
+          void** srcPtrs = (void**)ncclScratchForWarp(0);
+          if (tid == 0) {
+            int srcIdx = 0;
+            // If this is not the first pass, include recvbuff as first source (accumulator)
+            if (pass > 0) {
+              srcPtrs[srcIdx++] = (void*)(recvbuff + channelOffset);
+            }
+            // Add rank sources for this pass
+            for (int i = rankStart; i < rankEnd; i++) {
+              const ssize_t srcOffset = i * numElements + channelOffset;
+              srcPtrs[srcIdx++] = (void*)((T*)work->tempBuff + srcOffset);
+            }
+          }
+          __syncthreads();
+          
+          // Number of sources = ranks in this pass + (recvbuff if accumulating)
+          int nSrcs = ranksThisPass + (pass > 0 ? 1 : 0);
+          
+          void* dstPtrs[1];
+          dstPtrs[0] = (void*)(recvbuff + channelOffset);
+          
+          if (tid < nthreads) {
+            reduceCopy<COLL_UNROLL, USE_ACC, RedOp, T, 0, 1, 64, 0, 1, 1, 0>
+              (tid, nthreads, ncclShmem.redOpArgs[0], ncclShmem.redOpArgs, false, nSrcs, srcPtrs, 1, dstPtrs, numElementsPerBlock);
+          }
+          __syncthreads();
+        }
       }
     } else {
   #ifdef ENABLE_WARP_SPEED
