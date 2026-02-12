@@ -1,6 +1,12 @@
 # The test must be with CMake 3.18 or above which supports LINK_LANGUAGE that is necessary for
 # Fortran build.
 cmake_minimum_required(VERSION 3.18.0)
+# Flang (LLVM Fortran) is available in TheRock on Windows, but CMake doesn't fully support it yet.
+# CMake fails with "Fortran compiler identification is unknown" for LLVM Flang.
+if(WIN32)
+  message(STATUS "This sample is disabled on Windows - CMake doesn't fully support LLVM Flang yet.")
+  return()
+endif()
 if(ENABLE_ADDRESS_SANITIZER)
   message(STATUS "This fortran sample is temporarily disabled due to SWDEV-462616.")
   return()
