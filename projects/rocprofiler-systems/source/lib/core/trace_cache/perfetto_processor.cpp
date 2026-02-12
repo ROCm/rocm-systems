@@ -989,7 +989,7 @@ perfetto_processor_t::handle([[maybe_unused]] const pmc_event_with_sample& _pmc)
 
 #if ROCPROFSYS_USE_ROCM > 0
 void
-perfetto_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& _gpu_pmc)
+perfetto_processor_t::handle([[maybe_unused]] const pmc::gpu::sample& _gpu_pmc)
 {
     auto _ts        = _gpu_pmc.timestamp;
     auto _device_id = _gpu_pmc.device_id;

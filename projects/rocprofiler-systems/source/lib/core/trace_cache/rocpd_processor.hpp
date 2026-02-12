@@ -52,7 +52,7 @@ public:
     void handle(const in_time_sample& sample);
     void handle(const pmc_event_with_sample& sample);
 #if ROCPROFSYS_USE_ROCM > 0
-    void handle(const gpu_pmc_sample& sample);
+    void handle(const pmc::gpu::sample& sample);
 #endif
     void handle(const cpu_freq_sample& sample);
     void handle(const backtrace_region_sample& sample);

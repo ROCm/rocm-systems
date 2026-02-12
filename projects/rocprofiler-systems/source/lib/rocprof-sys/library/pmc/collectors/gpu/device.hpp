@@ -326,8 +326,9 @@ private:
             is_metric_supported(gpu_metrics.pcie_bandwidth_acc) ||
             is_metric_supported(gpu_metrics.pcie_bandwidth_inst);
 
-        LOG_DEBUG("Device [{}] supported metrics: {}", m_index,
-                  format_supported_metrics(m_supported_metrics));
+        // TODO: move back to debug after ci validation is done
+        LOG_INFO("Device [{}] supported metrics: {}", m_index,
+                 format_supported_metrics(m_supported_metrics));
 
         return m_supported_metrics.value != 0;
     }

@@ -125,8 +125,5 @@ get_size(const pmc::gpu::sample& item)
         item.metric_values.pcie.bandwidth.inst);
 }
 
-/// @brief GPU PMC sample type - legacy alias for backward compatibility
-using gpu_pmc_sample = pmc::gpu::sample;
-
 }  // namespace trace_cache
 }  // namespace rocprofsys

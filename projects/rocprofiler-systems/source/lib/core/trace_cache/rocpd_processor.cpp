@@ -358,7 +358,7 @@ rocpd_processor_t::handle([[maybe_unused]] const pmc_event_with_sample& _pmc)
 
 #if ROCPROFSYS_USE_ROCM > 0
 void
-rocpd_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& _gpu_pmc)
+rocpd_processor_t::handle([[maybe_unused]] const pmc::gpu::sample& _gpu_pmc)
 {
     const auto* _name            = trait::name<category::amd_smi>::value;
     auto        name_primary_key = m_data_processor->insert_string(_name);
@@ -713,9 +713,6 @@ rocpd_processor_t::post_process_metadata()
             m_agent_manager
                 ->get_agent_by_type_index(pmc_info.agent_type_index, pmc_info.type)
                 .base_id;
-
-        LOG_INFO("Inserting PMC description: agent_primary_key: {}, pmc_info: {}",
-                 agent_primary_key, pmc_info.name);
 
         m_data_processor->insert_pmc_description(
             n_info.id, process_info.pid, agent_primary_key, pmc_info.target_arch.c_str(),

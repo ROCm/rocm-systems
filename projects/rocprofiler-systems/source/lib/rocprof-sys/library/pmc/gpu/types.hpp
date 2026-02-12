@@ -66,10 +66,10 @@ constexpr uint64_t METRIC_VALUE_NOT_SUPPORTED_64 = 0xffffffffffffffff;  // 64-bi
  *   - gfx_activity = 5
  *   - umc_activity = 6
  *   - mm_activity = 7
- *   - vcn_activity = 8   (Device-level, Radeon GPUs)
- *   - jpeg_activity = 9  (Device-level, Radeon GPUs)
- *   - vcn_busy = 10      (Per-XCP, MI300 series)
- *   - jpeg_busy = 11     (Per-XCP, MI300 series)
+ *   - vcn_activity = 8
+ *   - jpeg_activity = 9
+ *   - vcn_busy = 10
+ *   - jpeg_busy = 11
  *   - xgmi = 12
  *   - pcie = 13
  */

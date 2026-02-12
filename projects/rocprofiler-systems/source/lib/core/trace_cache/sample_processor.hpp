@@ -74,7 +74,7 @@ struct processor_t
     }
 
 #if ROCPROFSYS_USE_ROCM > 0
-    void handle(const gpu_pmc_sample& sample) { static_cast<T*>(this)->handle(sample); }
+    void handle(const pmc::gpu::sample& sample) { static_cast<T*>(this)->handle(sample); }
 #endif
 
     void handle(const cpu_freq_sample& sample) { static_cast<T*>(this)->handle(sample); }
@@ -104,7 +104,7 @@ struct processor_view_t
     using in_time_sample_fn_t = void (*)(void*, const in_time_sample&) noexcept;
     using pmc_event_fn_t      = void (*)(void*, const pmc_event_with_sample&) noexcept;
 #if ROCPROFSYS_USE_ROCM > 0
-    using gpu_pmc_sample_fn_t = void (*)(void*, const gpu_pmc_sample&) noexcept;
+    using gpu_pmc_sample_fn_t = void (*)(void*, const pmc::gpu::sample&) noexcept;
 #endif
     using cpu_freq_sample_fn_t        = void (*)(void*, const cpu_freq_sample&) noexcept;
     using backtrace_region_fn_t       = void (*)(void*,
@@ -183,7 +183,7 @@ struct processor_view_t
         m_vtable->handle_pmc_event(m_object, sample);
     }
 #if ROCPROFSYS_USE_ROCM > 0
-    ROCPROFSYS_INLINE void handle(const gpu_pmc_sample& sample) const noexcept
+    ROCPROFSYS_INLINE void handle(const pmc::gpu::sample& sample) const noexcept
     {
         m_vtable->handle_gpu_pmc_sample(m_object, sample);
     }
@@ -237,7 +237,7 @@ private:
                 static_cast<T*>(obj)->handle(sample);
             },
 #if ROCPROFSYS_USE_ROCM > 0
-            +[](void* obj, const gpu_pmc_sample& sample) noexcept {
+            +[](void* obj, const pmc::gpu::sample& sample) noexcept {
                 static_cast<T*>(obj)->handle(sample);
             },
 #endif
@@ -321,7 +321,7 @@ struct sample_processor_t
                 break;
 #if ROCPROFSYS_USE_ROCM > 0
             case type_identifier_t::gpu_pmc_sample:
-                handle_sample(static_cast<const gpu_pmc_sample&>(sample));
+                handle_sample(static_cast<const pmc::gpu::sample&>(sample));
                 break;
 #endif
             case type_identifier_t::cpu_freq_sample:

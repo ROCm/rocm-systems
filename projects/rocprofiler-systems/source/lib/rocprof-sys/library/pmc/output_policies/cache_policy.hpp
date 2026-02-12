@@ -376,7 +376,7 @@ struct cache_policy
         pmc::gpu::enabled_metrics _enabled_metrics;
         _enabled_metrics.value = enabled_metrics.value & supported_metrics.value;
 
-        trace_cache::get_buffer_storage().store(trace_cache::gpu_pmc_sample{
+        trace_cache::get_buffer_storage().store(pmc::gpu::sample{
             _enabled_metrics, static_cast<uint32_t>(device_id), timestamp, metrics });
     }
 };
