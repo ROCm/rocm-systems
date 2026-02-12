@@ -18,7 +18,7 @@
 #
 
 function(setup_split_device_compile)
-  cmake_parse_arguments(SDC "" "TARGET;GPU_ARCH;ROCM_PATH;OUTPUT_DIR" "SOURCES;FUNC_ONLY_SOURCES;INCLUDE_DIRS;COMPILE_DEFS" ${ARGN})
+  cmake_parse_arguments(SDC "" "TARGET;GPU_ARCH;ROCM_PATH;OUTPUT_DIR" "SOURCES;FUNC_ONLY_SOURCES;INCLUDE_DIRS;COMPILE_DEFS;COMPILE_OPTS" ${ARGN})
 
   if(NOT SDC_TARGET)
     message(FATAL_ERROR "setup_split_device_compile: TARGET is required")
@@ -55,6 +55,47 @@ function(setup_split_device_compile)
     list(APPEND _def_flags "-D${_def}")
   endforeach()
 
+  # Forward compile options from the target (e.g. -mllvm flags, -W flags).
+  # Filter out options that conflict with the split pipeline's own flags
+  # or are irrelevant for device-only / host-only compilation.
+  set(_fwd_compile_opts "")
+  set(_skip_next OFF)
+  foreach(_opt ${SDC_COMPILE_OPTS})
+    if(_skip_next)
+      # This is the argument to a previous flag (e.g. the value after -mllvm)
+      list(APPEND _fwd_compile_opts "${_opt}")
+      set(_skip_next OFF)
+    elseif(_opt MATCHES "^-parallel-jobs"
+        OR _opt MATCHES "^--offload-compress"
+        OR _opt MATCHES "^--offload-arch"
+        OR _opt MATCHES "^-fvisibility"
+        OR _opt MATCHES "^-fgpu-rdc"
+        OR _opt MATCHES "^-x$"
+        OR _opt MATCHES "^-std="
+        OR _opt MATCHES "^-O[0-3s]$"
+        OR _opt MATCHES "^-fPIC")
+      # Skip: these are already set explicitly or irrelevant
+    elseif(_opt STREQUAL "-mllvm")
+      # -mllvm takes the next arg; forward both
+      list(APPEND _fwd_compile_opts "${_opt}")
+      set(_skip_next ON)
+    else()
+      list(APPEND _fwd_compile_opts "${_opt}")
+    endif()
+  endforeach()
+
+  # Also build LLC flags from any -mllvm options (LLC takes them directly)
+  set(_llc_extra_flags "")
+  set(_in_mllvm OFF)
+  foreach(_opt ${SDC_COMPILE_OPTS})
+    if(_in_mllvm)
+      list(APPEND _llc_extra_flags "${_opt}")
+      set(_in_mllvm OFF)
+    elseif(_opt STREQUAL "-mllvm")
+      set(_in_mllvm ON)
+    endif()
+  endforeach()
+
   set(ALL_FAT_OBJECTS "")
 
   list(LENGTH SDC_SOURCES _n_sources)
@@ -87,6 +128,7 @@ function(setup_split_device_compile)
         ${_inc_flags}
         ${_def_flags}
         ${_extra_defs}
+        ${_fwd_compile_opts}
         -fvisibility=hidden
         -Wno-unused-function
         -Wno-format-nonliteral
@@ -104,6 +146,7 @@ function(setup_split_device_compile)
         -mtriple=amdgcn-amd-amdhsa
         -mcpu=${SDC_GPU_ARCH}
         -filetype=obj
+        ${_llc_extra_flags}
         -o ${DEV_OBJ} ${BC_FILE}
       DEPENDS   ${BC_FILE}
       COMMENT   "SPLIT[llc] ${fname}"
@@ -122,6 +165,7 @@ function(setup_split_device_compile)
         ${_inc_flags}
         ${_def_flags}
         ${_extra_defs}
+        ${_fwd_compile_opts}
         -fvisibility=hidden
         -Wno-unused-function
         -Wno-format-nonliteral
