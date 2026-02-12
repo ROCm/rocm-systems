@@ -1369,7 +1369,8 @@ bool is_running_in_container() {
       if (line.find("docker") != std::string::npos ||
           line.find("lxc") != std::string::npos ||
           line.find("kubepods") != std::string::npos ||
-          line.find("containerd") != std::string::npos) {
+          line.find("containerd") != std::string::npos ||
+          line.find("podman") != std::string::npos) {
         ss << __PRETTY_FUNCTION__ << " | Detected container via cgroup: " << line;
         LOG_DEBUG(ss);
         return true;
@@ -1393,7 +1394,7 @@ bool is_running_in_container() {
 bool is_device_vfio_bound(const std::string& pci_sysfs_path) {
   std::ostringstream ss;
   std::string driver_link = pci_sysfs_path + "/driver";
-  char buf[256];
+  char buf[kSMI_MAX_STRING_LENGTH];
 
   ssize_t len = readlink(driver_link.c_str(), buf, sizeof(buf) - 1);
   if (len > 0) {

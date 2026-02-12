@@ -55,6 +55,7 @@
 #endif
 
 namespace amd::smi {
+constexpr uint32_t kSMI_MAX_STRING_LENGTH = 256;  // matches AMDSMI_MAX_STRING_LENGTH
 
 struct VirtModeDetectionResult {
   bool is_vm_guest = false;           // hypervisor flag in /proc/cpuinfo
