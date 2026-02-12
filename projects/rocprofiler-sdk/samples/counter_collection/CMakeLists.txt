@@ -62,9 +62,7 @@ set_tests_properties(
                ENVIRONMENT
                "${counter-collection-buffer-env}"
                FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               DISABLED
-               "${ROCPROFILER_DISABLE_UNSTABLE_CTESTS}")
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
 set_source_files_properties(device_serialized_main.cpp PROPERTIES LANGUAGE HIP)
 add_executable(counter-collection-buffer-device-serialization)
@@ -117,9 +115,7 @@ set_tests_properties(
                ENVIRONMENT
                "${counter-collection-callback-env}"
                FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               DISABLED
-               "${ROCPROFILER_DISABLE_UNSTABLE_CTESTS}")
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
 add_library(counter-collection-functional-counter-client SHARED)
 target_sources(counter-collection-functional-counter-client
