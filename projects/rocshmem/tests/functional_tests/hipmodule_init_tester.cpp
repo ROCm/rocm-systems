@@ -95,15 +95,21 @@ HipModuleInitTester::HipModuleInitTester(TesterArguments args)
   std::string build_include = "-I" + std::string(CMAKE_BINARY_DIR) + "/include";
   std::string src_include = "-I" + std::string(CMAKE_SOURCE_DIR) + "/src";
 
+  const char* rocm_path = std::getenv("ROCM_PATH");
+  std::string hip_include = rocm_path ?
+    "-I" + std::string(rocm_path) + "/include" :
+    "-I/opt/rocm/include";
+
   const char* options[] = {
     arch.c_str(),
+    hip_include.c_str(),
     include_path.c_str(),
     build_include.c_str(),
     src_include.c_str(),
     "-D__HIP_PLATFORM_AMD__"
   };
 
-  hiprtcResult compileResult = hiprtcCompileProgram(prog, 5, options);
+  hiprtcResult compileResult = hiprtcCompileProgram(prog, 6, options);
 
   // Check compilation result
   if (compileResult != HIPRTC_SUCCESS) {
