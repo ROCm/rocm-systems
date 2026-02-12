@@ -242,11 +242,11 @@ TEST(thread_trace, perfcounters_configure_test)
                    void*,
                    rocprofiler_user_data_t*) { return ROCPROFILER_THREAD_TRACE_CONTROL_NONE; },
                 [](rocprofiler_agent_id_t,
-                    int64_t,
-                    void*,
-                    size_t,
-                    rocprofiler_thread_trace_shader_data_flags_t,
-                    rocprofiler_user_data_t) {},
+                   int64_t,
+                   void*,
+                   size_t,
+                   rocprofiler_thread_trace_shader_data_flags_t,
+                   rocprofiler_user_data_t) {},
                 nullptr),
             "configure");
     }

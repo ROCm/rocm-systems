@@ -84,7 +84,7 @@ main(int /*argc*/, char** /*argv*/)
 
     for(int i = 0; i < loopcount; i++)
     {
-        if (start_and_stop && (i % 1000) == 0)
+        if(start_and_stop && (i % 1000) == 0)
         {
             roctxProfilerPause(0);
             roctxProfilerResume(0);
