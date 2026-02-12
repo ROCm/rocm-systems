@@ -69,6 +69,7 @@ namespace envvar {
     const var<bool> alternate_qp_ports("ALTERNATE_QP_PORTS", "", true);
     const var<uint8_t> traffic_class("TRAFFIC_CLASS", "", 0);
     const var<bool> pcie_relaxed_ordering("PCIE_RELAXED_ORDERING", "", false);
+    const var<bool> enable_dmabuf("ENABLE_DMABUF", "", false);
   }  // namespace gda
 
   namespace _detail {
