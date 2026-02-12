@@ -193,7 +193,8 @@ class RocProfCompute:
 
                 if self.__args.subpath != "gpu_model":
                     console_warning(
-                        "--subpath is deprecated and will be removed in future releases."
+                        "--subpath is deprecated and will be removed in future "
+                        "releases."
                     )
 
             if self.__args.name is not None and "/" in self.__args.name:
@@ -275,10 +276,13 @@ class RocProfCompute:
         self.__soc[arch] = soc_class(self.__args, self.__mspec)
 
     def parse_args(self) -> None:
-        from argparser import detect_experimental_config
-
         # Detect if --experimental flag is present (for help text control)
-        experimental_requested: bool = detect_experimental_config()
+        prelim_parser = argparse.ArgumentParser(add_help=False)
+        prelim_parser.add_argument("--experimental", action="store_true", default=False)
+
+        # Parse only known args (respects -- separator)
+        prelim_args, _ = prelim_parser.parse_known_args()
+        experimental_requested: bool = prelim_args.experimental
 
         # Build full parser with experimental knowledge
         parser = argparse.ArgumentParser(

@@ -39,7 +39,7 @@ and apply your changes there. For more help reference GitHub's ['About Forking']
 
 ### Adding Experimental Features
 
-This project uses a centralized registry for experimental features in `src/argparser.py`. The experimental flag system allows users to opt-in to unstable or preview features that are under development.
+This project uses the `ExperimentalAction` custom argparse action for experimental features in `src/argparser.py`. The experimental flag system allows users to opt-in to unstable or preview features that are under development.
 
 #### How It Works
 
@@ -48,23 +48,27 @@ The `--experimental` flag acts as a master toggle that:
 - Hides experimental options completely when disabled (using `argparse.SUPPRESS`)
 - Prevents usage of experimental features without the flag (raises parser error)
 - Displays a warning when experimental features are used
-- Allows gradual rollout of new features without affecting stable functionality
+- Delegates to standard argparse actions for proper value storage
 
 #### Adding a New Experimental Feature
 
-To add a new experimental feature, follow these 2 steps:
+To add a new experimental feature, follow these 3 steps:
 
-**1. Register the feature in `EXPERIMENTAL_FEATURES`**
+**1. Update the `--experimental` flag help text**
 
-Add an entry to the `EXPERIMENTAL_FEATURES` list in `src/argparser.py`:
+Add your feature to the help text in `src/argparser.py` in the `add_general_group()` function:
 
 ```python
-EXPERIMENTAL_FEATURES = [
-    # --spatial-multiplexing
-    {"label": "Spatial multiplexing", "flags": ["--spatial-multiplexing"]},
-    # Your new feature
-    {"label": "Your feature description", "flags": ["--your-flag"]},
-]
+general_group.add_argument(
+    "--experimental",
+    action="store_true",
+    default=False,
+    help=(
+        "Enable experimental feature(s):\n"
+        "   Spatial multiplexing (--spatial-multiplexing)\n"
+        "   Your feature name (--your-flag)\n"  # Add this line
+    ),
+)
 ```
 
 **2. Add the option to the appropriate parser mode using `ExperimentalAction`**
@@ -72,6 +76,7 @@ EXPERIMENTAL_FEATURES = [
 Add your argument to the relevant parser (profile, analyze, etc.) using the `ExperimentalAction` custom action:
 
 ```python
+# For a flag that stores values (like --spatial-multiplexing in profile mode)
 profile_group.add_argument(
     "--your-flag",
     dest="your_flag",
@@ -79,31 +84,60 @@ profile_group.add_argument(
     default=None,
     action=ExperimentalAction,
     experimental_enabled=experimental_enabled,
-    feature_label="Your feature description",
-    help_indent="\t\t\t", # "\t\t" if analyze_group
+    feature_label="Your feature name",
+    base_action="store",  # REQUIRED: Specify the base action type
     type=str,  # Optional: specify type if needed
     nargs="*",  # Optional: specify nargs if needed
     metavar="",  # Optional: specify metavar for help text
-    help="Description of your feature",
+    help="\t\t\tDescription of your feature",
+)
+
+# For a boolean flag (like --spatial-multiplexing in analyze mode)
+analyze_group.add_argument(
+    "--your-flag",
+    dest="your_flag",
+    required=False,
+    default=False,
+    action=ExperimentalAction,
+    experimental_enabled=experimental_enabled,
+    feature_label="Your feature description",
+    base_action="store_const",  # REQUIRED: For boolean-like behavior
+    nargs=0,
+    const=True,
+    help="\t\tDescription of your feature",
 )
 ```
 
+#### Supported Base Actions
+
+The `base_action` parameter is **required** and must be one of:
+- `store` - Store a value (default argparse behavior)
+- `store_const` - Store a constant value (no arguments consumed)
+- `store_true` - Store True when flag is present
+- `store_false` - Store False when flag is present
+- `append` - Append values to a list
+- `append_const` - Append a constant to a list
+- `count` - Count the number of times flag appears (like `-vvv`)
+- `extend` - Extend a list with multiple values
+
 The `ExperimentalAction` class automatically:
 - Suppresses help text when `experimental_enabled=False`
-- Prefixes help text with "EXPERIMENTAL:" when enabled
+- Preserves leading whitespace and prefixes help content with "EXPERIMENTAL:" when enabled
 - Raises an error if the feature is used without `--experimental`
 - Displays a warning message when the feature is used
-
+- Auto-sets `nargs=0` for actions that don't consume arguments
+- Auto-sets `const` for boolean actions (`store_true`/`store_false`)
+- Delegates to the appropriate argparse action for proper value storage
 
 #### Promoting Features to Stable
 
 When a feature is ready to graduate from experimental to stable:
 
-1. Remove the entry from the `EXPERIMENTAL_FEATURES` list
-2. Change `action=ExperimentalAction` to `action="store_true"` (or appropriate action)
-3. Remove the `experimental_enabled`, `feature_label`, and `help_indent` parameters
-4. Update the help text to remove "EXPERIMENTAL:" prefix
-5. Update any relevant documentation
+1. Remove the entry from the `--experimental` flag help text
+2. Change `action=ExperimentalAction` to `action="store"` (or appropriate standard action)
+3. Remove the `experimental_enabled`, `feature_label`, and `base_action` parameters
+4. Remove the "EXPERIMENTAL:" prefix from help text manually if needed
+5. Update any relevant documentation and tests
 
 #### Testing Experimental Features
 

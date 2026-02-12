@@ -31,26 +31,6 @@ from typing import Optional
 from utils.logger import console_warning
 from utils.utils import METRIC_ID_RE
 
-# Experimental Feature Registry
-EXPERIMENTAL_FEATURES = [
-    # --spatial-multiplexing
-    {"label": "Spatial multiplexing", "flags": ["--spatial-multiplexing"]},
-]
-
-
-def detect_experimental_config() -> bool:
-    """
-    Detect if --experimental flag is present (for help text control).
-    """
-    # Preliminary parser for --experimental
-    prelim_parser = argparse.ArgumentParser(add_help=False)
-    prelim_parser.add_argument("--experimental", action="store_true", default=False)
-
-    # Parse only known args (respects -- separator)
-    prelim_args, _ = prelim_parser.parse_known_args()
-
-    return prelim_args.experimental
-
 
 class ExperimentalAction(argparse.Action):
     """
@@ -58,59 +38,79 @@ class ExperimentalAction(argparse.Action):
     - Suppresses help text when experimental mode is disabled
     - Errors if feature used without --experimental flag
     - Warns when experimental feature is used
+    - Delegates to inner action for proper value storage
     """
 
     def __init__(
         self,
         option_strings: list[str],
-        dest: str,
-        experimental_enabled: bool = False,
-        feature_label: str = "",
-        help_indent: str = "\t\t\t",
-        nargs=None,  # noqa: ANN001
-        const=None,  # noqa: ANN001
-        default=None,  # noqa: ANN001
-        type=None,  # noqa: ANN001
-        choices=None,  # noqa: ANN001
-        required: bool = False,
-        metavar=None,  # noqa: ANN001
-        help: Optional[str] = None,
-        **kwargs,  # noqa: ANN003
+        help: str,
+        **kwargs,
     ) -> None:
-        self.experimental_enabled = experimental_enabled
-        self.feature_label = feature_label
+        self.experimental_enabled = kwargs.pop("experimental_enabled", False)
+        self.feature_label = kwargs.pop("feature_label", None)
 
-        # Modify help text based on experimental mode
-        if experimental_enabled:
-            help = (
-                f"{help_indent}EXPERIMENTAL: {help}"
-                if help
-                else f"{help_indent}EXPERIMENTAL"
+        # Extract the base_action
+        base_action = kwargs.pop("base_action", None)
+        if base_action is None:
+            raise ValueError(
+                "base_action is required for ExperimentalAction. "
+                "Specify one of: store, store_const, store_true, store_false, "
+                "append, append_const, count, extend"
             )
+
+        # Set required parameters for specific action types
+        if base_action in [
+            "store_true",
+            "store_false",
+            "count",
+            "store_const",
+            "append_const",
+        ]:
+            kwargs["nargs"] = 0
+
+        # Set const for boolean actions
+        if base_action == "store_true":
+            kwargs.setdefault("const", True)
+        elif base_action == "store_false":
+            kwargs.setdefault("const", False)
+
+        if self.experimental_enabled:
+            leading_whitespace = help[: len(help) - len(help.lstrip())]
+            help_content = help.lstrip()
+            help = f"{leading_whitespace}EXPERIMENTAL: {help_content}"
         else:
             help = argparse.SUPPRESS
 
-        # Initialize with the help text and standard argparse.Action behavior
         super().__init__(
             option_strings=option_strings,
-            dest=dest,
-            nargs=nargs,
-            const=const,
-            default=default,
-            type=type,
-            choices=choices,
-            required=required,
             help=help,
-            metavar=metavar,
-            **kwargs,  # noqa: ANN001
+            **kwargs,
         )
+
+        # Map of action types to their __call__ methods
+        action_map = {
+            "store": argparse._StoreAction.__call__,
+            "store_const": argparse._StoreConstAction.__call__,
+            "store_true": argparse._StoreTrueAction.__call__,
+            "store_false": argparse._StoreFalseAction.__call__,
+            "append": argparse._AppendAction.__call__,
+            "append_const": argparse._AppendConstAction.__call__,
+            "count": argparse._CountAction.__call__,
+            "extend": argparse._ExtendAction.__call__,
+        }
+
+        if base_action not in action_map:
+            raise ValueError(f"Unsupported base_action: {base_action}")
+
+        self._base_action_call = action_map[base_action]
 
     def __call__(
         self,
         parser: argparse.ArgumentParser,
         namespace: argparse.Namespace,
-        values,  # noqa: ANN001,
-        option_string: Optional[str] = None,  # noqa: ANN001, ARG002
+        values,  # noqa ANN001
+        option_string: Optional[str] = None,
     ) -> None:
         # Error if experimental feature used without --experimental flag
         if not self.experimental_enabled:
@@ -123,7 +123,7 @@ class ExperimentalAction(argparse.Action):
             f"{self.feature_label} is experimental and may change in future releases."
         )
 
-        setattr(namespace, self.dest, values)
+        self._base_action_call(self, parser, namespace, values, option_string)
 
 
 def validate_block(value: str) -> str:
@@ -206,10 +206,7 @@ def add_general_group(
         default=False,
         help=(
             "Enable experimental feature(s):\n"
-            + "".join(
-                f"   {f['label']} ({' '.join(f['flags'])})\n"
-                for f in EXPERIMENTAL_FEATURES
-            )
+            "   Spatial multiplexing (--spatial-multiplexing)\n"
         ),
     )
 
@@ -685,13 +682,14 @@ Examples:
         dest="spatial_multiplexing",
         required=False,
         default=None,
+        base_action="store",
         action=ExperimentalAction,
         experimental_enabled=experimental_enabled,
         feature_label="Spatial multiplexing",
         type=int,
         nargs="*",
         metavar="",
-        help="Provide Node ID and GPU number per node.",
+        help="\t\t\tProvide Node ID and GPU number per node.",
     )
 
     ## Analyze Command Line Options
@@ -992,11 +990,11 @@ Examples:
         dest="spatial_multiplexing",
         required=False,
         default=False,
+        base_action="store_const",
         action=ExperimentalAction,
         experimental_enabled=experimental_enabled,
         feature_label="Spatial multiplexing",
-        help_indent="\t\t",
         nargs=0,
         const=True,
-        help="Mode of spatial multiplexing.",
+        help="\t\tMode of spatial multiplexing.",
     )
