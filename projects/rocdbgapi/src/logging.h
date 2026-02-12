@@ -708,8 +708,8 @@ tracer<LogLevel>::enter (std::tuple<Args...> &&in_args, Functor &&func)
       --detail::log_indent_depth;
 
       if (LOG_DURATION)
-	dbgapi_log (LogLevel, "%s} throw (took %.3f ms)", m_prefix,
-		    elapsed.count ());
+	dbgapi_log (LogLevel, "%s} %s throw (took %.3f ms)", m_prefix,
+		    m_function, elapsed.count ());
       else
 	dbgapi_log (LogLevel, "%s} throw", m_prefix);
       throw;
@@ -741,8 +741,9 @@ tracer<LogLevel>::leave (std::tuple<Args...> &&out_args,
       --detail::log_indent_depth;
 
       if (LOG_DURATION)
-	detail::log (LogLevel, "%s} = %s (took %.3f ms)",
-		     m_prefix, results_str.c_str (), result.m_elapsed.count ());
+	detail::log (LogLevel, "%s} %s = %s (took %.3f ms)",
+		     m_prefix, m_function,
+		     results_str.c_str (), result.m_elapsed.count ());
       else
 	detail::log (LogLevel, "%s} = %s", m_prefix, results_str.c_str ());
     }
