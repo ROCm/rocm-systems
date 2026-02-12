@@ -205,11 +205,11 @@ class OmniAnalyze_Base:
             )
 
         print(f"{'INDEX':<8} {'BLOCK ALIAS':<16} {'BLOCK NAME'}")
+        panel_alias_dict = {value: key for key, value in get_panel_alias().items()}
         for key, value in self._arch_configs[arch].metric_list.items():
-            panel_alias_dict = get_panel_alias()
             if key.count(".") > 0:
                 continue
-            print(f"{key:<8} {panel_alias_dict[value]:<16} {value}")
+            print(f"{key:<8} {panel_alias_dict[key]:<16} {value}")
 
         sys.exit(0)
 

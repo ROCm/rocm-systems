@@ -376,10 +376,11 @@ class RocProfCompute:
             parser.build_dfs(arch_configs=ac, filter_metrics=[], sys_info=sys_info)
 
             print(f"{'INDEX':<8} {'BLOCK ALIAS':<16} {'BLOCK NAME'}")
+            panel_alias_dict = {value: key for key, value in get_panel_alias().items()}
             for key, value in ac.metric_list.items():
                 if key.count(".") > 0:
                     continue
-                print(f"{key:<8} {get_panel_alias()[value]:<16} {value}")
+                print(f"{key:<8} {panel_alias_dict[key]:<16} {value}")
             sys.exit(0)
         else:
             console_error("Unsupported arch")
