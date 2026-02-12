@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
+Copyright (c) 2022 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -57,6 +57,6 @@ TEST_CASE("Unit_hipGraphicsUnregisterResource_Negative_Parameters") {
     hipGraphicsResource* mapped_resource;
     HIP_CHECK(hipGraphicsGLRegisterBuffer(&mapped_resource, vbo, hipGraphicsRegisterFlagsNone));
     HIP_CHECK(hipGraphicsMapResources(1, &mapped_resource, 0));
-    HIP_CHECK_ERROR(hipGraphicsUnregisterResource(mapped_resource), hipErrorArrayIsMapped);
+    HIP_CHECK_ERROR(hipGraphicsUnregisterResource(mapped_resource), hipErrorAlreadyMapped);
   }
 }

@@ -1616,7 +1616,7 @@ void VirtualGPU::dispatchBarrierValuePacket(uint16_t packetHeader, bool resolveD
   barrier_value_packet_.cond = cond;
 
   // Dependent signal and external signal cant be true at the same time
-  assert(resolveDepSignal & (signal.handle != 0) == 0);
+  assert((resolveDepSignal && (signal.handle != 0)) == false);
   if (resolveDepSignal) {
     auto wait_signals = Barriers().WaitingSignal();
     if (wait_signals.size() > 0) {
@@ -1730,8 +1730,8 @@ VirtualGPU::VirtualGPU(Device& device, bool profiling, bool cooperative,
       schedulerThreads_(0),
       schedulerQueue_(nullptr),
       barriers_(*this),
-      managed_buffer_(*this, ManagedBuffer::kPoolNumSignals * device.settings().stagedXferSize_),
-      managed_kernarg_buffer_(*this, device.settings().kernargPoolSize_),
+      managed_buffer_(*this, kStagingPoolNumSignals * device.settings().stagedXferSize_, kStagingPoolNumSignals),
+      managed_kernarg_buffer_(*this, device.settings().kernargPoolSize_, kKernArgPoolNumSignals),
       cuMask_(cuMask),
       priority_(priority),
       copy_command_type_(0),
@@ -1912,7 +1912,7 @@ VirtualGPU::ManagedBuffer::~ManagedBuffer() {
 
 // ================================================================================================
 bool VirtualGPU::ManagedBuffer::Create(Device::MemorySegment mem_segment) {
-  pool_chunk_end_ = pool_size_ / kPoolNumSignals;
+  pool_chunk_end_ = pool_size_ / num_chunk_signals_;
   active_chunk_ = 0;
   // Allocate memory for managed buffer
   if (mem_segment == Device::MemorySegment::kKernArg &&
@@ -1965,14 +1965,14 @@ address VirtualGPU::ManagedBuffer::Acquire(uint32_t size, uint32_t alignment) {
     // Dispatch a barrier packet into the queue
     gpu_.dispatchBarrierPacket(kBarrierPacketHeader, kSkipSignal, pool_signal_[active_chunk_]);
     // Get the next chunk
-    active_chunk_ = ++active_chunk_ % kPoolNumSignals;
+    active_chunk_ = ++active_chunk_ % num_chunk_signals_;
     // Make sure the new active chunk is free
     bool test = WaitForSignal(pool_signal_[active_chunk_], gpu_.ActiveWait());
     assert(test && "Runtime can't fail a wait for chunk!");
     // Make sure the current offset matches the new chunk to avoid possible overlaps
     // between chunks and issues during recycle
     pool_cur_offset_ = (active_chunk_ == 0) ? 0 : pool_chunk_end_;
-    pool_chunk_end_ = pool_cur_offset_ + pool_size_ / kPoolNumSignals;
+    pool_chunk_end_ = pool_cur_offset_ + pool_size_ / num_chunk_signals_;
     result = amd::alignUp(pool_base_ + pool_cur_offset_, alignment);
     pool_cur_offset_ = (result + size) - pool_base_;
   }
@@ -1983,7 +1983,7 @@ address VirtualGPU::ManagedBuffer::Acquire(uint32_t size, uint32_t alignment) {
 // ================================================================================================
 void VirtualGPU::ManagedBuffer::ResetPool() {
   pool_cur_offset_ = 0;
-  pool_chunk_end_ = pool_size_ / kPoolNumSignals;
+  pool_chunk_end_ = pool_size_ / num_chunk_signals_;
   active_chunk_ = 0;
 }
 
@@ -2847,6 +2847,56 @@ void VirtualGPU::submitCopyMemoryP2P(amd::CopyMemoryP2PCommand& cmd) {
   }
 
   cmd.destination().signalWrite(&dstDevMem->dev());
+
+  profilingEnd();
+}
+
+// ================================================================================================
+void VirtualGPU::submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd) {
+  // Make sure VirtualGPU has an exclusive access to the resources
+  amd::ScopedLock lock(execution());
+
+  profilingBegin(cmd, true);
+
+  auto& copyOps = cmd.copyOps();
+  if (copyOps.empty()) {
+    profilingEnd();
+    return;
+  }
+
+  bool result = true;
+
+  // Sync caches for all source and destination memory objects
+  device::Memory::SyncFlags syncFlags;
+  syncFlags.skipEntire_ = false;
+
+  for (auto& op : copyOps) {
+    Memory* srcDevMem = dev().getRocMemory(op.srcMemory);
+    Memory* dstDevMem = dev().getRocMemory(op.dstMemory);
+
+    if (srcDevMem == nullptr || dstDevMem == nullptr) {
+      LogError("submitBatchCopyMemory: Invalid memory objects!");
+      cmd.setStatus(CL_INVALID_MEM_OBJECT);
+      profilingEnd();
+      return;
+    }
+
+    dstDevMem->syncCacheFromHost(*this, syncFlags);
+    srcDevMem->syncCacheFromHost(*this);
+  }
+
+  // Execute batch copy through blit manager
+  result = blitMgr().copyBufferBatch(copyOps, false);
+
+  if (!result) {
+    LogError("submitBatchCopyMemory failed!");
+    cmd.setStatus(CL_OUT_OF_RESOURCES);
+  } else {
+    // Mark all destinations as written
+    for (const auto& op : copyOps) {
+      op.dstMemory->signalWrite(&dev());
+    }
+  }
 
   profilingEnd();
 }

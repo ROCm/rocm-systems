@@ -807,7 +807,7 @@ hsa_status_t Device::iterateGpuMemoryPoolCallback(hsa_amd_memory_pool_t pool, vo
           if (stat != HSA_STATUS_SUCCESS) {
             LogPrintfError(
                 "Cannot query HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_GRANULE info"
-                "failed with hsa_status: %d \n",
+                "failed with hsa_status: %d",
                 stat);
           }
           // Query the recommended granularity for this pool.
@@ -816,7 +816,7 @@ hsa_status_t Device::iterateGpuMemoryPoolCallback(hsa_amd_memory_pool_t pool, vo
           if (stat != HSA_STATUS_SUCCESS) {
             LogPrintfError(
                 "Cannot query HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_REC_GRANULE info"
-                "failed with hsa_status: %d \n",
+                "failed with hsa_status: %d",
                 stat);
           }
         }
@@ -966,7 +966,7 @@ bool Sampler::create(const amd::Sampler& owner) {
 
   if (HSA_STATUS_SUCCESS != status) {
     ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE,
-             "Sampler creation failed with status: %d \n", status);
+             "Sampler creation failed with status: %d", status);
     return false;
   }
 
@@ -1980,7 +1980,7 @@ device::Memory* Device::createMemory(amd::Memory& owner) const {
 
   if (!result) {
     delete memory;
-    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE, "Cannot Write Image \n");
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE, "Cannot Write Image");
     return nullptr;
   }
 
@@ -2113,7 +2113,7 @@ void* Device::hostLock(void* hostMem, size_t size, const MemorySegment memSegmen
           pool, size, hostMem, deviceMemory, static_cast<int>(memSegment));
   if (status != HSA_STATUS_SUCCESS) {
     ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_LOCK,
-             "Failed to lock memory to pool, failed with hsa_status: %d \n", status);
+             "Failed to lock memory to pool, failed with hsa_status: %d", status);
     deviceMemory = nullptr;
   }
   return deviceMemory;
@@ -2157,7 +2157,7 @@ uint64_t Device::deviceVmemAlloc(size_t size, uint64_t flags) const {
   hsa_status_t hsa_status =
       Hsa::vmem_handle_create(gpuvm_segment_, size, MEMORY_TYPE_PINNED, flags, &hsa_vmem_handle);
   if (hsa_status != HSA_STATUS_SUCCESS) {
-    LogPrintfError("Failed hsa_amd_vmem_handle_create! Failed with hsa status: %d \n", hsa_status);
+    LogPrintfError("Failed hsa_amd_vmem_handle_create! Failed with hsa status: %d", hsa_status);
   }
 
   return hsa_vmem_handle.handle;
@@ -2169,7 +2169,7 @@ void Device::deviceVmemRelease(uint64_t mem_handle) const {
 
   hsa_status_t hsa_status = Hsa::vmem_handle_release(hsa_vmem_handle);
   if (hsa_status != HSA_STATUS_SUCCESS) {
-    LogPrintfError("Failed hsa_amd_vmem_handle_release! Failed with hsa status: %d \n", hsa_status);
+    LogPrintfError("Failed hsa_amd_vmem_handle_release! Failed with hsa status: %d", hsa_status);
   }
 }
 
@@ -2190,7 +2190,7 @@ void Device::releaseMemory(void* ptr, size_t size) const {
   hsa_status_t hsa_status = Hsa::vmem_address_free(ptr, size);
   ClPrint(amd::LOG_DEBUG, amd::LOG_MEM, "Free hsa reserved memory %p", ptr);
   if (hsa_status != HSA_STATUS_SUCCESS) {
-    LogError("hsa_amd_vmem_address_free failed \n");
+    LogError("hsa_amd_vmem_address_free failed");
   }
 }
 
@@ -2203,7 +2203,7 @@ void* Device::deviceLocalAlloc(size_t size, const AllocationFlags& flags) const 
 
   if (pool.handle == 0 || gpuvm_segment_max_alloc_ == 0) {
     ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
-            "Invalid argument, pool_handle: 0x%x , max_alloc: %u \n",
+            "Invalid argument, pool_handle: 0x%x , max_alloc: %u",
             pool.handle, gpuvm_segment_max_alloc_);
     return nullptr;
   }
@@ -2279,7 +2279,7 @@ void* Device::svmAlloc(amd::Context& context, size_t size, size_t alignment, cl_
     if (flags & CL_MEM_USE_HOST_PTR) {
       svmPtrUsed = svmPtr;
     } else {
-      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM, "Cannot find svm_ptr: 0x%x \n", svmPtr);
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM, "Cannot find svm_ptr: %p", svmPtr);
       return nullptr;
     }
   }
@@ -2317,7 +2317,7 @@ void* Device::virtualAlloc(void* req_addr, size_t size, size_t alignment) {
   hsa_status_t hsa_status =
       Hsa::vmem_address_reserve(&vptr, size, reinterpret_cast<uint64_t>(req_addr), 0);
   if (hsa_status != HSA_STATUS_SUCCESS) {
-    LogPrintfError("Failed hsa_amd_vmem_address_reserve. Failed with status: %d \n", hsa_status);
+    LogPrintfError("Failed hsa_amd_vmem_address_reserve. Failed with status: %d", hsa_status);
     return nullptr;
   }
 
@@ -2333,7 +2333,8 @@ void* Device::virtualAlloc(void* req_addr, size_t size, size_t alignment) {
 bool Device::virtualFree(void* addr) {
   amd::Memory* memObj = amd::MemObjMap::FindVirtualMemObj(addr);
   if (memObj == nullptr) {
-    LogPrintfError("Cannot find the Virtual MemObj entry for this addr 0x%x", addr);
+    LogPrintfError("Cannot find the Virtual MemObj entry for this addr %p", addr);
+    return false;
   }
 
   if (!memObj->getContext().devices()[0]->DestroyVirtualBuffer(memObj)) {
@@ -2342,7 +2343,7 @@ bool Device::virtualFree(void* addr) {
 
   hsa_status_t hsa_status = Hsa::vmem_address_free(memObj->getSvmPtr(), memObj->getSize());
   if (hsa_status != HSA_STATUS_SUCCESS) {
-    LogPrintfError("Failed hsa_amd_vmem_address_free. Failed with status:%d \n", hsa_status);
+    LogPrintfError("Failed hsa_amd_vmem_address_free. Failed with status:%d", hsa_status);
     return false;
   }
   return true;
@@ -2357,7 +2358,7 @@ bool Device::SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags,
       access_location == VmmLocationType::kDevice ? getBackendDevice() : getCpuAgent();
 
   if ((hsa_status = Hsa::vmem_set_access(va_addr, va_size, &desc, 1)) != HSA_STATUS_SUCCESS) {
-    LogPrintfError("Failed hsa_amd_vmem_set_access. Failed with status:%d \n", hsa_status);
+    LogPrintfError("Failed hsa_amd_vmem_set_access. Failed with status:%d", hsa_status);
     return false;
   }
 
@@ -2371,13 +2372,13 @@ bool Device::GetMemAccess(void* va_addr, VmmAccess* access_flags_ptr) const {
   size_t discard_offset = 0;
   amd::Memory* va_mem_obj = amd::MemObjMap::FindMemObj(va_addr, &discard_offset);
   if (va_mem_obj == nullptr) {
-    LogPrintfError("Failed to get Memory Object for va_addr: 0x%x", va_addr);
+    LogPrintfError("Failed to get Memory Object for va_addr: %p", va_addr);
     return false;
   }
 
   if ((hsa_status = Hsa::vmem_get_access(va_mem_obj->getSvmPtr(), &perms, getBackendDevice())) !=
       HSA_STATUS_SUCCESS) {
-    LogPrintfError("Failed hsa_amd_vmem_get_access. Failed with status:%d \n", hsa_status);
+    LogPrintfError("Failed hsa_amd_vmem_get_access. Failed with status:%d", hsa_status);
     return false;
   }
 
@@ -2400,7 +2401,7 @@ bool Device::ExportShareableVMMHandle(amd::Memory& amd_mem_obj, int flags, void*
 
   if ((hsa_status = Hsa::vmem_export_shareable_handle(&dmabuf_fd, hsa_vmem_handle, flags)) !=
       HSA_STATUS_SUCCESS) {
-    LogPrintfError("Failed hsa_vmem_export_shareable_handle with status: %d \n", hsa_status);
+    LogPrintfError("Failed hsa_vmem_export_shareable_handle with status: %d", hsa_status);
     return false;
   }
 
@@ -2422,7 +2423,7 @@ bool Device::ImportShareableHSAHandle(void* osHandle, uint64_t* hsa_handle_ptr) 
   int dmabuf_fd = static_cast<int>(reinterpret_cast<uintptr_t>(osHandle));
   if ((hsa_status = Hsa::vmem_import_shareable_handle(dmabuf_fd, &hsa_vmem_handle)) !=
       HSA_STATUS_SUCCESS) {
-    LogPrintfError("Failed hsa_amd_vmem_import_shareable_handle with status: %d \n", hsa_status);
+    LogPrintfError("Failed hsa_amd_vmem_import_shareable_handle with status: %d", hsa_status);
     return false;
   }
 
@@ -3003,7 +3004,7 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
   uint32_t queue_max_packets = 0;
   if (HSA_STATUS_SUCCESS !=
       Hsa::agent_get_info(bkendDevice_, HSA_AGENT_INFO_QUEUE_MAX_SIZE, &queue_max_packets)) {
-    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_QUEUE, "Cannot get hsa agent info \n");
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_QUEUE, "Cannot get hsa agent info");
     return nullptr;
   }
   auto queue_size = (queue_max_packets < queue_size_hint) ? queue_max_packets : queue_size_hint;

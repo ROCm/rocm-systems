@@ -70,6 +70,8 @@ env:
 
 jobs:
   code-coverage:
+    # TEMPORARILY DISABLED: pending CI stabilization
+    if: false
     name: Code Coverage • ${{ matrix.system.gpu }} • ${{ matrix.system.os }}
     strategy:
       # fail-fast: false

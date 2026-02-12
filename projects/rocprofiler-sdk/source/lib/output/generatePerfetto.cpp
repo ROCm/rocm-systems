@@ -39,6 +39,7 @@
 #include <future>
 #include <iostream>
 #include <map>
+#include <memory>
 #include <thread>
 #include <unordered_map>
 #include <utility>
@@ -1204,44 +1205,46 @@ write_perfetto(
     tracing_session->FlushBlocking();
     tracing_session->StopBlocking();
 
-    auto filename = std::string{"results"};
-    auto ofs      = get_output_stream(ocfg, filename, ".pftrace");
-
-    auto amount_read = std::atomic<size_t>{0};
-    auto is_done     = std::promise<void>{};
-    auto _mtx        = std::mutex{};
-    auto _reader     = [&ofs, &_mtx, &is_done, &amount_read](
-                       ::perfetto::TracingSession::ReadTraceCallbackArgs _args) {
-        auto _lk = std::unique_lock<std::mutex>{_mtx};
-        if(_args.data && _args.size > 0)
-        {
-            ROCP_TRACE << "Writing " << _args.size << " B to trace...";
-            // Write the trace data into file
-            ofs.stream->write(_args.data, _args.size);
-            amount_read += _args.size;
-        }
-        ROCP_INFO_IF(!_args.has_more && amount_read > 0)
-            << "Wrote " << amount_read << " B to perfetto trace file";
-        if(!_args.has_more) is_done.set_value();
+    struct read_trace_state
+    {
+        std::mutex          mtx{};
+        std::atomic<size_t> amount_read{0};
+        output_stream       ofs{};
     };
+
+    auto state = std::make_shared<read_trace_state>();
+    state->ofs = get_output_stream(ocfg, std::string{"results"}, ".pftrace");
 
     for(size_t i = 0; i < 2; ++i)
     {
         ROCP_TRACE << "Reading trace...";
-        amount_read = 0;
-        is_done     = std::promise<void>{};
+
+        auto is_done = std::make_shared<std::promise<void>>();
+        auto _reader = [state, is_done](::perfetto::TracingSession::ReadTraceCallbackArgs _args) {
+            auto _lk = std::unique_lock<std::mutex>{state->mtx};
+            if(_args.data && _args.size > 0)
+            {
+                ROCP_TRACE << "Writing " << _args.size << " B to trace...";
+                // Write the trace data into file
+                state->ofs.stream->write(_args.data, _args.size);
+                state->amount_read += _args.size;
+            }
+            ROCP_INFO_IF(!_args.has_more && state->amount_read > 0)
+                << "Wrote " << state->amount_read << " B to perfetto trace file";
+            if(!_args.has_more) is_done->set_value();
+        };
         tracing_session->ReadTrace(_reader);
-        is_done.get_future().wait();
+        is_done->get_future().wait();
     }
 
     ROCP_TRACE << "Destroying tracing session...";
     tracing_session.reset();
 
     ROCP_TRACE << "Flushing trace output stream...";
-    (*ofs.stream) << std::flush;
+    (*state->ofs.stream) << std::flush;
 
     ROCP_TRACE << "Destroying trace output stream...";
-    ofs.close();
+    state->ofs.close();
 }
 
 }  // namespace tool
