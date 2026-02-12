@@ -3181,3 +3181,10 @@ hipError_t hipMemGetMemPool(hipMemPool_t* pool, hipMemLocation* location,
   return hip::GetHipDispatchTable()->hipMemGetMemPool_fn(pool, location, type);
   CATCH;
 }
+hipError_t hipMipmappedArrayGetMemoryRequirements(hipArrayMemoryRequirements* memoryRequirements,
+                                                  hipMipmappedArray_t mipmap, hipDevice_t device) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipMipmappedArrayGetMemoryRequirements_fn(memoryRequirements,
+                                                                               mipmap, device);
+  CATCH;
+}

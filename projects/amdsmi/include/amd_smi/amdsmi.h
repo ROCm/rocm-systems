@@ -51,8 +51,9 @@ typedef enum {
     AMDSMI_INIT_AMD_GPUS       = (1 << 1),    //!< Initialize AMD GPUS
     AMDSMI_INIT_NON_AMD_CPUS   = (1 << 2),    //!< Initialize Non-AMD CPUS
     AMDSMI_INIT_NON_AMD_GPUS   = (1 << 3),    //!< Initialize Non-AMD GPUS
-    AMDSMI_INIT_AMD_APUS       = (AMDSMI_INIT_AMD_CPUS | AMDSMI_INIT_AMD_GPUS) /**< Initialize AMD CPUS and GPUS
+    AMDSMI_INIT_AMD_APUS       = (AMDSMI_INIT_AMD_CPUS | AMDSMI_INIT_AMD_GPUS), /**< Initialize AMD CPUS and GPUS
                                                                                     (Default option) */
+    AMDSMI_INIT_AMD_NICS       = (1 << 4)     //!< Initialize NIC's 
 } amdsmi_init_flags_t;
 
 /**
@@ -309,7 +310,9 @@ typedef enum {
     AMDSMI_PROCESSOR_TYPE_NON_AMD_CPU,   //!< Non-AMD CPU processor type
     AMDSMI_PROCESSOR_TYPE_AMD_CPU_CORE,  //!< AMD CPU-Core processor type, individual processing units within the CPU
     AMDSMI_PROCESSOR_TYPE_AMD_APU,       //!< AMD Accelerated processor type, GPU and CPU on a single die
-    AMDSMI_PROCESSOR_TYPE_AMD_NIC        //!< AMD Network Interface Card processor type
+    AMDSMI_PROCESSOR_TYPE_AMD_NIC,       //!< AMD Network Interface Card processor type
+    AMDSMI_PROCESSOR_TYPE_BRCM_NIC,      //!< Broadcom Network Interface Card type
+    AMDSMI_PROCESSOR_TYPE_BRCM_SWITCH    //!< Broadcomm Switch type
 } processor_type_t;
 
 /**
@@ -2478,6 +2481,200 @@ typedef struct {
   uint32_t socket_id;
   uint32_t cores_per_socket;
 } amdsmi_sock_info_t;
+
+/**
+ * @brief Maximum size definitions AMDSMI NIC
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+#define AMDSMI_MAX_NIC_PORTS              32  //!< Maximum number of NIC ports
+#define AMDSMI_MAX_NIC_RDMA_DEV           32  //!< Maximum number of NIC RDMA devices
+#define AMDSMI_MAX_NIC_FW                 16  //!< Maximum number of NIC firmwares
+
+/**
+ * @brief NIC Link Types. This enum is used to identify the link type between
+ * NIC and GPU processors based on their PCIe and NUMA connectivity.
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef enum {
+    AMDSMI_NIC_LINK_TYPE_UNKNOWN,  //!< unknown type.
+    AMDSMI_NIC_LINK_TYPE_PCIE,     //!< two processors connect via same PCIe
+    AMDSMI_NIC_LINK_TYPE_NUMA,     //!< two processors connect via different PCIe switches but on the same CPU
+    AMDSMI_NIC_LINK_TYPE_X_NUMA,   //!< two processors connect via  different  PCIe switches but on different CPUs
+ } amdsmi_nic_link_type_t;
+
+/**
+ * @brief Structure for NIC statistic name-value pairs
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ *
+ * This structure represents a single NIC statistic with its name and value.
+ */
+typedef struct {
+    char name[AMDSMI_MAX_STRING_LENGTH];
+    uint64_t value;
+} amdsmi_nic_stat_t;
+
+/**
+ * @brief NIC asic information
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef struct {
+    uint16_t vendor_id;
+    uint16_t subvendor_id;
+    uint16_t device_id;
+    uint16_t subsystem_id;
+    uint8_t revision;
+    char permanent_address[AMDSMI_MAX_STRING_LENGTH];
+    char product_name[AMDSMI_MAX_STRING_LENGTH];
+    char part_number[AMDSMI_MAX_STRING_LENGTH];
+    char serial_number[AMDSMI_MAX_STRING_LENGTH];
+    char vendor_name[AMDSMI_MAX_STRING_LENGTH];
+} amdsmi_nic_asic_info_t;
+
+/**
+ * @brief NIC bus information
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef struct {
+    amdsmi_bdf_t bdf;
+    uint8_t max_pcie_width;
+    uint32_t max_pcie_speed; //!< maximum PCIe speed in GT/s
+    char pcie_interface_version[AMDSMI_MAX_STRING_LENGTH];
+    char slot_type[AMDSMI_MAX_STRING_LENGTH];
+} amdsmi_nic_bus_info_t;
+
+/**
+ * @brief NIC NUMA information
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef struct {
+    uint8_t node;
+    char affinity[AMDSMI_MAX_STRING_LENGTH];
+} amdsmi_nic_numa_info_t;
+
+/**
+ * @brief NIC firmware information
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef struct {
+    char name[AMDSMI_MAX_STRING_LENGTH];
+    char version[AMDSMI_MAX_STRING_LENGTH];
+} amdsmi_nic_fw_t;
+
+/**
+ * @brief NIC firmware information collection
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef struct {
+    uint32_t num_fw;
+    amdsmi_nic_fw_t fw[AMDSMI_MAX_NIC_FW];
+} amdsmi_nic_fw_info_t;
+
+/**
+ * @brief NIC port information
+ *
+ * Active FEC Modes:
+ * The active_fec field provides a bitmask representation of Active FEC (Active Forward Error Correction) modes.
+ * The bitmask values are derived from the `ethtool_fecparam` structure, specifically
+ * the `active_fec` field. Below are examples of the defined FEC modes:
+ *
+ * Examples:
+ * - ETHTOOL_FEC_NONE  (0x01)
+ * - ETHTOOL_FEC_AUTO  (0x02)
+ * - ETHTOOL_FEC_RS    (0x04)
+ * - ETHTOOL_FEC_BASER (0x08)
+ * - ETHTOOL_FEC_LLRS  (0x10)
+ * - ETHTOOL_FEC_OFF   (0x20)
+ *
+ * Note: These definitions are based on the latest available ethtool information. Users should
+ * verify if there are any updates or changes to these definitions in the relevant ethtool
+ * structure or field before implementing them in their code.
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef struct {
+    amdsmi_bdf_t bdf;
+    uint32_t port_num;
+    char type[AMDSMI_MAX_STRING_LENGTH];
+    char flavour[AMDSMI_MAX_STRING_LENGTH];
+    char netdev[AMDSMI_MAX_STRING_LENGTH];
+    uint8_t ifindex;
+    char mac_address[AMDSMI_MAX_STRING_LENGTH];
+    uint8_t carrier;
+    uint16_t mtu;
+    char link_state[AMDSMI_MAX_STRING_LENGTH];
+    uint32_t link_speed;
+    uint32_t active_fec;   //!< Active FEC modes bitmask (see about FEC modes in the description)
+    char autoneg[AMDSMI_MAX_STRING_LENGTH];
+    char pause_autoneg[AMDSMI_MAX_STRING_LENGTH];
+    char pause_rx[AMDSMI_MAX_STRING_LENGTH];
+    char pause_tx[AMDSMI_MAX_STRING_LENGTH];
+} amdsmi_nic_port_t;
+
+/**
+ * @brief NIC port information collection
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef struct {
+    uint32_t num_ports;
+    amdsmi_nic_port_t ports[AMDSMI_MAX_NIC_PORTS];
+} amdsmi_nic_port_info_t;
+
+/**
+ * @brief NIC driver information
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef struct {
+    char name[AMDSMI_MAX_STRING_LENGTH];
+    char version[AMDSMI_MAX_STRING_LENGTH];
+} amdsmi_nic_driver_info_t;
+
+/**
+ * @brief NIC RDMA port information
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef struct {
+    char netdev[AMDSMI_MAX_STRING_LENGTH];
+    char state[AMDSMI_MAX_STRING_LENGTH];
+    uint8_t rdma_port;
+    uint16_t max_mtu;
+    uint16_t active_mtu;
+} amdsmi_nic_rdma_port_info_t;
+
+/**
+ * @brief NIC RDMA device information
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef struct {
+    char rdma_dev[AMDSMI_MAX_STRING_LENGTH];
+    char node_guid[AMDSMI_MAX_STRING_LENGTH];
+    char node_type[AMDSMI_MAX_STRING_LENGTH];
+    char sys_image_guid[AMDSMI_MAX_STRING_LENGTH];
+    char fw_ver[AMDSMI_MAX_STRING_LENGTH];
+    uint8_t num_rdma_ports;
+    amdsmi_nic_rdma_port_info_t rdma_port_info[AMDSMI_MAX_NIC_PORTS];
+} amdsmi_nic_rdma_dev_info_t;
+
+/**
+ * @brief NIC RDMA devices information collection
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef struct {
+    uint8_t num_rdma_dev;
+    amdsmi_nic_rdma_dev_info_t rdma_dev_info[AMDSMI_MAX_NIC_RDMA_DEV];
+} amdsmi_nic_rdma_devices_info_t;
 
 /*****************************************************************************/
 /** @defgroup tagInitShutdown Initialization and Shutdown
@@ -7704,6 +7901,134 @@ amdsmi_status_t amdsmi_get_dfc_ctrl(amdsmi_processor_handle processor_handle, ui
 /** @} End tagDFCEnableControl */
 
 #endif
+
+/*****************************************************************************/
+/** @defgroup tagNicInfo NIC Information
+ *  @{
+ */
+
+/**
+ *  @brief Retrieves information about the NIC driver
+ *
+ *  @ingroup tagNicInfo
+ *
+ *  @platform{host} @platform{gpu_bm_linux}
+ *
+ *  @param[in] processor_handle NIC for which to query
+ *
+ *  @param[out] info reference to the nic driver info struct.
+ *  Must be allocated by user.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_nic_driver_info(amdsmi_processor_handle processor_handle, amdsmi_nic_driver_info_t *info);
+
+/**
+ *  @brief Retrieves ASIC information for the NIC
+ *
+ *  @ingroup tagNicInfo
+ *
+ *  @platform{host} @platform{gpu_bm_linux}
+ *
+ *  @param[in] processor_handle NIC for which to query
+ *
+ *  @param[out] info reference to the nic asic info struct.
+ *  Must be allocated by user.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_nic_asic_info(amdsmi_processor_handle processor_handle, amdsmi_nic_asic_info_t *info);
+
+/**
+ *  @brief Retrieves BUS information for the NIC
+ *
+ *  @ingroup tagNicInfo
+ *
+ *  @platform{host} @platform{gpu_bm_linux}
+ *
+ *  @param[in] processor_handle NIC for which to query
+ *
+ *  @param[out] info reference to the nic bus info struct.
+ *  Must be allocated by user.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_nic_bus_info(amdsmi_processor_handle processor_handle, amdsmi_nic_bus_info_t *info);
+
+/**
+ *  @brief Retrieves NUMA information for the NIC
+ *
+ *  @ingroup tagNicInfo
+ *
+ *  @platform{host} @platform{gpu_bm_linux}
+ *
+ *  @param[in] processor_handle NIC for which to query
+ *
+ *  @param[out] info reference to the nic numa info struct.
+ *  Must be allocated by user.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_nic_numa_info(amdsmi_processor_handle processor_handle, amdsmi_nic_numa_info_t *info);
+
+/**
+ *  @brief Retrieves PORT information for the NIC
+ *
+ *  @ingroup tagNicInfo
+ *
+ *  @platform{host} @platform{gpu_bm_linux}
+ *
+ *  @param[in] processor_handle NIC for which to query
+ *
+ *  @param[out] info reference to the nic port info struct.
+ *  Must be allocated by user.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_nic_port_info(amdsmi_processor_handle processor_handle, amdsmi_nic_port_info_t *info);
+
+/**
+ *  @brief Retrieves RDMA devices information for the NIC
+ *
+ *  @ingroup tagNicInfo
+ *
+ *  @platform{host} @platform{gpu_bm_linux}
+ *
+ *  @param[in] processor_handle NIC for which to query
+ *
+ *  @param[out] info reference to the nic rdma devices info struct.
+ *  Must be allocated by user.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_nic_rdma_dev_info(amdsmi_processor_handle processor_handle, amdsmi_nic_rdma_devices_info_t *info);
+
+/**
+ *  @brief Retrieve RDMA port statistics for the NIC
+ *
+ *  @ingroup tagNicInfo
+ *
+ *  @platform{host} @platform{gpu_bm_linux}
+ *
+ *  This function follows a two-call pattern:
+ *  1. First call with stats=NULL to get the count of available statistics
+ *  2. Second call with allocated array to retrieve all statistics
+ *
+ *  @param[in] processor_handle NIC for which to query
+ *  @param[in] rdma_port_index index of the NIC RDMA port to query
+ *  @param[in,out] num_stats pointer to the number of statistics
+ *    - Input: maximum number of statistics that stats array can hold
+ *    - Output: actual number of statistics available/returned
+ *  @param[out] stats pointer to array of amdsmi_nic_stat_t structures to be filled
+ *    - If NULL, only num_stats is filled with the count of available statistics
+ *    - If not NULL, must be allocated by user with at least num_stats elements
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_nic_rdma_port_statistics(amdsmi_processor_handle processor_handle, uint32_t rdma_port_index,
+                                                    uint32_t *num_stats, amdsmi_nic_stat_t *stats);
+
+/** @} End tagNicInfo */
 
 #ifdef __cplusplus
 }
