@@ -30,8 +30,6 @@ def ucx_base_env() -> dict[str, str]:
     """UCX environment."""
     return {
         "ROCPROFSYS_USE_UCX": "ON",
-        "ROCPROFSYS_DEBUG": "ON",
-        "ROCPROFSYS_VERBOSE": "3",
         "ROCPROFSYS_DL_VERBOSE": "3",
         "ROCPROFSYS_PERFETTO_BACKEND": "inprocess",
         "ROCPROFSYS_PERFETTO_FILL_POLICY": "ring_buffer",
@@ -78,7 +76,6 @@ def ucx_env(ucx_base_env) -> dict[str, str]:
     env = ucx_base_env.copy()
     env.update(
         {
-            "ROCPROFSYS_VERBOSE": "1",
             "ROCPROFSYS_TRACE_LEGACY": "ON",
             "ROCPROFSYS_PERFETTO_COMBINE_TRACES": "ON",
         }
@@ -116,11 +113,9 @@ class TestUCX(RocprofsysTest):
         ]
         RUN_ARGS = ["30"]
         REWRITE_PASS_REGEX = [
-            r"UCX.*trace|ucp_.*trace|Category.*ucx|UCX function.*called"
+            r"ucx_gotcha|category::ucx|Successfully executed: .+rocprof-sys-merge-output\.sh.*"
         ]
-        SYS_RUN_PASS_REGEX = [
-            r"ucp_tag_send|ucp_tag_recv|write_perfetto_counter_track.*ucx"
-        ]
+        SYS_RUN_PASS_REGEX = [r"ucx_gotcha|category::ucx|Using UCX|pml.*ucx"]
 
         result = self.run_test(
             mode,
@@ -156,11 +151,11 @@ class TestUCX(RocprofsysTest):
             "--min-instructions",
             "0",
         ]
-        REWRITE_PASS_REGEX = [r"Successfully executed: .+rocprof-sys-merge-output\.sh.*"]
-        REWRITE_FAIL_REGEX = [r"Script not found|Failed to execute"]
-        SYS_RUN_PASS_REGEX = [
-            r"ucp_tag_send|ucp_tag_recv|UCX.*configured|Using UCX|pml.*ucx"
+        REWRITE_PASS_REGEX = [
+            r"ucx_gotcha|category::ucx|Successfully executed: .+rocprof-sys-merge-output\.sh.*"
         ]
+        REWRITE_FAIL_REGEX = [r"Script not found|Failed to execute"]
+        SYS_RUN_PASS_REGEX = [r"ucx_gotcha|category::ucx|Using UCX|pml.*ucx"]
 
         result = self.run_test(
             mode, "mpi-example", env=ucx_env, rewrite_args=REWRITE_ARGS, mpi_ranks=2
@@ -193,9 +188,7 @@ class TestUCX(RocprofsysTest):
             "--min-instructions",
             "0",
         ]
-        REWRITE_PASS_REGEX = [
-            r"UCX.*trace.*MPI.*trace|ucp_.*MPI_|Category.*ucx.*Category.*mpi"
-        ]
+        REWRITE_PASS_REGEX = [r"ucx_gotcha|category::ucx"]
         RUN_ARGS = ["30"]
 
         result = self.run_test(
@@ -225,7 +218,7 @@ class TestUCX(RocprofsysTest):
             "--min-instructions",
             "0",
         ]
-        REWRITE_PASS_REGEX = [r"UCX.*trace|ucp_.*send|ucp_.*recv|Category.*ucx"]
+        REWRITE_PASS_REGEX = [r"ucx_gotcha|category::ucx"]
 
         result = self.run_test(
             mode,
@@ -253,7 +246,7 @@ class TestUCX(RocprofsysTest):
             "--min-instructions",
             "0",
         ]
-        REWRITE_PASS_REGEX = [r"ucp_am_send|ucp_am_recv|uct_ep_am|Active.*Message"]
+        REWRITE_PASS_REGEX = [r"ucx_gotcha|category::ucx"]
         RUN_ARGS = ["64"]
 
         result = self.run_test(

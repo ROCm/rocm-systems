@@ -49,7 +49,6 @@ def ompt_sampling_env(ompt_env: dict[str, str]) -> dict[str, str]:
     env = ompt_env.copy()
     env.update(
         {
-            "ROCPROFSYS_VERBOSE": "2",
             "ROCPROFSYS_USE_OMPT": "OFF",
             "ROCPROFSYS_USE_SAMPLING": "ON",
             "ROCPROFSYS_USE_PROCESS_SAMPLING": "OFF",
@@ -80,7 +79,6 @@ def ompt_no_tmp_env(ompt_env: dict[str, str]) -> dict[str, str]:
     env = ompt_env.copy()
     env.update(
         {
-            "ROCPROFSYS_VERBOSE": "2",
             "ROCPROFSYS_USE_OMPT": "OFF",
             "ROCPROFSYS_USE_SAMPLING": "ON",
             "ROCPROFSYS_USE_PROCESS_SAMPLING": "OFF",

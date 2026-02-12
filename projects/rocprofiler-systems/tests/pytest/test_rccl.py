@@ -3,8 +3,6 @@
 
 """
 Tests for RCCL
-
-MPI is unsupported for RCCL tests.
 """
 
 from __future__ import annotations

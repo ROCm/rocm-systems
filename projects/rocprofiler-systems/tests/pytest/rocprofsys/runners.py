@@ -160,6 +160,7 @@ class BaseRunner(ABC):
     def __init__(
         self,
         config: RocprofsysConfig,
+        base_env: dict[str, str],
         target: str,
         output_dir: Path,
         run_args: Optional[list[str]] = None,
@@ -177,7 +178,7 @@ class BaseRunner(ABC):
         self.mpi_ranks = mpi_ranks
         self.working_directory = working_directory or config.rocprofsys_build_dir
         self.env = config.get_fundamental_environment()
-        self.env.update(config.get_base_environment())
+        self.env.update(base_env)
         self.env["ROCPROFSYS_OUTPUT_PATH"] = str(self.output_dir)
         if env:
             self.env.update(env)
@@ -240,7 +241,7 @@ class BaseRunner(ABC):
                 returncode=-1,
                 test_output=f"{e}",
                 output_dir=self.output_dir,
-                command="Failed to build command",
+                command=["Failed to build command"],
                 environment=self.env,
                 duration=0,
             )
@@ -316,17 +317,13 @@ class BaselineRunner(BaseRunner):
         command: Optional[list[str]] = None,
         **kwargs,
     ):
-        super().__init__(config, target, output_dir, **kwargs)
-        self.command = command
-
-        # If target is a rocprof-sys binary, use binary environment instead
         if target in self.ROCPROFSYS_BINARIES:
-            self.env = config.get_fundamental_environment()
-            self.env.update(config.get_base_binary_environment())
-            self.env["ROCPROFSYS_OUTPUT_PATH"] = str(self.output_dir)
-            # Re-apply any custom env passed via kwargs
-            if "env" in kwargs and kwargs["env"]:
-                self.env.update(kwargs["env"])
+            base_env = config.get_base_binary_environment()
+        else:
+            base_env = config.get_base_environment()
+
+        super().__init__(config, base_env, target, output_dir, **kwargs)
+        self.command = command
 
     def build_command(self) -> list[str]:
         if self.command:
@@ -354,7 +351,8 @@ class SamplingRunner(BaseRunner):
             sample_args: Arguments for rocprof-sys-sample
             **kwargs: Additional arguments passed to BaseRunner
         """
-        super().__init__(config, target, output_dir, **kwargs)
+        base_env = config.get_base_binary_environment()
+        super().__init__(config, base_env, target, output_dir, **kwargs)
         self.sample_args = sample_args or []
 
     def build_command(self) -> list[str]:
@@ -390,7 +388,8 @@ class BinaryRewriteRunner(BaseRunner):
                 fixture handle cleanup after validation completes.
             **kwargs: Additional arguments passed to BaseRunner
         """
-        super().__init__(config, target, output_dir, **kwargs)
+        base_env = config.get_base_binary_environment()
+        super().__init__(config, base_env, target, output_dir, **kwargs)
         self.rewrite_args = rewrite_args or []
         self.instrumented_exe = output_dir / f"{target}.inst"
         self.cleanup_on_success = cleanup_on_success
@@ -545,7 +544,8 @@ class RuntimeInstrumentRunner(BaseRunner):
             runtime_args: Arguments for rocprof-sys-instrument
             **kwargs: Additional arguments passed to BaseRunner
         """
-        super().__init__(config, target, output_dir, **kwargs)
+        base_env = config.get_base_binary_environment()
+        super().__init__(config, base_env, target, output_dir, **kwargs)
         self.runtime_args = runtime_args or []
 
     def build_command(self) -> list[str]:
@@ -578,7 +578,8 @@ class SysRunRunner(BaseRunner):
             sysrun_args: Arguments for rocprof-sys-run (before --)
             **kwargs: Additional arguments passed to BaseRunner
         """
-        super().__init__(config, target, output_dir, **kwargs)
+        base_env = config.get_base_binary_environment()
+        super().__init__(config, base_env, target, output_dir, **kwargs)
         self.sysrun_args = sysrun_args or []
 
     def build_command(self) -> list[str]:
@@ -612,7 +613,8 @@ class CausalRunner(BaseRunner):
             causal_args: Arguments for rocprof-sys-causal
             **kwargs: Additional arguments passed to BaseRunner
         """
-        super().__init__(config, target, output_dir, **kwargs)
+        base_env = config.get_base_causal_environment()
+        super().__init__(config, base_env, target, output_dir, **kwargs)
         self.causal_mode = causal_mode
         self.causal_args = causal_args or []
 
@@ -634,30 +636,14 @@ class PythonRunner(BaseRunner):
         config: RocprofsysConfig,
         target: str,
         output_dir: Path,
-        run_args: Optional[list[str]] = None,
-        timeout: int = 300,
-        mpi_ranks: int = 0,
-        working_directory: Optional[Path] = None,
-        env: Optional[dict[str, str]] = None,
         profile_args: Optional[list[str]] = None,
         python_version: Optional[str] = None,
         annotated: bool = False,
         standalone: bool = False,
         **kwargs,
     ):
-        self.config = config
-        self.target = target
-        self.target_exe = config.get_target_executable(target, python_version)
-        self.output_dir = Path(output_dir)
-        self.run_args = run_args or []
-        self.timeout = timeout
-        self.mpi_ranks = mpi_ranks
-        self.working_directory = working_directory or config.rocprofsys_build_dir
-        self.env = config.get_fundamental_environment()
-        self.env.update(config.get_base_python_environment())
-        self.env["ROCPROFSYS_OUTPUT_PATH"] = str(self.output_dir)
-        if env:
-            self.env.update(env)
+        base_env = config.get_base_python_environment()
+        super().__init__(config, base_env, target, output_dir, **kwargs)
 
         self.python_version = python_version
         self.annotated = annotated
@@ -665,10 +651,7 @@ class PythonRunner(BaseRunner):
         self.profile_args = profile_args or []
 
     def build_command(self) -> list[str]:
-        try:
-            python_executable = self.config.get_python_executable(self.python_version)
-        except FileNotFoundError as e:
-            raise FileNotFoundError(f"{e}")
+        python_executable = self.config.get_python_executable(self.python_version)
 
         command = [str(python_executable)]
         if not self.standalone:

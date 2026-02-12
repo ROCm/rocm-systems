@@ -229,6 +229,7 @@ class RocprofsysConfig:
         """Get base environment variables for test execution."""
         return {
             "ROCPROFSYS_CI": "ON",
+            "ROCPROFSYS_CI_TIMEOUT": os.environ.get("ROCPROFSYS_CI_TIMEOUT", "300"),
             "ROCPROFSYS_CONFIG_FILE": "",
             "ROCPROFSYS_TRACE": "ON",
             "ROCPROFSYS_PROFILE": "ON",
@@ -237,8 +238,7 @@ class RocprofsysConfig:
             "ROCPROFSYS_TIME_OUTPUT": "OFF",
             "ROCPROFSYS_FILE_OUTPUT": "ON",
             "ROCPROFSYS_USE_PID": "OFF",
-            "ROCPROFSYS_LOG_LEVEL": "info",
-            "ROCPROFSYS_VERBOSE": "1",
+            "ROCPROFSYS_LOG_LEVEL": "trace",
             "ROCPROFSYS_SAMPLING_FREQ": "300",
             "ROCPROFSYS_SAMPLING_DELAY": "0.05",
             "OMP_PROC_BIND": "spread",
@@ -250,18 +250,21 @@ class RocprofsysConfig:
     def get_base_binary_environment(self) -> dict[str, str]:
         """Get base environment variables for rocprof-sys binary test execution."""
         return {
+            "ROCPROFSYS_CI": "ON",
+            "ROCPROFSYS_CI_TIMEOUT": os.environ.get("ROCPROFSYS_CI_TIMEOUT", "300"),
             "ROCPROFSYS_TRACE": "ON",
             "ROCPROFSYS_PROFILE": "ON",
             "ROCPROFSYS_USE_SAMPLING": "ON",
             "ROCPROFSYS_TIME_OUTPUT": "OFF",
+            "ROCPROFSYS_USE_PID": "OFF",
             "LD_LIBRARY_PATH": self.get_library_path(),
-            "ROCPROFSYS_CI": "ON",
-            "ROCPROFSYS_CI_TIMEOUT": "300",
             "ROCPROFSYS_CONFIG_FILE": "",
         }
 
     def get_base_python_environment(self) -> dict[str, str]:
         return {
+            "ROCPROFSYS_CI": "ON",
+            "ROCPROFSYS_CI_TIMEOUT": os.environ.get("ROCPROFSYS_CI_TIMEOUT", "300"),
             "ROCPROFSYS_TRACE": "ON",
             "ROCPROFSYS_PROFILE": "ON",
             "ROCPROFSYS_USE_SAMPLING": "OFF",
@@ -270,7 +273,22 @@ class RocprofsysConfig:
             "ROCPROFSYS_TREE_OUTPUT": "OFF",
             "ROCPROFSYS_USE_PID": "OFF",
             "ROCPROFSYS_TIMEMORY_COMPONENTS": "wall_clock,trip_count",
-            "PYTHONPATH": str(self.python_module_path),
+            "PYTHONPATH": str(self.python_module_path or ""),
+            "ROCPROFSYS_CONFIG_FILE": "",
+        }
+
+    def get_base_causal_environment(self) -> dict[str, str]:
+        return {
+            "ROCPROFSYS_CI": "ON",
+            "ROCPROFSYS_CI_TIMEOUT": os.environ.get("ROCPROFSYS_CI_TIMEOUT", "300"),
+            "ROCPROFSYS_USE_PID": "OFF",
+            "ROCPROFSYS_THREAD_POOL_SIZE": "0",
+            "ROCPROFSYS_VERBOSE": "1",
+            "ROCPROFSYS_LOG_LEVEL": "info",
+            "ROCPROFSYS_DL_VERBOSE": "0",
+            "ROCPROFSYS_DEBUG_SETTINGS": "0",
+            "LD_LIBRARY_PATH": self.get_library_path(),
+            "ROCPROFSYS_CONFIG_FILE": "",
         }
 
     def get_python_executable(self, version: str) -> Path:
@@ -278,7 +296,6 @@ class RocprofsysConfig:
 
         Args:
             version: Python version string
-            target: Target script name
 
         Returns:
             Path to the Python script for that version

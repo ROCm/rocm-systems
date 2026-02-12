@@ -52,35 +52,23 @@ class SystemCapabilities:
         if not mpicc:
             return "unknown"
 
-        include_paths = ""
-
-        # Try OpenMPI-style query first
-        try:
-            result = subprocess.run(
-                [mpicc, "--showme:compile"],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            if result.returncode == 0:
-                include_paths = result.stdout
-        except (subprocess.SubprocessError, OSError):
-            pass
-
-        # Try MPICH-style query if OpenMPI didn't work
-        if not include_paths:
+        def _get_include_path(args: list[str]) -> str:
             try:
                 result = subprocess.run(
-                    [mpicc, "-show"],
+                    [mpicc] + args,
                     capture_output=True,
                     text=True,
                     timeout=10,
                 )
-                if result.returncode == 0:
-                    include_paths = result.stdout
+                return result.stdout if result.returncode == 0 else ""
             except (subprocess.SubprocessError, OSError):
-                pass
+                return ""
 
+        include_paths = _get_include_path(
+            ["--showme:compile"]
+        ) or _get_include_path(  # OpenMPI-style
+            ["-show"]
+        )  # MPICH-style
         # Check include paths for implementation markers
         if "openmpi" in include_paths.lower():
             return "openmpi"
@@ -100,7 +88,10 @@ class SystemCapabilities:
             return None
         try:
             result = subprocess.run(
-                [get_default_nic_script], capture_output=True, text=True
+                [get_default_nic_script],
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
             if result.returncode != 0:
                 return None
@@ -121,7 +112,10 @@ class SystemCapabilities:
             return None
         try:
             result = subprocess.run(
-                [generate_papi_nic_events_script], capture_output=True, text=True
+                [generate_papi_nic_events_script],
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
             if result.returncode != 0:
                 return None
@@ -137,16 +131,30 @@ class SystemCapabilities:
         if not mpi_send_recv.exists():
             return False
 
+        # Force OpenMPI to use UCX transport
+        ucx_env = os.environ.copy()
+        ucx_env.update(
+            {
+                "OMPI_MCA_pml": "ucx",
+                "OMPI_MCA_osc": "ucx",
+                "OMPI_MCA_pml_ucx_tls": "tcp,self",
+                "OMPI_MCA_pml_ucx_devices": "any",
+            }
+        )
+
         try:
             result = subprocess.run(
-                [self.mpiexec, "-n", "2", mpi_send_recv], capture_output=True, text=True
+                [self.mpiexec, "-n", "2", mpi_send_recv],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                env=ucx_env,
             )
             if result.returncode != 0:
                 return False
         except (subprocess.SubprocessError, OSError):
             return False
 
-        # Ensure the following regex is NOT found
         fail_regex = [
             r"PML ucx cannot be selected",
             r"UCX is not available",
@@ -155,8 +163,9 @@ class SystemCapabilities:
             r"No components were able to be opened in the pml framework",
         ]
 
+        combined_output = (result.stdout or "") + (result.stderr or "")
         for regex in fail_regex:
-            if re.search(regex, result.stdout):
+            if re.search(regex, combined_output):
                 return False
 
         return True
@@ -197,7 +206,10 @@ class SystemCapabilities:
             return False
         try:
             result = subprocess.run(
-                [capchk, "CAP_SYS_ADMIN", "effective"], capture_output=True, text=True
+                [capchk, "CAP_SYS_ADMIN", "effective"],
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
             if result.returncode != 0:
                 return False
@@ -213,7 +225,10 @@ class SystemCapabilities:
             return False
         try:
             result = subprocess.run(
-                [capchk, "CAP_PERFMON", "effective"], capture_output=True, text=True
+                [capchk, "CAP_PERFMON", "effective"],
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
             if result.returncode != 0:
                 return False
@@ -233,7 +248,7 @@ class SystemCapabilities:
                 [str(self.rocprofsys_avail), "--components"],
                 capture_output=True,
                 text=True,
-                timeout=120,
+                timeout=10,
             )
             if result.returncode != 0:
                 return False
@@ -260,7 +275,10 @@ class SystemCapabilities:
             return False
         try:
             result = subprocess.run(
-                [ldd_exec, str(target_path)], capture_output=True, text=True
+                [ldd_exec, str(target_path)],
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
             if result.returncode != 0:
                 return False

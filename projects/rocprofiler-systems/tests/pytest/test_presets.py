@@ -11,6 +11,20 @@ from conftest import RocprofsysTest
 
 pytestmark = [pytest.mark.presets]
 
+PRESETS = [
+    "balanced",
+    "profile-only",
+    "detailed",
+    "trace-hpc",
+    "workload-trace",
+    "sys-trace",
+    "runtime-trace",
+    "trace-gpu",
+    "trace-openmp",
+    "profile-mpi",
+    "trace-hw-counters",
+]
+
 # ============================================================================
 # Preset Tests
 # ============================================================================
@@ -18,22 +32,7 @@ pytestmark = [pytest.mark.presets]
 
 class TestPresets(RocprofsysTest):
     @pytest.mark.sampling
-    @pytest.mark.parametrize(
-        "preset",
-        [
-            "balanced",
-            "profile-only",
-            "detailed",
-            "trace-hpc",
-            "workload-trace",
-            "sys-trace",
-            "runtime-trace",
-            "trace-gpu",
-            "trace-openmp",
-            "profile-mpi",
-            "trace-hw-counters",
-        ],
-    )
+    @pytest.mark.parametrize("preset", PRESETS)
     def test_sample(self, preset):
         result = self.run_test(
             "baseline",
@@ -63,22 +62,7 @@ class TestPresets(RocprofsysTest):
         )
 
     @pytest.mark.sys_run
-    @pytest.mark.parametrize(
-        "preset",
-        [
-            "balanced",
-            "profile-only",
-            "detailed",
-            "trace-hpc",
-            "workload-trace",
-            "sys-trace",
-            "runtime-trace",
-            "trace-gpu",
-            "trace-openmp",
-            "profile-mpi",
-            "trace-hw-counters",
-        ],
-    )
+    @pytest.mark.parametrize("preset", PRESETS)
     def test_run(self, preset):
         result = self.run_test(
             "baseline",

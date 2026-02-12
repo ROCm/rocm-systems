@@ -17,7 +17,6 @@ import re
 import os
 import sys
 import shutil
-import json
 
 # Add the pytest directory to Python path for rocprofsys package
 sys.path.insert(0, str(Path(__file__).parent))
@@ -235,11 +234,11 @@ def pytest_configure(config: pytest.Config) -> None:
     # See pytest_collection_modifyitems
     generic_functional_markers = [
         "ucx",
-        "mpi",
         "overflow",
         "attach",
         "mpi",
         "rocm",
+        "python",
     ]
 
     # Non-functional informational markers
@@ -259,7 +258,6 @@ def pytest_configure(config: pytest.Config) -> None:
         "binary_rewrite",
         "runtime_instrument",
         "sys_run",
-        "python",
         "decode",
         "videodecode",
         "jpegdecode",
@@ -429,6 +427,7 @@ def pytest_collection_modifyitems(config, items) -> None:
         "Run 'echo 0 | sudo tee /proc/sys/kernel/yama/ptrace_scope' to enable attaching to process"
     )
     skip_rocm = pytest.mark.skip(reason="ROCm not available")
+    skip_python = pytest.mark.skip(reason="Python not available")
 
     # Conditions
     overflow_available = (
@@ -442,6 +441,10 @@ def pytest_collection_modifyitems(config, items) -> None:
     attach_available = rocprof_config.capabilities.ptrace_scope == 0
     mpi_available = rocprof_config.mpiexec is not None and not config.getoption(
         "--ci-mode", default=False
+    )
+    python_available = (
+        rocprof_config.python_versions is not None
+        and os.environ.get("ROCPROFSYS_USE_PYTHON", "ON").upper() == "ON"
     )
 
     for item in items:
@@ -498,6 +501,8 @@ def pytest_collection_modifyitems(config, items) -> None:
             item.add_marker(skip_attach)
         if "rocm" in item.keywords and not rocprof_config.rocm_path:
             item.add_marker(skip_rocm)
+        if "python" in item.keywords and not python_available:
+            item.add_marker(skip_python)
         if "rocm_min_version" in item.keywords:
             req_version = item.get_closest_marker("rocm_min_version").args[0]
             system_version = rocprof_config.rocm_version
@@ -738,7 +743,7 @@ def _generate_rocprofsys_config_header(config: pytest.Config) -> list[str]:
     except Exception as e:
         return [f"{e}"]
 
-    gpuInfo = get_gpu_info()
+    gpu_info = get_gpu_info()
 
     if rocprof_config.rocm_path:
         # Rocm version
@@ -803,10 +808,10 @@ def _generate_rocprofsys_config_header(config: pytest.Config) -> list[str]:
         "-" * 70,
         "GPU Information:",
         f"  rocminfo:             {rocminfo_path if rocminfo_path else rocminfo_err_msg}",
-        f"  Available:            {gpuInfo.available}",
-        f"  Architectures:        {gpuInfo.architectures if gpuInfo.architectures else 'None'}",
-        f"  Device count:         {gpuInfo.device_count}",
-        f"  Categories:           {gpuInfo.categories if gpuInfo.categories else 'None'}",
+        f"  Available:            {gpu_info.available}",
+        f"  Architectures:        {gpu_info.architectures if gpu_info.architectures else 'None'}",
+        f"  Device count:         {gpu_info.device_count}",
+        f"  Categories:           {gpu_info.categories if gpu_info.categories else 'None'}",
         "-" * 70,
         "Directories:",
         f"  Build dir:            {rocprof_config.rocprofsys_build_dir}",
@@ -851,7 +856,7 @@ def _generate_rocprofsys_config_header(config: pytest.Config) -> list[str]:
 def add_marker_if(
     item,
     marker_to_add: str,
-    cond: Optional[bool] = True,
+    cond: bool = True,
     req_mark: Optional[str] = None,
     skip_reason: Optional[str] = None,
 ) -> None:
@@ -878,7 +883,7 @@ def check_use_rocpd() -> bool:
     - A valid GPU
     - ROCm >= 7.0
     """
-    if os.environ.get("ROCPROFSYS_USE_ROCPD", "").upper() == "OFF":
+    if os.environ.get("ROCPROFSYS_USE_ROCPD", "ON").upper() != "ON":
         return False
     try:
         rocprof_config = get_rocprof_config()
@@ -896,10 +901,10 @@ def check_use_perfetto() -> bool:
     """Whether Perfetto is available for tests.
 
     Perfetto requires:
-    - Perfetto Python module installed
     - ROCPROFSYS_VALIDATE_PERFETTO not set to OFF (default: ON)
+    - Perfetto Python module installed
     """
-    if os.environ.get("ROCPROFSYS_VALIDATE_PERFETTO", "").upper() == "OFF":
+    if os.environ.get("ROCPROFSYS_VALIDATE_PERFETTO", "ON").upper() != "ON":
         return False
     try:
         import perfetto  # noqa
@@ -1233,41 +1238,38 @@ def cleanup_module_temp_files(
 # Class-scoped Fixtures
 # ----------------------------------------------------------------------------
 
+
+class OutputPathStore:
+    """Simple key-value store for sharing output paths between tests in a class.
+
+    Usage:
+        collect_output_path.store("my-key", some_path)
+        path = collect_output_path.get("my-key")
+        all_paths = collect_output_path.all()
+    """
+
+    def __init__(self):
+        self._storage: dict[str, Path] = {}
+
+    def store(self, key: str, value: Path) -> Path:
+        """Store a path under the given key. Returns the stored path."""
+        self._storage[key] = value
+        return value
+
+    def get(self, key: str) -> Optional[Path]:
+        """Retrieve a path by key, or None if not found."""
+        return self._storage.get(key)
+
+    def all(self) -> dict[str, Path]:
+        """Return a copy of all stored paths."""
+        return self._storage.copy()
+
+
 # Used to collect paths from different tests to be used in another test
 @pytest.fixture(scope="class")
 def collect_output_path():
-    """Class-scoped fixture for collecting and retrieving output paths.
-
-    Usage:
-        # Store a path
-        collect_output_path("store", "my-key", some_path)
-
-        # Retrieve a path
-        path = collect_output_path("get", "my-key")
-
-        # Get all stored paths
-        all_paths = collect_output_path("all")
-    """
-    _storage: dict[str, Path] = {}
-
-    def _accessor(
-        mode: str, key: str = None, value: Path = None
-    ) -> Optional[Path | dict[str, Path]]:
-        if mode == "store":
-            if key is None or value is None:
-                raise ValueError("store mode requires key and value")
-            _storage[key] = value
-            return value
-        elif mode == "get":
-            if key is None:
-                raise ValueError("get mode requires key")
-            return _storage.get(key)
-        elif mode == "all":
-            return _storage.copy()
-        else:
-            raise ValueError(f"Unknown mode: {mode}. Use 'store', 'get', or 'all'")
-
-    return _accessor
+    """Class-scoped fixture for collecting and retrieving output paths."""
+    return OutputPathStore()
 
 
 # ----------------------------------------------------------------------------

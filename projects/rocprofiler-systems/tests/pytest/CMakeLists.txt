@@ -48,7 +48,7 @@ add_custom_target(
 )
 
 if(ROCPROFSYS_INSTALL_TESTING)
-    # Build PyInstaller standalone (bundles Python + pytest; no Python/pip on target)
+    # Build standalone pytest binary
     set(ROCPROFSYS_STANDALONE_OUTPUT_DIR
         ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests
     )

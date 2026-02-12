@@ -84,13 +84,13 @@ class TestCodeCoverage(RocprofsysTest):
         elif type == "basic_blocks" and mode == "runtime_instrument":
             key = "basic_blocks_hybrid_coverage_ri"
         if key:
-            collect_output_path("store", key, result.output_dir)
+            collect_output_path.store(key, result.output_dir)
 
     @pytest.mark.python_versions
     def test_python(self, python_version, collect_output_path):
         # Get the coverage paths from the previously ran tests
-        brw_coverage_path = collect_output_path("get", "basic_blocks_coverage_brw")
-        ri_coverage_path = collect_output_path("get", "basic_blocks_hybrid_coverage_ri")
+        brw_coverage_path = collect_output_path.get("basic_blocks_coverage_brw")
+        ri_coverage_path = collect_output_path.get("basic_blocks_hybrid_coverage_ri")
         if not brw_coverage_path or not ri_coverage_path:
             pytest.skip("coverage paths not found")
 

@@ -22,7 +22,6 @@ def time_window_env() -> dict[str, str]:
     return {
         "ROCPROFSYS_USE_SAMPLING": "OFF",
         "ROCPROFSYS_USE_PROCESS_SAMPLING": "OFF",
-        "ROCPROFSYS_VERBOSE": "2",
     }
 
 

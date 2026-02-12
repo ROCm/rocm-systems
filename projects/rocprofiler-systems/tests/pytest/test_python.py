@@ -2,7 +2,7 @@
 # SPDX-License-Identifier:  MIT
 
 """
-Code coverage tests.
+Python tests.
 """
 
 from __future__ import annotations

@@ -300,7 +300,7 @@ class TestRocprofilerSystemsAvail(RocprofsysTest):
         )
         self.assert_regex(result, pass_regex=pass_regex)
 
-    def test_category_filter_rocprofiler_systemms(self):
+    def test_category_filter_rocprofiler_systems(self):
         pass_regex = [r"ROCPROFSYS_(SETTINGS_DESC|OUTPUT_FILE|OUTPUT_PREFIX)"]
         fail_regex = [
             r"ROCPROFSYS_(ADD_SECONDARY|SCIENTIFIC|PRECISION|MEMORY_PRECISION|TIMING_PRECISION)",

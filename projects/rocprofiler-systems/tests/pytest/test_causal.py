@@ -22,10 +22,6 @@ def causal_env() -> dict[str, str]:
         "ROCPROFSYS_TIME_OUTPUT": "OFF",
         "ROCPROFSYS_FILE_OUTPUT": "ON",
         "ROCPROFSYS_CAUSAL_RANDOM_SEED": "1342342",
-        "ROCPROFSYS_USE_PID": "OFF",
-        "ROCPROFSYS_DL_VERBOSE": "0",
-        "ROCPROFSYS_DEBUG_SETTINGS": "0",
-        "ROCPROFSYS_THREAD_POOL_SIZE": "0",
     }
 
 
