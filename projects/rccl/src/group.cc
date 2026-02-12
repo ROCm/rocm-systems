@@ -733,6 +733,7 @@ ncclResult_t ncclGroupEndInternal(ncclSimInfo_t* simInfo) {
   } else {
     /* No work to do - free the unused groupJob */
     free(groupJob);
+    groupJob = nullptr;
   }
   /* Reset the job state for the next group call. */
   groupLocalResetJobState();
