@@ -3,7 +3,7 @@ name: Trigger ROCm CI
 on:
   pull_request:
     types: [opened, synchronize, reopened]
-    branches: [develop]
+    branches: [release/rocm-rel-7.2]
 
 jobs:
   trigger-rocm-ci:
