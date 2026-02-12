@@ -452,6 +452,7 @@ namespace envvar {
     extern const var<bool> alternate_qp_ports;
     extern const var<uint8_t> traffic_class;
     extern const var<bool> pcie_relaxed_ordering;
+    extern const var<bool> enable_dmabuf;
   }  // namespace gda
 }  // namespace envvar
 }  // namespace rocshmem
