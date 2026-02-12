@@ -826,8 +826,13 @@ initialize()
         set_init_status(-1);
         std::atexit([]() {
             finalize(finalize_mode::exit_handler);
-            common::destroy_static_tl_objects();
-            common::destroy_static_objects();
+            // Only destroy static objects if finalization was not deferred.
+            // When deferred, the shutdown callback handles cleanup.
+            if(get_fini_status() != 0)
+            {
+                common::destroy_static_tl_objects();
+                common::destroy_static_objects();
+            }
         });
         invoke_client_configures();
         invoke_client_initializers();
@@ -884,7 +889,18 @@ finalize(finalize_mode mode)
        hsa::is_async_wait_initialized() && !hsa::is_async_shutdown())
     {
         ROCP_INFO << "deferring finalization until HSA async handler shutdown";
-        hsa::register_shutdown_callback([]() { finalize(finalize_mode::exit_handler); });
+        hsa::register_shutdown_callback([]() {
+            // Temporarily clear the shutdown flag so that finalization
+            // code can use wait_or_shutdown() for its own cleanup
+            // (e.g., stopping device counters needs signal waits to complete).
+            // HSA async threads are already destroyed at this point, but
+            // signal waits still work via the core HSA API.
+            hsa::reset_async_shutdown();
+            finalize(finalize_mode::exit_handler);
+            hsa::notify_async_shutdown();
+            common::destroy_static_tl_objects();
+            common::destroy_static_objects();
+        });
         return;
     }
 
