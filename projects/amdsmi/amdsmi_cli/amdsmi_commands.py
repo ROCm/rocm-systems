@@ -25,6 +25,7 @@ import json
 import logging
 import multiprocessing
 import os
+import shutil
 import signal
 import sys
 import threading
@@ -718,7 +719,8 @@ class AMDSMICommands():
     def static_gpu(self, args, multiple_devices=False, gpu=None, asic=None, bus=None, vbios=None,
                         limit=None, driver=None, ras=None, board=None, numa=None, vram=None,
                         cache=None, partition=None, dfc_ucode=None, fb_info=None, num_vf=None,
-                        soc_pstate=None, xgmi_plpd=None, process_isolation=None, clock=None, profile=None):
+                        soc_pstate=None, xgmi_plpd=None, process_isolation=None, clock=None, profile=None,
+                        mem_carveout=None, gtt=None):
         """Get Static information for target gpu
 
         Args:
@@ -772,6 +774,10 @@ class AMDSMICommands():
             args.partition = partition
         if clock:
             args.clock = clock
+        if mem_carveout:
+            args.mem_carveout = mem_carveout
+        if gtt:
+            args.gtt = gtt
 
         # args.clock defaults to False so if it was overwritten to empty list, that indicates that it was given as an arguments but with an empty list
         if args.clock == []:
@@ -780,10 +786,10 @@ class AMDSMICommands():
         # Store args that are applicable to the current platform (default arguments)
         current_platform_args = ["asic", "bus", "vbios", "driver", "ras",
                                  "vram", "cache", "board", "process_isolation",
-                                 "clock"]
+                                 "clock", "mem_carveout", "gtt"]
         current_platform_values = [args.asic, args.bus, args.vbios, args.driver, args.ras,
                                    args.vram, args.cache, args.board, args.process_isolation,
-                                   args.clock]
+                                   args.clock, args.mem_carveout, args.gtt]
 
         # amd-smi static default arguments:
         # Exclude args that are not applicable to the current platform,
@@ -1465,6 +1471,69 @@ class AMDSMICommands():
                 logging.debug("Failed to get cache info for gpu %s | %s", gpu_id, e.get_error_info())
 
             static_dict['cache_info'] = cache_info_list
+
+        if args.mem_carveout:
+            try:
+                uma_info = amdsmi_interface.amdsmi_get_gpu_uma_carveout_info(args.gpu)
+                logging.debug(f"UMA carveout info: {uma_info}")
+
+                if self.logger.is_json_format():
+                    # JSON: show all options with current index
+                    carveout_dict = {
+                        "options": uma_info.get('options', []),
+                        "current_index": uma_info.get('current_index', -1)
+                    }
+                    static_dict['mem_carveout'] = carveout_dict
+                elif self.logger.is_csv_format():
+                    # CSV: show only current index
+                    static_dict['mem_carveout_index'] = uma_info.get('current_index', -1)
+                else:
+                    # Human readable: show all options with current marked
+                    options = uma_info.get('options', [])
+                    current_index = uma_info.get('current_index', -1)
+                    if options:
+                        formatted_options = []
+                        for idx, option in enumerate(options):
+                            marker = "*" if idx == current_index else " "
+                            description = option.get('description', 'N/A')
+                            # Align indices: *[0] vs  [1]
+                            formatted_options.append(f"    {marker}[{idx}] {description}")
+                        static_dict['mem_carveout'] = "\n" + "\n".join(formatted_options)
+                    else:
+                        static_dict['mem_carveout'] = "N/A"
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                static_dict['mem_carveout'] = "N/A"
+                logging.debug("Failed to get mem carveout info for gpu %s | %s", gpu_id, e.get_error_info())
+
+        if args.gtt:
+            # GTT is system-wide, only display once
+            if not self._gtt_displayed:
+                try:
+                    ttm_info = amdsmi_interface.amdsmi_get_ttm_info()
+                    logging.debug(f"TTM info: {ttm_info}")
+
+                    gtt_pages = ttm_info.get('current_pages', 0)
+                    gtt_gb = self.helpers.pages_to_gb(gtt_pages)
+
+                    if self.logger.is_json_format():
+                        gtt_dict = {
+                            "size_gb": gtt_gb,
+                            "size_pages": gtt_pages
+                        }
+                        static_dict['gtt'] = gtt_dict
+                    elif self.logger.is_csv_format():
+                        static_dict['gtt_gb'] = gtt_gb
+                        static_dict['gtt_pages'] = gtt_pages
+                    else:
+                        # Human readable
+                        static_dict['gtt'] = f"{gtt_gb:.2f} GB ({gtt_pages} pages)"
+
+                    self._gtt_displayed = True
+                except amdsmi_exception.AmdSmiLibraryException as e:
+                    static_dict['gtt'] = "N/A"
+                    logging.debug("Failed to get GTT info | %s", e.get_error_info())
+                    self._gtt_displayed = True
+
         # default to printing all clocks, if in current_platform_args; otherwise print specific clocks
         if 'clock' in current_platform_args and (args.clock == True or isinstance(args.clock, list)):
             original_clock_args = args.clock  #save original args.clock value, so we can reset for multiple devices
@@ -1791,7 +1860,7 @@ class AMDSMICommands():
                 board=None, numa=None, vram=None, cache=None, partition=None,
                 dfc_ucode=None, fb_info=None, num_vf=None, cpu=None, nic=None,
                 interface_ver=None, soc_pstate=None, xgmi_plpd = None, process_isolation=None,
-                clock=None, profile=None):
+                clock=None, profile=None, mem_carveout=None, gtt=None):
         """Get Static information for target gpu and cpu
 
         Args:
@@ -1824,6 +1893,9 @@ class AMDSMICommands():
         Returns:
             None: Print output via AMDSMILogger to destination
         """
+        # Reset GTT display tracker
+        self._gtt_displayed = False
+
         # Mutually exclusive arguments
         if cpu:
             args.cpu = cpu
@@ -1852,7 +1924,7 @@ class AMDSMICommands():
         gpu_attributes = ["asic", "bus", "vbios", "limit", "driver", "ras",
                           "board", "numa", "vram", "cache", "partition",
                           "dfc_ucode", "fb_info", "num_vf", "soc_pstate", "xgmi_plpd",
-                          "process_isolation", "clock", "profile"]
+                          "process_isolation", "clock", "profile", "mem_carveout", "gtt"]
         for attr in gpu_attributes:
             if hasattr(args, attr):
                 if getattr(args, attr):
@@ -1883,7 +1955,7 @@ class AMDSMICommands():
                                     bus, vbios, limit, driver, ras,
                                     board, numa, vram, cache, partition,
                                     dfc_ucode, fb_info, num_vf, soc_pstate, xgmi_plpd,
-                                    process_isolation, clock, profile)
+                                    process_isolation, clock, profile, mem_carveout, gtt)
         elif self.helpers.is_amd_hsmp_initialized(): # Only CPU is initialized
             if args.cpu == None:
                 args.cpu = self.cpu_handles
@@ -1898,7 +1970,7 @@ class AMDSMICommands():
                                 bus, vbios, limit, driver, ras,
                                 board, numa, vram, cache, partition,
                                 dfc_ucode, fb_info, num_vf, soc_pstate, xgmi_plpd,
-                                process_isolation, clock, profile)
+                                process_isolation, clock, profile, mem_carveout, gtt)
 
         if hasattr(args, "nic") and args.nic:
             self.logger.output = {}
@@ -6336,7 +6408,7 @@ class AMDSMICommands():
     def set_gpu(self, args, multiple_devices=False, gpu=None, fan=None, perf_level=None,
                   profile=None, perf_determinism=None, compute_partition=None,
                   memory_partition=None, power_cap=None, soc_pstate=None, xgmi_plpd = None,
-                  process_isolation=None, clk_limit=None, clk_level=None, ptl_status=None, ptl_format=None):
+                  process_isolation=None, clk_limit=None, clk_level=None, ptl_status=None, ptl_format=None, mem_carveout=None):
         """Issue reset commands to target gpu(s)
 
         Args:
@@ -6393,6 +6465,8 @@ class AMDSMICommands():
             args.ptl_status = ptl_status
         if ptl_format:
             args.ptl_format = ptl_format
+        if mem_carveout is not None:
+            args.mem_carveout = mem_carveout
 
         # Handle No GPU passed
         if args.gpu == None:
@@ -6424,7 +6498,8 @@ class AMDSMICommands():
                         getattr(args, 'clk_limit', None) is not None,
                         getattr(args, 'ptl_status', None) is not None,
                         getattr(args, 'ptl_format', None) is not None,
-                        getattr(args, 'process_isolation', None) is not None]):
+                        getattr(args, 'process_isolation', None) is not None,
+                        getattr(args, 'mem_carveout', None) is not None]):
                 command = " ".join(sys.argv[1:])
                 raise AmdSmiRequiredCommandException(command, self.logger.format)
         else:
@@ -6976,6 +7051,51 @@ class AMDSMICommands():
             self.logger.clear_multiple_devices_output()
             return
 
+        if args.mem_carveout is not None:
+            # Validate single GPU (VRAM is per-GPU)
+            if isinstance(args.gpu, list) and len(args.gpu) > 1:
+                raise ValueError("VRAM carveout can only be set for a single GPU. Please specify --gpu <id>")
+
+            try:
+                uma_info = amdsmi_interface.amdsmi_get_gpu_uma_carveout_info(args.gpu)
+                options = uma_info.get('options', [])
+                current_index = uma_info.get('current_index', -1)
+
+                # Validate index
+                if args.mem_carveout >= len(options):
+                    self.logger.store_output(args.gpu, 'mem_carveout',
+                                           f"Invalid index {args.mem_carveout}. Valid range: 0-{len(options)-1}")
+                    self.logger.print_output()
+                    self.logger.clear_multiple_devices_output()
+                    return
+
+                # Check if already set
+                if args.mem_carveout == current_index:
+                    description = options[args.mem_carveout].get('description', 'N/A')
+                    self.logger.store_output(args.gpu, 'mem_carveout',
+                                           f"VRAM carveout is already set to [{args.mem_carveout}] {description}")
+                    self.logger.print_output()
+                    self.logger.clear_multiple_devices_output()
+                    return
+
+                # Set the value
+                amdsmi_interface.amdsmi_set_gpu_uma_carveout(args.gpu, args.mem_carveout)
+                description = options[args.mem_carveout].get('description', 'N/A')
+                self.logger.store_output(args.gpu, 'mem_carveout',
+                                       f"Successfully set VRAM carveout to [{args.mem_carveout}] {description}. Reboot required for changes to take effect.")
+                self.logger.print_output()
+                self.helpers.prompt_reboot()
+
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
+                    raise PermissionError('Command requires elevation') from e
+                self.logger.store_output(args.gpu, 'mem_carveout',
+                                       f"[{e.get_error_info(detailed=False)}] Unable to set VRAM carveout to index {args.mem_carveout}")
+                self.logger.print_output()
+
+            self.logger.clear_multiple_devices_output()
+            return
+
     def set_value(self, args, multiple_devices=False, gpu=None, fan=None, perf_level=None,
                   profile=None, perf_determinism=None, compute_partition=None,
                   memory_partition=None, power_cap=None,
@@ -6986,7 +7106,8 @@ class AMDSMICommands():
                   process_isolation=None, clk_limit=None, clk_level=None, ptl_status=None, ptl_format=None,
                   cpu_xgmi_pstate_range=None, cpu_railisofreq_policy=None, cpu_dfcstate_ctrl=None,
                   cpu_pc6_enable=None, cpu_cc6_enable=None, cpu_floor_limit=None, cpu_msr_floor_limit=None,
-                  cpu_dimm_sb_reg=None, cpu_sdps_limit=None, core_floor_limit=None, core_msr_floor_limit=None):
+                  cpu_dimm_sb_reg=None, cpu_sdps_limit=None, core_floor_limit=None, core_msr_floor_limit=None,
+                  mem_carveout=None, gtt=None):
         """Issue reset commands to target gpu(s)
 
         Args:
@@ -7049,7 +7170,8 @@ class AMDSMICommands():
         gpu_args_enabled = False
         gpu_attributes = ["fan", "perf_level", "profile", "perf_determinism", "compute_partition",
                           "memory_partition", "power_cap", "soc_pstate", "xgmi_plpd",
-                          "process_isolation", "clk_limit", "clk_level", "ptl_status", "ptl_format"]
+                          "process_isolation", "clk_limit", "clk_level", "ptl_status", "ptl_format",
+                          "mem_carveout", "gtt"]
         for attr in gpu_attributes:
             if hasattr(args, attr):
                 if getattr(args, attr) is not None:
@@ -7099,7 +7221,9 @@ class AMDSMICommands():
                             args.clk_level is not None,
                             args.ptl_status is not None,
                             args.ptl_format is not None,
-                            args.process_isolation is not None
+                            args.process_isolation is not None,
+                            args.mem_carveout is not None,
+                            args.gtt is not None
                             ])
             except AttributeError:
                 # If attribute error for gpu, then we could be another subcommand
@@ -7151,6 +7275,23 @@ class AMDSMICommands():
                 command = " ".join(sys.argv[1:])
                 raise AmdSmiRequiredCommandException(command, self.logger.format)
 
+        # Special GTT handling (system-wide, not per-GPU)
+        if hasattr(args, 'gtt') and args.gtt is not None:
+            gb_value = args.gtt
+            pages = self.helpers.gb_to_pages(gb_value)
+            try:
+                amdsmi_interface.amdsmi_set_ttm_pages_limit(pages)
+                self.logger.output['set_gtt'] = f"Successfully set GTT to {gb_value:.2f} GB ({pages} pages). Reboot required for changes to take effect."
+                self.logger.print_output()
+                self.helpers.prompt_reboot()
+                return
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
+                    raise PermissionError('Command requires elevation') from e
+                self.logger.output['set_gtt'] = f"[{e.get_error_info(detailed=False)}] Unable to set GTT to {gb_value:.2f} GB"
+                self.logger.print_output()
+                return
+
         # Only allow one device's arguments to be set at a time
         if not any([gpu_args_enabled, cpu_args_enabled, core_args_enabled]):
             raise ValueError('No GPU, CPU, or CORE arguments provided, specific arguments are needed')
@@ -7197,7 +7338,7 @@ class AMDSMICommands():
                 self.set_gpu(args, multiple_devices, gpu, fan, perf_level,
                                 profile, perf_determinism, compute_partition,
                                 memory_partition, power_cap, soc_pstate, xgmi_plpd,
-                                process_isolation, clk_limit, clk_level, ptl_status, ptl_format)
+                                process_isolation, clk_limit, clk_level, ptl_status, ptl_format, mem_carveout)
         elif self.helpers.is_amd_hsmp_initialized(): # Only CPU is initialized
             if args.cpu == None and args.core == None:
                 raise ValueError('No CPU or CORE provided, specific target(s) are needed')
@@ -7220,12 +7361,12 @@ class AMDSMICommands():
             self.set_gpu(args, multiple_devices, gpu, fan, perf_level,
                             profile, perf_determinism, compute_partition,
                             memory_partition, power_cap, soc_pstate, xgmi_plpd,
-                            process_isolation, clk_limit, clk_level, ptl_status, ptl_format)
+                            process_isolation, clk_limit, clk_level, ptl_status, ptl_format, mem_carveout)
 
 
     def reset(self, args, multiple_devices=False, gpu=None, gpureset=None,
                 clocks=None, fans=None, profile=None, xgmierr=None, perf_determinism=None,
-                power_cap=None, clean_local_data=None):
+                power_cap=None, clean_local_data=None, mem_carveout=None, gtt=None):
         """Issue reset commands to target gpu(s)
 
         Args:
@@ -7326,12 +7467,12 @@ class AMDSMICommands():
         # Error if no subcommand args are passed
         if self.helpers.is_baremetal():
             if not any([args.gpureset, args.clocks, args.fans, args.profile, args.xgmierr, \
-                        args.perf_determinism, args.power_cap, \
+                        args.perf_determinism, args.power_cap, args.gtt, \
                         args.clean_local_data]):
                 command = " ".join(sys.argv[1:])
                 raise AmdSmiRequiredCommandException(command, self.logger.format)
         else:
-            if not any([args.clean_local_data]):
+            if not any([args.gtt, args.clean_local_data]):
                 command = " ".join(sys.argv[1:])
                 raise AmdSmiRequiredCommandException(command, self.logger.format)
 
@@ -7504,6 +7645,21 @@ class AMDSMICommands():
         #######################
         # BM commands - END   #
         #######################
+
+        if args.gtt:
+            # GTT reset is system-wide, not per-GPU
+            try:
+                amdsmi_interface.amdsmi_reset_ttm_pages_limit()
+                self.logger.output['reset_gtt'] = "Successfully reset GTT to system default. Reboot required for changes to take effect."
+                self.logger.print_output()
+                self.helpers.prompt_reboot()
+                return
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
+                    raise PermissionError('Command requires elevation') from e
+                self.logger.output['reset_gtt'] = f"[{e.get_error_info(detailed=False)}] Unable to reset GTT"
+                self.logger.print_output()
+                return
 
         if args.clean_local_data:
             try:
@@ -9152,7 +9308,7 @@ class AMDSMICommands():
 
         if args.afid:
             if args.cper_file:
-                afids = self.helpers.pvtDumpAfids(args.cper_file)
+                afids = self.helpers.cper_dump_afids(args.cper_file)
                 if self.logger.is_json_format():
                     afid_output = {
                         "cper_file": str(args.cper_file),

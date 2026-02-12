@@ -3095,6 +3095,41 @@ struct_amdsmi_cper_hdr_t._fields_ = [
 ]
 
 amdsmi_cper_hdr_t = struct_amdsmi_cper_hdr_t
+
+# UMA/TTM memory management structures
+class struct_amdsmi_uma_carveout_option_t(Structure):
+    pass
+
+struct_amdsmi_uma_carveout_option_t._pack_ = 1
+struct_amdsmi_uma_carveout_option_t._fields_ = [
+    ('index', ctypes.c_uint32),
+    ('description', ctypes.c_char * 256),
+]
+
+amdsmi_uma_carveout_option_t = struct_amdsmi_uma_carveout_option_t
+
+class struct_amdsmi_uma_carveout_info_t(Structure):
+    pass
+
+struct_amdsmi_uma_carveout_info_t._pack_ = 1
+struct_amdsmi_uma_carveout_info_t._fields_ = [
+    ('current_index', ctypes.c_uint32),
+    ('num_options', ctypes.c_uint32),
+    ('options', struct_amdsmi_uma_carveout_option_t * 16),
+]
+
+amdsmi_uma_carveout_info_t = struct_amdsmi_uma_carveout_info_t
+
+class struct_amdsmi_ttm_info_t(Structure):
+    pass
+
+struct_amdsmi_ttm_info_t._pack_ = 1
+struct_amdsmi_ttm_info_t._fields_ = [
+    ('current_pages', ctypes.c_uint64),
+]
+
+amdsmi_ttm_info_t = struct_amdsmi_ttm_info_t
+
 amdsmi_get_afids_from_cper = _libraries['libamd_smi.so'].amdsmi_get_afids_from_cper
 amdsmi_get_afids_from_cper.restype = amdsmi_status_t
 amdsmi_get_afids_from_cper.argtypes = [ctypes.POINTER(ctypes.c_char), uint32_t, ctypes.POINTER(ctypes.c_uint64), ctypes.POINTER(ctypes.c_uint32)]
@@ -3284,6 +3319,24 @@ amdsmi_get_gpu_ptl_formats.argtypes = [amdsmi_processor_handle, ctypes.POINTER(a
 amdsmi_set_gpu_ptl_formats = _libraries['libamd_smi.so'].amdsmi_set_gpu_ptl_formats
 amdsmi_set_gpu_ptl_formats.restype = amdsmi_status_t
 amdsmi_set_gpu_ptl_formats.argtypes = [amdsmi_processor_handle, amdsmi_ptl_data_format_t, amdsmi_ptl_data_format_t]
+
+# UMA/TTM memory management functions
+amdsmi_get_gpu_uma_carveout_info = _libraries['libamd_smi.so'].amdsmi_get_gpu_uma_carveout_info
+amdsmi_get_gpu_uma_carveout_info.restype = amdsmi_status_t
+amdsmi_get_gpu_uma_carveout_info.argtypes = [amdsmi_processor_handle, ctypes.POINTER(struct_amdsmi_uma_carveout_info_t)]
+amdsmi_set_gpu_uma_carveout = _libraries['libamd_smi.so'].amdsmi_set_gpu_uma_carveout
+amdsmi_set_gpu_uma_carveout.restype = amdsmi_status_t
+amdsmi_set_gpu_uma_carveout.argtypes = [amdsmi_processor_handle, ctypes.c_uint32]
+amdsmi_get_ttm_info = _libraries['libamd_smi.so'].amdsmi_get_ttm_info
+amdsmi_get_ttm_info.restype = amdsmi_status_t
+amdsmi_get_ttm_info.argtypes = [ctypes.POINTER(struct_amdsmi_ttm_info_t)]
+amdsmi_set_ttm_pages_limit = _libraries['libamd_smi.so'].amdsmi_set_ttm_pages_limit
+amdsmi_set_ttm_pages_limit.restype = amdsmi_status_t
+amdsmi_set_ttm_pages_limit.argtypes = [ctypes.c_uint64]
+amdsmi_reset_ttm_pages_limit = _libraries['libamd_smi.so'].amdsmi_reset_ttm_pages_limit
+amdsmi_reset_ttm_pages_limit.restype = amdsmi_status_t
+amdsmi_reset_ttm_pages_limit.argtypes = []
+
 amdsmi_get_cpu_core_energy = _libraries['libamd_smi.so'].amdsmi_get_cpu_core_energy
 amdsmi_get_cpu_core_energy.restype = amdsmi_status_t
 amdsmi_get_cpu_core_energy.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_uint64)]

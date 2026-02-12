@@ -70,7 +70,7 @@ class AMDSMIParser(argparse.ArgumentParser):
     """
     def __init__(self, version, list, static, firmware, bad_pages, metric,
                  process, profile, event, topology, set_value, reset, monitor,
-                 xgmi, partition, ras, node, rocm_smi, default, sys_argv=None,
+                 xgmi, partition, ras, node, _rocm_smi, default, sys_argv=None,
                  helpers=None):
 
         # Helper variables
@@ -227,6 +227,23 @@ class AMDSMIParser(argparse.ArgumentParser):
             raise amdsmi_cli_exceptions.AmdSmiMissingParameterValueException(sub_arg, outputformat)
         else:
             raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(sys.argv[1], int_value, outputformat)
+
+
+    def _positive_float(self, float_value, sub_arg=None):
+        # Argument type validator for positive float values
+        try:
+            value = float(float_value)
+            if value > 0:
+                return value
+        except ValueError:
+            # Non-numeric values are handled via custom CLI exceptions below
+            pass
+
+        outputformat = self.helpers.get_output_format()
+        if float_value == "":
+            raise amdsmi_cli_exceptions.AmdSmiMissingParameterValueException(sub_arg, outputformat)
+        else:
+            raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(sys.argv[1], float_value, outputformat)
 
 
     def _is_valid_string(self, string_value, sub_arg=None):
@@ -1176,6 +1193,14 @@ class AMDSMIParser(argparse.ArgumentParser):
             static_parser.add_argument('-C', '--clock', action='store', default=False, nargs='*', type=str, required=False, help=clock_help)
             static_parser.add_argument('-p', '--partition', action='store_true', required=False, help=partition_help)
 
+            mem_carveout_help = "Display VRAM carveout memory options and current setting"
+            static_parser.add_argument('-m', '--mem-carveout', action='store_true',
+                                      required=False, help=mem_carveout_help)
+
+            gtt_help = "Display GTT (shared GPU memory) size"
+            static_parser.add_argument('-G', '--gtt', action='store_true',
+                                      required=False, help=gtt_help)
+
             # Options to display on Hypervisors and Baremetal
             if self.helpers.is_hypervisor() or self.helpers.is_baremetal():
                 static_parser.add_argument('-l', '--limit', action='store_true', required=False, help=limit_help)
@@ -1702,6 +1727,16 @@ class AMDSMIParser(argparse.ArgumentParser):
             set_value_exclusive_group.add_argument('-L', '--clk-limit', action=self._limit_select(), nargs=3, required=False, help=set_clk_limit_help, metavar=('CLK_TYPE', 'LIM_TYPE', 'VALUE'))
             set_value_exclusive_group.add_argument('-R', '--process-isolation', action='store', choices=[0,1], type=lambda value: self._not_negative_int(value, '--process-isolation'), required=False, help=set_process_isolation_help, metavar='STATUS')
 
+            set_mem_carveout_help = "Set VRAM carveout size by option index.\n\tUse `amd-smi static --mem-carveout` to see available options."
+            set_value_exclusive_group.add_argument('-m', '--mem-carveout', action='store',
+                                                  type=lambda value: self._not_negative_int(value, '--mem-carveout'),
+                                                  required=False, help=set_mem_carveout_help, metavar='INDEX')
+
+            set_gtt_help = "Set GTT (shared GPU memory) size in GB.\n\tThis is a system-wide setting, not per-GPU."
+            set_value_parser.add_argument('-G', '--gtt', action='store',
+                                         type=lambda value: self._positive_float(value, '--gtt'),
+                                         required=False, help=set_gtt_help, metavar='GB')
+
         if self.helpers.is_amd_hsmp_initialized():
             if self.helpers.is_baremetal():
                 # Optional CPU Args
@@ -1787,6 +1822,10 @@ class AMDSMIParser(argparse.ArgumentParser):
             reset_exclusive_group.add_argument('-x', '--xgmierr', action='store_true', required=False, help=reset_xgmierr_help)
             reset_exclusive_group.add_argument('-d', '--perf-determinism', action='store_true', required=False, help=reset_perf_det_help)
             reset_exclusive_group.add_argument('-o', '--power-cap', action='store_true', required=False, help=reset_power_cap_help)
+
+        reset_gtt_help = "Reset GTT (shared GPU memory) to system default"
+        reset_exclusive_group.add_argument('--gtt', action='store_true',
+                                          required=False, help=reset_gtt_help)
 
         # Add Baremetal and Virtual OS reset arguments
         reset_exclusive_group.add_argument('-l', '--clean-local-data', action='store_true', required=False, help=reset_gpu_clean_local_data_help)
