@@ -1,4 +1,4 @@
-# Contributing to the ROCm Libraries
+# Contributing to the ROCm Systems
 
 Thank you for contributing! This guide outlines the development workflow, contribution standards, and best practices when working in the super-repo.
 
@@ -44,7 +44,7 @@ This keeps your working directory clean and fast, as you won't need to clone the
 
 - `.github/`: CI workflows, scripts, and configuration files for synchronizing repositories during the migration period.
 - `docs/`: Documentation, including this guide and other helpful resources.
-- `projects/<name>/`: Each folder corresponds to a ROCm library that was previously maintained in its own GitHub repository and released as distinct packages.
+- `projects/<name>/`: Each folder corresponds to a ROCm systems component that was previously maintained in its own GitHub repository and released as distinct packages.
 - `shared/<name>/`: Shared components that existed in their own repository, used as dependencies by multiple libraries, but do not produce distinct packages in previous ROCm releases.
 
 Further changes to the structure may be made to improve development efficiency and minimize redundancy.
