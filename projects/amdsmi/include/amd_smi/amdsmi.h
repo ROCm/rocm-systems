@@ -2841,6 +2841,37 @@ amdsmi_status_t amdsmi_get_socket_info(amdsmi_socket_handle socket_handle, size_
 amdsmi_status_t amdsmi_get_processor_info(amdsmi_processor_handle processor_handle, size_t len, char *name);
 
 /**
+ *  @brief Get the list of cpu socket handles in the system.
+ *
+ *  @ingroup tagProcDiscovery
+ *
+ *  @platform{cpu_bm}
+ *
+ *  @details Depends on AMDSMI_INIT_AMD_CPUS flag passed to ::amdsmi_init.
+ *  The socket handles can be used to query the processor handles in that socket, which
+ *  will be used in other APIs to get processor detail information.
+ *
+ *  @param[in,out] socket_count As input, the value passed
+ *  through this parameter is the number of ::amdsmi_cpusocket_handle that
+ *  may be safely written to the memory pointed to by @p socket_handles. This is the
+ *  limit on how many socket handles will be written to @p socket_handles. On return, @p
+ *  socket_count will contain the number of socket handles written to @p socket_handles,
+ *  or the number of socket handles that could have been written if enough memory had been
+ *  provided.
+ *  If @p socket_handles is NULL, as output, @p socket_count will contain
+ *  how many sockets are available to read in the system.
+ *
+ *  @param[in,out] socket_handles A pointer to a block of memory to which the
+ *  ::amdsmi_cpusocket_handle values will be written. This value may be NULL.
+ *  In this case, this function can be used to query how many sockets are
+ *  available to read in the system.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_cpusocket_handles(uint32_t *socket_count,
+                amdsmi_cpusocket_handle* socket_handles);
+
+/**
  *  @brief Get respective processor counts from the processor handles
  *
  *  @ingroup tagProcDiscovery
