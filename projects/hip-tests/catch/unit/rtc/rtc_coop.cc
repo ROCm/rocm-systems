@@ -12,7 +12,7 @@ template <class T, template <typename> class Op>
 const char* functorToString()
 {
   if constexpr (std::is_same<Op<T>, cg::plus<T>>::value) {
-    return "cg::plus";
+    return "cooperative_groups::plus";
   }
 
   assert(false && "Missing conversion to string for type");
@@ -27,7 +27,9 @@ void compileProgram(hiprtcProgram& prog, const std::tuple<T, Types...>&) {
   expression = std::string("reduceCoopKernel<") +
                functorToString<T, Op>() +
                ", " +
-               typeToString<T>() + ">";
+               typeToString<T>() +
+               ", " +
+               std::to_string(getWarpSize()) + ">";
   HIPRTC_CHECK(hiprtcAddNameExpression(prog, expression.c_str()));
   compileProgram<Op>(prog, remainingTypes);
 }
@@ -73,18 +75,19 @@ void runReduce(hiprtcProgram& prog) {
   distribution dist(a, b);
 
   genRandomBuffers(d_input, input, dist, gen, wavefrontSize);
-
-  struct {
-    const T* d_output;
-    const T* d_input;
-  } args{d_output.ptr(), d_input.ptr()};
-  size_t size;
-  void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args, HIP_LAUNCH_PARAM_BUFFER_SIZE, &size,
+  std::vector<const void*> args = { d_output.ptr(), d_input.ptr() };
+  std::size_t sizeBytes = args.size() * sizeof(void*);
+  void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, args.data(), HIP_LAUNCH_PARAM_BUFFER_SIZE, &sizeBytes,
                     HIP_LAUNCH_PARAM_END};
   std::vector<char> code;
   size_t codeSize;
   std::string expression =
-      std::string("reduceCoopKernel<") + functorToString<T, Op>() + ", " + typeToString<T>() + ">";
+      std::string("reduceCoopKernel<") +
+      functorToString<T, Op>() +
+      ", " +
+      typeToString<T>() +
+      ", " +
+      std::to_string(wavefrontSize) + ">";
   dim3 grdDim{1u};
   dim3 blkDim{wavefrontSize};
   int numTile = 0;
@@ -102,7 +105,7 @@ void runReduce(hiprtcProgram& prog) {
   HIP_CHECK(hipMemcpy(output.ptr(), d_output.ptr(), d_output.size_bytes(), hipMemcpyDeviceToHost));
 
   for (auto tileSize : tileSizes) {
-    for (int laneId = 0; laneId < wavefrontSize; laneId++) {
+    for (unsigned int laneId = 0; laneId < wavefrontSize; laneId++) {
       if (tileSize <= wavefrontSize) {
         Op<T> op;
         unsigned long long mask = ~0ull >> (64 - tileSize);
@@ -110,8 +113,12 @@ void runReduce(hiprtcProgram& prog) {
 
         mask <<= (((laneId % wavefrontSize) / tileSize) * tileSize);
         expected = calculateExpected(input.host_ptr(), op, mask);
-        INFO("Tile: " << tileSize << " laneId: " << laneId);
-        REQUIRE(output.host_ptr()[numTile * laneId] == expected);
+        INFO("Tile: " << tileSize << " laneId: " << laneId << " mask " << mask);
+
+        for (unsigned int i = 0; i < wavefrontSize; i++) {
+          UNSCOPED_INFO("laneId: " << i << ": " << input.host_ptr()[i]);
+        }
+        REQUIRE(output.host_ptr()[numTile * wavefrontSize + laneId] == expected);
       }
     }
 
@@ -136,41 +143,40 @@ void runAndCompileTest(const std::tuple<Types...> types) {
   hiprtcProgram prog;
 
   kernelStr = R"(
-    using cg = coooperative_groups;
+    namespace cg = cooperative_groups;
 
-    template <template <typename> class Op, class T, class TileSize = void>
-    __global__ void reduceTiles(T& output, const T* input, const std::tuple<> tileSizes) 
+    template <template <typename> class Op, class T>
+    __device__ void reduceTiles(T*, const T*, const __hip_internal::index_sequence<>) 
     {
     }
 
     // run reduce for a specific type and for different tile sizes as  a variadic template parameter
     // @output the result, per lane
-    template <template <typename> class Op, class T, size_t TileSize, typename... TileSizes>
-    __global__ void reduceTiles(T* output, const T* input, const std::tuple<T, TileSizes...>) 
+    template <template <typename> class Op, class T, size_t TileSize, size_t... TileSizes>
+    __device__ void reduceTiles(T* output, const T* input, const __hip_internal::index_sequence<TileSize, TileSizes...>) 
     {
-      std::integer_sequence<TyleSizes...> remainingTypes;
+      const __hip_internal::index_sequence<TileSizes...> remainingTiles;
       cg::thread_block group = cg::this_thread_block();
       auto tile = cg::tiled_partition<TileSize>(group);
       Op<T> op;
-      T accum;
 
-      output[threadIdx.x] = cg::reduce(tile, accum, op);
-      reduceTiles(output + warpSize, input, remainingTypes);
+      output[threadIdx.x] = cg::reduce(tile, input[threadIdx.x], op);
+      reduceTiles<Op, T>(output + warpSize, input, remainingTiles);
     }
 
     // @output will receive a different result per tile size
-    template <template <typename> class Op, class T, size_t WarpSize>
+    template <template <typename> class Op, class T, int WarpSize>
     __global__ void reduceCoopKernel(T* output, const T* input)
     {
       if constexpr (WarpSize <= 32) {
-        std::integer_sequence<2, 4, 8, 16, 32> tileSizes;
-        reduceTiles<Op, T>(output, tileSizes);
+        __hip_internal::index_sequence<2, 4, 8, 16, 32> tileSizes;
+        reduceTiles<Op, T>(output, input, tileSizes);
       } else {
-        std::integer_sequence<2, 4, 8, 16, 32, 64> tileSizes;
-        reduceTiles<Op, T>(input, tileSizes);
+        __hip_internal::index_sequence<2, 4, 8, 16, 32, 64> tileSizes;
+        reduceTiles<Op, T>(output, input, tileSizes);
       }
     }
-  })";
+  )";
 
   HIPRTC_CHECK(
       hiprtcCreateProgram(&prog, kernelStr.c_str(), "coop_reduce.hip", 0, nullptr, nullptr));
