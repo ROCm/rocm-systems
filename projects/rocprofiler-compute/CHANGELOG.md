@@ -6,6 +6,20 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Added
 
+### Changed
+
+### Resolved issues
+
+### Removed
+
+### Optimized
+
+### Deprecated
+
+## ROCm Compute Profiler 3.5.0 for ROCm 7.12.0
+
+### Added
+
 * Native tool to perform counter collection using ROCprofiler-SDK public API. It is only supported for ROCm version 7.0.0 (and later).
   * Native tool is now the default for counter collection.
   * Native tool for counter collection will not be used under the following conditions:
@@ -46,7 +60,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Default output format for the underlying ROCprofiler-SDK tool has been changed from ``csv`` to ``rocpd``.
   * If the ROCprofiler-SDK ``rocpd`` public library is not available, will fall back to ``csv`` format
 
-* Option ``--rocprofiler-sdk-library-path`` has been changed to ``--rocprofiler-tool-library-path`` to better reflect the fact that we provide flexibility in choosing the path to ROCprofiler-SDK tool and not the library.
+* Option ``--rocprofiler-sdk-library-path`` has been changed to ``--rocprofiler-sdk-tool-library-path`` to better reflect the fact that we provide flexibility in choosing the path to ROCprofiler-SDK tool and not the library.
 
 * Standalone roofline (--roof-only option) in profile mode now creates HTML file output instead of PDF file output for roofline charts
 
@@ -65,7 +79,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Fix the functioning of --dispatch option to act as 1-based index and ensure that correct kernel iterations are being profiled
 
-* Corrected peak VALU Roofline profiling and analysis by removing `FP8` VALU and `BF16` VALU benchmarking.
+* Corrected peak VALU Roofline profiling and analysis by removing `FP8` VALU and `BF16` VALU benchmarking in favor of MFMA peaks.
 
 * Fixed issue where detected max memory clock from amd-smi interface was using max gfx clock
   * Fixed issue where values detected from amd-smi were wrong when some GPU devices were hidden using ROCR or HIP environment variables
