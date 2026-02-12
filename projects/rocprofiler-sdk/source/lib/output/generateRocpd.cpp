@@ -512,7 +512,8 @@ get_insert_statement_impl(std::string_view _table, ContainerT<sql_insert_value, 
         throw std::runtime_error("sqlite3_step failed");
     }
 
-    sqlite3_reset(stmt);
+    SQLITE3_CHECK(sqlite3_reset(stmt));
+    SQLITE3_CHECK(sqlite3_clear_bindings(stmt));
 
     return std::string{};
 }
