@@ -6,7 +6,7 @@
 # link time, serialising them), this module pre-compiles each device TU through
 # the full LLVM backend independently and in parallel:
 #
-#   source.cpp -> LLVM bitcode (.bc) -> device ELF (.o) via llc
+#   source.cpp -> LLVM bitcode (.bc) -> device ELF (.o) via clang -x ir
 #                                          |
 #   source.cpp -> host stub (.host.o) -----+
 #                                          v
@@ -18,7 +18,7 @@
 #
 
 function(setup_split_device_compile)
-  cmake_parse_arguments(SDC "" "TARGET;GPU_ARCH;ROCM_PATH;OUTPUT_DIR" "SOURCES;FUNC_ONLY_SOURCES;INCLUDE_DIRS;COMPILE_DEFS;COMPILE_OPTS" ${ARGN})
+  cmake_parse_arguments(SDC "" "TARGET;GPU_ARCH;ROCM_PATH;OUTPUT_DIR;BUNDLER_DEVICE_TARGET;BUNDLER_HOST_TARGET" "SOURCES;FUNC_ONLY_SOURCES;INCLUDE_DIRS;COMPILE_DEFS;COMPILE_OPTS" ${ARGN})
 
   if(NOT SDC_TARGET)
     message(FATAL_ERROR "setup_split_device_compile: TARGET is required")
@@ -32,8 +32,13 @@ function(setup_split_device_compile)
   if(NOT SDC_OUTPUT_DIR)
     message(FATAL_ERROR "setup_split_device_compile: OUTPUT_DIR is required")
   endif()
+  if(NOT SDC_BUNDLER_DEVICE_TARGET)
+    message(FATAL_ERROR "setup_split_device_compile: BUNDLER_DEVICE_TARGET is required")
+  endif()
+  if(NOT SDC_BUNDLER_HOST_TARGET)
+    message(FATAL_ERROR "setup_split_device_compile: BUNDLER_HOST_TARGET is required")
+  endif()
 
-  set(LLC     "${SDC_ROCM_PATH}/llvm/bin/llc")
   set(BUNDLER "${SDC_ROCM_PATH}/llvm/bin/clang-offload-bundler")
 
   # Output directories
@@ -84,18 +89,6 @@ function(setup_split_device_compile)
     endif()
   endforeach()
 
-  # Also build LLC flags from any -mllvm options (LLC takes them directly)
-  set(_llc_extra_flags "")
-  set(_in_mllvm OFF)
-  foreach(_opt ${SDC_COMPILE_OPTS})
-    if(_in_mllvm)
-      list(APPEND _llc_extra_flags "${_opt}")
-      set(_in_mllvm OFF)
-    elseif(_opt STREQUAL "-mllvm")
-      set(_in_mllvm ON)
-    endif()
-  endforeach()
-
   set(ALL_FAT_OBJECTS "")
 
   list(LENGTH SDC_SOURCES _n_sources)
@@ -138,18 +131,20 @@ function(setup_split_device_compile)
       VERBATIM
     )
 
-    # -- Step B: LLC to relocatable device ELF object -------------------------
+    # -- Step B: Compile bitcode to relocatable device ELF object -------------
+    # Use amdclang++ -x ir instead of standalone llc so the driver
+    # automatically applies all target-specific backend flags (target features,
+    # AMDGPU options, etc.) that vary across ROCm versions.
     add_custom_command(
       OUTPUT  ${DEV_OBJ}
-      COMMAND ${LLC}
-        -O3
-        -mtriple=amdgcn-amd-amdhsa
+      COMMAND ${CMAKE_CXX_COMPILER}
+        -x ir
+        -target amdgcn-amd-amdhsa
         -mcpu=${SDC_GPU_ARCH}
-        -filetype=obj
-        ${_llc_extra_flags}
+        -O3 -c
         -o ${DEV_OBJ} ${BC_FILE}
       DEPENDS   ${BC_FILE}
-      COMMENT   "SPLIT[llc] ${fname}"
+      COMMENT   "SPLIT[dev] ${fname}"
       VERBATIM
     )
 
@@ -176,11 +171,13 @@ function(setup_split_device_compile)
     )
 
     # -- Step D: Bundle host + device into fat object -------------------------
+    # Use the bundler target strings detected at configure time so they
+    # match what `amdclang++ --hip-link` expects on this ROCm version.
     add_custom_command(
       OUTPUT  ${FAT_OBJ}
       COMMAND ${BUNDLER}
         --type=o
-        --targets=host-x86_64-unknown-linux-gnu,hipv4-amdgcn-amd-amdhsa--${SDC_GPU_ARCH}
+        --targets=${SDC_BUNDLER_HOST_TARGET},${SDC_BUNDLER_DEVICE_TARGET}
         --input=${HOST_OBJ}
         --input=${DEV_OBJ}
         --output=${FAT_OBJ}
