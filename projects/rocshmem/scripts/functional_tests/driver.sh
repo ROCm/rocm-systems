@@ -161,11 +161,6 @@ ExecTest() {
 
   # MPI Parameters
   LAUNCHER=mpirun
-  OPTIONS=" -n $NUM_RANKS"
-  OPTIONS+=" -mca pml ucx -mca osc ucx"
-  OPTIONS+=" -x ROCSHMEM_MAX_NUM_CONTEXTS=$ROCSHMEM_MAX_NUM_CONTEXTS"
-  OPTIONS+=" -x UCX_ROCM_IPC_SIGPOOL_MAX_ELEMS=16384 -x ROCSHMEM_HEAP_SIZE=$HEAP_SIZE"
-  OPTIONS+=" --map-by numa ${TIMEOUT:+--timeout $TIMEOUT}"
 
   if [[ "" != "$ROCSHMEM_TEST_USE_DEFAULT_STREAM" ]]
   then
@@ -177,29 +172,43 @@ ExecTest() {
     OPTIONS+=" --hostfile $HOSTFILE"
   fi
 
+  # Build command as an array to avoid command injection with eval
+  local -a cmd
+  cmd=( "$LAUNCHER"
+        -n "$NUM_RANKS"
+        -mca pml ucx
+        -mca osc ucx
+        -x "ROCSHMEM_MAX_NUM_CONTEXTS=$ROCSHMEM_MAX_NUM_CONTEXTS"
+        -x "UCX_ROCM_IPC_SIGPOOL_MAX_ELEMS=16384"
+        -x "ROCSHMEM_HEAP_SIZE=$HEAP_SIZE"
+        ${ROCSHMEM_TEST_USE_DEFAULT_STREAM:+-x "ROCSHMEM_TEST_USE_DEFAULT_STREAM=$ROCSHMEM_TEST_USE_DEFAULT_STREAM"}
+        ${ROCSHMEM_TEST_UUID:+-x "ROCSHMEM_TEST_UUID=$ROCSHMEM_TEST_UUID"}
+        ${TIMEOUT:+--timeout "$TIMEOUT"}
+        ${HOSTFILE:+--hostfile "$HOSTFILE"}
+        --map-by numa
+      )
   # Construct Test Command
   TEST_LOG_NAME="$TEST_NAME"_n"$NUM_RANKS"_w"$NUM_WG"_z"$NUM_THREADS"
-  CMD="$LAUNCHER $OPTIONS $APP -a $TEST_NUM -w $NUM_WG -z $NUM_THREADS ${NOVERIF:+-noverif}"
-
+  cmd+=( "$APP" -a "$TEST_NUM" -w "$NUM_WG" -z "$NUM_THREADS" ${NOVERIF:+-noverif} )
   if [[ "" != "$MAX_MSG_SIZE" ]]
   then
     # Check if in volume mode
     if [[ $MAX_MSG_SIZE == v* ]]; then
-      CMD+=" -v ${MAX_MSG_SIZE#v}"
+      cmd+=( -v "${MAX_MSG_SIZE#v}" )
     else
-      CMD+=" -s $MAX_MSG_SIZE"
+      cmd+=( -s "$MAX_MSG_SIZE" )
     fi
     TEST_LOG_NAME+=_"$MAX_MSG_SIZE"B
   fi
-
-  CMD+=" >> $LOG_DIR/$TEST_LOG_NAME.log 2>&1"
+  # Create a human-readable representation of the command for logging purposes
+  CMD="${cmd[@]}"
   # Run Test
   if [ $NUM_GPUS -ge $NUM_RANKS ] || [[ "" != "$HOSTFILE" ]]; then
-    echo $TEST_LOG_NAME
-    echo "# $CMD" >"$LOG_DIR/$TEST_LOG_NAME.log"
-    eval $CMD
+    echo "Test:   $TEST_LOG_NAME"
+    echo "# $CMD >> $LOG_DIR/$TEST_LOG_NAME.log" >"$LOG_DIR/$TEST_LOG_NAME.log"
+    "${cmd[@]}" >>"$LOG_DIR/$TEST_LOG_NAME.log" 2>&1
   else
-    echo "Skipping test $TEST_LOG_NAME ($NUM_RANKS greater than $NUM_GPUS)"
+    echo "Skip:   $TEST_LOG_NAME ($NUM_RANKS greater than $NUM_GPUS)"
   fi
 
   # Validate Test
