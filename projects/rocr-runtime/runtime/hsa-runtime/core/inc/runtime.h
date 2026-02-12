@@ -904,6 +904,7 @@ class Runtime {
   int ipc_sock_server_fd_;
   std::map<uint64_t, int> ipc_sock_server_conns_;
   std::mutex ipc_sock_server_lock_;
+  os::Thread ipc_sock_server_thread_;
 
  private:
   void CheckVirtualMemApiSupport();
