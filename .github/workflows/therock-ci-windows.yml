@@ -28,8 +28,8 @@ jobs:
       CCACHE_DIR: "${{ github.workspace }}/.container-cache/ccache"
       CCACHE_MAXSIZE: "700M"
       # TODO(geomin12): Add matrix of families
-      # To get a fast signal of windows building for TheRock, adding gfx115X-all
-      AMDGPU_FAMILIES: "gfx115X-all"
+      # To get a fast signal of windows building for TheRock, adding gfx1151
+      AMDGPU_FAMILIES: "gfx1151"
     steps:
       - name: "Checking out repository for rocm-systems"
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
