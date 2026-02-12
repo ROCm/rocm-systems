@@ -221,6 +221,9 @@ struct formatter<::rocprofiler::common::thread_activity::status>
             case status::ActiveOnCPU: return fmt::format_to(ctx.out(), "ActiveOnCPU");
             case status::Unknown: return fmt::format_to(ctx.out(), "Unknown");
         }
+
+        ROCP_CI_LOG(INFO) << fmt::format("Unknown status value: {}", static_cast<int>(val));
+        return fmt::format_to(ctx.out(), "Unknown");
     }
 };
 
