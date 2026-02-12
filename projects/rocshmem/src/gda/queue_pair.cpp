@@ -118,6 +118,14 @@ QueuePair::~QueuePair() {
   allocator.deallocate((void*)fetching_atomic_freelist);
 }
 
+__device__ uint64_t QueuePair::get_same_qp_lane_mask() {
+  uint64_t active = get_active_lane_mask();
+  uintptr_t this_qp = reinterpret_cast<uintptr_t>(this);
+  // Bitmask of lanes in this warp whose value == this_qp
+  uint64_t same_qp_mask = __match_any_sync(active, this_qp);
+  return same_qp_mask;
+}
+
 /******************************************************************************
  ************************ PROVIDER-SPECIFIC HELPERS ***************************
  *****************************************************************************/
@@ -126,6 +134,14 @@ __device__ void QueuePair::post_wqe_rma(int pe, int32_t size, uintptr_t laddr, u
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
     ionic_post_wqe_rma(pe, size, laddr, raddr, opcode, cy);
+    return;
+#endif
+#if defined(GDA_BNXT)
+  case GDAProvider::BNXT:
+    if ((cy == THREAD) ||
+        (cy == WAVE && is_thread_zero_in_wave())) {
+      bnxt_post_wqe_rma(pe, size, laddr, raddr, opcode);
+    }
     return;
 #endif
   default:
@@ -158,11 +174,6 @@ __device__ void QueuePair::post_wqe_rma_mt(int pe, int32_t size, uintptr_t laddr
 #if defined(GDA_MLX5)
   case GDAProvider::MLX5:
     mlx5_post_wqe_rma(size, laddr, raddr, opcode);
-    return;
-#endif
-#if defined(GDA_BNXT)
-  case GDAProvider::BNXT:
-    bnxt_post_wqe_rma(pe, size, laddr, raddr, opcode);
     return;
 #endif
   default:
