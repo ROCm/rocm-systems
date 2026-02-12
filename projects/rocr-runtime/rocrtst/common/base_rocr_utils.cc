@@ -59,6 +59,17 @@
 #include "gtest/gtest.h"
 #include "hsa/hsa.h"
 
+#if !defined(ROCRTST_ASAN)
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define ROCRTST_ASAN 1
+#endif
+#endif
+#if defined(__SANITIZE_ADDRESS__)
+#define ROCRTST_ASAN 1
+#endif
+#endif
+
 namespace rocrtst {
 
 
@@ -106,15 +117,21 @@ hsa_status_t CommonCleanUp(BaseRocR* test) {
   }
 
   test->clear_code_object();
+
   err = hsa_shut_down();
   RET_IF_HSA_UTILS_ERR(err);
 
-  // Ensure that HSA is actually closed.
+#ifndef ROCRTST_ASAN
+ // Ensure that HSA is actually closed.
   hsa_status_t check = hsa_shut_down();
   if (check != HSA_STATUS_ERROR_NOT_INITIALIZED) {
     EXPECT_EQ(HSA_STATUS_ERROR_NOT_INITIALIZED, check) << "hsa_init reference count was too high.";
     return HSA_STATUS_ERROR;
   }
+
+#else
+  // Avoid a second shutdown under ASAN; its device allocator may be unloaded.
+#endif
 
   std::string intr_val;
 
