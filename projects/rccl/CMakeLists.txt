@@ -1452,51 +1452,22 @@ if(ENABLE_SPLIT_DEVICE_COMPILE)
   list(GET GPU_TARGETS 0 _split_gpu_arch)
   message(STATUS "Split device compile: targeting ${_split_gpu_arch}")
 
-  # Collect include directories that device TUs need.
-  # These mirror the target_include_directories calls above.
-  set(_split_include_dirs
-    ${PROJECT_BINARY_DIR}/include
-    ${HIPIFY_DIR}/src
-    ${HIPIFY_DIR}/src/device
-    ${HIPIFY_DIR}/src/device/network/unpack
-    ${HIPIFY_DIR}/src/include
-    ${HIPIFY_DIR}/src/include/mlx5
-    ${HIPIFY_DIR}/src/include/nccl_device
-    ${HIPIFY_DIR}/src/include/ionic
-    ${HIPIFY_DIR}/src/include/plugin
-    ${HIPIFY_DIR}/gensrc
-    ${HSA_INCLUDE_PATH}
-  )
+  # Extract include directories, compile definitions, and compile options
+  # directly from the rccl target so the split pipeline always stays in
+  # sync -- no manual mirroring required.
+  get_target_property(_split_include_dirs rccl INCLUDE_DIRECTORIES)
+  get_target_property(_split_compile_defs rccl COMPILE_DEFINITIONS)
+  get_target_property(_split_compile_opts rccl COMPILE_OPTIONS)
 
-  # Collect compile definitions that device TUs need.
-  # These mirror the target_compile_definitions calls above.
-  set(_split_compile_defs "")
-  if(COLLTRACE)
-    list(APPEND _split_compile_defs "ENABLE_COLLTRACE")
+  # get_target_property returns "<var>-NOTFOUND" when the property is empty
+  if(NOT _split_include_dirs)
+    set(_split_include_dirs "")
   endif()
-  if(IFC_ENABLED)
-    list(APPEND _split_compile_defs "USE_INDIRECT_FUNCTION_CALL")
+  if(NOT _split_compile_defs)
+    set(_split_compile_defs "")
   endif()
-  if(LL128_ENABLED)
-    list(APPEND _split_compile_defs "ENABLE_LL128")
-  endif()
-  if(FAULT_INJECTION)
-    list(APPEND _split_compile_defs "ENABLE_FAULT_INJECTION")
-  endif()
-  if(${HIP_CONTIGUOUS_MEMORY})
-    list(APPEND _split_compile_defs "HIP_CONTIGUOUS_MEMORY")
-  endif()
-  if("${hip_version_string}" VERSION_GREATER_EQUAL "5.7.31920")
-    list(APPEND _split_compile_defs "HIP_UNCACHED_MEMORY")
-  endif()
-  if(HIP_HOST_UNCACHED_MEMORY)
-    list(APPEND _split_compile_defs "HIP_HOST_UNCACHED_MEMORY")
-  endif()
-  if(ENABLE_MSCCL_KERNEL)
-    list(APPEND _split_compile_defs "COMPILE_MSCCL_KERNEL")
-  endif()
-  if(ENABLE_MSCCLPP)
-    list(APPEND _split_compile_defs "ENABLE_MSCCLPP")
+  if(NOT _split_compile_opts)
+    set(_split_compile_opts "")
   endif()
 
   include(cmake/SplitDeviceCompile.cmake)
@@ -1509,6 +1480,7 @@ if(ENABLE_SPLIT_DEVICE_COMPILE)
     OUTPUT_DIR          ${CMAKE_CURRENT_BINARY_DIR}
     INCLUDE_DIRS        ${_split_include_dirs}
     COMPILE_DEFS        ${_split_compile_defs}
+    COMPILE_OPTS        ${_split_compile_opts}
   )
 
   # Make rccl depend on all the split-compiled fat objects.
