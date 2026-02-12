@@ -391,7 +391,8 @@ __device__ int IPCContext::reduce(rocshmem_team_t team, T *dest,
         int p_count = nreduce - (n_seg * seg_size);
         int p_chunk = p_count / PE_size;
         if (p_chunk > 0) {
-          internal_ring_allreduce<T, Op>(p_dst, p_src, p_count, team_obj, 1,
+          internal_ring_allreduce<T, Op>(p_dst, p_src,
+                                         (p_chunk * PE_size), team_obj, 1,
                                          (p_chunk * PE_size), p_chunk);
         }
 
