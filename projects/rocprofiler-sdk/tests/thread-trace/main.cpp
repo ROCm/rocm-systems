@@ -77,12 +77,19 @@ main(int /*argc*/, char** /*argv*/)
     roctxProfilerResume(0);
 
     bool is_triple_buffer = std::getenv("TRIPLEBUFFER") ? atoi(std::getenv("TRIPLEBUFFER")) : false;
+    bool start_and_stop   = std::getenv("STARTSTOP") ? atoi(std::getenv("STARTSTOP")) : false;
 
     int loopcount = LOOPCOUNT;
     if(is_triple_buffer) loopcount = 30000;
 
     for(int i = 0; i < loopcount; i++)
     {
+        if (start_and_stop && (i % 1000) == 0)
+        {
+            roctxProfilerPause(0);
+            roctxProfilerResume(0);
+        }
+
         hipLaunchKernelGGL(
             branching_kernel, dim3(DATA_SIZE / 64), dim3(64), 0, 0, dst.ptr, src1.ptr, src2.ptr);
         HIP_API_CALL(hipGetLastError());

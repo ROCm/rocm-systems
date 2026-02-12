@@ -217,9 +217,6 @@ SQTTBufferingPackets::SQTTBufferingPackets(aqlprofile_handle_t _handle, int _sha
 : handle(_handle)
 , shader_engine_id(_shader_engine_id)
 {
-    const auto& aqlprofile = rocprofiler::thread_trace::get_aqlprofile_dl();
-    ROCP_FATAL_IF(!aqlprofile.valid()) << "AQLProfile missing required symbols for triple buffer.";
-
     // We sometimes need 2x the number of packets as there are buffers.
     uint64_t num_packets{6};
     buffer_swap.resize(num_packets);
@@ -228,7 +225,7 @@ SQTTBufferingPackets::SQTTBufferingPackets(aqlprofile_handle_t _handle, int _sha
     for(auto& buffer : buffer_swap)
         buffer_ptr.emplace_back(&buffer);
 
-    auto status = aqlprofile.get_buffer_packets_fn(
+    auto status = aqlprofile_att_get_buffer_packets(
         &header, &query_status, buffer_ptr.data(), &num_packets, handle, shader_engine_id, 0);
     CHECK_HSA(status, "failed to create ATT double buffer packet");
 
@@ -242,16 +239,14 @@ SQTTBufferingPackets::SQTTBufferingPackets(aqlprofile_handle_t _handle, int _sha
 std::optional<sqtt_buffer_status_t>
 SQTTBufferingPackets::query_buffer_status()
 {
-    const auto& aqlprofile = rocprofiler::thread_trace::get_aqlprofile_dl();
-    ROCP_FATAL_IF(!aqlprofile.valid()) << "AQLProfile missing required symbols for triple buffer.";
-
     auto ret = aqlprofile_att_buffer_status_t{};
 
-    auto status = aqlprofile.update_buffer_status_fn(&ret, handle, shader_engine_id, 0);
+    auto status = aqlprofile_att_update_buffer_status(&ret, handle, shader_engine_id, 0);
     CHECK_HSA(status, "failed to query ATT status");
 
     if(!ret.needs_swap) return {};
 
+    std::cout << current_buffer << " vs " << ret.num_swaps << std::endl;
     // Ensure aqlprofile and SDK agrees on which is the current buffer
     ROCP_FATAL_IF((current_buffer++) != ret.num_swaps) << "Mismatch of AQL and SDK buffer states!";
 

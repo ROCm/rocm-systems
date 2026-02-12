@@ -54,6 +54,7 @@ DL::~DL()
     if(handle) dlclose(handle);
 }
 
+/*
 AQLProfileDL::AQLProfileDL()
 {
     // Try to load libhsa-amd-aqlprofile64.so.1
@@ -98,7 +99,7 @@ get_aqlprofile_dl()
 {
     static auto*& instance = common::static_object<AQLProfileDL>::construct(AQLProfileDL());
     return *CHECK_NOTNULL(instance);
-}
+}*/
 
 }  // namespace thread_trace
 }  // namespace rocprofiler

@@ -241,7 +241,12 @@ TEST(thread_trace, perfcounters_configure_test)
                    rocprofiler_dispatch_id_t,
                    void*,
                    rocprofiler_user_data_t*) { return ROCPROFILER_THREAD_TRACE_CONTROL_NONE; },
-                [](rocprofiler_agent_id_t, int64_t, void*, size_t, rocprofiler_user_data_t) {},
+                [](rocprofiler_agent_id_t,
+                    int64_t,
+                    void*,
+                    size_t,
+                    rocprofiler_thread_trace_shader_data_flags_t,
+                    rocprofiler_user_data_t) {},
                 nullptr),
             "configure");
     }
@@ -312,7 +317,6 @@ TEST(thread_trace, perfcounters_configure_fail_test)
 
         EXPECT_NE(status, ROCPROFILER_STATUS_SUCCESS);
     }
-
     context::pop_client(1);
 }
 
@@ -410,6 +414,8 @@ TEST(thread_trace, agent_configure_test)
                                                         sizeof(rocprofiler_agent_t),
                                                         &ctx),
                      "Failed to find GPU agents");
+
+    context::pop_client(1);
 }
 
 TEST(thread_trace, triple_buffer_multiple_shader)
@@ -458,6 +464,8 @@ TEST(thread_trace, triple_buffer_multiple_shader)
     auto status = rocprofiler_query_available_agents(
         ROCPROFILER_AGENT_INFO_VERSION_0, configure_agents, sizeof(rocprofiler_agent_t), &ctx);
     ASSERT_EQ(status, ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT);
+
+    context::pop_client(1);
 }
 
 TEST(thread_trace, triple_buffer_dispatch_mode)
@@ -512,4 +520,6 @@ TEST(thread_trace, triple_buffer_dispatch_mode)
     auto status = rocprofiler_query_available_agents(
         ROCPROFILER_AGENT_INFO_VERSION_0, configure_agents, sizeof(rocprofiler_agent_t), &ctx);
     ASSERT_EQ(status, ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT);
+
+    context::pop_client(1);
 }

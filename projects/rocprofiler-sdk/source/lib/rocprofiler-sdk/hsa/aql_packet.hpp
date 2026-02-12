@@ -255,6 +255,8 @@ public:
     hsa_ext_amd_aql_pm4_packet_t                query_status{};
     virtual std::optional<sqtt_buffer_status_t> query_buffer_status();
 
+    void reset_current_buffer() { current_buffer = 0; };
+
     const aqlprofile_handle_t handle;
     uint64_t                  header{0};
     const int                 shader_engine_id;
