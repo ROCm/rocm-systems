@@ -580,12 +580,10 @@ set(_rccl_cxxflags "${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_${CMAKE_BUILD_TYPE}}")
 separate_arguments(CXXFLAGS NATIVE_COMMAND "${_rccl_cxxflags}")
 
 if(NOT BUILD_SHARED_LIBS)
-  # To create a static lib with `-fgpu-rdc`, you need `--emit-static-lib` and `--hip-link`.
-  # You also need to invoke amdclang++ again to trigger GPU code generation.
+  # Without -fgpu-rdc, device code is fully compiled per-TU.
+  # --emit-static-lib is still needed to produce a static library.
   set(static_link_flags
     ${CXXFLAGS}
-    --hip-link
-    -fgpu-rdc
     --emit-static-lib
   )
 

@@ -1,3 +1,5 @@
+#ifndef NCCL_DEVICE_SENDRECV_H_
+#define NCCL_DEVICE_SENDRECV_H_
 /*************************************************************************
  * Copyright (c) 2015-2022, NVIDIA CORPORATION. All rights reserved.
  * Modifications Copyright (c) 2019-2022 Advanced Micro Devices, Inc. All rights reserved.
@@ -281,3 +283,5 @@ struct RunWorkBatch<ncclFuncSendRecv, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPL
     }
   }
 };
+
+#endif // NCCL_DEVICE_SENDRECV_H_
