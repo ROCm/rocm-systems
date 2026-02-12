@@ -56,6 +56,24 @@
 
 namespace amd::smi {
 constexpr uint32_t kSMI_MAX_STRING_LENGTH = 256;  // matches AMDSMI_MAX_STRING_LENGTH
+constexpr size_t kMAX_DRIVER_SYMLINK_LEN = 1024;  // Linux kernel limits symlink targets to
+                                                  // 4096 bytes (on most filesystems)
+                                                  // Conservative size: ~512-1024 bytes (sweet spot)
+
+// Container detection indicators
+constexpr std::string_view kDOCKER_ENV_Path = "/.dockerenv";
+constexpr std::string_view kCONTAINER_ENV_PATH = "/run/.containerenv";
+constexpr std::string_view kCGROUP_PATH = "/proc/1/cgroup";
+constexpr std::string_view kCONTAINER_ENV_VAR = "container";
+
+constexpr std::string_view kDOCKER = "docker";
+constexpr std::string_view kLXC = "lxc";
+constexpr std::string_view kKUBEPODS = "kubepods";
+constexpr std::string_view kCONTAINERD = "containerd";
+constexpr std::string_view kPODMAN = "podman";
+
+// Virtualization detection indicators
+constexpr std::string_view kVFIO_PCI = "vfio-pci";
 
 struct VirtModeDetectionResult {
   bool is_vm_guest = false;           // hypervisor flag in /proc/cpuinfo
@@ -123,8 +141,11 @@ bool is_sudo_user();
 rsmi_status_t rsmi_get_gfx_target_version(uint32_t dv_ind, std::string *gfx_version);
 rsmi_status_t rsmi_dev_number_of_computes_get(uint32_t dv_ind, uint32_t* num_computes);
 
-VirtModeDetectionResult detect_virtualization_mode_sysfs(
-    const std::string& render_path);
+VirtModeDetectionResult detect_virtualization_mode_sysfs(const std::string& render_path);
+
+inline auto contains(std::string_view text, std::string_view substr) -> bool {
+    return text.find(substr) != std::string_view::npos;
+}
 
 std::string leftTrim(const std::string &s);
 std::string rightTrim(const std::string &s);

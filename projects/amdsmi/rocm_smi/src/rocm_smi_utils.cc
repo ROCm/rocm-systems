@@ -1348,29 +1348,27 @@ bool is_running_in_container() {
   std::ostringstream ss;
 
   // Check for Docker
-  if (FileExists("/.dockerenv")) {
+  if (FileExists(kDOCKER_ENV_Path.data())) {
     ss << __PRETTY_FUNCTION__ << " | Detected Docker container (/.dockerenv exists)";
     LOG_DEBUG(ss);
     return true;
   }
 
   // Check for Podman/other container runtimes
-  if (FileExists("/run/.containerenv")) {
+  if (FileExists(kCONTAINER_ENV_PATH.data())) {
     ss << __PRETTY_FUNCTION__ << " | Detected container (/run/.containerenv exists)";
     LOG_DEBUG(ss);
     return true;
   }
 
   // Check cgroup for container indicators
-  std::ifstream cgroup_file("/proc/1/cgroup");
+  std::ifstream cgroup_file(kCGROUP_PATH.data());
   if (cgroup_file.is_open()) {
     std::string line;
     while (std::getline(cgroup_file, line)) {
-      if (line.find("docker") != std::string::npos ||
-          line.find("lxc") != std::string::npos ||
-          line.find("kubepods") != std::string::npos ||
-          line.find("containerd") != std::string::npos ||
-          line.find("podman") != std::string::npos) {
+      if (contains(line, kDOCKER) || contains(line, kLXC) ||
+          contains(line, kKUBEPODS) || contains(line, kCONTAINERD)||
+          contains(line, kPODMAN)) {
         ss << __PRETTY_FUNCTION__ << " | Detected container via cgroup: " << line;
         LOG_DEBUG(ss);
         return true;
@@ -1379,7 +1377,7 @@ bool is_running_in_container() {
   }
 
   // Check for container environment variables (less reliable but useful)
-  const char* container_env = std::getenv("container");
+  const char* container_env = std::getenv(kCONTAINER_ENV_VAR.data());
   if (container_env != nullptr) {
     ss << __PRETTY_FUNCTION__ << " | Detected container via $container env var: " << container_env;
     LOG_DEBUG(ss);
@@ -1394,16 +1392,25 @@ bool is_running_in_container() {
 bool is_device_vfio_bound(const std::string& pci_sysfs_path) {
   std::ostringstream ss;
   std::string driver_link = pci_sysfs_path + "/driver";
-  char buf[kSMI_MAX_STRING_LENGTH];
+  char buf[kMAX_DRIVER_SYMLINK_LEN];
 
   ssize_t len = readlink(driver_link.c_str(), buf, sizeof(buf) - 1);
   if (len > 0) {
+    // Reject if readlink truncated the data
+    if (static_cast<std::size_t>(len) >= (sizeof(buf) - 1)) {
+      ss << __PRETTY_FUNCTION__
+         << " | [WARNING] Driver path truncated (len=" << len
+         << "), cannot reliably detect vfio-pci (passthrough)";
+      LOG_INFO(ss);
+      return false;
+    }
+
     buf[len] = '\0';
     std::string driver(buf);
     ss << __PRETTY_FUNCTION__ << " | Device driver: " << driver;
     LOG_DEBUG(ss);
 
-    if (driver.find("vfio-pci") != std::string::npos) {
+    if (contains(driver, kVFIO_PCI)) {
       ss << __PRETTY_FUNCTION__ << " | Device bound to vfio-pci (passthrough)";
       LOG_INFO(ss);
       return true;

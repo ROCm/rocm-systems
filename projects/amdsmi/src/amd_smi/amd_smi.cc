@@ -43,6 +43,7 @@
 #include <memory>
 #include <limits>
 #include <functional>
+#include <tuple>
 #include <exception>
 
 #include "amd_smi/impl/nic/smi_nic_interface.h"
@@ -5069,7 +5070,7 @@ amdsmi_get_gpu_vbios_info(amdsmi_processor_handle processor_handle, amdsmi_vbios
            << "Libdrm is likely not installed. ";
         LOG_INFO(ss);
         status = get_vbios_from_sysfs(processor_handle, info);
-        get_ifwi_version(processor_handle, info);  // ignore errors
+        std::ignore = get_ifwi_version(processor_handle, info);
         return status;  // Return what we have so far, even if libDRM parts fail
     }
 
@@ -5145,7 +5146,7 @@ amdsmi_get_gpu_vbios_info(amdsmi_processor_handle processor_handle, amdsmi_vbios
     libdrm.unload();
 
     // get vbios build string from rocm_smi which translates to ifwi version
-    auto _ = get_ifwi_version(processor_handle, info);  // ignore errors
+    std::ignore = get_ifwi_version(processor_handle, info);
 
     ss << __PRETTY_FUNCTION__
        << " | drmCommandWrite returned: " << strerror(errno) << "\n"
