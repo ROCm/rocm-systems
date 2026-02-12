@@ -1,3 +1,5 @@
+#ifndef NCCL_DEVICE_ALLTOALL_PIVOT_H_
+#define NCCL_DEVICE_ALLTOALL_PIVOT_H_
 /*************************************************************************
  * Copyright (c) 2015-2021, NVIDIA CORPORATION. All rights reserved.
  *
@@ -81,3 +83,5 @@ struct RunWorkColl<ncclFuncAlltoAllPivot, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_S
     runRing<T, RedOp, Proto>(tid, nThreads, work, ncclShmem, ncclShmemPerWarp);
   }
 };
+
+#endif // NCCL_DEVICE_ALLTOALL_PIVOT_H_

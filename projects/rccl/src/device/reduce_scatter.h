@@ -1,3 +1,5 @@
+#ifndef NCCL_DEVICE_REDUCE_SCATTER_H_
+#define NCCL_DEVICE_REDUCE_SCATTER_H_
 /*************************************************************************
  * Copyright (c) 2015-2022, NVIDIA CORPORATION. All rights reserved.
  * Modifications Copyright (c) 2019-2022 Advanced Micro Devices, Inc. All rights reserved.
@@ -650,3 +652,5 @@ struct RunWorkColl<ncclFuncReduceScatter, T, RedOp, NCCL_ALGO_COLLNET_DIRECT, NC
     }
   }
 };
+
+#endif // NCCL_DEVICE_REDUCE_SCATTER_H_
