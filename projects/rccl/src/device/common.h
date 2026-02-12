@@ -821,7 +821,7 @@ __global__ void ncclDevKernelDebug_Generic_4(ncclDevKernelArgsDefaultStorage NCC
 
 #ifdef USE_INDIRECT_FUNCTION_CALL
 #define DEFINE_ncclDevFunc(suffix, coll, redop, ty, algo, proto, acc, pipeline, unroll) \
-  __device__ void ncclDevFunc_##suffix() { \
+  __device__ __attribute__((noinline, used)) void ncclDevFunc_##suffix() { \
     RunWorkBatch<coll, ty, redop<ty>, algo, proto, acc, unroll, pipeline>().run(); \
   }
 #else

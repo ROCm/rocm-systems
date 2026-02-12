@@ -1234,6 +1234,10 @@ struct KernelInfo {
     DwarfAttrPositions dwarf_attr_positions;  // Positions of various DWARF attributes that need patching
     uint64_t orig_text_addr = 0;    // Original .text address for debug_line patching
     int vgpr = 0, sgpr = 0, lds = 0, stack = 0;
+    // Symbol info from .dynsym (to preserve compiler's binding/visibility)
+    uint8_t dynsym_st_info = 0;     // st_info (binding + type) from original .dynsym
+    uint8_t dynsym_st_other = 0;    // st_other (visibility) from original .dynsym
+    uint64_t dynsym_st_size = 0;    // st_size from original .dynsym
 };
 
 // Read one msgpack integer at data[off]: fixint, uint8 (0xcc), or uint16 (0xcd). Returns value and bytes consumed (0 if invalid).
@@ -1346,26 +1350,35 @@ KernelInfo parseKernel(const std::vector<uint8_t>& elf_data, const std::string& 
     const Elf64_Sym* syms = file.at<Elf64_Sym>(symtab->offset);
     size_t nsyms = symtab->size / sizeof(Elf64_Sym);
 
+    // Require exactly one ncclDevFunc_ - the top-level device function (must have noinline in DEFINE_ncclDevFunc).
+    // We do NOT fall back to ncclDevKernel_; the kernel ends with s_endpgm and cannot be called as a function.
+    int nccl_devfunc_count = 0;
+    size_t nccl_devfunc_idx = 0;
     for (size_t i = 0; i < nsyms; i++) {
         if (ELF64_ST_TYPE(syms[i].st_info) == STT_FUNC) {
             const char* n = strings + syms[i].st_name;
-            // Look for either ncclDevFunc_ or ncclDevKernel_..._Specialized
-            if (strstr(n, "ncclDevFunc_") || strstr(n, "ncclDevKernel_")) {
-                info.name = n;
-                // Extract from beginning of .text through end of ncclDevFunc_
-                // This includes helper functions (like runTreeSplit) that ncclDevFunc_ calls
-                // via PC-relative addressing. Without these, the PC-relative offsets would
-                // point to garbage after merging.
-                uint64_t func_start = syms[i].st_value;
-                uint64_t func_end = func_start + syms[i].st_size;
-                uint64_t extract_size = func_end - text->addr;
-
-                const uint8_t* p = file.at<uint8_t>(text->offset);
-                info.code.assign(p, p + extract_size);
-                info.func_offset = func_start - text->addr;  // Offset of ncclDevFunc_ within extracted code
-                break;
+            if (strstr(n, "ncclDevFunc_")) {
+                nccl_devfunc_count++;
+                nccl_devfunc_idx = i;
             }
         }
+    }
+    if (nccl_devfunc_count != 1) {
+        fprintf(stderr, "Error: %s: expected exactly one ncclDevFunc_ symbol, found %d.\n",
+                source_file.empty() ? "(object)" : source_file.c_str(), nccl_devfunc_count);
+        unlink(tmp.c_str());
+        exit(1);
+    }
+    {
+        const char* n = strings + syms[nccl_devfunc_idx].st_name;
+        info.name = n;
+        uint64_t func_start = syms[nccl_devfunc_idx].st_value;
+        uint64_t func_end = func_start + syms[nccl_devfunc_idx].st_size;
+        uint64_t extract_size = func_end - text->addr;
+
+        const uint8_t* p = file.at<uint8_t>(text->offset);
+        info.code.assign(p, p + extract_size);
+        info.func_offset = func_start - text->addr;  // Offset of ncclDevFunc_ within extracted code
     }
 
     // Parse .note for resources and save full note
@@ -1904,6 +1917,7 @@ private:
     std::vector<std::pair<const KernelInfo*, uint64_t>> kernel_text_offsets_;  // kernel -> text offset
     std::vector<std::pair<size_t, uint64_t>> specialized_kd_offsets_;  // KD offset in .rodata -> text offset
     std::vector<uint64_t> onerank_text_offsets_;  // oneRankReduce kernel offsets in dispatcher .text
+    std::vector<std::string> onerank_names_;      // oneRankReduce kernel names (parallel to onerank_text_offsets_)
     std::unordered_map<std::string, FuncIdMapping> funcid_map_;
 
     // Debug line info: (offset in merged .debug_line, size, orig_text_addr, new_text_offset)
@@ -2214,6 +2228,22 @@ private:
                 }
             }
 
+            // Zero out function tables - relocations will fill them at load time
+            // This is critical for symbol-based relocations to work correctly
+            if (rodata_table_1_off_ > 0 || rodata_table_2_off_ > 0 || rodata_table_4_off_ > 0) {
+                size_t table_size = FUNC_COUNT * 8;  // Each table is FUNC_COUNT * 8 bytes
+                if (rodata_table_1_off_ > 0 && rodata_table_1_off_ + table_size <= rodata.data.size()) {
+                    memset(rodata.data.data() + rodata_table_1_off_, 0, table_size);
+                }
+                if (rodata_table_2_off_ > 0 && rodata_table_2_off_ + table_size <= rodata.data.size()) {
+                    memset(rodata.data.data() + rodata_table_2_off_, 0, table_size);
+                }
+                if (rodata_table_4_off_ > 0 && rodata_table_4_off_ + table_size <= rodata.data.size()) {
+                    memset(rodata.data.data() + rodata_table_4_off_, 0, table_size);
+                }
+                printf("  Zeroed function tables in .rodata (relocations will fill them)\n");
+            }
+
             printf("Built .rodata: %zu bytes (KDs + const function tables)\n", rodata.data.size());
             if (rodata_table_1_off_ || rodata_table_2_off_ || rodata_table_4_off_) {
                 printf("  Function tables in .rodata at offsets: 0x%lx, 0x%lx, 0x%lx\n",
@@ -2257,8 +2287,9 @@ private:
                     }
 
                     if (is_func && in_text && has_onerank && not_kd) {
-                        // Store offset within .text
+                        // Store offset within .text and name
                         onerank_text_offsets_.push_back(syms[i].st_value - disp_text_for_onerank->addr);
+                        onerank_names_.push_back(name);
                     }
                 }
                 printf("  Found %d oneRankReduce candidates, %zu matched\n",
@@ -2998,36 +3029,16 @@ private:
             if (s.name == ".data.rel.ro") data_rel_ro_sec = &s;
         }
 
-        // Fill tables in .rodata if they're there (const tables case)
+        // Function tables should be zeroed - relocations will fill them at load time
+        // This applies whether tables are in .rodata or .data.rel.ro
+        // Symbol-based relocations (R_AMDGPU_ABS64) will resolve to the correct addresses
         if (rodata_sec && rodata_table_2_off_ > 0) {
-            printf("Function tables in .rodata (const) - pre-filling at offsets 0x%lx, 0x%lx, 0x%lx\n",
+            printf("Function tables in .rodata at offsets 0x%lx, 0x%lx, 0x%lx (zeroed, will be filled by relocations)\n",
                    rodata_table_1_off_, rodata_table_2_off_, rodata_table_4_off_);
-
-            uint8_t* rodata = rodata_sec->data.data();
-            int pop1 = 0, pop2 = 0, pop4 = 0;
-            for (int i = 0; i < FUNC_COUNT; i++) {
-                if (table_1_[i] && rodata_table_1_off_) {
-                    uint64_t addr = text_addr_ + table_1_[i];
-                    memcpy(rodata + rodata_table_1_off_ + i * 8, &addr, 8);
-                    pop1++;
-                }
-                if (table_2_[i] && rodata_table_2_off_) {
-                    uint64_t addr = text_addr_ + table_2_[i];
-                    memcpy(rodata + rodata_table_2_off_ + i * 8, &addr, 8);
-                    pop2++;
-                }
-                if (table_4_[i] && rodata_table_4_off_) {
-                    uint64_t addr = text_addr_ + table_4_[i];
-                    memcpy(rodata + rodata_table_4_off_ + i * 8, &addr, 8);
-                    pop4++;
-                }
-            }
-            printf("  Function entries pre-filled in .rodata: table_1=%d, table_2=%d, table_4=%d\n", pop1, pop2, pop4);
-        }
-        // For .data.rel.ro tables, don't pre-fill - R_AMDGPU_RELATIVE64 relocations
-        // will fill them at load time (like IFC). This is important for multi-GPU.
-        else if (data_rel_ro_sec) {
-            printf("Function tables at 0x%lx (will be filled by relocations at load time)\n", data_rel_ro_addr_);
+            // Tables are already zeroed when .rodata section is created
+        } else if (data_rel_ro_sec) {
+            printf("Function tables in .data.rel.ro at 0x%lx (zeroed, will be filled by relocations)\n", data_rel_ro_addr_);
+            // Tables are already zeroed when .data.rel.ro section is created
         }
 
         // Patch .text with PC-relative table references
@@ -3419,6 +3430,123 @@ private:
                 }
 
                 patchSymbol(sym, dynsym_strtab->data.data(), dynsym_strtab->data.size());
+            }
+
+            // Add ncclDevFunc_* symbols to .dynsym for symbol-based relocations
+            // These are internal functions that need to be in .dynsym so relocations can
+            // reference them by symbol index instead of absolute address.
+            // Prefer LOCAL HIDDEN (like specialized kernel .o files), but if that's not
+            // possible due to ordering constraints, use GLOBAL HIDDEN (not PROTECTED).
+            if (!kernel_text_offsets_.empty()) {
+                printf("Adding %zu ncclDevFunc_* symbols to .dynsym for relocations...\n", kernel_text_offsets_.size());
+                
+                uint16_t text_shndx = 0;
+                for (size_t j = 0; j < sections_.size(); j++) {
+                    if (sections_[j].name == ".text") { text_shndx = j + 1; break; }
+                }
+
+                // Find first global symbol index (for LOCAL symbol insertion)
+                size_t first_global_idx = dynsym_sec->data.size() / 24;
+                for (size_t i = 0; i * 24 < dynsym_sec->data.size(); i++) {
+                    uint8_t* sym = dynsym_sec->data.data() + i * 24;
+                    uint8_t binding = ELF64_ST_BIND(sym[4]);
+                    if (binding == STB_GLOBAL || binding == STB_WEAK) {
+                        first_global_idx = i;
+                        break;
+                    }
+                }
+
+                // Build LOCAL HIDDEN symbols
+                std::vector<uint8_t> local_syms;
+                for (const auto& [kern, text_off] : kernel_text_offsets_) {
+                    // Append name to .dynstr
+                    uint32_t name_off = dynsym_strtab->data.size();
+                    dynsym_strtab->data.insert(dynsym_strtab->data.end(),
+                                              kern->name.begin(), kern->name.end());
+                    dynsym_strtab->data.push_back('\0');
+
+                    // Create Elf64_Sym entry as LOCAL HIDDEN (preferred)
+                    Elf64_Sym sym = {};
+                    sym.st_name = name_off;
+                    sym.st_value = text_addr_ + text_off + kern->func_offset;
+                    sym.st_size = kern->code.size() - kern->func_offset;
+                    sym.st_info = ELF64_ST_INFO(STB_LOCAL, STT_FUNC);
+                    sym.st_other = STV_HIDDEN;
+                    sym.st_shndx = text_shndx;
+
+                    const uint8_t* p = reinterpret_cast<const uint8_t*>(&sym);
+                    local_syms.insert(local_syms.end(), p, p + sizeof(sym));
+                }
+
+                // Insert LOCAL symbols before first global symbol
+                if (first_global_idx * 24 < dynsym_sec->data.size()) {
+                    dynsym_sec->data.insert(dynsym_sec->data.begin() + first_global_idx * 24,
+                                          local_syms.begin(), local_syms.end());
+                } else {
+                    // No global symbols yet, append at end
+                    dynsym_sec->data.insert(dynsym_sec->data.end(),
+                                          local_syms.begin(), local_syms.end());
+                }
+                printf("  Added %zu LOCAL HIDDEN symbols to .dynsym (now %zu total)\n", 
+                       kernel_text_offsets_.size(), dynsym_sec->data.size() / 24);
+            }
+            
+            // Add oneRankReduce symbols to .dynsym for symbol-based relocations
+            // These are also internal functions that need symbols for relocations.
+            // Use LOCAL HIDDEN if possible (like ncclDevFunc_* symbols).
+            if (!onerank_text_offsets_.empty()) {
+                printf("Adding %zu oneRankReduce symbols to .dynsym for relocations...\n", onerank_text_offsets_.size());
+                
+                uint16_t text_shndx = 0;
+                for (size_t j = 0; j < sections_.size(); j++) {
+                    if (sections_[j].name == ".text") { text_shndx = j + 1; break; }
+                }
+                
+                // Find first global symbol index (for LOCAL symbol insertion)
+                size_t first_global_idx = dynsym_sec->data.size() / 24;
+                for (size_t i = 0; i * 24 < dynsym_sec->data.size(); i++) {
+                    uint8_t* sym = dynsym_sec->data.data() + i * 24;
+                    uint8_t binding = ELF64_ST_BIND(sym[4]);
+                    if (binding == STB_GLOBAL || binding == STB_WEAK) {
+                        first_global_idx = i;
+                        break;
+                    }
+                }
+                
+                // Build LOCAL HIDDEN symbols
+                std::vector<uint8_t> local_syms;
+                for (size_t i = 0; i < onerank_text_offsets_.size(); i++) {
+                    // Append name to .dynstr
+                    uint32_t name_off = dynsym_strtab->data.size();
+                    const std::string& name = (i < onerank_names_.size()) ? onerank_names_[i] : "<unknown>";
+                    dynsym_strtab->data.insert(dynsym_strtab->data.end(),
+                                              name.begin(), name.end());
+                    dynsym_strtab->data.push_back('\0');
+                    
+                    // Create Elf64_Sym entry as LOCAL HIDDEN
+                    Elf64_Sym sym = {};
+                    sym.st_name = name_off;
+                    sym.st_value = text_addr_ + onerank_text_offsets_[i];
+                    sym.st_size = 0;  // Size unknown, but relocations only need the address
+                    sym.st_info = ELF64_ST_INFO(STB_LOCAL, STT_FUNC);
+                    sym.st_other = STV_HIDDEN;
+                    sym.st_shndx = text_shndx;
+                    
+                    const uint8_t* p = reinterpret_cast<const uint8_t*>(&sym);
+                    local_syms.insert(local_syms.end(), p, p + sizeof(sym));
+                }
+                
+                // Insert LOCAL symbols before first global symbol
+                if (first_global_idx * 24 < dynsym_sec->data.size()) {
+                    dynsym_sec->data.insert(dynsym_sec->data.begin() + first_global_idx * 24,
+                                          local_syms.begin(), local_syms.end());
+                } else {
+                    // No global symbols yet, append at end
+                    dynsym_sec->data.insert(dynsym_sec->data.end(),
+                                          local_syms.begin(), local_syms.end());
+                }
+                printf("  Added %zu LOCAL HIDDEN oneRankReduce symbols to .dynsym (now %zu total)\n",
+                       onerank_text_offsets_.size(), dynsym_sec->data.size() / 24);
             }
         }
 
@@ -4087,6 +4215,22 @@ private:
             return false;
         }
 
+        // Find .dynsym and .dynstr sections
+        SectionInfo* dynsym_sec = nullptr;
+        SectionInfo* dynsym_strtab = nullptr;
+        for (auto& s : sections_) {
+            if (s.name == ".dynsym") dynsym_sec = &s;
+            if (s.name == ".dynstr") dynsym_strtab = &s;
+        }
+        if (!dynsym_sec) {
+            setFatalError(".dynsym section not found - required for symbol-based relocations");
+            return false;
+        }
+        if (!dynsym_strtab) {
+            setFatalError(".dynstr section not found - required for symbol-based relocations");
+            return false;
+        }
+
         // Build R_AMDGPU_RELATIVE64 relocations for function tables (like IFC)
         // These relocations tell the runtime to fill table entries with function addresses
         // The runtime applies these per-GPU during code object loading
@@ -4095,14 +4239,188 @@ private:
         // R_AMDGPU_RELATIVE64 = 13 (0x0d)
         // Each relocation: offset (8) + info (8) + addend (8) = 24 bytes
         const uint64_t R_AMDGPU_RELATIVE64 = 13;
+        const uint64_t R_AMDGPU_ABS64 = 3;
 
-        auto addReloc = [&](uint64_t offset, uint64_t addend) {
+        // Build map from function address to symbol index in .dynsym
+        // This allows us to use symbol-based relocations instead of absolute addresses
+        std::unordered_map<uint64_t, uint32_t> addr_to_symidx;
+        printf("Building address-to-symbol-index map from .dynsym...\n");
+        uint16_t text_shndx = 0;
+        for (size_t j = 0; j < sections_.size(); j++) {
+            if (sections_[j].name == ".text") { text_shndx = j + 1; break; }
+        }
+        
+        for (size_t sym_idx = 0; sym_idx * 24 < dynsym_sec->data.size(); sym_idx++) {
+            uint8_t* sym = dynsym_sec->data.data() + sym_idx * 24;
+            uint64_t sym_val;
+            uint16_t sym_shndx;
+            uint32_t name_idx;
+            memcpy(&sym_val, sym + 8, 8);
+            memcpy(&sym_shndx, sym + 6, 2);
+            memcpy(&name_idx, sym, 4);
+            
+            // Only map symbols in .text section (functions)
+            if (sym_shndx == text_shndx && sym_val >= text_addr_ && sym_val < text_addr_ + 0x100000) {
+                // Get symbol name for debugging
+                const char* sym_name = "";
+                if (name_idx < dynsym_strtab->data.size()) {
+                    sym_name = (const char*)dynsym_strtab->data.data() + name_idx;
+                }
+                addr_to_symidx[sym_val] = sym_idx;
+            }
+        }
+        printf("  Mapped %zu function addresses to symbol indices\n", addr_to_symidx.size());
+        if (addr_to_symidx.empty()) {
+            setFatalError("No function symbols found in .dynsym - cannot create symbol-based relocations");
+            return false;
+        }
+
+        // Verify that all functions in tables have symbols BEFORE creating relocations
+        // This gives us better diagnostics upfront rather than failing during relocation creation
+        struct MissingSymbol {
+            uint64_t addr;
+            std::string name;
+            std::string source;
+        };
+        std::vector<MissingSymbol> missing_symbols;
+        
+        // Check table_1 functions
+        for (int i = 0; i < FUNC_COUNT; i++) {
+            if (table_1_[i]) {
+                uint64_t func_addr = text_addr_ + table_1_[i];
+                if (addr_to_symidx.find(func_addr) == addr_to_symidx.end()) {
+                    MissingSymbol ms;
+                    ms.addr = func_addr;
+                    ms.name = names_1_[i].empty() ? "<unknown>" : names_1_[i];
+                    ms.source = "table_1";
+                    missing_symbols.push_back(ms);
+                }
+            }
+        }
+        // Check table_2 functions
+        for (int i = 0; i < FUNC_COUNT; i++) {
+            if (table_2_[i]) {
+                uint64_t func_addr = text_addr_ + table_2_[i];
+                if (addr_to_symidx.find(func_addr) == addr_to_symidx.end()) {
+                    MissingSymbol ms;
+                    ms.addr = func_addr;
+                    ms.name = names_2_[i].empty() ? "<unknown>" : names_2_[i];
+                    ms.source = "table_2";
+                    missing_symbols.push_back(ms);
+                }
+            }
+        }
+        // Check table_4 functions
+        for (int i = 0; i < FUNC_COUNT; i++) {
+            if (table_4_[i]) {
+                uint64_t func_addr = text_addr_ + table_4_[i];
+                if (addr_to_symidx.find(func_addr) == addr_to_symidx.end()) {
+                    MissingSymbol ms;
+                    ms.addr = func_addr;
+                    ms.name = names_4_[i].empty() ? "<unknown>" : names_4_[i];
+                    ms.source = "table_4";
+                    missing_symbols.push_back(ms);
+                }
+            }
+        }
+        // Check oneRankReduce kernels
+        for (size_t i = 0; i < onerank_text_offsets_.size(); i++) {
+            uint64_t func_addr = text_addr_ + onerank_text_offsets_[i];
+            if (addr_to_symidx.find(func_addr) == addr_to_symidx.end()) {
+                MissingSymbol ms;
+                ms.addr = func_addr;
+                ms.name = (i < onerank_names_.size()) ? onerank_names_[i] : "<unknown>";
+                ms.source = "onerank";
+                missing_symbols.push_back(ms);
+            }
+        }
+
+        if (!missing_symbols.empty()) {
+            fprintf(stderr, "\nERROR: Missing symbols for %zu function(s) referenced in tables but not in .dynsym:\n\n", missing_symbols.size());
+            
+            // Group by source
+            std::map<std::string, std::vector<MissingSymbol>> by_source;
+            for (const auto& ms : missing_symbols) {
+                by_source[ms.source].push_back(ms);
+            }
+            
+            for (const auto& [source, syms] : by_source) {
+                fprintf(stderr, "  From %s (%zu functions):\n", source.c_str(), syms.size());
+                for (const auto& ms : syms) {
+                    fprintf(stderr, "    0x%lx: %s\n", ms.addr, ms.name.c_str());
+                }
+                fprintf(stderr, "\n");
+            }
+            
+            // Also show what IS in .dynsym for comparison
+            fprintf(stderr, "Symbols currently in .dynsym (text section functions):\n");
+            int shown = 0;
+            for (const auto& [addr, symidx] : addr_to_symidx) {
+                if (shown++ < 20) {  // Show first 20
+                    uint8_t* sym = dynsym_sec->data.data() + symidx * 24;
+                    uint32_t name_idx;
+                    memcpy(&name_idx, sym, 4);
+                    const char* sym_name = "";
+                    if (name_idx < dynsym_strtab->data.size()) {
+                        sym_name = (const char*)dynsym_strtab->data.data() + name_idx;
+                    }
+                    fprintf(stderr, "  0x%lx: %s\n", addr, sym_name);
+                }
+            }
+            if (addr_to_symidx.size() > 20) {
+                fprintf(stderr, "  ... and %zu more\n", addr_to_symidx.size() - 20);
+            }
+            fprintf(stderr, "\n");
+            
+            setFatalError("All functions must have symbols in .dynsym for symbol-based relocations");
+            return false;
+        }
+
+        auto addRelocWithSymbol = [&](uint64_t offset, uint64_t func_addr) {
             size_t pos = rela_sec->data.size();
             rela_sec->data.resize(pos + 24);
             memcpy(rela_sec->data.data() + pos, &offset, 8);
-            uint64_t info = R_AMDGPU_RELATIVE64;
+            
+            // Look up symbol index for this function address
+            // Try exact match first
+            auto it = addr_to_symidx.find(func_addr);
+            if (it == addr_to_symidx.end()) {
+                // If exact match fails, try to find the closest symbol that contains this address
+                // (in case func_addr is within a function, not at its start)
+                uint32_t best_symidx = 0;
+                uint64_t best_dist = UINT64_MAX;
+                for (const auto& [sym_addr, symidx] : addr_to_symidx) {
+                    if (func_addr >= sym_addr) {
+                        uint64_t dist = func_addr - sym_addr;
+                        if (dist < best_dist) {
+                            // Check if this symbol's size covers the address
+                            // We don't have symbol size easily accessible, so use a reasonable threshold
+                            // Most functions are at least a few bytes, so if we're within 64KB, assume it's the right symbol
+                            if (dist < 0x10000) {
+                                best_dist = dist;
+                                best_symidx = symidx;
+                            }
+                        }
+                    }
+                }
+                if (best_dist < UINT64_MAX) {
+                    it = addr_to_symidx.find(func_addr - best_dist);
+                }
+            }
+            
+            if (it == addr_to_symidx.end()) {
+                fprintf(stderr, "ERROR: No symbol found for function address 0x%lx\n", func_addr);
+                setFatalError("Failed to find symbol for function address - all functions must have symbols in .dynsym");
+                return false;
+            }
+            
+            // Use R_AMDGPU_ABS64 with symbol index
+            // r_info = (symbol_index << 32) | relocation_type
+            uint64_t info = ((uint64_t)it->second << 32) | R_AMDGPU_ABS64;
+            uint64_t addend = 0;  // No addend needed when using symbol
             memcpy(rela_sec->data.data() + pos + 8, &info, 8);
             memcpy(rela_sec->data.data() + pos + 16, &addend, 8);
+            return true;
         };
 
         // Generate relocations for each function table entry
@@ -4114,15 +4432,24 @@ private:
         int reloc_count = 0;
         for (int i = 0; i < FUNC_COUNT; i++) {
             if (table_1_[i]) {
-                addReloc(table1_addr + i * 8, text_addr_ + table_1_[i]);
+                uint64_t func_addr = text_addr_ + table_1_[i];
+                if (!addRelocWithSymbol(table1_addr + i * 8, func_addr)) {
+                    return false;  // Fatal error already set
+                }
                 reloc_count++;
             }
             if (table_2_[i]) {
-                addReloc(table2_addr + i * 8, text_addr_ + table_2_[i]);
+                uint64_t func_addr = text_addr_ + table_2_[i];
+                if (!addRelocWithSymbol(table2_addr + i * 8, func_addr)) {
+                    return false;  // Fatal error already set
+                }
                 reloc_count++;
             }
             if (table_4_[i]) {
-                addReloc(table4_addr + i * 8, text_addr_ + table_4_[i]);
+                uint64_t func_addr = text_addr_ + table_4_[i];
+                if (!addRelocWithSymbol(table4_addr + i * 8, func_addr)) {
+                    return false;  // Fatal error already set
+                }
                 reloc_count++;
             }
         }
@@ -4132,11 +4459,14 @@ private:
         // These relocations fill the array that tracks "used" device functions
         for (size_t i = 0; i < onerank_text_offsets_.size(); i++) {
             // Each entry in __clang_gpu_used_external is 8 bytes
-            addReloc(data_addr_ + i * 8, text_addr_ + onerank_text_offsets_[i]);
+            uint64_t func_addr = text_addr_ + onerank_text_offsets_[i];
+            if (!addRelocWithSymbol(data_addr_ + i * 8, func_addr)) {
+                return false;  // Fatal error already set
+            }
             reloc_count++;
         }
 
-        printf("Built .rela.dyn with %d R_AMDGPU_RELATIVE64 relocations\n", reloc_count);
+        printf("Built .rela.dyn with %d relocations (all using symbol indices with R_AMDGPU_ABS64)\n", reloc_count);
         if (!onerank_text_offsets_.empty()) {
             printf("  (includes %zu relocations for __clang_gpu_used_external)\n", onerank_text_offsets_.size());
         }
@@ -4435,11 +4765,31 @@ private:
             if (sections_[i].name == ".strtab") strtab_idx = i + 1;
         }
 
+        // Calculate sh_info for .dynsym (index of first global symbol)
+        uint32_t dynsym_sh_info = 1;  // Default: first symbol is global (index 1, after NULL symbol)
+        for (auto& s : sections_) {
+            if (s.name == ".dynsym") {
+                // Count local symbols (STB_LOCAL) - sh_info points to first global symbol
+                size_t local_count = 0;
+                for (size_t i = 0; i * 24 < s.data.size(); i++) {
+                    uint8_t* sym = s.data.data() + i * 24;
+                    uint8_t binding = ELF64_ST_BIND(sym[4]);
+                    if (binding == STB_LOCAL) {
+                        local_count++;
+                    } else if (binding == STB_GLOBAL || binding == STB_WEAK) {
+                        break;  // Found first global
+                    }
+                }
+                dynsym_sh_info = local_count + 1;  // +1 for NULL symbol at index 0
+                break;
+            }
+        }
+
         for (size_t i = 0; i < sections_.size(); i++) {
             const auto& s = sections_[i];
             uint32_t link = 0, info = 0;
 
-            if (s.name == ".dynsym" && dynstr_idx >= 0) { link = dynstr_idx; info = 1; }
+            if (s.name == ".dynsym" && dynstr_idx >= 0) { link = dynstr_idx; info = dynsym_sh_info; }
             else if ((s.name == ".gnu.hash" || s.name == ".hash") && dynsym_idx >= 0) { link = dynsym_idx; }
             else if (s.name == ".rela.dyn" && dynsym_idx >= 0) { link = dynsym_idx; }
             else if (s.name == ".dynamic" && dynstr_idx >= 0) { link = dynstr_idx; }
