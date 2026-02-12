@@ -376,10 +376,13 @@ primary_to_index = {fn: primary_to_index.get(Fn(*fn), -1) for fn in func_rows}
 
 ################################################################################
 
-# Generate <gensrc>/device_table.h
-with open(os.path.join(gensrc, "device_table.h"), "w") as f:
-  print("-- Generating %s" % os.path.join(gensrc, "device_table.h"))
+# Generate <gensrc>/device_table_decl.h -- forward declarations only
+# This file is safe to include in any TU without creating cross-TU device symbol references.
+with open(os.path.join(gensrc, "device_table_decl.h"), "w") as f:
+  print("-- Generating %s" % os.path.join(gensrc, "device_table_decl.h"))
   out = f.write
+
+  out("#ifndef NCCL_DEVICE_TABLE_DECL_H_\n#define NCCL_DEVICE_TABLE_DECL_H_\n\n")
 
   if is_ifc: func_declaration = "__device__ void"
   else: func_declaration = "__device__ __attribute__((noinline)) void"
@@ -393,8 +396,21 @@ with open(os.path.join(gensrc, "device_table.h"), "w") as f:
       out("%s %s(struct ncclShmemData&, void*);\n" % (func_declaration, sym))
   out("\n")
 
-  index = {val: None for val in all_unrolls}
   out("typedef void(*ncclDevFuncPtr_t)(struct ncclShmemData&, void*);\n\n")
+
+  out("#endif // NCCL_DEVICE_TABLE_DECL_H_\n")
+
+# Generate <gensrc>/device_table_impl.h -- table definitions, Caller templates, NCCL_CALL_FUNCTIONS
+# This file creates cross-TU device symbol references (function pointer table entries) and should
+# only be included in the dispatch TU (common.cu or the unity/table-kernels TU).
+with open(os.path.join(gensrc, "device_table_impl.h"), "w") as f:
+  print("-- Generating %s" % os.path.join(gensrc, "device_table_impl.h"))
+  out = f.write
+
+  out("#ifndef NCCL_DEVICE_TABLE_IMPL_H_\n#define NCCL_DEVICE_TABLE_IMPL_H_\n\n")
+  out('#include "device_table_decl.h"\n\n')
+
+  index = {val: None for val in all_unrolls}
   for unroll in all_unrolls:
     index[unroll] = 0
     out("__device__ ncclDevFuncPtr_t const ncclDevFuncTable_%s[] = {\n" % unroll)
@@ -435,6 +451,22 @@ with open(os.path.join(gensrc, "device_table.h"), "w") as f:
       out(f"__forceinline__ __device__ void NCCL_CALL_FUNCTIONS_{unroll}(unsigned short funcIndex, struct ncclShmemData& ncclShmem, void* ncclShmemPerWarp) noexcept {{\n")
       out(f"  Caller{unroll}<0, {index[unroll]}>::call{unroll}(funcIndex, ncclShmem, ncclShmemPerWarp);\n")
       out("}\n\n")
+
+  out("#endif // NCCL_DEVICE_TABLE_IMPL_H_\n")
+
+# Generate <gensrc>/device_table.h -- backward-compatible wrapper that includes both
+# This preserves the existing build behavior: any TU that includes device_table.h gets everything.
+with open(os.path.join(gensrc, "device_table.h"), "w") as f:
+  print("-- Generating %s" % os.path.join(gensrc, "device_table.h"))
+  out = f.write
+
+  out("// Backward-compatible header: includes both declarations and table definitions.\n")
+  out("// For parallel assembly builds, include only device_table_decl.h in generated TUs\n")
+  out("// and device_table_impl.h in the dispatch TU (common.cu / table-kernels unity).\n")
+  out("#ifndef NCCL_DEVICE_TABLE_H_\n#define NCCL_DEVICE_TABLE_H_\n\n")
+  out('#include "device_table_decl.h"\n')
+  out('#include "device_table_impl.h"\n')
+  out("\n#endif // NCCL_DEVICE_TABLE_H_\n")
 
 # Generate <gensrc>/device_table.cpp
 if is_colltrace:

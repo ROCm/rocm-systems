@@ -929,6 +929,43 @@ foreach(file ${GENERATED_FILES})
   list(APPEND HIP_SOURCES ${file})
 endforeach()
 
+# Split device compilation: pre-compile each device TU through the LLVM backend
+# independently and in parallel, so that the final link is lightweight (~1-2s).
+option(ENABLE_SPLIT_DEVICE_COMPILE
+  "Pre-compile device code per-TU via LLC for fast linking (requires -fgpu-rdc at link time)" ON)
+
+if(ENABLE_SPLIT_DEVICE_COMPILE)
+  # Identify generated device TU sources (gensrc/*.cpp minus host-only files)
+  set(DEVICE_TU_SOURCES "")
+  set(DEVICE_FUNC_ONLY_SOURCES "")
+
+  foreach(file ${GENERATED_FILES})
+    get_filename_component(_fname ${file} NAME_WE)
+    get_filename_component(_fext  ${file} EXT)
+    if(_fext STREQUAL ".cpp"
+       AND NOT _fname STREQUAL "host_table"
+       AND NOT _fname STREQUAL "device_table")
+      list(APPEND DEVICE_TU_SOURCES ${file})
+      list(APPEND DEVICE_FUNC_ONLY_SOURCES ${file})
+      list(REMOVE_ITEM HIP_SOURCES ${file})
+    endif()
+  endforeach()
+
+  # Move common.cu.cpp to the split pipeline (defines the generic kernel
+  # that dispatches to ncclDevFunc_* via function pointer table -- needs RDC).
+  # NOTE: onerank.cu.cpp is NOT moved here because it defines standalone
+  # __global__ kernels in an anonymous namespace.  The device linker renames
+  # anonymous-namespace symbols (.intern.<hash>), which breaks the host stub
+  # registration.  Since onerank kernels don't reference cross-TU device
+  # symbols, they compile fine without -fgpu-rdc as part of the main target.
+  set(_COMMON_CU  "${HIPIFY_DIR}/src/device/common.cu.cpp")
+  list(APPEND DEVICE_TU_SOURCES ${_COMMON_CU})
+  list(REMOVE_ITEM HIP_SOURCES ${_COMMON_CU})
+
+  list(LENGTH DEVICE_TU_SOURCES _n_device_tus)
+  message(STATUS "Split device compile: ${_n_device_tus} device TUs separated from HIP_SOURCES")
+endif()
+
 # Create an initial git_version.cpp file (that will be updated with latest git version)
 #==================================================================================================
 # Create initial empty file at configure time
@@ -1228,7 +1265,8 @@ target_compile_options(rccl PRIVATE -Wall)
 target_compile_options(rccl PRIVATE -Werror=deprecated-copy-with-user-provided-copy)
 target_compile_options(rccl PRIVATE -Wno-format-nonliteral)
 target_compile_options(rccl PRIVATE -Wno-unused-function)
-target_compile_options(rccl PRIVATE -fgpu-rdc)
+# -fgpu-rdc removed: no longer needed now that extern __shared__ is eliminated.
+# Each TU is fully compiled (all backend passes) at compile time in parallel.
 
 if(QUIET_WARNINGS)
   target_compile_options(rccl PRIVATE -Wno-invalid-offsetof)
@@ -1348,7 +1386,7 @@ endif()
 if (ROCTX_ENABLE)
   target_link_libraries(rccl PRIVATE ${ROCTX_LIB})
 endif()
-target_link_libraries(rccl PRIVATE   -fgpu-rdc)             # Required when linking relocatable device code
+# -fgpu-rdc link flag removed: no longer using relocatable device code
 target_link_libraries(rccl PRIVATE   Threads::Threads)
 target_link_libraries(rccl INTERFACE hip::host)
 target_link_libraries(rccl PRIVATE   hip::device)
@@ -1414,16 +1452,97 @@ endif()
 ## Track linking time
 set_property(TARGET rccl PROPERTY RULE_LAUNCH_LINK "${CMAKE_COMMAND} -E time")
 
+# ── Split device compilation pipeline ─────────────────────────────────────────
+# Now that all target properties (includes, defines, options) are set, create
+# the per-TU custom commands that pre-compile device code through the LLVM
+# backend independently and in parallel.
+if(ENABLE_SPLIT_DEVICE_COMPILE)
+  list(GET GPU_TARGETS 0 _split_gpu_arch)
+  message(STATUS "Split device compile: targeting ${_split_gpu_arch}")
+
+  # Collect include directories that device TUs need.
+  # These mirror the target_include_directories calls above.
+  set(_split_include_dirs
+    ${PROJECT_BINARY_DIR}/include
+    ${HIPIFY_DIR}/src
+    ${HIPIFY_DIR}/src/device
+    ${HIPIFY_DIR}/src/device/network/unpack
+    ${HIPIFY_DIR}/src/include
+    ${HIPIFY_DIR}/src/include/mlx5
+    ${HIPIFY_DIR}/src/include/nccl_device
+    ${HIPIFY_DIR}/src/include/ionic
+    ${HIPIFY_DIR}/src/include/plugin
+    ${HIPIFY_DIR}/gensrc
+    ${HSA_INCLUDE_PATH}
+  )
+
+  # Collect compile definitions that device TUs need.
+  # These mirror the target_compile_definitions calls above.
+  set(_split_compile_defs "")
+  if(COLLTRACE)
+    list(APPEND _split_compile_defs "ENABLE_COLLTRACE")
+  endif()
+  if(IFC_ENABLED)
+    list(APPEND _split_compile_defs "USE_INDIRECT_FUNCTION_CALL")
+  endif()
+  if(LL128_ENABLED)
+    list(APPEND _split_compile_defs "ENABLE_LL128")
+  endif()
+  if(FAULT_INJECTION)
+    list(APPEND _split_compile_defs "ENABLE_FAULT_INJECTION")
+  endif()
+  if(${HIP_CONTIGUOUS_MEMORY})
+    list(APPEND _split_compile_defs "HIP_CONTIGUOUS_MEMORY")
+  endif()
+  if("${hip_version_string}" VERSION_GREATER_EQUAL "5.7.31920")
+    list(APPEND _split_compile_defs "HIP_UNCACHED_MEMORY")
+  endif()
+  if(HIP_HOST_UNCACHED_MEMORY)
+    list(APPEND _split_compile_defs "HIP_HOST_UNCACHED_MEMORY")
+  endif()
+  if(ENABLE_MSCCL_KERNEL)
+    list(APPEND _split_compile_defs "COMPILE_MSCCL_KERNEL")
+  endif()
+  if(ENABLE_MSCCLPP)
+    list(APPEND _split_compile_defs "ENABLE_MSCCLPP")
+  endif()
+
+  include(cmake/SplitDeviceCompile.cmake)
+  setup_split_device_compile(
+    TARGET              rccl
+    SOURCES             ${DEVICE_TU_SOURCES}
+    FUNC_ONLY_SOURCES   ${DEVICE_FUNC_ONLY_SOURCES}
+    GPU_ARCH            ${_split_gpu_arch}
+    ROCM_PATH           ${ROCM_PATH}
+    OUTPUT_DIR          ${CMAKE_CURRENT_BINARY_DIR}
+    INCLUDE_DIRS        ${_split_include_dirs}
+    COMPILE_DEFS        ${_split_compile_defs}
+  )
+
+  # Make rccl depend on all the split-compiled fat objects.
+  # The device TUs include hipified headers (common.h, etc.), so ensure
+  # hipify runs before any split pipeline commands on a clean build.
+  add_dependencies(rccl rccl_device_objects)
+  add_dependencies(rccl_device_objects hipify_all)
+
+  # Pass fat objects as linker inputs
+  target_link_options(rccl PRIVATE ${DEVICE_FAT_OBJECTS})
+
+  # The link step needs -fgpu-rdc --hip-link so the driver extracts
+  # pre-compiled device ELF from the fat objects and resolves cross-TU
+  # device symbols (fast -- just symbol resolution, no backend re-run).
+  target_link_libraries(rccl PRIVATE -fgpu-rdc)
+  target_link_options(rccl PRIVATE --hip-link)
+endif()
+
 ## Setup librccl.so version
 rocm_set_soversion(rccl "1.0")
 
 if(NOT BUILD_SHARED_LIBS)
-  # To create a static lib with `-fgpu-rdc`, you need `--emit-static-lib` and `--hip-link`.
-  # You also need to invoke amdclang++ again to trigger GPU code generation.
+  # Without -fgpu-rdc, device code is fully compiled per-TU.
+  # --emit-static-lib is still needed to produce a static library.
   set(static_link_flags
     ${CXXFLAGS}
-    --hip-link
-    -fgpu-rdc
     --emit-static-lib
   )
 
