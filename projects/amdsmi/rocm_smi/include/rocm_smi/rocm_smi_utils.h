@@ -60,7 +60,6 @@ constexpr uint32_t kSMI_MAX_STRING_LENGTH = 256;  // matches AMDSMI_MAX_STRING_L
 struct VirtModeDetectionResult {
   bool is_vm_guest = false;           // hypervisor flag in /proc/cpuinfo
   bool is_container = false;          // running inside docker/lxc/podman container
-  bool has_sriov_capability = false;  // device supports SR-IOV (sriov_totalvfs > 0)
   bool has_active_vfs = false;        // VFs are provisioned (sriov_numvfs > 0) -> indicates HOST
   bool is_vfio_bound = false;         // device bound to vfio-pci driver -> passthrough candidate
   bool sysfs_accessible = false;      // device sysfs path accessible

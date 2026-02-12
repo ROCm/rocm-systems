@@ -1414,11 +1414,16 @@ bool is_device_vfio_bound(const std::string& pci_sysfs_path) {
 
 // Check SR-IOV status for a device
 // pci_sysfs_path should be like "/sys/class/drm/renderD128/device"
-// Returns: tuple<has_sriov_capability, has_active_vfs>
-std::tuple<bool, bool> get_sriov_status(const std::string& pci_sysfs_path) {
+// Returns: True if device has active VFs (HOST mode), false otherwise
+//
+// Note: A device may support SR-IOV (sriov_totalvfs > 0)
+// but have no active VFs (sriov_numvfs = 0) if not in HOST mode
+// Example of this is partitions in BM mode - they support SR-IOV but will not
+// have active VFs since they are not in HOST mode
+bool get_sriov_status(const std::string& pci_sysfs_path) {
   std::ostringstream ss;
-  bool has_capability = false;
-  bool has_active_vfs = false;
+  bool has_capability = false;  // indicates if device supports SR-IOV (sriov_totalvfs > 0)
+  bool has_active_vfs = false;  // only true in HOST mode (sriov_numvfs > 0)
 
   // Check for SR-IOV total VFs (capability)
   std::string sriov_total_path = pci_sysfs_path + "/sriov_totalvfs";
@@ -1430,7 +1435,7 @@ std::tuple<bool, bool> get_sriov_status(const std::string& pci_sysfs_path) {
 
     if (total_vfs > 0) {
       has_capability = true;
-      ss << __PRETTY_FUNCTION__ << " | sriov_totalvfs = " << total_vfs;
+      ss << __PRETTY_FUNCTION__ << " | sriov_totalvfs (" << sriov_total_path << ") = " << total_vfs;
       LOG_DEBUG(ss);
     }
   }
@@ -1445,12 +1450,13 @@ std::tuple<bool, bool> get_sriov_status(const std::string& pci_sysfs_path) {
 
     if (num_vfs > 0) {
       has_active_vfs = true;
-      ss << __PRETTY_FUNCTION__ << " | sriov_numvfs = " << num_vfs << " (HOST mode)";
+      ss << __PRETTY_FUNCTION__ << " | sriov_numvfs (" << sriov_num_path
+         << ") = " << num_vfs << " (HOST mode)";
       LOG_INFO(ss);
     }
   }
 
-  return std::make_tuple(has_capability, has_active_vfs);
+  return has_active_vfs;
 }
 
 // Comprehensive virtualization mode detection via sysfs (no root required)
@@ -1479,8 +1485,8 @@ VirtModeDetectionResult detect_virtualization_mode_sysfs(
     result.sysfs_accessible = true;
   }
 
-  // Check SR-IOV status
-  std::tie(result.has_sriov_capability, result.has_active_vfs) = get_sriov_status(pci_sysfs_path);
+  // Check SR-IOV HOST status
+  result.has_active_vfs = get_sriov_status(pci_sysfs_path);
 
   // Check if device is bound to vfio-pci (passthrough indicator)
   result.is_vfio_bound = is_device_vfio_bound(pci_sysfs_path);

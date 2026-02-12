@@ -6190,17 +6190,16 @@ amdsmi_get_gpu_virtualization_mode(amdsmi_processor_handle processor_handle,
 
         ss << __PRETTY_FUNCTION__ << " | sysfs fallback detection"
            << " | render_path: " << (render_name_local.empty() ? "<empty>" : render_name_local)
-           << " | has_sriov_capability: " << std::boolalpha << result.has_sriov_capability
-           << " | has_active_vfs: " << std::boolalpha << result.has_active_vfs
-           << " | is_vfio_bound: " << std::boolalpha << result.is_vfio_bound
+           << " | (HOST) has_active_vfs: " << std::boolalpha << result.has_active_vfs
+           << " | (PASSTHROUGH) is_vfio_bound: " << std::boolalpha << result.is_vfio_bound
            << " | is_vm_guest: " << std::boolalpha << result.is_vm_guest
            << " | is_container: " << std::boolalpha << result.is_container
            << " | sysfs_accessible: " << std::boolalpha << result.sysfs_accessible;
         LOG_INFO(ss);
 
         *mode = AMDSMI_VIRTUALIZATION_MODE_UNKNOWN;
-        if (result.has_sriov_capability || result.has_active_vfs) {
-            // Device has SR-IOV capability OR active VFs = HOST mode
+        if (result.has_active_vfs) {
+            // Device has active VFs = HOST mode
             *mode = AMDSMI_VIRTUALIZATION_MODE_HOST;
         } else if (result.is_vfio_bound) {
             // Device bound to vfio-pci = PASSTHROUGH
