@@ -296,6 +296,12 @@ __device__ void QueuePair::put_nbi_single(void *dest, const void *source, size_t
   post_wqe_rma_single(nelems, src, dst, gda_op_rdma_write, ring_db);
 }
 
+__device__ void QueuePair::get_nbi_single(void *dest, const void *source, size_t nelems, bool ring_db) {
+  uintptr_t src = reinterpret_cast<uintptr_t>(source);
+  uintptr_t dst = reinterpret_cast<uintptr_t>(dest);
+  post_wqe_rma_single(nelems, dst, src, gda_op_rdma_read, ring_db);
+}
+
 __device__ void QueuePair::get_nbi(void *dest, const void *source, size_t nelems, int pe, Collectivity cy) {
   uintptr_t src = reinterpret_cast<uintptr_t>(source);
   uintptr_t dst = reinterpret_cast<uintptr_t>(dest);
