@@ -354,7 +354,7 @@ const char* ncclSymkKernelIdToString(int kernelId) {
 }
 
 #ifndef GENERATE_SYM_KERNELS
-void* ncclSymGetKernelPtr(ncclSymkKernelId kernelId, int/*ncclDevRedOp_t*/ red, ncclDataType_t ty) {
+void* ncclSymkGetKernelPtr(ncclSymkKernelId kernelId, int/*ncclDevRedOp_t*/ red, ncclDataType_t ty) {
   return nullptr;
 }
 #endif

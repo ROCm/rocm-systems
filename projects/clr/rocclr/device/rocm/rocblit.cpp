@@ -357,7 +357,7 @@ bool DmaBlitManager::copyBufferRect(device::Memory& srcMemory, device::Memory& d
 }
 
 // ================================================================================================
-bool DmaBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& copyOps,
+bool DmaBlitManager::copyBufferBatch(std::vector<amd::BatchCopyOp>& copyOps,
                                      bool entire) const {
   if (copyOps.empty()) {
     return true;
@@ -370,7 +370,7 @@ bool DmaBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& copyOp
   // Future optimization: use a shared completion signal for all operations
   bool result = true;
 
-  for (const auto& op : copyOps) {
+  for (auto& op : copyOps) {
     if (op.srcMemory == nullptr || op.dstMemory == nullptr) {
       LogError("DmaBlitManager::copyBufferBatch - Invalid memory objects!");
       return false;
@@ -392,9 +392,8 @@ bool DmaBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& copyOp
     amd::Coord3D dstOrigin(op.dstOffset);
     amd::Coord3D size(op.size);
 
-    amd::CopyMetadata metadata = op.metadata;
-
-    if (!hsaCopy(gpuMem(*srcDevMem), gpuMem(*dstDevMem), srcOrigin, dstOrigin, size, metadata)) {
+    if (!hsaCopy(gpuMem(*srcDevMem), gpuMem(*dstDevMem), srcOrigin, dstOrigin, size,
+                 op.metadata)) {
       LogPrintfError("DmaBlitManager::copyBufferBatch - Copy failed for operation");
       result = false;
       break;

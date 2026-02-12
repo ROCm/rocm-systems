@@ -612,6 +612,168 @@ __device__ void GDAContext::alltoall(rocshmem_team_t team, T *dst,
     alltoall_linear(team, dst, src, nelems);
   }
 }
+template <typename T>
+
+__device__ void GDAContext::alltoallv(rocshmem_team_t team,
+                                      T *dest, const size_t dest_nelems[],
+                                      const size_t dest_displs[],
+                                      T *source, const size_t source_nelems[],
+                                      const size_t source_displs[]) {
+  if (gda_provider_ == GDAProvider::MLX5 ||
+      gda_provider_ == GDAProvider::IONIC) {
+    printf("rocshmem::gda:alltoallv not implemented\n");
+    abort();
+  }
+
+  alltoallv_get(team,
+                dest, dest_nelems, dest_displs,
+                source, source_nelems, source_displs);
+}
+
+template <typename T>
+__device__ void GDAContext::alltoallv_copy(rocshmem_team_t team,
+                                           T *dest, const size_t dest_nelems[],
+                                           const size_t dest_displs[],
+                                           T *source, const size_t source_nelems[],
+                                           const size_t source_displs[]) {
+  GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
+  int pe_size = team_obj->num_pes;
+  long *pSync = team_obj->alltoall_pSync;
+  int my_pe_in_team = team_obj->my_pe;
+  uint64_t alltoall_pSync_offset = (team_obj->alltoall_sequence_number % 2) * pe_size;
+  T *tmp_buf = reinterpret_cast<T*>(team_obj->pWrk);
+  int tmp_buf_off = (ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE * sizeof(double)) / (pe_size * sizeof(T));
+
+  int tid = get_flat_block_id();
+  int step_size = min(get_flat_block_size(), WF_SIZE);
+
+  // Have each PE put their designated data to the other PEs
+  for (int j = tid; j < pe_size; j+= step_size) {
+    int dest_pe = team_obj->get_pe_in_world(j);
+    uint64_t base_heap_offset = base_heap[dest_pe] - base_heap[my_pe];
+    size_t nelems = source_nelems[dest_pe] * sizeof(T);
+    char* amo_dst = ((char*)&pSync[alltoall_pSync_offset + my_pe_in_team] + base_heap_offset);
+
+    if (nelems != 0) {
+      T* src = (T*)((char*)source + (source_displs[j] * sizeof(T)));
+      T* dst = (T*)((char*)&tmp_buf[my_pe * tmp_buf_off] + base_heap_offset);
+      qps[dest_pe].put_nbi_single(dst, src, nelems, false);
+    }
+
+    qps[dest_pe].atomic_nofetch_single(amo_dst, 1);
+  }
+
+  // wait until everyone has obtained their designated data
+  for (int j = tid; j < pe_size; j+= step_size) {
+    int dest_pe = team_obj->get_pe_in_world(j);
+
+    volatile long *vol_ivars = &pSync[alltoall_pSync_offset + dest_pe];
+    while (uncached_load(vol_ivars) != 1) { }
+
+    pe_quiet_single(dest_pe);
+
+    pSync[alltoall_pSync_offset + dest_pe] = ROCSHMEM_SYNC_VALUE;
+  }
+
+  // Copy out of staging buffer
+  __syncthreads();
+
+  for (int j = 0; j < pe_size; j++) {
+    size_t nelems = dest_nelems[j] * sizeof(T);
+
+    if (nelems != 0) {
+      T* dst = (T*)((char*) dest + dest_displs[j] * sizeof(T));
+      T* src = (T*)((char*) &tmp_buf[j * tmp_buf_off]);
+      memcpy_wg(dst, src, nelems);
+    }
+  }
+
+  __syncthreads();
+
+  if (is_thread_zero_in_block()) {
+    team_obj->alltoall_sequence_number++;
+  }
+}
+
+template <typename T>
+__device__ void GDAContext::alltoallv_get(rocshmem_team_t team,
+                                          T *dest, const size_t dest_nelems[],
+                                          const size_t dest_displs[],
+                                          T *source, const size_t source_nelems[],
+                                          const size_t source_displs[]) {
+  GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
+  int pe_size       = team_obj->num_pes;
+  int pe_start = team_obj->tinfo_wrt_world->pe_start;
+  int stride = team_obj->tinfo_wrt_world->stride;
+  long *pSync = team_obj->alltoall_pSync;
+  int my_pe_in_team = team_obj->my_pe;
+  uint64_t a2a_sn   = team_obj->alltoall_sequence_number;
+  uint64_t alltoall_pSync_offset = (a2a_sn % 2) * pe_size;
+  uint64_t *tmp_buf = (uint64_t*)team_obj->pWrk;
+
+  const uint64_t displs_mask = 0x0000'FFFF'FFFF'FFFF;
+  const uint64_t seq_mask = 0xFFFF;
+  const uint64_t seq_shift = 48;
+
+  int tid = get_flat_block_id();
+  int step_size = min(get_flat_block_size(), WF_SIZE);
+
+  /* Put Ctrl Message */
+  for (int j = tid; j < pe_size; j+= step_size) {
+    uint64_t *src;
+    uint64_t *dst;
+    uint64_t seq_bits;
+    uint64_t displ_bits;
+
+    int dest_pe = team_obj->get_pe_in_world(j);
+    uint64_t base_heap_offset = base_heap[dest_pe] - base_heap[my_pe];
+
+    /* Pack Ctrl Message * 16 bits seq | 48bit displ */
+    seq_bits = (seq_mask & (a2a_sn + 1)) << seq_shift;
+    displ_bits = (displs_mask & source_displs[dest_pe]);
+    uint64_t ctrl_msg = seq_bits | displ_bits;
+
+    /* Prepare Ctrl Message */
+    src = (uint64_t*)&ctrl_msg;
+    dst = (uint64_t*)((char*)&tmp_buf[my_pe] + base_heap_offset);
+
+    qps[dest_pe].put_nbi_single(dst, src, sizeof(uint64_t), true);
+
+    /* Wait for Ctrl Message */
+    uint64_t ctrl_value;
+    volatile uint64_t *vol_ctrl = &tmp_buf[dest_pe];
+
+    do {
+      ctrl_value = uncached_load(vol_ctrl);
+      seq_bits = (ctrl_value >> seq_shift) & seq_mask;
+      displ_bits = ctrl_value & displs_mask;
+    } while (seq_bits != (a2a_sn + 1));
+
+    /* Get data */
+    size_t nelems = dest_nelems[dest_pe] * sizeof(T);
+    src = (uint64_t*)((char*)source + (displ_bits * sizeof(T)) + base_heap_offset);
+    dst = (uint64_t*)((char*)dest + (dest_displs[j] * sizeof(T)));
+
+    qps[dest_pe].get_nbi_single(dst, src, nelems, true);
+
+    /* Put Completion */
+    char* amo_dst = ((char*)&pSync[alltoall_pSync_offset + my_pe_in_team] + base_heap_offset);
+    qps[dest_pe].atomic_nofetch_single(amo_dst, 1);
+
+    volatile long *vol_ivars = &pSync[alltoall_pSync_offset + dest_pe];
+    while (uncached_load(vol_ivars) != 1) { }
+
+    pe_quiet_single(dest_pe);
+
+    pSync[alltoall_pSync_offset + dest_pe] = ROCSHMEM_SYNC_VALUE;
+  }
+
+  if (is_thread_zero_in_block()) {
+    team_obj->alltoall_sequence_number++;
+  }
+
+  __syncthreads();
+}
 
 template <typename T>
 __device__ void GDAContext::alltoall_linear(rocshmem_team_t team, T *dst,
