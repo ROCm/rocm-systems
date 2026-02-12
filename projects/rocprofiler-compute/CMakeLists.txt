@@ -788,7 +788,7 @@ if(INSTALL_TESTS)
         )
     endif()
     install(
-        FILES requirements-test.txt
+        FILES requirements-test.txt pyproject.toml
         DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
         COMPONENT tests
     )
