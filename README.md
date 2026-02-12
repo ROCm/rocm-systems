@@ -86,7 +86,7 @@ projects/
 
 - Enable unified build and test workflows across ROCm libraries.
 - Facilitate shared tooling, CI, and contributor experience.
-- Improve integration, visibility, and collaboration across ROCm library teams.
+- Improve integration, visibility, and collaboration across ROCm Systems teams.
 
 ## Getting Started
 
