@@ -125,11 +125,12 @@ def test_kernel_trace(kernel_input_data):
         "_Z15matrixTransposePfS_i.kd",
         "matrixTranspose(float*, float*, int)",
     )
+    found_valid_kernel = False
 
-    # memory copies maybe less than two if rocr decides to use blit kernels they show up in kernel data.
+    # Blit kernel maybe recorded, when greater than 1.
     assert len(kernel_input_data) >= 1
     for row in kernel_input_data:
-        if re.search(r"__amd_rocclr_copyBuffer.*", row["Kernel_Name"]):
+        if re.search(r"__amd_rocclr_.*", row["Kernel_Name"]):
             continue
         assert row["Kind"] == "KERNEL_DISPATCH"
         assert int(row["Agent_Id"].split(" ")[-1]) >= 0
@@ -144,6 +145,8 @@ def test_kernel_trace(kernel_input_data):
         assert int(row["Grid_Size_Y"]) == 1024
         assert int(row["Grid_Size_Z"]) == 1
         assert int(row["End_Timestamp"]) >= int(row["Start_Timestamp"])
+        found_valid_kernel = True
+    assert found_valid_kernel
 
 
 def test_host_functions_json(json_data):
@@ -187,8 +190,9 @@ def test_kernel_trace_json(json_data):
         "_Z15matrixTransposePfS_i.kd",
         "matrixTranspose(float*, float*, int)",
     )
+    found_valid_kernel = False
     kernel_dispatch_data = data["buffer_records"]["kernel_dispatch"]
-    # memory copies maybe less than two if rocr decides to use blit kernels they show up in kernel data.
+    # Blit kernel maybe recorded, when greater than 1.
     assert len(kernel_dispatch_data) >= 1
     for dispatch in kernel_dispatch_data:
         dispatch_info = dispatch["dispatch_info"]
@@ -199,7 +203,7 @@ def test_kernel_trace_json(json_data):
         assert dispatch_info["agent_id"]["handle"] > 0
         assert dispatch_info["queue_id"]["handle"] > 0
         assert dispatch_info["kernel_id"] > 0
-        if re.search(r"__amd_rocclr_copyBuffer.*", kernel_name):
+        if re.search(r"__amd_rocclr_.*", kernel_name):
             continue
         assert kernel_name in valid_kernel_names
         assert dispatch_info["workgroup_size"]["x"] == 4
@@ -209,17 +213,27 @@ def test_kernel_trace_json(json_data):
         assert dispatch_info["grid_size"]["y"] == 1024
         assert dispatch_info["grid_size"]["z"] == 1
         assert dispatch["end_timestamp"] >= dispatch["start_timestamp"]
+        found_valid_kernel = True
+    assert found_valid_kernel
 
 
-def test_memory_copy_trace(agent_info_input_data, memory_copy_input_data):
+def test_memory_copy_trace(
+    agent_info_input_data,
+    memory_copy_input_data,
+    kernel_input_data,
+):
     def get_agent(node_id):
         for row in agent_info_input_data:
             if row["Logical_Node_Id"] == node_id:
                 return row
         return None
 
-    # memory copies maybe less than two if rocr decides to use blit kernels
-    assert len(memory_copy_input_data) > 0
+    has_blit_kernel = any(
+        re.search(r"__amd_rocclr_.*", row["Kernel_Name"]) for row in kernel_input_data
+    )
+    # memory copies may be missing if rocr decides to use blit kernels
+    if not has_blit_kernel:
+        assert len(memory_copy_input_data) > 0
 
     directions = set()
     valid_directions = ("MEMORY_COPY_HOST_TO_DEVICE", "MEMORY_COPY_DEVICE_TO_HOST")
@@ -240,7 +254,13 @@ def test_memory_copy_trace(agent_info_input_data, memory_copy_input_data):
         assert int(row["Correlation_Id"]) > 0
         assert int(row["End_Timestamp"]) >= int(row["Start_Timestamp"])
 
-    assert directions, "Expected at least one memory copy direction"
+    expected_directions = set(valid_directions)
+    if has_blit_kernel:
+        assert directions.issubset(expected_directions)
+    else:
+        assert (
+            directions == expected_directions
+        ), f"Expected directions {expected_directions}, got {directions}"
 
 
 def test_memory_copy_json_trace(json_data):
@@ -260,8 +280,19 @@ def test_memory_copy_json_trace(json_data):
         return None
 
     # one threads * two directions
-    # memory copies maybe less than two if rocr decides to use blit kernels
-    assert len(memory_copy_data) > 0, f"{memory_copy_data}"
+    kernel_dispatch_data = buffer_records.get("kernel_dispatch", [])
+    has_blit_kernel = False
+    for dispatch in kernel_dispatch_data:
+        dispatch_info = dispatch["dispatch_info"]
+        kernel_name = data["kernel_symbols"][dispatch_info["kernel_id"]][
+            "formatted_kernel_name"
+        ]
+        if re.search(r"__amd_rocclr_.*", kernel_name):
+            has_blit_kernel = True
+            break
+    # memory copies may be missing if rocr decides to use blit kernels
+    if not has_blit_kernel:
+        assert len(memory_copy_data) > 0, f"{memory_copy_data}"
 
     directions = set()
     valid_directions = ("MEMORY_COPY_HOST_TO_DEVICE", "MEMORY_COPY_DEVICE_TO_HOST")
@@ -282,7 +313,13 @@ def test_memory_copy_json_trace(json_data):
         assert row["correlation_id"]["internal"] > 0
         assert row["end_timestamp"] >= row["start_timestamp"]
 
-    assert directions, "Expected at least one memory copy direction"
+    expected_directions = set(valid_directions)
+    if has_blit_kernel:
+        assert directions.issubset(expected_directions)
+    else:
+        assert (
+            directions == expected_directions
+        ), f"Expected directions {expected_directions}, got {directions}"
 
 
 def test_marker_api_trace(marker_input_data):
