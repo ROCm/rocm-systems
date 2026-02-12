@@ -519,7 +519,7 @@ add_test(
 # -----------------------------------
 
 add_test(
-    NAME test_misc
+    NAME test_custom_argparser_actions
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_custom_argparser_actions.xml ${COV_OPTION}
         tests/test_custom_argparser_actions.py ${WORKING_DIR_OPTION}
