@@ -34,6 +34,10 @@ extern "C" {
 }
 #endif
 
+extern "C" {
+#include <smi_nic_interface.h>
+}
+#include "amd_smi/impl/nic/amd_smi_ainic_device.h"
 namespace amd::smi {
 
 // Define a map of rsmi status codes to amdsmi status codes
@@ -113,6 +117,21 @@ const std::map<esmi_status_t, amdsmi_status_t> esmi_status_map = {
 
 amdsmi_status_t esmi_to_amdsmi_status(esmi_status_t status);
 #endif
+
+// Define a map of smi nic status codes to amdsmi status codes
+const std::map<smi_nic_status_t, amdsmi_status_t> ainic_status_map = {
+	{SMI_NIC_STATUS_SUCCESS, AMDSMI_STATUS_SUCCESS},
+	{SMI_NIC_STATUS_ERROR, AMDSMI_STATUS_API_FAILED},
+	{SMI_NIC_STATUS_WRONG_PARAM, AMDSMI_STATUS_INVAL},
+	{SMI_NIC_STATUS_NOT_FOUND, AMDSMI_STATUS_NOT_FOUND},
+	{SMI_NIC_STATUS_NO_RESOURCE, AMDSMI_STATUS_OUT_OF_RESOURCES},
+	{SMI_NIC_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_YET_IMPLEMENTED},
+	{SMI_NIC_STATUS_NOT_INIT, AMDSMI_STATUS_NOT_INIT},
+	{SMI_NIC_STATUS_NO_DATA, AMDSMI_STATUS_NO_DATA},
+	{SMI_NIC_STATUS_DRIVER_NOT_LOADED, AMDSMI_STATUS_DRIVER_NOT_LOADED}
+};
+amdsmi_status_t ainic_to_amdsmi_status(smi_nic_status_t status);
+
 } // namespace amd::smi
 
 #endif  // AMD_SMI_INCLUDE_AMD_SMI_COMMON_H_

@@ -154,7 +154,11 @@ std::string TestContext::getCurrentArch() {
 std::string TestContext::getMatchingConfigFile(std::string config_dir) {
   std::string configFileToUse = "";
   if (isLinux() && isAmd()) {
+#if defined(ENABLE_SPIRV)
+    std::string cur_arch = "amdgcnspirv";
+#else
     std::string cur_arch = getCurrentArch();
+#endif
     LogPrintf("The arch present: %s", cur_arch.c_str());
     configFileToUse = config_dir + "/config_" + getConfig().platform + "_" + getConfig().os + "_" +
                       cur_arch + ".json";
