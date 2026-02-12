@@ -472,6 +472,7 @@ TestOther() {
   #       | Name             | Ranks | Workgroups | Threads | Max Message Size #
   ##############################################################################
   ExecTest  "init"             2       1            1
+ExecTest  "hipmodule_init    2       1            1
 
   ExecTest  "pingpong"         2       1            1
   ExecTest  "pingpong"         2       8            1
@@ -666,6 +667,7 @@ TestGDA() {
   #       | Name             | Ranks | Workgroups | Threads | Max Message Size #
   ##############################################################################
   ExecTest  "init"             2       1            1
+ExecTest  "hipmodule_init    2       1            1
 
   ExecTest  "pingpong"         2       1            1
   ExecTest  "pingpong"         2       8            1
