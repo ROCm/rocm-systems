@@ -256,6 +256,10 @@ void Runtime::RegisterDriver(std::unique_ptr<Driver> driver) {
 void Runtime::DestroyAgents() {
   agents_by_node_.clear();
 
+  // Clear system regions before destroying agents to prevent use-after-free
+  // when agent destructors access region memory
+  system_regions_fine_.clear();
+  system_regions_coarse_.clear();
   std::for_each(gpu_agents_.begin(), gpu_agents_.end(), DeleteObject());
   gpu_agents_.clear();
 
@@ -271,9 +275,6 @@ void Runtime::DestroyAgents() {
   aie_agents_.clear();
 
   region_gpu_ = NULL;
-
-  system_regions_fine_.clear();
-  system_regions_coarse_.clear();
 }
 
 void Runtime::DestroyDrivers() {
