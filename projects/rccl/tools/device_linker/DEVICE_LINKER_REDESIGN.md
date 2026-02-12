@@ -775,8 +775,6 @@ cmake -DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++ \
       -GNinja ..
 
 # After reconfiguring, ALWAYS delete CMakeCache.txt first:
-rm -f CMakeCache.txt
-
-# If sym_kernels_stub.cpp error, edit build/sym_kernels_stub.cpp:
+rm -f CMakeCache.txt# If sym_kernels_stub.cpp error, edit build/sym_kernels_stub.cpp:
 # Remove the ncclSymkGetKernelPtr function definition
 ```
