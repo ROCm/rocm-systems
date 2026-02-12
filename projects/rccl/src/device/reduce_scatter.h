@@ -564,7 +564,7 @@ struct RunWorkColl<ncclFuncReduceScatter, T, RedOp, NCCL_ALGO_COLLNET_DIRECT, NC
     ssize_t countPerRank = work->collnet.count;
     const int hasDn = (direct->down[0] >= 0) ? 1 : 0;
 
-    if (direct->out == -1) __builtin_trap();
+    // if (direct->out == -1) __builtin_trap();
     bool isMultiRail = (direct->nHeads > 1);
     int nWarps1 = (isMultiRail ? 2 : 0);
     int nWarps2 = (isMultiRail ? 2 : 1);

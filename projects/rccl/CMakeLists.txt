@@ -1370,12 +1370,17 @@ if (DEVICE_LINKER)
     list(APPEND DEVICE_ONLY_OPTS "--offload-arch=${FIRST_GPU_TARGET}")
   endif()
   # Device-only tweaks: -x hip, --cuda-device-only, --no-gpu-bundle-output. Arch from rccl (or FIRST_GPU_TARGET fallback).
+  # -w suppresses all warnings for specialized kernels. This is needed because:
+  #   - The LLVM backend emits "local memory global used by non-kernel function" warnings
+  #   - These are false positives: the __device__ functions accessing LDS get inlined into kernels
+  #   - This warning is a DiagnosticInfoUnsupported, not a frontend warning, so -Wno-* flags don't work
+  #   - With -fgpu-rdc (regular build), LTO sees the whole program and doesn't warn
+  #   - With device linker (no -fgpu-rdc), each file is compiled separately before inlining
   target_compile_options(specialized_kernels_device PRIVATE 
     "-x" "hip"
     "--cuda-device-only"
     "--no-gpu-bundle-output"
-    "-Wno-unused-command-line-argument"  # CMake automatically adds -MF dependency file flags for OBJECT libraries,
-                                           # but these are ignored/unused during --cuda-device-only compilation
+    "-w"  # Suppress backend LDS warnings (see comment above)
   )
   # Also add the filtered options from rccl target
   if(DEVICE_ONLY_OPTS)

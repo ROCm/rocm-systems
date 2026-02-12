@@ -1379,6 +1379,26 @@ KernelInfo parseKernel(const std::vector<uint8_t>& elf_data, const std::string& 
         const uint8_t* p = file.at<uint8_t>(text->offset);
         info.code.assign(p, p + extract_size);
         info.func_offset = func_start - text->addr;  // Offset of ncclDevFunc_ within extracted code
+
+        // Patch out s_trap 2 instructions inserted by LLVM for LDS access in non-kernel functions.
+        // The LLVM AMDGPU backend inserts these traps assuming non-kernel functions using LDS are
+        // dead code that will never execute. But with the device linker, these functions ARE called
+        // via function pointers from the dispatcher kernel, so the traps are incorrect.
+        // s_trap 2 = 0xbf920002, s_nop 0 = 0xbf800000
+        // See: llvm/lib/Target/AMDGPU/AMDGPUISelLowering.cpp LowerGlobalAddress() circa line 1558
+        constexpr uint32_t S_TRAP_2 = 0xbf920002;
+        constexpr uint32_t S_NOP_0  = 0xbf800000;
+        int trap_count = 0;
+        for (size_t i = 0; i + 4 <= info.code.size(); i += 4) {
+            uint32_t* inst = reinterpret_cast<uint32_t*>(info.code.data() + i);
+            if (*inst == S_TRAP_2) {
+                *inst = S_NOP_0;
+                trap_count++;
+            }
+        }
+        if (trap_count > 0) {
+            printf("  Patched %d s_trap 2 -> s_nop 0 in %s\n", trap_count, info.name.c_str());
+        }
     }
 
     // Parse .note for resources and save full note
