@@ -1,8 +1,12 @@
 # Rocstorage Architecture
 
+![System Layer Overview](graphs/system_layers.png)
+
 ## Chapter 1: Public API Design
 
 The rocstorage public API consists of three classes -- storage_t, writer_t, and reader_t -- and four type namespaces -- storage_types, writer_types, reader_types, and shared_types. Together they form the only surface that users interact with. Everything behind these headers is hidden and must remain hidden.
+
+![Public API Ownership Model](graphs/public_api_ownership.png)
 
 ### The Pimpl Boundary
 
@@ -52,6 +56,8 @@ The storage_t exposes only version information. Its purpose is to hold the datab
 
 ## Chapter 2: Writer Architecture
 
+![Writer Architecture: Layered Design](graphs/writer_architecture.png)
+
 The writer subsystem transforms public API calls into database rows. It is organized in layers: a policy-based dispatch mechanism at the top, CRTP interfaces in the middle, and schema-specific implementations at the bottom. This layering exists to allow new schema versions to be introduced without modifying existing code.
 
 ### Policy-Based Dispatch
@@ -78,11 +84,15 @@ Each schema version provides a complete set of writer implementations. Currently
 
 Each writer class inherits from its corresponding CRTP interface, passing itself as the template argument. It implements the required insert_impl (or register_*_impl for info registration) methods. These methods contain the schema-specific logic: which prepared statements to call, which foreign keys to resolve, which validations to perform, and how to serialize complex fields.
 
+![Writer Insert Data Flow](graphs/writer_insert_flow.png)
+
 The typical insert_impl method follows a consistent pattern. It begins a transaction through the backend. It validates that all required entities have been registered, using the insert validator. It resolves foreign keys from user-facing identifiers to database primary keys. It optionally inserts an event record if event metadata is present. It executes the prepared insert statement for its table. It optionally inserts argument records and sample records for timeline correlation. The transaction commits automatically when the scope exits.
 
 Common insert operations is a utility class shared by all data writers within a schema version. It handles event insertion, sample insertion, argument insertion, and string registration. These operations are factored out because they are identical across all data types within the same schema: an event row has the same structure whether it belongs to a region or a kernel dispatch.
 
 ### Writer Context
+
+![Writer Context: Dependency Injection](graphs/writer_context_dependencies.png)
 
 The writer context is a dependency injection container that holds everything the writer implementations need. It contains the database backend, the entity registry, the primary key providers, the insert validator, and the session UUID. Each writer receives a shared pointer to this context and uses it to access these shared resources.
 
@@ -166,6 +176,8 @@ Event reader implementations would continue to perform on-demand queries. Each s
 
 ## Chapter 4: Backend Abstraction Layer
 
+![Backend Abstraction Layer](graphs/backend_abstraction.png)
+
 The backend layer isolates the rest of the system from the specifics of the database engine. All database operations -- statement preparation, value binding, column extraction, transaction management, and schema initialization -- pass through the sqlite_backend class. No other component in the system references SQLite directly.
 
 ### Separation from Schema Logic
@@ -217,6 +229,8 @@ The backend is currently the only database implementation. However, its position
 Replacing SQLite with a different engine would require implementing the same set of operations -- prepared statement creation, value binding by type, column extraction by type, and RAII transaction management -- against the new engine's API. The statement classes would need to be parameterized by backend type (the insert_statements class already takes the backend as a template parameter). The writer and reader implementations would not need to change, because they interact with the backend only through the statement classes and the transaction guard.
 
 ## Chapter 5: Statements and Schema Correspondence
+
+![Statements and Schema Correspondence](graphs/schema_statement_correspondence.png)
 
 The statement classes define every SQL query the system executes. There is one insert_statements class and one read_statements class per schema version. Each class contains exactly one prepared statement per database table or query pattern, and the type signature of each statement matches the column layout of the table it targets. This one-to-one correspondence between statements and schema is deliberate and must be maintained.
 
