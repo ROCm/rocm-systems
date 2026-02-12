@@ -6203,21 +6203,17 @@ amdsmi_get_gpu_virtualization_mode(amdsmi_processor_handle processor_handle,
             // Device has active VFs = HOST mode
             *mode = AMDSMI_VIRTUALIZATION_MODE_HOST;
         } else if (result.is_vfio_bound) {
-            // Device bound to vfio-pci = PASSTHROUGH
+            // Device bound to vfio-pci = PASSTHROUGH mode
+            // Note: In nested virtualization (VM within VM), this reports the device's
+            // operational mode (PASSTHROUGH) rather than system context (GUEST).
+            // This aligns with DRM driver reporting and reflects device capabilities.
             *mode = AMDSMI_VIRTUALIZATION_MODE_PASSTHROUGH;
         } else if (result.is_vm_guest) {
             // hypervisor flag = GUEST (containers inherit this correctly)
             *mode = AMDSMI_VIRTUALIZATION_MODE_GUEST;
-        } else if (!result.is_vm_guest && !result.is_container) {
-            // Not VM, not container = safe to say BAREMETAL
+        } else if (!result.is_vm_guest) {
+            // Not VM, safe to say BAREMETAL
             *mode = AMDSMI_VIRTUALIZATION_MODE_BAREMETAL;
-        } else if (!result.is_vm_guest && result.is_container) {
-            // In container, no hypervisor flag = likely BAREMETAL
-            // BUT we can't be 100% sure without sysfs access
-            // Check if we could read any sysfs at all
-            if (result.sysfs_accessible) {
-                *mode = AMDSMI_VIRTUALIZATION_MODE_BAREMETAL;
-            }
         }
         return ((*mode == AMDSMI_VIRTUALIZATION_MODE_UNKNOWN) ?
                  AMDSMI_STATUS_NOT_SUPPORTED : AMDSMI_STATUS_SUCCESS);
