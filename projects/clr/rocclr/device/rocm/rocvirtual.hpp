@@ -466,20 +466,23 @@ class VirtualGPU : public device::VirtualDevice {
   void HiddenHeapInit();
   uint64_t getQueueID();
 
-#if defined(_WIN32)
-  //! Wake up the device queue monitor thread when scheduler enqueues a kernel
-  void WakeupDeviceQueueMonitor() {
-    if (monitorThreadRunning_.load(std::memory_order_relaxed)) {
-      {
-        std::lock_guard<std::mutex> lock(monitor_mutex_);
-        monitor_cv_.notify_one();
-      }
+  //! Add completion signal to the scheduler queue thread's event list.
+  //! Wakes the scheduler queue thread if its sleeping.
+  void addSchedulerEvent(hsa_signal_t signal) {
+    {
+      std::lock_guard<std::mutex> lock(scheduler_mutex_);
+      pendingSchedulerEvents_.push_back(signal);
     }
+    scheduler_cv_.notify_one();
   }
 
-  //! Start the device queue monitor thread on first use
-  void StartDeviceQueueMonitorThread();
-#endif  // _WIN32
+  //! Returns true if the scheduler queue thread is running
+  bool isSchedulerQueueThreadRunning() const {
+    return schedulerQueueThreadRunning_.load(std::memory_order_relaxed);
+  }
+
+  //! Start the scheduler queue thread on first use
+  void startSchedulerQueueThread();
 
   //! Analyzes a crashed AQL queue to find a broken AQL packet
   void AnalyzeAqlQueue() const;
@@ -637,12 +640,11 @@ class VirtualGPU : public device::VirtualDevice {
 
   hsa_queue_t* schedulerQueue_;
 
-#if defined(_WIN32)
-  std::thread deviceQueueMonitorThread_;   //!< Monitor thread for scheduler queue
-  std::atomic<bool> monitorThreadRunning_; //!< Thread running flag
-  std::mutex monitor_mutex_;               //!< Lock to synchronize monitor thread
-  std::condition_variable monitor_cv_;     //!< Condition to wake monitor thread
-#endif  // _WIN32
+  std::thread schedulerQueueThread_;                  //!< Host thread that monitors the scheduler queue
+  std::atomic<bool> schedulerQueueThreadRunning_;     //!< Flag to indicate if the thread is running
+  std::mutex scheduler_mutex_;                        //!< Lock to synchronize scheduler thread
+  std::condition_variable scheduler_cv_;              //!< Condition to wake scheduler thread
+  std::vector<hsa_signal_t> pendingSchedulerEvents_;  //!< Pending scheduler completion signals
 
   HwQueueTracker barriers_;  //!< Tracks active barriers in ROCr
 

@@ -2769,9 +2769,7 @@ bool KernelBlitManager::runScheduler(uint64_t vqVM, hsa_queue_t* schedulerQueue,
   releaseArguments(parameters);
 
 #if defined(_WIN32)
-  std::atomic_thread_fence(std::memory_order_seq_cst);
-  // Scheduler has enqueued a kernel, wake up the device queue monitor thread
-  gpu().WakeupDeviceQueueMonitor();
+  gpu().addSchedulerEvent(sp->complete_signal);
 #endif  // _WIN32
 
   // Wait for the scheduler to finish all operations
