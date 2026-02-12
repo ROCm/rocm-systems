@@ -467,7 +467,7 @@ class VirtualGPU : public device::VirtualDevice {
   uint64_t getQueueID();
 
   //! Add completion signal to the scheduler queue thread's event list.
-  //! Wakes the scheduler queue thread if its sleeping.
+  //! Wakes the scheduler queue thread if it's sleeping.
   void addSchedulerEvent(hsa_signal_t signal) {
     {
       std::lock_guard<std::mutex> lock(scheduler_mutex_);
