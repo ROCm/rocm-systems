@@ -54,7 +54,7 @@ public:
     StatusFn* att_status_fn     = nullptr;
     void*     handle            = nullptr;
 };
-
+/*
 class AQLProfileDL
 {
     using GetBufferPacketsFn   = decltype(aqlprofile_att_get_buffer_packets);
@@ -79,7 +79,7 @@ public:
 };
 
 const AQLProfileDL&
-get_aqlprofile_dl();
+get_aqlprofile_dl();*/
 
 }  // namespace thread_trace
 }  // namespace rocprofiler

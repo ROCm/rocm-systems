@@ -122,3 +122,61 @@ rocprofiler_add_integration_execute_test(
     PRELOAD "${PRELOAD_ENV}"
     ENVIRONMENT "ATT_NODETAIL=1"
     DISABLED ${ROCPROFILER_DISABLE_UNSTABLE_CTESTS})
+
+
+# Triple buffer tests.
+add_executable(thread-trace-api-triple-buffer-test)
+target_sources(thread-trace-api-triple-buffer-test
+               PRIVATE triple_buffer.cpp main.cpp kernel_branch.cpp kernel_lds.cpp)
+target_link_libraries(thread-trace-api-triple-buffer-test
+                      PRIVATE ${COMMON_LINK_LIBRARIES})
+
+# Checks for data integrity with ttracedata
+rocprofiler_add_integration_execute_test(
+    thread-trace-api-triple-buffer-consistency-test
+    COMMAND $<TARGET_FILE:thread-trace-api-triple-buffer-test>
+    DEPENDS thread-trace-api-triple-buffer-test
+    TIMEOUT 120
+    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "TRIPLEBUFFER=1;ATT_NODETAIL=1;ATT_SLOW_CALLBACK=0"
+    DISABLED ${IS_DISABLED})
+
+# Collects a lot of data, and check if parsering works successfully
+rocprofiler_add_integration_execute_test(
+    thread-trace-api-triple-buffer-hammer-test
+    COMMAND $<TARGET_FILE:thread-trace-api-triple-buffer-test>
+    DEPENDS thread-trace-api-triple-buffer-test
+    TIMEOUT 240
+    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "TRIPLEBUFFER=1;ATT_NODETAIL=0;ATT_SLOW_CALLBACK=0"
+    DISABLED ${IS_DISABLED})
+
+# Tests for proper handling of when the tool is very slow
+rocprofiler_add_integration_execute_test(
+    thread-trace-api-triple-buffer-slow-test
+    COMMAND $<TARGET_FILE:thread-trace-api-triple-buffer-test>
+    DEPENDS thread-trace-api-triple-buffer-test
+    TIMEOUT 120
+    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "TRIPLEBUFFER=1;ATT_NODETAIL=1;ATT_SLOW_CALLBACK=1"
+    DISABLED ${IS_DISABLED})
+
+# Tests for thread trace not paused during application run (global destructor)
+rocprofiler_add_integration_execute_test(
+    thread-trace-api-triple-buffer-no-pause-test
+    COMMAND $<TARGET_FILE:thread-trace-api-triple-buffer-test>
+    DEPENDS thread-trace-api-triple-buffer-test
+    TIMEOUT 120
+    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "TRIPLEBUFFER=1;EXECUTE_PAUSE=0"
+    DISABLED ${IS_DISABLED})
+
+# Tests for thread trace starting and stopping multiple times during the application
+rocprofiler_add_integration_execute_test(
+    thread-trace-api-triple-buffer-multiple-cmds-test
+    COMMAND $<TARGET_FILE:thread-trace-api-triple-buffer-test>
+    DEPENDS thread-trace-api-triple-buffer-test
+    TIMEOUT 120
+    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "TRIPLEBUFFER=1;STARTSTOP=1;ATT_NODETAIL=1"
+    DISABLED ${IS_DISABLED})

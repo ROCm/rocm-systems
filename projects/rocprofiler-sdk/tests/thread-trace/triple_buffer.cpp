@@ -239,7 +239,10 @@ cntrl_tracing_callback(rocprofiler_callback_tracing_record_t record,
             rocprofiler_trace_decode(decoder, parse, buffer.data(), output_size, &current_sdata);
             total_size += output_size;
         }
-        if(total_size < MIN_TRACE_SIZE) throw std::runtime_error("Trace is too small!");
+
+        static bool ignore_size = std::getenv("STARTSTOP") ? atoi(std::getenv("STARTSTOP")) : false;
+        if(!ignore_size && total_size < MIN_TRACE_SIZE)
+            throw std::runtime_error("Trace is too small!");
     }
     else if(record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT &&
             record.operation == ROCPROFILER_MARKER_CONTROL_API_ID_roctxProfilerResume)
