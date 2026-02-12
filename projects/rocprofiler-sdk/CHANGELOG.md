@@ -2,6 +2,12 @@
 
 Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projects/rocprofiler-sdk](https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/index.html)
 
+## ROCprofiler-SDK 1.2.0
+
+### Changed
+
+- Version updated to 1.2.0 to support better library compatibility detection for downstream dependencies
+
 ## ROCprofiler-SDK for AFAR I
 
 ### Added
