@@ -24,7 +24,6 @@
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
-#include "lib/rocprofiler-sdk/thread_trace/dl.hpp"
 
 #include <rocprofiler-sdk/experimental/thread_trace.h>
 
