@@ -3479,7 +3479,7 @@ bool VirtualGPU::createSchedulerParam() {
 }
 
 void VirtualGPU::startSchedulerQueueThread() {
-  schedulerQueueThreadRunning_.store(true, std::memory_order_relaxed);
+  schedulerQueueThreadRunning_.store(true, std::memory_order_release);
 
   schedulerQueueThread_ = std::thread([this]() {
     while (isSchedulerQueueThreadRunning()) {
