@@ -1174,15 +1174,12 @@ class AMDSMILogger():
         vbios_version = str(output['version_info']['vbios version'])
         kernel_version = str(output['version_info']['kernel version'])
 
-        ######################################################
-        # Please make the lines add up to 80-character width #
-        ######################################################
         # print GPU info
         print(default_line_1)
+        # Split the version line into 3 lines, each wrapping to the same width
         print("| AMD-SMI            {0:<57s} |".format(amd_smi_version[:57]))
 
         # Print amdgpu or kernel version based on availability, if neither then don't print
-        # Split the version line into 3 lines, each wrapping to the same width
         if amdgpu_version.strip() != "N/A":
             print("| amdgpu Version:    {0:<57s} |".format(amdgpu_version[:57]))
         elif kernel_version.strip() != "N/A":

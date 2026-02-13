@@ -1429,7 +1429,7 @@ bool is_device_vfio_bound(const std::string& pci_sysfs_path) {
 // have active VFs since they are not in HOST mode
 bool get_sriov_status(const std::string& pci_sysfs_path) {
   std::ostringstream ss;
-  bool has_capability = false;  // indicates if device supports SR-IOV (sriov_totalvfs > 0)
+  [[maybe_unused]] bool has_capability = false;  // if device supports SR-IOV (sriov_totalvfs > 0)
   bool has_active_vfs = false;  // only true in HOST mode (sriov_numvfs > 0)
 
   // Check for SR-IOV total VFs (capability)
