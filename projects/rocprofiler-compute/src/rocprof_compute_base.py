@@ -193,7 +193,8 @@ class RocProfCompute:
 
                 if self.__args.subpath != "gpu_model":
                     console_warning(
-                        "--subpath is deprecated and will be removed in future releases."
+                        "--subpath is deprecated and will be removed in future "
+                        "releases."
                     )
 
             if self.__args.name is not None and "/" in self.__args.name:
@@ -275,6 +276,15 @@ class RocProfCompute:
         self.__soc[arch] = soc_class(self.__args, self.__mspec)
 
     def parse_args(self) -> None:
+        # Detect if --experimental flag is present (for help text control)
+        prelim_parser = argparse.ArgumentParser(add_help=False)
+        prelim_parser.add_argument("--experimental", action="store_true", default=False)
+
+        # Parse only known args (respects -- separator)
+        prelim_args, _ = prelim_parser.parse_known_args()
+        experimental_requested: bool = prelim_args.experimental
+
+        # Build full parser with experimental knowledge
         parser = argparse.ArgumentParser(
             description=(
                 "Command line interface for AMD's GPU profiler, ROCm Compute Profiler"
@@ -286,7 +296,11 @@ class RocProfCompute:
             usage="rocprof-compute [mode] [options]",
         )
         omniarg_parser(
-            parser, config.rocprof_compute_home, self.__supported_archs, self.__version
+            parser,
+            config.rocprof_compute_home,
+            self.__supported_archs,
+            self.__version,
+            experimental_requested,
         )
         self.__args = parser.parse_args()
 
