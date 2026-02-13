@@ -750,7 +750,7 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
       else
         ncclDevFuncTable_4[ncclShmem.funcId]();
 #ifdef NCCL_DEVICE_DEBUG_TRAP
-      //#if (tid == 0 && blockIdx.x == 0 && args->debugOut) {
+      //#if (tid == 0 && blockIdx.x == 0 && args->debugOut)
       if (tid % WARP_SIZE == 0) {
         __asm__ __volatile__ ("s_trap 3");
         ((volatile uint64_t*)args->debugOut)[0] = 5;  /* trap 5: after specialized function returns */

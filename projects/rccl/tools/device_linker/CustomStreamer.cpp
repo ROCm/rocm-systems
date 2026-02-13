@@ -30,6 +30,7 @@
 #include "llvm/Support/LEB128.h"
 #include "llvm/Target/TargetOptions.h"
 #include "llvm/TargetParser/Triple.h"
+#include <cstdlib>
 
 using namespace llvm;
 using namespace dwarf_linker;
@@ -1077,24 +1078,40 @@ void CustomStreamer::emitLineTableRows(
 
   unsigned RowsSinceLastSequence = 0;
 
+  // Debug: trace first few line table row addresses when DWARFLINKER_TRACE_LINE_TABLE=1
+  if (getenv("DWARFLINKER_TRACE_LINE_TABLE")) {
+    unsigned trace_count = 0;
+    for (const DWARFDebugLine::Row &R : LineTable.Rows) {
+      if (trace_count++ < 5 || (R.IsStmt && trace_count < 10))
+        fprintf(stderr, "[LINE_TABLE_TRACE] Row %u: addr=0x%llx line=%u file=%u is_stmt=%d\n",
+                trace_count - 1, (unsigned long long)R.Address.Address, R.Line, R.File, R.IsStmt);
+      if (trace_count >= 15) break;
+    }
+  }
+
   for (const DWARFDebugLine::Row &Row : LineTable.Rows) {
     // If we're tracking row offsets, record the current section size as the
     // offset of this row.
     if (RowOffsets)
       RowOffsets->push_back(LineSectionSize);
 
-    int64_t AddressDelta;
+    // AddressDelta: MCDwarfLineAddr::encode expects BYTES (it ScaleAddrDelta divides by MinInstLength)
+    // DW_LNS_advance_pc expects instruction-length units
+    int64_t AddressDeltaBytes = 0;
+    int64_t AddressDeltaInstr = 0;
     if (Address == -1ULL) {
+      AddressDeltaBytes = 0;
+      AddressDeltaInstr = 0;
       MS->emitIntValue(dwarf::DW_LNS_extended_op, 1);
       MS->emitULEB128IntValue(AddressByteSize + 1);
       MS->emitIntValue(dwarf::DW_LNE_set_address, 1);
       MS->emitIntValue(Row.Address.Address, AddressByteSize);
       LineSectionSize +=
           2 + AddressByteSize + getULEB128Size(AddressByteSize + 1);
-      AddressDelta = 0;
     } else {
-      AddressDelta =
-          (Row.Address.Address - Address) / LineTable.Prologue.MinInstLength;
+      AddressDeltaBytes = (int64_t)(Row.Address.Address - Address);
+      AddressDeltaInstr =
+          AddressDeltaBytes / (int64_t)LineTable.Prologue.MinInstLength;
     }
 
     // FIXME: code copied and transformed from MCDwarf.cpp::EmitDwarfLineTable.
@@ -1155,8 +1172,8 @@ void CustomStreamer::emitLineTableRows(
 
     int64_t LineDelta = int64_t(Row.Line) - LastLine;
     if (!Row.EndSequence) {
-      MCDwarfLineAddr::encode(*MC, Params, LineDelta, AddressDelta,
-                              EncodingBuffer);
+      MCDwarfLineAddr::encode(*MC, Params, LineDelta,
+                              (uint64_t)AddressDeltaBytes, EncodingBuffer);
       MS->emitBytes(EncodingBuffer);
       LineSectionSize += EncodingBuffer.size();
       EncodingBuffer.resize(0);
@@ -1169,10 +1186,10 @@ void CustomStreamer::emitLineTableRows(
         MS->emitSLEB128IntValue(LineDelta);
         LineSectionSize += 1 + getSLEB128Size(LineDelta);
       }
-      if (AddressDelta) {
+      if (AddressDeltaInstr) {
         MS->emitIntValue(dwarf::DW_LNS_advance_pc, 1);
-        MS->emitULEB128IntValue(AddressDelta);
-        LineSectionSize += 1 + getULEB128Size(AddressDelta);
+        MS->emitULEB128IntValue((uint64_t)AddressDeltaInstr);
+        LineSectionSize += 1 + getULEB128Size((uint64_t)AddressDeltaInstr);
       }
       MCDwarfLineAddr::encode(*MC, Params, std::numeric_limits<int64_t>::max(),
                               0, EncodingBuffer);

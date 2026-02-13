@@ -1636,22 +1636,16 @@ private:
             }
 
             if (!debug_line.data.empty()) {
-                // Pad .debug_line to 8-byte boundary so .debug_line_str (which follows) starts aligned
-                // This ensures .debug_abbrev (which comes after .debug_line_str) also starts aligned
-                size_t padding = (8 - (debug_line.data.size() % 8)) % 8;
-                if (padding > 0) {
-                    debug_line.data.insert(debug_line.data.end(), padding, 0);
-                    printf("Built .debug_line: %zu bytes (+ %zu padding = %zu total, %zu chunks)\n",
-                           debug_line.data.size() - padding, padding, debug_line.data.size(), debug_line_chunks_.size());
-                } else {
-                    printf("Built .debug_line: %zu bytes (%zu chunks)\n",
-                           debug_line.data.size(), debug_line_chunks_.size());
-                }
-                sections_.push_back(std::move(debug_line));
+                // Skip adding buildDebugLine .debug_line to sections_.
+                // mergeDebugInfoWithDWARFLinker() will produce .debug_line with correct address
+                // remapping. Adding both would create duplicate sections; consumers (rocgdb,
+                // dwarfdump) use the first one, which would have wrong unpatched addresses.
+                printf("Built .debug_line: %zu bytes (%zu chunks) - not emitted, DWARFLinker will add corrected version\n",
+                       debug_line.data.size(), debug_line_chunks_.size());
             }
 
-            // Add merged .debug_line_str section
-            if (!merged_debug_line_str_.empty()) {
+            // Skip .debug_line_str from buildDebugLine - DWARFLinker produces its own
+            if (false && !merged_debug_line_str_.empty()) {
                 SectionInfo debug_line_str;
                 debug_line_str.name = ".debug_line_str";
                 debug_line_str.type = SHT_PROGBITS;
@@ -3119,6 +3113,16 @@ private:
         
         dwarf_streamer->finish();
         
+        // Debug: save streamer output ELF when RCCL_DEVICE_LINKER_SAVE_DWARF_OBJ is set
+        if (const char* save_path = getenv("RCCL_DEVICE_LINKER_SAVE_DWARF_OBJ")) {
+            FILE* f = fopen(save_path, "wb");
+            if (f) {
+                fwrite(dwarf_streamer_buffer.data(), 1, dwarf_streamer_buffer.size(), f);
+                fclose(f);
+                printf("Saved streamer output to %s (%zu bytes)\n", save_path, dwarf_streamer_buffer.size());
+            }
+        }
+        
         // CRITICAL: Free all DWARFContext objects immediately after linking to free memory
         printf("Freeing DWARFContext objects to reduce memory usage...\n");
         kernel_object_files.clear();
@@ -3796,9 +3800,10 @@ private:
 // ============================================================================
 
 void printUsage(const char* prog) {
-    fprintf(stderr, "Usage: %s -o output.elf --dispatcher dispatcher.elf --host-table table.cpp [--target arch] [--input-dir dir] [--omit-dwarf]\n", prog);
+    fprintf(stderr, "Usage: %s -o output.elf --dispatcher dispatcher.elf --host-table table.cpp [--target arch] [--input-dir dir] [--omit-dwarf] [--only-kernel pattern]\n", prog);
     fprintf(stderr, "  --input-dir: directory containing .o device binaries (not host fat binaries)\n");
     fprintf(stderr, "  --omit-dwarf: do not add DWARF sections to the merged ELF (use if loader rejects code object with debug)\n");
+    fprintf(stderr, "  --only-kernel pattern: only process .o files whose path contains pattern (for minimal reproducer)\n");
 }
 
 int main(int argc, char** argv) {
@@ -3807,6 +3812,7 @@ int main(int argc, char** argv) {
     std::vector<std::string> inputs;
 
     bool omit_dwarf = false;
+    std::string only_kernel_pattern;  // If non-empty, filter inputs to paths containing this
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
         if (arg == "-o" && i + 1 < argc) output = argv[++i];
@@ -3815,6 +3821,7 @@ int main(int argc, char** argv) {
         else if (arg == "--input-dir" && i + 1 < argc) input_dir = argv[++i];
         else if (arg == "--target" && i + 1 < argc) g_target_arch = argv[++i];
         else if (arg == "--omit-dwarf") omit_dwarf = true;
+        else if (arg == "--only-kernel" && i + 1 < argc) { only_kernel_pattern = argv[++i]; }
         else if (arg[0] != '-') inputs.push_back(arg);
     }
 
@@ -3849,7 +3856,18 @@ int main(int argc, char** argv) {
             fprintf(stderr, "No .o files found in --input-dir (%s). Build specialized kernels as device-only.\n", input_dir.c_str());
             return 1;
         }
-        
+        // Filter to only kernels matching --only-kernel pattern (for minimal reproducer)
+        if (!only_kernel_pattern.empty()) {
+            auto it = std::remove_if(inputs.begin(), inputs.end(), [&](const std::string& p) {
+                return p.find(only_kernel_pattern) == std::string::npos;
+            });
+            inputs.erase(it, inputs.end());
+            if (inputs.empty()) {
+                fprintf(stderr, "No .o files match --only-kernel '%s'\n", only_kernel_pattern.c_str());
+                return 1;
+            }
+            printf("MINIMAL REPRO: Only processing %zu kernel(s) matching '%s'\n", inputs.size(), only_kernel_pattern.c_str());
+        }
         // For testing: limit number of inputs if MAX_KERNELS_FOR_TEST is set
         const char* max_kernels_env = getenv("MAX_KERNELS_FOR_TEST");
         if (max_kernels_env) {

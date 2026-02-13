@@ -116,14 +116,15 @@ INCLUDES=(
     "-I$BUILD_DIR/include"
 )
 
-# Defines
-# IMPORTANT: These must match host compilation (CMakeLists.txt) to ensure structure layout agreement
-# All of these affect struct layouts or code paths and MUST be consistent:
-#   - DEVICE_LINKER: Uses function tables instead of direct calls
-#   - ENABLE_FAULT_INJECTION: Adds faults field to ncclShmemData
-#   - ENABLE_WARP_SPEED: Affects ncclShmemData layout (warpComm, warpChannel fields) and kernel args size
-#   - ENABLE_LL128: Affects protocol selection and scratch sizes
-DEFINES="-DDEVICE_LINKER -DENABLE_FAULT_INJECTION -DENABLE_WARP_SPEED -DENABLE_LL128"
+# Defines for host compilation (step 5)
+# MUST match dispatcher device and specialized kernel defs from CMake - use RCCL_DISPATCHER_DEFINES if set
+# (CMake passes this from specialized_kernels_device to ensure ncclShmemData/LDS layout is identical)
+if [ -n "${RCCL_DISPATCHER_DEFINES:-}" ]; then
+  DEFINES="$RCCL_DISPATCHER_DEFINES"
+else
+  # Fallback if not invoked from CMake (e.g. manual run)
+  DEFINES="-DDEVICE_LINKER -DENABLE_FAULT_INJECTION -DENABLE_WARP_SPEED -DENABLE_LL128"
+fi
 
 # Debug flag for peer pointer tracking (set DEBUG_PEER_POINTERS=1 to enable)
 if [ "${DEBUG_PEER_POINTERS:-0}" = "1" ]; then
@@ -182,6 +183,10 @@ DEVICE_LINKER_ARGS=(
 if [ -d "$SPECIALIZED_OBJ_DIR" ] && [ "$(ls -A "$SPECIALIZED_OBJ_DIR"/*.o 2>/dev/null)" ]; then
     DEVICE_LINKER_ARGS+=(--input-dir "$SPECIALIZED_OBJ_DIR/")
     echo "  Including specialized kernels from: $SPECIALIZED_OBJ_DIR"
+    if [ -n "${RCCL_DEVICE_LINKER_ONLY_KERNEL:-}" ]; then
+        DEVICE_LINKER_ARGS+=(--only-kernel "$RCCL_DEVICE_LINKER_ONLY_KERNEL")
+        echo "  MINIMAL REPRO: Only kernel matching: $RCCL_DEVICE_LINKER_ONLY_KERNEL"
+    fi
 fi
 
 # Omit DWARF from merged ELF if requested (e.g. to avoid loader rejecting the code object)

@@ -8,6 +8,7 @@
 #include "collectives.h"
 #include "common.h"
 
+
 // ncclShmem is defined in common.h via NCCL_SHMEM_DECL when DEVICE_LINKER is set
 // Only define here for non-DEVICE_LINKER builds (RDC mode with extern __shared__)
 #ifndef DEVICE_LINKER
@@ -35,30 +36,21 @@ struct RunWorkNop {
 // DEVICE_LINKER mode: No scratch reservation code - device linker patches .note metadata
 
 __launch_bounds__(NCCL_MAX_NTHREADS, 1) __global__ void ncclDevKernel_Generic_1(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {
-#ifdef NCCL_DEVICE_DEBUG_TRAP
-  if (threadIdx.x == 0 && blockIdx.x == 0 && argsStorage.args.debugOut) {
+  if (threadIdx.x == 0) {
     __asm__ __volatile__ ("s_trap 3");
-    ((volatile uint64_t*)argsStorage.args.debugOut)[0] = 0;
   }
-#endif
   ncclKernelMain<-1, RunWorkNop, /*COLLTRACE*/false, /*Unroll*/1>(&argsStorage.args);
 }
 __launch_bounds__(NCCL_MAX_NTHREADS, 1) __global__ void ncclDevKernel_Generic_2(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {
-#ifdef NCCL_DEVICE_DEBUG_TRAP
-  if (threadIdx.x == 0 && blockIdx.x == 0 && argsStorage.args.debugOut) {
+  if (threadIdx.x == 0) {
     __asm__ __volatile__ ("s_trap 3");
-    ((volatile uint64_t*)argsStorage.args.debugOut)[0] = 0;
   }
-#endif
   ncclKernelMain<-1, RunWorkNop, /*COLLTRACE*/false, /*Unroll*/2>(&argsStorage.args);
 }
 __launch_bounds__(NCCL_MAX_NTHREADS, 1) __global__ void ncclDevKernel_Generic_4(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {
-#ifdef NCCL_DEVICE_DEBUG_TRAP
-  if (threadIdx.x == 0 && blockIdx.x == 0 && argsStorage.args.debugOut) {
+  if (threadIdx.x == 0) {
     __asm__ __volatile__ ("s_trap 3");
-    ((volatile uint64_t*)argsStorage.args.debugOut)[0] = 0;
   }
-#endif
   ncclKernelMain<-1, RunWorkNop, /*COLLTRACE*/false, /*Unroll*/4>(&argsStorage.args);
 }
 #ifdef ENABLE_COLLTRACE
