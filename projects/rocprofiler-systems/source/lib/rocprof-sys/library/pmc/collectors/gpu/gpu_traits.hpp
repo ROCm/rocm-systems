@@ -192,11 +192,10 @@ struct gpu_traits
     /**
      * @brief Post-process Perfetto data.
      */
-    template <typename Perfetto, typename DeviceVector>
-    static void post_process_perfetto(const DeviceVector&      devices,
-                                      const enabled_metrics_t& enabled)
+    template <typename Perfetto>
+    static void post_process_perfetto(const enabled_metrics_t& enabled)
     {
-        Perfetto::post_process(devices, enabled);
+        Perfetto::post_process(enabled);
     }
 
     // Device creation

@@ -225,8 +225,7 @@ struct collector
     {
         if(SettingsApi::get_use_perfetto_legacy_metrics())
         {
-            Traits::template post_process_perfetto<PerfettoApi>(m_device_entries,
-                                                                m_enabled_metrics);
+            Traits::template post_process_perfetto<PerfettoApi>(m_enabled_metrics);
         }
     }
 

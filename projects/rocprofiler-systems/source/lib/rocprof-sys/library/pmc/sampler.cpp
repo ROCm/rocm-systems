@@ -195,9 +195,6 @@ shutdown()
         {
             slice.shutdown();
         }
-        g_collector_slices.clear();
-        g_collectors.gpu.reset();
-        g_device_provider.reset();
     } catch(std::runtime_error& _e)
     {
         LOG_ERROR("Exception thrown when shutting down PMC sampler: {}", _e.what());
@@ -214,6 +211,9 @@ post_process()
     {
         slice.post_process();
     }
+    g_collector_slices.clear();
+    g_collectors.gpu.reset();
+    g_device_provider.reset();
 }
 
 void

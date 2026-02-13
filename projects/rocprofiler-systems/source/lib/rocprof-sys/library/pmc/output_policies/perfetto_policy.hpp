@@ -135,6 +135,12 @@ struct perfetto_policy
         return bundle;
     }
 
+    static std::map<size_t, pmc::gpu::enabled_metrics>& get_device_registry()
+    {
+        static std::map<size_t, pmc::gpu::enabled_metrics> registry;
+        return registry;
+    }
+
     using counter_track = perfetto_counter_track<metrics>;
 
     /**
@@ -151,9 +157,11 @@ struct perfetto_policy
     {
         for(const auto& entry : entries)
         {
+            auto device_index = entry.device->get_index();
             get_perfetto_bundle().insert(
-                { entry.device->get_index(),
+                { device_index,
                   std::make_unique<std::vector<perfetto_amd_smi_sample>>() });
+            get_device_registry().insert({ device_index, entry.supported_metrics });
         }
     }
 
@@ -277,20 +285,17 @@ struct perfetto_policy
      *
      * Serializes all buffered PMC samples to Perfetto counter tracks.
      * This is called at the end of profiling to flush all samples.
+     * Uses the internally tracked device registry populated during init_storage().
      *
-     * @tparam DeviceEntryVector Container of device_entry structs (device + supported
-     * metrics)
-     * @param entries Vector of device entries
      * @param enabled_metrics Metrics that were enabled during collection
      */
-    template <typename DeviceEntryVector>
-    static void post_process(const DeviceEntryVector&  entries,
-                             pmc::gpu::enabled_metrics enabled_metrics)
+    static void post_process(pmc::gpu::enabled_metrics enabled_metrics)
     {
-        for(const auto& entry : entries)
+        const auto& registry = get_device_registry();
+        LOG_DEBUG("Post-processing {} devices", registry.size());
+        for(const auto& [device_index, supported_metrics] : registry)
         {
-            post_process_device(entry.device->get_index(), enabled_metrics,
-                                entry.supported_metrics);
+            post_process_device(device_index, enabled_metrics, supported_metrics);
         }
     }
 
