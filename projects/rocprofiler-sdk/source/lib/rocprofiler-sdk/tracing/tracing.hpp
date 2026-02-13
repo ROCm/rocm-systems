@@ -46,7 +46,7 @@ find_external_correlation_id(const external_correlation_id_map_t& corr_ids,
 {
     const auto* it = std::find_if(
         corr_ids.begin(), corr_ids.end(), [ctx](const auto& pair) { return pair.first == ctx; });
-    // Replacing unoderder_map.at; find_if should never return nullptr
+    // Replacing unordered_map::at; find_if should never return nullptr
     return it->second;
 }
 
