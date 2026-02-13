@@ -40,7 +40,7 @@ public:
     pool_impl()
     {
         // Pre-allocate some objects to reduce initial allocation overhead
-        pool_.reserve(8);  // Typical depth for nested calls
+        pool_.reserve(8);
     }
 
     ~pool_impl() = default;
