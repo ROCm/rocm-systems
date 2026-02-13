@@ -42,7 +42,7 @@ struct context;
 namespace kernel_dispatch
 {
 using context_t              = context::context;
-using user_data_map_t        = std::unordered_map<const context_t*, rocprofiler_user_data_t>;
+using user_data_map_t        = tracing::external_correlation_id_map_t;
 using external_corr_id_map_t = user_data_map_t;
 
 using profiling_time = tracing::profiling_time;
