@@ -1435,3 +1435,24 @@ hipError_t hipPointerGetAttribute(void* data, hipPointer_attribute attribute, co
     return err;
 }
 
+/* ============================================================================
+ * PyTorch Compatibility Stubs
+ * ============================================================================ */
+
+hipError_t hipMemcpyWithStream(void* dst, const void* src, size_t sizeBytes, int kind, hipStream_t stream) {
+    (void)stream;
+    return hipMemcpy(dst, src, sizeBytes, kind);
+}
+
+hipError_t hipMemcpyToSymbol(const void* symbol, const void* src, size_t count, size_t offset, int kind) {
+    (void)symbol; (void)src; (void)count; (void)offset; (void)kind;
+    hip_remote_log_error("hipMemcpyToSymbol: not implemented in remote mode");
+    return hipErrorNotSupported;
+}
+
+hipError_t hipGetSymbolAddress(void** devPtr, const void* symbol) {
+    (void)devPtr; (void)symbol;
+    hip_remote_log_error("hipGetSymbolAddress: not implemented in remote mode");
+    return hipErrorNotSupported;
+}
+

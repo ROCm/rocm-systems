@@ -888,3 +888,267 @@ hipError_t hipChooseDevice(int* device, const void* prop) {
     *device = 0;
     return hipSuccess;
 }
+
+/* ============================================================================
+ * PyTorch Compatibility Stubs
+ * ============================================================================ */
+
+hipError_t hipHostMalloc(void** ptr, size_t size, unsigned int flags) {
+    (void)flags;
+    return hipMallocHost(ptr, size);
+}
+
+hipError_t hipHostFree(void* ptr) {
+    return hipFreeHost(ptr);
+}
+
+hipError_t hipHostRegister(void* hostPtr, size_t sizeBytes, unsigned int flags) {
+    (void)hostPtr; (void)sizeBytes; (void)flags;
+    return hipSuccess;
+}
+
+hipError_t hipHostUnregister(void* hostPtr) {
+    (void)hostPtr;
+    return hipSuccess;
+}
+
+hipError_t hipDeviceGetDefaultMemPool(void** memPool, int device) {
+    (void)device;
+    if (memPool) *memPool = NULL;
+    return hipSuccess;
+}
+
+/**
+ * R0600 device properties struct layout (from hip_runtime_api.h).
+ * Must match the layout PyTorch was compiled against.
+ */
+typedef struct {
+    char name[256];
+    char uuid[16];
+    char luid[8];
+    unsigned int luidDeviceNodeMask;
+    size_t totalGlobalMem;
+    size_t sharedMemPerBlock;
+    int regsPerBlock;
+    int warpSize;
+    size_t memPitch;
+    int maxThreadsPerBlock;
+    int maxThreadsDim[3];
+    int maxGridSize[3];
+    int clockRate;
+    size_t totalConstMem;
+    int major;
+    int minor;
+    size_t textureAlignment;
+    size_t texturePitchAlignment;
+    int deviceOverlap;
+    int multiProcessorCount;
+    int kernelExecTimeoutEnabled;
+    int integrated;
+    int canMapHostMemory;
+    int computeMode;
+    int maxTexture1D;
+    int maxTexture1DMipmap;
+    int maxTexture1DLinear;
+    int maxTexture2D[2];
+    int maxTexture2DMipmap[2];
+    int maxTexture2DLinear[3];
+    int maxTexture2DGather[2];
+    int maxTexture3D[3];
+    int maxTexture3DAlt[3];
+    int maxTextureCubemap;
+    int maxTexture1DLayered[2];
+    int maxTexture2DLayered[3];
+    int maxTextureCubemapLayered[2];
+    int maxSurface1D;
+    int maxSurface2D[2];
+    int maxSurface3D[3];
+    int maxSurface1DLayered[2];
+    int maxSurface2DLayered[3];
+    int maxSurfaceCubemap;
+    int maxSurfaceCubemapLayered[2];
+    size_t surfaceAlignment;
+    int concurrentKernels;
+    int ECCEnabled;
+    int pciBusID;
+    int pciDeviceID;
+    int pciDomainID;
+    int tccDriver;
+    int asyncEngineCount;
+    int unifiedAddressing;
+    int memoryClockRate;
+    int memoryBusWidth;
+    int l2CacheSize;
+    int persistingL2CacheMaxSize;
+    int maxThreadsPerMultiProcessor;
+} hipDeviceProp_tR0600_Compat;
+
+hipError_t hipGetDevicePropertiesR0600(void* prop, int deviceId) {
+    if (!prop) return hipErrorInvalidValue;
+
+    HipRemoteDevicePropertiesResponse resp;
+    if (deviceId >= 0 && deviceId < MAX_CACHED_DEVICES && g_props_cached[deviceId]) {
+        resp = g_cached_props[deviceId];
+    } else {
+        HipRemoteDeviceRequest req;
+        memset(&req, 0, sizeof(req));
+        req.device_id = deviceId;
+
+        hipError_t err = hip_remote_request(
+            HIP_OP_GET_DEVICE_PROPERTIES,
+            &req, sizeof(req),
+            &resp, sizeof(resp)
+        );
+        if (err != hipSuccess) return err;
+
+        if (deviceId >= 0 && deviceId < MAX_CACHED_DEVICES) {
+            g_cached_props[deviceId] = resp;
+            g_props_cached[deviceId] = 1;
+        }
+    }
+
+    {
+        hipDeviceProp_tR0600_Compat* p = (hipDeviceProp_tR0600_Compat*)prop;
+        memset(p, 0, 1416);
+
+        strncpy(p->name, resp.name, sizeof(p->name) - 1);
+        p->totalGlobalMem = resp.total_global_mem;
+        p->sharedMemPerBlock = resp.shared_mem_per_block;
+        p->regsPerBlock = resp.regs_per_block;
+        p->warpSize = resp.warp_size ? resp.warp_size : 64;
+        p->maxThreadsPerBlock = resp.max_threads_per_block ? resp.max_threads_per_block : 1024;
+        p->maxThreadsDim[0] = resp.max_threads_dim[0];
+        p->maxThreadsDim[1] = resp.max_threads_dim[1];
+        p->maxThreadsDim[2] = resp.max_threads_dim[2];
+        p->maxGridSize[0] = resp.max_grid_size[0];
+        p->maxGridSize[1] = resp.max_grid_size[1];
+        p->maxGridSize[2] = resp.max_grid_size[2];
+        p->clockRate = resp.clock_rate;
+        p->major = resp.major;
+        p->minor = resp.minor;
+        p->multiProcessorCount = resp.multi_processor_count;
+        p->integrated = resp.integrated;
+        p->canMapHostMemory = resp.can_map_host_memory;
+        p->computeMode = resp.compute_mode;
+        p->concurrentKernels = resp.concurrent_kernels;
+        p->pciBusID = resp.pci_bus_id;
+        p->pciDeviceID = resp.pci_device_id;
+        p->pciDomainID = resp.pci_domain_id;
+        p->memoryClockRate = resp.memory_clock_rate;
+        p->memoryBusWidth = resp.memory_bus_width;
+        p->l2CacheSize = resp.l2_cache_size;
+        p->maxThreadsPerMultiProcessor = resp.max_threads_per_multi_processor;
+
+        p->memPitch = 2147483647;
+        p->textureAlignment = 512;
+        p->texturePitchAlignment = 32;
+        p->unifiedAddressing = 1;
+        p->asyncEngineCount = 2;
+        p->deviceOverlap = 1;
+
+        char* gcn_ptr = ((char*)prop) + 1160;
+        strncpy(gcn_ptr, resp.gcn_arch_name, 255);
+    }
+
+    return hipSuccess;
+}
+
+hipError_t hipDeviceGetGcnArchName(char* buf, int deviceId) {
+    if (!buf) return hipErrorInvalidValue;
+
+    HipRemoteDevicePropertiesResponse resp;
+    if (deviceId >= 0 && deviceId < MAX_CACHED_DEVICES && g_props_cached[deviceId]) {
+        resp = g_cached_props[deviceId];
+    } else {
+        HipRemoteDeviceRequest req;
+        memset(&req, 0, sizeof(req));
+        req.device_id = deviceId;
+        hipError_t err = hip_remote_request(
+            HIP_OP_GET_DEVICE_PROPERTIES,
+            &req, sizeof(req),
+            &resp, sizeof(resp)
+        );
+        if (err != hipSuccess) return err;
+    }
+    strncpy(buf, resp.gcn_arch_name, 255);
+    buf[255] = '\0';
+    return hipSuccess;
+}
+
+hipError_t hipInit(unsigned int flags) {
+    (void)flags;
+    return hipSuccess;
+}
+
+hipError_t hipExtGetLastError(void) {
+    return hipGetLastError();
+}
+
+hipError_t hipMemPtrGetInfo(void* ptr, size_t* size) {
+    (void)ptr;
+    if (size) *size = 0;
+    return hipSuccess;
+}
+
+hipError_t hipStreamGetDevice(void* stream, int* device) {
+    (void)stream;
+    if (device) *device = 0;
+    return hipSuccess;
+}
+
+hipError_t hipCtxGetCurrent(void** ctx) {
+    if (ctx) *ctx = (void*)(uintptr_t)1;
+    return hipSuccess;
+}
+
+hipError_t hipDevicePrimaryCtxGetState(int device, unsigned int* flags, int* active) {
+    (void)device;
+    if (flags) *flags = 0;
+    if (active) *active = 1;
+    return hipSuccess;
+}
+
+const char* hipDrvGetErrorString(hipError_t hipError, const char** errorString) {
+    const char* s = hipGetErrorString(hipError);
+    if (errorString) *errorString = s;
+    return s;
+}
+
+hipError_t hipLaunchHostFunc(hipStream_t stream, void (*fn)(void*), void* userData) {
+    (void)stream;
+    if (fn) fn(userData);
+    return hipSuccess;
+}
+
+hipError_t hipMemcpyFromSymbol(void* dst, const void* symbol, size_t count, size_t offset, int kind) {
+    (void)dst; (void)symbol; (void)count; (void)offset; (void)kind;
+    return hipErrorNotSupported;
+}
+
+hipError_t hipMemAdvise(const void* devPtr, size_t count, int advice, int device) {
+    (void)devPtr; (void)count; (void)advice; (void)device;
+    return hipSuccess;
+}
+
+hipError_t hipCtxSetCurrent(void* ctx) {
+    (void)ctx;
+    return hipSuccess;
+}
+
+hipError_t hipDevicePrimaryCtxRetain(void** pctx, int device) {
+    (void)device;
+    if (pctx) *pctx = (void*)(uintptr_t)1;
+    return hipSuccess;
+}
+
+hipError_t hipFuncGetAttribute(int* value, int attrib, void* hfunc) {
+    (void)attrib; (void)hfunc;
+    if (value) *value = 0;
+    return hipSuccess;
+}
+
+hipError_t hipExtStreamGetCUMask(hipStream_t stream, uint32_t cuMaskSize, uint32_t* cuMask) {
+    (void)stream;
+    if (cuMask && cuMaskSize > 0) memset(cuMask, 0xFF, cuMaskSize * sizeof(uint32_t));
+    return hipSuccess;
+}

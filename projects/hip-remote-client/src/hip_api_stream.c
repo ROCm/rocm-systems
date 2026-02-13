@@ -607,3 +607,52 @@ hipError_t hipStreamUpdateCaptureDependencies(void* stream, void** dependencies,
     free(req);
     return err;
 }
+
+/* ============================================================================
+ * PyTorch Compatibility Stubs
+ * ============================================================================ */
+
+hipError_t hipExtStreamCreateWithCUMask(hipStream_t* stream, uint32_t cuMaskSize, const uint32_t* cuMask) {
+    (void)cuMaskSize; (void)cuMask;
+    return hipStreamCreate(stream);
+}
+
+hipError_t hipGetStreamDeviceId(hipStream_t stream) {
+    (void)stream;
+    return 0;
+}
+
+hipError_t hipStreamGetCaptureInfo_v2(hipStream_t stream, int* captureStatus, unsigned long long* id, void** graph, const void** dependencies, size_t* numDependencies) {
+    (void)stream; (void)graph; (void)dependencies;
+    if (captureStatus) *captureStatus = 0;
+    if (id) *id = 0;
+    if (numDependencies) *numDependencies = 0;
+    return hipSuccess;
+}
+
+hipError_t hipThreadExchangeStreamCaptureMode(int* mode) {
+    (void)mode;
+    return hipSuccess;
+}
+
+hipError_t hipGraphInstantiateWithFlags(void** pGraphExec, void* graph, unsigned long long flags) {
+    (void)flags;
+    return hipGraphInstantiate(pGraphExec, graph, NULL, NULL, 0);
+}
+
+hipError_t hipGraphGetNodes(void* graph, void** nodes, size_t* numNodes) {
+    (void)graph; (void)nodes;
+    if (numNodes) *numNodes = 0;
+    return hipSuccess;
+}
+
+hipError_t hipGraphNodeGetDependencies(void* node, void** dependencies, size_t* numDependencies) {
+    (void)node; (void)dependencies;
+    if (numDependencies) *numDependencies = 0;
+    return hipSuccess;
+}
+
+hipError_t hipGraphDebugDotPrint(void* graph, const char* path, unsigned int flags) {
+    (void)graph; (void)path; (void)flags;
+    return hipSuccess;
+}

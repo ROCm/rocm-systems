@@ -523,3 +523,101 @@ hipError_t hipFuncSetCacheConfig(const void* func, hipFuncCache_t cacheConfig) {
         &resp, sizeof(resp)
     );
 }
+
+/* ============================================================================
+ * PyTorch Compatibility Extensions
+ * ============================================================================ */
+
+hipError_t hipExtModuleLaunchKernel(hipFunction_t f,
+                                     unsigned int globalWorkSizeX,
+                                     unsigned int globalWorkSizeY,
+                                     unsigned int globalWorkSizeZ,
+                                     unsigned int localWorkSizeX,
+                                     unsigned int localWorkSizeY,
+                                     unsigned int localWorkSizeZ,
+                                     size_t sharedMemBytes,
+                                     hipStream_t hStream,
+                                     void** kernelParams,
+                                     void** extra,
+                                     hipEvent_t startEvent,
+                                     hipEvent_t stopEvent,
+                                     unsigned int flags) {
+    (void)startEvent; (void)stopEvent; (void)flags;
+    hip_remote_log_debug("hipExtModuleLaunchKernel: f=%p grid=(%u,%u,%u) block=(%u,%u,%u) "
+                         "shared=%zu stream=%p kp=%p extra=%p",
+                         (void*)f, globalWorkSizeX, globalWorkSizeY, globalWorkSizeZ,
+                         localWorkSizeX, localWorkSizeY, localWorkSizeZ,
+                         sharedMemBytes, (void*)hStream, (void*)kernelParams, (void*)extra);
+    hipError_t err = hipModuleLaunchKernel(f,
+        globalWorkSizeX, globalWorkSizeY, globalWorkSizeZ,
+        localWorkSizeX, localWorkSizeY, localWorkSizeZ,
+        (unsigned int)sharedMemBytes, hStream, kernelParams, extra);
+    hip_remote_log_debug("hipExtModuleLaunchKernel: err=%d", err);
+    return err;
+}
+
+hipError_t hipModuleLoad(hipModule_t* module, const char* fname) {
+    if (!module || !fname) return hipErrorInvalidValue;
+
+    FILE* f = fopen(fname, "rb");
+    if (!f) {
+        hip_remote_log_error("hipModuleLoad: cannot open '%s'", fname);
+        return hipErrorFileNotFound;
+    }
+    fseek(f, 0, SEEK_END);
+    long len = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    if (len <= 0) {
+        fclose(f);
+        return hipErrorInvalidImage;
+    }
+    void* buf = malloc((size_t)len);
+    if (!buf) { fclose(f); return hipErrorOutOfMemory; }
+    fread(buf, 1, (size_t)len, f);
+    fclose(f);
+
+    HipRemoteModuleLoadRequest req;
+    req.data_size = (uint64_t)len;
+
+    HipRemoteModuleLoadResponse resp;
+    memset(&resp, 0, sizeof(resp));
+
+    hipError_t err = hip_remote_request_with_data(
+        HIP_OP_MODULE_LOAD_DATA,
+        &req, sizeof(req),
+        buf, (size_t)len,
+        &resp, sizeof(resp)
+    );
+
+    free(buf);
+
+    if (err == hipSuccess) {
+        *module = (hipModule_t)(uintptr_t)resp.module;
+    } else {
+        hip_remote_log_error("hipModuleLoad failed: %s\n error: %s", fname, hipGetErrorString(err));
+    }
+    return err;
+}
+
+hipError_t hipModuleLaunchCooperativeKernel(hipFunction_t f,
+                                             unsigned int gridDimX,
+                                             unsigned int gridDimY,
+                                             unsigned int gridDimZ,
+                                             unsigned int blockDimX,
+                                             unsigned int blockDimY,
+                                             unsigned int blockDimZ,
+                                             unsigned int sharedMemBytes,
+                                             hipStream_t stream,
+                                             void** kernelParams) {
+    return hipModuleLaunchKernel(f, gridDimX, gridDimY, gridDimZ,
+                                blockDimX, blockDimY, blockDimZ,
+                                sharedMemBytes, stream, kernelParams, NULL);
+}
+
+hipError_t hipModuleOccupancyMaxActiveBlocksPerMultiprocessor(int* numBlocks,
+                                                               hipFunction_t f,
+                                                               int blockSize,
+                                                               size_t dynSharedMemPerBlk) {
+    return hipOccupancyMaxActiveBlocksPerMultiprocessor(numBlocks, (const void*)f,
+                                                        blockSize, dynSharedMemPerBlk);
+}
