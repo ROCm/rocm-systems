@@ -8241,7 +8241,36 @@ def test_experimental_action_help_suppression():
 
 
 @pytest.mark.misc
-def test_resolve_rocm_library_path(monkeypatch, tmp_path):
+def test_version_to_numeric():
+    """Test version_to_numeric helper function."""
+    from utils.utils import version_to_numeric
+
+    # Test normalized to max_len=3
+    max_len = 3
+
+    # Single component versions
+    assert version_to_numeric([2], max_len) == 2_000_000  # 2 * 1000^2
+    assert version_to_numeric([10], max_len) == 10_000_000  # 10 * 1000^2
+    assert version_to_numeric([15], max_len) == 15_000_000  # 15 * 1000^2
+
+    # Multi-component versions
+    assert version_to_numeric([1, 2, 3], max_len) == 1_002_003  # 1*1000^2 + 2*1000 + 3
+    assert version_to_numeric([2, 5, 3], max_len) == 2_005_003  # 2*1000^2 + 5*1000 + 3
+    assert version_to_numeric([1, 2], max_len) == 1_002_000  # 1*1000^2 + 2*1000
+
+    # Version comparisons - higher version numbers should produce higher values
+    assert version_to_numeric([10], max_len) > version_to_numeric([2], max_len)
+    assert version_to_numeric([10], max_len) > version_to_numeric([1, 2, 3], max_len)
+    assert version_to_numeric([2], max_len) > version_to_numeric([1, 2, 3], max_len)
+    assert version_to_numeric([2, 5, 3], max_len) > version_to_numeric([2], max_len)
+    assert version_to_numeric([1, 2, 3], max_len) > version_to_numeric([1, 2], max_len)
+
+    # Edge case: version components support 0-999
+    assert version_to_numeric([999, 999, 999], max_len) == 999_999_999
+
+
+@pytest.mark.misc
+def test_resolve_rocm_library_path(tmp_path):
     """Test resolve_rocm_library_path with various scenarios."""
     from utils.utils import resolve_rocm_library_path
 
@@ -8265,17 +8294,39 @@ def test_resolve_rocm_library_path(monkeypatch, tmp_path):
     versioned_bar.touch()
     assert resolve_rocm_library_path(str(nonexistent)) == str(versioned_bar)
 
-    # Test case 5: Multiple versioned files, pick most specific
+    # Test case 5: Multiple versioned files, pick highest version deterministically
     multi_base = tmp_path / "libmulti.so"
     v1 = tmp_path / "libmulti.so.1"
     v123 = tmp_path / "libmulti.so.1.2.3"
     v12 = tmp_path / "libmulti.so.1.2"
+    v2 = tmp_path / "libmulti.so.2"
     v1.touch()
     v123.touch()
     v12.touch()
-    # Should pick .so.1.2.3 (most dots)
-    assert resolve_rocm_library_path(str(multi_base)) == str(v123)
+    v2.touch()
+    # Should pick .so.2 (highest major version)
+    assert resolve_rocm_library_path(str(multi_base)) == str(v2)
 
-    # Test case 6: No match at all, return original path
+    # Test case 6: Filters out non-numeric suffixes (e.g., .so.debug)
+    filter_base = tmp_path / "libfilter.so"
+    numeric_version = tmp_path / "libfilter.so.1"
+    debug_file = tmp_path / "libfilter.so.debug"
+    numeric_version.touch()
+    debug_file.touch()
+    # Should pick .so.1, not .so.debug
+    assert resolve_rocm_library_path(str(filter_base)) == str(numeric_version)
+
+    # Test case 7: Version comparison edge cases
+    # 10.0 should beat 2.5.3 (not string comparison)
+    version_base = tmp_path / "libversion.so"
+    v10 = tmp_path / "libversion.so.10"
+    v253 = tmp_path / "libversion.so.2.5.3"
+    v10.touch()
+    v253.touch()
+    # Should pick .so.10 (10 > 2 in first position)
+    assert resolve_rocm_library_path(str(version_base)) == str(v10)
+
+    # Test case 8: No match at all, raises FileNotFoundError
     missing = tmp_path / "libmissing.so"
-    assert resolve_rocm_library_path(str(missing)) == str(missing)
+    with pytest.raises(FileNotFoundError, match="ROCm library not found"):
+        resolve_rocm_library_path(str(missing))
