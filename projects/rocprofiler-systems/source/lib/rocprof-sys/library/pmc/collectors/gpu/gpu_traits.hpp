@@ -69,8 +69,9 @@ struct gpu_traits
     using driver_t          = Driver;
 
     // Required constants
-    static constexpr const char* device_name  = "GPU";
-    static constexpr bool        multi_device = true;
+    static constexpr const char* device_name      = "GPU";
+    static constexpr bool        multi_device     = true;
+    static constexpr bool        has_version_info = true;
 
     // Settings customization points
 

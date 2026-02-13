@@ -26,6 +26,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS WITH
 // THE SOFTWARE.
 
+#include "library/pmc/collectors/common/collector_slice.hpp"
 #include "library/pmc/collectors/common/settings.hpp"
 #include "library/pmc/collectors/gpu/collector.hpp"
 #include "library/pmc/device_providers/amd_smi/provider.hpp"
@@ -58,6 +59,7 @@
 #    include <cassert>
 #    include <optional>
 #    include <sys/resource.h>
+#    include <vector>
 
 namespace rocprofsys
 {
@@ -89,12 +91,20 @@ struct production_config
 
 using provider_factory_t =
     device_providers::amd_smi::provider_factory<drivers::amd_smi::driver_factory>;
-using provider_t        = provider_factory_t::provider_t;
-using production_impl_t = collectors::gpu::collector<provider_t, production_config>;
+using provider_t      = provider_factory_t::provider_t;
+using gpu_collector_t = collectors::gpu::collector<provider_t, production_config>;
 
-std::shared_ptr<provider_t> g_device_provider;
+/// Storage for actual collector objects (collector_slice is non-owning)
+struct collector_storage
+{
+    std::optional<gpu_collector_t> gpu;
+    // Future: std::optional<nic_collector_t> nic;
+    // Future: std::optional<cpu_collector_t> cpu;
+};
 
-std::optional<production_impl_t> g_data_collector;
+std::shared_ptr<provider_t>              g_device_provider;
+collector_storage                        g_collectors;
+std::vector<collectors::collector_slice> g_collector_slices;
 
 }  // namespace
 
@@ -107,7 +117,10 @@ set_state(State _v)
 void
 config()
 {
-    if(g_data_collector) g_data_collector->config();
+    for(auto& slice : g_collector_slices)
+    {
+        slice.config();
+    }
 }
 
 void
@@ -120,8 +133,10 @@ sample()
         return;
     }
 
-    if(g_data_collector)
-        g_data_collector->sample(tim::get_clock_real_now<size_t, std::nano>);
+    for(auto& slice : g_collector_slices)
+    {
+        slice.sample(tim::get_clock_real_now<size_t, std::nano>);
+    }
 }
 
 void
@@ -140,10 +155,21 @@ setup()
     {
         // Create and inject device provider
         g_device_provider = provider_factory_t::create();
-        g_data_collector.emplace(g_device_provider);
 
-        // Setup the collector
-        g_data_collector->setup();
+        // Create GPU collector and add to slice vector
+        g_collectors.gpu.emplace(g_device_provider);
+        g_collector_slices.emplace_back(*g_collectors.gpu);
+
+        // Future: Add NIC collector
+        // g_collectors.nic.emplace(g_device_provider);
+        // g_collector_slices.emplace_back(*g_collectors.nic);
+
+        // Setup all collectors
+        for(auto& slice : g_collector_slices)
+        {
+            slice.setup();
+        }
+
         is_initialized() = true;
     } catch(std::runtime_error& _e)
     {
@@ -165,7 +191,12 @@ shutdown()
 
     try
     {
-        if(g_data_collector) g_data_collector->shutdown();
+        for(auto& slice : g_collector_slices)
+        {
+            slice.shutdown();
+        }
+        g_collector_slices.clear();
+        g_collectors.gpu.reset();
         g_device_provider.reset();
     } catch(std::runtime_error& _e)
     {
@@ -179,7 +210,10 @@ void
 post_process()
 {
     LOG_DEBUG("Post-processing PMC samples.");
-    if(g_data_collector) g_data_collector->post_process();
+    for(auto& slice : g_collector_slices)
+    {
+        slice.post_process();
+    }
 }
 
 void
@@ -187,7 +221,12 @@ postfork_child_cleanup()
 {
     LOG_DEBUG("Disabling PMC sampling in child process after fork.");
     get_state().store(State::Finalized);
-    if(g_data_collector) g_data_collector->shutdown();
+    for(auto& slice : g_collector_slices)
+    {
+        slice.shutdown();
+    }
+    g_collector_slices.clear();
+    g_collectors.gpu.reset();
     g_device_provider.reset();
     is_initialized() = false;
 }

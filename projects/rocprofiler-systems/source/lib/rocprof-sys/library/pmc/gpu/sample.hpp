@@ -61,7 +61,7 @@ struct sample : trace_cache::cacheable_t
     {}
 
     enabled_metrics enabled_metric;
-    size_t          device_id;
+    uint32_t        device_id;
     uint64_t        timestamp;
     metrics         metric_values;
 };
@@ -83,6 +83,7 @@ serialize(uint8_t* buffer, const pmc::gpu::sample& item)
         item.metric_values.hotspot_temperature, item.metric_values.edge_temperature,
         item.metric_values.gfx_activity, item.metric_values.umc_activity,
         item.metric_values.mm_activity, item.metric_values.xcp_stats,
+        item.metric_values.vcn_activity, item.metric_values.jpeg_activity,
         item.metric_values.xgmi.link.width, item.metric_values.xgmi.link.speed,
         item.metric_values.xgmi.data_acc.read, item.metric_values.xgmi.data_acc.write,
         item.metric_values.pcie.link.width, item.metric_values.pcie.link.speed,
@@ -100,7 +101,8 @@ deserialize(uint8_t*& buffer)
         item.metric_values.memory_usage, item.metric_values.hotspot_temperature,
         item.metric_values.edge_temperature, item.metric_values.gfx_activity,
         item.metric_values.umc_activity, item.metric_values.mm_activity,
-        item.metric_values.xcp_stats, item.metric_values.xgmi.link.width,
+        item.metric_values.xcp_stats, item.metric_values.vcn_activity,
+        item.metric_values.jpeg_activity, item.metric_values.xgmi.link.width,
         item.metric_values.xgmi.link.speed, item.metric_values.xgmi.data_acc.read,
         item.metric_values.xgmi.data_acc.write, item.metric_values.pcie.link.width,
         item.metric_values.pcie.link.speed, item.metric_values.pcie.bandwidth.acc,
@@ -118,7 +120,8 @@ get_size(const pmc::gpu::sample& item)
         item.metric_values.memory_usage, item.metric_values.hotspot_temperature,
         item.metric_values.edge_temperature, item.metric_values.gfx_activity,
         item.metric_values.umc_activity, item.metric_values.mm_activity,
-        item.metric_values.xcp_stats, item.metric_values.xgmi.link.width,
+        item.metric_values.xcp_stats, item.metric_values.vcn_activity,
+        item.metric_values.jpeg_activity, item.metric_values.xgmi.link.width,
         item.metric_values.xgmi.link.speed, item.metric_values.xgmi.data_acc.read,
         item.metric_values.xgmi.data_acc.write, item.metric_values.pcie.link.width,
         item.metric_values.pcie.link.speed, item.metric_values.pcie.bandwidth.acc,

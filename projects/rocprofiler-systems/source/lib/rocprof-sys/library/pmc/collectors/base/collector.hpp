@@ -95,6 +95,20 @@ struct collector
     using CacheApi        = typename Config::CacheApi;
 
     /**
+     * @brief Entry holding a device and its cached supported metrics.
+     *
+     * Supported metrics are queried once during device enumeration and cached here
+     * to avoid repeated calls in the hot sampling path.
+     */
+    struct device_entry
+    {
+        device_ptr_t      device;
+        enabled_metrics_t supported_metrics;
+    };
+
+    using device_entries_t = std::vector<device_entry>;
+
+    /**
      * @brief Construct a collector with an injected device provider.
      *
      * @param provider Shared pointer to the device provider instance
@@ -126,12 +140,12 @@ struct collector
 
         m_enabled_metrics = Traits::template get_enabled_metrics<SettingsApi>();
 
-        LOG_INFO("Enabled {} {} devices for PMC sampling", m_devices.size(),
+        LOG_INFO("Enabled {} {} devices for PMC sampling", m_device_entries.size(),
                  Traits::device_name);
 
         if(SettingsApi::get_use_perfetto_legacy_metrics())
         {
-            Traits::template init_perfetto_storage<PerfettoApi>(m_devices);
+            Traits::template init_perfetto_storage<PerfettoApi>(m_device_entries);
         }
     }
 
@@ -145,9 +159,9 @@ struct collector
     {
         Traits::template init_category_metadata<CacheApi>();
 
-        for(const auto& device : m_devices)
+        for(const auto& entry : m_device_entries)
         {
-            auto device_index = Traits::get_device_index(device);
+            auto device_index = Traits::get_device_index(entry.device);
             if(SettingsApi::get_use_perfetto_legacy_metrics())
             {
                 Traits::template setup_counter_tracks<PerfettoApi>(device_index,
@@ -170,21 +184,20 @@ struct collector
     void sample(const get_timestamp_t& get_timestamp)
     {
         auto new_end = std::remove_if(
-            m_devices.begin(), m_devices.end(),
-            [this, &get_timestamp](const device_ptr_t& device) {
+            m_device_entries.begin(), m_device_entries.end(),
+            [this, &get_timestamp](const device_entry& entry) {
                 auto _timestamp = get_timestamp();
                 assert(_timestamp <
                        static_cast<unsigned long>(std::numeric_limits<int64_t>::max()));
 
                 try
                 {
-                    auto _supported_metrics = Traits::get_supported_metrics(device);
-                    auto _metrics   = Traits::get_metrics(device, m_enabled_metrics);
-                    auto _device_id = Traits::get_device_index(device);
+                    auto _metrics = Traits::get_metrics(entry.device, m_enabled_metrics);
+                    auto _device_id = Traits::get_device_index(entry.device);
 
                     Traits::template store_sample<CacheApi>(_device_id, m_enabled_metrics,
-                                                            _supported_metrics, _metrics,
-                                                            _timestamp);
+                                                            entry.supported_metrics,
+                                                            _metrics, _timestamp);
                     if(SettingsApi::get_use_perfetto_legacy_metrics())
                     {
                         Traits::template store_perfetto_sample<PerfettoApi>(
@@ -195,12 +208,12 @@ struct collector
                 {
                     LOG_ERROR("Reading metrics failed for {} device {}. Error: {}. "
                               "Disabling device!",
-                              Traits::device_name, Traits::get_device_index(device),
+                              Traits::device_name, Traits::get_device_index(entry.device),
                               e.what());
                     return true;  // Remove device
                 }
             });
-        m_devices.erase(new_end, m_devices.end());
+        m_device_entries.erase(new_end, m_device_entries.end());
     }
 
     /**
@@ -212,22 +225,25 @@ struct collector
     {
         if(SettingsApi::get_use_perfetto_legacy_metrics())
         {
-            Traits::template post_process_perfetto<PerfettoApi>(m_devices,
+            Traits::template post_process_perfetto<PerfettoApi>(m_device_entries,
                                                                 m_enabled_metrics);
         }
     }
 
     /**
-     * @brief Get the list of all devices.
-     * @return Const reference to the container of devices.
+     * @brief Get the device entries (devices with cached supported metrics).
+     * @return Const reference to the vector of device entries.
      */
-    const container_t& get_devices() const noexcept { return m_devices; }
+    const device_entries_t& get_device_entries() const noexcept
+    {
+        return m_device_entries;
+    }
 
     /**
      * @brief Get the number of enabled devices.
      * @return Number of devices currently enabled for sampling.
      */
-    size_t get_device_count() const noexcept { return m_devices.size(); }
+    size_t get_device_count() const noexcept { return m_device_entries.size(); }
 
     /**
      * @brief Set the device provider (for backward compatibility).
@@ -244,7 +260,7 @@ struct collector
      */
     void shutdown()
     {
-        m_devices.clear();
+        m_device_entries.clear();
         if(m_device_provider)
         {
             m_device_provider->shutdown();
@@ -254,22 +270,20 @@ struct collector
 
 private:
     /**
-     * @brief Log version information if available (GPU only).
+     * @brief Log version information if available.
+     *
+     * Only logs if the Traits class defines has_version_info = true.
      */
     void log_version_info()
     {
-        // Only log version for GPU (has get_version method)
-        if constexpr(std::is_same_v<const char*, decltype(Traits::device_name)>)
+        if constexpr(traits_has_version_info_v<Traits>)
         {
-            if(std::string(Traits::device_name) == "GPU")
-            {
-                auto _version = m_device_provider->get_version();
-                LOG_INFO("AMD SMI version: {}.{}.{} - str: {}.",
-                         _version.numeric_representation.major,
-                         _version.numeric_representation.minor,
-                         _version.numeric_representation.release,
-                         _version.string_representation);
-            }
+            auto _version = m_device_provider->get_version();
+            LOG_INFO("AMD SMI version: {}.{}.{} - str: {}.",
+                     _version.numeric_representation.major,
+                     _version.numeric_representation.minor,
+                     _version.numeric_representation.release,
+                     _version.string_representation);
         }
     }
 
@@ -335,7 +349,11 @@ private:
                                               Traits::expected_processor_type(), index);
                     if(Traits::is_device_supported(device))
                     {
-                        m_devices.emplace_back(std::move(device));
+                        // Cache supported metrics at enumeration time to avoid
+                        // repeated queries in the hot sampling path
+                        auto supported = Traits::get_supported_metrics(device);
+                        m_device_entries.push_back(
+                            device_entry{ std::move(device), supported });
                     }
                 }
 
@@ -366,7 +384,7 @@ private:
         }
     }
 
-    container_t                      m_devices;          ///< List of enabled devices
+    device_entries_t m_device_entries;  ///< Devices with cached supported metrics
     std::shared_ptr<device_provider> m_device_provider;  ///< Device provider instance
     enabled_metrics_t                m_enabled_metrics;  ///< Enabled metrics
 };

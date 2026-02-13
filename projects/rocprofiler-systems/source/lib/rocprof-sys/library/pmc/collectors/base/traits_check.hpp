@@ -94,6 +94,30 @@ template <typename Traits>
 inline constexpr bool has_multi_device_v = has_multi_device<Traits>::value;
 
 /**
+ * @brief Type trait to check if Traits defines the has_version_info constant.
+ */
+template <typename Traits, typename = void>
+struct has_version_info_trait : std::false_type
+{};
+
+template <typename Traits>
+struct has_version_info_trait<Traits, std::void_t<decltype(Traits::has_version_info)>>
+: std::true_type
+{};
+
+template <typename Traits>
+inline constexpr bool has_version_info_trait_v = has_version_info_trait<Traits>::value;
+
+/**
+ * @brief Helper to check if Traits::has_version_info is true.
+ *
+ * Returns false if the trait doesn't exist or is false.
+ */
+template <typename Traits>
+inline constexpr bool traits_has_version_info_v =
+    has_version_info_trait_v<Traits> && Traits::has_version_info;
+
+/**
  * @brief Validate that a Traits type satisfies all collector requirements.
  *
  * This function uses static_assert to provide clear compile-time error messages

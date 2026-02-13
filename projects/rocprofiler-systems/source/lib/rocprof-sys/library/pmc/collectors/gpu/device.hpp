@@ -94,10 +94,11 @@ public:
         metrics metrics{};
 
         amdsmi_gpu_metrics_t amd_smi_metrics{};
-        if(m_driver_api->get_metrics_info(m_device_handle, &amd_smi_metrics) !=
-           AMDSMI_STATUS_SUCCESS)
+        auto status = m_driver_api->get_metrics_info(m_device_handle, &amd_smi_metrics);
+        if(status != AMDSMI_STATUS_SUCCESS)
         {
-            return metrics;
+            throw std::runtime_error("Failed to read GPU metrics: AMD SMI error " +
+                                     std::to_string(static_cast<int>(status)));
         }
 
         collect_power_metrics(amd_smi_metrics, metrics, user_enabled);
@@ -322,9 +323,8 @@ private:
             is_metric_supported(gpu_metrics.pcie_bandwidth_acc) ||
             is_metric_supported(gpu_metrics.pcie_bandwidth_inst));
 
-        // TODO: move back to debug after ci validation is done
-        LOG_INFO("Device [{}] supported metrics: {}", m_index,
-                 format_supported_metrics(m_supported_metrics));
+        LOG_DEBUG("Device [{}] supported metrics: {}", m_index,
+                  format_supported_metrics(m_supported_metrics));
 
         return m_supported_metrics.any();
     }

@@ -37,6 +37,9 @@ namespace pmc
 namespace collectors
 {
 
+/// Type alias for timestamp retrieval function used by sample()
+using get_timestamp_t = std::function<unsigned long()>;
+
 /**
  * @brief Type-erased collector slice - non-owning view of any collector type.
  *
@@ -48,8 +51,8 @@ namespace collectors
  * std::span). The actual collector object must outlive the slice.
  *
  * Any type T can be wrapped in a collector_slice as long as it provides the
- * required interface methods: setup(), config(), sample(), post_process(),
- * shutdown()
+ * required interface methods: setup(), config(), sample(get_timestamp_t),
+ * post_process(), shutdown()
  *
  * Example usage:
  * @code
@@ -72,8 +75,8 @@ public:
     /**
      * @brief Construct a collector_slice from any collector type.
      *
-     * @tparam T Collector type (must have setup, config, sample, post_process, shutdown
-     * methods)
+     * @tparam T Collector type (must have setup, config, sample(get_timestamp_t),
+     *           post_process, shutdown methods)
      * @param obj Reference to the collector object (must outlive the slice)
      */
     template <typename T>
@@ -81,7 +84,9 @@ public:
     : m_object{ &obj }
     , m_setup_impl{ [](void* ptr) { static_cast<T*>(ptr)->setup(); } }
     , m_config_impl{ [](void* ptr) { static_cast<T*>(ptr)->config(); } }
-    , m_sample_impl{ [](void* ptr) { static_cast<T*>(ptr)->sample(); } }
+    , m_sample_impl{ [](void* ptr, const get_timestamp_t& ts) {
+        static_cast<T*>(ptr)->sample(ts);
+    } }
     , m_post_process_impl{ [](void* ptr) { static_cast<T*>(ptr)->post_process(); } }
     , m_shutdown_impl{ [](void* ptr) { static_cast<T*>(ptr)->shutdown(); } }
     {}
@@ -103,9 +108,15 @@ public:
     /**
      * @brief Sample metrics from the collector.
      *
-     * Calls the underlying collector's sample() method.
+     * Calls the underlying collector's sample() method with the provided
+     * timestamp function.
+     *
+     * @param get_timestamp Function to retrieve the current timestamp
      */
-    void sample() { m_sample_impl(m_object); }
+    void sample(const get_timestamp_t& get_timestamp)
+    {
+        m_sample_impl(m_object, get_timestamp);
+    }
 
     /**
      * @brief Post-process collected metrics.
@@ -122,10 +133,12 @@ public:
     void shutdown() { m_shutdown_impl(m_object); }
 
 private:
+    using sample_fn_t = std::function<void(void*, const get_timestamp_t&)>;
+
     void*                      m_object;      /**< Non-owning pointer to collector */
     std::function<void(void*)> m_setup_impl;  /**< Type-erased setup function */
     std::function<void(void*)> m_config_impl; /**< Type-erased config function */
-    std::function<void(void*)> m_sample_impl; /**< Type-erased sample function */
+    sample_fn_t                m_sample_impl; /**< Type-erased sample function */
     std::function<void(void*)>
         m_post_process_impl;                    /**< Type-erased post_process function */
     std::function<void(void*)> m_shutdown_impl; /**< Type-erased shutdown function */
