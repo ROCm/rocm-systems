@@ -58,7 +58,7 @@ protected:
     static enabled_metrics all_metrics_enabled()
     {
         enabled_metrics metrics;
-        metrics.value = 0xFFFF;  // Enable all metrics
+        metrics.set_all();  // Enable all metrics
         return metrics;
     }
 
@@ -252,7 +252,7 @@ TEST_F(DeviceTest, valid_device_construction_full_support)
 
     // Verify all metric bits are set
     auto supported = dev.get_supported_metrics();
-    EXPECT_NE(supported.value, 0U);
+    EXPECT_NE(supported.value(), 0U);
 
     // Verify basic properties
     EXPECT_EQ(dev.get_index(), test_index);
@@ -278,7 +278,7 @@ TEST_F(DeviceTest, device_construction_no_support)
 
     // Verify no metric bits are set
     auto supported = dev.get_supported_metrics();
-    EXPECT_EQ(supported.value, 0U);
+    EXPECT_EQ(supported.value(), 0U);
 
     // Verify get_gpu_metrics returns all zeros
     auto metrics = dev.get_gpu_metrics(all_metrics_enabled());
@@ -306,22 +306,22 @@ TEST_F(DeviceTest, device_construction_partial_support)
     // Verify only expected metrics are marked as supported
     auto supported = dev.get_supported_metrics();
 
-    EXPECT_TRUE(supported.bits.current_socket_power);
-    EXPECT_TRUE(supported.bits.hotspot_temperature);
-    EXPECT_TRUE(supported.bits.gfx_activity);
+    EXPECT_TRUE(supported.current_socket_power());
+    EXPECT_TRUE(supported.hotspot_temperature());
+    EXPECT_TRUE(supported.gfx_activity());
 
     // Verify unsupported metrics are not set
-    EXPECT_FALSE(supported.bits.average_socket_power);
-    EXPECT_FALSE(supported.bits.edge_temperature);
-    EXPECT_FALSE(supported.bits.umc_activity);
-    EXPECT_FALSE(supported.bits.mm_activity);
-    EXPECT_FALSE(supported.bits.memory_usage);
-    EXPECT_FALSE(supported.bits.vcn_activity);
-    EXPECT_FALSE(supported.bits.jpeg_activity);
-    EXPECT_FALSE(supported.bits.vcn_busy);
-    EXPECT_FALSE(supported.bits.jpeg_busy);
-    EXPECT_FALSE(supported.bits.xgmi);
-    EXPECT_FALSE(supported.bits.pcie);
+    EXPECT_FALSE(supported.average_socket_power());
+    EXPECT_FALSE(supported.edge_temperature());
+    EXPECT_FALSE(supported.umc_activity());
+    EXPECT_FALSE(supported.mm_activity());
+    EXPECT_FALSE(supported.memory_usage());
+    EXPECT_FALSE(supported.vcn_activity());
+    EXPECT_FALSE(supported.jpeg_activity());
+    EXPECT_FALSE(supported.vcn_busy());
+    EXPECT_FALSE(supported.jpeg_busy());
+    EXPECT_FALSE(supported.xgmi());
+    EXPECT_FALSE(supported.pcie());
 }
 
 /**
@@ -382,7 +382,7 @@ TEST_F(DeviceTest, current_socket_power_collection)
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
 
     // Verify current_socket_power is marked as supported
-    EXPECT_TRUE(dev.get_supported_metrics().bits.current_socket_power);
+    EXPECT_TRUE(dev.get_supported_metrics().current_socket_power());
 
     // Collect metrics
     auto collected_metrics = dev.get_gpu_metrics(all_metrics_enabled());
@@ -414,7 +414,7 @@ TEST_F(DeviceTest, average_socket_power_collection)
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
 
     // Verify average_socket_power is marked as supported
-    EXPECT_TRUE(dev.get_supported_metrics().bits.average_socket_power);
+    EXPECT_TRUE(dev.get_supported_metrics().average_socket_power());
 
     // Collect metrics
     auto collected_metrics = dev.get_gpu_metrics(all_metrics_enabled());
@@ -438,8 +438,8 @@ TEST_F(DeviceTest, power_metrics_not_collected_when_unsupported)
 
     // Verify power metrics are not marked as supported
     auto supported = dev.get_supported_metrics();
-    EXPECT_FALSE(supported.bits.current_socket_power);
-    EXPECT_FALSE(supported.bits.average_socket_power);
+    EXPECT_FALSE(supported.current_socket_power());
+    EXPECT_FALSE(supported.average_socket_power());
 
     // Collect metrics
     auto collected_metrics = dev.get_gpu_metrics(all_metrics_enabled());
@@ -476,7 +476,7 @@ TEST_F(DeviceTest, hotspot_temperature_collection)
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
 
     // Verify hotspot_temperature is marked as supported
-    EXPECT_TRUE(dev.get_supported_metrics().bits.hotspot_temperature);
+    EXPECT_TRUE(dev.get_supported_metrics().hotspot_temperature());
 
     // Collect metrics
     auto collected_metrics = dev.get_gpu_metrics(all_metrics_enabled());
@@ -508,7 +508,7 @@ TEST_F(DeviceTest, edge_temperature_collection)
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
 
     // Verify edge_temperature is marked as supported
-    EXPECT_TRUE(dev.get_supported_metrics().bits.edge_temperature);
+    EXPECT_TRUE(dev.get_supported_metrics().edge_temperature());
 
     // Collect metrics
     auto collected_metrics = dev.get_gpu_metrics(all_metrics_enabled());
@@ -532,8 +532,8 @@ TEST_F(DeviceTest, temperature_metrics_not_collected_when_unsupported)
 
     // Verify temperature metrics are not marked as supported
     auto supported = dev.get_supported_metrics();
-    EXPECT_FALSE(supported.bits.hotspot_temperature);
-    EXPECT_FALSE(supported.bits.edge_temperature);
+    EXPECT_FALSE(supported.hotspot_temperature());
+    EXPECT_FALSE(supported.edge_temperature());
 
     // Collect metrics
     auto collected_metrics = dev.get_gpu_metrics(all_metrics_enabled());
@@ -570,7 +570,7 @@ TEST_F(DeviceTest, gfx_activity_collection)
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
 
     // Verify gfx_activity is marked as supported
-    EXPECT_TRUE(dev.get_supported_metrics().bits.gfx_activity);
+    EXPECT_TRUE(dev.get_supported_metrics().gfx_activity());
 
     // Collect metrics
     auto collected_metrics = dev.get_gpu_metrics(all_metrics_enabled());
@@ -602,7 +602,7 @@ TEST_F(DeviceTest, umc_activity_collection)
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
 
     // Verify umc_activity is marked as supported
-    EXPECT_TRUE(dev.get_supported_metrics().bits.umc_activity);
+    EXPECT_TRUE(dev.get_supported_metrics().umc_activity());
 
     // Collect metrics
     auto collected_metrics = dev.get_gpu_metrics(all_metrics_enabled());
@@ -634,7 +634,7 @@ TEST_F(DeviceTest, mm_activity_collection)
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
 
     // Verify mm_activity is marked as supported
-    EXPECT_TRUE(dev.get_supported_metrics().bits.mm_activity);
+    EXPECT_TRUE(dev.get_supported_metrics().mm_activity());
 
     // Collect metrics
     auto collected_metrics = dev.get_gpu_metrics(all_metrics_enabled());
@@ -669,9 +669,9 @@ TEST_F(DeviceTest, all_activity_metrics_collection)
 
     // Verify all activity metrics are marked as supported
     auto supported = dev.get_supported_metrics();
-    EXPECT_TRUE(supported.bits.gfx_activity);
-    EXPECT_TRUE(supported.bits.umc_activity);
-    EXPECT_TRUE(supported.bits.mm_activity);
+    EXPECT_TRUE(supported.gfx_activity());
+    EXPECT_TRUE(supported.umc_activity());
+    EXPECT_TRUE(supported.mm_activity());
 
     // Collect metrics
     auto collected_metrics = dev.get_gpu_metrics(all_metrics_enabled());
@@ -708,7 +708,7 @@ TEST_F(DeviceTest, vram_memory_usage_collection_success)
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
 
     // Verify memory_usage is marked as supported
-    EXPECT_TRUE(dev.get_supported_metrics().bits.memory_usage);
+    EXPECT_TRUE(dev.get_supported_metrics().memory_usage());
 
     // Collect metrics
     auto collected_metrics = dev.get_gpu_metrics(all_metrics_enabled());
@@ -738,7 +738,7 @@ TEST_F(DeviceTest, memory_usage_collection_failure)
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
 
     // Verify memory_usage is NOT marked as supported
-    EXPECT_FALSE(dev.get_supported_metrics().bits.memory_usage);
+    EXPECT_FALSE(dev.get_supported_metrics().memory_usage());
 
     // Collect metrics
     auto collected_metrics = dev.get_gpu_metrics(all_metrics_enabled());
@@ -761,7 +761,7 @@ TEST_F(DeviceTest, memory_usage_not_collected_when_unsupported)
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
 
     // Verify memory_usage is NOT marked as supported
-    EXPECT_FALSE(dev.get_supported_metrics().bits.memory_usage);
+    EXPECT_FALSE(dev.get_supported_metrics().memory_usage());
 
     // Mock should NOT be called for memory usage during collection
     // (because supported bit is false, early return happens)
@@ -780,7 +780,7 @@ TEST_F(DeviceTest, memory_usage_not_collected_when_unsupported)
 // ============================================================================
 
 /**
- * VCN Busy Collection - All XCPs (MI300)
+ * VCN Busy Collection - All XCPs
  *
  * Objective: Verify per-XCP VCN busy stats copied for all XCP instances.
  */
@@ -810,9 +810,9 @@ TEST_F(DeviceTest, vcn_busy_collection_all_xcps)
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
 
     // Verify vcn_busy is marked as supported (per-XCP metrics)
-    EXPECT_TRUE(dev.get_supported_metrics().bits.vcn_busy);
+    EXPECT_TRUE(dev.get_supported_metrics().vcn_busy());
     // Device-level vcn_activity should NOT be set when per-XCP is available
-    EXPECT_FALSE(dev.get_supported_metrics().bits.vcn_activity);
+    EXPECT_FALSE(dev.get_supported_metrics().vcn_activity());
 
     // Collect metrics
     auto collected_metrics = dev.get_gpu_metrics(all_metrics_enabled());
@@ -860,7 +860,7 @@ TEST_F(DeviceTest, jpeg_activity_collection_all_xcps)
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
 
     // Verify jpeg_activity is marked as supported
-    EXPECT_TRUE(dev.get_supported_metrics().bits.jpeg_activity);
+    EXPECT_TRUE(dev.get_supported_metrics().jpeg_activity());
 
     // Collect metrics
     auto collected_metrics = dev.get_gpu_metrics(all_metrics_enabled());
@@ -891,8 +891,8 @@ TEST_F(DeviceTest, xcp_metrics_not_collected_when_unsupported)
 
     // Verify XCP metrics are NOT marked as supported
     auto supported = dev.get_supported_metrics();
-    EXPECT_FALSE(supported.bits.vcn_activity);
-    EXPECT_FALSE(supported.bits.jpeg_activity);
+    EXPECT_FALSE(supported.vcn_activity());
+    EXPECT_FALSE(supported.jpeg_activity());
 
     // Collect metrics
     auto collected_metrics = dev.get_gpu_metrics(all_metrics_enabled());
@@ -944,8 +944,8 @@ TEST_F(DeviceTest, mixed_vcn_jpeg_support)
 
     // Verify only VCN is supported
     auto supported = dev.get_supported_metrics();
-    EXPECT_TRUE(supported.bits.vcn_activity);
-    EXPECT_FALSE(supported.bits.jpeg_activity);
+    EXPECT_TRUE(supported.vcn_activity());
+    EXPECT_FALSE(supported.jpeg_activity());
 
     // Collect metrics
     auto collected_metrics = dev.get_gpu_metrics(all_metrics_enabled());
@@ -997,7 +997,7 @@ TEST_F(DeviceTest, xgmi_link_width_collection)
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
 
     // Verify XGMI is marked as supported
-    EXPECT_TRUE(dev.get_supported_metrics().bits.xgmi);
+    EXPECT_TRUE(dev.get_supported_metrics().xgmi());
 
     // Collect metrics
     auto collected_metrics = dev.get_gpu_metrics(all_metrics_enabled());
@@ -1029,7 +1029,7 @@ TEST_F(DeviceTest, xgmi_link_speed_collection)
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
 
     // Verify XGMI is marked as supported
-    EXPECT_TRUE(dev.get_supported_metrics().bits.xgmi);
+    EXPECT_TRUE(dev.get_supported_metrics().xgmi());
 
     // Collect metrics
     auto collected_metrics = dev.get_gpu_metrics(all_metrics_enabled());
@@ -1067,7 +1067,7 @@ TEST_F(DeviceTest, xgmi_read_write_data_collection_all_links)
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
 
     // Verify XGMI is marked as supported
-    EXPECT_TRUE(dev.get_supported_metrics().bits.xgmi);
+    EXPECT_TRUE(dev.get_supported_metrics().xgmi());
 
     // Collect metrics
     auto collected_metrics = dev.get_gpu_metrics(all_metrics_enabled());
@@ -1112,7 +1112,7 @@ TEST_F(DeviceTest, xgmi_sentinel_value_handling)
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
 
     // Verify XGMI is marked as supported (at least one metric is valid)
-    EXPECT_TRUE(dev.get_supported_metrics().bits.xgmi);
+    EXPECT_TRUE(dev.get_supported_metrics().xgmi());
 
     // Collect metrics
     auto collected_metrics = dev.get_gpu_metrics(all_metrics_enabled());
@@ -1140,7 +1140,7 @@ TEST_F(DeviceTest, xgmi_not_collected_when_unsupported)
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
 
     // Verify XGMI is NOT marked as supported
-    EXPECT_FALSE(dev.get_supported_metrics().bits.xgmi);
+    EXPECT_FALSE(dev.get_supported_metrics().xgmi());
 
     // Collect metrics
     auto collected_metrics = dev.get_gpu_metrics(all_metrics_enabled());
@@ -1183,7 +1183,7 @@ TEST_F(DeviceTest, pcie_link_width_collection)
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
 
     // Verify PCIe is marked as supported
-    EXPECT_TRUE(dev.get_supported_metrics().bits.pcie);
+    EXPECT_TRUE(dev.get_supported_metrics().pcie());
 
     // Collect metrics
     auto collected_metrics = dev.get_gpu_metrics(all_metrics_enabled());
@@ -1215,7 +1215,7 @@ TEST_F(DeviceTest, pcie_link_speed_collection)
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
 
     // Verify PCIe is marked as supported
-    EXPECT_TRUE(dev.get_supported_metrics().bits.pcie);
+    EXPECT_TRUE(dev.get_supported_metrics().pcie());
 
     // Collect metrics
     auto collected_metrics = dev.get_gpu_metrics(all_metrics_enabled());
@@ -1247,7 +1247,7 @@ TEST_F(DeviceTest, pcie_bandwidth_accumulator_collection)
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
 
     // Verify PCIe is marked as supported
-    EXPECT_TRUE(dev.get_supported_metrics().bits.pcie);
+    EXPECT_TRUE(dev.get_supported_metrics().pcie());
 
     // Collect metrics
     auto collected_metrics = dev.get_gpu_metrics(all_metrics_enabled());
@@ -1279,7 +1279,7 @@ TEST_F(DeviceTest, pcie_bandwidth_instantaneous_collection)
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
 
     // Verify PCIe is marked as supported
-    EXPECT_TRUE(dev.get_supported_metrics().bits.pcie);
+    EXPECT_TRUE(dev.get_supported_metrics().pcie());
 
     // Collect metrics
     auto collected_metrics = dev.get_gpu_metrics(all_metrics_enabled());
@@ -1315,7 +1315,7 @@ TEST_F(DeviceTest, pcie_sentinel_value_handling)
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
 
     // Verify PCIe is marked as supported (at least one metric is valid)
-    EXPECT_TRUE(dev.get_supported_metrics().bits.pcie);
+    EXPECT_TRUE(dev.get_supported_metrics().pcie());
 
     // Collect metrics
     auto collected_metrics = dev.get_gpu_metrics(all_metrics_enabled());
@@ -1341,7 +1341,7 @@ TEST_F(DeviceTest, pcie_not_collected_when_unsupported)
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
 
     // Verify PCIe is NOT marked as supported
-    EXPECT_FALSE(dev.get_supported_metrics().bits.pcie);
+    EXPECT_FALSE(dev.get_supported_metrics().pcie());
 
     // Collect metrics
     auto collected_metrics = dev.get_gpu_metrics(all_metrics_enabled());
@@ -1372,18 +1372,18 @@ TEST_F(DeviceTest, all_metrics_supported_detection)
 
     // Verify all metric support bits are set
     auto supported = dev.get_supported_metrics();
-    EXPECT_TRUE(supported.bits.current_socket_power);
-    EXPECT_TRUE(supported.bits.average_socket_power);
-    EXPECT_TRUE(supported.bits.memory_usage);
-    EXPECT_TRUE(supported.bits.hotspot_temperature);
-    EXPECT_TRUE(supported.bits.edge_temperature);
-    EXPECT_TRUE(supported.bits.gfx_activity);
-    EXPECT_TRUE(supported.bits.umc_activity);
-    EXPECT_TRUE(supported.bits.mm_activity);
-    EXPECT_TRUE(supported.bits.vcn_activity);
-    EXPECT_TRUE(supported.bits.jpeg_activity);
-    EXPECT_TRUE(supported.bits.xgmi);
-    EXPECT_TRUE(supported.bits.pcie);
+    EXPECT_TRUE(supported.current_socket_power());
+    EXPECT_TRUE(supported.average_socket_power());
+    EXPECT_TRUE(supported.memory_usage());
+    EXPECT_TRUE(supported.hotspot_temperature());
+    EXPECT_TRUE(supported.edge_temperature());
+    EXPECT_TRUE(supported.gfx_activity());
+    EXPECT_TRUE(supported.umc_activity());
+    EXPECT_TRUE(supported.mm_activity());
+    EXPECT_TRUE(supported.vcn_activity());
+    EXPECT_TRUE(supported.jpeg_activity());
+    EXPECT_TRUE(supported.xgmi());
+    EXPECT_TRUE(supported.pcie());
 }
 
 /**
@@ -1411,7 +1411,7 @@ TEST_F(DeviceTest, vcn_activity_support_detection_any_xcp)
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
 
     // Verify VCN activity is marked as supported
-    EXPECT_TRUE(dev.get_supported_metrics().bits.vcn_activity);
+    EXPECT_TRUE(dev.get_supported_metrics().vcn_activity());
 }
 
 /**
@@ -1428,7 +1428,7 @@ TEST_F(DeviceTest, vcn_activity_unsupported_all_sentinels)
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
 
     // Verify VCN activity is NOT supported
-    EXPECT_FALSE(dev.get_supported_metrics().bits.vcn_activity);
+    EXPECT_FALSE(dev.get_supported_metrics().vcn_activity());
 }
 
 /**
@@ -1456,7 +1456,7 @@ TEST_F(DeviceTest, jpeg_activity_support_detection_any_xcp)
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
 
     // Verify JPEG activity is marked as supported
-    EXPECT_TRUE(dev.get_supported_metrics().bits.jpeg_activity);
+    EXPECT_TRUE(dev.get_supported_metrics().jpeg_activity());
 }
 
 /**
@@ -1483,7 +1483,7 @@ TEST_F(DeviceTest, xgmi_support_detection_link_width_only)
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
 
     // Verify XGMI is marked as supported (OR logic)
-    EXPECT_TRUE(dev.get_supported_metrics().bits.xgmi);
+    EXPECT_TRUE(dev.get_supported_metrics().xgmi());
 }
 
 /**
@@ -1510,7 +1510,7 @@ TEST_F(DeviceTest, xgmi_support_detection_any_read_data_valid)
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
 
     // Verify XGMI is marked as supported (std::any_of logic)
-    EXPECT_TRUE(dev.get_supported_metrics().bits.xgmi);
+    EXPECT_TRUE(dev.get_supported_metrics().xgmi());
 }
 
 /**
@@ -1537,7 +1537,7 @@ TEST_F(DeviceTest, pcie_support_detection_bandwidth_only)
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
 
     // Verify PCIe is marked as supported (OR logic)
-    EXPECT_TRUE(dev.get_supported_metrics().bits.pcie);
+    EXPECT_TRUE(dev.get_supported_metrics().pcie());
 }
 
 /**
@@ -1562,7 +1562,7 @@ TEST_F(DeviceTest, memory_usage_support_detection)
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
 
     // Verify memory usage is marked as supported
-    EXPECT_TRUE(dev.get_supported_metrics().bits.memory_usage);
+    EXPECT_TRUE(dev.get_supported_metrics().memory_usage());
 }
 
 /**
@@ -1585,7 +1585,7 @@ TEST_F(DeviceTest, memory_usage_unsupported_api_failure)
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
 
     // Verify memory usage is NOT marked as supported
-    EXPECT_FALSE(dev.get_supported_metrics().bits.memory_usage);
+    EXPECT_FALSE(dev.get_supported_metrics().memory_usage());
 }
 
 /**
@@ -1610,7 +1610,7 @@ TEST_F(DeviceTest, memory_usage_unsupported_sentinel_value)
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
 
     // Verify memory usage is NOT marked as supported
-    EXPECT_FALSE(dev.get_supported_metrics().bits.memory_usage);
+    EXPECT_FALSE(dev.get_supported_metrics().memory_usage());
 }
 
 // ============================================================================
@@ -1654,10 +1654,10 @@ TEST_F(DeviceTest, vcn_activity_top_level_field_only)
     // stats This test documents the gap and will fail until implementation is fixed
 
     // When implementation is fixed, uncomment:
-    // EXPECT_TRUE(dev.get_supported_metrics().bits.vcn_activity);
+    // EXPECT_TRUE(dev.get_supported_metrics().vcn_activity());
 
     // Current behavior (documents the bug):
-    EXPECT_FALSE(dev.get_supported_metrics().bits.vcn_activity)
+    EXPECT_FALSE(dev.get_supported_metrics().vcn_activity())
         << "BUG: Implementation does not check top-level vcn_activity[] field";
 }
 
@@ -1690,7 +1690,7 @@ TEST_F(DeviceTest, vcn_activity_in_both_fields)
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
 
     // VCN activity should be supported (XCP stats are valid)
-    EXPECT_TRUE(dev.get_supported_metrics().bits.vcn_activity);
+    EXPECT_TRUE(dev.get_supported_metrics().vcn_activity());
 
     // Collect metrics
     auto collected_metrics = dev.get_gpu_metrics(all_metrics_enabled());
@@ -1735,7 +1735,7 @@ TEST_F(DeviceTest, vcn_activity_detection_should_check_both_sources)
 
     // EXPECTED (when fixed): vcn_activity should be supported
     // CURRENT: Will be false because top-level field is not checked
-    EXPECT_FALSE(dev.get_supported_metrics().bits.vcn_activity)
+    EXPECT_FALSE(dev.get_supported_metrics().vcn_activity())
         << "Implementation gap: initialize_supported_metrics() should check both "
            "vcn_activity[] AND xcp_stats[].vcn_busy[]";
 }
@@ -1810,7 +1810,7 @@ TEST_F(DeviceTest, vcn_activity_xcp_disabled_top_level_valid)
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
 
     // CURRENT: VCN not supported (implementation only checks XCP stats)
-    EXPECT_FALSE(dev.get_supported_metrics().bits.vcn_activity);
+    EXPECT_FALSE(dev.get_supported_metrics().vcn_activity());
 
     // EXPECTED (when fixed): Should be supported via top-level field
     // This represents real hardware scenario where XCP partitioning is disabled
@@ -1876,8 +1876,8 @@ TEST_F(DeviceTest, get_metrics_info_failure_during_init)
 
     // Verify memory is supported but GPU metrics are not
     auto supported = dev.get_supported_metrics();
-    EXPECT_TRUE(supported.bits.memory_usage);
-    EXPECT_FALSE(supported.bits.current_socket_power);
+    EXPECT_TRUE(supported.memory_usage());
+    EXPECT_FALSE(supported.current_socket_power());
 }
 
 /**

@@ -999,7 +999,7 @@ perfetto_processor_t::handle([[maybe_unused]] const pmc::gpu::sample& _gpu_pmc)
         return fmt::format("GPU [{}] {} (S)", _device_id, metric);
     };
 
-    if(_gpu_pmc.enabled_metric.bits.gfx_activity)
+    if(_gpu_pmc.enabled_metric.gfx_activity())
     {
         if(!amd_smi_gfx_track::exists(_device_id))
             amd_smi_gfx_track::emplace(_device_id, make_track_name("GFX Busy"), "%");
@@ -1015,31 +1015,31 @@ perfetto_processor_t::handle([[maybe_unused]] const pmc::gpu::sample& _gpu_pmc)
         TRACE_COUNTER("device_busy_mm", amd_smi_mm_track::at(_device_id, 0), _ts,
                       static_cast<double>(_gpu_pmc.metric_values.mm_activity));
     }
-    if(_gpu_pmc.enabled_metric.bits.hotspot_temperature ||
-       _gpu_pmc.enabled_metric.bits.edge_temperature)
+    if(_gpu_pmc.enabled_metric.hotspot_temperature() ||
+       _gpu_pmc.enabled_metric.edge_temperature())
     {
         if(!amd_smi_temp_track::exists(_device_id))
             amd_smi_temp_track::emplace(_device_id, make_track_name("Temperature"),
                                         "deg C");
 
-        const double temp = _gpu_pmc.enabled_metric.bits.hotspot_temperature
+        const double temp = _gpu_pmc.enabled_metric.hotspot_temperature()
                                 ? _gpu_pmc.metric_values.hotspot_temperature
                                 : _gpu_pmc.metric_values.edge_temperature;
         TRACE_COUNTER("device_temp", amd_smi_temp_track::at(_device_id, 0), _ts, temp);
     }
-    if(_gpu_pmc.enabled_metric.bits.current_socket_power ||
-       _gpu_pmc.enabled_metric.bits.average_socket_power)
+    if(_gpu_pmc.enabled_metric.current_socket_power() ||
+       _gpu_pmc.enabled_metric.average_socket_power())
     {
         if(!amd_smi_power_track::exists(_device_id))
             amd_smi_power_track::emplace(_device_id, make_track_name("Current Power"),
                                          "watts");
 
-        const double power = _gpu_pmc.enabled_metric.bits.average_socket_power
+        const double power = _gpu_pmc.enabled_metric.average_socket_power()
                                  ? _gpu_pmc.metric_values.average_socket_power
                                  : _gpu_pmc.metric_values.current_socket_power;
         TRACE_COUNTER("device_power", amd_smi_power_track::at(_device_id, 0), _ts, power);
     }
-    if(_gpu_pmc.enabled_metric.bits.memory_usage)
+    if(_gpu_pmc.enabled_metric.memory_usage())
     {
         if(!amd_smi_mem_track::exists(_device_id))
             amd_smi_mem_track::emplace(_device_id, make_track_name("Memory Usage"),
@@ -1051,9 +1051,9 @@ perfetto_processor_t::handle([[maybe_unused]] const pmc::gpu::sample& _gpu_pmc)
                       mem_mb);
     }
 
-    if(!_gpu_pmc.enabled_metric.bits.vcn_activity &&
-       !_gpu_pmc.enabled_metric.bits.jpeg_activity &&
-       !_gpu_pmc.enabled_metric.bits.xgmi && !_gpu_pmc.enabled_metric.bits.pcie)
+    if(!_gpu_pmc.enabled_metric.vcn_activity() &&
+       !_gpu_pmc.enabled_metric.jpeg_activity() && !_gpu_pmc.enabled_metric.xgmi() &&
+       !_gpu_pmc.enabled_metric.pcie())
         return;
 
     // Helper lambda to insert VCN/JPEG activity metrics
@@ -1122,7 +1122,7 @@ perfetto_processor_t::handle([[maybe_unused]] const pmc::gpu::sample& _gpu_pmc)
         }
     };
 
-    if(_gpu_pmc.enabled_metric.bits.vcn_activity)
+    if(_gpu_pmc.enabled_metric.vcn_activity())
     {
         for(size_t xcp = 0; xcp < AMDSMI_MAX_NUM_XCP; ++xcp)
         {
@@ -1132,7 +1132,7 @@ perfetto_processor_t::handle([[maybe_unused]] const pmc::gpu::sample& _gpu_pmc)
         }
     }
 
-    if(_gpu_pmc.enabled_metric.bits.jpeg_activity)
+    if(_gpu_pmc.enabled_metric.jpeg_activity())
     {
         for(size_t xcp = 0; xcp < AMDSMI_MAX_NUM_XCP; ++xcp)
         {
@@ -1142,7 +1142,7 @@ perfetto_processor_t::handle([[maybe_unused]] const pmc::gpu::sample& _gpu_pmc)
         }
     }
 
-    if(_gpu_pmc.enabled_metric.bits.xgmi)
+    if(_gpu_pmc.enabled_metric.xgmi())
     {
         if(!amd_smi_xgmi_link_width_track::exists(_device_id))
         {
@@ -1196,7 +1196,7 @@ perfetto_processor_t::handle([[maybe_unused]] const pmc::gpu::sample& _gpu_pmc)
         }
     }
 
-    if(_gpu_pmc.enabled_metric.bits.pcie)
+    if(_gpu_pmc.enabled_metric.pcie())
     {
         if(!amd_smi_pcie_link_width_track::exists(_device_id))
         {

@@ -29,6 +29,7 @@
 #pragma once
 
 #include "core/perfetto.hpp"
+#include "library/pmc/gpu/metric_descriptors.hpp"
 #include "library/pmc/gpu/types.hpp"
 #include "library/thread_info.hpp"
 
@@ -62,30 +63,20 @@ struct track_description
     std::vector<size_t> track_indexes;
 };
 
-// Helper function to create enabled_metrics value from bit positions
-// See enabled_metrics definition in pmc/gpu/types.hpp for bit position
-// documentation
-inline constexpr uint32_t
-make_metric_value(std::initializer_list<uint8_t> bit_positions)
-{
-    uint32_t value = 0;
-    for(auto bit : bit_positions)
-    {
-        value |= (1u << bit);
-    }
-    return value;
-}
+// Use centralized metric masks from metric_descriptors.hpp
+// This eliminates hardcoded bit positions
+namespace metric_masks = ::rocprofsys::pmc::gpu::metric_masks;
 
-const auto GFX_BUSY_VALUE      = make_metric_value({ 5 });     // gfx_activity
-const auto UMC_BUSY_VALUE      = make_metric_value({ 6 });     // umc_activity
-const auto MM_BUSY_VALUE       = make_metric_value({ 7 });     // mm_activity
-const auto TEMPERATURE_VALUE   = make_metric_value({ 3, 4 });  // hotspot, edge
-const auto CURRENT_POWER_VALUE = make_metric_value({ 0, 1 });  // current, average
-const auto MEMORY_USAGE_VALUE  = make_metric_value({ 2 });     // memory_usage
-const auto VCN_ACTIVITY_VALUE  = make_metric_value({ 8 });     // vcn_activity
-const auto JPEG_ACTIVITY_VALUE = make_metric_value({ 9 });     // jpeg_activity
-const auto XGMI_VALUE          = make_metric_value({ 12 });    // xgmi
-const auto PCIE_VALUE          = make_metric_value({ 13 });    // pcie
+const auto GFX_BUSY_VALUE      = metric_masks::gfx_activity;
+const auto UMC_BUSY_VALUE      = metric_masks::umc_activity;
+const auto MM_BUSY_VALUE       = metric_masks::mm_activity;
+const auto TEMPERATURE_VALUE   = metric_masks::temperature;
+const auto CURRENT_POWER_VALUE = metric_masks::power;
+const auto MEMORY_USAGE_VALUE  = metric_masks::memory_usage;
+const auto VCN_ACTIVITY_VALUE  = metric_masks::vcn_activity;
+const auto JPEG_ACTIVITY_VALUE = metric_masks::jpeg_activity;
+const auto XGMI_VALUE          = metric_masks::xgmi_mask;
+const auto PCIE_VALUE          = metric_masks::pcie_mask;
 
 inline std::unordered_map<uint32_t, track_description>&
 get_perfetto_tracks()
@@ -155,7 +146,7 @@ get_perfetto_bundle()
  *
  * This policy handles real-time serialization of AMD SMI metric samples into
  * Perfetto trace format, creating counter tracks for each metric type.
- * Supports both device-level metrics (Radeon) and per-XCP metrics (MI300 series).
+ * Supports both device-level metrics (Radeon) and per-XCP metrics.
  *
  * @see cache_policy for writing to trace cache instead
  */
@@ -212,7 +203,7 @@ struct perfetto_policy
 
         for(auto& [num, description] : tracks)
         {
-            auto enabled_metric = num & enabled_metric_config.value;
+            auto enabled_metric = num & enabled_metric_config.value();
             if(enabled_metric == 0)
             {
                 continue;
@@ -248,7 +239,7 @@ struct perfetto_policy
             }
         }
 
-        if(enabled_metric_config.bits.xgmi)
+        if(enabled_metric_config.xgmi())
         {
             auto& xgmi_tracks = get_xgmi_tracks()[device_index];
 
@@ -266,7 +257,7 @@ struct perfetto_policy
             }
         }
 
-        if(enabled_metric_config.bits.pcie)
+        if(enabled_metric_config.pcie())
         {
             auto& pcie_tracks = get_pcie_tracks()[device_index];
 
@@ -334,11 +325,10 @@ private:
             return;
         }
 
-        pmc::gpu::enabled_metrics effective_metrics;
-        effective_metrics.value =
-            static_cast<uint32_t>(enabled_metrics.value & supported_metrics.value);
+        pmc::gpu::enabled_metrics effective_metrics(enabled_metrics.value() &
+                                                    supported_metrics.value());
 
-        if(effective_metrics.value == 0)
+        if(effective_metrics.none())
         {
             LOG_DEBUG("No enabled PMC metrics for device [{}]", device_index);
             return;
@@ -371,7 +361,7 @@ private:
         const enabled_metrics&                           effective_metrics,
         std::unordered_map<uint32_t, track_description>& tracks)
     {
-        if(effective_metrics.bits.gfx_activity &&
+        if(effective_metrics.gfx_activity() &&
            !tracks.at(GFX_BUSY_VALUE).track_indexes.empty())
         {
             TRACE_COUNTER("device_busy_gfx",
@@ -380,7 +370,7 @@ private:
                           ts, static_cast<double>(metric_values.gfx_activity));
         }
 
-        if(effective_metrics.bits.umc_activity &&
+        if(effective_metrics.umc_activity() &&
            !tracks.at(UMC_BUSY_VALUE).track_indexes.empty())
         {
             TRACE_COUNTER("device_busy_umc",
@@ -389,7 +379,7 @@ private:
                           ts, static_cast<double>(metric_values.umc_activity));
         }
 
-        if(effective_metrics.bits.mm_activity &&
+        if(effective_metrics.mm_activity() &&
            !tracks.at(MM_BUSY_VALUE).track_indexes.empty())
         {
             TRACE_COUNTER("device_busy_mm",
@@ -398,11 +388,11 @@ private:
                           ts, static_cast<double>(metric_values.mm_activity));
         }
 
-        if((effective_metrics.bits.edge_temperature ||
-            effective_metrics.bits.hotspot_temperature) &&
+        if((effective_metrics.edge_temperature() ||
+            effective_metrics.hotspot_temperature()) &&
            !tracks.at(TEMPERATURE_VALUE).track_indexes.empty())
         {
-            const double temp = effective_metrics.bits.hotspot_temperature
+            const double temp = effective_metrics.hotspot_temperature()
                                     ? metric_values.hotspot_temperature
                                     : metric_values.edge_temperature;
             TRACE_COUNTER(
@@ -412,11 +402,11 @@ private:
                 ts, temp);
         }
 
-        if((effective_metrics.bits.average_socket_power ||
-            effective_metrics.bits.current_socket_power) &&
+        if((effective_metrics.average_socket_power() ||
+            effective_metrics.current_socket_power()) &&
            !tracks.at(CURRENT_POWER_VALUE).track_indexes.empty())
         {
-            const double power = effective_metrics.bits.average_socket_power
+            const double power = effective_metrics.average_socket_power()
                                      ? metric_values.average_socket_power
                                      : metric_values.current_socket_power;
             TRACE_COUNTER(
@@ -426,7 +416,7 @@ private:
                 ts, power);
         }
 
-        if(effective_metrics.bits.memory_usage &&
+        if(effective_metrics.memory_usage() &&
            !tracks.at(MEMORY_USAGE_VALUE).track_indexes.empty())
         {
             const double usage =
@@ -446,8 +436,8 @@ private:
         const pmc::gpu::enabled_metrics&                 supported_metric_config,
         std::unordered_map<uint32_t, track_description>& tracks)
     {
-        // Per-XCP VCN busy metrics (MI300)
-        if(effective_metrics.bits.vcn_busy &&
+        // Per-XCP VCN busy metrics
+        if(effective_metrics.vcn_busy() &&
            !tracks.at(VCN_ACTIVITY_VALUE).track_indexes.empty())
         {
             size_t engine_id = 0;
@@ -470,7 +460,7 @@ private:
         }
 
         // Device-level VCN activity (Radeon)
-        if(effective_metrics.bits.vcn_activity &&
+        if(effective_metrics.vcn_activity() &&
            !tracks.at(VCN_ACTIVITY_VALUE).track_indexes.empty())
         {
             size_t engine_id = 0;
@@ -490,11 +480,11 @@ private:
         }
 
         LOG_DEBUG("JPEG activity: {}, enabled: {}, supported: {}",
-                  effective_metrics.bits.jpeg_activity,
-                  enabled_metric_config.bits.jpeg_activity,
-                  supported_metric_config.bits.jpeg_activity);
+                  effective_metrics.jpeg_activity(),
+                  enabled_metric_config.jpeg_activity(),
+                  supported_metric_config.jpeg_activity());
 
-        if(effective_metrics.bits.jpeg_busy &&
+        if(effective_metrics.jpeg_busy() &&
            !tracks.at(JPEG_ACTIVITY_VALUE).track_indexes.empty())
         {
             size_t engine_id = 0;
@@ -515,7 +505,7 @@ private:
             }
         }
 
-        if(effective_metrics.bits.jpeg_activity &&
+        if(effective_metrics.jpeg_activity() &&
            !tracks.at(JPEG_ACTIVITY_VALUE).track_indexes.empty())
         {
             size_t engine_id = 0;
@@ -539,7 +529,7 @@ private:
                                      const metrics&         metric_values,
                                      const enabled_metrics& effective_metrics)
     {
-        if(!effective_metrics.bits.xgmi)
+        if(!effective_metrics.xgmi())
         {
             return;
         }
@@ -597,7 +587,7 @@ private:
                                      const metrics&         metric_values,
                                      const enabled_metrics& effective_metrics)
     {
-        if(!effective_metrics.bits.pcie)
+        if(!effective_metrics.pcie())
         {
             return;
         }

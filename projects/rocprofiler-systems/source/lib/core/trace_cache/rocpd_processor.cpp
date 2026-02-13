@@ -385,24 +385,24 @@ rocpd_processor_t::handle([[maybe_unused]] const pmc::gpu::sample& _gpu_pmc)
 
     insert_scalar(trait::name<category::amd_smi_gfx_busy>::value,
                   info::format_track_name<category::amd_smi_gfx_busy>(),
-                  enabled.bits.gfx_activity, m.gfx_activity);
+                  enabled.gfx_activity(), m.gfx_activity);
     insert_scalar(trait::name<category::amd_smi_umc_busy>::value,
                   info::format_track_name<category::amd_smi_umc_busy>(),
-                  enabled.bits.umc_activity, m.umc_activity);
+                  enabled.umc_activity(), m.umc_activity);
     insert_scalar(trait::name<category::amd_smi_mm_busy>::value,
                   info::format_track_name<category::amd_smi_mm_busy>(),
-                  enabled.bits.mm_activity, m.mm_activity);
+                  enabled.mm_activity(), m.mm_activity);
     insert_scalar(trait::name<category::amd_smi_temp>::value,
                   info::format_track_name<category::amd_smi_temp>(),
-                  enabled.bits.hotspot_temperature, m.hotspot_temperature);
+                  enabled.hotspot_temperature(), m.hotspot_temperature);
     insert_scalar(trait::name<category::amd_smi_power>::value,
                   info::format_track_name<category::amd_smi_power>(),
-                  enabled.bits.current_socket_power || enabled.bits.average_socket_power,
-                  enabled.bits.current_socket_power ? m.current_socket_power
-                                                    : m.average_socket_power);
+                  enabled.current_socket_power() || enabled.average_socket_power(),
+                  enabled.current_socket_power() ? m.current_socket_power
+                                                 : m.average_socket_power);
     insert_scalar(trait::name<category::amd_smi_memory_usage>::value,
                   info::format_track_name<category::amd_smi_memory_usage>(),
-                  enabled.bits.memory_usage, m.memory_usage / 1024.0);
+                  enabled.memory_usage(), m.memory_usage / 1024.0);
 
     auto insert_xcp_metrics = [&](const char* base_name, const std::string& base_track,
                                   bool is_enabled, const auto& get_array) {
@@ -423,11 +423,11 @@ rocpd_processor_t::handle([[maybe_unused]] const pmc::gpu::sample& _gpu_pmc)
 
     insert_xcp_metrics(trait::name<category::amd_smi_vcn_activity>::value,
                        info::format_track_name<category::amd_smi_vcn_activity>(),
-                       enabled.bits.vcn_busy,
+                       enabled.vcn_busy(),
                        [](const auto& xcp) -> const auto& { return xcp.vcn_busy; });
     insert_xcp_metrics(trait::name<category::amd_smi_jpeg_activity>::value,
                        info::format_track_name<category::amd_smi_jpeg_activity>(),
-                       enabled.bits.jpeg_busy,
+                       enabled.jpeg_busy(),
                        [](const auto& xcp) -> const auto& { return xcp.jpeg_busy; });
 
     auto insert_device_level_metrics = [&](const std::string_view base_name,
@@ -446,37 +446,37 @@ rocpd_processor_t::handle([[maybe_unused]] const pmc::gpu::sample& _gpu_pmc)
     };
 
     insert_device_level_metrics(info::format_track_name<category::amd_smi_vcn_activity>(),
-                                enabled.bits.vcn_activity, m.vcn_activity);
+                                enabled.vcn_activity(), m.vcn_activity);
 
     insert_device_level_metrics(
         info::format_track_name<category::amd_smi_jpeg_activity>(),
-        enabled.bits.jpeg_activity, m.jpeg_activity);
+        enabled.jpeg_activity(), m.jpeg_activity);
 
     insert_scalar(trait::name<category::amd_smi_pcie_link_width>::value,
                   info::format_track_name<category::amd_smi_pcie_link_width>(),
-                  enabled.bits.pcie, m.pcie.link.width);
+                  enabled.pcie(), m.pcie.link.width);
     insert_scalar(trait::name<category::amd_smi_pcie_link_speed>::value,
                   info::format_track_name<category::amd_smi_pcie_link_speed>(),
-                  enabled.bits.pcie, m.pcie.link.speed);
+                  enabled.pcie(), m.pcie.link.speed);
     insert_scalar(trait::name<category::amd_smi_pcie_bandwidth_acc>::value,
                   info::format_track_name<category::amd_smi_pcie_bandwidth_acc>(),
-                  enabled.bits.pcie, m.pcie.bandwidth.acc);
+                  enabled.pcie(), m.pcie.bandwidth.acc);
     insert_scalar(trait::name<category::amd_smi_pcie_bandwidth_inst>::value,
                   info::format_track_name<category::amd_smi_pcie_bandwidth_inst>(),
-                  enabled.bits.pcie, m.pcie.bandwidth.inst);
+                  enabled.pcie(), m.pcie.bandwidth.inst);
 
     // XGMI metrics
     insert_scalar(trait::name<category::amd_smi_xgmi_link_width>::value,
                   info::format_track_name<category::amd_smi_xgmi_link_width>(),
-                  enabled.bits.xgmi, m.xgmi.link.width);
+                  enabled.xgmi(), m.xgmi.link.width);
     insert_scalar(trait::name<category::amd_smi_xgmi_link_speed>::value,
                   info::format_track_name<category::amd_smi_xgmi_link_speed>(),
-                  enabled.bits.xgmi, m.xgmi.link.speed);
+                  enabled.xgmi(), m.xgmi.link.speed);
     insert_device_level_metrics(
-        info::format_track_name<category::amd_smi_xgmi_read_data>(), enabled.bits.xgmi,
+        info::format_track_name<category::amd_smi_xgmi_read_data>(), enabled.xgmi(),
         m.xgmi.data_acc.read);
     insert_device_level_metrics(
-        info::format_track_name<category::amd_smi_xgmi_write_data>(), enabled.bits.xgmi,
+        info::format_track_name<category::amd_smi_xgmi_write_data>(), enabled.xgmi(),
         m.xgmi.data_acc.write);
 }
 #endif

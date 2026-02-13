@@ -29,6 +29,7 @@
 #pragma once
 
 #include "core/config.hpp"
+#include "library/pmc/gpu/metric_descriptors.hpp"
 #include "library/pmc/gpu/types.hpp"
 #include "logger/debug.hpp"
 
@@ -36,7 +37,6 @@
 #include <regex>
 #include <set>
 #include <string>
-#include <unordered_map>
 
 namespace rocprofsys
 {
@@ -45,50 +45,38 @@ namespace pmc
 namespace collectors
 {
 
-// Import GPU types into collectors namespace
-namespace gpu
-{
-using ::rocprofsys::pmc::device_filter;
-using ::rocprofsys::pmc::device_selection_mode;
-using ::rocprofsys::pmc::gpu::enabled_metrics;
-}  // namespace gpu
-
-namespace
-{
-// Bitfield values for enabling/disabling all metrics at once
-// 0xffff sets all 16 metric bits to 1 (all enabled)
-// 0x0000 sets all bits to 0 (all disabled)
-constexpr uint16_t ENABLE_ALL_METRICS  = 0xffff;
-constexpr uint16_t DISABLE_ALL_METRICS = 0x0000;
-}  // namespace
+// Type aliases using fully qualified names
+using device_filter_t         = ::rocprofsys::pmc::device_filter;
+using device_selection_mode_t = ::rocprofsys::pmc::device_selection_mode;
+using enabled_metrics_t       = ::rocprofsys::pmc::gpu::enabled_metrics;
 
 struct settings_policy
 {
-    static gpu::device_filter get_device_filter() noexcept
+    static device_filter_t get_device_filter() noexcept
     {
         auto filter = rocprofsys::get_sampling_gpus();
         if(filter == "all" || filter == "on" || filter.empty())
         {
-            gpu::device_filter result;
-            result.mode = gpu::device_selection_mode::ALL;
+            device_filter_t result;
+            result.mode = device_selection_mode_t::ALL;
             return result;
         }
 
         if(filter == "none" || filter == "off")
         {
-            gpu::device_filter result;
-            result.mode = gpu::device_selection_mode::NONE;
+            device_filter_t result;
+            result.mode = device_selection_mode_t::NONE;
             return result;
         }
 
-        auto               enabled_devices = parse_numeric_range(filter);
-        gpu::device_filter result;
-        result.mode    = gpu::device_selection_mode::SPECIFIC;
+        auto            enabled_devices = parse_numeric_range(filter);
+        device_filter_t result;
+        result.mode    = device_selection_mode_t::SPECIFIC;
         result.indices = enabled_devices;
         return result;
     }
 
-    static gpu::enabled_metrics get_enabled_metrics() noexcept
+    static enabled_metrics_t get_enabled_metrics() noexcept
     {
         static auto _enabled_metrics = []() {
             auto setting = get_setting_value<std::string>("ROCPROFSYS_AMD_SMI_METRICS");
@@ -100,7 +88,7 @@ struct settings_policy
     static bool get_use_perfetto_legacy_metrics() { return get_use_perfetto(); }
 
 private:
-    static gpu::enabled_metrics parse_enabled_metrics(const std::string& input)
+    static enabled_metrics_t parse_enabled_metrics(const std::string& input)
     {
         std::string settings_trimmed;
         settings_trimmed.reserve(input.size());
@@ -113,67 +101,41 @@ private:
 
         if(settings_trimmed.empty() || settings_trimmed == "all")
         {
-            gpu::enabled_metrics result;
-            result.value = ENABLE_ALL_METRICS;
-            return result;
+            return enabled_metrics_t(gpu::metric_masks::all);
         }
 
         if(settings_trimmed == "none")
         {
-            gpu::enabled_metrics result;
-            result.value = DISABLE_ALL_METRICS;
-            return result;
+            return enabled_metrics_t(gpu::metric_masks::none);
         }
 
-        std::regex validator{
-            R"(^(?:temp|power|busy|mem_usage|vcn_activity|jpeg_activity|xgmi|pcie)"
-            R"()(?:[,;](?:temp|power|busy|mem_usage|vcn_activity|jpeg_activity|xgmi|pcie))*$)"
-        };
+        // Use validation pattern from metric_descriptors.hpp
+        std::regex validator{ std::string(gpu::metric_validation_pattern) };
 
         if(!std::regex_match(settings_trimmed, validator))
         {
             LOG_INFO("Invalid metrics settings '{}'. Enabling all metrics.", input);
-            gpu::enabled_metrics result;
-            result.value = ENABLE_ALL_METRICS;
-            return result;
+            return enabled_metrics_t(gpu::metric_masks::all);
         }
 
-        auto make_metric = [](std::initializer_list<uint8_t> bit_positions) {
-            uint32_t value = 0;
-            for(auto bit : bit_positions)
-            {
-                value |= (1u << bit);
-            }
-            gpu::enabled_metrics result;
-            result.value = value;
-            return result.value;
-        };
-
-        // See enabled_metrics definition in common.hpp for bit position documentation
-        const std::unordered_map<std::string, uint16_t> mapper{
-            { "temp", make_metric({ 3, 4 }) },        // hotspot, edge
-            { "power", make_metric({ 0, 1 }) },       // current, average
-            { "busy", make_metric({ 5, 6, 7 }) },     // gfx, umc, mm
-            { "mem_usage", make_metric({ 2 }) },      // memory_usage
-            { "vcn_activity", make_metric({ 8 }) },   // vcn_activity
-            { "jpeg_activity", make_metric({ 9 }) },  // jpeg_activity
-            { "xgmi", make_metric({ 12 }) },          // xgmi
-            { "pcie", make_metric({ 13 }) },          // pcie
-        };
-
-        gpu::enabled_metrics metrics;
-        metrics.value = DISABLE_ALL_METRICS;
+        // Parse metric aliases using the centralized alias table
+        enabled_metrics_t    metrics(gpu::metric_masks::none);
         std::regex           tokenizer{ R"(\w+)" };
         std::sregex_iterator it(settings_trimmed.begin(), settings_trimmed.end(),
                                 tokenizer);
-        std::sregex_iterator end;
+        std::sregex_iterator end_iter;
 
-        for(; it != end; ++it)
+        for(; it != end_iter; ++it)
         {
-            auto found = mapper.find(it->str());
-            if(found != mapper.end())
+            const auto& token = it->str();
+            // Look up alias in the centralized table
+            for(const auto& alias : gpu::user_metric_aliases)
             {
-                metrics.value |= found->second;
+                if(alias.name == token)
+                {
+                    metrics.set_value(metrics.value() | alias.mask);
+                    break;
+                }
             }
         }
 

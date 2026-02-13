@@ -29,14 +29,13 @@
 #pragma once
 
 #include "library/pmc/common/types.hpp"
+#include "library/pmc/gpu/metric_descriptors.hpp"
 
 #include <cstdint>
-#include <sstream>
-#include <string>
 
 #if ROCPROFSYS_USE_ROCM > 0
 #    include <array>
-#    include <set>
+#    include <sstream>
 #    include <stdexcept>
 
 #    include <amd_smi/amdsmi.h>
@@ -54,69 +53,9 @@ namespace gpu
 constexpr uint16_t METRIC_VALUE_NOT_SUPPORTED    = 0xffff;              // 16-bit sentinel
 constexpr uint64_t METRIC_VALUE_NOT_SUPPORTED_64 = 0xffffffffffffffff;  // 64-bit sentinel
 
-/**
- * @brief Bitfield union for selecting which AMD SMI metrics to collect.
- *
- * Bit positions (for value access):
- *   - current_socket_power = 0
- *   - average_socket_power = 1
- *   - memory_usage = 2
- *   - hotspot_temperature = 3
- *   - edge_temperature = 4
- *   - gfx_activity = 5
- *   - umc_activity = 6
- *   - mm_activity = 7
- *   - vcn_activity = 8
- *   - jpeg_activity = 9
- *   - vcn_busy = 10
- *   - jpeg_busy = 11
- *   - xgmi = 12
- *   - pcie = 13
- */
-union enabled_metrics
-{
-    struct
-    {
-        uint32_t current_socket_power : 1;
-        uint32_t average_socket_power : 1;
-        uint32_t memory_usage         : 1;
-        uint32_t hotspot_temperature  : 1;
-        uint32_t edge_temperature     : 1;
-        uint32_t gfx_activity         : 1;
-        uint32_t umc_activity         : 1;
-        uint32_t mm_activity          : 1;
-        uint32_t vcn_activity         : 1;
-        uint32_t jpeg_activity        : 1;
-        uint32_t vcn_busy             : 1;  // Per-XCP VCN busy
-        uint32_t jpeg_busy            : 1;  // Per-XCP JPEG busy
-        uint32_t xgmi                 : 1;
-        uint32_t pcie                 : 1;
-    } bits;
-    uint32_t value = 0;
-};
-
-inline std::string
-to_string(const enabled_metrics& metrics)
-{
-    std::stringstream ss;
-    ss << "[SMI enabled metrics] ";
-    ss << "Current socket power: " << static_cast<bool>(metrics.bits.current_socket_power)
-       << ", Average socket power: "
-       << static_cast<bool>(metrics.bits.average_socket_power)
-       << ", Memory usage: " << static_cast<bool>(metrics.bits.memory_usage)
-       << ", Hotspot temperature: " << static_cast<bool>(metrics.bits.hotspot_temperature)
-       << ", Edge temperature: " << static_cast<bool>(metrics.bits.edge_temperature)
-       << ", GFX activity: " << static_cast<bool>(metrics.bits.gfx_activity)
-       << ", UMC activity: " << static_cast<bool>(metrics.bits.umc_activity)
-       << ", MM activity: " << static_cast<bool>(metrics.bits.mm_activity)
-       << ", VCN activity: " << static_cast<bool>(metrics.bits.vcn_activity)
-       << ", JPEG activity: " << static_cast<bool>(metrics.bits.jpeg_activity)
-       << ", VCN busy: " << static_cast<bool>(metrics.bits.vcn_busy)
-       << ", JPEG busy: " << static_cast<bool>(metrics.bits.jpeg_busy)
-       << ", XGMI: " << static_cast<bool>(metrics.bits.xgmi)
-       << ", PCIE: " << static_cast<bool>(metrics.bits.pcie) << "\n";
-    return ss.str();
-}
+// enabled_metrics class and metric_id enum are now defined in metric_descriptors.hpp
+// This provides type-safe metric handling with explicit bit positions.
+// See metric_descriptors.hpp for the full API.
 
 #if ROCPROFSYS_USE_ROCM > 0
 
