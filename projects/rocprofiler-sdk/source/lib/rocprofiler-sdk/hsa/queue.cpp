@@ -242,8 +242,8 @@ WriteInterceptor(const void* packets,
         return;
     }
 
-    auto tracing_data_wrapper = tracing::pooled_tracing_data{};
-    auto& tracing_data_v = *tracing_data_wrapper;  // Reference to pooled object
+    auto  tracing_data_wrapper = tracing::pooled_tracing_data{};
+    auto& tracing_data_v       = *tracing_data_wrapper;
     tracing::populate_contexts(ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,
                                ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
                                tracing_data_v);
@@ -254,7 +254,7 @@ WriteInterceptor(const void* packets,
     };
 
     for(const auto* itr : context::get_active_contexts(queue_callback_context_filter))
-        tracing_data_v.external_correlation_ids.emplace(itr, tracing::empty_user_data);
+        tracing_data_v.external_correlation_ids.emplace_back(itr, tracing::empty_user_data);
 
     const auto* packets_arr         = static_cast<const rocprofiler_packet*>(packets);
     auto        transformed_packets = std::vector<rocprofiler_packet>{};

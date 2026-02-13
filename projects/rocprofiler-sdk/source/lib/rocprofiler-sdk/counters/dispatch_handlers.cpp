@@ -84,10 +84,13 @@ queue_cb(const context::context*                                         ctx,
     if(const auto* _corr_id = correlation_id)
     {
         _corr_id_v.internal = _corr_id->internal;
-        if(const auto* external =
-               rocprofiler::common::get_val(extern_corr_ids, info->internal_context))
+        auto extern_it =
+            std::find_if(extern_corr_ids.begin(),
+                         extern_corr_ids.end(),
+                         [ctx = info->internal_context](const auto& p) { return p.first == ctx; });
+        if(extern_it != extern_corr_ids.end())
         {
-            _corr_id_v.external = *external;
+            _corr_id_v.external = extern_it->second;
         }
     }
 

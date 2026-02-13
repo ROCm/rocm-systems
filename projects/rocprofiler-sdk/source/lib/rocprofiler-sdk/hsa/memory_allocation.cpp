@@ -64,7 +64,7 @@ namespace memory_allocation
 namespace
 {
 using context_t                = context::context;
-using external_corr_id_map_t   = std::unordered_map<const context_t*, rocprofiler_user_data_t>;
+using external_corr_id_map_t   = tracing::external_correlation_id_map_t;
 using region_to_agent_map      = std::unordered_map<hsa_region_t, rocprofiler_agent_id_t>;
 using memory_pool_to_agent_map = std::unordered_map<hsa_amd_memory_pool_t, rocprofiler_agent_id_t>;
 using region_to_agent_pair     = std::pair<region_to_agent_map*, rocprofiler_agent_id_t>;
@@ -360,7 +360,8 @@ memory_allocation_data::get_buffered_record(const context_t* _ctx,
                                             timestamp_t      _end) const
 {
     auto _external_corr_id =
-        (_ctx) ? tracing_data.external_correlation_ids.at(_ctx) : context::null_user_data;
+        (_ctx) ? tracing::find_external_correlation_id(tracing_data.external_correlation_ids, _ctx)
+               : context::null_user_data;
     auto _corr_id = rocprofiler_correlation_id_t{
         correlation_id->internal, _external_corr_id, correlation_id->ancestor};
 
@@ -465,8 +466,8 @@ memory_allocation_impl(Args... args)
     memory_allocation_data _data{};
 
     {
-        auto tracing_data_wrapper = tracing::pooled_tracing_data{};
-        auto& tracing_data = *tracing_data_wrapper;  // Reference to pooled object
+        auto  tracing_data_wrapper = tracing::pooled_tracing_data{};
+        auto& tracing_data         = *tracing_data_wrapper;
 
         tracing::populate_contexts(ROCPROFILER_CALLBACK_TRACING_MEMORY_ALLOCATION,
                                    ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION,
@@ -610,8 +611,8 @@ memory_free_impl(Args... args)
     memory_allocation_data _data{};
 
     {
-        auto tracing_data_wrapper = tracing::pooled_tracing_data{};
-        auto& tracing_data = *tracing_data_wrapper;  // Reference to pooled object
+        auto  tracing_data_wrapper = tracing::pooled_tracing_data{};
+        auto& tracing_data         = *tracing_data_wrapper;
 
         tracing::populate_contexts(ROCPROFILER_CALLBACK_TRACING_MEMORY_ALLOCATION,
                                    ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION,

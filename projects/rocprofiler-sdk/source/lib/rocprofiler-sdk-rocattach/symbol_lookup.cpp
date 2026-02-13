@@ -147,7 +147,7 @@ find_library(void*& addr, int inpid, const std::string& library)
     std::stringstream searchname;
     searchname << inpid << "::" << library;
     // Check cache first to avoid expensive /proc/maps scan
-    if (m_target_library_addrs.find(searchname.str()) != m_target_library_addrs.end())
+    if(m_target_library_addrs.find(searchname.str()) != m_target_library_addrs.end())
     {
         addr = m_target_library_addrs[searchname.str()];
         return true;

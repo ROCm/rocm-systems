@@ -66,7 +66,7 @@ namespace
 {
 using context_t              = context::context;
 using context_array_t        = common::container::small_vector<const context_t*>;
-using external_corr_id_map_t = std::unordered_map<const context_t*, rocprofiler_user_data_t>;
+using external_corr_id_map_t = tracing::external_correlation_id_map_t;
 
 template <size_t OpIdx>
 struct async_copy_info;
@@ -197,7 +197,8 @@ async_copy_data::get_buffered_record(const context_t* _ctx,
     ROCP_FATAL_IF(direction == ROCPROFILER_MEMORY_COPY_NONE) << "direction has not been set";
 
     auto _external_corr_id =
-        (_ctx) ? tracing_data.external_correlation_ids.at(_ctx) : context::null_user_data;
+        (_ctx) ? tracing::find_external_correlation_id(tracing_data.external_correlation_ids, _ctx)
+               : context::null_user_data;
     auto _corr_id = rocprofiler_async_correlation_id_t{correlation_id->internal, _external_corr_id};
 
     return common::init_public_api_struct(buffered_data_t{},
@@ -614,8 +615,8 @@ async_copy_impl(Args... args)
     async_copy_data* _data = nullptr;
 
     {
-        auto tracing_data_wrapper = tracing::pooled_tracing_data{};
-        auto& tracing_data = *tracing_data_wrapper;  // Reference to pooled object
+        auto  tracing_data_wrapper = tracing::pooled_tracing_data{};
+        auto& tracing_data         = *tracing_data_wrapper;
 
         tracing::populate_contexts(ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY,
                                    ROCPROFILER_BUFFER_TRACING_MEMORY_COPY,
