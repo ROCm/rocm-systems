@@ -390,9 +390,13 @@ async_copy_handler(hsa_signal_value_t, void* arg)
     // get the contexts that were active when the signal was created
     const auto& tracing_data = _data->tracing_data;
 
-    if(_profile_time.status == HSA_STATUS_SUCCESS && !tracing_data.empty())
+    // Cache empty() checks to avoid repeated function calls
+    const bool has_callback = !tracing_data.callback_contexts.empty();
+    const bool has_buffered = !tracing_data.buffered_contexts.empty();
+
+    if(_profile_time.status == HSA_STATUS_SUCCESS && (has_callback || has_buffered))
     {
-        if(!_data->tracing_data.callback_contexts.empty())
+        if(has_callback)
         {
             auto _tracer_data = _data->get_callback_data(_profile_time.start, _profile_time.end);
 
@@ -403,7 +407,7 @@ async_copy_handler(hsa_signal_value_t, void* arg)
                                                   _tracer_data);
         }
 
-        if(!_data->tracing_data.buffered_contexts.empty())
+        if(has_buffered)
         {
             auto record =
                 _data->get_buffered_record(nullptr, _profile_time.start, _profile_time.end);
@@ -689,6 +693,9 @@ async_copy_impl(Args... args)
     auto  _lk          = _data->get_lock();
     auto& tracing_data = _data->tracing_data;
 
+    // Cache empty() checks to avoid repeated function calls
+    const bool has_callback = !tracing_data.callback_contexts.empty();
+
     // at this point, we want to install our own signal handler
     _data->tid          = common::get_tid();
     _data->dst_agent    = _dst_agent_id;
@@ -783,7 +790,7 @@ async_copy_impl(Args... args)
                                                _direction,
                                                _data->correlation_id->internal);
 
-    if(!tracing_data.callback_contexts.empty())
+    if(has_callback)
     {
         auto _tracer_data = _data->get_callback_data();
 
