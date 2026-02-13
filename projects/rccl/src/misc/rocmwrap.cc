@@ -238,7 +238,7 @@ static void initOnceFunc() {
           }
         }
 
-	// Close file handle
+        // Close file handle
         if (strstr(path, "/proc/config.gz") != NULL) {
           pclose(fp);
         } else {
