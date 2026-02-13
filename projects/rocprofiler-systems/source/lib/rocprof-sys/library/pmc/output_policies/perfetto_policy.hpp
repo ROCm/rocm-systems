@@ -107,8 +107,12 @@ struct perfetto_policy
             { metric_masks::temperature, { "Temperature", "deg C", {} } },
             { metric_masks::power, { "Current Power", "watts", {} } },
             { metric_masks::memory_usage, { "Memory Usage", "megabytes", {} } },
+            // Device-level VCN/JPEG activity
             { metric_masks::vcn_activity, { "VCN Activity", "%", {} } },
             { metric_masks::jpeg_activity, { "JPEG Activity", "%", {} } },
+            // Per-XCP VCN/JPEG busy
+            { metric_masks::xcp_vcn_activity, { "VCN Busy", "%", {} } },
+            { metric_masks::xcp_jpeg_activity, { "JPEG Busy", "%", {} } },
             { metric_masks::xgmi_mask, { "XGMI", "", {} } },
             { metric_masks::pcie_mask, { "PCIe", "", {} } },
         };
@@ -212,15 +216,19 @@ struct perfetto_policy
                 }
             };
 
-            if(enabled_metric == metric_masks::vcn_activity ||
-               enabled_metric == metric_masks::jpeg_activity)
+            // Check if this is a VCN or JPEG track (device-level or per-XCP)
+            const bool is_vcn_track  = (num == metric_masks::vcn_activity ||
+                                       num == metric_masks::xcp_vcn_activity);
+            const bool is_jpeg_track = (num == metric_masks::jpeg_activity ||
+                                        num == metric_masks::xcp_jpeg_activity);
+
+            if(is_vcn_track || is_jpeg_track)
             {
                 for(std::size_t xcp = 0; xcp < AMDSMI_MAX_NUM_XCP; ++xcp)
                 {
                     process_xcp_array(description,
-                                      enabled_metric == metric_masks::vcn_activity
-                                          ? AMDSMI_MAX_NUM_VCN
-                                          : ROCPROFSYS_MAX_NUM_JPEG_ENGINES,
+                                      is_vcn_track ? AMDSMI_MAX_NUM_VCN
+                                                   : ROCPROFSYS_MAX_NUM_JPEG_ENGINES,
                                       xcp);
                 }
             }
@@ -429,9 +437,8 @@ private:
         const pmc::gpu::enabled_metrics&                 supported_metric_config,
         std::unordered_map<uint32_t, track_description>& tracks)
     {
-        // Per-XCP VCN busy metrics
-        if(effective_metrics.vcn_busy() &&
-           !tracks.at(metric_masks::vcn_activity).track_indexes.empty())
+        if(effective_metrics.xcp_vcn_activity() &&
+           !tracks.at(metric_masks::xcp_vcn_activity).track_indexes.empty())
         {
             size_t engine_id = 0;
             for(const auto& xcp_stats : metric_values.xcp_stats)
@@ -440,12 +447,12 @@ private:
                 {
                     if(vcn_val != std::numeric_limits<uint16_t>::max() &&
                        engine_id <
-                           tracks.at(metric_masks::vcn_activity).track_indexes.size())
+                           tracks.at(metric_masks::xcp_vcn_activity).track_indexes.size())
                     {
                         TRACE_COUNTER(
-                            "device_vcn_activity",
+                            "device_vcn_busy",
                             counter_track::at(device_index,
-                                              tracks.at(metric_masks::vcn_activity)
+                                              tracks.at(metric_masks::xcp_vcn_activity)
                                                   .track_indexes[engine_id++]),
                             ts, vcn_val);
                     }
@@ -453,7 +460,6 @@ private:
             }
         }
 
-        // Device-level VCN activity (Radeon)
         if(effective_metrics.vcn_activity() &&
            !tracks.at(metric_masks::vcn_activity).track_indexes.empty())
         {
@@ -477,8 +483,8 @@ private:
                   enabled_metric_config.jpeg_activity(),
                   supported_metric_config.jpeg_activity());
 
-        if(effective_metrics.jpeg_busy() &&
-           !tracks.at(metric_masks::jpeg_activity).track_indexes.empty())
+        if(effective_metrics.xcp_jpeg_activity() &&
+           !tracks.at(metric_masks::xcp_jpeg_activity).track_indexes.empty())
         {
             size_t engine_id = 0;
             for(const auto& xcp_stats : metric_values.xcp_stats)
@@ -486,13 +492,13 @@ private:
                 for(const auto& jpeg_val : xcp_stats.jpeg_busy)
                 {
                     if(jpeg_val != std::numeric_limits<uint16_t>::max() &&
-                       engine_id <
-                           tracks.at(metric_masks::jpeg_activity).track_indexes.size())
+                       engine_id < tracks.at(metric_masks::xcp_jpeg_activity)
+                                       .track_indexes.size())
                     {
                         TRACE_COUNTER(
-                            "device_jpeg_activity",
+                            "device_jpeg_busy",
                             counter_track::at(device_index,
-                                              tracks.at(metric_masks::jpeg_activity)
+                                              tracks.at(metric_masks::xcp_jpeg_activity)
                                                   .track_indexes[engine_id++]),
                             ts, jpeg_val);
                     }

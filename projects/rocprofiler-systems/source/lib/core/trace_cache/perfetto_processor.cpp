@@ -1122,7 +1122,7 @@ perfetto_processor_t::handle([[maybe_unused]] const pmc::gpu::sample& _gpu_pmc)
         }
     };
 
-    if(_gpu_pmc.enabled_metric.vcn_activity())
+    if(_gpu_pmc.enabled_metric.xcp_vcn_activity())
     {
         for(size_t xcp = 0; xcp < AMDSMI_MAX_NUM_XCP; ++xcp)
         {
@@ -1132,7 +1132,7 @@ perfetto_processor_t::handle([[maybe_unused]] const pmc::gpu::sample& _gpu_pmc)
         }
     }
 
-    if(_gpu_pmc.enabled_metric.jpeg_activity())
+    if(_gpu_pmc.enabled_metric.xcp_jpeg_activity())
     {
         for(size_t xcp = 0; xcp < AMDSMI_MAX_NUM_XCP; ++xcp)
         {

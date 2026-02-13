@@ -38,6 +38,8 @@
 #include <string>
 #include <vector>
 
+#include <spdlog/fmt/ranges.h>
+
 #if ROCPROFSYS_USE_ROCM > 0
 #    include <amd_smi/amdsmi.h>
 #endif
@@ -147,18 +149,18 @@ private:
                                   metrics&                    metrics,
                                   const enabled_metrics&      user_enabled) const
     {
-        if(m_supported_metrics.gfx_activity() && user_enabled.gfx_activity())
-        {
-            metrics.gfx_activity = gpu_metrics.average_gfx_activity;
-        }
-        if(m_supported_metrics.umc_activity() && user_enabled.umc_activity())
-        {
-            metrics.umc_activity = gpu_metrics.average_umc_activity;
-        }
-        if(m_supported_metrics.mm_activity() && user_enabled.mm_activity())
-        {
-            metrics.mm_activity = gpu_metrics.average_mm_activity;
-        }
+        metrics.gfx_activity =
+            (m_supported_metrics.gfx_activity() && user_enabled.gfx_activity())
+                ? gpu_metrics.average_gfx_activity
+                : metrics.gfx_activity;
+        metrics.umc_activity =
+            (m_supported_metrics.umc_activity() && user_enabled.umc_activity())
+                ? gpu_metrics.average_umc_activity
+                : metrics.umc_activity;
+        metrics.mm_activity =
+            (m_supported_metrics.mm_activity() && user_enabled.mm_activity())
+                ? gpu_metrics.average_mm_activity
+                : metrics.mm_activity;
     }
 
     void collect_memory_metrics(metrics&               metrics,
@@ -180,7 +182,7 @@ private:
     void collect_xcp_metrics(const amdsmi_gpu_metrics_t& gpu_metrics, metrics& metrics,
                              const enabled_metrics& user_enabled) const
     {
-        if(m_supported_metrics.vcn_busy() && user_enabled.vcn_busy())
+        if(m_supported_metrics.xcp_vcn_activity() && user_enabled.xcp_vcn_activity())
         {
             for(size_t xcp = 0; xcp < AMDSMI_MAX_NUM_XCP; ++xcp)
             {
@@ -196,7 +198,7 @@ private:
                       std::end(gpu_metrics.vcn_activity), metrics.vcn_activity.begin());
         }
 
-        if(m_supported_metrics.jpeg_busy() && user_enabled.jpeg_busy())
+        if(m_supported_metrics.xcp_jpeg_activity() && user_enabled.xcp_jpeg_activity())
         {
             for(size_t xcp = 0; xcp < AMDSMI_MAX_NUM_XCP; ++xcp)
             {
@@ -280,7 +282,7 @@ private:
         m_supported_metrics.set_mm_activity(
             is_metric_supported(gpu_metrics.average_mm_activity));
 
-        m_supported_metrics.set_vcn_busy(std::any_of(
+        m_supported_metrics.set_xcp_vcn_activity(std::any_of(
             std::begin(gpu_metrics.xcp_stats), std::end(gpu_metrics.xcp_stats),
             [](const amdsmi_gpu_xcp_metrics_t& xcp_stats) {
                 return std::any_of(std::begin(xcp_stats.vcn_busy),
@@ -288,7 +290,7 @@ private:
                                    [](uint16_t v) { return is_metric_supported(v); });
             }));
 
-        m_supported_metrics.set_jpeg_busy(std::any_of(
+        m_supported_metrics.set_xcp_jpeg_activity(std::any_of(
             std::begin(gpu_metrics.xcp_stats), std::end(gpu_metrics.xcp_stats),
             [](const amdsmi_gpu_xcp_metrics_t& xcp_stats) {
                 return std::any_of(std::begin(xcp_stats.jpeg_busy),
@@ -296,16 +298,14 @@ private:
                                    [](uint16_t v) { return is_metric_supported(v); });
             }));
 
-        // Check device-level VCN/JPEG activity metrics (Radeon)
-        // Only enable device-level if per-XCP is not available (priority to per-XCP)
         m_supported_metrics.set_vcn_activity(
-            !m_supported_metrics.vcn_busy() &&
+            !m_supported_metrics.xcp_vcn_activity() &&
             std::any_of(std::begin(gpu_metrics.vcn_activity),
                         std::end(gpu_metrics.vcn_activity),
                         [](uint16_t v) { return is_metric_supported(v); }));
 
         m_supported_metrics.set_jpeg_activity(
-            !m_supported_metrics.jpeg_busy() &&
+            !m_supported_metrics.xcp_jpeg_activity() &&
             std::any_of(std::begin(gpu_metrics.jpeg_activity),
                         std::end(gpu_metrics.jpeg_activity),
                         [](uint16_t v) { return is_metric_supported(v); }));
@@ -331,40 +331,18 @@ private:
 
     static std::string format_supported_metrics(const enabled_metrics& metrics)
     {
-        std::vector<std::string> supported;
-        supported.push_back("Current power: " + std::string(metrics.current_socket_power()
-                                                                ? "true"
-                                                                : "false"));
-        supported.push_back("Average power: " + std::string(metrics.average_socket_power()
-                                                                ? "true"
-                                                                : "false"));
-        supported.push_back("Memory usage: " +
-                            std::string(metrics.memory_usage() ? "true" : "false"));
-        supported.push_back("Hotspot temp: " + std::string(metrics.hotspot_temperature()
-                                                               ? "true"
-                                                               : "false"));
-        supported.push_back("Edge temp: " +
-                            std::string(metrics.edge_temperature() ? "true" : "false"));
-        supported.push_back("GFX activity: " +
-                            std::string(metrics.gfx_activity() ? "true" : "false"));
-        supported.push_back("UMC activity: " +
-                            std::string(metrics.umc_activity() ? "true" : "false"));
-        supported.push_back("MM activity: " +
-                            std::string(metrics.mm_activity() ? "true" : "false"));
-        supported.push_back("VCN activity: " +
-                            std::string(metrics.vcn_activity() ? "true" : "false"));
-        supported.push_back("JPEG activity: " +
-                            std::string(metrics.jpeg_activity() ? "true" : "false"));
-        supported.push_back("XGMI: " + std::string(metrics.xgmi() ? "true" : "false"));
-        supported.push_back("PCIe: " + std::string(metrics.pcie() ? "true" : "false"));
-
-        std::string result;
-        for(size_t i = 0; i < supported.size(); ++i)
-        {
-            if(i > 0) result += ", ";
-            result += supported[i];
-        }
-        return result;
+        return fmt::format("Current power: {}, Average power: {}, Memory usage: {}, "
+                           "Hotspot temp: {}, Edge temp: {}, GFX activity: {}, "
+                           "UMC activity: {}, MM activity: {}, VCN busy: {}, "
+                           "VCN activity: {}, JPEG busy: {}, JPEG activity: {}, "
+                           "XGMI: {}, PCIe: {}",
+                           metrics.current_socket_power(), metrics.average_socket_power(),
+                           metrics.memory_usage(), metrics.hotspot_temperature(),
+                           metrics.edge_temperature(), metrics.gfx_activity(),
+                           metrics.umc_activity(), metrics.mm_activity(),
+                           metrics.xcp_vcn_activity(), metrics.vcn_activity(),
+                           metrics.xcp_jpeg_activity(), metrics.jpeg_activity(),
+                           metrics.xgmi(), metrics.pcie());
     }
 
     template <typename T>

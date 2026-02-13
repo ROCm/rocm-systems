@@ -34,10 +34,11 @@
 #include "library/thread_info.hpp"
 #include "logger/debug.hpp"
 
+#include <spdlog/fmt/ranges.h>
+
 #include <cstdint>
 #include <limits>
 #include <memory>
-#include <sstream>
 #include <stdexcept>
 #include <string>
 
@@ -412,10 +413,13 @@ rocpd_processor_t::handle([[maybe_unused]] const pmc::gpu::sample& _gpu_pmc)
             const auto& arr = get_array(m.xcp_stats[xcp]);
             for(size_t i = 0; i < arr.size(); ++i)
             {
-                auto suffix =
-                    "_xcp" + std::to_string(xcp) + "[" + std::to_string(i) + "]";
-                auto pmc_name   = std::string(base_name) + suffix;
-                auto track_name = base_track + suffix;
+                // Skip sentinel values (unsupported metrics)
+                using value_type = std::decay_t<decltype(arr[i])>;
+                if(arr[i] == std::numeric_limits<value_type>::max()) continue;
+
+                auto suffix     = fmt::format("_xcp{}[{}]", xcp, i);
+                auto pmc_name   = fmt::format("{}{}", base_name, suffix);
+                auto track_name = fmt::format("{}{}", base_track, suffix);
                 insert_metric(true, pmc_name.c_str(), track_name.c_str(), arr[i]);
             }
         }
@@ -423,11 +427,11 @@ rocpd_processor_t::handle([[maybe_unused]] const pmc::gpu::sample& _gpu_pmc)
 
     insert_xcp_metrics(trait::name<category::amd_smi_vcn_activity>::value,
                        info::format_track_name<category::amd_smi_vcn_activity>(),
-                       enabled.vcn_busy(),
+                       enabled.xcp_vcn_activity(),
                        [](const auto& xcp) -> const auto& { return xcp.vcn_busy; });
     insert_xcp_metrics(trait::name<category::amd_smi_jpeg_activity>::value,
                        info::format_track_name<category::amd_smi_jpeg_activity>(),
-                       enabled.jpeg_busy(),
+                       enabled.xcp_jpeg_activity(),
                        [](const auto& xcp) -> const auto& { return xcp.jpeg_busy; });
 
     auto insert_device_level_metrics = [&](const std::string_view base_name,
@@ -435,12 +439,15 @@ rocpd_processor_t::handle([[maybe_unused]] const pmc::gpu::sample& _gpu_pmc)
         if(!is_enabled) return;
         for(size_t i = 0; i < arr.size(); ++i)
         {
-            auto suffix     = "_" + std::to_string(i);
-            auto pmc_name   = std::string(base_name) + suffix;
+            // Skip sentinel values (unsupported metrics)
+            using value_type = std::decay_t<decltype(arr[i])>;
+            if(arr[i] == std::numeric_limits<value_type>::max()) continue;
+
+            auto pmc_name   = fmt::format("{}_{}", base_name, i);
             auto track_name = pmc_name;
 
-            LOG_INFO("Inserting metric: pmc_name: {}, track_name: {}, value: {}",
-                     pmc_name, track_name, arr[i]);
+            LOG_TRACE("Inserting metric: pmc_name: {}, track_name: {}, value: {}",
+                      pmc_name, track_name, arr[i]);
             insert_metric(true, pmc_name.c_str(), track_name.c_str(), arr[i]);
         }
     };
@@ -537,8 +544,7 @@ rocpd_processor_t::handle([[maybe_unused]] const cpu_freq_sample& _cpu_freq_samp
                             _cpu_freq_sample.kernel_mode_time);
 
     auto get_track_name = [](const auto& cpu_id) {
-        return std::string(trait::name<category::cpu_freq>::value) + " [" +
-               std::to_string(cpu_id) + "]";
+        return fmt::format("{} [{}]", trait::name<category::cpu_freq>::value, cpu_id);
     };
 
     auto core_freq_samples = deserialize_freqs(_cpu_freq_sample.freqs);
@@ -673,19 +679,17 @@ rocpd_processor_t::post_process_metadata()
     auto _queue_list = m_metadata->get_queue_list();
     for(const auto& queue_handle : _queue_list)
     {
-        std::stringstream ss;
-        ss << "Queue " << queue_handle;
+        auto name = fmt::format("Queue {}", queue_handle);
         m_data_processor->insert_queue_info(queue_handle, n_info.id, process_info.pid,
-                                            ss.str().c_str());
+                                            name.c_str());
     }
 
     auto _stream_list = m_metadata->get_stream_list();
     for(const auto& stream_handle : _stream_list)
     {
-        std::stringstream ss;
-        ss << "Stream " << stream_handle;
+        auto name = fmt::format("Stream {}", stream_handle);
         m_data_processor->insert_stream_info(stream_handle, n_info.id, process_info.pid,
-                                             ss.str().c_str());
+                                             name.c_str());
     }
 
     auto buffer_info_list = m_metadata->get_buffer_name_info();
@@ -736,10 +740,9 @@ rocpd_processor_t::insert_thread_id(info::thread& t_info, const node_info& n_inf
         t_info.end   = extended_info->get_stop();
     }
 
-    std::stringstream ss;
-    ss << "Thread " << t_info.thread_id;
+    auto name = fmt::format("Thread {}", t_info.thread_id);
     m_data_processor->insert_thread_info(n_info.id, process_info.ppid, process_info.pid,
-                                         t_info.thread_id, ss.str().c_str(), t_info.start,
+                                         t_info.thread_id, name.c_str(), t_info.start,
                                          t_info.end);
 }
 

@@ -29,8 +29,7 @@ set(UNIT_TEST_OBJECTS
 
 if(ROCPROFSYS_USE_ROCM)
     list(
-        APPEND
-        UNIT_TEST_OBJECTS
+        APPEND UNIT_TEST_OBJECTS
         $<TARGET_OBJECTS:pmc-common-tests>
         $<TARGET_OBJECTS:pmc-gpu-collector-tests>
     )

@@ -112,8 +112,10 @@ ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_mm_busy, ROCPROFSYS_CATEGORY_AMD_SM
 ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_temp, ROCPROFSYS_CATEGORY_AMD_SMI_TEMP, "device_temp",   "Temperature of a GPU device")
 ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_power, ROCPROFSYS_CATEGORY_AMD_SMI_POWER, "device_power", "Power consumption of a GPU device")
 ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_memory_usage, ROCPROFSYS_CATEGORY_AMD_SMI_MEMORY_USAGE, "device_memory_usage", "Memory usage of a GPU device")
-ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_vcn_activity, ROCPROFSYS_CATEGORY_AMD_SMI_VCN_ACTIVITY, "device_vcn_activity", "VCN Activity of a GPU device")
-ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_jpeg_activity, ROCPROFSYS_CATEGORY_AMD_SMI_JPEG_ACTIVITY, "device_jpeg_activity", "JPEG Activity of a GPU device")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_vcn_activity, ROCPROFSYS_CATEGORY_AMD_SMI_VCN_ACTIVITY, "device_vcn_activity", "VCN Activity of a GPU device (Radeon)")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_jpeg_activity, ROCPROFSYS_CATEGORY_AMD_SMI_JPEG_ACTIVITY, "device_jpeg_activity", "JPEG Activity of a GPU device (Radeon)")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_vcn_busy, ROCPROFSYS_CATEGORY_AMD_SMI_VCN_BUSY, "device_vcn_busy", "VCN Busy percentage per XCP (MI300)")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_jpeg_busy, ROCPROFSYS_CATEGORY_AMD_SMI_JPEG_BUSY, "device_jpeg_busy", "JPEG Busy percentage per XCP (MI300)")
 ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_xgmi_link_width, ROCPROFSYS_CATEGORY_AMD_SMI_XGMI_LINK_WIDTH, "device_xgmi_link_width", "XGMI Link Width")
 ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_xgmi_link_speed, ROCPROFSYS_CATEGORY_AMD_SMI_XGMI_LINK_SPEED, "device_xgmi_link_speed", "XGMI Link Speed")
 ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_xgmi_read_data, ROCPROFSYS_CATEGORY_AMD_SMI_XGMI_READ_DATA, "device_xgmi_read_data", "XGMI Read Data Accumulator")
@@ -195,6 +197,8 @@ using name = perfetto_category<Tp...>;
         ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_memory_usage),                    \
         ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_vcn_activity),                    \
         ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_jpeg_activity),                   \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_vcn_busy),                        \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_jpeg_busy),                       \
         ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_xgmi_link_width),                 \
         ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_xgmi_link_speed),                 \
         ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_xgmi_read_data),                  \
