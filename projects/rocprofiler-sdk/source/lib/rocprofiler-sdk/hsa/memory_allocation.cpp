@@ -487,10 +487,6 @@ memory_allocation_impl(Args... args)
     auto  starting_addr_pointer = std::get<address_idx>(_tied_args);
     auto  region_or_pool        = std::get<region_idx>(_tied_args);
 
-    // Cache empty() checks to avoid repeated function calls
-    const bool has_callback = !tracing_data.callback_contexts.empty();
-    const bool has_buffered = !tracing_data.buffered_contexts.empty();
-
     _data.tid   = common::get_tid();
     _data.agent = get_agent<operation>(
         region_or_pool,
@@ -530,7 +526,7 @@ memory_allocation_impl(Args... args)
         rocprofiler_enum,
         _data.correlation_id->internal);
 
-    if(has_callback)
+    if(!tracing_data.callback_contexts.empty())
     {
         auto _tracer_data = _data.get_callback_data();
 
@@ -559,9 +555,9 @@ memory_allocation_impl(Args... args)
         _data.address = handle_starting_addr(starting_addr_pointer);
     }
 
-    if(has_callback || has_buffered)
+    if(!tracing_data.empty())
     {
-        if(has_callback)
+        if(!_data.tracing_data.callback_contexts.empty())
         {
             auto _tracer_data = _data.get_callback_data(start_ts, end_ts);
 
@@ -572,7 +568,7 @@ memory_allocation_impl(Args... args)
                                                   _tracer_data);
         }
 
-        if(has_buffered)
+        if(!_data.tracing_data.buffered_contexts.empty())
         {
             auto record = _data.get_buffered_record(nullptr, start_ts, end_ts);
 
@@ -630,10 +626,6 @@ memory_free_impl(Args... args)
 
     auto& tracing_data = _data.tracing_data;
 
-    // Cache empty() checks to avoid repeated function calls
-    const bool has_callback = !tracing_data.callback_contexts.empty();
-    const bool has_buffered = !tracing_data.buffered_contexts.empty();
-
     _data.tid            = common::get_tid();
     _data.func           = rocprofiler_enum;
     _data.correlation_id = context::get_latest_correlation_id();
@@ -669,7 +661,7 @@ memory_free_impl(Args... args)
         rocprofiler_enum,
         _data.correlation_id->internal);
 
-    if(has_callback)
+    if(!tracing_data.callback_contexts.empty())
     {
         auto _tracer_data = _data.get_callback_data();
 
@@ -692,9 +684,9 @@ memory_free_impl(Args... args)
         get_next_dispatch<TableIdx, OpIdx>(), std::move(_tied_args), std::make_index_sequence<N>{});
     auto end_ts = common::timestamp_ns();
 
-    if(has_callback || has_buffered)
+    if(!tracing_data.empty())
     {
-        if(has_callback)
+        if(!_data.tracing_data.callback_contexts.empty())
         {
             auto _tracer_data = _data.get_callback_data(start_ts, end_ts);
 
@@ -705,7 +697,7 @@ memory_free_impl(Args... args)
                                                   _tracer_data);
         }
 
-        if(has_buffered)
+        if(!_data.tracing_data.buffered_contexts.empty())
         {
             auto record = _data.get_buffered_record(nullptr, start_ts, end_ts);
 
