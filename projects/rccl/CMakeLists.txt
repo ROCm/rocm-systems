@@ -1453,7 +1453,7 @@ if (DEVICE_LINKER)
     "-x" "hip"
     "--cuda-device-only"
     "--no-gpu-bundle-output"
-    "-w"  # Suppress backend LDS warnings (see comment above)
+    #"-w"  # Suppress backend LDS warnings (see comment above)
   )
   # Also add the filtered options from rccl target
   if(DEVICE_ONLY_OPTS)
