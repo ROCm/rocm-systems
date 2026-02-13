@@ -744,7 +744,7 @@ __global__ void ncclDevKernelDebug_Generic_4(ncclDevKernelArgsDefaultStorage NCC
 // __attribute__((used)) prevents the linker/compiler from dead-code-eliminating
 // the device functions. These will be merged with the kernel TU at the assembly level.
 #define DEFINE_ncclDevFunc(suffix, coll, redop, ty, algo, proto, acc, pipeline, unroll) \
-  __attribute__((used)) __device__ void ncclDevFunc_##suffix(struct ncclShmemData* ncclShmem, void* ncclShmemPerWarp) { \
+  __attribute__((used)) __device__ void ncclDevFunc_##suffix(struct ncclShmemData& ncclShmem, void* ncclShmemPerWarp) { \
     RunWorkBatch<coll, ty, redop<ty>, algo, proto, acc, unroll, pipeline>().run(ncclShmem, ncclShmemPerWarp); \
   }
 #elif defined(USE_INDIRECT_FUNCTION_CALL)
