@@ -156,6 +156,19 @@ public:
         other.data_ = nullptr;
     }
 
+    pooled_tracing_data& operator=(pooled_tracing_data&& other) noexcept
+    {
+        if(this == &other) return *this;
+
+        // Release current resource back to the pool
+        if(data_ != nullptr) get_pool().release(data_);
+
+        // Steal the resource from other
+        data_       = other.data_;
+        other.data_ = nullptr;
+
+        return *this;
+    }
     // Access the tracing_data
     tracing_data&       operator*() { return *data_; }
     tracing_data*       operator->() { return data_; }
