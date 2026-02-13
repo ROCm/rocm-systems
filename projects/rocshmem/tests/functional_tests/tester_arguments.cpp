@@ -133,6 +133,7 @@ TesterArguments::TesterArguments(int argc, char *argv[]) {
       break;
     case TeamFCollectTestType:
     case TeamAllToAllTestType:
+    case TeamAllToAllvTestType:
     case TeamBroadcastTestType:
       min_msg_size = 8;
       break;
@@ -201,6 +202,7 @@ void TesterArguments::get_arguments() {
     case TeamWAVESyncTestType:
     case TeamWGSyncTestType:
     case TeamAllToAllTestType:
+    case TeamAllToAllvTestType:
     case TeamFCollectTestType:
     case TeamReductionTestType:
     case TeamBroadcastTestType:
