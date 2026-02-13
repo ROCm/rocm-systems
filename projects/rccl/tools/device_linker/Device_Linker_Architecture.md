@@ -209,6 +209,13 @@ From kernel metadata: **group_segment_fixed_size = 4944 bytes**
 | 32 | `tree` | 20 | ncclTree |
 | ... | ... | ... | ... |
 
+### LDS Mismatch: Other Causes (if "function called but not doing work")
+
+1. **Define drift** – Dispatcher vs specialized kernels built with different `-D` flags. **Fix:** Dispatcher defs are now derived from `specialized_kernels_device` (see CMakeLists.txt); `RCCL_DISPATCHER_DEFINES` passed to build script.
+2. **Include path difference** – Different header versions (e.g. `NCCL_MAX_GROUPS`) between dispatcher and specialized. Both use same `RCCL_INCLUDES` from rccl target.
+3. **LDS size in .note** – Device linker patches `group_segment_fixed_size` in kernel descriptors; must match actual `sizeof(ncclShmemData)` + scratch.
+4. **Compiler/ABI** – Different compiler versions or `-O` levels could theoretically change layout; both use same compiler and `-O3`.
+
 ---
 
 ## Build Pipeline

@@ -25,8 +25,8 @@ Instead of the production build's slow template instantiation, we pre-compile sp
 |-----------|--------|
 | Build | **WORKING** |
 | Kernel Load | **WORKING** |
-| Kernel Execute | **RUNS** but output data not modified |
-| DWARF Debug Info | **SUBTLE ERRORS** in merged image |
+| Kernel Execute | **RUNS** (LDS define sync fix: dispatcher defs now derived from specialized) |
+| DWARF Debug Info | **FIXED** (AddressDelta units + duplicate .debug_line removed) |
 
 ---
 
@@ -63,16 +63,16 @@ cd tools/device_linker
 
 ## Critical Constraint: Compilation Flags
 
-**Structure layout mismatches cause crashes/hangs.** All compilation units must have identical flags:
+**Structure layout mismatches cause "function not doing work" or hangs.** All compilation units must have identical flags.
 
 | Flag | Affects Layout |
 |------|----------------|
-| `ENABLE_FAULT_INJECTION` | **Yes** - adds `faults` field |
-| `ENABLE_WARP_SPEED` | **Yes** - adds `warpComm`/`warpChannel` |
-| `ENABLE_COLLTRACE` | **Yes** - adds trace fields |
+| `ENABLE_FAULT_INJECTION` | **Yes** - adds `faults` field to ncclShmemData |
+| `ENABLE_WARP_SPEED` | **Yes** - adds `warpComm`/`warpChannel` to ncclShmemData |
+| `ENABLE_COLLTRACE` | **Yes** - adds `collTrace`/`collTraceTail` |
 | `ENABLE_PROFILING` | **Yes** - adds `prof` field |
 
-CMake propagates these flags via `RCCL_DEFS` to specialized kernels and `DISPATCHER_DEFS` to the dispatcher. If you see hangs or crashes, verify flag consistency first.
+**Fix (no drift):** Dispatcher defs are now derived from `specialized_kernels_device` via `get_target_property(COMPILE_DEFINITIONS)` and passed to `build_with_device_linker.sh` via `RCCL_DISPATCHER_DEFINES`. Hand-picking was error-prone.
 
 ---
 

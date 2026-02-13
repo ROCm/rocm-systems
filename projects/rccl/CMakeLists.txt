@@ -1308,23 +1308,24 @@ if (DEVICE_LINKER)
     target_include_directories(specialized_kernels_device PRIVATE ${RCCL_INCLUDES})
   endif()
   
-  # Copy compile definitions from rccl target and add device-only defines
-  get_target_property(RCCL_DEFS rccl COMPILE_DEFINITIONS)
-  if(RCCL_DEFS)
-    target_compile_definitions(specialized_kernels_device PRIVATE ${RCCL_DEFS})
-  endif()
-  # Add definitions that may be set after rccl target is created (based on CMake options)
-  # These must match rccl target definitions for structure layout agreement
+  # Explicit compile definitions for specialized kernels.
+  # ONLY structure-layout and device-code defines belong here.
+  # Do NOT copy all rccl defines — extras like USE_INDIRECT_FUNCTION_CALL
+  # cause ncclDevFunc to be compiled with wrong calling conventions.
+  target_compile_definitions(specialized_kernels_device PRIVATE DEVICE_LINKER)
+  target_compile_definitions(specialized_kernels_device PRIVATE NDEBUG)
   if(FAULT_INJECTION)
     target_compile_definitions(specialized_kernels_device PRIVATE ENABLE_FAULT_INJECTION)
   endif()
   if(LL128_ENABLED)
     target_compile_definitions(specialized_kernels_device PRIVATE ENABLE_LL128)
   endif()
-  # Add device linker definition (not in rccl target since it's only for device linker builds)
-  target_compile_definitions(specialized_kernels_device PRIVATE DEVICE_LINKER)
-  # NDEBUG for specialized kernels: disables asserts so ncclDevFunc_ symbols are emitted
-  target_compile_definitions(specialized_kernels_device PRIVATE NDEBUG)
+  if(ENABLE_WARP_SPEED)
+    target_compile_definitions(specialized_kernels_device PRIVATE ENABLE_WARP_SPEED)
+  endif()
+  if(COLLTRACE)
+    target_compile_definitions(specialized_kernels_device PRIVATE ENABLE_COLLTRACE)
+  endif()
   
   # Filter compile options from rccl target for device-only compilation (shared by specialized kernels and dispatcher)
   # Remove only flags incompatible with device-only. Keep only the *first* --offload-arch from rccl so we get the same
@@ -1380,7 +1381,7 @@ if (DEVICE_LINKER)
     "-x" "hip"
     "--cuda-device-only"
     "--no-gpu-bundle-output"
-    #"-w"  # Suppress backend LDS warnings (see comment above)
+    "-w"  # Suppress backend LDS warnings (see comment above)
   )
   # Also add the filtered options from rccl target
   if(DEVICE_ONLY_OPTS)
@@ -1401,17 +1402,23 @@ if (DEVICE_LINKER)
   set(DISPATCHER_SOURCE ${DEVICE_LINKER_DIR}/dispatcher_combined.hip)
   set(DISPATCHER_DEVICE_ELF ${DEVICE_LINKER_OUTPUT_DIR}/dispatcher_device.elf)
   
-  # Build compile definitions for dispatcher - must match specialized kernels and rccl target
-  set(DISPATCHER_DEFS -DDEVICE_LINKER)
-  if(FAULT_INJECTION)
-    list(APPEND DISPATCHER_DEFS -DENABLE_FAULT_INJECTION)
+  # Build compile definitions for dispatcher - MUST exactly match specialized_kernels_device
+  # to ensure ncclShmemData and other LDS struct layouts are identical (avoids "function not doing work").
+  # Derive from specialized target rather than hand-picking to prevent drift.
+  get_target_property(SPEC_DEFS specialized_kernels_device COMPILE_DEFINITIONS)
+  set(DISPATCHER_DEFS "")
+  if(SPEC_DEFS)
+    foreach(def ${SPEC_DEFS})
+      if(def)
+        list(APPEND DISPATCHER_DEFS "-D${def}")
+      endif()
+    endforeach()
   endif()
-  if(LL128_ENABLED)
-    list(APPEND DISPATCHER_DEFS -DENABLE_LL128)
+  # Ensure DEVICE_LINKER is present (specialized has it)
+  if(NOT "DEVICE_LINKER" IN_LIST SPEC_DEFS)
+    list(APPEND DISPATCHER_DEFS -DDEVICE_LINKER)
   endif()
-  if(ENABLE_WARP_SPEED)
-    list(APPEND DISPATCHER_DEFS -DENABLE_WARP_SPEED)
-  endif()
+  # Optional debug defines not in rccl/specialized
   if(DEBUG_PEER_POINTERS)
     list(APPEND DISPATCHER_DEFS -DDEBUG_PEER_POINTERS)
   endif()
@@ -1419,12 +1426,7 @@ if (DEVICE_LINKER)
     list(APPEND DISPATCHER_DEFS -DNCCL_DEVICE_DEBUG_TRAP)
     message(STATUS "NCCL_DEVICE_DEBUG_TRAP: enabled (device debug traps for ROCgdb)")
   endif()
-  if(COLLTRACE)
-    list(APPEND DISPATCHER_DEFS -DENABLE_COLLTRACE)
-  endif()
-  if(PROFILE)
-    list(APPEND DISPATCHER_DEFS -DENABLE_PROFILING)
-  endif()
+  message(STATUS "Dispatcher defs derived from specialized_kernels_device: ${DISPATCHER_DEFS}")
   
   # Get include directories from rccl target and build include flags
   get_target_property(RCCL_INCLUDES rccl INCLUDE_DIRECTORIES)
@@ -1469,11 +1471,14 @@ if (DEVICE_LINKER)
   set(DISPATCHER_FINAL_OBJ ${DEVICE_LINKER_OUTPUT_DIR}/dispatcher_final.o)
   
   # Device linker binary is NOT built by this project.
+  # Pass dispatcher defs to build script for host compilation (step 5) - must match device defs for LDS layout
+  list(JOIN DISPATCHER_DEFS " " DISPATCHER_DEFS_STR)
 
   add_custom_command(
     OUTPUT ${DISPATCHER_FINAL_OBJ}
     COMMAND ${CMAKE_COMMAND} -E make_directory ${DEVICE_LINKER_OUTPUT_DIR}
-    COMMAND ${DEVICE_LINKER_DIR}/build_with_device_linker.sh
+    COMMAND ${CMAKE_COMMAND} -E env "RCCL_DISPATCHER_DEFINES=${DISPATCHER_DEFS_STR}"
+            ${DEVICE_LINKER_DIR}/build_with_device_linker.sh
             ${CMAKE_CURRENT_BINARY_DIR}
             ${FIRST_GPU_TARGET}
     DEPENDS 
