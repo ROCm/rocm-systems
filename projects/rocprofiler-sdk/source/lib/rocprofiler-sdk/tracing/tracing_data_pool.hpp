@@ -31,9 +31,9 @@ namespace rocprofiler
 {
 namespace tracing
 {
-namespace  // Anonymous namespace - private to this translation unit
+namespace  // Anonymous namespace
 {
-// Internal pool implementation - not intended for direct use outside this file
+// Internal pool implementation
 class pool_impl
 {
 public:
@@ -82,12 +82,30 @@ private:
     std::vector<std::unique_ptr<tracing_data>> pool_;
 };
 
-// Thread-local pool instance - private to this translation unit
-inline pool_impl&
+// Thread-local pool instance
+// Returns nullptr if pool has been destroyed (during thread shutdown)
+inline pool_impl*
 get_pool()
 {
+    // Track if the pool is still valid
+    thread_local bool      pool_destroyed = false;
     thread_local pool_impl pool;
-    return pool;
+
+    // Use a destructor guard to detect when thread locals are being destroyed
+    struct pool_guard
+    {
+        bool& destroyed;
+        pool_guard(bool& d)
+        : destroyed(d)
+        {}
+        ~pool_guard() { destroyed = true; }
+    };
+    thread_local pool_guard guard(pool_destroyed);
+
+    // Return nullptr if pool is being/has been destroyed
+    if(pool_destroyed) return nullptr;
+
+    return &pool;
 }
 
 }  // anonymous namespace
@@ -97,10 +115,35 @@ class pooled_tracing_data
 {
 public:
     pooled_tracing_data()
-    : data_(get_pool().acquire())
-    {}
+    {
+        auto* pool = get_pool();
+        if(pool)
+        {
+            data_   = pool->acquire();
+            pooled_ = true;
+        }
+        else
+        {
+            data_   = new tracing_data{};
+            pooled_ = false;
+        }
+    }
 
-    ~pooled_tracing_data() { get_pool().release(data_); }
+    ~pooled_tracing_data()
+    {
+        if(pooled_)
+        {
+            auto* pool = get_pool();
+            if(pool)
+                pool->release(data_);
+            else
+                delete data_;  // Pool destroyed, just delete
+        }
+        else
+        {
+            delete data_;
+        }
+    }
 
     // No copy, but allow move
     pooled_tracing_data(const pooled_tracing_data&) = delete;
@@ -108,6 +151,7 @@ public:
 
     pooled_tracing_data(pooled_tracing_data&& other) noexcept
     : data_(other.data_)
+    , pooled_(other.pooled_)
     {
         other.data_ = nullptr;
     }
@@ -122,6 +166,7 @@ public:
 
 private:
     tracing_data* data_;
+    bool          pooled_;  // Track whether this instance uses the pool
 };
 
 }  // namespace tracing
