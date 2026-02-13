@@ -1026,21 +1026,23 @@ if(ENABLE_SPLIT_DEVICE_COMPILE)
     endif()
   endforeach()
 
-  # NOTE: common.cu.cpp is intentionally NOT moved to the split pipeline.
-  # It defines the generic kernel that dispatches to ncclDevFunc_* via a
-  # function-pointer table (indirect call).  When pre-compiled to a device
-  # ELF in isolation, the AMDGPU backend cannot see callee function bodies
-  # and sets .private_segment_fixed_size: 0 (zero scratch).  The HIP runtime
-  # on some ROCm versions (e.g. 7.0.0) then allocates zero scratch memory,
-  # causing "illegal memory access" at runtime.
+  # Move common.cu.cpp into the split pipeline as well, but do NOT add it
+  # to DEVICE_FUNC_ONLY_SOURCES -- it must NOT get -DNCCL_FUNC_ONLY because
+  # it defines the generic kernel (ncclKernelMain) and the dispatch table.
+  # The AMDGPU backend correctly detects the indirect call through the
+  # function-pointer table and sets .uses_dynamic_stack: true in the kernel
+  # metadata even when compiled in isolation (Step B: clang -x ir).
   #
-  # By keeping common.cu.cpp in the regular target with -fgpu-rdc, its
-  # device bitcode goes through LTO at link time, where the backend can
-  # correctly compute scratch requirements.  The LTO step processes just
-  # this one TU's bitcode (fast), while the 122 device-function TUs remain
-  # pre-compiled ELFs from the split pipeline.
-  #
-  # NOTE: onerank.cu.cpp is also NOT moved here because it defines standalone
+  # This approach makes ALL device code go through the split pipeline as
+  # pre-compiled ELFs, so the device linker at link time only does fast
+  # symbol resolution (no LTO / backend re-compilation).  This avoids the
+  # mixed LTO-bitcode + pre-compiled-ELF scenario that caused "illegal
+  # memory access" crashes on ROCm 7.0.0.
+  set(_COMMON_CU "${HIPIFY_DIR}/src/device/common.cu.cpp")
+  list(APPEND DEVICE_TU_SOURCES ${_COMMON_CU})
+  list(REMOVE_ITEM HIP_SOURCES ${_COMMON_CU})
+
+  # NOTE: onerank.cu.cpp is NOT moved here because it defines standalone
   # __global__ kernels in an anonymous namespace.  The device linker renames
   # anonymous-namespace symbols (.intern.<hash>), which breaks the host stub
   # registration.  Since onerank kernels don't reference cross-TU device
@@ -1348,8 +1350,13 @@ target_compile_options(rccl PRIVATE -Wall)
 target_compile_options(rccl PRIVATE -Werror=deprecated-copy-with-user-provided-copy)
 target_compile_options(rccl PRIVATE -Wno-format-nonliteral)
 target_compile_options(rccl PRIVATE -Wno-unused-function)
-# -fgpu-rdc removed: no longer needed now that extern __shared__ is eliminated.
-# Each TU is fully compiled (all backend passes) at compile time in parallel.
+# When split device compilation is enabled, -fgpu-rdc is only needed at link
+# time (added in the ENABLE_SPLIT_DEVICE_COMPILE block below).  When split is
+# disabled, the standard build still requires -fgpu-rdc because common.cu.cpp
+# references device functions from other TUs via the function-pointer table.
+if(NOT ENABLE_SPLIT_DEVICE_COMPILE)
+  target_compile_options(rccl PRIVATE -fgpu-rdc)
+endif()
 
 if(QUIET_WARNINGS)
   target_compile_options(rccl PRIVATE -Wno-invalid-offsetof)
@@ -1469,7 +1476,13 @@ endif()
 if (ROCTX_ENABLE)
   target_link_libraries(rccl PRIVATE ${ROCTX_LIB})
 endif()
-# -fgpu-rdc link flag removed: no longer using relocatable device code
+# When split is disabled, the link step also needs -fgpu-rdc to resolve
+# cross-TU device symbols.  When split is enabled, this is added in the
+# ENABLE_SPLIT_DEVICE_COMPILE block further below.
+if(NOT ENABLE_SPLIT_DEVICE_COMPILE)
+  target_link_libraries(rccl PRIVATE -fgpu-rdc)
+  target_link_options(rccl PRIVATE --hip-link)
+endif()
 target_link_libraries(rccl PRIVATE   Threads::Threads)
 target_link_libraries(rccl INTERFACE hip::host)
 target_link_libraries(rccl PRIVATE   hip::device)
@@ -1682,15 +1695,6 @@ if(ENABLE_SPLIT_DEVICE_COMPILE)
   target_link_libraries(rccl PRIVATE -fgpu-rdc)
   target_link_options(rccl PRIVATE --hip-link)
 
-  # common.cu.cpp stays in the regular target (HIP_SOURCES) but needs
-  # -fgpu-rdc so that its device bitcode is embedded in the host object
-  # and processed by the device linker's LTO step at link time.  This
-  # allows the AMDGPU backend to correctly compute scratch/stack
-  # requirements for the kernel's indirect calls to device functions.
-  set(_COMMON_CU "${HIPIFY_DIR}/src/device/common.cu.cpp")
-  set_source_files_properties(${_COMMON_CU} PROPERTIES
-    COMPILE_OPTIONS "-fgpu-rdc"
-  )
 endif()
 
 ## Setup librccl.so version
