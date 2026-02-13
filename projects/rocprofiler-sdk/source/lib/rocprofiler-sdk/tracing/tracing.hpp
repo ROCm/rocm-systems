@@ -44,7 +44,7 @@ inline const rocprofiler_user_data_t&
 find_external_correlation_id(const external_correlation_id_map_t& corr_ids,
                              const context::context*              ctx)
 {
-    auto it = std::find_if(
+    const auto* it = std::find_if(
         corr_ids.begin(), corr_ids.end(), [ctx](const auto& pair) { return pair.first == ctx; });
     // Replacing unoderder_map.at; find_if should never return nullptr
     return it->second;
@@ -56,7 +56,7 @@ inline rocprofiler_user_data_t
 get_external_correlation_id(const external_correlation_id_map_t& corr_ids,
                             const context::context*              ctx)
 {
-    auto it = std::find_if(
+    const auto* it = std::find_if(
         corr_ids.begin(), corr_ids.end(), [ctx](const auto& pair) { return pair.first == ctx; });
     return (it != corr_ids.end()) ? it->second : context::null_user_data;
 }
