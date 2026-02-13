@@ -644,6 +644,7 @@ class VirtualGPU : public device::VirtualDevice {
   std::atomic<bool> schedulerQueueThreadRunning_;     //!< Flag to indicate if the thread is running
   std::mutex scheduler_mutex_;                        //!< Lock to synchronize scheduler thread
   std::condition_variable scheduler_cv_;              //!< Condition to wake scheduler thread
+  std::once_flag scheduler_thread_init_;              //!< Ensures thread is initialized exactly once
   std::vector<hsa_signal_t> pendingSchedulerEvents_;  //!< Pending scheduler completion signals
 
   HwQueueTracker barriers_;  //!< Tracks active barriers in ROCr

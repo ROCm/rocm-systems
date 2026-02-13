@@ -3463,7 +3463,9 @@ bool VirtualGPU::createSchedulerParam() {
     }
 
 #if defined(_WIN32)
-    startSchedulerQueueThread();
+  if (!isSchedulerQueueThreadRunning()) {
+    std::call_once(scheduler_thread_init_, [this]() { startSchedulerQueueThread(); });
+  }
 #endif  // _WIN32
     return true;
   }
@@ -3492,7 +3494,8 @@ void VirtualGPU::startSchedulerQueueThread() {
       }
 
       // Actively monitor the scheduler queue while any sync event is pending.
-      while (!pendingSchedulerEvents_.empty() && isSchedulerQueueThreadRunning()) {
+      bool has_active_events = true;
+      while (has_active_events && isSchedulerQueueThreadRunning()) {
         uint64_t read_index = Hsa::queue_load_read_index_scacquire(schedulerQueue_);
         uint64_t write_index = Hsa::queue_load_write_index_scacquire(schedulerQueue_);
 
@@ -3510,10 +3513,11 @@ void VirtualGPU::startSchedulerQueueThread() {
             std::remove_if(pendingSchedulerEvents_.begin(),
                            pendingSchedulerEvents_.end(),
                            [](hsa_signal_t signal) {
-                             return Hsa::signal_load_relaxed(signal) == 0;
+                             return (Hsa::signal_load_relaxed(signal) == 0);
                            }),
                     pendingSchedulerEvents_.end());
-        }
+          has_active_events = !pendingSchedulerEvents_.empty();
+	}
       }
       // All scheduler completion signals completed, go back to wait
     }
