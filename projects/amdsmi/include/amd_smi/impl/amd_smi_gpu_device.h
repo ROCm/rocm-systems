@@ -69,6 +69,8 @@ class AMDSmiGPUDevice: public AMDSmiProcessor {
     const GPUComputeProcessList_t& amdgpu_get_compute_process_list(ComputeProcessListType_t list_type = ComputeProcessListType_t::kAllProcessesOnDevice);
 
 
+    amdsmi_status_t amdgpu_query_cpu_affinity(std::string& cpu_affinity) const;
+
 // New methods for -e feature
     std::string bdf_to_string() const;     // -e feature
     std::vector<uint64_t> get_bitmask_from_numa_node(int32_t node_id, uint32_t size) const;
