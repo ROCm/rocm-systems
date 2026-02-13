@@ -926,7 +926,8 @@ ncclResult_t ncclIbInit(ncclDebugLogger_t logFunction, ncclProfilerCallback_t pr
     if (ncclNIbDevs == -1) {
       ncclNIbDevs = 0;
       ncclNMergedIbDevs = 0;
-      if (ncclFindInterfaces(ncclIbIfName, &ncclIbIfAddr, MAX_IF_NAME_SIZE, 1) != 1) {
+      int nIfs;
+      if (ncclFindInterfaces(ncclIbIfName, &ncclIbIfAddr, MAX_IF_NAME_SIZE, 1, &nIfs) != ncclSuccess || nIfs != 1) {
         WARN("NET/IB : No IP interface found.");
         ret = ncclInternalError;
         goto fail;
@@ -2133,9 +2134,9 @@ ib_recv:
     if (rComm->flushEnabled) {
       if (rcclParamIbGdrFlushGpuMemNoRelaxedOrdering()) {
 #if defined(HIP_UNCACHED_MEMORY)
-        NCCLCHECKGOTO(ncclCudaCalloc(&rCommDev->gpuFlush.gpuFlushGpuMem, sizeof(int), nullptr, hipDeviceMallocUncached), ret, fail);
+        NCCLCHECKGOTO(ncclCudaCalloc(&rCommDev->gpuFlush.gpuFlushGpuMem, sizeof(int), hipDeviceMallocUncached), ret, fail);
 #else
-        NCCLCHECKGOTO(ncclCudaCalloc(&rCommDev->gpuFlush.gpuFlushGpuMem, sizeof(int), nullptr, hipDeviceMallocFinegrained), ret, fail);
+        NCCLCHECKGOTO(ncclCudaCalloc(&rCommDev->gpuFlush.gpuFlushGpuMem, sizeof(int), hipDeviceMallocFinegrained), ret, fail);
 #endif
         if (useDmaBuf)
         {

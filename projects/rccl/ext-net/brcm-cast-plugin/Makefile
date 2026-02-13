@@ -9,7 +9,7 @@ RCCL_BUILD:=$(RCCL_HOME)/build
 RCCL_SRC:=$(RCCL_HOME)/src
 RCCL_HIP:=$(RCCL_BUILD)/hipify
 
-INC:= -I. -I$(RCCL_BUILD)/_deps/fmt-src/include -I$(RCCL_BUILD)/hipify/src/include/plugin -I$(RCCL_BUILD)/hipify/src/include -I$(RCCL_BUILD)/hipify/src  -I$(RCCL_SRC)/include -I$(RCCL_BUILD)/include
+INC:= -Inccl -I. -I$(RCCL_BUILD)/_deps/fmt-src/include -I$(RCCL_BUILD)/hipify/src/include/plugin -I$(RCCL_BUILD)/hipify/src/include -I$(RCCL_BUILD)/hipify/src  -I$(RCCL_SRC)/include -I$(RCCL_BUILD)/include
 INC+= -I$(RCCL_HIP)/src/device -I$(RCCL_HIP)/gensrc
 
 SHOW_UNDEF_SYMBOLS:= # -Wl,-z,defs
