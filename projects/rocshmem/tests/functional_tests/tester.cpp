@@ -137,7 +137,7 @@ Tester::Tester(TesterArguments args) : args(args) {
       case TeamFCollectTestType:
       case CollectTestType:
       case TeamAllToAllTestType:
-      case AllToAllsTestType:
+      case TeamAllToAllvTestType:
       case TeamAlltoallmemOnStreamTestType:
         max_msg_size = args.max_volume_size / args.num_wgs / args.numprocs;
         break;
