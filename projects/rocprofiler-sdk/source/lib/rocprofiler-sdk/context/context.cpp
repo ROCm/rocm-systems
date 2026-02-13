@@ -143,19 +143,14 @@ get_active_contexts(context_array_t& data, context_filter_t filter)
     if(num_ctx <= 0) return data;
 
     data.reserve(num_ctx);
-    size_t found_count = 0;  // Cache count to avoid repeated size() calls
     for(auto& itr : get_active_contexts_impl())
     {
         const auto* ctx = itr.load(std::memory_order_acquire);
         if(ctx)
         {
-            if(!filter || (filter && filter(ctx)))
-            {
-                data.emplace_back(ctx);
-                ++found_count;
-            }
+            if(!filter || (filter && filter(ctx))) data.emplace_back(ctx);
         }
-        if(static_cast<int64_t>(found_count) == num_ctx)
+        if(static_cast<int64_t>(data.size()) == num_ctx)
         {
             // if the number of active contexts changed, restart
             if(num_ctx != get_num_active_contexts().load(std::memory_order_relaxed))

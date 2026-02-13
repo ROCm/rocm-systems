@@ -33,6 +33,7 @@
 #include "lib/rocprofiler-sdk/counters/sample_processing.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/profiling_time.hpp"
+#include "lib/rocprofiler-sdk/tracing/tracing.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/rocprofiler.h>
@@ -84,14 +85,8 @@ queue_cb(const context::context*                                         ctx,
     if(const auto* _corr_id = correlation_id)
     {
         _corr_id_v.internal = _corr_id->internal;
-        auto extern_it =
-            std::find_if(extern_corr_ids.begin(),
-                         extern_corr_ids.end(),
-                         [ctx = info->internal_context](const auto& p) { return p.first == ctx; });
-        if(extern_it != extern_corr_ids.end())
-        {
-            _corr_id_v.external = extern_it->second;
-        }
+        _corr_id_v.external =
+            tracing::get_external_correlation_id(extern_corr_ids, info->internal_context);
     }
 
     auto req_profile = rocprofiler_counter_config_id_t{.handle = 0};

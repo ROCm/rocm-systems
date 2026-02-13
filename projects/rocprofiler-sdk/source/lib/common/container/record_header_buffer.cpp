@@ -108,7 +108,8 @@ record_header_buffer::clear()
         auto _sz = m_buffer.capacity();
         if(!m_buffer.clear(std::nothrow_t{})) return 0;
         // Only clear the used portion of m_headers (first _n elements)
-        // rocprofiler_record_header_t is a trivial type, so memset is safe and fast
+        // m_index is atomically incremented during every emplace, so it should
+        // indicate the number of used elements.
         if(_n > 0)
         {
             std::memset(m_headers.data(), 0, _n * sizeof(rocprofiler_record_header_t));
