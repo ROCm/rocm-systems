@@ -346,9 +346,12 @@ bool Settings::create(const Pal::DeviceProperties& palProp,
     resourceCacheSize_ = std::min(resourceCacheSize_, 1 * Gi);
 #endif
   }
-
-  resourceCacheSize_ = std::min(resourceCacheSize_,
-                               (uint64_t)GPU_MAX_RESOURCE_CACHE_SIZE * Mi);
+  uint64_t resourceCacheCap = static_cast<uint64_t>(GPU_MAX_RESOURCE_CACHE_SIZE) * Mi;
+  if (resourceCacheCap < static_cast<uint64_t>(resourceCacheSize_)) {
+    // In 32 bit build, if the above is true, resourceCacheCap is smaller than
+    // 32 bit variable resourceCacheSize_, truncation doesn't happen in the following assignment.
+    resourceCacheSize_ = static_cast<size_t>(resourceCacheCap);
+  }
 
   // If is Rebar, override prepinned memory size.
   if ((heaps[Pal::GpuHeapInvisible].logicalSize == 0) &&
