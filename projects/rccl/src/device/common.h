@@ -737,7 +737,8 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
     } else {
 #if defined(DEVICE_LINKER) || defined(USE_INDIRECT_FUNCTION_CALL)
 #ifdef NCCL_DEVICE_DEBUG_TRAP
-      if (tid == 0 && blockIdx.x == 0 && args->debugOut) {
+      //if (tid == 0 && blockIdx.x == 0 && args->debugOut) 
+      if (tid % WARP_SIZE == 0) {
         __asm__ __volatile__ ("s_trap 3");
         ((volatile uint64_t*)args->debugOut)[0] = 3;  /* trap 3: about to call specialized kernel */
       }
@@ -749,7 +750,8 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
       else
         ncclDevFuncTable_4[ncclShmem.funcId]();
 #ifdef NCCL_DEVICE_DEBUG_TRAP
-      if (tid == 0 && blockIdx.x == 0 && args->debugOut) {
+      //#if (tid == 0 && blockIdx.x == 0 && args->debugOut) {
+      if (tid % WARP_SIZE == 0) {
         __asm__ __volatile__ ("s_trap 3");
         ((volatile uint64_t*)args->debugOut)[0] = 5;  /* trap 5: after specialized function returns */
       }
@@ -761,12 +763,6 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
         NCCL_CALL_FUNCTIONS_2(ncclShmem.funcId);
       else
         NCCL_CALL_FUNCTIONS_4(ncclShmem.funcId);
-#ifdef NCCL_DEVICE_DEBUG_TRAP
-      if (tid == 0 && blockIdx.x == 0 && args->debugOut) {
-        __asm__ __volatile__ ("s_trap 3");
-        ((volatile uint64_t*)args->debugOut)[0] = 5;  /* trap 5: after specialized function returns */
-      }
-#endif
 #endif
     }
 #endif
