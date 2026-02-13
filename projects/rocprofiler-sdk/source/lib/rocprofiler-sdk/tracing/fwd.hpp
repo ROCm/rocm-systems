@@ -73,9 +73,5 @@ struct tracing_data
 
     bool empty() const { return (callback_contexts.empty() && buffered_contexts.empty()); }
 };
-
-// Forward declare pool wrapper
-class pooled_tracing_data;
-
 }  // namespace tracing
 }  // namespace rocprofiler

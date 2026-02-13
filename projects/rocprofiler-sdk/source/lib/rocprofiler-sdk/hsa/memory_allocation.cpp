@@ -33,7 +33,6 @@
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/tracing/fwd.hpp"
 #include "lib/rocprofiler-sdk/tracing/tracing.hpp"
-#include "lib/rocprofiler-sdk/tracing/tracing_data_pool.hpp"
 
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/external_correlation.h>
@@ -395,9 +394,7 @@ get_agent(T val, IterateFunc iterate_func, CallbackFunc callback)
 {
     static auto existing = typename memory_allocation_info<OpIdx>::maptype();
 
-    // Use find() once instead of count() + at() to avoid multiple lookups
-    auto it = existing.find(val);
-    if(it == existing.end())
+    if(existing.count(val) == 0)
     {
         auto agents = rocprofiler::agent::get_agents();
         for(const auto* itr : agents)
@@ -414,10 +411,8 @@ get_agent(T val, IterateFunc iterate_func, CallbackFunc callback)
                 }
             }
         }
-        // Re-find after potential insertion
-        it = existing.find(val);
     }
-    return it == existing.end() ? sdk::null_agent_id : it->second;
+    return existing.count(val) == 0 ? sdk::null_agent_id : existing.at(val);
 }
 
 rocprofiler_address_t
@@ -464,8 +459,7 @@ memory_allocation_impl(Args... args)
     memory_allocation_data _data{};
 
     {
-        auto tracing_data_wrapper = tracing::pooled_tracing_data{};
-        auto& tracing_data = *tracing_data_wrapper;  // Reference to pooled object
+        auto tracing_data = tracing::tracing_data{};
 
         tracing::populate_contexts(ROCPROFILER_CALLBACK_TRACING_MEMORY_ALLOCATION,
                                    ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION,
@@ -484,10 +478,6 @@ memory_allocation_impl(Args... args)
     auto& tracing_data          = _data.tracing_data;
     auto  starting_addr_pointer = std::get<address_idx>(_tied_args);
     auto  region_or_pool        = std::get<region_idx>(_tied_args);
-
-    // Cache empty() checks to avoid repeated function calls
-    const bool has_callback = !tracing_data.callback_contexts.empty();
-    const bool has_buffered = !tracing_data.buffered_contexts.empty();
 
     _data.tid   = common::get_tid();
     _data.agent = get_agent<operation>(
@@ -528,7 +518,7 @@ memory_allocation_impl(Args... args)
         rocprofiler_enum,
         _data.correlation_id->internal);
 
-    if(has_callback)
+    if(!tracing_data.callback_contexts.empty())
     {
         auto _tracer_data = _data.get_callback_data();
 
@@ -557,9 +547,9 @@ memory_allocation_impl(Args... args)
         _data.address = handle_starting_addr(starting_addr_pointer);
     }
 
-    if(has_callback || has_buffered)
+    if(!tracing_data.empty())
     {
-        if(has_callback)
+        if(!_data.tracing_data.callback_contexts.empty())
         {
             auto _tracer_data = _data.get_callback_data(start_ts, end_ts);
 
@@ -570,7 +560,7 @@ memory_allocation_impl(Args... args)
                                                   _tracer_data);
         }
 
-        if(has_buffered)
+        if(!_data.tracing_data.buffered_contexts.empty())
         {
             auto record = _data.get_buffered_record(nullptr, start_ts, end_ts);
 
@@ -609,8 +599,7 @@ memory_free_impl(Args... args)
     memory_allocation_data _data{};
 
     {
-        auto tracing_data_wrapper = tracing::pooled_tracing_data{};
-        auto& tracing_data = *tracing_data_wrapper;  // Reference to pooled object
+        auto tracing_data = tracing::tracing_data{};
 
         tracing::populate_contexts(ROCPROFILER_CALLBACK_TRACING_MEMORY_ALLOCATION,
                                    ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION,
@@ -627,10 +616,6 @@ memory_free_impl(Args... args)
     }
 
     auto& tracing_data = _data.tracing_data;
-
-    // Cache empty() checks to avoid repeated function calls
-    const bool has_callback = !tracing_data.callback_contexts.empty();
-    const bool has_buffered = !tracing_data.buffered_contexts.empty();
 
     _data.tid            = common::get_tid();
     _data.func           = rocprofiler_enum;
@@ -667,7 +652,7 @@ memory_free_impl(Args... args)
         rocprofiler_enum,
         _data.correlation_id->internal);
 
-    if(has_callback)
+    if(!tracing_data.callback_contexts.empty())
     {
         auto _tracer_data = _data.get_callback_data();
 
@@ -690,9 +675,9 @@ memory_free_impl(Args... args)
         get_next_dispatch<TableIdx, OpIdx>(), std::move(_tied_args), std::make_index_sequence<N>{});
     auto end_ts = common::timestamp_ns();
 
-    if(has_callback || has_buffered)
+    if(!tracing_data.empty())
     {
-        if(has_callback)
+        if(!_data.tracing_data.callback_contexts.empty())
         {
             auto _tracer_data = _data.get_callback_data(start_ts, end_ts);
 
@@ -703,7 +688,7 @@ memory_free_impl(Args... args)
                                                   _tracer_data);
         }
 
-        if(has_buffered)
+        if(!_data.tracing_data.buffered_contexts.empty())
         {
             auto record = _data.get_buffered_record(nullptr, start_ts, end_ts);
 

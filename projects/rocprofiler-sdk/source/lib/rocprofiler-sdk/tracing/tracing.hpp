@@ -264,9 +264,9 @@ execute_phase_none_callbacks(callback_context_data_vec_t&         callback_conte
     {
         if(!context_filter(itr.ctx, domain, operation)) continue;
 
-        auto&       ctx       = itr.ctx;
-        auto&       record    = itr.record;
-        auto&       user_data = itr.user_data;
+        auto&       ctx              = itr.ctx;
+        auto&       record           = itr.record;
+        auto&       user_data        = itr.user_data;
         const auto& extern_corr_id_v = external_corr_ids.at(ctx);
 
         auto corr_id_v =

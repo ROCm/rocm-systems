@@ -34,7 +34,6 @@
 #include "lib/rocprofiler-sdk/tracing/fwd.hpp"
 #include "lib/rocprofiler-sdk/tracing/profiling_time.hpp"
 #include "lib/rocprofiler-sdk/tracing/tracing.hpp"
-#include "lib/rocprofiler-sdk/tracing/tracing_data_pool.hpp"
 
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/external_correlation.h>
@@ -390,13 +389,9 @@ async_copy_handler(hsa_signal_value_t, void* arg)
     // get the contexts that were active when the signal was created
     const auto& tracing_data = _data->tracing_data;
 
-    // Cache empty() checks to avoid repeated function calls
-    const bool has_callback = !tracing_data.callback_contexts.empty();
-    const bool has_buffered = !tracing_data.buffered_contexts.empty();
-
-    if(_profile_time.status == HSA_STATUS_SUCCESS && (has_callback || has_buffered))
+    if(_profile_time.status == HSA_STATUS_SUCCESS && !tracing_data.empty())
     {
-        if(has_callback)
+        if(!_data->tracing_data.callback_contexts.empty())
         {
             auto _tracer_data = _data->get_callback_data(_profile_time.start, _profile_time.end);
 
@@ -407,7 +402,7 @@ async_copy_handler(hsa_signal_value_t, void* arg)
                                                   _tracer_data);
         }
 
-        if(has_buffered)
+        if(!_data->tracing_data.buffered_contexts.empty())
         {
             auto record =
                 _data->get_buffered_record(nullptr, _profile_time.start, _profile_time.end);
@@ -671,8 +666,7 @@ async_copy_impl(Args... args)
     async_copy_data* _data = nullptr;
 
     {
-        auto tracing_data_wrapper = tracing::pooled_tracing_data{};
-        auto& tracing_data = *tracing_data_wrapper;  // Reference to pooled object
+        auto tracing_data = tracing::tracing_data{};
 
         tracing::populate_contexts(ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY,
                                    ROCPROFILER_BUFFER_TRACING_MEMORY_COPY,
@@ -692,9 +686,6 @@ async_copy_impl(Args... args)
 
     auto  _lk          = _data->get_lock();
     auto& tracing_data = _data->tracing_data;
-
-    // Cache empty() checks to avoid repeated function calls
-    const bool has_callback = !tracing_data.callback_contexts.empty();
 
     // at this point, we want to install our own signal handler
     _data->tid          = common::get_tid();
@@ -790,7 +781,7 @@ async_copy_impl(Args... args)
                                                _direction,
                                                _data->correlation_id->internal);
 
-    if(has_callback)
+    if(!tracing_data.callback_contexts.empty())
     {
         auto _tracer_data = _data->get_callback_data();
 

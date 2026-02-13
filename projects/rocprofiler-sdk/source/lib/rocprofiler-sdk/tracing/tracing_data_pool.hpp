@@ -31,19 +31,19 @@ namespace rocprofiler
 {
 namespace tracing
 {
-namespace detail
+namespace  // Anonymous namespace - private to this translation unit
 {
-// Simple object pool for tracing_data to avoid repeated allocation/deallocation
-class tracing_data_pool
+// Internal pool implementation - not intended for direct use outside this file
+class pool_impl
 {
 public:
-    tracing_data_pool()
+    pool_impl()
     {
         // Pre-allocate some objects to reduce initial allocation overhead
         pool_.reserve(8);  // Typical depth for nested calls
     }
 
-    ~tracing_data_pool() = default;
+    ~pool_impl() = default;
 
     // Get a tracing_data object (reused or new)
     tracing_data* acquire()
@@ -82,32 +82,32 @@ private:
     std::vector<std::unique_ptr<tracing_data>> pool_;
 };
 
-// Thread-local pool instance
-inline tracing_data_pool&
-get_thread_pool()
+// Thread-local pool instance - private to this translation unit
+inline pool_impl&
+get_pool()
 {
-    thread_local tracing_data_pool pool;
+    thread_local pool_impl pool;
     return pool;
 }
 
-}  // namespace detail
+}  // anonymous namespace
 
-// RAII wrapper for automatic return to pool
+// RAII wrapper for automatic return to pool - PUBLIC interface
 class pooled_tracing_data
 {
 public:
     pooled_tracing_data()
-        : data_(detail::get_thread_pool().acquire())
+    : data_(get_pool().acquire())
     {}
 
-    ~pooled_tracing_data() { detail::get_thread_pool().release(data_); }
+    ~pooled_tracing_data() { get_pool().release(data_); }
 
     // No copy, but allow move
-    pooled_tracing_data(const pooled_tracing_data&)            = delete;
+    pooled_tracing_data(const pooled_tracing_data&) = delete;
     pooled_tracing_data& operator=(const pooled_tracing_data&) = delete;
 
     pooled_tracing_data(pooled_tracing_data&& other) noexcept
-        : data_(other.data_)
+    : data_(other.data_)
     {
         other.data_ = nullptr;
     }
