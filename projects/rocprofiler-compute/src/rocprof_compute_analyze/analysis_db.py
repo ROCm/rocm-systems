@@ -710,7 +710,7 @@ class db_analysis(OmniAnalyze_Base):
             roofline_data_df = self._arch_configs[gfx_arch].dfs[402]
 
             if roofline_data_df.empty:
-                console_warning(f"Roofline data not found or filtered for {workload_path}.")
+                console_warning(f"Roofline data is filtered out or not found for {workload_path}.")
                 continue
 
             roofline_data_expressions = dict(
