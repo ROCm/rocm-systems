@@ -203,7 +203,7 @@ static void initOnceFunc() {
     };
 
     // Check if zcat is available in the system
-    int has_zcat = (access("/usr/bin/zcat", X_OK) == 0);
+    int has_zcat = (access("zcat", X_OK) == 0);
 
     for (const auto& path : possiblePaths) {
       // Reset flags for each file
@@ -212,15 +212,14 @@ static void initOnceFunc() {
 
       // Special handling for /proc/config.gz
       snprintf(kernel_conf_file, sizeof(kernel_conf_file), path, utsname.release);
-      fp = fopen(kernel_conf_file, "r");
 
       if (strstr(path, "/proc/config.gz") != NULL) {
         // Skip .gz files if zcat is not available
         if (!has_zcat) {
-          INFO(NCCL_INIT, "/usr/bin/zcat not available, skipping %s", kernel_conf_file);
+          INFO(NCCL_INIT, "zcat not available, skipping %s", kernel_conf_file);
           continue;
         }
-        fp = popen("/usr/bin/zcat /proc/config.gz 2>/dev/null", "r");
+        fp = popen("zcat /proc/config.gz 2>/dev/null", "r");
       } else {
         fp = fopen(kernel_conf_file, "r");
       }
