@@ -303,12 +303,19 @@ int Assembler::RunAssemble(const char* const AssemblySource) {
 
     // Initialize MC interfaces and base class objects
     std::unique_ptr<const MCRegisterInfo> MRI(
+#if LLVM_VERSION_MAJOR > 18
+            TheTarget->createMCRegInfo(TheTriple));
+#else
             TheTarget->createMCRegInfo(TripleName));
+#endif
     if (!MRI) {
         outs() << "ASM Error: no register info for target " << MCPU << "\n";
         return -1;
     }
-#if LLVM_VERSION_MAJOR > 9
+#if LLVM_VERSION_MAJOR > 18
+    std::unique_ptr<const MCAsmInfo> MAI(
+            TheTarget->createMCAsmInfo(*MRI, TheTriple, MCOptions));
+#elif LLVM_VERSION_MAJOR > 9
     std::unique_ptr<const MCAsmInfo> MAI(
             TheTarget->createMCAsmInfo(*MRI, TripleName, MCOptions));
 #else
@@ -326,7 +333,12 @@ int Assembler::RunAssemble(const char* const AssemblySource) {
         return -1;
     }
     std::unique_ptr<MCSubtargetInfo> STI(
+#if LLVM_VERSION_MAJOR > 18
+            TheTarget->createMCSubtargetInfo(TheTriple, MCPU, std::string()));
+#else
             TheTarget->createMCSubtargetInfo(TripleName, MCPU, std::string()));
+#endif
+
     if (!STI || !STI->isCPUStringValid(MCPU)) {
         outs() << "ASM Error: no subtarget info for target " << MCPU << "\n";
         return -1;
