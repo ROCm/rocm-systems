@@ -324,7 +324,8 @@ __global__ void {kernel_name}(
     {func_const},
     RunWorkBatch<{func_const}, {cxx_type}, {redop_class}<{cxx_type}>, {algo_const}, {proto_const}, {acc}, {unroll}, {pipeline}>,
     false,  // COLLTRACE
-    {unroll}
+    {unroll},
+    ncclDevFunc_{devfunc_suffix}
   >(&argsStorage.args);
 }}
 

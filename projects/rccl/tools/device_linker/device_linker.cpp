@@ -853,7 +853,12 @@ public:
                 break;
             }
             default:
-                return std::nullopt;
+                // Non-address operations (DW_OP_lit*, DW_OP_constu, DW_OP_plus,
+                // DW_OP_LLVM_form_aspace_address, etc.) don't need relocation.
+                // Return 0 (no adjustment) so DWARFLinker keeps the containing DIE.
+                // This preserves __shared__ variables whose location expressions
+                // use address-space ops rather than relocatable addresses.
+                return 0;
         }
         
         if (has_addr) {
