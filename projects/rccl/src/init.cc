@@ -891,9 +891,9 @@ static ncclResult_t devCommSetup(ncclComm_t comm) {
    * launch so the kernel can read it (host pointer is not device-accessible). */
   NCCLCHECKGOTO(ncclCudaCalloc(&comm->kernelArgsBufDev, comm->workArgsBytes), ret, fail);
   ncclCommPushCudaFree(comm, comm->kernelArgsBufDev);
-  /* Small device buffer for kernel to write debug dump (args, first batch); host reads back when enabled. */
-  NCCLCHECKGOTO(ncclCudaCalloc(&comm->kernelDebugBufDev, 128), ret, fail);
-  ncclCommPushCudaFree(comm, comm->kernelDebugBufDev);
+  /* Debug buffer disabled: the hipStreamSynchronize readback in ncclLaunchKernel
+   * serializes multi-GPU kernel launches, causing deadlocks in group collectives. */
+  comm->kernelDebugBufDev = nullptr;
 #else
   comm->kernelArgsBufDev = nullptr;
   comm->kernelDebugBufDev = nullptr;

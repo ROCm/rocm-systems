@@ -1526,7 +1526,7 @@ if (DEVICE_LINKER)
             --cuda-device-only
             --offload-arch=${FIRST_GPU_TARGET}
             --no-gpu-bundle-output
-            -gline-tables-only
+            -g
             -O3
             -c
             ${DISPATCHER_SOURCE}

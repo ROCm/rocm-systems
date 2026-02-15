@@ -200,23 +200,25 @@ struct ncclShmemData {
   uint64_t barrier_pat;
 };
 
-// For RDC builds: use extern __shared__ for cross-TU sharing
-// For non-RDC builds (DEVICE_LINKER): use __shared__ (not extern)
-#ifndef NCCL_SHMEM_DECL
-  #ifdef DEVICE_LINKER
-    #define NCCL_SHMEM_DECL __shared__
-  #else
-    #define NCCL_SHMEM_DECL extern __shared__
-  #endif
+// Device linker builds specialized kernels as full kernels.
+// Each has its own shared memory definitions
+// This includes the dispatcher
+
+#if defined(DEVICE_LINKER)
+  #define SHARED_SC_PREFIX
+#else 
+  #define SHARED_SC_PREFIX extern
 #endif
 
-NCCL_SHMEM_DECL ncclShmemData ncclShmem;
+SHARED_SC_PREFIX __shared__ ncclShmemData ncclShmem;
+
 #if __CUDA_ARCH__ >= 700 || defined(DEVICE_LINKER)
-  // Dynamic shared memory always requires extern __shared__
-  extern __shared__ ulong2 ncclShmemPerWarp[];
+  extern __shared__ ulong2 ncclShmemPerWarp[/*ncclShmemDynamicSize()/sizeof(ulong2)*/];
 #else
-  NCCL_SHMEM_DECL ulong2 ncclShmemPerWarp[ncclShmemScratchWarpSize()*(NCCL_MAX_NTHREADS/WARP_SIZE)/sizeof(ulong2)];
+  SHARED_SC_PREFIX  __shared__ ulong2 ncclShmemPerWarp[ncclShmemScratchWarpSize()*(NCCL_MAX_NTHREADS/WARP_SIZE)/sizeof(ulong2)];
 #endif
+
+#undef SHARED_SC_PREFIX
 
 #ifdef ENABLE_FAULT_INJECTION
 __device__ inline void insert_random_delay_per_warp() {
@@ -532,7 +534,7 @@ __device__ __forceinline__ void profiler(int action) {
   }
 }
 
-template<int SpecializedFnId, typename SpecializedRunWorkBatch, bool COLLTRACE, int COLL_UNROLL>
+template<int SpecializedFnId, typename SpecializedRunWorkBatch, bool COLLTRACE, int COLL_UNROLL, void(*SpecializedDevFunc)() = nullptr>
 __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* args) {
   const int tid = threadIdx.x;
   int tn = blockDim.x;
@@ -728,9 +730,13 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
     if (tid == 0) __insert_timestamp(__LINE__);
     profiler(START);
 #ifdef NCCL_SPECIALIZED_KERNEL
-    // When NCCL_SPECIALIZED_KERNEL is defined, always run the specialized work batch
-    // since we're calling the right kernel directly via getSpecializedKernel()
+#ifdef DEVICE_LINKER
+    // Device linker: call ncclDevFunc directly so the compiler generates
+    // correct calling conventions (ncclDevFunc is extracted by device linker).
+    SpecializedDevFunc();
+#else
     SpecializedRunWorkBatch().run();
+#endif
 #else
     if (0 <= SpecializedFnId && ncclShmem.funcId == (unsigned)SpecializedFnId) {
       SpecializedRunWorkBatch().run();
