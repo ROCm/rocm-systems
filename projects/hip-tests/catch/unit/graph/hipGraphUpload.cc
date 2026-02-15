@@ -232,7 +232,7 @@ TEST_CASE("Unit_hipGraphUpload_Functional_With_Priority_Stream") {
   HIP_CHECK(hipStreamBeginCapture(stream1, hipStreamCaptureModeGlobal));
   HIP_CHECK(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyHostToDevice, stream1));
   HIP_CHECK(hipMemcpyAsync(B_d, B_h, Nbytes, hipMemcpyHostToDevice, stream1));
-  HipTest::vectorADD<int><<<1, 1, 0, stream1>>>(A_d, B_d, C_d, N);
+  HipTest::vectorADD<int><<<1, N, 0, stream1>>>(A_d, B_d, C_d, N);
   HIP_CHECK(hipMemcpyAsync(C_h, C_d, Nbytes, hipMemcpyDeviceToHost, stream1));
   HIP_CHECK(hipStreamEndCapture(stream1, &graph));
 
