@@ -1866,17 +1866,6 @@ ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan
   NCCLCHECK(ncclProfilerStartKernelLaunchEvent(plan, launchStream));
 
   void* extra[] = {plan->kernelArgs, &plan->kernelArgsSize};
-  /* HIP: kernel args must be in device memory (host pointer not visible to GPU).
-   * Copy once and use the same pointer for all launch paths. */
-  kernelArgsToPass = plan->kernelArgs;
-#if defined(__HIP_PLATFORM_AMD__) && defined(__HIPCC__)
-  if (comm->kernelArgsBufDev != nullptr) {
-    CUDACHECKGOTO(hipMemcpyAsync(comm->kernelArgsBufDev, plan->kernelArgs, plan->kernelArgsSize, hipMemcpyHostToDevice, launchStream), ret, do_return);
-    kernelArgsToPass = comm->kernelArgsBufDev;
-  }
-#endif
-  extra[0] = kernelArgsToPass;
-  extra[1] = &plan->kernelArgsSize;
 
   auto event = latency_profiler::collTraceAquireEventBaseline(plan, launchStream);
   if (planner->numStreams == 1 && !plan->persistent) {
