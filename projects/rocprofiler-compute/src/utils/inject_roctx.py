@@ -51,7 +51,7 @@ for candidate in candidate_paths:
 
 from utils.logger import console_error, console_log, console_warning
 
-console_log("torch trace", f"Python version: {python_version}")
+console_log("torch trace", f"Workload Python Version: {python_version}")
 
 try:
     from roctx import rangePop, rangePush
@@ -64,12 +64,9 @@ try:
     )
 except ImportError:
     console_error(
-        f"Looked for Roctx in :{candidate_paths}"
-        "ROCTX Python module not found.\n"
-        "Please ensure that the rocprofiler-sdk is installed"
-        " and that the roctx Python bindings are available for your Python version."
-        "You may need to reinstall or rebuild ROCm for your current Python environment.\n"
-        "The --torch-trace option requires a valid roctx installation.\n",
+        f"Looked for roctx in: {candidate_paths}\n"
+        "ROCTX not found. --torch-trace requires roctx from rocprofiler-sdk. "
+        "Ensure your ROCm (Python) version matches the workload's Python version.\n",
     )
     sys.exit(1)
 
