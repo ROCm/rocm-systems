@@ -501,67 +501,44 @@ agent_address_space_t::convert (
   throw api_error_t (AMD_DBGAPI_STATUS_ERROR_INVALID_ADDRESS_SPACE_CONVERSION);
 }
 
-bool
-memory_cache_t::contains_all (agent_address_t address,
-                              amd_dbgapi_size_t size) const
+/* Returns true if the ranges given by [A_ADDR, A_ADDR+A_SIZE) and
+   [B_ADDR, B_ADDR+B_SIZE) overlap.  */
+
+static bool
+ranges_overlap (agent_address_t a_addr, amd_dbgapi_size_t a_size,
+                agent_address_t b_addr, amd_dbgapi_size_t b_size)
 {
-  dbgapi_assert (address < (address + size) && "invalid size");
-  auto cache_line_begin = utils::align_down (address, cache_line_size);
-  auto cache_line_end = utils::align_up (address + size, cache_line_size);
+  auto a_end = a_addr + a_size;
+  auto b_end = b_addr + b_size;
 
-  for (auto cache_line_address = cache_line_begin;
-       cache_line_address < cache_line_end;
-       cache_line_address += cache_line_size)
-    if (m_cache_line_map.find (cache_line_address) == m_cache_line_map.end ())
-      return false;
-
-  return true;
+  return a_addr < b_end && b_addr < a_end;
 }
 
-void
-memory_cache_t::prefetch (agent_address_t address, amd_dbgapi_size_t size)
+std::byte *
+memory_cache_t::new_entry (agent_address_t address, amd_dbgapi_size_t size)
 {
-  if (size == 0)
-    return;
-
   dbgapi_assert (address < (address + size) && "invalid size");
-  auto cache_line_begin = utils::align_down (address, cache_line_size);
-  auto cache_line_end = utils::align_up (address + size, cache_line_size);
 
-  auto staging_buffer
-    = std::make_unique<std::byte[]> (cache_line_end - cache_line_begin);
+  for (auto &entry : m_cache_entries)
+    if (ranges_overlap (entry.address (), entry.size (), address, size))
+      fatal_error ("cache entry already exists");
 
-  try
+  if (!m_unused_cache_entries.empty ())
     {
-      m_xfer_agent_memory (cache_line_begin, &staging_buffer[0], nullptr,
-                           cache_line_end - cache_line_begin);
+      /* Reuse an existing entry node.  */
+      m_cache_entries.splice (m_cache_entries.end (), m_unused_cache_entries,
+                              m_unused_cache_entries.begin ());
     }
-  catch (const memory_error_t &)
+  else
     {
-      /* If a memory access error exception is raised while prefetching, simply
-         drop the prefetch.  */
-      return;
+      /* Create a new entry node.  */
+      m_cache_entries.emplace_back ();
     }
 
-  for (auto cache_line_address = cache_line_begin;
-       cache_line_address < cache_line_end;
-       cache_line_address += cache_line_size)
-    {
-      if (contains_all (cache_line_address, cache_line_size))
-        /* There's already a cache line for that address that will have already
-           been read, and possibly updated.  So leave cache line with its
-           current contents.  */
-        continue;
-
-      auto [it, success] = m_cache_line_map.try_emplace (cache_line_address);
-      dbgapi_assert (success && "failed to create memory cache");
-      [] (auto &&...) {}(success); /* Silence an unused variable warning when
-                                      building without assertions enabled.  */
-
-      memcpy (&it->second.m_data[0],
-              &staging_buffer[cache_line_address - cache_line_begin],
-              cache_line_size);
-    }
+  auto &entry = m_cache_entries.back ();
+  entry.reset (address, size);
+  m_xfer_agent_memory (address, entry.data (), nullptr, size);
+  return entry.data ();
 }
 
 void
@@ -571,73 +548,39 @@ memory_cache_t::write_back (agent_address_t address, amd_dbgapi_size_t size)
   if (size == 0)
     return;
 
-  dbgapi_assert (address < (address + size) && "invalid size");
-  auto first_line = utils::align_down (address, cache_line_size);
-  auto last_line = utils::align_down (address + size - 1, cache_line_size);
-
-  auto it = m_cache_line_map.lower_bound (first_line);
-  auto limit = m_cache_line_map.upper_bound (last_line);
-
-  std::unique_ptr<std::byte[]> staging_buffer;
-  size_t staging_buffer_size = 0;
-
-  while (it != limit)
+  for (auto &entry : m_cache_entries)
     {
-      auto &[cache_line_address, cache_line] = *it;
-      size_t request_size = cache_line_size;
+      auto dirty_start_offset = entry.dirty_range_start_offset ();
+      auto dirty_start_address = dirty_start_offset + entry.address ();
+      auto dirty_size = entry.dirty_range_size ();
 
-      /* Skip this line if it isn't dirty as we do not need to commit it to
-         memory.  */
-      if (!cache_line.m_dirty)
+      if (ranges_overlap (address, size, dirty_start_address, dirty_size))
         {
-          std::advance (it, 1);
-          continue;
-        }
+          entry.mark_clean ();
 
-      /* It is more efficient to do a single large memory access, so try to
-         group as many contiguous cache lines as possible.  */
-      auto next = std::next (it);
-      while (next != limit && next->second.m_dirty
-             && next->first == (cache_line_address + request_size))
-        {
-          request_size += cache_line_size;
-          std::advance (next, 1);
-        }
+          try
+            {
+              auto xfer_size = m_xfer_agent_memory (
+                dirty_start_address, nullptr,
+                entry.data () + dirty_start_offset, dirty_size);
 
-      if (request_size > staging_buffer_size)
-        {
-          staging_buffer = std::make_unique<std::byte[]> (request_size);
-          staging_buffer_size = request_size;
-        }
-
-      while (it != next)
-        {
-          memcpy (&staging_buffer[0] + (it->first - cache_line_address),
-                  &it->second.m_data[0], cache_line_size);
-          it->second.m_dirty = false;
-          std::advance (it, 1);
-        }
-
-      try
-        {
-          size_t xfer_size = m_xfer_agent_memory (
-            cache_line_address, nullptr, &staging_buffer[0], request_size);
-
-          if (xfer_size != request_size)
-            throw memory_access_error_t (m_agent.agent_address_space (),
-                                         cache_line_address + xfer_size);
-        }
-      catch (const process_exited_exception_t &)
-        {
-          /* The process has exited, simply discard the dirty cached bytes.  */
-        }
-      catch (const memory_error_t &e)
-        {
-          /* If we see memory errors, continue to try to write back all dirty
-             lines.  The first exception seen will be rethrown at the end of
-             the procedure.  */
-          if (!exception)
-            exception = std::current_exception ();
+              if (xfer_size != dirty_size)
+                throw memory_access_error_t (m_agent.agent_address_space (),
+                                             entry.address () + xfer_size);
+            }
+          catch (const process_exited_exception_t &)
+            {
+              /* The process has exited, simply discard the dirty cached
+                 bytes.  */
+            }
+          catch (const memory_error_t &e)
+            {
+              /* If we see memory errors, continue to try to write back
+                 all dirty ranges.  The first exception seen will be
+                 rethrown at the end of the procedure.  */
+              if (!exception)
+                exception = std::current_exception ();
+            }
         }
     }
 
@@ -653,17 +596,29 @@ memory_cache_t::discard (agent_address_t address, amd_dbgapi_size_t size,
     return;
 
   dbgapi_assert (address < (address + size) && "invalid size");
-  auto first_line = utils::align_down (address, cache_line_size);
-  auto last_line = utils::align_down (address + size - 1, cache_line_size);
 
-  auto it = m_cache_line_map.lower_bound (first_line);
-  auto limit = m_cache_line_map.upper_bound (last_line);
-
-  while (it != limit)
+  for (auto it = m_cache_entries.begin (); it != m_cache_entries.end ();)
     {
-      dbgapi_assert ((force_discard || !it->second.m_dirty)
-                     && "discarding a dirty cache line");
-      it = m_cache_line_map.erase (it);
+      if (ranges_overlap (it->address (), it->size (), address, size))
+        {
+          dbgapi_assert ((force_discard || !it->dirty ())
+                         && "discarding a dirty cache entry");
+
+          /* Don't allow discarding a partial entry.  */
+          [[maybe_unused]] auto range_end = address + size;
+          [[maybe_unused]] auto entry_end = it->address () + it->size ();
+          dbgapi_assert ((address <= it->address () && entry_end <= range_end)
+                         && "partial overlap when discarding entry");
+
+          /* Advance before splicing.  */
+          auto current = it++;
+
+          /* Move the matching entry to m_unused_entries.  */
+          m_unused_cache_entries.splice (m_unused_cache_entries.end (),
+                                         m_cache_entries, current);
+        }
+      else
+        ++it;
     }
 }
 
@@ -679,27 +634,30 @@ memory_cache_t::xfer_agent_memory (agent_address_t address, void *read,
   if (size > max - address)
     size = max - address;
 
-  auto first_line = utils::align_down (address, cache_line_size);
-  auto last_line = utils::align_down (address + size - 1, cache_line_size);
+  auto ptr = address;
 
-  /* Iterators to the first cache line, and one past the last cache line.  */
-  auto begin = m_cache_line_map.lower_bound (first_line);
-  auto end = m_cache_line_map.upper_bound (last_line);
-
-  /* If there are no cache lines affected by this access.  */
-  if (begin == end)
-    return m_xfer_agent_memory (address, read, write, size);
-
-  /* For cached accesses, handle one cache line at a time.  */
-  if (first_line != last_line)
+  while (size != 0)
     {
-      auto ptr = address;
-      while (size > 0)
-        {
-          auto limit = utils::align_up (ptr + 1, cache_line_size);
-          auto request_size = std::min (limit, ptr + size) - ptr;
+      /* Find the next overlapping cache entry.  */
+      cache_entry_t *entry = nullptr;
 
-          auto xfer_size = xfer_agent_memory (ptr, read, write, request_size);
+      for (auto &e : m_cache_entries)
+        if (ranges_overlap (e.address (), e.size (), ptr, size))
+          {
+            entry = &e;
+            break;
+          }
+
+      /* Determine where uncached data stops.  */
+      auto uncached_end = entry != nullptr ? entry->address () : ptr + size;
+
+      /* Handle uncached prefix, if any.  */
+      if (ptr < uncached_end)
+        {
+          auto request_size = std::min<size_t> (size, uncached_end - ptr);
+
+          auto xfer_size
+            = m_xfer_agent_memory (ptr, read, write, request_size);
 
           ptr += xfer_size;
           if (read != nullptr)
@@ -710,25 +668,38 @@ memory_cache_t::xfer_agent_memory (agent_address_t address, void *read,
 
           if (xfer_size != request_size)
             break;
+          continue;
         }
-      return ptr - address;
+
+      /* If no entry, we are done.  */
+      if (entry == nullptr)
+        continue;
+
+      /* Now PTR is inside the entry.  */
+      auto entry_end = entry->address () + entry->size ();
+      auto chunk_end = std::min (entry_end, ptr + size);
+
+      size_t offset = ptr - entry->address ();
+      size_t chunk_size = chunk_end - ptr;
+
+      if (read != nullptr)
+        std::memcpy (read, entry->data () + offset, chunk_size);
+      else
+        {
+          std::memcpy (entry->data () + offset, write, chunk_size);
+          entry->mark_offset_range_dirty (offset, chunk_size);
+        }
+
+      ptr += chunk_size;
+      if (read != nullptr)
+        read = static_cast<char *> (read) + chunk_size;
+      if (write != nullptr)
+        write = static_cast<const char *> (write) + chunk_size;
+
+      size -= chunk_size;
     }
 
-  dbgapi_assert (begin != m_cache_line_map.end ());
-  auto &cache_line = begin->second;
-  auto offset = address - first_line;
-
-  if (read != nullptr)
-    {
-      memcpy (read, &cache_line.m_data[0] + offset, size);
-    }
-  else
-    {
-      memcpy (&cache_line.m_data[0] + offset, write, size);
-      cache_line.m_dirty = true;
-    }
-
-  return size;
+  return ptr - address;
 }
 
 } /* namespace amd::dbgapi */
