@@ -993,8 +993,18 @@ NCCL_PARAM(ChunkSize, "CHUNK_SIZE", 0);
 // Need this temporary parameter to disable p2p batching to avoid some dips at 4MB - 32 MB message size at large scale
 // This parameter must be removed after further investigation,
 // Note that NCCL enables batching by default and it is needed to achieve perf for with smaller messages <= 4MB
-RCCL_PARAM(P2pBatchEnable, "P2P_BATCH_ENABLE", 0);
+// Currently, p2p-batching thresholds are only used for gfx950 for 16 nodes and above
+// previously, p2p-batching was causing regression on all node-counts for larger message sizes (64KB "per-rank")
+// we want to enable by default only for gfx950, so we user rcclEffectiveP2pBatchEnable helper to branch based on arch
+RCCL_PARAM(P2pBatchEnable, "P2P_BATCH_ENABLE", -1);
 RCCL_PARAM(P2pBatchThreshold, "P2P_BATCH_THRESHOLD", 1 << 16);  // 64k per-rank message size
+
+
+static int rcclEffectiveP2pBatchEnable(struct ncclComm* comm) {
+  auto userInput = rcclParamP2pBatchEnable();
+  if (userInput >= 0) return userInput;
+  return IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") ? 1 : 0;
+}
 
 // Put p2p op in plan assuming there is sizeof(ncclDevWorkBatch) in batch budget
 // and sizeof(ncclDevWorkP2p) in work budget. "sendRank" and "recvRank" must
@@ -1018,10 +1028,10 @@ static ncclResult_t addP2pToPlan(
   bool network[2] = {false, false};
   bool proxySameProcess[2] = {true, true};
   void** handles[2] = {NULL, NULL};
-  auto batchP2PEnableEnv = rcclParamP2pBatchEnable();
+  auto batchP2PEnableEnv = rcclEffectiveP2pBatchEnable(comm);
   auto p2pBatchThreshold = rcclParamP2pBatchThreshold();
   bool belowThreshold = (recvBytes <= p2pBatchThreshold) && (sendBytes <= p2pBatchThreshold);
-  bool batchP2P =  batchP2PEnableEnv && (sendBytes == recvBytes) && belowThreshold;
+  bool batchP2P =  batchP2PEnableEnv && (sendBytes == recvBytes) && (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && comm->nNodes >= 16 ? belowThreshold : true);
   //ncclP2pChannelBaseForRound now computes channel-base based on batching enablement (env. variable RCCL_P2P_BATCH_ENABLE=1)
   //but batching is only applicable if msg size is below threshold which is not checked below
   //this causes perf. dips in some cases but also boosts in other cases even when no batching happens because msg size is above threshold
@@ -1334,7 +1344,7 @@ static ncclResult_t scheduleP2pTasksToPlan(
       void* recvBuff = recv ? recv->buff : nullptr;
       // Add check to keep in-place send to self when P2P batching is enabled
       // Such case is not supported currently and is causing hangs
-      if (sendRank == comm->rank && send->buff == recv->buff && rcclParamP2pBatchEnable() == 0) {
+      if (sendRank == comm->rank && send->buff == recv->buff && rcclEffectiveP2pBatchEnable(comm) == 0) {
         // Skip send to self in-place (we don't need to support this).
         ncclIntruQueueDequeue(&peers[sendRank].sendQueue);
         ncclIntruQueueDequeue(&peers[recvRank].recvQueue);
@@ -2837,7 +2847,7 @@ static ncclResult_t p2pTaskAppend(
                                     : comm->p2pSchedule[round].recvRank)) {
         round += 1;
       }
-      uint8_t base = ncclP2pChannelBaseForRound(comm, round, rcclParamP2pBatchEnable());
+      uint8_t base = ncclP2pChannelBaseForRound(comm, round, rcclEffectiveP2pBatchEnable(comm));
       for (int c=0; c < comm->p2pnChannelsPerPeer; c++) {
         int channelId = ncclP2pChannelForPart(comm->p2pnChannels, base, c, comm->p2pnChannelsPerPeer, comm->nNodes);
         if (isSendNotRecv) {
