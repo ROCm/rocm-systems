@@ -17,6 +17,8 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
+
+cmake_minimum_required(VERSION 3.21.3)
 add_custom_target(build_cookbook)
 add_subdirectory(0_MatrixTranspose)
 add_subdirectory(1_hipEvent)
@@ -35,9 +37,20 @@ add_subdirectory(14_gpu_arch)
 add_subdirectory(15_static_library/device_functions)
 add_subdirectory(15_static_library/host_functions)
 # Disable samples that call hipcc directly for static builds.
+# Also check for required LLVM tools on Windows
 if(BUILD_SHARED_LIBS)
   add_subdirectory(16_assembly_to_executable)
-  add_subdirectory(17_llvm_ir_to_executable)
+  
+  # 17_llvm_ir_to_executable requires llvm-dis which may not be available
+  find_program(LLVM_DIS_EXE 
+    NAMES llvm-dis llvm-dis.exe
+    HINTS "${ROCM_PATH}/lib/llvm/bin" "${HIP_PATH}/lib/llvm/bin"
+  )
+  if(LLVM_DIS_EXE)
+    add_subdirectory(17_llvm_ir_to_executable)
+  else()
+    message(STATUS "Skipping 17_llvm_ir_to_executable - llvm-dis not found")
+  endif()
 endif()
 add_subdirectory(18_cmake_hip_device)
 add_subdirectory(19_cmake_lang)

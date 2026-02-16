@@ -697,8 +697,10 @@ static ncclResult_t scheduleCollTasksToPlan(
   int channelId = 0;
   size_t currentTraffic = 0;
 
+#ifdef ENABLE_TRACE
   size_t channelCounts[MAXCHANNELS];
   for (int c=0; c<MAXCHANNELS; c++) channelCounts[c] = 0;
+#endif
 
   while (nPlanColls!=0 && !ncclIntruQueueEmpty(&planner->collTaskQueue)) {
     struct ncclTaskColl* task = ncclIntruQueueHead(&planner->collTaskQueue);
@@ -944,9 +946,11 @@ static ncclResult_t scheduleCollTasksToPlan(
           int(devWork->cbd.chunkGrainsMid*rcclProtoGrainSize(task->protocol, comm)),
           int(devWork->cbd.chunkGrainsHi*rcclProtoGrainSize(task->protocol, comm)));
           // channel traffic counter
+#ifdef ENABLE_TRACE
           channelCounts[devWork->channelLo] += (long)devWork->cbd.countLo;
           if (devWork->channelLo != devWork->channelHi) channelCounts[devWork->channelHi] += (long)devWork->cbd.countHi;
           for (int c=devWork->channelLo+1; c<devWork->channelHi; c++) channelCounts[c] += (long)devWork->cbd.countMid;
+#endif
       }
     }
 
@@ -962,6 +966,7 @@ static ncclResult_t scheduleCollTasksToPlan(
     plan->workBytes += workNode->size;
   }
 
+#ifdef ENABLE_TRACE
   char line[1024];
   int offset = 0;
   for (int c=0; c<MAXCHANNELS; c++) {
@@ -969,6 +974,7 @@ static ncclResult_t scheduleCollTasksToPlan(
     offset = strlen(line);
   }
   TRACE(NCCL_COLL, "Channel traffic counts: %s", line);
+#endif
 
   return ncclSuccess;
 }
@@ -2887,7 +2893,7 @@ static ncclResult_t collTaskAppend(
   t->root = info->root;
   t->datatype = info->datatype;
   size_t elementSize = ncclTypeSize(t->datatype);
-  if (t->func == ncclFuncAllGather || t->func == ncclFuncBroadcast || t->func == ncclFuncAlltoAllPivot) {
+  if (t->func == ncclFuncAllGather || t->func == ncclFuncBroadcast || t->func == ncclFuncAlltoAllPivot || t->func == ncclFuncAllToAllGda) {
     t->count *= elementSize;
     t->datatype = ncclInt8;
     elementSize = 1;

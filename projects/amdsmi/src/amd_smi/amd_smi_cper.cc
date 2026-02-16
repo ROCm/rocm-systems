@@ -156,8 +156,6 @@ static auto amdsmi_read_cper_file(const std::string &filepath) -> CperFileCtx {
     GUID_INIT(0xDC3EA0B0, 0xA144, 0x4797, 0xB9, 0x5B, 0x53, 0xFA,   \
           0x24, 0x2B, 0x6E, 0x1D)
 
-static amdsmi_cper_guid_t mce = CPER_NOTIFY_MCE;
-static amdsmi_cper_guid_t cmc = CPER_NOTIFY_CMC;
 static amdsmi_cper_guid_t bt = BOOT_TYPE;
 static amdsmi_cper_guid_t cr = AMD_OOB_CRASHDUMP;
 static amdsmi_cper_guid_t nonstd = AMD_GPU_NONSTANDARD_ERROR;
@@ -300,7 +298,7 @@ exit:
 
     LOG_DEBUG(ss);
 
-    return aca_decode_corrected_error(body->err_ctx.reg_dump, sizeof(body->err_ctx.reg_dump)/sizeof(uint64_t),
+    return aca_decode_corrected_error(body->err_ctx.reg_dump, sizeof(body->err_ctx.reg_dump)/sizeof(body->err_ctx.reg_dump[0]),
         section->flags_mask, section->revision_major, body->err_ctx.reg_ctx_type);
 }
 
@@ -341,7 +339,7 @@ static int cper_dump_cr_boot(const struct cper_sec_crashdump *crashdump, const c
 }
 
 static void inject_product_serial_number(amdsmi_cper_hdr_t *cper, uint64_t product_serial) {
-    for (size_t i = 0; i < cper_num_sec(cper); i++) {
+    for (int i = 0; i < cper_num_sec(cper); i++) {
         void *sec_desc_offset = cper_get_sec_desc_offset(cper, i);
         struct cper_sec_desc *sec_desc = static_cast<struct cper_sec_desc *>(sec_desc_offset);
         strncpy(sec_desc->fru_id, std::to_string(product_serial).c_str(), sizeof(sec_desc->fru_id) - 1);
@@ -502,30 +500,31 @@ std::vector<int> cper_decode(const amdsmi_cper_hdr_t *cper) {
         cper_sec_desc *section = static_cast<struct cper_sec_desc *>(sec_desc_offset);
         cper_dump_sec_desc(section);
 
+        int afid = -1;
         if (cper_is_cr(sec_guid)) {
             struct cper_sec_crashdump *crashdump = static_cast<struct cper_sec_crashdump *>(sec_offset);
             if (cper_is_bt(cper_guid)) {
                 ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[AFIDS] decoding boot crash dump\n";
                 LOG_DEBUG(ss);
-                afids.emplace_back(cper_dump_cr_boot(crashdump, section));
+                afid = cper_dump_cr_boot(crashdump, section);
             }
             else {
                 ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[AFIDS] decoding crash dump\n";
                 LOG_DEBUG(ss);
-                afids.emplace_back(cper_dump_cr_fatal(crashdump, section));
+                afid = cper_dump_cr_fatal(crashdump, section);
             }
         }
         else if (cper_is_nonstd(sec_guid)) {
             struct cper_sec_nonstd_err *crashdump = static_cast<struct cper_sec_nonstd_err *>(sec_offset);
             ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[AFIDS] decoding non-standard error\n";
             LOG_DEBUG(ss);
-            afids.emplace_back(cper_dump_nonstd_err(crashdump, section));
+             afid = cper_dump_nonstd_err(crashdump, section);
         }
         else if (cper_is_proc_err(sec_guid)) {
             struct cper_sec_nonstd_err *crashdump = static_cast<struct cper_sec_nonstd_err *>(sec_offset);
             ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[AFIDS] decoding proc error section type\n";
             LOG_DEBUG(ss);
-            afids.emplace_back(cper_dump_nonstd_err(crashdump, section));
+            afid = cper_dump_nonstd_err(crashdump, section);
         }
         else {
             ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[AFIDS] Unknown error type!!\n";
@@ -534,6 +533,9 @@ std::vector<int> cper_decode(const amdsmi_cper_hdr_t *cper) {
             }
             ss << "\n";
             LOG_ERROR(ss);
+        }
+        if(afid != -1) {
+            afids.emplace_back(afid);
         }
     }
 
