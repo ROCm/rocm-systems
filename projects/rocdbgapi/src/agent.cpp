@@ -43,6 +43,7 @@ agent_t::agent_t (amd_dbgapi_agent_id_t agent_id, process_t &process,
   : handle_object (agent_id), m_os_agent_info (os_agent_info),
     m_architecture (architecture), m_process (process),
     m_memory_cache (
+      *this,
       [this] (agent_address_t address, void *read, const void *write,
               size_t size)
       {
@@ -107,7 +108,7 @@ agent_t::agent_t (amd_dbgapi_agent_id_t agent_id, process_t &process,
 
 agent_t::~agent_t ()
 {
-  /* Drop all active cache lines.  */
+  /* Drop all active cache entries.  */
   m_memory_cache.write_back ();
   m_memory_cache.discard ();
 }

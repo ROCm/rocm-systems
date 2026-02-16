@@ -653,28 +653,6 @@ wave_t::read_register (amdgpu_regnum_t regnum, size_t offset,
       return;
     }
 
-  std::optional<scoped_queue_suspend_t> suspend;
-  if (!queue ().is_suspended ()
-      && !agent ().memory_cache ().contains_all (*reg_addr + offset,
-                                                 value_size))
-    {
-      /* Get the wave_id before suspending the queue, as this wave could have
-         exited, and queue_t::update_waves may destroy this wave_t.  */
-      amd_dbgapi_wave_id_t wave_id = id ();
-
-      suspend.emplace (queue (), "read register");
-
-      /* Look for the wave_id again, the wave may have exited.  */
-      wave_t *wave = find (wave_id);
-      if (wave == nullptr)
-        throw api_error_t (AMD_DBGAPI_STATUS_ERROR_INVALID_WAVE_ID);
-
-      dbgapi_assert (wave == this);
-
-      /* The wave's saved state may have changed location in memory.  */
-      reg_addr = register_address (regnum);
-    }
-
   agent ().read_agent_memory (*reg_addr + offset, value, value_size);
 }
 
