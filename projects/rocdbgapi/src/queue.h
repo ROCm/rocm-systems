@@ -161,7 +161,7 @@ protected:
       {
       }
       global_address_t entry_address () const override { return 0; }
-      bool is_at_kernel_entry (global_address_t /* pc  */) const override
+      bool is_at_kernel_entry (agent_address_t /* pc  */) const override
       {
         return false;
       }

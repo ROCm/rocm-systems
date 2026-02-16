@@ -752,7 +752,7 @@ aql_queue_t::update_waves ()
                           seen by queue_t::update_waves before.  */
         && wave->state () == AMD_DBGAPI_WAVE_STATE_RUN
         && wave->dispatch ().kernel_descriptor ().is_at_kernel_entry (
-          global_address_t{wave->pc ()})
+          wave->pc ())
         && wave->is_halted ())
       {
         log_verbose ("%s is halted at launch", to_cstring (wave->id ()));

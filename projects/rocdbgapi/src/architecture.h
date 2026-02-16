@@ -176,7 +176,7 @@ public:
     virtual ~kernel_descriptor_t () = default;
 
     virtual global_address_t entry_address () const = 0;
-    virtual bool is_at_kernel_entry (global_address_t pc) const = 0;
+    virtual bool is_at_kernel_entry (agent_address_t pc) const = 0;
 
     global_address_t address () const { return m_address; }
     process_t &process () const { return m_process; }
