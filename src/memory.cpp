@@ -539,7 +539,7 @@ memory_cache_t::new_entry (agent_address_t address, amd_dbgapi_size_t size)
 
   entry = &m_cache_entries.back ();
   entry->reset (address, size);
-  m_xfer_global_memory (address, entry->data (), nullptr, size);
+  m_xfer_agent_memory (address, entry->data (), nullptr, size);
   return entry->data ();
 }
 
@@ -562,13 +562,12 @@ memory_cache_t::write_back (agent_address_t address, amd_dbgapi_size_t size)
 
           try
             {
-              auto xfer_size = m_xfer_global_memory (
+              auto xfer_size = m_xfer_agent_memory (
                 dirty_start_address, nullptr,
                 entry.data () + dirty_start_offset, dirty_size);
 
               if (xfer_size != dirty_size)
-                throw memory_access_error_t (/* FIXME_lmoriche:  */
-                                             address_space_t::global (),
+                throw memory_access_error_t (m_agent.agent_address_space (),
                                              entry.address () + xfer_size);
             }
           catch (const process_exited_exception_t &)
@@ -626,13 +625,13 @@ memory_cache_t::discard (agent_address_t address, amd_dbgapi_size_t size,
 }
 
 size_t
-memory_cache_t::xfer_global_memory (agent_address_t address, void *read,
-                                    const void *write, size_t size)
+memory_cache_t::xfer_agent_memory (agent_address_t address, void *read,
+                                   const void *write, size_t size)
 {
   if (size == 0)
     return 0;
 
-  /* Clamp to the end of the global address space.  */
+  /* Clamp to the end of the agent address space.  */
   if (address > (address + size))
     size = agent_address_t{} - address;
 
@@ -659,7 +658,7 @@ memory_cache_t::xfer_global_memory (agent_address_t address, void *read,
           auto request_size = std::min<size_t> (size, uncached_end - ptr);
 
           auto xfer_size
-            = m_xfer_global_memory (ptr, read, write, request_size);
+            = m_xfer_agent_memory (ptr, read, write, request_size);
 
           ptr += xfer_size;
           if (read != nullptr)

@@ -41,6 +41,7 @@ namespace amd::dbgapi
 class architecture_t;
 class process_t;
 class wave_t;
+class agent_t;
 
 /* AMDGPU DWARF Address Class Mapping
    See https://llvm.org/docs/AMDGPUUsage.html#address-class-identifier
@@ -566,6 +567,9 @@ private:
     }
   };
 
+  /* The agent for which this cache is for.  */
+  const agent_t &m_agent;
+
   /* The in-use cache entries.  */
   std::list<cache_entry_t> m_cache_entries;
 
@@ -574,14 +578,14 @@ private:
      reallocation, improving performance.  */
   std::list<cache_entry_t> m_unused_cache_entries;
 
-  delegate_fn_type const m_xfer_global_memory;
+  delegate_fn_type const m_xfer_agent_memory;
 
-  size_t xfer_global_memory (agent_address_t address, void *read,
-                             const void *write, size_t size);
+  size_t xfer_agent_memory (agent_address_t address, void *read,
+                            const void *write, size_t size);
 
 public:
-  memory_cache_t (delegate_fn_type xfer_global_memory)
-    : m_xfer_global_memory (std::move (xfer_global_memory))
+  memory_cache_t (const agent_t &agent, delegate_fn_type xfer_agent_memory)
+    : m_agent (agent), m_xfer_agent_memory (std::move (xfer_agent_memory))
   {
   }
   ~memory_cache_t () { dbgapi_assert (m_cache_entries.empty ()); }
@@ -601,16 +605,16 @@ public:
   /* Write dirty cached entries back to memory.  */
   void write_back (agent_address_t address = 0, amd_dbgapi_size_t size = -1);
 
-  [[nodiscard]] size_t read_global_memory (agent_address_t address,
-                                           void *buffer, size_t size)
+  [[nodiscard]] size_t read_agent_memory (agent_address_t address,
+                                          void *buffer, size_t size)
   {
-    return xfer_global_memory (address, buffer, nullptr, size);
+    return xfer_agent_memory (address, buffer, nullptr, size);
   }
 
-  [[nodiscard]] size_t write_global_memory (agent_address_t address,
-                                            const void *buffer, size_t size)
+  [[nodiscard]] size_t write_agent_memory (agent_address_t address,
+                                           const void *buffer, size_t size)
   {
-    return xfer_global_memory (address, nullptr, buffer, size);
+    return xfer_agent_memory (address, nullptr, buffer, size);
   }
 };
 
