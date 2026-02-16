@@ -3176,11 +3176,17 @@ skip_if_no_torch_gpu = pytest.mark.skipif(
 
 @skip_if_no_torch_gpu
 @pytest.mark.torch_operators
-def test_torch_trace_profile(binary_handler_profile_rocprof_compute):
+def test_torch_trace_profile(
+    binary_handler_profile_rocprof_compute,
+    binary_handler_analyze_rocprof_compute,
+):
     """
-    Test profiling a PyTorch application with --torch-trace option.
-    Verifies that all required files are generated and counter values are valid.
-    NOTE: Not included in the test suite since this requires PyTorch installation.
+    Test profile and analyze flow for PyTorch torch-trace.
+
+    Runs profiling with --torch-trace, verifies profile outputs (pmc_perf, marker
+    and counter CSVs), then runs analyze with --list-torch-operators and verifies
+    torch_trace directory and operator CSV contents (hierarchy, kernel, counters).
+    Requires PyTorch and GPU; not included in default suite.
     """
     workload_dir = test_utils.get_output_dir(param_id="torch_ops")
     Path(workload_dir).mkdir(parents=True, exist_ok=True)
@@ -3223,8 +3229,9 @@ if __name__ == "__main__":
 
     config["torch_test_app"] = ["python3", str(torch_app_path)]
 
-    # Profile with --torch-trace option
+    # Profile with --torch-trace (requires --experimental)
     options = [
+        "--experimental",
         "--torch-trace",
     ]
 
@@ -3331,9 +3338,53 @@ if __name__ == "__main__":
 
             assert found_row, f"{corresponding_counter_file} is empty"
 
-    destination_dir = test_utils.get_output_dir(param_id="torch_ops_analyze")
-    # Saving the profiler output to analyze with the torch trace analyzer script
-    shutil.copytree(workload_dir, destination_dir, dirs_exist_ok=True)
+    # Run analyze with --list-torch-operators (requires --experimental) and
+    # verify torch_trace directory and operator CSV structure.
+    returncode_analyze = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--path",
+        workload_dir,
+        "--list-torch-operators",
+    ])
+    assert returncode_analyze == 0, "Analyze with --list-torch-operators failed"
+
+    torch_trace_dir = Path(workload_dir) / "torch_trace"
+    assert torch_trace_dir.exists(), "torch_trace directory not created"
+
+    operator_csv_files = list(torch_trace_dir.glob("*.csv"))
+    assert operator_csv_files, "No operator CSV files found in torch_trace"
+
+    hierarchy_present = False
+    for op_file in operator_csv_files:
+        df = pd.read_csv(op_file)
+        assert not df.empty, f"{op_file} is empty"
+        assert "Operator_Name" in df.columns, (
+            f"Operator_Name column missing in {op_file}"
+        )
+        if not hierarchy_present:
+            hierarchy_present = (
+                df["Operator_Name"]
+                .apply(lambda x: "/" in str(x) or "::" in str(x))
+                .any()
+            )
+        assert "Kernel_Name" in df.columns, (
+            f"Kernel_Name missing in {op_file}"
+        )
+        assert df["Kernel_Name"].notnull().all() and (df["Kernel_Name"] != "").all(), (
+            f"Empty Kernel_Name in {op_file}"
+        )
+        assert "Counter_Value" in df.columns, (
+            f"Counter_Value column missing in {op_file}"
+        )
+        assert df["Counter_Value"].notnull().all()
+        assert (df["Counter_Value"] != "").all(), f"Empty Counter_Value in {op_file}"
+
+    assert hierarchy_present, (
+        f"No hierarchy information in operator CSV files. "
+        f"Files checked: {[f.name for f in operator_csv_files]}"
+    )
+
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
@@ -3402,13 +3453,13 @@ if __name__ == "__main__":
         baseline_df["End_Timestamp"].max() - baseline_df["Start_Timestamp"].min()
     )
     test_utils.clean_output_dir(config["cleanup"], workload_dir_baseline)
-    # Run WITH --torch-trace
+    # Run WITH --torch-trace (requires --experimental)
     workload_dir_with_flag = test_utils.get_output_dir(param_id="torch_with_ops")
     start_with_flag = time.time()
     returncode_with_flag = binary_handler_profile_rocprof_compute(
         config,
         workload_dir_with_flag,
-        ["--torch-trace"],
+        ["--experimental", "--torch-trace"],
         check_success=True,
         roof=False,
         app_name="torch_test_app",
