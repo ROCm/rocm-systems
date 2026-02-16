@@ -167,11 +167,12 @@ endif()
 
 ## Create Python-specific library if BUILD_PYTHON_LIB is enabled
 if(BUILD_PYTHON_LIB)
-    add_library(${AMD_SMI}_python ${SRC_LIST} ${INC_LIST})
+    add_library(${AMD_SMI}_python ${SRC_LIST} ${INC_LIST} ${AMDSMINIC_PATH})
     target_link_libraries(${AMD_SMI}_python PRIVATE
         rt
         Threads::Threads
         ${CMAKE_DL_LIBS}
+        ${AMDSMINIC_PATH}
         ${FILESYSTEM_LIB}
     )
     target_include_directories(${AMD_SMI}_python PRIVATE 
@@ -180,9 +181,11 @@ if(BUILD_PYTHON_LIB)
         ${PROJECT_SOURCE_DIR}/common/shared_mutex 
         ${RAS_DECODE_INC_DIR}
         ${DRM_INCLUDE_DIRS}
-        ${DRM_AMDGPU_INCLUDE_DIRS}                                          
+        ${DRM_AMDGPU_INCLUDE_DIRS}
+        ${NIC_INCLUDE_DIRS}
     )
     target_include_directories(${AMD_SMI}_python PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+                                                        "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/nic/ai-nic/amdsmi_unified/interface>"
                                                         "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
     set_property(TARGET ${AMD_SMI}_python PROPERTY SOVERSION "${MAJOR}")
     set_property(TARGET ${AMD_SMI}_python PROPERTY VERSION "${SO_VERSION_STRING}")
