@@ -449,30 +449,6 @@ class RocProfCompute:
 
         sys.exit(0)
 
-        profiler_classes = {
-            "rocprofv3": (
-                "rocprof_compute_profile.profiler_rocprof_v3",
-                "rocprof_v3_profiler",
-            ),
-            "rocprofiler-sdk": (
-                "rocprof_compute_profile.profiler_rocprofiler_sdk",
-                "rocprofiler_sdk_profiler",
-            ),
-        }
-
-        if self.__profiler_mode not in profiler_classes:
-            console_error("Unsupported profiler")
-
-        module_name, class_name = profiler_classes[self.__profiler_mode]
-        module = importlib.import_module(module_name)
-        profiler_class = getattr(module, class_name)
-
-        return profiler_class(
-            self.__args,
-            self.__profiler_mode,
-            self.__soc[self.__mspec.gpu_arch],
-        )
-
     def create_profiler(self) -> object:
         profiler_classes = {
             "rocprofv3": (
