@@ -36,7 +36,6 @@ import subprocess
 import tempfile
 from pathlib import Path
 from unittest import mock
-from unittest.signals import registerResult
 
 import pandas as pd
 import pytest
