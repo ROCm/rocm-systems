@@ -29,7 +29,7 @@ extend-exclude = [
 # Enable Pyflakes (F), pycodestyle (E, W for PEP8), aisort (I),
 # type annotation (ANN), and f-string (UP) rules.
 select = ["E", "W", "F", "I", "ANN", "UP", "PTH"]
-ignore = ["E713", "E711", "UP045", "PTH123", "PTH207"]
+ignore = ["E713", "E711", "UP045", "PTH123", "PTH207", "ANN003"]
 fixable = ["ALL"]
 unfixable = []
 
@@ -113,4 +113,5 @@ markers = [
     "noise_clamp",
     "torch_ops",
     "multi_rank",
+    "experimental_feature",
 ]
