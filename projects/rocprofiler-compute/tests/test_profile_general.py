@@ -23,10 +23,12 @@
 
 ##############################################################################
 
+import csv
 import importlib.util
 import inspect
 import os
 import re
+import shutil
 import socket
 import sqlite3
 import subprocess
@@ -999,7 +1001,9 @@ def test_output_directory_all_placeholders_combined(
 def test_output_directory_default_with_rank(
     binary_handler_profile_rocprof_compute, monkeypatch
 ):
-    """Test that rank is appended to the default output directory when MPI rank is set."""
+    """
+    Test that rank is appended to the default output directory when MPI rank is set.
+    """
     from rocprof_compute_base import RocProfCompute
 
     rank = "3"
@@ -3160,12 +3164,17 @@ def test_iteration_multiplexing_all_counter_accuracy(
     )
 
 
-skip_if_no_torch = pytest.mark.skipif(
-    importlib.util.find_spec("torch") is None, reason="torch is required for this test"
+skip_if_no_torch_gpu = pytest.mark.skipif(
+    (
+        importlib.util.find_spec("torch") is None
+        or not __import__("torch").cuda.is_available()
+    ),
+    reason=("PyTorch and GPU access are required for this test"),
 )
 
 
-@skip_if_no_torch
+@skip_if_no_torch_gpu
+@pytest.mark.torch_operators
 def test_torch_trace_profile(binary_handler_profile_rocprof_compute):
     """
     Test profiling a PyTorch application with --torch-trace option.
@@ -3231,21 +3240,104 @@ if __name__ == "__main__":
     num_devices = config.get("num_devices", 1)
     file_dict = test_utils.check_csv_files(workload_dir, num_devices, 1)
     assert "pmc_perf.csv" in file_dict, "pmc_perf.csv not generated"
-    # 2. Check torch trace directory
-    torch_trace_dir = Path(workload_dir) / "torch_trace"
-    assert torch_trace_dir.exists(), "torch_trace directory not created"
-    assert torch_trace_dir.is_dir(), "torch_trace is not a directory"
-    # 3. Check per-operator CSV files exist
-    operator_csv_files = list(torch_trace_dir.glob("*.csv"))
-    assert len(operator_csv_files) > 0, "No per-operator CSV files generated"
-    # 4. Verify per-operator CSV structure
-    for op_csv in operator_csv_files:
-        op_df = pd.read_csv(op_csv)
-        assert len(op_df) > 0, f"Per-operator CSV {op_csv.name} is empty"
+
+    # 2. Look for corresponding marker_api_trace.csv file
+    # and counter_collection.csv file in workload_dir/ and workload/*/
+    marker_api_trace_files = list(Path(workload_dir).glob("**/*marker_api_trace.csv"))
+    counter_collection_files = list(
+        Path(workload_dir).glob("**/*counter_collection.csv")
+    )
+    # Check if there is one-to-one mapping between marker_api_trace
+    # and counter_collection files.
+    # They should be present in the same subdirectories.
+    assert len(marker_api_trace_files) == len(counter_collection_files), (
+        "Mismatch in number of marker_api_trace.csv and counter_collection.csv files"
+    )
+    for marker_file in marker_api_trace_files:
+        # Build corresponding counter_collection file path by replacing filename
+        corresponding_counter_file = marker_file.parent / marker_file.name.replace(
+            "marker_api_trace", "counter_collection"
+        )
+        assert corresponding_counter_file.exists(), (
+            f"counter_collection.csv not found for {marker_file}"
+        )
+        # Check marker_api_trace.csv
+        expected_marker_columns = {
+            "Domain",
+            "Function",
+            "Process_Id",
+            "Thread_Id",
+            "Correlation_Id",
+            "Start_Timestamp",
+            "End_Timestamp",
+        }
+        with open(marker_file, newline="") as f:
+            reader = csv.DictReader(f)
+            fieldnames = reader.fieldnames
+            assert fieldnames is not None, f"No columns in {marker_file}"
+            for column in expected_marker_columns:
+                assert column in fieldnames, (
+                    f"Column '{column}' missing in {marker_file}"
+                )
+            found_row = False
+            for row in reader:
+                found_row = True
+                assert row["Function"], f"Empty Function in {marker_file}"
+                assert row["Correlation_Id"], f"Empty Correlation ID in {marker_file}"
+                assert row["Start_Timestamp"], f"Empty Start_Timestamp in {marker_file}"
+                assert row["End_Timestamp"], f"Empty End_Timestamp in {marker_file}"
+            assert found_row, f"{marker_file} is empty"
+        # Check counter_collection.csv
+        expected_counter_columns = {
+            "Correlation_Id",
+            "Kernel_Name",
+            "Counter_Name",
+            "Counter_Value",
+            "Start_Timestamp",
+            "End_Timestamp",
+        }
+        with open(corresponding_counter_file, newline="") as f:
+            reader = csv.DictReader(f)
+            fieldnames = reader.fieldnames
+            assert fieldnames is not None, f"No columns in {corresponding_counter_file}"
+            for column in expected_counter_columns:
+                assert column in fieldnames, (
+                    f"Column '{column}' missing in {corresponding_counter_file}"
+                )
+            found_row = False
+            for row in reader:
+                found_row = True
+
+                assert row["Correlation_Id"], (
+                    f"Empty Correlation_Id in {corresponding_counter_file}"
+                )
+
+                assert row["Kernel_Name"], (
+                    f"Empty Kernel_Name in {corresponding_counter_file}"
+                )
+
+                assert row["Counter_Name"], (
+                    f"Empty Counter_Name in {corresponding_counter_file}"
+                )
+
+                assert row["Start_Timestamp"], (
+                    f"Empty Start_Timestamp in {corresponding_counter_file}"
+                )
+
+                assert row["End_Timestamp"], (
+                    f"Empty End_Timestamp in {corresponding_counter_file}"
+                )
+
+            assert found_row, f"{corresponding_counter_file} is empty"
+
+    destination_dir = test_utils.get_output_dir(param_id="torch_ops_analyze")
+    # Saving the profiler output to analyze with the torch trace analyzer script
+    shutil.copytree(workload_dir, destination_dir, dirs_exist_ok=True)
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@skip_if_no_torch
+@skip_if_no_torch_gpu
+@pytest.mark.torch_operators
 def test_torch_trace_overhead(binary_handler_profile_rocprof_compute):
     """
     Measure overhead introduced by --torch-trace flag.
@@ -3353,11 +3445,7 @@ if __name__ == "__main__":
     print(f"  With flag kernel duration:    {with_flag_kernel_duration_total:.0f} ns")
     print(f"  Kernel execution overhead:    {kernel_overhead:.1f}%")
     print(f"{'=' * 70}\n")
-    # Verify torch trace directory was created
-    torch_trace_dir = Path(workload_dir_with_flag) / "torch_trace"
-    assert torch_trace_dir.exists(), "torch_trace directory should be created"
-    operator_csv_files = list(torch_trace_dir.glob("*.csv"))
-    assert len(operator_csv_files) > 0, "Operator CSV files should be generated"
+
     test_utils.clean_output_dir(config["cleanup"], workload_dir_with_flag)
     # Assert overhead is reasonable (< 100% wall-clock, < 50% kernel)
     assert wall_clock_overhead < 100, (

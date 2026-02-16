@@ -278,11 +278,7 @@ struct GpaSampleConfig
                 Pal::uint32 stallAllSimds              :  1;  ///< Stall all SIMDs for thread trace stall.
                 Pal::uint32 excludeNonDetailShaderData :  1;  ///< Only emit shader tokens from the SIMD that have been
                                                               ///  selected for detail instruction tracing
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 899
                 Pal::uint32 enableExecPopTokens        :  1;  ///< Output exec tokens
-#else
-                Pal::uint32 placeholder2               :  1;
-#endif
                 Pal::uint32 reserved                   : 25;  ///< Reserved for future use.
             };
             Pal::uint32 u32All;                             ///< Bit flags packed as uint32.

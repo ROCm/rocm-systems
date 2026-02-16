@@ -218,10 +218,15 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
   if (model_enabled) {
     wallclock_frequency_ = 0;
   } else {
-    // Get wallclock freq
-    err = driver().GetWallclockFrequency(node_id(), &wallclock_frequency_);
-    if (err != HSA_STATUS_SUCCESS) {
-      throw AMD::hsa_exception(err, "Agent creation failed.\nGetWallclockFrequency error.\n");
+    // Prefer cached node properties when available (in KHz)
+    if (properties_.WallClockKHz != 0) {
+      wallclock_frequency_ = uint64_t(properties_.WallClockKHz) * 1000ull;
+    } else {
+      // Fallback to driver query if properties do not provide it
+      err = driver().GetWallclockFrequency(node_id(), &wallclock_frequency_);
+      if (err != HSA_STATUS_SUCCESS) {
+        throw AMD::hsa_exception(err, "Agent creation failed.\nGetWallclockFrequency error.\n");
+      }
     }
   }
 #endif
