@@ -36,6 +36,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 from unittest import mock
+from unittest.signals import registerResult
 
 import pandas as pd
 import pytest
@@ -8770,6 +8771,248 @@ def test_impute_complete_last_group():
     assert result[("file1", "C2")].iloc[6] == 80
     assert result[("file1", "C1")].iloc[7] == 70
     assert result[("file1", "C2")].iloc[7] == 80
+
+
+@pytest.mark.data_imputation
+def test_impute_counters_iteration_multiplex_incorrect_andcorner_cases():
+    """
+    Test impute_counters_iteration_multiplex with incorrectly structured data
+    and other corner cases not covered by the main imputation tests.
+    """
+
+    # --- Sub-case A: Flat (non-MultiIndex) DataFrame ---
+    # A plain DataFrame without MultiIndex columns should be rejected by
+    # reverse_multi_index_df_pmc with a ValueError.
+    flat_df = pd.DataFrame({
+        "Dispatch_ID": [1],
+        "Kernel_Name": ["kernel_a"],
+        "C1": [10],
+    })
+    with pytest.raises(ValueError, match="multi-index"):
+        utils.impute_counters_iteration_multiplex(flat_df, "kernel")
+
+    # --- Sub-case B: Single-level MultiIndex ---
+    # A MultiIndex with only 1 level still fails the nlevels >= 2 guard.
+    single_level_df = pd.DataFrame({
+        "Dispatch_ID": [1],
+        "Kernel_Name": ["kernel_a"],
+        "C1": [10],
+    })
+    single_level_df.columns = pd.MultiIndex.from_arrays([
+        ["Dispatch_ID", "Kernel_Name", "C1"]
+    ])
+    with pytest.raises(ValueError, match="multi-index"):
+        utils.impute_counters_iteration_multiplex(single_level_df, "kernel")
+
+    # --- Sub-case C: Missing Kernel_Name column ---
+    # A valid 2-level MultiIndex but without the Kernel_Name column.
+    # The groupby("Kernel_Name") call should raise KeyError.
+    data_no_kernel_name = {
+        ("file1", "Dispatch_ID"): [1, 2],
+        ("file1", "GPU_ID"): [0, 0],
+        ("file1", "Grid_Size"): [1024, 1024],
+        ("file1", "Workgroup_Size"): [64, 64],
+        ("file1", "LDS_Per_Workgroup"): [32, 32],
+        ("file1", "Scratch_Per_Workitem"): [0, 0],
+        ("file1", "Arch_VGPR"): [16, 16],
+        ("file1", "Accum_VGPR"): [0, 0],
+        ("file1", "SGPR"): [32, 32],
+        ("file1", "Start_Timestamp"): [1000, 1200],
+        ("file1", "End_Timestamp"): [1500, 1700],
+        ("file1", "Kernel_ID"): [1, 1],
+        ("file1", "C1"): [10, None],
+        ("file1", "C2"): [None, 20],
+    }
+    df_no_kn = make_imputation_df(data_no_kernel_name)
+    with pytest.raises(KeyError):
+        utils.impute_counters_iteration_multiplex(df_no_kn, "kernel")
+
+    # --- Sub-case D: Empty DataFrame (zero rows) ---
+    # Valid MultiIndex structure but no data rows. Should not crash.
+    data_empty = {
+        ("file1", "Dispatch_ID"): [],
+        ("file1", "GPU_ID"): [],
+        ("file1", "Grid_Size"): [],
+        ("file1", "Workgroup_Size"): [],
+        ("file1", "LDS_Per_Workgroup"): [],
+        ("file1", "Scratch_Per_Workitem"): [],
+        ("file1", "Arch_VGPR"): [],
+        ("file1", "Accum_VGPR"): [],
+        ("file1", "SGPR"): [],
+        ("file1", "Kernel_Name"): [],
+        ("file1", "Start_Timestamp"): [],
+        ("file1", "End_Timestamp"): [],
+        ("file1", "Kernel_ID"): [],
+        ("file1", "C1"): [],
+        ("file1", "C2"): [],
+    }
+    df_empty = make_imputation_df(data_empty)
+    result = utils.impute_counters_iteration_multiplex(df_empty, "kernel")
+
+    # Result is a fallback DataFrame, not actual data.
+    # It has a single column ("file1", 0) containing 15 column name strings.
+    assert isinstance(result, pd.DataFrame)
+    assert list(result.columns) == [("file1", 0)]
+    assert len(result) == 15
+    assert "Dispatch_ID" in result[("file1", 0)].values
+    assert "C1" in result[("file1", 0)].values
+
+    # --- Sub-case E: All counters NaN ---
+    # Every counter value is NaN. The bucket-identification loop finds no
+    # non-empty frozensets, so counter_groups stays empty and the group is
+    # skipped entirely.
+    data_all_nan = {
+        ("file1", "Dispatch_ID"): [1, 2, 3],
+        ("file1", "GPU_ID"): [0, 0, 0],
+        ("file1", "Grid_Size"): [1024, 1024, 1024],
+        ("file1", "Workgroup_Size"): [64, 64, 64],
+        ("file1", "LDS_Per_Workgroup"): [32, 32, 32],
+        ("file1", "Scratch_Per_Workitem"): [0, 0, 0],
+        ("file1", "Arch_VGPR"): [16, 16, 16],
+        ("file1", "Accum_VGPR"): [0, 0, 0],
+        ("file1", "SGPR"): [32, 32, 32],
+        ("file1", "Kernel_Name"): ["kernel_a", "kernel_a", "kernel_a"],
+        ("file1", "Start_Timestamp"): [1000, 1200, 1400],
+        ("file1", "End_Timestamp"): [1500, 1700, 1900],
+        ("file1", "Kernel_ID"): [1, 1, 1],
+        ("file1", "C1"): [None, None, None],
+        ("file1", "C2"): [None, None, None],
+    }
+    df_all_nan = make_imputation_df(data_all_nan)
+    result = utils.impute_counters_iteration_multiplex(df_all_nan, "kernel")
+
+    # Group was dropped (no valid counters) -- fallback DataFrame returned.
+    assert isinstance(result, pd.DataFrame)
+    assert list(result.columns) == [("file1", 0)]
+    assert len(result) == 15
+
+    # Original dispatch data is absent from the result
+    assert 1 not in result[("file1", 0)].values
+    assert 2 not in result[("file1", 0)].values
+    assert 3 not in result[("file1", 0)].values
+
+    # --- Sub-case F: No counter columns at all ---
+    # DataFrame contains only the 13 non-counter columns.
+    # counter_columns is empty, so every row yields an empty frozenset
+    # and the group is skipped.
+    data_no_counters = {
+        ("file1", "Dispatch_ID"): [1, 2],
+        ("file1", "GPU_ID"): [0, 0],
+        ("file1", "Grid_Size"): [1024, 1024],
+        ("file1", "Workgroup_Size"): [64, 64],
+        ("file1", "LDS_Per_Workgroup"): [32, 32],
+        ("file1", "Scratch_Per_Workitem"): [0, 0],
+        ("file1", "Arch_VGPR"): [16, 16],
+        ("file1", "Accum_VGPR"): [0, 0],
+        ("file1", "SGPR"): [32, 32],
+        ("file1", "Kernel_Name"): ["kernel_a", "kernel_a"],
+        ("file1", "Start_Timestamp"): [1000, 1200],
+        ("file1", "End_Timestamp"): [1500, 1700],
+        ("file1", "Kernel_ID"): [1, 1],
+    }
+    df_no_counters = make_imputation_df(data_no_counters)
+    result = utils.impute_counters_iteration_multiplex(df_no_counters, "kernel")
+
+    # Group was dropped (no counter columns exist) -- fallback DataFrame returned.
+    assert isinstance(result, pd.DataFrame)
+    assert list(result.columns) == [("file1", 0)]
+    assert len(result) == 13
+
+    # No counter column names in the fallback values
+    assert "C1" not in result[("file1", 0)].values
+    assert "C2" not in result[("file1", 0)].values
+
+    # --- Sub-case G: Unrecognized policy string ---
+    # Any policy other than "kernel" falls through to the else branch
+    # (same as "kernel_launch_params"). Output must match exactly.
+    data_policy = {
+        ("file1", "Dispatch_ID"): [1, 2, 3],
+        ("file1", "GPU_ID"): [0, 0, 0],
+        ("file1", "Grid_Size"): [1024, 1024, 1024],
+        ("file1", "Workgroup_Size"): [64, 64, 64],
+        ("file1", "LDS_Per_Workgroup"): [32, 32, 32],
+        ("file1", "Scratch_Per_Workitem"): [0, 0, 0],
+        ("file1", "Arch_VGPR"): [16, 16, 16],
+        ("file1", "Accum_VGPR"): [0, 0, 0],
+        ("file1", "SGPR"): [32, 32, 32],
+        ("file1", "Kernel_Name"): ["kernel_a", "kernel_a", "kernel_a"],
+        ("file1", "Start_Timestamp"): [1000, 1200, 1400],
+        ("file1", "End_Timestamp"): [1500, 1700, 1900],
+        ("file1", "Kernel_ID"): [1, 1, 1],
+        ("file1", "C1"): [100, None, None],
+        ("file1", "C2"): [None, 500, 300],
+    }
+    df_policy = make_imputation_df(data_policy)
+    result_invalid = utils.impute_counters_iteration_multiplex(
+        df_policy, "invalid_policy"
+    )
+    result_klp = utils.impute_counters_iteration_multiplex(
+        df_policy, "kernel_launch_params"
+    )
+    assert isinstance(result_invalid, pd.DataFrame)
+    pd.testing.assert_frame_equal(
+        result_invalid.sort_values(by=("file1", "Dispatch_ID")).reset_index(drop=True),
+        result_klp.sort_values(by=("file1", "Dispatch_ID")).reset_index(drop=True),
+    )
+
+    # --- Sub-case H: Multiple collection levels (multi-file) ---
+    # Two file levels ("file1", "file2") each with independent dispatches.
+    # Tests the outer for-loop and final pd.concat across levels.
+    data_multi_file = {
+        ("file1", "Dispatch_ID"): [1, 2],
+        ("file1", "GPU_ID"): [0, 0],
+        ("file1", "Grid_Size"): [1024, 1024],
+        ("file1", "Workgroup_Size"): [64, 64],
+        ("file1", "LDS_Per_Workgroup"): [32, 32],
+        ("file1", "Scratch_Per_Workitem"): [0, 0],
+        ("file1", "Arch_VGPR"): [16, 16],
+        ("file1", "Accum_VGPR"): [0, 0],
+        ("file1", "SGPR"): [32, 32],
+        ("file1", "Kernel_Name"): ["kernel_a", "kernel_a"],
+        ("file1", "Start_Timestamp"): [1000, 1200],
+        ("file1", "End_Timestamp"): [1500, 1700],
+        ("file1", "Kernel_ID"): [1, 1],
+        ("file1", "C1"): [10, None],
+        ("file1", "C2"): [None, 20],
+        ("file2", "Dispatch_ID"): [1, 2],
+        ("file2", "GPU_ID"): [0, 0],
+        ("file2", "Grid_Size"): [512, 512],
+        ("file2", "Workgroup_Size"): [32, 32],
+        ("file2", "LDS_Per_Workgroup"): [16, 16],
+        ("file2", "Scratch_Per_Workitem"): [0, 0],
+        ("file2", "Arch_VGPR"): [8, 8],
+        ("file2", "Accum_VGPR"): [0, 0],
+        ("file2", "SGPR"): [16, 16],
+        ("file2", "Kernel_Name"): ["kernel_b", "kernel_b"],
+        ("file2", "Start_Timestamp"): [2000, 2200],
+        ("file2", "End_Timestamp"): [2500, 2700],
+        ("file2", "Kernel_ID"): [2, 2],
+        ("file2", "C1"): [50, None],
+        ("file2", "C2"): [None, 60],
+    }
+    df_multi_file = make_imputation_df(data_multi_file)
+    result = utils.impute_counters_iteration_multiplex(df_multi_file, "kernel")
+    result = result.sort_values(by=("file1", "Dispatch_ID"))
+
+    assert isinstance(result, pd.DataFrame)
+    assert len(result) == 2
+
+    # Verify both file levels are present in the output
+    top_levels = result.columns.get_level_values(0).unique().tolist()
+    assert "file1" in top_levels
+    assert "file2" in top_levels
+
+    # File1: C1 imputed into row 2, C2 imputed into row 1
+    assert result[("file1", "C1")].iloc[0] == 10
+    assert result[("file1", "C2")].iloc[0] == 20
+    assert result[("file1", "C1")].iloc[1] == 10
+    assert result[("file1", "C2")].iloc[1] == 20
+
+    # File2: independent imputation (values must not bleed from file1)
+    assert result[("file2", "C1")].iloc[0] == 50
+    assert result[("file2", "C2")].iloc[0] == 60
+    assert result[("file2", "C1")].iloc[1] == 50
+    assert result[("file2", "C2")].iloc[1] == 60
 
 
 # =============================================================================
