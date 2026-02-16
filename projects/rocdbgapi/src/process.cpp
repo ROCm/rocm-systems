@@ -284,8 +284,7 @@ void
 process_t::read_string (host_address_t address, std::string *string,
                         size_t size) const
 {
-  constexpr size_t chunk_size
-    = memory_cache_t<host_address_t>::cache_line_size;
+  constexpr size_t chunk_size = 64;
 
   dbgapi_assert (string && "invalid argument");
 
