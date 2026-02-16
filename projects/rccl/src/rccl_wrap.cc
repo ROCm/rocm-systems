@@ -26,6 +26,7 @@ THE SOFTWARE.
 #include "enqueue.h"
 #include <algorithm>
 #include "debug.h"
+#include "include/graph.h"
 
 #ifdef USE_AMDSMI
 #include "amd_smi/amdsmi.h"
@@ -453,16 +454,24 @@ bool rcclUseAllGatherDirect(struct ncclComm* comm, size_t& msgSize) {
     return false;
   }
 
+  // Check if user explicitly set threshold
+  static int userThresholdInput = -2;
+  if (userThresholdInput == -2) {
+    const char *thresholdStr = getenv("RCCL_DIRECT_ALLGATHER_THRESHOLD");
+    userThresholdInput = !thresholdStr ? 0 : 1;
+  }
+
   size_t threshold = rcclParamDirectAllGatherThreshold();
 
-  if (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && threshold != -1) {
-     if (comm->nNodes == 1) {
-        threshold = 8388608;
-     } else if (comm->nNodes < 64) {
-        threshold = comm->nNodes * 2097152;
-     }
-  } else if (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942") && threshold != -1) {
-	threshold = 4194304;
+  // Only perform auto-selection if user didn't explicitly set the threshold and threshold is not -1
+  if (!userThresholdInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && threshold != -1) {
+    if (comm->nNodes == 1) {
+      threshold = 8388608;
+    } else if (comm->nNodes < 64) {
+      threshold = comm->nNodes * 2097152;
+    }
+  } else if (!userThresholdInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942") && threshold != -1) {
+	  threshold = 4194304;
   }
 
   comm->enableCustColl = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") || IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942");
@@ -476,6 +485,7 @@ bool rcclUseAllGatherDirect(struct ncclComm* comm, size_t& msgSize) {
 
 bool rcclUseReduceScatterDirect(struct ncclComm* comm, size_t& msgSize) {
   // Direct ReduceScatter is supported for MI350 (gfx950):
+  // Only if PXN is enabled
   // - 2 nodes: enable for 128KiB .. 2MiB
   // - 4 and 8 nodes: enable up to 2MiB
   static int userDirectReduceScatterInput = -2;
@@ -489,6 +499,12 @@ bool rcclUseReduceScatterDirect(struct ncclComm* comm, size_t& msgSize) {
   }
   const bool archGfx950 = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950");
   if (!archGfx950) return false;
+
+  // Check if PXN is disabled - Direct Reduce Scatter requires PXN to be enabled
+  if(ncclPxnDisable(comm) != 0) {
+    INFO(NCCL_INIT, "RCCL DIRECT REDUCE-SCATTER disabled due to PXN being disabled.");
+    return false;
+  }
 
   size_t threshold = rcclParamDirectReduceScatterThreshold();
   if (threshold > -1) { 

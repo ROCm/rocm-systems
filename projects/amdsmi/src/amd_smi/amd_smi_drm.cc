@@ -29,6 +29,7 @@
 #include <regex>
 #include "config/amd_smi_config.h"
 #include "amd_smi/impl/amd_smi_drm.h"
+#include "amd_smi/impl/amd_smi_utils.h"
 #include "impl/scoped_fd.h"
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_main.h"
@@ -140,16 +141,17 @@ amdsmi_status_t AMDSmiDrm::init() {
             drm_free_version(version);
         }
 
-        uint64_t bdf_rocm = 0;
-        rsmi_status_t rsmi_ret = rsmi_dev_pci_id_get(i, &bdf_rocm);
+        uint64_t bdfid = 0;
+        rsmi_status_t rsmi_ret = rsmi_dev_pci_id_get(i, &bdfid);
+        auto [domain, bus, device_id, function] = parse_bdfid(bdfid);
         if (rsmi_ret != RSMI_STATUS_SUCCESS) {
             // Set empty values on error
             bdf = {}; // zero-initialize
         } else {
-            bdf.domain_number = static_cast<uint64_t>(((bdf_rocm >> 32) & 0xFFFFFFFF));
-            bdf.bus_number = static_cast<uint64_t>(((bdf_rocm >> 8) & 0xFF));
-            bdf.device_number = static_cast<uint64_t>(((bdf_rocm >> 3) & 0x1F));
-            bdf.function_number = static_cast<uint64_t>((bdf_rocm & 0x7));
+            bdf.function_number = function & 0x7;
+            bdf.device_number = device_id & 0x1f;
+            bdf.bus_number = bus & 0xff;
+            bdf.domain_number = domain & 0xffffffffffff;
         }
         drm_bdfs_.push_back(bdf);
     }
@@ -170,6 +172,13 @@ amdsmi_status_t AMDSmiDrm::get_bdf_by_index(uint32_t gpu_index, amdsmi_bdf_t *bd
     }
     *bdf_info = drm_bdfs_[gpu_index];
     return AMDSMI_STATUS_SUCCESS;
+}
+
+amdsmi_status_t AMDSmiDrm::amdgpu_query_cpu_affinity(const std::string &device_path, std::string &cpu_affinity) {
+  std::string cpuAffFile = "cpulistaffinity";
+  cpu_affinity = smi_brcm_get_value_string(device_path, cpuAffFile);
+  
+  return AMDSMI_STATUS_SUCCESS;
 }
 
 amdsmi_status_t AMDSmiDrm::get_drm_path_by_index(uint32_t gpu_index, std::string *drm_path) const {

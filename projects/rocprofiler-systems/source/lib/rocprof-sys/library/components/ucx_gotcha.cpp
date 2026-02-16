@@ -53,14 +53,10 @@ get_ucx_gotcha()
 void
 ucx_gotcha::configure()
 {
-    // don't emit warnings for missing UCX functions unless debug or verbosity >= 3
-    if(get_verbose_env() < 3 && !get_debug_env())
+    for(size_t i = 0; i < ucx_gotcha_t::capacity(); ++i)
     {
-        for(size_t i = 0; i < ucx_gotcha_t::capacity(); ++i)
-        {
-            auto* itr = ucx_gotcha_t::at(i);
-            if(itr) itr->verbose = -1;
-        }
+        auto* itr = ucx_gotcha_t::at(i);
+        if(itr) itr->verbose = -1;
     }
 
     ucx_gotcha_t::get_initializer() = []() {
@@ -256,6 +252,8 @@ ucx_gotcha::start()
     if(!get_ucx_gotcha().get<ucx_gotcha_t>()->get_is_running())
     {
         configure();
+        // Initializing comm_data metadata
+        comm_data::start();
         get_ucx_gotcha().start();
     }
 }

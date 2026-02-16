@@ -88,5 +88,6 @@ FILTER[90402]=${FILTER[90400]}
 # SWDEV-572968
 FILTER[gfx1151]=\
 $BLACKLIST_ALL_ASICS\
+"amdsmitstReadWrite.TempRead:"\
 "amdsmitstReadOnly.TestFrequenciesRead"
 

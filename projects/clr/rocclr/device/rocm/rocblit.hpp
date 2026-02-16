@@ -144,8 +144,8 @@ class DmaBlitManager : public device::HostBlitManager {
 
   //! Copies multiple buffer objects in a batch
   virtual bool copyBufferBatch(
-      const std::vector<amd::BatchCopyOp>& copyOps,  //!< Batch of copy operations
-      bool entire = false                            //!< Entire buffers will be updated
+      std::vector<amd::BatchCopyOp>& copyOps,  //!< Batch of copy operations
+      bool entire = false                      //!< Entire buffers will be updated
   ) const;
 
   //! Copies an image object to a buffer object

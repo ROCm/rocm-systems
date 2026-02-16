@@ -472,6 +472,16 @@ __device__ void IPCContext::alltoall(rocshmem_team_t team, T *dst,
 }
 
 template <typename T>
+__device__ void IPCContext::alltoallv(rocshmem_team_t team,
+                                      T *dest, const size_t dest_nelems[],
+                                      const size_t dest_displs[],
+                                      T *source, const size_t source_nelems[],
+                                      const size_t source_displs[]) {
+  printf("rocshmem::ipc:alltoallv not implemented\n");
+  abort();
+}
+
+template <typename T>
 __device__ void IPCContext::alltoall_linear(rocshmem_team_t team, T *dst,
                                             const T *src, int nelems) {
   IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
