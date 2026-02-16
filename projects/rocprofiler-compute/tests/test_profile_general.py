@@ -28,8 +28,8 @@ import importlib.util
 import inspect
 import os
 import re
-import socket
 import shutil
+import socket
 import sqlite3
 import subprocess
 import sys
@@ -1001,7 +1001,9 @@ def test_output_directory_all_placeholders_combined(
 def test_output_directory_default_with_rank(
     binary_handler_profile_rocprof_compute, monkeypatch
 ):
-    """Test that rank is appended to the default output directory when MPI rank is set."""
+    """
+    Test that rank is appended to the default output directory when MPI rank is set.
+    """
     from rocprof_compute_base import RocProfCompute
 
     rank = "3"

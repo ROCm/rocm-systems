@@ -1313,13 +1313,17 @@ def save_torch_trace_inputs(
         # process_torch_trace_output via glob **/torch_trace*_marker_api_trace.csv)
         for src_counter in counter_files:
             dst_counter = str(
-                Path(workload_dir) / f"{fbase}" / ("torch_trace_" + Path(src_counter).name)
+                Path(workload_dir)
+                /
+                f"{fbase}" / ("torch_trace_" + Path(src_counter).name)
             )
             shutil.copyfile(src_counter, dst_counter)
             console_log("torch trace", f"Copied Counter Collection: {dst_counter}")
         for src_marker in marker_files:
             dst_marker = str(
-                Path(workload_dir) / f"{fbase}" / ("torch_trace_" + Path(src_marker).name)
+                Path(workload_dir)
+                /
+                f"{fbase}" / ("torch_trace_" + Path(src_marker).name)
             )
             shutil.copyfile(src_marker, dst_marker)
             console_log("torch trace", f"Copied Marker API Trace: {dst_marker}")
@@ -1343,7 +1347,9 @@ def process_torch_trace_output(
     """
     # Find all marker_api_trace CSV files
     console_log(f"Looking for marker and counter csv files in {workload_dir}")
-    marker_api_trace_csvs = list(Path(workload_dir).glob("**/torch_trace*_marker_api_trace.csv"))
+    marker_api_trace_csvs = list(
+        Path(workload_dir).glob("**/torch_trace*_marker_api_trace.csv")
+        )
     counter_collection_csvs = [
         markers_file.parent
         / markers_file.name.replace("_marker_api_trace.", "_counter_collection.")
