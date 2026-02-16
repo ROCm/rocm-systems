@@ -29,7 +29,6 @@ Testcase Scenarios :
 
 
 #include <hip_test_common.hh>
-#include "hip/nvidia_detail/nvidia_hip_runtime_api.h"
 
 
 // Table with unique number of elements and memset values.
