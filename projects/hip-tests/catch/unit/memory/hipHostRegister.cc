@@ -997,7 +997,7 @@ TEMPLATE_TEST_CASE("Unit_hipHostRegister_Negative", "", int, float, double) {
   REQUIRE(hostMemFree > 0);
 
   // which is the limiter cpu or gpu
-  size_t memFree = std::max(devMemFree, hostMemFree);
+  size_t memFree = (devMemFree > hostMemFree) ? devMemFree: hostMemFree;
 
   SECTION("hipHostRegister Negative Test - invalid memory size") {
     INFO("Trying to allocate: " << memFree);
