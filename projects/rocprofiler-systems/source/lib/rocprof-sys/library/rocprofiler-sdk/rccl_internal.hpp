@@ -71,10 +71,13 @@ struct rccl_event_info
 };
 
 /**
- * @brief Null PMC registrar (no-op) for testing
+ * @brief Null PMC registrar (no-op) for optional PMC functionality
  *
  * This is a duck-typed registrar that does nothing when register_gpu_pmc is called.
- * Used as the default template parameter for rccl_gpu_tracking_state_t.
+ * Used as the default template parameter for rccl_gpu_tracking_state_t to enable
+ * zero-overhead operation when PMC registration is not needed (e.g., in tests or
+ * when PMC functionality is disabled). This follows the C++ policy-based design
+ * pattern for compile-time polymorphism without runtime overhead.
  */
 struct null_pmc_registrar
 {
