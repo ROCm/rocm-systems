@@ -429,6 +429,8 @@ jobs:
           
           echo 'Building Python wheel on ${{ matrix.os }}'
           
+          # Upgrade setuptools for proper wheel metadata
+          echo 'Upgrading setuptools...'
           python3 -m pip install --ignore-installed pip setuptools wheel
           
           # Build the wheel
