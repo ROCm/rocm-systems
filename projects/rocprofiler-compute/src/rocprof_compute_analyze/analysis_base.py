@@ -172,10 +172,12 @@ class OmniAnalyze_Base:
         print(f"PyTorch Operators in: {workload_path}")
         print(f"{'=' * 80}\n")
         operator_count = 0
-        for f in all_files:
+        for idx, f in enumerate(all_files, start=1):
             try:
                 df = pd.read_csv(f)
-                tty.show_torch_operator_hierarchy(str(f.name).replace(".csv", ""), df)
+                tty.show_torch_operator_hierarchy(
+                    str(f.name).replace(".csv", ""), df, index=idx
+                )
                 operator_count += 1
             except Exception as e:
                 console_log(f"Failed to read operator from {f.name}: {e}")
