@@ -295,7 +295,10 @@ def test_memory_copy_json_trace(json_data):
         assert len(memory_copy_data) > 0, f"{memory_copy_data}"
 
     directions = set()
-    valid_directions = ("MEMORY_COPY_HOST_TO_DEVICE", "MEMORY_COPY_DEVICE_TO_HOST")
+    expected_directions = {
+        "MEMORY_COPY_HOST_TO_DEVICE",
+        "MEMORY_COPY_DEVICE_TO_HOST",
+    }
     for row in memory_copy_data:
         src_agent = get_agent(row["src_agent_id"])
         dst_agent = get_agent(row["dst_agent_id"])
@@ -313,7 +316,6 @@ def test_memory_copy_json_trace(json_data):
         assert row["correlation_id"]["internal"] > 0
         assert row["end_timestamp"] >= row["start_timestamp"]
 
-    expected_directions = set(valid_directions)
     if has_blit_kernel:
         assert directions.issubset(expected_directions)
     else:
