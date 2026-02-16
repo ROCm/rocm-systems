@@ -1592,6 +1592,9 @@ class AMDSMIHelpers():
         Display CPER summary lines. If a logger is provided and its destination is
         not stdout, append the output to that file instead of printing to stdout.
         """
+        if logger is not None and logger.is_json_format():
+            return []
+
         use_file = (
             logger is not None
             and logger.is_human_readable_format()
@@ -1622,6 +1625,7 @@ class AMDSMIHelpers():
             # Assume 'entry' is a dictionary with keys: "error_severity" and "notify_type".
             timestamp = entry.get("timestamp", "unknown")
             gpu_id = '-'
+            output = ""
             if not isinstance(device_handle, Path):
                 gpu_id = self.get_gpu_id_from_device_handle(device_handle)
                 prefix = self._severity_as_string(
@@ -1651,6 +1655,9 @@ class AMDSMIHelpers():
             self.increment_cper_count()
 
     def _print_header(self, folder, logger=None):
+        if logger is not None and logger.is_json_format():
+            return
+
         header = f"{'timestamp':<20} {'gpu_id':<7} {'severity':<20}"
         if folder:
             header += f" {'file_name':<17} {'list of afids'}"
@@ -1667,8 +1674,7 @@ class AMDSMIHelpers():
         else:
             print(header)
 
-
-    def dump_cper_entries(self, folder, entries, cper_data, device_handle, file_limit=None, cper_file=None):
+    def dump_cper_entries(self, folder, entries, cper_data, device_handle, file_limit=None, logger=None, emit=True):
         """
         Dump CPER entries to files in the specified folder. Handles batch deletion if file limit is exceeded.
 
@@ -1680,8 +1686,10 @@ class AMDSMIHelpers():
         file_limit (int, optional): Maximum number of files to retain in the folder.
         cper_file (str, optional): cper file name to use when saving to folder
         """
+        json_output = logger is not None and logger.is_json_format()
+
         # Initialize header display
-        if not getattr(self, "_cper_display_initialized", False):
+        if not json_output and not getattr(self, "_cper_display_initialized", False):
             self._print_header(folder)
             self._cper_display_initialized = True
 
@@ -1753,46 +1761,70 @@ class AMDSMIHelpers():
                             logging.debug(f"Failed to delete file {old_file}: {e}")
 
             # Print collected rows
-            for cper_path, row in output_rows.items():
-                timestamp, gpu_id, severity, fname = row
-                try:
-                    afids = self.cper_dump_afids(cper_path)
-                    afids_str = ' '.join(map(str, afids))
-                except Exception as e:
-                    afids_str = "Error fetching AFIDs"
-                    logging.debug(f"Failed to fetch AFIDs for {cper_path}: {e}")
-                print(f"{timestamp:<20} {gpu_id:<7} {severity:<20} {fname:<17} {afids_str}")
-
+            if json_output:
+                json_rows = []
+                for cper_path, row in output_rows.items():
+                    timestamp, gpu_id, severity, fname = row
+                    cper_path_str = str(cper_path)
+                    json_path_str = str(Path(cper_path).with_suffix('.json'))
+                    try:
+                        afids = self.pvtDumpAfids(cper_path)
+                    except Exception as e:
+                        afids = []
+                        logging.debug(f"Failed to fetch AFIDs for {cper_path}: {e}")
+                    json_rows.append({
+                        "timestamp": timestamp,
+                        "gpu": gpu_id,
+                        "severity": severity,
+                        "cper_file": cper_path_str,
+                        "metadata_file": json_path_str,
+                        "afids": afids
+                    })
+                if emit:
+                    print(json.dumps(json_rows, indent=2))
+                return json_rows
+            else:
+                for cper_path, row in output_rows.items():
+                    timestamp, gpu_id, severity, fname = row
+                    try:
+                        afids = self.pvtDumpAfids(cper_path)
+                        afids_str = ' '.join(map(str, afids))
+                    except Exception as e:
+                        afids_str = "Error fetching AFIDs"
+                        logging.debug(f"Failed to fetch AFIDs for {cper_path}: {e}")
+                    print(f"{timestamp:<20} {gpu_id:<7} {severity:<20} {fname:<17} {afids_str}")
         else:
-            # Print entries as JSON if no folder is specified
-            try:
-                print(json.dumps(
-                    entries,
-                    indent=2,
-                    default=lambda o: o.decode('utf-8') if isinstance(o, bytes) else o
-                ))
-            except Exception as e:
-                logging.debug(f"Failed to dump entries as JSON: {e}")
-    
-    def dump_cper_entries_as_json(self, entries, _cper_data, _device_handle):
-        """
-        Return the CPER entries as a formatted JSON string and print it.
-        Parameters largely mirror dump_cper_entries so that callers can reuse the same argument list.
-        Unused arguments (_cper_data, _device_handle) are retained for API symmetry.
-        Returns:
-        str: The JSON representation of the CPER entries, or an empty string on failure.
-        """
-        try:
-            entries_json = json.dumps(
-                entries,
-                indent=2,
-                default=lambda o: o.decode("utf-8") if isinstance(o, bytes) else o,
-            )
-            print(entries_json)
-            return entries_json
-        except Exception as e:
-            logging.debug(f"Failed to serialize CPER entries as JSON: {e}")
-            return ""
+            if json_output:
+                try:
+                    gpu_id = self.get_gpu_id_from_device_handle(device_handle)
+                    json_rows = []
+                    for entry in entries.values():
+                        severity = self._severity_as_string(
+                            entry.get("error_severity", "Unknown"),
+                            entry.get("notify_type", "Unknown"),
+                            False
+                        )
+                        json_rows.append({
+                            "timestamp": entry.get("timestamp", "unknown"),
+                            "gpu": gpu_id,
+                            "severity": severity
+                        })
+                    if emit:
+                        print(json.dumps(json_rows, indent=2))
+                    return json_rows
+                except Exception as e:
+                    logging.debug(f"Failed to build json summary rows: {e}")
+            else:
+                # Print entries as JSON if no folder is specified
+                try:
+                    print(json.dumps(
+                        entries,
+                        indent=2,
+                        default=lambda o: o.decode('utf-8') if isinstance(o, bytes) else o
+                    ))
+                except Exception as e:
+                    logging.debug(f"Failed to dump entries as JSON: {e}")
+        return []
 
     def write_binary(self, data, size, filepath):
         """
@@ -1921,7 +1953,7 @@ class AMDSMIHelpers():
             return False
         return True
 
-    def ras_cper(self, args, device_handle, logger, gpu_idx):
+    def ras_cper(self, args, device_handle, logger, gpu_idx, emit_json=True):
         # Parse severity mask dynamically from the --severity option.
         severity_mask = 0
         # drop duplicates of args
@@ -1952,17 +1984,14 @@ class AMDSMIHelpers():
         else:
             log_path = None
 
-        if args.decode and args.cper_file:
-            device_handle = args.cper_file
-        else:
-            gpu_id = self.get_gpu_id_from_device_handle(device_handle)
-            if args.follow and not getattr(self, "_cper_follow_prompted", False):
-                print("Press CTRL + C to stop.")
-                self._cper_follow_prompted = True
+        gpu_id = self.get_gpu_id_from_device_handle(device_handle)
+        if args.follow and not logger.is_json_format() and not getattr(self, "_cper_follow_prompted", False):
+            print("Press CTRL + C to stop.")
+            self._cper_follow_prompted = True
 
-            primary_partition = self.is_primary_partition(device_handle, gpu_id)
-            if not primary_partition:
-                return
+        primary_partition = self.is_primary_partition(device_handle, gpu_id)
+        if not primary_partition:
+            return []
 
         if args.folder and not getattr(self, "_cper_folder_prompted", False):
             self._cper_folder_prompted = True
@@ -1971,7 +2000,7 @@ class AMDSMIHelpers():
         self.stop = False
 
         num_entries = 0
-        entries = {}
+        collected_json_rows = []
         while True:
             try:
                 entries, new_cursor, cper_data, status_code = amdsmi_interface.amdsmi_get_gpu_cper_entries(
@@ -2013,10 +2042,11 @@ class AMDSMIHelpers():
                         pass
                     with log_path.open('a', encoding='utf-8') as f:
                         sys.stdout = f
-                        if args.folder:
-                            self.dump_cper_entries(
-                                args.folder, entries, cper_data, device_handle, args.file_limit
+                        if args.folder or logger.is_json_format():
+                            cper_rows = self.dump_cper_entries(
+                                args.folder, entries, cper_data, device_handle, args.file_limit, logger, emit=emit_json
                             )
+                            collected_json_rows.extend(cper_rows)
                         else:
                             self.display_cper_files_generated(
                                 entries, device_handle, args.folder
@@ -2024,10 +2054,11 @@ class AMDSMIHelpers():
                 finally:
                     sys.stdout = orig_stdout
             else:
-                if args.folder:
-                    self.dump_cper_entries(
-                        args.folder, entries, cper_data, device_handle, args.file_limit
+                if args.folder or logger.is_json_format():
+                    cper_rows = self.dump_cper_entries(
+                        args.folder, entries, cper_data, device_handle, args.file_limit, logger, emit=emit_json
                     )
+                    collected_json_rows.extend(cper_rows)
                 else:
                     self.display_cper_files_generated(
                         entries, device_handle, args.folder
@@ -2045,10 +2076,11 @@ class AMDSMIHelpers():
                         pass
                     with log_path.open('a', encoding='utf-8') as f:
                         sys.stdout = f
-                        if args.folder:
-                            self.dump_cper_entries(
-                                args.folder, entries, cper_data, device_handle, args.file_limit
+                        if args.folder or logger.is_json_format():
+                            cper_rows = self.dump_cper_entries(
+                                args.folder, entries, cper_data, device_handle, args.file_limit, logger, emit=emit_json
                             )
+                            collected_json_rows.extend(cper_rows)
                         else:
                             self.display_cper_files_generated(
                                 entries, device_handle, args.folder
@@ -2056,15 +2088,16 @@ class AMDSMIHelpers():
                 finally:
                     sys.stdout = orig_stdout
             else:
-                if args.folder:
-                    self.dump_cper_entries(
-                        args.folder, entries, cper_data, device_handle, args.file_limit
+                if args.folder or logger.is_json_format():
+                    cper_rows = self.dump_cper_entries(
+                        args.folder, entries, cper_data, device_handle, args.file_limit, logger, emit=emit_json
                     )
+                    collected_json_rows.extend(cper_rows)
                 else:
                     self.display_cper_files_generated(
                         entries, device_handle, args.folder
                     )
-
+        return collected_json_rows
 
 
     def get_bitmask_ranges(self, bitmask_dict):
