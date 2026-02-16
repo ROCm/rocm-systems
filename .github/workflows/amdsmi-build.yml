@@ -77,7 +77,7 @@ jobs:
             cd $BUILD_FOLDER
 
             # Configure, build, and package
-            if cmake ${{ env.PROJECT_DIR }} -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON 2>&1 | tee cmake.log && \
+            if cmake ${{ env.PROJECT_DIR }} -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON -DBUILD_PYTHON_LIB=ON 2>&1 | tee cmake.log && \
                make -j $(nproc) 2>&1 | tee make.log && \
                make package 2>&1 | tee package.log; then
 
@@ -126,7 +126,7 @@ jobs:
           
           # Verify wheel installation
           echo 'Verifying wheel installation...'
-          cd /tmp && python3 -c "import amdsmi; print('✓ Import successful'); amdsmi.amdsmi_init(); print('✓ Library loaded'); amdsmi.amdsmi_shut_down(); print('✓ Wheel working!')"
+          cd /tmp && LD_LIBRARY_PATH=$BUILD_FOLDER/src:$LD_LIBRARY_PATH python3 -c "import amdsmi; print('Import successful'); amdsmi.amdsmi_init(); print('Library loaded'); amdsmi.amdsmi_shut_down(); print('Wheel working!')"
           echo 'Python wheel build and install completed on ${{ matrix.os }}'
 
       - name: Install AMDSMI
@@ -227,7 +227,7 @@ jobs:
             mkdir -p $BUILD_FOLDER
             cd $BUILD_FOLDER
 
-            if cmake ${{ env.PROJECT_DIR }} -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON && \
+            if cmake ${{ env.PROJECT_DIR }} -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON -DBUILD_PYTHON_LIB=ON && \
                make -j $(nproc) && \
                make package; then
 
@@ -253,7 +253,7 @@ jobs:
           echo 'Wheel created:'
           ls -lh *.whl
           python3 -m pip install --force-reinstall $BUILD_FOLDER/py-interface/python_package/*.whl
-          cd /tmp && python3 -c "import amdsmi; print('✓ Import successful'); amdsmi.amdsmi_init(); print('✓ Library loaded'); amdsmi.amdsmi_shut_down(); print('✓ Wheel working!')"
+          cd /tmp && LD_LIBRARY_PATH=$BUILD_FOLDER/src:$LD_LIBRARY_PATH python3 -c "import amdsmi; print('Import successful'); amdsmi.amdsmi_init(); print('Library loaded'); amdsmi.amdsmi_shut_down(); print('Wheel working!')"
           echo 'Python wheel build and install completed on ${{ matrix.os }}'
 
           echo 'Installing for test on ${{ matrix.os }}'
@@ -488,7 +488,7 @@ jobs:
           
           # Verify wheel installation
           echo 'Verifying wheel installation...'
-          cd /tmp && python3 -c "import amdsmi; print('✓ Import successful'); amdsmi.amdsmi_init(); print('✓ Library loaded'); amdsmi.amdsmi_shut_down(); print('✓ Wheel working!')"
+          cd /tmp && LD_LIBRARY_PATH=$BUILD_FOLDER/src:$LD_LIBRARY_PATH python3 -c "import amdsmi; print('Import successful'); amdsmi.amdsmi_init(); print('Library loaded'); amdsmi.amdsmi_shut_down(); print('Wheel working!')"
           echo 'Python wheel build and install completed on ${{ matrix.os }}'
 
       - name: Upload Python Wheel
@@ -565,7 +565,7 @@ jobs:
             mkdir -p $BUILD_FOLDER
             cd $BUILD_FOLDER
 
-            if cmake ${{ env.PROJECT_DIR }} -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON && \
+            if cmake ${{ env.PROJECT_DIR }} -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON -DBUILD_PYTHON_LIB=ON && \
                make -j $(nproc) && \
                make package; then
 
@@ -597,7 +597,7 @@ jobs:
             cd $BUILD_FOLDER
 
             # Capture build output to parse warnings
-            if cmake ${{ env.PROJECT_DIR }} -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON 2>&1 | tee cmake.log && \
+            if cmake ${{ env.PROJECT_DIR }} -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON -DBUILD_PYTHON_LIB=ON 2>&1 | tee cmake.log && \
                make -j $(nproc) 2>&1 | tee make.log && \
                make package 2>&1 | tee package.log; then
 
@@ -646,7 +646,7 @@ jobs:
           
           # Verify wheel installation
           echo 'Verifying wheel installation...'
-          cd /tmp && python3 -c "import amdsmi; print('✓ Import successful'); amdsmi.amdsmi_init(); print('✓ Library loaded'); amdsmi.amdsmi_shut_down(); print('✓ Wheel working!')"
+          cd /tmp && LD_LIBRARY_PATH=$BUILD_FOLDER/src:$LD_LIBRARY_PATH python3 -c "import amdsmi; print('Import successful'); amdsmi.amdsmi_init(); print('Library loaded'); amdsmi.amdsmi_shut_down(); print('Wheel working!')"
           echo 'Python wheel build and install completed on ${{ matrix.os }}'
 
       - name: Install AMDSMI(RHEL10 & AlmaLinux8)
@@ -805,7 +805,7 @@ jobs:
             mkdir -p $BUILD_FOLDER
             cd $BUILD_FOLDER
 
-            if cmake ${{ env.PROJECT_DIR }} -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON && \
+            if cmake ${{ env.PROJECT_DIR }} -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON -DBUILD_PYTHON_LIB=ON && \
                make -j $(nproc) && \
                make package; then
 
@@ -831,7 +831,7 @@ jobs:
           echo 'Wheel created:'
           ls -lh *.whl
           python3 -m pip install --force-reinstall $BUILD_FOLDER/py-interface/python_package/*.whl
-          cd /tmp && python3 -c "import amdsmi; print('✓ Import successful'); amdsmi.amdsmi_init(); print('✓ Library loaded'); amdsmi.amdsmi_shut_down(); print('✓ Wheel working!')"
+          cd /tmp && LD_LIBRARY_PATH=$BUILD_FOLDER/src:$LD_LIBRARY_PATH python3 -c "import amdsmi; print('Import successful'); amdsmi.amdsmi_init(); print('Library loaded'); amdsmi.amdsmi_shut_down(); print('Wheel working!')"
           echo 'Python wheel build and install completed on ${{ matrix.os }}'
 
           echo 'Installing for test on RHEL10/AlmaLinux8'
@@ -863,7 +863,7 @@ jobs:
           rm -rf $BUILD_FOLDER
           mkdir -p $BUILD_FOLDER
           cd $BUILD_FOLDER
-          cmake ${{ env.PROJECT_DIR }} -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON 
+          cmake ${{ env.PROJECT_DIR }} -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON -DBUILD_PYTHON_LIB=ON 
           make -j $(nproc)
           make package
 
@@ -877,7 +877,7 @@ jobs:
           echo 'Wheel created:'
           ls -lh *.whl
           python3 -m pip install --force-reinstall $BUILD_FOLDER/py-interface/python_package/*.whl
-          cd /tmp && python3 -c "import amdsmi; print('✓ Import successful'); amdsmi.amdsmi_init(); print('✓ Library loaded'); amdsmi.amdsmi_shut_down(); print('✓ Wheel working!')"
+          cd /tmp && LD_LIBRARY_PATH=$BUILD_FOLDER/src:$LD_LIBRARY_PATH python3 -c "import amdsmi; print('Import successful'); amdsmi.amdsmi_init(); print('Library loaded'); amdsmi.amdsmi_shut_down(); print('Wheel working!')"
           echo 'Python wheel build and install completed on ${{ matrix.os }}'
 
           echo 'Installing for test on ${{ matrix.os }}'
