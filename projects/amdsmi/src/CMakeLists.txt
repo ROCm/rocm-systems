@@ -128,8 +128,12 @@ set(SO_VERSION_STRING "${MAJOR}.${MINOR}.${RELEASE}")
 message("SOVERSION: ${SO_VERSION_STRING}")
 
 BuildNic(AMDSMINIC_LIB AMDSMINIC_PATH)
+# Create an intermediate target so the NIC library is only built once
+# even when multiple targets (amd_smi and amd_smi_python) depend on it
+add_custom_target(amdsminic_target DEPENDS ${AMDSMINIC_PATH})
 
 add_library(${AMD_SMI} ${SRC_LIST} ${INC_LIST} ${AMDSMINIC_PATH})
+add_dependencies(${AMD_SMI} amdsminic_target)
 target_link_libraries(${AMD_SMI} PRIVATE
     rt
     Threads::Threads
@@ -168,6 +172,7 @@ endif()
 ## Create Python-specific library if BUILD_PYTHON_LIB is enabled
 if(BUILD_PYTHON_LIB)
     add_library(${AMD_SMI}_python ${SRC_LIST} ${INC_LIST} ${AMDSMINIC_PATH})
+    add_dependencies(${AMD_SMI}_python amdsminic_target)
     target_link_libraries(${AMD_SMI}_python PRIVATE
         rt
         Threads::Threads
