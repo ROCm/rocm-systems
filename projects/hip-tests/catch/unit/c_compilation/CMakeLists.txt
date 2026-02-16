@@ -36,6 +36,7 @@ add_custom_target(devprop_c_custom
             -I${HIP_INCLUDE_DIR}
             -D${PLATFORM_DEFINE}
             -o hipGetDeviceProp.o
+            -fPIC
     BYPRODUCTS hipGetDeviceProp.o
 )
 
