@@ -191,16 +191,6 @@ namespace rocshmem
     }                                                                         \
 } while (0)
 
-#define CHECK_HSA(cmd)            \
-  do {                            \
-    hsa_status_t error = cmd;                                                      \
-    if (error != HSA_STATUS_SUCCESS) {                                        \
-      fprintf(stderr, "error: %d at %s:%d\n", error, __FILE__, __LINE__);     \
-      exit(EXIT_FAILURE);                                                     \
-    }                                                                         \
-} while (0)
-
-
 // Helper macros for calling RDMA functions and reporting errors
 #ifdef VERBS_DEBUG
 #define IBV_CALL(__func__, ...)                                         \

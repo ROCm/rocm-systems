@@ -25,6 +25,13 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Synced latest metric descriptions to public facing documentation
     * Updated metric units to be more human readable in public facing documentation
 
+* ``--output-directory`` option in profile mode to provide parameterized output directory for the profiling data.
+
+* Detection of MPI ranks while profiling and creation of output directories based on MPI rank.
+
+* Added `--experimental` flag to enable experimental features that are under development. This flag is required when using any experimental features. 
+  * Use `rocprof-compute --experimental --help` to see currently available experimental features.
+
 ### Changed
 
 * Default output format for the underlying ROCprofiler-SDK tool has been changed from ``csv`` to ``rocpd``.
@@ -72,6 +79,10 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 ### Optimized
 
 * Improved the responsiveness of menu and dropdown buttons in TUI analyze mode for a smoother user experience.
+
+### Deprecated
+
+* ``--path`` and ``--subpath`` have been deprecated and replaced with a unified ``--output-directory``
 
 ## ROCm Compute Profiler 3.4.0 for ROCm 7.2.0
 
