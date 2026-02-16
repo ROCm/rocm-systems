@@ -440,8 +440,7 @@ TEST_CASE("Unit_TexObjectCreate_TypePitch2D_EdgeCases") {
   res_desc.res.pitch2D.height = height;
 
   SECTION("Invalid device pointer") {
-    char handle;
-    res_desc.res.pitch2D.devPtr = reinterpret_cast<hipDeviceptr_t>(&handle);
+    res_desc.res.pitch2D.devPtr = nullptr;
     HIP_CHECK_ERROR(hipTexObjectCreate(&tex_object, &res_desc, &tex_desc, nullptr),
                     hipErrorInvalidValue);
   }
