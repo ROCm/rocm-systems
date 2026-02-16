@@ -112,14 +112,14 @@ public:
                                                   void *buffer,
                                                   size_t size) const
   {
-    return m_memory_cache.read_global_memory (address, buffer, size);
+    return m_memory_cache.read_agent_memory (address, buffer, size);
   }
 
   [[nodiscard]] size_t write_agent_memory_partial (agent_address_t address,
                                                    const void *buffer,
                                                    size_t size) const
   {
-    return m_memory_cache.write_global_memory (address, buffer, size);
+    return m_memory_cache.write_agent_memory (address, buffer, size);
   }
 
   template <typename T>

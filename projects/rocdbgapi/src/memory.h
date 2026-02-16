@@ -582,10 +582,10 @@ public:
                  void *value) const;
 };
 
-/* A memory cache.  Writes to cached lines are write-back: data is
-   immediately updated in the cache, and later updated in memory when
-   the cache is flushed.  Accesses to uncached lines are forwarded
-   directly to memory.  */
+/* A cache for agent memory.  Writes to cached lines are write-back:
+   data is immediately updated in the cache, and later updated in
+   memory when the cache is flushed.  Accesses to uncached lines are
+   forwarded directly to memory.  */
 
 class memory_cache_t
 {
@@ -603,15 +603,18 @@ private:
     bool m_dirty{ false };
   };
 
-  std::map<agent_address_t, cache_line_t> m_cache_line_map;
-  delegate_fn_type const m_xfer_global_memory;
+  /* The agent which this cache is for.  */
+  const agent_t &m_agent;
 
-  size_t xfer_global_memory (agent_address_t address, void *read,
-                             const void *write, size_t size);
+  std::map<agent_address_t, cache_line_t> m_cache_line_map;
+  delegate_fn_type const m_xfer_agent_memory;
+
+  size_t xfer_agent_memory (agent_address_t address, void *read,
+                            const void *write, size_t size);
 
 public:
-  memory_cache_t (delegate_fn_type xfer_global_memory)
-    : m_xfer_global_memory (std::move (xfer_global_memory))
+  memory_cache_t (const agent_t &agent, delegate_fn_type xfer_agent_memory)
+    : m_agent (agent), m_xfer_agent_memory (std::move (xfer_agent_memory))
   {
   }
   ~memory_cache_t () { dbgapi_assert (m_cache_line_map.empty ()); }
@@ -632,16 +635,16 @@ public:
   void write_back (agent_address_t address = 0,
                    amd_dbgapi_size_t size = amd_dbgapi_size_t (-1));
 
-  [[nodiscard]] size_t read_global_memory (agent_address_t address,
-                                           void *buffer, size_t size)
+  [[nodiscard]] size_t read_agent_memory (agent_address_t address,
+                                          void *buffer, size_t size)
   {
-    return xfer_global_memory (address, buffer, nullptr, size);
+    return xfer_agent_memory (address, buffer, nullptr, size);
   }
 
-  [[nodiscard]] size_t write_global_memory (agent_address_t address,
-                                            const void *buffer, size_t size)
+  [[nodiscard]] size_t write_agent_memory (agent_address_t address,
+                                           const void *buffer, size_t size)
   {
-    return xfer_global_memory (address, nullptr, buffer, size);
+    return xfer_agent_memory (address, nullptr, buffer, size);
   }
 };
 
