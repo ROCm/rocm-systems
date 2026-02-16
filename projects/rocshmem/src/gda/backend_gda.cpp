@@ -734,6 +734,9 @@ void GDABackend::cleanup_ibv() {
       CHECK_HIP(hipFree(bnxt_qps[i].sq_buf));
       CHECK_HIP(hipFree(bnxt_qps[i].rq_buf));
 
+      close(bnxt_qps[i].sq_dmabuf_fd);
+      close(bnxt_qps[i].rq_dmabuf_fd);
+
       err = bnxt_re_dv.destroy_cq(bnxt_scqs[i].cq);
       CHECK_ZERO(err, "bnxt_re_dv_destroy_cq (SCQ)");
 
@@ -745,6 +748,9 @@ void GDABackend::cleanup_ibv() {
 
       err = bnxt_re_dv.umem_dereg(bnxt_rcqs[i].umem_handle);
       CHECK_ZERO(err, "bnxt_re_dv_umem_dereg (RCQ)");
+
+      close(bnxt_scqs[i].dmabuf_fd);
+      close(bnxt_rcqs[i].dmabuf_fd);
 
       CHECK_HIP(hipFree(bnxt_scqs[i].buf));
       CHECK_HIP(hipFree(bnxt_rcqs[i].buf));

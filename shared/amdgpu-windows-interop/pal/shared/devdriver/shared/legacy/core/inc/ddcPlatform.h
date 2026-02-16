@@ -615,6 +615,10 @@ void Strncat(char(&dst)[DstSize], const char* pSrc)
     Strncat(dst, pSrc, DstSize);
 }
 
+void Memcpy_s(void* pDst, size_t dstSize, const void* pSrc, size_t srcSize);
+
+void Memmove_s(void* pDst, size_t dstSize, const void* pSrc, size_t srcSize);
+
 int32 Strcmpi(const char* pSrc1, const char* pSrc2);
 
 int32 Snprintf(char* pDst, size_t dstSize, const char* pFormat, ...);
@@ -672,9 +676,9 @@ void DD_PRINT_FUNC(LogLevel logLevel, const char* format, ...);
 #endif
 
 template <LogLevel logLevel = LogLevel::Info, class ...Ts>
-inline void LogString(const char *format, Ts&&... args)
+inline void LogString([[maybe_unused]] const char *format, [[maybe_unused]] Ts&&... args)
 {
-    if (DD_WILL_PRINT(logLevel))
+    if constexpr (DD_WILL_PRINT(logLevel))
     {
         DD_PRINT_FUNC(logLevel, format, Platform::Forward<Ts>(args)...);
     }

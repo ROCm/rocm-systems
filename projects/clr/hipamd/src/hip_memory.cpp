@@ -4502,6 +4502,32 @@ hipError_t ihipMipmappedArrayGetLevel(hipArray_t* level_array_pptr,
   return hipSuccess;
 }
 
+hipError_t ihipMipmappedArrayGetMemoryRequirements(hipArrayMemoryRequirements* memoryRequirements,
+                                                  hipMipmappedArray_t mipmap,
+                                                  hipDevice_t device) {
+  if (memoryRequirements == nullptr) {
+    return hipErrorInvalidValue;
+  }
+  if (mipmap == nullptr) {
+    return hipErrorInvalidHandle;
+  }
+
+  cl_mem cl_mem_obj = reinterpret_cast<cl_mem>(mipmap->data);
+  if (is_valid(cl_mem_obj) == false) {
+    return hipErrorInvalidValue;
+  }
+
+  amd::Image* image = as_amd(cl_mem_obj)->asImage();
+  if (image == nullptr) {
+    return hipErrorInvalidValue;
+  }
+
+  memoryRequirements->alignment = image->getAlignment();
+  memoryRequirements->size = image->getSize();
+
+  return hipSuccess;
+}
+
 hipError_t hipMipmappedArrayCreate(hipMipmappedArray_t* mipmapped_array_pptr,
                                    HIP_ARRAY3D_DESCRIPTOR* mipmapped_array_desc_ptr,
                                    unsigned int num_mipmap_levels) {
@@ -4524,6 +4550,13 @@ hipError_t hipMipmappedArrayGetLevel(hipArray_t* level_array_pptr,
   HIP_INIT_API(hipMipmappedArrayGetLevel, level_array_pptr, mipmapped_array_ptr, mip_level);
 
   HIP_RETURN(ihipMipmappedArrayGetLevel(level_array_pptr, mipmapped_array_ptr, mip_level));
+}
+
+hipError_t hipMipmappedArrayGetMemoryRequirements(hipArrayMemoryRequirements* memoryRequirements,
+                                                  hipMipmappedArray_t mipmap,
+                                                  hipDevice_t device) {
+  HIP_INIT_API(hipMipmappedArrayGetMemoryRequirements, memoryRequirements, mipmap, device);
+  HIP_RETURN(ihipMipmappedArrayGetMemoryRequirements(memoryRequirements, mipmap, device));
 }
 
 hipError_t hipMallocMipmappedArray(hipMipmappedArray_t* mipmappedArray,
