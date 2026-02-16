@@ -125,6 +125,10 @@ typedef enum rocprofiler_hsa_amd_ext_api_id_t  // NOLINT(performance-enum-size)
     ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_ais_file_write,
     ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_ais_file_read,
 #    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x09
+    ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_counted_queue_acquire,
+    ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_counted_queue_release,
+#    endif
 #endif
 
     ROCPROFILER_HSA_AMD_EXT_API_ID_LAST,

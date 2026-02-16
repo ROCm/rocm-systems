@@ -26,7 +26,7 @@ RUN zypper --non-interactive update -y && \
     zypper --non-interactive install -y chrpath cmake curl dpkg-devel \
         gcc-c++ gcc-fortran git gmock gtest iproute2 libdrm-devel libnuma-devel \
         ninja nlohmann_json-devel openmpi3-devel python3-pip rpm-build \
-        sqlite3-devel wget && \
+        sqlite3-devel wget libucp-devel libuct-devel && \
     python3 -m pip install 'cmake==3.21'
 
 ARG ROCM_VERSION=0.0

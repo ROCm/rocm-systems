@@ -163,7 +163,7 @@ Panel Config:
             + TCC_HIT[25])) + (TCC_MISS[26] + TCC_HIT[26])) + (TCC_MISS[27] + TCC_HIT[27]))
             + (TCC_MISS[28] + TCC_HIT[28])) + (TCC_MISS[28] + TCC_HIT[29])) + (TCC_MISS[30]
             + TCC_HIT[30])) + (TCC_MISS[31] + TCC_HIT[31])) != 0) else None))
-          unit: pct
+          unit: Percent
   - metric_table:
       id: 1802
       title: L2 Cache Hit Rate (pct)

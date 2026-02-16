@@ -552,18 +552,17 @@ class Device : public NullDevice {
   VirtualGPU* xferQueue() const;
 
   //! Acquire HSA queue. This method can create a new HSA queue or
-  //! share previously created
   hsa_queue_t* acquireQueue(
       uint32_t queue_size_hint, bool coop_queue = false, const std::vector<uint32_t>& cuMask = {},
       amd::CommandQueue::Priority priority = amd::CommandQueue::Priority::Normal,
-      bool managed = false);
+      bool managed = false, bool dedicated_queue = false);
 
   //! Release HSA queue
   void releaseQueue(hsa_queue_t*, const std::vector<uint32_t>& cuMask = {}, bool coop_queue = false,
                     bool managed = false);
 
-  hsa_queue_t* AcquireActiveNormalQueue();
-  bool ReleaseActiveNormalQueue(hsa_queue_t* queue);
+  hsa_queue_t* AcquireActiveQueue(amd::CommandQueue::Priority priority);
+  bool ReleaseActiveQueue(hsa_queue_t* queue, amd::CommandQueue::Priority priority);
 
   //! For the given HSA queue, return an existing hostcall buffer or create a
   //! new one. queuePool_ keeps a mapping from HSA queue to hostcall buffer.
@@ -619,8 +618,11 @@ class Device : public NullDevice {
   //! Removes a kernel from the kernel map
   void RemoveKernel(Kernel& gpuKernel) const;
 
-  // Returns the number of allocated normal queues on this device
-  uint32_t NumNormalQueues() const { return num_normal_queues_.load(); }
+  // Returns the number of allocated queues for a given priority on this device
+  uint32_t NumQueues(uint qIndex) const { return num_queues_[qIndex].load(); }
+
+  //! enum for keeping the total and available queue priorities
+  enum QueuePriority : uint { Low = 0, Normal = 1, High = 2, Total = 3 };
 
   //! Returns true if PM4 emulation is enabled
   bool IsPm4Emulation() const { return pm4_emulation_; }
@@ -678,12 +680,40 @@ class Device : public NullDevice {
   struct QueueInfo {
     int refCount;           //! Reference counter. Shows how many time the queue was shared
     void* hostcallBuffer_;  //! Host call buffer for the HSA queue
+    bool hasDedicatedQueue_;  //! True if this queue is a dedicated queue (e.g., null stream)
+
+    // Constructor
+    QueueInfo() : refCount(0), hostcallBuffer_(nullptr), hasDedicatedQueue_(false) {}
+
+    //! Get the current hardware queue depth (wptr - rptr)
+    static uint64_t GetHwQueueDepth(hsa_queue_t* queue) {
+      uint64_t wptr = Hsa::queue_load_write_index_relaxed(queue);
+      uint64_t rptr = Hsa::queue_load_read_index_relaxed(queue);
+      return wptr - rptr;
+    }
+
+    //! Get a combined metric for queue selection (lower is better)
+    uint64_t GetLoadMetric(hsa_queue_t* queue, uint32_t mode = 1) const {
+      auto depth = GetHwQueueDepth(queue);
+
+      // Dedicated queue penalty: prefer regular queues, but use dedicated if regular queues
+      // have depth > ~128 packets. Penalty = 128 << 4 = 2048.
+      uint64_t dedicated_queue_penalty = hasDedicatedQueue_ ? 2048 : 0;
+
+      // Advanced weighted metric: Give queue depth significantly more weight than refCount
+      uint64_t metric = dedicated_queue_penalty + (depth << 4) + static_cast<uint64_t>(refCount);
+      return metric;
+    }
   };
 
   struct QueueCompare {
+    const Device* device_;
+
+    QueueCompare(const Device* dev = nullptr) : device_(dev) {}
+
     // Customized queue compare operator to make sure the queues are sorted in the creation order
     bool operator()(hsa_queue_t* lhs, hsa_queue_t* rhs) const {
-      if (DEBUG_HIP_DYNAMIC_QUEUES) {
+      if (device_ != nullptr && device_->settings().dynamic_queues_ > 0) {
         return (lhs->id < rhs->id) ? true : false;
       } else {
         return (lhs < rhs) ? true : false;
@@ -693,10 +723,10 @@ class Device : public NullDevice {
   //! a vector for keeping Pool of HSA queues with low, normal and high priorities for recycling
   std::vector<std::map<hsa_queue_t*, QueueInfo, QueueCompare>> queuePool_;
   amd::Monitor active_queue_access_;            //!< Lock to serialise virtual gpu list access
-  std::atomic<uint32_t> num_normal_queues_{0};  //!< The total number of allocated normal queues
+  std::atomic<uint32_t> num_queues_[QueuePriority::Total] = {};  //!< Per-priority queue counters
 
-  //! returns a hsa queue from queuePool with least refCount and updates the refCount as well
-  hsa_queue_t* getQueueFromPool(const uint qIndex);
+  //! Use dynamic queues mode to get a queue from pool
+  hsa_queue_t* getQueueFromPool(const uint qIndex, bool force_reuse = false);
 
   void* coopHostcallBuffer_;
   //! returns value for corresponding LinkAttrbutes in a vector given Memory pool.
@@ -712,6 +742,7 @@ class Device : public NullDevice {
   uint32_t maxSdmaWriteMask_;
   bool isXgmi_;  //!< Flag to indicate if there is XGMI between CPU<->GPU
   bool pm4_emulation_ = false;  //!< Flag to indicate if PM4 emulation is enabled
+  uint32_t numHwPipes_;  //!< Number of hardware pipes
 
   //! SDMA engine allocator for per-stream affinity
   struct SdmaEngineAllocator {
@@ -742,9 +773,6 @@ class Device : public NullDevice {
 
  public:
   std::atomic<uint> numOfVgpus_;  //!< Virtual gpu unique index
-
-  //! enum for keeping the total and available queue priorities
-  enum QueuePriority : uint { Low = 0, Normal = 1, High = 2, Total = 3 };
 
 #if defined(__clang__)
 #if __has_feature(address_sanitizer)

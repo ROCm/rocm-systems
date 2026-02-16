@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2021 Advanced Micro Devices, Inc.
+/* Copyright (c) 2010 - 2026 Advanced Micro Devices, Inc.
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -64,6 +64,35 @@ void setupGLInteropOnce() {
   }
 }
 
+static inline hipError_t validateResources(hipGraphicsResource_t* resources, int count = 1) {
+  hip::Device* device = hip::getCurrentDevice();
+  if (device == nullptr) {
+    return hipErrorNoDevice;
+  }
+
+  if (count <= 0) {
+    LogError("invalid count");
+    return hipErrorInvalidValue;
+  }
+
+  if (resources == nullptr) {
+    return hipErrorInvalidValue;
+  }
+
+  for (int i = 0; i < count; i++) {
+    if (resources[i] == nullptr) {
+      return hipErrorInvalidValue;
+    }
+    if (!device->registeredGraphics().isValid(resources[i])) {
+      return hipErrorInvalidHandle;
+    }
+    if (!device->mappedGraphics().isValid(resources[i])) {
+      return hipErrorNotMapped;
+    }
+  }
+  return hipSuccess;
+}
+
 static inline hipError_t hipSetInteropObjects(int num_objects, void** mem_objects,
                                               std::vector<amd::Memory*>& interopObjects) {
   if ((num_objects == 0 && mem_objects != nullptr) ||
@@ -74,13 +103,13 @@ static inline hipError_t hipSetInteropObjects(int num_objects, void** mem_object
   while (num_objects-- > 0) {
     void* obj = *mem_objects++;
     if (obj == nullptr) {
-      return hipErrorInvalidResourceHandle;
+      return hipErrorInvalidHandle;
     }
 
     amd::Memory* mem = reinterpret_cast<amd::Memory*>(obj);
 
     if (mem->getInteropObj() == nullptr) {
-      return hipErrorInvalidResourceHandle;
+      return hipErrorInvalidHandle;
     }
 
     interopObjects.push_back(mem);
@@ -184,20 +213,33 @@ hipError_t hipGraphicsSubResourceGetMappedArray(hipArray_t* array, hipGraphicsRe
   HIP_INIT_API(hipGraphicsSubResourceGetMappedArray, array, resource, arrayIndex, mipLevel);
 
   amd::Context& amdContext = *(hip::getCurrentDevice()->asContext());
-  if (array == nullptr || resource == nullptr) {
-    LogError("invalid array/resource");
+  if (array == nullptr) {
+    LogError("invalid array");
     HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  hipError_t status = validateResources(&resource);
+  if (status != hipSuccess) {
+    LogError("invalid resource");
+    HIP_RETURN(status);
   }
 
   amd::Image* image = (reinterpret_cast<amd::Memory*>(resource))->asImage();
   if (image == nullptr) {
     LogError("invalid resource/image");
+    HIP_RETURN(hipErrorNotMappedAsArray);
+  }
+  // arrayIndex higher than zero not implemented
+  if (arrayIndex > 0) {
+    LogError("invalid arrayIndex, arrayIndex higher than zero not implemented");
     HIP_RETURN(hipErrorInvalidValue);
   }
-  // arrayIndex higher than zero not implmented
-  if (arrayIndex > 0) {
-    return hipErrorInvalidValue;
+
+  if (mipLevel >= image->getMipLevels()) {
+    LogError("invalid mipLevel");
+    HIP_RETURN(hipErrorInvalidValue);
   }
+
   amd::Image* view = image->createView(amdContext, image->getImageFormat(), nullptr, mipLevel, 0);
 
   hipArray* myarray = new hipArray();
@@ -225,16 +267,43 @@ hipError_t hipGraphicsSubResourceGetMappedArray(hipArray_t* array, hipGraphicsRe
   HIP_RETURN(hipSuccess);
 }
 
+// Helper function to convert from OpenGL Flags to HIP Memory Flags
+hipError_t HipToClMemoryFlags(uint32_t gl_flags, cl_mem_flags* cl_flags) {
+  if (cl_flags == nullptr) {
+    return hipErrorInvalidValue;
+  }
+  switch (gl_flags) {
+      case hipGraphicsRegisterFlagsNone:
+        *cl_flags = 0;
+        break;
+      case hipGraphicsRegisterFlagsReadOnly:
+        *cl_flags = CL_MEM_READ_ONLY;
+        break;
+      case hipGraphicsRegisterFlagsWriteDiscard:
+        *cl_flags = CL_MEM_WRITE_ONLY;
+        break;
+      case hipGraphicsRegisterFlagsSurfaceLoadStore:
+        *cl_flags = CL_MEM_READ_WRITE;
+        break;
+      case hipGraphicsRegisterFlagsTextureGather:
+        *cl_flags = CL_MEM_READ_WRITE | CL_MEM_READ_ONLY;
+        break;
+      default:
+        return hipErrorInvalidValue;
+        break;
+  }
+  return hipSuccess;
+}
+
 hipError_t hipGraphicsGLRegisterImage(hipGraphicsResource** resource, GLuint image, GLenum target,
                                       unsigned int flags) {
   HIP_INIT_API(hipGraphicsGLRegisterImage, resource, image, target, flags);
 
-  if (!((flags == hipGraphicsRegisterFlagsNone) || (flags & hipGraphicsRegisterFlagsReadOnly) ||
-        (flags & hipGraphicsRegisterFlagsWriteDiscard) ||
-        (flags & hipGraphicsRegisterFlagsSurfaceLoadStore) ||
-        (flags & hipGraphicsRegisterFlagsTextureGather))) {
-    LogError("invalid parameter \"flags\"");
-    HIP_RETURN(hipErrorInvalidValue);
+  cl_mem_flags cl_flags = 0;
+  hipError_t status = HipToClMemoryFlags(flags, &cl_flags);
+  if (status != hipSuccess) {
+    LogPrintfError("invalid parameter \"flags\" %u, gl interop can not convert", flags);
+    HIP_RETURN(status);
   }
 
   if (resource == nullptr) {
@@ -275,7 +344,7 @@ hipError_t hipGraphicsGLRegisterImage(hipGraphicsResource** resource, GLuint ima
   if ((GL_FALSE == amdContext.glenv()->glIsTexture_(image)) ||
       (GL_NO_ERROR != (glErr = amdContext.glenv()->glGetError_()))) {
     LogWarning("\"texture\" is not a GL texture object");
-    HIP_RETURN(hipErrorUnknown);
+    HIP_RETURN(hipErrorInvalidValue);
   }
 
   bool isImage = true;
@@ -470,7 +539,7 @@ hipError_t hipGraphicsGLRegisterImage(hipGraphicsResource** resource, GLuint ima
     // Now get CL format from GL format and bytes per pixel
     int iBytesPerPixel = 0;
     if (!amd::getCLFormatFromGL(amdContext, glInternalFormat, &clImageFormat, &iBytesPerPixel,
-                                flags)) {
+                                cl_flags)) {
       LogWarning("\"texture\" format does not map to an appropriate CL image format");
       HIP_RETURN(hipErrorInvalidValue);
     }
@@ -496,7 +565,7 @@ hipError_t hipGraphicsGLRegisterImage(hipGraphicsResource** resource, GLuint ima
   target = (glTarget == GL_TEXTURE_CUBE_MAP) ? target : 0;
 
   pImageGL = new (amdContext)
-      amd::ImageGL(amdContext, clType, flags, clImageFormat, static_cast<size_t>(gliTexWidth),
+      amd::ImageGL(amdContext, clType, cl_flags, clImageFormat, static_cast<size_t>(gliTexWidth),
                    static_cast<size_t>(gliTexHeight), static_cast<size_t>(gliTexDepth), glTarget,
                    image, 0, glInternalFormat, clGLType, numSamples, target);
 
@@ -530,6 +599,16 @@ hipError_t hipGraphicsGLRegisterImage(hipGraphicsResource** resource, GLuint ima
   mem->processGLResource(device::Memory::GLDecompressResource);
 
   *resource = reinterpret_cast<hipGraphicsResource*>(pImageGL);
+
+  hip::Device* device = hip::getCurrentDevice();
+  if (device == nullptr) {
+    return hipErrorNoDevice;
+  }
+
+  if (!device->registeredGraphics().add(*resource)) {
+    LogError("duplicate resource");
+    HIP_RETURN(hipErrorUnknown);
+  }
   HIP_RETURN(hipSuccess);
 }
 
@@ -537,10 +616,11 @@ hipError_t hipGraphicsGLRegisterBuffer(hipGraphicsResource** resource, GLuint bu
                                        unsigned int flags) {
   HIP_INIT_API(hipGraphicsGLRegisterBuffer, resource, buffer, flags);
 
-  if (!((flags == hipGraphicsRegisterFlagsNone) || (flags & hipGraphicsRegisterFlagsReadOnly) ||
-        (flags & hipGraphicsRegisterFlagsWriteDiscard))) {
-    LogError("invalid parameter \"flags\"");
-    HIP_RETURN(hipErrorInvalidValue);
+  cl_mem_flags cl_flags = 0;
+  hipError_t status = HipToClMemoryFlags(flags, &cl_flags);
+  if (status != hipSuccess) {
+    LogPrintfError("invalid parameter \"flags\" %u, gl interop can not convert", flags);
+    HIP_RETURN(status);
   }
 
   if (resource == nullptr) {
@@ -574,7 +654,7 @@ hipError_t hipGraphicsGLRegisterBuffer(hipGraphicsResource** resource, GLuint bu
     if ((GL_FALSE == amdContext.glenv()->glIsBuffer_(buffer)) ||
         (GL_NO_ERROR != (glErr = amdContext.glenv()->glGetError_()))) {
       LogWarning("\"buffer\" is not a GL buffer object");
-      HIP_RETURN(hipErrorInvalidResourceHandle);
+      HIP_RETURN(hipErrorInvalidValue);
     }
 
     // Check if size is available - data store is created
@@ -583,17 +663,17 @@ hipError_t hipGraphicsGLRegisterBuffer(hipGraphicsResource** resource, GLuint bu
     amdContext.glenv()->glGetBufferParameteriv_(glTarget, GL_BUFFER_SIZE, &gliSize);
     if (GL_NO_ERROR != (glErr = amdContext.glenv()->glGetError_())) {
       LogWarning("cannot get the GL buffer size");
-      HIP_RETURN(hipErrorInvalidResourceHandle);
+      HIP_RETURN(hipErrorInvalidValue);
     }
     if (gliSize == 0) {
       LogWarning("the GL buffer's data store is not created");
-      HIP_RETURN(hipErrorInvalidResourceHandle);
+      HIP_RETURN(hipErrorInvalidValue);
     }
 
   }  // Release scoped lock
 
   // Now create BufferGL object
-  pBufferGL = new (amdContext) amd::BufferGL(amdContext, flags, gliSize, 0, buffer);
+  pBufferGL = new (amdContext) amd::BufferGL(amdContext, cl_flags, gliSize, 0, buffer);
 
   if (!pBufferGL) {
     LogWarning("cannot create object of class BufferGL");
@@ -627,12 +707,35 @@ hipError_t hipGraphicsGLRegisterBuffer(hipGraphicsResource** resource, GLuint bu
 
   *resource = reinterpret_cast<hipGraphicsResource*>(pBufferGL);
 
+  hip::Device* device = hip::getCurrentDevice();
+  if (device == nullptr) {
+    return hipErrorNoDevice;
+  }
+
+  if (!device->registeredGraphics().add(*resource)) {
+    LogError("duplicate resource");
+    HIP_RETURN(hipErrorUnknown);
+  }
   HIP_RETURN(hipSuccess);
 }
 
 hipError_t hipGraphicsMapResources(int count, hipGraphicsResource_t* resources,
                                    hipStream_t stream) {
   HIP_INIT_API(hipGraphicsMapResources, count, resources, stream);
+
+  if (!hip::isValid(stream)) {
+    HIP_RETURN(hipErrorContextIsDestroyed);
+  }
+
+  hipError_t status = validateResources(resources, count);
+  if (status != hipErrorNotMapped) {
+    LogError("invalid resource(s)");
+    if (status == hipSuccess) {
+      status = hipErrorAlreadyMapped;
+    }
+    HIP_RETURN(status);
+  }
+
   amd::Context* amdContext = hip::getCurrentDevice()->asContext();
   if (!amdContext || !amdContext->glenv()) {
     HIP_RETURN(hipErrorUnknown);
@@ -645,12 +748,12 @@ hipError_t hipGraphicsMapResources(int count, hipGraphicsResource_t* resources,
 
   hip::Stream* hip_stream = hip::getStream(stream);
   if (nullptr == hip_stream) {
-    HIP_RETURN(hipErrorUnknown);
+    HIP_RETURN(hipErrorContextIsDestroyed);
   }
 
   if (!hip_stream->context().glenv() || !hip_stream->context().glenv()->isAssociated()) {
     LogWarning("\"amdContext\" is not created from GL context or share list");
-    HIP_RETURN(hipErrorUnknown);
+    HIP_RETURN(hipErrorContextIsDestroyed);
   }
 
   std::vector<amd::Memory*> memObjects;
@@ -688,12 +791,39 @@ hipError_t hipGraphicsMapResources(int count, hipGraphicsResource_t* resources,
     amd::MemObjMap::AddMemObj(reinterpret_cast<void*>(mem->virtualAddress()), mobj);
     mobj->retain();
   }
+  // Track mapping status
+  hip::Device* device = hip::getCurrentDevice();
+  if (device == nullptr) {
+    return hipErrorNoDevice;
+  }
+  for (int i = 0; i < count; i++) {
+    if (!device->mappedGraphics().add(resources[i])) {
+      HIP_RETURN(hipErrorMapFailed);
+    }
+  }
   HIP_RETURN(hipSuccess);
 }
 
 hipError_t hipGraphicsResourceGetMappedPointer(void** devPtr, size_t* size,
                                                hipGraphicsResource_t resource) {
   HIP_INIT_API(hipGraphicsResourceGetMappedPointer, devPtr, size, resource);
+
+  if (devPtr == nullptr) {
+    LogError("invalid device pointer");
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  if (size == nullptr) {
+    LogError("invalid size");
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  hipError_t status = validateResources(&resource);
+  if (status != hipSuccess) {
+    LogError("invalid resource");
+    HIP_RETURN(status);
+  }
+
   amd::Context* amdContext = hip::getCurrentDevice()->asContext();
   if (!amdContext || !amdContext->glenv()) {
     HIP_RETURN(hipErrorUnknown);
@@ -707,12 +837,27 @@ hipError_t hipGraphicsResourceGetMappedPointer(void** devPtr, size_t* size,
 
   amd::Device* curDev = *it;
   amd::Memory* amdMem = reinterpret_cast<amd::Memory*>(resource);
+
+  // Check if not a buffer
+  amd::Buffer* buffer = amdMem->asBuffer();
+  if (buffer == nullptr) {
+    LogError("resource not mapped as pointer");
+    HIP_RETURN(hipErrorNotMappedAsPointer);
+  }
+
   *size = amdMem->getSize();
 
   // Interop resources don't have svm allocations they are added to
   // amd::MemObjMap using device virtual address during creation.
-  device::Memory* mem = reinterpret_cast<device::Memory*>(amdMem->getDeviceMemory(*curDev));
-  *devPtr = reinterpret_cast<void*>(static_cast<uintptr_t>(mem->virtualAddress()));
+  device::Memory* devMem = reinterpret_cast<device::Memory*>(amdMem->getDeviceMemory(*curDev));
+
+  // Not mapped
+  if (devMem == nullptr) {
+    LogError("resource not mapped");
+    HIP_RETURN(hipErrorNotMapped);
+  }
+
+  *devPtr = reinterpret_cast<void*>(static_cast<uintptr_t>(devMem->virtualAddress()));
   HIP_RETURN(hipSuccess);
 }
 
@@ -726,9 +871,15 @@ hipError_t hipGraphicsUnmapResources(int count, hipGraphicsResource_t* resources
   // Wait for the current host queue
   hip::getStream(stream)->finish();
 
+  hipError_t status = validateResources(resources, count);
+  if (status != hipSuccess) {
+    LogError("resource(s) not mapped");
+    HIP_RETURN(status);
+  }
+
   hip::Stream* hip_stream = hip::getStream(stream);
   if (nullptr == hip_stream) {
-    HIP_RETURN(hipErrorUnknown);
+    HIP_RETURN(hipErrorContextIsDestroyed);
   }
 
   std::vector<amd::Memory*> memObjects;
@@ -757,8 +908,27 @@ hipError_t hipGraphicsUnmapResources(int count, hipGraphicsResource_t* resources
   if (as_cl(&command->event()) == nullptr) {
     command->release();
   }
+
+  hip::Device* device = hip::getCurrentDevice();
+  if (device == nullptr) {
+    HIP_RETURN(hipErrorNoDevice);
+  }
+
+  const amd::Device* curDev = device->devices()[0];
   for (auto& mobj : memObjects) {
+    device::Memory* mem = reinterpret_cast<device::Memory*>(mobj->getDeviceMemory(*curDev));
+    if (mem) {
+      amd::MemObjMap::RemoveMemObj(reinterpret_cast<void*>(mem->virtualAddress()));
+    }
     mobj->release();
+  }
+
+  // Remove mapping from registry
+  for (uint8_t i = 0; i < count; i++) {
+    if (!device->mappedGraphics().remove(resources[i])) {
+      LogError("failed to unmap resource");
+      HIP_RETURN(hipErrorUnknown);
+    }
   }
   HIP_RETURN(hipSuccess);
 }
@@ -769,6 +939,28 @@ hipError_t hipGraphicsUnregisterResource(hipGraphicsResource_t resource) {
   if (resource == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
+  hip::Device* device = hip::getCurrentDevice();
+  if (device == nullptr) {
+    LogError("no device");
+    HIP_RETURN(hipErrorNoDevice);
+  }
+
+  if (device->mappedGraphics().isValid(resource)) {
+    LogError("resource already mapped");
+    HIP_RETURN(hipErrorAlreadyMapped);
+  }
+
+  if (!device->registeredGraphics().isValid(resource)) {
+    LogError("resource not registered");
+    HIP_RETURN(hipErrorInvalidHandle);
+  }
+
+  // Safe to remove from registered list
+  if (!device->registeredGraphics().remove(resource)) {
+    LogError("failed to unregister resource");
+    HIP_RETURN(hipErrorUnknown);
+  }
+
   reinterpret_cast<amd::BufferGL*>(resource)->release();
 
   HIP_RETURN(hipSuccess);

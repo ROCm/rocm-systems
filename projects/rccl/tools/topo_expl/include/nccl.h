@@ -787,10 +787,10 @@ ncclResult_t pncclScatter(const void* sendbuff, void* recvbuff,
     @param[in]  datatype      Data buffer element datatype
     @param[in]  comm          Communicator group object to execute on
     @param[in]  stream        HIP stream to execute collective on */
-ncclResult_t  ncclAllToAll(const void* sendbuff, void* recvbuff, size_t count,
+ncclResult_t  ncclAlltoAll(const void* sendbuff, void* recvbuff, size_t count,
     ncclDataType_t datatype, ncclComm_t comm, hipStream_t stream);
 /*! @cond       include_hidden */
-ncclResult_t pncclAllToAll(const void* sendbuff, void* recvbuff, size_t count,
+ncclResult_t pncclAlltoAll(const void* sendbuff, void* recvbuff, size_t count,
     ncclDataType_t datatype, ncclComm_t comm, hipStream_t stream);
 /*! @endcond */
 
@@ -812,11 +812,11 @@ ncclResult_t pncclAllToAll(const void* sendbuff, void* recvbuff, size_t count,
     @param[in]  datatype      Data buffer element datatype
     @param[in]  comm          Communicator group object to execute on
     @param[in]  stream        HIP stream to execute collective on */
-ncclResult_t  ncclAllToAllv(const void *sendbuff, const size_t sendcounts[],
+ncclResult_t  ncclAlltoAllv(const void *sendbuff, const size_t sendcounts[],
     const size_t sdispls[], void *recvbuff, const size_t recvcounts[],
     const size_t rdispls[], ncclDataType_t datatype, ncclComm_t comm, hipStream_t stream);
 /*! @cond       include_hidden */
-ncclResult_t pncclAllToAllv(const void *sendbuff, const size_t sendcounts[],
+ncclResult_t pncclAlltoAllv(const void *sendbuff, const size_t sendcounts[],
     const size_t sdispls[], void *recvbuff, const size_t recvcounts[],
     const size_t rdispls[], ncclDataType_t datatype, ncclComm_t comm, hipStream_t stream);
 /*! @endcond */

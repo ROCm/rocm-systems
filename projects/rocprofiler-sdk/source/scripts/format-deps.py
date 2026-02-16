@@ -92,13 +92,11 @@ class FormatAll(argparse.Action):
 
 class InstallDepsUbuntu(argparse.Action):
     def __call__(self, parser, namespace, values, option_string=None):
-        os.system(
-            "sudo apt-get update; \
+        os.system("sudo apt-get update; \
             sudo apt-get install -y python3-pip software-properties-common wget curl clang-format-11; \
             python3 -m pip install -U cmake-format; \
             python -m pip install --upgrade pip; \
-            python -m pip install black"
-        )
+            python -m pip install black")
         exit(0)
 
 

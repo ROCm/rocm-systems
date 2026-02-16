@@ -146,7 +146,7 @@ counter_storage::counter_storage(const client_data* _tool_data, uint64_t _devid,
     auto _metric_name = std::string{ _name };
     _metric_name =
         std::regex_replace(_metric_name, std::regex{ "(.*)\\[([0-9]+)\\]" }, "$1_$2");
-    storage_name = JOIN('-', "rocprof", "device", device_id, _metric_name);
+    storage_name = fmt::format("rocprof-device-{}-{}", device_id, _metric_name);
     storage = std::make_unique<counter_storage_type>(tim::standalone_storage{}, index,
                                                      storage_name);
     tim::manager::instance()->add_cleanup(
@@ -158,8 +158,8 @@ counter_storage::counter_storage(const client_data* _tool_data, uint64_t _devid,
 
     {
         constexpr auto _unit = ::perfetto::CounterTrack::Unit::UNIT_COUNT;
-        track_name = JOIN(" ", "GPU", _metric_name, JOIN("", '[', device_id, ']'));
-        track      = std::make_unique<counter_track_type>(
+        track_name           = fmt::format(" GPU {} [{}]", _metric_name, device_id);
+        track                = std::make_unique<counter_track_type>(
             ::perfetto::StaticString(track_name.c_str()));
 
         metadata_initialize_counter_category();

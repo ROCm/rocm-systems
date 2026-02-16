@@ -368,7 +368,11 @@ namespace sdk
 namespace details
 {
 using namespace enum_string_test;
-ROCPROFILER_ENUM_INFO(test_unsupported_enum_val, TEST_ENUM_VALUE_NONE, TEST_ENUM_VALUE_LAST, false);
+ROCPROFILER_ENUM_INFO(test_unsupported_enum_val,
+                      TEST_ENUM_VALUE_NONE,
+                      TEST_ENUM_VALUE_LAST,
+                      false,
+                      not_operation);
 ROCPROFILER_ENUM_LABEL(TEST_ENUM_VALUE_V1);
 ROCPROFILER_ENUM_LABEL(TEST_ENUM_VALUE_V3);
 }  // namespace details

@@ -28,7 +28,7 @@ if(UNIX)
       lib/cmake/hsa-runtime64
       lib64/cmake/hsa-runtime64)
 else()
-  find_package(hsa-runtime64 CONFIG
+  find_package(hsa-runtime64 1.11 REQUIRED CONFIG
     PATHS
       /opt/rocm/
       ${ROCM_INSTALL_PATH}
@@ -41,9 +41,8 @@ else()
       cmake/hsa-runtime64
       lib/cmake/hsa-runtime64
       lib64/cmake/hsa-runtime64)
-endif()
 
-if (ROCR_DLL_LOAD)
+  # note: Temporarily for PAL backend build
   find_path(AMD_HSA_INCLUDE_DIR hsa.h
     HINTS
       /opt/rocm
@@ -59,13 +58,24 @@ if (ROCR_DLL_LOAD)
       include/hsa
       inc)
   message("Roc CLR: " ${ROCCLR_SRC_DIR} "; HSA headers:" ${AMD_HSA_INCLUDE_DIR})
-  target_compile_definitions(rocclr PUBLIC ROCR_DYN_DLL)
   target_include_directories(rocclr PUBLIC ${AMD_HSA_INCLUDE_DIR})
-else()
-  target_link_libraries(rocclr PUBLIC hsa-runtime64::hsa-runtime64)
+  target_include_directories(rocclr PUBLIC ${AMD_HSA_INCLUDE_DIR}/..)
+  # Static linking on Windows with ROCR
+  set (STATIC_ROCR ON)
 endif()
 
-#target_include_directories(rocclr PRIVATE ${AMD_HSA_INCLUDE_DIR}/..)
+if (ROCR_DLL_LOAD)
+  target_compile_definitions(rocclr PUBLIC ROCR_DYN_DLL)
+else()
+  if (STATIC_ROCR)
+    target_link_libraries(rocclr PUBLIC hsa-runtime64::hsa-runtime64_static)
+    if (WIN32)  # D3DKMTEnumAdapters3 requires OneCoreUAP.Lib
+      target_link_libraries (rocclr PRIVATE OneCoreUAP.Lib)
+    endif()
+  else()
+    target_link_libraries(rocclr PUBLIC hsa-runtime64::hsa-runtime64)
+  endif()
+endif()
 
 find_package(OpenGL REQUIRED)
 

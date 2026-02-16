@@ -428,11 +428,31 @@ def test_csv_data(
         if None in (csv_start_col, json_start_col, csv_end_col, json_end_col):
             continue
 
+        # Helper to get correlation_id for tiebreaking when timestamps are identical
+        def get_csv_corr_id(x):
+            return int(x.get("Correlation_Id", 0))
+
+        def get_json_corr_id(x):
+            corr = x.get("correlation_id", {})
+            if isinstance(corr, dict):
+                return int(corr.get("internal", 0))
+            return int(corr) if corr else 0
+
         _csv_data_sorted = sorted(
-            _csv_data, key=lambda x: (int(x[csv_start_col]), int(x[csv_end_col]))
+            _csv_data,
+            key=lambda x: (
+                int(x[csv_start_col]),
+                int(x[csv_end_col]),
+                get_csv_corr_id(x),
+            ),
         )
         _js_data_sorted = sorted(
-            _js_data, key=lambda x: (int(x[json_start_col]), int(x[json_end_col]))
+            _js_data,
+            key=lambda x: (
+                int(x[json_start_col]),
+                int(x[json_end_col]),
+                get_json_corr_id(x),
+            ),
         )
 
         for a, b in zip(_csv_data_sorted, _js_data_sorted):
