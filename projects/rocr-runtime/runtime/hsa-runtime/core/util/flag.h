@@ -490,6 +490,8 @@ class Flag {
 
   void disable_sdma_hdp_flush() { enable_sdma_hdp_flush_ = false; }
 
+  void set_disable_tool_register(bool disable) { disable_tool_register_ = disable; }
+
   private:
   bool check_flat_scratch_;
   bool enable_vm_fault_message_;
