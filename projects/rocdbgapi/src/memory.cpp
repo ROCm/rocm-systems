@@ -560,8 +560,8 @@ memory_cache_t::prefetch (agent_address_t address, amd_dbgapi_size_t size)
 
   try
     {
-      m_xfer_global_memory (cache_line_begin, &staging_buffer[0], nullptr,
-                            cache_line_end - cache_line_begin);
+      m_xfer_agent_memory (cache_line_begin, &staging_buffer[0], nullptr,
+                           cache_line_end - cache_line_begin);
     }
   catch (const memory_error_t &)
     {
@@ -647,13 +647,12 @@ memory_cache_t::write_back (agent_address_t address, amd_dbgapi_size_t size)
 
       try
         {
-          size_t xfer_size = m_xfer_global_memory (
+          size_t xfer_size = m_xfer_agent_memory (
             cache_line_address, nullptr, &staging_buffer[0], request_size);
 
           if (xfer_size != request_size)
-            throw memory_access_error_t (
-              /* FIXME_lmoriche:  */
-              address_space_t::global (), cache_line_address + xfer_size);
+            throw memory_access_error_t (m_agent.agent_address_space (),
+                                         cache_line_address + xfer_size);
         }
       catch (const process_exited_exception_t &)
         {
@@ -696,15 +695,19 @@ memory_cache_t::discard (agent_address_t address, amd_dbgapi_size_t size,
 }
 
 size_t
-memory_cache_t::xfer_global_memory (agent_address_t address, void *read,
-                                    const void *write, size_t size)
+memory_cache_t::xfer_agent_memory (agent_address_t address, void *read,
+                                   const void *write, size_t size)
 {
   if (size == 0)
     return 0;
 
-  /* Clamp to the end of the global address space.  */
-  if (address > (address + size))
-    size = agent_address_t{} - address;
+  /* Clamp to the end of the agent address space.  */
+  auto max = m_agent.agent_address_space ().last_address ();
+  if (address > max)
+    throw memory_access_error_t (m_agent.agent_address_space (), address);
+  auto available = (max - address) + 1;
+  if (size > available)
+    size = available;
 
   auto first_line = utils::align_down (address, cache_line_size);
   auto last_line = utils::align_down (address + size - 1, cache_line_size);
@@ -715,7 +718,7 @@ memory_cache_t::xfer_global_memory (agent_address_t address, void *read,
 
   /* If there are no cache lines affected by this access.  */
   if (begin == end)
-    return m_xfer_global_memory (address, read, write, size);
+    return m_xfer_agent_memory (address, read, write, size);
 
   /* For cached accesses, handle one cache line at a time.  */
   if (first_line != last_line)
@@ -726,7 +729,7 @@ memory_cache_t::xfer_global_memory (agent_address_t address, void *read,
           auto limit = utils::align_up (ptr + 1, cache_line_size);
           auto request_size = std::min (limit, ptr + size) - ptr;
 
-          auto xfer_size = xfer_global_memory (ptr, read, write, request_size);
+          auto xfer_size = xfer_agent_memory (ptr, read, write, request_size);
 
           ptr += xfer_size;
           if (read != nullptr)
