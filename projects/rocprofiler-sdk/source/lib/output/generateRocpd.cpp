@@ -62,6 +62,7 @@
 #include <unistd.h>
 
 #include <dlfcn.h>
+#include <algorithm>
 #include <atomic>
 #include <cctype>
 #include <chrono>
@@ -353,6 +354,145 @@ insert_value(std::string_view _name, const std::optional<Tp>& _value, TraitT = {
 
 using statement_cache_t = std::unordered_map<std::string, sqlite3_stmt*>;
 
+struct pending_insert_batch
+{
+    sqlite3*                                   conn      = nullptr;
+    statement_cache_t*                         cache     = nullptr;
+    std::string                                key       = {};
+    std::string                                table     = {};
+    std::vector<std::string>                   fields    = {};
+    std::vector<std::vector<sql_insert_value>> rows      = {};
+    size_t                                     max_rows  = 1;
+    bool                                       is_active = false;
+};
+
+auto&
+get_pending_insert_batch()
+{
+    static thread_local auto _v = pending_insert_batch{};
+    return _v;
+}
+
+size_t
+get_max_batch_rows(sqlite3* conn, size_t col_count)
+{
+    int var_limit = sqlite3_limit(conn, SQLITE_LIMIT_VARIABLE_NUMBER, -1);
+    if(var_limit <= 0) var_limit = 999;
+
+    auto max_rows =
+        static_cast<size_t>(var_limit / static_cast<int>(std::max<size_t>(1, col_count)));
+    if(max_rows == 0) max_rows = 1;
+    if(max_rows > 256) max_rows = 256;
+    return max_rows;
+}
+
+int
+bind_sql_value(sqlite3_stmt* stmt, int idx, const sql_insert_value& value)
+{
+    return std::visit(
+        [&](auto&& val) {
+            using value_type = common::mpl::unqualified_type_t<decltype(val)>;
+            if constexpr(std::is_same_v<value_type, std::monostate>)
+            {
+                return sqlite3_bind_null(stmt, idx);
+            }
+            else if constexpr(std::is_same_v<value_type, std::nullptr_t>)
+            {
+                return sqlite3_bind_null(stmt, idx);
+            }
+            else if constexpr(std::is_same_v<value_type, int64_t>)
+            {
+                return sqlite3_bind_int64(stmt, idx, val);
+            }
+            else if constexpr(std::is_same_v<value_type, uint64_t>)
+            {
+                return sqlite3_bind_int64(stmt, idx, static_cast<int64_t>(val));
+            }
+            else if constexpr(std::is_same_v<value_type, double>)
+            {
+                return sqlite3_bind_double(stmt, idx, val);
+            }
+            else if constexpr(common::mpl::is_string_type<value_type>::value)
+            {
+                return sqlite3_bind_text(stmt, idx, val.c_str(), -1, SQLITE_TRANSIENT);
+            }
+            else
+            {
+                static_assert(common::mpl::assert_false<value_type>::value,
+                              "Unsupported data type");
+            }
+        },
+        value.value);
+}
+
+void
+flush_pending_insert_batch()
+{
+    auto& pending = get_pending_insert_batch();
+    if(!pending.is_active || pending.rows.empty()) return;
+
+    ROCP_FATAL_IF(pending.conn == nullptr || pending.cache == nullptr)
+        << "Pending insert batch missing sqlite connection or statement cache";
+
+    const auto batch_size = pending.rows.size();
+    const auto field_size = pending.fields.size();
+    auto       batch_key =
+        fmt::format("{}:batch:{}:{}", pending.table, batch_size, fmt::join(pending.fields, ","));
+
+    auto& stmt = (*pending.cache)[batch_key];
+    if(!stmt)
+    {
+        auto row_placeholder = std::string{"("};
+        for(size_t i = 0; i < field_size; ++i)
+        {
+            if(i > 0) row_placeholder += ", ";
+            row_placeholder += "?";
+        }
+        row_placeholder += ")";
+
+        auto values_clause = std::string{};
+        values_clause.reserve(batch_size * row_placeholder.size());
+        for(size_t i = 0; i < batch_size; ++i)
+        {
+            if(i > 0) values_clause += ", ";
+            values_clause += row_placeholder;
+        }
+
+        auto sql = fmt::format("INSERT INTO {} ({}) VALUES {};",
+                               pending.table,
+                               fmt::join(pending.fields, ", "),
+                               values_clause);
+
+        SQLITE3_CHECK(sqlite3_prepare_v2(pending.conn, sql.c_str(), -1, &stmt, nullptr));
+    }
+
+    auto cleanup_guard = common::scope_destructor{[&]() {
+        if(stmt)
+        {
+            sqlite3_reset(stmt);
+            sqlite3_clear_bindings(stmt);
+        }
+    }};
+
+    int bind_idx = 1;
+    for(const auto& row : pending.rows)
+    {
+        for(const auto& value : row)
+            bind_sql_value(stmt, bind_idx++, value);
+    }
+
+    auto step_rc = sqlite3_step(stmt);
+    ROCP_FATAL_IF(step_rc != SQLITE_DONE) << "sqlite3_step failed with error code " << step_rc;
+
+    pending.rows.clear();
+    pending.is_active = false;
+    pending.key.clear();
+    pending.table.clear();
+    pending.fields.clear();
+    pending.conn  = nullptr;
+    pending.cache = nullptr;
+}
+
 void
 finalize_prepared_statements(statement_cache_t& cache)
 {
@@ -390,68 +530,30 @@ get_insert_statement_impl(sqlite3*                                  conn,
     auto table = replace_uuid(_table);
     auto key   = fmt::format("{}:{}", table, fmt::join(fields, ","));
 
-    auto& stmt = cache[key];
-    if(!stmt)
+    auto field_names = std::vector<std::string>{};
+    field_names.reserve(fields.size());
+    for(const auto& field : fields)
+        field_names.emplace_back(field);
+
+    auto& pending = get_pending_insert_batch();
+    if(pending.is_active && (pending.conn != conn || pending.cache != &cache || pending.key != key))
     {
-        auto placeholders = std::vector<std::string_view>(fields.size(), std::string_view{"?"});
-
-        auto sql = fmt::format("INSERT INTO {} ({}) VALUES ({});",
-                               table,
-                               fmt::join(fields, ", "),
-                               fmt::join(placeholders, ", "));
-
-        SQLITE3_CHECK(sqlite3_prepare_v2(conn, sql.c_str(), -1, &stmt, nullptr));
+        flush_pending_insert_batch();
     }
 
-    auto cleanup_guard = common::scope_destructor{[&]() {
-        if(stmt)
-        {
-            sqlite3_reset(stmt);
-            sqlite3_clear_bindings(stmt);
-        }
-    }};
-
-    for(size_t i = 0; i < values.size(); ++i)
+    if(!pending.is_active)
     {
-        int idx = static_cast<int>(i + 1);
-        std::visit(
-            [&](auto&& val) {
-                using value_type = common::mpl::unqualified_type_t<decltype(val)>;
-                if constexpr(std::is_same_v<value_type, std::monostate>)
-                {
-                    sqlite3_bind_null(stmt, idx);
-                }
-                else if constexpr(std::is_same_v<value_type, std::nullptr_t>)
-                {
-                    sqlite3_bind_null(stmt, idx);
-                }
-                else if constexpr(std::is_same_v<value_type, int64_t>)
-                {
-                    sqlite3_bind_int64(stmt, idx, val);
-                }
-                else if constexpr(std::is_same_v<value_type, uint64_t>)
-                {
-                    sqlite3_bind_int64(stmt, idx, static_cast<int64_t>(val));
-                }
-                else if constexpr(std::is_same_v<value_type, double>)
-                {
-                    sqlite3_bind_double(stmt, idx, val);
-                }
-                else if constexpr(common::mpl::is_string_type<value_type>::value)
-                {
-                    sqlite3_bind_text(stmt, idx, val.c_str(), -1, SQLITE_TRANSIENT);
-                }
-                else
-                {
-                    static_assert(common::mpl::assert_false<value_type>::value,
-                                  "Unsupported data type");
-                }
-            },
-            values[i].value);
+        pending.is_active = true;
+        pending.conn      = conn;
+        pending.cache     = &cache;
+        pending.key       = key;
+        pending.table     = table;
+        pending.fields    = std::move(field_names);
+        pending.max_rows  = get_max_batch_rows(conn, fields.size());
     }
 
-    auto step_rc = sqlite3_step(stmt);
-    ROCP_FATAL_IF(step_rc != SQLITE_DONE) << "sqlite3_step failed with error code " << step_rc;
+    pending.rows.emplace_back(std::move(values));
+    if(pending.rows.size() >= pending.max_rows) flush_pending_insert_batch();
 }
 
 template <template <typename...> class ContainerT, typename... TypesT>
@@ -1176,6 +1278,7 @@ write_rocpd(
 
     auto insert_kernel_dispatch_data = [&, node_id, this_pid](auto& dispatch_evt_ids) {
         auto _sqlgenperf_rocpd = get_simple_timer("rocpd_kernel_dispatch");
+        auto _deferred         = sql::deferred_transaction{conn};
 
         auto process_dispatch = [&](uint64_t    dispatch_id,
                                     uint64_t    kernel_id,
@@ -1268,7 +1371,6 @@ write_rocpd(
         {
             for(auto pctr : counter_collection_gen)
             {
-                auto _deferred = sql::deferred_transaction{conn};
                 for(const auto& record : counter_collection_gen.get(pctr))
                 {
                     const auto& dispatch_data = record.dispatch_data;
@@ -1303,7 +1405,6 @@ write_rocpd(
         {
             for(auto pitr : kernel_dispatch_gen)
             {
-                auto _deferred = sql::deferred_transaction{conn};
                 for(auto itr : kernel_dispatch_gen.get(pitr))
                 {
                     // Register thread ID
@@ -1332,10 +1433,10 @@ write_rocpd(
     auto insert_pmc_event_data =
         [&conn, &statement_cache, &tool_metadata, &counter_collection_gen](auto& dispatch_evt_ids) {
             auto   _sqlgenperf_rocpd = get_simple_timer("rocpd_pmc_event");
+            auto   _deferred         = sql::deferred_transaction{conn};
             size_t idx               = tool_metadata.pmc_event_offset;
             for(auto ditr : counter_collection_gen)
             {
-                auto _deferred = sql::deferred_transaction{conn};
                 for(const auto& record : counter_collection_gen.get(ditr))
                 {
                     const auto& info        = record.dispatch_data.dispatch_info;
@@ -1362,11 +1463,11 @@ write_rocpd(
         [&conn, &statement_cache, &tool_metadata, &string_entries, node_id, this_pid](
             const auto& _gen) {
             auto   _sqlgenperf_rocpd = get_simple_timer("rocpd_memory_copy");
+            auto   _deferred         = sql::deferred_transaction{conn};
             size_t copy_idx          = 1;
 
             for(auto pitr : _gen)
             {
-                auto _deferred = sql::deferred_transaction{conn};
                 for(auto itr : _gen.get(pitr))
                 {
                     // insert thread info if it doesn't already exist
@@ -1416,10 +1517,10 @@ write_rocpd(
             const auto& _gen) {
             auto address_to_agent_and_size =
                 std::unordered_map<rocprofiler_address_t, rocprofiler::agent::index_and_size>{};
+            auto _deferred = sql::deferred_transaction{conn};
 
             for(auto pitr : _gen)
             {
-                auto _deferred = sql::deferred_transaction{conn};
                 for(auto itr : _gen.get(pitr))
                 {
                     // insert thread info if it doesn't already exist
@@ -1528,10 +1629,10 @@ write_rocpd(
     auto insert_api_data =
         [&conn, &statement_cache, &tool_metadata, &string_entries, node_id, this_pid](
             const auto& _gen) {
+            auto _deferred = sql::deferred_transaction{conn};
+
             for(auto pitr : _gen)
             {
-                auto _deferred = sql::deferred_transaction{conn};
-
                 for(auto itr : _gen.get(pitr))
                 {
                     auto category = tool_metadata.buffer_names.at(itr.kind);
@@ -1633,6 +1734,7 @@ write_rocpd(
                                                      itr.thread_id,
                                                      string_entries.at(category),
                                                      "{}");
+
                         get_insert_statement(conn,
                                              statement_cache,
                                              "rocpd_sample{{uuid}}",
@@ -1804,6 +1906,7 @@ write_rocpd(
         execute_raw_sql_statements(conn, indexes_schema);
     }
 
+    flush_pending_insert_batch();
     finalize_prepared_statements(statement_cache);
     SQLITE3_CHECK(sqlite3_close_v2(conn));
 
