@@ -50,8 +50,9 @@ TEST_CASE("Unit_hipMemcpyDeviceToDeviceNoCU_SingleStream") {
   auto isDefaultStrm = GENERATE(0, 1);
   constexpr int N = 1 << 18;
   size_t buffer_size = N * sizeof(int);
-  constexpr unsigned threadsPerBlock = 128;
-  constexpr unsigned blocks = 64;
+  constexpr unsigned threadsPerBlock = 256;
+  constexpr int blocks =
+      (N % threadsPerBlock == 0) ? (N / threadsPerBlock) : ((N / threadsPerBlock) + 1);
   // Allocate device resources
   int *Ad, *Bd;
   HIP_CHECK(hipMalloc(&Ad, buffer_size));
@@ -231,8 +232,9 @@ TEST_CASE("Unit_hipMemcpyDeviceToDeviceNoCU_NoCU_MulStrm") {
 TEST_CASE("Unit_hipMemcpyDeviceToDeviceNoCU_Memcpy_Kernel_InParallel") {
   constexpr int N = 1 << 26;
   size_t buffer_size = N * sizeof(int);
-  constexpr unsigned threadsPerBlock = 128;
-  constexpr unsigned blocks = 64;
+  constexpr unsigned threadsPerBlock = 256;
+  constexpr int blocks =
+      (N % threadsPerBlock == 0) ? (N / threadsPerBlock) : ((N / threadsPerBlock) + 1);
   // Allocate device resources
   int *Ad, *Bd, *Cd;
   HIP_CHECK(hipMalloc(&Ad, buffer_size));
