@@ -29,6 +29,9 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Detection of MPI ranks while profiling and creation of output directories based on MPI rank.
 
+* Added `--experimental` flag to enable experimental features that are under development. This flag is required when using any experimental features. 
+  * Use `rocprof-compute --experimental --help` to see currently available experimental features.
+
 ### Changed
 
 * Default output format for the underlying ROCprofiler-SDK tool has been changed from ``csv`` to ``rocpd``.
