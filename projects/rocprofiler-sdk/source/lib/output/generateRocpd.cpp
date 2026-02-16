@@ -477,8 +477,15 @@ flush_pending_insert_batch()
     int bind_idx = 1;
     for(const auto& row : pending.rows)
     {
+        ROCP_FATAL_IF(row.size() != field_size)
+            << "Pending insert batch row has " << row.size() << " values, expected " << field_size;
+
         for(const auto& value : row)
-            bind_sql_value(stmt, bind_idx++, value);
+        {
+            auto bind_rc = bind_sql_value(stmt, bind_idx++, value);
+            ROCP_FATAL_IF(bind_rc != SQLITE_OK)
+                << "sqlite3_bind failed with error code " << bind_rc;
+        }
     }
 
     auto step_rc = sqlite3_step(stmt);
@@ -530,11 +537,6 @@ get_insert_statement_impl(sqlite3*                                  conn,
     auto table = replace_uuid(_table);
     auto key   = fmt::format("{}:{}", table, fmt::join(fields, ","));
 
-    auto field_names = std::vector<std::string>{};
-    field_names.reserve(fields.size());
-    for(const auto& field : fields)
-        field_names.emplace_back(field);
-
     auto& pending = get_pending_insert_batch();
     if(pending.is_active && (pending.conn != conn || pending.cache != &cache || pending.key != key))
     {
@@ -548,8 +550,11 @@ get_insert_statement_impl(sqlite3*                                  conn,
         pending.cache     = &cache;
         pending.key       = key;
         pending.table     = table;
-        pending.fields    = std::move(field_names);
-        pending.max_rows  = get_max_batch_rows(conn, fields.size());
+        pending.fields.clear();
+        pending.fields.reserve(fields.size());
+        for(const auto& field : fields)
+            pending.fields.emplace_back(field);
+        pending.max_rows = get_max_batch_rows(conn, fields.size());
     }
 
     pending.rows.emplace_back(std::move(values));
@@ -1541,14 +1546,6 @@ write_rocpd(
                     auto _queue_id        = get_queue_id(extract_queue_field(itr));
                     auto _address         = extract_address_field(itr);
                     auto _allocation_size = extract_allocation_size_field(itr);
-
-                    // memory allocation counter track
-                    struct free_memory_information
-                    {
-                        rocprofiler_timestamp_t start_timestamp = 0;
-                        rocprofiler_timestamp_t end_timestamp   = 0;
-                        rocprofiler_address_t   address         = {.handle = 0};
-                    };
 
                     auto _node_id = std::optional<uint64_t>{};
                     if(_type == "ALLOC")
