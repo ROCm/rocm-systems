@@ -25,6 +25,7 @@ public:
 };
 
 using rccl_gpu_tracking_state_mock = rccl_gpu_tracking_state_t<mock_pmc_registrar>;
+using rccl_gpu_tracking_state_test = rccl_gpu_tracking_state_t<null_pmc_registrar>;
 
 /**
  * @brief Test fixture for RCCL GPU tracking tests.

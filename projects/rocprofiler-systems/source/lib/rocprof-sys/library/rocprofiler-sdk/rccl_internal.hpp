@@ -199,7 +199,5 @@ private:
     std::unordered_map<uint32_t, uint64_t> m_cumulative_bytes_per_device{};
 };
 
-using rccl_gpu_tracking_state_test = rccl_gpu_tracking_state_t<null_pmc_registrar>;
-
 }  // namespace rocprofiler_sdk
 }  // namespace rocprofsys
