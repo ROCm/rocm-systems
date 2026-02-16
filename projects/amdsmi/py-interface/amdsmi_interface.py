@@ -741,6 +741,10 @@ def _format_bdf(amdsmi_bdf: amdsmi_wrapper.amdsmi_bdf_t) -> str:
     Returns:
         `str`: String containing BDF data in a readable format.
     """
+
+    if not hasattr(amdsmi_bdf, 'domain_number'):
+        return 'N/A'
+
     domain = hex(amdsmi_bdf.domain_number)[2:].zfill(4)
     bus = hex(amdsmi_bdf.bus_number)[2:].zfill(2)
     device = hex(amdsmi_bdf.device_number)[2:].zfill(2)

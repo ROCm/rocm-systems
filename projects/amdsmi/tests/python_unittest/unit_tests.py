@@ -198,6 +198,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
         self.assertEqual(inval_test.exception.get_error_code(),
                          amdsmi.amdsmi_wrapper.AMDSMI_STATUS_INVAL)
 
+
 class TestAmdSmiPython(unittest.TestCase):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -239,243 +240,19 @@ class TestAmdSmiPython(unittest.TestCase):
         amdsmi.amdsmi_shut_down()
         return
 
-    def FuncWithOnlyArgs(self, **kwargs):
-        '''
-            Arguments:
-            func_name=func
-        '''
-        iterator = iter(kwargs.items())
-        func_name, func = next(iterator)
-        param1_name, param1_value = next(iterator, (None, None))
-
-        if not param1_name:
-            msg = f'\t### {func_name}()'
-        else:
-            msg = f'\t### {func_name}({param1_name}={param1_value})'
-        try:
-            if param1_name:
-                data = func(param1_value)
-            else:
-                data = func()
-            self.common.print(msg, data)
-            self.common.check_ret('', '', self.common.PASS)
-        except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
-            if self.common.check_ret(msg, e, self.common.PASS):
-                self.raise_exception = e
-        if self.raise_exception:
-            raise self.raise_exception
-        return
-
-    def FuncWithGPULoopArgs(self, **kwargs):
-        '''
-            Arguments:
-                func_name=func
-            Optional:
-                param1_name=param1_value
-                param2_name=param2_value
-                param3_name=param3_value
-        '''
-        iterator = iter(kwargs.items())
-        func_name, func = next(iterator)
-        param1_name, param1_value = next(iterator, (None, None))
-        param2_name = None
-        param3_name = None
-        if param1_name:
-            param2_name, param2_value = next(iterator, (None, None))
-            if param2_name:
-                param3_name, param3_value = next(iterator, (None, None))
-
-        for i, gpu in enumerate(self.common.processors):
-            self.common.print_device_header(i, gpu)
-            if param3_name:
-                msg = f'\t### {func_name}(gpu={i}, {param1_name}={param1_value}, {param2_name}={param2_value}, {param3_name}={param3_value})'
-            elif param2_name:
-                msg = f'\t### {func_name}(gpu={i}, {param1_name}={param1_value}, {param2_name}={param2_value})'
-            elif param1_name:
-                msg = f'\t### {func_name}(gpu={i}, {param1_name}={param1_value})'
-            else:
-                msg = f'\t### {func_name}(gpu={i})'
-            try:
-                if param3_name:
-                    data = func(gpu, param1_value, param2_value, param3_value)
-                elif param2_name:
-                    data = func(gpu, param1_value, param2_value)
-                elif param1_name:
-                    data = func(gpu, param1_value)
-                else:
-                    data = func(gpu)
-                self.common.print(msg, data)
-                self.common.check_ret('', '', self.common.PASS)
-            except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
-                if self.common.check_ret(msg, e, self.common.PASS):
-                    self.raise_exception = e
-            self.common.print('')
-        if self.raise_exception:
-            raise self.raise_exception
-        return
-
-    def FuncWithGPU1ListLoopArgs(self, **kwargs):
-        '''
-            Arguments:
-                func_name=func
-                value1_name=[(value_name, value, value_cond), ...]
-            Optional:
-                param1_name=param1_value
-                param2_name=param2_value
-        '''
-        iterator = iter(kwargs.items())
-        func_name, func = next(iterator)
-        name1, values1 = next(iterator, (None, None))
-        param1_name, param1_value = next(iterator, (None, None))
-        if param1_name:
-            param2_name, param2_value = next(iterator, (None, None))
-        else:
-            param2_name = None
-
-        for i, gpu in enumerate(self.common.processors):
-            self.common.print_device_header(i, gpu)
-            for value1_name, value1, value1_cond in values1:
-                if param2_name:
-                    msg = f'\t### {func_name}(gpu={i}, {name1}={value1_name}, {param1_name}={param1_name}, {param2_name}={param2_name})'
-                elif param1_name:
-                    msg = f'\t### {func_name}(gpu={i}, {name1}={value1_name}, {param1_name}={param1_name})'
-                else:
-                    msg = f'\t### {func_name}(gpu={i}, {name1}={value1_name})'
-                try:
-                    if param2_name:
-                        data = func(gpu, value1, param1_value, param2_value)
-                    elif param1_name:
-                        data = func(gpu, value1, param1_value)
-                    else:
-                        data = func(gpu, value1)
-                    self.common.print(msg, data)
-                    self.common.check_ret('', '', self.common.PASS)
-                except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
-                    if not value1_cond == self.common.PASS:
-                        if self.common.check_ret(msg, e, value1_cond):
-                            self.raise_exception = e
-                    else:
-                        if self.common.check_ret(msg, e, self.common.PASS):
-                            self.raise_exception = e
-                self.common.print('')
-        if self.raise_exception:
-            raise self.raise_exception
-        return
-
-    def FuncWithGPU2ListLoopArgs(self, **kwargs):
-        '''
-            Arguments:
-                func_name=func
-                value1_name=[(value_name value, value_cond), ...]
-                value2_name=[(value_name, value, value_cond), ...]
-            Optional:
-                param1_name=param1_value
-                param2_name=param2_value
-        '''
-        iterator = iter(kwargs.items())
-        func_name, func = next(iterator)
-        name1, values1 = next(iterator, (None, None))
-        name2, values2 = next(iterator, (None, None))
-        param1_name, param1_value = next(iterator, (None, None))
-        if param1_name:
-            param2_name, param2_value = next(iterator, (None, None))
-        else:
-            param2_name = None
-
-        for i, gpu in enumerate(self.common.processors):
-            self.common.print_device_header(i, gpu)
-            for value1_name, value1, value1_cond in values1:
-                for value2_name, value2, value2_cond in values2:
-                    if param2_name:
-                        msg = f'\t### {func_name}(gpu={i}, {name1}={value1_name}, {name2}={value2_name}, {param1_name}={param1_value}, {param2_name}={param2_value})'
-                    elif param1_name:
-                        msg = f'\t### {func_name}(gpu={i}, {name1}={value1_name}, {name2}={value2_name}, {param1_name}={param1_value})'
-                    else:
-                        msg = f'\t### {func_name}(gpu={i}, {name1}={value1_name}, {name2}={value2_name})'
-                    try:
-                        if param2_name:
-                            data = func(gpu, value1, value2, param1_value, param2_value)
-                        elif param1_name:
-                            data = func(gpu, value1, value2, param1_value)
-                        else:
-                            data = func(gpu, value1, value2)
-                        self.common.print(msg, data)
-                        self.common.check_ret('', '', self.common.PASS)
-                    except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
-                        if not value1_cond == self.common.PASS:
-                            if self.common.check_ret(msg, e, value1_cond):
-                                self.raise_exception = e
-                        elif not value2_cond == self.common.PASS:
-                            if self.common.check_ret(msg, e, value2_cond):
-                                self.raise_exception = e
-                        else:
-                            if self.common.check_ret(msg, e, self.common.PASS):
-                                self.raise_exception = e
-                    self.common.print('')
-        if self.raise_exception:
-            raise self.raise_exception
-        return
-
-    def FuncWith2GPULoopArgs(self, **kwargs):
-        '''
-            Arguments:
-                func_name=func
-            Optional:
-                param1_name=param1_value
-                param2_name=param2_value
-        '''
-        iterator = iter(kwargs.items())
-        func_name, func = next(iterator)
-        param1_name, param1_value = next(iterator, (None, None))
-        if param1_name:
-            param2_name, param2_value = next(iterator, (None, None))
-        else:
-            param2_name = None
-
-        for i, gpu_i in enumerate(self.common.processors):
-            self.common.print_device_header(i, gpu_i)
-            for j, gpu_j in enumerate(self.common.processors):
-                self.common.print_device_header(j, gpu_j)
-                if param2_name:
-                    msg = f'\t### {func_name}(gpu={i}, gpu={j}, {param1_name}={param1_value}, {param2_name}={param2_value})'
-                elif param1_name:
-                    msg = f'\t### {func_name}(gpu={i}, gpu={j}, {param1_name}={param1_value})'
-                else:
-                    msg = f'\t### {func_name}(gpu={i}, gpu={j})'
-                try:
-                    if param2_name:
-                        data = func(gpu_i, gpu_j, param1_value, param2_value)
-                    elif param1_name:
-                        data = func(gpu_i, gpu_j, param1_value)
-                    else:
-                        data = func(gpu_i, gpu_j)
-                    self.common.print(msg, data)
-                    self.common.check_ret('', '', self.common.PASS)
-                except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
-                    if i == j:
-                        if self.common.check_ret(msg, e, self.common.FAIL):
-                            self.raise_exception = e
-                    else:
-                        if self.common.check_ret(msg, e, self.common.PASS):
-                            self.raise_exception = e
-                self.common.print('')
-        if self.raise_exception:
-            raise self.raise_exception
-        return
-
     def test_clean_gpu_local_data(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_clean_gpu_local_data=amdsmi.amdsmi_clean_gpu_local_data)
+        self.common.Test_API_Per_GPU(amdsmi_clean_gpu_local_data=amdsmi.amdsmi_clean_gpu_local_data)
         return
 
     def test_cpu_apb_disable(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_cpu_apb_disable=amdsmi.amdsmi_cpu_apb_disable, pstate=0)
+        self.common.Test_API_Per_GPU(amdsmi_cpu_apb_disable=amdsmi.amdsmi_cpu_apb_disable, pstate=0)
         return
 
     def test_cpu_apb_enable(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_cpu_apb_enable=amdsmi.amdsmi_cpu_apb_enable)
+        self.common.Test_API_Per_GPU(amdsmi_cpu_apb_enable=amdsmi.amdsmi_cpu_apb_enable)
         return
 
     def test_first_online_core_on_cpu_socket(self):
@@ -486,7 +263,7 @@ class TestAmdSmiPython(unittest.TestCase):
             self.common.print(msg)
             self.skipTest(msg)
 
-        self.FuncWithGPULoopArgs(amdsmi_first_online_core_on_cpu_socket=amdsmi.amdsmi_first_online_core_on_cpu_socket)
+        self.common.Test_API_Per_GPU(amdsmi_first_online_core_on_cpu_socket=amdsmi.amdsmi_first_online_core_on_cpu_socket)
         return
 
     def test_get_clk_freq(self):
@@ -497,7 +274,7 @@ class TestAmdSmiPython(unittest.TestCase):
             self.common.print(msg)
             self.skipTest(msg)
 
-        self.FuncWithGPULoopArgs(amdsmi_get_clk_freq=amdsmi.amdsmi_get_clk_freq)
+        self.common.Test_API_Per_GPU(amdsmi_get_clk_freq=amdsmi.amdsmi_get_clk_freq)
         return
 
     def test_get_clock_info(self):
@@ -508,17 +285,17 @@ class TestAmdSmiPython(unittest.TestCase):
             self.common.print(msg)
             self.skipTest(msg)
 
-        self.FuncWithGPULoopArgs(amdsmi_get_clock_info=amdsmi.amdsmi_get_clock_info)
+        self.common.Test_API_Per_GPU(amdsmi_get_clock_info=amdsmi.amdsmi_get_clock_info)
         return
 
     def test_get_cpu_cclk_limit(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_get_cpu_cclk_limit=amdsmi.amdsmi_get_cpu_cclk_limit)
+        self.common.Test_API_Per_GPU(amdsmi_get_cpu_cclk_limit=amdsmi.amdsmi_get_cpu_cclk_limit)
         return
 
     def test_get_cpu_core_current_freq_limit(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_get_cpu_core_current_freq_limit=amdsmi.amdsmi_get_cpu_core_current_freq_limit)
+        self.common.Test_API_Per_GPU(amdsmi_get_cpu_core_current_freq_limit=amdsmi.amdsmi_get_cpu_core_current_freq_limit)
         return
 
     def test_get_cpu_core_energy(self):
@@ -529,7 +306,7 @@ class TestAmdSmiPython(unittest.TestCase):
             self.common.print(msg)
             self.skipTest(msg)
 
-        self.FuncWithGPULoopArgs(amdsmi_get_cpu_core_energy=amdsmi.amdsmi_get_cpu_core_energy)
+        self.common.Test_API_Per_GPU(amdsmi_get_cpu_core_energy=amdsmi.amdsmi_get_cpu_core_energy)
         return
 
     # no gpu but have list
@@ -553,7 +330,7 @@ class TestAmdSmiPython(unittest.TestCase):
 
     def test_get_cpu_ddr_bw(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_get_cpu_ddr_bw=amdsmi.amdsmi_get_cpu_ddr_bw)
+        self.common.Test_API_Per_GPU(amdsmi_get_cpu_ddr_bw=amdsmi.amdsmi_get_cpu_ddr_bw)
         return
 
     def test_get_cpu_dimm_power_consumption(self):
@@ -562,7 +339,7 @@ class TestAmdSmiPython(unittest.TestCase):
         # TODO Find better way to get dimm_addr
         dimm_addr = 0
 
-        self.FuncWithGPULoopArgs(amdsmi_get_cpu_dimm_power_consumption=amdsmi.amdsmi_get_cpu_dimm_power_consumption, dimm_addr=dimm_addr)
+        self.common.Test_API_Per_GPU(amdsmi_get_cpu_dimm_power_consumption=amdsmi.amdsmi_get_cpu_dimm_power_consumption, dimm_addr=dimm_addr)
         return
 
     def test_get_cpu_dimm_temp_range_and_refresh_rate(self):
@@ -576,7 +353,7 @@ class TestAmdSmiPython(unittest.TestCase):
         # TODO Find better way to get dimm_addr
         dimm_addr = 0
 
-        self.FuncWithGPULoopArgs(amdsmi_get_cpu_dimm_temp_range_and_refresh_rate=amdsmi.amdsmi_get_cpu_dimm_temp_range_and_refresh_rate, dimm_addr=dimm_addr)
+        self.common.Test_API_Per_GPU(amdsmi_get_cpu_dimm_temp_range_and_refresh_rate=amdsmi.amdsmi_get_cpu_dimm_temp_range_and_refresh_rate, dimm_addr=dimm_addr)
         return
 
     def test_get_cpu_dimm_thermal_sensor(self):
@@ -590,7 +367,7 @@ class TestAmdSmiPython(unittest.TestCase):
         # TODO Find better way to get dimm_addr
         dimm_addr = 0
 
-        self.FuncWithGPULoopArgs(amdsmi_get_cpu_dimm_thermal_sensor=amdsmi.amdsmi_get_cpu_dimm_thermal_sensor, dimm_addr=dimm_addr)
+        self.common.Test_API_Per_GPU(amdsmi_get_cpu_dimm_thermal_sensor=amdsmi.amdsmi_get_cpu_dimm_thermal_sensor, dimm_addr=dimm_addr)
         return
 
     def test_get_cpu_family(self):
@@ -601,17 +378,17 @@ class TestAmdSmiPython(unittest.TestCase):
             self.common.print(msg)
             self.skipTest(msg)
 
-        self.FuncWithOnlyArgs(amdsmi_get_cpu_family=amdsmi.amdsmi_get_cpu_family)
+        self.common.Test_API(amdsmi_get_cpu_family=amdsmi.amdsmi_get_cpu_family)
         return
 
     def test_get_cpu_fclk_mclk(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_get_cpu_fclk_mclk=amdsmi.amdsmi_get_cpu_fclk_mclk)
+        self.common.Test_API_Per_GPU(amdsmi_get_cpu_fclk_mclk=amdsmi.amdsmi_get_cpu_fclk_mclk)
         return
 
     def test_get_cpu_handles(self):
         self.common.print_func_name('')
-        self.FuncWithOnlyArgs(amdsmi_get_cpu_handles=amdsmi.amdsmi_get_cpu_handles)
+        self.common.Test_API(amdsmi_get_cpu_handles=amdsmi.amdsmi_get_cpu_handles)
         return
 
     def test_get_cpu_hsmp_driver_version(self):
@@ -622,7 +399,7 @@ class TestAmdSmiPython(unittest.TestCase):
             self.common.print(msg)
             self.skipTest(msg)
 
-        self.FuncWithGPULoopArgs(amdsmi_get_cpu_hsmp_driver_version=amdsmi.amdsmi_get_cpu_hsmp_driver_version)
+        self.common.Test_API_Per_GPU(amdsmi_get_cpu_hsmp_driver_version=amdsmi.amdsmi_get_cpu_hsmp_driver_version)
         return
 
     def test_get_cpu_hsmp_proto_ver(self):
@@ -633,7 +410,7 @@ class TestAmdSmiPython(unittest.TestCase):
             self.common.print(msg)
             self.skipTest(msg)
 
-        self.FuncWithGPULoopArgs(amdsmi_get_cpu_hsmp_proto_ver=amdsmi.amdsmi_get_cpu_hsmp_proto_ver)
+        self.common.Test_API_Per_GPU(amdsmi_get_cpu_hsmp_proto_ver=amdsmi.amdsmi_get_cpu_hsmp_proto_ver)
         return
 
     def test_get_cpu_model(self):
@@ -644,32 +421,32 @@ class TestAmdSmiPython(unittest.TestCase):
             self.common.print(msg)
             self.skipTest(msg)
 
-        self.FuncWithOnlyArgs(amdsmi_get_cpu_model=amdsmi.amdsmi_get_cpu_model)
+        self.common.Test_API(amdsmi_get_cpu_model=amdsmi.amdsmi_get_cpu_model)
         return
 
     def test_get_cpu_prochot_status(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_get_cpu_prochot_status=amdsmi.amdsmi_get_cpu_prochot_status)
+        self.common.Test_API_Per_GPU(amdsmi_get_cpu_prochot_status=amdsmi.amdsmi_get_cpu_prochot_status)
         return
 
     def test_get_cpu_pwr_svi_telemetry_all_rails(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_get_cpu_pwr_svi_telemetry_all_rails=amdsmi.amdsmi_get_cpu_pwr_svi_telemetry_all_rails)
+        self.common.Test_API_Per_GPU(amdsmi_get_cpu_pwr_svi_telemetry_all_rails=amdsmi.amdsmi_get_cpu_pwr_svi_telemetry_all_rails)
         return
 
     def test_get_cpu_smu_fw_version(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_get_cpu_smu_fw_version=amdsmi.amdsmi_get_cpu_smu_fw_version)
+        self.common.Test_API_Per_GPU(amdsmi_get_cpu_smu_fw_version=amdsmi.amdsmi_get_cpu_smu_fw_version)
         return
 
     def test_get_cpu_socket_c0_residency(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_get_cpu_socket_c0_residency=amdsmi.amdsmi_get_cpu_socket_c0_residency)
+        self.common.Test_API_Per_GPU(amdsmi_get_cpu_socket_c0_residency=amdsmi.amdsmi_get_cpu_socket_c0_residency)
         return
 
     def test_get_cpu_socket_current_active_freq_limit(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_get_cpu_socket_current_active_freq_limit=amdsmi.amdsmi_get_cpu_socket_current_active_freq_limit)
+        self.common.Test_API_Per_GPU(amdsmi_get_cpu_socket_current_active_freq_limit=amdsmi.amdsmi_get_cpu_socket_current_active_freq_limit)
         return
 
     def test_get_cpu_socket_energy(self):
@@ -680,12 +457,12 @@ class TestAmdSmiPython(unittest.TestCase):
             self.common.print(msg)
             self.skipTest(msg)
 
-        self.FuncWithGPULoopArgs(amdsmi_get_cpu_socket_energy=amdsmi.amdsmi_get_cpu_socket_energy)
+        self.common.Test_API_Per_GPU(amdsmi_get_cpu_socket_energy=amdsmi.amdsmi_get_cpu_socket_energy)
         return
 
     def test_get_cpu_socket_freq_range(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_get_cpu_socket_freq_range=amdsmi.amdsmi_get_cpu_socket_freq_range)
+        self.common.Test_API_Per_GPU(amdsmi_get_cpu_socket_freq_range=amdsmi.amdsmi_get_cpu_socket_freq_range)
         return
 
     def test_get_cpu_socket_lclk_dpm_level(self):
@@ -694,27 +471,27 @@ class TestAmdSmiPython(unittest.TestCase):
         # TODO nbio_id = 0
         nbio_id = 0
 
-        self.FuncWithGPULoopArgs(amdsmi_get_cpu_socket_lclk_dpm_level=amdsmi.amdsmi_get_cpu_socket_lclk_dpm_level, nbio_id=nbio_id)
+        self.common.Test_API_Per_GPU(amdsmi_get_cpu_socket_lclk_dpm_level=amdsmi.amdsmi_get_cpu_socket_lclk_dpm_level, nbio_id=nbio_id)
         return
 
     def test_get_cpu_socket_power(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_get_cpu_socket_power=amdsmi.amdsmi_get_cpu_socket_power)
+        self.common.Test_API_Per_GPU(amdsmi_get_cpu_socket_power=amdsmi.amdsmi_get_cpu_socket_power)
         return
 
     def test_get_cpu_socket_power_cap(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_get_cpu_socket_power_cap=amdsmi.amdsmi_get_cpu_socket_power_cap)
+        self.common.Test_API_Per_GPU(amdsmi_get_cpu_socket_power_cap=amdsmi.amdsmi_get_cpu_socket_power_cap)
         return
 
     def test_get_cpu_socket_power_cap_max(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_get_cpu_socket_power_cap_max=amdsmi.amdsmi_get_cpu_socket_power_cap_max)
+        self.common.Test_API_Per_GPU(amdsmi_get_cpu_socket_power_cap_max=amdsmi.amdsmi_get_cpu_socket_power_cap_max)
         return
 
     def test_get_cpu_socket_temperature(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_get_cpu_socket_temperature=amdsmi.amdsmi_get_cpu_socket_temperature)
+        self.common.Test_API_Per_GPU(amdsmi_get_cpu_socket_temperature=amdsmi.amdsmi_get_cpu_socket_temperature)
         return
 
     def test_get_energy_count(self):
@@ -725,7 +502,7 @@ class TestAmdSmiPython(unittest.TestCase):
             self.common.print(msg)
             self.skipTest(msg)
 
-        self.FuncWithGPULoopArgs(amdsmi_get_energy_count=amdsmi.amdsmi_get_energy_count)
+        self.common.Test_API_Per_GPU(amdsmi_get_energy_count=amdsmi.amdsmi_get_energy_count)
         return
 
     # no gpu but have list
@@ -753,17 +530,17 @@ class TestAmdSmiPython(unittest.TestCase):
 
     def test_get_fw_info(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_get_fw_info=amdsmi.amdsmi_get_fw_info)
+        self.common.Test_API_Per_GPU(amdsmi_get_fw_info=amdsmi.amdsmi_get_fw_info)
         return
 
     def test_get_gpu_accelerator_partition_profile(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_get_gpu_accelerator_partition_profile=amdsmi.amdsmi_get_gpu_accelerator_partition_profile)
+        self.common.Test_API_Per_GPU(amdsmi_get_gpu_accelerator_partition_profile=amdsmi.amdsmi_get_gpu_accelerator_partition_profile)
         return
 
     def test_get_gpu_accelerator_partition_profile_config(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_get_gpu_accelerator_partition_profile_config=amdsmi.amdsmi_get_gpu_accelerator_partition_profile_config)
+        self.common.Test_API_Per_GPU(amdsmi_get_gpu_accelerator_partition_profile_config=amdsmi.amdsmi_get_gpu_accelerator_partition_profile_config)
         return
 
     def test_get_gpu_activity(self):
@@ -774,42 +551,42 @@ class TestAmdSmiPython(unittest.TestCase):
             self.common.print(msg)
             self.skipTest(msg)
 
-        self.FuncWithGPULoopArgs(amdsmi_get_gpu_activity=amdsmi.amdsmi_get_gpu_activity)
+        self.common.Test_API_Per_GPU(amdsmi_get_gpu_activity=amdsmi.amdsmi_get_gpu_activity)
         return
 
     def test_get_gpu_asic_info(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_get_gpu_asic_info=amdsmi.amdsmi_get_gpu_asic_info)
+        self.common.Test_API_Per_GPU(amdsmi_get_gpu_asic_info=amdsmi.amdsmi_get_gpu_asic_info)
         return
 
     def test_get_gpu_bad_page_info(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_get_gpu_bad_page_info=amdsmi.amdsmi_get_gpu_bad_page_info)
+        self.common.Test_API_Per_GPU(amdsmi_get_gpu_bad_page_info=amdsmi.amdsmi_get_gpu_bad_page_info)
         return
 
     def test_get_gpu_bad_page_threshold(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_get_gpu_bad_page_threshold=amdsmi.amdsmi_get_gpu_bad_page_threshold)
+        self.common.Test_API_Per_GPU(amdsmi_get_gpu_bad_page_threshold=amdsmi.amdsmi_get_gpu_bad_page_threshold)
         return
 
     def test_get_gpu_bdf_id(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_get_gpu_bdf_id=amdsmi.amdsmi_get_gpu_bdf_id)
+        self.common.Test_API_Per_GPU(amdsmi_get_gpu_bdf_id=amdsmi.amdsmi_get_gpu_bdf_id)
         return
 
     def test_get_gpu_board_info(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_get_gpu_board_info=amdsmi.amdsmi_get_gpu_board_info)
+        self.common.Test_API_Per_GPU(amdsmi_get_gpu_board_info=amdsmi.amdsmi_get_gpu_board_info)
         return
 
     def test_get_gpu_cache_info(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_get_gpu_cache_info=amdsmi.amdsmi_get_gpu_cache_info)
+        self.common.Test_API_Per_GPU(amdsmi_get_gpu_cache_info=amdsmi.amdsmi_get_gpu_cache_info)
         return
 
     def test_get_gpu_compute_partition(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_get_gpu_compute_partition=amdsmi.amdsmi_get_gpu_compute_partition)
+        self.common.Test_API_Per_GPU(amdsmi_get_gpu_compute_partition=amdsmi.amdsmi_get_gpu_compute_partition)
         return
 
     def test_get_gpu_compute_process_gpus(self):
@@ -820,12 +597,12 @@ class TestAmdSmiPython(unittest.TestCase):
             self.common.print(msg)
             self.skipTest(msg)
 
-        self.FuncWithGPULoopArgs(amdsmi_get_gpu_compute_process_gpus=amdsmi.amdsmi_get_gpu_compute_process_gpus)
+        self.common.Test_API_Per_GPU(amdsmi_get_gpu_compute_process_gpus=amdsmi.amdsmi_get_gpu_compute_process_gpus)
         return
 
     def test_get_gpu_compute_process_info(self):
         self.common.print_func_name('')
-        self.FuncWithOnlyArgs(amdsmi_get_gpu_compute_process_info=amdsmi.amdsmi_get_gpu_compute_process_info)
+        self.common.Test_API(amdsmi_get_gpu_compute_process_info=amdsmi.amdsmi_get_gpu_compute_process_info)
         return
 
     def test_get_gpu_compute_process_info_by_pid(self):
@@ -839,32 +616,32 @@ class TestAmdSmiPython(unittest.TestCase):
         #TODO pid = 0
         pid = 0
 
-        self.FuncWithOnlyArgs(amdsmi_get_gpu_compute_process_info_by_pid=amdsmi.amdsmi_get_gpu_compute_process_info_by_pid, pid=pid)
+        self.common.Test_API(amdsmi_get_gpu_compute_process_info_by_pid=amdsmi.amdsmi_get_gpu_compute_process_info_by_pid, pid=pid)
         return
 
     def test_get_gpu_device_bdf(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_get_gpu_device_bdf=amdsmi.amdsmi_get_gpu_device_bdf)
+        self.common.Test_API_Per_GPU(amdsmi_get_gpu_device_bdf=amdsmi.amdsmi_get_gpu_device_bdf)
         return
 
     def test_get_gpu_device_uuid(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_get_gpu_device_uuid=amdsmi.amdsmi_get_gpu_device_uuid)
+        self.common.Test_API_Per_GPU(amdsmi_get_gpu_device_uuid=amdsmi.amdsmi_get_gpu_device_uuid)
         return
 
     def test_get_gpu_driver_info(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_get_gpu_driver_info=amdsmi.amdsmi_get_gpu_driver_info)
+        self.common.Test_API_Per_GPU(amdsmi_get_gpu_driver_info=amdsmi.amdsmi_get_gpu_driver_info)
         return
 
     def test_get_gpu_ecc_count(self):
         self.common.print_func_name('')
-        self.FuncWithGPU1ListLoopArgs(amdsmi_get_gpu_ecc_count=amdsmi.amdsmi_get_gpu_ecc_count, gpu_block=self.common.gpu_blocks)
+        self.common.Test_Per_GPU_With_One_Enum(amdsmi_get_gpu_ecc_count=amdsmi.amdsmi_get_gpu_ecc_count, gpu_block=self.common.gpu_blocks)
         return
 
     def test_get_gpu_ecc_enabled(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_get_gpu_ecc_enabled=amdsmi.amdsmi_get_gpu_ecc_enabled)
+        self.common.Test_API_Per_GPU(amdsmi_get_gpu_ecc_enabled=amdsmi.amdsmi_get_gpu_ecc_enabled)
         return
 
     def test_get_gpu_ecc_status(self):
@@ -875,37 +652,37 @@ class TestAmdSmiPython(unittest.TestCase):
             self.common.print(msg)
             self.skipTest(msg)
 
-        self.FuncWithGPU1ListLoopArgs(amdsmi_get_gpu_ecc_status=amdsmi.amdsmi_get_gpu_ecc_status, gpu_block=self.common.gpu_blocks)
+        self.common.Test_Per_GPU_With_One_Enum(amdsmi_get_gpu_ecc_status=amdsmi.amdsmi_get_gpu_ecc_status, gpu_block=self.common.gpu_blocks)
         return
 
     def test_get_gpu_enumeration_info(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_get_gpu_enumeration_info=amdsmi.amdsmi_get_gpu_enumeration_info)
+        self.common.Test_API_Per_GPU(amdsmi_get_gpu_enumeration_info=amdsmi.amdsmi_get_gpu_enumeration_info)
         return
 
     def test_get_gpu_fan_rpms(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_get_gpu_fan_rpms=amdsmi.amdsmi_get_gpu_fan_rpms, index=0)
+        self.common.Test_API_Per_GPU(amdsmi_get_gpu_fan_rpms=amdsmi.amdsmi_get_gpu_fan_rpms, index=0)
         return
 
     def test_get_gpu_id(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_get_gpu_id=amdsmi.amdsmi_get_gpu_id)
+        self.common.Test_API_Per_GPU(amdsmi_get_gpu_id=amdsmi.amdsmi_get_gpu_id)
         return
 
     def test_get_gpu_kfd_info(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_get_gpu_kfd_info=amdsmi.amdsmi_get_gpu_kfd_info)
+        self.common.Test_API_Per_GPU(amdsmi_get_gpu_kfd_info=amdsmi.amdsmi_get_gpu_kfd_info)
         return
 
     def test_get_gpu_mem_overdrive_level(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_get_gpu_mem_overdrive_level=amdsmi.amdsmi_get_gpu_mem_overdrive_level)
+        self.common.Test_API_Per_GPU(amdsmi_get_gpu_mem_overdrive_level=amdsmi.amdsmi_get_gpu_mem_overdrive_level)
         return
 
     def test_get_gpu_memory_partition(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_get_gpu_memory_partition=amdsmi.amdsmi_get_gpu_memory_partition)
+        self.common.Test_API_Per_GPU(amdsmi_get_gpu_memory_partition=amdsmi.amdsmi_get_gpu_memory_partition)
         return
 
     def test_get_gpu_memory_partition_config(self):
@@ -916,27 +693,27 @@ class TestAmdSmiPython(unittest.TestCase):
             self.common.print(msg)
             self.skipTest(msg)
 
-        self.FuncWithGPULoopArgs(amdsmi_get_gpu_memory_partition_config=amdsmi.amdsmi_get_gpu_memory_partition_config)
+        self.common.Test_API_Per_GPU(amdsmi_get_gpu_memory_partition_config=amdsmi.amdsmi_get_gpu_memory_partition_config)
         return
 
     def test_get_gpu_memory_reserved_pages(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_get_gpu_memory_reserved_pages=amdsmi.amdsmi_get_gpu_memory_reserved_pages)
+        self.common.Test_API_Per_GPU(amdsmi_get_gpu_memory_reserved_pages=amdsmi.amdsmi_get_gpu_memory_reserved_pages)
         return
 
     def test_get_gpu_memory_total(self):
         self.common.print_func_name('')
-        self.FuncWithGPU1ListLoopArgs(amdsmi_get_gpu_memory_total=amdsmi.amdsmi_get_gpu_memory_total, memory_type=self.common.memory_types)
+        self.common.Test_Per_GPU_With_One_Enum(amdsmi_get_gpu_memory_total=amdsmi.amdsmi_get_gpu_memory_total, memory_type=self.common.memory_types)
         return
 
     def test_get_gpu_memory_usage(self):
         self.common.print_func_name('')
-        self.FuncWithGPU1ListLoopArgs(amdsmi_get_gpu_memory_usage=amdsmi.amdsmi_get_gpu_memory_usage, memory_type=self.common.memory_types)
+        self.common.Test_Per_GPU_With_One_Enum(amdsmi_get_gpu_memory_usage=amdsmi.amdsmi_get_gpu_memory_usage, memory_type=self.common.memory_types)
         return
 
     def test_get_gpu_metrics_header_info(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_get_gpu_metrics_header_info=amdsmi.amdsmi_get_gpu_metrics_header_info)
+        self.common.Test_API_Per_GPU(amdsmi_get_gpu_metrics_header_info=amdsmi.amdsmi_get_gpu_metrics_header_info)
         return
 
     def test_get_gpu_metrics_info(self):
@@ -946,7 +723,7 @@ class TestAmdSmiPython(unittest.TestCase):
             msg = '\tSkipping test_get_gpu_metrics_info as it fails (MI350X, AMDSMI_STATUS_UNEXPECTED_DATA).'
             self.common.print(msg)
             self.skipTest(msg)
-        self.FuncWithGPULoopArgs(amdsmi_get_gpu_metrics_info=amdsmi.amdsmi_get_gpu_metrics_info)
+        self.common.Test_API_Per_GPU(amdsmi_get_gpu_metrics_info=amdsmi.amdsmi_get_gpu_metrics_info)
         return
 
     def test_get_gpu_partition_metrics_info(self):
@@ -971,17 +748,17 @@ class TestAmdSmiPython(unittest.TestCase):
         #TODO num_region = 10
         num_region = 10
 
-        self.FuncWithGPULoopArgs(amdsmi_get_gpu_od_volt_curve_regions=amdsmi.amdsmi_get_gpu_od_volt_curve_regions, num_region=num_region)
+        self.common.Test_API_Per_GPU(amdsmi_get_gpu_od_volt_curve_regions=amdsmi.amdsmi_get_gpu_od_volt_curve_regions, num_region=num_region)
         return
 
     def test_get_gpu_od_volt_info(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_get_gpu_od_volt_info=amdsmi.amdsmi_get_gpu_od_volt_info)
+        self.common.Test_API_Per_GPU(amdsmi_get_gpu_od_volt_info=amdsmi.amdsmi_get_gpu_od_volt_info)
         return
 
     def test_get_gpu_overdrive_level(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_get_gpu_overdrive_level=amdsmi.amdsmi_get_gpu_overdrive_level)
+        self.common.Test_API_Per_GPU(amdsmi_get_gpu_overdrive_level=amdsmi.amdsmi_get_gpu_overdrive_level)
         return
 
     def test_get_gpu_pci_bandwidth(self):
@@ -991,7 +768,7 @@ class TestAmdSmiPython(unittest.TestCase):
             msg = '\tSkipping test_get_gpu_pci_bandwidth as it fails (MI350X, AMDSMI_STATUS_UNEXPECTED_DATA).'
             self.common.print(msg)
             self.skipTest(msg)
-        self.FuncWithGPULoopArgs(amdsmi_get_gpu_pci_bandwidth=amdsmi.amdsmi_get_gpu_pci_bandwidth)
+        self.common.Test_API_Per_GPU(amdsmi_get_gpu_pci_bandwidth=amdsmi.amdsmi_get_gpu_pci_bandwidth)
         return
 
     def test_get_gpu_pci_replay_counter(self):
@@ -999,47 +776,47 @@ class TestAmdSmiPython(unittest.TestCase):
 
         # TODO Check test_get_gpu_pci_replay_counter
 
-        self.FuncWithGPULoopArgs(amdsmi_get_gpu_pci_replay_counter=amdsmi.amdsmi_get_gpu_pci_replay_counter)
+        self.common.Test_API_Per_GPU(amdsmi_get_gpu_pci_replay_counter=amdsmi.amdsmi_get_gpu_pci_replay_counter)
         return
 
     def test_get_gpu_pci_throughput(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_get_gpu_pci_throughput=amdsmi.amdsmi_get_gpu_pci_throughput)
+        self.common.Test_API_Per_GPU(amdsmi_get_gpu_pci_throughput=amdsmi.amdsmi_get_gpu_pci_throughput)
         return
 
     def test_get_gpu_perf_level(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_get_gpu_perf_level=amdsmi.amdsmi_get_gpu_perf_level)
+        self.common.Test_API_Per_GPU(amdsmi_get_gpu_perf_level=amdsmi.amdsmi_get_gpu_perf_level)
         return
 
     def test_get_gpu_pm_metrics_info(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_get_gpu_pm_metrics_info=amdsmi.amdsmi_get_gpu_pm_metrics_info)
+        self.common.Test_API_Per_GPU(amdsmi_get_gpu_pm_metrics_info=amdsmi.amdsmi_get_gpu_pm_metrics_info)
         return
 
     def test_get_gpu_power_profile_presets(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_get_gpu_power_profile_presets=amdsmi.amdsmi_get_gpu_power_profile_presets, index=0)
+        self.common.Test_API_Per_GPU(amdsmi_get_gpu_power_profile_presets=amdsmi.amdsmi_get_gpu_power_profile_presets, index=0)
         return
 
     def test_get_gpu_process_isolation(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_get_gpu_process_isolation=amdsmi.amdsmi_get_gpu_process_isolation)
+        self.common.Test_API_Per_GPU(amdsmi_get_gpu_process_isolation=amdsmi.amdsmi_get_gpu_process_isolation)
         return
 
     def test_get_gpu_process_list(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_get_gpu_process_list=amdsmi.amdsmi_get_gpu_process_list)
+        self.common.Test_API_Per_GPU(amdsmi_get_gpu_process_list=amdsmi.amdsmi_get_gpu_process_list)
         return
 
     def test_get_gpu_ras_block_features_enabled(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_get_gpu_ras_block_features_enabled=amdsmi.amdsmi_get_gpu_ras_block_features_enabled)
+        self.common.Test_API_Per_GPU(amdsmi_get_gpu_ras_block_features_enabled=amdsmi.amdsmi_get_gpu_ras_block_features_enabled)
         return
 
     def test_get_gpu_ras_feature_info(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_get_gpu_ras_feature_info=amdsmi.amdsmi_get_gpu_ras_feature_info)
+        self.common.Test_API_Per_GPU(amdsmi_get_gpu_ras_feature_info=amdsmi.amdsmi_get_gpu_ras_feature_info)
         return
 
     def test_get_gpu_reg_table_info(self):
@@ -1050,69 +827,69 @@ class TestAmdSmiPython(unittest.TestCase):
             self.common.print(msg)
             self.skipTest(msg)
 
-        self.FuncWithGPU1ListLoopArgs(amdsmi_get_gpu_reg_table_info=amdsmi.amdsmi_get_gpu_reg_table_info, reg_type=self.common.reg_types)
+        self.common.Test_Per_GPU_With_One_Enum(amdsmi_get_gpu_reg_table_info=amdsmi.amdsmi_get_gpu_reg_table_info, reg_type=self.common.reg_types)
         return
 
     def test_get_gpu_revision(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_get_gpu_revision=amdsmi.amdsmi_get_gpu_revision)
+        self.common.Test_API_Per_GPU(amdsmi_get_gpu_revision=amdsmi.amdsmi_get_gpu_revision)
         return
 
     def test_get_gpu_subsystem_id(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_get_gpu_subsystem_id=amdsmi.amdsmi_get_gpu_subsystem_id)
+        self.common.Test_API_Per_GPU(amdsmi_get_gpu_subsystem_id=amdsmi.amdsmi_get_gpu_subsystem_id)
         return
 
     def test_get_gpu_subsystem_name(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_get_gpu_subsystem_name=amdsmi.amdsmi_get_gpu_subsystem_name)
+        self.common.Test_API_Per_GPU(amdsmi_get_gpu_subsystem_name=amdsmi.amdsmi_get_gpu_subsystem_name)
         return
 
     def test_get_gpu_topo_numa_affinity(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_get_gpu_topo_numa_affinity=amdsmi.amdsmi_get_gpu_topo_numa_affinity)
+        self.common.Test_API_Per_GPU(amdsmi_get_gpu_topo_numa_affinity=amdsmi.amdsmi_get_gpu_topo_numa_affinity)
         return
 
     def test_get_gpu_total_ecc_count(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_get_gpu_total_ecc_count=amdsmi.amdsmi_get_gpu_total_ecc_count)
+        self.common.Test_API_Per_GPU(amdsmi_get_gpu_total_ecc_count=amdsmi.amdsmi_get_gpu_total_ecc_count)
         return
 
     def test_get_gpu_vbios_info(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_get_gpu_vbios_info=amdsmi.amdsmi_get_gpu_vbios_info)
+        self.common.Test_API_Per_GPU(amdsmi_get_gpu_vbios_info=amdsmi.amdsmi_get_gpu_vbios_info)
         return
 
     def test_get_gpu_vendor_name(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_get_gpu_vendor_name=amdsmi.amdsmi_get_gpu_vendor_name)
+        self.common.Test_API_Per_GPU(amdsmi_get_gpu_vendor_name=amdsmi.amdsmi_get_gpu_vendor_name)
         return
 
     def test_get_gpu_virtualization_mode(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_get_gpu_virtualization_mode=amdsmi.amdsmi_get_gpu_virtualization_mode)
+        self.common.Test_API_Per_GPU(amdsmi_get_gpu_virtualization_mode=amdsmi.amdsmi_get_gpu_virtualization_mode)
         return
 
     def test_get_gpu_volt_metric(self):
         self.common.print_func_name('')
-        self.FuncWithGPU2ListLoopArgs(amdsmi_get_gpu_volt_metric=amdsmi.amdsmi_get_gpu_volt_metric,
+        self.common.Test_Per_GPU_With_Two_Enums(amdsmi_get_gpu_volt_metric=amdsmi.amdsmi_get_gpu_volt_metric,
                       voltage_type=self.common.voltage_types,
                       voltage_metric=self.common.voltage_metrics)
         return
 
     def test_get_gpu_vram_info(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_get_gpu_vram_info=amdsmi.amdsmi_get_gpu_vram_info)
+        self.common.Test_API_Per_GPU(amdsmi_get_gpu_vram_info=amdsmi.amdsmi_get_gpu_vram_info)
         return
 
     def test_get_gpu_vram_usage(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_get_gpu_vram_usage=amdsmi.amdsmi_get_gpu_vram_usage)
+        self.common.Test_API_Per_GPU(amdsmi_get_gpu_vram_usage=amdsmi.amdsmi_get_gpu_vram_usage)
         return
 
     def test_get_gpu_vram_vendor(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_get_gpu_vram_vendor=amdsmi.amdsmi_get_gpu_vram_vendor)
+        self.common.Test_API_Per_GPU(amdsmi_get_gpu_vram_vendor=amdsmi.amdsmi_get_gpu_vram_vendor)
         return
 
     def test_get_gpu_xcd_counter(self):
@@ -1123,7 +900,7 @@ class TestAmdSmiPython(unittest.TestCase):
             self.common.print(msg)
             self.skipTest(msg)
 
-        self.FuncWithGPULoopArgs(amdsmi_get_gpu_xcd_counter=amdsmi.amdsmi_get_gpu_xcd_counter)
+        self.common.Test_API_Per_GPU(amdsmi_get_gpu_xcd_counter=amdsmi.amdsmi_get_gpu_xcd_counter)
         return
 
     def test_get_gpu_xgmi_link_status(self):
@@ -1134,22 +911,22 @@ class TestAmdSmiPython(unittest.TestCase):
             self.common.print(msg)
             self.skipTest(msg)
 
-        self.FuncWithGPULoopArgs(amdsmi_get_gpu_xgmi_link_status=amdsmi.amdsmi_get_gpu_xgmi_link_status)
+        self.common.Test_API_Per_GPU(amdsmi_get_gpu_xgmi_link_status=amdsmi.amdsmi_get_gpu_xgmi_link_status)
         return
 
     def test_get_hsmp_metrics_table(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_get_hsmp_metrics_table=amdsmi.amdsmi_get_hsmp_metrics_table)
+        self.common.Test_API_Per_GPU(amdsmi_get_hsmp_metrics_table=amdsmi.amdsmi_get_hsmp_metrics_table)
         return
 
     def test_get_hsmp_metrics_table_version(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_get_hsmp_metrics_table_version=amdsmi.amdsmi_get_hsmp_metrics_table_version)
+        self.common.Test_API_Per_GPU(amdsmi_get_hsmp_metrics_table_version=amdsmi.amdsmi_get_hsmp_metrics_table_version)
         return
 
     def test_get_lib_version(self):
         self.common.print_func_name('')
-        self.FuncWithOnlyArgs(amdsmi_get_lib_version=amdsmi.amdsmi_get_lib_version)
+        self.common.Test_API(amdsmi_get_lib_version=amdsmi.amdsmi_get_lib_version)
         return
 
     def test_get_link_metrics(self):
@@ -1160,17 +937,17 @@ class TestAmdSmiPython(unittest.TestCase):
             self.common.print(msg)
             self.skipTest(msg)
 
-        self.FuncWithGPULoopArgs(amdsmi_get_link_metrics=amdsmi.amdsmi_get_link_metrics)
+        self.common.Test_API_Per_GPU(amdsmi_get_link_metrics=amdsmi.amdsmi_get_link_metrics)
         return
 
     def test_get_link_topology_nearest(self):
         self.common.print_func_name('')
-        self.FuncWithGPU1ListLoopArgs(amdsmi_get_link_topology_nearest=amdsmi.amdsmi_get_link_topology_nearest, link_type=self.common.link_types)
+        self.common.Test_Per_GPU_With_One_Enum(amdsmi_get_link_topology_nearest=amdsmi.amdsmi_get_link_topology_nearest, link_type=self.common.link_types)
         return
 
     def test_get_minmax_bandwidth_between_processors(self):
         self.common.print_func_name('')
-        self.FuncWith2GPULoopArgs(amdsmi_get_minmax_bandwidth_between_processors=amdsmi.amdsmi_get_minmax_bandwidth_between_processors)
+        self.common.Test_Per_GPU_With_GPU(amdsmi_get_minmax_bandwidth_between_processors=amdsmi.amdsmi_get_minmax_bandwidth_between_processors)
         return
 
     def test_get_pcie_info(self):
@@ -1181,7 +958,7 @@ class TestAmdSmiPython(unittest.TestCase):
             self.common.print(msg)
             self.skipTest(msg)
 
-        self.FuncWithGPULoopArgs(amdsmi_get_pcie_info=amdsmi.amdsmi_get_pcie_info)
+        self.common.Test_API_Per_GPU(amdsmi_get_pcie_info=amdsmi.amdsmi_get_pcie_info)
         return
 
     def test_set_cpu_pcie_link_rate(self):
@@ -1195,22 +972,22 @@ class TestAmdSmiPython(unittest.TestCase):
         # TODO rate_ctrl = 0
         rate_ctrl = 0
 
-        self.FuncWithGPULoopArgs(amdsmi_set_cpu_pcie_link_rate=amdsmi.amdsmi_set_cpu_pcie_link_rate, rate_ctrl=rate_ctrl)
+        self.common.Test_API_Per_GPU(amdsmi_set_cpu_pcie_link_rate=amdsmi.amdsmi_set_cpu_pcie_link_rate, rate_ctrl=rate_ctrl)
         return
 
     def test_get_power_info(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_get_power_info=amdsmi.amdsmi_get_power_info)
+        self.common.Test_API_Per_GPU(amdsmi_get_power_info=amdsmi.amdsmi_get_power_info)
         return
 
     def test_get_power_cap_info(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_get_power_cap_info=amdsmi.amdsmi_get_power_cap_info)
+        self.common.Test_API_Per_GPU(amdsmi_get_power_cap_info=amdsmi.amdsmi_get_power_cap_info)
         return
 
     def test_get_processor_count_from_handles(self):
         self.common.print_func_name('')
-        self.FuncWithOnlyArgs(amdsmi_get_processor_count_from_handles=amdsmi.amdsmi_get_processor_count_from_handles, processors=self.common.processors)
+        self.common.Test_API(amdsmi_get_processor_count_from_handles=amdsmi.amdsmi_get_processor_count_from_handles, processors=self.common.processors)
         return
 
     # print data issues
@@ -1233,12 +1010,12 @@ class TestAmdSmiPython(unittest.TestCase):
 
     def test_get_processor_info(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_get_processor_info=amdsmi.amdsmi_get_processor_info)
+        self.common.Test_API_Per_GPU(amdsmi_get_processor_info=amdsmi.amdsmi_get_processor_info)
         return
 
     def test_get_processor_type(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_get_processor_type=amdsmi.amdsmi_get_processor_type)
+        self.common.Test_API_Per_GPU(amdsmi_get_processor_type=amdsmi.amdsmi_get_processor_type)
         return
 
     # data print issues
@@ -1265,7 +1042,7 @@ class TestAmdSmiPython(unittest.TestCase):
             self.common.print(msg)
             self.skipTest(msg)
 
-        self.FuncWithGPU1ListLoopArgs(amdsmi_get_temp_metric=amdsmi.amdsmi_get_temp_metric, temperature_type=self.common.temperature_types, temperature_metric=self.common.temperature_metrics)
+        self.common.Test_Per_GPU_With_One_Enum(amdsmi_get_temp_metric=amdsmi.amdsmi_get_temp_metric, temperature_type=self.common.temperature_types, temperature_metric=self.common.temperature_metrics)
         return
 
     def test_get_threads_per_core(self):
@@ -1276,7 +1053,7 @@ class TestAmdSmiPython(unittest.TestCase):
             self.common.print(msg)
             self.skipTest(msg)
 
-        self.FuncWithOnlyArgs(amdsmi_get_threads_per_core=amdsmi.amdsmi_get_threads_per_core)
+        self.common.Test_API(amdsmi_get_threads_per_core=amdsmi.amdsmi_get_threads_per_core)
         return
 
     def test_get_utilization_count(self):
@@ -1287,7 +1064,7 @@ class TestAmdSmiPython(unittest.TestCase):
             self.common.print(msg)
             self.skipTest(msg)
 
-        self.FuncWithGPU1ListLoopArgs(amdsmi_get_utilization_count=amdsmi.amdsmi_get_utilization_count, utilization_counter_type=self.common.utilization_counter_types)
+        self.common.Test_Per_GPU_With_One_Enum(amdsmi_get_utilization_count=amdsmi.amdsmi_get_utilization_count, utilization_counter_type=self.common.utilization_counter_types)
         return
 
     def test_get_violation_status(self):
@@ -1298,22 +1075,22 @@ class TestAmdSmiPython(unittest.TestCase):
             self.common.print(msg)
             self.skipTest(msg)
 
-        self.FuncWithGPULoopArgs(amdsmi_get_violation_status=amdsmi.amdsmi_get_violation_status)
+        self.common.Test_API_Per_GPU(amdsmi_get_violation_status=amdsmi.amdsmi_get_violation_status)
         return
 
     def test_get_xgmi_info(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_get_xgmi_info=amdsmi.amdsmi_get_xgmi_info)
+        self.common.Test_API_Per_GPU(amdsmi_get_xgmi_info=amdsmi.amdsmi_get_xgmi_info)
         return
 
     def test_gpu_counter_group_supported(self):
         self.common.print_func_name('')
-        self.FuncWithGPU1ListLoopArgs(amdsmi_gpu_counter_group_supported=amdsmi.amdsmi_gpu_counter_group_supported, event_group=self.common.event_groups)
+        self.common.Test_Per_GPU_With_One_Enum(amdsmi_gpu_counter_group_supported=amdsmi.amdsmi_gpu_counter_group_supported, event_group=self.common.event_groups)
         return
 
     def test_get_gpu_available_counters(self):
         self.common.print_func_name('')
-        self.FuncWithGPU1ListLoopArgs(amdsmi_get_gpu_available_counters=amdsmi.amdsmi_get_gpu_available_counters, event_group=self.common.event_groups)
+        self.common.Test_Per_GPU_With_One_Enum(amdsmi_get_gpu_available_counters=amdsmi.amdsmi_get_gpu_available_counters, event_group=self.common.event_groups)
         return
 
     def test_gpu_validate_ras_eeprom(self):
@@ -1324,7 +1101,7 @@ class TestAmdSmiPython(unittest.TestCase):
             self.common.print(msg)
             self.skipTest(msg)
 
-        self.FuncWithGPULoopArgs(amdsmi_gpu_validate_ras_eeprom=amdsmi.amdsmi_gpu_validate_ras_eeprom)
+        self.common.Test_API_Per_GPU(amdsmi_gpu_validate_ras_eeprom=amdsmi.amdsmi_gpu_validate_ras_eeprom)
         return
 
     def test_gpu_xgmi_error_status(self):
@@ -1335,27 +1112,27 @@ class TestAmdSmiPython(unittest.TestCase):
             self.common.print(msg)
             self.skipTest(msg)
 
-        self.FuncWithGPULoopArgs(amdsmi_gpu_xgmi_error_status=amdsmi.amdsmi_gpu_xgmi_error_status)
+        self.common.Test_API_Per_GPU(amdsmi_gpu_xgmi_error_status=amdsmi.amdsmi_gpu_xgmi_error_status)
         return
 
     def test_init(self):
         self.common.print_func_name('')
-        self.FuncWithOnlyArgs(amdsmi_init=amdsmi.amdsmi_init)
+        self.common.Test_API(amdsmi_init=amdsmi.amdsmi_init)
         return
 
     def test_shut_down(self):
         self.common.print_func_name('')
-        self.FuncWithOnlyArgs(amdsmi_shut_down=amdsmi.amdsmi_shut_down)
+        self.common.Test_API(amdsmi_shut_down=amdsmi.amdsmi_shut_down)
         return
 
     def test_is_P2P_accessible(self):
         self.common.print_func_name('')
-        self.FuncWith2GPULoopArgs(amdsmi_is_P2P_accessible=amdsmi.amdsmi_is_P2P_accessible)
+        self.common.Test_Per_GPU_With_GPU(amdsmi_is_P2P_accessible=amdsmi.amdsmi_is_P2P_accessible)
         return
 
     def test_is_gpu_power_management_enabled(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_is_gpu_power_management_enabled=amdsmi.amdsmi_is_gpu_power_management_enabled)
+        self.common.Test_API_Per_GPU(amdsmi_is_gpu_power_management_enabled=amdsmi.amdsmi_is_gpu_power_management_enabled)
         return
 
     def test_reset_gpu(self):
@@ -1366,12 +1143,12 @@ class TestAmdSmiPython(unittest.TestCase):
             self.common.print(msg)
             self.skipTest(msg)
 
-        self.FuncWithGPULoopArgs(amdsmi_reset_gpu=amdsmi.amdsmi_reset_gpu)
+        self.common.Test_API_Per_GPU(amdsmi_reset_gpu=amdsmi.amdsmi_reset_gpu)
         return
 
     def test_reset_gpu_fan(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_reset_gpu_fan=amdsmi.amdsmi_reset_gpu_fan, index=0)
+        self.common.Test_API_Per_GPU(amdsmi_reset_gpu_fan=amdsmi.amdsmi_reset_gpu_fan, index=0)
         return
 
     def test_reset_gpu_xgmi_error(self):
@@ -1382,7 +1159,7 @@ class TestAmdSmiPython(unittest.TestCase):
             self.common.print(msg)
             self.skipTest(msg)
 
-        self.FuncWithGPULoopArgs(amdsmi_reset_gpu_xgmi_error=amdsmi.amdsmi_reset_gpu_xgmi_error)
+        self.common.Test_API_Per_GPU(amdsmi_reset_gpu_xgmi_error=amdsmi.amdsmi_reset_gpu_xgmi_error)
         return
 
     def test_set_cpu_df_pstate_range(self):
@@ -1397,7 +1174,7 @@ class TestAmdSmiPython(unittest.TestCase):
         max_pstate = 0
         min_pstate = 0
 
-        self.FuncWithGPULoopArgs(amdsmi_set_cpu_df_pstate_range=amdsmi.amdsmi_set_cpu_df_pstate_range, max_pstate=max_pstate, min_pstate=min_pstate)
+        self.common.Test_API_Per_GPU(amdsmi_set_cpu_df_pstate_range=amdsmi.amdsmi_set_cpu_df_pstate_range, max_pstate=max_pstate, min_pstate=min_pstate)
         return
 
     def test_set_cpu_gmi3_link_width_range(self):
@@ -1412,7 +1189,7 @@ class TestAmdSmiPython(unittest.TestCase):
         min_link_width = 0
         max_link_width = 0
 
-        self.FuncWithGPULoopArgs(amdsmi_set_cpu_gmi3_link_width_range=amdsmi.amdsmi_set_cpu_gmi3_link_width_range, min_link_width=min_link_width, max_link_width=max_link_width)
+        self.common.Test_API_Per_GPU(amdsmi_set_cpu_gmi3_link_width_range=amdsmi.amdsmi_set_cpu_gmi3_link_width_range, min_link_width=min_link_width, max_link_width=max_link_width)
         return
 
     # param modes
@@ -1448,7 +1225,7 @@ class TestAmdSmiPython(unittest.TestCase):
         min_val = 0
         max_val = 0
 
-        self.FuncWithGPULoopArgs(amdsmi_set_cpu_socket_lclk_dpm_level=amdsmi.amdsmi_set_cpu_socket_lclk_dpm_level, nbio_id=nbio_id, min_val=min_val, max_val=max_val)
+        self.common.Test_API_Per_GPU(amdsmi_set_cpu_socket_lclk_dpm_level=amdsmi.amdsmi_set_cpu_socket_lclk_dpm_level, nbio_id=nbio_id, min_val=min_val, max_val=max_val)
         return
 
     def test_set_cpu_xgmi_width(self):
@@ -1463,7 +1240,7 @@ class TestAmdSmiPython(unittest.TestCase):
         min_width = 0
         max_width = 0
 
-        self.FuncWithGPULoopArgs(amdsmi_set_cpu_xgmi_width=amdsmi.amdsmi_set_cpu_xgmi_width, min_width=min_width, max_width=max_width)
+        self.common.Test_API_Per_GPU(amdsmi_set_cpu_xgmi_width=amdsmi.amdsmi_set_cpu_xgmi_width, min_width=min_width, max_width=max_width)
         return
 
     def test_set_gpu_accelerator_partition_profile(self):
@@ -1477,7 +1254,7 @@ class TestAmdSmiPython(unittest.TestCase):
         # TODO profile_index = 0
         profile_index = 0
 
-        self.FuncWithGPULoopArgs(amdsmi_set_gpu_accelerator_partition_profile=amdsmi.amdsmi_set_gpu_accelerator_partition_profile, profile_index=profile_index)
+        self.common.Test_API_Per_GPU(amdsmi_set_gpu_accelerator_partition_profile=amdsmi.amdsmi_set_gpu_accelerator_partition_profile, profile_index=profile_index)
         return
 
     # Uses clk_type_name instead of clk_type
@@ -1549,7 +1326,7 @@ class TestAmdSmiPython(unittest.TestCase):
             self.common.print(msg)
             self.skipTest(msg)
 
-        self.FuncWithGPU1ListLoopArgs(amdsmi_set_gpu_memory_partition=amdsmi.amdsmi_set_gpu_memory_partition, memory_partition_type=self.common.memory_partition_types)
+        self.common.Test_Per_GPU_With_One_Enum(amdsmi_set_gpu_memory_partition=amdsmi.amdsmi_set_gpu_memory_partition, memory_partition_type=self.common.memory_partition_types)
         return
 
     def test_set_gpu_memory_partition_mode(self):
@@ -1560,7 +1337,7 @@ class TestAmdSmiPython(unittest.TestCase):
             self.common.print(msg)
             self.skipTest(msg)
 
-        self.FuncWithGPULoopArgs(amdsmi_set_gpu_memory_partition_mode=amdsmi.amdsmi_set_gpu_memory_partition_mode, memory_partition_type=self.common.memory_partition_types)
+        self.common.Test_API_Per_GPU(amdsmi_set_gpu_memory_partition_mode=amdsmi.amdsmi_set_gpu_memory_partition_mode, memory_partition_type=self.common.memory_partition_types)
         return
 
     # out of order freq_ind then value then clk_type
@@ -1612,7 +1389,7 @@ class TestAmdSmiPython(unittest.TestCase):
         clk_value = 0
         volt_value = 0
 
-        self.FuncWithGPULoopArgs(amdsmi_set_gpu_od_volt_info=amdsmi.amdsmi_set_gpu_od_volt_info, vpoint=vpoint, clk_value=clk_value, volt_value=volt_value)
+        self.common.Test_API_Per_GPU(amdsmi_set_gpu_od_volt_info=amdsmi.amdsmi_set_gpu_od_volt_info, vpoint=vpoint, clk_value=clk_value, volt_value=volt_value)
         return
 
     def test_set_gpu_perf_determinism_mode(self):
@@ -1626,7 +1403,7 @@ class TestAmdSmiPython(unittest.TestCase):
         # TODO clk_value = 0
         clk_value = 0
 
-        self.FuncWithGPULoopArgs(amdsmi_set_gpu_perf_determinism_mode=amdsmi.amdsmi_set_gpu_perf_determinism_mode, clk_value=clk_value)
+        self.common.Test_API_Per_GPU(amdsmi_set_gpu_perf_determinism_mode=amdsmi.amdsmi_set_gpu_perf_determinism_mode, clk_value=clk_value)
         return
 
     # out of order: 0 then power_profile_preset_mask
@@ -1692,17 +1469,17 @@ class TestAmdSmiPython(unittest.TestCase):
 
     def test_topo_get_link_type(self):
         self.common.print_func_name('')
-        self.FuncWith2GPULoopArgs(amdsmi_topo_get_link_type=amdsmi.amdsmi_topo_get_link_type)
+        self.common.Test_Per_GPU_With_GPU(amdsmi_topo_get_link_type=amdsmi.amdsmi_topo_get_link_type)
         return
 
     def test_topo_get_link_weight(self):
         self.common.print_func_name('')
-        self.FuncWith2GPULoopArgs(amdsmi_topo_get_link_weight=amdsmi.amdsmi_topo_get_link_weight)
+        self.common.Test_Per_GPU_With_GPU(amdsmi_topo_get_link_weight=amdsmi.amdsmi_topo_get_link_weight)
         return
 
     def test_topo_get_numa_node_number(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_topo_get_numa_node_number=amdsmi.amdsmi_topo_get_numa_node_number)
+        self.common.Test_API_Per_GPU(amdsmi_topo_get_numa_node_number=amdsmi.amdsmi_topo_get_numa_node_number)
         return
 
     def test_topo_get_p2p_status(self):
@@ -1713,12 +1490,12 @@ class TestAmdSmiPython(unittest.TestCase):
             self.common.print(msg)
             self.skipTest(msg)
 
-        self.FuncWith2GPULoopArgs(amdsmi_topo_get_p2p_status=amdsmi.amdsmi_topo_get_p2p_status)
+        self.common.Test_Per_GPU_With_GPU(amdsmi_topo_get_p2p_status=amdsmi.amdsmi_topo_get_p2p_status)
         return
 
     def test_get_gpu_busy_percent(self):
         self.common.print_func_name('')
-        self.FuncWithGPULoopArgs(amdsmi_get_gpu_busy_percent=amdsmi.amdsmi_get_gpu_busy_percent)
+        self.common.Test_API_Per_GPU(amdsmi_get_gpu_busy_percent=amdsmi.amdsmi_get_gpu_busy_percent)
         return
 
 if __name__ == '__main__':
@@ -1736,9 +1513,9 @@ if __name__ == '__main__':
         verbose=0
         runner_verbosity = 1
     elif '-v' in sys.argv or '--verbose' in sys.argv:
-        verbose=1
+        verbose = 1
     elif '-vv' in sys.argv:
-        verbose=2
+        verbose = 2
 
     # If no -k or --keyword argument is given, print all available tests
     if not ('-k' in sys.argv or '--keyword' in sys.argv):

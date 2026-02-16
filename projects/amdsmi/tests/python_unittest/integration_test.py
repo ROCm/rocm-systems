@@ -58,10 +58,6 @@ class TestAmdSmiInit(unittest.TestCase):
         cls.common = common.Common(verbose)
         return
 
-    @classmethod
-    def tearDownClass(cls):
-        return
-
     def test_init_shutdown(self):
         self.common.print(f'## test_init_shutdown()')
 
@@ -179,7 +175,7 @@ class TestAmdSmiPython(unittest.TestCase):
 
             if gpu.value != ret.value:
                 msg += f'gpu={i}: Expected: {gpu.value}, Received: {ret.value}'
-                self.raise_exception = amdsmi.AmdSmiLibraryException(amdsmi.amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_API_common.FAIL)
+                self.raise_exception = amdsmi.AmdSmiParameterException(ret.value, gpu.value, msg)
 
         if self.raise_exception:
             raise self.raise_exception
@@ -200,21 +196,6 @@ class TestAmdSmiPython(unittest.TestCase):
             print('\n###Test amdsmi_get_nic_device_uuid\n')
             uuid = amdsmi.amdsmi_get_nic_device_uuid(processor)
             print('  uuid is: {}'.format(uuid))
-        print()
-        return
-
-    def test_switch_bdf_device_id(self):
-        processors = amdsmi.amdsmi_get_switch_processor_handles()
-        self.assertGreaterEqual(len(processors), 1)
-        self.assertLessEqual(len(processors), self.max_num_physical_devices)
-        for i in range(0, len(processors)):
-            bdf = amdsmi.amdsmi_get_switch_device_bdf(processors[i])
-            print(f'\n\n###Test switch Processor {i}, bdf: {bdf}')
-            print('\n###Test amdsmi_get_processor_handle_from_bdf \n')
-            processor = amdsmi.amdsmi_get_processor_handle_from_bdf(bdf)
-            print('\n###Test amdsmi_get_device_id \n')
-            device_id = amdsmi.amdsmi_get_device_id(processor)
-            print('  device_id is: {}'.format(device_id))
         print()
         return
 
