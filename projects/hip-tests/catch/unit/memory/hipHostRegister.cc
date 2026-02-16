@@ -42,8 +42,8 @@ THE SOFTWARE.
 #define ADDITIONAL_MEMORY_PERCENT 10
 
 static constexpr auto LEN{1024 * 1024};
-static constexpr auto LARGE_CHUNK_LEN{100 * LEN};
-static constexpr auto SMALL_CHUNK_LEN{10 * LEN};
+static constexpr auto LARGE_CHUNK_LEN{128 * LEN};
+static constexpr auto SMALL_CHUNK_LEN{8 * LEN};
 
 #if HT_AMD
 #define TEST_SKIP(arch, msg)                                                                       \
@@ -55,9 +55,13 @@ static constexpr auto SMALL_CHUNK_LEN{10 * LEN};
 #define TEST_SKIP(arch, msg)
 #endif
 
+template <typename T> __global__ void SetVal(T* in, T val) {
+  int i = threadIdx.x + blockIdx.x * blockDim.x;
+  in[i] = val;
+}
 template <typename T> __global__ void Inc(T* Ad) {
-  int tx = threadIdx.x + blockIdx.x * blockDim.x;
-  atomicAdd(Ad + tx, static_cast<T>(1));
+  int i = threadIdx.x + blockIdx.x * blockDim.x;
+  Ad[i]++;
 }
 
 template <typename T>
@@ -287,9 +291,11 @@ TEST_CASE("Unit_hipHostRegister_SameChunkRepeat") {
   REQUIRE(A != nullptr);
   for (int iter = 0; iter < ITERATION; iter++) {
     // Initialize buffer with data
-    memset(A, INITIAL_VAL, sizeBytes);
-    HIP_CHECK(hipHostRegister(A, sizeBytes, 0));
+    for(size_t i = 0; i < LEN; i++) {
+      A[i] = INITIAL_VAL;
+    }
 
+    HIP_CHECK(hipHostRegister(A, sizeBytes, 0));
     // Reference the registered device pointer A from inside the kernel:
     hipLaunchKernelGGL(Inc, dim3(LEN / 32), dim3(32), 0, 0, A);
     HIP_CHECK(hipGetLastError());
@@ -327,10 +333,12 @@ TEST_CASE("Unit_hipHostRegister_Chunks_SingleAttempt") {
   A = reinterpret_cast<int*>(malloc(sizeBytes));
   REQUIRE(A != nullptr);
   // Initialize buffer with data
-  memset(A, INITIAL_VAL, sizeBytes);
+  for (size_t i = 0; i < LARGE_CHUNK_LEN; i++) {
+    A[i] = INITIAL_VAL;
+  }
   int* arrPtr[LARGE_CHUNK_LEN / SMALL_CHUNK_LEN];
   for (int cnt = 0; cnt < (LARGE_CHUNK_LEN / SMALL_CHUNK_LEN); cnt++) {
-    arrPtr[cnt] = A + (cnt * sizeBytesChunk);
+    arrPtr[cnt] = A + (cnt * SMALL_CHUNK_LEN);
     HIP_CHECK(hipHostRegister(arrPtr[cnt], sizeBytesChunk, 0));
   }
   // Reference each registered chunk inside the kernel:
@@ -375,9 +383,11 @@ TEST_CASE("Unit_hipHostRegister_Chunks_RoundRobin") {
   A = reinterpret_cast<int*>(malloc(sizeBytes));
   REQUIRE(A != nullptr);
   // Initialize buffer with data
-  memset(A, INITIAL_VAL, sizeBytes);
+  for (size_t i = 0; i < LARGE_CHUNK_LEN; i++) {
+    A[i] = INITIAL_VAL;
+  }
   for (int cnt = 0; cnt < (LARGE_CHUNK_LEN / SMALL_CHUNK_LEN); cnt++) {
-    int* ptrA = A + (cnt * sizeBytesChunk);
+    int* ptrA = A + (cnt * SMALL_CHUNK_LEN);
     HIP_CHECK(hipHostRegister(ptrA, sizeBytesChunk, 0));
     hipLaunchKernelGGL(Inc, dim3(SMALL_CHUNK_LEN / 32), dim3(32), 0, 0, ptrA);
     HIP_CHECK(hipGetLastError());
@@ -414,8 +424,7 @@ TEST_CASE("Unit_hipHostRegister_Perform_hipMemset") {
   REQUIRE(A != nullptr);
   // Register the host pointer
   HIP_CHECK(hipHostRegister(A, sizeBytes, 0));
-  // Memset the registered pointer
-  HIP_CHECK(hipMemset(A, INITIAL_VAL, sizeBytes));
+  hipLaunchKernelGGL(SetVal, dim3(LEN / 32), dim3(32), 0, 0, A, INITIAL_VAL);
   // Reference the registered device pointer A from inside the kernel:
   hipLaunchKernelGGL(Inc, dim3(LEN / 32), dim3(32), 0, 0, A);
   HIP_CHECK(hipGetLastError());
@@ -451,7 +460,9 @@ TEST_CASE("Unit_hipHostRegister_Perform_hipMemcpy") {
   REQUIRE(A != nullptr);
   B = reinterpret_cast<int*>(malloc(sizeBytes));
   REQUIRE(B != nullptr);
-  memset(B, INITIAL_VAL, sizeBytes);
+  for (size_t i = 0; i < LEN; i++) {
+    B[i] = INITIAL_VAL;
+  }
   // Register the host pointer
   HIP_CHECK(hipHostRegister(A, sizeBytes, 0));
   // Memcpy from B to A
@@ -493,6 +504,11 @@ TEST_CASE("Unit_hipHostRegister_Oversubscription") {
   // Get available GPU memory and total GPU memory
   HIP_CHECK(hipMemGetInfo(&availableMem, &maxGpuMem));
   size_t allocsize = maxGpuMem + ((maxGpuMem * ADDITIONAL_MEMORY_PERCENT) / 100);
+  // The alloc size might not be a multiple of 4, so we make it divisible by 4 since we will use int*
+  {
+    size_t val = 3;
+    allocsize = allocsize & ~val;
+  }
   // Get free host In bytes
   size_t hostMemFree = HipTest::getMemoryAmount() * 1024 * 1024;
   // Ensure that allocsize < hostMemFree
@@ -501,29 +517,27 @@ TEST_CASE("Unit_hipHostRegister_Oversubscription") {
     return;
   }
   int* A = reinterpret_cast<int*>(malloc(allocsize));
+  size_t count = allocsize / sizeof(int);
   REQUIRE(A != nullptr);
-  size_t used_size = LEN;
-  // Inititalize only the first used_size bytes chunk
-  memset(A, INITIAL_VAL, used_size);
-  // Inititalize only the last used_size bytes chunk
-  memset((A + allocsize - used_size), INITIAL_VAL, used_size);
-  // Register the entire host memory chunk
+
+  for (size_t i = 0; i < count; i++) {
+    A[i] = INITIAL_VAL;
+  }
+
   HIP_CHECK(hipHostRegister(A, allocsize, 0));
-  // Reference only the first used_size bytes
-  hipLaunchKernelGGL(Inc, dim3(used_size / 32), dim3(32), 0, 0, A);
+
+  // We check the first 1024 and last 1024 bytes
+  hipLaunchKernelGGL(Inc, 1, 1024, 0, 0, A);
+  HIP_CHECK(hipGetLastError());
+  hipLaunchKernelGGL(Inc, 1, 1024, 0, 0, A + count - 1024);
   HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipDeviceSynchronize());
-  for (int i = 0; i < used_size; i++) {
+
+  for (int i = 0; i < 1024; i++) {
     REQUIRE(A[i] == EXPECTED_VAL);
+    REQUIRE(A[count - 1024 + i] == EXPECTED_VAL);
   }
-  // Reference only the last used_size bytes chunk
-  int* B = (A + allocsize - used_size);
-  hipLaunchKernelGGL(Inc, dim3(used_size / 32), dim3(32), 0, 0, B);
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipDeviceSynchronize());
-  for (int i = 0; i < used_size; i++) {
-    REQUIRE(B[i] == EXPECTED_VAL);
-  }
+
   HIP_CHECK(hipHostUnregister(A));
   free(A);
 }
@@ -805,7 +819,9 @@ TEST_CASE("Unit_hipHostRegister_MemAdvise_SetGet") {
   int* A;
   A = reinterpret_cast<int*>(malloc(sizeBytes));
   REQUIRE(A != nullptr);
-  memset(A, INITIAL_VAL, sizeBytes);
+  for (size_t i = 0; i < LEN; i++) {
+    A[i] = INITIAL_VAL;
+  }
   HIP_CHECK(hipHostRegister(A, sizeBytes, 0));
   int out = 0;
   SECTION("Attribute = hipMemAdviseSetReadMostly") {
