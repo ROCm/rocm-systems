@@ -1,3 +1,9 @@
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 #include <cassert>
 #include <map>
 #include <algorithm>
@@ -76,7 +82,7 @@ uint64_t VaMgr::AllocImpl(const uint64_t bytes, const uint64_t align) {
   uint64_t addr = 0;
   uint64_t align_bytes = bytes;
   const int retry = align == 0 ? 0 : 1;
-  const uint64_t new_align = align == 0 ? min_align_ : AlignUp(align, min_align_);
+  const uint64_t new_align = align == 0 ? min_align_ : rocr::AlignUp(align, min_align_);
 
   lock_guard<mutex> gard(lock_);
   for (int i = 0; i <= retry; i++) {

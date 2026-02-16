@@ -22,6 +22,16 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * Roofline binaries compiled from [rocm-amdgpu-bench](https://github.com/ROCm/rocm-amdgpu-bench) repository have been removed from the project, as Roofline runtime compilation performs the same work as the Roofline binaries.
   * You can collect standalone Roofline empirical peaks without running the entire ROCm Compute Profiler's profile mode, through an entry point in [benchmark.py](https://github.com/ROCm/rocm-systems/blob/HEAD/projects/rocprofiler-compute/src/utils/benchmark.py). Running the `benchmark.py` Python file replaces calling standalone Roofline binary.
 
+* Synced latest metric descriptions to public facing documentation
+    * Updated metric units to be more human readable in public facing documentation
+
+* ``--output-directory`` option in profile mode to provide parameterized output directory for the profiling data.
+
+* Detection of MPI ranks while profiling and creation of output directories based on MPI rank.
+
+* Added `--experimental` flag to enable experimental features that are under development. This flag is required when using any experimental features. 
+  * Use `rocprof-compute --experimental --help` to see currently available experimental features.
+
 ### Changed
 
 * Default output format for the underlying ROCprofiler-SDK tool has been changed from ``csv`` to ``rocpd``.
@@ -32,6 +42,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Standalone roofline (--roof-only option) in profile mode now creates HTML file output instead of PDF file output for roofline charts
 
 ### Resolved issues
+
+* Improved VALU FP16 roofline benchmark to achieve peak performance by using vector types for packed math instructions
 
 * Implemented `NOISE_CLAMP` for L2 cache metrics to handle negative values from multi-pass profiling variance:
   * Negative values are clamped to 0 (eliminates physically impossible negative counts)
@@ -69,6 +81,10 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 ### Optimized
 
 * Improved the responsiveness of menu and dropdown buttons in TUI analyze mode for a smoother user experience.
+
+### Deprecated
+
+* ``--path`` and ``--subpath`` have been deprecated and replaced with a unified ``--output-directory``
 
 ## ROCm Compute Profiler 3.4.0 for ROCm 7.2.0
 

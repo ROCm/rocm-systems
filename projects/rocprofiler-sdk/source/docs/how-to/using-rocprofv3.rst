@@ -529,24 +529,22 @@ For the description of the fields in the output file, see :ref:`output-file-fiel
 RCCL trace
 ++++++++++++
 
-`RCCL <https://github.com/ROCm/rccl>`_ (pronounced "Rickle") is a stand-alone library of standard collective communication routines for GPUs. This option traces those communication routines.
+This section demonstrates how to trace `RCCL` (Rickle) collective communication routines using rocprofv3. `RCCL <https://github.com/ROCm/rccl>`_ (pronounced "Rickle") is a stand-alone library that provides standard collective communication operations for GPUs. 
+The trace output is captured in a rocpd database file and can be converted to pftrace format for visualization in the Perfetto UI. This approach is useful for analyzing GPU communication performance and identifying bottlenecks in collective operations.
 
 .. code-block:: shell
 
-    rocprofv3 --rccl-trace --output-format csv -- <application_path>
+    rocprofv3 --rccl-trace --sys-trace -- <application_path>
 
-The preceding command generates a ``rccl_api_trace`` file prefixed with the process ID.
+The preceding command generates a rocpd database file prefixed with the process ID which can be converted to pftrace to be visualized in Perfetto UI.
 
 .. code-block:: shell
 
-    $ cat 197_rccl_api_trace.csv
+    $ /opt/rocm/bin/rocpd2pftrace -i 163852_results.db
 
-Here are the contents of ``rccl_api_trace.csv`` file:
+Here is the RCCL trace visualized in Perfetto UI:
 
-.. csv-table:: RCCL trace
-   :file: /data/rccl_trace.csv
-   :widths: 10,10,10,10,10,20,20
-   :header-rows: 1
+.. image:: /data/perfetto_rccl.png
 
 rocDecode trace
 ++++++++++++++++
@@ -913,6 +911,19 @@ You can also customize the counters according to the requirement. Such counters 
 
 For a comprehensive list of counters available on MI200, see `MI200 performance counters and metrics <https://rocm.docs.amd.com/en/latest/conceptual/gpu-arch/mi300-mi200-performance-counters.html>`_.
 
+.. note::
+
+   Counter Dimension Collection
+   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+   When collecting counters with multiple dimensions or instances (e.g., ``TCC_MISS`` with ``DIMENSION_INSTANCE[0:15]``), individual dimension values cannot be collected separately using bracket notation such as ``TCC_MISS[0]`` or ``TCC_MISS[15]`` in input files.
+
+   **To collect aggregated values:**
+      Specify the counter name without dimension specifiers (e.g., ``pmc: TCC_MISS``). The ``rocprofv3`` tool will automatically collect accumulated values across all instances.
+
+   **To collect per-instance values:**
+      Use JSON output format, which includes detailed dimension information for individual counter instances.
+   
 Counter collection using input file
 +++++++++++++++++++++++++++++++++++++
 

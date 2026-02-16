@@ -400,8 +400,6 @@ struct ncclKernelPlanner {
   bool persistent;
   // The list of user streams aggregated over all tasks present.
   struct ncclCudaStreamList* streams;
-  // Keep track of the number of user streams
-  int numStreams;
   // The most recent user stream. Ignored if streams==nullptr
   cudaStream_t streamRecent;
   // The graph capturing all user streams or invalid if none. Thus we restrict the
@@ -688,7 +686,9 @@ struct ncclComm {
   volatile bool collTraceExit;
   bool collTraceEnabled;
 #endif
-
+#ifdef ENABLE_WARP_SPEED
+  int warpSpeedChannelMultiplier;
+#endif
 #ifdef ENABLE_FAULT_INJECTION
   uint64_t faults;
 #endif

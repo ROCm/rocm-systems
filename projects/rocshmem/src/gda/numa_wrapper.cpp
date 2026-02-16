@@ -104,7 +104,7 @@ int NUMAWrapper::max_node(void) {
 
 long NUMAWrapper::move_pages(int pid, unsigned long count, void *pages[count],
                              const int nodes[count], int status[count], int flags) {
-  return move_pages(pid, count, pages, nodes, status, flags);
+  return numa.move_pages(pid, count, pages, nodes, status, flags);
 }
 
 int NUMAWrapper::distance(int node1, int node2) {

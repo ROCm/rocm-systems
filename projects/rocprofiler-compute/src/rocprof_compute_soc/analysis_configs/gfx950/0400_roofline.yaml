@@ -61,7 +61,7 @@ Panel Config:
           value: AVG((((SQ_INSTS_VALU_MFMA_MOPS_F6F4 * 512)) / ((End_Timestamp - Start_Timestamp)
             / 1e9)) / 1e9)
           unit: GFLOP/s
-          peak: $MFMA_FLOPs_F6F4_empirical_peak
+          peak: $MFMAF6F4Flops_empirical_peak
         MFMA IOPs (Int8):
           value: AVG((((SQ_INSTS_VALU_MFMA_MOPS_I8 * 512)) / ((End_Timestamp - Start_Timestamp)
             / 1e9)) / 1e9)

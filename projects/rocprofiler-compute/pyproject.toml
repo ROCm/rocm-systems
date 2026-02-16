@@ -29,7 +29,7 @@ extend-exclude = [
 # Enable Pyflakes (F), pycodestyle (E, W for PEP8), aisort (I),
 # type annotation (ANN), and f-string (UP) rules.
 select = ["E", "W", "F", "I", "ANN", "UP", "PTH"]
-ignore = ["E713", "E711", "UP045", "PTH123", "PTH207"]
+ignore = ["E713", "E711", "UP045", "PTH123", "PTH207", "ANN003"]
 fixable = ["ALL"]
 unfixable = []
 
@@ -107,9 +107,16 @@ markers = [
     "roofline_2",
     "path",
     "sci_notion",
+    "iteration_multiplexing",
     "iteration_multiplexing_1",
     "iteration_multiplexing_2",
     "iteration_multiplexing_stochastic",
     "noise_clamp",
     "torch_ops",
+    "multi_rank",
+    "experimental_feature",
+    "skip",
+    "time_unit_conversion",
+    "time_unit_edge_cases",
+    "time_unit_integration",
 ]
