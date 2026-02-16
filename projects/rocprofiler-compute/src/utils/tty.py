@@ -433,7 +433,6 @@ def show_torch_operator_hierarchy(
 
         hierarchy_lines = []
         for level, part in enumerate(parts):
-            prefix = "/".join(parts[: level + 1])
             if level == 0:
                 line = f"{part}"
             else:
