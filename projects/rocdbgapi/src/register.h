@@ -138,6 +138,7 @@ enum class amdgpu_regnum_t : uint32_t
   xnack_mask_64,      /* XNACK mask for wave64 wavefronts.  */
   flat_scratch,       /* Flat scratch.  */
   scratch_base = flat_scratch,
+  sched_mode,         /* Scheduling mode configuration.  */
 
   /* SHADER_CYCLES_LO / SHADER_CYCLES_HI / DVGPR_ALLOC_LO / DVGPR_ALLOC_HI ?*/
 

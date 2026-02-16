@@ -511,6 +511,13 @@ protected:
                                        write, size);
   }
 
+  bool save_sched_mode () const override
+  {
+    version_t kfd_ioctl_version = get_kfd_version ();
+
+    return kfd_ioctl_version >= version_t {1, 20};
+  }
+
 private:
   static std::string marketing_name (uint32_t vendor_id, uint32_t device_id,
                                      uint32_t revision_id);

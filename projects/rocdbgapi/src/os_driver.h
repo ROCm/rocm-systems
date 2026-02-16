@@ -559,6 +559,11 @@ public:
   xfer_agent_memory_partial (os_agent_id_t agent, agent_address_t address,
                              void *read, const void *write, size_t *size) const
     = 0;
+
+  /* Helper to figure out if a given driver supports certain features.  */
+
+  /* Tells if the CWSR trap handler saves the SCHED_MODE register.  */
+  virtual bool save_sched_mode () const = 0;
 };
 
 /* OS driver class that implements no access that can be used if there is no
@@ -758,6 +763,11 @@ public:
     /* Suppress warnings in release builds.  */
     [] (auto &&...) {}(read, write);
     return AMD_DBGAPI_STATUS_ERROR_MEMORY_ACCESS;
+  }
+
+  bool save_sched_mode () const
+  {
+    return false;
   }
 };
 
