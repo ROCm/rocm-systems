@@ -40,6 +40,7 @@ import ctypes
 import os
 import sys
 import unittest
+
 import common
 from common import Common
 

@@ -185,6 +185,39 @@ class TestAmdSmiPython(unittest.TestCase):
             raise self.raise_exception
         return
 
+    def test_nic_bdf_device_id(self):
+        processors = amdsmi.amdsmi_get_nic_processor_handles()
+        self.assertGreaterEqual(len(processors), 1)
+        self.assertLessEqual(len(processors), self.max_num_physical_devices)
+        for i in range(0, len(processors)):
+            bdf = ''
+            nic_info = amdsmi.amdsmi_get_nic_info(processors[i])
+            if nic_info:
+                bdf = nic_info['bdf']
+            print(f'\n\n###Test nic Processor {i}, bdf: {bdf}')
+            print('\n###Test amdsmi_get_processor_handle_from_bdf\n')
+            processor = amdsmi.amdsmi_get_processor_handle_from_bdf(bdf)
+            print('\n###Test amdsmi_get_nic_device_uuid\n')
+            uuid = amdsmi.amdsmi_get_nic_device_uuid(processor)
+            print('  uuid is: {}'.format(uuid))
+        print()
+        return
+
+    def test_switch_bdf_device_id(self):
+        processors = amdsmi.amdsmi_get_switch_processor_handles()
+        self.assertGreaterEqual(len(processors), 1)
+        self.assertLessEqual(len(processors), self.max_num_physical_devices)
+        for i in range(0, len(processors)):
+            bdf = amdsmi.amdsmi_get_switch_device_bdf(processors[i])
+            print(f'\n\n###Test switch Processor {i}, bdf: {bdf}')
+            print('\n###Test amdsmi_get_processor_handle_from_bdf \n')
+            processor = amdsmi.amdsmi_get_processor_handle_from_bdf(bdf)
+            print('\n###Test amdsmi_get_device_id \n')
+            device_id = amdsmi.amdsmi_get_device_id(processor)
+            print('  device_id is: {}'.format(device_id))
+        print()
+        return
+
     def test_get_socket_info(self):
         self.common.print_func_name('')
 
