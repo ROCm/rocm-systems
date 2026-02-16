@@ -600,7 +600,7 @@ void
 memory_cache_t<AddressType>::prefetch (AddressType address,
                                        amd_dbgapi_size_t size)
 {
-  if (policy == policy_t::uncached || size == 0)
+  if (size == 0)
     return;
 
   dbgapi_assert (address < (address + size) && "invalid size");
@@ -649,7 +649,7 @@ memory_cache_t<AddressType>::write_back (AddressType address,
                                          amd_dbgapi_size_t size)
 {
   std::exception_ptr exception;
-  if (policy != policy_t::write_back || size == 0)
+  if (size == 0)
     return;
 
   dbgapi_assert (address < (address + size) && "invalid size");
@@ -771,8 +771,8 @@ memory_cache_t<AddressType>::xfer_global_memory (AddressType address,
   auto begin = m_cache_line_map.lower_bound (first_line);
   auto end = m_cache_line_map.upper_bound (last_line);
 
-  /* If uncached or there are no cache lines affected by this access.  */
-  if (policy == policy_t::uncached || begin == end)
+  /* If there are no cache lines affected by this access.  */
+  if (begin == end)
     return m_xfer_global_memory (address, read, write, size);
 
   /* For cached accesses, handle one cache line at a time.  */
@@ -810,10 +810,6 @@ memory_cache_t<AddressType>::xfer_global_memory (AddressType address,
   else
     {
       memcpy (&cache_line.m_data[0] + offset, write, size);
-
-      if (policy != policy_t::write_back)
-        return m_xfer_global_memory (address, nullptr, write, size);
-
       cache_line.m_dirty = true;
     }
 
