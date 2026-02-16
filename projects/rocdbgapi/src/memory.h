@@ -530,24 +530,13 @@ public:
                  void *value) const;
 };
 
+/* A write-back memory cache.  Data is immediately updated in the cache, and
+   later updated in memory when the cache is flushed.  */
+
 template <typename AddressType> class memory_cache_t
 {
 public:
-  enum class policy_t
-  {
-    /* If uncached is used, data is immediately written to global memory, and
-       is not written to the cache.  */
-    uncached = 0,
-    /* If write-through is used, data is written both to global memory and to
-       the cache.  */
-    write_through,
-    /* If write-back is used, data is immediately updated in the cache, and
-       later updated in memory when the cache is flushed.  */
-    write_back
-  };
-
   static constexpr size_t cache_line_size = 64;
-  static constexpr policy_t policy = policy_t::write_back;
 
 private:
   using delegate_fn_type
