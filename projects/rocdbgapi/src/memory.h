@@ -549,12 +549,11 @@ public:
   }
   ~memory_cache_t () { dbgapi_assert (m_cache_line_map.empty ()); }
 
-  bool contains_all (agent_address_t address, amd_dbgapi_size_t size) const;
-
-  /* Create cache lines if not already valid, and immediately fill them in.  */
-  void prefetch (agent_address_t address, amd_dbgapi_size_t size,
-                 memory_pool_t &pool);
-
+  /* Create a cache entry for the [address, address+size) range.  The range
+     must not be already cached.  Returns a non-owning pointer to the
+     contiguous block of cached data covering the specified range.  */
+  std::byte *new_entry (agent_address_t address, amd_dbgapi_size_t size,
+                        memory_pool_t &pool);
   /* Discard all cache lines in the specified range.  If FORCE_DISCARD
      is true, dirty lines are silently dropped.  Otherwise it is an error to
      discarded dirty cache lines.  */

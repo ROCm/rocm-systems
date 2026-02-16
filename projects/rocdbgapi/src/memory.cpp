@@ -501,37 +501,17 @@ agent_address_space_t::convert (
   throw api_error_t (AMD_DBGAPI_STATUS_ERROR_INVALID_ADDRESS_SPACE_CONVERSION);
 }
 
-bool
-memory_cache_t::contains_all (agent_address_t address,
-                              amd_dbgapi_size_t size) const
-{
-  dbgapi_assert (address < (address + size) && "invalid size");
-  auto cache_line_begin = address;
-  auto cache_line_end = address + size;
-
-  size_t cache_line_size = 1;
-
-  fatal_error ("boo!");
-  for (auto cache_line_address = cache_line_begin;
-       cache_line_address < cache_line_end;
-       cache_line_address += cache_line_size)
-    if (m_cache_line_map.find (cache_line_address) == m_cache_line_map.end ())
-      return false;
-
-  return true;
-}
-
 static bool ranges_overlap (agent_address_t a_addr, amd_dbgapi_size_t a_size,
                             agent_address_t b_addr, amd_dbgapi_size_t b_size);
 
-void
-memory_cache_t::prefetch (agent_address_t address, amd_dbgapi_size_t size,
-                          memory_pool_t &pool)
+std::byte *
+memory_cache_t::new_entry (agent_address_t address, amd_dbgapi_size_t size,
+                           memory_pool_t &pool)
 {
   TRACE_BEGIN (param_in (address), param_in (size));
 
   if (size == 0)
-    return;
+    return static_cast<std::byte *> (nullptr);
 
   dbgapi_assert (address < (address + size) && "invalid size");
 
@@ -565,9 +545,10 @@ memory_cache_t::prefetch (agent_address_t address, amd_dbgapi_size_t size,
       fatal_error ("whops");
       /* If a memory access error exception is raised while prefetching, simply
          drop the prefetch.  */
-      return;
+      return static_cast<std::byte *> (nullptr);
     }
 
+  return it->second.m_data;
   TRACE_END ();
 }
 
