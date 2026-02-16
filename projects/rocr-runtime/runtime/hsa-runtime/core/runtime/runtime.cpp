@@ -1434,6 +1434,13 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
   std::lock_guard<std::mutex> lock(ipc_sock_server_lock_);
 #if defined(__linux__)
   if (!ipc_sock_server_conns_.size()) { // create new runtime socket server
+    // Ensure any previous IPC server thread handle is released before starting a new one.
+    if (ipc_sock_server_thread_) {
+      os::WaitForThread(ipc_sock_server_thread_);
+      os::CloseThread(ipc_sock_server_thread_);
+      ipc_sock_server_thread_ = nullptr;
+    }
+
     struct sockaddr_un address;
     ipc_sock_server_fd_ = socket(AF_UNIX, SOCK_STREAM, 0);
     assert(ipc_sock_server_fd_ > -1 && "DMA buffer could not be exported for IPC!");
@@ -1462,6 +1469,11 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
     // Socket server needs to last for the lifetime of the runtime instance
     // as the attach life cycle is unknown.
     ipc_sock_server_thread_ = os::CreateThread(AsyncIPCSockServerConnLoop, NULL);
+    if (!ipc_sock_server_thread_) {
+      close(ipc_sock_server_fd_);
+      ipc_sock_server_fd_ = -1;
+      return HSA_STATUS_ERROR;
+    }
   }
 #else
   assert(!"Unimplemented! Do we really need this?");
