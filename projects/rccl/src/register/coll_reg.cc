@@ -182,6 +182,8 @@ ncclResult_t ncclRegisterCollBuffers(
   } else if (info->protocol == NCCL_PROTO_SIMPLE) {
     // IPC buffer registration
     if (info->func == ncclFuncReduceScatter && info->algorithm != NCCL_ALGO_COLLNET_DIRECT) goto exit;
+    // Skip IPC buffer registration for AllReduceWithBias
+    if (info->func == ncclFuncAllReduce && info->acc != nullptr) goto exit;
     if (info->algorithm == NCCL_ALGO_RING && ((info->func == ncclFuncAllReduce && info->sendbuff == info->recvbuff) || info->func == ncclFuncReduce)) goto exit;
     if (info->algorithm == NCCL_ALGO_TREE && info->sendbuff == info->recvbuff) goto exit;
     if (info->algorithm == NCCL_ALGO_COLLNET_CHAIN && info->sendbuff == info->recvbuff && comm->maxLocalRanks > 1) goto exit;
