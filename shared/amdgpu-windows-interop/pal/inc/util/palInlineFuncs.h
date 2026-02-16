@@ -1249,12 +1249,7 @@ constexpr uint32 HashString(
 ///
 /// @returns 32-bit hash generated from the provided string.
 template <class Char>
-#if defined(__cpp_consteval)
-consteval
-#else
-constexpr
-#endif
-uint32 CompileTimeHashString(
+consteval uint32 CompileTimeHashString(
     const Char* pString)
 {
     return HashString(pString);

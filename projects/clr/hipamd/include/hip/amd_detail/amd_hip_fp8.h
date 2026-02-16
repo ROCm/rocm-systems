@@ -987,11 +987,20 @@ __FP8_HOST_DEVICE_STATIC__ __hip_fp8_storage_t __hip_cvt_double_to_e8m0(
   __hip_fp8_storage_t e8m0;
   if (double_exp == 0x0U) {
     e8m0 = 0x0U;
-  } else if ((double_exp - 0x0380U) > 0x00FF) {  // if double is NaN/Inf/or too large
-    e8m0 = hip_detail::e8m0_NaN;
   } else {
-    e8m0 =
-        double_exp - 0x0380U;  // shift due to bias difference between double and single precision
+    // Use signed arithmetic to avoid unsigned underflow for small normal exponents
+    // 0x0380 is a bias difference between double and single precision (1023 - 127)
+    const int float_exp = static_cast<int>(double_exp) - 0x0380;
+    if (float_exp <= 0) {
+      // Underflow to subnormal/zero in float domain
+      e8m0 = 0x0U;
+    } else if (float_exp > 0x00FF) {
+      // NaN/Inf or overflow beyond 8-bit exponent range
+      e8m0 = hip_detail::e8m0_NaN;
+    } else {
+      // Valid finite range [1..254], 0xFF yields NaN and is later handled by saturation
+      e8m0 = static_cast<__hip_fp8_storage_t>(float_exp);
+    }
   }
 
   // If there is a mantissa and the exp wont overflow round up

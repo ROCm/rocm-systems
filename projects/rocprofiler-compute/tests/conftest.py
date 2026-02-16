@@ -24,6 +24,7 @@
 ##############################################################################
 
 import os
+import shutil
 import subprocess
 import sys
 from importlib.machinery import SourceFileLoader
@@ -68,6 +69,28 @@ def pytest_addoption(parser):
 
 @pytest.fixture
 def binary_handler_profile_rocprof_compute(request):
+    """
+    Fixture to run rocprof-compute profile command.
+
+    Args:
+        config: Test configuration dictionary containing app commands.
+        workload_dir: Directory to store profiling output.
+        options: Additional command-line options.
+        check_success: If True, assert that the command succeeds.
+        roof: If True, enable roofline.
+        app_name: Key in config dict for the application command.
+        attach_detach_para: Parameters for attach/detach mode.
+        skip_app_name: If True, skip adding --name option.
+        workload_dir_type: "output_directory" or "default".
+        num_ranks: Number of MPI ranks (1 = no MPI, >1 = use mpirun).
+        capture_output: If True, capture stdout/stderr and return
+            (returncode, stdout, stderr) tuple instead of just returncode.
+
+    Returns:
+        If capture_output is False: returncode (int)
+        If capture_output is True: (returncode, stdout, stderr) tuple
+    """
+
     def _handler(
         config,
         workload_dir,
@@ -76,7 +99,15 @@ def binary_handler_profile_rocprof_compute(request):
         roof=False,
         app_name="app_1",
         attach_detach_para=None,
+        skip_app_name=False,
+        workload_dir_type="output_directory",
+        num_ranks=1,
+        capture_output=False,
     ):
+        # Skip test if multiple ranks are requested but mpirun is not available
+        if num_ranks > 1 and shutil.which("mpirun") is None:
+            pytest.skip(f"mpirun not found, skipping {request.node.name}")
+
         if request.config.getoption("--rocprofiler-sdk-tool-path"):
             options.extend(
                 [
@@ -88,14 +119,21 @@ def binary_handler_profile_rocprof_compute(request):
             baseline_opts = [
                 "build/rocprof-compute.bin",
                 "profile",
-                "-n",
-                app_name,
                 "-VVV",
             ]
+            if not skip_app_name:
+                baseline_opts.extend(["-n", app_name])
             if not roof:
                 baseline_opts.append("--no-roof")
 
-            command_rocprof_compute = baseline_opts + options + ["--path", workload_dir]
+            command_rocprof_compute = baseline_opts + options
+
+            if workload_dir_type == "output_directory":
+                command_rocprof_compute = command_rocprof_compute + [
+                    "--output-directory",
+                    workload_dir,
+                ]
+
             if not attach_detach_para:
                 command_rocprof_compute = (
                     command_rocprof_compute + ["--"] + config[app_name]
@@ -110,27 +148,49 @@ def binary_handler_profile_rocprof_compute(request):
                         "--attach-duration-msec",
                         str(attach_detach_para["attach-duration-msec"]),
                     ]
+
+            # Wrap with mpirun if num_ranks > 1
+            if num_ranks > 1:
+                command_rocprof_compute = [
+                    "mpirun",
+                    "-n",
+                    str(num_ranks),
+                ] + command_rocprof_compute
 
             process = subprocess.run(
                 command_rocprof_compute,
                 text=True,
+                capture_output=capture_output,
             )
-            # verify run status
+            # Verify run status
             if check_success:
                 assert process.returncode == 0
+
+            # Return output tuple if capture_output is enabled
+            if capture_output:
+                return process.returncode, process.stdout, process.stderr
+
             return process.returncode
         else:
+            # Non-binary mode: use Python module directly or subprocess
             baseline_opts = [
                 "rocprof-compute",
                 "profile",
-                "-n",
-                app_name,
                 "-VVV",
             ]
+            if not skip_app_name:
+                baseline_opts.extend(["-n", app_name])
             if not roof:
                 baseline_opts.append("--no-roof")
 
-            command_rocprof_compute = baseline_opts + options + ["--path", workload_dir]
+            command_rocprof_compute = baseline_opts + options
+
+            if workload_dir_type == "output_directory":
+                command_rocprof_compute = command_rocprof_compute + [
+                    "--output-directory",
+                    workload_dir,
+                ]
+
             if not attach_detach_para:
                 command_rocprof_compute = (
                     command_rocprof_compute + ["--"] + config[app_name]
@@ -146,6 +206,39 @@ def binary_handler_profile_rocprof_compute(request):
                         str(attach_detach_para["attach-duration-msec"]),
                     ]
 
+            # For multi-rank, use mpirun to run the command
+            if num_ranks > 1:
+                # Use src/rocprof-compute instead of rocprof-compute
+                command_rocprof_compute[0] = "src/rocprof-compute"
+                command_rocprof_compute = [
+                    "mpirun",
+                    "-n",
+                    str(num_ranks),
+                ] + command_rocprof_compute
+
+            # For capture_output or multi-rank, run the command with subprocess
+            if capture_output or num_ranks > 1:
+                # Use src/rocprof-compute instead of rocprof-compute
+                if num_ranks == 1:
+                    command_rocprof_compute[0] = "src/rocprof-compute"
+
+                process = subprocess.run(
+                    command_rocprof_compute,
+                    text=True,
+                    capture_output=capture_output,
+                )
+
+                # Verify run status
+                if check_success:
+                    assert process.returncode == 0
+
+                # Return output tuple if capture_output is enabled
+                if capture_output:
+                    return process.returncode, process.stdout, process.stderr
+
+                return process.returncode
+
+            # Default single-rank mode: patch sys.argv and call main() directly
             with pytest.raises(SystemExit) as e:
                 with patch(
                     "sys.argv",
@@ -162,6 +255,16 @@ def binary_handler_profile_rocprof_compute(request):
 
 @pytest.fixture
 def binary_handler_analyze_rocprof_compute(request):
+    """
+    Fixture to run rocprof-compute analyze command.
+
+    Args:
+        arguments: Command-line arguments for the analyze command.
+
+    Returns:
+        returncode (int): Exit code from the command.
+    """
+
     def _handler(arguments):
         if request.config.getoption("--call-binary"):
             process = subprocess.run(
