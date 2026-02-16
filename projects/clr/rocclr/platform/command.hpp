@@ -246,16 +246,23 @@ union CopyMetadata {
     uint32_t copyEnginePreference_ : 2;
     uint32_t srcAccessOrder_ : 2;       //!< Source access ordering for batch copies
     uint32_t preferOverlapCompute_ : 1; //!< Prefer overlap with compute work
+    uint32_t reserved_ : 26;            //!< Reserved for future use
   };
   uint32_t flags_;
   CopyMetadata() : flags_(0) {}
   CopyMetadata(bool isAsync, CopyEnginePreference copyEnginePreference)
-      : isAsync_(isAsync), copyEnginePreference_(copyEnginePreference),
-        srcAccessOrder_(kSrcAccessOrderStream), preferOverlapCompute_(0) {}
+      : isAsync_(isAsync),
+        copyEnginePreference_(copyEnginePreference),
+        srcAccessOrder_(kSrcAccessOrderStream),
+        preferOverlapCompute_(0),
+        reserved_(0) {}
   CopyMetadata(bool isAsync, CopyEnginePreference copyEnginePreference,
                SrcAccessOrder srcAccessOrder, bool preferOverlap = false)
-      : isAsync_(isAsync), copyEnginePreference_(copyEnginePreference),
-        srcAccessOrder_(srcAccessOrder), preferOverlapCompute_(preferOverlap ? 1 : 0) {}
+      : isAsync_(isAsync),
+        copyEnginePreference_(copyEnginePreference),
+        srcAccessOrder_(srcAccessOrder),
+        preferOverlapCompute_(preferOverlap ? 1 : 0),
+        reserved_(0) {}
 };
 
 // Interface to callback to allocate kernel args from the graph kernel arg pool.
@@ -1142,7 +1149,7 @@ class BatchCopyMemoryCommand : public Command {
   virtual void submit(device::VirtualDevice& device) { device.submitBatchCopyMemory(*this); }
 
   //! Return the vector of copy operations
-  const std::vector<BatchCopyOp>& copyOps() const { return copyOps_; }
+  std::vector<BatchCopyOp>& copyOps() { return copyOps_; }
 
   //! Return the number of copy operations in the batch
   size_t count() const { return copyOps_.size(); }

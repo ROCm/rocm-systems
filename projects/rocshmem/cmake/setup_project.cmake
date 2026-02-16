@@ -44,7 +44,12 @@ if (NOT DEFINED CACHE{ROCM_MAJOR_VERSION})
   cmake_path(GET version_file_dir PARENT_PATH rocm_path)
 
   ## Check for ROCm version
-  file(READ ${rocm_version_file} rocm_version_string)
+  set(EXPLICIT_ROCM_VERSION "" CACHE STRING "Explicit ROCM version to compile to (auto detect if empty)")
+  if(EXPLICIT_ROCM_VERSION)
+    set(rocm_version_string "${EXPLICIT_ROCM_VERSION}")
+  else()
+    file(READ ${rocm_version_file} rocm_version_string)
+  endif()
   string(REGEX MATCH "([0-9]+)\\.([0-9]+)\\.([0-9]+)" rocm_version_matches ${rocm_version_string})
   if (rocm_version_matches)
     set(ROCM_MAJOR_VERSION ${CMAKE_MATCH_1} CACHE INTERNAL "")

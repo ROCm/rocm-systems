@@ -630,6 +630,15 @@ struct formatter<hipDriverEntryPointQueryResult> : rocprofiler::hip::details::ba
     }
 };
 #endif
+
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 23
+ROCP_SDK_HIP_FORMATTER(hipArrayMemoryRequirements,
+                       "{}alignment={}, size={}{}",
+                       '{',
+                       v.alignment,
+                       v.size,
+                       '}')
+#endif
 }  // namespace fmt
 
 #undef ROCP_SDK_HIP_FORMATTER
