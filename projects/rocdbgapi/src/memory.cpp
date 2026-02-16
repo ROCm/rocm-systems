@@ -695,55 +695,6 @@ host_address_space_t::convert (const wave_t &wave,
 }
 
 template <typename AddressType>
-void
-memory_cache_t<AddressType>::fetch_cache_line (cache_line_t &cache_line,
-                                               AddressType address) const
-{
-  dbgapi_assert (!cache_line.m_dirty);
-
-  size_t xfer_size = m_xfer_global_memory (address, &cache_line.m_data[0],
-                                           nullptr, cache_line.m_data.size ());
-
-  if (xfer_size != cache_line.m_data.size ())
-    throw memory_access_error_t (
-      /* FIXME_lmoriche:  */
-      address_space_t::global (), address + cache_line_size);
-
-  cache_line.m_dirty = false;
-}
-
-template <typename AddressType>
-void
-memory_cache_t<AddressType>::commit_cache_line (cache_line_t &cache_line,
-                                                AddressType address) const
-{
-  if (!cache_line.m_dirty)
-    return;
-
-  size_t xfer_size = m_xfer_global_memory (
-    address, nullptr, &cache_line.m_data[0], cache_line.m_data.size ());
-
-  if (xfer_size != cache_line.m_data.size ())
-    throw memory_access_error_t (
-      /* FIXME_lmoriche:  */
-      address_space_t::global (), address + xfer_size);
-
-  cache_line.m_dirty = false;
-}
-
-template <typename AddressType>
-void
-memory_cache_t<AddressType>::allocate_0_cache_line (
-  cache_line_t &cache_line) const
-{
-  dbgapi_assert (!cache_line.m_dirty);
-
-  memset (&cache_line.m_data[0], '\0', cache_line.m_data.size ());
-
-  cache_line.m_dirty = false;
-}
-
-template <typename AddressType>
 bool
 memory_cache_t<AddressType>::contains_all (AddressType address,
                                            amd_dbgapi_size_t size) const

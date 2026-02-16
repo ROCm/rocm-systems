@@ -606,10 +606,6 @@ private:
   std::map<AddressType, cache_line_t> m_cache_line_map;
   delegate_fn_type const m_xfer_global_memory;
 
-  void fetch_cache_line (cache_line_t &cache_line, AddressType address) const;
-  void commit_cache_line (cache_line_t &cache_line, AddressType address) const;
-  void allocate_0_cache_line (cache_line_t &cache_line) const;
-
   size_t xfer_global_memory (AddressType address, void *read,
                              const void *write, size_t size);
 
