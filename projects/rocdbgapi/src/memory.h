@@ -587,14 +587,14 @@ public:
    the cache is flushed.  Accesses to uncached lines are forwarded
    directly to memory.  */
 
-template <typename AddressType> class memory_cache_t
+class memory_cache_t
 {
 public:
   static constexpr size_t cache_line_size = 64;
 
 private:
   using delegate_fn_type
-    = std::function<size_t (AddressType /* address */, void * /* read */,
+    = std::function<size_t (agent_address_t /* address */, void * /* read */,
                             const void * /* write */, size_t /* size */)>;
 
   struct cache_line_t
@@ -603,10 +603,10 @@ private:
     bool m_dirty{ false };
   };
 
-  std::map<AddressType, cache_line_t> m_cache_line_map;
+  std::map<agent_address_t, cache_line_t> m_cache_line_map;
   delegate_fn_type const m_xfer_global_memory;
 
-  size_t xfer_global_memory (AddressType address, void *read,
+  size_t xfer_global_memory (agent_address_t address, void *read,
                              const void *write, size_t size);
 
 public:
@@ -616,29 +616,29 @@ public:
   }
   ~memory_cache_t () { dbgapi_assert (m_cache_line_map.empty ()); }
 
-  bool contains_all (AddressType address, amd_dbgapi_size_t size) const;
+  bool contains_all (agent_address_t address, amd_dbgapi_size_t size) const;
 
   /* Create cache lines if not already valid, and immediately fill them in.  */
-  void prefetch (AddressType address, amd_dbgapi_size_t size);
+  void prefetch (agent_address_t address, amd_dbgapi_size_t size);
 
   /* Discard all cache lines in the specified range.  If FORCE_DISCARD
      is true, dirty lines are silently dropped.  Otherwise it is an error to
      discarded dirty cache lines.  */
-  void discard (AddressType address = 0,
+  void discard (agent_address_t address = 0,
                 amd_dbgapi_size_t size = amd_dbgapi_size_t (-1),
                 bool force_discard = false);
 
   /* Write dirty lines back to memory.  */
-  void write_back (AddressType address = 0,
+  void write_back (agent_address_t address = 0,
                    amd_dbgapi_size_t size = amd_dbgapi_size_t (-1));
 
-  [[nodiscard]] size_t read_global_memory (AddressType address, void *buffer,
-                                           size_t size)
+  [[nodiscard]] size_t read_global_memory (agent_address_t address,
+                                           void *buffer, size_t size)
   {
     return xfer_global_memory (address, buffer, nullptr, size);
   }
 
-  [[nodiscard]] size_t write_global_memory (AddressType address,
+  [[nodiscard]] size_t write_global_memory (agent_address_t address,
                                             const void *buffer, size_t size)
   {
     return xfer_global_memory (address, nullptr, buffer, size);
