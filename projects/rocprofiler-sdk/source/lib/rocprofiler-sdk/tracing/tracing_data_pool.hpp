@@ -161,10 +161,25 @@ public:
         if(this == &other) return *this;
 
         // Release current resource back to the pool
-        if(data_ != nullptr) get_pool().release(data_);
+        if(data_ != nullptr)
+        {
+            if(pooled_)
+            {
+                auto* pool = get_pool();
+                if(pool)
+                    pool->release(data_);
+                else
+                    delete data_;
+            }
+            else
+            {
+                delete data_;
+            }
+        }
 
         // Steal the resource from other
         data_       = other.data_;
+        pooled_     = other.pooled_;
         other.data_ = nullptr;
 
         return *this;
