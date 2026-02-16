@@ -101,52 +101,6 @@ jobs:
           done
           echo "Build completed on ${{ matrix.os }}"
 
-      - name: Build and Install Python Wheel
-        run: |
-          set -e
-          BUILD_FOLDER=${{ env.PROJECT_DIR }}/build
-          
-          echo 'Building Python wheel on ${{ matrix.os }}'
-          
-          # Detect which Python to use for wheel building
-          if [[ "${{ matrix.os }}" == "RHEL8" || "${{ matrix.os }}" == "AlmaLinux8" || "${{ matrix.os }}" == "SLES" ]]; then
-            PYTHON_CMD=python3
-            for ver in 12 11 10 9 8; do
-              if command -v python3.$ver &> /dev/null; then
-                PYTHON_CMD=python3.$ver
-                echo "Using Python 3.$ver for wheel building"
-                break
-              fi
-            done
-            if [ "$PYTHON_CMD" == "python3" ]; then
-              echo "Using system Python 3 for wheel building"
-            fi
-          else
-            PYTHON_CMD=python3
-            echo "Using system Python 3 for wheel building"
-          fi
-          
-          # Upgrade setuptools for proper wheel metadata
-          echo 'Upgrading setuptools...'
-          $PYTHON_CMD -m pip install --ignore-installed pip setuptools wheel
-          
-          # Build the wheel
-          echo 'Building wheel package...'
-          cd $BUILD_FOLDER/py-interface/python_package
-          rm -rf *.whl *.egg-info build dist
-          $PYTHON_CMD -m pip wheel --no-deps --no-build-isolation -w . .
-          echo 'Wheel created:'
-          ls -lh *.whl
-          
-          # Install the wheel
-          echo 'Installing wheel package...'
-          $PYTHON_CMD -m pip install --force-reinstall $BUILD_FOLDER/py-interface/python_package/*.whl
-          
-          # Verify wheel installation
-          echo 'Verifying wheel installation...'
-          cd /tmp && $PYTHON_CMD -c "import amdsmi; print('✓ Import successful'); amdsmi.amdsmi_init(); print('✓ Library loaded'); amdsmi.amdsmi_shut_down(); print('✓ Wheel working!')"
-          echo 'Python wheel build and install completed on ${{ matrix.os }}'
-
       - name: Install AMDSMI
         run: |
           cd ${{ env.PROJECT_DIR }}/build
@@ -260,33 +214,6 @@ jobs:
               sleep $((2 * i))
             fi
           done
-
-          # Build and install Python wheel
-          echo 'Building Python wheel on ${{ matrix.os }}'
-          
-          # Detect which Python to use
-          if [[ "${{ matrix.os }}" == "RHEL8" || "${{ matrix.os }}" == "AlmaLinux8" || "${{ matrix.os }}" == "SLES" ]]; then
-            PYTHON_CMD=python3
-            for ver in 12 11 10 9 8; do
-              if command -v python3.$ver &> /dev/null; then
-                PYTHON_CMD=python3.$ver
-                echo "Using Python 3.$ver for wheel"
-                break
-              fi
-            done
-          else
-            PYTHON_CMD=python3
-          fi
-          
-          $PYTHON_CMD -m pip install --ignore-installed pip setuptools wheel
-          cd $BUILD_FOLDER/py-interface/python_package
-          rm -rf *.whl *.egg-info build dist
-          $PYTHON_CMD -m pip wheel --no-deps --no-build-isolation -w . .
-          echo 'Wheel created:'
-          ls -lh *.whl
-          $PYTHON_CMD -m pip install --force-reinstall $BUILD_FOLDER/py-interface/python_package/*.whl
-          cd /tmp && $PYTHON_CMD -c "import amdsmi; print('✓ Import successful'); amdsmi.amdsmi_init(); print('✓ Library loaded'); amdsmi.amdsmi_shut_down(); print('✓ Wheel working!')"
-          echo 'Python wheel build and install completed on ${{ matrix.os }}'
 
           echo 'Installing for test on ${{ matrix.os }}'
           for i in $(seq 1 $RETRIES); do
@@ -453,6 +380,108 @@ jobs:
           echo "Displaying Example NoDRM test results for ${{ matrix.os }}"
           cat /tmp/test-results-${{ matrix.os }}/amd_smi_nodrm_ex.log || echo "No NoDRM example test results found for ${{ matrix.os }}"
 
+  python-wheel-build-install:
+    name: Python Wheel Build & Install
+    runs-on:
+      - self-hosted
+      - ${{ vars.RUNNER_TYPE }}
+    continue-on-error: true
+    strategy:
+      max-parallel: 10
+      matrix:
+        include:
+          - os: Ubuntu22
+            package-type: deb
+          - os: RHEL9
+            package-type: rpm
+    container:
+      image: ${{ vars[format('{0}_DOCKER_IMAGE', matrix.os)] }}
+      options: --rm --privileged --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --shm-size=64G --cap-add=SYS_MODULE -v /lib/modules:/lib/modules -u root
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set Project Directory
+        run: |
+          TARGET_DIR=$(find $GITHUB_WORKSPACE -path "*/projects/amdsmi/CMakeLists.txt" -exec dirname {} \;)
+          if [ -z "$TARGET_DIR" ]; then
+            TARGET_DIR=$(find $GITHUB_WORKSPACE -maxdepth 2 -name "CMakeLists.txt" -exec dirname {} \; | head -n 1)
+          fi
+          echo "PROJECT_DIR=$TARGET_DIR" >> $GITHUB_ENV
+
+      - name: Install Latest Python for Wheel Building (RHEL9)
+        if: matrix.os == 'RHEL9'
+        run: |
+          set -e
+          echo 'Installing latest Python on ${{ matrix.os }}'
+          dnf install -y python3.11 python3.11-pip || dnf install -y python3.9 python3.9-pip || echo "Latest Python installation failed, will use system python"
+
+      - name: Build AMDSMI
+        run: |
+          set -e
+          echo 'Building on ${{ matrix.os }}'
+          BUILD_FOLDER=${{ env.PROJECT_DIR }}/build
+          rm -rf $BUILD_FOLDER
+          mkdir -p $BUILD_FOLDER
+          cd $BUILD_FOLDER
+          cmake ${{ env.PROJECT_DIR }} -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON -DBUILD_PYTHON_LIB=ON
+          make -j $(nproc)
+          make package
+          echo "Build completed on ${{ matrix.os }}"
+
+      - name: Build and Install Python Wheel
+        run: |
+          set -e
+          BUILD_FOLDER=${{ env.PROJECT_DIR }}/build
+          
+          echo 'Building Python wheel on ${{ matrix.os }}'
+          
+          # Detect which Python to use for wheel building
+          if [[ "${{ matrix.os }}" == "RHEL9" ]]; then
+            PYTHON_CMD=python3
+            for ver in 12 11 10 9 8; do
+              if command -v python3.$ver &> /dev/null; then
+                PYTHON_CMD=python3.$ver
+                echo "Using Python 3.$ver for wheel building"
+                break
+              fi
+            done
+            if [ "$PYTHON_CMD" == "python3" ]; then
+              echo "Using system Python 3 for wheel building"
+            fi
+          else
+            PYTHON_CMD=python3
+            echo "Using system Python 3 for wheel building"
+          fi
+          
+          # Upgrade setuptools for proper wheel metadata
+          echo 'Upgrading setuptools...'
+          $PYTHON_CMD -m pip install --ignore-installed pip setuptools wheel
+          
+          # Build the wheel
+          echo 'Building wheel package...'
+          cd $BUILD_FOLDER/py-interface/python_package
+          rm -rf *.whl *.egg-info build dist
+          $PYTHON_CMD -m pip wheel --no-deps --no-build-isolation -w . .
+          echo 'Wheel created:'
+          ls -lh *.whl
+          
+          # Install the wheel
+          echo 'Installing wheel package...'
+          $PYTHON_CMD -m pip install --force-reinstall $BUILD_FOLDER/py-interface/python_package/*.whl
+          
+          # Verify wheel installation
+          echo 'Verifying wheel installation...'
+          cd /tmp && $PYTHON_CMD -c "import amdsmi; print('✓ Import successful'); amdsmi.amdsmi_init(); print('✓ Library loaded'); amdsmi.amdsmi_shut_down(); print('✓ Wheel working!')"
+          echo 'Python wheel build and install completed on ${{ matrix.os }}'
+
+      - name: Upload Python Wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-wheel-${{ matrix.os }}
+          path: ${{ env.PROJECT_DIR }}/build/py-interface/python_package/*.whl
+
+
   rpm-buildinstall:
     name: Build
     runs-on:
@@ -575,66 +604,6 @@ jobs:
             fi
           done
           echo "Build completed on ${{ matrix.os }}"
-
-      - name: Install Latest Python for Wheel Building
-        if: matrix.os == 'RHEL8' || matrix.os == 'AlmaLinux8' || matrix.os == 'SLES'
-        run: |
-          set -e
-          echo 'Installing latest Python on ${{ matrix.os }}'
-          case "${{ matrix.os }}" in
-            RHEL8|AlmaLinux8)
-              dnf install -y python3.11 python3.11-pip || dnf install -y python3.9 python3.9-pip || echo "Latest Python installation failed, will use system python"
-              ;;
-            SLES)
-              zypper install -y python311 python311-pip || zypper install -y python39 python39-pip || echo "Latest Python installation failed, will use system python"
-              ;;
-          esac
-
-      - name: Build and Install Python Wheel
-        run: |
-          set -e
-          BUILD_FOLDER=${{ env.PROJECT_DIR }}/build
-          
-          echo 'Building Python wheel on ${{ matrix.os }}'
-          
-          # Detect which Python to use for wheel building
-          if [[ "${{ matrix.os }}" == "RHEL8" || "${{ matrix.os }}" == "AlmaLinux8" || "${{ matrix.os }}" == "SLES" ]]; then
-            PYTHON_CMD=python3
-            for ver in 12 11 10 9 8; do
-              if command -v python3.$ver &> /dev/null; then
-                PYTHON_CMD=python3.$ver
-                echo "Using Python 3.$ver for wheel building"
-                break
-              fi
-            done
-            if [ "$PYTHON_CMD" == "python3" ]; then
-              echo "Using system Python 3 for wheel building"
-            fi
-          else
-            PYTHON_CMD=python3
-            echo "Using system Python 3 for wheel building"
-          fi
-          
-          # Upgrade setuptools for proper wheel metadata
-          echo 'Upgrading setuptools...'
-          $PYTHON_CMD -m pip install --ignore-installed pip setuptools wheel
-          
-          # Build the wheel
-          echo 'Building wheel package...'
-          cd $BUILD_FOLDER/py-interface/python_package
-          rm -rf *.whl *.egg-info build dist
-          $PYTHON_CMD -m pip wheel --no-deps --no-build-isolation -w . .
-          echo 'Wheel created:'
-          ls -lh *.whl
-          
-          # Install the wheel
-          echo 'Installing wheel package...'
-          $PYTHON_CMD -m pip install --force-reinstall $BUILD_FOLDER/py-interface/python_package/*.whl
-          
-          # Verify wheel installation
-          echo 'Verifying wheel installation...'
-          cd /tmp && $PYTHON_CMD -c "import amdsmi; print('✓ Import successful'); amdsmi.amdsmi_init(); print('✓ Library loaded'); amdsmi.amdsmi_shut_down(); print('✓ Wheel working!')"
-          echo 'Python wheel build and install completed on ${{ matrix.os }}'
 
       - name: Install AMDSMI(RHEL10 & AlmaLinux8)
         if: matrix.os == 'RHEL10' || matrix.os == 'AlmaLinux8'
@@ -808,33 +777,6 @@ jobs:
             fi
           done
 
-          # Build and install Python wheel
-          echo 'Building Python wheel on ${{ matrix.os }}'
-          
-          # Detect which Python to use
-          if [[ "${{ matrix.os }}" == "RHEL8" || "${{ matrix.os }}" == "AlmaLinux8" || "${{ matrix.os }}" == "SLES" ]]; then
-            PYTHON_CMD=python3
-            for ver in 12 11 10 9 8; do
-              if command -v python3.$ver &> /dev/null; then
-                PYTHON_CMD=python3.$ver
-                echo "Using Python 3.$ver for wheel"
-                break
-              fi
-            done
-          else
-            PYTHON_CMD=python3
-          fi
-          
-          $PYTHON_CMD -m pip install --ignore-installed pip setuptools wheel
-          cd $BUILD_FOLDER/py-interface/python_package
-          rm -rf *.whl *.egg-info build dist
-          $PYTHON_CMD -m pip wheel --no-deps --no-build-isolation -w . .
-          echo 'Wheel created:'
-          ls -lh *.whl
-          $PYTHON_CMD -m pip install --force-reinstall $BUILD_FOLDER/py-interface/python_package/*.whl
-          cd /tmp && $PYTHON_CMD -c "import amdsmi; print('✓ Import successful'); amdsmi.amdsmi_init(); print('✓ Library loaded'); amdsmi.amdsmi_shut_down(); print('✓ Wheel working!')"
-          echo 'Python wheel build and install completed on ${{ matrix.os }}'
-
           echo 'Installing for test on RHEL10/AlmaLinux8'
           dnf install python3-setuptools python3-wheel -y
 
@@ -867,33 +809,6 @@ jobs:
           cmake ${{ env.PROJECT_DIR }} -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON -DBUILD_PYTHON_LIB=ON
           make -j $(nproc)
           make package
-
-          # Build and install Python wheel
-          echo 'Building Python wheel on ${{ matrix.os }}'
-          
-          # Detect which Python to use
-          if [[ "${{ matrix.os }}" == "RHEL8" || "${{ matrix.os }}" == "AlmaLinux8" || "${{ matrix.os }}" == "SLES" ]]; then
-            PYTHON_CMD=python3
-            for ver in 12 11 10 9 8; do
-              if command -v python3.$ver &> /dev/null; then
-                PYTHON_CMD=python3.$ver
-                echo "Using Python 3.$ver for wheel"
-                break
-              fi
-            done
-          else
-            PYTHON_CMD=python3
-          fi
-          
-          $PYTHON_CMD -m pip install --ignore-installed pip setuptools wheel
-          cd $BUILD_FOLDER/py-interface/python_package
-          rm -rf *.whl *.egg-info build dist
-          $PYTHON_CMD -m pip wheel --no-deps --no-build-isolation -w . .
-          echo 'Wheel created:'
-          ls -lh *.whl
-          $PYTHON_CMD -m pip install --force-reinstall $BUILD_FOLDER/py-interface/python_package/*.whl
-          cd /tmp && $PYTHON_CMD -c "import amdsmi; print('✓ Import successful'); amdsmi.amdsmi_init(); print('✓ Library loaded'); amdsmi.amdsmi_shut_down(); print('✓ Wheel working!')"
-          echo 'Python wheel build and install completed on ${{ matrix.os }}'
 
           echo 'Installing for test on ${{ matrix.os }}'
           case ${{ env.PACKAGE_MANAGER }} in
