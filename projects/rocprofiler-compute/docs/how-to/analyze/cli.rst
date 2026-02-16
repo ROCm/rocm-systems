@@ -643,11 +643,17 @@ Display all PyTorch operators captured during profiling:
      1. nn.Module.Net.forward/nn.Module.Conv2d.forward/torch.nn.functional.conv2d
      2. nn.Module.Net.forward/nn.Module.Linear.forward/torch.nn.functional.linear
      3. nn.Module.Net.forward/torch.nn.functional.relu
+     1. nn.Module.Net.forward/nn.Module.Conv2d.forward/torch.nn.functional.conv2d
+     2. nn.Module.Net.forward/nn.Module.Linear.forward/torch.nn.functional.linear
+     3. nn.Module.Net.forward/torch.nn.functional.relu
 
    ================================================================================
    Total: 3 operators
    ================================================================================
 
+Listed names are the full operator names (hierarchy with ``/``). Per-operator CSVs
+in ``torch_trace/`` are named from the **last** segment of each name (sanitized);
+see :ref:`torch-operator-profiling` for naming details.
 Listed names are the full operator names (hierarchy with ``/``). Per-operator CSVs
 in ``torch_trace/`` are named from the **last** segment of each name (sanitized);
 see :ref:`torch-operator-profiling` for naming details.
@@ -662,18 +668,29 @@ Filtering by Operator
 * **Last segment only** — the final component of the name (e.g. ``conv2d``)
 
 Selection at intermediate levels is not supported yet.
+``--torch-operator`` supports exactly two forms of selection:
+
+* **Full hierarchy** — the complete operator path as listed (e.g.
+  ``nn.Module.Net.forward/nn.Module.Conv2d.forward/torch.nn.functional.conv2d``)
+* **Last segment only** — the final component of the name (e.g. ``conv2d``)
+
+Selection at intermediate levels is not supported yet.
 
 .. code-block:: shell-session
 
    # Full hierarchy
    $ rocprof-compute --experimental analyze --path ./workload --torch-operator "nn.Module.Net.forward/nn.Module.Conv2d.forward/torch.nn.functional.conv2d"
+   # Full hierarchy
+   $ rocprof-compute --experimental analyze --path ./workload --torch-operator "nn.Module.Net.forward/nn.Module.Conv2d.forward/torch.nn.functional.conv2d"
 
    # Last segment only (matches any operator whose name ends with that segment)
-   $ rocprof-compute analyze --path ./workload --torch-operator conv2d
+   $ rocprof-compute analyze --path ./workload --experimental --torch-operator conv2d
 
+**Filter multiple operators** (each argument is full path or last segment):
 **Filter multiple operators** (each argument is full path or last segment):
 
 .. code-block:: shell-session
 
    $ rocprof-compute --experimental analyze --path ./workload \
+       --torch-operator "nn.Module.Net.forward/nn.Module.Conv2d.forward/torch.nn.functional.conv2d" "relu"
        --torch-operator "nn.Module.Net.forward/nn.Module.Conv2d.forward/torch.nn.functional.conv2d" "relu"
