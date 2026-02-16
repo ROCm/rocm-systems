@@ -1691,14 +1691,13 @@ def test_iteration_multiplexing(binary_handler_analyze_rocprof_compute):
 
 
 # ============================================================================
-# PyTorch Operator Analysis Tests
+# Torch-trace (analyze)
 # ============================================================================
-# These tests validate --list-torch-operators and --torch-operator (analyze
-# mode only). Full profile+analyze torch-trace flow is in
+# Tests for --list-torch-operators and --torch-operator. 
+# Full profile+analyze torch-trace flow is in 
 # test_profile_general.test_torch_trace_profile.
 
-
-@pytest.mark.torch_operators
+@pytest.mark.torch_trace
 def test_list_torch_operators_no_path(binary_handler_analyze_rocprof_compute):
     """Test --list-torch-operators fails gracefully without --path"""
     code = binary_handler_analyze_rocprof_compute([
@@ -1709,7 +1708,7 @@ def test_list_torch_operators_no_path(binary_handler_analyze_rocprof_compute):
     assert code == 1
 
 
-@pytest.mark.torch_operators
+@pytest.mark.torch_trace
 def test_list_torch_operators_no_trace_data(binary_handler_analyze_rocprof_compute):
     """Test graceful handling when torch_trace/ directory doesn't exist"""
     # Use regular vcopy workload (no torch data)
