@@ -7561,9 +7561,9 @@ class AMDSMICommands():
                 status = "DISABLED" if status == amdsmi_interface.amdsmi_wrapper.AMDSMI_NPM_STATUS_DISABLED else "ENABLED"
                 npm_dict.update({"status": status})
                 # Add UBB power info if available (not UINT64_MAX sentinel)
-                if ubb_power != "N/A" and ubb_power != 0xFFFFFFFFFFFFFFFF:
+                if ubb_power != "N/A" and ubb_power != amdsmi_interface.MaxUIntegerTypes.UINT64_T:
                     npm_dict['ubb_power'] = ubb_power
-                if ubb_power_limit != "N/A" and ubb_power_limit != 0xFFFFFFFFFFFFFFFF:
+                if ubb_power_limit != "N/A" and ubb_power_limit != amdsmi_interface.MaxUIntegerTypes.UINT64_T:
                     npm_dict['ubb_power_limit'] = ubb_power_limit
 
         # Get base board temperatures using node_handle
