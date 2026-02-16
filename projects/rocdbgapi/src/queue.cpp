@@ -507,20 +507,19 @@ aql_queue_t::queue_state_changed ()
       m_waves_running.reset ();
 
       /* The queue just changed state and is about to be placed back onto the
-         hardware.  Write back dirty cache lines in the wave saved state
-         region, but leave the cache lines valid so that accessing stopped
-         waves' cached registers does not require a queue suspend/resume.  The
-         saved state cache lines will be discarded when this queue is next
-         suspended again (see the 'case state_t::suspended:' below).  */
+         hardware.  Write back the cached wave saved state region (if dirty),
+         but leave the cached state valid so that accessing stopped waves'
+         cached registers does not require a queue suspend/resume.  The saved
+         state cache will be discarded when this queue is next suspended again
+         (see the 'case state_t::suspended:' below).  */
       agent ().memory_cache ().write_back (
         m_os_queue_info.ctx_save_restore_address,
         xcc_count * m_os_queue_info.ctx_save_restore_area_size);
       break;
 
     case state_t::suspended:
-      /* Discard the previously cached wave saved state lines.  The saved state
-         areas may be mapped to a different address in this new context wave
-         save.  */
+      /* Discard the previously cached wave saved state.  The saved state areas
+         may be mapped to a different address in this new context wave save.  */
       agent ().memory_cache ().discard (
         m_os_queue_info.ctx_save_restore_address,
         xcc_count * m_os_queue_info.ctx_save_restore_area_size);
@@ -626,16 +625,6 @@ aql_queue_t::update_waves ()
   {
     dbgapi_assert (*this == cwsr_record->queue ());
     process_t &process = cwsr_record->process ();
-
-    auto prefetch_begin
-      = cwsr_record->register_address (amdgpu_regnum_t::first_hwreg).value ();
-    auto prefetch_end
-      = cwsr_record->register_address (amdgpu_regnum_t::last_ttmp).value ()
-        + architecture ().register_size (amdgpu_regnum_t::last_ttmp);
-
-    dbgapi_assert (prefetch_end > prefetch_begin);
-    cwsr_record->agent ().memory_cache ().prefetch (
-      prefetch_begin, prefetch_end - prefetch_begin);
 
     wave_t *wave = nullptr;
 
@@ -795,10 +784,15 @@ aql_queue_t::update_waves ()
       auto wave_area_end = ctx_save_address + header.wave_state_offset;
       auto wave_area_begin = wave_area_end - header.wave_state_size;
 
-      /* The control stack and the wave save area should be contiguous.  */
+      /* The control stack and the wave save area should be contiguous: the
+         control stack grows down from the start point, and wave area grows
+         up.  */
       if (control_stack_end != wave_area_begin)
         fatal_error ("corrupted context save area header");
 
+      /* If there is data (control stack not empty), read the entire control
+         stack plus wave area in one go, cache it, and decode the context
+         stack.  */
       if (control_stack_begin != control_stack_end)
         {
           log_info ("decoding %s's context save area #%u: "
@@ -808,19 +802,36 @@ aql_queue_t::update_waves ()
                     to_cstring (control_stack_end),
                     to_cstring (wave_area_begin), to_cstring (wave_area_end));
 
-          /* Read the entire control stack from the inferior in one go.  */
-          amd_dbgapi_size_t size = control_stack_end - control_stack_begin;
-          if (!utils::is_aligned (size, sizeof (uint32_t)))
+          /* Cache the memory block.  We only really should need the chunk that
+             corresponds to the wave area, as we never need the control stack
+             again after decoding it, and we never need to write it back.
+             However, this is a speed-sensitive code path, where we want to
+             minimize number of (somewhat large) memory allocations, so cache it
+             all so that there's only one memory read, and one allocation.  Note
+             that writing back cache entries only writes back the dirty region,
+             so we won't write back the control stack for that reason
+             regardless.  */
+          std::byte *memory = (agent ().memory_cache ().new_entry (
+            control_stack_begin, wave_area_end - control_stack_begin));
+
+          amd_dbgapi_size_t control_stack_byte_size
+            = control_stack_end - control_stack_begin;
+          if (!utils::is_aligned (control_stack_byte_size, sizeof (uint32_t)))
             fatal_error ("corrupted control stack");
 
-          auto memory
-            = std::make_unique<uint32_t[]> (size / sizeof (uint32_t));
-          agent ().read_agent_memory (control_stack_begin, &memory[0], size);
+          /* MEMORY is heap-allocated, so it is guaranteed to have sufficient
+             alignment to be cast to uint32_t.  */
+          if (!utils::is_aligned (reinterpret_cast<uintptr_t> (memory),
+                                  alignof (uint32_t)))
+            fatal_error ("unexpected buffer alignment");
+          const auto *control_stack = reinterpret_cast<uint32_t *> (memory);
+          size_t control_stack_words
+            = control_stack_byte_size / sizeof (uint32_t);
 
           /* Decode the control stack.  For each entry in the control stack,
              the provided callback function is called with a CWSR record.  */
           wave_count += architecture ().control_stack_iterate (
-            *this, xcc_id, &memory[0], size / sizeof (uint32_t), wave_area_end,
+            *this, xcc_id, control_stack, control_stack_words, wave_area_end,
             wave_area_end - wave_area_begin, process_cwsr_record);
         }
     }

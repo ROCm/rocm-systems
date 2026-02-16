@@ -28,7 +28,7 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <map>
+#include <list>
 #include <optional>
 #include <string>
 #include <type_traits>
@@ -487,28 +487,100 @@ public:
 };
 
 /* A write-back memory cache.  Data is immediately updated in the cache, and
-   later updated in memory when the cache is flushed.  */
+   later updated in memory when the cache is flushed.  This caches wave state
+   data.  For compute, each entry corresponds to one xcc's worth of save area
+   data from a given queue.  */
 
 class memory_cache_t
 {
-public:
-  static constexpr size_t cache_line_size = 64;
-
 private:
   using delegate_fn_type
     = std::function<size_t (agent_address_t /* address */, void * /* read */,
                             const void * /* write */, size_t /* size */)>;
 
-  struct cache_line_t
+  struct cache_entry_t
   {
-    std::array<std::byte, cache_line_size> m_data{};
-    bool m_dirty{ false };
+  private:
+    agent_address_t m_address{ 0 };
+    size_t m_size{ 0 };
+    /* The data buffer.  This buffer only grows, it never shrinks, across
+       cache_entry_t reuses.  We don't use a std::vector instead to avoid value
+       (i.e. zero) initialization, for performance reasons.  */
+    std::unique_ptr<std::byte[]> m_data{};
+
+    /* Start and end offsets into data, tracking where we know dirty bytes are.
+       The whole range is clean if start and end are the same.  This is a single
+       range because memory_cache_t::write_back does one single write, for
+       performance.  */
+    size_t m_dirty_range_start_offset{ 0 };
+    size_t m_dirty_range_end_offset{ 0 };
+
+  public:
+    /* Reset an entry.  Not a ctor as we reuse cache entries.  */
+    void reset (agent_address_t address, size_t size)
+    {
+      /* Resize storage if needed.  */
+      if (m_data == nullptr || m_size < size)
+        m_data = std::make_unique<std::byte[]> (size);
+
+      m_address = address;
+      m_size = size;
+      mark_clean ();
+    }
+
+    /* Simple getters.  */
+    agent_address_t address () const { return m_address; }
+    size_t size () const { return m_size; }
+    const std::byte *data () const { return &m_data[0]; }
+    std::byte *data () { return &m_data[0]; }
+
+    /* Returns true if the entry is dirty.  */
+    bool dirty () const
+    {
+      return m_dirty_range_start_offset != m_dirty_range_end_offset;
+    }
+
+    /* Returns the offset into the first dirty byte.  */
+    agent_address_t dirty_range_start_offset () const
+    {
+      return m_dirty_range_start_offset;
+    }
+
+    /* Returns the size of the dirty range.  */
+    size_t dirty_range_size () const
+    {
+      return m_dirty_range_end_offset - m_dirty_range_start_offset;
+    }
+
+    /* Marks the given range dirty.  */
+    void mark_offset_range_dirty (size_t dirty_offset, size_t dirty_size)
+    {
+      if (!dirty () || dirty_offset < m_dirty_range_start_offset)
+        m_dirty_range_start_offset = dirty_offset;
+
+      size_t end_offset = dirty_offset + dirty_size;
+      if (end_offset > m_dirty_range_end_offset)
+        m_dirty_range_end_offset = end_offset;
+    }
+
+    /* Marks the whole entry not-dirty.  */
+    void mark_clean ()
+    {
+      m_dirty_range_start_offset = m_dirty_range_end_offset = 0;
+    }
   };
 
   /* The agent which this cache is for.  */
   const agent_t &m_agent;
 
-  std::map<agent_address_t, cache_line_t> m_cache_line_map;
+  /* The in-use cache entries.  */
+  std::list<cache_entry_t> m_cache_entries;
+
+  /* The not-in-use cache entries.  When an entry is discarded, it is
+     moved here from the in-use list.  This avoids memory
+     reallocation, improving performance.  */
+  std::list<cache_entry_t> m_unused_cache_entries;
+
   delegate_fn_type const m_xfer_agent_memory;
 
   size_t xfer_agent_memory (agent_address_t address, void *read,
@@ -519,20 +591,21 @@ public:
     : m_agent (agent), m_xfer_agent_memory (std::move (xfer_agent_memory))
   {
   }
-  ~memory_cache_t () { dbgapi_assert (m_cache_line_map.empty ()); }
+  ~memory_cache_t () { dbgapi_assert (m_cache_entries.empty ()); }
 
-  bool contains_all (agent_address_t address, amd_dbgapi_size_t size) const;
+  /* Create a cache entry for the [address, address+size) range.  The range
+     must not be already cached.  Returns a non-owning pointer to the
+     contiguous block of cached data covering the specified range.  */
+  std::byte *new_entry (agent_address_t address, amd_dbgapi_size_t size);
 
-  /* Create cache lines if not already valid, and immediately fill them in.  */
-  void prefetch (agent_address_t address, amd_dbgapi_size_t size);
-
-  /* Discard all cache lines in the specified range.  If FORCE_DISCARD
-     is true, dirty lines are silently dropped.  Otherwise it is an error to
-     discarded dirty cache lines.  */
+  /* Discard all cache entries in the specified range.  Discarding a partial
+     entry is not allowed; the specified range must contain whole cached regions
+     (or none).  If FORCE_DISCARD is true, dirty entries are silently
+     dropped. Otherwise it is an error to discard dirty cache entries.  */
   void discard (agent_address_t address = 0, amd_dbgapi_size_t size = -1,
                 bool force_discard = false);
 
-  /* Write dirty lines back to memory.  */
+  /* Write dirty cached entries back to memory.  */
   void write_back (agent_address_t address = 0, amd_dbgapi_size_t size = -1);
 
   [[nodiscard]] size_t read_agent_memory (agent_address_t address,
