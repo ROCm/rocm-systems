@@ -28,6 +28,8 @@
 /projects/rocr-runtime/                                               @kentrussell @dayatsin-amd @cfreeamd
 /projects/roctracer/                                                  @ammarwa @bgopesh
 /projects/rocshmem/                                                   @ROCm/rocshmem-reviewers
+/projects/rocdbgapi/                                                  @ROCm/debugger-reviewers
+/projects/rocr-debug-agent/                                           @ROCm/debugger-reviewers
 
 # Language runtime build infra code owners
 /projects/clr/**/*.cmake                                              @ROCm/clr-reviewers @ROCm/lrt-build-infra
