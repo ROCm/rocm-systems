@@ -406,40 +406,40 @@ get_insert_statement_impl(sqlite3*                                  conn,
     auto cleanup_guard = common::scope_destructor{[&]() {
         if(stmt)
         {
-            SQLITE3_CHECK(sqlite3_reset(stmt));
-            SQLITE3_CHECK(sqlite3_clear_bindings(stmt));
+            sqlite3_reset(stmt);
+            sqlite3_clear_bindings(stmt);
         }
     }};
 
     for(size_t i = 0; i < values.size(); ++i)
     {
-        int  idx = static_cast<int>(i + 1);
-        auto rc  = std::visit(
+        int idx = static_cast<int>(i + 1);
+        std::visit(
             [&](auto&& val) {
                 using value_type = common::mpl::unqualified_type_t<decltype(val)>;
                 if constexpr(std::is_same_v<value_type, std::monostate>)
                 {
-                    return sqlite3_bind_null(stmt, idx);
+                    sqlite3_bind_null(stmt, idx);
                 }
                 else if constexpr(std::is_same_v<value_type, std::nullptr_t>)
                 {
-                    return sqlite3_bind_null(stmt, idx);
+                    sqlite3_bind_null(stmt, idx);
                 }
                 else if constexpr(std::is_same_v<value_type, int64_t>)
                 {
-                    return sqlite3_bind_int64(stmt, idx, val);
+                    sqlite3_bind_int64(stmt, idx, val);
                 }
                 else if constexpr(std::is_same_v<value_type, uint64_t>)
                 {
-                    return sqlite3_bind_int64(stmt, idx, static_cast<int64_t>(val));
+                    sqlite3_bind_int64(stmt, idx, static_cast<int64_t>(val));
                 }
                 else if constexpr(std::is_same_v<value_type, double>)
                 {
-                    return sqlite3_bind_double(stmt, idx, val);
+                    sqlite3_bind_double(stmt, idx, val);
                 }
                 else if constexpr(common::mpl::is_string_type<value_type>::value)
                 {
-                    return sqlite3_bind_text(stmt, idx, val.c_str(), -1, SQLITE_TRANSIENT);
+                    sqlite3_bind_text(stmt, idx, val.c_str(), -1, SQLITE_TRANSIENT);
                 }
                 else
                 {
@@ -448,15 +448,10 @@ get_insert_statement_impl(sqlite3*                                  conn,
                 }
             },
             values[i].value);
-
-        SQLITE3_CHECK(rc);
     }
 
     auto step_rc = sqlite3_step(stmt);
     ROCP_FATAL_IF(step_rc != SQLITE_DONE) << "sqlite3_step failed with error code " << step_rc;
-
-    SQLITE3_CHECK(sqlite3_reset(stmt));
-    SQLITE3_CHECK(sqlite3_clear_bindings(stmt));
 }
 
 template <template <typename...> class ContainerT, typename... TypesT>
