@@ -133,7 +133,7 @@ struct ncclChannelToUd {
     bool udAllocated;
 };
 
-static ncclChannelToUd nccl_channel_ud_map[MAXCHANNELS][ncclIbChannelTypeMax];
+static ncclChannelToUd nccl_channel_ud_map[MAX_IB_DEVS][MAXCHANNELS][ncclIbChannelTypeMax];
 static bool nccl_channel_last_ud[MAX_IB_DEVS][ncclIbChannelTypeMax];
 
 // With ncclNet_v11_t the NCCL core initializes the network plugin per-communicator
@@ -1815,14 +1815,14 @@ ncclResult_t IbCastCreateQp(uint8_t ib_port, struct ncclIbNetCommDevBase* base,
   qpInitAttr.qp_type = IBV_QPT_RC;
 
   if (rcclAinicRoce) {
-    if (!nccl_channel_ud_map[channel_id][channel_type].udAllocated) {
+    if (!nccl_channel_ud_map[base->ibDevN][channel_id][channel_type].udAllocated) {
       bool lud = nccl_channel_last_ud[base->ibDevN][channel_type];
-      nccl_channel_ud_map[channel_id][channel_type].udId = lud;
-      nccl_channel_ud_map[channel_id][channel_type].udAllocated = true;
+      nccl_channel_ud_map[base->ibDevN][channel_id][channel_type].udId = lud;
+      nccl_channel_ud_map[base->ibDevN][channel_id][channel_type].udAllocated = true;
       nccl_channel_last_ud[base->ibDevN][channel_type] =
           !(nccl_channel_last_ud[base->ibDevN][channel_type]);
     }
-    if (nccl_channel_ud_map[channel_id][channel_type].udId) {
+    if (nccl_channel_ud_map[base->ibDevN][channel_id][channel_type].udId) {
       wrap_ionicdv_pd_set_udma_mask(base->pd, IONIC_UDMA_MASK_HIGH);
     } else {
       wrap_ionicdv_pd_set_udma_mask(base->pd, IONIC_UDMA_MASK_LOW);
@@ -3511,7 +3511,7 @@ ncclResult_t IbCastIrecv(void* recvComm, int n, void** data, size_t* sizes, int*
       for (int r = 0; r < n; r++) {
         int nEventHandles = req->pInfo[r].nEventHandles;
         assert(nEventHandles < MAX_QPS_PER_REQ);
-        req->pInfo[r].qpIndex[nEventHandles] = comm->base.qpIndex;
+        req->pInfo[r].qpIndex[nEventHandles] = curQpIndex;
         // Store info for profiler
         int64_t pluginId = NCCL_PROFILER_NET_TYPE_IB | NCCL_PROFILER_NET_IB_VER;
         req->pInfo[r].data.type = ncclProfileQp;
