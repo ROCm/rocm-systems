@@ -403,15 +403,23 @@ def _compute_operator_prefix_stats(df: pd.DataFrame) -> dict[str, tuple[float, i
     return prefix_stats
 
 
-def show_torch_operator_hierarchy(operator_name: str, df: pd.DataFrame) -> None:
+def show_torch_operator_hierarchy(
+    operator_name: str, df: pd.DataFrame, index: int | None = None
+) -> None:
     """
-    Display the hierarchy for each unique operator name in the DataFrame,
-    showing marker hierarchy with total_duration and count per level,
-    and kernel launches with duration on the right.
+    Display the hierarchy for each unique operator name in the DataFrame.
+    Shows Operator N: 'name', then Hierarchy N: full_name (total_duration, count),
+    with the hierarchy tree and kernel launches indented underneath.
     """
     print(f"\n{'-' * 80}")
-    print(f"Torch Operator Hierarchy for: {operator_name}")
+    if index is not None:
+        print(f"Operator {index}:  '{operator_name}'")
+    else:
+        print(f"Operator:  '{operator_name}'")
     print("-" * 80)
+
+    # Indent for content under each hierarchy so it's clear it belongs to that hierarchy
+    hierarchy_indent = "       "
 
     # Expect the DataFrame to have columns "Operator_Name", "Kernel_Name",
     # "Context_Id", etc. Optional: Start_Timestamp_function, End_Timestamp_function,
@@ -421,13 +429,20 @@ def show_torch_operator_hierarchy(operator_name: str, df: pd.DataFrame) -> None:
     has_duration = bool(prefix_stats)
 
     unique_op_hierarchies = df["Operator_Name"].unique()
+    left_col_width = 50
+    inner_width = left_col_width - len(hierarchy_indent)
     for i, op in enumerate(unique_op_hierarchies, start=1):
-        print(f"  {i:3d}. {op}")
+        stats_str = ""
+        if has_duration and op in prefix_stats:
+            total_ms, count = prefix_stats[op]
+            stats_str = f" (total_duration: {total_ms:.2f} ms, count: {count})"
+        print(f"{hierarchy_indent}Hierarchy {i}:  {op}{stats_str}")
         print(
-            "\nOperator Hierarchy".ljust(50)
+            f"{hierarchy_indent}\n{hierarchy_indent}"
+            + "Operator Hierarchy".ljust(inner_width)
             + ("Kernels Launched" if not has_duration else "Kernels Launched (duration)")
         )
-        print("-" * 80)
+        print(f"{hierarchy_indent}{'-' * (80 - len(hierarchy_indent))}")
         parts = str(op).split("/")
 
         hierarchy_lines = []
@@ -439,9 +454,6 @@ def show_torch_operator_hierarchy(operator_name: str, df: pd.DataFrame) -> None:
                 indent = "  " * level
                 prefix_char = "└─ "
                 line = f"{indent}{prefix_char}{part}"
-            if has_duration and prefix in prefix_stats:
-                total_ms, count = prefix_stats[prefix]
-                line += f" (total_duration: {total_ms:.2f} ms, count: {count})"
             hierarchy_lines.append(line)
 
         # Get kernels for this operator hierarchy
@@ -513,15 +525,15 @@ def show_torch_operator_hierarchy(operator_name: str, df: pd.DataFrame) -> None:
                         f"      {file_name}:{line_num} ({count} launches)\n"
                     )
 
-        # Print hierarchy lines (left column)
+        # Print hierarchy lines (left column), indented under this hierarchy
         for line in hierarchy_lines:
-            print(f"{line.ljust(40)}|")
+            print(f"{hierarchy_indent}{line.ljust(inner_width)}|")
 
-        # Print kernel lines aligned to the deepest level
+        # Print kernel lines aligned to the deepest level, indented under this hierarchy
         deepest_indent = "  " * len(parts)
         for kernel_line in kernels_info:
             left_padding = deepest_indent + "    "
-            print(f"{left_padding.ljust(40)}{kernel_line}")
+            print(f"{hierarchy_indent}{left_padding.ljust(inner_width)}{kernel_line}")
 
         print()
 
