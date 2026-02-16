@@ -51,7 +51,7 @@ size_t GetGranularity(hipDevice_t device) {
   size_t granularity = 0;
   HIP_CHECK(
       hipMemGetAllocationGranularity(&granularity, &prop, hipMemAllocationGranularityMinimum));
-  assert(granularity > 0);
+  REQUIRE(granularity > 0);
   return granularity;
 }
 
@@ -245,6 +245,7 @@ bool validateHandle(int handle, int size, int device = 0) {
   }
   int sizeBytes = size * sizeof(int);
   size_t sizeMem = ((granularity + sizeBytes - 1) / granularity) * granularity;
+  std::cout << "sizemem: " << sizeMem << std::endl;
 
   void* dstDevMem = nullptr;
   HIP_CHECK(hipMemAddressReserve(&dstDevMem, sizeMem, granularity, 0, 0));
@@ -262,7 +263,7 @@ bool validateHandle(int handle, int size, int device = 0) {
 
   for (int i = 0; i < size; i++) {
     if (dstHostMem[i] != i) {
-      std::cout << "Mismatch at " << i << " : " << dstHostMem[i] << std::endl;
+      std::cout << "memcpy Mismatch at " << i << " : " << dstHostMem[i] << std::endl;
       return false;
     }
   }
@@ -273,7 +274,7 @@ bool validateHandle(int handle, int size, int device = 0) {
 
   for (int i = 0; i < size; i++) {
     if (dstHostMem[i] != (i * i)) {
-      std::cout << "Mismatch at " << i << " : " << dstHostMem[i] << std::endl;
+      std::cout << "launch Mismatch at " << i << " : " << dstHostMem[i] << std::endl;
       return false;
     }
   }

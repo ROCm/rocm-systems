@@ -147,10 +147,10 @@ static void test_group_partition(unsigned int tileSz) {
     int* dResult = NULL;
     int* hResult = NULL;
 
-    HIPCHECK(hipHostMalloc(&hResult, tileSz * sizeof(int), hipHostMallocDefault));
+    HIPCHECK(hipHostMalloc(&hResult, 64 * sizeof(int), hipHostMallocDefault));
     memset(hResult, 0, numTiles * sizeof(int));
 
-    HIPCHECK(hipMalloc(&dResult, numTiles * sizeof(int)));
+    HIPCHECK(hipMalloc(&dResult, 64 /* hard coded */ * sizeof(int)));
 
 
     // Launch Kernel

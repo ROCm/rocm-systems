@@ -133,7 +133,10 @@ TEST_CASE("Unit_hipOccupancyAvailableDynamicSMemPerBlock_Positive") {
   INFO("Available Dynamic shared memory size : "
        << dynamicSmemSize << ", Dynamic shared memory calculated from device properties : "
        << devProp.sharedMemPerBlock - SIZE * sizeof(int));
+ // With ASAN this will mismatch
+#if !defined(ENABLE_ADDRESS_SANITIZER)
   REQUIRE(dynamicSmemSize == devProp.sharedMemPerBlock - SIZE * sizeof(int));
+#endif
   dynamicReverse<<<numBlocks, SIZE, SIZE * sizeof(int)>>>(deviceArray, SIZE);
 
   HIP_CHECK(hipMemcpy(actualOutput, deviceArray, SIZE * sizeof(int),

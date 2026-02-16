@@ -93,6 +93,8 @@ copies the result to host variable and validates the result.
 */
 TEMPLATE_TEST_CASE("Unit_hipMemcpyAsync_KernelLaunch", "", int, float, double) {
   size_t Nbytes = NUM_ELM * sizeof(TestType);
+  int threads = 1024;
+  int blocks = (NUM_ELM % threads == 0) ? (NUM_ELM / threads) : ((NUM_ELM / threads) + 1);
 
   TestType *A_d{nullptr}, *B_d{nullptr}, *C_d{nullptr};
   TestType *A_h{nullptr}, *B_h{nullptr}, *C_h{nullptr};
@@ -106,7 +108,7 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpyAsync_KernelLaunch", "", int, float, double) {
   HIP_CHECK(hipMemcpyAsync(B_d, B_h, Nbytes, hipMemcpyHostToDevice, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
 
-  hipLaunchKernelGGL(HipTest::vectorADD, dim3(1), dim3(1), 0, 0, static_cast<const TestType*>(A_d),
+  hipLaunchKernelGGL(HipTest::vectorADD, blocks, threads, 0, 0, static_cast<const TestType*>(A_d),
                      static_cast<const TestType*>(B_d), C_d, NUM_ELM);
   HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipMemcpyAsync(C_h, C_d, Nbytes, hipMemcpyDeviceToHost, stream));
