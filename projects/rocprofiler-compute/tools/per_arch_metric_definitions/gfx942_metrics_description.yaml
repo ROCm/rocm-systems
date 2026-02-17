@@ -544,7 +544,7 @@ Scalar L1D cache accesses:
     rst: The total number of sL1D read requests made for a sixteen dwords of data (64B), per :ref:`normalization unit <normalization-units>`.
     unit: Requests per Normalization Unit
   Atomic Req:
-    rst: The total number of atomic requests to the sL1D, per :ref:`normalization unit <normalization-units>`. Typically unused on current CDNA accelerators.
+    rst: The total number of atomic requests to the sL1D, per :ref:`normalization unit <normalization-units>`. Atomic requests to the sL1D are typically unused on current CDNA accelerators.
     unit: Requests per Normalization Unit
 Scalar L1D Cache - L2 Interface:
   sL1D-L2 BW:
