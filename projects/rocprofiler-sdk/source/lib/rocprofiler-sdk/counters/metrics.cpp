@@ -290,9 +290,8 @@ locateMetricsFile(std::string_view name)
     std::string rocm_path_attempt = "ROCM_PATH not set";
     if(const char* rocm_env = std::getenv("ROCM_PATH"))
     {
-        fs::path candidate =
-            fs::path{rocm_env} / "share" / "rocprofiler-sdk" / std::string{name};
-        rocm_path_attempt = candidate.string();
+        fs::path candidate = fs::path{rocm_env} / "share" / "rocprofiler-sdk" / std::string{name};
+        rocm_path_attempt  = candidate.string();
         if(fs::exists(candidate))
         {
             ROCP_INFO << name << " found via ROCM_PATH: " << candidate.string();
