@@ -330,8 +330,8 @@ if (HAVE_PARALLEL_JOBS)
 endif()
 
 ## Disable building MSCCL++ if the build environment is invalid
-## Currently MSCCL++ is supported only on gfx942 and gfx950, and only on Ubuntu and CentOS
-set(MSCCLPP_SUPPORTED_ARCHS "gfx942" "gfx942:xnack-" "gfx942:xnack+" "gfx950" "gfx950:xnack-" "gfx950:xnack+")
+## Currently MSCCL++ is supported only on gfx950, and only on Ubuntu and CentOS
+set(MSCCLPP_SUPPORTED_ARCHS "gfx950" "gfx950:xnack-" "gfx950:xnack+")
 
 # Check if any of the supported architectures are in GPU_TARGETS
 set(ARCH_MATCH_FOUND OFF)
