@@ -678,6 +678,20 @@ Examples:
         help="\t\t\tProvide Node ID and GPU number per node.",
     )
 
+    profile_group.add_argument(
+        "--membw-analysis",
+        dest="membw_analysis",
+        required=False,
+        default=None,
+        base_action="store_const",
+        action=ExperimentalAction,
+        experimental_enabled=experimental_enabled,
+        feature_label="Memory Bandwidth Analysis",
+        nargs=0,
+        const=True,
+        help="\t\t\tEnable block 30 (memory bandwidth specific) for profile mode.",
+    )
+
     ## Analyze Command Line Options
     ## ----------------------------
     analyze_parser = subparsers.add_parser(
@@ -982,20 +996,6 @@ Examples:
         ),
     )
 
-    # NOTE: Experimental Feature Toggle controlling all functionalities
-    # pertaining to "Memory Bandwidth Guided Analysis"
-    profile_group.add_argument(
-        "--membw-analysis",
-        action="store_true",
-        help=argparse.SUPPRESS,
-    )
-
-    analyze_group.add_argument(
-        "--membw-analysis",
-        action="store_true",
-        help=argparse.SUPPRESS,
-    )
-
     ## ----------------------------
     # Experimental Features
     ## ----------------------------
@@ -1011,4 +1011,18 @@ Examples:
         nargs=0,
         const=True,
         help="\t\tMode of spatial multiplexing.",
+    )
+
+    analyze_group.add_argument(
+        "--membw-analysis",
+        dest="membw_analysis",
+        required=False,
+        default=False,
+        base_action="store_const",
+        action=ExperimentalAction,
+        experimental_enabled=experimental_enabled,
+        feature_label="Memory Bandwidth Analysis",
+        nargs=0,
+        const=True,
+        help="\t\tEnable block 30 (memory bandwidth specific) for analysis mode.",
     )

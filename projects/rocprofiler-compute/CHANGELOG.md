@@ -29,8 +29,11 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Detection of MPI ranks while profiling and creation of output directories based on MPI rank.
 
-* Added `--experimental` flag to enable experimental features that are under development. This flag is required when using any experimental features. 
+* Added `--experimental` flag to enable experimental features that are under development. This flag is required when using any experimental features.
   * Use `rocprof-compute --experimental --help` to see currently available experimental features.
+
+* Added `--membw-analysis` under experimental features to allow memory bandwidth specific profiling and analysis.
+  * Use filter option `--block/-b 30` (and `--experimental --membw-analysis`) to profile/analyze memory bandwidth specific metrics.
 
 ### Changed
 
