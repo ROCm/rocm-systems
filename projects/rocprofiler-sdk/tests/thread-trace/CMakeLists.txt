@@ -163,6 +163,7 @@ rocprofiler_add_integration_execute_test(
     ENVIRONMENT "TRIPLEBUFFER=1;ATT_NODETAIL=1;ATT_SLOW_CALLBACK=1"
     DISABLED ${TRIPLE_BUFFER_DISABLED})
 
+# Some runtime versions have a problem with this. Disabling until that is fully resolved.
 # Tests for thread trace not paused during application run (global destructor)
 rocprofiler_add_integration_execute_test(
     thread-trace-api-triple-buffer-no-pause-test
@@ -171,7 +172,7 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 120
     PRELOAD "${PRELOAD_ENV}"
     ENVIRONMENT "TRIPLEBUFFER=1;EXECUTE_PAUSE=0"
-    DISABLED ${TRIPLE_BUFFER_DISABLED})
+    DISABLED ${TRIPLE_BUFFER_DISABLED} OR ${ROCPROFILER_DISABLE_UNSTABLE_CTESTS})
 
 # Tests for thread trace starting and stopping multiple times during the application
 rocprofiler_add_integration_execute_test(
