@@ -619,9 +619,9 @@ jobs:
         if: always()
         run: |
           set -e
-          sudo systemctl stop amd-metrics-exporter.service || true
-          sudo systemctl stop gpuagent.service || true
-          sudo systemctl daemon-reload || true
+          systemctl stop amd-metrics-exporter.service || true
+          systemctl stop gpuagent.service || true
+          systemctl daemon-reload || true
           case "${{ matrix.os }}" in
             SLES) zypper remove -y amd-metrics-exporter gpuagent amdgpu-exporter || true ;;
             RHEL8|RHEL9|RHEL10|AlmaLinux8|AzureLinux3) dnf remove -y amd-metrics-exporter gpuagent amdgpu-exporter || true ;;
