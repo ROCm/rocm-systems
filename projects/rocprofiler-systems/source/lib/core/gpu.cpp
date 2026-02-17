@@ -99,7 +99,7 @@ amdsmi_init()
     auto _amdsmi_init = []() {
         try
         {
-            // Currently, only AMDSMI_INIT_AMD_GPUS and AMDSMI_INIT_AMD_AINIC are
+            // Currently, only AMDSMI_INIT_AMD_GPUS and AMDSMI_INIT_AMD_NICS are
             // supported
             uint64_t init_flags = AMDSMI_INIT_AMD_GPUS;
 
