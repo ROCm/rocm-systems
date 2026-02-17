@@ -114,6 +114,15 @@ pthread_mutex_t* AMDSmiGPUDevice::get_mutex() {
     return amd::smi::GetMutex(gpu_id_);
 }
 
+amdsmi_status_t AMDSmiGPUDevice::amdgpu_query_cpu_affinity(std::string& cpu_affinity) const {
+    char bdf_str[20];
+    snprintf(bdf_str, sizeof(bdf_str)-1, "%04lx:%02x", bdf_.domain_number, bdf_.bus_number);
+  std::stringstream domain_bus_sstream;
+    domain_bus_sstream << "/sys/class/pci_bus/" << std::string(bdf_str);
+
+  return drm_.amdgpu_query_cpu_affinity(domain_bus_sstream.str(), cpu_affinity);
+}
+
 // cache the compute process list for the device
 static std::atomic<std::chrono::steady_clock::time_point> last_compute_process_list_update_time{std::chrono::steady_clock::time_point{}};
 static const std::chrono::milliseconds compute_process_list_cache_duration = std::chrono::milliseconds(500); // 500 ms
@@ -346,7 +355,7 @@ std::vector<uint64_t> AMDSmiGPUDevice::get_bitmask_from_numa_node(int32_t node_i
 std::vector<uint64_t> AMDSmiGPUDevice::get_bitmask_from_local_cpulist(uint32_t drm_card, uint32_t size) const {
     std::vector<uint64_t> bitmask(size, 0);
 
-    if (drm_card < 0) {
+    if (drm_card == std::numeric_limits<uint32_t>::max()) {
         bitmask[0] = std::numeric_limits<int32_t>::max();
         return bitmask;
     }
