@@ -101,7 +101,7 @@ TeamFcollectTester<T1>::TeamFcollectTester(TesterArguments args)
   n_pes = rocshmem_team_n_pes(ROCSHMEM_TEAM_WORLD);
 
   // Total number of elements in src buffer
-  int total_elems = (args.max_msg_size / sizeof(T1)) * args.num_wgs ;
+  int total_elems = (max_msg_size / sizeof(T1)) * args.num_wgs ;
   int buff_size = total_elems * sizeof(T1);
 
   source_buf = (T1 *)rocshmem_malloc(buff_size);
@@ -151,7 +151,7 @@ TeamFcollectTester<T1>::~TeamFcollectTester() {
 
 template <typename T1>
 void TeamFcollectTester<T1>::preLaunchKernel() {
-  bw_factor = n_pes;
+  bw_factor = n_pes * 2;
 
   for (int team_i = 0; team_i < num_teams; team_i++) {
     team_fcollect_world_dup[team_i] = ROCSHMEM_TEAM_INVALID;
