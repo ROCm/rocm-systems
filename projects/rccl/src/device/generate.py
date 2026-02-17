@@ -396,13 +396,13 @@ with open(os.path.join(gensrc, "device_table.h"), "w") as f:
     sym = paste("_", "ncclDevFunc", *fn)
     guard = get_arch_guard(fn)
     if guard:
-      out("#if %s\n%s %s(struct ncclShmemData*, void*);\n#endif\n" % (guard, func_declaration, sym))
+      out("#if %s\n%s %s(struct ncclShmemData&, void*);\n#endif\n" % (guard, func_declaration, sym))
     else:
-      out("%s %s(struct ncclShmemData*, void*);\n" % (func_declaration, sym))
+      out("%s %s(struct ncclShmemData&, void*);\n" % (func_declaration, sym))
   out("\n")
 
   index = {val: None for val in all_unrolls}
-  out("typedef void(*ncclDevFuncPtr_t)(struct ncclShmemData*, void*);\n\n")
+  out("typedef void(*ncclDevFuncPtr_t)(struct ncclShmemData&, void*);\n\n")
   for unroll in all_unrolls:
     index[unroll] = 0
     out("__device__ ncclDevFuncPtr_t const ncclDevFuncTable_%s[] = {\n" % unroll)
@@ -423,7 +423,7 @@ with open(os.path.join(gensrc, "device_table.h"), "w") as f:
       out(f"template<unsigned short f, unsigned short l>\n"
           f"struct Caller{unroll} {{\n"
           "  static __forceinline__ __device__ __host__\n"
-          f"  void call{unroll}(unsigned short funcIndex, struct ncclShmemData* ncclShmem, void* ncclShmemPerWarp) noexcept {{\n"
+          f"  void call{unroll}(unsigned short funcIndex, struct ncclShmemData& ncclShmem, void* ncclShmemPerWarp) noexcept {{\n"
           "    constexpr unsigned short m = f + (l - f) / 2;\n"
           f"    return (funcIndex < m)\n"
           f"      ? Caller{unroll}<f, m>::call{unroll}(funcIndex, ncclShmem, ncclShmemPerWarp)\n"
@@ -434,13 +434,13 @@ with open(os.path.join(gensrc, "device_table.h"), "w") as f:
       out(f"template<unsigned short f>\n"
           f"struct Caller{unroll}<f, f + 1> {{\n"
           "  static __forceinline__ __device__ __host__\n"
-          f"  void call{unroll}(unsigned short funcIndex, struct ncclShmemData* ncclShmem, void* ncclShmemPerWarp) noexcept {{\n"
+          f"  void call{unroll}(unsigned short funcIndex, struct ncclShmemData& ncclShmem, void* ncclShmemPerWarp) noexcept {{\n"
           f"    ncclDevFuncTable_{unroll}[f](ncclShmem, ncclShmemPerWarp);\n"
           "  }\n"
           "};\n\n")
 
       # emit NCCL_CALL_FUNCTIONS_<unroll> wrapper using last index value
-      out(f"__forceinline__ __device__ void NCCL_CALL_FUNCTIONS_{unroll}(unsigned short funcIndex, struct ncclShmemData* ncclShmem, void* ncclShmemPerWarp) noexcept {{\n")
+      out(f"__forceinline__ __device__ void NCCL_CALL_FUNCTIONS_{unroll}(unsigned short funcIndex, struct ncclShmemData& ncclShmem, void* ncclShmemPerWarp) noexcept {{\n")
       out(f"  Caller{unroll}<0, {index[unroll]}>::call{unroll}(funcIndex, ncclShmem, ncclShmemPerWarp);\n")
       out("}\n\n")
 
