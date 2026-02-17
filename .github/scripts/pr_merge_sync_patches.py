@@ -199,7 +199,7 @@ def _push_changes(repo_path: Path, branch: str) -> None:
 
 
 def generate_patch(
-    prefix: str, merge_sha: str, patch_path: Path, base_sha: Optional[str] = None
+    prefix: str, merge_sha: str, patch_path: Path, base_sha: str
 ) -> Optional[List[Path]]:
     """Generate patch file(s) for a given subtree prefix from a merge commit.
 
@@ -207,27 +207,12 @@ def generate_patch(
         prefix: The subtree prefix (e.g., "projects/rocBLAS/")
         merge_sha: The merge commit SHA
         patch_path: Path where patch file(s) should be written
-        base_sha: Optional base commit SHA. If provided, will detect if there are
-                 multiple commits and generate separate patches for each.
+        base_sha: Base commit SHA. Required to properly handle both squash and rebase merges.
 
     Returns:
         List[Path]: List of patch file paths (single entry for squash merges, multiple for rebase merges)
         None: If there are no commits to process
     """
-    if base_sha is None:
-        # No base SHA provided, use single commit approach (backward compatible)
-        args = [
-            "format-patch",
-            "-1",
-            merge_sha,
-            f"--relative={prefix}",
-            "--output",
-            str(patch_path),
-        ]
-        _run_git(args)
-        logger.debug(f"Generated single patch for prefix '{prefix}' at {patch_path}")
-        return [patch_path]
-
     # Check how many commits are between base and merge_sha
     commit_count = _run_git(["rev-list", "--count", f"{base_sha}..{merge_sha}"])
     commit_count_int = int(commit_count)
@@ -359,12 +344,13 @@ def main(argv: Optional[List[str]] = None) -> None:
 
     # Get base commit to detect if this is a rebase merge with multiple commits
     base_sha = client.get_pr_base_commit(args.repo, args.pr)
-    if base_sha:
-        logger.debug(f"Base commit for PR #{args.pr} in {args.repo}: {base_sha}")
-    else:
-        logger.warning(
-            f"Could not get base commit for PR #{args.pr}, will use single commit approach"
+    if not base_sha:
+        logger.error(
+            f"Could not get base commit for PR #{args.pr} in {args.repo}. "
+            f"Base commit is required to properly handle both squash and rebase merges."
         )
+        return
+    logger.debug(f"Base commit for PR #{args.pr} in {args.repo}: {base_sha}")
 
     for entry in relevant_subtrees:
         prefix = f"{entry.category}/{entry.name}/"
