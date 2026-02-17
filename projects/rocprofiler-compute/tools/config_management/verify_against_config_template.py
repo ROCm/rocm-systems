@@ -232,16 +232,19 @@ def validate_arch(
 
         latest_only = bool(panel_config.get("latest_only", False))
 
+        if pid is None:
+            errors.append(f"ERROR [{rel}]: Missing or non-integer Panel Config.id")
+            continue
+
+        actual_latest_only[pid] = latest_only
+        actual_order.append(pid)
+
         # If someone mistakenly marks latest_only in a non-latest arch, error early
         if latest_only and latest_arch and arch_dir.name != latest_arch:
             errors.append(
                 f"ERROR [{rel}]: Panel id {pid} is latest_only "
                 f'but arch "{arch_dir.name}"" is not latest_arch "{latest_arch}"'
             )
-
-        if pid is None:
-            errors.append(f"ERROR [{rel}]: Missing or non-integer Panel Config.id")
-            continue
 
         # required keys
         missing = [k for k in REQUIRED_PANEL_KEYS if k not in panel_config]
