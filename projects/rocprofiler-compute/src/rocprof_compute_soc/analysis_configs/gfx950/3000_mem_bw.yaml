@@ -225,5 +225,5 @@ Panel Config:
       The number of cycles to get 1 cache read response from TCC (L2), including reads and atomics with return.
       Equation: SUM(TCP_TCC_READ_REQ_LATENCY_sum) / SUM(TCP_TCC_READ_REQ_sum)
     L2 write latency: >-
-      The number of cycles to get 1 cache wrie response from TCC (L2), including writes and atomics without return.
+      The number of cycles to get 1 cache write response from TCC (L2), including writes and atomics without return.
       Equation: SUM(TCP_TCC_WRITE_REQ_LATENCY_sum) / SUM(TCP_TCC_WRITE_REQ_sum)
