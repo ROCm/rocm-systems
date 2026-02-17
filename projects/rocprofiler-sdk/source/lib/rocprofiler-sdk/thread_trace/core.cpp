@@ -145,7 +145,11 @@ ThreadTracerAgent::~ThreadTracerAgent()
     ROCP_TRACE << "Destroying ATT Queue...";
     if(active_traces.load() < 1) return;
 
-    ROCP_WARNING << "Thread tracer being destroyed with thread trace active";
+    // This is beter handled in triple buffer case
+    if (worker_flag && params.triple_buffering)
+        ROCP_INFO << "Thread tracer being destroyed with thread trace active";
+    else
+        ROCP_WARNING << "Thread tracer being destroyed with thread trace active";
 
     if(worker_flag) worker_flag->store(false);
     stop_thread_trace();
