@@ -198,18 +198,90 @@ def _push_changes(repo_path: Path, branch: str) -> None:
     logger.debug(f"Pushed changes from {repo_path} to origin")
 
 
-def generate_patch(prefix: str, merge_sha: str, patch_path: Path) -> None:
-    """Generate a patch file for a given subtree prefix from a merge commit."""
-    args = [
-        "format-patch",
-        "-1",
-        merge_sha,
-        f"--relative={prefix}",
-        "--output",
-        str(patch_path),
-    ]
-    _run_git(args)
-    logger.debug(f"Generated patch for prefix '{prefix}' at {patch_path}")
+def generate_patch(
+    prefix: str, merge_sha: str, patch_path: Path, base_sha: Optional[str] = None
+) -> Optional[List[Path]]:
+    """Generate patch file(s) for a given subtree prefix from a merge commit.
+
+    Args:
+        prefix: The subtree prefix (e.g., "projects/rocBLAS/")
+        merge_sha: The merge commit SHA
+        patch_path: Path where patch file(s) should be written
+        base_sha: Optional base commit SHA. If provided, will detect if there are
+                 multiple commits and generate separate patches for each.
+
+    Returns:
+        List[Path]: List of patch file paths (single entry for squash merges, multiple for rebase merges)
+        None: If there are no commits to process
+    """
+    if base_sha is None:
+        # No base SHA provided, use single commit approach (backward compatible)
+        args = [
+            "format-patch",
+            "-1",
+            merge_sha,
+            f"--relative={prefix}",
+            "--output",
+            str(patch_path),
+        ]
+        _run_git(args)
+        logger.debug(f"Generated single patch for prefix '{prefix}' at {patch_path}")
+        return [patch_path]
+
+    # Check how many commits are between base and merge_sha
+    commit_count = _run_git(["rev-list", "--count", f"{base_sha}..{merge_sha}"])
+    commit_count_int = int(commit_count)
+
+    if commit_count_int == 0:
+        logger.debug(
+            f"No commits between {base_sha} and {merge_sha} for prefix '{prefix}', skipping"
+        )
+        return None
+    elif commit_count_int == 1:
+        # Single commit (squash merge), use existing approach
+        args = [
+            "format-patch",
+            "-1",
+            merge_sha,
+            f"--relative={prefix}",
+            "--output",
+            str(patch_path),
+        ]
+        _run_git(args)
+        logger.debug(
+            f"Generated single patch for prefix '{prefix}' at {patch_path} (squash merge)"
+        )
+        return [patch_path]
+    else:
+        # Multiple commits (rebase merge), generate separate patches
+        patch_dir = patch_path.parent
+        patch_stem = patch_path.stem
+        # Use format-patch with range to generate multiple patches
+        # Output will be numbered: 0001-<subject>.patch, 0002-<subject>.patch, etc.
+        args = [
+            "format-patch",
+            f"{base_sha}..{merge_sha}",
+            f"--relative={prefix}",
+            "--output-directory",
+            str(patch_dir),
+        ]
+        _run_git(args)
+
+        # Find all generated patch files (they'll be numbered)
+        patch_files = sorted(patch_dir.glob("*.patch"))
+        if not patch_files:
+            logger.error(
+                f"No patch files generated for range {base_sha}..{merge_sha} with prefix '{prefix}'"
+            )
+            raise RuntimeError(
+                f"Expected {commit_count_int} patch files but none were generated. "
+                f"This may indicate an issue with the commit range or prefix filter."
+            )
+
+        logger.debug(
+            f"Generated {len(patch_files)} patch files for prefix '{prefix}' (rebase merge with {commit_count_int} commits)"
+        )
+        return patch_files
 
 
 def resolve_patch_author(
@@ -234,33 +306,53 @@ def apply_patch_to_subrepo(
     entry: RepoEntry,
     super_repo_url: str,
     super_repo_pr: int,
-    patch_path: Path,
+    patch_paths: List[Path],
     author_name: str,
     author_email: str,
     merge_sha: str,
     dry_run: bool = False,
 ) -> None:
-    """Clone the subrepo, apply the patch, and attribute to the original author with commit message annotations."""
+    """Clone the subrepo, apply patch(es), and attribute to the original author with commit message annotations.
+
+    Args:
+        entry: Repository entry configuration
+        super_repo_url: URL of the super repository
+        super_repo_pr: PR number in the super repository
+        patch_paths: List of patch file paths
+        author_name: Author name for commits
+        author_email: Author email for commits
+        merge_sha: Merge commit SHA
+        dry_run: If True, only log actions without making changes
+    """
     with tempfile.TemporaryDirectory() as tmpdir:
         subrepo_path = Path(tmpdir) / entry.name
         _clone_subrepo(entry.url, entry.branch, subrepo_path)
         if dry_run:
+            patch_count = len(patch_paths)
             logger.info(
-                f"[Dry-run] Would apply patch to {entry.url} as {author_name} <{author_email}>"
+                f"[Dry-run] Would apply {patch_count} patch(es) to {entry.url} as {author_name} <{author_email}>"
             )
             return
+
         _configure_git_user(subrepo_path)
-        _apply_patch(subrepo_path, patch_path)
-        _stage_changes(subrepo_path)
-        original_commit_msg = _extract_commit_message_from_patch(patch_path)
-        commit_msg = _format_commit_message(
-            super_repo_url, super_repo_pr, merge_sha, original_commit_msg
-        )
-        _commit_changes(subrepo_path, commit_msg, author_name, author_email)
         _set_authenticated_remote(subrepo_path, entry.url)
+
+        # Apply each patch and create separate commits
+        for i, patch_path in enumerate(patch_paths, 1):
+            logger.debug(f"Applying patch {i}/{len(patch_paths)}: {patch_path.name}")
+            _apply_patch(subrepo_path, patch_path)
+            _stage_changes(subrepo_path)
+            original_commit_msg = _extract_commit_message_from_patch(patch_path)
+            commit_msg = _format_commit_message(
+                super_repo_url, super_repo_pr, merge_sha, original_commit_msg
+            )
+            _commit_changes(subrepo_path, commit_msg, author_name, author_email)
+            logger.debug(f"Committed patch {i}/{len(patch_paths)}")
+
+        # Push all commits at once
         _push_changes(subrepo_path, entry.branch)
         logger.info(
-            f"Patch applied, committed, and pushed to {entry.url} as {author_name} <{author_email}>"
+            f"Applied {len(patch_paths)} patch(es), committed, and pushed to {entry.url} as {author_name} <{author_email}>"
         )
 
 
@@ -272,20 +364,36 @@ def main(argv: Optional[List[str]] = None) -> None:
     config = load_repo_config(args.config)
     subtrees = [line.strip() for line in args.subtrees.splitlines() if line.strip()]
     relevant_subtrees = get_subtree_info(config, subtrees)
-    merge_sha = client.get_squash_merge_commit(args.repo, args.pr)
+    merge_sha = client.get_merge_commit(args.repo, args.pr)
+    if not merge_sha:
+        logger.error(f"Could not get merge commit for PR #{args.pr} in {args.repo}")
+        return
     logger.debug(f"Merge commit for PR #{args.pr} in {args.repo}: {merge_sha}")
+
+    # Get base commit to detect if this is a rebase merge with multiple commits
+    base_sha = client.get_pr_base_commit(args.repo, args.pr)
+    if base_sha:
+        logger.debug(f"Base commit for PR #{args.pr} in {args.repo}: {base_sha}")
+    else:
+        logger.warning(
+            f"Could not get base commit for PR #{args.pr}, will use single commit approach"
+        )
+
     for entry in relevant_subtrees:
         prefix = f"{entry.category}/{entry.name}/"
         logger.debug(f"Processing subtree {prefix}")
         with tempfile.TemporaryDirectory() as tmpdir:
             patch_file = Path(tmpdir) / f"{entry.name}.patch"
-            generate_patch(prefix, merge_sha, patch_file)
+            patch_result = generate_patch(prefix, merge_sha, patch_file, base_sha)
+            if patch_result is None:
+                logger.debug(f"No patches to apply for subtree {prefix}, skipping")
+                continue
             author_name, author_email = resolve_patch_author(client, args.repo, args.pr)
             apply_patch_to_subrepo(
                 entry,
                 args.repo,
                 args.pr,
-                patch_file,
+                patch_result,
                 author_name,
                 author_email,
                 merge_sha,
