@@ -207,7 +207,7 @@ endif()
 
 set_property(GLOBAL APPEND PROPERTY
                G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/add_Kernel.code)
-set_target_properties(add_Kernel.code PROPERTIES LINKER_LANGUAGE ${GPGPU_LINKER_LIBRARIES})
+# set_target_properties(add_Kernel.code PROPERTIES LINKER_LANGUAGE ${GPGPU_LINKER_LIBRARIES})
 
 
 hip_add_exe_to_target(NAME GraphsTest2

@@ -39,7 +39,6 @@ if (HIP_PLATFORM MATCHES "amd")
             -I${HIP_INCLUDE_DIR}
             -D${PLATFORM_DEFINE}
             -o hipGetDeviceProp.o
-            -fPIC
     BYPRODUCTS hipGetDeviceProp.o
 )
 else()
