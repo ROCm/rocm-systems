@@ -3,8 +3,14 @@ name: Device Metrics Exporter CI
 on:
   pull_request:
     branches: [develop]
+    paths:
+      - 'projects/device-metrics-exporter/**'
+      - '.github/workflows/device-metrics-exporter-CI.yml'
   push:
     branches: [develop]
+    paths:
+      - 'projects/device-metrics-exporter/**'
+      - '.github/workflows/device-metrics-exporter-CI.yml'
   workflow_dispatch:
 
 permissions:
