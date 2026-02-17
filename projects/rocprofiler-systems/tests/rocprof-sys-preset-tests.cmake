@@ -47,14 +47,16 @@ rocprofiler_systems_add_bin_test(
     PASS_REGEX "Preset:        --trace-hpc"
 )
 
-rocprofiler_systems_add_bin_test(
-    NAME preset-sample-workload-trace
-    TARGET rocprofiler-systems-sample
-    ARGS --workload-trace -v 2 -- ls
-    LABELS preset sample
-    TIMEOUT 60
-    PASS_REGEX "Preset:        --workload-trace"
-)
+if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU})
+    rocprofiler_systems_add_bin_test(
+        NAME preset-sample-workload-trace
+        TARGET rocprofiler-systems-sample
+        ARGS --workload-trace -v 2 -- ls
+        LABELS preset sample
+        TIMEOUT 60
+        PASS_REGEX "Preset:        --workload-trace"
+    )
+endif()
 
 rocprofiler_systems_add_bin_test(
     NAME preset-sample-sys-trace
@@ -160,14 +162,16 @@ rocprofiler_systems_add_bin_test(
     PASS_REGEX "Preset:        --trace-hpc"
 )
 
-rocprofiler_systems_add_bin_test(
-    NAME preset-run-workload-trace
-    TARGET rocprofiler-systems-run
-    ARGS --workload-trace -v 2 -- ls
-    LABELS preset run
-    TIMEOUT 60
-    PASS_REGEX "Preset:        --workload-trace"
-)
+if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU})
+    rocprofiler_systems_add_bin_test(
+        NAME preset-run-workload-trace
+        TARGET rocprofiler-systems-run
+        ARGS --workload-trace -v 2 -- ls
+        LABELS preset run
+        TIMEOUT 60
+        PASS_REGEX "Preset:        --workload-trace"
+    )
+endif()
 
 rocprofiler_systems_add_bin_test(
     NAME preset-run-sys-trace

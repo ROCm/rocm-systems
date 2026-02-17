@@ -81,6 +81,13 @@ def check_amd_hsmp_driver():
             return True
     return False
 
+def check_amd_ionic_driver():
+    """ Returns true if ionic is found in the list of initialized modules """
+    status_file = Path("/sys/module/ionic/initstate")
+    if status_file.exists():
+        if status_file.read_text(encoding="ascii").strip() == "live":
+            return True
+    return False
 
 def amdsmi_cli_init():
     """ Initializes AMDSMI Library for the CLI
@@ -94,45 +101,26 @@ def amdsmi_cli_init():
     Raises:
         err: AmdSmiLibraryException if not successful in initializing any drivers
     """
-    init_flag = amdsmi_interface.AmdSmiInitFlags.INIT_ALL_PROCESSORS
-    if check_amdgpu_driver() and check_amd_hsmp_driver():
-        init_flag = amdsmi_interface.AmdSmiInitFlags.INIT_AMD_APUS
-        logging.debug("Both amdgpu , amd_hsmp or hsmp_acpi  driver's initstate is live")
-        try:
-            amdsmi_interface.amdsmi_init(init_flag)
-        except (amdsmi_interface.AmdSmiLibraryException, amdsmi_interface.AmdSmiParameterException) as e:
-            if e.err_code in (amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_INIT,
-                              amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_DRIVER_NOT_LOADED):
-                logging.error("Drivers not loaded (amdgpu, amd_hsmp or hsmp_acpi drivers not found in modules)")
-                sys.exit(-1)
-            else:
-                raise e
-    elif check_amdgpu_driver():
-        init_flag = amdsmi_interface.AmdSmiInitFlags.INIT_AMD_GPUS
-        logging.debug("amdgpu driver initstate is live")
-        try:
-            amdsmi_interface.amdsmi_init(init_flag)
-        except (amdsmi_interface.AmdSmiLibraryException, amdsmi_interface.AmdSmiParameterException) as e:
-            if e.err_code in (amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_INIT,
-                                amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_DRIVER_NOT_LOADED):
-                logging.error("Driver not loaded (amdgpu not found in modules)")
-                sys.exit(-1)
-            else:
-                raise e
-        logging.debug("amdgpu driver initialized successfully, but amd_hsmp or hsmp_acpi initstate was not live")
-    elif check_amd_hsmp_driver():
-        init_flag = amdsmi_interface.AmdSmiInitFlags.INIT_AMD_CPUS
-        logging.debug("amd_hsmp or hsmp_acpi driver initstate is live")
-        try:
-            amdsmi_interface.amdsmi_init(init_flag)
-        except (amdsmi_interface.AmdSmiLibraryException, amdsmi_interface.AmdSmiParameterException) as e:
-            if e.err_code in (amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_INIT,
-                              amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_DRIVER_NOT_LOADED):
-                logging.error("Driver not loaded (amd_hsmp or hsmp_acpi not found in modules)")
-                sys.exit(-1)
-            else:
-                raise e
-        logging.debug("amd_hsmp or hsmp_acpi driver initialized successfully, but amdgpu initstate was not live")
+    init_flag = 0
+    if check_amdgpu_driver():
+        init_flag |= amdsmi_interface.AmdSmiInitFlags.INIT_AMD_GPUS
+        logging.debug("amdgpu driver's initstate is live")
+    if check_amd_hsmp_driver():
+        init_flag |= amdsmi_interface.AmdSmiInitFlags.INIT_AMD_CPUS
+        logging.debug("hsmp driver's initstate is live")
+    if check_amd_ionic_driver():
+        logging.debug("ionic driver's initstate is live")
+        init_flag |= amdsmi_interface.AmdSmiInitFlags.INIT_AMD_NICS
+
+    try:
+        amdsmi_interface.amdsmi_init(init_flag)
+    except (amdsmi_interface.AmdSmiLibraryException, amdsmi_interface.AmdSmiParameterException) as e:
+        if e.err_code in (amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_INIT,
+                            amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_DRIVER_NOT_LOADED):
+            logging.error("Drivers not loaded (amdgpu, amd_hsmp, ionic, rdma drivers not found in modules)")
+            sys.exit(-1)
+        else:
+            raise e
 
     logging.debug(f"AMDSMI initialized with atleast one driver successfully | init flag: {init_flag}")
 
