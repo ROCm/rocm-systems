@@ -726,17 +726,72 @@ kfd_context_kinds(const context::context* ctx)
                                   ROCPROFILER_BUFFER_TRACING_KFD_QUEUE);
 }
 
+template <size_t EventIdx>
+struct kfd_event_range;
+
+#define SPECIALIZE_KFD_EVENT_RANGE(EventIdx, RangeIdx)                                             \
+    template <>                                                                                    \
+    struct kfd_event_range<EventIdx>                                                               \
+    {                                                                                              \
+        static constexpr auto value = RangeIdx;                                                    \
+    };
+
+SPECIALIZE_KFD_EVENT_RANGE(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE,
+                           ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE)
+SPECIALIZE_KFD_EVENT_RANGE(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_FAULT,
+                           ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT)
+SPECIALIZE_KFD_EVENT_RANGE(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE,
+                           ROCPROFILER_BUFFER_TRACING_KFD_QUEUE)
+
+#undef SPECIALIZE_KFD_EVENT_RANGE
+
+using kfd_event_domains_seq_t =
+    std::index_sequence<ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE,
+                        ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_FAULT,
+                        ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE>;
+
+template <size_t EventIdx, size_t... EventIdxs>
 auto
-get_contexts(rocprofiler_buffer_tracing_kind_t kind, int operation)
+get_event_range_domain(rocprofiler_buffer_tracing_kind_t idx,
+                       std::index_sequence<EventIdx, EventIdxs...>)
+{
+    if(EventIdx == idx)
+    {
+        return kfd_event_range<EventIdx>::value;
+    }
+
+    if constexpr(sizeof...(EventIdxs) > 0)
+    {
+        return get_event_range_domain(idx, std::index_sequence<EventIdxs...>{});
+    }
+
+    return ROCPROFILER_BUFFER_TRACING_NONE;
+}
+
+auto
+get_contexts(rocprofiler_buffer_tracing_kind_t event_kind)
 {
     auto active_contexts = context::get_active_contexts(
         [](const auto* ctx) { return (ctx->buffered_tracer && kfd_context_kinds(ctx)); });
     auto operation_ctxs = context::context_array_t{};
 
+    // convert the event kind to its associated range kind, if it has one.
+    auto range_kind = get_event_range_domain(event_kind, kfd_event_domains_seq_t{});
+
+    ROCP_CI_LOG_IF(INFO, event_kind == range_kind) << fmt::format(
+        "KFD event kind == KFD range kind :: {} == {}. This is unexpected and may indicate a bug",
+        static_cast<int>(event_kind),
+        static_cast<int>(range_kind));
+
     for(const auto* itr : active_contexts)
     {
         // if the given domain + op is not enabled, skip this context
-        if(itr->buffered_tracer->domains(kind, operation))
+        if(itr->buffered_tracer->domains(event_kind))
+        {
+            operation_ctxs.emplace_back(itr);
+        }
+        else if(range_kind != ROCPROFILER_BUFFER_TRACING_NONE &&
+                itr->buffered_tracer->domains(range_kind))
         {
             operation_ctxs.emplace_back(itr);
         }
@@ -1145,48 +1200,6 @@ is_one_of(int op, std::index_sequence<Ops...>)
     return ((op == Ops) || ...);
 }
 
-template <size_t EventIdx>
-struct kfd_event_range;
-
-#define SPECIALIZE_KFD_EVENT_RANGE(EventIdx, RangeIdx)                                             \
-    template <>                                                                                    \
-    struct kfd_event_range<EventIdx>                                                               \
-    {                                                                                              \
-        static constexpr auto value = RangeIdx;                                                    \
-    };
-
-SPECIALIZE_KFD_EVENT_RANGE(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE,
-                           ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE)
-SPECIALIZE_KFD_EVENT_RANGE(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_FAULT,
-                           ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT)
-SPECIALIZE_KFD_EVENT_RANGE(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE,
-                           ROCPROFILER_BUFFER_TRACING_KFD_QUEUE)
-
-#undef SPECIALIZE_KFD_EVENT_RANGE
-
-using kfd_event_domains_seq_t =
-    std::index_sequence<ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE,
-                        ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_FAULT,
-                        ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE>;
-
-template <size_t EventIdx, size_t... EventIdxs>
-auto
-get_event_range_domain(rocprofiler_buffer_tracing_kind_t idx,
-                       std::index_sequence<EventIdx, EventIdxs...>)
-{
-    if(EventIdx == idx)
-    {
-        return kfd_event_range<EventIdx>::value;
-    }
-
-    if constexpr(sizeof...(EventIdxs) > 0)
-    {
-        return get_event_range_domain(idx, std::index_sequence<EventIdxs...>{});
-    }
-
-    return ROCPROFILER_BUFFER_TRACING_NONE;
-}
-
 void
 check_paired_events(const context_t* ctx, buffer::instance* buffer, const kfd_event_record& rec)
 {
@@ -1357,7 +1370,7 @@ check_paired_events(const context_t* ctx, buffer::instance* buffer, const kfd_ev
         {
             // If event is ROCPROFILER_KFD_EVENT_QUEUE_RESTORE_RESCHEDULED we should not attempt to
             // pair it. It is an instantaneous event.
-            // It is handled in handle_reporting -> emplace_buffer_record.
+            // It is handled in handle_reporting -> emplace_event_buffer_record.
         }
         else
         {
@@ -1369,7 +1382,9 @@ check_paired_events(const context_t* ctx, buffer::instance* buffer, const kfd_ev
 }
 
 void
-emplace_buffer_record(const context_t* ctx, buffer::instance* buffer, const kfd_event_record& rec)
+emplace_event_buffer_record(const context_t*        ctx,
+                            buffer::instance*       buffer,
+                            const kfd_event_record& rec)
 {
     if(!ctx->is_tracing(rec.kind, rec.operation)) return;
 
@@ -1407,7 +1422,8 @@ emplace_buffer_record(const context_t* ctx, buffer::instance* buffer, const kfd_
         }
         default:
         {
-            ROCP_ERROR << fmt::format("Invalid Kind {} for record", static_cast<int>(rec.kind));
+            ROCP_CI_LOG(WARNING) << fmt::format("Invalid/Unsupported KFD event kind {}",
+                                                static_cast<int>(rec.kind));
         }
     }
 }
@@ -1420,24 +1436,37 @@ handle_reporting(std::string_view event_data)
     auto       event     = parse_event(
         kfd_event, get_node_map(), event_data, std::make_index_sequence<KFD_EVENT_LAST>{});
 
-    ROCP_ERROR_IF(event.kind < ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE ||
-                  event.kind > ROCPROFILER_BUFFER_TRACING_KFD_QUEUE)
+    ROCP_CI_LOG_IF(WARNING,
+                   event.kind < ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE ||
+                       event.kind > ROCPROFILER_BUFFER_TRACING_KFD_QUEUE)
         << fmt::format("kfd_events: Invalid record kind {}", static_cast<int>(event.kind));
 
-    ROCP_ERROR_IF(event.operation == -1)
+    ROCP_CI_LOG_IF(WARNING, event.operation == -1)
         << fmt::format("kfd_events: Invalid record operation: ({}, {})",
                        static_cast<int>(event.kind),
                        event.operation);
 
-    auto buffered_contexts = get_contexts(event.kind, event.operation);
-    if(buffered_contexts.empty()) return;
+    auto buffered_contexts = get_contexts(event.kind);
+
+    // loop will handle if array empty
+    ROCP_TRACE << fmt::format(
+        "KFD event {} (operation={}) has {} contexts based on the domain filtering",
+        static_cast<int>(event.kind),
+        static_cast<int>(event.operation),
+        buffered_contexts.size());
 
     for(const auto& itr : buffered_contexts)
     {
         auto* buffer = buffer::get_buffer(itr->buffered_tracer->buffer_data.at(event.kind));
 
+        // range handling is more complex so unconditionally call this function
         check_paired_events(itr, buffer, event);
-        emplace_buffer_record(itr, buffer, event);
+        // event handling is simpler since it resembles how KFD reports events so apply operation
+        // filter before calling the implementation.
+        if(itr->is_tracing(event.kind, event.operation))
+        {
+            emplace_event_buffer_record(itr, buffer, event);
+        }
     }
 }
 
