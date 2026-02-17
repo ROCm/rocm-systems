@@ -566,6 +566,7 @@ class RocProfCompute:
             console_error(f"Unsupported analysis mode -> {self.__analyze_mode}")
 
         if getattr(self.__args, "list_available_metrics", False):
+            self.generate_machine_specs()
             self.list_metrics()
 
         # -----------------------
