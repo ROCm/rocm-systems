@@ -7,6 +7,7 @@
  ************************************************************************/
 
 #include "nccl.h"
+#include "alloc.h"
 #include "channel.h"
 #include "nvmlwrap.h"
 #include "gdrwrap.h"
@@ -249,6 +250,10 @@ exit:;
 }
 
 static ncclResult_t ncclInit() {
+    // Register atexit handler to detect process shutdown. This must happen
+    // early so the handler runs BEFORE HIP runtime static destructors.
+    rcclRegisterShutdownHandler();
+
     char strValue[2048];
     NCCLCHECK(ncclTopoGetStrFromSys("/proc/sys/kernel", "numa_balancing", strValue));
     if (strcmp(strValue, "1") == 0)
