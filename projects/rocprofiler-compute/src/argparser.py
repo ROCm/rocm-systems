@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Optional
 
 from utils.logger import console_warning
-from utils.utils import METRIC_ID_RE
+from utils.utils import METRIC_ID_RE, resolve_rocm_library_path
 
 
 class ExperimentalAction(argparse.Action):
@@ -518,12 +518,14 @@ Examples:
     )
     profile_group.add_argument(
         "--rocprofiler-sdk-tool-path",
-        type=str,
+        type=resolve_rocm_library_path,
         dest="rocprofiler_sdk_tool_path",
         required=False,
-        default=str(
-            Path(os.getenv("ROCM_PATH", "/opt/rocm"))
-            / "lib/rocprofiler-sdk/librocprofiler-sdk-tool.so"
+        default=resolve_rocm_library_path(
+            str(
+                Path(os.getenv("ROCM_PATH", "/opt/rocm"))
+                / "lib/rocprofiler-sdk/librocprofiler-sdk-tool.so"
+            )
         ),
         help="\t\t\tSet the path to rocprofiler-sdk tool.",
     )
@@ -728,6 +730,20 @@ Examples:
         dest="list_available_metrics",
         help="\t\tList all available metrics for analysis on current arch",
         action="store_true",
+    )
+    analyze_group.add_argument(
+        "--list-torch-operators",
+        dest="list_torch_operators",
+        help="\t\tList all operators from PyTorch trace.",
+        action="store_true",
+    )
+    analyze_group.add_argument(
+        "--torch-operator",
+        metavar="",
+        type=str,
+        dest="torch_operator",
+        nargs="+",
+        help="\t\tSpecify operator name for filtering.",
     )
     analyze_group.add_argument(
         "-k",
