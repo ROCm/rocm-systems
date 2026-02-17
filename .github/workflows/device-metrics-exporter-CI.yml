@@ -476,7 +476,7 @@ jobs:
 
   rpm-test:
     name: Tests (RPM)
-    needs: [rpm-buildinstall, debian-test]
+    needs: [rpm-buildinstall]
     runs-on:
       - self-hosted
       - ${{ vars.RUNNER_TYPE }}
