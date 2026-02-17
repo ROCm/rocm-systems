@@ -89,6 +89,7 @@ class RocProfCompute:
             self.generate_machine_specs()
 
         self.sanitize()
+        self.handle_list_args()
 
         if self.__mode == "profile":
             self.detect_profiler()
@@ -306,6 +307,29 @@ class RocProfCompute:
         )
         self.__args = parser.parse_args()
 
+        if self.__args.mode == "profile":
+            self.handle_profile_args()
+        elif self.__args.mode == "analyze":
+            self.handle_analyze_args()
+
+    def handle_profile_args(self) -> None:
+        # Handle list operations first - these are independent and exit immediately
+        if getattr(self.__args, "list_sets", False):
+            return
+        if getattr(self.__args, "list_available_metrics", False):
+            return
+
+    def handle_analyze_args(self) -> None:
+        """Handle analyze-specific argument processing"""
+        # Block all filters during spatial-multiplexing
+        if self.__args.spatial_multiplexing:
+            self.__args.gpu_id = None
+            self.__args.gpu_kernel = None
+            self.__args.gpu_dispatch_id = None
+            self.__args.nodes = None
+
+    @demarcate
+    def handle_list_args(self) -> None:
         if self.__args.specs:
             print(generate_machine_specs(self.__args))
             sys.exit(0)
@@ -327,27 +351,6 @@ class RocProfCompute:
             console_error(
                 "rocprof-compute requires you to pass a valid mode. Detected None."
             )
-
-        if self.__args.mode == "profile":
-            self.handle_profile_args()
-        elif self.__args.mode == "analyze":
-            self.handle_analyze_args()
-
-    def handle_profile_args(self) -> None:
-        # Handle list operations first - these are independent and exit immediately
-        if getattr(self.__args, "list_sets", False):
-            return
-        if getattr(self.__args, "list_available_metrics", False):
-            return
-
-    def handle_analyze_args(self) -> None:
-        """Handle analyze-specific argument processing"""
-        # Block all filters during spatial-multiplexing
-        if self.__args.spatial_multiplexing:
-            self.__args.gpu_id = None
-            self.__args.gpu_kernel = None
-            self.__args.gpu_dispatch_id = None
-            self.__args.nodes = None
 
     @demarcate
     def list_metrics(self) -> None:
@@ -377,7 +380,6 @@ class RocProfCompute:
     @demarcate
     def list_blocks(self) -> None:
         for_current_arch = getattr(self.__args, "list_available_metrics", False)
-        console_log(f"for_current_arch: {for_current_arch}")
 
         arch = (
             self.__mspec.gpu_arch
