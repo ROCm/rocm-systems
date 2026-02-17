@@ -274,24 +274,27 @@ __device__ void QueuePair::ionic_ring_doorbell_single(uint32_t pos) {
   __atomic_store_n(&sq_dbreg[8 * __lane_id()], sq_dbval | (sq_mask & pos), __ATOMIC_SEQ_CST);
 }
 
-__device__ void QueuePair::ionic_quiet() {
-  ionic_quiet_internal(get_same_qp_lane_mask(), sq_prod);
+__device__ void QueuePair::ionic_quiet(ActiveWFInfo &wf_info) {
+  // ionic_quiet_internal(get_same_qp_lane_mask(), sq_prod);
+  ionic_quiet_internal(wf_info.pe_group_mask, sq_prod);
 }
 
 __device__ void QueuePair::ionic_quiet_single() {
   ionic_quiet_internal_ccqe_single(sq_prod);
 }
 
-__device__ void QueuePair::ionic_post_wqe_rma(int pe, int32_t size, uintptr_t laddr, uintptr_t raddr, uint8_t opcode, Collectivity cy) {
-  uint64_t activemask = get_same_qp_lane_mask();
-  uint32_t my_logical_lane_id = get_active_lane_num(activemask);
+__device__ void QueuePair::ionic_post_wqe_rma(int32_t size, uintptr_t laddr,
+    uintptr_t raddr, uint8_t opcode, ActiveWFInfo &wf_info) {
+  uint64_t activemask = wf_info.pe_group_mask; // get_same_qp_lane_mask();
+  uint32_t my_logical_lane_id = wf_info.pe_group_logical_lane_id; //get_active_lane_num(activemask);
   uint32_t num_wqes = 1;
-  if (cy == THREAD) {
-    num_wqes = get_active_lane_count(activemask);
+  if (wf_info.scope == ThreadScope::thread) {
+    num_wqes = wf_info.num_pe_group_lanes; // get_active_lane_count(activemask);
   }
 
   uint32_t my_sq_prod = reserve_sq(activemask, num_wqes);
-  if (cy == WAVE) {
+  if (wf_info.scope == ThreadScope::wave) {
+    // use wf_info.pe_group_leader_phys_lane_id;
     if (!is_first_active_lane(activemask)) {
       return;
     }
@@ -397,13 +400,14 @@ __device__ void QueuePair::ionic_post_wqe_rma_single(int pe, int32_t size, uintp
   commit_sq_single(my_sq_prod, my_sq_pos, num_wqes);
 }
 
-__device__ uint64_t QueuePair::ionic_post_wqe_amo(int pe, int32_t size, uintptr_t raddr, uint8_t opcode,
-                                                  int64_t atomic_data, int64_t atomic_cmp, bool fetching) {
-  uint64_t activemask = get_same_qp_lane_mask();
-  uint32_t num_wqes = get_active_lane_count(activemask);
-  uint32_t my_logical_lane_id = get_active_lane_num(activemask);
+__device__ uint64_t QueuePair::ionic_post_wqe_amo(int32_t size, uintptr_t raddr,
+    uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
+    bool fetching, ActiveWFInfo &wf_info) {
+  uint64_t activemask = wf_info.pe_group_mask; //get_same_qp_lane_mask();
+  uint32_t num_wqes = wf_info.num_pe_group_lanes; //get_active_lane_count(activemask);
+  uint32_t my_logical_lane_id = wf_info.pe_group_logical_lane_id; //get_active_lane_num(activemask);
   bool is_leader{my_logical_lane_id == 0};
-  const uint64_t leader_phys_lane_id = get_first_active_lane_id(activemask);
+  const uint64_t leader_phys_lane_id = wf_info.pe_group_leader_phys_lane_id; //get_first_active_lane_id(activemask);
   uint32_t my_sq_prod = reserve_sq(activemask, num_wqes);
   uint32_t my_sq_pos = my_sq_prod + my_logical_lane_id;
   struct ionic_v1_wqe *wqe = &ionic_sq_buf[my_sq_pos & sq_mask];

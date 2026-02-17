@@ -31,8 +31,7 @@
 namespace rocshmem {
 
 __device__ void GDAContext::internal_direct_barrier(int pe, int PE_start,
-                                                    int stride, int n_pes,
-                                                    int64_t *pSync) {
+    int stride, int n_pes, int64_t *pSync, ActiveWFInfo &wf_info) {
   int64_t flag_val{1};
   if (pe == PE_start) {
     // Go through all PE offsets (except current offset = 0)
@@ -49,7 +48,7 @@ __device__ void GDAContext::internal_direct_barrier(int pe, int PE_start,
     // Announce to other PEs that all have reached
     for (int i = 1, j = PE_start + stride; i < n_pes; ++i, j += stride) {
       pSync[0] = flag_val;
-      put(&pSync[0], &pSync[0], 1, j);
+      internal_putmem(&pSync[0], &pSync[0], sizeof(*pSync), j, j, wf_info);
 #if defined(__gfx90a__)
       __threadfence_system();
 #endif /* __gfx90a__ */
@@ -59,7 +58,8 @@ __device__ void GDAContext::internal_direct_barrier(int pe, int PE_start,
     // Mark current PE offset as reached
     size_t pe_offset = (pe - PE_start) / stride;
     pSync[pe_offset] = flag_val;
-    put(&pSync[pe_offset], &pSync[pe_offset], 1, PE_start);
+    internal_putmem(&pSync[pe_offset], &pSync[pe_offset], sizeof(*pSync),
+      PE_start, PE_start, wf_info);
 #if defined(__gfx90a__)
     __threadfence_system();
 #endif /* __gfx90a__ */
@@ -71,8 +71,7 @@ __device__ void GDAContext::internal_direct_barrier(int pe, int PE_start,
 }
 
 __device__ void GDAContext::internal_direct_barrier_wg(int pe, int PE_start,
-                                                       int stride, int n_pes,
-                                                       int64_t *pSync) {
+    int stride, int n_pes, int64_t *pSync, ActiveWFInfo &wf_info) {
   int64_t flag_val{1};
 
   if (pe == PE_start) {
@@ -95,13 +94,14 @@ __device__ void GDAContext::internal_direct_barrier_wg(int pe, int PE_start,
     for (int i = wf_id + 1, j = PE_start + stride + wf_id;
              i < n_pes;
              i+= wf_count, j += (wf_count * stride)) {
-      put_nbi_wave(&pSync[0], &flag_val, 1, j);
+      internal_putmem_nbi_wave(&pSync[0], &flag_val, sizeof(*pSync), j,
+        j, wf_info);
     }
 
     for (int i = wf_id + 1, j = PE_start + stride + wf_id;
              i < n_pes;
              i+= wf_count, j += (wf_count * stride)) {
-      pe_quiet(j);
+      qps[j].quiet(wf_info);
     }
 
     __syncthreads();
@@ -113,7 +113,8 @@ __device__ void GDAContext::internal_direct_barrier_wg(int pe, int PE_start,
     if (is_thread_zero_in_block()) {
       // Mark current PE offset as reached
       size_t pe_offset = (pe - PE_start) / stride;
-      put(&pSync[pe_offset], &flag_val, 1, PE_start);
+      internal_putmem(&pSync[pe_offset], &flag_val, sizeof(*pSync), PE_start,
+        PE_start, wf_info);
       wait_until(&pSync[0], ROCSHMEM_CMP_EQ, flag_val);
       pSync[0] = ROCSHMEM_SYNC_VALUE;
       __threadfence_system();
@@ -122,8 +123,7 @@ __device__ void GDAContext::internal_direct_barrier_wg(int pe, int PE_start,
 }
 
 __device__ void GDAContext::internal_atomic_barrier(int pe, int PE_start,
-                                                    int stride, int n_pes,
-                                                    int64_t *pSync) {
+    int stride, int n_pes, int64_t *pSync, ActiveWFInfo &wf_info) {
   int64_t flag_val{1};
   if (pe == PE_start) {
     wait_until(&pSync[0], ROCSHMEM_CMP_EQ, (int64_t)(n_pes - 1));
@@ -132,12 +132,13 @@ __device__ void GDAContext::internal_atomic_barrier(int pe, int PE_start,
 
     pSync[0] = flag_val;
     for (int i = 1, j = PE_start + stride; i < n_pes; ++i, j += stride) {
-      put_nbi(&pSync[0], &pSync[0], 1, j);
+      internal_putmem_nbi(&pSync[0], &pSync[0], sizeof(*pSync), j, j, wf_info);
     }
     quiet();
     pSync[0] = ROCSHMEM_SYNC_VALUE;
   } else {
-    amo_add<int64_t>(&pSync[0], flag_val, PE_start);
+    internal_amo_add<int64_t>(&pSync[0], flag_val, PE_start,
+      PE_start, wf_info);
     wait_until(&pSync[0], ROCSHMEM_CMP_EQ, flag_val);
     pSync[0] = ROCSHMEM_SYNC_VALUE;
     __threadfence_system();
@@ -145,33 +146,33 @@ __device__ void GDAContext::internal_atomic_barrier(int pe, int PE_start,
 }
 
 __device__ void GDAContext::internal_sync(int pe, int PE_start, int stride,
-                                          int PE_size, int64_t *pSync) {
+    int PE_size, int64_t *pSync, ActiveWFInfo &wf_info) {
   if (PE_size < 64) {
-    internal_direct_barrier(pe, PE_start, stride, PE_size, pSync);
+    internal_direct_barrier(pe, PE_start, stride, PE_size, pSync, wf_info);
   } else {
-    internal_atomic_barrier(pe, PE_start, stride, PE_size, pSync);
+    internal_atomic_barrier(pe, PE_start, stride, PE_size, pSync, wf_info);
   }
 }
 
-__device__ void GDAContext::internal_sync_wave(int pe, int PE_start, int stride,
-                                               int PE_size, int64_t *pSync) {
+__device__ void GDAContext::internal_sync_wave(int pe, int PE_start,
+    int stride, int PE_size, int64_t *pSync, ActiveWFInfo &wf_info) {
   if (is_thread_zero_in_wave()) {
     if (PE_size < 64) {
-      internal_direct_barrier(pe, PE_start, stride, PE_size, pSync);
+      internal_direct_barrier(pe, PE_start, stride, PE_size, pSync, wf_info);
     } else {
-      internal_atomic_barrier(pe, PE_start, stride, PE_size, pSync);
+      internal_atomic_barrier(pe, PE_start, stride, PE_size, pSync, wf_info);
     }
   }
 }
 
 __device__ void GDAContext::internal_sync_wg(int pe, int PE_start, int stride,
-                                             int PE_size, int64_t *pSync) {
+    int PE_size, int64_t *pSync, ActiveWFInfo &wf_info) {
   __syncthreads();
   if (PE_size < 64) {
-    internal_direct_barrier_wg(pe, PE_start, stride, PE_size, pSync);
+    internal_direct_barrier_wg(pe, PE_start, stride, PE_size, pSync, wf_info);
   } else {
     if (is_thread_zero_in_block()) {
-      internal_atomic_barrier(pe, PE_start, stride, PE_size, pSync);
+      internal_atomic_barrier(pe, PE_start, stride, PE_size, pSync, wf_info);
     }
   }
   __threadfence_system();
@@ -187,7 +188,8 @@ __device__ void GDAContext::sync(rocshmem_team_t team) {
   int pe_size = team_obj->num_pes;
   long *p_sync = team_obj->barrier_pSync;
 
-  internal_sync(pe, pe_start, pe_stride, pe_size, p_sync);
+  ActiveWFInfo wf_info(ctx_id_);
+  internal_sync(pe, pe_start, pe_stride, pe_size, p_sync, wf_info);
 }
 
 __device__ void GDAContext::sync_wave(rocshmem_team_t team) {
@@ -199,7 +201,8 @@ __device__ void GDAContext::sync_wave(rocshmem_team_t team) {
   int pe_size = team_obj->num_pes;
   long *p_sync = team_obj->barrier_pSync;
 
-  internal_sync_wave(pe, pe_start, pe_stride, pe_size, p_sync);
+  ActiveWFInfo wf_info(ctx_id_, ThreadScope::wave);
+  internal_sync_wave(pe, pe_start, pe_stride, pe_size, p_sync, wf_info);
 }
 
 __device__ void GDAContext::sync_wg(rocshmem_team_t team) {
@@ -211,19 +214,23 @@ __device__ void GDAContext::sync_wg(rocshmem_team_t team) {
   int pe_size = team_obj->num_pes;
   long *p_sync = team_obj->barrier_pSync;
 
-  internal_sync_wg(pe, pe_start, pe_stride, pe_size, p_sync);
+  ActiveWFInfo wf_info(ctx_id_, ThreadScope::wg);
+  internal_sync_wg(pe, pe_start, pe_stride, pe_size, p_sync, wf_info);
 }
 
 __device__ void GDAContext::sync_all() {
-  internal_sync(my_pe, 0, 1, num_pes, barrier_sync);
+  ActiveWFInfo wf_info(ctx_id_);
+  internal_sync(my_pe, 0, 1, num_pes, barrier_sync, wf_info);
 }
 
 __device__ void GDAContext::sync_all_wave() {
-  internal_sync_wave(my_pe, 0, 1, num_pes, barrier_sync);
+  ActiveWFInfo wf_info(ctx_id_, ThreadScope::wave);
+  internal_sync_wave(my_pe, 0, 1, num_pes, barrier_sync, wf_info);
 }
 
 __device__ void GDAContext::sync_all_wg() {
-  internal_sync_wg(my_pe, 0, 1, num_pes, barrier_sync);
+  ActiveWFInfo wf_info(ctx_id_, ThreadScope::wg);
+  internal_sync_wg(my_pe, 0, 1, num_pes, barrier_sync, wf_info);
 }
 
 __device__ void GDAContext::barrier_all() {
@@ -232,13 +239,13 @@ __device__ void GDAContext::barrier_all() {
 }
 
 __device__ void GDAContext::barrier_all_wave() {
-  quiet_wave();
+  quiet();
   sync_all_wave();
 }
 
 __device__ void GDAContext::barrier_all_wg() {
   if (is_wave_zero_in_block()) {
-    quiet_wave();
+    quiet();
   }
   sync_all_wg();
   __syncthreads();
@@ -253,8 +260,9 @@ __device__ void GDAContext::barrier(rocshmem_team_t team) {
   int pe_size = team_obj->num_pes;
   long *p_sync = team_obj->barrier_pSync;
 
-  quiet();
-  internal_sync(pe, pe_start, pe_stride, pe_size, p_sync);
+  ActiveWFInfo wf_info(ctx_id_);
+  internal_quiet(wf_info);
+  internal_sync(pe, pe_start, pe_stride, pe_size, p_sync, wf_info);
 }
 
 __device__ void GDAContext::barrier_wave(rocshmem_team_t team) {
@@ -266,8 +274,9 @@ __device__ void GDAContext::barrier_wave(rocshmem_team_t team) {
   int pe_size = team_obj->num_pes;
   long *p_sync = team_obj->barrier_pSync;
 
-  quiet_wave();
-  internal_sync_wave(pe, pe_start, pe_stride, pe_size, p_sync);
+  ActiveWFInfo wf_info(ctx_id_, ThreadScope::wave);
+  internal_quiet(wf_info);
+  internal_sync_wave(pe, pe_start, pe_stride, pe_size, p_sync, wf_info);
 }
 
 __device__ void GDAContext::barrier_wg(rocshmem_team_t team) {
@@ -279,10 +288,11 @@ __device__ void GDAContext::barrier_wg(rocshmem_team_t team) {
   int pe_size = team_obj->num_pes;
   long *p_sync = team_obj->barrier_pSync;
 
+  ActiveWFInfo wf_info(ctx_id_, ThreadScope::wg);
   if (is_wave_zero_in_block()) {
-    quiet_wave();
+    internal_quiet(wf_info);
   }
-  internal_sync_wg(pe, pe_start, pe_stride, pe_size, p_sync);
+  internal_sync_wg(pe, pe_start, pe_stride, pe_size, p_sync, wf_info);
   __syncthreads();
 }
 

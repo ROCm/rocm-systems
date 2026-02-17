@@ -69,18 +69,7 @@ enum class ThreadScope {
 
 class ActiveWFInfo {
  public:
-  /**
-   * @brief Mask of active threads in the wave. This is used to determine which
-   * threads are participating in posting WQEs and waiting for their completion
-   */
   uint64_t     activemask{0};
-  uint8_t      num_active_lanes{0};
-
-  //---- is this required? -----
-  uint8_t      my_logical_lane_id{0};
-  bool         is_leader{false};
-  uint64_t     leader_phys_lane_id{0};
-  //----------------------------
 
   ThreadScope  scope{ThreadScope::thread};
   uint64_t     pe_group_mask{0};
@@ -99,28 +88,35 @@ class ActiveWFInfo {
       : pe(pe), scope(scope) {
     // Get active lane mask
     activemask          = get_active_lane_mask();
-    // Get number of active lanes in the wave
-    num_active_lanes    = get_active_lane_count(activemask);
-    my_logical_lane_id  = get_active_lane_num(activemask);
-    is_leader           = (my_logical_lane_id == 0);
-    leader_phys_lane_id = get_first_active_lane_id(activemask);
 
     // Get mask of active lanes with the same PE
-    pe_group_mask       = __match_any_sync(activemask, pe);
-    num_pe_group_lanes  = get_active_lane_count(pe_group_mask);
-    pe_group_logical_lane_id = get_active_lane_num(pe_group_mask);
-    is_pe_group_leader  = (pe_group_logical_lane_id == 0);
-    pe_group_leader_phys_lane_id = get_first_active_lane_id(pe_group_mask);
+    switch (scope) {
+      case ThreadScope::thread: {
+        pe_group_mask       = __match_any_sync(activemask, pe);
+        num_pe_group_lanes  = get_active_lane_count(pe_group_mask);
+        pe_group_logical_lane_id = get_active_lane_num(pe_group_mask);
+        is_pe_group_leader  = (pe_group_logical_lane_id == 0);
+        pe_group_leader_phys_lane_id = get_first_active_lane_id(pe_group_mask);
+        break;
+      }
+      // Only thread 0 issues the WQE, so the group is just that thread
+      case ThreadScope::wave:
+      case ThreadScope::wg: {
+        pe_group_mask       = 1;
+        num_pe_group_lanes  = 1;
+        pe_group_logical_lane_id = 0;
+        is_pe_group_leader  = true;
+        pe_group_leader_phys_lane_id = 0;
+      }
+    }
   }
 
   __device__ void printInfo() {
-    printf("PE: %d, Scope: %d, activemask: %lx, num_active_lanes: %d, "
-           "my_logical_lane_id: %d, is_leader: %d, leader_phys_lane_id: %lx, "
+    printf("PE: %d, Scope: %d, activemask: %lx, "
            "pe_group_mask: %lx, num_pe_group_lanes: %d, "
            "pe_group_logical_lane_id: %d, is_pe_group_leader: %d, "
            "pe_group_leader_phys_lane_id: %lx\n",
-           pe, static_cast<int>(scope), activemask, num_active_lanes,
-           my_logical_lane_id, is_leader, leader_phys_lane_id,
+           pe, static_cast<int>(scope), activemask,
            pe_group_mask, num_pe_group_lanes,
            pe_group_logical_lane_id, is_pe_group_leader,
            pe_group_leader_phys_lane_id);
@@ -141,8 +137,6 @@ class QueuePair {
    */
   virtual ~QueuePair();
 
-  enum Collectivity { THREAD, WAVE };
-
   /**
    * @brief Create and enqueue a non-blocking put work queue entry (wqe).
    *
@@ -151,9 +145,11 @@ class QueuePair {
    * @param[in] nelems Size in bytes of data transmission.
    * @param[in] pe Destination processing element of data transmission.
    */
-  __device__ void put_nbi(void *dest, const void *source, size_t nelems, int pe, Collectivity cy = THREAD);
+  __device__ void put_nbi(void *dest, const void *source, size_t nelems,
+      int pe, ActiveWFInfo &wf_info);
 
-  __device__ void put_nbi_single(void *dest, const void *source, size_t nelems, bool ring_db);
+  __device__ void put_nbi_single(void *dest, const void *source, size_t nelems,
+      bool ring_db, ActiveWFInfo &wf_info);
 
   /**
    * @brief Create and enqueue a non-blocking get work queue entry (wqe).
@@ -163,15 +159,17 @@ class QueuePair {
    * @param[in] nelems Size in bytes of data transmission.
    * @param[in] pe Destination processing element of data transmission.
    */
-  __device__ void get_nbi(void *dest, const void *source, size_t nelems, int pe, Collectivity cy = THREAD);
+  __device__ void get_nbi(void *dest, const void *source, size_t nelems,
+      int pe, ActiveWFInfo &wf_info);
 
   __device__ void get_nbi_single(void *dest, const void *source, size_t nelems, bool ring_db);
 
   /**
    * @brief Empty all completions from the completion queue.
    */
-  __device__ void quiet(Collectivity cy = THREAD);
-  __device__ void quiet_single();
+  __device__ void quiet(ActiveWFInfo &wf_info);
+
+  __device__ void quiet_scope(ActiveWFInfo &wf_info);
 
   /**
    * @brief Create and enqueue an atomic fetch work queue entry (wqe).
@@ -179,11 +177,11 @@ class QueuePair {
    * @param[in] dest Destination address for data transmission.
    * @param[in] value Data value for the atomic operation.
    * @param[in] cond Used in atomic comparisons.
-   * @param[in] pe Destination processing element of data transmission.
    *
    * @return An atomic value
    */
-  __device__ int64_t atomic_fetch(void *dest, int64_t value, int64_t cond, int pe);
+  __device__ int64_t atomic_fetch(void *dest, int64_t value, int64_t cond,
+      ActiveWFInfo &wf_info);
 
   /**
    * @brief Create and enqueue an atomic fetch work queue entry (wqe).
@@ -191,11 +189,12 @@ class QueuePair {
    * @param[in] dest Destination address for data transmission.
    * @param[in] value Data value for the atomic operation.
    * @param[in] cond Used in atomic comparisons.
-   * @param[in] pe Destination processing element of data transmission.
    */
-  __device__ void atomic_nofetch(void *dest, int64_t value, int64_t cond, int pe);
+  __device__ void atomic_nofetch(void *dest, int64_t value, int64_t cond,
+      ActiveWFInfo &wf_info);
 
-  __device__ void atomic_nofetch_single(void *dest, int64_t value);
+//   __device__ void atomic_nofetch_single(void *dest, int64_t value,
+//       ActiveWFInfo &wf_info);
 
   /**
    * @brief Create and enqueue an atomic cas work queue entry (wqe).
@@ -203,11 +202,11 @@ class QueuePair {
    * @param[in] dest Destination address for data transmission.
    * @param[in] value Data value for the atomic operation.
    * @param[in] cond Used in atomic comparisons.
-   * @param[in] pe Destination processing element of data transmission.
    *
    * @return An atomic value
    */
-  __device__ int64_t atomic_cas(void *dest, int64_t atomic_data, int64_t atomic_cmp, int pe);
+  __device__ int64_t atomic_cas(void *dest, int64_t atomic_data,
+      int64_t atomic_cmp, ActiveWFInfo &wf_info);
 
   /**
    * @brief Create and enqueue an atomic cas work queue entry (wqe).
@@ -215,9 +214,9 @@ class QueuePair {
    * @param[in] dest Destination address for data transmission.
    * @param[in] value Data value for the atomic operation.
    * @param[in] cond Used in atomic comparisons.
-   * @param[in] pe Destination processing element of data transmission.
    */
-  __device__ int64_t atomic_cas_nofetch(void *dest, int64_t atomic_data, int64_t atomic_cmp, int pe);
+  __device__ int64_t atomic_cas_nofetch(void *dest, int64_t atomic_data,
+      int64_t atomic_cmp, ActiveWFInfo &wf_info);
 
   char *const *base_heap{nullptr};
 
@@ -233,13 +232,10 @@ class QueuePair {
    * @param[in] atomic_cmp An atomic comparison operation to be performed.
    * @param[in] fetching True if the operation returns a value.
    */
-  __device__ __attribute__((noinline)) uint64_t post_wqe_amo(int pe, int32_t size, uintptr_t raddr, uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp, bool fetch);
-
-  __device__ __attribute__((noinline)) uint64_t post_wqe_amo_single(uintptr_t raddr,
-                                                                    uint8_t opcode,
-                                                                    int64_t atomic_data,
-                                                                    int64_t atomic_cmp,
-                                                                    bool fetching);
+  __device__ __attribute__((noinline)) uint64_t
+  post_wqe_amo(int32_t size, uintptr_t raddr, uint8_t opcode,
+      int64_t atomic_data, int64_t atomic_cmp, bool fetch,
+      ActiveWFInfo &wf_info);
 
   /**
    * @brief Helper method to build work requests for the send queue.
@@ -252,15 +248,19 @@ class QueuePair {
    */
   __device__ __attribute__((noinline)) void
   post_wqe_rma(int pe, int32_t size, uintptr_t laddr, uintptr_t raddr,
-      uint8_t opcode, Collectivity cy);
+      uint8_t opcode, ActiveWFInfo &wf_info);
 
-  __device__ __attribute__((noinline)) void post_wqe_rma_single(int32_t size, uintptr_t laddr, uintptr_t raddr, uint8_t opcode, bool ring_db);
-  __device__ __attribute__((noinline)) void post_wqe_rma_mt(int pe, int32_t size, uintptr_t laddr, uintptr_t raddr, uint8_t opcode);
+  __device__ __attribute__((noinline)) void
+  post_wqe_rma_single(int32_t size, uintptr_t laddr, uintptr_t raddr,
+      uint8_t opcode, bool ring_db, ActiveWFInfo &wf_info);
+  __device__ __attribute__((noinline)) void
+  post_wqe_rma_mt(int pe, int32_t size, uintptr_t laddr, uintptr_t raddr,
+      uint8_t opcode, ActiveWFInfo &wf_info);
 
 #if defined(GDA_MLX5)
   __device__ __forceinline__ void
   mlx5_wait_for_free_sq_slots(uint64_t wave_sq_counter,
-      uint8_t num_active_lanes);
+      ActiveWFInfo &wf_info);
 
   __device__ __forceinline__ void
   mlx5_wait_for_db_touched_eq(uint64_t target_sq_counter);
@@ -279,40 +279,50 @@ class QueuePair {
       bool is_leader, uint64_t leader_phys_lane_id);
 
   __device__ __forceinline__ void
-  mlx5_ring_doorbell(uint64_t wave_sq_counter, uint8_t num_wqes);
+  mlx5_sq_ring_doorbell(uint64_t wave_sq_counter, uint8_t num_wqes);
 
   __device__ uint64_t
   mlx5_post_wqe_amo(int32_t size, uintptr_t raddr, uint8_t opcode,
-      int64_t atomic_data, int64_t atomic_cmp, bool fetch);
+      int64_t atomic_data, int64_t atomic_cmp, bool fetch,
+      ActiveWFInfo &wf_info);
 
   __device__ void
   mlx5_post_wqe_rma(int32_t size, uintptr_t laddr,
-      uintptr_t raddr, uint8_t opcode);
+      uintptr_t raddr, uint8_t opcode, ActiveWFInfo &wf_info);
 
-  __device__ void
-  mlx5_quiet();
+  __device__ void mlx5_quiet(ActiveWFInfo &wf_info);
 
 #endif
 #if defined(GDA_BNXT)
 
-  __device__ void bnxt_write_rma_wqe(uintptr_t raddr, uintptr_t laddr, int32_t length, uint8_t opcode);
-  __device__ uint32_t bnxt_write_amo_wqe(uintptr_t raddr, uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp, bool fetching);
+  __device__ void bnxt_write_rma_wqe(uintptr_t raddr, uintptr_t laddr,
+      int32_t length, uint8_t opcode);
+  __device__ uint32_t bnxt_write_amo_wqe(uintptr_t raddr, uint8_t opcode,
+      int64_t atomic_data, int64_t atomic_cmp, bool fetching);
 
-  __device__ uint64_t bnxt_post_wqe_amo_single(uintptr_t raddr, uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp, bool fetching);
-  __device__ uint64_t bnxt_post_wqe_amo(uintptr_t raddr, uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp, bool fetching);
+  __device__ uint64_t bnxt_post_wqe_amo_single(uintptr_t raddr, uint8_t opcode,
+      int64_t atomic_data, int64_t atomic_cmp, bool fetching);
+  __device__ uint64_t bnxt_post_wqe_amo(uintptr_t raddr, uint8_t opcode,
+      int64_t atomic_data, int64_t atomic_cmp, bool fetching,
+      ActiveWFInfo &wf_info);
 
-  __device__ void bnxt_post_wqe_rma(int pe, int32_t size, uintptr_t laddr, uintptr_t raddr, uint8_t opcode);
+  __device__ void bnxt_post_wqe_rma(int pe, int32_t size, uintptr_t laddr,
+      uintptr_t raddr, uint8_t opcode, ActiveWFInfo &wf_info);
 
-  __device__ void bnxt_post_wqe_rma_single(int32_t size, uintptr_t laddr, uintptr_t raddr, uint8_t opcode, bool ring_db);
-  __device__ void bnxt_quiet();
-  __device__ void bnxt_quiet_single();
+  __device__ void bnxt_post_wqe_rma_single(int32_t size, uintptr_t laddr,
+      uintptr_t raddr, uint8_t opcode, bool ring_db, ActiveWFInfo &wf_info);
+  __device__ void bnxt_quiet(ActiveWFInfo &wf_info);
+//   __device__ void bnxt_quiet_single();
 #endif
 #if defined(GDA_IONIC)
-  __device__ uint64_t ionic_post_wqe_amo(int pe, int32_t size, uintptr_t raddr, uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp, bool fetch);
+  __device__ uint64_t ionic_post_wqe_amo(int32_t size, uintptr_t raddr,
+      uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp, bool fetch,
+      ActiveWFInfo &wf_info);
   __device__ uint64_t ionic_post_wqe_amo_single(int pe, int32_t size, uintptr_t raddr, uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp, bool fetch);
-  __device__ void ionic_post_wqe_rma(int pe, int32_t size, uintptr_t laddr, uintptr_t raddr, uint8_t opcode, Collectivity cy = THREAD);
+  __device__ void ionic_post_wqe_rma(int32_t size, uintptr_t laddr,
+      uintptr_t raddr, uint8_t opcode, ActiveWFInfo &wf_info);
   __device__ void ionic_post_wqe_rma_single(int pe, int32_t size, uintptr_t laddr, uintptr_t raddr, uint8_t opcode, Collectivity cy);
-  __device__ void ionic_quiet();
+  __device__ void ionic_quiet(ActiveWFInfo &wf_info);
   __device__ void ionic_quiet_single();
 #endif
 
@@ -445,7 +455,8 @@ class QueuePair {
    * @param wqe this thread's wqe.
    * @return doorbell producer index.
    */
-  __device__ uint32_t commit_sq(uint64_t activemask, uint32_t my_sq_prod, uint32_t my_sq_pos, uint32_t num_wqes);
+  __device__ uint32_t commit_sq(uint64_t activemask, uint32_t my_sq_prod,
+      uint32_t my_sq_pos, uint32_t num_wqes);
   __device__ uint32_t commit_sq_single(uint32_t my_sq_prod, uint32_t my_sq_pos, uint32_t num_wqes);
 
   /**
