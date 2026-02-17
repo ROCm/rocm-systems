@@ -594,7 +594,17 @@ hsa_status_t ImageManagerNv::PopulateSamplerSrd(Sampler& sampler) const {
   }
   word2.bits.XY_MIN_FILTER = word2.bits.XY_MAG_FILTER;
   word2.bits.Z_FILTER = SQ_TEX_Z_FILTER_NONE;
-  word2.bits.MIP_FILTER = SQ_TEX_MIP_FILTER_NONE;
+
+  switch (sampler_descriptor.mipmap_filter_mode) {
+    case HSA_EXT_SAMPLER_FILTER_MODE_NEAREST:
+      word2.bits.MIP_FILTER = static_cast<int>(SQ_TEX_MIP_FILTER_POINT);
+      break;
+    case HSA_EXT_SAMPLER_FILTER_MODE_LINEAR:
+      word2.bits.MIP_FILTER = static_cast<int>(SQ_TEX_MIP_FILTER_LINEAR);
+      break;
+    default:
+      word2.bits.MIP_FILTER = static_cast<int>(SQ_TEX_MIP_FILTER_NONE);
+  }
 
   word3.u32All = 0;
 
@@ -923,7 +933,7 @@ hsa_status_t ImageManagerNv::PopulateMipmapSrd(MipmappedArray& mipmap) const {
     uint32_t minor_ver = MinorVerFromDevID(chip_id_);
     // For 1d, 2d and 2d-msaa in gfx1030 and beyond this is pitch-1
     if ((minor_ver >= 3) && !mipmap_array && !mipmap_3d)
-      word4.f.PITCH = out.pitch - 1;
+      word4.f.PITCH = 0;  // mipmap dosesn't support custom pitch, so set it as 0
 
     word5.val = 0;
     word5.f.MAX_MIP = mipmap.num_levels - 1;
@@ -1119,6 +1129,8 @@ hsa_status_t ImageManagerNv::PopulateMipLevelSrd(
     MipmappedArray& level_view,
     const MipmappedArray& mipmap_array,
     uint32_t mip_level) const {
+  // Copy entire parent structure (srd is a fixed array, so it's deep-copied automatically)
+  level_view = mipmap_array;
 
   // SRD already copied from parent, just modify BASE_LEVEL/LAST_LEVEL fields
   uint32_t* srd_words = reinterpret_cast<uint32_t*>(level_view.srd);
@@ -1130,7 +1142,9 @@ hsa_status_t ImageManagerNv::PopulateMipLevelSrd(
   word3->f.BASE_LEVEL = mip_level;
   word3->f.LAST_LEVEL = mip_level;
 
-  debug_print("Set SRD mip selection: BASE_LEVEL=%u, LAST_LEVEL=%u", mip_level, mip_level);
+  if (core::Runtime::runtime_singleton_->flag().image_print_srd()) {
+    debug_print("Set SRD mip selection: BASE_LEVEL=%u, LAST_LEVEL=%u", mip_level, mip_level);
+  }
 
   return HSA_STATUS_SUCCESS;
 }

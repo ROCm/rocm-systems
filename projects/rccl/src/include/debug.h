@@ -17,6 +17,7 @@
 #define NCCL_THREAD_NAMELEN 16
 
 extern int ncclDebugLevel;
+extern uint64_t ncclDebugMask;
 extern FILE *ncclDebugFile;
 
 void ncclDebugLog(ncclDebugLogLevel level, unsigned long flags, const char *filefunc, int line, const char *fmt, ...) __attribute__ ((format (printf, 5, 6)));

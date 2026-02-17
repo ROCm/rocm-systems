@@ -177,8 +177,8 @@ static bool checkhipMemPoolTrimTo(hipStream_t stream, int N, int dev = 0) {
     testObj.transferFromMempool(stream);
     testObj.freeDevBuf(stream);
     // verify and validate
-    REQUIRE(true == testObj.validateResult());
     HIP_CHECK(hipStreamSynchronize(stream));
+    REQUIRE(true == testObj.validateResult());
   }
   HIP_CHECK(hipMemPoolDestroy(mem_pool));
   return true;
