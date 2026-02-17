@@ -3667,8 +3667,8 @@ def test_roofline_iteration_multiplexing_laplace_eqn(
     laplace_eqn (single kernel, 3 launch configs).
 
     Profiles with and without iteration multiplexing using roofline counters
-    (block 4), compares counter accuracy, and verifies analysis mode roofline
-    pipeline completes successfully on multiplexed data.
+    (block 4) compares counter accuracy and then verifies analysis mode roofline
+    pipeline completes successfully on the multiplexed data.
     """
     if soc in ("MI100"):
         pytest.skip("Roofline not supported on MI100")
@@ -3846,14 +3846,11 @@ def test_roofline_iteration_multiplexing_insufficient_dispatches(
         f"{workload_dir}/profiling_config.yaml",
     )
 
-    # Analysis should handle gracefully (no crash)
     code = binary_handler_analyze_rocprof_compute([
         "analyze",
         "--path",
         workload_dir,
     ])
-    # Accept exit code 0 (graceful completion) or 1 (expected error due to
-    # insufficient data) -- the key assertion is no unhandled exception/crash
     assert code in (0, 1)
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
