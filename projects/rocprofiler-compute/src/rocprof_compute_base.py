@@ -309,17 +309,18 @@ class RocProfCompute:
         )
         self.__args = parser.parse_args()
 
+        if self.__args.specs:
+            print(generate_machine_specs(self.__args))
+            sys.exit(0)
+        elif self.__args.list_metrics is not None:
+            self.list_metrics()
+            sys.exit(0)
+        elif self.__args.list_blocks is not None:
+            self.list_blocks()
+            sys.exit(0)
+
         if self.__args.mode is None:
-            if self.__args.specs:
-                print(generate_machine_specs(self.__args))
-                sys.exit(0)
-            elif self.__args.list_metrics is not None:
-                self.list_metrics()
-                sys.exit(0)
-            elif self.__args.list_blocks is not None:
-                self.list_blocks()
-                sys.exit(0)
-            elif self.__args.config_dir:
+            if self.__args.config_dir:
                 parser.print_help(sys.stderr)
                 console_error(
                     "rocprof-compute requires you to pass --list-metrics "
@@ -329,7 +330,8 @@ class RocProfCompute:
             console_error(
                 "rocprof-compute requires you to pass a valid mode. Detected None."
             )
-        elif self.__args.mode == "profile":
+
+        if self.__args.mode == "profile":
             self.handle_profile_args()
         elif self.__args.mode == "analyze":
             self.handle_analyze_args()
@@ -483,12 +485,8 @@ class RocProfCompute:
     def run_profiler(self) -> None:
         self.print_graphic()
 
-        if self.__args.list_metrics is not None or self.__args.list_available_metrics:
-            self.list_metrics()
-        elif self.__args.list_sets:
+        if self.__args.list_sets:
             self.list_sets()
-        elif self.__args.list_blocks:
-            self.list_blocks()
 
         # Replace parameters in output directory when either:
         # 1. --output-directory is explicitly given by user
