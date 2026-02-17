@@ -57,6 +57,7 @@ from utils.utils import (
     parse_sets_yaml,
     replace_env,
     replace_rank,
+    resolve_rocm_library_path,
     set_locale_encoding,
 )
 
@@ -158,13 +159,16 @@ class RocProfCompute:
             console_error("Cannot use --list-available-metrics with --blocks")
 
         # fallback to csv output format, if rocpd public api not available
+        rocpd_path = resolve_rocm_library_path(
+            str(
+                Path(self.__args.rocprofiler_sdk_tool_path).parents[1]
+                / "librocprofiler-sdk-rocpd.so"
+            )
+        )
         if (
             self.__mode == "profile"
             and self.__args.format_rocprof_output == "rocpd"
-            and not (
-                Path(self.__args.rocprofiler_sdk_tool_path).parents[1]
-                / "librocprofiler-sdk-rocpd.so"
-            ).exists()
+            and not Path(rocpd_path).exists()
         ):
             console_warning(
                 "rocpd output format is not supported with the "
@@ -193,7 +197,8 @@ class RocProfCompute:
 
                 if self.__args.subpath != "gpu_model":
                     console_warning(
-                        "--subpath is deprecated and will be removed in future releases."
+                        "--subpath is deprecated and will be "
+                        "removed in future releases."
                     )
 
             if self.__args.name is not None and "/" in self.__args.name:
@@ -275,6 +280,15 @@ class RocProfCompute:
         self.__soc[arch] = soc_class(self.__args, self.__mspec)
 
     def parse_args(self) -> None:
+        # Detect if --experimental flag is present (for help text control)
+        prelim_parser = argparse.ArgumentParser(add_help=False)
+        prelim_parser.add_argument("--experimental", action="store_true", default=False)
+
+        # Parse only known args (respects -- separator)
+        prelim_args, _ = prelim_parser.parse_known_args()
+        experimental_requested: bool = prelim_args.experimental
+
+        # Build full parser with experimental knowledge
         parser = argparse.ArgumentParser(
             description=(
                 "Command line interface for AMD's GPU profiler, ROCm Compute Profiler"
@@ -286,7 +300,11 @@ class RocProfCompute:
             usage="rocprof-compute [mode] [options]",
         )
         omniarg_parser(
-            parser, config.rocprof_compute_home, self.__supported_archs, self.__version
+            parser,
+            config.rocprof_compute_home,
+            self.__supported_archs,
+            self.__version,
+            experimental_requested,
         )
         self.__args = parser.parse_args()
 
@@ -376,10 +394,11 @@ class RocProfCompute:
             parser.build_dfs(arch_configs=ac, filter_metrics=[], sys_info=sys_info)
 
             print(f"{'INDEX':<8} {'BLOCK ALIAS':<16} {'BLOCK NAME'}")
+            panel_alias_dict = {value: key for key, value in get_panel_alias().items()}
             for key, value in ac.metric_list.items():
                 if key.count(".") > 0:
                     continue
-                print(f"{key:<8} {get_panel_alias()[value]:<16} {value}")
+                print(f"{key:<8} {panel_alias_dict[key]:<16} {value}")
             sys.exit(0)
         else:
             console_error("Unsupported arch")

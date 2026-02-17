@@ -345,6 +345,16 @@ __device__ void ROContext::alltoall(rocshmem_team_t team, T *dest,
 }
 
 template <typename T>
+__device__ void ROContext::alltoallv(rocshmem_team_t team,
+                                     T *dest, const size_t dest_nelems[],
+                                     const size_t dest_displs[],
+                                     T *source, const size_t source_nelems[],
+                                     const size_t source_displs[]) {
+  printf("rocshmem::ipc:alltoallv not implemented\n");
+  abort();
+}
+
+template <typename T>
 __device__ void ROContext::fcollect(rocshmem_team_t team, T *dest,
                                     const T *source, int nelems) {
   if (!is_thread_zero_in_block()) {

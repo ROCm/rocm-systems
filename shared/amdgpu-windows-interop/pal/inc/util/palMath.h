@@ -33,6 +33,7 @@
 
 #include "palSysMemory.h"
 
+#include <bit>
 #include <limits>
 
 namespace Util
@@ -74,9 +75,9 @@ struct Fraction
 };
 
 /// Returns the bits of a floating point value as an unsigned integer.
-inline uint32 FloatToBits(float f)
+constexpr uint32 FloatToBits(float f)
 {
-    return (*(reinterpret_cast<uint32*>(&f)));
+    return std::bit_cast<uint32>(f);
 }
 
 /// Assigns the bits contained in an unsigned integer to the float pointer location

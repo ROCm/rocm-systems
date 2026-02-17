@@ -96,6 +96,8 @@ SKIPPABLE_PATH_PATTERNS = [
     "*/.wordlist.txt",
     "projects/*/docs/*",
     "projects/*/.gitignore",
+    "projects/rocr-runtime/libhsakmt/src/dxg/*",
+    "projects/rocshmem/*",
     "shared/*/docs/*",
     "shared/*/.gitignore",
 ]
