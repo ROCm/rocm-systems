@@ -484,7 +484,7 @@ bool Device::init() {
     }
 
     // Allocate a staging buffer for P2P emulation path
-    if ((devices.size() >= 1) && !p2p_available) {
+    if ((devices.size() > 1) && !p2p_available) {
       amd::Buffer* buf =
           new (*glb_ctx_) amd::Buffer(*glb_ctx_, CL_MEM_ALLOC_HOST_PTR, kP2PStagingSize);
       if ((buf != nullptr) && buf->create()) {
