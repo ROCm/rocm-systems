@@ -427,7 +427,8 @@ namespace envvar {
      */
     extern const var<size_t> max_wavefront_buffers;
 
-    extern const var<std::string> requested_dev;
+    extern const var<std::string> requested_nic;
+    extern const var<std::string> hca_list;
     extern const var<uint32_t> sq_size;
   }  // inline namespace _base
 
@@ -452,6 +453,7 @@ namespace envvar {
     extern const var<bool> alternate_qp_ports;
     extern const var<uint8_t> traffic_class;
     extern const var<bool> pcie_relaxed_ordering;
+    extern const var<bool> enable_dmabuf;
   }  // namespace gda
 }  // namespace envvar
 }  // namespace rocshmem

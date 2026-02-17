@@ -59,6 +59,9 @@ class TeamReductionTester : public Tester {
   long *pSync;
 
  private:
+  int my_pe = 0;
+  int n_pes = 0;
+
   std::function<void(T1 &, T1 &)> init_buf;
   std::function<std::pair<bool, std::string>(const T1 &, const T1 &)>
       verify_buf;

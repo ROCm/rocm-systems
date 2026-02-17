@@ -19,9 +19,18 @@ Requirements
 
   * MI250X
 
-  * MI300X
+  * MI300X, MI308X
 
-  * MI350X (Requires ROCm 7.0 or later)
+  * MI325X
+
+  * MI350X, MI355X (Requires ROCm 7.0 or later)
+
+* The following AMD GPUs have experimental support in rocSHMEM:
+
+  * Radeon AI PRO9700, Radeon RX 9070XT, Radeon RX 9070
+
+  * Radeon Pro W7900, Radeon RX 7900XTX, Radeon RX 7900XT
+
 
   .. note::
 
@@ -71,7 +80,7 @@ GDA NIC dependencies
 
 - GDA on Mellanox NICs should work on any recent version of rdma-core.
 - GDA on Broadcom Thor requires driver version 233.2.108.0 and firmware version 233.2.104.0 or later.
-
+- GDA on AMD Pensando Pollara 400 AI NIC requires a newer driver and firmware version - contact AMD for the latest supported version.
 
 Building rocSHMEM with MPI (Optional)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -147,7 +156,7 @@ The build script passes configuration options to CMake to set up a canonical bui
 
 .. note::
 
- This builds rocSHMEM with all backends. You can select IPC, RO, GDA, or any combination at runtime. However, this portability can reduce performance, so the other build scripts are recommended if you need maximum performance.
+ This builds rocSHMEM with all backends. You can select IPC, RO, GDA, or any combination at runtime by setting an environment variable (see :doc:`Environment variables <./api/env_variables>` for more details). However, this portability can reduce performance, so the other build scripts are recommended if you need maximum performance. If no specific backend is requested by the user, the library will use the IPC backend if all PEs are on a single node. If the job spans multiple nodes, rocSHMEM will try to use the various GDA backends first, and fall back to the RO backend if neither of the GDA backends can be used.
 
 GDA backend build
 ^^^^^^^^^^^^^^^^^

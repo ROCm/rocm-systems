@@ -80,14 +80,22 @@ $BLACKLIST_ALL_ASICS\
 FILTER[90400]=\
 $BLACKLIST_ALL_ASICS\
 "rsmitstReadOnly.TestVoltCurvRead"
-
 FILTER[90401]=${FILTER[90400]}
-
 FILTER[90402]=${FILTER[90400]}
 
+# SWDEV-566543
 # SWDEV-572968
-FILTER[gfx1151]=\
+# SWDEV-571572
+# SWDEV-571574
+# SWDEV-571576
+FILTER[strix_point]=\
 $BLACKLIST_ALL_ASICS\
-"amdsmitstReadWrite.TempRead:"\
-"amdsmitstReadOnly.TestFrequenciesRead"
+"amdsmitstReadOnly.TempRead:"\
+"amdsmitstReadOnly.TestFrequenciesRead:"\
+"amdsmitstReadWrite.TestFrequenciesReadWrite"
+FILTER[veo]=${FILTER[strix_point]}
+FILTER[gfx1150]=${FILTER[strix_point]}
+FILTER[gfx1151]=${FILTER[strix_point]}
+FILTER[gfx1152]=${FILTER[strix_point]}
+FILTER[gfx1153]=${FILTER[strix_point]}
 
