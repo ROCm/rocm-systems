@@ -45,10 +45,7 @@ if(WIN32)
 endif()
 
 add_subdirectory(lib)
-# add_subdirectory(cli)
+add_subdirectory(cli)
 add_subdirectory(daemon)
-# add_subdirectory(example)
+add_subdirectory(example)
 add_subdirectory(tests)
-
-# Documentation
-install(FILES README.md DESTINATION ${CMAKE_INSTALL_DOCDIR})
