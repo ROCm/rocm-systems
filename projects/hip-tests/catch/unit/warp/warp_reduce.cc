@@ -70,9 +70,9 @@ __global__ void reduceOp(T* output, const T* input, const MaskType* masks, int n
         result = __reduce_min_sync(masks[i], input[tid]);
       else if constexpr (std::is_same<Op, MaxOp<T>>::value)
         result = __reduce_max_sync(masks[i], input[tid]);
-      else if constexpr (std::is_same<Op, std::logical_and<T>>::value)
+      else if constexpr (std::is_same<Op, AndOp<T>>::value)
         result = __reduce_and_sync(masks[i], input[tid]);
-      else if (std::is_same<Op, std::logical_or<T>>::value)
+      else if (std::is_same<Op, OrOp<T>>::value)
         result = __reduce_or_sync(masks[i], input[tid]);
       else if (std::is_same<Op, XorOp<T>>::value)
         result = __reduce_xor_sync(masks[i], input[tid]);
@@ -206,9 +206,9 @@ TEST_CASE("Unit_hipReduceRandom") {
 
   SECTION("max") { runTestReduceForTypes<MaxOp>(allTypes); }
 
-  SECTION("and") { runTestReduceForTypes<std::logical_and>(integralTypes); }
+  SECTION("and") { runTestReduceForTypes<AndOp>(integralTypes); }
 
-  SECTION("or") { runTestReduceForTypes<std::logical_or>(integralTypes); }
+  SECTION("or") { runTestReduceForTypes<OrOp>(integralTypes); }
 
   SECTION("xor") { runTestReduceForTypes<XorOp>(integralTypes); }
 }

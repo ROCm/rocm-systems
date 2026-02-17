@@ -231,6 +231,22 @@ struct XorOp {
   }
 };
 
+template <class T>
+struct AndOp {
+  __host__ __device__ T operator()(const T& lhs, const T& rhs)
+  {
+    return lhs == 1 && rhs == 1;
+  }
+};
+
+template <class T>
+struct OrOp {
+  __host__ __device__ T operator()(const T& lhs, const T& rhs)
+  {
+    return lhs == 1 || rhs == 1;
+  }
+};
+
 // typeid(T).name() does seem to return a very descriptive name for primitive types,
 // at least on clang, so we roll out an equivalent
 template<class T>
@@ -264,9 +280,9 @@ const char* opToString()
     return "min";
   else if constexpr (std::is_same<Op<T>, MaxOp<T>>::value)
     return "max";
-  else if constexpr (std::is_same<Op<T>, std::logical_and<T>>::value)
+  else if constexpr (std::is_same<Op<T>, AndOp<T>>::value)
     return "logical_and";
-  else if constexpr (std::is_same<Op<T>, std::logical_or<T>>::value)
+  else if constexpr (std::is_same<Op<T>, OrOp<T>>::value)
     return "logical_or";
   else if constexpr (std::is_same<Op<T>, XorOp<T>>::value)
     return "logical_xor";
