@@ -165,32 +165,54 @@ get_hash_id(Tp&& _val)
         return get_hash_id(*_val);
 }
 
-auto&
-get_guid()
+struct rocpd_db
 {
-    static auto _v = std::string{};
-    return _v;
-}
+    using statement_map_t =
+        std::unordered_map<std::string_view, std::unordered_map<std::string, sqlite3_stmt*>>;
+    using schema_map_t = std::unordered_map<rocpd_sql_schema_kind_t, std::string>;
+    using track_map_t  = std::unordered_map<track_data, uint64_t>;
 
-auto&
-get_uuid()
+    rocpd_db() = default;
+    ~rocpd_db();
+    rocpd_db(const rocpd_db&) = delete;
+    rocpd_db& operator=(const rocpd_db&) = delete;
+    rocpd_db(rocpd_db&& other) noexcept  = delete;
+    rocpd_db& operator=(rocpd_db&&) = delete;
+
+    sqlite3*        conn             = nullptr;
+    std::string     uuid             = {};
+    std::string     guid             = {};
+    schema_map_t    schemas          = {};
+    track_map_t     tracks           = {};
+    size_t          event_id_counter = 0;
+    statement_map_t statements       = {};
+
+    auto get_event_id() { return ++event_id_counter; }
+};
+
+rocpd_db::~rocpd_db()
 {
-    static thread_local auto _v = std::string{};
-    return _v;
+    if(conn)
+    {
+        for(auto& [table, stmt_map] : statements)
+            for(auto& [stmt_name, stmt] : stmt_map)
+                sqlite3_finalize(stmt);
+        SQLITE3_CHECK(sqlite3_close_v2(conn));
+    }
 }
 
 auto
-replace_uuid(std::string_view inp)
+replace_uuid(const rocpd_db& db, std::string_view inp)
 {
-    const auto& _repl       = get_uuid();
+    const auto& _repl       = db.uuid;
     const auto  replacement = (_repl.empty()) ? std::string{} : fmt::format("_{}", _repl);
     return replace_all(std::string{inp}, std::string_view{"{{uuid}}"}, replacement);
 }
 
 auto
-replace_placeholders(std::string_view inp)
+replace_placeholders(const rocpd_db& db, std::string_view inp)
 {
-    return replace_uuid(inp);
+    return replace_uuid(db, inp);
 }
 
 template <typename... Args>
@@ -211,45 +233,26 @@ read_file(rocpd_sql_engine_t                        engine,
           const char*                               schema_content,
           void*                                     user_data)
 {
-    common::consume_args(engine, kind, options, variables, schema_path, schema_content, user_data);
+    common::consume_args(engine, kind, options, variables, schema_path, schema_content);
 
-    *static_cast<std::string*>(user_data) = replace_placeholders(schema_content);
+    auto* _db     = static_cast<rocpd_db*>(user_data);
+    auto& _schema = _db->schemas[kind];
+    _schema       = replace_placeholders(*_db, schema_content);
 }
 
 std::string
-read_schema_file(rocpd_sql_schema_kind_t schema_kind)
+read_schema_file(rocpd_db& db, rocpd_sql_schema_kind_t schema_kind)
 {
-    auto _variables     = common::init_public_api_struct(rocpd_sql_schema_jinja_variables_t{});
-    auto _options       = ROCPD_SQL_OPTIONS_NONE;
-    auto _schema_result = std::string{};
+    auto _variables = common::init_public_api_struct(rocpd_sql_schema_jinja_variables_t{});
+    auto _options   = ROCPD_SQL_OPTIONS_NONE;
 
-    _variables.uuid = get_uuid().c_str();
-    _variables.guid = get_guid().c_str();
+    _variables.uuid = db.uuid.c_str();
+    _variables.guid = db.guid.c_str();
 
-    ROCPD_CHECK(rocpd_sql_load_schema(ROCPD_SQL_ENGINE_SQLITE3,
-                                      schema_kind,
-                                      _options,
-                                      &_variables,
-                                      read_file,
-                                      nullptr,
-                                      0,
-                                      &_schema_result));
+    ROCPD_CHECK(rocpd_sql_load_schema(
+        ROCPD_SQL_ENGINE_SQLITE3, schema_kind, _options, &_variables, read_file, nullptr, 0, &db));
 
-    return _schema_result;
-}
-
-size_t
-get_event_id()
-{
-    static size_t event_id_index = 0;
-    return ++event_id_index;
-}
-
-auto&
-get_tracks()
-{
-    static auto _tracks = std::unordered_map<track_data, uint64_t>{};
-    return _tracks;
+    return db.schemas.at(schema_kind);
 }
 
 int
@@ -303,6 +306,14 @@ insert_value(std::string_view _name, const Tp& _value, TraitT = {})
 
     if constexpr(common::mpl::is_string_type<value_type>::value)
     {
+        if constexpr(std::is_pointer<value_type>::value)
+        {
+            if(!_value)
+            {
+                return insert_value(_name, std::string_view{}, TraitT{});
+            }
+        }
+
         if constexpr(!std::is_same<TraitT, allow_empty_string>::value)
         {
             if(std::string_view{_value}.empty())
@@ -352,40 +363,6 @@ insert_value(std::string_view _name, const std::optional<Tp>& _value, TraitT = {
     return insert_value(_name, _value.value(), TraitT{});
 }
 
-using statement_cache_t = std::unordered_map<std::string, sqlite3_stmt*>;
-
-struct pending_insert_batch
-{
-    sqlite3*                                   conn      = nullptr;
-    statement_cache_t*                         cache     = nullptr;
-    std::string                                key       = {};
-    std::string                                table     = {};
-    std::vector<std::string>                   fields    = {};
-    std::vector<std::vector<sql_insert_value>> rows      = {};
-    size_t                                     max_rows  = 1;
-    bool                                       is_active = false;
-};
-
-auto&
-get_pending_insert_batch()
-{
-    static thread_local auto _v = pending_insert_batch{};
-    return _v;
-}
-
-size_t
-get_max_batch_rows(sqlite3* conn, size_t col_count)
-{
-    int var_limit = sqlite3_limit(conn, SQLITE_LIMIT_VARIABLE_NUMBER, -1);
-    if(var_limit <= 0) var_limit = 999;
-
-    auto max_rows =
-        static_cast<size_t>(var_limit / static_cast<int>(std::max<size_t>(1, col_count)));
-    if(max_rows == 0) max_rows = 1;
-    if(max_rows > 256) max_rows = 256;
-    return max_rows;
-}
-
 int
 bind_sql_value(sqlite3_stmt* stmt, int idx, const sql_insert_value& value)
 {
@@ -425,95 +402,9 @@ bind_sql_value(sqlite3_stmt* stmt, int idx, const sql_insert_value& value)
         value.value);
 }
 
-void
-flush_pending_insert_batch()
-{
-    auto& pending = get_pending_insert_batch();
-    if(!pending.is_active || pending.rows.empty()) return;
-
-    ROCP_FATAL_IF(pending.conn == nullptr || pending.cache == nullptr)
-        << "Pending insert batch missing sqlite connection or statement cache";
-
-    const auto batch_size = pending.rows.size();
-    const auto field_size = pending.fields.size();
-    auto       batch_key =
-        fmt::format("{}:batch:{}:{}", pending.table, batch_size, fmt::join(pending.fields, ","));
-
-    auto& stmt = (*pending.cache)[batch_key];
-    if(!stmt)
-    {
-        auto row_placeholder = std::string{"("};
-        for(size_t i = 0; i < field_size; ++i)
-        {
-            if(i > 0) row_placeholder += ", ";
-            row_placeholder += "?";
-        }
-        row_placeholder += ")";
-
-        auto values_clause = std::string{};
-        values_clause.reserve(batch_size * row_placeholder.size());
-        for(size_t i = 0; i < batch_size; ++i)
-        {
-            if(i > 0) values_clause += ", ";
-            values_clause += row_placeholder;
-        }
-
-        auto sql = fmt::format("INSERT INTO {} ({}) VALUES {};",
-                               pending.table,
-                               fmt::join(pending.fields, ", "),
-                               values_clause);
-
-        SQLITE3_CHECK(sqlite3_prepare_v2(pending.conn, sql.c_str(), -1, &stmt, nullptr));
-    }
-
-    auto cleanup_guard = common::scope_destructor{[&]() {
-        if(stmt)
-        {
-            sqlite3_reset(stmt);
-            sqlite3_clear_bindings(stmt);
-        }
-    }};
-
-    int bind_idx = 1;
-    for(const auto& row : pending.rows)
-    {
-        ROCP_FATAL_IF(row.size() != field_size)
-            << "Pending insert batch row has " << row.size() << " values, expected " << field_size;
-
-        for(const auto& value : row)
-        {
-            auto bind_rc = bind_sql_value(stmt, bind_idx++, value);
-            ROCP_FATAL_IF(bind_rc != SQLITE_OK)
-                << "sqlite3_bind failed with error code " << bind_rc;
-        }
-    }
-
-    auto step_rc = sqlite3_step(stmt);
-    ROCP_FATAL_IF(step_rc != SQLITE_DONE) << "sqlite3_step failed with error code " << step_rc;
-
-    pending.rows.clear();
-    pending.is_active = false;
-    pending.key.clear();
-    pending.table.clear();
-    pending.fields.clear();
-    pending.conn  = nullptr;
-    pending.cache = nullptr;
-}
-
-void
-finalize_prepared_statements(statement_cache_t& cache)
-{
-    for(auto& [key, stmt] : cache)
-    {
-        if(stmt) SQLITE3_CHECK(sqlite3_finalize(stmt));
-    }
-    cache.clear();
-}
-
 template <template <typename...> class ContainerT, typename... TypesT>
 void
-get_insert_statement_impl(sqlite3*                                  conn,
-                          statement_cache_t&                        cache,
+get_insert_statement_impl(rocpd_db&                                 _db,
                           std::string_view                          _table,
                           ContainerT<sql_insert_value, TypesT...>&& _data)
 {
@@ -532,64 +423,60 @@ get_insert_statement_impl(sqlite3*                                  conn,
 
     if(fields.empty()) return;
 
-    ROCP_FATAL_IF(conn == nullptr) << "SQLite connection not set for prepared statements";
+    ROCP_FATAL_IF(_db.conn == nullptr) << "SQLite connection not set for prepared statements";
 
-    auto table = replace_uuid(_table);
-    auto key   = fmt::format("{}:{}", table, fmt::join(fields, ","));
+    auto   key  = fmt::format("{}", fmt::join(fields, ","));
+    auto*& stmt = _db.statements[_table][key];
 
-    auto& pending = get_pending_insert_batch();
-    if(pending.is_active && (pending.conn != conn || pending.cache != &cache || pending.key != key))
+    if(!stmt)
     {
-        flush_pending_insert_batch();
+        auto placeholders = std::vector<std::string_view>(fields.size(), "?");
+        auto sql          = fmt::format("INSERT INTO {} ({}) VALUES ({});",
+                               replace_uuid(_db, _table),
+                               fmt::join(fields, ", "),
+                               fmt::join(placeholders, ", "));
+
+        ROCP_INFO << fmt::format("Preparing SQL statement: '{}'", sql);
+        SQLITE3_CHECK(sqlite3_prepare_v2(_db.conn, sql.c_str(), -1, &stmt, nullptr));
     }
 
-    if(!pending.is_active)
+    for(size_t i = 0; i < fields.size(); ++i)
     {
-        pending.is_active = true;
-        pending.conn      = conn;
-        pending.cache     = &cache;
-        pending.key       = key;
-        pending.table     = table;
-        pending.fields.clear();
-        pending.fields.reserve(fields.size());
-        for(const auto& field : fields)
-            pending.fields.emplace_back(field);
-        pending.max_rows = get_max_batch_rows(conn, fields.size());
+        auto idx = static_cast<int>(i + 1);
+        ROCP_TRACE << fmt::format(
+            "Binding SQL value {} of {} (name={})", idx, fields.size(), fields.at(i));
+        SQLITE3_CHECK(bind_sql_value(stmt, idx, values.at(i)));
     }
 
-    pending.rows.emplace_back(std::move(values));
-    if(pending.rows.size() >= pending.max_rows) flush_pending_insert_batch();
+    SQLITE3_CHECK2(sqlite3_step(stmt), {SQLITE_OK, SQLITE_DONE, SQLITE_ROW});
+    SQLITE3_CHECK(sqlite3_reset(stmt));
+    SQLITE3_CHECK(sqlite3_clear_bindings(stmt));
 }
 
 template <template <typename...> class ContainerT, typename... TypesT>
 void
-get_insert_statement(sqlite3*                                  conn,
-                     statement_cache_t&                        cache,
+get_insert_statement(rocpd_db&                                 _db,
                      std::string_view                          _table,
                      ContainerT<sql_insert_value, TypesT...>&& _data)
 {
     get_insert_statement_impl(
-        conn, cache, _table, std::forward<ContainerT<sql_insert_value, TypesT...>>(_data));
+        _db, _table, std::forward<ContainerT<sql_insert_value, TypesT...>>(_data));
 }
 
 void
-get_insert_statement(sqlite3*                                  conn,
-                     statement_cache_t&                        cache,
+get_insert_statement(rocpd_db&                                 _db,
                      std::string_view                          _table,
                      std::initializer_list<sql_insert_value>&& _data)
 {
     get_insert_statement_impl(
-        conn, cache, _table, std::forward<std::initializer_list<sql_insert_value>>(_data));
+        _db, _table, std::forward<std::initializer_list<sql_insert_value>>(_data));
 }
 
 auto
-create_event_impl(sqlite3*                                  conn,
-                  statement_cache_t&                        cache,
-                  std::initializer_list<sql_insert_value>&& _data,
-                  int                                       line)
+create_event_impl(rocpd_db& _db, std::initializer_list<sql_insert_value>&& _data, int line)
 {
-    common::consume_args(conn, line);
-    auto evt_id    = get_event_id();
+    common::consume_args(_db, line);
+    auto evt_id    = _db.get_event_id();
     auto _data_vec = std::vector<sql_insert_value>{};
 
     _data_vec.reserve(_data.size() + 1);
@@ -597,30 +484,28 @@ create_event_impl(sqlite3*                                  conn,
     for(auto&& itr : _data)
         _data_vec.emplace_back(itr);
 
-    get_insert_statement(conn, cache, "rocpd_event{{uuid}}", std::move(_data_vec));
+    get_insert_statement(_db, "rocpd_event{{uuid}}", std::move(_data_vec));
 
     return evt_id;
 }
 
 uint64_t
-get_track_id_impl(sqlite3*           conn,
-                  statement_cache_t& cache,
-                  uint64_t           node_id,
-                  pid_t              pid,
-                  pid_t              tid,
-                  uint64_t           name_id,
-                  std::string_view   extdata,
-                  int                line)
+get_track_id_impl(rocpd_db&        _db,
+                  uint64_t         node_id,
+                  pid_t            pid,
+                  pid_t            tid,
+                  uint64_t         name_id,
+                  std::string_view extdata,
+                  int              line)
 {
-    common::consume_args(conn, line);
+    common::consume_args(_db, line);
     auto _track = track_data{node_id, pid, tid, name_id};
-    auto itr    = get_tracks().find(_track);
-    if(itr == get_tracks().end())
+    auto itr    = _db.tracks.find(_track);
+    if(itr == _db.tracks.end())
     {
-        auto idx = get_tracks().size() + 1;
-        itr      = get_tracks().emplace(_track, idx).first;
-        get_insert_statement(conn,
-                             cache,
+        auto idx = _db.tracks.size() + 1;
+        itr      = _db.tracks.emplace(_track, idx).first;
+        get_insert_statement(_db,
                              "rocpd_track{{uuid}}",
                              {
                                  insert_value("id", idx),
@@ -880,8 +765,8 @@ write_rocpd(
     ROCP_WARNING << fmt::format(
         "writing SQL database for process {} on node {}", this_pid, this_nid);
 
-    sqlite3* conn            = nullptr;
-    auto     statement_cache = statement_cache_t{};
+    auto      db   = rocpd_db{};
+    sqlite3*& conn = db.conn;
 
     {
         const auto& mach_id = tool_metadata.node_data.machine_id;
@@ -889,11 +774,11 @@ write_rocpd(
         auto        seed    = common::compute_system_seed(mach_id, this_pid, this_ppid, ticks);
         auto        uuid_v7 = common::generate_uuid_v7(this_pid_init_ns, seed);
 
-        get_guid() = fmt::format("{}", uuid_v7);
-        get_uuid() = fmt::format("{}", replace_all(uuid_v7, '-', "_"));
+        db.guid = fmt::format("{}", uuid_v7);
+        db.uuid = fmt::format("{}", replace_all(uuid_v7, '-', "_"));
 
         // reading schemata
-        auto table_schema = read_schema_file(ROCPD_SQL_SCHEMA_ROCPD_TABLES);
+        auto table_schema = read_schema_file(db, ROCPD_SQL_SCHEMA_ROCPD_TABLES);
         auto output_file  = get_output_filename(cfg, "results", "db");
         if(fs::exists(output_file)) fs::remove(output_file);
 
@@ -909,7 +794,7 @@ write_rocpd(
                         ROCPD_SQL_SCHEMA_ROCPD_MARKER_VIEWS,
                         ROCPD_SQL_SCHEMA_ROCPD_SUMMARY_VIEWS})
         {
-            auto views_schema = read_schema_file(itr);
+            auto views_schema = read_schema_file(db, itr);
             execute_raw_sql_statements(conn, views_schema);
         }
     }
@@ -969,7 +854,7 @@ write_rocpd(
     auto queue_set  = std::unordered_set<rocprofiler_queue_id_t>{};
 
     static auto get_stream_id =
-        [&conn, &statement_cache, &stream_set, &node_id, &this_pid](rocprofiler_stream_id_t val) {
+        [&db, &stream_set, &node_id, &this_pid](rocprofiler_stream_id_t val) {
             if(stream_set.count(val) == 0)
             {
                 ROCP_FATAL_IF(val.handle == 0 && !stream_set.empty()) << "Missing default stream";
@@ -982,8 +867,7 @@ write_rocpd(
                     _name = fmt::format("Stream {}", stream_set.size() - 1);
                 stream_set.emplace(val);
 
-                get_insert_statement(conn,
-                                     statement_cache,
+                get_insert_statement(db,
                                      "rocpd_info_stream{{uuid}}",
                                      {
                                          insert_value("id", val.handle),
@@ -996,43 +880,39 @@ write_rocpd(
             return val.handle;
         };
 
-    static auto get_queue_id =
-        [&conn, &statement_cache, &queue_set, &node_id, &this_pid](rocprofiler_queue_id_t val) {
-            if(queue_set.count(val) == 0)
-            {
-                ROCP_FATAL_IF(val.handle == 0 && !queue_set.empty()) << "Missing default queue";
-                ROCP_FATAL_IF(val.handle != 0 && queue_set.empty()) << "Missing default queue";
+    static auto get_queue_id = [&db, &queue_set, &node_id, &this_pid](rocprofiler_queue_id_t val) {
+        if(queue_set.count(val) == 0)
+        {
+            ROCP_FATAL_IF(val.handle == 0 && !queue_set.empty()) << "Missing default queue";
+            ROCP_FATAL_IF(val.handle != 0 && queue_set.empty()) << "Missing default queue";
 
-                auto _name = std::string{};
-                if(val.handle == 0)
-                    _name = std::string{"Default Queue"};
-                else
-                    _name = fmt::format("Queue {}", queue_set.size() - 1);
-                queue_set.emplace(val);
+            auto _name = std::string{};
+            if(val.handle == 0)
+                _name = std::string{"Default Queue"};
+            else
+                _name = fmt::format("Queue {}", queue_set.size() - 1);
+            queue_set.emplace(val);
 
-                get_insert_statement(conn,
-                                     statement_cache,
-                                     "rocpd_info_queue{{uuid}}",
-                                     {
-                                         insert_value("id", val.handle),
-                                         insert_value("nid", node_id),
-                                         insert_value("pid", this_pid),
-                                         insert_value("name", _name),
-                                     });
-            }
+            get_insert_statement(db,
+                                 "rocpd_info_queue{{uuid}}",
+                                 {
+                                     insert_value("id", val.handle),
+                                     insert_value("nid", node_id),
+                                     insert_value("pid", this_pid),
+                                     insert_value("name", _name),
+                                 });
+        }
 
-            return val.handle;
-        };
+        return val.handle;
+    };
 
     static auto get_thread_id =
-        [&conn, &statement_cache, &tool_metadata, &thread_ids, &node_id, &this_pid](
-            rocprofiler_thread_id_t val) {
+        [&db, &tool_metadata, &thread_ids, &node_id, &this_pid](rocprofiler_thread_id_t val) {
             if(thread_ids.count(val) == 0)
             {
                 thread_ids.emplace(val);
 
-                get_insert_statement(conn,
-                                     statement_cache,
+                get_insert_statement(db,
                                      "rocpd_info_thread{{uuid}}",
                                      {
                                          insert_value("id", val),
@@ -1055,8 +935,7 @@ write_rocpd(
         auto _deferred = sql::deferred_transaction{conn};
         for(const auto& itr : string_entries)
         {
-            get_insert_statement(conn,
-                                 statement_cache,
+            get_insert_statement(db,
                                  "rocpd_string{{uuid}}",
                                  {
                                      insert_value("id", itr.second),
@@ -1065,13 +944,12 @@ write_rocpd(
         }
     }
 
-    auto insert_node_data = [&conn, &statement_cache, &tool_metadata, node_id, node_hash]() {
+    auto insert_node_data = [&db, &tool_metadata, node_id, node_hash]() {
         auto        _sqlgenperf_rocpd = get_simple_timer("rocpd_info_node");
         const auto& _info             = tool_metadata.node_data;
 
         get_insert_statement(
-            conn,
-            statement_cache,
+            db,
             "rocpd_info_node{{uuid}}",
             {
                 insert_value("id", node_id),
@@ -1086,62 +964,57 @@ write_rocpd(
             });
     };
 
-    auto insert_process_data =
-        [&conn, &statement_cache, &tool_metadata, &cfg, node_id, this_pid]() {
-            auto _sqlgenperf_rocpd = get_simple_timer("rocpd_info_process");
-            auto json_cfg          = get_json_string([&cfg](auto& ar) { cfg.save(ar); });
-            auto json_env          = get_json_string([](auto& ar) {
-                size_t i = 0;
-                while(true)
+    auto insert_process_data = [&db, &tool_metadata, &cfg, node_id, this_pid]() {
+        auto _sqlgenperf_rocpd = get_simple_timer("rocpd_info_process");
+        auto json_cfg          = get_json_string([&cfg](auto& ar) { cfg.save(ar); });
+        auto json_env          = get_json_string([](auto& ar) {
+            size_t i = 0;
+            while(true)
+            {
+                const char* itr = environ[i++];
+                if(!itr) break;
+                if(auto pos = std::string_view{itr}.find('='); pos != std::string_view::npos)
                 {
-                    const char* itr = environ[i++];
-                    if(!itr) break;
-                    if(auto pos = std::string_view{itr}.find('='); pos != std::string_view::npos)
+                    auto evar = std::string{itr}.substr(0, pos);
+                    auto eval = std::string{itr}.substr(pos + 1);
+                    ROCP_TRACE << "ENV: " << evar << " = " << eval;
+                    if(eval.find(';') != std::string::npos)
                     {
-                        auto evar = std::string{itr}.substr(0, pos);
-                        auto eval = std::string{itr}.substr(pos + 1);
-                        ROCP_TRACE << "ENV: " << evar << " = " << eval;
-                        if(eval.find(';') != std::string::npos)
-                        {
-                            ROCP_INFO << fmt::format(
-                                "Env variable {} was sanitized due to semi-colon in the value",
-                                evar);
-                        }
-                        else if(!evar.empty())
-                        {
-                            ar(cereal::make_nvp(evar.c_str(), eval));
-                        }
+                        ROCP_INFO << fmt::format(
+                            "Env variable {} was sanitized due to semi-colon in the value", evar);
+                    }
+                    else if(!evar.empty())
+                    {
+                        ar(cereal::make_nvp(evar.c_str(), eval));
                     }
                 }
-            });
+            }
+        });
 
-            auto command = fmt::format(
-                "{}",
-                fmt::join(
-                    tool_metadata.command_line.begin(), tool_metadata.command_line.end(), " "));
-            auto _command = command;
+        auto _command = fmt::format(
+            "{}",
+            fmt::join(tool_metadata.command_line.begin(), tool_metadata.command_line.end(), " "));
 
-            get_insert_statement(conn,
-                                 statement_cache,
-                                 "rocpd_info_process{{uuid}}",
-                                 {
-                                     insert_value("id", this_pid),
-                                     insert_value("nid", node_id),
-                                     insert_value("ppid", tool_metadata.parent_process_id),
-                                     insert_value("pid", this_pid),
-                                     insert_value("init", tool_metadata.process_start_ns),
-                                     insert_value("fini", tool_metadata.process_end_ns),
-                                     insert_value("start", tool_metadata.process_start_ns),
-                                     insert_value("end", tool_metadata.process_end_ns),
-                                     insert_value("command", _command),
-                                     insert_value("environment", json_env),
-                                     insert_value("extdata", json_cfg),
-                                 });
-        };
+        get_insert_statement(db,
+                             "rocpd_info_process{{uuid}}",
+                             {
+                                 insert_value("id", this_pid),
+                                 insert_value("nid", node_id),
+                                 insert_value("ppid", tool_metadata.parent_process_id),
+                                 insert_value("pid", this_pid),
+                                 insert_value("init", tool_metadata.process_start_ns),
+                                 insert_value("fini", tool_metadata.process_end_ns),
+                                 insert_value("start", tool_metadata.process_start_ns),
+                                 insert_value("end", tool_metadata.process_end_ns),
+                                 insert_value("command", _command),
+                                 insert_value("environment", json_env),
+                                 insert_value("extdata", json_cfg),
+                             });
+    };
 
-    auto insert_agent_data = [&conn, &statement_cache, &tool_metadata, node_id, this_pid]() {
+    auto insert_agent_data = [&db, &tool_metadata, node_id, this_pid]() {
         auto _sqlgenperf_rocpd = get_simple_timer("rocpd_info_agent");
-        auto _deferred         = sql::deferred_transaction{conn};
+        auto _deferred         = sql::deferred_transaction{db.conn};
         for(auto itr : tool_metadata.agents)
         {
             auto json_info = get_json_string([&itr](auto& ar) { cereal::save(ar, itr); });
@@ -1152,8 +1025,7 @@ write_rocpd(
                 type = "GPU";
 
             get_insert_statement(
-                conn,
-                statement_cache,
+                db,
                 "rocpd_info_agent{{uuid}}",
                 {
                     insert_value("id", itr.node_id),
@@ -1174,13 +1046,9 @@ write_rocpd(
         }
     };
 
-    auto insert_kernel_code_object_data = [&conn,
-                                           &statement_cache,
-                                           &tool_metadata,
-                                           node_id,
-                                           this_pid]() {
+    auto insert_kernel_code_object_data = [&db, &tool_metadata, node_id, this_pid]() {
         auto _sqlgenperf_rocpd = get_simple_timer("rocpd kernel info");
-        auto _deferred         = sql::deferred_transaction{conn};
+        auto _deferred         = sql::deferred_transaction{db.conn};
         for(const auto& itr : tool_metadata.get_code_objects())
         {
             if(itr.size == 0) continue;
@@ -1189,8 +1057,7 @@ write_rocpd(
             auto        json_data =
                 get_json_string([](auto& ar, const auto oitr) { cereal::save(ar, oitr); }, itr);
 
-            get_insert_statement(conn,
-                                 statement_cache,
+            get_insert_statement(db,
                                  "rocpd_info_code_object{{uuid}}",
                                  {
                                      insert_value("id", itr.code_object_id),
@@ -1213,8 +1080,7 @@ write_rocpd(
                 get_json_string([](auto& ar, const auto& oitr) { cereal::save(ar, oitr); }, itr);
 
             get_insert_statement(
-                conn,
-                statement_cache,
+                db,
                 "rocpd_info_kernel_symbol{{uuid}}",
                 {
                     insert_value("id", itr.kernel_id),
@@ -1236,10 +1102,10 @@ write_rocpd(
         }
     };
 
-    auto insert_pmc_data = [&conn, &statement_cache, &tool_metadata, node_id, this_pid]() {
+    auto insert_pmc_data = [&db, &tool_metadata, node_id, this_pid]() {
         auto _sqlgenperf_rocpd = get_simple_timer("rocpd_info_pmc");
         auto recorded          = std::unordered_set<rocprofiler_counter_id_t>{};
-        auto _deferred         = sql::deferred_transaction{conn};
+        auto _deferred         = sql::deferred_transaction{db.conn};
         for(const auto& itr : tool_metadata.agent_counter_info)
         {
             for(const auto& aitr : itr.second)
@@ -1251,14 +1117,13 @@ write_rocpd(
                     if(agent) cereal::save(ar, *agent);
                 });
 
-                auto _name        = aitr.name;
-                auto _description = aitr.description;
-                auto _block       = aitr.block;
-                auto _expression  = aitr.expression;
+                const auto* _name        = aitr.name;
+                const auto* _description = aitr.description;
+                const auto* _block       = aitr.block;
+                const auto* _expression  = aitr.expression;
 
                 get_insert_statement(
-                    conn,
-                    statement_cache,
+                    db,
                     "rocpd_info_pmc{{uuid}}",
                     {
                         insert_value("id", aitr.id.handle),
@@ -1283,7 +1148,7 @@ write_rocpd(
 
     auto insert_kernel_dispatch_data = [&, node_id, this_pid](auto& dispatch_evt_ids) {
         auto _sqlgenperf_rocpd = get_simple_timer("rocpd_kernel_dispatch");
-        auto _deferred         = sql::deferred_transaction{conn};
+        auto _deferred         = sql::deferred_transaction{db.conn};
 
         auto process_dispatch = [&](uint64_t    dispatch_id,
                                     uint64_t    kernel_id,
@@ -1305,8 +1170,7 @@ write_rocpd(
                                  ? tool_metadata.get_kernel_symbol(kernel_id)->formatted_kernel_name
                                  : "unknown_kernel";
 
-            auto evt_id = create_event(conn,
-                                       statement_cache,
+            auto evt_id = create_event(db,
                                        {
                                            insert_value("category_id", string_entries.at(kind)),
                                            insert_value("stack_id", corr_id.internal),
@@ -1344,8 +1208,7 @@ write_rocpd(
 
             // Insert into kernel dispatch table
             get_insert_statement(
-                conn,
-                statement_cache,
+                db,
                 "rocpd_kernel_dispatch{{uuid}}",
                 {
                     insert_value("id", dispatch_id),
@@ -1436,9 +1299,9 @@ write_rocpd(
     };
 
     auto insert_pmc_event_data =
-        [&conn, &statement_cache, &tool_metadata, &counter_collection_gen](auto& dispatch_evt_ids) {
+        [&db, &tool_metadata, &counter_collection_gen](auto& dispatch_evt_ids) {
             auto   _sqlgenperf_rocpd = get_simple_timer("rocpd_pmc_event");
-            auto   _deferred         = sql::deferred_transaction{conn};
+            auto   _deferred         = sql::deferred_transaction{db.conn};
             size_t idx               = tool_metadata.pmc_event_offset;
             for(auto ditr : counter_collection_gen)
             {
@@ -1450,8 +1313,7 @@ write_rocpd(
                     auto evt_id = dispatch_evt_ids.at(dispatch_id);
                     for(const auto& count : record.read())
                     {
-                        get_insert_statement(conn,
-                                             statement_cache,
+                        get_insert_statement(db,
                                              "rocpd_pmc_event{{uuid}}",
                                              {
                                                  insert_value("id", idx++),
@@ -1465,10 +1327,9 @@ write_rocpd(
         };
 
     auto insert_memory_copy_data =
-        [&conn, &statement_cache, &tool_metadata, &string_entries, node_id, this_pid](
-            const auto& _gen) {
+        [&db, &tool_metadata, &string_entries, node_id, this_pid](const auto& _gen) {
             auto   _sqlgenperf_rocpd = get_simple_timer("rocpd_memory_copy");
-            auto   _deferred         = sql::deferred_transaction{conn};
+            auto   _deferred         = sql::deferred_transaction{db.conn};
             size_t copy_idx          = 1;
 
             for(auto pitr : _gen)
@@ -1482,8 +1343,7 @@ write_rocpd(
                     auto name = tool_metadata.buffer_names.at(itr.kind, itr.operation);
 
                     auto evt_id = create_event(
-                        conn,
-                        statement_cache,
+                        db,
                         {
                             insert_value("category_id", string_entries.at(kind)),
                             insert_value("stack_id", itr.correlation_id.internal),
@@ -1492,8 +1352,7 @@ write_rocpd(
                         });
 
                     get_insert_statement(
-                        conn,
-                        statement_cache,
+                        db,
                         "rocpd_memory_copy{{uuid}}",
                         {
                             insert_value("id", copy_idx++),
@@ -1518,11 +1377,10 @@ write_rocpd(
         };
 
     auto insert_memory_alloc_data =
-        [&conn, &statement_cache, &tool_metadata, &string_entries, node_id, this_pid](
-            const auto& _gen) {
+        [&db, &tool_metadata, &string_entries, node_id, this_pid](const auto& _gen) {
             auto address_to_agent_and_size =
                 std::unordered_map<rocprofiler_address_t, rocprofiler::agent::index_and_size>{};
-            auto _deferred = sql::deferred_transaction{conn};
+            auto _deferred = sql::deferred_transaction{db.conn};
 
             for(auto pitr : _gen)
             {
@@ -1584,8 +1442,7 @@ write_rocpd(
                     }
 
                     auto evt_id = create_event(
-                        conn,
-                        statement_cache,
+                        db,
                         {
                             insert_value("category_id", string_entries.at(_kind)),
                             insert_value("stack_id", itr.correlation_id.internal),
@@ -1596,8 +1453,7 @@ write_rocpd(
                     auto flags = extract_flags_field(itr);
 
                     get_insert_statement(
-                        conn,
-                        statement_cache,
+                        db,
                         "rocpd_memory_allocate{{uuid}}",
                         {
                             insert_value("nid", node_id),
@@ -1623,128 +1479,118 @@ write_rocpd(
         };
 
     // new string entries argument types and names can be added to _metadata
-    auto insert_api_data =
-        [&conn, &statement_cache, &tool_metadata, &string_entries, node_id, this_pid](
-            const auto& _gen) {
-            auto _deferred = sql::deferred_transaction{conn};
+    auto insert_api_data = [&db, &tool_metadata, &string_entries, node_id, this_pid](
+                               const auto& _gen) {
+        auto _deferred = sql::deferred_transaction{db.conn};
 
-            for(auto pitr : _gen)
+        for(auto pitr : _gen)
+        {
+            for(auto itr : _gen.get(pitr))
             {
-                for(auto itr : _gen.get(pitr))
-                {
-                    auto category = tool_metadata.buffer_names.at(itr.kind);
-                    auto name     = tool_metadata.buffer_names.at(itr.kind, itr.operation);
+                auto category = tool_metadata.buffer_names.at(itr.kind);
+                auto name     = tool_metadata.buffer_names.at(itr.kind, itr.operation);
 
-                    auto msg = std::string{"{}"};
-                    if(itr.kind == ROCPROFILER_BUFFER_TRACING_MARKER_CORE_RANGE_API)
+                auto msg = std::string{"{}"};
+                if(itr.kind == ROCPROFILER_BUFFER_TRACING_MARKER_CORE_RANGE_API)
+                {
+                    if(static_cast<rocprofiler_tracing_operation_t>(itr.operation) !=
+                       ROCPROFILER_MARKER_CORE_RANGE_API_ID_roctxGetThreadId)
                     {
-                        if(static_cast<rocprofiler_tracing_operation_t>(itr.operation) !=
-                           ROCPROFILER_MARKER_CORE_RANGE_API_ID_roctxGetThreadId)
-                        {
-                            // check generatePerfetto.cpp and generateOTF2.cpp, and the marker name
-                            // in the view
-                            auto message =
-                                tool_metadata.get_marker_message(itr.correlation_id.internal);
-                            if(!message.empty())
-                            {
-                                msg = get_json_string(
-                                    [](auto& ar, std::string_view _msg) {
-                                        ar(cereal::make_nvp("message", std::string{_msg}));
-                                    },
-                                    message);
-                            }
-                        }
-                        else
+                        // check generatePerfetto.cpp and generateOTF2.cpp, and the marker name
+                        // in the view
+                        auto message =
+                            tool_metadata.get_marker_message(itr.correlation_id.internal);
+                        if(!message.empty())
                         {
                             msg = get_json_string(
                                 [](auto& ar, std::string_view _msg) {
                                     ar(cereal::make_nvp("message", std::string{_msg}));
                                 },
-                                name);
+                                message);
                         }
-                    }
-
-                    auto args = function_args_t{};
-                    {
-                        auto _record = rocprofiler_record_header_t{
-                            .hash = rocprofiler_record_header_compute_hash(
-                                ROCPROFILER_BUFFER_CATEGORY_TRACING, itr.kind),
-                            .payload = &itr};
-
-                        rocprofiler_iterate_buffer_tracing_record_args(
-                            _record, iterate_args_callback, &args);
-                    }
-
-                    // insert thread info if it doesn't already exist
-                    get_thread_id(itr.thread_id);
-
-                    auto evt_id = create_event(
-                        conn,
-                        statement_cache,
-                        {
-                            insert_value("category_id", string_entries.at(category)),
-                            insert_value("stack_id", itr.correlation_id.internal),
-                            insert_value("parent_stack_id", itr.correlation_id.ancestor),
-                            insert_value("correlation_id", itr.correlation_id.external.value),
-                            insert_value("extdata", msg),
-                        });
-
-                    // insert arguments into rocpd_arg table
-                    for(const auto& arg_info : args)
-                    {
-                        auto demangled_type = common::cxx_demangle(arg_info.arg_type);
-
-                        get_insert_statement(conn,
-                                             statement_cache,
-                                             "rocpd_arg{{uuid}}",
-                                             {
-                                                 insert_value("event_id", evt_id),
-                                                 insert_value("position", arg_info.arg_number),
-                                                 insert_value("type", demangled_type),
-                                                 insert_value("name", arg_info.arg_name),
-                                                 insert_value("value", arg_info.arg_value),
-                                             });
-                    }
-
-                    if(itr.start_timestamp != itr.end_timestamp)
-                    {
-                        get_insert_statement(conn,
-                                             statement_cache,
-                                             "rocpd_region{{uuid}}",
-                                             {
-                                                 insert_value("id", itr.correlation_id.internal),
-                                                 insert_value("nid", node_id),
-                                                 insert_value("pid", this_pid),
-                                                 insert_value("tid", itr.thread_id),
-                                                 insert_value("start", itr.start_timestamp),
-                                                 insert_value("end", itr.end_timestamp),
-                                                 insert_value("name_id", string_entries.at(name)),
-                                                 insert_value("event_id", evt_id),
-                                             });
                     }
                     else
                     {
-                        auto track_id = get_track_id(conn,
-                                                     statement_cache,
-                                                     node_id,
-                                                     this_pid,
-                                                     itr.thread_id,
-                                                     string_entries.at(category),
-                                                     "{}");
-
-                        get_insert_statement(conn,
-                                             statement_cache,
-                                             "rocpd_sample{{uuid}}",
-                                             {
-                                                 insert_value("id", itr.correlation_id.internal),
-                                                 insert_value("track_id", track_id),
-                                                 insert_value("timestamp", itr.start_timestamp),
-                                                 insert_value("event_id", evt_id),
-                                             });
+                        msg = get_json_string(
+                            [](auto& ar, std::string_view _msg) {
+                                ar(cereal::make_nvp("message", std::string{_msg}));
+                            },
+                            name);
                     }
                 }
+
+                auto args = function_args_t{};
+                {
+                    auto _record = rocprofiler_record_header_t{
+                        .hash = rocprofiler_record_header_compute_hash(
+                            ROCPROFILER_BUFFER_CATEGORY_TRACING, itr.kind),
+                        .payload = &itr};
+
+                    rocprofiler_iterate_buffer_tracing_record_args(
+                        _record, iterate_args_callback, &args);
+                }
+
+                // insert thread info if it doesn't already exist
+                get_thread_id(itr.thread_id);
+
+                auto evt_id = create_event(
+                    db,
+                    {
+                        insert_value("category_id", string_entries.at(category)),
+                        insert_value("stack_id", itr.correlation_id.internal),
+                        insert_value("parent_stack_id", itr.correlation_id.ancestor),
+                        insert_value("correlation_id", itr.correlation_id.external.value),
+                        insert_value("extdata", msg),
+                    });
+
+                // insert arguments into rocpd_arg table
+                for(const auto& arg_info : args)
+                {
+                    auto demangled_type = common::cxx_demangle(arg_info.arg_type);
+
+                    get_insert_statement(db,
+                                         "rocpd_arg{{uuid}}",
+                                         {
+                                             insert_value("event_id", evt_id),
+                                             insert_value("position", arg_info.arg_number),
+                                             insert_value("type", demangled_type),
+                                             insert_value("name", arg_info.arg_name),
+                                             insert_value("value", arg_info.arg_value),
+                                         });
+                }
+
+                if(itr.start_timestamp != itr.end_timestamp)
+                {
+                    get_insert_statement(db,
+                                         "rocpd_region{{uuid}}",
+                                         {
+                                             insert_value("id", itr.correlation_id.internal),
+                                             insert_value("nid", node_id),
+                                             insert_value("pid", this_pid),
+                                             insert_value("tid", itr.thread_id),
+                                             insert_value("start", itr.start_timestamp),
+                                             insert_value("end", itr.end_timestamp),
+                                             insert_value("name_id", string_entries.at(name)),
+                                             insert_value("event_id", evt_id),
+                                         });
+                }
+                else
+                {
+                    auto track_id = get_track_id(
+                        db, node_id, this_pid, itr.thread_id, string_entries.at(category), "{}");
+
+                    get_insert_statement(db,
+                                         "rocpd_sample{{uuid}}",
+                                         {
+                                             insert_value("id", itr.correlation_id.internal),
+                                             insert_value("track_id", track_id),
+                                             insert_value("timestamp", itr.start_timestamp),
+                                             insert_value("event_id", evt_id),
+                                         });
+                }
             }
-        };
+        }
+    };
 
     auto insert_kfd_data = [&conn, &tool_metadata, node_id, this_pid](auto& pmc_ids) {
         auto _sqlgenperf_rocpd = get_simple_timer("rocpd_info_pmc: kfd");
@@ -1899,17 +1745,9 @@ write_rocpd(
 
     {
         auto _sqlgenperf_rocpd = get_simple_timer("SQL indexing");
-        auto indexes_schema    = read_schema_file(ROCPD_SQL_SCHEMA_ROCPD_INDEXES);
-        execute_raw_sql_statements(conn, indexes_schema);
+        auto indexes_schema    = read_schema_file(db, ROCPD_SQL_SCHEMA_ROCPD_INDEXES);
+        execute_raw_sql_statements(db.conn, indexes_schema);
     }
-
-    flush_pending_insert_batch();
-    finalize_prepared_statements(statement_cache);
-    SQLITE3_CHECK(sqlite3_close_v2(conn));
-
-    // Clear UUID/GUID state at end of write to prepare for potential re-attach
-    get_guid().clear();
-    get_uuid().clear();
 }
 }  // namespace tool
 }  // namespace rocprofiler
