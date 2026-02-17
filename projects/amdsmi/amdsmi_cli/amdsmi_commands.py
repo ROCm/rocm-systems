@@ -7533,7 +7533,7 @@ class AMDSMICommands():
             self.group_check_printed = True
 
         # Initialize variables for both power management and base board temps
-        npm_dict = {"limit": "N/A", "status": "N/A"}
+        npm_dict = {"limit": "N/A", "status": "N/A", "ubb_power": "N/A", "ubb_power_limit": "N/A"}
         power_unit = "W"
         limit = "N/A"
         base_board_temp_dict = {}
