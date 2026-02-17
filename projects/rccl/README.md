@@ -63,6 +63,7 @@ RCCL build & installation helper script
        --static                Build RCCL as a static library instead of shared library
     -t|--tests_build           Build rccl unit tests, but do not run
        --time-trace            Plot the build time of RCCL (requires `ninja-build` package installed on the system)
+       --rocshmem              Build with rocSHMEM support (for GDA AllToAll)
        --verbose               Show compile commands
 ```
 
@@ -125,6 +126,35 @@ will run only AllReduce correctness tests with float16 datatype. A list of avail
 
 There are also other performance and error-checking tests for RCCL.  These are maintained separately at https://github.com/ROCm/rccl-tests.
 See the rccl-tests README for more information on how to build and run those tests.
+
+## rocSHMEM support
+
+RCCL can use rocSHMEM's GPU Direct Async (GDA) backend to accelerate the **AllToAll** collective on supported multi-node setups. This is the only collective that currently uses rocSHMEM GDA inside RCCL.
+
+Please consult the [rocSHMEM documentation](https://rocm.docs.amd.com/projects/rocSHMEM/en/latest/install.html#gda-nic-dependencies) to see which NICs and drivers are required for GDA alltoall support. 
+
+**Building with rocSHMEM**
+
+- Using the install script:
+  ```shell
+  ./install.sh --rocshmem
+  ```
+  If the rocSHMEM submodule is present (`ext-src/rocSHMEM`), it will be built and linked automatically. To use a pre-built rocSHMEM installation instead, set `ROCSHMEM_INSTALL_DIR` to the install prefix before running the script.
+- Using CMake:
+  ```shell
+  cmake -DENABLE_ROCSHMEM=ON ..
+  # Optional: use an existing rocSHMEM install
+  cmake -DENABLE_ROCSHMEM=ON -DROCSHMEM_INSTALL_DIR=/path/to/rocshmem ..
+  ```
+
+**Runtime behavior**
+
+Users must set the following environment variables:
+
+- **`RCCL_ROCSHMEM_ENABLE`** (default: `1`): Set to `0` to disable rocSHMEM usage in RCCL.
+- **`RCCL_ROCSHMEM_THRESHOLD`** (default: `262144` bytes): Maximum AllToAll message size (in bytes) for which the GDA path is used. The GDA path is only considered when this value is ≤ 1 MiB (1048576); larger thresholds fall back to the standard AllToAll implementation.
+
+The GDA AllToAll path is selected only when all of the following hold: rocSHMEM is enabled at build and runtime, the GPU architecture is gfx942 (e.g. MI300X), the job is multi-node with 8 GPUs per node, and the AllToAll message size is ≤ `RCCL_ROCSHMEM_THRESHOLD`.
 
 ## Library and API Documentation
 

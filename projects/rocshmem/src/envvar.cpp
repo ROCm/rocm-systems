@@ -44,7 +44,8 @@ namespace envvar {
     const var<size_t> max_num_host_contexts("MAX_NUM_HOST_CONTEXTS", "", 1);
     const var<size_t> max_num_contexts("MAX_NUM_CONTEXTS", "", 32);
     const var<size_t> max_wavefront_buffers("MAX_WF_BUFFERS", "", 1024);
-    const var<std::string> requested_dev("USE_IB_HCA", "");
+    const var<std::string> requested_nic("USE_IB_HCA", "");
+    const var<std::string> hca_list("HCA_LIST", "");
     const var<uint32_t> sq_size("SQ_SIZE", "", 1024);
     const var<std::string> backend("BACKEND", "");
     const var<bool> disable_mixed_ipc("DISABLE_MIXED_IPC", "", false);
@@ -69,6 +70,7 @@ namespace envvar {
     const var<bool> alternate_qp_ports("ALTERNATE_QP_PORTS", "", true);
     const var<uint8_t> traffic_class("TRAFFIC_CLASS", "", 0);
     const var<bool> pcie_relaxed_ordering("PCIE_RELAXED_ORDERING", "", false);
+    const var<bool> enable_dmabuf("ENABLE_DMABUF", "", false);
   }  // namespace gda
 
   namespace _detail {
