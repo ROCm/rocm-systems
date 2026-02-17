@@ -1764,7 +1764,7 @@ class AMDSMICommands():
             self.logger.print_output(multiple_device_enabled=multiple_devices_csv_override)
 
     def _static_nics(self, args, multiple_devices, nic):
-        if args.nic == None:
+        if not hasattr(args, "nic") or args.nic == None:
             nic = None
             if self.helpers.is_ainic_initialized():
                 nic = self.device_handles_ainics
