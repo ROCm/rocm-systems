@@ -29,6 +29,9 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Detection of MPI ranks while profiling and creation of output directories based on MPI rank.
 
+* Added `--experimental` flag to enable experimental features that are under development. This flag is required when using any experimental features. 
+  * Use `rocprof-compute --experimental --help` to see currently available experimental features.
+
 ### Changed
 
 * Default output format for the underlying ROCprofiler-SDK tool has been changed from ``csv`` to ``rocpd``.
@@ -39,6 +42,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Standalone roofline (--roof-only option) in profile mode now creates HTML file output instead of PDF file output for roofline charts
 
 ### Resolved issues
+
+* Improved VALU FP16 roofline benchmark to achieve peak performance by using vector types for packed math instructions
 
 * Implemented `NOISE_CLAMP` for L2 cache metrics to handle negative values from multi-pass profiling variance:
   * Negative values are clamped to 0 (eliminates physically impossible negative counts)
