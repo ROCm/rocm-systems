@@ -328,14 +328,14 @@ def show_torch_operator_table(operator_name: str, df: pd.DataFrame) -> None:
     # Reset index for row numbering
     display_df = display_df.reset_index(drop=True)
 
-    # Use tabulate for consistent formatting
+    # Use tabulate for consistent formatting (single max width for all columns)
     table_str = tabulate(
         display_df,
         headers=display_df.columns,
         tablefmt="fancy_grid",
         showindex=True,
         floatfmt=".2f",
-        maxcolwidths=list(column_widths.values()),
+        maxcolwidths=35,
     )
 
     console_log(table_str)
@@ -440,7 +440,9 @@ def show_torch_operator_hierarchy(
         print(
             f"{hierarchy_indent}\n{hierarchy_indent}"
             + "Operator Hierarchy".ljust(inner_width)
-            + ("Kernels Launched" if not has_duration else "Kernels Launched (duration)")
+            + (
+            "Kernels Launched" if not has_duration else "Kernels Launched (duration)"
+            )
         )
         print(f"{hierarchy_indent}{'-' * (80 - len(hierarchy_indent))}")
         parts = str(op).split("/")
@@ -481,7 +483,10 @@ def show_torch_operator_hierarchy(
                 kernel_duration_ns[kernel_name] += float(
                     row["End_Timestamp_kernel"]
                 ) - float(row["Start_Timestamp_kernel"])
-            topmost_location = str(row["Context_Id"]).split("/")[0]
+            context_id = row.get("Context_Id")
+            if pd.isna(context_id) or not str(context_id).strip():
+                continue
+            topmost_location = str(context_id).split("/")[0]
             if "@" in topmost_location and ":" in topmost_location:
                 _, location = topmost_location.split("@", 1)
                 if ":" in location:
