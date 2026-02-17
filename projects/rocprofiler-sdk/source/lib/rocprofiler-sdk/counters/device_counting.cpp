@@ -590,6 +590,20 @@ stop_agent_ctx(const context::context* ctx)
                                                           UINT64_MAX,
                                                           HSA_WAIT_STATE_ACTIVE);
 
+        // Verify that the profiling queue is fully drained before releasing the device.
+        // After the stop packet completes, read_index must equal write_index.
+        {
+            auto* queue     = agent->profile_queue();
+            auto  read_idx  = hsa::get_core_table()->hsa_queue_load_read_index_relaxed_fn(queue);
+            auto  write_idx = hsa::get_core_table()->hsa_queue_load_write_index_relaxed_fn(queue);
+            ROCP_FATAL_IF(read_idx != write_idx)
+                << fmt::format("Profile queue not drained after stop packet: "
+                               "read_index={}, write_index={} (agent={})",
+                               read_idx,
+                               write_idx,
+                               agent->get_rocp_agent()->name);
+        }
+
         // Re-enable PTL (non-fatal if it fails)
         // Only re-enable here if using NEW behavior (at context start, not at configuration)
         if(!use_device_lock_at_start())
