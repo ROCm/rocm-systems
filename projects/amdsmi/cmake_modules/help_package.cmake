@@ -15,6 +15,32 @@ function(generic_add_rocm)
     # add package search paths
     set(CMAKE_PREFIX_PATH ${CMAKE_PREFIX_PATH} /usr/local PARENT_SCOPE)
     set(CMAKE_LIBRARY_PATH ${CMAKE_LIBRARY_PATH} /usr/lib64 /usr/lib/x86_64-linux-gnu PARENT_SCOPE)
+
+    #
+    # --- ROCm default compiler and tools build path setup ---
+    set(ROCM_LLVM_BIN_DIR "${ROCM_DIR}/lib/llvm/bin")
+    if(NOT IS_DIRECTORY "${ROCM_LLVM_BIN_DIR}")
+        message(FATAL_ERROR " ROCM_LLVM_BIN_DIR is not a valid directory: '${ROCM_LLVM_BIN_DIR}'\n"
+                            " Check ROCM_DIR and the LLVM binary path structure.")
+    endif()
+
+    #
+    # --- Find Clang C and C++ compilers within the ROCm LLVM binary directory ---
+    find_program(CMAKE_C_COMPILER
+        NAMES clang
+        HINTS "${ROCM_LLVM_BIN_DIR}"
+        NO_DEFAULT_PATH
+        REQUIRED
+    )
+    find_program(CMAKE_CXX_COMPILER
+        NAMES clang++
+        HINTS "${ROCM_LLVM_BIN_DIR}"
+        NO_DEFAULT_PATH
+        REQUIRED
+    )
+    message(STATUS " Using ROCm 'Lightning' compiler and tools:")
+    message(STATUS "   C   Compiler: ${CMAKE_C_COMPILER}")
+    message(STATUS "   C++ Compiler: ${CMAKE_CXX_COMPILER}")
 endfunction()
 
 function(generic_package)
@@ -27,9 +53,11 @@ function(generic_package)
     endif()
 
     if("${CMAKE_BUILD_TYPE}" STREQUAL Release)
-        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O2" PARENT_SCOPE)
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O2")
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}" PARENT_SCOPE)
     else()
-        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -ggdb -O0 -DDEBUG" PARENT_SCOPE)
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -ggdb -O0 -DDEBUG")
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}" PARENT_SCOPE)
     endif()
 
     # Add address sanitizer
@@ -54,6 +82,12 @@ function(generic_package)
         set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} ${ASAN_LINKER_FLAGS}" PARENT_SCOPE)
     else()
         ## Security breach mitigation flags
+        ## --- Clang _FORTIFY_SOURCE=2 ---
+        ## Note:
+        ##  Clang requires optimization '-Ox' to be ON to use/enable _FORTIFY_SOURCE
+        ##    '-O2' (or higher): best coverage
+        ##      More constant/known-size propagation happens, more calls get fortified,
+        ##      better compile-time diagnostics possible
         set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D_FORTIFY_SOURCE=2 -fstack-protector-all -Wcast-align" PARENT_SCOPE)
         ## More security breach mitigation flags
         set(HARDENING_LDFLAGS "${HARDENING_LDFLAGS} -Wl,-z,noexecstack -Wl,-z,relro -Wl,-z,now")

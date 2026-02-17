@@ -22,7 +22,7 @@
 #
 # Minimum version of cmake required
 #
-cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 3.25)
 
 set(AMD_SMI "amd_smi")
 set(AMD_SMI_LIBS_TARGET "${AMD_SMI}_lib")
@@ -52,6 +52,7 @@ set(BUILD_DEBIAN_PKGING_FLAG
     CACHE BOOL
     "Internal Status Flag to indicate Debian Packaging Build"
 )
+
 
 ## Setup the package version based on git tags.
 set(PKG_VERSION_GIT_TAG_PREFIX "amdsmi_pkg_ver")
