@@ -33,17 +33,16 @@ endif()
 
 # Creating Custom object file
 if (HIP_PLATFORM MATCHES "amd")
-add_custom_target(devprop_c_custom
+  add_custom_target(devprop_c_custom
     COMMAND ${CMAKE_C_COMPILER}
             -c -Wno-deprecated-declarations -x c ${CMAKE_CURRENT_SOURCE_DIR}/hipGetDeviceProp.c
             -I${HIP_INCLUDE_DIR}
             -D${PLATFORM_DEFINE}
             -o hipGetDeviceProp.o
-            -fPIC
     BYPRODUCTS hipGetDeviceProp.o
 )
 else()
-add_custom_target(devprop_c_custom
+  add_custom_target(devprop_c_custom
     COMMAND ${CMAKE_C_COMPILER}
             -c -Wno-deprecated-declarations -x c ${CMAKE_CURRENT_SOURCE_DIR}/hipGetDeviceProp.c
             -D${PLATFORM_DEFINE}
