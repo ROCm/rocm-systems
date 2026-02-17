@@ -26,7 +26,7 @@
 #    include <amd_smi/amdsmi.h>
 #endif
 
-#if ROCPROFSYS_AINIC_STAT_ENABLED > 0
+#if ROCPROFSYS_USE_AINIC > 0
 #    define USE_AINIC
 #endif
 

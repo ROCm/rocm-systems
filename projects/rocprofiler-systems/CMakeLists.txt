@@ -226,7 +226,7 @@ rocprofiler_systems_add_option(CMAKE_CXX_STANDARD_REQUIRED
 rocprofiler_systems_add_option(ROCPROFSYS_USE_AMD_SMI
                                "Enable AMD SMI support" ON
 )
-rocprofiler_systems_add_option(ROCPROFSYS_AINIC_STAT_ENABLED
+rocprofiler_systems_add_option(ROCPROFSYS_USE_AINIC
                                "Enable AI NIC profiling through AMD SMI" OFF
 )
 rocprofiler_systems_add_option(CMAKE_CXX_EXTENSIONS

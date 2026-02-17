@@ -797,7 +797,7 @@ PROFILING WORKFLOW:
             rocprofsys::common::update_env(_env, "ROCPROFSYS_CPU_FREQ_ENABLED", _h,
                                            update_mode::REPLACE, ":", updated_envs,
                                            original_envs);
-            rocprofsys::common::update_env(_env, "ROCPROFSYS_AINIC_STAT_ENABLED", _h,
+            rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_AINIC", _h,
                                            update_mode::REPLACE, ":", updated_envs,
                                            original_envs);
             if(_h)
@@ -824,7 +824,7 @@ PROFILING WORKFLOW:
                                                update_mode::REPLACE, ":", updated_envs,
                                                original_envs);
             if(_d)
-                rocprofsys::common::update_env(_env, "ROCPROFSYS_AINIC_STAT_ENABLED", _h,
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_AINIC", _h,
                                                update_mode::REPLACE, ":", updated_envs,
                                                original_envs);
         });

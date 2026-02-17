@@ -502,7 +502,7 @@ configure_settings(bool _init)
                               "user time, and kernel time",
                               false, "process_sampling");
 
-    ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_AINIC_STAT_ENABLED",
+    ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_USE_AINIC",
                               "Enable tracking for AI NIC metrics", false,
                               "process_sampling");
 
@@ -1243,7 +1243,7 @@ configure_mode_settings(const std::shared_ptr<settings>& _config)
         _set("ROCPROFSYS_USE_PROCESS_SAMPLING", false);
         _set("ROCPROFSYS_USE_CODE_COVERAGE", false);
         _set("ROCPROFSYS_CPU_FREQ_ENABLED", false);
-        _set("ROCPROFSYS_AINIC_STAT_ENABLED", false);
+        _set("ROCPROFSYS_USE_AINIC", false);
         set_setting_value("ROCPROFSYS_TIMEMORY_COMPONENTS", std::string{});
         set_setting_value("ROCPROFSYS_PAPI_EVENTS", std::string{});
     }
