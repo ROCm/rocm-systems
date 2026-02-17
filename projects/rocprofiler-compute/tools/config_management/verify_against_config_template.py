@@ -110,6 +110,7 @@ def load_template(
 
     panels: list[TemplatePanel] = []
     by_id: dict[int, TemplatePanel] = {}
+    latest_only_by_id: dict[int, bool] = {}
 
     for idx, p in enumerate(panels_raw):
         if not isinstance(p, dict):
@@ -130,7 +131,6 @@ def load_template(
         if not isinstance(ds_list, list):
             raise ValueError(f"Template panels[{idx}].data_sources must be list")
 
-        latest_only_by_id: dict[int, bool] = {}
         latest_only_by_id[pid] = bool(p.get("latest_only", False))
 
         ds_out: list[TemplateDataSource] = []
