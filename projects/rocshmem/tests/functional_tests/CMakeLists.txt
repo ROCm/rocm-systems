@@ -70,6 +70,66 @@ target_sources(
 )
 
 ###############################################################################
+# Compile test kernel to HSACO for hipmodule_init test
+###############################################################################
+# Get GPU architectures - use a simplified list for HSACO generation
+set(HSACO_GPU_TARGETS "gfx90a" "gfx942" "gfx950" "gfx1100")
+
+# Compile test_kernel.hip to HSACO for each GPU target
+foreach(GPU_TARGET ${HSACO_GPU_TARGETS})
+  # Create safe filename by replacing special chars
+  string(REPLACE ":" "_" SAFE_GPU_TARGET "${GPU_TARGET}")
+  set(HSACO_TARGET "${CMAKE_CURRENT_BINARY_DIR}/test_kernel_${SAFE_GPU_TARGET}.hsaco")
+
+  # Intermediate bitcode file
+  set(BC_FILE "${CMAKE_CURRENT_BINARY_DIR}/test_kernel_${SAFE_GPU_TARGET}.bc")
+  set(OBJ_FILE "${CMAKE_CURRENT_BINARY_DIR}/test_kernel_${SAFE_GPU_TARGET}.o")
+
+  add_custom_command(
+    OUTPUT ${BC_FILE}
+    COMMAND ${ROCM_PATH}/lib/llvm/bin/clang++
+      -x hip --cuda-device-only -std=c++17 -emit-llvm
+      --offload-arch=${GPU_TARGET}
+      -I${CMAKE_SOURCE_DIR}/include
+      -I${CMAKE_BINARY_DIR}/include
+      -I${CMAKE_SOURCE_DIR}/src
+      -c ${CMAKE_CURRENT_SOURCE_DIR}/test_kernel.hip
+      -o ${BC_FILE}
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/test_kernel.hip
+    COMMENT "Compiling test_kernel.hip to bitcode for ${GPU_TARGET}"
+    VERBATIM
+  )
+
+  add_custom_command(
+    OUTPUT ${OBJ_FILE}
+    COMMAND ${ROCM_PATH}/lib/llvm/bin/llc
+      -march=amdgcn -mcpu=${GPU_TARGET} -filetype=obj
+      ${BC_FILE} -o ${OBJ_FILE}
+    DEPENDS ${BC_FILE}
+    COMMENT "Compiling bitcode to object file for ${GPU_TARGET}"
+    VERBATIM
+  )
+
+  add_custom_command(
+    OUTPUT ${HSACO_TARGET}
+    COMMAND ${ROCM_PATH}/lib/llvm/bin/ld.lld
+      -shared ${OBJ_FILE} -o ${HSACO_TARGET}
+    DEPENDS ${OBJ_FILE}
+    COMMENT "Linking object file to HSACO for ${GPU_TARGET}"
+    VERBATIM
+  )
+  list(APPEND TEST_KERNEL_HSACOS ${HSACO_TARGET})
+endforeach()
+
+# Add custom target to build all HSACOs
+add_custom_target(test_kernels_hsaco ALL DEPENDS ${TEST_KERNEL_HSACOS})
+
+# Install HSACO files
+install(FILES ${TEST_KERNEL_HSACOS}
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/rocshmem/test_kernels
+        COMPONENT tests)
+
+###############################################################################
 # ROCSHMEM
 ###############################################################################
 if (BUILD_TESTS_ONLY)
@@ -89,12 +149,16 @@ endif()
 
 find_package(PMIx)
 
+# Option to use pre-compiled HSACO instead of HIPRTC
+option(USE_PRECOMPILED_HSACO "Use pre-compiled HSACO for hipmodule_init test instead of HIPRTC" OFF)
+
 target_compile_definitions(
   ${PROJECT_NAME}
   PRIVATE
     $<$<TARGET_EXISTS:PMIx::pmix>:HAVE_PMIX=1>
     CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
     CMAKE_BINARY_DIR="${CMAKE_BINARY_DIR}"
+    $<$<BOOL:${USE_PRECOMPILED_HSACO}>:USE_PRECOMPILED_HSACO>
 )
 
 configure_file(../../scripts/functional_tests/driver.sh rocshmem_functional_driver.sh COPYONLY)
@@ -107,5 +171,5 @@ target_link_libraries(
     roc::rocshmem
     $<TARGET_NAME_IF_EXISTS:MPI::MPI_CXX>
     $<TARGET_NAME_IF_EXISTS:PMIx::pmix>
-    hiprtc
+    $<IF:$<BOOL:${USE_PRECOMPILED_HSACO}>,,hiprtc>
 )

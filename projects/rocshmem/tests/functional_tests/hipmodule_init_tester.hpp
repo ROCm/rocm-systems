@@ -52,6 +52,7 @@ class HipModuleInitTester : public Tester {
   hipModule_t test_module;
   hipFunction_t kernel_func;
   int *device_result;
+  int *shmem_buf;  // Symmetric memory buffer for rocshmem operations
 };
 
 #include "hipmodule_init_tester.cpp"
