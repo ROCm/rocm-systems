@@ -31,8 +31,8 @@
       while (__hip_atomic_load((BARRIERS_PTR), __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_WORKGROUP) < (BARRIER_NEXT)) { \
         spins++; \
         if (spins == NCCL_SPINS_BEFORE_CHECK_ABORT) { \
-          if (__atomic_load_n((ncclShmem)->comm.abortFlag, __ATOMIC_SEQ_CST)) { \
-            (ncclShmem)->aborted = 1; \
+          if (__atomic_load_n((ncclShmem).comm.abortFlag, __ATOMIC_SEQ_CST)) { \
+            (ncclShmem).aborted = 1; \
             break; \
           } \
           spins = 0; \
@@ -65,8 +65,8 @@ struct ProtoSimple {
   static constexpr int MultimemDsts = MultimemDsts_1;
 
   // Data bytes (no flags etc) in one step of the fifo queue.
-  __device__ static int calcBytePerStep(struct ncclShmemData* ncclShmem) {
-    return ncclShmem->comm.buffSizes[NCCL_PROTO_SIMPLE]/NCCL_STEPS;
+  __device__ static int calcBytePerStep(struct ncclShmemData& ncclShmem) {
+    return ncclShmem.comm.buffSizes[NCCL_PROTO_SIMPLE]/NCCL_STEPS;
   }
   // Granularity of data bytes transferred per thread.
   __device__ static int calcBytePerGrain() {
@@ -80,8 +80,8 @@ struct ProtoLL {
   static constexpr int Id = NCCL_PROTO_LL;
 
   // Data bytes (no flags etc) in one step of the fifo queue.
-  __device__ static int calcBytePerStep(struct ncclShmemData* ncclShmem) {
-    return ncclShmem->comm.buffSizes[NCCL_PROTO_LL]/NCCL_STEPS/2; // Half is data
+  __device__ static int calcBytePerStep(struct ncclShmemData& ncclShmem) {
+    return ncclShmem.comm.buffSizes[NCCL_PROTO_LL]/NCCL_STEPS/2; // Half is data
   }
   // Granularity of data bytes transferred per thread.
   __device__ static int calcBytePerGrain() {
@@ -95,8 +95,8 @@ struct ProtoLL128 {
   static constexpr int Id = NCCL_PROTO_LL128;
 
   // Data bytes (no flags etc) in one step of the fifo queue.
-  __device__ static int calcBytePerStep(struct ncclShmemData* ncclShmem) {
-    return (ncclShmem->comm.buffSizes[NCCL_PROTO_LL128]/NCCL_STEPS)*NCCL_LL128_DATAELEMS/NCCL_LL128_LINEELEMS;
+  __device__ static int calcBytePerStep(struct ncclShmemData& ncclShmem) {
+    return (ncclShmem.comm.buffSizes[NCCL_PROTO_LL128]/NCCL_STEPS)*NCCL_LL128_DATAELEMS/NCCL_LL128_LINEELEMS;
   }
   // Granularity of data bytes transferred per thread.
   __device__ static int calcBytePerGrain() {
@@ -173,13 +173,13 @@ struct PrimitivesWithoutDirect {
   }
 };
 
-__device__ inline int checkAbort(int &abortCache, const int abortValue, int &spins, struct ncclShmemData* ncclShmem) {
+__device__ inline int checkAbort(int &abortCache, const int abortValue, int &spins, struct ncclShmemData& ncclShmem) {
   if (abortCache & abortValue) return 1;
   if (++spins < NCCL_SPINS_BEFORE_CHECK_ABORT) return 0;
   spins = 0;
-  int abort = __atomic_load_n((ncclShmem->comm.abortFlag), __ATOMIC_SEQ_CST);
+  int abort = __atomic_load_n((ncclShmem.comm.abortFlag), __ATOMIC_SEQ_CST);
   if (abort) {
-    __atomic_store_n(&ncclShmem->aborted, abort, __ATOMIC_SEQ_CST);
+    __atomic_store_n(&ncclShmem.aborted, abort, __ATOMIC_SEQ_CST);
     abortCache |= abortValue;
   }
   return abort;

@@ -31,24 +31,24 @@ inline __device__ void load64gpu(const uint64_t* ptr, uint64_t &v) {
 #define DATA_LOAD_SIZE 16
 
 // Map internal association of handle with group and peer index (called once at init time)
-inline __device__ void ncclNetDeviceUnpackSetup(void* ohandle, const int group, const int index, struct ncclShmemData* ncclShmem) {
+inline __device__ void ncclNetDeviceUnpackSetup(void* ohandle, const int group, const int index, ncclShmemData& ncclShmem) {
   struct unpackNetDeviceHandle* handle = (struct unpackNetDeviceHandle*) ohandle;
   // coverity[index_parm:FALSE]
-  ncclShmem->groups[group].devicePlugin.unpack.g_meta[index] = handle->meta;
-  ncclShmem->devicePlugin.unpack.bounce_buf = handle->bounce_buf;
+  ncclShmem.groups[group].devicePlugin.unpack.g_meta[index] = handle->meta;
+  ncclShmem.devicePlugin.unpack.bounce_buf = handle->bounce_buf;
   // coverity[index_parm:FALSE]
-  ncclShmem->groups[group].devicePlugin.unpack.head[index] = handle->head;
+  ncclShmem.groups[group].devicePlugin.unpack.head[index] = handle->head;
 }
 
-inline __device__ void ncclNetDeviceIncrementHead(const int group, const int index, struct ncclShmemData* ncclShmem) {
+inline __device__ void ncclNetDeviceIncrementHead(const int group, const int index, ncclShmemData& ncclShmem) {
   // coverity[index_parm:FALSE]
-  ncclShmem->groups[group].devicePlugin.unpack.head[index]++;
+  ncclShmem.groups[group].devicePlugin.unpack.head[index]++;
 }
 
-inline __device__ void ncclNetDeviceSaveHead(void* ohandle, const int group, const int index, struct ncclShmemData* ncclShmem) {
+inline __device__ void ncclNetDeviceSaveHead(void* ohandle, const int group, const int index, ncclShmemData& ncclShmem) {
   struct unpackNetDeviceHandle* handle = (struct unpackNetDeviceHandle*) ohandle;
   // coverity[index_parm:FALSE]
-  handle->head = ncclShmem->groups[group].devicePlugin.unpack.head[index];
+  handle->head = ncclShmem.groups[group].devicePlugin.unpack.head[index];
 }
 
 template <uint8_t sz>
@@ -164,21 +164,21 @@ inline __device__ int ppw(const int nbytes, int nw) {
 // threads
 template <int Recv>
 inline __device__ void ncclNetDeviceUnpack(
-    const int tid, const int tidInBlock, const int nworkers, const int group, int mask, int Src, int workSize, struct ncclShmemData* ncclShmem, void* ncclShmemPerWarp);
+    const int tid, const int tidInBlock, const int nworkers, const int group, int mask, int Src, int workSize, ncclShmemData& ncclShmem, void* ncclShmemPerWarp);
 
 template <>
 inline __device__ void ncclNetDeviceUnpack</*Recv=*/0>(
-    const int tid, const int tidInBlock, const int nworkers, const int group, int mask, int Src, int workSize, struct ncclShmemData* ncclShmem, void* ncclShmemPerWarp) {
+    const int tid, const int tidInBlock, const int nworkers, const int group, int mask, int Src, int workSize, ncclShmemData& ncclShmem, void* ncclShmemPerWarp) {
   // send unpack empty
 }
 
 inline __device__ void ncclNetDeviceUnpackInner(
     const int tid, const int tidInBlock, const int nworkers, const int group, const int index,
-    void *src, const int nbytes, const uint64_t step, struct ncclShmemData* ncclShmem, void* ncclShmemPerWarp);
+    void *src, const int nbytes, const uint64_t step, ncclShmemData& ncclShmem, void* ncclShmemPerWarp);
 
 template <>
 inline __device__ void ncclNetDeviceUnpack</*Recv=*/1>(
-    const int tid, const int tidInBlock, const int nworkers, const int group, int mask, int Src, int workSize, struct ncclShmemData* ncclShmem, void* ncclShmemPerWarp) {
+    const int tid, const int tidInBlock, const int nworkers, const int group, int mask, int Src, int workSize, ncclShmemData& ncclShmem, void* ncclShmemPerWarp) {
 
   while (mask != 0) {
     int ix = __ffs(mask)-1; // Get the first set bit of the mask (this should correlate to a peer index)
@@ -187,13 +187,13 @@ inline __device__ void ncclNetDeviceUnpack</*Recv=*/1>(
     // Pack data from the internal iovec to the supplied flat srcs buffer using all the threads
     // + Src is necessary in the case of accessing the user buffer directly
     ncclNetDeviceUnpackInner(tid, tidInBlock, nworkers, group /* in case they need to use split warps shared memory partitioning*/,
-      ix, ncclShmem->groups[group].srcs[ix + Src], workSize, ncclShmem->groups[group].devicePlugin.unpack.head[ix], ncclShmem, ncclShmemPerWarp);
+      ix, ncclShmem.groups[group].srcs[ix + Src], workSize, ncclShmem.groups[group].devicePlugin.unpack.head[ix], ncclShmem, ncclShmemPerWarp);
   }
 }
 
 inline __device__ void ncclNetDeviceUnpackInner(
     const int tid, const int tidInBlock, const int nworkers, const int group, const int index,
-    void *src, const int nbytes, const uint64_t step, struct ncclShmemData* ncclShmem, void* ncclShmemPerWarp) {
+    void *src, const int nbytes, const uint64_t step, ncclShmemData& ncclShmem, void* ncclShmemPerWarp) {
   // from src/collectives/device/common_kernel.h
   const int w = tid / WARP_SIZE;        // Warp number
   const int nw = nworkers / WARP_SIZE;  // Number of warps
@@ -212,8 +212,8 @@ inline __device__ void ncclNetDeviceUnpackInner(
 
   // hack head use per-warp
   head          = step;
-  g_meta_struct = ncclShmem->groups[group].devicePlugin.unpack.g_meta[index];
-  bounce_buf    = ncclShmem->devicePlugin.unpack.bounce_buf;
+  g_meta_struct = ncclShmem.groups[group].devicePlugin.unpack.g_meta[index];
+  bounce_buf    = ncclShmem.devicePlugin.unpack.bounce_buf;
 
   __syncwarp();
 
