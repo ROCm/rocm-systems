@@ -746,7 +746,7 @@ mfma_bf16_src = """
 using f32_16vec = __attribute__((__vector_size__(16 * sizeof(float)))) float;
 using bf16_8vec = __attribute__((__vector_size__(8 * sizeof(short)))) short;
 using bf16_4vec = __attribute__((__vector_size__(4 * sizeof(short))))  short;
-using bf16_2vec = __attribute__((__vector_size__(1 * sizeof(short))))  short;
+using bf16_2vec = __attribute__((__vector_size__(2 * sizeof(short))))  short;
 
 extern "C" __global__ void mfma_bf16(int iter, float *dummy)
 {
@@ -786,7 +786,7 @@ extern "C" __global__ void mfma_bf16(int iter, float *dummy)
     // Input: 8 BF16 registers
     bf16_8vec a;
     a[0] = threadIdx.x;
-    
+
     for(int i = 0; i < iter / 4; ++i)
     {
         result = __builtin_amdgcn_mfma_f32_32x32x16_bf16(a, a, result, 0, 0, 0);
@@ -866,7 +866,7 @@ extern "C" __global__ void mfma_i8(int iter, float *dummy)
 #elif defined(__gfx950__)
     int32_4vec a;
     a[0] = a[1] = threadIdx.x;
-    
+
     for(int i = 0; i < iter / 4; ++i)
     {
         result = __builtin_amdgcn_mfma_i32_32x32x32_i8(a, a, result, 0, 0, 0);
