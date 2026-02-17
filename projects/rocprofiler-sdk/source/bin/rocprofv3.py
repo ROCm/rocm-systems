@@ -1319,14 +1319,17 @@ def run(app_args, args, **kwargs):
             "both --mpi-world-rank-var and --mpi-world-size-var must be specified"
         )
 
-    # Set MPI_RANK and MPI_SIZE environment variables for use by the C++ code
+    # Set CUSTOM_MPI_RANK and CUSTOM_MPI_SIZE environment variables for use by the C++ code
     # These variables are used for %rank% and %size% expansion in output paths
     # Use get_mpi_rank_and_size to ensure rank and size come from the same source
+    # This normalizes all MPI implementations (OpenMPI, MVAPICH2, SLURM, custom, etc.)
+    # into CUSTOM_MPI_RANK and CUSTOM_MPI_SIZE that the C++ code can reliably use
+    # These custom variable names avoid conflicts with MPI implementation-specific variables
     mpi_rank, mpi_size = get_mpi_rank_and_size(custom_rank_env, custom_size_env)
     if mpi_rank is not None:
-        app_env["MPI_RANK"] = str(mpi_rank)
+        app_env["CUSTOM_MPI_RANK"] = str(mpi_rank)
     if mpi_size is not None:
-        app_env["MPI_SIZE"] = str(mpi_size)
+        app_env["CUSTOM_MPI_SIZE"] = str(mpi_size)
 
     # Check if this MPI rank should provide profile/trace output
     # If not, run the application without profiling instrumentation

@@ -174,24 +174,32 @@ get_variable_env(Tp _default_v, std::initializer_list<std::string_view>&& _optio
 int
 get_mpi_size()
 {
-    static int _v = get_variable_env<int>(0,
-                                          {"MPI_SIZE",  // most generic to most runtime-specific
-                                           "MPI_LOCALNRANKS",
-                                           "MPI_NRANKS",
-                                           "MV2_COMM_WORLD_SIZE",
-                                           "OMPI_COMM_WORLD_SIZE"});
+    static int _v = get_variable_env<int>(
+        0,
+        {"MPI_SIZE",  // most generic to most runtime-specific
+         "MPI_LOCALNRANKS",
+         "MPI_NRANKS",
+         "MV2_COMM_WORLD_SIZE",
+         "OMPI_COMM_WORLD_SIZE",
+         "CUSTOM_MPI_SIZE"});  // Custom variable set by rocprofv3.py (normalized from all MPI
+                               // implementations and custom env vars) - MUST be last to have
+                               // highest priority
     return _v;
 }
 
 int
 get_mpi_rank()
 {
-    static int _v = get_variable_env<int>(0,
-                                          {"MPI_RANK",  // most generic to most runtime-specific
-                                           "MPI_LOCALRANKID",
-                                           "MPI_RANKID",
-                                           "MV2_COMM_WORLD_RANK",
-                                           "OMPI_COMM_WORLD_RANK"});
+    static int _v = get_variable_env<int>(
+        0,
+        {"MPI_RANK",  // most generic to most runtime-specific
+         "MPI_LOCALRANKID",
+         "MPI_RANKID",
+         "MV2_COMM_WORLD_RANK",
+         "OMPI_COMM_WORLD_RANK",
+         "CUSTOM_MPI_RANK"});  // Custom variable set by rocprofv3.py (normalized from all MPI
+                               // implementations and custom env vars) - MUST be last to have
+                               // highest priority
     return _v;
 }
 

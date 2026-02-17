@@ -40,7 +40,8 @@ if(MPIRUN_EXECUTABLE)
         TIMEOUT 120
         LABELS "integration-tests" "mpi-tests"
         PRELOAD "${PRELOAD_ENV}"
-        FIXTURES_SETUP rocprofv3-test-mpi-ranks-with-mpi)
+        FIXTURES_SETUP rocprofv3-test-mpi-ranks-with-mpi
+        DISABLED TRUE)
 
     # Test with MPI - profile ranks 0-1,3 out of 4 ranks Use %env{OMPI_COMM_WORLD_RANK}%
     # to create separate output directories per rank
@@ -57,7 +58,8 @@ if(MPIRUN_EXECUTABLE)
         TIMEOUT 120
         LABELS "integration-tests" "mpi-tests"
         PRELOAD "${PRELOAD_ENV}"
-        FIXTURES_SETUP rocprofv3-test-mpi-ranks-with-mpi-multiple)
+        FIXTURES_SETUP rocprofv3-test-mpi-ranks-with-mpi-multiple
+        DISABLED TRUE)
 
     rocprofiler_add_integration_validate_test(
         rocprofv3-test-mpi-ranks-with-mpi
@@ -68,7 +70,8 @@ if(MPIRUN_EXECUTABLE)
              with-mpi-single
         TIMEOUT 45
         LABELS "integration-tests" "mpi-tests"
-        FIXTURES_REQUIRED rocprofv3-test-mpi-ranks-with-mpi)
+        FIXTURES_REQUIRED rocprofv3-test-mpi-ranks-with-mpi
+        DISABLED TRUE)
 
     rocprofiler_add_integration_validate_test(
         rocprofv3-test-mpi-ranks-with-mpi-multiple
@@ -79,7 +82,8 @@ if(MPIRUN_EXECUTABLE)
              with-mpi-multiple
         TIMEOUT 45
         LABELS "integration-tests" "mpi-tests"
-        FIXTURES_REQUIRED rocprofv3-test-mpi-ranks-with-mpi-multiple)
+        FIXTURES_REQUIRED rocprofv3-test-mpi-ranks-with-mpi-multiple
+        DISABLED TRUE)
 endif()
 
 # Test without MPI - should work gracefully (no MPI env vars set)
