@@ -50,55 +50,96 @@ const std::string GetVoltSensorNameStr(amdsmi_voltage_type_t st);
 void DumpMonitorInfo(const TestBase* test);
 #endif
 
-#define DISPLAY_AMDSMI_API(FUNC_NAME, STR) { \
-  std::cout << "\t### " << (FUNC_NAME) << "(" << (STR) << ")" << std::endl; \
-}
 static amdsmi_status_t NotSupportedErrorCodes[] = {
     AMDSMI_STATUS_NOT_SUPPORTED,
     AMDSMI_STATUS_NOT_YET_IMPLEMENTED,
     AMDSMI_STATUS_NO_HSMP_MSG_SUP
 };
-#define DISPLAY_AMDSMI_STATUS(RET, ...) { \
-  amdsmi_status_t retExpected[] = {__VA_ARGS__}; \
-  int numRetExpected = sizeof(retExpected) / sizeof(retExpected[0]); \
-  amdsmi_status_t RET_EXPECTED = retExpected[0]; \
-  int i; \
-  for (i=0; i<numRetExpected; ++i) if ((RET) == retExpected[i]) break; \
-  if (i < numRetExpected) RET_EXPECTED = (RET); \
-  if ((RET) != RET_EXPECTED) { \
-    const char *_err; \
-    std::string err_str; \
-    size_t pos; \
-    amdsmi_status_code_to_string((RET), &_err); \
-    err_str = std::string(_err); \
-    std::string status_str = !err_str.empty() ? err_str : "Unknown"; \
-    pos = status_str.find(":"); \
-    if (pos != std::string::npos) status_str = status_str.substr(0, pos); \
-    amdsmi_status_code_to_string(RET_EXPECTED, &_err); \
-    err_str = std::string(_err); \
-    std::string status_expected_str = !err_str.empty() ? err_str : "Unknown"; \
-    pos = status_expected_str.find(":"); \
-    if (pos != std::string::npos) status_expected_str = status_expected_str.substr(0, pos); \
-    int numNotSupportedErrorCodes = sizeof(NotSupportedErrorCodes) / sizeof(NotSupportedErrorCodes[0]); \
-    for (i=0; i<numNotSupportedErrorCodes ; ++i) if ((RET) == NotSupportedErrorCodes[i]) break; \
-    if (i < numNotSupportedErrorCodes) { \
-      std::cout << "\t===> AMDSMI API Returned " << (RET) << ", " << status_str << std::endl; \
-    } else { \
-      std::string start_dir = std::string(__FILE__); \
-      pos = start_dir.find("tests/amd_smi_test"); \
-      if (pos != std::string::npos) start_dir = start_dir.substr(pos); \
-      std::cout << "\t===> TEST FAILURE." << std::endl; \
-      std::cout << "\t===> ERROR: AMDSMI API Returned " << std::setfill(' ') << std::setw(2) << (RET) << ", " << status_str << std::endl; \
-      if (numRetExpected == 1) \
-      std::cout << "\t===>                   Expected " << std::setfill(' ') << std::setw(2) << RET_EXPECTED << ", " << status_expected_str << std::endl; \
-      else { \
-        std::cout << "\t===>                   Expected One of"; \
-        for (int i=0; i<numRetExpected; ++i) std::cout << " " << retExpected[i]; \
-        std::cout << std::endl; \
-      } \
-      std::cout << "\t===> " << start_dir << ":" << std::dec << __LINE__ << std::endl; \
-    } \
-  } \
+
+inline void DISPLAY_AMDSMI_API(std::string func_name, std::string desc) {
+    std::cout << "\t### " << (func_name) << "(" << (desc) << ")" << std::endl;
+    return;
+}
+
+inline std::string GetErrorCode(amdsmi_status_t returnCode) {
+    size_t pos;
+    const char *_err;
+    std::string err_str;
+
+    // Gets error code with code description
+    amdsmi_status_code_to_string(returnCode, &_err);
+    err_str = std::string(_err);
+    std::string status = !err_str.empty() ? err_str : "Unknown";
+
+    // Just want error code, remove error code description
+    pos = status.find(":");
+    if (pos != std::string::npos)
+        status = status.substr(0, pos);
+
+    return (status);
+}
+
+template<typename T, typename... Args>
+inline void DISPLAY_AMDSMI_STATUS(T returnCode, Args... args) {
+    // Input:
+    //     RET: API return code
+    //     ...: Expected API return code(s)
+    // Output:
+    //     print results
+
+    int i;
+    amdsmi_status_t retExpected[] = {args...};
+    int numRetExpected = sizeof(retExpected) / sizeof(retExpected[0]);
+
+    std::string status = GetErrorCode(returnCode);
+    amdsmi_status_t retExpectedStr = retExpected[0];
+
+    // Check for successful (expected) return code
+    for (i=0; i<numRetExpected; ++i) {
+        if (returnCode == retExpected[i]) {
+            std::cout << "\t===> TEST SUCCESS, AMDSMI API Returned " << returnCode << ", " << status << std::endl;
+            return;
+        }
+    }
+
+    //
+    // Return code is not what was expected
+    // Find and report error code
+    //
+
+    // Check if return code is in the not supported list
+    int numNotSupportedErrorCodes = sizeof(NotSupportedErrorCodes) / sizeof(NotSupportedErrorCodes[0]);
+    for (i=0; i<numNotSupportedErrorCodes ; ++i) {
+        if (returnCode == NotSupportedErrorCodes[i]) {
+            std::cout << "\t===> TEST SUCCESS, AMDSMI API Returned " << returnCode << ", " << status << std::endl;
+            return;
+        }
+    }
+
+    //
+    // Return code is not successful, print failure results
+    //
+    std::cout << "\t===> TEST FAILURE, AMDSMI API Returned " << std::setfill(' ') << std::setw(2) << returnCode << ", " << status << std::endl;
+    std::cout << "\t===>                          Expected ";
+    if (numRetExpected == 1) {
+        std::string expectedStatus = GetErrorCode(retExpectedStr);
+        std::cout << std::setfill(' ') << std::setw(2) << retExpectedStr << ", " << expectedStatus << std::endl;
+    }
+    else {
+        std::cout << "One of";
+        for (int i=0; i<numRetExpected; ++i)
+            std::cout << " " << retExpected[i];
+        std::cout << std::endl;
+    }
+    // Display file path starting from root directory
+    std::string start_dir = std::string(__FILE__);
+    int pos = start_dir.find("tests/amd_smi_test");
+    if (pos != std::string::npos)
+        start_dir = start_dir.substr(pos);
+    std::cout << "\t===> " << start_dir << ":" << std::dec << __LINE__ << std::endl;
+
+    return;
 }
 
 #endif  // TESTS_AMD_SMI_TEST_TEST_COMMON_H_
+
