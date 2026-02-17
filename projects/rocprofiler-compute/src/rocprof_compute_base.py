@@ -159,23 +159,20 @@ class RocProfCompute:
             console_error("Cannot use --list-available-metrics with --blocks")
 
         # fallback to csv output format, if rocpd public api not available
-        rocpd_path = resolve_rocm_library_path(
-            str(
-                Path(self.__args.rocprofiler_sdk_tool_path).parents[1]
-                / "librocprofiler-sdk-rocpd.so"
+        if self.__mode == "profile" and self.__args.format_rocprof_output == "rocpd":
+            rocpd_path = resolve_rocm_library_path(
+                str(
+                    Path(self.__args.rocprofiler_sdk_tool_path).parents[1]
+                    / "librocprofiler-sdk-rocpd.so"
+                )
             )
-        )
-        if (
-            self.__mode == "profile"
-            and self.__args.format_rocprof_output == "rocpd"
-            and not Path(rocpd_path).exists()
-        ):
-            console_warning(
-                "rocpd output format is not supported with the "
-                "current rocprofiler-sdk version. "
-                "Falling back to csv output format."
-            )
-            self.__args.format_rocprof_output = "csv"
+            if not Path(rocpd_path).exists():
+                console_warning(
+                    "rocpd output format is not supported with the "
+                    "current rocprofiler-sdk version. "
+                    "Falling back to csv output format."
+                )
+                self.__args.format_rocprof_output = "csv"
 
         # Validate name and output directory arguments in profiling mode
         # Skip validation if only listing metrics or sets
