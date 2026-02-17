@@ -70,9 +70,29 @@
 - changed-files:
   - any-glob-to-any-file: 'projects/rocr-runtime/**/*'
 
+"project: rocshmem":
+- changed-files:
+  - any-glob-to-any-file: 'projects/rocshmem/**/*'
+
 "project: roctracer":
 - changed-files:
   - any-glob-to-any-file: 'projects/roctracer/**/*'
+
+"project: rocjpeg":
+- changed-files:
+  - any-glob-to-any-file: 'projects/rocjpeg/**/*'
+
+"project: rocdecode":
+- changed-files:
+  - any-glob-to-any-file: 'projects/rocdecode/**/*'
+
+"project: rocr-debug-agent":
+- changed-files:
+  - any-glob-to-any-file: 'projects/rocr-debug-agent/**/*'
+
+"project: rocdbgapi":
+- changed-files:
+  - any-glob-to-any-file: 'projects/rocdbgapi/**/*'
 
 "shared: amdgpu-windows-interop":
 - changed-files:

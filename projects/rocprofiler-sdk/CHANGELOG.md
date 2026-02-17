@@ -242,7 +242,7 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 ## ROCprofiler-SDK 1.1.0 for ROCm release 7.2
 
 ### Added
-- Counter collection support for `gfx1150` and `gfx1151` (Strix Halo).
+- Counter collection support for `gfx1150` and `gfx1151`.
 - HSA Extension API v8 support.
 - `hipStreamCopyAttributes` API implementation.
 
