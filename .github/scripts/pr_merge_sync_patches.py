@@ -237,51 +237,38 @@ def generate_patch(
             f"No commits between {base_sha} and {merge_sha} for prefix '{prefix}', skipping"
         )
         return None
-    elif commit_count_int == 1:
-        # Single commit (squash merge), use existing approach
-        args = [
-            "format-patch",
-            "-1",
-            merge_sha,
-            f"--relative={prefix}",
-            "--output",
-            str(patch_path),
-        ]
-        _run_git(args)
-        logger.debug(
-            f"Generated single patch for prefix '{prefix}' at {patch_path} (squash merge)"
-        )
-        return [patch_path]
-    else:
-        # Multiple commits (rebase merge), generate separate patches
-        patch_dir = patch_path.parent
-        patch_stem = patch_path.stem
-        # Use format-patch with range to generate multiple patches
-        # Output will be numbered: 0001-<subject>.patch, 0002-<subject>.patch, etc.
-        args = [
-            "format-patch",
-            f"{base_sha}..{merge_sha}",
-            f"--relative={prefix}",
-            "--output-directory",
-            str(patch_dir),
-        ]
-        _run_git(args)
 
-        # Find all generated patch files (they'll be numbered)
-        patch_files = sorted(patch_dir.glob("*.patch"))
-        if not patch_files:
-            logger.error(
-                f"No patch files generated for range {base_sha}..{merge_sha} with prefix '{prefix}'"
-            )
-            raise RuntimeError(
-                f"Expected {commit_count_int} patch files but none were generated. "
-                f"This may indicate an issue with the commit range or prefix filter."
-            )
+    # Generate patches for all commits in the range (works for both single and multiple commits)
+    patch_dir = patch_path.parent
+    # Use format-patch with range to generate patches
+    # Output will be numbered: 0001-<subject>.patch, 0002-<subject>.patch, etc.
+    args = [
+        "format-patch",
+        f"{base_sha}..{merge_sha}",
+        f"--relative={prefix}",
+        "--output-directory",
+        str(patch_dir),
+    ]
+    _run_git(args)
 
-        logger.debug(
-            f"Generated {len(patch_files)} patch files for prefix '{prefix}' (rebase merge with {commit_count_int} commits)"
+    # Find all generated patch files (they'll be numbered)
+    # Note: With --relative, git only generates patches for commits that modify files
+    # within the prefix, so patch_files count may be less than commit_count_int
+    patch_files = sorted(patch_dir.glob("*.patch"))
+    if not patch_files:
+        logger.error(
+            f"No patch files generated for range {base_sha}..{merge_sha} with prefix '{prefix}'"
         )
-        return patch_files
+        raise RuntimeError(
+            f"No patch files were generated for range {base_sha}..{merge_sha} with prefix '{prefix}'. "
+            f"This is expected if none of the {commit_count_int} commits in this range modified files within this subtree, "
+            f"but may also indicate an issue with the commit range or prefix filter."
+        )
+
+    logger.debug(
+        f"Generated {len(patch_files)} patch file(s) for prefix '{prefix}' ({commit_count_int} commit(s) in range)"
+    )
+    return patch_files
 
 
 def resolve_patch_author(
