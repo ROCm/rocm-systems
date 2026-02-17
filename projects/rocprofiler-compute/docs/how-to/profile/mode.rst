@@ -793,6 +793,13 @@ When enabled, this feature instruments your PyTorch application to correlate GPU
 kernel executions with their originating PyTorch operators, providing insights into
 which operators contribute to specific performance counter values.
 
+.. important::
+
+   Torch trace is an **experimental** feature. You must pass ``--experimental`` to
+   both **profile** and **analyze** when using torch-trace-related options
+   (``--torch-trace`` for profile; ``--list-torch-operators`` and ``--torch-operator``
+   for analyze).
+
 .. note::
 
    **PyTorch Operators vs GPU Kernels**: PyTorch operators (such as ``conv2d``,
@@ -812,12 +819,12 @@ Requirements
 Usage
 -----
 
-To enable Torch operator mapping, use the ``--torch-trace`` option when profiling
-a PyTorch workload:
+To enable Torch operator mapping, use ``--experimental`` with the ``--torch-trace``
+option when profiling a PyTorch workload:
 
 .. code-block:: shell-session
 
-   $ rocprof-compute profile --name mnist_torch --torch-trace -- python train.py
+   $ rocprof-compute --experimental profile --name mnist_torch --torch-trace -- python train.py
 
                                     __                                       _
     _ __ ___   ___ _ __  _ __ ___  / _|       ___ ___  _ __ ___  _ __  _   _| |_ ___
@@ -921,6 +928,10 @@ Limitations
 
 .. note::
 
+   * Torch trace is experimental: use ``rocprof-compute --experimental profile ...
+     --torch-trace`` and ``rocprof-compute --experimental analyze ...`` with
+     ``--list-torch-operators`` or ``--torch-operator`` as needed.
+
    * The ``--torch-trace`` option requires the application to be a Python command
      or Python script.
 
@@ -966,24 +977,27 @@ Example with hierarchical naming:
             x = self.decoder(x)  # Captured as: nn.Module.MyModel.forward/nn.Module.Linear.forward
             return x
 
-**Analyzing captured operators**: After profiling, see :doc:`../analyze/cli` for 
-how to list and filter PyTorch operators in analyze mode.
+**Analyzing captured operators**: After profiling, use ``--experimental`` with
+analyze and see :doc:`../analyze/cli` for how to list and filter PyTorch operators
+(``--list-torch-operators``, ``--torch-operator``). Filtering accepts either the
+full hierarchical name or the last segment only (e.g. ``conv2d``).
 
 Combined with Other Options
 ----------------------------
 
-Torch operator mapping can be combined with other profiling options:
+Torch operator mapping can be combined with other profiling options. Use
+``--experimental`` with ``--torch-trace`` in all cases:
 
 .. code-block:: shell-session
 
    # Combine with block filtering for targeted counter collection
-   $ rocprof-compute profile --name mnist --torch-trace -b 11 12 -- python train.py
+   $ rocprof-compute --experimental profile --name mnist --torch-trace -b 11 12 -- python train.py
 
    # Combine with iteration multiplexing
-   $ rocprof-compute profile --name mnist --torch-trace --iteration-multiplexing kernel -- python train.py
+   $ rocprof-compute --experimental profile --name mnist --torch-trace --iteration-multiplexing kernel -- python train.py
 
    # Combine with kernel filtering (filters by GPU kernel name)
-   $ rocprof-compute profile --name mnist --torch-trace -k elementwise -- python train.py
+   $ rocprof-compute --experimental profile --name mnist --torch-trace -k elementwise -- python train.py
 
 .. _iteration-multiplexing:
 
