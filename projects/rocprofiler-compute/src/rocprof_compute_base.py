@@ -158,13 +158,15 @@ class RocProfCompute:
         ) and block:
             console_error("Cannot use --list-available-metrics with --blocks")
 
-        # fallback to csv output format, if rocpd public api not available
-        rocpd_path = resolve_rocm_library_path(
-            str(
-                Path(self.__args.rocprofiler_sdk_tool_path).parents[1]
-                / "librocprofiler-sdk-rocpd.so"
+        if hasattr(self.__args, "rocprofiler_sdk_tool_path"):
+            # fallback to csv output format, if rocpd public api not available
+            rocpd_path = resolve_rocm_library_path(
+                str(
+                    Path(self.__args.rocprofiler_sdk_tool_path).parents[1]
+                    / "librocprofiler-sdk-rocpd.so"
+                )
             )
-        )
+
         if (
             self.__mode == "profile"
             and self.__args.format_rocprof_output == "rocpd"
