@@ -735,7 +735,7 @@ memory_cache_t<AddressType>::xfer_global_memory (AddressType address,
 
   /* Clamp to the end of the global address space.  */
   if (address > (address + size))
-    size = AddressType{} - address;
+    size = AddressType{0} - address;
 
   auto first_line = utils::align_down (address, cache_line_size);
   auto last_line = utils::align_down (address + size - 1, cache_line_size);
