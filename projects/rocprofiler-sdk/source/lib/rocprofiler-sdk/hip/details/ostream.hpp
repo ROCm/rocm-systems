@@ -1065,6 +1065,13 @@ operator<<(std::ostream& out, const hipDeviceProp_tR0600& v)
             ::rocprofiler::hip::detail::operator<<(out, v.uuid);
             std::                       operator<<(out, ", ");
         }
+        if(std::string_view("hipDeviceProp_t::cuid").find(HIP_structs_regex) !=
+           std::string_view::npos)
+        {
+            std::                       operator<<(out, "cuid=");
+            ::rocprofiler::hip::detail::operator<<(out, v.cuid);
+            std::                       operator<<(out, ", ");
+        }
         if(std::string_view("hipDeviceProp_t::name").find(HIP_structs_regex) !=
            std::string_view::npos)
         {

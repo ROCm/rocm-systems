@@ -489,6 +489,25 @@ hipError_t hipDeviceGetUuid(hipUUID* uuid, hipDevice_t device) {
 }
 
 // ================================================================================================
+hipError_t hipDeviceGetCuid(hipUUID* cuid, hipDevice_t device) {
+  HIP_INIT_API(hipDeviceGetCuid, reinterpret_cast<void*>(cuid), device);
+
+  if (device < 0 || static_cast<size_t>(device) >= g_devices.size()) {
+    HIP_RETURN(hipErrorInvalidDevice);
+  }
+
+  if (cuid == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  auto* deviceHandle = g_devices[device]->devices()[0];
+  const auto& info = deviceHandle->info();
+  memcpy(cuid->bytes, info.cuid_, sizeof(info.cuid_));
+
+  HIP_RETURN(hipSuccess);
+}
+
+// ================================================================================================
 hipError_t ihipGetDeviceProperties(hipDeviceProp_tR0600* props, int device) {
   if (props == nullptr) {
     return hipErrorInvalidValue;
@@ -508,6 +527,7 @@ hipError_t ihipGetDeviceProperties(hipDeviceProp_tR0600* props, int device) {
   const auto& isa = deviceHandle->isa();
   ::strncpy(deviceProps.name, info.boardName_, sizeof(info.boardName_));
   memcpy(deviceProps.uuid.bytes, info.uuid_, sizeof(info.uuid_));
+  memcpy(deviceProps.cuid.bytes, info.cuid_, sizeof(info.cuid_));
   deviceProps.totalGlobalMem = info.globalMemSize_;
   deviceProps.sharedMemPerBlock = info.localMemSizePerCU_;
   deviceProps.sharedMemPerMultiprocessor = info.localMemSizePerCU_;

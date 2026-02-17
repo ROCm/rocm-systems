@@ -76,7 +76,19 @@ void init(bool* status) {
 
     tools_dispatch_table->__hipReportDevices_fn(device_count, uuids.data());
   }
+  if (tools_dispatch_table->__hipReportDevicesCuid_fn) {
+    std::vector<hipUUID> cuids;
+    cuids.reserve(device_count);
 
+    for (const auto* dev : g_devices) {
+      const auto& info = dev->devices()[0]->info();
+      static_assert(sizeof(info.cuid_) == sizeof(hipUUID::bytes), "CUID size mismatch");
+      cuids.emplace_back();
+      std::copy(std::begin(info.cuid_), std::end(info.cuid_), std::begin(cuids.back().bytes));
+    }
+
+    tools_dispatch_table->__hipReportDevicesCuid_fn(device_count, cuids.data());
+  }
   // Create and initialize host context
   host_context = new amd::Context(devices, amd::Context::Info());
   if (!host_context || CL_SUCCESS != host_context->create(nullptr)) {
