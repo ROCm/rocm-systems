@@ -484,6 +484,8 @@ class RocProfCompute:
 
         if self.__args.list_sets:
             self.list_sets()
+        elif self.__args.list_available_metrics:
+            self.list_metrics()
 
         # Replace parameters in output directory when either:
         # 1. --output-directory is explicitly given by user
@@ -559,6 +561,9 @@ class RocProfCompute:
             analyzer = db_analysis(self.__args, self.__supported_archs)
         else:
             console_error(f"Unsupported analysis mode -> {self.__analyze_mode}")
+
+        if getattr(self.__args, "list_available_metrics", False):
+            self.list_metrics()
 
         # -----------------------
         # run analysis workflow
