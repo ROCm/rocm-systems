@@ -243,7 +243,7 @@ def validate_arch(
         if latest_only and latest_arch and arch_dir.name != latest_arch:
             errors.append(
                 f"ERROR [{rel}]: Panel id {pid} is latest_only "
-                f'but arch "{arch_dir.name}"" is not latest_arch "{latest_arch}"'
+                f'but arch "{arch_dir.name}" is not latest_arch "{latest_arch}"'
             )
 
         # required keys
