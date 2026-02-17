@@ -1332,7 +1332,7 @@ template <class T>
 struct bit_and {
   __CG_QUALIFIER__ T operator()(const T& lhs, const T& rhs) const
   {
-    return lhs | rhs;
+    return lhs & rhs;
   }
 };
 
