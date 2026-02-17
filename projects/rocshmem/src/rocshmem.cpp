@@ -114,8 +114,8 @@ static BackendType select_backend_type(MPI_Comm comm, TcpBootstrap *bootstrap) {
     }
     if (envstr.find("ipc") != std::string::npos) {
       if (IPCBackend::backend_can_run(comm, bootstrap) != ROCSHMEM_SUCCESS) {
-          fprintf(stderr, "Error: ROCSHMEM_BACKEND=ipc requested but IPC backend cannot run.\n"
-                        "Most likely cause is PEs distributed to more than one node.\n");
+        fprintf(stderr, "Error: ROCSHMEM_BACKEND=ipc requested but IPC backend cannot run.\n"
+                "Most likely cause is PEs distributed to more than one node.\n");
         exit(1);
       }
       return BackendType::IPC_BACKEND;

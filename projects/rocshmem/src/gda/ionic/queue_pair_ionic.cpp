@@ -29,14 +29,6 @@
 
 namespace rocshmem {
 
-__device__ uint64_t QueuePair::get_same_qp_lane_mask() {
-  uint64_t active = get_active_lane_mask();
-  uintptr_t this_qp = reinterpret_cast<uintptr_t>(this);
-  // Bitmask of lanes in this warp whose value == this_qp
-  uint64_t same_qp_mask = __match_any_sync(active, this_qp);
-  return same_qp_mask;
-}
-
 __device__ uint32_t QueuePair::reserve_sq(uint64_t activemask, uint32_t num_wqes) {
   uint32_t my_sq_prod = 0;
 
