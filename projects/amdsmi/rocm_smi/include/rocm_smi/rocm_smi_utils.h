@@ -658,7 +658,7 @@ inline ostream_joiner<std::decay_t<DelimiterType>, CharType, TraitsType>
     };
 }
 
-
+uint64_t bdfid_from_domain(uint64_t bdfid, uint64_t domain);
 } // namespace amd::smi
 
 #endif  // INCLUDE_ROCM_SMI_ROCM_SMI_UTILS_H_

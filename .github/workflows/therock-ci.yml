@@ -5,9 +5,6 @@ on:
     branches:
       - develop
       - release/therock-*
-    # NOTE: this is temporary speed up to skip CI for WSL work
-    paths-ignore:
-      - "projects/rocr-runtime/libhsakmt/src/dxg"
   pull_request:
     types:
       - opened

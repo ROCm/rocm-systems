@@ -90,6 +90,8 @@ class QueuePair {
    */
   __device__ void get_nbi(void *dest, const void *source, size_t nelems, int pe, Collectivity cy = THREAD);
 
+  __device__ void get_nbi_single(void *dest, const void *source, size_t nelems, bool ring_db);
+
   /**
    * @brief Empty all completions from the completion queue.
    */

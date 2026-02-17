@@ -611,3 +611,61 @@ Analysis database example
       INFO ed45b0b189
    DEBUG Completed writing database
    WARNING Created file: test.db
+
+
+PyTorch Operator Analysis
+--------------------------
+
+.. note::
+   
+   PyTorch operator analysis is currently available only in CLI mode. GUI and TUI 
+   will provide different interfaces for operator selection and visualization.
+
+After profiling with ``--torch-trace`` (see :ref:`torch-operator-profiling`), use 
+the analyze CLI to explore captured operators with hierarchical names.
+
+Listing All Operators
+^^^^^^^^^^^^^^^^^^^^^^
+
+Display all PyTorch operators captured during profiling:
+
+.. code-block:: shell-session
+
+   $ rocprof-compute analyze --path ./workload --list-torch-operators
+
+   ================================================================================
+   PyTorch Operators in: ./workload
+   ================================================================================
+
+     1. ResNet_layer1_conv1
+     2. ResNet_layer1_bn1  
+     3. ResNet_layer4_conv2
+
+   ================================================================================
+   Total: 3 operators
+   ================================================================================
+
+The operators are shown with sanitized names (forward slashes replaced with underscores)
+matching the CSV filenames created in the ``torch_trace/`` directory.
+
+Filtering by Operator
+^^^^^^^^^^^^^^^^^^^^^^
+
+Analyze specific operators by name or pattern:
+
+.. code-block:: shell-session
+
+   $ rocprof-compute analyze --path ./workload --torch-operator "ResNet/layer4"
+
+This filters the analysis to show only kernels and metrics for the specified operator,
+enabling focused performance investigation of specific model components.
+
+**Filter multiple operators**:
+
+.. code-block:: shell-session
+
+   $ rocprof-compute analyze --path ./workload \
+       --torch-operator "Model/encoder" "Model/decoder"
+
+Use the hierarchical names (with forward slashes) as they appear in your model structure,
+not the sanitized underscore-separated names from the CSV files.
