@@ -1201,7 +1201,7 @@ is_one_of(int op, std::index_sequence<Ops...>)
 }
 
 void
-check_paired_events(const context_t* ctx, buffer::instance* buffer, const kfd_event_record& rec)
+check_paired_events(const context_t* ctx, const kfd_event_record& rec)
 {
     thread_local static events_unordered_set<page_migrate_event_record_t> page_migrate_events{};
     thread_local static events_unordered_set<page_fault_event_record_t>   page_fault_events{};
@@ -1214,6 +1214,9 @@ check_paired_events(const context_t* ctx, buffer::instance* buffer, const kfd_ev
         // range kind is not enabled for this context, skip any pairing or buffering for this event.
         return;
     }
+
+    auto* buffer =
+        CHECK_NOTNULL(buffer::get_buffer(ctx->buffered_tracer->buffer_data.at(_range_kind)));
 
     if(rec.kind == ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE)
     {
@@ -1382,11 +1385,12 @@ check_paired_events(const context_t* ctx, buffer::instance* buffer, const kfd_ev
 }
 
 void
-emplace_event_buffer_record(const context_t*        ctx,
-                            buffer::instance*       buffer,
-                            const kfd_event_record& rec)
+emplace_event_buffer_record(const context_t* ctx, const kfd_event_record& rec)
 {
     if(!ctx->is_tracing(rec.kind, rec.operation)) return;
+
+    auto* buffer =
+        CHECK_NOTNULL(buffer::get_buffer(ctx->buffered_tracer->buffer_data.at(rec.kind)));
 
     switch(rec.kind)
     {
@@ -1457,15 +1461,13 @@ handle_reporting(std::string_view event_data)
 
     for(const auto& itr : buffered_contexts)
     {
-        auto* buffer = buffer::get_buffer(itr->buffered_tracer->buffer_data.at(event.kind));
-
         // range handling is more complex so unconditionally call this function
-        check_paired_events(itr, buffer, event);
+        check_paired_events(itr, event);
         // event handling is simpler since it resembles how KFD reports events so apply operation
         // filter before calling the implementation.
         if(itr->is_tracing(event.kind, event.operation))
         {
-            emplace_event_buffer_record(itr, buffer, event);
+            emplace_event_buffer_record(itr, event);
         }
     }
 }
