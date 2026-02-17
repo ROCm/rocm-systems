@@ -617,11 +617,11 @@ The following example demonstrates profiling roofline data only:
    INFO Kernel Selection: None
    INFO Dispatch Selection: None
    INFO Filtered sections: ['4']
-   INFO 
+   INFO
    INFO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
    INFO Collecting Performance Counters (Roofline Only)
    INFO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-   INFO 
+   INFO
    INFO [Run 1/3][Approximate profiling time left: pending first measurement...]
    INFO [profiling] Current input file: /app/projects/rocprofiler-compute/workloads/occupancy/MI300X_A1/perfmon/pmc_perf_0.txt
    ...
@@ -635,6 +635,10 @@ The following example demonstrates profiling roofline data only:
    ...
 An inspection of our workload output folder shows ``.html`` plots were generated
 successfully.
+
+.. warning::
+
+   Deprecation warning: Standalone Roofline Analysis plot output ``empirRoof_gpu-<device ID><datatypes><kernels>.html`` will be auto-generated in analyze mode instead of profile mode in a future release.
 
 .. code-block:: shell-session
 
@@ -687,7 +691,7 @@ To enable iteration multiplexing in ROCm Compute Profiler, use the
 ``--iteration-multiplexing`` option in your profiling command. You can optionally specify
 the policy for multiplexing. The available policies are:
 
-* ``kernel`` 
+* ``kernel``
    The counters are divided based on the kernels being executed. Each kernel call
    for a particular kernel collects a different subset of counters.
 * ``kernel_launch_params``
@@ -707,10 +711,10 @@ By default, if no policy is specified, ROCm Compute Profiler uses the ``kernel_l
      Iteration multiplexing is only supported when using ROCm Compute Profiler with
      the native counter collection tool. Ensure that ``--attach-pid`` is not used in your profiling command.
 
-   * Ensure that your workload runs for enough iterations to cover all counter subsets. 
-     When using iteration multiplexing, the total number of iterations, for each kernel (for ``kernel`` policy)  
-     or for each unique kernel and launch parameters combination (for ``kernel_launch_params`` policy), 
-     specified in the workload should be sufficient to cover all subsets of counters. If the number of iterations 
+   * Ensure that your workload runs for enough iterations to cover all counter subsets.
+     When using iteration multiplexing, the total number of iterations, for each kernel (for ``kernel`` policy)
+     or for each unique kernel and launch parameters combination (for ``kernel_launch_params`` policy),
+     specified in the workload should be sufficient to cover all subsets of counters. If the number of iterations
      is too low, some counters may not be collected.
 
    * Launch paramaters for ``kernel_launch_params`` policy.
@@ -736,11 +740,11 @@ The following example demonstrates how to use iteration multiplexing with the
    [INFO] Kernel Selection: None
    [INFO] Dispatch Selection: None
    [INFO] Filtered sections: All
-   [INFO] 
+   [INFO]
    [INFO] ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
    [INFO] Collecting Performance Counters
    [INFO] ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-   [INFO] 
+   [INFO]
    [INFO] Using native counter collection tool: /tmp/rocprofiler-compute-tool-hlz4fagh/librocprofiler-compute-tool.so
    [INFO] Iteration multiplexing: kernel
    [INFO] [profiling] Current input files: /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/SQC_DCACHE_INFLIGHT_LEVEL.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/SQC_ICACHE_INFLIGHT_LEVEL.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/SQ_IFETCH_LEVEL.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/SQ_INST_LEVEL_LDS.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/SQ_INST_LEVEL_SMEM.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/SQ_INST_LEVEL_VMEM.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/SQ_LEVEL_WAVES.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/pmc_perf_0.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/pmc_perf_1.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/pmc_perf_10.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/pmc_perf_11.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/pmc_perf_12.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/pmc_perf_2.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/pmc_perf_3.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/pmc_perf_4.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/pmc_perf_5.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/pmc_perf_6.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/pmc_perf_7.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/pmc_perf_8.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/pmc_perf_9.txt

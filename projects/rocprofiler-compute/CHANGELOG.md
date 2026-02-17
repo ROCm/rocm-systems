@@ -75,8 +75,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Upcoming changes
 
-* Decouple Roofline profiling and analysis
-    * Roofline PDF plot will no longer be generated in profiling mode; Roofline PDF plots will be generated automatically in analysis mode as long as there is a valid roofline.csv file and complete counter collection from the profiling stage (i.e. user did not profile with --no-roof). A deprecation warning has been added during profiling mode to notify users of this change.
+* Move Roofline visualization to analysis mode
+    * Roofline plot files will no longer be generated in profiling mode; Roofline plots will be generated automatically when user runs analysis on a workload. A deprecation warning has been added during profiling mode to notify users of this change.
 
 ## ROCm Compute Profiler 3.4.0 for ROCm 7.2.0
 

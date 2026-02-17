@@ -706,7 +706,7 @@ class OmniSoC_Base:
                 (
                     "Deprecation warning: Standalone Roofline "
                     "Analysis plot output "
-                    "``empirRoof_gpu-{device ID}{datatypes}{kernels}.html`` "
+                    "``empirRoof_gpu-<device ID><datatypes><kernels>.html`` "
                     "will be auto-generated in analyze mode instead of profile "
                     "mode in a future release."
                 ),
