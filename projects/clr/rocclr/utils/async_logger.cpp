@@ -33,12 +33,12 @@
 #define close _close
 #define write _write
 #define lseek _lseek
-#define fsync _commit
 typedef int ssize_t;
 typedef long off_t;
 #else
 #include <unistd.h>
 #include <fcntl.h>
+#include <sys/uio.h>
 #endif
 
 namespace amd {
@@ -47,23 +47,32 @@ extern const size_t maxLogSize;
 
 namespace logging {
 
+namespace {
+constexpr uint16_t kMaxFileLen = 255;
+constexpr uint16_t kMaxMessageLen = 4095;
+}  // namespace
+
 // Static callback for crash signal handler
 static void crashFlushCallback() {
   AsyncLogger::GetInstance().FlushOnCrash();
 }
 
+// ================================================================================================
 AsyncLogger& AsyncLogger::GetInstance() {
   static AsyncLogger instance;
   return instance;
 }
 
+// ================================================================================================
 AsyncLogger::AsyncLogger()
     : capacity_(0), cached_pid_(0), output_fd_(-1) {}
 
+// ================================================================================================
 AsyncLogger::~AsyncLogger() {
   Shutdown();
 }
 
+// ================================================================================================
 void AsyncLogger::Initialize(const AsyncLoggerConfig& config) {
   if (initialized_.exchange(true)) {
     return;
@@ -107,6 +116,7 @@ void AsyncLogger::Initialize(const AsyncLoggerConfig& config) {
   InstallSignalHandlers();
 }
 
+// ================================================================================================
 void AsyncLogger::Shutdown() {
   if (!initialized_.load() || shutdown_.exchange(true)) {
     return;
@@ -125,7 +135,8 @@ void AsyncLogger::Shutdown() {
   }
 }
 
-void AsyncLogger::WriteLog(uint16_t level, uint32_t mask, const char* file,
+// ================================================================================================
+void AsyncLogger::WriteLog(uint16_t level, const char* file,
                            uint32_t line, const char* format, va_list args) {
   if (!config_.enabled || shutdown_.load(std::memory_order_acquire)) {
     return;
@@ -135,8 +146,8 @@ void AsyncLogger::WriteLog(uint16_t level, uint32_t mask, const char* file,
   char message[4096];
   vsnprintf(message, sizeof(message), format, args);
 
-  uint16_t file_len = file ? static_cast<uint16_t>(std::min(strlen(file), size_t(255))) : 0;
-  uint16_t msg_len = static_cast<uint16_t>(std::min(strlen(message), size_t(4095)));
+  uint16_t file_len = file ? static_cast<uint16_t>(std::min(strlen(file), size_t(kMaxFileLen))) : 0;
+  uint16_t msg_len = static_cast<uint16_t>(std::min(strlen(message), size_t(kMaxMessageLen)));
   uint32_t total_size = sizeof(EntryHeader) + file_len + msg_len;
 
   // Align to 8 bytes
@@ -205,11 +216,13 @@ void AsyncLogger::WriteLog(uint16_t level, uint32_t mask, const char* file,
   hdr->ready.store(1, std::memory_order_release);
 }
 
+// ================================================================================================
 void AsyncLogger::FlushSync() {
   std::lock_guard<std::mutex> lock(flush_mutex_);
   FlushBuffer();
 }
 
+// ================================================================================================
 void AsyncLogger::FlusherThreadLoop() {
   std::unique_lock<std::mutex> lock(flush_mutex_);
   while (!shutdown_.load(std::memory_order_acquire)) {
@@ -221,11 +234,12 @@ void AsyncLogger::FlusherThreadLoop() {
   }
 }
 
+// ================================================================================================
 void AsyncLogger::FlushBuffer() {
   size_t read_idx = read_pos_.load(std::memory_order_acquire);
   size_t write_idx = write_pos_.load(std::memory_order_acquire);
-
-  char output[8192];
+  const uint32_t kMaxEntrySize = static_cast<uint32_t>(
+      alignUp(sizeof(EntryHeader) + kMaxFileLen + kMaxMessageLen, 8));
 
   while (read_idx < write_idx) {
     size_t pos = read_idx & (capacity_ - 1);
@@ -233,7 +247,7 @@ void AsyncLogger::FlushBuffer() {
     // Entry header is guaranteed contiguous (WriteLog pads to avoid wrap)
     EntryHeader* hdr = reinterpret_cast<EntryHeader*>(buffer_.get() + pos);
 
-    // Wait for ready FIRST (acquire ensures we see all writes from producer)
+    // Wait for ready (acquire ensures we see all writes from producer)
     uint16_t ready_val = hdr->ready.load(std::memory_order_acquire);
     if (ready_val == 0) {
       constexpr int kSpinIter = 100;
@@ -247,38 +261,41 @@ void AsyncLogger::FlushBuffer() {
       }
     }
 
-    // Now safe to read header fields (producer has finished writing)
     uint32_t total_size = hdr->total_size;
-    uint16_t file_len = hdr->file_len;
-    uint16_t msg_len = hdr->msg_len;
-
-    // Validate
-    if (total_size == 0 || total_size > 8192) {
+    // Guard against corrupt header values
+    // max is header + max file + max message (8-byte aligned)
+    if (total_size == 0 || total_size > kMaxEntrySize) {
       read_idx += 8;
       continue;
     }
 
-    // Read data (contiguous, no wrap needed)
-    char filename[256] = {0};
-    char message[4096] = {0};
-    const char* data_ptr = buffer_.get() + pos + sizeof(EntryHeader);
+    // Point directly into ring buffer — data is contiguous, no copy needed
+    const char* file_ptr = buffer_.get() + pos + sizeof(EntryHeader);
+    const char* msg_ptr = file_ptr + hdr->file_len;
 
-    if (file_len > 0 && file_len < 256) {
-      memcpy(filename, data_ptr, file_len);
-      data_ptr += file_len;
-    }
-    if (msg_len > 0 && msg_len < 4096) {
-      memcpy(message, data_ptr, msg_len);
-    }
+    // Format only the fixed-size prefix; message is written from the ring buffer
+    char prefix[512];
+    int plen = snprintf(prefix, sizeof(prefix),
+                        ":%d:%-25.*s:%-4d: %010" PRIu64 " us: [pid:%d tid:0x%x] ",
+                        hdr->level, (int)hdr->file_len, file_ptr,
+                        hdr->line, hdr->timestamp_us,
+                        hdr->pid, hdr->thread_id);
 
-    // Format and write
-    int len = snprintf(output, sizeof(output),
-                      ":%d:%-25s:%-4d: %010" PRIu64 " us: [pid:%d tid:0x%x] %s\n",
-                      hdr->level, filename, hdr->line, hdr->timestamp_us,
-                      hdr->pid, hdr->thread_id, message);
-
-    if (len > 0 && output_fd_ >= 0) {
-      [[maybe_unused]] ssize_t r = ::write(output_fd_, output, len);
+    if (plen > 0 && output_fd_ >= 0) {
+#ifndef _WIN32
+      // Use one syscall for prefix + message + newline without building a large temp buffer.
+      struct iovec iov[3] = {
+        { prefix, static_cast<size_t>(plen) },
+        { const_cast<char*>(msg_ptr), hdr->msg_len },
+        { const_cast<char*>("\n"), 1 }
+      };
+      [[maybe_unused]] ssize_t r = ::writev(output_fd_, iov, 3);
+#else
+      [[maybe_unused]] ssize_t r;
+      r = ::write(output_fd_, prefix, plen);
+      r = ::write(output_fd_, msg_ptr, hdr->msg_len);
+      r = ::write(output_fd_, "\n", 1);
+#endif
     }
 
     read_idx += total_size;
@@ -297,10 +314,12 @@ void AsyncLogger::FlushBuffer() {
   }
 }
 
+// ================================================================================================
 void AsyncLogger::InstallSignalHandlers() {
   Os::installExceptionHandlers(crashFlushCallback);
 }
 
+// ================================================================================================
 void AsyncLogger::FlushOnCrash() {
   // Async-signal-safe: only use write() - fsync is NOT async-signal-safe
   [[maybe_unused]] ssize_t r;

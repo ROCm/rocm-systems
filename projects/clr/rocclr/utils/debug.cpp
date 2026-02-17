@@ -105,11 +105,11 @@ void flush_async_logs() {
 }
 
 // ================================================================================================
-void async_log_printf_impl(uint16_t level, uint32_t mask, const char* file,
+void async_log_printf_impl(uint16_t level, const char* file,
                           int line, const char* format, ...) {
   va_list args;
   va_start(args, format);
-  logging::AsyncLogger::GetInstance().WriteLog(level, mask, file, line, format, args);
+  logging::AsyncLogger::GetInstance().WriteLog(level, file, line, format, args);
   va_end(args);
 }
 
@@ -202,13 +202,13 @@ void log_printf(LogLevel level, const char* file, int line, uint64_t* start, con
 
     // Log asynchronously with or without duration
     if (start == nullptr || *start == 0) {
-      async_log_printf_impl(level, 0, file, line, "%s", message);
+      async_log_printf_impl(level, file, line, "%s", message);
       if (start != nullptr && *start == 0) {
         *start = timeUs;
       }
     } else {
       uint64_t duration = timeUs - *start;
-      async_log_printf_impl(level, 0, file, line, "%s: duration: %" PRIu64 " us", message,
+      async_log_printf_impl(level, file, line, "%s: duration: %" PRIu64 " us", message,
                             duration);
     }
     return;

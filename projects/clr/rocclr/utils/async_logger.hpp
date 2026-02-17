@@ -47,7 +47,7 @@ class AsyncLogger {
 
   void Initialize(const AsyncLoggerConfig& config);
   void Shutdown();
-  void WriteLog(uint16_t level, uint32_t mask, const char* file, uint32_t line,
+  void WriteLog(uint16_t level, const char* file, uint32_t line,
                 const char* format, va_list args);
   void FlushSync();
 

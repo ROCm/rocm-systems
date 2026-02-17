@@ -102,7 +102,7 @@ extern void shutdown_async_logging();
 extern void flush_async_logs();
 
 //! \brief Async log printf (fast path)
-extern void async_log_printf_impl(uint16_t level, uint32_t mask, const char* file, int line,
+extern void async_log_printf_impl(uint16_t level, const char* file, int line,
                                   const char* format, ...);
 
 /*@}*/  // namespace amd
@@ -224,7 +224,7 @@ inline void warning(const char* msg) { amd::report_warning(msg); }
     if (AMD_LOG_LEVEL >= level) {                                                                  \
       if (AMD_LOG_MASK & mask || mask == amd::LOG_ALWAYS) {                                        \
         if (amd::is_async_logging_enabled()) {                                                     \
-          amd::async_log_printf_impl(level, mask, __FILENAME__, __LINE__,                          \
+          amd::async_log_printf_impl(level, __FILENAME__, __LINE__,                                \
                                     format, ##__VA_ARGS__);                                        \
         } else {                                                                                   \
           amd::log_printf(level, __FILENAME__, __LINE__, format, ##__VA_ARGS__);                   \
