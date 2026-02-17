@@ -56,9 +56,14 @@ console_log("torch trace", f"Python version: {python_version}")
 try:
     from roctx import rangePop, rangePush
 
+    if hasattr(rangePush, "__code__") and hasattr(rangePush.__code__, "co_filename"):
+        roctx_path = Path(rangePush.__code__.co_filename).parent
+    else:
+        roctx_path = "<unknown>"
+
     console_log(
         "torch trace",
-        f"ROCTX module loaded from: {Path(rangePush.__code__.co_filename).parent}",
+        f"ROCTX module loaded from: {roctx_path}",
     )
 except ImportError:
     console_error(
