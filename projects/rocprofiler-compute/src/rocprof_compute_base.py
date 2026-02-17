@@ -85,7 +85,7 @@ class RocProfCompute:
         setattr(self.__args, "loglevel", self.__loglevel)
         set_locale_encoding()
 
-        if self.__mode == "profile":
+        if self.__mode is None or self.__mode == "profile":
             self.generate_machine_specs()
 
         self.sanitize()
@@ -183,6 +183,7 @@ class RocProfCompute:
             self.__args.list_metrics is None
             and not getattr(self.__args, "list_available_metrics", False)
             and not getattr(self.__args, "list_sets", False)
+            and not getattr(self.__args, "list_blocks", False)
         ):
             if self.__args.name is None and self.__args.output_directory == str(
                 Path.cwd() / "workloads"
@@ -377,6 +378,7 @@ class RocProfCompute:
     @demarcate
     def list_blocks(self) -> None:
         for_current_arch = getattr(self.__args, "list_available_metrics", False)
+        console_log(f"for_current_arch: {for_current_arch}")
 
         arch = (
             self.__mspec.gpu_arch
@@ -481,6 +483,13 @@ class RocProfCompute:
     def run_profiler(self) -> None:
         self.print_graphic()
 
+        if self.__args.list_metrics is not None or self.__args.list_available_metrics:
+            self.list_metrics()
+        elif self.__args.list_sets:
+            self.list_sets()
+        elif self.__args.list_blocks:
+            self.list_blocks()
+
         # Replace parameters in output directory when either:
         # 1. --output-directory is explicitly given by user
         # 2. --path and --output-directory are set to default workload directory.
@@ -495,11 +504,6 @@ class RocProfCompute:
             self.__args.path = self.__args.output_directory
 
         self.load_soc_specs()
-
-        if self.__args.list_metrics is not None or self.__args.list_available_metrics:
-            self.list_metrics()
-        elif self.__args.list_sets:
-            self.list_sets()
 
         # instantiate desired profiler
         profiler = self.create_profiler()
