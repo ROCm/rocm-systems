@@ -12,27 +12,27 @@
 namespace {
   template<typename T, typename RedOp, typename Proto>
 #if defined(USE_INDIRECT_FUNCTION_CALL) && !defined(__gfx942__) && !defined(__gfx950__)
-  __device__ void runRing(int tid, int nthreads, struct ncclDevWorkColl* work, struct ncclShmemData* ncclShmem, void* ncclShmemPerWarp) {
+  __device__ void runRing(int tid, int nthreads, struct ncclDevWorkColl* work, struct ncclShmemData& ncclShmem, void* ncclShmemPerWarp) {
 #else
-  __device__ __attribute__((noinline)) void runRing(int tid, int nthreads, struct ncclDevWorkColl* work, struct ncclShmemData* ncclShmem, void* ncclShmemPerWarp) {
+  __device__ __attribute__((noinline)) void runRing(int tid, int nthreads, struct ncclDevWorkColl* work, struct ncclShmemData& ncclShmem, void* ncclShmemPerWarp) {
 #endif
 #ifdef ENABLE_WARP_SPEED
     int warp = threadIdx.x / WARP_SIZE;
-    ncclRing *ring = &ncclShmem->warpChannel[warp].ring;
+    ncclRing *ring = &ncclShmem.warpChannel[warp].ring;
 #else
-    ncclRing *ring = &ncclShmem->channel.ring;
+    ncclRing *ring = &ncclShmem.channel.ring;
 #endif
-    const int nranks = ncclShmem->comm.nRanks;
-    const int rank = ncclShmem->comm.rank;
+    const int nranks = ncclShmem.comm.nRanks;
+    const int rank = ncclShmem.comm.rank;
     const int prevRank = ring->userRanks[nranks-1];
     const int root = work->root;
     size_t chunkCount;
     size_t channelCount;
     size_t gridOffset;
 #ifdef ENABLE_WARP_SPEED
-    ncclCollCbdPart(work, ncclShmem->warpChannelId[warp], Proto::Id, sizeof(T), (size_t*)nullptr, &gridOffset, &channelCount, &chunkCount);
+    ncclCollCbdPart(work, ncclShmem.warpChannelId[warp], Proto::Id, sizeof(T), (size_t*)nullptr, &gridOffset, &channelCount, &chunkCount);
 #else
-    ncclCollCbdPart(work, ncclShmem->channelId, Proto::Id, sizeof(T), (size_t*)nullptr, &gridOffset, &channelCount, &chunkCount);
+    ncclCollCbdPart(work, ncclShmem.channelId, Proto::Id, sizeof(T), (size_t*)nullptr, &gridOffset, &channelCount, &chunkCount);
 #endif
     size_t offset;
     int nelem;
@@ -69,7 +69,7 @@ namespace {
 
 template<typename T, typename RedOp>
 struct RunWorkColl<ncclFuncReduce, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE> {
-  __device__ __forceinline__ void run(int tid, int nthreads, struct ncclDevWorkColl* work, struct ncclShmemData* ncclShmem, void* ncclShmemPerWarp) {
+  __device__ __forceinline__ void run(int tid, int nthreads, struct ncclDevWorkColl* work, struct ncclShmemData& ncclShmem, void* ncclShmemPerWarp) {
     using Proto = ProtoSimple<REDUCE_CHUNKSTEPS/REDUCE_SLICESTEPS, REDUCE_SLICESTEPS>;
     runRing<T, RedOp, Proto>(tid, nthreads, work, ncclShmem, ncclShmemPerWarp);
   }
@@ -77,14 +77,14 @@ struct RunWorkColl<ncclFuncReduce, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE> 
 
 template<typename T, typename RedOp>
 struct RunWorkColl<ncclFuncReduce, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_LL> {
-  __device__ __forceinline__ void run(int tid, int nthreads, struct ncclDevWorkColl* work, struct ncclShmemData* ncclShmem, void* ncclShmemPerWarp) {
+  __device__ __forceinline__ void run(int tid, int nthreads, struct ncclDevWorkColl* work, struct ncclShmemData& ncclShmem, void* ncclShmemPerWarp) {
     runRing<T, RedOp, ProtoLL>(tid, nthreads, work, ncclShmem, ncclShmemPerWarp);
   }
 };
 
 template<typename T, typename RedOp>
 struct RunWorkColl<ncclFuncReduce, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_LL128> {
-  __device__ __forceinline__ void run(int tid, int nthreads, struct ncclDevWorkColl* work, struct ncclShmemData* ncclShmem, void* ncclShmemPerWarp) {
+  __device__ __forceinline__ void run(int tid, int nthreads, struct ncclDevWorkColl* work, struct ncclShmemData& ncclShmem, void* ncclShmemPerWarp) {
     runRing<T, RedOp, ProtoLL128>(tid, nthreads, work, ncclShmem, ncclShmemPerWarp);
   }
 };
