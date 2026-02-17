@@ -393,9 +393,11 @@ def show_torch_operator_hierarchy(
     operator_name: str, df: pd.DataFrame, index: int | None = None
 ) -> None:
     """
-    Display the hierarchy for each unique operator name in the DataFrame.
-    Shows Operator N: 'name', then Hierarchy N: full_name (total_duration, count),
-    with the hierarchy tree and kernel launches indented underneath.
+    Display the PyTorch operator listing with hierarchy, numbering, and durations.
+
+    Shows Operator N: 'name', then for each hierarchy path: full_name
+    (total_duration, count), the hierarchy tree, and kernel launches with
+    optional kernel durations (total_duration ms) when timestamps are present.
     """
     print(f"\n{'-' * 80}")
     if index is not None:
