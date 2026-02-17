@@ -21,9 +21,14 @@
 #
 ################################################################################
 
+# Search super-project (e.g. amd-mesa) sysdeps first when building in TheRock
+if(DEFINED THEROCK_SUPERPROJECT_INCLUDE_DIRS)
+  list(APPEND _libva_include_hints ${THEROCK_SUPERPROJECT_INCLUDE_DIRS})
+endif()
+
 find_library(LIBVA_LIBRARY NAMES va HINTS ${ROCM_PATH}/lib/rocm_sysdeps/lib /opt/amdgpu/lib/x86_64-linux-gnu /opt/amdgpu/lib64 /usr/lib/x86_64-linux-gnu /usr/lib64)
 find_library(LIBVA_DRM_LIBRARY NAMES va-drm HINTS ${ROCM_PATH}/lib/rocm_sysdeps/lib /opt/amdgpu/lib/x86_64-linux-gnu /opt/amdgpu/lib64 /usr/lib/x86_64-linux-gnu /usr/lib64)
-find_path(LIBVA_INCLUDE_DIR NAMES va/va.h PATHS ${ROCM_PATH}/lib/rocm_sysdeps/include /opt/amdgpu/include /usr/include NO_DEFAULT_PATH)
+find_path(LIBVA_INCLUDE_DIR NAMES va/va.h PATHS ${_libva_include_hints} ${ROCM_PATH}/lib/rocm_sysdeps/include /opt/amdgpu/include /usr/include NO_DEFAULT_PATH)
 
 include(FindPackageHandleStandardArgs)
 find_package_handle_standard_args(Libva DEFAULT_MSG LIBVA_INCLUDE_DIR LIBVA_LIBRARY)

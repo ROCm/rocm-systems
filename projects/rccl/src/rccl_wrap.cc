@@ -454,16 +454,24 @@ bool rcclUseAllGatherDirect(struct ncclComm* comm, size_t& msgSize) {
     return false;
   }
 
+  // Check if user explicitly set threshold
+  static int userThresholdInput = -2;
+  if (userThresholdInput == -2) {
+    const char *thresholdStr = getenv("RCCL_DIRECT_ALLGATHER_THRESHOLD");
+    userThresholdInput = !thresholdStr ? 0 : 1;
+  }
+
   size_t threshold = rcclParamDirectAllGatherThreshold();
 
-  if (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && threshold != -1) {
-     if (comm->nNodes == 1) {
-        threshold = 8388608;
-     } else if (comm->nNodes < 64) {
-        threshold = comm->nNodes * 2097152;
-     }
-  } else if (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942") && threshold != -1) {
-	threshold = 4194304;
+  // Only perform auto-selection if user didn't explicitly set the threshold and threshold is not -1
+  if (!userThresholdInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && threshold != -1) {
+    if (comm->nNodes == 1) {
+      threshold = 8388608;
+    } else if (comm->nNodes < 64) {
+      threshold = comm->nNodes * 2097152;
+    }
+  } else if (!userThresholdInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942") && threshold != -1) {
+	  threshold = 4194304;
   }
 
   comm->enableCustColl = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") || IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942");
