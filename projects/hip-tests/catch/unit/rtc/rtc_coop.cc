@@ -13,6 +13,16 @@ const char* functorToString()
 {
   if constexpr (std::is_same<Op<T>, cg::plus<T>>::value) {
     return "cooperative_groups::plus";
+  } else if constexpr (std::is_same<Op<T>, cg::less<T>>::value) {
+    return "cooperative_groups::less";
+  } else if constexpr (std::is_same<Op<T>, cg::greater<T>>::value) {
+    return "cooperative_groups::greater";
+  } else if constexpr (std::is_same<Op<T>, cg::bit_and<T>>::value) {
+    return "cooperative_groups::bit_and";
+  } else if constexpr (std::is_same<Op<T>, cg::bit_or<T>>::value) {
+    return "cooperative_groups::bit_or";
+  } else if constexpr (std::is_same<Op<T>, cg::bit_xor<T>>::value) {
+    return "cooperative_groups::bit_xor";
   }
 
   assert(false && "Missing conversion to string for type");
@@ -57,7 +67,7 @@ template <class T, template <typename> class Op>
 void runReduce(hiprtcProgram& prog) {
   using distribution = typename DistributionType<T>::type;
 
-  static constexpr std::array<int, 6> tileSizes = {2, 4, 8, 16, 32, 64};
+  static constexpr std::array<int, 7> tileSizes = {1, 2, 4, 8, 16, 32, 64};
   unsigned int wavefrontSize = getWarpSize();
   const char* loweredName;
   hipFunction_t kernel;
@@ -104,20 +114,34 @@ void runReduce(hiprtcProgram& prog) {
   HIP_CHECK(hipDeviceSynchronize());
   HIP_CHECK(hipMemcpy(output.ptr(), d_output.ptr(), d_output.size_bytes(), hipMemcpyDeviceToHost));
 
+  INFO("Type: " << typeToString<T>());
   for (auto tileSize : tileSizes) {
+    UNSCOPED_INFO("Tile size: " << tileSize);
     for (unsigned int laneId = 0; laneId < wavefrontSize; laneId++) {
+      unsigned long long mask = ~0ull >> (64 - tileSize);
+
+      mask <<= (((laneId % wavefrontSize) / tileSize) * tileSize);
+
       if (tileSize <= wavefrontSize) {
-        Op<T> op;
-        unsigned long long mask = ~0ull >> (64 - tileSize);
-        T expected;
+        std::string inputStr;
 
-        mask <<= (((laneId % wavefrontSize) / tileSize) * tileSize);
-        expected = calculateExpected(input.host_ptr(), op, mask);
-        INFO("Tile: " << tileSize << " laneId: " << laneId << " mask " << mask);
-
-        for (unsigned int i = 0; i < wavefrontSize; i++) {
-          UNSCOPED_INFO("laneId: " << i << ": " << input.host_ptr()[i]);
+        if constexpr (!std::is_same<T, half>::value) {
+          inputStr = std::string(" input: ") + std::to_string(input.host_ptr()[laneId]);
         }
+
+        UNSCOPED_INFO("laneId: " << laneId << " mask: " << mask << inputStr);
+      }
+    }
+
+    for (unsigned int laneId = 0; laneId < wavefrontSize; laneId++) {
+      unsigned long long mask = ~0ull >> (64 - tileSize);
+
+      mask <<= (((laneId % wavefrontSize) / tileSize) * tileSize);
+
+      if (tileSize <= wavefrontSize) {
+        T expected;
+        Op<T> op;
+        expected = calculateExpected(input.host_ptr(), op, mask);
         REQUIRE(output.host_ptr()[numTile * wavefrontSize + laneId] == expected);
       }
     }
@@ -169,10 +193,10 @@ void runAndCompileTest(const std::tuple<Types...> types) {
     __global__ void reduceCoopKernel(T* output, const T* input)
     {
       if constexpr (WarpSize <= 32) {
-        __hip_internal::index_sequence<2, 4, 8, 16, 32> tileSizes;
+        __hip_internal::index_sequence<1, 2, 4, 8, 16, 32> tileSizes;
         reduceTiles<Op, T>(output, input, tileSizes);
       } else {
-        __hip_internal::index_sequence<2, 4, 8, 16, 32, 64> tileSizes;
+        __hip_internal::index_sequence<1, 2, 4, 8, 16, 32, 64> tileSizes;
         reduceTiles<Op, T>(output, input, tileSizes);
       }
     }
@@ -187,10 +211,30 @@ void runAndCompileTest(const std::tuple<Types...> types) {
 
 TEST_CASE("Unit_Rtc_CoopReduce")
 {
-  const std::tuple<int/*, unsigned int, long long, unsigned long long, float, half, double*/> allTypes;
-  //const std::tuple<int, unsigned int, long long, unsigned long long> integralTypes;
+  const std::tuple<int, unsigned int, long long, unsigned long long, float, half, double> allTypes;
+  const std::tuple<int, unsigned int, long long, unsigned long long> integralTypes;
 
   SECTION("add") {
     runAndCompileTest<cooperative_groups::plus>(allTypes);
+  }
+
+  SECTION("less") {
+    runAndCompileTest<cooperative_groups::less>(allTypes);
+  }
+
+  SECTION("greater") {
+    runAndCompileTest<cooperative_groups::greater>(allTypes);
+  }
+
+  SECTION("and") {
+    runAndCompileTest<cooperative_groups::bit_and>(integralTypes);
+  }
+
+  SECTION("or") {
+    runAndCompileTest<cooperative_groups::bit_or>(integralTypes);
+  }
+
+  SECTION("xor") {
+    runAndCompileTest<cooperative_groups::bit_xor>(integralTypes);
   }
 }
