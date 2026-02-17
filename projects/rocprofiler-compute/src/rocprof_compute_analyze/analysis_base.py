@@ -191,12 +191,22 @@ class OmniAnalyze_Base:
 
     @demarcate
     def list_torch_operators(self) -> None:
-        """List PyTorch operators or show operator-to-kernel mapping and exit."""
+        """
+        List PyTorch operators with hierarchy, numbering, and durations.
+
+        Removes the previous torch_trace output directory (if any) and recreates it
+        from marker_api_trace and counter_collection files; those source files are
+        never deleted. Displays each operator with hierarchy, operator/kernel
+        durations, and numbering.
+        """
+        if not self.__args.path or not self.__args.path[0]:
+            console_error("--list-torch-operators requires --path to be specified.")
         workload_path = (
             self.__args.path[0][0]
             if isinstance(self.__args.path[0], list)
             else self.__args.path[0]
         )
+        # Remove previous torch_trace output dir only; marker/counter files are kept
         torch_trace_dir = Path(workload_path) / "torch_trace"
         if torch_trace_dir.exists():
             shutil.rmtree(torch_trace_dir)

@@ -734,7 +734,10 @@ Examples:
     analyze_group.add_argument(
         "--list-torch-operators",
         dest="list_torch_operators",
-        help="\t\tList all operators from PyTorch trace.",
+        help=(
+            "\t\tList PyTorch operators with hierarchy, numbering, and durations. "
+            "Recreates torch_trace output dir; does not delete marker/counter files."
+        ),
         action="store_true",
     )
     analyze_group.add_argument(
@@ -743,7 +746,10 @@ Examples:
         type=str,
         dest="torch_operator",
         nargs="+",
-        help="\t\tSpecify operator name for filtering.",
+        help=(
+            "\t\tShow details for selected operator(s) using existing torch_trace "
+            "directory (run --list-torch-operators first)."
+        ),
     )
     analyze_group.add_argument(
         "-k",
