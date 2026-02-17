@@ -272,9 +272,9 @@ jobs:
           # Default endpoint: http://localhost:5000/metrics
           # Default gpuagent port: 50061
           # Service names and default ports per AMD documentation.
-          sudo systemctl daemon-reload || true
-          sudo systemctl enable --now gpuagent.service || true
-          sudo systemctl enable --now amd-metrics-exporter.service || true
+          systemctl daemon-reload || true
+          systemctl enable --now gpuagent.service || true
+          systemctl enable --now amd-metrics-exporter.service || true
 
           sleep 3
 
