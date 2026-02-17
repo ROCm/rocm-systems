@@ -171,7 +171,7 @@ Panel Config:
       Measures backpressure from L2 Cache to L1 Cache. A high stall rate of 10% indicates that L2 is the bottleneck.
       Equation: SUM((TCP_TCR_TCP_STALL_CYCLES * 100)) / SUM(TCP_GATE_EN2_sum)
     L1 Cache - TA coalesce rate: >-
-      Measures the TA's capability in coalescing Buffer or Flat addresses. The optimal rate of 100%, the worst case rate is 25%.
+      Measures the TA's capability in coalescing Buffer or Flat addresses. The optimal rate is 100%, the worst case rate is 25%.
       Equation: SUM(((4 * TA_BUFFER_WAVEFRONTS_sum) * 100)) / SUM(TA_BUFFER_TOTAL_CYCLES_sum)
     L1 Cache - TA stalled by TCP: >-
       Measures the aggregated impact of TCP events on TA. A high stall rate of 10% indicates that TCP is the bottleneck.
