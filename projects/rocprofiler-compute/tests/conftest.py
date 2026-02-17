@@ -67,6 +67,18 @@ def pytest_addoption(parser):
     )
 
 
+@pytest.fixture(autouse=True)
+def skip_monkeypatch_with_binary(request):
+    """Auto-skip tests using monkeypatch when --call-binary is used.
+
+    Tests that use monkeypatch to patch Python functions/classes/modules
+    cannot work with --call-binary mode because the binary runs in a separate
+    process where Python patches don't apply.
+    """
+    if request.config.getoption("--call-binary") and "monkeypatch" in request.fixturenames:
+        pytest.skip("Test uses monkeypatch which is incompatible with --call-binary mode")
+
+
 @pytest.fixture
 def binary_handler_profile_rocprof_compute(request):
     """
@@ -117,7 +129,7 @@ def binary_handler_profile_rocprof_compute(request):
             )
         if request.config.getoption("--call-binary"):
             baseline_opts = [
-                "build/rocprof-compute.bin",
+                "./rocprof-compute.bin",
                 "profile",
                 "-VVV",
             ]
@@ -160,9 +172,14 @@ def binary_handler_profile_rocprof_compute(request):
             process = subprocess.run(
                 command_rocprof_compute,
                 text=True,
-                capture_output=capture_output,
+                capture_output=True,
             )
-            # Verify run status
+            # Print output so capsys can capture it
+            if process.stdout:
+                print(process.stdout, end="")
+            if process.stderr:
+                print(process.stderr, end="", file=sys.stderr)
+            # verify run status
             if check_success:
                 assert process.returncode == 0
 
@@ -268,9 +285,15 @@ def binary_handler_analyze_rocprof_compute(request):
     def _handler(arguments):
         if request.config.getoption("--call-binary"):
             process = subprocess.run(
-                ["build/rocprof-compute.bin", *arguments],
+                ["./rocprof-compute.bin", *arguments],
                 text=True,
+                capture_output=True,
             )
+            # Print output so capsys can capture it
+            if process.stdout:
+                print(process.stdout, end="")
+            if process.stderr:
+                print(process.stderr, end="", file=sys.stderr)
             return process.returncode
         else:
             with pytest.raises(SystemExit) as e:
