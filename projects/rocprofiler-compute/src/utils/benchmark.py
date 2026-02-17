@@ -1066,6 +1066,7 @@ template<int datatype> __global__ void mfma_f8f6f4(int iter, float *dummy)
 
 def mfma_bench(device: int, type: str, unit: str, rate: int) -> PerfMetrics:
     SIMDS_PER_CU = 4
+    SIMD_WIDTH = 16
     experiments = DEFAULT_NUM_EXPERIMENTS
     iters = 2000
 
@@ -1075,7 +1076,7 @@ def mfma_bench(device: int, type: str, unit: str, rate: int) -> PerfMetrics:
     workgroup_size = DEFAULT_WORKGROUP_SIZE
 
     arch = get_gfx_arch(device)
-    total_flops = workgroups * SIMDS_PER_CU * iters * mfma_ops[type][arch]
+    total_flops = (workgroups * workgroup_size // SIMDS_PER_CU // SIMD_WIDTH) * iters * mfma_ops[type][arch]
 
     dummy = hip.hipMalloc(64 * sizeof(c_float))
 
