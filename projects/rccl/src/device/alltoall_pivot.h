@@ -11,16 +11,16 @@
 namespace {
   template<typename T, typename RedOp, typename Proto>
 #if defined(USE_INDIRECT_FUNCTION_CALL) && !defined(__gfx942__) && !defined(__gfx950__)
-  __device__ void runRing(int tid, int nthreads, struct ncclDevWorkColl* work, struct ncclShmemData* ncclShmem, void* ncclShmemPerWarp) {
+  __device__ void runRing(int tid, int nthreads, struct ncclDevWorkColl* work, struct ncclShmemData& ncclShmem, void* ncclShmemPerWarp) {
 #else
-  __device__ __attribute__((noinline)) void runRing(int tid, int nthreads, struct ncclDevWorkColl* work, struct ncclShmemData* ncclShmem, void* ncclShmemPerWarp) {
+  __device__ __attribute__((noinline)) void runRing(int tid, int nthreads, struct ncclDevWorkColl* work, struct ncclShmemData& ncclShmem, void* ncclShmemPerWarp) {
 #endif
-    const int bid = ncclShmem->channelId - work->channelLo;
-    const int nranks = ncclShmem->comm.nRanks;
+    const int bid = ncclShmem.channelId - work->channelLo;
+    const int nranks = ncclShmem.comm.nRanks;
     size_t count, partOffset, partCount, chunkCount;
-    ncclCollCbdPart(work, ncclShmem->channelId, Proto::Id, sizeof(T), &count, &partOffset, &partCount, &chunkCount);
+    ncclCollCbdPart(work, ncclShmem.channelId, Proto::Id, sizeof(T), &count, &partOffset, &partCount, &chunkCount);
 
-    const ncclRing *ring = &ncclShmem->channel.ring;
+    const ncclRing *ring = &ncclShmem.channel.ring;
     const int num_bi_rings = work->pivotA2ANumBiRings;
     const int num_uni_rings = num_bi_rings * 2;
     const int num_chunks = (work->channelHi - work->channelLo + 1) / 2;
@@ -76,7 +76,7 @@ namespace {
 
 template<typename T, typename RedOp>
 struct RunWorkColl<ncclFuncAlltoAllPivot, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE> {
-  __device__ __forceinline__ void run(int tid, int nThreads, struct ncclDevWorkColl* work, struct ncclShmemData* ncclShmem, void* ncclShmemPerWarp) {
+  __device__ __forceinline__ void run(int tid, int nThreads, struct ncclDevWorkColl* work, struct ncclShmemData& ncclShmem, void* ncclShmemPerWarp) {
     using Proto = ProtoSimple<ALLTOALL_PIVOT_CHUNKSTEPS/ALLTOALL_PIVOT_SLICESTEPS, ALLTOALL_PIVOT_SLICESTEPS>;
     runRing<T, RedOp, Proto>(tid, nThreads, work, ncclShmem, ncclShmemPerWarp);
   }
