@@ -394,6 +394,21 @@ T calculateExpected(const T* input, Op op, unsigned long long mask)
       }
     }
     result = tmp[0];
+  } else if constexpr (std::is_same<Op, cooperative_groups::less<T>>::value) {
+    MinOp<T> minOp;
+    return calculateExpected(input, minOp, mask);
+  } else if constexpr (std::is_same<Op, cooperative_groups::greater<T>>::value) {
+    MaxOp<T> maxOp;
+    return calculateExpected(input, maxOp, mask);
+  } else if constexpr (std::is_same<Op, cooperative_groups::bit_xor<T>>::value) {
+    std::bit_xor<T> xorOp;
+    return calculateExpected(input, xorOp, mask);
+  } else if constexpr (std::is_same<Op, cooperative_groups::bit_or<T>>::value) {
+    std::bit_or<T> orOp;
+    return calculateExpected(input, orOp, mask);
+  } else if constexpr (std::is_same<Op, cooperative_groups::bit_and<T>>::value) {
+    std::bit_and<T> andOp;
+    return calculateExpected(input, andOp, mask);
   } else {
     bool initialized = false;
 
