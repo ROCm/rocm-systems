@@ -828,16 +828,20 @@ bool check_slp_vectorize_enabled(const char** Combination_CO, int Combination_CO
   }
   std::string kernel_name = get_string_parameters("kernel_name", block_name);
   const char* kername = kernel_name.c_str();
-  int CO_IRadded_size = 3;
-  const char** CO_IRadded = new const char*[3];
+  CaptureIR ir_capture;
+  auto dump_dir = ir_capture.CreateDumpDir();
+  std::string ir_dump_option = "-ir-dump-directory=" + dump_dir.string();
+  int CO_IRadded_size = 5;
+  const char** CO_IRadded = new const char*[5];
   CO_IRadded[0] = retrieved_CO.c_str();
   CO_IRadded[1] = "-mllvm";
   CO_IRadded[2] = "-print-after=constmerge";
+  CO_IRadded[3] = "-mllvm";
+  CO_IRadded[4] = ir_dump_option.c_str();
   __half2 *a_d, *x_d, *y_d;
   __half2 a_h, x_h;
   a_h.data.x = 1.5;
   x_h.data.y = 3.0;
-  CaptureStream capture(stderr);
   HIP_CHECK(hipMalloc(&a_d, sizeof(__half2)));
   HIP_CHECK(hipMalloc(&x_d, sizeof(__half2)));
   HIP_CHECK(hipMalloc(&y_d, sizeof(__half2)));
@@ -846,29 +850,31 @@ bool check_slp_vectorize_enabled(const char** Combination_CO, int Combination_CO
   hiprtcProgram prog;
   HIPRTC_CHECK(hiprtcCreateProgram(&prog, slp_vectorize_string, kername, 0, NULL, NULL));
   if (Combination_CO_size != -1) {
-    int Combination_CO_IRadded_size = Combination_CO_size + 3;
+    int Combination_CO_IRadded_size = Combination_CO_size + 5;
     int b = 0;
-    std::vector<std::string> add_ir_forcombi(Combination_CO_size + 3, "");
-    const char** Combination_CO_IRadded = new const char*[Combination_CO_size + 3];
-    for (int i = 0; i < Combination_CO_size + 3; ++i) {
+    std::vector<std::string> add_ir_forcombi(Combination_CO_size + 5, "");
+    const char** Combination_CO_IRadded = new const char*[Combination_CO_size + 5];
+    for (int i = 0; i < Combination_CO_size + 5; ++i) {
       if (i == Combination_CO_size) {
         Combination_CO_IRadded[i] = "-fno-signed-zeros";
         Combination_CO_IRadded[i + 1] = "-mllvm";
         Combination_CO_IRadded[i + 2] = "-print-after=constmerge";
+        Combination_CO_IRadded[i + 3] = "-mllvm";
+        add_ir_forcombi[i + 4] = ir_dump_option;
+        Combination_CO_IRadded[i + 4] = add_ir_forcombi[i + 4].c_str();
         break;
       }
       add_ir_forcombi[i] = Combination_CO[b];
       Combination_CO_IRadded[i] = add_ir_forcombi[i].c_str();
       b++;
     }
-    capture.Begin();
     hiprtcResult compileResult{
         hiprtcCompileProgram(prog, Combination_CO_IRadded_size, Combination_CO_IRadded)};
-    capture.End();
     if (!(compileResult == HIPRTC_SUCCESS)) {
+      ir_capture.Cleanup(dump_dir);
       WARN("Compiler option : " << retrieved_CO);
       WARN("FAILED IN COMBINATION :");
-      for (int i = 0; i < Combination_CO_size + 3; i++) {
+      for (int i = 0; i < Combination_CO_size + 5; i++) {
         WARN(Combination_CO_IRadded[i]);
       }
       WARN("hiprtcCompileProgram() api failed!! with error code: ");
@@ -883,10 +889,9 @@ bool check_slp_vectorize_enabled(const char** Combination_CO, int Combination_CO
       return 0;
     }
   } else {
-    capture.Begin();
     hiprtcResult compileResult{hiprtcCompileProgram(prog, CO_IRadded_size, CO_IRadded)};
-    capture.End();
     if (!(compileResult == HIPRTC_SUCCESS)) {
+      ir_capture.Cleanup(dump_dir);
       WARN("Compiler option : " << retrieved_CO);
       WARN("hiprtcCompileProgram() api failed!! with error code: ");
       WARN(compileResult);
@@ -900,7 +905,7 @@ bool check_slp_vectorize_enabled(const char** Combination_CO, int Combination_CO
       return 0;
     }
   }
-  std::string data = capture.getData();
+  std::string data = ir_capture.ReadDumpFile(dump_dir);
   std::stringstream dataStream;
   size_t codeSize;
   HIPRTC_CHECK(hiprtcGetCodeSize(prog, &codeSize));
@@ -981,16 +986,20 @@ bool check_slp_vectorize_disabled(const char** Combination_CO, int Combination_C
   }
   std::string kernel_name = get_string_parameters("kernel_name", block_name);
   const char* kername = kernel_name.c_str();
-  int CO_IRadded_size = 3;
-  const char** CO_IRadded = new const char*[3];
+  CaptureIR ir_capture;
+  auto dump_dir = ir_capture.CreateDumpDir();
+  std::string ir_dump_option = "-ir-dump-directory=" + dump_dir.string();
+  int CO_IRadded_size = 5;
+  const char** CO_IRadded = new const char*[5];
   CO_IRadded[0] = retrieved_CO.c_str();
   CO_IRadded[1] = "-mllvm";
   CO_IRadded[2] = "-print-after=constmerge";
+  CO_IRadded[3] = "-mllvm";
+  CO_IRadded[4] = ir_dump_option.c_str();
   __half2 *a_d, *x_d, *y_d;
   __half2 a_h, x_h;
   a_h.data.x = 1.5;
   x_h.data.y = 3.0;
-  CaptureStream capture(stderr);
   HIP_CHECK(hipMalloc(&a_d, sizeof(__half2)));
   HIP_CHECK(hipMalloc(&x_d, sizeof(__half2)));
   HIP_CHECK(hipMalloc(&y_d, sizeof(__half2)));
@@ -999,29 +1008,31 @@ bool check_slp_vectorize_disabled(const char** Combination_CO, int Combination_C
   hiprtcProgram prog;
   HIPRTC_CHECK(hiprtcCreateProgram(&prog, slp_vectorize_string, kername, 0, NULL, NULL));
   if (Combination_CO_size != -1) {
-    int Combination_CO_IRadded_size = Combination_CO_size + 3;
+    int Combination_CO_IRadded_size = Combination_CO_size + 5;
     int b = 0;
-    std::vector<std::string> add_ir_forcombi(Combination_CO_size + 3, "");
-    const char** Combination_CO_IRadded = new const char*[Combination_CO_size + 3];
-    for (int i = 0; i < Combination_CO_size + 3; ++i) {
+    std::vector<std::string> add_ir_forcombi(Combination_CO_size + 5, "");
+    const char** Combination_CO_IRadded = new const char*[Combination_CO_size + 5];
+    for (int i = 0; i < Combination_CO_size + 5; ++i) {
       if (i == Combination_CO_size) {
         Combination_CO_IRadded[i] = "-fno-signed-zeros";
         Combination_CO_IRadded[i + 1] = "-mllvm";
         Combination_CO_IRadded[i + 2] = "-print-after=constmerge";
+        Combination_CO_IRadded[i + 3] = "-mllvm";
+        add_ir_forcombi[i + 4] = ir_dump_option;
+        Combination_CO_IRadded[i + 4] = add_ir_forcombi[i + 4].c_str();
         break;
       }
       add_ir_forcombi[i] = Combination_CO[b];
       Combination_CO_IRadded[i] = add_ir_forcombi[i].c_str();
       b++;
     }
-    capture.Begin();
     hiprtcResult compileResult{
         hiprtcCompileProgram(prog, Combination_CO_IRadded_size, Combination_CO_IRadded)};
-    capture.End();
     if (!(compileResult == HIPRTC_SUCCESS)) {
+      ir_capture.Cleanup(dump_dir);
       WARN("Compiler option : " << retrieved_CO);
       WARN("FAILED IN COMBINATION :");
-      for (int i = 0; i < Combination_CO_size + 3; i++) {
+      for (int i = 0; i < Combination_CO_size + 5; i++) {
         WARN(Combination_CO_IRadded[i]);
       }
       WARN("hiprtcCompileProgram() api failed!! with error code: ");
@@ -1036,10 +1047,9 @@ bool check_slp_vectorize_disabled(const char** Combination_CO, int Combination_C
       return 0;
     }
   } else {
-    capture.Begin();
     hiprtcResult compileResult{hiprtcCompileProgram(prog, CO_IRadded_size, CO_IRadded)};
-    capture.End();
     if (!(compileResult == HIPRTC_SUCCESS)) {
+      ir_capture.Cleanup(dump_dir);
       WARN("Compiler option : " << retrieved_CO);
       WARN("hiprtcCompileProgram() api failed!! with error code: ");
       WARN(compileResult);
@@ -1053,7 +1063,7 @@ bool check_slp_vectorize_disabled(const char** Combination_CO, int Combination_C
       return 0;
     }
   }
-  std::string data = capture.getData();
+  std::string data = ir_capture.ReadDumpFile(dump_dir);
   std::stringstream dataStream;
   size_t codeSize;
   HIPRTC_CHECK(hiprtcGetCodeSize(prog, &codeSize));
@@ -1083,7 +1093,7 @@ bool check_slp_vectorize_disabled(const char** Combination_CO, int Combination_C
   }
   if (times == 2) {
     return 1;
-  } else if (times < 2) {
+  } else if (times < 1) {
     WARN("Compiler option : " << retrieved_CO);
     if (Combination_CO_size != -1) {
       WARN("FAILED IN COMBINATION :");
@@ -3031,28 +3041,32 @@ std::string checking_IR(const char* kername, const char** extra_CO_IRadded,
   HIP_CHECK(hipMemcpy(C_d, C_h, Nbytes, hipMemcpyHostToDevice));
   hiprtcProgram prog;
   HIPRTC_CHECK(hiprtcCreateProgram(&prog, ffp_contract_string, kername, 0, NULL, NULL));
+  CaptureIR ir_capture;
+  auto dump_dir = ir_capture.CreateDumpDir();
+  std::string ir_dump_option = "-ir-dump-directory=" + dump_dir.string();
   int Combination_CO_IRadded_size;
-  CaptureStream capture(stderr);
   if (Combination_CO_size != -1) {
-    Combination_CO_IRadded_size = Combination_CO_size + 2;
+    Combination_CO_IRadded_size = Combination_CO_size + 4;
     int b = 0;
-    std::vector<std::string> add_ir_forcombi(Combination_CO_size + 2, "");
-    const char** Combination_CO_IRadded = new const char*[Combination_CO_size + 2];
-    for (int i = 0; i < Combination_CO_size + 2; ++i) {
+    std::vector<std::string> add_ir_forcombi(Combination_CO_size + 4, "");
+    const char** Combination_CO_IRadded = new const char*[Combination_CO_size + 4];
+    for (int i = 0; i < Combination_CO_size + 4; ++i) {
       if (i == Combination_CO_size) {
         Combination_CO_IRadded[i] = "-mllvm";
         Combination_CO_IRadded[i + 1] = "-print-after=constmerge";
+        Combination_CO_IRadded[i + 2] = "-mllvm";
+        add_ir_forcombi[i + 3] = ir_dump_option;
+        Combination_CO_IRadded[i + 3] = add_ir_forcombi[i + 3].c_str();
         break;
       }
       add_ir_forcombi[i] = Combination_CO[b];
       Combination_CO_IRadded[i] = add_ir_forcombi[i].c_str();
       b++;
     }
-    capture.Begin();
     hiprtcResult compileResult{
         hiprtcCompileProgram(prog, Combination_CO_IRadded_size, Combination_CO_IRadded)};
-    capture.End();
     if (!(compileResult == HIPRTC_SUCCESS)) {
+      ir_capture.Cleanup(dump_dir);
       WARN("Compiler option : " << extra_CO_IRadded[0]);
       WARN("FAILED IN COMBINATION :");
       for (int i = 0; i < Combination_CO_size; i++) {
@@ -3070,10 +3084,20 @@ std::string checking_IR(const char* kername, const char** extra_CO_IRadded,
       return "";
     }
   } else {
-    capture.Begin();
-    hiprtcResult compileResult{hiprtcCompileProgram(prog, extra_CO_IRadded_size, extra_CO_IRadded)};
-    capture.End();
+    std::vector<std::string> extra_ir_options(extra_CO_IRadded_size + 2, "");
+    const char** extra_CO_IRadded_with_dump = new const char*[extra_CO_IRadded_size + 2];
+    for (int i = 0; i < extra_CO_IRadded_size; ++i) {
+      extra_ir_options[i] = extra_CO_IRadded[i];
+      extra_CO_IRadded_with_dump[i] = extra_ir_options[i].c_str();
+    }
+    extra_CO_IRadded_with_dump[extra_CO_IRadded_size] = "-mllvm";
+    extra_ir_options[extra_CO_IRadded_size + 1] = ir_dump_option;
+    extra_CO_IRadded_with_dump[extra_CO_IRadded_size + 1] =
+        extra_ir_options[extra_CO_IRadded_size + 1].c_str();
+    hiprtcResult compileResult{
+        hiprtcCompileProgram(prog, extra_CO_IRadded_size + 2, extra_CO_IRadded_with_dump)};
     if (!(compileResult == HIPRTC_SUCCESS)) {
+      ir_capture.Cleanup(dump_dir);
       WARN("hiprtcCompileProgram() api failed!! with error code: ");
       WARN(compileResult);
       size_t logSize;
@@ -3086,6 +3110,7 @@ std::string checking_IR(const char* kername, const char** extra_CO_IRadded,
       return "";
     }
   }
+  std::string data = ir_capture.ReadDumpFile(dump_dir);
   size_t codeSize;
   HIPRTC_CHECK(hiprtcGetCodeSize(prog, &codeSize));
   std::vector<char> codec(codeSize);
@@ -3105,7 +3130,6 @@ std::string checking_IR(const char* kername, const char** extra_CO_IRadded,
       return "";
     }
   }
-  std::string data = capture.getData();
   std::stringstream dataStream;
   HIP_CHECK(hipModuleUnload(module));
   HIPRTC_CHECK(hiprtcDestroyProgram(&prog));

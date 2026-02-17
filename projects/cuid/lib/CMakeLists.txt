@@ -19,7 +19,7 @@
 # THE SOFTWARE.
 
 cmake_minimum_required(VERSION 3.10)
-project(cuid_lib)
+project(amdcuid_lib)
 
 set(CMAKE_CXX_STANDARD 14)
 
@@ -69,3 +69,22 @@ target_include_directories(amdcuid_shared
     PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
+
+# Shared library
+install(TARGETS amdcuid_shared
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}    # Windows DLLs go here
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}    # Linux .so
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}    # Static libs & Windows import libs
+    COMPONENT library
+)
+
+# Static library
+install(TARGETS amdcuid_static
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT library
+)
+
+# Install public headers
+set(PUBLIC_HEADERS
+    include/amd_cuid.h
+)
+install(FILES ${PUBLIC_HEADERS} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR} COMPONENT library)
