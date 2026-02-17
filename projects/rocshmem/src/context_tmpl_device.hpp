@@ -158,6 +158,22 @@ __device__ void Context::alltoall(rocshmem_team_t team, T *dest,
 }
 
 template <typename T>
+__device__ void Context::alltoallv(rocshmem_team_t team,
+                                   T *dest, const size_t dest_nelems[],
+                                   const size_t dest_displs[],
+                                   T *source, const size_t source_nelems[],
+                                   const size_t source_displs[]) {
+
+  if (is_thread_zero_in_block()) {
+    ctxStats.incStat(NUM_ALLTOALLV);
+  }
+
+  DISPATCH(alltoallv<T>(team,
+                        dest, dest_nelems, dest_displs,
+                        source, source_nelems, source_displs));
+}
+
+template <typename T>
 __device__ void Context::fcollect(rocshmem_team_t team, T *dest,
                                   const T *source, int nelems) {
   if (nelems == 0) {

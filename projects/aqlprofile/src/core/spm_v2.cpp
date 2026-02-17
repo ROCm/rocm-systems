@@ -13,6 +13,7 @@
 #include <map>
 #include <array>
 #include <shared_mutex>
+#include <filesystem>
 
 #define PUBLIC_API __attribute__((visibility("default")))
 
@@ -118,6 +119,50 @@ namespace aqlprofile
 namespace spm
 {
 
+bool is_virtualization_enabled() {
+  // Check if GPU virtualization (SR-IOV) is enabled by looking for virtual function indicators
+  //
+  // In SR-IOV GPU virtualization:
+  // - Physical Function (PF): The actual GPU hardware device
+  // - Virtual Function (VF): Virtualized GPU instances derived from the PF
+  //
+  // The /sys/class/drm/card*/device/physfn symlink exists ONLY on VF devices
+  // and points back to their corresponding PF device. If this link exists,
+  // the GPU is running as a virtual function (virtualization enabled).
+
+  try {
+    for (const auto& entry : std::filesystem::directory_iterator("/sys/class/drm")) {
+      if (entry.path().filename().string().substr(0, 4) == "card" &&
+          std::filesystem::exists(entry.path() / "device" / "physfn")) {
+        return true;
+      }
+    }
+  } catch (...) {
+    // If filesystem access fails, assume no virtualization; fall-through
+  }
+  return false;
+}
+
+bool is_agent_supported_for_spm(const AgentInfo* agentInfo) {
+  const char* env_val = getenv("AQLPROFILE_SPM_OVERRIDE_AGENT_CHECK");
+  if (env_val && *env_val != '0' && *env_val != '\0') return true;
+
+  // if the device is gfx90a, then spm is not supported
+  if (strncmp(agentInfo->gfxip, "gfx90a", 6) == 0) {
+    printf("Streaming Performance Monitor (SPM) is not supported on gfx90a devices\n");
+    return false;
+  } else if (strncmp(agentInfo->gfxip, "gfx942", 6) == 0) {
+    // if the device is gfx942, check if virtualization is enabled
+    if (is_virtualization_enabled()) {
+      printf(
+          "Streaming Performance Monitor (SPM) is not supported on gfx942 devices "
+          "when GPU virtualization (SR-IOV) is enabled\n");
+      return false;
+    }
+  }
+  return true;
+}
+
 std::vector<aqlprofile_spm_parameter_t> default_spm_params = {
     {AQLPROFILE_SPM_PARAMETER_TYPE_BUFFER_SIZE,     1<<26}, // 64MB
     {AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL, 1<<13}, // 4us
@@ -205,6 +250,9 @@ hsa_status_t _internal_aqlprofile_spm_create_packets(
     aqlprofile_spm_profile_t             profile,
     size_t                               flags
 ) {
+    if (!is_agent_supported_for_spm(aql_profile::GetAgentInfo(profile.aql_agent)))
+      return HSA_STATUS_ERROR_INVALID_AGENT;
+
     auto s = std::make_shared<spm_state_t>();
     s->aql_agent = profile.aql_agent;
     s->hsa_agent = profile.hsa_agent;

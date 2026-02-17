@@ -169,14 +169,16 @@ int IPCBackend::backend_can_run(MPI_Comm comm, TcpBootstrap* bootstrap) {
                                   &shmcomm);
     int shm_comm_size;
     mpilib_ftable_.Comm_size(shmcomm, &shm_comm_size);
-    if (shm_comm_size == comm_size)
+    mpilib_ftable_.Comm_free(&shmcomm);
+    if (shm_comm_size == comm_size) {
       ret = ROCSHMEM_SUCCESS;
-
+    }
   } else if (bootstrap != nullptr) {
       int world_size = bootstrap->getNranks();
       int shm_size = bootstrap->getNranksPerNode();
-      if (shm_size == world_size)
+      if (shm_size == world_size) {
         ret = ROCSHMEM_SUCCESS;
+      }
   }
 
   return ret;
