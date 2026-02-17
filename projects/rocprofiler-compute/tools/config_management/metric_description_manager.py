@@ -262,7 +262,7 @@ def extract_descriptions_from_arch(
                 if metric_name in metrics_with_units
                 else metrics_sections.get(metric_name)
             )
-            
+
             # Skip metrics that don't belong to any known section
             if section_name is None:
                 continue
