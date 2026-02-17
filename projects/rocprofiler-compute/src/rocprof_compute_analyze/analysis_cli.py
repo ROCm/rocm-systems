@@ -101,41 +101,50 @@ class cli_analysis(OmniAnalyze_Base):
         arch_config = self._arch_configs[gpu_arch]
 
         if getattr(args, "torch_operator", False):
-            if not workload.filter_torch_operators:
+            # Check whether any torch operator data was actually loaded ,
+            # keys = CSV stems
+            torch_ops = getattr(workload, "torch_operators", None)
+            if not torch_ops:
                 console_error(
                     "No torch operators found in the profiling data. "
-                    'Please ensure that workload is profiled with "--torch-trace"'
-                    'option and analyze mode is run with "--list-torch-operators"'
-                    'option before using "--torch-operator" in analyze mode.'
+                    'Please ensure that workload is profiled with "--torch-trace" '
+                    'and analyze is run with "--list-torch-operators" before '
+                    'using "--torch-operator".'
                 )
+            else:
+                # Normalize user input to match torch_trace CSV filename stems
+                def _sanitize_key(name: str) -> str:
+                    return name.replace("torch.", "").replace(".", "_")
 
-            operator_args = getattr(args, "torch_operator", [])
-            operator_list = []
-            for op in operator_args:
-                # Support comma-separated or space-separated input
-                operator_list.extend([
-                    o.strip() for o in str(op).split(",") if o.strip()
-                ])
-            operator_list = [o for o in operator_list if o]
+                operator_args = getattr(args, "torch_operator", [])
+                operator_list = []
+                for op in operator_args:
+                    operator_list.extend([
+                        o.strip() for o in str(op).split(",") if o.strip()
+                    ])
+                operator_list = [o for o in operator_list if o]
 
-            for op in operator_list:
-                if "/" in op:
-                    # Hierarchy case: last part is operator name, rest is hierarchy
-                    hierarchy = op
-                    op_name = hierarchy.split("/")[-1]
-                    df = workload.torch_operators.get(op_name)
-                    if df is not None:
-                        filtered_df = df[df["Operator_Name"] == hierarchy]
-                        tty.show_torch_operator_table(hierarchy, filtered_df)
+                for op in operator_list:
+                    if "/" in op:
+                        hierarchy = op
+                        last_segment = hierarchy.split("/")[-1]
+                        op_key = _sanitize_key(last_segment)
+                        df = torch_ops.get(op_key)
+                        if df is not None:
+                            filtered_df = df[df["Operator_Name"] == hierarchy]
+                            if not filtered_df.empty:
+                                tty.show_torch_operator_table(hierarchy, filtered_df)
+                            else:
+                                console_log(f"No rows for operator: {hierarchy}")
+                        else:
+                            console_log(f"No data for operator: {hierarchy}")
                     else:
-                        console_log(f"No data for operator: {hierarchy}")
-                else:
-                    # Simple operator case
-                    df = workload.torch_operators.get(op)
-                    if df is not None:
-                        tty.show_torch_operator_table(op, df)
-                    else:
-                        console_log(f"No data for operator: {op}")
+                        op_key = _sanitize_key(op)
+                        df = torch_ops.get(op_key)
+                        if df is not None:
+                            tty.show_torch_operator_table(op, df)
+                        else:
+                            console_log(f"No data for operator: {op}")
 
         if args.list_stats:
             tty.show_kernel_stats(

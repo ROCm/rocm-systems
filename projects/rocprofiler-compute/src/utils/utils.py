@@ -1427,8 +1427,8 @@ def process_torch_trace_output(
         if Path(f"{workload_dir}/torch_trace").exists():
             console_log(
                 "torch trace",
-                "Torch data has already been processed"
-                f"and saved to {workload_dir}/torch_trace",
+                "Torch data has already been processed and saved to "
+                f"{workload_dir}/torch_trace",
             )
         else:
             console_warning(
@@ -1448,7 +1448,7 @@ def process_torch_trace_output(
     def _merge_pair(
         marker_path: Path,
         counter_path: Path,
-        join_keys: list = ("Correlation_ID"),
+        join_keys: tuple[str, ...] = ("Correlation_ID",),
     ) -> pd.DataFrame:
         """Merge a pair of marker and counter csv files on specified keys,
         return the merged dataframe.
