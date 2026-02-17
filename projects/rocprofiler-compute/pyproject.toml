@@ -107,6 +107,7 @@ markers = [
     "roofline_2",
     "path",
     "sci_notion",
+    "iteration_multiplexing",
     "iteration_multiplexing_1",
     "iteration_multiplexing_2",
     "iteration_multiplexing_stochastic",
@@ -114,4 +115,8 @@ markers = [
     "torch_ops",
     "multi_rank",
     "experimental_feature",
+    "skip",
+    "time_unit_conversion",
+    "time_unit_edge_cases",
+    "time_unit_integration",
 ]

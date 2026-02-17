@@ -565,7 +565,9 @@ rocprofsys_init_tooling_hidden(void)
         // if set to finalized, don't continue
         if(get_state() > State::Active) return;
 
+#if !defined(ROCPROFSYS_USE_ROCM) || ROCPROFSYS_USE_ROCM == 0
         rocprofsys_preinit_cpu_agents();
+#endif
 
         rocprofsys_preinit_cache();
 
