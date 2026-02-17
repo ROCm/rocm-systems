@@ -68,6 +68,13 @@ get_attach_table()
     return table;
 }
 
+auto&
+get_prev_notiffy_callback()
+{
+    static rocprofiler_attach_notify_new_code_object_t _v = nullptr;
+    return _v;
+}
+
 /**
  * @brief Flush internal PC sampling buffers and generate a marker record
  * for the code object load/unload event.
@@ -154,11 +161,22 @@ iterate_attach_code_object(hsa_executable_t executable, void*)
 }
 
 void
+chained_notify_new_code_object(hsa_executable_t executable, void* data)
+{
+    if(get_prev_notiffy_callback())
+    {
+        get_prev_notiffy_callback()(executable, data);
+    }
+   executable_freeze_internal(executable);
+}
+
+void
 load_attach_code_objects()
 {
     auto* attach_table = CHECK_NOTNULL(*(get_attach_table()));
     attach_table->rocprofiler_attach_iterate_all_code_objects(iterate_attach_code_object, nullptr);
-    attach_table->rocprofiler_attach_notify_new_code_object = iterate_attach_code_object;
+    get_prev_notiffy_callback() = attach_table->rocprofiler_attach_notify_new_code_object;
+    attach_table->rocprofiler_attach_notify_new_code_object = chained_notify_new_code_object;
 }
 }  // namespace
 
