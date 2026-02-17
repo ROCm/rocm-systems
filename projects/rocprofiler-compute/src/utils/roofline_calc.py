@@ -354,10 +354,14 @@ def calc_ai_analyze(
     filtered_pmc = apply_filters(workload, workload.path, is_gui=False, debug=False)
 
     kernel_ids_to_process: list[int] = []
+    kernel_names_to_process: list[str] = []
     kernel_top_table_id = 1
 
     if workload.filter_kernel_ids:
-        kernel_ids_to_process = workload.filter_kernel_ids
+        if all(isinstance(k, str) for k in workload.filter_kernel_ids):
+            kernel_names_to_process = list(workload.filter_kernel_ids)
+        else:
+            kernel_ids_to_process = list(workload.filter_kernel_ids)
     elif kernel_top_table_id in workload.dfs:
         kernel_top_df = workload.dfs[kernel_top_table_id]
         kernel_ids_to_process = kernel_top_df.index.tolist()
@@ -365,21 +369,24 @@ def calc_ai_analyze(
             "roofline", f"Found {len(kernel_ids_to_process)} kernels to process"
         )
 
-    if not kernel_ids_to_process:
+    if not kernel_ids_to_process and not kernel_names_to_process:
         console_warning("No kernels found to process for roofline")
         return plot_points.__dict__
 
-    for kernel_id in kernel_ids_to_process:
-        kernel_name = ""
-        if kernel_top_table_id in workload.dfs:
-            kernel_top_df = workload.dfs[kernel_top_table_id]
-            if kernel_id not in kernel_top_df.index:
-                continue
-            kernel_name = kernel_top_df.loc[kernel_id, "Kernel_Name"]
-        else:
+    # Resolve kernel ids to names when using integer filter
+    if kernel_ids_to_process and kernel_top_table_id in workload.dfs:
+        kernel_top_df = workload.dfs[kernel_top_table_id]
+        for kid in kernel_ids_to_process:
+            if kid in kernel_top_df.index:
+                kernel_names_to_process.append(
+                    str(kernel_top_df.loc[kid, "Kernel_Name"])
+                )
+
+    for kernel_name in kernel_names_to_process:
+        if not kernel_name:
             continue
 
-        console_debug("roofline", f"Processing kernel {kernel_id}: {kernel_name[:50]}")
+        console_debug("roofline", f"Processing kernel: {kernel_name[:50]}")
 
         # filter PMC data for specific kernel
         kernel_pmc_df = filtered_pmc[
@@ -387,7 +394,7 @@ def calc_ai_analyze(
         ]
 
         if kernel_pmc_df.empty:
-            console_debug("roofline", f"No PMC data for kernel {kernel_id}")
+            console_debug("roofline", f"No PMC data for kernel {kernel_name[:50]}")
             continue
 
         kernel_only_data = {"pmc_perf": kernel_pmc_df["pmc_perf"]}

@@ -84,11 +84,17 @@ class webui_analysis(OmniAnalyze_Base):
 
         self.app.layout = html.Div(style={"backgroundColor": "rgb(50, 50, 50)"})
 
-        # get filtered kernel names from kernel ids
+        # get filtered kernel names from kernel ids (int = index, str = name)
         filt_kernel_names: list[str] = []
-        kernel_top_df = base_data.dfs[1]
-        for kernel_id in base_data.filter_kernel_ids:
-            filt_kernel_names.append(str(kernel_top_df.loc[kernel_id, "Kernel_Name"]))
+        kernel_top_df = base_data.dfs.get(1)
+        if kernel_top_df is not None:
+            for kid in base_data.filter_kernel_ids:
+                if isinstance(kid, str):
+                    filt_kernel_names.append(kid)
+                elif isinstance(kid, int) and kid in kernel_top_df.index:
+                    filt_kernel_names.append(
+                        str(kernel_top_df.loc[kid, "Kernel_Name"])
+                    )
         input_filters["kernel"] = filt_kernel_names
 
         # setup app layout

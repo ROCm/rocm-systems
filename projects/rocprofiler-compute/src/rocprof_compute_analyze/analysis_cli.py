@@ -23,11 +23,14 @@
 
 ##############################################################################
 
+from pathlib import Path
+
+import pandas as pd
+
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from utils import file_io, parser, tty
 from utils.kernel_name_shortener import kernel_name_shortener
-from utils.logger import console_error, console_log, demarcate
-from pathlib import Path
+from utils.logger import console_error, console_log, console_warning, demarcate
 from utils.utils import process_torch_trace_output
 
 
@@ -81,6 +84,116 @@ class cli_analysis(OmniAnalyze_Base):
             # demangle and overwrite original 'Kernel_Name'
             kernel_name_shortener(workload.raw_pmc, args.kernel_verbose)
 
+            # If --torch-operator is used: load torch trace, resolve regex to kernel
+            # names, and set filter so metrics are computed on those kernels only.
+            if getattr(args, "torch_operator", False):
+                parser.load_torch_trace_data(workload, path_info[0])
+                if not workload.torch_operators:
+                    console_error(
+                        "No torch operators found in the profiling data. "
+                        'Please ensure that workload is profiled with "--torch-trace" '
+                        'and analyze is run with "--list-torch-operators" before '
+                        'using "--torch-operator".'
+                    )
+                operator_args = getattr(args, "torch_operator", [])
+                pattern_list = []
+                for op in operator_args:
+                    pattern_list.extend([
+                        o.strip() for o in str(op).split(",") if o.strip()
+                    ])
+                pattern_list = [p for p in pattern_list if p]
+                if pattern_list:
+                    kernel_names_torch = (
+                        parser.get_kernel_names_for_torch_operator_patterns(
+                            workload.torch_operators, pattern_list
+                        )
+                    )
+                    if not kernel_names_torch:
+                        console_warning(
+                            "No operators or kernels matched the given "
+                            "--torch-operator pattern(s). Metrics will not be filtered."
+                        )
+                    else:
+                        # Combine with -k/--kernel if set (intersection)
+                        existing = workload.filter_kernel_ids
+                        if existing:
+                            if all(isinstance(k, int) for k in existing):
+                                kernel_top_path = (
+                                    Path(path_info[0]) / "pmc_kernel_top.csv"
+                                )
+                                if kernel_top_path.is_file():
+                                    kernel_top_df = pd.read_csv(kernel_top_path)
+                                    names_from_k = []
+                                    for kid in existing:
+                                        if (
+                                            isinstance(kid, int)
+                                            and 0 <= kid < len(kernel_top_df)
+                                        ):
+                                            names_from_k.append(
+                                                str(
+                                                    kernel_top_df.iloc[kid][
+                                                        "Kernel_Name"
+                                                    ]
+                                                )
+                                            )
+                                    kernel_names = sorted(
+                                        set(kernel_names_torch)
+                                        & set(names_from_k)
+                                    )
+                                else:
+                                    kernel_names = kernel_names_torch
+                            else:
+                                kernel_names = sorted(
+                                    set(kernel_names_torch)
+                                    & set(str(k) for k in existing)
+                                )
+                            if not kernel_names:
+                                console_warning(
+                                    "No kernels in common between --torch-operator "
+                                    "and -k/--kernel; no kernel filter applied."
+                                )
+                                workload.filter_kernel_ids = []
+                            else:
+                                workload.filter_kernel_ids = kernel_names
+                        else:
+                            workload.filter_kernel_ids = kernel_names_torch
+
+                        if workload.filter_kernel_ids:
+                            msg = (
+                                f"Filtering to {len(workload.filter_kernel_ids)} "
+                                "kernel(s) matching --torch-operator"
+                            )
+                            if existing:
+                                msg += " and -k/--kernel (intersection)"
+                            msg += "."
+                            console_log(msg)
+                            # Show names and kernel IDs so user can use -k later
+                            kernel_top_path = Path(path_info[0]) / "pmc_kernel_top.csv"
+                            if kernel_top_path.is_file():
+                                kernel_top_df = pd.read_csv(kernel_top_path)
+                                name_to_id = {
+                                    str(kernel_top_df.iloc[i]["Kernel_Name"]): i
+                                    for i in range(len(kernel_top_df))
+                                }
+                                parts = []
+                                for name in workload.filter_kernel_ids:
+                                    kid = name_to_id.get(name)
+                                    parts.append(
+                                        f"{name} (id {kid})"
+                                        if kid is not None
+                                        else name
+                                    )
+                                console_log(
+                                    "  "
+                                    + ", ".join(parts)
+                                    + ". Use these ids with -k for future runs."
+                                )
+                            else:
+                                console_log(
+                                    "  "
+                                    + ", ".join(workload.filter_kernel_ids)
+                                )
+
             # create the loaded table
             parser.load_table_data(
                 workload=workload,
@@ -108,51 +221,8 @@ class cli_analysis(OmniAnalyze_Base):
                 console_error(f"Workload path does not exist: {workload_path}")
             process_torch_trace_output(str(workload_path))
 
-        if getattr(args, "torch_operator", False):
-            # Check whether any torch operator data was actually loaded ,
-            # keys = CSV stems
-            torch_ops = getattr(workload, "torch_operators", None)
-            if not torch_ops:
-                console_error(
-                    "No torch operators found in the profiling data. "
-                    'Please ensure that workload is profiled with "--torch-trace" '
-                    'and analyze is run with "--list-torch-operators" before '
-                    'using "--torch-operator".'
-                )
-            else:
-                # Normalize user input to match torch_trace CSV filename stems
-                def _sanitize_key(name: str) -> str:
-                    return name.replace("torch.", "").replace(".", "_")
-
-                operator_args = getattr(args, "torch_operator", [])
-                operator_list = []
-                for op in operator_args:
-                    operator_list.extend([
-                        o.strip() for o in str(op).split(",") if o.strip()
-                    ])
-                operator_list = [o for o in operator_list if o]
-
-                for op in operator_list:
-                    if "/" in op:
-                        hierarchy = op
-                        last_segment = hierarchy.split("/")[-1]
-                        op_key = _sanitize_key(last_segment)
-                        df = torch_ops.get(op_key)
-                        if df is not None:
-                            filtered_df = df[df["Operator_Name"] == hierarchy]
-                            if not filtered_df.empty:
-                                tty.show_torch_operator_table(hierarchy, filtered_df)
-                            else:
-                                console_log(f"No rows for operator: {hierarchy}")
-                        else:
-                            console_log(f"No data for operator: {hierarchy}")
-                    else:
-                        op_key = _sanitize_key(op)
-                        df = torch_ops.get(op_key)
-                        if df is not None:
-                            tty.show_torch_operator_table(op, df)
-                        else:
-                            console_log(f"No data for operator: {op}")
+        # With --torch-operator, filtering to matching kernels was applied in
+        # pre_processing; metrics below are already based on filtered data.
 
         if args.list_stats:
             tty.show_kernel_stats(

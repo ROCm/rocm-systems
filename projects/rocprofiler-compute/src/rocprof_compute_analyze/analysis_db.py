@@ -674,14 +674,19 @@ class db_analysis(OmniAnalyze_Base):
                     .astype(str)
                     .isin([self._runs[workload_path].filter_gpu_ids])
                 ]
-            # Filter kernel_ids
+            # Filter kernel_ids (int = index into top_kernels, str = kernel name)
             if self._runs[workload_path].filter_kernel_ids:
-                pmc_df = pmc_df.loc[
-                    pmc_df["Kernel_Name"].isin([
-                        top_kernels[id]
-                        for id in self._runs[workload_path].filter_kernel_ids
-                    ])
-                ]
+                ids_or_names = self._runs[workload_path].filter_kernel_ids
+                if all(isinstance(k, str) for k in ids_or_names):
+                    kernel_names = list(ids_or_names)
+                else:
+                    kernel_names = [
+                        top_kernels[kid]
+                        for kid in ids_or_names
+                        if isinstance(kid, int) and 0 <= kid < len(top_kernels)
+                    ]
+                if kernel_names:
+                    pmc_df = pmc_df.loc[pmc_df["Kernel_Name"].isin(kernel_names)]
             # Filter dispatch_ids
             if self._runs[workload_path].filter_dispatch_ids:
                 if ">" in self._runs[workload_path].filter_dispatch_ids[0]:

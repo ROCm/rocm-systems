@@ -2045,6 +2045,60 @@ def load_torch_trace_data(workload: schema.Workload, dir_path: str) -> None:
                 console_warning(f"Could not load {csv_file}: {e}")
 
 
+def get_kernel_names_for_torch_operator_patterns(
+    torch_operators: dict[str, pd.DataFrame],
+    patterns: list[str],
+) -> list[str]:
+    """
+    Identify all operators whose Operator_Name matches any of the given regex
+    patterns, then collect all Kernel_Name values for those operators.
+
+    :param torch_operators: dict mapping operator key -> DataFrame with
+        Operator_Name and Kernel_Name columns.
+    :param patterns: list of regex pattern strings (each is matched against
+        Operator_Name).
+    :return: sorted list of unique kernel names (strings) for the matched
+        operators.
+    """
+    if not torch_operators or not patterns:
+        return []
+
+    compiled = []
+    for p in patterns:
+        p = (p or "").strip()
+        if not p:
+            continue
+        try:
+            compiled.append(re.compile(p))
+        except re.error:
+            console_warning(f"Invalid regex for --torch-operator: {p!r}")
+            continue
+
+    if not compiled:
+        return []
+
+    kernel_names: set[str] = set()
+    for df in torch_operators.values():
+        if df is None or df.empty or "Operator_Name" not in df.columns:
+            continue
+        if "Kernel_Name" not in df.columns:
+            continue
+        for op_name in df["Operator_Name"].dropna().unique():
+            op_str = str(op_name).strip()
+            if not op_str:
+                continue
+            for pat in compiled:
+                if pat.search(op_str):
+                    # Only kernels from rows with this operator
+                    mask = df["Operator_Name"].astype(str).str.strip() == op_str
+                    kernel_names.update(
+                        df.loc[mask, "Kernel_Name"].dropna().astype(str).unique()
+                    )
+                    break
+
+    return sorted(kernel_names)
+
+
 @demarcate
 def load_table_data(
     workload: schema.Workload,

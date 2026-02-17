@@ -25,7 +25,7 @@
 
 from collections import OrderedDict
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Union
 
 import pandas as pd
 
@@ -59,7 +59,8 @@ class Workload:
     raw_pmc: pd.DataFrame = field(default_factory=pd.DataFrame)
     dfs: dict[int, pd.DataFrame] = field(default_factory=dict)
     dfs_type: dict[int, str] = field(default_factory=dict)
-    filter_kernel_ids: list[int] = field(default_factory=list)
+    # int = kernel index from --list-stats; str = kernel name (e.g. from --torch-operator)
+    filter_kernel_ids: list[Union[int, str]] = field(default_factory=list)
     filter_gpu_ids: list[int] = field(default_factory=list)
     filter_dispatch_ids: list[int] = field(default_factory=list)
     filter_nodes: list[str] = field(default_factory=list)

@@ -747,8 +747,10 @@ Examples:
         dest="torch_operator",
         nargs="+",
         help=(
-            "\t\tShow details for selected operator(s) using existing torch_trace "
-            "directory (run --list-torch-operators first)."
+            "\t\tRegex pattern(s) to match operator names; kernels for matching "
+            "operators are identified, profiling data is filtered to those kernels, "
+            "and all metrics are calculated on the filtered data. "
+            "Run with --list-torch-operators first (after profiling with --torch-trace)."
         ),
     )
     analyze_group.add_argument(
