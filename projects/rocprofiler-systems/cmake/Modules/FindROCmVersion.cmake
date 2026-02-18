@@ -303,8 +303,8 @@ function(ROCM_VERSION_PARSE_VERSION_FILES)
             ${ROCmVersion_ROOT_DIR}
             $ENV{CMAKE_PREFIX_PATH}
             ${CMAKE_PREFIX_PATH}
-            ${ROCM_PATH}
             ${ROCPROFSYS_DEFAULT_ROCM_PATH}
+            ${ROCM_PATH}
             /opt/rocm
         )
             if(EXISTS ${_DIR})
