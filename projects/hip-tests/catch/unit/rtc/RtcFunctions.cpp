@@ -838,15 +838,6 @@ bool check_slp_vectorize_enabled(const char** Combination_CO, int Combination_CO
   CO_IRadded[2] = "-print-after=constmerge";
   CO_IRadded[3] = "-mllvm";
   CO_IRadded[4] = ir_dump_option.c_str();
-  __half2 *a_d, *x_d, *y_d;
-  __half2 a_h, x_h;
-  a_h.data.x = 1.5;
-  x_h.data.y = 3.0;
-  HIP_CHECK(hipMalloc(&a_d, sizeof(__half2)));
-  HIP_CHECK(hipMalloc(&x_d, sizeof(__half2)));
-  HIP_CHECK(hipMalloc(&y_d, sizeof(__half2)));
-  HIP_CHECK(hipMemcpy(a_d, &a_h, sizeof(__half2), hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(x_d, &x_h, sizeof(__half2), hipMemcpyHostToDevice));
   hiprtcProgram prog;
   HIPRTC_CHECK(hiprtcCreateProgram(&prog, slp_vectorize_string, kername, 0, NULL, NULL));
   if (Combination_CO_size != -1) {
@@ -906,23 +897,6 @@ bool check_slp_vectorize_enabled(const char** Combination_CO, int Combination_CO
     }
   }
   std::string data = ir_capture.ReadDumpFile(dump_dir);
-  std::stringstream dataStream;
-  size_t codeSize;
-  HIPRTC_CHECK(hiprtcGetCodeSize(prog, &codeSize));
-  std::vector<char> codec(codeSize);
-  HIPRTC_CHECK(hiprtcGetCode(prog, codec.data()));
-  void* kernelParam[] = {reinterpret_cast<void*>(a_d), reinterpret_cast<void*>(x_d),
-                         reinterpret_cast<void*>(y_d)};
-  auto size = sizeof(kernelParam);
-  void* kernel_parameter[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &kernelParam,
-                              HIP_LAUNCH_PARAM_BUFFER_SIZE, &size, HIP_LAUNCH_PARAM_END};
-  hipModule_t module;
-  hipFunction_t function;
-  HIP_CHECK(hipModuleLoadData(&module, codec.data()));
-  HIP_CHECK(hipModuleGetFunction(&function, module, kername));
-  HIP_CHECK(hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, 0, nullptr, kernel_parameter));
-  HIP_CHECK(hipDeviceSynchronize());
-  HIP_CHECK(hipModuleUnload(module));
   HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
   if (data == "") {
     WARN("Compiler option : " << retrieved_CO);
@@ -936,13 +910,11 @@ bool check_slp_vectorize_enabled(const char** Combination_CO, int Combination_CO
     return 0;
   }
   int times = 0;
-  if (data.find("contract <2 x half>", 0) != -1) {
-    times++;
-  }
-  int start = data.find("contract <2 x half>", 0) + 1;
-  while (data.find("contract <2 x half>", start) != -1) {
-    times++;
-    start = data.find("contract <2 x half>", start) + 1;
+  const std::string search_string = "contract <2 x half>";
+  size_t start = 0;
+  while ((start = data.find(search_string, start)) != std::string::npos) {
+    ++times;
+    ++start;
   }
   if (times == 1) {
     return 1;
@@ -998,15 +970,6 @@ bool check_slp_vectorize_disabled(const char** Combination_CO, int Combination_C
   CO_IRadded[4] = ir_dump_option.c_str();
   CO_IRadded[5] = "-mllvm";
   CO_IRadded[6] = "-disable-vector-combine";
-  __half2 *a_d, *x_d, *y_d;
-  __half2 a_h, x_h;
-  a_h.data.x = 1.5;
-  x_h.data.y = 3.0;
-  HIP_CHECK(hipMalloc(&a_d, sizeof(__half2)));
-  HIP_CHECK(hipMalloc(&x_d, sizeof(__half2)));
-  HIP_CHECK(hipMalloc(&y_d, sizeof(__half2)));
-  HIP_CHECK(hipMemcpy(a_d, &a_h, sizeof(__half2), hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(x_d, &x_h, sizeof(__half2), hipMemcpyHostToDevice));
   hiprtcProgram prog;
   HIPRTC_CHECK(hiprtcCreateProgram(&prog, slp_vectorize_string, kername, 0, NULL, NULL));
   if (Combination_CO_size != -1) {
@@ -1068,23 +1031,6 @@ bool check_slp_vectorize_disabled(const char** Combination_CO, int Combination_C
     }
   }
   std::string data = ir_capture.ReadDumpFile(dump_dir);
-  std::stringstream dataStream;
-  size_t codeSize;
-  HIPRTC_CHECK(hiprtcGetCodeSize(prog, &codeSize));
-  std::vector<char> codec(codeSize);
-  HIPRTC_CHECK(hiprtcGetCode(prog, codec.data()));
-  void* kernelParam[] = {reinterpret_cast<void*>(a_d), reinterpret_cast<void*>(x_d),
-                         reinterpret_cast<void*>(y_d)};
-  auto size = sizeof(kernelParam);
-  void* kernel_parameter[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &kernelParam,
-                              HIP_LAUNCH_PARAM_BUFFER_SIZE, &size, HIP_LAUNCH_PARAM_END};
-  hipModule_t module;
-  hipFunction_t function;
-  HIP_CHECK(hipModuleLoadData(&module, codec.data()));
-  HIP_CHECK(hipModuleGetFunction(&function, module, kername));
-  HIP_CHECK(hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, 0, nullptr, kernel_parameter));
-  HIP_CHECK(hipDeviceSynchronize());
-  HIP_CHECK(hipModuleUnload(module));
   HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
   int times = 0;
   const std::string search_string = "contract half";

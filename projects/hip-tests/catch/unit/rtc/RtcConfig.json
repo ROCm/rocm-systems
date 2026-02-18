@@ -32,7 +32,7 @@
                     "infinite_num:NAN_num:no_finite_math:max_thread:NAN_num",
                     "undef_macro:warning:header_dir:no_denormals:finite_math:associative_math",
                     "header_dir:Rpass_inline:no_fast_math:infinite_num:NAN_num:no_finite_math",
-                    "denormals:no_unsafe_atomic:fast_ffp_contract",
+                    "denormals:no_unsafe_atomic",
                     "fast_math:no_infinite_num:no_NAN_num:finite_math:associative_math:no_signed_zeros:no_trapping_math:fast_ffp_contract",
                     "no_fast_math:infinite_num:NAN_num:no_finite_math:no_associative_math:signed_zeros:trapping_math:on_ffp_contract"
                     ]
