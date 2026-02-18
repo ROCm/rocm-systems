@@ -93,8 +93,10 @@ template <class T> void runTestMultipleMasks(unsigned long long masks[], int num
   LinearAllocGuard<T> d_output(LinearAllocs::hipMalloc, wavefrontSize * sizeof(T));
   std::plus<T> op;
   std::mt19937_64 gen(123);
-  T a = std::is_same<T, half>::value ? std::numeric_limits<unsigned short>::lowest() : -1023;
-  T b = std::is_same<T, half>::value ? std::numeric_limits<unsigned short>::max() : 1023;
+  typename distribution::result_type a = std::is_same<T, half>::value? std::numeric_limits<unsigned short>::lowest() :
+                                         (std::is_signed<T>::value? -1023 : 0);
+  typename distribution::result_type b = std::is_same<T, half>::value? std::numeric_limits<unsigned short>::max() :
+                                         1023;
   distribution distInput(a, b);
   dim3 blkDim{wavefrontSize};
   dim3 grdDim{1u};
