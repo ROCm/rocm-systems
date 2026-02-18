@@ -157,22 +157,19 @@ bool GPUScheduler::launchTest(const TestJob& job, const std::vector<int>& gpus)
     if (pid == 0)
     {
         // Child process
-        // Set environment variables to restrict GPU visibility
-        std::stringstream visibleDevices;
-        for (size_t i = 0; i < gpus.size(); ++i)
-        {
-            if (i > 0) visibleDevices << ",";
-            visibleDevices << gpus[i];
-        }
-
-        // Set both CUDA and HIP environment variables for compatibility
-        setenv("CUDA_VISIBLE_DEVICES", visibleDevices.str().c_str(), 1);
-        setenv("HIP_VISIBLE_DEVICES", visibleDevices.str().c_str(), 1);
-        setenv("ROCR_VISIBLE_DEVICES", visibleDevices.str().c_str(), 1);
+        // NOTE: We do NOT set HIP_VISIBLE_DEVICES here!
+        // Setting it causes issues because HIP/RCCL may initialize before the env var takes effect.
+        // Instead, we pass the physical GPU IDs directly to the test via the assignedGPUs parameter.
 
         if (config_.verboseLogging)
         {
-            INFO("Child process %d: HIP_VISIBLE_DEVICES=%s\n", getpid(), visibleDevices.str().c_str());
+            std::stringstream gpuList;
+            for (size_t i = 0; i < gpus.size(); ++i)
+            {
+                if (i > 0) gpuList << ",";
+                gpuList << gpus[i];
+            }
+            INFO("Child process %d: Using physical GPUs: %s\n", getpid(), gpuList.str().c_str());
         }
 
         // NOTE: We do NOT call ncclGetUniqueId() here!

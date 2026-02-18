@@ -33,19 +33,8 @@ struct SweepTestJob
 };
 
 // Execute a single test job (one GPU count configuration)
-static void ExecuteSweepJob(const SweepTestJob& job, const std::vector<int>& logicalGpuIds)
+static void ExecuteSweepJob(const SweepTestJob& job, const std::vector<int>& physicalGpuIds)
 {
-    // Debug: Print environment info
-    const char* hipVisibleDevs = getenv("HIP_VISIBLE_DEVICES");
-    const char* cudaVisibleDevs = getenv("CUDA_VISIBLE_DEVICES");
-    if (hipVisibleDevs || cudaVisibleDevs) {
-        INFO("ExecuteSweepJob for %d GPUs: HIP_VISIBLE_DEVICES=%s, CUDA_VISIBLE_DEVICES=%s, logicalGpuIds.size()=%zu\n",
-             job.numGpus,
-             hipVisibleDevs ? hipVisibleDevs : "not set",
-             cudaVisibleDevs ? cudaVisibleDevs : "not set",
-             logicalGpuIds.size());
-    }
-
     TestBed testBed;
 
     // Override GPU settings for this specific job
@@ -67,13 +56,12 @@ static void ExecuteSweepJob(const SweepTestJob& job, const std::vector<int>& log
         return;  // Skip based on enableSweep logic
     }
 
-    // When running under GPU Scheduler, HIP_VISIBLE_DEVICES has been set to physical GPU IDs
-    // which get remapped to logical IDs (0,1,2,3...). We must use the logical IDs here.
-    const std::vector<int>& gpuPriorityOrder = logicalGpuIds.empty() ?
-        testBed.ev.GetGpuPriorityOrder() : logicalGpuIds;
+    // Use physical GPU IDs directly (no HIP_VISIBLE_DEVICES remapping)
+    const std::vector<int>& gpuPriorityOrder = physicalGpuIds.empty() ?
+        testBed.ev.GetGpuPriorityOrder() : physicalGpuIds;
 
     if (testBed.ev.verbose) {
-        INFO("Using gpuPriorityOrder: [");
+        INFO("Using physical GPU IDs: [");
         for (size_t i = 0; i < gpuPriorityOrder.size(); ++i) {
             if (i > 0) INFO(", ");
             INFO("%d", gpuPriorityOrder[i]);
@@ -298,14 +286,10 @@ void TestBed::RunSimpleSweepParallel(std::vector<ncclFunc_t>     const& funcType
         TestJob testJob(
             testName.str(),
             numGpus,
-            [job, numGpus](const std::vector<int>& assignedGPUs) {
-                // Create logical GPU IDs (0,1,2,3...) for remapped HIP_VISIBLE_DEVICES
-                // IMPORTANT: Must have job.numGpus elements to match GetDeviceIdsList expectations
-                std::vector<int> logicalGpuIds;
-                for (int i = 0; i < numGpus; ++i) {
-                    logicalGpuIds.push_back(i);
-                }
-                ExecuteSweepJob(job, logicalGpuIds);
+            [job](const std::vector<int>& assignedGPUs) {
+                // Pass physical GPU IDs directly to the test
+                // No HIP_VISIBLE_DEVICES remapping - use actual physical IDs
+                ExecuteSweepJob(job, assignedGPUs);
             },
             100 - (numGpus * 10)  // Priority: larger GPU counts first
         );
