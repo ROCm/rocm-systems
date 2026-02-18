@@ -930,6 +930,45 @@ Limitations
    * This feature adds instrumentation overhead to track operator boundaries. For
      performance-critical measurements, consider profiling without this option first.
 
+
+.. _torch-operator-profiling:
+
+Hierarchical Operator Names
+----------------------------
+
+Starting with version 3.4, PyTorch operators are captured with their full module
+hierarchy, providing complete context about where each operation occurs in your model:
+
+.. code-block:: text
+
+   ResNet/layer4/conv2
+   Transformer/encoder/attention/softmax
+   MyModel/decoder/output_layer
+
+This hierarchical naming enables:
+
+* **Context preservation**: See exactly which model layer triggered each kernel
+* **Debugging**: Identify performance issues in specific model components
+* **Optimization**: Focus tuning efforts on bottleneck operators
+
+Example with hierarchical naming:
+
+.. code-block:: python
+
+   class MyModel(nn.Module):
+       def __init__(self):
+           super().__init__()
+           self.encoder = nn.Linear(512, 1024)
+           self.decoder = nn.Linear(1024, 512)
+       
+       def forward(self, x):
+            x = self.encoder(x)  # Captured as: nn.Module.MyModel.forward/nn.Module.Linear.forward
+            x = self.decoder(x)  # Captured as: nn.Module.MyModel.forward/nn.Module.Linear.forward
+            return x
+
+**Analyzing captured operators**: After profiling, see :doc:`../analyze/cli` for 
+how to list and filter PyTorch operators in analyze mode.
+
 Combined with Other Options
 ----------------------------
 
