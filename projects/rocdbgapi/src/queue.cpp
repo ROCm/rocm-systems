@@ -781,15 +781,147 @@ aql_queue_t::update_waves ()
      each discovered wave in the running state will increment this count.  */
   m_waves_running.emplace (0);
 
+  log_verbose ("ctx save restore address=%s: area-size=0x%llx",
+	       to_string (m_os_queue_info.ctx_save_restore_address).c_str (),
+	       (long long) m_os_queue_info.ctx_save_restore_area_size);
+
+  static bool did_perf_test = false;
+  if (!did_perf_test)
+    {
+      did_perf_test = true;
+
+      auto buffer
+	= std::make_unique<std::byte[]> (m_os_queue_info.ctx_save_restore_area_size);
+
+#if 1
+      {
+	TRACE_BEGIN_S_NORET (1, "xfer-perf-up-first ");
+
+	for (size_t size = 1;
+	     size < m_os_queue_info.ctx_save_restore_area_size;
+	     size *= 2)
+	  {
+	    using clock = std::chrono::steady_clock;
+
+	    /* Temporarily disable KMD logging.  */
+	    auto save_log_level = amd::dbgapi::log_level;
+	    amd::dbgapi::log_level = AMD_DBGAPI_LOG_LEVEL_NONE;
+
+	    clock::time_point start = clock::now ();
+
+	    size_t xfer_size = agent ().memory_cache ().read_agent_memory
+	      (m_os_queue_info.ctx_save_restore_address, &buffer[0], size);
+
+	    clock::time_point end = clock::now ();
+	    detail::fmilliseconds elapsed = end - start;
+
+	    amd::dbgapi::log_level = save_log_level;
+
+	    if (xfer_size != size)
+	      fatal_error ("xfer-perf size 0x%llx returned 0x%llx",
+			   (long long) size, (long long) xfer_size);
+
+	    log_verbose ("xfer-perf size 0x%llx took %.6f ms",
+			 (long long) size, elapsed.count ());
+	  }
+
+	TRACE_END_S_NORET (1);
+      }
+#endif
+
+      {
+	TRACE_BEGIN_S_NORET (1, "xfer-perf-down ");
+
+	size_t size = m_os_queue_info.ctx_save_restore_area_size;
+	for (; size != 0; size /= 2)
+	  {
+	    using clock = std::chrono::steady_clock;
+
+	    /* Temporarily disable KMD logging.  */
+	    auto save_log_level = amd::dbgapi::log_level;
+	    amd::dbgapi::log_level = AMD_DBGAPI_LOG_LEVEL_NONE;
+
+	    clock::time_point start = clock::now ();
+
+	    size_t xfer_size = agent ().memory_cache ().read_agent_memory
+	      (m_os_queue_info.ctx_save_restore_address, &buffer[0], size);
+
+	    clock::time_point end = clock::now ();
+	    detail::fmilliseconds elapsed = end - start;
+
+	    amd::dbgapi::log_level = save_log_level;
+
+	    if (xfer_size != size)
+	      fatal_error ("xfer-perf size 0x%llx returned 0x%llx",
+			   (long long) size,
+			   (long long) xfer_size);
+
+	    log_verbose ("xfer-perf size 0x%llx took %.6f ms",
+			 (long long) size, elapsed.count ());
+	  }
+
+	TRACE_END_S_NORET (1);
+      }
+
+      {
+	TRACE_BEGIN_S_NORET (1, "xfer-perf-up ");
+
+	for (size_t size = 1;
+	     size < m_os_queue_info.ctx_save_restore_area_size;
+	     size *= 2)
+	  {
+	    using clock = std::chrono::steady_clock;
+
+	    /* Temporarily disable KMD logging.  */
+	    auto save_log_level = amd::dbgapi::log_level;
+	    amd::dbgapi::log_level = AMD_DBGAPI_LOG_LEVEL_NONE;
+
+	    clock::time_point start = clock::now ();
+
+	    size_t xfer_size = agent ().memory_cache ().read_agent_memory
+	      (m_os_queue_info.ctx_save_restore_address, &buffer[0], size);
+
+	    clock::time_point end = clock::now ();
+	    detail::fmilliseconds elapsed = end - start;
+
+	    amd::dbgapi::log_level = save_log_level;
+
+	    if (xfer_size != size)
+	      fatal_error ("xfer-perf size 0x%llx returned 0x%llx",
+			   (long long) size, (long long) xfer_size);
+
+	    log_verbose ("xfer-perf size 0x%llx took %.6f ms",
+			 (long long) size, elapsed.count ());
+	  }
+
+	TRACE_END_S_NORET (1);
+      }
+    }
+
   for (uint32_t xcc_id = 0; xcc_id < agent ().os_info ().xcc_count; ++xcc_id)
     {
       auto ctx_save_address
         = m_os_queue_info.ctx_save_restore_address
           + xcc_id * m_os_queue_info.ctx_save_restore_area_size;
+      [[maybe_unused]] auto ctx_save_address_end
+        = ctx_save_address + m_os_queue_info.ctx_save_restore_area_size;
 
       /* Retrieve the control stack and wave save area memory locations.  */
       context_save_area_header_s header;
       agent ().read_agent_memory (ctx_save_address, &header);
+
+      if (!header.debugger_memory_offset || !header.debugger_memory_size)
+        fatal_error ("Per-queue memory reserved for the debugger is missing");
+
+      log_verbose ("ctx save restore address for xcc %u: %s", xcc_id,
+		   to_string (ctx_save_address).c_str ());
+
+      log_verbose ("control stack offset: 0x%x", header.control_stack_offset);
+      log_verbose ("control stack size: 0x%x", header.control_stack_size);
+      log_verbose ("wave state offset: 0x%x", header.wave_state_offset);
+      log_verbose ("wave state size: 0x%x", header.wave_state_size);
+      log_verbose ("debugger memory offset: 0x%x", header.debugger_memory_offset);
+      log_verbose ("debugger memory size: 0x%x", header.debugger_memory_size);
 
       auto control_stack_begin
         = ctx_save_address + header.control_stack_offset;

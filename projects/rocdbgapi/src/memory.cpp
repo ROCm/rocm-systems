@@ -521,6 +521,8 @@ memory_cache_t::contains_all (agent_address_t address,
 void
 memory_cache_t::prefetch (agent_address_t address, amd_dbgapi_size_t size)
 {
+  TRACE_BEGIN (param_in (address), param_in (size));
+
   if (size == 0)
     return;
 
@@ -562,6 +564,8 @@ memory_cache_t::prefetch (agent_address_t address, amd_dbgapi_size_t size)
               &staging_buffer[cache_line_address - cache_line_begin],
               cache_line_size);
     }
+
+  TRACE_END ();
 }
 
 void
@@ -675,8 +679,10 @@ size_t
 memory_cache_t::xfer_agent_memory (agent_address_t address, void *read,
                                    const void *write, size_t size)
 {
+  TRACE_BEGIN (param_in (address), param_in (size));
+
   if (size == 0)
-    return 0;
+    return size;
 
   /* Clamp to the end of the agent address space.  */
   auto max = m_agent.agent_address_space ().last_address ();
@@ -715,7 +721,7 @@ memory_cache_t::xfer_agent_memory (agent_address_t address, void *read,
           if (xfer_size != request_size)
             break;
         }
-      return ptr - address;
+      return size_t (ptr - address);
     }
 
   dbgapi_assert (begin != m_cache_line_map.end ());
@@ -733,6 +739,8 @@ memory_cache_t::xfer_agent_memory (agent_address_t address, void *read,
     }
 
   return size;
+
+  TRACE_END ();
 }
 
 } /* namespace amd::dbgapi */
