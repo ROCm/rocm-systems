@@ -104,6 +104,9 @@ struct cache_policy
         trace_cache::get_metadata_registry().add_track(
             { trace_cache::info::format_track_name<category::amd_smi_memory_usage>(),
               thread_id, "{}" });
+        trace_cache::get_metadata_registry().add_track(
+            { trace_cache::info::format_track_name<category::amd_smi_sdma>(), thread_id,
+              "{}" });
 
         auto add_vcn_track = [&](std::optional<int> xcp_idx) {
             for(int clk = 0; clk < AMDSMI_MAX_NUM_VCN; ++clk)
@@ -247,6 +250,13 @@ struct cache_policy
               trait::name<category::amd_smi_memory_usage>::description, LONG_DESCRIPTION,
               COMPONENT, tim::units::mem_repr(tim::units::megabyte),
               rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0 });
+
+        trace_cache::get_metadata_registry().add_pmc_info(
+            { agent_type::GPU, gpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+              trait::name<category::amd_smi_sdma>::value, "SDMA Usg",
+              trait::name<category::amd_smi_sdma>::description, LONG_DESCRIPTION,
+              COMPONENT, "us", rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0,
+              0 });
 
         for(int vcn = 0; vcn < AMDSMI_MAX_NUM_VCN; ++vcn)
         {

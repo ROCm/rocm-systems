@@ -31,9 +31,11 @@
 #include "core/config.hpp"
 #include "library/pmc/gpu/metric_descriptors.hpp"
 #include "library/pmc/gpu/types.hpp"
+#include "library/runtime.hpp"
 #include "logger/debug.hpp"
 
 #include <algorithm>
+#include <cstdint>
 #include <regex>
 #include <set>
 #include <string>
@@ -83,6 +85,12 @@ struct settings_policy
             return parse_enabled_metrics(setting.has_value() ? setting.value() : "all");
         }();
         return _enabled_metrics;
+    }
+
+    /** Root (target) process ID for metrics that are per-process (e.g. SDMA). */
+    static uint32_t get_target_pid() noexcept
+    {
+        return static_cast<uint32_t>(rocprofsys::get_root_process_id());
     }
 
     static bool get_use_perfetto_legacy_metrics() { return get_use_perfetto(); }

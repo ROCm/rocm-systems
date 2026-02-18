@@ -31,6 +31,7 @@
 #include "library/pmc/collectors/gpu/device.hpp"
 #include "library/pmc/gpu/types.hpp"
 
+#include <cstdint>
 #include <memory>
 #include <vector>
 
@@ -202,12 +203,17 @@ struct gpu_traits
 
     /**
      * @brief Create a new GPU device instance.
+     *
+     * @param target_pid Root (target) process ID for per-process metrics (e.g. SDMA).
+     *                   Supplied by the session/settings layer, not a GPU trait.
      */
     static device_ptr_t create_device(std::shared_ptr<driver_t> driver,
                                       amdsmi_processor_handle   handle,
-                                      processor_type_t type, size_t index)
+                                      processor_type_t type, size_t index,
+                                      uint32_t target_pid)
     {
-        return std::make_shared<device_t>(std::move(driver), handle, type, index);
+        return std::make_shared<device_t>(std::move(driver), handle, type, index,
+                                          target_pid);
     }
 
     /**

@@ -146,6 +146,21 @@ struct driver
     {
         return amdsmi_get_gpu_metrics_info(processor_handle, metrics);
     }
+
+    /**
+     * @brief Get the list of processes using the GPU.
+     * @param processor_handle GPU processor to query.
+     * @param num_process On input: max number of entries to fill; on output: count (when
+     * list is nullptr, only the count is returned).
+     * @param process_list Buffer to receive process info, or nullptr to query count only.
+     * @return AMD SMI status code indicating success or failure.
+     */
+    static amdsmi_status_t get_gpu_process_list(amdsmi_processor_handle processor_handle,
+                                                uint32_t*               num_process,
+                                                amdsmi_proc_info_t*     process_list)
+    {
+        return amdsmi_get_gpu_process_list(processor_handle, num_process, process_list);
+    }
 };
 
 /**

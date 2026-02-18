@@ -404,6 +404,9 @@ rocpd_processor_t::handle([[maybe_unused]] const pmc::gpu::sample& _gpu_pmc)
     insert_scalar(trait::name<category::amd_smi_memory_usage>::value,
                   info::format_track_name<category::amd_smi_memory_usage>(),
                   enabled.memory_usage(), m.memory_usage / 1024.0);
+    insert_scalar(trait::name<category::amd_smi_sdma>::value,
+                  info::format_track_name<category::amd_smi_sdma>(),
+                  enabled.sdma(), static_cast<double>(m.sdma));
 
     auto insert_xcp_metrics = [&](const char* base_name, const std::string& base_track,
                                   bool is_enabled, const auto& get_array) {

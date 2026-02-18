@@ -101,7 +101,8 @@ enum class metric_id : uint8_t
     xcp_jpeg_activity    = 11,  ///< Per-XCP partition
     xgmi                 = 12,
     pcie                 = 13,
-    COUNT                = 14
+    sdma                 = 14,  ///< SDMA usage for target process (microseconds)
+    COUNT                = 15
 };
 
 constexpr size_t METRIC_COUNT = static_cast<size_t>(metric_id::COUNT);
@@ -280,6 +281,7 @@ public:
     }
     [[nodiscard]] constexpr bool xgmi() const noexcept { return test(metric_id::xgmi); }
     [[nodiscard]] constexpr bool pcie() const noexcept { return test(metric_id::pcie); }
+    [[nodiscard]] constexpr bool sdma() const noexcept { return test(metric_id::sdma); }
 
     constexpr void set_current_socket_power(bool v) noexcept
     {
@@ -316,6 +318,7 @@ public:
     }
     constexpr void set_xgmi(bool v) noexcept { set(metric_id::xgmi, v); }
     constexpr void set_pcie(bool v) noexcept { set(metric_id::pcie, v); }
+    constexpr void set_sdma(bool v) noexcept { set(metric_id::sdma, v); }
 
     constexpr enabled_metrics operator&(const enabled_metrics& other) const noexcept
     {
@@ -414,7 +417,8 @@ to_string(const enabled_metrics& metrics)
        << ", JPEG activity: " << metrics.jpeg_activity()
        << ", XCP VCN activity: " << metrics.xcp_vcn_activity()
        << ", XCP JPEG activity: " << metrics.xcp_jpeg_activity()
-       << ", XGMI: " << metrics.xgmi() << ", PCIe: " << metrics.pcie() << "\n";
+       << ", XGMI: " << metrics.xgmi() << ", PCIe: " << metrics.pcie()
+       << ", SDMA: " << metrics.sdma() << "\n";
     return ss.str();
 }
 
@@ -441,6 +445,7 @@ constexpr uint32_t xcp_vcn_activity  = make_metric_mask(metric_id::xcp_vcn_activ
 constexpr uint32_t xcp_jpeg_activity = make_metric_mask(metric_id::xcp_jpeg_activity);
 constexpr uint32_t xgmi_mask         = make_metric_mask(metric_id::xgmi);
 constexpr uint32_t pcie_mask         = make_metric_mask(metric_id::pcie);
+constexpr uint32_t sdma_mask         = make_metric_mask(metric_id::sdma);
 
 constexpr uint32_t all  = (1u << METRIC_COUNT) - 1;
 constexpr uint32_t none = 0;
@@ -454,7 +459,7 @@ struct metric_alias
     uint32_t         mask;
 };
 
-constexpr std::array<metric_alias, 8> user_metric_aliases = { {
+constexpr std::array<metric_alias, 9> user_metric_aliases = { {
     { "temp", metric_masks::temperature },
     { "power", metric_masks::power },
     { "busy", metric_masks::busy },
@@ -463,11 +468,12 @@ constexpr std::array<metric_alias, 8> user_metric_aliases = { {
     { "jpeg_activity", metric_masks::jpeg_activity },
     { "xgmi", metric_masks::xgmi_mask },
     { "pcie", metric_masks::pcie_mask },
+    { "sdma", metric_masks::sdma_mask },
 } };
 
 constexpr std::string_view metric_validation_pattern =
-    R"(^(?:temp|power|busy|mem_usage|vcn_activity|jpeg_activity|xgmi|pcie))"
-    R"((?:[,;](?:temp|power|busy|mem_usage|vcn_activity|jpeg_activity|xgmi|pcie))*$)";
+    R"(^(?:temp|power|busy|mem_usage|vcn_activity|jpeg_activity|xgmi|pcie|sdma))"
+    R"((?:[,;](?:temp|power|busy|mem_usage|vcn_activity|jpeg_activity|xgmi|pcie|sdma))*$)";
 
 /** @brief Track descriptor for Perfetto output visualization. */
 struct perfetto_track_info
@@ -477,7 +483,7 @@ struct perfetto_track_info
     std::string_view units;
 };
 
-constexpr std::array<perfetto_track_info, 12> perfetto_tracks = { {
+constexpr std::array<perfetto_track_info, 13> perfetto_tracks = { {
     { metric_masks::gfx_activity, "GFX Busy", "%" },
     { metric_masks::umc_activity, "UMC Busy", "%" },
     { metric_masks::mm_activity, "MM Busy", "%" },
@@ -490,6 +496,7 @@ constexpr std::array<perfetto_track_info, 12> perfetto_tracks = { {
     { metric_masks::xcp_jpeg_activity, "JPEG Busy", "%" },
     { metric_masks::xgmi_mask, "XGMI", "" },
     { metric_masks::pcie_mask, "PCIe", "" },
+    { metric_masks::sdma_mask, "SDMA Usage", "us" },
 } };
 
 }  // namespace gpu

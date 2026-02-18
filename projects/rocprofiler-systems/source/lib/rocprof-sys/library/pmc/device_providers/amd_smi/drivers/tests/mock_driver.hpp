@@ -55,6 +55,9 @@ public:
     MOCK_METHOD(amdsmi_status_t, get_metrics_info,
                 (amdsmi_processor_handle processor_handle,
                  amdsmi_gpu_metrics_t*   metrics));
+    MOCK_METHOD(amdsmi_status_t, get_gpu_process_list,
+                (amdsmi_processor_handle processor_handle, uint32_t* num_process,
+                 amdsmi_proc_info_t* process_list));
 
     /**
      * @brief Set up default mock behaviors for common operations.
@@ -73,6 +76,8 @@ public:
         ON_CALL(*this, get_memory_usage(_, _, _))
             .WillByDefault(Return(AMDSMI_STATUS_SUCCESS));
         ON_CALL(*this, get_metrics_info(_, _))
+            .WillByDefault(Return(AMDSMI_STATUS_SUCCESS));
+        ON_CALL(*this, get_gpu_process_list(_, _, _))
             .WillByDefault(Return(AMDSMI_STATUS_SUCCESS));
     }
 };

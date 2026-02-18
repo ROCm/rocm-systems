@@ -63,11 +63,12 @@ class device
 {
 public:
     device(std::shared_ptr<Driver> driver, amdsmi_processor_handle handle,
-           processor_type_t processor_type, size_t logical_index)
+           processor_type_t processor_type, size_t logical_index, uint32_t target_pid)
     : m_driver_api{ std::move(driver) }
     , m_device_handle{ handle }
     , m_device_type{ processor_type }
     , m_index{ logical_index }
+    , m_target_pid{ target_pid }
     {
         m_is_supported = initialize_supported_metrics();
     }
@@ -110,6 +111,8 @@ public:
         collect_xcp_metrics(amd_smi_metrics, metrics, user_enabled);
         collect_xgmi_metrics(amd_smi_metrics, metrics, user_enabled);
         collect_pcie_metrics(amd_smi_metrics, metrics, user_enabled);
+        // SDMA metrics uses a different API call, so it's collected separately.
+        collect_sdma_metrics(metrics, user_enabled);
 
         return metrics;
     }
@@ -176,6 +179,44 @@ private:
                                           &mem_usage) == AMDSMI_STATUS_SUCCESS)
         {
             metrics.memory_usage = mem_usage;
+        }
+    }
+
+    void collect_sdma_metrics(metrics& metrics, const enabled_metrics& user_enabled) const
+    {
+        if(!m_supported_metrics.sdma() || !user_enabled.sdma())
+        {
+            return;
+        }
+        // Buffer is always populated in initialize_supported_metrics when SDMA is
+        // supported, so we only need one call per sample.
+        if(m_process_list.empty())
+        {
+            return;
+        }
+
+        uint32_t        num_process = static_cast<uint32_t>(m_process_list.size());
+        amdsmi_status_t ret         = m_driver_api->get_gpu_process_list(
+            m_device_handle, &num_process, m_process_list.data());
+        if(ret == AMDSMI_STATUS_OUT_OF_RESOURCES && num_process > 0)
+        {
+            m_process_list.resize(num_process);
+            num_process = static_cast<uint32_t>(m_process_list.size());
+            ret = m_driver_api->get_gpu_process_list(m_device_handle, &num_process,
+                                                     m_process_list.data());
+        }
+        if(ret != AMDSMI_STATUS_SUCCESS || num_process == 0)
+        {
+            return;
+        }
+
+        for(uint32_t i = 0; i < num_process; ++i)
+        {
+            if(m_process_list[i].pid == m_target_pid)
+            {
+                metrics.sdma = m_process_list[i].sdma_usage;
+                return;
+            }
         }
     }
 
@@ -323,6 +364,28 @@ private:
             is_metric_supported(gpu_metrics.pcie_bandwidth_acc) ||
             is_metric_supported(gpu_metrics.pcie_bandwidth_inst));
 
+        // SDMA is only supported if the library provides sdma_usage in amdsmi_proc_info_t
+        // Get the process list and check that the field is not unsupported sentinel.
+        uint32_t num_process    = 0;
+        bool     sdma_available = false;
+        if(m_driver_api->get_gpu_process_list(m_device_handle, &num_process, nullptr) ==
+               AMDSMI_STATUS_SUCCESS &&
+           num_process > 0)
+        {
+            m_process_list.resize(num_process);
+            num_process = static_cast<uint32_t>(m_process_list.size());
+            if(m_driver_api->get_gpu_process_list(m_device_handle, &num_process,
+                                                  m_process_list.data()) ==
+                   AMDSMI_STATUS_SUCCESS &&
+               num_process > 0)
+            {
+                sdma_available = is_metric_supported(
+                    m_process_list[0].sdma_usage,
+                    ::rocprofsys::pmc::gpu::METRIC_VALUE_NOT_SUPPORTED_64);
+            }
+        }
+        m_supported_metrics.set_sdma(sdma_available);
+
         LOG_DEBUG("Device [{}] supported metrics: {}", m_index,
                   format_supported_metrics(m_supported_metrics));
 
@@ -335,14 +398,14 @@ private:
                            "Hotspot temp: {}, Edge temp: {}, GFX activity: {}, "
                            "UMC activity: {}, MM activity: {}, VCN busy: {}, "
                            "VCN activity: {}, JPEG busy: {}, JPEG activity: {}, "
-                           "XGMI: {}, PCIe: {}",
+                           "XGMI: {}, PCIe: {}, SDMA usage: {}",
                            metrics.current_socket_power(), metrics.average_socket_power(),
                            metrics.memory_usage(), metrics.hotspot_temperature(),
                            metrics.edge_temperature(), metrics.gfx_activity(),
                            metrics.umc_activity(), metrics.mm_activity(),
                            metrics.xcp_vcn_activity(), metrics.vcn_activity(),
                            metrics.xcp_jpeg_activity(), metrics.jpeg_activity(),
-                           metrics.xgmi(), metrics.pcie());
+                           metrics.xgmi(), metrics.pcie(), metrics.sdma());
     }
 
     template <typename T>
@@ -367,6 +430,9 @@ private:
     enabled_metrics         m_supported_metrics;
     size_t                  m_index;
     bool                    m_is_supported = false;
+    const uint32_t          m_target_pid;  // Root process ID (cached for session)
+
+    mutable std::vector<amdsmi_proc_info_t> m_process_list;
 };
 
 #endif  // ROCPROFSYS_USE_ROCM > 0

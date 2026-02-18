@@ -343,9 +343,10 @@ private:
 
                 if(should_include)
                 {
-                    auto device =
-                        Traits::create_device(driver, processor_handle,
-                                              Traits::expected_processor_type(), index);
+                    auto target_pid = SettingsApi::get_target_pid();
+                    auto device     = Traits::create_device(driver, processor_handle,
+                                                            Traits::expected_processor_type(),
+                                                            index, target_pid);
                     if(Traits::is_device_supported(device))
                     {
                         // Cache supported metrics at enumeration time to avoid

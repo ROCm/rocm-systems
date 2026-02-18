@@ -12,6 +12,7 @@
 using namespace rocprofsys::pmc::collectors::gpu;
 using ::testing::_;
 using ::testing::DoAll;
+using ::testing::Invoke;
 using ::testing::Return;
 using ::testing::SetArgPointee;
 
@@ -245,7 +246,7 @@ TEST_F(DeviceTest, valid_device_construction_full_support)
     SetupAllMetricsSupported();
 
     // Create device
-    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
+    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index, 0);
 
     // Verify device is supported
     EXPECT_TRUE(dev.is_supported());
@@ -271,7 +272,7 @@ TEST_F(DeviceTest, device_construction_no_support)
     SetupNoMetricsSupported();
 
     // Create device
-    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
+    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index, 0);
 
     // Verify device is not supported
     EXPECT_FALSE(dev.is_supported());
@@ -298,7 +299,7 @@ TEST_F(DeviceTest, device_construction_partial_support)
     SetupPartialMetricsSupported();
 
     // Create device
-    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
+    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index, 0);
 
     // Verify device is supported (at least one metric available)
     EXPECT_TRUE(dev.is_supported());
@@ -335,7 +336,7 @@ TEST_F(DeviceTest, device_construction_different_types)
 
     // Test with GPU type
     {
-        device<MockDriver> dev(mock_driver, test_handle, AMDSMI_PROCESSOR_TYPE_AMD_GPU,
+        device<MockDriver> dev(mock_driver, test_handle, AMDSMI_PROCESSOR_TYPE_AMD_GPU, 0,
                                0);
         EXPECT_EQ(dev.get_device_type(), AMDSMI_PROCESSOR_TYPE_AMD_GPU);
     }
@@ -343,14 +344,14 @@ TEST_F(DeviceTest, device_construction_different_types)
     // Test with CPU type
     {
         device<MockDriver> dev(mock_driver, test_handle,
-                               AMDSMI_PROCESSOR_TYPE_AMD_CPU_CORE, 1);
+                               AMDSMI_PROCESSOR_TYPE_AMD_CPU_CORE, 1, 0);
         EXPECT_EQ(dev.get_device_type(), AMDSMI_PROCESSOR_TYPE_AMD_CPU_CORE);
     }
 
     // Test with APU type
     {
-        device<MockDriver> dev(mock_driver, test_handle, AMDSMI_PROCESSOR_TYPE_AMD_APU,
-                               2);
+        device<MockDriver> dev(mock_driver, test_handle, AMDSMI_PROCESSOR_TYPE_AMD_APU, 2,
+                               0);
         EXPECT_EQ(dev.get_device_type(), AMDSMI_PROCESSOR_TYPE_AMD_APU);
     }
 }
@@ -379,7 +380,7 @@ TEST_F(DeviceTest, current_socket_power_collection)
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
 
     // Create device (initializes supported metrics)
-    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
+    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index, 0);
 
     // Verify current_socket_power is marked as supported
     EXPECT_TRUE(dev.get_supported_metrics().current_socket_power());
@@ -411,7 +412,7 @@ TEST_F(DeviceTest, average_socket_power_collection)
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
 
     // Create device
-    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
+    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index, 0);
 
     // Verify average_socket_power is marked as supported
     EXPECT_TRUE(dev.get_supported_metrics().average_socket_power());
@@ -434,7 +435,7 @@ TEST_F(DeviceTest, power_metrics_not_collected_when_unsupported)
     SetupNoMetricsSupported();
 
     // Create device
-    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
+    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index, 0);
 
     // Verify power metrics are not marked as supported
     auto supported = dev.get_supported_metrics();
@@ -473,7 +474,7 @@ TEST_F(DeviceTest, hotspot_temperature_collection)
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
 
     // Create device
-    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
+    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index, 0);
 
     // Verify hotspot_temperature is marked as supported
     EXPECT_TRUE(dev.get_supported_metrics().hotspot_temperature());
@@ -505,7 +506,7 @@ TEST_F(DeviceTest, edge_temperature_collection)
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
 
     // Create device
-    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
+    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index, 0);
 
     // Verify edge_temperature is marked as supported
     EXPECT_TRUE(dev.get_supported_metrics().edge_temperature());
@@ -528,7 +529,7 @@ TEST_F(DeviceTest, temperature_metrics_not_collected_when_unsupported)
     SetupNoMetricsSupported();
 
     // Create device
-    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
+    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index, 0);
 
     // Verify temperature metrics are not marked as supported
     auto supported = dev.get_supported_metrics();
@@ -567,7 +568,7 @@ TEST_F(DeviceTest, gfx_activity_collection)
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
 
     // Create device
-    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
+    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index, 0);
 
     // Verify gfx_activity is marked as supported
     EXPECT_TRUE(dev.get_supported_metrics().gfx_activity());
@@ -599,7 +600,7 @@ TEST_F(DeviceTest, umc_activity_collection)
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
 
     // Create device
-    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
+    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index, 0);
 
     // Verify umc_activity is marked as supported
     EXPECT_TRUE(dev.get_supported_metrics().umc_activity());
@@ -631,7 +632,7 @@ TEST_F(DeviceTest, mm_activity_collection)
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
 
     // Create device
-    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
+    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index, 0);
 
     // Verify mm_activity is marked as supported
     EXPECT_TRUE(dev.get_supported_metrics().mm_activity());
@@ -665,7 +666,7 @@ TEST_F(DeviceTest, all_activity_metrics_collection)
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
 
     // Create device
-    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
+    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index, 0);
 
     // Verify all activity metrics are marked as supported
     auto supported = dev.get_supported_metrics();
@@ -705,7 +706,7 @@ TEST_F(DeviceTest, vram_memory_usage_collection_success)
         .WillByDefault(DoAll(SetArgPointee<2>(mem_usage), Return(AMDSMI_STATUS_SUCCESS)));
 
     // Create device
-    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
+    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index, 0);
 
     // Verify memory_usage is marked as supported
     EXPECT_TRUE(dev.get_supported_metrics().memory_usage());
@@ -735,7 +736,7 @@ TEST_F(DeviceTest, memory_usage_collection_failure)
         .WillByDefault(Return(AMDSMI_STATUS_NOT_SUPPORTED));
 
     // Create device
-    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
+    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index, 0);
 
     // Verify memory_usage is NOT marked as supported
     EXPECT_FALSE(dev.get_supported_metrics().memory_usage());
@@ -758,7 +759,7 @@ TEST_F(DeviceTest, memory_usage_not_collected_when_unsupported)
     SetupNoMetricsSupported();
 
     // Create device
-    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
+    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index, 0);
 
     // Verify memory_usage is NOT marked as supported
     EXPECT_FALSE(dev.get_supported_metrics().memory_usage());
@@ -807,7 +808,7 @@ TEST_F(DeviceTest, vcn_busy_collection_all_xcps)
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
 
     // Create device
-    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
+    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index, 0);
 
     // Verify vcn_busy is marked as supported (per-XCP metrics)
     EXPECT_TRUE(dev.get_supported_metrics().vcn_busy());
@@ -857,7 +858,7 @@ TEST_F(DeviceTest, jpeg_activity_collection_all_xcps)
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
 
     // Create device
-    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
+    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index, 0);
 
     // Verify jpeg_activity is marked as supported
     EXPECT_TRUE(dev.get_supported_metrics().jpeg_activity());
@@ -887,7 +888,7 @@ TEST_F(DeviceTest, xcp_metrics_not_collected_when_unsupported)
     SetupNoMetricsSupported();
 
     // Create device
-    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
+    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index, 0);
 
     // Verify XCP metrics are NOT marked as supported
     auto supported = dev.get_supported_metrics();
@@ -910,6 +911,187 @@ TEST_F(DeviceTest, xcp_metrics_not_collected_when_unsupported)
         }
     }
 }
+
+// ============================================================================
+// Category: SDMA Metrics Collection Tests
+// ============================================================================
+
+/**
+ * SDMA Collection - target process in list
+ *
+ * Objective: Verify SDMA usage is collected when process list contains the
+ * target process and sdma_usage is supported.
+ */
+TEST_F(DeviceTest, sdma_collection)
+{
+    const uint32_t target_pid = 0;
+    const uint64_t sdma_value = 42;
+
+    amdsmi_gpu_metrics_t metrics = CreateSentinelMetrics();
+    ON_CALL(*mock_driver, get_metrics_info(test_handle, _))
+        .WillByDefault(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
+    uint64_t sentinel_mem = 0xFFFFFFFFFFFFFFFFULL;
+    ON_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
+        .WillByDefault(
+            DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
+
+    ON_CALL(*mock_driver, get_gpu_process_list(test_handle, _, _))
+        .WillByDefault(DoAll(Invoke([target_pid, sdma_value](
+                                        amdsmi_processor_handle, uint32_t* num_process,
+                                        amdsmi_proc_info_t* process_list) {
+                                 *num_process = 1;
+                                 if(process_list != nullptr)
+                                 {
+                                     process_list[0].pid        = target_pid;
+                                     process_list[0].sdma_usage = sdma_value;
+                                 }
+                             }),
+                             Return(AMDSMI_STATUS_SUCCESS)));
+
+    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index,
+                           target_pid);
+
+    EXPECT_TRUE(dev.get_supported_metrics().sdma());
+
+    auto collected_metrics = dev.get_gpu_metrics(all_metrics_enabled());
+    EXPECT_EQ(collected_metrics.sdma, sdma_value);
+}
+
+/**
+ * SDMA Not Collected When Unsupported
+ *
+ * Objective: Verify SDMA is not marked supported and remains zero when
+ * process list reports sdma_usage as the unsupported sentinel.
+ */
+TEST_F(DeviceTest, sdma_not_collected_when_unsupported)
+{
+    amdsmi_gpu_metrics_t metrics = CreateSentinelMetrics();
+    ON_CALL(*mock_driver, get_metrics_info(test_handle, _))
+        .WillByDefault(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
+    uint64_t sentinel_mem = 0xFFFFFFFFFFFFFFFFULL;
+    ON_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
+        .WillByDefault(
+            DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
+
+    constexpr uint64_t sdma_unsupported = 0xFFFFFFFFFFFFFFFFULL;
+    ON_CALL(*mock_driver, get_gpu_process_list(test_handle, _, _))
+        .WillByDefault(DoAll(
+            Invoke([sdma_unsupported](amdsmi_processor_handle, uint32_t* num_process,
+                                      amdsmi_proc_info_t* process_list) {
+                *num_process = 1;
+                if(process_list != nullptr)
+                {
+                    process_list[0].pid        = 0;
+                    process_list[0].sdma_usage = sdma_unsupported;
+                }
+            }),
+            Return(AMDSMI_STATUS_SUCCESS)));
+
+    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index, 0);
+
+    EXPECT_FALSE(dev.get_supported_metrics().sdma());
+
+    auto collected_metrics = dev.get_gpu_metrics(all_metrics_enabled());
+    EXPECT_EQ(collected_metrics.sdma, 0ULL);
+}
+
+/**
+ * SDMA Not Supported When Process List Fails
+ *
+ * Objective: Verify SDMA is not marked supported when get_gpu_process_list fails.
+ */
+TEST_F(DeviceTest, sdma_not_supported_when_process_list_fails)
+{
+    SetupNoMetricsSupported();
+    ON_CALL(*mock_driver, get_gpu_process_list(test_handle, _, _))
+        .WillByDefault(Return(AMDSMI_STATUS_NOT_SUPPORTED));
+
+    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index, 0);
+
+    EXPECT_FALSE(dev.get_supported_metrics().sdma());
+
+    auto collected_metrics = dev.get_gpu_metrics(all_metrics_enabled());
+    EXPECT_EQ(collected_metrics.sdma, 0ULL);
+}
+
+/**
+ * SDMA Target Process Not In List
+ *
+ * Objective: Verify SDMA remains zero when supported but no process in the list
+ * matches the target PID.
+ */
+TEST_F(DeviceTest, sdma_target_process_not_in_list)
+{
+    const uint32_t target_pid = 0;    // device is looking for this
+    const uint32_t other_pid  = 999;  // process list has only this
+
+    amdsmi_gpu_metrics_t metrics = CreateSentinelMetrics();
+    ON_CALL(*mock_driver, get_metrics_info(test_handle, _))
+        .WillByDefault(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
+    uint64_t sentinel_mem = 0xFFFFFFFFFFFFFFFFULL;
+    ON_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
+        .WillByDefault(
+            DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
+
+    ON_CALL(*mock_driver, get_gpu_process_list(test_handle, _, _))
+        .WillByDefault(DoAll(
+            Invoke([other_pid](amdsmi_processor_handle, uint32_t* num_process,
+                               amdsmi_proc_info_t* process_list) {
+                *num_process = 1;
+                if(process_list != nullptr)
+                {
+                    process_list[0].pid        = other_pid;
+                    process_list[0].sdma_usage = 100;  // valid value but wrong process
+                }
+            }),
+            Return(AMDSMI_STATUS_SUCCESS)));
+
+    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index,
+                           target_pid);
+
+    EXPECT_TRUE(dev.get_supported_metrics().sdma());
+
+    auto collected_metrics = dev.get_gpu_metrics(all_metrics_enabled());
+    EXPECT_EQ(collected_metrics.sdma, 0ULL);
+}
+
+/**
+ * SDMA Support Detection - valid sdma_usage
+ *
+ * Objective: Verify SDMA is marked supported when process list returns valid
+ * sdma_usage (not the 64-bit sentinel).
+ */
+TEST_F(DeviceTest, sdma_support_detection_valid)
+{
+    amdsmi_gpu_metrics_t metrics = CreateSentinelMetrics();
+    ON_CALL(*mock_driver, get_metrics_info(test_handle, _))
+        .WillByDefault(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
+    uint64_t sentinel_mem = 0xFFFFFFFFFFFFFFFFULL;
+    ON_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
+        .WillByDefault(
+            DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
+
+    ON_CALL(*mock_driver, get_gpu_process_list(test_handle, _, _))
+        .WillByDefault(DoAll(Invoke([](amdsmi_processor_handle, uint32_t* num_process,
+                                       amdsmi_proc_info_t* process_list) {
+                                 *num_process = 1;
+                                 if(process_list != nullptr)
+                                 {
+                                     process_list[0].pid = 0;
+                                     process_list[0].sdma_usage =
+                                         1;  // any non-sentinel value
+                                 }
+                             }),
+                             Return(AMDSMI_STATUS_SUCCESS)));
+
+    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index, 0);
+
+    EXPECT_TRUE(dev.get_supported_metrics().sdma());
+}
+
+// ============================================================================
+// Category 6 (continued): XCP Mixed Support
+// ============================================================================
 
 /**
  * Mixed VCN/JPEG Support
@@ -940,7 +1122,7 @@ TEST_F(DeviceTest, mixed_vcn_jpeg_support)
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
 
     // Create device
-    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
+    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index, 0);
 
     // Verify only VCN is supported
     auto supported = dev.get_supported_metrics();
@@ -994,7 +1176,7 @@ TEST_F(DeviceTest, xgmi_link_width_collection)
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
 
     // Create device
-    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
+    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index, 0);
 
     // Verify XGMI is marked as supported
     EXPECT_TRUE(dev.get_supported_metrics().xgmi());
@@ -1026,7 +1208,7 @@ TEST_F(DeviceTest, xgmi_link_speed_collection)
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
 
     // Create device
-    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
+    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index, 0);
 
     // Verify XGMI is marked as supported
     EXPECT_TRUE(dev.get_supported_metrics().xgmi());
@@ -1064,7 +1246,7 @@ TEST_F(DeviceTest, xgmi_read_write_data_collection_all_links)
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
 
     // Create device
-    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
+    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index, 0);
 
     // Verify XGMI is marked as supported
     EXPECT_TRUE(dev.get_supported_metrics().xgmi());
@@ -1109,7 +1291,7 @@ TEST_F(DeviceTest, xgmi_sentinel_value_handling)
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
 
     // Create device
-    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
+    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index, 0);
 
     // Verify XGMI is marked as supported (at least one metric is valid)
     EXPECT_TRUE(dev.get_supported_metrics().xgmi());
@@ -1137,7 +1319,7 @@ TEST_F(DeviceTest, xgmi_not_collected_when_unsupported)
     SetupNoMetricsSupported();
 
     // Create device
-    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
+    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index, 0);
 
     // Verify XGMI is NOT marked as supported
     EXPECT_FALSE(dev.get_supported_metrics().xgmi());
@@ -1180,7 +1362,7 @@ TEST_F(DeviceTest, pcie_link_width_collection)
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
 
     // Create device
-    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
+    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index, 0);
 
     // Verify PCIe is marked as supported
     EXPECT_TRUE(dev.get_supported_metrics().pcie());
@@ -1212,7 +1394,7 @@ TEST_F(DeviceTest, pcie_link_speed_collection)
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
 
     // Create device
-    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
+    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index, 0);
 
     // Verify PCIe is marked as supported
     EXPECT_TRUE(dev.get_supported_metrics().pcie());
@@ -1244,7 +1426,7 @@ TEST_F(DeviceTest, pcie_bandwidth_accumulator_collection)
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
 
     // Create device
-    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
+    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index, 0);
 
     // Verify PCIe is marked as supported
     EXPECT_TRUE(dev.get_supported_metrics().pcie());
@@ -1276,7 +1458,7 @@ TEST_F(DeviceTest, pcie_bandwidth_instantaneous_collection)
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
 
     // Create device
-    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
+    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index, 0);
 
     // Verify PCIe is marked as supported
     EXPECT_TRUE(dev.get_supported_metrics().pcie());
@@ -1312,7 +1494,7 @@ TEST_F(DeviceTest, pcie_sentinel_value_handling)
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
 
     // Create device
-    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
+    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index, 0);
 
     // Verify PCIe is marked as supported (at least one metric is valid)
     EXPECT_TRUE(dev.get_supported_metrics().pcie());
@@ -1338,7 +1520,7 @@ TEST_F(DeviceTest, pcie_not_collected_when_unsupported)
     SetupNoMetricsSupported();
 
     // Create device
-    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
+    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index, 0);
 
     // Verify PCIe is NOT marked as supported
     EXPECT_FALSE(dev.get_supported_metrics().pcie());
@@ -1368,7 +1550,7 @@ TEST_F(DeviceTest, all_metrics_supported_detection)
     SetupAllMetricsSupported();
 
     // Create device (this triggers initialize_supported_metrics())
-    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
+    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index, 0);
 
     // Verify all metric support bits are set
     auto supported = dev.get_supported_metrics();
@@ -1408,7 +1590,7 @@ TEST_F(DeviceTest, vcn_activity_support_detection_any_xcp)
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
 
     // Create device
-    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
+    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index, 0);
 
     // Verify VCN activity is marked as supported
     EXPECT_TRUE(dev.get_supported_metrics().vcn_activity());
@@ -1425,7 +1607,7 @@ TEST_F(DeviceTest, vcn_activity_unsupported_all_sentinels)
     SetupNoMetricsSupported();
 
     // Create device
-    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
+    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index, 0);
 
     // Verify VCN activity is NOT supported
     EXPECT_FALSE(dev.get_supported_metrics().vcn_activity());
@@ -1453,7 +1635,7 @@ TEST_F(DeviceTest, jpeg_activity_support_detection_any_xcp)
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
 
     // Create device
-    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
+    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index, 0);
 
     // Verify JPEG activity is marked as supported
     EXPECT_TRUE(dev.get_supported_metrics().jpeg_activity());
@@ -1480,7 +1662,7 @@ TEST_F(DeviceTest, xgmi_support_detection_link_width_only)
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
 
     // Create device
-    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
+    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index, 0);
 
     // Verify XGMI is marked as supported (OR logic)
     EXPECT_TRUE(dev.get_supported_metrics().xgmi());
@@ -1507,7 +1689,7 @@ TEST_F(DeviceTest, xgmi_support_detection_any_read_data_valid)
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
 
     // Create device
-    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
+    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index, 0);
 
     // Verify XGMI is marked as supported (std::any_of logic)
     EXPECT_TRUE(dev.get_supported_metrics().xgmi());
@@ -1534,7 +1716,7 @@ TEST_F(DeviceTest, pcie_support_detection_bandwidth_only)
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
 
     // Create device
-    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
+    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index, 0);
 
     // Verify PCIe is marked as supported (OR logic)
     EXPECT_TRUE(dev.get_supported_metrics().pcie());
@@ -1559,7 +1741,7 @@ TEST_F(DeviceTest, memory_usage_support_detection)
             DoAll(SetArgPointee<2>(valid_mem_usage), Return(AMDSMI_STATUS_SUCCESS)));
 
     // Create device
-    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
+    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index, 0);
 
     // Verify memory usage is marked as supported
     EXPECT_TRUE(dev.get_supported_metrics().memory_usage());
@@ -1582,7 +1764,7 @@ TEST_F(DeviceTest, memory_usage_unsupported_api_failure)
         .WillByDefault(Return(AMDSMI_STATUS_NOT_SUPPORTED));
 
     // Create device
-    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
+    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index, 0);
 
     // Verify memory usage is NOT marked as supported
     EXPECT_FALSE(dev.get_supported_metrics().memory_usage());
@@ -1607,7 +1789,7 @@ TEST_F(DeviceTest, memory_usage_unsupported_sentinel_value)
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
 
     // Create device
-    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
+    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index, 0);
 
     // Verify memory usage is NOT marked as supported
     EXPECT_FALSE(dev.get_supported_metrics().memory_usage());
@@ -1647,7 +1829,7 @@ TEST_F(DeviceTest, vcn_activity_top_level_field_only)
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
 
     // Create device
-    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
+    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index, 0);
 
     // EXPECTED BEHAVIOR: VCN activity should be marked as supported
     // CURRENT BEHAVIOR: Will NOT be supported because implementation only checks XCP
@@ -1687,7 +1869,7 @@ TEST_F(DeviceTest, vcn_activity_in_both_fields)
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
 
     // Create device
-    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
+    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index, 0);
 
     // VCN activity should be supported (XCP stats are valid)
     EXPECT_TRUE(dev.get_supported_metrics().vcn_activity());
@@ -1731,7 +1913,7 @@ TEST_F(DeviceTest, vcn_activity_detection_should_check_both_sources)
         .WillByDefault(
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
 
-    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
+    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index, 0);
 
     // EXPECTED (when fixed): vcn_activity should be supported
     // CURRENT: Will be false because top-level field is not checked
@@ -1771,7 +1953,7 @@ TEST_F(DeviceTest, vcn_activity_collection_priority)
         .WillByDefault(
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
 
-    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
+    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index, 0);
 
     auto collected = dev.get_gpu_metrics(all_metrics_enabled());
 
@@ -1807,7 +1989,7 @@ TEST_F(DeviceTest, vcn_activity_xcp_disabled_top_level_valid)
         .WillByDefault(
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
 
-    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
+    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index, 0);
 
     // CURRENT: VCN not supported (implementation only checks XCP stats)
     EXPECT_FALSE(dev.get_supported_metrics().vcn_activity());
@@ -1838,7 +2020,7 @@ TEST_F(DeviceTest, get_metrics_info_failure)
             DoAll(SetArgPointee<2>(valid_mem_usage), Return(AMDSMI_STATUS_SUCCESS)));
 
     // Create device
-    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
+    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index, 0);
 
     // Call get_gpu_metrics() - should not throw
     auto metrics = dev.get_gpu_metrics(all_metrics_enabled());
@@ -1868,7 +2050,7 @@ TEST_F(DeviceTest, get_metrics_info_failure_during_init)
             DoAll(SetArgPointee<2>(valid_mem_usage), Return(AMDSMI_STATUS_SUCCESS)));
 
     // Create device - should not crash
-    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
+    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index, 0);
 
     // is_supported() should reflect whether ANY metric was supported (memory in this
     // case)
@@ -1891,7 +2073,7 @@ TEST_F(DeviceTest, multiple_metric_collections)
     SetupAllMetricsSupported();
 
     // Create device
-    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
+    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index, 0);
 
     // Collect metrics 10 times in a row
     for(int i = 0; i < 10; ++i)
@@ -1927,7 +2109,7 @@ TEST_F(DeviceTest, large_array_indices_xgmi)
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
 
     // Create device
-    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
+    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index, 0);
 
     // Collect metrics - should not crash or cause buffer overflow
     auto collected_metrics = dev.get_gpu_metrics(all_metrics_enabled());
@@ -1967,7 +2149,7 @@ TEST_F(DeviceTest, large_array_indices_xcp)
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
 
     // Create device
-    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
+    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index, 0);
 
     // Collect metrics - should not crash
     auto collected_metrics = dev.get_gpu_metrics(all_metrics_enabled());
@@ -2011,7 +2193,7 @@ TEST_F(DeviceTest, large_array_indices_jpeg)
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
 
     // Create device
-    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
+    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index, 0);
 
     // Collect metrics - should not crash
     auto collected_metrics = dev.get_gpu_metrics(all_metrics_enabled());
@@ -2065,8 +2247,8 @@ TEST_F(DeviceTest, concurrent_device_objects)
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
 
     // Create two device objects
-    device<MockDriver> dev1(mock_driver1, handle1, test_processor_type, 0);
-    device<MockDriver> dev2(mock_driver2, handle2, test_processor_type, 1);
+    device<MockDriver> dev1(mock_driver1, handle1, test_processor_type, 0, 0);
+    device<MockDriver> dev2(mock_driver2, handle2, test_processor_type, 1, 0);
 
     // Collect from device 1
     auto result1 = dev1.get_gpu_metrics(all_metrics_enabled());
@@ -2096,7 +2278,7 @@ TEST_F(DeviceTest, device_with_index_zero)
     SetupAllMetricsSupported();
 
     // Create device with index 0
-    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, 0);
+    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, 0, 0);
 
     // Verify index is correctly stored
     EXPECT_EQ(dev.get_index(), 0U);
@@ -2113,7 +2295,7 @@ TEST_F(DeviceTest, device_with_high_index)
     SetupAllMetricsSupported();
 
     // Create device with high index (simulating 16-GPU system)
-    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, 15);
+    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, 15, 0);
 
     // Verify index is correctly stored
     EXPECT_EQ(dev.get_index(), 15U);
@@ -2163,7 +2345,7 @@ TEST_F(DeviceTest, full_lifecycle_with_realistic_data)
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
 
     // Construct device
-    device<MockDriver> dev(mock, test_handle, test_processor_type, test_index);
+    device<MockDriver> dev(mock, test_handle, test_processor_type, test_index, 0);
 
     // Collection 1: Idle
     auto result1 = dev.get_gpu_metrics(all_metrics_enabled());
@@ -2196,7 +2378,7 @@ TEST_F(DeviceTest, device_type_filtering_scenario)
 
     // Create GPU device
     device<MockDriver> gpu_device(mock_driver, test_handle, AMDSMI_PROCESSOR_TYPE_AMD_GPU,
-                                  test_index);
+                                  test_index, 0);
 
     // Verify device type is correctly stored
     EXPECT_EQ(gpu_device.get_device_type(), AMDSMI_PROCESSOR_TYPE_AMD_GPU);

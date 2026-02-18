@@ -97,6 +97,7 @@ using amd_smi_mm_track    = perfetto_counter_track<category::amd_smi_mm_busy>;
 using amd_smi_temp_track  = perfetto_counter_track<category::amd_smi_temp>;
 using amd_smi_power_track = perfetto_counter_track<category::amd_smi_power>;
 using amd_smi_mem_track   = perfetto_counter_track<category::amd_smi_memory_usage>;
+using amd_smi_sdma_track  = perfetto_counter_track<category::amd_smi_sdma>;
 using amd_smi_vcn_track   = perfetto_counter_track<category::amd_smi_vcn_activity>;
 using amd_smi_jpeg_track  = perfetto_counter_track<category::amd_smi_jpeg_activity>;
 using amd_smi_xgmi_link_width_track =
@@ -1049,6 +1050,14 @@ perfetto_processor_t::handle([[maybe_unused]] const pmc::gpu::sample& _gpu_pmc)
             _gpu_pmc.metric_values.memory_usage / static_cast<double>(units::megabyte);
         TRACE_COUNTER("device_memory_usage", amd_smi_mem_track::at(_device_id, 0), _ts,
                       mem_mb);
+    }
+    if(_gpu_pmc.enabled_metric.sdma())
+    {
+        if(!amd_smi_sdma_track::exists(_device_id))
+            amd_smi_sdma_track::emplace(_device_id, make_track_name("SDMA Usage"), "us");
+
+        TRACE_COUNTER("device_sdma", amd_smi_sdma_track::at(_device_id, 0), _ts,
+                      static_cast<double>(_gpu_pmc.metric_values.sdma));
     }
 
     if(!_gpu_pmc.enabled_metric.vcn_activity() &&

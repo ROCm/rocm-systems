@@ -129,6 +129,9 @@ struct metrics
             uint64_t inst = 0;
         } bandwidth;
     } pcie;
+
+    /// SDMA usage for the target process (root process), in microseconds.
+    uint64_t sdma = 0;
 };
 
 inline void

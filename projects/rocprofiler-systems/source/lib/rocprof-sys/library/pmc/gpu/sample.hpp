@@ -87,7 +87,8 @@ serialize(uint8_t* buffer, const pmc::gpu::sample& item)
         item.metric_values.xgmi.link.width, item.metric_values.xgmi.link.speed,
         item.metric_values.xgmi.data_acc.read, item.metric_values.xgmi.data_acc.write,
         item.metric_values.pcie.link.width, item.metric_values.pcie.link.speed,
-        item.metric_values.pcie.bandwidth.acc, item.metric_values.pcie.bandwidth.inst);
+        item.metric_values.pcie.bandwidth.acc, item.metric_values.pcie.bandwidth.inst,
+        item.metric_values.sdma);
 }
 
 template <>
@@ -106,7 +107,7 @@ deserialize(uint8_t*& buffer)
         item.metric_values.xgmi.link.speed, item.metric_values.xgmi.data_acc.read,
         item.metric_values.xgmi.data_acc.write, item.metric_values.pcie.link.width,
         item.metric_values.pcie.link.speed, item.metric_values.pcie.bandwidth.acc,
-        item.metric_values.pcie.bandwidth.inst);
+        item.metric_values.pcie.bandwidth.inst, item.metric_values.sdma);
     return item;
 }
 
@@ -125,7 +126,7 @@ get_size(const pmc::gpu::sample& item)
         item.metric_values.xgmi.link.speed, item.metric_values.xgmi.data_acc.read,
         item.metric_values.xgmi.data_acc.write, item.metric_values.pcie.link.width,
         item.metric_values.pcie.link.speed, item.metric_values.pcie.bandwidth.acc,
-        item.metric_values.pcie.bandwidth.inst);
+        item.metric_values.pcie.bandwidth.inst, item.metric_values.sdma);
 }
 
 }  // namespace trace_cache
