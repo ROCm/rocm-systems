@@ -42,6 +42,7 @@
 
 #include <pthread.h>
 #include <unistd.h>
+#include <array>
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
@@ -302,6 +303,78 @@ TEST(rocprofiler_lib, agent)
         delete[] itr.name_str;
 }
 
+
+namespace
+{
+// Expected agent values when using local topology data/topology/nodes (7 nodes).
+// Used to verify that rocprofiler_query_available_agents returns agents matching the topology.
+struct LocalTopologyExpectedAgent
+{
+    rocprofiler_agent_type_t type;
+    uint32_t                 cpu_cores_count;
+    uint32_t                 simd_count;
+    uint32_t                 gfx_target_version;
+    uint32_t                 max_waves_per_simd;
+    uint32_t                 cu_per_simd_array;
+    // uint32_t                 mem_banks_count;
+    // uint32_t                 io_links_count;
+    // uint32_t                 wave_front_size;
+    // uint32_t                 array_count;
+    // uint32_t                 simd_arrays_per_engine;
+    // uint32_t                 simd_per_cu;
+    // uint32_t                 cu_count;
+    // uint32_t                 num_shader_banks;
+    // uint32_t                 num_sdma_engines;
+};
+
+//Specifying the expected number of agents/nodes when using local topology
+const int ExpectedAgentsCount{7};
+
+const std::array<LocalTopologyExpectedAgent, ExpectedAgentsCount> kLocalTopologyExpectedAgents = {{
+    // Node 0: CPU (from data/topology/nodes/0/properties)
+    {ROCPROFILER_AGENT_TYPE_CPU, 24, 0, 0, 0, 0},
+    // Node 1: GPU gfx906 (simd_count/simd_per_cu=60, array_count/simd_arrays_per_engine=4)
+    {ROCPROFILER_AGENT_TYPE_GPU, 0, 240, 90006, 10, 16},
+    // Node 2: GPU gfx1102
+    {ROCPROFILER_AGENT_TYPE_GPU, 0, 56, 110002, 16, 8},
+    // Node 3: GPU gfx1032
+    {ROCPROFILER_AGENT_TYPE_GPU, 0, 64, 100302, 16, 8},
+    // Node 4: GPU gfx942 (num_shader_banks = array_count/simd_arrays_per_engine = 32/1)
+    {ROCPROFILER_AGENT_TYPE_GPU, 0, 1216, 90402, 8, 10},
+    // Node 5: GPU gfx950
+    {ROCPROFILER_AGENT_TYPE_GPU, 0, 1024, 90500, 8, 9},
+    // Node 6: GPU gfx1201 (num_shader_banks = 8/2 = 4)
+    {ROCPROFILER_AGENT_TYPE_GPU, 0, 128, 120001, 16, 8},
+}};
+
+void
+expect_agent_matches_local_topology(const rocprofiler_agent_t*        actual,
+                                    const LocalTopologyExpectedAgent& expected,
+                                    size_t                            node_index)
+{
+    ASSERT_NE(actual, nullptr);
+    auto msg = [&](const char* field) {
+        return fmt::format("node_index={} field={}", node_index, field);
+    };
+    EXPECT_EQ(actual->type, expected.type) << msg("type");
+    EXPECT_EQ(actual->cpu_cores_count, expected.cpu_cores_count) << msg("cpu_cores_count");
+    EXPECT_EQ(actual->simd_count, expected.simd_count) << msg("simd_count");
+    EXPECT_EQ(actual->gfx_target_version, expected.gfx_target_version) << msg("gfx_target_version");
+    EXPECT_EQ(actual->max_waves_per_simd, expected.max_waves_per_simd) << msg("max_waves_per_simd");
+    EXPECT_EQ(actual->cu_per_simd_array, expected.cu_per_simd_array) << msg("cu_per_simd_array");
+    // EXPECT_EQ(actual->mem_banks_count, expected.mem_banks_count) << msg("mem_banks_count");
+    // EXPECT_EQ(actual->io_links_count, expected.io_links_count) << msg("io_links_count");
+    // EXPECT_EQ(actual->wave_front_size, expected.wave_front_size) << msg("wave_front_size");
+    // EXPECT_EQ(actual->array_count, expected.array_count) << msg("array_count");
+    // EXPECT_EQ(actual->simd_arrays_per_engine, expected.simd_arrays_per_engine)
+    //     << msg("simd_arrays_per_engine");
+    // EXPECT_EQ(actual->simd_per_cu, expected.simd_per_cu) << msg("simd_per_cu");
+    // EXPECT_EQ(actual->cu_count, expected.cu_count) << msg("cu_count");
+    // EXPECT_EQ(actual->num_shader_banks, expected.num_shader_banks) << msg("num_shader_banks");
+    // EXPECT_EQ(actual->num_sdma_engines, expected.num_sdma_engines) << msg("num_sdma_engines");
+}
+}  // namespace
+
 TEST(rocprofiler_lib, agent_local_topology)
 {
     namespace fs = rocprofiler::common::filesystem;
@@ -360,47 +433,13 @@ TEST(rocprofiler_lib, agent_local_topology)
 
     EXPECT_EQ(status, ROCPROFILER_STATUS_SUCCESS);
 
-    EXPECT_EQ(agents.size(), 7) << "Expected seven agents when using local topology!";
 
-    EXPECT_EQ(agents.at(0)->cpu_cores_count, 24);
-    EXPECT_EQ(agents.at(1)->cpu_cores_count, 0);
-    EXPECT_EQ(agents.at(2)->cpu_cores_count, 0);
-    EXPECT_EQ(agents.at(3)->cpu_cores_count, 0);
-    EXPECT_EQ(agents.at(4)->cpu_cores_count, 0);
-    EXPECT_EQ(agents.at(5)->cpu_cores_count, 0);
-    EXPECT_EQ(agents.at(6)->cpu_cores_count, 0);
+    EXPECT_EQ(agents.size(), ExpectedAgentsCount) << "Expected " << ExpectedAgentsCount << " agents when using local topology!";
 
-    EXPECT_EQ(agents.at(0)->simd_count, 0);
-    EXPECT_EQ(agents.at(1)->simd_count, 240);
-    EXPECT_EQ(agents.at(2)->simd_count, 56);
-    EXPECT_EQ(agents.at(3)->simd_count, 64);
-    EXPECT_EQ(agents.at(4)->simd_count, 1216);
-    EXPECT_EQ(agents.at(5)->simd_count, 1024);  
-    EXPECT_EQ(agents.at(6)->simd_count, 128);
-
-    EXPECT_EQ(agents.at(0)->gfx_target_version, 0);
-    EXPECT_EQ(agents.at(1)->gfx_target_version, 90006);
-    EXPECT_EQ(agents.at(2)->gfx_target_version, 110002);
-    EXPECT_EQ(agents.at(3)->gfx_target_version, 100302);
-    EXPECT_EQ(agents.at(4)->gfx_target_version, 90402);
-    EXPECT_EQ(agents.at(5)->gfx_target_version, 90500);
-    EXPECT_EQ(agents.at(6)->gfx_target_version, 120001);
-
-    EXPECT_EQ(agents.at(0)->max_waves_per_simd, 0);
-    EXPECT_EQ(agents.at(1)->max_waves_per_simd, 10);
-    EXPECT_EQ(agents.at(2)->max_waves_per_simd, 16);
-    EXPECT_EQ(agents.at(3)->max_waves_per_simd, 16);
-    EXPECT_EQ(agents.at(4)->max_waves_per_simd, 8);
-    EXPECT_EQ(agents.at(5)->max_waves_per_simd, 8);
-    EXPECT_EQ(agents.at(6)->max_waves_per_simd, 16);
-
-    EXPECT_EQ(agents.at(0)->cu_per_simd_array, 0);
-    EXPECT_EQ(agents.at(1)->cu_per_simd_array, 16);
-    EXPECT_EQ(agents.at(2)->cu_per_simd_array, 8);
-    EXPECT_EQ(agents.at(3)->cu_per_simd_array, 8);
-    EXPECT_EQ(agents.at(4)->cu_per_simd_array, 10);
-    EXPECT_EQ(agents.at(5)->cu_per_simd_array, 9);
-    EXPECT_EQ(agents.at(6)->cu_per_simd_array, 8);
+    for(size_t i = 0; i < ExpectedAgentsCount; ++i)
+    {
+        expect_agent_matches_local_topology(agents.at(i), kLocalTopologyExpectedAgents.at(i), i);
+    }
 
     hsa_init();
     {
