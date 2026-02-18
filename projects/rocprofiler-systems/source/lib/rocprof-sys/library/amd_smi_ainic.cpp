@@ -49,9 +49,9 @@ namespace amd_smi
 
 using nic_bundle_t          = std::deque<nic_data>;
 using nic_sampler_instances = thread_data<nic_bundle_t, category::amd_smi_nic>;
-std::vector<nic_bundle_t> nic_sampler_vec   = {};
-std::vector<std::string>  nic_data::nic_vec = {};
-ai_nic_stats_collector    nic_data::nic_stats_collector;
+static std::vector<nic_bundle_t> nic_sampler_vec   = {};
+std::vector<std::string>         nic_data::nic_vec = {};
+ai_nic_stats_collector           nic_data::nic_stats_collector;
 
 namespace
 {
