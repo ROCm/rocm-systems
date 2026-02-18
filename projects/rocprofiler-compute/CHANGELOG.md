@@ -29,7 +29,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Detection of MPI ranks while profiling and creation of output directories based on MPI rank.
 
-* Added `--experimental` flag to enable experimental features that are under development. This flag is required when using any experimental features. 
+* Added `--experimental` flag to enable experimental features that are under development. This flag is required when using any experimental features.
   * Use `rocprof-compute --experimental --help` to see currently available experimental features.
 
 * Added missing metric descriptions for gfx950 architecture
@@ -75,6 +75,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Fix redundant warnings for compute/memory partition not found for < MI 300 series GPUs by skipping partition checks
 
 * Fixed formula for metrics related to reads from L2 cache to HBM for MI350
+
+* Corrected kernel filtering during Roofline profiling to find substrings instead of requiring full kernel names.
 
 ### Removed
 
