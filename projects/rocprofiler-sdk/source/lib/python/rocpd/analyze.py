@@ -1640,6 +1640,10 @@ def execute(input: RocpdImportData, config: Optional[output_config.output_config
     if hasattr(input, "_paths") and input._paths:
         database_path = input._paths[0] if isinstance(input._paths, list) else str(input._paths)
 
+    # Map 'format' CLI key → 'output_format' parameter expected by analyze_performance
+    if "format" in kwargs:
+        kwargs["output_format"] = kwargs.pop("format")
+
     # Run analysis
     output = analyze_performance(
         connection=input,

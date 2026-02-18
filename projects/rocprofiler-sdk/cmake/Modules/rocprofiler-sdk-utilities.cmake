@@ -56,6 +56,15 @@ function(rocprofiler_sdk_pc_sampling_disabled _VAR)
     set(CMAKE_MESSAGE_INDENT "[${PROJECT_NAME}]${ARG_PREFIX} ")
 
     rocprofiler_sdk_get_gfx_architectures(rocprofiler-sdk-tests-gfx-info ECHO)
+    # Guard against empty GPU list (e.g. build machine without GPUs)
+    list(LENGTH rocprofiler-sdk-tests-gfx-info _gfx_list_len)
+    if(_gfx_list_len EQUAL 0)
+        set(${_VAR} TRUE PARENT_SCOPE)
+        if(ARG_ECHO)
+            message(STATUS "PC Sampling is disabled (no GPUs detected)")
+        endif()
+        return()
+    endif()
     list(GET rocprofiler-sdk-tests-gfx-info 0 pc-sampling-gpu-0-gfx-info)
 
     if("${pc-sampling-gpu-0-gfx-info}" MATCHES "^gfx90a$"
@@ -88,6 +97,15 @@ function(rocprofiler_sdk_pc_sampling_stochastic_disabled _VAR)
     set(CMAKE_MESSAGE_INDENT "[${PROJECT_NAME}]${ARG_PREFIX} ")
 
     rocprofiler_sdk_get_gfx_architectures(rocprofiler-sdk-tests-gfx-info ECHO)
+    # Guard against empty GPU list (e.g. build machine without GPUs)
+    list(LENGTH rocprofiler-sdk-tests-gfx-info _gfx_list_len)
+    if(_gfx_list_len EQUAL 0)
+        set(${_VAR} TRUE PARENT_SCOPE)
+        if(ARG_ECHO)
+            message(STATUS "Stochastic PC Sampling is disabled (no GPUs detected)")
+        endif()
+        return()
+    endif()
     list(GET rocprofiler-sdk-tests-gfx-info 0 pc-sampling-gpu-0-gfx-info)
 
     if("${pc-sampling-gpu-0-gfx-info}" MATCHES "^gfx94[0-9]$"
