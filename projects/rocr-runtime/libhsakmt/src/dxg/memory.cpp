@@ -581,7 +581,13 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtExportDMABufHandle(void *MemoryAddress,
   if (it != allocation_map_->begin()) {
     --it;
     auto gpu_mem = wsl::thunk::GpuMemory::Convert(it->second.handle);
-    if (gpu_mem->IsSysMemExporter() && it->second.dmabuf_fd == -1) {
+    if (!gpu_mem->IsPhysicalCreated()) {
+      auto code = gpu_mem->CreatePhysicalMemory();
+      if (code != ErrorCode::Success) {
+        return HSAKMT_STATUS_OUT_OF_RESOURCES;
+      }
+    }
+    if (it->second.dmabuf_fd == -1) {
       auto code = gpu_mem->ExportPhysicalHandle(DMABufFd);
       if (code != ErrorCode::Success)
         return HSAKMT_STATUS_ERROR;
@@ -590,7 +596,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtExportDMABufHandle(void *MemoryAddress,
     }
 #if defined(__linux__)
     *DMABufFd = dup(it->second.dmabuf_fd);
-#else 
+#else
     *DMABufFd = it->second.dmabuf_fd;
 #endif
     return HSAKMT_STATUS_SUCCESS;
@@ -618,7 +624,7 @@ HSAKMT_STATUS import_dmabuf_fd(uint64_t DMABufFd, uint32_t NodeId, bool alloc_va
     fstat(DMABufFd, &st);
     uint64_t sz = st.st_size;
     if (4096 <= sz && sz < dxg_runtime->SystemHeapSize() && (sz & 0xfff) == 0) {
-      pr_debug("DMABufFd %d is sys mem fd(IPC signal), get size:%ld from it\n", DMABufFd, st.st_size);
+      pr_debug("DMABufFd %lu is sys mem fd(IPC signal), get size:%ld from it\n", DMABufFd, st.st_size);
       create_info.flags.sysmem_ipc_sig_importer = 1;        // set to 1 when backend is system memory
       create_info.size = st.st_size;
     }
@@ -1081,4 +1087,110 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtReturnAsanHeaderPage(void *addr) {
 #else
   return HSAKMT_STATUS_NOT_SUPPORTED;
 #endif
+}
+
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtHandleImport(const HsaExternalHandleDesc* import_desc,
+    					HsaHandleImportResult* import_res, HsaHandleImportFlags* flags)
+{
+	CHECK_DXG_OPEN();
+  if (import_desc->type != HSA_EXTERNAL_HANDLE_DMA_BUF) {
+    assert(!"not supported\n");
+    return HSAKMT_STATUS_NOT_SUPPORTED;
+  }
+
+  if (static_cast<int>(import_desc->fd) == -1) {
+    import_res->buf_handle = 0;
+    return HSAKMT_STATUS_ERROR;
+  }
+
+  wsl::thunk::GpuMemoryHandle mem_handle;
+  wsl::thunk::WDDMDevice *pDevice = reinterpret_cast<wsl::thunk::WDDMDevice *>(import_desc->device_handle);
+  bool is_ipc_memfd = is_ipc_sysmemfd(import_desc->fd);
+  bool alloc_va = is_ipc_memfd;
+
+  // kmt handle importer is false for dma_buf_fd
+  HSAKMT_STATUS ret = import_dmabuf_fd(import_desc->fd, pDevice->NodeId(), alloc_va, is_ipc_memfd,
+                                       &mem_handle, false);
+  if (ret == HSAKMT_STATUS_SUCCESS) {
+    //use GpuMemory object handle as drm buf handle
+    import_res->buf_handle = reinterpret_cast<HsaMemoryObjectHandle>(mem_handle);
+    return HSAKMT_STATUS_SUCCESS;
+  }
+  return HSAKMT_STATUS_ERROR;
+}
+
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaMap(HsaMemoryObjectHandle Handle,
+              HSAuint64 offset, HSAuint64 size, HSAuint64 addr,
+              HsaMemoryMapFlags flags)
+{
+	CHECK_DXG_OPEN();
+  wsl::thunk::GpuMemory* gpu_mem = reinterpret_cast<wsl::thunk::GpuMemory*>(Handle);
+  assert(gpu_mem != nullptr);
+
+  auto code = gpu_mem->MapGpuVirtualAddress(static_cast<gpusize>(addr), size, offset);
+  if (code != ErrorCode::Success)
+    return HSAKMT_STATUS_ERROR;
+
+  code = gpu_mem->MakeResident();
+  if (code != ErrorCode::Success)
+    return HSAKMT_STATUS_ERROR;
+
+  // Wait on paging fence to ensure map and residency are completed. MakeResident()
+  // updates the same paging fence as Map(), hence it's safe to wait for the last one.
+  if (!gpu_mem->GetDevice()->WaitOnPagingFenceFromCpu()) {
+    return HSAKMT_STATUS_ERROR;
+  }
+
+	return HSAKMT_STATUS_SUCCESS;
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaUnmap(HsaMemoryObjectHandle Handle,
+              HSAuint64 offset, HSAuint64 size, HSAuint64 addr)
+{
+	CHECK_DXG_OPEN();
+  wsl::thunk::GpuMemory* gpu_mem = reinterpret_cast<wsl::thunk::GpuMemory*>(Handle);
+  assert(gpu_mem != nullptr);
+
+  auto code = gpu_mem->UnmapGpuVirtualAddress(static_cast<gpusize>(addr), size, offset);
+  if (code != ErrorCode::Success)
+    return HSAKMT_STATUS_ERROR;
+  // Wait on paging fence to ensure unmap is completed. Evict() doesn't
+  // update the fence.
+  if (!gpu_mem->GetDevice()->WaitOnPagingFenceFromCpu()) {
+    return HSAKMT_STATUS_ERROR;
+  }
+  gpu_mem->Evict();
+	return HSAKMT_STATUS_SUCCESS;
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtMemHandleFree(HsaMemoryObjectHandle Handle)
+{
+	CHECK_DXG_OPEN();
+  wsl::thunk::GpuMemory* gpu_mem = reinterpret_cast<wsl::thunk::GpuMemory*>(Handle);
+  delete gpu_mem;
+	return HSAKMT_STATUS_SUCCESS;
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryCpuMap(HsaMemoryObjectHandle Handle,
+              void** out_cpu_ptr)
+{
+	CHECK_DXG_OPEN();
+  wsl::thunk::GpuMemory *gpu_mem = reinterpret_cast<wsl::thunk::GpuMemory *>(Handle);
+  *out_cpu_ptr = nullptr;
+  if (gpu_mem->IsSysMemFd()) {
+    *out_cpu_ptr = gpu_mem->CpuAddress();
+  }
+  return HSAKMT_STATUS_SUCCESS;
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryGetCpuAddr(HsaAMDGPUDeviceHandle DeviceHandle,
+              HsaMemoryObjectHandle MemoryHandle, HSAint32* fd, HSAuint64* cpu_addr)
+{
+	CHECK_DXG_OPEN();
+  wsl::thunk::GpuMemory* gpu_mem = reinterpret_cast<wsl::thunk::GpuMemory*>(MemoryHandle);
+  assert(gpu_mem != nullptr);
+  cpu_addr =  static_cast<HSAuint64*>(gpu_mem->CpuAddress());
+  return HSAKMT_STATUS_SUCCESS;
 }
