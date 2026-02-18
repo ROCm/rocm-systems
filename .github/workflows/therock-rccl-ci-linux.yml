@@ -41,7 +41,6 @@ jobs:
         with:
           repository: "ROCm/rocm-systems"
           path: rocm-systems
-          ref: 0203842aa05864366ce225f154090de7114eb018 # Test Branch to fix RCCL perf-drop
 
       - name: Install python deps
         run: |
