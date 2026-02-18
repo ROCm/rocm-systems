@@ -198,11 +198,13 @@ bool GPUScheduler::launchTest(const TestJob& job, const std::vector<int>& gpus)
         try
         {
             job.testFunction(gpus);
-            _exit(0);  // Success
+            // Use exit() instead of _exit() to ensure C++ destructors run
+            // This is critical for TestBed cleanup which releases GPU memory
+            exit(0);  // Success
         }
         catch (...)
         {
-            _exit(1);  // Failure
+            exit(1);  // Failure
         }
     }
     else if (pid > 0)
