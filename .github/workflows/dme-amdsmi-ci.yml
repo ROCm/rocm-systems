@@ -79,10 +79,14 @@ jobs:
             golang-go \
             docker.io jq net-tools iproute2
 
-      - name: Submodules
+      - name: Validate checkout workspace
         run: |
-          set -e
-          git submodule update --init --recursive
+          set -euo pipefail
+          if [ ! -d "$GITHUB_WORKSPACE" ]; then
+            echo "GITHUB_WORKSPACE missing: $GITHUB_WORKSPACE"
+            exit 1
+          fi
+          echo "Using workspace: $GITHUB_WORKSPACE"
 
       - name: Checkout DME + sync AMDSMI source
         run: |
@@ -94,7 +98,12 @@ jobs:
           # Validate integration with this AMDSMI repo by overlaying current source.
           if [ -d "$DME_DIR/libamdsmi" ]; then
             find "$DME_DIR/libamdsmi" -mindepth 1 -maxdepth 1 ! -name ".git" -exec rm -rf {} +
-            git -C "$GITHUB_WORKSPACE" archive --format=tar HEAD | tar -xf - -C "$DME_DIR/libamdsmi"
+            if [ -d "$GITHUB_WORKSPACE/.git" ]; then
+              git -C "$GITHUB_WORKSPACE" archive --format=tar HEAD | tar -xf - -C "$DME_DIR/libamdsmi"
+            else
+              echo "No .git metadata in $GITHUB_WORKSPACE; copying workspace files directly."
+              tar -C "$GITHUB_WORKSPACE" --exclude=.git -cf - . | tar -xf - -C "$DME_DIR/libamdsmi"
+            fi
           fi
 
           git -C "$DME_DIR" submodule status
@@ -235,10 +244,14 @@ jobs:
             ca-certificates curl jq iproute2 net-tools \
             docker.io
 
-      - name: Submodules
+      - name: Validate checkout workspace
         run: |
-          set -e
-          git submodule update --init --recursive
+          set -euo pipefail
+          if [ ! -d "$GITHUB_WORKSPACE" ]; then
+            echo "GITHUB_WORKSPACE missing: $GITHUB_WORKSPACE"
+            exit 1
+          fi
+          echo "Using workspace: $GITHUB_WORKSPACE"
 
       - name: Checkout DME + sync AMDSMI source
         run: |
@@ -249,7 +262,12 @@ jobs:
 
           if [ -d "$DME_DIR/libamdsmi" ]; then
             find "$DME_DIR/libamdsmi" -mindepth 1 -maxdepth 1 ! -name ".git" -exec rm -rf {} +
-            git -C "$GITHUB_WORKSPACE" archive --format=tar HEAD | tar -xf - -C "$DME_DIR/libamdsmi"
+            if [ -d "$GITHUB_WORKSPACE/.git" ]; then
+              git -C "$GITHUB_WORKSPACE" archive --format=tar HEAD | tar -xf - -C "$DME_DIR/libamdsmi"
+            else
+              echo "No .git metadata in $GITHUB_WORKSPACE; copying workspace files directly."
+              tar -C "$GITHUB_WORKSPACE" --exclude=.git -cf - . | tar -xf - -C "$DME_DIR/libamdsmi"
+            fi
           fi
 
           git -C "$DME_DIR" submodule status
@@ -386,10 +404,14 @@ jobs:
               ;;
           esac
 
-      - name: Submodules
+      - name: Validate checkout workspace
         run: |
-          set -e
-          git submodule update --init --recursive
+          set -euo pipefail
+          if [ ! -d "$GITHUB_WORKSPACE" ]; then
+            echo "GITHUB_WORKSPACE missing: $GITHUB_WORKSPACE"
+            exit 1
+          fi
+          echo "Using workspace: $GITHUB_WORKSPACE"
 
       - name: Checkout DME + sync AMDSMI source
         run: |
@@ -400,7 +422,12 @@ jobs:
 
           if [ -d "$DME_DIR/libamdsmi" ]; then
             find "$DME_DIR/libamdsmi" -mindepth 1 -maxdepth 1 ! -name ".git" -exec rm -rf {} +
-            git -C "$GITHUB_WORKSPACE" archive --format=tar HEAD | tar -xf - -C "$DME_DIR/libamdsmi"
+            if [ -d "$GITHUB_WORKSPACE/.git" ]; then
+              git -C "$GITHUB_WORKSPACE" archive --format=tar HEAD | tar -xf - -C "$DME_DIR/libamdsmi"
+            else
+              echo "No .git metadata in $GITHUB_WORKSPACE; copying workspace files directly."
+              tar -C "$GITHUB_WORKSPACE" --exclude=.git -cf - . | tar -xf - -C "$DME_DIR/libamdsmi"
+            fi
           fi
 
           git -C "$DME_DIR" submodule status
@@ -530,10 +557,14 @@ jobs:
               ;;
           esac
 
-      - name: Submodules
+      - name: Validate checkout workspace
         run: |
-          set -e
-          git submodule update --init --recursive
+          set -euo pipefail
+          if [ ! -d "$GITHUB_WORKSPACE" ]; then
+            echo "GITHUB_WORKSPACE missing: $GITHUB_WORKSPACE"
+            exit 1
+          fi
+          echo "Using workspace: $GITHUB_WORKSPACE"
 
       - name: Checkout DME + sync AMDSMI source
         run: |
@@ -544,7 +575,12 @@ jobs:
 
           if [ -d "$DME_DIR/libamdsmi" ]; then
             find "$DME_DIR/libamdsmi" -mindepth 1 -maxdepth 1 ! -name ".git" -exec rm -rf {} +
-            git -C "$GITHUB_WORKSPACE" archive --format=tar HEAD | tar -xf - -C "$DME_DIR/libamdsmi"
+            if [ -d "$GITHUB_WORKSPACE/.git" ]; then
+              git -C "$GITHUB_WORKSPACE" archive --format=tar HEAD | tar -xf - -C "$DME_DIR/libamdsmi"
+            else
+              echo "No .git metadata in $GITHUB_WORKSPACE; copying workspace files directly."
+              tar -C "$GITHUB_WORKSPACE" --exclude=.git -cf - . | tar -xf - -C "$DME_DIR/libamdsmi"
+            fi
           fi
 
           git -C "$DME_DIR" submodule status
