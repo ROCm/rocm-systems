@@ -614,6 +614,25 @@ stop_agent_ctx(const context::context* ctx)
 rocprofiler_status_t
 device_counting_service_finalize()
 {
+    // In OLD behavior mode (ROCPROFILER_DEVICE_LOCK_AT_START=1), PTL is disabled at
+    // configuration time and never re-enabled during stop_agent_ctx. Re-enable it here
+    // during finalization so PTL is restored before the process exits.
+    if(use_device_lock_at_start())
+    {
+        for(auto& ctx : context::get_registered_contexts())
+        {
+            if(!ctx->device_counter_collection) continue;
+            for(auto& agent_data : ctx->device_counter_collection->agent_data)
+            {
+                const auto* agent_p = agent::get_agent(agent_data.agent_id);
+                if(agent_p)
+                {
+                    counters::counter_collection_ptl_enable(agent_p);
+                }
+            }
+        }
+    }
+
     for(auto& ctx : context::get_registered_contexts())
     {
         std::vector<rocprofiler::context::device_counting_service::state> expected = {
