@@ -1,3 +1,6 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
+
 # PMC Output Policies Sources
 set(pmc_output_policies_sources
     ${CMAKE_CURRENT_LIST_DIR}/perfetto_policy.hpp

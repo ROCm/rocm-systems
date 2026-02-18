@@ -1,3 +1,6 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
+
 # PMC (Performance Metric Counter) Sampler Library
 
 # Add subdirectories

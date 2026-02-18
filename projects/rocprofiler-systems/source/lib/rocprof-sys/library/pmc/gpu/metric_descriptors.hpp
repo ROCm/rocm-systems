@@ -1,30 +1,5 @@
-// Copyright (c) 2018-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// with the Software without restriction, including without limitation the
-// rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
-// sell copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// * Redistributions of source code must retain the above copyright notice,
-// this list of conditions and the following disclaimers.
-//
-// * Redistributions in binary form must reproduce the above copyright
-// notice, this list of conditions and the following disclaimers in the
-// documentation and/or other materials provided with the distribution.
-//
-// * Neither the names of Advanced Micro Devices, Inc. nor the names of its
-// contributors may be used to endorse or promote products derived from
-// this Software without specific prior written permission.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// CONTRIBUTORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS WITH
-// THE SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier:  MIT
 
 #pragma once
 
@@ -67,9 +42,10 @@
  * @since 1.5.0
  */
 
+#include <spdlog/fmt/fmt.h>
+
 #include <array>
 #include <cstdint>
-#include <sstream>
 #include <string>
 #include <string_view>
 
@@ -400,22 +376,17 @@ make_metric_mask(Ids... ids)
 inline std::string
 to_string(const enabled_metrics& metrics)
 {
-    std::stringstream ss;
-    ss << "[SMI enabled metrics] ";
-    ss << "Current socket power: " << metrics.current_socket_power()
-       << ", Average socket power: " << metrics.average_socket_power()
-       << ", Memory usage: " << metrics.memory_usage()
-       << ", Hotspot temperature: " << metrics.hotspot_temperature()
-       << ", Edge temperature: " << metrics.edge_temperature()
-       << ", GFX activity: " << metrics.gfx_activity()
-       << ", UMC activity: " << metrics.umc_activity()
-       << ", MM activity: " << metrics.mm_activity()
-       << ", VCN activity: " << metrics.vcn_activity()
-       << ", JPEG activity: " << metrics.jpeg_activity()
-       << ", XCP VCN activity: " << metrics.xcp_vcn_activity()
-       << ", XCP JPEG activity: " << metrics.xcp_jpeg_activity()
-       << ", XGMI: " << metrics.xgmi() << ", PCIe: " << metrics.pcie() << "\n";
-    return ss.str();
+    return fmt::format(
+        "[SMI enabled metrics] Current socket power: {}, Average socket power: {}, "
+        "Memory usage: {}, Hotspot temperature: {}, Edge temperature: {}, "
+        "GFX activity: {}, UMC activity: {}, MM activity: {}, "
+        "VCN activity: {}, JPEG activity: {}, XCP VCN activity: {}, "
+        "XCP JPEG activity: {}, XGMI: {}, PCIe: {}\n",
+        metrics.current_socket_power(), metrics.average_socket_power(),
+        metrics.memory_usage(), metrics.hotspot_temperature(), metrics.edge_temperature(),
+        metrics.gfx_activity(), metrics.umc_activity(), metrics.mm_activity(),
+        metrics.vcn_activity(), metrics.jpeg_activity(), metrics.xcp_vcn_activity(),
+        metrics.xcp_jpeg_activity(), metrics.xgmi(), metrics.pcie());
 }
 
 /** @brief Pre-computed bitmasks for metric groups and individual metrics. */

@@ -1,5 +1,5 @@
-// Copyright (c) 2018-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-// MIT License - See LICENSE file for details.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier:  MIT
 
 #include "library/pmc/collectors/common/collector_slice.hpp"
 

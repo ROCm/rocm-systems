@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier:  MIT
 
 #include "core/trace_cache/rocpd_processor.hpp"
 #include "core/agent_manager.hpp"
@@ -35,6 +16,7 @@
 #include "logger/debug.hpp"
 
 #include <spdlog/fmt/ranges.h>
+#include <timemory/units.hpp>
 
 #include <cstdint>
 #include <limits>
@@ -54,6 +36,7 @@ namespace trace_cache
 {
 namespace
 {
+namespace units = ::tim::units;
 
 #if ROCPROFSYS_USE_ROCM > 0
 auto
@@ -403,7 +386,8 @@ rocpd_processor_t::handle([[maybe_unused]] const pmc::gpu::sample& _gpu_pmc)
                                                  : m.average_socket_power);
     insert_scalar(trait::name<category::amd_smi_memory_usage>::value,
                   info::format_track_name<category::amd_smi_memory_usage>(),
-                  enabled.memory_usage(), m.memory_usage / 1024.0);
+                  enabled.memory_usage(),
+                  m.memory_usage / static_cast<double>(units::megabyte));
 
     auto insert_xcp_metrics = [&](const char* base_name, const std::string& base_track,
                                   bool is_enabled, const auto& get_array) {

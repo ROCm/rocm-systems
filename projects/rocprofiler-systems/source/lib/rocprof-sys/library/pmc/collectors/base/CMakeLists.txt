@@ -1,3 +1,6 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
+
 # PMC Base Collector Sources
 set(pmc_base_sources
     ${CMAKE_CURRENT_LIST_DIR}/collector.hpp

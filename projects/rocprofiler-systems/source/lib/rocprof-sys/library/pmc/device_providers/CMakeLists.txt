@@ -1,3 +1,6 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
+
 # PMC Device Providers
 if(ROCPROFSYS_USE_ROCM)
     add_subdirectory(amd_smi)
