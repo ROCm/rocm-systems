@@ -102,13 +102,13 @@ __device__ static inline void lock(uint32_t *lock) {
   do {
     expected = 0;
   } while (0 == __hip_atomic_compare_exchange_strong(lock, &expected, 1,
-                                                     __ATOMIC_SEQ_CST,
-                                                     __ATOMIC_SEQ_CST,
+                                                     __ATOMIC_ACQUIRE,
+                                                     __ATOMIC_ACQUIRE,
                                                      __HIP_MEMORY_SCOPE_SYSTEM));
 }
 
 __device__ static inline void unlock(uint32_t *lock) {
-  __hip_atomic_store(lock, 0, __ATOMIC_SEQ_CST, __HIP_MEMORY_SCOPE_SYSTEM);
+  __hip_atomic_store(lock, 0, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
 }
 
 __device__ void QueuePair::bnxt_ring_doorbell(uint32_t slot_idx) {
