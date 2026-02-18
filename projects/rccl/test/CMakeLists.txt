@@ -166,8 +166,11 @@ if(BUILD_TESTS)
     common/PtrUnion.cpp
     common/ProcessIsolatedTestRunner.cpp
     common/TestBed.cpp
+    common/TestBed_Parallel.cpp
     common/TestBedChild.cpp
     common/StandaloneUtils.cpp
+    common/GPUScheduler.cpp
+    common/ParallelTestRunner.cpp
     proxy_trace/ProxyTraceUnitTests.cpp
     ../src/misc/proxy_trace/proxy_trace.cc
     latency_profiler/LatencyProfilerUnitTest.cpp

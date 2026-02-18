@@ -21,7 +21,7 @@ namespace RcclUnitTesting
     std::vector<bool>           const managedMemList  = {false};
     std::vector<bool>           const useHipGraphList = {false};
 
-    testBed.RunSimpleSweep(funcTypes, dataTypes, redOps, roots, numElements,
+    testBed.RunSimpleSweepParallel(funcTypes, dataTypes, redOps, roots, numElements,
                            inPlaceList, managedMemList, useHipGraphList);
     testBed.Finalize();
   }
@@ -40,7 +40,7 @@ namespace RcclUnitTesting
     std::vector<bool>           const managedMemList  = {false};
     std::vector<bool>           const useHipGraphList = {true};
 
-    testBed.RunSimpleSweep(funcTypes, dataTypes, redOps, roots, numElements,
+    testBed.RunSimpleSweepParallel(funcTypes, dataTypes, redOps, roots, numElements,
                            inPlaceList, managedMemList, useHipGraphList);
     testBed.Finalize();
   }
@@ -60,7 +60,7 @@ namespace RcclUnitTesting
     std::vector<bool>           const managedMemList  = {false};
     std::vector<bool>           const useHipGraphList = {false};
 
-    testBed.RunSimpleSweep(funcTypes, dataTypes, redOps, roots, numElements,
+    testBed.RunSimpleSweepParallel(funcTypes, dataTypes, redOps, roots, numElements,
                            inPlaceList, managedMemList, useHipGraphList);
     testBed.Finalize();
   }
@@ -79,7 +79,7 @@ namespace RcclUnitTesting
     std::vector<bool>           const managedMemList  = {false};
     std::vector<bool>           const useHipGraphList = {true};
 
-    testBed.RunSimpleSweep(funcTypes, dataTypes, redOps, roots, numElements,
+    testBed.RunSimpleSweepParallel(funcTypes, dataTypes, redOps, roots, numElements,
                            inPlaceList, managedMemList, useHipGraphList);
     testBed.Finalize();
   }
@@ -98,7 +98,7 @@ namespace RcclUnitTesting
     std::vector<bool>           const managedMemList  = {true};
     std::vector<bool>           const useHipGraphList = {false};
 
-    testBed.RunSimpleSweep(funcTypes, dataTypes, redOps, roots, numElements,
+    testBed.RunSimpleSweepParallel(funcTypes, dataTypes, redOps, roots, numElements,
                            inPlaceList, managedMemList, useHipGraphList);
     testBed.Finalize();
   }
@@ -117,7 +117,7 @@ namespace RcclUnitTesting
     std::vector<bool>           const managedMemList  = {true};
     std::vector<bool>           const useHipGraphList = {true};
 
-    testBed.RunSimpleSweep(funcTypes, dataTypes, redOps, roots, numElements,
+    testBed.RunSimpleSweepParallel(funcTypes, dataTypes, redOps, roots, numElements,
                            inPlaceList, managedMemList, useHipGraphList);
     testBed.Finalize();
   }

@@ -24,7 +24,7 @@ namespace RcclUnitTesting
     std::vector<bool>           const managedMemList  = {false};
     std::vector<bool>           const useHipGraphList = {false};
 
-    testBed.RunSimpleSweep(funcTypes, dataTypes, redOps, roots, numElements,
+    testBed.RunSimpleSweepParallel(funcTypes, dataTypes, redOps, roots, numElements,
                            inPlaceList, managedMemList, useHipGraphList);
     testBed.Finalize();
   }
@@ -43,7 +43,7 @@ namespace RcclUnitTesting
     std::vector<bool>           const managedMemList  = {false};
     std::vector<bool>           const useHipGraphList = {true};
 
-    testBed.RunSimpleSweep(funcTypes, dataTypes, redOps, roots, numElements,
+    testBed.RunSimpleSweepParallel(funcTypes, dataTypes, redOps, roots, numElements,
                            inPlaceList, managedMemList, useHipGraphList);
     testBed.Finalize();
   }
@@ -62,7 +62,7 @@ namespace RcclUnitTesting
     std::vector<bool>           const managedMemList  = {true};
     std::vector<bool>           const useHipGraphList = {false};
 
-    testBed.RunSimpleSweep(funcTypes, dataTypes, redOps, roots, numElements,
+    testBed.RunSimpleSweepParallel(funcTypes, dataTypes, redOps, roots, numElements,
                            inPlaceList, managedMemList, useHipGraphList);
     testBed.Finalize();
   }
@@ -81,7 +81,7 @@ namespace RcclUnitTesting
     std::vector<bool>           const managedMemList  = {true};
     std::vector<bool>           const useHipGraphList = {true};
 
-    testBed.RunSimpleSweep(funcTypes, dataTypes, redOps, roots, numElements,
+    testBed.RunSimpleSweepParallel(funcTypes, dataTypes, redOps, roots, numElements,
                            inPlaceList, managedMemList, useHipGraphList);
     testBed.Finalize();
   }
@@ -104,7 +104,7 @@ namespace RcclUnitTesting
         bool                        const enableSweep     = false;
         for (auto channel : channelList) {
           setenv("NCCL_MIN_NCHANNELS", channel, 1);
-          testBed.RunSimpleSweep(funcTypes, dataTypes, redOps, roots, numElements,
+          testBed.RunSimpleSweepParallel(funcTypes, dataTypes, redOps, roots, numElements,
                                 inPlaceList, managedMemList, useHipGraphList, enableSweep);
           testBed.Finalize();
           unsetenv("NCCL_MIN_NCHANNELS");

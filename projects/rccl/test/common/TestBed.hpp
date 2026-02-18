@@ -174,6 +174,19 @@ namespace RcclUnitTesting
                         std::vector<bool>           const& useHipGraphList,
                         bool                        const& enableSweep = true);
 
+    // Run a simple sweep with GPU-aware parallel execution
+    // If UT_PARALLEL_TESTS=1, runs different GPU counts concurrently
+    // If UT_PARALLEL_TESTS=0, falls back to sequential RunSimpleSweep
+    void RunSimpleSweepParallel(std::vector<ncclFunc_t>     const& funcTypes,
+                                std::vector<ncclDataType_t> const& dataTypes,
+                                std::vector<ncclRedOp_t>    const& redOps,
+                                std::vector<int>            const& roots,
+                                std::vector<int>            const& numElements,
+                                std::vector<bool>           const& inPlaceList,
+                                std::vector<bool>           const& managedMemList,
+                                std::vector<bool>           const& useHipGraphList,
+                                bool                        const& enableSweep = true);
+
     // Wait for user-input if in interactive mode
     void InteractiveWait(std::string message);
 
