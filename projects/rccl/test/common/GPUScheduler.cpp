@@ -25,6 +25,7 @@ GPUScheduler::GPUScheduler(const GPUSchedulingConfig& config)
     , totalCompleted_(0)
     , totalFailed_(0)
     , nextJobId_(0)
+    , nextUniqueIdIndex_(0)
 {
     // Initialize GPU tracking
     gpuInUse_.resize(config_.totalGPUs, false);
@@ -72,6 +73,67 @@ void GPUScheduler::submitJobs(const std::vector<TestJob>& jobs)
     {
         submitJob(job);
     }
+}
+
+void GPUScheduler::preallocateUniqueIds(int poolSize)
+{
+    if (config_.verboseLogging)
+    {
+        INFO("Pre-generating pool of %d NCCL unique IDs to avoid serialization...\n", poolSize);
+    }
+
+    auto startTime = std::chrono::steady_clock::now();
+
+    for (int i = 0; i < poolSize; ++i)
+    {
+        ncclUniqueId id;
+        ncclResult_t result = ncclGetUniqueId(&id);
+        if (result != ncclSuccess)
+        {
+            ERROR("Failed to generate NCCL unique ID #%d: %d\n", i, result);
+            continue;
+        }
+
+        // Store as raw bytes
+        std::vector<char> idBytes(NCCL_UNIQUE_ID_BYTES);
+        memcpy(idBytes.data(), &id, NCCL_UNIQUE_ID_BYTES);
+        uniqueIdPool_.push_back(idBytes);
+    }
+
+    auto endTime = std::chrono::steady_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime);
+
+    if (config_.verboseLogging)
+    {
+        INFO("Generated %zu unique IDs in %ld ms (avg %.1f ms per ID)\n",
+             uniqueIdPool_.size(), duration.count(),
+             uniqueIdPool_.empty() ? 0.0 : (double)duration.count() / uniqueIdPool_.size());
+    }
+}
+
+std::string GPUScheduler::getNextUniqueId()
+{
+    std::lock_guard<std::mutex> lock(statsMutex_);
+
+    if (nextUniqueIdIndex_ >= uniqueIdPool_.size())
+    {
+        ERROR("Unique ID pool exhausted! Allocated %zu but need more.\n", uniqueIdPool_.size());
+        return "";
+    }
+
+    const std::vector<char>& idBytes = uniqueIdPool_[nextUniqueIdIndex_++];
+
+    // Convert to hex string for environment variable
+    std::string hexStr;
+    hexStr.reserve(NCCL_UNIQUE_ID_BYTES * 2);
+    for (int i = 0; i < NCCL_UNIQUE_ID_BYTES; ++i)
+    {
+        char hex[3];
+        sprintf(hex, "%02x", (unsigned char)idBytes[i]);
+        hexStr += hex;
+    }
+
+    return hexStr;
 }
 
 bool GPUScheduler::canAllocateGPUs(int numGPUs) const
@@ -154,12 +216,23 @@ bool GPUScheduler::launchTest(const TestJob& job, const std::vector<int>& gpus)
 
     pid_t pid = fork();
 
+    // Get a pre-generated unique ID from the pool
+    std::string uniqueIdHex = getNextUniqueId();
+    if (uniqueIdHex.empty())
+    {
+        ERROR("Failed to get unique ID from pool for test %s\n", job.testName.c_str());
+        return false;
+    }
+
     if (pid == 0)
     {
         // Child process
         // NOTE: We do NOT set HIP_VISIBLE_DEVICES here!
         // Setting it causes issues because HIP/RCCL may initialize before the env var takes effect.
         // Instead, we pass the physical GPU IDs directly to the test via the assignedGPUs parameter.
+
+        // Set pre-generated NCCL unique ID for this test
+        setenv("UT_RCCL_UNIQUE_ID", uniqueIdHex.c_str(), 1);
 
         if (config_.verboseLogging)
         {
@@ -169,7 +242,8 @@ bool GPUScheduler::launchTest(const TestJob& job, const std::vector<int>& gpus)
                 if (i > 0) gpuList << ",";
                 gpuList << gpus[i];
             }
-            INFO("Child process %d: Using physical GPUs: %s\n", getpid(), gpuList.str().c_str());
+            INFO("Child process %d: Using physical GPUs: %s, uniqueId: %s\n",
+                 getpid(), gpuList.str().c_str(), uniqueIdHex.substr(0, 16).c_str());
         }
 
         // NOTE: We do NOT call ncclGetUniqueId() here!

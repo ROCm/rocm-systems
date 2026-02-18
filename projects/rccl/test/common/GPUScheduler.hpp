@@ -131,6 +131,9 @@ public:
     // Print current scheduler state
     void printState() const;
 
+    // Pre-generate a pool of NCCL unique IDs to avoid serialization bottleneck
+    void preallocateUniqueIds(int poolSize);
+
 private:
     GPUSchedulingConfig config_;
 
@@ -164,6 +167,10 @@ private:
     // Job ID counter
     int nextJobId_;
 
+    // Pool of pre-generated NCCL unique IDs (eliminates ncclGetUniqueId serialization)
+    std::vector<std::vector<char>> uniqueIdPool_;
+    size_t nextUniqueIdIndex_;
+
     // Helper functions
     bool canAllocateGPUs(int numGPUs) const;
     std::vector<int> allocateGPUs(int numGPUs);
@@ -171,6 +178,7 @@ private:
     bool launchTest(const TestJob& job, const std::vector<int>& gpus);
     void recordCompletion(const RunningTest& test, bool success);
     double calculateGPUUtilization() const;
+    std::string getNextUniqueId();
 };
 
 } // namespace RcclUnitTesting
