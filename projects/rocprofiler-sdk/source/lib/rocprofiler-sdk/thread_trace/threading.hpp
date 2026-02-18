@@ -80,11 +80,19 @@ struct triple_buffer_consumer_data_t
 struct triple_buffer_producer_data_t
 {
     copy_data_t*                                 copy_data_fn{};
-    std::shared_ptr<std::atomic<bool>>           producer_running{};
+    std::shared_ptr<std::atomic<int>>            producer_running{};
     std::shared_ptr<Signal>                      start_pkt_signal{};
     std::unique_ptr<hsa::TraceControlAQLPacket>  control_packet{};
     std::shared_ptr<triple_buffer_shared_data_t> shared{};
     std::unique_ptr<hsa::SQTTBufferingPackets>   buffer_packet{};
+};
+
+// Worker flags have three states: stop (either stopped or stopping), running and (global)destructor
+enum worker_flag_status_t
+{
+    WORKER_FLAG_STOP = 0,
+    WORKER_FLAG_RUNNING,
+    WORKER_FLAG_DESTRUCTOR
 };
 
 void
