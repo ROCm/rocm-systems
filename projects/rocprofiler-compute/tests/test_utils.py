@@ -7734,7 +7734,7 @@ def test_amdsmi_get_gpu_memory_partition():
 # =============================================================================
 
 
-def make_imputation_df(data):
+def make_multilevel_df(data: dict) -> "pd.DataFrame":
     """
     Create a MultiIndex DataFrame for imputation tests.
 
@@ -7749,7 +7749,6 @@ def make_imputation_df(data):
     return df
 
 
-@pytest.mark.data_imputation
 def test_impute_counters_iteration_multiplex():
     """Test impute_counters_iteration_multiplex with sample DataFrame."""
 
@@ -7771,7 +7770,7 @@ def test_impute_counters_iteration_multiplex():
         ("file1", "Counter2"): [None, 500, 300],
     }
 
-    df = make_imputation_df(data)
+    df = make_multilevel_df(data)
 
     # For "kernel" policy
     result = utils.impute_counters_iteration_multiplex(df, "kernel")
@@ -7812,7 +7811,7 @@ def test_impute_counters_iteration_multiplex():
         ("file1", "Counter2"): [None, 500, None],
     }
 
-    df = make_imputation_df(data)
+    df = make_multilevel_df(data)
 
     result = utils.impute_counters_iteration_multiplex(df, "kernel_launch_params")
     # Sort by Dispatch_ID to ensure consistent order
@@ -7844,7 +7843,7 @@ def test_impute_counters_iteration_multiplex():
         ("file1", "Counter2"): [None, 500, 300],
     }
 
-    df = make_imputation_df(data)
+    df = make_multilevel_df(data)
 
     # For "kernel" policy
     result = utils.impute_counters_iteration_multiplex(df, "kernel")
@@ -7870,7 +7869,6 @@ def test_impute_counters_iteration_multiplex():
     assert pd.isna(result[("file1", "Counter1")].iloc[2])
 
 
-@pytest.mark.data_imputation
 def test_impute_fewer_dispatches_than_buckets():
     """
     Test imputation when kernels have fewer dispatches than counter buckets.
@@ -7900,7 +7898,7 @@ def test_impute_fewer_dispatches_than_buckets():
         ("file1", "C3"): [None, None],
     }
 
-    df = make_imputation_df(data)
+    df = make_multilevel_df(data)
     result = utils.impute_counters_iteration_multiplex(df, "kernel")
     result = result.sort_values(by=("file1", "Dispatch_ID"))
 
@@ -7939,7 +7937,7 @@ def test_impute_fewer_dispatches_than_buckets():
         ("file1", "C3"): [None, None, None, None],
     }
 
-    df = make_imputation_df(data)
+    df = make_multilevel_df(data)
     result = utils.impute_counters_iteration_multiplex(df, "kernel")
     result = result.sort_values(by=("file1", "Dispatch_ID"))
 
@@ -7990,7 +7988,7 @@ def test_impute_fewer_dispatches_than_buckets():
         ("file1", "C3"): [None, None, None, None, 70],
     }
 
-    df = make_imputation_df(data)
+    df = make_multilevel_df(data)
     result = utils.impute_counters_iteration_multiplex(df, "kernel")
     result = result.sort_values(by=("file1", "Dispatch_ID"))
 
@@ -8044,7 +8042,7 @@ def test_impute_fewer_dispatches_than_buckets():
         ("file1", "C3"): [None, None, None, None],
     }
 
-    df = make_imputation_df(data)
+    df = make_multilevel_df(data)
     result = utils.impute_counters_iteration_multiplex(df, "kernel_launch_params")
     result = result.sort_values(by=("file1", "Dispatch_ID"))
 
@@ -8096,7 +8094,7 @@ def test_impute_fewer_dispatches_than_buckets():
         ("file1", "C3"): [None, None, None, None, 70],
     }
 
-    df = make_imputation_df(data)
+    df = make_multilevel_df(data)
     result = utils.impute_counters_iteration_multiplex(df, "kernel_launch_params")
     result = result.sort_values(by=("file1", "Dispatch_ID"))
 
@@ -8123,7 +8121,6 @@ def test_impute_fewer_dispatches_than_buckets():
     assert result[("file1", "C3")].iloc[4] == 70
 
 
-@pytest.mark.data_imputation
 def test_impute_incomplete_last_group():
     """
     Test imputation when the last subgroup is incomplete.
@@ -8153,7 +8150,7 @@ def test_impute_incomplete_last_group():
         ("file1", "C2"): [None, 20, None],
     }
 
-    df = make_imputation_df(data)
+    df = make_multilevel_df(data)
     result = utils.impute_counters_iteration_multiplex(df, "kernel")
     result = result.sort_values(by=("file1", "Dispatch_ID"))
 
@@ -8222,7 +8219,7 @@ def test_impute_incomplete_last_group():
         ("file1", "C3"): [None, None, 30, None, None, None, 70, None, None],
     }
 
-    df = make_imputation_df(data)
+    df = make_multilevel_df(data)
     result = utils.impute_counters_iteration_multiplex(df, "kernel")
     result = result.sort_values(by=("file1", "Dispatch_ID"))
 
@@ -8330,7 +8327,7 @@ def test_impute_incomplete_last_group():
         ("file1", "C3"): [None, None, 30, None, None, None, 70, None, None, 100],
     }
 
-    df = make_imputation_df(data)
+    df = make_multilevel_df(data)
     result = utils.impute_counters_iteration_multiplex(df, "kernel")
     result = result.sort_values(by=("file1", "Dispatch_ID"))
 
@@ -8404,7 +8401,7 @@ def test_impute_incomplete_last_group():
         ("file1", "C2"): [None, 20, None, None, 60, None],
     }
 
-    df = make_imputation_df(data)
+    df = make_multilevel_df(data)
     result = utils.impute_counters_iteration_multiplex(df, "kernel_launch_params")
     result = result.sort_values(by=("file1", "Dispatch_ID"))
 
@@ -8457,7 +8454,7 @@ def test_impute_incomplete_last_group():
         ("file1", "C2"): [None, 20, None, None, 60, None, 80],
     }
 
-    df = make_imputation_df(data)
+    df = make_multilevel_df(data)
     result = utils.impute_counters_iteration_multiplex(df, "kernel_launch_params")
     result = result.sort_values(by=("file1", "Dispatch_ID"))
 
@@ -8483,7 +8480,6 @@ def test_impute_incomplete_last_group():
     assert result[("file1", "C2")].iloc[6] == 80
 
 
-@pytest.mark.data_imputation
 def test_impute_complete_last_group():
     """
     Test imputation when all subgroups are complete.
@@ -8513,7 +8509,7 @@ def test_impute_complete_last_group():
         ("file1", "C2"): [None, 20, None, 40],
     }
 
-    df = make_imputation_df(data)
+    df = make_multilevel_df(data)
     result = utils.impute_counters_iteration_multiplex(df, "kernel")
     result = result.sort_values(by=("file1", "Dispatch_ID"))
 
@@ -8658,7 +8654,7 @@ def test_impute_complete_last_group():
         ],
     }
 
-    df = make_imputation_df(data)
+    df = make_multilevel_df(data)
     result = utils.impute_counters_iteration_multiplex(df, "kernel")
     result = result.sort_values(by=("file1", "Dispatch_ID"))
 
@@ -8740,7 +8736,7 @@ def test_impute_complete_last_group():
         ("file1", "C2"): [None, 20, None, 40, None, 60, None, 80],
     }
 
-    df = make_imputation_df(data)
+    df = make_multilevel_df(data)
     result = utils.impute_counters_iteration_multiplex(df, "kernel_launch_params")
     result = result.sort_values(by=("file1", "Dispatch_ID"))
 
@@ -8772,7 +8768,6 @@ def test_impute_complete_last_group():
     assert result[("file1", "C2")].iloc[7] == 80
 
 
-@pytest.mark.data_imputation
 def test_impute_counters_iteration_multiplex_incorrect_andcorner_cases():
     """
     Test impute_counters_iteration_multiplex with incorrectly structured data
@@ -8822,7 +8817,7 @@ def test_impute_counters_iteration_multiplex_incorrect_andcorner_cases():
         ("file1", "C1"): [10, None],
         ("file1", "C2"): [None, 20],
     }
-    df_no_kn = make_imputation_df(data_no_kernel_name)
+    df_no_kn = make_multilevel_df(data_no_kernel_name)
     with pytest.raises(KeyError):
         utils.impute_counters_iteration_multiplex(df_no_kn, "kernel")
 
@@ -8845,7 +8840,7 @@ def test_impute_counters_iteration_multiplex_incorrect_andcorner_cases():
         ("file1", "C1"): [],
         ("file1", "C2"): [],
     }
-    df_empty = make_imputation_df(data_empty)
+    df_empty = make_multilevel_df(data_empty)
     result = utils.impute_counters_iteration_multiplex(df_empty, "kernel")
 
     # Result is a fallback DataFrame, not actual data.
@@ -8877,7 +8872,7 @@ def test_impute_counters_iteration_multiplex_incorrect_andcorner_cases():
         ("file1", "C1"): [None, None, None],
         ("file1", "C2"): [None, None, None],
     }
-    df_all_nan = make_imputation_df(data_all_nan)
+    df_all_nan = make_multilevel_df(data_all_nan)
     result = utils.impute_counters_iteration_multiplex(df_all_nan, "kernel")
 
     # Group was dropped (no valid counters) -- fallback DataFrame returned.
@@ -8909,7 +8904,7 @@ def test_impute_counters_iteration_multiplex_incorrect_andcorner_cases():
         ("file1", "End_Timestamp"): [1500, 1700],
         ("file1", "Kernel_ID"): [1, 1],
     }
-    df_no_counters = make_imputation_df(data_no_counters)
+    df_no_counters = make_multilevel_df(data_no_counters)
     result = utils.impute_counters_iteration_multiplex(df_no_counters, "kernel")
 
     # Group was dropped (no counter columns exist) -- fallback DataFrame returned.
@@ -8941,7 +8936,7 @@ def test_impute_counters_iteration_multiplex_incorrect_andcorner_cases():
         ("file1", "C1"): [100, None, None],
         ("file1", "C2"): [None, 500, 300],
     }
-    df_policy = make_imputation_df(data_policy)
+    df_policy = make_multilevel_df(data_policy)
     result_invalid = utils.impute_counters_iteration_multiplex(
         df_policy, "invalid_policy"
     )
@@ -8989,7 +8984,7 @@ def test_impute_counters_iteration_multiplex_incorrect_andcorner_cases():
         ("file2", "C1"): [50, None],
         ("file2", "C2"): [None, 60],
     }
-    df_multi_file = make_imputation_df(data_multi_file)
+    df_multi_file = make_multilevel_df(data_multi_file)
     result = utils.impute_counters_iteration_multiplex(df_multi_file, "kernel")
     result = result.sort_values(by=("file1", "Dispatch_ID"))
 
