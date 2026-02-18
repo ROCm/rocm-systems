@@ -18,6 +18,26 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Added `--base-board-temps` / `-b` option to display baseboard temperature sensors.
   - Selective display: Use `-p` for NPM only, `-b` for Baseboard only.
   - Default behavior (no flags): Shows both power management and baseboard temperatures.
+  
+### Changed
+
+- N/A
+
+### Removed
+
+- N/A
+
+### Optimized
+
+- N/A
+
+### Resolved Issues
+
+- **Fixed XGMI PLPD policy parsing in `amdsmi_get_xgmi_plpd()` returning incorrect data**.  
+  - Previously, only the first XGMI PLPD policy was correctly displayed; subsequent policies showed `policy_id=0` with empty descriptions.
+  - Root cause was incorrect usage of `ctypes.string_at()` combined with overly broad exception handling that silently masked errors.
+  - Fix uses direct `.decode()` on c_char arrays, matching the proven pattern in `amdsmi_get_soc_pstate()`.
+  - Affected command: `amd-smi static --xgmi-plpd`
 
 ## amd_smi_lib for ROCm 7.11.0
 

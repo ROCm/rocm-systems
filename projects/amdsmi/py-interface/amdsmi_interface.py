@@ -5546,36 +5546,25 @@ def amdsmi_get_xgmi_plpd(
     )
 
     policies = []
-    for i in range(policy.num_supported):
+    for i in range(0, policy.num_supported):
         try:
-            # Access the policy entry directly
-            policy_entry = policy.policies[i]
-            policy_id = policy_entry.policy_id
-
-            # Handle the policy description more carefully
-            policy_desc_bytes = policy_entry.policy_description
-            if policy_desc_bytes:
-                # Convert ctypes array to bytes and decode
-                policy_desc = ctypes.string_at(policy_desc_bytes).decode('utf-8').rstrip('\x00')
-            else:
-                policy_desc = ""
-
+            policy_id = policy.policies[i].policy_id
+            desc = policy.policies[i].policy_description
             policies.append({
                 'policy_id': policy_id,
-                'policy_description': policy_desc
+                'policy_description': desc.decode()
             })
         except (UnicodeDecodeError, AttributeError, ValueError):
             # Fallback for problematic entries
             policies.append({
-                'policy_id': 0,  # Default fallback
+                'policy_id': 0,
                 'policy_description': ""
             })
 
-    # Get current policy ID correctly
     if policy.current < policy.num_supported:
         current_id = policy.policies[policy.current].policy_id
     else:
-        current_id = 0  # Fallback
+        current_id = 0
 
     return {
         "num_supported": policy.num_supported,
