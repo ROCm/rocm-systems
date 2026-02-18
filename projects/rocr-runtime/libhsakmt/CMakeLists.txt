@@ -263,12 +263,18 @@ else()
       target_compile_definitions(${HSAKMT_TARGET} PRIVATE -DHAVE_MEMFD_CREATE=1)
     endif()
   else()
-    ## Link Window Kernel Mode Interface
+    ## Link Windows Kernel Mode Interface
     if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-      target_link_libraries(${HSAKMT_TARGET} ${CMAKE_CURRENT_SOURCE_DIR}/src/dxg/wkmi/win/dbg/wkmi.lib)
+      set(WKMI_LIB_PATH ${CMAKE_CURRENT_SOURCE_DIR}/src/dxg/wkmi/win/dbg/wkmi.lib)
     else()
-      target_link_libraries(${HSAKMT_TARGET} ${CMAKE_CURRENT_SOURCE_DIR}/src/dxg/wkmi/win/rel/wkmi.lib)
+      set(WKMI_LIB_PATH ${CMAKE_CURRENT_SOURCE_DIR}/src/dxg/wkmi/win/rel/wkmi.lib)
     endif()
+    
+    # Link wkmi.lib and ensure it's propagated to downstream targets (hsa-runtime64)
+    target_link_libraries(${HSAKMT_TARGET} PUBLIC ${WKMI_LIB_PATH})
+    
+    # Export wkmi.lib path for downstream static linking
+    set_property(TARGET ${HSAKMT_TARGET} APPEND PROPERTY INTERFACE_LINK_LIBRARIES ${WKMI_LIB_PATH})
   endif()
 
   ## Define default paths and packages.
@@ -374,6 +380,8 @@ else()
         PRIVATE pthread rt c numa ${CMAKE_DL_LIBS}
         INTERFACE -Wl,-Bstatic ${AMDGPU_STATIC_LIB_PATHS} ${DRM_AMDGPU_LDFLAGS} ${DRM_LDFLAGS} -Wl,-Bdynamic
       )
+    else()
+      set_property(TARGET ${HSAKMT_STATIC_DRM_TARGET} APPEND PROPERTY INTERFACE_LINK_LIBRARIES ${WKMI_LIB_PATH})
     endif()
     target_compile_options(${HSAKMT_STATIC_DRM_TARGET} PRIVATE ${DRM_CFLAGS} ${HSAKMT_C_FLAGS})
 
