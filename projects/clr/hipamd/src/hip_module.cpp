@@ -305,6 +305,10 @@ hipError_t ihipLaunchKernel_validate(hipFunction_t f, const amd::LaunchParams& l
   }
   hip::DeviceFunc* function = hip::DeviceFunc::asFunction(f);
   amd::Kernel* kernel = function->kernel();
+  if (!kernel) {
+    LogPrintfError("%s", "Kernel object is invalid or null, possibly due to architecture mismatch.");
+    return hipErrorInvalidValue;
+  }
   const amd::KernelSignature& signature = kernel->signature();
   if ((signature.numParameters() > 0) && (kernelParams == nullptr) && (extra == nullptr)) {
     LogPrintfError("%s", "At least one of kernelParams or extra Params should be provided");
@@ -374,10 +378,6 @@ hipError_t ihipLaunchKernelCommand(amd::Command*& command, hipFunction_t f,
   amd::NDRangeKernelCommand* kernelCommand = new amd::NDRangeKernelCommand(
       *stream, waitList, *kernel, ndrange, launch_params.sharedMemBytes_, params, gridId, numGrids,
       prevGridSum, allGridSum, firstDevice, profileNDRange);
-  if (!kernelCommand) {
-    return hipErrorOutOfMemory;
-  }
-
   address kernargs = nullptr;
   size_t kernargs_size = 0;
   // 'extra' is a struct that contains the following info: {

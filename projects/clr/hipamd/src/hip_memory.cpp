@@ -79,11 +79,6 @@ amd::Memory* getMemoryObjectWithOffset(const void* ptr, const size_t size) {
       return nullptr;
     }
     memObj = new (memObj->getContext()) amd::Buffer(*memObj, memObj->getMemFlags(), offset, size);
-    if (memObj == nullptr) {
-      ;
-      return nullptr;
-    }
-
     if (!memObj->create(nullptr)) {
       memObj->release();
       return nullptr;
@@ -148,11 +143,6 @@ hipError_t hipImportExternalMemory(hipExternalMemory_t* extMem_out,
       amd::ExternalBuffer(amdContext, memHandleDesc->size, memHandleDesc->handle.fd,
                           static_cast<amd::ExternalMemory::HandleType>(memHandleDesc->type));
 #endif
-
-  if (!ext_buffer) {
-    HIP_RETURN(hipErrorOutOfMemory);
-  }
-
   if (!ext_buffer->create()) {
     ext_buffer->release();
     HIP_RETURN(hipErrorOutOfMemory);
@@ -182,8 +172,8 @@ hipError_t hipExternalMemoryGetMappedBuffer(void** devPtr, hipExternalMemory_t e
   // Create a buffer view
   auto view = new (buf->getContext())
       amd::Buffer(*buf, buf->getMemFlags(), bufferDesc->offset, bufferDesc->size);
-  if (view == nullptr || !view->create()) {
-    if (view) view->release();
+  if (!view->create()) {
+    view->release();
     HIP_RETURN(hipErrorOutOfMemory);
   }
 
@@ -271,9 +261,6 @@ hipError_t hipSignalExternalSemaphoresAsync(const hipExternalSemaphore_t* extSem
       amd::ExternalSemaphoreCmd* command = new amd::ExternalSemaphoreCmd(
           *hip_stream, extSemArray[i], paramsArray[i].params.fence.value,
           amd::ExternalSemaphoreCmd::COMMAND_SIGNAL_EXTSEMAPHORE);
-      if (command == nullptr) {
-        return hipErrorOutOfMemory;
-      }
       command->enqueue();
       command->release();
     } else {
@@ -309,9 +296,6 @@ hipError_t hipWaitExternalSemaphoresAsync(const hipExternalSemaphore_t* extSemAr
       amd::ExternalSemaphoreCmd* command = new amd::ExternalSemaphoreCmd(
           *hip_stream, extSemArray[i], paramsArray[i].params.fence.value,
           amd::ExternalSemaphoreCmd::COMMAND_WAIT_EXTSEMAPHORE);
-      if (command == nullptr) {
-        return hipErrorOutOfMemory;
-      }
       command->enqueue();
       command->release();
     } else {
@@ -636,9 +620,6 @@ hipError_t ihipMemcpyCommand(amd::Command*& command, void* dst, const void* src,
     case hipHostToHost:
       break;
   }
-  if (command == nullptr) {
-    return hipErrorOutOfMemory;
-  }
   if (waitList.size() > 0) {
     waitList[0]->release();
   }
@@ -718,10 +699,8 @@ hipError_t ihipMemcpy(void* dst, const void* src, size_t sizeBytes, hipMemcpyKin
     amd::Command::EventWaitList waitList;
     waitList.push_back(command);
     amd::Command* depdentMarker = new amd::Marker(*pStream, false, waitList);
-    if (depdentMarker != nullptr) {
-      depdentMarker->enqueue();
-      depdentMarker->release();
-    }
+    depdentMarker->enqueue();
+    depdentMarker->release();
   } else {
     amd::HostQueue* newQueue = command->queue();
     if (newQueue != &stream) {
@@ -730,10 +709,8 @@ hipError_t ihipMemcpy(void* dst, const void* src, size_t sizeBytes, hipMemcpyKin
       if (cmd != nullptr) {
         waitList.push_back(cmd);
         amd::Command* depdentMarker = new amd::Marker(stream, true, waitList);
-        if (depdentMarker != nullptr) {
-          depdentMarker->enqueue();
-          depdentMarker->release();
-        }
+        depdentMarker->enqueue();
+        depdentMarker->release();
         cmd->release();
       }
     }
@@ -1137,11 +1114,6 @@ amd::Image* ihipImageCreate(const cl_channel_order channelOrder, const cl_channe
       default:
         LogPrintfError("Cannot create image of imageType: 0x%x", imageType);
     }
-  }
-
-  if (image == nullptr) {
-    status = hipErrorOutOfMemory;
-    return nullptr;
   }
 
   if (!image->create(nullptr)) {
@@ -1693,10 +1665,6 @@ hipError_t ihipMemcpyAtoDCommand(amd::Command*& command, void* dstDevice, amd::C
       *stream, CL_COMMAND_COPY_IMAGE_TO_BUFFER, amd::Command::EventWaitList{}, *srcImage,
       *dstMemory, srcOrigin, dstOrigin, copyRegion, srcRect, dstRect);
 
-  if (cpyMemCmd == nullptr) {
-    return hipErrorOutOfMemory;
-  }
-
   if (!cpyMemCmd->validatePeerMemory()) {
     delete cpyMemCmd;
     return hipErrorInvalidValue;
@@ -1715,10 +1683,6 @@ hipError_t ihipMemcpyDtoACommand(amd::Command*& command, amd::Image* dstImage,
   amd::CopyMemoryCommand* cpyMemCmd = new amd::CopyMemoryCommand(
       *stream, CL_COMMAND_COPY_BUFFER_TO_IMAGE, amd::Command::EventWaitList{}, *srcMemory,
       *dstImage, srcOrigin, dstOrigin, copyRegion, srcRect, dstRect);
-
-  if (cpyMemCmd == nullptr) {
-    return hipErrorOutOfMemory;
-  }
 
   if (!cpyMemCmd->validatePeerMemory()) {
     delete cpyMemCmd;
@@ -1818,9 +1782,6 @@ hipError_t ihipMemcpyDtoHCommand(amd::Command*& command, void* dstHost, amd::Coo
     amd::CopyMemoryCommand* copyCommand = new amd::CopyMemoryCommand(
         *stream, CL_COMMAND_COPY_BUFFER_RECT, amd::Command::EventWaitList{}, *srcMemory, *dstMemory,
         srcOrigin, dstOrigin, copyRegion, srcRect, dstRect, copyMetadata);
-    if (copyCommand == nullptr) {
-      return hipErrorOutOfMemory;
-    }
     command = copyCommand;
   } else {
     amd::Command::EventWaitList waitList;
@@ -1869,18 +1830,11 @@ hipError_t ihipMemcpyHtoDCommand(amd::Command*& command, void* dstDevice, amd::C
     amd::CopyMemoryCommand* copyCommand = new amd::CopyMemoryCommand(
         *stream, CL_COMMAND_COPY_BUFFER_RECT, amd::Command::EventWaitList{}, *srcMemory, *dstMemory,
         srcOrigin, dstOrigin, copyRegion, srcRect, dstRect, copyMetadata);
-    if (copyCommand == nullptr) {
-      return hipErrorOutOfMemory;
-    }
     command = copyCommand;
   } else {
     amd::WriteMemoryCommand* writeCommand = new amd::WriteMemoryCommand(
         *stream, CL_COMMAND_WRITE_BUFFER_RECT, amd::Command::EventWaitList{}, *dstMemory, dstStart,
         copyRegion, srcHost, dstRect, srcRect, copyMetadata);
-    if (writeCommand == nullptr) {
-      return hipErrorOutOfMemory;
-    }
-
     if (!writeCommand->validatePeerMemory()) {
       delete writeCommand;
       return hipErrorInvalidValue;
@@ -1956,9 +1910,6 @@ hipError_t ihipMemcpyHtoACommand(amd::Command*& command, amd::Image* dstImage,
     amd::CopyMemoryCommand* copyCommand = new amd::CopyMemoryCommand(
         *stream, CL_COMMAND_COPY_BUFFER_TO_IMAGE, amd::Command::EventWaitList{}, *srcMemory,
         *dstImage, srcOrigin, dstOrigin, copyRegion, copyMetadata);
-    if (copyCommand == nullptr) {
-      return hipErrorOutOfMemory;
-    }
     command = copyCommand;
   } else {
     hip::Stream* pStream = stream;
@@ -1975,10 +1926,6 @@ hipError_t ihipMemcpyHtoACommand(amd::Command*& command, amd::Image* dstImage,
     amd::WriteMemoryCommand* writeMemCmd = new amd::WriteMemoryCommand(
         *pStream, CL_COMMAND_WRITE_IMAGE, waitList, *dstImage, dstOrigin, copyRegion,
         static_cast<const char*>(srcHost) + start, srcRowPitch, srcSlicePitch, copyMetadata);
-    if (writeMemCmd == nullptr) {
-      return hipErrorOutOfMemory;
-    }
-
     if (!writeMemCmd->validatePeerMemory()) {
       delete writeMemCmd;
       return hipErrorInvalidValue;
@@ -2007,9 +1954,6 @@ hipError_t ihipMemcpyAtoHCommand(amd::Command*& command, void* dstHost, amd::Coo
     amd::CopyMemoryCommand* copyCommand = new amd::CopyMemoryCommand(
         *stream, CL_COMMAND_COPY_IMAGE_TO_BUFFER, amd::Command::EventWaitList{}, *srcImage,
         *dstMemory, srcOrigin, dstOrigin, copyRegion, copyMetadata);
-    if (copyCommand == nullptr) {
-      return hipErrorOutOfMemory;
-    }
     command = copyCommand;
   } else {
     hip::Stream* pStream = stream;
@@ -2026,11 +1970,6 @@ hipError_t ihipMemcpyAtoHCommand(amd::Command*& command, void* dstHost, amd::Coo
     amd::ReadMemoryCommand* readMemCmd = new amd::ReadMemoryCommand(
         *pStream, CL_COMMAND_READ_IMAGE, waitList, *srcImage, srcOrigin, copyRegion,
         static_cast<char*>(dstHost) + start, dstRowPitch, dstSlicePitch, copyMetadata);
-
-    if (readMemCmd == nullptr) {
-      return hipErrorOutOfMemory;
-    }
-
     if (!readMemCmd->validatePeerMemory()) {
       delete readMemCmd;
       return hipErrorInvalidValue;
@@ -2335,10 +2274,8 @@ inline hipError_t ihipMemcpyCmdEnqueue(amd::Command* command, bool isAsync = fal
       if (cmd != nullptr) {
         waitList.push_back(cmd);
         amd::Command* depdentMarker = new amd::Marker(*stream, true, waitList);
-        if (depdentMarker != nullptr) {
-          depdentMarker->enqueue();
-          depdentMarker->release();
-        }
+        depdentMarker->enqueue();
+        depdentMarker->release();
         cmd->release();
       }
     }

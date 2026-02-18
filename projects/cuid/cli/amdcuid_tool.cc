@@ -28,58 +28,63 @@
 #include <getopt.h>
 #include <unistd.h>
 #include <errno.h>
+#include <fstream>
 #include "include/amd_cuid.h"
-#include "src/cuid_file.h"
-#include "src/cuid_device_manager.h"
-#include "src/cuid_device.h"
-#include "src/cuid_gpu.h"
-#include "src/cuid_cpu.h"
-#include "src/cuid_nic.h"
-#include "src/cuid_util.h"
 
 /**
  * @file amdcuid_tool.cc
  * @brief AMD CUID command-line tool for generating and querying CUIDs
  * 
  * This tool provides functionality to:
- * - Generate CUID files from discovered hardware
- * - List and query device CUIDs from the CUID file
- * - Always reads from /tmp/cuid (or /tmp/priv_cuid with sudo for primary CUIDs)
+ * - Generate CUID files from discovered hardware using amdcuid_refresh()
+ * - List and query device CUIDs using the public amd_cuid.h API
+ * - Always reads from the library's internal registry
  */
 
-
-// Default CUID file paths - use functions to get paths at runtime
-static const char* get_default_cuid_file() { return CuidUtilities::cuid_file().c_str(); }
-static const char* get_default_priv_cuid_file() { return CuidUtilities::priv_cuid_file().c_str(); }
+/**
+ * @brief Check if running with root privileges
+ */
+bool is_root() {
+    return geteuid() == 0;
+}
 
 void print_usage(const char* program_name) {
     std::cout << "Usage: " << program_name << " [OPTIONS]\n\n";
     std::cout << "AMD Component Unified Identifier (CUID) Tool\n\n";
     std::cout << "Options:\n";
-    std::cout << "  --generate-cuid <key_file>   Generate CUID files from discovered devices\n";
-    std::cout << "                               Requires HMAC key file for derived CUID generation\n";
-    std::cout << "                               Creates /tmp/cuid and /tmp/priv_cuid (if root)\n";
-    std::cout << "  --list                       List all devices and their CUIDs from CUID file\n";
-    std::cout << "                               Reads from /tmp/cuid (or /tmp/priv_cuid with --show-primary)\n";
+    std::cout << "  --generate-cuid              Generate/refresh CUID registry from discovered devices\n";
+    std::cout << "                               Requires root privileges\n";
+    std::cout << "                               Uses existing key or specify --generate-key/--set-key\n";
+    std::cout << "  --generate-key               Generate a new random HMAC key (use with --generate-cuid)\n";
+    std::cout << "  --set-key <key_file>         Set HMAC key from file (32 bytes, use with --generate-cuid)\n";
+    std::cout << "  --notify-daemon              Notify daemon to refresh device registry (for udev integration)\n";
+    std::cout << "  --list                       List all devices and their CUIDs\n";
     std::cout << "  --type <type>                Filter by device type (gpu, cpu, nic, platform)\n";
     std::cout << "                               Use with --list or --query-device\n";
     std::cout << "  --show-primary               Show primary CUIDs (requires root privileges)\n";
     std::cout << "                               Use with --list or --query-device\n";
-    std::cout << "  --query-device <identifier>  Query specific device by node path or package:core ID\n";
+    std::cout << "  --query-device <identifier>  Query specific device by device path or BDF\n";
+    std::cout << "  --version                    Show library version\n";
     std::cout << "  --help, -h                   Show this help message\n";
     std::cout << "\nExamples:\n";
-    std::cout << "  # Generate CUID files (requires root for priv_cuid)\n";
-    std::cout << "  sudo " << program_name << " --generate-cuid /path/to/hmac_key.bin\n\n";
+    std::cout << "  # Generate CUID registry with a new random key (requires root)\n";
+    std::cout << "  sudo " << program_name << " --generate-cuid --generate-key\n\n";
+    std::cout << "  # Generate CUID registry with existing key file\n";
+    std::cout << "  sudo " << program_name << " --generate-cuid --set-key /path/to/hmac_key.bin\n\n";
+    std::cout << "  # Generate CUID registry using previously set key\n";
+    std::cout << "  sudo " << program_name << " --generate-cuid\n\n";
+    std::cout << "  # Notify daemon of device changes (called by udev)\n";
+    std::cout << "  " << program_name << " --notify-daemon\n\n";
     std::cout << "  # List all devices with their CUIDs\n";
     std::cout << "  " << program_name << " --list\n\n";
     std::cout << "  # List all GPUs with their CUIDs\n";
     std::cout << "  " << program_name << " --list --type gpu\n\n";
     std::cout << "  # List all devices with primary CUIDs (requires root)\n";
     std::cout << "  sudo " << program_name << " --list --show-primary\n\n";
-    std::cout << "  # Query specific device\n";
+    std::cout << "  # Query specific device by path\n";
     std::cout << "  " << program_name << " --query-device /sys/class/drm/renderD128\n\n";
-    std::cout << "  # Query device with primary CUID (requires root)\n";
-    std::cout << "  sudo " << program_name << " --query-device 0:0 --show-primary\n\n";
+    std::cout << "  # Query device by BDF\n";
+    std::cout << "  " << program_name << " --query-device 0000:03:00.0 --type gpu\n\n";
 }
 
 const char* device_type_to_string(amdcuid_device_type_t type) {
@@ -88,10 +93,7 @@ const char* device_type_to_string(amdcuid_device_type_t type) {
         case AMDCUID_DEVICE_TYPE_CPU: return "CPU";
         case AMDCUID_DEVICE_TYPE_GPU: return "GPU";
         case AMDCUID_DEVICE_TYPE_NIC: return "NIC";
-        case AMDCUID_DEVICE_TYPE_NPU: return "NPU";
-        case AMDCUID_DEVICE_TYPE_STORAGE: return "STORAGE";
-        case AMDCUID_DEVICE_TYPE_MEMORY: return "MEMORY";
-        case AMDCUID_DEVICE_TYPE_OTHER: return "OTHER";
+        case AMDCUID_DEVICE_TYPE_NONE: return "NONE";
         default: return "UNKNOWN";
     }
 }
@@ -104,98 +106,149 @@ amdcuid_device_type_t string_to_device_type(const std::string& type_str) {
     if (upper == "CPU") return AMDCUID_DEVICE_TYPE_CPU;
     if (upper == "GPU") return AMDCUID_DEVICE_TYPE_GPU;
     if (upper == "NIC") return AMDCUID_DEVICE_TYPE_NIC;
-    if (upper == "NPU") return AMDCUID_DEVICE_TYPE_NPU;
-    if (upper == "STORAGE") return AMDCUID_DEVICE_TYPE_STORAGE;
-    if (upper == "MEMORY") return AMDCUID_DEVICE_TYPE_MEMORY;
-    return AMDSMI_DEVICE_TYPE_NONE;
-}
-
-std::string cuid_to_string(const amdcuid_id_t& id) {
-    char uuid_str[37];
-    snprintf(uuid_str, sizeof(uuid_str),
-             "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
-             id.bytes[0], id.bytes[1], id.bytes[2], id.bytes[3],
-             id.bytes[4], id.bytes[5],
-             id.bytes[6], id.bytes[7],
-             id.bytes[8], id.bytes[9],
-             id.bytes[10], id.bytes[11], id.bytes[12], id.bytes[13], id.bytes[14], id.bytes[15]);
-    return std::string(uuid_str);
-}
-
-std::string format_timestamp(time_t timestamp) {
-    char buffer[64];
-    struct tm* tm_info = localtime(&timestamp);
-    strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", tm_info);
-    return std::string(buffer);
+    return AMDCUID_DEVICE_TYPE_NONE;
 }
 
 /**
- * @brief Check if running with root privileges
+ * @brief Load HMAC key from a file
+ * @param key_file Path to the key file (must be 32 bytes)
+ * @param key Output buffer for the key (32 bytes)
+ * @return true on success, false on failure
  */
-bool is_root() {
-    return geteuid() == 0;
+bool load_key_from_file(const std::string& key_file, uint8_t key[32]) {
+    std::ifstream file(key_file, std::ios::binary);
+    if (!file) {
+        return false;
+    }
+    file.read(reinterpret_cast<char*>(key), 32);
+    return file.gcount() == 32;
 }
 
 /**
- * @brief Get appropriate error message for file access failures
+ * @brief Notify the daemon to refresh device registry
+ * 
+ * This function is called by udev when device changes are detected.
+ * It triggers the daemon to re-scan devices via IPC.
+ * 
+ * @return 0 on success, 1 on failure
  */
-std::string get_file_error_message(const std::string& file_path, bool show_primary) {
-    if (access(file_path.c_str(), F_OK) != 0) {
-        return "CUID file not found: " + file_path + "\n"
-               "Please run 'sudo amdcuid_tool --generate-cuid <key_file>' first to generate CUID files.";
-    }
-    if (access(file_path.c_str(), R_OK) != 0) {
-        if (show_primary) {
-            return "Permission denied: Cannot read " + file_path + "\n"
-                   "Reading primary CUIDs requires root privileges. Try running with sudo.";
-        }
-        return "Permission denied: Cannot read " + file_path;
-    }
-    return "Failed to load CUID file: " + file_path;
-}
-
-int generate_cuid_files(const std::string& key_file) {
-    std::cout << "Generating CUID files...\n" << std::endl;
-    
-    // Initialize device manager and discover devices
-    auto& mgr = CuidDeviceManager::instance();
-    amdcuid_status_t status = mgr.init();
+int notify_daemon() {
+    amdcuid_status_t status = amdcuid_refresh();
     
     if (status != AMDCUID_STATUS_SUCCESS) {
-        std::cerr << "Error: Failed to initialize device manager (status: " << status << ")" << std::endl;
-        if (status == AMDCUID_STATUS_PERMISSION_DENIED) {
+        // Silently fail for udev context - don't spam logs
+        // The daemon may not be running, which is acceptable
+        return (status == AMDCUID_STATUS_IPC_ERROR) ? 0 : 1;
+    }
+    
+    return 0;
+}
+
+/**
+ * @brief Query a string property from a device handle
+ * @param handle The device handle
+ * @param query The query type
+ * @param result Output string
+ * @return Status code
+ */
+amdcuid_status_t query_string_property(amdcuid_id_t handle, amdcuid_query_t query, std::string& result) {
+    // First query to get required size
+    uint32_t length = 0;
+    amdcuid_status_t status = amdcuid_query_device_property(handle, query, nullptr, &length);
+    
+    if (status == AMDCUID_STATUS_INSUFFICIENT_SIZE && length > 0) {
+        // Allocate buffer and query again
+        std::vector<char> buffer(length);
+        status = amdcuid_query_device_property(handle, query, buffer.data(), &length);
+        if (status == AMDCUID_STATUS_SUCCESS) {
+            // Remove null terminator if present
+            result = std::string(buffer.data(), length > 0 && buffer[length-1] == '\0' ? length - 1 : length);
+        }
+    } else if (status == AMDCUID_STATUS_SUCCESS) {
+        result.clear();
+    }
+    
+    return status;
+}
+
+int generate_cuid_files(const std::string& key_file, bool generate_key) {
+    std::cout << "Generating/refreshing CUID registry...\n" << std::endl;
+    
+    // Check for root privileges
+    if (!is_root()) {
+        std::cerr << "Error: Generating CUIDs requires root privileges.\n";
+        std::cerr << "Please run with sudo." << std::endl;
+        return 1;
+    }
+    
+    // Validate key options - cannot use both together
+    if (!key_file.empty() && generate_key) {
+        std::cerr << "Error: Cannot use both --generate-key and --set-key together.\n";
+        std::cerr << "Use --generate-key to create a new random key, or\n";
+        std::cerr << "Use --set-key <file> to load an existing key from a file." << std::endl;
+        return 1;
+    }
+    
+    // Handle key setup
+    if (!key_file.empty()) {
+        // Load key from file
+        uint8_t key[32];
+        if (!load_key_from_file(key_file, key)) {
+            std::cerr << "Error: Failed to read HMAC key from file: " << key_file << std::endl;
+            std::cerr << "Key file must be exactly 32 bytes." << std::endl;
+            return 1;
+        }
+        
+        amdcuid_status_t status = amdcuid_set_hash_key(key);
+        if (status != AMDCUID_STATUS_SUCCESS) {
+            std::cerr << "Error: Failed to set HMAC key: " << amdcuid_status_to_string(status) << std::endl;
+            return 1;
+        }
+        std::cout << "HMAC key loaded from: " << key_file << std::endl;
+    } else if (generate_key) {
+        // Generate a new random key
+        uint8_t key[32];
+        amdcuid_status_t status = amdcuid_generate_hash_key(key);
+        if (status != AMDCUID_STATUS_SUCCESS) {
+            std::cerr << "Error: Failed to generate HMAC key: " << amdcuid_status_to_string(status) << std::endl;
+            return 1;
+        }
+        
+        status = amdcuid_set_hash_key(key);
+        if (status != AMDCUID_STATUS_SUCCESS) {
+            std::cerr << "Error: Failed to set generated HMAC key: " << amdcuid_status_to_string(status) << std::endl;
+            return 1;
+        }
+        std::cout << "Generated new HMAC key." << std::endl;
+    }
+    // else: No key option specified - attempt to use existing key (will be validated by amdcuid_refresh)
+    // else: No key option specified - attempt to use existing key (will be validated by amdcuid_refresh)
+    
+    // Use amdcuid_refresh() to discover devices and generate CUID files
+    amdcuid_status_t status = amdcuid_refresh();
+    
+    if (status != AMDCUID_STATUS_SUCCESS) {
+        std::cerr << "Error: Failed to refresh CUID registry: " << amdcuid_status_to_string(status) << std::endl;
+        if (status == AMDCUID_STATUS_KEY_ERROR) {
+            std::cerr << "No HMAC key found. Please use --generate-key or --set-key <file> to create a key first." << std::endl;
+        } else if (status == AMDCUID_STATUS_PERMISSION_DENIED) {
             std::cerr << "Some devices may require root privileges to discover." << std::endl;
         }
         return 1;
     }
     
-    std::cout << "Discovered " << mgr.devices().size() << " device(s)" << std::endl;
-    
-    // Generate CUID files
-    status = CuidFileGenerator::generate_from_devices(
-        mgr.devices(),
-        key_file,
-        get_default_cuid_file(),
-        get_default_priv_cuid_file()
-    );
-    
-    if (status != AMDCUID_STATUS_SUCCESS) {
-        std::cerr << "Error: Failed to generate CUID files (status: " << status << ")" << std::endl;
-        return 1;
+    // Count discovered devices
+    uint32_t count = 0;
+    status = amdcuid_get_all_handles(nullptr, &count);
+    if (status == AMDCUID_STATUS_INSUFFICIENT_SIZE || status == AMDCUID_STATUS_SUCCESS) {
+        std::cout << "Discovered " << count << " device(s)" << std::endl;
     }
     
-    std::cout << "\nCUID files generated successfully!" << std::endl;
-    std::cout << "  Public CUID file:     " << get_default_cuid_file() << std::endl;
-    if (is_root()) {
-        std::cout << "  Privileged CUID file: " << get_default_priv_cuid_file() << std::endl;
-    }
+    std::cout << "\nCUID registry refreshed successfully!" << std::endl;
     return 0;
 }
 
 int list_devices(bool show_primary, const std::string* filter_type) {
-    // Determine which file to read based on show_primary flag
-    std::string file_path = show_primary ? get_default_priv_cuid_file() : get_default_cuid_file();
-    
     // Check for root privileges if requesting primary CUIDs
     if (show_primary && !is_root()) {
         std::cerr << "Error: Permission denied\n";
@@ -203,41 +256,60 @@ int list_devices(bool show_primary, const std::string* filter_type) {
         return 1;
     }
     
-    CuidFile cuid_file(file_path, show_primary);
+    // Parse filter type if provided
+    amdcuid_device_type_t filter_device_type = AMDCUID_DEVICE_TYPE_NONE;
+    if (filter_type) {
+        filter_device_type = string_to_device_type(*filter_type);
+        if (filter_device_type == AMDCUID_DEVICE_TYPE_NONE) {
+            std::cerr << "Error: Unknown device type '" << *filter_type << "'" << std::endl;
+            std::cerr << "Valid types: platform, cpu, gpu, nic" << std::endl;
+            return 1;
+        }
+    }
     
-    if (!cuid_file.exists()) {
-        std::cerr << "Error: " << get_file_error_message(file_path, show_primary) << std::endl;
+    // Get all device handles using public API
+    uint32_t count = 0;
+    amdcuid_status_t status = amdcuid_get_all_handles(nullptr, &count);
+    
+    if (status != AMDCUID_STATUS_INSUFFICIENT_SIZE && status != AMDCUID_STATUS_SUCCESS) {
+        if (status == AMDCUID_STATUS_UNSUPPORTED) {
+            std::cout << "No devices found.\n";
+            std::cout << "Please run 'sudo amdcuid_tool --generate-cuid' first to generate CUID registry." << std::endl;
+            return 0;
+        }
+        std::cerr << "Error: Failed to get device count: " << amdcuid_status_to_string(status) << std::endl;
         return 1;
     }
     
-    amdcuid_status_t status = cuid_file.load();
-    if (status != AMDCUID_STATUS_SUCCESS) {
-        std::cerr << "Error: " << get_file_error_message(file_path, show_primary) << std::endl;
-        return 1;
-    }
-    
-    // const auto& entries = cuid_file.get_entries();
-    
-
-    
-    // Group by type
-    std::map<amdcuid_device_type_t, std::vector<CuidFileEntry>> grouped;
-    cuid_file.get_grouped_entries(grouped);
-
-    if (grouped.empty()) {
-        std::cout << "No entries found in CUID file." << std::endl;
+    if (count == 0) {
+        std::cout << "No devices found." << std::endl;
         return 0;
     }
     
-    // Parse filter type if provided
-    amdcuid_device_type_t filter_device_type = AMDSMI_DEVICE_TYPE_NONE;
-    if (filter_type) {
-        filter_device_type = string_to_device_type(*filter_type);
-        if (filter_device_type == AMDSMI_DEVICE_TYPE_NONE) {
-            std::cerr << "Error: Unknown device type '" << *filter_type << "'" << std::endl;
-            std::cerr << "Valid types: platform, cpu, gpu, nic, npu, storage, memory" << std::endl;
-            return 1;
+    std::vector<amdcuid_id_t> handles(count);
+    status = amdcuid_get_all_handles(handles.data(), &count);
+    if (status != AMDCUID_STATUS_SUCCESS) {
+        std::cerr << "Error: Failed to get device handles: " << amdcuid_status_to_string(status) << std::endl;
+        return 1;
+    }
+    
+    // Group handles by device type
+    std::map<amdcuid_device_type_t, std::vector<amdcuid_id_t>> grouped;
+    
+    for (const auto& handle : handles) {
+        amdcuid_device_type_t device_type;
+        uint32_t len = sizeof(device_type);
+        status = amdcuid_query_device_property(handle, AMDCUID_QUERY_DEVICE_TYPE, &device_type, &len);
+        if (status != AMDCUID_STATUS_SUCCESS) {
+            continue;
         }
+        
+        // Apply filter if specified
+        if (filter_type && device_type != filter_device_type) {
+            continue;
+        }
+        
+        grouped[device_type].push_back(handle);
     }
     
     if (grouped.empty()) {
@@ -263,49 +335,46 @@ int list_devices(bool show_primary, const std::string* filter_type) {
     
     for (const auto& kv : grouped) {
         amdcuid_device_type_t type = kv.first;
-        const std::vector<CuidFileEntry>& entry_list = kv.second;
+        const std::vector<amdcuid_id_t>& handle_list = kv.second;
         std::string type_str = device_type_to_string(type);
         std::cout << "---- " << type_str << " Devices ----" << std::endl;
         
-        for (const auto& entry : entry_list) {
+        int device_index = 0;
+        for (const auto& handle : handle_list) {
             if (type == AMDCUID_DEVICE_TYPE_PLATFORM) {
                 std::cout << type_str;
             } else {
-                std::cout << type_str << " #" << entry.device_index;
+                std::cout << type_str << " #" << device_index;
             }
             
-            if (show_primary && cuid_file.is_privileged()) {
-                std::cout << "\n  Primary CUID:   " << CuidUtilities::get_cuid_as_string(&entry.primary_cuid);
+            // Query primary CUID if requested and has permission
+            if (show_primary) {
+                amdcuid_id_t primary_cuid;
+                uint32_t len = sizeof(primary_cuid);
+                status = amdcuid_query_device_property(handle, AMDCUID_QUERY_PRIMARY_CUID, &primary_cuid, &len);
+                if (status == AMDCUID_STATUS_SUCCESS) {
+                    std::cout << "\n  Primary CUID:   " << amdcuid_id_to_string(primary_cuid);
+                }
             }
-            std::cout << "\n  CUID:           " << CuidUtilities::get_cuid_as_string(&entry.derived_cuid);
             
-            if (!entry.device_node.empty()) {
-                std::cout << "\n  Device Node:    " << entry.device_node;
-            }
-            if (!entry.package_core_id.empty()) {
-                std::cout << "\n  Package:Core:   " << entry.package_core_id;
-            }
-            if (!entry.bdf.empty()) {
-                std::cout << "\n  BDF:            " << entry.bdf;
-            }
-            if (!entry.mac_address.empty()) {
-                std::cout << "\n  MAC Address:    " << entry.mac_address;
-            }
-            if (entry.last_update > 0) {
-                std::cout << "\n  Last Update:    " << format_timestamp(entry.last_update);
+            // Query derived CUID (the handle itself is the derived CUID)
+            std::cout << "\n  CUID:           " << amdcuid_id_to_string(handle);
+            
+            // Query device path
+            std::string device_path;
+            if (query_string_property(handle, AMDCUID_QUERY_DEVICE_PATH, device_path) == AMDCUID_STATUS_SUCCESS) {
+                std::cout << "\n  Device Path:    " << device_path;
             }
             
             std::cout << "\n" << std::endl;
+            device_index++;
         }
     }
     
     return 0;
 }
 
-int query_device(const std::string& identifier, bool show_primary) {
-    // Determine which file to read based on show_primary flag
-    std::string file_path = show_primary ? get_default_priv_cuid_file() : get_default_cuid_file();
-    
+int query_device(const std::string& identifier, bool show_primary, const std::string* device_type_str) {
     // Check for root privileges if requesting primary CUIDs
     if (show_primary && !is_root()) {
         std::cerr << "Error: Permission denied\n";
@@ -313,64 +382,83 @@ int query_device(const std::string& identifier, bool show_primary) {
         return 1;
     }
     
-    CuidFile cuid_file(file_path, show_primary);
+    amdcuid_id_t handle;
+    amdcuid_status_t status;
     
-    if (!cuid_file.exists()) {
-        std::cerr << "Error: " << get_file_error_message(file_path, show_primary) << std::endl;
-        return 1;
+    // Determine device type for lookup
+    amdcuid_device_type_t device_type = AMDCUID_DEVICE_TYPE_GPU;  // Default to GPU
+    if (device_type_str) {
+        device_type = string_to_device_type(*device_type_str);
+        if (device_type == AMDCUID_DEVICE_TYPE_NONE) {
+            std::cerr << "Error: Unknown device type '" << *device_type_str << "'" << std::endl;
+            std::cerr << "Valid types: platform, cpu, gpu, nic" << std::endl;
+            return 1;
+        }
     }
     
-    amdcuid_status_t status = cuid_file.load();
+    // Check if identifier looks like a BDF (contains ':' and '.')
+    bool is_bdf = (identifier.find(':') != std::string::npos && identifier.find('.') != std::string::npos);
+    
+    if (is_bdf) {
+        // Try as BDF
+        status = amdcuid_get_handle_by_bdf(identifier.c_str(), device_type, &handle);
+    } else {
+        // Try as device path
+        status = amdcuid_get_handle_by_dev_path(identifier.c_str(), device_type, &handle);
+    }
+    
     if (status != AMDCUID_STATUS_SUCCESS) {
-        std::cerr << "Error: " << get_file_error_message(file_path, show_primary) << std::endl;
+        std::cerr << "Error: Device not found: " << identifier << std::endl;
+        std::cerr << "Status: " << amdcuid_status_to_string(status) << std::endl;
         return 1;
     }
     
-    // Try different search methods
-    CuidFileEntry entry;
+    // Device found, display information
+    std::cout << "Device Found:" << std::endl;
     
-    // Try as device node
-    status = cuid_file.find_by_device_node(identifier, entry);
+    // Query device type
+    amdcuid_device_type_t queried_type;
+    uint32_t len = sizeof(queried_type);
+    status = amdcuid_query_device_property(handle, AMDCUID_QUERY_DEVICE_TYPE, &queried_type, &len);
     if (status == AMDCUID_STATUS_SUCCESS) {
-        std::cout << "Device Found:" << std::endl;
-        std::cout << "  Type:           " << device_type_to_string(entry.device_type) << std::endl;
-        if (show_primary && cuid_file.is_privileged()) {
-            std::cout << "  Primary CUID:   " << cuid_to_string(entry.primary_cuid) << std::endl;
-        }
-        std::cout << "  CUID:           " << cuid_to_string(entry.derived_cuid) << std::endl;
-        std::cout << "  Device Node:    " << entry.device_node << std::endl;
-        if (!entry.bdf.empty()) {
-            std::cout << "  BDF:            " << entry.bdf << std::endl;
-        }
-        std::cout << "  Last Update:    " << format_timestamp(entry.last_update) << std::endl;
-        return 0;
+        std::cout << "  Type:           " << device_type_to_string(queried_type) << std::endl;
     }
     
-    // Try as package:core ID
-    status = cuid_file.find_by_package_core_id(identifier, entry);
-    if (status == AMDCUID_STATUS_SUCCESS) {
-        std::cout << "Device Found:" << std::endl;
-        std::cout << "  Type:           " << device_type_to_string(entry.device_type) << std::endl;
-        if (show_primary && cuid_file.is_privileged()) {
-            std::cout << "  Primary CUID:   " << cuid_to_string(entry.primary_cuid) << std::endl;
+    // Query primary CUID if requested
+    if (show_primary) {
+        amdcuid_id_t primary_cuid;
+        len = sizeof(primary_cuid);
+        status = amdcuid_query_device_property(handle, AMDCUID_QUERY_PRIMARY_CUID, &primary_cuid, &len);
+        if (status == AMDCUID_STATUS_SUCCESS) {
+            std::cout << "  Primary CUID:   " << amdcuid_id_to_string(primary_cuid) << std::endl;
+        } else if (status == AMDCUID_STATUS_PERMISSION_DENIED) {
+            std::cout << "  Primary CUID:   (requires root)" << std::endl;
         }
-        std::cout << "  CUID:           " << cuid_to_string(entry.derived_cuid) << std::endl;
-        std::cout << "  Package:Core:   " << entry.package_core_id << std::endl;
-        std::cout << "  Last Update:    " << format_timestamp(entry.last_update) << std::endl;
-        return 0;
     }
     
-    std::cerr << "Error: Device not found: " << identifier << std::endl;
-    return 1;
+    // Display derived CUID (the handle)
+    std::cout << "  CUID:           " << amdcuid_id_to_string(handle) << std::endl;
+    
+    // Query device path
+    std::string device_path;
+    if (query_string_property(handle, AMDCUID_QUERY_DEVICE_PATH, device_path) == AMDCUID_STATUS_SUCCESS) {
+        std::cout << "  Device Path:    " << device_path << std::endl;
+    }
+    
+    return 0;
 }
 
 int main(int argc, char* argv[]) {
     static struct option long_options[] = {
-        {"generate-cuid",      required_argument, 0, 'g'},
+        {"generate-cuid",      no_argument,       0, 'g'},
+        {"generate-key",       no_argument,       0, 'k'},
+        {"set-key",            required_argument, 0, 's'},
+        {"notify-daemon",      no_argument,       0, 'n'},
         {"list",               no_argument,       0, 'l'},
         {"type",               required_argument, 0, 't'},
         {"show-primary",       no_argument,       0, 'p'},
         {"query-device",       required_argument, 0, 'q'},
+        {"version",            no_argument,       0, 'v'},
         {"help",               no_argument,       0, 'h'},
         {0, 0, 0, 0}
     };
@@ -379,6 +467,8 @@ int main(int argc, char* argv[]) {
     std::string filter_type;
     std::string query_identifier;
     bool do_generate = false;
+    bool generate_key = false;
+    bool do_notify = false;
     bool do_list = false;
     bool show_primary = false;
     bool do_query = false;
@@ -386,11 +476,19 @@ int main(int argc, char* argv[]) {
     int opt;
     int option_index = 0;
     
-    while ((opt = getopt_long(argc, argv, "g:lt:pq:h", long_options, &option_index)) != -1) {
+    while ((opt = getopt_long(argc, argv, "gks:nlt:pq:vh", long_options, &option_index)) != -1) {
         switch (opt) {
             case 'g':
                 do_generate = true;
+                break;
+            case 'k':
+                generate_key = true;
+                break;
+            case 's':
                 key_file = optarg;
+                break;
+            case 'n':
+                do_notify = true;
                 break;
             case 'l':
                 do_list = true;
@@ -405,6 +503,9 @@ int main(int argc, char* argv[]) {
                 do_query = true;
                 query_identifier = optarg;
                 break;
+            case 'v':
+                std::cout << "AMD CUID Library Version: " << amdcuid_library_version_to_string() << std::endl;
+                return 0;
             case 'h':
                 print_usage(argv[0]);
                 return 0;
@@ -414,17 +515,21 @@ int main(int argc, char* argv[]) {
         }
     }
     
+    // Validate key options usage
+    if ((generate_key || !key_file.empty()) && !do_generate) {
+        std::cerr << "Error: --generate-key and --set-key can only be used with --generate-cuid" << std::endl;
+        return 1;
+    }
+    
     // Execute requested operation
     if (do_generate) {
-        if (key_file.empty()) {
-            std::cerr << "Error: HMAC key file required for --generate-cuid" << std::endl;
-            return 1;
-        }
-        return generate_cuid_files(key_file);
+        return generate_cuid_files(key_file, generate_key);
+    } else if (do_notify) {
+        return notify_daemon();
     } else if (do_list) {
         return list_devices(show_primary, filter_type.empty() ? nullptr : &filter_type);
     } else if (do_query) {
-        return query_device(query_identifier, show_primary);
+        return query_device(query_identifier, show_primary, filter_type.empty() ? nullptr : &filter_type);
     } else {
         print_usage(argv[0]);
         return 1;
