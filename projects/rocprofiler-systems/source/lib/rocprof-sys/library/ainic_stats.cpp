@@ -7,27 +7,19 @@
 
 #include "logger/debug.hpp"
 
+#include <spdlog/fmt/fmt.h>
+
 std::string
 nic_stats::to_string() const
 {
-    std::ostringstream stream;
-
-    stream << "[_name=" << _name << ", _netdev=" << _netdev
-           << ", _rx_rdma_ucast_bytes=" << _rx_rdma_ucast_bytes
-           << ", _rx_rdma_ucast_pkts=" << _rx_rdma_ucast_pkts
-           << ", _tx_rdma_ucast_bytes=" << _tx_rdma_ucast_bytes
-           << ", _tx_rdma_ucast_pkts=" << _tx_rdma_ucast_pkts
-           << ", _rx_rdma_cnp_pkts=" << _rx_rdma_cnp_pkts
-           << ", _tx_rdma_cnp_pkts=" << _tx_rdma_cnp_pkts << "]";
-    return stream.str();
+    return fmt::format("[_name={}, _netdev={}, _rx_rdma_ucast_bytes={}, "
+                       "_rx_rdma_ucast_pkts={}, _tx_rdma_ucast_bytes={}, "
+                       "_tx_rdma_ucast_pkts={}, _rx_rdma_cnp_pkts={}, "
+                       "_tx_rdma_cnp_pkts={}]",
+                       _name, _netdev, _rx_rdma_ucast_bytes, _rx_rdma_ucast_pkts,
+                       _tx_rdma_ucast_bytes, _tx_rdma_ucast_pkts, _rx_rdma_cnp_pkts,
+                       _tx_rdma_cnp_pkts);
 }
-
-const char* nic_stats::RX_RDMA_UCAST_BYTES = "rx_rdma_ucast_bytes";
-const char* nic_stats::RX_RDMA_UCAST_PKTS  = "rx_rdma_ucast_pkts";
-const char* nic_stats::TX_RDMA_UCAST_BYTES = "tx_rdma_ucast_bytes";
-const char* nic_stats::TX_RDMA_UCAST_PKTS  = "tx_rdma_ucast_pkts";
-const char* nic_stats::RX_RDMA_CNP_PKTS    = "rx_rdma_cnp_pkts";
-const char* nic_stats::TX_RDMA_CNP_PKTS    = "tx_rdma_cnp_pkts";
 
 ai_nic_stats_collector::ai_nic_stats_collector() {}
 

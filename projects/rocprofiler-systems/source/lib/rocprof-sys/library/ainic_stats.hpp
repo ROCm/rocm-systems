@@ -4,8 +4,8 @@
 #pragma once
 
 #include <cstdint>
-#include <map>
 #include <string>
+#include <unordered_map>
 
 #include "core/amd_smi.hpp"
 
@@ -15,9 +15,8 @@
 
 struct nic_stats
 {
-    std::string _name;         // RDMA device name
-    std::string _netdev;       // NIC name
-    uint32_t    _num_stats{};  // Number of stats collected for this NIC
+    std::string _name;    // RDMA device name
+    std::string _netdev;  // NIC name
 
     uint64_t _rx_rdma_ucast_bytes{};  // unicast received bytes
     uint64_t _rx_rdma_ucast_pkts{};   // unicast received packets
@@ -29,19 +28,18 @@ struct nic_stats
 
     std::string to_string() const;
 
-    static const char* RX_RDMA_UCAST_BYTES;
-    static const char* RX_RDMA_UCAST_PKTS;
-    static const char* TX_RDMA_UCAST_BYTES;
-    static const char* TX_RDMA_UCAST_PKTS;
-
-    static const char* RX_RDMA_CNP_PKTS;
-    static const char* TX_RDMA_CNP_PKTS;
+    static constexpr const char* RX_RDMA_UCAST_BYTES = "rx_rdma_ucast_bytes";
+    static constexpr const char* RX_RDMA_UCAST_PKTS  = "rx_rdma_ucast_pkts";
+    static constexpr const char* TX_RDMA_UCAST_BYTES = "tx_rdma_ucast_bytes";
+    static constexpr const char* TX_RDMA_UCAST_PKTS  = "tx_rdma_ucast_pkts";
+    static constexpr const char* RX_RDMA_CNP_PKTS    = "rx_rdma_cnp_pkts";
+    static constexpr const char* TX_RDMA_CNP_PKTS    = "tx_rdma_cnp_pkts";
 };
 
 class ai_nic_stats_collector
 {
 public:
-    using nic_params_t = std::map<std::string, nic_stats>;
+    using nic_params_t = std::unordered_map<std::string, nic_stats>;
 
 private:
     // _nic_params and _nic_delta_params both hold network stats. _nic_params holds the
