@@ -32,8 +32,10 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Added `--experimental` flag to enable experimental features that are under development. This flag is required when using any experimental features.
   * Use `rocprof-compute --experimental --help` to see currently available experimental features.
 
+* Added missing metric descriptions for gfx950 architecture
+
 * Added `--membw-analysis` under experimental features to allow memory bandwidth specific profiling and analysis.
-  * Use filter option `--block/-b 30` (and `--experimental --membw-analysis`) to profile/analyze memory bandwidth specific metrics.
+  * Use `--experimental --membw-analysis` to profile and analyze memory bandwidth specific metric nlock 30.
 
 ### Changed
 

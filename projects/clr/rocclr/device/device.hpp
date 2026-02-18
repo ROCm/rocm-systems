@@ -653,7 +653,6 @@ struct Info : public amd::EmbeddedObject {
   bool virtualMemoryManagement_;       //!< Virtual memory management support
   size_t virtualMemAllocGranularityMinimum_;  //!< minimum virtual memory allocation size/addr granularity
   size_t virtualMemAllocGranularityRecommended_;  //!< recommended virtual memory allocation size/addr granularity
-
   uint32_t driverNodeId_;
   //! Number of Physical SGPRs per SIMD
   uint32_t sgprsPerSimd_;
@@ -670,6 +669,8 @@ struct Info : public amd::EmbeddedObject {
   uint32_t numberOfXccs_;  //! The number of XCC(s) on the device
 
   bool hasExpertSchedMode_;  //! Device supports expert scheduling mode
+
+  bool dmabufSupported_;  //!< DMABuf support flag
 };
 
 //! Device settings

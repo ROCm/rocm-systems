@@ -305,6 +305,10 @@ hipError_t ihipLaunchKernel_validate(hipFunction_t f, const amd::LaunchParams& l
   }
   hip::DeviceFunc* function = hip::DeviceFunc::asFunction(f);
   amd::Kernel* kernel = function->kernel();
+  if (!kernel) {
+    LogPrintfError("%s", "Kernel object is invalid or null, possibly due to architecture mismatch.");
+    return hipErrorInvalidValue;
+  }
   const amd::KernelSignature& signature = kernel->signature();
   if ((signature.numParameters() > 0) && (kernelParams == nullptr) && (extra == nullptr)) {
     LogPrintfError("%s", "At least one of kernelParams or extra Params should be provided");

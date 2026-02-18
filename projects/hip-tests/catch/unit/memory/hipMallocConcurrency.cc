@@ -62,15 +62,15 @@ static constexpr auto BuffSizeBC = 5 * 1024 * 1024;
 /* Buffer size for smaller chunks in alloc/free cycles */
 static constexpr auto BuffSizeSC = 16;
 
-/* You may change it for individual test.
- * But default 100 is for quick return in Jenkin Build */
-static constexpr auto NumDiv = 100;
+/* You may change it for individual test. But default 500 is for quick return in Jenkin Build and to
+ * prevent out-of-memory issues on ASAN runs */
+static constexpr auto NumDiv = 500;
 
 /* Max alloc/free iterations for smaller chunks */
 static constexpr auto MaxAllocFree_SmallChunks = (5000000 / NumDiv);
 
 /* Max alloc/free iterations for bigger chunks */
-static constexpr auto MaxAllocFree_BigChunks = 10000;
+static constexpr auto MaxAllocFree_BigChunks = 5000;
 
 /* Max alloc and pool iterations */
 static constexpr auto MaxAllocPoolIter = (2000000 / NumDiv);
