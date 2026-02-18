@@ -3268,15 +3268,20 @@ def amdsmi_get_gpu_total_ecc_count(
     }
 
 def amdsmi_get_gpu_cper_entries(
-    processor_handle: processor_handle_t,
+    device_handle: amdsmi_wrapper.amdsmi_processor_handle | Path,
+    # processor_handle: Union[amdsmi_wrapper.amdsmi_processor_handle, str],
     severity_mask: int,
     buffer_size: int = 4 * 1048576,
     cursor: int = 0
 ) -> Tuple[Dict[str, Any], int, List[Dict[str, Any]], int]:
 
-    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+    if isinstance(device_handle, Path):
+        if not os.path.isfile(device_handle):
+            raise AmdSmiParameterException(device_handle, str)
+        device_handle = ctypes.c_char_p(str(device_handle).encode("utf-8"))
+    elif not isinstance(device_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(
-            processor_handle, amdsmi_wrapper.amdsmi_processor_handle
+            device_handle, amdsmi_wrapper.amdsmi_processor_handle
         )
     if not isinstance(severity_mask, int):
         raise AmdSmiParameterException(severity_mask, int)
@@ -3298,7 +3303,7 @@ def amdsmi_get_gpu_cper_entries(
 
     # Call the underlying AMD-SMI API.
     status_code = amdsmi_wrapper.amdsmi_get_gpu_cper_entries(
-        processor_handle,
+        device_handle,
         ctypes.c_uint32(severity_mask),
         buf,
         ctypes.byref(buf_size),
@@ -3338,9 +3343,9 @@ def amdsmi_get_gpu_cper_entries(
         )
 
         serial_number = ""
-        if isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        if isinstance(device_handle, amdsmi_wrapper.amdsmi_processor_handle):
             try:
-                board_info = amdsmi_get_gpu_board_info(processor_handle)
+                board_info = amdsmi_get_gpu_board_info(device_handle)
                 serial_number = board_info.get('product_serial', "")
             except Exception:
                 serial_number = ""
