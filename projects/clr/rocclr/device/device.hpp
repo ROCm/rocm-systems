@@ -1808,7 +1808,7 @@ class Device : public RuntimeObject {
    */
   virtual void* hostAlloc(size_t size, size_t alignment,
                           MemorySegment mem_seg = kNoAtomics,
-                          const void* agentInfo = nullptr) const {
+                          const void* agentInfo = nullptr, bool allowAccess = true) const {
     ShouldNotCallThis();
     return NULL;
   }
@@ -1827,7 +1827,7 @@ class Device : public RuntimeObject {
   } AllocationFlags;
 
   virtual void* deviceLocalAlloc(
-      size_t size, const AllocationFlags& flags = AllocationFlags{}) const {
+      size_t size, const AllocationFlags& flags = AllocationFlags{}, bool allowAccess = true) const {
     ShouldNotCallThis();
     return NULL;
   }
