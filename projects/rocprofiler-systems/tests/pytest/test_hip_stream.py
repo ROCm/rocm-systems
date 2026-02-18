@@ -13,6 +13,7 @@ pytestmark = [
     pytest.mark.gpu,
     pytest.mark.rocm_min_version("7.0"),
     pytest.mark.hip_stream,
+    pytest.mark.ci_enable,
 ]
 
 

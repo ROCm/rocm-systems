@@ -10,7 +10,12 @@ import pytest
 from pathlib import Path
 from conftest import RocprofsysTest
 
-pytestmark = [pytest.mark.gpu, pytest.mark.decode, pytest.mark.jpegdecode]
+pytestmark = [
+    pytest.mark.gpu,
+    pytest.mark.decode,
+    pytest.mark.jpegdecode,
+    pytest.mark.ci_enable,
+]
 
 
 # =============================================================================

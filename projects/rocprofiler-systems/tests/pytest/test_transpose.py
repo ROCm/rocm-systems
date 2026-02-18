@@ -24,7 +24,7 @@ import pytest
 from pathlib import Path
 from conftest import RocprofsysTest
 
-pytestmark = [pytest.mark.transpose, pytest.mark.gpu]
+pytestmark = [pytest.mark.transpose, pytest.mark.gpu, pytest.mark.ci_enable]
 
 from rocprofsys import (
     GPUInfo,

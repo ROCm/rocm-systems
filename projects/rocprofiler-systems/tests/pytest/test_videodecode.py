@@ -9,7 +9,12 @@ from __future__ import annotations
 import pytest
 from conftest import RocprofsysTest
 
-pytestmark = [pytest.mark.gpu, pytest.mark.decode, pytest.mark.videodecode]
+pytestmark = [
+    pytest.mark.gpu,
+    pytest.mark.decode,
+    pytest.mark.videodecode,
+    pytest.mark.ci_enable,
+]
 
 from pathlib import Path
 

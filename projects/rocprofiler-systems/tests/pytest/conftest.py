@@ -220,7 +220,11 @@ def pytest_configure(config: pytest.Config) -> None:
     )
     config.addinivalue_line(
         "markers",
-        "ci_disable(name): Use 'all' to skip entire test, or assertion name (e.g., 'assert_rocpd') to disable subtest (CI mode only).",
+        "ci_enable: Full test will be run when in CI mode. To disable a subtest, use ci_disable(name) (CI mode only)",
+    )
+    config.addinivalue_line(
+        "markers",
+        "ci_disable(name): Use 'all' to skip entire test, or assertion name (e.g., 'assert_rocpd') to disable subtest. Overrides ci_enable (CI mode only)",
     )
     config.addinivalue_line(
         "markers",
@@ -239,6 +243,7 @@ def pytest_configure(config: pytest.Config) -> None:
         "mpi",
         "rocm",
         "python",
+        "annotate",
     ]
 
     # Non-functional informational markers
@@ -286,7 +291,6 @@ def pytest_configure(config: pytest.Config) -> None:
         "caller_include",
         "causal",
         "causal_e2e",
-        "annotate",
         "papi",
         "code_coverage",
         "lulesh",
@@ -537,17 +541,17 @@ def pytest_collection_modifyitems(config, items) -> None:
                 )
         # ----------------------------------------------------------------------------
         # Deselect tests for CI mode (TheRock)
-        # This includes the markers: disable("all"), slow
+        # Only tests explicitly marked with @pytest.mark.ci_enable are selected.
+        # Note that ci_disable("all") overrides ci_enable.
         if config.getoption("--ci-mode", default=False) and not config.getoption(
             "--allow-disabled", default=False
         ):
-            marker = item.get_closest_marker("ci_disable")
-            if marker and "all" in marker.args:
-                deselected_tests.append(item)
-            elif item.get_closest_marker("slow"):
-                deselected_tests.append(item)
-            else:
+            disable_marker = item.get_closest_marker("ci_disable")
+            ci_disabled = disable_marker and "all" in disable_marker.args
+            if item.get_closest_marker("ci_enable") and not ci_disabled:
                 selected_tests.append(item)
+            else:
+                deselected_tests.append(item)
 
     # Apply deselection
     if deselected_tests:

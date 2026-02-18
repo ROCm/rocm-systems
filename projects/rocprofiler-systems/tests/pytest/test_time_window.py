@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 from conftest import RocprofsysTest
 
-pytestmark = [pytest.mark.time_window]
+pytestmark = [pytest.mark.time_window, pytest.mark.ci_enable]
 
 # ============================================================================
 # Time Window Fixtures

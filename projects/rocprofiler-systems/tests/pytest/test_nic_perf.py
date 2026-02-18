@@ -52,7 +52,7 @@ def nic_perf_download_url_2() -> str:
 # =============================================================================
 
 
-@pytest.mark.ci_disable("assert_perfetto")
+# @pytest.mark.ci_disable("assert_perfetto")
 class TestNIC(RocprofsysTest):
     """Tests for NIC performance."""
 

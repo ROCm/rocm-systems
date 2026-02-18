@@ -10,7 +10,7 @@ import pytest
 import os
 from conftest import RocprofsysTest
 
-pytestmark = [pytest.mark.rocprof_binary]
+pytestmark = [pytest.mark.rocprof_binary, pytest.mark.ci_enable]
 
 
 # ============================================================================

@@ -21,7 +21,7 @@ from pathlib import Path
 from conftest import RocprofsysTest
 
 # OpenMP will not be traced if no GPU is available, this includes CPU-only
-pytestmark = [pytest.mark.gpu, pytest.mark.openmp]
+pytestmark = [pytest.mark.gpu, pytest.mark.openmp, pytest.mark.ci_enable]
 
 # ============================================================================
 # OpenMP Fixtures
@@ -222,6 +222,7 @@ class TestOpenMPLU(RocprofsysTest):
 # ============================================================================
 
 
+@pytest.mark.ci_disable("all")
 class TestOpenMPTarget(RocprofsysTest):
     @pytest.mark.parametrize(
         "mode",
@@ -304,7 +305,10 @@ class TestOpenMPVV(RocprofsysTest):
             "sampling",
             "binary_rewrite",
             "sys_run",
-            pytest.param("runtime_instrument", marks=pytest.mark.slow),
+            pytest.param(
+                "runtime_instrument",
+                marks=[pytest.mark.slow, pytest.mark.ci_disable("all")],
+            ),
         ],
     )
     @pytest.mark.parametrize(

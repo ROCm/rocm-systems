@@ -10,7 +10,7 @@ import pytest
 from pathlib import Path
 from conftest import RocprofsysTest
 
-pytestmark = [pytest.mark.gpu, pytest.mark.roctx]
+pytestmark = [pytest.mark.gpu, pytest.mark.roctx, pytest.mark.ci_enable]
 
 # =============================================================================
 # ROCTx fixtures

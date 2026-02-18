@@ -13,7 +13,6 @@ pytestmark = [
     pytest.mark.rccl,
     pytest.mark.mpi,
     pytest.mark.gpu,
-    pytest.mark.ci_disable("all"),
 ]
 
 # =============================================================================
