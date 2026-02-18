@@ -93,11 +93,6 @@ class RocProfCompute:
 
         if self.__args.mode is None:
             parser.print_help(sys.stderr)
-            if self.__args.config_dir:
-                console_error(
-                    "rocprof-compute requires you to pass --list-metrics "
-                    "or --list-blocks with --config-dir."
-                )
             console_error(
                 "rocprof-compute requires you to pass a valid mode. Detected None."
             )
