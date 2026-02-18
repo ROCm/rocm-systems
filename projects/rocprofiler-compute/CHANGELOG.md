@@ -35,7 +35,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Added missing metric descriptions for gfx950 architecture
 
 * Added `--membw-analysis` under experimental features to allow memory bandwidth specific profiling and analysis.
-  * Use `--experimental --membw-analysis` to profile and analyze memory bandwidth specific metric nlock 30.
+  * Use `--experimental --membw-analysis` to profile and analyze memory bandwidth specific metric block 30.
 
 ### Changed
 
