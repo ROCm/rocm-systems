@@ -501,8 +501,12 @@ int64_t ReadEnvInt64(const char* name, int64_t fallback) {
   const char* val = std::getenv(name);
   if (!val) return fallback;
   char* end = nullptr;
+  errno = 0;
   long long parsed = std::strtoll(val, &end, 10);
-  return (end == val || parsed < 0) ? fallback : static_cast<int64_t>(parsed);
+  if (end == val || parsed < 0 || errno == ERANGE) {
+    return fallback;
+  }
+  return static_cast<int64_t>(parsed);
 }
 
 void EnsureInitialized() {
