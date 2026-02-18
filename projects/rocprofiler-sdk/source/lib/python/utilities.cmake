@@ -190,11 +190,13 @@ function(rocprofiler_rocpd_python_bindings _VERSION)
             COMPONENT rocpd)
     endforeach()
 
-    # Copy ai_analysis directory and its contents (including subdirectories)
+    # Copy ai_analysis directory and its contents (including subdirectories).
+    # Includes *.py modules, *.md docs, and *.json schema files (e.g.
+    # ai_analysis/docs/analysis-output.schema.json).
     file(GLOB_RECURSE rocpd_AI_ANALYSIS_FILES
          "${CMAKE_CURRENT_LIST_DIR}/ai_analysis/*.py"
          "${CMAKE_CURRENT_LIST_DIR}/ai_analysis/*.md"
-         "${CMAKE_CURRENT_LIST_DIR}/ai_analysis/README.md")
+         "${CMAKE_CURRENT_LIST_DIR}/ai_analysis/*.json")
 
     foreach(_AI_FILE ${rocpd_AI_ANALYSIS_FILES})
         file(RELATIVE_PATH _REL_PATH "${CMAKE_CURRENT_LIST_DIR}" "${_AI_FILE}")

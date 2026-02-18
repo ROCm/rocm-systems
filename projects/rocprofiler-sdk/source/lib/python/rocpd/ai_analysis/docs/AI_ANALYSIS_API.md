@@ -1,6 +1,6 @@
 # rocpd AI Analysis Python API Documentation
 
-**Version:** 1.0.0
+**Version:** 0.1.0
 **Module:** `rocpd.ai_analysis`
 
 ---
@@ -416,7 +416,7 @@ json_str = result.to_json(indent=2)
 {
   "metadata": {
     "rocpd_version": "6.3.0",
-    "analysis_version": "1.0.0",
+    "analysis_version": "0.1.0",
     "database_file": "/path/to/output.db",
     "analysis_timestamp": "2026-02-07T14:30:00Z",
     "custom_prompt": null

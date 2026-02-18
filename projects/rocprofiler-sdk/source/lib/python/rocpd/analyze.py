@@ -394,14 +394,37 @@ def generate_recommendations(
                     "priority": "HIGH",
                     "category": "Low Occupancy",
                     "issue": f"Low wave occupancy detected: average {avg_waves:.1f} waves per SIMD",
-                    "suggestion": "Increase kernel occupancy to improve GPU utilization:",
+                    "suggestion": "Increase kernel occupancy to improve GPU utilization",
                     "actions": [
-                        "- Increase block/workgroup size to launch more waves",
-                        "- Reduce register usage per thread",
-                        "- Reduce shared memory (LDS) usage per workgroup",
-                        "- Check for resource limitations preventing more waves",
+                        "Increase block/workgroup size to launch more waves per CU",
+                        "Reduce register usage per thread (check with --save-temps or rocm-llvm-mc)",
+                        "Reduce shared memory (LDS) usage per workgroup",
+                        "Check for resource limitations preventing more waves with rocprof-compute",
                     ],
-                    "next_steps": "Profile occupancy: rocprofv3 --pmc SQ_WAVES SQ_WAVE_CYCLES TA_TA_BUSY -- <your-app>",
+                    "estimated_impact": "10-30% throughput improvement depending on occupancy gap",
+                    "commands": [
+                        {
+                            "tool": "rocprofv3",
+                            "description": "Collect wave occupancy and cycle counters per kernel dispatch",
+                            "flags": ["--sys-trace"],
+                            "args": [
+                                {"name": "--pmc", "value": "SQ_WAVES SQ_WAVE_CYCLES TA_TA_BUSY"},
+                                {"name": "-d", "value": "./occupancy_output"},
+                                {"name": "-o", "value": "profile"},
+                            ],
+                            "full_command": "rocprofv3 --sys-trace --pmc SQ_WAVES SQ_WAVE_CYCLES TA_TA_BUSY -d ./occupancy_output -o profile -- ./app",
+                        },
+                        {
+                            "tool": "rocprof-compute",
+                            "description": "Deep-dive occupancy analysis: theoretical vs achieved waves per CU",
+                            "flags": [],
+                            "args": [
+                                {"name": "profile", "value": None},
+                                {"name": "--block", "value": "SQ"},
+                            ],
+                            "full_command": "rocprof-compute profile --block SQ -- ./app",
+                        },
+                    ],
                 }
             )
 
@@ -412,15 +435,35 @@ def generate_recommendations(
                 {
                     "priority": "MEDIUM",
                     "category": "GPU Utilization",
-                    "issue": f"GPU utilization is only {gpu_util:.1f}%",
-                    "suggestion": "Improve GPU utilization:",
+                    "issue": f"GPU utilization is only {gpu_util:.1f}% (target: >70%)",
+                    "suggestion": "Reduce GPU idle time by overlapping work and eliminating synchronization gaps",
                     "actions": [
-                        "- Launch more concurrent kernels using streams",
-                        "- Increase kernel grid size if problem permits",
-                        "- Reduce kernel launch overhead and synchronization",
-                        "- Check for host-side bottlenecks limiting launch rate",
+                        "Launch independent kernels concurrently using hipStreams",
+                        "Increase kernel grid size to fill all CUs when problem size allows",
+                        "Reduce hipDeviceSynchronize() and hipStreamSynchronize() call frequency",
+                        "Overlap host-device transfers with compute using async streams",
                     ],
-                    "next_steps": "Profile GPU activity: rocprofv3 --pmc GRBM_GUI_ACTIVE GRBM_COUNT -- <your-app>",
+                    "estimated_impact": f"Up to {100 - gpu_util:.0f}% reduction in idle time",
+                    "commands": [
+                        {
+                            "tool": "rocprofv3",
+                            "description": "Collect GPU active vs total cycle counters to confirm utilization",
+                            "flags": ["--sys-trace"],
+                            "args": [
+                                {"name": "--pmc", "value": "GRBM_GUI_ACTIVE GRBM_COUNT"},
+                                {"name": "-d", "value": "./utilization_output"},
+                                {"name": "-o", "value": "profile"},
+                            ],
+                            "full_command": "rocprofv3 --sys-trace --pmc GRBM_GUI_ACTIVE GRBM_COUNT -d ./utilization_output -o profile -- ./app",
+                        },
+                        {
+                            "tool": "rocprof-sys",
+                            "description": "System-level timeline: identify host/GPU idle gaps and synchronization stalls",
+                            "flags": ["--trace"],
+                            "args": [],
+                            "full_command": "rocprof-sys --trace -- ./app",
+                        },
+                    ],
                 }
             )
 
@@ -434,13 +477,35 @@ def generate_recommendations(
                 "priority": "HIGH",
                 "category": "Memory Transfer",
                 "issue": f"Memory copies consume {memcpy_percent:.1f}% of execution time",
-                "suggestion": "Consider reducing host-device transfers by:",
+                "suggestion": "Reduce host-device transfer overhead by batching and overlapping transfers",
                 "actions": [
-                    "- Batching multiple small copies into larger transfers",
-                    "- Using pinned memory for host allocations",
-                    "- Overlapping compute with data transfers using streams",
+                    "Batch multiple small hipMemcpy calls into one large transfer",
+                    "Allocate pinned host memory with hipHostMalloc for faster PCIe transfers",
+                    "Use hipMemcpyAsync with streams to overlap transfers with kernel execution",
+                    "Minimize round-trips: keep data on GPU between consecutive kernels",
                 ],
-                "next_steps": "Run: rocprofv3 --hip-trace --hsa-trace -- <your-app>",
+                "estimated_impact": "15-30% reduction in total runtime when transfers dominate",
+                "commands": [
+                    {
+                        "tool": "rocprofv3",
+                        "description": "Trace HIP and HSA memory copy operations with timing",
+                        "flags": ["--sys-trace", "--hsa-trace"],
+                        "args": [
+                            {"name": "-d", "value": "./memcpy_output"},
+                            {"name": "-o", "value": "profile"},
+                        ],
+                        "full_command": "rocprofv3 --sys-trace --hsa-trace -d ./memcpy_output -o profile -- ./app",
+                    },
+                    {
+                        "tool": "rocprof-sys",
+                        "description": "Detailed memory transfer timeline with PCIe bandwidth and overlap analysis",
+                        "flags": [],
+                        "args": [
+                            {"name": "--trace-gpu-memory", "value": None},
+                        ],
+                        "full_command": "rocprof-sys --trace-gpu-memory -- ./app",
+                    },
+                ],
             }
         )
 
@@ -451,14 +516,34 @@ def generate_recommendations(
             {
                 "priority": "MEDIUM",
                 "category": "API Overhead",
-                "issue": f"API overhead is {overhead_percent:.1f}% of total time",
-                "suggestion": "Reduce API calls by:",
+                "issue": f"API and launch overhead is {overhead_percent:.1f}% of total time",
+                "suggestion": "Reduce the number of API calls and kernel launches",
                 "actions": [
-                    "- Launching larger kernels instead of many small ones",
-                    "- Using batch operations where possible",
-                    "- Minimizing synchronization points",
+                    "Fuse multiple small kernels into fewer larger launches",
+                    "Replace repeated hipMalloc/hipFree with a pre-allocated memory pool",
+                    "Batch hipMemcpy calls; use hipMemcpyAsync where possible",
+                    "Minimize hipDeviceSynchronize() — synchronize at stream level instead",
                 ],
-                "next_steps": "Profile API calls with: rocprofv3 --hip-api-trace -- <your-app>",
+                "estimated_impact": "5-15% reduction when overhead exceeds 15%",
+                "commands": [
+                    {
+                        "tool": "rocprofv3",
+                        "description": "Trace all HIP runtime API calls to identify highest-frequency calls",
+                        "flags": ["--hip-api-trace", "--hsa-trace"],
+                        "args": [
+                            {"name": "-d", "value": "./api_output"},
+                            {"name": "-o", "value": "profile"},
+                        ],
+                        "full_command": "rocprofv3 --hip-api-trace --hsa-trace -d ./api_output -o profile -- ./app",
+                    },
+                    {
+                        "tool": "rocprof-sys",
+                        "description": "System-level API call frequency and per-call latency breakdown",
+                        "flags": ["--trace"],
+                        "args": [],
+                        "full_command": "rocprof-sys --trace -- ./app",
+                    },
+                ],
             }
         )
 
@@ -473,13 +558,42 @@ def generate_recommendations(
                     "priority": "HIGH",
                     "category": "Compute Bottleneck",
                     "issue": f"Kernel '{kernel_name}' consumes {percent:.1f}% of GPU time",
-                    "suggestion": "Profile this kernel in detail:",
+                    "suggestion": "Profile this kernel with hardware counters to identify its specific bottleneck",
                     "actions": [
-                        "- Collect hardware counters to identify bottlenecks",
-                        "- Check for memory bandwidth limitations",
-                        "- Analyze instruction mix and occupancy",
+                        "Collect hardware counters to classify compute vs memory bound",
+                        "Check memory access patterns for coalescing issues",
+                        "Analyze instruction mix: VALU, MFMA, load/store ratios",
+                        "Tune occupancy: balance registers, LDS, and block size",
                     ],
-                    "next_steps": f'Run: rocprofv3 --kernel-names "{kernel_name}" --pmc GRBM_COUNT GRBM_GUI_ACTIVE SQ_WAVES -- <your-app>',
+                    "estimated_impact": "Highly dependent on bottleneck type; 20-50% improvement possible",
+                    "commands": [
+                        {
+                            "tool": "rocprofv3",
+                            "description": f"Collect GPU hardware counters scoped to the dominant kernel",
+                            "flags": ["--sys-trace"],
+                            "args": [
+                                {"name": "--pmc", "value": "GRBM_COUNT GRBM_GUI_ACTIVE SQ_WAVES"},
+                                {"name": "--kernel-names", "value": kernel_name},
+                                {"name": "-d", "value": "./kernel_output"},
+                                {"name": "-o", "value": "profile"},
+                            ],
+                            "full_command": (
+                                f'rocprofv3 --sys-trace --pmc GRBM_COUNT GRBM_GUI_ACTIVE SQ_WAVES'
+                                f' --kernel-names "{kernel_name}"'
+                                f' -d ./kernel_output -o profile -- ./app'
+                            ),
+                        },
+                        {
+                            "tool": "rocprof-compute",
+                            "description": "Roofline model, instruction mix, and memory bottleneck analysis for this kernel",
+                            "flags": [],
+                            "args": [
+                                {"name": "profile", "value": None},
+                                {"name": "--kernel", "value": kernel_name},
+                            ],
+                            "full_command": f'rocprof-compute profile --kernel "{kernel_name}" -- ./app',
+                        },
+                    ],
                 }
             )
 
@@ -497,13 +611,33 @@ def generate_recommendations(
                     {
                         "priority": "MEDIUM",
                         "category": "Launch Overhead",
-                        "issue": f"Many small kernels detected ({total_calls} launches, avg {avg_duration/1000:.1f}μs)",
-                        "suggestion": "Consider kernel fusion or batching to reduce launch overhead",
+                        "issue": f"Many small kernels detected: {total_calls} launches, avg {avg_duration/1000:.1f} μs each",
+                        "suggestion": "Fuse kernels or batch work to amortize per-launch overhead (~5-10 μs each)",
                         "actions": [
-                            "- Combine multiple small kernels into a single launch",
-                            "- Increase problem size per kernel invocation",
+                            "Combine sequential element-wise kernels (e.g., add + multiply) into a single fused kernel",
+                            "Increase problem size per launch to push avg duration above 50 μs",
+                            "Use persistent kernels for iterative workloads to eliminate repeated launches",
                         ],
-                        "next_steps": "Analyze launch patterns with: rocprofv3 --sys-trace -- <your-app>",
+                        "estimated_impact": "Eliminates up to 50% of launch overhead for fine-grained workloads",
+                        "commands": [
+                            {
+                                "tool": "rocprofv3",
+                                "description": "Capture full kernel dispatch timeline to visualize launch frequency and gaps",
+                                "flags": ["--sys-trace"],
+                                "args": [
+                                    {"name": "-d", "value": "./launch_output"},
+                                    {"name": "-o", "value": "profile"},
+                                ],
+                                "full_command": "rocprofv3 --sys-trace -d ./launch_output -o profile -- ./app",
+                            },
+                            {
+                                "tool": "rocprof-sys",
+                                "description": "Visualize kernel launch timeline and inter-launch gaps in a Perfetto trace",
+                                "flags": ["--trace"],
+                                "args": [],
+                                "full_command": "rocprof-sys --trace -- ./app",
+                            },
+                        ],
                     }
                 )
 
@@ -516,14 +650,37 @@ def generate_recommendations(
                 {
                     "priority": "MEDIUM",
                     "category": "Memory Bandwidth",
-                    "issue": f"{direction} copies achieving only {bandwidth_gbps:.1f} GB/s",
-                    "suggestion": "Improve transfer efficiency:",
+                    "issue": f"{direction} copies achieving only {bandwidth_gbps:.2f} GB/s (avg transfer: {avg_bytes/1024:.1f} KB)",
+                    "suggestion": "Increase transfer size per operation to reach PCIe or HBM saturation bandwidth",
                     "actions": [
-                        f"- Use larger transfer sizes (current avg: {avg_bytes/1024:.1f} KB)",
-                        "- Enable async copies with streams",
-                        "- Consider peer-to-peer transfers for multi-GPU",
+                        f"Consolidate many {avg_bytes/1024:.1f} KB transfers into fewer large transfers (>1 MB each)",
+                        "Use hipHostMalloc with hipHostMallocPinned flag to enable DMA engine transfers",
+                        "Consider hipMemcpyAsync with stream to overlap with compute",
+                        "For multi-GPU: evaluate hipMemcpyPeer for direct device-to-device transfers",
                     ],
-                    "next_steps": "Profile memory operations: rocprofv3 --hsa-trace -- <your-app>",
+                    "estimated_impact": "2-10x bandwidth improvement by eliminating small-transfer PCIe overhead",
+                    "commands": [
+                        {
+                            "tool": "rocprofv3",
+                            "description": "Trace memory copy operations with size and timing data",
+                            "flags": ["--hsa-trace"],
+                            "args": [
+                                {"name": "-d", "value": "./bandwidth_output"},
+                                {"name": "-o", "value": "profile"},
+                            ],
+                            "full_command": "rocprofv3 --hsa-trace -d ./bandwidth_output -o profile -- ./app",
+                        },
+                        {
+                            "tool": "rocprof-compute",
+                            "description": "HBM bandwidth utilization analysis for memory-bound kernels",
+                            "flags": [],
+                            "args": [
+                                {"name": "profile", "value": None},
+                                {"name": "--block", "value": "TD"},
+                            ],
+                            "full_command": "rocprof-compute profile --block TD -- ./app",
+                        },
+                    ],
                 }
             )
 
@@ -533,18 +690,437 @@ def generate_recommendations(
             {
                 "priority": "INFO",
                 "category": "Performance",
-                "issue": "No obvious performance issues detected",
-                "suggestion": "Application appears well-optimized. For deeper analysis:",
+                "issue": "No obvious performance issues detected at this analysis tier",
+                "suggestion": "Collect deeper profiling data to find optimization opportunities",
                 "actions": [
-                    "- Collect hardware counters: rocprofv3 --pmc <metrics> -- <your-app>",
-                    "- Enable PC sampling: rocprofv3 --pc-sampling -- <your-app>",
-                    "- Profile memory allocation: rocprofv3 --sys-trace -- <your-app>",
+                    "Collect hardware counters to check GPU utilization and occupancy",
+                    "Enable PC sampling for instruction-level hotspot analysis",
+                    "Profile with rocprof-compute for roofline model and bottleneck classification",
                 ],
-                "next_steps": "Review AMD optimization guides at: https://rocm.docs.amd.com",
+                "estimated_impact": "Depends on findings from deeper analysis",
+                "commands": [
+                    {
+                        "tool": "rocprofv3",
+                        "description": "Collect standard hardware performance counters for Tier 2 analysis",
+                        "flags": ["--sys-trace"],
+                        "args": [
+                            {"name": "--pmc", "value": "GRBM_COUNT GRBM_GUI_ACTIVE SQ_WAVES"},
+                            {"name": "-d", "value": "./counters_output"},
+                            {"name": "-o", "value": "profile"},
+                        ],
+                        "full_command": "rocprofv3 --sys-trace --pmc GRBM_COUNT GRBM_GUI_ACTIVE SQ_WAVES -d ./counters_output -o profile -- ./app",
+                    },
+                    {
+                        "tool": "rocprof-sys",
+                        "description": "Full system trace for comprehensive performance timeline",
+                        "flags": ["--trace"],
+                        "args": [],
+                        "full_command": "rocprof-sys --trace -- ./app",
+                    },
+                    {
+                        "tool": "rocprof-compute",
+                        "description": "Complete hardware counter sweep for roofline model and bottleneck classification",
+                        "flags": [],
+                        "args": [
+                            {"name": "profile", "value": None},
+                        ],
+                        "full_command": "rocprof-compute profile -- ./app",
+                    },
+                ],
             }
         )
 
     return recommendations
+
+
+def _format_as_json(
+    time_breakdown: Dict[str, Any],
+    hotspots: List[Dict[str, Any]],
+    memory_analysis: Dict[str, Dict[str, Any]],
+    recommendations: List[Dict[str, Any]],
+    hardware_counters: Optional[Dict[str, Any]] = None,
+    database_path: str = "",
+) -> str:
+    """
+    Serialize analysis results to JSON conforming to schema v0.1.0.
+
+    The output document contains a top-level ``schema_version`` field that
+    consumers MUST check before parsing.  See
+    ``rocpd/ai_analysis/docs/analysis-output.schema.json`` for the
+    normative schema and ``SCHEMA_CHANGELOG.md`` for migration guidance.
+    """
+    import json as _json
+
+    breakdown = time_breakdown or {}
+    hw = hardware_counters or {}
+    total_runtime_ns = int(breakdown.get("total_runtime", 0))
+    kernel_time_ns = int(breakdown.get("total_kernel_time", 0))
+    memcpy_time_ns = int(breakdown.get("total_memcpy_time", 0))
+    kernel_pct = float(breakdown.get("kernel_percent", 0))
+    memcpy_pct = float(breakdown.get("memcpy_percent", 0))
+    overhead_pct = float(breakdown.get("overhead_percent", 0))
+    # Derive api_overhead_ns from the percentage; clamp negative values to 0
+    api_overhead_ns = max(0, int(total_runtime_ns * overhead_pct / 100.0))
+    idle_time_ns = max(0, total_runtime_ns - kernel_time_ns - memcpy_time_ns - api_overhead_ns)
+    idle_pct = float(idle_time_ns / total_runtime_ns * 100.0) if total_runtime_ns > 0 else 0.0
+
+    # --- metadata ---
+    has_counters = bool(hw.get("has_counters", False))
+    doc: Dict[str, Any] = {
+        "schema_version": "0.1.0",
+        "metadata": {
+            "rocpd_version": "6.3.0",
+            "analysis_version": "0.1.0",
+            "database_file": database_path,
+            "analysis_timestamp": datetime.now().isoformat(),
+            "analysis_duration_ms": 0,
+            "custom_prompt": None,
+        },
+        # --- profiling_info ---
+        "profiling_info": {
+            "total_duration_ns": total_runtime_ns,
+            "profiling_mode": "sys_trace_with_counters" if has_counters else "sys_trace_only",
+            "analysis_tier": 2 if has_counters else 1,
+            "gpus": [],
+        },
+        # --- summary ---
+        "summary": _build_summary(breakdown, hotspots, has_counters),
+        # --- execution_breakdown ---
+        "execution_breakdown": {
+            "total_runtime_ns": total_runtime_ns,
+            "kernel_time_ns": kernel_time_ns,
+            "kernel_time_pct": round(kernel_pct, 2),
+            "memcpy_time_ns": memcpy_time_ns,
+            "memcpy_time_pct": round(memcpy_pct, 2),
+            "api_overhead_ns": api_overhead_ns,
+            "api_overhead_pct": round(overhead_pct, 2),
+            "idle_time_ns": idle_time_ns,
+            "idle_time_pct": round(idle_pct, 2),
+        },
+        # --- hotspots ---
+        "hotspots": [
+            {
+                "rank": i + 1,
+                "name": k.get("name", "unknown"),
+                "calls": int(k.get("calls", 0)),
+                "total_duration_ns": int(k.get("total_duration", 0)),
+                "avg_duration_ns": float(k.get("avg_duration", 0)),
+                "min_duration_ns": int(k.get("min_duration", 0)),
+                "max_duration_ns": int(k.get("max_duration", 0)),
+                "pct_of_total": round(float(k.get("percent_of_total", 0)), 2),
+            }
+            for i, k in enumerate(hotspots or [])
+        ],
+        # --- memory_analysis ---
+        "memory_analysis": {
+            direction: {
+                "count": int(s.get("count", 0)),
+                "total_bytes": int(s.get("total_bytes", 0)),
+                "total_duration_ns": int(s.get("total_duration", 0)),
+                "avg_bytes": float(s.get("avg_bytes", 0)),
+                "avg_duration_ns": float(s.get("avg_duration", 0)),
+                "bandwidth_gbps": round(
+                    float(s.get("bandwidth_bytes_per_sec", 0)) / 1e9, 4
+                ),
+            }
+            for direction, s in (memory_analysis or {}).items()
+        },
+        # --- hardware_counters ---
+        "hardware_counters": _build_hw_counters_json(hw),
+        # --- recommendations ---
+        "recommendations": _build_recommendations_json(recommendations or []),
+        # --- warnings ---
+        "warnings": _build_warnings_json(has_counters),
+        "errors": [],
+        "llm_enhanced_explanation": None,
+    }
+
+    return _json.dumps(doc, indent=2)
+
+
+def _build_summary(
+    breakdown: Dict[str, Any],
+    hotspots: List[Dict[str, Any]],
+    has_counters: bool,
+) -> Dict[str, Any]:
+    """Derive the summary section from analysis data."""
+    memcpy_pct = float(breakdown.get("memcpy_percent", 0))
+    kernel_pct = float(breakdown.get("kernel_percent", 0))
+    overhead_pct = float(breakdown.get("overhead_percent", 0))
+
+    # Simple bottleneck classification
+    if memcpy_pct > 30:
+        bottleneck = "memory_transfer"
+        confidence = 0.85
+    elif memcpy_pct > 20:
+        bottleneck = "memory_transfer"
+        confidence = 0.70
+    elif overhead_pct > 25:
+        bottleneck = "latency"
+        confidence = 0.75
+    elif kernel_pct > 70 and has_counters:
+        bottleneck = "compute"
+        confidence = 0.80
+    elif kernel_pct > 70:
+        bottleneck = "compute"
+        confidence = 0.60
+    else:
+        bottleneck = "mixed"
+        confidence = 0.50
+
+    top_kernel = hotspots[0].get("name", "N/A") if hotspots else "N/A"
+    key_findings = [
+        f"Kernel execution: {kernel_pct:.1f}% of total runtime",
+        f"Memory copy overhead: {memcpy_pct:.1f}% of total runtime",
+        f"Top kernel: {top_kernel}",
+    ]
+    if has_counters:
+        key_findings.append("Hardware counter data available (Tier 2 analysis)")
+    else:
+        key_findings.append("No hardware counters — Tier 1 trace analysis only")
+
+    return {
+        "overall_assessment": (
+            f"Workload is {bottleneck.replace('_', ' ')}-bound "
+            f"with {len(hotspots)} unique kernels analyzed. "
+            f"Kernel time: {kernel_pct:.1f}%, memory copies: {memcpy_pct:.1f}%."
+        ),
+        "primary_bottleneck": bottleneck,
+        "confidence": round(confidence, 2),
+        "key_findings": key_findings,
+    }
+
+
+def _build_hw_counters_json(hw: Dict[str, Any]) -> Dict[str, Any]:
+    """Convert hardware_counters internal dict to schema-compliant form."""
+    has_counters = bool(hw.get("has_counters", False))
+    if not has_counters:
+        return {"has_counters": False, "metrics": None, "counters": None}
+
+    raw_metrics = hw.get("metrics", {}) or {}
+    metrics: Dict[str, Any] = {
+        "gpu_utilization_pct": raw_metrics.get("gpu_utilization_percent"),
+        "avg_waves": raw_metrics.get("avg_waves"),
+        "max_waves": raw_metrics.get("max_waves"),
+        "min_waves": raw_metrics.get("min_waves"),
+    }
+
+    raw_counters = hw.get("counters", {}) or {}
+    counters = {
+        name: {
+            "sample_count": int(s.get("sample_count", 0)),
+            "avg_value": float(s.get("avg_value", 0)),
+            "min_value": float(s.get("min_value", 0)),
+            "max_value": float(s.get("max_value", 0)),
+            "total_value": float(s.get("total_value", 0)),
+        }
+        for name, s in raw_counters.items()
+    }
+
+    return {"has_counters": True, "metrics": metrics, "counters": counters}
+
+
+# Stable IDs for known recommendation categories.
+_CATEGORY_IDS = {
+    "Low Occupancy": "ROCPD-OCCUPANCY-001",
+    "GPU Utilization": "ROCPD-UTILIZATION-001",
+    "Memory Transfer": "ROCPD-MEMCPY-001",
+    "API Overhead": "ROCPD-API-001",
+    "Compute Bottleneck": "ROCPD-COMPUTE-001",
+    "Launch Overhead": "ROCPD-LAUNCH-001",
+    "Memory Bandwidth": "ROCPD-MEMBW-001",
+    "Performance": "ROCPD-INFO-001",
+}
+
+
+def _build_recommendations_json(
+    recommendations: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Map internal recommendation dicts to the schema v0.1.0 format."""
+    out = []
+    seen_ids: Dict[str, int] = {}
+    for rec in recommendations:
+        category = rec.get("category", "General")
+        base_id = _CATEGORY_IDS.get(category, f"ROCPD-{category.upper().replace(' ', '-')[:12]}-001")
+        count = seen_ids.get(base_id, 0) + 1
+        seen_ids[base_id] = count
+        rec_id = base_id if count == 1 else f"{base_id[:-3]}{count:03d}"
+
+        out.append({
+            "id": rec_id,
+            "priority": rec.get("priority", "INFO"),
+            "category": category,
+            "issue": rec.get("issue", ""),
+            "suggestion": rec.get("suggestion", ""),
+            "actions": rec.get("actions", []),
+            "estimated_impact": rec.get("estimated_impact", ""),
+            "commands": rec.get("commands", []),
+        })
+    return out
+
+
+def _build_warnings_json(has_counters: bool) -> List[Dict[str, Any]]:
+    """Build the warnings list based on analysis context."""
+    if not has_counters:
+        return [
+            {
+                "severity": "warning",
+                "message": (
+                    "No hardware counters collected. Analysis limited to "
+                    "Tier 1 (trace data only)."
+                ),
+                "recommendation": (
+                    "Collect counters with: "
+                    "rocprofv3 --pmc GRBM_COUNT GRBM_GUI_ACTIVE SQ_WAVES -- ./app"
+                ),
+            }
+        ]
+    return []
+
+
+def _format_as_markdown(
+    time_breakdown: Dict[str, Any],
+    hotspots: List[Dict[str, Any]],
+    memory_analysis: Dict[str, Dict[str, Any]],
+    recommendations: List[Dict[str, Any]],
+    hardware_counters: Optional[Dict[str, Any]] = None,
+    database_path: str = "",
+) -> str:
+    """Format analysis results as Markdown."""
+    breakdown = time_breakdown or {}
+    hw = hardware_counters or {}
+    has_counters = bool(hw.get("has_counters", False))
+
+    total_runtime_ms = breakdown.get("total_runtime", 0) / 1e6
+    kernel_pct = breakdown.get("kernel_percent", 0)
+    memcpy_pct = breakdown.get("memcpy_percent", 0)
+    overhead_pct = breakdown.get("overhead_percent", 0)
+    kernel_ms = breakdown.get("total_kernel_time", 0) / 1e6
+    memcpy_ms = breakdown.get("total_memcpy_time", 0) / 1e6
+
+    lines = []
+    lines.append("# ROCpd AI Performance Analysis")
+    lines.append("")
+    if database_path:
+        lines.append(f"**Database:** `{database_path}`")
+    lines.append(f"**Analysis Date:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    tier = 2 if has_counters else 1
+    lines.append(f"**Analysis Tier:** {tier} ({'Hardware Counters' if has_counters else 'Trace Only'})")
+    lines.append("")
+
+    lines.append("## Time Breakdown")
+    lines.append("")
+    lines.append("| Category | Time (ms) | Percentage |")
+    lines.append("|----------|-----------|------------|")
+    lines.append(f"| Kernel Execution | {kernel_ms:,.2f} | {kernel_pct:.1f}% |")
+    lines.append(f"| Memory Copies | {memcpy_ms:,.2f} | {memcpy_pct:.1f}% |")
+    overhead_ms = total_runtime_ms - kernel_ms - memcpy_ms if total_runtime_ms > 0 else 0
+    lines.append(f"| API Overhead | {overhead_ms:,.2f} | {overhead_pct:.1f}% |")
+    lines.append(f"| **Total** | **{total_runtime_ms:,.2f}** | **100%** |")
+    lines.append("")
+
+    if hotspots:
+        lines.append("## Top Kernel Hotspots")
+        lines.append("")
+        lines.append("| Rank | Kernel | Calls | Total (ms) | Avg (μs) | % Total |")
+        lines.append("|------|--------|-------|------------|----------|---------|")
+        for i, k in enumerate(hotspots, 1):
+            name = k.get("name", "unknown")
+            if len(name) > 40:
+                name = name[:37] + "..."
+            lines.append(
+                f"| {i} | `{name}` | {k.get('calls', 0)} "
+                f"| {k.get('total_duration', 0)/1e6:,.2f} "
+                f"| {k.get('avg_duration', 0)/1e3:,.1f} "
+                f"| {k.get('percent_of_total', 0):.1f}% |"
+            )
+        lines.append("")
+
+    if memory_analysis:
+        lines.append("## Memory Copy Analysis")
+        lines.append("")
+        lines.append("| Direction | Count | Total Size | Duration (ms) | Bandwidth (GB/s) |")
+        lines.append("|-----------|-------|------------|---------------|-----------------|")
+        for direction, s in memory_analysis.items():
+            tb = s.get("total_bytes", 0)
+            if tb >= 1e9:
+                size_str = f"{tb/1e9:.1f} GB"
+            elif tb >= 1e6:
+                size_str = f"{tb/1e6:.1f} MB"
+            elif tb >= 1e3:
+                size_str = f"{tb/1e3:.1f} KB"
+            else:
+                size_str = f"{tb:.0f} B"
+            bw = s.get("bandwidth_bytes_per_sec", 0) / 1e9
+            lines.append(
+                f"| {direction} | {s.get('count', 0)} | {size_str} "
+                f"| {s.get('total_duration', 0)/1e6:,.2f} | {bw:.2f} |"
+            )
+        lines.append("")
+
+    if has_counters:
+        metrics = hw.get("metrics", {}) or {}
+        lines.append("## Hardware Counters (Tier 2)")
+        lines.append("")
+        if "gpu_utilization_percent" in metrics:
+            lines.append(f"- **GPU Utilization:** {metrics['gpu_utilization_percent']:.1f}%")
+        if "avg_waves" in metrics:
+            lines.append(f"- **Avg Wave Occupancy:** {metrics['avg_waves']:.1f} waves")
+            lines.append(f"- **Max Wave Occupancy:** {metrics.get('max_waves', 0):.1f} waves")
+        lines.append("")
+
+    if recommendations:
+        lines.append("## Recommendations")
+        lines.append("")
+        priority_emoji = {"HIGH": "🔴", "MEDIUM": "🟡", "LOW": "🟢", "INFO": "🔵"}
+        for rec in recommendations:
+            p = rec.get("priority", "INFO")
+            emoji = priority_emoji.get(p, "•")
+            lines.append(f"### {emoji} [{p}] {rec.get('category', '')}")
+            lines.append("")
+            lines.append(f"**Issue:** {rec.get('issue', '')}")
+            lines.append("")
+            lines.append(f"**Suggestion:** {rec.get('suggestion', '')}")
+            actions = rec.get("actions", [])
+            if actions:
+                lines.append("")
+                for action in actions:
+                    lines.append(f"{action}")
+            estimated_impact = rec.get("estimated_impact", "")
+            if estimated_impact:
+                lines.append("")
+                lines.append(f"**Estimated Impact:** {estimated_impact}")
+            commands = rec.get("commands", [])
+            if commands:
+                lines.append("")
+                lines.append("**Recommended Commands:**")
+                lines.append("")
+                for cmd in commands:
+                    tool = cmd.get("tool", "")
+                    desc = cmd.get("description", "")
+                    full_command = cmd.get("full_command", "")
+                    flags = cmd.get("flags", [])
+                    args = cmd.get("args", [])
+                    lines.append(f"*{tool}* — {desc}")
+                    if flags:
+                        lines.append(f"- Flags: `{' '.join(flags)}`")
+                    if args:
+                        arg_strs = []
+                        for a in args:
+                            name = a.get("name", "")
+                            value = a.get("value")
+                            arg_strs.append(
+                                f"{name} {value}" if value is not None else name
+                            )
+                        lines.append(f"- Args: `{' '.join(arg_strs)}`")
+                    if full_command:
+                        lines.append(f"```bash\n{full_command}\n```")
+                    lines.append("")
+            lines.append("")
+
+    lines.append("---")
+    lines.append(f"*Generated by rocpd analyze • {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*")
+    return "\n".join(lines)
 
 
 def format_analysis_output(
@@ -570,9 +1146,27 @@ def format_analysis_output(
     Returns:
         Formatted string output
     """
-    if output_format != "text":
-        return "Only text format is currently supported"
+    if output_format == "json":
+        return _format_as_json(
+            time_breakdown=time_breakdown,
+            hotspots=hotspots,
+            memory_analysis=memory_analysis,
+            recommendations=recommendations,
+            hardware_counters=hardware_counters,
+            database_path=database_path,
+        )
 
+    if output_format == "markdown":
+        return _format_as_markdown(
+            time_breakdown=time_breakdown,
+            hotspots=hotspots,
+            memory_analysis=memory_analysis,
+            recommendations=recommendations,
+            hardware_counters=hardware_counters,
+            database_path=database_path,
+        )
+
+    # Default: text
     lines = []
     width = 80
 
@@ -743,7 +1337,8 @@ def format_analysis_output(
         issue = rec.get("issue", "")
         suggestion = rec.get("suggestion", "")
         actions = rec.get("actions", [])
-        next_steps = rec.get("next_steps", "")
+        commands = rec.get("commands", [])
+        estimated_impact = rec.get("estimated_impact", "")
 
         lines.append(f"[{priority}] {category}")
         lines.append("─" * width)
@@ -755,9 +1350,30 @@ def format_analysis_output(
                 for action in actions:
                     lines.append(f"    {action}")
             lines.append("")
-        if next_steps:
-            lines.append(f"  Next Steps:")
-            lines.append(f"    $ {next_steps}")
+        if estimated_impact:
+            lines.append(f"  Estimated Impact: {estimated_impact}")
+            lines.append("")
+        if commands:
+            lines.append(f"  Recommended Commands:")
+            for cmd in commands:
+                tool = cmd.get("tool", "")
+                desc = cmd.get("description", "")
+                full_command = cmd.get("full_command", "")
+                flags = cmd.get("flags", [])
+                args = cmd.get("args", [])
+                lines.append(f"    [{tool}] {desc}")
+                if flags:
+                    lines.append(f"      Flags: {' '.join(flags)}")
+                if args:
+                    arg_strs = []
+                    for a in args:
+                        name = a.get("name", "")
+                        value = a.get("value")
+                        arg_strs.append(f"{name} {value}" if value is not None else name)
+                    lines.append(f"      Args:  {' '.join(arg_strs)}")
+                if full_command:
+                    lines.append(f"      $ {full_command}")
+            lines.append("")
         lines.append("")
 
     # Footer

@@ -422,7 +422,7 @@ rocprofiler_add_integration_execute_test(
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
     FIXTURES_REQUIRED rocprofv3-test-rocpd)
 
-# Test analyze with JSON output format
+# Test analyze with JSON output format (also a fixture for schema validation test)
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-rocpd-analyze-json
     COMMAND
@@ -434,6 +434,7 @@ rocprofiler_add_integration_execute_test(
     LABELS "integration-tests;rocpd"
     ENVIRONMENT "${rocprofv3-rocpd-env}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+    FIXTURES_SETUP rocprofv3-test-rocpd-analyze-json
     FIXTURES_REQUIRED rocprofv3-test-rocpd)
 
 # Test analyze with custom top-kernels
@@ -504,3 +505,46 @@ rocprofiler_add_integration_execute_test(
     LABELS "integration-tests;rocpd;pytest"
     ENVIRONMENT "${rocprofv3-rocpd-env}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+#########################################################################################
+#
+# JSON schema tests
+#
+#########################################################################################
+
+# Copy test_analyze_schema.py to build directory to avoid conftest.py issues
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/test_analyze_schema.py
+               ${CMAKE_CURRENT_BINARY_DIR}/test_analyze_schema_standalone.py COPYONLY)
+
+# Unit schema tests: validate the schema file structure and synthetic JSON output.
+# No database fixture needed - uses synthetic data generated in-process.
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-rocpd-analyze-schema-unit-tests
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/test_analyze_schema_standalone.py
+    DEPENDS rocprofiler-sdk::rocprofv3
+    TIMEOUT 120
+    LABELS "integration-tests;rocpd;pytest"
+    ENVIRONMENT "${rocprofv3-rocpd-env}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+# Integration schema validation: parse the real JSON output produced by the analyze-json
+# test and assert schema_version, required fields, and commands structure.
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-rocpd-analyze-schema-validate
+    COMMAND
+        ${Python3_EXECUTABLE} -c
+        "import json, sys; \
+         path = '${CMAKE_CURRENT_BINARY_DIR}/rocpd-analyze-output/analysis_results.json'; \
+         d = json.load(open(path)); \
+         assert d.get('schema_version') == '0.1.0', f'Bad schema_version: {d.get(\"schema_version\")}'; \
+         assert all(k in d for k in ('metadata','recommendations','hardware_counters','hotspots')); \
+         cmds = [c for r in d['recommendations'] for c in r.get('commands', [])]; \
+         assert len(cmds) > 0, 'No commands found in recommendations'; \
+         assert all(c['tool'] in ('rocprofv3','rocprof-sys','rocprof-compute') for c in cmds); \
+         print(f'Schema OK: version={d[\"schema_version\"]}, recs={len(d[\"recommendations\"])}, commands={len(cmds)}')"
+    DEPENDS rocprofiler-sdk::rocprofv3
+    TIMEOUT 120
+    LABELS "integration-tests;rocpd"
+    ENVIRONMENT "${rocprofv3-rocpd-env}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+    FIXTURES_REQUIRED rocprofv3-test-rocpd-analyze-json)

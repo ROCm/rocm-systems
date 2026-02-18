@@ -54,7 +54,7 @@ class AnalysisMetadata:
     """Metadata about the analysis"""
 
     rocpd_version: str
-    analysis_version: str = "1.0.0"
+    analysis_version: str = "0.1.0"
     database_file: str = ""
     analysis_timestamp: str = ""
     analysis_duration_ms: int = 0
@@ -478,7 +478,7 @@ def _build_analysis_result(
     # Build metadata
     metadata = AnalysisMetadata(
         rocpd_version="6.3.0",
-        analysis_version="1.0.0",
+        analysis_version="0.1.0",
         database_file=str(database_path),
         analysis_timestamp=datetime.now().isoformat(),
         custom_prompt=custom_prompt,

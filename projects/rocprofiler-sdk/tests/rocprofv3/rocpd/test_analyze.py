@@ -24,34 +24,87 @@
 ###############################################################################
 
 """
-Tests for the AI analysis module.
+Tests for the AI analysis module (analyze.py).
+
+Covers:
+  - Public API exports and imports
+  - generate_recommendations: all 6 Tier-1 rules + 2 Tier-2 rules + boundaries
+  - _build_summary: all bottleneck classification branches
+  - _build_hw_counters_json: with/without counters
+  - _build_warnings_json: both cases
+  - _build_recommendations_json: stable IDs, duplicate dedup, unknown category
+  - _format_as_json: correct value mapping, idle time, Tier 2, bandwidth conversion
+  - format_analysis_output: text, json, and markdown formats
 """
 
+import json
 import sys
 import pytest
 
 
+# ---------------------------------------------------------------------------
+# Shared helpers
+# ---------------------------------------------------------------------------
+
+def _empty_breakdown(**overrides):
+    """Return a time_breakdown dict with all fields zeroed unless overridden."""
+    base = {
+        "total_runtime": 0,
+        "total_kernel_time": 0,
+        "total_memcpy_time": 0,
+        "kernel_percent": 0.0,
+        "memcpy_percent": 0.0,
+        "overhead_percent": 0.0,
+    }
+    base.update(overrides)
+    return base
+
+
+def _make_hotspot(name="k", calls=10, total=1_000_000, pct=10.0,
+                  avg=100_000, min_d=90_000, max_d=110_000):
+    return {
+        "name": name,
+        "calls": calls,
+        "total_duration": total,
+        "avg_duration": avg,
+        "min_duration": min_d,
+        "max_duration": max_d,
+        "percent_of_total": pct,
+    }
+
+
+def _hw_counters(avg_waves=None, gpu_util=None):
+    """Build a hardware_counters dict for Tier 2 tests."""
+    metrics = {}
+    if avg_waves is not None:
+        metrics["avg_waves"] = avg_waves
+        metrics["max_waves"] = avg_waves * 2
+        metrics["min_waves"] = avg_waves / 2
+    if gpu_util is not None:
+        metrics["gpu_utilization_percent"] = gpu_util
+    return {"has_counters": True, "metrics": metrics, "counters": {}, "per_kernel": {}}
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
 def test_analyze_module_import():
     """Verify analyze module can be imported."""
-    try:
-        from rocpd import analyze
-
-        assert hasattr(analyze, "compute_time_breakdown")
-        assert hasattr(analyze, "identify_hotspots")
-        assert hasattr(analyze, "analyze_memory_copies")
-        assert hasattr(analyze, "generate_recommendations")
-        assert hasattr(analyze, "format_analysis_output")
-        assert hasattr(analyze, "add_args")
-        assert hasattr(analyze, "execute")
-        assert hasattr(analyze, "main")
-    except ImportError as e:
-        pytest.fail(f"Failed to import analyze module: {e}")
+    from rocpd import analyze
+    assert hasattr(analyze, "compute_time_breakdown")
+    assert hasattr(analyze, "identify_hotspots")
+    assert hasattr(analyze, "analyze_memory_copies")
+    assert hasattr(analyze, "generate_recommendations")
+    assert hasattr(analyze, "format_analysis_output")
+    assert hasattr(analyze, "add_args")
+    assert hasattr(analyze, "execute")
+    assert hasattr(analyze, "main")
 
 
 def test_analyze_module_has_all():
     """Verify analyze module exports expected functions."""
     from rocpd import analyze
-
     expected_exports = [
         "compute_time_breakdown",
         "identify_hotspots",
@@ -63,185 +116,794 @@ def test_analyze_module_has_all():
         "execute",
         "main",
     ]
-
     for export in expected_exports:
         assert export in analyze.__all__, f"Missing export: {export}"
 
 
+# ---------------------------------------------------------------------------
+# generate_recommendations – Tier 1 rules
+# ---------------------------------------------------------------------------
+
+def test_rule1_high_memcpy_fires():
+    """Rule 1: memcpy_percent > 20 triggers 'Memory Transfer' HIGH recommendation."""
+    from rocpd.analyze import generate_recommendations
+    recs = generate_recommendations(_empty_breakdown(memcpy_percent=25), [], {})
+    matches = [r for r in recs if r["category"] == "Memory Transfer"]
+    assert len(matches) == 1
+    assert matches[0]["priority"] == "HIGH"
+    assert "25.0%" in matches[0]["issue"]
+
+
+def test_rule1_memcpy_boundary_does_not_fire():
+    """Rule 1: memcpy_percent exactly 20 does NOT trigger (threshold is >20)."""
+    from rocpd.analyze import generate_recommendations
+    recs = generate_recommendations(_empty_breakdown(memcpy_percent=20), [], {})
+    assert not any(r["category"] == "Memory Transfer" for r in recs)
+
+
+def test_rule2_api_overhead_fires():
+    """Rule 2: overhead_percent > 15 triggers 'API Overhead' MEDIUM recommendation."""
+    from rocpd.analyze import generate_recommendations
+    recs = generate_recommendations(_empty_breakdown(overhead_percent=20), [], {})
+    matches = [r for r in recs if r["category"] == "API Overhead"]
+    assert len(matches) == 1
+    assert matches[0]["priority"] == "MEDIUM"
+    assert "20.0%" in matches[0]["issue"]
+
+
+def test_rule2_overhead_boundary_does_not_fire():
+    """Rule 2: overhead_percent exactly 15 does NOT trigger (threshold is >15)."""
+    from rocpd.analyze import generate_recommendations
+    recs = generate_recommendations(_empty_breakdown(overhead_percent=15), [], {})
+    assert not any(r["category"] == "API Overhead" for r in recs)
+
+
+def test_rule3_dominant_kernel_fires():
+    """Rule 3: single kernel > 50% triggers 'Compute Bottleneck' HIGH recommendation."""
+    from rocpd.analyze import generate_recommendations
+    hotspots = [_make_hotspot(name="dominant_kernel", pct=60.0)]
+    recs = generate_recommendations(_empty_breakdown(), hotspots, {})
+    matches = [r for r in recs if r["category"] == "Compute Bottleneck"]
+    assert len(matches) == 1
+    assert matches[0]["priority"] == "HIGH"
+    assert "dominant_kernel" in matches[0]["issue"]
+
+
+def test_rule3_dominant_kernel_boundary_does_not_fire():
+    """Rule 3: top kernel exactly 50% does NOT trigger (threshold is >50)."""
+    from rocpd.analyze import generate_recommendations
+    hotspots = [_make_hotspot(pct=50.0)]
+    recs = generate_recommendations(_empty_breakdown(), hotspots, {})
+    assert not any(r["category"] == "Compute Bottleneck" for r in recs)
+
+
+def test_rule3_uses_hotspot_name_in_commands():
+    """Rule 3: the kernel name appears in the rocprofv3 command's full_command."""
+    from rocpd.analyze import generate_recommendations
+    hotspots = [_make_hotspot(name="my_matmul", pct=75.0)]
+    recs = generate_recommendations(_empty_breakdown(), hotspots, {})
+    matches = [r for r in recs if r["category"] == "Compute Bottleneck"]
+    assert matches
+    cmds = matches[0].get("commands", [])
+    assert any("my_matmul" in c.get("full_command", "") for c in cmds)
+
+
+def test_rule4_many_small_kernels_fires():
+    """Rule 4: >1000 total calls with avg <10μs triggers 'Launch Overhead'."""
+    from rocpd.analyze import generate_recommendations
+    # 10 kernels × 200 calls = 2000 launches; 2e10 ns / 2000 = 1e7 ns = 10ms >> 10μs...
+    # Need avg < 10μs = 10_000 ns, so total_kernel_time < 2000 * 10_000 = 20_000_000
+    td = _empty_breakdown(total_kernel_time=10_000_000)  # avg = 5μs
+    hotspots = [_make_hotspot(name=f"k{i}", calls=200) for i in range(10)]
+    recs = generate_recommendations(td, hotspots, {})
+    matches = [r for r in recs if r["category"] == "Launch Overhead"]
+    assert len(matches) == 1
+    assert matches[0]["priority"] == "MEDIUM"
+    assert "2000" in matches[0]["issue"]
+
+
+def test_rule4_many_calls_but_large_kernels_does_not_fire():
+    """Rule 4: >1000 calls but avg >= 10μs does NOT trigger."""
+    from rocpd.analyze import generate_recommendations
+    # 2000 calls but avg = 50ms >> 10μs
+    td = _empty_breakdown(total_kernel_time=100_000_000_000)
+    hotspots = [_make_hotspot(name=f"k{i}", calls=200) for i in range(10)]
+    recs = generate_recommendations(td, hotspots, {})
+    assert not any(r["category"] == "Launch Overhead" for r in recs)
+
+
+def test_rule4_few_calls_does_not_fire():
+    """Rule 4: <= 1000 total calls does NOT trigger even if each is short."""
+    from rocpd.analyze import generate_recommendations
+    td = _empty_breakdown(total_kernel_time=1_000_000)
+    hotspots = [_make_hotspot(calls=100)]  # only 100 calls
+    recs = generate_recommendations(td, hotspots, {})
+    assert not any(r["category"] == "Launch Overhead" for r in recs)
+
+
+def test_rule5_low_bandwidth_fires():
+    """Rule 5: bandwidth < 10 GB/s triggers 'Memory Bandwidth' MEDIUM recommendation."""
+    from rocpd.analyze import generate_recommendations
+    mem = {"Host-to-Device": {"bandwidth_bytes_per_sec": 5e9, "avg_bytes": 1024}}
+    recs = generate_recommendations(_empty_breakdown(), [], mem)
+    matches = [r for r in recs if r["category"] == "Memory Bandwidth"]
+    assert len(matches) == 1
+    assert matches[0]["priority"] == "MEDIUM"
+    assert "Host-to-Device" in matches[0]["issue"]
+    assert "5.00 GB/s" in matches[0]["issue"]
+
+
+def test_rule5_high_bandwidth_does_not_fire():
+    """Rule 5: bandwidth >= 10 GB/s does NOT trigger."""
+    from rocpd.analyze import generate_recommendations
+    mem = {"Host-to-Device": {"bandwidth_bytes_per_sec": 50e9, "avg_bytes": 1024}}
+    recs = generate_recommendations(_empty_breakdown(), [], mem)
+    assert not any(r["category"] == "Memory Bandwidth" for r in recs)
+
+
+def test_rule5_zero_bandwidth_does_not_fire():
+    """Rule 5: bandwidth == 0 does NOT trigger (guard: bandwidth_gbps > 0)."""
+    from rocpd.analyze import generate_recommendations
+    mem = {"Host-to-Device": {"bandwidth_bytes_per_sec": 0, "avg_bytes": 0}}
+    recs = generate_recommendations(_empty_breakdown(), [], mem)
+    assert not any(r["category"] == "Memory Bandwidth" for r in recs)
+
+
+def test_rule5_multiple_directions():
+    """Rule 5: each low-bandwidth direction generates its own recommendation."""
+    from rocpd.analyze import generate_recommendations
+    mem = {
+        "Host-to-Device": {"bandwidth_bytes_per_sec": 2e9, "avg_bytes": 512},
+        "Device-to-Host": {"bandwidth_bytes_per_sec": 3e9, "avg_bytes": 512},
+    }
+    recs = generate_recommendations(_empty_breakdown(), [], mem)
+    bw_recs = [r for r in recs if r["category"] == "Memory Bandwidth"]
+    assert len(bw_recs) == 2
+    directions = {r["issue"].split()[0] for r in bw_recs}
+    assert "Host-to-Device" in directions
+    assert "Device-to-Host" in directions
+
+
+def test_rule6_default_info_fires_when_no_rules_trigger():
+    """Rule 6: INFO/Performance recommendation emitted when no rules fire."""
+    from rocpd.analyze import generate_recommendations
+    recs = generate_recommendations(_empty_breakdown(), [], {})
+    assert len(recs) == 1
+    assert recs[0]["priority"] == "INFO"
+    assert recs[0]["category"] == "Performance"
+    assert len(recs[0].get("commands", [])) > 0
+
+
+def test_rule6_default_suppressed_when_any_rule_fires():
+    """Rule 6: default INFO NOT emitted when at least one other rule fires."""
+    from rocpd.analyze import generate_recommendations
+    recs = generate_recommendations(_empty_breakdown(memcpy_percent=25), [], {})
+    assert not any(r["priority"] == "INFO" for r in recs)
+
+
+def test_multiple_rules_fire_simultaneously():
+    """Multiple Tier-1 rules can fire at once; all appear in recommendations."""
+    from rocpd.analyze import generate_recommendations
+    td = _empty_breakdown(memcpy_percent=30, overhead_percent=20)
+    recs = generate_recommendations(td, [], {})
+    categories = {r["category"] for r in recs}
+    assert "Memory Transfer" in categories
+    assert "API Overhead" in categories
+
+
+# ---------------------------------------------------------------------------
+# generate_recommendations – Tier 2 rules
+# ---------------------------------------------------------------------------
+
+def test_tier2_low_occupancy_fires():
+    """Tier 2: avg_waves > 0 and < 16 triggers 'Low Occupancy' HIGH."""
+    from rocpd.analyze import generate_recommendations
+    recs = generate_recommendations(_empty_breakdown(), [], {}, _hw_counters(avg_waves=8.0))
+    matches = [r for r in recs if r["category"] == "Low Occupancy"]
+    assert len(matches) == 1
+    assert matches[0]["priority"] == "HIGH"
+    assert "8.0" in matches[0]["issue"]
+
+
+def test_tier2_low_occupancy_boundary_does_not_fire():
+    """Tier 2: avg_waves exactly 16 does NOT trigger (threshold is < 16)."""
+    from rocpd.analyze import generate_recommendations
+    recs = generate_recommendations(_empty_breakdown(), [], {}, _hw_counters(avg_waves=16.0))
+    assert not any(r["category"] == "Low Occupancy" for r in recs)
+
+
+def test_tier2_zero_waves_does_not_fire():
+    """Tier 2: avg_waves == 0 does NOT trigger (guard: avg_waves > 0)."""
+    from rocpd.analyze import generate_recommendations
+    recs = generate_recommendations(_empty_breakdown(), [], {}, _hw_counters(avg_waves=0))
+    assert not any(r["category"] == "Low Occupancy" for r in recs)
+
+
+def test_tier2_low_gpu_utilization_fires():
+    """Tier 2: gpu_utilization_percent > 0 and < 70 triggers 'GPU Utilization' MEDIUM."""
+    from rocpd.analyze import generate_recommendations
+    recs = generate_recommendations(_empty_breakdown(), [], {}, _hw_counters(gpu_util=50.0))
+    matches = [r for r in recs if r["category"] == "GPU Utilization"]
+    assert len(matches) == 1
+    assert matches[0]["priority"] == "MEDIUM"
+    assert "50.0%" in matches[0]["issue"]
+
+
+def test_tier2_gpu_utilization_boundary_does_not_fire():
+    """Tier 2: gpu_utilization exactly 70% does NOT trigger (threshold is < 70)."""
+    from rocpd.analyze import generate_recommendations
+    recs = generate_recommendations(_empty_breakdown(), [], {}, _hw_counters(gpu_util=70.0))
+    assert not any(r["category"] == "GPU Utilization" for r in recs)
+
+
+def test_tier2_not_activated_when_no_counters():
+    """Tier 2 rules do NOT fire when has_counters=False."""
+    from rocpd.analyze import generate_recommendations
+    hw = {"has_counters": False}
+    recs = generate_recommendations(_empty_breakdown(), [], {}, hardware_counters=hw)
+    assert not any(r["category"] in ("Low Occupancy", "GPU Utilization") for r in recs)
+
+
+def test_tier2_commands_use_valid_tools():
+    """Tier 2 recommendations include commands with valid tool names."""
+    from rocpd.analyze import generate_recommendations
+    VALID_TOOLS = {"rocprofv3", "rocprof-sys", "rocprof-compute"}
+    recs = generate_recommendations(
+        _empty_breakdown(), [], {},
+        hardware_counters=_hw_counters(avg_waves=4.0, gpu_util=40.0),
+    )
+    for rec in recs:
+        for cmd in rec.get("commands", []):
+            assert cmd["tool"] in VALID_TOOLS, f"Invalid tool: {cmd['tool']!r}"
+
+
+# ---------------------------------------------------------------------------
+# Existing tests (preserved)
+# ---------------------------------------------------------------------------
+
 def test_recommendation_structure():
     """Test that recommendations have the expected structure."""
     from rocpd.analyze import generate_recommendations
-
-    # Test with empty data
-    time_breakdown = {
-        "kernel_percent": 0,
-        "memcpy_percent": 0,
-        "overhead_percent": 0,
-    }
-    hotspots = []
-    memory_analysis = {}
-
-    recommendations = generate_recommendations(time_breakdown, hotspots, memory_analysis)
-
+    recommendations = generate_recommendations(_empty_breakdown(), [], {})
     assert isinstance(recommendations, list)
-    assert len(recommendations) > 0, "Should have at least one recommendation"
-
-    # Check structure of first recommendation
+    assert len(recommendations) > 0
     rec = recommendations[0]
-    assert "priority" in rec
-    assert "category" in rec
-    assert "issue" in rec
-    assert "suggestion" in rec
-
-    # Verify valid priority
+    for field in ("priority", "category", "issue", "suggestion"):
+        assert field in rec
     assert rec["priority"] in ["HIGH", "MEDIUM", "LOW", "INFO"]
 
 
 def test_high_memcpy_recommendation():
     """Test that high memory copy overhead triggers recommendation."""
     from rocpd.analyze import generate_recommendations
-
-    time_breakdown = {
-        "kernel_percent": 50,
-        "memcpy_percent": 35,  # >20%, should trigger recommendation
-        "overhead_percent": 15,
-    }
-    hotspots = []
-    memory_analysis = {}
-
-    recommendations = generate_recommendations(time_breakdown, hotspots, memory_analysis)
-
-    # Should have recommendation about memory transfers
-    memcpy_recs = [r for r in recommendations if "Memory Transfer" in r.get("category", "")]
-    assert len(memcpy_recs) > 0, "Should have memory transfer recommendation"
+    td = _empty_breakdown(memcpy_percent=35)
+    recs = generate_recommendations(td, [], {})
+    memcpy_recs = [r for r in recs if "Memory Transfer" in r.get("category", "")]
+    assert len(memcpy_recs) > 0
     assert memcpy_recs[0]["priority"] == "HIGH"
 
 
 def test_hotspot_recommendation():
     """Test that dominant kernel triggers recommendation."""
     from rocpd.analyze import generate_recommendations
-
-    time_breakdown = {
-        "kernel_percent": 80,
-        "memcpy_percent": 10,
-        "overhead_percent": 10,
-    }
-
-    # Single kernel dominates
-    hotspots = [
-        {
-            "name": "test_kernel",
-            "calls": 100,
-            "total_duration": 1000000,
-            "percent_of_total": 60,  # >50%, should trigger
-        }
-    ]
-    memory_analysis = {}
-
-    recommendations = generate_recommendations(time_breakdown, hotspots, memory_analysis)
-
-    # Should have recommendation about compute bottleneck
-    compute_recs = [r for r in recommendations if "Compute Bottleneck" in r.get("category", "")]
-    assert len(compute_recs) > 0, "Should have compute bottleneck recommendation"
+    hotspots = [_make_hotspot(name="test_kernel", pct=60)]
+    recs = generate_recommendations(_empty_breakdown(), hotspots, {})
+    compute_recs = [r for r in recs if "Compute Bottleneck" in r.get("category", "")]
+    assert len(compute_recs) > 0
     assert "test_kernel" in compute_recs[0]["issue"]
 
 
-def test_format_output_text():
-    """Test text output formatting."""
-    from rocpd.analyze import format_analysis_output
+# ---------------------------------------------------------------------------
+# _build_summary – all bottleneck classification branches
+# ---------------------------------------------------------------------------
 
-    time_breakdown = {
-        "total_kernel_time": 1000000000,  # 1000 ms
-        "total_memcpy_time": 200000000,  # 200 ms
-        "total_runtime": 1200000000,  # 1200 ms
+def test_summary_memory_transfer_high_confidence():
+    """memcpy_pct > 30 → memory_transfer with confidence 0.85."""
+    from rocpd.analyze import _build_summary
+    result = _build_summary({"memcpy_percent": 35, "kernel_percent": 50, "overhead_percent": 15}, [], False)
+    assert result["primary_bottleneck"] == "memory_transfer"
+    assert result["confidence"] == 0.85
+
+
+def test_summary_memory_transfer_medium_confidence():
+    """memcpy_pct 20-30 → memory_transfer with confidence 0.70."""
+    from rocpd.analyze import _build_summary
+    result = _build_summary({"memcpy_percent": 25, "kernel_percent": 60, "overhead_percent": 15}, [], False)
+    assert result["primary_bottleneck"] == "memory_transfer"
+    assert result["confidence"] == 0.70
+
+
+def test_summary_latency_bottleneck():
+    """overhead_pct > 25 (memcpy < 20) → latency with confidence 0.75."""
+    from rocpd.analyze import _build_summary
+    result = _build_summary({"memcpy_percent": 10, "kernel_percent": 60, "overhead_percent": 30}, [], False)
+    assert result["primary_bottleneck"] == "latency"
+    assert result["confidence"] == 0.75
+
+
+def test_summary_compute_with_counters():
+    """kernel_pct > 70 + has_counters=True → compute with confidence 0.80."""
+    from rocpd.analyze import _build_summary
+    result = _build_summary({"memcpy_percent": 5, "kernel_percent": 80, "overhead_percent": 5}, [], True)
+    assert result["primary_bottleneck"] == "compute"
+    assert result["confidence"] == 0.80
+
+
+def test_summary_compute_without_counters():
+    """kernel_pct > 70 + has_counters=False → compute with confidence 0.60."""
+    from rocpd.analyze import _build_summary
+    result = _build_summary({"memcpy_percent": 5, "kernel_percent": 80, "overhead_percent": 5}, [], False)
+    assert result["primary_bottleneck"] == "compute"
+    assert result["confidence"] == 0.60
+
+
+def test_summary_mixed_bottleneck():
+    """Low percentages all round → mixed with confidence 0.50."""
+    from rocpd.analyze import _build_summary
+    result = _build_summary({"memcpy_percent": 10, "kernel_percent": 50, "overhead_percent": 10}, [], False)
+    assert result["primary_bottleneck"] == "mixed"
+    assert result["confidence"] == 0.50
+
+
+def test_summary_top_kernel_in_findings():
+    """Top kernel name from hotspots[0] appears in key_findings."""
+    from rocpd.analyze import _build_summary
+    hotspots = [_make_hotspot(name="gemm_kernel")]
+    result = _build_summary({"memcpy_percent": 5, "kernel_percent": 80, "overhead_percent": 5}, hotspots, False)
+    assert any("gemm_kernel" in f for f in result["key_findings"])
+
+
+def test_summary_empty_hotspots_shows_na():
+    """Empty hotspots → top kernel reported as 'N/A' in key_findings."""
+    from rocpd.analyze import _build_summary
+    result = _build_summary({"memcpy_percent": 5, "kernel_percent": 80, "overhead_percent": 5}, [], False)
+    assert any("N/A" in f for f in result["key_findings"])
+
+
+def test_summary_counters_finding_present():
+    """has_counters=True adds counter-data finding; False adds Tier 1 note."""
+    from rocpd.analyze import _build_summary
+    bd = {"memcpy_percent": 5, "kernel_percent": 50, "overhead_percent": 5}
+    with_hw = _build_summary(bd, [], True)
+    without_hw = _build_summary(bd, [], False)
+    assert any("Hardware counter" in f for f in with_hw["key_findings"])
+    assert any("Tier 1" in f for f in without_hw["key_findings"])
+
+
+def test_summary_has_required_keys():
+    """Summary dict contains all required schema keys."""
+    from rocpd.analyze import _build_summary
+    result = _build_summary({"memcpy_percent": 10, "kernel_percent": 60, "overhead_percent": 10}, [], False)
+    for key in ("overall_assessment", "primary_bottleneck", "confidence", "key_findings"):
+        assert key in result, f"Missing key: {key!r}"
+    assert isinstance(result["key_findings"], list)
+    assert isinstance(result["confidence"], float)
+
+
+# ---------------------------------------------------------------------------
+# _build_hw_counters_json
+# ---------------------------------------------------------------------------
+
+def test_hw_counters_no_counters_structure():
+    """has_counters=False returns the correct minimal structure."""
+    from rocpd.analyze import _build_hw_counters_json
+    result = _build_hw_counters_json({"has_counters": False})
+    assert result == {"has_counters": False, "metrics": None, "counters": None}
+
+
+def test_hw_counters_empty_dict():
+    """Empty dict (no has_counters key) treated as no counters."""
+    from rocpd.analyze import _build_hw_counters_json
+    result = _build_hw_counters_json({})
+    assert result["has_counters"] is False
+
+
+def test_hw_counters_with_metrics():
+    """has_counters=True maps all metric fields correctly."""
+    from rocpd.analyze import _build_hw_counters_json
+    hw = {
+        "has_counters": True,
+        "metrics": {
+            "gpu_utilization_percent": 75.5,
+            "avg_waves": 32.0,
+            "max_waves": 64.0,
+            "min_waves": 8.0,
+        },
+        "counters": {},
+    }
+    result = _build_hw_counters_json(hw)
+    assert result["has_counters"] is True
+    m = result["metrics"]
+    assert m["gpu_utilization_pct"] == 75.5
+    assert m["avg_waves"] == 32.0
+    assert m["max_waves"] == 64.0
+    assert m["min_waves"] == 8.0
+
+
+def test_hw_counters_with_counter_data():
+    """Counter stats are mapped with correct types."""
+    from rocpd.analyze import _build_hw_counters_json
+    hw = {
+        "has_counters": True,
+        "metrics": {},
+        "counters": {
+            "GRBM_COUNT": {
+                "sample_count": 100,
+                "avg_value": 1000.0,
+                "min_value": 900.0,
+                "max_value": 1100.0,
+                "total_value": 100_000.0,
+            }
+        },
+    }
+    result = _build_hw_counters_json(hw)
+    ctr = result["counters"]["GRBM_COUNT"]
+    assert ctr["sample_count"] == 100
+    assert isinstance(ctr["sample_count"], int)
+    assert ctr["avg_value"] == 1000.0
+    assert isinstance(ctr["avg_value"], float)
+
+
+# ---------------------------------------------------------------------------
+# _build_warnings_json
+# ---------------------------------------------------------------------------
+
+def test_warnings_no_counters_emits_warning():
+    """has_counters=False → one warning with 'warning' severity."""
+    from rocpd.analyze import _build_warnings_json
+    warnings = _build_warnings_json(has_counters=False)
+    assert len(warnings) == 1
+    assert warnings[0]["severity"] == "warning"
+    assert "Tier 1" in warnings[0]["message"]
+    assert "recommendation" in warnings[0]
+
+
+def test_warnings_with_counters_is_empty():
+    """has_counters=True → empty warnings list."""
+    from rocpd.analyze import _build_warnings_json
+    assert _build_warnings_json(has_counters=True) == []
+
+
+# ---------------------------------------------------------------------------
+# _build_recommendations_json – stable IDs, dedup, unknown category
+# ---------------------------------------------------------------------------
+
+def _simple_rec(category, priority="INFO"):
+    return {"category": category, "priority": priority, "issue": "x", "suggestion": "y"}
+
+
+def test_recs_json_stable_ids_for_known_categories():
+    """Known categories get their stable ROCPD-*-001 IDs."""
+    from rocpd.analyze import _build_recommendations_json
+    expected = {
+        "Low Occupancy": "ROCPD-OCCUPANCY-001",
+        "GPU Utilization": "ROCPD-UTILIZATION-001",
+        "Memory Transfer": "ROCPD-MEMCPY-001",
+        "API Overhead": "ROCPD-API-001",
+        "Compute Bottleneck": "ROCPD-COMPUTE-001",
+        "Launch Overhead": "ROCPD-LAUNCH-001",
+        "Memory Bandwidth": "ROCPD-MEMBW-001",
+        "Performance": "ROCPD-INFO-001",
+    }
+    recs = [_simple_rec(cat) for cat in expected]
+    out = _build_recommendations_json(recs)
+    by_cat = {r["category"]: r["id"] for r in out}
+    for cat, expected_id in expected.items():
+        assert by_cat[cat] == expected_id, f"{cat}: expected {expected_id}, got {by_cat[cat]}"
+
+
+def test_recs_json_duplicate_category_gets_incremented_id():
+    """Two recs with the same category → IDs end in 001 and 002."""
+    from rocpd.analyze import _build_recommendations_json
+    recs = [_simple_rec("Memory Transfer"), _simple_rec("Memory Transfer")]
+    out = _build_recommendations_json(recs)
+    assert out[0]["id"] == "ROCPD-MEMCPY-001"
+    assert out[1]["id"] == "ROCPD-MEMCPY-002"
+
+
+def test_recs_json_unknown_category_generates_id():
+    """Unknown category generates a ROCPD-...-001 style ID from the name."""
+    from rocpd.analyze import _build_recommendations_json
+    out = _build_recommendations_json([_simple_rec("Custom Analysis")])
+    assert out[0]["id"].startswith("ROCPD-")
+    assert out[0]["id"].endswith("-001")
+
+
+def test_recs_json_preserves_all_fields():
+    """_build_recommendations_json preserves all expected fields."""
+    from rocpd.analyze import _build_recommendations_json
+    rec = {
+        "category": "Performance",
+        "priority": "INFO",
+        "issue": "test issue",
+        "suggestion": "test suggestion",
+        "actions": ["do this"],
+        "estimated_impact": "5%",
+        "commands": [{"tool": "rocprofv3", "full_command": "rocprofv3 -- ./app",
+                       "description": "d", "flags": [], "args": []}],
+    }
+    out = _build_recommendations_json([rec])
+    assert out[0]["priority"] == "INFO"
+    assert out[0]["issue"] == "test issue"
+    assert out[0]["actions"] == ["do this"]
+    assert len(out[0]["commands"]) == 1
+
+
+def test_recs_json_empty_input_returns_empty():
+    """Empty input list returns empty output list."""
+    from rocpd.analyze import _build_recommendations_json
+    assert _build_recommendations_json([]) == []
+
+
+# ---------------------------------------------------------------------------
+# _format_as_json – value mapping correctness
+# ---------------------------------------------------------------------------
+
+def test_format_json_time_breakdown_values():
+    """_format_as_json maps time_breakdown keys correctly into execution_breakdown."""
+    from rocpd.analyze import _format_as_json
+    td = {
+        "total_runtime": 1_000_000_000,
+        "total_kernel_time": 800_000_000,
+        "total_memcpy_time": 100_000_000,
+        "kernel_percent": 80.0,
+        "memcpy_percent": 10.0,
+        "overhead_percent": 5.0,
+    }
+    doc = json.loads(_format_as_json(td, [], {}, []))
+    eb = doc["execution_breakdown"]
+    assert eb["total_runtime_ns"] == 1_000_000_000
+    assert eb["kernel_time_ns"] == 800_000_000
+    assert eb["memcpy_time_ns"] == 100_000_000
+    assert eb["kernel_time_pct"] == 80.0
+    assert eb["memcpy_time_pct"] == 10.0
+    assert eb["api_overhead_pct"] == 5.0
+
+
+def test_format_json_idle_time_calculation():
+    """Idle time = total − kernel − memcpy − api_overhead, clamped to 0."""
+    from rocpd.analyze import _format_as_json
+    td = {
+        "total_runtime": 1_000_000_000,       # 1 s
+        "total_kernel_time": 600_000_000,      # 600 ms
+        "total_memcpy_time": 200_000_000,      # 200 ms
+        "kernel_percent": 60.0,
+        "memcpy_percent": 20.0,
+        "overhead_percent": 10.0,              # 100 ms
+    }
+    doc = json.loads(_format_as_json(td, [], {}, []))
+    eb = doc["execution_breakdown"]
+    # api_overhead_ns = 10% of 1_000_000_000 = 100_000_000
+    assert eb["api_overhead_ns"] == 100_000_000
+    # idle = 1_000_000_000 - 600_000_000 - 200_000_000 - 100_000_000 = 100_000_000
+    assert eb["idle_time_ns"] == 100_000_000
+
+
+def test_format_json_idle_time_clamped_to_zero():
+    """Idle time never goes negative (clamped to 0)."""
+    from rocpd.analyze import _format_as_json
+    # kernel + memcpy already exceed total_runtime
+    td = {
+        "total_runtime": 100_000_000,
+        "total_kernel_time": 80_000_000,
+        "total_memcpy_time": 30_000_000,  # overflows
+        "kernel_percent": 80.0,
+        "memcpy_percent": 30.0,
+        "overhead_percent": 5.0,
+    }
+    doc = json.loads(_format_as_json(td, [], {}, []))
+    assert doc["execution_breakdown"]["idle_time_ns"] >= 0
+
+
+def test_format_json_hotspot_field_mapping():
+    """Hotspot fields are mapped with correct names and types."""
+    from rocpd.analyze import _format_as_json
+    hotspots = [
+        _make_hotspot(name="conv_fwd", calls=5, total=400_000_000,
+                      avg=80_000_000, min_d=60_000_000, max_d=100_000_000, pct=40.0),
+    ]
+    doc = json.loads(_format_as_json(_empty_breakdown(), hotspots, {}, []))
+    hs = doc["hotspots"][0]
+    assert hs["rank"] == 1
+    assert hs["name"] == "conv_fwd"
+    assert hs["calls"] == 5
+    assert hs["total_duration_ns"] == 400_000_000
+    assert hs["avg_duration_ns"] == 80_000_000.0
+    assert hs["min_duration_ns"] == 60_000_000
+    assert hs["max_duration_ns"] == 100_000_000
+    assert hs["pct_of_total"] == 40.0
+
+
+def test_format_json_hotspot_rank_increments():
+    """Multiple hotspots get ranks 1, 2, 3 in order."""
+    from rocpd.analyze import _format_as_json
+    hotspots = [_make_hotspot(name=f"k{i}") for i in range(3)]
+    doc = json.loads(_format_as_json(_empty_breakdown(), hotspots, {}, []))
+    ranks = [h["rank"] for h in doc["hotspots"]]
+    assert ranks == [1, 2, 3]
+
+
+def test_format_json_memory_bandwidth_gbps_conversion():
+    """bandwidth_bytes_per_sec is correctly converted to bandwidth_gbps."""
+    from rocpd.analyze import _format_as_json
+    mem = {
+        "Host-to-Device": {
+            "count": 10, "total_bytes": 0, "total_duration": 0,
+            "avg_bytes": 0, "avg_duration": 0,
+            "bandwidth_bytes_per_sec": 50e9,  # 50 GB/s
+        }
+    }
+    doc = json.loads(_format_as_json(_empty_breakdown(), [], mem, []))
+    bw = doc["memory_analysis"]["Host-to-Device"]["bandwidth_gbps"]
+    assert abs(bw - 50.0) < 0.001
+
+
+def test_format_json_analysis_tier_with_counters():
+    """analysis_tier=2 and hardware_counters.has_counters=True when counters present."""
+    from rocpd.analyze import _format_as_json
+    hw = {"has_counters": True, "metrics": {}, "counters": {}}
+    doc = json.loads(_format_as_json(_empty_breakdown(), [], {}, [], hardware_counters=hw))
+    assert doc["profiling_info"]["analysis_tier"] == 2
+    assert doc["hardware_counters"]["has_counters"] is True
+
+
+def test_format_json_analysis_tier_without_counters():
+    """analysis_tier=1 and hardware_counters.has_counters=False when no counters."""
+    from rocpd.analyze import _format_as_json
+    doc = json.loads(_format_as_json(_empty_breakdown(), [], {}, []))
+    assert doc["profiling_info"]["analysis_tier"] == 1
+    assert doc["hardware_counters"]["has_counters"] is False
+
+
+def test_format_json_database_path_in_metadata():
+    """database_file in metadata reflects the database_path argument."""
+    from rocpd.analyze import _format_as_json
+    doc = json.loads(_format_as_json(_empty_breakdown(), [], {}, [],
+                                      database_path="/data/trace.db"))
+    assert doc["metadata"]["database_file"] == "/data/trace.db"
+
+
+def test_format_json_schema_version():
+    """JSON output always carries schema_version = '0.1.0'."""
+    from rocpd.analyze import _format_as_json
+    doc = json.loads(_format_as_json(_empty_breakdown(), [], {}, []))
+    assert doc["schema_version"] == "0.1.0"
+
+
+def test_format_json_analysis_version_in_metadata():
+    """metadata.analysis_version = '0.1.0'."""
+    from rocpd.analyze import _format_as_json
+    doc = json.loads(_format_as_json(_empty_breakdown(), [], {}, []))
+    assert doc["metadata"]["analysis_version"] == "0.1.0"
+
+
+# ---------------------------------------------------------------------------
+# format_analysis_output – text, json, markdown
+# ---------------------------------------------------------------------------
+
+def _full_sample_data():
+    td = {
+        "total_runtime": 1_200_000_000,
+        "total_kernel_time": 1_000_000_000,
+        "total_memcpy_time": 200_000_000,
         "kernel_percent": 83.3,
         "memcpy_percent": 16.7,
-        "overhead_percent": 0,
+        "overhead_percent": 0.0,
     }
-
-    hotspots = [
-        {
-            "name": "kernel_1",
-            "calls": 100,
-            "total_duration": 500000000,
-            "avg_duration": 5000000,
-            "min_duration": 4000000,
-            "max_duration": 6000000,
-            "percent_of_total": 50,
-        }
-    ]
-
+    hotspots = [_make_hotspot(name="kernel_1", calls=100, total=500_000_000, pct=50.0)]
     memory_analysis = {
         "Host-to-Device": {
-            "count": 10,
-            "total_bytes": 1048576,  # 1 MB
-            "total_duration": 100000000,  # 100 ms
-            "avg_bytes": 104857,
-            "avg_duration": 10000000,
-            "bandwidth_bytes_per_sec": 10485760,  # ~10 MB/s
+            "count": 10, "total_bytes": 1_048_576,
+            "total_duration": 100_000_000, "avg_bytes": 104_857,
+            "avg_duration": 10_000_000, "bandwidth_bytes_per_sec": 10_485_760,
         }
     }
-
     recommendations = [
         {
             "priority": "INFO",
             "category": "Test",
             "issue": "Test issue",
             "suggestion": "Test suggestion",
-            "actions": ["Action 1", "Action 2"],
-            "next_steps": "Test command",
+            "actions": ["Action 1"],
+            "estimated_impact": "5%",
+            "commands": [],
         }
     ]
-
-    output = format_analysis_output(
-        time_breakdown,
-        hotspots,
-        memory_analysis,
-        recommendations,
-        database_path="/test/db.db",
-        output_format="text",
-    )
-
-    assert isinstance(output, str)
-    assert len(output) > 0
-    assert "ROCPD AI PERFORMANCE ANALYSIS" in output
-    assert "TIME BREAKDOWN" in output
-    assert "HOTSPOTS" in output
-    assert "MEMORY COPY ANALYSIS" in output
-    assert "RECOMMENDATIONS" in output
-    assert "kernel_1" in output
-    assert "Host-to-Device" in output
+    return td, hotspots, memory_analysis, recommendations
 
 
-def test_format_output_with_no_data():
-    """Test output formatting with empty data."""
+def test_format_output_text():
+    """Text format contains all expected section headers and data."""
     from rocpd.analyze import format_analysis_output
+    td, hs, mem, recs = _full_sample_data()
+    out = format_analysis_output(td, hs, mem, recs, output_format="text",
+                                  database_path="/test/db.db")
+    assert isinstance(out, str)
+    assert "ROCPD AI PERFORMANCE ANALYSIS" in out
+    assert "TIME BREAKDOWN" in out
+    assert "HOTSPOTS" in out
+    assert "MEMORY COPY ANALYSIS" in out
+    assert "RECOMMENDATIONS" in out
+    assert "kernel_1" in out
+    assert "Host-to-Device" in out
 
-    time_breakdown = {
-        "total_kernel_time": 0,
-        "total_memcpy_time": 0,
-        "total_runtime": 0,
-        "kernel_percent": 0,
-        "memcpy_percent": 0,
-        "overhead_percent": 0,
+
+def test_format_output_text_empty_data():
+    """Text format with all-zero data still produces valid output."""
+    from rocpd.analyze import format_analysis_output
+    out = format_analysis_output(_empty_breakdown(), [], {}, [], output_format="text")
+    assert isinstance(out, str)
+    assert "ROCPD AI PERFORMANCE ANALYSIS" in out
+
+
+def test_format_output_json():
+    """JSON format returns valid parseable JSON with required top-level keys."""
+    from rocpd.analyze import format_analysis_output
+    td, hs, mem, recs = _full_sample_data()
+    out = format_analysis_output(td, hs, mem, recs, output_format="json")
+    doc = json.loads(out)
+    for key in ("schema_version", "metadata", "hotspots", "recommendations",
+                 "execution_breakdown", "hardware_counters"):
+        assert key in doc, f"Missing key: {key!r}"
+
+
+def test_format_output_markdown():
+    """Markdown format returns well-structured markdown document."""
+    from rocpd.analyze import format_analysis_output
+    td, hs, mem, recs = _full_sample_data()
+    out = format_analysis_output(td, hs, mem, recs, output_format="markdown",
+                                  database_path="/test/db.db")
+    assert isinstance(out, str)
+    assert out.startswith("# ROCpd AI Performance Analysis")
+    assert "## Time Breakdown" in out
+    assert "## Top Kernel Hotspots" in out
+    assert "## Memory Copy Analysis" in out
+    assert "## Recommendations" in out
+    assert "kernel_1" in out
+    assert "Host-to-Device" in out
+
+
+def test_format_output_markdown_no_hotspots():
+    """Markdown format omits hotspot section when list is empty."""
+    from rocpd.analyze import format_analysis_output
+    td, _, mem, recs = _full_sample_data()
+    out = format_analysis_output(td, [], mem, recs, output_format="markdown")
+    assert "## Top Kernel Hotspots" not in out
+
+
+def test_format_output_markdown_no_memory():
+    """Markdown format omits memory section when analysis is empty."""
+    from rocpd.analyze import format_analysis_output
+    td, hs, _, recs = _full_sample_data()
+    out = format_analysis_output(td, hs, {}, recs, output_format="markdown")
+    assert "## Memory Copy Analysis" not in out
+
+
+def test_format_output_markdown_with_hardware_counters():
+    """Markdown format includes Tier 2 section when hardware counters present."""
+    from rocpd.analyze import format_analysis_output
+    td, hs, mem, recs = _full_sample_data()
+    hw = {
+        "has_counters": True,
+        "metrics": {"gpu_utilization_percent": 65.0, "avg_waves": 24.0, "max_waves": 48.0},
+        "counters": {},
     }
+    out = format_analysis_output(td, hs, mem, recs, hardware_counters=hw,
+                                  output_format="markdown")
+    assert "## Hardware Counters (Tier 2)" in out
+    assert "65.0%" in out
 
-    hotspots = []
-    memory_analysis = {}
-    recommendations = []
 
-    output = format_analysis_output(
-        time_breakdown,
-        hotspots,
-        memory_analysis,
-        recommendations,
-        database_path="",
-        output_format="text",
-    )
+def test_format_output_unknown_format_falls_back_to_text():
+    """Unrecognized format falls back to text output."""
+    from rocpd.analyze import format_analysis_output
+    out = format_analysis_output(_empty_breakdown(), [], {}, [], output_format="xml")
+    assert "ROCPD AI PERFORMANCE ANALYSIS" in out
 
-    assert isinstance(output, str)
-    assert "ROCPD AI PERFORMANCE ANALYSIS" in output
 
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
     # Use --noconftest to avoid loading conftest.py which requires rocprofiler_sdk module
