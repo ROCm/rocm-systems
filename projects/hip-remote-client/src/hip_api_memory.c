@@ -733,3 +733,123 @@ hipError_t hipMemcpyPeerAsync(void* dst, int dstDeviceId, const void* src,
         &resp, sizeof(resp)
     );
 }
+
+/* ============================================================================
+ * IPC (Inter-Process Communication) APIs
+ * ============================================================================ */
+
+hipError_t hipIpcGetMemHandle(hipIpcMemHandle_t* handle, void* devPtr) {
+    if (!handle) {
+        return hipErrorInvalidValue;
+    }
+    if (!devPtr) {
+        return hipErrorInvalidDevicePointer;
+    }
+
+    HipRemoteIpcGetMemHandleRequest req = {
+        .device_ptr = (uint64_t)(uintptr_t)devPtr
+    };
+    HipRemoteIpcGetMemHandleResponse resp;
+
+    hipError_t err = hip_remote_request(
+        HIP_OP_IPC_GET_MEM_HANDLE,
+        &req, sizeof(req),
+        &resp, sizeof(resp)
+    );
+
+    if (err == hipSuccess) {
+        memcpy(handle->reserved, resp.handle, HIP_REMOTE_IPC_HANDLE_SIZE);
+    }
+    return err;
+}
+
+hipError_t hipIpcOpenMemHandle(void** devPtr, hipIpcMemHandle_t handle, unsigned int flags) {
+    if (!devPtr) {
+        return hipErrorInvalidValue;
+    }
+
+    HipRemoteIpcOpenMemHandleRequest req;
+    memcpy(req.handle, handle.reserved, HIP_REMOTE_IPC_HANDLE_SIZE);
+    req.flags = flags;
+
+    HipRemoteIpcOpenMemHandleResponse resp;
+
+    hipError_t err = hip_remote_request(
+        HIP_OP_IPC_OPEN_MEM_HANDLE,
+        &req, sizeof(req),
+        &resp, sizeof(resp)
+    );
+
+    if (err == hipSuccess) {
+        *devPtr = (void*)(uintptr_t)resp.device_ptr;
+    } else {
+        *devPtr = NULL;
+    }
+    return err;
+}
+
+hipError_t hipIpcCloseMemHandle(void* devPtr) {
+    if (!devPtr) {
+        return hipErrorInvalidValue;
+    }
+
+    HipRemoteIpcCloseMemHandleRequest req = {
+        .device_ptr = (uint64_t)(uintptr_t)devPtr
+    };
+    HipRemoteResponseHeader resp;
+
+    return hip_remote_request(
+        HIP_OP_IPC_CLOSE_MEM_HANDLE,
+        &req, sizeof(req),
+        &resp, sizeof(resp)
+    );
+}
+
+hipError_t hipIpcGetEventHandle(hipIpcEventHandle_t* handle, hipEvent_t event) {
+    if (!handle) {
+        return hipErrorInvalidValue;
+    }
+    if (!event) {
+        return hipErrorInvalidResourceHandle;
+    }
+
+    HipRemoteIpcGetEventHandleRequest req = {
+        .event = (uint64_t)(uintptr_t)event
+    };
+    HipRemoteIpcGetEventHandleResponse resp;
+
+    hipError_t err = hip_remote_request(
+        HIP_OP_IPC_GET_EVENT_HANDLE,
+        &req, sizeof(req),
+        &resp, sizeof(resp)
+    );
+
+    if (err == hipSuccess) {
+        memcpy(handle->reserved, resp.handle, HIP_REMOTE_IPC_HANDLE_SIZE);
+    }
+    return err;
+}
+
+hipError_t hipIpcOpenEventHandle(hipEvent_t* event, hipIpcEventHandle_t handle) {
+    if (!event) {
+        return hipErrorInvalidValue;
+    }
+
+    HipRemoteIpcOpenEventHandleRequest req;
+    memcpy(req.handle, handle.reserved, HIP_REMOTE_IPC_HANDLE_SIZE);
+
+    HipRemoteIpcOpenEventHandleResponse resp;
+
+    hipError_t err = hip_remote_request(
+        HIP_OP_IPC_OPEN_EVENT_HANDLE,
+        &req, sizeof(req),
+        &resp, sizeof(resp)
+    );
+
+    if (err == hipSuccess) {
+        *event = (hipEvent_t)(uintptr_t)resp.event;
+    } else {
+        *event = NULL;
+    }
+    return err;
+}
