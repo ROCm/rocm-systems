@@ -45,7 +45,6 @@
 } while(0)
 
 // CUDACHECK macro (uses HIP for AMD)
-// CUDACHECK macro (uses HIP for AMD)
 // Stub out HIP types when hip_runtime.h is not available
 #if __has_include(<hip/hip_runtime.h>)
 #include <hip/hip_runtime.h>
