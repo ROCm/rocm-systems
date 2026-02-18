@@ -182,6 +182,12 @@ class TestAmdSmiPython(unittest.TestCase):
         return
 
     def test_nic_bdf_device_id(self):
+        common.Common._skip_if_missing(self, [
+                                "amdsmi_get_nic_processor_handles",
+                                "amdsmi_get_nic_info",
+                                "amdsmi_get_nic_device_uuid",
+                            ])
+        self.setUp()
         processors = amdsmi.amdsmi_get_nic_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), self.max_num_physical_devices)
@@ -199,9 +205,29 @@ class TestAmdSmiPython(unittest.TestCase):
         print()
         return
 
-    def test_get_socket_info(self):
+    def test_switch_bdf_device_id(self):
+        common.Common._skip_if_missing(self, [
+                                "amdsmi_get_switch_processor_handles",
+                                "amdsmi_get_switch_device_bdf",
+                                "amdsmi_get_device_id",
+                            ])
+        self.setUp()
+        processors = amdsmi.amdsmi_get_switch_processor_handles()
+        self.assertGreaterEqual(len(processors), 1)
+        self.assertLessEqual(len(processors), 32)
+        for i in range(0, len(processors)):
+            bdf = amdsmi.amdsmi_get_switch_device_bdf(processors[i])
+            print("\n\n###Test switch Processor {}, bdf: {}".format(i, bdf))
+            print("\n###Test amdsmi_get_processor_handle_from_bdf \n")
+            processor = amdsmi.amdsmi_get_processor_handle_from_bdf(bdf)
+            print("\n###Test amdsmi_get_device_id \n")
+            device_id = amdsmi.amdsmi_get_device_id(processor)
+            print("  device_id is: {}".format(device_id))
+        print()
+        self.tearDown()
+    
+  def test_get_socket_info(self):
         self.common.print_func_name('')
-
         # With invalid socket
         socket = -1
         msg = f'\t### amdsmi_get_socket_info(socket={socket}):'

@@ -730,7 +730,7 @@ def _format_bad_page_info(bad_page_info, bad_page_count: ctypes.c_uint32) -> Lis
     return table_records
 
 
-def _format_bdf(amdsmi_bdf: amdsmi_wrapper.amdsmi_bdf_t) -> str:
+def _format_bdf(amdsmi_bdf: Union[amdsmi_wrapper.amdsmi_bdf_t, amdsmi_wrapper.struct_amdsmi_bdf_t]) -> str:
     """
     Format BDF struct to readable data.
 
@@ -742,6 +742,11 @@ def _format_bdf(amdsmi_bdf: amdsmi_wrapper.amdsmi_bdf_t) -> str:
         `str`: String containing BDF data in a readable format.
     """
 
+     try:
+        struct = amdsmi_bdf.struct_amdsmi_bdf_t
+    except AttributeError:
+        struct = amdsmi_bdf
+        
     if not hasattr(amdsmi_bdf, 'domain_number'):
         return 'N/A'
 
@@ -2203,14 +2208,17 @@ def amdsmi_get_cpu_socket_count():
     return sock_count.value
 
 def _amdsmi_init_enum_flag_is_valid(flag):
+    """Validate that flag contains only valid initialization bits."""
     if flag == amdsmi_wrapper.AMDSMI_INIT_ALL_PROCESSORS:
         return True
-    valid = False
+    
+    # Build mask of all valid flags (excluding ALL_PROCESSORS)
+    valid_mask = 0
     for enum_flag in AmdSmiInitFlags:
-        if (flag & enum_flag) == enum_flag:
-            valid = True
-            break
-    return valid
+        if enum_flag != AmdSmiInitFlags.INIT_ALL_PROCESSORS:
+            valid_mask |= enum_flag.value
+    # Check if flag contains only valid bits and is not zero
+    return flag != 0 and (flag & ~valid_mask) == 0
 
 def amdsmi_init(flag=AmdSmiInitFlags.INIT_AMD_GPUS):
     if not _amdsmi_init_enum_flag_is_valid(flag):
