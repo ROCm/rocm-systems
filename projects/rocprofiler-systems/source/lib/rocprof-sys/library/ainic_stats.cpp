@@ -145,8 +145,8 @@ ai_nic_stats_collector::get_nic_count()
 
 #ifdef USE_AINIC
 void
-ai_nic_stats_collector::update_data_for_one_handle(amdsmi_processor_handle processor_handle,
-                                                amdsmi_nic_rdma_devices_info_t& info)
+ai_nic_stats_collector::update_data_for_one_handle(
+    amdsmi_processor_handle processor_handle, amdsmi_nic_rdma_devices_info_t& info)
 {
     for(uint8_t rdma_dev_idx = 0; rdma_dev_idx < info.num_rdma_dev; ++rdma_dev_idx)
     {

@@ -78,6 +78,6 @@ private:
 
 #ifdef USE_AINIC
     void update_data_for_one_handle(amdsmi_processor_handle         processor_handle,
-                                 amdsmi_nic_rdma_devices_info_t& info);
+                                    amdsmi_nic_rdma_devices_info_t& info);
 #endif
 };
