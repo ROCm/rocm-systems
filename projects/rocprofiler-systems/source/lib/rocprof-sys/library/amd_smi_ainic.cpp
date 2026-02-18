@@ -1,10 +1,12 @@
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
 #include "library/amd_smi_ainic.hpp"
 
 #include "core/agent_manager.hpp"
 #include "core/trace_cache/cache_manager.hpp"
 #include "core/trace_cache/cacheable.hpp"
 #include "core/trace_cache/sample_type.hpp"
-#include <amd_smi/amdsmi.h>
 #include <cstdint>
 #if defined(NDEBUG)
 #    undef NDEBUG
@@ -229,12 +231,12 @@ nic_data::post_process(size_t nic_index)
         uint64_t _ts = itr.m_ts;
         if(!_thread_info->is_valid_time(_ts)) continue;
 
-        uint32_t _rx_rdma_cnp_pkts = itr._rx_rdma_cnp_pkts;
-        uint32_t _tx_rdma_cnp_pkts = itr._tx_rdma_cnp_pkts;
-        uint32_t _rx_ucast_bytes   = itr._rx_ucast_bytes;
-        uint32_t _tx_ucast_bytes   = itr._tx_ucast_bytes;
-        uint32_t _rx_ucast_pkts    = itr._rx_ucast_pkts;
-        uint32_t _tx_ucast_pkts    = itr._tx_ucast_pkts;
+        uint64_t _rx_rdma_cnp_pkts = itr._rx_rdma_cnp_pkts;
+        uint64_t _tx_rdma_cnp_pkts = itr._tx_rdma_cnp_pkts;
+        uint64_t _rx_ucast_bytes   = itr._rx_ucast_bytes;
+        uint64_t _tx_ucast_bytes   = itr._tx_ucast_bytes;
+        uint64_t _rx_ucast_pkts    = itr._rx_ucast_pkts;
+        uint64_t _tx_ucast_pkts    = itr._tx_ucast_pkts;
 
         counter_track::emplace(nic_index, addendum("RX CNP PKTS"), "packets");
         counter_track::emplace(nic_index, addendum("TX CNP PKTS"), "packets");
