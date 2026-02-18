@@ -132,8 +132,8 @@ producer_loop(
 {
     CHECK_NOTNULL(parameters.copy_data_fn);
 
-    auto& queue = *CHECK_NOTNULL(parameters.shared->queue);
-    auto& flag  = *CHECK_NOTNULL(parameters.producer_running);
+    auto& queue       = *CHECK_NOTNULL(parameters.shared->queue);
+    auto& worker_flag = *CHECK_NOTNULL(parameters.producer_running);
 
     const size_t buffer_size           = queue.buffer_size;
     auto&        buffers               = parameters.shared->buffers;
@@ -195,10 +195,11 @@ producer_loop(
         auto wptr = iterate_data(parameters.control_packet->GetHandle());
         buffer_packet.reset_current_buffer();
         ROCP_INFO << "Iterate data with size: " << wptr.size;
-        send_to_consumer(wptr.data, wptr.size, ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_END);
+        if(worker_flag.load() != WORKER_FLAG_DESTRUCTOR)
+            send_to_consumer(wptr.data, wptr.size, ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_END);
     };
 
-    while(flag.load())
+    while(worker_flag.load() == WORKER_FLAG_RUNNING)
     {
         if(do_sleep) sleep_fn();
         do_sleep = true;  // Reset value

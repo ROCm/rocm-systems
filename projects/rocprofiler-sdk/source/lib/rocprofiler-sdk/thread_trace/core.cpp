@@ -151,7 +151,7 @@ ThreadTracerAgent::~ThreadTracerAgent()
     else
         ROCP_WARNING << "Thread tracer being destroyed with thread trace active";
 
-    if(worker_flag) worker_flag->store(false);
+    if(worker_flag) worker_flag->store(WORKER_FLAG_DESTRUCTOR);
     stop_thread_trace();
 }
 
@@ -255,7 +255,7 @@ ThreadTracerAgent::unload_codeobj(code_object_id_t id)
 }
 
 std::shared_ptr<Signal>
-ThreadTracerAgent::start_thread_trace(std::shared_ptr<std::atomic<bool>> _flag)
+ThreadTracerAgent::start_thread_trace(std::shared_ptr<std::atomic<int>> _flag)
 {
     ROCP_TRACE << "Starting thread trace for agent " << agent_id.handle;
     auto lock   = std::unique_lock{trace_resources_mut};
@@ -329,7 +329,9 @@ ThreadTracerAgent::stop_thread_trace()
 
     if(params.triple_buffering)
     {
-        if(worker_flag) worker_flag->store(false);
+        int expected = WORKER_FLAG_RUNNING;
+        worker_flag->compare_exchange_strong(expected, WORKER_FLAG_STOP);
+
         if(producer.joinable()) producer.join();
         if(consumer.joinable()) consumer.join();
         active_traces.fetch_sub(1);
@@ -508,7 +510,7 @@ DispatchThreadTracer::stop_context()  // NOLINT(readability-convert-member-funct
 
 DeviceThreadTracer::DeviceThreadTracer()
 {
-    worker_flag = std::make_shared<std::atomic<bool>>(false);
+    worker_flag = std::make_shared<std::atomic<int>>(WORKER_FLAG_STOP);
 }
 
 void
@@ -547,7 +549,8 @@ DeviceThreadTracer::start_context()
         return;
     }
 
-    worker_flag->store(true);
+    int expected = WORKER_FLAG_STOP;
+    worker_flag->compare_exchange_strong(expected, WORKER_FLAG_RUNNING);
     auto wait_list = std::vector<std::shared_ptr<Signal>>{};
 
     for(auto& [_, tracer] : agents)
@@ -566,7 +569,8 @@ DeviceThreadTracer::stop_context()
 
     ROCP_INFO << "Stopping device thread trace context";
 
-    worker_flag->store(false);
+    int expected = WORKER_FLAG_RUNNING;
+    worker_flag->compare_exchange_strong(expected, WORKER_FLAG_STOP);
 
     auto wait_list = std::vector<std::unique_ptr<Signal>>{};
 
