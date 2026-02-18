@@ -182,4 +182,20 @@ if(BUILD_TESTING)
     LABELS "integration"
     ENVIRONMENT "TF_DEBUG=1"
   )
+
+  # IPC (Inter-Process Communication) tests
+  add_executable(hip_remote_test_ipc tests/test_ipc.c)
+  target_link_libraries(hip_remote_test_ipc PRIVATE amdhip64)
+  target_include_directories(hip_remote_test_ipc PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+  )
+
+  add_test(NAME hip_remote_ipc
+    COMMAND hip_remote_test_ipc
+  )
+
+  set_tests_properties(hip_remote_ipc PROPERTIES
+    LABELS "integration"
+    ENVIRONMENT "TF_DEBUG=1"
+  )
 endif()

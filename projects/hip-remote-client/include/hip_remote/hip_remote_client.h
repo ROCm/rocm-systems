@@ -538,6 +538,72 @@ typedef void (*hipStreamCallback_t)(hipStream_t stream, hipError_t status, void*
 hipError_t hipStreamAddCallback(hipStream_t stream, hipStreamCallback_t callback,
                                  void* userData, unsigned int flags);
 
+/* ============================================================================
+ * IPC (Inter-Process Communication) APIs
+ * These enable sharing GPU memory and events between processes.
+ * ============================================================================ */
+
+/** IPC memory handle - 64 bytes, matches CUDA/HIP */
+typedef struct {
+    char reserved[64];
+} hipIpcMemHandle_t;
+
+/** IPC event handle - 64 bytes, matches CUDA/HIP */
+typedef struct {
+    char reserved[64];
+} hipIpcEventHandle_t;
+
+/** Flag for hipIpcOpenMemHandle */
+#define hipIpcMemLazyEnablePeerAccess 0x01
+
+/**
+ * Get an IPC handle for an existing device memory allocation.
+ * The handle can be passed to other processes to enable sharing.
+ *
+ * @param handle Pointer to receive the IPC handle
+ * @param devPtr Device pointer allocated via hipMalloc
+ * @return hipSuccess on success
+ */
+hipError_t hipIpcGetMemHandle(hipIpcMemHandle_t* handle, void* devPtr);
+
+/**
+ * Open an IPC memory handle from another process.
+ * Returns a device pointer valid in this process.
+ *
+ * @param devPtr Pointer to receive the device pointer
+ * @param handle IPC handle from hipIpcGetMemHandle
+ * @param flags Flags (hipIpcMemLazyEnablePeerAccess)
+ * @return hipSuccess on success
+ */
+hipError_t hipIpcOpenMemHandle(void** devPtr, hipIpcMemHandle_t handle, unsigned int flags);
+
+/**
+ * Close an IPC memory handle opened with hipIpcOpenMemHandle.
+ *
+ * @param devPtr Device pointer from hipIpcOpenMemHandle
+ * @return hipSuccess on success
+ */
+hipError_t hipIpcCloseMemHandle(void* devPtr);
+
+/**
+ * Get an IPC handle for an event.
+ * The event must have been created with hipEventInterprocess flag.
+ *
+ * @param handle Pointer to receive the IPC handle
+ * @param event Event handle
+ * @return hipSuccess on success
+ */
+hipError_t hipIpcGetEventHandle(hipIpcEventHandle_t* handle, hipEvent_t event);
+
+/**
+ * Open an IPC event handle from another process.
+ *
+ * @param event Pointer to receive the event handle
+ * @param handle IPC handle from hipIpcGetEventHandle
+ * @return hipSuccess on success
+ */
+hipError_t hipIpcOpenEventHandle(hipEvent_t* event, hipIpcEventHandle_t handle);
+
 #ifdef __cplusplus
 }
 #endif
