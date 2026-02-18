@@ -682,7 +682,7 @@ Examples:
         "--membw-analysis",
         dest="membw_analysis",
         required=False,
-        default=None,
+        default=False,
         base_action="store_const",
         action=ExperimentalAction,
         experimental_enabled=experimental_enabled,
