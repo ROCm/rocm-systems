@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - develop
-      - users/arravikum/rccl-ci-tests
   pull_request:
     types:
       - labeled
