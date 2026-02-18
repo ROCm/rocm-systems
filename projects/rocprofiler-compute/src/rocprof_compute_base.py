@@ -85,13 +85,23 @@ class RocProfCompute:
         setattr(self.__args, "loglevel", self.__loglevel)
         set_locale_encoding()
 
-        if self.__mode is None or self.__mode == "profile":
+        if self.__mode != "analyze":
             self.generate_machine_specs()
 
         self.sanitize()
         self.handle_list_args()
 
-        if self.__mode == "profile":
+        if self.__args.mode is None:
+            parser.print_help(sys.stderr)
+            if self.__args.config_dir:
+                console_error(
+                    "rocprof-compute requires you to pass --list-metrics "
+                    "or --list-blocks with --config-dir."
+                )
+            console_error(
+                "rocprof-compute requires you to pass a valid mode. Detected None."
+            )
+        elif self.__mode == "profile":
             self.detect_profiler()
         elif self.__mode == "analyze":
             self.detect_analyze()
@@ -254,9 +264,6 @@ class RocProfCompute:
     def generate_machine_specs(self) -> None:
         """Generate MachineSpecs for RocProfCompute"""
         self.__mspec = generate_machine_specs(self.__args)
-        if self.__args and self.__args.specs:
-            print(self.__mspec)
-            sys.exit(0)
 
     @demarcate
     def load_soc_specs(self, sysinfo: Optional[dict] = None) -> None:
@@ -340,17 +347,11 @@ class RocProfCompute:
             self.list_blocks()
             sys.exit(0)
 
-        if self.__args.mode is None:
-            if self.__args.config_dir:
-                parser.print_help(sys.stderr)
-                console_error(
-                    "rocprof-compute requires you to pass --list-metrics "
-                    "with --config-dir."
-                )
-            parser.print_help(sys.stderr)
-            console_error(
-                "rocprof-compute requires you to pass a valid mode. Detected None."
-            )
+        if self.__mode == "profile":
+            if self.__args.list_sets:
+                self.list_sets()
+            elif self.__args.list_available_metrics:
+                self.list_metrics()
 
     @demarcate
     def list_metrics(self) -> None:
@@ -484,11 +485,6 @@ class RocProfCompute:
     def run_profiler(self) -> None:
         self.print_graphic()
 
-        if self.__args.list_sets:
-            self.list_sets()
-        elif self.__args.list_available_metrics:
-            self.list_metrics()
-
         # Replace parameters in output directory when either:
         # 1. --output-directory is explicitly given by user
         # 2. --path and --output-directory are set to default workload directory.
@@ -564,10 +560,6 @@ class RocProfCompute:
         else:
             console_error(f"Unsupported analysis mode -> {self.__analyze_mode}")
 
-        if getattr(self.__args, "list_available_metrics", False):
-            self.generate_machine_specs()
-            self.list_metrics()
-
         # -----------------------
         # run analysis workflow
         # -----------------------
@@ -591,6 +583,9 @@ class RocProfCompute:
                 key: value[0] for key, value in sys_info.to_dict("list").items()
             }
             self.load_soc_specs(sys_info_dict)
+
+        if getattr(self.__args, "list_available_metrics", False):
+            self.list_metrics()
 
         analyzer.set_soc(self.__soc)
         analyzer.pre_processing()
