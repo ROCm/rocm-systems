@@ -23,7 +23,7 @@
 #include <mutex>
 #include "top.hpp"
 
-#ifdef ROCR_DYN_DLL
+#if defined(ROCR_DYN_DLL) || defined(ROCR_STATIC_OPEN)
 #include "hsa.h"
 #include "hsa_ext_image.h"
 #include "hsa_ext_amd.h"
