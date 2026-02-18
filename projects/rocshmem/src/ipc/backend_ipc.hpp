@@ -263,7 +263,7 @@ class IPCBackend : public Backend {
   /**
    * Fine grained memory allocator for buffers used in collectives Routines
    */
-  MemoryAllocator *fine_grained_allocator_{nullptr};
+  HIPAllocator *fine_grained_allocator_{nullptr};
 
   /**
    * @brief Collective routines work/sync buffer size

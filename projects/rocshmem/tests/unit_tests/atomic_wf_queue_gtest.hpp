@@ -27,7 +27,7 @@
 
 #include "../src/containers/atomic_wf_queue_impl.hpp"
 #include "gtest/gtest.h"
-#include "../src/memory/hip_allocator.hpp"
+#include "../src/memory/default_allocator.hpp"
 #include "../src/util.hpp"
 #include <iostream>
 

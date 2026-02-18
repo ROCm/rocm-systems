@@ -40,6 +40,7 @@ namespace envvar {
     const var<bool> uniqueid_with_mpi("UNIQUEID_WITH_MPI", "", false);
     const var<types::debug_level> debug_level("DEBUG_LEVEL", "", types::debug_level::NONE);
     const var<size_t> heap_size("HEAP_SIZE", "", 1L << 30);
+    const var<std::string> heap_mem_type("HEAP_MEM_TYPE", "");
     const var<size_t> max_num_teams("MAX_NUM_TEAMS", "", 40);
     const var<size_t> max_num_host_contexts("MAX_NUM_HOST_CONTEXTS", "", 1);
     const var<size_t> max_num_contexts("MAX_NUM_CONTEXTS", "", 32);

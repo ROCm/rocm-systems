@@ -37,7 +37,7 @@ namespace rocshmem {
  ******************************* WAVE FREE LIST ******************************
  *****************************************************************************/
 
-template <typename TYPE, typename ALLOCATOR = HIPDefaultFinegrainedAllocator>
+template <typename TYPE, typename ALLOCATOR>
 class AtomicWFQueue {
 
   using MutexProxyType = ABQLBlockMutexProxy<ALLOCATOR>;

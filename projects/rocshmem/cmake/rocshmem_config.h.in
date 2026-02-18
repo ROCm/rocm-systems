@@ -30,12 +30,6 @@
 #cmakedefine USE_THREADS
 #cmakedefine USE_SHARED_CTX
 #cmakedefine USE_WF_COAL
-#cmakedefine USE_HEAP_DEVICE_FINEGRAIN
-#cmakedefine USE_HEAP_DEVICE_UNCACHED
-#cmakedefine USE_HEAP_DEVICE_COARSEGRAIN
-#cmakedefine USE_HEAP_MANAGED
-#cmakedefine USE_HEAP_HOST_HIP
-#cmakedefine USE_HEAP_HOST
 #cmakedefine USE_ALLOC_DLMALLOC
 #cmakedefine USE_ALLOC_POW2BINS
 #cmakedefine USE_FUNC_CALL
@@ -46,3 +40,4 @@
 #cmakedefine GDA_BNXT
 #cmakedefine GDA_MLX5
 #cmakedefine HAVE_EXTERNAL_MPI
+#cmakedefine HAVE_DEVICE_MALLOC_UNCACHED

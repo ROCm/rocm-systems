@@ -42,32 +42,9 @@ MemoryAllocator::MemoryAllocator(hipError_t (*hip_alloc_fn)(void**, size_t),
                                  hipError_t (*hip_free_fn)(void*))
     : _hip_alloc(hip_alloc_fn), _hip_free(hip_free_fn) {}
 
-MemoryAllocator::MemoryAllocator(std::function<void*(size_t)> alloc_fn,
-                                 std::function<void(void*)> free_fn)
-    : _alloc(alloc_fn), _free(free_fn) {}
-
-MemoryAllocator::MemoryAllocator(
-    std::function<int(void**, size_t, size_t)> posix_align_fn,
-    std::function<void(void*)> free_fn, size_t alignment)
-    : _alloc_posix_memalign(posix_align_fn),
-      _free(free_fn),
-      _alignment(alignment) {}
-
 void MemoryAllocator::allocate(void** void_ptr, size_t size) {
   assert(void_ptr);
 
-  if (_alloc) {
-    *(reinterpret_cast<char**>(void_ptr)) =
-        reinterpret_cast<char*>(_alloc(size));
-    assert(*reinterpret_cast<char**>(void_ptr));
-    return;
-  }
-  if (_alloc_posix_memalign) {
-    assert(_alignment);
-    _alloc_posix_memalign(void_ptr, _alignment, size);
-    assert(*reinterpret_cast<char**>(void_ptr));
-    return;
-  }
   if (_hip_alloc) {
     CHECK_HIP(_hip_alloc(void_ptr, size));
     return;
@@ -84,10 +61,7 @@ void MemoryAllocator::deallocate(void* ptr) {
   if (!ptr) {
     return;
   }
-  if (_free) {
-    _free(ptr);
-    return;
-  }
+
   if (_hip_free) {
     CHECK_HIP(_hip_free(ptr));
     return;

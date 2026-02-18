@@ -53,6 +53,7 @@
 #include "templates_host.hpp"
 #include "util.hpp"
 #include "bootstrap/bootstrap.hpp"
+#include "memory/default_allocator.hpp"
 
 #include <cstdlib>
 #include <cstring>
@@ -502,6 +503,7 @@ __host__ void * rocshmem_ptr(const void * dest, int pe){
   if (bootstr != nullptr)
     delete bootstr;
 
+  delete_default_allocator();
   //TODO This crashes
   //MPIInstance::mpilib_dl_close();
 }

@@ -27,7 +27,7 @@
 
 #include <hip/hip_runtime.h>
 
-#include "memory/hip_allocator.hpp"
+#include "memory/default_allocator.hpp"
 #include "sync/abql_block_mutex.hpp"
 
 namespace rocshmem {
@@ -40,7 +40,7 @@ class FreeListProxy;
  ******************************* FREE LIST ***********************************
  *****************************************************************************/
 
-template <typename TYPE, typename ALLOC = HIPDefaultFinegrainedAllocator>
+template <typename TYPE, typename ALLOC>
 class FreeList {
   friend class FreeListProxy<ALLOC, TYPE>;
 
