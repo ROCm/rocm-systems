@@ -544,6 +544,114 @@ static void handle_pointer_get_attributes(int fd, uint32_t request_id,
     send_response(fd, HIP_OP_POINTER_GET_ATTRIBUTES, request_id, &resp, sizeof(resp));
 }
 
+/* ============================================================================
+ * IPC Operations
+ * ============================================================================ */
+
+static void handle_ipc_get_mem_handle(int fd, uint32_t request_id,
+                                      const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteIpcGetMemHandleRequest)) {
+        send_simple_response(fd, HIP_OP_IPC_GET_MEM_HANDLE, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteIpcGetMemHandleRequest* req = (const HipRemoteIpcGetMemHandleRequest*)payload;
+    void* devPtr = (void*)(uintptr_t)req->device_ptr;
+
+    hipIpcMemHandle_t handle;
+    memset(&handle, 0, sizeof(handle));
+    hipError_t err = hipIpcGetMemHandle(&handle, devPtr);
+    LOG_DEBUG("IpcGetMemHandle: devPtr=%p, err=%d", devPtr, err);
+
+    HipRemoteIpcGetMemHandleResponse resp;
+    resp.header.error_code = (int32_t)err;
+    memcpy(resp.handle, &handle, HIP_REMOTE_IPC_HANDLE_SIZE);
+    send_response(fd, HIP_OP_IPC_GET_MEM_HANDLE, request_id, &resp, sizeof(resp));
+}
+
+static void handle_ipc_open_mem_handle(int fd, uint32_t request_id,
+                                       const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteIpcOpenMemHandleRequest)) {
+        send_simple_response(fd, HIP_OP_IPC_OPEN_MEM_HANDLE, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteIpcOpenMemHandleRequest* req = (const HipRemoteIpcOpenMemHandleRequest*)payload;
+
+    hipIpcMemHandle_t handle;
+    memcpy(&handle, req->handle, HIP_REMOTE_IPC_HANDLE_SIZE);
+
+    void* devPtr = NULL;
+    hipError_t err = hipIpcOpenMemHandle(&devPtr, handle, req->flags);
+    LOG_DEBUG("IpcOpenMemHandle: flags=%u, devPtr=%p, err=%d", req->flags, devPtr, err);
+
+    HipRemoteIpcOpenMemHandleResponse resp = {
+        .header = { .error_code = (int32_t)err },
+        .device_ptr = (uint64_t)(uintptr_t)devPtr
+    };
+    send_response(fd, HIP_OP_IPC_OPEN_MEM_HANDLE, request_id, &resp, sizeof(resp));
+}
+
+static void handle_ipc_close_mem_handle(int fd, uint32_t request_id,
+                                        const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteIpcCloseMemHandleRequest)) {
+        send_simple_response(fd, HIP_OP_IPC_CLOSE_MEM_HANDLE, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteIpcCloseMemHandleRequest* req = (const HipRemoteIpcCloseMemHandleRequest*)payload;
+    void* devPtr = (void*)(uintptr_t)req->device_ptr;
+
+    hipError_t err = hipIpcCloseMemHandle(devPtr);
+    LOG_DEBUG("IpcCloseMemHandle: devPtr=%p, err=%d", devPtr, err);
+
+    send_simple_response(fd, HIP_OP_IPC_CLOSE_MEM_HANDLE, request_id, err);
+}
+
+static void handle_ipc_get_event_handle(int fd, uint32_t request_id,
+                                        const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteIpcGetEventHandleRequest)) {
+        send_simple_response(fd, HIP_OP_IPC_GET_EVENT_HANDLE, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteIpcGetEventHandleRequest* req = (const HipRemoteIpcGetEventHandleRequest*)payload;
+    hipEvent_t event = (hipEvent_t)(uintptr_t)req->event;
+
+    hipIpcEventHandle_t handle;
+    memset(&handle, 0, sizeof(handle));
+    hipError_t err = hipIpcGetEventHandle(&handle, event);
+    LOG_DEBUG("IpcGetEventHandle: event=%p, err=%d", event, err);
+
+    HipRemoteIpcGetEventHandleResponse resp;
+    resp.header.error_code = (int32_t)err;
+    memcpy(resp.handle, &handle, HIP_REMOTE_IPC_HANDLE_SIZE);
+    send_response(fd, HIP_OP_IPC_GET_EVENT_HANDLE, request_id, &resp, sizeof(resp));
+}
+
+static void handle_ipc_open_event_handle(int fd, uint32_t request_id,
+                                         const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteIpcOpenEventHandleRequest)) {
+        send_simple_response(fd, HIP_OP_IPC_OPEN_EVENT_HANDLE, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteIpcOpenEventHandleRequest* req = (const HipRemoteIpcOpenEventHandleRequest*)payload;
+
+    hipIpcEventHandle_t handle;
+    memcpy(&handle, req->handle, HIP_REMOTE_IPC_HANDLE_SIZE);
+
+    hipEvent_t event = NULL;
+    hipError_t err = hipIpcOpenEventHandle(&event, handle);
+    LOG_DEBUG("IpcOpenEventHandle: event=%p, err=%d", event, err);
+
+    HipRemoteIpcOpenEventHandleResponse resp = {
+        .header = { .error_code = (int32_t)err },
+        .event = (uint64_t)(uintptr_t)event
+    };
+    send_response(fd, HIP_OP_IPC_OPEN_EVENT_HANDLE, request_id, &resp, sizeof(resp));
+}
+
 static void handle_stream_create(int fd, uint32_t request_id,
                                  const void* payload, size_t payload_size) {
     unsigned int flags = 0;
@@ -1363,6 +1471,23 @@ static void handle_client(int client_fd) {
                 break;
             case HIP_OP_POINTER_GET_ATTRIBUTES:
                 handle_pointer_get_attributes(client_fd, header.request_id, payload, header.payload_length);
+                break;
+
+            /* IPC operations */
+            case HIP_OP_IPC_GET_MEM_HANDLE:
+                handle_ipc_get_mem_handle(client_fd, header.request_id, payload, header.payload_length);
+                break;
+            case HIP_OP_IPC_OPEN_MEM_HANDLE:
+                handle_ipc_open_mem_handle(client_fd, header.request_id, payload, header.payload_length);
+                break;
+            case HIP_OP_IPC_CLOSE_MEM_HANDLE:
+                handle_ipc_close_mem_handle(client_fd, header.request_id, payload, header.payload_length);
+                break;
+            case HIP_OP_IPC_GET_EVENT_HANDLE:
+                handle_ipc_get_event_handle(client_fd, header.request_id, payload, header.payload_length);
+                break;
+            case HIP_OP_IPC_OPEN_EVENT_HANDLE:
+                handle_ipc_open_event_handle(client_fd, header.request_id, payload, header.payload_length);
                 break;
 
             case HIP_OP_MEMCPY_3D:

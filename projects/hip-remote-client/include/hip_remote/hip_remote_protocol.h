@@ -121,6 +121,13 @@ typedef enum {
     HIP_OP_MEM_GET_INFO             = 0x0230,
     HIP_OP_POINTER_GET_ATTRIBUTES   = 0x0231,
 
+    /* IPC operations (0x024x) */
+    HIP_OP_IPC_GET_MEM_HANDLE       = 0x0240,
+    HIP_OP_IPC_OPEN_MEM_HANDLE      = 0x0241,
+    HIP_OP_IPC_CLOSE_MEM_HANDLE     = 0x0242,
+    HIP_OP_IPC_GET_EVENT_HANDLE     = 0x0243,
+    HIP_OP_IPC_OPEN_EVENT_HANDLE    = 0x0244,
+
     /* Stream operations (0x03xx) */
     HIP_OP_STREAM_CREATE            = 0x0300,
     HIP_OP_STREAM_CREATE_WITH_FLAGS = 0x0301,
@@ -452,6 +459,59 @@ typedef struct __attribute__((packed)) {
     int32_t is_managed;       /**< Is managed memory */
     uint32_t allocation_flags;/**< Allocation flags */
 } HipRemotePointerGetAttributesResponse;
+
+/* ============================================================================
+ * IPC Operations
+ * ============================================================================ */
+
+/** IPC handle size - matches HIP's hipIpcMemHandle_t (64 bytes) */
+#define HIP_REMOTE_IPC_HANDLE_SIZE 64
+
+/* HIP_OP_IPC_GET_MEM_HANDLE */
+typedef struct __attribute__((packed)) {
+    uint64_t device_ptr;      /**< Device pointer to get handle for */
+} HipRemoteIpcGetMemHandleRequest;
+
+typedef struct __attribute__((packed)) {
+    HipRemoteResponseHeader header;
+    uint8_t handle[HIP_REMOTE_IPC_HANDLE_SIZE];  /**< IPC memory handle */
+} HipRemoteIpcGetMemHandleResponse;
+
+/* HIP_OP_IPC_OPEN_MEM_HANDLE */
+typedef struct __attribute__((packed)) {
+    uint8_t handle[HIP_REMOTE_IPC_HANDLE_SIZE];  /**< IPC memory handle */
+    uint32_t flags;           /**< Flags (hipIpcMemLazyEnablePeerAccess) */
+} HipRemoteIpcOpenMemHandleRequest;
+
+typedef struct __attribute__((packed)) {
+    HipRemoteResponseHeader header;
+    uint64_t device_ptr;      /**< Opened device pointer */
+} HipRemoteIpcOpenMemHandleResponse;
+
+/* HIP_OP_IPC_CLOSE_MEM_HANDLE */
+typedef struct __attribute__((packed)) {
+    uint64_t device_ptr;      /**< Device pointer to close */
+} HipRemoteIpcCloseMemHandleRequest;
+
+/* HIP_OP_IPC_GET_EVENT_HANDLE */
+typedef struct __attribute__((packed)) {
+    uint64_t event;           /**< Event to get handle for */
+} HipRemoteIpcGetEventHandleRequest;
+
+typedef struct __attribute__((packed)) {
+    HipRemoteResponseHeader header;
+    uint8_t handle[HIP_REMOTE_IPC_HANDLE_SIZE];  /**< IPC event handle */
+} HipRemoteIpcGetEventHandleResponse;
+
+/* HIP_OP_IPC_OPEN_EVENT_HANDLE */
+typedef struct __attribute__((packed)) {
+    uint8_t handle[HIP_REMOTE_IPC_HANDLE_SIZE];  /**< IPC event handle */
+} HipRemoteIpcOpenEventHandleRequest;
+
+typedef struct __attribute__((packed)) {
+    HipRemoteResponseHeader header;
+    uint64_t event;           /**< Opened event handle */
+} HipRemoteIpcOpenEventHandleResponse;
 
 /* ============================================================================
  * Stream Operations
@@ -912,6 +972,12 @@ static inline const char* hip_remote_op_name(HipRemoteOpCode op_code) {
 
         case HIP_OP_MEM_GET_INFO: return "hipMemGetInfo";
         case HIP_OP_POINTER_GET_ATTRIBUTES: return "hipPointerGetAttributes";
+
+        case HIP_OP_IPC_GET_MEM_HANDLE: return "hipIpcGetMemHandle";
+        case HIP_OP_IPC_OPEN_MEM_HANDLE: return "hipIpcOpenMemHandle";
+        case HIP_OP_IPC_CLOSE_MEM_HANDLE: return "hipIpcCloseMemHandle";
+        case HIP_OP_IPC_GET_EVENT_HANDLE: return "hipIpcGetEventHandle";
+        case HIP_OP_IPC_OPEN_EVENT_HANDLE: return "hipIpcOpenEventHandle";
 
         case HIP_OP_STREAM_CREATE: return "hipStreamCreate";
         case HIP_OP_STREAM_CREATE_WITH_FLAGS: return "hipStreamCreateWithFlags";
