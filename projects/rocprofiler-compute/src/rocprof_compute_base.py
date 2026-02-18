@@ -352,11 +352,8 @@ class RocProfCompute:
     def list_metrics(self) -> None:
         for_current_arch = getattr(self.__args, "list_available_metrics", False)
 
-        arch = (
-            self.__mspec.gpu_arch
-            if (for_current_arch or self.__args.list_metrics is None)
-            else self.__args.list_metrics
-        )
+        arch = self.__mspec.gpu_arch if for_current_arch else self.__args.list_metrics
+
         if arch in self.__supported_archs.keys():
             ac = schema.ArchConfig()
             ac.panel_configs = file_io.load_panel_configs([
@@ -375,22 +372,14 @@ class RocProfCompute:
 
     @demarcate
     def list_blocks(self) -> None:
-        for_current_arch = getattr(self.__args, "list_available_metrics", False)
+        arch = self.__args.list_blocks
 
-        arch = (
-            self.__mspec.gpu_arch
-            if (for_current_arch or self.__args.list_blocks is None)
-            else self.__args.list_blocks
-        )
         if arch in self.__supported_archs.keys():
             ac = schema.ArchConfig()
             ac.panel_configs = file_io.load_panel_configs([
                 str(Path(self.__args.config_dir) / arch)
             ])
-            sys_info = (
-                self.__mspec.get_class_members().iloc[0] if for_current_arch else None
-            )
-            parser.build_dfs(arch_configs=ac, filter_metrics=[], sys_info=sys_info)
+            parser.build_dfs(arch_configs=ac, filter_metrics=[], sys_info=None)
 
             print(f"{'INDEX':<8} {'BLOCK ALIAS':<16} {'BLOCK NAME'}")
             panel_alias_dict = {value: key for key, value in get_panel_alias().items()}
