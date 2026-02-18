@@ -455,15 +455,15 @@ hipError_t hipEventRecordWithFlags(hipEvent_t event, hipStream_t stream, uint32_
 static hipError_t checkEventCaptureRestrictions(hipEvent_t event) {
   auto* e = reinterpret_cast<hip::Event*>(event);
   const auto hip_stream = e->GetCaptureStream();
-
-  // Case 1: Event was recorded during an active stream capture and is part of an active capture.
-  if (hip_stream != nullptr && hip_stream != hipStreamLegacy) {
-    auto* s = reinterpret_cast<hip::Stream*>(hip_stream);
-    if (s->GetCaptureStatus() == hipStreamCaptureStatusActive && s->IsEventCaptured(event)) {
-      s->SetCaptureStatus(hipStreamCaptureStatusInvalidated);
-      return hipErrorCapturedEvent;
-    }
+  if (hip_stream == nullptr || hip_stream == hipStreamLegacy) {
+    return hipSuccess;
   }
+  // Case 1: Event was recorded during an active stream capture and is part of an active capture.
+  auto* s = reinterpret_cast<hip::Stream*>(hip_stream);
+  if (s->GetCaptureStatus() == hipStreamCaptureStatusActive && s->IsEventCaptured(event)) {
+    s->SetCaptureStatus(hipStreamCaptureStatusInvalidated);
+    return hipErrorCapturedEvent;
+  }  
   // Case 2: The event was recorded on a stream that is neither actively capturing nor part of an
   // active capture session (proceed to next checks).
 
