@@ -7982,8 +7982,8 @@ class AMDSMICommands():
             self.helpers.check_required_groups(check_render=True, check_video=False)
             self.group_check_printed = True
 
-        (total_socket_count, total_processor_count, num_gpu_sockets, num_cpus_sockets) = self.helpers._get_socket_and_processor_info()
-        logging.debug(f"total sockets: {total_socket_count}, total processors: {total_processor_count}, gpu sockets: {num_gpu_sockets}, cpu sockets: {num_cpus_sockets}")
+        (total_socket_count, num_gpu_sockets, num_cpu_sockets) = self.helpers._get_socket_counts()
+        logging.debug(f"total sockets: {total_socket_count}, gpu sockets: {num_gpu_sockets}, cpu sockets: {num_cpu_sockets}")
 
         # Populate the possible gpus and their bdfs
         xgmi_values = []
@@ -8232,7 +8232,7 @@ class AMDSMICommands():
                 # First column: GPU# + tab + bdf, then status for each dest bdf
                 if self.logger.is_human_readable_format():
                     gpu_id_str = f"GPU{src_gpu_id}"
-                    row_dict = {"": f"{self.helpers.fmt(gpu_id_str, 7, 'left')}{self.helpers.fmt(src_gpu_bdf, 14, 'left')}"}
+                    row_dict = {"": f"{gpu_id_str.ljust(7)}{src_gpu_bdf.ljust(14)}"}
                 else:
                     row_dict = {"gpu": f"GPU{src_gpu_id}", "bdf": src_gpu_bdf}
                 json_status = []
