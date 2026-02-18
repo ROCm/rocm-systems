@@ -29,17 +29,36 @@
 
 namespace rocshmem {
 
-__device__ uint32_t QueuePair::reserve_sq(uint64_t activemask, uint32_t num_wqes) {
+__device__ uint32_t QueuePair::reserve_sq(ActiveWFInfo &wf_info,
+    uint32_t num_wqes) {
   uint32_t my_sq_prod = 0;
+  uint64_t activemask = wf_info.pe_group_mask;
+
+  // reserve space for wqes in sq
+  if (wf_info.is_pe_group_leader) {
+    my_sq_prod = __hip_atomic_fetch_add(&sq_prod, num_wqes, __ATOMIC_RELAXED,
+                 __HIP_MEMORY_SCOPE_AGENT);
+  }
+  my_sq_prod = __shfl(my_sq_prod, wf_info.pe_group_leader_phys_lane_id);
+
+  // wait for that space to be available
+  ionic_quiet_internal(wf_info, my_sq_prod + num_wqes - sq_mask);
+
+  return my_sq_prod;
+}
+
+__device__ uint32_t QueuePair::reserve_sq_single(uint32_t num_wqes) {
+  uint32_t my_sq_prod = 0;
+  uint64_t activemask = wf_info.pe_group_mask;
 
   // reserve space for wqes in sq
   if (is_first_active_lane(activemask)) {
     my_sq_prod = __hip_atomic_fetch_add(&sq_prod, num_wqes, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
   }
-  my_sq_prod = __shfl(my_sq_prod, get_first_active_lane_id(activemask));
+  my_sq_prod = __shfl(my_sq_prod, wf_info.pe_group_leader_phys_lane_id);
 
   // wait for that space to be available
-  ionic_quiet_internal(activemask, my_sq_prod + num_wqes - sq_mask);
+  ionic_quiet_internal_ccqe_single(my_sq_prod + num_wqes - sq_mask);
 
   return my_sq_prod;
 }
@@ -72,18 +91,19 @@ __device__ uint32_t QueuePair::commit_sq_single(uint32_t my_sq_prod, uint32_t my
   return dbprod;
 }
 
-__device__ uint32_t QueuePair::commit_sq(uint64_t activemask, uint32_t my_sq_prod, uint32_t my_sq_pos, uint32_t num_wqes) {
+__device__ uint32_t QueuePair::commit_sq(ActiveWFInfo &wf_info,
+    uint32_t my_sq_prod, uint32_t my_sq_pos, uint32_t num_wqes) {
   uint32_t dbprod = my_sq_prod + num_wqes;
 
-  spin_lock_acquire_shared(&sq_lock, activemask);
+  spin_lock_acquire_shared(&sq_lock, wf_info.pe_group_mask);
 
-  if (is_first_active_lane(activemask) && ((sq_dbprod - dbprod) & (1u << 31))) {
+  if (wf_info.is_pe_group_leader && ((sq_dbprod - dbprod) & (1u << 31))) {
     sq_dbprod = dbprod;
 
     ionic_ring_doorbell(dbprod);
   }
 
-  spin_lock_release_shared(&sq_lock, activemask);
+  spin_lock_release_shared(&sq_lock, wf_info.pe_group_mask);
 
   return dbprod;
 }
@@ -150,8 +170,9 @@ __device__ void QueuePair::poll_wave_cqes(uint64_t activemask) {
   sq_msn = msn;
 }
 
-__device__ void QueuePair::ionic_quiet_internal_ccqe(uint64_t activemask, uint32_t cons) {
-  if (!is_first_active_lane(activemask)) {
+__device__ void QueuePair::ionic_quiet_internal_ccqe(ActiveWFInfo &wf_info,
+    uint32_t cons) {
+  if (!wf_info.is_pe_group_leader) {
     return;
   }
 
@@ -214,18 +235,18 @@ __device__ void QueuePair::ionic_quiet_internal_ccqe_single(uint32_t cons) {
   }
 }
 
-__device__ void QueuePair::ionic_quiet_internal(uint64_t activemask, uint32_t cons) {
+__device__ void QueuePair::ionic_quiet_internal(ActiveWFInfo &wf_info, uint32_t cons) {
   uint32_t greed = 10;
 
   if (!cq_mask) {
-    ionic_quiet_internal_ccqe(activemask, cons);
+    ionic_quiet_internal_ccqe(wf_info, cons);
     return;
   }
 
   /* wait for sq_msn to catch up or pass cons. */
   /* 0x800000 - sign bit for 24-bit fields     */
   while ((sq_msn - cons) & 0x800000) {
-    if (!spin_lock_try_acquire_shared(&cq_lock, activemask)) {
+    if (!spin_lock_try_acquire_shared(&cq_lock, wf_info.pe_group_mask)) {
       continue;
     }
 
@@ -233,7 +254,7 @@ __device__ void QueuePair::ionic_quiet_internal(uint64_t activemask, uint32_t co
     while ((sq_msn - cons) & 0x800000) {
       uint32_t old_sq_msn = sq_msn;
 
-      poll_wave_cqes(activemask);
+      poll_wave_cqes(wf_info.pe_group_mask);
 
       if (!((sq_msn - cons) & 0x800000)) {
         if (sq_msn == old_sq_msn) {
@@ -246,7 +267,7 @@ __device__ void QueuePair::ionic_quiet_internal(uint64_t activemask, uint32_t co
       }
     }
 
-    spin_lock_release_shared(&cq_lock, activemask);
+    spin_lock_release_shared(&cq_lock, wf_info.pe_group_mask);
     break;
   }
 }
@@ -275,8 +296,7 @@ __device__ void QueuePair::ionic_ring_doorbell_single(uint32_t pos) {
 }
 
 __device__ void QueuePair::ionic_quiet(ActiveWFInfo &wf_info) {
-  // ionic_quiet_internal(get_same_qp_lane_mask(), sq_prod);
-  ionic_quiet_internal(wf_info.pe_group_mask, sq_prod);
+  ionic_quiet_internal(wf_info, sq_prod);
 }
 
 __device__ void QueuePair::ionic_quiet_single() {
@@ -285,23 +305,16 @@ __device__ void QueuePair::ionic_quiet_single() {
 
 __device__ void QueuePair::ionic_post_wqe_rma(int32_t size, uintptr_t laddr,
     uintptr_t raddr, uint8_t opcode, ActiveWFInfo &wf_info) {
-  uint64_t activemask = wf_info.pe_group_mask; // get_same_qp_lane_mask();
-  uint32_t my_logical_lane_id = wf_info.pe_group_logical_lane_id; //get_active_lane_num(activemask);
   uint32_t num_wqes = 1;
+  bool is_last_active_lane =
+            wf_info.pe_group_logical_lane_id == wf_info.num_pe_group_lanes - 1;
   if (wf_info.scope == ThreadScope::thread) {
-    num_wqes = wf_info.num_pe_group_lanes; // get_active_lane_count(activemask);
+    num_wqes = wf_info.num_pe_group_lanes;
   }
 
-  uint32_t my_sq_prod = reserve_sq(activemask, num_wqes);
-  if (wf_info.scope == ThreadScope::wave) {
-    // use wf_info.pe_group_leader_phys_lane_id;
-    if (!is_first_active_lane(activemask)) {
-      return;
-    }
-    activemask &= activemask ^ (activemask - 1);
-  }
+  uint32_t my_sq_prod = reserve_sq(wf_info, num_wqes);
 
-  uint32_t my_sq_pos = my_sq_prod + my_logical_lane_id;
+  uint32_t my_sq_pos = my_sq_prod + wf_info.pe_group_logical_lane_id;
   struct ionic_v1_wqe *wqe = &ionic_sq_buf[my_sq_pos & sq_mask];
   uint16_t wqe_flags = 0;
 
@@ -309,7 +322,7 @@ __device__ void QueuePair::ionic_post_wqe_rma(int32_t size, uintptr_t laddr,
     wqe_flags |= byteswap<uint16_t>(IONIC_V1_FLAG_COLOR);
   }
 
-  if (is_last_active_lane(activemask)) {
+  if (is_last_active_lane) {
     wqe_flags |= byteswap<uint16_t>(IONIC_V1_FLAG_SIG);
   }
 
@@ -345,7 +358,59 @@ __device__ void QueuePair::ionic_post_wqe_rma(int32_t size, uintptr_t laddr,
     }
   }
 
-  __hip_atomic_store(&wqe->base.flags, wqe_flags, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);
+  __hip_atomic_store(&wqe->base.flags, wqe_flags, __ATOMIC_RELEASE,
+    __HIP_MEMORY_SCOPE_AGENT);
+
+  commit_sq(wf_info, my_sq_prod, my_sq_pos, num_wqes);
+}
+
+__device__ void QueuePair::ionic_post_wqe_rma_single(int pe, int32_t size, uintptr_t laddr, uintptr_t raddr, uint8_t opcode, Collectivity cy) {
+  uint32_t num_wqes = 1;
+  uint32_t my_sq_prod = reserve_sq_single(num_wqes);
+  uint32_t my_sq_pos = my_sq_prod;
+  struct ionic_v1_wqe *wqe = &ionic_sq_buf[my_sq_pos & sq_mask];
+  uint16_t wqe_flags = 0;
+
+  if (!(my_sq_pos & (sq_mask + 1))) {
+    wqe_flags |= byteswap<uint16_t>(IONIC_V1_FLAG_COLOR);
+  }
+
+  wqe_flags |= byteswap<uint16_t>(IONIC_V1_FLAG_SIG);
+
+  // TODO why is this needed?
+  if (size && !laddr && opcode == IONIC_V2_OP_RDMA_WRITE) {
+    size = 1;
+  }
+
+  wqe->base.wqe_idx = my_sq_pos;
+  wqe->base.op = opcode;
+  wqe->base.num_sge_key = size ? 1 : 0;
+  wqe->base.imm_data_key = byteswap<uint32_t>(0);
+
+  wqe->common.rdma.remote_va_high = byteswap<uint32_t>(raddr >> 32);
+  wqe->common.rdma.remote_va_low = byteswap<uint32_t>(raddr);
+  wqe->common.rdma.remote_rkey = byteswap<uint32_t>(rkey);
+  wqe->common.length = byteswap<uint32_t>(size);
+
+  if (size) {
+    if (opcode == IONIC_V2_OP_RDMA_WRITE && size <= inline_threshold) {
+      wqe_flags |= byteswap<uint16_t>(IONIC_V1_FLAG_INL);
+      wqe->base.num_sge_key = 0;
+      if (!laddr) {
+        // TODO why is this needed?
+        wqe->common.pld.data[0] = 1;
+      } else {
+        memcpy(wqe->common.pld.data, reinterpret_cast<const void*>(laddr), size);
+      }
+    } else {
+      wqe->common.pld.sgl[0].va = byteswap<uint64_t>(laddr);
+      wqe->common.pld.sgl[0].len = byteswap<uint32_t>(size);
+      wqe->common.pld.sgl[0].lkey = byteswap<uint32_t>(lkey);
+    }
+  }
+
+  __hip_atomic_store(&wqe->base.flags, wqe_flags, __ATOMIC_RELEASE,
+    __HIP_MEMORY_SCOPE_AGENT);
 
   commit_sq(activemask, my_sq_prod, my_sq_pos, num_wqes);
 }
@@ -403,34 +468,33 @@ __device__ void QueuePair::ionic_post_wqe_rma_single(int pe, int32_t size, uintp
 __device__ uint64_t QueuePair::ionic_post_wqe_amo(int32_t size, uintptr_t raddr,
     uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
     bool fetching, ActiveWFInfo &wf_info) {
-  uint64_t activemask = wf_info.pe_group_mask; //get_same_qp_lane_mask();
-  uint32_t num_wqes = wf_info.num_pe_group_lanes; //get_active_lane_count(activemask);
-  uint32_t my_logical_lane_id = wf_info.pe_group_logical_lane_id; //get_active_lane_num(activemask);
-  bool is_leader{my_logical_lane_id == 0};
-  const uint64_t leader_phys_lane_id = wf_info.pe_group_leader_phys_lane_id; //get_first_active_lane_id(activemask);
-  uint32_t my_sq_prod = reserve_sq(activemask, num_wqes);
-  uint32_t my_sq_pos = my_sq_prod + my_logical_lane_id;
+  uint32_t num_wqes = wf_info.num_pe_group_lanes;
+  bool is_last_active_lane =
+            wf_info.pe_group_logical_lane_id == wf_info.num_pe_group_lanes - 1;
+  uint32_t my_sq_prod = reserve_sq(wf_info, num_wqes);
+  uint32_t my_sq_pos = my_sq_prod + wf_info.pe_group_logical_lane_id;
   struct ionic_v1_wqe *wqe = &ionic_sq_buf[my_sq_pos & sq_mask];
   uint16_t wqe_flags = 0;
   uint32_t cons;
 
   uint64_t* wave_fetch_atomic{nullptr};
   if (fetching) {
-    if (is_leader) {
+    if (wf_info.is_pe_group_leader) {
       auto res = fetching_atomic_freelist->pop_front();
       while (!res.success) {
         res = fetching_atomic_freelist->pop_front();
       }
       wave_fetch_atomic = res.value;
     }
-    wave_fetch_atomic = (uint64_t*)__shfl((uint64_t)wave_fetch_atomic, leader_phys_lane_id);
+    wave_fetch_atomic = (uint64_t*)__shfl((uint64_t)wave_fetch_atomic,
+                         wf_info.pe_group_leader_phys_lane_id);
   }
 
   if (!(my_sq_pos & (sq_mask + 1))) {
     wqe_flags |= byteswap<uint16_t>(IONIC_V1_FLAG_COLOR);
   }
 
-  if (is_last_active_lane(activemask)) {
+  if (is_last_active_lane) {
     wqe_flags |= byteswap<uint16_t>(IONIC_V1_FLAG_SIG);
   }
 
@@ -448,23 +512,27 @@ __device__ uint64_t QueuePair::ionic_post_wqe_amo(int32_t size, uintptr_t raddr,
   wqe->atomic_v2.compare_low = byteswap<uint32_t>(atomic_cmp);
 
   if (fetching) {
-    wqe->atomic_v2.local_va = byteswap<uint64_t>(reinterpret_cast<uint64_t>(wave_fetch_atomic + my_logical_lane_id));
+    wqe->atomic_v2.local_va =
+        byteswap<uint64_t>(reinterpret_cast<uint64_t>(
+          wave_fetch_atomic + wf_info.pe_group_logical_lane_id));
     wqe->atomic_v2.lkey = byteswap<uint32_t>(fetching_atomic_lkey);
   } else {
-    wqe->atomic_v2.local_va = byteswap<uint64_t>(reinterpret_cast<uint64_t>(nonfetching_atomic));
+    wqe->atomic_v2.local_va =
+        byteswap<uint64_t>(reinterpret_cast<uint64_t>(nonfetching_atomic));
     wqe->atomic_v2.lkey = byteswap<uint32_t>(nonfetching_atomic_lkey);
   }
 
-  __hip_atomic_store(&wqe->base.flags, wqe_flags, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);
+  __hip_atomic_store(&wqe->base.flags, wqe_flags, __ATOMIC_RELEASE,
+    __HIP_MEMORY_SCOPE_AGENT);
 
-  cons = commit_sq(activemask, my_sq_prod, my_sq_pos, num_wqes);
+  cons = commit_sq(wf_info, my_sq_prod, my_sq_pos, num_wqes);
 
   uint64_t ret{0};
   if (fetching) {
-    ionic_quiet_internal(activemask, cons);
-    ret = wave_fetch_atomic[my_logical_lane_id];
+    ionic_quiet_internal(wf_info, cons);
+    ret = wave_fetch_atomic[wf_info.pe_group_logical_lane_id];
     __atomic_signal_fence(__ATOMIC_SEQ_CST);
-    if (is_leader) {
+    if (wf_info.is_pe_group_leader) {
       fetching_atomic_freelist->push_back(wave_fetch_atomic);
     }
   }

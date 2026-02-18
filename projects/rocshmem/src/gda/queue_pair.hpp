@@ -87,7 +87,7 @@ class ActiveWFInfo {
   __device__ explicit ActiveWFInfo(int pe, ThreadScope scope = ThreadScope::thread)
       : pe(pe), scope(scope) {
     // Get active lane mask
-    activemask          = get_active_lane_mask();
+    activemask = get_active_lane_mask();
 
     // Get mask of active lanes with the same PE
     switch (scope) {
@@ -155,6 +155,7 @@ class QueuePair {
    * @param[in] source Source address for data transmission.
    * @param[in] nelems Size in bytes of data transmission.
    * @param[in] pe Destination processing element of data transmission.
+   * @param[in] wf_info Wavefront information.
    */
   __device__ void put_nbi(void *dest, const void *source, size_t nelems,
       int pe, ActiveWFInfo &wf_info);
@@ -169,6 +170,7 @@ class QueuePair {
    * @param[in] source Source address for data transmission.
    * @param[in] nelems Size in bytes of data transmission.
    * @param[in] pe Destination processing element of data transmission.
+   * @param[in] wf_info Wavefront information.
    */
   __device__ void get_nbi(void *dest, const void *source, size_t nelems,
       int pe, ActiveWFInfo &wf_info);
@@ -177,9 +179,14 @@ class QueuePair {
 
   /**
    * @brief Empty all completions from the completion queue.
+   * @param[in] wf_info Wavefront information.
    */
   __device__ void quiet(ActiveWFInfo &wf_info);
 
+  /**
+   * @brief Empty all completions from the completion queue.
+   * @param[in] wf_info Wavefront information.
+   */
   __device__ void quiet_scope(ActiveWFInfo &wf_info);
 
   /**
@@ -188,6 +195,7 @@ class QueuePair {
    * @param[in] dest Destination address for data transmission.
    * @param[in] value Data value for the atomic operation.
    * @param[in] cond Used in atomic comparisons.
+   * @param[in] wf_info Wavefront information.
    *
    * @return An atomic value
    */
@@ -200,12 +208,10 @@ class QueuePair {
    * @param[in] dest Destination address for data transmission.
    * @param[in] value Data value for the atomic operation.
    * @param[in] cond Used in atomic comparisons.
+   * @param[in] wf_info Wavefront information.
    */
   __device__ void atomic_nofetch(void *dest, int64_t value, int64_t cond,
       ActiveWFInfo &wf_info);
-
-//   __device__ void atomic_nofetch_single(void *dest, int64_t value,
-//       ActiveWFInfo &wf_info);
 
   /**
    * @brief Create and enqueue an atomic cas work queue entry (wqe).
@@ -213,6 +219,7 @@ class QueuePair {
    * @param[in] dest Destination address for data transmission.
    * @param[in] value Data value for the atomic operation.
    * @param[in] cond Used in atomic comparisons.
+   * @param[in] wf_info Wavefront information.
    *
    * @return An atomic value
    */
@@ -225,6 +232,7 @@ class QueuePair {
    * @param[in] dest Destination address for data transmission.
    * @param[in] value Data value for the atomic operation.
    * @param[in] cond Used in atomic comparisons.
+   * @param[in] wf_info Wavefront information.
    */
   __device__ int64_t atomic_cas_nofetch(void *dest, int64_t atomic_data,
       int64_t atomic_cmp, ActiveWFInfo &wf_info);
@@ -235,18 +243,24 @@ class QueuePair {
   /**
    * @brief Helper method to build work requests for the send queue.
    *
-   * @param[in] pe Destination processing element of data transmission.
    * @param[in] size Size in bytes of data transmission.
    * @param[in] raddr Remote address.
    * @param[in] opcode Operation to be performed.
    * @param[in] atomic_data An atomic data value to be used.
    * @param[in] atomic_cmp An atomic comparison operation to be performed.
-   * @param[in] fetching True if the operation returns a value.
+   * @param[in] fetch True if the operation returns a value.
+   * @param[in] wf_info Wavefront information.
    */
   __device__ __attribute__((noinline)) uint64_t
   post_wqe_amo(int32_t size, uintptr_t raddr, uint8_t opcode,
       int64_t atomic_data, int64_t atomic_cmp, bool fetch,
       ActiveWFInfo &wf_info);
+
+  __device__ __attribute__((noinline)) uint64_t post_wqe_amo_single(uintptr_t raddr,
+                                                                    uint8_t opcode,
+                                                                    int64_t atomic_data,
+                                                                    int64_t atomic_cmp,
+                                                                    bool fetching);
 
   /**
    * @brief Helper method to build work requests for the send queue.
@@ -256,6 +270,7 @@ class QueuePair {
    * @param[in] laddr Local address.
    * @param[in] raddr Remote address.
    * @param[in] opcode Operation to be performed.
+   * @param[in] wf_info Wavefront information.
    */
   __device__ __attribute__((noinline)) void
   post_wqe_rma(int pe, int32_t size, uintptr_t laddr, uintptr_t raddr,
@@ -451,42 +466,47 @@ class QueuePair {
 
   /**
    * @brief Reserve space in the sq to post this many wqes.
-   * @param my_tid my logical thread id.
+   * @param wf_info Wavefront information.
    * @param num_wqes number of sq wqes to reserve for this wave.
    * @return position of my_tid=0's wqe.
    */
-  __device__ uint32_t reserve_sq(uint64_t active_lane_mask, uint32_t num_wqes);
+  __device__ uint32_t reserve_sq(ActiveWFInfo &wf_info, uint32_t num_wqes);
   __device__ uint32_t reserve_sq_single(uint32_t num_wqes);
 
   /**
    * @brief Ring the sq doorbell maintaining order between waves.
-   * @param last this is the last wqe posted in this wave.
+   * @param wf_info Wavefront information.
    * @param my_sq_prod position of my_tid=0's wqe.
    * @param num_wqes number of sq wqes posted in this wave.
    * @param wqe this thread's wqe.
    * @return doorbell producer index.
    */
-  __device__ uint32_t commit_sq(uint64_t activemask, uint32_t my_sq_prod,
+  __device__ uint32_t commit_sq(ActiveWFInfo &wf_info, uint32_t my_sq_prod,
       uint32_t my_sq_pos, uint32_t num_wqes);
   __device__ uint32_t commit_sq_single(uint32_t my_sq_prod, uint32_t my_sq_pos, uint32_t num_wqes);
 
   /**
    * @brief Helper method to poll the next completion queue entry.
    */
-  __device__ __attribute__((noinline)) void poll_wave_cqes(uint64_t active_lane_mask);
+  __device__ __attribute__((noinline))
+  void poll_wave_cqes(uint64_t active_lane_mask);
 
   /**
    * @brief Helper method to drain completion queue entries.
+   * @param wf_info Wavefront information.
    * @param cons wait for sq_msn to catch up to this position.
    */
-  __device__ __attribute__((noinline)) void ionic_quiet_internal_ccqe(uint64_t active_lane_mask, uint32_t cons);
   __device__ __attribute__((noinline)) void ionic_quiet_internal_ccqe_single(uint32_t cons);
+  __device__ __attribute__((noinline))
+  void ionic_quiet_internal_ccqe(ActiveWFInfo &wf_info, uint32_t cons);
 
   /**
    * @brief Helper method to drain completion queue entries.
+   * @param wf_info Wavefront information.
    * @param cons wait for sq_msn to catch up to this position.
    */
-  __device__ __attribute__((noinline)) void ionic_quiet_internal(uint64_t active_lane_mask, uint32_t cons);
+  __device__ __attribute__((noinline))
+  void ionic_quiet_internal(ActiveWFInfo &wf_info, uint32_t cons);
 
   /* GDAProvider::IONIC END */
 
