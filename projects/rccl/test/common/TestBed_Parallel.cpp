@@ -277,10 +277,11 @@ void TestBed::RunSimpleSweepParallel(std::vector<ncclFunc_t>     const& funcType
         TestJob testJob(
             testName.str(),
             numGpus,
-            [job](const std::vector<int>& assignedGPUs) {
+            [job, numGpus](const std::vector<int>& assignedGPUs) {
                 // Create logical GPU IDs (0,1,2,3...) for remapped HIP_VISIBLE_DEVICES
+                // IMPORTANT: Must have job.numGpus elements to match GetDeviceIdsList expectations
                 std::vector<int> logicalGpuIds;
-                for (size_t i = 0; i < assignedGPUs.size(); ++i) {
+                for (int i = 0; i < numGpus; ++i) {
                     logicalGpuIds.push_back(i);
                 }
                 ExecuteSweepJob(job, logicalGpuIds);
