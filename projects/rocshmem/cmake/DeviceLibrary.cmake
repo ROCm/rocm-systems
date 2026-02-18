@@ -109,11 +109,16 @@ if(USE_GDA)
     ${CMAKE_SOURCE_DIR}/src/gda/backend_gda.cpp
     ${CMAKE_SOURCE_DIR}/src/gda/context_gda_device.cpp
     ${CMAKE_SOURCE_DIR}/src/gda/queue_pair.cpp
-    # TODO: Fix ionic/mlx5 compilation errors
-    # ${CMAKE_SOURCE_DIR}/src/gda/ionic/queue_pair_ionic.cpp
-    # ${CMAKE_SOURCE_DIR}/src/gda/mlx5/queue_pair_mlx5.cpp
-    # ${CMAKE_SOURCE_DIR}/src/gda/mlx5/segment_builder.cpp
   )
+
+  # Add ionic/mlx5 vendor-specific files if MPI is found
+  if(MPI_FOUND)
+    list(APPEND DEVICE_SOURCES
+      ${CMAKE_SOURCE_DIR}/src/gda/ionic/queue_pair_ionic.cpp
+      ${CMAKE_SOURCE_DIR}/src/gda/mlx5/queue_pair_mlx5.cpp
+      ${CMAKE_SOURCE_DIR}/src/gda/mlx5/segment_builder.cpp
+    )
+  endif()
 endif()
 
 # Add sync sources
@@ -157,17 +162,23 @@ foreach(GPU_TARGET ${DEVICE_LIB_GPU_TARGETS})
   file(MAKE_DIRECTORY "${OUTPUT_DIR}")
   file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
 
-  # Build compiler flags
+  # Build compiler flags (match Triton-distributed build exactly)
   set(DEVICE_COMPILE_FLAGS
     -x hip --cuda-device-only -std=c++20 -emit-llvm
-    --offload-arch=${GPU_TARGET}
     -mcode-object-version=5
-    -fgpu-rdc
-    -I${CMAKE_SOURCE_DIR}/include
-    -I${CMAKE_BINARY_DIR}/include
+    --offload-arch=${GPU_TARGET}
     -I${CMAKE_BINARY_DIR}/include/rocshmem
+    -I${CMAKE_BINARY_DIR}/include
+    -I${CMAKE_BINARY_DIR}/..
     -I${CMAKE_SOURCE_DIR}/src
   )
+
+  # Add MPI include directories for ionic/mlx5 compilation
+  if(MPI_FOUND)
+    foreach(MPI_INCLUDE_DIR ${MPI_CXX_INCLUDE_DIRS})
+      list(APPEND DEVICE_COMPILE_FLAGS -I${MPI_INCLUDE_DIR})
+    endforeach()
+  endif()
 
   if(USE_IPC)
     list(APPEND DEVICE_COMPILE_FLAGS -DUSE_IPC=1)
