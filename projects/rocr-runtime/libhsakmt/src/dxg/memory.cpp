@@ -1095,7 +1095,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtHandleImport(const HsaExternalHandleDesc* import_d
 {
 	CHECK_DXG_OPEN();
   if (import_desc->mem != nullptr) {
-    void *memaddr = (void *)(import_desc->mem);
+    void *memaddr = import_desc->mem;
     auto phys_mem = GetGpuMemoryFromAddress(memaddr);
     if (!phys_mem) return HSAKMT_STATUS_INVALID_HANDLE;
     if (!phys_mem->IsPhysicalCreated()) {

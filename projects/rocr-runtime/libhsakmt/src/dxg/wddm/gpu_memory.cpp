@@ -701,7 +701,7 @@ ErrorCode GpuMemory::ImportPhysicalAllocHandle(const GpuMemoryCreateInfo& create
     if (open_resource->NumAllocations > 1)
       alloc_handles_ptr_ = new WinAllocationHandle[open_resource->NumAllocations];
 
-    // Update shared_info if OpenResourceFromNtHandle skips populating it.
+    // Update shared_info if OpenResourceFromKMTHandle skips populating it.
     if (open_resource->PrivateRuntimeDataSize == 0) {
       for (auto alloc_index = 0U; alloc_index < open_resource->NumAllocations; alloc_index++) {
         const auto* const pPrivateDriverData =

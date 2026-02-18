@@ -110,7 +110,7 @@ public:
   hsa_status_t ExportDMABuf(void *mem, size_t size, int *dmabuf_fd,
                             size_t *offset) override;
   hsa_status_t ImportDMABuf(int dmabuf_fd, core::Agent &agent,
-                            core::ShareableHandle &handle, const void* mem = nullptr) override;
+                            core::ShareableHandle &handle, void* mem = nullptr) override;
   hsa_status_t Map(core::ShareableHandle handle, void *mem, size_t offset,
                    size_t size, hsa_access_permission_t perms) override;
   hsa_status_t Unmap(core::ShareableHandle handle, void *mem, size_t offset,

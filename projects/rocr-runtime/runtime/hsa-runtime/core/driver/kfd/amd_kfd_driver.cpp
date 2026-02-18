@@ -472,7 +472,7 @@ hsa_status_t KfdDriver::ExportDMABuf(void *mem, size_t size, int *dmabuf_fd,
 }
 
 hsa_status_t KfdDriver::ImportDMABuf(int dmabuf_fd, core::Agent &agent,
-                                     core::ShareableHandle &handle, const void* mem) {
+                                     core::ShareableHandle &handle, void* mem) {
   auto &gpu_agent = static_cast<GpuAgent &>(agent);
   HsaExternalHandleDesc desc;
   desc.device_handle = gpu_agent.libThunkDev();
@@ -506,8 +506,8 @@ hsa_status_t KfdDriver::Map(core::ShareableHandle handle, void *mem,
 hsa_status_t KfdDriver::Unmap(core::ShareableHandle handle, void *mem,
                               size_t offset, size_t size) {
   HsaMemoryObjectHandle memhandle = reinterpret_cast<HsaMemoryObjectHandle>(handle.handle);
-  HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemoryVaUnmap(memhandle, (HSAuint64)offset, (HSAuint64)size,
-                                     reinterpret_cast<HSAuint64>(mem)));
+  HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemoryVaUnmap(memhandle, static_cast<HSAuint64>(offset),
+                                     static_cast<HSAuint64>(size), reinterpret_cast<HSAuint64>(mem)));
   if (status != HSAKMT_STATUS_SUCCESS) {
     return HSA_STATUS_ERROR;
   }

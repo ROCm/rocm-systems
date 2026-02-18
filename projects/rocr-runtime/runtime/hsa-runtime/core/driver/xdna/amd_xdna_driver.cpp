@@ -446,7 +446,7 @@ hsa_status_t XdnaDriver::ExportDMABuf(void* mem, size_t size, int* dmabuf_fd, si
 }
 
 hsa_status_t XdnaDriver::ImportDMABuf(int dmabuf_fd, core::Agent &agent,
-                                      core::ShareableHandle &handle, const void* mem) {
+                                      core::ShareableHandle &handle, void* mem) {
   drm_prime_handle import_params = {};
   import_params.handle = AMDXDNA_INVALID_BO_HANDLE;
   import_params.fd = dmabuf_fd;

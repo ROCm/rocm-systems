@@ -3771,7 +3771,7 @@ Runtime::MappedHandleAllowedAgent::MappedHandleAllowedAgent(
   void* reuse_handle = nullptr;
   // If MappedHandle's public handle is same as target agent public handle
   // reuse the existing memory handles instead of importing dmabuf_fd (only valid for WSL/Windows)
-  if(targetAgent->public_handle().handle == memHandle->agentOwner()->public_handle().handle) {
+  if (targetAgent->public_handle().handle == memHandle->agentOwner()->public_handle().handle) {
     reuse_handle = memHandle->thunk_handle;
   }
   // Import to target agent.
