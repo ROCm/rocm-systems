@@ -33,19 +33,14 @@
 
 namespace rocshmem {
 
-class AbstractDeviceProxy {
-public:
-  virtual ~AbstractDeviceProxy() = default;
-
-  virtual __host__ __device__ T* get() = 0;
-};
-  
-template <typename ALLOCATOR, typename T>
-class DeviceProxy : public AbstractDeviceProxy {
+template <typename T>
+class DeviceProxy {
  public:
   DeviceProxy() = default;
 
-  DeviceProxy(size_t num_elems) : num_elems_ {num_elems} {
+  DeviceProxy(MemoryAllocator *allocator, size_t num_elems) : num_elems_ {num_elems},
+							      allocator_ {allocator},
+							      up_(nullptr, allocator) {
     /**
      * @brief The allocation size of the internal memory
      *
@@ -55,7 +50,7 @@ class DeviceProxy : public AbstractDeviceProxy {
      * Allocate memory and verify that the allocation worked.
      */
     T* temp{nullptr};
-    allocator_.allocate(reinterpret_cast<void**>(&temp), size_bytes);
+    allocator_->allocate(reinterpret_cast<void**>(&temp), size_bytes);
     assert(temp);
 
     /*
@@ -66,7 +61,7 @@ class DeviceProxy : public AbstractDeviceProxy {
     /*
      * Pass the memory into a unique ptr for tracking.
      */
-    std::unique_ptr<T, Deleter> up{temp};
+    std::unique_ptr<T, Deleter> up(temp, Deleter(allocator_));
     up_ = std::move(up);
 
     /*
@@ -97,21 +92,22 @@ class DeviceProxy : public AbstractDeviceProxy {
    */
   class Deleter {
    public:
-    void operator()(void* x) { a_.deallocate(x); }
+    Deleter(MemoryAllocator *alloc) : a_(alloc) {}
+    void operator()(void* x) { a_->deallocate(x); }
 
    private:
-    ALLOCATOR a_;
+    MemoryAllocator *a_;
   };
 
   /**
    * @brief Externally provided allocator type.
    */
-  ALLOCATOR allocator_{};
+  MemoryAllocator* allocator_{nullptr};
 
   /**
    * @brief Unique pointer for tracking the proxy.
    */
-  std::unique_ptr<T, Deleter> up_{nullptr};
+  std::unique_ptr<T, Deleter> up_;
 
   /**
    * @brief A handle to access the internal memory.

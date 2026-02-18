@@ -113,10 +113,10 @@ class ABQLBlockMutex {
 
 template <typename ALLOCATOR>
 class ABQLBlockMutexProxy {
-  using ProxyT = DeviceProxy<ALLOCATOR, ABQLBlockMutex>;
+  using ProxyT = DeviceProxy<ABQLBlockMutex>;
 
  public:
-  ABQLBlockMutexProxy(size_t num_elems = 1) : proxy_{num_elems} {}
+  ABQLBlockMutexProxy(HIPAllocator *allocator, size_t num_elems = 1) : proxy_{allocator, num_elems} {}
 
   ABQLBlockMutexProxy(const ABQLBlockMutexProxy& other) = delete;
 
@@ -129,7 +129,7 @@ class ABQLBlockMutexProxy {
   __host__ __device__ ABQLBlockMutex* get() { return proxy_.get(); }
 
  private:
-  ProxyT proxy_{};
+  ProxyT proxy_;
 };
 
 }  // namespace rocshmem

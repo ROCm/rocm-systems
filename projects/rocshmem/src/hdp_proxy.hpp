@@ -30,15 +30,14 @@
 
 namespace rocshmem {
 
-template <typename ALLOCATOR>
 class HdpProxy {
-  using HdpProxyT = DeviceProxy<ALLOCATOR, HdpPolicy>;
+  using HdpProxyT = DeviceProxy<HdpPolicy>;
 
  public:
   /*
    * Placement new the memory which is allocated by proxy_
    */
-  HdpProxy(size_t num_elems = 1) : proxy_{num_elems} {
+  HdpProxy(MemoryAllocator *allocator, size_t num_elems = 1) : proxy_{allocator, num_elems} {
     new (proxy_.get()) HdpPolicy();
   }
 
@@ -67,7 +66,7 @@ class HdpProxy {
   /*
    * @brief Memory managed by the lifetime of this object
    */
-  HdpProxyT proxy_{};
+  HdpProxyT proxy_;
 };
 
 }  // namespace rocshmem

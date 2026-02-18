@@ -69,6 +69,16 @@ class MemoryAllocator {
                   hipError_t (*hip_free_fn)(void*));
 
   /**
+   * @brief Primary constructor
+   *
+   * @param[in] an allocation function
+   * @param[in] a free function
+   * @param[in] alignment for allocations
+   */
+  MemoryAllocator(std::function<int(void**, size_t, size_t)> posix_align_fn,
+                  std::function<void(void*)> free_fn, size_t alignment);
+
+  /**
    * @brief Allocates memory
    *
    * @param[in, out] Address of raw pointer (&pointer_to_char)
@@ -98,11 +108,6 @@ class MemoryAllocator {
 
  private:
   /**
-   * @brief alignment for posix_memalign allocations
-   */
-  size_t _alignment{0};
-
-  /**
    * @brief a hip-specific allocator function
    */
   std::function<hipError_t(void**, size_t)> _hip_alloc{nullptr};
@@ -111,6 +116,16 @@ class MemoryAllocator {
    * @brief a hip-specific allocator function
    */
   std::function<hipError_t(void**, size_t, unsigned)> _hip_alloc_with_flags{nullptr};
+
+   /**
+   * @brief a posix allocator function for memory aligned accesses
+   */
+  std::function<int(void**, size_t, size_t)> _alloc_posix_memalign;
+
+  /**
+   * @brief alignment for posix_memalign allocations
+   */
+  size_t _alignment{0};
 
   /**
    * @brief flags specified in hip_runtime_api.h

@@ -259,12 +259,12 @@ class FreeList {
 template <typename ALLOCATOR, typename TYPE>
 class FreeListProxy {
   using FreeListT = FreeList<TYPE, ALLOCATOR>;
-  using ProxyT = DeviceProxy<ALLOCATOR, FreeListT>;
+  using ProxyT = DeviceProxy<FreeListT>;
 
  public:
   __host__ __device__ FreeListT* get() { return proxy_.get(); }
 
-  FreeListProxy(size_t num_elems = 1) : proxy_{num_elems} {
+  FreeListProxy(size_t num_elems = 1) : proxy_{&ALLOCATOR(), num_elems} {
     new (proxy_.get()) FreeListT();
   }
 
@@ -283,7 +283,7 @@ class FreeListProxy {
   }
 
  private:
-  ProxyT proxy_{};
+  ProxyT proxy_;
 };
 }  // namespace rocshmem
 

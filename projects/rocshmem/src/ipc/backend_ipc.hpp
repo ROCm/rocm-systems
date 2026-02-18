@@ -182,7 +182,7 @@ class IPCBackend : public Backend {
    *
    * @note Internal data ownership is managed by the proxy
    */
-  HdpProxy<HIPHostAllocator> hdp_proxy_{};
+  HdpProxy *hdp_proxy_{nullptr};
 
   /**
    * @brief Holds a copy of the default context for host functions
@@ -229,7 +229,7 @@ class IPCBackend : public Backend {
    *
    * @note Internal data ownership is managed by the proxy
    */
-  IPCDefaultContextProxyT default_context_proxy_;  // init handled in constructor
+  IPCDefaultContextProxy *default_context_proxy_{nullptr};
 
   /**
    * @brief An array of @ref ROContexts that backs the context FreeList.
@@ -239,7 +239,7 @@ class IPCBackend : public Backend {
   /**
    * @brief A free-list containing contexts.
    */
-  FreeListProxy<HIPAllocator, IPCContext *> ctx_free_list{};
+  FreeListProxy<MemoryAllocator, IPCContext *> *ctx_free_list{nullptr};
 
   /**
    * @brief The bitmask representing the availability of teams in the pool
@@ -300,6 +300,10 @@ class IPCBackend : public Backend {
    */
   void Allreduce_char_BAND (char* inbuf, char *outbuf, size_t num_bytes, Team *team);
 
+  /**
+   * @brief HipHostAllocator used by the hdp proxy
+   */
+  HIPHostAllocator host_allocator{};
 };
 
 }  // namespace rocshmem

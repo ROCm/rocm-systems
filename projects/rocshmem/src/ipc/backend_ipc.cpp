@@ -80,7 +80,7 @@ IPCBackend::IPCBackend(MPI_Comm comm):  Backend(comm) {
   }
 
   /* Initialize the host interface */
-  host_interface = std::make_shared<HostInterface>(hdp_proxy_.get(),
+  host_interface = std::make_shared<HostInterface>(hdp_proxy_->get(),
                                                    backend_comm,
                                                    &heap);
 
@@ -101,7 +101,7 @@ IPCBackend::IPCBackend(TcpBootstrap *bootstrap):  Backend(bootstrap) {
   assert(num_pes == ipcImpl.shm_size);
 
   /* Initialize the host interface */
-  host_interface = std::make_shared<HostInterface>(hdp_proxy_.get(),
+  host_interface = std::make_shared<HostInterface>(hdp_proxy_->get(),
                                                    bootstrap,
                                                    &heap);
 
@@ -112,6 +112,10 @@ IPCBackend::IPCBackend(TcpBootstrap *bootstrap):  Backend(bootstrap) {
 
 void IPCBackend::init() {
   ROCSHMEM_HOST_CTX_DEFAULT.ctx_opaque = default_host_ctx.get();
+
+  hdp_proxy_ = new HdpProxy (&host_allocator);
+
+  ctx_free_list = new FreeListProxy<HIPAllocator,IPCContext *>(); 
 
   setup_team_world();
 
@@ -125,7 +129,7 @@ void IPCBackend::init() {
 
   TeamInfo *tinfo = team_tracker.get_team_world()->tinfo_wrt_world;
 
-  default_context_proxy_ = IPCDefaultContextProxyT(this, tinfo);
+  default_context_proxy_ = new IPCDefaultContextProxy(this, tinfo, fine_grained_allocator_);
 
   setup_ctxs();
 }
@@ -142,6 +146,8 @@ IPCBackend::~IPCBackend() {
   CHECK_HIP(hipFree(team_world));
 
   CHECK_HIP(hipFree(ctx_array));
+  delete hdp_proxy_;
+  delete default_context_proxy_;
 }
 
 int IPCBackend::backend_can_run(MPI_Comm comm, TcpBootstrap* bootstrap) {

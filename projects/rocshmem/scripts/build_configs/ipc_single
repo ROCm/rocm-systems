@@ -46,5 +46,5 @@ cmake \
     -DUSE_HDP_FLUSH_HOST_SIDE=OFF \
     -DUSE_SINGLE_NODE=ON \
     $* $src_path
-cmake --build . --parallel 8
+cmake --build . --parallel 1
 cmake --install .

@@ -94,7 +94,7 @@ class HIPAllocator : public MemoryAllocator {
                 hipError_t (*hip_free_fn)(void*), unsigned flags) :
     MemoryAllocator (hip_alloc_fn, hip_free_fn, flags) {}
 
-  HIPAllocatorType type = AllocatorTypeCoursegrained;
+  HIPAllocatorType type = AllocatorTypeCoarsegrained;
 
   hipError_t GetIpcHandle(void *dev_ptr, void *handle)
   {
@@ -125,13 +125,7 @@ class HIPAllocator : public MemoryAllocator {
   }
 };
 
-class HIPAllocatorCoarsegrained : public HIPAllocator {
- public:
-  HIPAllocatorCoarsegrained()
-      : HIPAllocator(hipMalloc, hipFree) {
-    type = AllocatorTypeCoarsegrained;
-  }
-};
+using HIPAllocatorCoarsegrained = HIPAllocator;
 
 class HIPAllocatorFinegrained : public HIPAllocator {
  public:
@@ -157,6 +151,11 @@ class HIPHostAllocator : public MemoryAllocator {
  public:
   HIPHostAllocator()
       : MemoryAllocator(hipHostMalloc, hipFree, hipHostMallocCoherent) {}
+};
+
+class PosixAligned64Allocator : public MemoryAllocator {
+ public:
+  PosixAligned64Allocator() : MemoryAllocator(posix_memalign, std::free, 64) {}
 };
 
 }  // namespace rocshmem
