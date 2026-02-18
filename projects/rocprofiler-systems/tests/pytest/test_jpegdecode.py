@@ -83,8 +83,8 @@ class TestJPEGDecode(RocprofsysTest):
                 labels=["rocJpegCreate"],
                 counts=[1],
                 depths=[1],
-                counter_names=["JPEG Activity"]
-                if "instinct" in gpu_info.categories
-                else None,
+                counter_names=(
+                    ["JPEG Activity"] if "instinct" in gpu_info.categories else None
+                ),
             )
             self.assert_rocpd(result, rules_files=jpeg_decode_rules)

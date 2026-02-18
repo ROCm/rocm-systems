@@ -30,6 +30,7 @@ def lulesh_base_env() -> dict[str, str]:
 # Lulesh tests
 # =============================================================================
 
+
 # TODO: LULESH_USE_HIP does not currently work properly out of the box, tofix
 @pytest.mark.mpi_optional("lulesh")
 class TestLulesh(RocprofsysTest):

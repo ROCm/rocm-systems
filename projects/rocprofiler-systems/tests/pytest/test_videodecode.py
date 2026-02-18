@@ -81,8 +81,8 @@ class TestVideoDecode(RocprofsysTest):
                 labels=["rocDecCreateVideoParser"],
                 counts=[2],
                 depths=[1],
-                counter_names=["VCN Activity"]
-                if "instinct" in gpu_info.categories
-                else None,
+                counter_names=(
+                    ["VCN Activity"] if "instinct" in gpu_info.categories else None
+                ),
             )
             self.assert_rocpd(result, rules_files=video_decode_rules)
