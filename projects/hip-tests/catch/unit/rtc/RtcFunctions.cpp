@@ -989,13 +989,15 @@ bool check_slp_vectorize_disabled(const char** Combination_CO, int Combination_C
   CaptureIR ir_capture;
   auto dump_dir = ir_capture.CreateDumpDir();
   std::string ir_dump_option = "-ir-dump-directory=" + dump_dir.string();
-  int CO_IRadded_size = 5;
-  const char** CO_IRadded = new const char*[5];
+  int CO_IRadded_size = 7;
+  const char** CO_IRadded = new const char*[7];
   CO_IRadded[0] = retrieved_CO.c_str();
   CO_IRadded[1] = "-mllvm";
   CO_IRadded[2] = "-print-after=constmerge";
   CO_IRadded[3] = "-mllvm";
   CO_IRadded[4] = ir_dump_option.c_str();
+  CO_IRadded[5] = "-mllvm";
+  CO_IRadded[6] = "-disable-vector-combine";
   __half2 *a_d, *x_d, *y_d;
   __half2 a_h, x_h;
   a_h.data.x = 1.5;
@@ -1008,11 +1010,11 @@ bool check_slp_vectorize_disabled(const char** Combination_CO, int Combination_C
   hiprtcProgram prog;
   HIPRTC_CHECK(hiprtcCreateProgram(&prog, slp_vectorize_string, kername, 0, NULL, NULL));
   if (Combination_CO_size != -1) {
-    int Combination_CO_IRadded_size = Combination_CO_size + 5;
+    int Combination_CO_IRadded_size = Combination_CO_size + 7;
     int b = 0;
-    std::vector<std::string> add_ir_forcombi(Combination_CO_size + 5, "");
-    const char** Combination_CO_IRadded = new const char*[Combination_CO_size + 5];
-    for (int i = 0; i < Combination_CO_size + 5; ++i) {
+    std::vector<std::string> add_ir_forcombi(Combination_CO_IRadded_size, "");
+    const char** Combination_CO_IRadded = new const char*[Combination_CO_IRadded_size];
+    for (int i = 0; i < Combination_CO_IRadded_size; ++i) {
       if (i == Combination_CO_size) {
         Combination_CO_IRadded[i] = "-fno-signed-zeros";
         Combination_CO_IRadded[i + 1] = "-mllvm";
@@ -1020,6 +1022,8 @@ bool check_slp_vectorize_disabled(const char** Combination_CO, int Combination_C
         Combination_CO_IRadded[i + 3] = "-mllvm";
         add_ir_forcombi[i + 4] = ir_dump_option;
         Combination_CO_IRadded[i + 4] = add_ir_forcombi[i + 4].c_str();
+        Combination_CO_IRadded[i + 5] = "-mllvm";
+        Combination_CO_IRadded[i + 6] = "-disable-vector-combine";
         break;
       }
       add_ir_forcombi[i] = Combination_CO[b];
@@ -1032,7 +1036,7 @@ bool check_slp_vectorize_disabled(const char** Combination_CO, int Combination_C
       ir_capture.Cleanup(dump_dir);
       WARN("Compiler option : " << retrieved_CO);
       WARN("FAILED IN COMBINATION :");
-      for (int i = 0; i < Combination_CO_size + 5; i++) {
+      for (int i = 0; i < Combination_CO_size + 7; i++) {
         WARN(Combination_CO_IRadded[i]);
       }
       WARN("hiprtcCompileProgram() api failed!! with error code: ");
@@ -1083,13 +1087,11 @@ bool check_slp_vectorize_disabled(const char** Combination_CO, int Combination_C
   HIP_CHECK(hipModuleUnload(module));
   HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
   int times = 0;
-  if (data.find("contract <2 x half>", 0) != -1) {
-    times++;
-  }
-  int start = data.find("contract <2 x half>", 0) + 1;
-  while (data.find("contract <2 x half>", start) != -1) {
-    times++;
-    start = data.find("contract <2 x half>", start) + 1;
+  const std::string search_string = "contract half";
+  size_t start = 0;
+  while ((start = data.find(search_string, start)) != std::string::npos) {
+    ++times;
+    ++start;
   }
   if (times == 2) {
     return 1;
@@ -1101,7 +1103,7 @@ bool check_slp_vectorize_disabled(const char** Combination_CO, int Combination_C
         WARN(Combination_CO[i]);
       }
     }
-    WARN("IR CONTAIN 'fadd contract <2 x half>' " << times << "times");
+    WARN("IR CONTAIN '" << search_string << "' " << times << "times");
     WARN(" WHICH IS NOT EXPECTED(IT SHOULD BE PRESENT TWICE)");
     return 0;
   } else {
@@ -1112,7 +1114,7 @@ bool check_slp_vectorize_disabled(const char** Combination_CO, int Combination_C
         WARN(Combination_CO[i]);
       }
     }
-    WARN("IR CONTAIN 'fadd contract <2 x half>' " << times << "times");
+    WARN("IR CONTAIN '" << search_string << "' " << times << "times");
     WARN(" WHICH IS NOT EXPECTED(IT SHOULD BE PRESENT TWICE)");
     return 0;
   }
