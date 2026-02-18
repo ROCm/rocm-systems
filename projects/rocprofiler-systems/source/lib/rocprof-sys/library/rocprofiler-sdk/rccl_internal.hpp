@@ -172,12 +172,6 @@ public:
         }
     }
 
-    /**
-     * @brief Get the PMC registrar
-     * @return Shared pointer to the PMC registrar
-     */
-    std::shared_ptr<PmcRegistrar> get_registrar() const { return m_pmc_registrar; }
-
 private:
     std::shared_ptr<PmcRegistrar>          m_pmc_registrar;
     mutable std::mutex                     m_registered_gpus_mutex{};
