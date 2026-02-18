@@ -37,6 +37,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
     * Processes attempting to benchmark on the same GPU will wait with user-visible feedback and execute sequentially
     * Lock applies specifically to the roofline.csv file generated during benchmarking, not other files generated in profile mode
 
+* Added missing metric descriptions for gfx950 architecture
+
 ### Changed
 
 * Default output format for the underlying ROCprofiler-SDK tool has been changed from ``csv`` to ``rocpd``.
