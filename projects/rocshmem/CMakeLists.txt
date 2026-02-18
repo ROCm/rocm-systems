@@ -177,6 +177,9 @@ if (NOT BUILD_TESTS_ONLY)
   find_package(hip REQUIRED PATHS /opt/rocm)
   find_package(hsa-runtime64 REQUIRED)
 
+  # Include device library build (bitcode/HSACO for Triton/PyTorch integration)
+  include(cmake/DeviceLibrary.cmake)
+
   set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
   set(THREADS_PREFER_PTHREAD_FLAG TRUE)
   find_package(Threads REQUIRED)
