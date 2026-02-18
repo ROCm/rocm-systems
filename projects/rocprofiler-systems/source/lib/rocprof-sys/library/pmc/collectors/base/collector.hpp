@@ -29,7 +29,6 @@
 #pragma once
 
 #include "library/pmc/collectors/base/traits_check.hpp"
-#include "library/pmc/common/types.hpp"
 #include "logger/debug.hpp"
 
 #include <algorithm>
@@ -39,10 +38,6 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
-
-#if ROCPROFSYS_USE_ROCM > 0
-#    include <amd_smi/amdsmi.h>
-#endif
 
 namespace rocprofsys
 {
@@ -54,9 +49,6 @@ namespace base
 {
 
 #if ROCPROFSYS_USE_ROCM > 0
-
-using ::rocprofsys::pmc::device_filter;
-using ::rocprofsys::pmc::device_selection_mode;
 
 using get_timestamp_t = std::function<unsigned long()>;
 
@@ -78,6 +70,8 @@ struct collector
                   "Invalid traits: missing required type aliases");
     static_assert(has_device_name_v<Traits>, "Traits must define: device_name");
     static_assert(has_multi_device_v<Traits>, "Traits must define: multi_device");
+    static_assert(has_enumerate_devices_v<Traits>,
+                  "Traits must define: enumerate_devices() and device_entry type");
 
     // Type aliases from traits
     using traits_t          = Traits;
@@ -94,18 +88,8 @@ struct collector
     using PerfettoApi     = typename Config::PerfettoApi;
     using CacheApi        = typename Config::CacheApi;
 
-    /**
-     * @brief Entry holding a device and its cached supported metrics.
-     *
-     * Supported metrics are queried once during device enumeration and cached here
-     * to avoid repeated calls in the hot sampling path.
-     */
-    struct device_entry
-    {
-        device_ptr_t      device;
-        enabled_metrics_t supported_metrics;
-    };
-
+    // Device entry type from traits (contains device + cached supported metrics)
+    using device_entry     = typename Traits::device_entry;
     using device_entries_t = std::vector<device_entry>;
 
     /**
@@ -135,9 +119,8 @@ struct collector
                 "Device provider not set. Use constructor or set_device_provider().");
         }
 
-        log_version_info();
-        enumerate_devices();
-
+        m_device_entries =
+            Traits::template enumerate_devices<SettingsApi>(m_device_provider);
         m_enabled_metrics = Traits::template get_enabled_metrics<SettingsApi>();
 
         LOG_INFO("Enabled {} {} devices for PMC sampling", m_device_entries.size(),
@@ -268,121 +251,6 @@ struct collector
     }
 
 private:
-    /**
-     * @brief Log version information if available.
-     *
-     * Only logs if the Traits class defines has_version_info = true.
-     */
-    void log_version_info()
-    {
-        if constexpr(traits_has_version_info_v<Traits>)
-        {
-            auto _version = m_device_provider->get_version();
-            LOG_INFO("AMD SMI version: {}.{}.{} - str: {}.",
-                     _version.numeric_representation.major,
-                     _version.numeric_representation.minor,
-                     _version.numeric_representation.release,
-                     _version.string_representation);
-        }
-    }
-
-    /**
-     * @brief Enumerate devices from provider and create device objects.
-     */
-    void enumerate_devices()
-    {
-        auto filter = Traits::template get_device_filter<SettingsApi>();
-        auto driver = m_device_provider->get_driver();
-
-        if(filter.mode == device_selection_mode::NONE)
-        {
-            LOG_DEBUG("{} sampling disabled via configuration", Traits::device_name);
-            return;
-        }
-
-        auto   socket_handles = m_device_provider->get_socket_handles();
-        size_t index          = 0;
-
-        for(auto& socket_handle : socket_handles)
-        {
-            auto processor_handles =
-                Traits::get_processor_handles(*m_device_provider, socket_handle);
-
-            for(auto& processor_handle : processor_handles)
-            {
-                if constexpr(Traits::filter_by_processor_type())
-                {
-                    processor_type_t processor_type;
-                    auto             status =
-                        driver->get_processor_type(processor_handle, &processor_type);
-
-                    if(status != AMDSMI_STATUS_SUCCESS)
-                    {
-                        LOG_DEBUG("Failed to get processor type for handle at index {}",
-                                  index);
-                        index++;
-                        continue;
-                    }
-
-                    if(processor_type != Traits::expected_processor_type())
-                    {
-                        index++;
-                        continue;
-                    }
-                }
-
-                bool should_include = false;
-                switch(filter.mode)
-                {
-                    case device_selection_mode::ALL: should_include = true; break;
-                    case device_selection_mode::NONE: should_include = false; break;
-                    case device_selection_mode::SPECIFIC:
-                        should_include = filter.indices.count(index) > 0;
-                        break;
-                }
-
-                if(should_include)
-                {
-                    auto device =
-                        Traits::create_device(driver, processor_handle,
-                                              Traits::expected_processor_type(), index);
-                    if(Traits::is_device_supported(device))
-                    {
-                        // Cache supported metrics at enumeration time to avoid
-                        // repeated queries in the hot sampling path
-                        auto supported = Traits::get_supported_metrics(device);
-                        m_device_entries.push_back(
-                            device_entry{ std::move(device), supported });
-                    }
-                }
-
-                index++;
-            }
-        }
-
-        warn_invalid_indices(filter, index);
-    }
-
-    /**
-     * @brief Warn about invalid device indices specified by the user.
-     */
-    void warn_invalid_indices(const device_filter& filter, size_t max_index)
-    {
-        if(filter.mode == device_selection_mode::SPECIFIC)
-        {
-            for(auto requested_index : filter.indices)
-            {
-                if(requested_index >= max_index)
-                {
-                    LOG_WARNING("Requested {} device index {} does not exist. Available "
-                                "devices: 0-{}",
-                                Traits::device_name, requested_index,
-                                max_index > 0 ? max_index - 1 : 0);
-                }
-            }
-        }
-    }
-
     device_entries_t m_device_entries;  ///< Devices with cached supported metrics
     std::shared_ptr<device_provider> m_device_provider;  ///< Device provider instance
     enabled_metrics_t                m_enabled_metrics;  ///< Enabled metrics

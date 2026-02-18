@@ -29,7 +29,9 @@
 #pragma once
 
 #include "library/pmc/collectors/gpu/device.hpp"
+#include "library/pmc/common/types.hpp"
 #include "library/pmc/gpu/types.hpp"
+#include "logger/debug.hpp"
 
 #include <memory>
 #include <vector>
@@ -48,6 +50,9 @@ namespace gpu
 {
 
 #if ROCPROFSYS_USE_ROCM > 0
+
+using ::rocprofsys::pmc::device_filter;
+using ::rocprofsys::pmc::device_selection_mode;
 
 /**
  * @brief Traits type for GPU collector configuration.
@@ -69,9 +74,8 @@ struct gpu_traits
     using driver_t          = Driver;
 
     // Required constants
-    static constexpr const char* device_name      = "GPU";
-    static constexpr bool        multi_device     = true;
-    static constexpr bool        has_version_info = true;
+    static constexpr const char* device_name  = "GPU";
+    static constexpr bool        multi_device = true;
 
     // Settings customization points
 
@@ -91,31 +95,6 @@ struct gpu_traits
     static enabled_metrics_t get_enabled_metrics()
     {
         return Settings::get_enabled_metrics();
-    }
-
-    // Provider customization points
-
-    /**
-     * @brief Get processor handles from the device provider.
-     */
-    template <typename Provider>
-    static std::vector<amdsmi_processor_handle> get_processor_handles(
-        Provider& provider, amdsmi_socket_handle socket)
-    {
-        return provider.get_processor_handles(socket);
-    }
-
-    /**
-     * @brief Whether to filter devices by processor type.
-     */
-    static constexpr bool filter_by_processor_type() { return true; }
-
-    /**
-     * @brief The expected processor type for GPU devices.
-     */
-    static constexpr processor_type_t expected_processor_type()
-    {
-        return AMDSMI_PROCESSOR_TYPE_AMD_GPU;
     }
 
     // Cache API delegation
@@ -241,6 +220,123 @@ struct gpu_traits
     static bool is_device_supported(const device_ptr_t& device)
     {
         return device->is_supported();
+    }
+
+    // Device enumeration
+
+    /**
+     * @brief Entry holding a device and its cached supported metrics.
+     *
+     * This type is returned by enumerate_devices for the base collector to store.
+     */
+    struct device_entry
+    {
+        device_ptr_t      device;
+        enabled_metrics_t supported_metrics;
+    };
+
+    /**
+     * @brief Enumerate GPU devices using AMD SMI socket/processor iteration.
+     *
+     * This function implements GPU-specific enumeration:
+     * - Gets device filter from settings
+     * - Iterates through sockets and processors
+     * - Filters by processor type (AMD GPU)
+     * - Applies device filter (ALL, NONE, SPECIFIC indices)
+     * - Creates device objects and queries supported metrics
+     *
+     * @tparam Settings Settings API type for device filter configuration
+     * @tparam Provider Device provider type
+     * @param provider Shared pointer to the device provider
+     * @return Vector of device entries with cached supported metrics
+     */
+    template <typename Settings, typename Provider>
+    static std::vector<device_entry> enumerate_devices(std::shared_ptr<Provider> provider)
+    {
+        std::vector<device_entry> entries;
+        auto                      filter = get_device_filter<Settings>();
+
+        if(filter.mode == device_selection_mode::NONE)
+        {
+            LOG_DEBUG("{} sampling disabled via configuration", device_name);
+            return entries;
+        }
+
+        auto   driver         = provider->get_driver();
+        auto   socket_handles = provider->get_socket_handles();
+        size_t index          = 0;
+
+        for(auto& socket_handle : socket_handles)
+        {
+            auto processor_handles = provider->get_processor_handles(socket_handle);
+
+            for(auto& processor_handle : processor_handles)
+            {
+                processor_type_t processor_type;
+                auto status = driver->get_processor_type(processor_handle, &processor_type);
+
+                if(status != AMDSMI_STATUS_SUCCESS)
+                {
+                    LOG_DEBUG("Failed to get processor type for handle at index {}", index);
+                    index++;
+                    continue;
+                }
+
+                if(processor_type != AMDSMI_PROCESSOR_TYPE_AMD_GPU)
+                {
+                    index++;
+                    continue;
+                }
+
+                bool should_include = false;
+                switch(filter.mode)
+                {
+                    case device_selection_mode::ALL: should_include = true; break;
+                    case device_selection_mode::NONE: should_include = false; break;
+                    case device_selection_mode::SPECIFIC:
+                        should_include = filter.indices.count(index) > 0;
+                        break;
+                }
+
+                if(should_include)
+                {
+                    auto device = create_device(driver, processor_handle,
+                                                AMDSMI_PROCESSOR_TYPE_AMD_GPU, index);
+                    if(is_device_supported(device))
+                    {
+                        auto supported = get_supported_metrics(device);
+                        entries.push_back(device_entry{ std::move(device), supported });
+                    }
+                }
+
+                index++;
+            }
+        }
+
+        warn_invalid_indices(filter, index);
+        return entries;
+    }
+
+    /**
+     * @brief Warn about invalid device indices specified by the user.
+     *
+     * @param filter Device filter with requested indices
+     * @param max_index Maximum valid device index + 1
+     */
+    static void warn_invalid_indices(const device_filter& filter, size_t max_index)
+    {
+        if(filter.mode == device_selection_mode::SPECIFIC)
+        {
+            for(auto requested_index : filter.indices)
+            {
+                if(requested_index >= max_index)
+                {
+                    LOG_WARNING("Requested GPU device index {} does not exist. "
+                                "Available devices: 0-{}",
+                                requested_index, max_index > 0 ? max_index - 1 : 0);
+                }
+            }
+        }
     }
 };
 

@@ -30,6 +30,7 @@
 
 #include "library/pmc/common/types.hpp"
 #include "library/pmc/device_providers/amd_smi/drivers/driver.hpp"
+#include "logger/debug.hpp"
 
 #include <cstdint>
 #include <memory>
@@ -94,6 +95,10 @@ public:
         m_version.numeric_representation.minor   = ver.minor;
         m_version.numeric_representation.release = ver.release;
         m_version.string_representation          = ver.build;
+
+        LOG_INFO("AMD SMI version: {}.{}.{} - str: {}.", m_version.numeric_representation.major,
+                 m_version.numeric_representation.minor,
+                 m_version.numeric_representation.release, m_version.string_representation);
     }
 
     ~provider() = default;

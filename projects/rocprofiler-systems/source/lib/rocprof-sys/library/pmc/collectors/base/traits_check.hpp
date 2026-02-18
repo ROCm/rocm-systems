@@ -94,28 +94,23 @@ template <typename Traits>
 inline constexpr bool has_multi_device_v = has_multi_device<Traits>::value;
 
 /**
- * @brief Type trait to check if Traits defines the has_version_info constant.
+ * @brief Type trait to check if Traits defines enumerate_devices().
+ *
+ * The enumerate_devices function should be a static template function that
+ * takes a device provider and device filter, returning a vector of device entries.
  */
 template <typename Traits, typename = void>
-struct has_version_info_trait : std::false_type
+struct has_enumerate_devices : std::false_type
 {};
 
 template <typename Traits>
-struct has_version_info_trait<Traits, std::void_t<decltype(Traits::has_version_info)>>
-: std::true_type
+struct has_enumerate_devices<
+    Traits, std::void_t<decltype(Traits::device_entry::device),
+                        decltype(Traits::device_entry::supported_metrics)>> : std::true_type
 {};
 
 template <typename Traits>
-inline constexpr bool has_version_info_trait_v = has_version_info_trait<Traits>::value;
-
-/**
- * @brief Helper to check if Traits::has_version_info is true.
- *
- * Returns false if the trait doesn't exist or is false.
- */
-template <typename Traits>
-inline constexpr bool traits_has_version_info_v =
-    has_version_info_trait_v<Traits> && Traits::has_version_info;
+inline constexpr bool has_enumerate_devices_v = has_enumerate_devices<Traits>::value;
 
 /**
  * @brief Validate that a Traits type satisfies all collector requirements.
