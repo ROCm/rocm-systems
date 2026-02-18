@@ -326,32 +326,36 @@ bool calling_resp_function(const std::string block_name, const char** Combinatio
 }
 
 picojson::array getblock_fromconfig() {
-  std::string str = "pwd";
-  const char* cmd = str.c_str();
-  CaptureStream capture(stdout);
-  capture.Begin();
-  system(cmd);
-  capture.End();
-  std::string wor_dir = capture.getData();
-  std::string break_dir = wor_dir.substr(0, wor_dir.find("build"));
-  std::string append_str = "catch/unit/rtc/RtcConfig.json";
-  std::string config_path = break_dir + append_str;
-  std::string returnValue = "";
-  std::ifstream json_file(config_path.c_str());
-  if (!json_file.is_open()) {
-    WARN("Error loading config.jason");
-    exit(0);
+  static picojson::array cached_blocks;
+  static bool initialized = false;
+  if (!initialized) {
+    std::string str = "pwd";
+    const char* cmd = str.c_str();
+    CaptureStream capture(stdout);
+    capture.Begin();
+    system(cmd);
+    capture.End();
+    std::string wor_dir = capture.getData();
+    std::string break_dir = wor_dir.substr(0, wor_dir.find("build"));
+    std::string append_str = "catch/unit/rtc/RtcConfig.json";
+    std::string config_path = break_dir + append_str;
+    std::ifstream json_file(config_path.c_str());
+    if (!json_file.is_open()) {
+      WARN("Error loading config.jason");
+      exit(0);
+    }
+    std::string json_str((std::istreambuf_iterator<char>(json_file)),
+                         std::istreambuf_iterator<char>());
+    picojson::value v;
+    std::string err = picojson::parse(v, json_str);
+    if (!err.empty()) {
+      WARN("empty config.jason");
+      exit(0);
+    }
+    cached_blocks = v.get<picojson::array>();
+    initialized = true;
   }
-  std::string json_str((std::istreambuf_iterator<char>(json_file)),
-                       std::istreambuf_iterator<char>());
-  picojson::value v;
-  std::string err = picojson::parse(v, json_str);
-  if (!err.empty()) {
-    WARN("empty config.jason");
-    exit(0);
-  }
-  picojson::array& blocks = v.get<picojson::array>();
-  return blocks;
+  return cached_blocks;
 }
 
 std::string get_string_parameters(std::string para_name_to_retrieve, std::string block_name) {
