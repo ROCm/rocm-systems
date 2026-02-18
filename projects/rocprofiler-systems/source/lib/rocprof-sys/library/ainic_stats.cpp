@@ -76,7 +76,6 @@ ai_nic_stats_collector::update_stats()
 
     // Iterate through all socket handles to find all AI NIC processor
     // handles and update the statistics for each of them.
-    std::vector<amdsmi_nic_rdma_devices_info_t> nics;
     for(uint32_t index = 0; index < soc_count; index++)
     {
         uint32_t processor_count = 0;
@@ -106,8 +105,7 @@ ai_nic_stats_collector::update_stats()
             if(status != AMDSMI_STATUS_SUCCESS) continue;
 
             // Update info and stats.
-            update_data_for_one_nic(processor_handles[idx], info);
-            nics.emplace_back(info);
+            update_data_for_one_handle(processor_handles[idx], info);
         }
     }
 #endif  // USE_AINIC
@@ -147,7 +145,7 @@ ai_nic_stats_collector::get_nic_count()
 
 #ifdef USE_AINIC
 void
-ai_nic_stats_collector::update_data_for_one_nic(amdsmi_processor_handle processor_handle,
+ai_nic_stats_collector::update_data_for_one_handle(amdsmi_processor_handle processor_handle,
                                                 amdsmi_nic_rdma_devices_info_t& info)
 {
     for(uint8_t rdma_dev_idx = 0; rdma_dev_idx < info.num_rdma_dev; ++rdma_dev_idx)
