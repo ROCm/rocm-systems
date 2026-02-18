@@ -8,6 +8,8 @@
 
 #include <thread>
 #include <execinfo.h>
+#include <fcntl.h>
+#include <unistd.h>
 #ifdef ENABLE_OPENMP
 #include <omp.h>
 #endif
@@ -159,9 +161,35 @@ namespace RcclUnitTesting
   {
     if (this->verbose) INFO("Child %d begins GetUniqueId()\n", this->childId);
 
-    // Get a unique ID and pass it back to parent process
     ncclUniqueId id;
-    CHILD_NCCL_CALL(ncclGetUniqueId(&id), "ncclGetUniqueId");
+
+    // Check if we have a pre-generated NCCL unique ID from the GPU scheduler
+    // This prevents port collisions when running parallel tests
+    const char* rcclIdEnv = getenv("UT_RCCL_UNIQUE_ID");
+    if (rcclIdEnv != nullptr)
+    {
+        // Parse the hex-encoded NCCL unique ID from environment variable
+        if (strlen(rcclIdEnv) == NCCL_UNIQUE_ID_BYTES * 2)
+        {
+            for (int i = 0; i < NCCL_UNIQUE_ID_BYTES; i++)
+            {
+                char hexByte[3] = { rcclIdEnv[i * 2], rcclIdEnv[i * 2 + 1], '\0' };
+                id.internal[i] = (char)strtol(hexByte, nullptr, 16);
+            }
+            if (this->verbose) INFO("Child %d using pre-generated NCCL unique ID from UT_RCCL_UNIQUE_ID env var\n", this->childId);
+        }
+        else
+        {
+            ERROR("Child %d: Invalid UT_RCCL_UNIQUE_ID format, falling back to ncclGetUniqueId\n", this->childId);
+            CHILD_NCCL_CALL(ncclGetUniqueId(&id), "ncclGetUniqueId");
+        }
+    }
+    else
+    {
+        // No pre-generated ID, generate one (sequential execution or non-parallel test)
+        CHILD_NCCL_CALL(ncclGetUniqueId(&id), "ncclGetUniqueId");
+    }
+
     retValBuf.resize(sizeof(id));
     memcpy(retValBuf.data(), &id, sizeof(id));
 

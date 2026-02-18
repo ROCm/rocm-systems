@@ -11,6 +11,7 @@
 #include <functional>
 #include <vector>
 #include <string>
+#include <map>
 
 namespace RcclUnitTesting
 {
@@ -22,9 +23,9 @@ namespace RcclUnitTesting
  *   ParallelTestRunner runner;
  *
  *   // Register tests for different GPU counts
- *   runner.registerTest("AllReduce_1GPU", 1, []() { /* test code */ });
- *   runner.registerTest("AllReduce_2GPU", 2, []() { /* test code */ });
- *   runner.registerTest("AllReduce_8GPU", 8, []() { /* test code */ });
+ *   runner.registerTest("AllReduce_1GPU", 1, []() {  });
+ *   runner.registerTest("AllReduce_2GPU", 2, []() {  });
+ *   runner.registerTest("AllReduce_8GPU", 8, []() {  });
  *
  *   // Execute all tests with optimal GPU scheduling
  *   runner.executeAll();

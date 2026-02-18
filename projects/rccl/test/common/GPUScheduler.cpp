@@ -13,6 +13,7 @@
 #include <sys/wait.h>
 #include <cstring>
 #include <cstdlib>
+#include <nccl.h>
 
 namespace RcclUnitTesting
 {
@@ -147,6 +148,16 @@ bool GPUScheduler::launchTest(const TestJob& job, const std::vector<int>& gpus)
              job.testName.c_str(), job.jobId, gpus.size());
     }
 
+    // Generate unique NCCL comm ID in parent process BEFORE forking
+    // This prevents port collisions when multiple parallel tests try to call ncclGetUniqueId() simultaneously
+    ncclUniqueId ncclId;
+    ncclResult_t result = ncclGetUniqueId(&ncclId);
+    if (result != ncclSuccess)
+    {
+        ERROR("Failed to generate NCCL unique ID for test %s: %d\n", job.testName.c_str(), result);
+        return false;
+    }
+
     // Flush output before fork
     fflush(NULL);
 
@@ -167,6 +178,16 @@ bool GPUScheduler::launchTest(const TestJob& job, const std::vector<int>& gpus)
         setenv("CUDA_VISIBLE_DEVICES", visibleDevices.str().c_str(), 1);
         setenv("HIP_VISIBLE_DEVICES", visibleDevices.str().c_str(), 1);
         setenv("ROCR_VISIBLE_DEVICES", visibleDevices.str().c_str(), 1);
+
+        // Set the pre-generated NCCL unique ID as an environment variable
+        // The test process can retrieve this instead of calling ncclGetUniqueId()
+        char ncclIdHex[NCCL_UNIQUE_ID_BYTES * 2 + 1];
+        for (int i = 0; i < NCCL_UNIQUE_ID_BYTES; i++)
+        {
+            sprintf(&ncclIdHex[i * 2], "%02x", (unsigned char)ncclId.internal[i]);
+        }
+        ncclIdHex[NCCL_UNIQUE_ID_BYTES * 2] = '\0';
+        setenv("UT_RCCL_UNIQUE_ID", ncclIdHex, 1);
 
         if (config_.verboseLogging)
         {
