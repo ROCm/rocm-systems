@@ -47,6 +47,9 @@ class AMDSmiDrm {
     std::vector<amdsmi_bdf_t> get_bdfs();
     std::vector<std::string>& get_drm_paths();
     bool check_if_drm_is_supported();
+
+    amdsmi_status_t amdgpu_query_cpu_affinity(const std::string &device_path, std::string& cpu_affinity);
+
     uint32_t get_vendor_id();
 
  private:

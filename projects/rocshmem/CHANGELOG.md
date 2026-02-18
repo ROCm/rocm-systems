@@ -1,15 +1,17 @@
 # Changelog for rocSHMEM
-## Unreleased - rocSHMEM 3.x.x for ROCm 7.x.x
+## Unreleased - rocSHMEM 3.3.0 for ROCm x.x.x
 ### Added
 * Added new APIs:
    * `rocshmem_TYPENAME_alltoall_wg`
 
-## Unreleased -- rocSHMEM 3.2.1 for ROCm x.x.x
+## rocSHMEM 3.2.1 for ROCm 7.2.1
 ### Added
-### Changed
-### Removed
-### Resolved issues
+* Warn if large BAR is not available
+### Resolved Issues
+* GDA Backend will disable itself when no GDA compatible NICs are available rather than crashing
+* Fix memory coherency issues on gfx1201
 ### Known issues
+* Only 64bit rocSHMEM atomic APIs are implemented for the GDA conduit
 
 ## rocSHMEM 3.2.0 for ROCm 7.2.0
 ### Added

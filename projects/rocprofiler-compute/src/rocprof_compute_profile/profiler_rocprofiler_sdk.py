@@ -31,7 +31,7 @@ from typing import Optional, Union
 from rocprof_compute_profile.profiler_base import RocProfCompute_Base
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils.logger import console_error, console_log, demarcate
-from utils.utils import consolidate_torch_trace_output
+from utils.utils import resolve_rocm_library_path
 
 
 class rocprofiler_sdk_profiler(RocProfCompute_Base):
@@ -90,9 +90,11 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
             })
             options.pop("LD_PRELOAD", None)
 
-            rocprofiler_attach_library_path = str(
-                Path(args.rocprofiler_sdk_tool_path).parent.parent
-                / "librocprofiler-sdk-rocattach.so"
+            rocprofiler_attach_library_path = resolve_rocm_library_path(
+                str(
+                    Path(args.rocprofiler_sdk_tool_path).parent.parent
+                    / "librocprofiler-sdk-rocattach.so"
+                )
             )
             options.update({
                 "ROCPROF_ATTACH_LIBRARY": rocprofiler_attach_library_path,
@@ -164,9 +166,6 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
         if self.ready_to_profile:
             # Manually join each pmc_perf*.csv output
             self.join_prof()
-            if self.get_args().torch_trace:
-                consolidate_torch_trace_output(self.get_args().path)
-
             # Run roofline microbenchmark
             super().post_processing()
         else:
