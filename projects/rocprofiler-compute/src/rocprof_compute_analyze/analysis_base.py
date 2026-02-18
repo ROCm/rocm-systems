@@ -27,7 +27,6 @@ import argparse
 import copy
 import re
 import sys
-import textwrap
 from abc import abstractmethod
 from collections import OrderedDict
 from pathlib import Path
@@ -47,7 +46,6 @@ from utils.logger import (
 )
 from utils.roofline_calc import validate_roofline_csv
 from utils.utils import (
-    get_panel_alias,
     get_uuid,
     impute_counters_iteration_multiplex,
     is_workload_empty,
