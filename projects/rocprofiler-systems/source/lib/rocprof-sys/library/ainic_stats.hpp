@@ -1,3 +1,6 @@
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
 #pragma once
 
 #include <cstdint>
@@ -16,13 +19,13 @@ struct nic_stats
     std::string _netdev;       // NIC name
     uint32_t    _num_stats{};  // Number of stats collected for this NIC
 
-    std::uint32_t _rx_rdma_ucast_bytes{};  // unicast received bytes
-    std::uint32_t _rx_rdma_ucast_pkts{};   // unicast received packets
-    std::uint32_t _tx_rdma_ucast_bytes{};  // unicast transmitted bytes
-    std::uint32_t _tx_rdma_ucast_pkts{};   // unicast transmitted packets
+    uint64_t _rx_rdma_ucast_bytes{};  // unicast received bytes
+    uint64_t _rx_rdma_ucast_pkts{};   // unicast received packets
+    uint64_t _tx_rdma_ucast_bytes{};  // unicast transmitted bytes
+    uint64_t _tx_rdma_ucast_pkts{};   // unicast transmitted packets
 
-    std::uint32_t _rx_rdma_cnp_pkts{};  // received CNP packets
-    std::uint32_t _tx_rdma_cnp_pkts{};  // transmitted CNP packets
+    uint64_t _rx_rdma_cnp_pkts{};  // received CNP packets
+    uint64_t _tx_rdma_cnp_pkts{};  // transmitted CNP packets
 
     std::string to_string() const;
 
