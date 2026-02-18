@@ -847,7 +847,7 @@
   .if .amdgcn.gfx_generation_minor == 0
     // Restore ttmp11[27:26] into SCHED_MODE[0:1]
     s_bfe_u32         ttmp2, ttmp11, TTMP11_SCHED_MODE_BFE
-    s_setreg_b32      hwreg(HW_REG_WAVE_SCHED_MODE, 0, 2), ttmp2
+    //s_setreg_b32      hwreg(HW_REG_WAVE_SCHED_MODE, 0, 2), ttmp2
   .endif
 
   // Restore SQ_WAVE_STATUS.

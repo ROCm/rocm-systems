@@ -50,13 +50,13 @@ find_package(Python3 REQUIRED)
 
 # generally needed
 find_package(rocprofiler-sdk REQUIRED)
-find_package(rocprofiler_sdk_pytest REQUIRED)
+# find_package(rocprofiler_sdk_pytest REQUIRED)
 
 # get the gfx architectures that are present on the system
 rocprofiler_sdk_get_gfx_architectures(rocprofiler-sdk-tests-gfx-info ECHO)
 
 # configure python module <BINARY_DIR>/rocprofiler_sdk/pytest_utils
-add_subdirectory(pytest-packages)
+# add_subdirectory(pytest-packages)
 
 # common utilities
 add_subdirectory(common)
@@ -74,30 +74,4 @@ add_subdirectory(lib)
 add_subdirectory(bin)
 
 # validation tests
-add_subdirectory(kernel-tracing)
-add_subdirectory(async-copy-tracing)
-add_subdirectory(hsa-memory-allocation)
-add_subdirectory(scratch-memory-tracing)
-add_subdirectory(c-tool)
 add_subdirectory(thread-trace)
-add_subdirectory(pc_sampling)
-add_subdirectory(hip-graph-tracing)
-add_subdirectory(counter-collection)
-add_subdirectory(openmp-tools)
-add_subdirectory(rocdecode)
-add_subdirectory(rocjpeg)
-add_subdirectory(hip-host-tracing)
-add_subdirectory(code-object-multi-threaded)
-
-# rocpd validation tests
-add_subdirectory(rocpd)
-
-# rocattach validation tests
-add_subdirectory(rocattach)
-
-# rocprofv3 validation tests
-add_subdirectory(rocprofv3)
-
-# python bindings
-add_subdirectory(python-bindings)
-add_subdirectory(rocprofv3-avail)

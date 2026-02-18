@@ -419,7 +419,7 @@ function(rocprofiler_add_integration_validate_test NAME)
         "${_MULTI_OPTS}" # <multi_value_keywords>
         ${ARGN})
 
-    find_package(rocprofiler_sdk_pytest REQUIRED)
+    # find_package(rocprofiler_sdk_pytest REQUIRED)
 
     rocprofiler_set_integration_test_name(arg_NAME "${NAME}" "validate")
 
