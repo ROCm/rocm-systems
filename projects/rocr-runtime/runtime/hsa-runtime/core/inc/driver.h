@@ -211,7 +211,7 @@ public:
   /// @param[in] agent agent to import the memory for
   /// @param[out] handle handle to the imported memory
   virtual hsa_status_t ImportDMABuf(int dmabuf_fd, core::Agent &agent,
-                                    core::ShareableHandle &handle) = 0;
+                                    core::ShareableHandle &handle, const void* mem) = 0;
 
   /// @brief Maps the memory associated with the handle.
   ///
