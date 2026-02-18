@@ -291,6 +291,15 @@ class OmniSoC_Base:
 
             file_id, panel_id, metric_id = convert_metric_id_to_panel_info(block_id)
 
+            # NOTE: Experimental Feature Toggle
+            # HARD GATE: Block 30 (file_id 3000) requires membw_analysis flag
+            if file_id == "3000" and not args.membw_analysis:
+                console_warning(
+                    f"Skipping {block_id}: Block 30 (Memory Bandwidth Analysis) "
+                    f"requires --membw-analysis --experimental flags"
+                )
+                continue
+
             # File id filtering
             if file_id not in config_filename_dict:
                 console_warning(
@@ -448,7 +457,10 @@ class OmniSoC_Base:
                 console_error("Failed to import rocprofiler-sdk avail module.")
 
         avail.loadLibrary.libname = resolve_rocm_library_path(
-            str(Path(args.rocprofiler_sdk_tool_path).parent / "librocprofv3-list-avail.so")
+            str(
+                Path(args.rocprofiler_sdk_tool_path).parent
+                / "librocprofv3-list-avail.so"
+            )
         )
         counters = avail.get_counters()
         rocprof_counters = {

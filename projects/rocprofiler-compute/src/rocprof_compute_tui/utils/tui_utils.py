@@ -200,12 +200,8 @@ def process_panels_to_dataframes(
 
     for panel_id, panel in arch_configs.panel_configs.items():
         # NOTE: Experimental Feature Toggle
-        # Hide block 30 unless explicitly requested
-        if (
-            panel_id == 3000
-            and not args.membw_analysis
-            and (panel_id // 100) not in filter_panel_ids
-        ):
+        # HARD GATE: Block 30 (panel 3000) requires membw_analysis flag
+        if panel_id == 3000 and not args.membw_analysis:
             continue
 
         if panel_id in config.HIDDEN_SECTIONS:

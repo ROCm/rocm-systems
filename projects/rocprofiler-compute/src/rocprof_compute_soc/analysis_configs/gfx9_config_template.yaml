@@ -259,7 +259,7 @@ panels:
     id: 1
     title: PC Sampling
 - file: mem_bw.yaml
-  latest_only: true
+  experimental: true
   panel_id: 30
   panel_title: Memory Bandwidth Analysis
   panel_alias: membw_analysis
