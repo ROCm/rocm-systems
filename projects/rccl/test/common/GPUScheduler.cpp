@@ -14,6 +14,7 @@
 #include <cstring>
 #include <cstdlib>
 #include <nccl.h>
+#include <gtest/gtest.h>
 
 namespace RcclUnitTesting
 {
@@ -148,16 +149,6 @@ bool GPUScheduler::launchTest(const TestJob& job, const std::vector<int>& gpus)
              job.testName.c_str(), job.jobId, gpus.size());
     }
 
-    // Generate unique NCCL comm ID in parent process BEFORE forking
-    // This prevents port collisions when multiple parallel tests try to call ncclGetUniqueId() simultaneously
-    ncclUniqueId ncclId;
-    ncclResult_t result = ncclGetUniqueId(&ncclId);
-    if (result != ncclSuccess)
-    {
-        ERROR("Failed to generate NCCL unique ID for test %s: %d\n", job.testName.c_str(), result);
-        return false;
-    }
-
     // Flush output before fork
     fflush(NULL);
 
@@ -166,6 +157,17 @@ bool GPUScheduler::launchTest(const TestJob& job, const std::vector<int>& gpus)
     if (pid == 0)
     {
         // Child process
+        // Generate unique NCCL comm ID in child process AFTER forking
+        // This prevents GPU context inheritance from parent and avoids port collisions
+        ncclUniqueId ncclId;
+        ncclResult_t result = ncclGetUniqueId(&ncclId);
+        if (result != ncclSuccess)
+        {
+            ERROR("Child %d: Failed to generate NCCL unique ID for test %s: %d\n",
+                  getpid(), job.testName.c_str(), result);
+            _exit(1);
+        }
+
         // Set environment variables to restrict GPU visibility
         std::stringstream visibleDevices;
         for (size_t i = 0; i < gpus.size(); ++i)
@@ -195,17 +197,25 @@ bool GPUScheduler::launchTest(const TestJob& job, const std::vector<int>& gpus)
         }
 
         // Execute the test function with the GPU assignment
+        int exitCode = 0;
         try
         {
             job.testFunction(gpus);
-            // Use exit() instead of _exit() to ensure C++ destructors run
-            // This is critical for TestBed cleanup which releases GPU memory
-            exit(0);  // Success
+            // Check if GoogleTest detected any failures
+            // Note: GoogleTest failures don't throw exceptions
+            if (testing::Test::HasFailure())
+            {
+                exitCode = 1;
+            }
         }
         catch (...)
         {
-            exit(1);  // Failure
+            exitCode = 1;
         }
+
+        // Use exit() instead of _exit() to ensure C++ destructors run
+        // This is critical for TestBed cleanup which releases GPU memory
+        exit(exitCode);
     }
     else if (pid > 0)
     {

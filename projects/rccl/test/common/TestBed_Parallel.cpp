@@ -179,10 +179,12 @@ static void ExecuteSweepJob(const SweepTestJob& job)
 
     testBed.DestroyComms();
 
-    // If any test failed, exit with failure code
-    if (!isCorrect)
+    // Return exit code based on test results
+    // Note: Caller should use exit() not _exit() to ensure proper cleanup
+    if (!isCorrect || testing::Test::HasFailure())
     {
-        _exit(1);
+        // Don't call exit here - let the caller handle it to ensure proper cleanup
+        throw std::runtime_error("Test failed");
     }
 }
 
