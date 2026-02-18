@@ -133,8 +133,8 @@ __device__ T GDAContext::amo_swap(void *dst, T value, int pe) {
        * The compare-and-swap loop will execute at least twice if wrong.
        * It may run additional times if contention on memory location.
        */
-      while ((ret_val = qps[qp_index].atomic_cas(base_heap[pe] + L_offset,
-                         value, cond, wf_info)) != cond) {
+      while (wf_info.update(pe), (ret_val = qps[qp_index].atomic_cas(
+             base_heap[pe] + L_offset, value, cond, wf_info)) != cond) {
         cond = ret_val;
       }
       need_turn = false;
@@ -159,8 +159,8 @@ __device__ T GDAContext::amo_fetch_and(void *dst, T value, int pe) {
     uint8_t lane = __ffsll((unsigned long long)turns) - 1;
     int pe_turn = __shfl(pe, lane);
     if (pe_turn == pe) {
-      while ((ret_val = qps[qp_index].atomic_cas(base_heap[pe] + L_offset,
-                         desired_val, cond, wf_info)) != cond) {
+      while (wf_info.update(pe), (ret_val = qps[qp_index].atomic_cas(
+             base_heap[pe] + L_offset, desired_val, cond, wf_info)) != cond) {
         cond = ret_val;
         desired_val = ret_val & value;
       }
@@ -191,8 +191,8 @@ __device__ T GDAContext::amo_fetch_or(void *dst, T value, int pe) {
     uint8_t lane = __ffsll((unsigned long long)turns) - 1;
     int pe_turn = __shfl(pe, lane);
     if (pe_turn == pe) {
-      while ((ret_val = qps[qp_index].atomic_cas(base_heap[pe] + L_offset,
-                         desired_val, cond, wf_info)) != cond) {
+      while (wf_info.update(pe), (ret_val = qps[qp_index].atomic_cas(
+             base_heap[pe] + L_offset, desired_val, cond, wf_info)) != cond) {
         cond = ret_val;
         desired_val = ret_val | value;
       }
@@ -223,8 +223,8 @@ __device__ T GDAContext::amo_fetch_xor(void *dst, T value, int pe) {
     uint8_t lane = __ffsll((unsigned long long)turns) - 1;
     int pe_turn = __shfl(pe, lane);
     if (pe_turn == pe) {
-      while ((ret_val = qps[qp_index].atomic_cas(base_heap[pe] + L_offset,
-                         desired_val, cond, wf_info)) != cond) {
+      while (wf_info.update(pe), (ret_val = qps[qp_index].atomic_cas(
+             base_heap[pe] + L_offset, desired_val, cond, wf_info)) != cond) {
         cond = ret_val;
         desired_val = ret_val ^ value;
       }
@@ -992,6 +992,26 @@ __device__ void GDAContext::internal_amo_add(void *dst, T value, int pe,
 }
 
 template <typename T>
+__device__ T GDAContext::internal_amo_fetch_add(void *dst, T value, int pe,
+    int qp_index, ActiveWFInfo &wf_info) {
+  if constexpr (sizeof(T) != 8) { printf("rocshmem::gda:amo_fadd not implemented for non-64bit types.\n"); abort(); }//TODO:support for non-uint64t
+  uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
+  T ret_val = 0;
+  bool need_turn {true};
+  uint64_t turns = __ballot(need_turn);
+  while (turns) {
+    uint8_t lane = __ffsll((unsigned long long)turns) - 1;
+    int pe_turn = __shfl(pe, lane);
+    if (pe_turn == pe) {
+      ret_val =  qps[qp_index].atomic_fetch(base_heap[pe] + L_offset, value, 0, wf_info);
+      need_turn = false;
+    }
+    turns = __ballot(need_turn);
+  }
+  return ret_val;
+}
+
+template <typename T>
 __device__ T GDAContext::internal_amo_swap(void *dst, T value, int pe,
     int qp_index, ActiveWFInfo &wf_info) {
   if constexpr (sizeof(T) != 8) { printf("rocshmem::gda:amo_set not implemented for non-64bit types.\n"); abort(); }//TODO:support for non-uint64t
@@ -1009,8 +1029,8 @@ __device__ T GDAContext::internal_amo_swap(void *dst, T value, int pe,
        * The compare-and-swap loop will execute at least twice if wrong.
        * It may run additional times if contention on memory location.
        */
-      while ((ret_val = qps[qp_index].atomic_cas(base_heap[pe] + L_offset,
-                         value, cond, wf_info)) != cond) {
+      while (wf_info.update(pe), (ret_val = qps[qp_index].atomic_cas(
+             base_heap[pe] + L_offset, value, cond, wf_info)) != cond) {
         cond = ret_val;
       }
       need_turn = false;

@@ -314,20 +314,21 @@ __device__ void GDAContext::getmem_nbi_wave(void *dest, const void *source,
 
 
 //TODO: copied from IPC, needs review
-__device__ void GDAContext::putmem_signal(void *dest, const void *source, size_t nelems,
-                                          uint64_t *sig_addr, uint64_t signal, int sig_op,
-                                          int pe) {
+__device__ void GDAContext::putmem_signal(void *dest, const void *source,
+    size_t nelems, uint64_t *sig_addr, uint64_t signal, int sig_op, int pe) {
   ActiveWFInfo wf_info(pe);
   int qp_index = get_qp_index(pe, wf_info);
-  putmem(dest, source, nelems, pe);
-  fence();
+  internal_putmem(dest, source, nelems, pe, qp_index, wf_info);
+  qps[qp_index].quiet(wf_info);
 
   switch (sig_op) {
   case ROCSHMEM_SIGNAL_SET:
-    amo_set<uint64_t>(static_cast<void*>(sig_addr), signal, pe);
+    internal_amo_swap<uint64_t>(static_cast<void*>(sig_addr), signal, pe,
+      qp_index, wf_info);
     break;
   case ROCSHMEM_SIGNAL_ADD:
-    amo_add<uint64_t>(static_cast<void*>(sig_addr), signal, pe);
+    internal_amo_add<uint64_t>(static_cast<void*>(sig_addr), signal, pe,
+      qp_index, wf_info);
     break;
   default:
     DPRINTF("[%s] Invalid sig_op value (%d)\n", __func__, sig_op);
@@ -336,21 +337,22 @@ __device__ void GDAContext::putmem_signal(void *dest, const void *source, size_t
   //TODO: missing quiet_pe?
 }
 
-__device__ void GDAContext::putmem_signal_wg(void *dest, const void *source, size_t nelems,
-                                             uint64_t *sig_addr, uint64_t signal, int sig_op,
-                                             int pe) {
+__device__ void GDAContext::putmem_signal_wg(void *dest, const void *source,
+      size_t nelems, uint64_t *sig_addr, uint64_t signal, int sig_op, int pe) {
   ActiveWFInfo wf_info(pe, ThreadScope::wg);
   int qp_index = get_qp_index(pe, wf_info);
-  putmem_wg(dest, source, nelems, pe);
-  fence();
+  internal_putmem_wg(dest, source, nelems, pe, qp_index, wf_info);
+  qps[qp_index].quiet(wf_info);
 
   if (is_thread_zero_in_block()) {
     switch (sig_op) {
     case ROCSHMEM_SIGNAL_SET:
-      amo_set<uint64_t>(static_cast<void*>(sig_addr), signal, pe);
+      internal_amo_swap<uint64_t>(static_cast<void*>(sig_addr), signal, pe,
+        qp_index, wf_info);
       break;
     case ROCSHMEM_SIGNAL_ADD:
-      amo_add<uint64_t>(static_cast<void*>(sig_addr), signal, pe);
+      internal_amo_add<uint64_t>(static_cast<void*>(sig_addr), signal, pe,
+        qp_index, wf_info);
       break;
     default:
       DPRINTF("[%s] Invalid sig_op value (%d)\n", __func__, sig_op);
@@ -360,21 +362,22 @@ __device__ void GDAContext::putmem_signal_wg(void *dest, const void *source, siz
   }
 }
 
-__device__ void GDAContext::putmem_signal_wave(void *dest, const void *source, size_t nelems,
-                                               uint64_t *sig_addr, uint64_t signal, int sig_op,
-                                               int pe) {
+__device__ void GDAContext::putmem_signal_wave(void *dest, const void *source,
+      size_t nelems, uint64_t *sig_addr, uint64_t signal, int sig_op, int pe) {
   ActiveWFInfo wf_info(pe, ThreadScope::wave);
   int qp_index = get_qp_index(pe, wf_info);
-  putmem_wave(dest, source, nelems, pe);
-  fence();
+  internal_putmem_wave(dest, source, nelems, pe, qp_index, wf_info);
+  qps[qp_index].quiet(wf_info);
 
   if (is_thread_zero_in_wave()) {
     switch (sig_op) {
     case ROCSHMEM_SIGNAL_SET:
-      amo_set<uint64_t>(static_cast<void*>(sig_addr), signal, pe);
+      internal_amo_swap<uint64_t>(static_cast<void*>(sig_addr), signal, pe,
+        qp_index, wf_info);
       break;
     case ROCSHMEM_SIGNAL_ADD:
-      amo_add<uint64_t>(static_cast<void*>(sig_addr), signal, pe);
+      internal_amo_add<uint64_t>(static_cast<void*>(sig_addr), signal, pe,
+        qp_index, wf_info);
       break;
     default:
       DPRINTF("[%s] Invalid sig_op value (%d)\n", __func__, sig_op);
@@ -384,34 +387,39 @@ __device__ void GDAContext::putmem_signal_wave(void *dest, const void *source, s
   }
 }
 
-__device__ void GDAContext::putmem_signal_nbi(void *dest, const void *source, size_t nelems,
-                                              uint64_t *sig_addr, uint64_t signal, int sig_op,
-                                              int pe) {
+__device__ void GDAContext::putmem_signal_nbi(void *dest, const void *source,
+    size_t nelems, uint64_t *sig_addr, uint64_t signal, int sig_op, int pe) {
   putmem_signal(dest, source, nelems, sig_addr, signal, sig_op, pe); //TODO: optimize
 }
 
-__device__ void GDAContext::putmem_signal_nbi_wg(void *dest, const void *source, size_t nelems,
-                                                 uint64_t *sig_addr, uint64_t signal, int sig_op,
-                                                 int pe) {
+__device__ void GDAContext::putmem_signal_nbi_wg(void *dest,
+    const void *source, size_t nelems, uint64_t *sig_addr, uint64_t signal,
+    int sig_op, int pe) {
   putmem_signal_wg(dest, source, nelems, sig_addr, signal, sig_op, pe); //TODO: optimize
 }
 
-__device__ void GDAContext::putmem_signal_nbi_wave(void *dest, const void *source, size_t nelems,
-                                                   uint64_t *sig_addr, uint64_t signal, int sig_op,
-                                                   int pe) {
+__device__ void GDAContext::putmem_signal_nbi_wave(void *dest,
+    const void *source, size_t nelems, uint64_t *sig_addr, uint64_t signal,
+    int sig_op, int pe) {
   putmem_signal_wave(dest, source, nelems, sig_addr, signal, sig_op, pe); //TODO: optimize
 }
 
 __device__ uint64_t GDAContext::signal_fetch(const uint64_t *sig_addr) {
+  ActiveWFInfo wf_info(my_pe);
+  int qp_index = get_qp_index(my_pe, wf_info);
   uint64_t *dst = const_cast<uint64_t*>(sig_addr);
-  return amo_fetch_add<uint64_t>(static_cast<void*>(dst), 0, my_pe);
+  return internal_amo_fetch_add<uint64_t>(static_cast<void*>(dst), 0, my_pe,
+           qp_index, wf_info);
 }
 
 __device__ uint64_t GDAContext::signal_fetch_wg(const uint64_t *sig_addr) {
   __shared__ uint64_t value;
   if (is_thread_zero_in_block()) {
+    ActiveWFInfo wf_info(my_pe, ThreadScope::wg);
+    int qp_index = get_qp_index(my_pe, wf_info);
     uint64_t *dst = const_cast<uint64_t*>(sig_addr);
-    value = amo_fetch_add<uint64_t>(static_cast<void*>(dst), 0, my_pe);
+    value = internal_amo_fetch_add<uint64_t>(static_cast<void*>(dst), 0, my_pe,
+              qp_index, wf_info);
   }
   __threadfence_block();
   return value;
@@ -420,8 +428,11 @@ __device__ uint64_t GDAContext::signal_fetch_wg(const uint64_t *sig_addr) {
 __device__ uint64_t GDAContext::signal_fetch_wave(const uint64_t *sig_addr) {
   uint64_t value;
   if (is_thread_zero_in_wave()) {
+    ActiveWFInfo wf_info(my_pe, ThreadScope::wave);
+    int qp_index = get_qp_index(my_pe, wf_info);
     uint64_t *dst = const_cast<uint64_t*>(sig_addr);
-    value = amo_fetch_add<uint64_t>(static_cast<void*>(dst), 0, my_pe);
+    value = internal_amo_fetch_add<uint64_t>(static_cast<void*>(dst), 0, my_pe,
+              qp_index, wf_info);
   }
   __threadfence_block();
   value = __shfl(value, 0);

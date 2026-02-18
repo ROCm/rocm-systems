@@ -350,6 +350,10 @@ class GDAContext : public Context {
       ActiveWFInfo &wf_info);
 
   template <typename T>
+  __device__ T internal_amo_fetch_add(void *dst, T value, int pe, int qp_index,
+      ActiveWFInfo &wf_info);
+
+  template <typename T>
   __device__ T internal_amo_swap(void *dst, T value, int pe, int qp_index,
       ActiveWFInfo &wf_info);
 
