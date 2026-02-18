@@ -94,7 +94,7 @@ class HIPAllocator : public MemoryAllocator {
                 hipError_t (*hip_free_fn)(void*), unsigned flags) :
     MemoryAllocator (hip_alloc_fn, hip_free_fn, flags) {}
 
-  HIPAllocatorType type = AllocatorTypeLast;
+  HIPAllocatorType type = AllocatorTypeCoursegrained;
 
   hipError_t GetIpcHandle(void *dev_ptr, void *handle)
   {

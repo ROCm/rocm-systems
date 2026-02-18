@@ -36,7 +36,6 @@
 #include <dlfcn.h>
 
 #include "rocshmem/rocshmem.hpp"
-#include "atomic_return.hpp"
 #include "backend_type.hpp"
 #include "context_incl.hpp"
 #include "envvar.hpp"
@@ -71,7 +70,13 @@ ROBackend::ROBackend(MPI_Comm comm)
 
   atomic_ret_buffer_ = RetBufferProxyT(num_buff_elems);
 
-  status_ = StatusProxyT(num_buff_elems);
+  if (allocator->type == AllocatorTypeCoarsegrained) {
+    status_ = new DeviceProxy<HIPAllocatorCoarsegrained, char>(num_buff_elems);
+  } else if (allocator->type == AllocatorTypeFinegrained) {
+    status_ = new DeviceProxy<HIPAllocatorFinegrained, char>(num_buff_elems);
+  } else if (allocator->type == AllocatorTypeUncached) {
+    status_ = new DeviceProxy<HIPAllocatorUncached, char>(num_buff_elems);
+  }
 
   queue_ = Queue(envvar::max_num_contexts, queue_size_);
 
@@ -160,7 +165,13 @@ void ROBackend::setup_default_ctx_buffers() {
 
   atomic_ret_buffer_default_ctx_ = RetBufferProxyT(num_buff_elems);
 
-  status_default_ctx_ = StatusProxyT(num_buff_elems);
+  if (allocator->type == AllocatorTypeCoarsegrained) {
+    status_default_ctx_ = new DeviceProxy<HIPAllocatorCoarsegrained, char>(num_buff_elems);
+  } else if (allocator->type == AllocatorTypeFinegrained) {
+    status_default_ctx_ = new DeviceProxy<HIPAllocatorFinegrained, char>(num_buff_elems);
+  } else if (allocator->type == AllocatorTypeUncached) {
+    status_default_ctx_ = new DeviceProxy<HIPAllocatorUncached, char>(num_buff_elems);
+  }
 
   default_ctx_status_.get()->allocate_queue(envvar::max_wavefront_buffers);
   default_ctx_g_ret_buffer_.get()->allocate_queue(envvar::max_wavefront_buffers);

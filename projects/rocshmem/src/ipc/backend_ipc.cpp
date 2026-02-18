@@ -113,8 +113,6 @@ IPCBackend::IPCBackend(TcpBootstrap *bootstrap):  Backend(bootstrap) {
 void IPCBackend::init() {
   ROCSHMEM_HOST_CTX_DEFAULT.ctx_opaque = default_host_ctx.get();
 
-  fine_grained_allocator_ = get_default_allocator();
-
   setup_team_world();
 
   setup_wrk_sync_buffers();

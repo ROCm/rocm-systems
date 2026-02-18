@@ -33,8 +33,15 @@
 
 namespace rocshmem {
 
+class AbstractDeviceProxy {
+public:
+  virtual ~AbstractDeviceProxy() = default;
+
+  virtual __host__ __device__ T* get() = 0;
+};
+  
 template <typename ALLOCATOR, typename T>
-class DeviceProxy {
+class DeviceProxy : public AbstractDeviceProxy {
  public:
   DeviceProxy() = default;
 

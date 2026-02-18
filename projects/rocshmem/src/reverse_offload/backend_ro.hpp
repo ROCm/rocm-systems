@@ -31,7 +31,7 @@
 #include "backend_bc.hpp"
 #include "containers/free_list_impl.hpp"
 #include "hdp_proxy.hpp"
-#include "memory/hip_allocator.hpp"
+#include "memory/default_allocator.hpp"
 #include "backend_proxy.hpp"
 #include "block_handle.hpp"
 #include "context_proxy.hpp"
@@ -58,8 +58,6 @@ class ROHostContext;
  */
 class ROBackend : public Backend {
   using RetBufferProxyT = DeviceProxy<HIPAllocator, uint64_t>;
-  using StatusProxyT =
-          DeviceProxy<HIPDefaultFinegrainedAllocator, char>;
 
  public:
   /**
@@ -324,8 +322,8 @@ class ROBackend : public Backend {
    * operation completes. The GPU then resets status back to zero. There is
    * a separate status variable for each work-item in a RO Context
    */
-  StatusProxyT status_;
-  StatusProxyT status_default_ctx_;
+  AbstractDeviceProxy* status_{nullptr};
+  AbstractDeviceProxy* status_default_ctx_{nullptr};
 };
 
 }  // namespace rocshmem

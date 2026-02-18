@@ -41,6 +41,7 @@
 #include "backend_type.hpp"
 #include "ipc_policy.hpp"
 #include "memory/symmetric_heap.hpp"
+#include "memory/default_allocator.hpp"
 #include "stats.hpp"
 #include "team_tracker.hpp"
 #include "bootstrap/bootstrap.hpp"
@@ -277,6 +278,11 @@ class Backend {
   TeamTracker team_tracker{};
 
   BackendType get_backend_type() { return type; }
+
+  /** @brief Pointer to the default allocator
+   *
+   */
+  HIPAllocator *fine_grained_allocator_{nullptr};
 
  protected:
   /**
