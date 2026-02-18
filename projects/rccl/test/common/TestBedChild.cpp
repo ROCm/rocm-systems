@@ -8,6 +8,9 @@
 
 #include <thread>
 #include <execinfo.h>
+#include <sys/file.h>
+#include <fcntl.h>
+#include <unistd.h>
 #ifdef ENABLE_OPENMP
 #include <omp.h>
 #endif
@@ -162,8 +165,47 @@ namespace RcclUnitTesting
     // Get a unique ID and pass it back to parent process
     // This is called only by TestBed child 0 AFTER all rank children have been forked
     // This ensures GPU/HIP context is initialized only in child processes, not parent
+    //
+    // IMPORTANT: When multiple tests run concurrently (via GPU Scheduler),
+    // multiple child 0 processes may call ncclGetUniqueId() simultaneously,
+    // causing bootstrap network port collisions. Use a file lock to serialize.
+
     ncclUniqueId id;
-    CHILD_NCCL_CALL(ncclGetUniqueId(&id), "ncclGetUniqueId");
+
+    // Acquire exclusive lock to serialize ncclGetUniqueId() across concurrent tests
+    const char* lockPath = "/tmp/rccl_test_getuniqueid.lock";
+    int lockFd = open(lockPath, O_CREAT | O_RDWR, 0666);
+
+    if (lockFd >= 0)
+    {
+        if (this->verbose) INFO("Child %d acquiring lock for ncclGetUniqueId...\n", this->childId);
+
+        // flock() blocks until lock is acquired (automatically released when file is closed)
+        if (flock(lockFd, LOCK_EX) == 0)
+        {
+            if (this->verbose) INFO("Child %d acquired lock, calling ncclGetUniqueId\n", this->childId);
+
+            // Critical section: only one process executes this at a time
+            CHILD_NCCL_CALL(ncclGetUniqueId(&id), "ncclGetUniqueId");
+
+            if (this->verbose) INFO("Child %d releasing lock\n", this->childId);
+            flock(lockFd, LOCK_UN);  // Explicit unlock (also happens on close)
+        }
+        else
+        {
+            ERROR("Child %d failed to acquire lock, proceeding without lock\n", this->childId);
+            CHILD_NCCL_CALL(ncclGetUniqueId(&id), "ncclGetUniqueId");
+        }
+
+        close(lockFd);
+    }
+    else
+    {
+        // Lock file creation failed, proceed without locking
+        if (this->verbose) INFO("Child %d could not create lock file, proceeding without lock\n", this->childId);
+        CHILD_NCCL_CALL(ncclGetUniqueId(&id), "ncclGetUniqueId");
+    }
+
     retValBuf.resize(sizeof(id));
     memcpy(retValBuf.data(), &id, sizeof(id));
 
