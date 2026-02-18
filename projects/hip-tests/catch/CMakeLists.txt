@@ -181,6 +181,15 @@ if (WIN32)
   SET(CMAKE_CXX_RESPONSE_FILE_LINK_FLAG "")
 endif()
 
+# Add debug flags for RelWithDebInfo and Debug builds on Windows
+if(WIN32)
+    if(CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo" OR CMAKE_BUILD_TYPE STREQUAL "Debug")
+        add_compile_options(-g -gcodeview -gline-tables-only)
+        add_link_options(-Xlinker /DEBUG:FULL)
+        message(STATUS "Added debug flags for ${CMAKE_BUILD_TYPE} build")
+    endif()
+endif()
+
 if(HIP_PLATFORM STREQUAL "amd")
     if(WIN32)
         set(win_disable_warnings ${win_disable_warnings} -Wno-ignored-attributes -Wno-microsoft-cast)
@@ -245,6 +254,14 @@ string(STRIP "${OFFLOAD_ARCH_STR}" OFFLOAD_ARCH_STR)
 message(STATUS "Using offload arch string: ${OFFLOAD_ARCH_STR}")
 if(DEFINED OFFLOAD_ARCH_STR)
     set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} ${OFFLOAD_ARCH_STR}")
+endif()
+
+# # Add debug flags to HIP compilation for test sources on Windows
+if(WIN32)
+    if(CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo" OR CMAKE_BUILD_TYPE STREQUAL "Debug")
+        set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} -g -gcodeview -gline-tables-only")
+        message(STATUS "Added debug flags to CMAKE_HIP_FLAGS for ${CMAKE_BUILD_TYPE}")
+    endif()
 endif()
 
 # get hip-tests commit short hash
