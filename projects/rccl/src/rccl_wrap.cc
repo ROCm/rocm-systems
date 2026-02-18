@@ -490,7 +490,7 @@ bool rcclUseReduceScatterDirect(struct ncclComm* comm, size_t& msgSize) {
   if (msgSize > threshold) return false;
   // for 2 nodes, enable if msgSize is in 128KiB .. 2MiB range
   if (comm->nNodes == 2) return msgSize >= (size_t)131072;
-  if (comm->nNodes == 8 || comm->nNodes == 4) return true;
+  if (comm->nNodes == 4 || comm->nNodes == 8 || comm->nNodes == 16) return true;
   return false;
 }
 

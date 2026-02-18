@@ -24,18 +24,17 @@ namespace {
       const int nRanks = ncclShmem.comm.nRanks;
       const ssize_t numElements = work->count;
 
-      // Partition elements across blocks (channels)
+      // Calculate Offset to utilize multiple channels
       ssize_t elementsPerBlock = numElements / gridDim.x;
       ssize_t remainderElements = numElements % gridDim.x;
-      ssize_t numElementsPerBlock =
-          elementsPerBlock + (blockIdx.x < remainderElements ? 1 : 0);
-      ssize_t channelOffset =
-          blockIdx.x * elementsPerBlock + min((ssize_t)blockIdx.x, remainderElements);
+      // Calculate the number of elements per block for each block
+      // The first n blocks get 1 extra element to account for the remainder (n = remainderElements)
+      ssize_t numElementsPerBlock = elementsPerBlock + (blockIdx.x < remainderElements ? 1 : 0);
+      ssize_t channelOffset = blockIdx.x * elementsPerBlock + min((ssize_t)blockIdx.x, remainderElements);
 
       T* recvbuff = (T*)work->recvbuff;
       constexpr int MaxSrcs = 64;
 
-      // Warp scratch for pointers
       void** srcPtrs = (void**)ncclScratchForWarp(0);
 
       // Step 1: Reduce first MaxSrcs ranks → intermediate buffer
