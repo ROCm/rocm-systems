@@ -104,9 +104,9 @@ public:
 
 struct consumer_producer_t
 {
-    std::thread                        consumer{};
-    std::thread                        producer{};
-    std::shared_ptr<std::atomic<bool>> flag{};
+    std::thread                       consumer{};
+    std::thread                       producer{};
+    std::shared_ptr<std::atomic<int>> flag{};
 };
 
 consumer_producer_t
@@ -132,7 +132,7 @@ start_threads(rocprofiler_thread_trace_shader_data_callback_t cb_fn,
     }
     if(agent == nullptr) abort();
 
-    auto running_flag = std::make_shared<std::atomic<bool>>(true);
+    auto running_flag = std::make_shared<std::atomic<int>>(WORKER_FLAG_RUNNING);
 
     auto params              = thread_trace_parameter_pack{};
     params.triple_buffering  = true;
@@ -193,7 +193,7 @@ TEST(thread_trace, init_shutdown)
 
     auto userdata = rocprofiler_user_data_t{};
     auto threads  = rocprofiler::thread_trace::start_threads(empty_cb, always_null, userdata);
-    threads.flag->store(false);
+    threads.flag->store(rocprofiler::thread_trace::WORKER_FLAG_STOP);
     threads.consumer.join();
     threads.producer.join();
 }
@@ -222,7 +222,7 @@ TEST(thread_trace, status_query)
     while(!status_called)
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
 
-    threads.flag->store(false);
+    threads.flag->store(rocprofiler::thread_trace::WORKER_FLAG_STOP);
     threads.consumer.join();
     threads.producer.join();
 }
@@ -266,7 +266,7 @@ TEST(thread_trace, multiple_calls)
     while(status_called < 1000)
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
 
-    threads.flag->store(false);
+    threads.flag->store(rocprofiler::thread_trace::WORKER_FLAG_STOP);
     threads.consumer.join();
     threads.producer.join();
 
@@ -324,7 +324,7 @@ TEST(thread_trace, data_integrity)
     while(status_called < 100)
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
 
-    threads.flag->store(false);
+    threads.flag->store(rocprofiler::thread_trace::WORKER_FLAG_STOP);
     threads.consumer.join();
     threads.producer.join();
 
@@ -375,7 +375,7 @@ TEST(thread_trace, slow_cpu)
     while(!interrupt_received)
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
 
-    threads.flag->store(false);
+    threads.flag->store(rocprofiler::thread_trace::WORKER_FLAG_STOP);
     threads.consumer.join();
     threads.producer.join();
 
@@ -421,7 +421,7 @@ TEST(thread_trace, slow_gpu)
     while(!interrupt_received)
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
 
-    threads.flag->store(false);
+    threads.flag->store(rocprofiler::thread_trace::WORKER_FLAG_STOP);
     threads.consumer.join();
     threads.producer.join();
 
@@ -494,7 +494,7 @@ TEST(thread_trace, restart_after_overflow)
     while(!state->seen_normal_after_overflow.load())
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
 
-    threads.flag->store(false);
+    threads.flag->store(rocprofiler::thread_trace::WORKER_FLAG_STOP);
     threads.consumer.join();
     threads.producer.join();
 
@@ -565,7 +565,7 @@ TEST(thread_trace, buffer_alternation)
     while(callback_state.callback_count < 20)
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
 
-    threads.flag->store(false);
+    threads.flag->store(rocprofiler::thread_trace::WORKER_FLAG_STOP);
     threads.consumer.join();
     threads.producer.join();
 
