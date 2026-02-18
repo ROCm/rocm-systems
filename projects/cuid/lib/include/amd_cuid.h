@@ -245,8 +245,8 @@ amdcuid_status_t amdcuid_refresh();
  */
 typedef enum {
     AMDCUID_QUERY_NONE = 0,                   ///< No query
-    AMDCUID_QUERY_PRIMARY_CUID = 1,           ///< Query the primary CUID (amdcuid_primary_id). The bits will be formatted in the UUIDv8 format. Requires elevated permissions.
-    AMDCUID_QUERY_DERIVED_CUID = 2,           ///< Query the derived CUID (amdcuid_derived_id). The bits will be formatted in the UUIDv8 format. This is the user visible CUID in most cases.
+    AMDCUID_QUERY_PRIMARY_CUID = 1,           ///< Query the primary CUID (amdcuid_id_t). The bits will be formatted in the UUIDv8 format. Requires elevated permissions.
+    AMDCUID_QUERY_DERIVED_CUID = 2,           ///< Query the derived CUID (amdcuid_id_t). The bits will be formatted in the UUIDv8 format. This is the user visible CUID in most cases.
     AMDCUID_QUERY_HARDWARE_FINGERPRINT = 3,   ///< Query the hardware fingerprint (aka serial number/id) (uint64_t). Requires elevated permissions.
     AMDCUID_QUERY_DEVICE_PATH = 4,            ///< Query the device path (string).
     AMDCUID_QUERY_DEVICE_TYPE = 5,            ///< Query the device type (amdcuid_device_type_t).

@@ -57,6 +57,7 @@ from utils.utils import (
     parse_sets_yaml,
     replace_env,
     replace_rank,
+    resolve_rocm_library_path,
     set_locale_encoding,
 )
 
@@ -158,20 +159,20 @@ class RocProfCompute:
             console_error("Cannot use --list-available-metrics with --blocks")
 
         # fallback to csv output format, if rocpd public api not available
-        if (
-            self.__mode == "profile"
-            and self.__args.format_rocprof_output == "rocpd"
-            and not (
-                Path(self.__args.rocprofiler_sdk_tool_path).parents[1]
-                / "librocprofiler-sdk-rocpd.so"
-            ).exists()
-        ):
-            console_warning(
-                "rocpd output format is not supported with the "
-                "current rocprofiler-sdk version. "
-                "Falling back to csv output format."
+        if self.__mode == "profile" and self.__args.format_rocprof_output == "rocpd":
+            rocpd_path = resolve_rocm_library_path(
+                str(
+                    Path(self.__args.rocprofiler_sdk_tool_path).parents[1]
+                    / "librocprofiler-sdk-rocpd.so"
+                )
             )
-            self.__args.format_rocprof_output = "csv"
+            if not Path(rocpd_path).exists():
+                console_warning(
+                    "rocpd output format is not supported with the "
+                    "current rocprofiler-sdk version. "
+                    "Falling back to csv output format."
+                )
+                self.__args.format_rocprof_output = "csv"
 
         # Validate name and output directory arguments in profiling mode
         # Skip validation if only listing metrics or sets
@@ -193,8 +194,8 @@ class RocProfCompute:
 
                 if self.__args.subpath != "gpu_model":
                     console_warning(
-                        "--subpath is deprecated and will be removed in future "
-                        "releases."
+                        "--subpath is deprecated and will be "
+                        "removed in future releases."
                     )
 
             if self.__args.name is not None and "/" in self.__args.name:
@@ -390,10 +391,11 @@ class RocProfCompute:
             parser.build_dfs(arch_configs=ac, filter_metrics=[], sys_info=sys_info)
 
             print(f"{'INDEX':<8} {'BLOCK ALIAS':<16} {'BLOCK NAME'}")
+            panel_alias_dict = {value: key for key, value in get_panel_alias().items()}
             for key, value in ac.metric_list.items():
                 if key.count(".") > 0:
                     continue
-                print(f"{key:<8} {get_panel_alias()[value]:<16} {value}")
+                print(f"{key:<8} {panel_alias_dict[key]:<16} {value}")
             sys.exit(0)
         else:
             console_error("Unsupported arch")
