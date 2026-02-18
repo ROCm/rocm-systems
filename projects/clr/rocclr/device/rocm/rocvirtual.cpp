@@ -3517,7 +3517,7 @@ void VirtualGPU::startSchedulerQueueThread() {
                            }),
                     pendingSchedulerEvents_.end());
           has_active_events = !pendingSchedulerEvents_.empty();
-	}
+        }
       }
       // All scheduler completion signals completed, go back to wait
     }
