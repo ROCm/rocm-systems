@@ -157,17 +157,6 @@ bool GPUScheduler::launchTest(const TestJob& job, const std::vector<int>& gpus)
     if (pid == 0)
     {
         // Child process
-        // Generate unique NCCL comm ID in child process AFTER forking
-        // This prevents GPU context inheritance from parent and avoids port collisions
-        ncclUniqueId ncclId;
-        ncclResult_t result = ncclGetUniqueId(&ncclId);
-        if (result != ncclSuccess)
-        {
-            ERROR("Child %d: Failed to generate NCCL unique ID for test %s: %d\n",
-                  getpid(), job.testName.c_str(), result);
-            _exit(1);
-        }
-
         // Set environment variables to restrict GPU visibility
         std::stringstream visibleDevices;
         for (size_t i = 0; i < gpus.size(); ++i)
@@ -181,20 +170,17 @@ bool GPUScheduler::launchTest(const TestJob& job, const std::vector<int>& gpus)
         setenv("HIP_VISIBLE_DEVICES", visibleDevices.str().c_str(), 1);
         setenv("ROCR_VISIBLE_DEVICES", visibleDevices.str().c_str(), 1);
 
-        // Set the pre-generated NCCL unique ID as an environment variable
-        // The test process can retrieve this instead of calling ncclGetUniqueId()
-        char ncclIdHex[NCCL_UNIQUE_ID_BYTES * 2 + 1];
-        for (int i = 0; i < NCCL_UNIQUE_ID_BYTES; i++)
-        {
-            sprintf(&ncclIdHex[i * 2], "%02x", (unsigned char)ncclId.internal[i]);
-        }
-        ncclIdHex[NCCL_UNIQUE_ID_BYTES * 2] = '\0';
-        setenv("UT_RCCL_UNIQUE_ID", ncclIdHex, 1);
-
         if (config_.verboseLogging)
         {
             INFO("Child process %d: HIP_VISIBLE_DEVICES=%s\n", getpid(), visibleDevices.str().c_str());
         }
+
+        // NOTE: We do NOT call ncclGetUniqueId() here!
+        // TestBed has its own mechanism where it forks all rank children first,
+        // then asks child 0 to generate the unique ID, then broadcasts it.
+        // If we call ncclGetUniqueId() here, we initialize the GPU/HIP context
+        // BEFORE TestBed forks, causing all rank children to inherit the context
+        // which leads to GPU memory conflicts and OOM errors.
 
         // Execute the test function with the GPU assignment
         int exitCode = 0;
