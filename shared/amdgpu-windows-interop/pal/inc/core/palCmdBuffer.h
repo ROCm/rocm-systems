@@ -334,24 +334,42 @@ enum CacheCoherencyUsageFlags : uint32
     CoherShaderRead         = 0x00000002,     ///< Data read by a GPU shader.
     CoherShaderWrite        = 0x00000004,     ///< Data written by a GPU shader.
     CoherCopySrc            = 0x00000008,     ///< Source of a ICmdBuffer::CmdCopy*() call.
-    CoherCopyDst            = 0x00000010,     ///< Destination of a ICmdBuffer::CmdCopy*() call.
+    CoherCopyDst            = 0x00000010,     ///< Destination of a ICmdBuffer::CmdCopy*() or CmdClear() call.
     CoherColorTarget        = 0x00000020,     ///< Color target.
     CoherDepthStencilTarget = 0x00000040,     ///< Depth stencil target.
     CoherResolveSrc         = 0x00000080,     ///< Source of a CmdResolveImage() call.
     CoherResolveDst         = 0x00000100,     ///< Destination of a CmdResolveImage() call.
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 967
+    CoherIndirectArgs       = 0x00000200,     ///< Source argument data read by CmdDrawIndirect() and similar functions.
+    CoherIndexData          = 0x00000400,     ///< Index buffer data.
+    CoherQueueAtomic        = 0x00000800,     ///< Destination of a CmdMemoryAtomic() call.
+    CoherTimestamp          = 0x00001000,     ///< Destination of a CmdWriteTimestamp() call.
+    CoherStreamOut          = 0x00002000,     ///< Data written as stream output.
+    CoherMemory             = 0x00004000,     ///< Data read or written directly from/to memory
+    CoherSampleRate         = 0x00008000,     ///< CmdBindSampleRateImage() source.
+    CoherPresent            = 0x00010000,     ///< Source of present.
+    CoherCp                 = 0x00040000,     ///< HW Command Processor (CP) encompassing the front - end command
+                                              ///< processing of any queue, including SDMA.
+    CoherAllUsages          = 0x0007FFFF,
+#elif PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 914
     CoherClear              = 0x00000200,     ///< Destination of a CmdClear() call.
     CoherIndirectArgs       = 0x00000400,     ///< Source argument data read by CmdDrawIndirect() and similar functions.
     CoherIndexData          = 0x00000800,     ///< Index buffer data.
     CoherQueueAtomic        = 0x00001000,     ///< Destination of a CmdMemoryAtomic() call.
     CoherTimestamp          = 0x00002000,     ///< Destination of a CmdWriteTimestamp() call.
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 914
     CoherStreamOut          = 0x00004000,     ///< Data written as stream output.
     CoherMemory             = 0x00008000,     ///< Data read or written directly from/to memory
     CoherSampleRate         = 0x00010000,     ///< CmdBindSampleRateImage() source.
     CoherPresent            = 0x00020000,     ///< Source of present.
     CoherCp                 = 0x00080000,     ///< HW Command Processor (CP) encompassing the front - end command
-    CoherAllUsages          = 0x000FFFFF,     ///<  processing of any queue, including SDMA.
-#else
+                                              ///< processing of any queue, including SDMA.
+    CoherAllUsages          = 0x000FFFFF,
+#else // PAL_CLIENT_INTERFACE_MAJOR_VERSION
+    CoherClear              = 0x00000200,     ///< Destination of a CmdClear() call.
+    CoherIndirectArgs       = 0x00000400,     ///< Source argument data read by CmdDrawIndirect() and similar functions.
+    CoherIndexData          = 0x00000800,     ///< Index buffer data.
+    CoherQueueAtomic        = 0x00001000,     ///< Destination of a CmdMemoryAtomic() call.
+    CoherTimestamp          = 0x00002000,     ///< Destination of a CmdWriteTimestamp() call.
     CoherCeLoad             = 0x00004000,     ///< Source of a CmdLoadCeRam() call.
     CoherCeDump             = 0x00008000,     ///< Destination of CmdDumpCeRam() call.
     CoherStreamOut          = 0x00010000,     ///< Data written as stream output.
@@ -359,7 +377,8 @@ enum CacheCoherencyUsageFlags : uint32
     CoherSampleRate         = 0x00040000,     ///< CmdBindSampleRateImage() source.
     CoherPresent            = 0x00080000,     ///< Source of present.
     CoherCp                 = 0x00200000,     ///< HW Command Processor (CP) encompassing the front - end command
-    CoherAllUsages          = 0x003FFFFF,     ///<  processing of any queue, including SDMA.
+                                              ///< processing of any queue, including SDMA.
+    CoherAllUsages          = 0x003FFFFF,
 #endif
 
     CoherShader             = CoherShaderRead | CoherShaderWrite,
@@ -2073,7 +2092,9 @@ struct BoundColorTarget
     uint32         targetIndex;    ///< Render target index where the target image is currently bound.
     SwizzledFormat swizzledFormat; ///< Format and swizzle of the target image.
     uint32         samples;        ///< Sample count for the target.
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 961
     uint32         fragments;      ///< Fragment count for the target.
+#endif
     ClearColor     clearValue;     ///< clear color value.
 };
 
@@ -2095,7 +2116,12 @@ enum ComputeStateFlags : uint32
                                            ///  kernel arguments (if applicable). Note that the current user data will
                                            ///  be invalidated on CmdSaveComputeState.
     ComputeStateBorderColorPalette  = 0x2, ///< Selects the bound border color pallete that affects compute pipelines.
-    ComputeStateAll                 = 0x3, ///< Selects all state
+    ComputeStateAllState            = 0x3, ///< Selects all state
+    ComputeStateTreatAsBlt          = 0x4, ///< This compute state counts towards PipelineStageBlt.
+    ComputeStateAllFlags            = 0x7, ///< Selects all possible options
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 965
+    ComputeStateAll                 = ComputeStateAllState,
+#endif
 };
 
 /// Provides dynamic command buffer flags during submission
@@ -2360,17 +2386,28 @@ struct CmdBufferPayload
     uint32               payload[1];    ///< Initial DWORD of payload data with the other data to follow.
 };
 
-/// Flags controlling which sub-queue(s) of a command buffer should insert an RGP trace marker.  Zeroing out this
-/// union is invalid, because RGP markers must be sent to at least one sub-queue.
+/// Flags controlling which sub-queue(s) of a command buffer should insert an RGP trace marker and how the marker data
+/// is written. Zeroing out this union is invalid, because RGP markers must be sent to at least one sub-queue.
 union RgpMarkerSubQueueFlags
 {
     struct
     {
         uint32  includeMainSubQueue    :  1; ///< If set, includes the main sub-queue in the RGP marker.
         uint32  includeGangedSubQueues :  1; ///< If set, includes any ganged sub-queues in the RGP marker.
-        uint32  reserved               : 30; ///< Reserved for future use.
+        uint32  singleTokenWrite       :  1; ///< If set, write RGP marker to a table and an index to the register
+                                             ///< When this flag is set, numDwords must be one.
+        uint32  reserved               : 29; ///< Reserved for future use.
     };
     uint32  u32All; ///< Flags packed into a uint32
+};
+
+/// Bitmask values for flags giving hints for commands that use GPU memory virtual addresses instead of GPU memory
+/// objects.
+enum GpuVaHintFlags : uint32
+{
+    GpuVaHintIsTmzProtected   = 0x01, ///< It must be set if either source or destination memory is TMZ protected.
+                                      ///< Only used in CmdCopyMemoryFromGpuVa on DMA queues.
+    GpuVaHintAllFlags         = 0x01  ///< Clients should NOT use it, for internal static_assert purpose only.
 };
 
 /**
@@ -3256,11 +3293,28 @@ public:
     /// @param [in] regionCount     Number of regions to copy; size of the pRegions array.
     /// @param [in] pRegions        Array of copy regions, each entry specifynig a source offset, destination offset,
     ///                             and copy size.
+    /// @param [in] gpuVaHintFlags  Hints about the corresponding GPU memories.
     virtual void CmdCopyMemoryByGpuVa(
         gpusize                 srcGpuVirtAddr,
         gpusize                 dstGpuVirtAddr,
         uint32                  regionCount,
-        const MemoryCopyRegion* pRegions) = 0;
+        const MemoryCopyRegion* pRegions,
+        uint32                  gpuVaHintFlags) = 0;
+
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 969
+    void CmdCopyMemoryByGpuVa(
+        gpusize                 srcGpuVirtAddr,
+        gpusize                 dstGpuVirtAddr,
+        uint32                  regionCount,
+        const MemoryCopyRegion* pRegions)
+    {
+        CmdCopyMemoryByGpuVa(srcGpuVirtAddr,
+                             dstGpuVirtAddr,
+                             regionCount,
+                             pRegions,
+                             0);
+    }
+#endif
 
     /// Copies multiple regions from one image to another.
     ///
@@ -3374,6 +3428,43 @@ public:
     }
 #endif
 
+    /// Copies data directly (without format conversion) from one GPU memory virtual address to an image.
+    ///
+    /// @note  The CmdCopyMemoryToImage() path should be preferred because it contains more optimizations due to more
+    ///        knowledge about the memory itself that is lost when only virtual address is passed in.
+    ///
+    /// For compressed images, the extents are specified in compression blocks.
+    ///
+    /// The size of the data copied from memory is implicitly derived from the image extents.
+    ///
+    /// The source memory offset has to be aligned to the smaller of the copied texel size or 4 bytes.  A destination
+    /// subresource cannot be present more than once per CmdCopyMemoryToImage() call.
+    ///
+    /// Each region's imageOffset must be >= 0 and imageOffset + imageExtent must be <= imageSubres's extent.
+    ///
+    /// This function requires use of the following barrier flags:
+    /// - PipelineStage:  @ref PipelineStageBlt
+    /// - CacheCoherency: @ref CoherCopySrc for the source and @ref CoherCopyDst for the destination.
+    /// - ImageLayout:    @ref LayoutCopyDst
+    ///
+    /// @param [in] srcGpuVirtAddr GPU memory vitrual address where the source regions are located.
+    /// @param [in] dstImage       Image where destination data will be written.
+    /// @param [in] dstImageLayout Current allowed usages and engines for the destination image.  These masks must
+    ///                            include LayoutCopyDst and the ImageLayoutEngineFlags corresponding to the engine
+    ///                            this function is being called on.
+    /// @param [in] regionCount    Number of regions to copy; size of the pRegions array.
+    /// @param [in] pRegions       Array of copy regions, each entry specifying a source offset, a destination
+    ///                            subresource, destination x/y/z offset, and copy size in the x/y/z dimensions.
+    /// @param [in] flags          A mask of ORed @ref CopyMemoryToImageControlFlags that can be used to control copy
+    ///                            behavior.
+    virtual void CmdCopyMemoryToImageByGpuVa(
+        gpusize                      srcGpuVirtAddr,
+        const IImage&                dstImage,
+        ImageLayout                  dstImageLayout,
+        uint32                       regionCount,
+        const MemoryImageCopyRegion* pRegions,
+        uint32                       flags) = 0;
+
     /// Copies data directly (without format conversion) from an image to a GPU memory object.
     ///
     /// For compressed images, the extents are specified in compression blocks.
@@ -3402,6 +3493,40 @@ public:
         const IImage&                srcImage,
         ImageLayout                  srcImageLayout,
         const IGpuMemory&            dstGpuMemory,
+        uint32                       regionCount,
+        const MemoryImageCopyRegion* pRegions) = 0;
+
+    /// Copies data directly (without format conversion) from an image to one GPU memory virtual address.
+    ///
+    /// @note  The CmdCopyImageToMemory() path should be preferred because it contains more optimizations due to more
+    ///        knowledge about the memory itself that is lost when only virtual address is passed in.
+    ///
+    /// For compressed images, the extents are specified in compression blocks.
+    ///
+    /// The size of the data copied to memory is implicitly derived from the image extents.
+    ///
+    /// The destination memory offset has to be aligned to the smaller of the copied texel size or 4 bytes.  A
+    /// destination region cannot be present more than once per CmdCopyImageToMemory() call.
+    ///
+    /// Each region's imageOffset must be >= 0 and imageOffset + imageExtent must be <= imageSubres's extent.
+    ///
+    /// This function requires use of the following barrier flags:
+    /// - PipelineStage:  @ref PipelineStageBlt
+    /// - CacheCoherency: @ref CoherCopySrc for the source and @ref CoherCopyDst for the destination.
+    /// - ImageLayout:    @ref LayoutCopySrc
+    ///
+    /// @param [in] srcImage       Image where source data will be read from.
+    /// @param [in] srcImageLayout Current allowed usages and engines for the source image.  These masks must
+    ///                            include LayoutCopySrc and the ImageLayoutEngineFlags corresponding to the engine
+    ///                            this function is being called on.
+    /// @param [in] dstGpuVirtAddr GPU memory vitrual address where the destination data will be written.
+    /// @param [in] regionCount    Number of regions to copy; size of the pRegions array.
+    /// @param [in] pRegions       Array of copy regions, each entry specifying a destination offset, a source
+    ///                            subresource, source x/y/z offset, and copy size in the x/y/z dimensions.
+    virtual void CmdCopyImageToMemoryByGpuVa(
+        const IImage&                srcImage,
+        ImageLayout                  srcImageLayout,
+        gpusize                      dstGpuVirtAddr,
         uint32                       regionCount,
         const MemoryImageCopyRegion* pRegions) = 0;
 
@@ -3698,7 +3823,11 @@ public:
     ///
     /// This function requires use of the following barrier flags:
     /// - PipelineStage:  @ref PipelineStageCs is expected but the more general @ref PipelineStageBlt is also OK.
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 967
+    /// - CacheCoherency: @ref CoherShader is expected but the more general @ref CoherCopyDst is also OK.
+#else
     /// - CacheCoherency: @ref CoherShader is expected but the more general @ref CoherClear is also OK.
+#endif
     ///
     /// @param [in] gpuMemory     GPU memory to be cleared.
     /// @param [in] color         Specifies the clear color data and how to interpret it.
@@ -3756,7 +3885,11 @@ public:
     /// - ImageLayout:    @ref LayoutColorTarget
     /// Otherwise the following barrier flags must be used:
     /// - PipelineStage:  @ref PipelineStageBlt
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 967
+    /// - CacheCoherency: @ref CoherCopyDst
+#else
     /// - CacheCoherency: @ref CoherClear
+#endif
     ///
     /// @param [in] image       Image to be cleared.
     /// @param [in] imageLayout Current allowed usages and engines for the target image.
@@ -3809,7 +3942,9 @@ public:
         uint8                         stencil,
         uint8                         stencilWriteMask,
         uint32                        samples,
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 961
         uint32                        fragments,
+#endif
         DepthStencilSelectFlags       flag,
         uint32                        regionCount,
         const ClearBoundTargetRegion* pClearRegions) = 0;
@@ -3827,7 +3962,11 @@ public:
     /// - ImageLayout:    @ref LayoutDepthStencilTarget
     /// Otherwise the following barrier flags must be used:
     /// - PipelineStage:  @ref PipelineStageBlt
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 967
+    /// - CacheCoherency: @ref CoherCopyDst
+#else
     /// - CacheCoherency: @ref CoherClear
+#endif
     ///
     /// @param [in] image            Image to be cleared.
     /// @param [in] depth            Depth clear value.
@@ -4715,15 +4854,17 @@ public:
     /// give PAL clients a convenient way to issue their own internal compute workloads without modifying the
     /// application-facing state.
     ///
-    /// A call to this function must be preceded by a call to CmdSaveComputeState and the save stateFlags must contain
-    /// all restore stateFlags, otherwise the values of the restored state are undefined.
+    /// A call to this function must be preceded by a call to CmdSaveComputeState.
     ///
     /// This function can only be called on command buffers that support compute workloads. All previously disabled
     /// query counters will be reactivated.
     ///
     /// @param [in] stateFlags  A mask of ORed @ref ComputeStateFlags indicating which state to restore.
-    virtual void CmdRestoreComputeState(
-        uint32 stateFlags) = 0;
+    virtual void CmdRestoreComputeState() = 0;
+
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 965
+    void CmdRestoreComputeState(uint32 stateFlags) { CmdRestoreComputeState(); }
+#endif
 
     /// Issues commands which complete two tasks: using the provided @ref IIndirectCmdGenerator object to translate the
     /// indirect argument buffer into a format understandable by the GPU; and then executing the generated commands.

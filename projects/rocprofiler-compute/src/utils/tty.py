@@ -97,7 +97,9 @@ def convert_time_columns(df: pd.DataFrame, time_unit: str) -> pd.DataFrame:
 
     # Avoid modifying the original
     df_copy = df.copy()
-    time_rows = df_copy["Unit"].str.lower().str.contains("ns", na=False)
+    time_rows = (
+        df_copy["Unit"].str.lower().str.contains(r"\bns\b", na=False, regex=True)
+    )
     time_value_columns = ["Avg", "Min", "Max"]
 
     for col in time_value_columns:
@@ -127,7 +129,9 @@ def has_time_data(df: pd.DataFrame) -> bool:
     if "Unit" not in df.columns:
         return False
     # NOTE: "ns" / "NS" / "nS" / "Ns" are reserved for Nanosec time unit
-    return bool(df["Unit"].str.lower().str.contains("ns", na=False).any())
+    return bool(
+        df["Unit"].str.lower().str.contains(r"\bns\b", na=False, regex=True).any()
+    )
 
 
 def is_roofline_shown(
@@ -151,9 +155,18 @@ def is_roofline_shown(
     ):
         return False
 
-    print(f"\n{'=' * 80}", file=output)
+    # Check if any run has valid roofline data (already validated in analysis_base.py)
+    # This check determines whether to display roofline section in the output report
+    if not any(
+        hasattr(workload, "roofline_peaks") and not workload.roofline_peaks.empty
+        for workload in runs.values()
+    ):
+        # roofline_peaks is empty, meaning CSV validation failed earlier.
+        # Skip displaying this section entirely (error already logged).
+        return False
+
+    print(f"\n{'-' * 80}", file=output)
     print("4. Roofline", file=output)
-    print("=" * 80, file=output)
 
     # Display roofline metrics for each run
     for run_path, workload in runs.items():
@@ -162,7 +175,6 @@ def is_roofline_shown(
                 "\n(4.1) Per-Kernel Roofline Metrics and (4.2) AI Plot Points",
                 file=output,
             )
-            print("-" * 80, file=output)
 
             kernel_top_df = workload.dfs.get(1, pd.DataFrame())
             if not kernel_top_df.empty:
@@ -229,6 +241,173 @@ def is_roofline_shown(
     if roof_plot:
         show_roof_plot(roof_plot)
     return True
+
+
+def extract_kernel_name(full_kernel_name: str) -> str:
+    """
+    Extract the short kernel function name from a mangled C++ kernel name.
+
+    Examples:
+    - "void at::native::vectorized_elementwise_kernel<...>"
+       -> "vectorized_elementwise_kernel"
+    - "Cijk_Ailk_Bljk_SB_MT128x128x16..." -> "Cijk_Ailk_Bljk_SB_MT128x128x16..."
+    """
+    # Remove return type prefix (void, etc.)
+    kernel_name = full_kernel_name.strip()
+    if kernel_name.startswith("void "):
+        kernel_name = kernel_name[5:]
+
+    # First, extract the main function name before any template parameters
+    # Split on '<' to get the part before template parameters
+    if "<" in kernel_name:
+        main_part = kernel_name.split("<")[0]
+    elif "(" in kernel_name:
+        main_part = kernel_name.split("(")[0]
+    else:
+        main_part = kernel_name
+
+    # Now extract the function name from namespaces
+    if "::" in main_part:
+        # Get the last part after the last :: in the main part (before templates)
+        function_name = main_part.split("::")[-1].strip()
+        return function_name if function_name else kernel_name.strip()
+
+    return main_part.strip()
+
+
+def show_torch_operator_table(operator_name: str, df: pd.DataFrame) -> None:
+    """Display torch operator data in a properly formatted table."""
+    if df is None or df.empty:
+        console_log(f"No data available for operator: {operator_name}")
+        return
+
+    console_log(f"\n{operator_name}")
+    console_log("=" * len(operator_name))
+
+    # Create a copy for display formatting
+    display_df = df.copy()
+
+    # Define max widths for different column types
+    column_widths = {
+        "Operator_Name": 40,
+        "Context": 35,
+        "Kernel_Name": 35,
+        "default": 20,
+    }
+
+    # Truncate columns to reasonable widths
+    for col in display_df.columns:
+        if display_df[col].dtype == "object":  # String columns
+            max_width = column_widths.get(col, column_widths["default"])
+            display_df[col] = (
+                display_df[col]
+                .astype(str)
+                .apply(
+                    lambda x: (
+                        string_multiple_lines(x, max_width, 2)
+                        if len(x) > max_width
+                        else x
+                    )
+                )
+            )
+
+    # Reset index for row numbering
+    display_df = display_df.reset_index(drop=True)
+
+    # Use tabulate for consistent formatting
+    table_str = tabulate(
+        display_df,
+        headers=display_df.columns,
+        tablefmt="fancy_grid",
+        showindex=True,
+        floatfmt=".2f",
+        maxcolwidths=list(column_widths.values()),
+    )
+
+    console_log(table_str)
+
+
+def show_torch_operator_hierarchy(operator_name: str, df: pd.DataFrame) -> None:
+    """
+    Display the hierarchy for each unique operator name in the DataFrame,
+    showing marker hierarchy on the left and kernel launches on the right.
+    """
+    print(f"\n{'-' * 80}")
+    print(f"Torch Operator Hierarchy for: {operator_name}")
+    print("-" * 80)
+
+    # Expect the DataFrame to have columns "Operator_Name", "Kernel_Name",
+    # "Context_Id", etc.
+
+    unique_op_hierarchies = df["Operator_Name"].unique()
+    for i, op in enumerate(unique_op_hierarchies, start=1):
+        print(f"  {i:3d}. {op}")
+        print("\nOperator Hierarchy".ljust(50) + "Kernels Launched")
+        print("-" * 80)
+        parts = str(op).split("/")
+
+        hierarchy_lines = []
+        # Display the hierarchy tree
+        for i, part in enumerate(parts):
+            if i == 0:
+                # Top level - just the module name
+                hierarchy_lines.append(f"{part}")
+            else:
+                indent = "  " * i
+                prefix = "└─ "
+                hierarchy_lines.append(f"{indent}{prefix}{part}")
+
+        # Get kernels for this operator hierarchy
+        kernels_info = []
+        op_data = df[df["Operator_Name"] == op]
+        # Group by extracted kernel name
+        kernel_counts = {}
+        kernel_context = {}
+        for _, row in op_data.iterrows():
+            full_kernel_name = row["Kernel_Name"]
+            kernel_name = extract_kernel_name(full_kernel_name)
+
+            if kernel_name not in kernel_counts:
+                kernel_counts[kernel_name] = 0
+                kernel_context[kernel_name] = {
+                    "full_name": full_kernel_name,
+                    "contexts": {},
+                }
+            kernel_counts[kernel_name] += 1
+            topmost_location = str(row["Context_Id"]).split("/")[0]
+            _, location = topmost_location.split("@")
+            file_name, line_num = location.split(":")
+            if file_name not in kernel_context[kernel_name]["contexts"]:
+                kernel_context[kernel_name]["contexts"][file_name] = {line_num: 1}
+            else:
+                if line_num not in kernel_context[kernel_name]["contexts"][file_name]:
+                    kernel_context[kernel_name]["contexts"][file_name][line_num] = 1
+                else:
+                    kernel_context[kernel_name]["contexts"][file_name][line_num] += 1
+
+        # Format output for each unique kernel
+        for kernel_name, num_launches in kernel_counts.items():
+            kernel_info = f"|--> {kernel_name} ({num_launches} launches)\n"
+            kernels_info.append(kernel_info)
+            for file_name, line_count in kernel_context[kernel_name][
+                "contexts"
+            ].items():
+                for line_num, count in line_count.items():
+                    kernels_info.append(
+                        f"      {file_name}:{line_num} ({count} launches)\n"
+                    )
+
+        # Print hierarchy lines (left column)
+        for line in hierarchy_lines:
+            print(f"{line.ljust(40)}|")
+
+        # Print kernel lines aligned to the deepest level
+        deepest_indent = "  " * len(parts)
+        for kernel_line in kernels_info:
+            left_padding = deepest_indent + "    "
+            print(f"{left_padding.ljust(40)}{kernel_line}")
+
+        print()
 
 
 def process_table_data(
@@ -347,7 +526,7 @@ def process_table_data(
                         # Base run - just add the rounded values
                         cur_df_copy = copy.deepcopy(cur_df)
                         cur_df_copy[header] = [
-                            (round(float(x), args.decimal) if x != "" else x)
+                            (round(float(x), args.decimal) if x != "N/A" else x)
                             for x in base_df[header]
                         ]
                         result_df = pd.concat([result_df, cur_df_copy[header]], axis=1)
@@ -370,7 +549,7 @@ def format_table_output(
 
     # Check if any column in df is empty
     is_empty_columns_exist = any(
-        df.replace("", None).iloc[:, col_idx].isnull().all()
+        df.replace(["", "N/A"], None).iloc[:, col_idx].isnull().all()
         for col_idx in range(len(df.columns))
     )
 
@@ -414,7 +593,8 @@ def format_table_output(
         and "Value" in df.columns
     ):
         mem_data = (
-            pd.DataFrame([df["Metric"], df["Value"]])
+            pd
+            .DataFrame([df["Metric"], df["Value"]])
             .transpose()
             .set_index("Metric")
             .to_dict()["Value"]
@@ -481,20 +661,44 @@ def show_all(
         if not csv_dir.exists():
             csv_dir.mkdir()
 
+    # Check for valid roofline data once (used to skip roofline tables in the loop)
+    has_valid_roofline = any(
+        hasattr(workload, "roofline_peaks") and not workload.roofline_peaks.empty
+        for workload in runs.values()
+    )
+    roofline_warning_shown = False
+
+    # True if roofline (block 4) is in the active filter
+    # or no filter is applied
+    roofline_in_filter = (
+        any(str(m).split(".")[0] == "4" for m in args.filter_metrics)
+        if args.filter_metrics
+        else (not filter_panel_ids or 400 in filter_panel_ids)
+    )
+
     for panel_id, panel in arch_configs.panel_configs.items():
         # Skip panels that don't support baseline comparison
         if len(args.path) > 1 and panel_id in config.HIDDEN_SECTIONS:
             continue
 
-        if panel_id == 400 and not is_roofline_shown(
-            args, runs, output, panel, roof_plot, hidden_cols
-        ):
-            continue
+        # Handle roofline panel (400) with custom display logic
+        if panel_id == 400:
+            _ = is_roofline_shown(args, runs, output, panel, roof_plot, hidden_cols)
 
         panel_content = ""  # store content of all data_source from one panel
 
         for data_source in panel["data source"]:
             for table_type, table_config in data_source.items():
+                # Emit warnings for roofline tables (401, 402)
+                # if roofline data is invalid
+                if table_config["id"] in [401, 402] and not has_valid_roofline:
+                    if not roofline_warning_shown and roofline_in_filter:
+                        console_warning(
+                            "Roofline",
+                            "Not showing roofline table due to invalid roofline data",
+                        )
+                        roofline_warning_shown = True
+
                 # Block-filter logic:
                 # - If analysis used --filter-metrics, ignore profiling block filters
                 # - If profiling had block filters, only show selected tables/panels
@@ -559,7 +763,8 @@ def show_all(
                         args, table_config, processed_df, table_type, runs, csv_dir
                     )
 
-        if panel_content:
+        # Roofline printing is handled separately above in is_roofline_shown
+        if panel_content and table_config["id"] not in [401, 402]:
             print(f"\n{'-' * 80}", file=output)
             print(f"{panel_id // 100}. {panel['title']}", file=output)
             print(panel_content, file=output)
@@ -567,9 +772,7 @@ def show_all(
 
 def show_roof_plot(roof_plot: str) -> None:
     # TODO: short term solution to display roofline plot
-    print(f"\n{'-' * 80}")
-    print("4. Roofline")
-    print("4.3 Roofline Plot")
+    print("4.3 Roofline Plot:")
 
     if roof_plot:
         print(roof_plot)

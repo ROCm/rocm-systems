@@ -64,9 +64,11 @@ The documentation source files reside in the [`/docs`](/docs) folder of this rep
   - Utilization
   - VCN Utilization
   - JPEG Utilization
+  - XGMI interconnect metrics (link width, link speed, read/write data)
+  - PCIe metrics (link width, link speed, bandwidth)
 
 > [!NOTE]
-> The availability of VCN and JPEG engine utilization depends on device support for different ASICs. If unsupported, all values for VCN_ACTIVITY and JPEG_ACTIVITY will be reported as N/A in the output of `amd-smi metric --usage`.
+> The availability of VCN, JPEG, XGMI, and PCIe metrics depends on device support, system topology, and GPU architecture. If unsupported, all values will be reported as N/A in the output of `amd-smi metric --usage`.
 
 ### CPU metrics
 
@@ -217,6 +219,69 @@ rocprof-sys-sample --help
 rocprof-sys-sample <rocprof-sys-options> -- <exe> <exe-options>
 rocprof-sys-sample -f 1000 -- ls -la
 ```
+
+### Preset Profiling Modes
+
+Instead of manually configuring numerous options, use preset modes optimized for common workloads:
+
+**General Purpose:**
+
+- **`--balanced`** - Balanced profiling with moderate overhead and comprehensive data
+- **`--profile-only`** - Profiling-only mode without tracing (flat profile, minimal overhead)
+- **`--detailed`** - Comprehensive profiling with full system metrics
+
+**Workload-Specific:**
+
+- **`--trace-hpc`** - Optimized for HPC/MPI/OpenMP applications
+  - Automatically enables OMPT, MPIP, and relevant hardware counters
+- **`--workload-trace`** - Optimized for AI/ML/GPU workloads which are supported by ROCm stack
+  - Automatically enables GPU tracing, RCCL, and increases buffer sizes
+- **`--trace-gpu`** - GPU workload analysis with host functions, MPI, and device activity
+- **`--trace-openmp`** - OpenMP offload workloads with HSA domains
+- **`--profile-mpi`** - MPI communication latency profiling
+- **`--trace-hw-counters`** - Hardware counter collection during execution
+  - Automatically enables tracing VALU utilization
+
+**API Tracing:**
+
+- **`--sys-trace`** - Comprehensive system API tracing
+- **`--runtime-trace`** - Runtime API tracing
+  - Excludes compiler and low-level HSA
+
+**Example:**
+
+```bash
+# HPC application with MPI
+mpirun -n 4 rocprof-sys-sample --trace-hpc -- ./mpi_app
+
+# Balanced profiling with moderate overhead
+rocprof-sys-sample --balanced -- ./myapp
+```
+
+### Pre-Execution Information
+
+When using preset modes, ROCm Systems Profiler displays helpful information before execution:
+
+- Which preset is active
+- Where results will be saved
+- How to visualize the results
+- Warnings about potential issues (e.g., unwritable output directory)
+
+### Smart Validation
+
+The tools now validate your command-line options and provide clear guidance:
+
+- **Preset conflict detection**: Warns if multiple conflicting presets are specified
+- **Clear error messages**: Contextual help when problems occur
+- **Actionable solutions**: Step-by-step troubleshooting for common issues
+
+### Enhanced Help Text
+
+All binaries now feature structured help organized by skill level:
+
+- **Quick Start**: Get profiling immediately with minimal configuration
+- **Workload-Specific**: Use presets optimized for your application type
+- **Custom Configuration**: Advanced options for fine-grained control
 
 ### Binary instrumentation
 

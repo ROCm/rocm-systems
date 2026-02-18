@@ -280,7 +280,7 @@ void Thread_func(bool& ret_val) {
 }
 
 
-TEST_CASE("Unit_hipMemcpy_MultiThread-AllAPIs") {
+TEST_CASE("Unit_hipMemcpy_MultiThread-AllAPIs", "[multigpu]") {
   std::thread Thrd[NUM_THREADS];
   bool ret_val[NUM_THREADS];
   for (int i = 0; i < NUM_THREADS; i++) Thrd[i] = std::thread(Thread_func, std::ref(ret_val[i]));

@@ -36,6 +36,8 @@
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/registration.h>
 
+#include "logger/debug.hpp"
+
 #include <memory>
 #include <vector>
 
@@ -101,16 +103,6 @@ struct timing_interval
     rocprofiler_timestamp_t end   = 0;
 };
 
-struct argument_info
-{
-    uint32_t    arg_number = 0;
-    std::string arg_type   = {};
-    std::string arg_name   = {};
-    std::string arg_value  = {};
-};
-
-using function_args_t = std::vector<argument_info>;
-
 using agent_counter_info_map_t =
     std::unordered_map<rocprofiler_agent_id_t,
                        std::vector<rocprofiler_tool_counter_info_t>>;
@@ -130,7 +122,7 @@ using backtrace_operation_map_t =
 
 struct client_data
 {
-    static constexpr size_t num_buffers  = 4;
+    static constexpr size_t num_buffers  = 5;
     static constexpr size_t num_contexts = 2;
 
     using buffer_name_info_t   = rocprofiler::sdk::buffer_name_info_t<std::string_view>;
@@ -146,6 +138,7 @@ struct client_data
     rocprofiler_context_id_t                  primary_ctx               = { 0 };
     rocprofiler_context_id_t                  counter_ctx               = { 0 };
     rocprofiler_buffer_id_t                   kernel_dispatch_buffer    = { 0 };
+    rocprofiler_buffer_id_t                   scratch_memory_buffer     = { 0 };
     rocprofiler_buffer_id_t                   memory_copy_buffer        = { 0 };
     rocprofiler_buffer_id_t                   memory_alloc_buffer       = { 0 };
     rocprofiler_buffer_id_t                   counter_collection_buffer = { 0 };
@@ -187,12 +180,9 @@ client_data::get_contexts() const
 inline client_data::buffer_id_vec_t
 client_data::get_buffers() const
 {
-    return buffer_id_vec_t{
-        kernel_dispatch_buffer,
-        memory_copy_buffer,
-        memory_alloc_buffer,
-        counter_collection_buffer,
-    };
+    return buffer_id_vec_t{ kernel_dispatch_buffer, scratch_memory_buffer,
+                            memory_copy_buffer, memory_alloc_buffer,
+                            counter_collection_buffer };
 }
 
 inline const rocprofsys_agent_t*
@@ -281,7 +271,7 @@ as_client_data(void* _ptr)
                     << "] failed with error code "                                       \
                     << ROCPROFSYS_VARIABLE(_rocp_status_, __LINE__)                      \
                     << " :: " << status_msg;                                             \
-                ROCPROFSYS_WARNING(0, "%s\n", msg.str().c_str());                        \
+                LOG_WARNING("{}", msg.str());                                            \
             }                                                                            \
         }
 #endif

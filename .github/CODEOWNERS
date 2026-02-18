@@ -10,18 +10,26 @@
 **/library/include/                                                   @ROCm/rocm-documentation
 
 # Project-specific ownership
+/projects/amdsmi/                                                     @ROCm/smi-reviewers
 /projects/clr/                                                        @ROCm/clr-reviewers
 /projects/hip/                                                        @ROCm/hip-reviewers
 /projects/hipother/                                                   @ROCm/hipother-reviewers
 /projects/hip-tests/                                                  @ROCm/hip-tests-reviewers
+/projects/rccl/                                                       @ROCm/rccl-reviewers
+/projects/rccl/src/include/api_trace.h                                @ROCm/rccl-reviewers @ROCm/ROCM-DevTools-Team
+/projects/rccl-tests/                                                 @ROCm/rccl-reviewers
 /projects/rdc/                                                        @ROCm/rdc-reviewers
 /projects/rocm-core/                                                  @nunnikri @frepaul @raramakr @ashutom @amd-isparry @arvindcheru
 /projects/rocm-smi-lib/                                               @ROCm/smi-reviewers
 /projects/rocminfo/                                                   @dayatsin-amd @shwetagkhatri
 /projects/rocprofiler-compute/                                        @ROCm/rocprof-compute-reviewer # Owners: @ROCm/rocprof-compute-owners, Reviewers: @ROCm/rocprof-compute-reviewer
 /projects/rocprofiler-systems/                                        @ROCm/rocprof-sys @jrmadsen
+/projects/rocprofiler-sdk/                                            @ROCm/rocm-devtools-team @ROCm/rocprofiler-owners # First Review: @ROCm/rocm-devtools-team, Final Review: @ROCm/rocprofiler-owners 
 /projects/rocr-runtime/                                               @kentrussell @dayatsin-amd @cfreeamd
 /projects/roctracer/                                                  @ammarwa @bgopesh
+/projects/rocshmem/                                                   @ROCm/rocshmem-reviewers
+/projects/rocdbgapi/                                                  @ROCm/rocm-devtools-debugger
+/projects/rocr-debug-agent/                                           @ROCm/rocm-devtools-debugger
 
 # Language runtime build infra code owners
 /projects/clr/**/*.cmake                                              @ROCm/clr-reviewers @ROCm/lrt-build-infra
@@ -34,14 +42,15 @@
 /projects/hip-tests/**/CMakeLists.txt                                 @ROCm/hip-tests-reviewers @ROCm/lrt-build-infra
 
 # rocr-runtime section-specific code owners
-/projects/rocr-runtime/libhsakmt                                      @kentrussell @dayatsin-amd
+/projects/rocr-runtime/libhsakmt                                      @kentrussell @dayatsin-amd @cfreeamd
 /projects/rocr-runtime/libhsakmt/tests/kfdtest                        @kentrussell @xiaogang-chen-amd
 /projects/rocr-runtime/rocrtst                                        @shwetagkhatri @cfreeamd
-/projects/rocr-runtime/runtime/hsa-runtime/core/driver/xdna           @atgutier @ypapadop-amd
-/projects/rocr-runtime/runtime/hsa-runtime/core/driver/virtio         @dayatsin-amd
-/projects/rocr-runtime/runtime/hsa-runtime/loader                     @dayatsin-amd @kzhuravl
-/projects/rocr-runtime/runtime/hsa-runtime/image                      @shwetagkhatri
-/projects/rocr-runtime/runtime/hsa-runtime/pcs                        @shwetagkhatri @dayatsin-amd
+/projects/rocr-runtime/runtime/hsa-runtime/core/runtime/trap_handler/*.s	@lancesix @dayatsin-amd @cfreeamd @shwetagkhatri
+/projects/rocr-runtime/runtime/hsa-runtime/core/driver/xdna           @atgutier @ypapadop-amd @dayatsin-amd @cfreeamd
+/projects/rocr-runtime/runtime/hsa-runtime/core/driver/virtio         @dayatsin-amd @cfreeamd
+/projects/rocr-runtime/runtime/hsa-runtime/loader                     @dayatsin-amd @kzhuravl @cfreeamd
+/projects/rocr-runtime/runtime/hsa-runtime/image                      @shwetagkhatri @dayatsin-amd @cfreeamd
+/projects/rocr-runtime/runtime/hsa-runtime/pcs                        @shwetagkhatri @dayatsin-amd @cfreeamd
 
 # Documentation-specific ownership by project
 

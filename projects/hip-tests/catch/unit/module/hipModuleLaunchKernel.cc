@@ -42,7 +42,7 @@ TEST_CASE("Unit_hipModuleLaunchKernel_Positive_Parameters") {
   ModuleLaunchKernelPositiveParameters<hipModuleLaunchKernelWrapper>();
 }
 
-TEST_CASE("Unit_hipModuleLaunchKernel_Negative_Parameters") {
+TEST_CASE("Unit_hipModuleLaunchKernel_Negative_Parameters", "[multigpu]") {
   HIP_CHECK(hipFree(nullptr));
   ModuleLaunchKernelNegativeParameters<hipModuleLaunchKernelWrapper>();
 }
@@ -317,4 +317,22 @@ TEST_CASE("Unit_hipModuleLaunchKernel_Fntl") {
     testStatus = Module_WorkGroup_Test();
     REQUIRE(testStatus == true);
   }
+}
+
+TEST_CASE("Unit_hipModuleLaunchKernel_Verify_Capture") {
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  auto mg = ModuleGuard::InitModule("launch_kernel_module.code");
+
+  GENERATE_CAPTURE();
+  BEGIN_CAPTURE(stream);
+
+  hipFunction_t f = GetKernel(mg.module(), "NOPKernel");
+  HIP_CHECK(hipModuleLaunchKernel(f, 1, 1, 1, 1, 1, 1, 0, stream, nullptr, nullptr));
+
+  END_CAPTURE(stream);
+
+  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipStreamDestroy(stream));
 }

@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - develop
+      - release/therock-*
   pull_request:
     types:
       - opened
@@ -54,7 +55,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install pydantic requests
-        
+
       - name: Detect changed subtrees
         id: detect
         if: github.event_name == 'pull_request'
@@ -75,7 +76,7 @@ jobs:
           python .github/scripts/therock_configure_ci.py
 
   therock-ci-linux:
-    name: Linux (${{ matrix.projects.project_to_test }})
+    name: Linux (${{ matrix.projects.projects_to_test }})
     permissions:
       contents: read
       id-token: write
@@ -89,10 +90,10 @@ jobs:
     secrets: inherit
     with:
       cmake_options: ${{ matrix.projects.cmake_options }}
-      project_to_test: ${{ matrix.projects.project_to_test }}
+      projects_to_test: ${{ matrix.projects.projects_to_test }}
 
   therock-ci-windows:
-    name: Windows (${{ matrix.projects.project_to_test }})
+    name: Windows (${{ matrix.projects.projects_to_test }})
     permissions:
       contents: read
       id-token: write
@@ -106,7 +107,7 @@ jobs:
     secrets: inherit
     with:
       cmake_options: ${{ matrix.projects.cmake_options }}
-      project_to_test: ${{ matrix.projects.project_to_test }}
+      projects_to_test: ${{ matrix.projects.projects_to_test }}
 
   therock_ci_summary:
     name: TheRock CI Summary

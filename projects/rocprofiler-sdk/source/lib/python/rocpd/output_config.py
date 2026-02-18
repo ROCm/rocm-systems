@@ -35,8 +35,7 @@ except Exception:
 
 from . import libpyrocpd
 
-
-__all__ = ["format_path", "output_config", "add_args", "process_args"]
+__all__ = ["format_path", "output_config", "add_args", "add_generic_args"]
 
 
 def _generate_attribute_docs(data):
@@ -73,12 +72,9 @@ class output_config(libpyrocpd.output_config):
         self.update(**kwargs)
 
     def update(self, **kwargs):
-        _strict = kwargs.get("strict", True)
-        # _verbose = kwargs.get("log-level", "config")
+        _strict = kwargs.get("strict", False)
         for key, itr in kwargs.items():
             if hasattr(self, key):
-                # if _verbose in ("info", "trace", "config"):
-                #     print(f"  - output_config.{key} = {itr}")
                 if key == "agent_index_value":
                     if itr == "absolute":
                         setattr(self, key, libpyrocpd.agent_indexing.node)
@@ -97,10 +93,29 @@ def format_path(path, tag=os.path.basename(sys.executable)):
     return libpyrocpd.format_path(path, tag)
 
 
+def sanitize_input_list(input: list):
+    sanitized_list = []
+    for items in input:
+        if isinstance(items, list):
+            sanitized_list.extend(sanitize_input_list(items))
+        else:
+            sanitized_list.append(items)
+    return sanitized_list
+
+
 def check_file_exists(filename):
-    if not os.path.exists(filename):
-        raise argparse.ArgumentTypeError(f"File '{filename}' does not exist.")
-    return filename
+    import glob
+
+    # Check for wildcards passed in
+    if any(char in filename for char in ["*", "?", "["]):
+        expanded_files = glob.glob(filename)
+        if not expanded_files:
+            raise argparse.ArgumentTypeError(f"File '{filename}' does not exist.")
+        return sanitize_input_list(expanded_files)
+    else:
+        if not os.path.exists(filename):
+            raise argparse.ArgumentTypeError(f"File '{filename}' does not exist.")
+        return filename
 
 
 def add_args(parser):
@@ -125,6 +140,33 @@ def add_args(parser):
         required=False,
     )
 
+    io_options.add_argument(
+        "--automerge-limit",
+        help="Change database auto-merge limit (default: 1, auto-merge to 1 DB. max: 8)",
+        type=int,
+        required=False,
+    )
+
+    def process_args(input, args):
+        valid_args = ["output_file", "output_path"]
+        ret = {}
+        for itr in valid_args:
+            if hasattr(args, itr):
+                val = getattr(args, itr)
+                if itr == "output_format":
+                    ret[itr] = val
+                elif itr == "output_path" and val is not None:
+                    ret[itr] = format_path(val)
+                elif val is not None:
+                    ret[itr] = val
+        return ret
+
+    return process_args
+
+
+def add_generic_args(parser):
+    """Add generic arguments that apply to multiple output formats."""
+
     kernel_naming_options = parser.add_argument_group("Kernel naming options")
 
     kernel_naming_options.add_argument(
@@ -133,27 +175,6 @@ def add_args(parser):
         action="store_true",
         default=False,
     )
-
-    return ["output_file", "output_path", "kernel_rename"]
-
-
-def process_args(args, valid_args):
-
-    ret = {}
-    for itr in valid_args:
-        if hasattr(args, itr):
-            val = getattr(args, itr)
-            if itr == "output_format":
-                ret[itr] = val
-            elif itr == "output_path" and val is not None:
-                ret[itr] = format_path(val)
-            elif val is not None:
-                ret[itr] = val
-    return ret
-
-
-def add_generic_args(parser):
-    """Add generic arguments that apply to multiple output formats."""
 
     generic_options = parser.add_argument_group("Generic options")
 
@@ -167,16 +188,14 @@ def add_generic_args(parser):
         default="relative",
     )
 
-    return [
-        "agent_index_value",
-    ]
+    def process_args(input, args):
+        valid_args = ["agent_index_value", "kernel_rename"]
+        ret = {}
+        for itr in valid_args:
+            if hasattr(args, itr):
+                val = getattr(args, itr)
+                if val is not None:
+                    ret[itr] = val
+        return ret
 
-
-def process_generic_args(args, valid_args):
-    ret = {}
-    for itr in valid_args:
-        if hasattr(args, itr):
-            val = getattr(args, itr)
-            if val is not None:
-                ret[itr] = val
-    return ret
+    return process_args

@@ -1,5 +1,3 @@
-# This is a basic workflow to help you get started with Actions
-
 name: rocprofiler-compute Ubuntu 22.04
 
 on:
@@ -7,20 +5,30 @@ on:
     branches:
       - develop
     paths:
+      - '.github/workflows/rocprofiler-compute-ubuntu-jammy.yml'
       - 'projects/rocprofiler-compute/**'
-      - '!projects/rocprofiler-compute/*.md'
-      - '!projects/rocprofiler-compute/.github/**/*.md'
+      - '!**/*.md'
+      - '!**/*.rtf'
+      - '!**/*.rst'
+      - '!**/.markdownlint-ci2.yaml'
+      - '!**/.readthedocs.yaml'
+      - '!**/.spellcheck.local.yaml'
+      - '!**/.wordlist.txt'
       - '!projects/rocprofiler-compute/docs/**'
       - '!projects/rocprofiler-compute/docker/**'
   pull_request:
     paths:
+      - '.github/workflows/rocprofiler-compute-ubuntu-jammy.yml'
       - 'projects/rocprofiler-compute/**'
-      - '!projects/rocprofiler-compute/*.md'
-      - '!projects/rocprofiler-compute/.github/**/*.md'
+      - '!**/*.md'
+      - '!**/*.rtf'
+      - '!**/*.rst'
+      - '!**/.markdownlint-ci2.yaml'
+      - '!**/.readthedocs.yaml'
+      - '!**/.spellcheck.local.yaml'
+      - '!**/.wordlist.txt'
       - '!projects/rocprofiler-compute/docs/**'
       - '!projects/rocprofiler-compute/docker/**'
-
-  # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
 
 concurrency:
@@ -28,11 +36,12 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
+  build-ubuntu-jammy:
     # The type of runner that the job will run on
+    # https://hub.docker.com/r/rocm/dev-ubuntu-22.04/tags
     runs-on: ubuntu-latest
     container:
-      image: dgaliffiamd/rocprofiler-systems:ci-base-ubuntu-22.04
+      image: rocm/dev-ubuntu-22.04:7.1
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
       - name: Install baseline OS dependencies
@@ -41,15 +50,18 @@ jobs:
           apt-get install -y git
           apt-get install -y python3-pip
           apt-get install -y cmake
+
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           sparse-checkout: projects/rocprofiler-compute
+
       - name: Install Python prereqs
         working-directory: projects/rocprofiler-compute
         run: |
           python3 -m pip install -r requirements.txt
           python3 -m pip install -r requirements-test.txt
+
       - name: Configure and install
         working-directory: projects/rocprofiler-compute
         run: |
@@ -57,11 +69,13 @@ jobs:
           cd build
           cmake -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-compute -DPYTEST_NUMPROCS=4 ..
           make install
+
       - name: CTest- Analyze Commands
         working-directory: projects/rocprofiler-compute
         run: |
           cd build
           ctest --verbose -R test_analyze_commands
+
       - name: CTest- Analyze Workloads
         working-directory: projects/rocprofiler-compute
         run: |

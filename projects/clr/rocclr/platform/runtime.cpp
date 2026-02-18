@@ -105,17 +105,29 @@ void Runtime::tearDown() {
 }
 
 // ~RuntimeTearDown() will reference listenerLock.
-// listenerLock will be constructed ealier and destructed later than
+// listenerLock will be constructed earlier and destructed later than
 // runtime_tear_down.
-amd::Monitor listenerLock("Hostcall listener lock");
-std::vector<ReferenceCountedObject*> RuntimeTearDown::external_;
+amd::Monitor listenerLock{};
+std::vector<ReferenceCountedObject*> RuntimeTearDown::external_{};
+std::vector<std::pair<std::string, RuntimeTearDown::TearDownCallback>> 
+  RuntimeTearDown::tear_down_funcs_{};
+class RuntimeTearDown runtime_tear_down{};
 
+// =================================================================================================
 RuntimeTearDown::~RuntimeTearDown() {
+  ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Begin runtime teardown");
 #if !defined(_WIN32) && !defined(BUILD_STATIC_LIBS)
   // Only perform destruction if process matches the initialization,
-  // to avoid a call with the child process after fork()
+  // to avoid a call with the child process after fork().
   if (amd::IS_HIP && amd::Os::getProcessId() == Runtime::pid()) {
+    // Execute teardown funcs in reverse order of registration.
+    for (auto it = tear_down_funcs_.rbegin(); it != tear_down_funcs_.rend(); ++it) {
+      ClPrint(amd::LOG_DEBUG, amd::LOG_INIT, "~RuntimeTearDown invoke callback: %s",
+              it->first.c_str());
+      it->second();
+    }
     for (auto it : external_) {
+      ClPrint(amd::LOG_DEBUG, amd::LOG_INIT, "~RuntimeTearDown release external object: %p", it);
       it->release();
     }
     Runtime::tearDown();
@@ -123,10 +135,19 @@ RuntimeTearDown::~RuntimeTearDown() {
 #endif
 }
 
-void RuntimeTearDown::RegisterObject(ReferenceCountedObject* obj) { external_.push_back(obj); }
+// =================================================================================================
+void RuntimeTearDown::RegisterObject(ReferenceCountedObject* obj) {
+  external_.push_back(obj);
+  ClPrint(amd::LOG_DEBUG, amd::LOG_INIT, "RuntimeTearDown registered external object: %p", obj);
+}
 
-class RuntimeTearDown runtime_tear_down;
+// =================================================================================================
+void RuntimeTearDown::RegisterTearDownCallback(const std::string& msg, TearDownCallback func) {
+  tear_down_funcs_.emplace_back(msg, std::move(func));
+  ClPrint(amd::LOG_DEBUG, amd::LOG_INIT, "RuntimeTearDown registered callback: %s", msg.c_str());
+}
 
+// =================================================================================================
 uint ReferenceCountedObject::retain() {
   uint prev = referenceCount_.fetch_add(1, std::memory_order_relaxed);
   assert(prev != 0 && "An object with count==0 is invalid");

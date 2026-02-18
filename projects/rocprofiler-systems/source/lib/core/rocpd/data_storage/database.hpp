@@ -22,6 +22,8 @@
 
 #pragma once
 #include "common/traits.hpp"
+#include "logger/debug.hpp"
+
 #include <memory>
 #include <mutex>
 #include <sqlite3.h>
@@ -34,7 +36,6 @@ namespace rocpd
 {
 namespace data_storage
 {
-static std::mutex _mutex;
 class database
 {
 public:
@@ -42,8 +43,8 @@ public:
     database()                      = delete;
     database(database&)             = delete;
     database& operator=(database&)  = delete;
-    database(database&&)            = default;
-    database& operator=(database&&) = default;
+    database(database&&)            = delete;
+    database& operator=(database&&) = delete;
 
     void flush();
 
@@ -171,24 +172,47 @@ public:
      * This function prepares an SQLite statement based on the provided SQL query and
      * returns a lambda that can execute the prepared statement, binding the provided
      * values to the respective placeholders in the query.
+     *
+     * @param db_ref A shared_ptr to this database instance. The statement's deleter
+     *               captures it to guarantee the connection stays open until all
+     *               statements are finalized.
      */
     template <typename... Values>
-    auto create_statement_executor(const std::string& query)
+    static auto create_statement_executor(const std::string&        query,
+                                          std::shared_ptr<database> db_ref)
     {
+        if(db_ref == nullptr)
+        {
+            throw std::runtime_error("Database cannot be nullptr!");
+        }
+
         sqlite3_stmt* p_stmt;
-        validate_sqlite3_result(
-            sqlite3_prepare_v2(_sqlite3_db_temp, query.c_str(), -1, &p_stmt, nullptr),
-            query.c_str(), "Failed to create statement!");
-        std::shared_ptr<sqlite3_stmt> stmt{ p_stmt, sqlite3_finalize };
+        db_ref->validate_sqlite3_result(sqlite3_prepare_v2(db_ref->_sqlite3_db_temp,
+                                                           query.c_str(), -1, &p_stmt,
+                                                           nullptr),
+                                        query.c_str(), "Failed to create statement!");
 
-        return [stmt, query, this](Values... value) {
-            std::lock_guard lock{ _mutex };
-            int             position = 1;
+        std::shared_ptr<sqlite3_stmt> stmt{ p_stmt, [db = db_ref](sqlite3_stmt* s) {
+                                               if(db == nullptr)
+                                               {
+                                                   return;
+                                               }
+                                               sqlite3_finalize(s);
+                                           } };
 
-            ((bind_value(stmt.get(), position++, value, query)), ...);
+        return [stmt, query, db_ref](Values... value) {
+            if(db_ref == nullptr)
+            {
+                return;
+            }
 
-            validate_sqlite3_result(sqlite3_step(stmt.get()), query.c_str(),
-                                    "Failed to execute step!\n", "Values: ", value...);
+            int position = 1;
+
+            ((db_ref->bind_value(stmt.get(), position++, value, query)), ...);
+
+            db_ref->validate_sqlite3_result(sqlite3_step(stmt.get()), query.c_str(),
+                                            "Failed to execute step!\n",
+                                            "Values: ", value...);
             sqlite3_reset(stmt.get());
         };
     }

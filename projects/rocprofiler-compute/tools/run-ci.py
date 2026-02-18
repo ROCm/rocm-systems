@@ -23,311 +23,314 @@
 # THE SOFTWARE.
 ##############################################################################
 
-"""
-CI script to upload coverage XML files to CDash
-"""
-
 import argparse
+import glob
+import multiprocessing
 import os
+import re
 import shutil
-import subprocess
+import socket
 import sys
-import tempfile
-from pathlib import Path
 
 
-def detect_repo_structure():
-    """Detect if in monorepo or standalone structure"""
-    cwd = Path.cwd()
-
-    if "projects/rocprofiler-compute" in str(cwd):
-        parts = cwd.parts
-        idx = parts.index("rocprofiler-compute")
-        if idx > 0 and parts[idx - 1] == "projects":
-            monorepo_root = Path(*parts[: idx - 1])
-            project_root = monorepo_root / "projects" / "rocprofiler-compute"
-            return True, monorepo_root, project_root
-
-    if (cwd / "CMakeLists.txt").exists():
-        with open(cwd / "CMakeLists.txt") as f:
-            content = f.read()
-            if (
-                "project(rocprofiler-compute" in content
-                or "project(\n    rocprofiler-compute" in content
-            ):
-                return False, None, cwd
-
-    return False, None, cwd
+def which(cmd, require):
+    v = shutil.which(cmd)
+    if require and v is None:
+        raise RuntimeError(f"{cmd} not found")
+    return v if v is not None else ""
 
 
-def create_ctest_script(args):
-    """Generate a CTest script for uploading coverage data"""
+def generate_custom(args, cmake_args, ctest_args):
+    if not os.path.exists(args.binary_dir):
+        os.makedirs(args.binary_dir)
 
-    script_content = f"""
-cmake_minimum_required(VERSION 3.19)
+    NAME = args.name
+    SITE = args.site
+    BUILD_JOBS = args.build_jobs
+    SUBMIT_URL = args.submit_url
+    SOURCE_DIR = os.path.realpath(args.source_dir)
+    BINARY_DIR = os.path.realpath(args.binary_dir)
+    CMAKE_ARGS = " ".join(cmake_args)
+    CTEST_ARGS = " ".join(ctest_args)
 
-set(CTEST_PROJECT_NAME "{args.project_name}")
-set(CTEST_NIGHTLY_START_TIME "01:00:00 UTC")
-set(CTEST_DROP_SITE_CDASH TRUE)
+    GIT_CMD = which("git", require=True)
+    GCOV_CMD = which("gcov", require=False)
+    CMAKE_CMD = which("cmake", require=True)
+    _ = which("ctest", require=True)
 
-if(CMAKE_VERSION VERSION_GREATER 3.14)
-    set(CTEST_SUBMIT_URL "{args.submit_url}")
-else()
-    set(CTEST_DROP_METHOD "https")
-    set(CTEST_DROP_SITE "{args.cdash_host}")
-    set(CTEST_DROP_LOCATION "{args.submit_path}")
-endif()
+    # For Continuous builds transform to PR_XXXX format and include the actor
+    match = re.match(r"(.*)-([0-9]+)/merge(.*)", NAME)
+    if match and args.actor:
+        NAME = f"[{args.actor}] PR_{match.group(2)}_{match.group(1)}{match.group(3)}"
+    elif match:
+        NAME = f"PR_{match.group(2)}_{match.group(1)}{match.group(3)}"
 
-set(CTEST_SITE "{args.site}")
-set(CTEST_BUILD_NAME "{args.build_name}")
-set(CTEST_SOURCE_DIRECTORY "{args.source_dir}")
-set(CTEST_BINARY_DIRECTORY "{args.binary_dir}")
+    return f"""
+        set(CTEST_PROJECT_NAME "rocprofiler-compute")
+        set(CTEST_NIGHTLY_START_TIME "05:00:00 UTC")
 
-file(MAKE_DIRECTORY "${{CTEST_BINARY_DIRECTORY}}")
+        set(CTEST_DROP_METHOD "http")
+        set(CTEST_DROP_SITE_CDASH TRUE)
+        set(CTEST_SUBMIT_URL "https://{SUBMIT_URL}")
 
-if(NOT EXISTS "${{CTEST_BINARY_DIRECTORY}}/CMakeCache.txt")
-    file(WRITE "${{CTEST_BINARY_DIRECTORY}}/CMakeCache.txt"
-         "CMAKE_PROJECT_NAME:STATIC={args.project_name}\\n")
-endif()
+        set(CTEST_UPDATE_TYPE git)
+        set(CTEST_UPDATE_VERSION_ONLY TRUE)
+        set(CTEST_GIT_INIT_SUBMODULES TRUE)
 
-file(WRITE "${{CTEST_BINARY_DIRECTORY}}/CTestConfig.cmake" "
-set(CTEST_PROJECT_NAME \\"{args.project_name}\\")
-set(CTEST_NIGHTLY_START_TIME \\"01:00:00 UTC\\")
-if(CMAKE_VERSION VERSION_GREATER 3.14)
-    set(CTEST_SUBMIT_URL \\"{args.submit_url}\\")
-else()
-    set(CTEST_DROP_METHOD \\"https\\")
-    set(CTEST_DROP_SITE \\"{args.cdash_host}\\")
-    set(CTEST_DROP_LOCATION \\"{args.submit_path}\\")
-endif()
-set(CTEST_DROP_SITE_CDASH TRUE)
-")
+        set(CTEST_OUTPUT_ON_FAILURE TRUE)
+        set(CTEST_USE_LAUNCHERS TRUE)
+        set(CMAKE_CTEST_ARGUMENTS --output-on-failure {CTEST_ARGS})
 
-ctest_start({args.mode})
+        set(CTEST_CUSTOM_MAXIMUM_NUMBER_OF_ERRORS "100")
+        set(CTEST_CUSTOM_MAXIMUM_NUMBER_OF_WARNINGS "100")
+        set(CTEST_CUSTOM_MAXIMUM_PASSED_TEST_OUTPUT_SIZE "51200")
+        set(CTEST_CUSTOM_COVERAGE_EXCLUDE "/usr/.*;.*external/.*;.*examples/.*")
 
-set(COVERAGE_SRC_FILE "{args.coverage_file}")
-set(COVERAGE_DEST_FILE "${{CTEST_BINARY_DIRECTORY}}/coverage.xml")
+        set(CTEST_SITE "{SITE}")
+        set(CTEST_BUILD_NAME "{NAME}")
 
-if(NOT EXISTS "${{COVERAGE_SRC_FILE}}")
-    message(FATAL_ERROR "Coverage file not found: ${{COVERAGE_SRC_FILE}}")
-endif()
+        set(CTEST_SOURCE_DIRECTORY {SOURCE_DIR})
+        set(CTEST_BINARY_DIRECTORY {BINARY_DIR})
 
-file(COPY "${{COVERAGE_SRC_FILE}}" DESTINATION "${{CTEST_BINARY_DIRECTORY}}")
-get_filename_component(SRC_FILENAME "${{COVERAGE_SRC_FILE}}" NAME)
-if(NOT SRC_FILENAME STREQUAL "coverage.xml")
-    file(RENAME "${{CTEST_BINARY_DIRECTORY}}/${{SRC_FILENAME}}"
-                "${{COVERAGE_DEST_FILE}}")
-endif()
-
-message(STATUS "Processing coverage file: ${{COVERAGE_DEST_FILE}}")
-
-file(MAKE_DIRECTORY "${{CTEST_BINARY_DIRECTORY}}/Testing")
-file(MAKE_DIRECTORY "${{CTEST_BINARY_DIRECTORY}}/Testing/CoverageInfo")
-
-file(COPY "${{COVERAGE_DEST_FILE}}"
-     DESTINATION "${{CTEST_BINARY_DIRECTORY}}/Testing/CoverageInfo")
-
-ctest_coverage()
-
-ctest_submit(PARTS Coverage
-             RETRY_COUNT 3
-             RETRY_DELAY 5
-             CAPTURE_CMAKE_ERROR submit_error)
-
-if(submit_error)
-    message(FATAL_ERROR "Failed to submit coverage to CDash. "
-                        "Error code: ${{submit_error}}")
-endif()
-
-message(STATUS "Successfully submitted coverage to CDash")
-"""
-    return script_content
+        set(CTEST_UPDATE_COMMAND {GIT_CMD})
+        set(CTEST_CONFIGURE_COMMAND "{CMAKE_CMD} -B {BINARY_DIR} {SOURCE_DIR} \
+        {CMAKE_ARGS}")
+        set(CTEST_BUILD_COMMAND "{CMAKE_CMD} --build {BINARY_DIR} --target all \
+        --parallel {BUILD_JOBS}")
+        set(CTEST_COVERAGE_COMMAND {GCOV_CMD})
+        """
 
 
-def main():
-    if not os.getenv("CI"):
-        print("WARNING: CDash upload should normally only be done from CI/CD")
-        response = input("Continue anyway? (y/N): ")
-        if response.lower() != "y":
-            print("Aborted.")
-            return 1
+def generate_dashboard_script(args):
+    CODECOV = 1 if args.coverage else 0
+    DASHBOARD_MODE = args.mode
+    SOURCE_DIR = os.path.realpath(args.source_dir)
+    BINARY_DIR = os.path.realpath(args.binary_dir)
 
-    parser = argparse.ArgumentParser(
-        description="Upload coverage XML to CDash for rocprofiler-compute"
-    )
+    _script = """
 
-    # required
+        include("${CMAKE_CURRENT_LIST_DIR}/CTestCustom.cmake")
+
+        macro(handle_error _message _ret)
+            if(NOT ${${_ret}} EQUAL 0)
+                ctest_submit(PARTS Done RETURN_VALUE _submit_ret)
+                message(FATAL_ERROR "${_message} failed: ${${_ret}}")
+            endif()
+        endmacro()
+        """
+
+    _script += f"""
+        ctest_start({DASHBOARD_MODE})
+        ctest_update(SOURCE "{SOURCE_DIR}")
+        ctest_configure(BUILD "{BINARY_DIR}" RETURN_VALUE _configure_ret)
+        ctest_submit(PARTS Start Update Configure RETURN_VALUE _submit_ret)
+
+        handle_error("Configure" _configure_ret)
+
+        ctest_build(BUILD "{BINARY_DIR}" RETURN_VALUE _build_ret)
+        ctest_submit(PARTS Build RETURN_VALUE _submit_ret)
+
+        handle_error("Build" _build_ret)
+
+        ctest_test(BUILD "{BINARY_DIR}" RETURN_VALUE _test_ret)
+        ctest_submit(PARTS Test RETURN_VALUE _submit_ret)
+
+        if("{CODECOV}" GREATER 0)
+            ctest_coverage(
+                BUILD "{BINARY_DIR}"
+                RETURN_VALUE _coverage_ret
+                CAPTURE_CMAKE_ERROR _coverage_err)
+            ctest_submit(PARTS Coverage RETURN_VALUE _submit_ret)
+        endif()
+
+        ctest_submit(PARTS Done RETURN_VALUE _submit_ret)
+
+        # After all submissions complete, fail if tests failed
+        if(NOT ${{_test_ret}} EQUAL 0)
+            message(FATAL_ERROR "Some tests failed (see CDash for details)")
+        endif()
+        """
+    return _script
+
+
+def parse_cdash_args(args):
+    BUILD_JOBS = multiprocessing.cpu_count()
+    DASHBOARD_MODE = "Continuous"
+    DASHBOARD_STAGES = [
+        "Start",
+        "Update",
+        "Configure",
+        "Build",
+        "Test",
+        "Coverage",
+        "Submit",
+    ]
+    SOURCE_DIR = os.getcwd()
+    BINARY_DIR = os.path.join(SOURCE_DIR, "build")
+    SITE = socket.gethostname()
+    SUBMIT_URL = "my.cdash.org/submit.php?project=rocprofiler-compute"
+
+    parser = argparse.ArgumentParser()
+
     parser.add_argument(
-        "--coverage-file", required=True, help="Path to coverage XML file"
-    )
-    parser.add_argument("--build-name", required=True, help="Build name for CDash")
-
-    # optional
-    parser.add_argument(
-        "--project-name", default="rocprofiler-compute", help="CDash project name"
-    )
-    parser.add_argument(
-        "--submit-url",
-        default="https://my.cdash.org/submit.php?project=rocprofiler-compute",
-        help="CDash submission URL",
-    )
-    parser.add_argument(
-        "--cdash-host", default="my.cdash.org", help="CDash host (for older CMake)"
-    )
-    parser.add_argument(
-        "--submit-path",
-        default="/submit.php?project=rocprofiler-compute",
-        help="CDash submission path (for older CMake)",
+        "-n", "--name", help="Job name", default=None, type=str, required=True
     )
     parser.add_argument(
-        "--site",
+        "-a",
+        "--actor",
+        help="GitHub actor/username (included in Continuous builds)",
         default=None,
-        help="Site name for CDash (auto-detected if not provided)",
+        type=str,
+    )
+    parser.add_argument("-s", "--site", help="Site name", default=SITE, type=str)
+    parser.add_argument(
+        "-c", "--coverage", help="Enable code coverage", action="store_true"
     )
     parser.add_argument(
-        "--source-dir",
-        default=None,
-        help="Source directory path (auto-detected if not provided)",
+        "-j", "--build-jobs", help="Number of build tasks", default=BUILD_JOBS, type=int
     )
     parser.add_argument(
-        "--binary-dir",
-        default=None,
-        help="Binary directory path (defaults to source-dir/build)",
+        "-B", "--binary-dir", help="Build directory", default=BINARY_DIR, type=str
     )
     parser.add_argument(
+        "-S", "--source-dir", help="Source directory", default=SOURCE_DIR, type=str
+    )
+    parser.add_argument(
+        "-M",
         "--mode",
-        default="Experimental",
-        choices=["Experimental", "Nightly", "Continuous"],
-        help="CTest dashboard mode",
+        help="Dashboard mode",
+        default=DASHBOARD_MODE,
+        choices=("Continuous", "Nightly", "Experimental"),
+        type=str,
     )
     parser.add_argument(
-        "--dry-run", action="store_true", help="Generate script but don't execute"
+        "-T",
+        "--stages",
+        help="Dashboard stages",
+        nargs="+",
+        default=DASHBOARD_STAGES,
+        choices=DASHBOARD_STAGES,
+        type=str,
+    )
+    parser.add_argument(
+        "--submit-url", help="CDash submission site", default=SUBMIT_URL, type=str
+    )
+    parser.add_argument(
+        "--repeat-until-pass",
+        help="<N> for --repeat until-pass:<N>",
+        default=3,
+        type=int,
+    )
+    parser.add_argument(
+        "--repeat-until-fail",
+        help="<N> for --repeat until-fail:<N>",
+        default=None,
+        type=int,
+    )
+    parser.add_argument(
+        "--repeat-after-timeout",
+        help="<N> for --repeat after-timeout:<N>",
+        default=2,
+        type=int,
     )
 
-    args = parser.parse_args()
+    return parser.parse_args(args)
 
-    is_monorepo, monorepo_root, project_root = detect_repo_structure()
 
-    if not args.source_dir:
-        args.source_dir = str(project_root)
+def parse_args(args=None):
+    if args is None:
+        args = sys.argv[1:]
 
-    if not args.binary_dir:
-        args.binary_dir = os.path.join(args.source_dir, "build")
+    index = 0
+    input_args = []
+    ctest_args = []
+    cmake_args = []
+    data = [input_args, cmake_args, ctest_args]
 
-    if not args.site:
-        if is_monorepo:
-            args.site = f"Monorepo-{os.uname().nodename}"
+    for itr in args:
+        if itr == "--":
+            index += 1
+            if index > 2:
+                raise RuntimeError("Usage: <options> -- <ctest-args> -- <cdash-args>")
         else:
-            args.site = os.uname().nodename
+            data[index].append(itr)
 
-    coverage_path = Path(args.coverage_file)
-    if not coverage_path.is_absolute():
-        if not coverage_path.exists():
-            coverage_path = project_root / args.coverage_file
+    cdash_args = parse_cdash_args(input_args)
 
-    if not coverage_path.exists():
-        print(f"ERROR: Coverage file not found: {coverage_path}", file=sys.stderr)
-        print(f"  Searched in: {Path(args.coverage_file).absolute()}")
-        print(f"  And in: {project_root / args.coverage_file}")
-        return 1
+    if cdash_args.coverage:
+        cmake_args += ["-DENABLE_COVERAGE=ON"]
 
-    try:
-        import xml.etree.ElementTree as ET
+    def get_repeat_val(_param):
+        _value = getattr(cdash_args, f"repeat_{_param}".replace("-", "_"))
+        return [f"{_param}:{_value}"] if _value is not None and _value > 1 else []
 
-        tree = ET.parse(coverage_path)
-        root = tree.getroot()
-        if root.tag != "coverage":
-            print(
-                f"ERROR: File does not appear to be a coverage XML file "
-                f"(root tag: {root.tag})",
-                file=sys.stderr,
-            )
-            return 1
-        line_rate = float(root.get("line-rate", 0)) * 100
-        print(f"Line Coverage: {line_rate:.1f}%")
-    except Exception as e:
-        print(f"ERROR: Could not parse coverage XML file: {e}", file=sys.stderr)
-        return 1
+    repeat_args = (
+        get_repeat_val("until-pass")
+        + get_repeat_val("until-fail")
+        + get_repeat_val("after-timeout")
+    )
+    ctest_args += ["--repeat"] + repeat_args if len(repeat_args) > 0 else []
 
-    args.coverage_file = str(coverage_path.absolute())
-    args.source_dir = str(Path(args.source_dir).absolute())
-    args.binary_dir = str(Path(args.binary_dir).absolute())
+    return [cdash_args, cmake_args, ctest_args]
 
-    print(f"Repository type: {'Monorepo' if is_monorepo else 'Standalone'}")
-    print(f"Project root: {project_root}")
-    print(f"Uploading coverage file: {args.coverage_file}")
-    print(f"Build name: {args.build_name}")
-    print(f"Project: {args.project_name}")
-    print(f"Site: {args.site}")
-    print(f"Submit URL: {args.submit_url}")
 
-    # Ensure build directory exists
-    os.makedirs(args.binary_dir, exist_ok=True)
+def run(*args, **kwargs):
+    import subprocess
 
-    # Copy CTestConfig.cmake if it exists in source
-    source_ctest_config = Path(args.source_dir) / "CTestConfig.cmake"
-    if source_ctest_config.exists():
-        shutil.copy2(source_ctest_config, Path(args.binary_dir) / "CTestConfig.cmake")
-        print("Copied CTestConfig.cmake to build directory")
-
-    script_content = create_ctest_script(args)
-
-    if args.dry_run:
-        print("\nGenerated CTest script:")
-        print("=" * 50)
-        print(script_content)
-        return 0
-
-    try:
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".cmake", delete=False) as f:
-            f.write(script_content)
-            script_path = f.name
-
-        print(f"\nScript written to: {script_path}")
-
-        original_dir = os.getcwd()
-        os.chdir(args.source_dir)
-
-        cmd = ["ctest", "-S", script_path, "-V"]
-        print(f"Executing: {' '.join(cmd)}")
-        print(f"Working directory: {os.getcwd()}")
-
-        result = subprocess.run(cmd, capture_output=True, text=True)
-
-        if result.stdout:
-            print("\nSTDOUT:")
-            print(result.stdout)
-
-        if result.stderr:
-            print("\nSTDERR:")
-            print(result.stderr)
-
-        os.chdir(original_dir)
-
-        if result.returncode != 0:
-            print(f"\nCTest failed with return code: {result.returncode}")
-            return result.returncode
-
-        print("\n✅ Coverage successfully uploaded to CDash!")
-        cdash_url = args.submit_url.replace(
-            "/submit.php?project=", "/index.php?project="
-        )
-        print(f"View results at: {cdash_url}")
-        return 0
-
-    except Exception as e:
-        print(f"Error executing CTest script: {e}", file=sys.stderr)
-        import traceback
-
-        traceback.print_exc()
-        return 1
-    finally:
-        if "script_path" in locals():
-            try:
-                os.unlink(script_path)
-            except Exception:
-                pass
+    return subprocess.run(*args, **kwargs)
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    args, cmake_args, ctest_args = parse_args()
+
+    if not os.path.exists(args.binary_dir):
+        os.makedirs(args.binary_dir)
+
+    from textwrap import dedent
+
+    _config = dedent(generate_custom(args, cmake_args, ctest_args))
+    _script = dedent(generate_dashboard_script(args))
+
+    with open(os.path.join(args.binary_dir, "CTestCustom.cmake"), "w") as f:
+        f.write(f"{_config}\n")
+
+    with open(os.path.join(args.binary_dir, "dashboard.cmake"), "w") as f:
+        f.write(f"{_script}\n")
+
+    CTEST_CMD = which("ctest", require=True)
+
+    dashboard_args = ["-D"]
+    for itr in args.stages:
+        dashboard_args.append(f"{args.mode}{itr}")
+
+    try:
+        run(
+            [CTEST_CMD]
+            + dashboard_args
+            + [
+                "-S",
+                os.path.join(args.binary_dir, "dashboard.cmake"),
+                "--output-on-failure",
+                "-V",
+            ]
+            + ctest_args,
+            check=True,
+        )
+    finally:
+        if "-VV" not in ctest_args:
+            for file in glob.glob(
+                os.path.join(args.binary_dir, "Testing/**"), recursive=True
+            ):
+                if not os.path.isfile(file):
+                    continue
+                print(f"\n\n\n###### Reading {file}... ######\n\n\n")
+                with open(file, "r") as inpf:
+                    fdata = inpf.read()
+                    if "LastTest" not in file and "Coverage" not in file:
+                        print(fdata)
+                    oname = os.path.basename(file)
+                    if oname.endswith(".log"):
+                        oname += ".log"
+                    with open(os.path.join(args.binary_dir, oname), "w") as outf:
+                        print(f"\n\n###### Writing {oname}... ######\n\n")
+                        outf.write(fdata)

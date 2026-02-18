@@ -22,7 +22,6 @@
 
 #include "perfetto.hpp"
 #include "config.hpp"
-#include "debug.hpp"
 #include "library/runtime.hpp"
 #include "perfetto_fwd.hpp"
 #include "utility.hpp"
@@ -90,8 +89,7 @@ setup()
 
     for(const auto& itr : config::get_disabled_categories())
     {
-        ROCPROFSYS_VERBOSE_F(1, "Disabling perfetto track event category: %s\n",
-                             itr.c_str());
+        LOG_DEBUG("Disabling perfetto track event category: {}", itr);
         track_event_cfg.add_disabled_categories(itr);
     }
 
@@ -130,13 +128,12 @@ start()
         }
     }
 
-    ROCPROFSYS_VERBOSE(2, "Setup perfetto...\n");
+    LOG_DEBUG("Setup perfetto...");
     int   _fd = (_tmp_file) ? _tmp_file->fd : -1;
     auto& cfg = get_config();
     tracing_session->SetOnErrorCallback([](::perfetto::TracingError _err) {
         if(_err.code == ::perfetto::TracingError::kTracingFailed)
-            ROCPROFSYS_WARNING(0, "perfetto encountered a tracing error: %s\n",
-                               _err.message.c_str());
+            LOG_WARNING("Perfetto encountered a tracing error: {}", _err.message);
     });
     tracing_session->Setup(cfg, _fd);
     tracing_session->StartBlocking();
@@ -149,17 +146,19 @@ stop()
 
     auto& tracing_session = get_perfetto_session();
 
-    ROCPROFSYS_CI_THROW(tracing_session == nullptr,
-                        "Null pointer to the tracing session");
+    if(get_is_continuous_integration() && tracing_session == nullptr)
+    {
+        throw std::runtime_error("Null pointer to the tracing session");
+    }
 
     if(tracing_session)
     {
         // Make sure the last event is closed
-        ROCPROFSYS_VERBOSE(2, "Flushing the perfetto trace data...\n");
+        LOG_DEBUG("Flushing the perfetto trace data...");
         ::perfetto::TrackEvent::Flush();
         tracing_session->FlushBlocking();
 
-        ROCPROFSYS_VERBOSE(2, "Stopping the perfetto trace session (blocking)...\n");
+        LOG_DEBUG("Stopping the perfetto trace session (blocking)...");
         tracing_session->StopBlocking();
     }
 }
@@ -184,9 +183,8 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error)
 
             if(!_fdata)
             {
-                ROCPROFSYS_VERBOSE(
-                    -1, "Error! perfetto temp trace file '%s' could not be read",
-                    _tmp_file->filename.c_str());
+                LOG_ERROR("perfetto temp trace file '{}' could not be read",
+                          _tmp_file->filename);
                 return char_vec_t{ tracing_session->ReadTraceBlocking() };
             }
 
@@ -198,15 +196,19 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error)
             auto _fnum_read = ::fread(_data.data(), sizeof(char), _fnum_elem, _fdata);
             ::fclose(_fdata);
 
-            ROCPROFSYS_CI_THROW(
-                _fnum_read != _fnum_elem,
-                "Error! read %zu elements from perfetto trace file '%s'. Expected %zu\n",
-                _fnum_read, _tmp_file->filename.c_str(), _fnum_elem);
+            if(get_is_continuous_integration() && _fnum_read != _fnum_elem)
+            {
+                throw std::runtime_error(fmt::format(
+                    "read {} elements from perfetto trace file '{}'. Expected {}",
+                    _fnum_read, _tmp_file->filename, _fnum_elem));
+            }
         }
         else
         {
             _data = char_vec_t{ tracing_session->ReadTraceBlocking() };
         }
+
+        tracing_session.reset();
 
         return _data;
     };
@@ -241,6 +243,7 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error)
 #endif
 
     auto _filename = config::get_perfetto_output_filename();
+
     if(!trace_data.empty())
     {
         operation::file_output_message<tim::project::rocprofsys> _fom{};
@@ -269,9 +272,8 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error)
     }
     else if(dmp::rank() == 0)
     {
-        ROCPROFSYS_VERBOSE(
-            0, "perfetto trace data is empty. File '%s' will not be written...\n",
-            _filename.c_str());
+        LOG_ERROR("Perfetto trace data is empty. File '{}' will not be written...",
+                  _filename);
     }
 
     // Merge the output files, if rank 0
@@ -283,13 +285,13 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error)
 
         if(!_script_dir.empty())
         {
-            _script_path = rocprofsys::common::join("/", _script_dir, _script_path);
+            _script_path = fmt::format("{}/{}", _script_dir, _script_path);
         }
 
         // Test that the script exists
         if(!filepath::exists(_script_path))
         {
-            ROCPROFSYS_VERBOSE(0, "Script not found: %s\n", _script_path.c_str());
+            LOG_WARNING("Script not found: {}", _script_path);
         }
         else
         {
@@ -300,11 +302,11 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error)
 
             if(result != 0)
             {
-                ROCPROFSYS_VERBOSE(0, "Failed to execute: %s\n", _command.c_str());
+                LOG_ERROR("Failed to execute: {}", _command);
             }
             else
             {
-                ROCPROFSYS_VERBOSE(0, "Successfully executed: %s\n", _command.c_str());
+                LOG_INFO("Successfully executed: {}", _command);
             }
         }
     }

@@ -351,6 +351,11 @@ bool ReleaseMemory(void* addr, size_t size);
 bool CommitMemory(void* addr, size_t size, MemProt prot = MEM_PROT_NONE);
 /// Uncommit a chunk of memory previously committed with commitMemory.
 bool UncommitMemory(void* addr, size_t size);
+/// Changes the Protection of a region of committed pages in virtual address space
+bool UnmapMemory(void* addr, size_t size);
+bool MapMemory(void* addr, size_t size, MemProt prot, int fd, uint64_t cpu_addr);
+
+bool ProtectMemory(void* va, size_t size, MemProt perms);
 
 uint64_t HostTotalPhysicalMemory();
 

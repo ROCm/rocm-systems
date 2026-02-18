@@ -57,7 +57,7 @@ RUN	echo "export PATH=$HOME/.pyenv/bin:$PATH" >> ~/.bashrc &&\
 	apt-get install -y python3-pip
 	#clang?
 
-RUN python3 -m pip install astunparse==1.6.2 colorlover dash matplotlib numpy pandas pymongo pyyaml tabulate tqdm dash-svg pyinstaller dash-bootstrap-components &&\
+RUN python3 -m pip install astunparse==1.6.2 dash numpy pandas pyyaml tabulate dash-svg pyinstaller dash-bootstrap-components &&\
 	python3 -m pip install 'cmake==3.21.4' && \
 	./rocm_install.sh &&\
     #wget -q -O - https://repo.radeon.com/rocm/rocm.gpg.key | apt-key add - && \

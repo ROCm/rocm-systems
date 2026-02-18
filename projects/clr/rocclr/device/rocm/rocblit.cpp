@@ -35,7 +35,6 @@ DmaBlitManager::DmaBlitManager(VirtualGPU& gpu, Setup setup)
       StagingXferSize(dev().settings().stagedXferSize_),
       completeOperation_(false),
       context_(nullptr) {
-  dev().getSdmaRWMasks(&sdmaEngineReadMask_, &sdmaEngineWriteMask_);
 }
 
 inline void DmaBlitManager::synchronize() const {
@@ -352,9 +351,56 @@ bool DmaBlitManager::copyBufferRect(device::Memory& srcMemory, device::Memory& d
     }
   }
 
-  // The hsa copy api would result in a dirty cache state
+  // The ROCR copy api guarantees coherency after the copy
   gpu().setFenceDirty(false);
   return true;
+}
+
+// ================================================================================================
+bool DmaBlitManager::copyBufferBatch(std::vector<amd::BatchCopyOp>& copyOps,
+                                     bool entire) const {
+  if (copyOps.empty()) {
+    return true;
+  }
+
+  gpu().releaseGpuMemoryFence(true /* skipCpuWait */);
+
+  // Process each copy operation in the batch
+  // For now, we use the same signal completion approach as single copies
+  // Future optimization: use a shared completion signal for all operations
+  bool result = true;
+
+  for (auto& op : copyOps) {
+    if (op.srcMemory == nullptr || op.dstMemory == nullptr) {
+      LogError("DmaBlitManager::copyBufferBatch - Invalid memory objects!");
+      return false;
+    }
+
+    // Get device memory for source and destination
+    device::Memory* srcDevMem = op.srcMemory->getDeviceMemory(
+        *op.srcMemory->getContext().devices()[0]);
+    device::Memory* dstDevMem = op.dstMemory->getDeviceMemory(
+        *op.dstMemory->getContext().devices()[0]);
+
+    if (srcDevMem == nullptr || dstDevMem == nullptr) {
+      LogError("DmaBlitManager::copyBufferBatch - Failed to get device memory!");
+      return false;
+    }
+
+    // Fall back to individual copy using hsaCopy
+    amd::Coord3D srcOrigin(op.srcOffset);
+    amd::Coord3D dstOrigin(op.dstOffset);
+    amd::Coord3D size(op.size);
+
+    if (!hsaCopy(gpuMem(*srcDevMem), gpuMem(*dstDevMem), srcOrigin, dstOrigin, size,
+                 op.metadata)) {
+      LogPrintfError("DmaBlitManager::copyBufferBatch - Copy failed for operation");
+      result = false;
+      break;
+    }
+  }
+
+  return result;
 }
 
 // ================================================================================================
@@ -475,11 +521,8 @@ inline bool DmaBlitManager::rocrCopyBuffer(address dst, hsa_agent_t& dstAgent, c
                                            hsa_agent_t& srcAgent, size_t size,
                                            amd::CopyMetadata& copyMetadata) const {
   hsa_status_t status = HSA_STATUS_SUCCESS;
-
   uint32_t copyMask = 0;
-  uint32_t freeEngineMask = 0;
-  uint32_t recIdMask = 0;
-  bool kUseRegularCopyApi = 0;
+  bool kUseRegularCopyApi = false;
   constexpr size_t kRetainCountThreshold = 8;
   bool forceSDMA =
       (copyMetadata.copyEnginePreference_ == amd::CopyMetadata::CopyEnginePreference::SDMA);
@@ -508,31 +551,38 @@ inline bool DmaBlitManager::rocrCopyBuffer(address dst, hsa_agent_t& dstAgent, c
   hsa_signal_t active = gpu().Barriers().ActiveSignal(kInitSignalValueOne, gpu().timestamp());
 
   if (!kUseRegularCopyApi && engine != HwQueueEngine::Unknown) {
-    copyMask = gpu().getLastUsedSdmaEngine();
-    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_COPY, "Last copy mask 0x%x", copyMask);
-    copyMask &= (engine == HwQueueEngine::SdmaRead ? sdmaEngineReadMask_ : sdmaEngineWriteMask_);
-    if (copyMask == 0) {
-      // Check SDMA engine status
-      status = Hsa::memory_copy_engine_status(dstAgent, srcAgent, &freeEngineMask);
+    // Check if this VirtualGPU already has an assigned engine with affinity
+    uint32_t assignedEngineMask = gpu().AssignedSdmaEngine();
 
-      if (status == HSA_STATUS_SUCCESS) {
-        status = Hsa::memory_get_preferred_copy_engine(dstAgent, srcAgent, &recIdMask);
-      }
+    // For inter-GPU copies, always query preferred engine based on agents
+    // because the allocator has special logic to select high-bandwidth engines
+    // for specific src/dst pairs, and we shouldn't reuse an engine from a different copy type
+
+    if (assignedEngineMask != 0 && engine != HwQueueEngine::SdmaInter) {
+      // This VirtualGPU/stream already has an assigned engine - just use it
+      // Stream ordering handles any busy conditions naturally
+      copyMask = assignedEngineMask;
 
       ClPrint(amd::LOG_DEBUG, amd::LOG_COPY,
-              "Query copy engine status %x, srcAgent %p, "
-              "dstAgent %p, free_engine_mask 0x%x, rec_engine_mask 0x%x",
-              status, srcAgent.handle, dstAgent.handle, freeEngineMask, recIdMask);
+              "Using assigned SDMA engine for VirtualGPU %p: mask=0x%x, engine_type=%d",
+              &gpu(), copyMask, engine);
+    } else {
+      // No assigned engine yet - allocate one using device-level allocator
+      copyMask = dev().AllocateSdmaEngine(&gpu(), engine, dstAgent, srcAgent);
 
-      // If requested engine is valid and available, use it
-      if (recIdMask != 0 && (freeEngineMask & recIdMask) != 0) {
-        copyMask = recIdMask - (recIdMask & (recIdMask - 1));
+      if (copyMask != 0) {
+        // Store the assigned engine in the VirtualGPU for future use
+        gpu().SetAssignedSdmaEngine(copyMask);
+
+        ClPrint(amd::LOG_INFO, amd::LOG_COPY,
+                "Allocated new SDMA engine for VirtualGPU %p: mask=0x%x, engine_type=%d",
+                &gpu(), copyMask, engine);
       } else {
-        // Otherwise use first available engine
-        copyMask = freeEngineMask - (freeEngineMask & (freeEngineMask - 1));
+        ClPrint(amd::LOG_WARNING, amd::LOG_COPY,
+                "Failed to allocate SDMA engine for VirtualGPU %p, falling back to regular copy",
+                &gpu());
+        kUseRegularCopyApi = true;
       }
-
-      gpu().setLastUsedSdmaEngine(copyMask);
     }
 
     if (copyMask != 0 && status == HSA_STATUS_SUCCESS) {
@@ -573,7 +623,7 @@ inline bool DmaBlitManager::rocrCopyBuffer(address dst, hsa_agent_t& dstAgent, c
 
   if (status == HSA_STATUS_SUCCESS) {
     gpu().addSystemScope();
-    // The hsa copy api would result in a dirty cache state
+    // The ROCR copy api guarantees coherency after the copy
     gpu().setFenceDirty(false);
   } else {
     gpu().Barriers().ResetCurrentSignal();
@@ -2259,16 +2309,16 @@ bool KernelBlitManager::copyBuffer(device::Memory& srcMemory, device::Memory& ds
                                    amd::CopyMetadata copyMetadata) const {
   amd::ScopedLock k(lockXferOps_);
   bool result = false;
-  bool p2p = false;
   uint32_t blitWg = dev().settings().limit_blit_wg_;
 
-  if (&gpuMem(srcMemory).dev() != &gpuMem(dstMemory).dev()) {
-    if (sizeIn[0] > dev().settings().sdma_p2p_threshold_) {
-      p2p = true;
-    } else {
-      constexpr uint32_t kLimitWgForKernelP2p = 16;
-      blitWg = kLimitWgForKernelP2p;
-    }
+  bool isP2pOrIpc = (&gpuMem(srcMemory).dev() != &gpuMem(dstMemory).dev()) ||
+                    srcMemory.owner()->ipcShared() || dstMemory.owner()->ipcShared();
+
+  // Use SDMA for large P2P/IPC transfers, shader for small ones
+  if (isP2pOrIpc && sizeIn[0] <= dev().settings().sdma_p2p_threshold_) {
+    constexpr uint32_t kLimitWgForKernelP2p = 16;
+    blitWg = kLimitWgForKernelP2p;
+    isP2pOrIpc = false;
   }
 
   // Determine if we should use shader copy path based on various conditions
@@ -2281,7 +2331,6 @@ bool KernelBlitManager::copyBuffer(device::Memory& srcMemory, device::Memory& ds
       copyMetadata.copyEnginePreference_ == amd::CopyMetadata::CopyEnginePreference::BLIT;
 
   // Check memory access patterns
-  bool isP2pOrIpc = p2p || srcMemory.owner()->ipcShared() || dstMemory.owner()->ipcShared();
   bool neitherMemoryIsHostDirectAccess =
       !srcMemory.isHostMemDirectAccess() && !dstMemory.isHostMemDirectAccess();
 
@@ -2666,7 +2715,8 @@ amd::Memory* DmaBlitManager::pinHostMemory(const void* hostMem, size_t pinSize,
   amdMemory = new (*context_) amd::Buffer(*context_, CL_MEM_USE_HOST_PTR, pinAllocSize);
   amdMemory->setVirtualDevice(&gpu());
   if ((amdMemory != nullptr) && !amdMemory->create(tmpHost, SysMem)) {
-    DevLogPrintfError("Buffer create failed, Buffer: 0x%x \n", amdMemory);
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
+             "Buffer create failed, Buffer: 0x%x \n", amdMemory);
     amdMemory->release();
     return nullptr;
   }

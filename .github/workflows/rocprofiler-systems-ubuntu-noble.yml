@@ -8,23 +8,33 @@ on:
     paths:
       - '.github/workflows/rocprofiler-systems-ubuntu-noble.yml'
       - 'projects/rocprofiler-systems/**'
-      - '!projects/rocprofiler-systems/*.md'
+      - '!**/*.md'
+      - '!**/*.rtf'
+      - '!**/*.rst'
+      - '!**/.markdownlint-ci2.yaml'
+      - '!**/.readthedocs.yaml'
+      - '!**/.spellcheck.local.yaml'
+      - '!**/.wordlist.txt'
       - '!projects/rocprofiler-systems/docs/**'
       - '!projects/rocprofiler-systems/source/docs/**'
       - '!projects/rocprofiler-systems/source/python/gui/**'
       - '!projects/rocprofiler-systems/docker/**'
-      - '!projects/rocprofiler-systems/.wordlist.txt'
       - '!projects/rocprofiler-systems/CMakePresets.json'
   pull_request:
     paths:
       - '.github/workflows/rocprofiler-systems-ubuntu-noble.yml'
       - 'projects/rocprofiler-systems/**'
-      - '!projects/rocprofiler-systems/*.md'
+      - '!**/*.md'
+      - '!**/*.rtf'
+      - '!**/*.rst'
+      - '!**/.markdownlint-ci2.yaml'
+      - '!**/.readthedocs.yaml'
+      - '!**/.spellcheck.local.yaml'
+      - '!**/.wordlist.txt'
       - '!projects/rocprofiler-systems/docs/**'
       - '!projects/rocprofiler-systems/source/docs/**'
       - '!projects/rocprofiler-systems/source/python/gui/**'
       - '!projects/rocprofiler-systems/docker/**'
-      - '!projects/rocprofiler-systems/.wordlist.txt'
       - '!projects/rocprofiler-systems/CMakePresets.json'
 
 concurrency:
@@ -47,23 +57,13 @@ jobs:
         python: ['ON']
         build-type: ['Release']
         build-dyninst: ['ON']
-        rocm-version: ['0.0', '6.3', '6.4', '7.0']
+        rocm-version: ['0.0', '6.3', '6.4', '7.0', '7.1']
     env:
       OMPI_ALLOW_RUN_AS_ROOT: 1
       OMPI_ALLOW_RUN_AS_ROOT_CONFIRM: 1
       ROCPROFSYS_CI: 'ON'
 
     steps:
-    - name: Free Disk Space
-      uses: jlumbroso/free-disk-space@v1.3.0
-      with:
-          tool-cache: true
-          android: true
-          dotnet: true
-          haskell: true
-          large-packages: true
-          swap-storage: true
-
     - uses: actions/checkout@v4
       with:
         sparse-checkout: projects/rocprofiler-systems/
@@ -144,6 +144,19 @@ jobs:
           $CMAKE_PREFIX_PATH_ARG \
           -- \
           -LE "transpose|rccl|videodecode|jpegdecode|network"
+
+    - name: Check for Leftover Buffered Files
+      timeout-minutes: 5
+      working-directory: projects/rocprofiler-systems/
+      run: |
+        set -v
+        if find /tmp -maxdepth 1 -name 'buffered*' -print -quit | grep -q .; then
+          echo "Error: Found leftover buffered storage files in /tmp:"
+          ls -lh /tmp/buffered*
+          exit 1
+        else
+          echo "✓ No buffered storage files found in /tmp"
+        fi
 
     - name: Test Clean Up
       timeout-minutes: 10

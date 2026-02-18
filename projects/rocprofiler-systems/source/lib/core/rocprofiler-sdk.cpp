@@ -22,9 +22,12 @@
 
 #include "core/rocprofiler-sdk.hpp"
 #include "core/config.hpp"
-#include "core/debug.hpp"
 #include "timemory.hpp"
 #include <regex>
+
+#include "logger/debug.hpp"
+
+#include <spdlog/fmt/ranges.h>
 
 #if defined(ROCPROFSYS_USE_ROCM) && ROCPROFSYS_USE_ROCM > 0
 
@@ -48,13 +51,9 @@
             rocprofiler_status_t CHECKSTATUS = (result);                                 \
             if(CHECKSTATUS != ROCPROFILER_STATUS_SUCCESS)                                \
             {                                                                            \
-                auto        msg        = std::stringstream{};                            \
                 std::string status_msg = rocprofiler_get_status_string(CHECKSTATUS);     \
-                msg << "[" #result "][" << __FILE__ << ":" << __LINE__ << "] "           \
-                    << "rocprofiler-sdk call [" << #result                               \
-                    << "] failed with error code " << CHECKSTATUS                        \
-                    << " :: " << status_msg;                                             \
-                ROCPROFSYS_WARNING(0, "%s\n", msg.str().c_str());                        \
+                LOG_WARNING("rocprofiler-sdk call [{}] failed with error code {} :: {}", \
+                            #result, status_msg);                                        \
             }                                                                            \
         }
 
@@ -84,8 +83,8 @@ get_setting_name(std::string _v)
                                        __VA_ARGS__ });                                   \
             if(!_ret.second)                                                             \
             {                                                                            \
-                ROCPROFSYS_PRINT("Warning! Duplicate setting: %s / %s\n",                \
-                                 get_setting_name(ENV_NAME).c_str(), ENV_NAME);          \
+                LOG_WARNING("Duplicate setting: {} / {}", get_setting_name(ENV_NAME),    \
+                            ENV_NAME);                                                   \
             }                                                                            \
             return _config->find(ENV_NAME)->second;                                      \
         }()
@@ -131,7 +130,12 @@ get_operations_impl(rocprofiler_callback_tracing_kind_t kindv,
 
     auto _val = get_setting_value<std::string>(optname);
 
-    ROCPROFSYS_CONDITIONAL_ABORT_F(!_val, "no setting %s\n", optname.c_str());
+    if(!_val)
+    {
+        LOG_CRITICAL("no setting {}", optname);
+        ::rocprofsys::set_state(::rocprofsys::State::Finalized);
+        std::abort();
+    }
 
     if(_val->empty()) return std::unordered_set<int32_t>{};
 
@@ -143,8 +147,7 @@ get_operations_impl(rocprofiler_callback_tracing_kind_t kindv,
             auto _re = std::regex{ itr, std::regex_constants::icase };
             if(iitr.second && std::regex_search(iitr.second->data(), _re))
             {
-                ROCPROFSYS_PRINT_F("%s ('%s') matched: %s\n", optname.c_str(),
-                                   itr.c_str(), iitr.second->data());
+                LOG_DEBUG("{} ('{}') matched: {}", optname, itr, iitr.second->data());
                 _ret.emplace(iitr.first);
             }
         }
@@ -172,7 +175,12 @@ get_operations_impl(rocprofiler_buffer_tracing_kind_t kindv,
 
     auto _val = get_setting_value<std::string>(optname);
 
-    ROCPROFSYS_CONDITIONAL_ABORT_F(!_val, "no setting %s\n", optname.c_str());
+    if(!_val)
+    {
+        LOG_CRITICAL("no setting {}", optname);
+        ::rocprofsys::set_state(::rocprofsys::State::Finalized);
+        std::abort();
+    }
 
     if(_val->empty()) return std::unordered_set<int32_t>{};
 
@@ -184,8 +192,7 @@ get_operations_impl(rocprofiler_buffer_tracing_kind_t kindv,
             auto _re = std::regex{ itr, std::regex_constants::icase };
             if(iitr.second && std::regex_search(iitr.second->data(), _re))
             {
-                ROCPROFSYS_PRINT_F("%s ('%s') matched: %s\n", optname.c_str(),
-                                   itr.c_str(), iitr.second->data());
+                LOG_DEBUG("{} ('{}') matched: {}", optname, itr, iitr.second->data());
                 _ret.emplace(iitr.first);
             }
         }
@@ -276,11 +283,11 @@ config_settings(const std::shared_ptr<settings>& _config)
 
         if(_skip_domains.count(_v) > 0) return;
 
-        auto _op_option_name = JOIN('_', "ROCPROFSYS_ROCM", _domain_name, "OPERATIONS");
+        auto _op_option_name = fmt::format("ROCPROFSYS_ROCM_{}_OPERATIONS", _domain_name);
         auto _eop_option_name =
-            JOIN('_', "ROCPROFSYS_ROCM", _domain_name, "OPERATIONS_EXCLUDE");
+            fmt::format("ROCPROFSYS_ROCM_{}_OPERATIONS_EXCLUDE", _domain_name);
         auto _bt_option_name =
-            JOIN('_', "ROCPROFSYS_ROCM", _domain_name, "OPERATIONS_ANNOTATE_BACKTRACE");
+            fmt::format("ROCPROFSYS_ROCM_{}_OPERATIONS_ANNOTATE_BACKTRACE", _domain_name);
 
         auto _op_choices = std::vector<std::string>{};
         for(auto itr : _domain.operations)
@@ -328,6 +335,7 @@ config_settings(const std::shared_ptr<settings>& _config)
     _add_domain("hip_api");
     _add_domain("hsa_api");
     _add_domain("marker_api");
+    _add_domain("roctx");
 
     for(const auto& itr : buffered_tracing_info)
         _add_domain(itr.name);
@@ -337,10 +345,9 @@ config_settings(const std::shared_ptr<settings>& _config)
 
     std::sort(_domain_choices.begin(), _domain_choices.end());
 
-    namespace join = ::timemory::join;
     auto _domain_description =
-        JOIN("", "Specification of ROCm domains to trace/profile. Choices: ",
-             join::join(join::array_config{ ", ", "", "" }, _domain_choices));
+        fmt::format("Specification of ROCm domains to trace/profile. Choices: {}",
+                    fmt::join(_domain_choices, ", "));
     auto _domain_defaults = std::string{ "hip_runtime_api,marker_api,kernel_dispatch,"
                                          "memory_copy,scratch_memory" };
 
@@ -361,7 +368,6 @@ config_settings(const std::shared_ptr<settings>& _config)
 
     _skip_domains.emplace("kernel_dispatch");
     _skip_domains.emplace("page_migration");
-    _skip_domains.emplace("scratch_memory");
 
     _add_operation_settings(
         "MARKER_API", callback_tracing_info[ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API],
@@ -406,8 +412,10 @@ get_callback_domains()
     };
 
     auto _version = get_version();
-    ROCPROFSYS_WARNING_IF(_version.formatted == 0,
-                          "Warning! rocprofiler-sdk version not initialized\n");
+    if(_version.formatted == 0)
+    {
+        LOG_WARNING("rocprofiler-sdk version not initialized");
+    }
 
 #    if(ROCPROFILER_VERSION >= 600)
     if(_version.formatted >= 600)
@@ -458,8 +466,8 @@ get_callback_domains()
     {
         if(invalid_domain(itr))
         {
-            ROCPROFSYS_THROW("unsupported ROCPROFSYS_ROCM_DOMAINS value: %s\n",
-                             itr.c_str());
+            throw std::runtime_error(
+                fmt::format("unsupported ROCPROFSYS_ROCM_DOMAINS value: {}", itr));
         }
 
         if(itr == "hsa_api")
@@ -531,8 +539,8 @@ get_buffered_domains()
     {
         if(invalid_domain(itr))
         {
-            ROCPROFSYS_THROW("unsupported ROCPROFSYS_ROCM_DOMAINS value: %s\n",
-                             itr.c_str());
+            throw std::runtime_error(
+                fmt::format("unsupported ROCPROFSYS_ROCM_DOMAINS value: {}", itr));
         }
 
         if(itr == "hsa_api")
@@ -602,9 +610,13 @@ get_group_by_queue(void)
 std::vector<int32_t>
 get_operations(rocprofiler_callback_tracing_kind_t kindv)
 {
-    ROCPROFSYS_CONDITIONAL_ABORT_F(
-        callback_operation_option_names.count(kindv) == 0,
-        "callback_operation_operation_names does not have value for %i\n", kindv);
+    if(callback_operation_option_names.count(kindv) == 0)
+    {
+        LOG_CRITICAL("callback_operation_operation_names does not have value for {}",
+                     static_cast<int>(kindv));
+        ::rocprofsys::set_state(::rocprofsys::State::Finalized);
+        std::abort();
+    }
 
     auto _complete = get_operations_impl(kindv);
     auto _include  = get_operations_impl(
@@ -618,9 +630,13 @@ get_operations(rocprofiler_callback_tracing_kind_t kindv)
 std::vector<int32_t>
 get_operations(rocprofiler_buffer_tracing_kind_t kindv)
 {
-    ROCPROFSYS_CONDITIONAL_ABORT_F(
-        buffered_operation_option_names.count(kindv) == 0,
-        "buffered_operation_option_names does not have value for %i\n", kindv);
+    if(buffered_operation_option_names.count(kindv) == 0)
+    {
+        LOG_CRITICAL("buffered_operation_option_names does not have value for {}",
+                     static_cast<int>(kindv));
+        ::rocprofsys::set_state(::rocprofsys::State::Finalized);
+        std::abort();
+    }
 
     auto _complete = get_operations_impl(kindv);
     auto _include  = get_operations_impl(
@@ -634,9 +650,13 @@ get_operations(rocprofiler_buffer_tracing_kind_t kindv)
 std::unordered_set<int32_t>
 get_backtrace_operations(rocprofiler_callback_tracing_kind_t kindv)
 {
-    ROCPROFSYS_CONDITIONAL_ABORT_F(
-        callback_operation_option_names.count(kindv) == 0,
-        "callback_operation_operation_names does not have value for %i\n", kindv);
+    if(callback_operation_option_names.count(kindv) == 0)
+    {
+        LOG_CRITICAL("callback_operation_option_names does not have value for {}",
+                     static_cast<int>(kindv));
+        ::rocprofsys::set_state(::rocprofsys::State::Finalized);
+        std::abort();
+    }
 
     auto _data = get_operations_impl(
         kindv, callback_operation_option_names.at(kindv).operations_annotate_backtrace);
@@ -650,9 +670,13 @@ get_backtrace_operations(rocprofiler_callback_tracing_kind_t kindv)
 std::unordered_set<int32_t>
 get_backtrace_operations(rocprofiler_buffer_tracing_kind_t kindv)
 {
-    ROCPROFSYS_CONDITIONAL_ABORT_F(
-        buffered_operation_option_names.count(kindv) == 0,
-        "buffered_operation_option_names does not have value for %i\n", kindv);
+    if(buffered_operation_option_names.count(kindv) == 0)
+    {
+        LOG_CRITICAL("buffered_operation_option_names does not have value for {}",
+                     static_cast<int>(kindv));
+        ::rocprofsys::set_state(::rocprofsys::State::Finalized);
+        std::abort();
+    }
 
     auto _data = get_operations_impl(
         kindv, buffered_operation_option_names.at(kindv).operations_annotate_backtrace);

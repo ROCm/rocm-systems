@@ -31,7 +31,15 @@ application, launch, for example:
 This runs the app, launches each kernel, and generates profiling results. By
 default, results are written to a subdirectory with your accelerator's name;
 for example, ``./workloads/vcopy_data/MI200/``, where name is configurable
-via the ``-n`` argument.
+via the ``-n`` argument. When an MPI rank is detected, the default output
+directory appends the rank (``./workloads/vcopy_data/<rank>/``) instead of
+the gpu model. Use ``--output-directory`` to override the output location.
+
+.. note::
+
+   ``--path`` and ``--subpath`` are deprecated for profile mode and will be
+   removed in a future release. Use ``--output-directory`` with parameterized
+   placeholders instead.
 
 .. note::
 
@@ -54,7 +62,7 @@ Common filters to customize data collection include:
    Enables filtering kernels by name.
 
 ``-d``, ``--dispatch``
-   Enables filtering based on dispatch ID.
+   Enables filtering based on dispatch iteration.
 
 ``-b``, ``--block``
    Enables collection metrics for only the specified analysis report blocks.
@@ -118,7 +126,7 @@ Profile mode
    :doc:`ROCProfiler <rocprofiler:index>`. Depending on the profiling options
    chosen, selected kernels, dispatches, and or hardware components used by the
    application are profiled. It stores results locally in an output folder:
-   ``./workloads/\<name>``.
+   ``./workloads/\<name>`` (or rank-specific subdirectories when using MPI).
 
    .. code-block:: shell
 
@@ -200,11 +208,11 @@ The following table lists ROCm Compute Profiler's basic operations, their
 
    * - :doc:`Profile a workload </how-to/profile/mode>`
      - ``profile``
-     - ``--name``, ``-- <profile_cmd>``
+     - ``--name`` or ``--output-directory``, ``-- <profile_cmd>``
 
    * - :ref:`Standalone roofline analysis <standalone-roofline>`
      - ``profile``
-     - ``--name``, ``--roof-only``, ``--roofline-data-type <data_type>``, ``-- <profile_cmd>``
+     - ``--name`` or ``--output-directory``, ``--roof-only``, ``--roofline-data-type <data_type>``, ``-- <profile_cmd>``
 
    * - :doc:`Launch standalone GUI from CLI </how-to/analyze/standalone-gui>`
      - ``analyze``

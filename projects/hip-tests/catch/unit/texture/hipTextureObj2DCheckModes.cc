@@ -134,11 +134,6 @@ line1:
 TEST_CASE("Unit_hipTextureObj2DCheckModes") {
   CHECK_IMAGE_SUPPORT
 
-#if __HIP_NO_IMAGE_SUPPORT
-  HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");
-  return;
-#endif
-
   SECTION("hipAddressModeClamp, hipFilterModePoint, regularCoords") {
     runTest<hipAddressModeClamp, hipFilterModePoint, false>(256, 256, -3.9, 6.1);
     runTest<hipAddressModeClamp, hipFilterModePoint, false>(256, 256, 4.4, -7.0);

@@ -522,6 +522,9 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
         {RDC_FI_XGMI_7_WRITE_KB, gpu_metrics.xgmi_write_data_acc[7]},
         {RDC_FI_XGMI_TOTAL_WRITE_KB, sum_xgmi_write(gpu_metrics)},
         {RDC_FI_PCIE_BANDWIDTH, gpu_metrics.pcie_bandwidth_inst},
+        {RDC_FI_PCIE_LC_PERF_OTHER_END_RECOVERY, gpu_metrics.pcie_lc_perf_other_end_recovery},
+        {RDC_FI_PCIE_NAK_RCVD_COUNT_ACC, gpu_metrics.pcie_nak_rcvd_count_acc},
+        {RDC_FI_PCIE_NAK_SENT_COUNT_ACC, gpu_metrics.pcie_nak_sent_count_acc},
     };
 
     // In gpu_metrics,the max value means not supported
@@ -647,6 +650,14 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
         value->value.l_int = static_cast<int64_t>(partition_count);
       }
     } break;
+    case RDC_FI_KFD_ID: {
+      amdsmi_kfd_info_t kfd_info;
+      value->status = amdsmi_get_gpu_kfd_info(processor_handle, &kfd_info);
+      value->type = INTEGER;
+      if (value->status == AMDSMI_STATUS_SUCCESS) {
+        value->value.l_int = static_cast<int64_t>(kfd_info.kfd_id);
+      }
+    } break;
     case RDC_FI_POWER_USAGE: {
       amdsmi_power_info_t power_info = {};
       value->status = amdsmi_get_power_info(processor_handle, &power_info);
@@ -732,8 +743,7 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
     }
     case RDC_FI_GPU_PAGE_RETRIED: {
       uint32_t num_pages = 0;
-      amdsmi_retired_page_record_t page_record;
-      value->status = amdsmi_get_gpu_bad_page_info(processor_handle, &num_pages, &page_record);
+      value->status = amdsmi_get_gpu_bad_page_info(processor_handle, &num_pages, nullptr);
       value->type = INTEGER;
       if (value->status == AMDSMI_STATUS_SUCCESS) {
         value->value.l_int = num_pages;
@@ -899,6 +909,9 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
     case RDC_FI_XGMI_7_WRITE_KB:
     case RDC_FI_XGMI_TOTAL_WRITE_KB:
     case RDC_FI_PCIE_BANDWIDTH:
+    case RDC_FI_PCIE_LC_PERF_OTHER_END_RECOVERY:
+    case RDC_FI_PCIE_NAK_RCVD_COUNT_ACC:
+    case RDC_FI_PCIE_NAK_SENT_COUNT_ACC:
       read_gpu_metrics_uint64_t();
       break;
     case RDC_HEALTH_XGMI_ERROR: {

@@ -60,15 +60,16 @@ aqlprofile_agent_handle_t RegisterAgent(const aqlprofile_agent_info_v1_t* agent_
 
 // GPU enumeration
 enum gpu_id_t {
-  INVAL_GPU_ID,  // invalid GPU id
-  GFX9_GPU_ID,   // generic Gfx9 id
-  MI100_GPU_ID,  // Mi100 GPU id
-  MI200_GPU_ID,  // Mi200 GPU id
-  MI300_GPU_ID,  // Mi300 GPU id
-  MI350_GPU_ID,  // Mi350 GPU id
-  GFX10_GPU_ID,  // generic Gfx10 id
-  GFX11_GPU_ID,  // generic Gfx11 id
-  GFX12_GPU_ID,  // generic Gfx12 id
+  INVAL_GPU_ID,   // invalid GPU id
+  GFX9_GPU_ID,    // generic Gfx9 id
+  MI100_GPU_ID,   // Mi100 GPU id
+  MI200_GPU_ID,   // Mi200 GPU id
+  MI300_GPU_ID,   // Mi300 GPU id
+  MI350_GPU_ID,   // Mi350 GPU id
+  GFX10_GPU_ID,   // generic Gfx10 id
+  GFX11_GPU_ID,   // generic Gfx11 id
+  GFX115X_GPU_ID,  // Gfx11.5x id
+  GFX12_GPU_ID,   // generic Gfx12 id
 };
 
 // Block info map class
@@ -190,16 +191,15 @@ class Pm4Factory {
 
   virtual size_t GetNumEvents(uint32_t block_name) const {
     size_t se_number = GetShaderEnginesNumber() / GetXccNumber();
+    size_t sa_number = GetShaderArraysNumber();
     size_t block_samples_count = 1;
     auto* block_info = GetBlockInfo(block_name);
 
     if (block_info->attr & CounterBlockSeAttr)
       block_samples_count *= se_number;
     if (block_info->attr & CounterBlockSaAttr)
-      block_samples_count *= 2;
+      block_samples_count *= sa_number;
     if (block_info->attr & CounterBlockWgpAttr)
-      block_samples_count *= GetNumWGPs();
-    if ((block_info->attr & CounterBlockSqAttr) && IsGFX11()) // TODO: Move to CounterBlockWgpAttr
       block_samples_count *= GetNumWGPs();
     return block_samples_count;
   }
@@ -274,6 +274,8 @@ class Pm4Factory {
   static Pm4Factory* Gfx10Create(const AgentInfo* agent_info);
   // Create GFX11 generic factory
   static Pm4Factory* Gfx11Create(const AgentInfo* agent_info);
+  // Create GFX11.5 factory
+  static Pm4Factory* Gfx115xCreate(const AgentInfo* agent_info);
   // Create GFX12 generic factory
   static Pm4Factory* Gfx12Create(const AgentInfo* agent_info);
   // Create MI100 factory
@@ -322,6 +324,10 @@ inline Pm4Factory* Pm4Factory::Create(const AgentInfo* agent_info, gpu_id_t gpu_
       // Create Gfx11 generic factory
       case GFX11_GPU_ID:
         it->second = Gfx11Create(agent_info);
+        break;
+      // Create Gfx11.5 factory
+      case GFX115X_GPU_ID:
+        it->second = Gfx115xCreate(agent_info);
         break;
       case GFX12_GPU_ID:
         it->second = Gfx12Create(agent_info);
@@ -405,10 +411,12 @@ inline bool Pm4Factory::CheckConcurrent(const profile_t* profile) {
 
 // Return GPU id for a given agent
 inline gpu_id_t Pm4Factory::GetGpuId(std::string_view gfx_ip) {
+  // More specific GPU IDs must come before less specific IDs.
   std::vector<std::pair<std::string, gpu_id_t>> gfxip_map = {
       {"gfx908", MI100_GPU_ID}, {"gfx90a", MI200_GPU_ID}, {"gfx900", GFX9_GPU_ID},
       {"gfx902", GFX9_GPU_ID},  {"gfx906", GFX9_GPU_ID},  {"gfx94", MI300_GPU_ID},
-      {"gfx95", MI350_GPU_ID},  {"gfx10", GFX10_GPU_ID},  {"gfx11", GFX11_GPU_ID},
+      {"gfx95", MI350_GPU_ID},  {"gfx10", GFX10_GPU_ID},
+      {"gfx115", GFX115X_GPU_ID}, {"gfx11", GFX11_GPU_ID},
       {"gfx12", GFX12_GPU_ID},
   };
 

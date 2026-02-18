@@ -60,7 +60,7 @@ TEST_CASE("Unit_hipGraphicsResourceGetMappedPointer_Positive_Basic") {
   HIP_CHECK(hipGraphicsUnregisterResource(vbo_resource));
 }
 
-TEST_CASE("Unit_hipGraphicsResourceGetMappedPointer_Positive_Parameters") {
+TEST_CASE("Unit_hipGraphicsResourceGetMappedPointer_Null_Parameters") {
   GLContextScopeGuard gl_context;
 
   const int device_count = HipTest::getDeviceCount();
@@ -84,14 +84,23 @@ TEST_CASE("Unit_hipGraphicsResourceGetMappedPointer_Positive_Parameters") {
   size_t size = 0;
 
   SECTION("devPtr == nullptr") {
-    HIP_CHECK(hipGraphicsResourceGetMappedPointer(nullptr, &size, vbo_resource));
-    REQUIRE(size == vbo.kSize);
+    HIP_CHECK_ERROR(hipGraphicsResourceGetMappedPointer(nullptr, &size, vbo_resource), hipErrorInvalidValue);
   }
 
   SECTION("size == nullptr") {
-    HIP_CHECK(hipGraphicsResourceGetMappedPointer(reinterpret_cast<void**>(&buffer_devptr), nullptr,
-                                                  vbo_resource));
-    REQUIRE(buffer_devptr != nullptr);
+    HIP_CHECK_ERROR(hipGraphicsResourceGetMappedPointer(reinterpret_cast<void**>(&buffer_devptr), nullptr,
+                                                  vbo_resource), hipErrorInvalidValue);
+  }
+
+  SECTION("resource == nullptr") {
+    hipGraphicsResource* null_resource = nullptr;
+    HIP_CHECK_ERROR(hipGraphicsResourceGetMappedPointer(reinterpret_cast<void**>(&buffer_devptr), &size,
+                                                  null_resource), hipErrorInvalidValue);
+  }
+
+  SECTION("devPtr == nullptr && size == nullptr") {
+    HIP_CHECK_ERROR(hipGraphicsResourceGetMappedPointer(nullptr, nullptr,
+                                                  vbo_resource), hipErrorInvalidValue);
   }
 
   HIP_CHECK(hipGraphicsUnmapResources(1, &vbo_resource, 0));
@@ -145,7 +154,7 @@ TEST_CASE("Unit_hipGraphicsResourceGetMappedPointer_Negative_Parameters") {
     HIP_CHECK(hipGraphicsUnregisterResource(unregistered_resource));
     HIP_CHECK_ERROR(hipGraphicsResourceGetMappedPointer(reinterpret_cast<void**>(&buffer_devptr),
                                                         &size, unregistered_resource),
-                    hipErrorContextIsDestroyed);
+                    hipErrorInvalidHandle);
   }
 
   SECTION("not mapped resource") {

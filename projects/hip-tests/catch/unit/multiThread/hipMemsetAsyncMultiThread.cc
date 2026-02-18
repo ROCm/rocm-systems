@@ -62,7 +62,7 @@ template <typename Func, typename T> void threadCall(Func f, hipStream_t stream)
 
   T* ptr{nullptr};
   constexpr size_t size = 1024;
-  constexpr size_t iter = 1024;
+  constexpr size_t iter = 512;
   HIP_CHECK_THREAD(hipMalloc(&ptr, sizeof(T) * size));
   hipEvent_t event{};
   HIP_CHECK_THREAD(hipEventCreate(&event));

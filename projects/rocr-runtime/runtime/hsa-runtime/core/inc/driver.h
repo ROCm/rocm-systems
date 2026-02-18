@@ -50,6 +50,7 @@
 #include "core/inc/memory_region.h"
 #include "hsakmt/hsakmttypes.h"
 #include "inc/hsa.h"
+#include "core/inc/hsa_internal.h"
 
 namespace rocr {
 namespace core {
@@ -159,7 +160,7 @@ public:
   /// @param[in] event HsaEvent for event-driven callbacks.
   /// @param[out] queue_resource Queue resource information populated by the driver.
   virtual hsa_status_t CreateQueue(uint32_t node_id, HSA_QUEUE_TYPE type, uint32_t queue_pct,
-                                   HSA_QUEUE_PRIORITY priority, uint32_t sdma_engine_id,
+                                   HSA::hsa_amd_queue_priority_internal_t priority, uint32_t sdma_engine_id,
                                    void* queue_addr, uint64_t queue_size_bytes, HsaEvent* event,
                                    HsaQueueResource& queue_resource) const = 0;
 
@@ -175,7 +176,7 @@ public:
   /// @param[in] queue_size_bytes Size of the queue's ring buffer in bytes.
   /// @param[in] event HsaEvent for event-driven callbacks.
   virtual hsa_status_t UpdateQueue(HSA_QUEUEID queue_id, uint32_t queue_pct,
-                                   HSA_QUEUE_PRIORITY priority, void* queue_addr,
+                                   HSA::hsa_amd_queue_priority_internal_t priority, void* queue_addr,
                                    uint64_t queue_size_bytes, HsaEvent* event) const = 0;
 
   /// @brief Set the CU mask for a queue.
@@ -231,6 +232,14 @@ public:
   /// @param[in] size memory size in bytes
   virtual hsa_status_t Unmap(core::ShareableHandle handle, void *mem,
                              size_t offset, size_t size) = 0;
+
+  /// @brief Get Shareable Memory Handle for physical memory
+  /// @param[in] va virtual address
+  /// @param[in] mem  physical memory handle
+  /// @param[in] size size of memory allocated in bytes
+  /// @param[out] handle handle of the memory object
+  virtual hsa_status_t GetShareableHandle(void* va, void* mem, size_t size,
+                                          core::ShareableHandle* handle) = 0;
 
   /// @brief Releases the object associated with the handle.
   ///
@@ -348,7 +357,7 @@ public:
 
   /// @brief Releases the residency of the memory
   /// @param[in] mem address of memory to be made unresident
-  /// @return HSA_STATUS_SUCCESS if the driver successfully makes the memory
+  /// @return HSA_STATUS_SUCCESS if the driver successfully releases the residency
   virtual hsa_status_t MakeMemoryUnresident(const void* mem) const = 0;
 
   /// Unique identifier for supported kernel-mode drivers.

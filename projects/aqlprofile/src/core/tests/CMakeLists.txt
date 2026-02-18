@@ -217,6 +217,7 @@ SET(AQLPROFILE_V2_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../spm_data.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../gfx12_factory.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../gfx11_factory.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../gfx115x_factory.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../gfx10_factory.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../gfx940_factory.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../gfx908_factory.cpp

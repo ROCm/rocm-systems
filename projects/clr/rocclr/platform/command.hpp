@@ -90,7 +90,7 @@ class Event : public RuntimeObject {
   std::atomic_flag notified_;              //!< Command queue was notified
 
   void* hw_event_;        //!< HW event ID associated with SW event
-  Event* notify_event_;   //!< Notify event, which should contain HW signal
+  std::atomic<Event*> notify_event_;   //!< Notify event, which should contain HW signal
   const Device* device_;  //!< Device, this event associated with
 
   std::atomic<int32_t> event_entry_scope_;  //!< Command entry scope
@@ -219,7 +219,7 @@ class Event : public RuntimeObject {
   void* HwEvent() const { return hw_event_; }
 
   //! Returns notify even associated with the current command
-  Event* NotifyEvent() const {ScopedLock l(notify_lock_); return notify_event_; }
+  Event* NotifyEvent() const { return notify_event_; }
 
   //! Get entry scope of the event
   int32_t getCommandEntryScope() const {
@@ -234,15 +234,35 @@ class Event : public RuntimeObject {
 
 union CopyMetadata {
   enum CopyEnginePreference { NONE = 0, BLIT = 1, SDMA = 2, CPDMA = 3 };
+  //! Source access ordering for batch copies
+  enum SrcAccessOrder {
+    kSrcAccessOrderStream = 0,         //!< Access to source must be in stream order
+    kSrcAccessOrderDuringApiCall = 1,  //!< Source access completes before API returns
+    kSrcAccessOrderAny = 2             //!< Source access can be out of stream order
+  };
 
   struct {
     uint32_t isAsync_ : 1;
     uint32_t copyEnginePreference_ : 2;
+    uint32_t srcAccessOrder_ : 2;       //!< Source access ordering for batch copies
+    uint32_t preferOverlapCompute_ : 1; //!< Prefer overlap with compute work
+    uint32_t reserved_ : 26;            //!< Reserved for future use
   };
   uint32_t flags_;
   CopyMetadata() : flags_(0) {}
   CopyMetadata(bool isAsync, CopyEnginePreference copyEnginePreference)
-      : isAsync_(isAsync), copyEnginePreference_(copyEnginePreference) {}
+      : isAsync_(isAsync),
+        copyEnginePreference_(copyEnginePreference),
+        srcAccessOrder_(kSrcAccessOrderStream),
+        preferOverlapCompute_(0),
+        reserved_(0) {}
+  CopyMetadata(bool isAsync, CopyEnginePreference copyEnginePreference,
+               SrcAccessOrder srcAccessOrder, bool preferOverlap = false)
+      : isAsync_(isAsync),
+        copyEnginePreference_(copyEnginePreference),
+        srcAccessOrder_(srcAccessOrder),
+        preferOverlapCompute_(preferOverlap ? 1 : 0),
+        reserved_(0) {}
 };
 
 // Interface to callback to allocate kernel args from the graph kernel arg pool.
@@ -502,7 +522,7 @@ class OneMemoryArgCommand : public Command {
     memory_->retain();
   }
 
-  virtual void releaseResources() {
+  virtual void releaseResources() override {
     memory_->release();
     DEBUG_ONLY(memory_ = NULL);
     Command::releaseResources();
@@ -510,14 +530,14 @@ class OneMemoryArgCommand : public Command {
   }
 
   //! Release all pinned memory for this command
-  virtual void ReleasePinnedMemory() {
+  virtual void ReleasePinnedMemory() override {
     for (auto it : pinned_memory_) {
       it->release();
     }
     pinned_memory_.clear();
   }
   //! Release all pinned memory for this command
-  virtual bool IsMemoryPinned() const { return !pinned_memory_.empty(); }
+  virtual bool IsMemoryPinned() const override { return !pinned_memory_.empty(); }
 
   //! Adds pinned memory, used in this command for later release
   virtual void AddPinnedMemory(Memory* pinned) override { pinned_memory_.push_back(pinned); }
@@ -1088,10 +1108,65 @@ class CopyMemoryCommand : public TwoMemoryArgsCommand {
   bool isEntireMemory() const;
 };
 
+//! Structure to hold individual copy operation info for batch copies
+struct BatchCopyOp {
+  Memory* srcMemory;       //!< Source memory object
+  Memory* dstMemory;       //!< Destination memory object
+  size_t srcOffset;        //!< Offset in source buffer
+  size_t dstOffset;        //!< Offset in destination buffer
+  size_t size;             //!< Size of the copy in bytes
+  CopyMetadata metadata;   //!< Copy metadata for this operation
+
+  BatchCopyOp(Memory* src, Memory* dst, size_t srcOff, size_t dstOff,
+              size_t sz, CopyMetadata meta = CopyMetadata())
+      : srcMemory(src), dstMemory(dst), srcOffset(srcOff),
+        dstOffset(dstOff), size(sz), metadata(meta) {}
+};
+
+/*! \brief  A batch copy memory command for multiple buffer-to-buffer copies
+ *
+ *  \details Executes multiple copy operations as a batch. Copies within
+ *           a batch are not guaranteed to execute in any specific order
+ *           relative to each other.
+ */
+class BatchCopyMemoryCommand : public Command {
+ private:
+  std::vector<BatchCopyOp> copyOps_;  //!< Vector of copy operations
+
+ public:
+  BatchCopyMemoryCommand(HostQueue& queue, cl_command_type cmdType,
+                         const EventWaitList& eventWaitList,
+                         std::vector<BatchCopyOp>&& copyOps)
+      : Command(queue, cmdType, eventWaitList),
+        copyOps_(std::move(copyOps)) {}
+
+  BatchCopyMemoryCommand(HostQueue& queue, cl_command_type cmdType,
+                         const EventWaitList& eventWaitList,
+                         const std::vector<BatchCopyOp>& copyOps)
+      : Command(queue, cmdType, eventWaitList),
+        copyOps_(copyOps) {}
+
+  virtual void submit(device::VirtualDevice& device) { device.submitBatchCopyMemory(*this); }
+
+  //! Return the vector of copy operations
+  std::vector<BatchCopyOp>& copyOps() { return copyOps_; }
+
+  //! Return the number of copy operations in the batch
+  size_t count() const { return copyOps_.size(); }
+
+  //! Validate peer memory access for all operations
+  bool validatePeerMemory() const {
+    for (const auto& op : copyOps_) {
+      if (op.srcMemory == nullptr || op.dstMemory == nullptr) {
+        return false;
+      }
+    }
+    return true;
+  }
+};
+
 /*! \brief  A generic map memory command. Makes a memory object accessible to the host.
  *
- * @todo:dgladdin   Need to think more about how the pitch parameters operate in
- *                  the context of unified buffer/image commands.
  */
 
 class MapMemoryCommand : public OneMemoryArgCommand {
@@ -1383,6 +1458,7 @@ class AccumulateCommand : public Command {
  private:
   //! Kernel names and timestamps list for activity profiling
   std::vector<std::string> kernelNames_;
+  const std::vector<std::string>* kernelNamesRef_ = nullptr;
   std::vector<std::pair<uint64_t, uint64_t>> tsList_;
 
  public:
@@ -1399,13 +1475,20 @@ class AccumulateCommand : public Command {
     kernelNames_.insert(kernelNames_.end(), kernelNames.begin(), kernelNames.end());
   }
 
+  //! Set kernel names by reference
+  void setKernelNamesRef(const std::vector<std::string>* kernelNames) {
+    kernelNamesRef_ = kernelNames;
+  }
+
   //! Add kernel timestamp to the list if available
   void addTimestamps(uint64_t startTs, uint64_t endTs) {
     tsList_.push_back(std::make_pair(startTs, endTs));
   }
 
   //! Return the kernel names
-  const std::vector<std::string>& getKernelNames() const { return kernelNames_; }
+  const std::vector<std::string>& getKernelNames() const {
+    return kernelNamesRef_ != nullptr ? *kernelNamesRef_ : kernelNames_;
+  }
 
   //! Return the kernel timestamps
   const std::vector<std::pair<uint64_t, uint64_t>>& getTimestamps() const { return tsList_; }

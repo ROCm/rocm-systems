@@ -24,6 +24,7 @@ THE SOFTWARE.
 #include <iostream>
 #include <fstream>
 #include <vector>
+#include <cstring>
 #include "hip_helper.h"
 
 #define fileName "tex2dKernel.code"
@@ -119,7 +120,7 @@ template <typename T> bool runTest(hipModule_t& module, const char* refName, con
   unsigned int height = 256;
   unsigned int size = width * height * sizeof(T);
   T* hData = (T*)malloc(size);
-  memset(hData, 0, size);
+  std::memset(hData, 0, size);
   for (int i = 0; i < height; i++) {
     for (int j = 0; j < width; j++) {
       initVal(hData[i * width + j]);
@@ -136,12 +137,12 @@ template <typename T> bool runTest(hipModule_t& module, const char* refName, con
                                     hipMemcpyHostToDevice));
 
   hipResourceDesc resDesc;
-  memset(&resDesc, 0, sizeof(resDesc));
+  std::memset(&resDesc, 0, sizeof(resDesc));
   resDesc.resType = hipResourceTypeArray;
   resDesc.res.array.array = array;
 
   hipTextureDesc texDesc;
-  memset(&texDesc, 0, sizeof(texDesc));
+  std::memset(&texDesc, 0, sizeof(texDesc));
   texDesc.addressMode[0] = hipAddressModeClamp;
   texDesc.addressMode[1] = hipAddressModeClamp;
   texDesc.filterMode = hipFilterModePoint;
@@ -180,7 +181,7 @@ template <typename T> bool runTest(hipModule_t& module, const char* refName, con
   checkHipErrors(hipDeviceSynchronize());
 
   T* hOutputData = (T*)malloc(size);
-  memset(hOutputData, 0, size);
+  std::memset(hOutputData, 0, size);
   checkHipErrors(hipMemcpy(hOutputData, dData, size, hipMemcpyDeviceToHost));
 
   for (int i = 0; i < height; i++) {

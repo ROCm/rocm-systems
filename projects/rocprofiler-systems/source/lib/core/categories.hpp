@@ -22,7 +22,6 @@
 
 #pragma once
 
-#include "common/join.hpp"
 #include "defines.hpp"
 #include "rocprofiler-systems/categories.h"  // in rocprof-sys-user
 
@@ -115,15 +114,24 @@ ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_power, ROCPROFSYS_CATEGORY_AMD_SMI_
 ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_memory_usage, ROCPROFSYS_CATEGORY_AMD_SMI_MEMORY_USAGE, "device_memory_usage", "Memory usage of a GPU device")
 ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_vcn_activity, ROCPROFSYS_CATEGORY_AMD_SMI_VCN_ACTIVITY, "device_vcn_activity", "VCN Activity of a GPU device")
 ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_jpeg_activity, ROCPROFSYS_CATEGORY_AMD_SMI_JPEG_ACTIVITY, "device_jpeg_activity", "JPEG Activity of a GPU device")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_xgmi_link_width, ROCPROFSYS_CATEGORY_AMD_SMI_XGMI_LINK_WIDTH, "device_xgmi_link_width", "XGMI Link Width")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_xgmi_link_speed, ROCPROFSYS_CATEGORY_AMD_SMI_XGMI_LINK_SPEED, "device_xgmi_link_speed", "XGMI Link Speed")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_xgmi_read_data, ROCPROFSYS_CATEGORY_AMD_SMI_XGMI_READ_DATA, "device_xgmi_read_data", "XGMI Read Data Accumulator")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_xgmi_write_data, ROCPROFSYS_CATEGORY_AMD_SMI_XGMI_WRITE_DATA, "device_xgmi_write_data", "XGMI Write Data Accumulator")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_pcie_link_width, ROCPROFSYS_CATEGORY_AMD_SMI_PCIE_LINK_WIDTH, "device_pcie_link_width", "PCIe Link Width")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_pcie_link_speed, ROCPROFSYS_CATEGORY_AMD_SMI_PCIE_LINK_SPEED, "device_pcie_link_speed", "PCIe Link Speed")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_pcie_bandwidth_acc, ROCPROFSYS_CATEGORY_AMD_SMI_PCIE_BANDWIDTH_ACC, "device_pcie_bandwidth_acc", "PCIe Bandwidth Accumulated")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_pcie_bandwidth_inst, ROCPROFSYS_CATEGORY_AMD_SMI_PCIE_BANDWIDTH_INST, "device_pcie_bandwidth_inst", "PCIe Bandwidth Instantaneous")
 ROCPROFSYS_DEFINE_CATEGORY(category, rocm_rccl, ROCPROFSYS_CATEGORY_ROCM_RCCL, "rccl", "ROCm Communication Collectives Library (RCCL) regions")
 ROCPROFSYS_DEFINE_CATEGORY(category, pthread, ROCPROFSYS_CATEGORY_PTHREAD, "pthread", "POSIX threading functions")
 ROCPROFSYS_DEFINE_CATEGORY(category, kokkos, ROCPROFSYS_CATEGORY_KOKKOS, "kokkos", "KokkosTools regions")
 ROCPROFSYS_DEFINE_CATEGORY(category, mpi, ROCPROFSYS_CATEGORY_MPI, "mpi", "MPI regions")
+ROCPROFSYS_DEFINE_CATEGORY(category, ucx, ROCPROFSYS_CATEGORY_UCX, "ucx", "UCX regions")
 ROCPROFSYS_DEFINE_CATEGORY(category, process_sampling, ROCPROFSYS_CATEGORY_PROCESS_SAMPLING, "process_sampling", "Process-level data")
-ROCPROFSYS_DEFINE_CATEGORY(category, comm_data, ROCPROFSYS_CATEGORY_COMM_DATA, "comm_data", "MPI/RCCL counters for tracking amount of data sent or received")
+ROCPROFSYS_DEFINE_CATEGORY(category, comm_data, ROCPROFSYS_CATEGORY_COMM_DATA, "comm_data", "MPI/RCCL/UCX counters for tracking amount of data sent or received")
 ROCPROFSYS_DEFINE_CATEGORY(category, causal, ROCPROFSYS_CATEGORY_CAUSAL, "causal", "Causal profiling data")
 ROCPROFSYS_DEFINE_CATEGORY(category, cpu_freq, ROCPROFSYS_CATEGORY_CPU_FREQ, "cpu_frequency", "CPU frequency (collected in background thread)")
-ROCPROFSYS_DEFINE_CATEGORY(category, process_page, ROCPROFSYS_CATEGORY_PROCESS_PAGE, "process_page_fault", "Memory page faults in process (collected in background thread)")
+ROCPROFSYS_DEFINE_CATEGORY(category, process_page, ROCPROFSYS_CATEGORY_PROCESS_PAGE, "process_physical_memory", "Physical memory usage (RSS) in process in MB (collected in background thread)")
 ROCPROFSYS_DEFINE_CATEGORY(category, process_virt, ROCPROFSYS_CATEGORY_PROCESS_VIRT, "process_virtual_memory", "Virtual memory usage in process in MB (collected in background thread)")
 ROCPROFSYS_DEFINE_CATEGORY(category, process_peak, ROCPROFSYS_CATEGORY_PROCESS_PEAK, "process_memory_hwm", "Memory High-Water Mark i.e. peak memory usage (collected in background thread)")
 ROCPROFSYS_DEFINE_CATEGORY(category, process_context_switch, ROCPROFSYS_CATEGORY_PROCESS_CONTEXT_SWITCH, "process_context_switch", "Context switches in process (collected in background thread)")
@@ -187,10 +195,19 @@ using name = perfetto_category<Tp...>;
         ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_memory_usage),                    \
         ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_vcn_activity),                    \
         ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_jpeg_activity),                   \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_xgmi_link_width),                 \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_xgmi_link_speed),                 \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_xgmi_read_data),                  \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_xgmi_write_data),                 \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_pcie_link_width),                 \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_pcie_link_speed),                 \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_pcie_bandwidth_acc),              \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_pcie_bandwidth_inst),             \
         ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_rccl),                               \
         ROCPROFSYS_PERFETTO_CATEGORY(category::pthread),                                 \
         ROCPROFSYS_PERFETTO_CATEGORY(category::kokkos),                                  \
         ROCPROFSYS_PERFETTO_CATEGORY(category::mpi),                                     \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::ucx),                                     \
         ROCPROFSYS_PERFETTO_CATEGORY(category::sampling),                                \
         ROCPROFSYS_PERFETTO_CATEGORY(category::process_sampling),                        \
         ROCPROFSYS_PERFETTO_CATEGORY(category::comm_data),                               \

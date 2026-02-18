@@ -521,3 +521,11 @@ hipLibraryEnumerateKernels
 hipKernelGetLibrary
 hipKernelGetName
 hipOccupancyAvailableDynamicSMemPerBlock
+hipGetProcAddress_spt
+hipKernelGetParamInfo
+hipExtDisableLogging
+hipExtEnableLogging
+hipExtSetLoggingParams
+hipMemSetMemPool
+hipMemGetMemPool
+hipMipmappedArrayGetMemoryRequirements

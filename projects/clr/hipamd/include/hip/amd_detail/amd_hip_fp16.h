@@ -99,7 +99,7 @@ struct __half {
   // CREATORS
   __HOST_DEVICE__
   __half() = default;
-  __HOST_DEVICE__ constexpr __half(const __half_raw& x) : data{x.data} {}
+  __HOST_DEVICE__ constexpr __half(const __half_raw& x) : __x{x.x} {}
 #if !defined(__HIP_NO_HALF_CONVERSIONS__)
   __HOST_DEVICE__
   __half(decltype(data) x) : data{x} {}
@@ -821,8 +821,9 @@ inline __HOST_DEVICE__ __half __hadd_sat(__half x, __half y) { return __clamp_01
 inline __HOST_DEVICE__ __half __hsub_sat(__half x, __half y) { return __clamp_01(__hsub(x, y)); }
 inline __HOST_DEVICE__ __half __hmul_sat(__half x, __half y) { return __clamp_01(__hmul(x, y)); }
 inline __device__ __half __hfma(__half x, __half y, __half z) {
-  return __half_raw{__ocml_fma_f16(static_cast<__half_raw>(x).data, static_cast<__half_raw>(y).data,
-                                   static_cast<__half_raw>(z).data)};
+  return __half_raw{__builtin_elementwise_fma(static_cast<__half_raw>(x).data,
+                                              static_cast<__half_raw>(y).data,
+                                              static_cast<__half_raw>(z).data)};
 }
 inline __device__ __half __hfma_sat(__half x, __half y, __half z) {
   return __clamp_01(__hfma(x, y, z));
@@ -867,7 +868,9 @@ inline __HOST_DEVICE__ __half2 __hmul2_sat(__half2 x, __half2 y) {
   return __half2{__clamp_01(__half_raw{r.data.x}), __clamp_01(__half_raw{r.data.y})};
 }
 inline __device__ __half2 __hfma2(__half2 x, __half2 y, __half2 z) {
-  return __half2{__ocml_fma_2f16(x, y, z)};
+  return __half2{__builtin_elementwise_fma(static_cast<__half2_raw>(x).data,
+                                           static_cast<__half2_raw>(y).data,
+                                           static_cast<__half2_raw>(z).data)};
 }
 inline __device__ __half2 __hfma2_sat(__half2 x, __half2 y, __half2 z) {
   auto r = static_cast<__half2_raw>(__hfma2(x, y, z));
@@ -956,22 +959,22 @@ inline __device__ __half hcos(__half x) {
   return __half_raw{__ocml_cos_f16(static_cast<__half_raw>(x).data)};
 }
 inline __device__ __half hexp(__half x) {
-  return __half_raw{__ocml_exp_f16(static_cast<__half_raw>(x).data)};
+  return __half_raw{__builtin_elementwise_exp(static_cast<__half_raw>(x).data)};
 }
 inline __device__ __half hexp2(__half x) {
-  return __half_raw{__ocml_exp2_f16(static_cast<__half_raw>(x).data)};
+  return __half_raw{__builtin_elementwise_exp2(static_cast<__half_raw>(x).data)};
 }
 inline __device__ __half hexp10(__half x) {
   return __half_raw{__ocml_exp10_f16(static_cast<__half_raw>(x).data)};
 }
 inline __device__ __half hlog2(__half x) {
-  return __half_raw{__ocml_log2_f16(static_cast<__half_raw>(x).data)};
+  return __half_raw{__builtin_elementwise_log2(static_cast<__half_raw>(x).data)};
 }
 inline __device__ __half hlog(__half x) {
-  return __half_raw{__ocml_log_f16(static_cast<__half_raw>(x).data)};
+  return __half_raw{__builtin_elementwise_log(static_cast<__half_raw>(x).data)};
 }
 inline __device__ __half hlog10(__half x) {
-  return __half_raw{__ocml_log10_f16(static_cast<__half_raw>(x).data)};
+  return __half_raw{__builtin_elementwise_log10(static_cast<__half_raw>(x).data)};
 }
 inline __device__ __half hrcp(__half x) {
   return __half_raw{static_cast<_Float16>(1.0f) / static_cast<__half_raw>(x).data};
@@ -980,7 +983,7 @@ inline __device__ __half hrsqrt(__half x) {
   return __half_raw{__ocml_rsqrt_f16(static_cast<__half_raw>(x).data)};
 }
 inline __device__ __half hsqrt(__half x) {
-  return __half_raw{__ocml_sqrt_f16(static_cast<__half_raw>(x).data)};
+  return __half_raw{__builtin_elementwise_sqrt(static_cast<__half_raw>(x).data)};
 }
 inline __HOST_DEVICE__ bool __hisinf(__half x) {
   __half_raw hr = x;
@@ -1005,21 +1008,39 @@ inline __device__ __half2 h2rint(__half2 x) {
 }
 inline __device__ __half2 h2sin(__half2 x) { return __half2{__ocml_sin_2f16(x)}; }
 inline __device__ __half2 h2cos(__half2 x) { return __half2{__ocml_cos_2f16(x)}; }
-inline __device__ __half2 h2exp(__half2 x) { return __half2{__ocml_exp_2f16(x)}; }
-inline __device__ __half2 h2exp2(__half2 x) { return __half2{__ocml_exp2_2f16(x)}; }
+inline __device__ __half2 h2exp(__half2 x) {
+  return __half2{__builtin_elementwise_exp(static_cast<__half2_raw>(x).data)};
+}
+inline __device__ __half2 h2exp2(__half2 x) {
+  return __half2{__builtin_elementwise_exp2(static_cast<__half2_raw>(x).data)};
+}
 inline __device__ __half2 h2exp10(__half2 x) { return __half2{__ocml_exp10_2f16(x)}; }
-inline __device__ __half2 h2log2(__half2 x) { return __half2{__ocml_log2_2f16(x)}; }
-inline __device__ __half2 h2log(__half2 x) { return __ocml_log_2f16(x); }
-inline __device__ __half2 h2log10(__half2 x) { return __ocml_log10_2f16(x); }
+inline __device__ __half2 h2log2(__half2 x) {
+  return __half2{__builtin_elementwise_log2(static_cast<__half2_raw>(x).data)};
+}
+
+inline __device__ __half2 h2log(__half2 x) {
+  return __half2{__builtin_elementwise_log(static_cast<__half2_raw>(x).data)};
+}
+
+inline __device__ __half2 h2log10(__half2 x) {
+  return __half2{__builtin_elementwise_log10(static_cast<__half2_raw>(x).data)};
+}
+
 inline __device__ __half2 h2rcp(__half2 x) {
   return _Float16_2{_Float16_2{static_cast<_Float16>(1.0f), static_cast<_Float16>(1.0f)} / x.data};
 }
 inline __device__ __half2 h2rsqrt(__half2 x) { return __ocml_rsqrt_2f16(x); }
-inline __device__ __half2 h2sqrt(__half2 x) { return __ocml_sqrt_2f16(x); }
-inline __device__ __half2 __hisinf2(__half2 x) {
-  auto r = __ocml_isinf_2f16(x);
-  return __half2{_Float16_2{static_cast<_Float16>(r.x), static_cast<_Float16>(r.y)}};
+inline __device__ __half2 h2sqrt(__half2 x) {
+  return __half2{__builtin_elementwise_sqrt(static_cast<__half2_raw>(x).data)};
 }
+
+inline __device__ __half2 __hisinf2(__half2 x) {
+  return __half2{
+      _Float16_2{static_cast<_Float16>(__builtin_isinf(static_cast<__half2_raw>(x).data.x)),
+                 static_cast<_Float16>(__builtin_isinf(static_cast<__half2_raw>(x).data.y))}};
+}
+
 inline __HOST_DEVICE__ __half2 __hisnan2(__half2 x) {
   return __half2{_Float16_2{static_cast<_Float16>(__hisnan(x.x) ? 1.0f : 0.0f),
                             static_cast<_Float16>(__hisnan(x.y) ? 1.0f : 0.0f)}};

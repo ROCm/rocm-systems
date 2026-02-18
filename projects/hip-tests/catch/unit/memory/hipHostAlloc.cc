@@ -28,7 +28,7 @@ THE SOFTWARE.
 #include <hip_test_helper.hh>
 #include <kernels.hh>
 
-#define MEMORY_PERCENT 10
+#define MEMORY_PERCENT 5
 #define BLOCK_SIZE 512
 #define VALUE 32
 

@@ -34,6 +34,7 @@
 #include <iostream>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <sstream>
 #include <stdexcept>
 #include <unordered_map>
@@ -53,6 +54,8 @@ void RocprofilerCall(Callable&& callable, const std::string& msg, const char* fi
     throw std::runtime_error(errmsg.str());
   }
 }
+
+// Per-instance counter maps are now used instead of global maps (see id_to_name_ member)
 
 namespace amd {
 namespace rdc {
@@ -86,25 +89,34 @@ CounterSampler::~CounterSampler() { ctx_ = {}; }
 
 const std::string& CounterSampler::decode_record_name(
     const rocprofiler_record_counter_t& rec) const {
-  static auto roc_counters = [this]() {
-    auto name_to_id = CounterSampler::get_supported_counters(agent_);
-    std::map<uint64_t, std::string> id_to_name;
-    for (const auto& [name, id] : name_to_id) {
-      id_to_name.emplace(id.handle, name);
-    }
-    return id_to_name;
-  }();
+  // Extract counter ID from record using SDK API
   rocprofiler_counter_id_t counter_id = {.handle = 0};
   rocprofiler_query_record_counter_id(rec.id, &counter_id);
 
-  auto it = roc_counters.find(counter_id.handle);
-  if (it == roc_counters.end()) {
-    RDC_LOG(RDC_ERROR, "Error: Counter handle " << counter_id.handle
-                                                << " not found in roc_counters." << std::endl);
-    throw std::runtime_error("Counter handle not found in roc_counters");
+  std::lock_guard<std::mutex> lock(id_to_name_mutex_);
+  // Check cache first
+  auto it = id_to_name_.find(counter_id.handle);
+  if (it != id_to_name_.end()) {
+    return it->second;
   }
 
-  return it->second;
+  // Query SDK directly for the counter name (more robust than pre-enumeration)
+  rocprofiler_counter_info_v0_t info;
+  auto status = rocprofiler_query_counter_info(counter_id, ROCPROFILER_COUNTER_INFO_VERSION_0,
+                                                static_cast<void*>(&info));
+  if (status == ROCPROFILER_STATUS_SUCCESS) {
+    // Cache the result for future lookups
+    id_to_name_[counter_id.handle] = info.name;
+    return id_to_name_[counter_id.handle];
+  }
+
+  // Counter not found - log error
+  RDC_LOG(RDC_ERROR, "Error: Failed to query counter info for handle=0x" << std::hex
+          << counter_id.handle << std::dec << " (status=" << status << ")" << std::endl);
+
+  // Return a static error string rather than throwing
+  static const std::string unknown_counter = "UNKNOWN_COUNTER";
+  return unknown_counter;
 }
 
 std::unordered_map<std::string, size_t> CounterSampler::get_record_dimensions(
@@ -228,15 +240,18 @@ std::unordered_map<std::string, rocprofiler_counter_id_t> CounterSampler::get_su
             static_cast<void*>(&gpu_counters));
       },
       "Could not fetch supported counters", __FILE__, __LINE__);
+
   for (auto& counter : gpu_counters) {
-    rocprofiler_counter_info_v0_t version;
+    rocprofiler_counter_info_v0_t info;
     RocprofilerCall(
         [&]() {
           return rocprofiler_query_counter_info(counter, ROCPROFILER_COUNTER_INFO_VERSION_0,
-                                                static_cast<void*>(&version));
+                                                static_cast<void*>(&info));
         },
         "Could not query info for counter", __FILE__, __LINE__);
-    out.emplace(version.name, counter);
+
+    // Store the full counter ID for creating profiles
+    out.emplace(info.name, counter);
   }
   return out;
 }
@@ -312,6 +327,159 @@ extern "C" rocprofiler_tool_configure_result_t* rocprofiler_configure(uint32_t v
 
   // return pointer to configure data
   return &cfg;
+}
+
+CounterSampler::ProfileSet CounterSampler::create_profiles_for_counters(
+    const std::vector<std::string>& counters) {
+  ProfileSet profile_set;
+  auto roc_counters = get_supported_counters(agent_);
+
+  // Build ordered list of counters
+  std::vector<std::string> remaining_counters = counters;
+
+  RDC_LOG(RDC_DEBUG, "Creating profiles for " << counters.size() << " counters on agent "
+          << agent_.handle);
+
+  // Greedy packing: try to fit as many counters as possible into each profile
+  while (!remaining_counters.empty()) {
+    std::vector<std::string> current_profile_counters;
+    std::vector<std::string> failed_counters;
+    rocprofiler_counter_config_id_t last_valid_config = {};
+    size_t last_valid_size = 0;
+
+    // Try to add each remaining counter to the current profile
+    for (const auto& counter_name : remaining_counters) {
+      auto it = roc_counters.find(counter_name);
+      if (it == roc_counters.end()) {
+        RDC_LOG(RDC_DEBUG, "Counter " << counter_name << " not supported on agent "
+                << agent_.handle);
+        continue;
+      }
+
+      current_profile_counters.push_back(counter_name);
+
+      // Build the counter ID list
+      std::vector<rocprofiler_counter_id_t> gpu_counters;
+      size_t expected_size = 0;
+      for (const auto& name : current_profile_counters) {
+        auto it2 = roc_counters.find(name);
+        if (it2 != roc_counters.end()) {
+          gpu_counters.push_back(it2->second);
+          expected_size += get_counter_size(it2->second);
+        }
+      }
+
+      // Try to create config
+      rocprofiler_counter_config_id_t config = {};
+      auto status = rocprofiler_create_counter_config(agent_, gpu_counters.data(),
+                                                       gpu_counters.size(), &config);
+
+      if (status == ROCPROFILER_STATUS_ERROR_EXCEEDS_HW_LIMIT) {
+        // Counter doesn't fit, try next one
+        current_profile_counters.pop_back();
+        failed_counters.push_back(counter_name);
+      } else if (status == ROCPROFILER_STATUS_SUCCESS) {
+        // Success, save this config
+        last_valid_config = config;
+        last_valid_size = expected_size;
+      } else {
+        // Unexpected error
+        RDC_LOG(RDC_DEBUG, "Error creating counter config: " << status);
+        current_profile_counters.pop_back();
+        failed_counters.push_back(counter_name);
+      }
+    }
+
+    // Save the profile if valid
+    if (!current_profile_counters.empty() && last_valid_config.handle != 0) {
+      profile_set.profiles.push_back({last_valid_config, current_profile_counters, last_valid_size});
+
+      RDC_LOG(RDC_DEBUG, "  Profile " << profile_set.profiles.size()
+              << ": " << current_profile_counters.size() << " counters");
+    }
+
+    // Continue with failed counters
+    remaining_counters = failed_counters;
+
+    // Safety check to prevent infinite loop
+    if (current_profile_counters.empty() && !remaining_counters.empty()) {
+      RDC_LOG(RDC_ERROR, "Failed to create profile for remaining counters on agent "
+              << agent_.handle);
+      break;
+    }
+  }
+
+  if (counters.size() == 0) {
+    RDC_LOG(RDC_DEBUG, "Created " << profile_set.profiles.size()
+            << " profiles from 0 counters (compression: N/A)");
+  } else {
+    RDC_LOG(RDC_DEBUG, "Created " << profile_set.profiles.size()
+            << " profiles from " << counters.size() << " counters (compression: "
+            << (100.0 * profile_set.profiles.size() / counters.size()) << "%)");
+  }
+
+  return profile_set;
+}
+
+void CounterSampler::sample_counters_with_packing(const std::vector<std::string>& counters,
+                                                  std::map<std::string, double>& out_values,
+                                                  uint64_t duration) {
+  // Sort counters for cache key
+  std::vector<std::string> sorted_counters = counters;
+  std::sort(sorted_counters.begin(), sorted_counters.end());
+
+  // Check if we have a cached profile set
+  auto cached = cached_profile_sets_.find(sorted_counters);
+  if (cached == cached_profile_sets_.end()) {
+    // Create new profile set with greedy packing
+    RDC_LOG(RDC_DEBUG, "Creating new profile set for " << sorted_counters.size()
+            << " counters on agent " << agent_.handle);
+    ProfileSet profile_set = create_profiles_for_counters(sorted_counters);
+    cached = cached_profile_sets_.emplace(sorted_counters, std::move(profile_set)).first;
+  }
+
+  // Clear output
+  out_values.clear();
+
+  // Statistics tracking (thread-safe)
+  static std::atomic<uint64_t> total_sample_calls{0};
+  static std::atomic<uint64_t> total_profiles_sampled{0};
+
+  // Sample from all profiles in the set
+  for (const auto& profile : cached->second.profiles) {
+    std::vector<rocprofiler_record_counter_t> records;
+    records.resize(profile.expected_size);
+
+    counter_ = profile.config;
+
+    rocprofiler_start_context(ctx_);
+    size_t out_size = records.size();
+
+    // Wait for sampling window
+    usleep(duration);
+
+    rocprofiler_sample_device_counting_service(ctx_, {}, ROCPROFILER_COUNTER_FLAG_NONE,
+                                               records.data(), &out_size);
+    total_sample_calls++;
+    rocprofiler_stop_context(ctx_);
+    records.resize(out_size);
+
+    // Decode records and aggregate values
+    for (const auto& record : records) {
+      const std::string& name = decode_record_name(record);
+      out_values[name] += record.counter_value;
+    }
+  }
+
+  total_profiles_sampled += cached->second.profiles.size();
+
+  // Log statistics periodically (every 100 sample calls)
+  if (total_sample_calls % 100 == 0) {
+    RDC_LOG(RDC_DEBUG, "Greedy packed sampling statistics: "
+            << total_sample_calls << " total sample calls, "
+            << total_profiles_sampled << " total profiles sampled, "
+            << "avg " << (double)total_profiles_sampled / total_sample_calls << " profiles/sample");
+  }
 }
 
 }  // namespace rdc

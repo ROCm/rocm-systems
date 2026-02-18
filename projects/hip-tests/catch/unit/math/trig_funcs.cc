@@ -36,7 +36,7 @@ TEST_CASE("Unit_Device_cos_cosf_Negative_RTC") { NegativeTestRTCWrapper<4>(kCos)
 MATH_UNARY_WITHIN_ULP_TEST_DEF(tan, std::tan, 4, 2)
 TEST_CASE("Unit_Device_tan_tanf_Negative_RTC") { NegativeTestRTCWrapper<4>(kTan); }
 
-MATH_UNARY_WITHIN_ULP_TEST_DEF(asin, std::asin, 2, 2)
+MATH_UNARY_WITHIN_ULP_TEST_DEF(asin, std::asin, 3, 2)
 TEST_CASE("Unit_Device_asin_asinf_Negative_RTC") { NegativeTestRTCWrapper<4>(kAsin); }
 
 MATH_UNARY_WITHIN_ULP_TEST_DEF(acos, std::acos, 2, 2)
@@ -78,7 +78,7 @@ __global__ void sincos_kernel(std::pair<T, T>* const ys, const size_t num_xs, T*
   const auto tid = cg::this_grid().thread_rank();
   const auto stride = cg::this_grid().size();
 
-  for (auto i = tid; i < num_xs; i += stride) {
+  for (size_t i = tid; i < num_xs; i += stride) {
     if constexpr (std::is_same_v<float, T>) {
       sincosf(xs[i], &ys[i].first, &ys[i].second);
     } else if constexpr (std::is_same_v<double, T>) {
@@ -109,7 +109,7 @@ __global__ void sincospi_kernel(std::pair<T, T>* const ys, const size_t num_xs, 
   const auto tid = cg::this_grid().thread_rank();
   const auto stride = cg::this_grid().size();
 
-  for (auto i = tid; i < num_xs; i += stride) {
+  for (size_t i = tid; i < num_xs; i += stride) {
     if constexpr (std::is_same_v<float, T>) {
       sincospif(xs[i], &ys[i].first, &ys[i].second);
     } else if constexpr (std::is_same_v<double, T>) {

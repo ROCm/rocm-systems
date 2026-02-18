@@ -22,8 +22,6 @@
 
 #include "rocprof-sys-sample.hpp"
 
-#include <algorithm>
-#include <iostream>
 #include <string_view>
 #include <unistd.h>
 
@@ -52,6 +50,8 @@ main(int argc, char** argv)
         for(int i = 1; i < argc; ++i)
             _argv.emplace_back(argv[i]);
     }
+
+    add_torch_library_path(_env, _argv);
 
     print_updated_environment(_env);
 

@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2015 - 2022 Advanced Micro Devices, Inc. All rights reserved.
+Copyright (c) 2015 - 2025 Advanced Micro Devices, Inc. All rights reserved.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -1001,6 +1001,7 @@ typedef enum cudaGraphInstantiateFlags hipGraphInstantiateFlags;
 #define hipGraphInstantiateFlagDeviceLaunch cudaGraphInstantiateFlagDeviceLaunch
 #define hipGraphInstantiateFlagUseNodePriority cudaGraphInstantiateFlagUseNodePriority
 
+// Driver Entry Point Access
 typedef enum cudaDriverEntryPointQueryResult hipDriverEntryPointQueryResult;
 #define hipDriverEntryPointSuccess cudaDriverEntryPointSuccess
 #define hipDriverEntryPointSymbolNotFound cudaDriverEntryPointSymbolNotFound
@@ -1009,6 +1010,15 @@ typedef enum cudaDriverEntryPointQueryResult hipDriverEntryPointQueryResult;
 #define hipEnableDefault cudaEnableDefault
 #define hipEnableLegacyStream cudaEnableLegacyStream
 #define hipEnablePerThreadDefaultStream cudaEnablePerThreadDefaultStream
+
+typedef enum CUdriverProcAddressQueryResult hipDriverProcAddressQueryResult
+#define HIP_GET_PROC_ADDRESS_SUCCESS CU_GET_PROC_ADDRESS_SUCCESS
+#define HIP_GET_PROC_ADDRESS_SYMBOL_NOT_FOUND CU_GET_PROC_ADDRESS_SYMBOL_NOT_FOUND
+#define HIP_GET_PROC_ADDRESS_VERSION_NOT_SUFFICIENT CU_GET_PROC_ADDRESS_VERSION_NOT_SUFFICIENT
+
+#define HIP_GET_PROC_ADDRESS_DEFAULT CU_GET_PROC_ADDRESS_DEFAULT
+#define HIP_GET_PROC_ADDRESS_LEGACY_STREAM CU_GET_PROC_ADDRESS_LEGACY_STREAM
+#define HIP_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM CU_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM
 
 inline static hipError_t hipCUDAErrorTohipError(cudaError_t cuError) {
   switch (cuError) {
@@ -2090,8 +2100,8 @@ inline static hipError_t hipMemPrefetchAsync_v2(const void* dev_ptr, size_t coun
 inline static hipError_t hipMemAdvise_v2(const void* dev_ptr, size_t count, hipMemoryAdvise advice,
                                          hipMemLocation location) {
 #if CUDA_VERSION >= 13000
-  return hipCUDAErrorTohipError(cudaMemAdvise(dev_ptr, count,
-      hipMemoryAdviseTocudaMemoryAdvise(advice), location));
+  return hipCUDAErrorTohipError(
+      cudaMemAdvise(dev_ptr, count, hipMemoryAdviseTocudaMemoryAdvise(advice), location));
 #else
   return hipCUDAErrorTohipError(
       cudaMemAdvise_v2(dev_ptr, count, hipMemoryAdviseTocudaMemoryAdvise(advice), location));
@@ -2466,6 +2476,12 @@ inline static hipError_t hipMemcpy3DPeer(hipMemcpy3DPeerParms* p) {
 }
 inline static hipError_t hipMemcpy3DPeerAsync(hipMemcpy3DPeerParms* p, hipStream_t stream) {
   return hipCUDAErrorTohipError(cudaMemcpy3DPeerAsync(p, stream));
+}
+inline static hipError_t hipMipmappedArrayGetMemoryRequirements(
+    hipArrayMemoryRequirements* memoryRequirements, hipMipmappedArray_t mipmap,
+    hipDevice_t device) {
+  return hipCUDAErrorTohipError(
+      cudaMipmappedArrayGetMemoryRequirements(memoryRequirements, mipmap, device));
 }
 
 __HIP_DEPRECATED inline static hipError_t hipMemcpyToArray(hipArray_t dst, size_t wOffset,
@@ -3375,7 +3391,7 @@ inline static hipError_t hipStreamGetFlags(hipStream_t stream, unsigned int* fla
   return hipCUDAErrorTohipError(cudaStreamGetFlags(stream, flags));
 }
 
-inline static hipError_t hipStreamGetId(hipStream_t stream, unsigned long long *streamId) {
+inline static hipError_t hipStreamGetId(hipStream_t stream, unsigned long long* streamId) {
   return hipCUDAErrorTohipError(cudaStreamGetId(stream, streamId));
 }
 
@@ -3764,6 +3780,11 @@ inline static hipError_t hipKernelGetName(const char** name, hipKernel_t kernel)
   return hipCUResultTohipError(cuKernelGetName(name, kernel));
 }
 
+inline static hipError_t hipKernelGetParamInfo(hipKernel_t kernel, size_t paramIndex, size_t* paramOffset,
+                                               size_t* paramSize) {
+  return hipCUResultTohipError(cuKernelGetParamInfo(kernel, paramIndex, paramOffset, paramSize));
+}
+
 inline static hipError_t hipLaunchKernel(const void* function_address, dim3 numBlocks,
                                          dim3 dimBlocks, void** args, size_t sharedMemBytes,
                                          hipStream_t stream) {
@@ -4082,6 +4103,18 @@ inline static hipError_t hipMemPoolImportPointer(void** ptr, hipMemPool_t mem_po
   return hipCUDAErrorTohipError(cudaMemPoolImportPointer(ptr, mem_pool, export_data));
 }
 #endif  // CUDA_VERSION >= CUDA_11020
+
+#if CUDA_VERSION >= CUDA_13000
+inline static hipError_t hipMemSetMemPool(hipMemLocation* location, hipMemAllocationType type,
+                                          hipMemPool_t pool) {
+  return hipCUDAErrorTohipError(cuMemSetMemPool(location, type, pool));
+}
+
+inline static hipError_t hipMemGetMemPool(hipMemPool_t* pool, hipMemLocation* location,
+                                          hipMemAllocationType type) {
+  return hipCUDAErrorTohipError(cuMemGetMemPool(pool, location, type));
+}
+#endif // CUDA_VERSION >= CUDA_13000
 
 #ifdef __cplusplus
 }

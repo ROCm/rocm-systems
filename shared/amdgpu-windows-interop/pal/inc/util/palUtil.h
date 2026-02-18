@@ -41,8 +41,6 @@
 #define PAL_CPLUSPLUS_14 201402L
 /// C++17 standard version.
 #define PAL_CPLUSPLUS_17 201703L
-/// C++ feature version from September 2017 contains a few C++20 features.
-#define PAL_CPLUSPLUS_1709 201709L
 /// C++20 standard version.
 #define PAL_CPLUSPLUS_20 202002L
 
@@ -59,8 +57,8 @@
 #define PAL_CPLUSPLUS_AT_LEAST(v) (PAL_CPLUSPLUS >= (v))
 
 static_assert(
-    PAL_CPLUSPLUS_AT_LEAST(PAL_CPLUSPLUS_1709),
-    "C++ standard version " PAL_STRINGIFY(PAL_CPLUSPLUS_1709) " is required to build PAL. "
+    PAL_CPLUSPLUS_AT_LEAST(PAL_CPLUSPLUS_20),
+    "C++ standard version " PAL_STRINGIFY(PAL_CPLUSPLUS_20) " is required to build PAL. "
     "Found " PAL_STRINGIFY(PAL_CPLUSPLUS) ".");
 
 #if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 878
@@ -610,6 +608,61 @@ constexpr Result CollapseResults(Result lhs, Result rhs)
 ///          internal string tables when they added a new Result value. It's impossible for this to return nullptr.
 extern const char* ResultToString(
     Result result);
+
+/**
+ ***********************************************************************************************************************
+ * @brief A StickyResult wraps a Result with sticky error tracking semantics.
+ *
+ * A new StickyResult starts out set to Success. The first time it's set to any error Result it will get stuck to that
+ * specific error value. Even if you assign it a new error value it will ignore you and keep the first error value.
+ * This behavior is useful when execution must continue even if an error occurs, but we must also report the first
+ * error up to the caller.
+ *
+ * Assignment and conversion operator overloads are provided to make StickyResult and Result interop naturally.
+ ***********************************************************************************************************************
+ */
+class StickyResult
+{
+public:
+    /// Default Constructor
+    StickyResult() : m_value(Result::Success) {}
+
+    /// Resets this StickyResult back to Success. This is the only way to "unstick" an error.
+    void Reset() { m_value = Result::Success; }
+
+    /// Sets this StickyResult to the given result if the current value is not an error.
+    ///
+    /// @param [in] result  The Result the caller would like us to remember.
+    void Set(Result result)
+    {
+        if (IsErrorResult(m_value) == false)
+        {
+            m_value = result;
+        }
+    }
+
+    /// An assignment operator overload which simply calls Set.
+    ///
+    /// @param [in] result  The Result the caller would like us to remember.
+    StickyResult& operator=(Result result)
+    {
+        Set(result);
+        return *this;
+    }
+
+    /// Gets this StickyResult's current Result value.
+    ///
+    /// @returns The current Result value.
+    Result Get() const { return m_value; }
+
+    /// An implicit conversion operator overload which gets this StickyResult's current Result value.
+    ///
+    /// @returns The current Result value.
+    operator Result() const { return m_value; }
+
+private:
+    Result m_value; ///< The current underlying Result value.
+};
 
 /**
  ***********************************************************************************************************************

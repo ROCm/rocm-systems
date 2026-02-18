@@ -51,7 +51,33 @@ rocprofiler_systems_add_test(
     REWRITE_RUN_PASS_REGEX
         "(/[A-Za-z-]+/perfetto-trace-0.proto).*(/[A-Za-z-]+/wall_clock-0.txt')"
     REWRITE_RUN_FAIL_REGEX
-        "(perfetto-trace|trip_count|sampling_percent|sampling_cpu_clock|sampling_wall_clock|wall_clock)-[0-9][0-9]+.(json|txt|proto)|ROCPROFSYS_ABORT_FAIL_REGEX"
+        "Outputting.*(perfetto-trace|trip_count|sampling_percent|sampling_cpu_clock|sampling_wall_clock|wall_clock)-[0-9][0-9]+.(json|txt|proto)|ROCPROFSYS_ABORT_FAIL_REGEX"
+)
+
+# mpi-perfetto-merge requires legacy trace mode because MPI trace combining
+# uses MPI communication (mpi_get) which is only implemented in the legacy path
+rocprofiler_systems_add_test(
+    SKIP_RUNTIME
+    NAME "mpi-perfetto-merge"
+    TARGET mpi-example
+    MPI ON
+    NUM_PROCS 2
+    LABELS "perfetto-merge"
+    REWRITE_ARGS
+        -e
+        -v
+        2
+        --label
+        file
+        line
+        --min-instructions
+        0
+    ENVIRONMENT
+        "${_base_environment};ROCPROFSYS_VERBOSE=1;ROCPROFSYS_TRACE_LEGACY=ON;ROCPROFSYS_PERFETTO_COMBINE_TRACES=ON"
+    REWRITE_RUN_PASS_REGEX
+        "Successfully executed: .+rocprof-sys-merge-output.sh.*"
+    REWRITE_RUN_FAIL_REGEX
+        "Script not found|Failed to execute|ROCPROFSYS_ABORT_FAIL_REGEX"
 )
 
 rocprofiler_systems_add_test(
@@ -109,6 +135,7 @@ set(_mpip_environment
     "ROCPROFSYS_USE_MPIP=ON"
     "ROCPROFSYS_DEBUG=OFF"
     "ROCPROFSYS_VERBOSE=2"
+    "ROCPROFSYS_LOG_LEVEL=trace"
     "ROCPROFSYS_DL_VERBOSE=2"
     "${_test_openmp_env}"
     "${_test_library_path}"
@@ -124,6 +151,7 @@ set(_mpip_all2all_environment
     "ROCPROFSYS_USE_MPIP=ON"
     "ROCPROFSYS_DEBUG=ON"
     "ROCPROFSYS_VERBOSE=3"
+    "ROCPROFSYS_LOG_LEVEL=trace"
     "ROCPROFSYS_DL_VERBOSE=3"
     "${_test_openmp_env}"
     "${_test_library_path}"

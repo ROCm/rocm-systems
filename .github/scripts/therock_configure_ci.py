@@ -30,7 +30,7 @@ def set_github_output(d: Mapping[str, str]):
         return
     with open(step_output_file, "a") as f:
         f.writelines(f"{k}={v}" + "\n" for k, v in d.items())
-        
+
 def retry(max_attempts, delay_seconds, exceptions):
     def decorator(func):
         def newfn(*args, **kwargs):
@@ -81,7 +81,55 @@ def check_for_workflow_file_related_to_ci(paths: Optional[Iterable[str]]) -> boo
     return any(is_path_workflow_file_related_to_ci(p) for p in paths)
 
 
+# Paths matching any of these patterns are considered to have no influence over
+# build or test workflows so any related jobs can be skipped if all paths
+# modified by a commit/PR match a pattern in this list.
+SKIPPABLE_PATH_PATTERNS = [
+    "docs/*",
+    ".gitignore",
+    "*.md",
+    "*.rtf",
+    "*.rst",
+    "*/.markdownlint-ci2.yaml",
+    "*/.readthedocs.yaml",
+    "*/.spellcheck.local.yaml",
+    "*/.wordlist.txt",
+    "projects/*/docs/*",
+    "projects/*/.gitignore",
+    "projects/rocr-runtime/libhsakmt/src/dxg/*",
+    "projects/rocshmem/*",
+    "shared/*/docs/*",
+    "shared/*/.gitignore",
+]
+
+
+def is_path_skippable(path: str) -> bool:
+    """Determines if a given relative path to a file matches any skippable patterns."""
+    return any(fnmatch.fnmatch(path, pattern) for pattern in SKIPPABLE_PATH_PATTERNS)
+
+
+def check_for_non_skippable_path(paths: Optional[Iterable[str]]) -> bool:
+    """Returns true if at least one path is not in the skippable set."""
+    if paths is None:
+        return False
+    return any(not is_path_skippable(p) for p in paths)
+
+
 def retrieve_projects(args):
+    # Check if CI should be skipped based on modified paths
+    # (only for push and pull_request events, not workflow_dispatch or nightly)
+    if args.get("is_push") or args.get("is_pull_request"):
+        base_ref = args.get("base_ref")
+        modified_paths = get_modified_paths(base_ref)
+
+        paths_set = set(modified_paths)
+        contains_non_skippable_files = check_for_non_skippable_path(paths_set)
+
+        # If only skippable paths were modified, skip CI
+        if not contains_non_skippable_files:
+            logging.info("Only skippable paths were modified, skipping CI")
+            return []
+
     if args.get("is_pull_request"):
         subtrees = list(subtree_to_project_map.keys())
 
@@ -111,7 +159,7 @@ def retrieve_projects(args):
 
     # retrieve the subtrees to checkout, cmake options to build, and projects to test
     project_to_run = []
-    # Currently as we have no tests, we just build all packages available if an applicable change is made. 
+    # Currently as we have no tests, we just build all packages available if an applicable change is made.
     # As we start to get an idea of test times, we can divide test jobs.
     if projects:
         for project in ["all"]:

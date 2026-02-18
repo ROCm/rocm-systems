@@ -46,10 +46,9 @@ class rocprof_v3_profiler(RocProfCompute_Base):
             or not self.get_args().roof_only
         )
 
-    def get_profiler_options(self, fname: str, soc: OmniSoC_Base) -> list[str]:
+    def get_profiler_options(self) -> list[str]:
         args = self.get_args()
         app_cmd = shlex.split(args.remaining)
-
         if args.kokkos_trace:
             trace_option = "--kokkos-trace"
             # NOTE: --kokkos-trace feature is incomplete and is disabled for now.
@@ -60,9 +59,10 @@ class rocprof_v3_profiler(RocProfCompute_Base):
             )
         elif args.hip_trace:
             trace_option = "--hip-trace"
+        elif getattr(args, "torch_trace", False):
+            trace_option = "--marker-trace"
         else:
             trace_option = "--kernel-trace"
-
         profiling_options = [
             # v3 requires output directory argument
             "-d",
@@ -90,12 +90,12 @@ class rocprof_v3_profiler(RocProfCompute_Base):
         if args.dispatch:
             for dispatch_id in args.dispatch:
                 if ":" in dispatch_id:
-                    # 4:7 -> 5-7
+                    # 4:7 -> 4-7
                     start, end = dispatch_id.split(":")
-                    dispatch.append(f"{int(start) + 1}-{end}")
+                    dispatch.append(f"{start}-{end}")
                 else:
-                    # 4 -> 5
-                    dispatch.append(f"{int(dispatch_id) + 1}")
+                    # 4 -> 4
+                    dispatch.append(f"{dispatch_id}")
         if dispatch:
             profiling_options.extend([
                 "--kernel-iteration-range",

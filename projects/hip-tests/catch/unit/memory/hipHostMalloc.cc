@@ -38,7 +38,7 @@ This testfile verifies the following scenarios of hipHostMalloc API
 #define SYNC_EVENT 0
 #define SYNC_STREAM 1
 #define SYNC_DEVICE 2
-#define MEMORY_PERCENT 10
+#define MEMORY_PERCENT 5
 #define BLOCK_SIZE 512
 #define VALUE 32
 

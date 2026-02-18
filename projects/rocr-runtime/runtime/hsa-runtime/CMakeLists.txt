@@ -111,14 +111,14 @@ set_property(TARGET  ${CORE_RUNTIME_TARGET} PROPERTY OUTPUT_NAME ${CORE_RUNTIME_
 if (UNIX)
   target_compile_definitions(${CORE_RUNTIME_TARGET} PRIVATE "${HSA_COMMON_DEFS}" __linux__ HSA_EXPORT=1 HSA_EXPORT_FINALIZER=1 HSA_EXPORT_IMAGES=1 HSA_DEPRECATED=
   ROCR_BUILD_ID="${PACKAGE_VERSION_STRING}-${VERSION_JOB}-${VERSION_HASH}" )
-  
+
   ## Check for memfd_create syscall
   include(CheckSymbolExists)
   CHECK_SYMBOL_EXISTS ( "__NR_memfd_create" "sys/syscall.h" HAVE_MEMFD_CREATE )
   if ( HAVE_MEMFD_CREATE )
     target_compile_definitions(${CORE_RUNTIME_TARGET} PRIVATE HAVE_MEMFD_CREATE )
   endif()
-  
+
   ## Check for _GNU_SOURCE pthread extensions
   set(CMAKE_REQUIRED_DEFINITIONS -D_GNU_SOURCE)
   CHECK_SYMBOL_EXISTS ( "pthread_attr_setaffinity_np" "pthread.h" HAVE_PTHREAD_ATTR_SETAFFINITY_NP )
@@ -217,25 +217,27 @@ set ( SRCS core/driver/driver.cpp
            core/runtime/cache.cpp
            core/runtime/svm_profiler.cpp
            core/runtime/thunk_loader.cpp
+           core/runtime/counted_queue_manager.cpp
            core/common/hsa_table_interface.cpp
            loader/executable.cpp
            libamdhsacode/amd_elf_image.cpp
            libamdhsacode/amd_hsa_code_util.cpp
            libamdhsacode/amd_hsa_locks.cpp
            libamdhsacode/amd_options.cpp
-           libamdhsacode/amd_hsa_code.cpp
-           libamdhsacode/amd_core_dump.cpp )
+           libamdhsacode/amd_hsa_code.cpp)
 
 if(UNIX)
-  set(SRC_OS core/util/lnx/os_linux.cpp)
+  set(SRC_OS core/util/lnx/os_linux.cpp
+	     libamdhsacode/lnx/amd_core_dump.cpp)
   set(SRC_XDNA core/driver/xdna/amd_xdna_driver.cpp
                core/runtime/amd_aie_agent.cpp
                core/runtime/amd_aie_aql_queue.cpp)
 else()
   target_compile_definitions(${CORE_RUNTIME_TARGET} PRIVATE NOMINMAX)
-  set(SRC_OS core/util/win/os_win.cpp)
+  set(SRC_OS core/util/win/os_win.cpp
+	     libamdhsacode/win32/amd_core_dump.cpp)
 endif()
-         
+
 if ( BUILD_THUNK_VIRTIO )
   list(APPEND SRCS core/driver/virtio/amd_kfd_virtio_driver.cpp)
   target_compile_definitions(hsa-runtime64 PRIVATE HSAKMT_VIRTIO_ENABLED=1)
@@ -455,9 +457,9 @@ if( NOT ${BUILD_SHARED_LIBS} )
     install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules/FindLibElf.cmake ${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules/COPYING-CMAKE-SCRIPTS
       DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${CORE_RUNTIME_NAME}
       COMPONENT dev)
+    # Linker script (defines function aliases)
+    install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/${LNKSCR}
+      DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${CORE_RUNTIME_NAME}
+      COMPONENT dev)
   endif()
-  # Linker script (defines function aliases)
-  install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/${LNKSCR}
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${CORE_RUNTIME_NAME}
-    COMPONENT dev)
 endif()

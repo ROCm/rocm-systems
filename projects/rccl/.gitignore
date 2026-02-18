@@ -1,0 +1,8 @@
+# Copyright (c) 2015-2016, NVIDIA CORPORATION. All rights reserved.
+*.gcov
+/coverage/
+build/
+ext/
+src/transport/net_ib_rocm.cc
+# Visual Studio Code
+.vscode

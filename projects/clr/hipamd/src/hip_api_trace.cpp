@@ -790,6 +790,8 @@ hipError_t hipTexRefGetBorderColor(float* pBorderColor, const textureReference* 
 hipError_t hipTexRefGetArray(hipArray_t* pArray, const textureReference* texRef);
 hipError_t hipGetProcAddress(const char* symbol, void** pfn, int hipVersion, uint64_t flags,
                              hipDriverProcAddressQueryResult* symbolStatus = NULL);
+hipError_t hipGetProcAddress_spt(const char* symbol, void** pfn, int hipVersion, uint64_t flags,
+                                 hipDriverProcAddressQueryResult* symbolStatus = NULL);
 hipError_t hipStreamBeginCaptureToGraph(hipStream_t stream, hipGraph_t graph,
                                         const hipGraphNode_t* dependencies,
                                         const hipGraphEdgeData* dependencyData,
@@ -881,6 +883,16 @@ hipError_t hipKernelGetLibrary(hipLibrary_t* library, hipKernel_t kernel);
 hipError_t hipKernelGetName(const char** name, hipKernel_t kernel);
 hipError_t hipOccupancyAvailableDynamicSMemPerBlock(size_t* dynamicSmemSize, const void* f,
                                                     int numBlocks, int blockSize);
+hipError_t hipKernelGetParamInfo(hipKernel_t kernel, size_t paramIndex, size_t* paramOffset,
+                                 size_t* paramSize);
+hipError_t hipExtDisableLogging();
+hipError_t hipExtEnableLogging();
+hipError_t hipExtSetLoggingParams(size_t log_level, size_t log_size, size_t log_mask);
+hipError_t hipMemSetMemPool(hipMemLocation* location, hipMemAllocationType type, hipMemPool_t pool);
+hipError_t hipMemGetMemPool(hipMemPool_t* pool, hipMemLocation* location,
+                            hipMemAllocationType type);
+hipError_t hipMipmappedArrayGetMemoryRequirements(hipArrayMemoryRequirements* memoryRequirements,
+                                                  hipMipmappedArray_t mipmap, hipDevice_t device);
 }  // namespace hip
 
 namespace hip {
@@ -1225,6 +1237,8 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipMemsetD8Async_fn = hip::hipMemsetD8Async;
   ptrDispatchTable->hipMipmappedArrayCreate_fn = hip::hipMipmappedArrayCreate;
   ptrDispatchTable->hipMipmappedArrayDestroy_fn = hip::hipMipmappedArrayDestroy;
+  ptrDispatchTable->hipMipmappedArrayGetMemoryRequirements_fn =
+     hip::hipMipmappedArrayGetMemoryRequirements;
   ptrDispatchTable->hipMipmappedArrayGetLevel_fn = hip::hipMipmappedArrayGetLevel;
   ptrDispatchTable->hipModuleGetFunction_fn = hip::hipModuleGetFunction;
   ptrDispatchTable->hipModuleGetFunctionCount_fn = hip::hipModuleGetFunctionCount;
@@ -1377,6 +1391,7 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipTexRefGetBorderColor_fn = hip::hipTexRefGetBorderColor;
   ptrDispatchTable->hipTexRefGetArray_fn = hip::hipTexRefGetArray;
   ptrDispatchTable->hipGetProcAddress_fn = hip::hipGetProcAddress;
+  ptrDispatchTable->hipGetProcAddress_spt_fn = hip::hipGetProcAddress_spt;
   ptrDispatchTable->hipStreamBeginCaptureToGraph_fn = hip::hipStreamBeginCaptureToGraph;
   ptrDispatchTable->hipGetFuncBySymbol_fn = hip::hipGetFuncBySymbol;
   ptrDispatchTable->hipSetValidDevices_fn = hip::hipSetValidDevices;
@@ -1426,6 +1441,12 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipKernelGetLibrary_fn = hip::hipKernelGetLibrary;
   ptrDispatchTable->hipKernelGetName_fn = hip::hipKernelGetName;
   ptrDispatchTable->hipOccupancyAvailableDynamicSMemPerBlock_fn = hip::hipOccupancyAvailableDynamicSMemPerBlock;
+  ptrDispatchTable->hipKernelGetParamInfo_fn = hip::hipKernelGetParamInfo;
+  ptrDispatchTable->hipExtDisableLogging_fn = hip::hipExtDisableLogging;
+  ptrDispatchTable->hipExtEnableLogging_fn = hip::hipExtEnableLogging;
+  ptrDispatchTable->hipExtSetLoggingParams_fn = hip::hipExtSetLoggingParams;
+  ptrDispatchTable->hipMemSetMemPool_fn = hip::hipMemSetMemPool;
+  ptrDispatchTable->hipMemGetMemPool_fn = hip::hipMemGetMemPool;
 }
 
 #if HIP_ROCPROFILER_REGISTER > 0
@@ -2104,15 +2125,29 @@ HIP_ENFORCE_ABI(HipDispatchTable, hipKernelGetLibrary_fn, 503);
 HIP_ENFORCE_ABI(HipDispatchTable, hipKernelGetName_fn, 504);
 // HIP_RUNTIME_API_TABLE_STEP_VERSION == 18
 HIP_ENFORCE_ABI(HipDispatchTable, hipOccupancyAvailableDynamicSMemPerBlock_fn, 505);
+// HIP_RUNTIME_API_TABLE_STEP_VERSION == 19
+HIP_ENFORCE_ABI(HipDispatchTable, hipGetProcAddress_spt_fn, 506);
+// HIP_RUNTIME_API_TABLE_STEP_VERSION == 20
+HIP_ENFORCE_ABI(HipDispatchTable, hipKernelGetParamInfo_fn, 507);
+// HIP_RUNTIME_API_TABLE_STEP_VERSION == 21
+HIP_ENFORCE_ABI(HipDispatchTable, hipExtDisableLogging_fn, 508);
+HIP_ENFORCE_ABI(HipDispatchTable, hipExtEnableLogging_fn, 509);
+HIP_ENFORCE_ABI(HipDispatchTable, hipExtSetLoggingParams_fn, 510);
+// HIP_RUNTIME_API_TABLE_STEP_VERSION == 22
+HIP_ENFORCE_ABI(HipDispatchTable, hipMemSetMemPool_fn, 511);
+HIP_ENFORCE_ABI(HipDispatchTable, hipMemGetMemPool_fn, 512);
+// HIP_RUNTIME_API_TABLE_STEP_VERSION == 23
+HIP_ENFORCE_ABI(HipDispatchTable, hipMipmappedArrayGetMemoryRequirements_fn, 513);
+
 // if HIP_ENFORCE_ABI entries are added for each new function pointer in the table, the number below
 // will be +1 of the number in the last HIP_ENFORCE_ABI line. E.g.:
 //
 //  HIP_ENFORCE_ABI(<table>, <functor>, 8)
 //
 //  HIP_ENFORCE_ABI_VERSIONING(<table>, 9) <- 8 + 1 = 9
-HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 506)
+HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 514)
 
-static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 18,
+static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 23,
               "If you get this error, add new HIP_ENFORCE_ABI(...) code for the new function "
               "pointers and then update this check so it is true");
 #endif

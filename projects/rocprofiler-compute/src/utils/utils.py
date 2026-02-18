@@ -41,6 +41,7 @@ import sys
 import tempfile
 import threading
 import time
+import traceback
 import uuid
 from collections.abc import Generator
 from contextlib import contextmanager
@@ -64,6 +65,68 @@ METRIC_ID_RE = re.compile(pattern=r"^\d{1,2}(?:\.\d{1,2}){0,2}$")
 
 rocprof_cmd = ""
 rocprof_args = ""
+
+
+def version_to_numeric(version_parts: list[int], max_len: int) -> int:
+    """Convert version tuple to numeric value using base-1000 positional system."""
+    version_numeric = 0
+    for i, part in enumerate(version_parts):
+        version_numeric += part * (1000 ** (max_len - i - 1))
+    return version_numeric
+
+
+def resolve_rocm_library_path(library_path: Optional[str]) -> Optional[str]:
+    """
+    Resolve ROCm library path with automatic version fallback.
+    Tries exact path first, then falls back to versioned variants
+    (e.g., .so.1, .so.1.2.3).
+    """
+    if not library_path:
+        return library_path
+
+    path = Path(library_path)
+
+    # Try exact path first (handles both unversioned and explicit versioned paths)
+    if path.exists():
+        console_debug(f"Resolved library (exact match): {path}")
+        return str(path)
+
+    # Escape the input path so any glob metacharacters are treated literally.
+    matches = glob.glob(f"{glob.escape(library_path)}.*")
+
+    # First pass: filter to numeric versions and collect version tuples
+    version_tuples: list[tuple[list[int], str]] = []
+    for candidate in matches:
+        # Compute the suffix relative to the requested library path.
+        if not candidate.startswith(library_path):
+            continue
+        suffix = candidate[len(library_path) :]
+        # Expect a suffix like ".1" or ".1.2.3"
+        if not suffix.startswith("."):
+            continue
+        parts = suffix.split(".")[1:]  # drop leading empty element
+        if not parts:
+            continue
+        if not all(part.isdigit() for part in parts):
+            continue
+        version_tuples.append(([int(p) for p in parts], candidate))
+
+    # Find max version length to normalize all versions
+    if not version_tuples:
+        raise FileNotFoundError(f"ROCm library not found: {library_path}")
+
+    # Second pass: convert to numeric values with normalized length
+    max_version_len = max(len(vt[0]) for vt in version_tuples)
+    versioned_candidates: list[tuple[int, str]] = []
+    for version_parts, candidate in version_tuples:
+        version_numeric = version_to_numeric(version_parts, max_version_len)
+        versioned_candidates.append((version_numeric, candidate))
+
+    # Select the candidate with the highest numeric version.
+    versioned_candidates.sort(key=lambda item: item[0], reverse=True)
+    resolved = versioned_candidates[0][1]
+    console_debug(f"Resolved library (versioned): {library_path} -> {resolved}")
+    return resolved
 
 
 def is_tcc_channel_counter(counter: str) -> bool:
@@ -210,14 +273,14 @@ def detect_rocprof(args: argparse.Namespace) -> str:
 
     # Default is rocprofiler-sdk
     if os.environ.get("ROCPROF", "rocprofiler-sdk") == "rocprofiler-sdk":
-        if not Path(args.rocprofiler_sdk_library_path).exists():
+        if not Path(args.rocprofiler_sdk_tool_path).exists():
             console_error(
-                "Could not find rocprofiler-sdk library at "
-                f"{args.rocprofiler_sdk_library_path}"
+                "Could not find rocprofiler-sdk tool at "
+                f"{args.rocprofiler_sdk_tool_path}"
             )
         rocprof_cmd = "rocprofiler-sdk"
         console_debug(f"rocprof_cmd is {rocprof_cmd}")
-        console_debug(f"rocprofiler_sdk_path is {args.rocprofiler_sdk_library_path}")
+        console_debug(f"rocprofiler_sdk_tool_path is {args.rocprofiler_sdk_tool_path}")
     else:
         # If ROCPROF is not set to rocprofiler-sdk
         rocprof_cmd = os.environ["ROCPROF"]
@@ -232,6 +295,101 @@ def detect_rocprof(args: argparse.Namespace) -> str:
         console_debug(f"rocprof_cmd is {str(rocprof_cmd)}")
         console_debug(f"ROC Profiler: {rocprof_path}")
     return rocprof_cmd
+
+
+def perform_attach_detach(new_env: dict[str, str], options: dict[str, Any]) -> None:
+    @contextmanager
+    def temporary_env(env_vars: dict[str, str]) -> Generator[None, None, None]:
+        """
+        Temporarily change the environment variable of this application.
+        """
+        original_env = os.environ.copy()
+        os.environ.update({k: str(v) for k, v in env_vars.items()})
+        try:
+            yield
+        finally:
+            os.environ.clear()
+            os.environ.update(original_env)
+
+    with temporary_env(new_env):
+        libname = options["ROCPROF_ATTACH_LIBRARY"]
+
+        try:
+            c_lib = ctypes.CDLL(libname)
+            if c_lib is None:
+                console_error(f"Error opening {libname}")
+        except Exception as e:
+            console_error(f"Error loading {libname}: {e}")
+
+        # Set argument and return types for attach/detach functions
+        try:
+            # old attach/detach API
+            c_lib.attach.argtypes = [ctypes.c_uint]
+        except Exception as e:
+            console_debug(
+                "Error setting old attach/detach API argument "
+                f"types: {e}, trying new API"
+            )
+            try:
+                # new attach/detach API
+                c_lib.rocattach_attach.restype = ctypes.c_int
+                c_lib.rocattach_attach.argtypes = [ctypes.c_int]
+                c_lib.rocattach_detach.restype = ctypes.c_int
+                c_lib.rocattach_detach.argtypes = [ctypes.c_int]
+            except Exception as e:
+                console_error(
+                    f"Error setting attach/detach function argument types: {e}"
+                )
+
+        pid = options["ROCPROF_ATTACH_PID"]
+        if pid is None:
+            console_error("Mode of attach/detach must have setup for process ID")
+
+        try:
+            # old attach/detach API
+            c_lib.attach(int(pid))
+        except Exception as e:
+            console_debug(f"Error attaching with old API: {e}, trying new API")
+            try:
+                # new attach/detach API
+                attach_status = c_lib.rocattach_attach(int(pid))
+                if attach_status != 0:
+                    console_error(
+                        f"Error attaching to process {pid}, "
+                        f"rocattach_attach returned {attach_status}"
+                    )
+            except Exception as e:
+                console_error(f"Error attaching to process {pid}: {e}")
+
+        duration = os.environ.get("ROCPROF_ATTACH_DURATION", None)
+        if duration is None:
+            console_log(
+                f"\033[93mAttach to process with ID {pid} is successful, "
+                "Press Enter to detach...\033[0m"
+            )
+            input()
+        else:
+            console_log(
+                f"\033[93mAttach to process with ID {pid} is successful, "
+                f"detach will happen in {duration} milliseconds...\033[0m"
+            )
+            time.sleep(int(duration) / 1000)
+
+        try:
+            # old attach/detach API
+            c_lib.detach(int(pid))
+        except Exception as e:
+            console_debug(f"Error detaching with old API: {e}, trying new API")
+            try:
+                # new attach/detach API
+                detach_status = c_lib.rocattach_detach(int(pid))
+                if detach_status != 0:
+                    console_error(
+                        f"Error detaching from process {pid}, "
+                        f"rocattach_detach returned {detach_status}"
+                    )
+            except Exception as e:
+                console_error(f"Error detaching from process {pid}: {e}")
 
 
 def capture_subprocess_output(
@@ -684,17 +842,37 @@ def parse_text(text_file: str) -> list[str]:
 
 
 def run_prof(
-    fname: str,
+    fnames: Union[list[str], str],
     profiler_options: Union[list[str], dict[str, Union[str, list[str]]]],
     workload_dir: str,
     mspec: Any,  # noqa: ANN401
     loglevel: int,
     format_rocprof_output: str,
+    torch_trace_enabled: bool = False,
     retain_rocpd_output: bool = False,
 ) -> None:
-    fpath = Path(fname)
+    multiple_files = isinstance(fnames, list)
+    if multiple_files and (
+        (
+            isinstance(profiler_options, dict)
+            and profiler_options.get("ROCPROF_ITERATION_MULTIPLEXING") is None
+        )
+        or (
+            isinstance(profiler_options, list)
+            and "--iteration-multiplexing" not in profiler_options
+        )
+    ):
+        console_error(
+            "Multiple pmc files detected but ROCPROF_ITERATION_MULTIPLEXING is not set."
+        )
+        return
+
+    fpath = Path(fnames[0]) if multiple_files else Path(fnames)
     fbase = fpath.stem
-    console_debug(f"pmc file: {fpath.name}")
+    if multiple_files:
+        console_debug(f"pmc files: {', '.join([Path(fname).name for fname in fnames])}")
+    else:
+        console_debug(f"pmc file: {fpath.name}")
 
     is_mode_live_attach = (
         isinstance(profiler_options, list) and "--pid" in profiler_options
@@ -705,16 +883,23 @@ def run_prof(
 
     # standard rocprof options
     if rocprof_cmd == "rocprofiler-sdk":
-        options = cast(dict[str, Union[str, list[str]]], profiler_options)
-        options["ROCPROF_COUNTER_COLLECTION"] = "1"
-        options["ROCPROF_COUNTERS"] = f"pmc: {' '.join(parse_text(fname))}"
-    else:
-        default_options = ["-i", fname]
-        options = default_options + cast(list[str], profiler_options)
-
-    if rocprof_cmd == "rocprofiler-sdk":
+        options = cast(dict[str, Union[str, list[str]]], profiler_options).copy()
+        if multiple_files:
+            options["ROCPROF_COUNTERS"] = ", ".join([
+                f"pmc: {' '.join(parse_text(fname))}" for fname in fnames
+            ])
+        else:
+            options["ROCPROF_COUNTERS"] = f"pmc: {' '.join(parse_text(fnames))}"
         options["ROCPROF_AGENT_INDEX"] = "absolute"
     else:
+        if multiple_files:
+            console_error(
+                "Multiple pmc files detected but rocprofv3 does not "
+                "support multiple input files."
+            )
+            return
+        default_options = ["-i", fnames]
+        options = default_options + cast(list[str], profiler_options)
         options = ["-A", "absolute"] + options
 
     new_env = os.environ.copy()
@@ -728,11 +913,13 @@ def run_prof(
     ) as file:
         counter_defs = yaml.safe_load(file)
     # Extra counter definitions
-    if Path(fname).with_suffix(".yaml").exists():
-        with open(Path(fname).with_suffix(".yaml")) as file:
-            counter_defs["rocprofiler-sdk"]["counters"].extend(
-                yaml.safe_load(file)["rocprofiler-sdk"]["counters"]
-            )
+    for fname in fnames if multiple_files else [fnames]:
+        if Path(fname).with_suffix(".yaml").exists():
+            with open(Path(fname).with_suffix(".yaml")) as file:
+                counter_defs["rocprofiler-sdk"]["counters"].extend(
+                    yaml.safe_load(file)["rocprofiler-sdk"]["counters"]
+                )
+    # TODO: Write counter definitions to a user specified path
     # Write counter definitions to a temporary file
     tmpfile_path = (
         Path(tempfile.mkdtemp(prefix="rocprof_counter_defs_", dir="/tmp"))
@@ -747,19 +934,10 @@ def run_prof(
         f"ROCPROFILER_METRICS_PATH={new_env['ROCPROFILER_METRICS_PATH']}"
     )
 
-    # set required env var for >= mi300
-    if mspec.gpu_model.lower() not in (
-        "mi50",
-        "mi60",
-        "mi100",
-        "mi210",
-        "mi250",
-        "mi250x",
-    ):
-        new_env["ROCPROFILER_INDIVIDUAL_XCC_MODE"] = "1"
-
-    is_timestamps = Path(fname).name == "timestamps.txt"
     time_1 = time.time()
+
+    output_path = Path(workload_dir + "/out/pmc_1")
+    output_path.mkdir(parents=True, exist_ok=True)
 
     if rocprof_cmd == "rocprofiler-sdk":
         app_cmd = options.pop("APP_CMD") if "APP_CMD" in options else None
@@ -768,49 +946,7 @@ def run_prof(
         console_debug(f"rocprof sdk env vars: {new_env}")
 
         if is_mode_live_attach:
-
-            @contextmanager
-            def temporary_env(env_vars: dict[str, str]) -> Generator[None, None, None]:
-                """
-                Temporarily change the environment variable of this application.
-                """
-                original_env = os.environ.copy()
-                os.environ.update({k: str(v) for k, v in env_vars.items()})
-                try:
-                    yield
-                finally:
-                    os.environ.clear()
-                    os.environ.update(original_env)
-
-            with temporary_env(new_env):
-                libname = options["ROCPROF_ATTACH_TOOL_LIBRARY"]
-                c_lib = ctypes.CDLL(libname)
-                if c_lib is None:
-                    console_error(f"Error opening {libname}")
-                c_lib.attach.argtypes = [ctypes.c_uint]
-
-                pid = options["ROCPROF_ATTACH_PID"]
-                if pid is None:
-                    console_error(
-                        "Mode of attach/detach must have setup for process ID"
-                    )
-
-                c_lib.attach(int(pid))
-                duration = os.environ.get("ROCPROF_ATTACH_DURATION", None)
-                if duration is None:
-                    console_log(
-                        f"\033[93mAttach to process with ID {pid} is successful, "
-                        "Press Enter to detach...\033[0m"
-                    )
-                    input()
-                else:
-                    console_log(
-                        f"\033[93mAttach to process with ID {pid} is successful, "
-                        f"detach will happen in {duration} milliseconds...\033[0m"
-                    )
-                    time.sleep(int(duration) / 1000)
-                c_lib.detach()
-
+            perform_attach_detach(new_env, options)
         else:
             if app_cmd is None:
                 console_error(
@@ -849,104 +985,171 @@ def run_prof(
     results_files: list[str] = []
 
     if format_rocprof_output == "rocpd":
+        # If using native tool for counter collection
+        if (
+            rocprof_cmd == "rocprofiler-sdk"
+            and options["ROCPROF_COUNTER_COLLECTION"] == "0"
+        ):
+            for db_name in glob.glob(workload_dir + "/out/pmc_1/*/*.db"):
+                pid = Path(db_name).stem.split("_")[0]
+                rocpd_data.update_rocpd_pmc_events(
+                    pd.read_csv(
+                        f"{workload_dir}/out/pmc_1/{pid}_native_counter_collection.csv"
+                    ),
+                    db_name,
+                )
+                console_debug(f"Updated rocpd db {db_name} with native tool counters.")
         # Write results_fbase.csv
-        rocpd_data.convert_db_to_csv(
-            glob.glob(workload_dir + "/out/pmc_1/*/*.db")[0],
-            workload_dir + f"/results_{fbase}.csv",
+        rocpd_data.convert_dbs_to_csv(
+            glob.glob(workload_dir + "/out/pmc_1/*/*.db"),
+            workload_dir + f"/out/pmc_1/{fbase}_counter_collection.csv",
+            workload_dir + f"/out/pmc_1/{fbase}_marker_api_trace.csv",
         )
+        combined_df = pd.read_csv(
+            workload_dir + f"/out/pmc_1/{fbase}_counter_collection.csv"
+        )
+        # Reset Dispatch_ID based on PID, Kernel_Name, Grid_Size,
+        # Workgroup_Size, LDS_Per_Workgroup, Start_Timestamp, End_Timestamp
+        combined_df["Dispatch_ID"] = combined_df.groupby(
+            [
+                "PID",
+                "Kernel_Name",
+                "Grid_Size",
+                "Workgroup_Size",
+                "LDS_Per_Workgroup",
+                "Start_Timestamp",
+                "End_Timestamp",
+            ],
+            sort=False,
+        ).ngroup()
+        # Reset Kernel_ID based on Kernel_Name, Grid_Size,
+        # Workgroup_Size, LDS_Per_Workgroup
+        combined_df["Kernel_ID"] = combined_df.groupby(
+            ["Kernel_Name", "Grid_Size", "Workgroup_Size", "LDS_Per_Workgroup"],
+            sort=False,
+        ).ngroup()
+        # Drop PID since its not required
+        combined_df = combined_df.drop(columns=["PID"])
+        combined_df.to_csv(
+            workload_dir + f"/out/pmc_1/{fbase}_counter_collection.csv", index=False
+        )
+        combined_df.to_csv(workload_dir + f"/results_{fbase}.csv", index=False)
+        if torch_trace_enabled:
+            # move counter collection and marker trace to workload dir
+            save_torch_trace_inputs(workload_dir, fbase, format_rocprof_output)
         if retain_rocpd_output:
-            shutil.copyfile(
-                glob.glob(workload_dir + "/out/pmc_1/*/*.db")[0],
-                workload_dir + "/" + fbase + ".db",
-            )
-            console_warning(
-                f"Retaining large raw rocpd database: {workload_dir}/{fbase}.db"
-            )
+            for db_path in glob.glob(workload_dir + "/out/pmc_1/*/*.db"):
+                pid = Path(db_path).stem.split("_")[0]
+                shutil.copyfile(
+                    db_path,
+                    workload_dir + f"/{fbase}_{pid}.db",
+                )
+                console_warning(
+                    f"Retaining large raw rocpd database: "
+                    f"{workload_dir}/{fbase}_{pid}.db"
+                )
         # Remove temp directory
         shutil.rmtree(workload_dir + "/" + "out")
         return
-
-    # rocprofv3 requires additional processing for each process
-    results_files = process_rocprofv3_output(
-        format_rocprof_output, workload_dir, is_timestamps
-    )
-
-    if rocprof_cmd == "rocprofiler-sdk":
-        # TODO: as rocprofv3 --kokkos-trace feature improves,
-        # rocprof-compute should make updates accordingly
-        if "ROCPROF_HIP_RUNTIME_API_TRACE" in options:
-            process_hip_trace_output(workload_dir, fbase)
-    else:
-        if "--kokkos-trace" in options:
+    elif format_rocprof_output == "csv":
+        if rocprof_cmd == "rocprofiler-sdk":
+            # rocprofv3 requires additional processing for each process
+            results_files = process_rocprofv3_output(
+                workload_dir,
+                # counter data collected using native tool
+                using_native_tool=options["ROCPROF_COUNTER_COLLECTION"] == "0",
+            )
             # TODO: as rocprofv3 --kokkos-trace feature improves,
             # rocprof-compute should make updates accordingly
-            process_kokkos_trace_output(workload_dir, fbase)
-        elif "--hip-trace" in options:
-            process_hip_trace_output(workload_dir, fbase)
+            if "ROCPROF_HIP_RUNTIME_API_TRACE" in options:
+                process_hip_trace_output(workload_dir, fbase)
+        else:
+            # rocprofv3 requires additional processing for each process
+            # rocprofv3 cannot use native tool
+            results_files = process_rocprofv3_output(
+                workload_dir, using_native_tool=False
+            )
+            if "--kokkos-trace" in options:
+                # TODO: as rocprofv3 --kokkos-trace feature improves,
+                # rocprof-compute should make updates accordingly
+                process_kokkos_trace_output(workload_dir, fbase)
+            elif "--hip-trace" in options:
+                process_hip_trace_output(workload_dir, fbase)
+        # Add torch operator trace processing
+        if torch_trace_enabled:
+            # move counter collection and marker trace to workload dir
+            save_torch_trace_inputs(workload_dir, fbase, format_rocprof_output)
+        # Combine results into single CSV file
+        if results_files:
+            combined_results = pd.concat(
+                [pd.read_csv(f) for f in results_files], ignore_index=True
+            )
+        else:
+            console_warning(
+                f"Cannot write results for {fbase}.csv due to no counter "
+                "csv files generated."
+            )
+            return
 
-    # Combine results into single CSV file
-    if results_files:
-        combined_results = pd.concat(
-            [pd.read_csv(f) for f in results_files], ignore_index=True
+        # Overwrite column to ensure unique IDs.
+        combined_results["Dispatch_ID"] = range(0, len(combined_results))
+
+        # Reset Kernel_ID based on Kernel_Name, Grid_Size,
+        # Workgroup_Size, LDS_Per_Workgroup
+        combined_results["Kernel_ID"] = combined_results.groupby(
+            ["Kernel_Name", "Grid_Size", "Workgroup_Size", "LDS_Per_Workgroup"],
+            sort=False,
+        ).ngroup()
+
+        combined_results.to_csv(
+            workload_dir + "/out/pmc_1/results_" + fbase + ".csv", index=False
         )
+
+        if Path(f"{workload_dir}/out").exists():
+            # copy and remove out directory if needed
+            shutil.copyfile(
+                f"{workload_dir}/out/pmc_1/results_{fbase}.csv",
+                f"{workload_dir}/{fbase}.csv",
+            )
+            # Remove temp directory
+            shutil.rmtree(f"{workload_dir}/out")
+
+        # Standardize rocprof headers via overwrite
+        # {<key to remove>: <key to replace>}
+        output_headers = {
+            # ROCm-6.1.0 specific csv headers
+            "KernelName": "Kernel_Name",
+            "Index": "Dispatch_ID",
+            "grd": "Grid_Size",
+            "gpu-id": "GPU_ID",
+            "wgr": "Workgroup_Size",
+            "lds": "LDS_Per_Workgroup",
+            "scr": "Scratch_Per_Workitem",
+            "sgpr": "SGPR",
+            "arch_vgpr": "Arch_VGPR",
+            "accum_vgpr": "Accum_VGPR",
+            "BeginNs": "Start_Timestamp",
+            "EndNs": "End_Timestamp",
+            # ROCm-6.0.0 specific csv headers
+            "GRD": "Grid_Size",
+            "WGR": "Workgroup_Size",
+            "LDS": "LDS_Per_Workgroup",
+            "SCR": "Scratch_Per_Workitem",
+            "ACCUM_VGPR": "Accum_VGPR",
+        }
+        csv_path = Path(workload_dir) / f"{fbase}.csv"
+        df = pd.read_csv(csv_path)
+        df.rename(columns=output_headers, inplace=True)
+        df.to_csv(csv_path, index=False)
     else:
-        console_warning(
-            f"Cannot write results for {fbase}.csv due to no counter "
-            "csv files generated."
-        )
-        return
-
-    # Overwrite column to ensure unique IDs.
-    combined_results["Dispatch_ID"] = range(0, len(combined_results))
-
-    combined_results.to_csv(
-        workload_dir + "/out/pmc_1/results_" + fbase + ".csv", index=False
-    )
-
-    if Path(f"{workload_dir}/out").exists():
-        # copy and remove out directory if needed
-        shutil.copyfile(
-            f"{workload_dir}/out/pmc_1/results_{fbase}.csv",
-            f"{workload_dir}/{fbase}.csv",
-        )
-        # Remove temp directory
-        shutil.rmtree(f"{workload_dir}/out")
-
-    # Standardize rocprof headers via overwrite
-    # {<key to remove>: <key to replace>}
-    output_headers = {
-        # ROCm-6.1.0 specific csv headers
-        "KernelName": "Kernel_Name",
-        "Index": "Dispatch_ID",
-        "grd": "Grid_Size",
-        "gpu-id": "GPU_ID",
-        "wgr": "Workgroup_Size",
-        "lds": "LDS_Per_Workgroup",
-        "scr": "Scratch_Per_Workitem",
-        "sgpr": "SGPR",
-        "arch_vgpr": "Arch_VGPR",
-        "accum_vgpr": "Accum_VGPR",
-        "BeginNs": "Start_Timestamp",
-        "EndNs": "End_Timestamp",
-        # ROCm-6.0.0 specific csv headers
-        "GRD": "Grid_Size",
-        "WGR": "Workgroup_Size",
-        "LDS": "LDS_Per_Workgroup",
-        "SCR": "Scratch_Per_Workitem",
-        "ACCUM_VGPR": "Accum_VGPR",
-    }
-    csv_path = Path(workload_dir) / f"{fbase}.csv"
-    df = pd.read_csv(csv_path)
-    df.rename(columns=output_headers, inplace=True)
-    df.to_csv(csv_path, index=False)
+        console_error(f"Unknown format_rocprof_output: {format_rocprof_output}")
 
 
 def pc_sampling_prof(
+    profiler_options: Union[list[str], dict[str, Union[str, list[str]]]],
     method: str,
     interval: int,
     workload_dir: str,
-    appcmd: list[str],
-    rocprofiler_sdk_library_path: str,
 ) -> None:
     """
     Run rocprof with pc sampling. Current support v3 only.
@@ -957,19 +1160,11 @@ def pc_sampling_prof(
     unit = "time" if method == "host_trap" else "cycles"
 
     if rocprof_cmd == "rocprofiler-sdk":
-        rocm_libdir = str(Path(rocprofiler_sdk_library_path).parent)
-        rocprofiler_sdk_tool_path = str(
-            Path(rocm_libdir) / "rocprofiler-sdk/librocprofiler-sdk-tool.so"
-        )
-        ld_preload = [
-            rocprofiler_sdk_tool_path,
-            rocprofiler_sdk_library_path,
-        ]
-        options = {
-            "ROCPROFILER_LIBRARY_CTOR": "1",
-            "LD_PRELOAD": ":".join(ld_preload),
-            "ROCP_TOOL_LIBRARIES": rocprofiler_sdk_tool_path,
-            "LD_LIBRARY_PATH": rocm_libdir,
+        options = cast(dict[str, Union[str, list[str]]], profiler_options).copy()
+        options.update({
+            # no counter collection for pc sampling
+            "ROCPROF_COUNTER_COLLECTION": "0",
+            "ROCPROF_KERNEL_TRACE": "1",
             "ROCPROF_OUTPUT_FORMAT": "csv,json",
             "ROCPROF_OUTPUT_PATH": workload_dir,
             "ROCPROF_OUTPUT_FILE_NAME": "ps_file",
@@ -977,15 +1172,15 @@ def pc_sampling_prof(
             "ROCPROF_PC_SAMPLING_UNIT": unit,
             "ROCPROF_PC_SAMPLING_INTERVAL": str(interval),
             "ROCPROF_PC_SAMPLING_METHOD": method,
-            "ROCPROF_KERNEL_TRACE": "1",
-        }
+        })
+        app_cmd = options.pop("APP_CMD") if "APP_CMD" in options else None
         new_env = os.environ.copy()
         for key, value in options.items():
             new_env[key] = value
         console_debug(f"pc sampling rocprof sdk env vars: {new_env}")
-        console_debug(f"pc sampling rocprof sdk user provided command: {appcmd}")
+        console_debug(f"pc sampling rocprof sdk user provided command: {app_cmd}")
         success, output = capture_subprocess_output(
-            appcmd, new_env=new_env, profileMode=True
+            app_cmd, new_env=new_env, profileMode=True
         )
     else:
         options = [
@@ -1005,9 +1200,11 @@ def pc_sampling_prof(
             "-o",
             "ps_file",  # TODO: sync up with the name from source in 2100_.yaml
             "--",
+            cast(str, profiler_options[-1]),  # app command
         ]
-        options.extend(appcmd)
 
+        console_debug(f"rocprof command: {shlex.join([rocprof_cmd] + options)}")
+        # profile the app
         success, output = capture_subprocess_output(
             [rocprof_cmd] + options, new_env=os.environ.copy(), profileMode=True
         )
@@ -1016,74 +1213,346 @@ def pc_sampling_prof(
         console_error("PC sampling failed.")
 
 
-def process_rocprofv3_output(
-    rocprof_output: str, workload_dir: str, is_timestamps: bool
-) -> list[str]:
+def convert_native_counter_collection_csv(workload_dir: str) -> None:
     """
-    rocprofv3 specific output processing.
-    takes care of json or csv formats, for csv format,
-    additional processing is performed.
+    Use native counter collection csv and rocprofiler-sdk kernel
+    trace to write counter collection csv in rocprofiler-sdk format
+    for further processing to pmc_perf.csv file
+    """
+    for native_filename in glob.glob(
+        f"{workload_dir}/out/pmc_1/*_native_counter_collection.csv"
+    ):
+        counter_data = pd.read_csv(native_filename, index_col=False)
+        # Group by on dispatch_id and counter_id and sum the counter_value,
+        # Other rows in group have the same value, so take the first one
+        groupby_cols = ["dispatch_id", "counter_name"]
+        agg_dict = {
+            col: "first" for col in counter_data.columns if col not in groupby_cols
+        }
+        # Overwrite counter_value aggregation to sum
+        agg_dict["counter_value"] = "sum"
+        counter_data = counter_data.groupby(groupby_cols, as_index=False).agg(agg_dict)
+
+        pid = Path(native_filename).stem.split("_")[0]
+        kernel_data_filename = glob.glob(
+            f"{workload_dir}/out/pmc_1/*/{pid}_kernel_trace.csv"
+        )[0]
+        kernel_data = pd.read_csv(kernel_data_filename)
+
+        # Merge counter_data with kernel_data on dispatch_id
+        merged_data = pd.merge(
+            counter_data,
+            kernel_data,
+            left_on="dispatch_id",
+            right_on="Dispatch_Id",
+            how="inner",
+        )
+
+        rocprofv3_counter_data = pd.DataFrame({
+            "Correlation_Id": merged_data["Correlation_Id"],
+            "Dispatch_Id": merged_data["dispatch_id"],
+            "Agent_Id": merged_data["Agent_Id"],
+            "Queue_Id": merged_data["Queue_Id"],
+            "Process_Id": merged_data["Thread_Id"],
+            "Thread_Id": merged_data["Thread_Id"],
+            "Grid_Size": (
+                merged_data[["Grid_Size_X", "Grid_Size_Y", "Grid_Size_Z"]].prod(axis=1)
+            ),
+            "Kernel_Id": merged_data["Kernel_Id"],
+            "Kernel_Name": merged_data["Kernel_Name"],
+            "Workgroup_Size": (
+                merged_data[
+                    ["Workgroup_Size_X", "Workgroup_Size_Y", "Workgroup_Size_Z"]
+                ].prod(axis=1)
+            ),
+            "LDS_Block_Size": merged_data["LDS_Block_Size"],
+            "Scratch_Size": merged_data["Scratch_Size"],
+            "VGPR_Count": merged_data["VGPR_Count"],
+            "Accum_VGPR_Count": merged_data["Accum_VGPR_Count"],
+            "SGPR_Count": merged_data["SGPR_Count"],
+            "Counter_Name": merged_data["counter_name"],
+            "Counter_Value": merged_data["counter_value"],
+            "Start_Timestamp": merged_data["Start_Timestamp"],
+            "End_Timestamp": merged_data["End_Timestamp"],
+        })
+        rocprofv3_counter_data.to_csv(
+            kernel_data_filename.replace("kernel_trace", "counter_collection"),
+            index=False,
+        )
+
+
+def process_rocprofv3_output(workload_dir: str, using_native_tool: bool) -> list[str]:
+    """
+    rocprofv3 specific output processing for csv format.
     """
     results_files_csv: list[str] = []
 
-    if rocprof_output == "json":
-        results_files_json = glob.glob(f"{workload_dir}/out/pmc_1/*/*.json")
-
-        for json_file in results_files_json:
-            csv_file = str(Path(json_file).with_suffix(".csv"))
-            v3_json_to_csv(json_file, csv_file)
-        results_files_csv = glob.glob(f"{workload_dir}/out/pmc_1/*/*.csv")
-
-    elif rocprof_output == "csv":
-        counter_info_csvs = glob.glob(
-            f"{workload_dir}/out/pmc_1/*/*_counter_collection.csv"
-        )
-        existing_counter_files_csv = [f for f in counter_info_csvs if Path(f).is_file()]
-
-        if existing_counter_files_csv:
-            for counter_file in existing_counter_files_csv:
-                counter_path = Path(counter_file)
-                current_dir = counter_path.parent
-
-                agent_info_filepath = current_dir / counter_path.name.replace(
-                    "_counter_collection", "_agent_info"
-                )
-
-                if not agent_info_filepath.is_file():
-                    raise ValueError(
-                        f'{counter_file} has no corresponding "agent info" file'
-                    )
-
-                converted_csv_file = current_dir / counter_path.name.replace(
-                    "_counter_collection", "_converted"
-                )
-
-                try:
-                    v3_counter_csv_to_v2_csv(
-                        counter_file, str(agent_info_filepath), str(converted_csv_file)
-                    )
-                except Exception as e:
-                    console_warning(
-                        f"Error converting {counter_file} from v3 to v2 csv: {e}"
-                    )
-                    return []
-
-            results_files_csv = glob.glob(f"{workload_dir}/out/pmc_1/*/*_converted.csv")
-        elif is_timestamps:
-            # when the input is timestamps, we know counter csv file
-            # is not generated and will instead parse kernel trace file
-            results_files_csv = glob.glob(
-                f"{workload_dir}/out/pmc_1/*/*_kernel_trace.csv"
+    if using_native_tool:
+        try:
+            convert_native_counter_collection_csv(workload_dir)
+        except Exception:
+            console_error(
+                "Error converting native counter collection csv.\n"
+                f"Stacktrace:\n{traceback.format_exc()}"
             )
-        else:
-            # when the input is not for timestamps, and counter csv file
-            # is not generated, we assume failed rocprof run and will completely
-            # bypass the file generation and merging for current pmc
-            results_files_csv = []
+
+    counter_info_csvs = glob.glob(
+        f"{workload_dir}/out/pmc_1/*/*_counter_collection.csv"
+    )
+    existing_counter_files_csv = [f for f in counter_info_csvs if Path(f).is_file()]
+
+    if existing_counter_files_csv:
+        for counter_file in existing_counter_files_csv:
+            counter_path = Path(counter_file)
+            current_dir = counter_path.parent
+
+            agent_info_filepath = current_dir / counter_path.name.replace(
+                "_counter_collection", "_agent_info"
+            )
+
+            if not agent_info_filepath.is_file():
+                raise ValueError(
+                    f'{counter_file} has no corresponding "agent info" file'
+                )
+
+            converted_csv_file = current_dir / counter_path.name.replace(
+                "_counter_collection", "_converted"
+            )
+
+            try:
+                v3_counter_csv_to_v2_csv(
+                    counter_file, str(agent_info_filepath), str(converted_csv_file)
+                )
+            except Exception as e:
+                console_warning(
+                    f"Error converting {counter_file} from v3 to v2 csv: {e}"
+                )
+                return []
+
+        results_files_csv = glob.glob(f"{workload_dir}/out/pmc_1/*/*_converted.csv")
     else:
-        console_error("The output file of rocprofv3 can only support json or csv!!!")
+        return []
 
     return results_files_csv
+
+
+@demarcate
+def save_torch_trace_inputs(
+    workload_dir: str,
+    fbase: str,
+    output_format: str = "rocpd",
+) -> None:
+    """
+    Move counter_collection and marker_api_trace data to workload_dir,
+    for creation of PyTorch operator trace in Analyze mode.
+    """
+    src_dir = Path(workload_dir) / "out" / "pmc_1"
+    if output_format == "rocpd":
+        # Only one pair expected
+        src_counter = src_dir / f"{fbase}_counter_collection.csv"
+        src_marker = src_dir / f"{fbase}_marker_api_trace.csv"
+        dst_counter = Path(workload_dir) / f"torch_trace_{fbase}_counter_collection.csv"
+        dst_marker = Path(workload_dir) / f"torch_trace_{fbase}_marker_api_trace.csv"
+        # These files are expected to exist
+        # Letting shutil.copyfile raise error if files not found
+        shutil.copyfile(src_counter, dst_counter)
+        shutil.copyfile(src_marker, dst_marker)
+        console_log(
+            "torch trace",
+            "Moved counter collection and marker trace files"
+            "to workload dir for PyTorch trace creation.",
+        )
+        console_log("Counter Collection: ", str(dst_counter))
+        console_log("Marker API Trace: ", str(dst_marker))
+    elif output_format == "csv":
+        # Multiple pairs possible (one per PID/process)
+        counter_files = glob.glob(str(src_dir / "*/*_counter_collection.csv"))
+        marker_files = glob.glob(str(src_dir / "*/*_marker_api_trace.csv"))
+        (Path(workload_dir) / f"{fbase}").mkdir(parents=True, exist_ok=True)
+        # Expecting the files to be present
+        # Letting shutil.copyfile raise error if files not found
+        # Path: workload_dir/fbase/torch_trace_<src_basename> (discovered by
+        # process_torch_trace_output via glob **/torch_trace*_marker_api_trace.csv)
+        for src_counter in counter_files:
+            dst_counter = str(
+                Path(workload_dir)
+                /
+                f"{fbase}" / ("torch_trace_" + Path(src_counter).name)
+            )
+            shutil.copyfile(src_counter, dst_counter)
+            console_log("torch trace", f"Copied Counter Collection: {dst_counter}")
+        for src_marker in marker_files:
+            dst_marker = str(
+                Path(workload_dir)
+                /
+                f"{fbase}" / ("torch_trace_" + Path(src_marker).name)
+            )
+            shutil.copyfile(src_marker, dst_marker)
+            console_log("torch trace", f"Copied Marker API Trace: {dst_marker}")
+    else:
+        console_warning(
+            "torch trace",
+            f"Unknown output_format: {output_format} in save_torch_trace_inputs",
+        )
+
+
+@demarcate
+def process_torch_trace_output(
+    workload_dir: str,
+) -> None:
+    """
+    Joins counter_collection and marker_api_trace data.
+        - Performs inner join on Correlation_ID, filtering out unmatched entries
+        - Consolidates data across passes
+        - Groups by Operator_Name, saving one CSV per operator
+        - Output file is saved to workload/torch_trace/ directory
+    """
+    # Find all marker_api_trace CSV files
+    console_log(f"Looking for marker and counter csv files in {workload_dir}")
+    marker_api_trace_csvs = list(
+        Path(workload_dir).glob("**/torch_trace*_marker_api_trace.csv")
+        )
+    counter_collection_csvs = [
+        markers_file.parent
+        / markers_file.name.replace("_marker_api_trace.", "_counter_collection.")
+        for markers_file in marker_api_trace_csvs
+    ]
+    existing_csv_files = [
+        [marker_api_trace_csvs[i], counter_collection_csvs[i]]
+        for i in range(len(marker_api_trace_csvs))
+        if counter_collection_csvs[i].is_file() and marker_api_trace_csvs[i].is_file()
+    ]
+
+    if not existing_csv_files:
+        if Path(f"{workload_dir}/torch_trace").exists():
+            console_log(
+                "torch trace",
+                "Torch data has already been processed"
+                f"and saved to {workload_dir}/torch_trace",
+            )
+        else:
+            console_warning(
+                "torch trace",
+                "No marker files with corresponding counter files found."
+                "Ensure profiling was done with '--torch-trace'.",
+            )
+        return
+    # Delete existing torch_trace directory if present
+    if Path(f"{workload_dir}/torch_trace").exists():
+        shutil.rmtree(Path(f"{workload_dir}/torch_trace"))
+        console_log(
+            f"Removed previous torch_trace directory: {workload_dir}/torch_trace"
+        )
+
+    # Join marker and counter data
+    def _merge_pair(
+        marker_path: Path,
+        counter_path: Path,
+        join_keys: list = ("Correlation_ID"),
+    ) -> pd.DataFrame:
+        """Merge a pair of marker and counter csv files on specified keys,
+        return the merged dataframe.
+        """
+        marker_df = pd.read_csv(marker_path)
+        counter_df = pd.read_csv(counter_path)
+        # Normalize column names to handle case inconsistencies
+        marker_df.columns = marker_df.columns.str.replace(
+            "Correlation_Id", "Correlation_ID"
+        )
+        counter_df.columns = counter_df.columns.str.replace(
+            "Correlation_Id", "Correlation_ID"
+        )
+
+        return pd.merge(
+            marker_df,
+            counter_df,
+            on=join_keys,
+            how="inner",
+            suffixes=("_function", "_kernel"),
+        )
+
+    # If rocpd format, pairs are present in workload_dir, one pair per fbase
+    # If csv format, pairs are present in workload/{fbase}/ one pair per process
+    # Extracting the output_format used in profiling from the path of a marker file
+    if Path(workload_dir).resolve() == existing_csv_files[0][0].parent.resolve():
+        join_keys = ("Correlation_ID", "GUID")  # output_format "rocpd"
+    else:
+        join_keys = ("Correlation_ID",)  # output_format "csv"
+    consolidated_df = pd.concat(
+        [_merge_pair(f[0], f[1], join_keys) for f in existing_csv_files],
+        ignore_index=True,
+    )
+    required_columns = [
+        "Function",
+        "Kernel_Name",
+        "Counter_Name",
+        "Counter_Value",
+        "Start_Timestamp_function",
+        "End_Timestamp_function",
+        "Start_Timestamp_kernel",
+        "End_Timestamp_kernel",
+    ]
+    missing_columns = [
+        col for col in required_columns if col not in consolidated_df.columns
+    ]
+    if missing_columns:
+        console_error(
+            f"Consolidated torch trace is missing required columns {missing_columns}"
+        )
+        return
+    consolidated_df = consolidated_df[required_columns]
+    if consolidated_df.isnull().values.any():
+        console_warning("Consolidated torch trace contains missing values")
+        return
+    consolidated_df = consolidated_df.sort_values(by=["Function", "Counter_Name"])
+    split_columns = consolidated_df["Function"].str.split(":#", expand=True)
+    consolidated_df["Operator_Name"] = (
+        split_columns[0] if len(split_columns.columns) > 0 else None
+    )
+    consolidated_df["Context_Id"] = (
+        split_columns[1] if len(split_columns.columns) > 1 else None
+    )
+    consolidated_df.drop(columns=["Function"], inplace=True)
+    consolidated_df = consolidated_df[
+        [
+            "Operator_Name",
+            "Context_Id",
+            "Kernel_Name",
+            "Counter_Name",
+            "Counter_Value",
+            "Start_Timestamp_function",
+            "End_Timestamp_function",
+            "Start_Timestamp_kernel",
+            "End_Timestamp_kernel",
+        ]
+    ]
+    if consolidated_df.isnull().values.any():
+        console_error(
+            "Missing values in consolidated torch trace after splitting ",
+            "the Function name.",
+        )
+        return
+    grouped = consolidated_df.groupby("Operator_Name")
+    for operator_name, group in grouped:
+        # Extract the operator name from hierarchy
+        last_operator = operator_name.split("/")[-1]
+        sanitized_operator_name = last_operator.replace("torch.", "").replace(".", "_")
+        # Ensure output directory exists
+        Path(f"{workload_dir}/torch_trace").mkdir(parents=True, exist_ok=True)
+        output_file = f"{workload_dir}/torch_trace/{sanitized_operator_name}.csv"
+        # If the file already exists, append to it, else create new file.
+        if Path(output_file).is_file():
+            group.to_csv(output_file, mode="a", header=False, index=False)
+            console_log(f"Appended trace to existing file {output_file}")
+        else:
+            group.to_csv(output_file, index=False)
+            console_log(f"Saved consolidated trace to {output_file}")
+    for trace_file in marker_api_trace_csvs + counter_collection_csvs:
+        try:
+            Path(trace_file).unlink()
+            console_debug(f"Removed temporary torch trace file: {trace_file}")
+        except OSError as e:
+            console_warning(f"Error removing temporary file {trace_file}: {e}")
 
 
 @demarcate
@@ -1155,120 +1624,6 @@ def gen_sysinfo(
     df["ip_blocks"] = "|".join(blocks)
 
     df.to_csv(workload_dir + "/" + "sysinfo.csv", index=False)
-
-
-def detect_roofline(mspec: Any) -> dict[str, str]:  # noqa: ANN401
-    from utils import specs
-
-    rocm_ver = int(mspec.rocm_version[:1])
-
-    target_binary: dict[str, Any] = {
-        "rocm_ver": rocm_ver,
-        "distro": "override",
-        "path": None,
-    }
-
-    # Create distro ID list based off of ID (a string, containing a single distro)
-    # and ID_LIKE (a string, listing at least one distro, separated by a single space)
-    # from the system /etc/os-release file
-    os_release = Path("/etc/os-release").read_text()
-    id_list = specs.search(r'^ID_LIKE="?(.*?)"?$', os_release) or ""
-    id = specs.search(r'^ID="?(.*?)"?$', os_release) or ""
-    id_list = id_list.split() + [id]
-
-    if "ROOFLINE_BIN" in os.environ.keys():
-        rooflineBinary = os.environ["ROOFLINE_BIN"]
-        if Path(rooflineBinary).exists():
-            console_warning(
-                "roofline",
-                f"Detected user-supplied binary --> ROOFLINE_BIN = {rooflineBinary}\n",
-            )
-            # distro stays marked as override and path value is substituted in
-            target_binary["path"] = rooflineBinary
-            return target_binary
-        else:
-            console_error(
-                "roofline",
-                "user-supplied path to binary not accessible --> "
-                f"ROOFLINE_BIN = {rooflineBinary}\n",
-            )
-
-    # check that the system OS is based off of one of the following distributions
-    elif "azurelinux" in id_list:
-        distro = "azurelinux"
-
-    elif "debian" in id_list:
-        distro = "22.04"
-
-    elif "fedora" in id_list:
-        distro = "platform:el8"
-
-    elif "suse" in id_list:
-        distro = "15.6"
-
-    else:
-        console_error(
-            "roofline", "Cannot find a valid binary for your operating system"
-        )
-
-    # distro gets assigned, to follow default roofline bin location and nomenclature
-    target_binary["distro"] = distro
-    return target_binary
-
-
-def mibench(args: argparse.Namespace, mspec: Any) -> None:  # noqa: ANN401
-    """Run roofline microbenchmark to generate peek BW and FLOP measurements."""
-    console_log("roofline", "No roofline data found. Generating...")
-
-    distro_map = {
-        "platform:el8": "rhel8",
-        "15.6": "sles15sp6",
-        "22.04": "ubuntu22_04",
-        "azurelinux": "azurelinux3",
-    }
-
-    binary_paths: list[str] = []
-
-    target_binary = detect_roofline(mspec)
-    if target_binary["distro"] == "override":
-        binary_paths.append(target_binary["path"])
-    else:
-        # check two potential locations for roofline binaries due to differences in
-        # development usage vs formal install
-        potential_paths = [
-            config.rocprof_compute_home / "utils" / "rooflines" / "roofline",
-            config.rocprof_compute_home.parent.parent / "bin" / "roofline",
-        ]
-
-        for directory in potential_paths:
-            path_to_binary = (
-                f"{directory}-{distro_map[target_binary['distro']]}"
-                f"-rocm{target_binary['rocm_ver']}"
-            )
-            binary_paths.append(path_to_binary)
-
-    # Distro is valid but cant find rocm ver
-    found = False
-    for binary_path in binary_paths:
-        if Path(binary_path).exists():
-            found = True
-            path_to_binary = binary_path
-            break
-
-    if not found:
-        console_error("roofline", f"Unable to locate expected binary ({binary_paths}).")
-
-    my_args = [
-        path_to_binary,
-        "-o",
-        f"{args.path}/roofline.csv",
-        "-d",
-        str(args.device),
-    ]
-    if args.quiet:
-        my_args += "--quiet"
-
-    subprocess.run(my_args, check=True)
 
 
 def get_submodules(package_name: str) -> list[str]:
@@ -1364,6 +1719,131 @@ def reverse_multi_index_df_pmc(
     return dfs, coll_levels
 
 
+def impute_counters_iteration_multiplex(
+    df_multi_index: pd.DataFrame,
+    policy: str,
+) -> pd.DataFrame:
+    """
+    Perform data imputation for missing counter values due to iteration multiplexing.
+    """
+    non_counter_column_index = [
+        "Dispatch_ID",
+        "GPU_ID",
+        "Grid_Size",
+        "Workgroup_Size",
+        "LDS_Per_Workgroup",
+        "Scratch_Per_Workitem",
+        "Arch_VGPR",
+        "Accum_VGPR",
+        "SGPR",
+        "Kernel_Name",
+        "Start_Timestamp",
+        "End_Timestamp",
+        "Kernel_ID",
+    ]
+    result_dfs: list[pd.DataFrame] = []
+    dfs, coll_levels = reverse_multi_index_df_pmc(df_multi_index)
+
+    for df in dfs:
+        # Group by unique kernel configurations
+        unique_occurences = (
+            df.groupby("Kernel_Name")
+            if policy == "kernel"
+            else df.groupby(
+                [
+                    "Kernel_Name",
+                    "Grid_Size",
+                    "Workgroup_Size",
+                    "LDS_Per_Workgroup",
+                ],
+                as_index=False,
+            )
+        )
+
+        counter_columns = [
+            col for col in df.columns if col not in non_counter_column_index
+        ]
+        # Collect imputed groups as dataframes
+        group_dfs = []
+
+        for _, group in unique_occurences:
+            # Identify counter buckets
+            counter_groups: set[frozenset[str]] = set()
+            for _, row in group.iterrows():
+                # Set of counter column names with non empty values
+                cols_frozenset = frozenset(
+                    row[counter_columns][row[counter_columns].notna()].index
+                )
+                # If no counters found for this dispatch, continue
+                if not cols_frozenset:
+                    continue
+                # Since counter buckets are repeated in round robin fashion,
+                # we can stop once we see a repeated bucket
+                if cols_frozenset in counter_groups:
+                    break
+                counter_groups.add(cols_frozenset)
+
+            # If no counters found for this group, continue
+            if not counter_groups:
+                continue
+
+            # Iterate over subgroups of dispatches containing
+            # all counters and impute missing values
+            subgroup_size = len(counter_groups)
+            all_counters = {
+                counter for counter_group in counter_groups for counter in counter_group
+            }
+            # Collect imputed sub-groups as dataframes
+            subgroup_dfs = []
+            previous_fill_values = {}
+            for i in range(0, len(group), subgroup_size):
+                subgroup = group.iloc[i : i + subgroup_size]
+
+                # Build imputation mapping once for all counters in this subgroup
+                fill_values = {}
+                for counter in all_counters:
+                    valid_mask = subgroup[counter].notna()
+                    if valid_mask.any():
+                        # Get the first valid value for this counter
+                        fill_values[counter] = subgroup.loc[valid_mask, counter].iloc[0]
+
+                # Apply all fills at once using vectorized fillna
+                if fill_values:
+                    subgroup = subgroup.fillna(fill_values)
+
+                # If this is the last subgroup and it still has missing values,
+                # use previous subgroup's fill values
+                # NOTE: This wont work if the first subgroup is itself incomplete
+                is_last_subgroup = (i + subgroup_size) >= len(group)
+                # First any() returns bool pd.Series for every column,
+                # second any() returns single bool
+                if (
+                    is_last_subgroup
+                    and previous_fill_values
+                    and subgroup.isna().any().any()
+                ):
+                    # Use previous subgroup's fill values for remaining missing values
+                    subgroup = subgroup.fillna(previous_fill_values)
+
+                subgroup_dfs.append(subgroup)
+                previous_fill_values = fill_values
+
+            # Concatenate all subgroups for this group
+            if subgroup_dfs:
+                # Add the imputed group dataframe
+                group_dfs.append(pd.concat(subgroup_dfs, ignore_index=True))
+
+        # Create a new dataframe by concatenating all groups
+        result_dfs.append(
+            pd.concat(group_dfs, ignore_index=True)
+            if group_dfs
+            else pd.DataFrame(df.columns)
+        )
+
+    final_df = pd.concat(result_dfs, keys=coll_levels, axis=1, copy=False)
+    return final_df
+
+
 def merge_counters_spatial_multiplex(df_multi_index: pd.DataFrame) -> pd.DataFrame:
     """
     For spatial multiplexing, this merges counter values for the same kernel that
@@ -1435,9 +1915,8 @@ def merge_counters_spatial_multiplex(df_multi_index: pd.DataFrame) -> pd.DataFra
                     merged_row[col] = group["Start_Timestamp"].median()
                 elif col == "End_Timestamp":
                     # For End_Timestamp, calculate the median delta time
-                    delta_time = group["End_Timestamp"] - group["Start_Timestamp"]
-                    median_delta_time = delta_time.median()
-                    merged_row[col] = merged_row["Start_Timestamp"] + median_delta_time
+                    delta_time = group[col] - group["Start_Timestamp"]
+                    merged_row[col] = group["Start_Timestamp"] + delta_time.median()
                 else:
                     # For other non-counter columns, take the first occurrence (0th row)
                     merged_row[col] = group.iloc[0][col]
@@ -1648,3 +2127,49 @@ def get_panel_alias() -> dict[str, str]:
     return {
         panel["panel_alias"]: str(panel["panel_id"]) for panel in panel_yaml["panels"]
     }
+
+
+def get_rank() -> Optional[str]:
+    rank_env_vars = [
+        "SLURM_PROCID",
+        "FLUX_TASK_RANK",
+        "PMI_RANK",
+        "PMIX_RANK",
+        "PALS_RANKID",
+        "OMPI_COMM_WORLD_RANK",
+        "MV2_COMM_WORLD_RANK",
+        "MPI_RANKID",
+        "MPI_LOCALRANKID",
+        "MPI_RANK",
+    ]
+    for env_var in rank_env_vars:
+        value = os.environ.get(env_var)
+        if value is not None:
+            return value
+
+    return None
+
+
+def replace_rank(name: str) -> str:
+    def rank(match: re.Match[str]) -> str:
+        value = get_rank()
+        if value is not None:
+            return value + match.group(1)  # preserve trailing slash
+        else:
+            return ""  # Ignore %rank% and trailing slash
+
+    # Replace %rank% (and optional trailing slash) with MPI process rank
+    pattern = re.compile(r"%rank%(/?)")
+
+    return pattern.sub(rank, name)
+
+
+def replace_env(name: str) -> str:
+    def env(match: re.Match[str]) -> str:
+        var_name = match.group(1)
+        return os.environ.get(var_name, "")  # Default to empty string if not found
+
+    # Replace %env{VAR}% with environment variable values
+    pattern = re.compile(r"%env{([^}]+)}%")
+
+    return pattern.sub(env, name)

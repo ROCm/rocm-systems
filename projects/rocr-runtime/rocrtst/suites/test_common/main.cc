@@ -61,7 +61,9 @@
 #include "suites/functional/svm_memory.h"
 #include "suites/performance/dispatch_time.h"
 #include "suites/performance/memory_async_copy.h"
+#if ENABLE_COPY_NUMA
 #include "suites/performance/memory_async_copy_numa.h"
+#endif
 #include "suites/performance/memory_async_copy_on_engine.h"
 #include "suites/performance/enqueueLatency.h"
 #include "suites/negative/memory_allocate_negative_tests.h"
@@ -69,6 +71,7 @@
 #include "suites/stress/memory_concurrent_tests.h"
 #include "suites/stress/queue_write_index_concurrent_tests.h"
 #include "suites/test_common/test_case_template.h"
+#include "suites/functional/test_fault_example.h"
 #include "suites/test_common/main.h"
 #include "suites/test_common/test_common.h"
 #include "suites/functional/concurrent_init.h"
@@ -79,8 +82,12 @@
 #include "suites/functional/aql_barrier_bit.h"
 #include "suites/functional/signal_kernel.h"
 #include "suites/functional/cu_masking.h"
+#include "suites/functional/filter_devices.h"
+#include "suites/functional/gpu_coredump.h"
 #include "amd_smi/amdsmi.h"
 #include "common/common.h"
+#include "suites/functional/counted_queues.h"
+#include "common/os.h"
 
 static RocrTstGlobals *sRocrtstGlvalues = nullptr;
 
@@ -130,6 +137,12 @@ static void RunGenericTest(TestBase *test) {
 TEST(rocrtst, Test_Example) {
   TestExample tst;
 
+  RunGenericTest(&tst);
+}
+
+TEST(rocrtst, Test_Example_InterruptDisabled) {
+  TestExample tst;
+  rocrtst::SetEnv("HSA_ENABLE_INTERRUPT", "0");
   RunGenericTest(&tst);
 }
 
@@ -311,6 +324,69 @@ TEST(rocrtstFunc, Memory_Available) {
   );
 }
 
+TEST(rocrtstFunc, GpuCoreDump_DefaultPattern) {
+  RUN_IF_NOT_EMU_MODE(
+    GpuCoreDumpTest gcd;
+    RunCustomTestProlog(&gcd);
+    gcd.TestDefaultPattern();
+    RunCustomTestEpilog(&gcd);
+  );
+}
+
+TEST(rocrtstFunc, GpuCoreDump_CustomPattern) {
+  RUN_IF_NOT_EMU_MODE(
+    GpuCoreDumpTest gcd;
+    RunCustomTestProlog(&gcd);
+    gcd.TestCustomPattern();
+    RunCustomTestEpilog(&gcd);
+  );
+}
+
+TEST(rocrtstFunc, GpuCoreDump_DisableFlag) {
+  RUN_IF_NOT_EMU_MODE(
+    GpuCoreDumpTest gcd;
+    RunCustomTestProlog(&gcd);
+    gcd.TestDisableFlag();
+    RunCustomTestEpilog(&gcd);
+  );
+}
+
+TEST(rocrtstFunc, GpuCoreDump_PatternSubstitution) {
+  RUN_IF_NOT_EMU_MODE(
+    GpuCoreDumpTest gcd;
+    RunCustomTestProlog(&gcd);
+    gcd.TestPatternSubstitution();
+    RunCustomTestEpilog(&gcd);
+  );
+}
+
+TEST(rocrtstFunc, GpuCoreDump_InvalidPath) {
+  RUN_IF_NOT_EMU_MODE(
+    GpuCoreDumpTest gcd;
+    RunCustomTestProlog(&gcd);
+    gcd.TestInvalidPath();
+    RunCustomTestEpilog(&gcd);
+  );
+}
+
+TEST(rocrtstFunc, GpuCoreDump_ContentIntegrity) {
+  RUN_IF_NOT_EMU_MODE(
+    GpuCoreDumpTest gcd;
+    RunCustomTestProlog(&gcd);
+    gcd.TestCoreDumpContentIntegrity();
+    RunCustomTestEpilog(&gcd);
+  );
+}
+
+TEST(rocrtstFunc, GpuCoreDump_PipePattern) {
+  RUN_IF_NOT_EMU_MODE(
+    GpuCoreDumpTest gcd;
+    RunCustomTestProlog(&gcd);
+    gcd.TestPipePattern();
+    RunCustomTestEpilog(&gcd);
+  );
+}
+
 
 TEST(rocrtstFunc, Memory_Atomic_Add_Test) {
   RUN_IF_NOT_EMU_MODE(
@@ -472,12 +548,94 @@ TEST(rocrtstFunc, VirtMemory_Access_Test) {
   );
 }
 
+TEST(rocrtstFunc, VirtMemory_Accounting_Test) {
+  RUN_IF_NOT_EMU_MODE(
+    VirtMemoryTestBasic vmt;
+
+    RunCustomTestProlog(&vmt);
+    vmt.MemoryAccountingTest();
+    RunCustomTestEpilog(&vmt);
+  );
+}
+
 TEST(rocrtstFunc, VirtMemory_Interprocess_Test) {
   RUN_IF_NOT_EMU_MODE(
     VirtMemoryTestInterProcess vmt;
     RunCustomTestProlog(&vmt);
     RunCustomTestEpilog(&vmt);
   );
+}
+
+TEST(rocrtstFunc, Filter_Devices_Test) {
+  RUN_IF_NOT_EMU_MODE(
+    FilterDevicesTest fd;
+    RunCustomTestProlog(&fd);
+    fd.TestRocrVisibleDevicesFiltering();
+    RunCustomTestEpilog(&fd);
+  );
+}
+
+TEST(rocrtstFunc, Counted_Queue_Basic_Test) {
+  CountedQueuesTest cq;
+  RunCustomTestProlog(&cq);
+  cq.CountedQueueBasicApiTest();
+  RunCustomTestEpilog(&cq);
+}
+
+TEST(rocrtstFunc, Counted_Queue_Same_Priority_Max_Limit_Test) {
+  CountedQueuesTest cq;
+  RunCustomTestProlog(&cq);
+  cq.CountedQueues_SamePriority_MaxLimitTest();
+  RunCustomTestEpilog(&cq);
+}
+
+TEST(rocrtstFunc, Counted_Queue_Invalid_Args_Test) {
+  CountedQueuesTest cq;
+  RunCustomTestProlog(&cq);
+  cq.InvalidArgsTest();
+  RunCustomTestEpilog(&cq);
+}
+
+TEST(rocrtstFunc, Counted_Queue_Multiple_Priorities_Limit_Test) {
+  CountedQueuesTest cq;
+  RunCustomTestProlog(&cq);
+  cq.CountedQueuesAllPrioritiesLimitTest();
+  RunCustomTestEpilog(&cq);
+}
+
+TEST(rocrtstFunc, Counted_Queue_Set_Priority_Nack_Test) {
+  CountedQueuesTest cq;
+  RunCustomTestProlog(&cq);
+  cq.CountedQueuesSetPriorityNackTest();
+  RunCustomTestEpilog(&cq);
+}
+
+TEST(rocrtstFunc, Counted_Queue_Set_CUMask_Nack_Test) {
+  CountedQueuesTest cq;
+  RunCustomTestProlog(&cq);
+  cq.CountedQueuesSetCUMaskNackTest();
+  RunCustomTestEpilog(&cq);
+}
+
+TEST(rocrtstFunc, Counted_Queue_Dispatch_Test) {
+  CountedQueuesTest cq;
+  RunCustomTestProlog(&cq);
+  cq.CountedQueuesDispatchTest();
+  RunCustomTestEpilog(&cq);
+}
+
+TEST(rocrtstFunc, Counted_Queue_Multithreaded_Dispatch_Test) {
+  CountedQueuesTest cq;
+  RunCustomTestProlog(&cq);
+  cq.CountedQueuesMultithreadedDispatchTest();
+  RunCustomTestEpilog(&cq);
+}
+
+TEST(rocrtstFunc, Counted_Queue_Overflow_And_Wraparound_Test) {
+  CountedQueuesTest cq;
+  RunCustomTestProlog(&cq);
+  cq.CountedQueuesOverflowWrapAroundTest();
+  RunCustomTestEpilog(&cq);
 }
 
 TEST(rocrtstNeg, Memory_Negative_Tests) {
@@ -595,17 +753,15 @@ TEST(rocrtstStress, Queue_LoadStore_Write_Index_ConcurrentTest) {
 }
 
 TEST(rocrtstPerf, Memory_Async_Copy) {
-  RUN_IF_NOT_EMU_MODE(
-    MemoryAsyncCopy mac;
-    // To do full test, uncomment this:
-    //  mac.set_full_test(true);
-    // To test only 1 path, add lines like this:
-    //  mac.set_src_pool(<src pool id>);
-    //  mac.set_dst_pool(<dst pool id>);
-    // The default is to and from the cpu to 1 gpu, and to/from a gpu to
-    // another gpu
-    RunGenericTest(&mac);
-  );
+  MemoryAsyncCopy mac;
+  // To do full test, uncomment this:
+  //  mac.set_full_test(true);
+  // To test only 1 path, add lines like this:
+  //  mac.set_src_pool(<src pool id>);
+  //  mac.set_dst_pool(<dst pool id>);
+  // The default is to and from the cpu to 1 gpu, and to/from a gpu to
+  // another gpu
+  RunGenericTest(&mac);
 }
 
 TEST(rocrtstPerf, Memory_Async_Copy_On_Engine) {
@@ -622,10 +778,12 @@ TEST(rocrtstPerf, ENQUEUE_LATENCY) {
   RunGenericTest(&multiPacketequeue);
 }
 
+#if ENABLE_COPY_NUMA
 TEST(rocrtstPerf, DISABLED_Memory_Async_Copy_NUMA) {
   MemoryAsyncCopyNUMA numa;
   RunGenericTest(&numa);
 }
+#endif
 
 TEST(rocrtstPerf, AQL_Dispatch_Time_Single_SpinWait) {
   DispatchTime dt(true, true);

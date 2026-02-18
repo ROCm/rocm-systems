@@ -70,50 +70,50 @@ Panel Config:
           peak: ((($max_sclk * $cu_per_gpu) * 4096) / 1000)
           pop: ((100 * AVG(((SQ_INSTS_VALU_MFMA_MOPS_I8 * 512) / (End_Timestamp -
             Start_Timestamp)))) / ((($max_sclk * $cu_per_gpu) * 4096) / 1000))
-        Active CUs:
+        Active CUs (deprecated):
           value: $numActiveCUs
           unit: CUs
           peak: $cu_per_gpu
           pop: ((100 * $numActiveCUs) / $cu_per_gpu)
         SALU Utilization:
           value: AVG(((100 * SQ_ACTIVE_INST_SCA) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
-          unit: pct
+          unit: Percent
           peak: 100
           pop: AVG(((100 * SQ_ACTIVE_INST_SCA) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
         VALU Utilization:
           value: AVG(((100 * SQ_ACTIVE_INST_VALU) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
-          unit: pct
+          unit: Percent
           peak: 100
           pop: AVG(((100 * SQ_ACTIVE_INST_VALU) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
         MFMA Utilization:
           value: AVG(((100 * SQ_VALU_MFMA_BUSY_CYCLES) / (($GRBM_GUI_ACTIVE_PER_XCD
             * $cu_per_gpu) * 4)))
-          unit: pct
+          unit: Percent
           peak: 100
           pop: AVG(((100 * SQ_VALU_MFMA_BUSY_CYCLES) / (($GRBM_GUI_ACTIVE_PER_XCD
             * $cu_per_gpu) * 4)))
         VMEM Utilization:
           value: AVG((((100 * (SQ_ACTIVE_INST_FLAT+SQ_ACTIVE_INST_VMEM)) / $GRBM_GUI_ACTIVE_PER_XCD)
             / $cu_per_gpu))
-          unit: pct
+          unit: Percent
           peak: 100
           pop: AVG((((100 * (SQ_ACTIVE_INST_FLAT+SQ_ACTIVE_INST_VMEM)) / $GRBM_GUI_ACTIVE_PER_XCD)
             / $cu_per_gpu))
         Branch Utilization:
           value: AVG((((100 * SQ_ACTIVE_INST_MISC) / $GRBM_GUI_ACTIVE_PER_XCD) / $cu_per_gpu))
-          unit: pct
+          unit: Percent
           peak: 100
           pop: AVG((((100 * SQ_ACTIVE_INST_MISC) / $GRBM_GUI_ACTIVE_PER_XCD) / $cu_per_gpu))
         VALU Active Threads:
           value: AVG(((SQ_THREAD_CYCLES_VALU / SQ_ACTIVE_INST_VALU) if (SQ_ACTIVE_INST_VALU
             != 0) else None))
-          unit: Threads
+          unit: Work-items
           peak: $wave_size
           pop: (100 * AVG((SQ_THREAD_CYCLES_VALU / SQ_ACTIVE_INST_VALU / $wave_size)
             if (SQ_ACTIVE_INST_VALU != 0) else None))
         IPC:
           value: AVG((SQ_INSTS / SQ_BUSY_CU_CYCLES))
-          unit: Instr/cycle
+          unit: Instructions per Cycle
           peak: 5
           pop: ((100 * AVG((SQ_INSTS / SQ_BUSY_CU_CYCLES))) / 5)
         Wavefront Occupancy:
@@ -133,7 +133,7 @@ Panel Config:
         LDS Bank Conflicts/Access:
           value: AVG(((SQ_LDS_BANK_CONFLICT / (SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT))
             if ((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) != 0) else None))
-          unit: Conflicts/access
+          unit: Conflicts per Access
           peak: 32
           pop: ((100 * AVG(((SQ_LDS_BANK_CONFLICT / (SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT))
             if ((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) != 0) else None))) / 32)
@@ -142,7 +142,7 @@ Panel Config:
             + TCP_TCC_ATOMIC_WITH_RET_REQ_sum) + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum))
             / TCP_TOTAL_CACHE_ACCESSES_sum)) if (TCP_TOTAL_CACHE_ACCESSES_sum != 0)
             else None))
-          unit: pct
+          unit: Percent
           peak: 100
           pop: AVG(((100 - ((100 * (((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum)
             + TCP_TCC_ATOMIC_WITH_RET_REQ_sum) + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum))
@@ -157,7 +157,7 @@ Panel Config:
         L2 Cache Hit Rate:
           value: AVG((((100 * TCC_HIT_sum) / (TCC_HIT_sum + TCC_MISS_sum)) if ((TCC_HIT_sum
             + TCC_MISS_sum) != 0) else None))
-          unit: pct
+          unit: Percent
           peak: 100
           pop: AVG((((100 * TCC_HIT_sum) / (TCC_HIT_sum + TCC_MISS_sum)) if ((TCC_HIT_sum
             + TCC_MISS_sum) != 0) else None))
@@ -199,7 +199,7 @@ Panel Config:
         sL1D Cache Hit Rate:
           value: AVG((((100 * SQC_DCACHE_HITS) / (SQC_DCACHE_HITS + SQC_DCACHE_MISSES))
             if ((SQC_DCACHE_HITS + SQC_DCACHE_MISSES) != 0) else None))
-          unit: pct
+          unit: Percent
           peak: 100
           pop: AVG((((100 * SQC_DCACHE_HITS) / (SQC_DCACHE_HITS + SQC_DCACHE_MISSES))
             if ((SQC_DCACHE_HITS + SQC_DCACHE_MISSES) != 0) else None))
@@ -211,7 +211,7 @@ Panel Config:
             64))) / ((($max_sclk / 1000) * 64) * $sqc_per_gpu))
         L1I Hit Rate:
           value: AVG(((100 * SQC_ICACHE_HITS) / (SQC_ICACHE_HITS + SQC_ICACHE_MISSES)))
-          unit: pct
+          unit: Percent
           peak: 100
           pop: AVG(((100 * SQC_ICACHE_HITS) / (SQC_ICACHE_HITS + SQC_ICACHE_MISSES)))
         L1I BW:
@@ -226,13 +226,18 @@ Panel Config:
           peak: None
           pop: None
           coll_level: SQ_IFETCH_LEVEL
+        CU Utilization:
+          value: AVG(100 * SQ_BUSY_CU_CYCLES / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+          unit: Percent
+          peak: 100
+          pop: AVG(100 * SQ_BUSY_CU_CYCLES / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
   metrics_description:
-    VALU FLOPs: |-
+    VALU FLOPs: >-
       The total floating-point operations executed per second on the VALU.
       This is also presented as a percent of the peak theoretical FLOPs achievable
       on the specific accelerator. Note: this does not include any floating-point
       operations from MFMA instructions.
-    VALU IOPs: |-
+    VALU IOPs: >-
       The total integer operations executed per second on the VALU. This is
       also presented as a percent of the peak theoretical IOPs achievable on the
       specific accelerator. Note: this does not include any integer operations from
@@ -242,33 +247,33 @@ Panel Config:
       from VALU instructions. This is also presented as a percent of the peak theoretical
       F8 MFMA operations achievable on the specific accelerator. It is supported on
       AMD Instinct MI300 series and later only.
-    MFMA FLOPs (BF16): |-
+    MFMA FLOPs (BF16): >-
       The total number of 16-bit brain floating point MFMA operations executed
       per second. Note: this does not include any 16-bit brain floating point operations
       from VALU instructions. This is also presented as a percent of the peak theoretical
       BF16 MFMA operations achievable on the specific accelerator.
-    MFMA FLOPs (F16): |-
+    MFMA FLOPs (F16): >-
       The total number of 16-bit floating point MFMA operations executed per
       second. Note: this does not include any 16-bit floating point operations from
       VALU instructions. This is also presented as a percent of the peak theoretical
       F16 MFMA operations achievable on the specific accelerator.
-    MFMA FLOPs (F32): |-
+    MFMA FLOPs (F32): >-
       The total number of 32-bit floating point MFMA operations executed per
       second. Note: this does not include any 32-bit floating point operations from
       VALU instructions. This is also presented as a percent of the peak theoretical
       F32 MFMA operations achievable on the specific accelerator.
-    MFMA FLOPs (F64): |-
+    MFMA FLOPs (F64): >-
       The total number of 64-bit floating point MFMA operations executed per
       second. Note: this does not include any 64-bit floating point operations from
       VALU instructions. This is also presented as a percent of the peak theoretical
       F64 MFMA operations achievable on the specific accelerator.
-    MFMA IOPs (Int8): |-
+    MFMA IOPs (Int8): >-
       The total number of 8-bit integer MFMA operations executed per second.
       Note: this does not include any 8-bit integer operations from VALU instructions.
       This is also presented as a percent of the peak theoretical INT8 MFMA operations
       achievable on the specific accelerator.
-    Active CUs: Total number of active compute units (CUs) on the accelerator during
-      the kernel execution.
+    Active CUs (deprecated): Total number of active compute units (CUs) on the accelerator during
+      the kernel execution. (Deprecated - See CU Utilization instead)
     SALU Utilization: Indicates what percent of the kernel's duration the SALU was
       busy executing instructions. Computed as the ratio of the total number of cycles
       spent by the scheduler issuing SALU or SMEM instructions over the total CU cycles.
@@ -295,7 +300,7 @@ Panel Config:
     IPC: The ratio of the total number of instructions executed on the CU over the
       total active CU cycles. This is also presented as a percent of the peak theoretical
       bandwidth achievable on the specific accelerator.
-    Wavefront Occupancy: |-
+    Wavefront Occupancy: >-
       The time-averaged number of wavefronts resident on the accelerator over
       the lifetime of the kernel. Note: this metric may be inaccurate for short-running
       kernels (less than 1ms). This is also presented as a percent of the peak theoretical
@@ -328,7 +333,7 @@ Panel Config:
       if only a single value is requested in a cache line, the data movement will
       still be counted as a full cache line. This is also presented as a percent of
       the peak theoretical bandwidth achievable on the specific accelerator.
-    L2-Fabric Read BW: |-
+    L2-Fabric Read BW: >-
       The number of bytes read by the L2 over the Infinity Fabric\u2122 interface
       per unit time. This is also presented as a percent of the peak theoretical
       bandwidth achievable on the specific accelerator.
@@ -353,3 +358,7 @@ Panel Config:
       of all L1I requests.
     L1I Fetch Latency: The average number of cycles spent to fetch instructions to
       a CU.
+    CU Utilization: The percent of total SIMD cycles in the kernel
+      where any SIMD on a CU was actively doing any work, summed
+      over all CUs. Low values (less than 100%) indicate that the accelerator was
+      not fully saturated by the kernel, or a potential load-imbalance issue.

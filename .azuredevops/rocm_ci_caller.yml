@@ -1,20 +1,24 @@
-trigger: none  
-pr:  
+trigger: none
+pr:
   branches:
     include:
       - develop
       - release/rocm-rel-7.1
       - release/rocm-rel-7.2
+  # NOTE: this is temporary speed up to skip CI for WSL work
+  paths:
+    exclude:
+      - "projects/rocr-runtime/libhsakmt/src/dxg"
   drafts: false
 
 variables:
   - group: internal
   - name: REPOSITORY_NAME
-    value: '$(Build.Repository.Name)'  
+    value: '$(Build.Repository.Name)'
   - name: HEAD_SHA
     value: '$(system.pullRequest.sourceCommitId)'
   - name: PR_NUM
-    value: '$(system.pullRequest.pullRequestNumber)' 
+    value: '$(system.pullRequest.pullRequestNumber)'
   - name: PR_URL
     value: '$(system.pullRequest.sourceRepositoryUri)/pull/$(PR_NUM)'
   - name: BASE_REF
@@ -22,9 +26,9 @@ variables:
   - name: EVENT_TYPE
     value: 'pull_request'
   - name: GH_PAT
-    value: '$(svc_acc_org_secret)'  
+    value: '$(svc_acc_org_secret)'
 
-jobs:  
+jobs:
 - job: Determine_Changes
   displayName: 'Sparse Checkout & Check Changed Files'
   pool: rocm-ci-caller
@@ -45,7 +49,7 @@ jobs:
         git fetch --depth=250 origin $(HEAD_SHA)
 
         git checkout FETCH_HEAD
-        
+
         git diff --name-only origin/$(BASE_REF)...HEAD > ../changed_files.txt
 
         echo "Changed files:"
@@ -60,13 +64,29 @@ jobs:
           if [[ "$file" == projects/clr/* || "$file" == projects/hip/* || "$file" == projects/hip-tests/* ]]; then
             WINDOWS_SKIP=false
           fi
-          if [[ "$file" == projects/hip/docs/* || \
-                "$file" == projects/rdc/docs/* || \
-                "$file" == projects/rocm-smi-lib/docs/* || \
-                "$file" == projects/rocminfo/docs/* || \
-                "$file" == projects/rocprofiler-compute/docs/* || \
-                "$file" == projects/rocprofiler-systems/docs/* || \
-                "$file" == projects/rocr-runtime/runtime/docs/* ]]; then
+
+          # Exclude paths:
+          #     docs/**
+          #     *.md
+          #     *.rtf
+          #     *.rst
+          #
+          #     projects/*/docs/**
+          #     **/.markdownlint-ci2.yaml
+          #     **/.readthedocs.yaml
+          #     **/.spellcheck.local.yaml
+          #     **/.wordlist.txt
+          if [[ "${file}" == docs/* || \
+                "${file}" == *.md || \
+                "${file}" == *.rtf || \
+                "${file}" == *.rst
+             ]] || \
+             grep --quiet --extended-regexp '^projects/[^/.]+/docs/.*$' <<< "${file}" || \
+             grep --quiet --extended-regexp '^([^/.]+/)*.markdownlint-ci2.yaml$' <<< "${file}" || \
+             grep --quiet --extended-regexp '^([^/.]+/)*.readthedocs.yaml$' <<< "${file}" || \
+             grep --quiet --extended-regexp '^([^/.]+/)*.spellcheck.local.yaml$' <<< "${file}" || \
+             grep --quiet --extended-regexp '^([^/.]+/)*.wordlist.txt$' <<< "${file}" \
+            ; then
             WINDOWS_SKIP=true
             MATCH_FOUND=false
           fi
@@ -81,7 +101,7 @@ jobs:
       name: detectChanges
       displayName: Detect path changes
 
-- job: Trigger_Pipeline 
+- job: Trigger_Pipeline
   displayName: 'Trigger Pipeline or Skip'
   dependsOn: Determine_Changes
   condition: succeeded()
@@ -91,7 +111,7 @@ jobs:
     windows_skip: $[ dependencies.Determine_Changes.outputs['detectChanges.windows_skip'] ]
   steps:
     - checkout: none
-    
+
     - script: |
         echo "DEBUG: match_found = '$(match_found)'"
       displayName: 'Debug match_found variable'
@@ -110,7 +130,7 @@ jobs:
           -f description="Windows PSDB skipped"
       displayName: 'Skip WindowsCI - Internal'
       condition: eq(variables.windows_skip, 'true')
-    
+
     - script: |
         rm -rf $(repo_name)
         git clone $(gh_repo)
@@ -118,7 +138,7 @@ jobs:
       condition: eq(variables.match_found, 'true')
 
     - script: |
-        set -e  
+        set -e
         echo "Calling jenkins_api.py for PR #$(PR_NUM)"
         cd $(repo_name)
         docker run \
@@ -139,8 +159,8 @@ jobs:
             -ghpat '$(GH_PAT)' \
             -br   '$(BASE_REF)' \
             -et   '$(EVENT_TYPE)'" > /dev/null 2>&1
-      displayName: Invoke jenkins_api.py in Docker  
-      env:  
+      displayName: Invoke jenkins_api.py in Docker
+      env:
         svc_acc_org_secret: $(svc_acc_org_secret)
       condition: eq(variables.match_found, 'true')
 

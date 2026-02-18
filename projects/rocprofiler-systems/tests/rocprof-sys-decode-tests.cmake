@@ -61,13 +61,11 @@ if(MI300_DETECTED)
     list(APPEND _vcn_counter_names --counter-names "VCN Activity")
     list(APPEND _jpeg_counter_names --counter-names "JPEG Activity")
     list(
-        APPEND
-        _vcn_rocpd_validation_rules
+        APPEND _vcn_rocpd_validation_rules
         "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/video-decode/amd-smi-rules.json"
     )
     list(
-        APPEND
-        _jpeg_rocpd_validation_rules
+        APPEND _jpeg_rocpd_validation_rules
         "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/jpeg-decode/amd-smi-rules.json"
     )
 endif()

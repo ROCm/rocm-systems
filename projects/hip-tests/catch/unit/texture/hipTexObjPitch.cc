@@ -58,12 +58,7 @@ static __global__ void texture2dCopyKernel(hipTextureObject_t texObj, TYPE_t* ds
 TEMPLATE_TEST_CASE("Unit_hipTexObjPitch_texture2D", "", char, unsigned char, short, unsigned short,
                    int, unsigned int, float) {
   CHECK_IMAGE_SUPPORT
-
-#if __HIP_NO_IMAGE_SUPPORT
-  HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");
-  return;
-#endif
-  (void) hipGetLastError();  // Prevent negative tests affecting this
+  (void)hipGetLastError();  // Prevent negative tests affecting this
 
   TestType* B;
   TestType* A;

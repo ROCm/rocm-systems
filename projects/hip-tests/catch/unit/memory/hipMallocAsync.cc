@@ -290,7 +290,7 @@ TEST_CASE("Unit_hipMallocAsync_StreamEvent_CrissCross") {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMallocAsync_Multidevice") {
+TEST_CASE("Unit_hipMallocAsync_Multidevice", "[multigpu]") {
   int num_devices;
   HIP_CHECK(hipGetDeviceCount(&num_devices));
   for (int i = 0; i < num_devices; i++) {
@@ -330,7 +330,7 @@ static void threadQAsyncCommands(streamMemAllocTest* testObj, hipStream_t strm, 
   testObj->freeDevBuf(strm);
 }
 
-TEST_CASE("Unit_hipMallocAsync_Multidevice_Concurrent") {
+TEST_CASE("Unit_hipMallocAsync_Multidevice_Concurrent", "[multigpu]") {
   int num_devices;
   HIP_CHECK(hipGetDeviceCount(&num_devices));
   checkIfMultiDev(num_devices) hipStream_t* stream_buf = new hipStream_t[num_devices];
@@ -379,7 +379,7 @@ TEST_CASE("Unit_hipMallocAsync_Multidevice_Concurrent") {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMallocAsync_Multidevice_MultiStream") {
+TEST_CASE("Unit_hipMallocAsync_Multidevice_MultiStream", "[multigpu]") {
   int num_devices;
   HIP_CHECK(hipGetDeviceCount(&num_devices));
   checkIfMultiDev(num_devices)

@@ -32,12 +32,21 @@ hip_add_exe_to_target(NAME dynamicLoading
                       TEST_TARGET_NAME build_tests)
 
 if(HIP_PLATFORM MATCHES "amd")
-add_custom_target(libLazyLoad.so COMMAND ${CMAKE_CXX_COMPILER} -fPIC -lpthread -shared ${OFFLOAD_ARCH_STR} ${CMAKE_CURRENT_SOURCE_DIR}/liblazyLoad.cc -I${CMAKE_CURRENT_SOURCE_DIR}/../../include -I${CMAKE_CURRENT_SOURCE_DIR}/../../external/Catch2 -L${HIP_PATH}/${CMAKE_INSTALL_LIBDIR} --hip-path=${HIP_PATH} -o libLazyLoad.so)
+  add_custom_target(libLazyLoad.so COMMAND ${CMAKE_HIP_COMPILER} -fPIC -lpthread -shared
+    ${OFFLOAD_ARCH_LIST} -x hip ${CMAKE_CURRENT_SOURCE_DIR}/liblazyLoad.cc
+    -I${CMAKE_CURRENT_SOURCE_DIR}/../../include ${HIP_PATH_OPT}
+    -I${Catch2_SOURCE_DIR}/src -I${Catch2_BINARY_DIR}/generated-includes
+    -o libLazyLoad.so)
 elseif(HIP_PLATFORM MATCHES "nvidia")
-add_custom_target(libLazyLoad.so COMMAND ${CMAKE_CXX_COMPILER} -Xcompiler -fPIC -lpthread -shared ${CMAKE_CURRENT_SOURCE_DIR}/liblazyLoad.cc -I${CMAKE_CURRENT_SOURCE_DIR}/../../include -I${CMAKE_CURRENT_SOURCE_DIR}/../../external/Catch2 -I${HIP_PATH}/include/ -o libLazyLoad.so)
+  add_custom_target(libLazyLoad.so COMMAND ${CMAKE_CUDA_COMPILER} -Xcompiler -fPIC -lpthread -Wno-deprecated-declarations -shared
+    -x cu ${CMAKE_CURRENT_SOURCE_DIR}/liblazyLoad.cc -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
+    -I${Catch2_SOURCE_DIR}/src -I${Catch2_BINARY_DIR}/generated-includes -I${HIP_PATH}/include/ -o libLazyLoad.so)
 endif()
 
-add_custom_target(bit_extract_kernel.code COMMAND ${CMAKE_CXX_COMPILER} --genco ${OFFLOAD_ARCH_STR} ${CMAKE_CURRENT_SOURCE_DIR}/bit_extract_kernel.cpp -o ${CMAKE_CURRENT_BINARY_DIR}/../dynamicLoading/bit_extract_kernel.code -I${HIP_PATH}/include/ -I${CMAKE_CURRENT_SOURCE_DIR}/../../include --hip-path=${HIP_PATH} -L${HIP_PATH}/${CMAKE_INSTALL_LIBDIR})
+add_custom_target(bit_extract_kernel.code COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only
+  -x hip ${CMAKE_CURRENT_SOURCE_DIR}/bit_extract_kernel.cpp ${HIP_PATH_OPT}
+  ${OFFLOAD_ARCH_LIST} -o ${CMAKE_CURRENT_BINARY_DIR}/../dynamicLoading/bit_extract_kernel.code
+  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 
 add_custom_target(vecadd.cc COMMAND cp ${CMAKE_CURRENT_SOURCE_DIR}/vecadd.cc ${CMAKE_CURRENT_BINARY_DIR}/../dynamicLoading/)
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
@@ -47,10 +56,10 @@ set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
 )
 
 if(HIP_PLATFORM MATCHES "amd")
-hip_add_exe_to_target(NAME Dynamic
-                      TEST_SRC ${LINUX_TEST_SRC}
-                      TEST_TARGET_NAME build_tests
-                      LINKER_LIBS ${CMAKE_DL_LIBS})
+  hip_add_exe_to_target(NAME Dynamic
+                        TEST_SRC ${LINUX_TEST_SRC}
+                        TEST_TARGET_NAME build_tests
+                        LINKER_LIBS ${CMAKE_DL_LIBS})
 endif()
 add_dependencies(build_tests bit_extract_kernel.code libLazyLoad.so vecadd.cc)
 endif()

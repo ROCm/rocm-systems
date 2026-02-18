@@ -19,7 +19,7 @@ Panel Config:
             + SQ_INSTS_VALU_MUL_F32) + SQ_INSTS_VALU_TRANS_F32) + (2 * SQ_INSTS_VALU_FMA_F32))))
             + (64 * (((SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64) + SQ_INSTS_VALU_TRANS_F64)
             + (2 * SQ_INSTS_VALU_FMA_F64)))) / (End_Timestamp - Start_Timestamp)))
-          unit: GFLOP
+          unit: GFLOPs
           peak: (((($max_sclk * $cu_per_gpu) * 64) * 2) / 1000)
           pop: ((100 * AVG(((((64 * (((SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16)
             + SQ_INSTS_VALU_TRANS_F16) + (2 * SQ_INSTS_VALU_FMA_F16))) + (64 * (((SQ_INSTS_VALU_ADD_F32
@@ -30,37 +30,37 @@ Panel Config:
         VALU IOPs:
           value: AVG(((64 * (SQ_INSTS_VALU_INT32 + SQ_INSTS_VALU_INT64)) / (End_Timestamp
             - Start_Timestamp)))
-          unit: GIOP
+          unit: GIOPs
           peak: (((($max_sclk * $cu_per_gpu) * 64) * 2) / 1000)
           pop: ((100 * AVG(((64 * (SQ_INSTS_VALU_INT32 + SQ_INSTS_VALU_INT64)) / (End_Timestamp
             - Start_Timestamp)))) / (((($max_sclk * $cu_per_gpu) * 64) * 2) / 1000))
         MFMA FLOPs (BF16):
           value: AVG(((SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512) / (End_Timestamp - Start_Timestamp)))
-          unit: GFLOP
+          unit: GFLOPs
           peak: ((($max_sclk * $cu_per_gpu) * 1024) / 1000)
           pop: ((100 * AVG(((SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512) / (End_Timestamp
             - Start_Timestamp)))) / ((($max_sclk * $cu_per_gpu) * 1024) / 1000))
         MFMA FLOPs (F16):
           value: AVG(((SQ_INSTS_VALU_MFMA_MOPS_F16 * 512) / (End_Timestamp - Start_Timestamp)))
-          unit: GFLOP
+          unit: GFLOPs
           peak: ((($max_sclk * $cu_per_gpu) * 1024) / 1000)
           pop: ((100 * AVG(((SQ_INSTS_VALU_MFMA_MOPS_F16 * 512) / (End_Timestamp -
             Start_Timestamp)))) / ((($max_sclk * $cu_per_gpu) * 1024) / 1000))
         MFMA FLOPs (F32):
           value: AVG(((SQ_INSTS_VALU_MFMA_MOPS_F32 * 512) / (End_Timestamp - Start_Timestamp)))
-          unit: GFLOP
+          unit: GFLOPs
           peak: ((($max_sclk * $cu_per_gpu) * 256) / 1000)
           pop: ((100 * AVG(((SQ_INSTS_VALU_MFMA_MOPS_F32 * 512) / (End_Timestamp -
             Start_Timestamp)))) / ((($max_sclk * $cu_per_gpu) * 256) / 1000))
         MFMA FLOPs (F64):
           value: AVG(((SQ_INSTS_VALU_MFMA_MOPS_F64 * 512) / (End_Timestamp - Start_Timestamp)))
-          unit: GFLOP
+          unit: GFLOPs
           peak: ((($max_sclk * $cu_per_gpu) * 256) / 1000)
           pop: ((100 * AVG(((SQ_INSTS_VALU_MFMA_MOPS_F64 * 512) / (End_Timestamp -
             Start_Timestamp)))) / ((($max_sclk * $cu_per_gpu) * 256) / 1000))
         MFMA IOPs (INT8):
           value: AVG(((SQ_INSTS_VALU_MFMA_MOPS_I8 * 512) / (End_Timestamp - Start_Timestamp)))
-          unit: GIOP
+          unit: GIOPs
           peak: ((($max_sclk * $cu_per_gpu) * 1024) / 1000)
           pop: ((100 * AVG(((SQ_INSTS_VALU_MFMA_MOPS_I8 * 512) / (End_Timestamp -
             Start_Timestamp)))) / ((($max_sclk * $cu_per_gpu) * 1024) / 1000))
@@ -78,7 +78,7 @@ Panel Config:
           avg: AVG((SQ_INSTS / SQ_BUSY_CU_CYCLES))
           min: MIN((SQ_INSTS / SQ_BUSY_CU_CYCLES))
           max: MAX((SQ_INSTS / SQ_BUSY_CU_CYCLES))
-          unit: Instr/cycle
+          unit: Instructions per Cycle
         IPC (Issued):
           avg: AVG(((((((((SQ_INSTS_VALU + SQ_INSTS_VMEM) + SQ_INSTS_SALU) + SQ_INSTS_SMEM))
             + SQ_INSTS_BRANCH) + SQ_INSTS_SENDMSG) + SQ_INSTS_VSKIPPED + SQ_INSTS_LDS)
@@ -89,17 +89,17 @@ Panel Config:
           max: MAX(((((((((SQ_INSTS_VALU + SQ_INSTS_VMEM) + SQ_INSTS_SALU) + SQ_INSTS_SMEM))
             + SQ_INSTS_BRANCH) + SQ_INSTS_SENDMSG) + SQ_INSTS_VSKIPPED + SQ_INSTS_LDS)
             / SQ_ACTIVE_INST_ANY))
-          unit: Instr/cycle
+          unit: Instructions per Cycle
         SALU Utilization:
           avg: AVG((((100 * SQ_ACTIVE_INST_SCA) / $GRBM_GUI_ACTIVE_PER_XCD) / $cu_per_gpu))
           min: MIN((((100 * SQ_ACTIVE_INST_SCA) / $GRBM_GUI_ACTIVE_PER_XCD) / $cu_per_gpu))
           max: MAX((((100 * SQ_ACTIVE_INST_SCA) / $GRBM_GUI_ACTIVE_PER_XCD) / $cu_per_gpu))
-          unit: pct
+          unit: Percent
         VALU Utilization:
           avg: AVG((((100 * SQ_ACTIVE_INST_VALU) / $GRBM_GUI_ACTIVE_PER_XCD) / $cu_per_gpu))
           min: MIN((((100 * SQ_ACTIVE_INST_VALU) / $GRBM_GUI_ACTIVE_PER_XCD) / $cu_per_gpu))
           max: MAX((((100 * SQ_ACTIVE_INST_VALU) / $GRBM_GUI_ACTIVE_PER_XCD) / $cu_per_gpu))
-          unit: pct
+          unit: Percent
         VMEM Utilization:
           avg: AVG((((100 * (SQ_ACTIVE_INST_FLAT+SQ_ACTIVE_INST_VMEM)) / $GRBM_GUI_ACTIVE_PER_XCD)
             / $cu_per_gpu))
@@ -107,12 +107,12 @@ Panel Config:
             / $cu_per_gpu))
           max: MAX((((100 * (SQ_ACTIVE_INST_FLAT+SQ_ACTIVE_INST_VMEM)) / $GRBM_GUI_ACTIVE_PER_XCD)
             / $cu_per_gpu))
-          unit: pct
+          unit: Percent
         Branch Utilization:
           avg: AVG((((100 * SQ_ACTIVE_INST_MISC) / $GRBM_GUI_ACTIVE_PER_XCD) / $cu_per_gpu))
           min: MIN((((100 * SQ_ACTIVE_INST_MISC) / $GRBM_GUI_ACTIVE_PER_XCD) / $cu_per_gpu))
           max: MAX((((100 * SQ_ACTIVE_INST_MISC) / $GRBM_GUI_ACTIVE_PER_XCD) / $cu_per_gpu))
-          unit: pct
+          unit: Percent
         VALU Active Threads:
           avg: AVG(((SQ_THREAD_CYCLES_VALU / SQ_ACTIVE_INST_VALU) if (SQ_ACTIVE_INST_VALU
             != 0) else None))
@@ -120,12 +120,12 @@ Panel Config:
             != 0) else None))
           max: MAX(((SQ_THREAD_CYCLES_VALU / SQ_ACTIVE_INST_VALU) if (SQ_ACTIVE_INST_VALU
             != 0) else None))
-          unit: Threads
+          unit: Work-items
         MFMA Utilization:
           avg: AVG(((100 * SQ_VALU_MFMA_BUSY_CYCLES) / ((4 * $cu_per_gpu) * $GRBM_GUI_ACTIVE_PER_XCD)))
           min: MIN(((100 * SQ_VALU_MFMA_BUSY_CYCLES) / ((4 * $cu_per_gpu) * $GRBM_GUI_ACTIVE_PER_XCD)))
           max: MAX(((100 * SQ_VALU_MFMA_BUSY_CYCLES) / ((4 * $cu_per_gpu) * $GRBM_GUI_ACTIVE_PER_XCD)))
-          unit: pct
+          unit: Percent
         MFMA Instruction Cycles:
           avg: AVG(((SQ_VALU_MFMA_BUSY_CYCLES / SQ_INSTS_MFMA) if (SQ_INSTS_MFMA !=
             0) else None))
@@ -133,7 +133,7 @@ Panel Config:
             0) else None))
           max: MAX(((SQ_VALU_MFMA_BUSY_CYCLES / SQ_INSTS_MFMA) if (SQ_INSTS_MFMA !=
             0) else None))
-          unit: cycles/instr
+          unit: Cycles per Instruction
         VMEM Latency:
           avg: AVG(((SQ_ACCUM_PREV_HIRES / SQ_INSTS_VMEM) if (SQ_INSTS_VMEM != 0)
             else None))
@@ -184,7 +184,7 @@ Panel Config:
             * 2)))) + (512 * SQ_INSTS_VALU_MFMA_MOPS_F32)) + (64 * (((SQ_INSTS_VALU_ADD_F64
             + SQ_INSTS_VALU_MUL_F64) + SQ_INSTS_VALU_TRANS_F64) + (SQ_INSTS_VALU_FMA_F64
             * 2)))) + (512 * SQ_INSTS_VALU_MFMA_MOPS_F64)) / $denom))
-          unit: (OPs + $normUnit)
+          unit: (FLOPs + $normUnit)
         IOPs (Total):
           avg: AVG(((64 * (SQ_INSTS_VALU_INT32 + SQ_INSTS_VALU_INT64)) + (SQ_INSTS_VALU_MFMA_MOPS_I8
             * 512)) / $denom)
@@ -192,7 +192,7 @@ Panel Config:
             * 512)) / $denom)
           max: MAX(((64 * (SQ_INSTS_VALU_INT32 + SQ_INSTS_VALU_INT64)) + (SQ_INSTS_VALU_MFMA_MOPS_I8
             * 512)) / $denom)
-          unit: (OPs + $normUnit)
+          unit: (IOPS + $normUnit)
         F16 OPs:
           avg: AVG(((((((64 * SQ_INSTS_VALU_ADD_F16) + (64 * SQ_INSTS_VALU_MUL_F16))
             + (64 * SQ_INSTS_VALU_TRANS_F16)) + (128 * SQ_INSTS_VALU_FMA_F16)) + (512
@@ -203,12 +203,12 @@ Panel Config:
           max: MAX(((((((64 * SQ_INSTS_VALU_ADD_F16) + (64 * SQ_INSTS_VALU_MUL_F16))
             + (64 * SQ_INSTS_VALU_TRANS_F16)) + (128 * SQ_INSTS_VALU_FMA_F16)) + (512
             * SQ_INSTS_VALU_MFMA_MOPS_F16)) / $denom))
-          unit: (OPs + $normUnit)
+          unit: (FLOPs + $normUnit)
         BF16 OPs:
           avg: AVG(((512 * SQ_INSTS_VALU_MFMA_MOPS_BF16) / $denom))
           min: MIN(((512 * SQ_INSTS_VALU_MFMA_MOPS_BF16) / $denom))
           max: MAX(((512 * SQ_INSTS_VALU_MFMA_MOPS_BF16) / $denom))
-          unit: (OPs + $normUnit)
+          unit: (FLOPs + $normUnit)
         F32 OPs:
           avg: AVG((((64 * (((SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32) + SQ_INSTS_VALU_TRANS_F32)
             + (SQ_INSTS_VALU_FMA_F32 * 2))) + (512 * SQ_INSTS_VALU_MFMA_MOPS_F32))
@@ -219,7 +219,7 @@ Panel Config:
           max: MAX((((64 * (((SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32) + SQ_INSTS_VALU_TRANS_F32)
             + (SQ_INSTS_VALU_FMA_F32 * 2))) + (512 * SQ_INSTS_VALU_MFMA_MOPS_F32))
             / $denom))
-          unit: (OPs + $normUnit)
+          unit: (FLOPs + $normUnit)
         F64 OPs:
           avg: AVG((((64 * (((SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64) + SQ_INSTS_VALU_TRANS_F64)
             + (SQ_INSTS_VALU_FMA_F64 * 2))) + (512 * SQ_INSTS_VALU_MFMA_MOPS_F64))
@@ -230,44 +230,44 @@ Panel Config:
           max: MAX((((64 * (((SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64) + SQ_INSTS_VALU_TRANS_F64)
             + (SQ_INSTS_VALU_FMA_F64 * 2))) + (512 * SQ_INSTS_VALU_MFMA_MOPS_F64))
             / $denom))
-          unit: (OPs + $normUnit)
+          unit: (FLOPs + $normUnit)
         INT8 OPs:
           avg: AVG(((SQ_INSTS_VALU_MFMA_MOPS_I8 * 512) / $denom))
           min: MIN(((SQ_INSTS_VALU_MFMA_MOPS_I8 * 512) / $denom))
           max: MAX(((SQ_INSTS_VALU_MFMA_MOPS_I8 * 512) / $denom))
-          unit: (OPs + $normUnit)
+          unit: (IOPS + $normUnit)
   metrics_description:
-    VALU FLOPs: |-
+    VALU FLOPs: >-
       The total floating-point operations executed per second on the VALU.
       This is also presented as a percent of the peak theoretical FLOPs achievable
       on the specific accelerator. Note: this does not include any floating-point
       operations from MFMA instructions.
-    VALU IOPs: |-
+    VALU IOPs: >-
       The total integer operations executed per second on the VALU. This is
       also presented as a percent of the peak theoretical IOPs achievable on the
       specific accelerator. Note: this does not include any integer operations from
       MFMA instructions.
-    MFMA FLOPs (BF16): |-
+    MFMA FLOPs (BF16): >-
       The total number of 16-bit brain floating point MFMA operations executed
       per second. Note: this does not include any 16-bit brain floating point operations
       from VALU instructions. This is also presented as a percent of the peak theoretical
       BF16 MFMA operations achievable on the specific accelerator.
-    MFMA FLOPs (F16): |-
+    MFMA FLOPs (F16): >-
       The total number of 16-bit floating point MFMA operations executed per
       second. Note: this does not include any 16-bit floating point operations from
       VALU instructions. This is also presented as a percent of the peak theoretical
       F16 MFMA operations achievable on the specific accelerator.
-    MFMA FLOPs (F32): |-
+    MFMA FLOPs (F32): >-
       The total number of 32-bit floating point MFMA operations executed per
       second. Note: this does not include any 32-bit floating point operations from
       VALU instructions. This is also presented as a percent of the peak theoretical
       F32 MFMA operations achievable on the specific accelerator.
-    MFMA FLOPs (F64): |-
+    MFMA FLOPs (F64): >-
       The total number of 64-bit floating point MFMA operations executed per
       second. Note: this does not include any 64-bit floating point operations from
       VALU instructions. This is also presented as a percent of the peak theoretical
       F64 MFMA operations achievable on the specific accelerator.
-    MFMA IOPs (INT8): |-
+    MFMA IOPs (INT8): >-
       The total number of 8-bit integer MFMA operations executed per second.
       Note: this does not include any 8-bit integer operations from VALU instructions.
       This is also presented as a percent of the peak theoretical INT8 MFMA operations

@@ -58,12 +58,27 @@ std::string TestContext::substringFound(std::vector<std::string> list, std::stri
 
 std::string TestContext::getCurrentArch() {
 #if HT_LINUX
-  const char* cmd =
-      "/opt/rocm/bin/rocm_agent_enumerator | awk '$0 != \"gfx000\"' | xargs | sed -e 's/ /;/g' | "
-      "tr -d '\n'";
+  constexpr std::string_view rocm_agent_enum = "rocm_agent_enumerator";
+  std::filesystem::path default_rocm_bin_path = "/opt/rocm";
+  std::string command{};
+  if (const char *env_rocm_path = std::getenv("ROCM_PATH")) {
+    command += env_rocm_path;
+  } else {
+    command += default_rocm_bin_path;
+  }
+  command += "/bin/";
+  command += rocm_agent_enum;
+  if (!std::filesystem::exists(command)) {
+    return "";
+  }
+
+  command += " | awk '$0 != "
+             "\"gfx000\"' | xargs | sed -e 's/ /;/g' | "
+             "tr -d '\n'";
+
   std::array<char, 1024> buffer;
   std::string result;
-  std::unique_ptr<FILE, decltype(&pclose)> pipe(popen(cmd, "r"), pclose);
+  std::unique_ptr<FILE, decltype(&pclose)> pipe(popen(command.c_str(), "r"), pclose);
   if (!pipe) {
     printf("popen() failed!");
     return "";
@@ -108,11 +123,18 @@ std::string TestContext::getCurrentArch() {
     std::vector<std::string> filtered_archs;
     if (visible_devices.size() > 0) {
       for (size_t i = 0; i < visible_devices.size(); i++) {
-        filtered_archs.push_back(archs[visible_devices[i]]);
+        if (visible_devices[i] < archs.size()) {
+          filtered_archs.push_back(archs[visible_devices[i]]);
+        }
       }
     } else {
       filtered_archs = archs;
     }
+
+    if (filtered_archs.empty()) {
+      return "";
+    }
+
     auto first_filtered_arch = filtered_archs[0];
     if (!std::all_of(filtered_archs.begin(), filtered_archs.end(),
                      [&](const std::string& in) { return in == first_filtered_arch; })) {
@@ -132,7 +154,11 @@ std::string TestContext::getCurrentArch() {
 std::string TestContext::getMatchingConfigFile(std::string config_dir) {
   std::string configFileToUse = "";
   if (isLinux() && isAmd()) {
+#if defined(ENABLE_SPIRV)
+    std::string cur_arch = "amdgcnspirv";
+#else
     std::string cur_arch = getCurrentArch();
+#endif
     LogPrintf("The arch present: %s", cur_arch.c_str());
     configFileToUse = config_dir + "/config_" + getConfig().platform + "_" + getConfig().os + "_" +
                       cur_arch + ".json";

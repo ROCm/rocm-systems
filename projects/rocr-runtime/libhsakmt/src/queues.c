@@ -35,6 +35,7 @@
 #include <sys/mman.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <assert.h>
 
 /* 1024 doorbells, 4 or 8 bytes each doorbell depending on ASIC generation */
 #define DOORBELL_SIZE(gfxv)	(((gfxv) >= 0x90000) ? 8 : 4)
@@ -80,8 +81,28 @@ struct process_doorbells {
 	pthread_mutex_t mutex;
 };
 
-static unsigned int num_doorbells;
-static struct process_doorbells *doorbells;
+struct hsa_kfd_queue_context
+{
+	unsigned int num_doorbells;
+	struct process_doorbells *doorbells;
+};
+
+struct hsa_kfd_queue_context *hsakmt_kfdcontext_get_queue_context(HsaKFDContext *ctx)
+{
+	assert(ctx);
+
+	if (ctx->queue_context)
+		return ctx->queue_context;
+
+	ctx->queue_context = calloc(1, sizeof(struct hsa_kfd_queue_context));
+	if (!ctx->queue_context) {
+		pr_err("Alloc memory failed for struct hsa_kfd_queue_context size %zu\n",
+				 sizeof(struct hsa_kfd_queue_context));
+		return NULL;
+	}
+
+	return ctx->queue_context;
+}
 
 uint32_t hsakmt_get_vgpr_size_per_cu(uint32_t gfxv)
 {
@@ -102,38 +123,40 @@ uint32_t hsakmt_get_vgpr_size_per_cu(uint32_t gfxv)
 	return vgpr_size;
 }
 
-HSAKMT_STATUS hsakmt_init_process_doorbells(unsigned int NumNodes)
+HSAKMT_STATUS hsakmt_init_process_doorbells(HsaKFDContext *ctx, unsigned int NumNodes)
 {
 	unsigned int i;
 	HSAKMT_STATUS ret = HSAKMT_STATUS_SUCCESS;
+	struct hsa_kfd_queue_context *queue_ctx = hsakmt_kfdcontext_get_queue_context(ctx);
 
-	/* doorbells[] is accessed using Topology NodeId. This means doorbells[0],
+	/* queue_ctx->doorbells[] is accessed using Topology NodeId. This means doorbells[0],
 	 * which corresponds to CPU only Node, might not be used
 	 */
-	doorbells = malloc(NumNodes * sizeof(struct process_doorbells));
-	if (!doorbells)
+	queue_ctx->doorbells = malloc(NumNodes * sizeof(struct process_doorbells));
+	if (!queue_ctx->doorbells)
 		return HSAKMT_STATUS_NO_MEMORY;
 
 	for (i = 0; i < NumNodes; i++) {
-		doorbells[i].use_gpuvm = false;
-		doorbells[i].size = 0;
-		doorbells[i].mapping = NULL;
-		pthread_mutex_init(&doorbells[i].mutex, NULL);
+		queue_ctx->doorbells[i].use_gpuvm = false;
+		queue_ctx->doorbells[i].size = 0;
+		queue_ctx->doorbells[i].mapping = NULL;
+		pthread_mutex_init(&queue_ctx->doorbells[i].mutex, NULL);
 	}
 
-	num_doorbells = NumNodes;
+	queue_ctx->num_doorbells = NumNodes;
 
 	return ret;
 }
 
-static void get_doorbell_map_info(uint32_t node_id,
+static void get_doorbell_map_info(HsaKFDContext *ctx,
+				  uint32_t node_id,
 				  struct process_doorbells *doorbell)
 {
 	/*
 	 * GPUVM doorbell on Tonga requires a workaround for VM TLB ACTIVE bit
 	 * lookup bug. Remove ASIC check when this is implemented in amdgpu.
 	 */
-	uint32_t gfxv = hsakmt_get_gfxv_by_node_id(node_id);
+	uint32_t gfxv = hsakmt_get_gfxv_by_node_id(ctx, node_id);
 	doorbell->use_gpuvm = (hsakmt_is_dgpu && gfxv != GFX_VERSION_TONGA);
 	doorbell->size = DOORBELLS_PAGE_SIZE(DOORBELL_SIZE(gfxv));
 
@@ -144,94 +167,105 @@ static void get_doorbell_map_info(uint32_t node_id,
 	return;
 }
 
-void hsakmt_destroy_process_doorbells(void)
+void hsakmt_destroy_process_doorbells(HsaKFDContext *ctx)
 {
 	unsigned int i;
+	struct hsa_kfd_queue_context *queue_ctx = hsakmt_kfdcontext_get_queue_context(ctx);
+	struct process_doorbells *doorbells = queue_ctx->doorbells;
 
 	if (!doorbells)
 		return;
 
-	for (i = 0; i < num_doorbells; i++) {
+	for (i = 0; i < queue_ctx->num_doorbells; i++) {
 		if (!doorbells[i].size)
 			continue;
 
 		if (doorbells[i].use_gpuvm) {
-			hsakmt_fmm_unmap_from_gpu(doorbells[i].mapping);
-			hsakmt_fmm_release(doorbells[i].mapping);
+			hsakmt_fmm_unmap_from_gpu(ctx, doorbells[i].mapping);
+			hsakmt_fmm_release(ctx, doorbells[i].mapping);
 		} else
 			munmap(doorbells[i].mapping, doorbells[i].size);
 	}
 
 	free(doorbells);
-	doorbells = NULL;
-	num_doorbells = 0;
+	queue_ctx->doorbells = NULL;
+	queue_ctx->num_doorbells = 0;
 }
 
 /* This is a special funcion that should be called only from the child process
  * after a fork(). This will clear doorbells duplicated from the parent.
  */
-void hsakmt_clear_process_doorbells(void)
+void hsakmt_clear_process_doorbells(HsaKFDContext *ctx)
 {
 	unsigned int i;
+	struct hsa_kfd_queue_context *queue_ctx = hsakmt_kfdcontext_get_queue_context(ctx);
 
-	if (!doorbells)
+	if (!queue_ctx->doorbells)
 		return;
 
-	for (i = 0; i < num_doorbells; i++) {
-		if (!doorbells[i].size)
+	for (i = 0; i < queue_ctx->num_doorbells; i++) {
+		if (!queue_ctx->doorbells[i].size)
 			continue;
 
-		if (!doorbells[i].use_gpuvm)
-			munmap(doorbells[i].mapping, doorbells[i].size);
+		if (!queue_ctx->doorbells[i].use_gpuvm)
+			munmap(queue_ctx->doorbells[i].mapping, queue_ctx->doorbells[i].size);
 	}
 
-	free(doorbells);
-	doorbells = NULL;
-	num_doorbells = 0;
+	free(queue_ctx->doorbells);
+	queue_ctx->doorbells = NULL;
+	queue_ctx->num_doorbells = 0;
 }
 
-static HSAKMT_STATUS map_doorbell_apu(HSAuint32 NodeId, HSAuint32 gpu_id,
+static HSAKMT_STATUS map_doorbell_apu(HsaKFDContext *ctx,
+					  HSAuint32 NodeId, HSAuint32 gpu_id,
 				      HSAuint64 doorbell_mmap_offset)
 {
 	void *ptr;
+	struct hsa_kfd_queue_context *queue_ctx = hsakmt_kfdcontext_get_queue_context(ctx);
 
-	ptr = mmap(0, doorbells[NodeId].size, PROT_READ|PROT_WRITE,
-		   MAP_SHARED, hsakmt_kfd_fd, doorbell_mmap_offset);
+	ptr = mmap(0, queue_ctx->doorbells[NodeId].size, PROT_READ|PROT_WRITE,
+		   MAP_SHARED, ctx->fd, doorbell_mmap_offset);
 
 	if (ptr == MAP_FAILED)
 		return HSAKMT_STATUS_ERROR;
 
-	doorbells[NodeId].mapping = ptr;
+	queue_ctx->doorbells[NodeId].mapping = ptr;
 
 	return HSAKMT_STATUS_SUCCESS;
 }
 
-static HSAKMT_STATUS map_doorbell_dgpu(HSAuint32 NodeId, HSAuint32 gpu_id,
+static HSAKMT_STATUS map_doorbell_dgpu(HsaKFDContext *ctx,
+					   HSAuint32 NodeId, HSAuint32 gpu_id,
 				       HSAuint64 doorbell_mmap_offset)
 {
 	void *ptr;
+	struct hsa_kfd_queue_context *queue_ctx = hsakmt_kfdcontext_get_queue_context(ctx);
 
-	ptr = hsakmt_fmm_allocate_doorbell(gpu_id, doorbells[NodeId].size,
+	ptr = hsakmt_fmm_allocate_doorbell(ctx,
+				gpu_id, queue_ctx->doorbells[NodeId].size,
 				doorbell_mmap_offset);
 
 	if (!ptr)
 		return HSAKMT_STATUS_ERROR;
 
 	/* map for GPU access */
-	if (hsakmt_fmm_map_to_gpu(ptr, doorbells[NodeId].size, NULL)) {
-		hsakmt_fmm_release(ptr);
+	if (hsakmt_fmm_map_to_gpu(ctx, ptr, queue_ctx->doorbells[NodeId].size, NULL)) {
+		hsakmt_fmm_release(ctx, ptr);
 		return HSAKMT_STATUS_ERROR;
 	}
 
-	doorbells[NodeId].mapping = ptr;
+	queue_ctx->doorbells[NodeId].mapping = ptr;
 
 	return HSAKMT_STATUS_SUCCESS;
 }
 
-static HSAKMT_STATUS map_doorbell(HSAuint32 NodeId, HSAuint32 gpu_id,
+static HSAKMT_STATUS map_doorbell(HsaKFDContext *ctx,
+				  HSAuint32 NodeId, HSAuint32 gpu_id,
 				  HSAuint64 doorbell_mmap_offset)
 {
 	HSAKMT_STATUS status = HSAKMT_STATUS_SUCCESS;
+	struct hsa_kfd_queue_context *queue_ctx = hsakmt_kfdcontext_get_queue_context(ctx);
+	struct process_doorbells *doorbells = queue_ctx->doorbells;
 
 	pthread_mutex_lock(&doorbells[NodeId].mutex);
 	if (doorbells[NodeId].size) {
@@ -239,19 +273,19 @@ static HSAKMT_STATUS map_doorbell(HSAuint32 NodeId, HSAuint32 gpu_id,
 		return HSAKMT_STATUS_SUCCESS;
 	}
 
-	get_doorbell_map_info(NodeId, &doorbells[NodeId]);
+	get_doorbell_map_info(ctx, NodeId, &doorbells[NodeId]);
 
 	if (doorbells[NodeId].use_gpuvm) {
-		status = map_doorbell_dgpu(NodeId, gpu_id, doorbell_mmap_offset);
+		status = map_doorbell_dgpu(ctx, NodeId, gpu_id, doorbell_mmap_offset);
 		if (status != HSAKMT_STATUS_SUCCESS) {
 			/* Fall back to the old method if KFD doesn't
 			 * support doorbells in GPUVM
 			 */
 			doorbells[NodeId].use_gpuvm = false;
-			status = map_doorbell_apu(NodeId, gpu_id, doorbell_mmap_offset);
+			status = map_doorbell_apu(ctx, NodeId, gpu_id, doorbell_mmap_offset);
 		}
 	} else
-		status = map_doorbell_apu(NodeId, gpu_id, doorbell_mmap_offset);
+		status = map_doorbell_apu(ctx, NodeId, gpu_id, doorbell_mmap_offset);
 
 	if (status != HSAKMT_STATUS_SUCCESS)
 		doorbells[NodeId].size = 0;
@@ -279,13 +313,13 @@ static void *allocate_exec_aligned_memory_cpu(uint32_t size)
 }
 
 /* The bool return indicate whether the queue needs a context-save-restore area*/
-static bool update_ctx_save_restore_size(uint32_t nodeid, struct queue *q)
+static bool update_ctx_save_restore_size(HsaKFDContext *ctx, uint32_t nodeid, struct queue *q)
 {
 	HsaNodeProperties node;
 
 	if (q->gfxv < GFX_VERSION_CARRIZO)
 		return false;
-	if (hsaKmtGetNodeProperties(nodeid, &node))
+	if (hsaKmtGetNodePropertiesCtx(ctx, nodeid, &node))
 		return false;
 	if (node.NumFComputeCores && node.NumSIMDPerCU) {
 		uint32_t ctl_stack_size, wg_data_size;
@@ -309,14 +343,20 @@ static bool update_ctx_save_restore_size(uint32_t nodeid, struct queue *q)
 		q->debug_memory_size =
 			ALIGN_UP(wave_num * DEBUGGER_BYTES_PER_WAVE, DEBUGGER_BYTES_ALIGN);
 
-		q->ctx_save_restore_size = q->ctl_stack_size
-					+ PAGE_ALIGN_UP(wg_data_size);
+		/* Keep calculating it in case we are using an older kernel, but if we have
+		 * the CtlStackSize and CwsrSize from KFD, use that as the definitive value
+		 */
+		q->ctx_save_restore_size = node.CwsrSize > 0 ? node.CwsrSize :
+					   q->ctl_stack_size + PAGE_ALIGN_UP(wg_data_size);
+		q->ctl_stack_size = node.CtlStackSize > 0 ? node.CtlStackSize : q->ctl_stack_size;
+
 		return true;
 	}
 	return false;
 }
 
-void *hsakmt_allocate_exec_aligned_memory_gpu(uint32_t size, uint32_t align, uint32_t gpu_id,
+void *hsakmt_allocate_exec_aligned_memory_gpu(HsaKFDContext *ctx,
+					   uint32_t size, uint32_t align, uint32_t gpu_id,
 				       uint32_t NodeId, bool nonPaged,
 				       bool DeviceLocal,
 				       bool Uncached)
@@ -337,7 +377,7 @@ void *hsakmt_allocate_exec_aligned_memory_gpu(uint32_t size, uint32_t align, uin
 	size = ALIGN_UP(size, align);
 
 	if (DeviceLocal && !hsakmt_zfb_support)
-		mem = hsakmt_fmm_allocate_device(gpu_id, NodeId, mem, size, 0, flags);
+		mem = hsakmt_fmm_allocate_device(ctx, gpu_id, NodeId, mem, size, 0, flags);
 	else {
 		/* VRAM under ZFB mode should be supported here without any
 		 * additional code
@@ -346,13 +386,13 @@ void *hsakmt_allocate_exec_aligned_memory_gpu(uint32_t size, uint32_t align, uin
 		 * nonPaged=0 system memory allocation uses GTT path
 		 */
 		if (!nonPaged) {
-			cpu_id = hsakmt_get_direct_link_cpu(NodeId);
+			cpu_id = hsakmt_get_direct_link_cpu(ctx, NodeId);
 			if (cpu_id == INVALID_NODEID) {
 				flags.ui32.NoNUMABind = 1;
 				cpu_id = 0;
 			}
 		}
-		mem = hsakmt_fmm_allocate_host(gpu_id, cpu_id, mem, size, 0, flags);
+		mem = hsakmt_fmm_allocate_host(ctx, gpu_id, cpu_id, mem, size, 0, flags);
 	}
 
 	if (!mem) {
@@ -366,35 +406,36 @@ void *hsakmt_allocate_exec_aligned_memory_gpu(uint32_t size, uint32_t align, uin
 		HsaMemMapFlags map_flags = {0};
 		HSAKMT_STATUS result;
 
-		result = hsaKmtMapMemoryToGPUNodes(mem, size, &gpu_va, map_flags, 1, nodes_array);
+		result = hsaKmtMapMemoryToGPUNodesCtx(ctx, mem, size, &gpu_va, map_flags, 1, nodes_array);
 		if (result != HSAKMT_STATUS_SUCCESS) {
-			hsaKmtFreeMemory(mem, size);
+			hsaKmtFreeMemoryCtx(ctx, mem, size);
 			return NULL;
 		}
 
 		return mem;
 	}
 
-	if (hsaKmtMapMemoryToGPU(mem, size, &gpu_va) != HSAKMT_STATUS_SUCCESS) {
-		hsaKmtFreeMemory(mem, size);
+	if (hsaKmtMapMemoryToGPUCtx(ctx, mem, size, &gpu_va) != HSAKMT_STATUS_SUCCESS) {
+		hsaKmtFreeMemoryCtx(ctx, mem, size);
 		return NULL;
 	}
 
 	return mem;
 }
 
-void hsakmt_free_exec_aligned_memory_gpu(void *addr, uint32_t size, uint32_t align)
+void hsakmt_free_exec_aligned_memory_gpu(HsaKFDContext *ctx, void *addr, uint32_t size, uint32_t align)
 {
 	size = ALIGN_UP(size, align);
 
-	if (hsaKmtUnmapMemoryToGPU(addr) == HSAKMT_STATUS_SUCCESS)
-		hsaKmtFreeMemory(addr, size);
+	if (hsaKmtUnmapMemoryToGPUCtx(ctx, addr) == HSAKMT_STATUS_SUCCESS)
+		hsaKmtFreeMemoryCtx(ctx, addr, size);
 }
 
 /*
  * Allocates memory aligned to sysconf(_SC_PAGESIZE)
  */
-static void *allocate_exec_aligned_memory(uint32_t size,
+static void *allocate_exec_aligned_memory(HsaKFDContext *ctx,
+					  uint32_t size,
 					  bool use_ats,
 					  uint32_t gpu_id,
 					  uint32_t NodeId,
@@ -403,22 +444,25 @@ static void *allocate_exec_aligned_memory(uint32_t size,
 					  bool Uncached)
 {
 	if (!use_ats)
-		return hsakmt_allocate_exec_aligned_memory_gpu(size, PAGE_SIZE, gpu_id, NodeId,
+		return hsakmt_allocate_exec_aligned_memory_gpu(ctx,
+							size, PAGE_SIZE, gpu_id, NodeId,
 							nonPaged, DeviceLocal,
 							Uncached);
 	return allocate_exec_aligned_memory_cpu(size);
 }
 
-static void free_exec_aligned_memory(void *addr, uint32_t size, uint32_t align,
+static void free_exec_aligned_memory(HsaKFDContext *ctx,
+				     void *addr, uint32_t size, uint32_t align,
 				     bool use_ats)
 {
 	if (!use_ats)
-		hsakmt_free_exec_aligned_memory_gpu(addr, size, align);
+		hsakmt_free_exec_aligned_memory_gpu(ctx, addr, size, align);
 	else
 		munmap(addr, size);
 }
 
-static HSAKMT_STATUS register_svm_range(void *mem, uint32_t size,
+static HSAKMT_STATUS register_svm_range(HsaKFDContext *ctx,
+				void *mem, uint32_t size,
 				uint32_t gpuNode, uint32_t prefetchNode,
 				uint32_t preferredNode, bool alwaysMapped)
 {
@@ -451,23 +495,23 @@ static HSAKMT_STATUS register_svm_range(void *mem, uint32_t size,
 	attrs[5].type = HSA_SVM_ATTR_GRANULARITY;
 	attrs[5].value = 0xFF;
 
-	return hsaKmtSVMSetAttr(mem, size, nattr, attrs);
+	return hsaKmtSVMSetAttrCtx(ctx, mem, size, nattr, attrs);
 }
 
-static void free_queue(struct queue *q)
+static void free_queue(HsaKFDContext *ctx, struct queue *q)
 {
 	if (q->eop_buffer)
-		free_exec_aligned_memory(q->eop_buffer,
+		free_exec_aligned_memory(ctx, q->eop_buffer,
 					 q->eop_buffer_size,
 					 PAGE_SIZE, q->use_ats);
 	if (q->unified_ctx_save_restore)
 		munmap(q->ctx_save_restore, q->total_mem_alloc_size);
 	else if (q->ctx_save_restore)
-		free_exec_aligned_memory(q->ctx_save_restore,
+		free_exec_aligned_memory(ctx, q->ctx_save_restore,
 					 q->total_mem_alloc_size,
 					 PAGE_SIZE, q->use_ats);
 
-	free_exec_aligned_memory((void *)q, sizeof(*q), PAGE_SIZE, q->use_ats);
+	free_exec_aligned_memory(ctx, (void *)q, sizeof(*q), PAGE_SIZE, q->use_ats);
 }
 
 static inline void fill_cwsr_header(struct queue *q, void *addr,
@@ -488,7 +532,8 @@ static inline void fill_cwsr_header(struct queue *q, void *addr,
 	}
 }
 
-static int handle_concrete_asic(struct queue *q,
+static int handle_concrete_asic(HsaKFDContext *ctx,
+				struct queue *q,
 				struct kfd_ioctl_create_queue_args *args,
 				uint32_t gpu_id,
 				uint32_t NodeId,
@@ -503,7 +548,8 @@ static int handle_concrete_asic(struct queue *q,
 
 	if (q->eop_buffer_size > 0) {
 		pr_info("Allocating VRAM for EOP\n");
-		q->eop_buffer = allocate_exec_aligned_memory(q->eop_buffer_size,
+		q->eop_buffer = allocate_exec_aligned_memory(ctx,
+				q->eop_buffer_size,
 				q->use_ats, gpu_id,
 				NodeId, true, true, /* Unused for VRAM */false);
 		if (!q->eop_buffer)
@@ -513,12 +559,12 @@ static int handle_concrete_asic(struct queue *q,
 		args->eop_buffer_size = q->eop_buffer_size;
 	}
 
-	ret = update_ctx_save_restore_size(NodeId, q);
+	ret = update_ctx_save_restore_size(ctx, NodeId, q);
 
 	if (ret) {
 		HsaNodeProperties node;
 
-		if (hsaKmtGetNodeProperties(NodeId, &node))
+		if (hsaKmtGetNodePropertiesCtx(ctx, NodeId, &node))
 			return HSAKMT_STATUS_ERROR;
 
 		args->ctx_save_restore_size = q->ctx_save_restore_size;
@@ -555,7 +601,7 @@ static int handle_concrete_asic(struct queue *q,
 
 				fill_cwsr_header(q, addr, Event, ErrPayload, node.NumXcc);
 
-				HSAKMT_STATUS r = register_svm_range(addr, size,
+				HSAKMT_STATUS r = register_svm_range(ctx, addr, size,
 						NodeId, NodeId, 0, true);
 
 				if (r == HSAKMT_STATUS_SUCCESS) {
@@ -568,7 +614,7 @@ static int handle_concrete_asic(struct queue *q,
 		}
 
 		if (!q->unified_ctx_save_restore) {
-			q->ctx_save_restore = allocate_exec_aligned_memory(
+			q->ctx_save_restore = allocate_exec_aligned_memory(ctx,
 							q->total_mem_alloc_size,
 							q->use_ats, gpu_id, NodeId,
 							false, false, false);
@@ -591,24 +637,26 @@ static int handle_concrete_asic(struct queue *q,
  */
 static uint32_t priority_map[] = {0, 3, 5, 7, 9, 11, 15};
 
-HSAKMT_STATUS HSAKMTAPI hsaKmtCreateQueue(HSAuint32 NodeId,
-					  HSA_QUEUE_TYPE Type,
-					  HSAuint32 QueuePercentage,
-					  HSA_QUEUE_PRIORITY Priority,
-					  void *QueueAddress,
-					  HSAuint64 QueueSizeInBytes,
-					  HsaEvent *Event,
-					  HsaQueueResource *QueueResource)
+HSAKMT_STATUS HSAKMTAPI hsaKmtCreateQueueCtx(HsaKFDContext *ctx,
+						 HSAuint32 NodeId,
+						 HSA_QUEUE_TYPE Type,
+						 HSAuint32 QueuePercentage,
+						 HSA_QUEUE_PRIORITY Priority,
+						 void *QueueAddress,
+						 HSAuint64 QueueSizeInBytes,
+						 HsaEvent *Event,
+						 HsaQueueResource *QueueResource)
 {
 	if (Type == HSA_QUEUE_SDMA_BY_ENG_ID)
 		return HSAKMT_STATUS_ERROR;
 
-	return hsaKmtCreateQueueExt(NodeId, Type, QueuePercentage, Priority, 0,
+	return hsaKmtCreateQueueExtCtx(ctx, NodeId, Type, QueuePercentage, Priority, 0,
 				    QueueAddress, QueueSizeInBytes, Event,
 				    QueueResource);
 }
 
-HSAKMT_STATUS HSAKMTAPI hsaKmtCreateQueueExt(HSAuint32 NodeId,
+HSAKMT_STATUS HSAKMTAPI hsaKmtCreateQueueExtCtx(HsaKFDContext *ctx,
+						 HSAuint32 NodeId,
 					     HSA_QUEUE_TYPE Type,
 					     HSAuint32 QueuePercentage,
 					     HSA_QUEUE_PRIORITY Priority,
@@ -628,22 +676,24 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCreateQueueExt(HSAuint32 NodeId,
 
 	CHECK_KFD_OPEN();
 
+	struct hsa_kfd_queue_context *queue_ctx = hsakmt_kfdcontext_get_queue_context(ctx);
+
 	if (Priority < HSA_QUEUE_PRIORITY_MINIMUM ||
 		Priority > HSA_QUEUE_PRIORITY_MAXIMUM)
 		return HSAKMT_STATUS_INVALID_PARAMETER;
 
-	result = hsakmt_validate_nodeid(NodeId, &gpu_id);
+	result = hsakmt_validate_nodeid(ctx, NodeId, &gpu_id);
 	if (result != HSAKMT_STATUS_SUCCESS)
 		return result;
 
-	struct queue *q = allocate_exec_aligned_memory(sizeof(*q),
+	struct queue *q = allocate_exec_aligned_memory(ctx, sizeof(*q),
 			false, gpu_id, NodeId, true, false, true);
 	if (!q)
 		return HSAKMT_STATUS_NO_MEMORY;
 
 	memset(q, 0, sizeof(*q));
 
-	q->gfxv = hsakmt_get_gfxv_by_node_id(NodeId);
+	q->gfxv = hsakmt_get_gfxv_by_node_id(ctx, NodeId);
 	q->use_ats = false;
 
 	if (q->gfxv == GFX_VERSION_TONGA)
@@ -656,7 +706,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCreateQueueExt(HSAuint32 NodeId,
 	/* By default, CUs are all turned on. Initialize cu_mask to '1
 	 * for all CU bits.
 	 */
-	if (hsaKmtGetNodeProperties(NodeId, &props))
+	if (hsaKmtGetNodePropertiesCtx(ctx, NodeId, &props))
 		q->cu_mask_count = 0;
 	else {
 		cu_num = props.NumFComputeCores / props.NumSIMDPerCU;
@@ -695,9 +745,9 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCreateQueueExt(HSAuint32 NodeId,
 		QueueResource->QueueWptrValue = (uintptr_t)&q->wptr;
 	}
 
-	err = handle_concrete_asic(q, &args, gpu_id, NodeId, Event, QueueResource->ErrorReason);
+	err = handle_concrete_asic(ctx, q, &args, gpu_id, NodeId, Event, QueueResource->ErrorReason);
 	if (err != HSAKMT_STATUS_SUCCESS) {
-		free_queue(q);
+		free_queue(ctx, q);
 		return err;
 	}
 
@@ -709,10 +759,10 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCreateQueueExt(HSAuint32 NodeId,
 	args.queue_priority = priority_map[Priority+3];
 	args.sdma_engine_id = SdmaEngineId;
 
-	err = hsakmt_ioctl(hsakmt_kfd_fd, AMDKFD_IOC_CREATE_QUEUE, &args);
+	err = hsakmt_ioctl(ctx->fd, AMDKFD_IOC_CREATE_QUEUE, &args);
 
 	if (err == -1) {
-		free_queue(q);
+		free_queue(ctx, q);
 		return HSAKMT_STATUS_ERROR;
 	}
 
@@ -737,20 +787,21 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCreateQueueExt(HSAuint32 NodeId,
 		doorbell_offset = q->queue_id * DOORBELL_SIZE(q->gfxv);
 	}
 
-	err = map_doorbell(NodeId, gpu_id, doorbell_mmap_offset);
+	err = map_doorbell(ctx, NodeId, gpu_id, doorbell_mmap_offset);
 	if (err != HSAKMT_STATUS_SUCCESS) {
-		hsaKmtDestroyQueue(q->queue_id);
+		hsaKmtDestroyQueueCtx(ctx, q->queue_id);
 		return HSAKMT_STATUS_ERROR;
 	}
 
 	QueueResource->QueueId = PORT_VPTR_TO_UINT64(q);
-	QueueResource->Queue_DoorBell = VOID_PTR_ADD(doorbells[NodeId].mapping,
+	QueueResource->Queue_DoorBell = VOID_PTR_ADD(queue_ctx->doorbells[NodeId].mapping,
 						     doorbell_offset);
 
 	return HSAKMT_STATUS_SUCCESS;
 }
 
-HSAKMT_STATUS HSAKMTAPI hsaKmtUpdateQueue(HSA_QUEUEID QueueId,
+HSAKMT_STATUS HSAKMTAPI hsaKmtUpdateQueueCtx(HsaKFDContext *ctx,
+					  HSA_QUEUEID QueueId,
 					  HSAuint32 QueuePercentage,
 					  HSA_QUEUE_PRIORITY Priority,
 					  void *QueueAddress,
@@ -774,7 +825,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtUpdateQueue(HSA_QUEUEID QueueId,
 	arg.queue_percentage = QueuePercentage;
 	arg.queue_priority = priority_map[Priority+3];
 
-	int err = hsakmt_ioctl(hsakmt_kfd_fd, AMDKFD_IOC_UPDATE_QUEUE, &arg);
+	int err = hsakmt_ioctl(ctx->fd, AMDKFD_IOC_UPDATE_QUEUE, &arg);
 
 	if (err == -1)
 		return HSAKMT_STATUS_ERROR;
@@ -782,7 +833,8 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtUpdateQueue(HSA_QUEUEID QueueId,
 	return HSAKMT_STATUS_SUCCESS;
 }
 
-HSAKMT_STATUS HSAKMTAPI hsaKmtDestroyQueue(HSA_QUEUEID QueueId)
+HSAKMT_STATUS HSAKMTAPI hsaKmtDestroyQueueCtx(HsaKFDContext *ctx,
+						 HSA_QUEUEID QueueId)
 {
 	CHECK_KFD_OPEN();
 
@@ -794,20 +846,21 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtDestroyQueue(HSA_QUEUEID QueueId)
 
 	args.queue_id = q->queue_id;
 
-	int err = hsakmt_ioctl(hsakmt_kfd_fd, AMDKFD_IOC_DESTROY_QUEUE, &args);
+	int err = hsakmt_ioctl(ctx->fd, AMDKFD_IOC_DESTROY_QUEUE, &args);
 
 	if (err == -1) {
 		pr_err("Failed to destroy queue: %s\n", strerror(errno));
 		return HSAKMT_STATUS_ERROR;
 	}
 
-	free_queue(q);
+	free_queue(ctx, q);
 	return HSAKMT_STATUS_SUCCESS;
 }
 
-HSAKMT_STATUS HSAKMTAPI hsaKmtSetQueueCUMask(HSA_QUEUEID QueueId,
-					     HSAuint32 CUMaskCount,
-					     HSAuint32 *QueueCUMask)
+HSAKMT_STATUS HSAKMTAPI hsaKmtSetQueueCUMaskCtx(HsaKFDContext *ctx,
+						 HSA_QUEUEID QueueId,
+						 HSAuint32 CUMaskCount,
+						 HSAuint32 *QueueCUMask)
 {
 	struct queue *q = PORT_UINT64_TO_VPTR(QueueId);
 	struct kfd_ioctl_set_cu_mask_args args = {0};
@@ -821,7 +874,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtSetQueueCUMask(HSA_QUEUEID QueueId,
 	args.num_cu_mask = CUMaskCount;
 	args.cu_mask_ptr = (uintptr_t)QueueCUMask;
 
-	int err = hsakmt_ioctl(hsakmt_kfd_fd, AMDKFD_IOC_SET_CU_MASK, &args);
+	int err = hsakmt_ioctl(ctx->fd, AMDKFD_IOC_SET_CU_MASK, &args);
 
 	if (err == -1)
 		return HSAKMT_STATUS_ERROR;
@@ -832,12 +885,9 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtSetQueueCUMask(HSA_QUEUEID QueueId,
 	return HSAKMT_STATUS_SUCCESS;
 }
 
-HSAKMT_STATUS
-HSAKMTAPI
-hsaKmtGetQueueInfo(
-	HSA_QUEUEID QueueId,
-	HsaQueueInfo *QueueInfo
-)
+HSAKMT_STATUS HSAKMTAPI hsaKmtGetQueueInfoCtx(HsaKFDContext *ctx,
+						 HSA_QUEUEID QueueId,
+						 HsaQueueInfo *QueueInfo)
 {
 	struct queue *q = PORT_UINT64_TO_VPTR(QueueId);
 	struct kfd_ioctl_get_queue_wave_state_args args = {0};
@@ -853,7 +903,7 @@ hsaKmtGetQueueInfo(
 	args.queue_id = q->queue_id;
 	args.ctl_stack_address = (uintptr_t)q->ctx_save_restore;
 
-	if (hsakmt_ioctl(hsakmt_kfd_fd, AMDKFD_IOC_GET_QUEUE_WAVE_STATE, &args) < 0)
+	if (hsakmt_ioctl(ctx->fd, AMDKFD_IOC_GET_QUEUE_WAVE_STATE, &args) < 0)
 		return HSAKMT_STATUS_ERROR;
 
 	QueueInfo->ControlStackTop = (void *)(args.ctl_stack_address +
@@ -871,7 +921,8 @@ hsaKmtGetQueueInfo(
 	return HSAKMT_STATUS_SUCCESS;
 }
 
-HSAKMT_STATUS HSAKMTAPI hsaKmtSetTrapHandler(HSAuint32 Node,
+HSAKMT_STATUS HSAKMTAPI hsaKmtSetTrapHandlerCtx(HsaKFDContext *ctx,
+						 HSAuint32 Node,
 					     void *TrapHandlerBaseAddress,
 					     HSAuint64 TrapHandlerSizeInBytes,
 					     void *TrapBufferBaseAddress,
@@ -883,7 +934,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtSetTrapHandler(HSAuint32 Node,
 
 	CHECK_KFD_OPEN();
 
-	result = hsakmt_validate_nodeid(Node, &gpu_id);
+	result = hsakmt_validate_nodeid(ctx, Node, &gpu_id);
 	if (result != HSAKMT_STATUS_SUCCESS)
 		return result;
 
@@ -891,7 +942,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtSetTrapHandler(HSAuint32 Node,
 	args.tba_addr = (uintptr_t)TrapHandlerBaseAddress;
 	args.tma_addr = (uintptr_t)TrapBufferBaseAddress;
 
-	int err = hsakmt_ioctl(hsakmt_kfd_fd, AMDKFD_IOC_SET_TRAP_HANDLER, &args);
+	int err = hsakmt_ioctl(ctx->fd, AMDKFD_IOC_SET_TRAP_HANDLER, &args);
 
 	return (err == -1) ? HSAKMT_STATUS_ERROR : HSAKMT_STATUS_SUCCESS;
 }
@@ -921,12 +972,10 @@ uint32_t *hsakmt_convert_queue_ids(HSAuint32 NumQueues, HSA_QUEUEID *Queues)
 	return queue_ids_ptr;
 }
 
-HSAKMT_STATUS
-HSAKMTAPI
-hsaKmtAllocQueueGWS(
-                HSA_QUEUEID        QueueId,
-                HSAuint32          nGWS,
-                HSAuint32          *firstGWS)
+HSAKMT_STATUS HSAKMTAPI hsaKmtAllocQueueGWSCtx(HsaKFDContext *ctx,
+						 HSA_QUEUEID QueueId,
+						 HSAuint32 nGWS,
+						 HSAuint32 *firstGWS)
 {
 	struct kfd_ioctl_alloc_queue_gws_args args = {0};
 	struct queue *q = PORT_UINT64_TO_VPTR(QueueId);
@@ -936,7 +985,7 @@ hsaKmtAllocQueueGWS(
 	args.queue_id = (HSAuint32)q->queue_id;
 	args.num_gws = nGWS;
 
-	int err = hsakmt_ioctl(hsakmt_kfd_fd, AMDKFD_IOC_ALLOC_QUEUE_GWS, &args);
+	int err = hsakmt_ioctl(ctx->fd, AMDKFD_IOC_ALLOC_QUEUE_GWS, &args);
 
 	if (!err && firstGWS)
 		*firstGWS = args.first_gws;
@@ -951,4 +1000,86 @@ hsaKmtAllocQueueGWS(
 		return HSAKMT_STATUS_NOT_SUPPORTED;
 	else
 		return HSAKMT_STATUS_ERROR;
+}
+
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtCreateQueue(HSAuint32 NodeId,
+						 HSA_QUEUE_TYPE Type,
+						 HSAuint32 QueuePercentage,
+						 HSA_QUEUE_PRIORITY Priority,
+						 void *QueueAddress,
+						 HSAuint64 QueueSizeInBytes,
+						 HsaEvent *Event,
+						 HsaQueueResource *QueueResource)
+{
+	if (Type == HSA_QUEUE_SDMA_BY_ENG_ID)
+		return HSAKMT_STATUS_ERROR;
+
+	return hsaKmtCreateQueueExt(NodeId, Type, QueuePercentage, Priority, 0,
+				    QueueAddress, QueueSizeInBytes, Event,
+				    QueueResource);
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtCreateQueueExt(HSAuint32 NodeId,
+					     HSA_QUEUE_TYPE Type,
+					     HSAuint32 QueuePercentage,
+					     HSA_QUEUE_PRIORITY Priority,
+					     HSAuint32 SdmaEngineId,
+					     void *QueueAddress,
+					     HSAuint64 QueueSizeInBytes,
+					     HsaEvent *Event,
+					     HsaQueueResource *QueueResource)
+{
+
+	return hsaKmtCreateQueueExtCtx(&hsakmt_primary_kfd_ctx, NodeId, Type,
+					QueuePercentage, Priority, SdmaEngineId, QueueAddress,
+					QueueSizeInBytes, Event, QueueResource);
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtUpdateQueue(HSA_QUEUEID QueueId,
+						 HSAuint32 QueuePercentage,
+						 HSA_QUEUE_PRIORITY Priority,
+						 void *QueueAddress,
+						 HSAuint64 QueueSize,
+						 HsaEvent *Event)
+{
+	return hsaKmtUpdateQueueCtx(&hsakmt_primary_kfd_ctx, QueueId, QueuePercentage,
+					Priority, QueueAddress, QueueSize, Event);
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtDestroyQueue(HSA_QUEUEID QueueId)
+{
+	return hsaKmtDestroyQueueCtx(&hsakmt_primary_kfd_ctx, QueueId);
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtSetQueueCUMask(HSA_QUEUEID QueueId,
+						 HSAuint32 CUMaskCount,
+						 HSAuint32 *QueueCUMask)
+{
+	return hsaKmtSetQueueCUMaskCtx(&hsakmt_primary_kfd_ctx, QueueId, CUMaskCount, QueueCUMask);
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtGetQueueInfo(
+						 HSA_QUEUEID QueueId,
+						 HsaQueueInfo *QueueInfo)
+{
+	return hsaKmtGetQueueInfoCtx(&hsakmt_primary_kfd_ctx, QueueId, QueueInfo);
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtSetTrapHandler(HSAuint32 Node,
+						 void *TrapHandlerBaseAddress,
+						 HSAuint64 TrapHandlerSizeInBytes,
+						 void *TrapBufferBaseAddress,
+						 HSAuint64 TrapBufferSizeInBytes)
+{
+	return hsaKmtSetTrapHandlerCtx(&hsakmt_primary_kfd_ctx, Node,
+					TrapHandlerBaseAddress, TrapHandlerSizeInBytes,
+					TrapBufferBaseAddress, TrapBufferSizeInBytes);
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtAllocQueueGWS(HSA_QUEUEID QueueId,
+						 HSAuint32 nGWS,
+						 HSAuint32 *firstGWS)
+{
+	return hsaKmtAllocQueueGWSCtx(&hsakmt_primary_kfd_ctx, QueueId, nGWS, firstGWS);
 }

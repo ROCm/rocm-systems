@@ -58,8 +58,6 @@ Settings::Settings() {
 
   hostMemDirectAccess_ = HostMemDisable;
 
-  libSelector_ = amd::LibraryUndefined;
-
   // By default use host blit
   blitEngine_ = BlitEngineHost;
   pinnedXferSize_ = GPU_PINNED_XFER_SIZE * Mi;
@@ -133,7 +131,7 @@ Settings::Settings() {
                                                           : HIP_FORCE_DEV_KERNARG;
 
   limit_blit_wg_ = 16;
-  DEBUG_CLR_GRAPH_PACKET_CAPTURE = false;  // disable graph performance optimizations for PAL
+  DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING = 0;  // disable graph performance optimizations for PAL
 }
 
 bool Settings::create(const Pal::DeviceProperties& palProp,
@@ -168,6 +166,8 @@ bool Settings::create(const Pal::DeviceProperties& palProp,
     // Fall through for Navi2x ...
     case Pal::AsicRevision::StrixHalo:
     case Pal::AsicRevision::Strix1:
+    case Pal::AsicRevision::Krackan1:
+    case Pal::AsicRevision::Krackan2:
     case Pal::AsicRevision::Phoenix1:
     case Pal::AsicRevision::Phoenix2:
     case Pal::AsicRevision::HawkPoint1:
@@ -213,7 +213,6 @@ bool Settings::create(const Pal::DeviceProperties& palProp,
       // L1 cache size is 16KB
       cacheSize_ = 16 * Ki;
 
-      libSelector_ = amd::GPU_Library_CI;
       if (LP64_SWITCH(false, true)) {
         oclVersion_ =
             !reportAsOCL12Device ? XCONCAT(OpenCL, XCONCAT(OPENCL_MAJOR, OPENCL_MINOR)) : OpenCL12;
@@ -347,6 +346,12 @@ bool Settings::create(const Pal::DeviceProperties& palProp,
 #if !defined(_LP64)
     resourceCacheSize_ = std::min(resourceCacheSize_, 1 * Gi);
 #endif
+  }
+  uint64_t resourceCacheCap = static_cast<uint64_t>(GPU_MAX_RESOURCE_CACHE_SIZE) * Mi;
+  if (resourceCacheCap < static_cast<uint64_t>(resourceCacheSize_)) {
+    // In 32 bit build, if the above is true, resourceCacheCap is smaller than
+    // 32 bit variable resourceCacheSize_, truncation doesn't happen in the following assignment.
+    resourceCacheSize_ = static_cast<size_t>(resourceCacheCap);
   }
 
   // If is Rebar, override prepinned memory size.

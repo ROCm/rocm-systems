@@ -127,29 +127,29 @@ PerfettoSession::~PerfettoSession()
     auto filename = std::string{"results"};
     auto ofs      = tool::get_output_stream(config, filename, ".pftrace", std::ios::binary);
 
-    auto amount_read = std::atomic<size_t>{0};
-    auto is_done     = std::promise<void>{};
-    auto _mtx        = std::mutex{};
-    auto _reader     = [&ofs, &_mtx, &is_done, &amount_read](
-                       ::perfetto::TracingSession::ReadTraceCallbackArgs _args) {
-        auto _lk = std::unique_lock<std::mutex>{_mtx};
-        if(_args.data && _args.size > 0)
-        {
-            ROCP_TRACE << "Writing " << _args.size << " B to trace...";
-            // Write the trace data into file
-            ofs.stream->write(_args.data, _args.size);
-            amount_read += _args.size;
-        }
-        ROCP_INFO_IF(!_args.has_more && amount_read > 0)
-            << "Wrote " << amount_read << " B to perfetto trace file";
-        if(!_args.has_more) is_done.set_value();
-    };
-
+    // NOTE: These variables must be inside the loop to avoid a TSAN race condition.
+    // If is_done is declared outside and reassigned each iteration, the promise's internal
+    // mutex can be destroyed while the callback thread is still unlocking it after set_value().
     for(size_t i = 0; i < 2; ++i)
     {
         ROCP_TRACE << "Reading trace...";
-        amount_read = 0;
-        is_done     = std::promise<void>{};
+        auto amount_read = std::atomic<size_t>{0};
+        auto is_done     = std::promise<void>{};
+        auto _mtx        = std::mutex{};
+        auto _reader     = [&ofs, &_mtx, &is_done, &amount_read](
+                           ::perfetto::TracingSession::ReadTraceCallbackArgs _args) {
+            auto _lk = std::unique_lock<std::mutex>{_mtx};
+            if(_args.data && _args.size > 0)
+            {
+                ROCP_TRACE << "Writing " << _args.size << " B to trace...";
+                // Write the trace data into file
+                ofs.stream->write(_args.data, _args.size);
+                amount_read += _args.size;
+            }
+            ROCP_INFO_IF(!_args.has_more && amount_read > 0)
+                << "Wrote " << amount_read << " B to perfetto trace file";
+            if(!_args.has_more) is_done.set_value();
+        };
         tracing_session->ReadTrace(_reader);
         is_done.get_future().wait();
     }
@@ -517,10 +517,126 @@ write_perfetto(
         for(auto ditr : kernel_dispatch_gen)
         {
             auto gen = kernel_dispatch_gen.get(ditr);
-            for(auto it = begin(gen); it != end(gen); ++it)
-            {
-                auto& current = *it;
 
+            // Temporary fix until timestamp issues are resolved:
+            // Kernel dispatches executing on the same agent/queue/stream may have overlapping
+            // timestamps due to firmware reporting inaccuracies. Perfetto requires non-overlapping
+            // time slices on the same track for proper visualization.
+            // In the initial fix, the timestamps were set halfway between the ending timestamp and
+            // starting timestamp of overlapping kernel dispatches. In cases when one slice was
+            // completely overlapped by another one, this halfway point could fall before the
+            // beginning of the first slice or after the ending of the second one, making the
+            // duration of the slice negative. In the new fix, the halfway point is placed between
+            // the midpoints of the two overlapping slices.
+            {
+                struct kernel_dispatch_group_index
+                {
+                    uint64_t agent_absolute_index = 0;
+                    uint64_t stream_id            = 0;
+                    uint64_t queue_id             = 0;
+
+                    bool operator<(const kernel_dispatch_group_index& other) const
+                    {
+                        if(agent_absolute_index != other.agent_absolute_index)
+                            return agent_absolute_index < other.agent_absolute_index;
+
+                        if(queue_id != other.queue_id) return queue_id < other.queue_id;
+
+                        return stream_id < other.stream_id;
+                    }
+                };
+
+                struct kernel_dispatch_data
+                {
+                    std::vector<types::kernel_dispatch>::iterator sample;
+                    rocprofiler_timestamp_t                       timestamp;
+                };
+
+                std::map<kernel_dispatch_group_index, std::vector<kernel_dispatch_data>>
+                    kernel_groups;
+
+                // The visualization problem only happens for overlapping dispatches on the same
+                // agent/queue/stream. Separate all dispatches into groups based on their execution
+                // context.
+                for(auto it = begin(gen); it != end(gen); ++it)
+                {
+                    kernel_dispatch_group_index group_index;
+                    group_index.agent_absolute_index = it->agent_abs_index;
+                    if(ocfg.group_by_queue)
+                        group_index.queue_id = it->queue_id;
+                    else
+                        group_index.stream_id = it->stream_id;
+
+                    // Define each dispatch by the middle timestamp to keep their relative order
+                    // correct.
+                    kernel_groups[group_index].push_back({it, (it->start + it->end) / 2});
+                }
+
+                for(auto& kernel_group : kernel_groups)
+                {
+                    // Sort dispatches within the group by timestamp to ensure proper temporal
+                    // ordering.
+                    auto& group_data = kernel_group.second;
+                    std::sort(begin(group_data),
+                              end(group_data),
+                              [&](const kernel_dispatch_data& a, const kernel_dispatch_data& b) {
+                                  return a.timestamp < b.timestamp;
+                              });
+
+                    // Adjust end and start timestamps of consecutive dispatches to remove overlaps.
+                    for(auto sample_it = group_data.begin(); sample_it != group_data.end() - 1;
+                        ++sample_it)
+                    {
+                        auto next_sample_it = std::next(sample_it);
+
+                        auto current_it = sample_it->sample;
+                        auto next_it    = next_sample_it->sample;
+
+                        // Skip overlap handling if there is no overlap
+                        if(next_it->start >= current_it->end) continue;
+
+                        auto current_midpoint = sample_it->timestamp;
+                        auto next_midpoint    = next_sample_it->timestamp;
+
+                        auto current_mid_to_end_duration = current_it->end - current_midpoint;
+                        auto next_start_to_mid_duration  = next_midpoint - next_it->start;
+                        auto total_span =
+                            current_mid_to_end_duration +
+                            next_start_to_mid_duration;  // Total duration to redistribute
+                        auto max_span =
+                            next_midpoint - current_midpoint;  // Available space between midpoints
+
+                        // Preserve the proportions of each dispatch within the overlapped region to
+                        // minimize the timing error.
+                        double scale_factor =
+                            (total_span > 0) ? static_cast<double>(max_span) / total_span : 0.0;
+
+                        auto new_current_end =
+                            current_midpoint + static_cast<rocprofiler_timestamp_t>(
+                                                   current_mid_to_end_duration * scale_factor);
+
+                        auto new_next_start =
+                            next_midpoint - static_cast<rocprofiler_timestamp_t>(
+                                                next_start_to_mid_duration * scale_factor);
+
+                        // Report changed timestamps to ROCP INFO
+                        ROCP_INFO << fmt::format(
+                            "Kernel ending timestamp changed from {} ns to {} ns "
+                            "following kernel starting timestamp changed from {} ns to {} ns "
+                            "due to firmware timestamp error.",
+                            current_it->end,
+                            new_current_end,
+                            next_it->start,
+                            new_next_start);
+
+                        current_it->end = new_current_end;
+                        next_it->start  = new_next_start;
+                    }
+                }
+            }
+
+            for(auto& current : gen)
+            {
                 ::perfetto::Track* _track    = nullptr;
                 auto               agent_id  = current.agent_abs_index;
                 auto               queue_id  = rocprofiler_queue_id_t{.handle = current.queue_id};
@@ -532,32 +648,6 @@ write_perfetto(
                 else
                 {
                     _track = &stream_tracks.at(stream_id);
-                }
-
-                // Temporary fix until timestamp issues are resolved: Set timestamps to be
-                // halfway between ending timestamp and starting timestamp of overlapping
-                // kernel dispatches. Perfetto displays slices incorrectly if overlapping
-                // slices on the same track are not completely enveloped.
-                auto next = std::next(it);
-                if(next != end(gen) && next->agent_abs_index == it->agent_abs_index &&
-                   ((ocfg.group_by_queue && next->queue_id == it->queue_id) ||
-                    (!ocfg.group_by_queue && next->stream_id == it->stream_id)) &&
-                   next->start < it->end)
-                {
-                    auto start = next->start;
-                    auto end   = it->end;
-                    auto mid   = start + (end - start) / 2;
-                    // Report changed timestamps to ROCP INFO
-                    ROCP_INFO << fmt::format(
-                        "Kernel ending timestamp increased by {} ns to {} ns with "
-                        "following kernel starting timestamp decreased by {} ns to {} ns "
-                        "due to firmware timestamp error.",
-                        (it->end - mid),
-                        mid,
-                        (mid - next->start),
-                        mid);
-                    it->end     = mid;
-                    next->start = mid;
                 }
 
                 auto agent_index = agent_data.at(current.agent_abs_index).second;

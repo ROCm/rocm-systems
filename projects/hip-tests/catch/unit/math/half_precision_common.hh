@@ -34,7 +34,7 @@ THE SOFTWARE.
     const auto tid = cg::this_grid().thread_rank();                                                \
     const auto stride = cg::this_grid().size();                                                    \
                                                                                                    \
-    for (auto i = tid; i < num_xs; i += stride) {                                                  \
+    for (size_t i = tid; i < num_xs; i += stride) {                                                \
       ys[i] = func_name(xs[i]);                                                                    \
     }                                                                                              \
   }
@@ -59,7 +59,7 @@ THE SOFTWARE.
     const auto tid = cg::this_grid().thread_rank();                                                \
     const auto stride = cg::this_grid().size();                                                    \
                                                                                                    \
-    for (auto i = tid; i < num_xs; i += stride) {                                                  \
+    for (size_t i = tid; i < num_xs; i += stride) {                                                \
       ys[i] = func_name(x1s[i], x2s[i]);                                                           \
     }                                                                                              \
   }
@@ -85,7 +85,7 @@ THE SOFTWARE.
     const auto tid = cg::this_grid().thread_rank();                                                \
     const auto stride = cg::this_grid().size();                                                    \
                                                                                                    \
-    for (auto i = tid; i < num_xs; i += stride) {                                                  \
+    for (size_t i = tid; i < num_xs; i += stride) {                                                \
       ys[i] = func_name(x1s[i], x2s[i], x3s[i]);                                                   \
     }                                                                                              \
   }

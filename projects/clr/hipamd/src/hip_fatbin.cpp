@@ -24,73 +24,37 @@ THE SOFTWARE.
 #include "hip_fatbin.hpp"
 #include "hip_global.hpp"
 #include <unordered_map>
+#include <mutex>
 #include "hip_code_object.hpp"
 #include "hip_platform.hpp"
 #include "comgrctx.hpp"
 #include "amd_hsa_elf.hpp"
+#include "hip_comgr_helper.hpp"
+
+#if ROCM_KPACK_ENABLED
+#include <rocm_kpack/kpack.h>
+#endif
+
 namespace hip {
-namespace comgr_helper {
+// Use ComgrUniqueHandle and type aliases from hip_comgr_helper.hpp
+using comgr_helper::ComgrDataSetUniqueHandle;
+using comgr_helper::ComgrActionInfoUniqueHandle;
+using comgr_helper::ComgrDataUniqueHandle;
 
-template <typename comgr_T> class ComgrUniqueHandle {
- public:
-  ComgrUniqueHandle() = default;
-  // constructor which takes ownership of a correctly initialzed handle
-  ComgrUniqueHandle(comgr_T& handle) : comgr_obj_(handle) { handle = {0}; };
+#if ROCM_KPACK_ENABLED
+namespace {
+// HIP process-global kpack cache - initialized on first use
+std::once_flag g_hipKpackCacheInitFlag;
+kpack_cache_t g_hipKpackCache = nullptr;
 
-  template <typename T = comgr_T, std::enable_if_t<std::is_same_v<T, amd_comgr_data_set_t> ||
-                                                       std::is_same_v<T, amd_comgr_action_info_t>,
-                                                   bool> = true>
-  [[nodiscard]] amd_comgr_status_t Create() {
-    if constexpr (std::is_same_v<T, amd_comgr_data_set_t>) {
-      return amd::Comgr::create_data_set(&comgr_obj_);
-    } else if constexpr (std::is_same_v<T, amd_comgr_action_info_t>) {
-      return amd::Comgr::create_action_info(&comgr_obj_);
-    }
+void initHipKpackCache() { kpack_cache_create(&g_hipKpackCache); }
 
-    // Unreachable code
-    return AMD_COMGR_STATUS_SUCCESS;
-  }
-
-  template <typename T = comgr_T,
-            std::enable_if_t<std::is_same_v<T, amd_comgr_data_t>, bool> = true>
-  [[nodiscard]] amd_comgr_status_t Create(amd_comgr_data_kind_t kind) {
-    return amd::Comgr::create_data(kind, &comgr_obj_);
-  }
-
-  ~ComgrUniqueHandle() {
-    if (comgr_obj_.handle != 0) {
-      if constexpr (std::is_same_v<comgr_T, amd_comgr_data_set_t>) {
-        amd::Comgr::destroy_data_set(comgr_obj_);
-      } else if constexpr (std::is_same_v<comgr_T, amd_comgr_action_info_t>) {
-        amd::Comgr::destroy_action_info(comgr_obj_);
-      } else if constexpr (std::is_same_v<comgr_T, amd_comgr_data_t>) {
-        amd::Comgr::release_data(comgr_obj_);
-      }
-    }
-  }
-
-  // Delete all copy and move operators
-  ComgrUniqueHandle(ComgrUniqueHandle&) = delete;
-  ComgrUniqueHandle(ComgrUniqueHandle&&) = delete;
-  ComgrUniqueHandle& operator=(ComgrUniqueHandle&) = delete;
-  ComgrUniqueHandle& operator=(ComgrUniqueHandle&&) = delete;
-
-  // Method to access data
-  comgr_T get() const {
-    assert(comgr_obj_.handle != 0);
-    return comgr_obj_;
-  }
-
- private:
-  comgr_T comgr_obj_{0};
-};
-
-
-typedef ComgrUniqueHandle<amd_comgr_data_set_t> ComgrDataSetUniqueHandle;
-typedef ComgrUniqueHandle<amd_comgr_action_info_t> ComgrActionInfoUniqueHandle;
-typedef ComgrUniqueHandle<amd_comgr_data_t> ComgrDataUniqueHandle;
-
-}  // namespace comgr_helper
+kpack_cache_t getHipKpackCache() {
+  std::call_once(g_hipKpackCacheInitFlag, initHipKpackCache);
+  return g_hipKpackCache;
+}
+}  // namespace
+#endif
 
 FatBinaryInfo::FatBinaryInfo(const char* fname, const void* image)
     : foffset_(0), image_(image), image_mapped_(false), uri_(std::string()) {
@@ -103,23 +67,31 @@ FatBinaryInfo::FatBinaryInfo(const char* fname, const void* image)
   dev_programs_.resize(g_devices.size(), nullptr);
 }
 
+FatBinaryInfo::FatBinaryInfo(KpackParams kpack_params)
+    : FatBinaryInfo(kpack_params.binary_path.c_str(), nullptr) {
+  kpack_params_ = std::move(kpack_params);
+}
+
 FatBinaryInfo::~FatBinaryInfo() {
-  // Different devices in the same model have the same binary_image_
-  std::set<const void*> toDelete;
   // Release per device fat bin info.
   for (int dev_id = 0; dev_id < dev_programs_.size(); dev_id++) {
     if (dev_programs_[dev_id] != nullptr) {
-      auto& binaryInfo = dev_programs_[dev_id]->binary(*g_devices[dev_id]->devices()[0]);
-      if (std::get<0>(binaryInfo) && std::get<1>(binaryInfo).second == 0 &&
-          std::get<0>(binaryInfo) != image_) {
-        toDelete.insert(std::get<0>(binaryInfo));
-      }
       dev_programs_[dev_id]->release();
       dev_programs_[dev_id] = nullptr;
     }
   }
-  for (auto itemData : toDelete) {
-    delete[] reinterpret_cast<const char*>(itemData);
+  // Release Code object allocations
+  for (const auto& i : code_obj_allocations_) {
+    if (kpack_params_.has_value()) {
+      // Kpack-allocated code objects must be freed via kpack API
+#if ROCM_KPACK_ENABLED
+      kpack_free_code_object(const_cast<void*>(i));
+#else
+      guarantee(false, "Kpack code object but ROCM_KPACK_ENABLED=OFF");
+#endif
+    } else {
+      delete[] reinterpret_cast<const char*>(i);
+    }
   }
   ReleaseImageAndFile();
 }
@@ -349,9 +321,11 @@ static bool UncompressAndPopulateCodeObject(
         LogError("Failed to get data unbundled code object");
         break;
       }
+      comgr_helper::ComgrDataUniqueHandle item_handle(item);
 
       size_t item_name_size = 0;
-      if (auto comgr_status = amd::Comgr::get_data_name(item, &item_name_size, nullptr);
+      if (auto comgr_status =
+              amd::Comgr::get_data_name(item_handle.get(), &item_name_size, nullptr);
           comgr_status != AMD_COMGR_STATUS_SUCCESS) {
         LogError("Failed to get data size");
         break;
@@ -359,14 +333,14 @@ static bool UncompressAndPopulateCodeObject(
 
       std::string item_bundle_id(item_name_size, 0);
       if (auto comgr_status =
-              amd::Comgr::get_data_name(item, &item_name_size, item_bundle_id.data());
+              amd::Comgr::get_data_name(item_handle.get(), &item_name_size, item_bundle_id.data());
           comgr_status != AMD_COMGR_STATUS_SUCCESS) {
         LogError("Failed to get data");
         break;
       }
 
       size_t item_size = 0;
-      if (auto comgr_status = amd::Comgr::get_data(item, &item_size, nullptr);
+      if (auto comgr_status = amd::Comgr::get_data(item_handle.get(), &item_size, nullptr);
           comgr_status != AMD_COMGR_STATUS_SUCCESS) {
         LogError("Failed to get data size");
         break;
@@ -374,7 +348,7 @@ static bool UncompressAndPopulateCodeObject(
 
       if (item_size > 0) {
         char* item_data = new char[item_size];
-        if (auto comgr_status = amd::Comgr::get_data(item, &item_size, item_data);
+        if (auto comgr_status = amd::Comgr::get_data(item_handle.get(), &item_size, item_data);
             comgr_status != AMD_COMGR_STATUS_SUCCESS) {
           LogError("Failed to get data");
           break;
@@ -431,10 +405,9 @@ static bool PopulateCodeObjectMap(
 
     for (const auto& item : query_list_array) {
       if (item.size > 0) {
-        char* d = new char[item.size];
-        std::memcpy(reinterpret_cast<void*>(d), reinterpret_cast<const char*>(image) + item.offset,
-                    item.size);
-        code_obj_map[item.isa] = std::make_pair(d, item.size);
+        // Map the offset pointer and size from the image
+        auto loc = reinterpret_cast<const char*>(image) + item.offset;
+        code_obj_map[item.isa] = std::make_pair(loc, item.size);
       }
     }
 
@@ -517,12 +490,17 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
     if (!UncompressAndPopulateCodeObject(image_, unique_isa_names, code_obj_map)) {
       return hipErrorInvalidImage;
     }
+    // For compressed code objects, we use comgr to extract and make a copy.
+    // Track these to release later
+    std::for_each(code_obj_map.begin(), code_obj_map.end(),
+                  [&](const auto& info) { code_obj_allocations_.insert(info.second.first); });
   } else {  // uncompressed code object
     if (!PopulateCodeObjectMap(image_, unique_isa_names, code_obj_map)) {
       return hipErrorInvalidImage;
     }
   }
 
+  LogPrintfInfo("Forcing SPIRV: %s", (HIP_FORCE_SPIRV_CODEOBJECT != 0 ? "true" : "false"));
   hipError_t hip_status = hipErrorInvalidImage;
   do {
     bool spirv_isa_found = code_obj_map.find(spirv_isa_name) != code_obj_map.end() ||
@@ -536,24 +514,21 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
 
       // If the size is not 0, that means we found the native isa code object
       if (native_co != code_obj_map.end() && !HIP_FORCE_SPIRV_CODEOBJECT) {
-        // We need to do this because there is existing mechanism which deletes code object in
-        // destructor. Ideally next set of refactor should sort it.
-        char* co = new char[native_co->second.second];
-        std::memcpy(co, reinterpret_cast<const char*>(native_co->second.first),
-                    native_co->second.second);
-        hip_status = AddDevProgram(device, co, native_co->second.second, 0);
+        LogPrintfInfo("Using native code object for device: %s co: %s", device_name.c_str(),
+                      native_co->first.c_str());
+        hip_status = AddDevProgram(device, native_co->second.first, native_co->second.second, 0);
         if (hip_status != hipSuccess) {
           break;
         }
       } else if (generic_co != code_obj_map.end() && !HIP_FORCE_SPIRV_CODEOBJECT) {
-        char* co = new char[generic_co->second.second];
-        std::memcpy(co, reinterpret_cast<const char*>(generic_co->second.first),
-                    generic_co->second.second);
-        hip_status = AddDevProgram(device, co, generic_co->second.second, 0);
+        LogPrintfInfo("Using generic code object for device: %s co: %s", device_name.c_str(),
+                      generic_co->first.c_str());
+        hip_status = AddDevProgram(device, generic_co->second.first, generic_co->second.second, 0);
         if (hip_status != hipSuccess) {
           break;
         }
       } else if (spirv_isa_found) {
+        LogPrintfInfo("Using spirv code object for device: %s", device_name.c_str());
         std::string target_id = device->devices()[0]->isa().targetId();
         std::string isa = "amdgcn-amd-amdhsa--" + target_id;
 
@@ -675,6 +650,7 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
         }
 
         char* co = new char[co_size];
+        code_obj_allocations_.insert(co);  // track to release later
         if (auto comgr_status = amd::Comgr::get_data(exe_data.get(), &co_size, co);
             comgr_status != AMD_COMGR_STATUS_SUCCESS) {
           LogError("Failed to get exe data");
@@ -695,12 +671,80 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
     }
   } while (0);
 
-  // release code objects
-  for (const auto& co : code_obj_map) {
-    delete[] reinterpret_cast<const char*>(co.second.first);
+  return hip_status;
+}
+
+// This function is always defined but errors if ROCM_KPACK_ENABLED=OFF
+// TODO: Extract SPIR-V translation from ExtractFatBinaryUsingCOMGR and call
+// it from both of these entry-points once we have enough testing in place
+// to ensure this advanced case is functional.
+hipError_t FatBinaryInfo::ExtractKpackBinary(const std::vector<hip::Device*>& devices) {
+#if !ROCM_KPACK_ENABLED
+  LogError("Kpack binary detected but ROCM_KPACK_ENABLED=OFF");
+  return hipErrorNotSupported;
+#else
+  if (!kpack_params_.has_value()) {
+    LogError("ExtractKpackBinary called but kpack_params_ not set");
+    return hipErrorInvalidValue;
   }
 
-  return hip_status;
+  const auto& params = kpack_params_.value();
+  if (params.metadata == nullptr) {
+    LogError("HIPK metadata is null");
+    return hipErrorInvalidValue;
+  }
+
+  // Build architecture priority list from devices
+  // For each device, add native ISA first, then generic fallback
+  std::vector<std::string> arch_list;
+  for (auto device : devices) {
+    std::string device_name = device->devices()[0]->isa().isaName();
+    arch_list.push_back(device_name);
+
+    // Add generic fallback
+    auto generic_name = TargetToGeneric(device_name);
+    if (!generic_name.empty()) {
+      arch_list.push_back(generic_name);
+    }
+  }
+
+  // Convert to C-style array for kpack API
+  std::vector<const char*> arch_ptrs;
+  for (const auto& arch : arch_list) {
+    arch_ptrs.push_back(arch.c_str());
+  }
+
+  // Load code object from kpack archive
+  void* code_object = nullptr;
+  size_t code_object_size = 0;
+
+  // binary_path is used to resolve relative paths to kpack archives.
+  // bundle_index identifies which code object to load for multi-TU binaries.
+  // The kernel_name (used for TOC lookup) is embedded in the HIPK metadata.
+  kpack_error_t err =
+      kpack_load_code_object(getHipKpackCache(), params.metadata, fname_.c_str(),
+                             static_cast<uint32_t>(params.bundle_index),
+                             arch_ptrs.data(), arch_ptrs.size(), &code_object, &code_object_size);
+
+  if (err != KPACK_SUCCESS) {
+    LogPrintfError("kpack_load_code_object failed with error: %d", err);
+    return hipErrorInvalidImage;
+  }
+
+  // Add code object to all devices
+  for (auto device : devices) {
+    hipError_t hip_err = AddDevProgram(device, code_object, code_object_size, 0);
+    if (hip_err != hipSuccess) {
+      kpack_free_code_object(code_object);
+      return hip_err;
+    }
+  }
+
+  // Track allocation for cleanup in destructor
+  code_obj_allocations_.insert(code_object);
+
+  return hipSuccess;
+#endif
 }
 
 hipError_t FatBinaryInfo::AddDevProgram(hip::Device* device, const void* binary_image,

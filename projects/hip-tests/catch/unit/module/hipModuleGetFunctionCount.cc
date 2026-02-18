@@ -48,6 +48,7 @@ THE SOFTWARE.
  * - HIP_VERSION >= 7.1
  */
 TEST_CASE("Unit_hipModuleGetFunctionCount_Functional") {
+  CTX_CREATE();
   hipModule_t moduleSingleArch, moduleEmpty, doubleKernelModule, rtcModule;
   unsigned int count = 0;
   SECTION("Single arch, Single global function") {
@@ -89,6 +90,7 @@ TEST_CASE("Unit_hipModuleGetFunctionCount_Functional") {
     REQUIRE(count == 1);
     HIP_CHECK(hipModuleUnload(rtcModule));
   }
+  CTX_DESTROY();
 }
 /**
  * Test Description

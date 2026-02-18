@@ -643,6 +643,14 @@ global:
     hipKernelGetLibrary;
     hipKernelGetName;
     hipOccupancyAvailableDynamicSMemPerBlock;
+    hipGetProcAddress_spt;
+    hipKernelGetParamInfo;
+    hipExtDisableLogging;
+    hipExtEnableLogging;
+    hipExtSetLoggingParams;
+    hipMemSetMemPool;
+    hipMemGetMemPool;
+    hipMipmappedArrayGetMemoryRequirements;
 local:
     *;
 } hip_7.1;

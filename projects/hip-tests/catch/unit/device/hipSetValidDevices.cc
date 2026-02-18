@@ -158,7 +158,7 @@ TEST_CASE("Unit_hipSetValidDevices_Negative_Length_Lessthan_DeviceArrSize") {
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
-TEST_CASE("Unit_hipSetValidDevices_Positive_Basic") {
+TEST_CASE("Unit_hipSetValidDevices_Positive_Basic", "[multigpu]") {
   int totalDevices = HipTest::getDeviceCount();
   if (totalDevices < 2) {
     HipTest::HIP_SKIP_TEST("This test requires 2 or more GPUs. Skipping.");
@@ -430,7 +430,15 @@ TEST_CASE("Unit_hipSetValidDevices_with_hipMemcpyPeer") {
     HipTest::HIP_SKIP_TEST("Skipping, as this test requires more than 2 GPUs");
     return;
   }
-
+  int canAccessPeer = -1;
+  HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, 1, 0));
+  if (!canAccessPeer) {
+    std::string msg = "Device is not capable of directly accessing memory from peerDevice. Skipping the test.";
+    HipTest::HIP_SKIP_TEST(msg.c_str());
+    return;
+  }
+  REQUIRE(canAccessPeer == 1);
+  HIP_CHECK(hipDeviceEnablePeerAccess(1, 0));
   REQUIRE(getCurrentDevice() == 0);
 
   int* dev0_Arr = nullptr;
@@ -453,10 +461,6 @@ TEST_CASE("Unit_hipSetValidDevices_with_hipMemcpyPeer") {
   HIP_CHECK(hipMalloc(&dev1_Arr, NBYTES));
   REQUIRE(dev1_Arr != nullptr);
 
-  int canAccessPeer = -1;
-  HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, 1, 0));
-  REQUIRE(canAccessPeer == 1);
-
   HIP_CHECK(hipMemcpyPeer(dev1_Arr, 1, dev0_Arr, 0, N * sizeof(int)));
 
   int dstHostMem[N];
@@ -468,4 +472,6 @@ TEST_CASE("Unit_hipSetValidDevices_with_hipMemcpyPeer") {
   for (int i = 0; i < N; i++) {
     REQUIRE(dstHostMem[i] == 5);
   }
+  HIP_CHECK(hipFree(dev0_Arr));
+  HIP_CHECK(hipFree(dev1_Arr));
 }

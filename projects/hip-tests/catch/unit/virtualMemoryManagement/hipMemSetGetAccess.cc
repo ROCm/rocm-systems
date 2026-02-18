@@ -61,8 +61,8 @@ static __global__ void square_kernel(int* Buff) {
 
 // Simple HIP kernel: read from host-backed memory and write to a device buffer
 __global__ void copyFromHostMem(const int* hostMem, int* devOut, int N) {
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i < N) devOut[i] = hostMem[i];
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < N) devOut[i] = hostMem[i];
 }
 
 /**
@@ -340,7 +340,7 @@ TEST_CASE("Unit_hipMemGetAccess_NegTst") {
  * ------------------------
  *    - HIP_VERSION >= 6.1
  */
-TEST_CASE("Unit_hipMemSetAccess_FuncTstOnMultDev") {
+TEST_CASE("Unit_hipMemSetAccess_FuncTstOnMultDev", "[multigpu]") {
   size_t granularity = 0;
   constexpr int N = DATA_SIZE;
   size_t buffer_size = N * sizeof(int);
@@ -493,6 +493,130 @@ TEST_CASE("Unit_hipMemSetAccess_ChangeAccessProp") {
 /**
  * Test Description
  * ------------------------
+ *    - Create a VA range split into 3 segments. Map all of them.
+ *    - Verify hipMemSetAccess() works when called on:
+ *        - a single segment (3 calls: segment 0, segment 1, segment 2)
+ *        - two segments (2 calls: segments 0-1, then segments 1-2)
+ *        - the full range (1 call: segments 0-2)
+ * ------------------------
+ */
+TEST_CASE("Unit_hipMemSetAccess_SegmentsAccess") {
+  size_t granularity = 0;
+  int deviceId = 0;
+  hipDevice_t device;
+  CTX_CREATE();
+  HIP_CHECK(hipDeviceGet(&device, deviceId));
+  checkVMMSupported(device);
+
+  hipMemAllocationProp prop{};
+  prop.type = hipMemAllocationTypePinned;
+  prop.location.type = hipMemLocationTypeDevice;
+  prop.location.id = device;
+  HIP_CHECK(
+      hipMemGetAllocationGranularity(&granularity, &prop, hipMemAllocationGranularityMinimum));
+  REQUIRE(granularity > 0);
+
+  const size_t segment0_size = granularity;
+  const size_t segment1_size = granularity * 2;
+  const size_t segment2_size = granularity * 3;
+  const size_t total_size = segment0_size + segment1_size + segment2_size;
+
+  void* base = nullptr;
+  HIP_CHECK(hipMemAddressReserve(&base, total_size, 0, 0, 0));
+
+  auto* base_c = reinterpret_cast<char*>(base);
+  void* segment_0 = base_c;
+  void* segment_1 = base_c + segment0_size;
+  void* segment_2 = base_c + segment0_size + segment1_size;
+
+  hipMemGenericAllocationHandle_t handle_0{};
+  hipMemGenericAllocationHandle_t handle_1{};
+  hipMemGenericAllocationHandle_t handle_2{};
+  HIP_CHECK(hipMemCreate(&handle_0, segment0_size, &prop, 0));
+  HIP_CHECK(hipMemCreate(&handle_1, segment1_size, &prop, 0));
+  HIP_CHECK(hipMemCreate(&handle_2, segment2_size, &prop, 0));
+
+  HIP_CHECK(hipMemMap(segment_0, segment0_size, 0, handle_0, 0));
+  HIP_CHECK(hipMemMap(segment_1, segment1_size, 0, handle_1, 0));
+  HIP_CHECK(hipMemMap(segment_2, segment2_size, 0, handle_2, 0));
+
+  HIP_CHECK(hipMemRelease(handle_0));
+  HIP_CHECK(hipMemRelease(handle_1));
+  HIP_CHECK(hipMemRelease(handle_2));
+
+  hipMemAccessDesc rw{};
+  rw.location.type = hipMemLocationTypeDevice;
+  rw.location.id = device;
+  rw.flags = hipMemAccessFlagsProtReadWrite;
+
+  hipMemLocation location{};
+  location.type = hipMemLocationTypeDevice;
+  location.id = device;
+
+  unsigned long long flags = 0;
+  SECTION("Single segment access") {
+    HIP_CHECK(hipMemSetAccess(segment_0, segment0_size, &rw, 1));
+    HIP_CHECK(hipMemGetAccess(&flags, &location, segment_0));
+    REQUIRE(flags == hipMemAccessFlagsProtReadWrite);
+
+    flags = 0;
+    HIP_CHECK(hipMemSetAccess(segment_1, segment1_size, &rw, 1));
+    HIP_CHECK(hipMemGetAccess(&flags, &location, segment_1));
+    REQUIRE(flags == hipMemAccessFlagsProtReadWrite);
+
+    flags = 0;
+    HIP_CHECK(hipMemSetAccess(segment_2, segment2_size, &rw, 1));
+    HIP_CHECK(hipMemGetAccess(&flags, &location, segment_2));
+    REQUIRE(flags == hipMemAccessFlagsProtReadWrite);
+  }
+
+  SECTION("Two segments access") {
+    // First call targets segments 0 and 1.
+    HIP_CHECK(hipMemSetAccess(segment_0, segment0_size + segment1_size, &rw, 1));
+
+    HIP_CHECK(hipMemGetAccess(&flags, &location, segment_0));
+    REQUIRE(flags == hipMemAccessFlagsProtReadWrite);
+    flags = 0;
+    HIP_CHECK(hipMemGetAccess(&flags, &location, segment_1));
+    REQUIRE(flags == hipMemAccessFlagsProtReadWrite);
+
+    // Second call targets segments 1 and 2.
+    HIP_CHECK(hipMemSetAccess(segment_1, segment1_size + segment2_size, &rw, 1));
+
+    flags = 0;
+    HIP_CHECK(hipMemGetAccess(&flags, &location, segment_0));
+    REQUIRE(flags == hipMemAccessFlagsProtReadWrite);
+    flags = 0;
+    HIP_CHECK(hipMemGetAccess(&flags, &location, segment_1));
+    REQUIRE(flags == hipMemAccessFlagsProtReadWrite);
+    flags = 0;
+    HIP_CHECK(hipMemGetAccess(&flags, &location, segment_2));
+    REQUIRE(flags == hipMemAccessFlagsProtReadWrite);
+  }
+
+  SECTION("All three segments access") {
+    HIP_CHECK(hipMemSetAccess(base, total_size, &rw, 1));
+
+    HIP_CHECK(hipMemGetAccess(&flags, &location, segment_0));
+    REQUIRE(flags == hipMemAccessFlagsProtReadWrite);
+    flags = 0;
+    HIP_CHECK(hipMemGetAccess(&flags, &location, segment_1));
+    REQUIRE(flags == hipMemAccessFlagsProtReadWrite);
+    flags = 0;
+    HIP_CHECK(hipMemGetAccess(&flags, &location, segment_2));
+    REQUIRE(flags == hipMemAccessFlagsProtReadWrite);
+  }
+
+  HIP_CHECK(hipMemUnmap(segment_0, segment0_size));
+  HIP_CHECK(hipMemUnmap(segment_1, segment1_size));
+  HIP_CHECK(hipMemUnmap(segment_2, segment2_size));
+  HIP_CHECK(hipMemAddressFree(base, total_size));
+  CTX_DESTROY();
+}
+
+/**
+ * Test Description
+ * ------------------------
  *    - Test Virtual Memory to Unified Memory data transfer. Allocate
  * a Virtual Memory chunk and a Unified Memory chunk. Test if data can
  * be exchanged between these chunks.
@@ -548,7 +672,7 @@ TEST_CASE("Unit_hipMemSetAccess_Vmm2UnifiedMemCpy") {
   HIP_CHECK(hipMemcpyHtoD(reinterpret_cast<hipDeviceptr_t>(ptrA), ptrA_h, buffer_size));
   HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&ptrB), buffer_size));
   HIP_CHECK(hipMemcpyDtoD(reinterpret_cast<hipDeviceptr_t>(ptrB),
-                         reinterpret_cast<hipDeviceptr_t>(ptrA), buffer_size));
+                          reinterpret_cast<hipDeviceptr_t>(ptrA), buffer_size));
   HIP_CHECK(hipMemcpyDtoH(ptrB_h, reinterpret_cast<hipDeviceptr_t>(ptrB), buffer_size));
   bool bPassed = true;
   for (int idx = 0; idx < N; idx++) {
@@ -638,7 +762,7 @@ TEST_CASE("Unit_hipMemSetAccess_Vmm2DevMemCpy") {
  * ------------------------
  *    - HIP_VERSION >= 6.1
  */
-TEST_CASE("Unit_hipMemSetAccess_Vmm2PeerDevMemCpy") {
+TEST_CASE("Unit_hipMemSetAccess_Vmm2PeerDevMemCpy", "[multigpu]") {
   size_t granularity = 0;
   constexpr int N = DATA_SIZE;
   size_t buffer_size = N * sizeof(int);
@@ -729,7 +853,7 @@ TEST_CASE("Unit_hipMemSetAccess_Vmm2PeerDevMemCpy") {
  * ------------------------
  *    - HIP_VERSION >= 6.1
  */
-TEST_CASE("Unit_hipMemSetAccess_Vmm2PeerPeerMemCpy") {
+TEST_CASE("Unit_hipMemSetAccess_Vmm2PeerPeerMemCpy", "[multigpu]") {
   size_t granularity = 0;
   constexpr int N = DATA_SIZE;
   size_t buffer_size = N * sizeof(int);
@@ -891,7 +1015,7 @@ TEST_CASE("Unit_hipMemSetAccess_Vmm2VMMMemCpy") {
  * ------------------------
  *    - HIP_VERSION >= 6.1
  */
-TEST_CASE("Unit_hipMemSetAccess_Vmm2VMMInterDevMemCpy") {
+TEST_CASE("Unit_hipMemSetAccess_Vmm2VMMInterDevMemCpy", "[multigpu]") {
   size_t granularity = 0;
   constexpr int N = DATA_SIZE;
   size_t buffer_size = N * sizeof(int);
@@ -1474,7 +1598,7 @@ TEST_CASE("Unit_hipMemSetAccessHost_devicealloc") {
   constexpr size_t N = 1024;
   constexpr size_t bytes = N * sizeof(int);
 
-  //get minimum granularity
+  // get minimum granularity
   size_t gran = 0;
   HIP_CHECK(hipMemGetAllocationGranularity(&gran, &prop, hipMemAllocationGranularityMinimum));
   size_t mapSize = ((bytes + gran - 1) / gran) * gran;

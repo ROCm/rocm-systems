@@ -65,6 +65,7 @@
 
 // Include it explicitly for HIPRTC
 #include "amd_hip_bf16.h"
+#include "amd_hip_mx_common.h"
 
 #if !defined(__HIPCC_RTC__)
 #include <hip/amd_detail/amd_hip_common.h>
@@ -113,9 +114,9 @@
 #if !defined(__HIPCC_RTC__)
 static_assert(CHAR_BIT == 8, "byte size should be of 8 bits");
 #endif
-static_assert(sizeof(unsigned char) == 1);
-static_assert(sizeof(unsigned short int) == 2);
-static_assert(sizeof(unsigned int) == 4);
+static_assert(sizeof(unsigned char) == 1, "");
+static_assert(sizeof(unsigned short int) == 2, "");
+static_assert(sizeof(unsigned int) == 4, "");
 
 /**
  * \brief Describes FP8 interpretation
@@ -190,7 +191,7 @@ template <typename T, bool is_fnuz>
 __FP8_HOST_DEVICE_STATIC__ __hip_fp8_storage_t cast_to_f8(T _x, int wm, int we, bool clip = false,
                                                           bool stoch = false,
                                                           unsigned int rng = 0) {
-#if defined(__clang__) and defined(__HIP__)
+#if defined(__clang__) && defined(__HIP__)
   constexpr bool is_half = __hip_internal::is_same<T, _Float16>::value;
   constexpr bool is_float = __hip_internal::is_same<T, float>::value;
   constexpr bool is_double = __hip_internal::is_same<T, double>::value;
@@ -198,7 +199,7 @@ __FP8_HOST_DEVICE_STATIC__ __hip_fp8_storage_t cast_to_f8(T _x, int wm, int we, 
   constexpr bool is_half = std::is_same<T, _Float16>::value;
   constexpr bool is_float = std::is_same<T, float>::value;
   constexpr bool is_double = std::is_same<T, double>::value;
-#endif  // defined(__clang__) and defined(__HIP__)
+#endif  // defined(__clang__) && defined(__HIP__)
   static_assert(is_half || is_float || is_double, "Only half, float and double can be cast to f8");
 
   const int mfmt = (sizeof(T) == 8) ? 52 : ((sizeof(T) == 4) ? 23 : 10);
@@ -403,7 +404,7 @@ after shift right by 4 bits, it would look like midpoint.
 template <typename T, bool is_fnuz> __FP8_HOST_DEVICE_STATIC__ T cast_from_f8(__hip_fp8_storage_t x,
                                                                               int wm, int we,
                                                                               bool clip = false) {
-#if defined(__clang__) and defined(__HIP__)
+#if defined(__clang__) && defined(__HIP__)
   constexpr bool is_half = __hip_internal::is_same<T, _Float16>::value;
   constexpr bool is_float = __hip_internal::is_same<T, float>::value;
   constexpr bool is_double = __hip_internal::is_same<T, double>::value;
@@ -411,7 +412,7 @@ template <typename T, bool is_fnuz> __FP8_HOST_DEVICE_STATIC__ T cast_from_f8(__
   constexpr bool is_half = std::is_same<T, _Float16>::value;
   constexpr bool is_float = std::is_same<T, float>::value;
   constexpr bool is_double = std::is_same<T, double>::value;
-#endif  // defined(__clang__) and defined(__HIP__)
+#endif  // defined(__clang__) && defined(__HIP__)
   static_assert(is_half || is_float || is_double, "only half, float and double are supported");
 
   constexpr int weo = is_half ? 5 : (is_float ? 8 : 11);
@@ -492,7 +493,7 @@ template <typename T, bool is_fnuz> __FP8_HOST_DEVICE_STATIC__ T cast_from_f8(__
     }
   }
 
-#if defined(__clang__) and defined(__HIP__)
+#if defined(__clang__) && defined(__HIP__)
   typename __hip_internal::conditional<
       sizeof(T) == 2, unsigned short int,
       typename __hip_internal::conditional<sizeof(T) == 4, unsigned int,
@@ -948,6 +949,131 @@ __FP8_HOST_STATIC__ __hip_fp8x2_storage_t __hip_cvt_halfraw2_to_fp8x2(
     const __half2_raw x, const __hip_saturation_t sat, const __hip_fp8_interpretation_t interp) {
 #endif
   return __hip_cvt_float2_to_fp8x2(__half22float2(__half2(x)), sat, interp);
+}
+
+namespace hip_detail {
+
+constexpr __hip_fp8_storage_t e8m0_NaN = 0xFFU;
+constexpr __hip_internal::uint16_t bf16_NaN = 0x7FFFU;
+
+constexpr __hip_internal::uint16_t bf16_sig_mask = 0x007FU;
+constexpr __hip_internal::uint32_t float_sig_mask = 0x007FFFFFU;
+constexpr __hip_internal::uint64_t double_sig_mask = 0x000FFFFFFFFFFFFFU;
+
+constexpr __hip_internal::uint16_t bf16_max_exp = 0x7F80U;
+constexpr __hip_internal::uint32_t float_max_exp = 0x7F800000U;
+constexpr __hip_internal::uint64_t double_max_exp = 0x7FF0000000000000U;
+
+constexpr __hip_internal::uint16_t bf16_sign_mask = 0x8000U;
+constexpr __hip_internal::uint32_t float_sign_mask = 0x80000000U;
+constexpr __hip_internal::uint64_t double_sign_mask = 0x8000000000000000U;
+
+constexpr __hip_internal::uint16_t bf16_half_sig_bit = 0x0040U;
+constexpr __hip_internal::uint32_t float_half_sig_bit = 0x00400000U;
+constexpr __hip_internal::uint64_t double_half_sig_bit = 0x0008000000000000U;
+
+}  // namespace hip_detail
+
+__FP8_HOST_DEVICE_STATIC__ __hip_fp8_storage_t __hip_cvt_double_to_e8m0(
+    const double val, const __hip_saturation_t saturate, const enum hipRoundMode rounding) {
+  union {
+    double as_double;
+    __hip_internal::uint64_t as_int;
+  } u{val};
+
+  // Shifts out mantissa bits from double dtype
+  unsigned short double_exp =
+      static_cast<unsigned short>((~hip_detail::double_sign_mask & u.as_int) >> 52);
+  __hip_fp8_storage_t e8m0;
+  if (double_exp == 0x0U) {
+    e8m0 = 0x0U;
+  } else {
+    // Use signed arithmetic to avoid unsigned underflow for small normal exponents
+    // 0x0380 is a bias difference between double and single precision (1023 - 127)
+    const int float_exp = static_cast<int>(double_exp) - 0x0380;
+    if (float_exp <= 0) {
+      // Underflow to subnormal/zero in float domain
+      e8m0 = 0x0U;
+    } else if (float_exp > 0x00FF) {
+      // NaN/Inf or overflow beyond 8-bit exponent range
+      e8m0 = hip_detail::e8m0_NaN;
+    } else {
+      // Valid finite range [1..254], 0xFF yields NaN and is later handled by saturation
+      e8m0 = static_cast<__hip_fp8_storage_t>(float_exp);
+    }
+  }
+
+  // If there is a mantissa and the exp wont overflow round up
+  if ((rounding == hipRoundPosInf) && (u.as_int & hip_detail::double_sig_mask) &&
+      (!((u.as_int & ~hip_detail::double_sign_mask) < hip_detail::double_half_sig_bit)) &&
+      (e8m0 < hip_detail::e8m0_NaN)) {
+    ++e8m0;
+  }
+
+  // If e8m0 is NaN and exponent is a large non-inf value round down to a value
+  if ((saturate == __HIP_SATFINITE) && (e8m0 == hip_detail::e8m0_NaN) &&
+      ((u.as_int & ~hip_detail::double_sign_mask) <= hip_detail::double_max_exp)) {
+    --e8m0;
+  }
+  return e8m0;
+}
+
+__FP8_HOST_DEVICE_STATIC__ __hip_fp8_storage_t __hip_cvt_float_to_e8m0(
+    const float val, const __hip_saturation_t saturate, const enum hipRoundMode rounding) {
+  union {
+    float as_float;
+    __hip_internal::uint32_t as_int;
+  } u{val};
+
+  // Shifts out mantissa bits from float dtype
+  __hip_fp8_storage_t e8m0 = static_cast<unsigned char>(u.as_int >> 23);
+
+  // If there is a mantissa and the exp wont overflow round up
+  if ((rounding == hipRoundPosInf) && (u.as_int & hip_detail::float_sig_mask) &&
+      (!((u.as_int & ~hip_detail::float_sign_mask) < hip_detail::float_half_sig_bit)) &&
+      (e8m0 < hip_detail::e8m0_NaN)) {
+    ++e8m0;
+  }
+
+  // If e8m0 is NaN and exponent is a large non-inf value round down to a value
+  if ((saturate == __HIP_SATFINITE) && (e8m0 == hip_detail::e8m0_NaN) &&
+      ((u.as_int & ~hip_detail::float_sign_mask) <= hip_detail::float_max_exp)) {
+    --e8m0;
+  }
+  return e8m0;
+}
+
+__FP8_HOST_DEVICE_STATIC__ __hip_fp8_storage_t
+__hip_cvt_bfloat16raw_to_e8m0(const __hip_bfloat16_raw hr, const __hip_saturation_t saturate,
+                              const enum hipRoundMode rounding) {
+  // Shifts out mantissa bits from bf16 dtype
+  __hip_fp8_storage_t e8m0 = static_cast<unsigned char>(hr.x >> 7);
+
+  // If there is a mantissa and the exp wont overflow round up
+  if ((rounding == hipRoundPosInf) && (hr.x & hip_detail::bf16_sig_mask) &&
+      (!((hr.x & ~hip_detail::bf16_sign_mask) < hip_detail::bf16_half_sig_bit)) &&
+      (e8m0 < hip_detail::e8m0_NaN)) {
+    ++e8m0;
+  }
+
+  // If e8m0 is NaN and exponent is a large non-inf value round down to a value
+  if ((saturate == __HIP_SATFINITE) && (e8m0 == hip_detail::e8m0_NaN) &&
+      ((hr.x & ~hip_detail::bf16_sign_mask) <= hip_detail::bf16_max_exp)) {
+    --e8m0;
+  }
+  return e8m0;
+}
+
+__FP8_HOST_DEVICE_STATIC__ __hip_bfloat16_raw
+__hip_cvt_e8m0_to_bf16raw(const __hip_fp8_storage_t x) {
+  switch (x) {
+    case 0x00U:
+      return __hip_bfloat16_raw{0x0040U};
+    case hip_detail::e8m0_NaN:
+      return __hip_bfloat16_raw{hip_detail::bf16_NaN};
+    default:
+      return __hip_bfloat16_raw{static_cast<unsigned short>(x << 7)};
+  }
 }
 
 /**

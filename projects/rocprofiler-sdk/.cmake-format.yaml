@@ -262,6 +262,107 @@ parse:
         DIRECTORY: '*'
         TARGET: '*'
         SOURCE: '*'
+    pytest_discover_tests:
+      flags:
+        - STRIP_PARAM_BRACKETS
+        - INCLUDE_FILE_PATH
+        - BUNDLE_TESTS
+      kwargs:
+        WORKING_DIRECTORY: '*'
+        TRIM_FROM_NAME: '*'
+        TRIM_FROM_FULL_NAME: '*'
+        TEST_PATHS: '*'
+        LIBRARY_PATH_PREPEND: '*'
+        PYTHON_PATH_PREPEND: '*'
+        ENVIRONMENT: '*'
+        DEPENDS: '*'
+        EXTRA_ARGS: '*'
+        DISCOVERY_EXTRA_ARGS: '*'
+        PROPERTIES: '*'
+        TIMEOUT: '*'
+        LABELS: '*'
+        DISABLED: '*'
+        FIXTURES_SETUP: '*'
+        FIXTURES_REQUIRED: '*'
+        FIXTURES_CLEANUP: '*'
+        DISABLED_MEMCHECKS: '*'
+        ATTACHED_FILES: '*'
+        ATTACHED_FILES_ON_FAIL: '*'
+        PASS_REGULAR_EXPRESSION: '*'
+        FAIL_REGULAR_EXPRESSION: '*'
+        SKIP_REGULAR_EXPRESSION: '*'
+    rocprofiler_add_unit_test:
+      flags:
+        - WILL_FAIL
+        - DISCOVER
+      kwargs:
+        TARGET: '*'
+        TIMEOUT: '*'
+        LABELS: '*'
+        DISABLED: '*'
+        TEST_LIST: '*'
+        TEST_PREFIX: '*'
+        ENVIRONMENT: '*'
+        PASS_REGULAR_EXPRESSION: '*'
+        FAIL_REGULAR_EXPRESSION: '*'
+        SKIP_REGULAR_EXPRESSION: '*'
+        SOURCES: '*'
+    rocprofiler_add_integration_execute_test:
+      flags:
+        - WILL_FAIL
+        - UNSTABLE
+        - DISABLED_CODECOV
+      kwargs:
+        TARGET: '*'
+        WORKING_DIRECTORY: '*'
+        DEPENDS: '*'
+        TIMEOUT: '*'
+        LABELS: '*'
+        DISABLED: '*'
+        FIXTURES_SETUP: '*'
+        FIXTURES_REQUIRED: '*'
+        FIXTURES_CLEANUP: '*'
+        DISABLED_MEMCHECKS: '*'
+        ARGS: '*'
+        COMMAND: '*'
+        ATTACHED_FILES: '*'
+        ATTACHED_FILES_ON_FAIL: '*'
+        ENVIRONMENT: '*'
+        PRELOAD: '*'
+        PASS_REGULAR_EXPRESSION: '*'
+        FAIL_REGULAR_EXPRESSION: '*'
+        SKIP_REGULAR_EXPRESSION: '*'
+    rocprofiler_add_integration_validate_test:
+      flags:
+        - WILL_FAIL
+        - UNSTABLE
+        - DISABLED_CODECOV
+        - STRIP_PARAM_BRACKETS
+        - INCLUDE_FILE_NAME
+        - BUNDLE_TESTS
+      kwargs:
+        TARGET_DEPENDS: '*'
+        WORKING_DIRECTORY: '*'
+        DEPENDS: '*'
+        TIMEOUT: '*'
+        LABELS: '*'
+        DISABLED: '*'
+        FIXTURES_SETUP: '*'
+        FIXTURES_REQUIRED: '*'
+        FIXTURES_CLEANUP: '*'
+        DISABLED_MEMCHECKS: '*'
+        TEST_PATHS: '*'
+        CONFIG: '*'
+        COPY: '*'
+        ARGS: '*'
+        DISCOVERY_ARGS: '*'
+        ATTACHED_FILES: '*'
+        ATTACHED_FILES_ON_FAIL: '*'
+        ENVIRONMENT: '*'
+        PYTHON_PATH: '*'
+        PASS_REGULAR_EXPRESSION: '*'
+        FAIL_REGULAR_EXPRESSION: '*'
+        SKIP_REGULAR_EXPRESSION: '*'
   override_spec: {}
   vartags: []
   proptags: []

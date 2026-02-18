@@ -22,7 +22,7 @@ THE SOFTWARE.
 #include <vulkan/vulkan.h>
 
 #ifdef _WIN64
-
+#define NOMINMAX
 #include <Windows.h>
 #include <winnt.h>
 #include <VersionHelpers.h>
@@ -181,6 +181,11 @@ class VulkanTest {
   VkCommandBuffer GetCommandBuffer() const { return _command_buffer; }
 
   VkQueue GetQueue() const { return _queue; }
+
+  void CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties,
+                    VkBuffer& buffer, VkDeviceMemory& buffer_memory, bool external = false);
+
+  void CopyBuffer(VkBuffer src_buffer, VkBuffer dst_buffer, VkDeviceSize size);
 
  private:
   void CreateInstance();

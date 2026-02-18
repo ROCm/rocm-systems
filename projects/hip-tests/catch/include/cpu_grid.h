@@ -43,6 +43,15 @@ struct CPUGrid {
     return thread_rank_in_grid % threads_in_block_count_;
   }
 
+  inline std::optional<unsigned int> block_rank_in_grid(
+      const unsigned int thread_rank_in_grid) const {
+    if (thread_rank_in_grid > thread_count_) {
+      return std::nullopt;
+    }
+
+    return thread_rank_in_grid / threads_in_block_count_;
+  }
+
   inline std::optional<dim3> block_idx(const unsigned int thread_rank_in_grid) const {
     if (thread_rank_in_grid > thread_count_) {
       return std::nullopt;
@@ -105,11 +114,9 @@ struct CPUMultiGrid {
 };
 
 /* Generate dimensions for 1D, 2D and 3D blocks of threads */
-inline dim3 GenerateThreadDimensions() {
+inline dim3 GenerateThreadDimensionsImpl(const std::initializer_list<double>& multipliers) {
   hipDeviceProp_t props;
   HIP_CHECK(hipGetDeviceProperties(&props, 0));
-  const auto multipliers = {0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3,
-                            1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0, 2.1, 2.2, 2.3, 2.4, 2.5};
   return GENERATE_COPY(
       dim3(1, 1, 1), dim3(props.maxThreadsDim[0], 1, 1), dim3(1, props.maxThreadsDim[1], 1),
       dim3(1, 1, props.maxThreadsDim[2]),
@@ -124,61 +131,41 @@ inline dim3 GenerateThreadDimensions() {
           values(multipliers)),
       dim3(16, 8, 8), dim3(32, 32, 1), dim3(64, 8, 2), dim3(16, 16, 3),
       dim3(props.warpSize - 1, 3, 3), dim3(props.warpSize + 1, 3, 3));
+}
+
+inline dim3 GenerateThreadDimensions() {
+  const auto multipliers = {0.1, 0.5, 1.0, 1.5, 2.0};
+  return GenerateThreadDimensionsImpl(multipliers);
+}
+
+inline dim3 GenerateThreadDimensionsForShuffle() {
+  const auto multipliers = {0.5, 1.0, 2.0};
+  return GenerateThreadDimensionsImpl(multipliers);
 }
 
 /* Generate dimensions for 1D, 2D and 3D grids of blocks */
+inline dim3 GenerateBlockDimensionsImpl(const std::initializer_list<double>& multipliers) {
+  hipDeviceProp_t props;
+  HIP_CHECK(hipGetDeviceProperties(&props, 0));
+  return GENERATE_COPY(dim3(1, 1, 1),
+                       map([sm = props.multiProcessorCount](
+                               double i) { return dim3(static_cast<int>(i * sm), 1, 1); },
+                           values(multipliers)),
+                       map([sm = props.multiProcessorCount](
+                               double i) { return dim3(1, static_cast<int>(i * sm), 1); },
+                           values(multipliers)),
+                       map([sm = props.multiProcessorCount](
+                               double i) { return dim3(1, 1, static_cast<int>(i * sm)); },
+                           values(multipliers)),
+                       dim3(5, 5, 5));
+}
+
 inline dim3 GenerateBlockDimensions() {
-  hipDeviceProp_t props;
-  HIP_CHECK(hipGetDeviceProperties(&props, 0));
-  const auto multipliers = {0.5, 0.9, 1.0, 1.1, 1.5, 1.9, 2.0, 3.0, 4.0};
-  return GENERATE_COPY(dim3(1, 1, 1),
-                       map([sm = props.multiProcessorCount](
-                               double i) { return dim3(static_cast<int>(i * sm), 1, 1); },
-                           values(multipliers)),
-                       map([sm = props.multiProcessorCount](
-                               double i) { return dim3(1, static_cast<int>(i * sm), 1); },
-                           values(multipliers)),
-                       map([sm = props.multiProcessorCount](
-                               double i) { return dim3(1, 1, static_cast<int>(i * sm)); },
-                           values(multipliers)),
-                       dim3(5, 5, 5));
+  const auto multipliers = {0.5, 1.0, 1.5, 2.0};
+  return GenerateBlockDimensionsImpl(multipliers);
 }
 
-/* Generate dimensions for 1D, 2D and 3D blocks of threads - reduced set */
-inline dim3 GenerateThreadDimensionsForShuffle() {
-  hipDeviceProp_t props;
-  HIP_CHECK(hipGetDeviceProperties(&props, 0));
-  const auto multipliers = {0.5, 0.9, 1.0, 1.5, 2.0};
-  return GENERATE_COPY(
-      dim3(1, 1, 1), dim3(props.maxThreadsDim[0], 1, 1), dim3(1, props.maxThreadsDim[1], 1),
-      dim3(1, 1, props.maxThreadsDim[2]),
-      map([max = props.maxThreadsDim[0], warp_size = props.warpSize](
-              double i) { return dim3(std::min(static_cast<int>(i * warp_size), max), 1, 1); },
-          values(multipliers)),
-      map([max = props.maxThreadsDim[1], warp_size = props.warpSize](
-              double i) { return dim3(1, std::min(static_cast<int>(i * warp_size), max), 1); },
-          values(multipliers)),
-      map([max = props.maxThreadsDim[2], warp_size = props.warpSize](
-              double i) { return dim3(1, 1, std::min(static_cast<int>(i * warp_size), max)); },
-          values(multipliers)),
-      dim3(16, 8, 8), dim3(32, 32, 1), dim3(64, 8, 2), dim3(16, 16, 3),
-      dim3(props.warpSize - 1, 3, 3), dim3(props.warpSize + 1, 3, 3));
-}
-
-/* Generate dimensions for 1D, 2D and 3D grids of blocks - reduced set */
 inline dim3 GenerateBlockDimensionsForShuffle() {
-  hipDeviceProp_t props;
-  HIP_CHECK(hipGetDeviceProperties(&props, 0));
   const auto multipliers = {0.5, 1.0};
-  return GENERATE_COPY(dim3(1, 1, 1),
-                       map([sm = props.multiProcessorCount](
-                               double i) { return dim3(static_cast<int>(i * sm), 1, 1); },
-                           values(multipliers)),
-                       map([sm = props.multiProcessorCount](
-                               double i) { return dim3(1, static_cast<int>(i * sm), 1); },
-                           values(multipliers)),
-                       map([sm = props.multiProcessorCount](
-                               double i) { return dim3(1, 1, static_cast<int>(i * sm)); },
-                           values(multipliers)),
-                       dim3(5, 5, 5));
+  return GenerateBlockDimensionsImpl(multipliers);
 }

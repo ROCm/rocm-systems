@@ -964,6 +964,7 @@ enum class LocalMemoryType : uint32
     Count
 };
 
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 961
 /// Bitmask of all MSAA/EQAA types supported, in terms of samples (S) and shaded fragments (F)
 enum MsaaFlags : uint16
 {
@@ -991,6 +992,7 @@ enum MsaaFlags : uint16
 
     MsaaAll   = 0x3FFF,
 };
+#endif
 
 /// Supported RTIP version enumeration
 enum class RayTracingIpLevel : uint32
@@ -1370,8 +1372,10 @@ struct DeviceProperties
         uint32          maxArraySlices; ///< Maximum supported number of array slices for a 1D or 2D image.
         PrtFeatureFlags prtFeatures;    ///< PRT features supported by the hardware.
         gpusize         prtTileSize;    ///< Size, in bytes, of a PRT tile.
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 961
         MsaaFlags       msaaSupport;    ///< Bitflags for MSAA sample/fragment count support.
         uint8           maxMsaaFragments; ///< Max number of MSAA fragments per pixel (may have more samples).
+#endif
         uint8           numSwizzleEqs;  ///< How many swizzle equations are in pSwizzleEqs.
         Extent2d        vrsTileSize;    ///< Pixel dimensions of a VRS tile.  0x0 indicates image-based shading rate
                                         ///  is not supported.

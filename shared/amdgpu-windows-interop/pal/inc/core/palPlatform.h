@@ -165,6 +165,7 @@ enum class ApplicationProfileClient : uint32
     RisWindowed,
     FreeMux,
     FsrOvr,
+    Ffx,
     Count
 };
 

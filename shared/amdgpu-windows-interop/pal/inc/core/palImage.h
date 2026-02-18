@@ -201,9 +201,13 @@ union ImageCreateFlags
         uint32 optimalShareable        :  1; ///< Indicates metadata information is to be added into private data on
                                              ///  creation time and honored on open time.
         uint32 sampleLocsAlwaysKnown   :  1; ///< Sample pattern is always known in client driver for MSAA depth image.
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 963
         uint32 fullResolveDstOnly      :  1; ///< Indicates any ICmdBuffer::CmdResolveImage using this image as a
                                              ///  desination will overwrite the entire image (width and height of
                                              ///  resolve region is same as width and height of resolve dst).
+#else
+        uint32 reserved963             :  1;
+#endif
 #if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 960
         uint32 fullCopyDstOnly         :  1; ///< Indicates any copy to this image will overwrite the entire image.
                                              ///  A perf optimization of using post-copy metadata fixup to replace heavy
@@ -301,9 +305,12 @@ struct ImageCreateInfo
     Extent3d           extent;           ///< Dimensions in pixels WxHxD.
     uint32             mipLevels;        ///< Number of mipmap levels.  Cannot be 0.
     uint32             arraySize;        ///< Number of slices.  Set to 1 for non-array images.
-    uint32             samples;          ///< Number of coverage samples.  Set to 1 for single sample images.  Must be
-                                         ///  greater than or equal to the number of fragments.
+    uint32             samples;          ///< Number of coverage samples.  Set to 1 for single sample images.
+                                         ///< Must be a power of two no larger than @ref MaxMsaaSurfaceSamples.
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 961
+                                         ///< Must be greater than or equal to the number of fragments.
     uint32             fragments;        ///< Number of color/depth fragments.  Set to 1 for single sample images.
+#endif
     ImageTiling        tiling;           ///< Controls layout of pixels in the image.
     ImageTilingPattern tilingPreference; ///< Controls preferred tile swizzle organization for this image.
     TilingOptMode      tilingOptMode;    ///< Hints to pal to select the appropriate tiling mode.
@@ -354,7 +361,7 @@ struct ImageCreateInfo
     } prtPlus;
 
     /// The following "pitch" members must be zeroed unless the client is creating a @ref ImageTiling::Linear image and
-    /// wishes to directly specify the image's row and depth pitches.  In that case, they must be integer multiples of
+    /// wishes to directly specify the image's row and/or depth pitches.  In that case, they must be integer multiples of
     /// the alignments given by @ref IDevice::GetLinearImageAlignments, called with an appropriate maxElementSize.
     uint32   rowPitch;    ///< The image must have this row pitch for the first mip level (in bytes).
     uint32   depthPitch;  ///< The image must have this depth pitch for the first mip level (in bytes).
@@ -392,7 +399,9 @@ inline constexpr bool operator==(const ImageCreateInfo& lhs, const ImageCreateIn
                 (lhs.mipLevels               == rhs.mipLevels)               &&
                 (lhs.arraySize               == rhs.arraySize)               &&
                 (lhs.samples                 == rhs.samples)                 &&
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 961
                 (lhs.fragments               == rhs.fragments)               &&
+#endif
                 (lhs.tiling                  == rhs.tiling)                  &&
                 (lhs.tilingPreference        == rhs.tilingPreference)        &&
                 (lhs.tilingOptMode           == rhs.tilingOptMode)           &&
@@ -599,6 +608,10 @@ struct ImageMemoryLayout
 
 /// Collection of bitmasks specifying which operations are currently allowed on an image, and which queues are allowed
 /// to perform those operations.  Based on this information, PAL can determine the best compression state of the image.
+///
+/// Note that for valid image layout,
+///   - LayoutUninitializedTarget doesn't require engine flags.
+///   - All other layouts require both usages and engines are set.
 struct ImageLayout
 {
     uint32 usages  : 24;  ///< Bitmask of @ref ImageLayoutUsageFlags values.

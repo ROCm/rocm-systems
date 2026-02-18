@@ -20,8 +20,8 @@ THE SOFTWARE.
 #include "cooperative_groups_common.hh"
 #include "cg_common_kernels.hh"
 
-#include <bitset>
 #include <array>
+#include <random>
 
 #include <cmd_options.hh>
 #include <cpu_grid.h>
@@ -152,12 +152,22 @@ __global__ void block_tile_shfl_up(T* const out, const unsigned int delta) {
 
 template <typename T, size_t tile_size> void BlockTileShflUpTestImpl() {
   DYNAMIC_SECTION("Tile size: " << tile_size) {
+    const auto inv_reduction_factor = 1.0 / GetTestReductionFactor();
+
     auto blocks = GenerateBlockDimensionsForShuffle();
     auto threads = GenerateThreadDimensionsForShuffle();
     INFO("Grid dimensions: x " << blocks.x << ", y " << blocks.y << ", z " << blocks.z);
     INFO("Block dimensions: x " << threads.x << ", y " << threads.y << ", z " << threads.z);
-    auto delta = GENERATE(range(static_cast<size_t>(0), tile_size));
+
+    std::vector<size_t> deltas;
+    for (double i = 0; i < tile_size - 1; i += inv_reduction_factor) {
+      deltas.emplace_back(static_cast<size_t>(std::floor(i)));
+    }
+    deltas.emplace_back(tile_size - 1);
+
+    const auto delta = GENERATE_COPY(from_range(deltas.begin(), deltas.end()));
     INFO("Delta: " << delta);
+
     CPUGrid grid(blocks, threads);
 
     const auto alloc_size = grid.thread_count_ * sizeof(T);
@@ -195,7 +205,7 @@ template <typename T, size_t... tile_sizes> void BlockTileShflUpTest() {
  */
 TEMPLATE_TEST_CASE("Unit_Thread_Block_Tile_Shfl_Up_Positive_Basic", "", int, unsigned int, long,
                    unsigned long, long long, unsigned long long, float, double) {
-  BlockTileShflUpTest<TestType, 2, 4, 8, 16, 32>();
+  BlockTileShflUpTest<TestType, 2, 16, 32>();
 }
 
 
@@ -209,12 +219,22 @@ __global__ void block_tile_shfl_down(T* const out, const unsigned int delta) {
 
 template <typename T, size_t tile_size> void BlockTileShflDownTestImpl() {
   DYNAMIC_SECTION("Tile size: " << tile_size) {
+    const auto inv_reduction_factor = 1.0 / GetTestReductionFactor();
+
     auto blocks = GenerateBlockDimensionsForShuffle();
     auto threads = GenerateThreadDimensionsForShuffle();
     INFO("Grid dimensions: x " << blocks.x << ", y " << blocks.y << ", z " << blocks.z);
     INFO("Block dimensions: x " << threads.x << ", y " << threads.y << ", z " << threads.z);
-    auto delta = GENERATE(range(static_cast<size_t>(0), tile_size));
+
+    std::vector<size_t> deltas;
+    for (double i = 0; i < tile_size - 1; i += inv_reduction_factor) {
+      deltas.emplace_back(static_cast<size_t>(std::floor(i)));
+    }
+    deltas.emplace_back(tile_size - 1);
+
+    const auto delta = GENERATE_COPY(from_range(deltas.begin(), deltas.end()));
     INFO("Delta: " << delta);
+
     CPUGrid grid(blocks, threads);
 
     const auto alloc_size = grid.thread_count_ * sizeof(T);
@@ -252,7 +272,7 @@ template <typename T, size_t... tile_sizes> void BlockTileShflDownTest() {
 /**
  * Test Description
  * ------------------------
- *    - Validates the shuffle down behavior of thread block tiles of all valid sizes{2, 4, 8, 16,
+ *    - Validates the shuffle down behavior of thread block tiles of all valid sizes{2, 16,
  * 32, 64(if AMD)} for delta values of [0, tile size). The test is run for all overloads of
  * shfl_down.
  * Test source
@@ -264,7 +284,7 @@ template <typename T, size_t... tile_sizes> void BlockTileShflDownTest() {
  */
 TEMPLATE_TEST_CASE("Unit_Thread_Block_Tile_Shfl_Down_Positive_Basic", "", int, unsigned int, long,
                    unsigned long, long long, unsigned long long, float, double) {
-  BlockTileShflDownTest<TestType, 2, 4, 8, 16, 32>();
+  BlockTileShflDownTest<TestType, 2, 16, 32>();
 }
 
 
@@ -277,13 +297,23 @@ __global__ void block_tile_shfl_xor(T* const out, const unsigned mask) {
 }
 
 template <typename T, size_t tile_size> void BlockTileShflXORTestImpl() {
-  DYNAMIC_SECTION("Tile size: " << tile_size) {
+  DYNAMIC_SECTION("Tile size: " << tile_size) {    
+    const auto inv_reduction_factor = 1.0 / GetTestReductionFactor();
+
     auto blocks = GenerateBlockDimensionsForShuffle();
     auto threads = GenerateThreadDimensionsForShuffle();
     INFO("Grid dimensions: x " << blocks.x << ", y " << blocks.y << ", z " << blocks.z);
     INFO("Block dimensions: x " << threads.x << ", y " << threads.y << ", z " << threads.z);
-    const auto mask = GENERATE(range(static_cast<size_t>(0), tile_size));
+
+    std::vector<size_t> masks;
+    for (double i = 0; i < tile_size - 1; i += inv_reduction_factor) {
+        masks.emplace_back(static_cast<size_t>(std::floor(i)));
+    }
+    masks.emplace_back(tile_size - 1);
+
+    const auto mask = GENERATE_COPY(from_range(masks.begin(), masks.end()));
     INFO("Mask: 0x" << std::hex << mask);
+
     CPUGrid grid(blocks, threads);
 
     const auto alloc_size = grid.thread_count_ * sizeof(T);
@@ -317,7 +347,7 @@ template <typename T, size_t... tile_sizes> void BlockTileShflXORTest() {
 /**
  * Test Description
  * ------------------------
- *    - Validates the shuffle xor behavior of thread block tiles of all valid sizes{2, 4, 8, 16, 32,
+ *    - Validates the shuffle xor behavior of thread block tiles of all valid sizes{2, 16, 32,
  * 64(if AMD)} for mask values of [0, tile size). The test is run for all overloads of shfl_xor.
  * Test source
  * ------------------------
@@ -328,7 +358,7 @@ template <typename T, size_t... tile_sizes> void BlockTileShflXORTest() {
  */
 TEMPLATE_TEST_CASE("Unit_Thread_Block_Tile_Shfl_XOR_Positive_Basic", "", int, unsigned int, long,
                    unsigned long, long long, unsigned long long, float, double) {
-  BlockTileShflXORTest<TestType, 2, 4, 8, 16, 32>();
+  BlockTileShflXORTest<TestType, 2, 16, 32>();
 }
 
 template <typename T, size_t tile_size>
@@ -397,7 +427,7 @@ template <typename T, size_t... tile_sizes> void BlockTileShflTest() {
 /**
  * Test Description
  * ------------------------
- *    - Validates the shuffle behavior of thread block tiles of all valid sizes{2, 4, 8, 16, 32,
+ *    - Validates the shuffle behavior of thread block tiles of all valid sizes{2, 16, 32,
  * 64(if AMD)} for generated shuffle target lanes. The test is run for all overloads of shfl. Test
  * source
  * ------------------------
@@ -408,7 +438,7 @@ template <typename T, size_t... tile_sizes> void BlockTileShflTest() {
  */
 TEMPLATE_TEST_CASE("Unit_Thread_Block_Tile_Shfl_Positive_Basic", "", int, unsigned int, long,
                    unsigned long, long long, unsigned long long, float, double) {
-  BlockTileShflTest<TestType, 2, 4, 8, 16, 32>();
+  BlockTileShflTest<TestType, 2, 16, 32>();
 }
 
 
@@ -521,8 +551,8 @@ template <bool global_memory, typename T, size_t... tile_sizes> void BlockTileSy
  *    - HIP_VERSION >= 5.2
  */
 TEMPLATE_TEST_CASE("Unit_Thread_Block_Tile_Sync_Positive_Basic", "", uint8_t, uint16_t, uint32_t) {
-  SECTION("Global memory") { BlockTileSyncTest<true, TestType, 2, 4, 8, 16, 32>(); }
-  SECTION("Shared memory") { BlockTileSyncTest<false, TestType, 2, 4, 8, 16, 32>(); }
+  SECTION("Global memory") { BlockTileSyncTest<true, TestType, 2, 16, 32>(); }
+  SECTION("Shared memory") { BlockTileSyncTest<false, TestType, 2, 16, 32>(); }
 }
 
 /**

@@ -17,12 +17,12 @@ Panel Config:
           avg: AVG(Grid_Size)
           min: MIN(Grid_Size)
           max: MAX(Grid_Size)
-          unit: Work Items
+          unit: Work-items
         Workgroup Size:
           avg: AVG(Workgroup_Size)
           min: MIN(Workgroup_Size)
           max: MAX(Workgroup_Size)
-          unit: Work Items
+          unit: Work-items
         Total Wavefronts:
           avg: AVG(SPI_CSN_WAVE)
           min: MIN(SPI_CSN_WAVE)
@@ -62,7 +62,7 @@ Panel Config:
           avg: AVG(Scratch_Per_Workitem)
           min: MIN(Scratch_Per_Workitem)
           max: MAX(Scratch_Per_Workitem)
-          unit: Bytes/Workitem
+          unit: Bytes per Work-item
   - metric_table:
       id: 702
       title: Wavefront Runtime Stats
@@ -77,17 +77,17 @@ Panel Config:
           avg: AVG((End_Timestamp - Start_Timestamp))
           min: MIN((End_Timestamp - Start_Timestamp))
           max: MAX((End_Timestamp - Start_Timestamp))
-          unit: ns
+          unit: Nanoseconds
         Kernel Time (Cycles):
           avg: AVG($GRBM_GUI_ACTIVE_PER_XCD)
           min: MIN($GRBM_GUI_ACTIVE_PER_XCD)
           max: MAX($GRBM_GUI_ACTIVE_PER_XCD)
-          unit: Cycle
+          unit: Cycles
         Instructions per wavefront:
           avg: AVG((SQ_INSTS / SQ_WAVES))
           min: MIN((SQ_INSTS / SQ_WAVES))
           max: MAX((SQ_INSTS / SQ_WAVES))
-          unit: Instr/wavefront
+          unit: Instructions per Wavefront
         Wave Cycles:
           avg: AVG(((4 * SQ_WAVE_CYCLES) / $denom))
           min: MIN(((4 * SQ_WAVE_CYCLES) / $denom))
@@ -121,26 +121,26 @@ Panel Config:
     Workgroup Size: The total number of work-items (or, threads) in each workgroup
       (or, block) launched as part of the kernel dispatch. In HIP, this is equivalent
       to the total block size.
-    Total Wavefronts: |-
+    Total Wavefronts: >-
       The total number of wavefronts launched as part of the kernel dispatch.
       On AMD Instinct\u2122 CDNA\u2122 accelerators and GCN\u2122 GPUs, the wavefront
       size is always 64 work-items. Thus, the total number of wavefronts should
       be equivalent to the ceiling of grid size divided by 64.
     Saved Wavefronts: The total number of wavefronts saved at a context-save.
     Restored Wavefronts: The total number of wavefronts restored from a context-save.
-    VGPRs: |-
+    VGPRs: >-
       The number of architected vector general-purpose registers allocated
       for the kernel, see VALU. Note: this may not exactly match the number of VGPRs
       requested by the compiler due to allocation granularity.
-    AGPRs: |-
+    AGPRs: >-
       The number of accumulation vector general-purpose registers allocated
       for the kernel, see AGPRs. Note: this may not exactly match the number of
       AGPRs requested by the compiler due to allocation granularity.
-    SGPRs: |-
+    SGPRs: >-
       The number of scalar general-purpose registers allocated for the kernel,
       see SALU. Note: this may not exactly match the number of SGPRs requested by
       the compiler due to allocation granularity.
-    LDS Allocation: |-
+    LDS Allocation: >-
       The number of bytes of LDS memory (or, shared memory) allocated for
       this kernel. Note: This may also be larger than what was requested at compile
       time due to both allocation granularity and dynamic per-dispatch LDS allocations.
@@ -173,7 +173,7 @@ Panel Config:
       rather than identification of a precise limiter. The sum of this metric, Issue
       Wait Cycles and Active Wait Cycles should be equal to the total Wave Cycles
       metric.
-    Wavefront Occupancy: |-
+    Wavefront Occupancy: >-
       The time-averaged number of wavefronts resident on the accelerator over
       the lifetime of the kernel. Note: this metric may be inaccurate for short-running
       kernels (less than 1ms).

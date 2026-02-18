@@ -37,8 +37,8 @@ namespace hiprtc {
 
 // RTC Compile Program Member Functions
 RTCCompileProgram::RTCCompileProgram(std::string name_) : hip::RTCProgram(name_), fgpu_rdc_(false) {
-  if ((amd::Comgr::create_data_set(&compile_input_) != AMD_COMGR_STATUS_SUCCESS) ||
-      (amd::Comgr::create_data_set(&link_input_) != AMD_COMGR_STATUS_SUCCESS)) {
+  if ((compile_input_.Create() != AMD_COMGR_STATUS_SUCCESS) ||
+      (link_input_.Create() != AMD_COMGR_STATUS_SUCCESS)) {
     crashWithMessage("Failed to allocate internal hiprtc structure");
   }
   // Add internal header

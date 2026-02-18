@@ -43,7 +43,7 @@
 ///            compatible, it is assumed that the client will default-initialize all structs.
 ///
 /// @ingroup LibInit
-#define PAL_INTERFACE_MAJOR_VERSION 960
+#define PAL_INTERFACE_MAJOR_VERSION 969
 
 /// Minimum major interface version. This is the minimum interface version PAL supports in order to support backward
 /// compatibility. When it is equal to PAL_INTERFACE_MAJOR_VERSION, only the latest interface version is supported.
@@ -109,6 +109,7 @@ enum class NullGpuId : uint32
     Strix1,        ///< 11.5.0
     StrixHalo,     ///< 11.5.1
     Krackan1,      ///< 11.5.2
+    Krackan2,      ///< 11.5.3
     Navi44,        ///< 12.0.0
     Navi48,        ///< 12.0.1
 #if  (PAL_CLIENT_INTERFACE_MAJOR_VERSION>= 888)
@@ -206,6 +207,7 @@ enum class AsicRevision : uint32
     StrixHalo        = 0x3C, ///< 11.5.1
     Navi44           = 0x3D, ///< 12.0.0
     Navi48           = 0x3E, ///< 12.0.1
+    Krackan2         = 0x3F, ///< 11.5.3
 };
 
 /// Maps a null GPU ID to its associated text name.
