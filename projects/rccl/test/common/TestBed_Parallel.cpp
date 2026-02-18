@@ -33,7 +33,7 @@ struct SweepTestJob
 };
 
 // Execute a single test job (one GPU count configuration)
-static void ExecuteSweepJob(const SweepTestJob& job)
+static void ExecuteSweepJob(const SweepTestJob& job, const std::vector<int>& logicalGpuIds)
 {
     TestBed testBed;
 
@@ -56,7 +56,10 @@ static void ExecuteSweepJob(const SweepTestJob& job)
         return;  // Skip based on enableSweep logic
     }
 
-    const std::vector<int>& gpuPriorityOrder = testBed.ev.GetGpuPriorityOrder();
+    // When running under GPU Scheduler, HIP_VISIBLE_DEVICES has been set to physical GPU IDs
+    // which get remapped to logical IDs (0,1,2,3...). We must use the logical IDs here.
+    const std::vector<int>& gpuPriorityOrder = logicalGpuIds.empty() ?
+        testBed.ev.GetGpuPriorityOrder() : logicalGpuIds;
     testBed.InitComms(testBed.GetDeviceIdsList(numChildren, job.numGpus, job.ranksPerGpu, gpuPriorityOrder));
 
     if (testing::Test::HasFailure())
@@ -274,8 +277,13 @@ void TestBed::RunSimpleSweepParallel(std::vector<ncclFunc_t>     const& funcType
         TestJob testJob(
             testName.str(),
             numGpus,
-            [job](const std::vector<int>& /*assignedGPUs*/) {
-                ExecuteSweepJob(job);
+            [job](const std::vector<int>& assignedGPUs) {
+                // Create logical GPU IDs (0,1,2,3...) for remapped HIP_VISIBLE_DEVICES
+                std::vector<int> logicalGpuIds;
+                for (size_t i = 0; i < assignedGPUs.size(); ++i) {
+                    logicalGpuIds.push_back(i);
+                }
+                ExecuteSweepJob(job, logicalGpuIds);
             },
             100 - (numGpus * 10)  // Priority: larger GPU counts first
         );
