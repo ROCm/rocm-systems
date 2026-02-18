@@ -35,6 +35,17 @@ struct SweepTestJob
 // Execute a single test job (one GPU count configuration)
 static void ExecuteSweepJob(const SweepTestJob& job, const std::vector<int>& logicalGpuIds)
 {
+    // Debug: Print environment info
+    const char* hipVisibleDevs = getenv("HIP_VISIBLE_DEVICES");
+    const char* cudaVisibleDevs = getenv("CUDA_VISIBLE_DEVICES");
+    if (hipVisibleDevs || cudaVisibleDevs) {
+        INFO("ExecuteSweepJob for %d GPUs: HIP_VISIBLE_DEVICES=%s, CUDA_VISIBLE_DEVICES=%s, logicalGpuIds.size()=%zu\n",
+             job.numGpus,
+             hipVisibleDevs ? hipVisibleDevs : "not set",
+             cudaVisibleDevs ? cudaVisibleDevs : "not set",
+             logicalGpuIds.size());
+    }
+
     TestBed testBed;
 
     // Override GPU settings for this specific job
@@ -60,6 +71,16 @@ static void ExecuteSweepJob(const SweepTestJob& job, const std::vector<int>& log
     // which get remapped to logical IDs (0,1,2,3...). We must use the logical IDs here.
     const std::vector<int>& gpuPriorityOrder = logicalGpuIds.empty() ?
         testBed.ev.GetGpuPriorityOrder() : logicalGpuIds;
+
+    if (testBed.ev.verbose) {
+        INFO("Using gpuPriorityOrder: [");
+        for (size_t i = 0; i < gpuPriorityOrder.size(); ++i) {
+            if (i > 0) INFO(", ");
+            INFO("%d", gpuPriorityOrder[i]);
+        }
+        INFO("]\n");
+    }
+
     testBed.InitComms(testBed.GetDeviceIdsList(numChildren, job.numGpus, job.ranksPerGpu, gpuPriorityOrder));
 
     if (testing::Test::HasFailure())
