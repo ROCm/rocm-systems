@@ -35,21 +35,6 @@ ROCPROFILER_EXTERN_C_INIT
  */
 
 /**
- * @brief (experimental) Specification for a single PC sampling record format to configure
- */
-typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_record_spec_t
-{
-    uint64_t                              size;  ///< Size of this struct (for ABI compatibility)
-    rocprofiler_pc_sampling_record_kind_t record_version;
-    size_t                                record_size;
-
-    /// @var record_version
-    /// @brief Which record format to enable (VERSION_0-5, INVALID_SAMPLE, etc.)
-    /// @var record_size
-    /// @brief Must match sizeof(rocprofiler_pc_sampling_record_vN_t) for the version
-} rocprofiler_pc_sampling_record_spec_t;
-
-/**
  * @brief (experimental) Function used to configure the PC sampling service on the GPU agent with @p
  * agent_id.
  *
@@ -162,74 +147,58 @@ rocprofiler_configure_pc_sampling_service(rocprofiler_context_id_t         conte
  *
  * PC Sampling Record Versioning:
  * The client must specify which record formats to receive by providing an array of
- * @p record_specs. Different versions are optimized for different hardware architectures
+ * @p record_kinds. Different versions are optimized for different hardware architectures
  * and sampling methods, please @see ::rocprofiler_pc_sampling_record_kind_t
  *
  * Configuration Rules:
- * This function configures PC sampling in a single call. The @p record_specs array specifies
+ * This function configures PC sampling in a single call. The @p record_kinds array specifies
  * which record types should be enabled, with the following validation rules:
- * - The array must contain at least one element (num_specs > 0)
- * - At most ONE valid version (VERSION_0 through VERSION_5) can be included in the array
+ * - The array must contain at least one element (num_record_kinds > 0)
+ * - At most ONE valid version (V0_SAMPLE through V5_SAMPLE) can be included in the array
  * - INVALID_SAMPLE can be included independently, either alone or alongside one valid version
- * - Each record version can appear at most once in the array (no duplicates)
+ * - Each record kind can appear at most once in the array (no duplicates)
  * - Violating any of these rules returns ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT
  *
  * The order of elements in the array does not matter.
  *
  * Example 1 - ALLOWED: Configure only valid samples:
  * @code
- * // Configure to receive only valid samples in VERSION_0 format
+ * // Configure to receive only valid samples in V0 format
  * // Invalid samples will be silently discarded
- * rocprofiler_pc_sampling_record_spec_t specs[] = {
- *     {
- *         .size = sizeof(rocprofiler_pc_sampling_record_spec_t),
- *         .record_version = ROCPROFILER_PC_SAMPLING_RECORD_VERSION_0,
- *         .record_size = sizeof(rocprofiler_pc_sampling_record_v0_t)
- *     }
+ * rocprofiler_pc_sampling_record_kind_t record_kinds[] = {
+ *     ROCPROFILER_PC_SAMPLING_RECORD_V0_SAMPLE
  * };
  *
- * rocprofiler_configure_pc_sampling_service_(
+ * rocprofiler_configure_pc_sampling_service_v2(
  *     context_id, agent_id, method, unit, interval, buffer_id,
- *     specs, 1, 0);
+ *     record_kinds, 1, 0);
  * @endcode
  *
  * Example 2 - ALLOWED: Configure ONLY invalid samples:
  * @code
  * // Configure to receive only invalid/error samples
  * // Useful for debugging sampling failures
- * rocprofiler_pc_sampling_record_spec_t specs[] = {
- *     {
- *         .size = sizeof(rocprofiler_pc_sampling_record_spec_t),
- *         .record_version = ROCPROFILER_PC_SAMPLING_RECORD_INVALID_SAMPLE,
- *         .record_size = sizeof(rocprofiler_pc_sampling_record_invalid_t)
- *     }
+ * rocprofiler_pc_sampling_record_kind_t record_kinds[] = {
+ *     ROCPROFILER_PC_SAMPLING_RECORD_INVALID_SAMPLE
  * };
  *
- * rocprofiler_configure_pc_sampling_service_(
+ * rocprofiler_configure_pc_sampling_service_v2(
  *     context_id, agent_id, method, unit, interval, buffer_id,
- *     specs, 1, 0);
+ *     record_kinds, 1, 0);
  * @endcode
  *
  * Example 3 - ALLOWED: Configure valid samples AND invalid samples:
  * @code
- * // Configure to receive both valid samples (VERSION_0) and invalid samples
+ * // Configure to receive both valid samples (V0) and invalid samples
  * // Buffer will receive both record types
- * rocprofiler_pc_sampling_record_spec_t specs[] = {
- *     {
- *         .size = sizeof(rocprofiler_pc_sampling_record_spec_t),
- *         .record_version = ROCPROFILER_PC_SAMPLING_RECORD_VERSION_0,
- *         .record_size = sizeof(rocprofiler_pc_sampling_record_v0_t)
- *     },
- *     {
- *         .size = sizeof(rocprofiler_pc_sampling_record_spec_t),
- *         .record_version = ROCPROFILER_PC_SAMPLING_RECORD_INVALID_SAMPLE,
- *         .record_size = sizeof(rocprofiler_pc_sampling_record_invalid_t)
- *     }
+ * rocprofiler_pc_sampling_record_kind_t record_kinds[] = {
+ *     ROCPROFILER_PC_SAMPLING_RECORD_V0_SAMPLE,
+ *     ROCPROFILER_PC_SAMPLING_RECORD_INVALID_SAMPLE
  * };
  *
- * rocprofiler_configure_pc_sampling_service_(
+ * rocprofiler_configure_pc_sampling_service_v2(
  *     context_id, agent_id, method, unit, interval, buffer_id,
- *     specs, 2, 0);
+ *     record_kinds, 2, 0);
  *
  * // Now buffer receives both:
  * // - Valid samples as rocprofiler_pc_sampling_record_v0_t
@@ -238,57 +207,41 @@ rocprofiler_configure_pc_sampling_service(rocprofiler_context_id_t         conte
  *
  * Example 4 - INVALID: Configuring two different valid versions:
  * @code
- * // ERROR: Attempting to configure VERSION_0 and VERSION_1 together
+ * // ERROR: Attempting to configure V0_SAMPLE and V1_SAMPLE together
  * // Returns ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT
- * rocprofiler_pc_sampling_record_spec_t specs[] = {
- *     {
- *         .size = sizeof(rocprofiler_pc_sampling_record_spec_t),
- *         .record_version = ROCPROFILER_PC_SAMPLING_RECORD_VERSION_0,
- *         .record_size = sizeof(rocprofiler_pc_sampling_record_v0_t)
- *     },
- *     {
- *         .size = sizeof(rocprofiler_pc_sampling_record_spec_t),
- *         .record_version = ROCPROFILER_PC_SAMPLING_RECORD_VERSION_1,  // ERROR!
- *         .record_size = sizeof(rocprofiler_pc_sampling_record_v1_t)
- *     }
+ * rocprofiler_pc_sampling_record_kind_t record_kinds[] = {
+ *     ROCPROFILER_PC_SAMPLING_RECORD_V0_SAMPLE,
+ *     ROCPROFILER_PC_SAMPLING_RECORD_V1_SAMPLE  // ERROR!
  * };
  *
  * // This will FAIL - only one valid version allowed
- * rocprofiler_configure_pc_sampling_service_(
+ * rocprofiler_configure_pc_sampling_service_v2(
  *     context_id, agent_id, method, unit, interval, buffer_id,
- *     specs, 2, 0);
+ *     record_kinds, 2, 0);
  * @endcode
  *
- * Example 5 - INVALID: Duplicate record version:
+ * Example 5 - INVALID: Duplicate record kind:
  * @code
  * // ERROR: Attempting to configure INVALID_SAMPLE twice
  * // Returns ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT
- * rocprofiler_pc_sampling_record_spec_t specs[] = {
- *     {
- *         .size = sizeof(rocprofiler_pc_sampling_record_spec_t),
- *         .record_version = ROCPROFILER_PC_SAMPLING_RECORD_INVALID_SAMPLE,
- *         .record_size = sizeof(rocprofiler_pc_sampling_record_invalid_t)
- *     },
- *     {
- *         .size = sizeof(rocprofiler_pc_sampling_record_spec_t),
- *         .record_version = ROCPROFILER_PC_SAMPLING_RECORD_INVALID_SAMPLE,  // ERROR!
- *         .record_size = sizeof(rocprofiler_pc_sampling_record_invalid_t)
- *     }
+ * rocprofiler_pc_sampling_record_kind_t record_kinds[] = {
+ *     ROCPROFILER_PC_SAMPLING_RECORD_INVALID_SAMPLE,
+ *     ROCPROFILER_PC_SAMPLING_RECORD_INVALID_SAMPLE  // ERROR!
  * };
  *
- * // This will FAIL - duplicate record versions not allowed
- * rocprofiler_configure_pc_sampling_service_(
+ * // This will FAIL - duplicate record kinds not allowed
+ * rocprofiler_configure_pc_sampling_service_v2(
  *     context_id, agent_id, method, unit, interval, buffer_id,
- *     specs, 2, 0);
+ *     record_kinds, 2, 0);
  * @endcode
  *
  * Example 6 - INVALID: Empty array:
  * @code
- * // ERROR: Empty array (num_specs = 0)
+ * // ERROR: Empty array (num_record_kinds = 0)
  * // Returns ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT
- * rocprofiler_configure_pc_sampling_service_(
+ * rocprofiler_configure_pc_sampling_service_v2(
  *     context_id, agent_id, method, unit, interval, buffer_id,
- *     NULL, 0, 0);  // ERROR: At least one record spec required
+ *     NULL, 0, 0);  // ERROR: At least one record kind required
  * @endcode
  *
  * Rocprofiler-SDK checks whether the requested configuration is actually supported
@@ -335,8 +288,8 @@ rocprofiler_configure_pc_sampling_service(rocprofiler_context_id_t         conte
  * @param [in] unit       - The unit appropriate to the PC sampling type/method.
  * @param [in] interval   - frequency at which PC samples are generated
  * @param [in] buffer_id  - id of the buffer used for delivering PC samples
- * @param [in] record_specs - array of record specifications defining which record formats to enable
- * @param [in] num_specs  - number of elements in the record_specs array (must be > 0)
+ * @param [in] record_kinds - array of record kinds defining which record formats to enable
+ * @param [in] num_record_kinds - number of elements in the record_kinds array (must be > 0)
  * @param [in] flags      - reserved for future use, must be 0
  * @return ::rocprofiler_status_t
  * @retval ::ROCPROFILER_STATUS_SUCCESS PC sampling service configured successfully
@@ -347,32 +300,29 @@ rocprofiler_configure_pc_sampling_service(rocprofiler_context_id_t         conte
  * 4. GPU device does not support requested PC sampling method.
  * @retval ::ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL the amdgpu driver installed on the system
  * does not support the PC sampling feature
- * @retval ::ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_ABI record_size does not match the size of the
- * requested record version struct, or the record version is not supported
  * @retval ::ROCPROFILER_STATUS_ERROR a general error caused by the amdgpu driver
  * @retval ::ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT counter collection service already
  * setup in the context
  * @retval ::ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT function invoked with invalid arguments:
- * - num_specs is 0 (empty array)
- * - record_specs is NULL
- * - multiple valid versions (VERSION_0-5) in the array
- * - duplicate record versions in the array
- * - invalid record_version value
- * - record_size mismatch for any spec
+ * - num_record_kinds is 0 (empty array)
+ * - record_kinds is NULL
+ * - multiple valid versions (V0_SAMPLE-V5_SAMPLE) in the array
+ * - duplicate record kinds in the array
+ * - invalid record_kind value
  * - flags is not 0
  */
 ROCPROFILER_SDK_EXPERIMENTAL
 rocprofiler_status_t
 rocprofiler_configure_pc_sampling_service_v2(
-    rocprofiler_context_id_t                     context_id,
-    rocprofiler_agent_id_t                       agent_id,
-    rocprofiler_pc_sampling_method_t             method,
-    rocprofiler_pc_sampling_unit_t               unit,
-    uint64_t                                     interval,
-    rocprofiler_buffer_id_t                      buffer_id,
-    const rocprofiler_pc_sampling_record_spec_t* record_specs,
-    size_t                                       num_specs,
-    uint32_t                                     flags) ROCPROFILER_API;
+    rocprofiler_context_id_t                   context_id,
+    rocprofiler_agent_id_t                     agent_id,
+    rocprofiler_pc_sampling_method_t           method,
+    rocprofiler_pc_sampling_unit_t             unit,
+    uint64_t                                   interval,
+    rocprofiler_buffer_id_t                    buffer_id,
+    const rocprofiler_pc_sampling_record_kind_t* record_kinds,
+    size_t                                     num_record_kinds,
+    uint32_t                                   flags) ROCPROFILER_API;
 
 /**
  * @brief (experimental) Enumeration describing values of flags of
@@ -463,7 +413,7 @@ rocprofiler_status_t
 rocprofiler_query_pc_sampling_agent_configurations(
     rocprofiler_agent_id_t                                agent_id,
     rocprofiler_available_pc_sampling_configurations_cb_t cb,
-    void* user_data) ROCPROFILER_API ROCPROFILER_NONNULL(2, 3);
+    void* user_data) ROCPROFILER_API ROCPROFILER_NONNULL(2);
 
 /**
  * @brief (experimental) Information about the GPU part where wave was executing
@@ -1203,7 +1153,7 @@ rocprofiler_status_t
 rocprofiler_query_pc_sampling_arbiter_fields(rocprofiler_agent_id_t                      agent_id,
                                              rocprofiler_pc_sampling_arbiter_fields_cb_t cb,
                                              void* user_data) ROCPROFILER_API
-    ROCPROFILER_NONNULL(2, 3);
+    ROCPROFILER_NONNULL(2);
 
 /**
  * @brief (experimental) Callback to receive extracted arbiter state field values.
@@ -1254,10 +1204,7 @@ rocprofiler_pc_sampling_get_arbiter_state_fields(
     const rocprofiler_pc_sampling_arbiter_state_field_id_t* field_ids,
     size_t                                                  num_fields,
     rocprofiler_pc_sampling_arbiter_field_values_cb_t       cb,
-    void* user_data) ROCPROFILER_API ROCPROFILER_NONNULL(2, 4, 5);
-
-// TODO: get rid of the size from all records
-// TODO: ensure the size of the records, once you get rid of the `size` field.
+    void* user_data) ROCPROFILER_API ROCPROFILER_NONNULL(2, 4);
 
 /// NOTE: the following code is kept so that we could quickly compile the existing code before full
 /// refactoring
