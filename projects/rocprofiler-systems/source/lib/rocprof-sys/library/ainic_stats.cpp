@@ -26,7 +26,7 @@ const char* nic_stats::TX_RDMA_UCAST_PKTS  = "tx_rdma_ucast_pkts";
 const char* nic_stats::RX_RDMA_CNP_PKTS    = "rx_rdma_cnp_pkts";
 const char* nic_stats::TX_RDMA_CNP_PKTS    = "tx_rdma_cnp_pkts";
 
-ai_nic_stats_collector::ai_nic_stats_collector() {}
+ai_nic_stats_collector::ai_nic_stats_collector() = default;
 
 bool
 ai_nic_stats_collector::find_nic(const std::string& nic, nic_stats& data) const

@@ -1,6 +1,6 @@
 #include "library/amd_smi_ainic.hpp"
 
-#include "core/agent.hpp"
+#include "core/agent_manager.hpp"
 #include "core/trace_cache/cache_manager.hpp"
 #include "core/trace_cache/cacheable.hpp"
 #include "core/trace_cache/sample_type.hpp"
@@ -80,7 +80,7 @@ nic_data::sample()
     m_ts = _timestamp;
 
     trace_cache::get_buffer_storage().store(trace_cache::ainic_sample{
-        _timestamp, _rx_rdma_cnp_pkts, _tx_rdma_cnp_pkts, _rx_ucast_bytes,
+        _timestamp, _nic_index, _rx_rdma_cnp_pkts, _tx_rdma_cnp_pkts, _rx_ucast_bytes,
         _tx_ucast_bytes, _rx_ucast_pkts, _tx_ucast_pkts });
 }
 
@@ -96,31 +96,30 @@ metadata_initialize_ainic_smi_tracks(uint32_t nic_index)
 {
     const auto   thread_id = std::nullopt;
     std::string& nic       = nic_data::nic_vec[nic_index];
-    std::string  track_name{ fmt::format("{} ({})", nic, (int) nic_index) };
 
     trace_cache::get_metadata_registry().add_track(
         { trace_cache::info::annotate_with_nic<category::amd_smi_nic_rx_cnp_pkts>(
-              track_name),
+              nic, nic_index),
           thread_id, "{}" });
     trace_cache::get_metadata_registry().add_track(
         { trace_cache::info::annotate_with_nic<category::amd_smi_nic_tx_cnp_pkts>(
-              track_name),
+              nic, nic_index),
           thread_id, "{}" });
     trace_cache::get_metadata_registry().add_track(
         { trace_cache::info::annotate_with_nic<category::amd_smi_nic_rx_ucast_bytes>(
-              track_name),
+              nic, nic_index),
           thread_id, "{}" });
     trace_cache::get_metadata_registry().add_track(
         { trace_cache::info::annotate_with_nic<category::amd_smi_nic_tx_ucast_bytes>(
-              track_name),
+              nic, nic_index),
           thread_id, "{}" });
     trace_cache::get_metadata_registry().add_track(
         { trace_cache::info::annotate_with_nic<category::amd_smi_nic_rx_ucast_pkts>(
-              track_name),
+              nic, nic_index),
           thread_id, "{}" });
     trace_cache::get_metadata_registry().add_track(
         { trace_cache::info::annotate_with_nic<category::amd_smi_nic_tx_ucast_pkts>(
-              track_name),
+              nic, nic_index),
           thread_id, "{}" });
 }
 
@@ -134,7 +133,7 @@ metadata_initialize_ainic_smi_pmc(uint32_t nic_index)
     const char* BLOCK            = "";
     const char* EXPRESSION       = "";
     auto        ni               = node_info::get_instance();
-    const char* TARGET_ARCH      = "NIC";
+    const char* TARGET_ARCH      = "";
 
     trace_cache::get_metadata_registry().add_pmc_info(
         { agent_type::NIC, nic_index, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
@@ -333,6 +332,22 @@ nic_setup()
                 nic_set.insert(nic);
             }
         }
+    }
+
+    for(auto nic_index{ 0u }; nic_index < nic_data::nic_vec.size(); ++nic_index)
+    {
+        std::string& nic       = nic_data::nic_vec[nic_index];
+        auto         cur_agent = agent{ agent_type::NIC,
+                                0,
+                                nic_index,
+                                nic_index,
+                                static_cast<int32_t>(nic_index),
+                                static_cast<int32_t>(nic_index),
+                                nic,
+                                nic,
+                                "AI NIC",
+                                "AI NIC" };
+        get_agent_manager_instance().insert_agent(cur_agent);
     }
 
     nic_data::setup();

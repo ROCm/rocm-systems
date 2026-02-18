@@ -1301,5 +1301,12 @@ perfetto_processor_t::handle([[maybe_unused]] const in_time_sample& _sample)
     }
 }
 
+void
+perfetto_processor_t::handle([[maybe_unused]] const ainic_sample& _ainic)
+{
+#if ROCPROFSYS_USE_ROCM > 0
+#endif
+}
+
 }  // namespace trace_cache
 }  // namespace rocprofsys
