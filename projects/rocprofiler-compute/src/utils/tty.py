@@ -404,7 +404,10 @@ def _compute_operator_prefix_stats(df: pd.DataFrame) -> dict[str, tuple[float, i
 
 
 def show_torch_operator_hierarchy(
-    operator_name: str, df: pd.DataFrame, index: int | None = None
+    operator_name: str,
+    df: pd.DataFrame,
+    index: int | None = None,
+    kernel_name_to_id: dict[str, int] | None = None,
 ) -> None:
     """
     Display the PyTorch operator listing with hierarchy, numbering, and durations.
@@ -412,6 +415,7 @@ def show_torch_operator_hierarchy(
     Shows Operator N: 'name', then for each hierarchy path: full_name
     (total_duration, count), the hierarchy tree, and kernel launches with
     optional kernel durations (total_duration ms) when timestamps are present.
+    If kernel_name_to_id is provided, each kernel line shows (id N) for use with -k.
     """
     print(f"\n{'-' * 80}")
     if index is not None:
@@ -514,14 +518,19 @@ def show_torch_operator_hierarchy(
 
         ns_to_ms = 1.0 / 1_000_000.0
         for kernel_name, num_launches in kernel_counts.items():
+            id_suffix = ""
+            if kernel_name_to_id is not None and kernel_name in kernel_name_to_id:
+                id_suffix = f" (id {kernel_name_to_id[kernel_name]})"
             if has_kernel_ts and kernel_name in kernel_duration_ns:
                 total_ms = kernel_duration_ns[kernel_name] * ns_to_ms
                 kernel_info = (
-                    f"|--> {kernel_name} ({num_launches} launches, "
+                    f"|--> {kernel_name}{id_suffix} ({num_launches} launches, "
                     f"total_duration: {total_ms:.2f} ms)\n"
                 )
             else:
-                kernel_info = f"|--> {kernel_name} ({num_launches} launches)\n"
+                kernel_info = (
+                    f"|--> {kernel_name}{id_suffix} ({num_launches} launches)\n"
+                )
             kernels_info.append(kernel_info)
             for file_name, line_count in kernel_context[kernel_name][
                 "contexts"
