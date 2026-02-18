@@ -116,7 +116,7 @@ public:
     std::unique_ptr<aql::ThreadTraceAQLPacketFactory> factory{nullptr};
 
     /// Start the trace and spawn helper threads when triple buffering is used.
-    std::shared_ptr<Signal> start_thread_trace(std::shared_ptr<std::atomic<bool>> running_flag);
+    std::shared_ptr<Signal> start_thread_trace(std::shared_ptr<std::atomic<int>> running_flag);
     /// Stop the trace and flush the outstanding hardware packets.
     std::unique_ptr<Signal> stop_thread_trace();
 
@@ -132,9 +132,9 @@ private:
     std::unique_ptr<hsa::TraceControlAQLPacket>           control_packet{nullptr};
     std::unique_ptr<code_object::CodeobjCallbackRegistry> codeobj_reg{nullptr};
 
-    std::thread                        consumer{};
-    std::thread                        producer{};
-    std::shared_ptr<std::atomic<bool>> worker_flag{nullptr};
+    std::thread                       consumer{};
+    std::thread                       producer{};
+    std::shared_ptr<std::atomic<int>> worker_flag{nullptr};
 };
 
 class DispatchThreadTracer
@@ -206,8 +206,8 @@ private:
     std::map<rocprofiler_agent_id_t, std::unique_ptr<ThreadTracerAgent>> agents{};
     std::map<rocprofiler_agent_id_t, thread_trace_parameter_pack>        params{};
 
-    std::mutex                         agent_mut;
-    std::shared_ptr<std::atomic<bool>> worker_flag{nullptr};
+    std::mutex                        agent_mut;
+    std::shared_ptr<std::atomic<int>> worker_flag{nullptr};
 };
 
 /// Install the thread trace service for newly created contexts.
