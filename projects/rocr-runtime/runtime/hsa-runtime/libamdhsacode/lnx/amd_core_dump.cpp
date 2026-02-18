@@ -60,6 +60,8 @@
 #include "./amd_hsa_code_util.hpp"
 #include "core/inc/amd_core_dump.hpp"
 #include "hsakmt/hsakmt.h"
+#include "core/inc/amd_gpu_agent.h"
+#include "core/inc/amd_aql_queue.h"
 
 constexpr char SNAPSHOT_INFO_ALIGNMENT = 0x8;
 constexpr uint32_t LOAD_ALIGNMENT_SHIFT = 4;
@@ -255,6 +257,105 @@ class PackageBuilder {
   std::stringstream st_;
 };
 
+/**
+ * Track memory regions that should be included in 
+ * lightweight coredumps (Scratch + CWSR).
+ */
+class MemoryRegionFilter {
+public:
+  struct AddressRange {
+    uint64_t start;
+    uint64_t end;
+    
+    bool contains(uint64_t addr, uint64_t size) const {
+      uint64_t addr_end = addr + size;
+        // Check if the segment overlaps with this range
+        return !(addr_end <= start || addr >= end);
+    }
+  };
+
+  /* Helper to check if address range overlaps with 
+    any scratch or CWSR memory range */
+  bool should_include(uint64_t& addr, uint64_t& size, std::string& path) {
+    for(const auto& range : scratch_ranges) {
+      if (range.contains(addr, size)) {
+        // only dump scratch range that is mapped to a GPU and not just reserved
+        if (!path.empty() && (path.rfind("/dev/dri/renderD", 0) == 0)) return true;
+        return false;
+      }
+    }
+
+    for (const auto& range : cwsr_ranges) {
+      if (range.contains(addr, size)) return true;
+    }
+    return false;
+  }
+
+  void add_scratch_range(uint64_t start, uint64_t size) {
+    if (size > 0) {
+      scratch_ranges.push_back({start, start + size});
+    }
+  }
+
+  void add_cwsr_range(uint64_t start, uint64_t size) {
+    if (size > 0) {
+      cwsr_ranges.push_back({start, start + size});
+    }
+  }
+
+private:
+  std::vector<AddressRange> scratch_ranges;
+  std::vector<AddressRange> cwsr_ranges;
+}; 
+
+/* Build list of memory regions to be included in the lightweight coredump */
+static hsa_status_t build_lightweight_coredump_ranges(MemoryRegionFilter& filter) {
+  // Get all the GPU agents from runtime
+  const auto& gpu_agents = core::Runtime::runtime_singleton_->gpu_agents();
+
+  for(const core::Agent* agent : gpu_agents) {
+    const AMD::GpuAgent* gpu_agent = static_cast<const AMD::GpuAgent*>(agent);
+
+    // Add scratch memory range for this agent by getting the 
+    // size and base_address from agent's scratch_pool_
+    void* scratch_base = gpu_agent->GetScratchBase();
+    size_t scratch_size = gpu_agent->GetScratchSize();
+
+    if (scratch_base && scratch_size > 0) {
+      // Filter will hold all of the reserved address range, even if unused 
+      filter.add_scratch_range(reinterpret_cast<uint64_t>(scratch_base), scratch_size);
+      debug_print("Added scratch range: 0x%lx - 0x%lx (size: %zu)\n",
+                  reinterpret_cast<uint64_t>(scratch_base),
+                  reinterpret_cast<uint64_t>(scratch_base) + scratch_size,
+                  scratch_size);
+    }
+
+    // Go through all AQL queues for this agent
+    const auto& queues = gpu_agent->GetAqlQueues();
+    for(const core::Queue* queue : queues) {
+      const AMD::AqlQueue* aql_queue = static_cast<const AMD::AqlQueue*>(queue);
+
+      // Get CWSR memory allocation for this queue
+      HsaQueueInfo queue_info;
+      memset(&queue_info, 0, sizeof(queue_info));
+
+      if (HSAKMT_CALL(hsaKmtGetQueueInfo(aql_queue->aql_queue_id(), &queue_info)) == HSAKMT_STATUS_SUCCESS) {
+        if (queue_info.SaveAreaHeader) {
+          uintptr_t cwsr_addr = reinterpret_cast<uintptr_t>(queue_info.SaveAreaHeader);
+          uint64_t cwsr_size = static_cast<uint64_t>(queue_info.SaveAreaSizeInBytes);
+
+          if (cwsr_size > 0) {
+            filter.add_cwsr_range(cwsr_addr, cwsr_size);
+            debug_print("Added CWSR range to builder: %p to %p, total size = %d\n", 
+              cwsr_addr, (cwsr_addr + cwsr_size), cwsr_size);
+          }
+        } 
+      }
+    }
+  }
+  return HSA_STATUS_SUCCESS;
+}
+
 enum SegmentType { LOAD, NOTE };
 struct SegmentBuilder;
 
@@ -385,6 +486,18 @@ struct LoadSegmentBuilder : public SegmentBuilder {
     if (fd_ != -1) close(fd_);
   }
   hsa_status_t Collect(SegmentsInfo& segments) override {
+    const bool lightweight_dump = core::Runtime::runtime_singleton_->flag().lightweight_core_dump_enable();
+
+    impl::MemoryRegionFilter filter;
+    if (lightweight_dump) {
+      // build memory region filter to only include Scratch + CWSR allocations
+      hsa_status_t status = impl::build_lightweight_coredump_ranges(filter);
+      if (status != HSA_STATUS_SUCCESS) {
+        fprintf(stderr, "Failed to build lightweight core dump filter\n");
+        return status;
+      }
+    }
+    
     const std::string maps_path = "/proc/self/maps";
     std::ifstream maps(maps_path);
     if (!maps.is_open()) {
@@ -394,6 +507,7 @@ struct LoadSegmentBuilder : public SegmentBuilder {
 
     std::string line;
     while (std::getline(maps, line)) {
+      std::cout << "From /proc/self/maps = " << line << std::endl;
       std::istringstream isl{ line };
       std::string address, perms, offset, dev, inode, path;
       if (!(isl >> address >> perms >> offset >> dev >> inode)) {
@@ -403,29 +517,41 @@ struct LoadSegmentBuilder : public SegmentBuilder {
 
       std::getline(isl >> std::ws, path);
 
-      /* Look for the /dev/dri/renderD* files.  */
-      if (path.rfind("/dev/dri/renderD", 0) == 0) {
-        uint64_t start, end;
-        if (sscanf(address.c_str(), "%lx-%lx", &start, &end) != 2) {
-          fprintf(stderr, "Failed to parse '%s'", maps_path.c_str());
-          return HSA_STATUS_ERROR;
-        }
-        uint32_t flags = SHF_ALLOC;
-        flags |= (perms.find('w', 0) != std::string::npos) ? SHF_WRITE : 0;
-        flags |= (perms.find('x', 0) != std::string::npos) ? SHF_EXECINSTR : 0;
-        uint64_t size = end - start;
+      uint64_t start, end;
+      if (sscanf(address.c_str(), "%lx-%lx", &start, &end) != 2) {
+        fprintf(stderr, "Failed to parse '%s'", maps_path.c_str());
+        return HSA_STATUS_ERROR;
+      }
 
-        debug_print("LOAD 0x%lx size: %ld\n", start, size);
-        SegmentInfo s;
-        s.stype = LOAD;
-        s.vaddr = start;
-        s.size = size;
-        s.flags = flags;
-        s.builder = this;
-        segments.push_back(s);
-       }
-     }
-     return HSA_STATUS_SUCCESS;
+      uint64_t size = end - start;
+
+      bool is_gpu_mapping = (path.rfind("/dev/dri/renderD", 0) == 0);
+
+      if (!lightweight_dump) {
+        // full gpu coredump required; skip non-GPU path mappings from /proc/self/maps
+        if (!is_gpu_mapping) continue;
+      } else {
+        // need to generate a lightweight coredump with only scratch + cwsr allocations
+        if (!filter.should_include(start, size, path)) {
+          debug_print("Skipping load 0x%lx size: %ld (Not Scratch or CWSR)\n", start, size);
+          continue;
+        }
+      }
+
+      uint32_t flags = SHF_ALLOC;
+      flags |= (perms.find('w', 0) != std::string::npos) ? SHF_WRITE : 0;
+      flags |= (perms.find('x', 0) != std::string::npos) ? SHF_EXECINSTR : 0;
+
+      debug_print("LOAD 0x%lx size: %ld\n", start, size);
+      SegmentInfo s;
+      s.stype = LOAD;
+      s.vaddr = start;
+      s.size = size;
+      s.flags = flags;
+      s.builder = this;
+      segments.push_back(s);
+    }
+    return HSA_STATUS_SUCCESS;
   }
 
   hsa_status_t Read(void* buf, size_t buf_size, off_t offset) override {
