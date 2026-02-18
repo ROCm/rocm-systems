@@ -213,7 +213,7 @@ class GraphNode : public hipGraphNodeDOTAttribute {
     amd::ScopedLock lock(nodeSetLock_);
     nodeSet_.insert(this);
     isEnabled_ = node.isEnabled_;
-    dev_id_ = node.dev_id_;
+    dev_id_ = ihipGetDevice();
   }
 
   virtual ~GraphNode() {
