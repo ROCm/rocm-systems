@@ -158,10 +158,11 @@ namespace rocshmem
    * Returns the index of the NIC closest to the given GPU
    *
    * @param[in] gpuIndex Index of the GPU to query
+   * @param[in] hca_list Include list of device names that can be used (Exclude if prefixed by ^)
    * @param[out] dev_name Name of of IB Verbs capable NIC index closest to GPU gpuIndex
    * @returns index of IB Verbs capable NIC index closest to GPU gpuIndex, or -1 if unable to detect
    */
-  int GetClosestNicToGpu(int gpuIndex, const char** dev_name);
+  int GetClosestNicToGpu(int gpuIndex, const char* hca_list, const char** dev_name);
 
   /**
    * Returns information about number of available Devices
@@ -190,16 +191,6 @@ namespace rocshmem
       exit(EXIT_FAILURE);                                                     \
     }                                                                         \
 } while (0)
-
-#define CHECK_HSA(cmd)            \
-  do {                            \
-    hsa_status_t error = cmd;                                                      \
-    if (error != HSA_STATUS_SUCCESS) {                                        \
-      fprintf(stderr, "error: %d at %s:%d\n", error, __FILE__, __LINE__);     \
-      exit(EXIT_FAILURE);                                                     \
-    }                                                                         \
-} while (0)
-
 
 // Helper macros for calling RDMA functions and reporting errors
 #ifdef VERBS_DEBUG

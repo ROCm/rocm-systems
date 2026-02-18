@@ -32,7 +32,7 @@ The supported communication runtimes span multiple layers of the parallel comput
    **Automatic Detection and Default Behavior:**
 
    * **MPI** (``ROCPROFSYS_USE_MPIP``): Enabled by default (``ON``). When using binary instrumentation, ROCm Systems Profiler automatically detects MPI symbols in the target application and enables MPI support.
-   * **UCX** (``ROCPROFSYS_USE_UCX``): Enabled by default (``ON``). Automatically intercepts UCX functions if the UCX library is loaded by the application.
+   * **UCX** (``ROCPROFSYS_USE_UCX``): Disabled by default (``OFF``). Must be explicitly enabled to trace UCX operations. This is a runtime user-configurable option.
    * **RCCL** (``ROCPROFSYS_USE_RCCLP``): Disabled by default (``OFF``). Must be explicitly enabled to trace RCCL operations.
 
    These settings can be controlled at runtime using their respective environment variables to enable or disable tracing as needed.
@@ -153,22 +153,27 @@ In ROCm versions prior to 7.12, there is a known issue which causes the applicat
 Profiling UCX
 =============
 
+.. important::
+
+   Unlike MPI, UCX profiling is **disabled by default** and must be explicitly enabled using ``ROCPROFSYS_USE_UCX=ON``.
+
 UCX is a low-level communication framework that provides the foundation for efficient data movement in high-performance computing applications. UCX profiling enables detailed analysis of low-level communication primitives, RDMA operations, and transport-layer behavior.
 
-UCX profiling is **enabled by default** (``ROCPROFSYS_USE_UCX=ON``). When an application uses UCX — either directly or indirectly through higher-level libraries like MPI or RCCL — rocprofiler-systems automatically intercepts and traces UCX function calls.
+When enabled, rocprofiler-systems automatically intercepts and traces UCX function calls when an application uses UCX — either directly or indirectly through higher-level libraries like MPI or RCCL.
 
 Configuration
 -------------
 
-Since UCX profiling is enabled by default, you typically don't need to explicitly enable it.  However, if you need to disable UCX tracing, you can do so with the following configuration settings.
+UCX profiling must be explicitly enabled at runtime. To enable UCX tracing and profiling:
 
 .. code-block:: shell
 
-   # UCX profiling is enabled by default - no action needed
+   # UCX profiling is disabled by default - must be explicitly enabled
+   export ROCPROFSYS_USE_UCX=ON
    export ROCPROFSYS_TRACE=ON
    export ROCPROFSYS_PROFILE=ON
 
-   # To explicitly disable UCX profiling if needed:
+   # To explicitly disable UCX profiling (default behavior):
    export ROCPROFSYS_USE_UCX=OFF
 
 
@@ -266,12 +271,13 @@ Multi-Layer Communication Analysis
 
 One of the key strengths of ROCm Systems Profiler is the ability to profile multiple communication layers simultaneously, providing a comprehensive view of the communication stack.
 
-Since MPI and UCX profiling are enabled by default, profiling applications that use both layers requires only enabling tracing and profiling. To add RCCL profiling:
+Since MPI profiling is enabled by default while UCX and RCCL require explicit enablement, profiling applications that use multiple layers requires enabling the specific layers you want to trace:
 
 .. code-block:: shell
 
-   # MPI and UCX are enabled by default
-   # Explicitly enable RCCL profiling
+   # MPI is enabled by default
+   # Explicitly enable UCX and RCCL profiling
+   export ROCPROFSYS_USE_UCX=ON
    export ROCPROFSYS_USE_RCCLP=ON
    export ROCPROFSYS_TRACE=ON
    export ROCPROFSYS_PROFILE=ON
@@ -307,7 +313,7 @@ When profiling communication-intensive applications, consider the following reco
 
 **Add Lower-Level Details**
 
-* Enable UCX profiling to understand transport-layer behavior and RDMA utilization
+* Enable UCX profiling (``ROCPROFSYS_USE_UCX=ON``) to understand transport-layer behavior and RDMA utilization
 * Use hierarchical profiles to correlate high-level operations with low-level primitives
 
 **Minimize Overhead**
