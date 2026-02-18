@@ -32,6 +32,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Added `--experimental` flag to enable experimental features that are under development. This flag is required when using any experimental features. 
   * Use `rocprof-compute --experimental --help` to see currently available experimental features.
 
+* Added missing metric descriptions for gfx950 architecture
+
 ### Changed
 
 * Default output format for the underlying ROCprofiler-SDK tool has been changed from ``csv`` to ``rocpd``.
