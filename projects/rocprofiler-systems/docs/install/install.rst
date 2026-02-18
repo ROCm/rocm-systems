@@ -126,7 +126,7 @@ Optional third-party packages
 
 * `ROCm <https://rocm.docs.amd.com/projects/install-on-linux/en/latest>`_
 
-  * AMD SMI Lib for GPU monitoring
+  * AMD SMI Lib for GPU and AI NIC monitoring
   * ROCprofiler SDK for GPU hardware counters and ROCm tracing
 
 * Python
@@ -225,6 +225,7 @@ in `the Perfetto UI <https://ui.perfetto.dev>`_.
        -D ROCPROFSYS_BUILD_BOOST=ON                      \
        -D ROCPROFSYS_BUILD_ELFUTILS=ON                   \
        -D ROCPROFSYS_BUILD_LIBIBERTY=ON                  \
+       -D ROCPROFSYS_USE_AINIC=ON               \
        -S rocm-systems/projects/rocprofiler-systems
    cmake --build rocprof-sys-build --target all --parallel 8
    cmake --build rocprof-sys-build --target install

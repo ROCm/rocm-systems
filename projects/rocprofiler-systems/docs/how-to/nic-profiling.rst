@@ -8,6 +8,13 @@ Network performance profiling
 
 `ROCm Systems Profiler <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems>`_ supports network profiling.
 
+There are two kinds of network performance profiling:
+
+* Profiling using PAPI events
+* AI NIC profiling using amd-smi
+
+We first describe profiling via PAPI.
+
 All network events that can be traced on the system can be listed by running the command:
 
 .. code-block:: shell
@@ -129,3 +136,62 @@ like this:
 .. image:: ../data/rocprof-sys-perfetto-nic-trace.png
    :alt: Visualization of a performance graph in Perfetto with network tracks
    :width: 800
+
+AI NIC profiling
+================
+
+On a host that has AI network interface cards, such as Pensando Broadcom Thor 2,
+ROCm Systems Profiler can track the following values:
+
+* RX Congestion Notification Packets
+* TX Congestion Notification Packets
+* RX unicast bytes
+* TX unicast bytes
+* RX unicast packets
+* TX unicast packets
+
+Building ROCm Systems Profiler with AI NIC support enabled
+----------------------------------------------------------
+
+By default, AI NIC support is disabled. You can enable it by setting
+
+.. code-block:: shell
+
+   -D ROCPROFSYS_USE_AINIC=ON
+
+Sampling AI NIC
+---------------
+
+With AI NIC support enabled, you have to list the cards for which you want
+to track the values. There are two ways how this can be done:
+
+* by setting the configuration variable ROCPROFSYS_SAMPLING_AINICS
+* by passing in the command-line parameter --ai-nics
+
+For example, if the host has one AI NIC named enp229s0, then you can track
+its performance in the following ways, listed from the lowest to the highest
+priority:
+
+* set ROCPROFSYS_SAMPLING_AINICS=enp229s0 in the configuration file
+* set ROCPROFSYS_SAMPLING_AINICS=enp229s0 in the environment
+* pass --ai-nics=enp229s0 to rocprof-sys-sample
+
+Suppose that we are using rocprof-sys-sample to profile AI NIC interface enp229s0
+while running command `wget -O /dev/null --no-check-certificate https://example.com`.
+Then the command can look like this:
+
+.. code-block:: shell
+
+   rocprof-sys-sample --ai-nics=enp229s0 --device -- wget -O /dev/null --no-check-certificate https://example.com
+
+If you want to track multiple NICs on the host, you can provide them in a
+comma-separated list, like this:
+
+.. code-block::shell
+
+   --ai-nics=enp229s0,enp229s1
+
+The value of this parameter can also be:
+
+* all - tracking all NICs available on the host
+* none - not tracking any NICs
