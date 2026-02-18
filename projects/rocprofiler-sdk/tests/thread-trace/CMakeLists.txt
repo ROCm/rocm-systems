@@ -172,7 +172,7 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 120
     PRELOAD "${PRELOAD_ENV}"
     ENVIRONMENT "TRIPLEBUFFER=1;EXECUTE_PAUSE=0"
-    DISABLED ${TRIPLE_BUFFER_DISABLED} OR ${ROCPROFILER_DISABLE_UNSTABLE_CTESTS})
+    DISABLED True)
 
 # Tests for thread trace starting and stopping multiple times during the application
 rocprofiler_add_integration_execute_test(

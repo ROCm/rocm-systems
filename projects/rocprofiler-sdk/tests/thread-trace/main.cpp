@@ -80,11 +80,14 @@ main(int /*argc*/, char** /*argv*/)
     bool start_and_stop   = std::getenv("STARTSTOP") ? atoi(std::getenv("STARTSTOP")) : false;
 
     int loopcount = LOOPCOUNT;
-    if(is_triple_buffer) loopcount = 30000;
+    if(start_and_stop)
+        loopcount = 5000;  // prevent multiple-cmds test taking too long / timeout
+    else if(is_triple_buffer)
+        loopcount = 30000;
 
     for(int i = 0; i < loopcount; i++)
     {
-        if(start_and_stop && (i % 1000) == 0)
+        if(start_and_stop && (i % 500) == 0)
         {
             roctxProfilerPause(0);
             roctxProfilerResume(0);
