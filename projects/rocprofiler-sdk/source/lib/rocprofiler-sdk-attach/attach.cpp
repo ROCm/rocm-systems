@@ -61,6 +61,7 @@ rocprofiler_attach_set_api_table(const char*                                   n
                                  uint64_t                                      num_tables,
                                  rocprofiler_register_library_api_table_func_t register_functor)
 {
+    DEBUG_TRACE();
     rocprofiler::common::init_logging("ROCPROFILER_ATTACH");
 
     ROCP_TRACE << "rocprofiler_attach_set_api_table called for api " << name;

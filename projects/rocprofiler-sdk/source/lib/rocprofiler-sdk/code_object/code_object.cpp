@@ -1177,12 +1177,14 @@ get_attach_table()
 void
 iterate_attach_code_object(hsa_executable_t executable, void*)
 {
+    DEBUG_TRACE();
     executable_freeze_internal(executable);
 }
 
 void
 load_attach_code_objects()
 {
+    DEBUG_TRACE();
     auto* attach_table = CHECK_NOTNULL(*(get_attach_table()));
     attach_table->rocprofiler_attach_iterate_all_code_objects(iterate_attach_code_object, nullptr);
     attach_table->rocprofiler_attach_notify_new_code_object = iterate_attach_code_object;
@@ -1251,6 +1253,7 @@ get_kernel_id(uint64_t kernel_object)
 void
 finalize()
 {
+    DEBUG_TRACE();
     if(is_shutdown.load(std::memory_order_acquire) || !get_executables() || !get_code_objects())
         return;
 
@@ -1269,6 +1272,7 @@ finalize()
 void
 iterate_loaded_code_objects(code_object_iterator_t&& func)
 {
+    DEBUG_TRACE();
     if(is_shutdown.load(std::memory_order_acquire) || !get_executables() || !get_code_objects())
         return;
     CHECK_NOTNULL(get_code_objects())
@@ -1285,6 +1289,7 @@ iterate_loaded_code_objects(code_object_iterator_t&& func)
 void
 initialize(RocAttachDispatchTable* attach_table)
 {
+    DEBUG_TRACE();
     // We need to save the attach table for later, when the code object module receives the HSA
     // table and is initialized. We must get the attach table before HSA for correct behavior. This
     // is guaranteed by rocprofiler-register.

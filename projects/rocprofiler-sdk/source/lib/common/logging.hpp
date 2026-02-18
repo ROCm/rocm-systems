@@ -30,6 +30,18 @@
 #include <optional>
 #include <string_view>
 
+#include <cstdio>
+#include <unistd.h>
+#include <sys/syscall.h>
+
+// Helper to get a stable Thread ID on Linux
+#define GET_TID() syscall(SYS_gettid)
+
+// The Debug Macro
+#define DEBUG_TRACE() \
+    fprintf(stderr, "[DEBUG] PID:%d TID:%ld | %s:%d | %s\n", \
+            getpid(), GET_TID(), __FILE__, __LINE__, __func__)
+
 #define ROCP_LOG_LEVEL_TRACE   4
 #define ROCP_LOG_LEVEL_INFO    3
 #define ROCP_LOG_LEVEL_WARNING 2

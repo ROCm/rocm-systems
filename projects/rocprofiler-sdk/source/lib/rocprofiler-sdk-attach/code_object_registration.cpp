@@ -97,6 +97,7 @@ executable_destroy(hsa_executable_t executable)
 int
 iterate_all_code_objects(rocprof_attach_code_object_iterator_t func, void* data)
 {
+    DEBUG_TRACE();
     auto* registration = CHECK_NOTNULL(get_code_object_registration());
 
     for(const auto& code_object : registration->code_objects)
@@ -137,6 +138,7 @@ ROCPROFILER_EXTERN_C_INIT
 int
 rocprofiler_attach_iterate_all_code_objects(rocprof_attach_code_object_iterator_t func, void* data)
 {
+    DEBUG_TRACE();
     return iterate_all_code_objects(func, data);
 }
 

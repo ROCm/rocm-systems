@@ -247,6 +247,7 @@ generate_marker_packet_for_kernel(
 void
 pc_sampling_service_start(context::pc_sampling_service* service)
 {
+    DEBUG_TRACE();
     auto* pc_sampling_table_ = rocprofiler::hsa::get_table().pc_sampling_ext_;
     for(const auto& [_, agent_session] : service->agent_sessions)
     {
@@ -269,6 +270,7 @@ pc_sampling_service_start(context::pc_sampling_service* service)
 void
 pc_sampling_service_stop(context::pc_sampling_service* service)
 {
+    DEBUG_TRACE();
     auto* pc_sampling_table_ = rocprofiler::hsa::get_table().pc_sampling_ext_;
     for(const auto& [_, agent_session] : service->agent_sessions)
     {
@@ -296,6 +298,7 @@ pc_sampling_service_stop(context::pc_sampling_service* service)
 void
 pc_sampling_service_finish_configuration(context::pc_sampling_service* service)
 {
+    DEBUG_TRACE();
     // This function is executed once by a single thread.
     // No synchronization needed.
     auto* pc_sampling_table_ = rocprofiler::hsa::get_table().pc_sampling_ext_;
@@ -366,6 +369,7 @@ pc_sampling_service_finish_configuration(context::pc_sampling_service* service)
 rocprofiler_status_t
 flush_internal_agent_buffers(const PCSAgentSession* agent_session)
 {
+    DEBUG_TRACE();
     // If the agent has been hidden by the ROCR_VISIBLE_DEVICES,
     // there is no ROCr internal buffers to flush.
     if(!agent_session->hsa_agent.has_value()) return ROCPROFILER_STATUS_SUCCESS;

@@ -64,6 +64,7 @@ get_configured_pc_sampling_service()
 rocprofiler_status_t
 start_service(const context::context* ctx)
 {
+    DEBUG_TRACE();
     auto* service = ctx->pc_sampler.get();
 
     context::pc_sampling_service* _expected = nullptr;
@@ -87,6 +88,7 @@ start_service(const context::context* ctx)
 rocprofiler_status_t
 stop_service(const context::context* ctx)
 {
+    DEBUG_TRACE();
     auto* service = ctx->pc_sampler.get();
 
     if(get_active_pc_sampling_service().load() != service)
@@ -311,12 +313,14 @@ flush_all_agent_buffers()
 void
 service_sync()
 {
+    DEBUG_TRACE();
     flush_all_agent_buffers();
 }
 
 void
 service_fini()
 {
+    DEBUG_TRACE();
     flush_all_agent_buffers();
 }
 

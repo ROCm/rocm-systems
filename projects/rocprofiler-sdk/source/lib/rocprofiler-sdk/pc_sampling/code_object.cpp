@@ -91,6 +91,7 @@ get_prev_notiffy_callback()
 void
 flush_pc_sampling_buffers(const rocprofiler::code_object::hsa::code_object& code_object)
 {
+    // DEBUG_TRACE();
     auto agent_id = code_object.rocp_data.rocp_agent;
     if(!is_pc_sample_service_configured(agent_id)) return;
 
@@ -183,6 +184,7 @@ load_attach_code_objects()
 void
 initialize(HsaApiTable* table)
 {
+    DEBUG_TRACE();
     (void) table;
     auto& core_table = *table->core_;
 
@@ -221,6 +223,7 @@ initialize(RocAttachDispatchTable* attach_table)
 void
 finalize()
 {
+    DEBUG_TRACE();
     rocprofiler::code_object::iterate_loaded_code_objects(
         [&](const rocprofiler::code_object::hsa::code_object& code_object) {
             flush_pc_sampling_buffers(code_object);
