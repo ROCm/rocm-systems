@@ -100,9 +100,8 @@
 .endif
 .set TTMP_PC_HI_SHIFT                          , 7
 
-.set TTMP13_HT_FLAG_BIT                        , 22           // TTMP13 bit for host‑trap
-.set TTMP13_STOCH_FLAG_BIT                     , 21           // TTMP13 bit for stochastic
-.set TTMP13_BUF_FULL_BIT                       , 31           // TTMP13 bit – buf full mark
+.set TTMP1_BUF_ID_BIT_POSITION                 , 25           // TTMP1 bit position for buffer ID
+
 .set TTMP8_DISPATCH_ID_MASK                    , 0X1FFFFFF
 // Per-sample data layout within the device buffer. Each sample is 64 bytes.
 // These are offsets from the start of a specific sample slot in the device buffer.
@@ -237,11 +236,7 @@
   s_cbranch_scc0    .check_stochastic
 
   // It's a Host Trap event.
-  s_load_b64        ttmp[14:15], ttmp[14:15], 0x0, scope:SCOPE_CU         // ttmp[14:15]=*host_trap_buffers
-  s_bitset1_b32     ttmp13, TTMP13_HT_FLAG_BIT              // set bit 22 in TTMP13
-
-  // Clear the Host Trap flag in the hardware register to acknowledge the event
-  s_setreg_imm32_b32 hwreg(HW_REG_EXCP_FLAG_PRIV, SQ_WAVE_EXCP_FLAG_PRIV_HT_SHIFT,1), 0
+  s_load_b64        ttmp[14:15], ttmp[14:15], 0x0, scope:SCOPE_CU  // ttmp[14:15]=*host_trap_buffers
   s_wait_kmcnt      0                                       // Ensure previous load is complete.
   s_branch          .profile_trap_handlers
 
@@ -253,10 +248,6 @@
 
   s_load_b64        ttmp[14:15], ttmp[14:15], 0x8, scope:SCOPE_CU  // ttmp[14:15]=*stoch_trap_buf
   s_wait_kmcnt      0
-
-  s_bitset1_b32     ttmp13, TTMP13_STOCH_FLAG_BIT           // set bit 21 in TTMP13
-
-  s_setreg_imm32_b32 hwreg(HW_REG_EXCP_FLAG_PRIV, SQ_WAVE_EXCP_FLAG_PRIV_PERF_SNAPSHOT,1), 0 // Clear the perf_snapshot flag
   s_branch          .profile_trap_handlers
 
 .handle_sw_trap:
@@ -458,18 +449,18 @@
   // v[0:1] (lane 0) now holds the previous value of buf_write_val.
   // This previous value gives the slot index for the current sample.
 
-  v_readlane_b32    ttmp6, v1, 0x0                          // previous buf_write_val[63:32]
-  s_lshr_b32        ttmp6, ttmp6, TTMP13_BUF_FULL_BIT       // ttmp6 = previous_buffer_id (0 or 1, from bit 63 of original uint64_t)
+  v_readlane_b32    ttmp6, v1, 0x0                          // ttmp6 = high 32 bits of previous buf_write_val[63:32]
+  s_lshr_b32        ttmp6, ttmp6, 31                        // ttmp6 = previous_buffer_id (0 or 1, from bit 63 of original uint64_t)
                                                             // This ttmp6 is used to select which buffer's metadata (size, watermark, signal) to use.
                                                             // It's also used to calculate the base address of the sample buffer.
-  s_bitset0_b32     ttmp13, TTMP13_BUF_FULL_BIT             // Clear our local buffer full flag for now
+  s_bitset0_b32     ttmp1, TTMP1_BUF_ID_BIT_POSITION        // Clear buffer ID bit in ttmp1 for now
 
-  s_cmp_eq_u32      ttmp6, 0                                // store off buf_to_use
-  s_cbranch_scc1    .skip_bufbit_set                        // into bit31 of ttmp13
-  s_bitset1_b32     ttmp13, TTMP13_BUF_FULL_BIT
+  s_cmp_eq_u32      ttmp6, 0                                // Check the value of the buf_to_use
+  s_cbranch_scc1    .skip_bufbit_set                        // buffer_id (buf_to_use) remains zero
+  s_bitset1_b32     ttmp1, TTMP1_BUF_ID_BIT_POSITION        // buffer_id (buf_to_use) is 1
 
 .skip_bufbit_set:
-  // ttmp[2:3]=v[0:1]-backup, ttmp[4:5]=free, ttmp6=buf_to_use (also in ttmp13.b31)
+  // ttmp[2:3]=v[0:1]-backup, ttmp[4:5]=free, ttmp6=buf_to_use (also in ttmp1[25])
   // ttmp[10:11]=EXEC backup. ttmp[14:15]=tma
   // v[0:1].lane0=local_entry, v[2:3]=original, EXEC=0x1
 
@@ -527,9 +518,9 @@
   // ttmp[2:3] is free
   // ttmp[4:5] holds &buffer
   // ttmp6 holds buf_to_use
-  // ttmp[10:11] holds original shader’s [exec_lo,exec_hi]
-  // [ttmp14:15]=‘tma’, ttmp13.b31 = buf_to_use
-  // EXEC holds holds backup of original shader’s v[0:1]
+  // ttmp[10:11] holds original shader's [exec_lo,exec_hi]
+  // [ttmp14:15]='tma', ttmp1[25] = buf_to_use
+  // EXEC holds holds backup of original shader's v[0:1]
 
   v_readlane_b32    ttmp6, v0, 0                              // ttmp6=local_entry
   s_mul_i32         ttmp2, ttmp6, SAMPLE_OFF_BYTES_PER_SAMPLE // into buffer for 64B objects
@@ -550,7 +541,7 @@
   // ttmp[4:5] holds backup of original shaders v[2:3]
   // ttmp6 = free
   // ttmp[10:11] holds original shaders [exec_lo,exec_hi]
-  // ttmp[14:15]=tma, ttmp13.b31 = buf_to_use
+  // ttmp[14:15]=tma, ttmp1[25] = buf_to_use
   // EXEC holds backup of original shaders v[0:1]
 
   v_writelane_b32   v2, ttmp2, 0                            // bring output data to v[2:3]
@@ -567,7 +558,7 @@
   // ttmp[4:5] holds backup of original shader’s v[2:3]
   // ttmp6 = free
   // ttmp[10:11] holds original shader’s [exec_lo,exec_hi]
-  // ttmp[14:15]=‘tma’, ttmp13.b31 = buf_to_use
+  // ttmp[14:15]=‘tma’, ttmp1[25] = buf_to_use
   // EXEC is 0x1
 
   // Save exec for the sample. exec_lo is inside ttmp10, while exec_hi in ttmp11 for gfx120*
@@ -595,7 +586,7 @@
   // ttmp[4:5] holds backup of original shader’s v[2:3]
   // ttmp6 = free
   // ttmp[10:11] holds original shader’s [exec_lo,exec_hi]
-  // ttmp[14:15]=‘tma’, ttmp13.b31 = buf_to_use
+  // ttmp[14:15]=‘tma’, ttmp1[25] = buf_to_use
   // EXEC is 0x1
   // Get HW_ID1 & 2 with S_GETREG_B32 with size=32 (F8 in upper bits), offset=0, and:
   // HW_ID1 = 23 (0x17), HW_ID2 = 24 (0x18)
@@ -609,7 +600,7 @@
   // ttmp[4:5] holds backup of original shader's v[2:3]
   // ttmp6 = free
   // ttmp[10:11] holds original shader's [exec_lo,exec_hi]
-  // ttmp[14:15]=tma, ttmp13.b31 = buf_to_use
+  // ttmp[14:15]=tma, ttmp1[25] = buf_to_use
   // EXEC is 0x1
 
   // Store wave_in_group and chiplet information in the following format:
@@ -630,7 +621,7 @@
   // ttmp[4:5] holds backup of original shader’s v[2:3]
   // ttmp6 = free
   // ttmp[10:11] holds original shader’s [exec_lo,exec_hi]
-  // ttmp[14:15=‘tma’, ttmp13.b31 = buf_to_use
+  // ttmp[14:15=‘tma’, ttmp1[25] = buf_to_use
   // EXEC is 0x1
 
   STORE_CORRELATION_ID
@@ -642,12 +633,13 @@
   // ttmp[4:5] holds backup of original shader's v[2:3]
   // ttmp6 = free
   // ttmp[10:11] holds original shader's [exec_lo,exec_hi]
-  // ttmp[14:15]=tma, ttmp13.b31 = buf_to_use
+  // ttmp[14:15]=tma, ttmp1[25] = buf_to_use
   // EXEC is 0x1
 
   // Check perf_snapshot bit to determine if a trap caused by stochastic sampling.
-  s_bitcmp1_b32     ttmp13, TTMP13_STOCH_FLAG_BIT
-  s_cbranch_scc1    .fill_sample_stoch
+  s_getreg_b32      ttmp6, hwreg(HW_REG_EXCP_FLAG_PRIV)      // Read EXCP_FLAG_PRIV
+  s_bitcmp1_b32     ttmp6, SQ_WAVE_EXCP_FLAG_PRIV_PERF_SNAPSHOT // Test Performance Snapshot bit.
+  s_cbranch_scc1    .fill_sample_stoch  // jump if a trap is caused by the perf_snapshot block
 
 .fill_sample_ht:
   // The following is still true
@@ -657,7 +649,7 @@
   // ttmp[4:5] holds backup of original shader's v[2:3]
   // ttmp6 = free
   // ttmp[10:11] holds original shader's [exec_lo,exec_hi]
-  // ttmp[14:15]=tma, ttmp13.b31 = buf_to_use
+  // ttmp[14:15]=tma, ttmp1[25] = buf_to_use
   // EXEC is 0x1
 
   // Clear out 2 LSBs of the PC_LO (used as scratch bits in ttmp0)
@@ -677,7 +669,7 @@
   // ttmp[4:5] holds backup of original shader's v[2:3]
   // ttmp6 = free
   // ttmp[10:11] holds original shader's [exec_lo,exec_hi]
-  // ttmp[14:15]=tma, ttmp13.b31 = buf_to_use
+  // ttmp[14:15]=tma, ttmp1[25] = buf_to_use
   // EXEC is 0x1
   s_branch          .ret_from_fill_sample
 
@@ -688,7 +680,7 @@
   // ttmp[4:5] holds backup of original shader's v[2:3]
   // ttmp6 = free
   // ttmp[10:11] holds original shader's [exec_lo,exec_hi]
-  // ttmp[14:15]=tma, ttmp13.b31 = buf_to_use
+  // ttmp[14:15]=tma, ttmp1[25] = buf_to_use
   // EXEC is 0x1
 
   // Read performance SNAPSHOT registers and store at offset 0x28 (SAMPLE_OFF_SNAPSHOT_DATA + 4)
@@ -727,14 +719,16 @@
   // ttmp[2:3] holds backup of original shader’s v[0:1]
   // ttmp[4:5] holds backup of original shader’s v[2:3]
   // ttmp6 = free
-  // ttmp[10:11] holds original shader’s [exec_lo,exec_hi]
-  // ttmp[14:15]=‘tma’, ttmp13.b31 tells us buf_to_use
+  // ttmp[10:11] holds original shader's [exec_lo,exec_hi]
+  // ttmp[14:15]='tma', ttmp1[25] = buf_to_use
   // EXEC is 0x1
 
   // Sample data has been written to the device buffer.
   // Now, atomically increment the count of written samples for the current buffer.
   // This is pcs_sampling_data_t.buf_written_val0 or buf_written_val1.
-  s_lshr_b32        ttmp6, ttmp13, 31                       // ttmp6 is buf_to_use
+  // Calculate offset to buf_written_val for current buffer
+  // buf_written_val0 at offset 0x10, buf_written_val1 at offset 0x20
+  s_bfe_u32         ttmp6, ttmp1, (TTMP1_BUF_ID_BIT_POSITION | 1 << 16) // Extract buffer_id from ttmp1[25] into ttmp6
   s_mulk_i32        ttmp6, 0x10                             // ttmp6=offset from
                                                             // written_val0 to written_val_X
   s_add_u32         ttmp14, ttmp14, ttmp6                   // now ttmp[14:15] points to base for
@@ -828,20 +822,31 @@
   // v[2:3] is original user-data
   // ttmp[2:3] [local_entry, buf_size]
   // ttmp[4:5] = free
-  // ttmp6=buf_to_use (also in ttmp13.b31)
-  // ttmp[10:11] holds original shader’s [exec_lo,exec_hi]
+  // ttmp6=buf_to_use (also in ttmp1[25])
+  // ttmp[10:11] holds original shader's [exec_lo,exec_hi]
   // ttmp[14:15]=tma
   // EXEC=0x1
   // Restore vector registers before exiting
 
-  s_bitcmp1_b32     ttmp13, TTMP13_STOCH_FLAG_BIT           // Check if stochastic sampling
-  s_cbranch_scc0    .lost_sample_restore                    // If not, just restore and exit
-  s_getreg_b32      ttmp6, HW_REG_SQ_PERF_SNAPSHOT_PC_HI    // Read PC_HI to release lock
+  // Testing if the trap is caused by perf_snapshot (stochastic sampling HW).
+  s_getreg_b32      ttmp6, hwreg(HW_REG_EXCP_FLAG_PRIV)                // Read EXCP_FLAG_PRIV
+  s_bitcmp1_b32     ttmp6, SQ_WAVE_EXCP_FLAG_PRIV_PERF_SNAPSHOT        // Test perf_snapshot (stochastic) bit.
+  s_cbranch_scc0    .lost_sample_restore                               // If not, just restore sample
+  s_getreg_b32      ttmp6, HW_REG_SQ_PERF_SNAPSHOT_PC_HI               // Otherwise, free perf_snapshot resources
 
 .lost_sample_restore:
   v_writelane_b32   v0, ttmp2, 0                            // restore v[0:1] to user data
   v_writelane_b32   v1, ttmp3, 0
+
+  // zero out ttmp1[25] holding buff_id
+  s_bitset0_b32     ttmp1, TTMP1_BUF_ID_BIT_POSITION
+
   s_mov_b64         exec, ttmp[10:11]                       // restore exec mask
+
+  // Clear the Host Trap flag in the hardware register to acknowledge the event
+  s_setreg_imm32_b32 hwreg(HW_REG_EXCP_FLAG_PRIV, SQ_WAVE_EXCP_FLAG_PRIV_HT_SHIFT,1), 0
+  // Clear the perf_snapshot flag
+  s_setreg_imm32_b32 hwreg(HW_REG_EXCP_FLAG_PRIV, SQ_WAVE_EXCP_FLAG_PRIV_PERF_SNAPSHOT,1), 0
 
 .exit_trap:
   .if .amdgcn.gfx_generation_minor == 0
