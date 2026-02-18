@@ -174,15 +174,33 @@ class OmniAnalyze_Base:
         process_torch_trace_output(workload_path)
         torch_trace_dir = Path(workload_path) / "torch_trace"
         all_files = list(torch_trace_dir.glob("*.csv"))
+        kernel_top_path = Path(workload_path) / "pmc_kernel_top.csv"
+        kernel_name_to_id: dict[str, int] | None = None
+        if kernel_top_path.is_file():
+            try:
+                kernel_top_df = pd.read_csv(kernel_top_path)
+                kernel_name_to_id = {
+                    str(kernel_top_df.iloc[i]["Kernel_Name"]).strip(): i
+                    for i in range(len(kernel_top_df))
+                }
+            except Exception:
+                kernel_name_to_id = None
         print(f"\n{'=' * 80}")
         print(f"PyTorch Operators in: {workload_path}")
+        if kernel_name_to_id:
+            print("Kernel (id N) can be used with -k for filtering.")
         print(f"{'=' * 80}\n")
         operator_count = 0
+        # Use shortened names (1) by default for --list-torch-operators; --kernel-verbose still overrides
+        kernel_verbose = getattr(self.__args, "kernel_verbose", 1)
         for idx, f in enumerate(all_files, start=1):
             try:
                 df = pd.read_csv(f)
                 tty.show_torch_operator_hierarchy(
-                    str(f.name).replace(".csv", ""), df, index=idx
+                    str(f.name).replace(".csv", ""),
+                    df,
+                    index=idx,
+                    kernel_name_to_id=kernel_name_to_id,
                 )
                 operator_count += 1
             except Exception as e:
