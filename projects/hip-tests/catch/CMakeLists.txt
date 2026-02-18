@@ -375,7 +375,6 @@ set(_subdirs ${_autogen} "subdirs(..)\n")
 file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/${CATCH_BUILD_DIR}/CTestTestfile.cmake ${_subdirs})
 
 set(CATCH_SCRIPT_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/${CATCH_BUILD_DIR}/script)
-set(CATCH_ADD_TESTS_SCRIPT ${catch2_SOURCE_DIR}/extras/CatchAddTests.cmake)
 file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/cmake/hip-tests.cmake
      DESTINATION ${CATCH_SCRIPT_BINARY_DIR})
 file(COPY ${CATCH_ADD_TESTS_SCRIPT}
