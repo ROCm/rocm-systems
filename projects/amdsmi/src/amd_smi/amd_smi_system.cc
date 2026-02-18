@@ -283,6 +283,7 @@ amdsmi_status_t AMDSmiSystem::init(uint64_t flags) {
             return amd_smi_status;
     }
 #endif
+#ifdef BRCM_NIC
     if (flags & AMDSMI_INIT_AMD_NICS) {
         amd_smi_status = populate_brcm_nic_devices();
         if (amd_smi_status != AMDSMI_STATUS_SUCCESS)
@@ -294,7 +295,7 @@ amdsmi_status_t AMDSmiSystem::init(uint64_t flags) {
         if (amd_smi_status != AMDSMI_STATUS_SUCCESS)
             return amd_smi_status;
     }
-
+#endif
     return AMDSMI_STATUS_SUCCESS;
 }
 
@@ -664,9 +665,11 @@ amdsmi_status_t AMDSmiSystem::cleanup() {
             return amd::smi::rsmi_to_amdsmi_status(ret);
         }
     }
+#ifdef BRCM_NIC
     if (init_flag_ & AMDSMI_INIT_AMD_NICS) {
         smi_nic_destroy_context(ainic_ctx_);
     }
+#endif
     return AMDSMI_STATUS_SUCCESS;
 }
 
