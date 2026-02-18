@@ -229,11 +229,24 @@ int GPUScheduler::schedulePendingJobs()
     {
         TestJob nextJob = pendingJobs_.top();
 
-        // Check if we can allocate the required GPUs
+        // Check if this test requires more GPUs than the system has
+        if (nextJob.numGPUsRequired > config_.totalGPUs)
+        {
+            // Skip tests that require more GPUs than available on this machine
+            pendingJobs_.pop();
+            if (config_.verboseLogging)
+            {
+                INFO("Skipping test %s: requires %d GPUs but system has %d\n",
+                     nextJob.testName.c_str(), nextJob.numGPUsRequired, config_.totalGPUs);
+            }
+            continue;
+        }
+
+        // Check if we can allocate the required GPUs right now
         if (!canAllocateGPUs(nextJob.numGPUsRequired))
         {
-            // Can't allocate resources for the highest priority job
-            // Don't try others as they might have even higher requirements
+            // Can't allocate resources for the highest priority job right now
+            // Wait for some GPUs to be released
             break;
         }
 
