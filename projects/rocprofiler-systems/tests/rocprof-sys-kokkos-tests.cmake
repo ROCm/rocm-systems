@@ -102,7 +102,7 @@ rocprofiler_systems_add_test(
         -ME
         [==[lib(gomp|m-)]==]
     RUN_ARGS -i 10 -s 20 -p
-    ENVIRONMENT "${_base_environment};ROCPROFSYS_USE_KOKKOSP=ON;ROCPROFSYS_CI_SKIP_PUSH_POP_CHECK=true"
+    ENVIRONMENT "${_base_environment};ROCPROFSYS_USE_KOKKOSP=ON;ROCPROFSYS_CI_SKIP_PUSH_POP_CHECK=ON"
 )
 
 rocprofiler_systems_add_test(
@@ -125,7 +125,7 @@ rocprofiler_systems_add_test(
         -ME
         [==[libgomp]==]
     RUN_ARGS -i 10 -s 20 -p
-    ENVIRONMENT "${_perfetto_environment};ROCPROFSYS_USE_KOKKOSP=OFF;ROCPROFSYS_CI_SKIP_PUSH_POP_CHECK=true"
+    ENVIRONMENT "${_perfetto_environment};ROCPROFSYS_USE_KOKKOSP=OFF;ROCPROFSYS_CI_SKIP_PUSH_POP_CHECK=ON"
 )
 
 rocprofiler_systems_add_test(
@@ -147,6 +147,6 @@ rocprofiler_systems_add_test(
         --env
         ROCPROFSYS_TIMEMORY_COMPONENTS="wall_clock peak_rss"
     RUN_ARGS -i 2 -s 20 -p
-    ENVIRONMENT "${_timemory_environment};ROCPROFSYS_USE_KOKKOSP=OFF;ROCPROFSYS_CI_SKIP_PUSH_POP_CHECK=true"
+    ENVIRONMENT "${_timemory_environment};ROCPROFSYS_USE_KOKKOSP=OFF;ROCPROFSYS_CI_SKIP_PUSH_POP_CHECK=ON"
     REWRITE_FAIL_REGEX "0 instrumented loops in procedure"
 )
