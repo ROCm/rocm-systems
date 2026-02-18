@@ -71,20 +71,6 @@ struct rccl_event_info
 };
 
 /**
- * @brief Null PMC registrar (no-op) for optional PMC functionality
- *
- * This is a duck-typed registrar that does nothing when register_gpu_pmc is called.
- * Used as the default template parameter for rccl_gpu_tracking_state_t to enable
- * zero-overhead operation when PMC registration is not needed (e.g., in tests or
- * when PMC functionality is disabled). This follows the C++ policy-based design
- * pattern for compile-time polymorphism without runtime overhead.
- */
-struct null_pmc_registrar
-{
-    void register_gpu_pmc([[maybe_unused]] uint32_t device_idx) {}
-};
-
-/**
  * @brief Thread-safe GPU tracking state for RCCL PMC registration and byte counting
  *
  * This template class manages per-GPU registration and cumulative byte tracking.
@@ -96,15 +82,16 @@ struct null_pmc_registrar
  * Usage:
  *   Production: rccl_gpu_tracking_state_t<production_pmc_registrar> state(registrar);
  *   Testing:    rccl_gpu_tracking_state_t<mock_pmc_registrar> state(mock);
+ *               rccl_gpu_tracking_state_t<mock_pmc_registrar> state(nullptr);
  */
-template <typename PmcRegistrar = null_pmc_registrar>
+template <typename PmcRegistrar>
 class rccl_gpu_tracking_state_t
 {
 public:
     /**
      * @brief Construct tracking state with PMC registrar
-     * @param registrar Shared pointer to PMC registrar (can be nullptr for
-     * null_pmc_registrar)
+     * @param registrar Shared pointer to PMC registrar (can be nullptr to disable PMC
+     * registration)
      */
     explicit rccl_gpu_tracking_state_t(std::shared_ptr<PmcRegistrar> registrar = nullptr)
     : m_pmc_registrar(std::move(registrar))

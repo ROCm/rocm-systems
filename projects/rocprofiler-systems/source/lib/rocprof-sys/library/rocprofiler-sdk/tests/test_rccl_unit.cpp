@@ -25,7 +25,6 @@ public:
 };
 
 using rccl_gpu_tracking_state_mock = rccl_gpu_tracking_state_t<mock_pmc_registrar>;
-using rccl_gpu_tracking_state_test = rccl_gpu_tracking_state_t<null_pmc_registrar>;
 
 /**
  * @brief Test fixture for RCCL GPU tracking tests.
@@ -55,9 +54,9 @@ protected:
      * @brief Create tracking state without PMC registrar (null).
      * @return Tracking state with no PMC registration.
      */
-    rccl_gpu_tracking_state_test create_tracking_state_null()
+    rccl_gpu_tracking_state_mock create_tracking_state_null()
     {
-        return rccl_gpu_tracking_state_test(nullptr);
+        return rccl_gpu_tracking_state_mock(nullptr);
     }
 
     /**
@@ -138,7 +137,7 @@ TEST_F(rccl_test, rccl_type_size_returns_zero_for_max_int_datatype)
 
 TEST_F(rccl_test, tracking_state_default_constructor_creates_empty_state)
 {
-    rccl_gpu_tracking_state_test state(nullptr);
+    rccl_gpu_tracking_state_mock state(nullptr);
 
     EXPECT_FALSE(state.is_registered(0));
     EXPECT_FALSE(state.is_registered(1));
@@ -150,7 +149,7 @@ TEST_F(rccl_test, tracking_state_default_constructor_creates_empty_state)
 
 TEST_F(rccl_test, tracking_state_constructor_with_null_registrar)
 {
-    rccl_gpu_tracking_state_test state(nullptr);
+    rccl_gpu_tracking_state_mock state(nullptr);
 
     state.register_gpu(0);
     EXPECT_TRUE(state.is_registered(0));
