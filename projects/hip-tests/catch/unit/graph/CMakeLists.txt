@@ -93,11 +93,11 @@ if(HIP_PLATFORM MATCHES "amd")
     hipStreamCaptureExtModuleLaunchKernel.cc
     hipStreamBeginCaptureToGraph.cc
     hipGetProcAddressGraphApis.cc
-    # Below files are disbled in NVIDIA as PSDB builds are failing due to lower CUDA version.
+    # Below files are disabled in NVIDIA as PSDB builds are failing due to lower CUDA version.
     hipGraphExecNodeSetParams.cc
     hipGraphNodeSetParams.cc
     hipGraphExecGetFlags.cc
-    # this file is disable for NVIDIA due to lacking corresponding hipStreamGetCaptureInfo_v3 implementation
+    # this files are disabled for NVIDIA due to lacking corresponding hipStreamGetCaptureInfo_v3 implementation
     hipStreamGetCaptureInfo_old.cc
     hipStreamGetCaptureInfo_v2.cc
     hipStreamUpdateCaptureDependencies.cc

@@ -92,8 +92,8 @@ if(HIP_PLATFORM MATCHES "amd")
 
   add_dependencies(hipSquareGenericTargetDefault hipSquareGenericTargetCompressed)
   if(BUILD_SHARED_LIBS)
-    add_dependencies(hipSquareGenericTarget hipSquareGenericTargetOnly)
-    add_dependencies(hipSquareGenericTarget hipSquareGenericTargetOnlyCompressed)
+    add_dependencies(hipSquareGenericTargetDefault hipSquareGenericTargetOnly)
+    add_dependencies(hipSquareGenericTargetDefault hipSquareGenericTargetOnlyCompressed)
   endif()
 
   # SWDEV-548807 skip building hipSpirvTest

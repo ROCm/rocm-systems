@@ -27,7 +27,6 @@ if(HIP_PLATFORM MATCHES "nvidia")
                           TEST_TARGET_NAME build_tests
                           LINKER_LIBS nvrtc)
   set_target_properties(AssertionTest PROPERTIES LINKER_LANGUAGE CUDA)
-  target_link_libraries(AssertionTest cuda hip::host hip::device)
 elseif(HIP_PLATFORM MATCHES "amd")
     set(TEST_SRC
         static_assert.cc
@@ -38,6 +37,7 @@ elseif(HIP_PLATFORM MATCHES "amd")
                           TEST_TARGET_NAME build_tests
                           LINKER_LIBS hiprtc::hiprtc)
 endif()
+target_link_libraries(AssertionTest ${GPGPU_LINKER_LIBRARIES})
 
 if(UNIX)
 file(GLOB NEGATIVE_TEST_SRC
