@@ -1586,8 +1586,11 @@ process_t::attach ()
                                 .c_str ()
                             : "exited process");
 
-  if (os_driver ().check_version () != AMD_DBGAPI_STATUS_SUCCESS)
-    throw api_error_t (AMD_DBGAPI_STATUS_ERROR_RESTRICTION);
+  for (int i = 0; i < 20; i++)
+    {
+      if (os_driver ().check_version () != AMD_DBGAPI_STATUS_SUCCESS)
+	throw api_error_t (AMD_DBGAPI_STATUS_ERROR_RESTRICTION);
+    }
 
   os_runtime_info_t runtime_info{};
   if (auto status = os_driver ().enable_debug (
