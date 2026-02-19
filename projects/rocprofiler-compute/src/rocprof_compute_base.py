@@ -71,7 +71,7 @@ class RocProfCompute:
         self.__version: dict[str, Optional[str]] = {"ver": None, "ver_pretty": None}
         self.__supported_archs = mi_gpu_specs.get_gpu_series_dict()
         self.__mspec: MachineSpecs  # to be initialized in load_soc_specs()
-        self.__parser: argparse.ArgumentParser = argparse.ArgumentParser(add_help=False)
+        self.__parser: argparse.ArgumentParser  # to be initialized in parse_args()
 
         setup_console_handler()
         self.set_version()
@@ -86,10 +86,11 @@ class RocProfCompute:
         setattr(self.__args, "loglevel", self.__loglevel)
         set_locale_encoding()
 
+        self.sanitize()
+
         if self.__mode != "analyze":
             self.generate_machine_specs()
 
-        self.sanitize()
         self.handle_list_args()
 
         if self.__mode == "profile":
