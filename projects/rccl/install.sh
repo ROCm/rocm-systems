@@ -229,10 +229,13 @@ if [[ "${rebuild_tests_only}" == true ]]; then
         rccl_library="librccl.so"
     fi
 
+    # Get absolute path for the library
+    rccl_library_path="$(pwd)/${rccl_library}"
+
     # Check if the library exists
     if [[ ! -f "${rccl_library}" ]]; then
         echo "Error: --rebuild-tests-only requires rccl library to be already built."
-        echo "Expected library: ${PWD}/${rccl_library}"
+        echo "Expected library: ${rccl_library_path}"
         echo "Please build rccl first using './install.sh -t' or './install.sh' without --rebuild-tests-only flag."
         exit 1
     fi
@@ -244,7 +247,7 @@ if [[ "${rebuild_tests_only}" == true ]]; then
         exit 1
     fi
 
-    echo "Found existing rccl library: ${rccl_library}"
+    echo "Found existing rccl library: ${rccl_library_path}"
     echo "Skipping rccl build, rebuilding tests only..."
 fi
 
