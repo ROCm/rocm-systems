@@ -606,6 +606,32 @@ rsmi_num_monitor_devices(uint32_t *num_devices) {
   CATCH
 }
 
+rsmi_status_t rsmi_num_nic_monitor_devices(uint32_t *num_devices) {
+  TRY assert(num_devices != nullptr);
+  if (num_devices == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  amd::smi::RocmSMI &smi = amd::smi::RocmSMI::getInstance();
+
+  *num_devices = static_cast<uint32_t>(smi.nic_devices().size());
+  return RSMI_STATUS_SUCCESS;
+  CATCH
+}
+
+rsmi_status_t rsmi_num_switch_monitor_devices(uint32_t *num_devices) {
+  TRY assert(num_devices != nullptr);
+  if (num_devices == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  amd::smi::RocmSMI &smi = amd::smi::RocmSMI::getInstance();
+
+  *num_devices = static_cast<uint32_t>(smi.switch_devices().size());
+  return RSMI_STATUS_SUCCESS;
+  CATCH
+}
+
 rsmi_status_t rsmi_dev_ecc_enabled_get(uint32_t dv_ind,
                                                     uint64_t *enabled_blks) {
   TRY
@@ -830,8 +856,6 @@ rsmi_dev_pci_id_get(uint32_t dv_ind, uint64_t *bdfid) {
   CHK_API_SUPPORT_ONLY(bdfid, RSMI_DEFAULT_VARIANT, RSMI_DEFAULT_VARIANT)
   DEVICE_MUTEX
 
-  *bdfid = dev->bdfid();
-
   uint64_t domain = 0;
 
   kfd_node->get_property_value("domain", &domain);
@@ -848,9 +872,8 @@ rsmi_dev_pci_id_get(uint32_t dv_ind, uint64_t *bdfid) {
    * bits [7:3] = Device
    * bits [2:0] = Function (partition id maybe in bits [2:0]) <-- Fallback for non SPX modes
    */
-  assert((domain & 0xFFFFFFFF00000000) == 0);
-  (*bdfid) &= 0xFFFFFFFF;  // keep bottom 32 bits of pci_id
-  *bdfid |= (domain & 0xFFFFFFFF) << 32;  // Add domain to top of pci_id
+  *bdfid = amd::smi::bdfid_from_domain(dev->bdfid(), domain);
+
   uint64_t pci_id = *bdfid;
   uint32_t node = UINT32_MAX;
   rsmi_dev_node_id_get(dv_ind, &node);
@@ -860,6 +883,40 @@ rsmi_dev_pci_id_get(uint32_t dv_ind, uint64_t *bdfid) {
   << std::to_string(pci_id) << " ("
   << amd::smi::print_int_as_hex(pci_id) << ")";
   LOG_INFO(ss);
+
+  ss << __PRETTY_FUNCTION__ << " | ======= end ======="
+     << ", reporting RSMI_STATUS_SUCCESS";
+  LOG_TRACE(ss);
+  return RSMI_STATUS_SUCCESS;
+  CATCH
+}
+
+rsmi_status_t rsmi_nic_dev_pci_id_get(uint32_t dv_ind, uint64_t *bdfid) {
+  TRY std::ostringstream ss;
+  ss << __PRETTY_FUNCTION__ << "| ======= start =======";
+  LOG_TRACE(ss);
+
+  GET_NIC_DEV_FROM_INDX
+
+  uint64_t domain = 0;
+  *bdfid = amd::smi::bdfid_from_domain(dev->bdfid(), domain);
+
+  ss << __PRETTY_FUNCTION__ << " | ======= end ======="
+     << ", reporting RSMI_STATUS_SUCCESS";
+  LOG_TRACE(ss);
+  return RSMI_STATUS_SUCCESS;
+  CATCH
+}
+
+rsmi_status_t rsmi_switch_dev_pci_id_get(uint32_t dv_ind, uint64_t *bdfid) {
+  TRY std::ostringstream ss;
+  ss << __PRETTY_FUNCTION__ << "| ======= start =======";
+  LOG_TRACE(ss);
+
+  GET_SWITCH_DEV_FROM_INDX
+
+  uint64_t domain = 0;
+  *bdfid = amd::smi::bdfid_from_domain(dev->bdfid(), domain);
 
   ss << __PRETTY_FUNCTION__ << " | ======= end ======="
      << ", reporting RSMI_STATUS_SUCCESS";
@@ -3350,7 +3407,7 @@ rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_type,
           return RSMI_STATUS_NOT_SUPPORTED;
         }
 
-        
+
         std::string file_path = dev->get_sys_file_path_by_type(amd::smi::kDevGpuBoardTempMetrics);
         if (file_path == "") {
           LOG_ERROR("Failed to get GPU board temperature metrics file path");
@@ -3365,7 +3422,7 @@ rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_type,
           return ret;
         }
 
-        ret = get_gpuboard_temp_value(gpuboard_metric, 
+        ret = get_gpuboard_temp_value(gpuboard_metric,
                 static_cast<rsmi_temperature_type_t>(sensor_type), temperature);
         return ret;
   }
@@ -3533,6 +3590,15 @@ rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_type,
   uint32_t sensor_index =
      m->getTempSensorIndex(static_cast<rsmi_temperature_type_t>(sensor_type));
 
+  // Check if sensor_index is valid (not RSMI_TEMP_TYPE_INVALID)
+  if (sensor_index == RSMI_TEMP_TYPE_INVALID) {
+    ss << __PRETTY_FUNCTION__
+       << " | Sensor type " << sensor_type
+       << " not supported (sensor_index = RSMI_TEMP_TYPE_INVALID) | "
+       << getRSMIStatusString(RSMI_STATUS_NOT_SUPPORTED) << " |";
+    LOG_ERROR(ss);
+    return RSMI_STATUS_NOT_SUPPORTED;
+  }
 
   CHK_API_SUPPORT_ONLY(temperature, metric, sensor_index)
 
@@ -3609,6 +3675,12 @@ rsmi_dev_volt_metric_get(uint32_t dv_ind, rsmi_voltage_type_t sensor_type,
   } catch (...) {
     return RSMI_STATUS_NOT_SUPPORTED;
   }
+
+  // Check if sensor_index is valid (not RSMI_VOLT_TYPE_INVALID)
+  if (sensor_index == RSMI_VOLT_TYPE_INVALID) {
+    return RSMI_STATUS_NOT_SUPPORTED;
+  }
+
   CHK_API_SUPPORT_ONLY(voltage, metric, sensor_index)
 
   ret = get_dev_mon_value(mon_type, dv_ind, sensor_index, voltage);
@@ -7499,7 +7571,7 @@ rsmi_event_notification_get(int timeout_ms,
         LOG_ERROR(ss);
         continue;
       }
-      
+
       flockfile(anon_fp); // serialize stdio on this stream
 
       data_item =
@@ -7594,7 +7666,7 @@ rsmi_event_notification_get(int timeout_ms,
 
             sscanf(message, "%" PRId64 " -%d @%" PRIu32 "(%" PRIu32 ") %x->%x %x:%x %d\n", &ns, &pid, &start, &size, &from, &to, &prefetch_loc, &preferred_loc, &migrate_trigger);
             std::stringstream final_message;
-            final_message << "nd: " << std::to_string(ns).c_str() 
+            final_message << "nd: " << std::to_string(ns).c_str()
                           << "  pid: " << std::to_string(pid).c_str()
                           << "  start: 0x" << std::hex << start
                           << "  size: 0x" << std::hex << size
@@ -7620,7 +7692,7 @@ rsmi_event_notification_get(int timeout_ms,
 
             sscanf(message, "%" PRId64 " -%d @%" PRIu32 "(%" PRIu32 ") %x->%x %d %d\n", &ns, &pid, &start, &size, &from, &to, &migrate_trigger, &error_code);
             std::stringstream final_message;
-            final_message << "nd: " << std::to_string(ns).c_str() 
+            final_message << "nd: " << std::to_string(ns).c_str()
                           << "  pid: " << std::to_string(pid).c_str()
                           << "  start: 0x" << std::hex << start
                           << "  size: 0x" << std::hex << size
@@ -7638,9 +7710,9 @@ rsmi_event_notification_get(int timeout_ms,
             int32_t pid;
             uint32_t addr;
             uint32_t node;
-            char *rw = "\0";
+            char rw = '\0';
 
-            sscanf(message, "%" PRId64 " -%d @%" PRIx32 "(%x) %c\n", &ns, &pid, &addr, &node, rw);
+            sscanf(message, "%" PRId64 " -%d @%" PRIx32 "(%x) %c\n", &ns, &pid, &addr, &node, &rw);
             std::stringstream final_message;
             final_message << "ns: " << std::to_string(ns).c_str()
                           << "  pid: " << std::to_string(pid).c_str()
@@ -7657,9 +7729,9 @@ rsmi_event_notification_get(int timeout_ms,
             int32_t pid;
             uint32_t addr;
             uint32_t node;
-            char *migrate_update = "\0";
+            char migrate_update = '\0';
 
-            sscanf(message, "%" PRId64 " -%d @%" PRIx32 "(%x) %c\n", &ns, &pid, &addr, &node, migrate_update);
+            sscanf(message, "%" PRId64 " -%d @%" PRIx32 "(%x) %c\n", &ns, &pid, &addr, &node, &migrate_update);
             std::stringstream final_message;
             final_message << "ns: " << std::to_string(ns).c_str()
                           << "  pid: " << std::to_string(pid).c_str()
@@ -7692,9 +7764,9 @@ rsmi_event_notification_get(int timeout_ms,
             int64_t ns;
             int32_t pid;
             uint32_t node;
-            char *rescheduled = "\0";
+            char rescheduled = '\0';
 
-            sscanf(message, "%" PRId64 "-%d %x %c\n", &ns, &pid, &node, rescheduled);
+            sscanf(message, "%" PRId64 "-%d %x %c\n", &ns, &pid, &node, &rescheduled);
             std::stringstream final_message;
             final_message << "ns: " << std::to_string(ns).c_str()
                           << "  pid: " << std::to_string(pid).c_str()
@@ -7794,6 +7866,10 @@ rsmi_status_t rsmi_event_notification_stop(uint32_t dv_ind) {
 
   std::lock_guard<std::mutex> guard(*smi.kfd_notif_evt_fh_mutex());
 
+  // Ensure protected access of anon_fp
+  amd::smi::pthread_wrap pw(*amd::smi::GetMutex(dv_ind));
+  amd::smi::ScopedPthread lock(pw);
+
   FILE *anon_fp = smi.devices()[dv_ind]->evt_notif_anon_file_ptr();
   int   anon_fd = smi.devices()[dv_ind]->evt_notif_anon_fd();
 
@@ -7805,6 +7881,11 @@ rsmi_status_t rsmi_event_notification_stop(uint32_t dv_ind) {
   // Clear state first so nobody else can race a second close
   smi.devices()[dv_ind]->set_evt_notif_anon_file_ptr(nullptr);
   smi.devices()[dv_ind]->set_evt_notif_anon_fd(-1);
+
+  // If the fd is uninitialized, we should not fclose a potentially stale FILE*.
+  if (anon_fd == -1) {
+    return RSMI_STATUS_SUCCESS;
+  }
 
   if (anon_fp) {
     if (fclose(anon_fp) != 0) {

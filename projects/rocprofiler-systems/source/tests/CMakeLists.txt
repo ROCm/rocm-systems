@@ -22,9 +22,10 @@
 
 add_executable(
     rocprof-sys-unit-tests
-    dummy.cpp
     $<TARGET_OBJECTS:lib-common-tests>
     $<TARGET_OBJECTS:trace-cache-tests>
+    $<TARGET_OBJECTS:demangler-tests>
+    $<TARGET_OBJECTS:logger-tests>
 )
 
 target_link_libraries(

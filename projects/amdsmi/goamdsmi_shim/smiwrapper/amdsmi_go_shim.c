@@ -121,7 +121,7 @@ goamdsmi_status_t go_shim_amdsmiapu_init(goamdsmi_Init_t goamdsmi_Init)
     {
         if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_2)) {printf("AMDSMI, Status, Identified APU machine and going to enumurate APU\n");}
 
-        if( (AMDSMI_STATUS_SUCCESS == amdsmi_init(AMDSMI_INIT_AMD_APUS)) &&
+        if( (AMDSMI_STATUS_SUCCESS == amdsmi_init(AMDSMI_INIT_AMD_GPUS|AMDSMI_INIT_AMD_CPUS)) &&
             (AMDSMI_STATUS_SUCCESS == amdsmi_get_socket_handles(&num_apuSockets, nullptr)) &&
             (AMDSMI_STATUS_SUCCESS == amdsmi_get_socket_handles(&num_apuSockets, &amdsmi_apusocket_handle_all_socket[0])) &&
             (GOAMDSMI_VALUE_0 != num_apuSockets))
@@ -386,7 +386,7 @@ bool goamdsmi_gpu_init()
         if((num_gpu_devices_inAllSocket)) gpu_init_success = true;
     }
     if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {printf("AMDSMI, %s, InitAMDSMIGPUInit:%d, GpuSocketCount:%d, GpuCount:%d\n", gpu_init_success?"Success":"Failed", gpu_init_success?1:0, num_gpuSockets, num_gpu_devices_inAllSocket);}
-	
+
     return gpu_init_success;
 }
 
@@ -407,7 +407,7 @@ char* goamdsmi_gpu_dev_name_get(uint32_t dv_ind)
 	uint32_t len = 256;
     char* dev_name = (char*)malloc(sizeof(char)*len);dev_name[0] = '\0';
     strcpy(dev_name, GOAMDSMI_STRING_NA);
-	
+
     return dev_name;
 }
 

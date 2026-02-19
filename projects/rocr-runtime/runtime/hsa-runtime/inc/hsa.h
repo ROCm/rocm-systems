@@ -5692,6 +5692,14 @@ typedef int hsa_handle_t;
 #endif
 
 /**
+ * @brief Interop map flags.
+ */
+typedef uint32_t hsa_interop_map_flag_t;
+
+#define HSA_INTEROP_MAP_FLAG_NONE        0u
+#define HSA_INTEROP_MAP_FLAG_KMT_HANDLE  (1u << 0)
+
+/**
  * @brief Platform-independent container for a Windows LUID.
  */
 typedef struct hsa_luid_s {

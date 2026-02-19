@@ -446,12 +446,27 @@ class GraphNode : public hipGraphNodeDOTAttribute {
     out << "=\"";
     out << GetLabel(flag);
     if (DEBUG_HIP_GRAPH_DOT_PRINT) {
-      out << "\nStreamId:" << stream_id_;
-      out << "\nSegmentId:" << segment_id_;
-      out << "\nSignalIsRequired: " << ((signal_is_required_) ? "true" : "false");
+      if (DEBUG_HIP_GRAPH_DOT_PRINT >= 2) {
+        out << "\nStreamId:" << stream_id_;
+        out << "\nHW Queue:" << hw_queue_id_;
+      }
+      if (segment_id_ == -1) {
+        out << "\nStreamId:" << stream_id_;
+        out << "\nSignalIsRequired: " << ((signal_is_required_) ? "true" : "false");
+      }
       out << "\nDeviceId:" << dev_id_;
     }
     out << "\"";
+    if (DEBUG_HIP_GRAPH_DOT_PRINT) {
+      // Add color coding based on segment ID for better visualization
+      if (segment_id_ != -1) {
+        // Color nodes based on segment ID for better visual grouping
+        const char* colors[] = {"lightcoral", "lightblue", "lightgreen", "lightyellow",
+                                "lightpink",  "lightgray", "lightcyan",  "lightsalmon"};
+        int color_index = segment_id_ % (sizeof(colors) / sizeof(colors[0]));
+        out << ",fillcolor=\"" << colors[color_index] << "\",style=\"filled\"";
+      }
+    }
     out << "];";
   }
   void SetDeviceId(int id) { dev_id_ = id; }
@@ -473,6 +488,7 @@ class GraphNode : public hipGraphNodeDOTAttribute {
   size_t inDegree_;         //!< count of in coming edges (@todo: remove, it's dependencies_.size())
   size_t outDegree_;        //!< count of outgoing edges (@todo: remove, it's edges_.size())
   int32_t stream_id_ = -1;  //! Stream ID on which this node will be executed
+  int hw_queue_id_ = -1; //! Hardware queue ID on which this node will be executed
   int32_t segment_id_ = -1;  //! Segment ID on which this node will be executed
   int32_t launch_id_ = -1;  //! Launch ID of this node in the entire graph execution sequence
   static int nextID;
@@ -489,7 +505,7 @@ class GraphNode : public hipGraphNodeDOTAttribute {
   size_t kernargSegmentAlignment_ = 256;  //!< Kernel arg segment alignment
   int dev_id_;  //!< Device Id when node is created(dev id from capture stream/current device
                 //!< when explicitly added)
-  bool wait_ = false;                
+  bool wait_ = false;
 };
 
 class GraphEventWaitNode : public GraphNode {
@@ -733,16 +749,56 @@ class Graph {
   void GenerateDOT(std::ostream& fout, hipGraphDebugDotFlags flag) {
     fout << "subgraph cluster_" << GetID() << " {" << std::endl;
     fout << "label=\"graph_" << GetID() << "\"graph[style=\"dashed\"];\n";
-    for (auto node : vertices_) {
-      node->GenerateDOTNode(GetID(), fout, flag);
+
+    // Check if we should group nodes by segments
+    bool useSegmentClustering = !segments_.empty();
+
+    if (useSegmentClustering) {
+      GenerateDOTWithSegments(fout, flag);
+    } else {
+      // Original node-by-node generation
+      for (auto node : vertices_) {
+        node->GenerateDOTNode(GetID(), fout, flag);
+      }
+      fout << "\n";
+      for (auto& node : vertices_) {
+        node->GenerateDOTNodeEdges(GetID(), fout, flag);
+      }
     }
-    fout << "\n";
-    for (auto& node : vertices_) {
-      node->GenerateDOTNodeEdges(GetID(), fout, flag);
-    }
+
     fout << "}" << std::endl;
     for (auto node : vertices_) {
       node->GenerateDOT(fout, flag);
+    }
+  }
+
+  // generate DOT with segment clustering
+  void GenerateDOTWithSegments(std::ostream& fout, hipGraphDebugDotFlags flag) {
+    // Generate segment clusters
+    for (const auto& segment : segments_) {
+      // if (segment_nodes.find(segment.id) != segment_nodes.end()) {
+      fout << "subgraph cluster_segment_" << segment.id << " {" << std::endl;
+      fout << "label=\"Segment " << segment.id;
+      if (segment.stream_id != -1) {
+        fout << "\\nStream: " << segment.stream_id;
+      }
+      if (segment.dependency_level != -1) {
+        fout << "\\nLevel: " << segment.dependency_level;
+      }
+      fout << "\";" << std::endl;
+      fout << "style=\"rounded,filled\";" << std::endl;
+      fout << "fillcolor=\"lightblue\";" << std::endl;
+      fout << "color=\"blue\";" << std::endl;
+      for (auto node : segment.nodes) {
+        node->GenerateDOTNode(GetID(), fout, flag);
+      }
+      fout << "}" << std::endl;
+    }
+
+    fout << "\n";
+    // Generate all edges after all nodes are defined
+    for (auto& node : vertices_) {
+      node->GenerateDOTNodeEdges(GetID(), fout, flag);
     }
   }
 
@@ -1164,7 +1220,6 @@ class GraphKernelNode : public GraphNode {
     for (auto& command : commands_) {
       hipFunction_t func = getFunc(kernelParams_, dev_id_);
       hip::DeviceFunc* function = hip::DeviceFunc::asFunction(func);
-      amd::Kernel* kernel = function->kernel();
       amd::ScopedLock lock(function->dflock_);
       command->enqueue();
       command->release();
@@ -1188,9 +1243,14 @@ class GraphKernelNode : public GraphNode {
     out << "=\"";
     out << GetLabel(flag);
     if (DEBUG_HIP_GRAPH_DOT_PRINT) {
-      out << "StreamId:" << stream_id_;
-      out << "\nSegmentId:" << segment_id_;
-      out << "\nSignalIsRequired: " << ((signal_is_required_) ? "true" : "false");
+      if (DEBUG_HIP_GRAPH_DOT_PRINT >= 2) {
+        out << "\nStreamId:" << stream_id_;
+        out << "\nHW Queue:" << hw_queue_id_;
+      }
+      if (segment_id_ == -1) {
+        out << "\nStreamId:" << stream_id_;
+        out << "\nSignalIsRequired: " << ((signal_is_required_) ? "true" : "false");
+      }
       out << "\nDeviceId:" << dev_id_;
     }
     out << "\"";
@@ -1419,7 +1479,6 @@ class GraphKernelNode : public GraphNode {
       return hipErrorInvalidDeviceFunction;
     }
     hip::DeviceFunc* function = hip::DeviceFunc::asFunction(func);
-    amd::Kernel* kernel = function->kernel();
     amd::ScopedLock lock(function->dflock_);
     status = validateKernelParams(&kernelParams_, func, dev_id_);
     if (hipSuccess != status) {
@@ -1901,10 +1960,8 @@ class GraphMemcpyNode1D : public GraphMemcpyNode {
       if (cmd != nullptr) {
         waitList.push_back(cmd);
         amd::Command* depdentMarker = new amd::Marker(*cmdQueue, true, waitList);
-        if (depdentMarker != nullptr) {
-          depdentMarker->enqueue();  // Make sure command synced with last command of queue
-          depdentMarker->release();
-        }
+        depdentMarker->enqueue();  // Make sure command synced with last command of queue
+        depdentMarker->release();
         cmd->release();
       }
       command->enqueue();
@@ -1915,10 +1972,8 @@ class GraphMemcpyNode1D : public GraphMemcpyNode {
         waitList.clear();
         waitList.push_back(cmd);
         amd::Command* depdentMarker = new amd::Marker(*stream, true, waitList);
-        if (depdentMarker != nullptr) {
-          depdentMarker->enqueue();  // Make sure future commands of queue synced with command
-          depdentMarker->release();
-        }
+        depdentMarker->enqueue();  // Make sure future commands of queue synced with command
+        depdentMarker->release();
         cmd->release();
       }
     } else {
@@ -2880,9 +2935,6 @@ class hipGraphExternalSemSignalNode : public GraphNode {
             *stream, externalSemaphorNodeParam_.extSemArray[i],
             externalSemaphorNodeParam_.paramsArray[i].params.fence.value,
             amd::ExternalSemaphoreCmd::COMMAND_SIGNAL_EXTSEMAPHORE);
-        if (command == nullptr) {
-          return hipErrorOutOfMemory;
-        }
         commands_.emplace_back(command);
       } else {
         return hipErrorInvalidValue;
@@ -2933,9 +2985,6 @@ class hipGraphExternalSemWaitNode : public GraphNode {
             *stream, externalSemaphorNodeParam_.extSemArray[i],
             externalSemaphorNodeParam_.paramsArray[i].params.fence.value,
             amd::ExternalSemaphoreCmd::COMMAND_WAIT_EXTSEMAPHORE);
-        if (command == nullptr) {
-          return hipErrorOutOfMemory;
-        }
         commands_.emplace_back(command);
       } else {
         return hipErrorInvalidValue;
@@ -2982,9 +3031,6 @@ class hipGraphBatchMemOpNode : public GraphNode {
         *stream, ROCCLR_COMMAND_BATCH_STREAM, batchMemOpNodeParam_.count,
         batchMemOpNodeParam_.flags, waitList, batchMemOpNodeParam_.paramArray,
         sizeof(hipStreamBatchMemOpParams));
-    if (command == nullptr) {
-      return hipErrorOutOfMemory;
-    }
     commands_.emplace_back(command);
     return hipSuccess;
   }

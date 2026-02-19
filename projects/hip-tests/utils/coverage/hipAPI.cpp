@@ -48,9 +48,9 @@ bool operator<(const HipAPI& l_hip_api, const HipAPI& r_hip_api) {
 HipAPI::HipAPI(std::string api_name, bool deprecated_flag, std::string api_group_name,
                std::string file_restriction)
     : api_name{api_name},
+      file_restriction{file_restriction},
       deprecated{deprecated_flag},
-      api_group_name{api_group_name},
-      file_restriction{file_restriction} {
+      api_group_name{api_group_name} {
   test_cases.clear();
 }
 

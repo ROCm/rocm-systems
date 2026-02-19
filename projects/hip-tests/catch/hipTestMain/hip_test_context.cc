@@ -123,11 +123,18 @@ std::string TestContext::getCurrentArch() {
     std::vector<std::string> filtered_archs;
     if (visible_devices.size() > 0) {
       for (size_t i = 0; i < visible_devices.size(); i++) {
-        filtered_archs.push_back(archs[visible_devices[i]]);
+        if (visible_devices[i] < archs.size()) {
+          filtered_archs.push_back(archs[visible_devices[i]]);
+        }
       }
     } else {
       filtered_archs = archs;
     }
+
+    if (filtered_archs.empty()) {
+      return "";
+    }
+
     auto first_filtered_arch = filtered_archs[0];
     if (!std::all_of(filtered_archs.begin(), filtered_archs.end(),
                      [&](const std::string& in) { return in == first_filtered_arch; })) {
@@ -147,7 +154,11 @@ std::string TestContext::getCurrentArch() {
 std::string TestContext::getMatchingConfigFile(std::string config_dir) {
   std::string configFileToUse = "";
   if (isLinux() && isAmd()) {
+#if defined(ENABLE_SPIRV)
+    std::string cur_arch = "amdgcnspirv";
+#else
     std::string cur_arch = getCurrentArch();
+#endif
     LogPrintf("The arch present: %s", cur_arch.c_str());
     configFileToUse = config_dir + "/config_" + getConfig().platform + "_" + getConfig().os + "_" +
                       cur_arch + ".json";

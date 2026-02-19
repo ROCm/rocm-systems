@@ -22,12 +22,15 @@
 
 #include "library/rocprofiler-sdk/counters.hpp"
 #include "core/agent_manager.hpp"
+#include "core/demangler.hpp"
 #include "core/trace_cache/cache_manager.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "library/rocprofiler-sdk/fwd.hpp"
 
 #include <memory>
 #include <timemory/utility/types.hpp>
+
+#include "logger/debug.hpp"
 
 namespace rocprofsys
 {
@@ -94,7 +97,9 @@ counter_event::operator()(const client_data* tool_data, ::perfetto::CounterTrack
     const auto* _kern_sym_data =
         tool_data->get_kernel_symbol_info(_dispatch_info.kernel_id);
 
-    auto _bundle = counter_bundle_t{ tim::demangle(_kern_sym_data->kernel_name), _scope };
+    auto _bundle =
+        counter_bundle_t{ rocprofsys::utility::demangle(_kern_sym_data->kernel_name),
+                          _scope };
 
     _bundle.push(_dispatch_info.queue_id.handle)
         .start()
@@ -141,7 +146,7 @@ counter_storage::counter_storage(const client_data* _tool_data, uint64_t _devid,
     auto _metric_name = std::string{ _name };
     _metric_name =
         std::regex_replace(_metric_name, std::regex{ "(.*)\\[([0-9]+)\\]" }, "$1_$2");
-    storage_name = JOIN('-', "rocprof", "device", device_id, _metric_name);
+    storage_name = fmt::format("rocprof-device-{}-{}", device_id, _metric_name);
     storage = std::make_unique<counter_storage_type>(tim::standalone_storage{}, index,
                                                      storage_name);
     tim::manager::instance()->add_cleanup(
@@ -153,8 +158,8 @@ counter_storage::counter_storage(const client_data* _tool_data, uint64_t _devid,
 
     {
         constexpr auto _unit = ::perfetto::CounterTrack::Unit::UNIT_COUNT;
-        track_name = JOIN(" ", "GPU", _metric_name, JOIN("", '[', device_id, ']'));
-        track      = std::make_unique<counter_track_type>(
+        track_name           = fmt::format(" GPU {} [{}]", _metric_name, device_id);
+        track                = std::make_unique<counter_track_type>(
             ::perfetto::StaticString(track_name.c_str()));
 
         metadata_initialize_counter_category();
@@ -181,9 +186,8 @@ counter_storage::write(counter_storage_type* storage, const std::string& metric_
 {
     if(!trait::runtime_enabled<counter_data_tracker>::get())
     {
-        ROCPROFSYS_WARNING_F(
-            1, "%s counter_data_tracker is disabled. Can't write storage.\n",
-            metric_name.c_str());
+        LOG_WARNING("{} counter_data_tracker is disabled. Can't write storage.",
+                    metric_name);
         return;
     }
 

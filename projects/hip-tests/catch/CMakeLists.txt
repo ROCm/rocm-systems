@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(hiptests LANGUAGES C CXX HIP)                                         
+project(hiptests LANGUAGES C CXX HIP)
 
 option(ENABLE_ADDRESS_SANITIZER "Option to enable ASAN build" OFF)
 option(BUILD_SHARED_LIBS "Option for testing shared libraries" ON)
@@ -8,7 +8,12 @@ option(BUILD_UNIT_TESTS "Build unit tests" ON)
 option(BUILD_PERF_TESTS "Build perf tests" OFF)
 option(BUILD_STRESS_TESTS "Build stress tests" OFF)
 option(TEST_CLOCK_CYCLE "Option to use clock64" OFF)
-option(GENERATE_COVERATE "Generate coverage" OFF)
+option(RTC_TESTING "Run tests using HIP RTC to compile the kernels" OFF)
+option(ENABLE_SPIRV "Build hip-tests for SPIRV" OFF)
+
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE "Release")
+endif()
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -23,6 +28,7 @@ find_package(hiprtc)
 find_package(Git)
 find_package(Python 3 COMPONENTS Interpreter REQUIRED)
 find_program(HIPCONFIG_EXEC hipconfig REQUIRED)
+
 # hip root dir is 3 levels down the hip-config.cmake file path
 set(HIP_PATH ${hip_DIR}/../../../)
 if(NOT DEFINED ROCM_PATH)
@@ -31,14 +37,18 @@ if(NOT DEFINED ROCM_PATH)
         set(ROCM_PATH ${HIP_PATH})
     endif()
 endif()
+
 if(UNIX)
-    find_program(ROCM_AGENT_ENUMERATOR_EXEC rocm_agent_enumerator REQUIRED)
+    if(NOT ENABLE_SPIRV)
+        find_program(ROCM_AGENT_ENUMERATOR_EXEC rocm_agent_enumerator REQUIRED)
+    endif()
     find_program(GCC_EXEC gcc)
     find_program(GXX_EXEC g++)
 else() # Win32
     find_program(LLVM_RC_EXEC NAMES llvm-rc llvm-rc.exe
                  PATHS ${HIP_PATH} ${HIP_PATH}../lc/bin ${ROCM_PATH})
 endif()
+
 find_program(CLANG_CPP_EXEC NAMES clang-cpp clang-cpp.exe
              PATHS ${HIP_PATH} ${HIP_PATH}../lc/bin ${ROCM_PATH}/llvm/bin)
 message(STATUS "HIP Lib path: ${HIP_LIB_INSTALL_DIR}")
@@ -111,6 +121,14 @@ if(Catch2_FOUND)
     set(CATCH_ADD_TESTS_SCRIPT ${Catch2_DIR}/CatchAddTests.cmake)
     file(GLOB CATCH_LIBS "${Catch2_DIR}/../../*Catch2*")
 else()
+    # On Windows, ensure Catch2 uses the same MSVC runtime library and build configuration as our tests
+    if(WIN32)
+        set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build static libraries" FORCE)
+        set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>" CACHE STRING "MSVC runtime library" FORCE)
+        if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+            set(win_disable_warnings -fms-runtime-lib=static_dbg)
+        endif()
+    endif()
     # Setup catch2 manually
     include(FetchContent)
     FetchContent_Declare(
@@ -134,7 +152,6 @@ include_directories(
     "${CMAKE_CURRENT_LIST_DIR}/external/picojson"
 )
 
-option(RTC_TESTING "Run tests using HIP RTC to compile the kernels" OFF)
 if (RTC_TESTING)
     add_definitions(-DRTC_TESTING=ON)
 endif()
@@ -166,9 +183,15 @@ endif()
 
 if(HIP_PLATFORM STREQUAL "amd")
     if(WIN32)
-        set(win_disable_warnings -Wno-ignored-attributes -Wno-microsoft-cast)
+        set(win_disable_warnings ${win_disable_warnings} -Wno-ignored-attributes -Wno-microsoft-cast)
+        # Windows for some reason does not honor the `CMAKE_CXX_STANDARD` we set initially in the file
+        # Which results in errors about missing headers etc
+        set(win_cxx_standard -std=c++17)
     endif()
-    add_compile_options(${HIP_PATH_OPT} -std=c++17 -x hip -Wall -Wextra -Wvla -Wno-deprecated -Wno-option-ignored -Wno-unused-parameter ${win_disable_warnings}) # -Werror)
+    add_compile_options(${HIP_PATH_OPT} ${win_cxx_standard} -x hip -Wall -Wextra -Wvla -Wno-deprecated -Wno-option-ignored -Wno-unused-parameter ${win_disable_warnings})
+    if(CMAKE_BUILD_TYPE STREQUAL "Release")
+        add_compile_options(-O3)
+    endif()
 endif()
 
 # Turn off CMAKE_HIP_ARCHITECTURES Feature if cmake version is 3.21+
@@ -186,7 +209,9 @@ message(STATUS "CMAKE HIP ARCHITECTURES: ${CMAKE_HIP_ARCHITECTURES}")
 # preference to pass arch -
 # OFFLOAD_ARCH_STR
 # rocm_agent_enumerator
-if(DEFINED OFFLOAD_ARCH_STR)
+if(ENABLE_SPIRV)
+    set(OFFLOAD_ARCH_STR "--offload-arch=amdgcnspirv")
+elseif(DEFINED OFFLOAD_ARCH_STR)
     string(REPLACE "--offload-arch=" "" HIP_GPU_ARCH_LIST ${OFFLOAD_ARCH_STR})
 elseif(DEFINED GPU_TARGETS)
     foreach(_hip_gpu_arch ${GPU_TARGETS})
@@ -298,12 +323,14 @@ file(COPY ./include/hip_test_context.hh DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/
 
 # Enable device lambda on nvidia platforms
 if(HIP_PLATFORM STREQUAL "nvidia")
+    # SPIRV is not supported on it
+    if(ENABLE_SPIRV)
+        message(FATAL_ERROR "SPIRV is not supported on this platform")
+    endif()
+
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --extended-lambda")
     add_compile_options(-Xcompiler=-Wno-deprecated-declarations)
 endif()
-
-# Disable CXX extensions (gnu++11 etc)
-set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_custom_target(build_tests ALL)
 
@@ -326,14 +353,18 @@ if(BUILD_STRESS_TESTS)
     add_subdirectory(stress ${CATCH_BUILD_DIR}/stress)
 endif()
 
-if(GENERATE_COVERATE)
-    add_custom_target(gen_coverage
-                  COMMAND ${CMAKE_COMMAND} -B build/
-                  COMMAND ${CMAKE_COMMAND} --build build/
-                  COMMAND ./build/generateHipAPICoverage ${HIP_PATH}/include
-                  WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/../utils/coverage
-                  COMMENT "Generating Test Coverage Report")
-endif()
+add_custom_target(gen_coverage
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/utils/coverage
+    COMMAND ${CMAKE_COMMAND} -B ${CMAKE_CURRENT_BINARY_DIR}/utils/coverage -S ${CMAKE_CURRENT_SOURCE_DIR}/../utils/coverage
+    COMMAND ${CMAKE_COMMAND} --build ${CMAKE_CURRENT_BINARY_DIR}/utils/coverage --target clean-cov-report
+    COMMAND ${CMAKE_COMMAND} --build ${CMAKE_CURRENT_BINARY_DIR}/utils/coverage
+    COMMAND ${CMAKE_CURRENT_BINARY_DIR}/utils/coverage/generateHipAPICoverage ${HIP_PATH}/include ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/utils/coverage/
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    COMMENT "Generating Test Coverage Report"
+    USES_TERMINAL
+    VERBATIM
+)
+set_property(TARGET gen_coverage PROPERTY EXCLUDE_FROM_ALL TRUE)
 
 # packaging the tests
 add_subdirectory(packaging)

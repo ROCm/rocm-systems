@@ -151,13 +151,11 @@ static auto amdsmi_read_cper_file(const std::string &filepath) -> CperFileCtx {
           0x72, 0x5F, 0xD6, 0xAE)
 #define AMD_GPU_NONSTANDARD_ERROR                       \
     GUID_INIT(0x32AC0C78, 0x2623, 0x48F6, 0x81, 0xA2, 0xAC, 0x69,   \
-          0x17, 0x80, 0x55, 0x1D)          
+          0x17, 0x80, 0x55, 0x1D)
 #define PROC_ERR_SECTION_TYPE                   \
     GUID_INIT(0xDC3EA0B0, 0xA144, 0x4797, 0xB9, 0x5B, 0x53, 0xFA,   \
           0x24, 0x2B, 0x6E, 0x1D)
 
-static amdsmi_cper_guid_t mce = CPER_NOTIFY_MCE;
-static amdsmi_cper_guid_t cmc = CPER_NOTIFY_CMC;
 static amdsmi_cper_guid_t bt = BOOT_TYPE;
 static amdsmi_cper_guid_t cr = AMD_OOB_CRASHDUMP;
 static amdsmi_cper_guid_t nonstd = AMD_GPU_NONSTANDARD_ERROR;
@@ -238,9 +236,9 @@ static int cper_dump_sec_desc(const struct cper_sec_desc *desc)
 
     ss << "[SEC DESC] fru_id    = " << desc->fru_id << "\n";
     ss << "[SEC DESC] fru_text  = " << desc->fru_text << "\n";
-    
+
     ss << std::dec << "\n";
-    
+
     if (cper_is_cr(&desc->sec_type))
         ss << "[SEC DESC] AMD CrashDump Section\n";
     else if (cper_is_nonstd(&desc->sec_type))
@@ -256,13 +254,13 @@ static int cper_dump_sec_desc(const struct cper_sec_desc *desc)
     return 0;
 }
 
-static int aca_decode_fatal(const cper_sec_crashdump_data &data, uint32_t flag, uint16_t hw_revision, uint16_t register_context_type) 
+static int aca_decode_fatal(const cper_sec_crashdump_data &data, uint32_t flag, uint16_t hw_revision, uint16_t register_context_type)
 {
     const uint64_t *register_array = reinterpret_cast<const uint64_t *>(&data.dump.fatal_err);
     return decode_afid(register_array, sizeof(data.dump.fatal_err)/sizeof(uint64_t), flag, hw_revision, register_context_type);
 }
 
-static int aca_decode_corrected_error(const uint32_t *reg_dump, size_t num_bytes, uint32_t flag, uint16_t hw_revision, uint16_t register_context_type)  
+static int aca_decode_corrected_error(const uint32_t *reg_dump, size_t num_bytes, uint32_t flag, uint16_t hw_revision, uint16_t register_context_type)
 {
     const uint64_t *register_array = reinterpret_cast<const uint64_t *>(reg_dump);
     return decode_afid(register_array, num_bytes, flag, hw_revision, register_context_type);
@@ -294,13 +292,13 @@ static int cper_dump_nonstd_err(const struct cper_sec_nonstd_err *nonstd_err, co
     for (int i = 0; i < CPER_ACA_REG_COUNT; i++) {
         ss << "[NonSTD SEC] reg_dump[" << std::dec << i << "] = 0x" << std::hex << body->err_ctx.reg_dump[i] << "\n";
     }
-    
-exit:    
+
+exit:
     ss << std::dec << "~~~~NON STANDARD SECTION~~~\n\n";
 
     LOG_DEBUG(ss);
 
-    return aca_decode_corrected_error(body->err_ctx.reg_dump, sizeof(body->err_ctx.reg_dump)/sizeof(uint64_t), 
+    return aca_decode_corrected_error(body->err_ctx.reg_dump, sizeof(body->err_ctx.reg_dump)/sizeof(body->err_ctx.reg_dump[0]),
         section->flags_mask, section->revision_major, body->err_ctx.reg_ctx_type);
 }
 
@@ -341,7 +339,7 @@ static int cper_dump_cr_boot(const struct cper_sec_crashdump *crashdump, const c
 }
 
 static void inject_product_serial_number(amdsmi_cper_hdr_t *cper, uint64_t product_serial) {
-    for (size_t i = 0; i < cper_num_sec(cper); i++) {
+    for (int i = 0; i < cper_num_sec(cper); i++) {
         void *sec_desc_offset = cper_get_sec_desc_offset(cper, i);
         struct cper_sec_desc *sec_desc = static_cast<struct cper_sec_desc *>(sec_desc_offset);
         strncpy(sec_desc->fru_id, std::to_string(product_serial).c_str(), sizeof(sec_desc->fru_id) - 1);
@@ -349,7 +347,7 @@ static void inject_product_serial_number(amdsmi_cper_hdr_t *cper, uint64_t produ
     }
 }
 
-} //namespace 
+} //namespace
 
 amdsmi_status_t amdsmi_get_gpu_cper_entries_by_path(
     const char *amdgpu_ring_cper_file,
@@ -502,31 +500,32 @@ std::vector<int> cper_decode(const amdsmi_cper_hdr_t *cper) {
         cper_sec_desc *section = static_cast<struct cper_sec_desc *>(sec_desc_offset);
         cper_dump_sec_desc(section);
 
+        int afid = -1;
         if (cper_is_cr(sec_guid)) {
             struct cper_sec_crashdump *crashdump = static_cast<struct cper_sec_crashdump *>(sec_offset);
             if (cper_is_bt(cper_guid)) {
                 ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[AFIDS] decoding boot crash dump\n";
                 LOG_DEBUG(ss);
-                afids.emplace_back(cper_dump_cr_boot(crashdump, section));
+                afid = cper_dump_cr_boot(crashdump, section);
             }
             else {
                 ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[AFIDS] decoding crash dump\n";
                 LOG_DEBUG(ss);
-                afids.emplace_back(cper_dump_cr_fatal(crashdump, section));
+                afid = cper_dump_cr_fatal(crashdump, section);
             }
         }
         else if (cper_is_nonstd(sec_guid)) {
             struct cper_sec_nonstd_err *crashdump = static_cast<struct cper_sec_nonstd_err *>(sec_offset);
             ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[AFIDS] decoding non-standard error\n";
             LOG_DEBUG(ss);
-            afids.emplace_back(cper_dump_nonstd_err(crashdump, section));
-        } 
+             afid = cper_dump_nonstd_err(crashdump, section);
+        }
         else if (cper_is_proc_err(sec_guid)) {
             struct cper_sec_nonstd_err *crashdump = static_cast<struct cper_sec_nonstd_err *>(sec_offset);
             ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[AFIDS] decoding proc error section type\n";
             LOG_DEBUG(ss);
-            afids.emplace_back(cper_dump_nonstd_err(crashdump, section));
-        } 
+            afid = cper_dump_nonstd_err(crashdump, section);
+        }
         else {
             ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[AFIDS] Unknown error type!!\n";
             for(size_t j = 0; j < sizeof(sec_guid->b); ++j) {
@@ -534,6 +533,9 @@ std::vector<int> cper_decode(const amdsmi_cper_hdr_t *cper) {
             }
             ss << "\n";
             LOG_ERROR(ss);
+        }
+        if(afid != -1) {
+            afids.emplace_back(afid);
         }
     }
 

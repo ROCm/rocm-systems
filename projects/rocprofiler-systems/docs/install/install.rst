@@ -100,6 +100,7 @@ Required third-party packages
 
 * `libunwind <https://www.nongnu.org/libunwind/>`_ for call-stack sampling
 * `SQLite <https://github.com/sqlite/sqlite>`_ for database output
+* `spdlog <https://github.com/gabime/spdlog>`_ for logging
 
 Any of the third-party packages required by Dyninst, along with Dyninst itself, can be built and installed
 during the ROCm Systems Profiler build. The following list indicates the package, the version,
@@ -112,6 +113,7 @@ while Dyninst requires TBB), and the CMake option to build the package alongside
    "Dyninst", "13.0", "ROCm Systems Profiler", "``ROCPROFSYS_BUILD_DYNINST`` (default: OFF)"
    "Libunwind", "", "ROCm Systems Profiler", "``ROCPROFSYS_BUILD_LIBUNWIND`` (default: ON)"
    "Nlohmann/JSON", "", "ROCm Systems Profiler", "``ROCPROFSYS_BUILD_NLOHMANN_JSON`` (default: ON)"
+   "spdlog", "", "ROCm Systems Profiler", "``ROCPROFSYS_BUILD_SPDLOG`` (default: ON)"
    "SQLite", "", "ROCm Systems Profiler", "``ROCPROFSYS_BUILD_SQLITE`` (default: OFF)"
    "TBB", "2018.6", "Dyninst", "``ROCPROFSYS_BUILD_TBB`` (default: OFF)"
    "ElfUtils", "0.178", "Dyninst", "``ROCPROFSYS_BUILD_ELFUTILS`` (default: OFF)"
@@ -287,6 +289,21 @@ and the MPICH headers and then using
 ROCm Systems Profiler on an application built against OpenMPI causes a segmentation fault.
 This happens because the value of the ``MPI_COMM_WORLD`` is truncated
 during the function wrapping before being passed along to the underlying MPI function.
+
+UCX support within ROCm Systems Profiler
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+ROCm Systems Profiler supports tracing UCX (Unified Communication X) communication functions
+when ``ROCPROFSYS_USE_UCX`` is enabled. **UCX tracing is disabled by default** and must be explicitly 
+enabled at runtime by setting ``ROCPROFSYS_USE_UCX=ON``. UCX is a high-performance communication
+framework that serves as a transport layer for MPI and other communication libraries, providing
+optimized point-to-point and collective communication operations.
+
+When UCX support is enabled at runtime, ROCm Systems Profiler can automatically intercept and trace UCX
+communication functions such as ``ucp_tag_send``, ``ucp_tag_recv``, and other UCP (Unified
+Communication Protocol) and UCT (Unified Communication Transport) layer operations. This allows
+for detailed analysis of communication patterns and performance in applications using UCX as
+their underlying transport mechanism.
 
 Python support within ROCm Systems Profiler
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

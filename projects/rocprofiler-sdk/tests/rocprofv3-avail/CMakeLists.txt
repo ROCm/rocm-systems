@@ -15,9 +15,11 @@ set(PRELOAD_ENV "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}")
 
 # disable when GPU-0 is navi2, navi3, and navi4
 list(GET rocprofiler-sdk-tests-gfx-info 0 pc-sampling-gpu-0-gfx-info)
+# Disable for all sanitizers - Python tests cannot load sanitizer libs dynamically due to
+# static TLS block allocation limitations
 if("${pc-sampling-gpu-0-gfx-info}" MATCHES "^gfx(10|11|12)[0-9][0-9]$"
    OR "${pc-sampling-gpu-0-gfx-info}" MATCHES "^gfx906$"
-   OR ROCPROFILER_MEMCHECK STREQUAL "AddressSanitizer")
+   OR ROCPROFILER_MEMCHECK)
     set(IS_DISABLED ON)
 endif()
 

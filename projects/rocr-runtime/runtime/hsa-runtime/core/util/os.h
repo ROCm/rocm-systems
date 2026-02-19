@@ -355,6 +355,8 @@ bool UncommitMemory(void* addr, size_t size);
 bool UnmapMemory(void* addr, size_t size);
 bool MapMemory(void* addr, size_t size, MemProt prot, int fd, uint64_t cpu_addr);
 
+bool ProtectMemory(void* va, size_t size, MemProt perms);
+
 uint64_t HostTotalPhysicalMemory();
 
 /// Find First Set for any OS
