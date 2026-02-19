@@ -87,12 +87,10 @@ __forceinline HSA_QUEUE_PRIORITY HsaInternalToKfdPriority(
 }
 
 namespace AMD {
-#if defined(__linux__)
 static_assert(
-    (sizeof(core::ShareableHandle::handle) >= sizeof(HsaMemoryObjectHandle)) &&
-        (alignof(core::ShareableHandle::handle) >= alignof(HsaMemoryObjectHandle)),
+    (sizeof(decltype(core::ShareableHandle::handle)) >= sizeof(HsaMemoryObjectHandle)) &&
+        (alignof(decltype(core::ShareableHandle::handle)) >= alignof(HsaMemoryObjectHandle)),
     "ShareableHandle cannot store a HsaMemoryObjectHandle");
-#endif
 namespace {
 
 __forceinline HsaMemoryMapFlags mem_perm(hsa_access_permission_t perm) {
@@ -438,17 +436,6 @@ hsa_status_t KfdDriver::AllocQueueGWS(HSA_QUEUEID queue_id, uint32_t num_gws,
   if (HSAKMT_CALL(hsaKmtAllocQueueGWS(queue_id, num_gws, first_gws)) != HSAKMT_STATUS_SUCCESS) {
     return HSA_STATUS_ERROR;
   }
-  return HSA_STATUS_SUCCESS;
-}
-
-hsa_status_t KfdDriver::GetShareableHandle(void* va, void* mem, size_t size,
-                                           core::ShareableHandle* handle) {
-  uint64_t mem_handle;
-  HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtGetMemoryHandle(va, mem, size, &mem_handle));
-  if (status != HSAKMT_STATUS_SUCCESS) {
-    return HSA_STATUS_ERROR;
-  }
-  handle->handle = mem_handle;
   return HSA_STATUS_SUCCESS;
 }
 
