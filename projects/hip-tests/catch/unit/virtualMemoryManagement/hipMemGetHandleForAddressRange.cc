@@ -303,6 +303,12 @@ TEST_CASE("Unit_hipMemGetHandleForAddressRange_DeviceMemory") {
   constexpr int sizeBytes = size * sizeof(int);
   CTX_CREATE();
 
+  hipDevice_t device;
+  constexpr int kDeviceId = 0;
+  HIP_CHECK(hipDeviceGet(&device, kDeviceId));
+  checkDmaBufSupported(device);
+  checkVMMSupported(device);
+
   void* srcDevMem = createDeviceMemoryAndFillData(size);
   REQUIRE(srcDevMem != nullptr);
 
@@ -311,10 +317,6 @@ TEST_CASE("Unit_hipMemGetHandleForAddressRange_DeviceMemory") {
                                            hipMemRangeHandleTypeDmaBufFd, 0));
   REQUIRE(handle > 0);
 
-  hipDevice_t device;
-  constexpr int kDeviceId = 0;
-  HIP_CHECK(hipDeviceGet(&device, kDeviceId));
-  checkVMMSupported(device);
   REQUIRE(validateHandle(handle, size) == true);
 
   HIP_CHECK(hipFree(srcDevMem));
@@ -340,6 +342,7 @@ TEST_CASE("Unit_hipMemGetHandleForAddressRange_VM") {
   hipDevice_t device;
   constexpr int kDeviceId = 0;
   HIP_CHECK(hipDeviceGet(&device, kDeviceId));
+  checkDmaBufSupported(device);
   checkVMMSupported(device);
 
   constexpr int size = 1024;
@@ -395,6 +398,7 @@ TEST_CASE("Unit_hipMemGetHandleForAddressRange_DeviceMemory_InAnotherDevice",
   HIP_CHECK(hipSetDevice(srcDeviceId));
   hipDevice_t device;
   HIP_CHECK(hipDeviceGet(&device, srcDeviceId));
+  checkDmaBufSupported(device);
   checkVMMSupported(device);
 
   void* srcDevMem = nullptr;
@@ -447,6 +451,7 @@ TEST_CASE("Unit_hipMemGetHandleForAddressRange_VM_InAnotherDevice",
   HIP_CHECK(hipSetDevice(srcDeviceId));
   hipDevice_t device;
   HIP_CHECK(hipDeviceGet(&device, srcDeviceId));
+  checkDmaBufSupported(device);
   checkVMMSupported(device);
 
   constexpr int kNumElemsSize = 1024;
@@ -546,6 +551,7 @@ TEST_CASE("Unit_hipMemGetHandleForAddressRange_MulProc_Socket_DeviceMem") {
 
     hipDevice_t device;
     HIP_CHECK(hipDeviceGet(&device, 0));
+    checkDmaBufSupported(device);
     checkVMMSupported(device);
 
     void* srcDevMem = nullptr;
@@ -643,6 +649,7 @@ TEST_CASE("Unit_hipMemGetHandleForAddressRange_MulProc_Socket_VM") {
 
     hipDevice_t device;
     HIP_CHECK(hipDeviceGet(&device, 0));
+    checkDmaBufSupported(device);
     checkVMMSupported(device);
 
     hipDeviceptr_t ptrA;
@@ -735,6 +742,7 @@ TEST_CASE("Unit_hipMemGetHandleForAddressRange_MultipleThreads") {
   hipDevice_t device;
   constexpr int kDeviceId = 0;
   HIP_CHECK(hipDeviceGet(&device, kDeviceId));
+  checkDmaBufSupported(device);
   checkVMMSupported(device);
 
   const unsigned int threadsSupported = std::thread::hardware_concurrency();
@@ -774,6 +782,11 @@ TEST_CASE("Unit_hipMemGetHandleForAddressRange_MultipleThreads") {
  *  - HIP_VERSION >= 7.0
  */
 TEST_CASE("Unit_hipMemGetHandleForAddressRange_DifferentOffsets") {
+  hipDevice_t device;
+  constexpr int kDeviceId = 0;
+  HIP_CHECK(hipDeviceGet(&device, kDeviceId));
+  checkDmaBufSupported(device);
+
   int handle;
   int size = 5;
   int sizeBytes = size * sizeof(int);

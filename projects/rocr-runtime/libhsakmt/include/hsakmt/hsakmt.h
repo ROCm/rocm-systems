@@ -32,6 +32,8 @@
 extern "C" {
 #endif
 
+/* Forward declaration for debug trap ioctl arguments */
+struct kfd_ioctl_dbg_trap_args;
 
 /**
   "Opens" the HSA kernel driver for user-kernel mode communication.
@@ -131,6 +133,23 @@ hsaKmtGetNodeMemoryProperties(
     HSAuint32             NodeId,             //IN
     HSAuint32             NumBanks,           //IN
     HsaMemoryProperties*  MemoryProperties    //OUT
+    );
+
+/**
+  Retrieves the wall clock frequency of a specific HSA node.
+
+  The returned frequency is in hertz (Hz), i.e., KHz * 1000.
+  When possible, prefer using HsaNodeProperties.WallClockKHz from
+  hsaKmtGetNodeProperties(), as this function is mainly for compatibility
+  with clients that expect this API to exist.
+  Not all implementations are required to support this API.
+*/
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtGetNodeWallclockFrequency(
+    HSAuint32 NodeId,      // IN
+    uint64_t* Frequency    // OUT (Hz)
     );
 
 /**
@@ -401,7 +420,8 @@ hsaKmtGetQueueInfo(
 HSAKMT_STATUS
 HSAKMTAPI
 hsaKmtQueueRingDoorbell(
-    HSA_QUEUEID QueueId
+    HSA_QUEUEID QueueId,
+    HSAuint64 value
 );
 
 /**
@@ -852,8 +872,10 @@ hsaKmtCheckRuntimeDebugSupport(
 /**
   Debug ops call primarily used for KFD testing
  */
-HSAKMT_STATUS HSAKMTAPI hsaKmtDebugTrapIoctl(
-    struct kfd_ioctl_dbg_trap_args *arg,
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtDebugTrapIoctl(
+    struct kfd_ioctl_dbg_trap_args *args,
     HSA_QUEUEID *Queues,
     HSAuint64 *DebugReturn
     );

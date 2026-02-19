@@ -46,6 +46,7 @@ class AMDSMILogger():
             self.helpers = helpers
         self._cper_exit_message = True
         self.store_cpu_json_output = []
+        self.store_nic_json_output = []
         self.store_core_json_output = []
         self.store_gpu_json_output = []
         self.store_xgmi_metric_json_output = []
@@ -156,6 +157,10 @@ class AMDSMILogger():
             elif key == 'gpu':
                 stored_gpu = string_value
                 table_values += string_value.rjust(3)
+            elif key == 'brcm_nic':
+                table_values += string_value.rjust(3)   
+            elif key == 'brcm_switch':
+                 table_values += string_value.rjust(3)
             elif key == 'xcp':
                 stored_gpu = string_value
                 table_values += string_value.rjust(5)
@@ -188,6 +193,27 @@ class AMDSMILogger():
                 table_values += string_value.rjust(12)
             elif key in ('pcie_replay'):
                 table_values += string_value.rjust(13)
+            #BRCM Device Metrics
+            #NIC
+            elif key == "NIC_TEMP_CURRENT":
+                table_values += string_value.rjust(21)
+            elif key == "NIC_TEMP_CRIT_ALARM":
+                table_values += string_value.rjust(22)
+            elif key == "NIC_TEMP_EMERGENCY_ALARM":
+                table_values += string_value.rjust(26)
+            elif key == "NIC_TEMP_SHUTDOWN_ALARM":
+                table_values += string_value.rjust(25)
+            elif key == "NIC_TEMP_MAX_ALARM":
+                table_values += string_value.rjust(20)
+            #SWITCH
+            elif key == "CURRENT_LINK_SPEED":
+                table_values += string_value.rjust(25)
+            elif key == "MAX_LINK_SPEED":
+                table_values += string_value.rjust(20)
+            elif key == "CURRENT_LINK_WIDTH":
+                table_values += string_value.rjust(20)
+            elif key == "MAX_LINK_WIDTH":
+                table_values += string_value.rjust(20)
             # Only for handling topology tables
             elif 'gpu_' in key:
                 table_values += string_value.ljust(13)
@@ -231,7 +257,7 @@ class AMDSMILogger():
                         # Add N/A for empty process_info
                         table_values += "N/A".rjust(17) + "N/A".rjust(9) + "N/A".rjust(10) + \
                                         "N/A".rjust(10) + "N/A".rjust(10) + "N/A".rjust(10) + \
-                                        "N/A".rjust(9) + "N/A".rjust(10) + '\n'
+                                        "N/A".rjust(9) + "N/A".rjust(8) + "N/A".rjust(8) + '\n'
                     else:
                         #Fix this herre
                         for process_key, process_value in process_dict['process_info'].items():
@@ -252,8 +278,10 @@ class AMDSMILogger():
                                 table_values += string_process_value.rjust(10)
                             elif process_key == "cu_occupancy":
                                 table_values += string_process_value.rjust(9)
+                            elif process_key == "sdma_usage":
+                                table_values += string_process_value.rjust(8)
                             elif process_key == "evicted_time":
-                                table_values += string_process_value.rjust(9)
+                                table_values += string_process_value.rjust(8)
                                 # Add the stored gpu and stored timestamp to the next line
                                 table_values += '\n'
                                 if stored_timestamp:
@@ -279,7 +307,7 @@ class AMDSMILogger():
         # Increase tabbing for device arguments by pulling them out of the main dictionary and assiging them to an empty string
         tabbed_dictionary = {}
         for key, value in capitalized_json.items():
-            if key not in ["GPU", "CPU", "CORE"]:
+            if key not in ["GPU", "CPU", "CORE","BRCM_NIC","BRCM_SWITCH","AI_NIC"]:
                 tabbed_dictionary[key] = value
             # Filter out N/A values under clock
             if key == "CLOCK":
@@ -417,6 +445,42 @@ class AMDSMILogger():
         """
         gpu_id = self.helpers.get_gpu_id_from_device_handle(device_handle)
         self._store_output_amdsmi(gpu_id=gpu_id, argument=argument, data=data)
+    
+    def store_nic_output(self, device_handle, argument, data):
+        """ Convert device handle to nic id and store output
+            params:
+                device_handle - device handle object to the target device output
+                argument (str) - key to store data
+                data (dict | list) - Data store against argument
+            return:
+                Nothing
+        """
+        nic_id = self.helpers.get_nic_id_from_device_handle(device_handle)
+        self._store_nic_output_amdsmi(nic_id=nic_id, argument=argument, data=data)
+
+    def store_ainic_output(self, device_handle, argument, data):
+        """ Convert device handle to ainic id and store output
+            params:
+                device_handle - device handle object to the target device output
+                argument (str) - key to store data
+                data (dict | list) - Data store against argument
+            return:
+                Nothing
+        """
+        nic_id = self.helpers.get_ainic_id_from_device_handle(device_handle)
+        self._store_ainic_output_amdsmi(nic_id=nic_id, argument=argument, data=data)
+
+    def store_switch_output(self, device_handle, argument, data):
+        """ Convert device handle to nic id and store output
+            params:
+                device_handle - device handle object to the target device output
+                argument (str) - key to store data
+                data (dict | list) - Data store against argument
+            return:
+                Nothing
+        """
+        switch_id = self.helpers.get_switch_id_from_device_handle(device_handle)
+        self._store_switch_output_amdsmi(switch_id=switch_id, argument=argument, data=data)
 
 
     def store_cpu_output(self, device_handle, argument, data):
@@ -509,7 +573,76 @@ class AMDSMILogger():
                 self.output[argument] = data
         else:
             raise ValueError("Invalid output format: expected json, csv, or human_readable")
+        
+    def _store_nic_output_amdsmi(self, nic_id, argument, data):
+        if argument == 'timestamp': # Make sure timestamp is the first element in the output
+            self.output['timestamp'] = int(time.time())
 
+        if self.is_json_format() or self.is_human_readable_format():
+            self.output['brcm_nic'] = int(nic_id)
+            if argument == 'values' and isinstance(data, dict):
+            
+                self.output.update(data)
+            else:
+            
+              self.output[argument] = data
+        elif self.is_csv_format():
+            self.output['brcm_nic'] = int(nic_id)
+
+            if argument == 'values' or isinstance(data, dict):
+                flat_dict = self.flatten_dict(data)
+                self.output.update(flat_dict)
+            else:
+                self.output[argument] = data
+        else:
+            raise ValueError("Invalid output format: expected json, csv, or human_readable")
+        
+    def _store_ainic_output_amdsmi(self, nic_id, argument, data):
+        if argument == 'timestamp': # Make sure timestamp is the first element in the output
+            self.output['timestamp'] = int(time.time())
+
+        if self.is_json_format() or self.is_human_readable_format():
+            self.output['ai_nic'] = int(nic_id)
+            if argument == 'values' and isinstance(data, dict):
+            
+                self.output.update(data)
+            else:
+            
+              self.output[argument] = data
+        elif self.is_csv_format():
+            self.output['ai_nic'] = int(nic_id)
+
+            if argument == 'values' or isinstance(data, dict):
+                flat_dict = self.flatten_dict(data)
+                self.output.update(flat_dict)
+            else:
+                self.output[argument] = data
+        else:
+            raise ValueError("Invalid output format: expected json, csv, or human_readable")
+        
+              
+    def _store_switch_output_amdsmi(self, switch_id, argument, data):
+        if argument == 'timestamp': # Make sure timestamp is the first element in the output
+            self.output['timestamp'] = int(time.time())
+
+        if self.is_json_format() or self.is_human_readable_format():
+            self.output['brcm_switch'] = int(switch_id)
+            if argument == 'values' and isinstance(data, dict):
+            
+                self.output.update(data)
+            else:
+            
+              self.output[argument] = data
+        elif self.is_csv_format():
+            self.output['brcm_switch'] = int(switch_id)
+
+            if argument == 'values' or isinstance(data, dict):
+                flat_dict = self.flatten_dict(data)
+                self.output.update(flat_dict)
+            else:
+                self.output[argument] = data
+        else:
+            raise ValueError("Invalid output format: expected json, csv, or human_readable")
 
     def store_multiple_device_output(self):
         """ Store the current output into the multiple_device_output
@@ -604,6 +737,8 @@ class AMDSMILogger():
         combined_json = {}
         if self.store_cpu_json_output:
             combined_json["cpu_data"] = self.store_cpu_json_output
+        if self.store_nic_json_output:
+            combined_json["nic_data"] = self.store_nic_json_output
         if self.store_core_json_output:
             combined_json["core_data"] = self.store_core_json_output
         if self.store_gpu_json_output:
@@ -678,11 +813,13 @@ class AMDSMILogger():
                         writer.writerows(self.watch_output)
             else:
                 with self.destination.open('a', newline = '', encoding="utf-8") as output_file:
-                    # Get the header as a list of the first element to maintain order
-                    csv_header = stored_csv_output[0].keys()
-                    writer = csv.DictWriter(output_file, csv_header)
-                    writer.writeheader()
-                    writer.writerows(stored_csv_output)
+                    # Only write to file if there is data
+                    if stored_csv_output:
+                        # Get the header as a list of the first element to maintain order
+                        csv_header = stored_csv_output[0].keys()
+                        writer = csv.DictWriter(output_file, csv_header)
+                        writer.writeheader()
+                        writer.writerows(stored_csv_output)
 
 
     def _print_dual_csv_output(self, multiple_device_enabled=False, watching_output=False):
@@ -1137,26 +1274,27 @@ class AMDSMILogger():
         # print process list of all GPUs last
         print(default_line_1)
         print("| Processes:                                                                   |")
-        print("|  GPU        PID  Process Name          GTT_MEM  VRAM_MEM  MEM_USAGE     CU % |")
+        print("|  GPU      PID  Process Name       GTT_MEM  VRAM_MEM  MEM_USAGE  CU %  SDMA   |")
         print(default_line_5)
         elevated_permission_error = False
         if len(output['processes']) != 0:
             for process in output['processes']:
                 gpu_id = str(process['gpu']).rjust(4)
-                pid = str(process['pid']).rjust(9)
+                pid = str(process['pid']).rjust(7)
                 if str(process['name']) == "N/A":
-                    process_name = "N/A".ljust(19)
+                    process_name = "N/A".ljust(16)
                 else:
-                    process_name = str(process['name']).split('/')[-1].ljust(19)
+                    process_name = str(process['name']).split('/')[-1][:16].ljust(16)
                 gtt_mem = str(process['gtt']).rjust(8)
                 vram_mem = str(process['vram']).rjust(8)
                 mem_usage = str(process['mem_usage']).rjust(9)
                 if process['cu_occupancy']['total_num_cu'] != "N/A" and process['cu_occupancy']['current_cu'] != "N/A":
-                    cu_occupancy = (str(round(process['cu_occupancy']['current_cu'] / process['cu_occupancy']['total_num_cu'] * 100, 1)) + " %").rjust(7)
+                    cu_occupancy = (str(round(process['cu_occupancy']['current_cu'] / process['cu_occupancy']['total_num_cu'] * 100, 1)) + " %").rjust(5)
                 else:
-                    cu_occupancy = "N/A"
-                print("| {0:4.4s}  {1:9.9s}  {2:19.19s}  {3:8.8s}  {4:8.8s}  {5:9.9s}  {6:7.7s} |".format(
-                         gpu_id, pid, process_name, gtt_mem, vram_mem, mem_usage, cu_occupancy))
+                    cu_occupancy = "N/A".rjust(5)
+                sdma_usage = str(process['sdma_usage']).rjust(5)
+                print("| {0:4.4s}  {1:7.7s}  {2:16.16s}  {3:8.8s}  {4:8.8s}  {5:9.9s}  {6:5.5s}  {7:5.5s} |".format(
+                         gpu_id, pid, process_name, gtt_mem, vram_mem, mem_usage, cu_occupancy, sdma_usage))
                 if process['name'] == "N/A":
                     elevated_permission_error = True
         else:

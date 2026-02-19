@@ -1,5 +1,10 @@
-#ifndef _WSL_INC_WDDM_VA_MGR_H_
-#define _WSL_INC_WDDM_VA_MGR_H_
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+ #pragma once
 
 #include <mutex>
 #include <map>
@@ -83,4 +88,4 @@ private:
 
 } // namespace thunk
 } // namespace wsl
-#endif
+

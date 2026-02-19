@@ -20,6 +20,7 @@
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 import argparse
+import functools
 import json
 import logging
 import multiprocessing
@@ -64,6 +65,7 @@ class AMDSMICommands():
         if self.helpers.is_amdgpu_initialized():
             try:
                 self.device_handles = amdsmi_interface.amdsmi_get_processor_handles()
+                self.device_handles_gpus = amdsmi_interface.get_gpu_handles()
             except amdsmi_exception.AmdSmiLibraryException as e:
                 if e.err_code in (amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_INIT,
                                 amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_DRIVER_NOT_LOADED):
@@ -75,6 +77,20 @@ class AMDSMICommands():
                 # No GPU's found post amdgpu driver initialization
                 logging.error('Unable to detect any GPU devices, check amdgpu version and module status (sudo modprobe amdgpu)')
                 exit_flag = True
+
+        if self.helpers.is_ainic_initialized():
+            try:
+                self.device_handles_brcm_nics = amdsmi_interface.get_nic_handles()
+                self.device_handles_ainics = amdsmi_interface.get_ainic_handles()
+                if len(self.device_handles_gpus) == 0:
+                    self.device_handles_gpus = amdsmi_interface.get_gpu_handles()
+                self.device_handles_switchs = amdsmi_interface.get_switch_handles()
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                if e.err_code in (amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_INIT,
+                                amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_DRIVER_NOT_LOADED):
+                    logging.error('Unable to get devices, driver not initialized (BRCMNIC not found in modules)')
+                else:
+                    raise e
 
             # Resolve the node handle.
             for dev in self.device_handles:
@@ -134,7 +150,7 @@ class AMDSMICommands():
             sys.exit(-1)
 
 
-    def version(self, args, gpu_version=None, cpu_version=None):
+    def version(self, args, gpu_version=None, cpu_version=None, nic_version=None):
         """Print Version String
 
         Args:
@@ -145,10 +161,13 @@ class AMDSMICommands():
             args.gpu_version = gpu_version
         if cpu_version:
             args.cpu_version = cpu_version
+        if nic_version:
+            args.nic_version = nic_version
         # if no args are given, display everything
-        if args.gpu_version is None and args.cpu_version is None:
+        if args.gpu_version is None and args.cpu_version is None and args.nic_version is None:
             args.gpu_version = True
             args.cpu_version = True
+            args.nic_version = True
 
         try:
             amdsmi_lib_version = amdsmi_interface.amdsmi_get_lib_version()
@@ -191,6 +210,19 @@ class AMDSMICommands():
                 cpu_version_str = e.get_error_info()
             self.logger.output['amd_hsmp_driver_version'] = cpu_version_str
 
+        nic_version_str = "N/A"
+        if args.nic_version:
+            try:
+                ainic_device_handles = amdsmi_interface.get_ainic_handles()
+                for nic_id, device_handle in enumerate(ainic_device_handles):
+                    nic_info = amdsmi_interface.amdsmi_get_ainic_info(device_handle, True)
+                    if nic_version_str != "":
+                        nic_version_str += ", "
+                    nic_version_str += nic_info['DRIVER']['NAME'] + "." + nic_info['DRIVER']['VERSION'] 
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                nic_version_str = e.get_error_info()
+            self.logger.output['nic_driver_version'] = nic_version_str
+
         if self.logger.is_human_readable_format():
             human_readable_output = f"AMDSMI Tool: {__version__} | " \
                                     f"AMDSMI Library version: {amdsmi_lib_version_str} | " \
@@ -199,6 +231,8 @@ class AMDSMICommands():
                 human_readable_output = human_readable_output + f" | amdgpu version: {gpu_version_str}"
             if args.cpu_version:
                 human_readable_output = human_readable_output + f" | hsmp version: {cpu_version_str}"
+            if args.nic_version:
+                human_readable_output = human_readable_output + f" | AINIC version: {nic_version_str}"
             # Custom human readable handling for version
             if self.logger.destination == 'stdout':
                 print(human_readable_output)
@@ -209,7 +243,7 @@ class AMDSMICommands():
             self.logger.print_output()
 
 
-    def list(self, args, multiple_devices=False, gpu=None):
+    def list_gpu(self, args, multiple_devices=False, gpu=None):
         """List information for target gpu
 
         Args:
@@ -242,7 +276,7 @@ class AMDSMICommands():
             self.group_check_printed = True
 
         # Handle multiple GPUs
-        handled_multiple_gpus, device_handle = self.helpers.handle_gpus(args, self.logger, self.list)
+        handled_multiple_gpus, device_handle = self.helpers.handle_gpus(args, self.logger, self.list_gpu)
         if handled_multiple_gpus:
             return # This function is recursive
 
@@ -317,6 +351,296 @@ class AMDSMICommands():
 
         self.logger.print_output()
 
+    def list_brcm_nic(self, args, multiple_devices=False, nic=None):
+        """List information for target nic
+
+        Args:
+            args (Namespace): Namespace containing the parsed CLI args
+            multiple_devices (bool, optional): True if checking for multiple devices. Defaults to False.
+            nic (device_handle, optional): device_handle for target device. Defaults to None.
+
+        Raises:
+            IndexError: Index error if nic list is empty
+
+        Returns:
+            None: Print output via AMDSMILogger to destination
+        """
+        # Set args.* to passed in arguments
+        if nic:
+            args.nic = nic
+
+        if not self.group_check_printed:
+            self.helpers.check_required_groups()
+            self.group_check_printed = True
+
+        # Handle multiple NICs
+        handled_multiple_nics, device_handle = self.helpers.handle_brcm_nics(args, self.logger, self.list_brcm_nic)
+        if handled_multiple_nics:
+            return # This function is recursive
+
+        args.nic = device_handle
+
+        # Get nic_id for logging
+        nic_id = self.helpers.get_nic_id_from_device_handle(args.nic)
+
+        # Get nic info for logging
+        try:
+            nic_info = amdsmi_interface.amdsmi_get_nic_info(args.nic)
+            if nic_info:
+                bdf = nic_info['bdf']
+                uuid = nic_info['UUID']
+                device_name = nic_info['Device Name']
+                part_number = nic_info['Part Number']
+                firmware_version = nic_info['Firmware_Version']
+            else:
+                bdf = uuid = device_name = part_number = firmware_version = "N/A"
+
+        except amdsmi_exception.AmdSmiLibraryException as e:
+            bdf = uuid = device_name = part_number = firmware_version = "N/A"
+            logging.debug("Failed to get info for nic %s | %s", nic_id, e.get_error_info())
+
+        # CSV format is intentionally aligned with Host
+        if self.logger.is_csv_format():
+            self.logger.store_nic_output(args.nic, 'nic_bdf', bdf)
+            self.logger.store_nic_output(args.nic, 'permanent_address', uuid)
+            self.logger.store_nic_output(args.nic, 'device_name', device_name)
+            self.logger.store_nic_output(args.nic, 'part_number', part_number)
+            self.logger.store_nic_output(args.nic, 'firmware_version', firmware_version)
+        else:
+            self.logger.store_nic_output(args.nic, 'bdf', bdf)
+            self.logger.store_nic_output(args.nic, 'permanent_address', uuid)
+            self.logger.store_nic_output(args.nic, 'device_name', device_name)
+            self.logger.store_nic_output(args.nic, 'part_number', part_number)
+            self.logger.store_nic_output(args.nic, 'firmware_version', firmware_version)
+
+        if multiple_devices:
+            self.logger.store_multiple_device_output()
+            return # Skip printing when there are multiple devices
+
+        self.logger.print_output()
+
+    def list_ainic(self, args, multiple_devices=False, nic=None):
+        """List information for target ainic
+
+        Args:
+            args (Namespace): Namespace containing the parsed CLI args
+            multiple_devices (bool, optional): True if checking for multiple devices. Defaults to False.
+            nic (device_handle, optional): device_handle for target device. Defaults to None.
+
+        Raises:
+            IndexError: Index error if nic list is empty
+
+        Returns:
+            None: Print output via AMDSMILogger to destination
+        """
+        # Set args.* to passed in arguments
+        if nic:
+            args.nic = nic
+
+        if not self.group_check_printed:
+            self.helpers.check_required_groups()
+            self.group_check_printed = True
+
+        # Handle multiple NICs
+        handled_multiple_nics, device_handle = self.helpers.handle_ainics(args, self.logger, self.list_ainic)
+        if handled_multiple_nics:
+            return # This function is recursive
+
+        args.nic = device_handle
+
+        # Get nic_id for logging
+        nic_id = self.helpers.get_ainic_id_from_device_handle(args.nic)
+
+        # Get nic info for logging
+        try:
+            ainic_info = amdsmi_interface.amdsmi_get_ainic_info(args.nic)
+        except amdsmi_exception.AmdSmiLibraryException as e:
+            bdf = uuid = device_name = part_number = firmware_version = "N/A"
+            logging.debug("Failed to get info for nic %s | %s", nic_id, e.get_error_info())
+
+        # CSV format is intentionally aligned with Host
+        if self.logger.is_csv_format():
+            self.logger.store_ainic_output(args.nic, 'nic_bdf', ainic_info['bdf'])
+            self.logger.store_ainic_output(args.nic, 'permanent_address', ainic_info['Permanent Address'])
+            self.logger.store_ainic_output(args.nic, 'product_name', ainic_info['Product Name'])
+            self.logger.store_ainic_output(args.nic, 'part_number', ainic_info['Part Number'])
+            self.logger.store_ainic_output(args.nic, 'serial_number', ainic_info['Serial Number'])
+            self.logger.store_ainic_output(args.nic, 'vendor_name', ainic_info['Vendor Name'])
+        else:
+            self.logger.store_ainic_output(args.nic, 'bdf',   ainic_info['bdf'])
+            self.logger.store_ainic_output(args.nic, 'permanent_address', ainic_info['Permanent Address'])
+            self.logger.store_ainic_output(args.nic, 'product_name', ainic_info['Product Name'])
+            self.logger.store_ainic_output(args.nic, 'part_number', ainic_info['Part Number'])
+            self.logger.store_ainic_output(args.nic, 'serial_number', ainic_info['Serial Number'])
+            self.logger.store_ainic_output(args.nic, 'vendor_name', ainic_info['Vendor Name'])
+
+        if multiple_devices:
+            self.logger.store_multiple_device_output()
+            return # Skip printing when there are multiple devices
+
+        self.logger.print_output()
+
+    def list_nics(self, args):
+        if not self.helpers.is_ainic_initialized() and not self.helpers.is_brcm_nic_initialized():
+            return False
+        if args.nic == None:
+            args.nic = self.device_handles_ainics
+            args.nic.extend(self.device_handles_brcm_nics)
+            return False
+        if not isinstance(args.nic, list):
+            return False
+        nicCount = len(args.nic)
+        self.logger.output = {}
+        self.logger.clear_multiple_devices_output()
+        if nicCount <= 0:
+            return False
+        nics,ainics = self._get_nics_from_args(args)
+        if len(nics) > 0:
+            self.list_brcm_nic(args, False, nic=nics)
+        if len(ainics) > 0:
+            self.list_ainic(args, False, nic=ainics)
+            return True
+        return False
+
+    def list_switch(self, args, multiple_devices=False, switch=None):
+        """List information for target switch
+
+        Args:
+            args (Namespace): Namespace containing the parsed CLI args
+            multiple_devices (bool, optional): True if checking for multiple devices. Defaults to False.
+            switch (device_handle, optional): device_handle for target device. Defaults to None.
+
+        Raises:
+            IndexError: Index error if switch list is empty
+
+        Returns:
+            None: Print output via AMDSMILogger to destination
+        """
+        # Set args.* to passed in arguments
+        if switch:
+            args.switch = switch
+
+        if not self.group_check_printed:
+            self.helpers.check_required_groups()
+            self.group_check_printed = True
+
+        # Handle multiple Switchs
+        handled_multiple_switchs, device_handle = self.helpers.handle_switchs(args, self.logger, self.list_switch)
+        if handled_multiple_switchs:
+            return # This function is recursive
+
+        args.switch = device_handle
+
+        try:
+            bdf = amdsmi_interface.amdsmi_get_switch_device_bdf(args.switch)
+        except amdsmi_exception.AmdSmiLibraryException as e:
+            bdf = e.get_error_info()
+
+        try:
+            uuid = amdsmi_interface.amdsmi_get_switch_device_uuid(args.switch)
+        except amdsmi_exception.AmdSmiLibraryException as e:
+            uuid = e.get_error_info()
+
+        # CSV format is intentionally aligned with Host
+        if self.logger.is_csv_format():
+            self.logger.store_switch_output(args.switch, 'switch_bdf', bdf)
+            self.logger.store_switch_output(args.switch, 'switch_uuid', uuid)
+        else:
+            self.logger.store_switch_output(args.switch, 'bdf', bdf)
+            self.logger.store_switch_output(args.switch, 'uuid', uuid)
+
+        if multiple_devices:
+            self.logger.store_multiple_device_output()
+            return # Skip printing when there are multiple devices
+
+        self.logger.print_output()
+
+    def list_switchs(self, args):
+        if not self.helpers.is_brcm_switch_initialized():
+            return False
+        if args.switch == None:
+            args.switch = self.device_handles_switchs
+            if isinstance(args.switch, list):
+                switchCount = len(args.switch)
+            return False
+        if isinstance(args.switch, list):
+            switchCount = len(args.switch)
+            self.logger.output = {}
+            self.logger.clear_multiple_devices_output()
+            if switchCount > 0:
+                self.list_switch(args, False, switch=args.switch)
+                return True
+        return False
+
+    def _get_nics_from_args(self, args):
+        nics = []
+        ainics = []
+        for nic in args.nic:
+            for nic_ptr in self.device_handles_brcm_nics:
+                if nic_ptr.value == nic.value:
+                    nics.append(nic)
+            for nic_ptr in self.device_handles_ainics:
+                if nic_ptr.value == nic.value:
+                    ainics.append(nic)
+        return nics, ainics
+
+    def list(self, args, multiple_devices=False, gpu=None, nic=None, switch=None):
+       
+        if gpu:
+           args.gpu = gpu
+        if nic:
+            args.nic = nic
+        if switch:
+            args.switch = switch 
+
+        gpuCount = 0
+        nicCount = 0
+        switchCount = 0
+
+        # Handle No GPU passed
+        if args.gpu == None:
+            args.gpu = self.device_handles_gpus
+            if isinstance(args.gpu, list):
+                gpuCount = len(args.gpu)
+        else:
+            if isinstance(args.gpu, list):
+                gpuCount = len(args.gpu)
+                self.logger.output = {}
+                self.logger.clear_multiple_devices_output()
+
+                if gpuCount > 0:
+                    self.list_gpu(args, False, gpu=args.gpu)
+                    return
+            
+        if self.list_nics(args):
+            return
+        if self.list_switchs(args):
+            return
+
+        self.logger.output = {}
+        self.logger.clear_multiple_devices_output()
+
+        if gpuCount > 0:
+            self.list_gpu(args, False, gpu=args.gpu)
+
+        self.logger.output = {}
+        self.logger.clear_multiple_devices_output()
+
+        if self.helpers.is_ainic_initialized() or self.helpers.is_brcm_nic_initialized():
+            nics,ainics = self._get_nics_from_args(args)
+            if len(nics) > 0:
+                self.list_brcm_nic(args, False, nic=ainics)
+            if len(ainics) > 0:
+                self.list_ainic(args, False, nic=ainics)
+
+        self.logger.output = {}
+        self.logger.clear_multiple_devices_output()
+
+        if self.helpers.is_brcm_switch_initialized():
+            self.list_switch(args, False, switch=args.switch)
+
+        self.logger.output = {}
+        self.logger.clear_multiple_devices_output()
 
     def static_cpu(self, args, multiple_devices=False, cpu=None, interface_ver=None):
         """Get Static information for target cpu
@@ -1183,9 +1507,9 @@ class AMDSMICommands():
                             continue
                         freq_dict = {}
                         current_level = frequencies['current']
+                        # Add current_level first for proper output ordering
                         freq_dict.update({'current_level':current_level})
-                        current_frequency = str(self.helpers.convert_SI_unit(frequencies['frequency'][current_level], AMDSMIHelpers.SI_Unit.MICRO)) + "MHz"
-                        freq_dict.update({'current_frequency':current_frequency})
+                        # Add frequency_levels second
                         freq_dict.update({'frequency_levels':{}})
                         if frequencies["num_supported"] != 0:
                             for level in range(len(frequencies['frequency'])):
@@ -1252,6 +1576,7 @@ class AMDSMICommands():
                     })
                     self.logger.store_output(args.gpu, 'values', row_dict)
                     self.logger.store_gpu_json_output.append(row_dict)
+                    self.logger.store_multiple_device_output()
             # expand if ras blocks are populated
             elif self.helpers.is_linux() and self.helpers.is_baremetal() and args.ras:
                 if isinstance(static_dict['ras']['ecc_block_state'], list):
@@ -1285,11 +1610,188 @@ class AMDSMICommands():
         if not self.logger.is_json_format():
             self.logger.print_output(multiple_device_enabled=multiple_devices_csv_override)
 
+    def _filter_nics_from_args(subcommand):
+        @functools.wraps(subcommand)
+        def wrapper(self, *args, **kwargs):
+            original_nic = None
+            if len(args) > 0:
+                original_nic = args[0].nic
+                nics,ainics = self._get_nics_from_args(args[0])
+                if len(nics) == 0:
+                    args[0].nic = None
+                else:
+                    args[0].nic = nics
+            result = subcommand(self, *args, **kwargs)
+            if len(args) > 0:
+                args[0].nic = original_nic
+            return result
+        return wrapper
+
+    @_filter_nics_from_args
+    def _static_brcm_nic(self, args, multiple_devices=False, nic=None):
+        """Get Static information for target nic
+
+        Args:
+            args (Namespace): Namespace containing the parsed CLI args
+            multiple_devices (bool, optional): True if checking for multiple devices. Defaults to False.
+            nic (device_handle, optional): device_handle for target device. Defaults to None.
+
+        Returns:
+            None: Print output via AMDSMILogger to destination
+        """
+
+        if nic:
+            args.nic = nic
+
+        # Handle multiple NICs
+        handled_multiple_nics, device_handle = self.helpers.handle_brcm_nics(args, self.logger, self._static_brcm_nic)
+        if handled_multiple_nics:
+            return # This function is recursive
+        args.nic = device_handle
+        if not args.nic:
+            return
+
+        # Get nic id for logging
+        nic_id = self.helpers.get_nic_id_from_device_handle(args.nic)
+        logging.debug(f"Static Arg information for NIC {nic_id} on {self.helpers.os_info()}")
+
+        static_dict = {}
+        if self.logger.is_json_format():
+            static_dict['ai_nic'] = int(nic_id)
+
+        if args.nic:
+            try:
+                nic_info = amdsmi_interface.amdsmi_get_nic_info(args.nic)
+                if nic_info:
+                    static_dict["nic"] = {
+                        "bdf" : f"{nic_info['bdf']}",
+                        "UUID" : f"{nic_info['UUID']}",
+                        "Device Name" : f"{nic_info['Device Name']}",
+                        "Part Number" : f"{nic_info['Part Number']}",
+                        "Firmware_Version" : f"{nic_info['Firmware_Version']}"
+                    }
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                static_dict["nic"] = "N/A"
+                logging.debug("Failed to get NIC %s | %s", nic_id, e.get_error_info())
+
+        multiple_devices_csv_override = False
+        if not self.logger.is_json_format():
+            self.logger.store_nic_output(args.nic, 'values', static_dict)
+        else:
+            self.logger.store_nic_json_output.append(static_dict)
+        if multiple_devices:
+            self.logger.store_multiple_device_output()
+            return # Skip printing when there are multiple devices
+        if not self.logger.is_json_format():
+            self.logger.print_output(multiple_device_enabled=multiple_devices_csv_override)
+
+    def _filter_ainics_from_args(subcommand):
+        @functools.wraps(subcommand)
+        def wrapper(self, *args, **kwargs):
+            original_nic = None
+            if len(args) > 0:
+                original_nic = args[0].nic
+                nics,ainics = self._get_nics_from_args(args[0])
+                if len(ainics) == 0:
+                    args[0].nic = None
+                else:
+                    args[0].nic = ainics
+            result = subcommand(self, *args, **kwargs)
+            if len(args) > 0:
+                args[0].nic = original_nic
+            return result
+        return wrapper
+
+    @_filter_ainics_from_args
+    def _static_ainic(self, args, multiple_devices=False, nic=None):
+        """Get Static information for target ainic
+
+        Args:
+            args (Namespace): Namespace containing the parsed CLI args
+            multiple_devices (bool, optional): True if checking for multiple devices. Defaults to False.
+            nic (device_handle, optional): device_handle for target device. Defaults to None.
+
+        Returns:
+            None: Print output via AMDSMILogger to destination
+        """
+
+        if nic:
+            args.nic = nic
+
+        # Handle multiple NICs
+        handled_multiple_nics, device_handle = self.helpers.handle_ainics(args, self.logger, self._static_ainic)
+        if handled_multiple_nics:
+            return # This function is recursive
+        args.nic = device_handle
+        if not args.nic:
+            return
+
+        # Get nic id for logging
+        nic_id = self.helpers.get_ainic_id_from_device_handle(args.nic)
+        logging.debug(f"Static Arg information for NIC {nic_id} on {self.helpers.os_info()}")
+
+        static_dict = {}
+        if self.logger.is_json_format():
+            static_dict['ai_nic'] = int(nic_id)
+
+        if args.nic:
+            try:
+                nic_info = amdsmi_interface.amdsmi_get_ainic_info(args.nic, True)
+                filter = []
+                if hasattr(args, "asic") and getattr(args, "asic"):
+                    filter.append("asic")
+                if hasattr(args, "bus") and getattr(args, "bus"):
+                    filter.append("bus")
+                if hasattr(args, "driver") and getattr(args, "driver"):
+                    filter.append("driver")
+                if hasattr(args, "numa") and getattr(args, "numa"):
+                    filter.append("numa")
+                if len(filter) == 0 or len(filter) == 4:
+                    static_dict["nic"] = nic_info
+                else:
+                    nic_info_filtered = {}
+                    for attr in filter: #remove all attributes except the one in filter:
+                        nic_info_filtered = nic_info_filtered | {key: value for key, value in nic_info.items() if key.lower() == attr}
+                    static_dict["nic"] = nic_info_filtered
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                static_dict["nic"] = "N/A"
+                logging.debug("Failed to get NIC %s | %s", nic_id, e.get_error_info())
+
+        multiple_devices_csv_override = False
+        if not self.logger.is_json_format():
+            self.logger.store_ainic_output(args.nic, 'values', static_dict)
+        else:
+            self.logger.store_nic_json_output.append(static_dict)
+        if multiple_devices:
+            self.logger.store_multiple_device_output()
+            return # Skip printing when there are multiple devices
+        if not self.logger.is_json_format():
+            self.logger.print_output(multiple_device_enabled=multiple_devices_csv_override)
+
+    def _static_nics(self, args, multiple_devices, nic):
+        if not hasattr(args, "nic") or args.nic == None:
+            nic = None
+            if self.helpers.is_ainic_initialized():
+                nic = self.device_handles_ainics
+            if self.helpers.is_brcm_nic_initialized():
+                nic = self.device_handles_brcm_nics
+            args.nic = nic
+            return False
+        else:
+            if not self.helpers.is_ainic_initialized() and not self.helpers.is_brcm_nic_initialized():
+                return False
+            self.logger.output = {}
+            self.logger.clear_multiple_devices_output()
+            if self.helpers.is_ainic_initialized():
+                self._static_ainic(args, multiple_devices, nic)
+            if self.helpers.is_brcm_nic_initialized():
+                self._static_brcm_nic(args, multiple_devices, nic)
+            return True
 
     def static(self, args, multiple_devices=False, gpu=None, asic=None,
                 bus=None, vbios=None, limit=None, driver=None, ras=None,
                 board=None, numa=None, vram=None, cache=None, partition=None,
-                dfc_ucode=None, fb_info=None, num_vf=None, cpu=None,
+                dfc_ucode=None, fb_info=None, num_vf=None, cpu=None, nic=None,
                 interface_ver=None, soc_pstate=None, xgmi_plpd = None, process_isolation=None,
                 clock=None, profile=None):
         """Get Static information for target gpu and cpu
@@ -1313,6 +1815,7 @@ class AMDSMICommands():
             fb_info (bool, optional): Value override for args.fb_info. Defaults to None.
             num_vf (bool, optional): Value override for args.num_vf. Defaults to None.
             cpu (cpu_handle, optional): cpu_handle for target device. Defaults to None.
+            nic (nic_handle, optional): nic_handle for target device. Defaults to None.
             interface_ver (bool, optional): Value override for args.interface_ver. Defaults to None
             soc_pstate (bool, optional): Value override for args.soc_pstate. Defaults to None.
             xgmi_plpd (bool, optional): Value override for args.xgmi_plpd. Defaults to None.
@@ -1328,6 +1831,14 @@ class AMDSMICommands():
             args.cpu = cpu
         if gpu:
             args.gpu = gpu
+        if nic:
+            args.nic = nic
+
+        if self._static_nics(args, multiple_devices, nic):
+            return True # we do not want to print cpu or gpu if user only wanted nic
+        
+        if (hasattr(args, 'cpu') and args.cpu) or (hasattr(args, 'gpu') and args.gpu):
+            args.nic = None # we do not want to output nic at the end if user wants only cpu or gpu
 
         # Check if a CPU argument has been set
         cpu_args_enabled = False
@@ -1390,11 +1901,66 @@ class AMDSMICommands():
                                 board, numa, vram, cache, partition,
                                 dfc_ucode, fb_info, num_vf, soc_pstate, xgmi_plpd,
                                 process_isolation, clock, profile)
+
+        if args.nic:
+            self.logger.output = {}
+            self.logger.clear_multiple_devices_output()
+            self._static_ainic(args, multiple_devices, nic)
+            self._static_brcm_nic(args, multiple_devices, nic)
+
         if self.logger.is_json_format():
             self.logger.combine_arrays_to_json()
 
 
-    def firmware(self, args, multiple_devices=False, gpu=None, fw_list=True):
+    def firmware_nic(self, args, multiple_devices=False, nic=None, fw_list=True):
+        """ Get Firmware information for target nic
+
+        Args:
+            args (Namespace): Namespace containing the parsed CLI args
+            multiple_devices (bool, optional): True if checking for multiple devices. Defaults to False.
+            nic (device_handle, optional): device_handle for target device. Defaults to None.
+            fw_list (bool, optional): True to get list of all firmware information
+        Raises:
+            IndexError: Index error if nic list is empty
+
+        Returns:
+            None: Print output via AMDSMILogger to destination
+        """
+        if fw_list:
+            args.fw_list = fw_list
+        if nic:
+           args.nic = nic
+
+        # Handle No NIC passed
+        if args.nic==None:
+            args.nic = self.device_handles_brcm_nics
+
+        # Handle multiple NICs
+
+        if args.nic != None:
+            handled_multiple_nics, device_handle = self.helpers.handle_brcm_nics(args, self.logger, self.firmware_nic)
+            if handled_multiple_nics:
+                return # This function is recursive
+
+        args.nic = device_handle
+        nic_id = self.helpers.get_nic_id_from_device_handle(args.nic)
+        if args.fw_list:
+            try:
+                fw_info = amdsmi_interface.amdsmi_get_nic_fw_info(args.nic)
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                logging.debug("Failed to get firmware info for nic %s | %s", nic_id, e.get_error_info())
+
+        multiple_devices_csv_override = False
+
+        self.logger.store_nic_output(args.nic, 'values', fw_info)
+
+        if multiple_devices:
+            self.logger.store_multiple_device_output()
+            return # Skip printing when there are multiple devices
+
+        self.logger.print_output()
+
+    def firmware(self, args, multiple_devices=False, gpu=None, nic=None, fw_list=True, brcm_nic=None):
         """ Get Firmware information for target gpu
 
         Args:
@@ -1402,6 +1968,7 @@ class AMDSMICommands():
             multiple_devices (bool, optional): True if checking for multiple devices. Defaults to False.
             gpu (device_handle, optional): device_handle for target device. Defaults to None.
             fw_list (bool, optional): True to get list of all firmware information
+            brcm_nic (bool, optional): Value override for args.brcm_nic. Defaults to None.
         Raises:
             IndexError: Index error if gpu list is empty
 
@@ -1417,6 +1984,11 @@ class AMDSMICommands():
         if args.gpu == None:
             args.gpu = self.device_handles
 
+        if self.helpers.is_brcm_nic_initialized() and (args.brcm_nic or brcm_nic):
+            self.logger.output = {}
+            self.logger.clear_multiple_devices_output()
+            self.firmware_nic(args, multiple_devices, nic, fw_list)
+            return
         # Handle multiple GPUs
         handled_multiple_gpus, device_handle = self.helpers.handle_gpus(args, self.logger, self.firmware)
         if handled_multiple_gpus:
@@ -1781,15 +2353,12 @@ class AMDSMICommands():
                 args.gpu = stored_gpus
 
                 # Print multiple device output
-                if not self.logger.is_json_format():
+                if not self.logger.is_json_format() or watching_output:
                     self.logger.print_output(multiple_device_enabled=True, watching_output=watching_output)
 
                 # Add output to total watch output and clear multiple device output
                 if watching_output:
                     self.logger.store_watch_output(multiple_device_enabled=True)
-
-                    # Flush the watching output
-                    self.logger.print_output(multiple_device_enabled=True, watching_output=watching_output)
 
                 return
             elif len(args.gpu) == 1:
@@ -2815,7 +3384,7 @@ class AMDSMICommands():
             self.logger.store_multiple_device_output()
             return # Skip printing when there are multiple devices
 
-        if not self.logger.is_json_format():
+        if not self.logger.is_json_format() or watching_output:
             self.logger.print_output(watching_output=watching_output)
 
         if watching_output: # End of single gpu add to watch_output
@@ -3229,7 +3798,354 @@ class AMDSMICommands():
         if not self.logger.is_json_format():
             self.logger.print_output(multiple_device_enabled=multiple_devices_csv_override)
 
+    def metric_nic(self, args, multiple_devices=False, watching_output=False, watch=None, watch_time=None,
+                   iterations=None, nic=None, nic_power=None, nic_temperature=None, nic_errors=None):
+        """Get Metric information for target nic
+
+        Args:
+            args (Namespace): Namespace containing the parsed CLI args
+            multiple_devices (bool, optional): True if checking for multiple devices. Defaults to False.
+            watching_output (bool, optional): True if watch argument has been set. Defaults to False.
+            nic_power (bool, optional): Value override for args.nic_power. Defaults to None.
+            nic_temperature (bool, optional): Value override for args.nic_temperature. Defaults to None.
+            nic_errors (bool, optional): Value override for args.nic_errors. Defaults to None.
+
+        Raises:
+            IndexError: Index error if nic list is empty
+
+        Returns:
+            None: Print output via AMDSMILogger to destination
+        """
+        # Set args.* to passed in arguments
+        if nic:
+            args.nic = nic
+        if watch:
+            args.watch = watch
+        if watch_time:
+            args.watch_time = watch_time
+        if iterations:
+            args.iterations = iterations
+
+        #TODO: Need to add OS wise condition for the parameters
+
+        if nic_power:
+            args.nic_power = nic_power
+        if nic_temperature:
+            args.nic_temperature = nic_temperature
+        if nic_errors:
+            args.nic_errors = nic_errors
+
+        #Maintaining format as per other metric functions so above TODO can be resolved easily
+        current_platform_args = ["nic_power", "nic_temperature", "nic_errors"]
+        current_platform_values = [args.nic_power, args.nic_temperature, args.nic_errors]
+
+        # Handle No NIC passed
+        if args.nic == None:
+            args.nic = self.device_handles_brcm_nics
+
+        # Handle watch logic, will only enter this block once
+        if args.watch:
+            self.helpers.handle_watch(args=args, subcommand=self.metric_nic, logger=self.logger)
+            return
+
+        # Handle multiple NICs
+        if isinstance(args.nic, list):
+            if len(args.nic) > 1:
+                # Deepcopy nics as recursion will destroy the nic list
+                stored_nics = []
+                for nic in args.nic:
+                    stored_nics.append(nic)
+
+                # Store output from multiple devices
+                for device_handle in args.nic:
+                    self.metric_nic(args, multiple_devices=True, watching_output=watching_output, nic=device_handle)
+
+                # Reload original nics
+                args.nic = stored_nics
+
+                # Print multiple device output
+                self.logger.print_output(multiple_device_enabled=True, watching_output=watching_output)
+
+                # Add output to total watch output and clear multiple device output
+                if watching_output:
+                    self.logger.store_watch_output(multiple_device_enabled=True)
+
+                    # Flush the watching output
+                    self.logger.print_output(multiple_device_enabled=True, watching_output=watching_output)
+
+                return
+            elif len(args.nic) == 1:
+                args.nic = args.nic[0]
+            else:
+                raise IndexError("args.nic should not be an empty list")
+
+        # Get nic_id for logging
+        nic_id = self.helpers.get_nic_id_from_device_handle(args.nic)
+
+        # Put the metrics table in the debug logs
+        nic_metric_info ={}
+
+        try:
+            nic_metric_info = amdsmi_interface.amdsmi_get_nic_metrics_info(args.nic)
+            nic_metric_str = json.dumps(nic_metric_info, indent=4)
+            logging.debug("NIC Metrics table for %s | %s", nic_id, nic_metric_str)
+        except amdsmi_exception.AmdSmiLibraryException as e:
+            logging.debug("Unabled to load NIC Metrics table for %s | %s", nic_id, e.err_info)
+
+        logging.debug(f"Metric Arg information for NIC {nic_id} on {self.helpers.os_info()}")
+        logging.debug(f"Args:   {current_platform_args}")
+        logging.debug(f"Values: {current_platform_values}")
+
+        # Set the platform applicable args to True if no args are set
+        if not any(current_platform_values):
+            for arg in current_platform_args:
+                setattr(args, arg, True)
+
+        # Add timestamp and store values for specified arguments
+        values_dict = {}
+
+        if "nic_power" in current_platform_args:
+            if args.nic_power:                
+                power_dict = {}
+                sysfs_blocks = {"nic_power_async": "", "nic_power_control": "", "nic_power_runtime_active_time": "",
+                                "nic_power_runtime_status": "", "nic_power_runtime_usage": "", "nic_power_runtime_active_kids": "",
+                                "nic_power_runtime_enabled": "", "nic_power_runtime_suspended_time": ""}
+
+                for key in nic_metric_info.keys():
+                    if key in sysfs_blocks.keys():
+                        if isinstance(nic_metric_info[key], int):
+                            value = nic_metric_info[key]
+                        else:
+                            value = (nic_metric_info[key].split('\n')[0]).upper()
+                        
+                        if value == "" or value == 65535:
+                            value = "N/A"
+                        power_dict[key] = self.helpers.unit_format(self.logger,
+                                                                       value,
+                                                                       sysfs_blocks[key])
+
+                values_dict["nic_power"] = power_dict
+
+        if "nic_temperature" in current_platform_args:
+            if args.nic_temperature:
+                temp_dict = {}
+                sysfs_blocks = {"nic_temp_crit_alarm": "", "nic_temp_emergency_alarm": "", "nic_temp_shutdown_alarm": "",
+                                "nic_temp_max_alarm": "", "nic_temp_crit": "\N{DEGREE SIGN}C", "nic_temp_emergency": "\N{DEGREE SIGN}C", "nic_temp_input": "\N{DEGREE SIGN}C",
+                                "nic_temp_max": "\N{DEGREE SIGN}C", "nic_temp_shutdown": "\N{DEGREE SIGN}C"}
+
+                for key in nic_metric_info.keys():
+                    if key in sysfs_blocks.keys():
+                        if isinstance(nic_metric_info[key], int):
+                            value = nic_metric_info[key]
+                        else:
+                            value = (nic_metric_info[key].split('\n')[0]).upper()
+
+                        if value == "" or value == 65535:
+                            value = "N/A"
+                        temp_dict[key] = self.helpers.unit_format(self.logger,
+                                                                       value,
+                                                                       sysfs_blocks[key])
+
+                values_dict["nic_temperature"] = temp_dict
+
+        if "nic_errors" in current_platform_args:
+            if args.nic_errors:
+                
+                err_dict = {}
+                sysfs_blocks = ["nic_dev_correctable", "nic_dev_fatal", "nic_dev_nonfatal"]
+
+                for key in nic_metric_info.keys():
+                    if key in sysfs_blocks:
+                        err_dict[key] = {}
+                        content_list = nic_metric_info[key].split('\n')
+                        for content in content_list:
+                            if content != "" and content.lower() != "n/a":
+                                err_dict[key][content.split(' ')[0]] = content.split(' ')[1]
+
+                values_dict["nic_errors"] = err_dict
+
+        # Store timestamp first if watching_output is enabled
+        if watching_output:
+            self.logger.store_nic_output(args.nic, 'timestamp', int(time.time()))
+        self.logger.store_nic_output(args.nic, 'values', values_dict)
+
+        if multiple_devices:
+            self.logger.store_multiple_device_output()
+            return # Skip printing when there are multiple devices
+
+        self.logger.print_output(watching_output=watching_output)
+
+        if watching_output: # End of single gpu add to watch_output
+            self.logger.store_watch_output(multiple_device_enabled=False)
+        
+
+    def metric_switch(self, args, multiple_devices=False, watching_output=False, watch=None, watch_time=None,
+                      iterations=None,  switch=None, switch_power=None, switch_errors=None):
+        """Get Metric information for target switch
+
+        Args:
+            args (Namespace): Namespace containing the parsed CLI args
+            multiple_devices (bool, optional): True if checking for multiple devices. Defaults to False.
+            watching_output (bool, optional): True if watch argument has been set. Defaults to False.
+            switch_power (bool, optional): Value override for args.switch_power. Defaults to None.
+            switch_errors (bool, optional): Value override for args.switch_errors. Defaults to None.
+
+        Raises:
+            IndexError: Index error if switch list is empty
+
+        Returns:
+            None: Print output via AMDSMILogger to destination
+        """
+        # Set args.* to passed in arguments
+        if switch:
+            args.switch = switch
+        if watch:
+            args.watch = watch
+        if watch_time:
+            args.watch_time = watch_time
+        if iterations:
+            args.iterations = iterations
+
+        #TODO: Need to add OS wise condition for the parameters
+
+        if switch_power:
+            args.switch_power = switch_power
+        if switch_errors:
+            args.switch_errors = switch_errors
+
+        #Maintaining format as per other metric functions so above TODO can be resolved easily
+        current_platform_args = ["switch_power", "switch_errors"]
+        current_platform_values = [args.switch_power, args.switch_errors]
+
+        # Handle No SWITCH passed
+        if args.switch == None:
+            args.switch = self.device_handles_switchs
+
+        # Handle watch logic, will only enter this block once
+        if args.watch:
+            self.helpers.handle_watch(args=args, subcommand=self.metric_switch, logger=self.logger)
+            return
+
+        # Handle multiple Switches
+        if isinstance(args.switch, list):
+            if len(args.switch) > 1:
+                # Deepcopy switchs as recursion will destroy the switch list
+                stored_switches = []
+                for switch in args.switch:
+                    stored_switches.append(switch)
+
+                # Store output from multiple devices
+                for device_handle in args.switch:
+                    self.metric_switch(args, multiple_devices=True, watching_output=watching_output, switch=device_handle)
+
+                # Reload original switchs
+                args.switch = stored_switches
+
+                # Print multiple device output
+                self.logger.print_output(multiple_device_enabled=True, watching_output=watching_output)
+
+                # Add output to total watch output and clear multiple device output
+                if watching_output:
+                    self.logger.store_watch_output(multiple_device_enabled=True)
+
+                    # Flush the watching output
+                    self.logger.print_output(multiple_device_enabled=True, watching_output=watching_output)
+
+                return
+            elif len(args.switch) == 1:
+                args.switch = args.switch[0]
+            else:
+                return # intermittent issue with args.switch being an empty list. raise IndexError("args.switch should not be an empty list")
+
+        # Get switch_id for logging
+        switch_id = self.helpers.get_switch_id_from_device_handle(args.switch)
+
+        # Put the metrics table in the debug logs
+        switch_metric_info ={}
+        try:
+            switch_metric_info = amdsmi_interface.amdsmi_get_switch_metrics_info(args.switch)
+            switch_metric_str = json.dumps(switch_metric_info, indent=4)
+            logging.debug("SWITCH Metrics table for %s | %s", switch_id, switch_metric_str)
+        except amdsmi_exception.AmdSmiLibraryException as e:
+            logging.debug("Unabled to load SWITCH Metrics table for %s | %s", switch_id, e.err_info)
+
+        logging.debug(f"Metric Arg information for SWITCH {switch_id} on {self.helpers.os_info()}")
+        logging.debug(f"Args:   {current_platform_args}")
+        logging.debug(f"Values: {current_platform_values}")
+
+        # Set the platform applicable args to True if no args are set
+        if not any(current_platform_values):
+            for arg in current_platform_args:
+                setattr(args, arg, True)
+
+        # Add timestamp and store values for specified arguments
+        values_dict = {}
+
+        if "switch_power" in current_platform_args:
+            if args.switch_power:                
+                power_dict = {}
+                sysfs_blocks = {"brcm_power_async": "", "brcm_power_control": "", "brcm_power_runtime_active_kids": "",
+                                "brcm_power_runtime_active_time": "", "brcm_power_runtime_enabled": "", "brcm_power_runtime_status": "",
+                                "brcm_power_runtime_suspended_time": "", "brcm_power_runtime_usage": "",
+                                "brcm_power_wakeup": "", "brcm_power_wakeup_abort_count": "", "brcm_power_wakeup_active": "",
+                                "brcm_power_wakeup_active_count": "", "brcm_power_wakeup_count": "", "brcm_power_wakeup_last_time_ms": "",
+                                "brcm_power_wakeup_max_time_ms": "", "brcm_power_wakeup_total_time_ms": ""}
+
+                for key in switch_metric_info.keys():
+                    if key in sysfs_blocks.keys():
+                        if isinstance(switch_metric_info[key], int):
+                            value = switch_metric_info[key]
+                        else:
+                            value = (switch_metric_info[key].split('\n')[0]).upper()
+
+                        if value == "":
+                            value = "N/A"
+                        power_dict[key] = self.helpers.unit_format(self.logger,
+                                                                    value,
+                                                                    sysfs_blocks[key])
+
+                values_dict["switch_power"] = power_dict
+
+        if "switch_errors" in current_platform_args:
+            if args.switch_errors:
+                
+                err_dict = {}
+                sysfs_blocks = ["brcm_device_aer_dev_correctable", "brcm_device_aer_dev_fatal", "brcm_device_aer_dev_nonfatal"]
+
+                for key in switch_metric_info.keys():
+                    if key in sysfs_blocks:
+                        err_dict[key] = {}
+
+                        if switch_metric_info[key] == "N/A":
+                                continue
+
+                        content_list = switch_metric_info[key].split('\n')
+                        for content in content_list:
+                            if content != "":
+                                err_dict[key][content.split(' ')[0]] = content.split(' ')[1]
+
+                values_dict["switch_errors"] = err_dict
+
+        #TODO: ADD "NA" conditions in interface file
+        # Store timestamp first if watching_output is enabled
+        if watching_output:
+            self.logger.store_switch_output(args.switch, 'timestamp', int(time.time()))
+
+        self.logger.store_switch_output(args.switch, 'values', values_dict)
+
+        if multiple_devices:
+            self.logger.store_multiple_device_output()
+            return # Skip printing when there are multiple devices
+
+        self.logger.print_output(watching_output=watching_output)
+
+        if watching_output: # End of single gpu add to watch_output
+            self.logger.store_watch_output(multiple_device_enabled=False)
+
+
     def metric(self, args, multiple_devices=False, watching_output=False, gpu=None,
+                nic=None, nic_power=None, nic_temperature=None, nic_errors=None, brcm_nic=None,
+				switch=None, switch_power=None, switch_errors=None, brcm_switch=None,
                 usage=None, watch=None, watch_time=None, iterations=None, power=None,
                 clock=None, temperature=None, ecc=None, ecc_blocks=None, pcie=None,
                 fan=None, voltage_curve=None, overdrive=None, perf_level=None,
@@ -3299,6 +4215,16 @@ class AMDSMICommands():
             core_curr_active_freq_core_limit (bool, optional): Value override for args.core_curr_active_freq_core_limit. Defaults to None
             core_energy (bool, optional): Value override for args.core_energy. Defaults to None
 
+            nic (nic_handle, optional): device_handle for target device. Defaults to None.
+            nic_power (bool, optional): Value override for args.nic_power. Defaults to None.
+            nic_temperature (bool, optional): Value override for args.nic_temperature. Defaults to None.
+            nic_errors (bool, optional): Value override for args.nic_errors. Defaults to None.
+            brcm_nic (bool, optional): Value override for args.brcm_nic. Defaults to None.
+			switch (cpu_handle, optional): device_handle for target device. Defaults to None.
+            switch_power (bool, optional): Value override for args.switch_power. Defaults to None.
+            switch_errors (bool, optional): Value override for args.switch_errors. Defaults to None.
+			brcm_switch (bool, optional): Value override for args.brcm_switch. Defaults to None.
+
         Raises:
             IndexError: Index error if gpu list is empty
 
@@ -3313,6 +4239,24 @@ class AMDSMICommands():
             args.cpu = cpu
         if core:
             args.core = core
+        if self.helpers.is_brcm_nic_initialized() and (args.brcm_nic or brcm_nic):
+            args.nic_power = args.power
+            args.nic_temperature = args.temperature
+            args.nic_errors = args.ecc
+            self.logger.output = {}
+            self.logger.clear_multiple_devices_output()
+            self.metric_nic(args, multiple_devices, watching_output, watch, watch_time, iterations,
+                            nic, nic_power, nic_temperature, nic_errors)
+            return
+			
+        if  self.helpers.is_brcm_switch_initialized() and (args.brcm_switch or brcm_switch):
+            args.switch_power = args.power
+            args.switch_errors = args.ecc
+            self.logger.output = {}
+            self.logger.clear_multiple_devices_output()
+            self.metric_switch(args, multiple_devices, watching_output, watch, watch_time, iterations,
+                            switch, switch_power, switch_errors)
+            return
 
         # Check if a GPU argument has been set
         gpu_args_enabled = False
@@ -3543,6 +4487,7 @@ class AMDSMICommands():
                     "gfx": process_info["engine_usage"]["gfx"],
                     "enc": process_info["engine_usage"]["enc"],
                 },
+                "sdma_usage": process_info["sdma_usage"],
                 "cu_occupancy": process_info["cu_occupancy"],
                 "evicted_time": process_info["evicted_time"]
             }
@@ -3550,6 +4495,7 @@ class AMDSMICommands():
             engine_usage_unit = "ns"
             memory_usage_unit = "B"
             evicted_time_unit = "ms"
+            sdma_usage_unit = "us"
 
             if self.logger.is_human_readable_format():
                 process_info['mem_usage'] = self.helpers.convert_bytes_to_readable(process_info['mem_usage'])
@@ -3564,6 +4510,10 @@ class AMDSMICommands():
             process_info['evicted_time'] = self.helpers.unit_format(self.logger,
                                                                  process_info['evicted_time'],
                                                                  evicted_time_unit)
+
+            process_info['sdma_usage'] = self.helpers.unit_format(self.logger,
+                                                                 process_info['sdma_usage'],
+                                                                 sdma_usage_unit)
 
             for usage_metric in process_info['usage']:
                 process_info['usage'][usage_metric] = self.helpers.unit_format(self.logger,
@@ -3731,10 +4681,297 @@ class AMDSMICommands():
         self.stop = True
         raise SystemExit(128 + signum)
 
+    def topology_nic(self, args, multiple_devices=False, gpu=None, nic=None, 
+                nic_topo=None, nic_switch=None, multiple_device_enabled=None, switch=None):
+     
+        """ Get topology information for target gpus
+            params:
+                args - argparser args to pass to subcommand
+                multiple_devices (bool) - True if checking for multiple devices
+                gpu (device_handle) - device_handle for target device
+                nic (device_handle) - device_handle for target device
+                nic_topo (bool) - True if checking for connectivity between nic and gpu devices
+                nic_switch (bool) - True if checking for gpu, nic and switch device's affinity and parent switch
+                switch (device_handle) - device_handle for target device
+
+            return:
+                Nothing
+        """
+        # Set args.* to passed in arguments
+        if gpu:
+            args.gpu = gpu
+        if nic:
+            args.nic = nic
+        if nic_topo:
+            args.nic_topo=nic_topo
+        if nic_switch:
+            args.nic_switch=nic_switch
+        if switch:
+            args.switch = switch
+
+        if not self.group_check_printed:
+            self.helpers.check_required_groups()
+            self.group_check_printed = True
+
+        isSingleNICRequest = False #-N option
+        isSingleSwitchRequest= False #-bs option
+        isSingleGPURequest = False #-g option
+
+        gpucount = 0
+        niccount = 0
+        switchcount = 0
+
+        if args.nic == None:
+            args.nic = self.device_handles_brcm_nics
+        if not isinstance(args.nic, list):
+            args.nic = [args.nic]
+        if len(args.nic) == 1:
+            isSingleNICRequest = True
+        niccount = len(args.nic)
+
+        if args.switch == None:
+            args.switch = self.device_handles_switchs
+        if not isinstance(args.switch, list):
+            args.switch = [args.switch]
+        if len(args.switch) == 1:
+            isSingleSwitchRequest = True
+        switchcount = len(args.switch)
+
+        if args.gpu == None:
+            args.gpu = self.device_handles
+        if not isinstance(args.gpu, list):
+            args.gpu = [args.gpu]
+        if len(args.gpu) == 1:
+            isSingleGPURequest = True
+        gpucount = len(args.switch)
+
+        # Clear the table header
+        self.logger.table_header = ''.rjust(12)
+
+        if args.nic_topo:
+            topo_dict = {}
+
+            # Loop through each NIC to get its BDF and corresponding GPU statuses
+            for idx, dest_nic in enumerate(args.nic):
+                # Get NIC ID and BDF
+                nic_bdf = ""
+                nic_info = amdsmi_interface.amdsmi_get_nic_info(dest_nic)
+                if nic_info:
+                    nic_bdf = nic_info['bdf']
+                nic_id= self.helpers.get_nic_id_from_device_handle(dest_nic)
+
+                # List to store the GPU statuses for this NIC
+                gpu_statuses_for_nic = []
+
+                # Loop through each GPU to determine its status
+                for gpu_dest in args.gpu:
+                    gpu_bdf = amdsmi_interface.amdsmi_get_gpu_device_bdf(gpu_dest)
+                    gpu_id = self.helpers.get_gpu_id_from_device_handle(gpu_dest)
+                    status = amdsmi_interface.amdsmi_get_nic_gpu_topo_info(dest_nic,gpu_dest)
+                    gpu_statuses_for_nic.append((gpu_bdf, status))  # Store BDF and status as tuple
+
+                # Store NIC BDF and associated GPU statuses in the dictionary
+                topo_dict[nic_bdf] = gpu_statuses_for_nic
+
+            # Prepare tabular output for logger
+            tabular_output = []
+
+            # Add header row for GPU BDFs
+            if self.logger.is_human_readable_format():
+                header_row = {"brcm_nic": "", "bdf": "".rjust(19)}
+            else:
+                header_row = {}
+
+            gpu_bdfs = []  # List to store GPU BDFs for the header
+            for gpu_dest in args.gpu:
+                gpu_id = self.helpers.get_gpu_id_from_device_handle(gpu_dest)
+                gpu_bdf = amdsmi_interface.amdsmi_get_gpu_device_bdf(gpu_dest)
+                if self.logger.is_human_readable_format():
+                    header_row[f"GPU BDF_{gpu_bdf}"] = f"{gpu_bdf}".rjust(20)
+                else:
+                    header_row[f"GPU{gpu_id}"] = f"{gpu_bdf}"
+                gpu_bdfs.append(gpu_bdf)  # Store GPU BDF for later reference
+
+            # Add the header row
+            tabular_output.append(header_row)
+
+            # Add NIC rows with their associated GPU statuses
+            for idx, (nic_bdf, gpu_info) in enumerate(topo_dict.items()):
+                if not isSingleNICRequest:
+                    if self.logger.is_human_readable_format():
+                        nic_row = {'brcm_nic': f"BRCM_NIC{idx}".ljust(12), 'bdf': f"{nic_bdf}".ljust(18) }
+                    else:
+                        nic_row = {'brcm_nic': f"BRCM_NIC{idx}", 'bdf': f"{nic_bdf}"}
+                else: #nic_id get stored in the initial iteration
+                    if self.logger.is_human_readable_format():
+                        nic_row = {'brcm_nic': f"BRCM_NIC{nic_id}".ljust(12), 'bdf': f"{nic_bdf}".ljust(18) }
+                    else:
+                        nic_row = {'brcm_nic': f"BRCM_NIC{nic_id}", 'bdf': f"{nic_bdf}"}
+
+                # Add GPU BDFs and statuses in the row
+                for gpu_idx, (gpu_bdf, status) in enumerate(gpu_info):
+                    if self.logger.is_human_readable_format():
+                        nic_row[f"GPU{gpu_idx} Status"] = status.ljust(20)
+                    else:
+                        nic_row[f"GPU{gpu_idx}_Topo"] = status
+                # Add the NIC row to the table
+                tabular_output.append(nic_row)
+
+            # Use the logger to display the table
+
+            # Construct the table header with GPU column names (adjusting for multiple GPUs)
+            gpu_columns = [f"GPU{idx} " for idx in range(len(gpu_bdfs))]
+            gpu_status_columns = [f"GPU{idx} Status" for idx in range(len(gpu_bdfs))]
+            if self.logger.is_human_readable_format():
+                self.logger.table_header = f"{'Device'.ljust(30)}" + "  ".join(gpu.ljust(18) for gpu in gpu_columns)
+            else:
+                self.logger.table_header = f"{'Device'}" + "".join(gpu for gpu in gpu_columns)
+
+            # Output the table
+            self.logger.multiple_device_output = tabular_output
+            self.logger.table_title = "NIC-GPU ACCESS TABLE"
+            self.logger.print_output(multiple_device_enabled=True, tabular=True)
+
+            if self.logger.is_human_readable_format():
+            # Populate the legend output
+                legend_parts = [
+                    "\n\nLegend:",
+                    "  PCIe = gpu->nic are in same switch and numa",
+                    "  X-NUMA=gpu->nic are in different or same switch and across NUMA",
+                    "  NUMA= gpu->nic are in different or same switch and same NUMA"
+                ]
+                legend_output = "\n".join(legend_parts)
+
+                if self.logger.destination == 'stdout':
+                    print(legend_output)
+                else:
+                    with self.logger.destination.open('a', encoding="utf-8") as output_file:
+                        output_file.write(legend_output + '\n')
+
+            return
+
+        if args.nic_switch:
+            # Prepare the table's header and data
+            tabular_output = []
+
+            # Add header row for BDF, NUMA, and CPU Affinity
+            header_row = {"Device": "", "bdf": "", "NUMA": "", "SWITCH": "", "CPU Affinity": ""}
+            if self.logger.is_human_readable_format():
+                tabular_output.append(header_row)
+
+            if isSingleNICRequest:
+                gpucount = 0
+                niccount = 1
+                switchcount = 0
+            if isSingleSwitchRequest:
+                gpucount = 0
+                niccount = 0
+                switchcount = 1
+            if isSingleGPURequest:
+                gpucount = 1
+                niccount = 0
+                switchcount = 0
+
+            # First, add GPU information
+            if gpucount > 0:
+                for gpu_idx, gpu_dest in enumerate(args.gpu):
+                    gpu_id= self.helpers.get_gpu_id_from_device_handle(gpu_dest)
+                    gpu_bdf = amdsmi_interface.amdsmi_get_gpu_device_bdf(gpu_dest)
+                    CPU_Affinity=amdsmi_interface.amdsmi_get_gpu_topo_cpu_affinity(gpu_dest)
+                    numa_node=amdsmi_interface.amdsmi_get_gpu_topo_numa_affinity(gpu_dest)
+                    switch_bdf = amdsmi_interface.amdsmi_get_root_switch(amdsmi_interface.amdsmi_get_gpu_device_bdf_bdf(gpu_dest))
+
+                    # Add GPU row to the table
+                    if self.logger.is_human_readable_format():
+                        device_row = {
+                            "Device": f"GPU{gpu_id}".ljust(17),
+                            "bdf": f"{gpu_bdf}".rjust(2),
+                            "NUMA":f"{numa_node}".rjust(8).ljust(20),
+                            "SWITCH":f"{switch_bdf}".rjust(8).ljust(20),
+                            "CPU Affinity": f"{CPU_Affinity}".ljust(20)
+                        }
+                    else:
+                        device_row = {
+                            "Device": f"GPU{gpu_id}",
+                            "bdf": gpu_bdf,
+                            "NUMA":numa_node,
+                            "SWITCH":switch_bdf,
+                            "CPU Affinity": CPU_Affinity
+                        }
+                    tabular_output.append(device_row)
+
+            ## Then, add NIC information
+            if niccount > 0:
+                for nic_idx, nic_dest in enumerate(args.nic):
+                    nic_id= self.helpers.get_nic_id_from_device_handle(nic_dest)
+                    nic_bdf = ""
+                    nic_info = amdsmi_interface.amdsmi_get_nic_info(nic_dest)
+                    if nic_info:
+                        nic_bdf = nic_info['bdf']
+                    CPU_Affinity=amdsmi_interface.amdsmi_get_nic_topo_cpu_affinity(nic_dest)
+                    numa_node=amdsmi_interface.amdsmi_get_nic_topo_numa_affinity(nic_dest)
+                    switch_bdf = amdsmi_interface.amdsmi_get_root_switch(amdsmi_interface.amdsmi_get_nic_device_bdf_bdf(nic_dest))
+
+                    # Add NIC row to the table
+                    if self.logger.is_human_readable_format():
+                        device_row = {
+                            "Device": f"BRCM_NIC{nic_id}".ljust(17),
+                            "bdf": f"{nic_bdf}".rjust(2),
+                            "NUMA": f"{numa_node}".rjust(8).ljust(20),
+                            "SWITCH":f"{switch_bdf}".rjust(8).ljust(20),
+                            "CPU Affinity": f"{CPU_Affinity}".ljust(20)
+                        }
+                    else:
+                        device_row = {
+                            "Device": f"BRCM_NIC{nic_id}",
+                            "bdf": nic_bdf,
+                            "NUMA": numa_node,
+                            "SWITCH":switch_bdf,
+                            "CPU Affinity": CPU_Affinity
+                        }
+                    tabular_output.append(device_row)
+
+            ## Then, add SWITCH information
+            if switchcount > 0:
+                for switch_idx, switch_dest in enumerate(args.switch):
+                    switch_id= self.helpers.get_switch_id_from_device_handle(switch_dest)
+                    switch_bdf = amdsmi_interface.amdsmi_get_switch_device_bdf(switch_dest)
+                    CPU_Affinity=amdsmi_interface.amdsmi_get_switch_topo_cpu_affinity(switch_dest)
+                    numa_node=amdsmi_interface.amdsmi_get_switch_topo_numa_affinity(switch_dest)
+                    pSwitch_bdf = "N/A"
+
+                    # Add NIC row to the table
+                    if self.logger.is_human_readable_format():
+                        device_row = {
+                            "Device": f"BRCM_SWITCH{switch_id}".ljust(17),
+                            "bdf": f"{switch_bdf}".rjust(2),
+                            "NUMA": f"{numa_node}".rjust(8).ljust(20),
+                            "SWITCH":f"{pSwitch_bdf}".rjust(8).ljust(20),
+                            "CPU Affinity": f"{CPU_Affinity}".ljust(20)
+                        }
+                    else:
+                        device_row = {
+                            "Device": f"BRCM_SWITCH{switch_id}",
+                            "bdf": switch_bdf,
+                            "NUMA": numa_node,
+                            "SWITCH":pSwitch_bdf,
+                            "CPU Affinity": CPU_Affinity
+                        }
+                    tabular_output.append(device_row)
+
+            # Display the table using the logger
+            self.logger.table_title = "AFFINITY TABLE"
+            self.logger.table_header = "Device".ljust(17) + "bdf".ljust(17) + "NUMA".ljust(15) + "SWITCH".ljust(20) + "CPU Affinity".ljust(17)
+            self.logger.multiple_device_output = tabular_output
+            self.logger.print_output(multiple_device_enabled=True, tabular=True)
+            return
+
 
     def topology(self, args, multiple_devices=False, gpu=None, access=None,
-                weight=None, hops=None, link_type=None, numa_bw=None,
-                coherent=None, atomics=None, dma=None, bi_dir=None):
+                weight=None, hops=None, link_type=None, numa_bw=None, coherent=None, 
+                atomics=None, dma=None, bi_dir=None, nic=None, nic_topo=None, nic_switch=None,
+                multiple_device_enabled=None, switch=None):
+     
         """ Get topology information for target gpus
             params:
                 args - argparser args to pass to subcommand
@@ -3749,6 +4986,10 @@ class AMDSMICommands():
                 atomics (bool) - Value override for args.atomics
                 dma (bool) - Value override for args.dma
                 bi_dir (bool) - Value override for args.bi_dir
+                nic (device_handle) - device_handle for target device
+                nic_topo (bool) - True if checking for connectivity between nic and gpu devices
+                nic_switch (bool) - True if checking for gpu, nic and switch device's affinity and parent switch
+                switch (device_handle) - device_handle for target device
             return:
                 Nothing
         """
@@ -3773,6 +5014,17 @@ class AMDSMICommands():
             args.dma = dma
         if bi_dir:
             args.bi_dir = bi_dir
+        if nic:
+            args.nic = nic
+        if switch:
+            args.switch = switch
+        if ((self.helpers.is_brcm_nic_initialized() and 
+                (nic_topo or args.nic_topo)) or 
+                (self.helpers.is_brcm_switch_initialized() and
+                (nic_switch or args.nic_switch))):
+            self.topology_nic(args, multiple_devices, args.gpu, args.nic, args.nic_topo, args.nic_switch,
+                multiple_device_enabled, args.switch)
+            return
 
         # Handle No GPU passed
         if args.gpu == None:
@@ -4727,26 +5979,26 @@ class AMDSMICommands():
 
         # Error if no subcommand args are passed
         if self.helpers.is_baremetal():
-            if not any([args.fan is not None,
-                        args.perf_level,
-                        args.profile,
-                        args.compute_partition,
-                        args.memory_partition,
-                        args.perf_determinism is not None,
-                        args.power_cap is not None,
-                        args.soc_pstate is not None,
-                        args.xgmi_plpd is not None,
-                        args.clk_level is not None,
-                        args.clk_limit is not None,
-                        args.ptl_status is not None,
-                        args.ptl_format is not None,
-                        args.process_isolation is not None]):
+            if not any([getattr(args, 'fan', None) is not None,
+                        getattr(args, 'perf_level', None) is not None,
+                        getattr(args, 'profile', None) is not None,
+                        getattr(args, 'compute_partition', None) is not None,
+                        getattr(args, 'memory_partition', None) is not None,
+                        getattr(args, 'perf_determinism', None) is not None,
+                        getattr(args, 'power_cap', None) is not None,
+                        getattr(args, 'soc_pstate', None) is not None,
+                        getattr(args, 'xgmi_plpd', None) is not None,
+                        getattr(args, 'clk_level', None) is not None,
+                        getattr(args, 'clk_limit', None) is not None,
+                        getattr(args, 'ptl_status', None) is not None,
+                        getattr(args, 'ptl_format', None) is not None,
+                        getattr(args, 'process_isolation', None) is not None]):
                 command = " ".join(sys.argv[1:])
                 raise AmdSmiRequiredCommandException(command, self.logger.format)
         else:
-            if not any([args.power_cap is not None,
-                        args.clk_limit is not None,
-                        args.process_isolation is not None]):
+            if not any([getattr(args, 'power_cap', None) is not None,
+                        getattr(args, 'clk_limit', None) is not None,
+                        getattr(args, 'process_isolation', None) is not None]):
                 command = " ".join(sys.argv[1:])
                 raise AmdSmiRequiredCommandException(command, self.logger.format)
 
@@ -5129,13 +6381,9 @@ class AMDSMICommands():
             if isinstance(args.ptl_status, int):
                 status_string = "Enabled" if args.ptl_status else "Disabled"
                 result = f"Requested PTL status to {status_string}" # This should not print out
-                try:
-                    current_state = amdsmi_interface.amdsmi_get_gpu_ptl_state(args.gpu)
-                    if current_state == args.ptl_status:
-                        result = f"PTL state is already {status_string}"
-                    else:
-                        amdsmi_interface.amdsmi_set_gpu_ptl_state(args.gpu, args.ptl_status)
-                        result = f"Successfully set PTL state to {status_string}"
+                try: # Due to driver requirements, do NOT check current state. Set state regardless of current state.
+                    amdsmi_interface.amdsmi_set_gpu_ptl_state(args.gpu, args.ptl_status)
+                    result = f"Successfully set PTL state to {status_string}"
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                         raise PermissionError('Command requires elevation') from e
@@ -5517,7 +6765,7 @@ class AMDSMICommands():
 
     def reset(self, args, multiple_devices=False, gpu=None, gpureset=None,
                 clocks=None, fans=None, profile=None, xgmierr=None, perf_determinism=None,
-                power_cap=None, reload_driver=None, clean_local_data=None):
+                power_cap=None, clean_local_data=None):
         """Issue reset commands to target gpu(s)
 
         Args:
@@ -5557,8 +6805,6 @@ class AMDSMICommands():
             args.perf_determinism = perf_determinism
         if power_cap:
             args.power_cap = power_cap
-        if reload_driver:
-            args.reload_driver = reload_driver
         if clean_local_data:
             args.clean_local_data = clean_local_data
 
@@ -5569,6 +6815,43 @@ class AMDSMICommands():
         if not self.group_check_printed:
             self.helpers.check_required_groups(check_render=True, check_video=False)
             self.group_check_printed = True
+
+        # Mode-1 gpureset is hive-wide.
+        # Group GPUs by hive and reset each hive only once.
+        gpus_to_reset = []
+
+        if args.gpureset and isinstance(args.gpu, list) and len(args.gpu) > 1:
+            # Group GPUs by their XGMI hive ID.
+            # If GPU not in a hive or no hive info, reset individually.
+            hive_to_gpus = {}
+            gpus_without_hive = []
+
+            for gpu in args.gpu:
+                try:
+                    xgmi_info = amdsmi_interface.amdsmi_get_xgmi_info(gpu)
+                    if isinstance(xgmi_info, dict):
+                        hive_id = xgmi_info.get('xgmi_hive_id', None)
+                        if hive_id is not None and hive_id != 0:
+                            if hive_id not in hive_to_gpus:
+                                hive_to_gpus[hive_id] = []
+                            hive_to_gpus[hive_id].append(gpu)
+                        else:
+                            gpus_without_hive.append(gpu)
+                    else:
+                        gpus_without_hive.append(gpu)
+                except:
+                    gpus_without_hive.append(gpu)
+
+            # For each hive, reset using the first GPU (resets entire hive)
+            for hive_id, gpu_list in hive_to_gpus.items():
+                gpus_to_reset.append(gpu_list[0])
+
+            # Add all non-hive GPUs to reset individually
+            gpus_to_reset.extend(gpus_without_hive)
+
+            # Update args.gpu to only the GPUs to reset
+            if gpus_to_reset:
+                args.gpu = gpus_to_reset
 
         # Handle multiple GPUs
         handled_multiple_gpus, device_handle = self.helpers.handle_gpus(args, self.logger, self.reset)
@@ -5583,12 +6866,12 @@ class AMDSMICommands():
         # Error if no subcommand args are passed
         if self.helpers.is_baremetal():
             if not any([args.gpureset, args.clocks, args.fans, args.profile, args.xgmierr, \
-                        args.perf_determinism, args.power_cap, args.reload_driver, \
+                        args.perf_determinism, args.power_cap, \
                         args.clean_local_data]):
                 command = " ".join(sys.argv[1:])
                 raise AmdSmiRequiredCommandException(command, self.logger.format)
         else:
-            if not any([args.clean_local_data, args.reload_driver]):
+            if not any([args.clean_local_data]):
                 command = " ".join(sys.argv[1:])
                 raise AmdSmiRequiredCommandException(command, self.logger.format)
 
@@ -5779,106 +7062,21 @@ class AMDSMICommands():
             self.logger.clear_multiple_devices_output()
             return
 
-        # Adding to VMs since, they should also support same reload as baremetal
-        if args.reload_driver:
-            # Check permissions BEFORE starting any processes
-            # Required to avoid permission errors when starting the progress bar
-            try:
-                if os.geteuid() != 0:
-                    result = "[AMDSMI_STATUS_NO_PERM] Command requires elevation"
-                    self.logger.store_output(args.gpu, 'reload_driver', result)
-                    self.logger.print_output()
-                    self.logger.clear_multiple_devices_output()
-                    raise PermissionError('Command requires elevation')
-            except AttributeError:
-                pass # os.geteuid() not available on Windows
-            lock = multiprocessing.Lock()
-            lock.acquire()
-            is_lock_released = False
-            progress_process = None
-            try:
-                self.helpers.increment_set_count()
-                set_count = self.helpers.get_set_count()
-                if set_count == 1:
-                    self.helpers.confirm_gpu_driver_reload_warning()
-                    # Start progress bar in separate process
-                    string_out = f"Reloading driver for all AMD GPUs:"
-                    progress_process = multiprocessing.Process(
-                        target=self.helpers.showProgressbar,
-                        args=(string_out, 140, True)
-                    )
-                    progress_process.start()
-                    # Perform the actual driver reload (this is where permission error occurs)
-                    amdsmi_interface.amdsmi_gpu_driver_reload()
-                    # If we get here, operation was successful
-                    self.helpers.assign_previous_set_success_check(amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_SUCCESS)
-                    result = "Successfully reloaded driver"
-                else:
-                    if self.helpers.get_previous_set_success_check() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_SUCCESS:
-                        result = "Successfully reloaded driver"
-                    elif self.helpers.get_previous_set_success_check() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
-                        result = "[AMDSMI_STATUS_NO_PERM] Command requires elevation"
-                        raise PermissionError('Command requires elevation')
-                    else:
-                        previous_check = self.helpers.get_previous_set_success_check()
-                        temp_exception = amdsmi_exception.AmdSmiLibraryException(previous_check)
-                        str_out = temp_exception.get_error_info(detailed=False)
-                        result = f"[{str_out}] Unable to successfully restart driver"
-            except amdsmi_exception.AmdSmiLibraryException as e:
-                # Handle permission error FIRST, before any cleanup
-                self.helpers.assign_previous_set_success_check(e.get_error_code())
-                if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
-                    self.helpers.assign_previous_set_success_check(amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM)
-                    result = f"[{e.get_error_info(detailed=False)}] Command requires elevation"
-                    # Clean termination of progress bar
-                    if progress_process and progress_process.is_alive():
-                        progress_process.terminate()
-                        progress_process.join(timeout=0.1)  # Wait max 0.1 second
-                        if progress_process.is_alive():
-                            progress_process.kill()  # Force kill if needed
-                        print("\n")  # Clean up progress bar line
-                    # Store result and exit early
-                    self.logger.store_output(args.gpu, 'reload_driver', result)
-                    self.logger.print_output()
-                    self.logger.clear_multiple_devices_output()
-                    if not is_lock_released:
-                        lock.release()
-                        is_lock_released = True
-                    raise PermissionError('Command requires elevation') from e
-                else:
-                    # Handle other errors
-                    self.helpers.assign_previous_set_success_check(e.get_error_code())
-                    result = f"[{e.get_error_info(detailed=False)}] Unable to successfully restart driver"
-            finally:
-                # Always clean up progress bar process
-                if progress_process and progress_process.is_alive():
-                    progress_process.terminate()
-                    progress_process.join(timeout=0.1)
-                    if progress_process.is_alive():
-                        progress_process.kill()
-                    print("\n")  # Clean up progress bar line
-                # Always release lock
-                if not is_lock_released:
-                    lock.release()
-                    is_lock_released = True
-            # Store and print result
-            self.logger.store_output(args.gpu, 'reload_driver', result)
-            self.logger.print_output()
-            self.logger.clear_multiple_devices_output()
-            return
 
     def monitor(self, args, multiple_devices=False, watching_output=False, gpu=None,
                     watch=None, watch_time=None, iterations=None, power_usage=None,
                     temperature=None, base_board_temps=None, gpu_board_temps=None,
                     gfx_util=None, mem_util=None, encoder=None, decoder=None,
                     ecc=None, vram_usage=None, pcie=None, process=None,
-                    violation=None):
+                    violation=None, nic=None, switch=None, brcm_nic=None, brcm_switch=None):
         """ Populate a table with each GPU as an index to rows of targeted data
 
         Args:
             args (Namespace): Namespace containing the parsed CLI args
             multiple_devices (bool, optional): True if checking for multiple devices. Defaults to False.
             gpu (device_handle, optional): device_handle for target device. Defaults to None.
+            nic (device_handle, optional): device_handle for target nic device. Defaults to None.
+            switch (device_handle, optional): device_handle for target switch device. Defaults to None.
             watch (bool, optional): Value override for args.watch. Defaults to None.
             watch_time (int, optional): Value override for args.watch_time. Defaults to None.
             iterations (int, optional): Value override for args.iterations. Defaults to None.
@@ -5895,6 +7093,8 @@ class AMDSMICommands():
             pcie (bool, optional): Value override for args.pcie. Defaults to None.
             process (bool, optional): Value override for args.process. Defaults to None.
             violation (bool, optional): Value override for args.violation. Defaults to None.
+            brcm_nic (bool, optional): Value override for args.brcm_nic. Defaults to None.
+            brcm_switch (bool, optional): Value override for args.brcm_switch. Defaults to None.
 
         Raises:
             ValueError: Value error if no gpu value is provided
@@ -5912,6 +7112,10 @@ class AMDSMICommands():
             args.watch_time = watch_time
         if iterations:
             args.iterations = iterations
+        if nic:
+            args.nic = nic
+        if switch:
+            args.switch = switch
 
         # monitor args
         if power_usage:
@@ -5938,6 +7142,14 @@ class AMDSMICommands():
             args.pcie = pcie
         if process:
             args.process = process
+        if brcm_nic or args.brcm_nic:
+            self.monitor_nic(args, multiple_devices, watching_output, args.nic, watch, watch_time, iterations,
+                            args.temperature, args.brcm_nic)
+            return
+        if brcm_switch or args.brcm_switch:
+            self.monitor_switch(args, multiple_devices, watching_output, args.switch, watch, watch_time, iterations,
+                            args.pcie, args.brcm_switch)
+            return
         if not self.helpers.is_virtual_os():
             if violation:
                 args.violation = violation
@@ -6470,10 +7682,12 @@ class AMDSMICommands():
                 process_info.pop('engine_usage')  # Remove 'engine_usage' value
                 process_info['mem_usage'] = process_info.pop('mem')
                 process_info['cu_occupancy'] = process_info.pop('cu_occupancy')
+                process_info['sdma_usage'] = process_info.pop('sdma_usage')
                 process_info['evicted_time'] = process_info.pop('evicted_time')
 
                 memory_usage_unit = "B"
                 evicted_time_unit = "ms"
+                sdma_usage_unit = "us"
 
                 if self.logger.is_human_readable_format():
                     process_info['mem_usage'] = self.helpers.convert_bytes_to_readable(process_info['mem_usage'])
@@ -6485,9 +7699,23 @@ class AMDSMICommands():
                                                                      process_info['mem_usage'],
                                                                      memory_usage_unit)
 
-                process_info['evicted_time'] = self.helpers.unit_format(self.logger,
+                if self.logger.is_human_readable_format():
+                    process_info['evicted_time'] = self.helpers.convert_time_to_readable(
+                                                                     process_info['evicted_time'],
+                                                                     "ms")
+                else:
+                    process_info['evicted_time'] = self.helpers.unit_format(self.logger,
                                                                      process_info['evicted_time'],
                                                                      evicted_time_unit)
+
+                if self.logger.is_human_readable_format():
+                    process_info['sdma_usage'] = self.helpers.convert_time_to_readable(
+                                                                     process_info['sdma_usage'],
+                                                                     "us")
+                else:
+                    process_info['sdma_usage'] = self.helpers.unit_format(self.logger,
+                                                                     process_info['sdma_usage'],
+                                                                     sdma_usage_unit)
 
                 for usage_metric in process_info['memory_usage']:
                     process_info['memory_usage'][usage_metric] = self.helpers.unit_format(self.logger,
@@ -6522,7 +7750,7 @@ class AMDSMICommands():
             # Build the process table's title and header
             self.logger.secondary_table_title = "PROCESS INFO"
             self.logger.secondary_table_header = 'GPU'.rjust(3) + "NAME".rjust(19) + "PID".rjust(9) + "GTT_MEM".rjust(10) + \
-                                                "CPU_MEM".rjust(10) + "VRAM_MEM".rjust(10) + "MEM_USG".rjust(10) + "CU%".rjust(9) + "EVICT".rjust(10)
+                                                "CPU_MEM".rjust(10) + "VRAM_MEM".rjust(10) + "MEM_USG".rjust(10) + "CU%".rjust(9) + "SDMA".rjust(8) + "EVICT".rjust(8)
 
             if watching_output:
                 self.logger.secondary_table_header = 'TIMESTAMP'.rjust(10) + '  ' + self.logger.secondary_table_header
@@ -7429,7 +8657,7 @@ class AMDSMICommands():
                         output_file.write(legend_output + '\n')
 
 
-    def ras(self, args, multiple_devices=False, gpu=None, cper=None, afid=None,
+    def ras(self, args, multiple_devices=False, gpu=None, cper=None, afid=None, decode=None,
             severity=None, folder=None, file_limit=None, cper_file=None, follow=None):
         """
         Retrieve and process CPER (RAS) entries for a target GPU.
@@ -7449,6 +8677,8 @@ class AMDSMICommands():
             args.cper = cper
         if afid:
             args.afid = afid
+        if decode:
+            args.decode = decode
         if severity:
             args.severity = severity
         if folder:
@@ -7464,7 +8694,11 @@ class AMDSMICommands():
 
         if args.afid:
             if args.cper_file:
-                afids = self.helpers.pvtDumpAfids(args.cper_file)
+                if args.decode:
+                    args.cursor = [0]
+                    self.helpers.ras_cper(args, None, self.logger, 0)
+                    return
+                afids = self.helpers.cper_dump_afids(args.cper_file)
                 print(' '.join(map(str, afids)))
                 return
             else:
@@ -7526,13 +8760,16 @@ class AMDSMICommands():
             time.sleep(1)
 
 
-    def node(self, args, multiple_devices=False, nodes=None, power_management=None):
+    def node(self, args, multiple_devices=False, nodes=None, power_management=None, base_board_temps=None):
         """List node informations
 
         Args:
             args (Namespace): Namespace containing the parsed CLI args
             multiple_devices (bool, optional): True if checking for multiple devices.
                 Defaults to False.
+            nodes (node_handle, optional): node_handle for target node. Defaults to None.
+            power_management (bool, optional): Value override for args.power_management. Defaults to None.
+            base_board_temps (bool, optional): Value override for args.base_board_temps. Defaults to None.
 
         Returns:
             None: Print output via AMDSMILogger to destination
@@ -7540,8 +8777,20 @@ class AMDSMICommands():
         # Set args.* to passed in arguments
         if nodes:
             args.nodes = nodes
-        if power_management:
-            args.power_management = power_management
+        # Store args that are applicable to the current platform
+        current_platform_args = ["power_management", "base_board_temps"]
+
+        # Check if any node-specific options were passed via command line
+        current_platform_values = []
+        if args.power_management:
+            current_platform_values += [args.power_management]
+        if args.base_board_temps:
+            current_platform_values += [args.base_board_temps]
+
+        # If no node options are passed, enable all by default
+        if not any(current_platform_values):
+            for arg in current_platform_args:
+                setattr(args, arg, True)
         if getattr(args, 'nodes', None) is None:
             args.nodes = self.node_handle
 
@@ -7549,42 +8798,76 @@ class AMDSMICommands():
             self.helpers.check_required_groups(check_render=True, check_video=False)
             self.group_check_printed = True
 
-        # Get NPM info
-        if args.nodes is not None:
-            try:
-                npm_info = amdsmi_interface.amdsmi_get_npm_info(args.nodes)
-            except amdsmi_exception.AmdSmiLibraryException as e:
-                logging.debug("amdsmi_get_npm_info failed: %s", e.get_error_info())
-                npm_info = "N/A"
-        else:
-            logging.debug('No node handle available to query NPM info')
-            npm_info = "N/A"
-
-        # Log outputs
+        # Initialize variables for both power management and base board temps
         npm_dict = {"limit": "N/A", "status": "N/A"}
-        power_unit ="W"
-
+        power_unit = "W"
         limit = "N/A"
-        if isinstance(npm_info, dict):
-            limit = npm_info.get('limit', "N/A")
-            status = npm_info.get('status', npm_info.get('current', "N/A"))
+        base_board_temp_dict = {}
 
-            if limit !="N/A":
-                npm_dict['limit'] = limit
-            status = "DISABLED" if status == amdsmi_interface.amdsmi_wrapper.AMDSMI_NPM_STATUS_DISABLED else "ENABLED"
-            npm_dict.update({"status": status})
+        # Get NPM info
+        if args.power_management:
+            if args.nodes is not None:
+                try:
+                    npm_info = amdsmi_interface.amdsmi_get_npm_info(args.nodes)
+                except amdsmi_exception.AmdSmiLibraryException as e:
+                    logging.debug("amdsmi_get_npm_info failed: %s", e.get_error_info())
+                    npm_info = "N/A"
+            else:
+                logging.debug('No node handle available to query NPM info')
+                npm_info = "N/A"
+
+            if isinstance(npm_info, dict):
+                limit = npm_info.get('limit', "N/A")
+                status = npm_info.get('status', npm_info.get('current', "N/A"))
+
+                if limit !="N/A":
+                    npm_dict['limit'] = limit
+                status = "DISABLED" if status == amdsmi_interface.amdsmi_wrapper.AMDSMI_NPM_STATUS_DISABLED else "ENABLED"
+                npm_dict.update({"status": status})
+
+        # Get base board temperatures using node_handle
+        if args.base_board_temps:
+            if args.nodes is not None:
+                try:
+                    # Get device_handle from node_handle
+                    device_handle = amdsmi_interface.amdsmi_get_device_handle_from_node(args.nodes)
+                    gpu_id = self.helpers.get_gpu_id_from_device_handle(device_handle)
+                    base_board_temp_dict = self.helpers.get_base_board_temperatures(device_handle, gpu_id, self.logger)
+                except amdsmi_exception.AmdSmiLibraryException as e:
+                    logging.debug("Failed to get device handle from node: %s", e.get_error_info())
+                    base_board_temp_dict = {}
+
+        # Print output
         if self.logger.is_human_readable_format() and self.logger.destination == 'stdout':
-            print(f"NODE:\n    POWER_MANAGEMENT:\n        LIMIT: {npm_dict.get('limit', 'N/A')} {power_unit}\n        STATUS: {npm_dict.get('status', 'N/A')}")
+            node_output = ["NODE:"]
+            if args.power_management:
+                node_output.append("    POWER_MANAGEMENT:")
+                node_output.append(f"        LIMIT: {npm_dict.get('limit', 'N/A')} {power_unit}")
+                node_output.append(f"        STATUS: {npm_dict.get('status', 'N/A')}")
+            if args.base_board_temps and base_board_temp_dict:
+                node_output.append("    BASEBOARD:")
+                node_output.append("        TEMPERATURE:")
+                for temp_name, temp_value in base_board_temp_dict.items():
+                    node_output.append(f"            {temp_name.upper()}: {temp_value}")
+            print("\n".join(node_output))
         else:
             if self.logger.is_csv_format():
                 csv_dict = {}
-                csv_dict['limit'] = npm_dict.get('limit', "N/A")
-                csv_dict['status'] = npm_dict.get('status', "N/A")
+                if args.power_management:
+                    csv_dict['limit'] = npm_dict.get('limit', "N/A")
+                    csv_dict['status'] = npm_dict.get('status', "N/A")
+                if args.base_board_temps and base_board_temp_dict:
+                    csv_dict.update(base_board_temp_dict)
                 self.logger.output = csv_dict
             else:
                 # For JSON and human readable format with file output
-                npm_dict["limit"] = self.helpers.unit_format(self.logger, limit, power_unit)
-                self.logger.output = {'node': {'power_management': npm_dict}}
+                node_output = {}
+                if args.power_management:
+                    npm_dict["limit"] = self.helpers.unit_format(self.logger, limit, power_unit)
+                    node_output['power_management'] = npm_dict
+                if args.base_board_temps and base_board_temp_dict:
+                    node_output['base_board'] = {'temperature': base_board_temp_dict}
+                self.logger.output = {'node': node_output}
                 if multiple_devices:
                     self.logger.store_multiple_device_output()
                     return
@@ -7780,12 +9063,13 @@ class AMDSMICommands():
             try:
                 raw_process_list = amdsmi_interface.amdsmi_get_gpu_process_list(processor)
                 for proc in raw_process_list:
-                    proc_info_dict = {"gpu": "N/A", "pid": "N/A", "name": "N/A","gtt": "N/A", "vram": "N/A", "mem_usage": "N/A", "cu_occupancy": "N/A"}
+                    proc_info_dict = {"gpu": "N/A", "pid": "N/A", "name": "N/A","gtt": "N/A", "vram": "N/A", "mem_usage": "N/A", "cu_occupancy": "N/A", "sdma_usage": "N/A"}
                     proc_info_dict['gpu'] = gpu_id
                     proc_info_dict['pid'] = proc['pid']
                     proc_info_dict['name'] = proc['name']
                     proc_info_dict['gtt'] = self.helpers.convert_bytes_to_readable(proc['memory_usage']['gtt_mem'])
                     proc_info_dict['vram'] = self.helpers.convert_bytes_to_readable(proc['memory_usage']['vram_mem'])
+                    proc_info_dict['sdma_usage'] = self.helpers.unit_format(self.logger, proc['sdma_usage'], "us")
                     proc_info_dict['mem_usage'] = self.helpers.convert_bytes_to_readable(proc['mem'])
                     # Handle cu_occupancy conversion safely
                     try:
