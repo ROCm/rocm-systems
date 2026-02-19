@@ -21,6 +21,19 @@ VERSION.sha
 # temp files
 /tests/Testing
 
+# test executables (built by CMake in tests/CMakeLists.txt)
+/tests/hip_dynamic_shared
+/tests/laplace_eqn
+/tests/mat_mul_max
+/tests/memcopy
+/tests/mpi_aware_laplace_eqn
+/tests/occupancy
+/tests/rocflop
+/tests/vcopy
+/tests/vmem
+/tests/vrandom_access
+/tests/vsequential_access
+
 # documentation artifacts
 /_build
 _toc.yml
