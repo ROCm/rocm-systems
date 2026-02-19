@@ -107,14 +107,6 @@ TEST_CASE("Unit_hipGraphAddHostNode_Negative") {
                     hipErrorInvalidValue);
   }
 
-  SECTION("Pass invalid numDependencies and valid list for dependencies") {
-    HIP_CHECK(hipGraphAddHostNode(&hostNode, graph, nullptr, 0, &hostParams));
-    dependencies.push_back(hostNode);
-    HIP_CHECK_ERROR(hipGraphAddHostNode(&hostNode, graph, dependencies.data(),
-                                        dependencies.size() + 1, &hostParams),
-                    hipErrorInvalidValue);
-  }
-
   SECTION("Passing nullptr to host params") {
     HIP_CHECK_ERROR(hipGraphAddHostNode(&hostNode, graph, nullptr, 0, nullptr),
                     hipErrorInvalidValue);

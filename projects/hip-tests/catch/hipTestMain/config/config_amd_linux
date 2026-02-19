@@ -79,7 +79,6 @@
         "Unit_hipMultiThreadDevice_SerialPyramid",
         "Unit_Device___clzll_Sanity_Positive - unsigned long long int",
         "Unit_Test_makechar_functionality",
-        "Unit_Rtc_ReduceRandom",
         "Unit_test_generic_target_only_in_regular_fatbin",
         "Unit_test_generic_target_only_in_compressed_fatbin",
         "=== special values test, fix: comment out [HEX_DBL(-, 1, fffffffffffff, +, 31), HEX_DBL(+, 1, fffffffffffff, +, 31)]",
