@@ -734,7 +734,19 @@ ncclResult_t ncclGroupEndInternal(ncclSimInfo_t* simInfo) {
   groupJob->joined = false;
   ncclIntruQueueTransfer(&groupJob->asyncJobs, &ncclAsyncJobs);
 
-  if (hasCommHead || !ncclIntruQueueEmpty(&groupJob->asyncJobs) || ncclGroupCommPreconnectHead != nullptr) {
+  /* Only allocate groupJob if there is work to do */
+  if (hasCommHead || !ncclIntruQueueEmpty(&ncclAsyncJobs) || ncclGroupCommPreconnectHead != nullptr) {
+    NCCLCHECKGOTO(ncclCalloc(&groupJob, 1), ret, fail);
+    ncclIntruQueueConstruct(&groupJob->asyncJobs);
+    groupJob->groupRefCount = 0;
+    groupJob->nonBlockingInit = false;
+    memcpy(groupJob->groupCommHead, ncclGroupCommHead, sizeof(ncclGroupCommHead));
+    groupJob->groupCommPreconnectHead = ncclGroupCommPreconnectHead;
+    groupJob->groupError = ncclSuccess;
+    groupJob->abortFlag = false;
+    groupJob->joined = false;
+    ncclIntruQueueTransfer(&groupJob->asyncJobs, &ncclAsyncJobs);
+
     /* make sure ncclGroupBlocking has been set. */
     assert(ncclGroupBlocking == 0 || ncclGroupBlocking == 1);
     if (ncclGroupBlocking == 0 && (ncclGroupCommPreconnectHead != nullptr || !ncclIntruQueueEmpty(&ncclAsyncJobs))) {
@@ -779,10 +791,6 @@ ncclResult_t ncclGroupEndInternal(ncclSimInfo_t* simInfo) {
       if (simInfo) memcpy((void*)simInfo, (void*)internalSimInfoPtr, realSize);
       free(groupJob);
     }
-  } else {
-    /* No work to do - free the unused groupJob */
-    free(groupJob);
-    groupJob = nullptr;
   }
   /* Reset the job state for the next group call. */
   groupLocalResetJobState();
