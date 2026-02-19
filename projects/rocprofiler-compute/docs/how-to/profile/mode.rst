@@ -886,9 +886,9 @@ their performance counters:
 ``torch_trace/`` directory
    Contains per-operator CSV files. Columns include:
 
-   * ``Operator_Name`` - Full operator hierarchy
-      (e.g. ``nn.Module.Net.forward/nn.Module.Conv2d.forward/torch.nn.functional.relu``,
-            ``nn.Module.ResNet.forward/torch.nn.functional.relu``).
+   * ``Operator_Name`` - Full operator hierarchy (e.g.
+     ``nn.Module.Net.forward/nn.Module.Conv2d.forward/torch.nn.functional.relu``,
+     ``nn.Module.ResNet.forward/torch.nn.functional.relu``).
    * ``Context_Id`` - Call context (e.g., ``1@__init__.py:231``)
    * ``Counter_Name`` / ``Counter_Value`` - Performance counter values
    * ``Start_Timestamp_function`` / ``End_Timestamp_function`` - Operator timing
@@ -897,37 +897,51 @@ their performance counters:
    This per-operator organization enables focused analysis of specific operators without
    processing the entire trace.
 
-Sample rows from ``torch_trace/ones_like.csv`` (from profiling an mnist model). The full CSV
-includes columns ``Start_Timestamp_function``, ``End_Timestamp_function``,
-``Start_Timestamp_kernel``, ``End_Timestamp_kernel``.
+Sample rows from ``torch_trace/ones_like.csv`` (from profiling an mnist model).
 
 .. list-table::
    :header-rows: 1
-   :widths: 18 18 50 28 18
+   :widths: 16 14 42 22 12 14 14 14 14
 
    * - Operator_Name
      - Context_Id
      - Kernel_Name
      - Counter_Name
      - Counter_Value
+     - Start_Timestamp_function
+     - End_Timestamp_function
+     - Start_Timestamp_kernel
+     - End_Timestamp_kernel
 
    * - torch.ones_like
      - 1@__init__.py:231
      - ``void at::native::vectorized_elementwise_kernel<...>(...)``
      - CPC_CPC_STAT_BUSY
      - 23004
+     - 6789210204040073
+     - 6789210223815845
+     - 6789210223810274
+     - 6789210223811914
 
    * - torch.ones_like
      - 1@__init__.py:231
      - ``void at::native::vectorized_elementwise_kernel<...>(...)``
      - CPC_CPC_STAT_IDLE
      - 0
+     - 6789210204040073
+     - 6789210223815845
+     - 6789210223810274
+     - 6789210223811914
 
    * - torch.ones_like
      - 1@__init__.py:231
      - ``void at::native::vectorized_elementwise_kernel<...>(...)``
      - CPC_CPC_STAT_STALL
      - 6715
+     - 6789281060081123
+     - 6789281079930585
+     - 6789281079932564
+     - 6789281079934204
 
 ``pmc_perf.csv``
    Standard performance counter data (same as non-torch profiling)
