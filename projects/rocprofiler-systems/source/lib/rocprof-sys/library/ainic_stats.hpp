@@ -10,7 +10,7 @@
 
 #include "core/amd_smi.hpp"
 
-#ifdef USE_AINIC
+#ifdef AINIC_SUPPORTED
 #    include <amd_smi/amdsmi.h>
 #endif
 
@@ -78,7 +78,7 @@ public:
 private:
     size_t get_nic_count();
 
-#ifdef USE_AINIC
+#ifdef AINIC_SUPPORTED
     void update_data_for_one_handle(amdsmi_processor_handle         processor_handle,
                                     amdsmi_nic_rdma_devices_info_t& info);
 #endif
