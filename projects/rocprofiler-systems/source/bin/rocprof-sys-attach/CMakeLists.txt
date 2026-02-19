@@ -27,8 +27,6 @@ find_package(rocprofiler-sdk-rocattach QUIET) #QUIET to avoid error if not found
 if(rocprofiler-sdk-rocattach_FOUND)
     add_executable(${TARGET} ${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-attach.cpp)
 
-    find_package(rocprofiler-sdk-rocattach REQUIRED)
-
     target_link_libraries(
         ${TARGET}
         PRIVATE rocprofiler-sdk::rocprofiler-sdk-rocattach-shared-library
@@ -47,7 +45,7 @@ if(rocprofiler-sdk-rocattach_FOUND)
     install(TARGETS ${TARGET} DESTINATION ${CMAKE_INSTALL_BINDIR} OPTIONAL)
 else()
     message(
-        INFO
+        STATUS
         "rocprofiler-sdk-rocattach not found, skipping rocprof-sys-attach target"
     )
 endif()
