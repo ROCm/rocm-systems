@@ -747,7 +747,7 @@ config()
         metadata_initialize_smi_pmc(_dev_id);
     }
 
-#ifdef USE_AINIC
+#ifdef AINIC_SUPPORTED
     nic_config();
 #endif
 
@@ -771,7 +771,7 @@ sample()
         _data->emplace_back(data{ itr });
     }
 
-#ifdef USE_AINIC
+#ifdef AINIC_SUPPORTED
     nic_sample();
 #endif
 }
@@ -1253,7 +1253,7 @@ setup()
             }
         }
 
-#ifdef USE_AINIC
+#ifdef AINIC_SUPPORTED
         nic_setup();
 #endif
 
@@ -1298,7 +1298,7 @@ post_process()
         data::post_process(itr);
     }
 
-#ifdef USE_AINIC
+#ifdef AINIC_SUPPORTED
     for(size_t i = 0; i < nic_data::nic_vec.size(); ++i)
     {
         auto& nic = nic_data::nic_vec.at(i);

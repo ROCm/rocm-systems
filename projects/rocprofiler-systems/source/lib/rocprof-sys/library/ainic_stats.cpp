@@ -44,7 +44,7 @@ ai_nic_stats_collector::is_nic_valid(const std::string& nic) const
 void
 ai_nic_stats_collector::update_stats()
 {
-#ifdef USE_AINIC
+#ifdef AINIC_SUPPORTED
     uint32_t                                soc_count{};
     std::unique_ptr<amdsmi_socket_handle[]> sockets;
     // Call amdsmi_get_socket_handles with second parameter (socket_handles)
@@ -103,13 +103,13 @@ ai_nic_stats_collector::update_stats()
             update_data_for_one_handle(processor_handles[idx], info);
         }
     }
-#endif  // USE_AINIC
+#endif  // AINIC_SUPPORTED
 }
 
 size_t
 ai_nic_stats_collector::get_nic_count()
 {
-#ifdef USE_AINIC
+#ifdef AINIC_SUPPORTED
     uint32_t                          soc_count = 10;
     std::vector<amdsmi_socket_handle> sockets(soc_count);
     // Get the sockets of the system
@@ -135,10 +135,10 @@ ai_nic_stats_collector::get_nic_count()
     return nic_count;
 #else
     return 0;
-#endif  // USE_AINIC
+#endif  // AINIC_SUPPORTED
 }
 
-#ifdef USE_AINIC
+#ifdef AINIC_SUPPORTED
 void
 ai_nic_stats_collector::update_data_for_one_handle(
     amdsmi_processor_handle processor_handle, amdsmi_nic_rdma_devices_info_t& info)
@@ -248,7 +248,7 @@ ai_nic_stats_collector::update_data_for_one_handle(
         }
     }
 }
-#endif  //  USE_AINIC
+#endif  //  AINIC_SUPPORTED
 
 void
 ai_nic_stats_collector::get_data(const std::string& nic, nic_stats& data) const

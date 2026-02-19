@@ -24,12 +24,15 @@
 
 #if ROCPROFSYS_USE_ROCM > 0
 #    include <amd_smi/amdsmi.h>
-#endif
 
-#if ROCPROFSYS_USE_AINIC > 0
-#    define USE_AINIC
+// AMD-SMI 26.2+ supports NIC APIs
+#    if ROCPROFSYS_USE_AINIC > 0
+#        if AMDSMI_LIB_VERSION_MAJOR > 26 ||                                             \
+            (AMDSMI_LIB_VERSION_MAJOR == 26 && AMDSMI_LIB_VERSION_MINOR > 2)
+#            define AINIC_SUPPORTED 1
+#        endif
+#    endif
 #endif
-
 namespace rocprofsys
 {
 namespace amd_smi

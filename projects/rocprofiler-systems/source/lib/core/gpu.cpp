@@ -103,7 +103,7 @@ amdsmi_init()
             // supported
             uint64_t init_flags = AMDSMI_INIT_AMD_GPUS;
 
-#    ifdef USE_AINIC
+#    ifdef AINIC_SUPPORTED
             init_flags |= AMDSMI_INIT_AMD_NICS;
 #    endif
 
@@ -306,13 +306,13 @@ get_processor_handles()
         {
             processor_type_t processor_type = {};
             ret = amdsmi_get_processor_type(processor, &processor_type);
-#    ifdef USE_AINIC
+#    ifdef AINIC_SUPPORTED
             if(processor_type == AMDSMI_PROCESSOR_TYPE_AMD_NIC)
             {
                 processors::ainic_list.push_back(processor);
                 continue;
             }
-#    endif  // USE_AINIC
+#    endif  // AINIC_SUPPORTED
             if(processor_type != AMDSMI_PROCESSOR_TYPE_AMD_GPU)
             {
                 throw std::runtime_error("Not AMD_GPU device type!");
