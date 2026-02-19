@@ -134,6 +134,12 @@ public:
     // Pre-generate a pool of NCCL unique IDs to avoid serialization bottleneck
     void preallocateUniqueIds(int poolSize);
 
+    // Start background thread to generate unique IDs asynchronously
+    void startAsyncIdGeneration(int totalNeeded);
+
+    // Stop background ID generation thread
+    void stopAsyncIdGeneration();
+
 private:
     GPUSchedulingConfig config_;
 
@@ -170,8 +176,13 @@ private:
     // Pool of pre-generated NCCL unique IDs (eliminates ncclGetUniqueId serialization)
     std::vector<std::vector<char>> uniqueIdPool_;
     size_t nextUniqueIdIndex_;
+    std::thread uniqueIdGeneratorThread_;
+    std::atomic<bool> stopIdGeneration_;
+    std::atomic<int> targetPoolSize_;
+    std::mutex poolMutex_;
 
     // Helper functions
+    void uniqueIdGeneratorThreadFunc();
     bool canAllocateGPUs(int numGPUs) const;
     std::vector<int> allocateGPUs(int numGPUs);
     void releaseGPUs(const std::vector<int>& gpus);

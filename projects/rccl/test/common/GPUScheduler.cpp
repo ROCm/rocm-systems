@@ -13,6 +13,8 @@
 #include <sys/wait.h>
 #include <cstring>
 #include <cstdlib>
+#include <thread>
+#include <atomic>
 #include <nccl.h>
 #include <gtest/gtest.h>
 
@@ -26,6 +28,8 @@ GPUScheduler::GPUScheduler(const GPUSchedulingConfig& config)
     , totalFailed_(0)
     , nextJobId_(0)
     , nextUniqueIdIndex_(0)
+    , stopIdGeneration_(false)
+    , targetPoolSize_(0)
 {
     // Initialize GPU tracking
     gpuInUse_.resize(config_.totalGPUs, false);
@@ -41,6 +45,9 @@ GPUScheduler::GPUScheduler(const GPUSchedulingConfig& config)
 
 GPUScheduler::~GPUScheduler()
 {
+    // Stop background ID generation if running
+    stopAsyncIdGeneration();
+
     // Wait for any remaining tests
     while (!runningTests_.empty())
     {
@@ -115,6 +122,19 @@ std::string GPUScheduler::getNextUniqueId()
 {
     std::lock_guard<std::mutex> lock(statsMutex_);
 
+    // Wait if pool is temporarily empty but generation is ongoing
+    if (uniqueIdGeneratorThread_.joinable())
+    {
+        while (nextUniqueIdIndex_ >= uniqueIdPool_.size() &&
+               uniqueIdPool_.size() < (size_t)targetPoolSize_.load())
+        {
+            // Temporarily release lock to allow generator thread to add IDs
+            statsMutex_.unlock();
+            usleep(10000);  // 10ms
+            statsMutex_.lock();
+        }
+    }
+
     if (nextUniqueIdIndex_ >= uniqueIdPool_.size())
     {
         ERROR("Unique ID pool exhausted! Allocated %zu but need more.\n", uniqueIdPool_.size());
@@ -134,6 +154,112 @@ std::string GPUScheduler::getNextUniqueId()
     }
 
     return hexStr;
+}
+
+void GPUScheduler::uniqueIdGeneratorThreadFunc()
+{
+    int generatedCount = 0;
+    auto startTime = std::chrono::steady_clock::now();
+
+    while (!stopIdGeneration_.load() && generatedCount < targetPoolSize_.load())
+    {
+        ncclUniqueId id;
+        ncclResult_t result = ncclGetUniqueId(&id);
+        if (result != ncclSuccess)
+        {
+            ERROR("Background thread: Failed to generate NCCL unique ID #%d: %d\n", generatedCount, result);
+            usleep(100000);  // Back off on error
+            continue;
+        }
+
+        // Store in pool (thread-safe)
+        {
+            std::lock_guard<std::mutex> lock(poolMutex_);
+            std::vector<char> idBytes(NCCL_UNIQUE_ID_BYTES);
+            memcpy(idBytes.data(), &id, NCCL_UNIQUE_ID_BYTES);
+            uniqueIdPool_.push_back(idBytes);
+        }
+
+        generatedCount++;
+
+        if (config_.verboseLogging && generatedCount % 4 == 0)
+        {
+            auto now = std::chrono::steady_clock::now();
+            auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - startTime);
+            INFO("Background ID generation: %d/%d complete (%.1f IDs/sec)\n",
+                 generatedCount, targetPoolSize_.load(),
+                 generatedCount * 1000.0 / std::max(1L, elapsed.count()));
+        }
+    }
+
+    if (config_.verboseLogging)
+    {
+        auto endTime = std::chrono::steady_clock::now();
+        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime);
+        INFO("Background ID generation complete: %d IDs in %ld ms\n", generatedCount, duration.count());
+    }
+}
+
+void GPUScheduler::startAsyncIdGeneration(int totalNeeded)
+{
+    targetPoolSize_.store(totalNeeded);
+    stopIdGeneration_.store(false);
+
+    // Generate initial batch synchronously (max_concurrent worth)
+    int initialBatch = std::min(totalNeeded, config_.maxConcurrentTests * 2);
+
+    if (config_.verboseLogging)
+    {
+        INFO("Generating initial batch of %d IDs synchronously...\n", initialBatch);
+    }
+
+    auto startTime = std::chrono::steady_clock::now();
+    for (int i = 0; i < initialBatch; ++i)
+    {
+        ncclUniqueId id;
+        ncclResult_t result = ncclGetUniqueId(&id);
+        if (result != ncclSuccess)
+        {
+            ERROR("Failed to generate initial NCCL unique ID #%d: %d\n", i, result);
+            continue;
+        }
+
+        std::vector<char> idBytes(NCCL_UNIQUE_ID_BYTES);
+        memcpy(idBytes.data(), &id, NCCL_UNIQUE_ID_BYTES);
+        uniqueIdPool_.push_back(idBytes);
+    }
+
+    auto endTime = std::chrono::steady_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime);
+
+    if (config_.verboseLogging)
+    {
+        INFO("Initial batch of %zu IDs generated in %ld ms\n", uniqueIdPool_.size(), duration.count());
+    }
+
+    // Start background thread to generate remaining IDs
+    if (initialBatch < totalNeeded)
+    {
+        // Update target for background thread (it only needs to generate the rest)
+        int remaining = totalNeeded - initialBatch;
+        targetPoolSize_.store(totalNeeded);  // Total target
+
+        if (config_.verboseLogging)
+        {
+            INFO("Starting background generation of remaining %d IDs...\n", remaining);
+        }
+
+        uniqueIdGeneratorThread_ = std::thread(&GPUScheduler::uniqueIdGeneratorThreadFunc, this);
+    }
+}
+
+void GPUScheduler::stopAsyncIdGeneration()
+{
+    if (uniqueIdGeneratorThread_.joinable())
+    {
+        stopIdGeneration_.store(true);
+        uniqueIdGeneratorThread_.join();
+    }
 }
 
 bool GPUScheduler::canAllocateGPUs(int numGPUs) const

@@ -261,8 +261,9 @@ void TestBed::RunSimpleSweepParallel(std::vector<ncclFunc_t>     const& funcType
             for (int r = 1; r <= ev.maxRanksPerGpu; ++r)
                 totalJobs++;
 
-    // Pre-generate pool of NCCL unique IDs to avoid serialization bottleneck
-    scheduler.preallocateUniqueIds(totalJobs);
+    // Start async generation of NCCL unique IDs
+    // Generates initial batch synchronously, rest in background while tests run
+    scheduler.startAsyncIdGeneration(totalJobs);
 
     // Create test jobs for each GPU count (the outer loop from original RunSimpleSweep)
     for (int numGpus : ev.GetNumGpusList())
