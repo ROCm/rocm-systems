@@ -77,6 +77,9 @@ void init(bool* status) {
     auto* device = new Device(&amd_device->context(), static_cast<unsigned int>(i));
     if (!device || !device->Create()) {
       *status = false;
+      if (device) {
+        device->release();
+      }
       return;
     }
     g_devices.push_back(device);

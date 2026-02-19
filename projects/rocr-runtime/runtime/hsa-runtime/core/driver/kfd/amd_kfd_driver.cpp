@@ -88,12 +88,10 @@ __forceinline HSA_QUEUE_PRIORITY HsaInternalToKfdPriority(
 
 namespace AMD {
 
-#if defined(__linux__)
 static_assert(
     (sizeof(core::ShareableHandle::handle) >= sizeof(HsaMemoryObjectHandle)) &&
         (alignof(core::ShareableHandle::handle) >= alignof(HsaMemoryObjectHandle)),
     "ShareableHandle cannot store a HsaMemoryObjectHandle");
-#endif
 
 namespace {
 
@@ -475,7 +473,6 @@ hsa_status_t KfdDriver::ExportDMABuf(void *mem, size_t size, int *dmabuf_fd,
 
 hsa_status_t KfdDriver::ImportDMABuf(int dmabuf_fd, core::Agent &agent,
                                      core::ShareableHandle &handle) {
-#if defined(__linux__)
   auto &gpu_agent = static_cast<GpuAgent &>(agent);
   HsaExternalHandleDesc desc;
   desc.device_handle = gpu_agent.libThunkDev();
@@ -489,16 +486,12 @@ hsa_status_t KfdDriver::ImportDMABuf(int dmabuf_fd, core::Agent &agent,
     return HSA_STATUS_ERROR;
   }
   handle.handle = reinterpret_cast<uint64_t>(res.buf_handle);
-#else
-  assert(!"Unimplemented!");
-#endif
   return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t KfdDriver::Map(core::ShareableHandle handle, void *mem,
                             size_t offset, size_t size,
                             hsa_access_permission_t perms) {
-#if defined(__linux__)
   HsaMemoryObjectHandle memhandle = reinterpret_cast<HsaMemoryObjectHandle>(handle.handle);
   HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemoryVaMap(memhandle, reinterpret_cast<HSAuint64>(offset),
                                      reinterpret_cast<HSAuint64>(size), reinterpret_cast<HSAuint64>(mem),
@@ -506,29 +499,21 @@ hsa_status_t KfdDriver::Map(core::ShareableHandle handle, void *mem,
   if (status != HSAKMT_STATUS_SUCCESS) {
     return HSA_STATUS_ERROR;
   }
-#else
-  assert(!"Unimplemented!");
-#endif
   return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t KfdDriver::Unmap(core::ShareableHandle handle, void *mem,
                               size_t offset, size_t size) {
-#if defined(__linux__)
   HsaMemoryObjectHandle memhandle = reinterpret_cast<HsaMemoryObjectHandle>(handle.handle);
   HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemoryVaUnmap(memhandle, (HSAuint64)offset, (HSAuint64)size,
                                      reinterpret_cast<HSAuint64>(mem)));
   if (status != HSAKMT_STATUS_SUCCESS) {
     return HSA_STATUS_ERROR;
   }
-#else
-  assert(!"Unimplemented!");
-#endif
   return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t KfdDriver::ReleaseShareableHandle(core::ShareableHandle &handle) {
-#if defined(__linux__)
   auto memhandle = reinterpret_cast<HsaMemoryObjectHandle>(handle.handle);
   HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemHandleFree(memhandle));
   if (status != HSAKMT_STATUS_SUCCESS) {
@@ -536,9 +521,6 @@ hsa_status_t KfdDriver::ReleaseShareableHandle(core::ShareableHandle &handle) {
   }
   handle = {};
   return HSA_STATUS_SUCCESS;
-#else
-  assert(!"Unimplemented!");
-#endif
 }
 
 hsa_status_t KfdDriver::SPMAcquire(uint32_t preferred_node_id) const {

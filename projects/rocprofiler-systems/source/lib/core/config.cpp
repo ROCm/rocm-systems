@@ -381,7 +381,7 @@ configure_settings(bool _init)
                               "parallelism");
 
     ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_USE_UCX",
-                              "Enable support for UCX functions", true, "ucx", "backend",
+                              "Enable support for UCX functions", false, "ucx", "backend",
                               "parallelism");
 
     ROCPROFSYS_CONFIG_SETTING(

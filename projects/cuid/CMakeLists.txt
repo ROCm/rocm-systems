@@ -19,10 +19,33 @@
 # THE SOFTWARE.
 
 cmake_minimum_required(VERSION 3.10)
-project(cuid)
+project(amdcuid)
+
+# Set platform-appropriate default install prefix
+if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+    if(WIN32)
+        set(CMAKE_INSTALL_PREFIX "C:/Program Files/AMD/AMDCUID" CACHE PATH "Installation prefix" FORCE)
+    else()  # Linux/Unix
+        set(CMAKE_INSTALL_PREFIX "/opt/amdcuid" CACHE PATH "Installation prefix" FORCE)
+    endif()
+endif()
+
+include(GNUInstallDirs)
+
+if(WIN32)
+    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+    set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)  # DLLs
+    set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)  # Import libs
+endif()
+
+# Platform-specific dependencies; If we decide to use the default Windows crypto API, we can remove the OpenSSL dependency on Windows
+if(WIN32)
+    # Windows may need different OpenSSL path
+    set(OPENSSL_ROOT_DIR "C:/OpenSSL-Win64" CACHE PATH "OpenSSL location")
+endif()
 
 add_subdirectory(lib)
-# add_subdirectory(cli)
+add_subdirectory(cli)
 add_subdirectory(daemon)
-# add_subdirectory(example)
+add_subdirectory(example)
 add_subdirectory(tests)

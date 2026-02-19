@@ -126,7 +126,6 @@ DevicePtr discover_device_by_path(const char* dev_path, amdcuid_device_type_t de
     int fd = open(dev_path, O_RDONLY);
     if (fd < 0) {
         // unable to open device path
-        close(fd);
         return nullptr;
     }
 
@@ -286,7 +285,6 @@ amdcuid_status_t amdcuid_get_handle_by_bdf(const char* bdf, amdcuid_device_type_
         || device_path.find("net") == std::string::npos) {
         int fd = open(device_path.c_str(), O_RDONLY);
         if (fd < 0) {
-            close(fd);
             return AMDCUID_STATUS_DEVICE_NOT_FOUND;
         }
         real_dev_path = CuidUtilities::real_dev_path_from_fd(fd);
@@ -375,17 +373,17 @@ amdcuid_status_t amdcuid_query_device_property(amdcuid_id_t handle, amdcuid_quer
                 if (geteuid() != 0) {
                     return AMDCUID_STATUS_PERMISSION_DENIED;
                 }
-                if (*length < sizeof(amdcuid_primary_id)) {
+                if (*length < sizeof(amdcuid_id_t)) {
                     return AMDCUID_STATUS_INSUFFICIENT_SIZE;
                 }
                 amdcuid_primary_id id = {};
                 status = device->get_primary_cuid(id);
-                *(amdcuid_primary_id *)data = id; // would this require exposing the struct definition in the public header?
-                *length = sizeof(amdcuid_primary_id);
+                *(amdcuid_id_t *)data = id.UUIDv8_representation;
+                *length = sizeof(amdcuid_id_t);
             }
             break;
         case AMDCUID_QUERY_DERIVED_CUID: {
-                if (*length < sizeof(amdcuid_derived_id)) {
+                if (*length < sizeof(amdcuid_id_t)) {
                     return AMDCUID_STATUS_INSUFFICIENT_SIZE;
                 }
                 amdcuid_derived_id sec_id = {};
@@ -396,8 +394,8 @@ amdcuid_status_t amdcuid_query_device_property(amdcuid_id_t handle, amdcuid_quer
                     // if not elevated, only get existing derived cuid
                     status = device->get_derived_cuid(sec_id);
                 }
-                *(amdcuid_derived_id *)data = sec_id;
-                *length = sizeof(amdcuid_derived_id);
+                *(amdcuid_id_t *)data = sec_id.UUIDv8_representation;
+                *length = sizeof(amdcuid_id_t);
             }
             break;
         case AMDCUID_QUERY_HARDWARE_FINGERPRINT: {
