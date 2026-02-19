@@ -195,8 +195,7 @@ producer_loop(
         auto wptr = iterate_data(parameters.control_packet->GetHandle());
         buffer_packet.reset_current_buffer();
         ROCP_INFO << "Iterate data with size: " << wptr.size;
-        if(worker_flag.load() != WORKER_FLAG_DESTRUCTOR)
-            send_to_consumer(wptr.data, wptr.size, ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_END);
+        send_to_consumer(wptr.data, wptr.size, ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_END);
     };
 
     while(worker_flag.load() == WORKER_FLAG_RUNNING)
