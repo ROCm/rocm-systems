@@ -50,7 +50,6 @@ if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU})
 endif()
 
 rocprofiler_systems_add_test(
-    SKIP_RUNTIME
     NAME roctx-api
     TARGET roctx
     GPU ON
@@ -163,14 +162,31 @@ rocprofiler_systems_add_validation_test(
 if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU} AND TEST roctx-api-sampling)
     set_property(TEST roctx-api-sampling APPEND PROPERTY LABELS rocpd)
 
+    # Select AMD SMI rules based on GPU type detected at CMake configure time
+    # Scenarios:
+    #   1. APU only system: use relaxed rules (amd-smi-rules-apu.json)
+    #   2. Integrated GPU (same as APU): use relaxed rules
+    #   3. Discrete GPU only: use strict rules (amd-smi-rules.json)
+    # Note: Systems with mixed GPUs (discrete + APU) will use relaxed rules
+    #       since APU can cause AMD SMI errors even when discrete GPU is used
+    if(_HAS_APU)
+        set(_AMD_SMI_RULES
+            "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/roctx/amd-smi-rules-apu.json"
+        )
+    else()
+        set(_AMD_SMI_RULES
+            "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/roctx/amd-smi-rules.json"
+        )
+    endif()
+
     rocprofiler_systems_add_validation_test(
         NAME roctx-api-sampling
         ROCPD_FILE "rocpd.db"
         ARGS --validation-rules
             "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/default-rules.json"
-            "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/roctx/amd-smi-rules.json"
             "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/roctx/validation-rules.json"
             "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/roctx/sdk-metrics-rules.json"
+            "${_AMD_SMI_RULES}"
         LABELS "roctx;rocpd"
     )
 endif()

@@ -323,6 +323,38 @@ if(ROCPROFSYS_USE_ROCM AND (NOT DEFINED ROCPROFSYS_CI_GPU OR ROCPROFSYS_CI_GPU))
     endif()
 endif()
 
+# ------------------------------------------------------------------------------#
+# APU Detection: Detect if system has any APU (integrated GPU)
+# APUs have limited AMD SMI support and can cause sampling errors when present
+# Known APU architectures: gfx90c (Cezanne), gfx1151 (Strix Point), etc.
+# Systems with APUs (even mixed with discrete GPUs) need relaxed AMD SMI rules
+# ------------------------------------------------------------------------------#
+set(_HAS_APU OFF)
+if(_VALID_GPU AND ROCPROFSYS_AMD_SMI_EXE)
+    execute_process(
+        COMMAND ${ROCPROFSYS_AMD_SMI_EXE} static --asic
+        OUTPUT_VARIABLE _ASIC_OUTPUT
+        ERROR_QUIET
+        RESULT_VARIABLE _ASIC_RET
+    )
+    if(_ASIC_RET EQUAL 0)
+        # Check for APU indicators in the output
+        # APU architectures: gfx90c, gfx1151, and "Radeon Graphics" without Pro/RX
+        if(_ASIC_OUTPUT MATCHES "gfx90c|gfx1151|gfx1036|gfx1103")
+            set(_HAS_APU ON)
+        endif()
+        # Also check for generic "Radeon Graphics" which indicates integrated GPU
+        if(_ASIC_OUTPUT MATCHES "MARKET_NAME: AMD Radeon Graphics[^a-zA-Z]")
+            set(_HAS_APU ON)
+        endif()
+        if(_HAS_APU)
+            rocprofiler_systems_message(
+                STATUS "APU detected in system. Using relaxed AMD SMI validation rules."
+            )
+        endif()
+    endif()
+endif()
+
 set(LULESH_USE_GPU ${LULESH_USE_ROCM})
 if(LULESH_USE_CUDA)
     set(LULESH_USE_GPU ON)
