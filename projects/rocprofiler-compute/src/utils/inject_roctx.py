@@ -56,10 +56,7 @@ console_log("torch trace", f"Python version: {python_version}")
 try:
     from roctx import rangePop, rangePush
 
-    if hasattr(rangePush, "__code__") and hasattr(rangePush.__code__, "co_filename"):
-        roctx_path = Path(rangePush.__code__.co_filename).parent
-    else:
-        roctx_path = "<unknown>"
+    roctx_path = Path(rangePush.__code__.co_filename).parent
 
     console_log(
         "torch trace",
@@ -530,14 +527,10 @@ def instrument_all_torch_ops():
                         marker_stack = get_marker_stack()
                         context_stack = get_context_stack()
                         marker_stack.append(marker_name)
-                        # Filter empty strings from context_stack; always add context
-                        # suffix so downstream parsing (expecting ":" and Context_Id) works.
                         filtered_context = [c for c in context_stack if c]
-                        if filtered_context:
-                            context_suffix = ":" + "/".join(filtered_context)
-                        else:
-                            context_suffix = ":#0@unknown:0"
-                        full_marker_name = "/".join(marker_stack) + context_suffix
+                        full_marker_name = "/".join(marker_stack) + (
+                            ":" + "/".join(filtered_context) if filtered_context else ""
+                        )
 
                         rangePush(full_marker_name)
                         try:

@@ -314,200 +314,80 @@ def show_torch_operator_table(operator_name: str, df: pd.DataFrame) -> None:
     # Reset index for row numbering
     display_df = display_df.reset_index(drop=True)
 
-    # Use tabulate for consistent formatting (single max width for all columns)
+    # Use tabulate for consistent formatting
     table_str = tabulate(
         display_df,
         headers=display_df.columns,
         tablefmt="fancy_grid",
         showindex=True,
         floatfmt=".2f",
-        maxcolwidths=35,
+        maxcolwidths=list(column_widths.values()),
     )
 
     console_log(table_str)
 
 
-def _compute_operator_prefix_stats(df: pd.DataFrame) -> dict[str, tuple[float, int]]:
+def show_torch_operator_hierarchy(operator_name: str, df: pd.DataFrame) -> None:
     """
-    Compute total duration (ms) and invocation count per operator path prefix.
-
-    Deduplication uses (Operator_Name, Context_Id, Start_Timestamp_function) when
-    Context_Id is present (one invocation per call site and start time); otherwise
-    falls back to (Operator_Name, Start_Timestamp_function, End_Timestamp_function)
-    so one operator invocation is counted once even when it launched multiple kernels.
-
-    Hierarchy semantics: the trace only has the full path per row (e.g. A/B/C). We do
-    not have separate timing per level; we attribute each invocation's duration to every
-    prefix along its path. So stats at each node are inclusive: total_duration is the
-    sum of (that invocation's duration) for all invocations whose path passes through
-    that node. Count at a node is the number of such invocations.
-    Returns dict: prefix -> (total_duration_ms, count).
-    """
-    has_ts = (
-        "Start_Timestamp_function" in df.columns
-        and "End_Timestamp_function" in df.columns
-    )
-    if not has_ts:
-        return {}
-
-    # Columns to identify one invocation and get duration
-    use_context = "Context_Id" in df.columns and df["Context_Id"].notna().any()
-    if use_context:
-        invocations = (
-            df[
-                [
-                    "Operator_Name",
-                    "Context_Id",
-                    "Start_Timestamp_function",
-                    "End_Timestamp_function",
-                ]
-            ]
-            .drop_duplicates(
-                subset=["Operator_Name", "Context_Id", "Start_Timestamp_function"]
-            )
-        )
-    else:
-        invocations = df[
-            ["Operator_Name", "Start_Timestamp_function", "End_Timestamp_function"]
-        ].drop_duplicates()
-
-    prefix_stats: dict[str, tuple[float, int]] = {}
-    ns_to_ms = 1.0 / 1_000_000.0
-    for _, row in invocations.iterrows():
-        op = str(row["Operator_Name"])
-        duration_ns = float(row["End_Timestamp_function"]) - float(
-            row["Start_Timestamp_function"]
-        )
-        duration_ms = duration_ns * ns_to_ms
-        parts = op.split("/")
-        for i in range(1, len(parts) + 1):
-            prefix = "/".join(parts[:i])
-            if prefix not in prefix_stats:
-                prefix_stats[prefix] = (0.0, 0)
-            prev_dur, prev_cnt = prefix_stats[prefix]
-            prefix_stats[prefix] = (prev_dur + duration_ms, prev_cnt + 1)
-    return prefix_stats
-
-
-def show_torch_operator_hierarchy(
-    operator_name: str, df: pd.DataFrame, index: int | None = None
-) -> None:
-    """
-    Display the PyTorch operator listing with hierarchy, numbering, and durations.
-
-    Shows Operator N: 'name', then for each hierarchy path: full_name
-    (total_duration, count), the hierarchy tree, and kernel launches with
-    optional kernel durations (total_duration ms) when timestamps are present.
+    Display the hierarchy for each unique operator name in the DataFrame,
+    showing marker hierarchy on the left and kernel launches on the right.
     """
     print(f"\n{'-' * 80}")
-    if index is not None:
-        print(f"Operator {index}:  '{operator_name}'")
-    else:
-        print(f"Operator:  '{operator_name}'")
+    print(f"Torch Operator Hierarchy for: {operator_name}")
     print("-" * 80)
 
-    # Indent for content under each hierarchy so it's clear it belongs to that hierarchy
-    hierarchy_indent = "       "
-
     # Expect the DataFrame to have columns "Operator_Name", "Kernel_Name",
-    # "Context_Id", etc. Optional: Start_Timestamp_function, End_Timestamp_function,
-    # Start_Timestamp_kernel, End_Timestamp_kernel for durations.
-
-    prefix_stats = _compute_operator_prefix_stats(df)
-    has_duration = bool(prefix_stats)
+    # "Context_Id", etc.
 
     unique_op_hierarchies = df["Operator_Name"].unique()
-    left_col_width = 50
-    inner_width = left_col_width - len(hierarchy_indent)
     for i, op in enumerate(unique_op_hierarchies, start=1):
-        stats_str = ""
-        if has_duration and op in prefix_stats:
-            total_ms, count = prefix_stats[op]
-            stats_str = f" (total_duration: {total_ms:.2f} ms, count: {count})"
-        print(f"{hierarchy_indent}Hierarchy {i}:  {op}{stats_str}")
-        print(
-            f"{hierarchy_indent}\n{hierarchy_indent}"
-            + "Operator Hierarchy".ljust(inner_width)
-            + (
-            "Kernels Launched" if not has_duration else "Kernels Launched (duration)"
-            )
-        )
-        print(f"{hierarchy_indent}{'-' * (80 - len(hierarchy_indent))}")
+        print(f"  {i:3d}. {op}")
+        print("\nOperator Hierarchy".ljust(50) + "Kernels Launched")
+        print("-" * 80)
         parts = str(op).split("/")
 
         hierarchy_lines = []
-        for level, part in enumerate(parts):
-            if level == 0:
-                line = f"{part}"
+        # Display the hierarchy tree
+        for i, part in enumerate(parts):
+            if i == 0:
+                # Top level - just the module name
+                hierarchy_lines.append(f"{part}")
             else:
-                indent = "  " * level
-                prefix_char = "└─ "
-                line = f"{indent}{prefix_char}{part}"
-            hierarchy_lines.append(line)
+                indent = "  " * i
+                prefix = "└─ "
+                hierarchy_lines.append(f"{indent}{prefix}{part}")
 
         # Get kernels for this operator hierarchy
         kernels_info = []
         op_data = df[df["Operator_Name"] == op]
-        has_kernel_ts = (
-            "Start_Timestamp_kernel" in df.columns
-            and "End_Timestamp_kernel" in df.columns
-        )
-        kernel_counts: dict[str, int] = {}
-        kernel_duration_ns: dict[str, float] = {}
-        kernel_context: dict[str, dict[str, dict[str, int]]] = {}
+        # Group by extracted kernel name
+        kernel_counts = {}
+        kernel_context = {}
         for _, row in op_data.iterrows():
             full_kernel_name = row["Kernel_Name"]
             kernel_name = extract_kernel_name(full_kernel_name)
 
             if kernel_name not in kernel_counts:
                 kernel_counts[kernel_name] = 0
-                kernel_duration_ns[kernel_name] = 0.0
                 kernel_context[kernel_name] = {
                     "full_name": full_kernel_name,
                     "contexts": {},
                 }
             kernel_counts[kernel_name] += 1
-            if has_kernel_ts:
-                kernel_duration_ns[kernel_name] += float(
-                    row["End_Timestamp_kernel"]
-                ) - float(row["Start_Timestamp_kernel"])
-            context_id = row.get("Context_Id")
-            if pd.isna(context_id) or not str(context_id).strip():
-                continue
-            topmost_location = str(context_id).split("/")[0]
-            if "@" in topmost_location and ":" in topmost_location:
-                _, location = topmost_location.split("@", 1)
-                if ":" in location:
-                    file_name, line_num = location.split(":", 1)
-                    if file_name not in kernel_context[kernel_name]["contexts"]:
-                        kernel_context[kernel_name]["contexts"][file_name] = {
-                            line_num: 1
-                        }
-                    else:
-                        if (
-                            line_num
-                            not in kernel_context[kernel_name]["contexts"][
-                                file_name
-                            ]
-                        ):
-                            kernel_context[kernel_name]["contexts"][file_name][
-                                line_num
-                            ] = 1
-                        else:
-                            kernel_context[kernel_name]["contexts"][file_name][
-                                line_num
-                            ] += 1
-
-        ns_to_ms = 1.0 / 1_000_000.0
-        for kernel_name, num_launches in kernel_counts.items():
-            if has_kernel_ts and kernel_name in kernel_duration_ns:
-                total_ms = kernel_duration_ns[kernel_name] * ns_to_ms
-                kernel_info = (
-                    f"|--> {kernel_name} ({num_launches} launches, "
-                    f"total_duration: {total_ms:.2f} ms)\n"
-                )
+            topmost_location = str(row["Context_Id"]).split("/")[0]
+            _, location = topmost_location.split("@")
+            file_name, line_num = location.split(":")
+            if file_name not in kernel_context[kernel_name]["contexts"]:
+                kernel_context[kernel_name]["contexts"][file_name] = {line_num: 1}
             else:
-                kernel_info = f"|--> {kernel_name} ({num_launches} launches)\n"
+                if line_num not in kernel_context[kernel_name]["contexts"][file_name]:
+                    kernel_context[kernel_name]["contexts"][file_name][line_num] = 1
+                else:
+                    kernel_context[kernel_name]["contexts"][file_name][line_num] += 1
+
+        # Format output for each unique kernel
+        for kernel_name, num_launches in kernel_counts.items():
+            kernel_info = f"|--> {kernel_name} ({num_launches} launches)\n"
             kernels_info.append(kernel_info)
             for file_name, line_count in kernel_context[kernel_name][
                 "contexts"
@@ -517,15 +397,15 @@ def show_torch_operator_hierarchy(
                         f"      {file_name}:{line_num} ({count} launches)\n"
                     )
 
-        # Print hierarchy lines (left column), indented under this hierarchy
+        # Print hierarchy lines (left column)
         for line in hierarchy_lines:
-            print(f"{hierarchy_indent}{line.ljust(inner_width)}|")
+            print(f"{line.ljust(40)}|")
 
-        # Print kernel lines aligned to the deepest level, indented under this hierarchy
+        # Print kernel lines aligned to the deepest level
         deepest_indent = "  " * len(parts)
         for kernel_line in kernels_info:
             left_padding = deepest_indent + "    "
-            print(f"{hierarchy_indent}{left_padding.ljust(inner_width)}{kernel_line}")
+            print(f"{left_padding.ljust(40)}{kernel_line}")
 
         print()
 
