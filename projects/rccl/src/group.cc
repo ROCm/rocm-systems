@@ -723,17 +723,6 @@ ncclResult_t ncclGroupEndInternal(ncclSimInfo_t* simInfo) {
     }
   }
 
-  NCCLCHECKGOTO(ncclCalloc(&groupJob, 1), ret, fail);
-  ncclIntruQueueConstruct(&groupJob->asyncJobs);
-  groupJob->groupRefCount = 0;
-  groupJob->nonBlockingInit = false;
-  memcpy(groupJob->groupCommHead, ncclGroupCommHead, sizeof(ncclGroupCommHead));
-  groupJob->groupCommPreconnectHead = ncclGroupCommPreconnectHead;
-  groupJob->groupError = ncclSuccess;
-  groupJob->abortFlag = false;
-  groupJob->joined = false;
-  ncclIntruQueueTransfer(&groupJob->asyncJobs, &ncclAsyncJobs);
-
   /* Only allocate groupJob if there is work to do */
   if (hasCommHead || !ncclIntruQueueEmpty(&ncclAsyncJobs) || ncclGroupCommPreconnectHead != nullptr) {
     NCCLCHECKGOTO(ncclCalloc(&groupJob, 1), ret, fail);
