@@ -27,7 +27,7 @@ The rocpd AI Analysis API provides programmatic access to AI-powered GPU perform
 
 - ✅ **Local-first analysis** - Works offline, no API calls required
 - ✅ **Optional LLM enhancement** - Natural language explanations via Anthropic Claude or OpenAI GPT
-- ✅ **Multiple output formats** - Python objects, JSON, text, markdown
+- ✅ **Multiple output formats** - Python objects, JSON, text, markdown, webview (interactive HTML)
 - ✅ **Privacy-focused** - Data sanitization for LLM mode
 - ✅ **User-modifiable** - Customize LLM behavior via reference guide
 - ✅ **Type-safe** - Dataclass-based API with type hints
@@ -110,6 +110,24 @@ json_output = analyze_database_to_json(
 
 # JSON string is also returned
 print(json_output)
+```
+
+### Webview (Interactive HTML)
+
+```python
+from rocpd.ai_analysis import analyze_database
+from pathlib import Path
+
+result = analyze_database(Path("output.db"))
+Path("analysis.html").write_text(result.to_webview())
+# Open analysis.html in any browser - no server required
+```
+
+Or via CLI (file extension applied automatically):
+
+```bash
+rocpd analyze -i output.db --format webview -d ./output -o analysis
+# Produces: ./output/analysis.html
 ```
 
 ---
@@ -322,6 +340,7 @@ class AnalysisResult:
 - `to_json(indent: int = 2) -> str`: Serialize to JSON
 - `to_text() -> str`: Generate plain text report
 - `to_markdown() -> str`: Generate markdown report
+- `to_webview() -> str`: Generate self-contained interactive HTML report
 
 **Example:**
 
@@ -397,7 +416,7 @@ print(result.summary.overall_assessment)
 
 ### JSON
 
-Machine-readable structured data.
+Machine-readable structured data. Output file extension: `.json`.
 
 ```python
 from rocpd.ai_analysis import analyze_database, OutputFormat
@@ -449,7 +468,7 @@ json_str = result.to_json(indent=2)
 
 ### Text
 
-Human-readable plain text report.
+Human-readable plain text report. Output file extension: `.txt`.
 
 ```python
 result = analyze_database(Path("output.db"))
@@ -459,13 +478,43 @@ print(text_report)
 
 ### Markdown
 
-Markdown-formatted report with syntax highlighting.
+Markdown-formatted report with syntax highlighting. Output file extension: `.md`.
 
 ```python
 result = analyze_database(Path("output.db"))
 markdown_report = result.to_markdown()
 Path("report.md").write_text(markdown_report)
 ```
+
+### Webview (Interactive HTML)
+
+Self-contained single-file HTML report with AMD dark theme, sortable tables, interactive
+recommendation cards, and SVG performance gauges. No external dependencies — open directly
+in a browser. Output file extension: `.html`.
+
+```python
+result = analyze_database(Path("output.db"))
+html_report = result.to_webview()
+Path("report.html").write_text(html_report)
+```
+
+**CLI usage:**
+
+```bash
+# Produces output/analysis.html automatically
+rocpd analyze -i output.db --format webview -d ./output -o analysis
+```
+
+**Features of the HTML report:**
+
+- **Overview panel**: Assessment text, bottleneck badge, confidence, key findings
+- **Execution breakdown**: Stacked and individual progress bars (kernel/memcpy/API/idle)
+- **Recommendations**: Collapsible cards color-coded by priority (HIGH auto-expanded);
+  one-click copy of profiling commands
+- **Hotspot table**: Sortable by any column; rows with >20% of total time highlighted
+- **Memory transfers**: Per-direction table (H2D, D2H, D2D, P2P)
+- **Hardware counters**: GPU utilization and wave occupancy gauges (Tier 2)
+- **Embedded data**: Full JSON payload included for programmatic inspection
 
 ---
 

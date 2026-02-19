@@ -73,6 +73,19 @@ schema_path = pkg_resources.files("rocpd.ai_analysis") / "docs" / "analysis-outp
 
 ---
 
+### v0.1.1 — 2026-02-19
+
+**No schema changes.** Description and tooling improvements only.
+
+- Added `webview` output format (`--format webview`) producing a self-contained
+  interactive HTML report. The underlying JSON data structure is unchanged; the HTML
+  report embeds the same payload as `--format json`.
+- CLI `--format` now automatically appends the correct file extension to the output
+  file name: `.json`, `.md`, `.html`, or `.txt` depending on the selected format.
+  No schema-level change.
+
+---
+
 ### v0.1.0 — 2026-02-18
 
 **Initial beta release.**

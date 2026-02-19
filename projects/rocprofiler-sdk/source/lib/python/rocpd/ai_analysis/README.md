@@ -12,7 +12,7 @@ This module provides both CLI and Python API access to AI-powered analysis of GP
 - **Optional LLM enhancement** - Natural language explanations via Anthropic Claude or OpenAI GPT
 - **User-modifiable "fence"** - Customize LLM behavior by editing reference guide
 - **Privacy-focused** - Data sanitization for LLM mode (kernel names, grid sizes redacted)
-- **Multiple output formats** - Python objects, JSON, text, markdown
+- **Multiple output formats** - Python objects, JSON, text, markdown, webview (interactive HTML)
 - **Type-safe API** - Dataclass-based with type hints
 
 ## Quick Start
@@ -30,8 +30,14 @@ rocpd analyze -i output.db --llm anthropic
 # With custom prompt
 rocpd analyze -i output.db --llm anthropic --prompt "Why is my matmul kernel slow?"
 
-# JSON output
-rocpd analyze -i output.db --format json -o analysis.json
+# JSON output (produces analysis.json)
+rocpd analyze -i output.db --format json -d ./output -o analysis
+
+# Markdown output (produces analysis.md)
+rocpd analyze -i output.db --format markdown -d ./output -o analysis
+
+# Interactive HTML webview (produces analysis.html)
+rocpd analyze -i output.db --format webview -d ./output -o analysis
 ```
 
 ### Python API Usage
@@ -137,7 +143,7 @@ rocpd analyze -i output.db --llm anthropic
 │    - Generate natural language output   │
 └─────────────────────────────────────────┘
     ↓
-Analysis results (text/JSON/markdown)
+Analysis results (text/JSON/markdown/webview)
 ```
 
 ## Analysis Tiers
@@ -209,6 +215,7 @@ class AnalysisResult:
     def to_json(indent: int = 2) -> str
     def to_text() -> str
     def to_markdown() -> str
+    def to_webview() -> str  # Self-contained interactive HTML report
 ```
 
 ### Exceptions
@@ -327,7 +334,25 @@ data = json.loads(json_output)
 print(f"Analysis tier: {data['profiling_info']['analysis_tier']}")
 ```
 
-### Example 4: Optiq Integration
+### Example 4: Interactive HTML Webview
+
+```bash
+# Generate a self-contained HTML report for browser viewing
+# Output file extension is applied automatically (.html for webview)
+rocpd analyze -i output.db --format webview -d ./reports -o my_trace
+# Produces: ./reports/my_trace.html
+```
+
+```python
+from rocpd.ai_analysis import analyze_database
+from pathlib import Path
+
+result = analyze_database(Path("output.db"))
+html_report = result.to_webview()
+Path("analysis.html").write_text(html_report)
+```
+
+### Example 5: roc-optiq Integration
 
 ```python
 from rocpd.ai_analysis import analyze_database
