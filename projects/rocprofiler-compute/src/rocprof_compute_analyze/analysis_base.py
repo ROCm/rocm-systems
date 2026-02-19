@@ -175,10 +175,20 @@ class OmniAnalyze_Base:
         process_torch_trace_output(workload_path)
         torch_trace_dir = Path(workload_path) / "torch_trace"
         all_files = list(torch_trace_dir.glob("*.csv"))
+        # Load each CSV and compute total duration for ordering (number by duration, highest first)
+        file_df_duration: list[tuple[Path, pd.DataFrame, float]] = []
+        for f in all_files:
+            try:
+                df = pd.read_csv(f)
+                total_ms = tty._total_operator_duration_ms(df)
+                file_df_duration.append((f, df, total_ms))
+            except Exception as e:
+                console_error(f"Failed to read operator from {f.name}: {e}")
+        file_df_duration.sort(key=lambda x: x[2], reverse=True)
         # Use default kernel verbosity = 1
         kernel_verbose = getattr(self.__args, "kernel_verbose", 1)
         kernel_top_path = Path(workload_path) / "pmc_kernel_top.csv"
-        kernel_name_to_id: dict[str, int] | None = None
+        kernel_name_to_id: Optional[dict[str, int]] = None
         if kernel_top_path.is_file():
             try:
                 kernel_top_df = pd.read_csv(kernel_top_path)
@@ -199,20 +209,15 @@ class OmniAnalyze_Base:
             print("Kernel (id N) can be used with -k for filtering.")
         print(f"{'=' * 80}\n")
         operator_count = 0
-        for idx, f in enumerate(all_files, start=1):
-            try:
-                df = pd.read_csv(f)
-                tty.show_torch_operator_hierarchy(
-                    str(f.name).replace(".csv", ""),
-                    df,
-                    index=idx,
-                    kernel_name_to_id=kernel_name_to_id,
-                    kernel_verbose=kernel_verbose,
-                )
-                operator_count += 1
-            except Exception as e:
-                console_log(f"Failed to read operator from {f.name}: {e}")
-                sys.exit(1)
+        for idx, (f, df, _total_ms) in enumerate(file_df_duration, start=1):
+            tty.show_torch_operator_hierarchy(
+                str(f.name).replace(".csv", ""),
+                df,
+                index=idx,
+                kernel_name_to_id=kernel_name_to_id,
+                kernel_verbose=kernel_verbose,
+            )
+            operator_count += 1
 
         if not operator_count:
             console_warning(
