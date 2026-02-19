@@ -432,7 +432,7 @@ For attachment profiling of running processes:
         help=(
             "Specify Performance Monitoring Counters to collect (space-separated). "
             "For single-pass: --pmc COUNTER1 COUNTER2 ... "
-            "For multi-pass: --pmc \"GROUP1_C1 GROUP1_C2\" --pmc \"GROUP2_C1 GROUP2_C2\" ... "
+            'For multi-pass: --pmc "GROUP1_C1 GROUP1_C2" --pmc "GROUP2_C1 GROUP2_C2" ... '
             "Note: Use multiple --pmc flags for multi-pass collection when counters "
             "cannot be collected simultaneously due to hardware limitations"
         ),
@@ -1569,23 +1569,6 @@ def run(app_args, args, **kwargs):
     if args.pmc and args.pmc_groups:
         fatal_error("Cannot specify both --pmc and (input file) pmc_groups")
 
-    # Validate CLI multi-pass usage
-    if args.pmc and len(args.pmc) > 1:
-        # Check for empty groups
-        for idx, group in enumerate(args.pmc):
-            if not group or (isinstance(group, list) and len(group) == 0):
-                fatal_error(
-                    f"Empty counter group in --pmc flag {idx + 1}. "
-                    "Each --pmc must specify at least one counter."
-                )
-
-    # Warn if interval specified in single-pass
-    if args.pmc and len(args.pmc) == 1 and hasattr(args, "pmc_group_interval") and args.pmc_group_interval:
-        warning(
-            "--pmc-group-interval specified but only one --pmc group provided. "
-            "Interval setting will be ignored in single-pass mode."
-        )
-
     if args.pmc:
         update_env("ROCPROF_COUNTER_COLLECTION", True, overwrite=True)
 
@@ -1612,9 +1595,7 @@ def run(app_args, args, **kwargs):
             # Single-pass: set ROCPROF_COUNTERS (existing behavior)
             counters = args.pmc[0] if isinstance(args.pmc[0], list) else args.pmc
             counter_str = " ".join(counters) if isinstance(counters, list) else counters
-            update_env(
-                "ROCPROF_COUNTERS", f"pmc: {counter_str}", overwrite=True
-            )
+            update_env("ROCPROF_COUNTERS", f"pmc: {counter_str}", overwrite=True)
 
     if args.pmc_groups:
         group_env = ""
@@ -1829,17 +1810,29 @@ def main(argv=None):
 
     # Detect CLI multi-pass mode (multiple --pmc flags)
     cli_multipass = (
-        hasattr(cmd_args, "pmc") and
-        cmd_args.pmc is not None and
-        len(cmd_args.pmc) > 1
+        hasattr(cmd_args, "pmc") and cmd_args.pmc is not None and len(cmd_args.pmc) > 1
     )
+
+    # Validate CLI multi-pass usage
+    if cli_multipass:
+        # Check for empty groups
+        for idx, group in enumerate(cmd_args.pmc):
+            if not group or (isinstance(group, list) and len(group) == 0):
+                fatal_error(
+                    f"Empty counter group in --pmc flag {idx + 1}. "
+                    "Each --pmc must specify at least one counter."
+                )
 
     # Validate incompatible options
     if cli_multipass and cmd_args.pid:
-        fatal_error("Multi-pass counter collection (multiple --pmc flags) is not compatible with attach mode (--pid)")
+        fatal_error(
+            "Multi-pass counter collection (multiple --pmc flags) is not compatible with attach mode (--pid)"
+        )
 
     if cli_multipass and cmd_args.collection_period:
-        fatal_error("Multi-pass counter collection (multiple --pmc flags) is not compatible with --collection-period")
+        fatal_error(
+            "Multi-pass counter collection (multiple --pmc flags) is not compatible with --collection-period"
+        )
 
     if len(inp_args) == 1 and not cli_multipass:
         args = get_args(cmd_args, inp_args[0])
