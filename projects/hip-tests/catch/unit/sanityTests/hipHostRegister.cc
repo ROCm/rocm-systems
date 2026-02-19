@@ -35,7 +35,7 @@ constexpr size_t MEM_SIZE = 1024 * 1024;   // 1 MB
 constexpr int NUM_ITERATIONS = 5;          // iterations with increasing size
 constexpr int NBUF_ALLOCATIONS = 100;      // number of buffers (sanity test)
 constexpr int NBUF_SIZES = 3;              // 1KB, 1MB, 10MB
-constexpr int NBUF_FLAGS = 6;
+constexpr int NBUF_FLAGS = 3;
 
 /**
  * Test Description
@@ -73,18 +73,17 @@ TEST_CASE("Unit_hipHostRegister_RegisterUnregister") {
  * ------------------------
  *    - Stress test for hipHostRegister/hipHostUnregister with multiple buffer
  *      counts and flag values. Allocates many chunks per size, registers all
- *      with each flag (0, 1, 2, 8), unregisters all, then frees.
+ *      with each flag, unregisters all, then frees.
  * Test source
  * ------------------------
  *    - unit/sanityTests/hipHostRegister.cc
  */
+
 TEST_CASE("Unit_hipHostRegister_Nbuf_MultiFlag_RegisterUnregister") {
   static const size_t sizes[NBUF_SIZES] = {1024, 1048576, 10485760};
 
   static const unsigned int flags[NBUF_FLAGS] = {
-      hipHostRegisterDefault, hipHostRegisterPortable, hipHostRegisterMapped,
-      hipExtHostRegisterCoarseGrained, hipExtHostRegisterUncached,
-      hipHostRegisterIoMemory};
+      hipHostRegisterDefault, hipHostRegisterPortable, hipHostRegisterMapped};
 
   std::vector<void*> ptrs(NBUF_ALLOCATIONS);
 

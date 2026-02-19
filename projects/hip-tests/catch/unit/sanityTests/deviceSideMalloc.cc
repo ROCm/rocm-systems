@@ -66,7 +66,7 @@ __global__ void perThreadBlockAllocation() {
   __shared__ int* data;
 
   if (threadIdx.x == 0) {
-    size_t size = blockDim.x * 64;
+    size_t size = blockDim.x * 64 * sizeof(int);
     data = static_cast<int*>(malloc(size));
   }
   __syncthreads();
@@ -86,7 +86,7 @@ __global__ void perThreadBlockAllocation() {
 
 __global__ void allocmemKernel() {
   if (threadIdx.x == 0)
-    dataptr_dsm[blockIdx.x] = static_cast<int*>(malloc(blockDim.x * 4));
+    dataptr_dsm[blockIdx.x] = static_cast<int*>(malloc(blockDim.x * sizeof(int)));
   __syncthreads();
 
   if (dataptr_dsm[blockIdx.x] == nullptr)
@@ -103,8 +103,10 @@ __global__ void usememKernel() {
 
 __global__ void freememKernel() {
   int* ptr = dataptr_dsm[blockIdx.x];
-  if (ptr != nullptr && threadIdx.x == 0)
+  if (ptr != nullptr && threadIdx.x == 0) {
     free(ptr);
+    dataptr_dsm[blockIdx.x] = nullptr;
+  }
 }
 
 /**
