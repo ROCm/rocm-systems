@@ -27,7 +27,6 @@
 #include "stream_info.hpp"
 #include "timestamps.hpp"
 
-#include "lib/common/container/small_vector.hpp"
 #include "lib/common/container/stable_vector.hpp"
 #include "lib/common/defines.hpp"
 #include "lib/common/demangle.hpp"
@@ -62,15 +61,11 @@
 
 #include <dlfcn.h>
 #include <algorithm>
-#include <atomic>
 #include <cctype>
 #include <chrono>
 #include <filesystem>
-#include <future>
 #include <initializer_list>
 #include <limits>
-#include <map>
-#include <thread>
 #include <type_traits>
 #include <unordered_map>
 #include <utility>
@@ -108,7 +103,48 @@ namespace
 namespace fs          = ::rocprofiler::common::filesystem;
 using function_args_t = std::vector<argument_info>;
 
-auto main_tid = common::get_tid();
+struct sql_insert_value
+{
+    std::string_view                                                                     name  = {};
+    std::variant<std::monostate, int64_t, uint64_t, double, std::string, std::nullptr_t> value = {};
+};
+
+struct pending_insert_batch
+{
+    sqlite3*                                        conn      = nullptr;
+    std::unordered_map<std::string, sqlite3_stmt*>* cache     = nullptr;
+    std::string                                     key       = {};
+    std::string                                     table     = {};
+    std::vector<std::string>                        fields    = {};
+    std::vector<std::vector<sql_insert_value>>      rows      = {};
+    size_t                                          max_rows  = 1;
+    bool                                            is_active = false;
+};
+
+struct rocpd_db
+{
+    using statement_cache_t = std::unordered_map<std::string, sqlite3_stmt*>;
+    using schema_map_t      = std::unordered_map<rocpd_sql_schema_kind_t, std::string>;
+    using track_map_t       = std::unordered_map<track_data, uint64_t>;
+
+    rocpd_db() = default;
+    ~rocpd_db();
+    rocpd_db(const rocpd_db&)            = delete;
+    rocpd_db& operator=(const rocpd_db&) = delete;
+    rocpd_db(rocpd_db&&)                 = delete;
+    rocpd_db& operator=(rocpd_db&&)      = delete;
+
+    sqlite3*             conn             = nullptr;
+    std::string          uuid             = {};
+    std::string          guid             = {};
+    schema_map_t         schemas          = {};
+    track_map_t          tracks           = {};
+    size_t               event_id_counter = 0;
+    statement_cache_t    statements       = {};
+    pending_insert_batch pending_batch    = {};
+
+    size_t get_event_id() { return ++event_id_counter; }
+};
 
 template <typename Tp>
 auto
@@ -162,42 +198,6 @@ get_hash_id(Tp&& _val)
         return get_hash_id(std::string_view{_val});
     else
         return get_hash_id(*_val);
-}
-
-struct rocpd_db
-{
-    using statement_map_t =
-        std::unordered_map<std::string_view, std::unordered_map<std::string, sqlite3_stmt*>>;
-    using schema_map_t = std::unordered_map<rocpd_sql_schema_kind_t, std::string>;
-    using track_map_t  = std::unordered_map<track_data, uint64_t>;
-
-    rocpd_db() = default;
-    ~rocpd_db();
-    rocpd_db(const rocpd_db&) = delete;
-    rocpd_db& operator=(const rocpd_db&) = delete;
-    rocpd_db(rocpd_db&& other) noexcept  = delete;
-    rocpd_db& operator=(rocpd_db&&) = delete;
-
-    sqlite3*        conn             = nullptr;
-    std::string     uuid             = {};
-    std::string     guid             = {};
-    schema_map_t    schemas          = {};
-    track_map_t     tracks           = {};
-    size_t          event_id_counter = 0;
-    statement_map_t statements       = {};
-
-    auto get_event_id() { return ++event_id_counter; }
-};
-
-rocpd_db::~rocpd_db()
-{
-    if(conn)
-    {
-        for(auto& [table, stmt_map] : statements)
-            for(auto& [stmt_name, stmt] : stmt_map)
-                sqlite3_finalize(stmt);
-        SQLITE3_CHECK(sqlite3_close_v2(conn));
-    }
 }
 
 auto
@@ -273,12 +273,6 @@ iterate_args_callback(rocprofiler_buffer_tracing_kind_t /*kind*/,
             argument_info{arg_number, common::cxx_demangle(arg_type), arg_name, arg_value_str});
     return 0;
 }
-
-struct sql_insert_value
-{
-    std::string_view                                                                     name  = {};
-    std::variant<std::monostate, int64_t, uint64_t, double, std::string, std::nullptr_t> value = {};
-};
 
 struct allow_empty_string
 {};
@@ -362,6 +356,34 @@ insert_value(std::string_view _name, const std::optional<Tp>& _value, TraitT = {
     return insert_value(_name, _value.value(), TraitT{});
 }
 
+rocpd_db::~rocpd_db()
+{
+    for(auto& [key, stmt] : statements)
+    {
+        if(stmt) SQLITE3_CHECK(sqlite3_finalize(stmt));
+    }
+    statements.clear();
+
+    if(conn)
+    {
+        SQLITE3_CHECK(sqlite3_close_v2(conn));
+        conn = nullptr;
+    }
+}
+
+size_t
+get_max_batch_rows(sqlite3* conn, size_t col_count)
+{
+    int var_limit = sqlite3_limit(conn, SQLITE_LIMIT_VARIABLE_NUMBER, -1);
+    if(var_limit <= 0) var_limit = 999;
+
+    auto max_rows =
+        static_cast<size_t>(var_limit / static_cast<int>(std::max<size_t>(1, col_count)));
+    if(max_rows == 0) max_rows = 1;
+    if(max_rows > 1024) max_rows = 1024;
+    return max_rows;
+}
+
 int
 bind_sql_value(sqlite3_stmt* stmt, int idx, const sql_insert_value& value)
 {
@@ -401,9 +423,94 @@ bind_sql_value(sqlite3_stmt* stmt, int idx, const sql_insert_value& value)
         value.value);
 }
 
+void
+flush_pending_insert_batch(pending_insert_batch& pending)
+{
+    if(!pending.is_active || pending.rows.empty()) return;
+
+    ROCP_FATAL_IF(pending.conn == nullptr || pending.cache == nullptr)
+        << "Pending insert batch missing sqlite connection or statement cache";
+
+    const auto batch_size = pending.rows.size();
+    const auto field_size = pending.fields.size();
+    ROCP_FATAL_IF(field_size == 0)
+        << "Pending insert batch has zero fields for table: " << pending.table;
+
+    auto batch_key =
+        fmt::format("{}:batch:{}:{}", pending.table, batch_size, fmt::join(pending.fields, ","));
+
+    auto& stmt = (*pending.cache)[batch_key];
+    if(!stmt)
+    {
+        auto row_placeholder = std::string{"("};
+        for(size_t i = 0; i < field_size; ++i)
+        {
+            if(i > 0) row_placeholder += ", ";
+            row_placeholder += "?";
+        }
+        row_placeholder += ")";
+
+        auto values_clause = std::string{};
+        values_clause.reserve(batch_size * row_placeholder.size());
+        for(size_t i = 0; i < batch_size; ++i)
+        {
+            if(i > 0) values_clause += ", ";
+            values_clause += row_placeholder;
+        }
+
+        auto sql = fmt::format("INSERT INTO {} ({}) VALUES {};",
+                               pending.table,
+                               fmt::join(pending.fields, ", "),
+                               values_clause);
+
+        SQLITE3_CHECK(sqlite3_prepare_v2(pending.conn, sql.c_str(), -1, &stmt, nullptr));
+    }
+
+    auto cleanup_guard = common::scope_destructor{[&]() {
+        if(stmt)
+        {
+            sqlite3_reset(stmt);
+            sqlite3_clear_bindings(stmt);
+        }
+    }};
+
+    int bind_idx = 1;
+    for(const auto& row : pending.rows)
+    {
+        ROCP_FATAL_IF(row.size() != field_size)
+            << "Pending insert batch row has " << row.size() << " values, expected " << field_size;
+
+        for(const auto& value : row)
+        {
+            auto bind_rc = bind_sql_value(stmt, bind_idx++, value);
+            ROCP_FATAL_IF(bind_rc != SQLITE_OK)
+                << "sqlite3_bind failed with error code " << bind_rc;
+        }
+    }
+
+    auto step_rc = sqlite3_step(stmt);
+    ROCP_FATAL_IF(step_rc != SQLITE_DONE)
+        << "sqlite3_step failed with error code " << step_rc
+        << ", sqlite3_errmsg: " << sqlite3_errmsg(pending.conn) << ", table: " << pending.table
+        << ", batch_size: " << batch_size
+        << ", fields: " << fmt::format("{}", fmt::join(pending.fields, ", "));
+
+    pending.rows.clear();
+}
+
+void
+flush_pending_insert_batch(rocpd_db& db)
+{
+    auto& pending = db.pending_batch;
+    if(!pending.is_active) return;
+
+    flush_pending_insert_batch(pending);
+    pending = pending_insert_batch{};
+}
+
 template <template <typename...> class ContainerT, typename... TypesT>
 void
-get_insert_statement_impl(rocpd_db&                                 _db,
+get_insert_statement_impl(rocpd_db&                                 db,
                           std::string_view                          _table,
                           ContainerT<sql_insert_value, TypesT...>&& _data)
 {
@@ -422,53 +529,72 @@ get_insert_statement_impl(rocpd_db&                                 _db,
 
     if(fields.empty()) return;
 
-    ROCP_FATAL_IF(_db.conn == nullptr) << "SQLite connection not set for prepared statements";
+    ROCP_FATAL_IF(db.conn == nullptr) << "SQLite connection not set for prepared statements";
 
-    auto   key  = fmt::format("{}", fmt::join(fields, ","));
-    auto*& stmt = _db.statements[_table][key];
+    auto table = replace_uuid(db, _table);
+    auto key   = fmt::format("{}:{}", table, fmt::join(fields, ","));
 
-    if(!stmt)
+    auto& pending = db.pending_batch;
+
+    // single-batch mode: flush whenever the insert key changes
+    if(pending.is_active && pending.key != key)
     {
-        auto placeholders = std::vector<std::string_view>(fields.size(), "?");
-        auto sql          = fmt::format("INSERT INTO {} ({}) VALUES ({});",
-                               replace_uuid(_db, _table),
-                               fmt::join(fields, ", "),
-                               fmt::join(placeholders, ", "));
-
-        ROCP_INFO << fmt::format("Preparing SQL statement: '{}'", sql);
-        SQLITE3_CHECK(sqlite3_prepare_v2(_db.conn, sql.c_str(), -1, &stmt, nullptr));
+        flush_pending_insert_batch(db);
     }
 
+    if(!pending.is_active)
+    {
+        pending.is_active = true;
+        pending.conn      = db.conn;
+        pending.cache     = &db.statements;
+        pending.key       = key;
+        pending.table     = table;
+        pending.fields.clear();
+        pending.fields.reserve(fields.size());
+        for(const auto& field : fields)
+            pending.fields.emplace_back(field);
+        pending.max_rows = get_max_batch_rows(db.conn, fields.size());
+        pending.rows.clear();
+        pending.rows.reserve(pending.max_rows);
+    }
+
+    ROCP_FATAL_IF(pending.key != key)
+        << "Pending insert batch key mismatch: expected " << key << ", got " << pending.key;
+    ROCP_FATAL_IF(pending.table != table)
+        << "Pending insert batch table mismatch: expected " << table << ", got " << pending.table;
+    ROCP_FATAL_IF(pending.fields.size() != fields.size())
+        << "Pending insert batch field count mismatch for key: " << key
+        << ". expected: " << fields.size() << ", got: " << pending.fields.size();
     for(size_t i = 0; i < fields.size(); ++i)
     {
-        auto idx = static_cast<int>(i + 1);
-        ROCP_TRACE << fmt::format(
-            "Binding SQL value {} of {} (name={})", idx, fields.size(), fields.at(i));
-        SQLITE3_CHECK(bind_sql_value(stmt, idx, values.at(i)));
+        ROCP_FATAL_IF(pending.fields.at(i) != fields.at(i))
+            << "Pending insert batch field mismatch at index " << i << " for key: " << key
+            << ". expected: " << fields.at(i) << ", got: " << pending.fields.at(i);
     }
+    ROCP_FATAL_IF(pending.conn != db.conn || pending.cache != &db.statements)
+        << "Pending insert batch state mismatch for key: " << key;
 
-    SQLITE3_CHECK2(sqlite3_step(stmt), {SQLITE_OK, SQLITE_DONE, SQLITE_ROW});
-    SQLITE3_CHECK(sqlite3_reset(stmt));
-    SQLITE3_CHECK(sqlite3_clear_bindings(stmt));
+    pending.rows.emplace_back(std::move(values));
+    if(pending.rows.size() >= pending.max_rows) flush_pending_insert_batch(pending);
 }
 
 template <template <typename...> class ContainerT, typename... TypesT>
 void
-get_insert_statement(rocpd_db&                                 _db,
+get_insert_statement(rocpd_db&                                 db,
                      std::string_view                          _table,
                      ContainerT<sql_insert_value, TypesT...>&& _data)
 {
     get_insert_statement_impl(
-        _db, _table, std::forward<ContainerT<sql_insert_value, TypesT...>>(_data));
+        db, _table, std::forward<ContainerT<sql_insert_value, TypesT...>>(_data));
 }
 
 void
-get_insert_statement(rocpd_db&                                 _db,
+get_insert_statement(rocpd_db&                                 db,
                      std::string_view                          _table,
                      std::initializer_list<sql_insert_value>&& _data)
 {
     get_insert_statement_impl(
-        _db, _table, std::forward<std::initializer_list<sql_insert_value>>(_data));
+        db, _table, std::forward<std::initializer_list<sql_insert_value>>(_data));
 }
 
 auto
@@ -643,7 +769,7 @@ write_rocpd(
     const generator<rocprofiler_buffer_tracing_rocdecode_api_ext_record_t>& rocdecode_api_gen,
     const generator<tool_counter_record_t>&                                 counter_collection_gen)
 {
-    static auto get_simple_timer = [](std::string_view label) {
+    auto get_simple_timer = [](std::string_view label) {
         return common::simple_timer{fmt::format("SQLite3 generation :: {:24}", label)};
     };
 
@@ -656,10 +782,9 @@ write_rocpd(
     const uint64_t this_pid         = tool_metadata.process_id;
     const uint64_t this_pid_init_ns = tool_metadata.process_start_ns;
     const uint64_t this_ppid        = tool_metadata.parent_process_id;
-    const uint64_t this_nid         = node_id;
 
     ROCP_WARNING << fmt::format(
-        "writing SQL database for process {} on node {}", this_pid, this_nid);
+        "writing SQL database for process {} on node {}", this_pid, node_id);
 
     auto      db   = rocpd_db{};
     sqlite3*& conn = db.conn;
@@ -681,6 +806,7 @@ write_rocpd(
         SQLITE3_CHECK(sqlite3_open_v2(
             output_file.c_str(), &conn, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nullptr));
         SQLITE3_CHECK(sqlite3_busy_handler(conn, &sql::busy_handler, nullptr));
+
         ROCP_ERROR << fmt::format("Opened result file: {} (UUID={})", output_file, uuid_v7);
 
         execute_raw_sql_statements(conn, table_schema);
@@ -749,34 +875,33 @@ write_rocpd(
     auto stream_set = std::unordered_set<rocprofiler_stream_id_t>{};
     auto queue_set  = std::unordered_set<rocprofiler_queue_id_t>{};
 
-    static auto get_stream_id =
-        [&db, &stream_set, &node_id, &this_pid](rocprofiler_stream_id_t val) {
-            if(stream_set.count(val) == 0)
-            {
-                ROCP_FATAL_IF(val.handle == 0 && !stream_set.empty()) << "Missing default stream";
-                ROCP_FATAL_IF(val.handle != 0 && stream_set.empty()) << "Missing default stream";
+    auto get_stream_id = [&db, &stream_set, &node_id, &this_pid](rocprofiler_stream_id_t val) {
+        if(stream_set.count(val) == 0)
+        {
+            ROCP_FATAL_IF(val.handle == 0 && !stream_set.empty()) << "Missing default stream";
+            ROCP_FATAL_IF(val.handle != 0 && stream_set.empty()) << "Missing default stream";
 
-                auto _name = std::string{};
-                if(val.handle == 0)
-                    _name = std::string{"Default Stream"};
-                else
-                    _name = fmt::format("Stream {}", stream_set.size() - 1);
-                stream_set.emplace(val);
+            auto _name = std::string{};
+            if(val.handle == 0)
+                _name = std::string{"Default Stream"};
+            else
+                _name = fmt::format("Stream {}", stream_set.size() - 1);
+            stream_set.emplace(val);
 
-                get_insert_statement(db,
-                                     "rocpd_info_stream{{uuid}}",
-                                     {
-                                         insert_value("id", val.handle),
-                                         insert_value("nid", node_id),
-                                         insert_value("pid", this_pid),
-                                         insert_value("name", _name),
-                                     });
-            }
+            get_insert_statement(db,
+                                 "rocpd_info_stream{{uuid}}",
+                                 {
+                                     insert_value("id", val.handle),
+                                     insert_value("nid", node_id),
+                                     insert_value("pid", this_pid),
+                                     insert_value("name", _name),
+                                 });
+        }
 
-            return val.handle;
-        };
+        return val.handle;
+    };
 
-    static auto get_queue_id = [&db, &queue_set, &node_id, &this_pid](rocprofiler_queue_id_t val) {
+    auto get_queue_id = [&db, &queue_set, &node_id, &this_pid](rocprofiler_queue_id_t val) {
         if(queue_set.count(val) == 0)
         {
             ROCP_FATAL_IF(val.handle == 0 && !queue_set.empty()) << "Missing default queue";
@@ -802,7 +927,7 @@ write_rocpd(
         return val.handle;
     };
 
-    static auto get_thread_id =
+    auto get_thread_id =
         [&db, &tool_metadata, &thread_ids, &node_id, &this_pid](rocprofiler_thread_id_t val) {
             if(thread_ids.count(val) == 0)
             {
@@ -828,7 +953,7 @@ write_rocpd(
     {
         auto _sqlgenperf_rocpd = get_simple_timer("rocpd_string");
 
-        auto _deferred = sql::deferred_transaction{conn};
+        auto _deferred = sql::deferred_transaction{db.conn};
         for(const auto& itr : string_entries)
         {
             get_insert_statement(db,
@@ -840,7 +965,7 @@ write_rocpd(
         }
     }
 
-    auto insert_node_data = [&db, &tool_metadata, node_id, node_hash]() {
+    auto insert_node_data = [&db, &tool_metadata, node_id, node_hash, &get_simple_timer]() {
         auto        _sqlgenperf_rocpd = get_simple_timer("rocpd_info_node");
         const auto& _info             = tool_metadata.node_data;
 
@@ -860,7 +985,7 @@ write_rocpd(
             });
     };
 
-    auto insert_process_data = [&db, &tool_metadata, &cfg, node_id, this_pid]() {
+    auto insert_process_data = [&db, &tool_metadata, &cfg, node_id, this_pid, &get_simple_timer]() {
         auto _sqlgenperf_rocpd = get_simple_timer("rocpd_info_process");
         auto json_cfg          = get_json_string([&cfg](auto& ar) { cfg.save(ar); });
         auto json_env          = get_json_string([](auto& ar) {
@@ -887,9 +1012,10 @@ write_rocpd(
             }
         });
 
-        auto _command = fmt::format(
+        auto command = fmt::format(
             "{}",
             fmt::join(tool_metadata.command_line.begin(), tool_metadata.command_line.end(), " "));
+        auto _command = command;
 
         get_insert_statement(db,
                              "rocpd_info_process{{uuid}}",
@@ -908,7 +1034,7 @@ write_rocpd(
                              });
     };
 
-    auto insert_agent_data = [&db, &tool_metadata, node_id, this_pid]() {
+    auto insert_agent_data = [&db, &tool_metadata, node_id, this_pid, &get_simple_timer]() {
         auto _sqlgenperf_rocpd = get_simple_timer("rocpd_info_agent");
         auto _deferred         = sql::deferred_transaction{db.conn};
         for(auto itr : tool_metadata.agents)
@@ -942,7 +1068,11 @@ write_rocpd(
         }
     };
 
-    auto insert_kernel_code_object_data = [&db, &tool_metadata, node_id, this_pid]() {
+    auto insert_kernel_code_object_data = [&db,
+                                           &tool_metadata,
+                                           node_id,
+                                           this_pid,
+                                           &get_simple_timer]() {
         auto _sqlgenperf_rocpd = get_simple_timer("rocpd kernel info");
         auto _deferred         = sql::deferred_transaction{db.conn};
         for(const auto& itr : tool_metadata.get_code_objects())
@@ -998,7 +1128,7 @@ write_rocpd(
         }
     };
 
-    auto insert_pmc_data = [&db, &tool_metadata, node_id, this_pid]() {
+    auto insert_pmc_data = [&db, &tool_metadata, node_id, this_pid, &get_simple_timer]() {
         auto _sqlgenperf_rocpd = get_simple_timer("rocpd_info_pmc");
         auto recorded          = std::unordered_set<rocprofiler_counter_id_t>{};
         auto _deferred         = sql::deferred_transaction{db.conn};
@@ -1013,10 +1143,10 @@ write_rocpd(
                     if(agent) cereal::save(ar, *agent);
                 });
 
-                const auto* _name        = aitr.name;
-                const auto* _description = aitr.description;
-                const auto* _block       = aitr.block;
-                const auto* _expression  = aitr.expression;
+                auto _name        = aitr.name;
+                auto _description = aitr.description;
+                auto _block       = aitr.block;
+                auto _expression  = aitr.expression;
 
                 get_insert_statement(
                     db,
@@ -1195,7 +1325,7 @@ write_rocpd(
     };
 
     auto insert_pmc_event_data =
-        [&db, &tool_metadata, &counter_collection_gen](auto& dispatch_evt_ids) {
+        [&db, &tool_metadata, &counter_collection_gen, &get_simple_timer](auto& dispatch_evt_ids) {
             auto   _sqlgenperf_rocpd = get_simple_timer("rocpd_pmc_event");
             auto   _deferred         = sql::deferred_transaction{db.conn};
             size_t idx               = tool_metadata.pmc_event_offset;
@@ -1222,161 +1352,177 @@ write_rocpd(
             }
         };
 
-    auto insert_memory_copy_data =
-        [&db, &tool_metadata, &string_entries, node_id, this_pid](const auto& _gen) {
-            auto   _sqlgenperf_rocpd = get_simple_timer("rocpd_memory_copy");
-            auto   _deferred         = sql::deferred_transaction{db.conn};
-            size_t copy_idx          = 1;
+    auto insert_memory_copy_data = [&db,
+                                    &tool_metadata,
+                                    &string_entries,
+                                    node_id,
+                                    this_pid,
+                                    &get_simple_timer,
+                                    &get_thread_id,
+                                    &get_stream_id](const auto& _gen) {
+        auto   _sqlgenperf_rocpd = get_simple_timer("rocpd_memory_copy");
+        auto   _deferred         = sql::deferred_transaction{db.conn};
+        size_t copy_idx          = 1;
 
-            for(auto pitr : _gen)
+        for(auto pitr : _gen)
+        {
+            for(auto itr : _gen.get(pitr))
             {
-                for(auto itr : _gen.get(pitr))
-                {
-                    // insert thread info if it doesn't already exist
-                    get_thread_id(itr.thread_id);
+                // insert thread info if it doesn't already exist
+                get_thread_id(itr.thread_id);
 
-                    auto kind = tool_metadata.buffer_names.at(itr.kind);
-                    auto name = tool_metadata.buffer_names.at(itr.kind, itr.operation);
+                auto kind = tool_metadata.buffer_names.at(itr.kind);
+                auto name = tool_metadata.buffer_names.at(itr.kind, itr.operation);
 
-                    auto evt_id = create_event(
-                        db,
-                        {
-                            insert_value("category_id", string_entries.at(kind)),
-                            insert_value("stack_id", itr.correlation_id.internal),
-                            insert_value("parent_stack_id", itr.correlation_id.internal),
-                            insert_value("correlation_id", itr.correlation_id.external.value),
-                        });
+                auto evt_id = create_event(
+                    db,
+                    {
+                        insert_value("category_id", string_entries.at(kind)),
+                        insert_value("stack_id", itr.correlation_id.internal),
+                        insert_value("parent_stack_id", itr.correlation_id.internal),
+                        insert_value("correlation_id", itr.correlation_id.external.value),
+                    });
 
-                    get_insert_statement(
-                        db,
-                        "rocpd_memory_copy{{uuid}}",
-                        {
-                            insert_value("id", copy_idx++),
-                            insert_value("nid", node_id),
-                            insert_value("pid", this_pid),
-                            insert_value("tid", itr.thread_id),
-                            insert_value("start", itr.start_timestamp),
-                            insert_value("end", itr.end_timestamp),
-                            insert_value("name_id", string_entries.at(name)),
-                            insert_value("dst_agent_id",
-                                         tool_metadata.get_agent(itr.dst_agent_id)->node_id),
-                            insert_value("src_agent_id",
-                                         tool_metadata.get_agent(itr.src_agent_id)->node_id),
-                            insert_value("dst_address", itr.dst_address.value),
-                            insert_value("src_address", itr.src_address.value),
-                            insert_value("size", itr.bytes),
-                            insert_value("stream_id", get_stream_id(itr.stream_id)),
-                            insert_value("event_id", evt_id),
-                        });
-                }
+                get_insert_statement(
+                    db,
+                    "rocpd_memory_copy{{uuid}}",
+                    {
+                        insert_value("id", copy_idx++),
+                        insert_value("nid", node_id),
+                        insert_value("pid", this_pid),
+                        insert_value("tid", itr.thread_id),
+                        insert_value("start", itr.start_timestamp),
+                        insert_value("end", itr.end_timestamp),
+                        insert_value("name_id", string_entries.at(name)),
+                        insert_value("dst_agent_id",
+                                     tool_metadata.get_agent(itr.dst_agent_id)->node_id),
+                        insert_value("src_agent_id",
+                                     tool_metadata.get_agent(itr.src_agent_id)->node_id),
+                        insert_value("dst_address", itr.dst_address.value),
+                        insert_value("src_address", itr.src_address.value),
+                        insert_value("size", itr.bytes),
+                        insert_value("stream_id", get_stream_id(itr.stream_id)),
+                        insert_value("event_id", evt_id),
+                    });
             }
-        };
+        }
+    };
 
-    auto insert_memory_alloc_data =
-        [&db, &tool_metadata, &string_entries, node_id, this_pid](const auto& _gen) {
-            auto address_to_agent_and_size =
-                std::unordered_map<rocprofiler_address_t, rocprofiler::agent::index_and_size>{};
-            auto _deferred = sql::deferred_transaction{db.conn};
+    auto insert_memory_alloc_data = [&db,
+                                     &tool_metadata,
+                                     &string_entries,
+                                     node_id,
+                                     this_pid,
+                                     &get_thread_id,
+                                     &get_stream_id,
+                                     &get_queue_id](const auto& _gen) {
+        auto address_to_agent_and_size =
+            std::unordered_map<rocprofiler_address_t, rocprofiler::agent::index_and_size>{};
+        auto _deferred = sql::deferred_transaction{db.conn};
 
-            for(auto pitr : _gen)
+        for(auto pitr : _gen)
+        {
+            for(auto itr : _gen.get(pitr))
             {
-                for(auto itr : _gen.get(pitr))
+                // insert thread info if it doesn't already exist
+                get_thread_id(itr.thread_id);
+
+                auto _kind           = tool_metadata.buffer_names.at(itr.kind);
+                auto _cpptype        = tool_metadata.buffer_names.at(itr.kind, itr.operation);
+                auto [_type, _level] = memtype_to_db(_cpptype);
+
+                ROCP_FATAL_IF(_type != "ALLOC" && _type != "FREE" && _type != "RECLAIM" &&
+                              _type != "REALLOC")
+                    << "erroneous db type: " << _type;
+
+                ROCP_FATAL_IF(_level != "REAL" && _level != "VIRTUAL" && _level != "SCRATCH")
+                    << "erroneous db level: " << _level;
+
+                auto _stream_id       = get_stream_id(extract_stream_field(itr));
+                auto _queue_id        = get_queue_id(extract_queue_field(itr));
+                auto _address         = extract_address_field(itr);
+                auto _allocation_size = extract_allocation_size_field(itr);
+
+                auto _node_id = std::optional<uint64_t>{};
+                if(_type == "ALLOC")
                 {
-                    // insert thread info if it doesn't already exist
-                    get_thread_id(itr.thread_id);
-
-                    auto _kind           = tool_metadata.buffer_names.at(itr.kind);
-                    auto _cpptype        = tool_metadata.buffer_names.at(itr.kind, itr.operation);
-                    auto [_type, _level] = memtype_to_db(_cpptype);
-
-                    ROCP_FATAL_IF(_type != "ALLOC" && _type != "FREE" && _type != "RECLAIM" &&
-                                  _type != "REALLOC")
-                        << "erroneous db type: " << _type;
-
-                    ROCP_FATAL_IF(_level != "REAL" && _level != "VIRTUAL" && _level != "SCRATCH")
-                        << "erroneous db level: " << _level;
-
-                    auto _stream_id       = get_stream_id(extract_stream_field(itr));
-                    auto _queue_id        = get_queue_id(extract_queue_field(itr));
-                    auto _address         = extract_address_field(itr);
-                    auto _allocation_size = extract_allocation_size_field(itr);
-
-                    auto _node_id = std::optional<uint64_t>{};
-                    if(_type == "ALLOC")
+                    _node_id = tool_metadata.get_agent(itr.agent_id)->node_id;
+                    address_to_agent_and_size.emplace(
+                        rocprofiler_address_t{.handle = _address.handle},
+                        rocprofiler::agent::index_and_size{_node_id.value(), _allocation_size});
+                }
+                else if(_type == "FREE")
+                {
+                    if(address_to_agent_and_size.count(_address) == 0)
                     {
-                        _node_id = tool_metadata.get_agent(itr.agent_id)->node_id;
-                        address_to_agent_and_size.emplace(
-                            rocprofiler_address_t{.handle = _address.handle},
-                            rocprofiler::agent::index_and_size{_node_id.value(), _allocation_size});
-                    }
-                    else if(_type == "FREE")
-                    {
-                        if(address_to_agent_and_size.count(_address) == 0)
+                        if(_address.handle == 0)
                         {
-                            if(_address.handle == 0)
-                            {
-                                // Freeing null pointers is expected behavior and is occurs in HSA
-                                // functions like hipStreamDestroy
-                                ROCP_INFO << "null pointer freed due to HSA operation";
-                            }
-                            else
-                            {
-                                // Following should not occur
-                                ROCP_INFO << "Unpaired free operation occurred";
-                            }
+                            // Freeing null pointers is expected behavior and is occurs in HSA
+                            // functions like hipStreamDestroy
+                            ROCP_INFO << "null pointer freed due to HSA operation";
                         }
                         else
                         {
-                            auto [agent_abs_index, size] = address_to_agent_and_size[_address];
-                            _node_id                     = agent_abs_index;
-                            _allocation_size             = 0;
+                            // Following should not occur
+                            ROCP_INFO << "Unpaired free operation occurred";
                         }
                     }
                     else
                     {
-                        ROCP_CI_LOG(WARNING) << "unhandled memory allocation type " << _type;
+                        auto [agent_abs_index, size] = address_to_agent_and_size[_address];
+                        _node_id                     = agent_abs_index;
+                        _allocation_size             = 0;
                     }
-
-                    auto evt_id = create_event(
-                        db,
-                        {
-                            insert_value("category_id", string_entries.at(_kind)),
-                            insert_value("stack_id", itr.correlation_id.internal),
-                            insert_value("parent_stack_id", itr.correlation_id.ancestor),
-                            insert_value("correlation_id", itr.correlation_id.external.value),
-                        });
-
-                    auto flags = extract_flags_field(itr);
-
-                    get_insert_statement(
-                        db,
-                        "rocpd_memory_allocate{{uuid}}",
-                        {
-                            insert_value("nid", node_id),
-                            insert_value("pid", this_pid),
-                            insert_value("tid", itr.thread_id),
-                            insert_value("start", itr.start_timestamp),
-                            insert_value("end", itr.end_timestamp),
-                            insert_value("agent_id", _node_id),
-                            insert_value("type", _type),
-                            insert_value("level", _level),
-                            insert_value("queue_id", _queue_id),
-                            insert_value("stream_id", _stream_id),
-                            insert_value("event_id", evt_id),
-                            insert_value("address", _address.value),
-                            insert_value("size", _allocation_size),
-                            insert_value("extdata",
-                                         flags == "" ? "{}" : get_json_string([&flags](auto& ar) {
-                                             ar(cereal::make_nvp("flags", flags));
-                                         })),
-                        });
                 }
+                else
+                {
+                    ROCP_CI_LOG(WARNING) << "unhandled memory allocation type " << _type;
+                }
+
+                auto evt_id = create_event(
+                    db,
+                    {
+                        insert_value("category_id", string_entries.at(_kind)),
+                        insert_value("stack_id", itr.correlation_id.internal),
+                        insert_value("parent_stack_id", itr.correlation_id.ancestor),
+                        insert_value("correlation_id", itr.correlation_id.external.value),
+                    });
+
+                auto flags = extract_flags_field(itr);
+
+                get_insert_statement(
+                    db,
+                    "rocpd_memory_allocate{{uuid}}",
+                    {
+                        insert_value("nid", node_id),
+                        insert_value("pid", this_pid),
+                        insert_value("tid", itr.thread_id),
+                        insert_value("start", itr.start_timestamp),
+                        insert_value("end", itr.end_timestamp),
+                        insert_value("agent_id", _node_id),
+                        insert_value("type", _type),
+                        insert_value("level", _level),
+                        insert_value("queue_id", _queue_id),
+                        insert_value("stream_id", _stream_id),
+                        insert_value("event_id", evt_id),
+                        insert_value("address", _address.value),
+                        insert_value("size", _allocation_size),
+                        insert_value("extdata",
+                                     flags == "" ? "{}" : get_json_string([&flags](auto& ar) {
+                                         ar(cereal::make_nvp("flags", flags));
+                                     })),
+                    });
             }
-        };
+        }
+    };
 
     // new string entries argument types and names can be added to _metadata
-    auto insert_api_data = [&db, &tool_metadata, &string_entries, node_id, this_pid](
-                               const auto& _gen) {
+    auto insert_api_data = [&db,
+                            &tool_metadata,
+                            &string_entries,
+                            node_id,
+                            this_pid,
+                            &get_thread_id](const auto& _gen) {
         auto _deferred = sql::deferred_transaction{db.conn};
 
         for(auto pitr : _gen)
@@ -1522,8 +1668,10 @@ write_rocpd(
     {
         auto _sqlgenperf_rocpd = get_simple_timer("SQL indexing");
         auto indexes_schema    = read_schema_file(db, ROCPD_SQL_SCHEMA_ROCPD_INDEXES);
-        execute_raw_sql_statements(db.conn, indexes_schema);
+        execute_raw_sql_statements(conn, indexes_schema);
     }
+
+    flush_pending_insert_batch(db);
 }
 }  // namespace tool
 }  // namespace rocprofiler

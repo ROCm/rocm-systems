@@ -35,6 +35,7 @@
 #include <cstdint>
 #include <string_view>
 #include <type_traits>
+#include <unordered_set>
 
 namespace rocprofiler
 {
