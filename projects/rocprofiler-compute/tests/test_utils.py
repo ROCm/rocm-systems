@@ -8326,10 +8326,9 @@ def test_resolve_rocm_library_path(tmp_path):
     # Should pick .so.10 (10 > 2 in first position)
     assert resolve_rocm_library_path(str(version_base)) == str(v10)
 
-    # Test case 8: No match at all, raises FileNotFoundError
+    # Test case 8: No match at all, returns original path
     missing = tmp_path / "libmissing.so"
-    with pytest.raises(FileNotFoundError, match="ROCm library not found"):
-        resolve_rocm_library_path(str(missing))
+    assert resolve_rocm_library_path(str(missing)) == str(missing)
 
 
 # =============================================================================

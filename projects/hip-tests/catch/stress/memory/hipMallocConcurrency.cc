@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
+Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
 in the Software without restriction, including without limitation the rights
@@ -20,30 +20,22 @@ THE SOFTWARE.
 /**
 Testcase Scenarios :
 
- 1) Test hipMalloc() api passing zero size and confirming *ptr returning
- nullptr. Also pass nullptr to hipFree() api.
-
- 2) Pass maximum value of size_t for hipMalloc() api and make sure appropriate
- error is returned.
-
- 3) Check for hipMalloc() error code, passing invalid/null pointer.
-
- 4) Regress hipMalloc()/hipFree() in loop for bigger chunk of allocation
+ 1) Regress hipMalloc()/hipFree() in loop for bigger chunk of allocation
  with adequate number of iterations and later test for kernel execution on
  default gpu.
 
- 5) Regress hipMalloc()/hipFree() in loop while allocating smaller chunks
+ 2) Regress hipMalloc()/hipFree() in loop while allocating smaller chunks
  keeping maximum number of iterations and then run kernel code on default
  gpu, perfom data validation.
 
- 6) Check hipMalloc() api adaptability when app creates small chunks of memory
+ 3) Check hipMalloc() api adaptability when app creates small chunks of memory
  continuously, stores it for later use and then frees it at later point
  of time.
 
- 7) Multithread Scenario : Exercise hipMalloc() api parellely on all gpus from
+ 4) Multithread Scenario : Exercise hipMalloc() api parellely on all gpus from
  multiple threads and regress the api.
 
- 8) Validate memory usage with hipMemGetInfo() while regressing hipMalloc()
+ 5) Validate memory usage with hipMemGetInfo() while regressing hipMalloc()
  api. Check for any possible memory leaks.
 */
 
@@ -62,18 +54,14 @@ static constexpr auto BuffSizeBC = 5 * 1024 * 1024;
 /* Buffer size for smaller chunks in alloc/free cycles */
 static constexpr auto BuffSizeSC = 16;
 
-/* You may change it for individual test. But default 500 is for quick return in Jenkin Build and to
- * prevent out-of-memory issues on ASAN runs */
-static constexpr auto NumDiv = 500;
-
 /* Max alloc/free iterations for smaller chunks */
-static constexpr auto MaxAllocFree_SmallChunks = (5000000 / NumDiv);
+static constexpr auto MaxAllocFree_SmallChunks = 5000000;
 
 /* Max alloc/free iterations for bigger chunks */
-static constexpr auto MaxAllocFree_BigChunks = 5000;
+static constexpr auto MaxAllocFree_BigChunks = 10000;
 
 /* Max alloc and pool iterations */
-static constexpr auto MaxAllocPoolIter = (2000000 / NumDiv);
+static constexpr auto MaxAllocPoolIter = 2000000;
 
 /* Test status shared across threads */
 static std::atomic<bool> g_thTestPassed{true};
@@ -218,34 +206,11 @@ static void threadFunc(int gpu) {
   UNSCOPED_INFO("thread execution status on gpu" << gpu << ":" << g_thTestPassed.load());
 }
 
-
-/* Performs Argument Validation of api */
-TEST_CASE("Unit_hipMalloc_ArgumentValidation") {
-  int* ptr{nullptr};
-
-  SECTION("hipMalloc() when size(0)") {
-    HIP_CHECK(hipMalloc(&ptr, 0));
-    // ptr expected to be reset to null ptr
-    REQUIRE(ptr == nullptr);
-  }
-
-  SECTION("hipFree() when freeing nullptr") { HIP_CHECK(hipFree(ptr)); }
-
-  SECTION("hipMalloc() with invalid argument") {
-    HIP_CHECK_ERROR(hipMalloc(nullptr, 100), hipErrorInvalidValue);
-  }
-
-  SECTION("hipMalloc() with max size_t") {
-    HIP_CHECK_ERROR(hipMalloc(&ptr, std::numeric_limits<std::size_t>::max()),
-                    hipErrorMemoryAllocation);
-  }
-}
-
 /**
  * Regress hipMalloc()/hipFree() in loop for bigger chunks and
  * smaller chunks of memory allocation
  */
-TEST_CASE("Unit_hipMalloc_LoopRegressionAllocFreeCycles") {
+TEST_CASE("Stress_hipMalloc_LoopRegressionAllocFreeCycles") {
   int devCnt = 0;
 
   // Get GPU count
@@ -262,7 +227,7 @@ TEST_CASE("Unit_hipMalloc_LoopRegressionAllocFreeCycles") {
  * continuously, stores it for later use and then frees it at later point
  * of time.
  */
-TEST_CASE("Unit_hipMalloc_AllocateAndPoolBuffers") {
+TEST_CASE("Stress_hipMalloc_AllocateAndPoolBuffers") {
   size_t avail{0}, tot{0};
   bool ret{false};
   hipError_t err{};
@@ -303,7 +268,7 @@ TEST_CASE("Unit_hipMalloc_AllocateAndPoolBuffers") {
  * Exercise hipMalloc() api parellely on all gpus from
  * multiple threads and regress the api.
  */
-TEST_CASE("Unit_hipMalloc_Multithreaded_MultiGPU", "[multigpu]") {
+TEST_CASE("Stress_hipMalloc_Multithreaded_MultiGPU", "[multigpu]") {
   std::vector<std::thread> threadlist;
   int devCnt;
 
