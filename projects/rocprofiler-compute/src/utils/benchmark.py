@@ -578,12 +578,17 @@ def lds_bw_benchmark(device: int) -> PerfMetrics:
 
     return perf_metrics
 
-
-flops_benchmark_src = """
+vector_types_src = """
 template<typename T, int Rank>
 using vecT = T __attribute__((ext_vector_type(Rank)));
 
+template<typename T> using vec2 = vecT<T, 2>;
 template<typename T> using vec4 = vecT<T, 4>;
+template<typename T> using vec8 = vecT<T, 8>;
+template<typename T> using vec16 = vecT<T, 16>;
+"""
+
+flops_benchmark_src = vector_types_src + """
 
 template<typename T, int nFMA>
 __global__ void flops_benchmark(T *buf, int count)
@@ -677,8 +682,7 @@ def flops_bench(device: int, type: str, unit: str, rate: int) -> PerfMetrics:
     return perf_metrics
 
 
-mfma_f32_src = """
-using f32_16vec = __attribute__((__vector_size__(16 * sizeof(float)))) float;
+mfma_f32_src = vector_types_src + """
 
 extern "C" __global__ void mfma_f32(int iter, float *dummy)
 {
@@ -686,7 +690,7 @@ extern "C" __global__ void mfma_f32(int iter, float *dummy)
     float a =  threadIdx.x;
 
     // Output: 16 F32 registers
-    f32_16vec result = {0};
+    vec16<float> result = {0};
 
     // CDNA2: v_mfma_f32_32x32x2f32 ops: 32x32x2x2 = 4096
     // CDNA3: v_mfma_f32_32x32x2_f32
@@ -702,19 +706,17 @@ extern "C" __global__ void mfma_f32(int iter, float *dummy)
 }
 """
 
-mfma_f16_src = """
+mfma_f16_src = vector_types_src + """
 
-using f32_16vec = __attribute__((__vector_size__(16 * sizeof(float)))) float;
-using f16_2vec = __attribute__((__vector_size__(2 * sizeof(__2f16))))  float;
 
 extern "C" __global__ void mfma_f16(int iter, float *dummy)
 {
     // Input: 2 F32 registers
-    f16_2vec a;
+    vec4<__fp16> a;
     a[1] = a[0] = threadIdx.x;
 
     //Output: 16 F32 registers
-    f32_16vec result = {0};
+    vec16<float> result = {0};
 
     // CDNA2: v_mfma_f32_32x32x8f16 ops: 32x32x8x2 = 16384
     // CDNA3: v_mfma_f32_32x32x8_f16
@@ -730,7 +732,7 @@ extern "C" __global__ void mfma_f16(int iter, float *dummy)
 }
 """
 
-mfma_bf16_src = """
+mfma_bf16_src = vector_types_src + """
 
 using f32_16vec = __attribute__((__vector_size__(16 * sizeof(float)))) float;
 using bf16_4vec = __attribute__((__vector_size__(2 * sizeof(__2i16))))  short;
@@ -757,7 +759,7 @@ extern "C" __global__ void mfma_bf16(int iter, float *dummy)
 #else
     // Input: 2 F32 registers
     // builting mfma expects 4 short registers
-    bf16_4vec a;
+    vec4<short> a;
     a[3] = a[2] = a[1] = a[0]= threadIdx.x;
 
     // CDNA3: v_mfma_f32_32x32x8_bf16 ops: 32x32x8x2 = 16384
@@ -774,9 +776,7 @@ extern "C" __global__ void mfma_bf16(int iter, float *dummy)
 }
 """
 
-mfma_f64_src = """
-
-using f64_4vec = __attribute__((__vector_size__(4 * sizeof(double)))) double;
+mfma_f64_src = vector_types_src + """
 
 extern "C" __global__ void mfma_f64(int iter, float *dummy)
 {
@@ -785,7 +785,7 @@ extern "C" __global__ void mfma_f64(int iter, float *dummy)
     double a =  threadIdx.x;
 
     // Output: 4 F64 registers
-    f64_4vec result = {0};
+    vec4<double> result = {0};
 
     // CDNA2: v_mfma_f64_16x16x4f64 ops: 16x16x4x2 = 2048
     // CDNA3: v_mfma_f64_16x16x4_f64
@@ -840,9 +840,7 @@ extern "C" __global__ void mfma_i8(int iter, float *dummy)
 }
 """
 
-mfma_f8_src = """
-
-using f32_16vec = __attribute__((__vector_size__(16 * sizeof(float)))) float;
+mfma_f8_src = vector_types_src + """
 
 extern "C" __global__ void mfma_f8(int iter, float *dummy)
 {
@@ -852,7 +850,7 @@ extern "C" __global__ void mfma_f8(int iter, float *dummy)
     double a =  threadIdx.x;
 
     // Output: 16 F32 registers
-    f32_16vec result = {0};
+    vec16<float> result = {0};
 
     // CDNA3: v_mfma_f32_32x32x16_fp8_fp8 ops: 32x32x16x2 = 32768
     for(int i = 0; i < iter; ++i)
@@ -867,14 +865,7 @@ extern "C" __global__ void mfma_f8(int iter, float *dummy)
 }
 """
 
-mfma_f8f6f4_src = """
-
-using int32_16vec = __attribute__((__vector_size__(16 * sizeof(int)))) int;
-using int32_8vec = __attribute__((__vector_size__(8 * sizeof(int)))) int;
-using bf16_2vec = __attribute__((__vector_size__(1 * sizeof(__2i16))))  short;
-using bf16_4vec = __attribute__((__vector_size__(2 * sizeof(__2i16))))  short;
-using f32_16vec = __attribute__((__vector_size__(16 * sizeof(float)))) float;
-using f16_2vec = __attribute__((__vector_size__(2 * sizeof(__2f16))))  float;
+mfma_f8f6f4_src = vector_types_src + """
 
 #define FP8_E4M3 0
 #define BF8_E5M2 1
@@ -887,11 +878,11 @@ template<int datatype> __global__ void mfma_f8f6f4(int iter, float *dummy)
 {
     // MI350 series only
     // Input: 8 i32 registers
-    int32_8vec a;
+    vec8<int> a;
     a[0] = a[1] = a[2] = a[3] = a[4] = a[5] = a[6] = a[7] = threadIdx.x;
 
     // Output: 16 F32 registers
-    f32_16vec result = {0};
+    vec16<float> result = {0};
 
     // CDNA4: v_mfma_f32_32x32x64_f8f6f4    ops: 32x32x64x2 = 131072
     switch (datatype)
