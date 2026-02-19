@@ -173,7 +173,7 @@ private:
     CuidFile priv_cuid_file_{CuidUtilities::priv_cuid_file(), false};
 
     //cuid hmac for deriving cuids
-    cuid_hmac manager_hmac;
+    cuid_hmac manager_hmac = cuid_hmac();
 };
 
 #endif // CUID_DEVICE_MANAGER_H

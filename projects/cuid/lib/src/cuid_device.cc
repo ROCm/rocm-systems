@@ -66,6 +66,7 @@ amdcuid_status_t CuidDevice::get_derived_cuid(amdcuid_derived_id& id, cuid_hmac 
         switch (type){
             case AMDCUID_DEVICE_TYPE_PLATFORM:
             {
+                std::cout << "Looking up platform device in CUID file..." << std::endl;
                 // for platform, just return the first entry found
                 CuidFileEntry entry;
                 status = derived_file.find_by_device_type(AMDCUID_DEVICE_TYPE_PLATFORM, entry);
@@ -77,6 +78,7 @@ amdcuid_status_t CuidDevice::get_derived_cuid(amdcuid_derived_id& id, cuid_hmac 
             case AMDCUID_DEVICE_TYPE_GPU:
             // search by render node
             {
+                std::cout << "Looking up GPU device in CUID file by render node..." << std::endl;
                 auto gpu = reinterpret_cast<CuidGpu*>(const_cast<CuidDevice*>(this));
                 if (gpu) {
                     auto info = gpu->get_info();
@@ -92,6 +94,7 @@ amdcuid_status_t CuidDevice::get_derived_cuid(amdcuid_derived_id& id, cuid_hmac 
             case AMDCUID_DEVICE_TYPE_CPU:
                 // search by package_core_id
                 {
+                    std::cout << "Looking up CPU device in CUID file by package_core_id..." << std::endl;
                     auto cpu = reinterpret_cast<CuidCpu*>(const_cast<CuidDevice*>(this));
                     if (cpu) {
                         const auto& info = cpu->get_info();
@@ -109,6 +112,7 @@ amdcuid_status_t CuidDevice::get_derived_cuid(amdcuid_derived_id& id, cuid_hmac 
             case AMDCUID_DEVICE_TYPE_NIC:
                 // search by device node
                 {
+                    std::cout << "Looking up NIC device in CUID file by device node..." << std::endl;
                     auto nic = reinterpret_cast<CuidNic*>(const_cast<CuidDevice*>(this));
                     if (nic) {
                         const auto& info = nic->get_info();
