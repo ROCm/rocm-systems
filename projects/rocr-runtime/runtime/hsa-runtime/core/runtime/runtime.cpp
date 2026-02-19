@@ -378,7 +378,6 @@ hsa_status_t Runtime::FreeMemory(void* ptr) {
     //track the exporter BO to clear meta data via set_metadata
     //clear the set metadata here if possible if theres an existing ldrm_bo
     if (it->second.thunk_bo) {
-#if defined(__linux__)
       if (!thunkLoader()->IsDXG()) {
         //clear metadata
         HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemHandleFree(it->second.thunk_bo));
@@ -386,9 +385,6 @@ hsa_status_t Runtime::FreeMemory(void* ptr) {
           return HSA_STATUS_ERROR;
         }
       }
-#else
-      assert(!"Unimplemented!");
-#endif
     }
 
     allocation_map_.erase(it);
@@ -1413,7 +1409,7 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
 
       HsaExternalHandleDesc desc;
       desc.device_handle = agent_->libThunkDev();
-      desc.fd = reinterpret_cast<HSAint32>(dmabuf_fd);
+      desc.fd = static_cast<HSAint32>(dmabuf_fd);
       desc.type = HSA_EXTERNAL_HANDLE_DMA_BUF;
       desc.metadata = handle->handle[7];
       HsaHandleImportFlags hflags;
@@ -1543,9 +1539,9 @@ int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle,
 
       HsaExternalHandleDesc desc;
       desc.device_handle = agent->libThunkDev();
-      desc.fd = reinterpret_cast<HSAint32>(dmabuf_fd);
+      desc.fd = static_cast<HSAint32>(dmabuf_fd);
       desc.type = HSA_EXTERNAL_HANDLE_DMA_BUF;
-      desc.metadata = reinterpret_cast<HSAuint32>(shared_handle);
+      desc.metadata = static_cast<HSAuint32>(shared_handle);
       HsaHandleImportFlags hflags;
       hflags.ui32.IPCHandle = 1;
       hflags.ui32.SysMem = isDmabufSysmem;
@@ -1673,7 +1669,7 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
     if (status != HSAKMT_STATUS_SUCCESS) {
       return errCleanup(bo);
     }
-    status = HSAKMT_CALL(hsaKmtMemoryVaMap(bo, 0, reinterpret_cast<HSAuint64>(importSize),
+    status = HSAKMT_CALL(hsaKmtMemoryVaMap(bo, 0, static_cast<HSAuint64>(importSize),
                                            reinterpret_cast<HSAuint64>(cpuPtr), HSA_MEMORY_ACCESS_NONE));
     if (status != HSAKMT_STATUS_SUCCESS) {
       return errCleanup(bo);
@@ -1717,7 +1713,7 @@ hsa_status_t Runtime::IPCDetach(void* ptr) {
 #if defined(__linux__)
       if (it->second.thunk_bo) {
         HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemoryVaUnmap(it->second.thunk_bo, 0,
-                                                               reinterpret_cast<HSAuint64>(it->second.size),
+                                                               static_cast<HSAuint64>(it->second.size),
                                                                reinterpret_cast<HSAuint64>(ptr)));
         if (status != HSAKMT_STATUS_SUCCESS) {
           return HSA_STATUS_ERROR_INVALID_ARGUMENT;

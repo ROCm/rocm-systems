@@ -730,7 +730,7 @@ def _format_bad_page_info(bad_page_info, bad_page_count: ctypes.c_uint32) -> Lis
     return table_records
 
 
-def _format_bdf(amdsmi_bdf: amdsmi_wrapper.amdsmi_bdf_t) -> str:
+def _format_bdf(amdsmi_bdf: Union[amdsmi_wrapper.amdsmi_bdf_t, amdsmi_wrapper.struct_amdsmi_bdf_t]) -> str:
     """
     Format BDF struct to readable data.
 
@@ -741,10 +741,15 @@ def _format_bdf(amdsmi_bdf: amdsmi_wrapper.amdsmi_bdf_t) -> str:
     Returns:
         `str`: String containing BDF data in a readable format.
     """
-    domain = hex(amdsmi_bdf.domain_number)[2:].zfill(4)
-    bus = hex(amdsmi_bdf.bus_number)[2:].zfill(2)
-    device = hex(amdsmi_bdf.device_number)[2:].zfill(2)
-    function = hex(amdsmi_bdf.function_number)[2:]
+    try:
+        struct = amdsmi_bdf.struct_amdsmi_bdf_t
+    except AttributeError:
+        struct = amdsmi_bdf
+
+    domain = hex(struct.domain_number)[2:].zfill(4)
+    bus = hex(struct.bus_number)[2:].zfill(2)
+    device = hex(struct.device_number)[2:].zfill(2)
+    function = hex(struct.function_number)[2:]
     return domain + ":" + bus + ":" + device + "." + function
 
 
@@ -2199,14 +2204,17 @@ def amdsmi_get_cpu_socket_count():
     return sock_count.value
 
 def _amdsmi_init_enum_flag_is_valid(flag):
+    """Validate that flag contains only valid initialization bits."""
     if flag == amdsmi_wrapper.AMDSMI_INIT_ALL_PROCESSORS:
         return True
-    valid = False
+    
+    # Build mask of all valid flags (excluding ALL_PROCESSORS)
+    valid_mask = 0
     for enum_flag in AmdSmiInitFlags:
-        if (flag & enum_flag) == enum_flag:
-            valid = True
-            break
-    return valid
+        if enum_flag != AmdSmiInitFlags.INIT_ALL_PROCESSORS:
+            valid_mask |= enum_flag.value
+    # Check if flag contains only valid bits and is not zero
+    return flag != 0 and (flag & ~valid_mask) == 0
 
 def amdsmi_init(flag=AmdSmiInitFlags.INIT_AMD_GPUS):
     if not _amdsmi_init_enum_flag_is_valid(flag):
@@ -3260,15 +3268,20 @@ def amdsmi_get_gpu_total_ecc_count(
     }
 
 def amdsmi_get_gpu_cper_entries(
-    processor_handle: processor_handle_t,
+    device_handle: amdsmi_wrapper.amdsmi_processor_handle | Path,
+    # processor_handle: Union[amdsmi_wrapper.amdsmi_processor_handle, str],
     severity_mask: int,
     buffer_size: int = 4 * 1048576,
     cursor: int = 0
 ) -> Tuple[Dict[str, Any], int, List[Dict[str, Any]], int]:
 
-    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+    if isinstance(device_handle, Path):
+        if not os.path.isfile(device_handle):
+            raise AmdSmiParameterException(device_handle, str)
+        device_handle = ctypes.c_char_p(str(device_handle).encode("utf-8"))
+    elif not isinstance(device_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(
-            processor_handle, amdsmi_wrapper.amdsmi_processor_handle
+            device_handle, amdsmi_wrapper.amdsmi_processor_handle
         )
     if not isinstance(severity_mask, int):
         raise AmdSmiParameterException(severity_mask, int)
@@ -3290,7 +3303,7 @@ def amdsmi_get_gpu_cper_entries(
 
     # Call the underlying AMD-SMI API.
     status_code = amdsmi_wrapper.amdsmi_get_gpu_cper_entries(
-        processor_handle,
+        device_handle,
         ctypes.c_uint32(severity_mask),
         buf,
         ctypes.byref(buf_size),
@@ -3330,9 +3343,9 @@ def amdsmi_get_gpu_cper_entries(
         )
 
         serial_number = ""
-        if isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        if isinstance(device_handle, amdsmi_wrapper.amdsmi_processor_handle):
             try:
-                board_info = amdsmi_get_gpu_board_info(processor_handle)
+                board_info = amdsmi_get_gpu_board_info(device_handle)
                 serial_number = board_info.get('product_serial', "")
             except Exception:
                 serial_number = ""
@@ -5538,36 +5551,25 @@ def amdsmi_get_xgmi_plpd(
     )
 
     policies = []
-    for i in range(policy.num_supported):
+    for i in range(0, policy.num_supported):
         try:
-            # Access the policy entry directly
-            policy_entry = policy.policies[i]
-            policy_id = policy_entry.policy_id
-
-            # Handle the policy description more carefully
-            policy_desc_bytes = policy_entry.policy_description
-            if policy_desc_bytes:
-                # Convert ctypes array to bytes and decode
-                policy_desc = ctypes.string_at(policy_desc_bytes).decode('utf-8').rstrip('\x00')
-            else:
-                policy_desc = ""
-
+            policy_id = policy.policies[i].policy_id
+            desc = policy.policies[i].policy_description
             policies.append({
                 'policy_id': policy_id,
-                'policy_description': policy_desc
+                'policy_description': desc.decode()
             })
         except (UnicodeDecodeError, AttributeError, ValueError):
             # Fallback for problematic entries
             policies.append({
-                'policy_id': 0,  # Default fallback
+                'policy_id': 0,
                 'policy_description': ""
             })
 
-    # Get current policy ID correctly
     if policy.current < policy.num_supported:
         current_id = policy.policies[policy.current].policy_id
     else:
-        current_id = 0  # Fallback
+        current_id = 0
 
     return {
         "num_supported": policy.num_supported,
