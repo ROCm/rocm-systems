@@ -143,7 +143,7 @@ amdcuid_status_t CuidGpu::discover_single(amdcuid_gpu_info *gpu_info, const std:
     }
     else
     {
-        info.header.fields.gpu.vendor_id = (uint16_t)strtol(vendor.c_str(), nullptr, 0);
+        info.header.fields.gpu.vendor_id = (uint16_t)strtol(vendor.c_str(), nullptr, 16);
     }
 
     std::string device = CuidUtilities::read_sysfs_file(device_path_in_use + "/device");
@@ -157,7 +157,7 @@ amdcuid_status_t CuidGpu::discover_single(amdcuid_gpu_info *gpu_info, const std:
     }
     else
     {
-        info.header.fields.gpu.device_id = (uint16_t)strtol(device.c_str(), nullptr, 0);
+        info.header.fields.gpu.device_id = (uint16_t)strtol(device.c_str(), nullptr, 16);
     }
 
     std::string pci_class = CuidUtilities::read_sysfs_file(device_path_in_use + "/class");
@@ -187,7 +187,7 @@ amdcuid_status_t CuidGpu::discover_single(amdcuid_gpu_info *gpu_info, const std:
     }
     else
     {
-        info.header.fields.gpu.revision_id = (uint16_t)strtol(revision_id.c_str(), nullptr, 0);
+        info.header.fields.gpu.revision_id = (uint16_t)strtol(revision_id.c_str(), nullptr, 16);
     }
 
     // we use the original device path to get render node

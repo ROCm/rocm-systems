@@ -342,16 +342,13 @@ amdcuid_status_t amdcuid_refresh() {
     amdcuid_status_t status;
     if (geteuid() == 0)
     {
-        std::cout << "Performing device discovery for refresh..." << std::endl;
         status = mgr.get_devices_on_system();
         if (status != AMDCUID_STATUS_SUCCESS) {
             return status;
         }
-        std::cout << "Device discovery complete, building CUID index and saving to files..." << std::endl;
         mgr.build_cuid_index();
 
         // save updated device list to files
-        std::cout << "Saving updated device registry to CUID files..." << std::endl;
         status = mgr.save_registry_to_files();
         if (status != AMDCUID_STATUS_SUCCESS) {
             return status;
@@ -467,14 +464,6 @@ amdcuid_status_t amdcuid_query_device_property(amdcuid_id_t handle, amdcuid_quer
         case AMDCUID_QUERY_DEVICE_ID: {
                 if (*length < sizeof(uint16_t)) {
                     return AMDCUID_STATUS_INSUFFICIENT_SIZE;
-                }
-                if (data != nullptr) {
-                    status = device->get_device_id(*(uint16_t*)data);
-                }
-                else
-                {
-                    uint16_t dummy;
-                    status = device->get_device_id(dummy);
                 }
                 if (data != nullptr) {
                     status = device->get_device_id(*(uint16_t*)data);

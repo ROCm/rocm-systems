@@ -547,7 +547,7 @@ amdcuid_status_t CuidFile::save() {
             // Write hardware fingerprint (privileged file only)
             if (is_privileged_)
             {
-                file << "hardware_fingerprint=" << std::hex << entry.hardware_fingerprint << "\n";
+                file << "hardware_fingerprint=" << std::hex << std::setw(16) << std::setfill('0') << entry.hardware_fingerprint << "\n";
             }
 
             // Write device-specific fields
