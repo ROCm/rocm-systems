@@ -32,6 +32,7 @@
 struct MockedGotchaData
 {
     std::string tool_id;
+    int         verbose = 0;  // set by shmem_gotcha::configure() to silence gotcha output
 };
 
 struct GMockSHMEMGotcha
@@ -174,6 +175,8 @@ TEST_F(shmem_gotcha_test, component_lifecycle)
         .WillOnce(::testing::Return(false));
     EXPECT_CALL(*test_globals::g_shmem_gotcha_gmock, capacity())
         .WillRepeatedly(::testing::Return(180));
+    EXPECT_CALL(*test_globals::g_shmem_gotcha_gmock, at(::testing::_))
+        .WillRepeatedly(::testing::Return(nullptr));
     EXPECT_CALL(*test_globals::g_shmem_gotcha_gmock, get_initializer())
         .Times(1)
         .WillOnce(::testing::ReturnRef(initializer));
@@ -213,6 +216,9 @@ TEST_F(shmem_gotcha_test, test_start)
 
     EXPECT_CALL(*test_globals::g_shmem_gotcha_gmock, capacity())
         .WillRepeatedly(::testing::Return(180));
+
+    EXPECT_CALL(*test_globals::g_shmem_gotcha_gmock, at(::testing::_))
+        .WillRepeatedly(::testing::Return(nullptr));
 
     EXPECT_CALL(*test_globals::g_shmem_gotcha_gmock, get_initializer())
         .Times(1)
@@ -334,6 +340,8 @@ TEST_F(shmem_gotcha_test, test_configure_function_names)
         .WillOnce(::testing::Return(false));
     EXPECT_CALL(*test_globals::g_shmem_gotcha_gmock, capacity())
         .WillRepeatedly(::testing::Return(180));
+    EXPECT_CALL(*test_globals::g_shmem_gotcha_gmock, at(::testing::_))
+        .WillRepeatedly(::testing::Return(nullptr));
     EXPECT_CALL(*test_globals::g_shmem_gotcha_gmock, get_initializer())
         .Times(1)
         .WillOnce(::testing::ReturnRef(initializer));

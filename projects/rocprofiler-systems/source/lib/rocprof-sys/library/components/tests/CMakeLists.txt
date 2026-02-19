@@ -29,9 +29,9 @@ target_link_libraries(
         rocprofiler-systems-headers # defines.hpp
         rocprofiler-systems-googletest-library
         rocprofiler-systems-timemory
-        #rocprofiler-systems-libva # VA-API # keep for now, remove later
+        rocprofiler-systems-libva # needed for include path to va/va.h
         rocprofiler-systems-object-library
-        rocprofiler-systems-perfetto # Perfetto # keep for now, remove later
+        rocprofiler-systems-perfetto
         rocprofiler-systems-core-library
         rocprofiler-systems-logger # spdlog for headers pulled in via category_region -> trace_cache
     # rocprofiler-systems-compile-options
