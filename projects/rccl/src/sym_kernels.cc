@@ -354,9 +354,7 @@ const char* ncclSymkKernelIdToString(int kernelId) {
 }
 
 #ifndef GENERATE_SYM_KERNELS
-// Fallback stub when symmetric kernel generation is disabled.
-// Must match the declaration in `src/include/sym_kernels.h`.
-void* ncclSymkGetKernelPtr(ncclSymkKernelId /*kernelId*/, int/*ncclDevRedOp_t*/ /*red*/, ncclDataType_t /*ty*/) {
+void* ncclSymkGetKernelPtr(ncclSymkKernelId kernelId, int/*ncclDevRedOp_t*/ red, ncclDataType_t ty) {
   return nullptr;
 }
 #endif

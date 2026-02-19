@@ -141,11 +141,6 @@ Optional third-party packages
     (By default, if ROCm Systems Profiler cannot find an OpenMPI MPI distribution, it uses a local copy
     of the OpenMPI ``mpi.h``.)
 
-* UCX
-
-  * ``ROCPROFSYS_USE_UCX`` enables UCX (Unified Communication X) support for tracing UCX communication functions
-    used as a transport layer for MPI and other communication libraries
-
 .. csv-table::
    :header: "Third-Party Library", "CMake Enable Option"
    :widths: 15, 45
@@ -154,7 +149,6 @@ Optional third-party packages
    "PAPI", "``ROCPROFSYS_USE_PAPI`` (default: ON)"
    "MPI", "``ROCPROFSYS_USE_MPI`` (default: OFF)"
    "MPI (header-only)", "``ROCPROFSYS_USE_MPI_HEADERS`` (default: ON)"
-   "UCX", "``ROCPROFSYS_USE_UCX`` (default: ON)"
 
 Installing Dyninst
 -----------------------------------
@@ -300,11 +294,12 @@ UCX support within ROCm Systems Profiler
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 ROCm Systems Profiler supports tracing UCX (Unified Communication X) communication functions
-when ``ROCPROFSYS_USE_UCX`` is enabled (default: ON). UCX is a high-performance communication
+when ``ROCPROFSYS_USE_UCX`` is enabled. **UCX tracing is disabled by default** and must be explicitly 
+enabled at runtime by setting ``ROCPROFSYS_USE_UCX=ON``. UCX is a high-performance communication
 framework that serves as a transport layer for MPI and other communication libraries, providing
 optimized point-to-point and collective communication operations.
 
-When UCX support is enabled, ROCm Systems Profiler can automatically intercept and trace UCX
+When UCX support is enabled at runtime, ROCm Systems Profiler can automatically intercept and trace UCX
 communication functions such as ``ucp_tag_send``, ``ucp_tag_recv``, and other UCP (Unified
 Communication Protocol) and UCT (Unified Communication Transport) layer operations. This allows
 for detailed analysis of communication patterns and performance in applications using UCX as

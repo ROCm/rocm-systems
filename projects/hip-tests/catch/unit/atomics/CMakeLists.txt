@@ -19,7 +19,7 @@
 # THE SOFTWARE.
 
 if(HIP_PLATFORM MATCHES "amd")
-    set(TEST_SRC
+  set(TEST_SRC
       atomicAnd.cc
       atomicAnd_system.cc
       atomicOr.cc
@@ -30,9 +30,7 @@ if(HIP_PLATFORM MATCHES "amd")
       atomicMin_system.cc
       atomicMax.cc
       atomicMax_system.cc
-      safeAtomicMin.cc
       unsafeAtomicMin.cc
-      safeAtomicMax.cc
       unsafeAtomicMax.cc
       __hip_atomic_fetch_min.cc
       __hip_atomic_fetch_max.cc
@@ -41,7 +39,6 @@ if(HIP_PLATFORM MATCHES "amd")
       sequential_consistency.cc
       atomicAdd.cc
       atomicAdd_system.cc
-      unsafeAtomicAdd.cc
       safeAtomicAdd.cc
       atomicSub.cc
       atomicSub_system.cc
@@ -59,15 +56,24 @@ if(HIP_PLATFORM MATCHES "amd")
       atomicDec.cc
     )
 
+ if(NOT ENABLE_SPIRV)
+    set(SPIRV_INCOMPATIBLE_TESTS
+      safeAtomicMin.cc
+      safeAtomicMax.cc
+      unsafeAtomicAdd.cc
+    )
+    set(TEST_SRC ${TEST_SRC} ${SPIRV_INCOMPATIBLE_TESTS})
+  endif()
+
   hip_add_exe_to_target(NAME AtomicsTest
                         TEST_SRC ${TEST_SRC}
                         TEST_TARGET_NAME build_tests
                         LINKER_LIBS hiprtc::hiprtc)
 
-if(UNIX)
-  set(EXPECTED_ERRORS 40)
+  if(UNIX)
+    set(EXPECTED_ERRORS 40)
 
-  file(GLOB NEGATIVE_TEST_SRC
+    file(GLOB NEGATIVE_TEST_SRC
         "atomicAnd_negative_kernels.cc"
         "atomicOr_negative_kernels.cc"
         "atomicXor_negative_kernels.cc"
@@ -82,69 +88,7 @@ if(UNIX)
         "atomicExch_negative_kernels.cc"
         "atomicExch_system_negative_kernels.cc")
 
-  file(COPY ${NEGATIVE_TEST_SRC} DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/src)
-  set_property(GLOBAL APPEND PROPERTY G_INSTALL_SRC_FILES ${NEGATIVE_TEST_SRC})
- # add_test(NAME Unit_atomicAnd_Negative_Parameters
- #         COMMAND ${Python3_EXECUTABLE} ../compileAndCaptureOutput.py
- #         ./src ${HIP_PLATFORM} ${HIP_PATH}
- #         atomicAnd_negative_kernels.cc ${EXPECTED_ERRORS})
-
- # add_test(NAME Unit_atomicOr_Negative_Parameters
- #         COMMAND ${Python3_EXECUTABLE} ../compileAndCaptureOutput.py
- #         ./src ${HIP_PLATFORM} ${HIP_PATH}
- #         atomicOr_negative_kernels.cc ${EXPECTED_ERRORS})
-
- # add_test(NAME Unit_atomicXor_Negative_Parameters
- #         COMMAND ${Python3_EXECUTABLE} ../compileAndCaptureOutput.py
- #         ./src ${HIP_PLATFORM} ${HIP_PATH}
- #         atomicXor_negative_kernels.cc ${EXPECTED_ERRORS})
-
- # add_test(NAME Unit_atomicMin_Negative_Parameters
- #         COMMAND ${Python3_EXECUTABLE} ../compileAndCaptureOutput.py
- #         ./src ${HIP_PLATFORM} ${HIP_PATH}
- #         atomicMin_negative_kernels.cc 42)
-
- # add_test(NAME Unit_atomicMax_Negative_Parameters
- #         COMMAND ${Python3_EXECUTABLE} ../compileAndCaptureOutput.py
- #         ./src ${HIP_PLATFORM} ${HIP_PATH}
- #         atomicMax_negative_kernels.cc 42)
-
-	#add_test(NAME Unit_AtomicBuiltins_Negative_Parameters
- #         COMMAND ${Python3_EXECUTABLE} ../compileAndCaptureOutput.py
- #         ./src ${HIP_PLATFORM} ${HIP_PATH}
- #         atomic_builtin_kernels.cc 60 27)
-
- #         add_test(NAME Unit_atomicAdd_Negative_Parameters
- #         COMMAND ${Python3_EXECUTABLE} ../compileAndCaptureOutput.py
- #         ./src ${HIP_PLATFORM} ${HIP_PATH}
- #         atomicAdd_negative_kernels.cc 48)
- # add_test(NAME Unit_atomicSub_Negative_Parameters
- #         COMMAND ${Python3_EXECUTABLE} ../compileAndCaptureOutput.py
- #         ./src ${HIP_PLATFORM} ${HIP_PATH}
- #         atomicSub_negative_kernels.cc 48)
- # add_test(NAME Unit_atomicInc_Negative_Parameters
- #         COMMAND ${Python3_EXECUTABLE} ../compileAndCaptureOutput.py
- #         ./src ${HIP_PLATFORM} ${HIP_PATH}
- #         atomicInc_negative_kernels.cc 8)
-
- # add_test(NAME Unit_atomicDec_Negative_Parameters
- #         COMMAND ${Python3_EXECUTABLE} ../compileAndCaptureOutput.py
- #         ./src ${HIP_PLATFORM} ${HIP_PATH}
- #         atomicDec_negative_kernels.cc 8)
-
- # add_test(NAME Unit_atomicCAS_Negative_Parameters
- #         COMMAND ${Python3_EXECUTABLE} ../compileAndCaptureOutput.py
- #         ./src ${HIP_PLATFORM} ${HIP_PATH}
- #         atomicCAS_negative_kernels.cc 48)
-
- # add_test(NAME Unit_atomicExch_Negative_Parameters
- #          COMMAND ${Python3_EXECUTABLE} ../compileAndCaptureOutput.py
- #          ./src ${HIP_PLATFORM} ${HIP_PATH}
- #          atomicExch_negative_kernels.cc 40)
-
- # add_test(NAME Unit_atomicExch_system_Negative_Parameters
- #          COMMAND ${Python3_EXECUTABLE} ../compileAndCaptureOutput.py
- #          ./src ${HIP_PLATFORM} ${HIP_PATH}
- #          atomicExch_system_negative_kernels.cc 40)
-endif()
+    file(COPY ${NEGATIVE_TEST_SRC} DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/src)
+    set_property(GLOBAL APPEND PROPERTY G_INSTALL_SRC_FILES ${NEGATIVE_TEST_SRC})
+  endif()
 endif()
