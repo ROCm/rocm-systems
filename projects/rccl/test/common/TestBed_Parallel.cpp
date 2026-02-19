@@ -263,8 +263,17 @@ void TestBed::RunSimpleSweepParallel(std::vector<ncclFunc_t>     const& funcType
     for (int isMultiProcess : ev.GetIsMultiProcessList())
     for (int ranksPerGpu = 1; ranksPerGpu <= ev.maxRanksPerGpu; ++ranksPerGpu)
     {
+        auto start = std::chrono::steady_clock::now();
+
         // Create a test job for this GPU configuration
         SweepTestJob job;
+
+        if (config.verboseLogging)
+        {
+            auto afterStruct = std::chrono::steady_clock::now();
+            INFO("Time to create SweepTestJob struct: %ld us\n",
+                 std::chrono::duration_cast<std::chrono::microseconds>(afterStruct - start).count());
+        }
         job.numGpus = numGpus;
         job.isMultiProcess = isMultiProcess;
         job.ranksPerGpu = ranksPerGpu;
@@ -302,7 +311,17 @@ void TestBed::RunSimpleSweepParallel(std::vector<ncclFunc_t>     const& funcType
             100 - (numGpus * 10)  // Priority: larger GPU counts first
         );
 
+        auto beforeSubmit = std::chrono::steady_clock::now();
         scheduler.submitJob(testJob);
+
+        if (config.verboseLogging)
+        {
+            auto afterSubmit = std::chrono::steady_clock::now();
+            INFO("Time to submitJob: %ld us\n",
+                 std::chrono::duration_cast<std::chrono::microseconds>(afterSubmit - beforeSubmit).count());
+            INFO("Total time for this iteration: %ld us\n",
+                 std::chrono::duration_cast<std::chrono::microseconds>(afterSubmit - start).count());
+        }
     }
 
     // Run all jobs with GPU-aware scheduling
