@@ -45,6 +45,8 @@ The documentation source files reside in the [`/docs`](/docs) folder of this rep
 - HSA
 - Pthreads
 - MPI
+- RCCL
+- UCX
 - Kokkos-Tools (KokkosP)
 - OpenMP-Tools (OMPT)
 
