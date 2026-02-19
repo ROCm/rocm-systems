@@ -20,8 +20,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Added
 
-* Native tool to perform counter collection using ROCprofiler-SDK public API. It is only supported for ROCm version 7.0.0 (and later).
-  * Native tool is now the default for counter collection.
+* Native tool to perform counter collection using the ROCprofiler-SDK public API. It is supported starting with ROCm version 7.0.0 and later
+  * Native tool is now the default method for counter collection.
   * Native tool for counter collection will not be used under the following conditions:
     * Specific profiler is provided through the ``ROCPROF`` environment variable.
     * ``--no-native-tool`` option is provided, forcing usage of the default profiler.
@@ -41,9 +41,9 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * ``--output-directory`` option in profile mode to provide parameterized output directory for the profiling data.
 
-* Detection of MPI ranks while profiling and creation of output directories based on MPI rank.
+* Automatic MPI rank detection during profiling, with output directories created per MPI rank.
 
-* Added `--experimental` flag to enable experimental features that are under development. This flag is required when using any experimental features.
+* `--experimental` flag to enable in‑development experimental features. This flag is required when using any experimental functionality.
   * Use `rocprof-compute --experimental --help` to see currently available experimental features.
 
 * GPU benchmark locking for Roofline benchmarking to prevent concurrent profiling conflicts on the same GPU
@@ -51,16 +51,15 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
     * Processes attempting to benchmark on the same GPU will wait with user-visible feedback and execute sequentially
     * Lock applies specifically to the roofline.csv file generated during benchmarking, not other files generated in profile mode
 
-* Added missing metric descriptions for gfx950 architecture
-
-* Added missing metric descriptions for gfx942 architecture
+* Missing metric descriptions for gfx950 architecture
+* Missing metric descriptions for gfx942 architecture
 
 ### Changed
 
-* Default output format for the underlying ROCprofiler-SDK tool has been changed from ``csv`` to ``rocpd``.
-  * If the ROCprofiler-SDK ``rocpd`` public library is not available, will fall back to ``csv`` format
+* The default output format for the underlying ROCprofiler-SDK tool has been changed from ``csv`` to ``rocpd``.
+  * If the ROCprofiler-SDK ``rocpd`` public library is not available, the tool will fall back to ``csv`` format.
 
-* Option ``--rocprofiler-sdk-library-path`` has been changed to ``--rocprofiler-sdk-tool-path`` to better reflect the fact that we provide flexibility in choosing the path to ROCprofiler-SDK tool (librocprofiler-sdk-tool.so) and not the library.
+* Changed the option ``--rocprofiler-sdk-library-path`` to ``--rocprofiler-sdk-tool-path`` to more accurately describe that it selects the path to the ROCprofiler-SDK tool (librocprofiler-sdk-tool.so) and not the library.
 
 * Standalone roofline (--roof-only option) in profile mode now creates HTML file output instead of PDF file output for roofline charts
 
@@ -73,14 +72,11 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * Warnings issued only when relative error exceeds 1% (anomaly detection)
   * Added FAQ documentation explaining the "Counter variance corrected" warning
 
-* Fixed the meaning of --dispatch option in profile mode in argparser to convey the fact that it control which iterations of the kernel to profile and not which dispatch ids to profile.
+* Corrected the meaning of ``--dispatch`` option in profile mode in ``argparser`` to clarify that it controls which kernel iterations to profile and not which dispatch IDs to profile.
 
 * Corrected peak VALU Roofline profiling and analysis by removing `FP8` VALU and `BF16` VALU benchmarking that was erroneously added during implementation of these datatypes into roofline feature.
 
-* Fix the functioning of --dispatch option to act as 1-based index and ensure that correct kernel iterations are being profiled
-
-* Fixed issue where detected max memory clock from amd-smi interface was using max gfx clock
-  * Fixed issue where values detected from amd-smi were wrong when some GPU devices were hidden using ROCR or HIP environment variables
+* Corrected the functioning of the ``--dispatch`` option to act as a 1-based index and ensure that correct kernel iterations are being profiled.
 
 * Analysis mode bugfixes
   * Improved warnings when metrics could not be calculated due to missing counter data
@@ -89,7 +85,9 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Fix issue where counter collection data was empty when profiling workload which spawn multiple child processes
 
-* Fix issue where dispatch filtering in a range (e.g. >2) was not working
+* Fixed an issue where the maximum memory clock detected from the ``amd-smi`` interface incorrectly used the max gfx clock.
+
+* Fixed the issue of incorrect values from ``amd-smi`` when some GPU devices were hidden by ROCR or HIP environment variables.
 
 * Fix redundant warnings for compute/memory partition not found for < MI 300 series GPUs by skipping partition checks
 
@@ -106,6 +104,10 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 ### Deprecated
 
 * ``--path`` and ``--subpath`` have been deprecated and replaced with a unified ``--output-directory``
+
+### Upcoming changes
+
+* ``--path`` and ``--subpath` options will be removed in a future release.
 
 ## ROCm Compute Profiler 3.4.0 for ROCm 7.2.0
 
