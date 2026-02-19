@@ -469,6 +469,10 @@ def show_torch_operator_hierarchy(
                 kernel_name = process_single_kernel_name(
                     full_kernel_name, kernel_verbose
                 )
+            # Fallback: if template brackets remain, shortener didn't collapse them;
+            # use simple extraction so listing stays readable (e.g. "vectorized_elementwise_kernel").
+            if "<" in kernel_name:
+                kernel_name = extract_kernel_name(full_kernel_name)
 
             if kernel_name not in kernel_counts:
                 kernel_counts[kernel_name] = 0
