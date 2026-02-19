@@ -2615,7 +2615,7 @@ get_rocm_events_info()
 extern "C"
 {
     rocprofiler_tool_configure_result_t* rocprofiler_configure(
-        uint32_t version, const char* runtime_version, uint32_t priority,
+        uint32_t version, const char* runtime_version, [[maybe_unused]] uint32_t priority,
         rocprofiler_client_id_t* id)
     {
         // only activate once
@@ -2694,7 +2694,7 @@ extern "C"
     }
 
     rocprofiler_tool_configure_attach_result_t* rocprofiler_configure_attach(
-        uint32_t version, const char* runtime_version, uint32_t priority,
+        uint32_t version, const char* runtime_version, [[maybe_unused]] uint32_t priority,
         rocprofiler_client_id_t* id)
     {
         if(!rocprofsys::config::settings_are_configured() &&
