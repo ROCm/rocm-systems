@@ -4,13 +4,11 @@ on:
   pull_request:
     branches: [develop]
     paths:
-      - 'projects/device-metrics-exporter/**'
       - 'projects/amdsmi/**'
       - '.github/workflows/dme-amdsmi-ci.yml'
   push:
     branches: [develop]
     paths:
-      - 'projects/device-metrics-exporter/**'
       - 'projects/amdsmi/**'
       - '.github/workflows/dme-amdsmi-ci.yml'
   workflow_dispatch:
@@ -81,7 +79,7 @@ jobs:
 
       - name: Validate checkout workspace
         run: |
-          set -euo pipefail
+          set -eu
           if [ ! -d "$GITHUB_WORKSPACE" ]; then
             echo "GITHUB_WORKSPACE missing: $GITHUB_WORKSPACE"
             exit 1
@@ -90,7 +88,7 @@ jobs:
 
       - name: Checkout DME + sync AMDSMI source
         run: |
-          set -euo pipefail
+          set -eu
           rm -rf "$DME_DIR"
           git clone --recurse-submodules "$DME_REPO" "$DME_DIR"
           git -C "$DME_DIR" submodule update --init --recursive
@@ -246,7 +244,7 @@ jobs:
 
       - name: Validate checkout workspace
         run: |
-          set -euo pipefail
+          set -eu
           if [ ! -d "$GITHUB_WORKSPACE" ]; then
             echo "GITHUB_WORKSPACE missing: $GITHUB_WORKSPACE"
             exit 1
@@ -255,7 +253,7 @@ jobs:
 
       - name: Checkout DME + sync AMDSMI source
         run: |
-          set -euo pipefail
+          set -eu
           rm -rf "$DME_DIR"
           git clone --recurse-submodules "$DME_REPO" "$DME_DIR"
           git -C "$DME_DIR" submodule update --init --recursive
@@ -274,7 +272,7 @@ jobs:
 
       - name: Build + Package + Install for Tests (DEB)
         run: |
-          set -euo pipefail
+          set -eu
           cd "$DME_DIR"
 
           make gpuagent-build
@@ -290,7 +288,7 @@ jobs:
       - name: Start Services + Smoke Test /metrics (DEB)
         shell: bash
         run: |
-          set -euo pipefail
+          set -eu
           mkdir -p /tmp/test-results-${{ matrix.os }}
 
           # Start gpuagent + exporter; service names per AMD docs
@@ -406,7 +404,7 @@ jobs:
 
       - name: Validate checkout workspace
         run: |
-          set -euo pipefail
+          set -eu
           if [ ! -d "$GITHUB_WORKSPACE" ]; then
             echo "GITHUB_WORKSPACE missing: $GITHUB_WORKSPACE"
             exit 1
@@ -415,7 +413,7 @@ jobs:
 
       - name: Checkout DME + sync AMDSMI source
         run: |
-          set -euo pipefail
+          set -eu
           rm -rf "$DME_DIR"
           git clone --recurse-submodules "$DME_REPO" "$DME_DIR"
           git -C "$DME_DIR" submodule update --init --recursive
@@ -559,7 +557,7 @@ jobs:
 
       - name: Validate checkout workspace
         run: |
-          set -euo pipefail
+          set -eu
           if [ ! -d "$GITHUB_WORKSPACE" ]; then
             echo "GITHUB_WORKSPACE missing: $GITHUB_WORKSPACE"
             exit 1
@@ -568,7 +566,7 @@ jobs:
 
       - name: Checkout DME + sync AMDSMI source
         run: |
-          set -euo pipefail
+          set -eu
           rm -rf "$DME_DIR"
           git clone --recurse-submodules "$DME_REPO" "$DME_DIR"
           git -C "$DME_DIR" submodule update --init --recursive
@@ -587,7 +585,7 @@ jobs:
 
       - name: Build + Package + Install for Tests (RPM)
         run: |
-          set -euo pipefail
+          set -eu
           cd "$DME_DIR"
           if [[ "${{ matrix.os }}" == "RHEL10" || "${{ matrix.os }}" == "AlmaLinux8" ]]; then
             export QA_RPATHS=$((0x0010 | 0x0002))
@@ -613,7 +611,7 @@ jobs:
       - name: Start Services + Smoke Test /metrics (RPM)
         shell: bash
         run: |
-          set -euo pipefail
+          set -eu
           mkdir -p /tmp/test-results-${{ matrix.os }}
 
           sudo systemctl daemon-reload || true
