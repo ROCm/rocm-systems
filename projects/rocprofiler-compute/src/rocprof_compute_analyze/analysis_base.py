@@ -175,7 +175,7 @@ class OmniAnalyze_Base:
         process_torch_trace_output(workload_path)
         torch_trace_dir = Path(workload_path) / "torch_trace"
         all_files = list(torch_trace_dir.glob("*.csv"))
-        # Load each CSV and compute total duration for ordering (number by duration, highest first)
+        # Load each CSV and compute total duration for ordering ( highest first)
         file_df_duration: list[tuple[Path, pd.DataFrame, float]] = []
         for f in all_files:
             try:
