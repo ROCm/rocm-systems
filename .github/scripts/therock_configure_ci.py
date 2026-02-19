@@ -31,6 +31,7 @@ def set_github_output(d: Mapping[str, str]):
     with open(step_output_file, "a") as f:
         f.writelines(f"{k}={v}" + "\n" for k, v in d.items())
 
+
 def retry(max_attempts, delay_seconds, exceptions):
     def decorator(func):
         def newfn(*args, **kwargs):
@@ -39,14 +40,19 @@ def retry(max_attempts, delay_seconds, exceptions):
                 try:
                     return func(*args, **kwargs)
                 except exceptions as e:
-                    print(f'Exception {str(e)} thrown when attempting to run , attempt {attempt} of {max_attempts}')
+                    print(
+                        f"Exception {str(e)} thrown when attempting to run , attempt {attempt} of {max_attempts}"
+                    )
                     attempt += 1
                     if attempt < max_attempts:
                         backoff = delay_seconds * (2 ** (attempt - 1))
                         time.sleep(backoff)
             return func(*args, **kwargs)
+
         return newfn
+
     return decorator
+
 
 @retry(max_attempts=3, delay_seconds=2, exceptions=(TimeoutError))
 def get_modified_paths(base_ref: str) -> Optional[Iterable[str]]:
@@ -155,14 +161,22 @@ def retrieve_projects(args):
     # collect the associated subtree to project
     for subtree in subtrees:
         if subtree in subtree_to_project_map:
-            projects.add(subtree_to_project_map.get(subtree))
+            value = subtree_to_project_map[subtree]
+            if isinstance(value, list):
+                projects.update(value)
+            else:
+                projects.add(value)
 
     # retrieve the subtrees to checkout, cmake options to build, and projects to test
     project_to_run = []
-    # Currently as we have no tests, we just build all packages available if an applicable change is made.
     # As we start to get an idea of test times, we can divide test jobs.
+    base_projects = {"core", "profiler"}
     if projects:
         for project in ["all"]:
+            if project in project_map:
+                project_to_run.append(project_map.get(project))
+        # Append additional project groups beyond the base ones (e.g. systems-profiler)
+        for project in sorted(projects - base_projects):
             if project in project_map:
                 project_to_run.append(project_map.get(project))
 

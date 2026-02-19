@@ -14,7 +14,7 @@ subtree_to_project_map = {
     "projects/rocprofiler-compute": "profiler",
     "projects/rocprofiler-register": "profiler",
     "projects/rocprofiler-sdk": "profiler",
-    "projects/rocprofiler-systems": "profiler",
+    "projects/rocprofiler-systems": ["profiler", "systems-profiler"],
     "projects/rocprofiler": "profiler",
     "projects/rocr-runtime": "core",
     "projects/roctracer": "profiler",
@@ -28,6 +28,10 @@ project_map = {
     "profiler": {
         "cmake_options": "-DTHEROCK_ENABLE_PROFILER=ON -DTHEROCK_ENABLE_ALL=OFF",
         "projects_to_test": "rocprofiler-tests",
+    },
+    "systems-profiler": {
+        "cmake_options": "-DTHEROCK_ENABLE_CORE=ON -DTHEROCK_ENABLE_PROFILER=ON -DTHEROCK_ENABLE_ALL=OFF -DTHEROCK_ENABLE_HIP_RUNTIME=ON -DTHEROCK_ENABLE_COMPILER=ON -DTHEROCK_ENABLE_RCCL=ON",
+        "projects_to_test": "rocprofiler-systems-tests",
     },
     "all": {
         "cmake_options": "-DTHEROCK_ENABLE_CORE=ON -DTHEROCK_ENABLE_PROFILER=ON -DTHEROCK_ENABLE_ALL=OFF",
