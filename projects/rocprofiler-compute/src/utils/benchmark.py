@@ -734,20 +734,16 @@ extern "C" __global__ void mfma_f16(int iter, float *dummy)
 
 mfma_bf16_src = vector_types_src + """
 
-using f32_16vec = __attribute__((__vector_size__(16 * sizeof(float)))) float;
-using bf16_4vec = __attribute__((__vector_size__(2 * sizeof(__2i16))))  short;
-using bf16_2vec = __attribute__((__vector_size__(1 * sizeof(__2i16))))  short;
-
 extern "C" __global__ void mfma_bf16(int iter, float *dummy)
 {
     // Output: 16 F32 registers
-    f32_16vec result = {0};
+    vec16<float> result = {0};
 
 // MI100/MI200
 #if defined(__gfx908__) or defined(__gfx90a__)
     // Input: 1 F32 register
     // builtin mfma expects 2 short registers
-    bf16_2vec a;
+    vec16<short> a;
     a[1] = a[0]= threadIdx.x;
 
     // CDNA1/2: v_mfma_f32_32x32x4bf16 ops: 32x32x4x2 = 8192
@@ -801,14 +797,12 @@ extern "C" __global__ void mfma_f64(int iter, float *dummy)
 }
 """
 
-mfma_i8_src = """
-using int32_8vec = __attribute__((__vector_size__(8 * sizeof(int)))) int;
-using int32_16vec = __attribute__((__vector_size__(16 * sizeof(int)))) int;
+mfma_i8_src = vector_types_src + """
 
 extern "C" __global__ void mfma_i8(int iter, float *dummy)
 {
     // Output: 16 I32 registers
-    int32_16vec result = {0};
+    vec16<int> result = {0};
 
 // MI100/MI200
 #if defined(__gfx908__) or defined(__gfx90a__)
