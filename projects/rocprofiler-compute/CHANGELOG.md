@@ -39,6 +39,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Added missing metric descriptions for gfx950 architecture
 
+* Added missing metric descriptions for gfx942 architecture
+
 ### Changed
 
 * Default output format for the underlying ROCprofiler-SDK tool has been changed from ``csv`` to ``rocpd``.
