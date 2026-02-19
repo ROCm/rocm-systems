@@ -14,6 +14,8 @@
 #include <chrono>
 #include <mutex>
 #include <string>
+#include <thread>
+#include <atomic>
 #include <sys/types.h>
 
 namespace RcclUnitTesting
