@@ -139,7 +139,7 @@ utilization, and power metrics.
 * Performance states and limits, such as available frequency levels, clock
   throttling, and voltage controls
 
-These metrics are retrieved through the ROCm SMI C API, which exposes a stable,
+These metrics are retrieved through the AMD SMI C API, which exposes a stable,
 scriptable interface for system and performance monitoring tools.
 
 ``amd-smi`` also supports management operations, including:

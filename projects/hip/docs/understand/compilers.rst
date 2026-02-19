@@ -72,9 +72,9 @@ models, and compute features are supported by that generation of hardware.
 
 A GFX version is expressed as a short string, for example:
 
-* ``gfx90a`` — CDNA 2 (MI250 series)
-* ``gfx942`` — CDNA 3 (MI300 series)
-* ``gfx1100`` — RDNA 3 (RX 7900 series)
+* ``gfx90a`` — CDNA2 (MI250 series)
+* ``gfx942`` — CDNA3 (MI300 series)
+* ``gfx1100`` — RDNA3 (RX 7900 series)
 
 Most GFX IP versions are composed of three numerical fields, which act roughly
 like a major-minor-subminor versioning system:
