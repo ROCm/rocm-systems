@@ -81,7 +81,7 @@ Panel Config:
           unit: Cycles per Request
   - metric_table:
       id: 3003
-      title: Helper Raw Counter Value
+      title: Raw Counter Value
       header:
         metric: Metric
         value: Avg
