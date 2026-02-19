@@ -652,6 +652,196 @@ static void handle_ipc_open_event_handle(int fd, uint32_t request_id,
     send_response(fd, HIP_OP_IPC_OPEN_EVENT_HANDLE, request_id, &resp, sizeof(resp));
 }
 
+/* ============================================================================
+ * Memory Pool Operations
+ * ============================================================================ */
+
+static void handle_mem_pool_create(int fd, uint32_t request_id,
+                                   const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteMemPoolCreateRequest)) {
+        send_simple_response(fd, HIP_OP_MEM_POOL_CREATE, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteMemPoolCreateRequest* req = (const HipRemoteMemPoolCreateRequest*)payload;
+
+    hipMemPoolProps props;
+    memset(&props, 0, sizeof(props));
+    props.allocType = (hipMemAllocationType)req->alloc_type;
+    props.handleTypes = (hipMemHandleType)req->handle_types;
+    props.location.type = (hipMemLocationType)req->location_type;
+    props.location.id = req->location_id;
+    props.maxSize = req->max_size;
+
+    hipMemPool_t memPool = NULL;
+    hipError_t err = hipMemPoolCreate(&memPool, &props);
+    LOG_DEBUG("MemPoolCreate: allocType=%d, device=%d, pool=%p, err=%d",
+              req->alloc_type, req->location_id, memPool, err);
+
+    HipRemoteMemPoolCreateResponse resp = {
+        .header = { .error_code = (int32_t)err },
+        .mem_pool = (uint64_t)(uintptr_t)memPool
+    };
+    send_response(fd, HIP_OP_MEM_POOL_CREATE, request_id, &resp, sizeof(resp));
+}
+
+static void handle_mem_pool_destroy(int fd, uint32_t request_id,
+                                    const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteMemPoolDestroyRequest)) {
+        send_simple_response(fd, HIP_OP_MEM_POOL_DESTROY, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteMemPoolDestroyRequest* req = (const HipRemoteMemPoolDestroyRequest*)payload;
+    hipMemPool_t memPool = (hipMemPool_t)(uintptr_t)req->mem_pool;
+
+    hipError_t err = hipMemPoolDestroy(memPool);
+    LOG_DEBUG("MemPoolDestroy: pool=%p, err=%d", memPool, err);
+
+    send_simple_response(fd, HIP_OP_MEM_POOL_DESTROY, request_id, err);
+}
+
+static void handle_mem_pool_set_attribute(int fd, uint32_t request_id,
+                                          const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteMemPoolSetAttributeRequest)) {
+        send_simple_response(fd, HIP_OP_MEM_POOL_SET_ATTRIBUTE, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteMemPoolSetAttributeRequest* req = (const HipRemoteMemPoolSetAttributeRequest*)payload;
+    hipMemPool_t memPool = (hipMemPool_t)(uintptr_t)req->mem_pool;
+    hipMemPoolAttr attr = (hipMemPoolAttr)req->attr;
+    uint64_t value = req->value;
+
+    hipError_t err = hipMemPoolSetAttribute(memPool, attr, &value);
+    LOG_DEBUG("MemPoolSetAttribute: pool=%p, attr=%d, value=%lu, err=%d",
+              memPool, attr, (unsigned long)value, err);
+
+    send_simple_response(fd, HIP_OP_MEM_POOL_SET_ATTRIBUTE, request_id, err);
+}
+
+static void handle_mem_pool_get_attribute(int fd, uint32_t request_id,
+                                          const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteMemPoolGetAttributeRequest)) {
+        send_simple_response(fd, HIP_OP_MEM_POOL_GET_ATTRIBUTE, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteMemPoolGetAttributeRequest* req = (const HipRemoteMemPoolGetAttributeRequest*)payload;
+    hipMemPool_t memPool = (hipMemPool_t)(uintptr_t)req->mem_pool;
+    hipMemPoolAttr attr = (hipMemPoolAttr)req->attr;
+    uint64_t value = 0;
+
+    hipError_t err = hipMemPoolGetAttribute(memPool, attr, &value);
+    LOG_DEBUG("MemPoolGetAttribute: pool=%p, attr=%d, value=%lu, err=%d",
+              memPool, attr, (unsigned long)value, err);
+
+    HipRemoteMemPoolGetAttributeResponse resp = {
+        .header = { .error_code = (int32_t)err },
+        .value = value
+    };
+    send_response(fd, HIP_OP_MEM_POOL_GET_ATTRIBUTE, request_id, &resp, sizeof(resp));
+}
+
+static void handle_malloc_from_pool_async(int fd, uint32_t request_id,
+                                          const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteMallocFromPoolAsyncRequest)) {
+        send_simple_response(fd, HIP_OP_MALLOC_FROM_POOL_ASYNC, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteMallocFromPoolAsyncRequest* req = (const HipRemoteMallocFromPoolAsyncRequest*)payload;
+    hipMemPool_t memPool = (hipMemPool_t)(uintptr_t)req->mem_pool;
+    hipStream_t stream = (hipStream_t)(uintptr_t)req->stream;
+
+    void* devPtr = NULL;
+    hipError_t err = hipMallocFromPoolAsync(&devPtr, req->size, memPool, stream);
+    LOG_DEBUG("MallocFromPoolAsync: size=%lu, pool=%p, stream=%p, ptr=%p, err=%d",
+              (unsigned long)req->size, memPool, stream, devPtr, err);
+
+    HipRemoteMallocResponse resp = {
+        .header = { .error_code = (int32_t)err },
+        .device_ptr = (uint64_t)(uintptr_t)devPtr
+    };
+    send_response(fd, HIP_OP_MALLOC_FROM_POOL_ASYNC, request_id, &resp, sizeof(resp));
+}
+
+static void handle_mem_pool_trim_to(int fd, uint32_t request_id,
+                                    const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteMemPoolTrimToRequest)) {
+        send_simple_response(fd, HIP_OP_MEM_POOL_TRIM_TO, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteMemPoolTrimToRequest* req = (const HipRemoteMemPoolTrimToRequest*)payload;
+    hipMemPool_t memPool = (hipMemPool_t)(uintptr_t)req->mem_pool;
+
+    hipError_t err = hipMemPoolTrimTo(memPool, req->min_bytes_to_hold);
+    LOG_DEBUG("MemPoolTrimTo: pool=%p, minBytes=%lu, err=%d",
+              memPool, (unsigned long)req->min_bytes_to_hold, err);
+
+    send_simple_response(fd, HIP_OP_MEM_POOL_TRIM_TO, request_id, err);
+}
+
+static void handle_device_get_default_mem_pool(int fd, uint32_t request_id,
+                                               const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteDeviceGetMemPoolRequest)) {
+        send_simple_response(fd, HIP_OP_DEVICE_GET_DEFAULT_MEM_POOL, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteDeviceGetMemPoolRequest* req = (const HipRemoteDeviceGetMemPoolRequest*)payload;
+
+    hipMemPool_t memPool = NULL;
+    hipError_t err = hipDeviceGetDefaultMemPool(&memPool, req->device);
+    LOG_DEBUG("DeviceGetDefaultMemPool: device=%d, pool=%p, err=%d",
+              req->device, memPool, err);
+
+    HipRemoteDeviceGetMemPoolResponse resp = {
+        .header = { .error_code = (int32_t)err },
+        .mem_pool = (uint64_t)(uintptr_t)memPool
+    };
+    send_response(fd, HIP_OP_DEVICE_GET_DEFAULT_MEM_POOL, request_id, &resp, sizeof(resp));
+}
+
+static void handle_device_set_mem_pool(int fd, uint32_t request_id,
+                                       const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteDeviceSetMemPoolRequest)) {
+        send_simple_response(fd, HIP_OP_DEVICE_SET_MEM_POOL, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteDeviceSetMemPoolRequest* req = (const HipRemoteDeviceSetMemPoolRequest*)payload;
+    hipMemPool_t memPool = (hipMemPool_t)(uintptr_t)req->mem_pool;
+
+    hipError_t err = hipDeviceSetMemPool(req->device, memPool);
+    LOG_DEBUG("DeviceSetMemPool: device=%d, pool=%p, err=%d",
+              req->device, memPool, err);
+
+    send_simple_response(fd, HIP_OP_DEVICE_SET_MEM_POOL, request_id, err);
+}
+
+static void handle_device_get_mem_pool(int fd, uint32_t request_id,
+                                       const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteDeviceGetMemPoolRequest)) {
+        send_simple_response(fd, HIP_OP_DEVICE_GET_MEM_POOL, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteDeviceGetMemPoolRequest* req = (const HipRemoteDeviceGetMemPoolRequest*)payload;
+
+    hipMemPool_t memPool = NULL;
+    hipError_t err = hipDeviceGetMemPool(&memPool, req->device);
+    LOG_DEBUG("DeviceGetMemPool: device=%d, pool=%p, err=%d",
+              req->device, memPool, err);
+
+    HipRemoteDeviceGetMemPoolResponse resp = {
+        .header = { .error_code = (int32_t)err },
+        .mem_pool = (uint64_t)(uintptr_t)memPool
+    };
+    send_response(fd, HIP_OP_DEVICE_GET_MEM_POOL, request_id, &resp, sizeof(resp));
+}
+
 static void handle_stream_create(int fd, uint32_t request_id,
                                  const void* payload, size_t payload_size) {
     unsigned int flags = 0;
@@ -1488,6 +1678,35 @@ static void handle_client(int client_fd) {
                 break;
             case HIP_OP_IPC_OPEN_EVENT_HANDLE:
                 handle_ipc_open_event_handle(client_fd, header.request_id, payload, header.payload_length);
+                break;
+
+            /* Memory Pool operations */
+            case HIP_OP_MEM_POOL_CREATE:
+                handle_mem_pool_create(client_fd, header.request_id, payload, header.payload_length);
+                break;
+            case HIP_OP_MEM_POOL_DESTROY:
+                handle_mem_pool_destroy(client_fd, header.request_id, payload, header.payload_length);
+                break;
+            case HIP_OP_MEM_POOL_SET_ATTRIBUTE:
+                handle_mem_pool_set_attribute(client_fd, header.request_id, payload, header.payload_length);
+                break;
+            case HIP_OP_MEM_POOL_GET_ATTRIBUTE:
+                handle_mem_pool_get_attribute(client_fd, header.request_id, payload, header.payload_length);
+                break;
+            case HIP_OP_MALLOC_FROM_POOL_ASYNC:
+                handle_malloc_from_pool_async(client_fd, header.request_id, payload, header.payload_length);
+                break;
+            case HIP_OP_MEM_POOL_TRIM_TO:
+                handle_mem_pool_trim_to(client_fd, header.request_id, payload, header.payload_length);
+                break;
+            case HIP_OP_DEVICE_GET_DEFAULT_MEM_POOL:
+                handle_device_get_default_mem_pool(client_fd, header.request_id, payload, header.payload_length);
+                break;
+            case HIP_OP_DEVICE_SET_MEM_POOL:
+                handle_device_set_mem_pool(client_fd, header.request_id, payload, header.payload_length);
+                break;
+            case HIP_OP_DEVICE_GET_MEM_POOL:
+                handle_device_get_mem_pool(client_fd, header.request_id, payload, header.payload_length);
                 break;
 
             case HIP_OP_MEMCPY_3D:
