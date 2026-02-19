@@ -15,7 +15,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Iteration multiplexing to collect counters in single application run
 
-* Added `--torch-trace` option to enable mapping of PyTorch operators to collected counter values during profiling.
+* Added `--torch-trace` option to enable mapping of PyTorch operators to collected counter values during profiling. Torch-trace is an experimental feature and requires ``--experimental`` for both profile and analyze modes (see ``--experimental`` below).
 
 * Runtime compilation of Roofline benchmarking:
   * GPU kernels from [rocm-amdgpu-bench](https://github.com/ROCm/rocm-amdgpu-bench) repository are moved into the ROCm Compute Profiler and are compiled at runtime using local HIP and HIPRTC Python wrappers.
@@ -32,7 +32,14 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Added `--experimental` flag to enable experimental features that are under development. This flag is required when using any experimental features.
   * Use `rocprof-compute --experimental --help` to see currently available experimental features.
 
+* GPU benchmark locking for Roofline benchmarking to prevent concurrent profiling conflicts on the same GPU
+    * Multiple rocprof-compute processes can safely profile on different GPUs in parallel
+    * Processes attempting to benchmark on the same GPU will wait with user-visible feedback and execute sequentially
+    * Lock applies specifically to the roofline.csv file generated during benchmarking, not other files generated in profile mode
+
 * Added missing metric descriptions for gfx950 architecture
+
+* Added missing metric descriptions for gfx942 architecture
 
 * Added `--membw-analysis` under experimental features to allow memory bandwidth specific profiling and analysis with metric block 30.
 

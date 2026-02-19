@@ -252,10 +252,6 @@ bool extractByteCodeBinary(const comgr_helper::ComgrDataSetUniqueHandle& inDataS
   size_t bufSize = (dataKind == AMD_COMGR_DATA_KIND_LOG) ? binarySize + 1 : binarySize;
 
   char* binary = new char[bufSize];
-  if (binary == nullptr) {
-    return false;
-  }
-
   if (amd::Comgr::get_data(binaryData.get(), &binarySize, binary) != AMD_COMGR_STATUS_SUCCESS) {
     delete[] binary;
     return false;
