@@ -1360,7 +1360,7 @@ def save_torch_trace_inputs(
         shutil.copyfile(src_marker, dst_marker)
         console_log(
             "torch trace",
-            "Moved counter collection and marker trace files"
+            "Moved counter collection and marker trace files "
             "to workload dir for PyTorch trace creation.",
         )
         console_log("Counter Collection: ", str(dst_counter))
