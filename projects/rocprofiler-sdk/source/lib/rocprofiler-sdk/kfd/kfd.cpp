@@ -1456,7 +1456,7 @@ handle_reporting(std::string_view event_data)
     ROCP_TRACE << fmt::format(
         "KFD event {} (operation={}) has {} contexts based on the domain filtering",
         static_cast<int>(event.kind),
-        static_cast<int>(event.operation),
+        event.operation,
         buffered_contexts.size());
 
     for(const auto& itr : buffered_contexts)
