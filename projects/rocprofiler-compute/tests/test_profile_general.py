@@ -3172,6 +3172,7 @@ skip_if_no_torch_gpu = pytest.mark.skipif(
     reason=("PyTorch and GPU access are required for this test"),
 )
 
+
 @skip_if_no_torch_gpu
 @pytest.mark.torch_trace
 def test_torch_trace_profile(
@@ -3367,9 +3368,7 @@ if __name__ == "__main__":
                 .apply(lambda x: "/" in str(x) or "::" in str(x))
                 .any()
             )
-        assert "Kernel_Name" in df.columns, (
-            f"Kernel_Name missing in {op_file}"
-        )
+        assert "Kernel_Name" in df.columns, f"Kernel_Name missing in {op_file}"
         assert df["Kernel_Name"].notnull().all() and (df["Kernel_Name"] != "").all(), (
             f"Empty Kernel_Name in {op_file}"
         )
