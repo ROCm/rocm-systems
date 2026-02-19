@@ -761,9 +761,9 @@ ncclResult_t rcclCommSetP2pShiftSize(struct ncclComm* comm) {
   int nChannelsLog2 = countOneBits(nP2pChannels-1);
   int shiftSize = rcclParamP2pChannelShiftSize();
 
-  // Use 'bit-reversal' equivalent for default/invalid shiftSize
-  if (shiftSize < 0 || shiftSize >= nChannelsLog2) {
-    comm->p2pChannelShiftSize = nChannelsLog2 - 1;
+  // Use bit-reversal for default/invalid shiftSize (device uses shiftSize==-1 for that path).
+  if (shiftSize >= nChannelsLog2) {
+    comm->p2pChannelShiftSize = -1;
   } else {
     comm->p2pChannelShiftSize = shiftSize;
   }
