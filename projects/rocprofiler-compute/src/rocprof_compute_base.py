@@ -71,6 +71,7 @@ class RocProfCompute:
         self.__version: dict[str, Optional[str]] = {"ver": None, "ver_pretty": None}
         self.__supported_archs = mi_gpu_specs.get_gpu_series_dict()
         self.__mspec: MachineSpecs  # to be initialized in load_soc_specs()
+        self.__parser: argparse.ArgumentParser = argparse.ArgumentParser(add_help=False)
 
         setup_console_handler()
         self.set_version()
@@ -91,12 +92,7 @@ class RocProfCompute:
         self.sanitize()
         self.handle_list_args()
 
-        if self.__args.mode is None:
-            parser.print_help(sys.stderr)
-            console_error(
-                "rocprof-compute requires you to pass a valid mode. Detected None."
-            )
-        elif self.__mode == "profile":
+        if self.__mode == "profile":
             self.detect_profiler()
         elif self.__mode == "analyze":
             self.detect_analyze()
@@ -148,6 +144,15 @@ class RocProfCompute:
             self.__analyze_mode = "cli"
 
     def sanitize(self) -> None:
+        if self.__args.mode is None and not (
+            getattr(self.__args, "list_metrics", False)
+            or getattr(self.__args, "list_blocks", False)
+        ):
+            self.__parser.print_help(sys.stderr)
+            console_error(
+                "rocprof-compute requires you to pass a valid mode. Detected None."
+            )
+
         block = False
         if (hasattr(self.__args, "filter_metrics") and self.__args.filter_metrics) or (
             hasattr(self.__args, "filter_blocks") and self.__args.filter_blocks
@@ -290,7 +295,7 @@ class RocProfCompute:
         experimental_requested: bool = prelim_args.experimental
 
         # Build full parser with experimental knowledge
-        parser = argparse.ArgumentParser(
+        self.__parser = argparse.ArgumentParser(
             description=(
                 "Command line interface for AMD's GPU profiler, ROCm Compute Profiler"
             ),
@@ -301,13 +306,13 @@ class RocProfCompute:
             usage="rocprof-compute [mode] [options]",
         )
         omniarg_parser(
-            parser,
+            self.__parser,
             config.rocprof_compute_home,
             self.__supported_archs,
             self.__version,
             experimental_requested,
         )
-        self.__args = parser.parse_args()
+        self.__args = self.__parser.parse_args()
 
         if self.__args.mode == "profile":
             self.handle_profile_args()
