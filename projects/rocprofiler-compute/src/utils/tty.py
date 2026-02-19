@@ -46,16 +46,6 @@ from utils.utils import (
 KERNEL_NAME_WRAP_WIDTH = 100
 
 
-def wrap_kernel_name(name: str) -> str:
-    """Wrap a kernel name at KERNEL_NAME_WRAP_WIDTH without truncation."""
-    return textwrap.fill(
-        name,
-        width=KERNEL_NAME_WRAP_WIDTH,
-        break_long_words=True,
-        break_on_hyphens=False,
-    )
-
-
 def string_multiple_lines(source: str, width: int, max_rows: int) -> str:
     """
     Adjust string with multiple lines by inserting '\n'
@@ -205,9 +195,10 @@ def is_roofline_shown(
                     kernel_name = metrics.get("name", f"Kernel {kernel_id}")
                     kernel_pct = 0
 
-                wrapped_name = wrap_kernel_name(kernel_name)
                 print(
-                    f"\nKernel {kernel_id}: {wrapped_name} ({kernel_pct:.1f}%)",
+                    f"\nKernel {kernel_id}: "
+                    f"{textwrap.fill(kernel_name, width=KERNEL_NAME_WRAP_WIDTH)}"
+                    f" ({kernel_pct:.1f}%)",
                     file=output,
                 )
 
@@ -309,7 +300,11 @@ def show_torch_operator_table(operator_name: str, df: pd.DataFrame) -> None:
         if display_df[col].dtype != "object":
             continue
         if col == "Kernel_Name":
-            display_df[col] = display_df[col].astype(str).apply(wrap_kernel_name)
+            display_df[col] = (
+                display_df[col]
+                .astype(str)
+                .apply(lambda x: textwrap.fill(x, width=KERNEL_NAME_WRAP_WIDTH))
+            )
             continue
         max_width = column_widths.get(col, column_widths["default"])
         display_df[col] = (
@@ -457,7 +452,9 @@ def process_table_data(
                 in ["pmc_kernel_top.csv", "pmc_dispatch_info.csv"]
                 and header == "Kernel_Name"
             ):
-                adjusted_names = base_df["Kernel_Name"].apply(wrap_kernel_name)
+                adjusted_names = base_df["Kernel_Name"].apply(
+                    lambda x: textwrap.fill(x, width=KERNEL_NAME_WRAP_WIDTH)
+                )
                 result_df = pd.concat([result_df, adjusted_names], axis=1)
             elif table_type == "raw_csv_table" and header == "Info":
                 for run_data in runs.values():
