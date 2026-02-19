@@ -445,8 +445,13 @@ def show_torch_operator_hierarchy(
         if has_duration and op in prefix_stats:
             total_ms, count = prefix_stats[op]
             stats_str = f" (total_duration: {total_ms:.2f} ms, count: {count})"
-  kernel_header = "Kernels Launched" if not has_duration else "Kernels Launched (duration)"                                                                              
-  print(f"{hierarchy_indent}\n{hierarchy_indent}{'Operator Hierarchy'.ljust(inner_width)}{kernel_header}")
+        kernel_header = (
+            "Kernels Launched" if not has_duration else "Kernels Launched (duration)"
+        )
+        print(
+            f"{hierarchy_indent}\n{hierarchy_indent}"
+            + "Operator Hierarchy".ljust(inner_width)
+            + kernel_header
         )
         print(f"{hierarchy_indent}{'-' * (80 - len(hierarchy_indent))}")
         parts = str(op).split("/")
