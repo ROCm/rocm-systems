@@ -2612,6 +2612,61 @@ get_rocm_events_info()
 }  // namespace rocprofiler_sdk
 }  // namespace rocprofsys
 
+namespace
+{
+/**
+ * Initialize rocprofiler-sdk tool configuration.
+ *
+ * Performs common setup for both standard and attach configure paths:
+ * initializes tooling, validates ROCm usage, sets up client data,
+ * logs version info, and registers thread callbacks.
+ *
+ * @param version The rocprofiler-sdk version number.
+ * @param runtime_version The runtime version string.
+ * @param id The client identifier to initialize.
+ * @return true if initialization succeeded, false otherwise.
+ */
+bool
+sdk_tool_configure(uint32_t version, const char* runtime_version,
+                   rocprofiler_client_id_t* id)
+{
+    if(!rocprofsys::config::settings_are_configured() &&
+       rocprofsys::get_state() < rocprofsys::State::Active)
+        rocprofsys_init_tooling_hidden();
+
+    if(!rocprofsys::config::get_use_rocm())
+        return false;
+
+    // set the client name
+    id->name = "rocprofsys";
+
+    // ensure tool data exists
+    if(!rocprofsys::rocprofiler_sdk::tool_data)
+        rocprofsys::rocprofiler_sdk::tool_data =
+            new rocprofsys::rocprofiler_sdk::client_data{};
+
+    // store client info
+    rocprofsys::rocprofiler_sdk::tool_data->client_id = id;
+
+    // compute major/minor/patch version info
+    uint32_t major = version / 10000;
+    uint32_t minor = (version % 10000) / 100;
+    uint32_t patch = version % 100;
+
+    LOG_INFO("{} is using rocprofiler-sdk v{}.{}.{} ({})", id->name, major, minor, patch,
+             runtime_version);
+
+    ROCPROFILER_CALL(rocprofiler_at_internal_thread_create(
+        rocprofsys::rocprofiler_sdk::thread_precreate,
+        rocprofsys::rocprofiler_sdk::thread_postcreate,
+        ROCPROFILER_LIBRARY | ROCPROFILER_HSA_LIBRARY | ROCPROFILER_HIP_LIBRARY |
+            ROCPROFILER_MARKER_LIBRARY,
+        nullptr));
+
+    return true;
+}
+}  // namespace
+
 extern "C"
 {
     rocprofiler_tool_configure_result_t* rocprofiler_configure(
@@ -2628,50 +2683,15 @@ extern "C"
         if(!tim::get_env("ROCPROFSYS_INIT_TOOLING", true)) return nullptr;
         if(!tim::settings::enabled()) return nullptr;
 
-        if(!rocprofsys::config::settings_are_configured() &&
-           rocprofsys::get_state() < rocprofsys::State::Active)
-            rocprofsys_init_tooling_hidden();
-
-        if(!rocprofsys::config::get_use_rocm())
-        {
+        if(!sdk_tool_configure(version, runtime_version, id))
             return nullptr;
-        }
 
-        // set the client name
-        id->name = "rocprofsys";
-
-        // ensure tool data exists
-        if(!rocprofsys::rocprofiler_sdk::tool_data)
-            rocprofsys::rocprofiler_sdk::tool_data =
-                new rocprofsys::rocprofiler_sdk::client_data{};
-
-        // store client info
-        rocprofsys::rocprofiler_sdk::tool_data->client_id = id;
-
-        // compute major/minor/patch version info
-        uint32_t major = version / 10000;
-        uint32_t minor = (version % 10000) / 100;
-        uint32_t patch = version % 100;
-
-        LOG_INFO("{} is using rocprofiler-sdk v{}.{}.{} ({})", id->name, major, minor,
-                 patch, runtime_version);
-
-        ROCPROFILER_CALL(rocprofiler_at_internal_thread_create(
-            rocprofsys::rocprofiler_sdk::thread_precreate,
-            rocprofsys::rocprofiler_sdk::thread_postcreate,
-            ROCPROFILER_LIBRARY | ROCPROFILER_HSA_LIBRARY | ROCPROFILER_HIP_LIBRARY |
-                ROCPROFILER_MARKER_LIBRARY,
-            nullptr));
-
-        // create configure data
         static auto cfg = rocprofiler_tool_configure_result_t{
             sizeof(rocprofiler_tool_configure_result_t),
             &::rocprofsys::rocprofiler_sdk::tool_init,
             &::rocprofsys::rocprofiler_sdk::tool_fini,
             rocprofsys::rocprofiler_sdk::tool_data
         };
-
-        // return pointer to configure data
         return &cfg;
     }
 
@@ -2697,40 +2717,8 @@ extern "C"
         uint32_t version, const char* runtime_version, [[maybe_unused]] uint32_t priority,
         rocprofiler_client_id_t* id)
     {
-        if(!rocprofsys::config::settings_are_configured() &&
-           rocprofsys::get_state() < rocprofsys::State::Active)
-            rocprofsys_init_tooling_hidden();
-
-        if(!rocprofsys::config::get_use_rocm())
-        {
+        if(!sdk_tool_configure(version, runtime_version, id))
             return nullptr;
-        }
-
-        // set the client name
-        id->name = "rocprofsys";
-
-        // ensure tool data exists
-        if(!rocprofsys::rocprofiler_sdk::tool_data)
-            rocprofsys::rocprofiler_sdk::tool_data =
-                new rocprofsys::rocprofiler_sdk::client_data{};
-
-        // store client info
-        rocprofsys::rocprofiler_sdk::tool_data->client_id = id;
-
-        // compute major/minor/patch version info
-        uint32_t major = version / 10000;
-        uint32_t minor = (version % 10000) / 100;
-        uint32_t patch = version % 100;
-
-        LOG_INFO("{} is using rocprofiler-sdk v{}.{}.{} ({})", id->name, major, minor,
-                 patch, runtime_version);
-
-        ROCPROFILER_CALL(rocprofiler_at_internal_thread_create(
-            rocprofsys::rocprofiler_sdk::thread_precreate,
-            rocprofsys::rocprofiler_sdk::thread_postcreate,
-            ROCPROFILER_LIBRARY | ROCPROFILER_HSA_LIBRARY | ROCPROFILER_HIP_LIBRARY |
-                ROCPROFILER_MARKER_LIBRARY,
-            nullptr));
 
         static auto cfg = rocprofiler_tool_configure_attach_result_t{
             sizeof(rocprofiler_tool_configure_attach_result_t), &tool_attach_init,
