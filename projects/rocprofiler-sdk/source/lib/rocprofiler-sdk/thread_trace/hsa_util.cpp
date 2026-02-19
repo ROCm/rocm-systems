@@ -24,6 +24,7 @@
 #include "lib/rocprofiler-sdk/thread_trace/hsa_util.hpp"
 #include "lib/rocprofiler-sdk/hsa/aql_packet.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
+#include "lib/rocprofiler-sdk/registration.hpp"
 
 #define CHECK_HSA(fn, message)                                                                     \
     {                                                                                              \
@@ -53,7 +54,10 @@ Signal::Signal()
 
 Signal::~Signal()
 {
-    WaitOn();
+    // During finalization the GPU may be torn down and signals will never
+    // complete.  Skip the blocking wait to avoid hanging in the global
+    // destructor chain (see AIPROFSDK-71).
+    if(registration::get_fini_status() == 0) WaitOn();
     hsa::get_core_table()->hsa_signal_destroy_fn(signal);
 }
 
@@ -62,7 +66,12 @@ Signal::WaitOn() const
 {
     auto wait_fn = hsa::get_core_table()->hsa_signal_wait_scacquire_fn;
     while(wait_fn(signal, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED) != 0)
+    {
+        // During finalization the GPU may be torn down and signals may never
+        // complete.  Break out to avoid hanging (AIPROFSDK-71).
+        if(registration::get_fini_status() != 0) return;
         sched_yield();
+    }
 }
 
 void

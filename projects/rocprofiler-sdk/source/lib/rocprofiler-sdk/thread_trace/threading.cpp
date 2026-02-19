@@ -25,6 +25,7 @@
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
+#include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/core.hpp"
 
 #include <atomic>
@@ -73,6 +74,10 @@ copy_data_sync(void*       dst,
                Signal*     dependency)
 {
     ROCP_FATAL_IF(dependency == nullptr) << "Dependency must not be null";
+
+    // During finalization the async copy engine may already be torn down.
+    // Submitting work at this point can cause a GPU hang (AIPROFSDK-71).
+    if(registration::get_fini_status() != 0) return;
 
     thread_local Signal signal{};
     auto                dep = dependency->getSignal();
@@ -198,7 +203,7 @@ producer_loop(
         send_to_consumer(wptr.data, wptr.size, ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_END);
     };
 
-    while(flag.load())
+    while(flag.load() && registration::get_fini_status() == 0)
     {
         if(do_sleep) sleep_fn();
         do_sleep = true;  // Reset value
@@ -255,8 +260,13 @@ producer_loop(
             submit_signal.WaitOn();
         }
     }
-    stop_trace();
-    iterate_trace();
+    // Only attempt the final drain if the runtime is still alive.
+    // During finalization, submitting packets or async copies can hang (AIPROFSDK-71).
+    if(registration::get_fini_status() == 0)
+    {
+        stop_trace();
+        iterate_trace();
+    }
     parameters.shared->consumer_running.store(false);
     write_cv.notify_all();
 
