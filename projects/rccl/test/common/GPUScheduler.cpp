@@ -120,7 +120,8 @@ void GPUScheduler::preallocateUniqueIds(int poolSize)
 
 std::string GPUScheduler::getNextUniqueId()
 {
-    std::lock_guard<std::mutex> lock(statsMutex_);
+    // Use unique_lock instead of lock_guard so we can manually unlock/lock
+    std::unique_lock<std::mutex> lock(poolMutex_);
 
     // Wait if pool is temporarily empty but generation is ongoing
     if (uniqueIdGeneratorThread_.joinable())
@@ -129,9 +130,9 @@ std::string GPUScheduler::getNextUniqueId()
                uniqueIdPool_.size() < (size_t)targetPoolSize_.load())
         {
             // Temporarily release lock to allow generator thread to add IDs
-            statsMutex_.unlock();
+            lock.unlock();
             usleep(10000);  // 10ms
-            statsMutex_.lock();
+            lock.lock();
         }
     }
 
