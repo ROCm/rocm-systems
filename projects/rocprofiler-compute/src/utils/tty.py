@@ -404,14 +404,12 @@ def _compute_operator_prefix_stats(df: pd.DataFrame) -> dict[str, tuple[float, i
 
 
 def _total_operator_duration_ms(df: pd.DataFrame) -> float:
-    """Return total duration (ms) for the operator: sum of unique invocation durations."""
+    """
+    Return total duration (ms) for the operator: sum of unique invocation durations.
+    """
     prefix_stats = _compute_operator_prefix_stats(df)
     if not prefix_stats:
         return 0.0
-    # Each invocation is counted at every prefix; total = sum of leaf (full path) durations
-    # Full paths are the longest keys; we need sum of (duration per invocation once).
-    # prefix_stats has prefix -> (duration_sum_at_that_node, count). Summing all would overcount.
-    # Instead: use same invocations as _compute_operator_prefix_stats and sum duration_ns once each.
     has_ts = (
         "Start_Timestamp_function" in df.columns
         and "End_Timestamp_function" in df.columns
