@@ -290,8 +290,9 @@ class OmniSoC_Base:
                 print(f"alias: {alias}, block id: {block_id}")
 
             file_id, panel_id, metric_id = convert_metric_id_to_panel_info(block_id)
+            if file_id == "3000":
+                print(f"file id: {file_id}")
 
-            # NOTE: Experimental Feature Toggle
             # HARD GATE: Block 30 (file_id 3000) requires membw_analysis flag
             if file_id == "3000" and not args.membw_analysis:
                 console_warning(

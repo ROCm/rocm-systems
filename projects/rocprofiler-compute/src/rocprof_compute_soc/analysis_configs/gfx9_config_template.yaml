@@ -267,3 +267,9 @@ panels:
   - type: metric_table
     id: 1
     title: L1 Cache
+  - type: metric_table
+    id: 2
+    title: L1 traffic
+  - type: metric_table
+    id: 3
+    title: Helper Raw Counter Value

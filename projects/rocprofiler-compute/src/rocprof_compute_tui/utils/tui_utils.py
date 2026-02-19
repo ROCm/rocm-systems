@@ -192,14 +192,11 @@ def process_panels_to_dataframes(
 
     filter_panel_ids = set()
     for bid in raw_filter_panel_ids:
-        bid_s = str(bid)
-
-        file_id, _, _ = convert_metric_id_to_panel_info(bid_s)
+        file_id, _, _ = convert_metric_id_to_panel_info(str(bid))
         if file_id is not None:
             filter_panel_ids.add(int(file_id))
 
     for panel_id, panel in arch_configs.panel_configs.items():
-        # NOTE: Experimental Feature Toggle
         # HARD GATE: Block 30 (panel 3000) requires membw_analysis flag
         if panel_id == 3000 and not args.membw_analysis:
             continue
