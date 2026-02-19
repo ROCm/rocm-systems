@@ -8395,3 +8395,67 @@ def test_calc_roofline_data_early_exit_on_empty_roofline_df(monkeypatch):
     assert len(warning_messages) == 1, "Should log one warning message"
     assert "Roofline data is filtered out or not found" in warning_messages[0]
     assert workload_path in warning_messages[0]
+
+
+# =============================================================================
+# GPU Benchmark Locking Tests
+# =============================================================================
+
+
+@pytest.mark.misc
+def test_gpu_benchmark_locking(tmp_path, monkeypatch, capsys):
+    """Test GPU benchmark locking functions."""
+    import fcntl
+
+    import utils.benchmark as benchmark
+
+    # --- Setup: redirect lock directory to temp path ---
+    lock_dir = tmp_path / "locks"
+    lock_dir.mkdir()
+
+    # Mock GPU UUID
+    monkeypatch.setattr(
+        benchmark.hip,
+        "hipGetDeviceProperties",
+        lambda d: mock.Mock(uuid=mock.Mock(uuid=bytes([0x01, 0x02, 0x03, 0x04]))),
+    )
+
+    # Mock Path to use our temp directory
+    original_path = Path
+
+    def mock_path(p):
+        if p == "/tmp/rocprof-compute-benchmark":
+            return lock_dir
+        return original_path(p)
+
+    monkeypatch.setattr(benchmark, "Path", mock_path)
+
+    # --- Test lock acquisition and lock file creation ---
+    with benchmark.gpu_benchmark_lock(0):
+        lock_file = lock_dir / "rocprof-compute-benchmark-01020304.lock"
+        assert lock_file.exists()
+
+    # --- Test no message when lock acquired immediately ---
+    capsys.readouterr()  # Clear previous output
+    with benchmark.gpu_benchmark_lock(0):
+        pass
+    output = capsys.readouterr().out
+    assert "Waiting" not in output
+
+    # --- Test waiting/acquired messages when lock is contended ---
+    call_count = {"count": 0}
+
+    def mock_flock(fd, op):
+        call_count["count"] += 1
+        if call_count["count"] == 1 and (op & fcntl.LOCK_NB):
+            raise BlockingIOError("Lock held by another process")
+
+    monkeypatch.setattr(benchmark.fcntl, "flock", mock_flock)
+
+    with benchmark.gpu_benchmark_lock(0):
+        pass
+
+    output = capsys.readouterr().out
+    assert "Waiting for GPU 0" in output
+    assert "another rocprof-compute benchmark is in progress" in output
+    assert "Acquired lock for GPU 0" in output
