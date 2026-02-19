@@ -110,7 +110,8 @@ class ActiveWFInfo {
     is_pe_group_leader  = (pe_group_logical_lane_id == 0);
   }
 
-  __device__ void update(int pe, ThreadScope new_scope = ThreadScope::thread) {
+  // used in CAS based atomic operations at thread scope
+  __device__ void update(int _pe, ThreadScope _scope = ThreadScope::thread) {
     // Get active lane mask
     activemask          = get_active_lane_mask();
     pe_group_mask       = __match_any_sync(activemask, pe);
@@ -118,7 +119,8 @@ class ActiveWFInfo {
     pe_group_logical_lane_id = get_active_lane_num(pe_group_mask);
     is_pe_group_leader  = (pe_group_logical_lane_id == 0);
     pe_group_leader_phys_lane_id = get_first_active_lane_id(pe_group_mask);
-    scope               = new_scope;
+    scope               = _scope;
+    pe                  = _pe;
   }
 
   __device__ void printInfo() {
