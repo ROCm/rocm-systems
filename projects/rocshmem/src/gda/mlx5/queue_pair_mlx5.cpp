@@ -272,6 +272,8 @@ __device__ void QueuePair::mlx5_poll_cq_until(uint16_t requested_available_slots
 #ifdef DEBUG
       printf("CQ: invalid completion (%x)\n", opcode);
 #endif
+      // reload sq_sig, we might need to look at the other CQE
+      sq_sig = __hip_atomic_load(&mlx5_sq.sig, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_AGENT);
       continue;
     }
 
@@ -301,7 +303,8 @@ __device__ void QueuePair::mlx5_poll_cq_until(uint16_t requested_available_slots
 }
 
 __device__ void QueuePair::mlx5_quiet() {
-  if (is_first_active_lane()) {
+  uint64_t qp_mask = get_same_qp_lane_mask();
+  if (is_first_active_lane(qp_mask)) {
     mlx5_poll_cq_until(mlx5_sq.depth);
   }
 }
