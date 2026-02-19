@@ -38,16 +38,13 @@
 #endif
 
 #if ROCPROFSYS_USE_ROCM > 0
-// This is a workaround to include the correct registration.h because ROCPROFILER_VERSION
-// is not updated and we are not sure which version of the rocprofiler-sdk library is
-// being used.
+// Add experimental registration.h if available
 #    if __has_include(<rocprofiler-sdk/experimental/registration.h>)
 #        include <rocprofiler-sdk/experimental/registration.h>
 #    else
-#        include <rocprofiler-sdk/registration.h>
+#        include <rocprofiler-sdk/registration.h>  // Fallback to stable registration.h
 #    endif
 #endif
-
 //--------------------------------------------------------------------------------------//
 
 #define ROCPROFSYS_DLSYM(VARNAME, HANDLE, FUNCNAME)                                      \

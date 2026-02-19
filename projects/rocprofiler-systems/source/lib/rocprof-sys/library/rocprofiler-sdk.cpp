@@ -37,8 +37,7 @@
 #include <rocprofiler-sdk/cxx/name_info.hpp>
 #include <rocprofiler-sdk/cxx/operators.hpp>
 
-#if ROCPROFILER_SDK_VERSION >= ROCPROFILER_SDK_COMPUTE_VERSION(1, 2, 0) &&               \
-    __has_include(<rocprofiler-sdk/experimental/registration.h>)
+#if __has_include(<rocprofiler-sdk/experimental/registration.h>)
 #    include <rocprofiler-sdk/experimental/registration.h>
 #else
 #    include <rocprofiler-sdk/registration.h>
@@ -249,8 +248,8 @@ create_agent_profile(rocprofiler_agent_id_t          agent_id,
             }
         }
 
-        // Removes any numeric index enclosed in square brackets at the end of the string.
-        // For example, "example[123]" will be converted to "example".
+        // Removes any numeric index enclosed in square brackets at the end of the
+        // string. For example, "example[123]" will be converted to "example".
         auto _old_name_v = name_v;
         name_v =
             std::regex_replace(name_v, std::regex{ "^(.*)(\\[)([0-9]+)(\\])$" }, "$1");
@@ -301,10 +300,10 @@ create_agent_profile(rocprofiler_agent_id_t          agent_id,
 
         if(get_is_continuous_integration())
         {
-            LOG_CRITICAL(
-                "Unable to find all counters for agent {} (gpu-{}, {}) in {}. Found: {}",
-                tool_agent_v->agent->node_id, tool_agent_v->device_id,
-                tool_agent_v->agent->name, requested_counters, found_counters);
+            LOG_CRITICAL("Unable to find all counters for agent {} (gpu-{}, {}) in "
+                         "{}. Found: {}",
+                         tool_agent_v->agent->node_id, tool_agent_v->device_id,
+                         tool_agent_v->agent->name, requested_counters, found_counters);
 
             ::rocprofsys::set_state(::rocprofsys ::State ::Finalized);
             ::std ::abort();
@@ -701,13 +700,13 @@ tool_tracing_callback_start(CategoryT, rocprofiler_callback_tracing_record_t rec
                 }
                 default:
                 {
-                    // A basic roctx marker region starts with roctxRangePushA ENTER and
-                    // ends with roctxRangePop EXIT.
-                    // Breaking instead of returning allows the roctxRangePop ENTER to be
-                    // processed, which timemory will link to the roctxRangePop EXIT. As
-                    // we do not push roctxRangePushA EXIT into timemory, it will think
-                    // that the roctxRangePushA ENTER is still active when it is in fact
-                    // not. This will cause the wall clock tree to be incorrect.
+                    // A basic roctx marker region starts with roctxRangePushA ENTER
+                    // and ends with roctxRangePop EXIT. Breaking instead of returning
+                    // allows the roctxRangePop ENTER to be processed, which timemory
+                    // will link to the roctxRangePop EXIT. As we do not push
+                    // roctxRangePushA EXIT into timemory, it will think that the
+                    // roctxRangePushA ENTER is still active when it is in fact not.
+                    // This will cause the wall clock tree to be incorrect.
                     return;
                 }
             }
@@ -997,11 +996,11 @@ get_ompt_standard_cb_storage()
 
 // An OMPT parallel callback consists of ROCPROFILER_OMPT_ID_parallel_begin and
 // ROCPROFILER_OMPT_ID_parallel_end
-//  As the beginning and end can only occur on the same thread, they are connected into a
-//  single track called "omp_parallel" for clarity. In this track, the information
-//  contained within parallel_begin should be displayed as it contains all the information
-//  that parallel_end has as well as the flags and number of threads/teams that were
-//  requested.
+//  As the beginning and end can only occur on the same thread, they are connected
+//  into a single track called "omp_parallel" for clarity. In this track, the
+//  information contained within parallel_begin should be displayed as it contains all
+//  the information that parallel_end has as well as the flags and number of
+//  threads/teams that were requested.
 auto&
 get_ompt_parallel_cb_storage()
 {
@@ -1302,8 +1301,8 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
         // TODO: Once finalization issue is fixed, skip the corresponding end
         // of the thread_begin callback. Can be identified with:
         // - thread_end: The thread_data ptr from the thread_begin callback generated
-        //    by the "initial-thread-begin" needs to match the thread_end's thread_data
-        //    ptr
+        //    by the "initial-thread-begin" needs to match the thread_end's
+        //    thread_data ptr
     }
 #endif
 
@@ -1538,7 +1537,8 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                 // Callbacks that are received but that we do not process
                 static const std::set<rocprofiler_ompt_operation_t> ompt_no_process = {
                     ROCPROFILER_OMPT_ID_callback_functions,  // "Fake" callback
-                    // Not processed as these are received after our tool finalizes
+                    // Not processed as these are received after our tool
+                    // finalizes
                     ROCPROFILER_OMPT_ID_thread_end,
                 };
 
@@ -1559,9 +1559,9 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                         ompt_tracing_callback_stop(record, user_data, ts, _bt_data);
                         ompt_pop_parallel_callback(record, ts, _bt_data);
                         break;
-                    // Unlike parallel callbacks, we cannot receive the corresponding end
-                    // to thread_begin. Set thread_begin as "instant" so the user can
-                    // see callback without it spanning the entire track
+                    // Unlike parallel callbacks, we cannot receive the corresponding
+                    // end to thread_begin. Set thread_begin as "instant" so the user
+                    // can see callback without it spanning the entire track
                     case ROCPROFILER_OMPT_ID_thread_begin:
                     case ROCPROFILER_OMPT_ID_lock_init:
                     case ROCPROFILER_OMPT_ID_lock_destroy:
@@ -1573,7 +1573,8 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                     case ROCPROFILER_OMPT_ID_device_initialize:
                     case ROCPROFILER_OMPT_ID_device_finalize:
                     case ROCPROFILER_OMPT_ID_device_load:
-                    // case ROCPROFILER_OMPT_ID_device_unload: // Unsupported by runtime
+                    // case ROCPROFILER_OMPT_ID_device_unload: // Unsupported by
+                    // runtime
                     case ROCPROFILER_OMPT_ID_task_create:
                     case ROCPROFILER_OMPT_ID_task_schedule:
                     case ROCPROFILER_OMPT_ID_mutex_released:
@@ -1583,9 +1584,9 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                     case ROCPROFILER_OMPT_ID_task_dependence:
                     case ROCPROFILER_OMPT_ID_error:
                     {
-                        // These callbacks are considered instant events and should start
-                        // and immediately call stop as no corresponding "end" will be
-                        // received
+                        // These callbacks are considered instant events and should
+                        // start and immediately call stop as no corresponding "end"
+                        // will be received
                         auto instant_ts = ts;
                         ompt_tracing_callback_start(record, user_data, instant_ts);
                         ompt_tracing_callback_stop(record, user_data, instant_ts,
@@ -2115,9 +2116,9 @@ counter_record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_da
             }
             if(!_info)
             {
-                LOG_CRITICAL(
-                    "unable to find counter info for counter (id={}) on agent (id={})",
-                    itr.first.handle, _agent_id.handle);
+                LOG_CRITICAL("unable to find counter info for counter (id={}) on "
+                             "agent (id={})",
+                             itr.first.handle, _agent_id.handle);
                 ::rocprofsys::set_state(::rocprofsys ::State ::Finalized);
                 ::std ::abort();
             }
@@ -2239,7 +2240,8 @@ tool_hip_stream_callback(rocprofiler_callback_tracing_record_t record,
                       (unsigned long) stream_id.handle);
             stream_id_push(stream_id);
         }
-        // Pop stream ID off of stream stack after underlying HIP function is completed
+        // Pop stream ID off of stream stack after underlying HIP function is
+        // completed
         else if(record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT)
         {
             LOG_TRACE("operation = ROCPROFILER_HIP_STREAM_SET, phase = "
@@ -2615,8 +2617,7 @@ sdk_tool_configure(uint32_t version, const char* runtime_version,
        rocprofsys::get_state() < rocprofsys::State::Active)
         rocprofsys_init_tooling_hidden();
 
-    if(!rocprofsys::config::get_use_rocm())
-        return false;
+    if(!rocprofsys::config::get_use_rocm()) return false;
 
     // set the client name
     id->name = "rocprofsys";
@@ -2664,8 +2665,7 @@ extern "C"
         if(!tim::get_env("ROCPROFSYS_INIT_TOOLING", true)) return nullptr;
         if(!tim::settings::enabled()) return nullptr;
 
-        if(!sdk_tool_configure(version, runtime_version, id))
-            return nullptr;
+        if(!sdk_tool_configure(version, runtime_version, id)) return nullptr;
 
         static auto cfg = rocprofiler_tool_configure_result_t{
             sizeof(rocprofiler_tool_configure_result_t),
@@ -2698,8 +2698,7 @@ extern "C"
         uint32_t version, const char* runtime_version, [[maybe_unused]] uint32_t priority,
         rocprofiler_client_id_t* id)
     {
-        if(!sdk_tool_configure(version, runtime_version, id))
-            return nullptr;
+        if(!sdk_tool_configure(version, runtime_version, id)) return nullptr;
 
         static auto cfg = rocprofiler_tool_configure_attach_result_t{
             sizeof(rocprofiler_tool_configure_attach_result_t), &tool_attach_init,
