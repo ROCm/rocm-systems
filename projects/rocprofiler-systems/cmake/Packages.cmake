@@ -271,14 +271,15 @@ if(ROCPROFSYS_USE_ROCM)
         target_link_directories(amd_smi INTERFACE ${_drm_LIBRARY_DIRS})
     endif()
 
-    # When AI NIC stats are enabled, define ENABLE_ESMI_LIB so AMD SMI headers
+    # When AI NIC profiling is enabled and ROCm version is 7.0+, define ENABLE_ESMI_LIB so AMD SMI headers
     # expose NIC APIs (e.g. amdsmi_get_nic_rdma_port_statistics, AMDSMI_INIT_AMD_NICS).
-    # This aligns with an AMD SMI build configured with -DENABLE_ESMI_LIB=ON.
     if(ROCPROFSYS_USE_AINIC)
-        target_compile_definitions(
-            rocprofiler-systems-compile-definitions
-            INTERFACE ROCPROFSYS_USE_AINIC ENABLE_ESMI_LIB
-        )
+        if(ROCPROFSYS_ROCM_VERSION_MAJOR GREATER 6)
+            target_compile_definitions(
+                rocprofiler-systems-compile-definitions
+                INTERFACE ROCPROFSYS_USE_AINIC ENABLE_ESMI_LIB
+            )
+        endif()
     endif()
 
     target_link_libraries(rocprofiler-systems-rocm INTERFACE amd_smi)
