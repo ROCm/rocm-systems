@@ -140,8 +140,6 @@ ThreadTracerAgent::ThreadTracerAgent(thread_trace_parameter_pack _params,
 
 ThreadTracerAgent::~ThreadTracerAgent()
 {
-    // We expect the trace to be stopped before destruction. Emit a warning
-    // and flush the outstanding after packets if this invariant is violated.
     ROCP_TRACE << "Destroying ATT Queue...";
     if(active_traces.load() < 1) return;
 
@@ -198,6 +196,8 @@ thread_trace_callback(uint32_t shader, void* buffer, uint64_t size, void* callba
 void
 ThreadTracerAgent::iterate_data(aqlprofile_handle_t handle, rocprofiler_user_data_t data)
 {
+    if(active_traces.load() <= 0) return;
+
     cbdata_t cb_dt{};
 
     cb_dt.agent = agent_id;
@@ -570,7 +570,7 @@ DeviceThreadTracer::stop_context()
     ROCP_INFO << "Stopping device thread trace context";
 
     int expected = WORKER_FLAG_RUNNING;
-    worker_flag->compare_exchange_strong(expected, WORKER_FLAG_STOP);
+    if(worker_flag) worker_flag->compare_exchange_strong(expected, WORKER_FLAG_STOP);
 
     auto wait_list = std::vector<std::unique_ptr<Signal>>{};
 
