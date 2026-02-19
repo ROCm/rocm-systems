@@ -749,7 +749,7 @@ Examples:
         feature_label="List torch operators",
         help=(
             "\t\tList PyTorch operators with hierarchy, numbering, and durations. "
-            "Recreates torch_trace output dir; does not delete marker/counter files."
+            "Recreates torch_trace output directory."
         ),
     )
     analyze_group.add_argument(
