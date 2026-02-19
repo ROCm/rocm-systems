@@ -984,11 +984,15 @@ hierarchy, providing complete context about where each operation occurs in your 
 
 .. code-block:: text
 
-   ResNet/layer4/conv2
-   Transformer/encoder/attention/softmax
-   MyModel/decoder/output_layer
+   nn.Module.Net.forward/nn.Module.Conv2d.forward/torch.nn.functional.conv2d
+   nn.Module.MyModel.forward/nn.Module.Linear.forward
+   torch.nn.functional.relu
 
-This hierarchical naming enables:
+The per-operator CSV under ``torch_trace/`` is named after the operator 
+e.g. ``ones_like.csv``, ``relu.csv``, etc. The ``Operator_Name`` column in the CSV
+contains the full operator hierarchy.
+
+This hierarchical information enables:
 
 * **Context preservation**: See exactly which model layer triggered each kernel
 * **Debugging**: Identify performance issues in specific model components
