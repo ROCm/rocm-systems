@@ -299,17 +299,19 @@ void TestBed::RunSimpleSweepParallel(std::vector<ncclFunc_t>     const& funcType
                 // No HIP_VISIBLE_DEVICES remapping - use actual physical IDs
                 ExecuteSweepJob(job, assignedGPUs);
             },
-            100 - (numGpus * 10)  // Priority: larger GPU counts first
+            numGpus * 10  // Priority: higher GPU count = higher priority (greedy scheduling)
         );
 
         scheduler.submitJob(testJob);
+
+        // Try to launch jobs immediately after submission (overlap submission and execution)
+        scheduler.schedulePendingJobs();
     }
 
-    // Run all jobs with GPU-aware scheduling
+    // Run scheduler until all jobs complete (continues launching and monitoring)
     if (config.verboseLogging)
     {
-        INFO("Starting parallel execution of %d test configurations\n",
-             (int)(ev.GetNumGpusList().size() * ev.GetIsMultiProcessList().size() * ev.maxRanksPerGpu));
+        INFO("All jobs submitted. Waiting for remaining tests to complete.\n");
     }
 
     scheduler.runUntilComplete();
