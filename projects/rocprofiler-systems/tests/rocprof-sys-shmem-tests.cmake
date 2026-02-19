@@ -32,27 +32,18 @@ endif()
 
 # Exit early if shmem_hello was not built (e.g. oshcc not found)
 if(NOT TARGET shmem_hello)
-    message(
-        STATUS
-        "shmem_hello not available; skipping SHMEM tests"
-    )
+    message(STATUS "shmem_hello not available; skipping SHMEM tests")
     return()
 endif()
 
 find_program(OSHRUN_EXECUTABLE NAMES oshrun)
 if(NOT OSHRUN_EXECUTABLE)
-    message(
-        STATUS
-        "oshrun not found; skipping SHMEM tests"
-    )
+    message(STATUS "oshrun not found; skipping SHMEM tests")
     return()
 endif()
 
 # Common environment for all SHMEM tests
-set(_shmem_environment
-    "${_base_environment}"
-    "ROCPROFSYS_USE_SHMEM=ON"
-)
+set(_shmem_environment "${_base_environment}" "ROCPROFSYS_USE_SHMEM=ON")
 
 set(_SHMEM_NP 2)
 set(_SHMEM_PINGPONG_ARGS "-n" "1000" "-s" "8")
@@ -71,12 +62,8 @@ set(_SHMEM_PINGPONG_EXE "${ROCPROFSYS_SHMEM_PINGPONG_EXE}")
 add_test(
     NAME shmem-validation-check
     COMMAND
-        bash
-        ${CMAKE_CURRENT_LIST_DIR}/shmem_validation_check.sh
-        ${OSHRUN_EXECUTABLE}
-        ${_SHMEM_NP}
-        ${_SHMEM_HELLO_EXE}
-        ${_SHMEM_VALIDATION_MARKER}
+        bash ${CMAKE_CURRENT_LIST_DIR}/shmem_validation_check.sh ${OSHRUN_EXECUTABLE}
+        ${_SHMEM_NP} ${_SHMEM_HELLO_EXE} ${_SHMEM_VALIDATION_MARKER}
     WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
 )
 
@@ -118,10 +105,7 @@ set(_SHMEM_RUN_IF_OK
 add_test(
     NAME shmem-pingpong-baseline
     COMMAND
-        ${_SHMEM_RUN_IF_OK}
-        ${OSHRUN_EXECUTABLE}
-        -n ${_SHMEM_NP}
-        "${_SHMEM_PINGPONG_EXE}"
+        ${_SHMEM_RUN_IF_OK} ${OSHRUN_EXECUTABLE} -n ${_SHMEM_NP} "${_SHMEM_PINGPONG_EXE}"
         ${_SHMEM_PINGPONG_ARGS}
     WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
 )
@@ -141,12 +125,8 @@ set_tests_properties(
 add_test(
     NAME shmem-pingpong-sampling
     COMMAND
-        ${_SHMEM_RUN_IF_OK}
-        ${OSHRUN_EXECUTABLE}
-        -n ${_SHMEM_NP}
-        $<TARGET_FILE:rocprofiler-systems-sample>
-        --
-        "${_SHMEM_PINGPONG_EXE}"
+        ${_SHMEM_RUN_IF_OK} ${OSHRUN_EXECUTABLE} -n ${_SHMEM_NP}
+        $<TARGET_FILE:rocprofiler-systems-sample> -- "${_SHMEM_PINGPONG_EXE}"
         ${_SHMEM_PINGPONG_ARGS}
     WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
 )
@@ -159,24 +139,18 @@ set_tests_properties(
         RUN_SERIAL ON
         TIMEOUT 120
         SKIP_RETURN_CODE 77
-        ENVIRONMENT
-            "${_shmem_environment}"
-            "ROCPROFSYS_OUTPUT_PATH=${PROJECT_BINARY_DIR}/rocprof-sys-tests-output"
+        ENVIRONMENT "${_shmem_environment}"
+        "ROCPROFSYS_OUTPUT_PATH=${PROJECT_BINARY_DIR}/rocprof-sys-tests-output"
             "ROCPROFSYS_OUTPUT_PREFIX=shmem-pingpong-sampling/"
-            "ROCPROFSYS_CI=ON"
-            "ROCPROFSYS_CI_TIMEOUT=120"
+        "ROCPROFSYS_CI=ON" "ROCPROFSYS_CI_TIMEOUT=120"
 )
 
 # ---- shmem_pingpong: sys-run (trace with rocprofiler-systems-run) ----
 add_test(
     NAME shmem-pingpong-sys-run
     COMMAND
-        ${_SHMEM_RUN_IF_OK}
-        ${OSHRUN_EXECUTABLE}
-        -n ${_SHMEM_NP}
-        $<TARGET_FILE:rocprofiler-systems-run>
-        --
-        "${_SHMEM_PINGPONG_EXE}"
+        ${_SHMEM_RUN_IF_OK} ${OSHRUN_EXECUTABLE} -n ${_SHMEM_NP}
+        $<TARGET_FILE:rocprofiler-systems-run> -- "${_SHMEM_PINGPONG_EXE}"
         ${_SHMEM_PINGPONG_ARGS}
     WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
 )
@@ -189,12 +163,10 @@ set_tests_properties(
         RUN_SERIAL ON
         TIMEOUT 300
         SKIP_RETURN_CODE 77
-        ENVIRONMENT
-            "${_shmem_environment}"
-            "ROCPROFSYS_OUTPUT_PATH=${PROJECT_BINARY_DIR}/rocprof-sys-tests-output"
+        ENVIRONMENT "${_shmem_environment}"
+        "ROCPROFSYS_OUTPUT_PATH=${PROJECT_BINARY_DIR}/rocprof-sys-tests-output"
             "ROCPROFSYS_OUTPUT_PREFIX=shmem-pingpong-sys-run/"
-            "ROCPROFSYS_CI=ON"
-            "ROCPROFSYS_CI_TIMEOUT=300"
+        "ROCPROFSYS_CI=ON" "ROCPROFSYS_CI_TIMEOUT=300"
 )
 
 # ---- Perfetto validation for shmem-pingpong-sys-run (wrapped so it skips when validation skipped) ----
@@ -202,12 +174,8 @@ if(ROCPROFSYS_VALIDATION_PYTHON AND ROCPROFSYS_VALIDATION_PYTHON_PERFETTO EQUAL 
     add_test(
         NAME validate-shmem-pingpong-sys-run-perfetto
         COMMAND
-            ${_SHMEM_RUN_IF_OK}
-            ${ROCPROFSYS_VALIDATION_PYTHON}
-            ${CMAKE_CURRENT_LIST_DIR}/validate-perfetto-proto.py
-            -m "shmem"
-            -p
-            -i
+            ${_SHMEM_RUN_IF_OK} ${ROCPROFSYS_VALIDATION_PYTHON}
+            ${CMAKE_CURRENT_LIST_DIR}/validate-perfetto-proto.py -m "shmem" -p -i
             ${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/shmem-pingpong-sys-run/perfetto-trace.proto
             -t /opt/trace_processor/bin/trace_processor_shell
         WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
@@ -233,13 +201,10 @@ if(ENABLE_ROCPD_TEST AND ROCPROFSYS_VALIDATION_PYTHON)
     add_test(
         NAME validate-shmem-pingpong-sys-run-rocpd
         COMMAND
-            ${_SHMEM_RUN_IF_OK}
-            ${ROCPROFSYS_VALIDATION_PYTHON}
-            ${CMAKE_CURRENT_LIST_DIR}/validate-rocpd.py
-            -db
+            ${_SHMEM_RUN_IF_OK} ${ROCPROFSYS_VALIDATION_PYTHON}
+            ${CMAKE_CURRENT_LIST_DIR}/validate-rocpd.py -db
             ${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/shmem-pingpong-sys-run/rocpd.db
-            --validation-rules
-            ${_shmem_rocpd_validation_rules}
+            --validation-rules ${_shmem_rocpd_validation_rules}
         WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
     )
     set_tests_properties(

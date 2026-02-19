@@ -31,8 +31,8 @@ from pathlib import Path
 
 current_path = os.path.dirname(os.path.abspath(__file__))
 python_lib_path = f"{current_path}/../../share/amd_smi"
-sys.path.append(python_lib_path)
-# If the python library is installed, it will overwrite the path above
+sys.path.insert(0, python_lib_path)
+# Prioritize the library from this installation over any pip-installed version
 
 try:
     from amdsmi import amdsmi_interface, amdsmi_exception

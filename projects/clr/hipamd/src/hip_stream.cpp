@@ -194,10 +194,7 @@ static hipError_t ihipStreamCreate(hipStream_t* stream, unsigned int flags,
     return hipErrorInvalidValue;
   }
   hip::Stream* hStream = new hip::Stream(hip::getCurrentDevice(), priority, flags, false, cuMask);
-
-  if (hStream == nullptr) {
-    return hipErrorOutOfMemory;
-  } else if (!hStream->Create()) {
+  if (!hStream->Create()) {
     hip::Stream::Destroy(hStream);
     return hipErrorOutOfMemory;
   }
@@ -561,10 +558,8 @@ hipError_t hipStreamQuery_common(hipStream_t stream) {
 
   if (hip_stream->vdev()->isFenceDirty()) {
     amd::Command* command = new amd::Marker(*hip_stream, kMarkerDisableFlush);
-    if (command != nullptr) {
-      command->enqueue();
-      command->release();
-    }
+    command->enqueue();
+    command->release();
   }
 
   amd::Command* command = hip_stream->getLastQueuedCommand(true);
@@ -617,9 +612,6 @@ hipError_t streamCallback_common(hipStream_t stream, StreamCallback* cbo, void* 
     eventWaitList.push_back(last_command);
   }
   amd::Command* command = new amd::Marker(*hip_stream, !kMarkerDisableFlush, eventWaitList);
-  if (command == nullptr) {
-    return hipErrorInvalidValue;
-  }
   if ((cbo == nullptr) || !command->setCallback(CL_COMPLETE, ihipStreamCallback, cbo)) {
     command->release();
     if (last_command != nullptr) {
@@ -637,9 +629,6 @@ hipError_t streamCallback_common(hipStream_t stream, StreamCallback* cbo, void* 
   eventWaitList.clear();
   eventWaitList.push_back(command);
   amd::Command* block_command = new amd::Marker(*hip_stream, !kMarkerDisableFlush, eventWaitList);
-  if (block_command == nullptr) {
-    return hipErrorInvalidValue;
-  }
   block_command->enqueue();
 
   // Release the callback marker
