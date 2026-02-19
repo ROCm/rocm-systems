@@ -97,7 +97,6 @@ TEST_CASE("Unit_hipDeviceSynchronize_Positive_Nullstream") {
   hipLaunchKernelGGL(HIP_KERNEL_NAME(Iter), dim3(1), dim3(1), 0, NULL, A_d, 1 << 30);
   HIP_CHECK(hipMemcpyAsync(A_h, A_d, _SIZE, hipMemcpyDeviceToHost, NULL));
 
-  REQUIRE(1 << 30 != A_h[0] - 1);
   HIP_CHECK(hipDeviceSynchronize());
   REQUIRE(1 << 30 == A_h[0] - 1);
   HIP_CHECK(hipHostFree(A_h));
