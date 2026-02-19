@@ -82,18 +82,6 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Improved the responsiveness of menu and dropdown buttons in TUI analyze mode for a smoother user experience.
 
-### Known issues
-
-* Roofline benchmarking feature does not automatically detect the GPU device being profiled on.
-    * Default GPU device to collect roofline benchmarks on is currently --device 0 unless user provides --device option.
-    * Workaround is for users to provide a valid GPU device with --device option in profile mode.
-
-* Roofline benchmarking feature does not handle multiple processes attempting to profile roofline benchmarks on the same device simultaneously.
-    * Workaround is to preemptively collect roofline benchmarking for the device and ensuring roofline.csv is in the correct workload directory before running the usual profile mode. Rocprof-compute will skip roofline benchmarking execution if there is already a roofline.csv present in the workload folder to conserve time while profiling.
-    * To execute standalone roofline benchmarking and generate a roofline.csv, run [benchmark.py](https://github.com/ROCm/rocm-systems/blob/HEAD/projects/rocprofiler-compute/src/utils/benchmark.py). Note: the roofline.csv is outputted to the working directory from which the benchmarking python file was executed, which will need to be relocated to the workload directory if executed from elsewhere.
-      * Unless otherwise specified by the user, default workload directory layout is as follows: `/[Working directory user is executing program out of]/workloads/[Name of workload given using --name]/[GFX Architecture]`
-      * Example: On the target device, run ``benchmark.py`` out of "\~/path_to_program/workloads/program_name/MI300X" (you may need to preemptively create this path if rocprof-compute has not been previously run with this program name), followed by running ``rocprof-compute profile --name program_name -- ./program`` out of "\~/path_to_program/"
-
 ### Deprecated
 
 * ``--path`` and ``--subpath`` have been deprecated and replaced with a unified ``--output-directory``
