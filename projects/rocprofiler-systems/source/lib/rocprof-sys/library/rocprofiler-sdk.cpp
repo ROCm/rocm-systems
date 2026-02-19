@@ -56,10 +56,8 @@
 #include <rocprofiler-sdk/cxx/name_info.hpp>
 #include <rocprofiler-sdk/cxx/operators.hpp>
 
-// This is a workaround to include the correct registration.h because ROCPROFILER_VERSION
-// is not updated and we are not sure which version of the rocprofiler-sdk library is
-// being used.
-#if __has_include(<rocprofiler-sdk/experimental/registration.h>)
+#if ROCPROFILER_SDK_VERSION >= ROCPROFILER_SDK_COMPUTE_VERSION(1, 2, 0) &&               \
+    __has_include(<rocprofiler-sdk/experimental/registration.h>)
 #    include <rocprofiler-sdk/experimental/registration.h>
 #else
 #    include <rocprofiler-sdk/registration.h>
@@ -2676,7 +2674,8 @@ extern "C"
         // return pointer to configure data
         return &cfg;
     }
-#if ROCPROFSYS_ROCM_VERSION >= 71200
+
+#if ROCPROFILER_SDK_VERSION >= ROCPROFILER_SDK_COMPUTE_VERSION(1, 2, 0)
     int tool_attach_init([[maybe_unused]] rocprofiler_client_detach_t detach_func,
                          [[maybe_unused]] rocprofiler_context_id_t*   context_ids,
                          [[maybe_unused]] uint64_t                    context_ids_length,
