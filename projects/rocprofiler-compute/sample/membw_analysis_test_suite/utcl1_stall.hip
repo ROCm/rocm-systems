@@ -23,10 +23,9 @@
 /*
  * UTCL1 Stall Workload - Targets TCP_UTCL1_STALL_INFLIGHT_MAX / tcp_busy >= 10%
  *
- * 1. UTCL1 has 32 cache lines (MI300 GFX UTCL1 Introduction)
- * 2. STALL_INFLIGHT_MAX: Stall when too many in-flight requests to UTCL2
- * 3. Need: Issue requests for >32 different pages before first completes
- * 4. Page size = 4KB (1024 floats)
+ * 1. STALL_INFLIGHT_MAX: Stall when too many in-flight requests to UTCL2
+ * 2. Need: Issue requests for >32 different pages before first completes
+ * 3. Page size = 4KB (1024 floats)
  *
  * Strategy: UNCOALESCED + RAPID PAGE HOPPING
  * - Each lane accesses different 4KB page -> 64 pages per wavefront

@@ -35,7 +35,7 @@
         } \
     } while(0)
 
-// Stride to exceed L2 (64MB on MI350) - use prime-ish to avoid wrap collisions
+// Stride to exceed L2 - use prime-ish to avoid wrap collisions
 constexpr long long L2_STRIDE = 67 * 1024 * 1024LL;  // 67MB - doesn't divide N
 
 // Baseline: Uncoalesced + large stride -> L2 misses + high request rate -> fill LFIFO -> TCR stall
@@ -77,7 +77,7 @@ __global__ void gl2_backpressure_optimized(float* data, int N) {
 int main(int argc, char** argv) {
     bool use_optimized = (argc > 1 && std::string(argv[1]) == "opt");
 
-    // 2GB - exceeds L2 (64MB on MI350), every access causes L2 miss -> long TCR wait
+    // 2GB - exceeds L2, every access causes L2 miss -> long TCR wait
     int N = 512 * 1024 * 1024;
     size_t bytes = (size_t)N * sizeof(float);
 
