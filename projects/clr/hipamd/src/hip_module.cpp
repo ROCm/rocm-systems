@@ -378,10 +378,6 @@ hipError_t ihipLaunchKernelCommand(amd::Command*& command, hipFunction_t f,
   amd::NDRangeKernelCommand* kernelCommand = new amd::NDRangeKernelCommand(
       *stream, waitList, *kernel, ndrange, launch_params.sharedMemBytes_, params, gridId, numGrids,
       prevGridSum, allGridSum, firstDevice, profileNDRange);
-  if (!kernelCommand) {
-    return hipErrorOutOfMemory;
-  }
-
   address kernargs = nullptr;
   size_t kernargs_size = 0;
   // 'extra' is a struct that contains the following info: {
@@ -844,7 +840,8 @@ hipError_t hipExtLaunchKernel(const void* hostFunction, dim3 gridDim, dim3 block
   HIP_INIT_API(hipExtLaunchKernel, hostFunction, gridDim, blockDim, args, sharedMemBytes, stream,
                startEvent, stopEvent, flags);
 
-  if (!hip::isValid(startEvent) || !hip::isValid(stopEvent)) {
+
+  if (!hip::isValid(stream) || !hip::isValid(startEvent) || !hip::isValid(stopEvent)) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 

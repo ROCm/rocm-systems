@@ -199,21 +199,16 @@ hipError_t hipFreeAsync(void* dev_ptr, hipStream_t stream) {
       // so the queue thread could process it, because creating a command from the queue thread
       // may block the execution
       event = new hip::Event(0);
-      if (event != nullptr) {
-        if (hipSuccess != event->addMarker(hip_stream, nullptr)) {
-          delete event;
-          event = nullptr;
-        } else {
-          // Make sure runtime sends a notification to the worker thread
-          auto result = event->ready();
-        }
+      if (hipSuccess != event->addMarker(hip_stream, nullptr)) {
+        delete event;
+        event = nullptr;
+      } else {
+        // Make sure runtime sends a notification to the worker thread
+        auto result = event->ready();
       }
     }
 
     auto cmd = new FreeAsyncCommand(*hip_stream, dev_ptr, event);
-    if (cmd == nullptr) {
-      HIP_RETURN(hipErrorUnknown);
-    }
     cmd->enqueue();
     cmd->release();
   }
@@ -328,9 +323,6 @@ hipError_t hipMemPoolCreate(hipMemPool_t* mem_pool, const hipMemPoolProps* pool_
   }
   auto device = g_devices[pool_props->location.id];
   auto pool = new hip::MemoryPool(device, pool_props);
-  if (pool == nullptr) {
-    HIP_RETURN(hipErrorInvalidValue);
-  }
   *mem_pool = reinterpret_cast<hipMemPool_t>(pool);
   HIP_RETURN(hipSuccess);
 }
@@ -433,9 +425,6 @@ hipError_t hipMemPoolImportFromShareableHandle(hipMemPool_t* mem_pool, void* sha
 
   auto device = g_devices[0];
   auto pool = new hip::MemoryPool(device, nullptr, true);
-  if (pool == nullptr) {
-    HIP_RETURN(hipErrorOutOfMemory);
-  }
   // Note: The interface casts the integer value of file handle under Linux into void*,
   // but compiler may not allow to cast it back. Hence, make a cast with a union...
   union {
