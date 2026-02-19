@@ -26,7 +26,7 @@
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from utils import file_io, parser, tty
 from utils.kernel_name_shortener import kernel_name_shortener
-from utils.logger import console_error, demarcate
+from utils.logger import console_error, console_log, demarcate
 
 
 class cli_analysis(OmniAnalyze_Base):
@@ -99,6 +99,43 @@ class cli_analysis(OmniAnalyze_Base):
         workload = self._runs[workload_path]
         gpu_arch = workload.sys_info.iloc[0]["gpu_arch"]
         arch_config = self._arch_configs[gpu_arch]
+
+        if getattr(args, "torch_operator", False):
+            if not workload.filter_torch_operators:
+                console_error(
+                    "No torch operators found in the profiling data. "
+                    'Please ensure that workload is profiled with "--torch-trace"'
+                    'option and analyze mode is run with "--list-torch-operators"'
+                    'option before using "--torch-operator" in analyze mode.'
+                )
+
+            operator_args = getattr(args, "torch_operator", [])
+            operator_list = []
+            for op in operator_args:
+                # Support comma-separated or space-separated input
+                operator_list.extend([
+                    o.strip() for o in str(op).split(",") if o.strip()
+                ])
+            operator_list = [o for o in operator_list if o]
+
+            for op in operator_list:
+                if "/" in op:
+                    # Hierarchy case: last part is operator name, rest is hierarchy
+                    hierarchy = op
+                    op_name = hierarchy.split("/")[-1]
+                    df = workload.torch_operators.get(op_name)
+                    if df is not None:
+                        filtered_df = df[df["Operator_Name"] == hierarchy]
+                        tty.show_torch_operator_table(hierarchy, filtered_df)
+                    else:
+                        console_log(f"No data for operator: {hierarchy}")
+                else:
+                    # Simple operator case
+                    df = workload.torch_operators.get(op)
+                    if df is not None:
+                        tty.show_torch_operator_table(op, df)
+                    else:
+                        console_log(f"No data for operator: {op}")
 
         if args.list_stats:
             tty.show_kernel_stats(

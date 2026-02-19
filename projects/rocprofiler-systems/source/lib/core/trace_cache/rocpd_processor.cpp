@@ -413,11 +413,13 @@ rocpd_processor_t::handle([[maybe_unused]] const amd_smi_sample& _amd_smi)
         info::annotate_with_device_id<category::amd_smi_power>(_amd_smi.device_id)
             .c_str(),
         _amd_smi.power);
+
+    auto mem_usage_mb = _amd_smi.mem_usage / static_cast<double>(units::megabyte);
     insert_event_and_sample(
         is_mem_usage_enabled, trait::name<category::amd_smi_memory_usage>::value,
         info::annotate_with_device_id<category::amd_smi_memory_usage>(_amd_smi.device_id)
             .c_str(),
-        _amd_smi.mem_usage);
+        mem_usage_mb);
 
     if(!is_vcn_enabled && !is_jpeg_enabled && !is_xgmi_enabled && !is_pcie_enabled)
         return;

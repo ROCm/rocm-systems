@@ -132,7 +132,7 @@ __host__ void init_bins(int num_bins, int num_waves, uint32_t *off_bins,
  * HOST TESTER CLASS METHODS
  *****************************************************************************/
 RandomAccessTester::RandomAccessTester(TesterArguments args) : Tester(args) {
-  int max_size = args.max_msg_size;
+  int max_size = max_msg_size;
   int wg_size = args.wg_size;
   _num_waves = (args.wg_size / 64) * args.num_wgs;
   _num_bins = args.thread_access / args.coal_coef;
@@ -166,7 +166,7 @@ RandomAccessTester::~RandomAccessTester() {
 }
 
 void RandomAccessTester::resetBuffers(size_t size) {
-  for (size_t i = 0; i < args.max_msg_size / sizeof(int) * args.wg_size * space;
+  for (size_t i = 0; i < max_msg_size / sizeof(int) * args.wg_size * space;
        i++) {
     s_buf[i] = 1;
     r_buf[i] = 0;

@@ -37,9 +37,7 @@ from pathlib import Path
 # Add parent directory to Python path for config module
 script_dir = Path(__file__).resolve().parent
 sys.path.insert(0, str(script_dir.parent))
-
-from utils.logger import console_log, console_warning
-
+# Attempt to load ROCTX module from ROCm installation
 rocm_root = os.environ.get("ROCM_PATH", "/opt/rocm")
 python_version = f"python{sys.version_info.major}.{sys.version_info.minor}"
 candidate_paths = [
@@ -51,8 +49,31 @@ for candidate in candidate_paths:
     if candidate not in sys.path:
         sys.path.insert(0, candidate)
 
+from utils.logger import console_error, console_log, console_warning
+
+console_log("torch trace", f"Python version: {python_version}")
+
+try:
+    from roctx import rangePop, rangePush
+
+    console_log(
+        "torch trace",
+        f"ROCTX module loaded from: {Path(rangePush.__code__.co_filename).parent}",
+    )
+except ImportError:
+    console_error(
+        f"Looked for Roctx in :{candidate_paths}"
+        "ROCTX Python module not found.\n"
+        "Please ensure that the rocprofiler-sdk is installed"
+        " and that the roctx Python bindings are available for your Python version."
+        "You may need to reinstall or rebuild ROCm for your current Python environment.\n"
+        "The --torch-trace option requires a valid roctx installation.\n",
+    )
+    sys.exit(1)
+
 try:
     import torch
+    import torch._C
 
     console_log(f"PyTorch version: {torch.__version__}")
 except ImportError:
@@ -68,7 +89,173 @@ import inspect
 from functools import wraps
 
 import torch.nn.functional as F
-from roctx import rangePop, rangePush
+
+import threading
+
+# Thread-local stacks for hierarchical marker names
+_thread_local = threading.local()
+
+
+def get_marker_stack():
+    if not hasattr(_thread_local, "marker_stack"):
+        _thread_local.marker_stack = []
+    return _thread_local.marker_stack
+
+
+def get_context_stack():
+    if not hasattr(_thread_local, "context_stack"):
+        _thread_local.context_stack = []
+    return _thread_local.context_stack
+
+
+if hasattr(torch._C, "_dispatch_call"):
+    original_dispatch_call = torch._C._dispatch_call
+
+    def dispatch_call_with_roctx(*args, **kwargs):
+        marker_stack = get_marker_stack()
+        context_stack = get_context_stack()
+        op_name = str(args[0]) if args else "aten_op"
+        marker_stack.append(f"aten::{op_name}")
+        # Use call count and caller location for context, similar to other wrappers
+        current_frame = inspect.currentframe()
+        caller_frame = current_frame.f_back if current_frame is not None else None
+        if caller_frame is not None:
+            filename = caller_frame.f_code.co_filename
+            location = f"{Path(filename).name}:{caller_frame.f_lineno}"
+        else:
+            location = "unknown:0"
+        # Optionally, use a call counter (not strictly necessary, but for consistency)
+        if not hasattr(dispatch_call_with_roctx, "_call_count"):
+            dispatch_call_with_roctx._call_count = 0
+        dispatch_call_with_roctx._call_count += 1
+        context_stack.append(f"#{dispatch_call_with_roctx._call_count}@{location}")
+        full_marker_name = "/".join(marker_stack) + ":" + "/".join(context_stack)
+        rangePush(full_marker_name)
+        # using try / finally to ensure rangePop is called.
+        try:
+            return original_dispatch_call(*args, **kwargs)
+        except Exception as e:
+            console_warning("torch trace", f"Error in {full_marker_name}: {e}")
+            console_warning(
+                "torch trace", "Cannot inject ROCTX markers for torch._C._dispatch_call"
+            )
+        finally:
+            rangePop()
+            marker_stack.pop()
+            context_stack.pop()
+
+    torch._C._dispatch_call = dispatch_call_with_roctx
+else:
+    console_log("torch._C._dispatch_call not found; skipping dispatcher patching.")
+
+try:
+    import torchvision
+
+    original_tv_dispatch_call = torchvision._C._dispatch_call
+
+    def tv_dispatch_call_with_roctx(*args, **kwargs):
+        marker_stack = get_marker_stack()
+        context_stack = get_context_stack()
+        op_name = str(args[0]) if args else "vision_op"
+        marker_stack.append(f"torchvision::{op_name}")
+
+        current_frame = inspect.currentframe()
+        caller_frame = current_frame.f_back if current_frame is not None else None
+        if caller_frame is not None:
+            filename = caller_frame.f_code.co_filename
+            location = f"{Path(filename).name}:{caller_frame.f_lineno}"
+        else:
+            location = "unknown:0"
+
+        if not hasattr(tv_dispatch_call_with_roctx, "_call_count"):
+            tv_dispatch_call_with_roctx._call_count = 0
+        tv_dispatch_call_with_roctx._call_count += 1
+        context_stack.append(f"#{tv_dispatch_call_with_roctx._call_count}@{location}")
+
+        full_marker_name = "/".join(marker_stack) + ":" + "/".join(context_stack)
+        rangePush(full_marker_name)
+        try:
+            return original_tv_dispatch_call(*args, **kwargs)
+        finally:
+            rangePop()
+            marker_stack.pop()
+            context_stack.pop()
+
+    torchvision._C._dispatch_call = tv_dispatch_call_with_roctx
+except Exception:
+    pass  # torchvision not installed or no _C._dispatch_call
+
+try:
+    import torch.distributed as dist
+
+    original_all_reduce = dist.all_reduce
+
+    def all_reduce_with_roctx(*args, **kwargs):
+        marker_stack = get_marker_stack()
+        context_stack = get_context_stack()
+        marker_stack.append("torch.distributed.all_reduce")
+
+        current_frame = inspect.currentframe()
+        caller_frame = current_frame.f_back if current_frame is not None else None
+        if caller_frame is not None:
+            filename = caller_frame.f_code.co_filename
+            location = f"{Path(filename).name}:{caller_frame.f_lineno}"
+        else:
+            location = "unknown:0"
+
+        if not hasattr(all_reduce_with_roctx, "_call_count"):
+            all_reduce_with_roctx._call_count = 0
+        all_reduce_with_roctx._call_count += 1
+        context_stack.append(f"#{all_reduce_with_roctx._call_count}@{location}")
+
+        full_marker_name = "/".join(marker_stack) + ":" + "/".join(context_stack)
+        rangePush(full_marker_name)
+        try:
+            return original_all_reduce(*args, **kwargs)
+        finally:
+            rangePop()
+            marker_stack.pop()
+            context_stack.pop()
+
+    dist.all_reduce = all_reduce_with_roctx
+except Exception as e:
+    console_warning("torch trace", f"Could not patch torch.distributed.all_reduce: {e}")
+
+try:
+    import torch.cuda
+
+    original_set_device = torch.cuda.set_device
+
+    def set_device_with_roctx(*args, **kwargs):
+        marker_stack = get_marker_stack()
+        context_stack = get_context_stack()
+        marker_stack.append("torch.cuda.set_device")
+
+        current_frame = inspect.currentframe()
+        caller_frame = current_frame.f_back if current_frame is not None else None
+        if caller_frame is not None:
+            filename = caller_frame.f_code.co_filename
+            location = f"{Path(filename).name}:{caller_frame.f_lineno}"
+        else:
+            location = "unknown:0"
+
+        if not hasattr(set_device_with_roctx, "_call_count"):
+            set_device_with_roctx._call_count = 0
+        set_device_with_roctx._call_count += 1
+        context_stack.append(f"#{set_device_with_roctx._call_count}@{location}")
+
+        full_marker_name = "/".join(marker_stack) + ":" + "/".join(context_stack)
+        rangePush(full_marker_name)
+        try:
+            return original_set_device(*args, **kwargs)
+        finally:
+            rangePop()
+            marker_stack.pop()
+            context_stack.pop()
+
+    torch.cuda.set_device = set_device_with_roctx
+except Exception:
+    pass
 
 
 def roctx_wrapper(func, name=None):
@@ -86,12 +273,20 @@ def roctx_wrapper(func, name=None):
         else:
             location = "unknown:0"
 
-        # Unique marker: function + call_number + source_location
-        rangePush(f"{func_name}:#{call_counter['count']}@{location}")
+        # Build hierarchical marker name with separate context
+        marker_stack = get_marker_stack()
+        context_stack = get_context_stack()
+        marker_stack.append(func_name)
+        context_stack.append(f"#{call_counter['count']}@{location}")
+        full_marker_name = "/".join(marker_stack) + ":" + "/".join(context_stack)
+
+        rangePush(full_marker_name)
         try:
             result = func(*args, **kwargs)
         finally:
             rangePop()
+            marker_stack.pop()
+            context_stack.pop()
         return result
 
     return wrapper
@@ -190,14 +385,21 @@ def inject_roctx_into_torch():
         else:
             location = "unknown:0"
 
-        rangePush(f"torch.Tensor.backward:#{backward_counter['count']}@{location}")
+        marker_stack = get_marker_stack()
+        context_stack = get_context_stack()
+        marker_stack.append("torch.Tensor.backward")
+        context_stack.append(f"#{backward_counter['count']}@{location}")
+        full_marker_name = "/".join(marker_stack) + ":" + "/".join(context_stack)
+
+        rangePush(full_marker_name)
         try:
             return original_backward(self, *args, **kwargs)
         finally:
             rangePop()
+            marker_stack.pop()
+            context_stack.pop()
 
     torch.Tensor.backward = backward_with_roctx
-
     wrapped_count += 1
     console_log("Wrapped: torch.Tensor.backward")
 
@@ -215,11 +417,31 @@ def inject_roctx_into_optimizer():
     original_step = Optimizer.step
 
     def step_with_roctx(self, *args, **kwargs):
-        rangePush(f"optimizer.{self.__class__.__name__}.step")
+        marker_stack = get_marker_stack()
+        context_stack = get_context_stack()
+        marker_stack.append(f"optimizer.{self.__class__.__name__}.step")
+
+        current_frame = inspect.currentframe()
+        caller_frame = current_frame.f_back if current_frame is not None else None
+        if caller_frame is not None:
+            filename = caller_frame.f_code.co_filename
+            location = f"{Path(filename).name}:{caller_frame.f_lineno}"
+        else:
+            location = "unknown:0"
+
+        if not hasattr(self, "_roctx_step_call_count"):
+            self._roctx_step_call_count = 0
+        self._roctx_step_call_count += 1
+        context_stack.append(f"#{self._roctx_step_call_count}@{location}")
+
+        full_marker_name = "/".join(marker_stack) + ":" + "/".join(context_stack)
+        rangePush(full_marker_name)
         try:
             return original_step(self, *args, **kwargs)
         finally:
             rangePop()
+            marker_stack.pop()
+            context_stack.pop()
 
     Optimizer.step = step_with_roctx
     console_log("Wrapped optimizer.step() with ROCTX markers\n")
@@ -229,20 +451,16 @@ def inject_roctx_into_model():
     """Wrap nn.Module forward() method with call counter."""
 
     from torch import nn
-    from typing import Any
 
     original_call = nn.Module.__call__
 
     # Per-instance call counters
     def call_with_roctx(self, *args, **kwargs):
         class_name = self.__class__.__name__
-
-        # Initialize counter for this instance if not exists
         if not hasattr(self, "_roctx_call_count"):
             self._roctx_call_count = 0
         self._roctx_call_count += 1
 
-        # Get caller location
         current_frame = inspect.currentframe()
         caller_frame = current_frame.f_back if current_frame is not None else None
         if caller_frame is not None:
@@ -251,17 +469,94 @@ def inject_roctx_into_model():
         else:
             location = "unknown:0"
 
-        # Create detailed marker
-        rangePush(
-            f"nn.Module.{class_name}.forward:#{self._roctx_call_count}@{location}"
-        )
+        marker_stack = get_marker_stack()
+        context_stack = get_context_stack()
+        marker_stack.append(f"nn.Module.{class_name}.forward")
+        context_stack.append(f"#{self._roctx_call_count}@{location}")
+        full_marker_name = "/".join(marker_stack) + ":" + "/".join(context_stack)
+
+        rangePush(full_marker_name)
         try:
             return original_call(self, *args, **kwargs)
         finally:
             rangePop()
+            marker_stack.pop()
+            context_stack.pop()
 
     nn.Module.__call__ = call_with_roctx
     console_log("Wrapped nn.Module forward() with ROCTX markers\n")
+
+
+def instrument_all_torch_ops():
+    # Base operator namespaces to instrument across backends
+    op_namespaces = ["aten", "quantized", "ml", "prims"]
+    # Only include NVIDIA-specific nvfuser ops when running on a CUDA build
+    torch_version = getattr(torch, "version", None)
+    cuda_version = (
+        getattr(torch_version, "cuda", None) if torch_version is not None else None
+    )
+    hip_version = (
+        getattr(torch_version, "hip", None) if torch_version is not None else None
+    )
+    if cuda_version is not None and hip_version is None:
+        op_namespaces.append("nvfuser")
+    wrapped_count = 0
+    failed_count = 0
+
+    console_log("Instrumenting torch.ops namespace for C++ ATen operations...")
+    for ns in op_namespaces:
+        ops = getattr(torch.ops, ns, None)
+        if ops is None:
+            continue
+        ns_count = 0
+        for op_name in dir(ops):
+            if op_name.startswith("__"):
+                continue
+            try:
+                op = getattr(ops, op_name, None)
+                if not callable(op):
+                    continue
+                if hasattr(op, "_roctx_wrapped"):
+                    continue
+
+                def make_wrapper(original_op, namespace, operation_name):
+                    def wrapper(*args, **kwargs):
+                        marker_name = f"torch.ops.{namespace}.{operation_name}"
+                        marker_stack = get_marker_stack()
+                        context_stack = get_context_stack()
+                        marker_stack.append(marker_name)
+                        # Filter empty strings from context_stack
+                        filtered_context = [c for c in context_stack if c]
+                        full_marker_name = "/".join(marker_stack) + (
+                            ":" + "/".join(filtered_context) if filtered_context else ""
+                        )
+
+                        rangePush(full_marker_name)
+                        try:
+                            return original_op(*args, **kwargs)
+                        finally:
+                            rangePop()
+                            marker_stack.pop()
+
+                    wrapper._roctx_wrapped = True
+                    return wrapper
+
+                wrapped_op = make_wrapper(op, ns, op_name)
+                setattr(ops, op_name, wrapped_op)
+                wrapped_count += 1
+                ns_count += 1
+            except Exception as e:
+                failed_count += 1
+                if failed_count <= 10:
+                    console_log(f"  Failed to wrap {ns}.{op_name}: {e}")
+
+        if ns_count > 0:
+            console_log(f"  Wrapped {ns_count} operations in torch.ops.{ns}")
+
+    console_log(f"[ROCTX] Total: {wrapped_count} torch.ops operations wrapped")
+    if failed_count > 0:
+        console_log(f"[ROCTX] ({failed_count} operations failed to wrap)")
+    console_log("")
 
 
 if __name__ == "__main__":
@@ -277,6 +572,7 @@ if __name__ == "__main__":
     inject_roctx_into_torch()
     inject_roctx_into_optimizer()
     inject_roctx_into_model()
+    instrument_all_torch_ops()
 
     console_log("=" * 70)
     console_log("Starting target script with ROCTX instrumentation...")

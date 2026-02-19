@@ -85,8 +85,6 @@ __global__ void TeamReductionTest(int loop, int skip, long long int *start_time,
 
   rocshmem_wg_team_create_ctx(team, ctx_type, &ctx);
 
-  int n_pes = rocshmem_ctx_n_pes(ctx);
-
   __syncthreads();
 
   for (int i = 0; i < loop + skip; i++) {
@@ -113,8 +111,11 @@ TeamReductionTester<T1, T2>::TeamReductionTester(
     TesterArguments args, std::function<void(T1 &, T1 &)> f1,
     std::function<std::pair<bool, std::string>(const T1 &, const T1 &)> f2)
     : Tester(args), init_buf{f1}, verify_buf{f2} {
-  s_buf = (T1 *)rocshmem_malloc(args.max_msg_size * sizeof(T1));
-  r_buf = (T1 *)rocshmem_malloc(args.max_msg_size * sizeof(T1));
+  my_pe = rocshmem_team_my_pe(ROCSHMEM_TEAM_WORLD);
+  n_pes = rocshmem_team_n_pes(ROCSHMEM_TEAM_WORLD);
+
+  s_buf = (T1 *)rocshmem_malloc(max_msg_size * sizeof(T1));
+  r_buf = (T1 *)rocshmem_malloc(max_msg_size * sizeof(T1));
 }
 
 template <typename T1, ROCSHMEM_OP T2>
@@ -125,7 +126,7 @@ TeamReductionTester<T1, T2>::~TeamReductionTester() {
 
 template <typename T1, ROCSHMEM_OP T2>
 void TeamReductionTester<T1, T2>::preLaunchKernel() {
-  int n_pes = rocshmem_team_n_pes(ROCSHMEM_TEAM_WORLD);
+  bw_factor = n_pes;
 
   team_reduce_world_dup = ROCSHMEM_TEAM_INVALID;
   rocshmem_team_split_strided(ROCSHMEM_TEAM_WORLD, 0, 1, n_pes, nullptr, 0,
@@ -153,14 +154,13 @@ void TeamReductionTester<T1, T2>::postLaunchKernel() {
 
 template <typename T1, ROCSHMEM_OP T2>
 void TeamReductionTester<T1, T2>::resetBuffers(size_t size) {
-  for (uint64_t i = 0; i < args.max_msg_size; i++) {
+  for (uint64_t i = 0; i < max_msg_size; i++) {
     init_buf(s_buf[i], r_buf[i]);
   }
 }
 
 template <typename T1, ROCSHMEM_OP T2>
 void TeamReductionTester<T1, T2>::verifyResults(size_t size) {
-  int n_pes = rocshmem_n_pes();
   for (uint64_t i = 0; i < size; i++) {
     auto r = verify_buf(r_buf[i], (T1)n_pes);
     if (r.first == false) {
