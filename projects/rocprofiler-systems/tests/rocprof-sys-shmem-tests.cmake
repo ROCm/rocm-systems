@@ -43,7 +43,18 @@ if(NOT OSHRUN_EXECUTABLE)
 endif()
 
 # Common environment for all SHMEM tests
-set(_shmem_environment "${_base_environment}" "ROCPROFSYS_USE_SHMEM=ON")
+set(SHMEM_OUTPUT_DIR "${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/shmem-pingpong")
+
+set(_shmem_environment
+    "${_base_environment}"
+    "ROCPROFSYS_USE_PID=OFF"
+    "ROCPROFSYS_USE_SHMEM=ON"
+    "ROCPROFSYS_OUTPUT_PATH=${SHMEM_OUTPUT_DIR}"
+)
+
+if(${ENABLE_ROCPD_TEST})
+    list(APPEND _shmem_environment "ROCPROFSYS_USE_ROCPD=ON")
+endif()
 
 set(_SHMEM_NP 2)
 set(_SHMEM_PINGPONG_ARGS "-n" "1000" "-s" "8")
@@ -140,9 +151,6 @@ set_tests_properties(
         TIMEOUT 120
         SKIP_RETURN_CODE 77
         ENVIRONMENT "${_shmem_environment}"
-        "ROCPROFSYS_OUTPUT_PATH=${PROJECT_BINARY_DIR}/rocprof-sys-tests-output"
-            "ROCPROFSYS_OUTPUT_PREFIX=shmem-pingpong-sampling/"
-        "ROCPROFSYS_CI=ON" "ROCPROFSYS_CI_TIMEOUT=120"
 )
 
 # ---- shmem_pingpong: sys-run (trace with rocprofiler-systems-run) ----
@@ -164,20 +172,22 @@ set_tests_properties(
         TIMEOUT 300
         SKIP_RETURN_CODE 77
         ENVIRONMENT "${_shmem_environment}"
-        "ROCPROFSYS_OUTPUT_PATH=${PROJECT_BINARY_DIR}/rocprof-sys-tests-output"
-            "ROCPROFSYS_OUTPUT_PREFIX=shmem-pingpong-sys-run/"
-        "ROCPROFSYS_CI=ON" "ROCPROFSYS_CI_TIMEOUT=300"
 )
 
 # ---- Perfetto validation for shmem-pingpong-sys-run (wrapped so it skips when validation skipped) ----
 if(ROCPROFSYS_VALIDATION_PYTHON AND ROCPROFSYS_VALIDATION_PYTHON_PERFETTO EQUAL 0)
+    set(_SHMEM_PERFETTO_LABELS shmem_pingpong start_pes)
+    set(_SHMEM_PERFETTO_COUNTS 1 1)
+    set(_SHMEM_PERFETTO_DEPTHS 0 1)
+
     add_test(
         NAME validate-shmem-pingpong-sys-run-perfetto
         COMMAND
             ${_SHMEM_RUN_IF_OK} ${ROCPROFSYS_VALIDATION_PYTHON}
-            ${CMAKE_CURRENT_LIST_DIR}/validate-perfetto-proto.py -m "shmem" -p -i
-            ${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/shmem-pingpong-sys-run/perfetto-trace.proto
-            -t /opt/trace_processor/bin/trace_processor_shell
+            ${CMAKE_CURRENT_LIST_DIR}/validate-perfetto-proto.py -p -l
+            ${_SHMEM_PERFETTO_LABELS} -c ${_SHMEM_PERFETTO_COUNTS} -d
+            ${_SHMEM_PERFETTO_DEPTHS} -i ${SHMEM_OUTPUT_DIR}/perfetto-trace.proto -t
+            /opt/trace_processor/bin/trace_processor_shell
         WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
     )
     set_tests_properties(
@@ -202,8 +212,7 @@ if(ENABLE_ROCPD_TEST AND ROCPROFSYS_VALIDATION_PYTHON)
         NAME validate-shmem-pingpong-sys-run-rocpd
         COMMAND
             ${_SHMEM_RUN_IF_OK} ${ROCPROFSYS_VALIDATION_PYTHON}
-            ${CMAKE_CURRENT_LIST_DIR}/validate-rocpd.py -db
-            ${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/shmem-pingpong-sys-run/rocpd.db
+            ${CMAKE_CURRENT_LIST_DIR}/validate-rocpd.py -db ${SHMEM_OUTPUT_DIR}/rocpd.db
             --validation-rules ${_shmem_rocpd_validation_rules}
         WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
     )
