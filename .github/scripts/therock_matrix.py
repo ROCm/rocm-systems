@@ -24,17 +24,21 @@ project_map = {
     "core": {
         "cmake_options": "-DTHEROCK_ENABLE_CORE=ON -DTHEROCK_ENABLE_HIP_RUNTIME=ON -DTHEROCK_ENABLE_ALL=OFF",
         "projects_to_test": "hip-tests",
+        "platforms": ["linux", "windows"],
     },
     "profiler": {
         "cmake_options": "-DTHEROCK_ENABLE_PROFILER=ON -DTHEROCK_ENABLE_ALL=OFF",
         "projects_to_test": "rocprofiler-tests",
+        "platforms": ["linux", "windows"],
     },
     "systems-profiler": {
         "cmake_options": "-DTHEROCK_ENABLE_CORE=ON -DTHEROCK_ENABLE_PROFILER=ON -DTHEROCK_ENABLE_ALL=OFF -DTHEROCK_ENABLE_HIP_RUNTIME=ON -DTHEROCK_ENABLE_COMPILER=ON -DTHEROCK_ENABLE_RCCL=ON",
-        "projects_to_test": "rocprofiler-systems-tests",
+        "projects_to_test": "rocprofiler_systems",
+        "platforms": ["linux"],
     },
     "all": {
         "cmake_options": "-DTHEROCK_ENABLE_CORE=ON -DTHEROCK_ENABLE_PROFILER=ON -DTHEROCK_ENABLE_ALL=OFF",
         "projects_to_test": "hip-tests, rocprofiler-tests",
+        "platforms": ["linux", "windows"],
     },
 }

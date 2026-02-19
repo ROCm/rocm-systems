@@ -183,9 +183,20 @@ def retrieve_projects(args):
     return project_to_run
 
 
+def filter_projects_by_platform(projects, platform):
+    return [p for p in projects if platform in p.get("platforms", ["linux", "windows"])]
+
+
 def run(args):
     project_to_run = retrieve_projects(args)
-    set_github_output({"projects": json.dumps(project_to_run)})
+    linux_projects = filter_projects_by_platform(project_to_run, "linux")
+    windows_projects = filter_projects_by_platform(project_to_run, "windows")
+    set_github_output(
+        {
+            "linux_projects": json.dumps(linux_projects),
+            "windows_projects": json.dumps(windows_projects),
+        }
+    )
 
 
 if __name__ == "__main__":

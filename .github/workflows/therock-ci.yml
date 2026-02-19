@@ -37,7 +37,8 @@ jobs:
       # parent will be the tip of the base branch.
       BASE_REF: HEAD^
     outputs:
-      projects: ${{ steps.projects.outputs.projects }}
+      linux_projects: ${{ steps.projects.outputs.linux_projects }}
+      windows_projects: ${{ steps.projects.outputs.windows_projects }}
     steps:
       - name: Checkout code
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -81,11 +82,11 @@ jobs:
       contents: read
       id-token: write
     needs: setup
-    if: ${{ needs.setup.outputs.projects != '[]' }}
+    if: ${{ needs.setup.outputs.linux_projects != '[]' }}
     strategy:
       fail-fast: false
       matrix:
-        projects: ${{ fromJSON(needs.setup.outputs.projects) }}
+        projects: ${{ fromJSON(needs.setup.outputs.linux_projects) }}
     uses: ./.github/workflows/therock-ci-linux.yml
     secrets: inherit
     with:
@@ -98,11 +99,11 @@ jobs:
       contents: read
       id-token: write
     needs: setup
-    if: ${{ needs.setup.outputs.projects != '[]' }}
+    if: ${{ needs.setup.outputs.windows_projects != '[]' }}
     strategy:
       fail-fast: false
       matrix:
-        projects: ${{ fromJSON(needs.setup.outputs.projects) }}
+        projects: ${{ fromJSON(needs.setup.outputs.windows_projects) }}
     uses: ./.github/workflows/therock-ci-windows.yml
     secrets: inherit
     with:
