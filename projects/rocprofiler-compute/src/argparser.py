@@ -191,6 +191,7 @@ def add_general_group(
         help=(
             "Enable experimental feature(s):\n"
             "   Spatial multiplexing (--spatial-multiplexing)\n"
+            "   Torch trace (--torch-trace, --list-torch-operators, --torch-operator)\n"
         ),
     )
 
@@ -363,7 +364,12 @@ Examples:
         dest="torch_trace",
         required=False,
         default=False,
-        action="store_true",
+        const=True,
+        nargs=0,
+        base_action="store_true",
+        action=ExperimentalAction,
+        experimental_enabled=experimental_enabled,
+        feature_label="Torch trace",
         help=(
             "\t\t\tTorch Trace, maps PyTorch operators to performance counters.\n"
             "\t\t\tShould be used only when profiling PyTorch applications."
@@ -734,8 +740,17 @@ Examples:
     analyze_group.add_argument(
         "--list-torch-operators",
         dest="list_torch_operators",
-        help="\t\tList all operators from PyTorch trace.",
-        action="store_true",
+        default=False,
+        const=True,
+        nargs=0,
+        base_action="store_true",
+        action=ExperimentalAction,
+        experimental_enabled=experimental_enabled,
+        feature_label="List torch operators",
+        help=(
+            "\t\tList PyTorch operators with hierarchy, numbering, and durations. "
+            "Recreates torch_trace output directory."
+        ),
     )
     analyze_group.add_argument(
         "--torch-operator",
@@ -743,7 +758,14 @@ Examples:
         type=str,
         dest="torch_operator",
         nargs="+",
-        help="\t\tSpecify operator name for filtering.",
+        base_action="store",
+        action=ExperimentalAction,
+        experimental_enabled=experimental_enabled,
+        feature_label="Torch operator filter",
+        help=(
+            "\t\tShow details for selected operator(s) using existing torch_trace "
+            "directory (run --list-torch-operators first)."
+        ),
     )
     analyze_group.add_argument(
         "-k",

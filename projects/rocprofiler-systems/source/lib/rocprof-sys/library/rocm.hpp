@@ -52,7 +52,8 @@ extern "C"
     rocprofiler_tool_configure_result_t* rocprofiler_configure(
         uint32_t version, const char* runtime_version, uint32_t priority,
         rocprofiler_client_id_t* client_id) ROCPROFSYS_PUBLIC_API;
-#if defined(ROCPROFSYS_USE_ROCM) && ROCPROFSYS_USE_ROCM > 0 && ROCPROFILER_VERSION >= 10200
+#if defined(ROCPROFSYS_USE_ROCM) && ROCPROFSYS_USE_ROCM > 0 &&                           \
+    ROCPROFILER_VERSION >= 10200
     rocprofiler_tool_configure_attach_result_t* rocprofiler_configure_attach(
         uint32_t version, const char* runtime_version, uint32_t priority,
         rocprofiler_client_id_t* client_id) ROCPROFSYS_PUBLIC_API;
