@@ -21,13 +21,6 @@ nic_stats::to_string() const
                        _tx_rdma_cnp_pkts);
 }
 
-const char* nic_stats::RX_RDMA_UCAST_BYTES = "rx_rdma_ucast_bytes";
-const char* nic_stats::RX_RDMA_UCAST_PKTS  = "rx_rdma_ucast_pkts";
-const char* nic_stats::TX_RDMA_UCAST_BYTES = "tx_rdma_ucast_bytes";
-const char* nic_stats::TX_RDMA_UCAST_PKTS  = "tx_rdma_ucast_pkts";
-const char* nic_stats::RX_RDMA_CNP_PKTS    = "rx_rdma_cnp_pkts";
-const char* nic_stats::TX_RDMA_CNP_PKTS    = "tx_rdma_cnp_pkts";
-
 ai_nic_stats_collector::ai_nic_stats_collector() = default;
 
 bool
