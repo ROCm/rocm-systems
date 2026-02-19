@@ -60,7 +60,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Default output format for the underlying ROCprofiler-SDK tool has been changed from ``csv`` to ``rocpd``.
   * If the ROCprofiler-SDK ``rocpd`` public library is not available, will fall back to ``csv`` format
 
-* Option ``--rocprofiler-sdk-library-path`` has been changed to ``--rocprofiler-sdk-tool-library-path`` to better reflect the fact that we provide flexibility in choosing the path to ROCprofiler-SDK tool and not the library.
+* Option ``--rocprofiler-sdk-library-path`` has been changed to ``--rocprofiler-sdk-tool-path`` to better reflect the fact that we provide flexibility in choosing the path to ROCprofiler-SDK tool (librocprofiler-sdk-tool.so) and not the library.
 
 * Standalone roofline (--roof-only option) in profile mode now creates HTML file output instead of PDF file output for roofline charts
 
@@ -75,7 +75,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Fixed the meaning of --dispatch option in profile mode in argparser to convey the fact that it control which iterations of the kernel to profile and not which dispatch ids to profile.
 
-* The meaning of --dispatch option in analyze is still the same which is which dispatch ids to analyze
+* Corrected peak VALU Roofline profiling and analysis by removing `FP8` VALU and `BF16` VALU benchmarking that was erroneously added during implementation of these datatypes into roofline feature.
 
 * Fix the functioning of --dispatch option to act as 1-based index and ensure that correct kernel iterations are being profiled
 
