@@ -14,6 +14,8 @@ HIP workloads targeting MI350 L2 backpressure and L1 stall metrics (≥10%).
 +--------------------------+--------------------------------------------------------------------------------------------------+-------------------------------------------+
 | utcl1_stall              | Rapid page hopping (>32 pages) -> exceed UTCL1 entries -> in-flight stall.                       | Stay in one page.                         |
 +--------------------------+--------------------------------------------------------------------------------------------------+-------------------------------------------+
+| ta_tcp_stall             | Random access, TA waits for TCP.                                                                 | Sequential access, TCP serves TA quickly. |
++--------------------------+--------------------------------------------------------------------------------------------------+-------------------------------------------+
 
 > [!NOTE]
 Note: Above workloads are still WIP, the profiled result may not reflect the intended results.
