@@ -38,6 +38,7 @@ import pandas as pd
 import config
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils import file_io, parser, schema, tty
+from utils.kernel_name_shortener import kernel_name_shortener
 from utils.logger import (
     console_debug,
     console_error,
@@ -174,15 +175,22 @@ class OmniAnalyze_Base:
         process_torch_trace_output(workload_path)
         torch_trace_dir = Path(workload_path) / "torch_trace"
         all_files = list(torch_trace_dir.glob("*.csv"))
+        # Use same kernel verbosity as analyze tables (default 1); user can override with --kernel-verbose
+        kernel_verbose = getattr(self.__args, "kernel_verbose", 1)
         kernel_top_path = Path(workload_path) / "pmc_kernel_top.csv"
         kernel_name_to_id: dict[str, int] | None = None
         if kernel_top_path.is_file():
             try:
                 kernel_top_df = pd.read_csv(kernel_top_path)
-                kernel_name_to_id = {
-                    str(kernel_top_df.iloc[i]["Kernel_Name"]).strip(): i
-                    for i in range(len(kernel_top_df))
-                }
+                if "Kernel_Name" in kernel_top_df.columns:
+                    kernel_top_df = kernel_name_shortener(
+                        kernel_top_df.copy(), kernel_verbose
+                    )
+                    if kernel_top_df is not None:
+                        kernel_name_to_id = {
+                            str(kernel_top_df.iloc[i]["Kernel_Name"]).strip(): i
+                            for i in range(len(kernel_top_df))
+                        }
             except Exception:
                 kernel_name_to_id = None
         print(f"\n{'=' * 80}")
@@ -191,8 +199,6 @@ class OmniAnalyze_Base:
             print("Kernel (id N) can be used with -k for filtering.")
         print(f"{'=' * 80}\n")
         operator_count = 0
-        # Use shortened names (1) by default for --list-torch-operators; --kernel-verbose still overrides
-        kernel_verbose = getattr(self.__args, "kernel_verbose", 1)
         for idx, f in enumerate(all_files, start=1):
             try:
                 df = pd.read_csv(f)
@@ -201,6 +207,7 @@ class OmniAnalyze_Base:
                     df,
                     index=idx,
                     kernel_name_to_id=kernel_name_to_id,
+                    kernel_verbose=kernel_verbose,
                 )
                 operator_count += 1
             except Exception as e:
