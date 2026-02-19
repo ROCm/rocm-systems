@@ -20,23 +20,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-/*
- * GL2 Backpressure Workload - Targets TCP_TCR_TCP_STALL_CYCLES / tcp_busy >= 10%
- *
- * 1. LFIFO FILL (MI300_TCP_Delta_MAS, mi300_gpu_bandwidth):
- *    - TCP has 704-deep LFIFO; requests queue until L2 returns data
- *    - When LFIFO full, TCP stalls (TCR stall) - can't issue new requests
- *    - Need: issue rate > drain rate. Drain rate ~704/memory_latency (~200 cycles)
- *    - Strategy: UNCOALESCED access -> 64 requests/wavefront -> 64x request rate
- *
- * 2. L2 MISS LATENCY (ensure every access misses L2):
- *    - MI350 L2: 8MB per XCD, ~64MB total. Use 2GB working set.
- *    - Stride = 64MB to spread across L2, ensure no reuse
- *
- * 3. HIGH REQUEST RATE:
- *    - 128 iterations per thread, uncoalesced (each lane different cache line)
- *    - Small block (64) -> more blocks -> more concurrent waves -> more in-flight requests
- */
 
 #include <hip/hip_runtime.h>
 #include <iostream>

@@ -23,8 +23,6 @@
 /*
  * UTCL1 Stall Workload - Targets TCP_UTCL1_STALL_INFLIGHT_MAX / tcp_busy >= 10%
  *
- * Design based on MI300 UTCL1 documentation (MCP):
- *
  * 1. UTCL1 has 32 cache lines (MI300 GFX UTCL1 Introduction)
  * 2. STALL_INFLIGHT_MAX: Stall when too many in-flight requests to UTCL2
  * 3. Need: Issue requests for >32 different pages before first completes
