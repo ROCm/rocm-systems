@@ -1098,3 +1098,315 @@ hipError_t hipDeviceGetMemPool(hipMemPool_t* memPool, int device) {
     }
     return err;
 }
+
+/* ============================================================================
+ * Host Memory Registration
+ * ============================================================================ */
+
+hipError_t hipHostRegister(void* hostPtr, size_t sizeBytes, unsigned int flags) {
+    if (!hostPtr || sizeBytes == 0) {
+        return hipErrorInvalidValue;
+    }
+
+    HipRemoteHostRegisterRequest req = {
+        .host_ptr = (uint64_t)(uintptr_t)hostPtr,
+        .size_bytes = sizeBytes,
+        .flags = flags
+    };
+    HipRemoteResponseHeader resp;
+
+    return hip_remote_request(
+        HIP_OP_HOST_REGISTER,
+        &req, sizeof(req),
+        &resp, sizeof(resp)
+    );
+}
+
+hipError_t hipHostUnregister(void* hostPtr) {
+    if (!hostPtr) {
+        return hipErrorInvalidValue;
+    }
+
+    HipRemoteHostUnregisterRequest req = {
+        .host_ptr = (uint64_t)(uintptr_t)hostPtr
+    };
+    HipRemoteResponseHeader resp;
+
+    return hip_remote_request(
+        HIP_OP_HOST_UNREGISTER,
+        &req, sizeof(req),
+        &resp, sizeof(resp)
+    );
+}
+
+hipError_t hipHostGetDevicePointer(void** devPtr, void* hstPtr, unsigned int flags) {
+    if (!devPtr || !hstPtr) {
+        return hipErrorInvalidValue;
+    }
+
+    HipRemoteHostGetDevicePointerRequest req = {
+        .host_ptr = (uint64_t)(uintptr_t)hstPtr,
+        .flags = flags
+    };
+    HipRemoteHostGetDevicePointerResponse resp;
+
+    hipError_t err = hip_remote_request(
+        HIP_OP_HOST_GET_DEVICE_POINTER,
+        &req, sizeof(req),
+        &resp, sizeof(resp)
+    );
+
+    if (err == hipSuccess) {
+        *devPtr = (void*)(uintptr_t)resp.device_ptr;
+    }
+    return err;
+}
+
+hipError_t hipHostGetFlags(unsigned int* flagsPtr, void* hostPtr) {
+    if (!flagsPtr || !hostPtr) {
+        return hipErrorInvalidValue;
+    }
+
+    HipRemoteHostGetFlagsRequest req = {
+        .host_ptr = (uint64_t)(uintptr_t)hostPtr
+    };
+    HipRemoteHostGetFlagsResponse resp;
+
+    hipError_t err = hip_remote_request(
+        HIP_OP_HOST_GET_FLAGS,
+        &req, sizeof(req),
+        &resp, sizeof(resp)
+    );
+
+    if (err == hipSuccess) {
+        *flagsPtr = resp.flags;
+    }
+    return err;
+}
+
+hipError_t hipHostAlloc(void** ptr, size_t size, unsigned int flags) {
+    if (!ptr) {
+        return hipErrorInvalidValue;
+    }
+    if (size == 0) {
+        *ptr = NULL;
+        return hipSuccess;
+    }
+
+    HipRemoteHostAllocRequest req = {
+        .size = size,
+        .flags = flags
+    };
+    HipRemoteHostAllocResponse resp;
+
+    hipError_t err = hip_remote_request(
+        HIP_OP_HOST_ALLOC,
+        &req, sizeof(req),
+        &resp, sizeof(resp)
+    );
+
+    if (err == hipSuccess) {
+        *ptr = (void*)(uintptr_t)resp.ptr;
+    }
+    return err;
+}
+
+hipError_t hipHostFree(void* ptr) {
+    if (!ptr) {
+        return hipSuccess;
+    }
+
+    HipRemoteHostFreeRequest req = {
+        .ptr = (uint64_t)(uintptr_t)ptr
+    };
+    HipRemoteResponseHeader resp;
+
+    return hip_remote_request(
+        HIP_OP_HOST_FREE,
+        &req, sizeof(req),
+        &resp, sizeof(resp)
+    );
+}
+
+/* ============================================================================
+ * Pitched Memory Allocation
+ * ============================================================================ */
+
+hipError_t hipMemAllocPitch(void** dptr, size_t* pitch, size_t widthInBytes,
+                            size_t height, unsigned int elementSizeBytes) {
+    if (!dptr || !pitch) {
+        return hipErrorInvalidValue;
+    }
+
+    HipRemoteMemAllocPitchRequest req = {
+        .width_in_bytes = widthInBytes,
+        .height = height,
+        .element_size = elementSizeBytes
+    };
+    HipRemoteMemAllocPitchResponse resp;
+
+    hipError_t err = hip_remote_request(
+        HIP_OP_MEM_ALLOC_PITCH,
+        &req, sizeof(req),
+        &resp, sizeof(resp)
+    );
+
+    if (err == hipSuccess) {
+        *dptr = (void*)(uintptr_t)resp.dptr;
+        *pitch = (size_t)resp.pitch;
+    }
+    return err;
+}
+
+/* ============================================================================
+ * Unified Memory Management
+ * ============================================================================ */
+
+hipError_t hipMemAdvise(const void* dev_ptr, size_t count, hipMemoryAdvise advice, int device) {
+    if (!dev_ptr || count == 0) {
+        return hipErrorInvalidValue;
+    }
+
+    HipRemoteMemAdviseRequest req = {
+        .dev_ptr = (uint64_t)(uintptr_t)dev_ptr,
+        .count = count,
+        .advice = (int32_t)advice,
+        .device = device
+    };
+    HipRemoteResponseHeader resp;
+
+    return hip_remote_request(
+        HIP_OP_MEM_ADVISE,
+        &req, sizeof(req),
+        &resp, sizeof(resp)
+    );
+}
+
+hipError_t hipMemPrefetchAsync(const void* dev_ptr, size_t count, int device, void* stream) {
+    if (!dev_ptr || count == 0) {
+        return hipErrorInvalidValue;
+    }
+
+    HipRemoteMemPrefetchAsyncRequest req = {
+        .dev_ptr = (uint64_t)(uintptr_t)dev_ptr,
+        .count = count,
+        .device = device,
+        .reserved = 0,
+        .stream = (uint64_t)(uintptr_t)stream
+    };
+    HipRemoteResponseHeader resp;
+
+    return hip_remote_request(
+        HIP_OP_MEM_PREFETCH_ASYNC,
+        &req, sizeof(req),
+        &resp, sizeof(resp)
+    );
+}
+
+hipError_t hipMemRangeGetAttribute(void* data, size_t data_size, hipMemRangeAttribute attribute,
+                                   const void* dev_ptr, size_t count) {
+    if (!data || !dev_ptr || data_size == 0 || count == 0) {
+        return hipErrorInvalidValue;
+    }
+
+    HipRemoteMemRangeGetAttributeRequest req = {
+        .data_size = data_size,
+        .attribute = (int32_t)attribute,
+        .reserved = 0,
+        .dev_ptr = (uint64_t)(uintptr_t)dev_ptr,
+        .count = count
+    };
+
+    /* Allocate buffer for response + data */
+    size_t resp_size = sizeof(HipRemoteMemRangeGetAttributeResponse) + data_size;
+    uint8_t* resp_buf = (uint8_t*)malloc(resp_size);
+    if (!resp_buf) {
+        return hipErrorOutOfMemory;
+    }
+
+    hipError_t err = hip_remote_request(
+        HIP_OP_MEM_RANGE_GET_ATTRIBUTE,
+        &req, sizeof(req),
+        resp_buf, resp_size
+    );
+
+    if (err == hipSuccess) {
+        /* Copy data from response */
+        memcpy(data, resp_buf + sizeof(HipRemoteMemRangeGetAttributeResponse), data_size);
+    }
+
+    free(resp_buf);
+    return err;
+}
+
+hipError_t hipMemRangeGetAttributes(void** data, size_t* data_sizes, hipMemRangeAttribute* attributes,
+                                    size_t num_attributes, const void* dev_ptr, size_t count) {
+    if (!data || !data_sizes || !attributes || num_attributes == 0 || !dev_ptr || count == 0) {
+        return hipErrorInvalidValue;
+    }
+
+    if (num_attributes > HIP_REMOTE_MAX_MEM_RANGE_ATTRIBUTES) {
+        return hipErrorInvalidValue;
+    }
+
+    /* Build request with variable-length arrays */
+    size_t req_size = sizeof(HipRemoteMemRangeGetAttributesRequest) +
+                      num_attributes * sizeof(int32_t) +  /* attributes */
+                      num_attributes * sizeof(uint64_t);  /* data_sizes */
+
+    uint8_t* req_buf = (uint8_t*)malloc(req_size);
+    if (!req_buf) {
+        return hipErrorOutOfMemory;
+    }
+
+    HipRemoteMemRangeGetAttributesRequest* req = (HipRemoteMemRangeGetAttributesRequest*)req_buf;
+    req->num_attributes = (uint32_t)num_attributes;
+    req->reserved = 0;
+    req->dev_ptr = (uint64_t)(uintptr_t)dev_ptr;
+    req->count = count;
+
+    /* Copy attributes */
+    int32_t* attrs_ptr = (int32_t*)(req_buf + sizeof(HipRemoteMemRangeGetAttributesRequest));
+    for (size_t i = 0; i < num_attributes; i++) {
+        attrs_ptr[i] = (int32_t)attributes[i];
+    }
+
+    /* Copy data sizes */
+    uint64_t* sizes_ptr = (uint64_t*)(attrs_ptr + num_attributes);
+    for (size_t i = 0; i < num_attributes; i++) {
+        sizes_ptr[i] = (uint64_t)data_sizes[i];
+    }
+
+    /* Calculate total response data size */
+    size_t total_data_size = 0;
+    for (size_t i = 0; i < num_attributes; i++) {
+        total_data_size += data_sizes[i];
+    }
+
+    size_t resp_size = sizeof(HipRemoteMemRangeGetAttributesResponse) + total_data_size;
+    uint8_t* resp_buf = (uint8_t*)malloc(resp_size);
+    if (!resp_buf) {
+        free(req_buf);
+        return hipErrorOutOfMemory;
+    }
+
+    hipError_t err = hip_remote_request(
+        HIP_OP_MEM_RANGE_GET_ATTRIBUTES,
+        req_buf, req_size,
+        resp_buf, resp_size
+    );
+
+    if (err == hipSuccess) {
+        /* Copy data for each attribute */
+        uint8_t* data_ptr = resp_buf + sizeof(HipRemoteMemRangeGetAttributesResponse);
+        for (size_t i = 0; i < num_attributes; i++) {
+            memcpy(data[i], data_ptr, data_sizes[i]);
+            data_ptr += data_sizes[i];
+        }
+    }
+
+    free(req_buf);
+    free(resp_buf);
+    return err;
+}
+

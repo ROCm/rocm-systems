@@ -535,3 +535,278 @@ const char* hipGetErrorString(hipError_t error) {
         default: return "unknown error";
     }
 }
+
+/* ============================================================================
+ * Device Driver APIs
+ * ============================================================================ */
+
+hipError_t hipDeviceGet(hipDevice_t* device, int ordinal) {
+    if (!device) {
+        return hipErrorInvalidValue;
+    }
+
+    HipRemoteDeviceGetRequest req = { .ordinal = ordinal };
+    HipRemoteDeviceGetResponse resp;
+
+    hipError_t err = hip_remote_request(
+        HIP_OP_DEVICE_GET,
+        &req, sizeof(req),
+        &resp, sizeof(resp)
+    );
+
+    if (err == hipSuccess) {
+        *device = (hipDevice_t)resp.device;
+    }
+    return err;
+}
+
+hipError_t hipDeviceGetName(char* name, int len, hipDevice_t device) {
+    if (!name || len <= 0) {
+        return hipErrorInvalidValue;
+    }
+
+    HipRemoteDeviceGetNameRequest req = {
+        .device = (uint64_t)device,
+        .len = len
+    };
+    HipRemoteDeviceGetNameResponse resp;
+
+    hipError_t err = hip_remote_request(
+        HIP_OP_DEVICE_GET_NAME,
+        &req, sizeof(req),
+        &resp, sizeof(resp)
+    );
+
+    if (err == hipSuccess) {
+        strncpy(name, resp.name, len - 1);
+        name[len - 1] = '\0';
+    }
+    return err;
+}
+
+hipError_t hipDeviceTotalMem(size_t* bytes, hipDevice_t device) {
+    if (!bytes) {
+        return hipErrorInvalidValue;
+    }
+
+    HipRemoteDeviceTotalMemRequest req = { .device = (uint64_t)device };
+    HipRemoteDeviceTotalMemResponse resp;
+
+    hipError_t err = hip_remote_request(
+        HIP_OP_DEVICE_TOTAL_MEM,
+        &req, sizeof(req),
+        &resp, sizeof(resp)
+    );
+
+    if (err == hipSuccess) {
+        *bytes = (size_t)resp.bytes;
+    }
+    return err;
+}
+
+hipError_t hipDeviceGetPCIBusId(char* pciBusId, int len, int device) {
+    if (!pciBusId || len <= 0) {
+        return hipErrorInvalidValue;
+    }
+
+    HipRemoteDeviceGetPCIBusIdRequest req = {
+        .device = device,
+        .len = len
+    };
+    HipRemoteDeviceGetPCIBusIdResponse resp;
+
+    hipError_t err = hip_remote_request(
+        HIP_OP_DEVICE_GET_PCI_BUS_ID,
+        &req, sizeof(req),
+        &resp, sizeof(resp)
+    );
+
+    if (err == hipSuccess) {
+        strncpy(pciBusId, resp.pci_bus_id, len - 1);
+        pciBusId[len - 1] = '\0';
+    }
+    return err;
+}
+
+hipError_t hipDeviceGetByPCIBusId(int* device, const char* pciBusId) {
+    if (!device || !pciBusId) {
+        return hipErrorInvalidValue;
+    }
+
+    HipRemoteDeviceGetByPCIBusIdRequest req;
+    strncpy(req.pci_bus_id, pciBusId, sizeof(req.pci_bus_id) - 1);
+    req.pci_bus_id[sizeof(req.pci_bus_id) - 1] = '\0';
+
+    HipRemoteDeviceGetByPCIBusIdResponse resp;
+
+    hipError_t err = hip_remote_request(
+        HIP_OP_DEVICE_GET_BY_PCI_BUS_ID,
+        &req, sizeof(req),
+        &resp, sizeof(resp)
+    );
+
+    if (err == hipSuccess) {
+        *device = resp.device;
+    }
+    return err;
+}
+
+hipError_t hipDeviceComputeCapability(int* major, int* minor, hipDevice_t device) {
+    if (!major || !minor) {
+        return hipErrorInvalidValue;
+    }
+
+    HipRemoteDeviceComputeCapabilityRequest req = { .device = (uint64_t)device };
+    HipRemoteDeviceComputeCapabilityResponse resp;
+
+    hipError_t err = hip_remote_request(
+        HIP_OP_DEVICE_COMPUTE_CAPABILITY,
+        &req, sizeof(req),
+        &resp, sizeof(resp)
+    );
+
+    if (err == hipSuccess) {
+        *major = resp.major;
+        *minor = resp.minor;
+    }
+    return err;
+}
+
+hipError_t hipDeviceGetUuid(hipUUID* uuid, hipDevice_t device) {
+    if (!uuid) {
+        return hipErrorInvalidValue;
+    }
+
+    HipRemoteDeviceGetUuidRequest req = { .device = (uint64_t)device };
+    HipRemoteDeviceGetUuidResponse resp;
+
+    hipError_t err = hip_remote_request(
+        HIP_OP_DEVICE_GET_UUID,
+        &req, sizeof(req),
+        &resp, sizeof(resp)
+    );
+
+    if (err == hipSuccess) {
+        memcpy(uuid->bytes, resp.uuid, HIP_UUID_SIZE);
+    }
+    return err;
+}
+
+/* ============================================================================
+ * Device Cache/Config APIs
+ * ============================================================================ */
+
+hipError_t hipDeviceGetCacheConfig(hipFuncCache_t* cacheConfig) {
+    if (!cacheConfig) {
+        return hipErrorInvalidValue;
+    }
+
+    HipRemoteDeviceCacheConfigResponse resp;
+
+    hipError_t err = hip_remote_request(
+        HIP_OP_DEVICE_GET_CACHE_CONFIG,
+        NULL, 0,
+        &resp, sizeof(resp)
+    );
+
+    if (err == hipSuccess) {
+        *cacheConfig = (hipFuncCache_t)resp.cache_config;
+    }
+    return err;
+}
+
+hipError_t hipDeviceSetCacheConfig(hipFuncCache_t cacheConfig) {
+    HipRemoteDeviceCacheConfigRequest req = { .cache_config = (int32_t)cacheConfig };
+    HipRemoteResponseHeader resp;
+
+    return hip_remote_request(
+        HIP_OP_DEVICE_SET_CACHE_CONFIG,
+        &req, sizeof(req),
+        &resp, sizeof(resp)
+    );
+}
+
+hipError_t hipDeviceGetSharedMemConfig(hipSharedMemConfig* pConfig) {
+    if (!pConfig) {
+        return hipErrorInvalidValue;
+    }
+
+    HipRemoteDeviceSharedMemConfigResponse resp;
+
+    hipError_t err = hip_remote_request(
+        HIP_OP_DEVICE_GET_SHARED_MEM_CONFIG,
+        NULL, 0,
+        &resp, sizeof(resp)
+    );
+
+    if (err == hipSuccess) {
+        *pConfig = (hipSharedMemConfig)resp.shared_mem_config;
+    }
+    return err;
+}
+
+hipError_t hipDeviceSetSharedMemConfig(hipSharedMemConfig config) {
+    HipRemoteDeviceSharedMemConfigRequest req = { .shared_mem_config = (int32_t)config };
+    HipRemoteResponseHeader resp;
+
+    return hip_remote_request(
+        HIP_OP_DEVICE_SET_SHARED_MEM_CONFIG,
+        &req, sizeof(req),
+        &resp, sizeof(resp)
+    );
+}
+
+hipError_t hipGetDeviceFlags(unsigned int* flags) {
+    if (!flags) {
+        return hipErrorInvalidValue;
+    }
+
+    HipRemoteDeviceFlagsResponse resp;
+
+    hipError_t err = hip_remote_request(
+        HIP_OP_GET_DEVICE_FLAGS,
+        NULL, 0,
+        &resp, sizeof(resp)
+    );
+
+    if (err == hipSuccess) {
+        *flags = resp.flags;
+    }
+    return err;
+}
+
+hipError_t hipSetDeviceFlags(unsigned int flags) {
+    HipRemoteDeviceFlagsRequest req = { .flags = flags };
+    HipRemoteResponseHeader resp;
+
+    return hip_remote_request(
+        HIP_OP_SET_DEVICE_FLAGS,
+        &req, sizeof(req),
+        &resp, sizeof(resp)
+    );
+}
+
+hipError_t hipDeviceGetP2PAttribute(int* value, hipDeviceP2PAttr attr,
+                                     int srcDevice, int dstDevice) {
+    if (!value) {
+        return hipErrorInvalidValue;
+    }
+
+    HipRemoteDeviceGetP2PAttributeRequest req = {
+        .attr = (int32_t)attr,
+        .src_device = srcDevice,
+        .dst_device = dstDevice
+    };
+    HipRemoteDeviceGetP2PAttributeResponse resp;
+
+    hipError_t err = hip_remote_request(
+        HIP_OP_DEVICE_GET_P2P_ATTRIBUTE,
+        &req, sizeof(req),
+        &resp, sizeof(resp)
+    );
+
+    if (err == hipSuccess) {
+        *value = resp.value;
+    }
+    return err;
+}

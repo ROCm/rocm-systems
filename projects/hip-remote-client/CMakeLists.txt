@@ -27,6 +27,7 @@ set(HIP_REMOTE_SOURCES
   src/hip_api_memory.c
   src/hip_api_stream.c
   src/hip_api_module.c
+  src/hip_api_graph.c
 )
 
 set(HIP_REMOTE_HEADERS
@@ -211,6 +212,54 @@ if(BUILD_TESTING)
   )
 
   set_tests_properties(hip_remote_mempool PROPERTIES
+    LABELS "integration"
+    ENVIRONMENT "TF_DEBUG=1"
+  )
+
+  # Graph Node tests
+  add_executable(hip_remote_test_graph_nodes tests/test_graph_nodes.c)
+  target_link_libraries(hip_remote_test_graph_nodes PRIVATE amdhip64)
+  target_include_directories(hip_remote_test_graph_nodes PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+  )
+
+  add_test(NAME hip_remote_graph_nodes
+    COMMAND hip_remote_test_graph_nodes
+  )
+
+  set_tests_properties(hip_remote_graph_nodes PROPERTIES
+    LABELS "integration"
+    ENVIRONMENT "TF_DEBUG=1"
+  )
+
+  # Device APIs tests
+  add_executable(hip_remote_test_device_apis tests/test_device_apis.c)
+  target_link_libraries(hip_remote_test_device_apis PRIVATE amdhip64)
+  target_include_directories(hip_remote_test_device_apis PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+  )
+
+  add_test(NAME hip_remote_device_apis
+    COMMAND hip_remote_test_device_apis
+  )
+
+  set_tests_properties(hip_remote_device_apis PROPERTIES
+    LABELS "integration"
+    ENVIRONMENT "TF_DEBUG=1"
+  )
+
+  # Memory APIs tests
+  add_executable(hip_remote_test_memory_apis tests/test_memory_apis.c)
+  target_link_libraries(hip_remote_test_memory_apis PRIVATE amdhip64)
+  target_include_directories(hip_remote_test_memory_apis PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+  )
+
+  add_test(NAME hip_remote_memory_apis
+    COMMAND hip_remote_test_memory_apis
+  )
+
+  set_tests_properties(hip_remote_memory_apis PROPERTIES
     LABELS "integration"
     ENVIRONMENT "TF_DEBUG=1"
   )

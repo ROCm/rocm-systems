@@ -167,6 +167,37 @@ typedef void* hipStream_t;
 /* Opaque event handle */
 typedef void* hipEvent_t;
 
+/* Opaque device handle */
+typedef int hipDevice_t;
+
+/* UUID structure */
+typedef struct {
+    char bytes[16];
+} hipUUID;
+
+/* Function cache config */
+typedef enum {
+    hipFuncCachePreferNone = 0,
+    hipFuncCachePreferShared = 1,
+    hipFuncCachePreferL1 = 2,
+    hipFuncCachePreferEqual = 3
+} hipFuncCache_t;
+
+/* Shared memory config */
+typedef enum {
+    hipSharedMemBankSizeDefault = 0,
+    hipSharedMemBankSizeFourByte = 1,
+    hipSharedMemBankSizeEightByte = 2
+} hipSharedMemConfig;
+
+/* P2P attributes */
+typedef enum {
+    hipDevP2PAttrPerformanceRank = 0,
+    hipDevP2PAttrAccessSupported = 1,
+    hipDevP2PAttrNativeAtomicSupported = 2,
+    hipDevP2PAttrHipArrayAccessSupported = 3
+} hipDeviceP2PAttr;
+
 /* Stream flags */
 #define hipStreamDefault        0x00
 #define hipStreamNonBlocking    0x01
@@ -176,6 +207,32 @@ typedef void* hipEvent_t;
 #define hipEventBlockingSync    0x01
 #define hipEventDisableTiming   0x02
 #define hipEventInterprocess    0x04
+
+/* Host registration flags */
+#define hipHostRegisterDefault  0x00
+#define hipHostRegisterPortable 0x01
+#define hipHostRegisterMapped   0x02
+#define hipHostRegisterIoMemory 0x04
+#define hipHostRegisterReadOnly 0x08
+
+/* Memory advise values */
+typedef enum {
+    hipMemAdviseSetReadMostly = 1,
+    hipMemAdviseUnsetReadMostly = 2,
+    hipMemAdviseSetPreferredLocation = 3,
+    hipMemAdviseUnsetPreferredLocation = 4,
+    hipMemAdviseSetAccessedBy = 5,
+    hipMemAdviseUnsetAccessedBy = 6
+} hipMemoryAdvise;
+
+/* Memory range attributes */
+typedef enum {
+    hipMemRangeAttributeReadMostly = 1,
+    hipMemRangeAttributePreferredLocation = 2,
+    hipMemRangeAttributeAccessedBy = 3,
+    hipMemRangeAttributeLastPrefetchLocation = 4,
+    hipMemRangeAttributeCoherencyMode = 100
+} hipMemRangeAttribute;
 
 /* ============================================================================
  * Client State
@@ -337,6 +394,24 @@ hipError_t hipDeviceCanAccessPeer(int* canAccessPeer, int deviceId, int peerDevi
 hipError_t hipDeviceEnablePeerAccess(int peerDeviceId, unsigned int flags);
 hipError_t hipDeviceDisablePeerAccess(int peerDeviceId);
 
+/* Device Driver APIs */
+hipError_t hipDeviceGet(hipDevice_t* device, int ordinal);
+hipError_t hipDeviceGetName(char* name, int len, hipDevice_t device);
+hipError_t hipDeviceTotalMem(size_t* bytes, hipDevice_t device);
+hipError_t hipDeviceGetPCIBusId(char* pciBusId, int len, int device);
+hipError_t hipDeviceGetByPCIBusId(int* device, const char* pciBusId);
+hipError_t hipDeviceComputeCapability(int* major, int* minor, hipDevice_t device);
+hipError_t hipDeviceGetUuid(hipUUID* uuid, hipDevice_t device);
+
+/* Device Cache/Config APIs */
+hipError_t hipDeviceGetCacheConfig(hipFuncCache_t* cacheConfig);
+hipError_t hipDeviceSetCacheConfig(hipFuncCache_t cacheConfig);
+hipError_t hipDeviceGetSharedMemConfig(hipSharedMemConfig* pConfig);
+hipError_t hipDeviceSetSharedMemConfig(hipSharedMemConfig config);
+hipError_t hipGetDeviceFlags(unsigned int* flags);
+hipError_t hipSetDeviceFlags(unsigned int flags);
+hipError_t hipDeviceGetP2PAttribute(int* value, hipDeviceP2PAttr attr, int srcDevice, int dstDevice);
+
 /* Error Handling */
 const char* hipGetErrorString(hipError_t error);
 const char* hipGetErrorName(hipError_t error);
@@ -401,6 +476,26 @@ hipError_t hipMemcpy3DAsync(const hipMemcpy3DParms* p, void* stream);
 hipError_t hipMemcpyPeer(void* dst, int dstDeviceId, const void* src, int srcDeviceId, size_t sizeBytes);
 hipError_t hipMemcpyPeerAsync(void* dst, int dstDeviceId, const void* src, int srcDeviceId,
                                size_t sizeBytes, void* stream);
+
+/* Host Memory Registration */
+hipError_t hipHostRegister(void* hostPtr, size_t sizeBytes, unsigned int flags);
+hipError_t hipHostUnregister(void* hostPtr);
+hipError_t hipHostGetDevicePointer(void** devPtr, void* hstPtr, unsigned int flags);
+hipError_t hipHostGetFlags(unsigned int* flagsPtr, void* hostPtr);
+hipError_t hipHostAlloc(void** ptr, size_t size, unsigned int flags);
+hipError_t hipHostFree(void* ptr);
+
+/* Pitched Memory Allocation */
+hipError_t hipMemAllocPitch(void** dptr, size_t* pitch, size_t widthInBytes, size_t height,
+                            unsigned int elementSizeBytes);
+
+/* Unified Memory Management */
+hipError_t hipMemAdvise(const void* dev_ptr, size_t count, hipMemoryAdvise advice, int device);
+hipError_t hipMemPrefetchAsync(const void* dev_ptr, size_t count, int device, void* stream);
+hipError_t hipMemRangeGetAttribute(void* data, size_t data_size, hipMemRangeAttribute attribute,
+                                   const void* dev_ptr, size_t count);
+hipError_t hipMemRangeGetAttributes(void** data, size_t* data_sizes, hipMemRangeAttribute* attributes,
+                                    size_t num_attributes, const void* dev_ptr, size_t count);
 
 /* Stream Management */
 hipError_t hipStreamCreate(void** stream);
@@ -532,6 +627,130 @@ hipError_t hipGraphExecDestroy(hipGraphExec_t graphExec);
 hipError_t hipStreamBeginCapture(hipStream_t stream, hipStreamCaptureMode mode);
 hipError_t hipStreamEndCapture(hipStream_t stream, hipGraph_t* pGraph);
 hipError_t hipStreamIsCapturing(hipStream_t stream, hipStreamCaptureStatus* pCaptureStatus);
+
+/* Graph Node Types */
+typedef enum {
+    hipGraphNodeTypeKernel = 0,
+    hipGraphNodeTypeMemcpy = 1,
+    hipGraphNodeTypeMemset = 2,
+    hipGraphNodeTypeHost = 3,
+    hipGraphNodeTypeGraph = 4,
+    hipGraphNodeTypeEmpty = 5,
+    hipGraphNodeTypeWaitEvent = 6,
+    hipGraphNodeTypeEventRecord = 7,
+    hipGraphNodeTypeExtSemaphoreSignal = 8,
+    hipGraphNodeTypeExtSemaphoreWait = 9,
+    hipGraphNodeTypeMemAlloc = 10,
+    hipGraphNodeTypeMemFree = 11,
+    hipGraphNodeTypeCount = 12
+} hipGraphNodeType;
+
+/* Memset parameters for graph nodes */
+typedef struct {
+    void* dst;
+    size_t pitch;
+    unsigned int value;
+    unsigned int elementSize;
+    size_t width;
+    size_t height;
+} hipMemsetParams;
+
+/* Kernel node parameters */
+typedef struct {
+    dim3 blockDim;
+    void** extra;
+    void* func;
+    dim3 gridDim;
+    void** kernelParams;
+    unsigned int sharedMemBytes;
+} hipKernelNodeParams;
+
+/* Host node parameters (limited support in remote mode) */
+typedef struct {
+    void* fn;
+    void* userData;
+} hipHostNodeParams;
+
+/**
+ * Add a memcpy node to a graph.
+ */
+hipError_t hipGraphAddMemcpyNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
+                                  const hipGraphNode_t* pDependencies, size_t numDependencies,
+                                  const hipMemcpy3DParms* pCopyParams);
+
+/**
+ * Add a 1D memcpy node to a graph.
+ */
+hipError_t hipGraphAddMemcpyNode1D(hipGraphNode_t* pGraphNode, hipGraph_t graph,
+                                    const hipGraphNode_t* pDependencies, size_t numDependencies,
+                                    void* dst, const void* src, size_t count, hipMemcpyKind kind);
+
+/**
+ * Add a memset node to a graph.
+ */
+hipError_t hipGraphAddMemsetNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
+                                  const hipGraphNode_t* pDependencies, size_t numDependencies,
+                                  const hipMemsetParams* pMemsetParams);
+
+/**
+ * Add a kernel launch node to a graph.
+ */
+hipError_t hipGraphAddKernelNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
+                                  const hipGraphNode_t* pDependencies, size_t numDependencies,
+                                  const hipKernelNodeParams* pNodeParams);
+
+/**
+ * Add dependencies between nodes.
+ */
+hipError_t hipGraphAddDependencies(hipGraph_t graph,
+                                    const hipGraphNode_t* from,
+                                    const hipGraphNode_t* to,
+                                    size_t numDependencies);
+
+/**
+ * Add an empty node to a graph.
+ */
+hipError_t hipGraphAddEmptyNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
+                                 const hipGraphNode_t* pDependencies, size_t numDependencies);
+
+/**
+ * Get all nodes in a graph.
+ */
+hipError_t hipGraphGetNodes(hipGraph_t graph, hipGraphNode_t* nodes, size_t* numNodes);
+
+/**
+ * Get root nodes of a graph.
+ */
+hipError_t hipGraphGetRootNodes(hipGraph_t graph, hipGraphNode_t* pRootNodes, size_t* pNumRootNodes);
+
+/**
+ * Get edges of a graph.
+ */
+hipError_t hipGraphGetEdges(hipGraph_t graph, hipGraphNode_t* from, hipGraphNode_t* to, size_t* numEdges);
+
+/**
+ * Get type of a graph node.
+ */
+hipError_t hipGraphNodeGetType(hipGraphNode_t node, hipGraphNodeType* pType);
+
+/**
+ * Destroy a graph node.
+ */
+hipError_t hipGraphDestroyNode(hipGraphNode_t node);
+
+/**
+ * Add an event record node to a graph.
+ */
+hipError_t hipGraphAddEventRecordNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
+                                       const hipGraphNode_t* pDependencies, size_t numDependencies,
+                                       hipEvent_t event);
+
+/**
+ * Add an event wait node to a graph.
+ */
+hipError_t hipGraphAddEventWaitNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
+                                     const hipGraphNode_t* pDependencies, size_t numDependencies,
+                                     hipEvent_t event);
 
 /* Stream Callback (Note: callbacks execute on worker, not client) */
 typedef void (*hipStreamCallback_t)(hipStream_t stream, hipError_t status, void* userData);

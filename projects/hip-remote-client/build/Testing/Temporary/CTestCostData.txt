@@ -1,0 +1,10 @@
+hip_remote_basic 5 0.852203
+hip_remote_extended 5 1.03298
+hip_remote_phase2 5 1.40075
+hip_remote_graphs 4 1.36867
+hip_remote_ipc 4 0.651973
+hip_remote_mempool 4 1.55094
+hip_remote_graph_nodes 4 2.89381
+hip_remote_device_apis 4 0.785876
+hip_remote_memory_apis 1 1.82296
+---

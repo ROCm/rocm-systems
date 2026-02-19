@@ -842,6 +842,584 @@ static void handle_device_get_mem_pool(int fd, uint32_t request_id,
     send_response(fd, HIP_OP_DEVICE_GET_MEM_POOL, request_id, &resp, sizeof(resp));
 }
 
+
+/* ============================================================================
+ * Host Memory Registration Handlers
+ * ============================================================================ */
+
+static void handle_host_register(int fd, uint32_t request_id,
+                                 const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteHostRegisterRequest)) {
+        send_simple_response(fd, HIP_OP_HOST_REGISTER, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteHostRegisterRequest* req = (const HipRemoteHostRegisterRequest*)payload;
+    void* hostPtr = (void*)(uintptr_t)req->host_ptr;
+    hipError_t err = hipHostRegister(hostPtr, req->size_bytes, req->flags);
+    LOG_DEBUG("HostRegister: ptr=%p, size=%lu, flags=%u, err=%d",
+              hostPtr, req->size_bytes, req->flags, err);
+    send_simple_response(fd, HIP_OP_HOST_REGISTER, request_id, err);
+}
+
+static void handle_host_unregister(int fd, uint32_t request_id,
+                                   const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteHostUnregisterRequest)) {
+        send_simple_response(fd, HIP_OP_HOST_UNREGISTER, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteHostUnregisterRequest* req = (const HipRemoteHostUnregisterRequest*)payload;
+    void* hostPtr = (void*)(uintptr_t)req->host_ptr;
+    hipError_t err = hipHostUnregister(hostPtr);
+    LOG_DEBUG("HostUnregister: ptr=%p, err=%d", hostPtr, err);
+    send_simple_response(fd, HIP_OP_HOST_UNREGISTER, request_id, err);
+}
+
+static void handle_host_get_device_pointer(int fd, uint32_t request_id,
+                                           const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteHostGetDevicePointerRequest)) {
+        send_simple_response(fd, HIP_OP_HOST_GET_DEVICE_POINTER, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteHostGetDevicePointerRequest* req = (const HipRemoteHostGetDevicePointerRequest*)payload;
+    void* hostPtr = (void*)(uintptr_t)req->host_ptr;
+    void* devPtr = NULL;
+    hipError_t err = hipHostGetDevicePointer(&devPtr, hostPtr, req->flags);
+    LOG_DEBUG("HostGetDevicePointer: host=%p, dev=%p, err=%d", hostPtr, devPtr, err);
+
+    HipRemoteHostGetDevicePointerResponse resp = {
+        .header = { .error_code = (int32_t)err },
+        .device_ptr = (uint64_t)(uintptr_t)devPtr
+    };
+    send_response(fd, HIP_OP_HOST_GET_DEVICE_POINTER, request_id, &resp, sizeof(resp));
+}
+
+static void handle_host_get_flags(int fd, uint32_t request_id,
+                                  const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteHostGetFlagsRequest)) {
+        send_simple_response(fd, HIP_OP_HOST_GET_FLAGS, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteHostGetFlagsRequest* req = (const HipRemoteHostGetFlagsRequest*)payload;
+    void* hostPtr = (void*)(uintptr_t)req->host_ptr;
+    unsigned int flags = 0;
+    hipError_t err = hipHostGetFlags(&flags, hostPtr);
+    LOG_DEBUG("HostGetFlags: ptr=%p, flags=%u, err=%d", hostPtr, flags, err);
+
+    HipRemoteHostGetFlagsResponse resp = {
+        .header = { .error_code = (int32_t)err },
+        .flags = flags
+    };
+    send_response(fd, HIP_OP_HOST_GET_FLAGS, request_id, &resp, sizeof(resp));
+}
+
+static void handle_host_alloc(int fd, uint32_t request_id,
+                              const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteHostAllocRequest)) {
+        send_simple_response(fd, HIP_OP_HOST_ALLOC, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteHostAllocRequest* req = (const HipRemoteHostAllocRequest*)payload;
+    void* ptr = NULL;
+    hipError_t err = hipHostAlloc(&ptr, req->size, req->flags);
+    LOG_DEBUG("HostAlloc: size=%lu, flags=%u, ptr=%p, err=%d",
+              req->size, req->flags, ptr, err);
+
+    HipRemoteHostAllocResponse resp = {
+        .header = { .error_code = (int32_t)err },
+        .ptr = (uint64_t)(uintptr_t)ptr
+    };
+    send_response(fd, HIP_OP_HOST_ALLOC, request_id, &resp, sizeof(resp));
+}
+
+static void handle_host_free(int fd, uint32_t request_id,
+                             const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteHostFreeRequest)) {
+        send_simple_response(fd, HIP_OP_HOST_FREE, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteHostFreeRequest* req = (const HipRemoteHostFreeRequest*)payload;
+    void* ptr = (void*)(uintptr_t)req->ptr;
+    hipError_t err = hipHostFree(ptr);
+    LOG_DEBUG("HostFree: ptr=%p, err=%d", ptr, err);
+    send_simple_response(fd, HIP_OP_HOST_FREE, request_id, err);
+}
+
+static void handle_mem_alloc_pitch(int fd, uint32_t request_id,
+                                   const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteMemAllocPitchRequest)) {
+        send_simple_response(fd, HIP_OP_MEM_ALLOC_PITCH, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteMemAllocPitchRequest* req = (const HipRemoteMemAllocPitchRequest*)payload;
+    hipDeviceptr_t dptr;
+    size_t pitch;
+    hipError_t err = hipMemAllocPitch(&dptr, &pitch, req->width_in_bytes,
+                                      req->height, req->element_size);
+    LOG_DEBUG("MemAllocPitch: width=%lu, height=%lu, elem=%u, pitch=%lu, ptr=%p, err=%d",
+              req->width_in_bytes, req->height, req->element_size, pitch, (void*)dptr, err);
+
+    HipRemoteMemAllocPitchResponse resp = {
+        .header = { .error_code = (int32_t)err },
+        .dptr = (uint64_t)dptr,
+        .pitch = pitch
+    };
+    send_response(fd, HIP_OP_MEM_ALLOC_PITCH, request_id, &resp, sizeof(resp));
+}
+
+/* ============================================================================
+ * Unified Memory Management Handlers
+ * ============================================================================ */
+
+static void handle_mem_advise(int fd, uint32_t request_id,
+                              const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteMemAdviseRequest)) {
+        send_simple_response(fd, HIP_OP_MEM_ADVISE, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteMemAdviseRequest* req = (const HipRemoteMemAdviseRequest*)payload;
+    const void* devPtr = (const void*)(uintptr_t)req->dev_ptr;
+    hipError_t err = hipMemAdvise(devPtr, req->count, (hipMemoryAdvise)req->advice, req->device);
+    LOG_DEBUG("MemAdvise: ptr=%p, count=%lu, advice=%d, device=%d, err=%d",
+              devPtr, req->count, req->advice, req->device, err);
+    send_simple_response(fd, HIP_OP_MEM_ADVISE, request_id, err);
+}
+
+static void handle_mem_prefetch_async(int fd, uint32_t request_id,
+                                      const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteMemPrefetchAsyncRequest)) {
+        send_simple_response(fd, HIP_OP_MEM_PREFETCH_ASYNC, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteMemPrefetchAsyncRequest* req = (const HipRemoteMemPrefetchAsyncRequest*)payload;
+    const void* devPtr = (const void*)(uintptr_t)req->dev_ptr;
+    hipStream_t stream = (hipStream_t)(uintptr_t)req->stream;
+    hipError_t err = hipMemPrefetchAsync(devPtr, req->count, req->device, stream);
+    LOG_DEBUG("MemPrefetchAsync: ptr=%p, count=%lu, device=%d, stream=%p, err=%d",
+              devPtr, req->count, req->device, stream, err);
+    send_simple_response(fd, HIP_OP_MEM_PREFETCH_ASYNC, request_id, err);
+}
+
+static void handle_mem_range_get_attribute(int fd, uint32_t request_id,
+                                           const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteMemRangeGetAttributeRequest)) {
+        send_simple_response(fd, HIP_OP_MEM_RANGE_GET_ATTRIBUTE, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteMemRangeGetAttributeRequest* req = (const HipRemoteMemRangeGetAttributeRequest*)payload;
+    const void* devPtr = (const void*)(uintptr_t)req->dev_ptr;
+
+    /* Allocate buffer for attribute data */
+    void* data = malloc(req->data_size);
+    if (!data) {
+        send_simple_response(fd, HIP_OP_MEM_RANGE_GET_ATTRIBUTE, request_id, hipErrorOutOfMemory);
+        return;
+    }
+
+    hipError_t err = hipMemRangeGetAttribute(data, req->data_size,
+                                             (hipMemRangeAttribute)req->attribute,
+                                             devPtr, req->count);
+    LOG_DEBUG("MemRangeGetAttribute: ptr=%p, count=%lu, attr=%d, size=%lu, err=%d",
+              devPtr, req->count, req->attribute, req->data_size, err);
+
+    /* Send response with data */
+    size_t resp_size = sizeof(HipRemoteMemRangeGetAttributeResponse) + req->data_size;
+    uint8_t* resp_buf = (uint8_t*)malloc(resp_size);
+    if (!resp_buf) {
+        free(data);
+        send_simple_response(fd, HIP_OP_MEM_RANGE_GET_ATTRIBUTE, request_id, hipErrorOutOfMemory);
+        return;
+    }
+
+    HipRemoteMemRangeGetAttributeResponse* resp = (HipRemoteMemRangeGetAttributeResponse*)resp_buf;
+    resp->header.error_code = (int32_t)err;
+    if (err == hipSuccess) {
+        memcpy(resp_buf + sizeof(HipRemoteMemRangeGetAttributeResponse), data, req->data_size);
+    }
+
+    send_response(fd, HIP_OP_MEM_RANGE_GET_ATTRIBUTE, request_id, resp_buf, resp_size);
+    free(data);
+    free(resp_buf);
+}
+
+static void handle_mem_range_get_attributes(int fd, uint32_t request_id,
+                                            const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteMemRangeGetAttributesRequest)) {
+        send_simple_response(fd, HIP_OP_MEM_RANGE_GET_ATTRIBUTES, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteMemRangeGetAttributesRequest* req = (const HipRemoteMemRangeGetAttributesRequest*)payload;
+
+    if (req->num_attributes == 0 || req->num_attributes > HIP_REMOTE_MAX_MEM_RANGE_ATTRIBUTES) {
+        send_simple_response(fd, HIP_OP_MEM_RANGE_GET_ATTRIBUTES, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const void* devPtr = (const void*)(uintptr_t)req->dev_ptr;
+    const uint8_t* req_data = (const uint8_t*)payload + sizeof(HipRemoteMemRangeGetAttributesRequest);
+
+    /* Parse attributes and data sizes from request */
+    const int32_t* attributes = (const int32_t*)req_data;
+    const uint64_t* data_sizes = (const uint64_t*)(attributes + req->num_attributes);
+
+    /* Allocate arrays for hipMemRangeGetAttributes */
+    void** data_ptrs = (void**)malloc(req->num_attributes * sizeof(void*));
+    size_t* sizes = (size_t*)malloc(req->num_attributes * sizeof(size_t));
+    hipMemRangeAttribute* attrs = (hipMemRangeAttribute*)malloc(req->num_attributes * sizeof(hipMemRangeAttribute));
+
+    if (!data_ptrs || !sizes || !attrs) {
+        free(data_ptrs);
+        free(sizes);
+        free(attrs);
+        send_simple_response(fd, HIP_OP_MEM_RANGE_GET_ATTRIBUTES, request_id, hipErrorOutOfMemory);
+        return;
+    }
+
+    /* Allocate data buffers */
+    size_t total_size = 0;
+    for (size_t i = 0; i < req->num_attributes; i++) {
+        sizes[i] = (size_t)data_sizes[i];
+        attrs[i] = (hipMemRangeAttribute)attributes[i];
+        data_ptrs[i] = malloc(sizes[i]);
+        if (!data_ptrs[i]) {
+            for (size_t j = 0; j < i; j++) free(data_ptrs[j]);
+            free(data_ptrs);
+            free(sizes);
+            free(attrs);
+            send_simple_response(fd, HIP_OP_MEM_RANGE_GET_ATTRIBUTES, request_id, hipErrorOutOfMemory);
+            return;
+        }
+        total_size += sizes[i];
+    }
+
+    hipError_t err = hipMemRangeGetAttributes(data_ptrs, sizes, attrs,
+                                              req->num_attributes, devPtr, req->count);
+    LOG_DEBUG("MemRangeGetAttributes: ptr=%p, count=%lu, num_attrs=%u, err=%d",
+              devPtr, req->count, req->num_attributes, err);
+
+    /* Build response with all attribute data */
+    size_t resp_size = sizeof(HipRemoteMemRangeGetAttributesResponse) + total_size;
+    uint8_t* resp_buf = (uint8_t*)malloc(resp_size);
+    if (!resp_buf) {
+        for (size_t i = 0; i < req->num_attributes; i++) free(data_ptrs[i]);
+        free(data_ptrs);
+        free(sizes);
+        free(attrs);
+        send_simple_response(fd, HIP_OP_MEM_RANGE_GET_ATTRIBUTES, request_id, hipErrorOutOfMemory);
+        return;
+    }
+
+    HipRemoteMemRangeGetAttributesResponse* resp = (HipRemoteMemRangeGetAttributesResponse*)resp_buf;
+    resp->header.error_code = (int32_t)err;
+
+    if (err == hipSuccess) {
+        uint8_t* data_ptr = resp_buf + sizeof(HipRemoteMemRangeGetAttributesResponse);
+        for (size_t i = 0; i < req->num_attributes; i++) {
+            memcpy(data_ptr, data_ptrs[i], sizes[i]);
+            data_ptr += sizes[i];
+        }
+    }
+
+    send_response(fd, HIP_OP_MEM_RANGE_GET_ATTRIBUTES, request_id, resp_buf, resp_size);
+
+    for (size_t i = 0; i < req->num_attributes; i++) free(data_ptrs[i]);
+    free(data_ptrs);
+    free(sizes);
+    free(attrs);
+    free(resp_buf);
+}
+
+/* ============================================================================
+ * Graph Node Operations
+ * ============================================================================ */
+
+static void handle_graph_add_memcpy_node_1d(int fd, uint32_t request_id,
+                                            const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteGraphAddMemcpyNode1DRequest)) {
+        send_simple_response(fd, HIP_OP_GRAPH_ADD_MEMCPY_NODE_1D, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteGraphAddMemcpyNode1DRequest* req = (const HipRemoteGraphAddMemcpyNode1DRequest*)payload;
+    hipGraph_t graph = (hipGraph_t)(uintptr_t)req->graph;
+
+    /* Extract dependencies */
+    size_t deps_offset = sizeof(HipRemoteGraphAddMemcpyNode1DRequest);
+    const uint64_t* dep_handles = (const uint64_t*)((const uint8_t*)payload + deps_offset);
+    hipGraphNode_t deps[HIP_REMOTE_MAX_GRAPH_DEPENDENCIES];
+    size_t num_deps = req->num_deps;
+    if (num_deps > HIP_REMOTE_MAX_GRAPH_DEPENDENCIES) num_deps = HIP_REMOTE_MAX_GRAPH_DEPENDENCIES;
+    for (size_t i = 0; i < num_deps; i++) {
+        deps[i] = (hipGraphNode_t)(uintptr_t)dep_handles[i];
+    }
+
+    hipGraphNode_t node = NULL;
+    hipError_t err = hipGraphAddMemcpyNode1D(&node, graph,
+                                              num_deps > 0 ? deps : NULL, num_deps,
+                                              (void*)(uintptr_t)req->dst,
+                                              (const void*)(uintptr_t)req->src,
+                                              req->count, (hipMemcpyKind)req->kind);
+    LOG_DEBUG("GraphAddMemcpyNode1D: graph=%p, count=%lu, node=%p, err=%d",
+              graph, (unsigned long)req->count, node, err);
+
+    HipRemoteGraphAddNodeResponse resp = {
+        .header = { .error_code = (int32_t)err },
+        .node = (uint64_t)(uintptr_t)node
+    };
+    send_response(fd, HIP_OP_GRAPH_ADD_MEMCPY_NODE_1D, request_id, &resp, sizeof(resp));
+}
+
+static void handle_graph_add_memset_node(int fd, uint32_t request_id,
+                                         const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteGraphAddMemsetNodeRequest)) {
+        send_simple_response(fd, HIP_OP_GRAPH_ADD_MEMSET_NODE, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteGraphAddMemsetNodeRequest* req = (const HipRemoteGraphAddMemsetNodeRequest*)payload;
+    hipGraph_t graph = (hipGraph_t)(uintptr_t)req->graph;
+
+    /* Extract dependencies */
+    size_t deps_offset = sizeof(HipRemoteGraphAddMemsetNodeRequest);
+    const uint64_t* dep_handles = (const uint64_t*)((const uint8_t*)payload + deps_offset);
+    hipGraphNode_t deps[HIP_REMOTE_MAX_GRAPH_DEPENDENCIES];
+    size_t num_deps = req->num_deps;
+    if (num_deps > HIP_REMOTE_MAX_GRAPH_DEPENDENCIES) num_deps = HIP_REMOTE_MAX_GRAPH_DEPENDENCIES;
+    for (size_t i = 0; i < num_deps; i++) {
+        deps[i] = (hipGraphNode_t)(uintptr_t)dep_handles[i];
+    }
+
+    hipMemsetParams params = {
+        .dst = (void*)(uintptr_t)req->dst,
+        .pitch = req->pitch,
+        .value = (unsigned int)req->value,
+        .elementSize = req->element_size,
+        .width = req->width,
+        .height = req->height
+    };
+
+    hipGraphNode_t node = NULL;
+    hipError_t err = hipGraphAddMemsetNode(&node, graph,
+                                            num_deps > 0 ? deps : NULL, num_deps,
+                                            &params);
+    LOG_DEBUG("GraphAddMemsetNode: graph=%p, dst=%p, value=%d, node=%p, err=%d",
+              graph, params.dst, params.value, node, err);
+
+    HipRemoteGraphAddNodeResponse resp = {
+        .header = { .error_code = (int32_t)err },
+        .node = (uint64_t)(uintptr_t)node
+    };
+    send_response(fd, HIP_OP_GRAPH_ADD_MEMSET_NODE, request_id, &resp, sizeof(resp));
+}
+
+static void handle_graph_add_empty_node(int fd, uint32_t request_id,
+                                        const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteGraphAddEmptyNodeRequest)) {
+        send_simple_response(fd, HIP_OP_GRAPH_ADD_EMPTY_NODE, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteGraphAddEmptyNodeRequest* req = (const HipRemoteGraphAddEmptyNodeRequest*)payload;
+    hipGraph_t graph = (hipGraph_t)(uintptr_t)req->graph;
+
+    /* Extract dependencies */
+    size_t deps_offset = sizeof(HipRemoteGraphAddEmptyNodeRequest);
+    const uint64_t* dep_handles = (const uint64_t*)((const uint8_t*)payload + deps_offset);
+    hipGraphNode_t deps[HIP_REMOTE_MAX_GRAPH_DEPENDENCIES];
+    size_t num_deps = req->num_deps;
+    if (num_deps > HIP_REMOTE_MAX_GRAPH_DEPENDENCIES) num_deps = HIP_REMOTE_MAX_GRAPH_DEPENDENCIES;
+    for (size_t i = 0; i < num_deps; i++) {
+        deps[i] = (hipGraphNode_t)(uintptr_t)dep_handles[i];
+    }
+
+    hipGraphNode_t node = NULL;
+    hipError_t err = hipGraphAddEmptyNode(&node, graph,
+                                           num_deps > 0 ? deps : NULL, num_deps);
+    LOG_DEBUG("GraphAddEmptyNode: graph=%p, node=%p, err=%d", graph, node, err);
+
+    HipRemoteGraphAddNodeResponse resp = {
+        .header = { .error_code = (int32_t)err },
+        .node = (uint64_t)(uintptr_t)node
+    };
+    send_response(fd, HIP_OP_GRAPH_ADD_EMPTY_NODE, request_id, &resp, sizeof(resp));
+}
+
+static void handle_graph_add_dependencies(int fd, uint32_t request_id,
+                                          const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteGraphAddDependenciesRequest)) {
+        send_simple_response(fd, HIP_OP_GRAPH_ADD_DEPENDENCIES, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteGraphAddDependenciesRequest* req = (const HipRemoteGraphAddDependenciesRequest*)payload;
+    hipGraph_t graph = (hipGraph_t)(uintptr_t)req->graph;
+
+    /* Extract from/to pairs */
+    size_t pairs_offset = sizeof(HipRemoteGraphAddDependenciesRequest);
+    const uint64_t* pairs = (const uint64_t*)((const uint8_t*)payload + pairs_offset);
+
+    hipGraphNode_t* from = (hipGraphNode_t*)malloc(req->num_deps * sizeof(hipGraphNode_t));
+    hipGraphNode_t* to = (hipGraphNode_t*)malloc(req->num_deps * sizeof(hipGraphNode_t));
+    if (!from || !to) {
+        free(from);
+        free(to);
+        send_simple_response(fd, HIP_OP_GRAPH_ADD_DEPENDENCIES, request_id, hipErrorOutOfMemory);
+        return;
+    }
+
+    for (uint32_t i = 0; i < req->num_deps; i++) {
+        from[i] = (hipGraphNode_t)(uintptr_t)pairs[i * 2];
+        to[i] = (hipGraphNode_t)(uintptr_t)pairs[i * 2 + 1];
+    }
+
+    hipError_t err = hipGraphAddDependencies(graph, from, to, req->num_deps);
+    LOG_DEBUG("GraphAddDependencies: graph=%p, num=%u, err=%d", graph, req->num_deps, err);
+
+    free(from);
+    free(to);
+    send_simple_response(fd, HIP_OP_GRAPH_ADD_DEPENDENCIES, request_id, err);
+}
+
+static void handle_graph_get_nodes(int fd, uint32_t request_id,
+                                   const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteGraphGetNodesRequest)) {
+        send_simple_response(fd, HIP_OP_GRAPH_GET_NODES, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteGraphGetNodesRequest* req = (const HipRemoteGraphGetNodesRequest*)payload;
+    hipGraph_t graph = (hipGraph_t)(uintptr_t)req->graph;
+
+    size_t numNodes = req->max_nodes;
+    hipGraphNode_t* nodes = NULL;
+    if (req->max_nodes > 0) {
+        nodes = (hipGraphNode_t*)malloc(req->max_nodes * sizeof(hipGraphNode_t));
+        if (!nodes) {
+            send_simple_response(fd, HIP_OP_GRAPH_GET_NODES, request_id, hipErrorOutOfMemory);
+            return;
+        }
+    }
+
+    hipError_t err = hipGraphGetNodes(graph, nodes, &numNodes);
+    LOG_DEBUG("GraphGetNodes: graph=%p, numNodes=%lu, err=%d", graph, (unsigned long)numNodes, err);
+
+    /* Build variable-length response */
+    size_t resp_size = sizeof(HipRemoteGraphGetNodesResponse) + numNodes * sizeof(uint64_t);
+    uint8_t* buffer = (uint8_t*)malloc(resp_size);
+    if (!buffer) {
+        free(nodes);
+        send_simple_response(fd, HIP_OP_GRAPH_GET_NODES, request_id, hipErrorOutOfMemory);
+        return;
+    }
+
+    HipRemoteGraphGetNodesResponse* resp = (HipRemoteGraphGetNodesResponse*)buffer;
+    resp->header.error_code = (int32_t)err;
+    resp->num_nodes = (uint32_t)numNodes;
+    resp->reserved = 0;
+
+    uint64_t* node_handles = (uint64_t*)(buffer + sizeof(HipRemoteGraphGetNodesResponse));
+    for (size_t i = 0; i < numNodes && i < req->max_nodes; i++) {
+        node_handles[i] = (uint64_t)(uintptr_t)nodes[i];
+    }
+
+    send_response(fd, HIP_OP_GRAPH_GET_NODES, request_id, buffer, resp_size);
+    free(buffer);
+    free(nodes);
+}
+
+static void handle_graph_get_root_nodes(int fd, uint32_t request_id,
+                                        const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteGraphGetNodesRequest)) {
+        send_simple_response(fd, HIP_OP_GRAPH_GET_ROOT_NODES, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteGraphGetNodesRequest* req = (const HipRemoteGraphGetNodesRequest*)payload;
+    hipGraph_t graph = (hipGraph_t)(uintptr_t)req->graph;
+
+    size_t numNodes = req->max_nodes;
+    hipGraphNode_t* nodes = NULL;
+    if (req->max_nodes > 0) {
+        nodes = (hipGraphNode_t*)malloc(req->max_nodes * sizeof(hipGraphNode_t));
+        if (!nodes) {
+            send_simple_response(fd, HIP_OP_GRAPH_GET_ROOT_NODES, request_id, hipErrorOutOfMemory);
+            return;
+        }
+    }
+
+    hipError_t err = hipGraphGetRootNodes(graph, nodes, &numNodes);
+    LOG_DEBUG("GraphGetRootNodes: graph=%p, numNodes=%lu, err=%d", graph, (unsigned long)numNodes, err);
+
+    size_t resp_size = sizeof(HipRemoteGraphGetNodesResponse) + numNodes * sizeof(uint64_t);
+    uint8_t* buffer = (uint8_t*)malloc(resp_size);
+    if (!buffer) {
+        free(nodes);
+        send_simple_response(fd, HIP_OP_GRAPH_GET_ROOT_NODES, request_id, hipErrorOutOfMemory);
+        return;
+    }
+
+    HipRemoteGraphGetNodesResponse* resp = (HipRemoteGraphGetNodesResponse*)buffer;
+    resp->header.error_code = (int32_t)err;
+    resp->num_nodes = (uint32_t)numNodes;
+    resp->reserved = 0;
+
+    uint64_t* node_handles = (uint64_t*)(buffer + sizeof(HipRemoteGraphGetNodesResponse));
+    for (size_t i = 0; i < numNodes && i < req->max_nodes; i++) {
+        node_handles[i] = (uint64_t)(uintptr_t)nodes[i];
+    }
+
+    send_response(fd, HIP_OP_GRAPH_GET_ROOT_NODES, request_id, buffer, resp_size);
+    free(buffer);
+    free(nodes);
+}
+
+static void handle_graph_node_get_type(int fd, uint32_t request_id,
+                                       const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteGraphNodeGetTypeRequest)) {
+        send_simple_response(fd, HIP_OP_GRAPH_NODE_GET_TYPE, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteGraphNodeGetTypeRequest* req = (const HipRemoteGraphNodeGetTypeRequest*)payload;
+    hipGraphNode_t node = (hipGraphNode_t)(uintptr_t)req->node;
+
+    hipGraphNodeType type = hipGraphNodeTypeEmpty;
+    hipError_t err = hipGraphNodeGetType(node, &type);
+    LOG_DEBUG("GraphNodeGetType: node=%p, type=%d, err=%d", node, type, err);
+
+    HipRemoteGraphNodeGetTypeResponse resp = {
+        .header = { .error_code = (int32_t)err },
+        .type = (int32_t)type
+    };
+    send_response(fd, HIP_OP_GRAPH_NODE_GET_TYPE, request_id, &resp, sizeof(resp));
+}
+
+static void handle_graph_destroy_node(int fd, uint32_t request_id,
+                                      const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteGraphDestroyNodeRequest)) {
+        send_simple_response(fd, HIP_OP_GRAPH_DESTROY_NODE, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteGraphDestroyNodeRequest* req = (const HipRemoteGraphDestroyNodeRequest*)payload;
+    hipGraphNode_t node = (hipGraphNode_t)(uintptr_t)req->node;
+
+    hipError_t err = hipGraphDestroyNode(node);
+    LOG_DEBUG("GraphDestroyNode: node=%p, err=%d", node, err);
+
+    send_simple_response(fd, HIP_OP_GRAPH_DESTROY_NODE, request_id, err);
+}
+
 static void handle_stream_create(int fd, uint32_t request_id,
                                  const void* payload, size_t payload_size) {
     unsigned int flags = 0;
@@ -1149,6 +1727,257 @@ static void handle_device_disable_peer_access(int fd, uint32_t request_id,
     hipError_t err = hipDeviceDisablePeerAccess(req->peer_device_id);
     LOG_DEBUG("DeviceDisablePeerAccess: peer=%d, err=%d", req->peer_device_id, err);
     send_simple_response(fd, HIP_OP_DEVICE_DISABLE_PEER_ACCESS, request_id, err);
+}
+
+/* ============================================================================
+ * Device Driver APIs
+ * ============================================================================ */
+
+static void handle_device_get(int fd, uint32_t request_id,
+                               const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteDeviceGetRequest)) {
+        send_simple_response(fd, HIP_OP_DEVICE_GET, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteDeviceGetRequest* req = (const HipRemoteDeviceGetRequest*)payload;
+    hipDevice_t device;
+    hipError_t err = hipDeviceGet(&device, req->ordinal);
+    LOG_DEBUG("DeviceGet: ordinal=%d, device=%d, err=%d", req->ordinal, device, err);
+
+    HipRemoteDeviceGetResponse resp = {
+        .header = { .error_code = (int32_t)err },
+        .device = (uint64_t)device
+    };
+    send_response(fd, HIP_OP_DEVICE_GET, request_id, &resp, sizeof(resp));
+}
+
+static void handle_device_get_name(int fd, uint32_t request_id,
+                                   const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteDeviceGetNameRequest)) {
+        send_simple_response(fd, HIP_OP_DEVICE_GET_NAME, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteDeviceGetNameRequest* req = (const HipRemoteDeviceGetNameRequest*)payload;
+    char name[256] = {0};
+    hipDevice_t device = (hipDevice_t)req->device;
+    hipError_t err = hipDeviceGetName(name, sizeof(name), device);
+    LOG_DEBUG("DeviceGetName: device=%d, name=%s, err=%d", device, name, err);
+
+    HipRemoteDeviceGetNameResponse resp;
+    memset(&resp, 0, sizeof(resp));
+    resp.header.error_code = (int32_t)err;
+    if (err == hipSuccess) {
+        strncpy(resp.name, name, sizeof(resp.name) - 1);
+    }
+    send_response(fd, HIP_OP_DEVICE_GET_NAME, request_id, &resp, sizeof(resp));
+}
+
+static void handle_device_total_mem(int fd, uint32_t request_id,
+                                    const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteDeviceTotalMemRequest)) {
+        send_simple_response(fd, HIP_OP_DEVICE_TOTAL_MEM, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteDeviceTotalMemRequest* req = (const HipRemoteDeviceTotalMemRequest*)payload;
+    size_t bytes = 0;
+    hipDevice_t device = (hipDevice_t)req->device;
+    hipError_t err = hipDeviceTotalMem(&bytes, device);
+    LOG_DEBUG("DeviceTotalMem: device=%d, bytes=%zu, err=%d", device, bytes, err);
+
+    HipRemoteDeviceTotalMemResponse resp = {
+        .header = { .error_code = (int32_t)err },
+        .bytes = (uint64_t)bytes
+    };
+    send_response(fd, HIP_OP_DEVICE_TOTAL_MEM, request_id, &resp, sizeof(resp));
+}
+
+static void handle_device_get_pci_bus_id(int fd, uint32_t request_id,
+                                         const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteDeviceGetPCIBusIdRequest)) {
+        send_simple_response(fd, HIP_OP_DEVICE_GET_PCI_BUS_ID, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteDeviceGetPCIBusIdRequest* req = (const HipRemoteDeviceGetPCIBusIdRequest*)payload;
+    char pci_bus_id[32] = {0};
+    hipError_t err = hipDeviceGetPCIBusId(pci_bus_id, sizeof(pci_bus_id), req->device);
+    LOG_DEBUG("DeviceGetPCIBusId: device=%d, pci_bus_id=%s, err=%d", req->device, pci_bus_id, err);
+
+    HipRemoteDeviceGetPCIBusIdResponse resp;
+    memset(&resp, 0, sizeof(resp));
+    resp.header.error_code = (int32_t)err;
+    if (err == hipSuccess) {
+        strncpy(resp.pci_bus_id, pci_bus_id, sizeof(resp.pci_bus_id) - 1);
+    }
+    send_response(fd, HIP_OP_DEVICE_GET_PCI_BUS_ID, request_id, &resp, sizeof(resp));
+}
+
+static void handle_device_get_by_pci_bus_id(int fd, uint32_t request_id,
+                                            const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteDeviceGetByPCIBusIdRequest)) {
+        send_simple_response(fd, HIP_OP_DEVICE_GET_BY_PCI_BUS_ID, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteDeviceGetByPCIBusIdRequest* req = (const HipRemoteDeviceGetByPCIBusIdRequest*)payload;
+    int device = 0;
+    hipError_t err = hipDeviceGetByPCIBusId(&device, req->pci_bus_id);
+    LOG_DEBUG("DeviceGetByPCIBusId: pci_bus_id=%s, device=%d, err=%d", req->pci_bus_id, device, err);
+
+    HipRemoteDeviceGetByPCIBusIdResponse resp = {
+        .header = { .error_code = (int32_t)err },
+        .device = device
+    };
+    send_response(fd, HIP_OP_DEVICE_GET_BY_PCI_BUS_ID, request_id, &resp, sizeof(resp));
+}
+
+static void handle_device_compute_capability(int fd, uint32_t request_id,
+                                             const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteDeviceComputeCapabilityRequest)) {
+        send_simple_response(fd, HIP_OP_DEVICE_COMPUTE_CAPABILITY, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteDeviceComputeCapabilityRequest* req = (const HipRemoteDeviceComputeCapabilityRequest*)payload;
+    int major = 0, minor = 0;
+    hipDevice_t device = (hipDevice_t)req->device;
+    hipError_t err = hipDeviceComputeCapability(&major, &minor, device);
+    LOG_DEBUG("DeviceComputeCapability: device=%d, major=%d, minor=%d, err=%d", device, major, minor, err);
+
+    HipRemoteDeviceComputeCapabilityResponse resp = {
+        .header = { .error_code = (int32_t)err },
+        .major = major,
+        .minor = minor
+    };
+    send_response(fd, HIP_OP_DEVICE_COMPUTE_CAPABILITY, request_id, &resp, sizeof(resp));
+}
+
+static void handle_device_get_uuid(int fd, uint32_t request_id,
+                                   const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteDeviceGetUuidRequest)) {
+        send_simple_response(fd, HIP_OP_DEVICE_GET_UUID, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteDeviceGetUuidRequest* req = (const HipRemoteDeviceGetUuidRequest*)payload;
+    hipUUID uuid;
+    memset(&uuid, 0, sizeof(uuid));
+    hipDevice_t device = (hipDevice_t)req->device;
+    hipError_t err = hipDeviceGetUuid(&uuid, device);
+    LOG_DEBUG("DeviceGetUuid: device=%d, err=%d", device, err);
+
+    HipRemoteDeviceGetUuidResponse resp;
+    memset(&resp, 0, sizeof(resp));
+    resp.header.error_code = (int32_t)err;
+    if (err == hipSuccess) {
+        memcpy(resp.uuid, uuid.bytes, HIP_UUID_SIZE);
+    }
+    send_response(fd, HIP_OP_DEVICE_GET_UUID, request_id, &resp, sizeof(resp));
+}
+
+/* ============================================================================
+ * Device Cache/Config APIs
+ * ============================================================================ */
+
+static void handle_device_get_cache_config(int fd, uint32_t request_id) {
+    hipFuncCache_t cache_config;
+    hipError_t err = hipDeviceGetCacheConfig(&cache_config);
+    LOG_DEBUG("DeviceGetCacheConfig: config=%d, err=%d", cache_config, err);
+
+    HipRemoteDeviceCacheConfigResponse resp = {
+        .header = { .error_code = (int32_t)err },
+        .cache_config = (int32_t)cache_config
+    };
+    send_response(fd, HIP_OP_DEVICE_GET_CACHE_CONFIG, request_id, &resp, sizeof(resp));
+}
+
+static void handle_device_set_cache_config(int fd, uint32_t request_id,
+                                           const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteDeviceCacheConfigRequest)) {
+        send_simple_response(fd, HIP_OP_DEVICE_SET_CACHE_CONFIG, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteDeviceCacheConfigRequest* req = (const HipRemoteDeviceCacheConfigRequest*)payload;
+    hipFuncCache_t cache_config = (hipFuncCache_t)req->cache_config;
+    hipError_t err = hipDeviceSetCacheConfig(cache_config);
+    LOG_DEBUG("DeviceSetCacheConfig: config=%d, err=%d", cache_config, err);
+    send_simple_response(fd, HIP_OP_DEVICE_SET_CACHE_CONFIG, request_id, err);
+}
+
+static void handle_device_get_shared_mem_config(int fd, uint32_t request_id) {
+    hipSharedMemConfig config;
+    hipError_t err = hipDeviceGetSharedMemConfig(&config);
+    LOG_DEBUG("DeviceGetSharedMemConfig: config=%d, err=%d", config, err);
+
+    HipRemoteDeviceSharedMemConfigResponse resp = {
+        .header = { .error_code = (int32_t)err },
+        .shared_mem_config = (int32_t)config
+    };
+    send_response(fd, HIP_OP_DEVICE_GET_SHARED_MEM_CONFIG, request_id, &resp, sizeof(resp));
+}
+
+static void handle_device_set_shared_mem_config(int fd, uint32_t request_id,
+                                                const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteDeviceSharedMemConfigRequest)) {
+        send_simple_response(fd, HIP_OP_DEVICE_SET_SHARED_MEM_CONFIG, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteDeviceSharedMemConfigRequest* req = (const HipRemoteDeviceSharedMemConfigRequest*)payload;
+    hipSharedMemConfig config = (hipSharedMemConfig)req->shared_mem_config;
+    hipError_t err = hipDeviceSetSharedMemConfig(config);
+    LOG_DEBUG("DeviceSetSharedMemConfig: config=%d, err=%d", config, err);
+    send_simple_response(fd, HIP_OP_DEVICE_SET_SHARED_MEM_CONFIG, request_id, err);
+}
+
+static void handle_get_device_flags(int fd, uint32_t request_id) {
+    unsigned int flags = 0;
+    hipError_t err = hipGetDeviceFlags(&flags);
+    LOG_DEBUG("GetDeviceFlags: flags=%u, err=%d", flags, err);
+
+    HipRemoteDeviceFlagsResponse resp = {
+        .header = { .error_code = (int32_t)err },
+        .flags = flags
+    };
+    send_response(fd, HIP_OP_GET_DEVICE_FLAGS, request_id, &resp, sizeof(resp));
+}
+
+static void handle_set_device_flags(int fd, uint32_t request_id,
+                                    const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteDeviceFlagsRequest)) {
+        send_simple_response(fd, HIP_OP_SET_DEVICE_FLAGS, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteDeviceFlagsRequest* req = (const HipRemoteDeviceFlagsRequest*)payload;
+    hipError_t err = hipSetDeviceFlags(req->flags);
+    LOG_DEBUG("SetDeviceFlags: flags=%u, err=%d", req->flags, err);
+    send_simple_response(fd, HIP_OP_SET_DEVICE_FLAGS, request_id, err);
+}
+
+static void handle_device_get_p2p_attribute(int fd, uint32_t request_id,
+                                            const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteDeviceGetP2PAttributeRequest)) {
+        send_simple_response(fd, HIP_OP_DEVICE_GET_P2P_ATTRIBUTE, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteDeviceGetP2PAttributeRequest* req = (const HipRemoteDeviceGetP2PAttributeRequest*)payload;
+    int value = 0;
+    hipDeviceP2PAttr attr = (hipDeviceP2PAttr)req->attr;
+    hipError_t err = hipDeviceGetP2PAttribute(&value, attr, req->src_device, req->dst_device);
+    LOG_DEBUG("DeviceGetP2PAttribute: attr=%d, src=%d, dst=%d, value=%d, err=%d",
+              attr, req->src_device, req->dst_device, value, err);
+
+    HipRemoteDeviceGetP2PAttributeResponse resp = {
+        .header = { .error_code = (int32_t)err },
+        .value = value
+    };
+    send_response(fd, HIP_OP_DEVICE_GET_P2P_ATTRIBUTE, request_id, &resp, sizeof(resp));
 }
 
 /* ============================================================================
@@ -1709,6 +2538,69 @@ static void handle_client(int client_fd) {
                 handle_device_get_mem_pool(client_fd, header.request_id, payload, header.payload_length);
                 break;
 
+            /* Host memory registration */
+            case HIP_OP_HOST_REGISTER:
+                handle_host_register(client_fd, header.request_id, payload, header.payload_length);
+                break;
+            case HIP_OP_HOST_UNREGISTER:
+                handle_host_unregister(client_fd, header.request_id, payload, header.payload_length);
+                break;
+            case HIP_OP_HOST_GET_DEVICE_POINTER:
+                handle_host_get_device_pointer(client_fd, header.request_id, payload, header.payload_length);
+                break;
+            case HIP_OP_HOST_GET_FLAGS:
+                handle_host_get_flags(client_fd, header.request_id, payload, header.payload_length);
+                break;
+            case HIP_OP_HOST_ALLOC:
+                handle_host_alloc(client_fd, header.request_id, payload, header.payload_length);
+                break;
+            case HIP_OP_HOST_FREE:
+                handle_host_free(client_fd, header.request_id, payload, header.payload_length);
+                break;
+            case HIP_OP_MEM_ALLOC_PITCH:
+                handle_mem_alloc_pitch(client_fd, header.request_id, payload, header.payload_length);
+                break;
+
+            /* Unified memory management */
+            case HIP_OP_MEM_ADVISE:
+                handle_mem_advise(client_fd, header.request_id, payload, header.payload_length);
+                break;
+            case HIP_OP_MEM_PREFETCH_ASYNC:
+                handle_mem_prefetch_async(client_fd, header.request_id, payload, header.payload_length);
+                break;
+            case HIP_OP_MEM_RANGE_GET_ATTRIBUTE:
+                handle_mem_range_get_attribute(client_fd, header.request_id, payload, header.payload_length);
+                break;
+            case HIP_OP_MEM_RANGE_GET_ATTRIBUTES:
+                handle_mem_range_get_attributes(client_fd, header.request_id, payload, header.payload_length);
+                break;
+
+            /* Graph Node operations */
+            case HIP_OP_GRAPH_ADD_MEMCPY_NODE_1D:
+                handle_graph_add_memcpy_node_1d(client_fd, header.request_id, payload, header.payload_length);
+                break;
+            case HIP_OP_GRAPH_ADD_MEMSET_NODE:
+                handle_graph_add_memset_node(client_fd, header.request_id, payload, header.payload_length);
+                break;
+            case HIP_OP_GRAPH_ADD_EMPTY_NODE:
+                handle_graph_add_empty_node(client_fd, header.request_id, payload, header.payload_length);
+                break;
+            case HIP_OP_GRAPH_ADD_DEPENDENCIES:
+                handle_graph_add_dependencies(client_fd, header.request_id, payload, header.payload_length);
+                break;
+            case HIP_OP_GRAPH_GET_NODES:
+                handle_graph_get_nodes(client_fd, header.request_id, payload, header.payload_length);
+                break;
+            case HIP_OP_GRAPH_GET_ROOT_NODES:
+                handle_graph_get_root_nodes(client_fd, header.request_id, payload, header.payload_length);
+                break;
+            case HIP_OP_GRAPH_NODE_GET_TYPE:
+                handle_graph_node_get_type(client_fd, header.request_id, payload, header.payload_length);
+                break;
+            case HIP_OP_GRAPH_DESTROY_NODE:
+                handle_graph_destroy_node(client_fd, header.request_id, payload, header.payload_length);
+                break;
+
             case HIP_OP_MEMCPY_3D:
                 handle_memcpy3d(client_fd, header.request_id, payload, header.payload_length, false);
                 break;
@@ -1781,6 +2673,52 @@ static void handle_client(int client_fd) {
                 break;
             case HIP_OP_DEVICE_DISABLE_PEER_ACCESS:
                 handle_device_disable_peer_access(client_fd, header.request_id, payload, header.payload_length);
+                break;
+
+            /* Device driver APIs */
+            case HIP_OP_DEVICE_GET:
+                handle_device_get(client_fd, header.request_id, payload, header.payload_length);
+                break;
+            case HIP_OP_DEVICE_GET_NAME:
+                handle_device_get_name(client_fd, header.request_id, payload, header.payload_length);
+                break;
+            case HIP_OP_DEVICE_TOTAL_MEM:
+                handle_device_total_mem(client_fd, header.request_id, payload, header.payload_length);
+                break;
+            case HIP_OP_DEVICE_GET_PCI_BUS_ID:
+                handle_device_get_pci_bus_id(client_fd, header.request_id, payload, header.payload_length);
+                break;
+            case HIP_OP_DEVICE_GET_BY_PCI_BUS_ID:
+                handle_device_get_by_pci_bus_id(client_fd, header.request_id, payload, header.payload_length);
+                break;
+            case HIP_OP_DEVICE_COMPUTE_CAPABILITY:
+                handle_device_compute_capability(client_fd, header.request_id, payload, header.payload_length);
+                break;
+            case HIP_OP_DEVICE_GET_UUID:
+                handle_device_get_uuid(client_fd, header.request_id, payload, header.payload_length);
+                break;
+
+            /* Device cache/config APIs */
+            case HIP_OP_DEVICE_GET_CACHE_CONFIG:
+                handle_device_get_cache_config(client_fd, header.request_id);
+                break;
+            case HIP_OP_DEVICE_SET_CACHE_CONFIG:
+                handle_device_set_cache_config(client_fd, header.request_id, payload, header.payload_length);
+                break;
+            case HIP_OP_DEVICE_GET_SHARED_MEM_CONFIG:
+                handle_device_get_shared_mem_config(client_fd, header.request_id);
+                break;
+            case HIP_OP_DEVICE_SET_SHARED_MEM_CONFIG:
+                handle_device_set_shared_mem_config(client_fd, header.request_id, payload, header.payload_length);
+                break;
+            case HIP_OP_GET_DEVICE_FLAGS:
+                handle_get_device_flags(client_fd, header.request_id);
+                break;
+            case HIP_OP_SET_DEVICE_FLAGS:
+                handle_set_device_flags(client_fd, header.request_id, payload, header.payload_length);
+                break;
+            case HIP_OP_DEVICE_GET_P2P_ATTRIBUTE:
+                handle_device_get_p2p_attribute(client_fd, header.request_id, payload, header.payload_length);
                 break;
 
             case HIP_OP_OCCUPANCY_MAX_POTENTIAL_BLOCK_SIZE:
