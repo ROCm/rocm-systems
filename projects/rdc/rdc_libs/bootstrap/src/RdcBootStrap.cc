@@ -373,6 +373,10 @@ const char* rdc_status_string(rdc_status_t result) {
       return "Insufficient permission to complete operation";
     case RDC_ST_CORRUPTED_EEPROM:
       return "EEPROM is corrupted";
+    case RDC_ST_GROUP_NOT_FOUND:
+      return "Group not found";
+    case RDC_ST_FLDGROUP_NOT_FOUND:
+      return "Fieldgroup not found";
     case RDC_ST_UNKNOWN_ERROR:
       return "Unknown error";
     default:
