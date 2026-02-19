@@ -52,8 +52,8 @@ __global__ void vmem_sq_l1_backpressure(float* data, int N) {
     if (tid >= N / 64) return;
     int base = tid * 64;
 
-    // 32 independent loads - no dependency between them so SQ can issue back-to-back.
-    // Uncoalesced: threadIdx.x*32 = different cache line per thread; i*4096 = spread pages.
+    // Independent loads
+    // Uncoalesced
     float v[32];
 #pragma unroll
     for (int i = 0; i < 32; i++) {
@@ -69,9 +69,7 @@ __global__ void vmem_sq_l1_backpressure(float* data, int N) {
     }
 }
 
-// Fixed baseline: UNCOALESCED accesses to stress VMEM/L1 (TA FIFO, TCP, UTCL1).
-// - Each thread in a warp touches a DIFFERENT cache line (stride 32 floats = 128B).
-// - Many VMEM ops per thread to fill command/address FIFOs and stress translation.
+// Fixed baseline: UNCOALESCED accesses
 __global__ void vmem_stall_baseline(float* data, int N) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= N) return;

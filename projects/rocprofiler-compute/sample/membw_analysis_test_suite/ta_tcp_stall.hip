@@ -63,7 +63,7 @@ __global__ void ta_tcp_stall_optimized(float* data, int N) {
 int main(int argc, char** argv) {
     bool use_optimized = (argc > 1 && std::string(argv[1]) == "opt");
 
-    const int N = 128 * 1024 * 1024;  // 512MB
+    const int N = 128 * 1024 * 1024;
     const size_t bytes = N * sizeof(float);
 
     float* d_data;

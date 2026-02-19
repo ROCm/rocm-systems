@@ -35,7 +35,6 @@
         } \
     } while(0)
 
-// Stride to exceed L2 - use prime-ish to avoid wrap collisions
 constexpr long long L2_STRIDE = 67 * 1024 * 1024LL;  // 67MB - doesn't divide N
 
 // Baseline: Uncoalesced + large stride -> L2 misses + high request rate -> fill LFIFO -> TCR stall
@@ -45,9 +44,8 @@ __global__ void gl2_backpressure_baseline(float* data, int N) {
 
     int lane = threadIdx.x & 63;  // Wave64
 
-    // UNCOALESCED: each lane accesses different cache line (lane * 32 floats = 128B apart)
-    // LARGE STRIDE: 67MB per iteration -> exceeds L2, every access misses
-    // 128 iterations -> many in-flight requests -> fill 704-deep LFIFO -> TCR stall
+    // UNCOALESCED
+    // LARGE STRIDE
     float acc = 0.0f;
     for (int i = 0; i < 128; i++) {
         long long offset = (long long)idx * 64 + (long long)lane * 32 + (long long)i * L2_STRIDE;
@@ -77,7 +75,7 @@ __global__ void gl2_backpressure_optimized(float* data, int N) {
 int main(int argc, char** argv) {
     bool use_optimized = (argc > 1 && std::string(argv[1]) == "opt");
 
-    // 2GB - exceeds L2, every access causes L2 miss -> long TCR wait
+    // 2GB
     int N = 512 * 1024 * 1024;
     size_t bytes = (size_t)N * sizeof(float);
 
@@ -96,7 +94,7 @@ int main(int argc, char** argv) {
     CHECK_HIP(hipMemcpy(d_data, h_data, bytes, hipMemcpyHostToDevice));
     delete[] h_data;
 
-    // Block 64 -> more blocks -> more concurrent waves -> fill 704-deep LFIFO
+    // Block 64 -> more blocks -> more concurrent waves
     dim3 block(64);
     dim3 grid((N + block.x - 1) / block.x);
 

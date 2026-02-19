@@ -23,14 +23,6 @@
 /*
  * UTCL1 Stall Workload - Targets TCP_UTCL1_STALL_INFLIGHT_MAX / tcp_busy >= 10%
  *
- * 1. STALL_INFLIGHT_MAX: Stall when too many in-flight requests to UTCL2
- * 2. Need: Issue requests for >32 different pages before first completes
- * 3. Page size = 4KB (1024 floats)
- *
- * Strategy: UNCOALESCED + RAPID PAGE HOPPING
- * - Each lane accesses different 4KB page -> 64 pages per wavefront
- * - 256 iterations -> 256*64 = 16K page refs per wave before reuse
- * - Exceeds 32 UTCL1 entries -> in-flight stall
  */
 
 #include <hip/hip_runtime.h>
@@ -49,15 +41,13 @@
 
 constexpr int PAGE_FLOATS = 4096 / sizeof(float);  // 1024 floats per 4KB page
 
-// Baseline: Rapid page hopping - exceed 32 UTCL1 entries, trigger INFLIGHT stall
+// Baseline: Rapid page hopping - exceed UTCL1 entries, trigger INFLIGHT stall
 __global__ void utcl1_stall_baseline(float* data, int N) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= N) return;
 
     int lane = threadIdx.x & 63;  // Wave64
 
-    // Each lane = different page. 512 iters = 512*64 = 32K page refs per wave
-    // Exceeds 32 UTCL1 entries -> in-flight requests pile up -> INFLIGHT stall
     float acc = 0.0f;
     for (int i = 0; i < 512; i++) {
         unsigned long long page_offset = (unsigned long long)lane * PAGE_FLOATS
