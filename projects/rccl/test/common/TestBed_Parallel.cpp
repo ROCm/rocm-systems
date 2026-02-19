@@ -29,11 +29,7 @@ struct SweepTestJob
     std::vector<bool>           managedMemList;
     std::vector<bool>           useHipGraphList;
     bool                        enableSweep;
-    // Only copy the fields we actually use from EnvVars
-    bool                        showNames;
-    bool                        verbose;
-    int                         printValues;
-    bool                        isGfx90;
+    EnvVars                     envVars;  // Capture environment settings
 };
 
 // Execute a single test job (one GPU count configuration)
@@ -46,9 +42,9 @@ static void ExecuteSweepJob(const SweepTestJob& job, const std::vector<int>& phy
     testBed.ev.maxGpus = job.numGpus;
 
     // Copy other env settings
-    testBed.ev.showNames = job.showNames;
-    testBed.ev.verbose = job.verbose;
-    testBed.ev.printValues = job.printValues;
+    testBed.ev.showNames = job.envVars.showNames;
+    testBed.ev.verbose = job.envVars.verbose;
+    testBed.ev.printValues = job.envVars.printValues;
 
     bool isCorrect = true;
 
@@ -89,7 +85,7 @@ static void ExecuteSweepJob(const SweepTestJob& job, const std::vector<int>& phy
     for (int dtIdx = 0; dtIdx < job.dataTypes.size() && isCorrect; ++dtIdx)
     {
         // Skip AllReduce FP8 test on 9 to 16 ranks (gfx90a)
-        if (job.isGfx90 && numRanks > 8 && job.funcTypes[ftIdx] == ncclCollAllReduce
+        if (testBed.ev.isGfx90 && numRanks > 8 && job.funcTypes[ftIdx] == ncclCollAllReduce
                       && (job.dataTypes[dtIdx] == ncclFloat8e4m3
                       || job.dataTypes[dtIdx] == ncclFloat8e5m2))
         {
@@ -162,7 +158,7 @@ static void ExecuteSweepJob(const SweepTestJob& job, const std::vector<int>& phy
                                                              job.inPlaceList[ipIdx], job.managedMemList[mmIdx],
                                                              job.useHipGraphList[hgIdx], job.ranksPerGpu);
 
-                    if (job.showNames)
+                    if (job.envVars.showNames)
                     {
                         INFO("%s [%9d elements]\n", name.c_str(), numInputElements);
                     }
@@ -277,11 +273,7 @@ void TestBed::RunSimpleSweepParallel(std::vector<ncclFunc_t>     const& funcType
         job.managedMemList = managedMemList;
         job.useHipGraphList = useHipGraphList;
         job.enableSweep = enableSweep;
-        // Copy only the specific fields we need (avoid copying entire EnvVars which triggers expensive constructor)
-        job.showNames = ev.showNames;
-        job.verbose = ev.verbose;
-        job.printValues = ev.printValues;
-        job.isGfx90 = ev.isGfx90;
+        job.envVars = ev;  // Capture current environment
 
         // Create descriptive test name
         std::stringstream testName;
