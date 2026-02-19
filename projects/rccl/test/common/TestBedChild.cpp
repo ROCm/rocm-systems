@@ -159,29 +159,9 @@ namespace RcclUnitTesting
   {
     if (this->verbose) INFO("Child %d begins GetUniqueId()\n", this->childId);
 
+    // Get a unique ID and pass it back to parent process
     ncclUniqueId id;
-
-    // Check if GPU Scheduler pre-generated a unique ID for us
-    const char* uniqueIdEnv = getenv("UT_RCCL_UNIQUE_ID");
-    if (uniqueIdEnv != nullptr && strlen(uniqueIdEnv) == NCCL_UNIQUE_ID_BYTES * 2)
-    {
-        // Use pre-generated ID from pool (avoids ncclGetUniqueId serialization bottleneck)
-        if (this->verbose) INFO("Child %d using pre-generated unique ID from pool\n", this->childId);
-
-        for (int i = 0; i < NCCL_UNIQUE_ID_BYTES; ++i)
-        {
-            char hexByte[3] = { uniqueIdEnv[i * 2], uniqueIdEnv[i * 2 + 1], '\0' };
-            id.internal[i] = (char)strtol(hexByte, nullptr, 16);
-        }
-    }
-    else
-    {
-        // No pre-generated ID available, generate one now
-        // This happens when running tests outside GPU Scheduler (sequential mode)
-        if (this->verbose) INFO("Child %d generating unique ID (no pool available)\n", this->childId);
-        CHILD_NCCL_CALL(ncclGetUniqueId(&id), "ncclGetUniqueId");
-    }
-
+    CHILD_NCCL_CALL(ncclGetUniqueId(&id), "ncclGetUniqueId");
     retValBuf.resize(sizeof(id));
     memcpy(retValBuf.data(), &id, sizeof(id));
 

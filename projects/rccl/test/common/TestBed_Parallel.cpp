@@ -254,17 +254,6 @@ void TestBed::RunSimpleSweepParallel(std::vector<ncclFunc_t>     const& funcType
              ev.GetNumGpusList().size());
     }
 
-    // Calculate how many test jobs we'll create
-    int totalJobs = 0;
-    for (size_t i = 0; i < ev.GetNumGpusList().size(); ++i)
-        for (size_t j = 0; j < ev.GetIsMultiProcessList().size(); ++j)
-            for (int r = 1; r <= ev.maxRanksPerGpu; ++r)
-                totalJobs++;
-
-    // Pre-generate pool of NCCL unique IDs to avoid serialization bottleneck
-    // Generated in separate forked process to avoid GPU context in parent
-    scheduler.preallocateUniqueIds(totalJobs);
-
     // Create test jobs for each GPU count (the outer loop from original RunSimpleSweep)
     for (int numGpus : ev.GetNumGpusList())
     for (int isMultiProcess : ev.GetIsMultiProcessList())
