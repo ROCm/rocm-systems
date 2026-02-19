@@ -1,0 +1,968 @@
+Start testing: Feb 19 16:11 CET
+----------------------------------------------------------
+1/9 Testing: hip_remote_basic
+1/9 Test: hip_remote_basic
+Command: "/Users/setupuser/github/TheRock/rocm-systems/projects/hip-remote-client/build/hip_remote_test_basic"
+Directory: /Users/setupuser/github/TheRock/rocm-systems/projects/hip-remote-client/build
+"hip_remote_basic" start time: Feb 19 16:11 CET
+Output:
+----------------------------------------------------------
+[HIP-Remote] Client initialized: host=localhost port=50052
+[HIP-Remote] Remote HIP client library loaded
+[HIP-Remote] Client initialized: host=localhost port=50052
+[HIP-Remote] Connecting to localhost:50052...
+[HIP-Remote] Connected successfully
+[HIP-Remote] Init handshake complete
+[HIP-Remote] Sending hipGetDeviceCount (id=2, payload=0)
+[HIP-Remote] Received response for hipGetDeviceCount: error=0
+[HIP-Remote] Sending hipGetDeviceCount (id=3, payload=0)
+[HIP-Remote] Received response for hipGetDeviceCount: error=0
+[HIP-Remote] Sending hipSetDevice (id=4, payload=4)
+[HIP-Remote] Received response for hipSetDevice: error=0
+[HIP-Remote] Sending hipGetDevice (id=5, payload=0)
+[HIP-Remote] Received response for hipGetDevice: error=0
+[HIP-Remote] Sending hipGetDeviceCount (id=6, payload=0)
+[HIP-Remote] Received response for hipGetDeviceCount: error=0
+[HIP-Remote] Sending hipGetDeviceProperties (id=7, payload=4)
+[HIP-Remote] Received response for hipGetDeviceProperties: error=0
+[HIP-Remote] Sending hipGetDeviceCount (id=8, payload=0)
+[HIP-Remote] Received response for hipGetDeviceCount: error=0
+[HIP-Remote] Sending hipMalloc (id=9, payload=12)
+[HIP-Remote] Received response for hipMalloc: error=0
+[HIP-Remote] Sending hipFree (id=10, payload=8)
+[HIP-Remote] Received response for hipFree: error=0
+[HIP-Remote] Sending hipGetDeviceCount (id=11, payload=0)
+[HIP-Remote] Received response for hipGetDeviceCount: error=0
+[HIP-Remote] Sending hipMalloc (id=12, payload=12)
+[HIP-Remote] Received response for hipMalloc: error=0
+[HIP-Remote] Sending hipMemcpy with data (id=13, payload=36, data=1024)
+[HIP-Remote] Sending hipMemcpy expecting data (id=14, payload=36, expect_data=1024)
+[HIP-Remote] Sending hipFree (id=15, payload=8)
+[HIP-Remote] Received response for hipFree: error=0
+[HIP-Remote] Sending hipGetDeviceCount (id=16, payload=0)
+[HIP-Remote] Received response for hipGetDeviceCount: error=0
+[HIP-Remote] Sending hipStreamCreate (id=17, payload=8)
+[HIP-Remote] Received response for hipStreamCreate: error=0
+[HIP-Remote] Sending hipStreamSynchronize (id=18, payload=8)
+[HIP-Remote] Received response for hipStreamSynchronize: error=0
+[HIP-Remote] Sending hipStreamDestroy (id=19, payload=8)
+[HIP-Remote] Received response for hipStreamDestroy: error=0
+[HIP-Remote] Sending hipGetDeviceCount (id=20, payload=0)
+[HIP-Remote] Received response for hipGetDeviceCount: error=0
+[HIP-Remote] Sending hipEventCreate (id=21, payload=4)
+[HIP-Remote] Received response for hipEventCreate: error=0
+[HIP-Remote] Sending hipEventDestroy (id=22, payload=8)
+[HIP-Remote] Received response for hipEventDestroy: error=0
+[HIP-Remote] Sending hipRuntimeGetVersion (id=23, payload=0)
+[HIP-Remote] Received response for hipRuntimeGetVersion: error=0
+[HIP-Remote] Disconnected: shutdown (errno=0: Undefined error: 0)
+[HIP-Remote] Remote HIP client library unloaded
+=== Remote HIP Basic Tests ===
+
+Test: hipGetDeviceCount
+  Found 8 device(s)
+Test: hipSetDevice / hipGetDevice
+  Set and get device 0: OK
+Test: hipGetDeviceProperties
+  Device 0: AMD Instinct MI300X
+Test: hipMalloc / hipFree
+  Allocated and freed 1MB: OK
+Test: hipMemcpy
+  Round-trip memcpy 1KB: OK
+Test: hipStreamCreate / hipStreamDestroy
+  Created and destroyed stream: OK
+Test: hipEventCreate / hipEventDestroy
+  Created and destroyed event: OK
+Test: hipRuntimeGetVersion
+  Runtime version: 70125424
+
+=== Results ===
+All tests PASSED
+<end of output>
+Test time =   4.26 sec
+----------------------------------------------------------
+Test Passed.
+"hip_remote_basic" end time: Feb 19 16:11 CET
+"hip_remote_basic" time elapsed: 00:00:04
+----------------------------------------------------------
+
+2/9 Testing: hip_remote_extended
+2/9 Test: hip_remote_extended
+Command: "/Users/setupuser/github/TheRock/rocm-systems/projects/hip-remote-client/build/hip_remote_test_extended"
+Directory: /Users/setupuser/github/TheRock/rocm-systems/projects/hip-remote-client/build
+"hip_remote_extended" start time: Feb 19 16:11 CET
+Output:
+----------------------------------------------------------
+[HIP-Remote] Client initialized: host=localhost port=50052
+[HIP-Remote] Remote HIP client library loaded
+[HIP-Remote] Client initialized: host=localhost port=50052
+[HIP-Remote] Connecting to localhost:50052...
+[HIP-Remote] Connected successfully
+[HIP-Remote] Init handshake complete
+[HIP-Remote] Sending hipGetDeviceCount (id=2, payload=0)
+[HIP-Remote] Received response for hipGetDeviceCount: error=0
+[HIP-Remote] Sending hipStreamCreate (id=3, payload=8)
+[HIP-Remote] Received response for hipStreamCreate: error=0
+[HIP-Remote] Sending hipMallocAsync (id=4, payload=16)
+[HIP-Remote] Received response for hipMallocAsync: error=0
+[HIP-Remote] Sending hipFreeAsync (id=5, payload=16)
+[HIP-Remote] Received response for hipFreeAsync: error=0
+[HIP-Remote] Sending hipStreamSynchronize (id=6, payload=8)
+[HIP-Remote] Received response for hipStreamSynchronize: error=0
+[HIP-Remote] Sending hipStreamDestroy (id=7, payload=8)
+[HIP-Remote] Received response for hipStreamDestroy: error=0
+[HIP-Remote] Sending hipGetDeviceCount (id=8, payload=0)
+[HIP-Remote] Received response for hipGetDeviceCount: error=0
+[HIP-Remote] Sending hipStreamCreateWithFlags (id=9, payload=8)
+[HIP-Remote] Received response for hipStreamCreateWithFlags: error=0
+[HIP-Remote] Sending hipStreamGetFlags (id=10, payload=8)
+[HIP-Remote] Received response for hipStreamGetFlags: error=0
+[HIP-Remote] Sending hipStreamDestroy (id=11, payload=8)
+[HIP-Remote] Received response for hipStreamDestroy: error=0
+[HIP-Remote] Sending hipGetDeviceCount (id=12, payload=0)
+[HIP-Remote] Received response for hipGetDeviceCount: error=0
+[HIP-Remote] Sending hipStreamCreateWithPriority (id=13, payload=8)
+[HIP-Remote] Received response for hipStreamCreateWithPriority: error=0
+[HIP-Remote] Sending hipStreamGetPriority (id=14, payload=8)
+[HIP-Remote] Received response for hipStreamGetPriority: error=0
+[HIP-Remote] Sending hipStreamDestroy (id=15, payload=8)
+[HIP-Remote] Received response for hipStreamDestroy: error=0
+[HIP-Remote] Sending hipGetDeviceCount (id=16, payload=0)
+[HIP-Remote] Received response for hipGetDeviceCount: error=0
+[HIP-Remote] Sending hipMalloc (id=17, payload=12)
+[HIP-Remote] Received response for hipMalloc: error=0
+[HIP-Remote] Sending unknown with data (id=18, payload=64, data=65536)
+[HIP-Remote] Sending unknown expecting data (id=19, payload=64, expect_data=65536)
+[HIP-Remote] Sending hipFree (id=20, payload=8)
+[HIP-Remote] Received response for hipFree: error=0
+[HIP-Remote] Sending hipGetDeviceCount (id=21, payload=0)
+[HIP-Remote] Received response for hipGetDeviceCount: error=0
+[HIP-Remote] Sending hipMalloc (id=22, payload=12)
+[HIP-Remote] Received response for hipMalloc: error=0
+[HIP-Remote] Sending hipPointerGetAttributes (id=23, payload=8)
+[HIP-Remote] Received response for hipPointerGetAttributes: error=0
+[HIP-Remote] Sending hipFree (id=24, payload=8)
+[HIP-Remote] Received response for hipFree: error=0
+[HIP-Remote] Disconnected: shutdown (errno=0: Undefined error: 0)
+[HIP-Remote] Remote HIP client library unloaded
+=== Remote HIP Extended Tests ===
+
+Test: hipMallocAsync / hipFreeAsync
+  Async allocated and freed 1MB: OK
+Test: hipStreamGetFlags
+  Stream flags: 0x1
+  Stream get flags: OK
+Test: hipStreamGetPriority
+  Stream priority: 0
+  Stream get priority: OK
+Test: hipMemcpy2D
+  2D memcpy round-trip 64x128 floats: OK
+Test: hipPointerGetAttributes
+  Memory type: 2 (expected: 2 = hipMemoryTypeDevice)
+  Device: 0
+  Device pointer: 0x784a68200000
+  Is managed: 0
+  Pointer attributes: OK
+
+=== Results ===
+All extended tests PASSED
+<end of output>
+Test time =   5.16 sec
+----------------------------------------------------------
+Test Passed.
+"hip_remote_extended" end time: Feb 19 16:11 CET
+"hip_remote_extended" time elapsed: 00:00:05
+----------------------------------------------------------
+
+3/9 Testing: hip_remote_phase2
+3/9 Test: hip_remote_phase2
+Command: "/Users/setupuser/github/TheRock/rocm-systems/projects/hip-remote-client/build/hip_remote_test_phase2"
+Directory: /Users/setupuser/github/TheRock/rocm-systems/projects/hip-remote-client/build
+"hip_remote_phase2" start time: Feb 19 16:11 CET
+Output:
+----------------------------------------------------------
+[HIP-Remote] Client initialized: host=localhost port=50052
+[HIP-Remote] Remote HIP client library loaded
+[HIP-Remote] Client initialized: host=localhost port=50052
+[HIP-Remote] Connecting to localhost:50052...
+[HIP-Remote] Connected successfully
+[HIP-Remote] Init handshake complete
+[HIP-Remote] Sending hipGetDeviceCount (id=2, payload=0)
+[HIP-Remote] Received response for hipGetDeviceCount: error=0
+[HIP-Remote] Sending hipDeviceGetLimit (id=3, payload=12)
+[HIP-Remote] Received response for hipDeviceGetLimit: error=0
+[HIP-Remote] Sending hipDeviceGetLimit (id=4, payload=12)
+[HIP-Remote] Received response for hipDeviceGetLimit: error=0
+[HIP-Remote] Sending hipGetDeviceCount (id=5, payload=0)
+[HIP-Remote] Received response for hipGetDeviceCount: error=0
+[HIP-Remote] Sending hipDeviceCanAccessPeer (id=6, payload=8)
+[HIP-Remote] Received response for hipDeviceCanAccessPeer: error=0
+[HIP-Remote] Sending hipDeviceCanAccessPeer (id=7, payload=8)
+[HIP-Remote] Received response for hipDeviceCanAccessPeer: error=0
+[HIP-Remote] Sending hipGetDeviceCount (id=8, payload=0)
+[HIP-Remote] Received response for hipGetDeviceCount: error=0
+[HIP-Remote] Sending hipDeviceCanAccessPeer (id=9, payload=8)
+[HIP-Remote] Received response for hipDeviceCanAccessPeer: error=0
+[HIP-Remote] Sending hipSetDevice (id=10, payload=4)
+[HIP-Remote] Received response for hipSetDevice: error=0
+[HIP-Remote] Sending hipMalloc (id=11, payload=12)
+[HIP-Remote] Received response for hipMalloc: error=0
+[HIP-Remote] Sending hipSetDevice (id=12, payload=4)
+[HIP-Remote] Received response for hipSetDevice: error=0
+[HIP-Remote] Sending hipMalloc (id=13, payload=12)
+[HIP-Remote] Received response for hipMalloc: error=0
+[HIP-Remote] Sending hipSetDevice (id=14, payload=4)
+[HIP-Remote] Received response for hipSetDevice: error=0
+[HIP-Remote] Sending hipMemcpy with data (id=15, payload=36, data=4096)
+[HIP-Remote] Sending hipSetDevice (id=16, payload=4)
+[HIP-Remote] Received response for hipSetDevice: error=0
+[HIP-Remote] Sending hipDeviceEnablePeerAccess (id=17, payload=8)
+[HIP-Remote] Received response for hipDeviceEnablePeerAccess: error=704
+[HIP-Remote] Sending hipMemcpyPeer (id=18, payload=40)
+[HIP-Remote] Received response for hipMemcpyPeer: error=0
+[HIP-Remote] Sending hipMemcpy expecting data (id=19, payload=36, expect_data=4096)
+[HIP-Remote] Sending hipSetDevice (id=20, payload=4)
+[HIP-Remote] Received response for hipSetDevice: error=0
+[HIP-Remote] Sending hipFree (id=21, payload=8)
+[HIP-Remote] Received response for hipFree: error=0
+[HIP-Remote] Sending hipSetDevice (id=22, payload=4)
+[HIP-Remote] Received response for hipSetDevice: error=0
+[HIP-Remote] Sending hipFree (id=23, payload=8)
+[HIP-Remote] Received response for hipFree: error=0
+[HIP-Remote] Sending hipSetDevice (id=24, payload=4)
+[HIP-Remote] Received response for hipSetDevice: error=0
+[HIP-Remote] Sending hipGetDeviceCount (id=25, payload=0)
+[HIP-Remote] Received response for hipGetDeviceCount: error=0
+[HIP-Remote] Sending hipStreamCreate (id=26, payload=8)
+[HIP-Remote] Received response for hipStreamCreate: error=0
+[HIP-Remote] Sending hipStreamCreate (id=27, payload=8)
+[HIP-Remote] Received response for hipStreamCreate: error=0
+[HIP-Remote] Sending hipEventCreate (id=28, payload=4)
+[HIP-Remote] Received response for hipEventCreate: error=0
+[HIP-Remote] Sending hipEventRecord (id=29, payload=16)
+[HIP-Remote] Received response for hipEventRecord: error=0
+[HIP-Remote] Sending hipStreamWaitEvent (id=30, payload=20)
+[HIP-Remote] Received response for hipStreamWaitEvent: error=0
+[HIP-Remote] Sending hipStreamSynchronize (id=31, payload=8)
+[HIP-Remote] Received response for hipStreamSynchronize: error=0
+[HIP-Remote] Sending hipEventDestroy (id=32, payload=8)
+[HIP-Remote] Received response for hipEventDestroy: error=0
+[HIP-Remote] Sending hipStreamDestroy (id=33, payload=8)
+[HIP-Remote] Received response for hipStreamDestroy: error=0
+[HIP-Remote] Sending hipStreamDestroy (id=34, payload=8)
+[HIP-Remote] Received response for hipStreamDestroy: error=0
+[HIP-Remote] Disconnected: shutdown (errno=0: Undefined error: 0)
+[HIP-Remote] Remote HIP client library unloaded
+=== Remote HIP Phase 2 Tests ===
+
+Test: hipDeviceGetLimit / hipDeviceSetLimit
+  Malloc heap size: 8388608 bytes
+  Stack size: 1024 bytes
+  Device limits: OK
+Test: hipDeviceCanAccessPeer
+  Device 0 -> Device 1: Yes
+  Device 1 -> Device 0: Yes
+  Peer access query: OK
+Test: hipMemcpyPeer
+  Peer memcpy: OK
+Test: hipStreamWaitEvent
+  Stream wait event: OK
+
+=== Results ===
+All Phase 2 tests PASSED
+<end of output>
+Test time =   7.00 sec
+----------------------------------------------------------
+Test Passed.
+"hip_remote_phase2" end time: Feb 19 16:12 CET
+"hip_remote_phase2" time elapsed: 00:00:07
+----------------------------------------------------------
+
+4/9 Testing: hip_remote_graphs
+4/9 Test: hip_remote_graphs
+Command: "/Users/setupuser/github/TheRock/rocm-systems/projects/hip-remote-client/build/hip_remote_test_graphs"
+Directory: /Users/setupuser/github/TheRock/rocm-systems/projects/hip-remote-client/build
+"hip_remote_graphs" start time: Feb 19 16:12 CET
+Output:
+----------------------------------------------------------
+[HIP-Remote] Client initialized: host=localhost port=50052
+[HIP-Remote] Remote HIP client library loaded
+[HIP-Remote] Client initialized: host=localhost port=50052
+[HIP-Remote] Connecting to localhost:50052...
+[HIP-Remote] Connected successfully
+[HIP-Remote] Init handshake complete
+[HIP-Remote] Sending hipGetDeviceCount (id=2, payload=0)
+[HIP-Remote] Received response for hipGetDeviceCount: error=0
+[HIP-Remote] Sending hipGraphCreate (id=3, payload=4)
+[HIP-Remote] Received response for hipGraphCreate: error=0
+[HIP-Remote] Sending hipGraphDestroy (id=4, payload=8)
+[HIP-Remote] Received response for hipGraphDestroy: error=0
+[HIP-Remote] Sending hipGetDeviceCount (id=5, payload=0)
+[HIP-Remote] Received response for hipGetDeviceCount: error=0
+[HIP-Remote] Sending hipStreamCreate (id=6, payload=8)
+[HIP-Remote] Received response for hipStreamCreate: error=0
+[HIP-Remote] Sending hipStreamIsCapturing (id=7, payload=8)
+[HIP-Remote] Received response for hipStreamIsCapturing: error=0
+[HIP-Remote] Sending hipStreamDestroy (id=8, payload=8)
+[HIP-Remote] Received response for hipStreamDestroy: error=0
+[HIP-Remote] Sending hipGetDeviceCount (id=9, payload=0)
+[HIP-Remote] Received response for hipGetDeviceCount: error=0
+[HIP-Remote] Sending hipStreamCreateWithFlags (id=10, payload=8)
+[HIP-Remote] Received response for hipStreamCreateWithFlags: error=0
+[HIP-Remote] Sending hipStreamBeginCapture (id=11, payload=12)
+[HIP-Remote] Received response for hipStreamBeginCapture: error=0
+[HIP-Remote] Sending hipStreamIsCapturing (id=12, payload=8)
+[HIP-Remote] Received response for hipStreamIsCapturing: error=0
+[HIP-Remote] Sending hipStreamEndCapture (id=13, payload=8)
+[HIP-Remote] Received response for hipStreamEndCapture: error=0
+[HIP-Remote] Sending hipStreamIsCapturing (id=14, payload=8)
+[HIP-Remote] Received response for hipStreamIsCapturing: error=0
+[HIP-Remote] Sending hipGraphDestroy (id=15, payload=8)
+[HIP-Remote] Received response for hipGraphDestroy: error=0
+[HIP-Remote] Sending hipStreamDestroy (id=16, payload=8)
+[HIP-Remote] Received response for hipStreamDestroy: error=0
+[HIP-Remote] Sending hipGetDeviceCount (id=17, payload=0)
+[HIP-Remote] Received response for hipGetDeviceCount: error=0
+[HIP-Remote] Sending hipGraphCreate (id=18, payload=4)
+[HIP-Remote] Received response for hipGraphCreate: error=0
+[HIP-Remote] Sending hipGraphInstantiate (id=19, payload=12)
+[HIP-Remote] Received response for hipGraphInstantiate: error=0
+[HIP-Remote] Sending hipStreamCreate (id=20, payload=8)
+[HIP-Remote] Received response for hipStreamCreate: error=0
+[HIP-Remote] Sending hipGraphLaunch (id=21, payload=16)
+[HIP-Remote] Received response for hipGraphLaunch: error=0
+[HIP-Remote] Sending hipStreamSynchronize (id=22, payload=8)
+[HIP-Remote] Received response for hipStreamSynchronize: error=0
+[HIP-Remote] Sending hipGraphExecDestroy (id=23, payload=8)
+[HIP-Remote] Received response for hipGraphExecDestroy: error=0
+[HIP-Remote] Sending hipGraphDestroy (id=24, payload=8)
+[HIP-Remote] Received response for hipGraphDestroy: error=0
+[HIP-Remote] Sending hipStreamDestroy (id=25, payload=8)
+[HIP-Remote] Received response for hipStreamDestroy: error=0
+[HIP-Remote] Disconnected: shutdown (errno=0: Undefined error: 0)
+[HIP-Remote] Remote HIP client library unloaded
+=== Remote HIP Graph Tests ===
+
+Test: hipGraphCreate / hipGraphDestroy
+  Graph create/destroy: OK
+Test: hipStreamIsCapturing
+  Initial capture status: 0 (None)
+  Stream capture status query: OK
+Test: hipStreamBeginCapture / hipStreamEndCapture
+  Capture status after begin: 1 (Active)
+  Stream capture basic: OK
+Test: hipGraphInstantiate / hipGraphLaunch
+  Graph instantiate/launch: OK
+
+=== Results ===
+All graph tests PASSED
+<end of output>
+Test time =   5.47 sec
+----------------------------------------------------------
+Test Passed.
+"hip_remote_graphs" end time: Feb 19 16:12 CET
+"hip_remote_graphs" time elapsed: 00:00:05
+----------------------------------------------------------
+
+5/9 Testing: hip_remote_ipc
+5/9 Test: hip_remote_ipc
+Command: "/Users/setupuser/github/TheRock/rocm-systems/projects/hip-remote-client/build/hip_remote_test_ipc"
+Directory: /Users/setupuser/github/TheRock/rocm-systems/projects/hip-remote-client/build
+"hip_remote_ipc" start time: Feb 19 16:12 CET
+Output:
+----------------------------------------------------------
+[HIP-Remote] Client initialized: host=localhost port=50052
+[HIP-Remote] Remote HIP client library loaded
+[HIP-Remote] Client initialized: host=localhost port=50052
+[HIP-Remote] Connecting to localhost:50052...
+[HIP-Remote] Connected successfully
+[HIP-Remote] Init handshake complete
+[HIP-Remote] Sending hipGetDeviceCount (id=2, payload=0)
+[HIP-Remote] Received response for hipGetDeviceCount: error=0
+[HIP-Remote] Sending hipMalloc (id=3, payload=12)
+[HIP-Remote] Received response for hipMalloc: error=0
+[HIP-Remote] Sending hipIpcGetMemHandle (id=4, payload=8)
+[HIP-Remote] Received response for hipIpcGetMemHandle: error=0
+[HIP-Remote] Sending hipFree (id=5, payload=8)
+[HIP-Remote] Received response for hipFree: error=0
+[HIP-Remote] Sending hipMalloc (id=6, payload=12)
+[HIP-Remote] Received response for hipMalloc: error=0
+[HIP-Remote] Sending hipIpcGetMemHandle (id=7, payload=8)
+[HIP-Remote] Received response for hipIpcGetMemHandle: error=0
+[HIP-Remote] Sending hipIpcOpenMemHandle (id=8, payload=68)
+[HIP-Remote] Received response for hipIpcOpenMemHandle: error=201
+[HIP-Remote] Sending hipFree (id=9, payload=8)
+[HIP-Remote] Received response for hipFree: error=0
+[HIP-Remote] Sending hipEventCreateWithFlags (id=10, payload=4)
+[HIP-Remote] Received response for hipEventCreateWithFlags: error=0
+[HIP-Remote] Sending hipIpcGetEventHandle (id=11, payload=8)
+[HIP-Remote] Received response for hipIpcGetEventHandle: error=0
+[HIP-Remote] Sending hipIpcOpenEventHandle (id=12, payload=64)
+[HIP-Remote] Received response for hipIpcOpenEventHandle: error=201
+[HIP-Remote] Sending hipEventDestroy (id=13, payload=8)
+[HIP-Remote] Received response for hipEventDestroy: error=0
+[HIP-Remote] Disconnected: shutdown (errno=0: Undefined error: 0)
+[HIP-Remote] Remote HIP client library unloaded
+=== Remote HIP IPC Tests ===
+Found 8 GPU(s)
+
+Test: IPC NULL parameter checks
+  PASS: hipIpcGetMemHandle(NULL, ptr) fails
+  PASS: hipIpcOpenMemHandle(NULL, ...) fails
+  PASS: hipIpcCloseMemHandle(NULL) fails
+  PASS: hipIpcGetEventHandle(NULL, event) fails
+  PASS: hipIpcOpenEventHandle(NULL, ...) fails
+
+Test: hipIpcGetMemHandle
+  PASS: hipMalloc for IPC test
+  PASS: hipIpcGetMemHandle succeeds
+  PASS: IPC handle is populated
+  PASS: hipIpcGetMemHandle with NULL ptr fails
+  PASS: hipIpcGetMemHandle with NULL handle fails
+
+Test: hipIpcOpenMemHandle / hipIpcCloseMemHandle
+  PASS: hipMalloc for IPC test
+  PASS: hipIpcGetMemHandle succeeds
+  IPC open returned 201 (expected in same-process scenario)
+  PASS: hipIpcOpenMemHandle returns expected error
+
+Test: hipIpcGetEventHandle / hipIpcOpenEventHandle
+  PASS: hipEventCreateWithFlags with interprocess
+  PASS: hipIpcGetEventHandle succeeds
+  PASS: IPC event handle is populated
+  IPC event open returned 201 (may be expected in same-process)
+  PASS: hipIpcGetEventHandle with NULL event fails
+
+=== Results ===
+All IPC tests PASSED
+<end of output>
+Test time =   2.61 sec
+----------------------------------------------------------
+Test Passed.
+"hip_remote_ipc" end time: Feb 19 16:12 CET
+"hip_remote_ipc" time elapsed: 00:00:02
+----------------------------------------------------------
+
+6/9 Testing: hip_remote_mempool
+6/9 Test: hip_remote_mempool
+Command: "/Users/setupuser/github/TheRock/rocm-systems/projects/hip-remote-client/build/hip_remote_test_mempool"
+Directory: /Users/setupuser/github/TheRock/rocm-systems/projects/hip-remote-client/build
+"hip_remote_mempool" start time: Feb 19 16:12 CET
+Output:
+----------------------------------------------------------
+[HIP-Remote] Client initialized: host=localhost port=50052
+[HIP-Remote] Remote HIP client library loaded
+[HIP-Remote] Client initialized: host=localhost port=50052
+[HIP-Remote] Connecting to localhost:50052...
+[HIP-Remote] Connected successfully
+[HIP-Remote] Init handshake complete
+[HIP-Remote] Sending hipGetDeviceCount (id=2, payload=0)
+[HIP-Remote] Received response for hipGetDeviceCount: error=0
+[HIP-Remote] Sending hipDeviceGetDefaultMemPool (id=3, payload=4)
+[HIP-Remote] Received response for hipDeviceGetDefaultMemPool: error=0
+[HIP-Remote] Sending hipDeviceGetDefaultMemPool (id=4, payload=4)
+[HIP-Remote] Received response for hipDeviceGetDefaultMemPool: error=0
+[HIP-Remote] Sending hipDeviceGetMemPool (id=5, payload=4)
+[HIP-Remote] Received response for hipDeviceGetMemPool: error=0
+[HIP-Remote] Sending hipDeviceGetDefaultMemPool (id=6, payload=4)
+[HIP-Remote] Received response for hipDeviceGetDefaultMemPool: error=0
+[HIP-Remote] Sending hipDeviceSetMemPool (id=7, payload=16)
+[HIP-Remote] Received response for hipDeviceSetMemPool: error=0
+[HIP-Remote] Sending hipDeviceGetMemPool (id=8, payload=4)
+[HIP-Remote] Received response for hipDeviceGetMemPool: error=0
+[HIP-Remote] Sending hipDeviceGetDefaultMemPool (id=9, payload=4)
+[HIP-Remote] Received response for hipDeviceGetDefaultMemPool: error=0
+[HIP-Remote] Sending hipMallocFromPoolAsync (id=10, payload=24)
+[HIP-Remote] Received response for hipMallocFromPoolAsync: error=0
+[HIP-Remote] Sending hipFreeAsync (id=11, payload=16)
+[HIP-Remote] Received response for hipFreeAsync: error=0
+[HIP-Remote] Sending hipDeviceSynchronize (id=12, payload=0)
+[HIP-Remote] Received response for hipDeviceSynchronize: error=0
+[HIP-Remote] Sending hipDeviceGetDefaultMemPool (id=13, payload=4)
+[HIP-Remote] Received response for hipDeviceGetDefaultMemPool: error=0
+[HIP-Remote] Sending hipMemPoolGetAttribute (id=14, payload=12)
+[HIP-Remote] Received response for hipMemPoolGetAttribute: error=0
+[HIP-Remote] Sending hipMemPoolGetAttribute (id=15, payload=12)
+[HIP-Remote] Received response for hipMemPoolGetAttribute: error=0
+[HIP-Remote] Sending hipMemPoolGetAttribute (id=16, payload=12)
+[HIP-Remote] Received response for hipMemPoolGetAttribute: error=0
+[HIP-Remote] Sending hipMemPoolSetAttribute (id=17, payload=24)
+[HIP-Remote] Received response for hipMemPoolSetAttribute: error=0
+[HIP-Remote] Sending hipMemPoolGetAttribute (id=18, payload=12)
+[HIP-Remote] Received response for hipMemPoolGetAttribute: error=0
+[HIP-Remote] Sending hipMemPoolSetAttribute (id=19, payload=24)
+[HIP-Remote] Received response for hipMemPoolSetAttribute: error=0
+[HIP-Remote] Sending hipDeviceGetDefaultMemPool (id=20, payload=4)
+[HIP-Remote] Received response for hipDeviceGetDefaultMemPool: error=0
+[HIP-Remote] Sending hipMallocFromPoolAsync (id=21, payload=24)
+[HIP-Remote] Received response for hipMallocFromPoolAsync: error=0
+[HIP-Remote] Sending hipFreeAsync (id=22, payload=16)
+[HIP-Remote] Received response for hipFreeAsync: error=0
+[HIP-Remote] Sending hipDeviceSynchronize (id=23, payload=0)
+[HIP-Remote] Received response for hipDeviceSynchronize: error=0
+[HIP-Remote] Sending hipMemPoolTrimTo (id=24, payload=16)
+[HIP-Remote] Received response for hipMemPoolTrimTo: error=0
+[HIP-Remote] Sending hipMemPoolCreate (id=25, payload=56)
+[HIP-Remote] Received response for hipMemPoolCreate: error=0
+[HIP-Remote] Sending hipMallocFromPoolAsync (id=26, payload=24)
+[HIP-Remote] Received response for hipMallocFromPoolAsync: error=0
+[HIP-Remote] Sending hipFreeAsync (id=27, payload=16)
+[HIP-Remote] Received response for hipFreeAsync: error=0
+[HIP-Remote] Sending hipDeviceSynchronize (id=28, payload=0)
+[HIP-Remote] Received response for hipDeviceSynchronize: error=0
+[HIP-Remote] Sending hipMemPoolDestroy (id=29, payload=8)
+[HIP-Remote] Received response for hipMemPoolDestroy: error=0
+[HIP-Remote] Disconnected: shutdown (errno=0: Undefined error: 0)
+[HIP-Remote] Remote HIP client library unloaded
+=== Remote HIP Memory Pool Tests ===
+Found 8 GPU(s)
+
+Test: Memory Pool NULL parameter checks
+  PASS: hipMemPoolCreate(NULL, NULL) fails
+  PASS: hipMemPoolCreate(NULL, props) fails
+  PASS: hipMemPoolDestroy(NULL) fails
+  PASS: hipMemPoolGetAttribute(NULL, ...) fails
+  PASS: hipMemPoolGetAttribute(..., NULL) fails
+  PASS: hipMallocFromPoolAsync(NULL, ...) fails
+  PASS: hipMallocFromPoolAsync(..., NULL, ...) fails
+  PASS: hipMemPoolTrimTo(NULL, ...) fails
+
+Test: hipDeviceGetDefaultMemPool
+  PASS: hipDeviceGetDefaultMemPool succeeds
+  PASS: default pool is not NULL
+  Default pool for device 0: 0x64f4e80e3740
+  PASS: hipDeviceGetDefaultMemPool with NULL fails
+
+Test: hipDeviceGetMemPool / hipDeviceSetMemPool
+  PASS: hipDeviceGetMemPool succeeds
+  Current pool for device 0: 0x64f4e80e3740
+  PASS: get default pool
+  PASS: hipDeviceSetMemPool succeeds
+  PASS: verify pool was set
+
+Test: hipMallocFromPoolAsync with default pool
+  PASS: get default pool
+  PASS: hipMallocFromPoolAsync succeeds
+  PASS: allocated pointer is not NULL
+  Allocated 1MB from default pool: 0x780c31400100
+  PASS: hipFreeAsync succeeds
+  PASS: hipDeviceSynchronize succeeds
+
+Test: hipMemPoolGetAttribute / hipMemPoolSetAttribute
+  PASS: get default pool
+  PASS: get release threshold
+  Current release threshold: 0
+  PASS: get reserved memory
+  Current reserved memory: 0 bytes
+  PASS: get used memory
+  Current used memory: 0 bytes
+  PASS: set release threshold
+  PASS: verify release threshold was set
+  PASS: restore release threshold
+
+Test: hipMemPoolTrimTo
+  PASS: get default pool
+  PASS: allocate from pool
+  PASS: free to pool
+  PASS: sync
+  PASS: hipMemPoolTrimTo succeeds
+  Pool trimmed successfully
+
+Test: hipMemPoolCreate / hipMemPoolDestroy
+  PASS: hipMemPoolCreate succeeds
+  PASS: created pool is not NULL
+  Created custom pool: 0x64f4e8e727a0
+  PASS: allocate from custom pool
+  Allocated from custom pool: 0x7805f6400100
+  PASS: free from custom pool
+  PASS: sync
+  PASS: hipMemPoolDestroy succeeds
+
+=== Results ===
+All memory pool tests PASSED
+<end of output>
+Test time =   6.20 sec
+----------------------------------------------------------
+Test Passed.
+"hip_remote_mempool" end time: Feb 19 16:12 CET
+"hip_remote_mempool" time elapsed: 00:00:06
+----------------------------------------------------------
+
+7/9 Testing: hip_remote_graph_nodes
+7/9 Test: hip_remote_graph_nodes
+Command: "/Users/setupuser/github/TheRock/rocm-systems/projects/hip-remote-client/build/hip_remote_test_graph_nodes"
+Directory: /Users/setupuser/github/TheRock/rocm-systems/projects/hip-remote-client/build
+"hip_remote_graph_nodes" start time: Feb 19 16:12 CET
+Output:
+----------------------------------------------------------
+[HIP-Remote] Client initialized: host=localhost port=50052
+[HIP-Remote] Remote HIP client library loaded
+[HIP-Remote] Client initialized: host=localhost port=50052
+[HIP-Remote] Connecting to localhost:50052...
+[HIP-Remote] Connected successfully
+[HIP-Remote] Init handshake complete
+[HIP-Remote] Sending hipGetDeviceCount (id=2, payload=0)
+[HIP-Remote] Received response for hipGetDeviceCount: error=0
+[HIP-Remote] Sending hipGraphCreate (id=3, payload=4)
+[HIP-Remote] Received response for hipGraphCreate: error=0
+[HIP-Remote] Sending hipGraphDestroy (id=4, payload=8)
+[HIP-Remote] Received response for hipGraphDestroy: error=0
+[HIP-Remote] Sending hipGraphCreate (id=5, payload=4)
+[HIP-Remote] Received response for hipGraphCreate: error=0
+[HIP-Remote] Sending hipGraphAddEmptyNode (id=6, payload=12)
+[HIP-Remote] Received response for hipGraphAddEmptyNode: error=0
+[HIP-Remote] Sending hipGraphNodeGetType (id=7, payload=8)
+[HIP-Remote] Received response for hipGraphNodeGetType: error=0
+[HIP-Remote] Sending hipGraphGetNodes (id=8, payload=12)
+[HIP-Remote] Received response for hipGraphGetNodes: error=0
+[HIP-Remote] Sending hipGraphGetRootNodes (id=9, payload=12)
+[HIP-Remote] Received response for hipGraphGetRootNodes: error=0
+[HIP-Remote] Sending hipGraphDestroy (id=10, payload=8)
+[HIP-Remote] Received response for hipGraphDestroy: error=0
+[HIP-Remote] Sending hipGraphCreate (id=11, payload=4)
+[HIP-Remote] Received response for hipGraphCreate: error=0
+[HIP-Remote] Sending hipGraphAddEmptyNode (id=12, payload=12)
+[HIP-Remote] Received response for hipGraphAddEmptyNode: error=0
+[HIP-Remote] Sending hipGraphAddEmptyNode (id=13, payload=12)
+[HIP-Remote] Received response for hipGraphAddEmptyNode: error=0
+[HIP-Remote] Sending hipGraphGetRootNodes (id=14, payload=12)
+[HIP-Remote] Received response for hipGraphGetRootNodes: error=0
+[HIP-Remote] Sending hipGraphAddDependencies (id=15, payload=28)
+[HIP-Remote] Received response for hipGraphAddDependencies: error=0
+[HIP-Remote] Sending hipGraphGetRootNodes (id=16, payload=12)
+[HIP-Remote] Received response for hipGraphGetRootNodes: error=0
+[HIP-Remote] Sending hipGraphDestroy (id=17, payload=8)
+[HIP-Remote] Received response for hipGraphDestroy: error=0
+[HIP-Remote] Sending hipGraphCreate (id=18, payload=4)
+[HIP-Remote] Received response for hipGraphCreate: error=0
+[HIP-Remote] Sending hipMalloc (id=19, payload=12)
+[HIP-Remote] Received response for hipMalloc: error=0
+[HIP-Remote] Sending hipMalloc (id=20, payload=12)
+[HIP-Remote] Received response for hipMalloc: error=0
+[HIP-Remote] Sending hipGraphAddMemcpyNode1D (id=21, payload=44)
+[HIP-Remote] Received response for hipGraphAddMemcpyNode1D: error=0
+[HIP-Remote] Sending hipGraphNodeGetType (id=22, payload=8)
+[HIP-Remote] Received response for hipGraphNodeGetType: error=0
+[HIP-Remote] Sending hipGraphInstantiate (id=23, payload=12)
+[HIP-Remote] Received response for hipGraphInstantiate: error=0
+[HIP-Remote] Sending hipGraphLaunch (id=24, payload=16)
+[HIP-Remote] Received response for hipGraphLaunch: error=0
+[HIP-Remote] Sending hipDeviceSynchronize (id=25, payload=0)
+[HIP-Remote] Received response for hipDeviceSynchronize: error=0
+[HIP-Remote] Sending hipGraphExecDestroy (id=26, payload=8)
+[HIP-Remote] Received response for hipGraphExecDestroy: error=0
+[HIP-Remote] Sending hipGraphDestroy (id=27, payload=8)
+[HIP-Remote] Received response for hipGraphDestroy: error=0
+[HIP-Remote] Sending hipFree (id=28, payload=8)
+[HIP-Remote] Received response for hipFree: error=0
+[HIP-Remote] Sending hipFree (id=29, payload=8)
+[HIP-Remote] Received response for hipFree: error=0
+[HIP-Remote] Sending hipGraphCreate (id=30, payload=4)
+[HIP-Remote] Received response for hipGraphCreate: error=0
+[HIP-Remote] Sending hipMalloc (id=31, payload=12)
+[HIP-Remote] Received response for hipMalloc: error=0
+[HIP-Remote] Sending hipGraphAddMemsetNode (id=32, payload=56)
+[HIP-Remote] Received response for hipGraphAddMemsetNode: error=0
+[HIP-Remote] Sending hipGraphNodeGetType (id=33, payload=8)
+[HIP-Remote] Received response for hipGraphNodeGetType: error=0
+[HIP-Remote] Sending hipGraphInstantiate (id=34, payload=12)
+[HIP-Remote] Received response for hipGraphInstantiate: error=0
+[HIP-Remote] Sending hipGraphLaunch (id=35, payload=16)
+[HIP-Remote] Received response for hipGraphLaunch: error=0
+[HIP-Remote] Sending hipDeviceSynchronize (id=36, payload=0)
+[HIP-Remote] Received response for hipDeviceSynchronize: error=0
+[HIP-Remote] Sending hipMemcpy expecting data (id=37, payload=36, expect_data=16)
+[HIP-Remote] Sending hipGraphExecDestroy (id=38, payload=8)
+[HIP-Remote] Received response for hipGraphExecDestroy: error=0
+[HIP-Remote] Sending hipGraphDestroy (id=39, payload=8)
+[HIP-Remote] Received response for hipGraphDestroy: error=0
+[HIP-Remote] Sending hipFree (id=40, payload=8)
+[HIP-Remote] Received response for hipFree: error=0
+[HIP-Remote] Sending hipGraphCreate (id=41, payload=4)
+[HIP-Remote] Received response for hipGraphCreate: error=0
+[HIP-Remote] Sending hipMalloc (id=42, payload=12)
+[HIP-Remote] Received response for hipMalloc: error=0
+[HIP-Remote] Sending hipMalloc (id=43, payload=12)
+[HIP-Remote] Received response for hipMalloc: error=0
+[HIP-Remote] Sending hipGraphAddMemsetNode (id=44, payload=56)
+[HIP-Remote] Received response for hipGraphAddMemsetNode: error=0
+[HIP-Remote] Sending hipGraphAddMemcpyNode1D (id=45, payload=52)
+[HIP-Remote] Received response for hipGraphAddMemcpyNode1D: error=0
+[HIP-Remote] Sending hipGraphAddMemsetNode (id=46, payload=64)
+[HIP-Remote] Received response for hipGraphAddMemsetNode: error=0
+[HIP-Remote] Sending hipGraphGetNodes (id=47, payload=12)
+[HIP-Remote] Received response for hipGraphGetNodes: error=0
+[HIP-Remote] Sending hipGraphGetRootNodes (id=48, payload=12)
+[HIP-Remote] Received response for hipGraphGetRootNodes: error=0
+[HIP-Remote] Sending hipGraphInstantiate (id=49, payload=12)
+[HIP-Remote] Received response for hipGraphInstantiate: error=0
+[HIP-Remote] Sending hipGraphLaunch (id=50, payload=16)
+[HIP-Remote] Received response for hipGraphLaunch: error=0
+[HIP-Remote] Sending hipDeviceSynchronize (id=51, payload=0)
+[HIP-Remote] Received response for hipDeviceSynchronize: error=0
+[HIP-Remote] Sending hipMemcpy expecting data (id=52, payload=36, expect_data=16)
+[HIP-Remote] Sending hipMemcpy expecting data (id=53, payload=36, expect_data=16)
+[HIP-Remote] Sending hipGraphExecDestroy (id=54, payload=8)
+[HIP-Remote] Received response for hipGraphExecDestroy: error=0
+[HIP-Remote] Sending hipGraphDestroy (id=55, payload=8)
+[HIP-Remote] Received response for hipGraphDestroy: error=0
+[HIP-Remote] Sending hipFree (id=56, payload=8)
+[HIP-Remote] Received response for hipFree: error=0
+[HIP-Remote] Sending hipFree (id=57, payload=8)
+[HIP-Remote] Received response for hipFree: error=0
+[HIP-Remote] Disconnected: shutdown (errno=0: Undefined error: 0)
+[HIP-Remote] Remote HIP client library unloaded
+=== Remote HIP Graph Node Tests ===
+Found 8 GPU(s)
+
+Test: Graph Node NULL parameter checks
+  PASS: hipGraphAddEmptyNode(NULL, ...) fails
+  PASS: hipGraphAddEmptyNode(..., NULL, ...) fails
+  PASS: hipGraphAddMemcpyNode1D(NULL, ...) fails
+  PASS: hipGraphAddMemsetNode(NULL, ...) fails
+  PASS: hipGraphNodeGetType(NULL, ...) fails
+  PASS: hipGraphDestroyNode(NULL) fails
+
+Test: hipGraphAddEmptyNode
+  PASS: hipGraphCreate succeeds
+  PASS: hipGraphAddEmptyNode succeeds
+  PASS: empty node is not NULL
+  Created empty node: 0x64f4e8172060
+  PASS: hipGraphNodeGetType succeeds
+  PASS: node type is empty
+  Node type: 5 (expected 5)
+  PASS: hipGraphGetNodes count succeeds
+  PASS: graph has 1 node
+  PASS: hipGraphGetRootNodes count succeeds
+  PASS: graph has 1 root
+
+Test: hipGraphAddDependencies
+  PASS: create graph
+  PASS: add node1
+  PASS: add node2
+  PASS: get root count
+  PASS: 2 roots initially
+  PASS: hipGraphAddDependencies succeeds
+  PASS: get root count after deps
+  PASS: 1 root after dependency
+
+Test: hipGraphAddMemcpyNode1D
+  PASS: create graph
+  PASS: malloc src
+  PASS: malloc dst
+  PASS: hipGraphAddMemcpyNode1D succeeds
+  PASS: memcpy node is not NULL
+  Created memcpy node: 0x64f4e8feec30
+  PASS: get node type
+  PASS: node type is memcpy
+  PASS: instantiate graph
+  PASS: launch graph
+  PASS: sync after launch
+
+Test: hipGraphAddMemsetNode
+  PASS: create graph
+  PASS: malloc
+  PASS: hipGraphAddMemsetNode succeeds
+  PASS: memset node is not NULL
+  Created memset node: 0x64f4e8174f30
+  PASS: get node type
+  PASS: node type is memset
+  PASS: instantiate graph
+  PASS: launch graph
+  PASS: sync after launch
+  PASS: copy back to verify
+  PASS: memset value correct
+
+Test: Graph with chained nodes
+  PASS: create graph
+  PASS: malloc a
+  PASS: malloc b
+  PASS: add memset node 1
+  PASS: add memcpy node 2
+  PASS: add memset node 3
+  PASS: get node count
+  PASS: graph has 3 nodes
+  PASS: get root count
+  PASS: graph has 1 root
+  PASS: instantiate graph
+  PASS: launch graph
+  PASS: sync
+  PASS: copy a
+  PASS: copy b
+  PASS: d_a has 0xBB
+  PASS: d_b has 0xAA
+
+=== Results ===
+All graph node tests PASSED
+<end of output>
+Test time =  11.58 sec
+----------------------------------------------------------
+Test Passed.
+"hip_remote_graph_nodes" end time: Feb 19 16:12 CET
+"hip_remote_graph_nodes" time elapsed: 00:00:11
+----------------------------------------------------------
+
+8/9 Testing: hip_remote_device_apis
+8/9 Test: hip_remote_device_apis
+Command: "/Users/setupuser/github/TheRock/rocm-systems/projects/hip-remote-client/build/hip_remote_test_device_apis"
+Directory: /Users/setupuser/github/TheRock/rocm-systems/projects/hip-remote-client/build
+"hip_remote_device_apis" start time: Feb 19 16:12 CET
+Output:
+----------------------------------------------------------
+[HIP-Remote] Client initialized: host=localhost port=50052
+[HIP-Remote] Remote HIP client library loaded
+[HIP-Remote] Client initialized: host=localhost port=50052
+[HIP-Remote] Connecting to localhost:50052...
+[HIP-Remote] Connected successfully
+[HIP-Remote] Init handshake complete
+[HIP-Remote] Sending hipDeviceGet (id=2, payload=4)
+[HIP-Remote] Received response for hipDeviceGet: error=0
+[HIP-Remote] Sending hipDeviceGetName (id=3, payload=12)
+[HIP-Remote] Received response for hipDeviceGetName: error=0
+[HIP-Remote] Sending hipDeviceTotalMem (id=4, payload=8)
+[HIP-Remote] Received response for hipDeviceTotalMem: error=0
+[HIP-Remote] Sending hipDeviceGetPCIBusId (id=5, payload=8)
+[HIP-Remote] Received response for hipDeviceGetPCIBusId: error=0
+[HIP-Remote] Sending hipDeviceGetByPCIBusId (id=6, payload=32)
+[HIP-Remote] Received response for hipDeviceGetByPCIBusId: error=0
+[HIP-Remote] Sending hipDeviceComputeCapability (id=7, payload=8)
+[HIP-Remote] Received response for hipDeviceComputeCapability: error=0
+[HIP-Remote] Sending hipDeviceGetUuid (id=8, payload=8)
+[HIP-Remote] Received response for hipDeviceGetUuid: error=0
+[HIP-Remote] Sending hipDeviceGetCacheConfig (id=9, payload=0)
+[HIP-Remote] Received response for hipDeviceGetCacheConfig: error=0
+[HIP-Remote] Sending hipDeviceSetCacheConfig (id=10, payload=4)
+[HIP-Remote] Received response for hipDeviceSetCacheConfig: error=0
+[HIP-Remote] Sending hipDeviceGetSharedMemConfig (id=11, payload=0)
+[HIP-Remote] Received response for hipDeviceGetSharedMemConfig: error=0
+[HIP-Remote] Sending hipDeviceSetSharedMemConfig (id=12, payload=4)
+[HIP-Remote] Received response for hipDeviceSetSharedMemConfig: error=0
+[HIP-Remote] Sending hipGetDeviceFlags (id=13, payload=0)
+[HIP-Remote] Received response for hipGetDeviceFlags: error=0
+[HIP-Remote] Sending hipSetDeviceFlags (id=14, payload=4)
+[HIP-Remote] Received response for hipSetDeviceFlags: error=0
+[HIP-Remote] Sending hipGetDeviceCount (id=15, payload=0)
+[HIP-Remote] Received response for hipGetDeviceCount: error=0
+[HIP-Remote] Sending hipDeviceGetP2PAttribute (id=16, payload=12)
+[HIP-Remote] Received response for hipDeviceGetP2PAttribute: error=0
+[HIP-Remote] Disconnected: shutdown (errno=0: Undefined error: 0)
+[HIP-Remote] Remote HIP client library unloaded
+=== HIP Remote Device APIs Test ===
+
+[TEST] hipDeviceGet
+  Device handle for ordinal 0: 0
+
+[TEST] hipDeviceGetName
+  Device name: AMD Instinct MI300X
+
+[TEST] hipDeviceTotalMem
+  Total memory: 206141652992 bytes (191.98 GB)
+
+[TEST] hipDeviceGetPCIBusId
+  PCI Bus ID: 0000:65:00.0
+
+[TEST] hipDeviceGetByPCIBusId
+  Device from PCI Bus ID '0000:65:00.0': 0
+
+[TEST] hipDeviceComputeCapability
+  Compute capability: 9.4
+
+[TEST] hipDeviceGetUuid
+  UUID: 32653637-6566-3765-3736-653337623231
+
+[TEST] hipDeviceGetCacheConfig / hipDeviceSetCacheConfig
+  Current cache config: 0
+  Set cache config to PreferShared
+
+[TEST] hipDeviceGetSharedMemConfig / hipDeviceSetSharedMemConfig
+  Current shared mem config: 1
+  Set shared mem config to FourByte
+
+[TEST] hipGetDeviceFlags / hipSetDeviceFlags
+  Current device flags: 0x0
+  Set device flags to 0
+
+[TEST] hipDeviceGetP2PAttribute
+  Device count: 8
+  P2P access supported (0->1): 1
+
+=== All Tests Passed! ===
+<end of output>
+Test time =   3.14 sec
+----------------------------------------------------------
+Test Passed.
+"hip_remote_device_apis" end time: Feb 19 16:12 CET
+"hip_remote_device_apis" time elapsed: 00:00:03
+----------------------------------------------------------
+
+9/9 Testing: hip_remote_memory_apis
+9/9 Test: hip_remote_memory_apis
+Command: "/Users/setupuser/github/TheRock/rocm-systems/projects/hip-remote-client/build/hip_remote_test_memory_apis"
+Directory: /Users/setupuser/github/TheRock/rocm-systems/projects/hip-remote-client/build
+"hip_remote_memory_apis" start time: Feb 19 16:12 CET
+Output:
+----------------------------------------------------------
+[HIP-Remote] Client initialized: host=localhost port=50052
+[HIP-Remote] Remote HIP client library loaded
+[HIP-Remote] Client initialized: host=localhost port=50052
+[HIP-Remote] Connecting to localhost:50052...
+[HIP-Remote] Connected successfully
+[HIP-Remote] Init handshake complete
+[HIP-Remote] Sending hipHostAlloc (id=2, payload=12)
+[HIP-Remote] Received response for hipHostAlloc: error=0
+[HIP-Remote] Sending hipHostFree (id=3, payload=8)
+[HIP-Remote] Received response for hipHostFree: error=0
+[HIP-Remote] Sending hipMemAllocPitch (id=4, payload=20)
+[HIP-Remote] Received response for hipMemAllocPitch: error=0
+[HIP-Remote] Sending hipMalloc (id=5, payload=12)
+[HIP-Remote] Received response for hipMalloc: error=0
+[HIP-Remote] Sending hipMemcpy (id=6, payload=36)
+[HIP-Remote] Received response for hipMemcpy: error=0
+[HIP-Remote] Sending hipFree (id=7, payload=8)
+[HIP-Remote] Received response for hipFree: error=0
+[HIP-Remote] Sending hipFree (id=8, payload=8)
+[HIP-Remote] Received response for hipFree: error=0
+[HIP-Remote] Disconnected: shutdown (errno=0: Undefined error: 0)
+[HIP-Remote] Remote HIP client library unloaded
+=== HIP Remote Memory APIs Test ===
+
+[TEST] hipHostAlloc / hipHostFree
+  Allocated 4KB host memory: 0x785269e30000 (remote)
+  Note: Host memory allocated on remote worker, not directly accessible locally
+  Freed host memory
+
+[TEST] hipHostRegister / hipHostUnregister (Remote Limitations)
+  Note: Host registration requires local host memory access
+  In remote mode, host memory lives on the worker, not the client
+  Skipping local malloc registration tests in remote mode
+
+[TEST] hipMemAllocPitch
+  Allocated pitched memory: ptr=0x784a68200000, pitch=256 (width=256, height=128, elem=4)
+  Pitch is greater or equal than width
+  Copied data to pitched memory
+  Freed pitched memory
+
+[TEST] Unified Memory APIs (Skipped in Remote Mode)
+  Note: hipMallocManaged and unified memory features
+  are not fully supported in remote HIP mode
+  These would require shared virtual address space
+
+[TEST] Summary
+  All implemented memory APIs are present and callable
+  Note: Some APIs have remote-mode limitations:
+    - Host registration requires worker-side host memory
+    - Unified memory features need shared address space
+
+=== All Tests Passed! ===
+<end of output>
+Test time =   1.82 sec
+----------------------------------------------------------
+Test Passed.
+"hip_remote_memory_apis" end time: Feb 19 16:12 CET
+"hip_remote_memory_apis" time elapsed: 00:00:01
+----------------------------------------------------------
+
+End testing: Feb 19 16:12 CET
+
+integration =  47.26 sec*proc
+

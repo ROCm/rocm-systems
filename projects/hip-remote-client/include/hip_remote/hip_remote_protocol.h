@@ -84,6 +84,22 @@ typedef enum {
     HIP_OP_DEVICE_CAN_ACCESS_PEER   = 0x0109,
     HIP_OP_DEVICE_ENABLE_PEER_ACCESS = 0x010A,
     HIP_OP_DEVICE_DISABLE_PEER_ACCESS = 0x010B,
+    HIP_OP_DEVICE_GET               = 0x010C,  /* hipDeviceGet */
+    HIP_OP_DEVICE_GET_NAME          = 0x010D,  /* hipDeviceGetName */
+    HIP_OP_DEVICE_TOTAL_MEM         = 0x010E,  /* hipDeviceTotalMem */
+    HIP_OP_DEVICE_GET_PCI_BUS_ID    = 0x010F,  /* hipDeviceGetPCIBusId */
+    HIP_OP_DEVICE_GET_BY_PCI_BUS_ID = 0x0110,  /* hipDeviceGetByPCIBusId */
+    HIP_OP_DEVICE_COMPUTE_CAPABILITY = 0x0111, /* hipDeviceComputeCapability */
+    HIP_OP_DEVICE_GET_UUID          = 0x0112,  /* hipDeviceGetUuid */
+    HIP_OP_DEVICE_GET_CACHE_CONFIG  = 0x0113,  /* hipDeviceGetCacheConfig */
+    HIP_OP_DEVICE_SET_CACHE_CONFIG  = 0x0114,  /* hipDeviceSetCacheConfig */
+    HIP_OP_DEVICE_GET_SHARED_MEM_CONFIG = 0x0115, /* hipDeviceGetSharedMemConfig */
+    HIP_OP_DEVICE_SET_SHARED_MEM_CONFIG = 0x0116, /* hipDeviceSetSharedMemConfig */
+    HIP_OP_SET_DEVICE_FLAGS         = 0x0117,  /* hipSetDeviceFlags */
+    HIP_OP_GET_DEVICE_FLAGS         = 0x0118,  /* hipGetDeviceFlags */
+    HIP_OP_DEVICE_GET_P2P_ATTRIBUTE = 0x0119,  /* hipDeviceGetP2PAttribute */
+    HIP_OP_SET_VALID_DEVICES        = 0x011A,  /* hipSetValidDevices */
+    HIP_OP_CHOOSE_DEVICE            = 0x011B,  /* hipChooseDevice */
 
     /* Memory allocation (0x02xx) */
     HIP_OP_MALLOC                   = 0x0200,
@@ -138,6 +154,38 @@ typedef enum {
     HIP_OP_DEVICE_GET_DEFAULT_MEM_POOL = 0x0256,
     HIP_OP_DEVICE_SET_MEM_POOL      = 0x0257,
     HIP_OP_DEVICE_GET_MEM_POOL      = 0x0258,
+
+    /* Host memory registration (0x026x) */
+    HIP_OP_HOST_REGISTER            = 0x0260,
+    HIP_OP_HOST_UNREGISTER          = 0x0261,
+    HIP_OP_HOST_GET_DEVICE_POINTER  = 0x0262,
+    HIP_OP_HOST_GET_FLAGS           = 0x0263,
+    HIP_OP_HOST_ALLOC               = 0x0264,
+    HIP_OP_HOST_FREE                = 0x0265,
+    HIP_OP_MEM_ALLOC_PITCH          = 0x0266,
+
+    /* Unified memory management (0x027x) */
+    HIP_OP_MEM_ADVISE               = 0x0270,
+    HIP_OP_MEM_PREFETCH_ASYNC       = 0x0271,
+    HIP_OP_MEM_RANGE_GET_ATTRIBUTE  = 0x0272,
+    HIP_OP_MEM_RANGE_GET_ATTRIBUTES = 0x0273,
+
+    /* Graph Node operations (0x064x) */
+    HIP_OP_GRAPH_ADD_MEMCPY_NODE    = 0x0640,
+    HIP_OP_GRAPH_ADD_MEMSET_NODE    = 0x0641,
+    HIP_OP_GRAPH_ADD_KERNEL_NODE    = 0x0642,
+    HIP_OP_GRAPH_ADD_DEPENDENCIES   = 0x0643,
+    HIP_OP_GRAPH_ADD_EMPTY_NODE     = 0x0644,
+    HIP_OP_GRAPH_GET_NODES          = 0x0645,
+    HIP_OP_GRAPH_GET_ROOT_NODES     = 0x0646,
+    HIP_OP_GRAPH_GET_EDGES          = 0x0647,
+    HIP_OP_GRAPH_NODE_GET_TYPE      = 0x0648,
+    HIP_OP_GRAPH_DESTROY_NODE       = 0x0649,
+    HIP_OP_GRAPH_ADD_MEMCPY_NODE_1D = 0x064A,
+    HIP_OP_GRAPH_ADD_HOST_NODE      = 0x064B,
+    HIP_OP_GRAPH_ADD_CHILD_GRAPH_NODE = 0x064C,
+    HIP_OP_GRAPH_ADD_EVENT_RECORD_NODE = 0x064D,
+    HIP_OP_GRAPH_ADD_EVENT_WAIT_NODE = 0x064E,
 
     /* Stream operations (0x03xx) */
     HIP_OP_STREAM_CREATE            = 0x0300,
@@ -342,6 +390,145 @@ typedef struct __attribute__((packed)) {
     int32_t peer_device_id;       /**< Peer device to enable/disable access to */
     uint32_t flags;               /**< Flags (reserved, must be 0) */
 } HipRemoteDevicePeerAccessRequest;
+
+/* HIP_OP_DEVICE_GET */
+typedef struct __attribute__((packed)) {
+    int32_t ordinal;              /**< Device ordinal */
+} HipRemoteDeviceGetRequest;
+
+typedef struct __attribute__((packed)) {
+    HipRemoteResponseHeader header;
+    uint64_t device;              /**< Device handle (opaque) */
+} HipRemoteDeviceGetResponse;
+
+/* HIP_OP_DEVICE_GET_NAME */
+typedef struct __attribute__((packed)) {
+    uint64_t device;              /**< Device handle */
+    int32_t len;                  /**< Maximum length of name buffer */
+} HipRemoteDeviceGetNameRequest;
+
+typedef struct __attribute__((packed)) {
+    HipRemoteResponseHeader header;
+    char name[256];               /**< Device name string */
+} HipRemoteDeviceGetNameResponse;
+
+/* HIP_OP_DEVICE_TOTAL_MEM */
+typedef struct __attribute__((packed)) {
+    uint64_t device;              /**< Device handle */
+} HipRemoteDeviceTotalMemRequest;
+
+typedef struct __attribute__((packed)) {
+    HipRemoteResponseHeader header;
+    uint64_t bytes;               /**< Total memory in bytes */
+} HipRemoteDeviceTotalMemResponse;
+
+/* HIP_OP_DEVICE_GET_PCI_BUS_ID */
+typedef struct __attribute__((packed)) {
+    int32_t device;               /**< Device ordinal */
+    int32_t len;                  /**< Maximum length of PCI bus ID string */
+} HipRemoteDeviceGetPCIBusIdRequest;
+
+typedef struct __attribute__((packed)) {
+    HipRemoteResponseHeader header;
+    char pci_bus_id[32];          /**< PCI bus ID string (e.g., "0000:03:00.0") */
+} HipRemoteDeviceGetPCIBusIdResponse;
+
+/* HIP_OP_DEVICE_GET_BY_PCI_BUS_ID */
+typedef struct __attribute__((packed)) {
+    char pci_bus_id[32];          /**< PCI bus ID string */
+} HipRemoteDeviceGetByPCIBusIdRequest;
+
+typedef struct __attribute__((packed)) {
+    HipRemoteResponseHeader header;
+    int32_t device;               /**< Device ordinal */
+} HipRemoteDeviceGetByPCIBusIdResponse;
+
+/* HIP_OP_DEVICE_COMPUTE_CAPABILITY */
+typedef struct __attribute__((packed)) {
+    uint64_t device;              /**< Device handle */
+} HipRemoteDeviceComputeCapabilityRequest;
+
+typedef struct __attribute__((packed)) {
+    HipRemoteResponseHeader header;
+    int32_t major;                /**< Major compute capability version */
+    int32_t minor;                /**< Minor compute capability version */
+} HipRemoteDeviceComputeCapabilityResponse;
+
+/* HIP_OP_DEVICE_GET_UUID */
+#define HIP_UUID_SIZE 16
+
+typedef struct __attribute__((packed)) {
+    uint64_t device;              /**< Device handle */
+} HipRemoteDeviceGetUuidRequest;
+
+typedef struct __attribute__((packed)) {
+    HipRemoteResponseHeader header;
+    uint8_t uuid[HIP_UUID_SIZE];  /**< Device UUID bytes */
+} HipRemoteDeviceGetUuidResponse;
+
+/* HIP_OP_DEVICE_GET_CACHE_CONFIG / HIP_OP_DEVICE_SET_CACHE_CONFIG */
+typedef struct __attribute__((packed)) {
+    int32_t cache_config;         /**< hipFuncCache_t enum value */
+} HipRemoteDeviceCacheConfigRequest;
+
+typedef struct __attribute__((packed)) {
+    HipRemoteResponseHeader header;
+    int32_t cache_config;         /**< hipFuncCache_t enum value */
+} HipRemoteDeviceCacheConfigResponse;
+
+/* HIP_OP_DEVICE_GET_SHARED_MEM_CONFIG / HIP_OP_DEVICE_SET_SHARED_MEM_CONFIG */
+typedef struct __attribute__((packed)) {
+    int32_t shared_mem_config;    /**< hipSharedMemConfig enum value */
+} HipRemoteDeviceSharedMemConfigRequest;
+
+typedef struct __attribute__((packed)) {
+    HipRemoteResponseHeader header;
+    int32_t shared_mem_config;    /**< hipSharedMemConfig enum value */
+} HipRemoteDeviceSharedMemConfigResponse;
+
+/* HIP_OP_SET_DEVICE_FLAGS / HIP_OP_GET_DEVICE_FLAGS */
+typedef struct __attribute__((packed)) {
+    uint32_t flags;               /**< Device flags */
+} HipRemoteDeviceFlagsRequest;
+
+typedef struct __attribute__((packed)) {
+    HipRemoteResponseHeader header;
+    uint32_t flags;               /**< Device flags */
+} HipRemoteDeviceFlagsResponse;
+
+/* HIP_OP_DEVICE_GET_P2P_ATTRIBUTE */
+typedef struct __attribute__((packed)) {
+    int32_t attr;                 /**< hipDeviceP2PAttr enum value */
+    int32_t src_device;           /**< Source device ordinal */
+    int32_t dst_device;           /**< Destination device ordinal */
+} HipRemoteDeviceGetP2PAttributeRequest;
+
+typedef struct __attribute__((packed)) {
+    HipRemoteResponseHeader header;
+    int32_t value;                /**< Attribute value */
+} HipRemoteDeviceGetP2PAttributeResponse;
+
+/* HIP_OP_SET_VALID_DEVICES */
+typedef struct __attribute__((packed)) {
+    int32_t len;                  /**< Number of valid devices */
+    /* Followed by len int32_t device IDs */
+} HipRemoteSetValidDevicesRequest;
+
+/* HIP_OP_CHOOSE_DEVICE */
+typedef struct __attribute__((packed)) {
+    /* Contains key fields from hipDeviceProp_t for matching */
+    uint64_t total_global_mem;
+    int32_t major;
+    int32_t minor;
+    int32_t multi_processor_count;
+    int32_t warp_size;
+    int32_t max_threads_per_block;
+} HipRemoteChooseDeviceRequest;
+
+typedef struct __attribute__((packed)) {
+    HipRemoteResponseHeader header;
+    int32_t device;               /**< Best matching device ordinal */
+} HipRemoteChooseDeviceResponse;
 
 /* ============================================================================
  * Memory Operations
@@ -632,6 +819,305 @@ typedef struct __attribute__((packed)) {
     uint32_t reserved;        /**< Padding */
     uint64_t mem_pool;        /**< Memory pool to set */
 } HipRemoteDeviceSetMemPoolRequest;
+
+/* ============================================================================
+ * Host Memory Registration
+ * ============================================================================ */
+
+/* HIP_OP_HOST_REGISTER */
+typedef struct __attribute__((packed)) {
+    uint64_t host_ptr;        /**< Host pointer to register */
+    uint64_t size_bytes;      /**< Size in bytes */
+    uint32_t flags;           /**< Registration flags */
+} HipRemoteHostRegisterRequest;
+
+/* HIP_OP_HOST_UNREGISTER */
+typedef struct __attribute__((packed)) {
+    uint64_t host_ptr;        /**< Host pointer to unregister */
+} HipRemoteHostUnregisterRequest;
+
+/* HIP_OP_HOST_GET_DEVICE_POINTER */
+typedef struct __attribute__((packed)) {
+    uint64_t host_ptr;        /**< Host pointer */
+    uint32_t flags;           /**< Flags (reserved) */
+} HipRemoteHostGetDevicePointerRequest;
+
+typedef struct __attribute__((packed)) {
+    HipRemoteResponseHeader header;
+    uint64_t device_ptr;      /**< Device pointer */
+} HipRemoteHostGetDevicePointerResponse;
+
+/* HIP_OP_HOST_GET_FLAGS */
+typedef struct __attribute__((packed)) {
+    uint64_t host_ptr;        /**< Host pointer */
+} HipRemoteHostGetFlagsRequest;
+
+typedef struct __attribute__((packed)) {
+    HipRemoteResponseHeader header;
+    uint32_t flags;           /**< Allocation flags */
+} HipRemoteHostGetFlagsResponse;
+
+/* HIP_OP_HOST_ALLOC */
+typedef struct __attribute__((packed)) {
+    uint64_t size;            /**< Allocation size */
+    uint32_t flags;           /**< Allocation flags */
+} HipRemoteHostAllocRequest;
+
+typedef struct __attribute__((packed)) {
+    HipRemoteResponseHeader header;
+    uint64_t ptr;             /**< Allocated pointer */
+} HipRemoteHostAllocResponse;
+
+/* HIP_OP_HOST_FREE */
+typedef struct __attribute__((packed)) {
+    uint64_t ptr;             /**< Pointer to free */
+} HipRemoteHostFreeRequest;
+
+/* HIP_OP_MEM_ALLOC_PITCH */
+typedef struct __attribute__((packed)) {
+    uint64_t width_in_bytes;  /**< Width in bytes */
+    uint64_t height;          /**< Height */
+    uint32_t element_size;    /**< Element size in bytes */
+} HipRemoteMemAllocPitchRequest;
+
+typedef struct __attribute__((packed)) {
+    HipRemoteResponseHeader header;
+    uint64_t dptr;            /**< Allocated device pointer */
+    uint64_t pitch;           /**< Pitch in bytes */
+} HipRemoteMemAllocPitchResponse;
+
+/* ============================================================================
+ * Unified Memory Management
+ * ============================================================================ */
+
+/* Memory advise values */
+typedef enum {
+    HIP_MEM_ADVISE_SET_READ_MOSTLY = 1,
+    HIP_MEM_ADVISE_UNSET_READ_MOSTLY = 2,
+    HIP_MEM_ADVISE_SET_PREFERRED_LOCATION = 3,
+    HIP_MEM_ADVISE_UNSET_PREFERRED_LOCATION = 4,
+    HIP_MEM_ADVISE_SET_ACCESSED_BY = 5,
+    HIP_MEM_ADVISE_UNSET_ACCESSED_BY = 6
+} HipMemoryAdvise;
+
+/* Memory range attributes */
+typedef enum {
+    HIP_MEM_RANGE_ATTRIBUTE_READ_MOSTLY = 1,
+    HIP_MEM_RANGE_ATTRIBUTE_PREFERRED_LOCATION = 2,
+    HIP_MEM_RANGE_ATTRIBUTE_ACCESSED_BY = 3,
+    HIP_MEM_RANGE_ATTRIBUTE_LAST_PREFETCH_LOCATION = 4,
+    HIP_MEM_RANGE_ATTRIBUTE_COHERENCY_MODE = 100
+} HipMemRangeAttribute;
+
+/* HIP_OP_MEM_ADVISE */
+typedef struct __attribute__((packed)) {
+    uint64_t dev_ptr;         /**< Device pointer */
+    uint64_t count;           /**< Size in bytes */
+    int32_t advice;           /**< HipMemoryAdvise enum value */
+    int32_t device;           /**< Device ID */
+} HipRemoteMemAdviseRequest;
+
+/* HIP_OP_MEM_PREFETCH_ASYNC */
+typedef struct __attribute__((packed)) {
+    uint64_t dev_ptr;         /**< Device pointer */
+    uint64_t count;           /**< Size in bytes */
+    int32_t device;           /**< Destination device */
+    uint32_t reserved;        /**< Padding */
+    uint64_t stream;          /**< Stream for async operation */
+} HipRemoteMemPrefetchAsyncRequest;
+
+/* HIP_OP_MEM_RANGE_GET_ATTRIBUTE */
+typedef struct __attribute__((packed)) {
+    uint64_t data_size;       /**< Size of data buffer */
+    int32_t attribute;        /**< HipMemRangeAttribute enum */
+    uint32_t reserved;        /**< Padding */
+    uint64_t dev_ptr;         /**< Device pointer */
+    uint64_t count;           /**< Range size in bytes */
+} HipRemoteMemRangeGetAttributeRequest;
+
+typedef struct __attribute__((packed)) {
+    HipRemoteResponseHeader header;
+    /* Followed by data of size data_size */
+} HipRemoteMemRangeGetAttributeResponse;
+
+/* HIP_OP_MEM_RANGE_GET_ATTRIBUTES */
+#define HIP_REMOTE_MAX_MEM_RANGE_ATTRIBUTES 8
+
+typedef struct __attribute__((packed)) {
+    uint32_t num_attributes;  /**< Number of attributes to query */
+    uint32_t reserved;        /**< Padding */
+    uint64_t dev_ptr;         /**< Device pointer */
+    uint64_t count;           /**< Range size in bytes */
+    /* Followed by num_attributes int32_t attribute values */
+    /* Followed by num_attributes uint64_t data_sizes */
+} HipRemoteMemRangeGetAttributesRequest;
+
+typedef struct __attribute__((packed)) {
+    HipRemoteResponseHeader header;
+    /* Followed by data for each attribute */
+} HipRemoteMemRangeGetAttributesResponse;
+
+/* ============================================================================
+ * Graph Node Operations
+ * ============================================================================ */
+
+/** Max dependencies per graph node operation */
+#define HIP_REMOTE_MAX_GRAPH_DEPENDENCIES 64
+
+/** Graph node types */
+typedef enum {
+    HIP_GRAPH_NODE_TYPE_KERNEL = 0,
+    HIP_GRAPH_NODE_TYPE_MEMCPY = 1,
+    HIP_GRAPH_NODE_TYPE_MEMSET = 2,
+    HIP_GRAPH_NODE_TYPE_HOST = 3,
+    HIP_GRAPH_NODE_TYPE_GRAPH = 4,
+    HIP_GRAPH_NODE_TYPE_EMPTY = 5,
+    HIP_GRAPH_NODE_TYPE_WAIT_EVENT = 6,
+    HIP_GRAPH_NODE_TYPE_EVENT_RECORD = 7,
+    HIP_GRAPH_NODE_TYPE_EXT_SEMAS_SIGNAL = 8,
+    HIP_GRAPH_NODE_TYPE_EXT_SEMAS_WAIT = 9,
+    HIP_GRAPH_NODE_TYPE_MEM_ALLOC = 10,
+    HIP_GRAPH_NODE_TYPE_MEM_FREE = 11,
+    HIP_GRAPH_NODE_TYPE_COUNT = 12
+} HipGraphNodeType;
+
+/* HIP_OP_GRAPH_ADD_MEMCPY_NODE */
+typedef struct __attribute__((packed)) {
+    uint64_t graph;           /**< Graph handle */
+    uint32_t num_deps;        /**< Number of dependencies */
+    uint32_t reserved;        /**< Padding */
+    uint64_t dst;             /**< Destination pointer */
+    uint64_t src;             /**< Source pointer */
+    uint64_t width;           /**< Copy width */
+    uint64_t height;          /**< Copy height */
+    uint64_t dst_pitch;       /**< Destination pitch */
+    uint64_t src_pitch;       /**< Source pitch */
+    int32_t kind;             /**< hipMemcpyKind */
+    uint32_t reserved2;       /**< Padding */
+    /* Followed by num_deps uint64_t dependency node handles */
+} HipRemoteGraphAddMemcpyNodeRequest;
+
+/* HIP_OP_GRAPH_ADD_MEMCPY_NODE_1D */
+typedef struct __attribute__((packed)) {
+    uint64_t graph;           /**< Graph handle */
+    uint32_t num_deps;        /**< Number of dependencies */
+    uint32_t reserved;        /**< Padding */
+    uint64_t dst;             /**< Destination pointer */
+    uint64_t src;             /**< Source pointer */
+    uint64_t count;           /**< Number of bytes */
+    int32_t kind;             /**< hipMemcpyKind */
+    /* Followed by num_deps uint64_t dependency node handles */
+} HipRemoteGraphAddMemcpyNode1DRequest;
+
+typedef struct __attribute__((packed)) {
+    HipRemoteResponseHeader header;
+    uint64_t node;            /**< Created graph node handle */
+} HipRemoteGraphAddNodeResponse;
+
+/* HIP_OP_GRAPH_ADD_MEMSET_NODE */
+typedef struct __attribute__((packed)) {
+    uint64_t graph;           /**< Graph handle */
+    uint32_t num_deps;        /**< Number of dependencies */
+    uint32_t reserved;        /**< Padding */
+    uint64_t dst;             /**< Destination pointer */
+    uint64_t pitch;           /**< Pitch */
+    int32_t value;            /**< Value to set */
+    uint32_t element_size;    /**< Element size (1, 2, or 4) */
+    uint64_t width;           /**< Width in elements */
+    uint64_t height;          /**< Height */
+    /* Followed by num_deps uint64_t dependency node handles */
+} HipRemoteGraphAddMemsetNodeRequest;
+
+/* HIP_OP_GRAPH_ADD_KERNEL_NODE */
+typedef struct __attribute__((packed)) {
+    uint64_t graph;           /**< Graph handle */
+    uint32_t num_deps;        /**< Number of dependencies */
+    uint32_t reserved;        /**< Padding */
+    uint64_t func;            /**< Kernel function handle */
+    uint32_t grid_dim_x;      /**< Grid dimensions */
+    uint32_t grid_dim_y;
+    uint32_t grid_dim_z;
+    uint32_t block_dim_x;     /**< Block dimensions */
+    uint32_t block_dim_y;
+    uint32_t block_dim_z;
+    uint32_t shared_mem_bytes;/**< Shared memory size */
+    uint32_t num_args;        /**< Number of kernel arguments */
+    /* Followed by num_deps uint64_t dependency node handles */
+    /* Followed by num_args uint64_t kernel arguments */
+} HipRemoteGraphAddKernelNodeRequest;
+
+/* HIP_OP_GRAPH_ADD_DEPENDENCIES */
+typedef struct __attribute__((packed)) {
+    uint64_t graph;           /**< Graph handle */
+    uint32_t num_deps;        /**< Number of dependencies to add */
+    /* Followed by num_deps pairs of (from_node, to_node) uint64_t handles */
+} HipRemoteGraphAddDependenciesRequest;
+
+/* HIP_OP_GRAPH_ADD_EMPTY_NODE */
+typedef struct __attribute__((packed)) {
+    uint64_t graph;           /**< Graph handle */
+    uint32_t num_deps;        /**< Number of dependencies */
+    /* Followed by num_deps uint64_t dependency node handles */
+} HipRemoteGraphAddEmptyNodeRequest;
+
+/* HIP_OP_GRAPH_GET_NODES / HIP_OP_GRAPH_GET_ROOT_NODES */
+typedef struct __attribute__((packed)) {
+    uint64_t graph;           /**< Graph handle */
+    uint32_t max_nodes;       /**< Maximum nodes to return */
+} HipRemoteGraphGetNodesRequest;
+
+typedef struct __attribute__((packed)) {
+    HipRemoteResponseHeader header;
+    uint32_t num_nodes;       /**< Number of nodes returned */
+    uint32_t reserved;        /**< Padding */
+    /* Followed by num_nodes uint64_t node handles */
+} HipRemoteGraphGetNodesResponse;
+
+/* HIP_OP_GRAPH_GET_EDGES */
+typedef struct __attribute__((packed)) {
+    uint64_t graph;           /**< Graph handle */
+    uint32_t max_edges;       /**< Maximum edges to return */
+} HipRemoteGraphGetEdgesRequest;
+
+typedef struct __attribute__((packed)) {
+    HipRemoteResponseHeader header;
+    uint32_t num_edges;       /**< Number of edges returned */
+    uint32_t reserved;        /**< Padding */
+    /* Followed by num_edges pairs of (from_node, to_node) uint64_t handles */
+} HipRemoteGraphGetEdgesResponse;
+
+/* HIP_OP_GRAPH_NODE_GET_TYPE */
+typedef struct __attribute__((packed)) {
+    uint64_t node;            /**< Node handle */
+} HipRemoteGraphNodeGetTypeRequest;
+
+typedef struct __attribute__((packed)) {
+    HipRemoteResponseHeader header;
+    int32_t type;             /**< HipGraphNodeType */
+} HipRemoteGraphNodeGetTypeResponse;
+
+/* HIP_OP_GRAPH_DESTROY_NODE */
+typedef struct __attribute__((packed)) {
+    uint64_t node;            /**< Node handle to destroy */
+} HipRemoteGraphDestroyNodeRequest;
+
+/* HIP_OP_GRAPH_ADD_HOST_NODE */
+typedef struct __attribute__((packed)) {
+    uint64_t graph;           /**< Graph handle */
+    uint32_t num_deps;        /**< Number of dependencies */
+    uint32_t reserved;        /**< Padding */
+    /* Note: Host callbacks not supported in remote mode - stub only */
+    /* Followed by num_deps uint64_t dependency node handles */
+} HipRemoteGraphAddHostNodeRequest;
+
+/* HIP_OP_GRAPH_ADD_EVENT_RECORD_NODE / HIP_OP_GRAPH_ADD_EVENT_WAIT_NODE */
+typedef struct __attribute__((packed)) {
+    uint64_t graph;           /**< Graph handle */
+    uint32_t num_deps;        /**< Number of dependencies */
+    uint32_t reserved;        /**< Padding */
+    uint64_t event;           /**< Event handle */
+    /* Followed by num_deps uint64_t dependency node handles */
+} HipRemoteGraphAddEventNodeRequest;
 
 /* ============================================================================
  * Stream Operations
@@ -1062,6 +1548,22 @@ static inline const char* hip_remote_op_name(HipRemoteOpCode op_code) {
         case HIP_OP_DEVICE_CAN_ACCESS_PEER: return "hipDeviceCanAccessPeer";
         case HIP_OP_DEVICE_ENABLE_PEER_ACCESS: return "hipDeviceEnablePeerAccess";
         case HIP_OP_DEVICE_DISABLE_PEER_ACCESS: return "hipDeviceDisablePeerAccess";
+        case HIP_OP_DEVICE_GET: return "hipDeviceGet";
+        case HIP_OP_DEVICE_GET_NAME: return "hipDeviceGetName";
+        case HIP_OP_DEVICE_TOTAL_MEM: return "hipDeviceTotalMem";
+        case HIP_OP_DEVICE_GET_PCI_BUS_ID: return "hipDeviceGetPCIBusId";
+        case HIP_OP_DEVICE_GET_BY_PCI_BUS_ID: return "hipDeviceGetByPCIBusId";
+        case HIP_OP_DEVICE_COMPUTE_CAPABILITY: return "hipDeviceComputeCapability";
+        case HIP_OP_DEVICE_GET_UUID: return "hipDeviceGetUuid";
+        case HIP_OP_DEVICE_GET_CACHE_CONFIG: return "hipDeviceGetCacheConfig";
+        case HIP_OP_DEVICE_SET_CACHE_CONFIG: return "hipDeviceSetCacheConfig";
+        case HIP_OP_DEVICE_GET_SHARED_MEM_CONFIG: return "hipDeviceGetSharedMemConfig";
+        case HIP_OP_DEVICE_SET_SHARED_MEM_CONFIG: return "hipDeviceSetSharedMemConfig";
+        case HIP_OP_SET_DEVICE_FLAGS: return "hipSetDeviceFlags";
+        case HIP_OP_GET_DEVICE_FLAGS: return "hipGetDeviceFlags";
+        case HIP_OP_DEVICE_GET_P2P_ATTRIBUTE: return "hipDeviceGetP2PAttribute";
+        case HIP_OP_SET_VALID_DEVICES: return "hipSetValidDevices";
+        case HIP_OP_CHOOSE_DEVICE: return "hipChooseDevice";
 
         case HIP_OP_MALLOC: return "hipMalloc";
         case HIP_OP_FREE: return "hipFree";
@@ -1108,6 +1610,35 @@ static inline const char* hip_remote_op_name(HipRemoteOpCode op_code) {
         case HIP_OP_DEVICE_GET_DEFAULT_MEM_POOL: return "hipDeviceGetDefaultMemPool";
         case HIP_OP_DEVICE_SET_MEM_POOL: return "hipDeviceSetMemPool";
         case HIP_OP_DEVICE_GET_MEM_POOL: return "hipDeviceGetMemPool";
+
+        case HIP_OP_HOST_REGISTER: return "hipHostRegister";
+        case HIP_OP_HOST_UNREGISTER: return "hipHostUnregister";
+        case HIP_OP_HOST_GET_DEVICE_POINTER: return "hipHostGetDevicePointer";
+        case HIP_OP_HOST_GET_FLAGS: return "hipHostGetFlags";
+        case HIP_OP_HOST_ALLOC: return "hipHostAlloc";
+        case HIP_OP_HOST_FREE: return "hipHostFree";
+        case HIP_OP_MEM_ALLOC_PITCH: return "hipMemAllocPitch";
+
+        case HIP_OP_MEM_ADVISE: return "hipMemAdvise";
+        case HIP_OP_MEM_PREFETCH_ASYNC: return "hipMemPrefetchAsync";
+        case HIP_OP_MEM_RANGE_GET_ATTRIBUTE: return "hipMemRangeGetAttribute";
+        case HIP_OP_MEM_RANGE_GET_ATTRIBUTES: return "hipMemRangeGetAttributes";
+
+        case HIP_OP_GRAPH_ADD_MEMCPY_NODE: return "hipGraphAddMemcpyNode";
+        case HIP_OP_GRAPH_ADD_MEMSET_NODE: return "hipGraphAddMemsetNode";
+        case HIP_OP_GRAPH_ADD_KERNEL_NODE: return "hipGraphAddKernelNode";
+        case HIP_OP_GRAPH_ADD_DEPENDENCIES: return "hipGraphAddDependencies";
+        case HIP_OP_GRAPH_ADD_EMPTY_NODE: return "hipGraphAddEmptyNode";
+        case HIP_OP_GRAPH_GET_NODES: return "hipGraphGetNodes";
+        case HIP_OP_GRAPH_GET_ROOT_NODES: return "hipGraphGetRootNodes";
+        case HIP_OP_GRAPH_GET_EDGES: return "hipGraphGetEdges";
+        case HIP_OP_GRAPH_NODE_GET_TYPE: return "hipGraphNodeGetType";
+        case HIP_OP_GRAPH_DESTROY_NODE: return "hipGraphDestroyNode";
+        case HIP_OP_GRAPH_ADD_MEMCPY_NODE_1D: return "hipGraphAddMemcpyNode1D";
+        case HIP_OP_GRAPH_ADD_HOST_NODE: return "hipGraphAddHostNode";
+        case HIP_OP_GRAPH_ADD_CHILD_GRAPH_NODE: return "hipGraphAddChildGraphNode";
+        case HIP_OP_GRAPH_ADD_EVENT_RECORD_NODE: return "hipGraphAddEventRecordNode";
+        case HIP_OP_GRAPH_ADD_EVENT_WAIT_NODE: return "hipGraphAddEventWaitNode";
 
         case HIP_OP_STREAM_CREATE: return "hipStreamCreate";
         case HIP_OP_STREAM_CREATE_WITH_FLAGS: return "hipStreamCreateWithFlags";
