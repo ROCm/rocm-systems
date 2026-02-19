@@ -120,21 +120,7 @@ void GPUScheduler::preallocateUniqueIds(int poolSize)
 
 std::string GPUScheduler::getNextUniqueId()
 {
-    // Use unique_lock instead of lock_guard so we can manually unlock/lock
-    std::unique_lock<std::mutex> lock(poolMutex_);
-
-    // Wait if pool is temporarily empty but generation is ongoing
-    if (uniqueIdGeneratorThread_.joinable())
-    {
-        while (nextUniqueIdIndex_ >= uniqueIdPool_.size() &&
-               uniqueIdPool_.size() < (size_t)targetPoolSize_.load())
-        {
-            // Temporarily release lock to allow generator thread to add IDs
-            lock.unlock();
-            usleep(10000);  // 10ms
-            lock.lock();
-        }
-    }
+    std::lock_guard<std::mutex> lock(poolMutex_);
 
     if (nextUniqueIdIndex_ >= uniqueIdPool_.size())
     {
@@ -157,100 +143,94 @@ std::string GPUScheduler::getNextUniqueId()
     return hexStr;
 }
 
-void GPUScheduler::uniqueIdGeneratorThreadFunc()
+
+void GPUScheduler::startAsyncIdGeneration(int totalNeeded)
 {
-    int generatedCount = 0;
+    if (config_.verboseLogging)
+    {
+        INFO("Generating pool of %d unique IDs in separate process...\n", totalNeeded);
+    }
+
     auto startTime = std::chrono::steady_clock::now();
 
-    while (!stopIdGeneration_.load() && generatedCount < targetPoolSize_.load())
+    // Fork a separate process to generate IDs
+    // This prevents GPU context initialization in the parent process
+    int pipefd[2];
+    if (pipe(pipefd) == -1)
     {
-        ncclUniqueId id;
-        ncclResult_t result = ncclGetUniqueId(&id);
-        if (result != ncclSuccess)
+        ERROR("Failed to create pipe for unique ID generation\n");
+        return;
+    }
+
+    pid_t pid = fork();
+    if (pid == 0)
+    {
+        // Child process: Generate all unique IDs
+        close(pipefd[0]);  // Close read end
+
+        for (int i = 0; i < totalNeeded; ++i)
         {
-            ERROR("Background thread: Failed to generate NCCL unique ID #%d: %d\n", generatedCount, result);
-            usleep(100000);  // Back off on error
-            continue;
+            ncclUniqueId id;
+            ncclResult_t result = ncclGetUniqueId(&id);
+            if (result != ncclSuccess)
+            {
+                ERROR("ID generator process: Failed to generate ID #%d: %d\n", i, result);
+                _exit(1);
+            }
+
+            // Write ID to pipe
+            ssize_t written = write(pipefd[1], &id, sizeof(ncclUniqueId));
+            if (written != sizeof(ncclUniqueId))
+            {
+                ERROR("ID generator process: Failed to write ID #%d to pipe\n", i);
+                _exit(1);
+            }
         }
 
-        // Store in pool (thread-safe)
+        close(pipefd[1]);
+        _exit(0);  // Success
+    }
+    else if (pid > 0)
+    {
+        // Parent process: Read IDs from pipe
+        close(pipefd[1]);  // Close write end
+
+        for (int i = 0; i < totalNeeded; ++i)
         {
-            std::lock_guard<std::mutex> lock(poolMutex_);
+            ncclUniqueId id;
+            ssize_t bytesRead = read(pipefd[0], &id, sizeof(ncclUniqueId));
+            if (bytesRead != sizeof(ncclUniqueId))
+            {
+                ERROR("Failed to read unique ID #%d from pipe\n", i);
+                break;
+            }
+
             std::vector<char> idBytes(NCCL_UNIQUE_ID_BYTES);
             memcpy(idBytes.data(), &id, NCCL_UNIQUE_ID_BYTES);
             uniqueIdPool_.push_back(idBytes);
         }
 
-        generatedCount++;
+        close(pipefd[0]);
 
-        if (config_.verboseLogging && generatedCount % 4 == 0)
-        {
-            auto now = std::chrono::steady_clock::now();
-            auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - startTime);
-            INFO("Background ID generation: %d/%d complete (%.1f IDs/sec)\n",
-                 generatedCount, targetPoolSize_.load(),
-                 generatedCount * 1000.0 / std::max(1L, elapsed.count()));
-        }
-    }
+        // Wait for child process to exit
+        int status;
+        waitpid(pid, &status, 0);
 
-    if (config_.verboseLogging)
-    {
         auto endTime = std::chrono::steady_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime);
-        INFO("Background ID generation complete: %d IDs in %ld ms\n", generatedCount, duration.count());
-    }
-}
-
-void GPUScheduler::startAsyncIdGeneration(int totalNeeded)
-{
-    targetPoolSize_.store(totalNeeded);
-    stopIdGeneration_.store(false);
-
-    // Generate initial batch synchronously (max_concurrent worth)
-    int initialBatch = std::min(totalNeeded, config_.maxConcurrentTests * 2);
-
-    if (config_.verboseLogging)
-    {
-        INFO("Generating initial batch of %d IDs synchronously...\n", initialBatch);
-    }
-
-    auto startTime = std::chrono::steady_clock::now();
-    for (int i = 0; i < initialBatch; ++i)
-    {
-        ncclUniqueId id;
-        ncclResult_t result = ncclGetUniqueId(&id);
-        if (result != ncclSuccess)
-        {
-            ERROR("Failed to generate initial NCCL unique ID #%d: %d\n", i, result);
-            continue;
-        }
-
-        std::vector<char> idBytes(NCCL_UNIQUE_ID_BYTES);
-        memcpy(idBytes.data(), &id, NCCL_UNIQUE_ID_BYTES);
-        uniqueIdPool_.push_back(idBytes);
-    }
-
-    auto endTime = std::chrono::steady_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime);
-
-    if (config_.verboseLogging)
-    {
-        INFO("Initial batch of %zu IDs generated in %ld ms\n", uniqueIdPool_.size(), duration.count());
-    }
-
-    // Start background thread to generate remaining IDs
-    if (initialBatch < totalNeeded)
-    {
-        // Update target for background thread (it only needs to generate the rest)
-        int remaining = totalNeeded - initialBatch;
-        targetPoolSize_.store(totalNeeded);  // Total target
 
         if (config_.verboseLogging)
         {
-            INFO("Starting background generation of remaining %d IDs...\n", remaining);
+            INFO("Generated %zu unique IDs in %ld ms (%.1f ms per ID, in separate process)\n",
+                 uniqueIdPool_.size(), duration.count(),
+                 uniqueIdPool_.empty() ? 0.0 : (double)duration.count() / uniqueIdPool_.size());
         }
-
-        uniqueIdGeneratorThread_ = std::thread(&GPUScheduler::uniqueIdGeneratorThreadFunc, this);
+    }
+    else
+    {
+        ERROR("Failed to fork ID generator process\n");
+        close(pipefd[0]);
+        close(pipefd[1]);
     }
 }
 
