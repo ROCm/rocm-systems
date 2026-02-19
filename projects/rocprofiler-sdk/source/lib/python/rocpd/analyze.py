@@ -1320,26 +1320,52 @@ def _format_as_webview(
             '<h2>&#128293; Top Kernel Hotspots</h2>'
             '<table class="dtable sortable" id="hs-tbl">'
             '<thead><tr>'
-            '<th>#</th>'
-            '<th>Kernel Name</th>'
-            '<th>Calls &#8645;</th>'
-            '<th>Total Time &#8645;</th>'
-            '<th>Avg Time &#8645;</th>'
-            '<th>Min Time &#8645;</th>'
-            '<th>% Total &#8645;</th>'
+            '<th data-tip=\'Rank by total execution time — 1 is the hottest kernel.\'>#</th>'
+            '<th data-tip=\'Demangled GPU kernel function name dispatched to the GPU. Rows highlighted in red consume &gt;20% of total runtime.\'>Kernel Name</th>'
+            '<th data-tip=\'Number of times this kernel was dispatched. Very high call counts with low avg time suggest kernel launch overhead dominates useful work.\'>Calls &#8645;</th>'
+            '<th data-tip=\'Sum of all dispatch durations for this kernel — the primary metric for identifying hotspots. Longer total time = bigger optimization target.\'>Total Time &#8645;</th>'
+            '<th data-tip=\'Mean duration per single dispatch. Values below 10 &micro;s suggest kernel launch overhead may dominate the actual computation.\'>Avg Time &#8645;</th>'
+            '<th data-tip=\'Fastest observed single dispatch. Useful for spotting variance — a large gap between min and avg suggests irregular execution (cache effects, branch divergence).\'>Min Time &#8645;</th>'
+            '<th data-tip=\'Percentage of total profiling window time consumed by this kernel. Kernels above 20% are highlighted and are the highest-priority optimization targets.\'>% Total &#8645;</th>'
             '</tr></thead>'
             '<tbody>' + "".join(hotspot_rows) + '</tbody>'
             '</table></section>'
         )
 
     # ── memory analysis table ───────────────────────────────────────────────
+    _MEM_DIR_TIPS = {
+        "Host-to-Device": (
+            "<strong>Host-to-Device (H2D)</strong>"
+            "CPU &rarr; GPU transfer over PCIe. Used to upload inputs, weights, or parameters before kernel execution. "
+            "<em>PCIe 4.0 x16 peak: ~32 GB/s. Minimize by reusing GPU allocations across iterations.</em>"
+        ),
+        "Device-to-Host": (
+            "<strong>Device-to-Host (D2H)</strong>"
+            "GPU &rarr; CPU transfer over PCIe. Used to read results back after kernel execution. "
+            "<em>Minimize these — prefer keeping results on GPU across multiple kernels. Use async memcpy to overlap with compute.</em>"
+        ),
+        "Device-to-Device": (
+            "<strong>Device-to-Device (D2D)</strong>"
+            "GPU &rarr; GPU on the same device, using HBM bandwidth directly (not PCIe). Very fast — can approach peak HBM bandwidth. "
+            "<em>Use for in-GPU data reorganization. MI300X HBM peak: ~5.3 TB/s.</em>"
+        ),
+        "Peer-to-Peer": (
+            "<strong>Peer-to-Peer (P2P)</strong>"
+            "GPU &rarr; different GPU transfer. Speed depends on interconnect: Infinity Fabric is fast (&sim;900 GB/s on MI300X); PCIe is slower (~32 GB/s). "
+            "<em>Enable peer access with hipDeviceEnablePeerAccess for direct transfers.</em>"
+        ),
+    }
     mem_rows = []
     for direction, s in (memory_analysis or {}).items():
         tb  = s.get("total_bytes", 0)
         bw  = s.get("bandwidth_bytes_per_sec", 0) / 1e9
+        dir_tip = _MEM_DIR_TIPS.get(
+            direction,
+            f"<strong>{_h(direction)}</strong>Memory transfer direction between host and device."
+        )
         mem_rows.append(
             f'<tr>'
-            f'<td>{_h(direction)}</td>'
+            f'<td data-tip=\'{dir_tip}\'>{_h(direction)}</td>'
             f'<td>{int(s.get("count", 0)):,}</td>'
             f'<td>{_fmt_bytes(tb)}</td>'
             f'<td>{_fmt_ns(s.get("total_duration", 0))}</td>'
@@ -1354,8 +1380,12 @@ def _format_as_webview(
             '<h2>&#128190; Memory Transfer Analysis</h2>'
             '<table class="dtable">'
             '<thead><tr>'
-            '<th>Direction</th><th>Count</th><th>Total Bytes</th>'
-            '<th>Total Time</th><th>Avg Size</th><th>Bandwidth</th>'
+            '<th data-tip=\'Transfer direction. Hover each row to learn what each direction means.\'>Direction</th>'
+            '<th data-tip=\'Number of individual copy operations in this direction. Many small transfers are inefficient — batch them when possible.\'>Count</th>'
+            '<th data-tip=\'Total data volume transferred in this direction across all operations.\'>Total Bytes</th>'
+            '<th data-tip=\'Total wall-clock time spent on copies in this direction.\'>Total Time</th>'
+            '<th data-tip=\'Average bytes per copy operation. Transfers below 1 MB are typically inefficient due to PCIe transaction overhead — batch small transfers.\'>Avg Size</th>'
+            '<th data-tip=\'Achieved transfer bandwidth. PCIe 4.0 x16 theoretical peak is ~32 GB/s. Low bandwidth usually means many small transfers, not PCIe saturation.\'>Bandwidth</th>'
             '</tr></thead>'
             '<tbody>' + "".join(mem_rows) + '</tbody>'
             '</table></section>'
@@ -1364,37 +1394,67 @@ def _format_as_webview(
     # ── hardware counters ───────────────────────────────────────────────────
     gauges_html = ""
     if gpu_util is not None:
-        gc = "#44dd66" if float(gpu_util) >= 70 else "#ff8800"
+        _gpu_u = float(gpu_util)
+        gc = "#44dd66" if _gpu_u >= 70 else "#ff8800"
         hint = (
             '<p class="g-hint warn">&#9888; Low — increase parallelism</p>'
-            if float(gpu_util) < 70
+            if _gpu_u < 70
             else '<p class="g-hint ok">&#10003; Good utilization</p>'
         )
+        _gpu_ok = _gpu_u >= 70
+        _gpu_status = (
+            '<span class="tok">Good — GPU is well-utilized.</span>'
+            if _gpu_ok else
+            '<span class="twarn">Low — reduce synchronization barriers, increase batch size, or launch larger kernels.</span>'
+        )
+        _gpu_tip = (
+            f"<strong>GPU Utilization ({_gpu_u:.1f}%)</strong>"
+            f"Percentage of GPU clock cycles where the hardware was actively processing work. "
+            f"Derived from hardware counters: <code>GRBM_GUI_ACTIVE &divide; GRBM_COUNT</code>.<br>"
+            f"<em>Target: &ge;70%. Below 70% means the GPU is frequently idle.</em><br>"
+            f"{_gpu_status}"
+        )
         gauges_html += (
-            f'<div class="gauge-wrap">'
-            f'{_svg_gauge(float(gpu_util), gc, "GPU Utilization", f"{float(gpu_util):.1f}%")}'
+            f'<div class="gauge-wrap" data-tip=\'{_gpu_tip}\'>'
+            f'{_svg_gauge(_gpu_u, gc, "GPU Utilization", f"{_gpu_u:.1f}%")}'
             f'{hint}</div>'
         )
     if avg_waves is not None:
-        wc = "#44dd66" if float(avg_waves) >= 16 else "#ff8800"
+        _aw = float(avg_waves)
+        wc = "#44dd66" if _aw >= 16 else "#ff8800"
         # Normalize waves to 0-100% assuming 64 waves/SIMD as 100%
-        wpct = min(100.0, float(avg_waves) / 64.0 * 100.0)
+        wpct = min(100.0, _aw / 64.0 * 100.0)
         whint = (
             '<p class="g-hint warn">&#9888; Low occupancy — check registers/LDS</p>'
-            if float(avg_waves) < 16
+            if _aw < 16
             else '<p class="g-hint ok">&#10003; Adequate occupancy</p>'
         )
-        wave_str = f"{float(avg_waves):.0f}"
+        wave_str = f"{_aw:.0f}"
         if max_waves is not None:
             wave_str += f" / {float(max_waves):.0f}"
+        _wave_ok = _aw >= 16
+        _wave_status = (
+            '<span class="tok">Good — adequate wavefront occupancy for latency hiding.</span>'
+            if _wave_ok else
+            '<span class="twarn">Low — reduce register usage or LDS allocation per wavefront to increase occupancy and hide memory latency.</span>'
+        )
+        _wave_tip = (
+            f"<strong>Wave Occupancy (avg {_aw:.0f} waves)</strong>"
+            f"Average number of wavefronts (64 threads each) simultaneously in-flight per compute unit. "
+            f"Collected via the <code>SQ_WAVES</code> hardware counter. "
+            f"Higher occupancy lets the GPU hide memory latency by switching to another wavefront while one waits for data.<br>"
+            f"<em>Target: &ge;16 waves. Max practical: 64 waves/SIMD unit. "
+            f"Low occupancy usually means each wavefront uses too many registers or too much LDS.</em><br>"
+            f"{_wave_status}"
+        )
         gauges_html += (
-            f'<div class="gauge-wrap">'
+            f'<div class="gauge-wrap" data-tip=\'{_wave_tip}\'>'
             f'{_svg_gauge(wpct, wc, "Avg Waves", wave_str)}'
             f'{whint}</div>'
         )
     raw_counters = hw.get("counters", {}) or {}
     ctr_rows = "".join(
-        f'<tr><td><code>{_h(n)}</code></td>'
+        f'<tr class="ctr-row" data-ctr="{_h(n)}"><td><code>{_h(n)}</code></td>'
         f'<td>{int(v.get("sample_count", 0)):,}</td>'
         f'<td>{float(v.get("avg_value", 0)):.2f}</td>'
         f'<td>{float(v.get("min_value", 0)):.2f}</td>'
@@ -1444,6 +1504,93 @@ def _format_as_webview(
     )
     tier_label = "Hardware Counters (Tier 2)" if has_counters else "Trace Only (Tier 1)"
     bn_display = bottleneck.replace("_", " ").title()
+
+    # ── Pre-computed tooltip strings (single-quote delimited in HTML attrs) ──
+    _TIP_KERNEL = (
+        "<strong>Kernel Execution</strong>"
+        "Time actively running GPU compute kernels. Higher is better — means more "
+        "useful work is being done on the GPU silicon. "
+        "<em>If this is low (&lt;40%), look for excessive GPU idle time or API launch overhead.</em>"
+    )
+    _TIP_MEMCPY = (
+        "<strong>Memory Copies</strong>"
+        "Time transferring data between CPU (host) and GPU (device) over the PCIe bus. "
+        "High values (&gt;20%) indicate a PCIe bandwidth bottleneck. "
+        "<em>Minimize by batching transfers, using pinned (page-locked) memory, "
+        "or overlapping copies with kernel execution via async streams.</em>"
+    )
+    _TIP_OVERHEAD = (
+        "<strong>API &amp; Launch Overhead</strong>"
+        "Time in HIP/HSA runtime calls: kernel launch latency, "
+        "synchronization barriers, and runtime bookkeeping. "
+        "High values (&gt;15%) suggest too many small kernel dispatches or excessive "
+        "CPU&ndash;GPU synchronization points. "
+        "<em>Batch work into fewer larger kernels and minimize hipDeviceSynchronize calls.</em>"
+    )
+    _TIP_IDLE = (
+        "<strong>GPU Idle</strong>"
+        "Time when the GPU had no work to execute — pipeline bubbles between kernel launches. "
+        "High idle time means the CPU is not submitting work fast enough, "
+        "or there are long synchronization stalls waiting on host results. "
+        "<em>Use asynchronous launches, CUDA/HIP streams, and reduce host processing "
+        "between dispatches.</em>"
+    )
+    _BN_TIPS = {
+        "compute": (
+            "<strong>Compute Bottleneck</strong>"
+            "GPU arithmetic units (VALU/MFMA) are the limiting factor. "
+            "The workload is doing more FLOPs than the memory system can supply data for, "
+            "meaning arithmetic throughput is the ceiling. "
+            "<em>Optimize: use MFMA (matrix FMA) instructions, reduce register pressure, "
+            "increase thread-level parallelism.</em>"
+        ),
+        "memory_transfer": (
+            "<strong>Memory Transfer Bottleneck</strong>"
+            "PCIe data transfers between CPU and GPU dominate execution time. "
+            "The application is spending more time moving data than computing. "
+            "<em>Optimize: keep data resident on GPU across multiple kernels, "
+            "use pinned host memory, overlap transfers with computation via async streams.</em>"
+        ),
+        "memory_bandwidth": (
+            "<strong>Memory Bandwidth Bottleneck</strong>"
+            "HBM (High Bandwidth Memory) bandwidth is the limiting factor. "
+            "Kernels are reading/writing more data than HBM can deliver per clock. "
+            "<em>Optimize: improve data reuse via tiling, exploit L1/L2 cache locality, "
+            "use LDS (shared memory) to reduce HBM traffic.</em>"
+        ),
+        "latency": (
+            "<strong>Latency Bottleneck</strong>"
+            "Many small, short-lived kernels where launch overhead dominates actual computation. "
+            "GPU spends more time being launched than running. "
+            "<em>Optimize: fuse multiple small kernels into one, increase work per dispatch, "
+            "or use persistent kernel patterns.</em>"
+        ),
+        "mixed": (
+            "<strong>Mixed Bottleneck</strong>"
+            "Multiple performance limiters are present simultaneously. "
+            "No single dominant bottleneck was identified. "
+            "<em>Address the highest-priority recommendation first, re-profile, "
+            "then iterate.</em>"
+        ),
+        "unknown": (
+            "<strong>Bottleneck Unknown</strong>"
+            "Analysis could not determine a clear primary bottleneck from available data. "
+            "<em>Collect hardware counters for deeper analysis: "
+            "rocprofv3 --pmc GRBM_COUNT GRBM_GUI_ACTIVE SQ_WAVES -- ./app</em>"
+        ),
+    }
+    _tip_bn = _BN_TIPS.get(bottleneck, _BN_TIPS["unknown"])
+    _tip_tier = (
+        "<strong>Analysis Tier 2 — Hardware Counters</strong>"
+        "Profiling data includes hardware performance counters collected via "
+        "<code>rocprofv3 --pmc</code>. Enables GPU utilization, wave occupancy, "
+        "and per-kernel counter breakdowns in addition to timing data."
+        if has_counters else
+        "<strong>Analysis Tier 1 — Trace Only</strong>"
+        "Profiling data contains timing information only (no hardware counters). "
+        "For deeper GPU-level insights, re-profile with: "
+        "<em>rocprofv3 --pmc GRBM_COUNT GRBM_GUI_ACTIVE SQ_WAVES -- ./app</em>"
+    )
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -1566,6 +1713,22 @@ header {{
 .g-hint {{ font-size: .8rem; margin-top: .25rem; }}
 .g-hint.warn {{ color: var(--orange); }}
 .g-hint.ok {{ color: var(--green); }}
+/* ── Floating tooltip ────────────────────────────────────────────────── */
+#tt {{
+  position:fixed;z-index:9999;pointer-events:none;max-width:310px;
+  padding:.65rem .9rem;background:#13131f;border:1px solid #3a3a5c;
+  border-radius:8px;box-shadow:0 8px 32px rgba(0,0,0,.65);
+  font-size:.81rem;line-height:1.62;color:var(--text);
+  opacity:0;transition:opacity .13s;white-space:normal;
+}}
+#tt.show{{ opacity:1; }}
+#tt strong{{ color:var(--blue);display:block;margin-bottom:.22rem;font-size:.86rem; }}
+#tt code{{ font-size:.8rem;background:rgba(255,255,255,.07);
+           padding:.05em .3em;border-radius:3px; }}
+#tt em{{ color:var(--dim);font-size:.78rem;display:block;margin-top:.3rem; }}
+#tt .tok{{ color:var(--green);font-weight:600; }}
+#tt .twarn{{ color:var(--orange);font-weight:600; }}
+[data-tip]{{ cursor:help; }}
 /* ── Footer ─────────────────────────────────────────────────────────── */
 footer {{ border-top: 1px solid var(--bdr); padding: 1.25rem 0; }}
 footer p {{ text-align: center; color: var(--dim); font-size: .78rem; }}
@@ -1597,22 +1760,22 @@ footer p {{ text-align: center; color: var(--dim); font-size: .78rem; }}
   <h2>&#128202; Overview</h2>
   <p class="assess">{_h(assessment)}</p>
   <div class="stat-grid">
-    <div class="stat">
+    <div class="stat" data-tip='{_tip_bn}'>
       <div class="stat-label">Primary Bottleneck</div>
       <div class="stat-value" style="color:{bn_color}">{_h(bn_display)}</div>
       <div class="stat-sub">Confidence: {confidence}%</div>
     </div>
-    <div class="stat">
+    <div class="stat" data-tip='<strong>Total Runtime</strong>Wall-clock duration of the profiled application from first observed event to last. Includes kernel execution, memory copies, API calls, and GPU idle time.'>
       <div class="stat-label">Total Runtime</div>
       <div class="stat-value">{total_ms:,.2f} ms</div>
       <div class="stat-sub">{len(hotspots or [])} kernel(s) analyzed</div>
     </div>
-    <div class="stat">
+    <div class="stat" data-tip='{_TIP_KERNEL}'>
       <div class="stat-label">Kernel Time</div>
       <div class="stat-value" style="color:var(--blue)">{kernel_pct:.1f}%</div>
       <div class="stat-sub">{kernel_ms:,.2f} ms</div>
     </div>
-    <div class="stat">
+    <div class="stat" data-tip='{_tip_tier}'>
       <div class="stat-label">Analysis Tier</div>
       <div class="stat-value">{tier}</div>
       <div class="stat-sub">{'With hardware counters' if has_counters else 'Trace-level only'}</div>
@@ -1624,15 +1787,11 @@ footer p {{ text-align: center; color: var(--dim); font-size: .78rem; }}
 <!-- ── Execution Breakdown ────────────────────────────────────── -->
 <section class="card">
   <h2>&#9200; Execution Breakdown</h2>
-  <div class="stacked" title="Hover segments for details">
-    <div class="seg" style="width:{kernel_pct:.2f}%;background:#5599ee"
-         title="Kernel Execution {kernel_pct:.1f}%"></div>
-    <div class="seg" style="width:{memcpy_pct:.2f}%;background:#ff8c00"
-         title="Memory Copies {memcpy_pct:.1f}%"></div>
-    <div class="seg" style="width:{overhead_pct:.2f}%;background:#9966cc"
-         title="API Overhead {overhead_pct:.1f}%"></div>
-    <div class="seg" style="width:{idle_pct:.2f}%;background:#3a3a55"
-         title="GPU Idle {idle_pct:.1f}%"></div>
+  <div class="stacked">
+    <div class="seg" data-tip='{_TIP_KERNEL}' style="width:{kernel_pct:.2f}%;background:#5599ee"></div>
+    <div class="seg" data-tip='{_TIP_MEMCPY}' style="width:{memcpy_pct:.2f}%;background:#ff8c00"></div>
+    <div class="seg" data-tip='{_TIP_OVERHEAD}' style="width:{overhead_pct:.2f}%;background:#9966cc"></div>
+    <div class="seg" data-tip='{_TIP_IDLE}' style="width:{idle_pct:.2f}%;background:#3a3a55"></div>
   </div>
   <div class="legend">
     <div class="leg"><div class="dot" style="background:#5599ee"></div>Kernel Execution</div>
@@ -1641,22 +1800,22 @@ footer p {{ text-align: center; color: var(--dim); font-size: .78rem; }}
     <div class="leg"><div class="dot" style="background:#3a3a55"></div>GPU Idle</div>
   </div>
   <div class="brows">
-    <div class="brow">
+    <div class="brow" data-tip='{_TIP_KERNEL}'>
       <div class="blabel">Kernel Execution</div>
       <div class="btrack"><div class="bfill" style="width:{kernel_pct:.2f}%;background:#5599ee"></div></div>
       <div class="bval">{kernel_ms:,.2f} ms <span class="dim">({kernel_pct:.1f}%)</span></div>
     </div>
-    <div class="brow">
+    <div class="brow" data-tip='{_TIP_MEMCPY}'>
       <div class="blabel">Memory Copies</div>
       <div class="btrack"><div class="bfill" style="width:{memcpy_pct:.2f}%;background:#ff8c00"></div></div>
       <div class="bval">{memcpy_ms:,.2f} ms <span class="dim">({memcpy_pct:.1f}%)</span></div>
     </div>
-    <div class="brow">
+    <div class="brow" data-tip='{_TIP_OVERHEAD}'>
       <div class="blabel">API Overhead</div>
       <div class="btrack"><div class="bfill" style="width:{overhead_pct:.2f}%;background:#9966cc"></div></div>
       <div class="bval">{overhead_ms:,.2f} ms <span class="dim">({overhead_pct:.1f}%)</span></div>
     </div>
-    <div class="brow">
+    <div class="brow" data-tip='{_TIP_IDLE}'>
       <div class="blabel">GPU Idle</div>
       <div class="btrack"><div class="bfill" style="width:{idle_pct:.2f}%;background:#3a3a55"></div></div>
       <div class="bval">{idle_ms:,.2f} ms <span class="dim">({idle_pct:.1f}%)</span></div>
@@ -1686,6 +1845,9 @@ footer p {{ text-align: center; color: var(--dim); font-size: .78rem; }}
   <p>Generated by <strong>rocpd analyze</strong> &mdash; AMD ROCm GPU Performance Analysis &bull; {analysis_date}</p>
 </div>
 </footer>
+
+<!-- floating tooltip -->
+<div id="tt"></div>
 
 <script>
 /* embedded analysis data (JSON) */
@@ -1737,6 +1899,70 @@ document.querySelectorAll('.sortable thead th').forEach(function(th) {{
     }});
     th.textContent += dir === 1 ? ' \u25b2' : ' \u25bc';
   }});
+}});
+
+/* ── Floating tooltip system ── */
+var ttEl = document.getElementById('tt');
+var ttTimer = null;
+function showTip(e, html) {{
+  ttEl.innerHTML = html;
+  ttEl.classList.add('show');
+  moveTip(e);
+}}
+function moveTip(e) {{
+  var x = e.clientX + 16;
+  var y = e.clientY - 12;
+  var w = ttEl.offsetWidth || 310;
+  if (x + w + 10 > window.innerWidth) {{ x = e.clientX - w - 12; }}
+  if (y + ttEl.offsetHeight + 10 > window.innerHeight) {{
+    y = e.clientY - ttEl.offsetHeight - 8;
+  }}
+  ttEl.style.left = x + 'px';
+  ttEl.style.top  = y + 'px';
+}}
+function hideTip() {{
+  ttEl.classList.remove('show');
+}}
+document.querySelectorAll('[data-tip]').forEach(function(el) {{
+  el.addEventListener('mouseenter', function(e) {{ showTip(e, el.dataset.tip); }});
+  el.addEventListener('mousemove',  moveTip);
+  el.addEventListener('mouseleave', hideTip);
+}});
+
+/* ── AMD GPU hardware counter definitions ── */
+var COUNTER_TIPS = {{
+  'GRBM_COUNT': '<strong>GRBM_COUNT</strong>Total GPU clock cycles elapsed during the profiling window. Acts as the time denominator for all utilization metrics.<em>Usage: GPU Utilization = GRBM_GUI_ACTIVE &divide; GRBM_COUNT &times; 100%</em>',
+  'GRBM_GUI_ACTIVE': '<strong>GRBM_GUI_ACTIVE</strong>Clock cycles where the GPU Command Processor had active work queued. Numerator for GPU utilization — higher relative to GRBM_COUNT means better GPU occupancy.<em>Target: &ge;70% of GRBM_COUNT for a well-utilized GPU.</em>',
+  'SQ_WAVES': '<strong>SQ_WAVES</strong>Total number of wavefronts (groups of 64 threads) launched across all compute units during the profiling window. Each wavefront is one SIMD execution unit.<em>High counts = good parallelism. Used to compute wave occupancy (avg simultaneous waves).</em>',
+  'SQ_WAVE_CYCLES': '<strong>SQ_WAVE_CYCLES</strong>Total clock cycles consumed across all wavefronts. Divide by SQ_WAVES to get average cycles per wavefront — a proxy for per-kernel execution time.<em>Compare with GRBM_COUNT to estimate how busy the compute units were vs total time.</em>',
+  'SQ_INSTS_VALU': '<strong>SQ_INSTS_VALU</strong>Vector ALU instructions executed — floating-point and integer arithmetic (add, mul, fma, transcendental). This is the primary compute workload.<em>High VALU counts relative to VMEM reads indicate a compute-bound kernel (good use of GPU).</em>',
+  'SQ_INSTS_SALU': '<strong>SQ_INSTS_SALU</strong>Scalar ALU instructions — operations applied identically to all 64 threads in a wavefront (address calculation, control flow, predication).<em>Very high SALU relative to VALU may indicate excessive branching or non-uniform control flow.</em>',
+  'SQ_INSTS_VMEM_RD': '<strong>SQ_INSTS_VMEM_RD</strong>Vector memory read instructions (global/local memory loads). Each instruction may trigger multiple cache line fetches depending on access patterns.<em>High counts relative to VALU confirm a memory-bound workload. Improve data locality or increase compute intensity.</em>',
+  'SQ_INSTS_VMEM_WR': '<strong>SQ_INSTS_VMEM_WR</strong>Vector memory write instructions (global/local memory stores).<em>High write traffic alongside high reads can saturate HBM bandwidth. Consider write-combining or reducing redundant stores.</em>',
+  'SQ_INSTS_LDS': '<strong>SQ_INSTS_LDS</strong>Local Data Share (LDS / shared memory) instructions. LDS is fast on-chip memory shared within a workgroup — much faster than HBM.<em>High LDS usage is generally good (data reuse within workgroup). Watch for LDS bank conflicts which serialize access.</em>',
+  'SQ_INSTS_SMEM': '<strong>SQ_INSTS_SMEM</strong>Scalar memory instructions — loads from constant/uniform memory accessed by all threads in a wavefront identically.<em>Used for kernel arguments, constant buffers. Low latency due to scalar cache.</em>',
+  'FETCH_SIZE': '<strong>FETCH_SIZE</strong>Total kilobytes fetched from the L2 cache to the compute units (read bandwidth from L2 to L1/VGPR).<em>Compare against theoretical L2 bandwidth to assess cache pressure. High values with low VALU suggest memory-bound kernel.</em>',
+  'WRITE_SIZE': '<strong>WRITE_SIZE</strong>Total kilobytes written back to the L2 cache from compute units.<em>High write traffic alongside FETCH_SIZE indicates significant memory bandwidth demand. Check if writes can be reduced or deferred.</em>',
+  'TCP_TOTAL_READ_REQ': '<strong>TCP_TOTAL_READ_REQ</strong>Texture Cache Processor (TCP / L1 vector data cache) total read requests issued by compute units.<em>Used to compute L1 cache hit rate when combined with TCP miss counters.</em>',
+  'TCP_TOTAL_CACHE_ACCESSES': '<strong>TCP_TOTAL_CACHE_ACCESSES</strong>Total accesses to the L1 vector (TCP) cache.<em>Combine with miss counters to compute L1 hit rate. Low hit rate means working set exceeds L1 capacity.</em>',
+  'TCC_EA_RDREQ_COUNT_sum': '<strong>TCC L2 Read Requests</strong>L2 cache (TCC) read requests forwarded to the memory system (HBM). High values confirm HBM bandwidth is being heavily utilized.<em>If GPU is memory-bound and this is high, improve data reuse or reduce working set size.</em>',
+  'TCC_EA_WRREQ_COUNT_sum': '<strong>TCC L2 Write Requests</strong>L2 cache write requests to HBM. Combine with read requests for total HBM bandwidth demand.<em>High write counts may indicate unnecessary stores or lack of write combining.</em>',
+  'TCC_HIT_sum': '<strong>TCC L2 Cache Hits</strong>Number of requests satisfied by the L2 cache without going to HBM.<em>Higher is better. Low L2 hit rate means working set exceeds L2 capacity — consider tiling or blocking.</em>',
+  'TCC_MISS_sum': '<strong>TCC L2 Cache Misses</strong>Number of requests that missed L2 and had to fetch from HBM.<em>Each miss adds significant latency (~300-400 cycles on MI300X). Reduce misses via better data locality.</em>',
+  'TA_TA_BUSY': '<strong>TA_TA_BUSY</strong>Texture Addresser busy cycles — measures how actively the texture/address unit is computing memory addresses for vector loads.<em>High TA_BUSY alongside low VALU suggests address calculation is a bottleneck.</em>',
+  'SQ_ACTIVE_INST_VALU': '<strong>SQ_ACTIVE_INST_VALU</strong>Cycles where VALU instructions were actively executing (not stalled). A measure of effective compute throughput.<em>Compare with SQ_WAVES * cycles to estimate VALU utilization efficiency.</em>',
+}};
+
+/* Apply COUNTER_TIPS to counter table rows */
+document.querySelectorAll('.ctr-row').forEach(function(tr) {{
+  var name = tr.dataset.ctr;
+  var tip = COUNTER_TIPS[name] ||
+    ('<strong>' + name + '</strong>Hardware performance counter. ' +
+     'Values are raw HW event counts for the profiling window. ' +
+     '<em>Consult AMD CDNA ISA documentation or rocprofv3 counter reference for full semantics.</em>');
+  tr.addEventListener('mouseenter', function(e) {{ showTip(e, tip); }});
+  tr.addEventListener('mousemove',  moveTip);
+  tr.addEventListener('mouseleave', hideTip);
 }});
 </script>
 </body>
