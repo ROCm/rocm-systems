@@ -3172,7 +3172,6 @@ skip_if_no_torch_gpu = pytest.mark.skipif(
     reason=("PyTorch and GPU access are required for this test"),
 )
 
-
 @skip_if_no_torch_gpu
 @pytest.mark.torch_trace
 def test_torch_trace_profile(
