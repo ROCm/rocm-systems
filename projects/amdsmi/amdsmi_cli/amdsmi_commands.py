@@ -8657,7 +8657,7 @@ class AMDSMICommands():
                         output_file.write(legend_output + '\n')
 
 
-    def ras(self, args, multiple_devices=False, gpu=None, cper=None, afid=None,
+    def ras(self, args, multiple_devices=False, gpu=None, cper=None, afid=None, decode=None,
             severity=None, folder=None, file_limit=None, cper_file=None, follow=None):
         """
         Retrieve and process CPER (RAS) entries for a target GPU.
@@ -8677,6 +8677,8 @@ class AMDSMICommands():
             args.cper = cper
         if afid:
             args.afid = afid
+        if decode:
+            args.decode = decode
         if severity:
             args.severity = severity
         if folder:
@@ -8692,7 +8694,11 @@ class AMDSMICommands():
 
         if args.afid:
             if args.cper_file:
-                afids = self.helpers.pvtDumpAfids(args.cper_file)
+                if args.decode:
+                    args.cursor = [0]
+                    self.helpers.ras_cper(args, None, self.logger, 0)
+                    return
+                afids = self.helpers.cper_dump_afids(args.cper_file)
                 print(' '.join(map(str, afids)))
                 return
             else:

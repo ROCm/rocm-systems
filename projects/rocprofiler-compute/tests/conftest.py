@@ -75,8 +75,13 @@ def skip_monkeypatch_with_binary(request):
     cannot work with --call-binary mode because the binary runs in a separate
     process where Python patches don't apply.
     """
-    if request.config.getoption("--call-binary") and "monkeypatch" in request.fixturenames:
-        pytest.skip("Test uses monkeypatch which is incompatible with --call-binary mode")
+    if (
+        request.config.getoption("--call-binary")
+        and "monkeypatch" in request.fixturenames
+    ):
+        pytest.skip(
+            "Test uses monkeypatch which is incompatible with --call-binary mode"
+        )
 
 
 @pytest.fixture

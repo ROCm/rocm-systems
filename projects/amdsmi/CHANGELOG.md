@@ -369,6 +369,15 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
         PTL_FORMAT: I8,F64
   ```
 
+- **Added support to process CPER files even on machines without GPU and CPER is not enabled.**
+  - New `--cper-file` option:
+  ```console
+  $ sudo amd-smi ras --afid --cper-file cpers/bad_cper/incomplete_aca.cper --decode --folder /tmp/cper_dump
+timestamp            gpu_id  severity             file_name         list of afids
+2070/01/01 00:26:21  -       FATAL                fatal-1.cper      28
+2070/01/01 00:26:21  -       FATAL                fatal-2.cper      28
+  ```
+
 ### Changed
 
 - **The `amd-smi` command now shows hsmp rather than amd_hsmp**.  
