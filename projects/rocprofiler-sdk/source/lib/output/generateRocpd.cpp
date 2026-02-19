@@ -113,7 +113,6 @@ struct pending_insert_batch
 {
     sqlite3*                                        conn      = nullptr;
     std::unordered_map<std::string, sqlite3_stmt*>* cache     = nullptr;
-    std::string                                     key       = {};
     std::string                                     table     = {};
     std::vector<std::string>                        fields    = {};
     std::vector<std::vector<sql_insert_value>>      rows      = {};
@@ -424,6 +423,19 @@ bind_sql_value(sqlite3_stmt* stmt, int idx, const sql_insert_value& value)
 }
 
 void
+reset_and_clear_statement(sqlite3_stmt* stmt)
+{
+    if(!stmt) return;
+
+    auto reset_rc = sqlite3_reset(stmt);
+    ROCP_FATAL_IF(reset_rc != SQLITE_OK) << "sqlite3_reset failed with error code " << reset_rc;
+
+    auto clear_rc = sqlite3_clear_bindings(stmt);
+    ROCP_FATAL_IF(clear_rc != SQLITE_OK)
+        << "sqlite3_clear_bindings failed with error code " << clear_rc;
+}
+
+void
 flush_pending_insert_batch(pending_insert_batch& pending)
 {
     if(!pending.is_active || pending.rows.empty()) return;
@@ -436,8 +448,13 @@ flush_pending_insert_batch(pending_insert_batch& pending)
     ROCP_FATAL_IF(field_size == 0)
         << "Pending insert batch has zero fields for table: " << pending.table;
 
-    auto batch_key =
-        fmt::format("{}:batch:{}:{}", pending.table, batch_size, fmt::join(pending.fields, ","));
+    const bool   is_full_batch  = (batch_size == pending.max_rows);
+    const size_t statement_rows = (is_full_batch) ? batch_size : size_t{1};
+    const auto   statement_suffix =
+        (is_full_batch) ? std::string_view{"full"} : std::string_view{"single"};
+
+    auto batch_key = fmt::format(
+        "{}:batch:{}:{}", pending.table, statement_suffix, fmt::join(pending.fields, ","));
 
     auto& stmt = (*pending.cache)[batch_key];
     if(!stmt)
@@ -451,8 +468,8 @@ flush_pending_insert_batch(pending_insert_batch& pending)
         row_placeholder += ")";
 
         auto values_clause = std::string{};
-        values_clause.reserve(batch_size * row_placeholder.size());
-        for(size_t i = 0; i < batch_size; ++i)
+        values_clause.reserve(statement_rows * row_placeholder.size());
+        for(size_t i = 0; i < statement_rows; ++i)
         {
             if(i > 0) values_clause += ", ";
             values_clause += row_placeholder;
@@ -466,34 +483,58 @@ flush_pending_insert_batch(pending_insert_batch& pending)
         SQLITE3_CHECK(sqlite3_prepare_v2(pending.conn, sql.c_str(), -1, &stmt, nullptr));
     }
 
-    auto cleanup_guard = common::scope_destructor{[&]() {
-        if(stmt)
-        {
-            sqlite3_reset(stmt);
-            sqlite3_clear_bindings(stmt);
-        }
-    }};
+    auto cleanup_guard = common::scope_destructor{[&]() { reset_and_clear_statement(stmt); }};
 
-    int bind_idx = 1;
-    for(const auto& row : pending.rows)
+    if(is_full_batch)
     {
-        ROCP_FATAL_IF(row.size() != field_size)
-            << "Pending insert batch row has " << row.size() << " values, expected " << field_size;
+        reset_and_clear_statement(stmt);
 
-        for(const auto& value : row)
+        int bind_idx = 1;
+        for(const auto& row : pending.rows)
         {
-            auto bind_rc = bind_sql_value(stmt, bind_idx++, value);
-            ROCP_FATAL_IF(bind_rc != SQLITE_OK)
-                << "sqlite3_bind failed with error code " << bind_rc;
+            ROCP_FATAL_IF(row.size() != field_size) << "Pending insert batch row has " << row.size()
+                                                    << " values, expected " << field_size;
+
+            for(const auto& value : row)
+            {
+                auto bind_rc = bind_sql_value(stmt, bind_idx++, value);
+                ROCP_FATAL_IF(bind_rc != SQLITE_OK)
+                    << "sqlite3_bind failed with error code " << bind_rc;
+            }
+        }
+
+        auto step_rc = sqlite3_step(stmt);
+        ROCP_FATAL_IF(step_rc != SQLITE_DONE)
+            << "sqlite3_step failed with error code " << step_rc
+            << ", sqlite3_errmsg: " << sqlite3_errmsg(pending.conn) << ", table: " << pending.table
+            << ", batch_size: " << batch_size
+            << ", fields: " << fmt::format("{}", fmt::join(pending.fields, ", "));
+    }
+    else
+    {
+        for(const auto& row : pending.rows)
+        {
+            ROCP_FATAL_IF(row.size() != field_size) << "Pending insert batch row has " << row.size()
+                                                    << " values, expected " << field_size;
+
+            reset_and_clear_statement(stmt);
+
+            int bind_idx = 1;
+            for(const auto& value : row)
+            {
+                auto bind_rc = bind_sql_value(stmt, bind_idx++, value);
+                ROCP_FATAL_IF(bind_rc != SQLITE_OK)
+                    << "sqlite3_bind failed with error code " << bind_rc;
+            }
+
+            auto step_rc = sqlite3_step(stmt);
+            ROCP_FATAL_IF(step_rc != SQLITE_DONE)
+                << "sqlite3_step failed with error code " << step_rc
+                << ", sqlite3_errmsg: " << sqlite3_errmsg(pending.conn)
+                << ", table: " << pending.table << ", batch_size: " << batch_size
+                << ", fields: " << fmt::format("{}", fmt::join(pending.fields, ", "));
         }
     }
-
-    auto step_rc = sqlite3_step(stmt);
-    ROCP_FATAL_IF(step_rc != SQLITE_DONE)
-        << "sqlite3_step failed with error code " << step_rc
-        << ", sqlite3_errmsg: " << sqlite3_errmsg(pending.conn) << ", table: " << pending.table
-        << ", batch_size: " << batch_size
-        << ", fields: " << fmt::format("{}", fmt::join(pending.fields, ", "));
 
     pending.rows.clear();
 }
@@ -532,12 +573,20 @@ get_insert_statement_impl(rocpd_db&                                 db,
     ROCP_FATAL_IF(db.conn == nullptr) << "SQLite connection not set for prepared statements";
 
     auto table = replace_uuid(db, _table);
-    auto key   = fmt::format("{}:{}", table, fmt::join(fields, ","));
 
     auto& pending = db.pending_batch;
 
+    auto same_batch_shape = [&](const pending_insert_batch& batch) {
+        if(batch.table != table) return false;
+        if(batch.fields.size() != fields.size()) return false;
+        return std::equal(batch.fields.begin(),
+                          batch.fields.end(),
+                          fields.begin(),
+                          [](const std::string& lhs, std::string_view rhs) { return lhs == rhs; });
+    };
+
     // single-batch mode: flush whenever the insert key changes
-    if(pending.is_active && pending.key != key)
+    if(pending.is_active && !same_batch_shape(pending))
     {
         flush_pending_insert_batch(db);
     }
@@ -547,7 +596,6 @@ get_insert_statement_impl(rocpd_db&                                 db,
         pending.is_active = true;
         pending.conn      = db.conn;
         pending.cache     = &db.statements;
-        pending.key       = key;
         pending.table     = table;
         pending.fields.clear();
         pending.fields.reserve(fields.size());
@@ -558,21 +606,13 @@ get_insert_statement_impl(rocpd_db&                                 db,
         pending.rows.reserve(pending.max_rows);
     }
 
-    ROCP_FATAL_IF(pending.key != key)
-        << "Pending insert batch key mismatch: expected " << key << ", got " << pending.key;
-    ROCP_FATAL_IF(pending.table != table)
-        << "Pending insert batch table mismatch: expected " << table << ", got " << pending.table;
-    ROCP_FATAL_IF(pending.fields.size() != fields.size())
-        << "Pending insert batch field count mismatch for key: " << key
-        << ". expected: " << fields.size() << ", got: " << pending.fields.size();
-    for(size_t i = 0; i < fields.size(); ++i)
-    {
-        ROCP_FATAL_IF(pending.fields.at(i) != fields.at(i))
-            << "Pending insert batch field mismatch at index " << i << " for key: " << key
-            << ". expected: " << fields.at(i) << ", got: " << pending.fields.at(i);
-    }
     ROCP_FATAL_IF(pending.conn != db.conn || pending.cache != &db.statements)
-        << "Pending insert batch state mismatch for key: " << key;
+        << "Pending insert batch state mismatch for table: " << table;
+
+#if !defined(NDEBUG)
+    ROCP_FATAL_IF(!same_batch_shape(pending))
+        << "Pending insert batch schema mismatch for table: " << table;
+#endif
 
     pending.rows.emplace_back(std::move(values));
     if(pending.rows.size() >= pending.max_rows) flush_pending_insert_batch(pending);
@@ -788,6 +828,8 @@ write_rocpd(
 
     auto      db   = rocpd_db{};
     sqlite3*& conn = db.conn;
+    auto      _flush_pending_on_exit =
+        common::scope_destructor{[&db]() { flush_pending_insert_batch(db); }};
 
     {
         const auto& mach_id = tool_metadata.node_data.machine_id;
