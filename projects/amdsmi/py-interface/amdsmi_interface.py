@@ -3268,8 +3268,7 @@ def amdsmi_get_gpu_total_ecc_count(
     }
 
 def amdsmi_get_gpu_cper_entries(
-    device_handle: amdsmi_wrapper.amdsmi_processor_handle | Path,
-    # processor_handle: Union[amdsmi_wrapper.amdsmi_processor_handle, str],
+    device_handle: Union[amdsmi_wrapper.amdsmi_processor_handle, Path],
     severity_mask: int,
     buffer_size: int = 4 * 1048576,
     cursor: int = 0
