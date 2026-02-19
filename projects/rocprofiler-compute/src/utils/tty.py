@@ -43,6 +43,18 @@ from utils.utils import (
     get_uuid,
 )
 
+KERNEL_NAME_WRAP_WIDTH = 100
+
+
+def wrap_kernel_name(name: str) -> str:
+    """Wrap a kernel name at KERNEL_NAME_WRAP_WIDTH without truncation."""
+    return textwrap.fill(
+        name,
+        width=KERNEL_NAME_WRAP_WIDTH,
+        break_long_words=True,
+        break_on_hyphens=False,
+    )
+
 
 def string_multiple_lines(source: str, width: int, max_rows: int) -> str:
     """
@@ -193,8 +205,9 @@ def is_roofline_shown(
                     kernel_name = metrics.get("name", f"Kernel {kernel_id}")
                     kernel_pct = 0
 
+                wrapped_name = wrap_kernel_name(kernel_name)
                 print(
-                    f"\nKernel {kernel_id}: {kernel_name} ({kernel_pct:.1f}%)",
+                    f"\nKernel {kernel_id}: {wrapped_name} ({kernel_pct:.1f}%)",
                     file=output,
                 )
 
@@ -284,44 +297,41 @@ def show_torch_operator_table(operator_name: str, df: pd.DataFrame) -> None:
     # Create a copy for display formatting
     display_df = df.copy()
 
-    # Define max widths for different column types
+    # Max display width per column type; Kernel_Name is skipped (show full).
     column_widths = {
         "Operator_Name": 40,
         "Context": 35,
-        "Kernel_Name": 10000,  # no practical truncation; show full name
         "default": 20,
     }
 
-    # Truncate columns to reasonable widths
+    # Truncate string columns; wrap Kernel_Name (full, no truncation)
     for col in display_df.columns:
-        if display_df[col].dtype == "object":  # String columns
-            max_width = column_widths.get(col, column_widths["default"])
-            display_df[col] = (
-                display_df[col]
-                .astype(str)
-                .apply(
-                    lambda x: (
-                        string_multiple_lines(x, max_width, 2)
-                        if len(x) > max_width
-                        else x
-                    )
+        if display_df[col].dtype != "object":
+            continue
+        if col == "Kernel_Name":
+            display_df[col] = display_df[col].astype(str).apply(wrap_kernel_name)
+            continue
+        max_width = column_widths.get(col, column_widths["default"])
+        display_df[col] = (
+            display_df[col]
+            .astype(str)
+            .apply(
+                lambda x: (
+                    string_multiple_lines(x, max_width, 2) if len(x) > max_width else x
                 )
             )
+        )
 
     # Reset index for row numbering
     display_df = display_df.reset_index(drop=True)
 
-    # Use tabulate for consistent formatting
-    maxcolwidths = [
-        column_widths.get(col, column_widths["default"]) for col in display_df.columns
-    ]
+    # Use tabulate for consistent formatting (no maxcolwidths: natural column width)
     table_str = tabulate(
         display_df,
         headers=display_df.columns,
         tablefmt="fancy_grid",
         showindex=True,
         floatfmt=".2f",
-        maxcolwidths=maxcolwidths,
     )
 
     console_log(table_str)
@@ -441,19 +451,13 @@ def process_table_data(
 
         if header not in comparable_columns:
             # Process columns that are not comparable across runs.
-            # Kernel_Name: wrap at fixed width so full name is shown (multi-line);
-            # high max_rows avoids "..." truncation.
             if (
                 table_type == "raw_csv_table"
                 and table_config["source"]
                 in ["pmc_kernel_top.csv", "pmc_dispatch_info.csv"]
                 and header == "Kernel_Name"
             ):
-                wrap_width = 100
-                max_rows = 20
-                adjusted_names = base_df["Kernel_Name"].apply(
-                    lambda x: string_multiple_lines(x, wrap_width, max_rows)
-                )
+                adjusted_names = base_df["Kernel_Name"].apply(wrap_kernel_name)
                 result_df = pd.concat([result_df, adjusted_names], axis=1)
             elif table_type == "raw_csv_table" and header == "Info":
                 for run_data in runs.values():
