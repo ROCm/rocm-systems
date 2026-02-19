@@ -193,11 +193,8 @@ def is_roofline_shown(
                     kernel_name = metrics.get("name", f"Kernel {kernel_id}")
                     kernel_pct = 0
 
-                display_name = (
-                    kernel_name[:80] + "..." if len(kernel_name) > 80 else kernel_name
-                )
                 print(
-                    f"\nKernel {kernel_id}: {display_name} ({kernel_pct:.1f}%)",
+                    f"\nKernel {kernel_id}: {kernel_name} ({kernel_pct:.1f}%)",
                     file=output,
                 )
 
@@ -291,7 +288,7 @@ def show_torch_operator_table(operator_name: str, df: pd.DataFrame) -> None:
     column_widths = {
         "Operator_Name": 40,
         "Context": 35,
-        "Kernel_Name": 35,
+        "Kernel_Name": 10000,  # no practical truncation; show full name
         "default": 20,
     }
 
@@ -315,13 +312,16 @@ def show_torch_operator_table(operator_name: str, df: pd.DataFrame) -> None:
     display_df = display_df.reset_index(drop=True)
 
     # Use tabulate for consistent formatting
+    maxcolwidths = [
+        column_widths.get(col, column_widths["default"]) for col in display_df.columns
+    ]
     table_str = tabulate(
         display_df,
         headers=display_df.columns,
         tablefmt="fancy_grid",
         showindex=True,
         floatfmt=".2f",
-        maxcolwidths=list(column_widths.values()),
+        maxcolwidths=maxcolwidths,
     )
 
     console_log(table_str)
@@ -441,22 +441,20 @@ def process_table_data(
 
         if header not in comparable_columns:
             # Process columns that are not comparable across runs.
+            # Kernel_Name: wrap at fixed width so full name is shown (multi-line);
+            # high max_rows avoids "..." truncation.
             if (
                 table_type == "raw_csv_table"
                 and table_config["source"]
                 in ["pmc_kernel_top.csv", "pmc_dispatch_info.csv"]
                 and header == "Kernel_Name"
             ):
-                # NB: the width of kernel name might depend
-                # on the header of the table.
-                width = 40 if table_config["source"] == "pmc_kernel_top.csv" else 80
-                max_rows = 3 if table_config["source"] == "pmc_kernel_top.csv" else 4
-
+                wrap_width = 100
+                max_rows = 20
                 adjusted_names = base_df["Kernel_Name"].apply(
-                    lambda x: string_multiple_lines(x, width, max_rows)
+                    lambda x: string_multiple_lines(x, wrap_width, max_rows)
                 )
                 result_df = pd.concat([result_df, adjusted_names], axis=1)
-
             elif table_type == "raw_csv_table" and header == "Info":
                 for run_data in runs.values():
                     cur_df = run_data.dfs[table_config["id"]]
@@ -577,6 +575,14 @@ def format_table_output(
         "pmc_dispatch_info.csv",
     ]:
         df = df.head(args.max_stat_num)
+
+    if (
+        table_type == "raw_csv_table"
+        and table_config["source"] == "pmc_kernel_top.csv"
+        and not df.empty
+    ):
+        df = df.copy()
+        df.index.name = "#"
     # NB:
     # "columnwise: True" is a special attr of a table/df
     # For raw_csv_table, such as system_info, we transpose the
