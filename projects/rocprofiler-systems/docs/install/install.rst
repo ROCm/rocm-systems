@@ -126,7 +126,7 @@ Optional third-party packages
 
 * `ROCm <https://rocm.docs.amd.com/projects/install-on-linux/en/latest>`_
 
-  * AMD SMI Lib for GPU and AI NIC monitoring
+  * AMD SMI Lib for GPU monitoring
   * ROCprofiler SDK for GPU hardware counters and ROCm tracing
 
 * Python
@@ -225,7 +225,6 @@ in `the Perfetto UI <https://ui.perfetto.dev>`_.
        -D ROCPROFSYS_BUILD_BOOST=ON                      \
        -D ROCPROFSYS_BUILD_ELFUTILS=ON                   \
        -D ROCPROFSYS_BUILD_LIBIBERTY=ON                  \
-       -D ROCPROFSYS_USE_AINIC=ON               \
        -S rocm-systems/projects/rocprofiler-systems
    cmake --build rocprof-sys-build --target all --parallel 8
    cmake --build rocprof-sys-build --target install
@@ -295,7 +294,7 @@ UCX support within ROCm Systems Profiler
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 ROCm Systems Profiler supports tracing UCX (Unified Communication X) communication functions
-when ``ROCPROFSYS_USE_UCX`` is enabled. **UCX tracing is disabled by default** and must be explicitly 
+when ``ROCPROFSYS_USE_UCX`` is enabled. **UCX tracing is disabled by default** and must be explicitly
 enabled at runtime by setting ``ROCPROFSYS_USE_UCX=ON``. UCX is a high-performance communication
 framework that serves as a transport layer for MPI and other communication libraries, providing
 optimized point-to-point and collective communication operations.
