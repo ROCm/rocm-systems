@@ -112,7 +112,8 @@
         "1600_vector_l1_data_cache.yaml": "2a539ff492d3a83b62f50f4b5b93d8c8",
         "1700_l2_cache.yaml": "ca170444952edf6d05ce69e47e894e9f",
         "1800_l2_cache_per_channel.yaml": "c4c6b0990499b445608c46d1a051b9f6",
-        "2100_pc_sampling.yaml": "8049866f25214544f1e53a9e2f08399b"
+        "2100_pc_sampling.yaml": "8049866f25214544f1e53a9e2f08399b",
+        "3000_mem_bw.yaml": "2e03d55710d1ea61362353722164dd97"
       }
     },
     "gfx950": {
@@ -131,7 +132,7 @@
         "1200_local_data_share_lds.yaml": "6a9c1c5f65ed5b9e93bbdfd0cb5a62a9",
         "1300_instruction_cache.yaml": "e616b2e4ec05c2d91df43cdaabfc9fea",
         "1400_scalar_l1_data_cache.yaml": "393c4aea974c05e45590f3053d66e12e",
-        "1500_address_processing_unit_and_data_return_path_ta_td.yaml": "87aba9c2e08cf2075c919c7180be8370",
+        "1500_address_processing_unit_and_data_return_path_ta_td.yaml": "cad7f36a0db961558c58e5e6dd8ac8fe",
         "1600_vector_l1_data_cache.yaml": "022ed673965804905ccb43fd32aa949b",
         "1700_l2_cache.yaml": "00f830341a8f8c0bd273a627cca23956",
         "1800_l2_cache_per_channel.yaml": "5d16f669dbb4fb3fbb28ac14b597a248",
