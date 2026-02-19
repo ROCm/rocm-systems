@@ -139,7 +139,7 @@ class RocProfCompute_Base:
             # Appending a wrapper for injecting roctx-markers
             if getattr(args, "torch_trace", False):
                 # Override the output-format to CSV when torch-trace is enabled
-                if args.format_rocprof_output != "csv":
+                if getattr(args, "format_rocprof_output", "rocpd") != "csv":
                     args.format_rocprof_output = "csv"
                     console_warning(
                         "torch trace",
