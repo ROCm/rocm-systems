@@ -409,10 +409,10 @@ register storage per CU.
 
 .. _dme:
 
-Data movement engine (CDNA3+)
+Data movement engine (CDNA 3 / CDNA 4)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-CDNA3 and CDNA4 architectures include specialized Data Movement Engine (DME)
+CDNA 3 and CDNA 4 architectures include specialized Data Movement Engine (DME)
 hardware units designed to accelerate access to multi-dimensional tensor data
 in GPU memory. DMEs perform high-throughput, low-overhead copies between
 global memory (HBM) and the on-chip memory hierarchy, particularly the Local
@@ -462,12 +462,12 @@ between threads in a workgroup.
 
    Local data share organization and SIMD connections
 
-**Organization**: The LDS contains 32 (CDNA, CDNA2, and CDNA3) or 64 (CDNA4+ and
-RDNA2+) banks, each 4-bytes wide, providing 128 (CDNA, CDNA2, and CDNA3) or 256
-(CDNA4+ and RDNA2+) bytes per cycle total bandwidth. Banks can be accessed
-independently each cycle for reads, writes, and/or atomic operations. The SIMDs
-connect to the LDS in pairs, with each pair sharing a 64-byte bidirectional
-port.
+**Organization**: The LDS contains 32 (CDNA, CDNA 2, and CDNA 3) or 64 (CDNA 4
+and RDNA 2, RDNA 3, and RDNA 4) banks, each 4-bytes wide, providing 128 (CDNA,
+CDNA 2, and CDNA 3) or 256 (CDNA 4 and RDNA 2, RDNA 3, and RDNA 4) bytes per
+cycle total bandwidth. Each bank can be accessed independently every cycle for
+reads, writes, and/or atomic operations. The SIMDs connect to the LDS in pairs,
+with each pair sharing a 64-byte bidirectional port.
 
 **Access patterns**: A single wavefront can achieve up to 64 bytes per cycle
 throughput (16 lanes per cycle). The actual bandwidth depends on data size and

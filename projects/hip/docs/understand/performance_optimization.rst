@@ -344,8 +344,8 @@ selected.
 
 A wavefront is considered **active** from the time its threads begin
 executing until all threads in that wavefront have completed the kernel.
-Active wavefronts form the pool from which the wavefront schedulers select
-candidates for instruction issue each cycle.
+The wavefront schedulers select wavefronts from the active pool each cycle;
+the selected wavefronts then issue their instructions.
 
 An **eligible** wavefront is an active wavefront ready to issue its next
 instruction. For a wavefront to be eligible:
