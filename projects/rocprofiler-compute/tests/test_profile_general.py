@@ -2994,7 +2994,8 @@ def test_iteration_multiplexing_deterministic_counter_accuracy(
     binary_handler_profile_rocprof_compute,
     binary_handler_analyze_rocprof_compute,
 ):
-    # These metrics should cover the deterministic counters being checked and roofline
+    # These metrics should cover the deterministic counters being checked
+    # Block 4 (roofline) included to verify roofline counters under multiplexing
     options = ["--block", "4", "6.1.5", "6.1.6", "7.2.2", "10.1"]
     workload_dir = test_utils.get_output_dir(param_id="no_iter_mplx")
     _ = binary_handler_profile_rocprof_compute(
@@ -3002,7 +3003,7 @@ def test_iteration_multiplexing_deterministic_counter_accuracy(
         workload_dir,
         options,
         check_success=True,
-        roof=True,
+        roof=False,
         app_name="app_laplace_eqn",
     )
     counters_no_multiplexing = test_utils.check_csv_files(
@@ -3026,7 +3027,7 @@ def test_iteration_multiplexing_deterministic_counter_accuracy(
         workload_dir,
         options,
         check_success=True,
-        roof=True,
+        roof=False,
         app_name="app_laplace_eqn_iter",
     )
     counters_kernel = test_utils.check_csv_files(
@@ -3083,14 +3084,15 @@ def test_iteration_multiplexing_stochastic_counter_accuracy(
     binary_handler_analyze_rocprof_compute,
 ):
     workload_dir = test_utils.get_output_dir(param_id="no_iter_mplx")
-    # These metrics should cover the L1 cache stochastic counters and roofline
+    # These metrics should cover the L1 cache stochastic counters
+    # Block 4 (roofline) included to verify roofline counters under multiplexing
     options = ["--block", "4", "16.1", "16.3"]
     _ = binary_handler_profile_rocprof_compute(
         config,
         workload_dir,
         options,
         check_success=True,
-        roof=True,
+        roof=False,
         app_name="app_laplace_eqn",
     )
     counters_no_multiplexing = test_utils.check_csv_files(
@@ -3112,7 +3114,7 @@ def test_iteration_multiplexing_stochastic_counter_accuracy(
         workload_dir,
         options,
         check_success=True,
-        roof=True,
+        roof=False,
         app_name="app_laplace_eqn_iter",
     )
     counters_kernel = test_utils.check_csv_files(
