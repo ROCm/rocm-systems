@@ -170,6 +170,7 @@ if(BUILD_TESTS)
     common/TestBedChild.cpp
     common/StandaloneUtils.cpp
     common/GPUScheduler.cpp
+    common/GlobalGPUScheduler.cpp
     common/ParallelTestRunner.cpp
     proxy_trace/ProxyTraceUnitTests.cpp
     ../src/misc/proxy_trace/proxy_trace.cc

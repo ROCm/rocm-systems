@@ -7,16 +7,66 @@
 #include <gtest/gtest.h>
 #include "EnvVars.hpp"
 #include "TestBed.hpp"
+#include "GlobalGPUScheduler.hpp"
+#include <cstdlib>
 int main(int argc, char **argv)
 {
   ::testing::InitGoogleTest(&argc, argv);
   RcclUnitTesting::EnvVars ev;
   ev.ShowConfig();
+
+  // Check if global scheduler is enabled (cross-suite parallelization)
+  const char* globalSchedulerEnv = std::getenv("UT_GLOBAL_SCHEDULER");
+  bool useGlobalScheduler = (globalSchedulerEnv != nullptr && std::atoi(globalSchedulerEnv) != 0);
+
+  if (useGlobalScheduler)
+  {
+    // Initialize global GPU scheduler for cross-suite parallelization
+    RcclUnitTesting::GPUSchedulingConfig config;
+    config.totalGPUs = ev.maxGpus;
+    config.enableParallelExecution = true;
+
+    const char* maxTestsEnv = std::getenv("UT_MAX_PARALLEL_TESTS");
+    config.maxConcurrentTests = maxTestsEnv ? std::atoi(maxTestsEnv) : 8;
+
+    const char* verboseEnv = std::getenv("UT_PARALLEL_VERBOSE");
+    config.verboseLogging = (verboseEnv != nullptr && std::atoi(verboseEnv) != 0) || ev.verbose;
+
+    RcclUnitTesting::GlobalGPUScheduler::initialize(config);
+
+    if (config.verboseLogging)
+    {
+      printf("[ INFO     ] Global GPU Scheduler enabled - jobs from all test suites will run in parallel\n");
+      printf("[ INFO     ] Total GPUs: %d, Max concurrent tests: %d\n",
+             config.totalGPUs, config.maxConcurrentTests);
+    }
+  }
+
+  // Run all tests
   int retCode = RUN_ALL_TESTS();
+
+  // Wait for all jobs to complete and shutdown global scheduler if enabled
+  if (useGlobalScheduler)
+  {
+    RcclUnitTesting::GlobalGPUScheduler::waitForAllJobs();
+
+    auto stats = RcclUnitTesting::GlobalGPUScheduler::getStatistics();
+
+    printf("\n");
+    printf("[ INFO     ] ============= Global GPU Scheduler Statistics =============\n");
+    printf("[ INFO     ] Total jobs submitted: %d\n", stats.totalJobsSubmitted);
+    printf("[ INFO     ] Completed: %d, Failed: %d\n", stats.totalJobsCompleted, stats.totalJobsFailed);
+    printf("[ INFO     ] Total execution time: %ld ms (%.2f minutes)\n",
+           stats.totalExecutionTime.count(), stats.totalExecutionTime.count() / 60000.0);
+    printf("[ INFO     ] Average GPU utilization: %.1f%%\n", stats.averageGPUUtilization);
+    printf("[ INFO     ] ==========================================================\n");
+
+    RcclUnitTesting::GlobalGPUScheduler::shutdown();
+  }
+
   printf("[ INFO     ] Total executed cases: %d\n", RcclUnitTesting::TestBed::NumTestsRun());
 
   // Show timing information
-
   if (ev.showTiming)
   {
     size_t totalTimeMsec = 0;

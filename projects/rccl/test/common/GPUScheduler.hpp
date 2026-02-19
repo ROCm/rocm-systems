@@ -95,10 +95,12 @@ public:
     ~GPUScheduler();
 
     // Submit a test job to be scheduled
-    void submitJob(const TestJob& job);
+    // Returns the assigned job ID
+    int submitJob(const TestJob& job);
 
     // Submit multiple jobs at once
-    void submitJobs(const std::vector<TestJob>& jobs);
+    // Returns vector of assigned job IDs
+    std::vector<int> submitJobs(const std::vector<TestJob>& jobs);
 
     // Try to schedule and launch pending jobs
     // Returns number of jobs launched
@@ -114,6 +116,9 @@ public:
 
     // Check if all jobs are complete
     bool allJobsComplete() const;
+
+    // Check if specific jobs are complete
+    bool areJobsComplete(const std::vector<int>& jobIds) const;
 
     // Get scheduling statistics
     struct Statistics
@@ -163,6 +168,9 @@ private:
 
     // Job ID counter
     int nextJobId_;
+
+    // Job completion tracking (jobId -> completed)
+    std::set<int> completedJobIds_;
 
     // Helper functions
     bool canAllocateGPUs(int numGPUs) const;

@@ -8,6 +8,7 @@
 
 #include "TestBed.hpp"
 #include "GPUScheduler.hpp"
+#include "GlobalGPUScheduler.hpp"
 #include <functional>
 #include <sstream>
 
@@ -239,99 +240,190 @@ void TestBed::RunSimpleSweepParallel(std::vector<ncclFunc_t>     const& funcType
         GTEST_SKIP() << "Skipping... test reduction operations excluded by UT_REDOPS.";
     }
 
-    // Create GPU scheduler
-    GPUSchedulingConfig config;
-    config.totalGPUs = ev.maxGpus;
-    config.enableParallelExecution = true;
+    // Check if using global scheduler (cross-suite parallelization)
+    const char* globalSchedulerEnv = std::getenv("UT_GLOBAL_SCHEDULER");
+    bool useGlobalScheduler = (globalSchedulerEnv != nullptr && std::atoi(globalSchedulerEnv) != 0);
 
-    const char* maxTestsEnv = std::getenv("UT_MAX_PARALLEL_TESTS");
-    config.maxConcurrentTests = maxTestsEnv ? std::atoi(maxTestsEnv) : 8;
-
-    const char* verboseEnv = std::getenv("UT_PARALLEL_VERBOSE");
-    config.verboseLogging = (verboseEnv != nullptr && std::atoi(verboseEnv) != 0) || ev.verbose;
-
-    GPUScheduler scheduler(config);
-
-    if (config.verboseLogging)
+    if (useGlobalScheduler)
     {
-        INFO("Parallel GPU sweep enabled: running tests for %d GPU counts concurrently\n",
-             ev.GetNumGpusList().size());
-    }
+        // Use the global scheduler - jobs from all test suites run together
+        if (!GlobalGPUScheduler::isInitialized())
+        {
+            ERROR("UT_GLOBAL_SCHEDULER is enabled but GlobalGPUScheduler not initialized.\n");
+            ERROR("Call GlobalGPUScheduler::initialize() in main() before RUN_ALL_TESTS().\n");
+            FAIL() << "Global scheduler not initialized";
+            return;
+        }
 
-    // Create test jobs for each GPU count (the outer loop from original RunSimpleSweep)
-    for (int numGpus : ev.GetNumGpusList())
-    for (int isMultiProcess : ev.GetIsMultiProcessList())
-    for (int ranksPerGpu = 1; ranksPerGpu <= ev.maxRanksPerGpu; ++ranksPerGpu)
+        // Submit jobs to global scheduler and track our job IDs
+        std::vector<int> jobIds;
+
+        // Get test suite name from GoogleTest context
+        auto currentTest = ::testing::UnitTest::GetInstance()->current_test_info();
+        std::string suitePrefix = currentTest ?
+            std::string(currentTest->test_suite_name()) + "." + std::string(currentTest->name()) :
+            "Unknown";
+
+        if (ev.verbose)
+        {
+            INFO("[%s] Submitting jobs to global scheduler\n", suitePrefix.c_str());
+        }
+
+        // Create test jobs for each GPU count (the outer loop from original RunSimpleSweep)
+        for (int numGpus : ev.GetNumGpusList())
+        for (int isMultiProcess : ev.GetIsMultiProcessList())
+        for (int ranksPerGpu = 1; ranksPerGpu <= ev.maxRanksPerGpu; ++ranksPerGpu)
+        {
+            // Create a test job for this GPU configuration
+            SweepTestJob job;
+            job.numGpus = numGpus;
+            job.isMultiProcess = isMultiProcess;
+            job.ranksPerGpu = ranksPerGpu;
+            job.funcTypes = funcTypes;
+            job.dataTypes = dataTypes;
+            job.redOps = redOps;
+            job.roots = roots;
+            job.numElements = numElements;
+            job.inPlaceList = inPlaceList;
+            job.managedMemList = managedMemList;
+            job.useHipGraphList = useHipGraphList;
+            job.enableSweep = enableSweep;
+            job.showNames = ev.showNames;
+            job.verbose = ev.verbose;
+            job.printValues = ev.printValues;
+            job.isGfx90 = ev.isGfx90;
+
+            // Create descriptive test name with suite prefix
+            std::stringstream testName;
+            testName << suitePrefix << "_" << numGpus << "GPU";
+            if (isMultiProcess) testName << "_MP";
+            else testName << "_SP";
+            if (ranksPerGpu > 1) testName << "_" << ranksPerGpu << "RPG";
+
+            // Submit as a TestJob to the global scheduler
+            TestJob testJob(
+                testName.str(),
+                numGpus,
+                [job](const std::vector<int>& assignedGPUs) {
+                    ExecuteSweepJob(job, assignedGPUs);
+                },
+                numGpus * 10  // Priority: higher GPU count = higher priority
+            );
+
+            int jobId = GlobalGPUScheduler::submitJob(testJob);
+            jobIds.push_back(jobId);
+        }
+
+        if (ev.verbose)
+        {
+            INFO("[%s] Submitted %zu jobs to global scheduler. Waiting for completion...\n",
+                 suitePrefix.c_str(), jobIds.size());
+        }
+
+        // Wait for only OUR jobs to complete (other test suites' jobs can run in parallel)
+        GlobalGPUScheduler::waitForJobs(jobIds);
+
+        if (ev.verbose)
+        {
+            INFO("[%s] All jobs completed.\n", suitePrefix.c_str());
+        }
+
+        // Note: We can't get per-test statistics easily with global scheduler
+        // Statistics will be printed at the end by main()
+    }
+    else
     {
-        // Create a test job for this GPU configuration
-        SweepTestJob job;
-        job.numGpus = numGpus;
-        job.isMultiProcess = isMultiProcess;
-        job.ranksPerGpu = ranksPerGpu;
-        job.funcTypes = funcTypes;
-        job.dataTypes = dataTypes;
-        job.redOps = redOps;
-        job.roots = roots;
-        job.numElements = numElements;
-        job.inPlaceList = inPlaceList;
-        job.managedMemList = managedMemList;
-        job.useHipGraphList = useHipGraphList;
-        job.enableSweep = enableSweep;
-        // Copy only specific fields to avoid expensive EnvVars copy constructor
-        job.showNames = ev.showNames;
-        job.verbose = ev.verbose;
-        job.printValues = ev.printValues;
-        job.isGfx90 = ev.isGfx90;
+        // Use per-test scheduler (original behavior - within-suite parallelization only)
+        GPUSchedulingConfig config;
+        config.totalGPUs = ev.maxGpus;
+        config.enableParallelExecution = true;
 
-        // Create descriptive test name
-        std::stringstream testName;
-        testName << "Sweep_" << numGpus << "GPU";
-        if (isMultiProcess) testName << "_MP";
-        else testName << "_SP";
-        if (ranksPerGpu > 1) testName << "_" << ranksPerGpu << "RPG";
+        const char* maxTestsEnv = std::getenv("UT_MAX_PARALLEL_TESTS");
+        config.maxConcurrentTests = maxTestsEnv ? std::atoi(maxTestsEnv) : 8;
 
-        // Submit as a TestJob to the scheduler
-        TestJob testJob(
-            testName.str(),
-            numGpus,
-            [job](const std::vector<int>& assignedGPUs) {
-                // Pass physical GPU IDs directly to the test
-                // No HIP_VISIBLE_DEVICES remapping - use actual physical IDs
-                ExecuteSweepJob(job, assignedGPUs);
-            },
-            numGpus * 10  // Priority: higher GPU count = higher priority (greedy scheduling)
-        );
+        const char* verboseEnv = std::getenv("UT_PARALLEL_VERBOSE");
+        config.verboseLogging = (verboseEnv != nullptr && std::atoi(verboseEnv) != 0) || ev.verbose;
 
-        scheduler.submitJob(testJob);
+        GPUScheduler scheduler(config);
 
-        // Try to launch jobs immediately after submission (overlap submission and execution)
-        scheduler.schedulePendingJobs();
+        if (config.verboseLogging)
+        {
+            INFO("Parallel GPU sweep enabled: running tests for %d GPU counts concurrently\n",
+                 ev.GetNumGpusList().size());
+        }
+
+        // Create test jobs for each GPU count (the outer loop from original RunSimpleSweep)
+        for (int numGpus : ev.GetNumGpusList())
+        for (int isMultiProcess : ev.GetIsMultiProcessList())
+        for (int ranksPerGpu = 1; ranksPerGpu <= ev.maxRanksPerGpu; ++ranksPerGpu)
+        {
+            // Create a test job for this GPU configuration
+            SweepTestJob job;
+            job.numGpus = numGpus;
+            job.isMultiProcess = isMultiProcess;
+            job.ranksPerGpu = ranksPerGpu;
+            job.funcTypes = funcTypes;
+            job.dataTypes = dataTypes;
+            job.redOps = redOps;
+            job.roots = roots;
+            job.numElements = numElements;
+            job.inPlaceList = inPlaceList;
+            job.managedMemList = managedMemList;
+            job.useHipGraphList = useHipGraphList;
+            job.enableSweep = enableSweep;
+            job.showNames = ev.showNames;
+            job.verbose = ev.verbose;
+            job.printValues = ev.printValues;
+            job.isGfx90 = ev.isGfx90;
+
+            // Create descriptive test name
+            std::stringstream testName;
+            testName << "Sweep_" << numGpus << "GPU";
+            if (isMultiProcess) testName << "_MP";
+            else testName << "_SP";
+            if (ranksPerGpu > 1) testName << "_" << ranksPerGpu << "RPG";
+
+            // Submit as a TestJob to the scheduler
+            TestJob testJob(
+                testName.str(),
+                numGpus,
+                [job](const std::vector<int>& assignedGPUs) {
+                    ExecuteSweepJob(job, assignedGPUs);
+                },
+                numGpus * 10  // Priority: higher GPU count = higher priority
+            );
+
+            scheduler.submitJob(testJob);
+
+            // Try to launch jobs immediately after submission (overlap submission and execution)
+            scheduler.schedulePendingJobs();
+        }
+
+        // Run scheduler until all jobs complete (continues launching and monitoring)
+        if (config.verboseLogging)
+        {
+            INFO("All jobs submitted. Waiting for remaining tests to complete.\n");
+        }
+
+        scheduler.runUntilComplete();
+
+        // Get statistics
+        auto stats = scheduler.getStatistics();
+
+        if (config.verboseLogging)
+        {
+            INFO("\n");
+            INFO("=============== Parallel Sweep Statistics ===============\n");
+            INFO("Test configurations executed: %d\n", stats.totalJobsSubmitted);
+            INFO("Passed: %d, Failed: %d\n", stats.totalJobsCompleted, stats.totalJobsFailed);
+            INFO("Total execution time: %ld ms\n", stats.totalExecutionTime.count());
+            INFO("Average GPU utilization: %.1f%%\n", stats.averageGPUUtilization);
+            INFO("========================================================\n");
+        }
+
+        // Fail the test if any sweep jobs failed
+        ASSERT_EQ(stats.totalJobsFailed, 0) << "Some sweep configurations failed";
     }
-
-    // Run scheduler until all jobs complete (continues launching and monitoring)
-    if (config.verboseLogging)
-    {
-        INFO("All jobs submitted. Waiting for remaining tests to complete.\n");
-    }
-
-    scheduler.runUntilComplete();
-
-    // Get statistics
-    auto stats = scheduler.getStatistics();
-
-    if (config.verboseLogging)
-    {
-        INFO("\n");
-        INFO("=============== Parallel Sweep Statistics ===============\n");
-        INFO("Test configurations executed: %d\n", stats.totalJobsSubmitted);
-        INFO("Passed: %d, Failed: %d\n", stats.totalJobsCompleted, stats.totalJobsFailed);
-        INFO("Total execution time: %ld ms\n", stats.totalExecutionTime.count());
-        INFO("Average GPU utilization: %.1f%%\n", stats.averageGPUUtilization);
-        INFO("========================================================\n");
-    }
-
-    // Fail the test if any sweep jobs failed
-    ASSERT_EQ(stats.totalJobsFailed, 0) << "Some sweep configurations failed";
 }
 
 } // namespace RcclUnitTesting

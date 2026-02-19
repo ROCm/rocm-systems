@@ -48,13 +48,15 @@ GPUScheduler::~GPUScheduler()
     }
 }
 
-void GPUScheduler::submitJob(const TestJob& job)
+int GPUScheduler::submitJob(const TestJob& job)
 {
     std::lock_guard<std::mutex> lock(statsMutex_);
 
     TestJob jobCopy = job;
     jobCopy.jobId = nextJobId_++;
     jobCopy.submittedTime = std::chrono::steady_clock::now();
+
+    int assignedJobId = jobCopy.jobId;
 
     pendingJobs_.push(jobCopy);
     totalSubmitted_++;
@@ -64,14 +66,22 @@ void GPUScheduler::submitJob(const TestJob& job)
         INFO("Job submitted: %s (ID: %d, GPUs: %d, Priority: %d)\n",
              jobCopy.testName.c_str(), jobCopy.jobId, jobCopy.numGPUsRequired, jobCopy.priority);
     }
+
+    return assignedJobId;
 }
 
-void GPUScheduler::submitJobs(const std::vector<TestJob>& jobs)
+std::vector<int> GPUScheduler::submitJobs(const std::vector<TestJob>& jobs)
 {
+    std::vector<int> jobIds;
+    jobIds.reserve(jobs.size());
+
     for (const auto& job : jobs)
     {
-        submitJob(job);
+        int jobId = submitJob(job);
+        jobIds.push_back(jobId);
     }
+
+    return jobIds;
 }
 
 
@@ -349,6 +359,9 @@ void GPUScheduler::recordCompletion(const RunningTest& test, bool success)
         totalCompleted_++;
     else
         totalFailed_++;
+
+    // Track job completion
+    completedJobIds_.insert(test.job.jobId);
 }
 
 void GPUScheduler::runUntilComplete()
@@ -381,6 +394,20 @@ bool GPUScheduler::allJobsComplete() const
 {
     std::lock_guard<std::mutex> lock(statsMutex_);
     return pendingJobs_.empty() && runningTests_.empty();
+}
+
+bool GPUScheduler::areJobsComplete(const std::vector<int>& jobIds) const
+{
+    std::lock_guard<std::mutex> lock(statsMutex_);
+
+    for (int jobId : jobIds)
+    {
+        if (completedJobIds_.find(jobId) == completedJobIds_.end())
+        {
+            return false;
+        }
+    }
+    return true;
 }
 
 double GPUScheduler::calculateGPUUtilization() const
