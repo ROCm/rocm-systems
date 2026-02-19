@@ -950,6 +950,8 @@ Limitations
    * This feature adds instrumentation overhead to track operator boundaries. For
      performance-critical measurements, consider profiling without this option first.
 
+   * This option forces rocprof output to CSV format; rocpd format is not supported yet.
+
 
 .. _torch-operator-profiling:
 
