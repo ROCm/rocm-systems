@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS
         "fini" BIGINT,
         "start" BIGINT,
         "end" BIGINT,
+        "source_app" TEXT, -- rocprofv3/rocprof-sys/rocprof-compute, don't TYPE check because there could be new apps in future
         "command" TEXT,
         "environment" JSONB DEFAULT "{}" NOT NULL,
         "extdata" JSONB DEFAULT "{}" NOT NULL,
@@ -68,7 +69,7 @@ CREATE TABLE IF NOT EXISTS
         "guid" TEXT DEFAULT "{{guid}}" NOT NULL,
         "nid" INTEGER NOT NULL,
         "pid" INTEGER NOT NULL,
-        "type" TEXT CHECK ("type" IN ('CPU', 'GPU')),
+        "type" TEXT CHECK ("type" IN ('CPU', 'GPU', 'NIC')),
         "absolute_index" INTEGER,
         "logical_index" INTEGER,
         "type_index" INTEGER,
@@ -117,7 +118,7 @@ CREATE TABLE IF NOT EXISTS
         "nid" INTEGER NOT NULL,
         "pid" INTEGER NOT NULL,
         "agent_id" INTEGER,
-        "target_arch" TEXT CHECK ("target_arch" IN ('CPU', 'GPU')),
+        "target_arch" TEXT CHECK ("target_arch" IN ('CPU', 'GPU', 'NIC')),
         "event_code" INT,
         "instance_id" INTEGER,
         "name" TEXT NOT NULL,
@@ -365,9 +366,21 @@ CREATE TABLE IF NOT EXISTS
         FOREIGN KEY (event_id) REFERENCES `rocpd_event{{uuid}}` (id) ON UPDATE CASCADE
     );
 
+CREATE TABLE IF NOT EXISTS
+    `rocpd_roofline_data{{uuid}}` (
+        "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+        "guid" TEXT DEFAULT "{{guid}}" NOT NULL,
+        "agent_id" INTEGER NOT NULL,
+        "name_id" INTEGER NOT NULL,
+        "value" REAL NOT NULL,
+        "extdata" JSONB DEFAULT "{}" NOT NULL,
+        FOREIGN KEY (name_id) REFERENCES `rocpd_string{{uuid}}` (id) ON UPDATE CASCADE,
+        FOREIGN KEY (agent_id) REFERENCES `rocpd_info_agent{{uuid}}` (id) ON UPDATE CASCADE
+    );
+
 INSERT INTO
     `rocpd_metadata{{uuid}}` ("tag", "value")
 VALUES
-    ("schema_version", "3"),
+    ("schema_version", "3.0.1"),
     ("uuid", "{{uuid}}"),
     ("guid", "{{guid}}");
