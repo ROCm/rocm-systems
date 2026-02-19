@@ -13,8 +13,6 @@
 #include <sys/wait.h>
 #include <cstring>
 #include <cstdlib>
-#include <thread>
-#include <atomic>
 #include <nccl.h>
 #include <gtest/gtest.h>
 
@@ -28,8 +26,6 @@ GPUScheduler::GPUScheduler(const GPUSchedulingConfig& config)
     , totalFailed_(0)
     , nextJobId_(0)
     , nextUniqueIdIndex_(0)
-    , stopIdGeneration_(false)
-    , targetPoolSize_(0)
 {
     // Initialize GPU tracking
     gpuInUse_.resize(config_.totalGPUs, false);
@@ -45,9 +41,6 @@ GPUScheduler::GPUScheduler(const GPUSchedulingConfig& config)
 
 GPUScheduler::~GPUScheduler()
 {
-    // Stop background ID generation if running
-    stopAsyncIdGeneration();
-
     // Wait for any remaining tests
     while (!runningTests_.empty())
     {
@@ -144,11 +137,11 @@ std::string GPUScheduler::getNextUniqueId()
 }
 
 
-void GPUScheduler::startAsyncIdGeneration(int totalNeeded)
+void GPUScheduler::preallocateUniqueIds(int poolSize)
 {
     if (config_.verboseLogging)
     {
-        INFO("Generating pool of %d unique IDs in separate process...\n", totalNeeded);
+        INFO("Generating pool of %d unique IDs in separate process...\n", poolSize);
     }
 
     auto startTime = std::chrono::steady_clock::now();
@@ -168,7 +161,7 @@ void GPUScheduler::startAsyncIdGeneration(int totalNeeded)
         // Child process: Generate all unique IDs
         close(pipefd[0]);  // Close read end
 
-        for (int i = 0; i < totalNeeded; ++i)
+        for (int i = 0; i < poolSize; ++i)
         {
             ncclUniqueId id;
             ncclResult_t result = ncclGetUniqueId(&id);
@@ -195,7 +188,7 @@ void GPUScheduler::startAsyncIdGeneration(int totalNeeded)
         // Parent process: Read IDs from pipe
         close(pipefd[1]);  // Close write end
 
-        for (int i = 0; i < totalNeeded; ++i)
+        for (int i = 0; i < poolSize; ++i)
         {
             ncclUniqueId id;
             ssize_t bytesRead = read(pipefd[0], &id, sizeof(ncclUniqueId));
@@ -234,14 +227,6 @@ void GPUScheduler::startAsyncIdGeneration(int totalNeeded)
     }
 }
 
-void GPUScheduler::stopAsyncIdGeneration()
-{
-    if (uniqueIdGeneratorThread_.joinable())
-    {
-        stopIdGeneration_.store(true);
-        uniqueIdGeneratorThread_.join();
-    }
-}
 
 bool GPUScheduler::canAllocateGPUs(int numGPUs) const
 {
