@@ -352,6 +352,12 @@ html_report = result.to_webview()
 Path("analysis.html").write_text(html_report)
 ```
 
+The HTML report includes **hover tooltips on every visual element** — gauges, bars,
+table headers, counter rows, and overview stats. Each tooltip explains what the metric
+measures, why it matters, target thresholds, and how to address issues. Hardware counter
+rows (GRBM_*, SQ_*, TCP/TCC, FETCH_SIZE, etc.) include educational content about the
+underlying hardware event being counted.
+
 ### Example 5: roc-optiq Integration
 
 ```python

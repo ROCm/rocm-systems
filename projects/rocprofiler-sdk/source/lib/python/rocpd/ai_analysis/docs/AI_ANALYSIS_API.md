@@ -515,6 +515,19 @@ rocpd analyze -i output.db --format webview -d ./output -o analysis
 - **Memory transfers**: Per-direction table (H2D, D2H, D2D, P2P)
 - **Hardware counters**: GPU utilization and wave occupancy gauges (Tier 2)
 - **Embedded data**: Full JSON payload included for programmatic inspection
+- **Hover tooltips**: Every graph, gauge, bar, table column, and counter row shows a
+  floating tooltip on hover explaining what the metric means, why it matters, good/bad
+  thresholds, and how to address issues. Coverage includes:
+  - *Gauges*: counter formula (e.g. `GRBM_GUI_ACTIVE ÷ GRBM_COUNT`), target thresholds,
+    current status assessment
+  - *Breakdown bars*: what each category measures, optimization guidance
+  - *Overview stats*: per-bottleneck type explanation with specific fix advice,
+    Tier 1 vs Tier 2 distinction with upgrade command
+  - *Hotspot columns*: semantics of Calls, Total/Avg/Min time, % Total
+  - *Memory directions*: H2D/D2H/D2D/P2P with PCIe vs HBM bandwidth context
+  - *Counter rows*: educational content for 20+ known AMD GPU counters
+    (GRBM_*, SQ_*, TCP/TCC cache, FETCH_SIZE, WRITE_SIZE, etc.);
+    unknown counters receive a generic fallback message
 
 ---
 

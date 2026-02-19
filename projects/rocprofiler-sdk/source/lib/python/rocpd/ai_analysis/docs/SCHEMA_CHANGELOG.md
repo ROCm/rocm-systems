@@ -73,6 +73,21 @@ schema_path = pkg_resources.files("rocpd.ai_analysis") / "docs" / "analysis-outp
 
 ---
 
+### v0.1.2 — 2026-02-19
+
+**No schema changes.** Webview presentation improvements only.
+
+- Added hover tooltips to all visual elements in the `--format webview` HTML report:
+  gauges, execution breakdown bars, overview stat cards, hotspot table column headers,
+  memory transfer direction cells and column headers, and hardware counter table rows.
+- Counter rows use a `COUNTER_TIPS` JavaScript lookup covering 20+ known AMD GPU
+  hardware counters (GRBM_*, SQ_*, TCP/TCC cache, FETCH_SIZE, WRITE_SIZE, etc.)
+  with educational content about what each counter measures and why it matters.
+- Unknown counters receive a generic fallback tooltip pointing to AMD ISA documentation.
+- No changes to JSON output structure, schema version string, or analysis logic.
+
+---
+
 ### v0.1.1 — 2026-02-19
 
 **No schema changes.** Description and tooling improvements only.
