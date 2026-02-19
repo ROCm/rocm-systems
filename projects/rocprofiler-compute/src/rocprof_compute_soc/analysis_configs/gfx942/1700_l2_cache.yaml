@@ -491,6 +491,8 @@ Panel Config:
       data from any memory location, per normalization unit.
     Read (64B): The total number of L2 requests to Infinity Fabric to read 64B of
       data from any memory location, per normalization unit.
+    Read (128B): The total number of L2 requests to Infinity Fabric to read 128B
+      of data from any memory location, per normalization unit.
     Read (Uncached): The total number of L2 requests to Infinity Fabric to read uncached
       data from any memory location, per normalization unit. 64B requests for uncached
       data are counted as two 32B uncached data requests.
