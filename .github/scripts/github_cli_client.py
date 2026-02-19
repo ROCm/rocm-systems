@@ -333,8 +333,12 @@ class GitHubCLIClient:
                 f"No valid labels to apply to PR #{pr_number} in {target_repo}."
             )
 
-    def get_squash_merge_commit(self, repo: str, pr_number: int) -> Optional[str]:
-        """Get the squash merge commit SHA of a merged pull request."""
+    def get_merge_commit(self, repo: str, pr_number: int) -> Optional[str]:
+        """Get the merge commit SHA of a merged pull request.
+
+        Works for both "Squash and merge" and "Rebase and merge" merge types.
+        Returns the merge_commit_sha from the PR API response.
+        """
         url = f"{self.api_url}/repos/{repo}/pulls/{pr_number}"
         logger.debug(f"Request URL: {url}")
         data = self._get_json(url, f"Failed to fetch PR #{pr_number} from {repo}")
@@ -345,6 +349,25 @@ class GitHubCLIClient:
             logger.debug(f"PR #{pr_number} merged commit: {data['merge_commit_sha']}")
             return data["merge_commit_sha"]
         logger.warning(f"PR #{pr_number} is not merged or missing merge commit SHA.")
+        return None
+
+    def get_pr_base_commit(self, repo: str, pr_number: int) -> Optional[str]:
+        """Get the base commit SHA of a pull request.
+
+        Returns the SHA of the base branch commit that the PR was targeting.
+        This is available in the PR API response as base.sha.
+        """
+        url = f"{self.api_url}/repos/{repo}/pulls/{pr_number}"
+        logger.debug(f"Request URL: {url}")
+        data = self._get_json(url, f"Failed to fetch PR #{pr_number} from {repo}")
+        if not data:
+            logger.error(f"No data returned for PR #{pr_number}")
+            return None
+        base_data = data.get("base", {})
+        if base_data.get("sha"):
+            logger.debug(f"PR #{pr_number} base commit: {base_data['sha']}")
+            return base_data["sha"]
+        logger.warning(f"PR #{pr_number} missing base commit SHA.")
         return None
 
     def get_user(self, username: str) -> tuple[str, str]:

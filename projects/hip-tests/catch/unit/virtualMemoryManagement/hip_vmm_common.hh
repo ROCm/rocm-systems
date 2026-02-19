@@ -46,6 +46,16 @@ THE SOFTWARE.
     }                                                                                              \
   }
 
+#define checkDmaBufSupported(device)                                                               \
+  {                                                                                                \
+    int value = 0;                                                                                 \
+    hipDeviceAttribute_t attr = hipDeviceAttributeDmaBufSupported;                                 \
+    HIP_CHECK(hipDeviceGetAttribute(&value, attr, device));                                        \
+    if (value == 0) {                                                                              \
+      HipTest::HIP_SKIP_TEST("Device Doesn't support Dma Bufd. Skipping Test..");                  \
+      return;                                                                                      \
+    }                                                                                              \
+  }
 #ifdef __linux__
 #define checkSysCallErrors(result)                                                                 \
   if (result == -1) {                                                                              \
