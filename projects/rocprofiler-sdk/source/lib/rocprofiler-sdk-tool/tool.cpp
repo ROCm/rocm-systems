@@ -1049,11 +1049,13 @@ buffered_tracing_callback(rocprofiler_context_id_t /*context*/,
                     tool::tool_buffer_tracing_memory_allocation_ext_record_t{*record, stream_id},
                     domain_type::MEMORY_ALLOCATION);
             }
+            /*
             else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE ||
                     header->kind == ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_FAULT)
             {
                 // drop these events, which are captured within the corresponding paired record
             }
+            */
             else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE)
             {
                 auto* record = static_cast<rocprofiler_buffer_tracing_kfd_event_queue_record_t*>(
@@ -2122,12 +2124,14 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
          //
          // These may or may not be desired behaviors in the backend KFD service. If they change,
          // the KFD processing logic in this file may need to be revisited
+         /*
          buffer_service_config{tool::get_config().kfd_page_migration_trace,
                                ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE,
                                get_buffers().kfd_trace},
          buffer_service_config{tool::get_config().kfd_page_mapping_trace,
                                ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_FAULT,
                                get_buffers().kfd_trace},
+         */
          buffer_service_config{tool::get_config().kfd_queue_trace,
                                ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE,
                                get_buffers().kfd_trace},
@@ -2136,6 +2140,15 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                get_buffers().kfd_trace},
          buffer_service_config{tool::get_config().kfd_dropped_events_trace,
                                ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS,
+                               get_buffers().kfd_trace},
+         buffer_service_config{tool::get_config().kfd_page_migration_trace,
+                               ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE,
+                               get_buffers().kfd_trace},
+         buffer_service_config{tool::get_config().kfd_page_mapping_trace,
+                               ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT,
+                               get_buffers().kfd_trace},
+         buffer_service_config{tool::get_config().kfd_queue_trace,
+                               ROCPROFILER_BUFFER_TRACING_KFD_QUEUE,
                                get_buffers().kfd_trace}})
 
     {

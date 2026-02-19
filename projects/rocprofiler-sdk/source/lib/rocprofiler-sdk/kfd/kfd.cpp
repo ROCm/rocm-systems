@@ -1335,8 +1335,8 @@ check_paired_events(const context_t* ctx, const kfd_event_record& rec)
         if(is_start_event)
         {
             // only insert start event if the corresponding operation is enabled for this context
-            if(!ctx->is_tracing(_range_kind,
-                                get_queue_record_op(rec.data.queue_event, std::nullopt)))
+            if(ctx->is_tracing(_range_kind,
+                               get_queue_record_op(rec.data.queue_event, std::nullopt)))
             {
                 queue_events.insert(rec.data.queue_event);
             }

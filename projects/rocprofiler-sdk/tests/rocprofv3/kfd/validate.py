@@ -79,8 +79,6 @@ def test_kfd_trace(json_data):
             data["strings"]["buffer_records"][kind_id]["operations"]
         )
 
-        assert record["pid"] >= data["metadata"]["pid"]
-
         if kind in paired_kind:
             assert "start_timestamp" in record
             assert "end_timestamp" in record

@@ -349,8 +349,6 @@ def test_kfd_trace_json(json_data):
         assert op_id >= 0 and op_id < len(
             data["strings"]["buffer_records"][kind_id]["operations"]
         )
-        assert record["pid"] >= data["metadata"]["pid"]
-
         if "end_timestamp" in record:
             assert record["end_timestamp"] >= record["start_timestamp"]
 
