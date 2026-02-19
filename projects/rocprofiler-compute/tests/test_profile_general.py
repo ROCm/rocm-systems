@@ -3340,6 +3340,7 @@ if __name__ == "__main__":
     # Run analyze with --list-torch-operators and verify torch_trace directory
     # and operator CSV structure.
     returncode_analyze = binary_handler_analyze_rocprof_compute([
+        "--experimental",
         "analyze",
         "--path",
         workload_dir,
@@ -3385,6 +3386,7 @@ if __name__ == "__main__":
 
     # Run analyze with --torch-operator filter (SimpleNet uses F.relu)
     returncode_analyze_relu = binary_handler_analyze_rocprof_compute([
+        "--experimental",
         "analyze",
         "--path",
         workload_dir,
